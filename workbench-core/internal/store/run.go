@@ -18,9 +18,8 @@ var DataDir = "data"
 func CreateRun(goal string, maxBytesForContext int) (types.Run, error) {
 	run := types.NewRun(goal, maxBytesForContext)
 	//fmt.Printf("run: %v", run)
-	runDir := filepath.Join(DataDir, "runs", run.RunId)
-	targetPath := filepath.Join(runDir, "run.json")
-	err := os.MkdirAll(runDir, 0755)
+	targetPath := runFilePath(run.RunId)
+	err := os.MkdirAll(filepath.Dir(targetPath), 0755)
 	if err != nil {
 		return types.Run{}, err
 	}
@@ -32,6 +31,25 @@ func CreateRun(goal string, maxBytesForContext int) (types.Run, error) {
 
 	if err := WriteFileAtomic(targetPath, b, 0644); err != nil {
 		return types.Run{}, err
+	}
+	return run, nil
+}
+
+func LoadRun(runId string) (types.Run, error) {
+	targetPath := runFilePath(runId)
+	b, err := os.ReadFile(targetPath)
+	if err != nil {
+		return types.Run{}, fmt.Errorf("load run.json file: %w", err)
+	}
+
+	var run types.Run
+
+	if err := json.Unmarshal(b, &run); err != nil {
+		return types.Run{}, fmt.Errorf("error unmarshalling json: %w", err)
+	}
+
+	if run.RunId == "" {
+		return types.Run{}, fmt.Errorf("invalid run.json: missing runId")
 	}
 	return run, nil
 }
@@ -80,4 +98,8 @@ func WriteFileAtomic(targetpath string, data []byte, perm os.FileMode) error {
 	}
 
 	return nil
+}
+
+func runFilePath(runId string) string {
+	return filepath.Join(DataDir, "runs", runId, "run.json")
 }
