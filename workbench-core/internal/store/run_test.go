@@ -83,3 +83,69 @@ func TestCreateRun(t *testing.T) {
 		t.Error("error should be omitted from JSON when nil")
 	}
 }
+
+func TestLoadRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDataDir := DataDir
+	DataDir = tmpDir
+	defer func() { DataDir = oldDataDir }()
+
+	t.Run("Success", func(t *testing.T) {
+		goal := "Load Success Goal"
+		run, err := CreateRun(goal, 100)
+		if err != nil {
+			t.Fatalf("Failed to create run for loading: %v", err)
+		}
+
+		loaded, err := LoadRun(run.RunId)
+		if err != nil {
+			t.Fatalf("LoadRun failed: %v", err)
+		}
+
+		if loaded.RunId != run.RunId {
+			t.Errorf("Expected RunId %q, got %q", run.RunId, loaded.RunId)
+		}
+		if loaded.Goal != goal {
+			t.Errorf("Expected goal %q, got %q", goal, loaded.Goal)
+		}
+	})
+
+	t.Run("NotFound", func(t *testing.T) {
+		_, err := LoadRun("non-existent-run")
+		if err == nil {
+			t.Error("Expected error for non-existent run, got nil")
+		}
+	})
+
+	t.Run("MalformedJSON", func(t *testing.T) {
+		runId := "malformed-run"
+		runDir := filepath.Join(tmpDir, "runs", runId)
+		if err := os.MkdirAll(runDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "run.json"), []byte("{invalid-json}"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := LoadRun(runId)
+		if err == nil {
+			t.Error("Expected error for malformed JSON, got nil")
+		}
+	})
+
+	t.Run("MissingRunId", func(t *testing.T) {
+		runId := "missing-id-run"
+		runDir := filepath.Join(tmpDir, "runs", runId)
+		if err := os.MkdirAll(runDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "run.json"), []byte(`{"goal":"test"}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := LoadRun(runId)
+		if err == nil {
+			t.Error("Expected error for missing runId, got nil")
+		}
+	})
+}
