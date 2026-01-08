@@ -17,11 +17,11 @@ var statusName = map[RunStatus]string{
 }
 
 type Run struct {
-	RunId              string    `json:"runId'`
+	RunId              string    `json:"runId"`
 	Goal               string    `json:"goal"`
 	Status             RunStatus `json:"status"`
 	StartedAt          time.Time `json:"startedAt"`
-	FinishedAt         time.Time `json:"finishedAt"`
+	FinishedAt         time.Time `json:"finishedAt,omitempty"`
 	MaxBytesForContext int       `json:"maxBytesForContext"`
-	Err                error     `json:"error"`
+	Err                error     `json:"error,omitempty"`
 }
