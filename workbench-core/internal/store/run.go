@@ -3,6 +3,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,17 +36,24 @@ func CreateRun(goal string, maxBytesForContext int) (types.Run, error) {
 	return run, nil
 }
 
+// LoadRun reads a run's state from disk by its run ID.
+// It returns an error if the file cannot be read, if the JSON is malformed,
+// or if the loaded data is missing critical fields like runId.
 func LoadRun(runId string) (types.Run, error) {
 	targetPath := runFilePath(runId)
 	b, err := os.ReadFile(targetPath)
 	if err != nil {
-		return types.Run{}, fmt.Errorf("load run.json file: %w", err)
+		return types.Run{}, fmt.Errorf("error reading run.json file %s: %w", targetPath, err)
+	}
+
+	if errors.Is(err, os.ErrNotExist) {
+		return types.Run{}, fmt.Errorf("run.json file %s does not exist", targetPath)
 	}
 
 	var run types.Run
 
 	if err := json.Unmarshal(b, &run); err != nil {
-		return types.Run{}, fmt.Errorf("error unmarshalling json: %w", err)
+		return types.Run{}, fmt.Errorf("error unmarshalling json file %s: %w", targetPath, err)
 	}
 
 	if run.RunId == "" {
@@ -100,6 +108,7 @@ func WriteFileAtomic(targetpath string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
+// runFilePath returns the absolute or relative path to a run's run.json file.
 func runFilePath(runId string) string {
 	return filepath.Join(DataDir, "runs", runId, "run.json")
 }
