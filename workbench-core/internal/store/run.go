@@ -10,13 +10,15 @@ import (
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
+var DataDir = "data"
+
 // CreateRun initializes a new run with the given goal and context limit.
 // It creates a unique run ID, a corresponding directory in data/runs,
 // and persists the initial run state as run.json.
 func CreateRun(goal string, maxBytesForContext int) (types.Run, error) {
 	run := types.NewRun(goal, maxBytesForContext)
 	//fmt.Printf("run: %v", run)
-	runDir := filepath.Join("data", "runs", run.RunId)
+	runDir := filepath.Join(DataDir, "runs", run.RunId)
 	targetPath := filepath.Join(runDir, "run.json")
 	err := os.MkdirAll(runDir, 0755)
 	if err != nil {
