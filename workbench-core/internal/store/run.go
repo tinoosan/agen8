@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -16,29 +14,21 @@ import (
 // It creates a unique run ID, a corresponding directory in data/runs,
 // and persists the initial run state as run.json.
 func CreateRun(goal string, maxBytesForContext int) (types.Run, error) {
-	runId := "run-" + uuid.NewString()
-	runDir := filepath.Join("data", "runs", runId)
+	run := types.NewRun(goal, maxBytesForContext)
+	//fmt.Printf("run: %v", run)
+	runDir := filepath.Join("data", "runs", run.RunId)
 	targetPath := filepath.Join(runDir, "run.json")
-	err := os.Mkdir(runDir, 0755)
+	err := os.MkdirAll(runDir, 0755)
 	if err != nil {
 		return types.Run{}, err
 	}
 
-	run := types.Run{
-		RunId:              runId,
-		Goal:               goal,
-		Status:             types.StatusRunning,
-		StartedAt:          time.Now(),
-		MaxBytesForContext: maxBytesForContext,
-		Err:                nil,
-	}
-
-	b, err := json.Marshal(run)
+	b, err := json.MarshalIndent(run, "", "\t")
 	if err != nil {
 		return types.Run{}, err
 	}
 
-	if err := WriteFileAtomic(targetPath, b, 0755); err != nil {
+	if err := WriteFileAtomic(targetPath, b, 0644); err != nil {
 		return types.Run{}, err
 	}
 	return run, nil
