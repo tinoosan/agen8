@@ -1,6 +1,10 @@
 package types
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type RunStatus string
 
@@ -10,18 +14,26 @@ const (
 	StatusFailed  RunStatus = "failed"
 )
 
-var statusName = map[RunStatus]string{
-	StatusRunning: "running",
-	StatusDone:    "done",
-	StatusFailed:  "failed",
+type Run struct {
+	RunId              string     `json:"runId"`
+	Goal               string     `json:"goal"`
+	Status             RunStatus  `json:"status"`
+	StartedAt          *time.Time `json:"startedAt"`
+	FinishedAt         *time.Time `json:"finishedAt,omitempty"`
+	MaxBytesForContext int        `json:"maxBytesForContext"`
+	Error              *string    `json:"error,omitempty"`
 }
 
-type Run struct {
-	RunId              string    `json:"runId"`
-	Goal               string    `json:"goal"`
-	Status             RunStatus `json:"status"`
-	StartedAt          time.Time `json:"startedAt"`
-	FinishedAt         time.Time `json:"finishedAt,omitempty"`
-	MaxBytesForContext int       `json:"maxBytesForContext"`
-	Err                error     `json:"error,omitempty"`
+func NewRun(goal string, maxBytesForContext int) Run {
+	runId := "run-" + uuid.NewString()
+	now := time.Now()
+	return Run{
+		RunId:              runId,
+		Goal:               goal,
+		Status:             StatusRunning,
+		StartedAt:          &now,
+		MaxBytesForContext: maxBytesForContext,
+		Error:              nil,
+	}
+
 }
