@@ -14,6 +14,12 @@ const (
 	StatusFailed  RunStatus = "failed"
 )
 
+var RunStatuses = map[string]RunStatus{
+	string(StatusRunning): StatusRunning,
+	string(StatusDone): StatusDone,
+	string(StatusFailed): StatusFailed,
+}
+
 type Run struct {
 	RunId              string     `json:"runId"`
 	Goal               string     `json:"goal"`
