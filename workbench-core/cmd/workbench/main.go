@@ -14,6 +14,15 @@ func main() {
 		return
 	}
 
+	data := map[string]string{
+		"some_key": "some_value",
+	}
+
+	err = store.AppendEvent(run.RunId, "run-created", "some generic message", data)
+	if err != nil {
+		fmt.Println(err)
+	}
+
 	loadedRun, err := store.LoadRun(run.RunId)
 	if err != nil {
 		fmt.Printf("error: %s\n", err)
@@ -29,5 +38,19 @@ func main() {
 	}
 
 	fmt.Printf("stopped run: %+v\n", stoppedRun)
+
+	err = store.AppendEvent(stoppedRun.RunId, "run-stopped", "some generic message", data)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	events, err := store.ListEvents(stoppedRun.RunId)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	fmt.Println(events)
 
 }
