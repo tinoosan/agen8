@@ -30,7 +30,7 @@ func LoadRun(runId string) (types.Run, error) {
 	b, err := os.ReadFile(targetPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return types.Run{}, fmt.Errorf("run.json file %s does not exist", targetPath)
+			return types.Run{}, fmt.Errorf("run.json file %s does not exist: %w", targetPath, err)
 		}
 		return types.Run{}, fmt.Errorf("error reading run.json file %s: %w", targetPath, err)
 	}
