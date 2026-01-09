@@ -149,3 +149,103 @@ func TestLoadRun(t *testing.T) {
 		}
 	})
 }
+
+func TestStopRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDataDir := DataDir
+	DataDir = tmpDir
+	defer func() { DataDir = oldDataDir }()
+
+	t.Run("SuccessDone", func(t *testing.T) {
+		run, err := CreateRun("Stop Success", 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		stopped, err := StopRun(run.RunId, types.StatusDone, "")
+		if err != nil {
+			t.Fatalf("StopRun failed: %v", err)
+		}
+
+		if stopped.Status != types.StatusDone {
+			t.Errorf("Expected status %q, got %q", types.StatusDone, stopped.Status)
+		}
+		if stopped.FinishedAt == nil {
+			t.Error("Expected FinishedAt to be set")
+		}
+		if stopped.Error != nil {
+			t.Errorf("Expected Error to be nil, got %q", *stopped.Error)
+		}
+
+		// Verify on disk
+		loaded, _ := LoadRun(run.RunId)
+		if loaded.Status != types.StatusDone {
+			t.Errorf("Disk status expected %q, got %q", types.StatusDone, loaded.Status)
+		}
+	})
+
+	t.Run("SuccessFailed", func(t *testing.T) {
+		run, err := CreateRun("Stop Failed Success", 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		errMsg := "some error occurred"
+		stopped, err := StopRun(run.RunId, types.StatusFailed, errMsg)
+		if err != nil {
+			t.Fatalf("StopRun failed: %v", err)
+		}
+
+		if stopped.Status != types.StatusFailed {
+			t.Errorf("Expected status %q, got %q", types.StatusFailed, stopped.Status)
+		}
+		if stopped.FinishedAt == nil {
+			t.Error("Expected FinishedAt to be set")
+		}
+		if stopped.Error == nil || *stopped.Error != errMsg {
+			t.Errorf("Expected Error %q, got %v", errMsg, stopped.Error)
+		}
+	})
+
+	t.Run("ErrorMissingMessage", func(t *testing.T) {
+		run, err := CreateRun("Stop Error Missing Msg", 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = StopRun(run.RunId, types.StatusFailed, "")
+		if err == nil {
+			t.Error("Expected error for missing error message, got nil")
+		}
+	})
+
+	t.Run("ErrorInvalidStatus", func(t *testing.T) {
+		run, err := CreateRun("Stop Error Invalid Status", 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = StopRun(run.RunId, types.StatusRunning, "")
+		if err == nil {
+			t.Error("Expected error for transition to status 'running', got nil")
+		}
+	})
+
+	t.Run("ErrorAlreadyStopped", func(t *testing.T) {
+		run, err := CreateRun("Stop Error Already Stopped", 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = StopRun(run.RunId, types.StatusDone, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Try to stop again
+		_, err = StopRun(run.RunId, types.StatusDone, "")
+		if err == nil {
+			t.Error("Expected error for already stopped run, got nil")
+		}
+	})
+}
