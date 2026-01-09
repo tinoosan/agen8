@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -26,7 +27,7 @@ func CreateRun(goal string, maxBytesForContext int) (types.Run, error) {
 // It returns an error if the file cannot be read, if the JSON is malformed,
 // or if the loaded data is missing critical fields like runId.
 func LoadRun(runId string) (types.Run, error) {
-	targetPath := runFilePath(runId)
+	targetPath := GetRunFilePath(runId)
 	b, err := os.ReadFile(targetPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -50,7 +51,7 @@ func LoadRun(runId string) (types.Run, error) {
 // SaveRun persists the current state of a run to disk as its run.json file.
 // It ensures the necessary directory structure exists before writing.
 func SaveRun(run types.Run) error {
-	targetPath := runFilePath(run.RunId)
+	targetPath := GetRunFilePath(run.RunId)
 	err := os.MkdirAll(filepath.Dir(targetPath), 0755)
 	if err != nil {
 		return err
@@ -60,7 +61,7 @@ func SaveRun(run types.Run) error {
 	if err != nil {
 		return fmt.Errorf("error marshalling run: %w", err)
 	}
-	if err := WriteFileAtomic(targetPath, b, 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(targetPath, b, 0644); err != nil {
 		return fmt.Errorf("error writing run.json file %s: %w", targetPath, err)
 	}
 	return nil
@@ -104,55 +105,4 @@ func StopRun(runId string, status types.RunStatus, errorMsg string) (types.Run, 
 	}
 
 	return run, SaveRun(run)
-}
-
-// WriteFileAtomic writes data to targetpath using an atomic rename operation.
-// This ensures that the target file is either fully written or not written at all,
-// preventing partial writes or corrupted files in case of a crash or power failure.
-func WriteFileAtomic(targetpath string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(targetpath)
-
-	// Create a temporary file in the same directory as the target path.
-	tmpFile, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-
-	tmpName := tmpFile.Name()
-
-	defer func() {
-		_ = os.Remove(tmpName)
-	}()
-
-	// Write the data to the temporary file.
-	if _, err := tmpFile.Write(data); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("write temp file: %w", err)
-	}
-
-	// Sync ensuring data is physically written to disk.
-	if err := tmpFile.Sync(); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("sync temp file: %w", err)
-	}
-
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
-	}
-
-	if err := os.Chmod(tmpName, perm); err != nil {
-		return fmt.Errorf("chmod temp file: %w", err)
-	}
-
-	// Atomically rename the temporary file to the target path.
-	if err := os.Rename(tmpName, targetpath); err != nil {
-		return fmt.Errorf("rename temp to target: %w", err)
-	}
-
-	return nil
-}
-
-// runFilePath returns the absolute or relative path to a run's run.json file.
-func runFilePath(runId string) string {
-	return filepath.Join(DataDir, "runs", runId, "run.json")
 }
