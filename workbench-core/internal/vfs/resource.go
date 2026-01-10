@@ -10,17 +10,33 @@ type Resource interface {
 }
 
 type Entry struct {
-	Path                string
-	IsDir               bool
-	Size                int64
-	ModTime             time.Time
-	HasSize, HasModTime bool
+	// Full path of the entry e.g /workspace/file.txt
+	Path string
+	// Whether the entry is a directory
+	IsDir bool
+	// Size of the entry in bytes
+	Size int64
+	// Modification time of the entry
+	ModTime time.Time
+	// Whether the entry has a size
+	HasSize bool
+	// Whether the entry has a modification time
+	HasModTime bool
 }
 
-func NewEntry(path string, isDir bool, size int64, modTime time.Time) Entry {
+func NewDirEntry(path string) Entry {
 	return Entry{
 		Path:       path,
-		IsDir:      isDir,
+		IsDir:      true,
+		HasSize:    false,
+		HasModTime: false,
+	}
+}
+
+func NewFileEntry(path string, size int64, modTime time.Time) Entry {
+	return Entry{
+		Path:       path,
+		IsDir:      false,
 		Size:       size,
 		ModTime:    modTime,
 		HasSize:    true,
