@@ -6,15 +6,16 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
 func TestCreateRun(t *testing.T) {
 	// Setup temporary data directory
 	tmpDir := t.TempDir()
-	oldDataDir := DataDir
-	DataDir = tmpDir
-	defer func() { DataDir = oldDataDir }()
+	oldDataDir := config.DataDir
+	config.DataDir = tmpDir
+	defer func() { config.DataDir = oldDataDir }()
 
 	goal := "Test Goal"
 	maxBytes := 1024
@@ -86,9 +87,9 @@ func TestCreateRun(t *testing.T) {
 
 func TestLoadRun(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := DataDir
-	DataDir = tmpDir
-	defer func() { DataDir = oldDataDir }()
+	oldDataDir := config.DataDir
+	config.DataDir = tmpDir
+	defer func() { config.DataDir = oldDataDir }()
 
 	t.Run("Success", func(t *testing.T) {
 		goal := "Load Success Goal"
@@ -152,9 +153,9 @@ func TestLoadRun(t *testing.T) {
 
 func TestStopRun(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := DataDir
-	DataDir = tmpDir
-	defer func() { DataDir = oldDataDir }()
+	oldDataDir := config.DataDir
+	config.DataDir = tmpDir
+	defer func() { config.DataDir = oldDataDir }()
 
 	t.Run("SuccessDone", func(t *testing.T) {
 		run, err := CreateRun("Stop Success", 100)

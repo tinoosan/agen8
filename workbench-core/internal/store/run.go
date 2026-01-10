@@ -9,11 +9,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
-
-var DataDir = "data"
 
 // CreateRun initializes a new run with the given goal and context limit.
 // It creates a unique run ID, a corresponding directory in data/runs,
@@ -27,7 +26,7 @@ func CreateRun(goal string, maxBytesForContext int) (types.Run, error) {
 // It returns an error if the file cannot be read, if the JSON is malformed,
 // or if the loaded data is missing critical fields like runId.
 func LoadRun(runId string) (types.Run, error) {
-	targetPath := fsutil.GetRunFilePath(DataDir, runId)
+	targetPath := fsutil.GetRunFilePath(config.DataDir, runId)
 	b, err := os.ReadFile(targetPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -51,7 +50,7 @@ func LoadRun(runId string) (types.Run, error) {
 // SaveRun persists the current state of a run to disk as its run.json file.
 // It ensures the necessary directory structure exists before writing.
 func SaveRun(run types.Run) error {
-	targetPath := fsutil.GetRunFilePath(DataDir, run.RunId)
+	targetPath := fsutil.GetRunFilePath(config.DataDir, run.RunId)
 	err := os.MkdirAll(filepath.Dir(targetPath), 0755)
 	if err != nil {
 		return err

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/nxadm/tail"
+	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
@@ -37,8 +38,8 @@ func AppendEvent(runId, eventType, message string, data map[string]string) error
 		return fmt.Errorf("error appending event, message cannot be blank")
 	}
 
-	targetPath := fsutil.GetEventFilePath(DataDir, runId)
-	runFilePath := fsutil.GetRunFilePath(DataDir, runId)
+	targetPath := fsutil.GetEventFilePath(config.DataDir, runId)
+	runFilePath := fsutil.GetRunFilePath(config.DataDir, runId)
 
 	// We check if a run exists before we attempt to create an event in reference to it
 	_, err := os.Stat(runFilePath)
@@ -83,7 +84,7 @@ func AppendEvent(runId, eventType, message string, data map[string]string) error
 // ListEvents retrieves all recorded events for a given run ID.
 // It reads from the run's JSONL event log, validates each entry, and returns them in order.
 func ListEvents(runId string) ([]types.Event, int64, error) {
-	targetPath := fsutil.GetEventFilePath(DataDir, runId)
+	targetPath := fsutil.GetEventFilePath(config.DataDir, runId)
 	events := make([]types.Event, 0)
 	f, err := os.Open(targetPath)
 	if err != nil {
@@ -148,7 +149,7 @@ func TailEvents(ctx context.Context, runId string, fromOffset int64) (<-chan Tai
 	eventCh := make(chan TailedEvent)
 	errCh := make(chan error, 1)
 
-	targetPath := fsutil.GetEventFilePath(DataDir, runId)
+	targetPath := fsutil.GetEventFilePath(config.DataDir, runId)
 	currentOffset := fromOffset
 
 	go func() {
