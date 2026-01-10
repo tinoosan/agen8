@@ -19,9 +19,11 @@ type Entry struct {
 
 func NewEntry(path string, isDir bool, size int64, modTime time.Time) Entry {
 	return Entry{
-		Path:    path,
-		IsDir:   isDir,
-		Size:    size,
-		ModTime: modTime,
+		Path:       path,
+		IsDir:      isDir,
+		Size:       size,
+		ModTime:    modTime,
+		HasSize:    true,
+		HasModTime: true,
 	}
 }
