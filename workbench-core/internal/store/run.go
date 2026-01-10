@@ -27,7 +27,7 @@ func CreateRun(goal string, maxBytesForContext int) (types.Run, error) {
 // It returns an error if the file cannot be read, if the JSON is malformed,
 // or if the loaded data is missing critical fields like runId.
 func LoadRun(runId string) (types.Run, error) {
-	targetPath := GetRunFilePath(runId)
+	targetPath := fsutil.GetRunFilePath(DataDir, runId)
 	b, err := os.ReadFile(targetPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -51,7 +51,7 @@ func LoadRun(runId string) (types.Run, error) {
 // SaveRun persists the current state of a run to disk as its run.json file.
 // It ensures the necessary directory structure exists before writing.
 func SaveRun(run types.Run) error {
-	targetPath := GetRunFilePath(run.RunId)
+	targetPath := fsutil.GetRunFilePath(DataDir, run.RunId)
 	err := os.MkdirAll(filepath.Dir(targetPath), 0755)
 	if err != nil {
 		return err

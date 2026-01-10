@@ -6,6 +6,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/tinoosan/workbench-core/internal/fsutil"
 )
 
 func TestEventStore(t *testing.T) {
@@ -25,7 +27,7 @@ func TestEventStore(t *testing.T) {
 			t.Fatalf("AppendEvent failed: %v", err)
 		}
 
-		filePath := GetEventFilePath(run.RunId)
+		filePath := fsutil.GetEventFilePath(DataDir, run.RunId)
 		f, err := os.Open(filePath)
 		if err != nil {
 			t.Fatalf("Failed to open event file: %v", err)
@@ -68,7 +70,7 @@ func TestEventStore(t *testing.T) {
 		}
 
 		// Verify offset matches file size
-		filePath := GetEventFilePath(run.RunId)
+		filePath := fsutil.GetEventFilePath(DataDir, run.RunId)
 		info, err := os.Stat(filePath)
 		if err != nil {
 			t.Fatalf("Failed to stat event file: %v", err)
@@ -82,7 +84,7 @@ func TestEventStore(t *testing.T) {
 	t.Run("TailEventsReturnsFromOffset", func(t *testing.T) {
 		// We already have 2 events from previous tests
 		// Get offset before adding more
-		filePath := GetEventFilePath(run.RunId)
+		filePath := fsutil.GetEventFilePath(DataDir, run.RunId)
 		info, _ := os.Stat(filePath)
 		offset := info.Size()
 
@@ -133,7 +135,7 @@ func TestEventStore(t *testing.T) {
 
 	t.Run("TailEventsReceivesNewEvents", func(t *testing.T) {
 		// Get current offset
-		filePath := GetEventFilePath(run.RunId)
+		filePath := fsutil.GetEventFilePath(DataDir, run.RunId)
 		info, _ := os.Stat(filePath)
 		offset := info.Size()
 
@@ -180,7 +182,7 @@ func TestEventStore(t *testing.T) {
 
 	t.Run("TailEventsWaitsForCompleteLines", func(t *testing.T) {
 		// Get current offset
-		filePath := GetEventFilePath(run.RunId)
+		filePath := fsutil.GetEventFilePath(DataDir, run.RunId)
 		info, _ := os.Stat(filePath)
 		offset := info.Size()
 
