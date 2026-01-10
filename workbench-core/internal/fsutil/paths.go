@@ -9,5 +9,5 @@ func GetRunFilePath(dataDir, runId string) string {
 
 // GetEventFilePath returns the path to a run's event.jsonl file given the data directory and run ID.
 func GetEventFilePath(dataDir, runId string) string {
-	return filepath.Join(dataDir, "runs", runId, "event.jsonl")
+	return filepath.Join(dataDir, "runs", runId, "events.jsonl")
 }
