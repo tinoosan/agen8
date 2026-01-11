@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -16,6 +17,25 @@ type DirResource struct {
 	Mount   string // e.g workspace
 }
 
+func NewDirResource(baseDir, mount string) (*DirResource, error) {
+	if baseDir == "" {
+		return nil, fmt.Errorf("baseDir cannot be empty")
+	}
+	if mount == "" {
+		return nil, fmt.Errorf("mount cannot be empty")
+	}
+
+	mount = strings.TrimLeft(mount, "/")
+
+	if mount == "" {
+		return nil, fmt.Errorf("mount cannot be '/'")
+	}
+	return &DirResource{
+		BaseDir: baseDir,
+		Mount:   mount,
+	}, nil
+}
+
 // List returns a list of entries under the given subpath.
 // The subpath must be relative to the base directory.
 func (d *DirResource) List(subpath string) ([]vfs.Entry, error) {
@@ -26,6 +46,9 @@ func (d *DirResource) List(subpath string) ([]vfs.Entry, error) {
 
 	des, err := os.ReadDir(targetPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("does not exist: %w", err)
+		}
 		return nil, fmt.Errorf("list %s: %w", targetPath, err)
 	}
 	entries := make([]vfs.Entry, 0, len(des))
@@ -39,11 +62,11 @@ func (d *DirResource) List(subpath string) ([]vfs.Entry, error) {
 		childVPath := path.Join("/", d.Mount, childSubpath)
 
 		e := vfs.Entry{
-			Path:  childVPath,
-			IsDir: de.IsDir(),
-			Size:  info.Size(),
-			ModTime: info.ModTime(),
-			HasSize: true,
+			Path:       childVPath,
+			IsDir:      de.IsDir(),
+			Size:       info.Size(),
+			ModTime:    info.ModTime(),
+			HasSize:    true,
 			HasModTime: true,
 		}
 

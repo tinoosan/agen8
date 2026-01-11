@@ -2,6 +2,10 @@ package vfs
 
 import "time"
 
+const (
+	MountWorkspace = "workspace"
+)
+
 // Resource is the minimal contract a “mounted thing” must implement to behave like a filesystem.
 //
 // A Resource does not have to be a real OS directory.

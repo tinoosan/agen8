@@ -39,18 +39,18 @@ func (fs *FS) Mount(name string, r Resource) {
 //
 // Returns an error if the path is empty, doesn't start with "/", or references
 // an unknown mount.
-func (fs *FS) Resolve(vpath string) (Resource, string, error) {
+func (fs *FS) Resolve(vpath string) (Resource, string, string, error) {
 	if vpath == "" {
-		return nil, "", fmt.Errorf("path cannot be empty")
+		return nil, "", "", fmt.Errorf("path cannot be empty")
 	}
 	if !strings.HasPrefix(vpath, "/") {
-		return nil, "", fmt.Errorf("path must start with '/'")
+		return nil, "", "", fmt.Errorf("path must start with '/'")
 	}
 
 	// Trim leading slashes so "/workspace/a/b" -> "workspace/a/b"
 	trimmed := strings.TrimLeft(vpath, "/")
 	if trimmed == "" {
-		return nil, "", fmt.Errorf("path must include a mount, e.g. /workspace")
+		return nil, "", "", fmt.Errorf("path must include a mount, e.g. /workspace")
 	}
 
 	// Split into /workspace and a/b
@@ -59,12 +59,12 @@ func (fs *FS) Resolve(vpath string) (Resource, string, error) {
 
 	r, ok := fs.mounts[mountName]
 	if !ok {
-		return nil, "", fmt.Errorf("unknown mount %q", mountName)
+		return nil, "", "", fmt.Errorf("unknown mount %q", mountName)
 	}
 
 	subpath := ""
 	if len(parts) == 2 {
 		subpath = parts[1] // "a/b"
 	}
-	return r, subpath, nil
+	return r, subpath, mountName, nil
 }
