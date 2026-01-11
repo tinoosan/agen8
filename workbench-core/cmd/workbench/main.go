@@ -82,4 +82,13 @@ func main() {
 		log.Printf("entry: %+v", e)
 	}
 
+	// List trace
+	entries, err = fs.List("/trace")
+	if err != nil {
+		log.Fatalf("error listing trace: %v", err)
+	}
+	for _, e := range entries {
+		log.Printf("entry: %+v", e)
+	}
+
 }

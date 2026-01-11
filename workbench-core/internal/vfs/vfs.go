@@ -145,7 +145,7 @@ func (fs *FS) listRoot() ([]Entry, error) {
 	entries := make([]Entry, 0)
 	for mn, _ := range fs.mounts {
 		entries = append(entries, Entry{
-			Path: mn,
+			Path: "/" + mn,
 			IsDir: true,
 		})
 	}

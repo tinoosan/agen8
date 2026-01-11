@@ -12,6 +12,10 @@ func GetEventFilePath(dataDir, runId string) string {
 	return filepath.Join(dataDir, "runs", runId, "events.jsonl")
 }
 
+func GetRunDir(dataDir, runId string) string {
+	return filepath.Join(dataDir, "runs", runId)
+}
+
 // GetWorkspaceDir returns the path to a run's workspace directory given the data directory and run ID.
 func GetWorkspaceDir(dataDir, runId string) string {
 	return filepath.Join(dataDir, "runs", runId, "workspace")
