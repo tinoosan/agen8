@@ -1,9 +1,12 @@
 package resources
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/config"
@@ -65,9 +68,6 @@ func (tr *TraceResource) List(subpath string) ([]vfs.Entry, error) {
 // Read reads a file at subpath relative to BaseDir.
 // subpath is resource-relative (no leading "/").
 func (tr *TraceResource) Read(subpath string) ([]byte, error) {
-	// vfs.Resolve("/trace/events") gives subpath "events"
-	// vfs.Resolve("/trace") gives subpath ""
-
 	// Normalise
 	subpath = strings.TrimSpace(subpath)
 	if subpath == "" || subpath == "." {
@@ -77,30 +77,57 @@ func (tr *TraceResource) Read(subpath string) ([]byte, error) {
 		return nil, fmt.Errorf("trace read: absolute paths not allowed: %q", subpath)
 	}
 
-	// Prevent nested paths like "events/1"
-	if strings.Contains(subpath, "/") || strings.Contains(subpath, string(filepath.Separator)) {
-		return nil, fmt.Errorf("trace read: invalid path %q: nested paths not alloed", subpath)
-	}
+	// Split on "/" so we can support patterns like:
+	// "events.since/123" and "events.tail/50"
+	parts := strings.Split(subpath, "/")
 
-	var targetPath string
+	// Route by first segment
+	switch parts[0] {
 
-	switch subpath {
-	case "run:":
-		targetPath = filepath.Join(tr.BaseDir, "run.json")
-	case "events":
-		targetPath = filepath.Join(tr.BaseDir, "events.jsonl")
-	default:
-		return nil, fmt.Errorf("trace read: unknown item %q (allowed: run, events)", subpath)
-	}
-
-	b, err := os.ReadFile(targetPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("trace read: %s does not exist: %w", targetPath, err)
+	case "run":
+		// must be exactly "run"
+		if len(parts) != 1 {
+			return nil, fmt.Errorf("trace read: 'run' does not take a suffix (got %q)", subpath)
 		}
-		return nil, fmt.Errorf("trace read %q (%s): %w", subpath, targetPath, err)
+		targetPath := filepath.Join(tr.BaseDir, "run.json")
+		return readFile(targetPath, "run")
+
+	case "events":
+		// must be exactly "events"
+		if len(parts) != 1 {
+			return nil, fmt.Errorf("trace read: 'events' does not take a suffix (got %q)", subpath)
+		}
+		targetPath := filepath.Join(tr.BaseDir, "events.jsonl")
+		return readFile(targetPath, "events")
+
+	case "events.since":
+		// expects "events.since/<offset>"
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("trace read: expected 'events.since/<offset>' (got %q)", subpath)
+		}
+		offsetStr := parts[1]
+		// TODO: parse offsetStr -> int64, validate >=
+		offset, err := strconv.ParseInt(offsetStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("trace read: events.since offset must be a number (got %q)", subpath)
+		}
+		if offset < 0 {
+			return nil, fmt.Errorf("trace read: events.since offset must be non-negative (got %q)", subpath)
+		}
+
+		b, err := tr.readEventsSince(offset)
+		if err != nil {
+			return nil, fmt.Errorf("trace read: error reading events.since: %w", err)
+			// TODO: call tr.readEventsSince(offset)
+		}
+		return b, nil
+
+	default:
+		return nil, fmt.Errorf(
+			"trace read: unknown item %q (allowed: run, events, events.since/<offset>, events.tail/<n>)",
+			parts[0],
+		)
 	}
-	return b, nil
 }
 
 // Write replaces the file at subpath (creating parent directories if needed).
@@ -113,4 +140,61 @@ func (tr *TraceResource) Write(subpath string, data []byte) error {
 // subpath is resource-relative (no leading "/").
 func (tr *TraceResource) Append(subpath string, data []byte) error {
 	return fmt.Errorf("append not supported for trace resource")
+}
+
+func (tr *TraceResource) readEventsSince(offset int64) ([]byte, error) {
+	logicalName := "events.since"
+	targetPath := fsutil.GetEventFilePath(config.DataDir, tr.RunId)
+
+	// Open
+	f, err := os.Open(targetPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// If there are no events yet, returning empty is usually nicer than error.
+			// If you prefer strictness, change this to return an error.
+			return []byte{}, nil
+		}
+		return nil, fmt.Errorf("trace %s: open %s: %w", logicalName, targetPath, err)
+	}
+	defer f.Close()
+
+	// Validate offset
+	if offset < 0 {
+		return nil, fmt.Errorf("trace %s: offset cannot be negative (%d)", logicalName, offset)
+	}
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("trace %s: stat %s: %w", logicalName, targetPath, err)
+	}
+
+	size := info.Size()
+	if offset > size {
+		// offset is beyond EOF; nothing new to return
+		return []byte{}, nil
+	}
+
+	// Seek to offset
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("trace %s: seek %s to %d: %w", logicalName, targetPath, offset, err)
+	}
+
+	// Read the rest
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("trace %s: read %s from %d: %w", logicalName, targetPath, offset, err)
+	}
+
+	return b, nil
+}
+
+func readFile(targetPath, logicalName string) ([]byte, error) {
+	b, err := os.ReadFile(targetPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("trace %s: file %s does not exist: %w", logicalName, targetPath, err)
+		}
+		return nil, fmt.Errorf("trace %s: error reading file %s: %w", logicalName, targetPath, err)
+	}
+	return b, nil
 }
