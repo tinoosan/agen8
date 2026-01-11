@@ -4,6 +4,7 @@ import "time"
 
 const (
 	MountWorkspace = "workspace"
+	MountTrace     = "trace"
 )
 
 // Resource is the minimal contract a “mounted thing” must implement to behave like a filesystem.
@@ -21,8 +22,8 @@ const (
 //   - The path passed into a Resource method is ALWAYS a subpath relative to the mount.
 //   - It should NOT start with "/".
 //   - Example: if the VFS resolves "/workspace/notes.md":
-//       mount = "workspace"
-//       resource receives path = "notes.md"
+//     mount = "workspace"
+//     resource receives path = "notes.md"
 //
 // Semantics
 //   - List: discover what exists at a path (like listing a directory).
