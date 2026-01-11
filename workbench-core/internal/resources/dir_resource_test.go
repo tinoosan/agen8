@@ -36,16 +36,134 @@ func TestSafeJoin_BlocksEscapeAttempts(t *testing.T) {
 			name:    "just parent directory",
 			subpath: "..",
 		},
+		{
+			name:    "tricky double parent",
+			subpath: "a/../..",
+		},
+		{
+			name:    "tricky with trailing separator",
+			subpath: "a/../../",
+		},
+		{
+			name:    "leading dot parent",
+			subpath: "./../x",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := dr.safeJoin(tt.subpath)
 			if err == nil {
-				t.Errorf("safeJoin(%q) should have returned an error for escape attempt", tt.subpath)
+				t.Fatalf("safeJoin(%q) should have returned an error for escape attempt", tt.subpath)
 			}
-			if !strings.Contains(err.Error(), "escapes mount root") {
+			// Check for expected error messages
+			msg := err.Error()
+			if !strings.Contains(msg, "escapes mount root") {
 				t.Errorf("safeJoin(%q) error should mention 'escapes mount root', got: %v", tt.subpath, err)
+			}
+		})
+	}
+}
+
+// TestSafeJoin_BlocksAbsolutePaths verifies that safeJoin rejects absolute paths.
+func TestSafeJoin_BlocksAbsolutePaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	dr := &DirResource{
+		BaseDir: tmpDir,
+		Mount:   "workspace",
+	}
+
+	tests := []struct {
+		name    string
+		subpath string
+	}{
+		{
+			name:    "unix absolute path",
+			subpath: "/etc/passwd",
+		},
+		{
+			name:    "unix absolute with subdirs",
+			subpath: "/var/log/app.log",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := dr.safeJoin(tt.subpath)
+			if err == nil {
+				t.Fatalf("safeJoin(%q) should have returned an error for absolute path", tt.subpath)
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "absolute paths not allowed") {
+				t.Errorf("safeJoin(%q) error should mention 'absolute paths not allowed', got: %v", tt.subpath, err)
+			}
+		})
+	}
+}
+
+// TestSafeJoin_AllowsNormalPaths verifies that safeJoin accepts valid relative paths.
+func TestSafeJoin_AllowsNormalPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	dr := &DirResource{
+		BaseDir: tmpDir,
+		Mount:   "workspace",
+	}
+
+	tests := []struct {
+		name     string
+		subpath  string
+		expected string // expected suffix of the result
+	}{
+		{
+			name:     "simple file",
+			subpath:  "notes.md",
+			expected: "notes.md",
+		},
+		{
+			name:     "nested path",
+			subpath:  "reports/q1.md",
+			expected: filepath.Join("reports", "q1.md"),
+		},
+		{
+			name:     "normalization allowed",
+			subpath:  "a/../b/file.txt",
+			expected: filepath.Join("b", "file.txt"),
+		},
+		{
+			name:     "dot current directory",
+			subpath:  "./notes.md",
+			expected: "notes.md",
+		},
+		{
+			name:     "empty path (root)",
+			subpath:  "",
+			expected: "", // should resolve to tmpDir itself
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := dr.safeJoin(tt.subpath)
+			if err != nil {
+				t.Fatalf("safeJoin(%q) should not return error for valid path, got: %v", tt.subpath, err)
+			}
+
+			// Result should start with tmpDir
+			if !strings.HasPrefix(result, tmpDir) {
+				t.Errorf("safeJoin(%q) result %q should start with baseDir %q", tt.subpath, result, tmpDir)
+			}
+
+			// Result should not contain ".."
+			if strings.Contains(result, "..") {
+				t.Errorf("safeJoin(%q) result %q should not contain '..'", tt.subpath, result)
+			}
+
+			// Check expected suffix if provided
+			if tt.expected != "" {
+				expected := filepath.Join(tmpDir, tt.expected)
+				if result != expected {
+					t.Errorf("safeJoin(%q) = %q, want %q", tt.subpath, result, expected)
+				}
 			}
 		})
 	}
@@ -202,8 +320,9 @@ func TestList_ReturnsCorrectVFSPaths(t *testing.T) {
 				if !e.HasModTime {
 					t.Errorf("File entry %q should have HasModTime=true", e.Path)
 				}
-				if e.Size <= 0 {
-					t.Errorf("File entry %q should have Size > 0, got %d", e.Path, e.Size)
+				// Size should be non-negative (empty files have size 0, which is valid)
+				if e.Size < 0 {
+					t.Errorf("File entry %q should have Size >= 0, got %d", e.Path, e.Size)
 				}
 			}
 		}
