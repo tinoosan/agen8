@@ -6,6 +6,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
 func NewRunWorkspace(runId string) (*DirResource, error) {
@@ -18,5 +19,5 @@ func NewRunWorkspace(runId string) (*DirResource, error) {
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("error creating workspace directory %s: %w", baseDir, err)
 	}
-	return NewDirResource(baseDir)
+	return NewDirResource(baseDir, vfs.MountWorkspace)
 }
