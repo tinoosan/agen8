@@ -16,6 +16,17 @@ func main() {
 		log.Fatalf("error creating run: %v", err)
 	}
 
+	data := map[string]string{
+		"name":  "Alice",
+		"email": "alice@example.com",
+	}
+
+	// Create event log
+	err = store.AppendEvent(run.RunId, "run.started", "Run started", data)
+	if err != nil {
+		log.Fatalf("error appending event: %v", err)
+	}
+
 	// Create vfs
 	fs := vfs.NewFS()
 
