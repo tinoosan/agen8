@@ -116,6 +116,10 @@ func (fs *FS) Append(vpath string, data []byte) error {
 // List returns a list of entries under the given subpath.
 // The subpath must be relative to the base directory.
 func (fs *FS) List(vpath string) ([]Entry, error) {
+
+	if vpath == "/" {
+		return fs.listRoot()
+	}
 	mountName, r, subpath, err := fs.Resolve(vpath)
 	if err != nil {
 		return nil, err
@@ -135,4 +139,15 @@ func (fs *FS) List(vpath string) ([]Entry, error) {
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+func (fs *FS) listRoot() ([]Entry, error) {
+	entries := make([]Entry, 0)
+	for mn, _ := range fs.mounts {
+		entries = append(entries, Entry{
+			Path: mn,
+			IsDir: true,
+		})
+	}
+	return entries, nil
 }

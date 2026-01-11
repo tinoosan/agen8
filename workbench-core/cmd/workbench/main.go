@@ -65,4 +65,13 @@ func main() {
 		log.Printf("entry: %+v", e)
 	}
 
+	// List root
+	entries, err = fs.List("/")
+	if err != nil {
+		log.Fatalf("error listing root: %v", err)
+	}
+	for _, e := range entries {
+		log.Printf("entry: %+v", e)
+	}
+
 }
