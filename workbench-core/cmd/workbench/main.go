@@ -26,6 +26,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("error appending event: %v", err)
 	}
+	err = store.AppendEvent(run.RunId, "step.started", "Step 1 started", data)
+	if err != nil {
+		log.Fatalf("error appending event: %v", err)
+	}
+	err = store.AppendEvent(run.RunId, "step.progress", "Step 1 halfway", data)
+	if err != nil {
+		log.Fatalf("error appending event: %v", err)
+	}
+	err = store.AppendEvent(run.RunId, "step.completed", "Step 1 done", data)
+	if err != nil {
+		log.Fatalf("error appending event: %v", err)
+	}
+	err = store.AppendEvent(run.RunId, "run.completed", "Run finished", data)
+	if err != nil {
+		log.Fatalf("error appending event: %v", err)
+	}
 
 	// create trace
 	trace, err := resources.NewTraceResource(run.RunId)
@@ -46,7 +62,7 @@ func main() {
 	log.Printf("mounted workspace at %s", workspace.BaseDir)
 	fs.Mount(vfs.MountTrace, trace)
 	log.Printf("mounted trace at %s", trace.BaseDir)
-	
+
 	// Write to workspace
 	if err := fs.Write("/workspace/notes.md", []byte("hello world")); err != nil {
 		log.Fatalf("error writing to workspace: %v", err)
@@ -90,5 +106,12 @@ func main() {
 	for _, e := range entries {
 		log.Printf("entry: %+v", e)
 	}
+
+	// Read trace events and print the last 3 lines
+	traceEvents, err := fs.Read("/trace/events.latest/3")
+	if err != nil {
+		log.Fatalf("error reading trace events: %v", err)
+	}
+	log.Printf("last 3 trace events:\n%s", string(traceEvents))
 
 }
