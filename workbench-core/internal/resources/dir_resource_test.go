@@ -13,7 +13,6 @@ func TestSafeJoin_BlocksEscapeAttempts(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
-		Mount:   "workspace",
 	}
 
 	tests := []struct {
@@ -70,7 +69,6 @@ func TestSafeJoin_BlocksAbsolutePaths(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
-		Mount:   "workspace",
 	}
 
 	tests := []struct {
@@ -106,7 +104,6 @@ func TestSafeJoin_AllowsNormalPaths(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
-		Mount:   "workspace",
 	}
 
 	tests := []struct {
@@ -174,7 +171,6 @@ func TestWriteRead_Roundtrip(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
-		Mount:   "workspace",
 	}
 
 	content := []byte("hi")
@@ -204,7 +200,6 @@ func TestAppend_CreatesFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
-		Mount:   "workspace",
 	}
 
 	filename := "log.txt"
@@ -236,11 +231,11 @@ func TestAppend_CreatesFile(t *testing.T) {
 }
 
 // TestList_ReturnsCorrectVFSPaths verifies that List returns entries with proper VFS paths.
-func TestList_ReturnsCorrectVFSPaths(t *testing.T) {
+// TestList_ReturnsCorrectPaths verifies that List returns entries with proper relative paths.
+func TestList_ReturnsCorrectPaths(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
-		Mount:   "workspace",
 	}
 
 	// Create test files and directories
@@ -264,23 +259,23 @@ func TestList_ReturnsCorrectVFSPaths(t *testing.T) {
 			t.Errorf("List(\"\") returned %d entries, want 2", len(entries))
 		}
 
-		// Check for notes.md
+		// Check for notes.md and reports (paths are now relative, not full VFS paths)
 		foundNotes := false
 		foundReports := false
 		for _, e := range entries {
-			if e.Path == "/workspace/notes.md" && !e.IsDir {
+			if e.Path == "notes.md" && !e.IsDir {
 				foundNotes = true
 			}
-			if e.Path == "/workspace/reports" && e.IsDir {
+			if e.Path == "reports" && e.IsDir {
 				foundReports = true
 			}
 		}
 
 		if !foundNotes {
-			t.Error("List(\"\") should contain /workspace/notes.md")
+			t.Error("List(\"\") should contain notes.md")
 		}
 		if !foundReports {
-			t.Error("List(\"\") should contain /workspace/reports directory")
+			t.Error("List(\"\") should contain reports directory")
 		}
 	})
 
@@ -296,8 +291,9 @@ func TestList_ReturnsCorrectVFSPaths(t *testing.T) {
 			t.Errorf("List(\"reports\") returned %d entries, want 1", len(entries))
 		}
 
-		if entries[0].Path != "/workspace/reports/q1.md" {
-			t.Errorf("List(\"reports\") entry path = %q, want %q", entries[0].Path, "/workspace/reports/q1.md")
+		// Path is now relative to the subpath
+		if entries[0].Path != "reports/q1.md" {
+			t.Errorf("List(\"reports\") entry path = %q, want %q", entries[0].Path, "reports/q1.md")
 		}
 
 		if entries[0].IsDir {
@@ -334,7 +330,6 @@ func TestWrite_CreatesParentDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
-		Mount:   "workspace",
 	}
 
 	// Write to a nested path that doesn't exist

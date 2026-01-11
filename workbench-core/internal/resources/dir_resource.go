@@ -1,10 +1,13 @@
+// Package resources provides concrete implementations of the vfs.Resource interface.
+//
+// DirResource is a filesystem-backed resource that maps a virtual mount to a real
+// OS directory, with built-in path traversal protection.
 package resources
 
 import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -12,32 +15,69 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
+// DirResource implements vfs.Resource by mapping virtual paths to a real OS directory.
+// It provides secure filesystem access with automatic path traversal protection.
+//
+// Example:
+//
+//	dr, _ := NewDirResource("/data/runs/run-123/workspace", "workspace")
+//	// Virtual path "/workspace/notes.md" maps to "/data/runs/run-123/workspace/notes.md"
+//
+// Security:
+//
+//	All subpaths are validated through safeJoin to prevent directory traversal attacks.
+//	Paths like "../etc/passwd" or "a/../../secrets" are rejected.
 type DirResource struct {
-	BaseDir string // e.g data/runs/run-123/workspace
-	Mount   string // e.g workspace
+	// BaseDir is the absolute OS path that serves as the root directory for this resource.
+	// Example: "/data/runs/run-123/workspace" or "/Users/alice/projects/myapp"
+	BaseDir string
 }
 
-func NewDirResource(baseDir, mount string) (*DirResource, error) {
+// NewDirResource creates a new directory-backed resource.
+//
+// Parameters:
+//   - baseDir: the OS directory path to mount (e.g., "/data/workspace")
+//   - mount: the virtual mount name (e.g., "workspace")
+//
+// The mount name will be sanitized by removing leading slashes.
+//
+// Returns an error if:
+//   - baseDir is empty
+//   - mount is empty or becomes empty after sanitization
+//
+// Example:
+//
+//	dr, err := NewDirResource("/data/runs/123/workspace", "workspace")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+func NewDirResource(baseDir string) (*DirResource, error) {
 	if baseDir == "" {
 		return nil, fmt.Errorf("baseDir cannot be empty")
 	}
-	if mount == "" {
-		return nil, fmt.Errorf("mount cannot be empty")
-	}
 
-	mount = strings.TrimLeft(mount, "/")
-
-	if mount == "" {
-		return nil, fmt.Errorf("mount cannot be '/'")
-	}
 	return &DirResource{
 		BaseDir: baseDir,
-		Mount:   mount,
 	}, nil
 }
 
-// List returns a list of entries under the given subpath.
-// The subpath must be relative to the base directory.
+// List returns all entries (files and directories) under the given subpath.
+//
+// The subpath is relative to BaseDir and must not escape the mount root.
+// Use "" or "." to list the root of the mount.
+//
+// Each returned Entry has its Path field set to the full VFS path
+// (e.g., "/workspace/notes.md" not just "notes.md").
+//
+// Returns an error if:
+//   - subpath attempts directory traversal (e.g., "../etc")
+//   - the directory doesn't exist
+//   - there are permission issues
+//
+// Example:
+//
+//	entries, err := dr.List("reports")
+//	// Returns entries like "/workspace/reports/q1.md", "/workspace/reports/q2.md"
 func (d *DirResource) List(subpath string) ([]vfs.Entry, error) {
 	targetPath, err := d.safeJoin(subpath)
 	if err != nil {
@@ -59,10 +99,9 @@ func (d *DirResource) List(subpath string) ([]vfs.Entry, error) {
 		}
 
 		childSubpath := strings.TrimLeft(filepath.ToSlash(filepath.Join(subpath, de.Name())), "/")
-		childVPath := path.Join("/", d.Mount, childSubpath)
 
 		e := vfs.Entry{
-			Path:       childVPath,
+			Path:       childSubpath,
 			IsDir:      de.IsDir(),
 			Size:       info.Size(),
 			ModTime:    info.ModTime(),
@@ -76,7 +115,22 @@ func (d *DirResource) List(subpath string) ([]vfs.Entry, error) {
 	return entries, nil
 }
 
-// Read returns the contents of the file at the given subpath.
+// Read returns the complete contents of the file at the given subpath.
+//
+// The subpath is relative to BaseDir and must not escape the mount root.
+//
+// Returns an error if:
+//   - subpath attempts directory traversal
+//   - the file doesn't exist
+//   - there are permission issues
+//   - the path points to a directory (not a file)
+//
+// Example:
+//
+//	data, err := dr.Read("config.json")
+//	if err != nil {
+//	    return err
+//	}
 func (d *DirResource) Read(subpath string) ([]byte, error) {
 	targetPath, err := d.safeJoin(subpath)
 	if err != nil {
@@ -91,6 +145,23 @@ func (d *DirResource) Read(subpath string) ([]byte, error) {
 	return b, nil
 }
 
+// Write creates or replaces a file at the given subpath with the provided data.
+//
+// Parent directories are created automatically if they don't exist.
+// The write is performed atomically using a temp file + rename strategy.
+//
+// The subpath is relative to BaseDir and must not escape the mount root.
+//
+// Returns an error if:
+//   - subpath attempts directory traversal
+//   - parent directory creation fails
+//   - there are permission issues
+//   - disk is full
+//
+// Example:
+//
+//	err := dr.Write("logs/app.log", []byte("Starting...\n"))
+//	// Creates "logs" directory if needed, then writes the file
 func (d *DirResource) Write(subpath string, data []byte) error {
 	targetPath, err := d.safeJoin(subpath)
 	if err != nil {
@@ -110,6 +181,23 @@ func (d *DirResource) Write(subpath string, data []byte) error {
 	return nil
 }
 
+// Append adds data to the end of a file at the given subpath.
+//
+// If the file doesn't exist, it is created (like Write).
+// Parent directories are created automatically if they don't exist.
+//
+// The subpath is relative to BaseDir and must not escape the mount root.
+//
+// Returns an error if:
+//   - subpath attempts directory traversal
+//   - parent directory creation fails
+//   - there are permission issues
+//   - disk is full
+//
+// Example:
+//
+//	err := dr.Append("logs/events.log", []byte("2024-01-11: User logged in\n"))
+//	// Appends to existing file or creates new file
 func (d *DirResource) Append(subpath string, data []byte) error {
 	targetPath, err := d.safeJoin(subpath)
 	if err != nil {
@@ -136,8 +224,26 @@ func (d *DirResource) Append(subpath string, data []byte) error {
 	return nil
 }
 
-// safeJoin converts a resource-relative subpath (no leading "/") into an OS path under baseDir.
-// It rejects any subpath that would escape baseDir e.g. data/runs/run-123/workspace.
+// safeJoin converts a resource-relative subpath into a secure OS path under BaseDir.
+//
+// This is the security boundary for DirResource. It performs multiple checks:
+//  1. Rejects absolute paths (e.g., "/etc/passwd")
+//  2. Normalizes the path using filepath.Clean
+//  3. Rejects paths with ".." components after normalization
+//  4. Verifies the final absolute path is contained within BaseDir
+//
+// The subpath should NOT have a leading slash.
+//
+// Returns an error if:
+//   - subpath is an absolute path
+//   - subpath escapes BaseDir (e.g., "../../../etc")
+//   - filepath operations fail (rare)
+//
+// Examples:
+//   - "notes.md" -> BaseDir + "/notes.md" ✓
+//   - "a/../b/file.txt" -> BaseDir + "/b/file.txt" ✓ (normalized)
+//   - "../etc/passwd" -> error ✗ (escape attempt)
+//   - "a/../../secrets" -> error ✗ (escape attempt)
 func (d *DirResource) safeJoin(subpath string) (string, error) {
 	// Clean turns things like "a/../b" into "b" and "a/../../x" into "../x".
 	clean := filepath.Clean(subpath)

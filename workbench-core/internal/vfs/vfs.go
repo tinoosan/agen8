@@ -68,3 +68,71 @@ func (fs *FS) Resolve(vpath string) (mountName string, r Resource, subpath strin
 	}
 	return mountName, r, subpath, nil
 }
+
+// Read reads the contents of a file at the given VFS path.
+// It returns an error if the path is invalid or if the file cannot be read.
+func (fs *FS) Read(vpath string) ([]byte, error) {
+	mountName, r, subpath, err := fs.Resolve(vpath)
+	if err != nil {
+		return nil, err
+	}
+
+	b, err := r.Read(subpath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s:%s: %w", mountName, subpath, err)
+	}
+	return b, nil
+}
+
+// Write writes the given data to a file at the given VFS path.
+// It returns an error if the path is invalid or if the file cannot be written.
+func (fs *FS) Write(vpath string, data []byte) error {
+	mountName, r, subpath, err := fs.Resolve(vpath)
+	if err != nil {
+		return err
+	}
+
+	if err := r.Write(subpath, data); err != nil {
+		return fmt.Errorf("write %s:%s: %w", mountName, subpath, err)
+	}
+	return nil
+}
+
+// Append appends the given data to a file at the given VFS path.
+// It returns an error if the path is invalid or if the file cannot be appended to.
+func (fs *FS) Append(vpath string, data []byte) error {
+	mountName, r, subpath, err := fs.Resolve(vpath)
+	if err != nil {
+		return err
+	}
+
+	err = r.Append(subpath, data)
+	if err != nil {
+		return fmt.Errorf("append %s:%s: %w", mountName, subpath, err)
+	}
+	return nil
+}
+
+// List returns a list of entries under the given subpath.
+// The subpath must be relative to the base directory.
+func (fs *FS) List(vpath string) ([]Entry, error) {
+	mountName, r, subpath, err := fs.Resolve(vpath)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := r.List(subpath)
+	if err != nil {
+		return nil, fmt.Errorf("list %s:%s: %w", mountName, subpath, err)
+	}
+	out := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		vp := "/" + mountName
+		if e.Path != "" {
+			vp += "/" + e.Path
+		}
+		e.Path = vp
+		out = append(out, e)
+	}
+	return out, nil
+}

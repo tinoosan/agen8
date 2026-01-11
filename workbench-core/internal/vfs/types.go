@@ -54,7 +54,8 @@ type Resource interface {
 //   - If true, the entry represents a “directory-like” container.
 //   - For tool mounts, a “directory” can mean a namespace grouping, not a real folder.
 type Entry struct {
-	// Full VFS path of the entry, e.g. "/workspace/file.txt".
+	// Resource-relative path (no leading "/").
+	// Examples: "notes.md", "reports/q1.md". The root itself is "".
 	Path string
 
 	// Whether the entry is directory-like.
