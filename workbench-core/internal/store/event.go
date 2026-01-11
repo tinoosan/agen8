@@ -76,6 +76,21 @@ func AppendEvent(runId, eventType, message string, data map[string]string) error
 		return fmt.Errorf("error writing event for run %s: %w", runId, err)
 	}
 
+	traceDir := fsutil.GetTraceDir(config.DataDir, runId)
+	if err := os.MkdirAll(traceDir, 0755); err != nil {
+		return fmt.Errorf("error creating trace directory %s: %w", traceDir, err)
+	}
+	tracePath := filepath.Join(traceDir, "events.jsonl")
+	tf, err := os.OpenFile(tracePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("error appending trace event for run %s: %w", runId, err)
+	}
+	defer tf.Close()
+
+	if _, err := tf.Write(b); err != nil {
+		return fmt.Errorf("error writing trace event for run %s: %w", runId, err)
+	}
+
 	//f.Sync()
 	return nil
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,11 @@ type TraceResource struct {
 	RunId string
 }
 
+const (
+	maxLatestCount = 200
+	maxSinceBytes  = 64 * 1024
+)
+
 func NewTraceResource(runId string) (*TraceResource, error) {
 	if runId == "" {
 		return nil, fmt.Errorf("runId cannot be empty")
@@ -40,6 +46,15 @@ func NewTraceResource(runId string) (*TraceResource, error) {
 	// create trace directory if it doesn't exist
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("error creating trace directory %s: %w", baseDir, err)
+	}
+	eventsPath := filepath.Join(baseDir, "events.jsonl")
+	if _, err := os.Stat(eventsPath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("error checking trace events %s: %w", eventsPath, err)
+		}
+		if err := os.WriteFile(eventsPath, []byte{}, 0644); err != nil {
+			return nil, fmt.Errorf("error creating trace events %s: %w", eventsPath, err)
+		}
 	}
 	return &TraceResource{
 		BaseDir: baseDir,
@@ -58,7 +73,7 @@ func NewTraceResource(runId string) (*TraceResource, error) {
 // Example:
 //
 //	entries, err := tr.List("")
-//	// Returns entries like "events", "events.since", "events.latest", "run"
+//	// Returns entries like "events", "events.since", "events.latest"
 func (tr *TraceResource) List(subpath string) ([]vfs.Entry, error) {
 	// Treat "" and "." as the root of the trace resource
 	if subpath == "" || subpath == "." {
@@ -110,7 +125,7 @@ func (tr *TraceResource) Read(subpath string) ([]byte, error) {
 		if len(parts) != 1 {
 			return nil, fmt.Errorf("trace read: 'events' does not take a suffix (got %q)", subpath)
 		}
-		targetPath := fsutil.GetEventFilePath(config.DataDir, tr.RunId)
+		targetPath := filepath.Join(tr.BaseDir, "events.jsonl")
 		return readFile(targetPath, "events")
 
 	case "events.since":
@@ -145,6 +160,9 @@ func (tr *TraceResource) Read(subpath string) ([]byte, error) {
 		}
 		if count < 0 {
 			return nil, fmt.Errorf("trace read: events.latest count must be non-negative (got %q)", subpath)
+		}
+		if count > maxLatestCount {
+			return nil, fmt.Errorf("trace read: events.latest count exceeds max %d", maxLatestCount)
 		}
 
 		b, err := tr.ReadLastEvents(count)
@@ -181,7 +199,7 @@ func (tr *TraceResource) Append(subpath string, data []byte) error {
 // bytes plus the next offset (current file size).
 func (tr *TraceResource) ReadEventsSince(offset int64) ([]byte, int64, error) {
 	logicalName := "events.since"
-	targetPath := fsutil.GetEventFilePath(config.DataDir, tr.RunId)
+	targetPath := filepath.Join(tr.BaseDir, "events.jsonl")
 
 	if offset < 0 {
 		return nil, 0, fmt.Errorf("trace %s: offset cannot be negative (%d)", logicalName, offset)
@@ -205,6 +223,9 @@ func (tr *TraceResource) ReadEventsSince(offset int64) ([]byte, int64, error) {
 	if offset > size {
 		return []byte{}, size, nil
 	}
+	if size-offset > maxSinceBytes {
+		return nil, size, fmt.Errorf("trace %s: requested %d bytes exceeds max %d", logicalName, size-offset, maxSinceBytes)
+	}
 
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return nil, 0, fmt.Errorf("trace %s: seek %s to %d: %w", logicalName, targetPath, offset, err)
@@ -222,10 +243,13 @@ func (tr *TraceResource) ReadEventsSince(offset int64) ([]byte, int64, error) {
 // If count is 0, it returns empty.
 func (tr *TraceResource) ReadLastEvents(count int) ([]byte, error) {
 	logicalName := "events.latest"
-	targetPath := fsutil.GetEventFilePath(config.DataDir, tr.RunId)
+	targetPath := filepath.Join(tr.BaseDir, "events.jsonl")
 
 	if count == 0 {
 		return []byte{}, nil
+	}
+	if count > maxLatestCount {
+		return nil, fmt.Errorf("trace %s: count exceeds max %d", logicalName, maxLatestCount)
 	}
 
 	f, err := os.Open(targetPath)
