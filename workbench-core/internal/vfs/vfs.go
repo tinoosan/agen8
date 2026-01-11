@@ -30,41 +30,41 @@ func (fs *FS) Mount(name string, r Resource) {
 	fs.mounts[name] = r
 }
 
-// Resolve takes a virtual path and returns the corresponding mounted resource,
+// Resolve takes a virtual path and returns the mount name, corresponding mounted resource,
 // the subpath within that resource, and any error encountered.
 //
 // The path must start with "/" and include a mount name (e.g., "/workspace/a/b").
-// For the path "/workspace/a/b", it returns the resource mounted as "workspace"
-// and the subpath "a/b".
+// For the path "/workspace/a/b", it returns the mount name "workspace", the resource
+// mounted as "workspace", and the subpath "a/b".
 //
 // Returns an error if the path is empty, doesn't start with "/", or references
 // an unknown mount.
-func (fs *FS) Resolve(vpath string) (Resource, string, string, error) {
+func (fs *FS) Resolve(vpath string) (mountName string, r Resource, subpath string, err error) {
 	if vpath == "" {
-		return nil, "", "", fmt.Errorf("path cannot be empty")
+		return "", nil, "", fmt.Errorf("path cannot be empty")
 	}
 	if !strings.HasPrefix(vpath, "/") {
-		return nil, "", "", fmt.Errorf("path must start with '/'")
+		return "", nil, "", fmt.Errorf("path must start with '/'")
 	}
 
 	// Trim leading slashes so "/workspace/a/b" -> "workspace/a/b"
 	trimmed := strings.TrimLeft(vpath, "/")
 	if trimmed == "" {
-		return nil, "", "", fmt.Errorf("path must include a mount, e.g. /workspace")
+		return "", nil, "", fmt.Errorf("path must include a mount, e.g. /workspace")
 	}
 
 	// Split into /workspace and a/b
 	parts := strings.SplitN(trimmed, "/", 2)
-	mountName := parts[0]
+	mountName = parts[0]
 
 	r, ok := fs.mounts[mountName]
 	if !ok {
-		return nil, "", "", fmt.Errorf("unknown mount %q", mountName)
+		return "", nil, "", fmt.Errorf("unknown mount %q", mountName)
 	}
 
-	subpath := ""
+	subpath = ""
 	if len(parts) == 2 {
 		subpath = parts[1] // "a/b"
 	}
-	return r, subpath, mountName, nil
+	return mountName, r, subpath, nil
 }
