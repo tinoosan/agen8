@@ -27,6 +27,12 @@ func main() {
 		log.Fatalf("error appending event: %v", err)
 	}
 
+	// create trace
+	trace, err := resources.NewTraceResource(run.RunId)
+	if err != nil {
+		log.Fatalf("error creating trace: %v", err)
+	}
+
 	// Create vfs
 	fs := vfs.NewFS()
 
@@ -38,7 +44,9 @@ func main() {
 
 	fs.Mount(vfs.MountWorkspace, workspace)
 	log.Printf("mounted workspace at %s", workspace.BaseDir)
-
+	fs.Mount(vfs.MountTrace, trace)
+	log.Printf("mounted trace at %s", trace.BaseDir)
+	
 	// Write to workspace
 	if err := fs.Write("/workspace/notes.md", []byte("hello world")); err != nil {
 		log.Fatalf("error writing to workspace: %v", err)

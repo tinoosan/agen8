@@ -21,3 +21,8 @@ func GetWorkspaceDir(dataDir, runId string) string {
 func GetArtifactDir(dataDir, runId string) string {
 	return filepath.Join(dataDir, "runs", runId, "artifacts")
 }
+
+// GetTraceDir returns the path to a run's trace directory given the data directory and run ID.
+func GetTraceDir(dataDir, runId string) string {
+	return filepath.Join(dataDir, "runs", runId, "trace")
+}
