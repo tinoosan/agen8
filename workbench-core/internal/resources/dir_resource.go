@@ -28,9 +28,19 @@ import (
 //	All subpaths are validated through safeJoin to prevent directory traversal attacks.
 //	Paths like "../etc/passwd" or "a/../../secrets" are rejected.
 type DirResource struct {
-	// BaseDir is the absolute OS path that serves as the root directory for this resource.
-	// Example: "/data/runs/run-123/workspace" or "/Users/alice/projects/myapp"
+	// BaseDir is the OS directory backing this resource (the sandbox root).
+	// All operations are confined under BaseDir. The resource must reject any
+	// subpath that would escape BaseDir (e.g. "..", absolute paths).
+	//
+	// BaseDir is an implementation detail; callers interact via virtual paths
+	// like "/workspace/notes.md" through the VFS.
+	//
+	// Example: "/data/runs/run-123/workspace" or "/Users/alice/projects/myapp".
 	BaseDir string
+
+	// Mount is the virtual mount name used by the VFS.
+	// Example: "workspace" maps to the virtual namespace "/workspace".
+	Mount string
 }
 
 // NewDirResource creates a new directory-backed resource.
@@ -51,23 +61,27 @@ type DirResource struct {
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-func NewDirResource(baseDir string) (*DirResource, error) {
+func NewDirResource(baseDir, mount string) (*DirResource, error) {
 	if baseDir == "" {
 		return nil, fmt.Errorf("baseDir cannot be empty")
+	}
+	mount = strings.TrimLeft(mount, "/")
+	if mount == "" {
+		return nil, fmt.Errorf("mount cannot be empty")
 	}
 
 	return &DirResource{
 		BaseDir: baseDir,
+		Mount:   mount,
 	}, nil
 }
 
-// List returns all entries (files and directories) under the given subpath.
+// List lists entries under subpath relative to BaseDir.
+// subpath is resource-relative (no leading "/").
+// List("") lists the resource root.
 //
-// The subpath is relative to BaseDir and must not escape the mount root.
-// Use "" or "." to list the root of the mount.
-//
-// Each returned Entry has its Path field set to the full VFS path
-// (e.g., "/workspace/notes.md" not just "notes.md").
+// Each returned Entry has its Path field set to the resource-relative path
+// (e.g., "reports/q1.md" not just "q1.md").
 //
 // Returns an error if:
 //   - subpath attempts directory traversal (e.g., "../etc")
@@ -77,7 +91,7 @@ func NewDirResource(baseDir string) (*DirResource, error) {
 // Example:
 //
 //	entries, err := dr.List("reports")
-//	// Returns entries like "/workspace/reports/q1.md", "/workspace/reports/q2.md"
+//	// Returns entries like "reports/q1.md", "reports/q2.md"
 func (d *DirResource) List(subpath string) ([]vfs.Entry, error) {
 	targetPath, err := d.safeJoin(subpath)
 	if err != nil {
@@ -115,9 +129,8 @@ func (d *DirResource) List(subpath string) ([]vfs.Entry, error) {
 	return entries, nil
 }
 
-// Read returns the complete contents of the file at the given subpath.
-//
-// The subpath is relative to BaseDir and must not escape the mount root.
+// Read reads a file at subpath relative to BaseDir.
+// subpath is resource-relative (no leading "/").
 //
 // Returns an error if:
 //   - subpath attempts directory traversal
@@ -145,12 +158,11 @@ func (d *DirResource) Read(subpath string) ([]byte, error) {
 	return b, nil
 }
 
-// Write creates or replaces a file at the given subpath with the provided data.
+// Write replaces the file at subpath (creating parent directories if needed).
+// subpath is resource-relative (no leading "/").
 //
 // Parent directories are created automatically if they don't exist.
 // The write is performed atomically using a temp file + rename strategy.
-//
-// The subpath is relative to BaseDir and must not escape the mount root.
 //
 // Returns an error if:
 //   - subpath attempts directory traversal
@@ -181,12 +193,11 @@ func (d *DirResource) Write(subpath string, data []byte) error {
 	return nil
 }
 
-// Append adds data to the end of a file at the given subpath.
+// Append appends bytes to the file at subpath (creating parent directories if needed).
+// subpath is resource-relative (no leading "/").
 //
 // If the file doesn't exist, it is created (like Write).
 // Parent directories are created automatically if they don't exist.
-//
-// The subpath is relative to BaseDir and must not escape the mount root.
 //
 // Returns an error if:
 //   - subpath attempts directory traversal

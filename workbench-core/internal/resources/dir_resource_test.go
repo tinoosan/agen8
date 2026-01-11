@@ -13,6 +13,7 @@ func TestSafeJoin_BlocksEscapeAttempts(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
+		Mount:   "workspace",
 	}
 
 	tests := []struct {
@@ -69,6 +70,7 @@ func TestSafeJoin_BlocksAbsolutePaths(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
+		Mount:   "workspace",
 	}
 
 	tests := []struct {
@@ -104,6 +106,7 @@ func TestSafeJoin_AllowsNormalPaths(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
+		Mount:   "workspace",
 	}
 
 	tests := []struct {
@@ -171,6 +174,7 @@ func TestWriteRead_Roundtrip(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
+		Mount:   "workspace",
 	}
 
 	content := []byte("hi")
@@ -200,6 +204,7 @@ func TestAppend_CreatesFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
+		Mount:   "workspace",
 	}
 
 	filename := "log.txt"
@@ -236,6 +241,7 @@ func TestList_ReturnsCorrectPaths(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
+		Mount:   "workspace",
 	}
 
 	// Create test files and directories
@@ -330,6 +336,7 @@ func TestWrite_CreatesParentDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{
 		BaseDir: tmpDir,
+		Mount:   "workspace",
 	}
 
 	// Write to a nested path that doesn't exist
