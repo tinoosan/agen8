@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -111,7 +110,7 @@ func (tr *TraceResource) Read(subpath string) ([]byte, error) {
 		if len(parts) != 1 {
 			return nil, fmt.Errorf("trace read: 'events' does not take a suffix (got %q)", subpath)
 		}
-		targetPath := filepath.Join(tr.BaseDir, "events.jsonl")
+		targetPath := fsutil.GetEventFilePath(config.DataDir, tr.RunId)
 		return readFile(targetPath, "events")
 
 	case "events.since":
