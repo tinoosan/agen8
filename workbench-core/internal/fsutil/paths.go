@@ -30,3 +30,13 @@ func GetArtifactDir(dataDir, runId string) string {
 func GetTraceDir(dataDir, runId string) string {
 	return filepath.Join(dataDir, "runs", runId, "trace")
 }
+
+// GetToolsDir returns the path to workbench tools directory given the data directory.
+func GetToolsDir(dataDir string) string {
+	return filepath.Join(dataDir, "tools")
+}
+
+// GetResultsDir returns the path to workbench results directory given the data directory and run ID.
+func GetResultsDir(dataDir, runId string) string {
+	return filepath.Join(dataDir, "runs", runId, "results")
+}
