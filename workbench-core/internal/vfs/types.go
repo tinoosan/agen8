@@ -5,6 +5,8 @@ import "time"
 const (
 	MountWorkspace = "workspace"
 	MountTrace     = "trace"
+	MountTools     = "tools"
+	MountResults   = "results"
 )
 
 // Resource is the minimal contract a “mounted thing” must implement to behave like a filesystem.
