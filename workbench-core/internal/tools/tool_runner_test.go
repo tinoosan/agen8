@@ -189,3 +189,45 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 }
+
+func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDataDir := config.DataDir
+	config.DataDir = tmpDir
+	defer func() { config.DataDir = oldDataDir }()
+
+	run, err := store.CreateRun("runner invoke error test", 100)
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	results, err := resources.NewRunResults(run.RunId)
+	if err != nil {
+		t.Fatalf("NewRunResults: %v", err)
+	}
+
+	fs := vfs.NewFS()
+	fs.Mount(vfs.MountResults, results)
+
+	inv := invokerFunc(func(ctx context.Context, req types.ToolRequest) (tools.ToolCallResult, error) {
+		return tools.ToolCallResult{}, &tools.InvokeError{Code: "timeout", Message: "command timed out", Retryable: true}
+	})
+
+	runner := tools.Runner{
+		FS: fs,
+		ToolRegistry: tools.MapRegistry{
+			types.ToolID("github.com.acme.stock"): inv,
+		},
+	}
+
+	resp, err := runner.Run(context.Background(), types.ToolID("github.com.acme.stock"), "acme.do", json.RawMessage(`{}`), 0)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if resp.Ok {
+		t.Fatalf("expected ok=false response")
+	}
+	if resp.Error == nil || resp.Error.Code != "timeout" || !resp.Error.Retryable {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+}

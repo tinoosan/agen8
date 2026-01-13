@@ -32,6 +32,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -42,8 +43,18 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
+// Runner executes tool calls and persists their results under /results/<callId>/.
+//
+// Runner is intentionally small: it is the single code path for tool execution.
+// Builtins and external tools (later) both implement ToolInvoker and run through
+// the same lifecycle and persistence rules.
 type Runner struct {
-	FS           *vfs.FS
+	// FS is the virtual filesystem used to write results.
+	//
+	// FS must have the "/results" mount configured before Run is called.
+	FS *vfs.FS
+
+	// ToolRegistry resolves toolId -> ToolInvoker.
 	ToolRegistry ToolRegistry
 }
 
@@ -59,6 +70,47 @@ type ToolRegistry interface {
 type ToolInvoker interface {
 	Invoke(ctx context.Context, req types.ToolRequest) (ToolCallResult, error)
 }
+
+// InvokeError is an optional structured error that a ToolInvoker can return.
+//
+// The runner converts InvokeError into a types.ToolResponse with the provided
+// error fields:
+//   - Code becomes ToolError.Code
+//   - Message becomes ToolError.Message
+//   - Retryable becomes ToolError.Retryable
+//
+// If a tool returns a non-InvokeError, the runner falls back to code "tool_failed".
+//
+// This small wrapper lets tools express protocol-level error codes like:
+//   - "invalid_input"
+//   - "timeout"
+//
+// without introducing a separate execution flow for builtins vs custom tools.
+type InvokeError struct {
+	Code      string
+	Message   string
+	Retryable bool
+	Err       error
+}
+
+// Error returns a stable, human-readable error message.
+//
+// The returned message is what ends up in ToolResponse.Error.Message when the
+// runner persists an invocation failure.
+func (e *InvokeError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message != "" {
+		return e.Message
+	}
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return "tool invoke error"
+}
+
+func (e *InvokeError) Unwrap() error { return e.Err }
 
 // ToolCallResult is the successful output of a tool invocation.
 //
@@ -79,6 +131,7 @@ type ToolArtifactWrite struct {
 // MapRegistry is the minimal in-memory registry.
 type MapRegistry map[types.ToolID]ToolInvoker
 
+// Get looks up a tool invoker by toolId.
 func (m MapRegistry) Get(id types.ToolID) (ToolInvoker, bool) {
 	inv, ok := m[id]
 	return inv, ok
@@ -143,7 +196,22 @@ func (r *Runner) Run(ctx context.Context, toolId types.ToolID, actionId string, 
 
 	result, err := inv.Invoke(ctx, req)
 	if err != nil {
-		resp := types.NewToolResponseError(req, "tool_failed", err.Error(), false)
+		code := "tool_failed"
+		message := err.Error()
+		retryable := false
+
+		var invErr *InvokeError
+		if errors.As(err, &invErr) && invErr != nil {
+			if invErr.Code != "" {
+				code = invErr.Code
+			}
+			if invErr.Message != "" {
+				message = invErr.Message
+			}
+			retryable = invErr.Retryable
+		}
+
+		resp := types.NewToolResponseError(req, code, message, retryable)
 		if err := r.persist(callID, resp, nil); err != nil {
 			return types.ToolResponse{}, err
 		}
@@ -177,6 +245,11 @@ func (r *Runner) Run(ctx context.Context, toolId types.ToolID, actionId string, 
 	return resp, nil
 }
 
+// persist writes the results of a tool call.
+//
+// Write order:
+//   - artifacts first (so response.json references are safe)
+//   - response.json last (so readers see a complete result)
 func (r *Runner) persist(callID string, resp types.ToolResponse, artifacts []ToolArtifactWrite) error {
 	// Write artifacts first so response.json references are safe.
 	for _, a := range artifacts {
@@ -201,6 +274,10 @@ func (r *Runner) persist(callID string, resp types.ToolResponse, artifacts []Too
 	return nil
 }
 
+// validateArtifactWrite validates a tool-provided artifact before the runner writes it.
+//
+// Tools write artifacts relative to the call directory, e.g. "quote.json".
+// This helper prevents directory traversal and ensures MediaType is present.
 func validateArtifactWrite(a ToolArtifactWrite) error {
 	if a.Path == "" {
 		return fmt.Errorf("artifact path is required")

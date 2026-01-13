@@ -11,7 +11,7 @@ type ToolID string
 type ActionID string
 
 var toolIDRegex = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_-]+)+$`)
-var actionIDRegex = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_-]+)+$`)
+var actionIDRegex = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_-]+)*$`)
 
 func ParseToolID(id string) (ToolID, error) {
 	s := strings.ToLower(strings.TrimSpace(id))
@@ -50,7 +50,7 @@ func ParseActionID(id string) (ActionID, error) {
 		return "", fmt.Errorf("action ID cannot be empty")
 	}
 	if !actionIDRegex.MatchString(s) {
-		return "", fmt.Errorf("invalid action ID %q (expected dot-separated id like workbench.write)", s)
+		return "", fmt.Errorf("invalid action ID %q (expected id like exec or workbench.write)", s)
 	}
 	return ActionID(s), nil
 }
