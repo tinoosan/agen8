@@ -23,6 +23,8 @@ var (
 
 	// ErrToolRequestInputRequired indicates that "input" is missing (nil).
 	ErrToolRequestInputRequired = errors.New("input is required")
+	// ErrToolRequestInputInvalidJSON indicates that "input" is not valid JSON.
+	ErrToolRequestInputInvalidJSON = errors.New("input must be valid JSON")
 	// ErrToolRequestTimeoutInvalid indicates that "timeoutMs" is invalid (< 0).
 	ErrToolRequestTimeoutInvalid = errors.New("timeoutMs must be >= 0")
 
@@ -30,6 +32,8 @@ var (
 	ErrToolResponseErrorMustBeNilWhenOK = errors.New("error must be nil when ok=true")
 	// ErrToolResponseErrorRequiredWhenNotOK indicates that "error" must be non-nil when ok=false.
 	ErrToolResponseErrorRequiredWhenNotOK = errors.New("error is required when ok=false")
+	// ErrToolResponseOutputInvalidJSON indicates that "output" is not valid JSON when provided.
+	ErrToolResponseOutputInvalidJSON = errors.New("output must be valid JSON")
 
 	// ErrToolErrorCodeRequired indicates that ToolError.Code is missing.
 	ErrToolErrorCodeRequired = errors.New("error.code is required")
@@ -163,11 +167,20 @@ func (r ToolRequest) Validate() error {
 	if r.ToolID.String() == "" {
 		return ErrToolIDRequired
 	}
+	if _, err := ParseToolID(r.ToolID.String()); err != nil {
+		return err
+	}
 	if r.ActionID == "" {
 		return ErrToolActionIDRequired
 	}
+	if _, err := ParseActionID(r.ActionID); err != nil {
+		return err
+	}
 	if r.Input == nil {
 		return ErrToolRequestInputRequired
+	}
+	if !json.Valid(r.Input) {
+		return ErrToolRequestInputInvalidJSON
 	}
 	if r.TimeoutMs < 0 {
 		return ErrToolRequestTimeoutInvalid
@@ -236,8 +249,17 @@ func (r ToolResponse) Validate() error {
 	if r.ToolID.String() == "" {
 		return ErrToolIDRequired
 	}
+	if _, err := ParseToolID(r.ToolID.String()); err != nil {
+		return err
+	}
 	if r.ActionID == "" {
 		return ErrToolActionIDRequired
+	}
+	if _, err := ParseActionID(r.ActionID); err != nil {
+		return err
+	}
+	if r.Output != nil && !json.Valid(r.Output) {
+		return ErrToolResponseOutputInvalidJSON
 	}
 	for _, a := range r.Artifacts {
 		if err := a.Validate(); err != nil {

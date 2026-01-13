@@ -127,7 +127,7 @@ func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 		ToolRegistry: tools.MapRegistry{},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("github.com.missing.tool"), "x", json.RawMessage(`{}`), 0)
+	resp, err := runner.Run(context.Background(), types.ToolID("github.com.missing.tool"), "missing.action", json.RawMessage(`{}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("github.com.acme.stock"), "x", json.RawMessage(`{}`), 0)
+	resp, err := runner.Run(context.Background(), types.ToolID("github.com.acme.stock"), "acme.do", json.RawMessage(`{}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

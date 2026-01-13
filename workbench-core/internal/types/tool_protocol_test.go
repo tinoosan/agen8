@@ -52,6 +52,14 @@ func TestToolRequestValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("InvalidJSONInput", func(t *testing.T) {
+		r := valid
+		r.Input = json.RawMessage(`{`)
+		if err := r.Validate(); err == nil {
+			t.Fatalf("expected error")
+		}
+	})
+
 	t.Run("NegativeTimeout", func(t *testing.T) {
 		r := valid
 		r.TimeoutMs = -1
@@ -101,6 +109,13 @@ func TestToolResponseValidate(t *testing.T) {
 	t.Run("MissingRequiredFieldsFails", func(t *testing.T) {
 		resp := NewToolResponseOK(req, nil, nil)
 		resp.CallID = ""
+		if err := resp.Validate(); err == nil {
+			t.Fatalf("expected error")
+		}
+	})
+
+	t.Run("InvalidJSONOutputFails", func(t *testing.T) {
+		resp := NewToolResponseOK(req, json.RawMessage(`{`), nil)
 		if err := resp.Validate(); err == nil {
 			t.Fatalf("expected error")
 		}
