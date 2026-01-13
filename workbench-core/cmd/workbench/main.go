@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
+	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/agent"
+	"github.com/tinoosan/workbench-core/internal/llm"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tools"
@@ -107,102 +107,69 @@ func main() {
 		ToolRegistry: tools.BuiltinInvokerRegistry(builtinCfg),
 	}
 
-	log.Printf("== Simulating: user request -> agent loop -> result ==")
-
-	userRequest := "Show me what's in the workspace directory, then get the latest quote for AAPL. Save the raw quote as JSON and write a short markdown summary."
+	userRequest := "List the available tools, then list what’s currently in /workspace. Then get the latest quote for AAPL. Write the raw quote to /workspace/quote.json and a short markdown summary to /workspace/summary.md. Before you return your final answer, briefly reflect on what host ops you used and what you observed in /tools and /results."
+	if len(os.Args) > 1 {
+		userRequest = strings.Join(os.Args[1:], " ")
+	}
 	log.Printf("user -> agent: %q", userRequest)
 	emit("user.request", "User request received", map[string]string{
 		"text": userRequest,
 	})
 
 	executor := &agent.HostOpExecutor{FS: fs, Runner: &runner, DefaultMaxBytes: 4096}
-	exec := func(req types.HostOpRequest) types.HostOpResponse { return executor.Exec(context.Background(), req) }
+	model := strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
+	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" || model == "" {
+		log.Fatalf("OPENROUTER_API_KEY and OPENROUTER_MODEL are required to run the non-scripted agent loop")
+	}
 
-	agentSay := func(req types.HostOpRequest) types.HostOpResponse {
+	client, err := llm.NewOpenRouterClientFromEnv()
+	if err != nil {
+		log.Fatalf("error creating OpenRouter client: %v", err)
+	}
+
+	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		emit("agent.op.request", "Agent requested host op", map[string]string{
 			"op":       req.Op,
 			"path":     req.Path,
 			"toolId":   req.ToolID.String(),
 			"actionId": req.ActionID,
 		})
-		resp := agent.AgentSay(log.Printf, exec, req)
-		data := map[string]string{
+		resp := executor.Exec(ctx, req)
+		emit("agent.op.response", "Host op completed", map[string]string{
 			"op":  resp.Op,
-			"ok":  strconv.FormatBool(resp.Ok),
+			"ok":  fmtBool(resp.Ok),
 			"err": resp.Error,
-		}
-		if resp.BytesLen != 0 {
-			data["bytesLen"] = strconv.Itoa(resp.BytesLen)
-		}
-		if resp.Truncated {
-			data["truncated"] = "true"
-		}
-		if resp.ToolResponse != nil {
-			data["callId"] = resp.ToolResponse.CallID
-		}
-		emit("agent.op.response", "Host op completed", data)
+		})
 		return resp
 	}
 
-	emit("agent.loop.start", "Agent loop started", map[string]string{})
-
-	// Observe environment and recent trace.
-	agentSay(types.HostOpRequest{Op: "fs.list", Path: "/"})
-	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/trace/events.latest/10", MaxBytes: 2048})
-
-	// Discover tools and read the chosen tool manifest.
-	toolsList := agentSay(types.HostOpRequest{Op: "fs.list", Path: "/tools"})
-	if !toolsList.Ok {
-		log.Fatalf("agent loop failed: cannot list tools: %s", toolsList.Error)
-	}
-	emit("agent.plan", "First list workspace via builtin.bash, then fetch quote via github.com.acme.stock", map[string]string{})
-
-	// 1) Use builtin.bash exec to list the workspace (agent discovers it via /tools).
-	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/tools/builtin.bash", MaxBytes: 2048})
-	lsResp := agentSay(types.HostOpRequest{
-		Op:       "tool.run",
-		ToolID:   types.ToolID("builtin.bash"),
-		ActionID: "exec",
-		Input:    json.RawMessage(`{"argv":["ls","-la"],"cwd":"."}`),
+	emit("agent.loop.start", "Agent loop started", map[string]string{
+		"model": model,
 	})
-	if !lsResp.Ok || lsResp.ToolResponse == nil {
-		log.Fatalf("agent loop failed: builtin.bash tool.run did not return toolResponse: %s", lsResp.Error)
-	}
-	lsCallID := lsResp.ToolResponse.CallID
-	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + lsCallID + "/response.json", MaxBytes: 4096})
 
-	// 2) Use the stock quote tool (example builtin registered in memory).
-	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/tools/github.com.acme.stock", MaxBytes: 2048})
-
-	// Execute tool via host primitive.
-	runResp := agentSay(types.HostOpRequest{
-		Op:        "tool.run",
-		ToolID:    types.ToolID("github.com.acme.stock"),
-		ActionID:  "quote.latest",
-		Input:     json.RawMessage(`{"symbol":"AAPL"}`),
-		TimeoutMs: 0,
-	})
-	if !runResp.Ok || runResp.ToolResponse == nil {
-		log.Fatalf("agent loop failed: tool.run did not return toolResponse: %s", runResp.Error)
+	a := &agent.Agent{
+		LLM:      client,
+		Exec:     execWithEvents,
+		Model:    model,
+		MaxSteps: 20,
 	}
 
-	callID := runResp.ToolResponse.CallID
-
-	// Read persisted results (what the agent would do next).
-	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/response.json", MaxBytes: 4096})
-	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/quote.json", MaxBytes: 2048})
-	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/notes.md", MaxBytes: 2048})
-
-	// Write a final answer to workspace (simulated "agent response").
-	finalAnswer := "Latest quote for AAPL retrieved. See /results/" + callID + "/quote.json and /results/" + callID + "/notes.md."
-	agentSay(types.HostOpRequest{Op: "fs.write", Path: "/workspace/final.md", Text: finalAnswer})
+	final, err := a.Run(context.Background(), userRequest)
+	if err != nil {
+		log.Fatalf("agent loop error: %v", err)
+	}
+	log.Printf("agent -> user:\n%s", final)
 	emit("agent.final", "Agent produced final answer", map[string]string{
-		"path":   "/workspace/final.md",
-		"callId": callID,
+		"text": final,
 	})
-
-	log.Printf("agent -> user:\n%s", finalAnswer)
 	emit("run.completed", "Run finished", data)
 
 	log.Printf("== Workbench demo complete ==")
+}
+
+func fmtBool(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
