@@ -107,7 +107,9 @@ func main() {
 		ToolRegistry: tools.BuiltinInvokerRegistry(builtinCfg),
 	}
 
-	userRequest := "List the available tools, then list what’s currently in /workspace. Then get the latest quote for AAPL. Write the raw quote to /workspace/quote.json and a short markdown summary to /workspace/summary.md. Before you return your final answer, briefly reflect on what host ops you used and what you observed in /tools and /results."
+	// Keep the default goal intentionally vague so the agent has to discover
+	// the environment (/tools, /trace, /results, /workspace) and choose actions.
+	userRequest := "Get the latest quote for AAPL and leave me a short summary of what you did and what you observed."
 	if len(os.Args) > 1 {
 		userRequest = strings.Join(os.Args[1:], " ")
 	}
@@ -127,7 +129,13 @@ func main() {
 		log.Fatalf("error creating OpenRouter client: %v", err)
 	}
 
+	systemPromptBytes, err := os.ReadFile("internal/agent/INITIAL_PROMPT.md")
+	if err != nil {
+		log.Fatalf("error reading internal/agent/INITIAL_PROMPT.md: %v", err)
+	}
+
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		log.Printf("agent -> host:\n%s", agent.PrettyJSON(req))
 		emit("agent.op.request", "Agent requested host op", map[string]string{
 			"op":       req.Op,
 			"path":     req.Path,
@@ -135,6 +143,7 @@ func main() {
 			"actionId": req.ActionID,
 		})
 		resp := executor.Exec(ctx, req)
+		log.Printf("host -> agent:\n%s", agent.PrettyJSON(resp))
 		emit("agent.op.response", "Host op completed", map[string]string{
 			"op":  resp.Op,
 			"ok":  fmtBool(resp.Ok),
@@ -148,10 +157,12 @@ func main() {
 	})
 
 	a := &agent.Agent{
-		LLM:      client,
-		Exec:     execWithEvents,
-		Model:    model,
-		MaxSteps: 20,
+		LLM:          client,
+		Exec:         execWithEvents,
+		Model:        model,
+		SystemPrompt: string(systemPromptBytes),
+		MaxSteps:     20,
+		Logf:         log.Printf,
 	}
 
 	final, err := a.Run(context.Background(), userRequest)

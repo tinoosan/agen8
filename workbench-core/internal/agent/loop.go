@@ -32,9 +32,20 @@ type Agent struct {
 	// Model is required. Example: "openai/gpt-4o-mini" (via OpenRouter), etc.
 	Model string
 
+	// SystemPrompt is the system instructions passed to the model.
+	//
+	// If empty, the agent uses an internal default prompt.
+	// In production, prefer setting this explicitly (e.g. from INITIAL_PROMPT.md)
+	// so the contract is centralized and pkgsite-visible.
+	SystemPrompt string
+
 	// MaxSteps caps the number of model -> host op iterations.
 	// If zero, a default is used.
 	MaxSteps int
+
+	// Logf is an optional logger used to print what the agent is doing.
+	// Example: log.Printf.
+	Logf func(format string, args ...any)
 }
 
 // Run executes the agent loop for a single user goal and returns the final response text.
@@ -60,7 +71,10 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 		return "", fmt.Errorf("MaxSteps must be >= 1")
 	}
 
-	system := agentLoopV0SystemPrompt()
+	system := strings.TrimSpace(a.SystemPrompt)
+	if system == "" {
+		system = agentLoopV0SystemPrompt()
+	}
 
 	msgs := []types.LLMMessage{
 		{Role: "user", Content: goal},
@@ -79,6 +93,9 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 		}
 
 		opJSON := extractJSONObject(resp.Text)
+		if a.Logf != nil {
+			a.Logf("model -> host (step %d): %s", step, strings.TrimSpace(opJSON))
+		}
 		var op types.HostOpRequest
 		if err := json.Unmarshal([]byte(opJSON), &op); err != nil {
 			// Feed the parse error back to the model as a user message and keep going.
