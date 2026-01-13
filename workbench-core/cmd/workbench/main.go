@@ -31,6 +31,16 @@ func main() {
 	}
 	log.Printf("runId=%s", run.RunId)
 
+	emit := func(eventType, message string, data map[string]string) {
+		if err := store.AppendEvent(run.RunId, eventType, message, data); err != nil {
+			log.Fatalf("error appending event: %v", err)
+		}
+	}
+
+	emit("agent.session.started", "Agent session started", map[string]string{
+		"runId": run.RunId,
+	})
+
 	data := map[string]string{
 		"name":  "Alice",
 		"email": "alice@example.com",
@@ -38,26 +48,11 @@ func main() {
 
 	log.Printf("== Trace setup (events mirrored into /trace) ==")
 
-	err = store.AppendEvent(run.RunId, "run.started", "Run started", data)
-	if err != nil {
-		log.Fatalf("error appending event: %v", err)
-	}
-	err = store.AppendEvent(run.RunId, "step.started", "Step 1 started", data)
-	if err != nil {
-		log.Fatalf("error appending event: %v", err)
-	}
-	err = store.AppendEvent(run.RunId, "step.progress", "Step 1 halfway", data)
-	if err != nil {
-		log.Fatalf("error appending event: %v", err)
-	}
-	err = store.AppendEvent(run.RunId, "step.completed", "Step 1 done", data)
-	if err != nil {
-		log.Fatalf("error appending event: %v", err)
-	}
-	err = store.AppendEvent(run.RunId, "run.completed", "Run finished", data)
-	if err != nil {
-		log.Fatalf("error appending event: %v", err)
-	}
+	emit("run.started", "Run started", data)
+	emit("step.started", "Step 1 started", data)
+	emit("step.progress", "Step 1 halfway", data)
+	emit("step.completed", "Step 1 done", data)
+	emit("run.completed", "Run finished", data)
 
 	trace, err := resources.NewTraceResource(run.RunId)
 	if err != nil {
@@ -135,22 +130,34 @@ func main() {
 	for _, e := range mounts {
 		log.Printf("mount: %s", e.Path)
 	}
+	emit("agent.fs.list", "Listed VFS mounts", map[string]string{
+		"path": "/",
+	})
 
 	log.Printf("== Workspace demo (read/write/append/list) ==")
 
 	if err := fs.Write("/workspace/notes.md", []byte("hello world")); err != nil {
 		log.Fatalf("error writing to workspace: %v", err)
 	}
+	emit("agent.fs.write", "Wrote /workspace/notes.md", map[string]string{
+		"path": "/workspace/notes.md",
+	})
 
 	b, err := fs.Read("/workspace/notes.md")
 	if err != nil {
 		log.Fatalf("error reading from workspace: %v", err)
 	}
 	log.Printf("read /workspace/notes.md => %q", string(b))
+	emit("agent.fs.read", "Read /workspace/notes.md", map[string]string{
+		"path": "/workspace/notes.md",
+	})
 
 	if err := fs.Append("/workspace/notes.md", []byte("\n\nHello again!")); err != nil {
 		log.Fatalf("error appending to workspace: %v", err)
 	}
+	emit("agent.fs.append", "Appended /workspace/notes.md", map[string]string{
+		"path": "/workspace/notes.md",
+	})
 
 	entries, err := fs.List("/workspace")
 	if err != nil {
@@ -175,6 +182,9 @@ func main() {
 		log.Fatalf("error reading trace events.latest: %v", err)
 	}
 	log.Printf("read /trace/events.latest/3 =>\n%s", string(traceLatest))
+	emit("agent.trace.read", "Read /trace/events.latest/3", map[string]string{
+		"path": "/trace/events.latest/3",
+	})
 
 	// Offset-based incremental read (UI-style):
 	// 1) ListEvents gives nextOffset (byte offset)
@@ -197,6 +207,10 @@ func main() {
 		log.Fatalf("error reading trace events.since: %v", err)
 	}
 	log.Printf("read /trace/events.since/%d =>\n%s", nextOffset, string(traceSince))
+	emit("agent.trace.read", "Read /trace/events.since/<offset>", map[string]string{
+		"path":   "/trace/events.since/<offset>",
+		"offset": strconv.FormatInt(nextOffset, 10),
+	})
 
 	log.Printf("== Tools demo (discovery + read manifest bytes) ==")
 
@@ -256,6 +270,10 @@ func main() {
 		log.Fatalf("read persisted response.json failed: %v", err)
 	}
 	log.Printf("read %s =>\n%s", responsePath, string(responseBytes))
+	emit("agent.tool.response", "Read tool response.json", map[string]string{
+		"path":   responsePath,
+		"callId": resp.CallID,
+	})
 
 	for _, a := range resp.Artifacts {
 		p := "/results/" + resp.CallID + "/" + a.Path
@@ -264,22 +282,52 @@ func main() {
 			log.Fatalf("read artifact %s failed: %v", p, err)
 		}
 		log.Printf("read %s (%s) => %d bytes", p, a.MediaType, len(b))
+		emit("agent.tool.artifact", "Read tool artifact", map[string]string{
+			"path":      p,
+			"callId":    resp.CallID,
+			"mediaType": a.MediaType,
+			"bytesLen":  strconv.Itoa(len(b)),
+		})
 	}
 
 	log.Printf("== Mock host primitives flow (agent emits JSON ops) ==")
 	log.Printf("Note: fs.* and tool.run are HOST PRIMITIVES (always available); only /tools is discovered.")
 
-	executor := &agent.HostOpExecutor{FS: fs, Runner: &runner, ReadPreviewLimit: 600}
-	exec := func(req types.HostOpRequest) types.HostOpResponse { return executor.Exec(context.Background(), req) }
+	executor := &agent.HostOpExecutor{FS: fs, Runner: &runner, DefaultMaxBytes: 4096}
+	exec := func(req types.HostOpRequest) types.HostOpResponse {
+		return executor.Exec(context.Background(), req)
+	}
 
 	agentSay := func(req types.HostOpRequest) types.HostOpResponse {
-		return agent.AgentSay(log.Printf, exec, req)
+		emit("agent.op.request", "Agent requested host op", map[string]string{
+			"op":       req.Op,
+			"path":     req.Path,
+			"toolId":   req.ToolID.String(),
+			"actionId": req.ActionID,
+		})
+		resp := agent.AgentSay(log.Printf, exec, req)
+		data := map[string]string{
+			"op":  resp.Op,
+			"ok":  strconv.FormatBool(resp.Ok),
+			"err": resp.Error,
+		}
+		if resp.BytesLen != 0 {
+			data["bytesLen"] = strconv.Itoa(resp.BytesLen)
+		}
+		if resp.Truncated {
+			data["truncated"] = "true"
+		}
+		if resp.ToolResponse != nil {
+			data["callId"] = resp.ToolResponse.CallID
+		}
+		emit("agent.op.response", "Host op completed", data)
+		return resp
 	}
 
 	agentSay(types.HostOpRequest{Op: "fs.list", Path: "/"})
-	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/trace/events.latest/5"})
+	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/trace/events.latest/5", MaxBytes: 2048})
 	agentSay(types.HostOpRequest{Op: "fs.list", Path: "/tools"})
-	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/tools/github.com.acme.stock"})
+	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/tools/github.com.acme.stock", MaxBytes: 2048})
 
 	toolRunResp := agentSay(types.HostOpRequest{
 		Op:        "tool.run",
@@ -294,9 +342,9 @@ func main() {
 		callID = toolRunResp.ToolResponse.CallID
 	}
 	if callID != "" {
-		agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/response.json"})
-		agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/quote.json"})
-		agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/notes.md"})
+		agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/response.json", MaxBytes: 4096})
+		agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/quote.json", MaxBytes: 2048})
+		agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/notes.md", MaxBytes: 2048})
 	}
 
 	log.Printf("== Workbench demo complete ==")

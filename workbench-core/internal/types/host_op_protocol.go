@@ -19,6 +19,7 @@ type HostOpRequest struct {
 	ActionID  string          `json:"actionId,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
 	TimeoutMs int             `json:"timeoutMs,omitempty"`
+	MaxBytes  int             `json:"maxBytes,omitempty"`
 	Text      string          `json:"text,omitempty"`
 }
 
@@ -28,12 +29,14 @@ type HostOpRequest struct {
 // For tool.run, the host returns ToolResponse, and the agent can then read persisted results
 // via /results/<callId>/....
 type HostOpResponse struct {
-	Op       string   `json:"op"`
-	Ok       bool     `json:"ok"`
-	Error    string   `json:"error,omitempty"`
-	Entries  []string `json:"entries,omitempty"`
-	BytesLen int      `json:"bytesLen,omitempty"`
-	Text     string   `json:"text,omitempty"`
+	Op        string   `json:"op"`
+	Ok        bool     `json:"ok"`
+	Error     string   `json:"error,omitempty"`
+	Entries   []string `json:"entries,omitempty"`
+	BytesLen  int      `json:"bytesLen,omitempty"`
+	Text      string   `json:"text,omitempty"`
+	BytesB64  string   `json:"bytesB64,omitempty"`
+	Truncated bool     `json:"truncated,omitempty"`
 
 	ToolResponse *ToolResponse `json:"toolResponse,omitempty"`
 }

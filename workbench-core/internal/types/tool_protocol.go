@@ -96,11 +96,11 @@ var (
 //
 // After a tool call finishes, outputs are stored under a call directory keyed by callId:
 //   - /results/<callId>/response.json
-//   - /results/<callId>/artifacts/<file>
-//   - /results/index.jsonl                 (append-only index for discoverability)
+//   - /results/<callId>/<artifact.Path>      (zero or more files)
+//   - /results/index.jsonl                   (append-only index for discoverability; optional)
 //
 // "artifact" means a file produced by the tool call that can be read later (JSON, CSV, PNG, etc).
-// ToolResponse.Artifacts contains paths RELATIVE to the call directory, e.g. "artifacts/quote.json".
+// ToolResponse.Artifacts contains paths RELATIVE to the call directory, e.g. "quote.json".
 //
 // Example (runner/host side; no IO implementation here, just the contract):
 //
@@ -120,13 +120,13 @@ var (
 //	  Ok:       true,
 //	  Output:   []byte(`{"price":123.45}`),
 //	  Artifacts: []ToolArtifactRef{
-//	    { Path: "artifacts/quote.json", MediaType: "application/json" },
+//	    { Path: "quote.json", MediaType: "application/json" },
 //	  },
 //	}
 //
 //	// Runner writes:
 //	//   /results/<callId>/response.json
-//	//   /results/<callId>/artifacts/quote.json
+//	//   /results/<callId>/quote.json
 //	// and appends to:
 //	//   /results/index.jsonl
 //	line := NewIndexLineFromResponse(resp, "quote.latest AAPL ok")
@@ -134,7 +134,7 @@ var (
 // On-disk examples (implementation detail; for a specific runId):
 //
 //	data/runs/<runId>/results/<callId>/response.json
-//	data/runs/<runId>/results/<callId>/artifacts/<file>
+//	data/runs/<runId>/results/<callId>/<artifact.Path>
 //	data/runs/<runId>/results/index.jsonl
 //
 // Rationale:
@@ -207,7 +207,7 @@ func (e ToolError) Validate() error {
 
 // ToolArtifactRef is a reference to an artifact written under /results/<runId>/.
 type ToolArtifactRef struct {
-	Path      string `json:"path"`      // relative path under results/<runId>/ e.g. "artifacts/quote.json"
+	Path      string `json:"path"`      // relative path under results/<callId>/ e.g. "quote.json"
 	MediaType string `json:"mediaType"` // e.g. "application/json"
 }
 
