@@ -36,6 +36,11 @@ func GetToolsDir(dataDir string) string {
 	return filepath.Join(dataDir, "tools")
 }
 
+// GetToolManifestPath returns the path to a tool's manifest.json given the tools directory and tool ID.
+func GetToolManifestPath(toolsDir, toolID string) string {
+	return filepath.Join(toolsDir, toolID, "manifest.json")
+}
+
 // GetResultsDir returns the path to workbench results directory given the data directory and run ID.
 func GetResultsDir(dataDir, runId string) string {
 	return filepath.Join(dataDir, "runs", runId, "results")
