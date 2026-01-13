@@ -9,6 +9,19 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
+// ResultsResource is a directory-backed resource mounted at "/results".
+//
+// Usage pattern (callId-first, Pattern A)
+//
+// Tool call outputs are stored under:
+//
+//	/results/<callId>/response.json
+//	/results/<callId>/artifacts/<file>
+//
+// This resource is only the filesystem mount; the tool runner/host decides what it writes.
+// On disk (implementation detail) the base dir is:
+//
+//	data/runs/<runId>/results
 func NewRunResults(runId string) (*DirResource, error) {
 	if runId == "" {
 		return nil, fmt.Errorf("runId cannot be empty")
