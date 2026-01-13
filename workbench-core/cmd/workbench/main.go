@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tools"
@@ -263,6 +264,39 @@ func main() {
 			log.Fatalf("read artifact %s failed: %v", p, err)
 		}
 		log.Printf("read %s (%s) => %d bytes", p, a.MediaType, len(b))
+	}
+
+	log.Printf("== Mock host primitives flow (agent emits JSON ops) ==")
+	log.Printf("Note: fs.* and tool.run are HOST PRIMITIVES (always available); only /tools is discovered.")
+
+	executor := &agent.HostOpExecutor{FS: fs, Runner: &runner, ReadPreviewLimit: 600}
+	exec := func(req types.HostOpRequest) types.HostOpResponse { return executor.Exec(context.Background(), req) }
+
+	agentSay := func(req types.HostOpRequest) types.HostOpResponse {
+		return agent.AgentSay(log.Printf, exec, req)
+	}
+
+	agentSay(types.HostOpRequest{Op: "fs.list", Path: "/"})
+	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/trace/events.latest/5"})
+	agentSay(types.HostOpRequest{Op: "fs.list", Path: "/tools"})
+	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/tools/github.com.acme.stock"})
+
+	toolRunResp := agentSay(types.HostOpRequest{
+		Op:        "tool.run",
+		ToolID:    types.ToolID("github.com.acme.stock"),
+		ActionID:  "quote.latest",
+		Input:     json.RawMessage(`{"symbol":"AAPL"}`),
+		TimeoutMs: 0,
+	})
+
+	callID := ""
+	if toolRunResp.Ok && toolRunResp.ToolResponse != nil {
+		callID = toolRunResp.ToolResponse.CallID
+	}
+	if callID != "" {
+		agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/response.json"})
+		agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/quote.json"})
+		agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/notes.md"})
 	}
 
 	log.Printf("== Workbench demo complete ==")
