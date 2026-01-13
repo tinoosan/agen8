@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/agent"
@@ -109,7 +111,7 @@ func main() {
 
 	// Keep the default goal intentionally vague so the agent has to discover
 	// the environment (/tools, /trace, /results, /workspace) and choose actions.
-	userRequest := "Get the latest quote for AAPL and leave me a short summary of what you did and what you observed."
+	userRequest := "Test the builtin.bash tool first: fetch https://example.com and write the response body to /workspace/example.html. Then summarize what you did and what you observed about the environment."
 	if len(os.Args) > 1 {
 		userRequest = strings.Join(os.Args[1:], " ")
 	}
@@ -135,7 +137,12 @@ func main() {
 	}
 
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
-		log.Printf("agent -> host:\n%s", agent.PrettyJSON(req))
+		logEventLine("agent.op.request", "Agent requested host op", map[string]string{
+			"op":       req.Op,
+			"path":     req.Path,
+			"toolId":   req.ToolID.String(),
+			"actionId": req.ActionID,
+		})
 		emit("agent.op.request", "Agent requested host op", map[string]string{
 			"op":       req.Op,
 			"path":     req.Path,
@@ -143,7 +150,23 @@ func main() {
 			"actionId": req.ActionID,
 		})
 		resp := executor.Exec(ctx, req)
-		log.Printf("host -> agent:\n%s", agent.PrettyJSON(resp))
+
+		respData := map[string]string{
+			"op":  resp.Op,
+			"ok":  fmtBool(resp.Ok),
+			"err": resp.Error,
+		}
+		if resp.BytesLen != 0 {
+			respData["bytesLen"] = strconv.Itoa(resp.BytesLen)
+		}
+		if resp.Truncated {
+			respData["truncated"] = "true"
+		}
+		if resp.ToolResponse != nil && resp.ToolResponse.CallID != "" {
+			respData["callId"] = resp.ToolResponse.CallID
+		}
+		logEventLine("agent.op.response", "Host op completed", respData)
+
 		emit("agent.op.response", "Host op completed", map[string]string{
 			"op":  resp.Op,
 			"ok":  fmtBool(resp.Ok),
@@ -155,6 +178,7 @@ func main() {
 	emit("agent.loop.start", "Agent loop started", map[string]string{
 		"model": model,
 	})
+	logEventLine("agent.loop.start", "Agent loop started", map[string]string{"model": model})
 
 	a := &agent.Agent{
 		LLM:          client,
@@ -162,7 +186,7 @@ func main() {
 		Model:        model,
 		SystemPrompt: string(systemPromptBytes),
 		MaxSteps:     20,
-		Logf:         log.Printf,
+		Logf:         nil,
 	}
 
 	final, err := a.Run(context.Background(), userRequest)
@@ -170,6 +194,9 @@ func main() {
 		log.Fatalf("agent loop error: %v", err)
 	}
 	log.Printf("agent -> user:\n%s", final)
+	logEventLine("agent.final", "Agent produced final answer", map[string]string{
+		"text": final,
+	})
 	emit("agent.final", "Agent produced final answer", map[string]string{
 		"text": final,
 	})
@@ -183,4 +210,26 @@ func fmtBool(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// logEventLine prints a single-line JSON log similar to events.jsonl.
+//
+// It is intentionally compact so you can follow the agent loop in the terminal
+// without opening the on-disk event log.
+func logEventLine(eventType, message string, data map[string]string) {
+	line := struct {
+		Type    string            `json:"type"`
+		Message string            `json:"message"`
+		Data    map[string]string `json:"data,omitempty"`
+	}{
+		Type:    eventType,
+		Message: message,
+		Data:    data,
+	}
+	b, err := json.Marshal(line)
+	if err != nil {
+		log.Printf("%s %s", eventType, message)
+		return
+	}
+	log.Printf("%s", string(b))
 }

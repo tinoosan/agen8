@@ -107,6 +107,11 @@ func DefaultBashAllowlist() map[string]bool {
 		"awk":  true,
 		"jq":   true,
 		"stat": true,
+
+		// Network-capable tools (still confined to RootDir for cwd).
+		// These allow the agent to fetch documentation and inspect responses.
+		"curl": true,
+		"ping": true,
 	}
 }
 
