@@ -9,6 +9,9 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
+// NewRunWorkspace creates a directory-backed resource for a run's workspace.
+// The workspace is the agent-writable working directory mounted at "/workspace".
+// Creates the directory if it doesn't exist.
 func NewRunWorkspace(runId string) (*DirResource, error) {
 	if runId == "" {
 		return nil, fmt.Errorf("runId cannot be empty")

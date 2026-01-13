@@ -3,10 +3,21 @@ package vfs
 import "time"
 
 const (
+	// MountWorkspace is the mount name for an agent's working directory.
+	// Paths under /workspace are readable and writable by the agent.
 	MountWorkspace = "workspace"
-	MountTrace     = "trace"
-	MountTools     = "tools"
-	MountResults   = "results"
+
+	// MountTrace is the mount name for the read-only event feed.
+	// The agent can poll /trace/events.since/<offset> for new events.
+	MountTrace = "trace"
+
+	// MountTools is the mount name for tool discovery and manifests.
+	// fs.List("/tools") returns tool IDs; fs.Read("/tools/<id>") returns JSON manifest bytes.
+	MountTools = "tools"
+
+	// MountResults is the mount name for tool call outputs.
+	// Tool results are stored under /results/<callId>/response.json.
+	MountResults = "results"
 )
 
 // Resource is the minimal contract a “mounted thing” must implement to behave like a filesystem.

@@ -7,12 +7,21 @@ import (
 	"strings"
 )
 
+// ToolID is a unique identifier for a tool in dot-separated format.
+// Example: "github.com.acme.stock" or "workbench.builtin.bash".
+// ToolID is case-insensitive and normalized to lowercase.
 type ToolID string
+
+// ActionID identifies a specific action within a tool.
+// Example: "exec" or "quote.latest".
+// ActionID is case-insensitive and normalized to lowercase.
 type ActionID string
 
 var toolIDRegex = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_-]+)+$`)
 var actionIDRegex = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_-]+)*$`)
 
+// ParseToolID parses and validates a tool ID string.
+// Returns an error if the ID is empty or doesn't match the expected format.
 func ParseToolID(id string) (ToolID, error) {
 	s := strings.ToLower(strings.TrimSpace(id))
 	if s == "" {
@@ -44,6 +53,8 @@ func (id *ToolID) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// ParseActionID parses and validates an action ID string.
+// Returns an error if the ID is empty or doesn't match the expected format.
 func ParseActionID(id string) (ActionID, error) {
 	s := strings.ToLower(strings.TrimSpace(id))
 	if s == "" {
@@ -74,6 +85,7 @@ func (id *ActionID) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// EnvVar describes environment variable requirements for a tool.
 type EnvVar struct {
 	// Required maps env var name -> description.
 	Required map[string]string `json:"required,omitempty"`
@@ -81,6 +93,7 @@ type EnvVar struct {
 	Optional map[string]string `json:"optional,omitempty"`
 }
 
+// ToolKind distinguishes between builtin tools (shipped with workbench) and custom tools.
 type ToolKind string
 
 const (
@@ -126,6 +139,8 @@ func ParseBuiltinToolManifest(b []byte) (ToolManifest, error) {
 	return m, m.Validate()
 }
 
+// ToolManifest describes a tool's metadata, capabilities, and actions.
+// It is the JSON schema stored at /tools/<toolId>/manifest.json.
 type ToolManifest struct {
 	ID          ToolID       `json:"id"`
 	Version     string       `json:"version"`
@@ -137,6 +152,8 @@ type ToolManifest struct {
 	Env         EnvVar       `json:"env,omitempty"`
 }
 
+// ToolAction describes a single callable action within a tool.
+// Each action has its own input/output schema and can be invoked independently.
 type ToolAction struct {
 	ID           ActionID        `json:"id"` // eg. workbench.write
 	DisplayName  string          `json:"displayName"`

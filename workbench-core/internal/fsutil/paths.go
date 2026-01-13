@@ -1,3 +1,11 @@
+// Package fsutil provides filesystem path helpers for workbench data layout.
+//
+// All run data is stored under:
+//
+//	<dataDir>/runs/<runId>/
+//
+// This package centralizes path construction so the layout is consistent
+// and easy to change.
 package fsutil
 
 import "path/filepath"
@@ -12,6 +20,7 @@ func GetEventFilePath(dataDir, runId string) string {
 	return filepath.Join(dataDir, "runs", runId, "events.jsonl")
 }
 
+// GetRunDir returns the base directory for a run given the data directory and run ID.
 func GetRunDir(dataDir, runId string) string {
 	return filepath.Join(dataDir, "runs", runId)
 }
