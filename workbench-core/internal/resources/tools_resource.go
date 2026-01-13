@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
@@ -61,6 +61,37 @@ func NewToolsResource() (*ToolsResource, error) {
 		Mount:           vfs.MountTools,
 		BuiltinRegistry: make(map[string]BuiltinTool),
 	}, nil
+}
+
+// RegisterBuiltin validates and registers a builtin tool manifest into the in-memory registry.
+//
+// The manifest must:
+//   - be valid JSON
+//   - be a valid builtin ToolManifest (kind=builtin, actions non-empty, schemas valid JSON, etc.)
+//   - have an id that matches toolID
+//
+// Builtins are served before disk tools when IDs collide.
+func (tr *ToolsResource) RegisterBuiltin(toolID string, manifestJSON []byte) error {
+	if tr.BuiltinRegistry == nil {
+		tr.BuiltinRegistry = make(map[string]BuiltinTool)
+	}
+
+	parsedID, err := types.ParseToolID(toolID)
+	if err != nil {
+		return err
+	}
+
+	m, err := types.ParseBuiltinToolManifest(manifestJSON)
+	if err != nil {
+		return err
+	}
+
+	if m.ID != parsedID {
+		return fmt.Errorf("builtin manifest id %q does not match toolID %q", m.ID, parsedID)
+	}
+
+	tr.BuiltinRegistry[parsedID.String()] = BuiltinTool{Manifest: manifestJSON}
+	return nil
 }
 
 // List lists entries under subpath relative to BaseDir.
@@ -146,7 +177,7 @@ func (tr *ToolsResource) Read(subpath string) ([]byte, error) {
 		return tool.Manifest, nil
 	}
 
-	manifestPath := toolManifestPath(tr.BaseDir, toolID)
+	manifestPath := fsutil.GetToolManifestPath(tr.BaseDir, toolID)
 	b, err := os.ReadFile(manifestPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -169,10 +200,6 @@ func (tr *ToolsResource) Append(subpath string, data []byte) error {
 	return fmt.Errorf("append not supported for tools resource")
 }
 
-func toolManifestPath(baseDir, toolID string) string {
-	return filepath.Join(baseDir, toolID, "manifest.json")
-}
-
 func listDiskToolIDs(baseDir string) ([]string, error) {
 	des, err := os.ReadDir(baseDir)
 	if err != nil {
@@ -188,7 +215,7 @@ func listDiskToolIDs(baseDir string) ([]string, error) {
 			continue
 		}
 		toolID := de.Name()
-		manifestPath := toolManifestPath(baseDir, toolID)
+		manifestPath := fsutil.GetToolManifestPath(baseDir, toolID)
 		info, err := os.Stat(manifestPath)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
