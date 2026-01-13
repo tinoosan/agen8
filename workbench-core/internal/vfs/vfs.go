@@ -5,6 +5,7 @@ package vfs
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -142,10 +143,19 @@ func (fs *FS) List(vpath string) ([]Entry, error) {
 }
 
 func (fs *FS) listRoot() ([]Entry, error) {
-	entries := make([]Entry, 0)
-	for mn, _ := range fs.mounts {
+	if len(fs.mounts) == 0 {
+		return []Entry{}, nil
+	}
+	mountNames := make([]string, 0, len(fs.mounts))
+	for mn := range fs.mounts {
+		mountNames = append(mountNames, mn)
+	}
+	sort.Strings(mountNames)
+
+	entries := make([]Entry, 0, len(mountNames))
+	for _, mn := range mountNames {
 		entries = append(entries, Entry{
-			Path: "/" + mn,
+			Path:  "/" + mn,
 			IsDir: true,
 		})
 	}
