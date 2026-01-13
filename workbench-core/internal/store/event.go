@@ -22,6 +22,21 @@ type TailedEvent struct {
 	NextOffset int64
 }
 
+// Event storage overview
+//
+// Canonical event log
+//   - AppendEvent writes an event as one JSON object per line (JSONL) to:
+//       data/runs/<runId>/events.jsonl
+//
+// Trace mirror
+//   - AppendEvent also mirrors the exact same bytes (including newline) into:
+//       data/runs/<runId>/trace/events.jsonl
+//     so the trace VFS mount can be self-contained and offset-based polling is stable.
+//
+// Offset semantics
+//   - ListEvents returns nextOffset as the current file size.
+//   - That offset can be used later to fetch only new bytes (e.g. via /trace/events.since/<offset>).
+
 // AppendEvent records a new event for the specified run.
 // It validates inputs, ensures the run exists, and appends the event to the run's event log.
 func AppendEvent(runId, eventType, message string, data map[string]string) error {

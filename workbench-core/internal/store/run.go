@@ -1,4 +1,19 @@
 // Package store provides functionality for persisting and retrieving workbench data.
+//
+// Run storage layout (implementation detail)
+//
+// Each run is stored under:
+//
+//	data/runs/<runId>/
+//
+// With canonical files:
+//   - run.json       (run metadata + state)
+//   - events.jsonl   (append-only JSONL event log)
+//
+// And resource-backed directories:
+//   - workspace/     (agent writable working directory)
+//   - trace/         (mirrored event feed for agent polling)
+//   - results/       (tool call outputs, callId-first layout)
 package store
 
 import (

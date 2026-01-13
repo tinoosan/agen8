@@ -19,6 +19,22 @@ type BuiltinTool struct {
 	Manifest []byte // required: the tool manifest JSON
 }
 
+// ToolsResource exposes tool discovery and tool manifests under the VFS mount "/tools".
+//
+// VFS usage pattern (agent/host-facing)
+//   - Discover tools:
+//     fs.List("/tools") => entries like "/tools/<toolId>" (IsDir=true)
+//   - Read a tool's manifest:
+//     fs.Read("/tools/<toolId>") => manifest JSON bytes
+//
+// The agent does not need to know about "manifest.json" as a filename; reading a tool
+// returns its manifest by default. Nested reads (e.g. "/tools/<toolId>/bin/x") are rejected.
+//
+// Storage model (implementation detail)
+//   - Builtin tools live in memory (BuiltinRegistry).
+//   - Custom tools live on disk under:
+//     data/tools/<toolId>/manifest.json
+//   - If the same toolId exists in both places, builtins win.
 type ToolsResource struct {
 	// BaseDir is the OS directory backing this resource (the sandbox root).
 	// All operations are confined under BaseDir. The resource must reject any

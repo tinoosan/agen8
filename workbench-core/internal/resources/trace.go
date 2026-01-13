@@ -33,6 +33,27 @@ type TraceResource struct {
 	RunId string
 }
 
+// TraceResource exposes a read-only event feed under the VFS mount "/trace".
+//
+// VFS usage pattern (agent/host-facing)
+//   - Read full trace log:
+//     fs.Read("/trace/events") => full JSONL bytes
+//   - Pull new events using offsets:
+//     fs.Read("/trace/events.since/<byteOffset>") => bytes from offset to EOF
+//   - Convenience for recent context:
+//     fs.Read("/trace/events.latest/<count>") => last N JSONL lines
+//
+// Offset semantics
+//   - Offsets are byte offsets into the underlying JSONL file.
+//   - This enables incremental polling loops:
+//     events, nextOffset := store.ListEvents(runId) // nextOffset == file size
+//     later: fs.Read("/trace/events.since/<nextOffset>")
+//
+// Storage model (implementation detail)
+//   - TraceResource is confined to BaseDir and reads BaseDir/events.jsonl only.
+//   - store.AppendEvent mirrors every canonical event log line into:
+//     data/runs/<runId>/trace/events.jsonl
+//     so offsets behave predictably and the trace mount is self-contained.
 const (
 	maxLatestCount = 200
 	maxSinceBytes  = 64 * 1024
