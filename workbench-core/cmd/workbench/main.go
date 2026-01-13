@@ -16,16 +16,10 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
-type invokerFunc func(ctx context.Context, req types.ToolRequest) (tools.ToolCallResult, error)
-
-func (f invokerFunc) Invoke(ctx context.Context, req types.ToolRequest) (tools.ToolCallResult, error) {
-	return f(ctx, req)
-}
-
 func main() {
-	log.Printf("== Workbench demo starting ==")
+	log.Printf("== Workbench demo: agent loop simulation ==")
 
-	run, err := store.CreateRun("test goal", 100)
+	run, err := store.CreateRun("demo: user request -> agent loop -> result", 100)
 	if err != nil {
 		log.Fatalf("error creating run: %v", err)
 	}
@@ -37,22 +31,12 @@ func main() {
 		}
 	}
 
-	emit("agent.session.started", "Agent session started", map[string]string{
-		"runId": run.RunId,
-	})
-
 	data := map[string]string{
 		"name":  "Alice",
 		"email": "alice@example.com",
 	}
 
-	log.Printf("== Trace setup (events mirrored into /trace) ==")
-
 	emit("run.started", "Run started", data)
-	emit("step.started", "Step 1 started", data)
-	emit("step.progress", "Step 1 halfway", data)
-	emit("step.completed", "Step 1 done", data)
-	emit("run.completed", "Run finished", data)
 
 	trace, err := resources.NewTraceResource(run.RunId)
 	if err != nil {
@@ -70,20 +54,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("error creating tools: %v", err)
 	}
-	if err := toolsResource.RegisterBuiltin(
-		"github.com.acme.stock",
-		[]byte(`{"id":"github.com.acme.stock","version":"0.1.0","kind":"builtin","displayName":"Acme Stock","description":"Example builtin tool","actions":[{"id":"quote.latest","displayName":"Latest Quote","description":"Fetch latest quote for a symbol","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]},"outputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"price":{"type":"number"}},"required":["symbol","price"]}}]}`),
-	); err != nil {
-		log.Fatalf("error registering builtin tool manifest: %v", err)
+	if err := tools.RegisterBuiltinManifests(toolsResource); err != nil {
+		log.Fatalf("error registering builtin tool manifests: %v", err)
 	}
-	if err := toolsResource.RegisterBuiltin(
-		"github.com.dupe.tool",
-		[]byte(`{"id":"github.com.dupe.tool","version":"0.1.0","kind":"builtin","displayName":"Dupe Tool (builtin)","description":"Builtin should override disk","actions":[{"id":"dupe.noop","displayName":"No-op","description":"Returns an empty object","inputSchema":{"type":"object"},"outputSchema":{"type":"object"}}]}`),
-	); err != nil {
-		log.Fatalf("error registering builtin tool manifest: %v", err)
-	}
-
-	log.Printf("== Tools setup (builtins + disk) ==")
 
 	// Disk tools under data/tools/<toolId>/manifest.json
 	if err := os.MkdirAll(filepath.Join(toolsResource.BaseDir, "github.com.other.stock"), 0755); err != nil {
@@ -122,181 +95,28 @@ func main() {
 	fs.Mount(vfs.MountTools, toolsResource)
 	log.Printf("mounted /tools => %s", toolsResource.BaseDir)
 
-	log.Printf("== VFS mounts ==")
-	mounts, err := fs.List("/")
+	absWorkspaceRoot, err := filepath.Abs(workspace.BaseDir)
 	if err != nil {
-		log.Fatalf("error listing mounts: %v", err)
-	}
-	for _, e := range mounts {
-		log.Printf("mount: %s", e.Path)
-	}
-	emit("agent.fs.list", "Listed VFS mounts", map[string]string{
-		"path": "/",
-	})
-
-	log.Printf("== Workspace demo (read/write/append/list) ==")
-
-	if err := fs.Write("/workspace/notes.md", []byte("hello world")); err != nil {
-		log.Fatalf("error writing to workspace: %v", err)
-	}
-	emit("agent.fs.write", "Wrote /workspace/notes.md", map[string]string{
-		"path": "/workspace/notes.md",
-	})
-
-	b, err := fs.Read("/workspace/notes.md")
-	if err != nil {
-		log.Fatalf("error reading from workspace: %v", err)
-	}
-	log.Printf("read /workspace/notes.md => %q", string(b))
-	emit("agent.fs.read", "Read /workspace/notes.md", map[string]string{
-		"path": "/workspace/notes.md",
-	})
-
-	if err := fs.Append("/workspace/notes.md", []byte("\n\nHello again!")); err != nil {
-		log.Fatalf("error appending to workspace: %v", err)
-	}
-	emit("agent.fs.append", "Appended /workspace/notes.md", map[string]string{
-		"path": "/workspace/notes.md",
-	})
-
-	entries, err := fs.List("/workspace")
-	if err != nil {
-		log.Fatalf("error listing workspace: %v", err)
-	}
-	for _, e := range entries {
-		log.Printf("workspace entry: %s", e.Path)
+		log.Fatalf("error resolving workspace root absolute path: %v", err)
 	}
 
-	log.Printf("== Trace demo (latest + since) ==")
-
-	entries, err = fs.List("/trace")
-	if err != nil {
-		log.Fatalf("error listing trace: %v", err)
-	}
-	for _, e := range entries {
-		log.Printf("trace capability: %s", e.Path)
-	}
-
-	traceLatest, err := fs.Read("/trace/events.latest/3")
-	if err != nil {
-		log.Fatalf("error reading trace events.latest: %v", err)
-	}
-	log.Printf("read /trace/events.latest/3 =>\n%s", string(traceLatest))
-	emit("agent.trace.read", "Read /trace/events.latest/3", map[string]string{
-		"path": "/trace/events.latest/3",
-	})
-
-	// Offset-based incremental read (UI-style):
-	// 1) ListEvents gives nextOffset (byte offset)
-	_, nextOffset, err := store.ListEvents(run.RunId)
-	if err != nil {
-		log.Fatalf("error listing events for offset: %v", err)
-	}
-	// 2) Later, new events arrive...
-	err = store.AppendEvent(run.RunId, "agent.thought", "Thinking...", nil)
-	if err != nil {
-		log.Fatalf("error appending event: %v", err)
-	}
-	err = store.AppendEvent(run.RunId, "agent.action", "Did something", nil)
-	if err != nil {
-		log.Fatalf("error appending event: %v", err)
-	}
-	// 3) Fetch new bytes from trace using that offset
-	traceSince, err := fs.Read("/trace/events.since/" + strconv.FormatInt(nextOffset, 10))
-	if err != nil {
-		log.Fatalf("error reading trace events.since: %v", err)
-	}
-	log.Printf("read /trace/events.since/%d =>\n%s", nextOffset, string(traceSince))
-	emit("agent.trace.read", "Read /trace/events.since/<offset>", map[string]string{
-		"path":   "/trace/events.since/<offset>",
-		"offset": strconv.FormatInt(nextOffset, 10),
-	})
-
-	log.Printf("== Tools demo (discovery + read manifest bytes) ==")
-
-	entries, err = fs.List("/tools")
-	if err != nil {
-		log.Fatalf("error listing tools: %v", err)
-	}
-	for _, e := range entries {
-		log.Printf("tool: %s", e.Path)
-	}
-
-	acmeManifest, err := fs.Read("/tools/github.com.acme.stock")
-	if err != nil {
-		log.Fatalf("error reading builtin tool manifest: %v", err)
-	}
-	log.Printf("builtin manifest github.com.acme.stock:\n%s", string(acmeManifest))
-
-	otherManifest, err := fs.Read("/tools/github.com.other.stock/manifest.json")
-	if err != nil {
-		log.Fatalf("error reading disk tool manifest: %v", err)
-	}
-	log.Printf("disk manifest github.com.other.stock:\n%s", string(otherManifest))
-
-	dupeManifest, err := fs.Read("/tools/github.com.dupe.tool")
-	if err != nil {
-		log.Fatalf("error reading dupe tool manifest: %v", err)
-	}
-	log.Printf("dupe manifest (builtin overrides disk) github.com.dupe.tool:\n%s", string(dupeManifest))
-
-	log.Printf("== Tool runner demo (writes /results/<callId>/...) ==")
+	builtinCfg := tools.BuiltinConfig{BashRootDir: absWorkspaceRoot}
 
 	runner := tools.Runner{
-		FS: fs,
-		ToolRegistry: tools.MapRegistry{
-			types.ToolID("github.com.acme.stock"): invokerFunc(func(ctx context.Context, req types.ToolRequest) (tools.ToolCallResult, error) {
-				return tools.ToolCallResult{
-					Output: json.RawMessage(`{"ok":true,"price":123.45}`),
-					Artifacts: []tools.ToolArtifactWrite{
-						{Path: "quote.json", Bytes: []byte(`{"symbol":"AAPL","price":123.45}`), MediaType: "application/json"},
-						{Path: "notes.md", Bytes: []byte("# Quote\nAAPL = 123.45\n"), MediaType: "text/markdown"},
-					},
-				}, nil
-			}),
-		},
+		FS:           fs,
+		ToolRegistry: tools.BuiltinInvokerRegistry(builtinCfg),
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("github.com.acme.stock"), "quote.latest", json.RawMessage(`{"symbol":"AAPL"}`), 0)
-	if err != nil {
-		log.Fatalf("runner.Run failed: %v", err)
-	}
-	pretty, _ := json.MarshalIndent(resp, "", "  ")
-	log.Printf("runner response =>\n%s", string(pretty))
+	log.Printf("== Simulating: user request -> agent loop -> result ==")
 
-	responsePath := "/results/" + resp.CallID + "/response.json"
-	responseBytes, err := fs.Read(responsePath)
-	if err != nil {
-		log.Fatalf("read persisted response.json failed: %v", err)
-	}
-	log.Printf("read %s =>\n%s", responsePath, string(responseBytes))
-	emit("agent.tool.response", "Read tool response.json", map[string]string{
-		"path":   responsePath,
-		"callId": resp.CallID,
+	userRequest := "Show me what's in the workspace directory, then get the latest quote for AAPL. Save the raw quote as JSON and write a short markdown summary."
+	log.Printf("user -> agent: %q", userRequest)
+	emit("user.request", "User request received", map[string]string{
+		"text": userRequest,
 	})
 
-	for _, a := range resp.Artifacts {
-		p := "/results/" + resp.CallID + "/" + a.Path
-		b, err := fs.Read(p)
-		if err != nil {
-			log.Fatalf("read artifact %s failed: %v", p, err)
-		}
-		log.Printf("read %s (%s) => %d bytes", p, a.MediaType, len(b))
-		emit("agent.tool.artifact", "Read tool artifact", map[string]string{
-			"path":      p,
-			"callId":    resp.CallID,
-			"mediaType": a.MediaType,
-			"bytesLen":  strconv.Itoa(len(b)),
-		})
-	}
-
-	log.Printf("== Mock host primitives flow (agent emits JSON ops) ==")
-	log.Printf("Note: fs.* and tool.run are HOST PRIMITIVES (always available); only /tools is discovered.")
-
 	executor := &agent.HostOpExecutor{FS: fs, Runner: &runner, DefaultMaxBytes: 4096}
-	exec := func(req types.HostOpRequest) types.HostOpResponse {
-		return executor.Exec(context.Background(), req)
-	}
+	exec := func(req types.HostOpRequest) types.HostOpResponse { return executor.Exec(context.Background(), req) }
 
 	agentSay := func(req types.HostOpRequest) types.HostOpResponse {
 		emit("agent.op.request", "Agent requested host op", map[string]string{
@@ -324,28 +144,65 @@ func main() {
 		return resp
 	}
 
+	emit("agent.loop.start", "Agent loop started", map[string]string{})
+
+	// Observe environment and recent trace.
 	agentSay(types.HostOpRequest{Op: "fs.list", Path: "/"})
-	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/trace/events.latest/5", MaxBytes: 2048})
-	agentSay(types.HostOpRequest{Op: "fs.list", Path: "/tools"})
+	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/trace/events.latest/10", MaxBytes: 2048})
+
+	// Discover tools and read the chosen tool manifest.
+	toolsList := agentSay(types.HostOpRequest{Op: "fs.list", Path: "/tools"})
+	if !toolsList.Ok {
+		log.Fatalf("agent loop failed: cannot list tools: %s", toolsList.Error)
+	}
+	emit("agent.plan", "First list workspace via builtin.bash, then fetch quote via github.com.acme.stock", map[string]string{})
+
+	// 1) Use builtin.bash exec to list the workspace (agent discovers it via /tools).
+	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/tools/builtin.bash", MaxBytes: 2048})
+	lsResp := agentSay(types.HostOpRequest{
+		Op:       "tool.run",
+		ToolID:   types.ToolID("builtin.bash"),
+		ActionID: "exec",
+		Input:    json.RawMessage(`{"argv":["ls","-la"],"cwd":"."}`),
+	})
+	if !lsResp.Ok || lsResp.ToolResponse == nil {
+		log.Fatalf("agent loop failed: builtin.bash tool.run did not return toolResponse: %s", lsResp.Error)
+	}
+	lsCallID := lsResp.ToolResponse.CallID
+	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + lsCallID + "/response.json", MaxBytes: 4096})
+
+	// 2) Use the stock quote tool (example builtin registered in memory).
 	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/tools/github.com.acme.stock", MaxBytes: 2048})
 
-	toolRunResp := agentSay(types.HostOpRequest{
+	// Execute tool via host primitive.
+	runResp := agentSay(types.HostOpRequest{
 		Op:        "tool.run",
 		ToolID:    types.ToolID("github.com.acme.stock"),
 		ActionID:  "quote.latest",
 		Input:     json.RawMessage(`{"symbol":"AAPL"}`),
 		TimeoutMs: 0,
 	})
+	if !runResp.Ok || runResp.ToolResponse == nil {
+		log.Fatalf("agent loop failed: tool.run did not return toolResponse: %s", runResp.Error)
+	}
 
-	callID := ""
-	if toolRunResp.Ok && toolRunResp.ToolResponse != nil {
-		callID = toolRunResp.ToolResponse.CallID
-	}
-	if callID != "" {
-		agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/response.json", MaxBytes: 4096})
-		agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/quote.json", MaxBytes: 2048})
-		agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/notes.md", MaxBytes: 2048})
-	}
+	callID := runResp.ToolResponse.CallID
+
+	// Read persisted results (what the agent would do next).
+	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/response.json", MaxBytes: 4096})
+	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/quote.json", MaxBytes: 2048})
+	agentSay(types.HostOpRequest{Op: "fs.read", Path: "/results/" + callID + "/notes.md", MaxBytes: 2048})
+
+	// Write a final answer to workspace (simulated "agent response").
+	finalAnswer := "Latest quote for AAPL retrieved. See /results/" + callID + "/quote.json and /results/" + callID + "/notes.md."
+	agentSay(types.HostOpRequest{Op: "fs.write", Path: "/workspace/final.md", Text: finalAnswer})
+	emit("agent.final", "Agent produced final answer", map[string]string{
+		"path":   "/workspace/final.md",
+		"callId": callID,
+	})
+
+	log.Printf("agent -> user:\n%s", finalAnswer)
+	emit("run.completed", "Run finished", data)
 
 	log.Printf("== Workbench demo complete ==")
 }
