@@ -1,6 +1,23 @@
-// Package vfs provides a virtual filesystem abstraction that allows mounting
-// multiple resources under named paths and resolving virtual paths to their
-// underlying resources.
+// Package vfs provides a virtual filesystem abstraction that lets the agent/host
+// interact with multiple resources through a single path-based interface.
+//
+// # Mounting
+//
+// Each Resource is mounted under a mount name and accessed via VFS paths:
+//   - Mount "workspace" => VFS paths like "/workspace/notes.md"
+//   - Mount "tools"     => VFS paths like "/tools/<toolId>"
+//   - Mount "trace"     => VFS paths like "/trace/events.latest/3"
+//
+// Path conventions
+//   - VFS paths always start with "/" and include a mount name.
+//   - Resource methods receive a "subpath" relative to the mount, with no leading "/".
+//   - Example: Resolve("/workspace/notes.md") => mount="workspace", subpath="notes.md".
+//
+// Listing
+//   - List("/") returns the mounted namespaces as directory-like entries:
+//     "/workspace", "/tools", "/trace", ...
+//   - List("/<mount>") delegates to the resource and rewrites returned Entry.Path values
+//     to include the mount prefix (so callers always see full VFS paths).
 package vfs
 
 import (
