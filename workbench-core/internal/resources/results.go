@@ -14,11 +14,10 @@ func NewRunResults(runId string) (*DirResource, error) {
 		return nil, fmt.Errorf("runId cannot be empty")
 	}
 
-	baseDir := fsutil.GetWorkspaceDir(config.DataDir, runId)
-	// create workspace directory if it doesn't exist
+	baseDir := fsutil.GetResultsDir(config.DataDir, runId)
+	// create results directory if it doesn't exist
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return nil, fmt.Errorf("error creating workspace directory %s: %w", baseDir, err)
+		return nil, fmt.Errorf("error creating results directory %s: %w", baseDir, err)
 	}
 	return NewDirResource(baseDir, vfs.MountResults)
 }
-
