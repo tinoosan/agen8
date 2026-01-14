@@ -130,6 +130,29 @@ The host executes the tool (builtin first) and returns a `ToolResponse`. You the
 - `/results/<callId>/response.json`
 - any artifact files referenced by `ToolResponse.artifacts`
 
+## 8) Important: VFS Paths vs Tool Filesystem Paths
+
+You interact with the environment using **VFS paths** like `/workspace/notes.md` only through host operations (`fs.read`, `fs.write`, etc).
+
+Tools (like `builtin.bash`) do **not** automatically understand VFS paths. When you run a tool via `tool.run`, the tool sees a **real OS filesystem** rooted at its sandbox directory.
+
+Practical rule:
+
+- Use VFS paths (start with `/`) only in host ops: `fs.*`.
+- When you pass file paths inside tool inputs (e.g. to `builtin.bash` argv), use paths that make sense inside the tool’s sandbox:
+  - prefer relative paths like `example.html`
+  - avoid VFS paths like `/workspace/example.html` unless the tool explicitly documents that it can access that OS path.
+
+## 9) Persistent Memory (Across Sessions) (/memory)
+
+This system may provide you with a **Persistent Memory** section in the prompt, containing short notes from previous sessions.
+
+When you learn a durable, reusable lesson (e.g., a reliable workflow or constraint), write a short update to:
+
+- `/memory/update.md`
+
+Use plain text or markdown. Keep it short and actionable.
+
 ## 8) Operating Principles
 
 - Prefer **discovery then action**: list mounts → read trace → list tools → read manifests → act.

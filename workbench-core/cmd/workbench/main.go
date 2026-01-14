@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"log"
@@ -88,6 +89,11 @@ func main() {
 		log.Fatalf("error creating results: %v", err)
 	}
 
+	memoryRes, err := resources.NewMemoryResource()
+	if err != nil {
+		log.Fatalf("error creating memory: %v", err)
+	}
+
 	fs.Mount(vfs.MountWorkspace, workspace)
 	log.Printf("mounted /workspace => %s", workspace.BaseDir)
 	fs.Mount(vfs.MountResults, results)
@@ -96,6 +102,8 @@ func main() {
 	log.Printf("mounted /trace => %s", trace.BaseDir)
 	fs.Mount(vfs.MountTools, toolsResource)
 	log.Printf("mounted /tools => %s", toolsResource.BaseDir)
+	fs.Mount(vfs.MountMemory, memoryRes)
+	log.Printf("mounted /memory => %s", memoryRes.BaseDir)
 
 	absWorkspaceRoot, err := filepath.Abs(workspace.BaseDir)
 	if err != nil {
@@ -135,6 +143,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("error reading internal/agent/INITIAL_PROMPT.md: %v", err)
 	}
+	baseSystemPrompt := string(systemPromptBytes)
+
+	memoryPath := agent.DefaultPersistentMemoryPath()
+	memoryText, err := agent.LoadPersistentMemory(memoryPath)
+	if err != nil {
+		log.Fatalf("error reading persistent memory: %v", err)
+	}
+	systemPrompt := agent.BuildSystemPromptWithMemory(baseSystemPrompt, memoryText)
 
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		logEventLine("agent.op.request", "Agent requested host op", map[string]string{
@@ -184,22 +200,59 @@ func main() {
 		LLM:          client,
 		Exec:         execWithEvents,
 		Model:        model,
-		SystemPrompt: string(systemPromptBytes),
+		SystemPrompt: systemPrompt,
 		MaxSteps:     20,
 		Logf:         nil,
 	}
 
-	final, err := a.Run(context.Background(), userRequest)
-	if err != nil {
-		log.Fatalf("agent loop error: %v", err)
+	// Interactive chat loop:
+	//   - user types a message
+	//   - agent runs the loop until {"op":"final"} and prints the result
+	//   - host ingests /workspace/memory_update.md and persists it across sessions
+	log.Printf("== Chat session started (type 'exit' to quit) ==")
+	in := bufio.NewScanner(os.Stdin)
+	for {
+		log.Printf("you> ")
+		if !in.Scan() {
+			break
+		}
+		line := strings.TrimSpace(in.Text())
+		if line == "" {
+			continue
+		}
+		if line == "exit" || line == "quit" {
+			break
+		}
+
+		emit("user.message", "User message received", map[string]string{"text": line})
+		final, err := a.Run(context.Background(), line)
+		if err != nil {
+			logEventLine("agent.error", "Agent loop error", map[string]string{"err": err.Error()})
+			log.Printf("agent error: %v", err)
+			continue
+		}
+		log.Printf("agent> %s", final)
+		logEventLine("agent.final", "Agent produced final answer", map[string]string{"text": final})
+		emit("agent.final", "Agent produced final answer", map[string]string{"text": final})
+
+		// Ingest memory update if the agent wrote one.
+		if b, err := fs.Read("/memory/update.md"); err == nil {
+			update := strings.TrimSpace(string(b))
+			if update != "" {
+				if err := agent.AppendPersistentMemory(memoryPath, update); err != nil {
+					logEventLine("agent.memory.error", "Failed to persist memory update", map[string]string{"err": err.Error()})
+				} else {
+					logEventLine("agent.memory.append", "Persisted memory update", map[string]string{"bytes": strconv.Itoa(len(update))})
+					// Refresh in-memory system prompt for subsequent turns.
+					memoryText = memoryText + "\n\n" + update
+					systemPrompt = agent.BuildSystemPromptWithMemory(baseSystemPrompt, memoryText)
+					a.SystemPrompt = systemPrompt
+				}
+				_ = fs.Write("/memory/update.md", []byte{})
+			}
+		}
 	}
-	log.Printf("agent -> user:\n%s", final)
-	logEventLine("agent.final", "Agent produced final answer", map[string]string{
-		"text": final,
-	})
-	emit("agent.final", "Agent produced final answer", map[string]string{
-		"text": final,
-	})
+
 	emit("run.completed", "Run finished", data)
 
 	log.Printf("== Workbench demo complete ==")

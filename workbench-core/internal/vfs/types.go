@@ -18,6 +18,11 @@ const (
 	// MountResults is the mount name for tool call outputs.
 	// Tool results are stored under /results/<callId>/response.json.
 	MountResults = "results"
+
+	// MountMemory is the mount name for persistent, cross-run agent memory.
+	// The host may inject /memory/memory.md into the system prompt at startup,
+	// and ingest /memory/update.md after each turn.
+	MountMemory = "memory"
 )
 
 // Resource is the minimal contract a “mounted thing” must implement to behave like a filesystem.

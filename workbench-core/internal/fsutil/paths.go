@@ -54,3 +54,20 @@ func GetToolManifestPath(toolsDir, toolID string) string {
 func GetResultsDir(dataDir, runId string) string {
 	return filepath.Join(dataDir, "runs", runId, "results")
 }
+
+// GetAgentDir returns the base directory for cross-run agent state.
+func GetAgentDir(dataDir string) string {
+	return filepath.Join(dataDir, "agent")
+}
+
+// GetAgentMemoryPath returns the path to the persistent cross-run memory markdown file.
+func GetAgentMemoryPath(dataDir string) string {
+	return filepath.Join(GetAgentDir(dataDir), "memory.md")
+}
+
+// GetAgentMemoryUpdatePath returns the path to the per-turn memory update staging file.
+//
+// The host ingests this file after each agent turn and appends it to memory.md.
+func GetAgentMemoryUpdatePath(dataDir string) string {
+	return filepath.Join(GetAgentDir(dataDir), "update.md")
+}
