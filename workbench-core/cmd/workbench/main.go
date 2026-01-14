@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/llm"
+	"github.com/tinoosan/workbench-core/internal/repl"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tools"
@@ -121,7 +121,12 @@ func main() {
 		ToolRegistry: tools.BuiltinInvokerRegistry(builtinCfg),
 	}
 
-	executor := &agent.HostOpExecutor{FS: fs, Runner: &runner, DefaultMaxBytes: 4096}
+	executor := &agent.HostOpExecutor{
+		FS:              fs,
+		Runner:          &runner,
+		DefaultMaxBytes: 4096,
+		MaxReadBytes:    16 * 1024,
+	}
 	model := strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
 	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" || model == "" {
 		log.Fatalf("OPENROUTER_API_KEY and OPENROUTER_MODEL are required to run the non-scripted agent loop")
@@ -139,12 +144,19 @@ func main() {
 	baseSystemPrompt := string(systemPromptBytes)
 
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
-		logEventLine("agent.op.request", "Agent requested host op", map[string]string{
+		reqData := map[string]string{
 			"op":       req.Op,
 			"path":     req.Path,
 			"toolId":   req.ToolID.String(),
 			"actionId": req.ActionID,
-		})
+		}
+		if req.Op == "fs.read" && req.MaxBytes != 0 {
+			reqData["maxBytes"] = strconv.Itoa(req.MaxBytes)
+		}
+		if req.Op == "tool.run" && req.TimeoutMs != 0 {
+			reqData["timeoutMs"] = strconv.Itoa(req.TimeoutMs)
+		}
+		logEventLine("agent.op.request", "Agent requested host op", reqData)
 		emit("agent.op.request", "Agent requested host op", map[string]string{
 			"op":       req.Op,
 			"path":     req.Path,
@@ -199,7 +211,7 @@ func main() {
 		Model:          model,
 		SystemPrompt:   baseSystemPrompt,
 		ContextUpdater: updater,
-		MaxSteps:       20,
+		MaxSteps:       200,
 		Logf:           nil,
 		OnLLMUsage:     nil,
 	}
@@ -210,13 +222,17 @@ func main() {
 	//   - host evaluates /memory/update.md and (optionally) commits it to /memory/memory.md
 	//   - host appends an immutable audit line to /memory/commits.jsonl
 	log.Printf("== Chat session started (type 'exit' to quit) ==")
-	in := bufio.NewReader(os.Stdin)
-	enableBracketedPaste(os.Stdout)
-	defer disableBracketedPaste(os.Stdout)
+	historyPath := filepath.Join("data", "runs", run.RunId, "repl_history.txt")
+	rr, err := repl.NewReader(historyPath)
+	if err != nil {
+		log.Fatalf("error starting readline: %v", err)
+	}
+	defer rr.Close()
 	memEval := agent.DefaultMemoryEvaluator()
 	turn := 0
+	var conversation []types.LLMMessage
 	for {
-		userMsg, exit, err := readUserMessage(in, os.Stdout)
+		userMsg, exit, err := readUserMessage(rr, rr)
 		if err != nil {
 			log.Printf("read stdin: %v", err)
 			break
@@ -225,6 +241,11 @@ func main() {
 			break
 		}
 		if strings.TrimSpace(userMsg) == "" {
+			continue
+		}
+		if strings.TrimSpace(userMsg) == ":reset" {
+			conversation = nil
+			logEventLine("chat.reset", "Cleared conversation history", nil)
 			continue
 		}
 
@@ -246,12 +267,21 @@ func main() {
 			})
 		}
 
-		final, err := a.Run(context.Background(), userMsg)
+		conversation = append(conversation, types.LLMMessage{Role: "user", Content: userMsg})
+		start := time.Now()
+		final, updated, steps, err := a.RunConversation(context.Background(), conversation)
+		dur := time.Since(start)
+		conversation = updated
 		if err != nil {
 			logEventLine("agent.error", "Agent loop error", map[string]string{"err": err.Error()})
 			log.Printf("agent error: %v", err)
 			continue
 		}
+		logEventLine("agent.turn.complete", "Agent completed user request", map[string]string{
+			"turn":       strconv.Itoa(turn),
+			"steps":      strconv.Itoa(steps),
+			"durationMs": strconv.FormatInt(dur.Milliseconds(), 10),
+		})
 
 		// Print a turn-level usage summary if the provider reported usage.
 		if turnUsage.TotalTokens != 0 {
@@ -400,44 +430,29 @@ func appendRunMemory(baseDir string, update string) error {
 }
 
 const (
-	bracketedPasteEnable  = "\x1b[?2004h"
-	bracketedPasteDisable = "\x1b[?2004l"
-	bracketedPasteStart   = "\x1b[200~"
-	bracketedPasteEnd     = "\x1b[201~"
+	primaryPrompt      = "you> "
+	continuationPrompt = "...> "
 )
 
-// enableBracketedPaste asks the terminal to wrap pasted text in sentinel escape sequences.
-//
-// This makes multi-line paste usable in a line-oriented REPL:
-//   - the terminal sends "\x1b[200~" before pasted content and "\x1b[201~" after
-//   - the REPL can buffer until it sees the end sentinel and treat the entire paste as one message
-//
-// If the terminal does not support bracketed paste, it is a harmless no-op.
-func enableBracketedPaste(w io.Writer) {
-	_, _ = io.WriteString(w, bracketedPasteEnable)
-}
-
-// disableBracketedPaste disables terminal bracketed paste mode.
-func disableBracketedPaste(w io.Writer) {
-	_, _ = io.WriteString(w, bracketedPasteDisable)
+type lineReader interface {
+	ReadLine(prompt string) (string, error)
 }
 
 // readUserMessage reads one "user turn" from stdin.
 //
 // It supports three ways to compose a message:
 //  1. Single-line input: type a line and press Enter.
-//  2. Multi-line paste: paste text; the REPL buffers until the terminal signals paste end.
-//  3. Explicit compose modes:
+//  2. Multi-line paste: paste text; the editor captures it into a single message.
+//  3. Explicit compose modes (recommended for long input):
 //     - :paste   (multi-line; end with a line containing only ".")
 //     - :compose (opens $VISUAL/$EDITOR)
 //
 // This is intentionally "boring" (no readline deps). The goal is to avoid the UX bug where
 // multi-line paste turns into multiple agent turns and looks like the agent keeps running
 // after it already produced a final answer.
-func readUserMessage(in *bufio.Reader, out io.Writer) (msg string, exit bool, err error) {
+func readUserMessage(lr lineReader, out io.Writer) (msg string, exit bool, err error) {
 	for {
-		_, _ = io.WriteString(out, "you> ")
-		raw, readErr := in.ReadString('\n')
+		raw, readErr := lr.ReadLine(primaryPrompt)
 		if readErr != nil && !errors.Is(readErr, io.EOF) {
 			return "", false, readErr
 		}
@@ -445,34 +460,9 @@ func readUserMessage(in *bufio.Reader, out io.Writer) (msg string, exit bool, er
 			return "", true, nil
 		}
 
-		// If the terminal wrapped a paste, buffer until we see the end sentinel.
-		if strings.Contains(raw, bracketedPasteStart) && !strings.Contains(raw, bracketedPasteEnd) && !errors.Is(readErr, io.EOF) {
-			var b strings.Builder
-			b.WriteString(raw)
-			for {
-				next, nextErr := in.ReadString('\n')
-				b.WriteString(next)
-				if strings.Contains(next, bracketedPasteEnd) || strings.Contains(b.String(), bracketedPasteEnd) || errors.Is(nextErr, io.EOF) {
-					raw = b.String()
-					readErr = nextErr
-					break
-				}
-				if nextErr != nil && !errors.Is(nextErr, io.EOF) {
-					return "", false, nextErr
-				}
-			}
-		}
-
 		raw = strings.ReplaceAll(raw, "\r", "")
-		raw = strings.ReplaceAll(raw, bracketedPasteStart, "")
-		raw = strings.ReplaceAll(raw, bracketedPasteEnd, "")
-		raw = strings.TrimRight(raw, "\n")
-
 		line := strings.TrimSpace(raw)
 		if line == "" {
-			if errors.Is(readErr, io.EOF) {
-				return "", true, nil
-			}
 			continue
 		}
 
@@ -483,7 +473,7 @@ func readUserMessage(in *bufio.Reader, out io.Writer) (msg string, exit bool, er
 			printREPLHelp(out)
 			continue
 		case ":paste":
-			msg, exit, err := readMultilinePaste(in, out)
+			msg, exit, err := readMultilinePaste(lr, out)
 			if err != nil {
 				return "", false, err
 			}
@@ -493,7 +483,7 @@ func readUserMessage(in *bufio.Reader, out io.Writer) (msg string, exit bool, er
 			if strings.TrimSpace(msg) == "" {
 				continue
 			}
-			edited, err := maybeEditMessage(in, out, msg)
+			edited, err := maybeEditMessage(lr, out, msg)
 			if err != nil {
 				return "", false, err
 			}
@@ -506,7 +496,7 @@ func readUserMessage(in *bufio.Reader, out io.Writer) (msg string, exit bool, er
 			if strings.TrimSpace(edited) == "" {
 				continue
 			}
-			if ok, err := confirmSend(in, out); err != nil {
+			if ok, err := confirmSend(lr, out); err != nil {
 				return "", false, err
 			} else if !ok {
 				continue
@@ -516,7 +506,7 @@ func readUserMessage(in *bufio.Reader, out io.Writer) (msg string, exit bool, er
 			// If the user pasted multi-line content, open an editor so they can adjust it
 			// before sending it to the agent (better UX than trying to edit inline).
 			if strings.Contains(raw, "\n") {
-				edited, err := maybeEditMessage(in, out, raw)
+				edited, err := maybeEditMessage(lr, out, raw)
 				if err != nil {
 					return "", false, err
 				}
@@ -533,11 +523,12 @@ Commands:
   :help           show this help
   :paste          enter multi-line mode (end with a line containing only ".")
   :compose/:edit  open $VISUAL/$EDITOR to write a message
+  :reset          clear conversation history for this session
   exit/quit       leave the chat session
 
 Tips:
-  - Multi-line paste is supported when your terminal supports "bracketed paste".
-    If paste still submits line-by-line, use :paste or :compose.
+  - Arrow keys + paste are supported in the REPL.
+  - For long or multi-line messages, use :paste or :compose.
 `)+"\n\n")
 }
 
@@ -547,12 +538,11 @@ Tips:
 //   - a line containing only "." sends the message
 //   - ":abort" cancels the message
 //   - "exit"/"quit" exits the chat session
-func readMultilinePaste(in *bufio.Reader, out io.Writer) (msg string, exit bool, err error) {
+func readMultilinePaste(lr lineReader, out io.Writer) (msg string, exit bool, err error) {
 	_, _ = io.WriteString(out, "paste mode (end with a line containing only \".\"; :abort cancels)\n")
 	var b strings.Builder
 	for {
-		_, _ = io.WriteString(out, "...> ")
-		line, readErr := in.ReadString('\n')
+		line, readErr := lr.ReadLine(continuationPrompt)
 		if readErr != nil && !errors.Is(readErr, io.EOF) {
 			return "", false, readErr
 		}
@@ -580,7 +570,7 @@ func readMultilinePaste(in *bufio.Reader, out io.Writer) (msg string, exit bool,
 //
 // This is primarily used for multi-line pasted messages: the user can paste, edit, then
 // press Enter to submit as a single agent turn.
-func maybeEditMessage(in *bufio.Reader, out io.Writer, initial string) (string, error) {
+func maybeEditMessage(lr lineReader, out io.Writer, initial string) (string, error) {
 	edited, err := editMessageInEditor(initial)
 	if err != nil {
 		return "", err
@@ -588,7 +578,7 @@ func maybeEditMessage(in *bufio.Reader, out io.Writer, initial string) (string, 
 	if strings.TrimSpace(edited) == "" {
 		return "", nil
 	}
-	ok, err := confirmSend(in, out)
+	ok, err := confirmSend(lr, out)
 	if err != nil {
 		return "", err
 	}
@@ -599,10 +589,9 @@ func maybeEditMessage(in *bufio.Reader, out io.Writer, initial string) (string, 
 }
 
 // confirmSend prompts the user to press Enter to send the composed message.
-func confirmSend(in *bufio.Reader, out io.Writer) (bool, error) {
+func confirmSend(lr lineReader, out io.Writer) (bool, error) {
 	_, _ = io.WriteString(out, "press Enter to send (or type 'abort' to cancel)\n")
-	_, _ = io.WriteString(out, "send> ")
-	line, err := in.ReadString('\n')
+	line, err := lr.ReadLine("send> ")
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, err
 	}

@@ -24,6 +24,14 @@ type HostOpExecutor struct {
 	Runner *tools.Runner
 
 	DefaultMaxBytes int
+
+	// MaxReadBytes caps fs.read payload size returned to the model.
+	//
+	// This protects the model context window and cost from accidental "read the whole file"
+	// requests (e.g. reading large HTML pages, logs, or binary blobs).
+	//
+	// If zero, no explicit cap is applied beyond DefaultMaxBytes / req.MaxBytes behavior.
+	MaxReadBytes int
 }
 
 func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
@@ -60,6 +68,9 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		}
 		if maxBytes <= 0 {
 			maxBytes = 4096
+		}
+		if x.MaxReadBytes > 0 && maxBytes > x.MaxReadBytes {
+			maxBytes = x.MaxReadBytes
 		}
 		text, b64, truncated := encodeReadPayload(b, maxBytes)
 		return types.HostOpResponse{

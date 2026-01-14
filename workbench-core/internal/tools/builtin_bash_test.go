@@ -180,3 +180,24 @@ func TestBuiltinBash_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 		t.Fatalf("stdout artifact mismatch")
 	}
 }
+
+func TestDefaultBashAllowlist_IncludesITCommands(t *testing.T) {
+	allow := tools.DefaultBashAllowlist()
+	for _, name := range []string{
+		"curl",
+		"wget",
+		"ping",
+		"dig",
+		"nslookup",
+		"traceroute",
+		"netstat",
+		"lsof",
+		"ps",
+		"df",
+		"uname",
+	} {
+		if !allow[name] {
+			t.Fatalf("expected %q to be allowlisted", name)
+		}
+	}
+}

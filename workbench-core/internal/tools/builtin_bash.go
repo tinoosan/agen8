@@ -95,6 +95,7 @@ func NewBuiltinBashInvoker(rootDir string) *BuiltinBashInvoker {
 // The allowlist is intentionally strict; expand only as needed.
 func DefaultBashAllowlist() map[string]bool {
 	return map[string]bool{
+		// File/text inspection (confined by RootDir + cwd rules).
 		"ls":   true,
 		"cat":  true,
 		"rg":   true,
@@ -108,10 +109,32 @@ func DefaultBashAllowlist() map[string]bool {
 		"jq":   true,
 		"stat": true,
 
-		// Network-capable tools (still confined to RootDir for cwd).
-		// These allow the agent to fetch documentation and inspect responses.
-		"curl": true,
-		"ping": true,
+		// Basic system/IT inspection (read-only style commands).
+		"date":   true,
+		"uname":  true,
+		"whoami": true,
+		"id":     true,
+		"env":    true,
+		"which":  true,
+
+		"ps":   true,
+		"top":  true,
+		"df":   true,
+		"du":   true,
+		"free": true,
+
+		"netstat": true,
+		"lsof":    true,
+
+		// Network-capable tools.
+		// Still confined to RootDir for cwd, but can access the network.
+		// Keep this list explicit and add commands only when needed.
+		"curl":       true,
+		"wget":       true,
+		"ping":       true,
+		"traceroute": true,
+		"dig":        true,
+		"nslookup":   true,
 	}
 }
 

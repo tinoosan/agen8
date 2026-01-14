@@ -59,19 +59,31 @@ type Agent struct {
 	OnLLMUsage func(step int, usage types.LLMUsage)
 }
 
-// Run executes the agent loop for a single user goal and returns the final response text.
-func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
+// RunConversation executes the agent loop for an existing conversation.
+//
+// Why this exists:
+//   - In an interactive REPL, users often respond with short follow-ups like "2" or "go on".
+//   - If the host starts a fresh loop per input line, those short replies lose context and
+//     the model restarts discovery (wasting tokens and producing confusing behavior).
+//
+// Conversation model:
+//   - msgs is the full chat history so far (typically ending with the latest user message).
+//   - The agent appends each model-emitted HostOpRequest (as an assistant message) and the
+//     corresponding HostOpResponse (as a user message) as the loop proceeds.
+//   - When the model returns {"op":"final","text":"..."}, the agent appends that final JSON
+//     object as the last assistant message and returns text to the host to display.
+func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (final string, updated []types.LLMMessage, steps int, err error) {
 	if a == nil || a.LLM == nil {
-		return "", fmt.Errorf("agent LLM is required")
+		return "", nil, 0, fmt.Errorf("agent LLM is required")
 	}
 	if a.Exec == nil {
-		return "", fmt.Errorf("agent Exec is required")
+		return "", nil, 0, fmt.Errorf("agent Exec is required")
 	}
 	if strings.TrimSpace(a.Model) == "" {
-		return "", fmt.Errorf("agent Model is required")
+		return "", nil, 0, fmt.Errorf("agent Model is required")
 	}
-	if strings.TrimSpace(goal) == "" {
-		return "", fmt.Errorf("goal is required")
+	if len(msgs) == 0 {
+		return "", nil, 0, fmt.Errorf("msgs is required")
 	}
 
 	maxSteps := a.MaxSteps
@@ -79,7 +91,7 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 		maxSteps = 20
 	}
 	if maxSteps < 1 {
-		return "", fmt.Errorf("MaxSteps must be >= 1")
+		return "", nil, 0, fmt.Errorf("MaxSteps must be >= 1")
 	}
 
 	baseSystem := strings.TrimSpace(a.SystemPrompt)
@@ -87,16 +99,15 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 		baseSystem = agentLoopV0SystemPrompt()
 	}
 
-	msgs := []types.LLMMessage{
-		{Role: "user", Content: goal},
-	}
+	// Copy the slice so the caller can keep their own version if needed.
+	msgs = append([]types.LLMMessage(nil), msgs...)
 
 	for step := 1; step <= maxSteps; step++ {
 		system := baseSystem
 		if a.ContextUpdater != nil {
 			updated, _, err := a.ContextUpdater.BuildSystemPrompt(ctx, baseSystem, step)
 			if err != nil {
-				return "", err
+				return "", nil, 0, err
 			}
 			system = updated
 		}
@@ -109,7 +120,7 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 			JSONOnly:  true,
 		})
 		if err != nil {
-			return "", err
+			return "", nil, 0, err
 		}
 		if a.OnLLMUsage != nil && resp.Usage != nil {
 			a.OnLLMUsage(step, *resp.Usage)
@@ -138,7 +149,8 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 		}
 
 		if op.Op == "final" {
-			return strings.TrimSpace(op.Text), nil
+			msgs = append(msgs, types.LLMMessage{Role: "assistant", Content: strings.TrimSpace(opJSON)})
+			return strings.TrimSpace(op.Text), msgs, step, nil
 		}
 
 		hostResp := a.Exec(ctx, op)
@@ -155,7 +167,18 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 		)
 	}
 
-	return "", fmt.Errorf("agent exceeded max steps (%d) without final", maxSteps)
+	return "", msgs, maxSteps, fmt.Errorf("agent exceeded max steps (%d) without final", maxSteps)
+}
+
+// Run executes the agent loop for a single user goal and returns the final response text.
+func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
+	if strings.TrimSpace(goal) == "" {
+		return "", fmt.Errorf("goal is required")
+	}
+	final, _, _, err := a.RunConversation(ctx, []types.LLMMessage{
+		{Role: "user", Content: goal},
+	})
+	return final, err
 }
 
 func agentLoopV0SystemPrompt() string {
