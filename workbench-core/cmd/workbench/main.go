@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/llm"
@@ -89,7 +90,7 @@ func main() {
 		log.Fatalf("error creating results: %v", err)
 	}
 
-	memoryRes, err := resources.NewMemoryResource()
+	memoryRes, err := resources.NewRunMemoryResource(run.RunId)
 	if err != nil {
 		log.Fatalf("error creating memory: %v", err)
 	}
@@ -145,13 +146,6 @@ func main() {
 	}
 	baseSystemPrompt := string(systemPromptBytes)
 
-	memoryPath := agent.DefaultPersistentMemoryPath()
-	memoryText, err := agent.LoadPersistentMemory(memoryPath)
-	if err != nil {
-		log.Fatalf("error reading persistent memory: %v", err)
-	}
-	systemPrompt := agent.BuildSystemPromptWithMemory(baseSystemPrompt, memoryText)
-
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		logEventLine("agent.op.request", "Agent requested host op", map[string]string{
 			"op":       req.Op,
@@ -196,13 +190,25 @@ func main() {
 	})
 	logEventLine("agent.loop.start", "Agent loop started", map[string]string{"model": model})
 
+	updater := &agent.ContextUpdater{
+		FS:             fs,
+		MaxMemoryBytes: 8 * 1024,
+		MaxTraceBytes:  8 * 1024,
+		ManifestPath:   "/workspace/context_manifest.json",
+		Emit: func(eventType, message string, data map[string]string) {
+			logEventLine(eventType, message, data)
+			emit(eventType, message, data)
+		},
+	}
+
 	a := &agent.Agent{
-		LLM:          client,
-		Exec:         execWithEvents,
-		Model:        model,
-		SystemPrompt: systemPrompt,
-		MaxSteps:     20,
-		Logf:         nil,
+		LLM:            client,
+		Exec:           execWithEvents,
+		Model:          model,
+		SystemPrompt:   baseSystemPrompt,
+		ContextUpdater: updater,
+		MaxSteps:       20,
+		Logf:           nil,
 	}
 
 	// Interactive chat loop:
@@ -239,14 +245,11 @@ func main() {
 		if b, err := fs.Read("/memory/update.md"); err == nil {
 			update := strings.TrimSpace(string(b))
 			if update != "" {
-				if err := agent.AppendPersistentMemory(memoryPath, update); err != nil {
+				// Commit to run-scoped memory.md on disk (host policy).
+				if err := appendRunMemory(memoryRes.BaseDir, update); err != nil {
 					logEventLine("agent.memory.error", "Failed to persist memory update", map[string]string{"err": err.Error()})
 				} else {
 					logEventLine("agent.memory.append", "Persisted memory update", map[string]string{"bytes": strconv.Itoa(len(update))})
-					// Refresh in-memory system prompt for subsequent turns.
-					memoryText = memoryText + "\n\n" + update
-					systemPrompt = agent.BuildSystemPromptWithMemory(baseSystemPrompt, memoryText)
-					a.SystemPrompt = systemPrompt
 				}
 				_ = fs.Write("/memory/update.md", []byte{})
 			}
@@ -285,4 +288,19 @@ func logEventLine(eventType, message string, data map[string]string) {
 		return
 	}
 	log.Printf("%s", string(b))
+}
+
+func appendRunMemory(baseDir string, update string) error {
+	update = strings.TrimSpace(update)
+	if update == "" {
+		return nil
+	}
+	p := filepath.Join(baseDir, "memory.md")
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString("\n\n---\n" + time.Now().UTC().Format(time.RFC3339Nano) + "\n\n" + update + "\n")
+	return err
 }

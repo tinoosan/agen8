@@ -71,3 +71,20 @@ func GetAgentMemoryPath(dataDir string) string {
 func GetAgentMemoryUpdatePath(dataDir string) string {
 	return filepath.Join(GetAgentDir(dataDir), "update.md")
 }
+
+// GetRunMemoryDir returns the path to a run-scoped memory directory.
+//
+// This is where per-run agent memory state can live (separate from global history).
+func GetRunMemoryDir(dataDir, runId string) string {
+	return filepath.Join(GetRunDir(dataDir, runId), "memory")
+}
+
+// GetRunMemoryPath returns the path to a run-scoped memory markdown file.
+func GetRunMemoryPath(dataDir, runId string) string {
+	return filepath.Join(GetRunMemoryDir(dataDir, runId), "memory.md")
+}
+
+// GetRunMemoryUpdatePath returns the path to a run-scoped memory update staging file.
+func GetRunMemoryUpdatePath(dataDir, runId string) string {
+	return filepath.Join(GetRunMemoryDir(dataDir, runId), "update.md")
+}

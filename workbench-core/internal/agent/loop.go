@@ -39,6 +39,11 @@ type Agent struct {
 	// so the contract is centralized and pkgsite-visible.
 	SystemPrompt string
 
+	// ContextUpdater optionally refreshes bounded context (memory/trace/etc) per model step.
+	//
+	// If set, the agent calls it before each model request and uses the returned prompt.
+	ContextUpdater *ContextUpdater
+
 	// MaxSteps caps the number of model -> host op iterations.
 	// If zero, a default is used.
 	MaxSteps int
@@ -71,9 +76,9 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 		return "", fmt.Errorf("MaxSteps must be >= 1")
 	}
 
-	system := strings.TrimSpace(a.SystemPrompt)
-	if system == "" {
-		system = agentLoopV0SystemPrompt()
+	baseSystem := strings.TrimSpace(a.SystemPrompt)
+	if baseSystem == "" {
+		baseSystem = agentLoopV0SystemPrompt()
 	}
 
 	msgs := []types.LLMMessage{
@@ -81,6 +86,15 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 	}
 
 	for step := 1; step <= maxSteps; step++ {
+		system := baseSystem
+		if a.ContextUpdater != nil {
+			updated, _, err := a.ContextUpdater.BuildSystemPrompt(ctx, baseSystem, step)
+			if err != nil {
+				return "", err
+			}
+			system = updated
+		}
+
 		resp, err := a.LLM.Generate(ctx, types.LLMRequest{
 			Model:     a.Model,
 			System:    system,

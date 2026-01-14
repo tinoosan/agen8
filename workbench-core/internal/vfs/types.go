@@ -19,9 +19,12 @@ const (
 	// Tool results are stored under /results/<callId>/response.json.
 	MountResults = "results"
 
-	// MountMemory is the mount name for persistent, cross-run agent memory.
-	// The host may inject /memory/memory.md into the system prompt at startup,
+	// MountMemory is the mount name for run-scoped agent memory.
+	// The host may inject /memory/memory.md into the system prompt,
 	// and ingest /memory/update.md after each turn.
+	//
+	// Note: a future multi-agent system will likely introduce a shared, global
+	// history mount for immutable provenance across runs/agents (distinct from /memory).
 	MountMemory = "memory"
 )
 

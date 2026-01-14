@@ -12,7 +12,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
-// MemoryResource exposes persistent, cross-run agent memory under the VFS mount "/memory".
+// MemoryResource exposes run-scoped agent memory under the VFS mount "/memory".
 //
 // This resource is intentionally small and explicit:
 //   - /memory/memory.md is the accumulated long-term memory (read-only to the agent)
@@ -38,10 +38,16 @@ type MemoryResource struct {
 	// Mount is the virtual mount name used by the VFS.
 	// Example: "memory" maps to the virtual namespace "/memory".
 	Mount string
+
+	// RunId is the run this memory directory belongs to.
+	RunId string
 }
 
-func NewMemoryResource() (*MemoryResource, error) {
-	baseDir := fsutil.GetAgentDir(config.DataDir)
+func NewRunMemoryResource(runId string) (*MemoryResource, error) {
+	if strings.TrimSpace(runId) == "" {
+		return nil, fmt.Errorf("runId cannot be empty")
+	}
+	baseDir := fsutil.GetRunMemoryDir(config.DataDir, runId)
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("error creating memory directory %s: %w", baseDir, err)
 	}
@@ -57,7 +63,7 @@ func NewMemoryResource() (*MemoryResource, error) {
 			}
 		}
 	}
-	return &MemoryResource{BaseDir: baseDir, Mount: vfs.MountMemory}, nil
+	return &MemoryResource{BaseDir: baseDir, Mount: vfs.MountMemory, RunId: runId}, nil
 }
 
 // List lists entries under subpath relative to BaseDir.

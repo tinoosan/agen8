@@ -143,15 +143,23 @@ Practical rule:
   - prefer relative paths like `example.html`
   - avoid VFS paths like `/workspace/example.html` unless the tool explicitly documents that it can access that OS path.
 
-## 9) Persistent Memory (Across Sessions) (/memory)
+## 9) Memory vs History
 
-This system may provide you with a **Persistent Memory** section in the prompt, containing short notes from previous sessions.
+### /memory (Run-Scoped Working Memory)
+
+This system may provide you with a **Memory** section in the prompt, containing notes accumulated during the current run.
 
 When you learn a durable, reusable lesson (e.g., a reliable workflow or constraint), write a short update to:
 
 - `/memory/update.md`
 
 Use plain text or markdown. Keep it short and actionable.
+
+### /history (Shared Global Record, Later)
+
+Later, the system will introduce **History** as a shared, immutable record spanning multiple agents and sessions.
+History will contain raw interactions (inputs, outputs, and environment steps) with provenance metadata.
+It will be distinct from /memory, and accessible through the filesystem namespace.
 
 ## 8) Operating Principles
 

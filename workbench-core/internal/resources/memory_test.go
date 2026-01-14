@@ -15,9 +15,9 @@ func TestMemoryResource_ReadWriteUpdate(t *testing.T) {
 	config.DataDir = tmp
 	defer func() { config.DataDir = old }()
 
-	mr, err := NewMemoryResource()
+	mr, err := NewRunMemoryResource("run-test")
 	if err != nil {
-		t.Fatalf("NewMemoryResource: %v", err)
+		t.Fatalf("NewRunMemoryResource: %v", err)
 	}
 	if mr.Mount != vfs.MountMemory {
 		t.Fatalf("unexpected mount %q", mr.Mount)
