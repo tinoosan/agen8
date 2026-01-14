@@ -88,3 +88,21 @@ func GetRunMemoryPath(dataDir, runId string) string {
 func GetRunMemoryUpdatePath(dataDir, runId string) string {
 	return filepath.Join(GetRunMemoryDir(dataDir, runId), "update.md")
 }
+
+// GetRunHistoryDir returns the path to a run-scoped history directory.
+//
+// History is an immutable, append-only log of raw interactions between:
+// - users
+// - agents
+// - the environment/host
+//
+// It is separate from /trace (which is a curated event feed for agents) and from
+// /memory (which is curated, host-governed long-term notes).
+func GetRunHistoryDir(dataDir, runId string) string {
+	return filepath.Join(GetRunDir(dataDir, runId), "history")
+}
+
+// GetRunHistoryPath returns the path to the run-scoped history JSONL file.
+func GetRunHistoryPath(dataDir, runId string) string {
+	return filepath.Join(GetRunHistoryDir(dataDir, runId), "history.jsonl")
+}

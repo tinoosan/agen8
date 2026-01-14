@@ -26,6 +26,19 @@ const (
 	// Note: a future multi-agent system will likely introduce a shared, global
 	// history mount for immutable provenance across runs/agents (distinct from /memory).
 	MountMemory = "memory"
+
+	// MountHistory is the mount name for run-scoped history.
+	//
+	// History is an immutable, append-only log of raw interactions between users,
+	// agents, and the environment. It is intended as a verifiable source of truth
+	// for provenance, debugging, and compliance.
+	//
+	// In the current single-agent implementation, history is run-scoped:
+	//   data/runs/<runId>/history/history.jsonl
+	//
+	// In a future multi-agent system, you may add a shared global history mount
+	// alongside run-scoped histories.
+	MountHistory = "history"
 )
 
 // Resource is the minimal contract a “mounted thing” must implement to behave like a filesystem.

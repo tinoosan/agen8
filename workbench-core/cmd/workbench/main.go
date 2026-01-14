@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/agent"
+	"github.com/tinoosan/workbench-core/internal/events"
 	"github.com/tinoosan/workbench-core/internal/llm"
 	"github.com/tinoosan/workbench-core/internal/repl"
 	"github.com/tinoosan/workbench-core/internal/resources"
@@ -32,18 +32,39 @@ func main() {
 	}
 	log.Printf("runId=%s", run.RunId)
 
-	emit := func(eventType, message string, data map[string]string) {
-		if err := store.AppendEvent(run.RunId, eventType, message, data); err != nil {
-			log.Fatalf("error appending event: %v", err)
+	historyRes, err := resources.NewRunHistoryResource(run.RunId)
+	if err != nil {
+		log.Fatalf("error creating history: %v", err)
+	}
+	historySink := &events.HistorySink{BaseDir: historyRes.BaseDir}
+
+	emitter := &events.Emitter{
+		RunID: run.RunId,
+		Sink: events.MultiSink{
+			events.ConsoleSink{},
+			events.StoreSink{},
+			historySink,
+		},
+	}
+	mustEmit := func(ctx context.Context, ev events.Event) {
+		if err := emitter.Emit(ctx, ev); err != nil {
+			log.Fatalf("error emitting event: %v", err)
 		}
 	}
+	boolp := func(b bool) *bool { return &b }
 
 	data := map[string]string{
 		"name":  "Alice",
 		"email": "alice@example.com",
 	}
 
-	emit("run.started", "Run started", data)
+	// Store-only run lifecycle events (kept identical to previous behavior).
+	mustEmit(context.Background(), events.Event{
+		Type:    "run.started",
+		Message: "Run started",
+		Data:    data,
+		Console: boolp(false),
+	})
 
 	trace, err := resources.NewTraceResource(run.RunId)
 	if err != nil {
@@ -108,6 +129,8 @@ func main() {
 	log.Printf("mounted /tools => %s", toolsResource.BaseDir)
 	fs.Mount(vfs.MountMemory, memoryRes)
 	log.Printf("mounted /memory => %s", memoryRes.BaseDir)
+	fs.Mount(vfs.MountHistory, historyRes)
+	log.Printf("mounted /history => %s", historyRes.BaseDir)
 
 	absWorkspaceRoot, err := filepath.Abs(workspace.BaseDir)
 	if err != nil {
@@ -131,6 +154,7 @@ func main() {
 	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" || model == "" {
 		log.Fatalf("OPENROUTER_API_KEY and OPENROUTER_MODEL are required to run the non-scripted agent loop")
 	}
+	historySink.Model = model
 
 	client, err := llm.NewOpenRouterClientFromEnv()
 	if err != nil {
@@ -156,12 +180,13 @@ func main() {
 		if req.Op == "tool.run" && req.TimeoutMs != 0 {
 			reqData["timeoutMs"] = strconv.Itoa(req.TimeoutMs)
 		}
-		logEventLine("agent.op.request", "Agent requested host op", reqData)
-		emit("agent.op.request", "Agent requested host op", map[string]string{
-			"op":       req.Op,
-			"path":     req.Path,
-			"toolId":   req.ToolID.String(),
-			"actionId": req.ActionID,
+		// Preserve existing divergence: console includes extra fields (e.g. maxBytes),
+		// while the store log keeps a minimal schema.
+		mustEmit(ctx, events.Event{
+			Type:      "agent.op.request",
+			Message:   "Agent requested host op",
+			Data:      reqData,
+			StoreData: map[string]string{"op": req.Op, "path": req.Path, "toolId": req.ToolID.String(), "actionId": req.ActionID},
 		})
 		resp := executor.Exec(ctx, req)
 
@@ -179,20 +204,20 @@ func main() {
 		if resp.ToolResponse != nil && resp.ToolResponse.CallID != "" {
 			respData["callId"] = resp.ToolResponse.CallID
 		}
-		logEventLine("agent.op.response", "Host op completed", respData)
-
-		emit("agent.op.response", "Host op completed", map[string]string{
-			"op":  resp.Op,
-			"ok":  fmtBool(resp.Ok),
-			"err": resp.Error,
+		mustEmit(ctx, events.Event{
+			Type:      "agent.op.response",
+			Message:   "Host op completed",
+			Data:      respData,
+			StoreData: map[string]string{"op": resp.Op, "ok": fmtBool(resp.Ok), "err": resp.Error},
 		})
 		return resp
 	}
 
-	emit("agent.loop.start", "Agent loop started", map[string]string{
-		"model": model,
+	mustEmit(context.Background(), events.Event{
+		Type:    "agent.loop.start",
+		Message: "Agent loop started",
+		Data:    map[string]string{"model": model},
 	})
-	logEventLine("agent.loop.start", "Agent loop started", map[string]string{"model": model})
 
 	updater := &agent.ContextUpdater{
 		FS:             fs,
@@ -200,8 +225,7 @@ func main() {
 		MaxTraceBytes:  8 * 1024,
 		ManifestPath:   "/workspace/context_manifest.json",
 		Emit: func(eventType, message string, data map[string]string) {
-			logEventLine(eventType, message, data)
-			emit(eventType, message, data)
+			mustEmit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
 		},
 	}
 
@@ -245,12 +269,21 @@ func main() {
 		}
 		if strings.TrimSpace(userMsg) == ":reset" {
 			conversation = nil
-			logEventLine("chat.reset", "Cleared conversation history", nil)
+			mustEmit(context.Background(), events.Event{
+				Type:    "chat.reset",
+				Message: "Cleared conversation history",
+				Store:   boolp(false),
+			})
 			continue
 		}
 
 		turn++
-		emit("user.message", "User message received", map[string]string{"text": userMsg})
+		mustEmit(context.Background(), events.Event{
+			Type:    "user.message",
+			Message: "User message received",
+			Data:    map[string]string{"text": userMsg},
+			Console: boolp(false),
+		})
 
 		// Reset per-turn usage accumulator.
 		var turnUsage types.LLMUsage
@@ -258,12 +291,17 @@ func main() {
 			turnUsage.InputTokens += usage.InputTokens
 			turnUsage.OutputTokens += usage.OutputTokens
 			turnUsage.TotalTokens += usage.TotalTokens
-			logEventLine("llm.usage", "Model usage", map[string]string{
-				"step":      strconv.Itoa(step),
-				"input":     strconv.Itoa(usage.InputTokens),
-				"output":    strconv.Itoa(usage.OutputTokens),
-				"total":     strconv.Itoa(usage.TotalTokens),
-				"turnTotal": strconv.Itoa(turnUsage.TotalTokens),
+			mustEmit(context.Background(), events.Event{
+				Type:    "llm.usage",
+				Message: "Model usage",
+				Data: map[string]string{
+					"step":      strconv.Itoa(step),
+					"input":     strconv.Itoa(usage.InputTokens),
+					"output":    strconv.Itoa(usage.OutputTokens),
+					"total":     strconv.Itoa(usage.TotalTokens),
+					"turnTotal": strconv.Itoa(turnUsage.TotalTokens),
+				},
+				Store: boolp(false),
 			})
 		}
 
@@ -273,22 +311,37 @@ func main() {
 		dur := time.Since(start)
 		conversation = updated
 		if err != nil {
-			logEventLine("agent.error", "Agent loop error", map[string]string{"err": err.Error()})
+			mustEmit(context.Background(), events.Event{
+				Type:    "agent.error",
+				Message: "Agent loop error",
+				Data:    map[string]string{"err": err.Error()},
+				Store:   boolp(false),
+			})
 			log.Printf("agent error: %v", err)
 			continue
 		}
-		logEventLine("agent.turn.complete", "Agent completed user request", map[string]string{
-			"turn":       strconv.Itoa(turn),
-			"steps":      strconv.Itoa(steps),
-			"durationMs": strconv.FormatInt(dur.Milliseconds(), 10),
+		mustEmit(context.Background(), events.Event{
+			Type:    "agent.turn.complete",
+			Message: "Agent completed user request",
+			Data: map[string]string{
+				"turn":       strconv.Itoa(turn),
+				"steps":      strconv.Itoa(steps),
+				"durationMs": strconv.FormatInt(dur.Milliseconds(), 10),
+			},
+			Store: boolp(false),
 		})
 
 		// Print a turn-level usage summary if the provider reported usage.
 		if turnUsage.TotalTokens != 0 {
-			logEventLine("llm.usage.total", "Turn usage total", map[string]string{
-				"input":  strconv.Itoa(turnUsage.InputTokens),
-				"output": strconv.Itoa(turnUsage.OutputTokens),
-				"total":  strconv.Itoa(turnUsage.TotalTokens),
+			mustEmit(context.Background(), events.Event{
+				Type:    "llm.usage.total",
+				Message: "Turn usage total",
+				Data: map[string]string{
+					"input":  strconv.Itoa(turnUsage.InputTokens),
+					"output": strconv.Itoa(turnUsage.OutputTokens),
+					"total":  strconv.Itoa(turnUsage.TotalTokens),
+				},
+				Store: boolp(false),
 			})
 		}
 
@@ -296,17 +349,15 @@ func main() {
 		if b, err := fs.Read("/memory/update.md"); err == nil {
 			updateRaw := string(b)
 			if strings.TrimSpace(updateRaw) == "" {
-				logEventLine("memory.evaluate", "No memory update written", map[string]string{
-					"turn":     strconv.Itoa(turn),
-					"accepted": "false",
-					"reason":   "no_update",
-					"bytes":    "0",
-				})
-				emit("memory.evaluate", "No memory update written", map[string]string{
-					"turn":     strconv.Itoa(turn),
-					"accepted": "false",
-					"reason":   "no_update",
-					"bytes":    "0",
+				mustEmit(context.Background(), events.Event{
+					Type:    "memory.evaluate",
+					Message: "No memory update written",
+					Data: map[string]string{
+						"turn":     strconv.Itoa(turn),
+						"accepted": "false",
+						"reason":   "no_update",
+						"bytes":    "0",
+					},
 				})
 			} else {
 
@@ -315,35 +366,36 @@ func main() {
 
 				accepted, reason, cleaned := memEval.Evaluate(updateRaw)
 
-				logEventLine("memory.evaluate", "Evaluated memory update", map[string]string{
-					"turn":     strconv.Itoa(turn),
-					"accepted": fmtBool(accepted),
-					"reason":   reason,
-					"bytes":    strconv.Itoa(len(trimmed)),
-					"sha256":   hash[:12],
-				})
-				emit("memory.evaluate", "Evaluated memory update", map[string]string{
-					"turn":     strconv.Itoa(turn),
-					"accepted": fmtBool(accepted),
-					"reason":   reason,
-					"bytes":    strconv.Itoa(len(trimmed)),
-					"sha256":   hash[:12],
+				mustEmit(context.Background(), events.Event{
+					Type:    "memory.evaluate",
+					Message: "Evaluated memory update",
+					Data: map[string]string{
+						"turn":     strconv.Itoa(turn),
+						"accepted": fmtBool(accepted),
+						"reason":   reason,
+						"bytes":    strconv.Itoa(len(trimmed)),
+						"sha256":   hash[:12],
+					},
 				})
 
 				if accepted {
 					// Commit to run-scoped memory.md on disk (host policy).
 					if err := appendRunMemory(memoryRes.BaseDir, strings.TrimSpace(cleaned)); err != nil {
-						logEventLine("memory.commit.error", "Failed to commit memory update", map[string]string{"err": err.Error()})
-					} else {
-						logEventLine("memory.commit", "Committed memory update", map[string]string{
-							"turn":   strconv.Itoa(turn),
-							"bytes":  strconv.Itoa(len(strings.TrimSpace(cleaned))),
-							"sha256": hash[:12],
+						mustEmit(context.Background(), events.Event{
+							Type:    "memory.commit.error",
+							Message: "Failed to commit memory update",
+							Data:    map[string]string{"err": err.Error()},
+							Store:   boolp(false),
 						})
-						emit("memory.commit", "Committed memory update", map[string]string{
-							"turn":   strconv.Itoa(turn),
-							"bytes":  strconv.Itoa(len(strings.TrimSpace(cleaned))),
-							"sha256": hash[:12],
+					} else {
+						mustEmit(context.Background(), events.Event{
+							Type:    "memory.commit",
+							Message: "Committed memory update",
+							Data: map[string]string{
+								"turn":   strconv.Itoa(turn),
+								"bytes":  strconv.Itoa(len(strings.TrimSpace(cleaned))),
+								"sha256": hash[:12],
+							},
 						})
 					}
 				}
@@ -356,16 +408,26 @@ func main() {
 					Bytes:    len(trimmed),
 					SHA256:   hash,
 				}); err != nil {
-					logEventLine("memory.audit.error", "Failed to append memory audit log", map[string]string{
-						"turn": strconv.Itoa(turn),
-						"err":  err.Error(),
+					mustEmit(context.Background(), events.Event{
+						Type:    "memory.audit.error",
+						Message: "Failed to append memory audit log",
+						Data: map[string]string{
+							"turn": strconv.Itoa(turn),
+							"err":  err.Error(),
+						},
+						Store: boolp(false),
 					})
 				} else {
-					logEventLine("memory.audit.append", "Appended memory audit log", map[string]string{
-						"turn":     strconv.Itoa(turn),
-						"accepted": fmtBool(accepted),
-						"reason":   reason,
-						"sha256":   hash[:12],
+					mustEmit(context.Background(), events.Event{
+						Type:    "memory.audit.append",
+						Message: "Appended memory audit log",
+						Data: map[string]string{
+							"turn":     strconv.Itoa(turn),
+							"accepted": fmtBool(accepted),
+							"reason":   reason,
+							"sha256":   hash[:12],
+						},
+						Store: boolp(false),
 					})
 				}
 			}
@@ -376,11 +438,19 @@ func main() {
 		// Print the final agent response last, after host-side housekeeping logs.
 		// This keeps the terminal output easy to follow during interactive sessions.
 		log.Printf("agent> %s", final)
-		logEventLine("agent.final", "Agent produced final answer", map[string]string{"text": final})
-		emit("agent.final", "Agent produced final answer", map[string]string{"text": final})
+		mustEmit(context.Background(), events.Event{
+			Type:    "agent.final",
+			Message: "Agent produced final answer",
+			Data:    map[string]string{"text": final},
+		})
 	}
 
-	emit("run.completed", "Run finished", data)
+	mustEmit(context.Background(), events.Event{
+		Type:    "run.completed",
+		Message: "Run finished",
+		Data:    data,
+		Console: boolp(false),
+	})
 
 	log.Printf("== Workbench demo complete ==")
 }
@@ -390,28 +460,6 @@ func fmtBool(b bool) string {
 		return "true"
 	}
 	return "false"
-}
-
-// logEventLine prints a single-line JSON log similar to events.jsonl.
-//
-// It is intentionally compact so you can follow the agent loop in the terminal
-// without opening the on-disk event log.
-func logEventLine(eventType, message string, data map[string]string) {
-	line := struct {
-		Type    string            `json:"type"`
-		Message string            `json:"message"`
-		Data    map[string]string `json:"data,omitempty"`
-	}{
-		Type:    eventType,
-		Message: message,
-		Data:    data,
-	}
-	b, err := json.Marshal(line)
-	if err != nil {
-		log.Printf("%s %s", eventType, message)
-		return
-	}
-	log.Printf("%s", string(b))
 }
 
 func appendRunMemory(baseDir string, update string) error {
