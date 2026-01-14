@@ -1,0 +1,286 @@
+package tools
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/tinoosan/workbench-core/internal/types"
+)
+
+var builtinRipgrepManifest = []byte(`{"id":"builtin.ripgrep","version":"0.1.0","kind":"builtin","displayName":"Builtin Ripgrep","description":"Searches text under a host-configured root directory using ripgrep and returns structured matches.","actions":[{"id":"search","displayName":"Search","description":"Search for query in files under the sandbox root. Returns structured match records (path, line, text).","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"glob":{"type":"array","items":{"type":"string"}},"caseSensitive":{"type":"boolean"},"maxMatches":{"type":"integer"},"contextLines":{"type":"integer"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"matches":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"text":{"type":"string"}},"required":["path","line","text"]}},"truncated":{"type":"boolean"},"limit":{"type":"string"}},"required":["matches","truncated"]}}]}`)
+
+func init() {
+	registerBuiltin(BuiltinDef{
+		ID:       types.ToolID("builtin.ripgrep"),
+		Manifest: builtinRipgrepManifest,
+		NewInvoker: func(cfg BuiltinConfig) ToolInvoker {
+			root := strings.TrimSpace(cfg.RipgrepRootDir)
+			if root == "" {
+				root = cfg.BashRootDir
+			}
+			return NewBuiltinRipgrepInvoker(root)
+		},
+	})
+}
+
+const (
+	defaultRipgrepMaxMatches = 50
+	maxRipgrepMaxMatches     = 2000
+)
+
+// BuiltinRipgrepInvoker implements the builtin tool "builtin.ripgrep" (action: "search").
+//
+// Why this exists (vs using builtin.bash rg ...):
+//   - builtin.bash returns unstructured stdout, which is costly for the model to parse.
+//   - builtin.ripgrep returns structured match records so the agent can reason cheaply
+//     (path + line + text) and then decide what to open next.
+//
+// Confinement:
+//   - RootDir is an absolute OS path configured by the host.
+//   - Input paths are relative to RootDir. Absolute paths and ".." are rejected.
+//
+// Execution:
+//   - This tool runs the "rg" binary directly (no shell) and requests JSON output via `rg --json`.
+//   - Matches are parsed from rg's JSON stream and returned in ToolResponse.Output.
+type BuiltinRipgrepInvoker struct {
+	RootDir string
+
+	// Hard caps to keep tool output bounded.
+	DefaultMaxMatches int
+}
+
+func NewBuiltinRipgrepInvoker(rootDir string) *BuiltinRipgrepInvoker {
+	return &BuiltinRipgrepInvoker{
+		RootDir:           rootDir,
+		DefaultMaxMatches: defaultRipgrepMaxMatches,
+	}
+}
+
+type ripgrepSearchInput struct {
+	Query         string   `json:"query"`
+	Paths         []string `json:"paths,omitempty"`
+	Glob          []string `json:"glob,omitempty"`
+	CaseSensitive bool     `json:"caseSensitive,omitempty"`
+	MaxMatches    int      `json:"maxMatches,omitempty"`
+	ContextLines  int      `json:"contextLines,omitempty"`
+}
+
+type ripgrepMatch struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Text string `json:"text"`
+}
+
+type ripgrepSearchOutput struct {
+	Matches   []ripgrepMatch `json:"matches"`
+	Truncated bool           `json:"truncated"`
+	Limit     string         `json:"limit,omitempty"` // "maxMatches"
+}
+
+func (r *BuiltinRipgrepInvoker) Invoke(ctx context.Context, req types.ToolRequest) (ToolCallResult, error) {
+	if r == nil {
+		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: "builtin.ripgrep invoker is nil"}
+	}
+	if err := req.Validate(); err != nil {
+		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
+	}
+	if req.ActionID != "search" {
+		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("unsupported action %q (allowed: search)", req.ActionID)}
+	}
+	root := strings.TrimSpace(r.RootDir)
+	if root == "" {
+		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: "rootDir is required"}
+	}
+	if !filepath.IsAbs(root) {
+		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("rootDir must be absolute, got %q", root)}
+	}
+
+	var in ripgrepSearchInput
+	if err := json.Unmarshal(req.Input, &in); err != nil {
+		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid input JSON: %v", err)}
+	}
+	in.Query = strings.TrimSpace(in.Query)
+	if in.Query == "" {
+		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: "query is required"}
+	}
+
+	paths := in.Paths
+	if len(paths) == 0 {
+		paths = []string{"."}
+	}
+	for _, p := range paths {
+		if err := validateRelativeToolPath(p); err != nil {
+			return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid paths: %v", err)}
+		}
+	}
+	for _, g := range in.Glob {
+		if strings.TrimSpace(g) == "" {
+			return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: "glob entries must be non-empty"}
+		}
+	}
+	if in.ContextLines < 0 {
+		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: "contextLines must be >= 0"}
+	}
+
+	maxMatches := in.MaxMatches
+	if maxMatches == 0 {
+		maxMatches = r.DefaultMaxMatches
+	}
+	if maxMatches < 0 {
+		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: "maxMatches must be >= 0"}
+	}
+	if maxMatches > maxRipgrepMaxMatches {
+		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("maxMatches exceeds max %d", maxRipgrepMaxMatches)}
+	}
+
+	argv := make([]string, 0, 16)
+	argv = append(argv, "--json")
+	if !in.CaseSensitive {
+		argv = append(argv, "-i")
+	}
+	if in.ContextLines > 0 {
+		argv = append(argv, "--context", strconv.Itoa(in.ContextLines))
+	}
+	if maxMatches > 0 {
+		argv = append(argv, "--max-count", strconv.Itoa(maxMatches))
+	}
+	for _, g := range in.Glob {
+		argv = append(argv, "--glob", g)
+	}
+	argv = append(argv, in.Query)
+	argv = append(argv, paths...)
+
+	cmd := exec.CommandContext(ctx, "rg", argv...)
+	cmd.Dir = root
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("stdout pipe: %v", err), Err: err}
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("stderr pipe: %v", err), Err: err}
+	}
+
+	if err := cmd.Start(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: "rg binary not found (install ripgrep)"}
+		}
+		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
+	}
+
+	// Read stderr fully (bounded by OS). We keep it small by only using it when the
+	// command fails to run correctly.
+	stderrBytes, _ := ioReadAllLimited(stderr, 64*1024)
+
+	matches := make([]ripgrepMatch, 0)
+	sc := bufio.NewScanner(stdout)
+	// Allow longer JSON lines than the default 64K.
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for sc.Scan() {
+		line := sc.Bytes()
+		var env struct {
+			Type string          `json:"type"`
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(line, &env); err != nil {
+			continue
+		}
+		if env.Type != "match" {
+			continue
+		}
+		var md struct {
+			Path struct {
+				Text string `json:"text"`
+			} `json:"path"`
+			Lines struct {
+				Text string `json:"text"`
+			} `json:"lines"`
+			LineNumber int `json:"line_number"`
+		}
+		if err := json.Unmarshal(env.Data, &md); err != nil {
+			continue
+		}
+		text := strings.TrimRight(md.Lines.Text, "\n")
+		matches = append(matches, ripgrepMatch{
+			Path: md.Path.Text,
+			Line: md.LineNumber,
+			Text: text,
+		})
+	}
+
+	if err := sc.Err(); err != nil {
+		// Scanner errors are treated as a tool failure.
+		_ = cmd.Wait()
+		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("read rg output: %v", err), Err: err}
+	}
+
+	waitErr := cmd.Wait()
+	// rg returns exit code 1 when there are no matches; that is not a tool failure.
+	if waitErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(waitErr, &exitErr) {
+			code := exitErr.ExitCode()
+			if code != 1 {
+				msg := strings.TrimSpace(string(stderrBytes))
+				if msg == "" {
+					msg = waitErr.Error()
+				}
+				return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: msg, Err: waitErr}
+			}
+		} else {
+			return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: waitErr.Error(), Err: waitErr}
+		}
+	}
+
+	out := ripgrepSearchOutput{
+		Matches:   matches,
+		Truncated: false,
+	}
+	if maxMatches > 0 && len(matches) >= maxMatches {
+		out.Truncated = true
+		out.Limit = "maxMatches"
+	}
+	outJSON, err := json.Marshal(out)
+	if err != nil {
+		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
+	}
+	return ToolCallResult{Output: outJSON}, nil
+}
+
+func validateRelativeToolPath(p string) error {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return fmt.Errorf("path entries must be non-empty")
+	}
+	if strings.HasPrefix(p, "/") || filepath.IsAbs(p) {
+		return fmt.Errorf("path must be relative")
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return fmt.Errorf("path escapes root")
+		}
+	}
+	for _, seg := range strings.Split(p, string(filepath.Separator)) {
+		if seg == ".." {
+			return fmt.Errorf("path escapes root")
+		}
+	}
+	return nil
+}
+
+func ioReadAllLimited(r io.Reader, max int64) ([]byte, error) {
+	if max <= 0 {
+		max = 64 * 1024
+	}
+	return io.ReadAll(io.LimitReader(r, max))
+}

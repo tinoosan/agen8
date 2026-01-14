@@ -16,6 +16,10 @@ type BuiltinConfig struct {
 	// BashRootDir is the OS directory used as the sandbox root for builtin.bash.
 	// It must be an absolute path; builtin.bash rejects cwd escapes and absolute cwd.
 	BashRootDir string
+
+	// RipgrepRootDir is the OS directory used as the sandbox root for builtin.ripgrep.
+	// If empty, builtin.ripgrep falls back to BashRootDir.
+	RipgrepRootDir string
 }
 
 // BuiltinDef describes a builtin tool definition: manifest bytes + an optional invoker factory.
