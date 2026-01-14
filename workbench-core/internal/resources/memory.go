@@ -52,7 +52,7 @@ func NewRunMemoryResource(runId string) (*MemoryResource, error) {
 		return nil, fmt.Errorf("error creating memory directory %s: %w", baseDir, err)
 	}
 	// Ensure files exist so fs.read works even before any updates.
-	for _, name := range []string{"memory.md", "update.md"} {
+	for _, name := range []string{"memory.md", "update.md", "commits.jsonl"} {
 		p := filepath.Join(baseDir, name)
 		if _, err := os.Stat(p); err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -75,6 +75,7 @@ func (mr *MemoryResource) List(subpath string) ([]vfs.Entry, error) {
 		return []vfs.Entry{
 			{Path: "memory.md", IsDir: false},
 			{Path: "update.md", IsDir: false},
+			{Path: "commits.jsonl", IsDir: false},
 		}, nil
 	}
 	return nil, fmt.Errorf("invalid subpath %q: cannot list non-root", subpath)
@@ -90,8 +91,8 @@ func (mr *MemoryResource) Read(subpath string) ([]byte, error) {
 	if strings.HasPrefix(subpath, "/") {
 		return nil, fmt.Errorf("memory read: absolute paths not allowed: %q", subpath)
 	}
-	if subpath != "memory.md" && subpath != "update.md" {
-		return nil, fmt.Errorf("memory read: unknown item %q (allowed: memory.md, update.md)", subpath)
+	if subpath != "memory.md" && subpath != "update.md" && subpath != "commits.jsonl" {
+		return nil, fmt.Errorf("memory read: unknown item %q (allowed: memory.md, update.md, commits.jsonl)", subpath)
 	}
 	return os.ReadFile(filepath.Join(mr.BaseDir, subpath))
 }

@@ -50,4 +50,7 @@ func TestMemoryResource_ReadWriteUpdate(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(mr.BaseDir, "update.md")); err != nil {
 		t.Fatalf("expected update.md to exist: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(mr.BaseDir, "commits.jsonl")); err != nil {
+		t.Fatalf("expected commits.jsonl to exist: %v", err)
+	}
 }
