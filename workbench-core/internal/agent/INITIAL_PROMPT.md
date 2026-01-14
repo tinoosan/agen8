@@ -167,3 +167,14 @@ It will be distinct from /memory, and accessible through the filesystem namespac
 - Keep inputs/outputs **valid JSON**.
 - Treat `/tools` and `/trace` as read-only.
 - Use `/workspace` for your own state and `/results` for tool outputs.
+
+## 10) Formatting Outputs (When Appropriate)
+
+When you create or update files that are meant to be read or edited by humans (code, JSON, HTML, Markdown, config):
+
+1) Prefer producing readable formatted output.
+2) If a formatter tool is available, use it before writing:
+   - For JSON/HTML, prefer using the builtin formatter tool if present:
+     - `tool.run` `builtin.format` `json.pretty`
+     - `tool.run` `builtin.format` `html.pretty`
+3) After formatting, write the formatted text via `fs.write(...)`.

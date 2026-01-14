@@ -198,14 +198,18 @@ func main() {
 		ContextUpdater: updater,
 		MaxSteps:       20,
 		Logf:           nil,
+		OnLLMUsage:     nil,
 	}
 
 	// Interactive chat loop:
 	//   - user types a message
 	//   - agent runs the loop until {"op":"final"} and prints the result
-	//   - host ingests /workspace/memory_update.md and persists it across sessions
+	//   - host evaluates /memory/update.md and (optionally) commits it to /memory/memory.md
+	//   - host appends an immutable audit line to /memory/commits.jsonl
 	log.Printf("== Chat session started (type 'exit' to quit) ==")
 	in := bufio.NewScanner(os.Stdin)
+	memEval := agent.DefaultMemoryEvaluator()
+	turn := 0
 	for {
 		log.Printf("you> ")
 		if !in.Scan() {
@@ -219,7 +223,24 @@ func main() {
 			break
 		}
 
+		turn++
 		emit("user.message", "User message received", map[string]string{"text": line})
+
+		// Reset per-turn usage accumulator.
+		var turnUsage types.LLMUsage
+		a.OnLLMUsage = func(step int, usage types.LLMUsage) {
+			turnUsage.InputTokens += usage.InputTokens
+			turnUsage.OutputTokens += usage.OutputTokens
+			turnUsage.TotalTokens += usage.TotalTokens
+			logEventLine("llm.usage", "Model usage", map[string]string{
+				"step":      strconv.Itoa(step),
+				"input":     strconv.Itoa(usage.InputTokens),
+				"output":    strconv.Itoa(usage.OutputTokens),
+				"total":     strconv.Itoa(usage.TotalTokens),
+				"turnTotal": strconv.Itoa(turnUsage.TotalTokens),
+			})
+		}
+
 		final, err := a.Run(context.Background(), line)
 		if err != nil {
 			logEventLine("agent.error", "Agent loop error", map[string]string{"err": err.Error()})
@@ -230,18 +251,94 @@ func main() {
 		logEventLine("agent.final", "Agent produced final answer", map[string]string{"text": final})
 		emit("agent.final", "Agent produced final answer", map[string]string{"text": final})
 
+		// Print a turn-level usage summary if the provider reported usage.
+		if turnUsage.TotalTokens != 0 {
+			logEventLine("llm.usage.total", "Turn usage total", map[string]string{
+				"input":  strconv.Itoa(turnUsage.InputTokens),
+				"output": strconv.Itoa(turnUsage.OutputTokens),
+				"total":  strconv.Itoa(turnUsage.TotalTokens),
+			})
+		}
+
 		// Ingest memory update if the agent wrote one.
 		if b, err := fs.Read("/memory/update.md"); err == nil {
-			update := strings.TrimSpace(string(b))
-			if update != "" {
-				// Commit to run-scoped memory.md on disk (host policy).
-				if err := appendRunMemory(memoryRes.BaseDir, update); err != nil {
-					logEventLine("agent.memory.error", "Failed to persist memory update", map[string]string{"err": err.Error()})
-				} else {
-					logEventLine("agent.memory.append", "Persisted memory update", map[string]string{"bytes": strconv.Itoa(len(update))})
-				}
-				_ = fs.Write("/memory/update.md", []byte{})
+			updateRaw := string(b)
+			if strings.TrimSpace(updateRaw) == "" {
+				logEventLine("memory.evaluate", "No memory update written", map[string]string{
+					"turn":     strconv.Itoa(turn),
+					"accepted": "false",
+					"reason":   "no_update",
+					"bytes":    "0",
+				})
+				emit("memory.evaluate", "No memory update written", map[string]string{
+					"turn":     strconv.Itoa(turn),
+					"accepted": "false",
+					"reason":   "no_update",
+					"bytes":    "0",
+				})
+				continue
 			}
+
+			trimmed := strings.TrimSpace(updateRaw)
+			hash := agent.SHA256Hex(trimmed)
+
+			accepted, reason, cleaned := memEval.Evaluate(updateRaw)
+
+			logEventLine("memory.evaluate", "Evaluated memory update", map[string]string{
+				"turn":     strconv.Itoa(turn),
+				"accepted": fmtBool(accepted),
+				"reason":   reason,
+				"bytes":    strconv.Itoa(len(trimmed)),
+				"sha256":   hash[:12],
+			})
+			emit("memory.evaluate", "Evaluated memory update", map[string]string{
+				"turn":     strconv.Itoa(turn),
+				"accepted": fmtBool(accepted),
+				"reason":   reason,
+				"bytes":    strconv.Itoa(len(trimmed)),
+				"sha256":   hash[:12],
+			})
+
+			if accepted {
+				// Commit to run-scoped memory.md on disk (host policy).
+				if err := appendRunMemory(memoryRes.BaseDir, strings.TrimSpace(cleaned)); err != nil {
+					logEventLine("memory.commit.error", "Failed to commit memory update", map[string]string{"err": err.Error()})
+				} else {
+					logEventLine("memory.commit", "Committed memory update", map[string]string{
+						"turn":   strconv.Itoa(turn),
+						"bytes":  strconv.Itoa(len(strings.TrimSpace(cleaned))),
+						"sha256": hash[:12],
+					})
+					emit("memory.commit", "Committed memory update", map[string]string{
+						"turn":   strconv.Itoa(turn),
+						"bytes":  strconv.Itoa(len(strings.TrimSpace(cleaned))),
+						"sha256": hash[:12],
+					})
+				}
+			}
+
+			if err := agent.AppendCommitLog(memoryRes.BaseDir, agent.MemoryCommitLine{
+				Model:    model,
+				Turn:     turn,
+				Accepted: accepted,
+				Reason:   reason,
+				Bytes:    len(trimmed),
+				SHA256:   hash,
+			}); err != nil {
+				logEventLine("memory.audit.error", "Failed to append memory audit log", map[string]string{
+					"turn": strconv.Itoa(turn),
+					"err":  err.Error(),
+				})
+			} else {
+				logEventLine("memory.audit.append", "Appended memory audit log", map[string]string{
+					"turn":     strconv.Itoa(turn),
+					"accepted": fmtBool(accepted),
+					"reason":   reason,
+					"sha256":   hash[:12],
+				})
+			}
+
+			_ = fs.Write("/memory/update.md", []byte{})
 		}
 	}
 

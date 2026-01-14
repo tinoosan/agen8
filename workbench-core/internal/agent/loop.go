@@ -51,6 +51,12 @@ type Agent struct {
 	// Logf is an optional logger used to print what the agent is doing.
 	// Example: log.Printf.
 	Logf func(format string, args ...any)
+
+	// OnLLMUsage is an optional hook invoked after each model call when the provider
+	// returns token usage metrics.
+	//
+	// This is used to surface per-step and per-turn token usage in the host logs.
+	OnLLMUsage func(step int, usage types.LLMUsage)
 }
 
 // Run executes the agent loop for a single user goal and returns the final response text.
@@ -104,6 +110,9 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 		})
 		if err != nil {
 			return "", err
+		}
+		if a.OnLLMUsage != nil && resp.Usage != nil {
+			a.OnLLMUsage(step, *resp.Usage)
 		}
 
 		opJSON := extractJSONObject(resp.Text)
