@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -207,24 +210,26 @@ func main() {
 	//   - host evaluates /memory/update.md and (optionally) commits it to /memory/memory.md
 	//   - host appends an immutable audit line to /memory/commits.jsonl
 	log.Printf("== Chat session started (type 'exit' to quit) ==")
-	in := bufio.NewScanner(os.Stdin)
+	in := bufio.NewReader(os.Stdin)
+	enableBracketedPaste(os.Stdout)
+	defer disableBracketedPaste(os.Stdout)
 	memEval := agent.DefaultMemoryEvaluator()
 	turn := 0
 	for {
-		log.Printf("you> ")
-		if !in.Scan() {
+		userMsg, exit, err := readUserMessage(in, os.Stdout)
+		if err != nil {
+			log.Printf("read stdin: %v", err)
 			break
 		}
-		line := strings.TrimSpace(in.Text())
-		if line == "" {
+		if exit {
+			break
+		}
+		if strings.TrimSpace(userMsg) == "" {
 			continue
-		}
-		if line == "exit" || line == "quit" {
-			break
 		}
 
 		turn++
-		emit("user.message", "User message received", map[string]string{"text": line})
+		emit("user.message", "User message received", map[string]string{"text": userMsg})
 
 		// Reset per-turn usage accumulator.
 		var turnUsage types.LLMUsage
@@ -241,15 +246,12 @@ func main() {
 			})
 		}
 
-		final, err := a.Run(context.Background(), line)
+		final, err := a.Run(context.Background(), userMsg)
 		if err != nil {
 			logEventLine("agent.error", "Agent loop error", map[string]string{"err": err.Error()})
 			log.Printf("agent error: %v", err)
 			continue
 		}
-		log.Printf("agent> %s", final)
-		logEventLine("agent.final", "Agent produced final answer", map[string]string{"text": final})
-		emit("agent.final", "Agent produced final answer", map[string]string{"text": final})
 
 		// Print a turn-level usage summary if the provider reported usage.
 		if turnUsage.TotalTokens != 0 {
@@ -276,70 +278,76 @@ func main() {
 					"reason":   "no_update",
 					"bytes":    "0",
 				})
-				continue
-			}
+			} else {
 
-			trimmed := strings.TrimSpace(updateRaw)
-			hash := agent.SHA256Hex(trimmed)
+				trimmed := strings.TrimSpace(updateRaw)
+				hash := agent.SHA256Hex(trimmed)
 
-			accepted, reason, cleaned := memEval.Evaluate(updateRaw)
+				accepted, reason, cleaned := memEval.Evaluate(updateRaw)
 
-			logEventLine("memory.evaluate", "Evaluated memory update", map[string]string{
-				"turn":     strconv.Itoa(turn),
-				"accepted": fmtBool(accepted),
-				"reason":   reason,
-				"bytes":    strconv.Itoa(len(trimmed)),
-				"sha256":   hash[:12],
-			})
-			emit("memory.evaluate", "Evaluated memory update", map[string]string{
-				"turn":     strconv.Itoa(turn),
-				"accepted": fmtBool(accepted),
-				"reason":   reason,
-				"bytes":    strconv.Itoa(len(trimmed)),
-				"sha256":   hash[:12],
-			})
+				logEventLine("memory.evaluate", "Evaluated memory update", map[string]string{
+					"turn":     strconv.Itoa(turn),
+					"accepted": fmtBool(accepted),
+					"reason":   reason,
+					"bytes":    strconv.Itoa(len(trimmed)),
+					"sha256":   hash[:12],
+				})
+				emit("memory.evaluate", "Evaluated memory update", map[string]string{
+					"turn":     strconv.Itoa(turn),
+					"accepted": fmtBool(accepted),
+					"reason":   reason,
+					"bytes":    strconv.Itoa(len(trimmed)),
+					"sha256":   hash[:12],
+				})
 
-			if accepted {
-				// Commit to run-scoped memory.md on disk (host policy).
-				if err := appendRunMemory(memoryRes.BaseDir, strings.TrimSpace(cleaned)); err != nil {
-					logEventLine("memory.commit.error", "Failed to commit memory update", map[string]string{"err": err.Error()})
-				} else {
-					logEventLine("memory.commit", "Committed memory update", map[string]string{
-						"turn":   strconv.Itoa(turn),
-						"bytes":  strconv.Itoa(len(strings.TrimSpace(cleaned))),
-						"sha256": hash[:12],
+				if accepted {
+					// Commit to run-scoped memory.md on disk (host policy).
+					if err := appendRunMemory(memoryRes.BaseDir, strings.TrimSpace(cleaned)); err != nil {
+						logEventLine("memory.commit.error", "Failed to commit memory update", map[string]string{"err": err.Error()})
+					} else {
+						logEventLine("memory.commit", "Committed memory update", map[string]string{
+							"turn":   strconv.Itoa(turn),
+							"bytes":  strconv.Itoa(len(strings.TrimSpace(cleaned))),
+							"sha256": hash[:12],
+						})
+						emit("memory.commit", "Committed memory update", map[string]string{
+							"turn":   strconv.Itoa(turn),
+							"bytes":  strconv.Itoa(len(strings.TrimSpace(cleaned))),
+							"sha256": hash[:12],
+						})
+					}
+				}
+
+				if err := agent.AppendCommitLog(memoryRes.BaseDir, agent.MemoryCommitLine{
+					Model:    model,
+					Turn:     turn,
+					Accepted: accepted,
+					Reason:   reason,
+					Bytes:    len(trimmed),
+					SHA256:   hash,
+				}); err != nil {
+					logEventLine("memory.audit.error", "Failed to append memory audit log", map[string]string{
+						"turn": strconv.Itoa(turn),
+						"err":  err.Error(),
 					})
-					emit("memory.commit", "Committed memory update", map[string]string{
-						"turn":   strconv.Itoa(turn),
-						"bytes":  strconv.Itoa(len(strings.TrimSpace(cleaned))),
-						"sha256": hash[:12],
+				} else {
+					logEventLine("memory.audit.append", "Appended memory audit log", map[string]string{
+						"turn":     strconv.Itoa(turn),
+						"accepted": fmtBool(accepted),
+						"reason":   reason,
+						"sha256":   hash[:12],
 					})
 				}
 			}
 
-			if err := agent.AppendCommitLog(memoryRes.BaseDir, agent.MemoryCommitLine{
-				Model:    model,
-				Turn:     turn,
-				Accepted: accepted,
-				Reason:   reason,
-				Bytes:    len(trimmed),
-				SHA256:   hash,
-			}); err != nil {
-				logEventLine("memory.audit.error", "Failed to append memory audit log", map[string]string{
-					"turn": strconv.Itoa(turn),
-					"err":  err.Error(),
-				})
-			} else {
-				logEventLine("memory.audit.append", "Appended memory audit log", map[string]string{
-					"turn":     strconv.Itoa(turn),
-					"accepted": fmtBool(accepted),
-					"reason":   reason,
-					"sha256":   hash[:12],
-				})
-			}
-
 			_ = fs.Write("/memory/update.md", []byte{})
 		}
+
+		// Print the final agent response last, after host-side housekeeping logs.
+		// This keeps the terminal output easy to follow during interactive sessions.
+		log.Printf("agent> %s", final)
+		logEventLine("agent.final", "Agent produced final answer", map[string]string{"text": final})
+		emit("agent.final", "Agent produced final answer", map[string]string{"text": final})
 	}
 
 	emit("run.completed", "Run finished", data)
@@ -389,4 +397,265 @@ func appendRunMemory(baseDir string, update string) error {
 	defer f.Close()
 	_, err = f.WriteString("\n\n---\n" + time.Now().UTC().Format(time.RFC3339Nano) + "\n\n" + update + "\n")
 	return err
+}
+
+const (
+	bracketedPasteEnable  = "\x1b[?2004h"
+	bracketedPasteDisable = "\x1b[?2004l"
+	bracketedPasteStart   = "\x1b[200~"
+	bracketedPasteEnd     = "\x1b[201~"
+)
+
+// enableBracketedPaste asks the terminal to wrap pasted text in sentinel escape sequences.
+//
+// This makes multi-line paste usable in a line-oriented REPL:
+//   - the terminal sends "\x1b[200~" before pasted content and "\x1b[201~" after
+//   - the REPL can buffer until it sees the end sentinel and treat the entire paste as one message
+//
+// If the terminal does not support bracketed paste, it is a harmless no-op.
+func enableBracketedPaste(w io.Writer) {
+	_, _ = io.WriteString(w, bracketedPasteEnable)
+}
+
+// disableBracketedPaste disables terminal bracketed paste mode.
+func disableBracketedPaste(w io.Writer) {
+	_, _ = io.WriteString(w, bracketedPasteDisable)
+}
+
+// readUserMessage reads one "user turn" from stdin.
+//
+// It supports three ways to compose a message:
+//  1. Single-line input: type a line and press Enter.
+//  2. Multi-line paste: paste text; the REPL buffers until the terminal signals paste end.
+//  3. Explicit compose modes:
+//     - :paste   (multi-line; end with a line containing only ".")
+//     - :compose (opens $VISUAL/$EDITOR)
+//
+// This is intentionally "boring" (no readline deps). The goal is to avoid the UX bug where
+// multi-line paste turns into multiple agent turns and looks like the agent keeps running
+// after it already produced a final answer.
+func readUserMessage(in *bufio.Reader, out io.Writer) (msg string, exit bool, err error) {
+	for {
+		_, _ = io.WriteString(out, "you> ")
+		raw, readErr := in.ReadString('\n')
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return "", false, readErr
+		}
+		if errors.Is(readErr, io.EOF) && raw == "" {
+			return "", true, nil
+		}
+
+		// If the terminal wrapped a paste, buffer until we see the end sentinel.
+		if strings.Contains(raw, bracketedPasteStart) && !strings.Contains(raw, bracketedPasteEnd) && !errors.Is(readErr, io.EOF) {
+			var b strings.Builder
+			b.WriteString(raw)
+			for {
+				next, nextErr := in.ReadString('\n')
+				b.WriteString(next)
+				if strings.Contains(next, bracketedPasteEnd) || strings.Contains(b.String(), bracketedPasteEnd) || errors.Is(nextErr, io.EOF) {
+					raw = b.String()
+					readErr = nextErr
+					break
+				}
+				if nextErr != nil && !errors.Is(nextErr, io.EOF) {
+					return "", false, nextErr
+				}
+			}
+		}
+
+		raw = strings.ReplaceAll(raw, "\r", "")
+		raw = strings.ReplaceAll(raw, bracketedPasteStart, "")
+		raw = strings.ReplaceAll(raw, bracketedPasteEnd, "")
+		raw = strings.TrimRight(raw, "\n")
+
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			if errors.Is(readErr, io.EOF) {
+				return "", true, nil
+			}
+			continue
+		}
+
+		switch line {
+		case "exit", "quit":
+			return "", true, nil
+		case ":help", "help":
+			printREPLHelp(out)
+			continue
+		case ":paste":
+			msg, exit, err := readMultilinePaste(in, out)
+			if err != nil {
+				return "", false, err
+			}
+			if exit {
+				return "", true, nil
+			}
+			if strings.TrimSpace(msg) == "" {
+				continue
+			}
+			edited, err := maybeEditMessage(in, out, msg)
+			if err != nil {
+				return "", false, err
+			}
+			return strings.TrimSpace(edited), false, nil
+		case ":compose", ":edit":
+			edited, err := editMessageInEditor("")
+			if err != nil {
+				return "", false, err
+			}
+			if strings.TrimSpace(edited) == "" {
+				continue
+			}
+			if ok, err := confirmSend(in, out); err != nil {
+				return "", false, err
+			} else if !ok {
+				continue
+			}
+			return strings.TrimSpace(edited), false, nil
+		default:
+			// If the user pasted multi-line content, open an editor so they can adjust it
+			// before sending it to the agent (better UX than trying to edit inline).
+			if strings.Contains(raw, "\n") {
+				edited, err := maybeEditMessage(in, out, raw)
+				if err != nil {
+					return "", false, err
+				}
+				return strings.TrimSpace(edited), false, nil
+			}
+			return line, false, nil
+		}
+	}
+}
+
+func printREPLHelp(w io.Writer) {
+	_, _ = io.WriteString(w, strings.TrimSpace(`
+Commands:
+  :help           show this help
+  :paste          enter multi-line mode (end with a line containing only ".")
+  :compose/:edit  open $VISUAL/$EDITOR to write a message
+  exit/quit       leave the chat session
+
+Tips:
+  - Multi-line paste is supported when your terminal supports "bracketed paste".
+    If paste still submits line-by-line, use :paste or :compose.
+`)+"\n\n")
+}
+
+// readMultilinePaste reads multi-line input until the user terminates it.
+//
+// End markers:
+//   - a line containing only "." sends the message
+//   - ":abort" cancels the message
+//   - "exit"/"quit" exits the chat session
+func readMultilinePaste(in *bufio.Reader, out io.Writer) (msg string, exit bool, err error) {
+	_, _ = io.WriteString(out, "paste mode (end with a line containing only \".\"; :abort cancels)\n")
+	var b strings.Builder
+	for {
+		_, _ = io.WriteString(out, "...> ")
+		line, readErr := in.ReadString('\n')
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return "", false, readErr
+		}
+		if errors.Is(readErr, io.EOF) && line == "" {
+			return "", true, nil
+		}
+		line = strings.ReplaceAll(line, "\r", "")
+		line = strings.TrimRight(line, "\n")
+		trim := strings.TrimSpace(line)
+		switch trim {
+		case ".":
+			return b.String(), false, nil
+		case ":abort":
+			return "", false, nil
+		case "exit", "quit":
+			return "", true, nil
+		default:
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+	}
+}
+
+// maybeEditMessage opens an editor (if configured) and asks for send confirmation.
+//
+// This is primarily used for multi-line pasted messages: the user can paste, edit, then
+// press Enter to submit as a single agent turn.
+func maybeEditMessage(in *bufio.Reader, out io.Writer, initial string) (string, error) {
+	edited, err := editMessageInEditor(initial)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(edited) == "" {
+		return "", nil
+	}
+	ok, err := confirmSend(in, out)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", nil
+	}
+	return edited, nil
+}
+
+// confirmSend prompts the user to press Enter to send the composed message.
+func confirmSend(in *bufio.Reader, out io.Writer) (bool, error) {
+	_, _ = io.WriteString(out, "press Enter to send (or type 'abort' to cancel)\n")
+	_, _ = io.WriteString(out, "send> ")
+	line, err := in.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	if strings.TrimSpace(line) == "abort" {
+		return false, nil
+	}
+	return true, nil
+}
+
+// editMessageInEditor opens $VISUAL or $EDITOR to edit a message, returning the final text.
+//
+// If no editor is configured, it returns the original text unchanged.
+func editMessageInEditor(initial string) (string, error) {
+	editor := strings.TrimSpace(os.Getenv("VISUAL"))
+	if editor == "" {
+		editor = strings.TrimSpace(os.Getenv("EDITOR"))
+	}
+	if editor == "" {
+		return initial, nil
+	}
+
+	tmp, err := os.CreateTemp("", "workbench-message-*.md")
+	if err != nil {
+		return "", err
+	}
+	name := tmp.Name()
+	_ = os.Chmod(name, 0600)
+	if _, err := tmp.WriteString(initial); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", err
+	}
+	defer os.Remove(name)
+
+	fields := strings.Fields(editor)
+	if len(fields) == 0 {
+		return initial, nil
+	}
+	cmd := exec.Command(fields[0], append(fields[1:], name)...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+
+	b, err := os.ReadFile(name)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }

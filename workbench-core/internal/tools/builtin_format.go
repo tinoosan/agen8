@@ -230,11 +230,21 @@ func formatHTML(req types.ToolRequest) (ToolCallResult, error) {
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: "indent must be between 0 and 8"}
 	}
 
+	// Keep this formatter lean and predictable:
+	// - no external binaries
+	// - no third-party HTML pretty-printer dependencies
+	//
+	// This is intentionally best-effort: it targets readability for typical minified HTML
+	// (e.g. responses from curl) rather than 100% whitespace-preserving semantics.
 	outText := prettyHTML(in.Text, indent)
+	if !strings.HasSuffix(outText, "\n") {
+		outText += "\n"
+	}
+
 	resp := formatHTMLOutput{
 		Text:    outText,
 		Changed: outText != in.Text,
-		Warning: "best-effort formatter; may not preserve all whitespace-sensitive semantics (avoid for <pre>/<textarea>/<script>/<style> if exact whitespace matters)",
+		Warning: "best-effort formatter; may not preserve whitespace-sensitive semantics (avoid for <pre>/<textarea>/<script>/<style> if exact whitespace matters)",
 	}
 	b, err := json.Marshal(resp)
 	if err != nil {
