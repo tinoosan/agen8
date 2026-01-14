@@ -118,17 +118,6 @@ func main() {
 		ToolRegistry: tools.BuiltinInvokerRegistry(builtinCfg),
 	}
 
-	// Keep the default goal intentionally vague so the agent has to discover
-	// the environment (/tools, /trace, /results, /workspace) and choose actions.
-	userRequest := "Test the builtin.bash tool first: fetch https://example.com and write the response body to /workspace/example.html. Then summarize what you did and what you observed about the environment."
-	if len(os.Args) > 1 {
-		userRequest = strings.Join(os.Args[1:], " ")
-	}
-	log.Printf("user -> agent: %q", userRequest)
-	emit("user.request", "User request received", map[string]string{
-		"text": userRequest,
-	})
-
 	executor := &agent.HostOpExecutor{FS: fs, Runner: &runner, DefaultMaxBytes: 4096}
 	model := strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
 	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" || model == "" {
