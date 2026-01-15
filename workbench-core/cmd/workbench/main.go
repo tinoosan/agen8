@@ -167,6 +167,7 @@ func main() {
 	}
 	baseSystemPrompt := string(systemPromptBytes)
 
+	var updater *agent.ContextUpdater
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		reqData := map[string]string{
 			"op":       req.Op,
@@ -189,6 +190,9 @@ func main() {
 			StoreData: map[string]string{"op": req.Op, "path": req.Path, "toolId": req.ToolID.String(), "actionId": req.ActionID},
 		})
 		resp := executor.Exec(ctx, req)
+		if updater != nil {
+			updater.ObserveHostOp(req, resp)
+		}
 
 		respData := map[string]string{
 			"op":  resp.Op,
@@ -219,7 +223,7 @@ func main() {
 		Data:    map[string]string{"model": model},
 	})
 
-	updater := &agent.ContextUpdater{
+	updater = &agent.ContextUpdater{
 		FS:             fs,
 		MaxMemoryBytes: 8 * 1024,
 		MaxTraceBytes:  8 * 1024,
