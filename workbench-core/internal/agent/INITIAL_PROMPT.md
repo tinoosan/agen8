@@ -20,7 +20,7 @@ VFS operations:
 - `fs.list(vpath)`:
   - `{"op":"fs.list","path":"/tools"}`
 - `fs.read(vpath)`:
-  - `{"op":"fs.read","path":"/trace/events.latest/50","maxBytes":4096}`
+  - `{"op":"fs.read","path":"/workspace/notes.md","maxBytes":4096}`
 - `fs.write(vpath, bytes)`:
   - `{"op":"fs.write","path":"/workspace/notes.md","text":"..."}`
 - `fs.append(vpath, bytes)`:
@@ -30,6 +30,7 @@ Tool execution:
 
 - `tool.run(toolId, actionId, input)`:
   - `{"op":"tool.run","toolId":"builtin.bash","actionId":"exec","input":{...},"timeoutMs":5000}`
+  - `{"op":"tool.run","toolId":"builtin.trace","actionId":"events.summary","input":{"cursor":"0","limit":50,"maxBytes":8192}}`
 
 ## 1) Your Only Assumed Capabilities (Host Primitives)
 
@@ -46,7 +47,8 @@ All paths you use are **VFS paths** (start with `/`).
 
 1. `fs.list("/")` to see available mounts.
 2. Read recent context:
-   - `fs.read("/trace/events.latest/50")` (or a smaller number if needed)
+   - Prefer the **Recent Ops (from /trace)** section in your system prompt.
+   - If you need more trace beyond what the system prompt includes, call `builtin.trace`.
 
 ## 3) Tool Discovery Contract (/tools)
 
@@ -81,20 +83,33 @@ Use `/workspace` as your writable working directory:
 
 ## 5) Run Trace (/trace)
 
-`/trace` is a **read-only** event feed (JSONL).
+The system maintains a **run-scoped** event feed (JSONL) used for auditability and
+short-term state.
 
-Common reads:
+### Preferred interface (module-as-tool)
 
-- Recent events: `fs.read("/trace/events.latest/<n>")`
-- Incremental polling:
-  - Track a byte offset `offset` (typically provided by the host/UI).
-  - Fetch new bytes since that offset:
-    - `fs.read("/trace/events.since/<offset>")`
+Use the always-available builtin module tool `builtin.trace`:
+
+- Latest events:
+  - `tool.run("builtin.trace","events.latest", {"limit": 50, "maxBytes": 8192})`
+- Incremental polling (cursor-based):
+  - Track a `cursor` token returned by the host/module.
+  - Fetch new events since that cursor:
+    - `tool.run("builtin.trace","events.since", {"cursor": "<cursor>", "limit": 200, "maxBytes": 8192})`
+- Token-efficient summary (recommended):
+  - `tool.run("builtin.trace","events.summary", {"cursor": "<cursor>", "limit": 200, "maxBytes": 8192})`
 
 Notes:
 
-- `events.since/<offset>` uses a **byte offset** into the JSONL file (not “last N lines”).
-- Treat each line as one JSON object.
+- `cursor` is an **opaque token**. Do not assume it is a byte offset, timestamp, or id.
+- Treat each event as one JSON object.
+
+### Debug-only interface (raw file)
+
+`/trace` is also mounted as a read-only filesystem view for debugging.
+
+- `fs.read("/trace/events")` returns raw JSONL bytes.
+- Avoid encoding queries into file paths (no `/trace/events.since/...` or `/trace/events.latest/...`).
 
 ## 6) Tool Results (/results) — CallID-First Layout
 

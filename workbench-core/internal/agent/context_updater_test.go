@@ -10,11 +10,12 @@ import (
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/internal/trace"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
-func TestContextUpdater_IncludesMemoryAndAdvancesTraceOffset(t *testing.T) {
+func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 	tmp := t.TempDir()
 	old := config.DataDir
 	config.DataDir = tmp
@@ -65,14 +66,26 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceOffset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSystemPrompt: %v", err)
 	}
-	if u.TraceOffset == 0 {
-		t.Fatalf("expected trace offset to advance")
+	after1, err := trace.CursorToInt64(u.TraceCursor)
+	if err != nil {
+		t.Fatalf("CursorToInt64: %v", err)
+	}
+	if after1 == 0 {
+		t.Fatalf("expected trace cursor to advance")
 	}
 	if m1.Memory.BytesIncluded == 0 {
 		t.Fatalf("expected memory to be included")
 	}
-	if m1.Trace.OffsetAfter <= m1.Trace.OffsetBefore {
-		t.Fatalf("expected trace offset to advance in manifest")
+	before1, err := trace.CursorToInt64(m1.Trace.CursorBefore)
+	if err != nil {
+		t.Fatalf("CursorToInt64 before: %v", err)
+	}
+	afterManifest1, err := trace.CursorToInt64(m1.Trace.CursorAfter)
+	if err != nil {
+		t.Fatalf("CursorToInt64 after: %v", err)
+	}
+	if afterManifest1 <= before1 {
+		t.Fatalf("expected trace cursor to advance in manifest")
 	}
 	if system1 == "base" {
 		t.Fatalf("expected prompt to be augmented")
@@ -84,7 +97,7 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceOffset(t *testing.T) {
 	}
 
 	// Add another event and confirm offset advances again.
-	before := u.TraceOffset
+	before := u.TraceCursor
 	if err := store.AppendEvent(run.RunId, "test.event2", "hello2", map[string]string{}); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
@@ -93,11 +106,11 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceOffset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSystemPrompt: %v", err)
 	}
-	if u.TraceOffset <= before {
-		t.Fatalf("expected trace offset to advance again")
+	if u.TraceCursor == before {
+		t.Fatalf("expected trace cursor to advance again")
 	}
-	if m2.Trace.OffsetBefore != before {
-		t.Fatalf("expected offsetBefore=%d got %d", before, m2.Trace.OffsetBefore)
+	if m2.Trace.CursorBefore != before {
+		t.Fatalf("expected cursorBefore=%q got %q", before, m2.Trace.CursorBefore)
 	}
 }
 

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tinoosan/workbench-core/internal/trace"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
@@ -27,6 +29,16 @@ import (
 type ContextUpdater struct {
 	FS *vfs.FS
 
+	// TraceStore is the module-style API used to read trace events.
+	//
+	// This replaces encoding dynamic queries into VFS paths like:
+	//   /trace/events.since/<offset>
+	//   /trace/events.latest/<n>
+	//
+	// If nil, the updater falls back to calling methods on the mounted trace resource
+	// (ReadEventsSince/ReadLastEvents), which still avoids dynamic path conventions.
+	TraceStore trace.Store
+
 	// LastOp/LastResp are the most recent host op request/response observed by the host.
 	//
 	// These are optional, but enable deterministic, adaptive context policies:
@@ -40,9 +52,12 @@ type ContextUpdater struct {
 	// LastToolRun captures the most recent tool.run call (if any).
 	LastToolRun *LastToolRun
 
-	// TraceOffset is the current byte offset into /trace/events.jsonl used by
-	// events.since/<offset>.
-	TraceOffset int64
+	// TraceCursor is the current cursor into the run trace stream used by
+	// the module-style events.since cursor API.
+	//
+	// Cursor is treated as opaque by the updater. DiskTraceStore currently encodes it
+	// as a base-10 int64 byte offset into data/runs/<runId>/trace/events.jsonl.
+	TraceCursor trace.Cursor
 
 	// MaxMemoryBytes caps how many bytes from /memory/memory.md are injected.
 	// If zero, a default is used.
@@ -82,8 +97,8 @@ type LastToolRun struct {
 type ContextPolicy struct {
 	Step int `json:"step"`
 
-	TraceOffsetBefore int64 `json:"traceOffsetBefore"`
-	TraceOffsetAfter  int64 `json:"traceOffsetAfter"`
+	TraceCursorBefore trace.Cursor `json:"traceCursorBefore"`
+	TraceCursorAfter  trace.Cursor `json:"traceCursorAfter"`
 
 	LastOp    *types.HostOpRequest  `json:"lastOp,omitempty"`
 	LastResp  *types.HostOpResponse `json:"lastResp,omitempty"`
@@ -115,15 +130,15 @@ type ContextManifest struct {
 	} `json:"memory"`
 
 	Trace struct {
-		Path          string `json:"path"`
-		ReadMode      string `json:"readMode"` // "since" or "latest"
-		ReadError     string `json:"readError,omitempty"`
-		OffsetBefore  int64  `json:"offsetBefore"`
-		OffsetAfter   int64  `json:"offsetAfter"`
-		BytesRead     int    `json:"bytesRead"`
-		BytesIncluded int    `json:"bytesIncluded"`
-		Truncated     bool   `json:"truncated"`
-		BudgetBytes   int    `json:"budgetBytes"`
+		Path          string       `json:"path"`
+		ReadMode      string       `json:"readMode"` // "since" or "latest"
+		ReadError     string       `json:"readError,omitempty"`
+		CursorBefore  trace.Cursor `json:"cursorBefore"`
+		CursorAfter   trace.Cursor `json:"cursorAfter"`
+		BytesRead     int          `json:"bytesRead"`
+		BytesIncluded int          `json:"bytesIncluded"`
+		Truncated     bool         `json:"truncated"`
+		BudgetBytes   int          `json:"budgetBytes"`
 
 		Events struct {
 			LinesTotal     int `json:"linesTotal"`
@@ -198,23 +213,26 @@ func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt strin
 	manifest.Memory.BudgetBytes = policy.Budgets.MemoryBytes
 
 	// Trace excerpt (incremental since offset -> parsed -> filtered -> condensed).
-	traceMode, tracePath, traceBytes, traceRead, offsetBefore, offsetAfter, traceErr := u.readTraceSince(ctx, policy.TraceOffsetBefore)
-	u.TraceOffset = offsetAfter
-	manifest.Policy.TraceOffsetAfter = offsetAfter
+	traceMode, tracePath, batch, cursorBefore, cursorAfter, traceErr := u.readTraceBatch(ctx, policy.TraceCursorBefore, trace.SinceOptions{
+		MaxBytes: policy.Budgets.TraceBytes,
+		Limit:    200,
+	})
+	u.TraceCursor = cursorAfter
+	manifest.Policy.TraceCursorAfter = cursorAfter
 	manifest.Trace.Path = tracePath
 	manifest.Trace.ReadMode = traceMode
-	manifest.Trace.OffsetBefore = offsetBefore
-	manifest.Trace.OffsetAfter = offsetAfter
-	manifest.Trace.BytesRead = traceRead
+	manifest.Trace.CursorBefore = cursorBefore
+	manifest.Trace.CursorAfter = cursorAfter
+	manifest.Trace.BytesRead = batch.BytesRead
 	if traceErr != nil {
 		manifest.Trace.ReadError = traceErr.Error()
 	}
 
-	linesTotal, parsed, parseErrors, newEvents := parseEventJSONL(traceBytes)
-	manifest.Trace.Events.LinesTotal = linesTotal
-	manifest.Trace.Events.Parsed = parsed
-	manifest.Trace.Events.ParseErrors = parseErrors
+	manifest.Trace.Events.LinesTotal = batch.LinesTotal
+	manifest.Trace.Events.Parsed = batch.Parsed
+	manifest.Trace.Events.ParseErrors = batch.ParseErrors
 
+	newEvents := toTypesEvents(batch.Events)
 	if traceMode == "since" {
 		u.traceEvents = append(u.traceEvents, newEvents...)
 		if len(u.traceEvents) > maxEvents {
@@ -259,11 +277,10 @@ func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt strin
 			"step":             strconv.Itoa(step),
 			"memoryBytes":      strconv.Itoa(manifest.Memory.BytesIncluded),
 			"traceBytes":       strconv.Itoa(manifest.Trace.BytesIncluded),
-			"traceOffsetAfter": strconv.FormatInt(manifest.Trace.OffsetAfter, 10),
+			"traceOffsetAfter": string(manifest.Trace.CursorAfter),
 		})
 	}
 
-	_ = ctx
 	return system, manifest, nil
 }
 
@@ -317,7 +334,7 @@ var _ = types.HostOpRequest{}
 
 func (u *ContextUpdater) computePolicy(step int, baseMem, baseTrace int) ContextPolicy {
 	p := ContextPolicy{Step: step}
-	p.TraceOffsetBefore = u.TraceOffset
+	p.TraceCursorBefore = u.TraceCursor
 	p.TraceIncludeTypes = u.TraceIncludeTypes
 	if len(p.TraceIncludeTypes) == 0 {
 		p.TraceIncludeTypes = defaultTraceIncludeTypes()
@@ -382,53 +399,55 @@ type traceLatestReader interface {
 	ReadLastEvents(count int) ([]byte, error)
 }
 
-func (u *ContextUpdater) readTraceSince(ctx context.Context, offset int64) (mode, path string, b []byte, bytesRead int, offsetBefore, offsetAfter int64, err error) {
-	_ = ctx
-	offsetBefore = offset
+func (u *ContextUpdater) readTraceBatch(ctx context.Context, cursor trace.Cursor, opts trace.SinceOptions) (mode, source string, batch trace.Batch, cursorBefore, cursorAfter trace.Cursor, err error) {
+	if strings.TrimSpace(string(cursor)) == "" {
+		cursor = trace.CursorFromInt64(0)
+	}
+	cursorBefore = cursor
+	mode = "since"
+	source = "/trace/events.jsonl"
 
-	// Prefer calling into the underlying trace resource directly so we can get nextOffset
-	// even in error cases (e.g. "requested exceeds max").
+	if u.TraceStore != nil {
+		b, readErr := u.TraceStore.EventsSince(ctx, cursor, opts)
+		return mode, source, b, cursorBefore, b.CursorAfter, readErr
+	}
+
+	// Fallback: use the mounted trace resource's callable methods (still avoids dynamic paths).
 	_, r, _, resErr := u.FS.Resolve("/trace")
 	if resErr == nil {
 		if tr, ok := r.(traceSinceReader); ok {
-			path = "/trace/events.since/" + strconv.FormatInt(offset, 10)
-			mode = "since"
-			out, next, readErr := tr.ReadEventsSince(offset)
-			if readErr == nil {
-				return mode, path, out, len(out), offsetBefore, next, nil
+			offset, err := trace.CursorToInt64(cursor)
+			if err != nil {
+				return mode, source, trace.Batch{CursorAfter: cursor}, cursorBefore, cursor, fmt.Errorf("invalid trace cursor for trace resource fallback")
 			}
-			// Fall back to latest snapshot when the since window is too large.
-			if lr, ok := r.(traceLatestReader); ok {
-				mode = "latest"
-				path = "/trace/events.latest/200"
-				out2, err2 := lr.ReadLastEvents(200)
-				if err2 != nil {
-					return mode, path, []byte{}, 0, offsetBefore, next, fmt.Errorf("events.latest fallback failed: %w", err2)
-				}
-				return mode, path, out2, len(out2), offsetBefore, next, fmt.Errorf("events.since failed: %w", readErr)
+			raw, next, readErr := tr.ReadEventsSince(offset)
+			// Parse raw JSONL into trace.Event, then into batch.
+			linesTotal, parsed, parseErrors, events := parseTypesEventJSONL(raw)
+			batch = trace.Batch{
+				Events:         toTraceEvents(events),
+				CursorAfter:    trace.CursorFromInt64(next),
+				BytesRead:      len(raw),
+				LinesTotal:     linesTotal,
+				Parsed:         parsed,
+				ParseErrors:    parseErrors,
+				Returned:       len(events),
+				ReturnedCapped: false,
 			}
-			// No latest fallback available; still advance offset to next.
-			return mode, path, []byte{}, 0, offsetBefore, next, fmt.Errorf("events.since failed: %w", readErr)
+			return mode, "/trace/events.jsonl", batch, cursorBefore, batch.CursorAfter, readErr
 		}
 	}
 
-	// Fallback: read via VFS only (no nextOffset available).
-	mode = "since"
-	path = "/trace/events.since/" + strconv.FormatInt(offset, 10)
-	out, readErr := u.FS.Read(path)
-	if readErr != nil {
-		return mode, path, []byte{}, 0, offsetBefore, offsetBefore, readErr
-	}
-	return mode, path, out, len(out), offsetBefore, offsetBefore + int64(len(out)), nil
+	return mode, source, trace.Batch{CursorAfter: cursor}, cursorBefore, cursor, fmt.Errorf("trace store not configured and trace resource does not support cursor reads")
 }
 
-func parseEventJSONL(b []byte) (linesTotal, parsed, parseErrors int, events []types.Event) {
+func parseTypesEventJSONL(b []byte) (linesTotal, parsed, parseErrors int, events []types.Event) {
 	if len(b) == 0 {
 		return 0, 0, 0, nil
 	}
-	sc := bufio.NewScanner(strings.NewReader(string(b)))
-	// Scanner default token limit is 64K; our trace is capped at 64K for since reads,
-	// and latest is bounded by count, so this is safe.
+	sc := bufio.NewScanner(bytes.NewReader(b))
+	// The default token limit is 64K; increase it a bit so we can parse larger JSONL lines
+	// without surprising truncation when the caller has a higher MaxBytes budget.
+	sc.Buffer(make([]byte, 0, 64*1024), 256*1024)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -444,10 +463,55 @@ func parseEventJSONL(b []byte) (linesTotal, parsed, parseErrors int, events []ty
 		events = append(events, ev)
 	}
 	if err := sc.Err(); err != nil && !errors.Is(err, io.EOF) {
-		// Treat scanner errors as parse errors for accounting.
 		parseErrors++
 	}
 	return linesTotal, parsed, parseErrors, events
+}
+
+func toTraceEvents(in []types.Event) []trace.Event {
+	out := make([]trace.Event, 0, len(in))
+	for _, ev := range in {
+		out = append(out, trace.Event{
+			Timestamp: ev.Timestamp.UTC().Format(time.RFC3339Nano),
+			Type:      ev.Type,
+			Message:   ev.Message,
+			Data:      ev.Data,
+		})
+	}
+	return out
+}
+
+func toTypesEvents(in []trace.Event) []types.Event {
+	out := make([]types.Event, 0, len(in))
+	for _, ev := range in {
+		out = append(out, types.Event{
+			// These fields are not needed for reasoning summaries; keep them empty.
+			Timestamp: parseRFC3339Time(ev.Timestamp),
+			Type:      ev.Type,
+			Message:   ev.Message,
+			Data:      ev.Data,
+		})
+	}
+	return out
+}
+
+func parseRFC3339Time(s string) time.Time {
+	if strings.TrimSpace(s) == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		// best-effort: return zero time
+		return time.Time{}
+	}
+	return t
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func summarizeTrace(all []types.Event, includeTypes []string, budgetBytes int) (summary string, selected, capped, excluded int, truncated bool) {

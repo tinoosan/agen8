@@ -19,6 +19,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tools"
+	"github.com/tinoosan/workbench-core/internal/trace"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
@@ -66,7 +67,7 @@ func main() {
 		Console: boolp(false),
 	})
 
-	trace, err := resources.NewTraceResource(run.RunId)
+	traceRes, err := resources.NewTraceResource(run.RunId)
 	if err != nil {
 		log.Fatalf("error creating trace: %v", err)
 	}
@@ -123,8 +124,8 @@ func main() {
 	log.Printf("mounted /workspace => %s", workspace.BaseDir)
 	fs.Mount(vfs.MountResults, results)
 	log.Printf("mounted /results => %s", results.BaseDir)
-	fs.Mount(vfs.MountTrace, trace)
-	log.Printf("mounted /trace => %s", trace.BaseDir)
+	fs.Mount(vfs.MountTrace, traceRes)
+	log.Printf("mounted /trace => %s", traceRes.BaseDir)
 	fs.Mount(vfs.MountTools, toolsResource)
 	log.Printf("mounted /tools => %s", toolsResource.BaseDir)
 	fs.Mount(vfs.MountMemory, memoryRes)
@@ -137,7 +138,11 @@ func main() {
 		log.Fatalf("error resolving workspace root absolute path: %v", err)
 	}
 
-	builtinCfg := tools.BuiltinConfig{BashRootDir: absWorkspaceRoot}
+	traceStore := trace.DiskTraceStore{Dir: traceRes.BaseDir}
+	builtinCfg := tools.BuiltinConfig{
+		BashRootDir: absWorkspaceRoot,
+		TraceStore:  traceStore,
+	}
 
 	runner := tools.Runner{
 		FS:           fs,
@@ -225,6 +230,7 @@ func main() {
 
 	updater = &agent.ContextUpdater{
 		FS:             fs,
+		TraceStore:     traceStore,
 		MaxMemoryBytes: 8 * 1024,
 		MaxTraceBytes:  8 * 1024,
 		ManifestPath:   "/workspace/context_manifest.json",
@@ -255,7 +261,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("error starting readline: %v", err)
 	}
+	// Route all log output (including event JSON lines) through readline so terminal
+	// redraw stays correct while the user is typing.
+	//
+	// Without this, log output can interleave with the input prompt/line buffer and
+	// make the UI look "broken" (shifted/indented lines).
+	oldLogWriter := log.Writer()
+	log.SetOutput(rr)
 	defer rr.Close()
+	defer log.SetOutput(oldLogWriter)
 	memEval := agent.DefaultMemoryEvaluator()
 	turn := 0
 	var conversation []types.LLMMessage
@@ -331,6 +345,7 @@ func main() {
 				"turn":       strconv.Itoa(turn),
 				"steps":      strconv.Itoa(steps),
 				"durationMs": strconv.FormatInt(dur.Milliseconds(), 10),
+				"duration":   dur.Truncate(time.Millisecond).String(),
 			},
 			Store: boolp(false),
 		})
@@ -441,7 +456,7 @@ func main() {
 
 		// Print the final agent response last, after host-side housekeeping logs.
 		// This keeps the terminal output easy to follow during interactive sessions.
-		log.Printf("agent> %s", final)
+		rr.Printf("agent> %s\n", final)
 		mustEmit(context.Background(), events.Event{
 			Type:    "agent.final",
 			Message: "Agent produced final answer",
