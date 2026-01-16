@@ -1,0 +1,31 @@
+// Package fsutil provides filesystem utilities for workbench data management.
+//
+// This package contains helper functions for constructing canonical file paths
+// and performing atomic file operations. It serves as a single source of truth
+// for workbench's data layout conventions.
+//
+// # Path Construction Helpers
+//
+// The package provides typed path builders that enforce the standard directory
+// structure under DataDir:
+//
+//	GetRunFilePath(dataDir, runId)           -> data/runs/<runId>/run.json
+//	GetEventFilePath(dataDir, runId)         -> data/runs/<runId>/events.jsonl
+//	GetRunWorkspaceDir(dataDir, runId)       -> data/runs/<runId>/workspace
+//	GetResultsDir(dataDir, runId)            -> data/runs/<runId>/results
+//	GetTraceDir(dataDir, runId)              -> data/runs/<runId>/trace
+//	GetRunMemoryDir(dataDir, runId)          -> data/runs/<runId>/memory
+//	GetToolsDir(dataDir)                     -> data/tools
+//	GetToolManifestPath(baseDir, toolId)     -> <baseDir>/<toolId>/manifest.json
+//
+// # Atomic Write Operations
+//
+// The package provides WriteFileAtomic which uses a temp-file-plus-rename strategy
+// to ensure file writes are atomic at the filesystem level. This prevents partial
+// writes from being visible to readers and reduces the risk of corruption.
+//
+// # Usage
+//
+//	runPath := fsutil.GetRunFilePath(config.DataDir, "run-abc123")
+//	err := fsutil.WriteFileAtomic(runPath, jsonBytes, 0644)
+package fsutil
