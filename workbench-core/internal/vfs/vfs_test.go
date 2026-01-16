@@ -120,6 +120,35 @@ func TestListRoot_IsStableAndPrefixed(t *testing.T) {
 	}
 }
 
+func TestNotFoundPathFails(t *testing.T) {
+	fs := vfs.NewFS()
+	fs.Mount("workspace", fakeResource{})
+
+	if _, err := fs.List("/nope"); err == nil {
+		t.Fatalf("expected error for unknown mount")
+	}
+	if _, err := fs.Read("/nope/x"); err == nil {
+		t.Fatalf("expected error for unknown mount")
+	}
+}
+
+func TestResolve_LongestPrefixWins(t *testing.T) {
+	fs := vfs.NewFS()
+	fs.Mount("a", fakeResource{})
+	fs.Mount("a/b", fakeResource{})
+
+	mn, _, subpath, err := fs.Resolve("/a/b/c")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if mn != "a/b" {
+		t.Fatalf("expected mount %q got %q", "a/b", mn)
+	}
+	if subpath != "c" {
+		t.Fatalf("expected subpath %q got %q", "c", subpath)
+	}
+}
+
 func TestList_RewritesPathsWithMountPrefix(t *testing.T) {
 	fs := vfs.NewFS()
 	fs.Mount("m", fakeResource{

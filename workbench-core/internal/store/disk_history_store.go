@@ -12,9 +12,9 @@ import (
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 )
 
-// DiskHistoryStore is a run-scoped HistoryStore backed by the on-disk history layout:
+// DiskHistoryStore is a session-scoped HistoryStore backed by the on-disk history layout:
 //
-//	data/runs/<runId>/history/history.jsonl
+//	data/sessions/<sessionId>/history/history.jsonl
 //
 // History is append-only: the store supports reading the full log and appending new
 // JSONL lines. Higher-level components decide what to record and with what metadata.
@@ -22,12 +22,12 @@ type DiskHistoryStore struct {
 	Path string
 }
 
-// NewDiskHistoryStore constructs a DiskHistoryStore for a runId under config.DataDir.
-func NewDiskHistoryStore(runId string) (*DiskHistoryStore, error) {
-	if strings.TrimSpace(runId) == "" {
-		return nil, fmt.Errorf("runId is required")
+// NewDiskHistoryStore constructs a DiskHistoryStore for a sessionID under config.DataDir.
+func NewDiskHistoryStore(sessionID string) (*DiskHistoryStore, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("sessionId is required")
 	}
-	return NewDiskHistoryStoreFromPath(fsutil.GetRunHistoryPath(config.DataDir, runId))
+	return NewDiskHistoryStoreFromPath(fsutil.GetSessionHistoryPath(config.DataDir, sessionID))
 }
 
 // NewDiskHistoryStoreFromPath constructs a DiskHistoryStore that reads/appends to path.

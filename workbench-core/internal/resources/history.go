@@ -14,7 +14,7 @@ import (
 
 // HistoryResource exposes an immutable, append-only history log under the VFS mount "/history".
 //
-// High-level model (run-scoped today)
+// High-level model (session-scoped)
 //
 // History records raw interactions between:
 //   - users (inputs)
@@ -30,10 +30,9 @@ import (
 // compliance verification.
 //
 // Scope
-//   - For now, history is scoped to a run:
-//     data/runs/<runId>/history/history.jsonl
-//   - Later, a multi-agent system may add a shared, cross-run mount at /history
-//     while keeping run-scoped histories for isolation.
+//   - History is scoped to a session:
+//     data/sessions/<sessionId>/history/history.jsonl
+//   - A session can contain multiple runs (including sub-agent runs).
 //
 // Access policy
 // - The agent can read history via VFS, but cannot write to it.
@@ -51,8 +50,8 @@ type HistoryResource struct {
 	// Example: "history" maps to the virtual namespace "/history".
 	Mount string
 
-	// RunId is the run this history directory belongs to.
-	RunId string
+	// SessionID is the session this history log belongs to.
+	SessionID string
 
 	// Store is the backing store for history.jsonl.
 	//
@@ -60,22 +59,22 @@ type HistoryResource struct {
 	Store store.HistoryStore
 }
 
-func NewRunHistoryResource(runId string) (*HistoryResource, error) {
-	if strings.TrimSpace(runId) == "" {
-		return nil, fmt.Errorf("runId cannot be empty")
+func NewSessionHistoryResource(sessionID string) (*HistoryResource, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("sessionId cannot be empty")
 	}
-	// Keep BaseDir for debug output / run inspection, but store owns the IO.
-	baseDir := fsutil.GetRunHistoryDir(config.DataDir, runId)
+	// Keep BaseDir for debug output / inspection, but store owns the IO.
+	baseDir := fsutil.GetSessionHistoryDir(config.DataDir, sessionID)
 
-	s, err := store.NewDiskHistoryStore(runId)
+	s, err := store.NewDiskHistoryStore(sessionID)
 	if err != nil {
 		return nil, err
 	}
 	return &HistoryResource{
-		BaseDir: baseDir,
-		Mount:   vfs.MountHistory,
-		RunId:   runId,
-		Store:   s,
+		BaseDir:   baseDir,
+		Mount:     vfs.MountHistory,
+		SessionID: sessionID,
+		Store:     s,
 	}, nil
 }
 

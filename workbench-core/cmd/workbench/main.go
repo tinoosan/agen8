@@ -34,7 +34,7 @@ func main() {
 	}
 	log.Printf("runId=%s", run.RunId)
 
-	historyRes, err := resources.NewRunHistoryResource(run.RunId)
+	historyRes, err := resources.NewSessionHistoryResource(run.SessionID)
 	if err != nil {
 		log.Fatalf("error creating history: %v", err)
 	}

@@ -29,6 +29,14 @@ var RunStatuses = map[string]RunStatus{
 type Run struct {
 	// RunId is the unique identifier for this run (e.g., "run-<uuid>").
 	RunId string `json:"runId"`
+	// SessionID is the session this run belongs to (e.g., "sess-<uuid>").
+	//
+	// A session groups multiple runs and provides shared, append-only history across them.
+	SessionID string `json:"sessionId,omitempty"`
+	// ParentRunID is the run that spawned this run (empty for root runs).
+	//
+	// This is the basis for "sub-agents": a sub-agent is a child run in the same session.
+	ParentRunID string `json:"parentRunId,omitempty"`
 	// Goal is the high-level description of what this run is trying to accomplish.
 	Goal string `json:"goal"`
 	// Status is the current operating state of the run.
@@ -45,11 +53,13 @@ type Run struct {
 
 // NewRun initializes a new Run instance with a unique ID and the given parameters.
 // It sets the initial status to StatusRunning and the start time to now.
-func NewRun(goal string, maxBytesForContext int) Run {
+func NewRun(goal string, maxBytesForContext int, sessionID string, parentRunID string) Run {
 	runId := "run-" + uuid.NewString()
 	now := time.Now()
 	return Run{
 		RunId:              runId,
+		SessionID:          sessionID,
+		ParentRunID:        parentRunID,
 		Goal:               goal,
 		Status:             StatusRunning,
 		StartedAt:          &now,

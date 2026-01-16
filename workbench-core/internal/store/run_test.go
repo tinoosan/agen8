@@ -41,6 +41,9 @@ func TestCreateRun(t *testing.T) {
 	if run.RunId == "" {
 		t.Error("Expected RunId to be set, got empty string")
 	}
+	if run.SessionID == "" {
+		t.Error("Expected SessionID to be set, got empty string")
+	}
 
 	// Verify run.json creation
 	runDir := filepath.Join(tmpDir, "runs", run.RunId)

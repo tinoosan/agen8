@@ -20,7 +20,7 @@ import (
 //
 // On disk (run-scoped today):
 //
-//	data/runs/<runId>/history/history.jsonl
+//	data/sessions/<sessionId>/history/history.jsonl
 //
 // The host owns history: it is append-only and should not be writable via VFS.
 type HistorySink struct {

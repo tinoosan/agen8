@@ -40,7 +40,10 @@ func NewFS() *FS {
 
 // Mount registers a resource under the given name. If a resource with the same
 // name already exists, it will be replaced. The name should be a simple
-// identifier without slashes (e.g., "workspace", "data").
+// identifier (e.g., "workspace", "data").
+//
+// Mount names may include "/" to support nested mounts (e.g. "workspace/cache").
+// When resolving a VFS path, the longest matching mount prefix wins.
 func (fs *FS) Mount(name string, r Resource) {
 	if fs.mounts == nil {
 		fs.mounts = make(map[string]Resource)
@@ -65,26 +68,34 @@ func (fs *FS) Resolve(vpath string) (mountName string, r Resource, subpath strin
 		return "", nil, "", fmt.Errorf("path must start with '/'")
 	}
 
-	// Trim leading slashes so "/workspace/a/b" -> "workspace/a/b"
+	// Trim leading slashes so "/workspace/a/b" -> "workspace/a/b".
 	trimmed := strings.TrimLeft(vpath, "/")
 	if trimmed == "" {
 		return "", nil, "", fmt.Errorf("path must include a mount, e.g. /workspace")
 	}
 
-	// Split into /workspace and a/b
-	parts := strings.SplitN(trimmed, "/", 2)
-	mountName = parts[0]
-
-	r, ok := fs.mounts[mountName]
-	if !ok {
-		return "", nil, "", fmt.Errorf("unknown mount %q", mountName)
+	// Find the longest matching mount prefix.
+	//
+	// This allows nested mounts like "workspace/cache" to override "workspace"
+	// when resolving "/workspace/cache/x".
+	best := ""
+	for mn := range fs.mounts {
+		if trimmed == mn || strings.HasPrefix(trimmed, mn+"/") {
+			if len(mn) > len(best) {
+				best = mn
+			}
+		}
+	}
+	if best == "" {
+		return "", nil, "", fmt.Errorf("not found: unknown mount for path %q", vpath)
 	}
 
+	r = fs.mounts[best]
 	subpath = ""
-	if len(parts) == 2 {
-		subpath = parts[1] // "a/b"
+	if trimmed != best {
+		subpath = strings.TrimPrefix(trimmed, best+"/")
 	}
-	return mountName, r, subpath, nil
+	return best, r, subpath, nil
 }
 
 // Read reads the contents of a file at the given VFS path.

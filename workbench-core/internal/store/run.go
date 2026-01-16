@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/config"
@@ -38,8 +39,30 @@ import (
 // It creates a unique run ID, a corresponding directory in data/runs,
 // and persists the initial run state as run.json.
 func CreateRun(goal string, maxBytesForContext int) (types.Run, error) {
-	run := types.NewRun(goal, maxBytesForContext)
-	return run, SaveRun(run)
+	// Runs always belong to a session. For now (until a CLI/session loader exists),
+	// CreateRun creates a new session implicitly.
+	sess, err := CreateSession(goal)
+	if err != nil {
+		return types.Run{}, err
+	}
+	return CreateRunInSession(sess.SessionID, "", goal, maxBytesForContext)
+}
+
+// CreateRunInSession creates a run within an existing session.
+//
+// parentRunID is optional; when set, the new run is considered a "sub-agent" run.
+func CreateRunInSession(sessionID, parentRunID, goal string, maxBytesForContext int) (types.Run, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return types.Run{}, fmt.Errorf("sessionId is required")
+	}
+	run := types.NewRun(goal, maxBytesForContext, sessionID, parentRunID)
+	if err := SaveRun(run); err != nil {
+		return types.Run{}, err
+	}
+	if _, err := AddRunToSession(sessionID, run.RunId); err != nil {
+		return types.Run{}, err
+	}
+	return run, nil
 }
 
 // LoadRun reads a run's state from disk by its run ID.

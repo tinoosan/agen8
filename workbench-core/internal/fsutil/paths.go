@@ -10,6 +10,33 @@ package fsutil
 
 import "path/filepath"
 
+// GetSessionsDir returns the path to the sessions directory given the data directory.
+//
+// Sessions group runs and provide shared, append-only history.
+func GetSessionsDir(dataDir string) string {
+	return filepath.Join(dataDir, "sessions")
+}
+
+// GetSessionDir returns the base directory for a session.
+func GetSessionDir(dataDir, sessionID string) string {
+	return filepath.Join(GetSessionsDir(dataDir), sessionID)
+}
+
+// GetSessionFilePath returns the path to a session's session.json file.
+func GetSessionFilePath(dataDir, sessionID string) string {
+	return filepath.Join(GetSessionDir(dataDir, sessionID), "session.json")
+}
+
+// GetSessionHistoryDir returns the path to a session-scoped history directory.
+func GetSessionHistoryDir(dataDir, sessionID string) string {
+	return filepath.Join(GetSessionDir(dataDir, sessionID), "history")
+}
+
+// GetSessionHistoryPath returns the path to the session-scoped history JSONL file.
+func GetSessionHistoryPath(dataDir, sessionID string) string {
+	return filepath.Join(GetSessionHistoryDir(dataDir, sessionID), "history.jsonl")
+}
+
 // GetRunFilePath returns the path to a run's run.json file given the data directory and run ID.
 func GetRunFilePath(dataDir, runId string) string {
 	return filepath.Join(dataDir, "runs", runId, "run.json")
@@ -89,20 +116,4 @@ func GetRunMemoryUpdatePath(dataDir, runId string) string {
 	return filepath.Join(GetRunMemoryDir(dataDir, runId), "update.md")
 }
 
-// GetRunHistoryDir returns the path to a run-scoped history directory.
-//
-// History is an immutable, append-only log of raw interactions between:
-// - users
-// - agents
-// - the environment/host
-//
-// It is separate from /trace (which is a curated event feed for agents) and from
-// /memory (which is curated, host-governed long-term notes).
-func GetRunHistoryDir(dataDir, runId string) string {
-	return filepath.Join(GetRunDir(dataDir, runId), "history")
-}
-
-// GetRunHistoryPath returns the path to the run-scoped history JSONL file.
-func GetRunHistoryPath(dataDir, runId string) string {
-	return filepath.Join(GetRunHistoryDir(dataDir, runId), "history.jsonl")
-}
+// NOTE: history is session-scoped (data/sessions/<sessionId>/history/history.jsonl).
