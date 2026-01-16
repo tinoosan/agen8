@@ -10,12 +10,12 @@
 //  1. Accept (toolId, actionId, input)
 //  2. Build a types.ToolRequest
 //  3. Invoke a tool implementation (ToolInvoker) from a registry
-//  4. Persist outputs under /results/<callId>/...
+//  4. Persist outputs under /results/<callId>/... (virtual mount backed by a ResultsStore)
 //  5. Return a types.ToolResponse (what the agent/host "sees")
 //
 // Results layout written by this runner (Pattern A: callId-first)
 //
-// For each tool call (identified by callId), the runner writes:
+// For each tool call (identified by callId), the runner stores:
 //   - /results/<callId>/response.json
 //   - /results/<callId>/<artifact.Path>        (zero or more files)
 //
@@ -39,8 +39,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
 // Runner executes tool calls and persists their results under /results/<callId>/.
@@ -49,10 +49,12 @@ import (
 // Builtins and external tools (later) both implement ToolInvoker and run through
 // the same lifecycle and persistence rules.
 type Runner struct {
-	// FS is the virtual filesystem used to write results.
+	// Results is the backing store for the virtual "/results" mount.
 	//
-	// FS must have the "/results" mount configured before Run is called.
-	FS *vfs.FS
+	// The runner persists response.json and artifact bytes into this store, and
+	// the agent later reads them via fs.read("/results/<callId>/...") through the
+	// mounted VirtualResultsResource.
+	Results store.ResultsStore
 
 	// ToolRegistry resolves toolId -> ToolInvoker.
 	ToolRegistry ToolRegistry
@@ -147,8 +149,8 @@ func (m MapRegistry) Get(id types.ToolID) (ToolInvoker, bool) {
 // This method returns a types.ToolResponse for tool-level failures (unknown tool, tool error),
 // and only returns a non-nil error for runner failures (IO/marshal/host bugs).
 func (r *Runner) Run(ctx context.Context, toolId types.ToolID, actionId string, input json.RawMessage, timeoutMs int) (types.ToolResponse, error) {
-	if r == nil || r.FS == nil {
-		return types.ToolResponse{}, fmt.Errorf("runner FS is required")
+	if r == nil || r.Results == nil {
+		return types.ToolResponse{}, fmt.Errorf("runner ResultsStore is required")
 	}
 	if r.ToolRegistry == nil {
 		return types.ToolResponse{}, fmt.Errorf("runner ToolRegistry is required")
@@ -251,13 +253,16 @@ func (r *Runner) Run(ctx context.Context, toolId types.ToolID, actionId string, 
 //   - artifacts first (so response.json references are safe)
 //   - response.json last (so readers see a complete result)
 func (r *Runner) persist(callID string, resp types.ToolResponse, artifacts []ToolArtifactWrite) error {
+	if r == nil || r.Results == nil {
+		return fmt.Errorf("runner ResultsStore is required")
+	}
 	// Write artifacts first so response.json references are safe.
 	for _, a := range artifacts {
 		if err := validateArtifactWrite(a); err != nil {
 			return err
 		}
-		target := "/results/" + callID + "/" + path.Clean(a.Path)
-		if err := r.FS.Write(target, a.Bytes); err != nil {
+		target := path.Clean(a.Path)
+		if err := r.Results.PutArtifact(callID, target, a.MediaType, a.Bytes); err != nil {
 			return err
 		}
 	}
@@ -267,8 +272,7 @@ func (r *Runner) persist(callID string, resp types.ToolResponse, artifacts []Too
 	if err != nil {
 		return fmt.Errorf("marshal response: %w", err)
 	}
-	target := "/results/" + callID + "/response.json"
-	if err := r.FS.Write(target, b); err != nil {
+	if err := r.Results.PutCall(callID, b); err != nil {
 		return err
 	}
 	return nil

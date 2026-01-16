@@ -32,13 +32,14 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := resources.NewRunResults(run.RunId)
+	resultsStore := store.NewInMemoryResultsStore()
+	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewRunResults: %v", err)
+		t.Fatalf("NewVirtualResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, results)
+	fs.Mount(vfs.MountResults, resultsRes)
 
 	inv := invokerFunc(func(ctx context.Context, req types.ToolRequest) (tools.ToolCallResult, error) {
 		return tools.ToolCallResult{
@@ -54,7 +55,7 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 	}
 
 	runner := tools.Runner{
-		FS:           fs,
+		Results:      resultsStore,
 		ToolRegistry: reg,
 	}
 
@@ -97,9 +98,9 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 		t.Fatalf("unexpected artifact bytes: %q", string(ab))
 	}
 
-	// sanity on disk location (implementation detail)
-	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results", resp.CallID, "response.json")); err != nil {
-		t.Fatalf("expected response.json on disk: %v", err)
+	// Ensure no on-disk results directory was created for the run.
+	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
+		t.Fatalf("expected no on-disk results directory")
 	}
 }
 
@@ -114,16 +115,17 @@ func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := resources.NewRunResults(run.RunId)
+	resultsStore := store.NewInMemoryResultsStore()
+	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewRunResults: %v", err)
+		t.Fatalf("NewVirtualResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, results)
+	fs.Mount(vfs.MountResults, resultsRes)
 
 	runner := tools.Runner{
-		FS:           fs,
+		Results:      resultsStore,
 		ToolRegistry: tools.MapRegistry{},
 	}
 
@@ -141,6 +143,11 @@ func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 	if _, err := fs.Read("/results/" + resp.CallID + "/response.json"); err != nil {
 		t.Fatalf("expected persisted response.json: %v", err)
 	}
+
+	// Ensure no on-disk results directory was created for the run.
+	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
+		t.Fatalf("expected no on-disk results directory")
+	}
 }
 
 func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
@@ -154,13 +161,14 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := resources.NewRunResults(run.RunId)
+	resultsStore := store.NewInMemoryResultsStore()
+	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewRunResults: %v", err)
+		t.Fatalf("NewVirtualResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, results)
+	fs.Mount(vfs.MountResults, resultsRes)
 
 	inv := invokerFunc(func(ctx context.Context, req types.ToolRequest) (tools.ToolCallResult, error) {
 		return tools.ToolCallResult{
@@ -172,7 +180,7 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 	})
 
 	runner := tools.Runner{
-		FS: fs,
+		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
 			types.ToolID("github.com.acme.stock"): inv,
 		},
@@ -188,6 +196,11 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 	if resp.Error == nil || resp.Error.Code != "invalid_artifact" {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
+
+	// Ensure no on-disk results directory was created for the run.
+	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
+		t.Fatalf("expected no on-disk results directory")
+	}
 }
 
 func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
@@ -201,20 +214,21 @@ func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := resources.NewRunResults(run.RunId)
+	resultsStore := store.NewInMemoryResultsStore()
+	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewRunResults: %v", err)
+		t.Fatalf("NewVirtualResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, results)
+	fs.Mount(vfs.MountResults, resultsRes)
 
 	inv := invokerFunc(func(ctx context.Context, req types.ToolRequest) (tools.ToolCallResult, error) {
 		return tools.ToolCallResult{}, &tools.InvokeError{Code: "timeout", Message: "command timed out", Retryable: true}
 	})
 
 	runner := tools.Runner{
-		FS: fs,
+		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
 			types.ToolID("github.com.acme.stock"): inv,
 		},
@@ -229,5 +243,10 @@ func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
 	}
 	if resp.Error == nil || resp.Error.Code != "timeout" || !resp.Error.Retryable {
 		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+
+	// Ensure no on-disk results directory was created for the run.
+	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
+		t.Fatalf("expected no on-disk results directory")
 	}
 }

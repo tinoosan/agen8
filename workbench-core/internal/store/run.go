@@ -13,7 +13,11 @@
 // And resource-backed directories:
 //   - workspace/     (agent writable working directory)
 //   - trace/         (mirrored event feed for agent polling)
-//   - results/       (tool call outputs, callId-first layout)
+//
+// # Results note
+//
+// The agent sees a "/results" mount in the VFS, but the default implementation is now
+// virtual (ResultsStore-backed) rather than an on-disk "results/" directory.
 package store
 
 import (

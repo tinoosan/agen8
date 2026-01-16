@@ -27,9 +27,10 @@ func TestBuiltinBash_Exec_CatFile_OK(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := resources.NewRunResults(run.RunId)
+	resultsStore := store.NewInMemoryResultsStore()
+	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewRunResults: %v", err)
+		t.Fatalf("NewVirtualResultsResource: %v", err)
 	}
 
 	rootDir := t.TempDir()
@@ -38,10 +39,10 @@ func TestBuiltinBash_Exec_CatFile_OK(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, results)
+	fs.Mount(vfs.MountResults, resultsRes)
 
 	runner := tools.Runner{
-		FS: fs,
+		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
 			types.ToolID("builtin.bash"): tools.NewBuiltinBashInvoker(rootDir),
 		},
@@ -76,6 +77,11 @@ func TestBuiltinBash_Exec_CatFile_OK(t *testing.T) {
 	if _, err := fs.Read("/results/" + resp.CallID + "/response.json"); err != nil {
 		t.Fatalf("expected persisted response.json: %v", err)
 	}
+
+	// Ensure no on-disk results directory was created for the run.
+	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
+		t.Fatalf("expected no on-disk results directory")
+	}
 }
 
 func TestBuiltinBash_Exec_RejectsEscapeCwd(t *testing.T) {
@@ -89,16 +95,17 @@ func TestBuiltinBash_Exec_RejectsEscapeCwd(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := resources.NewRunResults(run.RunId)
+	resultsStore := store.NewInMemoryResultsStore()
+	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewRunResults: %v", err)
+		t.Fatalf("NewVirtualResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, results)
+	fs.Mount(vfs.MountResults, resultsRes)
 
 	runner := tools.Runner{
-		FS: fs,
+		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
 			types.ToolID("builtin.bash"): tools.NewBuiltinBashInvoker(t.TempDir()),
 		},
@@ -114,6 +121,11 @@ func TestBuiltinBash_Exec_RejectsEscapeCwd(t *testing.T) {
 	if resp.Error == nil || resp.Error.Code != "invalid_input" {
 		t.Fatalf("expected invalid_input error, got %+v", resp.Error)
 	}
+
+	// Ensure no on-disk results directory was created for the run.
+	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
+		t.Fatalf("expected no on-disk results directory")
+	}
 }
 
 func TestBuiltinBash_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
@@ -127,9 +139,10 @@ func TestBuiltinBash_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := resources.NewRunResults(run.RunId)
+	resultsStore := store.NewInMemoryResultsStore()
+	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewRunResults: %v", err)
+		t.Fatalf("NewVirtualResultsResource: %v", err)
 	}
 
 	rootDir := t.TempDir()
@@ -140,11 +153,11 @@ func TestBuiltinBash_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, results)
+	fs.Mount(vfs.MountResults, resultsRes)
 
 	inv := tools.NewBuiltinBashInvoker(rootDir)
 	runner := tools.Runner{
-		FS: fs,
+		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
 			types.ToolID("builtin.bash"): inv,
 		},
@@ -178,6 +191,11 @@ func TestBuiltinBash_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 	}
 	if string(b) != string(full) {
 		t.Fatalf("stdout artifact mismatch")
+	}
+
+	// Ensure no on-disk results directory was created for the run.
+	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
+		t.Fatalf("expected no on-disk results directory")
 	}
 }
 

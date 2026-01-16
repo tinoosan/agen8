@@ -31,9 +31,10 @@ func TestBuiltinRipgrep_Search_FindsMatch(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := resources.NewRunResults(run.RunId)
+	resultsStore := store.NewInMemoryResultsStore()
+	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewRunResults: %v", err)
+		t.Fatalf("NewVirtualResultsResource: %v", err)
 	}
 
 	rootDir := t.TempDir()
@@ -42,10 +43,10 @@ func TestBuiltinRipgrep_Search_FindsMatch(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, results)
+	fs.Mount(vfs.MountResults, resultsRes)
 
 	runner := tools.Runner{
-		FS: fs,
+		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
 			types.ToolID("builtin.ripgrep"): tools.NewBuiltinRipgrepInvoker(rootDir),
 		},
@@ -75,6 +76,11 @@ func TestBuiltinRipgrep_Search_FindsMatch(t *testing.T) {
 	if out.Matches[0].Path == "" || out.Matches[0].Line == 0 {
 		t.Fatalf("unexpected match: %+v", out.Matches[0])
 	}
+
+	// Ensure no on-disk results directory was created for the run.
+	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
+		t.Fatalf("expected no on-disk results directory")
+	}
 }
 
 func TestBuiltinRipgrep_Search_RejectsEscapePath(t *testing.T) {
@@ -92,16 +98,17 @@ func TestBuiltinRipgrep_Search_RejectsEscapePath(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	results, err := resources.NewRunResults(run.RunId)
+	resultsStore := store.NewInMemoryResultsStore()
+	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewRunResults: %v", err)
+		t.Fatalf("NewVirtualResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, results)
+	fs.Mount(vfs.MountResults, resultsRes)
 
 	runner := tools.Runner{
-		FS: fs,
+		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
 			types.ToolID("builtin.ripgrep"): tools.NewBuiltinRipgrepInvoker(t.TempDir()),
 		},
@@ -116,5 +123,10 @@ func TestBuiltinRipgrep_Search_RejectsEscapePath(t *testing.T) {
 	}
 	if resp.Error == nil || resp.Error.Code != "invalid_input" {
 		t.Fatalf("expected invalid_input, got %+v", resp.Error)
+	}
+
+	// Ensure no on-disk results directory was created for the run.
+	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
+		t.Fatalf("expected no on-disk results directory")
 	}
 }

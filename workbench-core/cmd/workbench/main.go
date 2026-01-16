@@ -110,9 +110,10 @@ func main() {
 		log.Fatalf("error writing collision tool manifest: %v", err)
 	}
 
-	results, err := resources.NewRunResults(run.RunId)
+	resultsStore := store.NewInMemoryResultsStore()
+	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
 	if err != nil {
-		log.Fatalf("error creating results: %v", err)
+		log.Fatalf("error creating virtual results: %v", err)
 	}
 
 	memoryRes, err := resources.NewRunMemoryResource(run.RunId)
@@ -122,8 +123,8 @@ func main() {
 
 	fs.Mount(vfs.MountWorkspace, workspace)
 	log.Printf("mounted /workspace => %s", workspace.BaseDir)
-	fs.Mount(vfs.MountResults, results)
-	log.Printf("mounted /results => %s", results.BaseDir)
+	fs.Mount(vfs.MountResults, resultsRes)
+	log.Printf("mounted /results => (virtual)")
 	fs.Mount(vfs.MountTrace, traceRes)
 	log.Printf("mounted /trace => %s", traceRes.BaseDir)
 	fs.Mount(vfs.MountTools, toolsResource)
@@ -145,7 +146,7 @@ func main() {
 	}
 
 	runner := tools.Runner{
-		FS:           fs,
+		Results:      resultsStore,
 		ToolRegistry: tools.BuiltinInvokerRegistry(builtinCfg),
 	}
 
@@ -461,6 +462,9 @@ func main() {
 			Type:    "agent.final",
 			Message: "Agent produced final answer",
 			Data:    map[string]string{"text": final},
+			// The final answer is already printed as "agent> ..."; avoid duplicating it
+			// as a JSON console event line (it can be long and harms readability).
+			Console: boolp(false),
 		})
 	}
 
