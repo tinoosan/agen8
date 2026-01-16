@@ -28,36 +28,23 @@ import (
 //   - or {"op":"final","text":"..."} to stop the loop
 type Agent struct {
 	LLM  types.LLMClient
-	Exec func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse
+	Exec HostExecutor
 
 	// Model is required. Example: "openai/gpt-4o-mini" (via OpenRouter), etc.
 	Model string
 
-	// SystemPrompt is the system instructions passed to the model.
-	//
-	// If empty, the agent uses an internal default prompt.
-	// In production, prefer setting this explicitly (e.g. from INITIAL_PROMPT.md)
-	// so the contract is centralized and pkgsite-visible.
+	// SystemPrompt is the base system instructions passed to the model.
 	SystemPrompt string
 
-	// ContextUpdater optionally refreshes bounded context (memory/trace/etc) per model step.
-	//
-	// If set, the agent calls it before each model request and uses the returned prompt.
-	ContextUpdater *ContextUpdater
+	// Context optionally refreshes bounded context (memory/profile/trace/etc) per model step.
+	Context ContextSource
 
 	// MaxSteps caps the number of model -> host op iterations.
 	// If zero, a default is used.
 	MaxSteps int
 
-	// Logf is an optional logger used to print what the agent is doing.
-	// Example: log.Printf.
-	Logf func(format string, args ...any)
-
-	// OnLLMUsage is an optional hook invoked after each model call when the provider
-	// returns token usage metrics.
-	//
-	// This is used to surface per-step and per-turn token usage in the host logs.
-	OnLLMUsage func(step int, usage types.LLMUsage)
+	// Hooks are optional observability callbacks invoked by the agent loop.
+	Hooks Hooks
 }
 
 // RunConversation executes the agent loop for an existing conversation.
@@ -105,8 +92,8 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 
 	for step := 1; step <= maxSteps; step++ {
 		system := baseSystem
-		if a.ContextUpdater != nil {
-			updated, _, err := a.ContextUpdater.BuildSystemPrompt(ctx, baseSystem, step)
+		if a.Context != nil {
+			updated, err := a.Context.SystemPrompt(ctx, baseSystem, step)
 			if err != nil {
 				return "", nil, 0, err
 			}
@@ -123,13 +110,13 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 		if err != nil {
 			return "", nil, 0, err
 		}
-		if a.OnLLMUsage != nil && resp.Usage != nil {
-			a.OnLLMUsage(step, *resp.Usage)
+		if a.Hooks.OnLLMUsage != nil && resp.Usage != nil {
+			a.Hooks.OnLLMUsage(step, *resp.Usage)
 		}
 
 		opJSON := extractJSONObject(resp.Text)
-		if a.Logf != nil {
-			a.Logf("model -> host (step %d): %s", step, strings.TrimSpace(opJSON))
+		if a.Hooks.Logf != nil {
+			a.Hooks.Logf("model -> host (step %d): %s", step, strings.TrimSpace(opJSON))
 		}
 		var op types.HostOpRequest
 		if err := json.Unmarshal([]byte(opJSON), &op); err != nil {
@@ -154,7 +141,7 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 			return strings.TrimSpace(op.Text), msgs, step, nil
 		}
 
-		hostResp := a.Exec(ctx, op)
+		hostResp := a.Exec.Exec(ctx, op)
 		hostRespJSON, _ := jsonutil.MarshalPretty(hostResp)
 
 		// Feed the host response back to the model as the next user turn.

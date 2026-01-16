@@ -319,6 +319,14 @@ func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt strin
 	return system, manifest, nil
 }
 
+// SystemPrompt implements ContextSource by returning an augmented system prompt for a step.
+//
+// The agent uses this interface method to stay decoupled from the updater's manifest type.
+func (u *ContextUpdater) SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error) {
+	s, _, err := u.BuildSystemPrompt(ctx, basePrompt, step)
+	return s, err
+}
+
 func headUTF8(b []byte, max int) ([]byte, bool) {
 	if max <= 0 || len(b) <= max {
 		return b, false

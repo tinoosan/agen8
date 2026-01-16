@@ -337,12 +337,12 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 	}
 
 	a, err := agent.New(agent.Config{
-		LLM:            client,
-		Exec:           execWithEvents,
-		Model:          model,
-		SystemPrompt:   baseSystemPrompt,
-		ContextUpdater: updater,
-		MaxSteps:       opts.MaxSteps,
+		LLM:          client,
+		Exec:         agent.HostExecFunc(execWithEvents),
+		Model:        model,
+		SystemPrompt: baseSystemPrompt,
+		Context:      updater,
+		MaxSteps:     opts.MaxSteps,
 	})
 	if err != nil {
 		return err
@@ -415,7 +415,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		})
 
 		var turnUsage types.LLMUsage
-		a.OnLLMUsage = func(step int, usage types.LLMUsage) {
+		a.Hooks.OnLLMUsage = func(step int, usage types.LLMUsage) {
 			turnUsage.InputTokens += usage.InputTokens
 			turnUsage.OutputTokens += usage.OutputTokens
 			turnUsage.TotalTokens += usage.TotalTokens

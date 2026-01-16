@@ -40,7 +40,7 @@ func TestAgentLoopV0_Run_ExecutesOpsUntilFinal(t *testing.T) {
 		return types.HostOpResponse{Op: req.Op, Ok: true, Text: string(b)}
 	}
 
-	a := &Agent{LLM: llm, Exec: exec, Model: "test-model", MaxSteps: 5}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
 	final, err := a.Run(context.Background(), "goal")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
