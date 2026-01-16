@@ -1,7 +1,9 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +31,42 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
+// RunChatOptions controls host-side limits and prompt injection behavior for RunChat.
+type RunChatOptions struct {
+	// MaxSteps caps how many agent loop steps are allowed per user turn.
+	MaxSteps int
+
+	// MaxTraceBytes caps how many trace bytes ContextUpdater will consider per step.
+	MaxTraceBytes int
+	// MaxMemoryBytes caps how many run-scoped memory bytes are injected per step.
+	MaxMemoryBytes int
+	// MaxProfileBytes caps how many global profile bytes are injected per step.
+	MaxProfileBytes int
+
+	// RecentHistoryPairs is the number of (user,agent) message pairs to include
+	// in the "Recent Conversation" block injected into the system prompt.
+	RecentHistoryPairs int
+}
+
+func (o RunChatOptions) withDefaults() RunChatOptions {
+	if o.MaxSteps <= 0 {
+		o.MaxSteps = 200
+	}
+	if o.MaxTraceBytes <= 0 {
+		o.MaxTraceBytes = 8 * 1024
+	}
+	if o.MaxMemoryBytes <= 0 {
+		o.MaxMemoryBytes = 8 * 1024
+	}
+	if o.MaxProfileBytes <= 0 {
+		o.MaxProfileBytes = 4 * 1024
+	}
+	if o.RecentHistoryPairs <= 0 {
+		o.RecentHistoryPairs = 8
+	}
+	return o
+}
+
 // RunChat starts the interactive REPL-driven agent loop for a run.
 //
 // This is the main "Workbench" experience:
@@ -38,7 +76,9 @@ import (
 //   - starts a readline-based chat session
 //
 // The CLI (cmd/workbench) decides how runs/sessions are created or resumed.
-func RunChat(ctx context.Context, run types.Run) (retErr error) {
+func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr error) {
+	opts = opts.withDefaults()
+
 	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
@@ -264,11 +304,12 @@ func RunChat(ctx context.Context, run types.Run) (retErr error) {
 	})
 
 	updater = &agent.ContextUpdater{
-		FS:             fs,
-		TraceStore:     traceStore,
-		MaxMemoryBytes: 8 * 1024,
-		MaxTraceBytes:  8 * 1024,
-		ManifestPath:   "/workspace/context_manifest.json",
+		FS:              fs,
+		TraceStore:      traceStore,
+		MaxProfileBytes: opts.MaxProfileBytes,
+		MaxMemoryBytes:  opts.MaxMemoryBytes,
+		MaxTraceBytes:   opts.MaxTraceBytes,
+		ManifestPath:    "/workspace/context_manifest.json",
 		Emit: func(eventType, message string, data map[string]string) {
 			mustEmit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
 		},
@@ -280,7 +321,7 @@ func RunChat(ctx context.Context, run types.Run) (retErr error) {
 		Model:          model,
 		SystemPrompt:   baseSystemPrompt,
 		ContextUpdater: updater,
-		MaxSteps:       200,
+		MaxSteps:       opts.MaxSteps,
 		Logf:           nil,
 		OnLLMUsage:     nil,
 	}
@@ -300,6 +341,7 @@ func RunChat(ctx context.Context, run types.Run) (retErr error) {
 	_, _ = io.WriteString(rr, userInputHelp())
 
 	memEval := agent.DefaultMemoryEvaluator()
+	profileEval := agent.DefaultProfileEvaluator()
 	turn := 0
 	var conversation []types.LLMMessage
 	for {
@@ -333,6 +375,13 @@ func RunChat(ctx context.Context, run types.Run) (retErr error) {
 			}
 		} else {
 			a.SystemPrompt = baseSystemPrompt
+		}
+		// Inject a bounded "recent conversation" excerpt from /history so a resumed run
+		// can continue coherently without rereading the full history log.
+		if hb, err := historyRes.Store.LinesLatest(context.Background(), store.HistoryLatestOptions{MaxBytes: 32 * 1024, Limit: 50}); err == nil {
+			if blk := recentConversationBlock(hb.Lines, opts.RecentHistoryPairs); strings.TrimSpace(blk) != "" {
+				a.SystemPrompt = strings.TrimSpace(a.SystemPrompt) + "\n\n" + blk + "\n"
+			}
 		}
 
 		turn++
@@ -510,7 +559,7 @@ func RunChat(ctx context.Context, run types.Run) (retErr error) {
 				trimmed := strings.TrimSpace(updateRaw)
 				hash := agent.SHA256Hex(trimmed)
 
-				accepted, reason, cleaned := memEval.Evaluate(updateRaw)
+				accepted, reason, cleaned := profileEval.Evaluate(updateRaw)
 
 				mustEmit(context.Background(), events.Event{
 					Type:    "profile.evaluate",
@@ -617,6 +666,74 @@ func RunChat(ctx context.Context, run types.Run) (retErr error) {
 
 	log.Printf("== Workbench complete ==")
 	return nil
+}
+
+type historyLine struct {
+	Timestamp string            `json:"ts"`
+	RunID     string            `json:"runId"`
+	Origin    string            `json:"origin"`
+	Kind      string            `json:"kind"`
+	Message   string            `json:"message"`
+	Model     string            `json:"model,omitempty"`
+	Data      map[string]string `json:"data,omitempty"`
+}
+
+func recentConversationBlock(lines [][]byte, maxPairs int) string {
+	// Keep only user.message and agent.final, in original order (most recent last).
+	var msgs []string
+	for _, raw := range lines {
+		var hl historyLine
+		if err := json.Unmarshal(bytes.TrimSpace(raw), &hl); err != nil {
+			continue
+		}
+		switch hl.Kind {
+		case "user.message":
+			text := ""
+			if hl.Data != nil {
+				text = strings.TrimSpace(hl.Data["text"])
+			}
+			if text == "" {
+				text = strings.TrimSpace(hl.Message)
+			}
+			if text != "" {
+				msgs = append(msgs, "user: "+oneLineClamp(text, 160))
+			}
+		case "agent.final":
+			text := ""
+			if hl.Data != nil {
+				text = strings.TrimSpace(hl.Data["text"])
+			}
+			if text == "" {
+				text = strings.TrimSpace(hl.Message)
+			}
+			if text != "" {
+				msgs = append(msgs, "agent: "+oneLineClamp(text, 160))
+			}
+		}
+	}
+	if len(msgs) == 0 {
+		return ""
+	}
+	// Keep last N pairs (2 lines per pair), best-effort.
+	if maxPairs <= 0 {
+		maxPairs = 8
+	}
+	maxLines := maxPairs * 2
+	if len(msgs) > maxLines {
+		msgs = msgs[len(msgs)-maxLines:]
+	}
+	return "## Recent Conversation (from /history)\n\n" + strings.Join(msgs, "\n")
+}
+
+func oneLineClamp(s string, max int) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.TrimSpace(s)
+	if max > 0 && len(s) > max {
+		return s[:max] + "…"
+	}
+	return s
 }
 
 func fmtBool(b bool) string {

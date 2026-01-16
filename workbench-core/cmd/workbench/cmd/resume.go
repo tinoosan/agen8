@@ -27,6 +27,12 @@ var resumeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return app.RunChat(cmd.Context(), run)
+		return app.RunChat(cmd.Context(), run, app.RunChatOptions{
+			MaxSteps:           maxSteps,
+			MaxTraceBytes:      maxTraceBytes,
+			MaxMemoryBytes:     maxMemoryBytes,
+			MaxProfileBytes:    maxProfileBytes,
+			RecentHistoryPairs: recentHistoryPairs,
+		})
 	},
 }

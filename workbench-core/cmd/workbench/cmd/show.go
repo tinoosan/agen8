@@ -10,4 +10,5 @@ var showCmd = &cobra.Command{
 func init() {
 	showCmd.AddCommand(showSessionCmd)
 	showCmd.AddCommand(showRunCmd)
+	showCmd.AddCommand(showHistoryCmd)
 }

@@ -16,6 +16,12 @@ var (
 	maxContextB  int
 	defaultGoal  string
 	defaultTitle string
+
+	maxSteps           int
+	maxTraceBytes      int
+	maxMemoryBytes     int
+	maxProfileBytes    int
+	recentHistoryPairs int
 )
 
 var rootCmd = &cobra.Command{
@@ -61,7 +67,13 @@ new run in that session (workspaces remain run-scoped).
 		if err != nil {
 			return err
 		}
-		return app.RunChat(cmd.Context(), run)
+		return app.RunChat(cmd.Context(), run, app.RunChatOptions{
+			MaxSteps:           maxSteps,
+			MaxTraceBytes:      maxTraceBytes,
+			MaxMemoryBytes:     maxMemoryBytes,
+			MaxProfileBytes:    maxProfileBytes,
+			RecentHistoryPairs: recentHistoryPairs,
+		})
 	},
 }
 
@@ -78,6 +90,11 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&maxContextB, "context-bytes", 8*1024, "run.maxBytesForContext (persisted in run.json)")
 	rootCmd.PersistentFlags().StringVar(&defaultTitle, "title", "workbench", "title for new sessions (workbench only)")
 	rootCmd.PersistentFlags().StringVar(&defaultGoal, "goal", "interactive chat", "initial goal for the run (workbench only)")
+	rootCmd.PersistentFlags().IntVar(&maxSteps, "max-steps", 200, "max agent steps per user turn")
+	rootCmd.PersistentFlags().IntVar(&maxTraceBytes, "trace-bytes", 8*1024, "context updater trace budget (bytes)")
+	rootCmd.PersistentFlags().IntVar(&maxMemoryBytes, "memory-bytes", 8*1024, "context updater memory budget (bytes)")
+	rootCmd.PersistentFlags().IntVar(&maxProfileBytes, "profile-bytes", 4*1024, "context updater profile budget (bytes)")
+	rootCmd.PersistentFlags().IntVar(&recentHistoryPairs, "history-pairs", 8, "number of recent (user,agent) pairs injected from /history")
 
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(listCmd)

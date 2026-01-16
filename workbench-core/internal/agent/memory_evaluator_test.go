@@ -48,6 +48,27 @@ func TestMemoryEvaluator_Evaluate(t *testing.T) {
 	})
 }
 
+func TestProfileEvaluator_Evaluate(t *testing.T) {
+	e := DefaultProfileEvaluator()
+
+	t.Run("AcceptsKeyValueLines", func(t *testing.T) {
+		ok, reason, cleaned := e.Evaluate("birthday: 1994-11-27\ntimezone: UTC\n")
+		if !ok || reason != "accepted" {
+			t.Fatalf("expected accepted, got ok=%v reason=%q", ok, reason)
+		}
+		if !strings.HasSuffix(cleaned, "\n") {
+			t.Fatalf("expected newline-terminated cleaned output")
+		}
+	})
+
+	t.Run("RejectsNonKeyValue", func(t *testing.T) {
+		ok, reason, _ := e.Evaluate("RULE: do the thing\n")
+		if ok || reason != "not_profile" {
+			t.Fatalf("expected not_profile rejection, got ok=%v reason=%q", ok, reason)
+		}
+	})
+}
+
 func TestAppendCommitLog_WritesJSONL(t *testing.T) {
 	tmp := t.TempDir()
 
