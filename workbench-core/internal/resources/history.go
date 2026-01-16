@@ -1,15 +1,15 @@
 package resources
 
 import (
-	"errors"
+	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // HistoryResource exposes an immutable, append-only history log under the VFS mount "/history".
@@ -53,34 +53,41 @@ type HistoryResource struct {
 
 	// RunId is the run this history directory belongs to.
 	RunId string
+
+	// Store is the backing store for history.jsonl.
+	//
+	// This is the storage boundary; HistoryResource does not perform direct filesystem IO.
+	Store store.HistoryStore
 }
 
 func NewRunHistoryResource(runId string) (*HistoryResource, error) {
 	if strings.TrimSpace(runId) == "" {
 		return nil, fmt.Errorf("runId cannot be empty")
 	}
+	// Keep BaseDir for debug output / run inspection, but store owns the IO.
 	baseDir := fsutil.GetRunHistoryDir(config.DataDir, runId)
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return nil, fmt.Errorf("error creating history directory %s: %w", baseDir, err)
+
+	s, err := store.NewDiskHistoryStore(runId)
+	if err != nil {
+		return nil, err
 	}
-	p := filepath.Join(baseDir, "history.jsonl")
-	if _, err := os.Stat(p); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("error checking %s: %w", p, err)
-		}
-		if err := os.WriteFile(p, []byte{}, 0644); err != nil {
-			return nil, fmt.Errorf("error creating %s: %w", p, err)
-		}
-	}
-	return &HistoryResource{BaseDir: baseDir, Mount: vfs.MountHistory, RunId: runId}, nil
+	return &HistoryResource{
+		BaseDir: baseDir,
+		Mount:   vfs.MountHistory,
+		RunId:   runId,
+		Store:   s,
+	}, nil
 }
 
 // List lists entries under subpath relative to BaseDir.
 // subpath is resource-relative (no leading "/").
 // List("") lists the resource root.
 func (hr *HistoryResource) List(subpath string) ([]vfs.Entry, error) {
-	subpath = strings.TrimSpace(subpath)
-	if subpath == "" || subpath == "." {
+	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
+	if err != nil {
+		return nil, err
+	}
+	if clean == "" || clean == "." {
 		return []vfs.Entry{
 			{Path: "history.jsonl", IsDir: false},
 		}, nil
@@ -91,17 +98,20 @@ func (hr *HistoryResource) List(subpath string) ([]vfs.Entry, error) {
 // Read reads a file at subpath relative to BaseDir.
 // subpath is resource-relative (no leading "/").
 func (hr *HistoryResource) Read(subpath string) ([]byte, error) {
-	subpath = strings.TrimSpace(subpath)
-	if subpath == "" || subpath == "." {
+	if hr == nil || hr.Store == nil {
+		return nil, fmt.Errorf("history store not configured")
+	}
+	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
+	if err != nil {
+		return nil, fmt.Errorf("history read: %w", err)
+	}
+	if clean == "" || clean == "." {
 		return nil, fmt.Errorf("history read: path required (try 'history.jsonl')")
 	}
-	if strings.HasPrefix(subpath, "/") {
-		return nil, fmt.Errorf("history read: absolute paths not allowed: %q", subpath)
+	if clean != "history.jsonl" {
+		return nil, fmt.Errorf("history read: unknown item %q (allowed: history.jsonl)", clean)
 	}
-	if subpath != "history.jsonl" {
-		return nil, fmt.Errorf("history read: unknown item %q (allowed: history.jsonl)", subpath)
-	}
-	return os.ReadFile(filepath.Join(hr.BaseDir, subpath))
+	return hr.Store.ReadAll(context.Background())
 }
 
 // Write replaces the file at subpath (creating parent directories if needed).

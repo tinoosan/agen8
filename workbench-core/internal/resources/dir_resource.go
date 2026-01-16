@@ -13,6 +13,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // DirResource implements vfs.Resource by mapping virtual paths to a real OS directory.
@@ -256,41 +257,5 @@ func (d *DirResource) Append(subpath string, data []byte) error {
 //   - "../etc/passwd" -> error ✗ (escape attempt)
 //   - "a/../../secrets" -> error ✗ (escape attempt)
 func (d *DirResource) safeJoin(subpath string) (string, error) {
-	// Clean turns things like "a/../b" into "b" and "a/../../x" into "../x".
-	clean := filepath.Clean(subpath)
-
-	if filepath.IsAbs(clean) {
-		return "", fmt.Errorf("absolute paths not allowed")
-	}
-
-	// filepath.Clean can return "." for empty paths; that’s fine for listing baseDir.
-	// But we reject any path that starts with ".." after cleaning.
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("invalid path: escapes mount root")
-	}
-
-	joined := filepath.Join(d.BaseDir, clean)
-
-	// Stronger containment check: compare absolute paths.
-	baseAbs, err := filepath.Abs(d.BaseDir)
-	if err != nil {
-		return "", fmt.Errorf("abs baseDir: %w", err)
-	}
-
-	joinedAbs, err := filepath.Abs(joined)
-	if err != nil {
-		return "", fmt.Errorf("abs joined: %w", err)
-	}
-
-	// Ensure joinedAbs is inside baseAbs (path boundary aware)
-	rel, err := filepath.Rel(baseAbs, joinedAbs)
-	if err != nil {
-		return "", fmt.Errorf("rel: %w", err)
-	}
-
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("invalid path: escapes mount root")
-	}
-
-	return joinedAbs, nil
+	return vfsutil.SafeJoinBaseDir(d.BaseDir, subpath)
 }

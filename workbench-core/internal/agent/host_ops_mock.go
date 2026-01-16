@@ -3,11 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
@@ -129,7 +129,7 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 
 // PrettyJSON is a small helper for demos/logging.
 func PrettyJSON(v any) string {
-	b, err := json.MarshalIndent(v, "", "  ")
+	b, err := jsonutil.MarshalPretty(v)
 	if err != nil {
 		return "<json marshal error: " + err.Error() + ">"
 	}

@@ -8,14 +8,20 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/tinoosan/workbench-core/internal/store"
 )
 
 func TestHistorySink_AppendsJSONL(t *testing.T) {
 	tmp := t.TempDir()
+	hstore, err := store.NewDiskHistoryStoreFromPath(filepath.Join(tmp, "history.jsonl"))
+	if err != nil {
+		t.Fatalf("NewDiskHistoryStoreFromPath: %v", err)
+	}
 	sink := HistorySink{
-		BaseDir: tmp,
-		Model:   "openai/test-model",
-		Now:     func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
+		Store: hstore,
+		Model: "openai/test-model",
+		Now:   func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
 	}
 
 	if err := sink.Emit(context.Background(), "run-1", Event{

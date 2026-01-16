@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
@@ -266,7 +267,7 @@ func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt strin
 	system = strings.TrimSpace(system)
 
 	if u.ManifestPath != "" {
-		b, err := json.MarshalIndent(manifest, "", "  ")
+		b, err := jsonutil.MarshalPretty(manifest)
 		if err == nil {
 			_ = u.FS.Write(u.ManifestPath, b)
 		}

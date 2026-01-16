@@ -3,10 +3,10 @@ package resources
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // VirtualMemoryResource exposes run-scoped memory under the VFS mount "/memory",
@@ -51,8 +51,11 @@ func NewVirtualMemoryResource(s store.MemoryStore) (*VirtualMemoryResource, erro
 
 // List lists entries under subpath relative to the /memory mount.
 func (mr *VirtualMemoryResource) List(subpath string) ([]vfs.Entry, error) {
-	subpath = strings.TrimSpace(subpath)
-	if subpath == "" || subpath == "." {
+	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
+	if err != nil {
+		return nil, err
+	}
+	if clean == "" || clean == "." {
 		return []vfs.Entry{
 			{Path: "memory.md", IsDir: false},
 			{Path: "update.md", IsDir: false},
@@ -67,14 +70,14 @@ func (mr *VirtualMemoryResource) Read(subpath string) ([]byte, error) {
 	if mr == nil || mr.Store == nil {
 		return nil, fmt.Errorf("memory store not configured")
 	}
-	subpath = strings.TrimSpace(subpath)
-	if subpath == "" || subpath == "." {
+	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
+	if err != nil {
+		return nil, fmt.Errorf("memory read: %w", err)
+	}
+	if clean == "" || clean == "." {
 		return nil, fmt.Errorf("memory read: path required (try 'memory.md')")
 	}
-	if strings.HasPrefix(subpath, "/") {
-		return nil, fmt.Errorf("memory read: absolute paths not allowed: %q", subpath)
-	}
-	switch subpath {
+	switch clean {
 	case "memory.md":
 		s, err := mr.Store.GetMemory(context.Background())
 		return []byte(s), err
@@ -85,7 +88,7 @@ func (mr *VirtualMemoryResource) Read(subpath string) ([]byte, error) {
 		s, err := mr.Store.GetCommitLog(context.Background())
 		return []byte(s), err
 	default:
-		return nil, fmt.Errorf("memory read: unknown item %q (allowed: memory.md, update.md, commits.jsonl)", subpath)
+		return nil, fmt.Errorf("memory read: unknown item %q (allowed: memory.md, update.md, commits.jsonl)", clean)
 	}
 }
 
@@ -96,11 +99,11 @@ func (mr *VirtualMemoryResource) Write(subpath string, data []byte) error {
 	if mr == nil || mr.Store == nil {
 		return fmt.Errorf("memory store not configured")
 	}
-	subpath = strings.TrimSpace(subpath)
-	if strings.HasPrefix(subpath, "/") {
-		return fmt.Errorf("memory write: absolute paths not allowed: %q", subpath)
+	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
+	if err != nil {
+		return fmt.Errorf("memory write: %w", err)
 	}
-	if subpath != "update.md" {
+	if clean != "update.md" {
 		return fmt.Errorf("memory write: only update.md is writable")
 	}
 	return mr.Store.SetUpdate(context.Background(), string(data))
@@ -114,11 +117,11 @@ func (mr *VirtualMemoryResource) Append(subpath string, data []byte) error {
 	if mr == nil || mr.Store == nil {
 		return fmt.Errorf("memory store not configured")
 	}
-	subpath = strings.TrimSpace(subpath)
-	if strings.HasPrefix(subpath, "/") {
-		return fmt.Errorf("memory append: absolute paths not allowed: %q", subpath)
+	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
+	if err != nil {
+		return fmt.Errorf("memory append: %w", err)
 	}
-	if subpath != "update.md" {
+	if clean != "update.md" {
 		return fmt.Errorf("memory append: only update.md is writable")
 	}
 	prev, err := mr.Store.GetUpdate(context.Background())

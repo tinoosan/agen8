@@ -29,9 +29,13 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTraceResource: %v", err)
 	}
-	memRes, err := resources.NewRunMemoryResource(run.RunId)
+	memStore, err := store.NewDiskMemoryStore(run.RunId)
 	if err != nil {
-		t.Fatalf("NewRunMemoryResource: %v", err)
+		t.Fatalf("NewDiskMemoryStore: %v", err)
+	}
+	memRes, err := resources.NewVirtualMemoryResource(memStore)
+	if err != nil {
+		t.Fatalf("NewVirtualMemoryResource: %v", err)
 	}
 	wsRes, err := resources.NewRunWorkspace(run.RunId)
 	if err != nil {
@@ -141,9 +145,13 @@ func TestContextUpdater_FiltersTraceEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTraceResource: %v", err)
 	}
-	memRes, err := resources.NewRunMemoryResource(run.RunId)
+	memStore, err := store.NewDiskMemoryStore(run.RunId)
 	if err != nil {
-		t.Fatalf("NewRunMemoryResource: %v", err)
+		t.Fatalf("NewDiskMemoryStore: %v", err)
+	}
+	memRes, err := resources.NewVirtualMemoryResource(memStore)
+	if err != nil {
+		t.Fatalf("NewVirtualMemoryResource: %v", err)
 	}
 	wsRes, err := resources.NewRunWorkspace(run.RunId)
 	if err != nil {
@@ -212,9 +220,13 @@ func TestContextUpdater_AdaptiveBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTraceResource: %v", err)
 	}
-	memRes, err := resources.NewRunMemoryResource(run.RunId)
+	memStore, err := store.NewDiskMemoryStore(run.RunId)
 	if err != nil {
-		t.Fatalf("NewRunMemoryResource: %v", err)
+		t.Fatalf("NewDiskMemoryStore: %v", err)
+	}
+	memRes, err := resources.NewVirtualMemoryResource(memStore)
+	if err != nil {
+		t.Fatalf("NewVirtualMemoryResource: %v", err)
 	}
 	wsRes, err := resources.NewRunWorkspace(run.RunId)
 	if err != nil {
@@ -270,9 +282,13 @@ func TestContextUpdater_FailureBumpAfterBadOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTraceResource: %v", err)
 	}
-	memRes, err := resources.NewRunMemoryResource(run.RunId)
+	memStore, err := store.NewDiskMemoryStore(run.RunId)
 	if err != nil {
-		t.Fatalf("NewRunMemoryResource: %v", err)
+		t.Fatalf("NewDiskMemoryStore: %v", err)
+	}
+	memRes, err := resources.NewVirtualMemoryResource(memStore)
+	if err != nil {
+		t.Fatalf("NewVirtualMemoryResource: %v", err)
 	}
 	wsRes, err := resources.NewRunWorkspace(run.RunId)
 	if err != nil {

@@ -4,12 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tinoosan/workbench-core/internal/store"
 )
 
 // HistorySink appends enriched, immutable history lines to history.jsonl.
@@ -25,9 +24,10 @@ import (
 //
 // The host owns history: it is append-only and should not be writable via VFS.
 type HistorySink struct {
-	// BaseDir is the OS directory where history.jsonl lives.
-	// Example: data/runs/<runId>/history
-	BaseDir string
+	// Store is the backing store for history.jsonl.
+	//
+	// This is the storage boundary; HistorySink does not perform direct filesystem IO.
+	Store store.HistoryStore
 
 	// Model is the model identifier used for this run (for provenance).
 	// Example: "openai/gpt-5-mini".
@@ -38,15 +38,15 @@ type HistorySink struct {
 	Now func() time.Time
 }
 
-func (s HistorySink) Emit(_ context.Context, runID string, event Event) error {
+func (s HistorySink) Emit(ctx context.Context, runID string, event Event) error {
 	if !enabled(event.History) {
 		return nil
 	}
 	if strings.TrimSpace(runID) == "" {
 		return fmt.Errorf("history sink: runID is required")
 	}
-	if strings.TrimSpace(s.BaseDir) == "" {
-		return fmt.Errorf("history sink: BaseDir is required")
+	if s.Store == nil {
+		return fmt.Errorf("history sink: Store is required")
 	}
 
 	now := time.Now
@@ -88,19 +88,8 @@ func (s HistorySink) Emit(_ context.Context, runID string, event Event) error {
 	if err != nil {
 		return fmt.Errorf("history sink: marshal: %w", err)
 	}
-	b = append(b, '\n')
-
-	if err := os.MkdirAll(s.BaseDir, 0755); err != nil {
-		return fmt.Errorf("history sink: mkdir: %w", err)
-	}
-	p := filepath.Join(s.BaseDir, "history.jsonl")
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return fmt.Errorf("history sink: open: %w", err)
-	}
-	defer f.Close()
-	if _, err := f.Write(b); err != nil {
-		return fmt.Errorf("history sink: write: %w", err)
+	if err := s.Store.AppendLine(ctx, b); err != nil {
+		return fmt.Errorf("history sink: append: %w", err)
 	}
 	return nil
 }

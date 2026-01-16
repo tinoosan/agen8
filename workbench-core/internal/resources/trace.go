@@ -12,6 +12,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 type TraceResource struct {
@@ -96,8 +97,12 @@ func NewTraceResource(runId string) (*TraceResource, error) {
 //	entries, err := tr.List("")
 //	// Returns entries like "events", "events.since", "events.latest"
 func (tr *TraceResource) List(subpath string) ([]vfs.Entry, error) {
+	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
+	if err != nil {
+		return nil, err
+	}
 	// Treat "" and "." as the root of the trace resource
-	if subpath == "" || subpath == "." {
+	if clean == "" || clean == "." {
 		return []vfs.Entry{
 			{Path: "events", IsDir: false},
 			{Path: "events.latest", IsDir: false},
@@ -125,18 +130,13 @@ func (tr *TraceResource) List(subpath string) ([]vfs.Entry, error) {
 //
 //	b, err := tr.Read("events.since/0")
 func (tr *TraceResource) Read(subpath string) ([]byte, error) {
-	// Normalise
-	subpath = strings.TrimSpace(subpath)
-	if subpath == "" || subpath == "." {
+	clean, parts, err := vfsutil.NormalizeResourceSubpath(subpath)
+	if err != nil {
+		return nil, fmt.Errorf("trace read: %w", err)
+	}
+	if clean == "" || clean == "." {
 		return nil, fmt.Errorf("trace read: path required (try 'events')")
 	}
-	if strings.HasPrefix(subpath, "/") {
-		return nil, fmt.Errorf("trace read: absolute paths not allowed: %q", subpath)
-	}
-
-	// Split on "/" so we can support patterns like:
-	// "events.since/123" and "events.latest/3"
-	parts := strings.Split(subpath, "/")
 
 	// Route by first segment
 	switch parts[0] {
@@ -144,7 +144,7 @@ func (tr *TraceResource) Read(subpath string) ([]byte, error) {
 	case "events":
 		// must be exactly "events"
 		if len(parts) != 1 {
-			return nil, fmt.Errorf("trace read: 'events' does not take a suffix (got %q)", subpath)
+			return nil, fmt.Errorf("trace read: 'events' does not take a suffix (got %q)", clean)
 		}
 		targetPath := filepath.Join(tr.BaseDir, "events.jsonl")
 		return readFile(targetPath, "events")
@@ -152,15 +152,15 @@ func (tr *TraceResource) Read(subpath string) ([]byte, error) {
 	case "events.since":
 		// expects "events.since/<offset>"
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("trace read: expected 'events.since/<offset>' (got %q)", subpath)
+			return nil, fmt.Errorf("trace read: expected 'events.since/<offset>' (got %q)", clean)
 		}
 		offsetStr := parts[1]
 		offset, err := strconv.ParseInt(offsetStr, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("trace read: events.since offset must be a number (got %q)", subpath)
+			return nil, fmt.Errorf("trace read: events.since offset must be a number (got %q)", clean)
 		}
 		if offset < 0 {
-			return nil, fmt.Errorf("trace read: events.since offset must be non-negative (got %q)", subpath)
+			return nil, fmt.Errorf("trace read: events.since offset must be non-negative (got %q)", clean)
 		}
 
 		b, _, err := tr.ReadEventsSince(offset)
@@ -172,15 +172,15 @@ func (tr *TraceResource) Read(subpath string) ([]byte, error) {
 	case "events.latest":
 		// expects "events.latest/<count>"
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("trace read: expected 'events.latest/<count>' (got %q)", subpath)
+			return nil, fmt.Errorf("trace read: expected 'events.latest/<count>' (got %q)", clean)
 		}
 		countStr := parts[1]
 		count, err := strconv.Atoi(countStr)
 		if err != nil {
-			return nil, fmt.Errorf("trace read: events.latest count must be a number (got %q)", subpath)
+			return nil, fmt.Errorf("trace read: events.latest count must be a number (got %q)", clean)
 		}
 		if count < 0 {
-			return nil, fmt.Errorf("trace read: events.latest count must be non-negative (got %q)", subpath)
+			return nil, fmt.Errorf("trace read: events.latest count must be non-negative (got %q)", clean)
 		}
 		if count > maxLatestCount {
 			return nil, fmt.Errorf("trace read: events.latest count exceeds max %d", maxLatestCount)

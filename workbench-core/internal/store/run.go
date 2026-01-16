@@ -30,6 +30,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -75,7 +76,7 @@ func SaveRun(run types.Run) error {
 		return err
 	}
 
-	b, err := json.MarshalIndent(run, "", "\t")
+	b, err := jsonutil.MarshalPretty(run)
 	if err != nil {
 		return fmt.Errorf("error marshalling run: %w", err)
 	}

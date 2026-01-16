@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -154,7 +155,7 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 		}
 
 		hostResp := a.Exec(ctx, op)
-		hostRespJSON, _ := json.MarshalIndent(hostResp, "", "  ")
+		hostRespJSON, _ := jsonutil.MarshalPretty(hostResp)
 
 		// Feed the host response back to the model as the next user turn.
 		msgs = append(msgs,

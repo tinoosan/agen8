@@ -36,7 +36,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("error creating history: %v", err)
 	}
-	historySink := &events.HistorySink{BaseDir: historyRes.BaseDir}
+	historySink := &events.HistorySink{Store: historyRes.Store}
 
 	emitter := &events.Emitter{
 		RunID: run.RunId,
