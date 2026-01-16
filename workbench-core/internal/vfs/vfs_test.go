@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/tinoosan/workbench-core/internal/resources"
+	"github.com/tinoosan/workbench-core/internal/tools"
+	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
@@ -204,24 +206,33 @@ func TestVFS_WithDirResourceRoundtrip(t *testing.T) {
 
 func TestVFS_WithToolsResource_ReadOnlyManifest(t *testing.T) {
 	tmp := t.TempDir()
-	tools := &resources.ToolsResource{
-		BaseDir: tmp,
-		Mount:   "tools",
-		BuiltinRegistry: map[string]resources.BuiltinTool{
-			"github.com.acme.stock": {Manifest: []byte(`{"id":"github.com.acme.stock"}`)},
+	builtin := tools.StaticManifestProvider{
+		Manifests: map[types.ToolID][]byte{
+			types.ToolID("github.com.acme.stock"): []byte(`{"id":"github.com.acme.stock"}`),
 		},
 	}
 
-	// Disk tool
+	// Disk tool (valid custom manifest; DiskManifestProvider validates it).
 	if err := os.MkdirAll(filepath.Join(tmp, "github.com.other.stock"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, "github.com.other.stock", "manifest.json"), []byte(`{"id":"github.com.other.stock"}`), 0644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(tmp, "github.com.other.stock", "manifest.json"),
+		[]byte(`{"id":"github.com.other.stock","version":"0.1.0","kind":"custom","displayName":"Other Stock","description":"Example disk tool","actions":[{"id":"quote.latest","displayName":"Latest Quote","description":"Fetch latest quote","inputSchema":{"type":"object"},"outputSchema":{"type":"object"}}]}`),
+		0644,
+	); err != nil {
 		t.Fatal(err)
 	}
 
+	disk := tools.NewDiskManifestProvider(tmp)
+	reg := tools.NewCompositeToolManifestRegistry(builtin, disk)
+	toolsRes, err := resources.NewVirtualToolsResource(reg)
+	if err != nil {
+		t.Fatalf("NewVirtualToolsResource: %v", err)
+	}
+
 	fs := vfs.NewFS()
-	fs.Mount("tools", tools)
+	fs.Mount("tools", toolsRes)
 
 	entries, err := fs.List("/tools")
 	if err != nil {
@@ -248,7 +259,7 @@ func TestVFS_WithToolsResource_ReadOnlyManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read disk: %v", err)
 	}
-	if string(b) != `{"id":"github.com.other.stock"}` {
+	if !strings.Contains(string(b), `"id":"github.com.other.stock"`) {
 		t.Fatalf("unexpected bytes: %q", string(b))
 	}
 

@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/agent"
+	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/llm"
 	"github.com/tinoosan/workbench-core/internal/repl"
 	"github.com/tinoosan/workbench-core/internal/resources"
@@ -78,31 +80,43 @@ func main() {
 		log.Fatalf("error creating workspace: %v", err)
 	}
 
-	toolsResource, err := resources.NewToolsResource()
+	// /tools is virtual and does not require a disk directory.
+	// If data/tools exists, it is used as an optional provider.
+	toolsDir := fsutil.GetToolsDir(config.DataDir)
+	_ = os.MkdirAll(toolsDir, 0755)
+
+	builtinProvider, err := tools.NewBuiltinManifestProvider()
 	if err != nil {
-		log.Fatalf("error creating tools: %v", err)
+		log.Fatalf("error loading builtin tool manifests: %v", err)
 	}
-	if err := tools.RegisterBuiltinManifests(toolsResource); err != nil {
-		log.Fatalf("error registering builtin tool manifests: %v", err)
+	diskProvider := tools.NewDiskManifestProvider(toolsDir)
+	diskProvider.Logf = log.Printf
+
+	toolManifests := tools.NewCompositeToolManifestRegistry(builtinProvider, diskProvider)
+	toolManifests.Logf = log.Printf
+
+	toolsResource, err := resources.NewVirtualToolsResource(toolManifests)
+	if err != nil {
+		log.Fatalf("error creating tools resource: %v", err)
 	}
 
-	// Disk tools under data/tools/<toolId>/manifest.json
-	if err := os.MkdirAll(filepath.Join(toolsResource.BaseDir, "github.com.other.stock"), 0755); err != nil {
+	// Optional disk tools under data/tools/<toolId>/manifest.json (demo only).
+	if err := os.MkdirAll(filepath.Join(toolsDir, "github.com.other.stock"), 0755); err != nil {
 		log.Fatalf("error creating disk tool directory: %v", err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(toolsResource.BaseDir, "github.com.other.stock", "manifest.json"),
+		filepath.Join(toolsDir, "github.com.other.stock", "manifest.json"),
 		[]byte(`{"id":"github.com.other.stock","version":"0.1.0","kind":"custom","displayName":"Other Stock","description":"Example disk tool","actions":[{"id":"quote.latest","displayName":"Latest Quote","description":"Fetch latest quote for a symbol","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]},"outputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"price":{"type":"number"}},"required":["symbol","price"]}}]}`),
 		0644,
 	); err != nil {
 		log.Fatalf("error writing disk tool manifest: %v", err)
 	}
 	// Collision on disk: should be ignored on read due to builtin override
-	if err := os.MkdirAll(filepath.Join(toolsResource.BaseDir, "github.com.dupe.tool"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(toolsDir, "github.com.dupe.tool"), 0755); err != nil {
 		log.Fatalf("error creating collision tool directory: %v", err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(toolsResource.BaseDir, "github.com.dupe.tool", "manifest.json"),
+		filepath.Join(toolsDir, "github.com.dupe.tool", "manifest.json"),
 		[]byte(`{"id":"github.com.dupe.tool","version":"0.1.0","kind":"custom","displayName":"Dupe Tool (disk)","description":"Should not be returned","actions":[{"id":"dupe.noop","displayName":"No-op","description":"Returns an empty object","inputSchema":{"type":"object"},"outputSchema":{"type":"object"}}]}`),
 		0644,
 	); err != nil {
@@ -131,7 +145,7 @@ func main() {
 	fs.Mount(vfs.MountTrace, traceRes)
 	log.Printf("mounted /trace => %s", traceRes.BaseDir)
 	fs.Mount(vfs.MountTools, toolsResource)
-	log.Printf("mounted /tools => %s", toolsResource.BaseDir)
+	log.Printf("mounted /tools => (virtual; disk provider: %s)", toolsDir)
 	fs.Mount(vfs.MountMemory, memoryRes)
 	log.Printf("mounted /memory => %s", memoryRes.BaseDir)
 	fs.Mount(vfs.MountHistory, historyRes)
