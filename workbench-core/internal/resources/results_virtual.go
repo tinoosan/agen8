@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
@@ -56,7 +57,7 @@ func (r *VirtualResultsResource) List(subpath string) ([]vfs.Entry, error) {
 	if r == nil || r.Store == nil {
 		return nil, fmt.Errorf("results store not configured")
 	}
-	clean, parts, err := normalizeAndSplitResults(subpath)
+	clean, parts, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +117,7 @@ func (r *VirtualResultsResource) Read(subpath string) ([]byte, error) {
 	if r == nil || r.Store == nil {
 		return nil, fmt.Errorf("results store not configured")
 	}
-	clean, parts, err := normalizeAndSplitResults(subpath)
+	clean, parts, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {
 		return nil, err
 	}
@@ -148,41 +149,4 @@ func (r *VirtualResultsResource) Write(subpath string, data []byte) error {
 // Append is not supported; /results is read-only to the agent.
 func (r *VirtualResultsResource) Append(subpath string, data []byte) error {
 	return fmt.Errorf("results is read-only")
-}
-
-// normalizeAndSplitResults enforces "resource-relative" subpaths and returns split parts.
-//
-// Treats "" and "." as root.
-// Rejects absolute and escape attempts ("..", "a/../x").
-func normalizeAndSplitResults(subpath string) (string, []string, error) {
-	s := strings.TrimSpace(subpath)
-	if s == "" || s == "." {
-		return s, nil, nil
-	}
-	if strings.HasPrefix(s, "/") {
-		return "", nil, fmt.Errorf("absolute paths not allowed: %q", subpath)
-	}
-
-	// Reject any explicit parent directory segments, even if they would clean away.
-	for _, seg := range strings.Split(s, "/") {
-		if seg == ".." {
-			return "", nil, fmt.Errorf("invalid path: escapes mount root")
-		}
-	}
-
-	clean := path.Clean(s)
-	if clean == "." {
-		return ".", nil, nil
-	}
-	if clean == ".." || strings.HasPrefix(clean, "../") {
-		return "", nil, fmt.Errorf("invalid path: escapes mount root")
-	}
-
-	parts := strings.Split(clean, "/")
-	for _, p := range parts {
-		if p == "" {
-			return "", nil, fmt.Errorf("invalid path: empty segment")
-		}
-	}
-	return clean, parts, nil
 }

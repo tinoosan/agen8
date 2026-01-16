@@ -4,14 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"sort"
-	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // BuiltinTool is the virtual (in-memory) representation of a tool.
@@ -106,7 +105,7 @@ func (tr *ToolsResource) RegisterBuiltin(toolID string, manifestJSON []byte) err
 // disk tools, in stable sorted order. If a tool ID exists in both places,
 // builtins win (it is still listed once).
 func (tr *ToolsResource) List(subpath string) ([]vfs.Entry, error) {
-	clean, _, err := normalizeAndSplitTools(subpath)
+	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {
 		return nil, fmt.Errorf("tools list: %w", err)
 	}
@@ -153,7 +152,7 @@ func (tr *ToolsResource) List(subpath string) ([]vfs.Entry, error) {
 // Any other nested path is rejected.
 // If a tool exists in both builtins and on disk, builtins win.
 func (tr *ToolsResource) Read(subpath string) ([]byte, error) {
-	clean, parts, err := normalizeAndSplitTools(subpath)
+	clean, parts, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {
 		return nil, fmt.Errorf("tools read: %w", err)
 	}
@@ -233,44 +232,7 @@ func listDiskToolIDs(baseDir string) ([]string, error) {
 	return out, nil
 }
 
-// normalizeAndSplitTools enforces "resource-relative" subpaths and returns split parts.
-//
-// Treats "" and "." as root.
-// Rejects absolute and escape attempts ("..", "a/../x").
-func normalizeAndSplitTools(subpath string) (string, []string, error) {
-	s := strings.TrimSpace(subpath)
-	if s == "" || s == "." {
-		return s, nil, nil
-	}
-	if strings.HasPrefix(s, "/") {
-		return "", nil, fmt.Errorf("absolute paths not allowed: %q", subpath)
-	}
-
-	// Reject any explicit parent directory segments, even if they would clean away.
-	// Example: "a/../x" is rejected.
-	for _, seg := range strings.Split(s, "/") {
-		if seg == ".." {
-			return "", nil, fmt.Errorf("invalid path: escapes mount root")
-		}
-	}
-
-	// VFS subpaths always use "/" separators.
-	clean := path.Clean(s)
-	if clean == "." {
-		return ".", nil, nil
-	}
-	if clean == ".." || strings.HasPrefix(clean, "../") {
-		return "", nil, fmt.Errorf("invalid path: escapes mount root")
-	}
-
-	parts := strings.Split(clean, "/")
-	for _, p := range parts {
-		if p == "" {
-			return "", nil, fmt.Errorf("invalid path: empty segment")
-		}
-	}
-	return clean, parts, nil
-}
+// Note: subpath normalization is shared across virtual resources via internal/vfsutil.
 
 // Example usage:
 //

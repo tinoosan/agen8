@@ -34,13 +34,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // Runner executes tool calls and persists their results under /results/<callId>/.
@@ -221,15 +221,17 @@ func (r *Runner) Run(ctx context.Context, toolId types.ToolID, actionId string, 
 	}
 
 	artifactRefs := make([]types.ToolArtifactRef, 0, len(result.Artifacts))
+	cleanedArtifacts := make([]ToolArtifactWrite, 0, len(result.Artifacts))
 	for _, a := range result.Artifacts {
-		ref := types.ToolArtifactRef{Path: a.Path, MediaType: a.MediaType}
-		if err := validateArtifactWrite(a); err != nil {
+		clean, err := validateAndCleanArtifactWrite(a)
+		if err != nil {
 			resp := types.NewToolResponseError(req, "invalid_artifact", err.Error(), false)
 			if err := r.persist(callID, resp, nil); err != nil {
 				return types.ToolResponse{}, err
 			}
 			return resp, nil
 		}
+		ref := types.ToolArtifactRef{Path: clean, MediaType: a.MediaType}
 		if err := ref.Validate(); err != nil {
 			resp := types.NewToolResponseError(req, "invalid_artifact", err.Error(), false)
 			if err := r.persist(callID, resp, nil); err != nil {
@@ -238,10 +240,15 @@ func (r *Runner) Run(ctx context.Context, toolId types.ToolID, actionId string, 
 			return resp, nil
 		}
 		artifactRefs = append(artifactRefs, ref)
+		cleanedArtifacts = append(cleanedArtifacts, ToolArtifactWrite{
+			Path:      clean,
+			Bytes:     a.Bytes,
+			MediaType: a.MediaType,
+		})
 	}
 
 	resp := types.NewToolResponseOK(req, result.Output, artifactRefs)
-	if err := r.persist(callID, resp, result.Artifacts); err != nil {
+	if err := r.persist(callID, resp, cleanedArtifacts); err != nil {
 		return types.ToolResponse{}, err
 	}
 	return resp, nil
@@ -258,11 +265,10 @@ func (r *Runner) persist(callID string, resp types.ToolResponse, artifacts []Too
 	}
 	// Write artifacts first so response.json references are safe.
 	for _, a := range artifacts {
-		if err := validateArtifactWrite(a); err != nil {
+		if _, err := validateAndCleanArtifactWrite(a); err != nil {
 			return err
 		}
-		target := path.Clean(a.Path)
-		if err := r.Results.PutArtifact(callID, target, a.MediaType, a.Bytes); err != nil {
+		if err := r.Results.PutArtifact(callID, a.Path, a.MediaType, a.Bytes); err != nil {
 			return err
 		}
 	}
@@ -278,34 +284,36 @@ func (r *Runner) persist(callID string, resp types.ToolResponse, artifacts []Too
 	return nil
 }
 
-// validateArtifactWrite validates a tool-provided artifact before the runner writes it.
+// validateAndCleanArtifactWrite validates a tool-provided artifact before the runner writes it.
 //
 // Tools write artifacts relative to the call directory, e.g. "quote.json".
 // This helper prevents directory traversal and ensures MediaType is present.
-func validateArtifactWrite(a ToolArtifactWrite) error {
+//
+// It returns the normalized relative path that will be used for persistence and for
+// ToolResponse.Artifacts[].Path so the agent sees a stable, canonical path.
+func validateAndCleanArtifactWrite(a ToolArtifactWrite) (string, error) {
 	if a.Path == "" {
-		return fmt.Errorf("artifact path is required")
-	}
-	if strings.HasPrefix(a.Path, "/") {
-		return fmt.Errorf("artifact path must be relative")
-	}
-
-	// Reject any explicit parent segments, even if they would clean away.
-	for _, seg := range strings.Split(a.Path, "/") {
-		if seg == ".." {
-			return fmt.Errorf("artifact path escapes results directory")
-		}
-	}
-
-	clean := path.Clean(a.Path)
-	if clean == "." {
-		return fmt.Errorf("artifact path is invalid")
-	}
-	if clean == ".." || strings.HasPrefix(clean, "../") {
-		return fmt.Errorf("artifact path escapes results directory")
+		return "", fmt.Errorf("artifact path is required")
 	}
 	if a.MediaType == "" {
-		return fmt.Errorf("artifact mediaType is required")
+		return "", fmt.Errorf("artifact mediaType is required")
 	}
-	return nil
+
+	clean, err := vfsutil.CleanRelPath(a.Path)
+	if err != nil {
+		// Preserve the runner-facing phrasing while reusing shared path validation.
+		msg := err.Error()
+		switch {
+		case strings.Contains(msg, "absolute paths not allowed"):
+			return "", fmt.Errorf("artifact path must be relative")
+		case strings.Contains(msg, "escapes mount root"):
+			return "", fmt.Errorf("artifact path escapes results directory")
+		default:
+			return "", err
+		}
+	}
+	if clean == "." {
+		return "", fmt.Errorf("artifact path is invalid")
+	}
+	return clean, nil
 }

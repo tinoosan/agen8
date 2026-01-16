@@ -3,11 +3,12 @@ package store
 import (
 	"errors"
 	"fmt"
-	"path"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // ResultsStore is the host-side storage interface for tool call outputs.
@@ -176,7 +177,7 @@ func (s *InMemoryResultsStore) PutArtifact(callID, artifactPath, mediaType strin
 	if content == nil {
 		return fmt.Errorf("content is required")
 	}
-	clean, err := validateAndCleanResultRelPath(artifactPath)
+	clean, err := vfsutil.CleanRelPath(artifactPath)
 	if err != nil {
 		return err
 	}
@@ -211,7 +212,7 @@ func (s *InMemoryResultsStore) GetArtifact(callID, artifactPath string) ([]byte,
 	if artifactPath == "" {
 		return nil, "", fmt.Errorf("artifactPath is required")
 	}
-	clean, err := validateAndCleanResultRelPath(artifactPath)
+	clean, err := vfsutil.CleanRelPath(artifactPath)
 	if err != nil {
 		return nil, "", err
 	}
@@ -256,20 +257,4 @@ func (s *InMemoryResultsStore) ListArtifacts(callID string) ([]ArtifactMeta, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
-}
-
-func validateAndCleanResultRelPath(rel string) (string, error) {
-	if strings.HasPrefix(rel, "/") {
-		return "", fmt.Errorf("invalid path: absolute paths not allowed")
-	}
-	for _, seg := range strings.Split(rel, "/") {
-		if seg == ".." {
-			return "", fmt.Errorf("invalid path: escapes mount root")
-		}
-	}
-	clean := path.Clean(rel)
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
-		return "", fmt.Errorf("invalid path: escapes mount root")
-	}
-	return clean, nil
 }
