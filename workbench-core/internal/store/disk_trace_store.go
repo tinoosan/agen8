@@ -1,4 +1,4 @@
-package trace
+package store
 
 import (
 	"bufio"
@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	defaultSinceMaxBytes  = 64 * 1024
-	defaultSinceLimit     = 200
-	defaultLatestMaxBytes = 64 * 1024
-	defaultLatestLimit    = 200
+	defaultTraceSinceMaxBytes  = 64 * 1024
+	defaultTraceSinceLimit     = 200
+	defaultTraceLatestMaxBytes = 64 * 1024
+	defaultTraceLatestLimit    = 200
 )
 
 // DiskTraceStore reads the current on-disk trace format:
@@ -38,37 +38,37 @@ type DiskTraceStore struct {
 // Kind returns a stable identifier for this store implementation.
 func (s DiskTraceStore) Kind() string { return "disk" }
 
-func (s DiskTraceStore) EventsSince(_ context.Context, cursor Cursor, opts SinceOptions) (Batch, error) {
+func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts TraceSinceOptions) (TraceBatch, error) {
 	if strings.TrimSpace(s.Dir) == "" {
-		return Batch{}, fmt.Errorf("disk trace store: Dir is required")
+		return TraceBatch{}, fmt.Errorf("disk trace store: Dir is required")
 	}
-	offset, err := CursorToInt64(cursor)
+	offset, err := TraceCursorToInt64(cursor)
 	if err != nil {
-		return Batch{}, fmt.Errorf("disk trace store: invalid cursor")
+		return TraceBatch{}, fmt.Errorf("disk trace store: invalid cursor")
 	}
 
 	maxBytes := opts.MaxBytes
 	if maxBytes <= 0 {
-		maxBytes = defaultSinceMaxBytes
+		maxBytes = defaultTraceSinceMaxBytes
 	}
 	limit := opts.Limit
 	if limit <= 0 {
-		limit = defaultSinceLimit
+		limit = defaultTraceSinceLimit
 	}
 
 	p := filepath.Join(s.Dir, "events.jsonl")
 	f, err := os.Open(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Batch{CursorAfter: CursorFromInt64(offset)}, nil
+			return TraceBatch{CursorAfter: TraceCursorFromInt64(offset)}, nil
 		}
-		return Batch{}, err
+		return TraceBatch{}, err
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		return Batch{}, err
+		return TraceBatch{}, err
 	}
 	size := info.Size()
 	if offset > size {
@@ -76,14 +76,14 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor Cursor, opts Since
 	}
 
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return Batch{}, err
+		return TraceBatch{}, err
 	}
 
 	lr := io.LimitReader(f, int64(maxBytes))
 	r := bufio.NewReader(lr)
 
 	var (
-		events        []Event
+		events        []TraceEvent
 		bytesConsumed int64
 		linesTotal    int
 		parsed        int
@@ -97,7 +97,7 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor Cursor, opts Since
 			if errors.Is(readErr, io.EOF) {
 				break
 			}
-			return Batch{}, readErr
+			return TraceBatch{}, readErr
 		}
 
 		// If we hit the maxBytes cap mid-line, do NOT consume the partial line.
@@ -122,7 +122,7 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor Cursor, opts Since
 			parseErrors++
 		} else {
 			parsed++
-			events = append(events, Event{
+			events = append(events, TraceEvent{
 				Timestamp: ev.Timestamp.UTC().Format(time.RFC3339Nano),
 				Type:      ev.Type,
 				Message:   ev.Message,
@@ -141,9 +141,9 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor Cursor, opts Since
 	}
 	truncated := cursorAfter < size
 
-	return Batch{
+	return TraceBatch{
 		Events:         events,
-		CursorAfter:    CursorFromInt64(cursorAfter),
+		CursorAfter:    TraceCursorFromInt64(cursorAfter),
 		BytesRead:      int(bytesConsumed),
 		LinesTotal:     linesTotal,
 		Parsed:         parsed,
@@ -154,37 +154,37 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor Cursor, opts Since
 	}, nil
 }
 
-func (s DiskTraceStore) EventsLatest(_ context.Context, opts LatestOptions) (Batch, error) {
+func (s DiskTraceStore) EventsLatest(_ context.Context, opts TraceLatestOptions) (TraceBatch, error) {
 	if strings.TrimSpace(s.Dir) == "" {
-		return Batch{}, fmt.Errorf("disk trace store: Dir is required")
+		return TraceBatch{}, fmt.Errorf("disk trace store: Dir is required")
 	}
 
 	maxBytes := opts.MaxBytes
 	if maxBytes <= 0 {
-		maxBytes = defaultLatestMaxBytes
+		maxBytes = defaultTraceLatestMaxBytes
 	}
 	limit := opts.Limit
 	if limit <= 0 {
-		limit = defaultLatestLimit
+		limit = defaultTraceLatestLimit
 	}
 
 	p := filepath.Join(s.Dir, "events.jsonl")
 	f, err := os.Open(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Batch{CursorAfter: CursorFromInt64(0)}, nil
+			return TraceBatch{CursorAfter: TraceCursorFromInt64(0)}, nil
 		}
-		return Batch{}, err
+		return TraceBatch{}, err
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		return Batch{}, err
+		return TraceBatch{}, err
 	}
 	size := info.Size()
 	if size == 0 {
-		return Batch{CursorAfter: CursorFromInt64(0)}, nil
+		return TraceBatch{CursorAfter: TraceCursorFromInt64(0)}, nil
 	}
 
 	readSize := int64(maxBytes)
@@ -193,11 +193,11 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts LatestOptions) (Bat
 	}
 	start := size - readSize
 	if _, err := f.Seek(start, io.SeekStart); err != nil {
-		return Batch{}, err
+		return TraceBatch{}, err
 	}
 	b, err := io.ReadAll(f)
 	if err != nil {
-		return Batch{}, err
+		return TraceBatch{}, err
 	}
 
 	// Split into lines; first line may be partial if we started mid-file.
@@ -205,7 +205,7 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts LatestOptions) (Bat
 	linesTotal := 0
 	parsed := 0
 	parseErrors := 0
-	var parsedEvents []Event
+	var parsedEvents []TraceEvent
 
 	// Parse in order, skipping empty/partial prefixes that fail to unmarshal.
 	for _, ln := range rawLines {
@@ -220,7 +220,7 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts LatestOptions) (Bat
 			continue
 		}
 		parsed++
-		parsedEvents = append(parsedEvents, Event{
+		parsedEvents = append(parsedEvents, TraceEvent{
 			Timestamp: ev.Timestamp.UTC().Format(time.RFC3339Nano),
 			Type:      ev.Type,
 			Message:   ev.Message,
@@ -233,9 +233,9 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts LatestOptions) (Bat
 		parsedEvents = parsedEvents[len(parsedEvents)-limit:]
 	}
 
-	return Batch{
+	return TraceBatch{
 		Events:         parsedEvents,
-		CursorAfter:    CursorFromInt64(size),
+		CursorAfter:    TraceCursorFromInt64(size),
 		BytesRead:      len(b),
 		LinesTotal:     linesTotal,
 		Parsed:         parsed,

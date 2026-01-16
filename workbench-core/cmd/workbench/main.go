@@ -19,7 +19,6 @@ import (
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tools"
-	"github.com/tinoosan/workbench-core/internal/trace"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
@@ -143,7 +142,7 @@ func main() {
 		log.Fatalf("error resolving workspace root absolute path: %v", err)
 	}
 
-	traceStore := trace.DiskTraceStore{Dir: traceRes.BaseDir}
+	traceStore := store.DiskTraceStore{Dir: traceRes.BaseDir}
 	builtinCfg := tools.BuiltinConfig{
 		BashRootDir: absWorkspaceRoot,
 		TraceStore:  traceStore,

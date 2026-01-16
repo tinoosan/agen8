@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/internal/trace"
+	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -123,7 +123,7 @@ func init() {
 // - return structured outputs (events + cursor)
 // - keep query semantics explicit and discoverable via the tool manifest
 type BuiltinTraceInvoker struct {
-	Store trace.Store
+	Store store.TraceStore
 }
 
 type traceSinceInput struct {
@@ -133,13 +133,13 @@ type traceSinceInput struct {
 }
 
 type traceSinceOutput struct {
-	StoreKind      string        `json:"storeKind,omitempty"`
-	CursorBefore   trace.Cursor  `json:"cursorBefore"`
-	CursorAfter    trace.Cursor  `json:"cursorAfter"`
-	Truncated      bool          `json:"truncated"`
-	BytesRead      int           `json:"bytesRead"`
-	EventsReturned int           `json:"eventsReturned"`
-	Events         []trace.Event `json:"events"`
+	StoreKind      string             `json:"storeKind,omitempty"`
+	CursorBefore   store.TraceCursor  `json:"cursorBefore"`
+	CursorAfter    store.TraceCursor  `json:"cursorAfter"`
+	Truncated      bool               `json:"truncated"`
+	BytesRead      int                `json:"bytesRead"`
+	EventsReturned int                `json:"eventsReturned"`
+	Events         []store.TraceEvent `json:"events"`
 }
 
 type traceLatestInput struct {
@@ -148,12 +148,12 @@ type traceLatestInput struct {
 }
 
 type traceLatestOutput struct {
-	StoreKind      string        `json:"storeKind,omitempty"`
-	CursorAfter    trace.Cursor  `json:"cursorAfter"`
-	Truncated      bool          `json:"truncated"`
-	BytesRead      int           `json:"bytesRead"`
-	EventsReturned int           `json:"eventsReturned"`
-	Events         []trace.Event `json:"events"`
+	StoreKind      string             `json:"storeKind,omitempty"`
+	CursorAfter    store.TraceCursor  `json:"cursorAfter"`
+	Truncated      bool               `json:"truncated"`
+	BytesRead      int                `json:"bytesRead"`
+	EventsReturned int                `json:"eventsReturned"`
+	Events         []store.TraceEvent `json:"events"`
 }
 
 func (t BuiltinTraceInvoker) Invoke(ctx context.Context, req types.ToolRequest) (ToolCallResult, error) {
@@ -186,7 +186,7 @@ func (t BuiltinTraceInvoker) eventsSince(ctx context.Context, req types.ToolRequ
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
 	}
 
-	batch, err := t.Store.EventsSince(ctx, cursor, trace.SinceOptions{MaxBytes: in.MaxBytes, Limit: in.Limit})
+	batch, err := t.Store.EventsSince(ctx, cursor, store.TraceSinceOptions{MaxBytes: in.MaxBytes, Limit: in.Limit})
 	if err != nil {
 		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
 	}
@@ -212,7 +212,7 @@ func (t BuiltinTraceInvoker) eventsLatest(ctx context.Context, req types.ToolReq
 	if err := json.Unmarshal(req.Input, &in); err != nil {
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid input JSON: %v", err)}
 	}
-	batch, err := t.Store.EventsLatest(ctx, trace.LatestOptions{MaxBytes: in.MaxBytes, Limit: in.Limit})
+	batch, err := t.Store.EventsLatest(ctx, store.TraceLatestOptions{MaxBytes: in.MaxBytes, Limit: in.Limit})
 	if err != nil {
 		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
 	}
@@ -239,15 +239,15 @@ type traceSummaryInput struct {
 }
 
 type traceSummaryOutput struct {
-	StoreKind      string         `json:"storeKind,omitempty"`
-	CursorBefore   trace.Cursor   `json:"cursorBefore"`
-	CursorAfter    trace.Cursor   `json:"cursorAfter"`
-	Truncated      bool           `json:"truncated"`
-	BytesRead      int            `json:"bytesRead"`
-	EventsReturned int            `json:"eventsReturned"`
-	TypeCounts     map[string]int `json:"typeCounts,omitempty"`
-	LastTimestamp  string         `json:"lastTimestamp,omitempty"`
-	Summary        string         `json:"summary"`
+	StoreKind      string            `json:"storeKind,omitempty"`
+	CursorBefore   store.TraceCursor `json:"cursorBefore"`
+	CursorAfter    store.TraceCursor `json:"cursorAfter"`
+	Truncated      bool              `json:"truncated"`
+	BytesRead      int               `json:"bytesRead"`
+	EventsReturned int               `json:"eventsReturned"`
+	TypeCounts     map[string]int    `json:"typeCounts,omitempty"`
+	LastTimestamp  string            `json:"lastTimestamp,omitempty"`
+	Summary        string            `json:"summary"`
 }
 
 func (t BuiltinTraceInvoker) eventsSummary(ctx context.Context, req types.ToolRequest) (ToolCallResult, error) {
@@ -260,7 +260,7 @@ func (t BuiltinTraceInvoker) eventsSummary(ctx context.Context, req types.ToolRe
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
 	}
 
-	batch, err := t.Store.EventsSince(ctx, cursor, trace.SinceOptions{MaxBytes: in.MaxBytes, Limit: in.Limit})
+	batch, err := t.Store.EventsSince(ctx, cursor, store.TraceSinceOptions{MaxBytes: in.MaxBytes, Limit: in.Limit})
 	if err != nil {
 		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
 	}
@@ -343,7 +343,7 @@ func formatSummary(typeCounts map[string]int, lastTimestamp string, lines []stri
 	return strings.TrimSpace(b.String())
 }
 
-func storeKind(s trace.Store) string {
+func storeKind(s store.TraceStore) string {
 	type kinder interface{ Kind() string }
 	if k, ok := s.(kinder); ok {
 		return k.Kind()
@@ -351,7 +351,7 @@ func storeKind(s trace.Store) string {
 	return ""
 }
 
-func parseCursor(raw json.RawMessage) (trace.Cursor, error) {
+func parseCursor(raw json.RawMessage) (store.TraceCursor, error) {
 	raw = json.RawMessage(strings.TrimSpace(string(raw)))
 	if len(raw) == 0 {
 		return "", fmt.Errorf("cursor is required")
@@ -361,7 +361,7 @@ func parseCursor(raw json.RawMessage) (trace.Cursor, error) {
 	if err := json.Unmarshal(raw, &n); err == nil {
 		i, err := n.Int64()
 		if err == nil && i >= 0 {
-			return trace.CursorFromInt64(i), nil
+			return store.TraceCursorFromInt64(i), nil
 		}
 	}
 	// Then string.
@@ -371,7 +371,7 @@ func parseCursor(raw json.RawMessage) (trace.Cursor, error) {
 		if s == "" {
 			return "", fmt.Errorf("cursor is required")
 		}
-		return trace.Cursor(s), nil
+		return store.TraceCursor(s), nil
 	}
 	return "", fmt.Errorf("cursor must be a string or number")
 }

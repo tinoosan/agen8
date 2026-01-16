@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tools"
-	"github.com/tinoosan/workbench-core/internal/trace"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -22,7 +22,7 @@ func TestBuiltinTrace_EventsSince_CursorAdvances(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	inv := tools.BuiltinTraceInvoker{Store: trace.DiskTraceStore{Dir: dir}}
+	inv := tools.BuiltinTraceInvoker{Store: store.DiskTraceStore{Dir: dir}}
 	req := types.ToolRequest{
 		Version:  "v1",
 		CallID:   "c1",

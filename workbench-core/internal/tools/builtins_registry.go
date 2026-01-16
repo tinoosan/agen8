@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/tinoosan/workbench-core/internal/trace"
+	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -23,7 +23,7 @@ type BuiltinConfig struct {
 	RipgrepRootDir string
 
 	// TraceStore is the run-scoped trace store used by builtin.trace.
-	TraceStore trace.Store
+	TraceStore store.TraceStore
 }
 
 // BuiltinDef describes a builtin tool definition: manifest bytes + an optional invoker factory.

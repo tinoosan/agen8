@@ -10,7 +10,6 @@ import (
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/trace"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
@@ -66,7 +65,7 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSystemPrompt: %v", err)
 	}
-	after1, err := trace.CursorToInt64(u.TraceCursor)
+	after1, err := store.TraceCursorToInt64(u.TraceCursor)
 	if err != nil {
 		t.Fatalf("CursorToInt64: %v", err)
 	}
@@ -76,11 +75,11 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 	if m1.Memory.BytesIncluded == 0 {
 		t.Fatalf("expected memory to be included")
 	}
-	before1, err := trace.CursorToInt64(m1.Trace.CursorBefore)
+	before1, err := store.TraceCursorToInt64(m1.Trace.CursorBefore)
 	if err != nil {
 		t.Fatalf("CursorToInt64 before: %v", err)
 	}
-	afterManifest1, err := trace.CursorToInt64(m1.Trace.CursorAfter)
+	afterManifest1, err := store.TraceCursorToInt64(m1.Trace.CursorAfter)
 	if err != nil {
 		t.Fatalf("CursorToInt64 after: %v", err)
 	}

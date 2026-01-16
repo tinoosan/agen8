@@ -1,4 +1,4 @@
-package trace
+package store
 
 import (
 	"context"
@@ -7,16 +7,16 @@ import (
 	"strings"
 )
 
-// Cursor is an opaque, stable position token used by trace stores.
+// TraceCursor is an opaque, stable position token used by trace stores.
 //
 // Cursor exists to prevent ambiguity and churn around incremental retrieval.
-// At the tool/module boundary, callers should treat Cursor as an uninterpreted
+// At the module boundary, callers should treat TraceCursor as an uninterpreted
 // string: do not assume it is a byte offset, a timestamp, or an event id.
 //
-// DiskTraceStore encodes Cursor as a base-10 int64 byte offset into its JSONL file.
-type Cursor string
+// DiskTraceStore encodes TraceCursor as a base-10 int64 byte offset into its JSONL file.
+type TraceCursor string
 
-// Store is the pluggable storage interface for trace/event retrieval.
+// TraceStore is the pluggable storage interface for run trace/event retrieval.
 //
 // This is the "module-first" replacement for encoding queries into VFS paths like:
 //
@@ -32,12 +32,12 @@ type Cursor string
 // - cursor is an opaque token.
 // - cursorAfter is the next cursor to use to fetch only new content.
 // - cursorAfter MUST be deterministic for the same underlying data and options.
-type Store interface {
-	EventsSince(ctx context.Context, cursor Cursor, opts SinceOptions) (Batch, error)
-	EventsLatest(ctx context.Context, opts LatestOptions) (Batch, error)
+type TraceStore interface {
+	EventsSince(ctx context.Context, cursor TraceCursor, opts TraceSinceOptions) (TraceBatch, error)
+	EventsLatest(ctx context.Context, opts TraceLatestOptions) (TraceBatch, error)
 }
 
-type SinceOptions struct {
+type TraceSinceOptions struct {
 	// MaxBytes caps how many bytes are read from cursor onward.
 	// If <= 0, a default is used.
 	MaxBytes int
@@ -47,7 +47,7 @@ type SinceOptions struct {
 	Limit int
 }
 
-type LatestOptions struct {
+type TraceLatestOptions struct {
 	// MaxBytes caps how many bytes from the end of the file are considered.
 	// If <= 0, a default is used.
 	MaxBytes int
@@ -57,10 +57,10 @@ type LatestOptions struct {
 	Limit int
 }
 
-// Batch is one bounded retrieval of trace events.
-type Batch struct {
-	Events      []Event `json:"events"`
-	CursorAfter Cursor  `json:"cursorAfter"`
+// TraceBatch is one bounded retrieval of trace events.
+type TraceBatch struct {
+	Events      []TraceEvent `json:"events"`
+	CursorAfter TraceCursor  `json:"cursorAfter"`
 
 	// Accounting for auditability/observability.
 	BytesRead      int  `json:"bytesRead"`
@@ -75,32 +75,32 @@ type Batch struct {
 	Truncated bool `json:"truncated"`
 }
 
-// Event is the minimal event shape returned by module actions.
+// TraceEvent is the minimal event shape returned by trace store reads.
 //
 // We keep this smaller than types.Event for token efficiency:
 // - runId/eventId are already known from the run context
 // - Timestamp/Type/Message/Data are the useful reasoning fields
-type Event struct {
+type TraceEvent struct {
 	Timestamp string            `json:"timestamp"`
 	Type      string            `json:"type"`
 	Message   string            `json:"message"`
 	Data      map[string]string `json:"data,omitempty"`
 }
 
-// CursorFromInt64 encodes a byte offset cursor as an opaque token.
+// TraceCursorFromInt64 encodes a byte offset cursor as an opaque token.
 //
 // DiskTraceStore uses this encoding. Other stores are free to use different formats.
-func CursorFromInt64(offset int64) Cursor {
+func TraceCursorFromInt64(offset int64) TraceCursor {
 	if offset < 0 {
 		offset = 0
 	}
-	return Cursor(strconv.FormatInt(offset, 10))
+	return TraceCursor(strconv.FormatInt(offset, 10))
 }
 
-// CursorToInt64 decodes a DiskTraceStore cursor into a byte offset.
+// TraceCursorToInt64 decodes a DiskTraceStore cursor into a byte offset.
 //
 // If the cursor is empty, it decodes to 0.
-func CursorToInt64(c Cursor) (int64, error) {
+func TraceCursorToInt64(c TraceCursor) (int64, error) {
 	s := strings.TrimSpace(string(c))
 	if s == "" {
 		return 0, nil

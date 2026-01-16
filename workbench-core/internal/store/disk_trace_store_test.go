@@ -1,4 +1,4 @@
-package trace
+package store
 
 import (
 	"context"
@@ -37,13 +37,13 @@ func TestDiskTraceStore_EventsSince_CursorAdvancesDeterministically(t *testing.T
 	}
 
 	s := DiskTraceStore{Dir: dir}
-	batch1, err := s.EventsSince(context.Background(), CursorFromInt64(0), SinceOptions{MaxBytes: 1024, Limit: 10})
+	batch1, err := s.EventsSince(context.Background(), TraceCursorFromInt64(0), TraceSinceOptions{MaxBytes: 1024, Limit: 10})
 	if err != nil {
 		t.Fatalf("EventsSince: %v", err)
 	}
-	after1, err := CursorToInt64(batch1.CursorAfter)
+	after1, err := TraceCursorToInt64(batch1.CursorAfter)
 	if err != nil {
-		t.Fatalf("CursorToInt64: %v", err)
+		t.Fatalf("TraceCursorToInt64: %v", err)
 	}
 	if after1 != int64(len(content)) {
 		t.Fatalf("cursorAfter=%d want %d", after1, len(content))
@@ -53,7 +53,7 @@ func TestDiskTraceStore_EventsSince_CursorAdvancesDeterministically(t *testing.T
 	}
 
 	// Calling again from cursorAfter should return no new events and keep cursor stable.
-	batch2, err := s.EventsSince(context.Background(), batch1.CursorAfter, SinceOptions{MaxBytes: 1024, Limit: 10})
+	batch2, err := s.EventsSince(context.Background(), batch1.CursorAfter, TraceSinceOptions{MaxBytes: 1024, Limit: 10})
 	if err != nil {
 		t.Fatalf("EventsSince: %v", err)
 	}
