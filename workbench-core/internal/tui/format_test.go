@@ -7,7 +7,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/events"
 )
 
-func TestFormatEventLine_OpRequest(t *testing.T) {
+func TestClassifyEvent_OpRequest(t *testing.T) {
 	ev := events.Event{
 		Type:    "agent.op.request",
 		Message: "Agent requested host op",
@@ -19,18 +19,18 @@ func TestFormatEventLine_OpRequest(t *testing.T) {
 			"maxBytes": "4096",
 		},
 	}
-	line := formatEventLine(ev)
-	if !strings.HasPrefix(line, "* ") {
-		t.Fatalf("expected bullet line, got %q", line)
+	rr := classifyEvent(ev)
+	if rr.Class != RenderAction {
+		t.Fatalf("expected action class, got %v", rr.Class)
 	}
-	for _, want := range []string{"op=fs.read", "path=/tools/builtin.bash", "maxBytes=4096"} {
-		if !strings.Contains(line, want) {
-			t.Fatalf("expected %q to contain %q", line, want)
+	for _, want := range []string{"Read /tools/builtin.bash"} {
+		if !strings.Contains(rr.Text, want) {
+			t.Fatalf("expected %q to contain %q", rr.Text, want)
 		}
 	}
 }
 
-func TestFormatEventLine_OpResponse(t *testing.T) {
+func TestClassifyEvent_OpResponse(t *testing.T) {
 	ev := events.Event{
 		Type:    "agent.op.response",
 		Message: "Host op completed",
@@ -42,10 +42,60 @@ func TestFormatEventLine_OpResponse(t *testing.T) {
 			"truncated": "true",
 		},
 	}
-	line := formatEventLine(ev)
-	for _, want := range []string{"op=tool.run", "ok=true", "callId=abc"} {
-		if !strings.Contains(line, want) {
-			t.Fatalf("expected %q to contain %q", line, want)
-		}
+	rr := classifyEvent(ev)
+	if rr.Class != RenderAction {
+		t.Fatalf("expected action class, got %v", rr.Class)
 	}
+	if !strings.Contains(rr.Text, "✓") {
+		t.Fatalf("expected completion marker, got %q", rr.Text)
+	}
+	if !strings.Contains(rr.Text, "call=abc") {
+		t.Fatalf("expected call id, got %q", rr.Text)
+	}
+}
+
+func TestClassifyEvent_ToolRunRequest_ShowsArgsAndCommand(t *testing.T) {
+	t.Run("builtin.bash exec", func(t *testing.T) {
+		ev := events.Event{
+			Type:    "agent.op.request",
+			Message: "Agent requested host op",
+			Data: map[string]string{
+				"op":       "tool.run",
+				"toolId":   "builtin.bash",
+				"actionId": "exec",
+				"input":    `{"argv":["rg","-n","Example Domain","."],"cwd":"."}`,
+			},
+		}
+		rr := classifyEvent(ev)
+		if rr.Class != RenderAction {
+			t.Fatalf("expected action class, got %v", rr.Class)
+		}
+		for _, want := range []string{"rg -n", "Example Domain"} {
+			if !strings.Contains(rr.Text, want) {
+				t.Fatalf("expected %q to contain %q", rr.Text, want)
+			}
+		}
+	})
+
+	t.Run("builtin.ripgrep search", func(t *testing.T) {
+		ev := events.Event{
+			Type:    "agent.op.request",
+			Message: "Agent requested host op",
+			Data: map[string]string{
+				"op":       "tool.run",
+				"toolId":   "builtin.ripgrep",
+				"actionId": "search",
+				"input":    `{"query":"Example Domain","paths":["."],"caseSensitive":false,"maxMatches":50}`,
+			},
+		}
+		rr := classifyEvent(ev)
+		if rr.Class != RenderAction {
+			t.Fatalf("expected action class, got %v", rr.Class)
+		}
+		for _, want := range []string{"rg --json", "-i", "--max-count 50", "Example Domain", "."} {
+			if !strings.Contains(rr.Text, want) {
+				t.Fatalf("expected %q to contain %q", rr.Text, want)
+			}
+		}
+	})
 }

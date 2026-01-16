@@ -20,6 +20,12 @@ func (s EventSink) Emit(_ context.Context, _ string, event events.Event) error {
 	if s.Ch == nil {
 		return nil
 	}
+	// The host may emit a final "run completed" event after the UI has begun shutting
+	// down. If the channel has already been closed, sending would panic. Treat that
+	// as a no-op: events are still persisted by other sinks (store/history).
+	defer func() {
+		_ = recover()
+	}()
 	select {
 	case s.Ch <- event:
 	default:

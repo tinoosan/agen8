@@ -346,6 +346,18 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		if req.Op == types.HostOpToolRun && req.TimeoutMs != 0 {
 			reqData["timeoutMs"] = strconv.Itoa(req.TimeoutMs)
 		}
+		if req.Op == types.HostOpToolRun && len(req.Input) != 0 {
+			s, tr, n := toolRunInputForEvent(req.Input)
+			if s != "" {
+				reqData["input"] = s
+			}
+			if tr {
+				reqData["inputTruncated"] = "true"
+			}
+			if n != 0 {
+				reqData["inputBytes"] = strconv.Itoa(n)
+			}
+		}
 
 		mustEmit(ctx, events.Event{
 			Type:      "agent.op.request",

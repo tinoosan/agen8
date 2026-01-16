@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tinoosan/workbench-core/internal/app"
 	"github.com/tinoosan/workbench-core/internal/config"
+	"github.com/tinoosan/workbench-core/internal/cost"
 	"github.com/tinoosan/workbench-core/internal/store"
 )
 
@@ -18,6 +19,7 @@ var (
 	defaultGoal  string
 	defaultTitle string
 	uiMode       string
+	pricingFile  string
 
 	maxSteps           int
 	maxTraceBytes      int
@@ -53,6 +55,30 @@ new run in that session (workspaces remain run-scoped).
 		if maxContextB <= 0 {
 			return fmt.Errorf("--context-bytes must be > 0")
 		}
+
+		// Pricing resolution (model-picker safe):
+		//   1) explicit flags (--price-in-per-m/--price-out-per-m)
+		//   2) optional pricing file override (env/flag)
+		//   3) built-in pricing table (compiled into the binary)
+		if !cmd.Root().PersistentFlags().Changed("price-in-per-m") || !cmd.Root().PersistentFlags().Changed("price-out-per-m") {
+			model := strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
+			pf := cost.DefaultPricing()
+			if strings.TrimSpace(pricingFile) != "" {
+				if fromFile, err := cost.LoadPricingFile(pricingFile); err == nil {
+					for k, v := range fromFile.Models {
+						pf.Models[k] = v
+					}
+				}
+			}
+			if inPerM, outPerM, ok := pf.Lookup(model); ok {
+				if !cmd.Root().PersistentFlags().Changed("price-in-per-m") {
+					priceInPerM = inPerM
+				}
+				if !cmd.Root().PersistentFlags().Changed("price-out-per-m") {
+					priceOutPerM = outPerM
+				}
+			}
+		}
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -65,14 +91,6 @@ new run in that session (workspaces remain run-scoped).
 			goal = "interactive chat"
 		}
 
-		sess, err := store.CreateSession(title)
-		if err != nil {
-			return err
-		}
-		run, err := store.CreateRunInSession(sess.SessionID, "", goal, maxContextB)
-		if err != nil {
-			return err
-		}
 		opts := app.RunChatOptions{
 			MaxSteps:              maxSteps,
 			MaxTraceBytes:         maxTraceBytes,
@@ -86,8 +104,18 @@ new run in that session (workspaces remain run-scoped).
 		}
 		switch strings.ToLower(strings.TrimSpace(uiMode)) {
 		case "", "tui":
-			return app.RunChatTUI(cmd.Context(), run, opts)
+			return app.RunNewChatTUI(cmd.Context(), title, goal, maxContextB, opts)
 		case "repl":
+			// The legacy REPL creates the session/run upfront.
+			// (We can make this lazy too, but the TUI is the primary UX.)
+			sess, err := store.CreateSession(title)
+			if err != nil {
+				return err
+			}
+			run, err := store.CreateRunInSession(sess.SessionID, "", goal, maxContextB)
+			if err != nil {
+				return err
+			}
 			return app.RunChat(cmd.Context(), run, opts)
 		default:
 			return fmt.Errorf("unknown --ui %q (expected tui or repl)", uiMode)
@@ -109,6 +137,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&defaultTitle, "title", "workbench", "title for new sessions (workbench only)")
 	rootCmd.PersistentFlags().StringVar(&defaultGoal, "goal", "interactive chat", "initial goal for the run (workbench only)")
 	rootCmd.PersistentFlags().StringVar(&uiMode, "ui", "tui", "interactive UI mode: tui or repl")
+	pricingFile = strings.TrimSpace(os.Getenv("WORKBENCH_PRICING_FILE"))
+	rootCmd.PersistentFlags().StringVar(&pricingFile, "pricing-file", pricingFile, "optional path to pricing json (env WORKBENCH_PRICING_FILE)")
 	rootCmd.PersistentFlags().IntVar(&maxSteps, "max-steps", 200, "max agent steps per user turn")
 	rootCmd.PersistentFlags().IntVar(&maxTraceBytes, "trace-bytes", 8*1024, "context updater trace budget (bytes)")
 	rootCmd.PersistentFlags().IntVar(&maxMemoryBytes, "memory-bytes", 8*1024, "context updater memory budget (bytes)")
@@ -119,10 +149,9 @@ func init() {
 	includeHistoryOps = envBool("WORKBENCH_INCLUDE_HISTORY_OPS", true)
 	rootCmd.PersistentFlags().BoolVar(&includeHistoryOps, "include-history-ops", includeHistoryOps, "include environment host ops from /history in prompt context (higher cost)")
 
-	// Pricing (USD per 1M tokens). Defaults to gpt-5.2 pricing if OPENROUTER_MODEL matches.
-	defIn, defOut := defaultPricingFromEnv()
-	priceInPerM = envFloat("WORKBENCH_PRICE_IN_PER_M", defIn)
-	priceOutPerM = envFloat("WORKBENCH_PRICE_OUT_PER_M", defOut)
+	// Pricing (USD per 1M tokens). If not set, the host uses the built-in table.
+	priceInPerM = envFloat("WORKBENCH_PRICE_IN_PER_M", 0)
+	priceOutPerM = envFloat("WORKBENCH_PRICE_OUT_PER_M", 0)
 	rootCmd.PersistentFlags().Float64Var(&priceInPerM, "price-in-per-m", priceInPerM, "USD per 1M input tokens (cost estimate)")
 	rootCmd.PersistentFlags().Float64Var(&priceOutPerM, "price-out-per-m", priceOutPerM, "USD per 1M output tokens (cost estimate)")
 
@@ -155,10 +184,5 @@ func envFloat(key string, def float64) float64 {
 	return f
 }
 
-func defaultPricingFromEnv() (inPerM, outPerM float64) {
-	model := strings.ToLower(strings.TrimSpace(os.Getenv("OPENROUTER_MODEL")))
-	if strings.Contains(model, "gpt-5.2") {
-		return 1.75, 14.0
-	}
-	return 0, 0
-}
+// Note: pricing defaults are resolved at runtime in PersistentPreRunE so the model
+// picker can safely switch models without requiring code changes.

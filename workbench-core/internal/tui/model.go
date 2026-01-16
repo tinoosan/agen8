@@ -2,7 +2,11 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wordwrap"
 	"github.com/tinoosan/workbench-core/internal/events"
 )
 
@@ -34,8 +39,14 @@ type Model struct {
 	runner TurnRunner
 	events <-chan events.Event
 
-	view viewport.Model
-	log  string
+	transcript      viewport.Model
+	inspectorList   viewport.Model
+	inspectorDetail viewport.Model
+
+	transcriptItems []transcriptItem
+
+	inspectorEntries []inspectorEntry
+	inspectorSel     int
 
 	single    textarea.Model
 	multiline textarea.Model
@@ -44,22 +55,113 @@ type Model struct {
 	width  int
 	height int
 
+	showDetails bool
+
 	turnInFlight bool
 	turnStarted  time.Time
 	turnTitle    string
+	turnN        int
 
-	statusLine string
+	pendingActionIdx       int
+	pendingActionText      string
+	waitingForAction       bool
+	pendingActionIsToolRun bool
 
-	styleHeader lipgloss.Style
-	styleEvent  lipgloss.Style
-	styleUser   lipgloss.Style
-	styleAgent  lipgloss.Style
-	styleError  lipgloss.Style
+	sessionTitle  string
+	workflowTitle string
+
+	lastTurnTokensIn  int
+	lastTurnTokensOut int
+	lastTurnTokens    int
+	totalTokens       int
+	lastTurnCostUSD   string
+	lastTurnDuration  string
+	lastTurnSteps     string
+	totalCostUSD      float64
+
+	styleHeaderBar lipgloss.Style
+	styleHeaderApp lipgloss.Style
+	styleHeaderMid lipgloss.Style
+	styleHeaderRHS lipgloss.Style
+
+	styleDim             lipgloss.Style
+	styleInspectorHeader lipgloss.Style
+	styleInspectorRow    lipgloss.Style
+	styleInspectorSel    lipgloss.Style
+
+	styleUserBox   lipgloss.Style
+	styleUserLabel lipgloss.Style
+	styleAgentBox  lipgloss.Style
+	styleAgent     lipgloss.Style
+	styleAction    lipgloss.Style
+	styleTelemetry lipgloss.Style
+	styleOutcome   lipgloss.Style
+	styleError     lipgloss.Style
+
+	styleInputBox lipgloss.Style
+	styleHint     lipgloss.Style
+}
+
+type transcriptItemKind int
+
+const (
+	transcriptSpacer transcriptItemKind = iota
+	transcriptUser
+	transcriptAgent
+	transcriptAction
+	transcriptError
+)
+
+type transcriptItem struct {
+	kind transcriptItemKind
+
+	// For user/agent/error content (raw, unwrapped).
+	text string
+
+	// For action lines.
+	actionText        string
+	actionCompletion  string
+	actionIsToolRun   bool
+	actionIsCompleted bool
+}
+
+type inspectorEntry struct {
+	at      time.Time
+	evType  string
+	message string
+	data    map[string]string
+	summary string
+	detail  string
 }
 
 func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model {
-	vp := viewport.New(0, 0)
-	vp.Style = lipgloss.NewStyle().Padding(0, 1)
+	main := viewport.New(0, 0)
+	main.Style = lipgloss.NewStyle().Padding(0, 2)
+
+	insList := viewport.New(0, 0)
+	insList.Style = lipgloss.NewStyle().Padding(0, 1)
+	insDetail := viewport.New(0, 0)
+	insDetail.Style = lipgloss.NewStyle().Padding(0, 1)
+
+	// Textarea focus styling:
+	//
+	// The default bubbles/textarea focused style uses a visible cursor-line highlight.
+	// For Workbench, we want focus to affect behavior (cursor + key handling) but not
+	// introduce a distinct "selected" visual treatment in the input box.
+	//
+	// So: use identical styles for focused + blurred, and avoid background/reverse
+	// effects on the cursor line.
+	plainTextAreaStyle := textarea.Style{
+		Base:        lipgloss.NewStyle(),
+		CursorLine:  lipgloss.NewStyle(),
+		EndOfBuffer: lipgloss.NewStyle().Foreground(lipgloss.Color("#404040")),
+		LineNumber:  lipgloss.NewStyle().Foreground(lipgloss.Color("#707070")),
+		Placeholder: lipgloss.NewStyle().Foreground(lipgloss.Color("#707070")),
+		Prompt: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9ad0ff")).
+			Bold(true),
+		Text: lipgloss.NewStyle().Foreground(lipgloss.Color("#eaeaea")),
+	}
 
 	single := textarea.New()
 	single.Placeholder = "Type a message…"
@@ -69,37 +171,82 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	single.SetHeight(1)
 	single.CharLimit = 0
 	single.KeyMap.InsertNewline.SetEnabled(false) // Enter should submit in single-line mode.
+	single.FocusedStyle = plainTextAreaStyle
+	single.BlurredStyle = plainTextAreaStyle
 
 	multi := textarea.New()
-	multi.Placeholder = "Multiline message (Ctrl+Enter to send)…"
+	multi.Placeholder = "Multiline message (Ctrl+S to send)…"
 	multi.Prompt = "…> "
 	multi.ShowLineNumbers = false
 	multi.CharLimit = 0
 	multi.SetHeight(6)
+	// Keep prompt dimmer for multiline mode, but still avoid focus highlighting.
+	multiStyle := plainTextAreaStyle
+	multiStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#707070"))
+	multi.FocusedStyle = multiStyle
+	multi.BlurredStyle = multiStyle
 
 	m := Model{
-		ctx:       ctx,
-		runner:    runner,
-		events:    evCh,
-		view:      vp,
-		single:    single,
-		multiline: multi,
-		styleHeader: lipgloss.NewStyle().
+		ctx:             ctx,
+		runner:          runner,
+		events:          evCh,
+		transcript:      main,
+		inspectorList:   insList,
+		inspectorDetail: insDetail,
+		single:          single,
+		multiline:       multi,
+
+		styleHeaderBar: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#c0c0c0")),
-		styleEvent: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#707070")),
-		styleUser: lipgloss.NewStyle().
+		styleHeaderApp: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#eaeaea")).
+			Bold(true),
+		styleHeaderMid: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#c0c0c0")),
+		styleHeaderRHS: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9ad0ff")),
+
+		styleDim: lipgloss.NewStyle().Foreground(lipgloss.Color("#707070")),
+		styleInspectorHeader: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#707070")).
+			Bold(true),
+		styleInspectorRow: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#b0b0b0")),
+		styleInspectorSel: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#eaeaea")).
+			Background(lipgloss.Color("#303030")),
+
+		styleUserLabel: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#9ad0ff")).
 			Bold(true),
+		styleUserBox: lipgloss.NewStyle().
+			Padding(0, 1).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#404040")),
+		styleAgentBox: lipgloss.NewStyle().
+			Padding(0, 1),
 		styleAgent: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#eaeaea")),
+		styleAction: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#c0c0c0")),
+		styleTelemetry: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6b6b6b")),
+		styleOutcome: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#8a8a8a")),
 		styleError: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#ff5f5f")).
 			Bold(true),
+
+		styleInputBox: lipgloss.NewStyle().
+			Padding(0, 1).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#404040")),
+		styleHint: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#707070")),
 	}
 
-	m.appendLine(m.styleHeader.Render("== Chat session started (Ctrl+C to quit) =="))
-	m.appendLine(m.styleHeader.Render("Tip: Ctrl+J toggles multiline; in multiline, Enter inserts newline and Ctrl+Enter sends."))
+	m.pendingActionIdx = -1
+	m.inspectorSel = -1
 	return m
 }
 
@@ -120,23 +267,70 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Toggle multiline (Ctrl+J is reliable across terminals).
-		if msg.Type == tea.KeyCtrlJ {
+		// Toggle details panel.
+		if msg.Type == tea.KeyTab {
+			m.showDetails = !m.showDetails
+			m.layout()
+			return m, nil
+		}
+		if msg.Type == tea.KeyCtrlD {
+			m.showDetails = !m.showDetails
+			if m.showDetails {
+				m.ensureInspectorSelection()
+				m.refreshInspectorViews()
+			}
+			m.layout()
+			return m, nil
+		}
+
+		// Toggle multiline.
+		//
+		// Note: Ctrl+J is ASCII LF and is often indistinguishable from Enter in many
+		// terminal setups. Use Ctrl+G as the reliable toggle.
+		if msg.Type == tea.KeyCtrlG {
 			m.toggleMultiline()
 			return m, nil
+		}
+
+		// Inspector navigation.
+		if m.showDetails {
+			switch msg.Type {
+			case tea.KeyUp:
+				m.moveInspectorSelection(-1)
+				return m, nil
+			case tea.KeyDown:
+				m.moveInspectorSelection(1)
+				return m, nil
+			case tea.KeyPgUp, tea.KeyCtrlU:
+				var cmd tea.Cmd
+				m.inspectorDetail, cmd = m.inspectorDetail.Update(msg)
+				return m, cmd
+			case tea.KeyPgDown, tea.KeyCtrlF:
+				var cmd tea.Cmd
+				m.inspectorDetail, cmd = m.inspectorDetail.Update(msg)
+				return m, cmd
+			}
 		}
 
 		if m.turnInFlight {
 			// While a turn is running, we allow scrolling but prevent submitting.
 			var cmd tea.Cmd
-			m.view, cmd = m.view.Update(msg)
+			m.transcript, cmd = m.transcript.Update(msg)
 			return m, cmd
 		}
 
 		if m.isMulti {
-			// In multiline mode, Enter inserts newline. We treat Ctrl+Enter as send when
-			// the terminal exposes it, but also support "ctrl+m" (some terminals).
-			if strings.EqualFold(msg.String(), "ctrl+enter") || strings.EqualFold(msg.String(), "ctrl+m") {
+			// In multiline mode, Enter inserts newline.
+			//
+			// Note: many terminals do not distinguish Ctrl+Enter from Enter unless an
+			// "extended keys" protocol is enabled. We support:
+			//   - Ctrl+Enter when it is exposed by the terminal/driver
+			//   - Ctrl+S as a reliable fallback "send" key
+			//   - Alt+Enter when it is exposed
+			if msg.Type == tea.KeyCtrlS ||
+				strings.EqualFold(msg.String(), "ctrl+enter") ||
+				strings.EqualFold(msg.String(), "ctrl+m") ||
+				strings.EqualFold(msg.String(), "alt+enter") {
 				return m, m.submitMultiline()
 			}
 			if msg.Type == tea.KeyEnter {
@@ -168,87 +362,179 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case eventMsg:
 		ev := events.Event(msg)
-		// The final answer is rendered as the agent message, not as an event row.
-		if ev.Type == "agent.final" {
-			return m, m.waitEvent()
-		}
-		line := formatEventLine(ev)
-		if strings.TrimSpace(line) != "" {
-			m.appendLine(m.styleEvent.Render(line))
-		}
+		m.onEvent(ev)
 		return m, m.waitEvent()
 
 	case turnDoneMsg:
 		m.turnInFlight = false
 		if msg.err != nil {
-			m.appendLine(m.styleError.Render("agent error: " + msg.err.Error()))
-			m.appendLine(m.styleHeader.Render(""))
+			m.addTranscriptItem(transcriptItem{kind: transcriptError, text: "agent error: " + msg.err.Error()})
+			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 			m.turnTitle = ""
 			return m, nil
 		}
-		m.appendLine(m.styleAgent.Render("agent> " + strings.TrimSpace(msg.final)))
-		m.appendLine(m.styleHeader.Render(""))
+		m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: strings.TrimSpace(msg.final)})
+		m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 		m.turnTitle = ""
 		return m, nil
 	}
 
 	// Default fallthrough: keep viewport responsive.
 	var cmd tea.Cmd
-	m.view, cmd = m.view.Update(msg)
+	m.transcript, cmd = m.transcript.Update(msg)
 	return m, cmd
 }
 
 func (m Model) View() string {
 	header := m.renderHeader()
-	body := m.view.View()
+	body := m.renderBody()
 	input := m.renderInput()
 	return header + "\n" + body + "\n" + input
 }
 
 func (m *Model) layout() {
-	// Layout:
-	// - 1 line header
-	// - 1 line separator
-	// - viewport fills remaining minus input height
-	// - input at bottom
-	headerH := 2
-	inputH := 3
+	headerH := 1
+	inputH := 5
 	if m.isMulti {
-		inputH = 8
+		inputH = 10
 	}
-	viewH := m.height - headerH - inputH
-	if viewH < 3 {
-		viewH = 3
+	bodyH := m.height - headerH - inputH
+	if bodyH < 5 {
+		bodyH = 5
 	}
-	m.view.Width = m.width
-	m.view.Height = viewH
+	m.transcript.Height = bodyH
 
-	m.single.SetWidth(max(20, m.width-2))
-	m.multiline.SetWidth(max(20, m.width-2))
-	m.view.SetContent(m.log)
-	m.view.GotoBottom()
+	mainW := m.width
+	detailW := 0
+	if m.showDetails {
+		// 70/30 split with a minimum transcript width.
+		detailW = int(math.Round(float64(m.width) * 0.33))
+		if detailW < 32 {
+			detailW = 32
+		}
+		if detailW > m.width-40 {
+			detailW = max(32, m.width-40)
+		}
+		mainW = m.width - detailW
+	}
+
+	m.transcript.Width = max(40, mainW)
+	m.inspectorList.Width = max(32, detailW)
+	m.inspectorDetail.Width = max(32, detailW)
+	// Split inspector vertically when visible.
+	if detailW != 0 {
+		listH := max(5, bodyH/2)
+		m.inspectorList.Height = listH
+		m.inspectorDetail.Height = max(5, bodyH-listH-1)
+	}
+
+	m.rebuildTranscript()
+	m.transcript.GotoBottom()
+	m.refreshInspectorViews()
+
+	m.single.SetWidth(max(20, m.width-6))
+	m.multiline.SetWidth(max(20, m.width-6))
 }
 
 func (m Model) renderHeader() string {
-	chips := []string{}
-	if m.statusLine != "" {
-		chips = append(chips, m.statusLine)
+	left := m.styleHeaderApp.Render("workbench")
+
+	mid := strings.TrimSpace(m.workflowTitle)
+	if mid == "" {
+		mid = strings.TrimSpace(m.sessionTitle)
+	}
+	if mid == "" {
+		mid = "interactive"
+	}
+	mid = truncateMiddle(mid, max(16, m.width/2))
+	mid = m.styleHeaderMid.Render(mid)
+
+	rhsParts := []string{}
+	if m.lastTurnTokens != 0 {
+		rhsParts = append(rhsParts, fmt.Sprintf("%d tok", m.lastTurnTokens))
+	}
+	if strings.TrimSpace(m.lastTurnCostUSD) != "" {
+		rhsParts = append(rhsParts, "$"+m.lastTurnCostUSD)
+	}
+	if m.totalCostUSD > 0 {
+		rhsParts = append(rhsParts, fmt.Sprintf("Σ$%.4f", m.totalCostUSD))
 	}
 	if m.turnInFlight {
-		chips = append(chips, "running…")
+		rhsParts = append(rhsParts, "running…")
 	}
-	line := strings.Join(chips, "  ")
-	if line == "" {
-		line = "workbench"
+	rhs := m.styleHeaderRHS.Render(strings.Join(rhsParts, "  "))
+
+	// Fit: left | mid | rhs
+	avail := max(1, m.width)
+	leftW := lipgloss.Width(left)
+	rhsW := lipgloss.Width(rhs)
+	midW := max(0, avail-leftW-rhsW-2)
+	mid = lipgloss.NewStyle().Width(midW).Align(lipgloss.Center).Render(mid)
+
+	return m.styleHeaderBar.Render(lipgloss.JoinHorizontal(lipgloss.Top, left, " ", mid, " ", rhs))
+}
+
+func (m Model) renderBody() string {
+	if !m.showDetails {
+		return m.transcript.View()
 	}
-	return m.styleHeader.Render(line) + "\n" + m.styleHeader.Render(strings.Repeat("─", max(1, m.width)))
+
+	header := m.styleInspectorHeader.Render("Inspector") + m.styleDim.Render(" (Tab/Ctrl+D to hide)")
+	divider := m.styleDim.Render(strings.Repeat("─", max(1, m.inspectorList.Width)))
+
+	listBox := header + "\n" + divider + "\n" + m.inspectorList.View()
+	detailHeader := m.styleDim.Render("Details (PgUp/PgDn scroll)")
+	detailBox := detailHeader + "\n" + divider + "\n" + m.inspectorDetail.View()
+
+	detailsBody := lipgloss.JoinVertical(lipgloss.Top, listBox, m.styleDim.Render(strings.Repeat("─", max(1, m.inspectorList.Width))), detailBox)
+	detailsBox := lipgloss.NewStyle().
+		Width(m.inspectorList.Width + 2).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("#303030")).
+		Render(detailsBody)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, m.transcript.View(), detailsBox)
 }
 
 func (m Model) renderInput() string {
+	var input string
 	if m.isMulti {
-		return m.multiline.View()
+		input = m.multiline.View()
+	} else {
+		input = m.single.View()
 	}
-	return m.single.View()
+
+	box := m.styleInputBox.Render(input)
+	status := m.renderStatusLine()
+	hintText := "ctrl+d inspector  ctrl+g multiline  enter send  ctrl+s send (multiline)  ctrl+c quit"
+	if m.showDetails {
+		hintText = "ctrl+d hide inspector  ↑/↓ select  pgup/pgdn scroll details  ctrl+g multiline  ctrl+s send (multiline)"
+	}
+	hint := m.styleHint.Render(hintText)
+	if status != "" {
+		return box + "\n" + status + "\n" + hint
+	}
+	return box + "\n" + hint
+}
+
+func (m Model) renderStatusLine() string {
+	parts := []string{}
+	if strings.TrimSpace(m.lastTurnDuration) != "" {
+		parts = append(parts, m.lastTurnDuration)
+	}
+	if m.lastTurnTokens != 0 {
+		parts = append(parts, fmt.Sprintf("%d tokens", m.lastTurnTokens))
+	}
+	if strings.TrimSpace(m.lastTurnCostUSD) != "" {
+		parts = append(parts, "$"+m.lastTurnCostUSD)
+	}
+	if m.totalCostUSD > 0 {
+		parts = append(parts, fmt.Sprintf("Σ$%.4f", m.totalCostUSD))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return m.styleHint.Render("last: " + strings.Join(parts, " • "))
 }
 
 func (m *Model) toggleMultiline() {
@@ -287,7 +573,16 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 	m.turnInFlight = true
 	m.turnStarted = time.Now()
 	m.turnTitle = userMsg
-	m.appendLine(m.styleUser.Render("you> " + userMsg))
+	m.turnN++
+	m.pendingActionIdx = -1
+	m.pendingActionText = ""
+	m.waitingForAction = false
+
+	if m.workflowTitle == "" {
+		m.workflowTitle = firstLine(userMsg)
+	}
+
+	m.addTranscriptItem(transcriptItem{kind: transcriptUser, text: userMsg})
 
 	return func() tea.Msg {
 		final, err := m.runner.RunTurn(m.ctx, userMsg)
@@ -296,14 +591,132 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 	}
 }
 
-func (m *Model) appendLine(line string) {
-	if strings.TrimSpace(m.log) == "" {
-		m.log = line
-	} else {
-		m.log += "\n" + line
+func (m *Model) appendDetails(line string) {
+	_ = line
+}
+
+func (m *Model) addTranscriptItem(it transcriptItem) {
+	m.transcriptItems = append(m.transcriptItems, it)
+	m.rebuildTranscript()
+	m.transcript.GotoBottom()
+}
+
+func (m *Model) rebuildTranscript() {
+	w := max(40, m.transcript.Width)
+	contentW := max(20, w-8)
+
+	lines := make([]string, 0, len(m.transcriptItems))
+	for _, it := range m.transcriptItems {
+		switch it.kind {
+		case transcriptSpacer:
+			lines = append(lines, m.styleDim.Render(""))
+		case transcriptUser:
+			body := m.styleUserLabel.Render("you> ") + wrapText(it.text, contentW)
+			lines = append(lines, m.styleUserBox.Render(body))
+		case transcriptAgent:
+			body := m.styleAgent.Render(wrapText("agent> "+strings.TrimSpace(it.text), contentW))
+			lines = append(lines, m.styleAgentBox.Render(body))
+		case transcriptError:
+			lines = append(lines, m.styleError.Render(wrapText(it.text, contentW)))
+		case transcriptAction:
+			prefix := "• "
+			if it.actionIsToolRun && !it.actionIsCompleted {
+				prefix = "• Run "
+			}
+			if it.actionIsToolRun && it.actionIsCompleted {
+				prefix = "• Ran "
+			}
+			line := m.styleAction.Render(prefix + wrapText(it.actionText, max(20, w-12)))
+			if it.actionIsCompleted && strings.TrimSpace(it.actionCompletion) != "" {
+				line += "  " + m.styleDim.Render(strings.TrimSpace(it.actionCompletion))
+			}
+			lines = append(lines, line)
+		}
 	}
-	m.view.SetContent(m.log)
-	m.view.GotoBottom()
+
+	m.transcript.SetContent(strings.Join(lines, "\n"))
+}
+
+func (m *Model) onEvent(ev events.Event) {
+	rr := classifyEvent(ev)
+	m.inspectorEntries = append(m.inspectorEntries, inspectorEntry{
+		at:      time.Now(),
+		evType:  ev.Type,
+		message: ev.Message,
+		data:    ev.Data,
+		summary: inspectorSummary(ev),
+		detail:  inspectorDetail(ev),
+	})
+	m.ensureInspectorSelection()
+	if m.showDetails {
+		m.refreshInspectorViews()
+	}
+
+	// Session title can come from run.started event.
+	if ev.Type == "run.started" {
+		if v := strings.TrimSpace(ev.Data["sessionTitle"]); v != "" {
+			m.sessionTitle = v
+		}
+	}
+
+	// Chrome metrics only (never rendered as transcript lines).
+	switch ev.Type {
+	case "llm.usage.total":
+		m.lastTurnTokensIn = parseInt(ev.Data["input"])
+		m.lastTurnTokensOut = parseInt(ev.Data["output"])
+		m.lastTurnTokens = parseInt(ev.Data["total"])
+		m.totalTokens += m.lastTurnTokens
+	case "llm.cost.total":
+		m.lastTurnCostUSD = strings.TrimSpace(ev.Data["costUsd"])
+		if v := strings.TrimSpace(ev.Data["costUsd"]); v != "" {
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				m.totalCostUSD += f
+			}
+		}
+	case "agent.turn.complete":
+		m.lastTurnDuration = strings.TrimSpace(ev.Data["duration"])
+		m.lastTurnSteps = strings.TrimSpace(ev.Data["steps"])
+	}
+
+	// Chat transcript: only compact action summaries, paired request+response.
+	if rr.Class != RenderAction {
+		return
+	}
+
+	switch ev.Type {
+	case "agent.op.request":
+		txt := strings.TrimSpace(rr.Text)
+		if txt == "" {
+			return
+		}
+		m.pendingActionText = txt
+		m.pendingActionIsToolRun = strings.TrimSpace(ev.Data["op"]) == "tool.run"
+		m.waitingForAction = true
+		m.pendingActionIdx = len(m.transcriptItems)
+		m.addTranscriptItem(transcriptItem{
+			kind:            transcriptAction,
+			actionText:      txt,
+			actionIsToolRun: m.pendingActionIsToolRun,
+		})
+	case "agent.op.response":
+		if !m.waitingForAction || m.pendingActionIdx < 0 {
+			return
+		}
+		comp := strings.TrimSpace(rr.Text)
+		if m.pendingActionIdx < len(m.transcriptItems) {
+			it := m.transcriptItems[m.pendingActionIdx]
+			if it.kind == transcriptAction && !it.actionIsCompleted {
+				it.actionCompletion = comp
+				it.actionIsCompleted = true
+				m.transcriptItems[m.pendingActionIdx] = it
+			}
+		}
+		m.pendingActionText = ""
+		m.waitingForAction = false
+		m.pendingActionIdx = -1
+		m.pendingActionIsToolRun = false
+		m.rebuildTranscript()
+	}
 }
 
 func (m Model) waitEvent() tea.Cmd {
@@ -319,11 +732,195 @@ func (m Model) waitEvent() tea.Cmd {
 	}
 }
 
+func (m *Model) ensureInspectorSelection() {
+	if m.inspectorSel >= 0 && m.inspectorSel < len(m.inspectorEntries) {
+		return
+	}
+	if len(m.inspectorEntries) == 0 {
+		m.inspectorSel = -1
+		return
+	}
+	m.inspectorSel = len(m.inspectorEntries) - 1
+}
+
+func (m *Model) moveInspectorSelection(delta int) {
+	if !m.showDetails || len(m.inspectorEntries) == 0 {
+		return
+	}
+	if m.inspectorSel < 0 {
+		m.inspectorSel = 0
+	} else {
+		m.inspectorSel += delta
+		if m.inspectorSel < 0 {
+			m.inspectorSel = 0
+		}
+		if m.inspectorSel >= len(m.inspectorEntries) {
+			m.inspectorSel = len(m.inspectorEntries) - 1
+		}
+	}
+	m.refreshInspectorViews()
+}
+
+func (m *Model) refreshInspectorViews() {
+	// List content.
+	if m.inspectorList.Width <= 0 {
+		return
+	}
+	var b strings.Builder
+	for i, e := range m.inspectorEntries {
+		prefix := "  "
+		if i == m.inspectorSel {
+			prefix = "› "
+		}
+		line := fmt.Sprintf("%s%s %s", prefix, e.at.Format("15:04:05"), e.summary)
+		if i == m.inspectorSel {
+			b.WriteString(m.styleInspectorSel.Render(truncateRight(line, max(1, m.inspectorList.Width-2))))
+		} else {
+			b.WriteString(m.styleInspectorRow.Render(truncateRight(line, max(1, m.inspectorList.Width-2))))
+		}
+		if i != len(m.inspectorEntries)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	m.inspectorList.SetContent(b.String())
+
+	// Detail content for selected.
+	if m.inspectorSel >= 0 && m.inspectorSel < len(m.inspectorEntries) {
+		w := max(24, m.inspectorDetail.Width-2)
+		m.inspectorDetail.SetContent(lipgloss.NewStyle().Width(w).Render(m.inspectorEntries[m.inspectorSel].detail))
+	} else {
+		m.inspectorDetail.SetContent("")
+	}
+}
+
+func truncateRight(s string, maxLen int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.TrimSpace(s)
+	if maxLen <= 0 || len(s) <= maxLen {
+		return s
+	}
+	if maxLen < 2 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-1] + "…"
+}
+
+func inspectorSummary(ev events.Event) string {
+	switch ev.Type {
+	case "agent.op.request":
+		op := ev.Data["op"]
+		path := ev.Data["path"]
+		tool := ev.Data["toolId"]
+		act := ev.Data["actionId"]
+		switch op {
+		case "tool.run":
+			// Reuse the transcript-friendly renderer, but keep it single-line and short.
+			return fmt.Sprintf("%s %s", ev.Type, truncateRight(renderToolRunInspector(tool, act, strings.TrimSpace(ev.Data["input"])), 80))
+		default:
+			if path != "" {
+				return fmt.Sprintf("%s %s %s", ev.Type, op, path)
+			}
+			return fmt.Sprintf("%s %s", ev.Type, op)
+		}
+	case "agent.op.response":
+		op := ev.Data["op"]
+		ok := ev.Data["ok"]
+		if call := ev.Data["callId"]; call != "" {
+			if len(call) > 8 {
+				call = call[:8]
+			}
+			return fmt.Sprintf("%s %s ok=%s call=%s", ev.Type, op, ok, call)
+		}
+		return fmt.Sprintf("%s %s ok=%s", ev.Type, op, ok)
+	default:
+		if strings.TrimSpace(ev.Message) != "" {
+			return fmt.Sprintf("%s %s", ev.Type, ev.Message)
+		}
+		return ev.Type
+	}
+}
+
+func inspectorDetail(ev events.Event) string {
+	var b strings.Builder
+	b.WriteString("type: ")
+	b.WriteString(ev.Type)
+	b.WriteByte('\n')
+	b.WriteString("message: ")
+	b.WriteString(ev.Message)
+	b.WriteByte('\n')
+	if len(ev.Data) != 0 {
+		b.WriteString("\n")
+		b.WriteString("data:\n")
+		keys := make([]string, 0, len(ev.Data))
+		for k := range ev.Data {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			b.WriteString("  ")
+			b.WriteString(k)
+			b.WriteString(": ")
+			b.WriteString(ev.Data[k])
+			b.WriteByte('\n')
+		}
+	}
+	// Also include pretty JSON for copy/paste in debug mode, but formatted and wrapped.
+	raw := struct {
+		Type    string            `json:"type"`
+		Message string            `json:"message"`
+		Data    map[string]string `json:"data,omitempty"`
+	}{
+		Type:    ev.Type,
+		Message: ev.Message,
+		Data:    ev.Data,
+	}
+	if jb, err := json.MarshalIndent(raw, "", "  "); err == nil {
+		b.WriteString("\njson:\n")
+		b.WriteString(string(jb))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 func max(a, b int) int {
 	if a > b {
 		return a
 	}
 	return b
+}
+
+func truncateMiddle(s string, maxLen int) string {
+	s = strings.TrimSpace(s)
+	if maxLen <= 0 || len(s) <= maxLen {
+		return s
+	}
+	if maxLen < 8 {
+		return s[:maxLen]
+	}
+	keep := (maxLen - 1) / 2
+	return s[:keep] + "…" + s[len(s)-keep:]
+}
+
+func firstLine(s string) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	return truncateMiddle(s, 48)
+}
+
+func wrapText(s string, width int) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.TrimRight(s, "\n")
+	if width <= 0 {
+		return s
+	}
+	// Use a dedicated wrapping lib so reflow behaves consistently across width changes.
+	return wordwrap.String(s, width)
 }
 
 // Run starts the Workbench Bubble Tea program.
