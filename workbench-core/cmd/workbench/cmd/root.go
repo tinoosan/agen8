@@ -17,6 +17,7 @@ var (
 	maxContextB  int
 	defaultGoal  string
 	defaultTitle string
+	uiMode       string
 
 	maxSteps           int
 	maxTraceBytes      int
@@ -72,7 +73,7 @@ new run in that session (workspaces remain run-scoped).
 		if err != nil {
 			return err
 		}
-		return app.RunChat(cmd.Context(), run, app.RunChatOptions{
+		opts := app.RunChatOptions{
 			MaxSteps:              maxSteps,
 			MaxTraceBytes:         maxTraceBytes,
 			MaxMemoryBytes:        maxMemoryBytes,
@@ -82,7 +83,15 @@ new run in that session (workspaces remain run-scoped).
 			IncludeHistoryOps:     &includeHistoryOps,
 			PriceInPerMTokensUSD:  priceInPerM,
 			PriceOutPerMTokensUSD: priceOutPerM,
-		})
+		}
+		switch strings.ToLower(strings.TrimSpace(uiMode)) {
+		case "", "tui":
+			return app.RunChatTUI(cmd.Context(), run, opts)
+		case "repl":
+			return app.RunChat(cmd.Context(), run, opts)
+		default:
+			return fmt.Errorf("unknown --ui %q (expected tui or repl)", uiMode)
+		}
 	},
 }
 
@@ -99,6 +108,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&maxContextB, "context-bytes", 8*1024, "run.maxBytesForContext (persisted in run.json)")
 	rootCmd.PersistentFlags().StringVar(&defaultTitle, "title", "workbench", "title for new sessions (workbench only)")
 	rootCmd.PersistentFlags().StringVar(&defaultGoal, "goal", "interactive chat", "initial goal for the run (workbench only)")
+	rootCmd.PersistentFlags().StringVar(&uiMode, "ui", "tui", "interactive UI mode: tui or repl")
 	rootCmd.PersistentFlags().IntVar(&maxSteps, "max-steps", 200, "max agent steps per user turn")
 	rootCmd.PersistentFlags().IntVar(&maxTraceBytes, "trace-bytes", 8*1024, "context updater trace budget (bytes)")
 	rootCmd.PersistentFlags().IntVar(&maxMemoryBytes, "memory-bytes", 8*1024, "context updater memory budget (bytes)")

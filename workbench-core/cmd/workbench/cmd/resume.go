@@ -27,7 +27,7 @@ var resumeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return app.RunChat(cmd.Context(), run, app.RunChatOptions{
+		opts := app.RunChatOptions{
 			MaxSteps:              maxSteps,
 			MaxTraceBytes:         maxTraceBytes,
 			MaxMemoryBytes:        maxMemoryBytes,
@@ -37,6 +37,14 @@ var resumeCmd = &cobra.Command{
 			IncludeHistoryOps:     &includeHistoryOps,
 			PriceInPerMTokensUSD:  priceInPerM,
 			PriceOutPerMTokensUSD: priceOutPerM,
-		})
+		}
+		switch strings.ToLower(strings.TrimSpace(uiMode)) {
+		case "", "tui":
+			return app.RunChatTUI(cmd.Context(), run, opts)
+		case "repl":
+			return app.RunChat(cmd.Context(), run, opts)
+		default:
+			return fmt.Errorf("unknown --ui %q (expected tui or repl)", uiMode)
+		}
 	},
 }
