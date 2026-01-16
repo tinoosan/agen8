@@ -233,41 +233,5 @@ func extractJSONObject(s string) string {
 }
 
 func validateModelOp(op types.HostOpRequest) error {
-	switch op.Op {
-	case "fs.list", "fs.read", "fs.write", "fs.append", "tool.run", "final":
-	default:
-		return fmt.Errorf("unknown op %q", op.Op)
-	}
-
-	switch op.Op {
-	case "final":
-		if strings.TrimSpace(op.Text) == "" {
-			return fmt.Errorf("final.text is required")
-		}
-		return nil
-	case "fs.list", "fs.read":
-		if strings.TrimSpace(op.Path) == "" {
-			return fmt.Errorf("path is required")
-		}
-	case "fs.write", "fs.append":
-		if strings.TrimSpace(op.Path) == "" {
-			return fmt.Errorf("path is required")
-		}
-		// text can be empty (writing empty file is valid), but the field must exist in JSON;
-		// we can't reliably distinguish "missing" vs "" after unmarshal, so keep it lenient.
-	case "tool.run":
-		if op.ToolID.String() == "" {
-			return fmt.Errorf("toolId is required")
-		}
-		if strings.TrimSpace(op.ActionID) == "" {
-			return fmt.Errorf("actionId is required")
-		}
-		if op.Input == nil {
-			return fmt.Errorf("input is required")
-		}
-		if op.TimeoutMs < 0 {
-			return fmt.Errorf("timeoutMs must be >= 0")
-		}
-	}
-	return nil
+	return op.Validate()
 }

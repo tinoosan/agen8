@@ -16,13 +16,18 @@ const (
 	StatusDone RunStatus = "done"
 	// StatusFailed indicates the run stopped due to an error.
 	StatusFailed RunStatus = "failed"
+	// StatusCanceled indicates the run was interrupted by the user or host.
+	//
+	// This is a terminal state used when a run is intentionally stopped (e.g. SIGINT / Ctrl-C).
+	StatusCanceled RunStatus = "canceled"
 )
 
 // RunStatuses maps status strings to their typed RunStatus values.
 var RunStatuses = map[string]RunStatus{
-	string(StatusRunning): StatusRunning,
-	string(StatusDone):    StatusDone,
-	string(StatusFailed):  StatusFailed,
+	string(StatusRunning):  StatusRunning,
+	string(StatusDone):     StatusDone,
+	string(StatusFailed):   StatusFailed,
+	string(StatusCanceled): StatusCanceled,
 }
 
 // Run represents the state and metadata of a single workbench execution.

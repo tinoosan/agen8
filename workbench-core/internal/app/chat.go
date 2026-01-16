@@ -8,11 +8,14 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/chzyer/readline"
 	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/events"
@@ -35,7 +38,28 @@ import (
 //   - starts a readline-based chat session
 //
 // The CLI (cmd/workbench) decides how runs/sessions are created or resumed.
-func RunChat(ctx context.Context, run types.Run) error {
+func RunChat(ctx context.Context, run types.Run) (retErr error) {
+	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	// Ensure the run is transitioned to a terminal state and persisted to run.json.
+	//
+	// This fixes the current WIP behavior where a run can remain "running" forever if the
+	// process exits without calling store.StopRun (e.g. Ctrl-C).
+	defer func() {
+		status := types.StatusDone
+		errMsg := ""
+		if runCtx.Err() != nil {
+			status = types.StatusCanceled
+			errMsg = "interrupted"
+		}
+		if retErr != nil {
+			status = types.StatusFailed
+			errMsg = retErr.Error()
+		}
+		_, _ = store.StopRun(run.RunId, status, errMsg)
+	}()
+
 	log.Printf("== Workbench chat ==")
 	log.Printf("sessionId=%s", run.SessionID)
 	log.Printf("runId=%s", run.RunId)
@@ -326,7 +350,7 @@ func RunChat(ctx context.Context, run types.Run) error {
 
 		conversation = append(conversation, types.LLMMessage{Role: "user", Content: userMsg})
 		start := time.Now()
-		final, updated, steps, err := a.RunConversation(ctx, conversation)
+		final, updated, steps, err := a.RunConversation(runCtx, conversation)
 		dur := time.Since(start)
 		conversation = updated
 		if err != nil {
@@ -517,6 +541,9 @@ func readUserMessage(lr lineReader, out io.Writer) (msg string, exit bool, err e
 	_, _ = io.WriteString(out, userInputHelp())
 	line, err := lr.ReadLine(userPrompt)
 	if err != nil && !errors.Is(err, io.EOF) {
+		if errors.Is(err, readline.ErrInterrupt) {
+			return "", true, nil
+		}
 		return "", false, err
 	}
 	if errors.Is(err, io.EOF) {
@@ -664,4 +691,3 @@ func editMessageInEditor(initial string) (string, error) {
 	}
 	return string(b), nil
 }
-

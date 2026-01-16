@@ -1,6 +1,25 @@
 package types
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+const (
+	// HostOpFSList lists directory entries in the VFS.
+	HostOpFSList = "fs.list"
+	// HostOpFSRead reads a file from the VFS.
+	HostOpFSRead = "fs.read"
+	// HostOpFSWrite writes/replaces a file in the VFS.
+	HostOpFSWrite = "fs.write"
+	// HostOpFSAppend appends to a file in the VFS.
+	HostOpFSAppend = "fs.append"
+	// HostOpToolRun runs a discovered tool via the ToolRunner.
+	HostOpToolRun = "tool.run"
+	// HostOpFinal ends the agent loop for a user turn.
+	HostOpFinal = "final"
+)
 
 // HostOpRequest is the minimal "host primitive" request envelope.
 //
@@ -21,6 +40,60 @@ type HostOpRequest struct {
 	TimeoutMs int             `json:"timeoutMs,omitempty"`
 	MaxBytes  int             `json:"maxBytes,omitempty"`
 	Text      string          `json:"text,omitempty"`
+}
+
+// Validate checks the request is well-formed for its declared Op.
+//
+// This is intentionally strict for ops that the agent frequently gets wrong (tool.run, final),
+// and intentionally lenient for file ops where JSON unmarshalling can't distinguish "missing"
+// vs "present but empty" for string fields like Text.
+func (r HostOpRequest) Validate() error {
+	r.Op = strings.TrimSpace(r.Op)
+	switch r.Op {
+	case HostOpFSList, HostOpFSRead, HostOpFSWrite, HostOpFSAppend, HostOpToolRun, HostOpFinal:
+	default:
+		return fmt.Errorf("unknown op %q", r.Op)
+	}
+
+	switch r.Op {
+	case HostOpFinal:
+		if strings.TrimSpace(r.Text) == "" {
+			return fmt.Errorf("final.text is required")
+		}
+		return nil
+
+	case HostOpFSList, HostOpFSRead:
+		if strings.TrimSpace(r.Path) == "" {
+			return fmt.Errorf("path is required")
+		}
+		if r.MaxBytes < 0 {
+			return fmt.Errorf("maxBytes must be >= 0")
+		}
+		return nil
+
+	case HostOpFSWrite, HostOpFSAppend:
+		if strings.TrimSpace(r.Path) == "" {
+			return fmt.Errorf("path is required")
+		}
+		return nil
+
+	case HostOpToolRun:
+		if r.ToolID.String() == "" {
+			return fmt.Errorf("toolId is required")
+		}
+		if strings.TrimSpace(r.ActionID) == "" {
+			return fmt.Errorf("actionId is required")
+		}
+		if r.Input == nil {
+			return fmt.Errorf("input is required")
+		}
+		if r.TimeoutMs < 0 {
+			return fmt.Errorf("timeoutMs must be >= 0")
+		}
+		return nil
+	}
+
+	return nil
 }
 
 // HostOpResponse is the minimal "host primitive" response envelope.

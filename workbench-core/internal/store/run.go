@@ -115,7 +115,7 @@ func SaveRun(run types.Run) error {
 // The updated state is then persisted to disk.
 func StopRun(runId string, status types.RunStatus, errorMsg string) (types.Run, error) {
 
-	if status != types.StatusFailed && status != types.StatusDone {
+	if status != types.StatusFailed && status != types.StatusDone && status != types.StatusCanceled {
 		return types.Run{}, fmt.Errorf("error stopping run %s, invalid status '%s'", runId, status)
 	}
 
@@ -124,7 +124,7 @@ func StopRun(runId string, status types.RunStatus, errorMsg string) (types.Run, 
 		return types.Run{}, fmt.Errorf("error stopping run: %w", err)
 	}
 
-	if run.Status == types.StatusDone || run.Status == types.StatusFailed {
+	if run.Status == types.StatusDone || run.Status == types.StatusFailed || run.Status == types.StatusCanceled {
 		return types.Run{}, fmt.Errorf("run %s cannot be stopped due to invalid state %s", run.RunId, run.Status)
 	}
 
@@ -140,6 +140,15 @@ func StopRun(runId string, status types.RunStatus, errorMsg string) (types.Run, 
 
 		if errorMsg == "" {
 			return types.Run{}, fmt.Errorf("error stopping run, error message is required for failed runs")
+		}
+		run.Status = status
+		run.FinishedAt = &now
+		run.Error = &errorMsg
+	}
+
+	if status == types.StatusCanceled {
+		if strings.TrimSpace(errorMsg) == "" {
+			errorMsg = "canceled"
 		}
 		run.Status = status
 		run.FinishedAt = &now
