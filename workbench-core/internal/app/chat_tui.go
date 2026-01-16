@@ -367,6 +367,11 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		if resp.ToolResponse != nil && resp.ToolResponse.CallID != "" {
 			respData["callId"] = resp.ToolResponse.CallID
 		}
+		if resp.Op == types.HostOpToolRun && resp.ToolResponse != nil && len(resp.ToolResponse.Output) != 0 {
+			if p := toolRunOutputPreviewForEvent(resp.ToolResponse.ToolID.String(), resp.ToolResponse.ActionID, resp.ToolResponse.Output); strings.TrimSpace(p) != "" {
+				respData["outputPreview"] = p
+			}
+		}
 		mustEmit(ctx, events.Event{
 			Type:      "agent.op.response",
 			Message:   "Host op completed",
@@ -724,6 +729,11 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		}
 		if resp.ToolResponse != nil && resp.ToolResponse.CallID != "" {
 			respData["callId"] = resp.ToolResponse.CallID
+		}
+		if resp.Op == types.HostOpToolRun && resp.ToolResponse != nil && len(resp.ToolResponse.Output) != 0 {
+			if p := toolRunOutputPreviewForEvent(resp.ToolResponse.ToolID.String(), resp.ToolResponse.ActionID, resp.ToolResponse.Output); strings.TrimSpace(p) != "" {
+				respData["outputPreview"] = p
+			}
 		}
 		r.mustEmit(ctx, events.Event{
 			Type:      "agent.op.response",

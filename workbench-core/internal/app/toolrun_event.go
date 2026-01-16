@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -52,6 +53,80 @@ func toolRunInputForEvent(raw json.RawMessage) (sanitized string, truncated bool
 
 	s2, tr := capBytes(singleLine(string(b)), maxToolRunInputEventBytes)
 	return s2, tr, originalBytes
+}
+
+const maxToolRunOutputPreviewBytes = 1200
+
+// toolRunOutputPreviewForEvent returns a small, human-readable summary of a tool.run output payload.
+//
+// This is used only for UI events so the Activity details panel can show a preview without reading
+// /results/<callId>/response.json.
+//
+// It is intentionally conservative:
+//   - hard-caps size
+//   - avoids dumping large structured payloads (e.g., ripgrep matches) in full
+func toolRunOutputPreviewForEvent(toolID, actionID string, raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return ""
+	}
+
+	switch strings.TrimSpace(toolID) {
+	case "builtin.bash":
+		if strings.TrimSpace(actionID) != "exec" {
+			break
+		}
+		var out struct {
+			ExitCode int    `json:"exitCode"`
+			Stdout   string `json:"stdout"`
+			Stderr   string `json:"stderr"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			break
+		}
+		stdout := strings.TrimSpace(out.Stdout)
+		stderr := strings.TrimSpace(out.Stderr)
+		s := fmt.Sprintf("exitCode=%d", out.ExitCode)
+		if stdout != "" {
+			s += " stdout=" + previewText(stdout, 400)
+		}
+		if stderr != "" {
+			s += " stderr=" + previewText(stderr, 400)
+		}
+		s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
+		return s2
+
+	case "builtin.ripgrep":
+		if strings.TrimSpace(actionID) != "search" {
+			break
+		}
+		var out struct {
+			Matches []any `json:"matches"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			break
+		}
+		s := fmt.Sprintf("matches=%d", len(out.Matches))
+		s2, _ := capBytes(s, maxToolRunOutputPreviewBytes)
+		return s2
+	}
+
+	// Generic fallback: show a compact JSON string preview.
+	s2, _ := capBytes(singleLine(string(raw)), maxToolRunOutputPreviewBytes)
+	return s2
+}
+
+func previewText(s string, max int) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.TrimSpace(s)
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	if max < 2 {
+		return s[:max]
+	}
+	return s[:max-1] + "…"
 }
 
 func redactValue(key string, v any) any {

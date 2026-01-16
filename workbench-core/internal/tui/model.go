@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -39,14 +39,17 @@ type Model struct {
 	runner TurnRunner
 	events <-chan events.Event
 
-	transcript      viewport.Model
-	inspectorList   viewport.Model
-	inspectorDetail viewport.Model
+	transcript     viewport.Model
+	activityList   list.Model
+	activityDetail viewport.Model
 
 	transcriptItems []transcriptItem
 
-	inspectorEntries []inspectorEntry
-	inspectorSel     int
+	activities        []Activity
+	activityIndexByID map[string]int
+	pendingActivityID string
+	activitySeq       int
+	expandOutput      bool
 
 	single    textarea.Model
 	multiline textarea.Model
@@ -55,7 +58,8 @@ type Model struct {
 	width  int
 	height int
 
-	showDetails bool
+	showDetails   bool
+	showTelemetry bool
 
 	turnInFlight bool
 	turnStarted  time.Time
@@ -84,10 +88,7 @@ type Model struct {
 	styleHeaderMid lipgloss.Style
 	styleHeaderRHS lipgloss.Style
 
-	styleDim             lipgloss.Style
-	styleInspectorHeader lipgloss.Style
-	styleInspectorRow    lipgloss.Style
-	styleInspectorSel    lipgloss.Style
+	styleDim lipgloss.Style
 
 	styleUserBox   lipgloss.Style
 	styleUserLabel lipgloss.Style
@@ -125,23 +126,22 @@ type transcriptItem struct {
 	actionIsCompleted bool
 }
 
-type inspectorEntry struct {
-	at      time.Time
-	evType  string
-	message string
-	data    map[string]string
-	summary string
-	detail  string
-}
-
 func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model {
 	main := viewport.New(0, 0)
 	main.Style = lipgloss.NewStyle().Padding(0, 2)
 
-	insList := viewport.New(0, 0)
-	insList.Style = lipgloss.NewStyle().Padding(0, 1)
-	insDetail := viewport.New(0, 0)
-	insDetail.Style = lipgloss.NewStyle().Padding(0, 1)
+	details := viewport.New(0, 0)
+	details.Style = lipgloss.NewStyle().Padding(0, 1)
+
+	activity := list.New([]list.Item{}, newActivityDelegate(), 0, 0)
+	activity.Title = "Activity"
+	activity.SetShowHelp(false)
+	activity.SetShowStatusBar(false)
+	activity.SetShowPagination(false)
+	activity.SetFilteringEnabled(false)
+	activity.Styles.Title = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#707070")).
+		Bold(true)
 
 	// Textarea focus styling:
 	//
@@ -187,14 +187,16 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	multi.BlurredStyle = multiStyle
 
 	m := Model{
-		ctx:             ctx,
-		runner:          runner,
-		events:          evCh,
-		transcript:      main,
-		inspectorList:   insList,
-		inspectorDetail: insDetail,
-		single:          single,
-		multiline:       multi,
+		ctx:               ctx,
+		runner:            runner,
+		events:            evCh,
+		transcript:        main,
+		activityList:      activity,
+		activityDetail:    details,
+		showDetails:       true,
+		activityIndexByID: map[string]int{},
+		single:            single,
+		multiline:         multi,
 
 		styleHeaderBar: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#c0c0c0")),
@@ -207,14 +209,6 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 			Foreground(lipgloss.Color("#9ad0ff")),
 
 		styleDim: lipgloss.NewStyle().Foreground(lipgloss.Color("#707070")),
-		styleInspectorHeader: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#707070")).
-			Bold(true),
-		styleInspectorRow: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#b0b0b0")),
-		styleInspectorSel: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#eaeaea")).
-			Background(lipgloss.Color("#303030")),
 
 		styleUserLabel: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#9ad0ff")).
@@ -246,7 +240,6 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	}
 
 	m.pendingActionIdx = -1
-	m.inspectorSel = -1
 	return m
 }
 
@@ -270,16 +263,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Toggle details panel.
 		if msg.Type == tea.KeyTab {
 			m.showDetails = !m.showDetails
+			m.refreshActivityDetail()
 			m.layout()
 			return m, nil
 		}
 		if msg.Type == tea.KeyCtrlD {
 			m.showDetails = !m.showDetails
-			if m.showDetails {
-				m.ensureInspectorSelection()
-				m.refreshInspectorViews()
-			}
+			m.refreshActivityDetail()
 			m.layout()
+			return m, nil
+		}
+
+		// Telemetry toggle (hidden by default).
+		if strings.EqualFold(msg.String(), "t") {
+			m.showTelemetry = !m.showTelemetry
+			m.refreshActivityDetail()
 			return m, nil
 		}
 
@@ -292,22 +290,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Inspector navigation.
+		// Activity navigation / details scrolling.
 		if m.showDetails {
+			switch msg.String() {
+			case "ctrl+p":
+				m.activityList.CursorUp()
+				m.refreshActivityDetail()
+				return m, nil
+			case "ctrl+n":
+				m.activityList.CursorDown()
+				m.refreshActivityDetail()
+				return m, nil
+			case "e", "enter":
+				m.expandOutput = !m.expandOutput
+				m.refreshActivityDetail()
+				return m, nil
+			}
 			switch msg.Type {
-			case tea.KeyUp:
-				m.moveInspectorSelection(-1)
-				return m, nil
-			case tea.KeyDown:
-				m.moveInspectorSelection(1)
-				return m, nil
 			case tea.KeyPgUp, tea.KeyCtrlU:
 				var cmd tea.Cmd
-				m.inspectorDetail, cmd = m.inspectorDetail.Update(msg)
+				m.activityDetail, cmd = m.activityDetail.Update(msg)
 				return m, cmd
 			case tea.KeyPgDown, tea.KeyCtrlF:
 				var cmd tea.Cmd
-				m.inspectorDetail, cmd = m.inspectorDetail.Update(msg)
+				m.activityDetail, cmd = m.activityDetail.Update(msg)
 				return m, cmd
 			}
 		}
@@ -419,18 +425,18 @@ func (m *Model) layout() {
 	}
 
 	m.transcript.Width = max(40, mainW)
-	m.inspectorList.Width = max(32, detailW)
-	m.inspectorDetail.Width = max(32, detailW)
-	// Split inspector vertically when visible.
 	if detailW != 0 {
-		listH := max(5, bodyH/2)
-		m.inspectorList.Height = listH
-		m.inspectorDetail.Height = max(5, bodyH-listH-1)
+		m.activityList.SetWidth(max(32, detailW))
+		listH := max(6, bodyH/2)
+		m.activityList.SetHeight(listH)
+
+		m.activityDetail.Width = max(32, detailW)
+		m.activityDetail.Height = max(6, bodyH-listH-1)
 	}
 
 	m.rebuildTranscript()
 	m.transcript.GotoBottom()
-	m.refreshInspectorViews()
+	m.refreshActivityDetail()
 
 	m.single.SetWidth(max(20, m.width-6))
 	m.multiline.SetWidth(max(20, m.width-6))
@@ -479,21 +485,23 @@ func (m Model) renderBody() string {
 		return m.transcript.View()
 	}
 
-	header := m.styleInspectorHeader.Render("Inspector") + m.styleDim.Render(" (Tab/Ctrl+D to hide)")
-	divider := m.styleDim.Render(strings.Repeat("─", max(1, m.inspectorList.Width)))
+	rightW := max(32, m.activityList.Width())
+	divider := m.styleDim.Render(strings.Repeat("─", max(1, rightW)))
 
-	listBox := header + "\n" + divider + "\n" + m.inspectorList.View()
-	detailHeader := m.styleDim.Render("Details (PgUp/PgDn scroll)")
-	detailBox := detailHeader + "\n" + divider + "\n" + m.inspectorDetail.View()
+	listHeader := m.styleDim.Render("Activity") + m.styleDim.Render(" (Tab/Ctrl+D to hide)")
+	listBox := listHeader + "\n" + divider + "\n" + m.activityList.View()
 
-	detailsBody := lipgloss.JoinVertical(lipgloss.Top, listBox, m.styleDim.Render(strings.Repeat("─", max(1, m.inspectorList.Width))), detailBox)
-	detailsBox := lipgloss.NewStyle().
-		Width(m.inspectorList.Width + 2).
+	detailHeader := m.styleDim.Render("Details") + m.styleDim.Render(" (PgUp/PgDn scroll, e expand, t telemetry)")
+	detailBox := detailHeader + "\n" + divider + "\n" + m.activityDetail.View()
+
+	rightBody := lipgloss.JoinVertical(lipgloss.Top, listBox, m.styleDim.Render(strings.Repeat("─", max(1, rightW))), detailBox)
+	rightPane := lipgloss.NewStyle().
+		Width(rightW + 2).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("#303030")).
-		Render(detailsBody)
+		Render(rightBody)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, m.transcript.View(), detailsBox)
+	return lipgloss.JoinHorizontal(lipgloss.Top, m.transcript.View(), rightPane)
 }
 
 func (m Model) renderInput() string {
@@ -506,9 +514,9 @@ func (m Model) renderInput() string {
 
 	box := m.styleInputBox.Render(input)
 	status := m.renderStatusLine()
-	hintText := "ctrl+d inspector  ctrl+g multiline  enter send  ctrl+s send (multiline)  ctrl+c quit"
+	hintText := "ctrl+d activity  ctrl+g multiline  enter send  ctrl+s send (multiline)  ctrl+c quit"
 	if m.showDetails {
-		hintText = "ctrl+d hide inspector  ↑/↓ select  pgup/pgdn scroll details  ctrl+g multiline  ctrl+s send (multiline)"
+		hintText = "ctrl+d hide activity  ctrl+p/ctrl+n select  pgup/pgdn scroll details  e expand  t telemetry  ctrl+g multiline  ctrl+s send"
 	}
 	hint := m.styleHint.Render(hintText)
 	if status != "" {
@@ -639,18 +647,7 @@ func (m *Model) rebuildTranscript() {
 
 func (m *Model) onEvent(ev events.Event) {
 	rr := classifyEvent(ev)
-	m.inspectorEntries = append(m.inspectorEntries, inspectorEntry{
-		at:      time.Now(),
-		evType:  ev.Type,
-		message: ev.Message,
-		data:    ev.Data,
-		summary: inspectorSummary(ev),
-		detail:  inspectorDetail(ev),
-	})
-	m.ensureInspectorSelection()
-	if m.showDetails {
-		m.refreshInspectorViews()
-	}
+	m.observeActivityEvent(ev)
 
 	// Session title can come from run.started event.
 	if ev.Type == "run.started" {
@@ -732,65 +729,189 @@ func (m Model) waitEvent() tea.Cmd {
 	}
 }
 
-func (m *Model) ensureInspectorSelection() {
-	if m.inspectorSel >= 0 && m.inspectorSel < len(m.inspectorEntries) {
-		return
-	}
-	if len(m.inspectorEntries) == 0 {
-		m.inspectorSel = -1
-		return
-	}
-	m.inspectorSel = len(m.inspectorEntries) - 1
-}
+func (m *Model) observeActivityEvent(ev events.Event) {
+	switch ev.Type {
+	case "agent.op.request":
+		op := strings.TrimSpace(ev.Data["op"])
+		if op == "" {
+			return
+		}
+		m.activitySeq++
+		id := fmt.Sprintf("act-%d", m.activitySeq)
+		now := time.Now()
 
-func (m *Model) moveInspectorSelection(delta int) {
-	if !m.showDetails || len(m.inspectorEntries) == 0 {
-		return
-	}
-	if m.inspectorSel < 0 {
-		m.inspectorSel = 0
-	} else {
-		m.inspectorSel += delta
-		if m.inspectorSel < 0 {
-			m.inspectorSel = 0
+		act := Activity{
+			ID:        id,
+			Kind:      op,
+			Status:    ActivityPending,
+			StartedAt: now,
+			Path:      strings.TrimSpace(ev.Data["path"]),
+			MaxBytes:  strings.TrimSpace(ev.Data["maxBytes"]),
+			ToolID:    strings.TrimSpace(ev.Data["toolId"]),
+			ActionID:  strings.TrimSpace(ev.Data["actionId"]),
+			InputJSON: strings.TrimSpace(ev.Data["input"]),
 		}
-		if m.inspectorSel >= len(m.inspectorEntries) {
-			m.inspectorSel = len(m.inspectorEntries) - 1
-		}
-	}
-	m.refreshInspectorViews()
-}
-
-func (m *Model) refreshInspectorViews() {
-	// List content.
-	if m.inspectorList.Width <= 0 {
-		return
-	}
-	var b strings.Builder
-	for i, e := range m.inspectorEntries {
-		prefix := "  "
-		if i == m.inspectorSel {
-			prefix = "› "
-		}
-		line := fmt.Sprintf("%s%s %s", prefix, e.at.Format("15:04:05"), e.summary)
-		if i == m.inspectorSel {
-			b.WriteString(m.styleInspectorSel.Render(truncateRight(line, max(1, m.inspectorList.Width-2))))
+		if op == "tool.run" {
+			act.Command = strings.TrimSpace(renderToolRunTranscript(act.ToolID, act.ActionID, act.InputJSON))
+			if act.Command != "" {
+				act.Title = "Run " + act.Command
+			} else {
+				act.Title = "Run tool"
+			}
 		} else {
-			b.WriteString(m.styleInspectorRow.Render(truncateRight(line, max(1, m.inspectorList.Width-2))))
+			act.Title = renderOpRequest(ev.Data)
 		}
-		if i != len(m.inspectorEntries)-1 {
-			b.WriteByte('\n')
-		}
-	}
-	m.inspectorList.SetContent(b.String())
 
-	// Detail content for selected.
-	if m.inspectorSel >= 0 && m.inspectorSel < len(m.inspectorEntries) {
-		w := max(24, m.inspectorDetail.Width-2)
-		m.inspectorDetail.SetContent(lipgloss.NewStyle().Width(w).Render(m.inspectorEntries[m.inspectorSel].detail))
-	} else {
-		m.inspectorDetail.SetContent("")
+		m.pendingActivityID = id
+		m.activities = append(m.activities, act)
+		m.activityIndexByID[id] = len(m.activities) - 1
+		m.refreshActivityList()
+		m.activityList.Select(len(m.activities) - 1)
+		m.refreshActivityDetail()
+
+	case "agent.op.response":
+		if strings.TrimSpace(ev.Data["op"]) == "" {
+			return
+		}
+		idx, ok := m.activityIndexByID[m.pendingActivityID]
+		if !ok || idx < 0 || idx >= len(m.activities) {
+			return
+		}
+		act := m.activities[idx]
+		now := time.Now()
+
+		act.Ok = strings.TrimSpace(ev.Data["ok"])
+		act.Error = strings.TrimSpace(ev.Data["err"])
+		act.CallID = strings.TrimSpace(ev.Data["callId"])
+		act.OutputPreview = strings.TrimSpace(ev.Data["outputPreview"])
+
+		fin := now
+		act.FinishedAt = &fin
+		act.Duration = fin.Sub(act.StartedAt)
+		if act.Ok == "true" {
+			act.Status = ActivityOK
+		} else {
+			act.Status = ActivityError
+		}
+
+		m.activities[idx] = act
+		m.pendingActivityID = ""
+		m.refreshActivityList()
+		m.refreshActivityDetail()
 	}
+}
+
+func (m *Model) refreshActivityList() {
+	items := make([]list.Item, 0, len(m.activities))
+	for _, a := range m.activities {
+		items = append(items, activityItem{act: a})
+	}
+	cur := m.activityList.Index()
+	m.activityList.SetItems(items)
+	if cur >= 0 && cur < len(items) {
+		m.activityList.Select(cur)
+	}
+}
+
+func (m *Model) refreshActivityDetail() {
+	if !m.showDetails {
+		return
+	}
+	if len(m.activities) == 0 || m.activityList.Index() < 0 || m.activityList.Index() >= len(m.activities) {
+		m.activityDetail.SetContent("")
+		return
+	}
+	act := m.activities[m.activityList.Index()]
+	m.activityDetail.SetContent(lipgloss.NewStyle().Width(max(24, m.activityDetail.Width-2)).Render(renderActivityDetail(act, m.activityDetail.Width-4, m.showTelemetry, m.expandOutput)))
+}
+
+func renderActivityDetail(a Activity, width int, telemetry bool, expanded bool) string {
+	w := max(24, width)
+	label := lipgloss.NewStyle().Foreground(lipgloss.Color("#707070")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#707070"))
+
+	var b strings.Builder
+	b.WriteString(label.Render(a.Kind))
+	b.WriteString("  ")
+	b.WriteString(a.ShortStatus())
+	if a.Duration > 0 {
+		b.WriteString(dim.Render("  " + a.Duration.String()))
+	}
+	b.WriteString("\n\n")
+
+	b.WriteString(label.Render("Summary"))
+	b.WriteString("\n")
+	b.WriteString(wrapText(a.Title, w))
+	b.WriteString("\n\n")
+
+	b.WriteString(label.Render("Inputs"))
+	b.WriteString("\n")
+	if a.Kind == "tool.run" {
+		if strings.TrimSpace(a.ToolID) != "" || strings.TrimSpace(a.ActionID) != "" {
+			b.WriteString(wrapText(fmt.Sprintf("tool: %s/%s", a.ToolID, a.ActionID), w))
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(a.Command) != "" {
+			b.WriteString(wrapText("cmd: "+a.Command, w))
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(a.InputJSON) != "" {
+			b.WriteString("args:\n")
+			b.WriteString(wrapText(prettyJSONOneLine(a.InputJSON), w))
+			b.WriteString("\n")
+		}
+	} else {
+		if strings.TrimSpace(a.Path) != "" {
+			b.WriteString(wrapText("path: "+a.Path, w))
+			b.WriteString("\n")
+		}
+		if telemetry && strings.TrimSpace(a.MaxBytes) != "" {
+			b.WriteString(wrapText("maxBytes: "+a.MaxBytes, w))
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("\n")
+
+	b.WriteString(label.Render("Outputs"))
+	b.WriteString("\n")
+	if strings.TrimSpace(a.CallID) != "" {
+		b.WriteString(wrapText("callId: "+a.CallID, w))
+		b.WriteString("\n")
+	}
+	if strings.TrimSpace(a.Error) != "" {
+		b.WriteString(wrapText("error: "+a.Error, w))
+		b.WriteString("\n")
+	}
+	if strings.TrimSpace(a.OutputPreview) != "" {
+		txt := a.OutputPreview
+		if !expanded && len(txt) > 600 {
+			txt = txt[:599] + "…"
+		}
+		b.WriteString("\n")
+		b.WriteString(label.Render("Preview"))
+		b.WriteString(dim.Render(" (e to expand)"))
+		b.WriteString("\n")
+		b.WriteString(wrapText(txt, w))
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func prettyJSONOneLine(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	var v any
+	if err := json.Unmarshal([]byte(s), &v); err != nil {
+		return s
+	}
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return s
+	}
+	return string(b)
 }
 
 func truncateRight(s string, maxLen int) string {
@@ -803,83 +924,6 @@ func truncateRight(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-1] + "…"
-}
-
-func inspectorSummary(ev events.Event) string {
-	switch ev.Type {
-	case "agent.op.request":
-		op := ev.Data["op"]
-		path := ev.Data["path"]
-		tool := ev.Data["toolId"]
-		act := ev.Data["actionId"]
-		switch op {
-		case "tool.run":
-			// Reuse the transcript-friendly renderer, but keep it single-line and short.
-			return fmt.Sprintf("%s %s", ev.Type, truncateRight(renderToolRunInspector(tool, act, strings.TrimSpace(ev.Data["input"])), 80))
-		default:
-			if path != "" {
-				return fmt.Sprintf("%s %s %s", ev.Type, op, path)
-			}
-			return fmt.Sprintf("%s %s", ev.Type, op)
-		}
-	case "agent.op.response":
-		op := ev.Data["op"]
-		ok := ev.Data["ok"]
-		if call := ev.Data["callId"]; call != "" {
-			if len(call) > 8 {
-				call = call[:8]
-			}
-			return fmt.Sprintf("%s %s ok=%s call=%s", ev.Type, op, ok, call)
-		}
-		return fmt.Sprintf("%s %s ok=%s", ev.Type, op, ok)
-	default:
-		if strings.TrimSpace(ev.Message) != "" {
-			return fmt.Sprintf("%s %s", ev.Type, ev.Message)
-		}
-		return ev.Type
-	}
-}
-
-func inspectorDetail(ev events.Event) string {
-	var b strings.Builder
-	b.WriteString("type: ")
-	b.WriteString(ev.Type)
-	b.WriteByte('\n')
-	b.WriteString("message: ")
-	b.WriteString(ev.Message)
-	b.WriteByte('\n')
-	if len(ev.Data) != 0 {
-		b.WriteString("\n")
-		b.WriteString("data:\n")
-		keys := make([]string, 0, len(ev.Data))
-		for k := range ev.Data {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			b.WriteString("  ")
-			b.WriteString(k)
-			b.WriteString(": ")
-			b.WriteString(ev.Data[k])
-			b.WriteByte('\n')
-		}
-	}
-	// Also include pretty JSON for copy/paste in debug mode, but formatted and wrapped.
-	raw := struct {
-		Type    string            `json:"type"`
-		Message string            `json:"message"`
-		Data    map[string]string `json:"data,omitempty"`
-	}{
-		Type:    ev.Type,
-		Message: ev.Message,
-		Data:    ev.Data,
-	}
-	if jb, err := json.MarshalIndent(raw, "", "  "); err == nil {
-		b.WriteString("\njson:\n")
-		b.WriteString(string(jb))
-		b.WriteByte('\n')
-	}
-	return b.String()
 }
 
 func max(a, b int) int {
