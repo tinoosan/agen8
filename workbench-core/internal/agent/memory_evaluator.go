@@ -45,6 +45,8 @@ type MemoryEvaluator struct {
 	DenyRegex []*regexp.Regexp
 }
 
+var kvStructuredLineRE = regexp.MustCompile(`^\s*[A-Za-z][A-Za-z0-9 _-]{0,40}\s*:\s+\S+`)
+
 func DefaultMemoryEvaluator() *MemoryEvaluator {
 	return &MemoryEvaluator{
 		MaxBytes:          2048,
@@ -106,7 +108,18 @@ func looksStructured(s string) bool {
 		}
 	}
 	for _, line := range strings.Split(s, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "- ") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "- ") {
+			return true
+		}
+		// Allow simple "key: value" structured facts (useful for user/profile memory).
+		// Examples:
+		//   birthday: 1994-11-27
+		//   preferred editor: vim
+		//
+		// This is intentionally conservative: it only accepts short keys followed by a colon
+		// and at least one non-space value character.
+		if kvStructuredLineRE.MatchString(line) {
 			return true
 		}
 	}

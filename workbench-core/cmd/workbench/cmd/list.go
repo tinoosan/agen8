@@ -9,4 +9,5 @@ var listCmd = &cobra.Command{
 
 func init() {
 	listCmd.AddCommand(listSessionsCmd)
+	listCmd.AddCommand(listRunsCmd)
 }

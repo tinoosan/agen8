@@ -87,6 +87,28 @@ func GetAgentDir(dataDir string) string {
 	return filepath.Join(dataDir, "agent")
 }
 
+// GetProfileDir returns the base directory for global user profile memory.
+//
+// Profile is shared across runs and sessions (unlike run-scoped /memory).
+func GetProfileDir(dataDir string) string {
+	return filepath.Join(dataDir, "profile")
+}
+
+// GetProfilePath returns the path to the committed profile markdown file.
+func GetProfilePath(dataDir string) string {
+	return filepath.Join(GetProfileDir(dataDir), "profile.md")
+}
+
+// GetProfileUpdatePath returns the path to the profile update staging file.
+func GetProfileUpdatePath(dataDir string) string {
+	return filepath.Join(GetProfileDir(dataDir), "update.md")
+}
+
+// GetProfileCommitsPath returns the path to the profile commits audit JSONL file.
+func GetProfileCommitsPath(dataDir string) string {
+	return filepath.Join(GetProfileDir(dataDir), "commits.jsonl")
+}
+
 // GetAgentMemoryPath returns the path to the persistent cross-run memory markdown file.
 func GetAgentMemoryPath(dataDir string) string {
 	return filepath.Join(GetAgentDir(dataDir), "memory.md")

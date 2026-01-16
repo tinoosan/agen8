@@ -23,6 +23,16 @@ func TestMemoryEvaluator_Evaluate(t *testing.T) {
 		}
 	})
 
+	t.Run("AcceptsKeyValueFact", func(t *testing.T) {
+		ok, reason, cleaned := e.Evaluate("birthday: 1994-11-27\n")
+		if !ok || reason != "accepted" {
+			t.Fatalf("expected accepted, got ok=%v reason=%q", ok, reason)
+		}
+		if !strings.HasSuffix(cleaned, "\n") {
+			t.Fatalf("expected newline-terminated cleaned output")
+		}
+	})
+
 	t.Run("RejectsUnstructured", func(t *testing.T) {
 		ok, reason, _ := e.Evaluate("this is a long paragraph with no structure")
 		if ok || reason != "unstructured" {

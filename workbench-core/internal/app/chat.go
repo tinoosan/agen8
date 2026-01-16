@@ -144,6 +144,15 @@ func RunChat(ctx context.Context, run types.Run) (retErr error) {
 		return fmt.Errorf("create memory resource: %w", err)
 	}
 
+	profileStore, err := store.NewDiskProfileStore()
+	if err != nil {
+		return fmt.Errorf("create profile store: %w", err)
+	}
+	profileRes, err := resources.NewVirtualProfileResource(profileStore)
+	if err != nil {
+		return fmt.Errorf("create profile resource: %w", err)
+	}
+
 	fs.Mount(vfs.MountWorkspace, workspace)
 	log.Printf("mounted /workspace => %s", workspace.BaseDir)
 	fs.Mount(vfs.MountResults, resultsRes)
@@ -154,6 +163,8 @@ func RunChat(ctx context.Context, run types.Run) (retErr error) {
 	log.Printf("mounted /tools => (virtual; disk provider: %s)", toolsDir)
 	fs.Mount(vfs.MountMemory, memoryRes)
 	log.Printf("mounted /memory => %s", memoryRes.BaseDir)
+	fs.Mount(vfs.MountProfile, profileRes)
+	log.Printf("mounted /profile => (global; disk store)")
 	fs.Mount(vfs.MountHistory, historyRes)
 	log.Printf("mounted /history => %s", historyRes.BaseDir)
 
@@ -284,6 +295,9 @@ func RunChat(ctx context.Context, run types.Run) (retErr error) {
 	log.SetOutput(rr)
 	defer rr.Close()
 	defer log.SetOutput(oldLogWriter)
+
+	// Print REPL help once at session start (not on every user turn).
+	_, _ = io.WriteString(rr, userInputHelp())
 
 	memEval := agent.DefaultMemoryEvaluator()
 	turn := 0
@@ -441,12 +455,15 @@ func RunChat(ctx context.Context, run types.Run) (retErr error) {
 				}
 
 				if err := memStore.AppendCommitLog(context.Background(), types.MemoryCommitLine{
-					Model:    model,
-					Turn:     turn,
-					Accepted: accepted,
-					Reason:   reason,
-					Bytes:    len(trimmed),
-					SHA256:   hash,
+					Scope:     "memory",
+					SessionID: run.SessionID,
+					RunID:     run.RunId,
+					Model:     model,
+					Turn:      turn,
+					Accepted:  accepted,
+					Reason:    reason,
+					Bytes:     len(trimmed),
+					SHA256:    hash,
 				}); err != nil {
 					mustEmit(context.Background(), events.Event{
 						Type:    "memory.audit.error",
@@ -473,6 +490,97 @@ func RunChat(ctx context.Context, run types.Run) (retErr error) {
 			}
 
 			_ = fs.Write("/memory/update.md", []byte{})
+		}
+
+		// Ingest profile update if the agent wrote one.
+		if b, err := fs.Read("/profile/update.md"); err == nil {
+			updateRaw := string(b)
+			if strings.TrimSpace(updateRaw) == "" {
+				mustEmit(context.Background(), events.Event{
+					Type:    "profile.evaluate",
+					Message: "No profile update written",
+					Data: map[string]string{
+						"turn":     strconv.Itoa(turn),
+						"accepted": "false",
+						"reason":   "no_update",
+						"bytes":    "0",
+					},
+				})
+			} else {
+				trimmed := strings.TrimSpace(updateRaw)
+				hash := agent.SHA256Hex(trimmed)
+
+				accepted, reason, cleaned := memEval.Evaluate(updateRaw)
+
+				mustEmit(context.Background(), events.Event{
+					Type:    "profile.evaluate",
+					Message: "Evaluated profile update",
+					Data: map[string]string{
+						"turn":     strconv.Itoa(turn),
+						"accepted": fmtBool(accepted),
+						"reason":   reason,
+						"bytes":    strconv.Itoa(len(trimmed)),
+						"sha256":   hash[:12],
+					},
+				})
+
+				if accepted {
+					if err := profileStore.AppendProfile(context.Background(), formatRunMemoryAppend(strings.TrimSpace(cleaned))); err != nil {
+						mustEmit(context.Background(), events.Event{
+							Type:    "profile.commit.error",
+							Message: "Failed to commit profile update",
+							Data:    map[string]string{"err": err.Error()},
+							Store:   boolp(false),
+						})
+					} else {
+						mustEmit(context.Background(), events.Event{
+							Type:    "profile.commit",
+							Message: "Committed profile update",
+							Data: map[string]string{
+								"turn":   strconv.Itoa(turn),
+								"bytes":  strconv.Itoa(len(strings.TrimSpace(cleaned))),
+								"sha256": hash[:12],
+							},
+						})
+					}
+				}
+
+				if err := profileStore.AppendCommitLog(context.Background(), types.MemoryCommitLine{
+					Scope:     "profile",
+					SessionID: run.SessionID,
+					RunID:     run.RunId,
+					Model:     model,
+					Turn:      turn,
+					Accepted:  accepted,
+					Reason:    reason,
+					Bytes:     len(trimmed),
+					SHA256:    hash,
+				}); err != nil {
+					mustEmit(context.Background(), events.Event{
+						Type:    "profile.audit.error",
+						Message: "Failed to append profile audit log",
+						Data: map[string]string{
+							"turn": strconv.Itoa(turn),
+							"err":  err.Error(),
+						},
+						Store: boolp(false),
+					})
+				} else {
+					mustEmit(context.Background(), events.Event{
+						Type:    "profile.audit.append",
+						Message: "Appended profile audit log",
+						Data: map[string]string{
+							"turn":     strconv.Itoa(turn),
+							"accepted": fmtBool(accepted),
+							"reason":   reason,
+							"sha256":   hash[:12],
+						},
+						Store: boolp(false),
+					})
+				}
+			}
+
+			_ = fs.Write("/profile/update.md", []byte{})
 		}
 
 		if _, err := store.RecordTurnInSession(run.SessionID, run.RunId, userMsg, final); err != nil {
@@ -538,7 +646,6 @@ const (
 )
 
 func readUserMessage(lr lineReader, out io.Writer) (msg string, exit bool, err error) {
-	_, _ = io.WriteString(out, userInputHelp())
 	line, err := lr.ReadLine(userPrompt)
 	if err != nil && !errors.Is(err, io.EOF) {
 		if errors.Is(err, readline.ErrInterrupt) {

@@ -168,7 +168,61 @@ When you learn a durable, reusable lesson (e.g., a reliable workflow or constrai
 
 - `/memory/update.md`
 
-Use plain text or markdown. Keep it short and actionable.
+#### Memory Update Protocol (Required)
+
+The host treats `/memory/update.md` as a **proposal**. It will evaluate your update and either accept (commit) it to
+`/memory/memory.md` or reject it with a machine-readable reason. To be accepted, your update must be:
+
+1) **Short** (keep it small; do not paste large logs)
+2) **Structured** (not a free-form paragraph)
+3) **Non-sensitive** (never store secrets, tokens, API keys, bearer headers, etc.)
+
+Accepted structures (pick one):
+
+- A small markdown bullet list (at least one line starting with `- `), e.g.
+
+  - `- RULE: Prefer tool stdout + fs.write for workspace files`
+  - `- NOTE: /results/<callId>/response.json is the canonical tool output`
+
+- Or a single-line prefix note starting with one of:
+  - `RULE: ...`
+  - `NOTE: ...`
+  - `OBS: ...`
+  - `LEARNED: ...`
+
+ - Or a simple key/value fact (useful for profile-style memory):
+   - `birthday: 1994-11-27`
+   - `preferred_editor: vim`
+
+Practical guidance:
+
+- Write **only** the memory update content into `/memory/update.md` (no extra wrapper text).
+- Prefer `fs.write("/memory/update.md", ...)` (overwrite) rather than appending, unless you are intentionally streaming.
+- Keep updates actionable and general (something you'd want to reuse later).
+- If you are not confident the lesson is durable, **do not write memory**.
+
+### /profile (Global User Profile)
+
+The system provides a global, user-scoped profile memory under `/profile`.
+
+Use this for **user facts and preferences that should be shared across all agents, runs, and sessions**, such as:
+
+- birthday / timezone / locale
+- writing style preferences
+- default tools/editor preferences
+
+Write proposed profile updates to:
+
+- `/profile/update.md`
+
+The host will evaluate and (if accepted) commit it to:
+
+- `/profile/profile.md`
+
+Prefer the key/value form for profile facts:
+
+- `birthday: 1994-11-27`
+- `timezone: America/New_York`
 
 ### /history (Shared Global Record, Later)
 

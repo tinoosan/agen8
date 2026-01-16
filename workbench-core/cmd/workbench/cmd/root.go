@@ -81,4 +81,5 @@ func init() {
 
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(showCmd)
 }

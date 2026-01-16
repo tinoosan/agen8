@@ -13,6 +13,14 @@ type MemoryCommitLine struct {
 	Model     string `json:"model,omitempty"`
 	Turn      int    `json:"turn"`
 
+	// Scope indicates where this memory proposal was written (e.g. "memory", "profile").
+	// It is optional for backward compatibility.
+	Scope string `json:"scope,omitempty"`
+	// SessionID is the session in which the proposal occurred (optional).
+	SessionID string `json:"sessionId,omitempty"`
+	// RunID is the run in which the proposal occurred (optional).
+	RunID string `json:"runId,omitempty"`
+
 	Accepted bool   `json:"accepted"`
 	Reason   string `json:"reason"`
 

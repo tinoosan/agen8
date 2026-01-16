@@ -27,6 +27,13 @@ const (
 	// history mount for immutable provenance across runs/agents (distinct from /memory).
 	MountMemory = "memory"
 
+	// MountProfile is the mount name for user-scoped profile memory.
+	//
+	// Profile is global across runs and sessions and is intended for durable user facts
+	// and preferences (e.g. timezone, writing style, birthday). It is distinct from
+	// run-scoped /memory, which is working memory for the current run.
+	MountProfile = "profile"
+
 	// MountHistory is the mount name for session-scoped history.
 	//
 	// History is an immutable, append-only log of raw interactions between users,
