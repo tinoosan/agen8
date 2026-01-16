@@ -33,6 +33,7 @@ var resumeCmd = &cobra.Command{
 			MaxMemoryBytes:     maxMemoryBytes,
 			MaxProfileBytes:    maxProfileBytes,
 			RecentHistoryPairs: recentHistoryPairs,
+			UserID:             userID,
 		})
 	},
 }

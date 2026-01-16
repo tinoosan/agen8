@@ -22,6 +22,7 @@ var (
 	maxMemoryBytes     int
 	maxProfileBytes    int
 	recentHistoryPairs int
+	userID             string
 )
 
 var rootCmd = &cobra.Command{
@@ -73,6 +74,7 @@ new run in that session (workspaces remain run-scoped).
 			MaxMemoryBytes:     maxMemoryBytes,
 			MaxProfileBytes:    maxProfileBytes,
 			RecentHistoryPairs: recentHistoryPairs,
+			UserID:             userID,
 		})
 	},
 }
@@ -95,6 +97,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&maxMemoryBytes, "memory-bytes", 8*1024, "context updater memory budget (bytes)")
 	rootCmd.PersistentFlags().IntVar(&maxProfileBytes, "profile-bytes", 4*1024, "context updater profile budget (bytes)")
 	rootCmd.PersistentFlags().IntVar(&recentHistoryPairs, "history-pairs", 8, "number of recent (user,agent) pairs injected from /history")
+	rootCmd.PersistentFlags().StringVar(&userID, "user-id", strings.TrimSpace(os.Getenv("WORKBENCH_USER_ID")), "optional stable user identifier (also supports env WORKBENCH_USER_ID)")
 
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(listCmd)

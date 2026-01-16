@@ -54,6 +54,35 @@ type Run struct {
 	MaxBytesForContext int `json:"maxBytesForContext"`
 	// Error contains the failure message if the run status is StatusFailed.
 	Error *string `json:"error,omitempty"`
+
+	// Runtime captures host/runtime configuration used when executing this run.
+	//
+	// This is primarily for reproducibility and debugging ("why did the agent behave that way?").
+	// It is optional and may be nil for older runs.
+	Runtime *RunRuntimeConfig `json:"runtime,omitempty"`
+}
+
+// RunRuntimeConfig is host/runtime configuration persisted into run.json for reproducibility.
+//
+// This is not "agent memory". It is host configuration: budgets, model, and other knobs
+// that materially affect run behavior.
+type RunRuntimeConfig struct {
+	// DataDir is the workbench data directory used by the host process.
+	DataDir string `json:"dataDir,omitempty"`
+
+	// Model is the configured LLM model identifier for this run.
+	Model string `json:"model,omitempty"`
+
+	// MaxSteps is the maximum number of agent loop steps allowed per user turn.
+	MaxSteps int `json:"maxSteps,omitempty"`
+
+	// Context budgets applied by the ContextUpdater per step.
+	MaxTraceBytes   int `json:"maxTraceBytes,omitempty"`
+	MaxMemoryBytes  int `json:"maxMemoryBytes,omitempty"`
+	MaxProfileBytes int `json:"maxProfileBytes,omitempty"`
+
+	// RecentHistoryPairs controls how much recent /history is injected on resume.
+	RecentHistoryPairs int `json:"recentHistoryPairs,omitempty"`
 }
 
 // NewRun initializes a new Run instance with a unique ID and the given parameters.

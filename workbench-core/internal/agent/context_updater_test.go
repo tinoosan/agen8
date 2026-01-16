@@ -306,8 +306,8 @@ func TestContextUpdater_FailureBumpAfterBadOp(t *testing.T) {
 		MaxTraceBytes:  200,
 	}
 
-	u.ObserveHostOp(types.HostOpRequest{Op: "fs.read", Path: "/trace/events"}, types.HostOpResponse{
-		Op:    "fs.read",
+	u.ObserveHostOp(types.HostOpRequest{Op: types.HostOpFSRead, Path: "/trace/events"}, types.HostOpResponse{
+		Op:    types.HostOpFSRead,
 		Ok:    false,
 		Error: "boom",
 	})

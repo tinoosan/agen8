@@ -38,12 +38,12 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 	if x == nil || x.FS == nil {
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: "host executor missing FS"}
 	}
+	if err := req.Validate(); err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
 
 	switch req.Op {
-	case "fs.list":
-		if req.Path == "" {
-			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "path is required"}
-		}
+	case types.HostOpFSList:
 		entries, err := x.FS.List(req.Path)
 		if err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
@@ -54,10 +54,7 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		}
 		return types.HostOpResponse{Op: req.Op, Ok: true, Entries: out}
 
-	case "fs.read":
-		if req.Path == "" {
-			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "path is required"}
-		}
+	case types.HostOpFSRead:
 		b, err := x.FS.Read(req.Path)
 		if err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
@@ -82,39 +79,21 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			Truncated: truncated,
 		}
 
-	case "fs.write":
-		if req.Path == "" {
-			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "path is required"}
-		}
+	case types.HostOpFSWrite:
 		if err := x.FS.Write(req.Path, []byte(req.Text)); err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 		}
 		return types.HostOpResponse{Op: req.Op, Ok: true}
 
-	case "fs.append":
-		if req.Path == "" {
-			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "path is required"}
-		}
+	case types.HostOpFSAppend:
 		if err := x.FS.Append(req.Path, []byte(req.Text)); err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 		}
 		return types.HostOpResponse{Op: req.Op, Ok: true}
 
-	case "tool.run":
+	case types.HostOpToolRun:
 		if x.Runner == nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "host executor missing Runner"}
-		}
-		if req.ToolID.String() == "" {
-			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "toolId is required"}
-		}
-		if req.ActionID == "" {
-			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "actionId is required"}
-		}
-		if req.Input == nil {
-			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "input is required"}
-		}
-		if req.TimeoutMs < 0 {
-			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "timeoutMs must be >= 0"}
 		}
 		resp, err := x.Runner.Run(ctx, req.ToolID, req.ActionID, req.Input, req.TimeoutMs)
 		if err != nil {

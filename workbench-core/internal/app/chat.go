@@ -46,6 +46,10 @@ type RunChatOptions struct {
 	// RecentHistoryPairs is the number of (user,agent) message pairs to include
 	// in the "Recent Conversation" block injected into the system prompt.
 	RecentHistoryPairs int
+
+	// UserID is an optional stable identifier for the end user.
+	// If set, it is recorded into history/events for provenance.
+	UserID string
 }
 
 func (o RunChatOptions) withDefaults() RunChatOptions {
@@ -125,15 +129,20 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 	}
 	boolp := func(b bool) *bool { return &b }
 
-	data := map[string]string{
-		"name":  "Alice",
-		"email": "alice@example.com",
+	sessionTitle := ""
+	if sess, err := store.LoadSession(run.SessionID); err == nil {
+		sessionTitle = strings.TrimSpace(sess.Title)
 	}
 
 	mustEmit(context.Background(), events.Event{
 		Type:    "run.started",
 		Message: "Run started",
-		Data:    data,
+		Data: map[string]string{
+			"sessionId":    run.SessionID,
+			"sessionTitle": sessionTitle,
+			"runId":        run.RunId,
+			"userId":       strings.TrimSpace(opts.UserID),
+		},
 		Console: boolp(false),
 	})
 
@@ -237,6 +246,18 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 	}
 	historySink.Model = model
 
+	// Persist runtime config for reproducibility/debugging.
+	run.Runtime = &types.RunRuntimeConfig{
+		DataDir:            config.DataDir,
+		Model:              model,
+		MaxSteps:           opts.MaxSteps,
+		MaxTraceBytes:      opts.MaxTraceBytes,
+		MaxMemoryBytes:     opts.MaxMemoryBytes,
+		MaxProfileBytes:    opts.MaxProfileBytes,
+		RecentHistoryPairs: opts.RecentHistoryPairs,
+	}
+	_ = store.SaveRun(run)
+
 	client, err := llm.NewOpenRouterClientFromEnv()
 	if err != nil {
 		return fmt.Errorf("create OpenRouter client: %w", err)
@@ -256,10 +277,10 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 			"toolId":   req.ToolID.String(),
 			"actionId": req.ActionID,
 		}
-		if req.Op == "fs.read" && req.MaxBytes != 0 {
+		if req.Op == types.HostOpFSRead && req.MaxBytes != 0 {
 			reqData["maxBytes"] = strconv.Itoa(req.MaxBytes)
 		}
-		if req.Op == "tool.run" && req.TimeoutMs != 0 {
+		if req.Op == types.HostOpToolRun && req.TimeoutMs != 0 {
 			reqData["timeoutMs"] = strconv.Itoa(req.TimeoutMs)
 		}
 
@@ -315,15 +336,16 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		},
 	}
 
-	a := &agent.Agent{
+	a, err := agent.New(agent.Config{
 		LLM:            client,
 		Exec:           execWithEvents,
 		Model:          model,
 		SystemPrompt:   baseSystemPrompt,
 		ContextUpdater: updater,
 		MaxSteps:       opts.MaxSteps,
-		Logf:           nil,
-		OnLLMUsage:     nil,
+	})
+	if err != nil {
+		return err
 	}
 
 	log.Printf("== Chat session started (type 'exit' to quit) ==")
@@ -660,7 +682,10 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 	mustEmit(context.Background(), events.Event{
 		Type:    "run.completed",
 		Message: "Run finished",
-		Data:    data,
+		Data: map[string]string{
+			"sessionId": run.SessionID,
+			"runId":     run.RunId,
+		},
 		Console: boolp(false),
 	})
 

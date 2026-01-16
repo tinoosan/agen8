@@ -176,7 +176,7 @@ func (u *ContextUpdater) ObserveHostOp(req types.HostOpRequest, resp types.HostO
 	u.LastOp = &reqCopy
 	u.LastResp = &respCopy
 
-	if req.Op == "tool.run" && resp.ToolResponse != nil {
+	if req.Op == types.HostOpToolRun && resp.ToolResponse != nil {
 		u.LastToolRun = &LastToolRun{
 			ToolID:   req.ToolID,
 			ActionID: req.ActionID,

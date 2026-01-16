@@ -48,7 +48,7 @@ func TestAgentLoopV0_Run_ExecutesOpsUntilFinal(t *testing.T) {
 	if final != "done" {
 		t.Fatalf("unexpected final %q", final)
 	}
-	if len(called) != 1 || called[0].Op != "fs.list" || called[0].Path != "/tools" {
+	if len(called) != 1 || called[0].Op != types.HostOpFSList || called[0].Path != "/tools" {
 		t.Fatalf("unexpected calls: %+v", called)
 	}
 }
