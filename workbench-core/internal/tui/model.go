@@ -101,6 +101,8 @@ type Model struct {
 
 	styleInputBox lipgloss.Style
 	styleHint     lipgloss.Style
+
+	md *markdownRenderer
 }
 
 type transcriptItemKind int
@@ -129,9 +131,11 @@ type transcriptItem struct {
 func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model {
 	main := viewport.New(0, 0)
 	main.Style = lipgloss.NewStyle().Padding(0, 2)
+	main.MouseWheelEnabled = true
 
 	details := viewport.New(0, 0)
 	details.Style = lipgloss.NewStyle().Padding(0, 1)
+	details.MouseWheelEnabled = true
 
 	activity := list.New([]list.Item{}, newActivityDelegate(), 0, 0)
 	activity.Title = "Activity"
@@ -237,6 +241,8 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 			BorderForeground(lipgloss.Color("#404040")),
 		styleHint: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#707070")),
+
+		md: newMarkdownRenderer(),
 	}
 
 	m.pendingActionIdx = -1
@@ -275,7 +281,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Telemetry toggle (hidden by default).
-		if strings.EqualFold(msg.String(), "t") {
+		// Use Ctrl+T as the primary toggle so we don't hijack normal typing.
+		// For convenience, allow plain "t" when the input is empty.
+		if msg.Type == tea.KeyCtrlT || (strings.EqualFold(msg.String(), "t") && m.single.Value() == "" && m.multiline.Value() == "") {
 			m.showTelemetry = !m.showTelemetry
 			m.refreshActivityDetail()
 			return m, nil
@@ -292,16 +300,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Activity navigation / details scrolling.
 		if m.showDetails {
+			inputEmpty := m.single.Value() == "" && m.multiline.Value() == ""
 			switch msg.String() {
 			case "ctrl+p":
-				m.activityList.CursorUp()
-				m.refreshActivityDetail()
-				return m, nil
+				if inputEmpty {
+					m.activityList.CursorUp()
+					m.refreshActivityDetail()
+					return m, nil
+				}
 			case "ctrl+n":
-				m.activityList.CursorDown()
-				m.refreshActivityDetail()
-				return m, nil
-			case "e", "enter":
+				if inputEmpty {
+					m.activityList.CursorDown()
+					m.refreshActivityDetail()
+					return m, nil
+				}
+			case "ctrl+e":
 				m.expandOutput = !m.expandOutput
 				m.refreshActivityDetail()
 				return m, nil
@@ -320,9 +333,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.turnInFlight {
 			// While a turn is running, we allow scrolling but prevent submitting.
-			var cmd tea.Cmd
-			m.transcript, cmd = m.transcript.Update(msg)
-			return m, cmd
+			// Mouse scroll handling is done in the global MouseMsg handler below.
 		}
 
 		if m.isMulti {
@@ -383,6 +394,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 		m.turnTitle = ""
 		return m, nil
+	}
+
+	// Mouse wheel scrolling:
+	// - Always allow scrolling the transcript.
+	// - When the Activity pane is open, scroll the Details panel if the cursor is over it,
+	//   otherwise scroll the transcript.
+	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		// If details are visible and the mouse is within the right pane, scroll details.
+		if m.showDetails && m.activityList.Width() > 0 {
+			leftW := m.transcript.Width
+			if msg.X >= leftW {
+				var cmd tea.Cmd
+				m.activityDetail, cmd = m.activityDetail.Update(msg)
+				return m, cmd
+			}
+		}
+		var cmd tea.Cmd
+		m.transcript, cmd = m.transcript.Update(msg)
+		return m, cmd
 	}
 
 	// Default fallthrough: keep viewport responsive.
@@ -491,7 +522,11 @@ func (m Model) renderBody() string {
 	listHeader := m.styleDim.Render("Activity") + m.styleDim.Render(" (Tab/Ctrl+D to hide)")
 	listBox := listHeader + "\n" + divider + "\n" + m.activityList.View()
 
-	detailHeader := m.styleDim.Render("Details") + m.styleDim.Render(" (PgUp/PgDn scroll, e expand, t telemetry)")
+	telemetryBadge := ""
+	if m.showTelemetry {
+		telemetryBadge = " [telemetry]"
+	}
+	detailHeader := m.styleDim.Render("Details"+telemetryBadge) + m.styleDim.Render(" (PgUp/PgDn scroll, ctrl+e expand, ctrl+t telemetry)")
 	detailBox := detailHeader + "\n" + divider + "\n" + m.activityDetail.View()
 
 	rightBody := lipgloss.JoinVertical(lipgloss.Top, listBox, m.styleDim.Render(strings.Repeat("─", max(1, rightW))), detailBox)
@@ -516,7 +551,7 @@ func (m Model) renderInput() string {
 	status := m.renderStatusLine()
 	hintText := "ctrl+d activity  ctrl+g multiline  enter send  ctrl+s send (multiline)  ctrl+c quit"
 	if m.showDetails {
-		hintText = "ctrl+d hide activity  ctrl+p/ctrl+n select  pgup/pgdn scroll details  e expand  t telemetry  ctrl+g multiline  ctrl+s send"
+		hintText = "ctrl+d hide activity  ctrl+p/ctrl+n select (when input empty)  pgup/pgdn scroll details  ctrl+e expand  ctrl+t telemetry  ctrl+g multiline  ctrl+s send"
 	}
 	hint := m.styleHint.Render(hintText)
 	if status != "" {
@@ -619,10 +654,12 @@ func (m *Model) rebuildTranscript() {
 		case transcriptSpacer:
 			lines = append(lines, m.styleDim.Render(""))
 		case transcriptUser:
-			body := m.styleUserLabel.Render("you> ") + wrapText(it.text, contentW)
+			// Render user text as markdown so pasted tasks and lists are readable.
+			body := m.styleUserLabel.Render("you> ") + strings.TrimRight(m.md.render(it.text, contentW), "\n")
 			lines = append(lines, m.styleUserBox.Render(body))
 		case transcriptAgent:
-			body := m.styleAgent.Render(wrapText("agent> "+strings.TrimSpace(it.text), contentW))
+			// Render agent answers as markdown (code blocks, bullets, tables).
+			body := m.styleAgent.Render(strings.TrimRight(m.md.render("agent> "+strings.TrimSpace(it.text), contentW), "\n"))
 			lines = append(lines, m.styleAgentBox.Render(body))
 		case transcriptError:
 			lines = append(lines, m.styleError.Render(wrapText(it.text, contentW)))
@@ -822,64 +859,66 @@ func (m *Model) refreshActivityDetail() {
 		return
 	}
 	act := m.activities[m.activityList.Index()]
-	m.activityDetail.SetContent(lipgloss.NewStyle().Width(max(24, m.activityDetail.Width-2)).Render(renderActivityDetail(act, m.activityDetail.Width-4, m.showTelemetry, m.expandOutput)))
+	w := max(24, m.activityDetail.Width-4)
+	md := renderActivityDetailMarkdown(act, m.showTelemetry, m.expandOutput)
+	m.activityDetail.SetContent(strings.TrimRight(m.md.render(md, w), "\n"))
 }
 
-func renderActivityDetail(a Activity, width int, telemetry bool, expanded bool) string {
-	w := max(24, width)
-	label := lipgloss.NewStyle().Foreground(lipgloss.Color("#707070")).Bold(true)
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#707070"))
-
+func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) string {
 	var b strings.Builder
-	b.WriteString(label.Render(a.Kind))
-	b.WriteString("  ")
+	b.WriteString("## ")
+	b.WriteString(a.Kind)
+	b.WriteString(" ")
 	b.WriteString(a.ShortStatus())
 	if a.Duration > 0 {
-		b.WriteString(dim.Render("  " + a.Duration.String()))
+		b.WriteString(" · ")
+		b.WriteString(a.Duration.String())
 	}
 	b.WriteString("\n\n")
 
-	b.WriteString(label.Render("Summary"))
-	b.WriteString("\n")
-	b.WriteString(wrapText(a.Title, w))
+	b.WriteString("**Summary**\n\n")
+	b.WriteString("- ")
+	b.WriteString(a.Title)
 	b.WriteString("\n\n")
 
-	b.WriteString(label.Render("Inputs"))
-	b.WriteString("\n")
+	b.WriteString("**Inputs**\n\n")
 	if a.Kind == "tool.run" {
 		if strings.TrimSpace(a.ToolID) != "" || strings.TrimSpace(a.ActionID) != "" {
-			b.WriteString(wrapText(fmt.Sprintf("tool: %s/%s", a.ToolID, a.ActionID), w))
+			b.WriteString("- tool: ")
+			b.WriteString(fmt.Sprintf("%s/%s", a.ToolID, a.ActionID))
 			b.WriteString("\n")
 		}
 		if strings.TrimSpace(a.Command) != "" {
-			b.WriteString(wrapText("cmd: "+a.Command, w))
-			b.WriteString("\n")
+			b.WriteString("- cmd:\n\n```sh\n")
+			b.WriteString(a.Command)
+			b.WriteString("\n```\n")
 		}
 		if strings.TrimSpace(a.InputJSON) != "" {
-			b.WriteString("args:\n")
-			b.WriteString(wrapText(prettyJSONOneLine(a.InputJSON), w))
-			b.WriteString("\n")
+			b.WriteString("\n- args:\n\n```json\n")
+			b.WriteString(prettyJSONOneLine(a.InputJSON))
+			b.WriteString("\n```\n")
 		}
 	} else {
 		if strings.TrimSpace(a.Path) != "" {
-			b.WriteString(wrapText("path: "+a.Path, w))
-			b.WriteString("\n")
+			b.WriteString("- path: `")
+			b.WriteString(a.Path)
+			b.WriteString("`\n")
 		}
 		if telemetry && strings.TrimSpace(a.MaxBytes) != "" {
-			b.WriteString(wrapText("maxBytes: "+a.MaxBytes, w))
+			b.WriteString("- maxBytes: ")
+			b.WriteString(a.MaxBytes)
 			b.WriteString("\n")
 		}
 	}
-	b.WriteString("\n")
-
-	b.WriteString(label.Render("Outputs"))
-	b.WriteString("\n")
+	b.WriteString("\n**Outputs**\n\n")
 	if strings.TrimSpace(a.CallID) != "" {
-		b.WriteString(wrapText("callId: "+a.CallID, w))
-		b.WriteString("\n")
+		b.WriteString("- callId: `")
+		b.WriteString(a.CallID)
+		b.WriteString("`\n")
 	}
 	if strings.TrimSpace(a.Error) != "" {
-		b.WriteString(wrapText("error: "+a.Error, w))
+		b.WriteString("- error: ")
+		b.WriteString(a.Error)
 		b.WriteString("\n")
 	}
 	if strings.TrimSpace(a.OutputPreview) != "" {
@@ -887,12 +926,9 @@ func renderActivityDetail(a Activity, width int, telemetry bool, expanded bool) 
 		if !expanded && len(txt) > 600 {
 			txt = txt[:599] + "…"
 		}
-		b.WriteString("\n")
-		b.WriteString(label.Render("Preview"))
-		b.WriteString(dim.Render(" (e to expand)"))
-		b.WriteString("\n")
-		b.WriteString(wrapText(txt, w))
-		b.WriteString("\n")
+		b.WriteString("\n**Preview** _(press `e` to expand)_\n\n```text\n")
+		b.WriteString(txt)
+		b.WriteString("\n```\n")
 	}
 
 	return b.String()
@@ -973,7 +1009,7 @@ func Run(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) error
 		return fmt.Errorf("tui runner is required")
 	}
 	m := New(ctx, runner, evCh)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	_, err := p.Run()
 	return err
 }
