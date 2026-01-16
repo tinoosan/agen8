@@ -83,6 +83,14 @@ type RunRuntimeConfig struct {
 
 	// RecentHistoryPairs controls how much recent /history is injected on resume.
 	RecentHistoryPairs int `json:"recentHistoryPairs,omitempty"`
+
+	// IncludeHistoryOps controls whether environment/host ops are included when injecting
+	// session history into the system prompt.
+	IncludeHistoryOps bool `json:"includeHistoryOps,omitempty"`
+
+	// Pricing configuration used to estimate per-turn cost (USD per 1M tokens).
+	PriceInPerMTokensUSD  float64 `json:"priceInPerMTokensUsd,omitempty"`
+	PriceOutPerMTokensUSD float64 `json:"priceOutPerMTokensUsd,omitempty"`
 }
 
 // NewRun initializes a new Run instance with a unique ID and the given parameters.

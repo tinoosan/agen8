@@ -28,12 +28,15 @@ var resumeCmd = &cobra.Command{
 			return err
 		}
 		return app.RunChat(cmd.Context(), run, app.RunChatOptions{
-			MaxSteps:           maxSteps,
-			MaxTraceBytes:      maxTraceBytes,
-			MaxMemoryBytes:     maxMemoryBytes,
-			MaxProfileBytes:    maxProfileBytes,
-			RecentHistoryPairs: recentHistoryPairs,
-			UserID:             userID,
+			MaxSteps:              maxSteps,
+			MaxTraceBytes:         maxTraceBytes,
+			MaxMemoryBytes:        maxMemoryBytes,
+			MaxProfileBytes:       maxProfileBytes,
+			RecentHistoryPairs:    recentHistoryPairs,
+			UserID:                userID,
+			IncludeHistoryOps:     &includeHistoryOps,
+			PriceInPerMTokensUSD:  priceInPerM,
+			PriceOutPerMTokensUSD: priceOutPerM,
 		})
 	},
 }

@@ -1,9 +1,7 @@
 package app
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -50,6 +48,19 @@ type RunChatOptions struct {
 	// UserID is an optional stable identifier for the end user.
 	// If set, it is recorded into history/events for provenance.
 	UserID string
+
+	// IncludeHistoryOps controls whether the constructor includes environment/host ops
+	// from /history in addition to user/agent messages.
+	IncludeHistoryOps *bool
+
+	// PriceInPerMTokensUSD is the input token price in USD per 1M tokens.
+	//
+	// If both PriceInPerMTokensUSD and PriceOutPerMTokensUSD are > 0 and the model returns
+	// usage metrics, the host will emit a per-turn cost estimate.
+	PriceInPerMTokensUSD float64
+
+	// PriceOutPerMTokensUSD is the output token price in USD per 1M tokens.
+	PriceOutPerMTokensUSD float64
 }
 
 func (o RunChatOptions) withDefaults() RunChatOptions {
@@ -68,7 +79,36 @@ func (o RunChatOptions) withDefaults() RunChatOptions {
 	if o.RecentHistoryPairs <= 0 {
 		o.RecentHistoryPairs = 8
 	}
+	if o.IncludeHistoryOps == nil {
+		o.IncludeHistoryOps = boolPtr(true)
+	}
 	return o
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func derefBool(p *bool, def bool) bool {
+	if p == nil {
+		return def
+	}
+	return *p
+}
+
+func estimateTurnCostUSD(usage types.LLMUsage, priceInPerM, priceOutPerM float64) float64 {
+	if usage.InputTokens <= 0 && usage.OutputTokens <= 0 {
+		return 0
+	}
+	if priceInPerM <= 0 && priceOutPerM <= 0 {
+		return 0
+	}
+	in := float64(usage.InputTokens) / 1_000_000.0 * priceInPerM
+	out := float64(usage.OutputTokens) / 1_000_000.0 * priceOutPerM
+	return in + out
+}
+
+func fmtUSD(v float64) string {
+	// Keep it stable and compact; this is an estimate based on token usage.
+	return fmt.Sprintf("%.6f", v)
 }
 
 // RunChat starts the interactive REPL-driven agent loop for a run.
@@ -248,13 +288,16 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 
 	// Persist runtime config for reproducibility/debugging.
 	run.Runtime = &types.RunRuntimeConfig{
-		DataDir:            config.DataDir,
-		Model:              model,
-		MaxSteps:           opts.MaxSteps,
-		MaxTraceBytes:      opts.MaxTraceBytes,
-		MaxMemoryBytes:     opts.MaxMemoryBytes,
-		MaxProfileBytes:    opts.MaxProfileBytes,
-		RecentHistoryPairs: opts.RecentHistoryPairs,
+		DataDir:               config.DataDir,
+		Model:                 model,
+		MaxSteps:              opts.MaxSteps,
+		MaxTraceBytes:         opts.MaxTraceBytes,
+		MaxMemoryBytes:        opts.MaxMemoryBytes,
+		MaxProfileBytes:       opts.MaxProfileBytes,
+		RecentHistoryPairs:    opts.RecentHistoryPairs,
+		IncludeHistoryOps:     derefBool(opts.IncludeHistoryOps, true),
+		PriceInPerMTokensUSD:  opts.PriceInPerMTokensUSD,
+		PriceOutPerMTokensUSD: opts.PriceOutPerMTokensUSD,
 	}
 	_ = store.SaveRun(run)
 
@@ -268,6 +311,26 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		return fmt.Errorf("read internal/agent/INITIAL_PROMPT.md: %w", err)
 	}
 	baseSystemPrompt := string(systemPromptBytes)
+
+	// Constructor builds bounded, auditable context blocks from /profile, /memory, /trace, /history.
+	// It persists its state and manifest to /workspace so context assembly is reproducible.
+	constructor := &agent.ContextConstructor{
+		FS:                fs,
+		RunID:             run.RunId,
+		SessionID:         run.SessionID,
+		TraceStore:        traceStore,
+		HistoryStore:      historyRes.Store,
+		IncludeHistoryOps: derefBool(opts.IncludeHistoryOps, true),
+		MaxProfileBytes:   opts.MaxProfileBytes,
+		MaxMemoryBytes:    opts.MaxMemoryBytes,
+		MaxTraceBytes:     opts.MaxTraceBytes,
+		MaxHistoryBytes:   8 * 1024,
+		StatePath:         "/workspace/context_constructor_state.json",
+		ManifestPath:      "/workspace/context_constructor_manifest.json",
+		Emit: func(eventType, message string, data map[string]string) {
+			mustEmit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
+		},
+	}
 
 	var updater *agent.ContextUpdater
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
@@ -294,6 +357,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		if updater != nil {
 			updater.ObserveHostOp(req, resp)
 		}
+		constructor.ObserveHostOp(req, resp)
 
 		respData := map[string]string{
 			"op":  resp.Op,
@@ -341,7 +405,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		Exec:         agent.HostExecFunc(execWithEvents),
 		Model:        model,
 		SystemPrompt: baseSystemPrompt,
-		Context:      updater,
+		Context:      constructor,
 		MaxSteps:     opts.MaxSteps,
 	})
 	if err != nil {
@@ -398,13 +462,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		} else {
 			a.SystemPrompt = baseSystemPrompt
 		}
-		// Inject a bounded "recent conversation" excerpt from /history so a resumed run
-		// can continue coherently without rereading the full history log.
-		if hb, err := historyRes.Store.LinesLatest(context.Background(), store.HistoryLatestOptions{MaxBytes: 32 * 1024, Limit: 50}); err == nil {
-			if blk := recentConversationBlock(hb.Lines, opts.RecentHistoryPairs); strings.TrimSpace(blk) != "" {
-				a.SystemPrompt = strings.TrimSpace(a.SystemPrompt) + "\n\n" + blk + "\n"
-			}
-		}
+		// Recent conversation injection is handled by ContextConstructor (via /history).
 
 		turn++
 		mustEmit(context.Background(), events.Event{
@@ -470,6 +528,23 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 				},
 				Store: boolp(false),
 			})
+			if cost := estimateTurnCostUSD(turnUsage, opts.PriceInPerMTokensUSD, opts.PriceOutPerMTokensUSD); cost > 0 {
+				mustEmit(context.Background(), events.Event{
+					Type:    "llm.cost.total",
+					Message: "Turn cost estimate",
+					Data: map[string]string{
+						"turn":          strconv.Itoa(turn),
+						"input":         strconv.Itoa(turnUsage.InputTokens),
+						"output":        strconv.Itoa(turnUsage.OutputTokens),
+						"total":         strconv.Itoa(turnUsage.TotalTokens),
+						"costUsd":       fmtUSD(cost),
+						"priceInPerM":   fmtUSD(opts.PriceInPerMTokensUSD),
+						"priceOutPerM":  fmtUSD(opts.PriceOutPerMTokensUSD),
+						"pricingSource": "host_config",
+					},
+					Store: boolp(false),
+				})
+			}
 		}
 
 		// Ingest memory update if the agent wrote one.
@@ -693,73 +768,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 	return nil
 }
 
-type historyLine struct {
-	Timestamp string            `json:"ts"`
-	RunID     string            `json:"runId"`
-	Origin    string            `json:"origin"`
-	Kind      string            `json:"kind"`
-	Message   string            `json:"message"`
-	Model     string            `json:"model,omitempty"`
-	Data      map[string]string `json:"data,omitempty"`
-}
-
-func recentConversationBlock(lines [][]byte, maxPairs int) string {
-	// Keep only user.message and agent.final, in original order (most recent last).
-	var msgs []string
-	for _, raw := range lines {
-		var hl historyLine
-		if err := json.Unmarshal(bytes.TrimSpace(raw), &hl); err != nil {
-			continue
-		}
-		switch hl.Kind {
-		case "user.message":
-			text := ""
-			if hl.Data != nil {
-				text = strings.TrimSpace(hl.Data["text"])
-			}
-			if text == "" {
-				text = strings.TrimSpace(hl.Message)
-			}
-			if text != "" {
-				msgs = append(msgs, "user: "+oneLineClamp(text, 160))
-			}
-		case "agent.final":
-			text := ""
-			if hl.Data != nil {
-				text = strings.TrimSpace(hl.Data["text"])
-			}
-			if text == "" {
-				text = strings.TrimSpace(hl.Message)
-			}
-			if text != "" {
-				msgs = append(msgs, "agent: "+oneLineClamp(text, 160))
-			}
-		}
-	}
-	if len(msgs) == 0 {
-		return ""
-	}
-	// Keep last N pairs (2 lines per pair), best-effort.
-	if maxPairs <= 0 {
-		maxPairs = 8
-	}
-	maxLines := maxPairs * 2
-	if len(msgs) > maxLines {
-		msgs = msgs[len(msgs)-maxLines:]
-	}
-	return "## Recent Conversation (from /history)\n\n" + strings.Join(msgs, "\n")
-}
-
-func oneLineClamp(s string, max int) string {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, "\r", "\n")
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.TrimSpace(s)
-	if max > 0 && len(s) > max {
-		return s[:max] + "…"
-	}
-	return s
-}
+// Note: recent conversation injection is handled by agent.ContextConstructor.
 
 func fmtBool(b bool) string {
 	if b {

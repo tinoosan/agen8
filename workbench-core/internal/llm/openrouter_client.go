@@ -15,6 +15,15 @@ import (
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
+const (
+	openRouterMaxResponseBytes   = 2 * 1024 * 1024
+	openRouterErrorBodyPreview   = 512
+	openRouterDefaultAttempts    = 3
+	openRouterRetryBaseBackoff   = 200 * time.Millisecond
+	openRouterRetryMaxBackoff    = 2 * time.Second
+	openRouterDefaultHTTPTimeout = 30 * time.Second
+)
+
 // OpenRouterClient implements types.LLMClient using OpenRouter's OpenAI-compatible
 // Chat Completions endpoint.
 //
@@ -61,7 +70,7 @@ func NewOpenRouterClientFromEnv() (*OpenRouterClient, error) {
 		}
 	}
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
+	httpClient := &http.Client{Timeout: openRouterDefaultHTTPTimeout}
 	return &OpenRouterClient{
 		APIKey:           key,
 		BaseURL:          strings.TrimRight(baseURL, "/"),
@@ -70,6 +79,70 @@ func NewOpenRouterClientFromEnv() (*OpenRouterClient, error) {
 		AppTitle:         strings.TrimSpace(os.Getenv("OPENROUTER_APP_TITLE")),
 		DefaultMaxTokens: defaultMaxTokens,
 	}, nil
+}
+
+func openRouterIsRetryableStatus(code int) bool {
+	switch code {
+	case http.StatusRequestTimeout, http.StatusTooManyRequests,
+		http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func openRouterRequestID(h http.Header) string {
+	// OpenRouter often includes an identifier, but the exact header name is not
+	// guaranteed. We try a few common variants and use the first non-empty value.
+	for _, k := range []string{"X-Request-Id", "X-Request-ID", "X-OpenRouter-Request-Id", "X-Openrouter-Request-Id"} {
+		if v := strings.TrimSpace(h.Get(k)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func openRouterBodyPreview(raw []byte) string {
+	s := strings.TrimSpace(string(raw))
+	if s == "" {
+		return ""
+	}
+	if len(s) <= openRouterErrorBodyPreview {
+		return s
+	}
+	return s[:openRouterErrorBodyPreview] + "…"
+}
+
+func openRouterShouldRetryParseErr(err error, raw []byte) bool {
+	if err == nil {
+		return false
+	}
+	trim := bytes.TrimSpace(raw)
+	if len(trim) == 0 {
+		return true
+	}
+	// Treat classic "truncated JSON" parse errors as transient.
+	// json.Unmarshal typically returns: "unexpected end of JSON input".
+	msg := err.Error()
+	if strings.Contains(msg, "unexpected end of JSON input") || strings.Contains(msg, "unexpected EOF") {
+		return true
+	}
+	return false
+}
+
+func openRouterSleep(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 func (c *OpenRouterClient) Generate(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
@@ -87,7 +160,7 @@ func (c *OpenRouterClient) Generate(ctx context.Context, req types.LLMRequest) (
 	}
 	httpClient := c.HTTP
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = &http.Client{Timeout: openRouterDefaultHTTPTimeout}
 	}
 
 	type message struct {
@@ -149,29 +222,6 @@ func (c *OpenRouterClient) Generate(ctx context.Context, req types.LLMRequest) (
 	}
 
 	u := c.BaseURL + "/chat/completions"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
-	if err != nil {
-		return types.LLMResponse{}, fmt.Errorf("build request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
-	if c.AppURL != "" {
-		httpReq.Header.Set("HTTP-Referer", c.AppURL)
-	}
-	if c.AppTitle != "" {
-		httpReq.Header.Set("X-Title", c.AppTitle)
-	}
-
-	httpResp, err := httpClient.Do(httpReq)
-	if err != nil {
-		return types.LLMResponse{}, fmt.Errorf("openrouter request failed: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	raw, _ := io.ReadAll(io.LimitReader(httpResp.Body, 2*1024*1024))
-	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return types.LLMResponse{}, fmt.Errorf("openrouter status %s: %s", httpResp.Status, strings.TrimSpace(string(raw)))
-	}
 
 	type choice struct {
 		Message struct {
@@ -188,24 +238,128 @@ func (c *OpenRouterClient) Generate(ctx context.Context, req types.LLMRequest) (
 		Usage   *usage   `json:"usage,omitempty"`
 	}
 
-	var parsed responseBody
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return types.LLMResponse{}, fmt.Errorf("parse openrouter response: %w; raw=%s", err, strings.TrimSpace(string(raw)))
-	}
-	if len(parsed.Choices) == 0 {
-		return types.LLMResponse{}, fmt.Errorf("openrouter response missing choices; raw=%s", strings.TrimSpace(string(raw)))
+	attempts := openRouterDefaultAttempts
+	var lastErr error
+	backoff := openRouterRetryBaseBackoff
+	for attempt := 1; attempt <= attempts; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
+		if err != nil {
+			return types.LLMResponse{}, fmt.Errorf("build request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
+		if c.AppURL != "" {
+			httpReq.Header.Set("HTTP-Referer", c.AppURL)
+		}
+		if c.AppTitle != "" {
+			httpReq.Header.Set("X-Title", c.AppTitle)
+		}
+
+		httpResp, err := httpClient.Do(httpReq)
+		if err != nil {
+			lastErr = fmt.Errorf("openrouter request failed: %w", err)
+			if attempt < attempts {
+				if err := openRouterSleep(ctx, backoff); err != nil {
+					return types.LLMResponse{}, lastErr
+				}
+				backoff *= 2
+				if backoff > openRouterRetryMaxBackoff {
+					backoff = openRouterRetryMaxBackoff
+				}
+				continue
+			}
+			return types.LLMResponse{}, lastErr
+		}
+
+		raw, readErr := io.ReadAll(io.LimitReader(httpResp.Body, openRouterMaxResponseBytes))
+		_ = httpResp.Body.Close()
+		reqID := openRouterRequestID(httpResp.Header)
+		contentLen := strings.TrimSpace(httpResp.Header.Get("Content-Length"))
+
+		if readErr != nil {
+			lastErr = fmt.Errorf("openrouter read response: %w (status=%s requestId=%s contentLength=%s)", readErr, httpResp.Status, reqID, contentLen)
+			if attempt < attempts {
+				if err := openRouterSleep(ctx, backoff); err != nil {
+					return types.LLMResponse{}, lastErr
+				}
+				backoff *= 2
+				if backoff > openRouterRetryMaxBackoff {
+					backoff = openRouterRetryMaxBackoff
+				}
+				continue
+			}
+			return types.LLMResponse{}, lastErr
+		}
+
+		if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+			bodyPreview := openRouterBodyPreview(raw)
+			lastErr = fmt.Errorf("openrouter status %s (requestId=%s bodyLen=%d): %s", httpResp.Status, reqID, len(raw), bodyPreview)
+			if attempt < attempts && openRouterIsRetryableStatus(httpResp.StatusCode) {
+				if err := openRouterSleep(ctx, backoff); err != nil {
+					return types.LLMResponse{}, lastErr
+				}
+				backoff *= 2
+				if backoff > openRouterRetryMaxBackoff {
+					backoff = openRouterRetryMaxBackoff
+				}
+				continue
+			}
+			return types.LLMResponse{}, lastErr
+		}
+
+		if len(bytes.TrimSpace(raw)) == 0 {
+			lastErr = fmt.Errorf("openrouter empty response body (status=%s requestId=%s contentLength=%s)", httpResp.Status, reqID, contentLen)
+			if attempt < attempts {
+				if err := openRouterSleep(ctx, backoff); err != nil {
+					return types.LLMResponse{}, lastErr
+				}
+				backoff *= 2
+				if backoff > openRouterRetryMaxBackoff {
+					backoff = openRouterRetryMaxBackoff
+				}
+				continue
+			}
+			return types.LLMResponse{}, lastErr
+		}
+
+		var parsed responseBody
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			bodyPreview := openRouterBodyPreview(raw)
+			lastErr = fmt.Errorf("parse openrouter response: %w (requestId=%s bodyLen=%d); raw=%s", err, reqID, len(raw), bodyPreview)
+			if attempt < attempts && openRouterShouldRetryParseErr(err, raw) {
+				if err := openRouterSleep(ctx, backoff); err != nil {
+					return types.LLMResponse{}, lastErr
+				}
+				backoff *= 2
+				if backoff > openRouterRetryMaxBackoff {
+					backoff = openRouterRetryMaxBackoff
+				}
+				continue
+			}
+			return types.LLMResponse{}, lastErr
+		}
+		if len(parsed.Choices) == 0 {
+			bodyPreview := openRouterBodyPreview(raw)
+			lastErr = fmt.Errorf("openrouter response missing choices (requestId=%s bodyLen=%d); raw=%s", reqID, len(raw), bodyPreview)
+			return types.LLMResponse{}, lastErr
+		}
+
+		out := types.LLMResponse{
+			Text: strings.TrimSpace(parsed.Choices[0].Message.Content),
+			Raw:  raw,
+		}
+		if parsed.Usage != nil {
+			out.Usage = &types.LLMUsage{
+				InputTokens:  parsed.Usage.PromptTokens,
+				OutputTokens: parsed.Usage.CompletionTokens,
+				TotalTokens:  parsed.Usage.TotalTokens,
+			}
+		}
+		return out, nil
 	}
 
-	out := types.LLMResponse{
-		Text: strings.TrimSpace(parsed.Choices[0].Message.Content),
-		Raw:  raw,
+	if lastErr == nil {
+		lastErr = fmt.Errorf("openrouter request failed")
 	}
-	if parsed.Usage != nil {
-		out.Usage = &types.LLMUsage{
-			InputTokens:  parsed.Usage.PromptTokens,
-			OutputTokens: parsed.Usage.CompletionTokens,
-			TotalTokens:  parsed.Usage.TotalTokens,
-		}
-	}
-	return out, nil
+	return types.LLMResponse{}, lastErr
 }

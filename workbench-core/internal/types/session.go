@@ -60,6 +60,14 @@ type Session struct {
 	//
 	// Runs are stored separately under data/runs/<runId>/; this list is an index.
 	Runs []string `json:"runs,omitempty"`
+
+	// HistoryCursor is the host-maintained cursor used for incremental history retrieval.
+	//
+	// History is session-scoped, so this cursor persists across runs to support resume,
+	// constructor/context building, and UI polling.
+	//
+	// Cursor is treated as opaque at the module boundary.
+	HistoryCursor string `json:"historyCursor,omitempty"`
 }
 
 // NewSession creates a new session with a unique ID.

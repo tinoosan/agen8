@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/tinoosan/workbench-core/internal/types"
@@ -66,5 +67,80 @@ func TestOpenRouterClient_Generate_ParsesFirstChoice(t *testing.T) {
 	}
 	if gotBody["response_format"] == nil {
 		t.Fatalf("expected response_format to be set when JSONOnly=true")
+	}
+}
+
+func TestOpenRouterClient_Generate_RetriesOnEmptyBody(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		n := atomic.AddInt32(&calls, 1)
+		if n == 1 {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+
+	c := &OpenRouterClient{
+		APIKey:  "k",
+		BaseURL: srv.URL,
+		HTTP:    srv.Client(),
+	}
+
+	resp, err := c.Generate(context.Background(), types.LLMRequest{
+		Model:    "openai/gpt-4o-mini",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Text != "ok" {
+		t.Fatalf("unexpected text %q", resp.Text)
+	}
+	if atomic.LoadInt32(&calls) != 2 {
+		t.Fatalf("expected 2 calls, got %d", calls)
+	}
+}
+
+func TestOpenRouterClient_Generate_RetriesOnRetryableStatus(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		n := atomic.AddInt32(&calls, 1)
+		if n == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("bad gateway"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+
+	c := &OpenRouterClient{
+		APIKey:  "k",
+		BaseURL: srv.URL,
+		HTTP:    srv.Client(),
+	}
+
+	resp, err := c.Generate(context.Background(), types.LLMRequest{
+		Model:    "openai/gpt-4o-mini",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Text != "ok" {
+		t.Fatalf("unexpected text %q", resp.Text)
+	}
+	if atomic.LoadInt32(&calls) != 2 {
+		t.Fatalf("expected 2 calls, got %d", calls)
 	}
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -23,6 +24,9 @@ var (
 	maxProfileBytes    int
 	recentHistoryPairs int
 	userID             string
+	includeHistoryOps  bool
+	priceInPerM        float64
+	priceOutPerM       float64
 )
 
 var rootCmd = &cobra.Command{
@@ -69,12 +73,15 @@ new run in that session (workspaces remain run-scoped).
 			return err
 		}
 		return app.RunChat(cmd.Context(), run, app.RunChatOptions{
-			MaxSteps:           maxSteps,
-			MaxTraceBytes:      maxTraceBytes,
-			MaxMemoryBytes:     maxMemoryBytes,
-			MaxProfileBytes:    maxProfileBytes,
-			RecentHistoryPairs: recentHistoryPairs,
-			UserID:             userID,
+			MaxSteps:              maxSteps,
+			MaxTraceBytes:         maxTraceBytes,
+			MaxMemoryBytes:        maxMemoryBytes,
+			MaxProfileBytes:       maxProfileBytes,
+			RecentHistoryPairs:    recentHistoryPairs,
+			UserID:                userID,
+			IncludeHistoryOps:     &includeHistoryOps,
+			PriceInPerMTokensUSD:  priceInPerM,
+			PriceOutPerMTokensUSD: priceOutPerM,
 		})
 	},
 }
@@ -99,7 +106,49 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&recentHistoryPairs, "history-pairs", 8, "number of recent (user,agent) pairs injected from /history")
 	rootCmd.PersistentFlags().StringVar(&userID, "user-id", strings.TrimSpace(os.Getenv("WORKBENCH_USER_ID")), "optional stable user identifier (also supports env WORKBENCH_USER_ID)")
 
+	includeHistoryOps = envBool("WORKBENCH_INCLUDE_HISTORY_OPS", true)
+	rootCmd.PersistentFlags().BoolVar(&includeHistoryOps, "include-history-ops", includeHistoryOps, "include environment host ops from /history in prompt context (higher cost)")
+
+	// Pricing (USD per 1M tokens). Defaults to gpt-5.2 pricing if OPENROUTER_MODEL matches.
+	defIn, defOut := defaultPricingFromEnv()
+	priceInPerM = envFloat("WORKBENCH_PRICE_IN_PER_M", defIn)
+	priceOutPerM = envFloat("WORKBENCH_PRICE_OUT_PER_M", defOut)
+	rootCmd.PersistentFlags().Float64Var(&priceInPerM, "price-in-per-m", priceInPerM, "USD per 1M input tokens (cost estimate)")
+	rootCmd.PersistentFlags().Float64Var(&priceOutPerM, "price-out-per-m", priceOutPerM, "USD per 1M output tokens (cost estimate)")
+
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(showCmd)
+}
+
+func envBool(key string, def bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return def
+	}
+	return b
+}
+
+func envFloat(key string, def float64) float64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return def
+	}
+	return f
+}
+
+func defaultPricingFromEnv() (inPerM, outPerM float64) {
+	model := strings.ToLower(strings.TrimSpace(os.Getenv("OPENROUTER_MODEL")))
+	if strings.Contains(model, "gpt-5.2") {
+		return 1.75, 14.0
+	}
+	return 0, 0
 }
