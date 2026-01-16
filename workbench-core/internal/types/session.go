@@ -33,6 +33,29 @@ type Session struct {
 	// CurrentRunID is the run the host considers "active" for resume/navigation.
 	CurrentRunID string `json:"currentRunId,omitempty"`
 
+	// CurrentGoal is the current user-facing objective for this session.
+	//
+	// This is a host-maintained field used to make "resume session" coherent:
+	// the host injects it into the system prompt so the agent can continue without
+	// rereading the entire history.
+	CurrentGoal string `json:"currentGoal,omitempty"`
+
+	// Plan is an optional short plan for the current goal.
+	//
+	// This enables "plan mode" patterns where a planner agent writes a plan and
+	// then delegates to sub-agent runs. The host should treat this as advisory state
+	// and keep provenance in /history.
+	Plan string `json:"plan,omitempty"`
+
+	// Summary is a compact, host-maintained recap of what happened so far.
+	//
+	// This is NOT a replacement for /history (the source of truth). It is a
+	// bounded, human+agent friendly digest to reduce token cost on resume.
+	Summary string `json:"summary,omitempty"`
+
+	// UpdatedAt is the last time the session state was updated by the host.
+	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
+
 	// Runs is an ordered list of run IDs created in this session.
 	//
 	// Runs are stored separately under data/runs/<runId>/; this list is an index.
