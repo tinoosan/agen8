@@ -116,7 +116,11 @@ func main() {
 		log.Fatalf("error creating virtual results: %v", err)
 	}
 
-	memoryRes, err := resources.NewRunMemoryResource(run.RunId)
+	memStore, err := store.NewDiskMemoryStore(run.RunId)
+	if err != nil {
+		log.Fatalf("error creating memory store: %v", err)
+	}
+	memoryRes, err := resources.NewVirtualMemoryResource(memStore)
 	if err != nil {
 		log.Fatalf("error creating memory: %v", err)
 	}
@@ -366,6 +370,10 @@ func main() {
 		}
 
 		// Ingest memory update if the agent wrote one.
+		//
+		// Note: /memory is a virtual mount backed by a MemoryStore. Reads/writes below
+		// go through the VFS (and thus through the store), preserving the same contract
+		// while allowing a pluggable backend.
 		if b, err := fs.Read("/memory/update.md"); err == nil {
 			updateRaw := string(b)
 			if strings.TrimSpace(updateRaw) == "" {
@@ -399,8 +407,11 @@ func main() {
 				})
 
 				if accepted {
-					// Commit to run-scoped memory.md on disk (host policy).
-					if err := appendRunMemory(memoryRes.BaseDir, strings.TrimSpace(cleaned)); err != nil {
+					// Commit to run-scoped memory.md (host policy).
+					//
+					// Keep formatting identical to the previous implementation so existing runs
+					// remain comparable on disk.
+					if err := memStore.AppendMemory(context.Background(), formatRunMemoryAppend(strings.TrimSpace(cleaned))); err != nil {
 						mustEmit(context.Background(), events.Event{
 							Type:    "memory.commit.error",
 							Message: "Failed to commit memory update",
@@ -420,7 +431,7 @@ func main() {
 					}
 				}
 
-				if err := agent.AppendCommitLog(memoryRes.BaseDir, agent.MemoryCommitLine{
+				if err := memStore.AppendCommitLog(context.Background(), types.MemoryCommitLine{
 					Model:    model,
 					Turn:     turn,
 					Accepted: accepted,
@@ -485,19 +496,17 @@ func fmtBool(b bool) string {
 	return "false"
 }
 
-func appendRunMemory(baseDir string, update string) error {
+// formatRunMemoryAppend produces the exact block appended to memory.md when a memory update
+// is accepted by the host.
+//
+// This stays in the host (not the store) so the evaluation/commit policy can evolve
+// independently of the storage backend.
+func formatRunMemoryAppend(update string) string {
 	update = strings.TrimSpace(update)
 	if update == "" {
-		return nil
+		return ""
 	}
-	p := filepath.Join(baseDir, "memory.md")
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString("\n\n---\n" + time.Now().UTC().Format(time.RFC3339Nano) + "\n\n" + update + "\n")
-	return err
+	return "\n\n---\n" + time.Now().UTC().Format(time.RFC3339Nano) + "\n\n" + update + "\n"
 }
 
 const (

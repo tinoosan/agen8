@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tinoosan/workbench-core/internal/types"
 )
 
 func TestMemoryEvaluator_Evaluate(t *testing.T) {
@@ -39,7 +41,7 @@ func TestMemoryEvaluator_Evaluate(t *testing.T) {
 func TestAppendCommitLog_WritesJSONL(t *testing.T) {
 	tmp := t.TempDir()
 
-	line := MemoryCommitLine{
+	line := types.MemoryCommitLine{
 		Turn:     1,
 		Model:    "m",
 		Accepted: true,
@@ -60,7 +62,7 @@ func TestAppendCommitLog_WritesJSONL(t *testing.T) {
 		t.Fatalf("expected jsonl content")
 	}
 
-	var parsed MemoryCommitLine
+	var parsed types.MemoryCommitLine
 	if err := json.Unmarshal([]byte(s), &parsed); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}

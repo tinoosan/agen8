@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/tinoosan/workbench-core/internal/types"
 )
 
 // MemoryEvaluator is the simplest possible "Context Evaluator v0" for agent memory.
@@ -111,24 +113,8 @@ func looksStructured(s string) bool {
 	return false
 }
 
-// MemoryCommitLine is a single audit record appended to /memory/commits.jsonl.
-//
-// The audit log is immutable and append-only within a run. This enables debugging:
-// "what did the agent try to write to memory, and why was it accepted/rejected?"
-type MemoryCommitLine struct {
-	Timestamp string `json:"timestamp"`
-	Model     string `json:"model,omitempty"`
-	Turn      int    `json:"turn"`
-
-	Accepted bool   `json:"accepted"`
-	Reason   string `json:"reason"`
-
-	Bytes  int    `json:"bytes"`
-	SHA256 string `json:"sha256"`
-}
-
 // AppendCommitLog appends a JSONL audit record to baseDir/commits.jsonl.
-func AppendCommitLog(baseDir string, line MemoryCommitLine) error {
+func AppendCommitLog(baseDir string, line types.MemoryCommitLine) error {
 	if strings.TrimSpace(baseDir) == "" {
 		return fmt.Errorf("baseDir is required")
 	}
