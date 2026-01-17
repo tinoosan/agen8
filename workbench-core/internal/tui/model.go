@@ -63,6 +63,8 @@ type Model struct {
 	showDetails   bool
 	showTelemetry bool
 
+	focus focusTarget
+
 	turnInFlight bool
 	turnStarted  time.Time
 	turnTitle    string
@@ -106,6 +108,13 @@ type Model struct {
 
 	md *markdownRenderer
 }
+
+type focusTarget int
+
+const (
+	focusInput focusTarget = iota
+	focusActivityList
+)
 
 type transcriptItemKind int
 
@@ -245,7 +254,8 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 		styleHint: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#707070")),
 
-		md: newMarkdownRenderer(),
+		md:    newMarkdownRenderer(),
+		focus: focusInput,
 	}
 
 	m.pendingActionIdx = -1
@@ -270,17 +280,57 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Toggle details panel.
-		if msg.Type == tea.KeyTab {
+		// Toggle activity panel open/closed.
+		if msg.Type == tea.KeyCtrlA {
 			m.showDetails = !m.showDetails
-			m.refreshActivityDetail()
+			if m.showDetails {
+				m.focus = focusActivityList
+				m.single.Blur()
+				m.multiline.Blur()
+				m.refreshActivityDetail()
+			} else {
+				m.focus = focusInput
+				if m.isMulti {
+					m.multiline.Focus()
+				} else {
+					m.single.Focus()
+				}
+			}
 			m.layout()
 			return m, nil
 		}
-		if msg.Type == tea.KeyCtrlD {
-			m.showDetails = !m.showDetails
-			m.refreshActivityDetail()
+
+		// Esc closes the activity panel and returns focus to input.
+		if msg.Type == tea.KeyEsc && m.showDetails {
+			m.showDetails = false
+			m.focus = focusInput
+			if m.isMulti {
+				m.multiline.Focus()
+			} else {
+				m.single.Focus()
+			}
 			m.layout()
+			return m, nil
+		}
+
+		// Tab cycles focus between input and activity list.
+		if msg.Type == tea.KeyTab {
+			if !m.showDetails {
+				m.focus = focusInput
+				return m, nil
+			}
+			if m.focus == focusInput {
+				m.focus = focusActivityList
+				m.single.Blur()
+				m.multiline.Blur()
+			} else {
+				m.focus = focusInput
+				if m.isMulti {
+					m.multiline.Focus()
+				} else {
+					m.single.Focus()
+				}
+			}
 			return m, nil
 		}
 
@@ -302,42 +352,62 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Activity navigation / details scrolling.
-		if m.showDetails {
-			inputEmpty := m.single.Value() == "" && m.multiline.Value() == ""
-			switch msg.String() {
-			case "ctrl+p":
-				if inputEmpty {
-					m.activityList.CursorUp()
-					m.refreshActivityDetail()
-					return m, nil
-				}
-			case "ctrl+n":
-				if inputEmpty {
-					m.activityList.CursorDown()
-					m.refreshActivityDetail()
-					return m, nil
-				}
-			case "ctrl+e":
+		// Activity navigation / details scrolling (when focused).
+		if m.showDetails && m.focus == focusActivityList {
+			switch msg.Type {
+			case tea.KeyUp:
+				m.activityList.CursorUp()
+				m.refreshActivityDetail()
+				return m, nil
+			case tea.KeyDown:
+				m.activityList.CursorDown()
+				m.refreshActivityDetail()
+				return m, nil
+			case tea.KeyEnter:
 				m.expandOutput = !m.expandOutput
 				m.refreshActivityDetail()
 				return m, nil
 			}
+			switch msg.String() {
+			case "j":
+				m.activityList.CursorDown()
+				m.refreshActivityDetail()
+				return m, nil
+			case "k":
+				m.activityList.CursorUp()
+				m.refreshActivityDetail()
+				return m, nil
+			case "e", "ctrl+e":
+				m.expandOutput = !m.expandOutput
+				m.refreshActivityDetail()
+				return m, nil
+			case "ctrl+p":
+				m.activityList.CursorUp()
+				m.refreshActivityDetail()
+				return m, nil
+			case "ctrl+n":
+				m.activityList.CursorDown()
+				m.refreshActivityDetail()
+				return m, nil
+			}
 			switch msg.Type {
-			case tea.KeyPgUp, tea.KeyCtrlU:
-				var cmd tea.Cmd
-				m.activityDetail, cmd = m.activityDetail.Update(msg)
-				return m, cmd
-			case tea.KeyPgDown, tea.KeyCtrlF:
+			case tea.KeyPgUp, tea.KeyCtrlU, tea.KeyPgDown, tea.KeyCtrlF:
 				var cmd tea.Cmd
 				m.activityDetail, cmd = m.activityDetail.Update(msg)
 				return m, cmd
 			}
+			// Do not forward keys to the input when Activity is focused.
+			return m, nil
 		}
 
 		if m.turnInFlight {
 			// While a turn is running, we allow scrolling but prevent submitting.
 			// Mouse scroll handling is done in the global MouseMsg handler below.
+		}
+
+		// Only forward key events into the input when input is focused.
+		if m.focus != focusInput {
+			return m, nil
 		}
 
 		if m.isMulti {
@@ -433,15 +503,26 @@ func (m Model) View() string {
 func (m *Model) layout() {
 	wasAtBottom := m.transcript.AtBottom()
 
-	headerH := 1
-	inputH := 5
-	if m.isMulti {
-		inputH = 10
+	// Width-dependent components (header + footer) can wrap when the terminal is narrow.
+	// We compute their real rendered heights so the header is never "pushed off" by a
+	// footer that becomes taller due to wrapping.
+	m.single.SetWidth(max(20, m.width-6))
+	m.multiline.SetWidth(max(20, m.width-6))
+
+	headerH := lipgloss.Height(m.renderHeader())
+	if headerH < 1 {
+		headerH = 1
 	}
-	bodyH := m.height - headerH - inputH
-	if bodyH < 5 {
-		bodyH = 5
+	footerH := lipgloss.Height(m.renderInput())
+	if footerH < 1 {
+		footerH = 1
 	}
+
+	bodyH := m.height - headerH - footerH
+	if bodyH < 1 {
+		bodyH = 1
+	}
+
 	m.transcript.Height = bodyH
 
 	mainW := m.width
@@ -460,13 +541,25 @@ func (m *Model) layout() {
 
 	m.transcript.Width = max(40, mainW)
 	if detailW != 0 {
-		m.activityList.SetWidth(max(32, detailW))
-		listH := max(6, bodyH/2)
+		// The right pane has a border, so its inner content must be sized to
+		// fit within (detailW-2)x(bodyH-2). If we let inner components render
+		// taller than the pane, the combined view can exceed terminal height and
+		// cause the header to appear to "disappear" (clipped off the top).
+		innerW := max(24, detailW-2)
+		innerH := max(1, bodyH-2)
+
+		m.activityList.SetWidth(max(24, innerW))
+
+		// Split the inner height between list and details.
+		listH := max(6, innerH/2)
+		if listH > innerH-1 {
+			listH = max(1, innerH-1)
+		}
 		m.activityList.SetHeight(listH)
 
-		m.activityDetail.Width = max(32, detailW)
+		m.activityDetail.Width = max(24, innerW)
 		// No extra divider line between list + detail; keep the right pane height exact.
-		m.activityDetail.Height = max(6, bodyH-listH)
+		m.activityDetail.Height = max(1, innerH-listH)
 	}
 
 	m.rebuildTranscript()
@@ -475,8 +568,8 @@ func (m *Model) layout() {
 	}
 	m.refreshActivityDetail()
 
-	m.single.SetWidth(max(20, m.width-6))
-	m.multiline.SetWidth(max(20, m.width-6))
+	// Recompute once after content/layout changes so the footer measurement stays correct
+	// for the next resize cycle.
 }
 
 func (m Model) renderHeader() string {
@@ -522,15 +615,19 @@ func (m Model) renderBody() string {
 		return m.transcript.View()
 	}
 
-	rightW := max(32, m.activityList.Width())
+	// Note: lipgloss Style Width/Height refer to the content area and do not include
+	// border width/height. Since the right pane uses a border, we size it using the
+	// inner dimensions so the overall pane stays exactly aligned with the transcript.
+	rightW := max(24, m.activityList.Width())
+	rightH := max(1, m.transcript.Height-2) // -2 for top/bottom border
 
 	// Important: keep the right pane height exactly equal to the transcript height.
 	// If the right pane is taller, Bubble Tea will clip the top of the overall view,
 	// which makes the header appear to "disappear" when Activity is toggled.
 	rightBody := lipgloss.JoinVertical(lipgloss.Top, m.activityList.View(), m.activityDetail.View())
 	rightPane := lipgloss.NewStyle().
-		Width(rightW + 2).
-		Height(m.transcript.Height).
+		Width(rightW).
+		Height(rightH).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("#303030")).
 		Render(rightBody)
@@ -547,13 +644,21 @@ func (m Model) renderInput() string {
 	}
 
 	box := m.styleInputBox.Render(input)
-	status := m.renderStatusLine()
-	hintText := "ctrl+d activity  ctrl+g multiline  enter send  ctrl+c quit"
-	if m.showDetails {
-		hintText = "ctrl+d hide activity  ctrl+p/ctrl+n select (when input empty)  pgup/pgdn scroll details  ctrl+e expand  ctrl+t telemetry  ctrl+g multiline  ctrl+o send (multiline)"
+	statusRaw := m.renderStatusLine()
+	focusName := "input"
+	if m.focus == focusActivityList {
+		focusName = "activity"
 	}
-	hint := m.styleHint.Render(hintText)
-	if status != "" {
+
+	hintText := "ctrl+a activity  tab focus  ctrl+g multiline  enter send  ctrl+c quit"
+	if m.showDetails {
+		hintText = "ctrl+a hide activity  tab focus  esc close  j/k↑/↓ select  e/enter expand  pgup/pgdn scroll details  ctrl+t telemetry  ctrl+g multiline  ctrl+o send (multiline)"
+	}
+	footerW := max(20, m.width-2)
+	hintRaw := hintText + "  focus: " + focusName
+	hint := m.styleHint.Render(wordwrap.String(hintRaw, footerW))
+	if statusRaw != "" {
+		status := m.styleHint.Render(wordwrap.String(statusRaw, footerW))
 		return box + "\n" + status + "\n" + hint
 	}
 	return box + "\n" + hint
@@ -576,7 +681,7 @@ func (m Model) renderStatusLine() string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return m.styleHint.Render("last: " + strings.Join(parts, " • "))
+	return "last: " + strings.Join(parts, " • ")
 }
 
 func (m *Model) toggleMultiline() {
@@ -640,12 +745,16 @@ func (m *Model) appendDetails(line string) {
 
 func (m *Model) addTranscriptItem(it transcriptItem) {
 	wasAtBottom := m.transcript.AtBottom()
+	wasEmpty := len(m.transcriptItems) == 0
 
 	m.transcriptItems = append(m.transcriptItems, it)
 	m.rebuildTranscript()
 	// If the user was at the bottom, keep them there (chat behavior). Otherwise,
 	// preserve their scroll position.
-	if wasAtBottom {
+	if wasEmpty {
+		// For the first item, keep the top visible (avoid "first message is cut off").
+		m.transcript.SetYOffset(0)
+	} else if wasAtBottom {
 		m.transcript.GotoBottom()
 	}
 }
