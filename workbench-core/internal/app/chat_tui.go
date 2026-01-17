@@ -267,9 +267,10 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		TraceStore:     traceStore,
 	}
 
+	builtinInvokers := tools.BuiltinInvokerRegistry(builtinCfg)
 	runner := tools.Runner{
 		Results:      resultsStore,
-		ToolRegistry: tools.BuiltinInvokerRegistry(builtinCfg),
+		ToolRegistry: builtinInvokers,
 	}
 
 	executor := &agent.HostOpExecutor{
@@ -461,6 +462,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		profileEval:      agent.DefaultProfileEvaluator(),
 		model:            model,
 		workdirBase:      workdirRes.BaseDir,
+		builtinInvokers:  builtinInvokers,
 		artifacts:        artifactIndex,
 		constructor:      constructor,
 	}
@@ -503,12 +505,123 @@ func (r *lazyNewSessionTurnRunner) RunTurn(ctx context.Context, userMsg string) 
 	if strings.TrimSpace(userMsg) == "" {
 		return "", nil
 	}
+
+	// Slash commands are host-side commands and should not create a new session/run.
+	if handled, err := r.handleHostCommandPreInit(userMsg); handled {
+		return "", err
+	}
 	if !r.initialized {
 		if err := r.initForFirstTurn(userMsg); err != nil {
 			return "", err
 		}
 	}
 	return r.engine.RunTurn(ctx, userMsg)
+}
+
+func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (handled bool, err error) {
+	line := strings.TrimSpace(userMsg)
+	if !strings.HasPrefix(line, "/") {
+		return false, nil
+	}
+	boolp := func(b bool) *bool { return &b }
+
+	cmd, arg := splitSlashCommand(line)
+	switch cmd {
+	case "cd":
+		cur, err := resolveWorkDir(r.opts.WorkDir)
+		if err != nil {
+			return true, err
+		}
+		next, err := resolveWorkDirChange(cur, arg)
+		if err != nil {
+			r.emitPreInit(events.Event{
+				Type:    "workdir.error",
+				Message: "Workdir change failed",
+				Data: map[string]string{
+					"from": cur,
+					"to":   strings.TrimSpace(arg),
+					"err":  err.Error(),
+				},
+				Store:   boolp(false),
+				Console: boolp(false),
+			})
+			return true, nil
+		}
+		r.opts.WorkDir = next
+		r.emitPreInit(events.Event{
+			Type:    "workdir.changed",
+			Message: "Workdir changed",
+			Data: map[string]string{
+				"from": cur,
+				"to":   next,
+			},
+			Store:   boolp(false),
+			Console: boolp(false),
+		})
+		return true, nil
+	case "pwd", "workdir":
+		if cmd == "workdir" && strings.TrimSpace(arg) != "" {
+			// /workdir <path> behaves like /cd <path>.
+			cur, err := resolveWorkDir(r.opts.WorkDir)
+			if err != nil {
+				return true, err
+			}
+			next, err := resolveWorkDirChange(cur, arg)
+			if err != nil {
+				r.emitPreInit(events.Event{
+					Type:    "workdir.error",
+					Message: "Workdir change failed",
+					Data: map[string]string{
+						"from": cur,
+						"to":   strings.TrimSpace(arg),
+						"err":  err.Error(),
+					},
+					Store:   boolp(false),
+					Console: boolp(false),
+				})
+				return true, nil
+			}
+			r.opts.WorkDir = next
+			r.emitPreInit(events.Event{
+				Type:    "workdir.changed",
+				Message: "Workdir changed",
+				Data: map[string]string{
+					"from": cur,
+					"to":   next,
+				},
+				Store:   boolp(false),
+				Console: boolp(false),
+			})
+			return true, nil
+		}
+		cur, err := resolveWorkDir(r.opts.WorkDir)
+		if err != nil {
+			return true, err
+		}
+		r.emitPreInit(events.Event{
+			Type:    "workdir.pwd",
+			Message: "Current workdir",
+			Data: map[string]string{
+				"workdir": cur,
+			},
+			Store:   boolp(false),
+			Console: boolp(false),
+		})
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+func (r *lazyNewSessionTurnRunner) emitPreInit(ev events.Event) {
+	if r == nil || r.evCh == nil {
+		return
+	}
+	select {
+	case r.evCh <- ev:
+	default:
+		// Best-effort: pre-run commands should never block the UI.
+	}
 }
 
 // ReadVFS reads a virtual filesystem path from the currently active run.
@@ -685,9 +798,10 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		TraceStore:     traceStore,
 	}
 
+	builtinInvokers := tools.BuiltinInvokerRegistry(builtinCfg)
 	runner := tools.Runner{
 		Results:      resultsStore,
-		ToolRegistry: tools.BuiltinInvokerRegistry(builtinCfg),
+		ToolRegistry: builtinInvokers,
 	}
 
 	executor := &agent.HostOpExecutor{
@@ -878,6 +992,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		profileEval:      agent.DefaultProfileEvaluator(),
 		model:            model,
 		workdirBase:      workdirRes.BaseDir,
+		builtinInvokers:  builtinInvokers,
 		artifacts:        artifactIndex,
 		constructor:      constructor,
 	}
@@ -913,8 +1028,13 @@ type tuiTurnRunner struct {
 	profileEval  *agent.ProfileEvaluator
 
 	workdirBase string
-	artifacts   *ArtifactIndex
-	constructor *agent.ContextConstructor
+	// builtinInvokers is the in-memory registry used by tool.run for builtins.
+	//
+	// It is a map (reference type), so updating entries updates the runner behavior
+	// without reconstructing the entire agent loop.
+	builtinInvokers tools.MapRegistry
+	artifacts       *ArtifactIndex
+	constructor     *agent.ContextConstructor
 
 	turn         int
 	conversation []types.LLMMessage
@@ -966,6 +1086,14 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 
 	if strings.HasPrefix(strings.TrimSpace(userMsg), ":publish") {
 		return r.handlePublish(userMsg)
+	}
+
+	// Slash commands are host-side commands and do not call the agent.
+	//
+	// These commands operate on the host's /workdir mount and are safe to run
+	// during an interactive session (no restart required).
+	if r.handleSlashCommand(userMsg) {
+		return "", nil
 	}
 
 	// Refresh session state and inject it so the agent stays coherent across runs.
@@ -1262,6 +1390,116 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	// NOTE: Do not emit agent.final here. The TUI renders the final response as a
 	// chat message, not as an event line.
 	return final, nil
+}
+
+func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (handled bool) {
+	if r == nil || r.fs == nil {
+		return false
+	}
+	line := strings.TrimSpace(userMsg)
+	if !strings.HasPrefix(line, "/") {
+		return false
+	}
+	boolp := func(b bool) *bool { return &b }
+
+	cmd, arg := splitSlashCommand(line)
+	switch cmd {
+	case "cd":
+		from := strings.TrimSpace(r.workdirBase)
+		if from == "" {
+			// Should not happen: /workdir is always mounted for a run.
+			from = "."
+		}
+		to, err := resolveWorkDirChange(from, arg)
+		if err != nil {
+			r.mustEmit(context.Background(), events.Event{
+				Type:    "workdir.error",
+				Message: "Workdir change failed",
+				Data: map[string]string{
+					"from": from,
+					"to":   strings.TrimSpace(arg),
+					"err":  err.Error(),
+				},
+				Console: boolp(false),
+			})
+			return true
+		}
+
+		workdirRes, err := resources.NewWorkdirResource(to)
+		if err != nil {
+			r.mustEmit(context.Background(), events.Event{
+				Type:    "workdir.error",
+				Message: "Workdir change failed",
+				Data: map[string]string{
+					"from": from,
+					"to":   to,
+					"err":  err.Error(),
+				},
+				Console: boolp(false),
+			})
+			return true
+		}
+
+		// Rebind /workdir to the new root. All file operations immediately target the new directory.
+		r.fs.Mount(vfs.MountWorkdir, workdirRes)
+		r.workdirBase = workdirRes.BaseDir
+		r.opts.WorkDir = workdirRes.BaseDir
+
+		// Update builtin sandbox roots (builtin.bash + builtin.ripgrep) to follow the active workdir.
+		if r.builtinInvokers != nil {
+			r.builtinInvokers[types.ToolID("builtin.bash")] = tools.NewBuiltinBashInvoker(workdirRes.BaseDir)
+			r.builtinInvokers[types.ToolID("builtin.ripgrep")] = tools.NewBuiltinRipgrepInvoker(workdirRes.BaseDir)
+		}
+
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "workdir.changed",
+			Message: "Workdir changed",
+			Data: map[string]string{
+				"from": from,
+				"to":   workdirRes.BaseDir,
+			},
+			Console: boolp(false),
+		})
+		return true
+
+	case "pwd", "workdir":
+		// /workdir with no args behaves like /pwd.
+		// /workdir <path> is an alias for /cd <path>.
+		if cmd == "workdir" && strings.TrimSpace(arg) != "" {
+			return r.handleSlashCommand("/cd " + arg)
+		}
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "workdir.pwd",
+			Message: "Current workdir",
+			Data: map[string]string{
+				"workdir": strings.TrimSpace(r.workdirBase),
+			},
+			Console: boolp(false),
+		})
+		return true
+	default:
+		return false
+	}
+}
+
+func splitSlashCommand(line string) (cmd string, arg string) {
+	line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "/"))
+	if line == "" {
+		return "", ""
+	}
+	parts := strings.Fields(line)
+	if len(parts) == 0 {
+		return "", ""
+	}
+	cmd = strings.TrimSpace(parts[0])
+	if len(parts) == 1 {
+		return cmd, ""
+	}
+	i := strings.Index(line, parts[0])
+	if i >= 0 {
+		arg = strings.TrimSpace(line[i+len(parts[0]):])
+	}
+	return cmd, arg
 }
 
 func (r *tuiTurnRunner) handlePublish(userMsg string) (string, error) {

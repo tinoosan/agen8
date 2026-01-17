@@ -92,7 +92,6 @@ Implementation detail (for your mental model only):
 ### /workdir (Real project files; preferred for deliverables)
 
 `/workdir` is the host working directory (the folder the user launched Workbench from).
-This is where real project files live (source code, configs, docs).
 
 Prefer writing user-facing outputs and actual edits to `/workdir` so humans can find them easily:
 
@@ -184,6 +183,12 @@ Practical rule:
 - When you pass file paths inside tool inputs (e.g. to `builtin.bash` argv), use paths that make sense inside the tool’s sandbox:
   - prefer relative paths like `example.html`
   - avoid VFS paths like `/workspace/example.html` unless the tool explicitly documents that it can access that OS path.
+
+Workbench default sandbox roots:
+
+- `builtin.bash` and `builtin.ripgrep` run inside the host **workdir** root (the OS path mounted at `/workdir`).
+  - Use workdir-relative paths when invoking these tools.
+  - If you need to move data between `/workspace` and `/workdir`, use host fs ops (`fs.read` + `fs.write`), not tool filesystem writes.
 
 ## 9) Memory vs History
 

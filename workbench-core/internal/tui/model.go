@@ -88,6 +88,7 @@ type Model struct {
 
 	sessionTitle  string
 	workflowTitle string
+	workdir       string
 
 	lastTurnTokensIn  int
 	lastTurnTokensOut int
@@ -524,8 +525,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.turnTitle = ""
 			return m, nil
 		}
-		m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: strings.TrimSpace(msg.final)})
-		m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+		if strings.TrimSpace(msg.final) != "" {
+			m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: strings.TrimSpace(msg.final)})
+			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+		}
 		m.scrollToCurrentTurnStart()
 		m.turnTitle = ""
 		return m, nil
@@ -633,6 +636,22 @@ func (m *Model) onEvent(ev events.Event) {
 			m.sessionTitle = v
 		}
 	}
+	// Workdir is discovered via host.mounted and updated via /cd at runtime.
+	if ev.Type == "host.mounted" {
+		if wd := strings.TrimSpace(ev.Data["/workdir"]); wd != "" {
+			m.workdir = wd
+		}
+	}
+	if ev.Type == "workdir.changed" {
+		if wd := strings.TrimSpace(ev.Data["to"]); wd != "" {
+			m.workdir = wd
+		}
+	}
+	if ev.Type == "workdir.pwd" {
+		if wd := strings.TrimSpace(ev.Data["workdir"]); wd != "" {
+			m.workdir = wd
+		}
+	}
 
 	// Chrome metrics only (never rendered as transcript lines).
 	switch ev.Type {
@@ -691,6 +710,27 @@ func (m *Model) onEvent(ev events.Event) {
 		m.pendingActionIdx = -1
 		m.pendingActionIsToolRun = false
 		m.rebuildTranscript()
+	default:
+		txt := strings.TrimSpace(rr.Text)
+		if txt == "" {
+			return
+		}
+		// Host-side command errors should appear as errors in the transcript.
+		if ev.Type == "workdir.error" {
+			m.addTranscriptItem(transcriptItem{kind: transcriptError, text: txt})
+			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+			return
+		}
+		comp := "✓ ok"
+		if ev.Type == "refs.ambiguous" || ev.Type == "refs.unresolved" {
+			comp = "✗"
+		}
+		m.addTranscriptItem(transcriptItem{
+			kind:              transcriptAction,
+			actionText:        txt,
+			actionCompletion:  comp,
+			actionIsCompleted: true,
+		})
 	}
 }
 

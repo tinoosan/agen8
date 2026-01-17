@@ -13,6 +13,57 @@ import (
 
 func (m *Model) observeActivityEvent(ev events.Event) {
 	switch ev.Type {
+	case "workdir.changed":
+		m.activitySeq++
+		id := fmt.Sprintf("act-%d", m.activitySeq)
+		now := time.Now()
+		fin := now
+
+		act := Activity{
+			ID:         id,
+			Kind:       "workdir.changed",
+			Title:      "Workdir changed",
+			Status:     ActivityOK,
+			StartedAt:  now,
+			FinishedAt: &fin,
+			Duration:   0,
+			From:       strings.TrimSpace(ev.Data["from"]),
+			To:         strings.TrimSpace(ev.Data["to"]),
+			Ok:         "true",
+		}
+		m.activities = append(m.activities, act)
+		m.activityIndexByID[id] = len(m.activities) - 1
+		m.refreshActivityList()
+		m.activityList.Select(len(m.activities) - 1)
+		m.refreshActivityDetail()
+		return
+
+	case "workdir.error":
+		m.activitySeq++
+		id := fmt.Sprintf("act-%d", m.activitySeq)
+		now := time.Now()
+		fin := now
+
+		act := Activity{
+			ID:         id,
+			Kind:       "workdir.changed",
+			Title:      "Workdir change failed",
+			Status:     ActivityError,
+			StartedAt:  now,
+			FinishedAt: &fin,
+			Duration:   0,
+			From:       strings.TrimSpace(ev.Data["from"]),
+			To:         strings.TrimSpace(ev.Data["to"]),
+			Ok:         "false",
+			Error:      strings.TrimSpace(ev.Data["err"]),
+		}
+		m.activities = append(m.activities, act)
+		m.activityIndexByID[id] = len(m.activities) - 1
+		m.refreshActivityList()
+		m.activityList.Select(len(m.activities) - 1)
+		m.refreshActivityDetail()
+		return
+
 	case "agent.op.request":
 		op := strings.TrimSpace(ev.Data["op"])
 		if op == "" {
@@ -146,6 +197,16 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 		b.WriteString(a.Kind)
 		b.WriteString("`\n")
 	}
+	if strings.TrimSpace(a.From) != "" {
+		b.WriteString("- From: `")
+		b.WriteString(a.From)
+		b.WriteString("`\n")
+	}
+	if strings.TrimSpace(a.To) != "" {
+		b.WriteString("- To: `")
+		b.WriteString(a.To)
+		b.WriteString("`\n")
+	}
 	if strings.TrimSpace(a.Path) != "" {
 		b.WriteString("- Path: `")
 		b.WriteString(a.Path)
@@ -259,6 +320,15 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 	var b strings.Builder
 
 	switch a.Kind {
+	case "workdir.changed":
+		if strings.TrimSpace(a.From) != "" || strings.TrimSpace(a.To) != "" {
+			b.WriteString("- from: `")
+			b.WriteString(strings.TrimSpace(a.From))
+			b.WriteString("`\n")
+			b.WriteString("- to: `")
+			b.WriteString(strings.TrimSpace(a.To))
+			b.WriteString("`\n")
+		}
 	case "tool.run":
 		if strings.TrimSpace(a.Command) != "" {
 			b.WriteString("- command:\n\n")

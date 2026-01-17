@@ -91,6 +91,11 @@ func (m Model) renderHeader() string {
 	if mid == "" {
 		mid = "interactive"
 	}
+	if wd := strings.TrimSpace(m.workdir); wd != "" {
+		// Keep the workdir visible but bounded.
+		wd = truncateMiddle(wd, max(16, m.width/3))
+		mid = mid + " · " + wd
+	}
 	mid = truncateMiddle(mid, max(16, m.width/2))
 	mid = m.styleHeaderMid.Render(mid)
 

@@ -118,6 +118,36 @@ func classifyEvent(ev events.Event) RenderResult {
 		}
 		return res
 
+	case "workdir.changed":
+		res.Class = RenderAction
+		from := strings.TrimSpace(ev.Data["from"])
+		to := strings.TrimSpace(ev.Data["to"])
+		if from != "" && to != "" {
+			res.Text = "Workdir changed: " + from + " → " + to
+		} else if to != "" {
+			res.Text = "Workdir: " + to
+		} else {
+			res.Text = "Workdir changed"
+		}
+		return res
+	case "workdir.pwd":
+		res.Class = RenderAction
+		wd := strings.TrimSpace(ev.Data["workdir"])
+		if wd == "" {
+			res.Text = "Workdir"
+		} else {
+			res.Text = "Workdir: " + wd
+		}
+		return res
+	case "workdir.error":
+		res.Class = RenderAction
+		if e := strings.TrimSpace(ev.Data["err"]); e != "" {
+			res.Text = "Workdir change failed: " + e
+		} else {
+			res.Text = "Workdir change failed"
+		}
+		return res
+
 	// Telemetry/Outcome are never rendered into the chat transcript.
 	// The inspector/details view still receives the raw JSON lines.
 	case "context.update", "context.constructor":

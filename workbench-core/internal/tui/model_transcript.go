@@ -23,8 +23,26 @@ func (m *Model) addTranscriptItem(it transcriptItem) {
 }
 
 func (m *Model) rebuildTranscript() {
-	w := max(40, m.transcript.Width)
-	contentW := max(20, w-8)
+	// Important: wrap content to the *actual* transcript viewport width.
+	//
+	// If we wrap to a larger width than the viewport, the terminal will soft-wrap
+	// long lines. When the wrapped line count exceeds the terminal height, the
+	// screen scrolls and the header appears to "disappear".
+	w := max(20, m.transcript.Width)
+
+	// Allocate inner widths so the *rendered* transcript never exceeds `w`,
+	// accounting for borders/padding and the "you>"/"agent>" prefixes.
+	//
+	// User box chrome:
+	//   - border: 1 left + 1 right
+	//   - padding: 1 left + 1 right
+	//   => 4 columns of overhead
+	//
+	// Agent box chrome:
+	//   - padding: 1 left + 1 right
+	//   => 2 columns of overhead
+	userInnerW := max(20, w-4-len("you> "))
+	agentInnerW := max(20, w-2-len("agent> "))
 
 	lines := make([]string, 0, len(m.transcriptItems))
 	startLines := make([]int, 0, len(m.transcriptItems))
@@ -37,7 +55,7 @@ func (m *Model) rebuildTranscript() {
 			lineNo++
 		case transcriptUser:
 			// Render user text as markdown so pasted tasks and lists are readable.
-			body := m.styleUserLabel.Render("you> ") + strings.TrimRight(m.renderer.RenderMarkdown(it.text, contentW), "\n")
+			body := m.styleUserLabel.Render("you> ") + strings.TrimRight(m.renderer.RenderMarkdown(it.text, userInnerW), "\n")
 			lines = append(lines, m.styleUserBox.Render(body))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptAgent:
@@ -45,13 +63,13 @@ func (m *Model) rebuildTranscript() {
 			//
 			// Important: do not prefix "agent>" inside the markdown source, otherwise
 			// fenced blocks (```json) stop being recognized by the markdown parser.
-			rendered := strings.TrimRight(m.renderer.RenderMarkdown(strings.TrimSpace(it.text), contentW), "\n")
+			rendered := strings.TrimRight(m.renderer.RenderMarkdown(strings.TrimSpace(it.text), agentInnerW), "\n")
 			rendered = prefixFirstLine(rendered, "agent> ")
 			body := m.styleAgent.Render(rendered)
 			lines = append(lines, m.styleAgentBox.Render(body))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptError:
-			lines = append(lines, m.styleError.Render(wrapText(it.text, contentW)))
+			lines = append(lines, m.styleError.Render(wrapText(it.text, max(20, w-4))))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptAction:
 			prefix := "• "

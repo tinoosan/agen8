@@ -44,6 +44,8 @@ type Activity struct {
 	Duration   time.Duration
 
 	// Inputs are the relevant operation inputs. Keep small and readable.
+	From      string
+	To        string
 	Path      string
 	MaxBytes  string
 	ToolID    string
