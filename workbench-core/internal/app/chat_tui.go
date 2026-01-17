@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/tui"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // RunNewChatTUI starts the TUI immediately, but defers creating a new session/run
@@ -175,6 +177,15 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 
 	fs := vfs.NewFS()
 
+	workdirAbs, err := resolveWorkDir(opts.WorkDir)
+	if err != nil {
+		return err
+	}
+	workdirRes, err := resources.NewWorkdirResource(workdirAbs)
+	if err != nil {
+		return fmt.Errorf("create workdir: %w", err)
+	}
+
 	workspace, err := resources.NewRunWorkspace(run.RunId)
 	if err != nil {
 		return fmt.Errorf("create workspace: %w", err)
@@ -220,6 +231,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 	}
 
 	fs.Mount(vfs.MountWorkspace, workspace)
+	fs.Mount(vfs.MountWorkdir, workdirRes)
 	fs.Mount(vfs.MountResults, resultsRes)
 	fs.Mount(vfs.MountTrace, traceRes)
 	fs.Mount(vfs.MountTools, toolsResource)
@@ -232,6 +244,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		Message: "Mounted VFS resources",
 		Data: map[string]string{
 			"/workspace": workspace.BaseDir,
+			"/workdir":   workdirRes.BaseDir,
 			"/results":   "(virtual)",
 			"/trace":     traceRes.BaseDir,
 			"/tools":     "(virtual)",
@@ -242,15 +255,16 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		Console: boolp(false),
 	})
 
-	absWorkspaceRoot, err := filepath.Abs(workspace.BaseDir)
+	absWorkdirRoot, err := filepath.Abs(workdirRes.BaseDir)
 	if err != nil {
-		return fmt.Errorf("resolve workspace root: %w", err)
+		return fmt.Errorf("resolve workdir root: %w", err)
 	}
 
 	traceStore := store.DiskTraceStore{Dir: traceRes.BaseDir}
 	builtinCfg := tools.BuiltinConfig{
-		BashRootDir: absWorkspaceRoot,
-		TraceStore:  traceStore,
+		BashRootDir:    absWorkdirRoot,
+		RipgrepRootDir: absWorkdirRoot,
+		TraceStore:     traceStore,
 	}
 
 	runner := tools.Runner{
@@ -313,6 +327,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 			mustEmit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
 		},
 	}
+	artifactIndex := newArtifactIndex()
 
 	var updater *agent.ContextUpdater
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
@@ -366,6 +381,9 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 			StoreData: map[string]string{"op": req.Op, "path": req.Path, "toolId": req.ToolID.String(), "actionId": req.ActionID},
 		})
 		resp := executor.Exec(ctx, req)
+		if resp.Ok && (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) {
+			artifactIndex.ObserveWrite(req.Path)
+		}
 		if updater != nil {
 			updater.ObserveHostOp(req, resp)
 		}
@@ -442,6 +460,9 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		memEval:          agent.DefaultMemoryEvaluator(),
 		profileEval:      agent.DefaultProfileEvaluator(),
 		model:            model,
+		workdirBase:      workdirRes.BaseDir,
+		artifacts:        artifactIndex,
+		constructor:      constructor,
 	}
 
 	err = tui.Run(runCtx, engine, evCh)
@@ -574,6 +595,15 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 
 	fs := vfs.NewFS()
 
+	workdirAbs, err := resolveWorkDir(r.opts.WorkDir)
+	if err != nil {
+		return err
+	}
+	workdirRes, err := resources.NewWorkdirResource(workdirAbs)
+	if err != nil {
+		return fmt.Errorf("create workdir: %w", err)
+	}
+
 	workspace, err := resources.NewRunWorkspace(run.RunId)
 	if err != nil {
 		return fmt.Errorf("create workspace: %w", err)
@@ -619,6 +649,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	}
 
 	fs.Mount(vfs.MountWorkspace, workspace)
+	fs.Mount(vfs.MountWorkdir, workdirRes)
 	fs.Mount(vfs.MountResults, resultsRes)
 	fs.Mount(vfs.MountTrace, traceRes)
 	fs.Mount(vfs.MountTools, toolsResource)
@@ -631,6 +662,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		Message: "Mounted VFS resources",
 		Data: map[string]string{
 			"/workspace": workspace.BaseDir,
+			"/workdir":   workdirRes.BaseDir,
 			"/results":   "(virtual)",
 			"/trace":     traceRes.BaseDir,
 			"/tools":     "(virtual)",
@@ -641,15 +673,16 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		Console: boolp(false),
 	})
 
-	absWorkspaceRoot, err := filepath.Abs(workspace.BaseDir)
+	absWorkdirRoot, err := filepath.Abs(workdirRes.BaseDir)
 	if err != nil {
-		return fmt.Errorf("resolve workspace root: %w", err)
+		return fmt.Errorf("resolve workdir root: %w", err)
 	}
 
 	traceStore := store.DiskTraceStore{Dir: traceRes.BaseDir}
 	builtinCfg := tools.BuiltinConfig{
-		BashRootDir: absWorkspaceRoot,
-		TraceStore:  traceStore,
+		BashRootDir:    absWorkdirRoot,
+		RipgrepRootDir: absWorkdirRoot,
+		TraceStore:     traceStore,
 	}
 
 	runner := tools.Runner{
@@ -711,6 +744,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 			r.mustEmit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
 		},
 	}
+	artifactIndex := newArtifactIndex()
 
 	var updater *agent.ContextUpdater
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
@@ -764,6 +798,9 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 			StoreData: map[string]string{"op": req.Op, "path": req.Path, "toolId": req.ToolID.String(), "actionId": req.ActionID},
 		})
 		resp := executor.Exec(ctx, req)
+		if resp.Ok && (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) {
+			artifactIndex.ObserveWrite(req.Path)
+		}
 		if updater != nil {
 			updater.ObserveHostOp(req, resp)
 		}
@@ -840,6 +877,9 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		memEval:          agent.DefaultMemoryEvaluator(),
 		profileEval:      agent.DefaultProfileEvaluator(),
 		model:            model,
+		workdirBase:      workdirRes.BaseDir,
+		artifacts:        artifactIndex,
+		constructor:      constructor,
 	}
 	r.initialized = true
 	return nil
@@ -871,6 +911,10 @@ type tuiTurnRunner struct {
 	profileStore store.ProfileStore
 	memEval      *agent.MemoryEvaluator
 	profileEval  *agent.ProfileEvaluator
+
+	workdirBase string
+	artifacts   *ArtifactIndex
+	constructor *agent.ContextConstructor
 
 	turn         int
 	conversation []types.LLMMessage
@@ -920,6 +964,10 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		return "done", nil
 	}
 
+	if strings.HasPrefix(strings.TrimSpace(userMsg), ":publish") {
+		return r.handlePublish(userMsg)
+	}
+
 	// Refresh session state and inject it so the agent stays coherent across runs.
 	if sess, err := store.LoadSession(r.run.SessionID); err == nil {
 		if blk := agent.SessionContextBlock(sess); strings.TrimSpace(blk) != "" {
@@ -938,6 +986,52 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		Data:    map[string]string{"text": userMsg},
 		Console: boolp(false),
 	})
+
+	// Resolve @file references into bounded attachments for the constructor.
+	//
+	// This is what enables coding-agent workflows:
+	//   user: "Update @go.mod ..."
+	//   host: resolves /workdir/go.mod and injects it into the system prompt
+	refs, err := ResolveAtRefs(r.fs, r.workdirBase, r.artifacts, userMsg, 6, 48*1024, 12*1024)
+	if err != nil {
+		return "", err
+	}
+	if r.constructor != nil {
+		r.constructor.SetFileAttachments(refs.Attachments)
+		defer r.constructor.ClearFileAttachments()
+	}
+	if len(refs.AttachedSummaries) != 0 {
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "refs.attached",
+			Message: "Attached file references",
+			Data: map[string]string{
+				"count": strconv.Itoa(len(refs.AttachedSummaries)),
+				"files": strings.Join(refs.AttachedSummaries, ", "),
+			},
+			Store: boolp(false),
+		})
+	}
+	for tok, cands := range refs.Ambiguous {
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "refs.ambiguous",
+			Message: "Ambiguous @reference",
+			Data: map[string]string{
+				"token":      tok,
+				"candidates": strings.Join(cands, ", "),
+			},
+			Store: boolp(false),
+		})
+	}
+	if len(refs.Unresolved) != 0 {
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "refs.unresolved",
+			Message: "Unresolved @references",
+			Data: map[string]string{
+				"tokens": strings.Join(refs.Unresolved, ", "),
+			},
+			Store: boolp(false),
+		})
+	}
 
 	var turnUsage types.LLMUsage
 	r.agent.Hooks.OnLLMUsage = func(step int, usage types.LLMUsage) {
@@ -1168,4 +1262,93 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	// NOTE: Do not emit agent.final here. The TUI renders the final response as a
 	// chat message, not as an event line.
 	return final, nil
+}
+
+func (r *tuiTurnRunner) handlePublish(userMsg string) (string, error) {
+	if r == nil || r.fs == nil {
+		return "", fmt.Errorf("vfs not available")
+	}
+	boolp := func(b bool) *bool { return &b }
+
+	parts := strings.Fields(strings.TrimSpace(userMsg))
+	// parts[0] is ":publish"
+	src := ""
+	dst := ""
+	if len(parts) >= 2 {
+		src = parts[1]
+	}
+	if len(parts) >= 3 {
+		dst = parts[2]
+	}
+	if strings.TrimSpace(src) == "" {
+		src = "last"
+	}
+	srcVPath, ok := r.resolvePublishSource(src)
+	if !ok {
+		return "", fmt.Errorf("publish: unknown source %q (use :publish <vfsPath> or :publish <artifactName>)", src)
+	}
+
+	dstVPath, err := r.publishToWorkdir(srcVPath, dst)
+	if err != nil {
+		return "", err
+	}
+	if r.artifacts != nil {
+		r.artifacts.RecordPublish(srcVPath, dstVPath)
+		r.artifacts.ObserveWrite(dstVPath)
+	}
+	r.mustEmit(context.Background(), events.Event{
+		Type:    "artifact.published",
+		Message: "Published artifact to workdir",
+		Data: map[string]string{
+			"source": srcVPath,
+			"dest":   dstVPath,
+		},
+		Store: boolp(false),
+	})
+	return "done", nil
+}
+
+func (r *tuiTurnRunner) resolvePublishSource(src string) (vpath string, ok bool) {
+	src = strings.TrimSpace(src)
+	if src == "" {
+		return "", false
+	}
+	if strings.HasPrefix(src, "/") {
+		return src, true
+	}
+	if r.artifacts == nil {
+		return "", false
+	}
+	return r.artifacts.Resolve(src)
+}
+
+func (r *tuiTurnRunner) publishToWorkdir(srcVPath string, dstRel string) (string, error) {
+	srcVPath = strings.TrimSpace(srcVPath)
+	if srcVPath == "" {
+		return "", fmt.Errorf("publish: source is required")
+	}
+	b, err := r.fs.Read(srcVPath)
+	if err != nil {
+		return "", fmt.Errorf("publish: read %s: %w", srcVPath, err)
+	}
+
+	dstRel = strings.TrimSpace(dstRel)
+	if dstRel == "" {
+		dstRel = path.Base(srcVPath)
+	}
+	clean, _, err := vfsutil.NormalizeResourceSubpath(dstRel)
+	if err != nil || clean == "" || clean == "." {
+		return "", fmt.Errorf("publish: invalid destination %q", dstRel)
+	}
+
+	dstVPath := "/workdir/" + clean
+	// Avoid overwriting existing files by default. If it exists, publish under
+	// "/workdir/.workbench/<name>".
+	if _, err := r.fs.Read(dstVPath); err == nil {
+		dstVPath = "/workdir/.workbench/" + clean
+	}
+	if err := r.fs.Write(dstVPath, b); err != nil {
+		return "", fmt.Errorf("publish: write %s: %w", dstVPath, err)
+	}
+	return dstVPath, nil
 }

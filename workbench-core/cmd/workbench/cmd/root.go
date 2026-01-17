@@ -15,6 +15,7 @@ import (
 
 var (
 	dataDir      string
+	workDir      string
 	maxContextB  int
 	defaultGoal  string
 	defaultTitle string
@@ -104,6 +105,7 @@ new run in that session (workspaces remain run-scoped).
 		}
 
 		opts := app.RunChatOptions{
+			WorkDir:               workDir,
 			MaxSteps:              maxSteps,
 			MaxTraceBytes:         maxTraceBytes,
 			MaxMemoryBytes:        maxMemoryBytes,
@@ -145,6 +147,8 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", config.DataDir, "base directory for runs/sessions (default: data)")
+	workDir = strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR"))
+	rootCmd.PersistentFlags().StringVar(&workDir, "workdir", workDir, "host working directory to mount at /workdir (default: current directory; env WORKBENCH_WORKDIR)")
 	rootCmd.PersistentFlags().IntVar(&maxContextB, "context-bytes", 8*1024, "run.maxBytesForContext (persisted in run.json)")
 	rootCmd.PersistentFlags().StringVar(&defaultTitle, "title", "workbench", "title for new sessions (workbench only)")
 	rootCmd.PersistentFlags().StringVar(&defaultGoal, "goal", "interactive chat", "initial goal for the run (workbench only)")

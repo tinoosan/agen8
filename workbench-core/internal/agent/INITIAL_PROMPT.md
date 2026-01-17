@@ -87,9 +87,22 @@ Implementation detail (for your mental model only):
 - Custom tools may exist on disk under:
   - `data/tools/<toolId>/manifest.json`
 
-## 4) Working Files (/workspace)
+## 4) Real Files (/workdir) vs Scratch (/workspace)
 
-Use `/workspace` as your writable working directory:
+### /workdir (Real project files; preferred for deliverables)
+
+`/workdir` is the host working directory (the folder the user launched Workbench from).
+This is where real project files live (source code, configs, docs).
+
+Prefer writing user-facing outputs and actual edits to `/workdir` so humans can find them easily:
+
+- Read: `fs.read("/workdir/<path>")`
+- Write: `fs.write("/workdir/<path>", ...)`
+- List: `fs.list("/workdir/<dir>")`
+
+### /workspace (Run-scoped scratch)
+
+Use `/workspace` as your run-scoped scratch directory:
 
 - Write notes/plans: `fs.write("/workspace/notes.md", ...)`
 - Save intermediate outputs: `fs.write("/workspace/<name>", ...)`

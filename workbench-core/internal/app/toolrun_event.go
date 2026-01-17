@@ -113,6 +113,42 @@ func toolRunOutputPreviewForEvent(toolID, actionID string, raw json.RawMessage) 
 		s := fmt.Sprintf("matches=%d", len(out.Matches))
 		s2, _ := capBytes(s, maxToolRunOutputPreviewBytes)
 		return s2
+
+	case "builtin.http":
+		if strings.TrimSpace(actionID) != "fetch" {
+			break
+		}
+		var out struct {
+			Status        int    `json:"status"`
+			FinalURL      string `json:"finalUrl"`
+			Body          string `json:"body"`
+			BodyTruncated bool   `json:"bodyTruncated"`
+			BodyPath      string `json:"bodyPath"`
+			Warning       string `json:"warning"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			break
+		}
+		s := fmt.Sprintf("status=%d", out.Status)
+		if strings.TrimSpace(out.FinalURL) != "" {
+			s += " url=" + previewText(out.FinalURL, 200)
+		}
+		if strings.TrimSpace(out.Warning) != "" {
+			s += " warning=" + previewText(out.Warning, 200)
+		}
+		body := strings.TrimSpace(out.Body)
+		if body != "" {
+			s += " body=" + previewText(body, 300)
+			if out.BodyTruncated && out.BodyPath != "" {
+				s += " (full=" + out.BodyPath + ")"
+			} else if out.BodyTruncated {
+				s += " (truncated)"
+			}
+		} else if out.BodyPath != "" {
+			s += " bodyPath=" + out.BodyPath
+		}
+		s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
+		return s2
 	}
 
 	// Generic fallback: show a compact JSON string preview.

@@ -31,6 +31,11 @@ import (
 
 // RunChatOptions controls host-side limits and prompt injection behavior for RunChat.
 type RunChatOptions struct {
+	// WorkDir is the host working directory to mount at /workdir.
+	//
+	// If empty, the host uses os.Getwd() at startup.
+	WorkDir string
+
 	// MaxSteps caps how many agent loop steps are allowed per user turn.
 	MaxSteps int
 
@@ -64,6 +69,9 @@ type RunChatOptions struct {
 }
 
 func (o RunChatOptions) withDefaults() RunChatOptions {
+	if strings.TrimSpace(o.WorkDir) == "" {
+		o.WorkDir = strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR"))
+	}
 	if o.MaxSteps <= 0 {
 		o.MaxSteps = 200
 	}
@@ -193,6 +201,15 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 
 	fs := vfs.NewFS()
 
+	workdirAbs, err := resolveWorkDir(opts.WorkDir)
+	if err != nil {
+		return err
+	}
+	workdirRes, err := resources.NewWorkdirResource(workdirAbs)
+	if err != nil {
+		return fmt.Errorf("create workdir: %w", err)
+	}
+
 	workspace, err := resources.NewRunWorkspace(run.RunId)
 	if err != nil {
 		return fmt.Errorf("create workspace: %w", err)
@@ -244,6 +261,8 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 
 	fs.Mount(vfs.MountWorkspace, workspace)
 	log.Printf("mounted /workspace => %s", workspace.BaseDir)
+	fs.Mount(vfs.MountWorkdir, workdirRes)
+	log.Printf("mounted /workdir => %s", workdirRes.BaseDir)
 	fs.Mount(vfs.MountResults, resultsRes)
 	log.Printf("mounted /results => (virtual)")
 	fs.Mount(vfs.MountTrace, traceRes)
@@ -257,15 +276,16 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 	fs.Mount(vfs.MountHistory, historyRes)
 	log.Printf("mounted /history => %s", historyRes.BaseDir)
 
-	absWorkspaceRoot, err := filepath.Abs(workspace.BaseDir)
+	absWorkdirRoot, err := filepath.Abs(workdirRes.BaseDir)
 	if err != nil {
-		return fmt.Errorf("resolve workspace root: %w", err)
+		return fmt.Errorf("resolve workdir root: %w", err)
 	}
 
 	traceStore := store.DiskTraceStore{Dir: traceRes.BaseDir}
 	builtinCfg := tools.BuiltinConfig{
-		BashRootDir: absWorkspaceRoot,
-		TraceStore:  traceStore,
+		BashRootDir:    absWorkdirRoot,
+		RipgrepRootDir: absWorkdirRoot,
+		TraceStore:     traceStore,
 	}
 
 	runner := tools.Runner{

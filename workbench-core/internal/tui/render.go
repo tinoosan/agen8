@@ -78,6 +78,46 @@ func classifyEvent(ev events.Event) RenderResult {
 		res.Text = renderOpResponse(ev.Data)
 		return res
 
+	// Host-side helpers (user-facing, compact).
+	case "refs.attached":
+		res.Class = RenderAction
+		files := strings.TrimSpace(ev.Data["files"])
+		if files == "" {
+			res.Text = "Attached referenced files"
+		} else {
+			res.Text = "Attached " + files
+		}
+		return res
+	case "refs.ambiguous":
+		res.Class = RenderAction
+		tok := strings.TrimSpace(ev.Data["token"])
+		cands := strings.TrimSpace(ev.Data["candidates"])
+		if tok != "" && cands != "" {
+			res.Text = "Ambiguous @" + tok + " (candidates: " + cands + ")"
+		} else {
+			res.Text = "Ambiguous @reference"
+		}
+		return res
+	case "refs.unresolved":
+		res.Class = RenderAction
+		toks := strings.TrimSpace(ev.Data["tokens"])
+		if toks != "" {
+			res.Text = "Unresolved @references: " + toks
+		} else {
+			res.Text = "Unresolved @references"
+		}
+		return res
+	case "artifact.published":
+		res.Class = RenderAction
+		src := strings.TrimSpace(ev.Data["source"])
+		dst := strings.TrimSpace(ev.Data["dest"])
+		if src != "" && dst != "" {
+			res.Text = "Published " + src + " → " + dst
+		} else {
+			res.Text = "Published artifact to workdir"
+		}
+		return res
+
 	// Telemetry/Outcome are never rendered into the chat transcript.
 	// The inspector/details view still receives the raw JSON lines.
 	case "context.update", "context.constructor":
@@ -200,6 +240,27 @@ func renderToolRunTranscript(toolID, actionID, input string) string {
 		}
 		argv = append(argv, paths...)
 		return shellJoin(argv)
+
+	case "builtin.http":
+		if actionID != "fetch" {
+			return fmt.Sprintf("%s/%s", toolID, actionID)
+		}
+		var in struct {
+			URL    string `json:"url"`
+			Method string `json:"method"`
+		}
+		if err := json.Unmarshal([]byte(input), &in); err != nil {
+			return fmt.Sprintf("%s/%s", toolID, actionID)
+		}
+		u := strings.TrimSpace(in.URL)
+		if u == "" {
+			return fmt.Sprintf("%s/%s", toolID, actionID)
+		}
+		m := strings.ToUpper(strings.TrimSpace(in.Method))
+		if m == "" {
+			m = "GET"
+		}
+		return m + " " + u
 	}
 
 	// Default: don't leak opaque tool inputs into chat.
@@ -284,6 +345,31 @@ func renderToolRunInspector(toolID, actionID, input string) string {
 		args := fmt.Sprintf("query=%s paths=%s", quoteShort(query, 60), listPreview(paths, 3))
 		cmd := shellJoin(argv)
 		return fmt.Sprintf("%s %s cmd=%s", base, args, truncateRight(cmd, 140))
+
+	case "builtin.http":
+		if actionID != "fetch" {
+			break
+		}
+		var in struct {
+			URL      string `json:"url"`
+			Method   string `json:"method"`
+			MaxBytes int    `json:"maxBytes"`
+		}
+		if err := json.Unmarshal([]byte(input), &in); err != nil {
+			break
+		}
+		u := strings.TrimSpace(in.URL)
+		m := strings.ToUpper(strings.TrimSpace(in.Method))
+		if m == "" {
+			m = "GET"
+		}
+		if u == "" {
+			break
+		}
+		if in.MaxBytes > 0 {
+			return fmt.Sprintf("%s %s %s maxBytes=%d", base, m, truncateRight(u, 140), in.MaxBytes)
+		}
+		return fmt.Sprintf("%s %s %s", base, m, truncateRight(u, 160))
 
 	case "builtin.format":
 		// Avoid echoing large text payloads; show only metadata.

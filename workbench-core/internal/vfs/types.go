@@ -7,6 +7,13 @@ const (
 	// Paths under /workspace are readable and writable by the agent.
 	MountWorkspace = "workspace"
 
+	// MountWorkdir is the mount name for the host working directory.
+	//
+	// /workdir maps to the OS directory the user launched Workbench from (or a flag override).
+	// It is intended for "real project files" so the agent can operate on them
+	// while still keeping /workspace as a run-scoped scratch area.
+	MountWorkdir = "workdir"
+
 	// MountTrace is the mount name for the read-only event feed.
 	// The agent can poll /trace/events.since/<offset> for new events.
 	MountTrace = "trace"

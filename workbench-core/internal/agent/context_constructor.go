@@ -67,6 +67,15 @@ type ContextConstructor struct {
 	LastResp    *types.HostOpResponse
 	LastToolRun *LastToolRun
 
+	// FileAttachments are bounded file snapshots resolved by the host for the current
+	// user turn (e.g. @go.mod, @cmd/workbench/main.go).
+	//
+	// The host is responsible for:
+	// - resolving tokens to VFS paths
+	// - bounding bytes per file / total bytes
+	// - setting/clearing this slice per user turn
+	FileAttachments []FileAttachment
+
 	traceCursor   store.TraceCursor
 	historyCursor store.HistoryCursor
 
@@ -116,6 +125,16 @@ type ConstructorManifest struct {
 		Truncated     bool   `json:"truncated"`
 		Reason        string `json:"reason"`
 	} `json:"sources"`
+
+	References []struct {
+		Token         string `json:"token"`
+		Path          string `json:"path"`
+		DisplayName   string `json:"displayName"`
+		BytesTotal    int    `json:"bytesTotal"`
+		BytesIncluded int    `json:"bytesIncluded"`
+		Truncated     bool   `json:"truncated"`
+		Reason        string `json:"reason"`
+	} `json:"references,omitempty"`
 }
 
 // historyLine is the minimal schema written to /history/history.jsonl by HistorySink.
@@ -145,6 +164,29 @@ func (c *ContextConstructor) ObserveHostOp(req types.HostOpRequest, resp types.H
 			CallID:   resp.ToolResponse.CallID,
 		}
 	}
+}
+
+// SetFileAttachments sets the current turn's referenced file attachments.
+//
+// Callers should treat these as ephemeral: set them before running the agent loop
+// for a user turn, and clear them after the turn completes.
+func (c *ContextConstructor) SetFileAttachments(atts []FileAttachment) {
+	if c == nil {
+		return
+	}
+	if len(atts) == 0 {
+		c.FileAttachments = nil
+		return
+	}
+	c.FileAttachments = append([]FileAttachment(nil), atts...)
+}
+
+// ClearFileAttachments removes any current turn file attachments.
+func (c *ContextConstructor) ClearFileAttachments() {
+	if c == nil {
+		return
+	}
+	c.FileAttachments = nil
 }
 
 // SystemPrompt implements ContextSource.
@@ -250,6 +292,47 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 		Reason:        "run-scoped working memory",
 	})
 
+	// Turn-scoped file attachments (resolved from @references in the user message).
+	if len(c.FileAttachments) != 0 {
+		system += "\n\n## Referenced Files\n\n"
+		for _, att := range c.FileAttachments {
+			name := strings.TrimSpace(att.DisplayName)
+			if name == "" {
+				name = strings.TrimSpace(att.Token)
+			}
+			if name == "" {
+				name = "<file>"
+			}
+			system += "### " + name + "\n\n"
+			system += "- path: `" + strings.TrimSpace(att.VPath) + "`\n"
+			if att.BytesTotal != 0 {
+				system += "- bytes: " + strconv.Itoa(att.BytesIncluded) + " (of " + strconv.Itoa(att.BytesTotal) + ")\n"
+			}
+			if att.Truncated {
+				system += "- truncated: true\n"
+			}
+			system += "\n" + fencedCodeForPath(att.VPath, att.Content) + "\n"
+
+			manifest.References = append(manifest.References, struct {
+				Token         string `json:"token"`
+				Path          string `json:"path"`
+				DisplayName   string `json:"displayName"`
+				BytesTotal    int    `json:"bytesTotal"`
+				BytesIncluded int    `json:"bytesIncluded"`
+				Truncated     bool   `json:"truncated"`
+				Reason        string `json:"reason"`
+			}{
+				Token:         strings.TrimSpace(att.Token),
+				Path:          strings.TrimSpace(att.VPath),
+				DisplayName:   strings.TrimSpace(att.DisplayName),
+				BytesTotal:    att.BytesTotal,
+				BytesIncluded: att.BytesIncluded,
+				Truncated:     att.Truncated,
+				Reason:        "user @reference attachment",
+			})
+		}
+	}
+
 	// Last op snapshot (cheap, high-signal).
 	if c.LastOp != nil {
 		system += "\n\n## Last Host Op\n\n" + c.summarizeLastOp(failureBump) + "\n"
@@ -318,6 +401,47 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	}
 
 	return system, nil
+}
+
+func fencedCodeForPath(vpath string, content string) string {
+	lang := guessFenceLang(vpath)
+	content = strings.TrimRight(content, "\n")
+	// Avoid accidental fence termination in content; fall back to plain fence.
+	if strings.Contains(content, "```") {
+		lang = ""
+	}
+	if lang != "" {
+		return "```" + lang + "\n" + content + "\n```"
+	}
+	return "```\n" + content + "\n```"
+}
+
+func guessFenceLang(vpath string) string {
+	low := strings.ToLower(strings.TrimSpace(vpath))
+	switch {
+	case strings.HasSuffix(low, ".go"):
+		return "go"
+	case strings.HasSuffix(low, ".mod"):
+		return "go"
+	case strings.HasSuffix(low, ".sum"):
+		return "txt"
+	case strings.HasSuffix(low, ".json"):
+		return "json"
+	case strings.HasSuffix(low, ".yaml"), strings.HasSuffix(low, ".yml"):
+		return "yaml"
+	case strings.HasSuffix(low, ".md"):
+		return "md"
+	case strings.HasSuffix(low, ".sh"):
+		return "sh"
+	case strings.HasSuffix(low, ".ts"):
+		return "ts"
+	case strings.HasSuffix(low, ".js"):
+		return "js"
+	case strings.HasSuffix(low, ".html"), strings.HasSuffix(low, ".htm"):
+		return "html"
+	default:
+		return ""
+	}
 }
 
 func (c *ContextConstructor) summarizeLastOp(failureBump bool) string {
