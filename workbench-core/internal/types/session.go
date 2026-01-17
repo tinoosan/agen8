@@ -27,6 +27,16 @@ type Session struct {
 	// Title is an optional short label for the session.
 	Title string `json:"title,omitempty"`
 
+	// ActiveModel is the model identifier that should be used when (re)starting runs
+	// in this session, unless overridden by host config or a runtime /model command.
+	//
+	// This is session-scoped on purpose:
+	// - It makes "resume session" deterministic.
+	// - It keeps model provenance stable across sub-agent runs.
+	//
+	// Example: "openai/gpt-5.2".
+	ActiveModel string `json:"activeModel,omitempty"`
+
 	// CreatedAt is when the session was created.
 	CreatedAt *time.Time `json:"createdAt"`
 

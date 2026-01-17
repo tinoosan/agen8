@@ -16,6 +16,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/config"
+	"github.com/tinoosan/workbench-core/internal/cost"
 	"github.com/tinoosan/workbench-core/internal/events"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/llm"
@@ -154,9 +155,23 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 	boolp := func(b bool) *bool { return &b }
 
 	sessionTitle := ""
+	sessionModel := ""
 	if sess, err := store.LoadSession(run.SessionID); err == nil {
 		sessionTitle = strings.TrimSpace(sess.Title)
+		sessionModel = strings.TrimSpace(sess.ActiveModel)
 	}
+
+	model := strings.TrimSpace(opts.Model)
+	if model == "" {
+		model = sessionModel
+	}
+	if model == "" {
+		model = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
+	}
+	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" || model == "" {
+		return fmt.Errorf("OPENROUTER_API_KEY and OPENROUTER_MODEL (or --model or session.activeModel) are required")
+	}
+	opts.Model = model
 
 	mustEmit(context.Background(), events.Event{
 		Type:    "run.started",
@@ -280,11 +295,8 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		MaxReadBytes:    16 * 1024,
 	}
 
-	model := strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
-	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" || model == "" {
-		return fmt.Errorf("OPENROUTER_API_KEY and OPENROUTER_MODEL are required")
-	}
 	historySink.Model = model
+	setHistoryModel := func(next string) { historySink.Model = strings.TrimSpace(next) }
 
 	run.Runtime = &types.RunRuntimeConfig{
 		DataDir:               config.DataDir,
@@ -299,6 +311,14 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		PriceOutPerMTokensUSD: opts.PriceOutPerMTokensUSD,
 	}
 	_ = store.SaveRun(run)
+
+	// Persist the active model at the session level so "resume session" is deterministic.
+	if sess, err := store.LoadSession(run.SessionID); err == nil {
+		if strings.TrimSpace(sess.ActiveModel) != model {
+			sess.ActiveModel = model
+			_ = store.SaveSession(sess)
+		}
+	}
 
 	client, err := llm.NewOpenRouterClientFromEnv()
 	if err != nil {
@@ -461,6 +481,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		memEval:          agent.DefaultMemoryEvaluator(),
 		profileEval:      agent.DefaultProfileEvaluator(),
 		model:            model,
+		setHistoryModel:  setHistoryModel,
 		workdirBase:      workdirRes.BaseDir,
 		builtinInvokers:  builtinInvokers,
 		artifacts:        artifactIndex,
@@ -507,8 +528,8 @@ func (r *lazyNewSessionTurnRunner) RunTurn(ctx context.Context, userMsg string) 
 	}
 
 	// Slash commands are host-side commands and should not create a new session/run.
-	if handled, err := r.handleHostCommandPreInit(userMsg); handled {
-		return "", err
+	if resp, handled, err := r.handleHostCommandPreInit(userMsg); handled {
+		return resp, err
 	}
 	if !r.initialized {
 		if err := r.initForFirstTurn(userMsg); err != nil {
@@ -518,19 +539,64 @@ func (r *lazyNewSessionTurnRunner) RunTurn(ctx context.Context, userMsg string) 
 	return r.engine.RunTurn(ctx, userMsg)
 }
 
-func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (handled bool, err error) {
+func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (resp string, handled bool, err error) {
 	line := strings.TrimSpace(userMsg)
 	if !strings.HasPrefix(line, "/") {
-		return false, nil
+		return "", false, nil
 	}
 	boolp := func(b bool) *bool { return &b }
 
 	cmd, arg := splitSlashCommand(line)
 	switch cmd {
+	case "model":
+		cur := strings.TrimSpace(r.opts.Model)
+		if cur == "" {
+			cur = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
+		}
+		next, out, ok := handleModelCommandPreInit(cur, r.opts.PricingFile, arg)
+		if !ok {
+			return "", false, nil
+		}
+		if strings.TrimSpace(out) != "" {
+			r.emitPreInit(events.Event{
+				Type:    "model.info",
+				Message: "Model",
+				Data: map[string]string{
+					"text": out,
+				},
+				Store:   boolp(false),
+				Console: boolp(false),
+			})
+			resp = out
+		}
+		if strings.TrimSpace(next) != "" && next != cur {
+			r.opts.Model = next
+			inPerM, outPerM, known, source := pricingForModel(next, r.opts.PricingFile)
+			if known {
+				r.opts.PriceInPerMTokensUSD = inPerM
+				r.opts.PriceOutPerMTokensUSD = outPerM
+			} else {
+				r.opts.PriceInPerMTokensUSD = 0
+				r.opts.PriceOutPerMTokensUSD = 0
+			}
+			r.emitPreInit(events.Event{
+				Type:    "model.changed",
+				Message: "Model changed",
+				Data: map[string]string{
+					"from":          cur,
+					"to":            next,
+					"pricingKnown":  fmtBool(known),
+					"pricingSource": source,
+				},
+				Store:   boolp(false),
+				Console: boolp(false),
+			})
+		}
+		return resp, true, nil
 	case "cd":
 		cur, err := resolveWorkDir(r.opts.WorkDir)
 		if err != nil {
-			return true, err
+			return "", true, err
 		}
 		next, err := resolveWorkDirChange(cur, arg)
 		if err != nil {
@@ -545,7 +611,7 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (han
 				Store:   boolp(false),
 				Console: boolp(false),
 			})
-			return true, nil
+			return "", true, nil
 		}
 		r.opts.WorkDir = next
 		r.emitPreInit(events.Event{
@@ -558,13 +624,13 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (han
 			Store:   boolp(false),
 			Console: boolp(false),
 		})
-		return true, nil
+		return "", true, nil
 	case "pwd", "workdir":
 		if cmd == "workdir" && strings.TrimSpace(arg) != "" {
 			// /workdir <path> behaves like /cd <path>.
 			cur, err := resolveWorkDir(r.opts.WorkDir)
 			if err != nil {
-				return true, err
+				return "", true, err
 			}
 			next, err := resolveWorkDirChange(cur, arg)
 			if err != nil {
@@ -579,7 +645,7 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (han
 					Store:   boolp(false),
 					Console: boolp(false),
 				})
-				return true, nil
+				return "", true, nil
 			}
 			r.opts.WorkDir = next
 			r.emitPreInit(events.Event{
@@ -592,11 +658,11 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (han
 				Store:   boolp(false),
 				Console: boolp(false),
 			})
-			return true, nil
+			return "", true, nil
 		}
 		cur, err := resolveWorkDir(r.opts.WorkDir)
 		if err != nil {
-			return true, err
+			return "", true, err
 		}
 		r.emitPreInit(events.Event{
 			Type:    "workdir.pwd",
@@ -607,9 +673,9 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (han
 			Store:   boolp(false),
 			Console: boolp(false),
 		})
-		return true, nil
+		return cur, true, nil
 	default:
-		return false, nil
+		return "", false, nil
 	}
 }
 
@@ -687,7 +753,17 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	}
 	boolp := func(b bool) *bool { return &b }
 
-	historySink.Model = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
+	model := strings.TrimSpace(r.opts.Model)
+	if model == "" {
+		model = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
+	}
+	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" || model == "" {
+		return fmt.Errorf("OPENROUTER_API_KEY and OPENROUTER_MODEL (or /model) are required")
+	}
+	r.opts.Model = model
+
+	historySink.Model = model
+	setHistoryModel := func(next string) { historySink.Model = strings.TrimSpace(next) }
 
 	r.mustEmit(context.Background(), events.Event{
 		Type:    "run.started",
@@ -700,6 +776,10 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		},
 		Console: boolp(false),
 	})
+
+	// Persist the session's active model as early as possible.
+	sess.ActiveModel = model
+	_ = store.SaveSession(sess)
 
 	traceRes, err := resources.NewTraceResource(run.RunId)
 	if err != nil {
@@ -809,11 +889,6 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		Runner:          &runner,
 		DefaultMaxBytes: 4096,
 		MaxReadBytes:    16 * 1024,
-	}
-
-	model := strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
-	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" || model == "" {
-		return fmt.Errorf("OPENROUTER_API_KEY and OPENROUTER_MODEL are required")
 	}
 
 	run.Runtime = &types.RunRuntimeConfig{
@@ -991,6 +1066,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		memEval:          agent.DefaultMemoryEvaluator(),
 		profileEval:      agent.DefaultProfileEvaluator(),
 		model:            model,
+		setHistoryModel:  setHistoryModel,
 		workdirBase:      workdirRes.BaseDir,
 		builtinInvokers:  builtinInvokers,
 		artifacts:        artifactIndex,
@@ -1019,6 +1095,7 @@ type tuiTurnRunner struct {
 	agent            *agent.Agent
 	baseSystemPrompt string
 	model            string
+	setHistoryModel  func(model string)
 
 	mustEmit func(ctx context.Context, ev events.Event)
 
@@ -1092,8 +1169,8 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	//
 	// These commands operate on the host's /workdir mount and are safe to run
 	// during an interactive session (no restart required).
-	if r.handleSlashCommand(userMsg) {
-		return "", nil
+	if resp, handled := r.handleSlashCommand(userMsg); handled {
+		return resp, nil
 	}
 
 	// Refresh session state and inject it so the agent stays coherent across runs.
@@ -1218,23 +1295,30 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 			},
 			Store: boolp(false),
 		})
-		if cost := estimateTurnCostUSD(turnUsage, r.opts.PriceInPerMTokensUSD, r.opts.PriceOutPerMTokensUSD); cost > 0 {
-			r.mustEmit(context.Background(), events.Event{
-				Type:    "llm.cost.total",
-				Message: "Turn cost estimate",
-				Data: map[string]string{
-					"turn":          strconv.Itoa(r.turn),
-					"input":         strconv.Itoa(turnUsage.InputTokens),
-					"output":        strconv.Itoa(turnUsage.OutputTokens),
-					"total":         strconv.Itoa(turnUsage.TotalTokens),
-					"costUsd":       fmtUSD(cost),
-					"priceInPerM":   fmtUSD(r.opts.PriceInPerMTokensUSD),
-					"priceOutPerM":  fmtUSD(r.opts.PriceOutPerMTokensUSD),
-					"pricingSource": "host_config",
-				},
-				Store: boolp(false),
-			})
+
+		// Cost estimate is optional: if pricing is unknown, emit a marker so the UI
+		// can clear stale values (and display "?" if desired).
+		pricingKnown := r.opts.PriceInPerMTokensUSD > 0 || r.opts.PriceOutPerMTokensUSD > 0
+		costUSD := estimateTurnCostUSD(turnUsage, r.opts.PriceInPerMTokensUSD, r.opts.PriceOutPerMTokensUSD)
+		data := map[string]string{
+			"turn":         strconv.Itoa(r.turn),
+			"input":        strconv.Itoa(turnUsage.InputTokens),
+			"output":       strconv.Itoa(turnUsage.OutputTokens),
+			"total":        strconv.Itoa(turnUsage.TotalTokens),
+			"known":        fmtBool(pricingKnown),
+			"priceInPerM":  fmtUSD(r.opts.PriceInPerMTokensUSD),
+			"priceOutPerM": fmtUSD(r.opts.PriceOutPerMTokensUSD),
 		}
+		if pricingKnown && costUSD > 0 {
+			data["costUsd"] = fmtUSD(costUSD)
+			data["pricingSource"] = "host_config"
+		}
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "llm.cost.total",
+			Message: "Turn cost estimate",
+			Data:    data,
+			Store:   boolp(false),
+		})
 	}
 
 	// Memory update ingestion (run-scoped).
@@ -1392,18 +1476,85 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	return final, nil
 }
 
-func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (handled bool) {
+func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled bool) {
 	if r == nil || r.fs == nil {
-		return false
+		return "", false
 	}
 	line := strings.TrimSpace(userMsg)
 	if !strings.HasPrefix(line, "/") {
-		return false
+		return "", false
 	}
 	boolp := func(b bool) *bool { return &b }
 
 	cmd, arg := splitSlashCommand(line)
 	switch cmd {
+	case "model":
+		cur := strings.TrimSpace(r.model)
+		if cur == "" {
+			cur = strings.TrimSpace(r.opts.Model)
+		}
+		next, out, ok := handleModelCommandPreInit(cur, r.opts.PricingFile, arg)
+		if !ok {
+			return "", false
+		}
+		if strings.TrimSpace(out) != "" {
+			r.mustEmit(context.Background(), events.Event{
+				Type:    "model.info",
+				Message: "Model",
+				Data: map[string]string{
+					"text": out,
+				},
+				Console: boolp(false),
+			})
+			resp = out
+		}
+		if strings.TrimSpace(next) == "" || next == cur {
+			return resp, true
+		}
+
+		inPerM, outPerM, known, source := pricingForModel(next, r.opts.PricingFile)
+		if known {
+			r.opts.PriceInPerMTokensUSD = inPerM
+			r.opts.PriceOutPerMTokensUSD = outPerM
+		} else {
+			r.opts.PriceInPerMTokensUSD = 0
+			r.opts.PriceOutPerMTokensUSD = 0
+		}
+
+		// Update the active model for subsequent LLM calls.
+		r.model = next
+		r.opts.Model = next
+		r.agent.Model = next
+		if r.setHistoryModel != nil {
+			r.setHistoryModel(next)
+		}
+
+		if r.run.Runtime == nil {
+			r.run.Runtime = &types.RunRuntimeConfig{}
+		}
+		r.run.Runtime.Model = next
+		r.run.Runtime.PriceInPerMTokensUSD = r.opts.PriceInPerMTokensUSD
+		r.run.Runtime.PriceOutPerMTokensUSD = r.opts.PriceOutPerMTokensUSD
+		_ = store.SaveRun(r.run)
+
+		// Persist at session scope so resume uses the selected model.
+		if sess, err := store.LoadSession(r.run.SessionID); err == nil {
+			sess.ActiveModel = next
+			_ = store.SaveSession(sess)
+		}
+
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "model.changed",
+			Message: "Model changed",
+			Data: map[string]string{
+				"from":          cur,
+				"to":            next,
+				"pricingKnown":  fmtBool(known),
+				"pricingSource": source,
+			},
+			Console: boolp(false),
+		})
+		return resp, true
 	case "cd":
 		from := strings.TrimSpace(r.workdirBase)
 		if from == "" {
@@ -1422,7 +1573,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (handled bool) {
 				},
 				Console: boolp(false),
 			})
-			return true
+			return "", true
 		}
 
 		workdirRes, err := resources.NewWorkdirResource(to)
@@ -1437,7 +1588,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (handled bool) {
 				},
 				Console: boolp(false),
 			})
-			return true
+			return "", true
 		}
 
 		// Rebind /workdir to the new root. All file operations immediately target the new directory.
@@ -1460,7 +1611,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (handled bool) {
 			},
 			Console: boolp(false),
 		})
-		return true
+		return "", true
 
 	case "pwd", "workdir":
 		// /workdir with no args behaves like /pwd.
@@ -1476,9 +1627,9 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (handled bool) {
 			},
 			Console: boolp(false),
 		})
-		return true
+		return strings.TrimSpace(r.workdirBase), true
 	default:
-		return false
+		return "", false
 	}
 }
 
@@ -1500,6 +1651,75 @@ func splitSlashCommand(line string) (cmd string, arg string) {
 		arg = strings.TrimSpace(line[i+len(parts[0]):])
 	}
 	return cmd, arg
+}
+
+func pricingForModel(modelID, pricingFile string) (inPerM, outPerM float64, known bool, source string) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return 0, 0, false, ""
+	}
+
+	source = "builtin"
+	pf := cost.DefaultPricing()
+	if strings.TrimSpace(pricingFile) != "" {
+		if fromFile, err := cost.LoadPricingFile(pricingFile); err == nil {
+			for k, v := range fromFile.Models {
+				pf.Models[k] = v
+			}
+			source = "file"
+		}
+	}
+	inPerM, outPerM, ok := pf.Lookup(modelID)
+	if !ok {
+		return 0, 0, false, source
+	}
+	return inPerM, outPerM, true, source
+}
+
+func handleModelCommandPreInit(currentModel, pricingFile, arg string) (nextModel string, out string, handled bool) {
+	arg = strings.TrimSpace(arg)
+
+	cur := strings.TrimSpace(currentModel)
+	if cur == "" {
+		cur = "unknown"
+	}
+
+	if arg == "" || strings.EqualFold(arg, "show") {
+		return "", "Current model: " + cur, true
+	}
+	if strings.EqualFold(arg, "list") {
+		lines := []string{"Supported models:"}
+		for _, m := range cost.SupportedModels() {
+			prefix := "  - "
+			if m == currentModel {
+				prefix = "  * "
+			}
+			lines = append(lines, prefix+m)
+		}
+		return "", strings.Join(lines, "\n"), true
+	}
+
+	// Allow both:
+	//   /model set <id>
+	//   /model <id>
+	lower := strings.ToLower(arg)
+	if strings.HasPrefix(lower, "set ") {
+		arg = strings.TrimSpace(arg[4:])
+	}
+	if strings.TrimSpace(arg) == "" {
+		return "", "Usage:\n  /model show\n  /model list\n  /model <modelId>", true
+	}
+
+	if !cost.IsSupportedModel(arg) {
+		return "", fmt.Sprintf("Unsupported model %q. Use /model list.", arg), true
+	}
+
+	_, _, known, _ := pricingForModel(arg, pricingFile)
+	msg := "Model set to " + arg
+	if !known {
+		msg += " (pricing unknown)"
+	}
+	return arg, msg, true
 }
 
 func (r *tuiTurnRunner) handlePublish(userMsg string) (string, error) {

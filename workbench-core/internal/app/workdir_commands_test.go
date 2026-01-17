@@ -43,7 +43,7 @@ func TestTUITurnRunner_CD_RebindsWorkdirAndUpdatesBuiltins(t *testing.T) {
 		baseSystemPrompt: "",
 	}
 
-	if handled := r.handleSlashCommand("/cd " + dir2); !handled {
+	if _, handled := r.handleSlashCommand("/cd " + dir2); !handled {
 		t.Fatalf("expected /cd to be handled")
 	}
 
@@ -105,7 +105,7 @@ func TestTUITurnRunner_CD_InvalidDirDoesNotChange(t *testing.T) {
 	}
 
 	nonexistent := filepath.Join(dir1, "does-not-exist")
-	if handled := r.handleSlashCommand("/cd " + nonexistent); !handled {
+	if _, handled := r.handleSlashCommand("/cd " + nonexistent); !handled {
 		t.Fatalf("expected /cd to be handled")
 	}
 	if r.workdirBase != dir1 {

@@ -31,6 +31,11 @@ import (
 
 // RunChatOptions controls host-side limits and prompt injection behavior for RunChat.
 type RunChatOptions struct {
+	// Model is the model identifier used for LLM requests.
+	//
+	// If empty, the host falls back to OPENROUTER_MODEL.
+	Model string
+
 	// WorkDir is the host working directory to mount at /workdir.
 	//
 	// If empty, the host uses os.Getwd() at startup.
@@ -66,6 +71,12 @@ type RunChatOptions struct {
 
 	// PriceOutPerMTokensUSD is the output token price in USD per 1M tokens.
 	PriceOutPerMTokensUSD float64
+
+	// PricingFile is an optional path to a pricing JSON file.
+	//
+	// This is used by runtime /model switching to recompute per-turn cost estimation.
+	// Pricing is still optional: if no entry exists for a model, cost is "unknown".
+	PricingFile string
 }
 
 func (o RunChatOptions) withDefaults() RunChatOptions {
@@ -89,6 +100,9 @@ func (o RunChatOptions) withDefaults() RunChatOptions {
 	}
 	if o.IncludeHistoryOps == nil {
 		o.IncludeHistoryOps = boolPtr(true)
+	}
+	if strings.TrimSpace(o.PricingFile) == "" {
+		o.PricingFile = strings.TrimSpace(os.Getenv("WORKBENCH_PRICING_FILE"))
 	}
 	return o
 }
@@ -178,9 +192,24 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 	boolp := func(b bool) *bool { return &b }
 
 	sessionTitle := ""
+	sessionModel := ""
 	if sess, err := store.LoadSession(run.SessionID); err == nil {
 		sessionTitle = strings.TrimSpace(sess.Title)
+		sessionModel = strings.TrimSpace(sess.ActiveModel)
 	}
+
+	model := strings.TrimSpace(opts.Model)
+	if model == "" {
+		model = sessionModel
+	}
+	if model == "" {
+		model = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
+	}
+	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" || model == "" {
+		return fmt.Errorf("OPENROUTER_API_KEY and OPENROUTER_MODEL (or --model or session.activeModel) are required to run the non-scripted agent loop")
+	}
+	opts.Model = model
+	historySink.Model = model
 
 	mustEmit(context.Background(), events.Event{
 		Type:    "run.started",
@@ -300,12 +329,6 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		MaxReadBytes:    16 * 1024,
 	}
 
-	model := strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
-	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" || model == "" {
-		return fmt.Errorf("OPENROUTER_API_KEY and OPENROUTER_MODEL are required to run the non-scripted agent loop")
-	}
-	historySink.Model = model
-
 	// Persist runtime config for reproducibility/debugging.
 	run.Runtime = &types.RunRuntimeConfig{
 		DataDir:               config.DataDir,
@@ -320,6 +343,14 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		PriceOutPerMTokensUSD: opts.PriceOutPerMTokensUSD,
 	}
 	_ = store.SaveRun(run)
+
+	// Persist the active model at the session level so "resume session" is deterministic.
+	if sess, err := store.LoadSession(run.SessionID); err == nil {
+		if strings.TrimSpace(sess.ActiveModel) != model {
+			sess.ActiveModel = model
+			_ = store.SaveSession(sess)
+		}
+	}
 
 	client, err := llm.NewOpenRouterClientFromEnv()
 	if err != nil {

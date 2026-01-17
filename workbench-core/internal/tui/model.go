@@ -677,6 +677,12 @@ func (m *Model) onEvent(ev events.Event) {
 			m.modelID = v
 		}
 	}
+	// Model identifier can change at runtime via the host /model command.
+	if ev.Type == "model.changed" {
+		if v := strings.TrimSpace(ev.Data["to"]); v != "" {
+			m.modelID = v
+		}
+	}
 	// Workdir is discovered via host.mounted and updated via /cd at runtime.
 	if ev.Type == "host.mounted" {
 		if wd := strings.TrimSpace(ev.Data["/workdir"]); wd != "" {
@@ -702,7 +708,11 @@ func (m *Model) onEvent(ev events.Event) {
 		m.lastTurnTokens = parseInt(ev.Data["total"])
 		m.totalTokens += m.lastTurnTokens
 	case "llm.cost.total":
+		known := parseBool(ev.Data["known"])
 		m.lastTurnCostUSD = strings.TrimSpace(ev.Data["costUsd"])
+		if !known && m.lastTurnCostUSD == "" {
+			m.lastTurnCostUSD = "?"
+		}
 		if v := strings.TrimSpace(ev.Data["costUsd"]); v != "" {
 			if f, err := strconv.ParseFloat(v, 64); err == nil {
 				m.totalCostUSD += f

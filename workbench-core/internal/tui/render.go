@@ -642,3 +642,12 @@ func parseInt(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n
 }
+
+func parseBool(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	b, _ := strconv.ParseBool(s)
+	return b
+}

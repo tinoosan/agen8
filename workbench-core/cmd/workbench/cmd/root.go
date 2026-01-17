@@ -21,6 +21,7 @@ var (
 	defaultTitle string
 	uiMode       string
 	pricingFile  string
+	modelID      string
 	enableMouse  bool
 
 	maxSteps           int
@@ -74,7 +75,10 @@ new run in that session (workspaces remain run-scoped).
 		//   2) optional pricing file override (env/flag)
 		//   3) built-in pricing table (compiled into the binary)
 		if !cmd.Root().PersistentFlags().Changed("price-in-per-m") || !cmd.Root().PersistentFlags().Changed("price-out-per-m") {
-			model := strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
+			model := strings.TrimSpace(modelID)
+			if model == "" {
+				model = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
+			}
 			pf := cost.DefaultPricing()
 			if strings.TrimSpace(pricingFile) != "" {
 				if fromFile, err := cost.LoadPricingFile(pricingFile); err == nil {
@@ -105,6 +109,7 @@ new run in that session (workspaces remain run-scoped).
 		}
 
 		opts := app.RunChatOptions{
+			Model:                 modelID,
 			WorkDir:               workDir,
 			MaxSteps:              maxSteps,
 			MaxTraceBytes:         maxTraceBytes,
@@ -115,6 +120,7 @@ new run in that session (workspaces remain run-scoped).
 			IncludeHistoryOps:     &includeHistoryOps,
 			PriceInPerMTokensUSD:  priceInPerM,
 			PriceOutPerMTokensUSD: priceOutPerM,
+			PricingFile:           pricingFile,
 		}
 		switch strings.ToLower(strings.TrimSpace(uiMode)) {
 		case "", "tui":
@@ -158,6 +164,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&enableMouse, "mouse", enableMouse, "enable Bubble Tea mouse capture (mouse wheel scrolling; may disable native selection)")
 	pricingFile = strings.TrimSpace(os.Getenv("WORKBENCH_PRICING_FILE"))
 	rootCmd.PersistentFlags().StringVar(&pricingFile, "pricing-file", pricingFile, "optional path to pricing json (env WORKBENCH_PRICING_FILE)")
+	modelID = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
+	rootCmd.PersistentFlags().StringVar(&modelID, "model", modelID, "LLM model identifier (default: env OPENROUTER_MODEL)")
 	rootCmd.PersistentFlags().IntVar(&maxSteps, "max-steps", 200, "max agent steps per user turn")
 	rootCmd.PersistentFlags().IntVar(&maxTraceBytes, "trace-bytes", 8*1024, "context updater trace budget (bytes)")
 	rootCmd.PersistentFlags().IntVar(&maxMemoryBytes, "memory-bytes", 8*1024, "context updater memory budget (bytes)")

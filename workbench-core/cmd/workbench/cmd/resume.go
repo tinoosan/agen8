@@ -28,6 +28,8 @@ var resumeCmd = &cobra.Command{
 			return err
 		}
 		opts := app.RunChatOptions{
+			Model:                 modelID,
+			WorkDir:               workDir,
 			MaxSteps:              maxSteps,
 			MaxTraceBytes:         maxTraceBytes,
 			MaxMemoryBytes:        maxMemoryBytes,
@@ -37,6 +39,7 @@ var resumeCmd = &cobra.Command{
 			IncludeHistoryOps:     &includeHistoryOps,
 			PriceInPerMTokensUSD:  priceInPerM,
 			PriceOutPerMTokensUSD: priceOutPerM,
+			PricingFile:           pricingFile,
 		}
 		switch strings.ToLower(strings.TrimSpace(uiMode)) {
 		case "", "tui":
