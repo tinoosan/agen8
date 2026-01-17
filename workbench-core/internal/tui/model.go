@@ -89,6 +89,9 @@ type Model struct {
 	sessionTitle  string
 	workflowTitle string
 	workdir       string
+	modelID       string
+	sessionID     string
+	runID         string
 
 	lastTurnTokensIn  int
 	lastTurnTokensOut int
@@ -115,8 +118,14 @@ type Model struct {
 	styleOutcome   lipgloss.Style
 	styleError     lipgloss.Style
 
-	styleInputBox lipgloss.Style
-	styleHint     lipgloss.Style
+	styleInputBox            lipgloss.Style
+	styleComposerCardFocused lipgloss.Style
+	styleComposerCardBlurred lipgloss.Style
+	styleComposerAccentFocus lipgloss.Style
+	styleComposerAccentBlur  lipgloss.Style
+	styleComposerStatusKey   lipgloss.Style
+	styleComposerStatusVal   lipgloss.Style
+	styleHint                lipgloss.Style
 
 	renderer *ContentRenderer
 }
@@ -269,6 +278,26 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 			Padding(0, 1).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("#404040")),
+		styleComposerCardFocused: lipgloss.NewStyle().
+			Margin(0, 1).
+			Padding(0, 1).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#6bbcff")),
+		styleComposerCardBlurred: lipgloss.NewStyle().
+			Margin(0, 1).
+			Padding(0, 1).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#404040")),
+		styleComposerAccentFocus: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6bbcff")).
+			Bold(true),
+		styleComposerAccentBlur: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#404040")),
+		styleComposerStatusKey: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9ad0ff")).
+			Bold(true),
+		styleComposerStatusVal: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#eaeaea")),
 		styleHint: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#707070")),
 
@@ -634,6 +663,18 @@ func (m *Model) onEvent(ev events.Event) {
 	if ev.Type == "run.started" {
 		if v := strings.TrimSpace(ev.Data["sessionTitle"]); v != "" {
 			m.sessionTitle = v
+		}
+		if v := strings.TrimSpace(ev.Data["sessionId"]); v != "" {
+			m.sessionID = v
+		}
+		if v := strings.TrimSpace(ev.Data["runId"]); v != "" {
+			m.runID = v
+		}
+	}
+	// Model identifier comes from agent.loop.start (host source of truth).
+	if ev.Type == "agent.loop.start" {
+		if v := strings.TrimSpace(ev.Data["model"]); v != "" {
+			m.modelID = v
 		}
 	}
 	// Workdir is discovered via host.mounted and updated via /cd at runtime.

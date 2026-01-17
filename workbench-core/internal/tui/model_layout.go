@@ -15,8 +15,20 @@ func (m *Model) layout() {
 	// Width-dependent components (header + footer) can wrap when the terminal is narrow.
 	// We compute their real rendered heights so the header is never "pushed off" by a
 	// footer that becomes taller due to wrapping.
-	m.single.SetWidth(max(20, m.width-6))
-	m.multiline.SetWidth(max(20, m.width-6))
+	// Composer width:
+	// - we render the composer as a bordered "card" with an accent bar and outer margin.
+	// - to keep layout stable, we must pre-compute the *content* width and size
+	//   the textarea(s) so they never exceed the card inner width.
+	//
+	// Overhead budget (left + right):
+	// - outer margin: 2 cols (1 each side)
+	// - border: 2 cols
+	// - padding: 2 cols
+	// - accent + gap: 2 cols
+	// => total ~8 cols of overhead
+	composerContentW := max(20, m.width-8)
+	m.single.SetWidth(composerContentW)
+	m.multiline.SetWidth(composerContentW)
 
 	headerH := lipgloss.Height(m.renderHeader())
 	if headerH < 1 {
@@ -157,7 +169,61 @@ func (m Model) renderInput() string {
 		input = m.single.View()
 	}
 
-	box := m.styleInputBox.Render(input)
+	isFocused := m.focus == focusInput
+	cardStyle := m.styleComposerCardBlurred
+	accentStyle := m.styleComposerAccentBlur
+	if isFocused {
+		cardStyle = m.styleComposerCardFocused
+		accentStyle = m.styleComposerAccentFocus
+	}
+
+	modelID := strings.TrimSpace(m.modelID)
+	if modelID == "" {
+		modelID = "unknown"
+	}
+	modelLabel := m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelID)
+
+	ids := []string{}
+	if v := strings.TrimSpace(m.sessionID); v != "" {
+		ids = append(ids, "sess:"+truncateMiddle(v, 10))
+	}
+	if v := strings.TrimSpace(m.runID); v != "" {
+		ids = append(ids, "run:"+truncateMiddle(v, 10))
+	}
+	idsLabel := ""
+	if len(ids) != 0 {
+		idsLabel = m.styleDim.Render(strings.Join(ids, " "))
+	}
+
+	// Status row is rendered inside the composer card.
+	// It uses the same width as the editor so it never overflows the viewport.
+	statusW := max(20, m.width-8)
+	statusLeft := modelLabel
+	statusRight := idsLabel
+	leftW := lipgloss.Width(statusLeft)
+	rightW := lipgloss.Width(statusRight)
+	midW := max(0, statusW-leftW-rightW-1)
+	status := statusLeft
+	if midW > 0 {
+		status += strings.Repeat(" ", midW)
+	}
+	if statusRight != "" {
+		status += " " + statusRight
+	}
+	status = lipgloss.NewStyle().Width(statusW).Render(status)
+
+	content := lipgloss.JoinVertical(lipgloss.Top, status, "", input)
+	h := lipgloss.Height(content)
+	if h < 1 {
+		h = 1
+	}
+	accentLines := make([]string, 0, h)
+	for i := 0; i < h; i++ {
+		accentLines = append(accentLines, "│")
+	}
+	accent := accentStyle.Render(strings.Join(accentLines, "\n"))
+
+	box := cardStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, accent, " ", content))
 	statusRaw := m.renderStatusLine()
 	focusName := "input"
 	if m.focus == focusActivityList {
