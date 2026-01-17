@@ -62,10 +62,35 @@ func (r *markdownRenderer) get(width int) (*glamour.TermRenderer, error) {
 	// We also tweak the code block styling slightly to make it read as "code" (not prose)
 	// and we preserve newlines so pasted tasks/snippets keep their structure.
 	style := styles.DarkStyleConfig
+	// Render markdown as markdown (hide raw markers like "###" and "**").
+	style.H1.StylePrimitive.Prefix = ""
+	style.H2.StylePrimitive.Prefix = ""
+	style.H3.StylePrimitive.Prefix = ""
+	style.H4.StylePrimitive.Prefix = ""
+	style.H5.StylePrimitive.Prefix = ""
+	style.H6.StylePrimitive.Prefix = ""
+
+	style.Strong.BlockPrefix = ""
+	style.Strong.BlockSuffix = ""
+	style.Strong.Bold = boolPtr(true)
+
+	style.Emph.BlockPrefix = ""
+	style.Emph.BlockSuffix = ""
+	style.Emph.Italic = boolPtr(true)
+
+	style.Strikethrough.BlockPrefix = ""
+	style.Strikethrough.BlockSuffix = ""
+
+	style.Code.StylePrimitive.BlockPrefix = ""
+	style.Code.StylePrimitive.BlockSuffix = ""
+
 	style.CodeBlock.Margin = uintPtr(0)
 	style.CodeBlock.Indent = uintPtr(0)
 	style.CodeBlock.StylePrimitive.BlockPrefix = "\n"
 	style.CodeBlock.StylePrimitive.BlockSuffix = "\n"
+	// Subtle background for code blocks to improve scannability.
+	style.CodeBlock.StylePrimitive.BackgroundColor = stringPtr("#1c1f2b")
+	style.CodeBlock.StylePrimitive.Color = stringPtr("#eaeaea")
 
 	tr, err := glamour.NewTermRenderer(
 		glamour.WithStyles(style),
@@ -81,7 +106,9 @@ func (r *markdownRenderer) get(width int) (*glamour.TermRenderer, error) {
 	return tr, nil
 }
 
-func uintPtr(v uint) *uint { return &v }
+func uintPtr(v uint) *uint       { return &v }
+func stringPtr(s string) *string { return &s }
+func boolPtr(b bool) *bool       { return &b }
 
 // preprocessMarkdown applies small, deterministic markdown rewrites that improve readability
 // in the terminal without changing the meaning of the content.

@@ -15,7 +15,7 @@ func TestRenderActivityDetailMarkdown_FSWrite_ShowsContentPreview(t *testing.T) 
 	}
 
 	md := renderActivityDetailMarkdown(a, false, false)
-	if !strings.Contains(md, "content preview") {
+	if !strings.Contains(md, "Written content preview") {
 		t.Fatalf("expected content preview section, got:\n%s", md)
 	}
 	if !strings.Contains(md, "```json") {

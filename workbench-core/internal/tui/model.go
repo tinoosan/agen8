@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -119,7 +118,7 @@ type Model struct {
 	styleInputBox lipgloss.Style
 	styleHint     lipgloss.Style
 
-	md *markdownRenderer
+	renderer *ContentRenderer
 }
 
 type focusTarget int
@@ -273,8 +272,8 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 		styleHint: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#707070")),
 
-		md:    newMarkdownRenderer(),
-		focus: focusInput,
+		renderer: newContentRenderer(),
+		focus:    focusInput,
 	}
 
 	m.pendingActionIdx = -1
@@ -822,7 +821,7 @@ func (m *Model) rebuildTranscript() {
 			lineNo++
 		case transcriptUser:
 			// Render user text as markdown so pasted tasks and lists are readable.
-			body := m.styleUserLabel.Render("you> ") + strings.TrimRight(m.md.render(it.text, contentW), "\n")
+			body := m.styleUserLabel.Render("you> ") + strings.TrimRight(m.renderer.RenderMarkdown(it.text, contentW), "\n")
 			lines = append(lines, m.styleUserBox.Render(body))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptAgent:
@@ -830,7 +829,7 @@ func (m *Model) rebuildTranscript() {
 			//
 			// Important: do not prefix "agent>" inside the markdown source, otherwise
 			// fenced blocks (```json) stop being recognized by the markdown parser.
-			rendered := strings.TrimRight(m.md.render(strings.TrimSpace(it.text), contentW), "\n")
+			rendered := strings.TrimRight(m.renderer.RenderMarkdown(strings.TrimSpace(it.text), contentW), "\n")
 			rendered = prefixFirstLine(rendered, "agent> ")
 			body := m.styleAgent.Render(rendered)
 			lines = append(lines, m.styleAgentBox.Render(body))
@@ -1075,13 +1074,13 @@ func (m *Model) refreshActivityDetail() {
 
 	if m.fileViewOpen {
 		md := renderFilePreviewMarkdown(m.fileViewPath, m.fileViewContent, m.fileViewTruncated, m.fileViewErr)
-		m.activityDetail.SetContent(strings.TrimRight(m.md.render(header+help+md, w), "\n"))
+		m.activityDetail.SetContent(strings.TrimRight(m.renderer.RenderMarkdown(header+help+md, w), "\n"))
 		return
 	}
 
 	act := m.activities[m.activityList.Index()]
 	md := renderActivityDetailMarkdown(act, m.showTelemetry, m.expandOutput)
-	m.activityDetail.SetContent(strings.TrimRight(m.md.render(header+help+md, w), "\n"))
+	m.activityDetail.SetContent(strings.TrimRight(m.renderer.RenderMarkdown(header+help+md, w), "\n"))
 }
 
 func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) string {
@@ -1159,16 +1158,17 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 
 	if (a.Kind == "fs.write" || a.Kind == "fs.append") && !a.TextRedacted && strings.TrimSpace(a.TextPreview) != "" {
 		lang := guessCodeFenceLang(a.Path, a.TextIsJSON)
+		b.WriteString("\n**Written content preview**")
 		if a.TextTruncated {
-			b.WriteString("\n**Written content preview** _(truncated)_\n\n```" + lang + "\n")
+			b.WriteString(" _(truncated)_")
+		}
+		b.WriteString("\n\n")
+		if strings.EqualFold(lang, "json") {
+			b.WriteString(FormatJSON(a.TextPreview))
 		} else {
-			b.WriteString("\n**Written content preview**\n\n```" + lang + "\n")
+			b.WriteString(FormatCode(lang, a.TextPreview))
 		}
-		b.WriteString(a.TextPreview)
-		if !strings.HasSuffix(a.TextPreview, "\n") {
-			b.WriteString("\n")
-		}
-		b.WriteString("```\n")
+		b.WriteString("\n")
 	} else if (a.Kind == "fs.write" || a.Kind == "fs.append") && a.TextRedacted {
 		b.WriteString("\n**Written content preview**\n\n_(redacted)_\n")
 	}
@@ -1178,9 +1178,9 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 		if !expanded && len(txt) > 600 {
 			txt = txt[:599] + "…"
 		}
-		b.WriteString("\n**Tool output preview** _(press `e` to expand)_\n\n```text\n")
-		b.WriteString(txt)
-		b.WriteString("\n```\n")
+		b.WriteString("\n**Tool output preview** _(press `e` to expand)_\n\n")
+		b.WriteString(FormatCode("text", txt))
+		b.WriteString("\n")
 	}
 
 	if telemetry {
@@ -1214,14 +1214,14 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 	switch a.Kind {
 	case "tool.run":
 		if strings.TrimSpace(a.Command) != "" {
-			b.WriteString("- command:\n\n```sh\n")
-			b.WriteString(a.Command)
-			b.WriteString("\n```\n")
+			b.WriteString("- command:\n\n")
+			b.WriteString(FormatCode("bash", a.Command))
+			b.WriteString("\n")
 		}
 		if strings.TrimSpace(a.InputJSON) != "" {
-			b.WriteString("\n- input:\n\n```json\n")
-			b.WriteString(prettyJSONOneLine(a.InputJSON))
-			b.WriteString("\n```\n")
+			b.WriteString("\n- input:\n\n")
+			b.WriteString(FormatJSON(a.InputJSON))
+			b.WriteString("\n")
 		}
 	default:
 		if strings.TrimSpace(a.Path) != "" {
@@ -1270,16 +1270,18 @@ func renderFilePreviewMarkdown(path string, content string, truncated bool, errS
 	}
 
 	lang := guessCodeFenceLang(path, strings.HasSuffix(strings.ToLower(path), ".json"))
+	b.WriteString("\n**Content**")
 	if truncated {
-		b.WriteString("\n**Content** _(truncated)_\n\n```" + lang + "\n")
+		b.WriteString(" _(truncated)_")
+	}
+	b.WriteString("\n\n")
+
+	if strings.EqualFold(lang, "json") {
+		b.WriteString(FormatJSON(content))
 	} else {
-		b.WriteString("\n**Content**\n\n```" + lang + "\n")
+		b.WriteString(FormatCode(lang, content))
 	}
-	b.WriteString(content)
-	if !strings.HasSuffix(content, "\n") {
-		b.WriteString("\n")
-	}
-	b.WriteString("```\n")
+	b.WriteString("\n")
 	return b.String()
 }
 
@@ -1343,22 +1345,6 @@ func guessCodeFenceLang(path string, isJSON bool) string {
 	default:
 		return "text"
 	}
-}
-
-func prettyJSONOneLine(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	var v any
-	if err := json.Unmarshal([]byte(s), &v); err != nil {
-		return s
-	}
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return s
-	}
-	return string(b)
 }
 
 func truncateRight(s string, maxLen int) string {

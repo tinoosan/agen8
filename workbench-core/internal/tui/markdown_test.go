@@ -29,3 +29,11 @@ func TestPreprocessMarkdown_InvalidJSON_IsLeftRaw(t *testing.T) {
 		t.Fatalf("expected invalid json block to be unchanged.\nwant:\n%s\ngot:\n%s", in, out)
 	}
 }
+
+func TestMarkdownRenderer_RendersHeadingsAndLists(t *testing.T) {
+	r := newContentRenderer()
+	rendered := r.RenderMarkdown("### Title\n\n- item\n", 80)
+	if strings.Contains(rendered, "###") {
+		t.Fatalf("expected heading markers to be rendered (not shown raw), got:\n%s", rendered)
+	}
+}
