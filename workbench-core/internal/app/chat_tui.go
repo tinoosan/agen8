@@ -173,6 +173,16 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 	}
 	opts.Model = model
 
+	// Resolve pricing against the effective model (session-aware).
+	//
+	// If pricing is not known for the model, cost is shown as "unknown".
+	if opts.PriceInPerMTokensUSD <= 0 && opts.PriceOutPerMTokensUSD <= 0 {
+		if inPerM, outPerM, ok, _ := pricingForModel(model, opts.PricingFile); ok {
+			opts.PriceInPerMTokensUSD = inPerM
+			opts.PriceOutPerMTokensUSD = outPerM
+		}
+	}
+
 	mustEmit(context.Background(), events.Event{
 		Type:    "run.started",
 		Message: "Run started",
@@ -761,6 +771,14 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		return fmt.Errorf("OPENROUTER_API_KEY and OPENROUTER_MODEL (or /model) are required")
 	}
 	r.opts.Model = model
+
+	// Resolve pricing against the effective model (pre-run /model is allowed).
+	if r.opts.PriceInPerMTokensUSD <= 0 && r.opts.PriceOutPerMTokensUSD <= 0 {
+		if inPerM, outPerM, ok, _ := pricingForModel(model, r.opts.PricingFile); ok {
+			r.opts.PriceInPerMTokensUSD = inPerM
+			r.opts.PriceOutPerMTokensUSD = outPerM
+		}
+	}
 
 	historySink.Model = model
 	setHistoryModel := func(next string) { historySink.Model = strings.TrimSpace(next) }
@@ -1651,29 +1669,6 @@ func splitSlashCommand(line string) (cmd string, arg string) {
 		arg = strings.TrimSpace(line[i+len(parts[0]):])
 	}
 	return cmd, arg
-}
-
-func pricingForModel(modelID, pricingFile string) (inPerM, outPerM float64, known bool, source string) {
-	modelID = strings.TrimSpace(modelID)
-	if modelID == "" {
-		return 0, 0, false, ""
-	}
-
-	source = "builtin"
-	pf := cost.DefaultPricing()
-	if strings.TrimSpace(pricingFile) != "" {
-		if fromFile, err := cost.LoadPricingFile(pricingFile); err == nil {
-			for k, v := range fromFile.Models {
-				pf.Models[k] = v
-			}
-			source = "file"
-		}
-	}
-	inPerM, outPerM, ok := pf.Lookup(modelID)
-	if !ok {
-		return 0, 0, false, source
-	}
-	return inPerM, outPerM, true, source
 }
 
 func handleModelCommandPreInit(currentModel, pricingFile, arg string) (nextModel string, out string, handled bool) {

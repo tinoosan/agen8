@@ -27,8 +27,13 @@ var resumeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
+		modelOverride := ""
+		if cmd.Root().PersistentFlags().Changed("model") {
+			modelOverride = strings.TrimSpace(modelID)
+		}
 		opts := app.RunChatOptions{
-			Model:                 modelID,
+			Model:                 modelOverride,
 			WorkDir:               workDir,
 			MaxSteps:              maxSteps,
 			MaxTraceBytes:         maxTraceBytes,

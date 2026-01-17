@@ -18,6 +18,7 @@ import (
 	"github.com/chzyer/readline"
 	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/config"
+	"github.com/tinoosan/workbench-core/internal/cost"
 	"github.com/tinoosan/workbench-core/internal/events"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/llm"
@@ -28,6 +29,29 @@ import (
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
+
+func pricingForModel(modelID, pricingFile string) (inPerM, outPerM float64, known bool, source string) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return 0, 0, false, ""
+	}
+
+	source = "builtin"
+	pf := cost.DefaultPricing()
+	if strings.TrimSpace(pricingFile) != "" {
+		if fromFile, err := cost.LoadPricingFile(pricingFile); err == nil {
+			for k, v := range fromFile.Models {
+				pf.Models[k] = v
+			}
+			source = "file"
+		}
+	}
+	inPerM, outPerM, ok := pf.Lookup(modelID)
+	if !ok {
+		return 0, 0, false, source
+	}
+	return inPerM, outPerM, true, source
+}
 
 // RunChatOptions controls host-side limits and prompt injection behavior for RunChat.
 type RunChatOptions struct {
@@ -210,6 +234,17 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 	}
 	opts.Model = model
 	historySink.Model = model
+
+	// Resolve pricing against the effective model (session-aware).
+	//
+	// If pricing is not known for the model, cost is shown as "unknown".
+	if opts.PriceInPerMTokensUSD <= 0 && opts.PriceOutPerMTokensUSD <= 0 {
+		inPerM, outPerM, known, _ := pricingForModel(model, opts.PricingFile)
+		if known {
+			opts.PriceInPerMTokensUSD = inPerM
+			opts.PriceOutPerMTokensUSD = outPerM
+		}
+	}
 
 	mustEmit(context.Background(), events.Event{
 		Type:    "run.started",

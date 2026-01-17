@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tinoosan/workbench-core/internal/app"
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/cost"
 	"github.com/tinoosan/workbench-core/internal/store"
 )
 
@@ -70,32 +69,10 @@ new run in that session (workspaces remain run-scoped).
 			_ = os.Unsetenv("WORKBENCH_MOUSE")
 		}
 
-		// Pricing resolution (model-picker safe):
-		//   1) explicit flags (--price-in-per-m/--price-out-per-m)
-		//   2) optional pricing file override (env/flag)
-		//   3) built-in pricing table (compiled into the binary)
-		if !cmd.Root().PersistentFlags().Changed("price-in-per-m") || !cmd.Root().PersistentFlags().Changed("price-out-per-m") {
-			model := strings.TrimSpace(modelID)
-			if model == "" {
-				model = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
-			}
-			pf := cost.DefaultPricing()
-			if strings.TrimSpace(pricingFile) != "" {
-				if fromFile, err := cost.LoadPricingFile(pricingFile); err == nil {
-					for k, v := range fromFile.Models {
-						pf.Models[k] = v
-					}
-				}
-			}
-			if inPerM, outPerM, ok := pf.Lookup(model); ok {
-				if !cmd.Root().PersistentFlags().Changed("price-in-per-m") {
-					priceInPerM = inPerM
-				}
-				if !cmd.Root().PersistentFlags().Changed("price-out-per-m") {
-					priceOutPerM = outPerM
-				}
-			}
-		}
+		// Pricing is resolved against the effective model at runtime (after session
+		// load and/or /model overrides).
+		//
+		// Here we only respect explicit user-provided overrides via flags/env.
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -108,8 +85,13 @@ new run in that session (workspaces remain run-scoped).
 			goal = "interactive chat"
 		}
 
+		modelOverride := ""
+		if cmd.Root().PersistentFlags().Changed("model") {
+			modelOverride = strings.TrimSpace(modelID)
+		}
+
 		opts := app.RunChatOptions{
-			Model:                 modelID,
+			Model:                 modelOverride,
 			WorkDir:               workDir,
 			MaxSteps:              maxSteps,
 			MaxTraceBytes:         maxTraceBytes,
@@ -160,7 +142,6 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&defaultGoal, "goal", "interactive chat", "initial goal for the run (workbench only)")
 	rootCmd.PersistentFlags().StringVar(&uiMode, "ui", "tui", "interactive UI mode: tui or repl")
 	enableMouse = envBool("WORKBENCH_MOUSE", false)
-	enableMouse = envBool("WORKBENCH_MOUSE", true)
 	rootCmd.PersistentFlags().BoolVar(&enableMouse, "mouse", enableMouse, "enable Bubble Tea mouse capture (mouse wheel scrolling; may disable native selection)")
 	pricingFile = strings.TrimSpace(os.Getenv("WORKBENCH_PRICING_FILE"))
 	rootCmd.PersistentFlags().StringVar(&pricingFile, "pricing-file", pricingFile, "optional path to pricing json (env WORKBENCH_PRICING_FILE)")
