@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -558,6 +559,86 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 
 	cmd, arg := splitSlashCommand(line)
 	switch cmd {
+	case "editor":
+		cur, err := resolveWorkDir(r.opts.WorkDir)
+		if err != nil {
+			return "", true, err
+		}
+		vpath, display, err := resolveWorkdirVPathFromArg(cur, arg)
+		if err != nil {
+			r.emitPreInit(events.Event{
+				Type:    "ui.editor.error",
+				Message: "Editor",
+				Data: map[string]string{
+					"err": err.Error(),
+				},
+				Store:   boolp(false),
+				Console: boolp(false),
+			})
+			return "", true, nil
+		}
+		r.emitPreInit(events.Event{
+			Type:    "ui.editor.open",
+			Message: "Open editor",
+			Data: map[string]string{
+				"vpath": vpath,
+				"path":  display,
+			},
+			Store:   boolp(false),
+			Console: boolp(false),
+		})
+		return "", true, nil
+	case "open":
+		cur, err := resolveWorkDir(r.opts.WorkDir)
+		if err != nil {
+			return "", true, err
+		}
+		_, display, err := resolveWorkdirVPathFromArg(cur, arg)
+		if err != nil {
+			r.emitPreInit(events.Event{
+				Type:    "ui.open.error",
+				Message: "Open",
+				Data: map[string]string{
+					"err": err.Error(),
+				},
+				Store:   boolp(false),
+				Console: boolp(false),
+			})
+			return "", true, nil
+		}
+
+		in, _ := json.Marshal(map[string]string{"path": display})
+		inv := tools.NewBuiltinOpenInvoker(cur)
+		_, invErr := inv.Invoke(r.ctx, types.ToolRequest{
+			Version:  "v1",
+			CallID:   "preinit",
+			ToolID:   types.ToolID("builtin.open"),
+			ActionID: "open",
+			Input:    in,
+		})
+		if invErr != nil {
+			r.emitPreInit(events.Event{
+				Type:    "ui.open.error",
+				Message: "Open",
+				Data: map[string]string{
+					"path": display,
+					"err":  invErr.Error(),
+				},
+				Store:   boolp(false),
+				Console: boolp(false),
+			})
+			return "", true, nil
+		}
+		r.emitPreInit(events.Event{
+			Type:    "ui.open.ok",
+			Message: "Opened file",
+			Data: map[string]string{
+				"path": display,
+			},
+			Store:   boolp(false),
+			Console: boolp(false),
+		})
+		return "", true, nil
 	case "model":
 		cur := strings.TrimSpace(r.opts.Model)
 		if cur == "" {
@@ -711,10 +792,70 @@ func (r *lazyNewSessionTurnRunner) ReadVFS(ctx context.Context, path string, max
 	if r == nil {
 		return "", 0, false, fmt.Errorf("runner is nil")
 	}
+	// Support reading from /workdir before the first user message, so /editor can be
+	// used without forcing a session/run to be created.
 	if !r.initialized || r.engine == nil {
-		return "", 0, false, fmt.Errorf("no active run (send a message first)")
+		if !strings.HasPrefix(strings.TrimSpace(path), "/workdir/") {
+			return "", 0, false, fmt.Errorf("no active run (send a message first)")
+		}
+		base, err := resolveWorkDir(r.opts.WorkDir)
+		if err != nil {
+			return "", 0, false, err
+		}
+		res, err := resources.NewWorkdirResource(base)
+		if err != nil {
+			return "", 0, false, err
+		}
+		sub := strings.TrimPrefix(strings.TrimSpace(path), "/workdir/")
+		sub, _, err = vfsutil.NormalizeResourceSubpath(sub)
+		if err != nil || sub == "" || sub == "." {
+			return "", 0, false, fmt.Errorf("invalid workdir path: %s", path)
+		}
+		b, err := res.Read(sub)
+		if err != nil {
+			return "", 0, false, err
+		}
+		bytesLen = len(b)
+		if maxBytes <= 0 {
+			maxBytes = 16 * 1024
+		}
+		if bytesLen > maxBytes {
+			b = b[:maxBytes]
+			truncated = true
+		}
+		_ = ctx
+		return string(b), bytesLen, truncated, nil
 	}
 	return r.engine.ReadVFS(ctx, path, maxBytes)
+}
+
+func (r *lazyNewSessionTurnRunner) WriteVFS(ctx context.Context, path string, data []byte) error {
+	if r == nil {
+		return fmt.Errorf("runner is nil")
+	}
+	// Support writing under /workdir before the first user message, so /editor can
+	// save without creating a session/run.
+	if !r.initialized || r.engine == nil {
+		if !strings.HasPrefix(strings.TrimSpace(path), "/workdir/") {
+			return fmt.Errorf("no active run (send a message first)")
+		}
+		base, err := resolveWorkDir(r.opts.WorkDir)
+		if err != nil {
+			return err
+		}
+		res, err := resources.NewWorkdirResource(base)
+		if err != nil {
+			return err
+		}
+		sub := strings.TrimPrefix(strings.TrimSpace(path), "/workdir/")
+		sub, _, err = vfsutil.NormalizeResourceSubpath(sub)
+		if err != nil || sub == "" || sub == "." {
+			return fmt.Errorf("invalid workdir path: %s", path)
+		}
+		_ = ctx
+		return res.Write(sub, data)
+	}
+	return r.engine.WriteVFS(ctx, path, data)
 }
 
 func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
@@ -1160,6 +1301,14 @@ func (r *tuiTurnRunner) ReadVFS(ctx context.Context, path string, maxBytes int) 
 	return string(b), bytesLen, truncated, nil
 }
 
+func (r *tuiTurnRunner) WriteVFS(ctx context.Context, path string, data []byte) error {
+	if r == nil || r.fs == nil {
+		return fmt.Errorf("vfs not available")
+	}
+	_ = ctx
+	return r.fs.Write(path, data)
+}
+
 func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, error) {
 	if r == nil {
 		return "", fmt.Errorf("runner is nil")
@@ -1506,6 +1655,56 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 
 	cmd, arg := splitSlashCommand(line)
 	switch cmd {
+	case "editor":
+		vpath, display, err := resolveWorkdirVPathFromArg(r.workdirBase, arg)
+		if err != nil {
+			r.mustEmit(context.Background(), events.Event{
+				Type:    "ui.editor.error",
+				Message: "Editor",
+				Data: map[string]string{
+					"err": err.Error(),
+				},
+				Store:   boolp(false),
+				Console: boolp(false),
+			})
+			return "", true
+		}
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "ui.editor.open",
+			Message: "Open editor",
+			Data: map[string]string{
+				"vpath": vpath,
+				"path":  display,
+			},
+			Store:   boolp(false),
+			Console: boolp(false),
+		})
+		return "", true
+	case "open":
+		_, display, err := resolveWorkdirVPathFromArg(r.workdirBase, arg)
+		if err != nil {
+			r.mustEmit(context.Background(), events.Event{
+				Type:    "ui.open.error",
+				Message: "Open",
+				Data: map[string]string{
+					"err": err.Error(),
+				},
+				Store:   boolp(false),
+				Console: boolp(false),
+			})
+			return "", true
+		}
+		in, _ := json.Marshal(map[string]string{"path": display})
+		// Execute via the normal host primitive pathway so this appears in the Activity feed
+		// (tool.run) without involving the model/agent loop.
+		_ = r.agent.Exec.Exec(context.Background(), types.HostOpRequest{
+			Op:       types.HostOpToolRun,
+			ToolID:   types.ToolID("builtin.open"),
+			ActionID: "open",
+			Input:    in,
+		})
+		return "", true
+
 	case "model":
 		cur := strings.TrimSpace(r.model)
 		if cur == "" {
@@ -1618,6 +1817,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		if r.builtinInvokers != nil {
 			r.builtinInvokers[types.ToolID("builtin.bash")] = tools.NewBuiltinBashInvoker(workdirRes.BaseDir)
 			r.builtinInvokers[types.ToolID("builtin.ripgrep")] = tools.NewBuiltinRipgrepInvoker(workdirRes.BaseDir)
+			r.builtinInvokers[types.ToolID("builtin.open")] = tools.NewBuiltinOpenInvoker(workdirRes.BaseDir)
 		}
 
 		r.mustEmit(context.Background(), events.Event{
@@ -1669,6 +1869,53 @@ func splitSlashCommand(line string) (cmd string, arg string) {
 		arg = strings.TrimSpace(line[i+len(parts[0]):])
 	}
 	return cmd, arg
+}
+
+func resolveWorkdirVPathFromArg(workdirBase, arg string) (vpath string, display string, err error) {
+	workdirBase = strings.TrimSpace(workdirBase)
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return "", "", fmt.Errorf("usage: /editor <path> or /editor @<path>")
+	}
+
+	// Prefer @token parsing (supports quoting).
+	ref := arg
+	if strings.HasPrefix(strings.TrimSpace(arg), "@") {
+		toks := ExtractAtRefs(arg)
+		if len(toks) == 0 {
+			return "", "", fmt.Errorf("invalid @reference")
+		}
+		ref = toks[0]
+	} else {
+		ref = strings.Trim(ref, `"'“”‘’`)
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", "", fmt.Errorf("path is required")
+	}
+
+	// Allow absolute paths, but only if they remain within the current workdir.
+	if filepath.IsAbs(ref) {
+		if workdirBase == "" {
+			return "", "", fmt.Errorf("workdir is not set")
+		}
+		abs := filepath.Clean(ref)
+		rel, err := filepath.Rel(workdirBase, abs)
+		if err != nil {
+			return "", "", fmt.Errorf("path must be within workdir")
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == ".." || strings.HasPrefix(rel, "../") {
+			return "", "", fmt.Errorf("path must be within workdir")
+		}
+		ref = rel
+	}
+
+	clean, _, err := vfsutil.NormalizeResourceSubpath(ref)
+	if err != nil || clean == "" || clean == "." {
+		return "", "", fmt.Errorf("invalid path: %s", ref)
+	}
+	return "/workdir/" + clean, clean, nil
 }
 
 func handleModelCommandPreInit(currentModel, pricingFile, arg string) (nextModel string, out string, handled bool) {

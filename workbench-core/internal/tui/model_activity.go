@@ -13,6 +13,124 @@ import (
 
 func (m *Model) observeActivityEvent(ev events.Event) {
 	switch ev.Type {
+	case "ui.editor.open":
+		m.activitySeq++
+		id := fmt.Sprintf("act-%d", m.activitySeq)
+		now := time.Now()
+		fin := now
+
+		p := strings.TrimSpace(ev.Data["path"])
+		if p == "" {
+			p = strings.TrimSpace(ev.Data["vpath"])
+		}
+		title := "Open editor"
+		if p != "" {
+			title = "Edit " + p
+		}
+
+		act := Activity{
+			ID:         id,
+			Kind:       "ui.editor.open",
+			Title:      title,
+			Status:     ActivityOK,
+			StartedAt:  now,
+			FinishedAt: &fin,
+			Duration:   0,
+			Path:       p,
+			Ok:         "true",
+		}
+		m.activities = append(m.activities, act)
+		m.activityIndexByID[id] = len(m.activities) - 1
+		m.refreshActivityList()
+		m.activityList.Select(len(m.activities) - 1)
+		m.refreshActivityDetail()
+		return
+
+	case "ui.editor.error":
+		m.activitySeq++
+		id := fmt.Sprintf("act-%d", m.activitySeq)
+		now := time.Now()
+		fin := now
+
+		act := Activity{
+			ID:         id,
+			Kind:       "ui.editor.open",
+			Title:      "Editor error",
+			Status:     ActivityError,
+			StartedAt:  now,
+			FinishedAt: &fin,
+			Duration:   0,
+			Ok:         "false",
+			Error:      strings.TrimSpace(ev.Data["err"]),
+		}
+		m.activities = append(m.activities, act)
+		m.activityIndexByID[id] = len(m.activities) - 1
+		m.refreshActivityList()
+		m.activityList.Select(len(m.activities) - 1)
+		m.refreshActivityDetail()
+		return
+
+	case "ui.open.ok":
+		m.activitySeq++
+		id := fmt.Sprintf("act-%d", m.activitySeq)
+		now := time.Now()
+		fin := now
+
+		p := strings.TrimSpace(ev.Data["path"])
+		title := "Opened file"
+		if p != "" {
+			title = "Open " + p
+		}
+
+		act := Activity{
+			ID:         id,
+			Kind:       "ui.open",
+			Title:      title,
+			Status:     ActivityOK,
+			StartedAt:  now,
+			FinishedAt: &fin,
+			Duration:   0,
+			Path:       p,
+			Ok:         "true",
+		}
+		m.activities = append(m.activities, act)
+		m.activityIndexByID[id] = len(m.activities) - 1
+		m.refreshActivityList()
+		m.activityList.Select(len(m.activities) - 1)
+		m.refreshActivityDetail()
+		return
+
+	case "ui.open.error":
+		m.activitySeq++
+		id := fmt.Sprintf("act-%d", m.activitySeq)
+		now := time.Now()
+		fin := now
+
+		p := strings.TrimSpace(ev.Data["path"])
+		title := "Open failed"
+		if p != "" {
+			title = "Open " + p
+		}
+
+		act := Activity{
+			ID:         id,
+			Kind:       "ui.open",
+			Title:      title,
+			Status:     ActivityError,
+			StartedAt:  now,
+			FinishedAt: &fin,
+			Duration:   0,
+			Path:       p,
+			Ok:         "false",
+			Error:      strings.TrimSpace(ev.Data["err"]),
+		}
+		m.activities = append(m.activities, act)
+		m.activityIndexByID[id] = len(m.activities) - 1
+		m.refreshActivityList()
+		m.activityList.Select(len(m.activities) - 1)
+		m.refreshActivityDetail()
+		return
+
 	case "workdir.changed":
 		m.activitySeq++
 		id := fmt.Sprintf("act-%d", m.activitySeq)

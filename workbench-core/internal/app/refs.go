@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/vfs"
@@ -28,7 +29,12 @@ type RefResolution struct {
 
 // ExtractAtRefs finds @tokens inside free-form user input.
 //
-// Tokens are conservative: "@<path-like>" where <path-like> contains only
+// Supported forms:
+//   - Unquoted: @path/to/file.txt
+//   - Quoted:   @"my file.md"  or @'my file.md'
+//   - Smart quotes: @“my file.md” or @‘my file.md’
+//
+// Unquoted tokens are conservative: "@<path-like>" where <path-like> contains only
 // letters/digits plus "._-/".
 func ExtractAtRefs(userText string) []string {
 	userText = strings.ReplaceAll(userText, "\r", "")
@@ -55,6 +61,21 @@ func ExtractAtRefs(userText string) []string {
 			continue
 		}
 		j := i + 1
+		if j >= len(userText) {
+			continue
+		}
+
+		// Quoted token: @"..." / @'...' / @“...” / @‘...’
+		if tok, end, ok := consumeAtQuotedToken(userText, j); ok {
+			if tok != "" && !seen[tok] {
+				seen[tok] = true
+				out = append(out, tok)
+			}
+			i = end - 1
+			continue
+		}
+
+		// Unquoted token.
 		for j < len(userText) {
 			r := rune(userText[j])
 			if !isTokChar(r) {
@@ -76,6 +97,45 @@ func ExtractAtRefs(userText string) []string {
 		i = j - 1
 	}
 	return out
+}
+
+func consumeAtQuotedToken(s string, start int) (tok string, end int, ok bool) {
+	if start >= len(s) {
+		return "", start, false
+	}
+	open, openSize := utf8.DecodeRuneInString(s[start:])
+	if open == utf8.RuneError && openSize == 1 {
+		return "", start, false
+	}
+	close := rune(0)
+	switch open {
+	case '"':
+		close = '"'
+	case '\'':
+		close = '\''
+	case '“':
+		close = '”'
+	case '‘':
+		close = '’'
+	default:
+		return "", start, false
+	}
+	// Allow optional @<quote> with no whitespace. start points at the quote.
+	i := start + openSize
+	for i < len(s) {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			i++
+			continue
+		}
+		if r == close {
+			raw := s[start+openSize : i]
+			return strings.TrimSpace(raw), i + size, true
+		}
+		i += size
+	}
+	// No closing quote; treat as not-a-token.
+	return "", start, false
 }
 
 // ResolveAtRefs resolves @tokens to bounded file attachments.

@@ -2,7 +2,9 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strconv"
 	"strings"
@@ -24,6 +26,17 @@ type TurnRunner interface {
 	RunTurn(ctx context.Context, userMsg string) (final string, err error)
 }
 
+// vfsAccessor is an optional extension interface implemented by the app TurnRunner.
+//
+// The chat transcript is driven by RunTurn(), but some UI workflows (like the in-TUI
+// editor and artifact preview) need direct access to mounted VFS paths.
+//
+// This keeps the agent loop contract unchanged: the editor is a host UX feature.
+type vfsAccessor interface {
+	ReadVFS(ctx context.Context, path string, maxBytes int) (text string, bytesLen int, truncated bool, err error)
+	WriteVFS(ctx context.Context, path string, data []byte) error
+}
+
 type eventMsg events.Event
 
 type turnDoneMsg struct {
@@ -36,6 +49,18 @@ type fileViewMsg struct {
 	content   string
 	truncated bool
 	err       error
+}
+
+type editorLoadMsg struct {
+	vpath   string
+	content string
+	notice  string
+	err     error
+}
+
+type editorSaveMsg struct {
+	vpath string
+	err   error
 }
 
 type Model struct {
@@ -85,6 +110,13 @@ type Model struct {
 	fileViewContent   string
 	fileViewTruncated bool
 	fileViewErr       string
+
+	editorOpen   bool
+	editorVPath  string
+	editorBuf    textarea.Model
+	editorDirty  bool
+	editorErr    string
+	editorNotice string
 
 	sessionTitle  string
 	workflowTitle string
@@ -229,6 +261,17 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	multi.FocusedStyle = multiStyle
 	multi.BlurredStyle = multiStyle
 
+	editor := textarea.New()
+	editor.Placeholder = ""
+	editor.Prompt = ""
+	editor.ShowLineNumbers = true
+	editor.CharLimit = 0
+	editor.SetHeight(1)
+	editorStyle := plainTextAreaStyle
+	editorStyle.Prompt = lipgloss.NewStyle()
+	editor.FocusedStyle = editorStyle
+	editor.BlurredStyle = editorStyle
+
 	m := Model{
 		ctx:               ctx,
 		runner:            runner,
@@ -240,6 +283,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 		activityIndexByID: map[string]int{},
 		single:            single,
 		multiline:         multi,
+		editorBuf:         editor,
 
 		styleHeaderBar: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#c0c0c0")),
@@ -325,6 +369,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Global quit.
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
+		}
+
+		// In-TUI editor mode: capture keys and render a full-screen editor.
+		if m.editorOpen {
+			switch msg.Type {
+			case tea.KeyEsc:
+				m.editorOpen = false
+				m.editorVPath = ""
+				m.editorDirty = false
+				m.editorErr = ""
+				m.editorNotice = ""
+				m.focus = focusInput
+				if m.isMulti {
+					m.multiline.Focus()
+				} else {
+					m.single.Focus()
+				}
+				m.layout()
+				return m, nil
+			}
+			if msg.String() == "ctrl+o" {
+				return m, m.saveEditor()
+			}
+
+			before := m.editorBuf.Value()
+			var cmd tea.Cmd
+			m.editorBuf, cmd = m.editorBuf.Update(msg)
+			if m.editorBuf.Value() != before {
+				m.editorDirty = true
+				m.editorNotice = ""
+			}
+			return m, cmd
 		}
 
 		// Transcript scrolling (mouse capture is off by default for native selection).
@@ -527,7 +603,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		ev := events.Event(msg)
 		m.onEvent(ev)
-		return m, m.waitEvent()
+		cmds := []tea.Cmd{m.waitEvent()}
+		if ev.Type == "ui.editor.open" {
+			if v := strings.TrimSpace(ev.Data["vpath"]); v != "" {
+				cmds = append(cmds, m.openEditor(v))
+			}
+		}
+		return m, tea.Batch(cmds...)
+
+	case editorLoadMsg:
+		if strings.TrimSpace(msg.vpath) == "" || msg.vpath != m.editorVPath {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.editorErr = msg.err.Error()
+			m.editorBuf.SetValue("")
+			m.editorDirty = false
+			m.editorNotice = ""
+		} else {
+			m.editorErr = ""
+			m.editorBuf.SetValue(msg.content)
+			m.editorDirty = false
+			m.editorNotice = strings.TrimSpace(msg.notice)
+		}
+		m.layout()
+		return m, nil
+
+	case editorSaveMsg:
+		if strings.TrimSpace(msg.vpath) == "" || msg.vpath != m.editorVPath {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.editorErr = msg.err.Error()
+			return m, nil
+		}
+		m.editorErr = ""
+		m.editorNotice = "saved"
+		m.editorDirty = false
+		return m, nil
 
 	case fileViewMsg:
 		// Ignore stale responses.
@@ -590,10 +703,106 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	if m.editorOpen {
+		return m.renderEditorView()
+	}
 	header := m.renderHeader()
 	body := m.renderBody()
 	input := m.renderInput()
 	return header + "\n" + body + "\n" + input
+}
+
+func (m Model) renderEditorView() string {
+	header := m.renderHeader()
+
+	title := m.editorTitle()
+	w := max(1, m.width-2)
+	bar := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#c0c0c0")).
+		Padding(0, 1).
+		Render(truncateMiddle(title, w))
+
+	bodyH := max(1, m.height-lipgloss.Height(header)-lipgloss.Height(bar)-2)
+	m.editorBuf.SetHeight(bodyH)
+	m.editorBuf.SetWidth(max(1, m.width-2))
+	editor := lipgloss.NewStyle().Padding(0, 1).Render(m.editorBuf.View())
+
+	footer := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#707070")).
+		Padding(0, 1).
+		Render("ctrl+o save  esc cancel")
+
+	return header + "\n" + bar + "\n" + editor + "\n" + footer
+}
+
+func (m Model) editorTitle() string {
+	vp := strings.TrimSpace(m.editorVPath)
+	name := vp
+	switch {
+	case strings.HasPrefix(vp, "/workdir/"):
+		name = strings.TrimPrefix(vp, "/workdir/")
+	case strings.HasPrefix(vp, "/workspace/"):
+		name = strings.TrimPrefix(vp, "/workspace/")
+	}
+	title := "Editing: " + name
+	if m.editorDirty {
+		title += " *"
+	}
+	if strings.TrimSpace(m.editorNotice) != "" {
+		title += " · " + strings.TrimSpace(m.editorNotice)
+	}
+	if strings.TrimSpace(m.editorErr) != "" {
+		title += " · error: " + strings.TrimSpace(m.editorErr)
+	}
+	return title
+}
+
+func (m *Model) openEditor(vpath string) tea.Cmd {
+	m.editorOpen = true
+	m.editorVPath = strings.TrimSpace(vpath)
+	m.editorDirty = false
+	m.editorErr = ""
+	m.editorNotice = ""
+	m.editorBuf.SetValue("")
+	m.editorBuf.Focus()
+	m.layout()
+
+	return func() tea.Msg {
+		acc, ok := m.runner.(vfsAccessor)
+		if !ok {
+			return editorLoadMsg{vpath: vpath, err: fmt.Errorf("vfs access not available")}
+		}
+		txt, _, truncated, err := acc.ReadVFS(m.ctx, vpath, 512*1024)
+		if err != nil {
+			// Missing file is a valid workflow: open a new file and allow saving it.
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrNotExist) {
+				return editorLoadMsg{vpath: vpath, content: "", notice: "new file"}
+			}
+			return editorLoadMsg{vpath: vpath, err: err}
+		}
+		if truncated {
+			return editorLoadMsg{vpath: vpath, err: fmt.Errorf("file too large to edit in TUI (truncated)")}
+		}
+		return editorLoadMsg{vpath: vpath, content: txt}
+	}
+}
+
+func (m *Model) saveEditor() tea.Cmd {
+	vpath := strings.TrimSpace(m.editorVPath)
+	if vpath == "" {
+		return nil
+	}
+	data := []byte(m.editorBuf.Value())
+	return func() tea.Msg {
+		acc, ok := m.runner.(vfsAccessor)
+		if !ok {
+			return editorSaveMsg{vpath: vpath, err: fmt.Errorf("vfs access not available")}
+		}
+		if err := acc.WriteVFS(m.ctx, vpath, data); err != nil {
+			return editorSaveMsg{vpath: vpath, err: err}
+		}
+		return editorSaveMsg{vpath: vpath}
+	}
 }
 
 func (m *Model) toggleMultiline() {

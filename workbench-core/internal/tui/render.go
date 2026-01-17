@@ -118,6 +118,48 @@ func classifyEvent(ev events.Event) RenderResult {
 		}
 		return res
 
+	case "ui.editor.open":
+		res.Class = RenderAction
+		p := strings.TrimSpace(ev.Data["path"])
+		if p == "" {
+			p = strings.TrimSpace(ev.Data["vpath"])
+		}
+		if p != "" {
+			res.Text = "Edit " + p
+		} else {
+			res.Text = "Open editor"
+		}
+		return res
+	case "ui.editor.error":
+		res.Class = RenderAction
+		if e := strings.TrimSpace(ev.Data["err"]); e != "" {
+			res.Text = "Editor error: " + e
+		} else {
+			res.Text = "Editor error"
+		}
+		return res
+	case "ui.open.ok":
+		res.Class = RenderAction
+		p := strings.TrimSpace(ev.Data["path"])
+		if p != "" {
+			res.Text = "Opened " + p
+		} else {
+			res.Text = "Opened file"
+		}
+		return res
+	case "ui.open.error":
+		res.Class = RenderAction
+		p := strings.TrimSpace(ev.Data["path"])
+		e := strings.TrimSpace(ev.Data["err"])
+		if p != "" && e != "" {
+			res.Text = "Open failed: " + p + " (" + e + ")"
+		} else if e != "" {
+			res.Text = "Open failed: " + e
+		} else {
+			res.Text = "Open failed"
+		}
+		return res
+
 	case "workdir.changed":
 		res.Class = RenderAction
 		from := strings.TrimSpace(ev.Data["from"])
@@ -291,6 +333,22 @@ func renderToolRunTranscript(toolID, actionID, input string) string {
 			m = "GET"
 		}
 		return m + " " + u
+
+	case "builtin.open":
+		if actionID != "open" {
+			return fmt.Sprintf("%s/%s", toolID, actionID)
+		}
+		var in struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(input), &in); err != nil {
+			return "Open"
+		}
+		p := strings.TrimSpace(in.Path)
+		if p == "" {
+			return "Open"
+		}
+		return "Open " + p
 	}
 
 	// Default: don't leak opaque tool inputs into chat.
@@ -400,6 +458,22 @@ func renderToolRunInspector(toolID, actionID, input string) string {
 			return fmt.Sprintf("%s %s %s maxBytes=%d", base, m, truncateRight(u, 140), in.MaxBytes)
 		}
 		return fmt.Sprintf("%s %s %s", base, m, truncateRight(u, 160))
+
+	case "builtin.open":
+		if actionID != "open" {
+			break
+		}
+		var in struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(input), &in); err != nil {
+			break
+		}
+		p := strings.TrimSpace(in.Path)
+		if p == "" {
+			break
+		}
+		return fmt.Sprintf("%s path=%s", base, quoteShort(p, 140))
 
 	case "builtin.format":
 		// Avoid echoing large text payloads; show only metadata.

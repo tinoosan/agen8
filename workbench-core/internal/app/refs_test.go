@@ -136,3 +136,21 @@ func TestResolveAtRefs_Ambiguous(t *testing.T) {
 		t.Fatalf("expected ambiguous candidates for dup.txt")
 	}
 }
+
+func TestExtractAtRefs_Quoted(t *testing.T) {
+	t.Parallel()
+
+	got := ExtractAtRefs(`please open @"my file.md" and @‘notes one.md’ and @cmd/main.go`)
+	if len(got) != 3 {
+		t.Fatalf("got %d tokens, want %d (%v)", len(got), 3, got)
+	}
+	if got[0] != "my file.md" {
+		t.Fatalf("got[0]=%q, want %q", got[0], "my file.md")
+	}
+	if got[1] != "notes one.md" {
+		t.Fatalf("got[1]=%q, want %q", got[1], "notes one.md")
+	}
+	if got[2] != "cmd/main.go" {
+		t.Fatalf("got[2]=%q, want %q", got[2], "cmd/main.go")
+	}
+}
