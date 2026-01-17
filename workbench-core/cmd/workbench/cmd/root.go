@@ -20,6 +20,7 @@ var (
 	defaultTitle string
 	uiMode       string
 	pricingFile  string
+	enableMouse  bool
 
 	maxSteps           int
 	maxTraceBytes      int
@@ -54,6 +55,17 @@ new run in that session (workspaces remain run-scoped).
 		}
 		if maxContextB <= 0 {
 			return fmt.Errorf("--context-bytes must be > 0")
+		}
+
+		// Mouse mode is opt-in. By default the TUI does NOT capture the mouse so users
+		// can drag-select text in the transcript with their terminal's native selection.
+		//
+		// When enabled, Bubble Tea captures mouse events (wheel, clicks), which typically
+		// disables native selection unless the terminal supports shift-drag selection.
+		if enableMouse {
+			_ = os.Setenv("WORKBENCH_MOUSE", "true")
+		} else {
+			_ = os.Unsetenv("WORKBENCH_MOUSE")
 		}
 
 		// Pricing resolution (model-picker safe):
@@ -137,6 +149,9 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&defaultTitle, "title", "workbench", "title for new sessions (workbench only)")
 	rootCmd.PersistentFlags().StringVar(&defaultGoal, "goal", "interactive chat", "initial goal for the run (workbench only)")
 	rootCmd.PersistentFlags().StringVar(&uiMode, "ui", "tui", "interactive UI mode: tui or repl")
+	enableMouse = envBool("WORKBENCH_MOUSE", false)
+	enableMouse = envBool("WORKBENCH_MOUSE", true)
+	rootCmd.PersistentFlags().BoolVar(&enableMouse, "mouse", enableMouse, "enable Bubble Tea mouse capture (mouse wheel scrolling; may disable native selection)")
 	pricingFile = strings.TrimSpace(os.Getenv("WORKBENCH_PRICING_FILE"))
 	rootCmd.PersistentFlags().StringVar(&pricingFile, "pricing-file", pricingFile, "optional path to pricing json (env WORKBENCH_PRICING_FILE)")
 	rootCmd.PersistentFlags().IntVar(&maxSteps, "max-steps", 200, "max agent steps per user turn")

@@ -206,6 +206,28 @@ func TestLayout_ViewNeverExceedsTerminalHeight_WhenActivityOpen(t *testing.T) {
 	}
 }
 
+func TestTranscript_PgDnScrollsEvenWhenInputFocused(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 100
+	m.height = 16
+	m.layout()
+
+	// Fill transcript so it can scroll.
+	for i := 0; i < 80; i++ {
+		m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: "line"})
+	}
+
+	// Force to top so PgDn has room to scroll.
+	m.transcript.SetYOffset(0)
+	before := m.transcript.YOffset
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	updated := m2.(Model)
+	after := updated.transcript.YOffset
+	if after <= before {
+		t.Fatalf("expected PgDn to increase YOffset, before=%d after=%d", before, after)
+	}
+}
+
 func TestLayout_ViewLinesDoNotExceedTerminalWidth_WhenActivityOpen(t *testing.T) {
 	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
 	m.width = 120

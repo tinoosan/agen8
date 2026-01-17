@@ -1,0 +1,196 @@
+package tui
+
+import (
+	"fmt"
+	"math"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wordwrap"
+)
+
+func (m *Model) layout() {
+	wasAtBottom := m.transcript.AtBottom()
+
+	// Width-dependent components (header + footer) can wrap when the terminal is narrow.
+	// We compute their real rendered heights so the header is never "pushed off" by a
+	// footer that becomes taller due to wrapping.
+	m.single.SetWidth(max(20, m.width-6))
+	m.multiline.SetWidth(max(20, m.width-6))
+
+	headerH := lipgloss.Height(m.renderHeader())
+	if headerH < 1 {
+		headerH = 1
+	}
+	footerH := lipgloss.Height(m.renderInput())
+	if footerH < 1 {
+		footerH = 1
+	}
+
+	bodyH := m.height - headerH - footerH
+	if bodyH < 1 {
+		bodyH = 1
+	}
+
+	m.transcript.Height = bodyH
+
+	mainW := m.width
+	detailW := 0
+	if m.showDetails {
+		// 70/30 split with a minimum transcript width.
+		detailW = int(math.Round(float64(m.width) * 0.33))
+		if detailW < 32 {
+			detailW = 32
+		}
+		if detailW > m.width-40 {
+			detailW = max(32, m.width-40)
+		}
+		mainW = m.width - detailW
+	}
+
+	m.transcript.Width = max(40, mainW)
+	if detailW != 0 {
+		// The right pane has a border, so its inner content must be sized to
+		// fit within (detailW-2)x(bodyH-2). If we let inner components render
+		// taller than the pane, the combined view can exceed terminal height and
+		// cause the header to appear to "disappear" (clipped off the top).
+		innerW := max(24, detailW-2)
+		innerH := max(1, bodyH-2)
+
+		m.activityList.SetWidth(max(24, innerW))
+
+		// Split the inner height between list and details.
+		listH := max(6, innerH/2)
+		if listH > innerH-1 {
+			listH = max(1, innerH-1)
+		}
+		m.activityList.SetHeight(listH)
+
+		m.activityDetail.Width = max(24, innerW)
+		// No extra divider line between list + detail; keep the right pane height exact.
+		m.activityDetail.Height = max(1, innerH-listH)
+	}
+
+	m.rebuildTranscript()
+	if wasAtBottom {
+		m.transcript.GotoBottom()
+	}
+	m.refreshActivityDetail()
+
+	// Recompute once after content/layout changes so the footer measurement stays correct
+	// for the next resize cycle.
+}
+
+func (m Model) renderHeader() string {
+	left := m.styleHeaderApp.Render("workbench")
+
+	mid := strings.TrimSpace(m.workflowTitle)
+	if mid == "" {
+		mid = strings.TrimSpace(m.sessionTitle)
+	}
+	if mid == "" {
+		mid = "interactive"
+	}
+	mid = truncateMiddle(mid, max(16, m.width/2))
+	mid = m.styleHeaderMid.Render(mid)
+
+	rhsParts := []string{}
+	if m.lastTurnTokens != 0 {
+		rhsParts = append(rhsParts, fmt.Sprintf("%d tok", m.lastTurnTokens))
+	}
+	if strings.TrimSpace(m.lastTurnCostUSD) != "" {
+		rhsParts = append(rhsParts, "$"+m.lastTurnCostUSD)
+	}
+	if m.totalCostUSD > 0 {
+		rhsParts = append(rhsParts, fmt.Sprintf("Σ$%.4f", m.totalCostUSD))
+	}
+	if m.turnInFlight {
+		rhsParts = append(rhsParts, "running…")
+	}
+	rhs := m.styleHeaderRHS.Render(strings.Join(rhsParts, "  "))
+
+	// Fit: left | mid | rhs
+	avail := max(1, m.width)
+	leftW := lipgloss.Width(left)
+	rhsW := lipgloss.Width(rhs)
+	midW := max(0, avail-leftW-rhsW-2)
+	mid = lipgloss.NewStyle().Width(midW).Align(lipgloss.Center).Render(mid)
+
+	return m.styleHeaderBar.Render(lipgloss.JoinHorizontal(lipgloss.Top, left, " ", mid, " ", rhs))
+}
+
+func (m Model) renderBody() string {
+	if !m.showDetails {
+		return m.transcript.View()
+	}
+
+	// Note: lipgloss Style Width/Height refer to the content area and do not include
+	// border width/height. Since the right pane uses a border, we size it using the
+	// inner dimensions so the overall pane stays exactly aligned with the transcript.
+	rightW := max(24, m.activityList.Width())
+	rightH := max(1, m.transcript.Height-2) // -2 for top/bottom border
+
+	// Important: keep the right pane height exactly equal to the transcript height.
+	// If the right pane is taller, Bubble Tea will clip the top of the overall view,
+	// which makes the header appear to "disappear" when Activity is toggled.
+	rightBody := lipgloss.JoinVertical(lipgloss.Top, m.activityList.View(), m.activityDetail.View())
+	rightPane := lipgloss.NewStyle().
+		Width(rightW).
+		Height(rightH).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("#303030")).
+		Render(rightBody)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, m.transcript.View(), rightPane)
+}
+
+func (m Model) renderInput() string {
+	var input string
+	if m.isMulti {
+		input = m.multiline.View()
+	} else {
+		input = m.single.View()
+	}
+
+	box := m.styleInputBox.Render(input)
+	statusRaw := m.renderStatusLine()
+	focusName := "input"
+	if m.focus == focusActivityList {
+		focusName = "activity"
+	}
+
+	hintText := "ctrl+a activity  tab focus  ctrl+g multiline  enter send  ctrl+c quit"
+	if m.showDetails {
+		hintText = "ctrl+a hide activity  tab focus  esc close  j/k↑/↓ select  e/enter expand  o open file  pgup/pgdn scroll  ctrl+t telemetry  ctrl+g multiline  ctrl+o send (multiline)"
+	} else {
+		hintText = "pgup/pgdn scroll  " + hintText
+	}
+	footerW := max(20, m.width-2)
+	hintRaw := hintText + "  focus: " + focusName
+	hint := m.styleHint.Render(wordwrap.String(hintRaw, footerW))
+	if statusRaw != "" {
+		status := m.styleHint.Render(wordwrap.String(statusRaw, footerW))
+		return box + "\n" + status + "\n" + hint
+	}
+	return box + "\n" + hint
+}
+
+func (m Model) renderStatusLine() string {
+	parts := []string{}
+	if strings.TrimSpace(m.lastTurnDuration) != "" {
+		parts = append(parts, m.lastTurnDuration)
+	}
+	if m.lastTurnTokens != 0 {
+		parts = append(parts, fmt.Sprintf("%d tokens", m.lastTurnTokens))
+	}
+	if strings.TrimSpace(m.lastTurnCostUSD) != "" {
+		parts = append(parts, "$"+m.lastTurnCostUSD)
+	}
+	if m.totalCostUSD > 0 {
+		parts = append(parts, fmt.Sprintf("Σ$%.4f", m.totalCostUSD))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "last: " + strings.Join(parts, " • ")
+}

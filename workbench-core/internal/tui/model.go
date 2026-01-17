@@ -3,7 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
-	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/reflow/wordwrap"
 	"github.com/tinoosan/workbench-core/internal/events"
 )
 
@@ -298,6 +297,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		// Transcript scrolling (mouse capture is off by default for native selection).
+		//
+		// These keys scroll the main chat transcript regardless of input focus:
+		//   - PgUp/PgDn
+		//   - Ctrl+U/Ctrl+F (half-page up/down)
+		//
+		// When the Activity panel is focused, PgUp/PgDn are routed to the details panel
+		// instead (see below).
+		if msg.Type == tea.KeyPgUp || msg.Type == tea.KeyPgDown || msg.Type == tea.KeyCtrlU || msg.Type == tea.KeyCtrlF {
+			// If Activity is focused, let the details panel consume these keys.
+			if m.showDetails && m.focus == focusActivityList {
+				break
+			}
+			var cmd tea.Cmd
+			m.transcript, cmd = m.transcript.Update(msg)
+			return m, cmd
+		}
+
 		// Toggle activity panel open/closed.
 		if msg.Type == tea.KeyCtrlA {
 			m.showDetails = !m.showDetails
@@ -547,190 +564,6 @@ func (m Model) View() string {
 	return header + "\n" + body + "\n" + input
 }
 
-func (m *Model) layout() {
-	wasAtBottom := m.transcript.AtBottom()
-
-	// Width-dependent components (header + footer) can wrap when the terminal is narrow.
-	// We compute their real rendered heights so the header is never "pushed off" by a
-	// footer that becomes taller due to wrapping.
-	m.single.SetWidth(max(20, m.width-6))
-	m.multiline.SetWidth(max(20, m.width-6))
-
-	headerH := lipgloss.Height(m.renderHeader())
-	if headerH < 1 {
-		headerH = 1
-	}
-	footerH := lipgloss.Height(m.renderInput())
-	if footerH < 1 {
-		footerH = 1
-	}
-
-	bodyH := m.height - headerH - footerH
-	if bodyH < 1 {
-		bodyH = 1
-	}
-
-	m.transcript.Height = bodyH
-
-	mainW := m.width
-	detailW := 0
-	if m.showDetails {
-		// 70/30 split with a minimum transcript width.
-		detailW = int(math.Round(float64(m.width) * 0.33))
-		if detailW < 32 {
-			detailW = 32
-		}
-		if detailW > m.width-40 {
-			detailW = max(32, m.width-40)
-		}
-		mainW = m.width - detailW
-	}
-
-	m.transcript.Width = max(40, mainW)
-	if detailW != 0 {
-		// The right pane has a border, so its inner content must be sized to
-		// fit within (detailW-2)x(bodyH-2). If we let inner components render
-		// taller than the pane, the combined view can exceed terminal height and
-		// cause the header to appear to "disappear" (clipped off the top).
-		innerW := max(24, detailW-2)
-		innerH := max(1, bodyH-2)
-
-		m.activityList.SetWidth(max(24, innerW))
-
-		// Split the inner height between list and details.
-		listH := max(6, innerH/2)
-		if listH > innerH-1 {
-			listH = max(1, innerH-1)
-		}
-		m.activityList.SetHeight(listH)
-
-		m.activityDetail.Width = max(24, innerW)
-		// No extra divider line between list + detail; keep the right pane height exact.
-		m.activityDetail.Height = max(1, innerH-listH)
-	}
-
-	m.rebuildTranscript()
-	if wasAtBottom {
-		m.transcript.GotoBottom()
-	}
-	m.refreshActivityDetail()
-
-	// Recompute once after content/layout changes so the footer measurement stays correct
-	// for the next resize cycle.
-}
-
-func (m Model) renderHeader() string {
-	left := m.styleHeaderApp.Render("workbench")
-
-	mid := strings.TrimSpace(m.workflowTitle)
-	if mid == "" {
-		mid = strings.TrimSpace(m.sessionTitle)
-	}
-	if mid == "" {
-		mid = "interactive"
-	}
-	mid = truncateMiddle(mid, max(16, m.width/2))
-	mid = m.styleHeaderMid.Render(mid)
-
-	rhsParts := []string{}
-	if m.lastTurnTokens != 0 {
-		rhsParts = append(rhsParts, fmt.Sprintf("%d tok", m.lastTurnTokens))
-	}
-	if strings.TrimSpace(m.lastTurnCostUSD) != "" {
-		rhsParts = append(rhsParts, "$"+m.lastTurnCostUSD)
-	}
-	if m.totalCostUSD > 0 {
-		rhsParts = append(rhsParts, fmt.Sprintf("Σ$%.4f", m.totalCostUSD))
-	}
-	if m.turnInFlight {
-		rhsParts = append(rhsParts, "running…")
-	}
-	rhs := m.styleHeaderRHS.Render(strings.Join(rhsParts, "  "))
-
-	// Fit: left | mid | rhs
-	avail := max(1, m.width)
-	leftW := lipgloss.Width(left)
-	rhsW := lipgloss.Width(rhs)
-	midW := max(0, avail-leftW-rhsW-2)
-	mid = lipgloss.NewStyle().Width(midW).Align(lipgloss.Center).Render(mid)
-
-	return m.styleHeaderBar.Render(lipgloss.JoinHorizontal(lipgloss.Top, left, " ", mid, " ", rhs))
-}
-
-func (m Model) renderBody() string {
-	if !m.showDetails {
-		return m.transcript.View()
-	}
-
-	// Note: lipgloss Style Width/Height refer to the content area and do not include
-	// border width/height. Since the right pane uses a border, we size it using the
-	// inner dimensions so the overall pane stays exactly aligned with the transcript.
-	rightW := max(24, m.activityList.Width())
-	rightH := max(1, m.transcript.Height-2) // -2 for top/bottom border
-
-	// Important: keep the right pane height exactly equal to the transcript height.
-	// If the right pane is taller, Bubble Tea will clip the top of the overall view,
-	// which makes the header appear to "disappear" when Activity is toggled.
-	rightBody := lipgloss.JoinVertical(lipgloss.Top, m.activityList.View(), m.activityDetail.View())
-	rightPane := lipgloss.NewStyle().
-		Width(rightW).
-		Height(rightH).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#303030")).
-		Render(rightBody)
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, m.transcript.View(), rightPane)
-}
-
-func (m Model) renderInput() string {
-	var input string
-	if m.isMulti {
-		input = m.multiline.View()
-	} else {
-		input = m.single.View()
-	}
-
-	box := m.styleInputBox.Render(input)
-	statusRaw := m.renderStatusLine()
-	focusName := "input"
-	if m.focus == focusActivityList {
-		focusName = "activity"
-	}
-
-	hintText := "ctrl+a activity  tab focus  ctrl+g multiline  enter send  ctrl+c quit"
-	if m.showDetails {
-		hintText = "ctrl+a hide activity  tab focus  esc close  j/k↑/↓ select  e/enter expand  o open file  pgup/pgdn scroll details  ctrl+t telemetry  ctrl+g multiline  ctrl+o send (multiline)"
-	}
-	footerW := max(20, m.width-2)
-	hintRaw := hintText + "  focus: " + focusName
-	hint := m.styleHint.Render(wordwrap.String(hintRaw, footerW))
-	if statusRaw != "" {
-		status := m.styleHint.Render(wordwrap.String(statusRaw, footerW))
-		return box + "\n" + status + "\n" + hint
-	}
-	return box + "\n" + hint
-}
-
-func (m Model) renderStatusLine() string {
-	parts := []string{}
-	if strings.TrimSpace(m.lastTurnDuration) != "" {
-		parts = append(parts, m.lastTurnDuration)
-	}
-	if m.lastTurnTokens != 0 {
-		parts = append(parts, fmt.Sprintf("%d tokens", m.lastTurnTokens))
-	}
-	if strings.TrimSpace(m.lastTurnCostUSD) != "" {
-		parts = append(parts, "$"+m.lastTurnCostUSD)
-	}
-	if m.totalCostUSD > 0 {
-		parts = append(parts, fmt.Sprintf("Σ$%.4f", m.totalCostUSD))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "last: " + strings.Join(parts, " • ")
-}
-
 func (m *Model) toggleMultiline() {
 	m.isMulti = !m.isMulti
 	if m.isMulti {
@@ -788,96 +621,6 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 
 func (m *Model) appendDetails(line string) {
 	_ = line
-}
-
-func (m *Model) addTranscriptItem(it transcriptItem) {
-	wasAtBottom := m.transcript.AtBottom()
-	wasEmpty := len(m.transcriptItems) == 0
-
-	m.transcriptItems = append(m.transcriptItems, it)
-	m.rebuildTranscript()
-	// If the user was at the bottom, keep them there (chat behavior). Otherwise,
-	// preserve their scroll position.
-	if wasEmpty {
-		// For the first item, keep the top visible (avoid "first message is cut off").
-		m.transcript.SetYOffset(0)
-	} else if wasAtBottom {
-		m.transcript.GotoBottom()
-	}
-}
-
-func (m *Model) rebuildTranscript() {
-	w := max(40, m.transcript.Width)
-	contentW := max(20, w-8)
-
-	lines := make([]string, 0, len(m.transcriptItems))
-	startLines := make([]int, 0, len(m.transcriptItems))
-	lineNo := 0
-	for _, it := range m.transcriptItems {
-		startLines = append(startLines, lineNo)
-		switch it.kind {
-		case transcriptSpacer:
-			lines = append(lines, m.styleDim.Render(""))
-			lineNo++
-		case transcriptUser:
-			// Render user text as markdown so pasted tasks and lists are readable.
-			body := m.styleUserLabel.Render("you> ") + strings.TrimRight(m.renderer.RenderMarkdown(it.text, contentW), "\n")
-			lines = append(lines, m.styleUserBox.Render(body))
-			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-		case transcriptAgent:
-			// Render agent answers as markdown (code blocks, bullets, tables).
-			//
-			// Important: do not prefix "agent>" inside the markdown source, otherwise
-			// fenced blocks (```json) stop being recognized by the markdown parser.
-			rendered := strings.TrimRight(m.renderer.RenderMarkdown(strings.TrimSpace(it.text), contentW), "\n")
-			rendered = prefixFirstLine(rendered, "agent> ")
-			body := m.styleAgent.Render(rendered)
-			lines = append(lines, m.styleAgentBox.Render(body))
-			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-		case transcriptError:
-			lines = append(lines, m.styleError.Render(wrapText(it.text, contentW)))
-			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-		case transcriptAction:
-			prefix := "• "
-			if it.actionIsToolRun && !it.actionIsCompleted {
-				prefix = "• Run "
-			}
-			if it.actionIsToolRun && it.actionIsCompleted {
-				prefix = "• Ran "
-			}
-			line := m.styleAction.Render(prefix + wrapText(it.actionText, max(20, w-12)))
-			if it.actionIsCompleted && strings.TrimSpace(it.actionCompletion) != "" {
-				line += "  " + m.styleDim.Render(strings.TrimSpace(it.actionCompletion))
-			}
-			lines = append(lines, line)
-			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-		}
-	}
-
-	m.transcriptItemStartLine = startLines
-	m.transcript.SetContent(strings.Join(lines, "\n"))
-	// Clamp scroll when content shrinks or re-wrap changes line count.
-	m.transcript.SetYOffset(m.transcript.YOffset)
-}
-
-func prefixFirstLine(s string, prefix string) string {
-	if s == "" {
-		return prefix
-	}
-	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
-		return prefix + s[:idx] + "\n" + s[idx+1:]
-	}
-	return prefix + s
-}
-
-func (m *Model) scrollToCurrentTurnStart() {
-	// Keep the current turn "anchored" so the user message + action lines remain visible
-	// even when the agent answer is long.
-	idx := m.lastTurnUserItemIdx
-	if idx < 0 || idx >= len(m.transcriptItemStartLine) {
-		return
-	}
-	m.transcript.SetYOffset(m.transcriptItemStartLine[idx])
 }
 
 func (m *Model) onEvent(ev events.Event) {
@@ -964,449 +707,37 @@ func (m Model) waitEvent() tea.Cmd {
 	}
 }
 
-func (m *Model) observeActivityEvent(ev events.Event) {
-	switch ev.Type {
-	case "agent.op.request":
-		op := strings.TrimSpace(ev.Data["op"])
-		if op == "" {
-			return
-		}
-		m.activitySeq++
-		id := fmt.Sprintf("act-%d", m.activitySeq)
-		now := time.Now()
-
-		act := Activity{
-			ID:            id,
-			Kind:          op,
-			Status:        ActivityPending,
-			StartedAt:     now,
-			Path:          strings.TrimSpace(ev.Data["path"]),
-			MaxBytes:      strings.TrimSpace(ev.Data["maxBytes"]),
-			ToolID:        strings.TrimSpace(ev.Data["toolId"]),
-			ActionID:      strings.TrimSpace(ev.Data["actionId"]),
-			InputJSON:     strings.TrimSpace(ev.Data["input"]),
-			TextPreview:   strings.TrimSpace(ev.Data["textPreview"]),
-			TextTruncated: strings.TrimSpace(ev.Data["textTruncated"]) == "true",
-			TextRedacted:  strings.TrimSpace(ev.Data["textRedacted"]) == "true",
-			TextIsJSON:    strings.TrimSpace(ev.Data["textIsJSON"]) == "true",
-			TextBytes:     strings.TrimSpace(ev.Data["textBytes"]),
-		}
-		if op == "tool.run" {
-			act.Command = strings.TrimSpace(renderToolRunTranscript(act.ToolID, act.ActionID, act.InputJSON))
-			if act.Command != "" {
-				act.Title = "Run " + act.Command
-			} else {
-				act.Title = "Run tool"
-			}
-		} else {
-			act.Title = renderOpRequest(ev.Data)
-		}
-
-		m.pendingActivityID = id
-		m.activities = append(m.activities, act)
-		m.activityIndexByID[id] = len(m.activities) - 1
-		m.refreshActivityList()
-		m.activityList.Select(len(m.activities) - 1)
-		m.refreshActivityDetail()
-
-	case "agent.op.response":
-		if strings.TrimSpace(ev.Data["op"]) == "" {
-			return
-		}
-		idx, ok := m.activityIndexByID[m.pendingActivityID]
-		if !ok || idx < 0 || idx >= len(m.activities) {
-			return
-		}
-		act := m.activities[idx]
-		now := time.Now()
-
-		act.Ok = strings.TrimSpace(ev.Data["ok"])
-		act.Error = strings.TrimSpace(ev.Data["err"])
-		act.CallID = strings.TrimSpace(ev.Data["callId"])
-		act.OutputPreview = strings.TrimSpace(ev.Data["outputPreview"])
-		act.BytesLen = strings.TrimSpace(ev.Data["bytesLen"])
-		act.Truncated = strings.TrimSpace(ev.Data["truncated"]) == "true"
-
-		fin := now
-		act.FinishedAt = &fin
-		act.Duration = fin.Sub(act.StartedAt)
-		if act.Ok == "true" {
-			act.Status = ActivityOK
-		} else {
-			act.Status = ActivityError
-		}
-
-		m.activities[idx] = act
-		m.pendingActivityID = ""
-		m.refreshActivityList()
-		m.refreshActivityDetail()
-	}
-}
-
-func (m *Model) refreshActivityList() {
-	items := make([]list.Item, 0, len(m.activities))
-	for _, a := range m.activities {
-		items = append(items, activityItem{act: a})
-	}
-	cur := m.activityList.Index()
-	m.activityList.SetItems(items)
-	if cur >= 0 && cur < len(items) {
-		m.activityList.Select(cur)
-	}
-}
-
-func (m *Model) refreshActivityDetail() {
-	if !m.showDetails {
-		return
-	}
-	if len(m.activities) == 0 || m.activityList.Index() < 0 || m.activityList.Index() >= len(m.activities) {
-		m.activityDetail.SetContent("")
-		return
-	}
-	w := max(24, m.activityDetail.Width-4)
-
-	telemetryBadge := ""
-	if m.showTelemetry {
-		telemetryBadge = " _(telemetry on)_"
-	}
-	header := "### Details" + telemetryBadge + "\n\n"
-	help := "_PgUp/PgDn scroll · e/enter expand · o open file · Ctrl+T telemetry_\n\n"
-
-	if m.fileViewOpen {
-		md := renderFilePreviewMarkdown(m.fileViewPath, m.fileViewContent, m.fileViewTruncated, m.fileViewErr)
-		m.activityDetail.SetContent(strings.TrimRight(m.renderer.RenderMarkdown(header+help+md, w), "\n"))
-		return
-	}
-
-	act := m.activities[m.activityList.Index()]
-	md := renderActivityDetailMarkdown(act, m.showTelemetry, m.expandOutput)
-	m.activityDetail.SetContent(strings.TrimRight(m.renderer.RenderMarkdown(header+help+md, w), "\n"))
-}
-
-func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) string {
-	var b strings.Builder
-	b.WriteString("## ")
-	b.WriteString(a.Title)
-	b.WriteString("\n\n")
-
-	b.WriteString("**Title**\n\n")
-	b.WriteString(a.Title)
-	b.WriteString("\n\n")
-
-	b.WriteString("**Fields**\n\n")
-	if strings.TrimSpace(a.Kind) != "" {
-		b.WriteString("- Operation: `")
-		b.WriteString(a.Kind)
-		b.WriteString("`\n")
-	}
-	if strings.TrimSpace(a.Path) != "" {
-		b.WriteString("- Path: `")
-		b.WriteString(a.Path)
-		b.WriteString("`\n")
-	}
-	if strings.TrimSpace(a.ToolID) != "" {
-		b.WriteString("- Tool: `")
-		b.WriteString(a.ToolID)
-		b.WriteString("`\n")
-	}
-	if strings.TrimSpace(a.ActionID) != "" {
-		b.WriteString("- Action: `")
-		b.WriteString(a.ActionID)
-		b.WriteString("`\n")
-	}
-	if strings.TrimSpace(a.CallID) != "" {
-		b.WriteString("- CallID: `")
-		b.WriteString(a.CallID)
-		b.WriteString("`\n")
-	}
-	b.WriteString("- Status: ")
-	b.WriteString(string(a.Status))
-	b.WriteString(" ")
-	b.WriteString(a.ShortStatus())
-	if a.Duration > 0 {
-		b.WriteString(" · duration=")
-		b.WriteString(a.Duration.Truncate(time.Millisecond).String())
-	}
-	b.WriteString("\n\n")
-
-	b.WriteString("**Arguments**\n\n")
-	renderedArgs := renderActivityArgumentsMarkdown(a, telemetry)
-	if strings.TrimSpace(renderedArgs) != "" {
-		b.WriteString(renderedArgs)
-		if !strings.HasSuffix(renderedArgs, "\n") {
-			b.WriteString("\n")
-		}
-	} else {
-		b.WriteString("_No arguments._\n")
-	}
-	b.WriteString("\n")
-
-	b.WriteString("**Output**\n\n")
-	if strings.TrimSpace(a.Error) != "" {
-		b.WriteString("- error: ")
-		b.WriteString(a.Error)
-		b.WriteString("\n")
-	}
-	openable := openablePathsForActivity(a)
-	if len(openable) != 0 {
-		for _, p := range openable {
-			b.WriteString("- file: `")
-			b.WriteString(p)
-			b.WriteString("` _(press `o` to open)_\n")
-		}
-	}
-
-	if (a.Kind == "fs.write" || a.Kind == "fs.append") && !a.TextRedacted && strings.TrimSpace(a.TextPreview) != "" {
-		lang := guessCodeFenceLang(a.Path, a.TextIsJSON)
-		b.WriteString("\n**Written content preview**")
-		if a.TextTruncated {
-			b.WriteString(" _(truncated)_")
-		}
-		b.WriteString("\n\n")
-		if strings.EqualFold(lang, "json") {
-			b.WriteString(FormatJSON(a.TextPreview))
-		} else {
-			b.WriteString(FormatCode(lang, a.TextPreview))
-		}
-		b.WriteString("\n")
-	} else if (a.Kind == "fs.write" || a.Kind == "fs.append") && a.TextRedacted {
-		b.WriteString("\n**Written content preview**\n\n_(redacted)_\n")
-	}
-
-	if strings.TrimSpace(a.OutputPreview) != "" {
-		txt := a.OutputPreview
-		if !expanded && len(txt) > 600 {
-			txt = txt[:599] + "…"
-		}
-		b.WriteString("\n**Tool output preview** _(press `e` to expand)_\n\n")
-		b.WriteString(FormatCode("text", txt))
-		b.WriteString("\n")
-	}
-
-	if telemetry {
-		b.WriteString("\n**Telemetry**\n\n")
-		if strings.TrimSpace(a.MaxBytes) != "" && a.Kind == "fs.read" {
-			b.WriteString("- maxBytes: ")
-			b.WriteString(a.MaxBytes)
-			b.WriteString("\n")
-		}
-		if strings.TrimSpace(a.TextBytes) != "" && (a.Kind == "fs.write" || a.Kind == "fs.append") {
-			b.WriteString("- textBytes: ")
-			b.WriteString(a.TextBytes)
-			b.WriteString("\n")
-		}
-		if strings.TrimSpace(a.BytesLen) != "" {
-			b.WriteString("- bytesLen: ")
-			b.WriteString(a.BytesLen)
-			b.WriteString("\n")
-		}
-		if a.Truncated {
-			b.WriteString("- truncated: true\n")
-		}
-	}
-
-	return b.String()
-}
-
-func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
-	var b strings.Builder
-
-	switch a.Kind {
-	case "tool.run":
-		if strings.TrimSpace(a.Command) != "" {
-			b.WriteString("- command:\n\n")
-			b.WriteString(FormatCode("bash", a.Command))
-			b.WriteString("\n")
-		}
-		if strings.TrimSpace(a.InputJSON) != "" {
-			b.WriteString("\n- input:\n\n")
-			b.WriteString(FormatJSON(a.InputJSON))
-			b.WriteString("\n")
-		}
-	default:
-		if strings.TrimSpace(a.Path) != "" {
-			b.WriteString("- path: `")
-			b.WriteString(a.Path)
-			b.WriteString("`\n")
-		}
-		if telemetry && strings.TrimSpace(a.MaxBytes) != "" && a.Kind == "fs.read" {
-			b.WriteString("- maxBytes: ")
-			b.WriteString(a.MaxBytes)
-			b.WriteString("\n")
-		}
-	}
-
-	return b.String()
-}
-
-func openablePathsForActivity(a Activity) []string {
-	paths := make([]string, 0, 2)
-	if strings.TrimSpace(a.Kind) == "tool.run" && strings.TrimSpace(a.CallID) != "" {
-		paths = append(paths, "/results/"+a.CallID+"/response.json")
-	}
-	if strings.HasPrefix(strings.TrimSpace(a.Kind), "fs.") && strings.TrimSpace(a.Path) != "" {
-		paths = append(paths, a.Path)
-	}
-	return paths
-}
-
-func renderFilePreviewMarkdown(path string, content string, truncated bool, errStr string) string {
-	var b strings.Builder
-	b.WriteString("## File preview\n\n")
-	if strings.TrimSpace(path) != "" {
-		b.WriteString("- path: `")
-		b.WriteString(strings.TrimSpace(path))
-		b.WriteString("`\n")
-	}
-	if strings.TrimSpace(errStr) != "" {
-		b.WriteString("\n**Error**\n\n")
-		b.WriteString(errStr)
-		b.WriteString("\n")
-		return b.String()
-	}
-	if strings.TrimSpace(content) == "" {
-		b.WriteString("\n_(empty)_\n")
-		return b.String()
-	}
-
-	lang := guessCodeFenceLang(path, strings.HasSuffix(strings.ToLower(path), ".json"))
-	b.WriteString("\n**Content**")
-	if truncated {
-		b.WriteString(" _(truncated)_")
-	}
-	b.WriteString("\n\n")
-
-	if strings.EqualFold(lang, "json") {
-		b.WriteString(FormatJSON(content))
-	} else {
-		b.WriteString(FormatCode(lang, content))
-	}
-	b.WriteString("\n")
-	return b.String()
-}
-
-func (m *Model) openSelectedActivityFile() tea.Cmd {
-	if !m.showDetails || len(m.activities) == 0 {
-		return nil
-	}
-	idx := m.activityList.Index()
-	if idx < 0 || idx >= len(m.activities) {
-		return nil
-	}
-	act := m.activities[idx]
-	paths := openablePathsForActivity(act)
-	if len(paths) == 0 {
-		return nil
-	}
-
-	path := paths[0]
-	m.fileViewOpen = true
-	m.fileViewPath = path
-	m.fileViewContent = "_Loading…_"
-	m.fileViewTruncated = false
-	m.fileViewErr = ""
-	m.refreshActivityDetail()
-
-	type vfsReader interface {
-		ReadVFS(ctx context.Context, path string, maxBytes int) (text string, bytesLen int, truncated bool, err error)
-	}
-	vr, ok := m.runner.(vfsReader)
-	if !ok {
-		return func() tea.Msg {
-			return fileViewMsg{path: path, err: fmt.Errorf("file preview not supported by runner")}
-		}
-	}
-
-	const maxPreviewBytes = 16 * 1024
-	return func() tea.Msg {
-		txt, _, tr, err := vr.ReadVFS(m.ctx, path, maxPreviewBytes)
-		return fileViewMsg{path: path, content: txt, truncated: tr, err: err}
-	}
-}
-
-func guessCodeFenceLang(path string, isJSON bool) string {
-	if isJSON {
-		return "json"
-	}
-	low := strings.ToLower(strings.TrimSpace(path))
-	switch {
-	case strings.HasSuffix(low, ".md"):
-		return "md"
-	case strings.HasSuffix(low, ".go"):
-		return "go"
-	case strings.HasSuffix(low, ".sh"):
-		return "sh"
-	case strings.HasSuffix(low, ".js"):
-		return "js"
-	case strings.HasSuffix(low, ".ts"):
-		return "ts"
-	case strings.HasSuffix(low, ".html"), strings.HasSuffix(low, ".htm"):
-		return "html"
-	default:
-		return "text"
-	}
-}
-
-func truncateRight(s string, maxLen int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.TrimSpace(s)
-	if maxLen <= 0 || len(s) <= maxLen {
-		return s
-	}
-	if maxLen < 2 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-1] + "…"
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func truncateMiddle(s string, maxLen int) string {
-	s = strings.TrimSpace(s)
-	if maxLen <= 0 || len(s) <= maxLen {
-		return s
-	}
-	if maxLen < 8 {
-		return s[:maxLen]
-	}
-	keep := (maxLen - 1) / 2
-	return s[:keep] + "…" + s[len(s)-keep:]
-}
-
-func firstLine(s string) string {
-	s = strings.ReplaceAll(s, "\r", "")
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	}
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	return truncateMiddle(s, 48)
-}
-
-func wrapText(s string, width int) string {
-	s = strings.ReplaceAll(s, "\r", "")
-	s = strings.TrimRight(s, "\n")
-	if width <= 0 {
-		return s
-	}
-	// Use a dedicated wrapping lib so reflow behaves consistently across width changes.
-	return wordwrap.String(s, width)
-}
-
 // Run starts the Workbench Bubble Tea program.
 func Run(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) error {
 	if runner == nil {
 		return fmt.Errorf("tui runner is required")
 	}
 	m := New(ctx, runner, evCh)
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
+
+	// Mouse capture enables mouse wheel / trackpad scrolling in the transcript.
+	//
+	// Note: enabling xterm mouse tracking often disables native terminal click+drag
+	// selection unless your terminal supports shift-drag selection. Workbench defaults
+	// to mouse scrolling; set WORKBENCH_MOUSE=false (or --mouse=false) to restore
+	// native selection behavior.
+	//
+	// Mouse mode is opt-in via:
+	//   - env: WORKBENCH_MOUSE=true/false
+	//   - flag: --mouse (wired in cmd/workbench)
+	enableMouse := strings.TrimSpace(os.Getenv("WORKBENCH_MOUSE"))
+	mouseOn := true
+	if enableMouse != "" {
+		mouseOn = enableMouse == "1" || strings.EqualFold(enableMouse, "true") || strings.EqualFold(enableMouse, "yes")
+	}
+
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	if mouseOn {
+		// Cell motion is enough for wheel/trackpad scrolling and reduces event spam
+		// compared to "all motion".
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+
+	p := tea.NewProgram(m, opts...)
 	_, err := p.Run()
 	return err
 }
