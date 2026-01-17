@@ -779,7 +779,12 @@ func (m *Model) rebuildTranscript() {
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptAgent:
 			// Render agent answers as markdown (code blocks, bullets, tables).
-			body := m.styleAgent.Render(strings.TrimRight(m.md.render("agent> "+strings.TrimSpace(it.text), contentW), "\n"))
+			//
+			// Important: do not prefix "agent>" inside the markdown source, otherwise
+			// fenced blocks (```json) stop being recognized by the markdown parser.
+			rendered := strings.TrimRight(m.md.render(strings.TrimSpace(it.text), contentW), "\n")
+			rendered = prefixFirstLine(rendered, "agent> ")
+			body := m.styleAgent.Render(rendered)
 			lines = append(lines, m.styleAgentBox.Render(body))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptError:
@@ -806,6 +811,16 @@ func (m *Model) rebuildTranscript() {
 	m.transcript.SetContent(strings.Join(lines, "\n"))
 	// Clamp scroll when content shrinks or re-wrap changes line count.
 	m.transcript.SetYOffset(m.transcript.YOffset)
+}
+
+func prefixFirstLine(s string, prefix string) string {
+	if s == "" {
+		return prefix
+	}
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		return prefix + s[:idx] + "\n" + s[idx+1:]
+	}
+	return prefix + s
 }
 
 func (m *Model) scrollToCurrentTurnStart() {
@@ -914,15 +929,20 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		now := time.Now()
 
 		act := Activity{
-			ID:        id,
-			Kind:      op,
-			Status:    ActivityPending,
-			StartedAt: now,
-			Path:      strings.TrimSpace(ev.Data["path"]),
-			MaxBytes:  strings.TrimSpace(ev.Data["maxBytes"]),
-			ToolID:    strings.TrimSpace(ev.Data["toolId"]),
-			ActionID:  strings.TrimSpace(ev.Data["actionId"]),
-			InputJSON: strings.TrimSpace(ev.Data["input"]),
+			ID:            id,
+			Kind:          op,
+			Status:        ActivityPending,
+			StartedAt:     now,
+			Path:          strings.TrimSpace(ev.Data["path"]),
+			MaxBytes:      strings.TrimSpace(ev.Data["maxBytes"]),
+			ToolID:        strings.TrimSpace(ev.Data["toolId"]),
+			ActionID:      strings.TrimSpace(ev.Data["actionId"]),
+			InputJSON:     strings.TrimSpace(ev.Data["input"]),
+			TextPreview:   strings.TrimSpace(ev.Data["textPreview"]),
+			TextTruncated: strings.TrimSpace(ev.Data["textTruncated"]) == "true",
+			TextRedacted:  strings.TrimSpace(ev.Data["textRedacted"]) == "true",
+			TextIsJSON:    strings.TrimSpace(ev.Data["textIsJSON"]) == "true",
+			TextBytes:     strings.TrimSpace(ev.Data["textBytes"]),
 		}
 		if op == "tool.run" {
 			act.Command = strings.TrimSpace(renderToolRunTranscript(act.ToolID, act.ActionID, act.InputJSON))
@@ -1051,6 +1071,29 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 			b.WriteString(a.MaxBytes)
 			b.WriteString("\n")
 		}
+		if telemetry && strings.TrimSpace(a.TextBytes) != "" && (a.Kind == "fs.write" || a.Kind == "fs.append") {
+			b.WriteString("- textBytes: ")
+			b.WriteString(a.TextBytes)
+			b.WriteString("\n")
+		}
+
+		if a.Kind == "fs.write" || a.Kind == "fs.append" {
+			if a.TextRedacted {
+				b.WriteString("\n- content: _(redacted)_\n")
+			} else if strings.TrimSpace(a.TextPreview) != "" {
+				lang := guessCodeFenceLang(a.Path, a.TextIsJSON)
+				if a.TextTruncated {
+					b.WriteString("\n- content preview: _(truncated)_\n\n```" + lang + "\n")
+				} else {
+					b.WriteString("\n- content preview:\n\n```" + lang + "\n")
+				}
+				b.WriteString(a.TextPreview)
+				if !strings.HasSuffix(a.TextPreview, "\n") {
+					b.WriteString("\n")
+				}
+				b.WriteString("```\n")
+			}
+		}
 	}
 	b.WriteString("\n**Outputs**\n\n")
 	if strings.TrimSpace(a.CallID) != "" {
@@ -1074,6 +1117,29 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 	}
 
 	return b.String()
+}
+
+func guessCodeFenceLang(path string, isJSON bool) string {
+	if isJSON {
+		return "json"
+	}
+	low := strings.ToLower(strings.TrimSpace(path))
+	switch {
+	case strings.HasSuffix(low, ".md"):
+		return "md"
+	case strings.HasSuffix(low, ".go"):
+		return "go"
+	case strings.HasSuffix(low, ".sh"):
+		return "sh"
+	case strings.HasSuffix(low, ".js"):
+		return "js"
+	case strings.HasSuffix(low, ".ts"):
+		return "ts"
+	case strings.HasSuffix(low, ".html"), strings.HasSuffix(low, ".htm"):
+		return "html"
+	default:
+		return "text"
+	}
 }
 
 func prettyJSONOneLine(s string) string {

@@ -358,6 +358,24 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 				reqData["inputBytes"] = strconv.Itoa(n)
 			}
 		}
+		if (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) && strings.TrimSpace(req.Text) != "" {
+			p, tr, red, n, isJSON := fsWriteTextPreviewForEvent(req.Path, req.Text)
+			if p != "" {
+				reqData["textPreview"] = p
+			}
+			if tr {
+				reqData["textTruncated"] = "true"
+			}
+			if red {
+				reqData["textRedacted"] = "true"
+			}
+			if n != 0 {
+				reqData["textBytes"] = strconv.Itoa(n)
+			}
+			if isJSON {
+				reqData["textIsJSON"] = "true"
+			}
+		}
 
 		mustEmit(ctx, events.Event{
 			Type:      "agent.op.request",

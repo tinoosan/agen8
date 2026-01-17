@@ -11,7 +11,21 @@ It must be either:
 - A host operation request (one of: `fs.list`, `fs.read`, `fs.write`, `fs.append`, `tool.run`)
 - Or a terminal response: `{"op":"final","text":"..."}`
 
-Do not include any other text, markdown, or code fences.
+Do not include any other text outside the JSON object.
+
+Important:
+- Do **not** wrap the JSON object itself in markdown fences (no surrounding ```).
+- When `op:"final"`, the `text` field **may** contain markdown, including fenced code blocks.
+
+### Final Response Formatting (Required)
+
+When you respond with `{"op":"final","text":"..."}`:
+
+- Write normal prose in markdown.
+- Any code, config, logs, or structured data must be in a fenced code block.
+  - Prefer specifying the language: `json`, `go`, `sh`, `md`, `txt`.
+- For JSON blocks, always emit them as ` ```json ` and pretty-print (multi-line, indented) when possible.
+- Do not use triple-backticks anywhere except inside `final.text`.
 
 ### Host Operation JSON Shapes
 

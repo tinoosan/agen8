@@ -12,6 +12,10 @@ const (
 	maxToolRunInputEventBytes = 1024
 )
 
+const (
+	maxFSWriteTextPreviewBytes = 2000
+)
+
 // toolRunInputForEvent returns a small, sanitized JSON string representation of a tool.run input payload
 // suitable for emitting in UI events.
 //
@@ -116,6 +120,41 @@ func toolRunOutputPreviewForEvent(toolID, actionID string, raw json.RawMessage) 
 	return s2
 }
 
+// fsWriteTextPreviewForEvent returns a small preview of a fs.write/fs.append payload for UI events.
+//
+// The goal is to make the Activity details panel more useful (show what was written) without
+// storing full file contents in the event stream.
+//
+// Behavior:
+// - Hard-caps size.
+// - Best-effort JSON pretty-printing when the content looks like JSON (either by extension or validity).
+// - Redacts obvious secrets (bearer tokens, api keys) conservatively.
+func fsWriteTextPreviewForEvent(path string, text string) (preview string, truncated bool, redacted bool, originalBytes int, isJSON bool) {
+	originalBytes = len([]byte(text))
+	if strings.TrimSpace(text) == "" {
+		return "", false, false, originalBytes, false
+	}
+
+	if looksSensitiveText(text) {
+		return "<omitted>", false, true, originalBytes, false
+	}
+
+	raw := bytes.TrimSpace([]byte(text))
+	ext := strings.ToLower(strings.TrimSpace(path))
+	isJSON = strings.HasSuffix(ext, ".json") || json.Valid(raw)
+
+	preview = text
+	if isJSON {
+		var buf bytes.Buffer
+		if err := json.Indent(&buf, raw, "", "  "); err == nil {
+			preview = buf.String()
+		}
+	}
+
+	preview, truncated = capBytes(preview, maxFSWriteTextPreviewBytes)
+	return preview, truncated, false, originalBytes, isJSON
+}
+
 func previewText(s string, max int) string {
 	s = strings.ReplaceAll(s, "\r", "")
 	s = strings.ReplaceAll(s, "\n", " ")
@@ -171,6 +210,26 @@ func redactValue(key string, v any) any {
 func isSensitiveKey(k string) bool {
 	switch k {
 	case "text", "stdin", "authorization", "token", "apikey", "api_key", "secret", "password":
+		return true
+	default:
+		return false
+	}
+}
+
+func looksSensitiveText(s string) bool {
+	low := strings.ToLower(s)
+	switch {
+	case strings.Contains(low, "authorization: bearer "):
+		return true
+	case strings.Contains(low, "api_key"):
+		return true
+	case strings.Contains(low, "apikey"):
+		return true
+	case strings.Contains(low, "secret"):
+		return true
+	case strings.Contains(low, "password"):
+		return true
+	case strings.Contains(s, "sk-"):
 		return true
 	default:
 		return false

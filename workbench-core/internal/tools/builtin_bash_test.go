@@ -199,23 +199,81 @@ func TestBuiltinBash_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 	}
 }
 
-func TestDefaultBashAllowlist_IncludesITCommands(t *testing.T) {
-	allow := tools.DefaultBashAllowlist()
+func TestBuiltinBash_Exec_RejectsAbsolutePathArgs(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDataDir := config.DataDir
+	config.DataDir = tmpDir
+	defer func() { config.DataDir = oldDataDir }()
+
+	_, err := store.CreateRun("builtin bash abs path args test", 100)
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	resultsStore := store.NewInMemoryResultsStore()
+	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	if err != nil {
+		t.Fatalf("NewVirtualResultsResource: %v", err)
+	}
+
+	fs := vfs.NewFS()
+	fs.Mount(vfs.MountResults, resultsRes)
+
+	runner := tools.Runner{
+		Results: resultsStore,
+		ToolRegistry: tools.MapRegistry{
+			types.ToolID("builtin.bash"): tools.NewBuiltinBashInvoker(t.TempDir()),
+		},
+	}
+
+	resp, err := runner.Run(context.Background(), types.ToolID("builtin.bash"), "exec", json.RawMessage(`{"argv":["cat","/etc/hosts"],"cwd":"."}`), 0)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if resp.Ok {
+		t.Fatalf("expected ok=false, got %+v", resp)
+	}
+	if resp.Error == nil || resp.Error.Code != "invalid_input" {
+		t.Fatalf("expected invalid_input error, got %+v", resp.Error)
+	}
+}
+
+func TestDefaultBashDenylist_BlocksHighRiskCommands(t *testing.T) {
+	deny := tools.DefaultBashDenylist()
 	for _, name := range []string{
-		"curl",
+		"bash",
+		"sh",
+		"python3",
+		"node",
+		"sudo",
+		"ssh",
+		"scp",
+		"nc",
 		"wget",
+		"apt-get",
+		"npm",
+		"chmod",
+		"launchctl",
+		"rm",
+		"dd",
+	} {
+		if !deny[name] {
+			t.Fatalf("expected %q to be denied", name)
+		}
+	}
+	for _, name := range []string{
+		"ls",
+		"cat",
+		"rg",
+		"curl",
 		"ping",
 		"dig",
-		"nslookup",
-		"traceroute",
-		"netstat",
-		"lsof",
 		"ps",
 		"df",
 		"uname",
 	} {
-		if !allow[name] {
-			t.Fatalf("expected %q to be allowlisted", name)
+		if deny[name] {
+			t.Fatalf("expected %q to NOT be denied", name)
 		}
 	}
 }

@@ -51,6 +51,15 @@ type Activity struct {
 	InputJSON string // sanitized one-line JSON from the event (tool.run only)
 	Command   string // effective command line (tool.run only)
 
+	// For fs.write/fs.append, this is a small preview of the payload that was written.
+	// The host provides this as an event field so the UI can show "what changed"
+	// without needing to read the file back.
+	TextPreview   string
+	TextTruncated bool
+	TextRedacted  bool
+	TextIsJSON    bool
+	TextBytes     string // telemetry-only
+
 	// Outputs are small summaries suitable for a details panel.
 	CallID        string
 	Ok            string
@@ -71,6 +80,7 @@ func (a Activity) ShortStatus() string {
 
 func (a Activity) HasDetails() bool {
 	return strings.TrimSpace(a.InputJSON) != "" ||
+		strings.TrimSpace(a.TextPreview) != "" ||
 		strings.TrimSpace(a.OutputPreview) != "" ||
 		strings.TrimSpace(a.Error) != "" ||
 		strings.TrimSpace(a.CallID) != ""

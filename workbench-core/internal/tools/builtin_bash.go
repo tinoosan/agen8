@@ -14,7 +14,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
-var builtinBashManifest = []byte(`{"id":"builtin.bash","version":"0.1.0","kind":"builtin","displayName":"Builtin Bash (restricted)","description":"Runs a restricted set of CLI commands inside a host-configured root directory.","actions":[{"id":"exec","displayName":"Execute command","description":"Execute an allowlisted command with argv and return exitCode/stdout/stderr. stdout/stderr may be truncated; full output may be written as artifacts.","inputSchema":{"type":"object","properties":{"argv":{"type":"array","items":{"type":"string"},"minItems":1},"cwd":{"type":"string"},"stdin":{"type":"string"}},"required":["argv"]},"outputSchema":{"type":"object","properties":{"exitCode":{"type":"integer"},"stdout":{"type":"string"},"stderr":{"type":"string"},"stdoutPath":{"type":"string"},"stderrPath":{"type":"string"}},"required":["exitCode","stdout","stderr"]}}]}`)
+var builtinBashManifest = []byte(`{"id":"builtin.bash","version":"0.1.0","kind":"builtin","displayName":"Builtin Bash (restricted)","description":"Runs CLI commands inside a host-configured root directory with a small denylist (shells/interpreters/privilege escalation).","actions":[{"id":"exec","displayName":"Execute command","description":"Execute a command with argv and return exitCode/stdout/stderr. Some command names are denied. Absolute path arguments are rejected. stdout/stderr may be truncated; full output may be written as artifacts.","inputSchema":{"type":"object","properties":{"argv":{"type":"array","items":{"type":"string"},"minItems":1},"cwd":{"type":"string"},"stdin":{"type":"string"}},"required":["argv"]},"outputSchema":{"type":"object","properties":{"exitCode":{"type":"integer"},"stdout":{"type":"string"},"stderr":{"type":"string"},"stdoutPath":{"type":"string"},"stderrPath":{"type":"string"}},"required":["exitCode","stdout","stderr"]}}]}`)
 
 func init() {
 	registerBuiltin(BuiltinDef{
@@ -74,67 +74,114 @@ const (
 // invoke "bash -lc ...".
 type BuiltinBashInvoker struct {
 	RootDir  string
-	Allow    map[string]bool
+	Deny     map[string]bool
 	MaxBytes int
 }
 
-// NewBuiltinBashInvoker returns a BuiltinBashInvoker with the default allowlist
+// NewBuiltinBashInvoker returns a BuiltinBashInvoker with the default denylist
 // and max output cap (64KB).
 //
 // rootDir must be an absolute OS path. It is used as the sandbox root for "cwd".
 func NewBuiltinBashInvoker(rootDir string) *BuiltinBashInvoker {
 	return &BuiltinBashInvoker{
 		RootDir:  rootDir,
-		Allow:    DefaultBashAllowlist(),
+		Deny:     DefaultBashDenylist(),
 		MaxBytes: defaultBashMaxOutputBytes,
 	}
 }
 
-// DefaultBashAllowlist returns the initial allowlist for builtin.bash exec.
+// DefaultBashDenylist returns the initial denylist for builtin.bash exec.
 //
-// The allowlist is intentionally strict; expand only as needed.
-func DefaultBashAllowlist() map[string]bool {
+// Rationale:
+//   - An allowlist becomes a maintenance burden as the agent grows more capable.
+//   - A denylist is smaller and easier to evolve while still blocking the most
+//     risky classes of commands (shells, interpreters, privilege escalation).
+//
+// Security note:
+//   - builtin.bash is still confined by RootDir + cwd rules.
+//   - Additionally, builtin.bash rejects absolute file paths in argv to avoid
+//     accidental reads/writes outside RootDir.
+func DefaultBashDenylist() map[string]bool {
 	return map[string]bool{
-		// File/text inspection (confined by RootDir + cwd rules).
-		"ls":   true,
-		"cat":  true,
-		"rg":   true,
-		"find": true,
-		"head": true,
-		"tail": true,
-		"wc":   true,
-		"grep": true,
-		"sed":  true,
-		"awk":  true,
-		"jq":   true,
-		"stat": true,
+		// Shells (would allow the agent to construct arbitrary pipelines/scripts).
+		"bash": true,
+		"sh":   true,
+		"zsh":  true,
+		"fish": true,
+		"ksh":  true,
+		"dash": true,
+		"tcsh": true,
+		"csh":  true,
 
-		// Basic system/IT inspection (read-only style commands).
-		"date":   true,
-		"uname":  true,
-		"whoami": true,
-		"id":     true,
-		"env":    true,
-		"which":  true,
+		// Interpreters / runtimes (arbitrary scripting).
+		"python":  true,
+		"python3": true,
+		"node":    true,
+		"deno":    true,
+		"bun":     true,
+		"ruby":    true,
+		"perl":    true,
+		"php":     true,
+		"lua":     true,
+		"java":    true,
 
-		"ps":   true,
-		"top":  true,
-		"df":   true,
-		"du":   true,
-		"free": true,
+		// Privilege escalation.
+		"sudo": true,
+		"su":   true,
+		"doas": true,
 
-		"netstat": true,
-		"lsof":    true,
+		// Remote shells / file transfer (avoid turning the tool into an SSH client).
+		"ssh":   true,
+		"scp":   true,
+		"sftp":  true,
+		"rsync": true,
 
-		// Network-capable tools.
-		// Still confined to RootDir for cwd, but can access the network.
-		// Keep this list explicit and add commands only when needed.
-		"curl":       true,
-		"wget":       true,
-		"ping":       true,
-		"traceroute": true,
-		"dig":        true,
-		"nslookup":   true,
+		// Package managers / installers (can mutate the host and exfiltrate).
+		"brew":    true,
+		"apt":     true,
+		"apt-get": true,
+		"yum":     true,
+		"dnf":     true,
+		"pacman":  true,
+		"apk":     true,
+		"pip":     true,
+		"pip3":    true,
+		"npm":     true,
+		"npx":     true,
+		"gem":     true,
+
+		// Network pivot tools.
+		"nc":     true,
+		"ncat":   true,
+		"netcat": true,
+		"socat":  true,
+		"telnet": true,
+
+		// Network fetchers:
+		// - Keep curl allowed (it is the most common and is useful for safe-ish retrieval).
+		// - Deny other downloaders by default.
+		"wget": true,
+
+		// System control / destructive disk ops.
+		"shutdown": true,
+		"reboot":   true,
+		"halt":     true,
+		"poweroff": true,
+		"dd":       true,
+		"mkfs":     true,
+		"mount":    true,
+		"umount":   true,
+
+		// Permission and ownership changes (broadly unsafe).
+		"chmod": true,
+		"chown": true,
+
+		// Service control.
+		"systemctl": true,
+		"launchctl": true,
+
+		// Deletion (prefer host-mediated writes; avoid destructive shell ops).
+		"rm": true,
 	}
 }
 
@@ -196,8 +243,17 @@ func (b *BuiltinBashInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 	}
 
 	cmdName := in.Argv[0]
-	if b.Allow != nil && !b.Allow[cmdName] {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("command %q is not allowed", cmdName)}
+	if strings.Contains(cmdName, "/") || strings.Contains(cmdName, string(filepath.Separator)) {
+		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: "command must be a bare executable name (no path separators)"}
+	}
+	if b.Deny != nil && b.Deny[cmdName] {
+		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("command %q is denied", cmdName)}
+	}
+	// Prevent absolute path arguments (keeps file IO under RootDir + cwd).
+	for _, a := range in.Argv[1:] {
+		if looksLikeAbsPathOrFlagValue(a) {
+			return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("absolute paths are not allowed in argv (got %q); use relative paths under cwd", a)}
+		}
 	}
 
 	cwd := strings.TrimSpace(in.Cwd)
@@ -272,6 +328,32 @@ func (b *BuiltinBashInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 	}
 
 	return ToolCallResult{Output: outputJSON, Artifacts: artifacts}, nil
+}
+
+func looksLikeAbsPath(s string) bool {
+	if strings.TrimSpace(s) == "" {
+		return false
+	}
+	// Unix-like absolute path.
+	if strings.HasPrefix(s, "/") {
+		return true
+	}
+	// Windows-like drive path.
+	if filepath.IsAbs(s) {
+		return true
+	}
+	return false
+}
+
+func looksLikeAbsPathOrFlagValue(s string) bool {
+	if looksLikeAbsPath(s) {
+		return true
+	}
+	_, v, ok := strings.Cut(s, "=")
+	if ok && looksLikeAbsPath(v) {
+		return true
+	}
+	return false
 }
 
 // truncateString returns s truncated to maxBytes bytes.
