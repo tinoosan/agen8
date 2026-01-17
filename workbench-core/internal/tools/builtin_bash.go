@@ -158,8 +158,9 @@ func DefaultBashDenylist() map[string]bool {
 		"telnet": true,
 
 		// Network fetchers:
-		// - Keep curl allowed (it is the most common and is useful for safe-ish retrieval).
-		// - Deny other downloaders by default.
+		// - Prefer builtin.http for outbound HTTP.
+		// - Deny common downloaders by default.
+		"curl": true,
 		"wget": true,
 
 		// System control / destructive disk ops.
