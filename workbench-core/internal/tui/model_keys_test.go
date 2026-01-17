@@ -21,6 +21,26 @@ func (s stubRunner) RunTurn(ctx context.Context, userMsg string) (string, error)
 	return s.final, s.err
 }
 
+type stubRunnerWithRead struct {
+	stubRunner
+	files map[string]string
+}
+
+func (s stubRunnerWithRead) ReadVFS(ctx context.Context, path string, maxBytes int) (text string, bytesLen int, truncated bool, err error) {
+	_ = ctx
+	if s.files == nil {
+		return "", 0, false, nil
+	}
+	txt := s.files[path]
+	b := []byte(txt)
+	bytesLen = len(b)
+	if maxBytes > 0 && len(b) > maxBytes {
+		b = b[:maxBytes]
+		truncated = true
+	}
+	return string(b), bytesLen, truncated, nil
+}
+
 func TestKeyHandling_EnterSubmitsEvenWhenDetailsVisible(t *testing.T) {
 	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
 	m.showDetails = true
@@ -183,6 +203,67 @@ func TestLayout_ViewNeverExceedsTerminalHeight_WhenActivityOpen(t *testing.T) {
 	view := m.View()
 	if got := lipgloss.Height(view); got > m.height {
 		t.Fatalf("expected View() height <= %d, got %d", m.height, got)
+	}
+}
+
+func TestLayout_ViewLinesDoNotExceedTerminalWidth_WhenActivityOpen(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 120
+	m.height = 30
+	m.showDetails = true
+	m.layout()
+
+	view := m.View()
+	for i, line := range strings.Split(view, "\n") {
+		if w := lipgloss.Width(line); w > m.width {
+			t.Fatalf("line %d exceeds terminal width: got %d, want <= %d; line=%q", i+1, w, m.width, line)
+		}
+	}
+}
+
+func TestActivity_OpenFileViewer_OKey(t *testing.T) {
+	r := stubRunnerWithRead{
+		stubRunner: stubRunner{final: "ok"},
+		files: map[string]string{
+			"/workspace/example.json": "{\n  \"ok\": true\n}\n",
+		},
+	}
+	m := New(context.Background(), r, make(chan events.Event))
+	m.width = 120
+	m.height = 30
+	m.showDetails = true
+	m.focus = focusActivityList
+	m.single.Blur()
+	m.multiline.Blur()
+	m.layout()
+
+	m.activities = []Activity{
+		{ID: "act-1", Kind: "fs.write", Title: "Write /workspace/example.json", Status: ActivityOK, Path: "/workspace/example.json"},
+	}
+	m.refreshActivityList()
+	m.activityList.Select(0)
+	m.refreshActivityDetail()
+
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	updated := m2.(Model)
+	if cmd == nil {
+		t.Fatalf("expected open-file cmd, got nil")
+	}
+	if !updated.fileViewOpen {
+		t.Fatalf("expected fileViewOpen true")
+	}
+	if updated.fileViewPath != "/workspace/example.json" {
+		t.Fatalf("expected fileViewPath %q, got %q", "/workspace/example.json", updated.fileViewPath)
+	}
+
+	msg := cmd()
+	m3, _ := updated.Update(msg)
+	updated2 := m3.(Model)
+	if updated2.fileViewErr != "" {
+		t.Fatalf("unexpected file view error: %s", updated2.fileViewErr)
+	}
+	if !strings.Contains(updated2.fileViewContent, "\"ok\"") {
+		t.Fatalf("expected file content to be loaded, got %q", updated2.fileViewContent)
 	}
 }
 

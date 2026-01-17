@@ -490,6 +490,23 @@ func (r *lazyNewSessionTurnRunner) RunTurn(ctx context.Context, userMsg string) 
 	return r.engine.RunTurn(ctx, userMsg)
 }
 
+// ReadVFS reads a virtual filesystem path from the currently active run.
+//
+// This is used by the TUI to preview "openable" artifacts (e.g. /results/<callId>/response.json
+// or /workspace/<file>) without changing the agent loop contract or introducing a new host op.
+//
+// For lazyNewSessionTurnRunner, this is only available after the first turn initializes
+// the session/run and mounts the VFS.
+func (r *lazyNewSessionTurnRunner) ReadVFS(ctx context.Context, path string, maxBytes int) (text string, bytesLen int, truncated bool, err error) {
+	if r == nil {
+		return "", 0, false, fmt.Errorf("runner is nil")
+	}
+	if !r.initialized || r.engine == nil {
+		return "", 0, false, fmt.Errorf("no active run (send a message first)")
+	}
+	return r.engine.ReadVFS(ctx, path, maxBytes)
+}
+
 func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	if r.initialized {
 		return nil
@@ -857,6 +874,31 @@ type tuiTurnRunner struct {
 
 	turn         int
 	conversation []types.LLMMessage
+}
+
+// ReadVFS reads a virtual filesystem path via the run's mounted VFS.
+//
+// The TUI uses this to preview artifacts referenced by Activity items (e.g.
+// /results/<callId>/response.json and /workspace/<file>). This keeps the "open
+// artifact" UX purely in the UI layer without adding new host primitives.
+func (r *tuiTurnRunner) ReadVFS(ctx context.Context, path string, maxBytes int) (text string, bytesLen int, truncated bool, err error) {
+	if r == nil || r.fs == nil {
+		return "", 0, false, fmt.Errorf("vfs not available")
+	}
+	if maxBytes <= 0 {
+		maxBytes = 16 * 1024
+	}
+	b, err := r.fs.Read(path)
+	if err != nil {
+		return "", 0, false, err
+	}
+	bytesLen = len(b)
+	if bytesLen > maxBytes {
+		b = b[:maxBytes]
+		truncated = true
+	}
+	_ = ctx
+	return string(b), bytesLen, truncated, nil
 }
 
 func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, error) {

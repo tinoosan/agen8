@@ -65,6 +65,10 @@ type Activity struct {
 	Ok            string
 	Error         string
 	OutputPreview string // e.g. stdout/stderr preview for builtin.bash when available
+
+	// Response metadata (telemetry only).
+	BytesLen  string
+	Truncated bool
 }
 
 func (a Activity) ShortStatus() string {

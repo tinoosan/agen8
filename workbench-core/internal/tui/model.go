@@ -33,6 +33,13 @@ type turnDoneMsg struct {
 	err   error
 }
 
+type fileViewMsg struct {
+	path      string
+	content   string
+	truncated bool
+	err       error
+}
+
 type Model struct {
 	ctx context.Context
 
@@ -74,6 +81,12 @@ type Model struct {
 	pendingActionText      string
 	waitingForAction       bool
 	pendingActionIsToolRun bool
+
+	fileViewOpen      bool
+	fileViewPath      string
+	fileViewContent   string
+	fileViewTruncated bool
+	fileViewErr       string
 
 	sessionTitle  string
 	workflowTitle string
@@ -141,11 +154,17 @@ type transcriptItem struct {
 
 func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model {
 	main := viewport.New(0, 0)
-	main.Style = lipgloss.NewStyle().Padding(0, 2)
+	// Important: avoid horizontal padding on viewports.
+	//
+	// If viewport content becomes wider than the terminal (due to padding + borders
+	// in transcript elements), the terminal will soft-wrap long lines. That increases
+	// the effective number of screen lines and can make the header appear to
+	// "disappear" (scrolled off the top) on resize or when toggling the sidebar.
+	main.Style = lipgloss.NewStyle()
 	main.MouseWheelEnabled = true
 
 	details := viewport.New(0, 0)
-	details.Style = lipgloss.NewStyle().Padding(0, 1)
+	details.Style = lipgloss.NewStyle()
 	details.MouseWheelEnabled = true
 
 	activity := list.New([]list.Item{}, newActivityDelegate(), 0, 0)
@@ -300,7 +319,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Esc closes the activity panel and returns focus to input.
+		// Esc closes the file preview if it's open; otherwise, it closes the activity
+		// panel and returns focus to input.
+		if msg.Type == tea.KeyEsc && m.showDetails && m.fileViewOpen {
+			m.fileViewOpen = false
+			m.fileViewPath = ""
+			m.fileViewContent = ""
+			m.fileViewTruncated = false
+			m.fileViewErr = ""
+			m.refreshActivityDetail()
+			return m, nil
+		}
 		if msg.Type == tea.KeyEsc && m.showDetails {
 			m.showDetails = false
 			m.focus = focusInput
@@ -381,6 +410,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.expandOutput = !m.expandOutput
 				m.refreshActivityDetail()
 				return m, nil
+			case "o":
+				return m, m.openSelectedActivityFile()
 			case "ctrl+p":
 				m.activityList.CursorUp()
 				m.refreshActivityDetail()
@@ -451,6 +482,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		ev := events.Event(msg)
 		m.onEvent(ev)
 		return m, m.waitEvent()
+
+	case fileViewMsg:
+		// Ignore stale responses.
+		if strings.TrimSpace(msg.path) != "" && msg.path != m.fileViewPath {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.fileViewErr = msg.err.Error()
+			m.fileViewContent = ""
+			m.fileViewTruncated = false
+		} else {
+			m.fileViewErr = ""
+			m.fileViewContent = msg.content
+			m.fileViewTruncated = msg.truncated
+		}
+		m.refreshActivityDetail()
+		return m, nil
 
 	case turnDoneMsg:
 		m.turnInFlight = false
@@ -652,7 +700,7 @@ func (m Model) renderInput() string {
 
 	hintText := "ctrl+a activity  tab focus  ctrl+g multiline  enter send  ctrl+c quit"
 	if m.showDetails {
-		hintText = "ctrl+a hide activity  tab focus  esc close  j/k↑/↓ select  e/enter expand  pgup/pgdn scroll details  ctrl+t telemetry  ctrl+g multiline  ctrl+o send (multiline)"
+		hintText = "ctrl+a hide activity  tab focus  esc close  j/k↑/↓ select  e/enter expand  o open file  pgup/pgdn scroll details  ctrl+t telemetry  ctrl+g multiline  ctrl+o send (multiline)"
 	}
 	footerW := max(20, m.width-2)
 	hintRaw := hintText + "  focus: " + focusName
@@ -977,6 +1025,8 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		act.Error = strings.TrimSpace(ev.Data["err"])
 		act.CallID = strings.TrimSpace(ev.Data["callId"])
 		act.OutputPreview = strings.TrimSpace(ev.Data["outputPreview"])
+		act.BytesLen = strings.TrimSpace(ev.Data["bytesLen"])
+		act.Truncated = strings.TrimSpace(ev.Data["truncated"]) == "true"
 
 		fin := now
 		act.FinishedAt = &fin
@@ -1014,109 +1064,262 @@ func (m *Model) refreshActivityDetail() {
 		m.activityDetail.SetContent("")
 		return
 	}
-	act := m.activities[m.activityList.Index()]
 	w := max(24, m.activityDetail.Width-4)
-	md := renderActivityDetailMarkdown(act, m.showTelemetry, m.expandOutput)
+
 	telemetryBadge := ""
 	if m.showTelemetry {
 		telemetryBadge = " _(telemetry on)_"
 	}
 	header := "### Details" + telemetryBadge + "\n\n"
-	help := "_PgUp/PgDn scroll · Ctrl+E expand · Ctrl+T telemetry_\n\n"
+	help := "_PgUp/PgDn scroll · e/enter expand · o open file · Ctrl+T telemetry_\n\n"
+
+	if m.fileViewOpen {
+		md := renderFilePreviewMarkdown(m.fileViewPath, m.fileViewContent, m.fileViewTruncated, m.fileViewErr)
+		m.activityDetail.SetContent(strings.TrimRight(m.md.render(header+help+md, w), "\n"))
+		return
+	}
+
+	act := m.activities[m.activityList.Index()]
+	md := renderActivityDetailMarkdown(act, m.showTelemetry, m.expandOutput)
 	m.activityDetail.SetContent(strings.TrimRight(m.md.render(header+help+md, w), "\n"))
 }
 
 func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) string {
 	var b strings.Builder
 	b.WriteString("## ")
-	b.WriteString(a.Kind)
-	b.WriteString(" ")
-	b.WriteString(a.ShortStatus())
-	if a.Duration > 0 {
-		b.WriteString(" · ")
-		b.WriteString(a.Duration.String())
-	}
-	b.WriteString("\n\n")
-
-	b.WriteString("**Summary**\n\n")
-	b.WriteString("- ")
 	b.WriteString(a.Title)
 	b.WriteString("\n\n")
 
-	b.WriteString("**Inputs**\n\n")
-	if a.Kind == "tool.run" {
-		if strings.TrimSpace(a.ToolID) != "" || strings.TrimSpace(a.ActionID) != "" {
-			b.WriteString("- tool: ")
-			b.WriteString(fmt.Sprintf("%s/%s", a.ToolID, a.ActionID))
-			b.WriteString("\n")
-		}
-		if strings.TrimSpace(a.Command) != "" {
-			b.WriteString("- cmd:\n\n```sh\n")
-			b.WriteString(a.Command)
-			b.WriteString("\n```\n")
-		}
-		if strings.TrimSpace(a.InputJSON) != "" {
-			b.WriteString("\n- args:\n\n```json\n")
-			b.WriteString(prettyJSONOneLine(a.InputJSON))
-			b.WriteString("\n```\n")
-		}
-	} else {
-		if strings.TrimSpace(a.Path) != "" {
-			b.WriteString("- path: `")
-			b.WriteString(a.Path)
-			b.WriteString("`\n")
-		}
-		if telemetry && strings.TrimSpace(a.MaxBytes) != "" {
-			b.WriteString("- maxBytes: ")
-			b.WriteString(a.MaxBytes)
-			b.WriteString("\n")
-		}
-		if telemetry && strings.TrimSpace(a.TextBytes) != "" && (a.Kind == "fs.write" || a.Kind == "fs.append") {
-			b.WriteString("- textBytes: ")
-			b.WriteString(a.TextBytes)
-			b.WriteString("\n")
-		}
+	b.WriteString("**Title**\n\n")
+	b.WriteString(a.Title)
+	b.WriteString("\n\n")
 
-		if a.Kind == "fs.write" || a.Kind == "fs.append" {
-			if a.TextRedacted {
-				b.WriteString("\n- content: _(redacted)_\n")
-			} else if strings.TrimSpace(a.TextPreview) != "" {
-				lang := guessCodeFenceLang(a.Path, a.TextIsJSON)
-				if a.TextTruncated {
-					b.WriteString("\n- content preview: _(truncated)_\n\n```" + lang + "\n")
-				} else {
-					b.WriteString("\n- content preview:\n\n```" + lang + "\n")
-				}
-				b.WriteString(a.TextPreview)
-				if !strings.HasSuffix(a.TextPreview, "\n") {
-					b.WriteString("\n")
-				}
-				b.WriteString("```\n")
-			}
-		}
+	b.WriteString("**Fields**\n\n")
+	if strings.TrimSpace(a.Kind) != "" {
+		b.WriteString("- Operation: `")
+		b.WriteString(a.Kind)
+		b.WriteString("`\n")
 	}
-	b.WriteString("\n**Outputs**\n\n")
+	if strings.TrimSpace(a.Path) != "" {
+		b.WriteString("- Path: `")
+		b.WriteString(a.Path)
+		b.WriteString("`\n")
+	}
+	if strings.TrimSpace(a.ToolID) != "" {
+		b.WriteString("- Tool: `")
+		b.WriteString(a.ToolID)
+		b.WriteString("`\n")
+	}
+	if strings.TrimSpace(a.ActionID) != "" {
+		b.WriteString("- Action: `")
+		b.WriteString(a.ActionID)
+		b.WriteString("`\n")
+	}
 	if strings.TrimSpace(a.CallID) != "" {
-		b.WriteString("- callId: `")
+		b.WriteString("- CallID: `")
 		b.WriteString(a.CallID)
 		b.WriteString("`\n")
 	}
+	b.WriteString("- Status: ")
+	b.WriteString(string(a.Status))
+	b.WriteString(" ")
+	b.WriteString(a.ShortStatus())
+	if a.Duration > 0 {
+		b.WriteString(" · duration=")
+		b.WriteString(a.Duration.Truncate(time.Millisecond).String())
+	}
+	b.WriteString("\n\n")
+
+	b.WriteString("**Arguments**\n\n")
+	renderedArgs := renderActivityArgumentsMarkdown(a, telemetry)
+	if strings.TrimSpace(renderedArgs) != "" {
+		b.WriteString(renderedArgs)
+		if !strings.HasSuffix(renderedArgs, "\n") {
+			b.WriteString("\n")
+		}
+	} else {
+		b.WriteString("_No arguments._\n")
+	}
+	b.WriteString("\n")
+
+	b.WriteString("**Output**\n\n")
 	if strings.TrimSpace(a.Error) != "" {
 		b.WriteString("- error: ")
 		b.WriteString(a.Error)
 		b.WriteString("\n")
 	}
+	openable := openablePathsForActivity(a)
+	if len(openable) != 0 {
+		for _, p := range openable {
+			b.WriteString("- file: `")
+			b.WriteString(p)
+			b.WriteString("` _(press `o` to open)_\n")
+		}
+	}
+
+	if (a.Kind == "fs.write" || a.Kind == "fs.append") && !a.TextRedacted && strings.TrimSpace(a.TextPreview) != "" {
+		lang := guessCodeFenceLang(a.Path, a.TextIsJSON)
+		if a.TextTruncated {
+			b.WriteString("\n**Written content preview** _(truncated)_\n\n```" + lang + "\n")
+		} else {
+			b.WriteString("\n**Written content preview**\n\n```" + lang + "\n")
+		}
+		b.WriteString(a.TextPreview)
+		if !strings.HasSuffix(a.TextPreview, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("```\n")
+	} else if (a.Kind == "fs.write" || a.Kind == "fs.append") && a.TextRedacted {
+		b.WriteString("\n**Written content preview**\n\n_(redacted)_\n")
+	}
+
 	if strings.TrimSpace(a.OutputPreview) != "" {
 		txt := a.OutputPreview
 		if !expanded && len(txt) > 600 {
 			txt = txt[:599] + "…"
 		}
-		b.WriteString("\n**Preview** _(press `e` to expand)_\n\n```text\n")
+		b.WriteString("\n**Tool output preview** _(press `e` to expand)_\n\n```text\n")
 		b.WriteString(txt)
 		b.WriteString("\n```\n")
 	}
 
+	if telemetry {
+		b.WriteString("\n**Telemetry**\n\n")
+		if strings.TrimSpace(a.MaxBytes) != "" && a.Kind == "fs.read" {
+			b.WriteString("- maxBytes: ")
+			b.WriteString(a.MaxBytes)
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(a.TextBytes) != "" && (a.Kind == "fs.write" || a.Kind == "fs.append") {
+			b.WriteString("- textBytes: ")
+			b.WriteString(a.TextBytes)
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(a.BytesLen) != "" {
+			b.WriteString("- bytesLen: ")
+			b.WriteString(a.BytesLen)
+			b.WriteString("\n")
+		}
+		if a.Truncated {
+			b.WriteString("- truncated: true\n")
+		}
+	}
+
 	return b.String()
+}
+
+func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
+	var b strings.Builder
+
+	switch a.Kind {
+	case "tool.run":
+		if strings.TrimSpace(a.Command) != "" {
+			b.WriteString("- command:\n\n```sh\n")
+			b.WriteString(a.Command)
+			b.WriteString("\n```\n")
+		}
+		if strings.TrimSpace(a.InputJSON) != "" {
+			b.WriteString("\n- input:\n\n```json\n")
+			b.WriteString(prettyJSONOneLine(a.InputJSON))
+			b.WriteString("\n```\n")
+		}
+	default:
+		if strings.TrimSpace(a.Path) != "" {
+			b.WriteString("- path: `")
+			b.WriteString(a.Path)
+			b.WriteString("`\n")
+		}
+		if telemetry && strings.TrimSpace(a.MaxBytes) != "" && a.Kind == "fs.read" {
+			b.WriteString("- maxBytes: ")
+			b.WriteString(a.MaxBytes)
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
+}
+
+func openablePathsForActivity(a Activity) []string {
+	paths := make([]string, 0, 2)
+	if strings.TrimSpace(a.Kind) == "tool.run" && strings.TrimSpace(a.CallID) != "" {
+		paths = append(paths, "/results/"+a.CallID+"/response.json")
+	}
+	if strings.HasPrefix(strings.TrimSpace(a.Kind), "fs.") && strings.TrimSpace(a.Path) != "" {
+		paths = append(paths, a.Path)
+	}
+	return paths
+}
+
+func renderFilePreviewMarkdown(path string, content string, truncated bool, errStr string) string {
+	var b strings.Builder
+	b.WriteString("## File preview\n\n")
+	if strings.TrimSpace(path) != "" {
+		b.WriteString("- path: `")
+		b.WriteString(strings.TrimSpace(path))
+		b.WriteString("`\n")
+	}
+	if strings.TrimSpace(errStr) != "" {
+		b.WriteString("\n**Error**\n\n")
+		b.WriteString(errStr)
+		b.WriteString("\n")
+		return b.String()
+	}
+	if strings.TrimSpace(content) == "" {
+		b.WriteString("\n_(empty)_\n")
+		return b.String()
+	}
+
+	lang := guessCodeFenceLang(path, strings.HasSuffix(strings.ToLower(path), ".json"))
+	if truncated {
+		b.WriteString("\n**Content** _(truncated)_\n\n```" + lang + "\n")
+	} else {
+		b.WriteString("\n**Content**\n\n```" + lang + "\n")
+	}
+	b.WriteString(content)
+	if !strings.HasSuffix(content, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("```\n")
+	return b.String()
+}
+
+func (m *Model) openSelectedActivityFile() tea.Cmd {
+	if !m.showDetails || len(m.activities) == 0 {
+		return nil
+	}
+	idx := m.activityList.Index()
+	if idx < 0 || idx >= len(m.activities) {
+		return nil
+	}
+	act := m.activities[idx]
+	paths := openablePathsForActivity(act)
+	if len(paths) == 0 {
+		return nil
+	}
+
+	path := paths[0]
+	m.fileViewOpen = true
+	m.fileViewPath = path
+	m.fileViewContent = "_Loading…_"
+	m.fileViewTruncated = false
+	m.fileViewErr = ""
+	m.refreshActivityDetail()
+
+	type vfsReader interface {
+		ReadVFS(ctx context.Context, path string, maxBytes int) (text string, bytesLen int, truncated bool, err error)
+	}
+	vr, ok := m.runner.(vfsReader)
+	if !ok {
+		return func() tea.Msg {
+			return fileViewMsg{path: path, err: fmt.Errorf("file preview not supported by runner")}
+		}
+	}
+
+	const maxPreviewBytes = 16 * 1024
+	return func() tea.Msg {
+		txt, _, tr, err := vr.ReadVFS(m.ctx, path, maxPreviewBytes)
+		return fileViewMsg{path: path, content: txt, truncated: tr, err: err}
+	}
 }
 
 func guessCodeFenceLang(path string, isJSON bool) string {
