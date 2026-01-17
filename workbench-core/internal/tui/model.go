@@ -43,7 +43,9 @@ type Model struct {
 	activityList   list.Model
 	activityDetail viewport.Model
 
-	transcriptItems []transcriptItem
+	transcriptItems         []transcriptItem
+	transcriptItemStartLine []int
+	lastTurnUserItemIdx     int
 
 	activities        []Activity
 	activityIndexByID map[string]int
@@ -143,6 +145,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	activity.SetShowStatusBar(false)
 	activity.SetShowPagination(false)
 	activity.SetFilteringEnabled(false)
+	activity.SetShowFilter(false)
 	activity.Styles.Title = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#707070")).
 		Bold(true)
@@ -179,7 +182,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	single.BlurredStyle = plainTextAreaStyle
 
 	multi := textarea.New()
-	multi.Placeholder = "Multiline message (Ctrl+S to send)…"
+	multi.Placeholder = "Multiline message (Ctrl+O to send)…"
 	multi.Prompt = "…> "
 	multi.ShowLineNumbers = false
 	multi.CharLimit = 0
@@ -246,6 +249,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	}
 
 	m.pendingActionIdx = -1
+	m.lastTurnUserItemIdx = -1
 	return m
 }
 
@@ -342,12 +346,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Note: many terminals do not distinguish Ctrl+Enter from Enter unless an
 			// "extended keys" protocol is enabled. We support:
 			//   - Ctrl+Enter when it is exposed by the terminal/driver
-			//   - Ctrl+S as a reliable fallback "send" key
-			//   - Alt+Enter when it is exposed
-			if msg.Type == tea.KeyCtrlS ||
-				strings.EqualFold(msg.String(), "ctrl+enter") ||
-				strings.EqualFold(msg.String(), "ctrl+m") ||
-				strings.EqualFold(msg.String(), "alt+enter") {
+			//   - Ctrl+O as a reliable fallback "send" key (avoids Alt+Enter fullscreen on macOS terminals)
+			if msg.Type == tea.KeyCtrlO || strings.EqualFold(msg.String(), "ctrl+o") || strings.EqualFold(msg.String(), "ctrl+enter") {
 				return m, m.submitMultiline()
 			}
 			if msg.Type == tea.KeyEnter {
@@ -392,6 +392,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: strings.TrimSpace(msg.final)})
 		m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+		m.scrollToCurrentTurnStart()
 		m.turnTitle = ""
 		return m, nil
 	}
@@ -430,6 +431,8 @@ func (m Model) View() string {
 }
 
 func (m *Model) layout() {
+	wasAtBottom := m.transcript.AtBottom()
+
 	headerH := 1
 	inputH := 5
 	if m.isMulti {
@@ -462,11 +465,14 @@ func (m *Model) layout() {
 		m.activityList.SetHeight(listH)
 
 		m.activityDetail.Width = max(32, detailW)
-		m.activityDetail.Height = max(6, bodyH-listH-1)
+		// No extra divider line between list + detail; keep the right pane height exact.
+		m.activityDetail.Height = max(6, bodyH-listH)
 	}
 
 	m.rebuildTranscript()
-	m.transcript.GotoBottom()
+	if wasAtBottom {
+		m.transcript.GotoBottom()
+	}
 	m.refreshActivityDetail()
 
 	m.single.SetWidth(max(20, m.width-6))
@@ -517,21 +523,14 @@ func (m Model) renderBody() string {
 	}
 
 	rightW := max(32, m.activityList.Width())
-	divider := m.styleDim.Render(strings.Repeat("─", max(1, rightW)))
 
-	listHeader := m.styleDim.Render("Activity") + m.styleDim.Render(" (Tab/Ctrl+D to hide)")
-	listBox := listHeader + "\n" + divider + "\n" + m.activityList.View()
-
-	telemetryBadge := ""
-	if m.showTelemetry {
-		telemetryBadge = " [telemetry]"
-	}
-	detailHeader := m.styleDim.Render("Details"+telemetryBadge) + m.styleDim.Render(" (PgUp/PgDn scroll, ctrl+e expand, ctrl+t telemetry)")
-	detailBox := detailHeader + "\n" + divider + "\n" + m.activityDetail.View()
-
-	rightBody := lipgloss.JoinVertical(lipgloss.Top, listBox, m.styleDim.Render(strings.Repeat("─", max(1, rightW))), detailBox)
+	// Important: keep the right pane height exactly equal to the transcript height.
+	// If the right pane is taller, Bubble Tea will clip the top of the overall view,
+	// which makes the header appear to "disappear" when Activity is toggled.
+	rightBody := lipgloss.JoinVertical(lipgloss.Top, m.activityList.View(), m.activityDetail.View())
 	rightPane := lipgloss.NewStyle().
 		Width(rightW + 2).
+		Height(m.transcript.Height).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("#303030")).
 		Render(rightBody)
@@ -549,9 +548,9 @@ func (m Model) renderInput() string {
 
 	box := m.styleInputBox.Render(input)
 	status := m.renderStatusLine()
-	hintText := "ctrl+d activity  ctrl+g multiline  enter send  ctrl+s send (multiline)  ctrl+c quit"
+	hintText := "ctrl+d activity  ctrl+g multiline  enter send  ctrl+c quit"
 	if m.showDetails {
-		hintText = "ctrl+d hide activity  ctrl+p/ctrl+n select (when input empty)  pgup/pgdn scroll details  ctrl+e expand  ctrl+t telemetry  ctrl+g multiline  ctrl+s send"
+		hintText = "ctrl+d hide activity  ctrl+p/ctrl+n select (when input empty)  pgup/pgdn scroll details  ctrl+e expand  ctrl+t telemetry  ctrl+g multiline  ctrl+o send (multiline)"
 	}
 	hint := m.styleHint.Render(hintText)
 	if status != "" {
@@ -625,6 +624,7 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 		m.workflowTitle = firstLine(userMsg)
 	}
 
+	m.lastTurnUserItemIdx = len(m.transcriptItems)
 	m.addTranscriptItem(transcriptItem{kind: transcriptUser, text: userMsg})
 
 	return func() tea.Msg {
@@ -639,9 +639,15 @@ func (m *Model) appendDetails(line string) {
 }
 
 func (m *Model) addTranscriptItem(it transcriptItem) {
+	wasAtBottom := m.transcript.AtBottom()
+
 	m.transcriptItems = append(m.transcriptItems, it)
 	m.rebuildTranscript()
-	m.transcript.GotoBottom()
+	// If the user was at the bottom, keep them there (chat behavior). Otherwise,
+	// preserve their scroll position.
+	if wasAtBottom {
+		m.transcript.GotoBottom()
+	}
 }
 
 func (m *Model) rebuildTranscript() {
@@ -649,20 +655,27 @@ func (m *Model) rebuildTranscript() {
 	contentW := max(20, w-8)
 
 	lines := make([]string, 0, len(m.transcriptItems))
+	startLines := make([]int, 0, len(m.transcriptItems))
+	lineNo := 0
 	for _, it := range m.transcriptItems {
+		startLines = append(startLines, lineNo)
 		switch it.kind {
 		case transcriptSpacer:
 			lines = append(lines, m.styleDim.Render(""))
+			lineNo++
 		case transcriptUser:
 			// Render user text as markdown so pasted tasks and lists are readable.
 			body := m.styleUserLabel.Render("you> ") + strings.TrimRight(m.md.render(it.text, contentW), "\n")
 			lines = append(lines, m.styleUserBox.Render(body))
+			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptAgent:
 			// Render agent answers as markdown (code blocks, bullets, tables).
 			body := m.styleAgent.Render(strings.TrimRight(m.md.render("agent> "+strings.TrimSpace(it.text), contentW), "\n"))
 			lines = append(lines, m.styleAgentBox.Render(body))
+			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptError:
 			lines = append(lines, m.styleError.Render(wrapText(it.text, contentW)))
+			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptAction:
 			prefix := "• "
 			if it.actionIsToolRun && !it.actionIsCompleted {
@@ -676,10 +689,24 @@ func (m *Model) rebuildTranscript() {
 				line += "  " + m.styleDim.Render(strings.TrimSpace(it.actionCompletion))
 			}
 			lines = append(lines, line)
+			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		}
 	}
 
+	m.transcriptItemStartLine = startLines
 	m.transcript.SetContent(strings.Join(lines, "\n"))
+	// Clamp scroll when content shrinks or re-wrap changes line count.
+	m.transcript.SetYOffset(m.transcript.YOffset)
+}
+
+func (m *Model) scrollToCurrentTurnStart() {
+	// Keep the current turn "anchored" so the user message + action lines remain visible
+	// even when the agent answer is long.
+	idx := m.lastTurnUserItemIdx
+	if idx < 0 || idx >= len(m.transcriptItemStartLine) {
+		return
+	}
+	m.transcript.SetYOffset(m.transcriptItemStartLine[idx])
 }
 
 func (m *Model) onEvent(ev events.Event) {
@@ -861,7 +888,13 @@ func (m *Model) refreshActivityDetail() {
 	act := m.activities[m.activityList.Index()]
 	w := max(24, m.activityDetail.Width-4)
 	md := renderActivityDetailMarkdown(act, m.showTelemetry, m.expandOutput)
-	m.activityDetail.SetContent(strings.TrimRight(m.md.render(md, w), "\n"))
+	telemetryBadge := ""
+	if m.showTelemetry {
+		telemetryBadge = " _(telemetry on)_"
+	}
+	header := "### Details" + telemetryBadge + "\n\n"
+	help := "_PgUp/PgDn scroll · Ctrl+E expand · Ctrl+T telemetry_\n\n"
+	m.activityDetail.SetContent(strings.TrimRight(m.md.render(header+help+md, w), "\n"))
 }
 
 func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) string {
