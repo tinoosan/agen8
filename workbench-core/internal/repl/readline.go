@@ -12,7 +12,6 @@ import (
 // Reader is a thin wrapper around github.com/chzyer/readline.
 //
 // Why this exists:
-// - The workbench demo needs a reliable interactive terminal UX:
 //   - arrow-key navigation
 //   - editing/backspace
 //   - history
