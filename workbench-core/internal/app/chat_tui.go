@@ -59,6 +59,7 @@ func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, m
 		goal:        strings.TrimSpace(goal),
 		evCh:        evCh,
 	}
+	wasInterrupted := false
 
 	// If we created a run, ensure it transitions to a terminal state and is persisted.
 	defer func() {
@@ -67,7 +68,7 @@ func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, m
 		}
 		status := types.StatusDone
 		errMsg := ""
-		if runCtx.Err() != nil {
+		if runCtx.Err() != nil || wasInterrupted {
 			status = types.StatusCanceled
 			errMsg = "interrupted"
 		}
@@ -80,12 +81,17 @@ func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, m
 
 	// Start the UI. The runner will emit run/session events only after the first message.
 	err := tui.Run(runCtx, lazy, evCh)
+	wasInterrupted = errors.Is(err, tea.ErrInterrupted)
 	retErr = err
 
 	// If the user interrupted the session (Ctrl-C), print a convenient resume command
 	// after the TUI exits.
 	if shouldPrintResumeHint(runCtx, err) && strings.TrimSpace(lazy.run.SessionID) != "" {
 		fmt.Fprintln(os.Stderr, "Resume with: workbench resume "+lazy.run.SessionID)
+	}
+	// Treat Ctrl-C as a successful exit so Cobra doesn't print usage/errors.
+	if wasInterrupted {
+		retErr = nil
 	}
 
 	// Best-effort: emit run.completed if we created a run and have an emitter.
@@ -128,11 +134,12 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 
 	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
+	wasInterrupted := false
 
 	defer func() {
 		status := types.StatusDone
 		errMsg := ""
-		if runCtx.Err() != nil {
+		if runCtx.Err() != nil || wasInterrupted {
 			status = types.StatusCanceled
 			errMsg = "interrupted"
 		}
@@ -225,10 +232,15 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 	}
 
 	err = tui.Run(runCtx, engine, evCh)
+	wasInterrupted = errors.Is(err, tea.ErrInterrupted)
 	// If the user interrupted the session (Ctrl-C), print a convenient resume command
 	// after the TUI exits.
 	if shouldPrintResumeHint(runCtx, err) && strings.TrimSpace(run.SessionID) != "" {
 		fmt.Fprintln(os.Stderr, "Resume with: workbench resume "+run.SessionID)
+	}
+	// Treat Ctrl-C as a successful exit so Cobra doesn't print usage/errors.
+	if wasInterrupted {
+		err = nil
 	}
 	mustEmit(context.Background(), events.Event{
 		Type:    "run.completed",
