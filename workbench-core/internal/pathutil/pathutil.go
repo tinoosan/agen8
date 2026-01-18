@@ -51,4 +51,3 @@ func CleanResultsArtifactPath(p string) (string, error) {
 	}
 	return clean, nil
 }
-
