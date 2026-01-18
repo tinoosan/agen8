@@ -28,9 +28,9 @@ func TestBuiltinHTTP_Fetch_SmallBody_OK(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -98,9 +98,9 @@ func TestBuiltinHTTP_Fetch_LargeBody_WritesArtifact(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	// >16KB preview cap.

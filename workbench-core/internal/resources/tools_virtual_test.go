@@ -18,9 +18,9 @@ func TestVirtualToolsResource_ListIncludesBuiltin(t *testing.T) {
 		t.Fatalf("NewBuiltinManifestProvider: %v", err)
 	}
 	reg := tools.NewCompositeToolManifestRegistry(builtin)
-	res, err := resources.NewVirtualToolsResource(reg)
+	res, err := resources.NewToolsResource(reg)
 	if err != nil {
-		t.Fatalf("NewVirtualToolsResource: %v", err)
+		t.Fatalf("NewToolsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
@@ -62,9 +62,9 @@ func TestVirtualToolsResource_DiskToolsAppearWhenPresent(t *testing.T) {
 		t.Fatalf("NewBuiltinManifestProvider: %v", err)
 	}
 	reg := tools.NewCompositeToolManifestRegistry(builtin, disk)
-	res, err := resources.NewVirtualToolsResource(reg)
+	res, err := resources.NewToolsResource(reg)
 	if err != nil {
-		t.Fatalf("NewVirtualToolsResource: %v", err)
+		t.Fatalf("NewToolsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
@@ -109,9 +109,9 @@ func TestVirtualToolsResource_BuiltinOverridesDiskOnCollision(t *testing.T) {
 		t.Fatalf("NewBuiltinManifestProvider: %v", err)
 	}
 	reg := tools.NewCompositeToolManifestRegistry(builtin, disk)
-	res, err := resources.NewVirtualToolsResource(reg)
+	res, err := resources.NewToolsResource(reg)
 	if err != nil {
-		t.Fatalf("NewVirtualToolsResource: %v", err)
+		t.Fatalf("NewToolsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
@@ -137,9 +137,9 @@ func TestVirtualToolsResource_ReadOnlyEnforced(t *testing.T) {
 		t.Fatalf("NewBuiltinManifestProvider: %v", err)
 	}
 	reg := tools.NewCompositeToolManifestRegistry(builtin)
-	res, err := resources.NewVirtualToolsResource(reg)
+	res, err := resources.NewToolsResource(reg)
 	if err != nil {
-		t.Fatalf("NewVirtualToolsResource: %v", err)
+		t.Fatalf("NewToolsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()

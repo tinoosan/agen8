@@ -30,13 +30,13 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDiskMemoryStore: %v", err)
 	}
-	memRes, err := resources.NewVirtualMemoryResource(memStore)
+	memRes, err := resources.NewMemoryResource(memStore)
 	if err != nil {
-		t.Fatalf("NewVirtualMemoryResource: %v", err)
+		t.Fatalf("NewMemoryResource: %v", err)
 	}
-	wsRes, err := resources.NewRunWorkspace(cfg, run.RunId)
+	wsRes, err := resources.NewWorkspace(cfg, run.RunId)
 	if err != nil {
-		t.Fatalf("NewRunWorkspace: %v", err)
+		t.Fatalf("NewWorkspace: %v", err)
 	}
 
 	// Seed run-scoped memory.md on disk (read-only to the agent).
@@ -143,13 +143,13 @@ func TestContextUpdater_FiltersTraceEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDiskMemoryStore: %v", err)
 	}
-	memRes, err := resources.NewVirtualMemoryResource(memStore)
+	memRes, err := resources.NewMemoryResource(memStore)
 	if err != nil {
-		t.Fatalf("NewVirtualMemoryResource: %v", err)
+		t.Fatalf("NewMemoryResource: %v", err)
 	}
-	wsRes, err := resources.NewRunWorkspace(cfg, run.RunId)
+	wsRes, err := resources.NewWorkspace(cfg, run.RunId)
 	if err != nil {
-		t.Fatalf("NewRunWorkspace: %v", err)
+		t.Fatalf("NewWorkspace: %v", err)
 	}
 
 	// Include one relevant event and one irrelevant event.
@@ -215,13 +215,13 @@ func TestContextUpdater_AdaptiveBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDiskMemoryStore: %v", err)
 	}
-	memRes, err := resources.NewVirtualMemoryResource(memStore)
+	memRes, err := resources.NewMemoryResource(memStore)
 	if err != nil {
-		t.Fatalf("NewVirtualMemoryResource: %v", err)
+		t.Fatalf("NewMemoryResource: %v", err)
 	}
-	wsRes, err := resources.NewRunWorkspace(cfg, run.RunId)
+	wsRes, err := resources.NewWorkspace(cfg, run.RunId)
 	if err != nil {
-		t.Fatalf("NewRunWorkspace: %v", err)
+		t.Fatalf("NewWorkspace: %v", err)
 	}
 
 	fs := vfs.NewFS()
@@ -274,13 +274,13 @@ func TestContextUpdater_FailureBumpAfterBadOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDiskMemoryStore: %v", err)
 	}
-	memRes, err := resources.NewVirtualMemoryResource(memStore)
+	memRes, err := resources.NewMemoryResource(memStore)
 	if err != nil {
-		t.Fatalf("NewVirtualMemoryResource: %v", err)
+		t.Fatalf("NewMemoryResource: %v", err)
 	}
-	wsRes, err := resources.NewRunWorkspace(cfg, run.RunId)
+	wsRes, err := resources.NewWorkspace(cfg, run.RunId)
 	if err != nil {
-		t.Fatalf("NewRunWorkspace: %v", err)
+		t.Fatalf("NewWorkspace: %v", err)
 	}
 
 	fs := vfs.NewFS()

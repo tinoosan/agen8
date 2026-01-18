@@ -135,7 +135,7 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 		_, _ = store.StopRun(cfg, run.RunId, status, errMsg)
 	}()
 
-	historyRes, err := resources.NewSessionHistoryResource(cfg, run.SessionID)
+	historyRes, err := resources.NewHistoryResource(cfg, run.SessionID)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -635,7 +635,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	}
 	r.run = run
 
-	historyRes, err := resources.NewSessionHistoryResource(cfg, run.SessionID)
+	historyRes, err := resources.NewHistoryResource(cfg, run.SessionID)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}

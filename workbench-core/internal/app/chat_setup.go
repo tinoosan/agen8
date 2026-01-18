@@ -80,7 +80,7 @@ func setupTUIChatRuntime(
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
 
-	workspace, err := resources.NewRunWorkspace(cfg, run.RunId)
+	workspace, err := resources.NewWorkspace(cfg, run.RunId)
 	if err != nil {
 		return nil, fmt.Errorf("create workspace: %w", err)
 	}
@@ -95,13 +95,13 @@ func setupTUIChatRuntime(
 	diskProvider := tools.NewDiskManifestProvider(toolsDir)
 	toolManifests := tools.NewCompositeToolManifestRegistry(builtinProvider, diskProvider)
 
-	toolsResource, err := resources.NewVirtualToolsResource(toolManifests)
+	toolsResource, err := resources.NewToolsResource(toolManifests)
 	if err != nil {
 		return nil, fmt.Errorf("create tools resource: %w", err)
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
 		return nil, fmt.Errorf("create results: %w", err)
 	}
@@ -110,7 +110,7 @@ func setupTUIChatRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("create memory store: %w", err)
 	}
-	memoryRes, err := resources.NewVirtualMemoryResource(memStore)
+	memoryRes, err := resources.NewMemoryResource(memStore)
 	if err != nil {
 		return nil, fmt.Errorf("create memory resource: %w", err)
 	}
@@ -119,7 +119,7 @@ func setupTUIChatRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("create profile store: %w", err)
 	}
-	profileRes, err := resources.NewVirtualProfileResource(profileStore)
+	profileRes, err := resources.NewProfileResource(profileStore)
 	if err != nil {
 		return nil, fmt.Errorf("create profile resource: %w", err)
 	}

@@ -34,7 +34,7 @@ type VirtualToolsResource struct {
 	Registry tools.ToolManifestRegistry
 }
 
-func NewVirtualToolsResource(reg tools.ToolManifestRegistry) (*VirtualToolsResource, error) {
+func NewToolsResource(reg tools.ToolManifestRegistry) (*VirtualToolsResource, error) {
 	if reg == nil {
 		return nil, fmt.Errorf("tool manifest registry is required")
 	}

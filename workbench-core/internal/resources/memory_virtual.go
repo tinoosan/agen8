@@ -38,7 +38,7 @@ type VirtualMemoryResource struct {
 	Store store.MemoryVFSStore
 }
 
-func NewVirtualMemoryResource(s store.MemoryVFSStore) (*VirtualMemoryResource, error) {
+func NewMemoryResource(s store.MemoryVFSStore) (*VirtualMemoryResource, error) {
 	if s == nil {
 		return nil, fmt.Errorf("memory store is required")
 	}

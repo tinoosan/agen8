@@ -13,9 +13,9 @@ func TestVirtualMemoryResource_ReadWriteUpdateAndReadOnlyMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDiskMemoryStoreFromDir: %v", err)
 	}
-	mr, err := resources.NewVirtualMemoryResource(memStore)
+	mr, err := resources.NewMemoryResource(memStore)
 	if err != nil {
-		t.Fatalf("NewVirtualMemoryResource: %v", err)
+		t.Fatalf("NewMemoryResource: %v", err)
 	}
 
 	fs := vfs.NewFS()

@@ -30,9 +30,9 @@ func TestBuiltinRipgrep_Search_FindsMatch(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	rootDir := t.TempDir()
@@ -95,9 +95,9 @@ func TestBuiltinRipgrep_Search_RejectsEscapePath(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()

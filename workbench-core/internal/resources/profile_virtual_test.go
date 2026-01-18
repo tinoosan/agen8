@@ -13,9 +13,9 @@ func TestVirtualProfileResource_ReadWriteUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDiskProfileStoreFromDir: %v", err)
 	}
-	r, err := NewVirtualProfileResource(ps)
+	r, err := NewProfileResource(ps)
 	if err != nil {
-		t.Fatalf("NewVirtualProfileResource: %v", err)
+		t.Fatalf("NewProfileResource: %v", err)
 	}
 
 	fs := vfs.NewFS()

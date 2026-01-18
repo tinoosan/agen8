@@ -32,7 +32,7 @@ type VirtualProfileResource struct {
 	Store store.ProfileVFSStore
 }
 
-func NewVirtualProfileResource(s store.ProfileVFSStore) (*VirtualProfileResource, error) {
+func NewProfileResource(s store.ProfileVFSStore) (*VirtualProfileResource, error) {
 	if s == nil {
 		return nil, fmt.Errorf("profile store is required")
 	}

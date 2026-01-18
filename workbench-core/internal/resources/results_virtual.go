@@ -37,8 +37,8 @@ type VirtualResultsResource struct {
 	Store store.ResultsView
 }
 
-// NewVirtualResultsResource creates a new virtual /results mount backed by a ResultsStore.
-func NewVirtualResultsResource(s store.ResultsView) (*VirtualResultsResource, error) {
+// NewResultsResource creates a new virtual /results mount backed by a ResultsStore.
+func NewResultsResource(s store.ResultsView) (*VirtualResultsResource, error) {
 	if s == nil {
 		return nil, fmt.Errorf("results store is required")
 	}

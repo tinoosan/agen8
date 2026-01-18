@@ -9,10 +9,10 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
-// NewRunWorkspace creates a directory-backed resource for a run's workspace.
+// NewWorkspace creates a directory-backed resource for a run's workspace.
 // The workspace is the agent-writable working directory mounted at "/workspace".
 // Creates the directory if it doesn't exist.
-func NewRunWorkspace(cfg config.Config, runId string) (*DirResource, error) {
+func NewWorkspace(cfg config.Config, runId string) (*DirResource, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

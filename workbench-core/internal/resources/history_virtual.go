@@ -64,7 +64,7 @@ type HistoryResource struct {
 	Appender store.HistoryAppender
 }
 
-func NewSessionHistoryResource(cfg config.Config, sessionID string) (*HistoryResource, error) {
+func NewHistoryResource(cfg config.Config, sessionID string) (*HistoryResource, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

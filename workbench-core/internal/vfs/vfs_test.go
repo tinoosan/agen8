@@ -255,9 +255,9 @@ func TestVFS_WithToolsResource_ReadOnlyManifest(t *testing.T) {
 
 	disk := tools.NewDiskManifestProvider(tmp)
 	reg := tools.NewCompositeToolManifestRegistry(builtin, disk)
-	toolsRes, err := resources.NewVirtualToolsResource(reg)
+	toolsRes, err := resources.NewToolsResource(reg)
 	if err != nil {
-		t.Fatalf("NewVirtualToolsResource: %v", err)
+		t.Fatalf("NewToolsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()

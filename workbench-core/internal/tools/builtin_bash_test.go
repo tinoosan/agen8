@@ -26,9 +26,9 @@ func TestBuiltinBash_Exec_CatFile_OK(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	rootDir := t.TempDir()
@@ -92,9 +92,9 @@ func TestBuiltinBash_Exec_RejectsEscapeCwd(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
@@ -134,9 +134,9 @@ func TestBuiltinBash_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	rootDir := t.TempDir()
@@ -203,9 +203,9 @@ func TestBuiltinBash_Exec_RejectsAbsolutePathArgs(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()

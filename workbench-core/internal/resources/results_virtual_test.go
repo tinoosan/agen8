@@ -18,9 +18,9 @@ func TestVirtualResultsResource_ListAndRead(t *testing.T) {
 		t.Fatalf("PutArtifact: %v", err)
 	}
 
-	res, err := resources.NewVirtualResultsResource(resultsStore)
+	res, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()

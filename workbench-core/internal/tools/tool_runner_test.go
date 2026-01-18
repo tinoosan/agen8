@@ -31,9 +31,9 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
@@ -112,9 +112,9 @@ func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
@@ -156,9 +156,9 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
@@ -207,9 +207,9 @@ func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
+	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
-		t.Fatalf("NewVirtualResultsResource: %v", err)
+		t.Fatalf("NewResultsResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
