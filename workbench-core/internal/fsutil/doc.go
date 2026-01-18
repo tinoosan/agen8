@@ -26,6 +26,7 @@
 //
 // # Usage
 //
-//	runPath := fsutil.GetRunFilePath(config.DataDir, "run-abc123")
+//	cfg := config.Default()
+//	runPath := fsutil.GetRunFilePath(cfg.DataDir, "run-abc123")
 //	err := fsutil.WriteFileAtomic(runPath, jsonBytes, 0644)
 package fsutil

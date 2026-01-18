@@ -22,17 +22,23 @@ import (
 //	data/sessions/<sessionId>/session.json
 //
 // The session history file is created lazily by the history store/sink.
-func CreateSession(title string) (types.Session, error) {
+func CreateSession(cfg config.Config, title string) (types.Session, error) {
+	if err := cfg.Validate(); err != nil {
+		return types.Session{}, err
+	}
 	s := types.NewSession(title)
-	return s, SaveSession(s)
+	return s, SaveSession(cfg, s)
 }
 
 // SaveSession persists a session's session.json file.
-func SaveSession(s types.Session) error {
+func SaveSession(cfg config.Config, s types.Session) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(s.SessionID) == "" {
 		return fmt.Errorf("sessionId is required")
 	}
-	targetPath := fsutil.GetSessionFilePath(config.DataDir, s.SessionID)
+	targetPath := fsutil.GetSessionFilePath(cfg.DataDir, s.SessionID)
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 		return err
 	}
@@ -44,12 +50,15 @@ func SaveSession(s types.Session) error {
 }
 
 // LoadSession reads session.json for a session ID.
-func LoadSession(sessionID string) (types.Session, error) {
+func LoadSession(cfg config.Config, sessionID string) (types.Session, error) {
+	if err := cfg.Validate(); err != nil {
+		return types.Session{}, err
+	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return types.Session{}, fmt.Errorf("sessionId is required")
 	}
-	targetPath := fsutil.GetSessionFilePath(config.DataDir, sessionID)
+	targetPath := fsutil.GetSessionFilePath(cfg.DataDir, sessionID)
 	b, err := os.ReadFile(targetPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -69,7 +78,10 @@ func LoadSession(sessionID string) (types.Session, error) {
 
 // AddRunToSession appends runId to the session index (if not already present)
 // and updates CurrentRunID.
-func AddRunToSession(sessionID, runID string) (types.Session, error) {
+func AddRunToSession(cfg config.Config, sessionID, runID string) (types.Session, error) {
+	if err := cfg.Validate(); err != nil {
+		return types.Session{}, err
+	}
 	sessionID = strings.TrimSpace(sessionID)
 	runID = strings.TrimSpace(runID)
 	if sessionID == "" {
@@ -78,7 +90,7 @@ func AddRunToSession(sessionID, runID string) (types.Session, error) {
 	if runID == "" {
 		return types.Session{}, fmt.Errorf("runId is required")
 	}
-	s, err := LoadSession(sessionID)
+	s, err := LoadSession(cfg, sessionID)
 	if err != nil {
 		return types.Session{}, err
 	}
@@ -93,12 +105,15 @@ func AddRunToSession(sessionID, runID string) (types.Session, error) {
 		s.Runs = append(s.Runs, runID)
 	}
 	s.CurrentRunID = runID
-	return s, SaveSession(s)
+	return s, SaveSession(cfg, s)
 }
 
 // ListSessionIDs returns all session IDs currently on disk, sorted ascending.
-func ListSessionIDs() ([]string, error) {
-	base := fsutil.GetSessionsDir(config.DataDir)
+func ListSessionIDs(cfg config.Config) ([]string, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	base := fsutil.GetSessionsDir(cfg.DataDir)
 	des, err := os.ReadDir(base)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

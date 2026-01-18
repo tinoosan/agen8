@@ -59,14 +59,17 @@ type HistoryResource struct {
 	Store store.HistoryStore
 }
 
-func NewSessionHistoryResource(sessionID string) (*HistoryResource, error) {
+func NewSessionHistoryResource(cfg config.Config, sessionID string) (*HistoryResource, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, fmt.Errorf("sessionId cannot be empty")
 	}
 	// Keep BaseDir for debug output / inspection, but store owns the IO.
-	baseDir := fsutil.GetSessionHistoryDir(config.DataDir, sessionID)
+	baseDir := fsutil.GetSessionHistoryDir(cfg.DataDir, sessionID)
 
-	s, err := store.NewDiskHistoryStore(sessionID)
+	s, err := store.NewDiskHistoryStore(cfg, sessionID)
 	if err != nil {
 		return nil, err
 	}

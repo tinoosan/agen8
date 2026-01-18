@@ -51,9 +51,7 @@ Use "workbench resume <sessionId>" to continue a previous session by creating a
 new run in that session (workspaces remain run-scoped).
 `),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if dataDir != "" {
-			config.DataDir = dataDir
-		}
+		// dataDir is resolved per-command via effectiveConfig().
 		if maxContextB <= 0 {
 			return fmt.Errorf("--context-bytes must be > 0")
 		}
@@ -76,6 +74,10 @@ new run in that session (workspaces remain run-scoped).
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := effectiveConfig()
+		if err != nil {
+			return err
+		}
 		title := defaultTitle
 		if title == "" {
 			title = "workbench"
@@ -106,19 +108,19 @@ new run in that session (workspaces remain run-scoped).
 		}
 		switch strings.ToLower(strings.TrimSpace(uiMode)) {
 		case "", "tui":
-			return app.RunNewChatTUI(cmd.Context(), title, goal, maxContextB, opts)
+			return app.RunNewChatTUI(cmd.Context(), cfg, title, goal, maxContextB, opts)
 		case "repl":
 			// The legacy REPL creates the session/run upfront.
 			// (We can make this lazy too, but the TUI is the primary UX.)
-			sess, err := store.CreateSession(title)
+			sess, err := store.CreateSession(cfg, title)
 			if err != nil {
 				return err
 			}
-			run, err := store.CreateRunInSession(sess.SessionID, "", goal, maxContextB)
+			run, err := store.CreateRunInSession(cfg, sess.SessionID, "", goal, maxContextB)
 			if err != nil {
 				return err
 			}
-			return app.RunChat(cmd.Context(), run, opts)
+			return app.RunChat(cmd.Context(), cfg, run, opts)
 		default:
 			return fmt.Errorf("unknown --ui %q (expected tui or repl)", uiMode)
 		}
@@ -134,7 +136,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", config.DataDir, "base directory for runs/sessions (default: data)")
+	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", config.Default().DataDir, "base directory for runs/sessions (default: data)")
 	workDir = strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR"))
 	rootCmd.PersistentFlags().StringVar(&workDir, "workdir", workDir, "host working directory to mount at /workdir (default: current directory; env WORKBENCH_WORKDIR)")
 	rootCmd.PersistentFlags().IntVar(&maxContextB, "context-bytes", 8*1024, "run.maxBytesForContext (persisted in run.json)")

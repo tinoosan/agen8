@@ -15,21 +15,18 @@ import (
 )
 
 func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
-	tmp := t.TempDir()
-	old := config.DataDir
-	config.DataDir = tmp
-	defer func() { config.DataDir = old }()
+	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun("updater test", 10)
+	run, err := store.CreateRun(cfg, "updater test", 10)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	traceRes, err := resources.NewTraceResource(run.RunId)
+	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewTraceResource: %v", err)
 	}
-	memStore, err := store.NewDiskMemoryStore(run.RunId)
+	memStore, err := store.NewDiskMemoryStore(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewDiskMemoryStore: %v", err)
 	}
@@ -37,19 +34,19 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewVirtualMemoryResource: %v", err)
 	}
-	wsRes, err := resources.NewRunWorkspace(run.RunId)
+	wsRes, err := resources.NewRunWorkspace(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewRunWorkspace: %v", err)
 	}
 
 	// Seed run-scoped memory.md on disk (read-only to the agent).
-	memPath := fsutil.GetRunMemoryPath(config.DataDir, run.RunId)
+	memPath := fsutil.GetRunMemoryPath(cfg.DataDir, run.RunId)
 	if err := os.WriteFile(memPath, []byte("remember this"), 0644); err != nil {
 		t.Fatalf("WriteFile memory.md: %v", err)
 	}
 
 	// Seed trace with one event.
-	if err := store.AppendEvent(run.RunId, "test.event", "hello", map[string]string{"k": "v"}); err != nil {
+	if err := store.AppendEvent(cfg, run.RunId, "test.event", "hello", map[string]string{"k": "v"}); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
@@ -101,7 +98,7 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 
 	// Add another event and confirm offset advances again.
 	before := u.TraceCursor
-	if err := store.AppendEvent(run.RunId, "test.event2", "hello2", map[string]string{}); err != nil {
+	if err := store.AppendEvent(cfg, run.RunId, "test.event2", "hello2", map[string]string{}); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
@@ -131,21 +128,18 @@ func TestHeadTailUTF8(t *testing.T) {
 }
 
 func TestContextUpdater_FiltersTraceEvents(t *testing.T) {
-	tmp := t.TempDir()
-	old := config.DataDir
-	config.DataDir = tmp
-	defer func() { config.DataDir = old }()
+	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun("updater filter test", 10)
+	run, err := store.CreateRun(cfg, "updater filter test", 10)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	traceRes, err := resources.NewTraceResource(run.RunId)
+	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewTraceResource: %v", err)
 	}
-	memStore, err := store.NewDiskMemoryStore(run.RunId)
+	memStore, err := store.NewDiskMemoryStore(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewDiskMemoryStore: %v", err)
 	}
@@ -153,24 +147,24 @@ func TestContextUpdater_FiltersTraceEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewVirtualMemoryResource: %v", err)
 	}
-	wsRes, err := resources.NewRunWorkspace(run.RunId)
+	wsRes, err := resources.NewRunWorkspace(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewRunWorkspace: %v", err)
 	}
 
 	// Include one relevant event and one irrelevant event.
-	if err := store.AppendEvent(run.RunId, "agent.op.request", "Agent requested host op", map[string]string{
+	if err := store.AppendEvent(cfg, run.RunId, "agent.op.request", "Agent requested host op", map[string]string{
 		"op":   "fs.list",
 		"path": "/",
 	}); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
-	if err := store.AppendEvent(run.RunId, "irrelevant.event", "noise", map[string]string{
+	if err := store.AppendEvent(cfg, run.RunId, "irrelevant.event", "noise", map[string]string{
 		"x": "y",
 	}); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
-	if err := store.AppendEvent(run.RunId, "agent.op.response", "Host op completed", map[string]string{
+	if err := store.AppendEvent(cfg, run.RunId, "agent.op.response", "Host op completed", map[string]string{
 		"op": "fs.list",
 		"ok": "true",
 	}); err != nil {
@@ -206,21 +200,18 @@ func TestContextUpdater_FiltersTraceEvents(t *testing.T) {
 }
 
 func TestContextUpdater_AdaptiveBudgets(t *testing.T) {
-	tmp := t.TempDir()
-	old := config.DataDir
-	config.DataDir = tmp
-	defer func() { config.DataDir = old }()
+	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun("updater budget test", 10)
+	run, err := store.CreateRun(cfg, "updater budget test", 10)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	traceRes, err := resources.NewTraceResource(run.RunId)
+	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewTraceResource: %v", err)
 	}
-	memStore, err := store.NewDiskMemoryStore(run.RunId)
+	memStore, err := store.NewDiskMemoryStore(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewDiskMemoryStore: %v", err)
 	}
@@ -228,7 +219,7 @@ func TestContextUpdater_AdaptiveBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewVirtualMemoryResource: %v", err)
 	}
-	wsRes, err := resources.NewRunWorkspace(run.RunId)
+	wsRes, err := resources.NewRunWorkspace(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewRunWorkspace: %v", err)
 	}
@@ -268,21 +259,18 @@ func TestContextUpdater_AdaptiveBudgets(t *testing.T) {
 }
 
 func TestContextUpdater_FailureBumpAfterBadOp(t *testing.T) {
-	tmp := t.TempDir()
-	old := config.DataDir
-	config.DataDir = tmp
-	defer func() { config.DataDir = old }()
+	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun("updater failure bump test", 10)
+	run, err := store.CreateRun(cfg, "updater failure bump test", 10)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	traceRes, err := resources.NewTraceResource(run.RunId)
+	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewTraceResource: %v", err)
 	}
-	memStore, err := store.NewDiskMemoryStore(run.RunId)
+	memStore, err := store.NewDiskMemoryStore(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewDiskMemoryStore: %v", err)
 	}
@@ -290,7 +278,7 @@ func TestContextUpdater_FailureBumpAfterBadOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewVirtualMemoryResource: %v", err)
 	}
-	wsRes, err := resources.NewRunWorkspace(run.RunId)
+	wsRes, err := resources.NewRunWorkspace(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewRunWorkspace: %v", err)
 	}

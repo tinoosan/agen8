@@ -60,11 +60,14 @@ const (
 	maxSinceBytes  = 64 * 1024
 )
 
-func NewTraceResource(runId string) (*TraceResource, error) {
+func NewTraceResource(cfg config.Config, runId string) (*TraceResource, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	if runId == "" {
 		return nil, fmt.Errorf("runId cannot be empty")
 	}
-	baseDir := fsutil.GetTraceDir(config.DataDir, runId)
+	baseDir := fsutil.GetTraceDir(cfg.DataDir, runId)
 	// create trace directory if it doesn't exist
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("error creating trace directory %s: %w", baseDir, err)

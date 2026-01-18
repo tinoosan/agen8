@@ -20,11 +20,9 @@ import (
 
 func TestBuiltinHTTP_Fetch_SmallBody_OK(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun("builtin http test", 100)
+	run, err := store.CreateRun(cfg, "builtin http test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -92,11 +90,9 @@ func TestBuiltinHTTP_Fetch_SmallBody_OK(t *testing.T) {
 
 func TestBuiltinHTTP_Fetch_LargeBody_WritesArtifact(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	_, err := store.CreateRun("builtin http large test", 100)
+	_, err := store.CreateRun(cfg, "builtin http large test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

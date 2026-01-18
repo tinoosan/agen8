@@ -39,7 +39,10 @@ type TailedEvent struct {
 
 // AppendEvent records a new event for the specified run.
 // It validates inputs, ensures the run exists, and appends the event to the run's event log.
-func AppendEvent(runId, eventType, message string, data map[string]string) error {
+func AppendEvent(cfg config.Config, runId, eventType, message string, data map[string]string) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 
 	if runId == "" {
 		return fmt.Errorf("error appending event, runId cannot be blank")
@@ -53,8 +56,8 @@ func AppendEvent(runId, eventType, message string, data map[string]string) error
 		return fmt.Errorf("error appending event, message cannot be blank")
 	}
 
-	targetPath := fsutil.GetEventFilePath(config.DataDir, runId)
-	runFilePath := fsutil.GetRunFilePath(config.DataDir, runId)
+	targetPath := fsutil.GetEventFilePath(cfg.DataDir, runId)
+	runFilePath := fsutil.GetRunFilePath(cfg.DataDir, runId)
 
 	// We check if a run exists before we attempt to create an event in reference to it
 	_, err := os.Stat(runFilePath)
@@ -91,7 +94,7 @@ func AppendEvent(runId, eventType, message string, data map[string]string) error
 		return fmt.Errorf("error writing event for run %s: %w", runId, err)
 	}
 
-	traceDir := fsutil.GetTraceDir(config.DataDir, runId)
+	traceDir := fsutil.GetTraceDir(cfg.DataDir, runId)
 	if err := os.MkdirAll(traceDir, 0755); err != nil {
 		return fmt.Errorf("error creating trace directory %s: %w", traceDir, err)
 	}
@@ -113,8 +116,11 @@ func AppendEvent(runId, eventType, message string, data map[string]string) error
 
 // ListEvents retrieves all recorded events for a given run ID.
 // It reads from the run's JSONL event log, validates each entry, and returns them in order.
-func ListEvents(runId string) ([]types.Event, int64, error) {
-	targetPath := fsutil.GetEventFilePath(config.DataDir, runId)
+func ListEvents(cfg config.Config, runId string) ([]types.Event, int64, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, 0, err
+	}
+	targetPath := fsutil.GetEventFilePath(cfg.DataDir, runId)
 	events := make([]types.Event, 0)
 	f, err := os.Open(targetPath)
 	if err != nil {
@@ -175,11 +181,18 @@ func ListEvents(runId string) ([]types.Event, int64, error) {
 // Each TailedEvent includes the NextOffset for resuming after refresh.
 // The caller should cancel the context to stop tailing.
 // Both returned channels are closed when the function exits.
-func TailEvents(ctx context.Context, runId string, fromOffset int64) (<-chan TailedEvent, <-chan error) {
+func TailEvents(cfg config.Config, ctx context.Context, runId string, fromOffset int64) (<-chan TailedEvent, <-chan error) {
 	eventCh := make(chan TailedEvent)
 	errCh := make(chan error, 1)
 
-	targetPath := fsutil.GetEventFilePath(config.DataDir, runId)
+	if err := cfg.Validate(); err != nil {
+		errCh <- err
+		close(eventCh)
+		close(errCh)
+		return eventCh, errCh
+	}
+
+	targetPath := fsutil.GetEventFilePath(cfg.DataDir, runId)
 	currentOffset := fromOffset
 
 	go func() {

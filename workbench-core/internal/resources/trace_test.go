@@ -12,22 +12,14 @@ import (
 	"github.com/tinoosan/workbench-core/internal/store"
 )
 
-func withTempDataDir(t *testing.T) func() {
-	t.Helper()
-	tmpDir := t.TempDir()
-	old := config.DataDir
-	config.DataDir = tmpDir
-	return func() { config.DataDir = old }
-}
-
 func TestTraceResourceListRoot(t *testing.T) {
-	defer withTempDataDir(t)()
+	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun("trace list", 100)
+	run, err := store.CreateRun(cfg, "trace list", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	tr, err := NewTraceResource(run.RunId)
+	tr, err := NewTraceResource(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewTraceResource: %v", err)
 	}
@@ -53,32 +45,32 @@ func TestTraceResourceListRoot(t *testing.T) {
 }
 
 func TestTraceResourceReadEventsSince(t *testing.T) {
-	defer withTempDataDir(t)()
+	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun("trace since", 100)
+	run, err := store.CreateRun(cfg, "trace since", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	tr, err := NewTraceResource(run.RunId)
+	tr, err := NewTraceResource(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewTraceResource: %v", err)
 	}
 
-	if err := store.AppendEvent(run.RunId, "a", "first", nil); err != nil {
+	if err := store.AppendEvent(cfg, run.RunId, "a", "first", nil); err != nil {
 		t.Fatalf("AppendEvent first: %v", err)
 	}
 
-	eventPath := fsutil.GetEventFilePath(config.DataDir, run.RunId)
+	eventPath := fsutil.GetEventFilePath(cfg.DataDir, run.RunId)
 	info, err := os.Stat(eventPath)
 	if err != nil {
 		t.Fatalf("stat events.jsonl: %v", err)
 	}
 	offset := info.Size()
 
-	if err := store.AppendEvent(run.RunId, "b", "second", nil); err != nil {
+	if err := store.AppendEvent(cfg, run.RunId, "b", "second", nil); err != nil {
 		t.Fatalf("AppendEvent second: %v", err)
 	}
-	if err := store.AppendEvent(run.RunId, "c", "third", nil); err != nil {
+	if err := store.AppendEvent(cfg, run.RunId, "c", "third", nil); err != nil {
 		t.Fatalf("AppendEvent third: %v", err)
 	}
 
@@ -101,24 +93,24 @@ func TestTraceResourceReadEventsSince(t *testing.T) {
 }
 
 func TestTraceResourceReadEventsLatest(t *testing.T) {
-	defer withTempDataDir(t)()
+	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun("trace latest", 100)
+	run, err := store.CreateRun(cfg, "trace latest", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	tr, err := NewTraceResource(run.RunId)
+	tr, err := NewTraceResource(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewTraceResource: %v", err)
 	}
 
-	if err := store.AppendEvent(run.RunId, "a", "first", nil); err != nil {
+	if err := store.AppendEvent(cfg, run.RunId, "a", "first", nil); err != nil {
 		t.Fatalf("AppendEvent first: %v", err)
 	}
-	if err := store.AppendEvent(run.RunId, "b", "second", nil); err != nil {
+	if err := store.AppendEvent(cfg, run.RunId, "b", "second", nil); err != nil {
 		t.Fatalf("AppendEvent second: %v", err)
 	}
-	if err := store.AppendEvent(run.RunId, "c", "third", nil); err != nil {
+	if err := store.AppendEvent(cfg, run.RunId, "c", "third", nil); err != nil {
 		t.Fatalf("AppendEvent third: %v", err)
 	}
 
@@ -127,7 +119,7 @@ func TestTraceResourceReadEventsLatest(t *testing.T) {
 		t.Fatalf("Read events.latest: %v", err)
 	}
 
-	eventPath := fsutil.GetEventFilePath(config.DataDir, run.RunId)
+	eventPath := fsutil.GetEventFilePath(cfg.DataDir, run.RunId)
 	all, err := os.ReadFile(eventPath)
 	if err != nil {
 		t.Fatalf("ReadFile events.jsonl: %v", err)
@@ -140,13 +132,13 @@ func TestTraceResourceReadEventsLatest(t *testing.T) {
 }
 
 func TestTraceResourceReadEvents(t *testing.T) {
-	defer withTempDataDir(t)()
+	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun("trace events", 100)
+	run, err := store.CreateRun(cfg, "trace events", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	tr, err := NewTraceResource(run.RunId)
+	tr, err := NewTraceResource(cfg, run.RunId)
 	if err != nil {
 		t.Fatalf("NewTraceResource: %v", err)
 	}

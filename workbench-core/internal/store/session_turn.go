@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -23,7 +24,10 @@ const (
 //
 // The intent is to prevent "agent amnesia" when resuming a session by giving the host
 // a small, bounded snapshot to inject into the system prompt.
-func RecordTurnInSession(sessionID, runID, userText, agentFinal string) (types.Session, error) {
+func RecordTurnInSession(cfg config.Config, sessionID, runID, userText, agentFinal string) (types.Session, error) {
+	if err := cfg.Validate(); err != nil {
+		return types.Session{}, err
+	}
 	sessionID = strings.TrimSpace(sessionID)
 	runID = strings.TrimSpace(runID)
 	if sessionID == "" {
@@ -33,7 +37,7 @@ func RecordTurnInSession(sessionID, runID, userText, agentFinal string) (types.S
 		return types.Session{}, fmt.Errorf("runId is required")
 	}
 
-	s, err := LoadSession(sessionID)
+	s, err := LoadSession(cfg, sessionID)
 	if err != nil {
 		return types.Session{}, err
 	}
@@ -72,7 +76,7 @@ func RecordTurnInSession(sessionID, runID, userText, agentFinal string) (types.S
 
 	s.Summary = appendAndCapBytes(s.Summary, line, MaxSessionSummaryBytes)
 
-	return s, SaveSession(s)
+	return s, SaveSession(cfg, s)
 }
 
 func clampString(s string, max int) string {

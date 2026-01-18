@@ -67,21 +67,20 @@ func TestLazyRunner_Model_DoesNotInitializeSession(t *testing.T) {
 func TestTUITurnRunner_Model_UpdatesAgentAndSession(t *testing.T) {
 	t.Parallel()
 
-	oldDataDir := config.DataDir
-	t.Cleanup(func() { config.DataDir = oldDataDir })
-	config.DataDir = t.TempDir()
+	cfg := config.Config{DataDir: t.TempDir()}
 
-	sess, err := store.CreateSession("test")
+	sess, err := store.CreateSession(cfg, "test")
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	run, err := store.CreateRunInSession(sess.SessionID, "", "test", 1024)
+	run, err := store.CreateRunInSession(cfg, sess.SessionID, "", "test", 1024)
 	if err != nil {
 		t.Fatalf("CreateRunInSession: %v", err)
 	}
 
 	var got []events.Event
 	r := &tuiTurnRunner{
+		cfg:  cfg,
 		fs:   vfs.NewFS(),
 		run:  run,
 		opts: RunChatOptions{Model: "openai/gpt-5.2"},
@@ -104,7 +103,7 @@ func TestTUITurnRunner_Model_UpdatesAgentAndSession(t *testing.T) {
 		t.Fatalf("agent model=%q, want %q", r.agent.Model, "openai/gpt-4o")
 	}
 
-	updated, err := store.LoadSession(sess.SessionID)
+	updated, err := store.LoadSession(cfg, sess.SessionID)
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}

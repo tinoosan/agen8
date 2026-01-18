@@ -14,16 +14,20 @@ var resumeCmd = &cobra.Command{
 	Short: "Resume a previous session by starting a new run",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := effectiveConfig()
+		if err != nil {
+			return err
+		}
 		sessionID := strings.TrimSpace(args[0])
 		if sessionID == "" {
 			return fmt.Errorf("sessionId is required")
 		}
-		sess, err := store.LoadSession(sessionID)
+		sess, err := store.LoadSession(cfg, sessionID)
 		if err != nil {
 			return err
 		}
 		parent := strings.TrimSpace(sess.CurrentRunID)
-		run, err := store.CreateRunInSession(sessionID, parent, "resume session", maxContextB)
+		run, err := store.CreateRunInSession(cfg, sessionID, parent, "resume session", maxContextB)
 		if err != nil {
 			return err
 		}
@@ -48,9 +52,9 @@ var resumeCmd = &cobra.Command{
 		}
 		switch strings.ToLower(strings.TrimSpace(uiMode)) {
 		case "", "tui":
-			return app.RunChatTUI(cmd.Context(), run, opts)
+			return app.RunChatTUI(cmd.Context(), cfg, run, opts)
 		case "repl":
-			return app.RunChat(cmd.Context(), run, opts)
+			return app.RunChat(cmd.Context(), cfg, run, opts)
 		default:
 			return fmt.Errorf("unknown --ui %q (expected tui or repl)", uiMode)
 		}

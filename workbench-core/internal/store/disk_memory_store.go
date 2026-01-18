@@ -28,12 +28,15 @@ type DiskMemoryStore struct {
 	BaseDir string
 }
 
-// NewDiskMemoryStore constructs a DiskMemoryStore for a runId under config.DataDir.
-func NewDiskMemoryStore(runId string) (*DiskMemoryStore, error) {
+// NewDiskMemoryStore constructs a DiskMemoryStore for a runId under cfg.DataDir.
+func NewDiskMemoryStore(cfg config.Config, runId string) (*DiskMemoryStore, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(runId) == "" {
 		return nil, fmt.Errorf("runId is required")
 	}
-	baseDir := fsutil.GetRunMemoryDir(config.DataDir, runId)
+	baseDir := fsutil.GetRunMemoryDir(cfg.DataDir, runId)
 	return NewDiskMemoryStoreFromDir(baseDir)
 }
 

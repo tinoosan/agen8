@@ -13,18 +13,22 @@ var listRunsCmd = &cobra.Command{
 	Short: "List runs for a session",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := effectiveConfig()
+		if err != nil {
+			return err
+		}
 		sessionID := strings.TrimSpace(args[0])
 		if sessionID == "" {
 			return fmt.Errorf("sessionId is required")
 		}
-		sess, err := store.LoadSession(sessionID)
+		sess, err := store.LoadSession(cfg, sessionID)
 		if err != nil {
 			return err
 		}
 
 		out := cmd.OutOrStdout()
 		for _, runID := range sess.Runs {
-			run, err := store.LoadRun(runID)
+			run, err := store.LoadRun(cfg, runID)
 			if err != nil {
 				// Keep listing even if one run is missing/corrupt; session index is best-effort.
 				fmt.Fprintf(out, "%s\t%s\n", runID, "error:"+err.Error())

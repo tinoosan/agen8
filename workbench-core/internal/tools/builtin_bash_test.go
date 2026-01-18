@@ -18,11 +18,9 @@ import (
 
 func TestBuiltinBash_Exec_CatFile_OK(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun("builtin bash ok test", 100)
+	run, err := store.CreateRun(cfg, "builtin bash ok test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -86,11 +84,9 @@ func TestBuiltinBash_Exec_CatFile_OK(t *testing.T) {
 
 func TestBuiltinBash_Exec_RejectsEscapeCwd(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun("builtin bash cwd test", 100)
+	run, err := store.CreateRun(cfg, "builtin bash cwd test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -130,11 +126,9 @@ func TestBuiltinBash_Exec_RejectsEscapeCwd(t *testing.T) {
 
 func TestBuiltinBash_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun("builtin bash truncation test", 100)
+	run, err := store.CreateRun(cfg, "builtin bash truncation test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -201,11 +195,9 @@ func TestBuiltinBash_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 
 func TestBuiltinBash_Exec_RejectsAbsolutePathArgs(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	_, err := store.CreateRun("builtin bash abs path args test", 100)
+	_, err := store.CreateRun(cfg, "builtin bash abs path args test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

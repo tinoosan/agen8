@@ -7,12 +7,9 @@ import (
 )
 
 func TestCreateSessionAndAddRun(t *testing.T) {
-	tmp := t.TempDir()
-	old := config.DataDir
-	config.DataDir = tmp
-	defer func() { config.DataDir = old }()
+	cfg := config.Config{DataDir: t.TempDir()}
 
-	s, err := CreateSession("test session")
+	s, err := CreateSession(cfg, "test session")
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -21,7 +18,7 @@ func TestCreateSessionAndAddRun(t *testing.T) {
 	}
 
 	// Add a run and ensure it becomes current.
-	updated, err := AddRunToSession(s.SessionID, "run-1")
+	updated, err := AddRunToSession(cfg, s.SessionID, "run-1")
 	if err != nil {
 		t.Fatalf("AddRunToSession: %v", err)
 	}
@@ -32,7 +29,7 @@ func TestCreateSessionAndAddRun(t *testing.T) {
 		t.Fatalf("runs=%v", updated.Runs)
 	}
 
-	loaded, err := LoadSession(s.SessionID)
+	loaded, err := LoadSession(cfg, s.SessionID)
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
@@ -42,17 +39,14 @@ func TestCreateSessionAndAddRun(t *testing.T) {
 }
 
 func TestRecordTurnInSession_UpdatesGoalAndSummary(t *testing.T) {
-	tmp := t.TempDir()
-	old := config.DataDir
-	config.DataDir = tmp
-	defer func() { config.DataDir = old }()
+	cfg := config.Config{DataDir: t.TempDir()}
 
-	s, err := CreateSession("t")
+	s, err := CreateSession(cfg, "t")
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	updated, err := RecordTurnInSession(s.SessionID, "run-1", "do the thing", "done")
+	updated, err := RecordTurnInSession(cfg, s.SessionID, "run-1", "do the thing", "done")
 	if err != nil {
 		t.Fatalf("RecordTurnInSession: %v", err)
 	}

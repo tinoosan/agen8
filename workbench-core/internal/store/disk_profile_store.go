@@ -28,9 +28,12 @@ type DiskProfileStore struct {
 	BaseDir string
 }
 
-// NewDiskProfileStore constructs a DiskProfileStore rooted at config.DataDir/profile.
-func NewDiskProfileStore() (*DiskProfileStore, error) {
-	baseDir := fsutil.GetProfileDir(config.DataDir)
+// NewDiskProfileStore constructs a DiskProfileStore rooted at cfg.DataDir/profile.
+func NewDiskProfileStore(cfg config.Config) (*DiskProfileStore, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	baseDir := fsutil.GetProfileDir(cfg.DataDir)
 	return NewDiskProfileStoreFromDir(baseDir)
 }
 

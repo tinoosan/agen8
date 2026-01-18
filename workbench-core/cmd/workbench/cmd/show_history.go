@@ -16,11 +16,15 @@ var showHistoryCmd = &cobra.Command{
 	Short: "Show recent session history (JSONL)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := effectiveConfig()
+		if err != nil {
+			return err
+		}
 		sessionID := strings.TrimSpace(args[0])
 		if sessionID == "" {
 			return fmt.Errorf("sessionId is required")
 		}
-		hs, err := store.NewDiskHistoryStore(sessionID)
+		hs, err := store.NewDiskHistoryStore(cfg, sessionID)
 		if err != nil {
 			return err
 		}

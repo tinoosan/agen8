@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
@@ -29,6 +30,9 @@ import (
 // an augmented system prompt.
 type ContextConstructor struct {
 	FS *vfs.FS
+
+	// Cfg is used for disk-backed host state (e.g. session.json history cursor).
+	Cfg config.Config
 
 	// RunID/SessionID identify the current execution scope.
 	RunID     string
@@ -203,7 +207,7 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 
 	// Pull session-scoped history cursor from session.json (persisted across runs).
 	if c.SessionID != "" {
-		if sess, err := store.LoadSession(c.SessionID); err == nil {
+		if sess, err := store.LoadSession(c.Cfg, c.SessionID); err == nil {
 			if strings.TrimSpace(sess.HistoryCursor) != "" {
 				c.historyCursor = store.HistoryCursor(strings.TrimSpace(sess.HistoryCursor))
 			}
@@ -377,9 +381,9 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 			}
 			// Persist session-level history cursor.
 			if c.SessionID != "" {
-				if sess, err := store.LoadSession(c.SessionID); err == nil {
+				if sess, err := store.LoadSession(c.Cfg, c.SessionID); err == nil {
 					sess.HistoryCursor = string(c.historyCursor)
-					_ = store.SaveSession(sess)
+					_ = store.SaveSession(c.Cfg, sess)
 				}
 			}
 		}

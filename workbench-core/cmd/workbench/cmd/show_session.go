@@ -14,11 +14,15 @@ var showSessionCmd = &cobra.Command{
 	Short: "Show session.json for a session",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := effectiveConfig()
+		if err != nil {
+			return err
+		}
 		sessionID := strings.TrimSpace(args[0])
 		if sessionID == "" {
 			return fmt.Errorf("sessionId is required")
 		}
-		sess, err := store.LoadSession(sessionID)
+		sess, err := store.LoadSession(cfg, sessionID)
 		if err != nil {
 			return err
 		}

@@ -13,22 +13,20 @@ import (
 
 func TestEventStore(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := CreateRun("Event Test Run", 1024)
+	run, err := CreateRun(cfg, "Event Test Run", 1024)
 	if err != nil {
 		t.Fatalf("Failed to create run: %v", err)
 	}
 
 	t.Run("AppendEventWritesOneLine", func(t *testing.T) {
-		err := AppendEvent(run.RunId, "test_event", "hello world", map[string]string{"foo": "bar"})
+		err := AppendEvent(cfg, run.RunId, "test_event", "hello world", map[string]string{"foo": "bar"})
 		if err != nil {
 			t.Fatalf("AppendEvent failed: %v", err)
 		}
 
-		filePath := fsutil.GetEventFilePath(config.DataDir, run.RunId)
+		filePath := fsutil.GetEventFilePath(cfg.DataDir, run.RunId)
 		f, err := os.Open(filePath)
 		if err != nil {
 			t.Fatalf("Failed to open event file: %v", err)
@@ -48,12 +46,12 @@ func TestEventStore(t *testing.T) {
 
 	t.Run("ListEventsReturnsInOrder", func(t *testing.T) {
 		// Append a second event
-		err := AppendEvent(run.RunId, "second_event", "second message", nil)
+		err := AppendEvent(cfg, run.RunId, "second_event", "second message", nil)
 		if err != nil {
 			t.Fatalf("Failed to append second event: %v", err)
 		}
 
-		events, offset, err := ListEvents(run.RunId)
+		events, offset, err := ListEvents(cfg, run.RunId)
 		if err != nil {
 			t.Fatalf("ListEvents failed: %v", err)
 		}
@@ -71,7 +69,7 @@ func TestEventStore(t *testing.T) {
 		}
 
 		// Verify offset matches file size
-		filePath := fsutil.GetEventFilePath(config.DataDir, run.RunId)
+		filePath := fsutil.GetEventFilePath(cfg.DataDir, run.RunId)
 		info, err := os.Stat(filePath)
 		if err != nil {
 			t.Fatalf("Failed to stat event file: %v", err)
@@ -85,18 +83,18 @@ func TestEventStore(t *testing.T) {
 	t.Run("TailEventsReturnsFromOffset", func(t *testing.T) {
 		// We already have 2 events from previous tests
 		// Get offset before adding more
-		filePath := fsutil.GetEventFilePath(config.DataDir, run.RunId)
+		filePath := fsutil.GetEventFilePath(cfg.DataDir, run.RunId)
 		info, _ := os.Stat(filePath)
 		offset := info.Size()
 
 		// Add 2 more events
-		AppendEvent(run.RunId, "third_event", "third message", nil)
-		AppendEvent(run.RunId, "fourth_event", "fourth message", nil)
+		AppendEvent(cfg, run.RunId, "third_event", "third message", nil)
+		AppendEvent(cfg, run.RunId, "fourth_event", "fourth message", nil)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		eventCh, errCh := TailEvents(ctx, run.RunId, offset)
+		eventCh, errCh := TailEvents(cfg, ctx, run.RunId, offset)
 
 		var tailedEvents []TailedEvent
 		done := false
@@ -136,20 +134,20 @@ func TestEventStore(t *testing.T) {
 
 	t.Run("TailEventsReceivesNewEvents", func(t *testing.T) {
 		// Get current offset
-		filePath := fsutil.GetEventFilePath(config.DataDir, run.RunId)
+		filePath := fsutil.GetEventFilePath(cfg.DataDir, run.RunId)
 		info, _ := os.Stat(filePath)
 		offset := info.Size()
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		eventCh, errCh := TailEvents(ctx, run.RunId, offset)
+		eventCh, errCh := TailEvents(cfg, ctx, run.RunId, offset)
 
 		// Append a new event after starting to tail
 		// Give the tail library time to set up file watching
 		go func() {
 			time.Sleep(500 * time.Millisecond)
-			AppendEvent(run.RunId, "new_event", "new message", nil)
+			AppendEvent(cfg, run.RunId, "new_event", "new message", nil)
 		}()
 
 		var tailedEvents []TailedEvent
@@ -183,14 +181,14 @@ func TestEventStore(t *testing.T) {
 
 	t.Run("TailEventsWaitsForCompleteLines", func(t *testing.T) {
 		// Get current offset
-		filePath := fsutil.GetEventFilePath(config.DataDir, run.RunId)
+		filePath := fsutil.GetEventFilePath(cfg.DataDir, run.RunId)
 		info, _ := os.Stat(filePath)
 		offset := info.Size()
 
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
-		eventCh, errCh := TailEvents(ctx, run.RunId, offset)
+		eventCh, errCh := TailEvents(cfg, ctx, run.RunId, offset)
 
 		// Write an incomplete line (no newline)
 		go func() {

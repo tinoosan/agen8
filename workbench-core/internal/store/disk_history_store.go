@@ -25,12 +25,15 @@ type DiskHistoryStore struct {
 	Path string
 }
 
-// NewDiskHistoryStore constructs a DiskHistoryStore for a sessionID under config.DataDir.
-func NewDiskHistoryStore(sessionID string) (*DiskHistoryStore, error) {
+// NewDiskHistoryStore constructs a DiskHistoryStore for a sessionID under cfg.DataDir.
+func NewDiskHistoryStore(cfg config.Config, sessionID string) (*DiskHistoryStore, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, fmt.Errorf("sessionId is required")
 	}
-	return NewDiskHistoryStoreFromPath(fsutil.GetSessionHistoryPath(config.DataDir, sessionID))
+	return NewDiskHistoryStoreFromPath(fsutil.GetSessionHistoryPath(cfg.DataDir, sessionID))
 }
 
 // NewDiskHistoryStoreFromPath constructs a DiskHistoryStore that reads/appends to path.

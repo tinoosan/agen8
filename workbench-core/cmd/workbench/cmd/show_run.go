@@ -14,11 +14,15 @@ var showRunCmd = &cobra.Command{
 	Short: "Show run.json for a run",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := effectiveConfig()
+		if err != nil {
+			return err
+		}
 		runID := strings.TrimSpace(args[0])
 		if runID == "" {
 			return fmt.Errorf("runId is required")
 		}
-		run, err := store.LoadRun(runID)
+		run, err := store.LoadRun(cfg, runID)
 		if err != nil {
 			return err
 		}

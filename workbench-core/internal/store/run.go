@@ -38,28 +38,34 @@ import (
 // CreateRun initializes a new run with the given goal and context limit.
 // It creates a unique run ID, a corresponding directory in data/runs,
 // and persists the initial run state as run.json.
-func CreateRun(goal string, maxBytesForContext int) (types.Run, error) {
+func CreateRun(cfg config.Config, goal string, maxBytesForContext int) (types.Run, error) {
+	if err := cfg.Validate(); err != nil {
+		return types.Run{}, err
+	}
 	// Runs always belong to a session. For now (until a CLI/session loader exists),
 	// CreateRun creates a new session implicitly.
-	sess, err := CreateSession(goal)
+	sess, err := CreateSession(cfg, goal)
 	if err != nil {
 		return types.Run{}, err
 	}
-	return CreateRunInSession(sess.SessionID, "", goal, maxBytesForContext)
+	return CreateRunInSession(cfg, sess.SessionID, "", goal, maxBytesForContext)
 }
 
 // CreateRunInSession creates a run within an existing session.
 //
 // parentRunID is optional; when set, the new run is considered a "sub-agent" run.
-func CreateRunInSession(sessionID, parentRunID, goal string, maxBytesForContext int) (types.Run, error) {
+func CreateRunInSession(cfg config.Config, sessionID, parentRunID, goal string, maxBytesForContext int) (types.Run, error) {
+	if err := cfg.Validate(); err != nil {
+		return types.Run{}, err
+	}
 	if strings.TrimSpace(sessionID) == "" {
 		return types.Run{}, fmt.Errorf("sessionId is required")
 	}
 	run := types.NewRun(goal, maxBytesForContext, sessionID, parentRunID)
-	if err := SaveRun(run); err != nil {
+	if err := SaveRun(cfg, run); err != nil {
 		return types.Run{}, err
 	}
-	if _, err := AddRunToSession(sessionID, run.RunId); err != nil {
+	if _, err := AddRunToSession(cfg, sessionID, run.RunId); err != nil {
 		return types.Run{}, err
 	}
 	return run, nil
@@ -68,8 +74,11 @@ func CreateRunInSession(sessionID, parentRunID, goal string, maxBytesForContext 
 // LoadRun reads a run's state from disk by its run ID.
 // It returns an error if the file cannot be read, if the JSON is malformed,
 // or if the loaded data is missing critical fields like runId.
-func LoadRun(runId string) (types.Run, error) {
-	targetPath := fsutil.GetRunFilePath(config.DataDir, runId)
+func LoadRun(cfg config.Config, runId string) (types.Run, error) {
+	if err := cfg.Validate(); err != nil {
+		return types.Run{}, err
+	}
+	targetPath := fsutil.GetRunFilePath(cfg.DataDir, runId)
 	b, err := os.ReadFile(targetPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -92,8 +101,11 @@ func LoadRun(runId string) (types.Run, error) {
 
 // SaveRun persists the current state of a run to disk as its run.json file.
 // It ensures the necessary directory structure exists before writing.
-func SaveRun(run types.Run) error {
-	targetPath := fsutil.GetRunFilePath(config.DataDir, run.RunId)
+func SaveRun(cfg config.Config, run types.Run) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	targetPath := fsutil.GetRunFilePath(cfg.DataDir, run.RunId)
 	err := os.MkdirAll(filepath.Dir(targetPath), 0755)
 	if err != nil {
 		return err
@@ -113,13 +125,16 @@ func SaveRun(run types.Run) error {
 // It updates the Status, sets FinishedAt to the current time,
 // and records an error message if the status is Failed.
 // The updated state is then persisted to disk.
-func StopRun(runId string, status types.RunStatus, errorMsg string) (types.Run, error) {
+func StopRun(cfg config.Config, runId string, status types.RunStatus, errorMsg string) (types.Run, error) {
+	if err := cfg.Validate(); err != nil {
+		return types.Run{}, err
+	}
 
 	if status != types.StatusFailed && status != types.StatusDone && status != types.StatusCanceled {
 		return types.Run{}, fmt.Errorf("error stopping run %s, invalid status '%s'", runId, status)
 	}
 
-	run, err := LoadRun(runId)
+	run, err := LoadRun(cfg, runId)
 	if err != nil {
 		return types.Run{}, fmt.Errorf("error stopping run: %w", err)
 	}
@@ -155,5 +170,5 @@ func StopRun(runId string, status types.RunStatus, errorMsg string) (types.Run, 
 		run.Error = &errorMsg
 	}
 
-	return run, SaveRun(run)
+	return run, SaveRun(cfg, run)
 }

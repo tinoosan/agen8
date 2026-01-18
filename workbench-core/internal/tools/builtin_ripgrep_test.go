@@ -22,11 +22,9 @@ func TestBuiltinRipgrep_Search_FindsMatch(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun("builtin ripgrep test", 100)
+	run, err := store.CreateRun(cfg, "builtin ripgrep test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -89,11 +87,9 @@ func TestBuiltinRipgrep_Search_RejectsEscapePath(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun("builtin ripgrep escape test", 100)
+	run, err := store.CreateRun(cfg, "builtin ripgrep escape test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

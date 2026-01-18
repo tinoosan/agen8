@@ -23,11 +23,9 @@ func (f invokerFunc) Invoke(ctx context.Context, req types.ToolRequest) (tools.T
 
 func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun("runner test", 100)
+	run, err := store.CreateRun(cfg, "runner test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -106,11 +104,9 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 
 func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun("runner unknown tool test", 100)
+	run, err := store.CreateRun(cfg, "runner unknown tool test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -152,11 +148,9 @@ func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 
 func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun("runner invalid artifact test", 100)
+	run, err := store.CreateRun(cfg, "runner invalid artifact test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -205,11 +199,9 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 
 func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun("runner invoke error test", 100)
+	run, err := store.CreateRun(cfg, "runner invoke error test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

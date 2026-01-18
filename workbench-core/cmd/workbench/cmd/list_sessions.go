@@ -12,7 +12,11 @@ var listSessionsCmd = &cobra.Command{
 	Short: "List sessions",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ids, err := store.ListSessionIDs()
+		cfg, err := effectiveConfig()
+		if err != nil {
+			return err
+		}
+		ids, err := store.ListSessionIDs(cfg)
 		if err != nil {
 			return err
 		}

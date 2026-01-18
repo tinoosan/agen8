@@ -1,12 +1,31 @@
 package config
 
-// DataDir is the base directory for all workbench data storage.
+import (
+	"fmt"
+	"strings"
+)
+
+// Config holds host runtime configuration that should not be global state.
 //
-// All run-scoped data (workspace, events, results, etc.) is stored under
-// subdirectories of DataDir. The default value "data" creates a local
-// data directory in the current working directory.
-//
-// This will likely become configurable via environment variable or config file
-// in future versions to support deployment scenarios where data should be
-// stored in a specific location (e.g., /var/lib/workbench, ~/.workbench, etc.).
-var DataDir = "data"
+// This is intentionally small for now. As more knobs are added, they should live
+// here rather than as package-level globals to keep code testable and parallel-safe.
+type Config struct {
+	// DataDir is the base directory for all workbench data storage.
+	//
+	// All run-scoped data (workspace, events, results, etc.) is stored under
+	// subdirectories of DataDir. The default value "data" creates a local
+	// data directory in the current working directory.
+	DataDir string
+}
+
+// Default returns the default host configuration.
+func Default() Config {
+	return Config{DataDir: "data"}
+}
+
+func (c Config) Validate() error {
+	if strings.TrimSpace(c.DataDir) == "" {
+		return fmt.Errorf("config.DataDir is required")
+	}
+	return nil
+}

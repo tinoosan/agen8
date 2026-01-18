@@ -13,14 +13,12 @@ import (
 func TestCreateRun(t *testing.T) {
 	// Setup temporary data directory
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
 	goal := "Test Goal"
 	maxBytes := 1024
 
-	run, err := CreateRun(goal, maxBytes)
+	run, err := CreateRun(cfg, goal, maxBytes)
 	if err != nil {
 		t.Fatalf("CreateRun failed: %v", err)
 	}
@@ -90,18 +88,16 @@ func TestCreateRun(t *testing.T) {
 
 func TestLoadRun(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
 	t.Run("Success", func(t *testing.T) {
 		goal := "Load Success Goal"
-		run, err := CreateRun(goal, 100)
+		run, err := CreateRun(cfg, goal, 100)
 		if err != nil {
 			t.Fatalf("Failed to create run for loading: %v", err)
 		}
 
-		loaded, err := LoadRun(run.RunId)
+		loaded, err := LoadRun(cfg, run.RunId)
 		if err != nil {
 			t.Fatalf("LoadRun failed: %v", err)
 		}
@@ -115,7 +111,7 @@ func TestLoadRun(t *testing.T) {
 	})
 
 	t.Run("NotFound", func(t *testing.T) {
-		_, err := LoadRun("non-existent-run")
+		_, err := LoadRun(cfg, "non-existent-run")
 		if err == nil {
 			t.Error("Expected error for non-existent run, got nil")
 		}
@@ -131,7 +127,7 @@ func TestLoadRun(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err := LoadRun(runId)
+		_, err := LoadRun(cfg, runId)
 		if err == nil {
 			t.Error("Expected error for malformed JSON, got nil")
 		}
@@ -147,7 +143,7 @@ func TestLoadRun(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err := LoadRun(runId)
+		_, err := LoadRun(cfg, runId)
 		if err == nil {
 			t.Error("Expected error for missing runId, got nil")
 		}
@@ -156,17 +152,15 @@ func TestLoadRun(t *testing.T) {
 
 func TestStopRun(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldDataDir := config.DataDir
-	config.DataDir = tmpDir
-	defer func() { config.DataDir = oldDataDir }()
+	cfg := config.Config{DataDir: tmpDir}
 
 	t.Run("SuccessDone", func(t *testing.T) {
-		run, err := CreateRun("Stop Success", 100)
+		run, err := CreateRun(cfg, "Stop Success", 100)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		stopped, err := StopRun(run.RunId, types.StatusDone, "")
+		stopped, err := StopRun(cfg, run.RunId, types.StatusDone, "")
 		if err != nil {
 			t.Fatalf("StopRun failed: %v", err)
 		}
@@ -182,20 +176,20 @@ func TestStopRun(t *testing.T) {
 		}
 
 		// Verify on disk
-		loaded, _ := LoadRun(run.RunId)
+		loaded, _ := LoadRun(cfg, run.RunId)
 		if loaded.Status != types.StatusDone {
 			t.Errorf("Disk status expected %q, got %q", types.StatusDone, loaded.Status)
 		}
 	})
 
 	t.Run("SuccessFailed", func(t *testing.T) {
-		run, err := CreateRun("Stop Failed Success", 100)
+		run, err := CreateRun(cfg, "Stop Failed Success", 100)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		errMsg := "some error occurred"
-		stopped, err := StopRun(run.RunId, types.StatusFailed, errMsg)
+		stopped, err := StopRun(cfg, run.RunId, types.StatusFailed, errMsg)
 		if err != nil {
 			t.Fatalf("StopRun failed: %v", err)
 		}
@@ -212,42 +206,42 @@ func TestStopRun(t *testing.T) {
 	})
 
 	t.Run("ErrorMissingMessage", func(t *testing.T) {
-		run, err := CreateRun("Stop Error Missing Msg", 100)
+		run, err := CreateRun(cfg, "Stop Error Missing Msg", 100)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		_, err = StopRun(run.RunId, types.StatusFailed, "")
+		_, err = StopRun(cfg, run.RunId, types.StatusFailed, "")
 		if err == nil {
 			t.Error("Expected error for missing error message, got nil")
 		}
 	})
 
 	t.Run("ErrorInvalidStatus", func(t *testing.T) {
-		run, err := CreateRun("Stop Error Invalid Status", 100)
+		run, err := CreateRun(cfg, "Stop Error Invalid Status", 100)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		_, err = StopRun(run.RunId, types.StatusRunning, "")
+		_, err = StopRun(cfg, run.RunId, types.StatusRunning, "")
 		if err == nil {
 			t.Error("Expected error for transition to status 'running', got nil")
 		}
 	})
 
 	t.Run("ErrorAlreadyStopped", func(t *testing.T) {
-		run, err := CreateRun("Stop Error Already Stopped", 100)
+		run, err := CreateRun(cfg, "Stop Error Already Stopped", 100)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		_, err = StopRun(run.RunId, types.StatusDone, "")
+		_, err = StopRun(cfg, run.RunId, types.StatusDone, "")
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		// Try to stop again
-		_, err = StopRun(run.RunId, types.StatusDone, "")
+		_, err = StopRun(cfg, run.RunId, types.StatusDone, "")
 		if err == nil {
 			t.Error("Expected error for already stopped run, got nil")
 		}

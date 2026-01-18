@@ -166,7 +166,10 @@ func fmtUSD(v float64) string {
 //   - starts a readline-based chat session
 //
 // The CLI (cmd/workbench) decides how runs/sessions are created or resumed.
-func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr error) {
+func RunChat(ctx context.Context, cfg config.Config, run types.Run, opts RunChatOptions) (retErr error) {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	opts = opts.withDefaults()
 
 	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -187,14 +190,14 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 			status = types.StatusFailed
 			errMsg = retErr.Error()
 		}
-		_, _ = store.StopRun(run.RunId, status, errMsg)
+		_, _ = store.StopRun(cfg, run.RunId, status, errMsg)
 	}()
 
 	log.Printf("== Workbench chat ==")
 	log.Printf("sessionId=%s", run.SessionID)
 	log.Printf("runId=%s", run.RunId)
 
-	historyRes, err := resources.NewSessionHistoryResource(run.SessionID)
+	historyRes, err := resources.NewSessionHistoryResource(cfg, run.SessionID)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -204,7 +207,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		RunID: run.RunId,
 		Sink: events.MultiSink{
 			events.ConsoleSink{},
-			events.StoreSink{},
+			events.StoreSink{Cfg: cfg},
 			historySink,
 		},
 	}
@@ -217,7 +220,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 
 	sessionTitle := ""
 	sessionModel := ""
-	if sess, err := store.LoadSession(run.SessionID); err == nil {
+	if sess, err := store.LoadSession(cfg, run.SessionID); err == nil {
 		sessionTitle = strings.TrimSpace(sess.Title)
 		sessionModel = strings.TrimSpace(sess.ActiveModel)
 	}
@@ -258,7 +261,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		Console: boolp(false),
 	})
 
-	traceRes, err := resources.NewTraceResource(run.RunId)
+	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
 	if err != nil {
 		return fmt.Errorf("create trace: %w", err)
 	}
@@ -274,14 +277,14 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		return fmt.Errorf("create workdir: %w", err)
 	}
 
-	workspace, err := resources.NewRunWorkspace(run.RunId)
+	workspace, err := resources.NewRunWorkspace(cfg, run.RunId)
 	if err != nil {
 		return fmt.Errorf("create workspace: %w", err)
 	}
 
 	// /tools is virtual and does not require a disk directory.
 	// If data/tools exists, it is used as an optional provider.
-	toolsDir := fsutil.GetToolsDir(config.DataDir)
+	toolsDir := fsutil.GetToolsDir(cfg.DataDir)
 	_ = os.MkdirAll(toolsDir, 0755)
 
 	builtinProvider, err := tools.NewBuiltinManifestProvider()
@@ -305,7 +308,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		return fmt.Errorf("create results: %w", err)
 	}
 
-	memStore, err := store.NewDiskMemoryStore(run.RunId)
+	memStore, err := store.NewDiskMemoryStore(cfg, run.RunId)
 	if err != nil {
 		return fmt.Errorf("create memory store: %w", err)
 	}
@@ -314,7 +317,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		return fmt.Errorf("create memory resource: %w", err)
 	}
 
-	profileStore, err := store.NewDiskProfileStore()
+	profileStore, err := store.NewDiskProfileStore(cfg)
 	if err != nil {
 		return fmt.Errorf("create profile store: %w", err)
 	}
@@ -366,7 +369,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 
 	// Persist runtime config for reproducibility/debugging.
 	run.Runtime = &types.RunRuntimeConfig{
-		DataDir:               config.DataDir,
+		DataDir:               cfg.DataDir,
 		Model:                 model,
 		MaxSteps:              opts.MaxSteps,
 		MaxTraceBytes:         opts.MaxTraceBytes,
@@ -377,13 +380,13 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		PriceInPerMTokensUSD:  opts.PriceInPerMTokensUSD,
 		PriceOutPerMTokensUSD: opts.PriceOutPerMTokensUSD,
 	}
-	_ = store.SaveRun(run)
+	_ = store.SaveRun(cfg, run)
 
 	// Persist the active model at the session level so "resume session" is deterministic.
-	if sess, err := store.LoadSession(run.SessionID); err == nil {
+	if sess, err := store.LoadSession(cfg, run.SessionID); err == nil {
 		if strings.TrimSpace(sess.ActiveModel) != model {
 			sess.ActiveModel = model
-			_ = store.SaveSession(sess)
+			_ = store.SaveSession(cfg, sess)
 		}
 	}
 
@@ -402,6 +405,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 	// It persists its state and manifest to /workspace so context assembly is reproducible.
 	constructor := &agent.ContextConstructor{
 		FS:                fs,
+		Cfg:               cfg,
 		RunID:             run.RunId,
 		SessionID:         run.SessionID,
 		TraceStore:        traceStore,
@@ -534,7 +538,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 	}
 
 	log.Printf("== Chat session started (type 'exit' to quit) ==")
-	historyPath := filepath.Join(config.DataDir, "runs", run.RunId, "repl_history.txt")
+	historyPath := filepath.Join(cfg.DataDir, "runs", run.RunId, "repl_history.txt")
 	rr, err := repl.NewReader(historyPath)
 	if err != nil {
 		return fmt.Errorf("start readline: %w", err)
@@ -574,7 +578,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 		}
 
 		// Refresh session state and inject it so the agent stays coherent across runs.
-		if sess, err := store.LoadSession(run.SessionID); err == nil {
+		if sess, err := store.LoadSession(cfg, run.SessionID); err == nil {
 			if blk := agent.SessionContextBlock(sess); strings.TrimSpace(blk) != "" {
 				a.SystemPrompt = strings.TrimSpace(baseSystemPrompt) + "\n\n" + blk + "\n"
 			} else {
@@ -850,7 +854,7 @@ func RunChat(ctx context.Context, run types.Run, opts RunChatOptions) (retErr er
 			_ = fs.Write("/profile/update.md", []byte{})
 		}
 
-		if _, err := store.RecordTurnInSession(run.SessionID, run.RunId, userMsg, final); err != nil {
+		if _, err := store.RecordTurnInSession(cfg, run.SessionID, run.RunId, userMsg, final); err != nil {
 			mustEmit(context.Background(), events.Event{
 				Type:    "session.update.error",
 				Message: "Failed to update session state",

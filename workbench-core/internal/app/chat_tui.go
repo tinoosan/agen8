@@ -35,7 +35,10 @@ import (
 //
 // This avoids creating on-disk sessions/runs when the user opens Workbench and exits
 // without doing anything.
-func RunNewChatTUI(ctx context.Context, title, goal string, maxContextB int, opts RunChatOptions) (retErr error) {
+func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, maxContextB int, opts RunChatOptions) (retErr error) {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	opts = opts.withDefaults()
 
 	// The TUI owns stdout/stderr. Avoid mixing standard log output into the screen.
@@ -49,6 +52,7 @@ func RunNewChatTUI(ctx context.Context, title, goal string, maxContextB int, opt
 	evCh := make(chan events.Event, 2048)
 	lazy := &lazyNewSessionTurnRunner{
 		ctx:         runCtx,
+		cfg:         cfg,
 		opts:        opts,
 		maxContextB: maxContextB,
 		title:       strings.TrimSpace(title),
@@ -71,7 +75,7 @@ func RunNewChatTUI(ctx context.Context, title, goal string, maxContextB int, opt
 			status = types.StatusFailed
 			errMsg = retErr.Error()
 		}
-		_, _ = store.StopRun(lazy.run.RunId, status, errMsg)
+		_, _ = store.StopRun(cfg, lazy.run.RunId, status, errMsg)
 	}()
 
 	// Start the UI. The runner will emit run/session events only after the first message.
@@ -105,7 +109,10 @@ func RunNewChatTUI(ctx context.Context, title, goal string, maxContextB int, opt
 //
 // The underlying agent loop contract, tool execution model, and store policies are
 // unchanged. Only presentation and input handling differ from RunChat's REPL.
-func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr error) {
+func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts RunChatOptions) (retErr error) {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	opts = opts.withDefaults()
 
 	// The TUI owns stdout/stderr. Avoid mixing standard log output into the screen.
@@ -127,10 +134,10 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 			status = types.StatusFailed
 			errMsg = retErr.Error()
 		}
-		_, _ = store.StopRun(run.RunId, status, errMsg)
+		_, _ = store.StopRun(cfg, run.RunId, status, errMsg)
 	}()
 
-	historyRes, err := resources.NewSessionHistoryResource(run.SessionID)
+	historyRes, err := resources.NewSessionHistoryResource(cfg, run.SessionID)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -142,7 +149,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 	emitter := &events.Emitter{
 		RunID: run.RunId,
 		Sink: events.MultiSink{
-			events.StoreSink{},
+			events.StoreSink{Cfg: cfg},
 			historySink,
 			tui.EventSink{Ch: evCh},
 		},
@@ -157,7 +164,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 
 	sessionTitle := ""
 	sessionModel := ""
-	if sess, err := store.LoadSession(run.SessionID); err == nil {
+	if sess, err := store.LoadSession(cfg, run.SessionID); err == nil {
 		sessionTitle = strings.TrimSpace(sess.Title)
 		sessionModel = strings.TrimSpace(sess.ActiveModel)
 	}
@@ -196,7 +203,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		Console: boolp(false),
 	})
 
-	traceRes, err := resources.NewTraceResource(run.RunId)
+	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
 	if err != nil {
 		return fmt.Errorf("create trace: %w", err)
 	}
@@ -212,12 +219,12 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		return fmt.Errorf("create workdir: %w", err)
 	}
 
-	workspace, err := resources.NewRunWorkspace(run.RunId)
+	workspace, err := resources.NewRunWorkspace(cfg, run.RunId)
 	if err != nil {
 		return fmt.Errorf("create workspace: %w", err)
 	}
 
-	toolsDir := fsutil.GetToolsDir(config.DataDir)
+	toolsDir := fsutil.GetToolsDir(cfg.DataDir)
 	_ = os.MkdirAll(toolsDir, 0755)
 
 	builtinProvider, err := tools.NewBuiltinManifestProvider()
@@ -238,7 +245,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		return fmt.Errorf("create results: %w", err)
 	}
 
-	memStore, err := store.NewDiskMemoryStore(run.RunId)
+	memStore, err := store.NewDiskMemoryStore(cfg, run.RunId)
 	if err != nil {
 		return fmt.Errorf("create memory store: %w", err)
 	}
@@ -247,7 +254,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		return fmt.Errorf("create memory resource: %w", err)
 	}
 
-	profileStore, err := store.NewDiskProfileStore()
+	profileStore, err := store.NewDiskProfileStore(cfg)
 	if err != nil {
 		return fmt.Errorf("create profile store: %w", err)
 	}
@@ -310,7 +317,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 	setHistoryModel := func(next string) { historySink.Model = strings.TrimSpace(next) }
 
 	run.Runtime = &types.RunRuntimeConfig{
-		DataDir:               config.DataDir,
+		DataDir:               cfg.DataDir,
 		Model:                 model,
 		MaxSteps:              opts.MaxSteps,
 		MaxTraceBytes:         opts.MaxTraceBytes,
@@ -321,13 +328,13 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 		PriceInPerMTokensUSD:  opts.PriceInPerMTokensUSD,
 		PriceOutPerMTokensUSD: opts.PriceOutPerMTokensUSD,
 	}
-	_ = store.SaveRun(run)
+	_ = store.SaveRun(cfg, run)
 
 	// Persist the active model at the session level so "resume session" is deterministic.
-	if sess, err := store.LoadSession(run.SessionID); err == nil {
+	if sess, err := store.LoadSession(cfg, run.SessionID); err == nil {
 		if strings.TrimSpace(sess.ActiveModel) != model {
 			sess.ActiveModel = model
-			_ = store.SaveSession(sess)
+			_ = store.SaveSession(cfg, sess)
 		}
 	}
 
@@ -344,6 +351,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 
 	constructor := &agent.ContextConstructor{
 		FS:                fs,
+		Cfg:               cfg,
 		RunID:             run.RunId,
 		SessionID:         run.SessionID,
 		TraceStore:        traceStore,
@@ -481,6 +489,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 
 	engine := &tuiTurnRunner{
 		ctx:              runCtx,
+		cfg:              cfg,
 		run:              run,
 		opts:             opts,
 		fs:               fs,
@@ -515,6 +524,7 @@ func RunChatTUI(ctx context.Context, run types.Run, opts RunChatOptions) (retErr
 
 type lazyNewSessionTurnRunner struct {
 	ctx context.Context
+	cfg config.Config
 
 	opts        RunChatOptions
 	maxContextB int
@@ -890,6 +900,9 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	if r.initialized {
 		return nil
 	}
+	if err := r.cfg.Validate(); err != nil {
+		return err
+	}
 
 	title := strings.TrimSpace(r.title)
 	if title == "" || strings.EqualFold(title, "workbench") {
@@ -903,17 +916,18 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		goal = "interactive chat"
 	}
 
-	sess, err := store.CreateSession(title)
+	cfg := r.cfg
+	sess, err := store.CreateSession(cfg, title)
 	if err != nil {
 		return err
 	}
-	run, err := store.CreateRunInSession(sess.SessionID, "", goal, r.maxContextB)
+	run, err := store.CreateRunInSession(cfg, sess.SessionID, "", goal, r.maxContextB)
 	if err != nil {
 		return err
 	}
 	r.run = run
 
-	historyRes, err := resources.NewSessionHistoryResource(run.SessionID)
+	historyRes, err := resources.NewSessionHistoryResource(cfg, run.SessionID)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -922,7 +936,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	emitter := &events.Emitter{
 		RunID: run.RunId,
 		Sink: events.MultiSink{
-			events.StoreSink{},
+			events.StoreSink{Cfg: cfg},
 			historySink,
 			tui.EventSink{Ch: r.evCh},
 		},
@@ -966,9 +980,9 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 
 	// Persist the session's active model as early as possible.
 	sess.ActiveModel = model
-	_ = store.SaveSession(sess)
+	_ = store.SaveSession(cfg, sess)
 
-	traceRes, err := resources.NewTraceResource(run.RunId)
+	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
 	if err != nil {
 		return fmt.Errorf("create trace: %w", err)
 	}
@@ -984,12 +998,12 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		return fmt.Errorf("create workdir: %w", err)
 	}
 
-	workspace, err := resources.NewRunWorkspace(run.RunId)
+	workspace, err := resources.NewRunWorkspace(cfg, run.RunId)
 	if err != nil {
 		return fmt.Errorf("create workspace: %w", err)
 	}
 
-	toolsDir := fsutil.GetToolsDir(config.DataDir)
+	toolsDir := fsutil.GetToolsDir(cfg.DataDir)
 	_ = os.MkdirAll(toolsDir, 0755)
 
 	builtinProvider, err := tools.NewBuiltinManifestProvider()
@@ -1010,7 +1024,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		return fmt.Errorf("create results: %w", err)
 	}
 
-	memStore, err := store.NewDiskMemoryStore(run.RunId)
+	memStore, err := store.NewDiskMemoryStore(cfg, run.RunId)
 	if err != nil {
 		return fmt.Errorf("create memory store: %w", err)
 	}
@@ -1019,7 +1033,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		return fmt.Errorf("create memory resource: %w", err)
 	}
 
-	profileStore, err := store.NewDiskProfileStore()
+	profileStore, err := store.NewDiskProfileStore(cfg)
 	if err != nil {
 		return fmt.Errorf("create profile store: %w", err)
 	}
@@ -1079,7 +1093,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	}
 
 	run.Runtime = &types.RunRuntimeConfig{
-		DataDir:               config.DataDir,
+		DataDir:               cfg.DataDir,
 		Model:                 model,
 		MaxSteps:              r.opts.MaxSteps,
 		MaxTraceBytes:         r.opts.MaxTraceBytes,
@@ -1090,7 +1104,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		PriceInPerMTokensUSD:  r.opts.PriceInPerMTokensUSD,
 		PriceOutPerMTokensUSD: r.opts.PriceOutPerMTokensUSD,
 	}
-	_ = store.SaveRun(run)
+	_ = store.SaveRun(cfg, run)
 
 	client, err := llm.NewOpenRouterClientFromEnv()
 	if err != nil {
@@ -1105,6 +1119,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 
 	constructor := &agent.ContextConstructor{
 		FS:                fs,
+		Cfg:               cfg,
 		RunID:             run.RunId,
 		SessionID:         run.SessionID,
 		TraceStore:        traceStore,
@@ -1242,6 +1257,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 
 	r.engine = &tuiTurnRunner{
 		ctx:              r.ctx,
+		cfg:              cfg,
 		run:              run,
 		opts:             r.opts,
 		fs:               fs,
@@ -1273,6 +1289,8 @@ func firstLineForTitle(s string) string {
 
 type tuiTurnRunner struct {
 	ctx context.Context
+
+	cfg config.Config
 
 	run  types.Run
 	opts RunChatOptions
@@ -1369,7 +1387,7 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	}
 
 	// Refresh session state and inject it so the agent stays coherent across runs.
-	if sess, err := store.LoadSession(r.run.SessionID); err == nil {
+	if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
 		if blk := agent.SessionContextBlock(sess); strings.TrimSpace(blk) != "" {
 			r.agent.SystemPrompt = strings.TrimSpace(r.baseSystemPrompt) + "\n\n" + blk + "\n"
 		} else {
@@ -1650,7 +1668,7 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		_ = r.fs.Write("/profile/update.md", []byte{})
 	}
 
-	if _, err := store.RecordTurnInSession(r.run.SessionID, r.run.RunId, userMsg, final); err != nil {
+	if _, err := store.RecordTurnInSession(r.cfg, r.run.SessionID, r.run.RunId, userMsg, final); err != nil {
 		r.mustEmit(context.Background(), events.Event{
 			Type:    "session.update.error",
 			Message: "Failed to update session state",
@@ -1805,12 +1823,12 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		r.run.Runtime.Model = next
 		r.run.Runtime.PriceInPerMTokensUSD = r.opts.PriceInPerMTokensUSD
 		r.run.Runtime.PriceOutPerMTokensUSD = r.opts.PriceOutPerMTokensUSD
-		_ = store.SaveRun(r.run)
+		_ = store.SaveRun(r.cfg, r.run)
 
 		// Persist at session scope so resume uses the selected model.
-		if sess, err := store.LoadSession(r.run.SessionID); err == nil {
+		if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
 			sess.ActiveModel = next
-			_ = store.SaveSession(sess)
+			_ = store.SaveSession(r.cfg, sess)
 		}
 
 		r.mustEmit(context.Background(), events.Event{
