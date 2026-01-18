@@ -2,10 +2,11 @@ package app
 
 import (
 	"fmt"
-	"github.com/tinoosan/workbench-core/internal/cost"
-	"github.com/tinoosan/workbench-core/internal/types"
 	"os"
 	"strings"
+
+	"github.com/tinoosan/workbench-core/internal/cost"
+	"github.com/tinoosan/workbench-core/internal/types"
 )
 
 func pricingForModel(modelID, pricingFile string) (inPerM, outPerM float64, known bool, source string) {
