@@ -111,12 +111,12 @@ func (f *Factory) Trace() (*TraceResource, error) {
 	return tr, nil
 }
 
-func (f *Factory) Results() (*VirtualResultsResource, error) {
+func (f *Factory) Results() (*ResultsResource, error) {
 	rs := f.ensureResultsStore()
 	return NewResultsResource(rs)
 }
 
-func (f *Factory) Memory() (*VirtualMemoryResource, error) {
+func (f *Factory) Memory() (*MemoryResource, error) {
 	cfg, err := f.cfg()
 	if err != nil {
 		return nil, err
@@ -131,7 +131,7 @@ func (f *Factory) Memory() (*VirtualMemoryResource, error) {
 	return NewMemoryResource(ms)
 }
 
-func (f *Factory) Profile() (*VirtualProfileResource, error) {
+func (f *Factory) Profile() (*ProfileResource, error) {
 	cfg, err := f.cfg()
 	if err != nil {
 		return nil, err
@@ -164,7 +164,7 @@ func (f *Factory) History() (*HistoryResource, error) {
 	}, nil
 }
 
-func (f *Factory) Tools() (*VirtualToolsResource, error) {
+func (f *Factory) Tools() (*ToolsResource, error) {
 	cfg, err := f.cfg()
 	if err != nil {
 		return nil, err
@@ -229,4 +229,3 @@ func (f *Factory) MountAll(fs *vfs.FS) error {
 
 	return nil
 }
-

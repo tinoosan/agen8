@@ -9,26 +9,10 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
-// VirtualMemoryResource exposes run-scoped memory under the VFS mount "/memory",
-// backed by a pluggable store.MemoryStore.
-//
-// This is the MemoryStore-backed counterpart to the old disk-backed MemoryResource.
-// The VFS contract stays the same (stable paths, no dynamic path queries):
-//   - /memory/memory.md       (read-only to agent)
-//   - /memory/update.md       (writable by agent)
-//   - /memory/commits.jsonl   (read-only, for debugging/audit)
-//
-// Host policy remains unchanged:
-//   - host reads /memory/update.md
-//   - evaluates it
-//   - appends accepted updates to memory.md
-//   - appends audit lines to commits.jsonl
-//   - clears update.md
-type VirtualMemoryResource struct {
-	// BaseDir is the OS directory backing this resource (the sandbox root).
-	//
-	// VirtualMemoryResource is store-backed; BaseDir is typically empty and only
-	// exists to keep resources consistent and debuggable.
+// MemoryResource exposes run-scoped memory under the VFS mount "/memory",
+// backed by a store.MemoryVFSStore.
+type MemoryResource struct {
+	// BaseDir is unused by this resource, but kept for consistency/debugging.
 	BaseDir string
 
 	// Mount is the virtual mount name used by the VFS.
@@ -38,11 +22,11 @@ type VirtualMemoryResource struct {
 	Store store.MemoryVFSStore
 }
 
-func NewMemoryResource(s store.MemoryVFSStore) (*VirtualMemoryResource, error) {
+func NewMemoryResource(s store.MemoryVFSStore) (*MemoryResource, error) {
 	if s == nil {
 		return nil, fmt.Errorf("memory store is required")
 	}
-	return &VirtualMemoryResource{
+	return &MemoryResource{
 		BaseDir: "",
 		Mount:   vfs.MountMemory,
 		Store:   s,
@@ -50,7 +34,7 @@ func NewMemoryResource(s store.MemoryVFSStore) (*VirtualMemoryResource, error) {
 }
 
 // List lists entries under subpath relative to the /memory mount.
-func (mr *VirtualMemoryResource) List(subpath string) ([]vfs.Entry, error) {
+func (mr *MemoryResource) List(subpath string) ([]vfs.Entry, error) {
 	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {
 		return nil, err
@@ -66,7 +50,7 @@ func (mr *VirtualMemoryResource) List(subpath string) ([]vfs.Entry, error) {
 }
 
 // Read reads a file at subpath relative to the /memory mount.
-func (mr *VirtualMemoryResource) Read(subpath string) ([]byte, error) {
+func (mr *MemoryResource) Read(subpath string) ([]byte, error) {
 	if mr == nil || mr.Store == nil {
 		return nil, fmt.Errorf("memory store not configured")
 	}
@@ -95,7 +79,7 @@ func (mr *VirtualMemoryResource) Read(subpath string) ([]byte, error) {
 // Write replaces the file at subpath.
 //
 // Only update.md is writable (agent staging area).
-func (mr *VirtualMemoryResource) Write(subpath string, data []byte) error {
+func (mr *MemoryResource) Write(subpath string, data []byte) error {
 	if mr == nil || mr.Store == nil {
 		return fmt.Errorf("memory store not configured")
 	}
@@ -110,10 +94,7 @@ func (mr *VirtualMemoryResource) Write(subpath string, data []byte) error {
 }
 
 // Append appends bytes to update.md.
-//
-// This is used for "agent streaming" style updates; the host still decides what
-// becomes committed memory.
-func (mr *VirtualMemoryResource) Append(subpath string, data []byte) error {
+func (mr *MemoryResource) Append(subpath string, data []byte) error {
 	if mr == nil || mr.Store == nil {
 		return fmt.Errorf("memory store not configured")
 	}
@@ -130,3 +111,4 @@ func (mr *VirtualMemoryResource) Append(subpath string, data []byte) error {
 	}
 	return mr.Store.SetUpdate(context.Background(), prev+string(data))
 }
+

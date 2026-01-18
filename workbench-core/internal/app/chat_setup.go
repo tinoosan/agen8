@@ -97,7 +97,7 @@ func setupTUIChatRuntime(
 	_, trr, _, _ := fs.Resolve("/" + vfs.MountTrace)
 	traceRes := trr.(*resources.TraceResource)
 	_, mr, _, _ := fs.Resolve("/" + vfs.MountMemory)
-	memoryRes := mr.(*resources.VirtualMemoryResource)
+	memoryRes := mr.(*resources.MemoryResource)
 	_, hr, _, _ := fs.Resolve("/" + vfs.MountHistory)
 	historyRes = hr.(*resources.HistoryResource)
 

@@ -10,20 +10,16 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
-// VirtualToolsResource exposes tool discovery under the VFS mount "/tools",
+// ToolsResource exposes tool discovery under the VFS mount "/tools",
 // backed by a tools.ToolManifestRegistry.
 //
-// Agent contract (unchanged)
+// Agent contract
 //   - List("/tools") returns tool IDs as directory-like entries (IsDir=true).
 //   - Read("/tools/<toolId>") returns that tool's manifest JSON bytes.
 //   - Read("/tools/<toolId>/manifest.json") is also accepted for compatibility.
 //
 // /tools is read-only: Write and Append are not supported.
-//
-// This resource is intentionally *virtual*: it does not require an on-disk directory
-// layout to exist. Disk tools (if any) are exposed via a registry provider, not by
-// scanning a physical mount.
-type VirtualToolsResource struct {
+type ToolsResource struct {
 	// BaseDir is unused by this resource, but kept for consistency/debugging.
 	BaseDir string
 
@@ -34,18 +30,18 @@ type VirtualToolsResource struct {
 	Registry tools.ToolManifestRegistry
 }
 
-func NewToolsResource(reg tools.ToolManifestRegistry) (*VirtualToolsResource, error) {
+func NewToolsResource(reg tools.ToolManifestRegistry) (*ToolsResource, error) {
 	if reg == nil {
 		return nil, fmt.Errorf("tool manifest registry is required")
 	}
-	return &VirtualToolsResource{
+	return &ToolsResource{
 		BaseDir:  "",
 		Mount:    vfs.MountTools,
 		Registry: reg,
 	}, nil
 }
 
-func (tr *VirtualToolsResource) List(subpath string) ([]vfs.Entry, error) {
+func (tr *ToolsResource) List(subpath string) ([]vfs.Entry, error) {
 	if tr == nil || tr.Registry == nil {
 		return nil, fmt.Errorf("tool registry not configured")
 	}
@@ -68,7 +64,7 @@ func (tr *VirtualToolsResource) List(subpath string) ([]vfs.Entry, error) {
 	return out, nil
 }
 
-func (tr *VirtualToolsResource) Read(subpath string) ([]byte, error) {
+func (tr *ToolsResource) Read(subpath string) ([]byte, error) {
 	if tr == nil || tr.Registry == nil {
 		return nil, fmt.Errorf("tool registry not configured")
 	}
@@ -91,7 +87,7 @@ func (tr *VirtualToolsResource) Read(subpath string) ([]byte, error) {
 	return nil, fmt.Errorf("tools read: nested paths are not allowed (got %q)", clean)
 }
 
-func (tr *VirtualToolsResource) readManifest(toolID string) ([]byte, error) {
+func (tr *ToolsResource) readManifest(toolID string) ([]byte, error) {
 	id, err := types.ParseToolID(toolID)
 	if err != nil {
 		return nil, fmt.Errorf("tools read: invalid toolId %q", toolID)
@@ -106,10 +102,11 @@ func (tr *VirtualToolsResource) readManifest(toolID string) ([]byte, error) {
 	return b, nil
 }
 
-func (tr *VirtualToolsResource) Write(_ string, _ []byte) error {
+func (tr *ToolsResource) Write(_ string, _ []byte) error {
 	return fmt.Errorf("tools write: not supported (tools is read-only)")
 }
 
-func (tr *VirtualToolsResource) Append(_ string, _ []byte) error {
+func (tr *ToolsResource) Append(_ string, _ []byte) error {
 	return fmt.Errorf("tools append: not supported (tools is read-only)")
 }
+

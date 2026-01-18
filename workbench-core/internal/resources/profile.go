@@ -9,20 +9,10 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
-// VirtualProfileResource exposes user-scoped profile memory under the VFS mount "/profile",
-// backed by a pluggable store.ProfileStore.
-//
-// Profile is global across runs and sessions and is intended for durable user facts and
-// preferences (e.g. timezone, writing style, birthday). It mirrors the /memory contract,
-// but with a different scope:
-//   - /profile/profile.md     (read-only to agent; host-managed)
-//   - /profile/update.md      (writable by agent; host evaluates + commits)
-//   - /profile/commits.jsonl  (read-only, for debugging/audit)
-type VirtualProfileResource struct {
-	// BaseDir is the OS directory backing this resource (the sandbox root).
-	//
-	// VirtualProfileResource is store-backed; BaseDir is typically empty and only
-	// exists to keep resources consistent and debuggable.
+// ProfileResource exposes user-scoped profile memory under the VFS mount "/profile",
+// backed by a store.ProfileVFSStore.
+type ProfileResource struct {
+	// BaseDir is unused by this resource, but kept for consistency/debugging.
 	BaseDir string
 
 	// Mount is the virtual mount name used by the VFS.
@@ -32,11 +22,11 @@ type VirtualProfileResource struct {
 	Store store.ProfileVFSStore
 }
 
-func NewProfileResource(s store.ProfileVFSStore) (*VirtualProfileResource, error) {
+func NewProfileResource(s store.ProfileVFSStore) (*ProfileResource, error) {
 	if s == nil {
 		return nil, fmt.Errorf("profile store is required")
 	}
-	return &VirtualProfileResource{
+	return &ProfileResource{
 		BaseDir: "",
 		Mount:   vfs.MountProfile,
 		Store:   s,
@@ -44,7 +34,7 @@ func NewProfileResource(s store.ProfileVFSStore) (*VirtualProfileResource, error
 }
 
 // List lists entries under subpath relative to the /profile mount.
-func (pr *VirtualProfileResource) List(subpath string) ([]vfs.Entry, error) {
+func (pr *ProfileResource) List(subpath string) ([]vfs.Entry, error) {
 	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {
 		return nil, err
@@ -60,7 +50,7 @@ func (pr *VirtualProfileResource) List(subpath string) ([]vfs.Entry, error) {
 }
 
 // Read reads a file at subpath relative to the /profile mount.
-func (pr *VirtualProfileResource) Read(subpath string) ([]byte, error) {
+func (pr *ProfileResource) Read(subpath string) ([]byte, error) {
 	if pr == nil || pr.Store == nil {
 		return nil, fmt.Errorf("profile store not configured")
 	}
@@ -89,7 +79,7 @@ func (pr *VirtualProfileResource) Read(subpath string) ([]byte, error) {
 // Write replaces the file at subpath.
 //
 // Only update.md is writable (agent staging area).
-func (pr *VirtualProfileResource) Write(subpath string, data []byte) error {
+func (pr *ProfileResource) Write(subpath string, data []byte) error {
 	if pr == nil || pr.Store == nil {
 		return fmt.Errorf("profile store not configured")
 	}
@@ -104,7 +94,7 @@ func (pr *VirtualProfileResource) Write(subpath string, data []byte) error {
 }
 
 // Append appends bytes to update.md.
-func (pr *VirtualProfileResource) Append(subpath string, data []byte) error {
+func (pr *ProfileResource) Append(subpath string, data []byte) error {
 	if pr == nil || pr.Store == nil {
 		return fmt.Errorf("profile store not configured")
 	}
@@ -121,3 +111,4 @@ func (pr *VirtualProfileResource) Append(subpath string, data []byte) error {
 	}
 	return pr.Store.SetUpdate(context.Background(), prev+string(data))
 }
+
