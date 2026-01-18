@@ -1967,7 +1967,6 @@ func (m Model) renderModelPicker(base string) string {
 		Padding(1, 2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#6bbcff")).
-		Background(lipgloss.Color("#1a1a1a")).
 		Foreground(lipgloss.Color("#eaeaea"))
 
 	modalContent := modalStyle.Render(content)
