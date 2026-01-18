@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // TurnRunner executes one user turn and returns the agent final response.
@@ -59,6 +62,11 @@ type editorLoadMsg struct {
 }
 
 type editorSaveMsg struct {
+	vpath string
+	err   error
+}
+
+type editorExternalDoneMsg struct {
 	vpath string
 	err   error
 }
@@ -642,6 +650,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editorDirty = false
 		return m, nil
 
+	case editorExternalDoneMsg:
+		if strings.TrimSpace(msg.vpath) == "" {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.addTranscriptItem(transcriptItem{kind: transcriptError, text: "editor error: " + msg.err.Error()})
+			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+			m.rebuildTranscript()
+		}
+		m.focus = focusInput
+		if m.isMulti {
+			m.multiline.Focus()
+		} else {
+			m.single.Focus()
+		}
+		return m, nil
+
 	case fileViewMsg:
 		// Ignore stale responses.
 		if strings.TrimSpace(msg.path) != "" && msg.path != m.fileViewPath {
@@ -758,6 +783,25 @@ func (m Model) editorTitle() string {
 }
 
 func (m *Model) openEditor(vpath string) tea.Cmd {
+	// Prefer the user's external editor when configured.
+	//
+	// /editor is a host UX convenience command; it should open $VISUAL/$EDITOR
+	// rather than forcing users into a bespoke in-TUI editor.
+	editor := strings.TrimSpace(os.Getenv("VISUAL"))
+	if editor == "" {
+		editor = strings.TrimSpace(os.Getenv("EDITOR"))
+	}
+	if editor != "" {
+		if cmd, err := m.editorExecCmd(editor, vpath); err == nil && cmd != nil {
+			return tea.ExecProcess(cmd, func(err error) tea.Msg {
+				return editorExternalDoneMsg{vpath: vpath, err: err}
+			})
+		}
+	}
+	return m.openInternalEditor(vpath)
+}
+
+func (m *Model) openInternalEditor(vpath string) tea.Cmd {
 	m.editorOpen = true
 	m.editorVPath = strings.TrimSpace(vpath)
 	m.editorDirty = false
@@ -785,6 +829,38 @@ func (m *Model) openEditor(vpath string) tea.Cmd {
 		}
 		return editorLoadMsg{vpath: vpath, content: txt}
 	}
+}
+
+func (m *Model) editorExecCmd(editor string, vpath string) (*exec.Cmd, error) {
+	editor = strings.TrimSpace(editor)
+	vpath = strings.TrimSpace(vpath)
+	if editor == "" || vpath == "" {
+		return nil, fmt.Errorf("editor and vpath are required")
+	}
+	if !strings.HasPrefix(vpath, "/workdir/") {
+		return nil, fmt.Errorf("external editor only supports /workdir paths")
+	}
+	workdir := strings.TrimSpace(m.workdir)
+	if workdir == "" {
+		return nil, fmt.Errorf("workdir is unknown")
+	}
+
+	sub := strings.TrimPrefix(vpath, "/workdir/")
+	clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
+	if err != nil || clean == "" || clean == "." {
+		return nil, fmt.Errorf("invalid workdir path: %s", vpath)
+	}
+	abs := filepath.Join(workdir, filepath.FromSlash(clean))
+
+	fields := strings.Fields(editor)
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("invalid editor")
+	}
+	cmd := exec.CommandContext(m.ctx, fields[0], append(fields[1:], abs)...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd, nil
 }
 
 func (m *Model) saveEditor() tea.Cmd {
@@ -904,6 +980,13 @@ func (m *Model) onEvent(ev events.Event) {
 		}
 	}
 	if ev.Type == "workdir.pwd" {
+		if wd := strings.TrimSpace(ev.Data["workdir"]); wd != "" {
+			m.workdir = wd
+		}
+	}
+	if ev.Type == "ui.editor.open" {
+		// Pre-run /editor includes the absolute workdir so the TUI can resolve
+		// and open $VISUAL/$EDITOR without creating a run.
 		if wd := strings.TrimSpace(ev.Data["workdir"]); wd != "" {
 			m.workdir = wd
 		}

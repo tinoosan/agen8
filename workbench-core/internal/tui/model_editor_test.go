@@ -41,6 +41,9 @@ func (r *fakeVFSRunner) WriteVFS(ctx context.Context, path string, data []byte) 
 }
 
 func TestEditor_OpenNewFile_SetsNotice(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+
 	r := &fakeVFSRunner{readErr: fs.ErrNotExist}
 	m := New(context.Background(), r, nil)
 
@@ -58,6 +61,9 @@ func TestEditor_OpenNewFile_SetsNotice(t *testing.T) {
 }
 
 func TestEditor_Save_WritesViaRunner(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+
 	r := &fakeVFSRunner{readErr: fs.ErrNotExist}
 	m := New(context.Background(), r, nil)
 
@@ -92,6 +98,9 @@ func TestEditor_Save_WritesViaRunner(t *testing.T) {
 }
 
 func TestEditor_OpenExistingFile_PropagatesError(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+
 	r := &fakeVFSRunner{readErr: errors.New("boom")}
 	m := New(context.Background(), r, nil)
 
@@ -106,6 +115,9 @@ func TestEditor_OpenExistingFile_PropagatesError(t *testing.T) {
 }
 
 func TestEditor_EscClosesAndRestoresFocus(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+
 	r := &fakeVFSRunner{readErr: fs.ErrNotExist}
 	m := New(context.Background(), r, nil)
 

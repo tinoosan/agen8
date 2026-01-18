@@ -583,6 +583,9 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 			Data: map[string]string{
 				"vpath": vpath,
 				"path":  display,
+				// Include the absolute workdir so the TUI can open $EDITOR without
+				// requiring a session/run to exist.
+				"workdir": cur,
 			},
 			Store:   boolp(false),
 			Console: boolp(false),
@@ -1673,8 +1676,9 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			Type:    "ui.editor.open",
 			Message: "Open editor",
 			Data: map[string]string{
-				"vpath": vpath,
-				"path":  display,
+				"vpath":   vpath,
+				"path":    display,
+				"workdir": strings.TrimSpace(r.workdirBase),
 			},
 			Store:   boolp(false),
 			Console: boolp(false),
