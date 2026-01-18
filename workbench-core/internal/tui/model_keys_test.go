@@ -947,6 +947,112 @@ func TestFilePicker_OpenCommand_DoesNotAutoRun(t *testing.T) {
 	}
 }
 
+func TestEditorCompose_LoadsComposeFileIntoMultilineOnExit(t *testing.T) {
+	workdir := t.TempDir()
+	composeAbs := filepath.Join(workdir, ".workbench", "compose.md")
+	if err := os.MkdirAll(filepath.Dir(composeAbs), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	want := "hello\nfrom editor\n"
+	if err := os.WriteFile(composeAbs, []byte(want), 0644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.showDetails = true
+	m.workdir = workdir
+	m.layout()
+
+	// Simulate host telling us to open compose editor.
+	m2, _ := m.Update(eventMsg(events.Event{
+		Type: "ui.editor.open",
+		Data: map[string]string{
+			"vpath":   "/workdir/.workbench/compose.md",
+			"purpose": "compose",
+			"workdir": workdir,
+		},
+	}))
+	updated := m2.(Model)
+	if strings.TrimSpace(updated.externalEditorComposeVPath) == "" {
+		t.Fatalf("expected externalEditorComposeVPath to be set")
+	}
+
+	// Simulate external editor exiting successfully.
+	m3, cmd := updated.Update(editorExternalDoneMsg{vpath: "/workdir/.workbench/compose.md", err: nil})
+	updated2 := m3.(Model)
+	if cmd == nil {
+		t.Fatalf("expected compose load cmd")
+	}
+	msg := cmd()
+	m4, _ := updated2.Update(msg)
+	updated3 := m4.(Model)
+
+	if !updated3.isMulti {
+		t.Fatalf("expected isMulti true")
+	}
+	if got := updated3.multiline.Value(); got != want {
+		t.Fatalf("expected multiline to contain compose text; got %q", got)
+	}
+	if updated3.turnInFlight {
+		t.Fatalf("expected not to submit")
+	}
+}
+
+func TestCtrlE_PrefillsComposeFileAndLoadsOnExit(t *testing.T) {
+	t.Setenv("EDITOR", "true") // ensure editorExecCmd can construct a command
+
+	workdir := t.TempDir()
+	composeAbs := filepath.Join(workdir, ".workbench", "compose.md")
+	if err := os.MkdirAll(filepath.Dir(composeAbs), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.showDetails = true
+	m.workdir = workdir
+	m.layout()
+
+	// Start with some input.
+	m.isMulti = true
+	m.multiline.SetValue("draft line 1\nline 2\n")
+
+	// Ctrl+E should write compose file and return a cmd (editor launch).
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	updated := m2.(Model)
+	if cmd == nil {
+		t.Fatalf("expected cmd from ctrl+e")
+	}
+	b, err := os.ReadFile(composeAbs)
+	if err != nil {
+		t.Fatalf("read compose: %v", err)
+	}
+	if got := string(b); got != "draft line 1\nline 2\n" {
+		t.Fatalf("expected compose prefill to match input; got %q", got)
+	}
+
+	// Now simulate editor changed the file.
+	want := "edited in vim\nsecond line\n"
+	if err := os.WriteFile(composeAbs, []byte(want), 0644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+
+	m3, loadCmd := updated.Update(editorExternalDoneMsg{vpath: "/workdir/.workbench/compose.md", err: nil})
+	updated2 := m3.(Model)
+	if loadCmd == nil {
+		t.Fatalf("expected compose load cmd")
+	}
+	loadMsg := loadCmd()
+	m4, _ := updated2.Update(loadMsg)
+	updated3 := m4.(Model)
+	if got := updated3.multiline.Value(); got != want {
+		t.Fatalf("expected multiline updated from compose; got %q", got)
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

@@ -25,6 +25,8 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
+const composeVPath = "/workdir/.workbench/compose.md"
+
 // TurnRunner executes one user turn and returns the agent final response.
 //
 // The host (internal/app) owns the actual agent loop, memory commit policy,
@@ -72,6 +74,12 @@ type editorSaveMsg struct {
 
 type editorExternalDoneMsg struct {
 	vpath string
+	err   error
+}
+
+type editorComposeLoadMsg struct {
+	vpath string
+	text  string
 	err   error
 }
 
@@ -140,6 +148,8 @@ type Model struct {
 	editorDirty  bool
 	editorErr    string
 	editorNotice string
+	// Tracks an external editor session that is composing a chat message (not editing a file).
+	externalEditorComposeVPath string
 
 	sessionTitle  string
 	workflowTitle string
@@ -199,6 +209,14 @@ type Model struct {
 	filePickerAllPaths []string // canonical rel paths (slash-separated)
 	filePickerQuery    string   // last applied query (for substring filtering)
 	filePickerWorkdir  string   // workdir used for filePickerAllPaths (absolute)
+}
+
+func (m *Model) prefetchWorkdir() tea.Cmd {
+	// Workdir can be unknown before first turn. Prefetch it without creating a run.
+	return func() tea.Msg {
+		wd, err := m.runner.RunTurn(m.ctx, "/pwd")
+		return workdirPrefetchMsg{workdir: strings.TrimSpace(wd), err: err}
+	}
 }
 
 type focusTarget int
@@ -1087,6 +1105,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		// Ctrl+E opens external editor for composing a message, prefilled from current input.
+		// Only active when the input is focused (so we don't override Activity panel shortcuts).
+		if m.focus == focusInput && strings.EqualFold(msg.String(), "ctrl+e") {
+			return m, m.openComposeEditorPrefill()
+		}
+
 		// Modal: model picker (must capture keys even when input is focused).
 		if m.modelPickerOpen {
 			switch msg.Type {
@@ -1434,6 +1458,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{m.waitEvent()}
 		if ev.Type == "ui.editor.open" {
 			if v := strings.TrimSpace(ev.Data["vpath"]); v != "" {
+				if strings.TrimSpace(ev.Data["purpose"]) == "compose" {
+					m.externalEditorComposeVPath = v
+				}
 				cmds = append(cmds, m.openEditor(v))
 			}
 		}
@@ -1520,6 +1547,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addTranscriptItem(transcriptItem{kind: transcriptError, text: "editor error: " + msg.err.Error()})
 			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 			m.rebuildTranscript()
+		} else if strings.TrimSpace(m.externalEditorComposeVPath) != "" && msg.vpath == m.externalEditorComposeVPath {
+			// Compose flow: load the compose buffer into the multiline input.
+			cmd := m.loadComposeBuffer(msg.vpath)
+			m.externalEditorComposeVPath = ""
+			m.focus = focusInput
+			m.isMulti = true
+			m.multiline.Focus()
+			return m, cmd
 		}
 		m.focus = focusInput
 		if m.isMulti {
@@ -1527,6 +1562,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.single.Focus()
 		}
+		return m, nil
+
+	case editorComposeLoadMsg:
+		if strings.TrimSpace(msg.vpath) == "" || strings.TrimSpace(msg.vpath) != strings.TrimSpace(composeVPath) {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.addTranscriptItem(transcriptItem{kind: transcriptError, text: "compose load error: " + msg.err.Error()})
+			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+			m.rebuildTranscript()
+			return m, nil
+		}
+		m.focus = focusInput
+		m.isMulti = true
+		m.multiline.SetValue(msg.text)
+		m.multiline.Focus()
+		m.layout()
 		return m, nil
 
 	case fileViewMsg:
@@ -1895,6 +1947,80 @@ func (m *Model) editorExecCmd(editor string, vpath string) (*exec.Cmd, error) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd, nil
+}
+
+func (m *Model) loadComposeBuffer(vpath string) tea.Cmd {
+	vpath = strings.TrimSpace(vpath)
+	if vpath == "" {
+		vpath = composeVPath
+	}
+	// Compose buffer always lives under /workdir.
+	if !strings.HasPrefix(vpath, "/workdir/") {
+		return func() tea.Msg {
+			return editorComposeLoadMsg{vpath: composeVPath, err: fmt.Errorf("compose buffer must be under /workdir")}
+		}
+	}
+	workdir := strings.TrimSpace(m.workdir)
+	if workdir == "" {
+		return func() tea.Msg {
+			return editorComposeLoadMsg{vpath: composeVPath, err: fmt.Errorf("workdir is unknown")}
+		}
+	}
+	sub := strings.TrimPrefix(vpath, "/workdir/")
+	clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
+	if err != nil || clean == "" || clean == "." {
+		return func() tea.Msg {
+			return editorComposeLoadMsg{vpath: composeVPath, err: fmt.Errorf("invalid compose path: %s", vpath)}
+		}
+	}
+	abs := filepath.Join(workdir, filepath.FromSlash(clean))
+	return func() tea.Msg {
+		b, err := os.ReadFile(abs)
+		if err != nil {
+			return editorComposeLoadMsg{vpath: composeVPath, err: err}
+		}
+		return editorComposeLoadMsg{vpath: composeVPath, text: string(b)}
+	}
+}
+
+func (m *Model) openComposeEditorPrefill() tea.Cmd {
+	// Require a known workdir so we can write the compose buffer.
+	workdir := strings.TrimSpace(m.workdir)
+	if workdir == "" {
+		// Best-effort: try to prefetch it; otherwise no-op.
+		return m.prefetchWorkdir()
+	}
+
+	// Read current input value (single or multiline).
+	cur := ""
+	if m.isMulti {
+		cur = m.multiline.Value()
+	} else {
+		cur = m.single.Value()
+	}
+
+	composeRel := filepath.FromSlash(".workbench/compose.md")
+	composeAbs := filepath.Join(workdir, composeRel)
+	_ = os.MkdirAll(filepath.Dir(composeAbs), 0755)
+	_ = os.WriteFile(composeAbs, []byte(cur), 0644)
+
+	editor := strings.TrimSpace(os.Getenv("VISUAL"))
+	if editor == "" {
+		editor = strings.TrimSpace(os.Getenv("EDITOR"))
+	}
+	if editor == "" {
+		// No external editor configured; fall back to internal editor UX.
+		m.externalEditorComposeVPath = composeVPath
+		return m.openInternalEditor(composeVPath)
+	}
+
+	m.externalEditorComposeVPath = composeVPath
+	if cmd, err := m.editorExecCmd(editor, composeVPath); err == nil && cmd != nil {
+		return tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return editorExternalDoneMsg{vpath: composeVPath, err: err}
+		})
+	}
+	return nil
 }
 
 func (m *Model) saveEditor() tea.Cmd {
