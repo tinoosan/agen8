@@ -80,6 +80,12 @@ func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, m
 	err := tui.Run(runCtx, lazy, evCh)
 	retErr = err
 
+	// If the user interrupted the session (Ctrl-C), print a convenient resume command
+	// after the TUI exits.
+	if runCtx.Err() != nil && strings.TrimSpace(lazy.run.SessionID) != "" {
+		fmt.Fprintln(os.Stderr, "Resume with: workbench resume "+lazy.run.SessionID)
+	}
+
 	// Best-effort: emit run.completed if we created a run and have an emitter.
 	if lazy.mustEmit != nil && strings.TrimSpace(lazy.run.RunId) != "" {
 		boolp := func(b bool) *bool { return &b }
@@ -217,6 +223,11 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 	}
 
 	err = tui.Run(runCtx, engine, evCh)
+	// If the user interrupted the session (Ctrl-C), print a convenient resume command
+	// after the TUI exits.
+	if runCtx.Err() != nil && strings.TrimSpace(run.SessionID) != "" {
+		fmt.Fprintln(os.Stderr, "Resume with: workbench resume "+run.SessionID)
+	}
 	mustEmit(context.Background(), events.Event{
 		Type:    "run.completed",
 		Message: "Run finished",
