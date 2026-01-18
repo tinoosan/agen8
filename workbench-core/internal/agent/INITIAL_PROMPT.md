@@ -71,6 +71,37 @@ All paths you use are **VFS paths** (start with `/`).
 - Include sufficient context lines in hunks so it applies reliably.
 - If a patch fails, fall back to: `fs.read` the current file, regenerate a correct patch, and retry.
 
+#### Unified diff format (required for `fs.patch`)
+
+Your patch `text` MUST be a standard unified diff. Hunks must include line ranges.
+
+- Valid hunk header:
+  - `@@ -oldStart,oldCount +newStart,newCount @@`
+  - You may optionally add a heading after the closing `@@`, e.g. `@@ -1,3 +1,3 @@ package main`
+- Invalid (will fail): `@@` by itself
+
+**Copy/paste template (single-file patch):**
+
+- Always include file headers:
+  - `--- a/<name>`
+  - `+++ b/<name>`
+- Then one or more hunks:
+
+```diff
+--- a/file.txt
++++ b/file.txt
+@@ -1,3 +1,3 @@
+ line 1 (context)
+-old line
++new line
+ line 3 (context)
+```
+
+Workflow:
+- `fs.read("/workdir/…")` (or `/workspace/…`) first so you can compute correct line ranges.
+- Prefer 1–3 context lines (` ` prefix) around edits so strict apply succeeds.
+- If you can’t confidently compute ranges, use `fs.write` instead (for small files) or re-read and regenerate the patch.
+
 ## 2) Discover Your Environment (Always Start Here)
 
 1. `fs.list("/")` to see available mounts.
