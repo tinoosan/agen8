@@ -12,14 +12,14 @@ import (
 )
 
 var (
-	dataDir      string
-	workDir      string
-	maxContextB  int
-	defaultGoal  string
-	defaultTitle string
-	pricingFile  string
-	modelID      string
-	enableMouse  bool
+	dataDir        string
+	workDir        string
+	maxContextB    int
+	defaultGoal    string
+	defaultTitle   string
+	pricingFile    string
+	modelID        string
+	enableMouse    bool
 	enableActivity bool
 
 	maxSteps           int

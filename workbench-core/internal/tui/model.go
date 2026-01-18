@@ -1106,13 +1106,13 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	editor.BlurredStyle = editorStyle
 
 	m := Model{
-		ctx:               ctx,
-		runner:            runner,
-		events:            evCh,
-		transcript:        main,
-		activityList:      activity,
-		activityDetail:    details,
-		helpViewport:      helpVp,
+		ctx:            ctx,
+		runner:         runner,
+		events:         evCh,
+		transcript:     main,
+		activityList:   activity,
+		activityDetail: details,
+		helpViewport:   helpVp,
 		// Default: start with the activity panel closed. Users can toggle it with
 		// Ctrl+A, or enable it by default via WORKBENCH_ACTIVITY/--activity.
 		showDetails:       false,
