@@ -83,6 +83,30 @@ func (m *Model) layout() {
 		m.activityDetail.Height = max(1, innerH-listH)
 	}
 
+	// Model picker sizing: ensure the underlying list model has a real viewport so
+	// VisibleItems/filtering behave correctly (not just during rendering).
+	if m.modelPickerOpen {
+		modalW := 60
+		if modalW > m.width-8 {
+			modalW = m.width - 8
+		}
+		if modalW < 40 {
+			modalW = 40
+		}
+		modalH := 20
+		if modalH > m.height-8 {
+			modalH = m.height - 8
+		}
+		if modalH < 10 {
+			modalH = 10
+		}
+
+		innerW := max(20, modalW-4) // modal padding/border budget
+		innerH := max(4, modalH-2)
+		m.modelPickerList.SetWidth(innerW)
+		m.modelPickerList.SetHeight(innerH)
+	}
+
 	m.rebuildTranscript()
 	if wasAtBottom {
 		m.transcript.GotoBottom()

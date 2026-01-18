@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -177,10 +177,8 @@ type Model struct {
 	commandPaletteSelected int
 
 	// Model picker state
-	modelPickerOpen   bool
-	modelPickerFilter textinput.Model
-	modelPickerList   list.Model
-	modelPickerAll    []string
+	modelPickerOpen bool
+	modelPickerList list.Model
 }
 
 type focusTarget int
@@ -221,6 +219,47 @@ type modelPickerItem struct {
 func (m modelPickerItem) FilterValue() string { return m.id }
 func (m modelPickerItem) Title() string       { return m.id }
 func (m modelPickerItem) Description() string { return "" }
+
+type modelPickerDelegate struct {
+	styleRow lipgloss.Style
+	styleSel lipgloss.Style
+}
+
+func newModelPickerDelegate() modelPickerDelegate {
+	return modelPickerDelegate{
+		styleRow: lipgloss.NewStyle().Foreground(lipgloss.Color("#b0b0b0")),
+		// Avoid background/underline styling (can look like text selection).
+		styleSel: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#eaeaea")).
+			Bold(true),
+	}
+}
+
+func (d modelPickerDelegate) Height() int  { return 1 }
+func (d modelPickerDelegate) Spacing() int { return 0 }
+func (d modelPickerDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd {
+	return nil
+}
+
+func (d modelPickerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	it, ok := item.(modelPickerItem)
+	if !ok {
+		return
+	}
+
+	isSel := index == m.Index()
+	prefix := "  "
+	style := d.styleRow
+	if isSel {
+		prefix = "› "
+		style = d.styleSel
+	}
+
+	// Keep line within list width.
+	maxW := max(1, m.Width()-lipgloss.Width(prefix))
+	line := truncateRight(it.id, maxW)
+	_, _ = fmt.Fprint(w, style.Render(prefix+line))
+}
 
 // Hardcoded list of available slash commands for the command palette.
 var availableCommands = []string{
@@ -381,76 +420,42 @@ func (m *Model) autocompleteCommand() {
 
 // openModelPicker initializes and opens the model picker modal.
 func (m *Model) openModelPicker() tea.Cmd {
-	m.modelPickerAll = cost.SupportedModels()
 	m.modelPickerOpen = true
 
-	// Initialize filter input
-	filter := textinput.New()
-	filter.Placeholder = "Filter models..."
-	filter.Focus()
-	filter.CharLimit = 100
-	filter.Prompt = ""
-	filter.Width = 40
-	m.modelPickerFilter = filter
-
-	// Initialize list with all models
-	m.rebuildModelPickerItems()
-
-	return textinput.Blink
-}
-
-// closeModelPicker closes the model picker modal.
-func (m *Model) closeModelPicker() {
-	m.modelPickerOpen = false
-	m.modelPickerFilter = textinput.Model{}
-	m.modelPickerList = list.Model{}
-	m.modelPickerAll = nil
-}
-
-// rebuildModelPickerItems rebuilds the list items based on the current filter.
-func (m *Model) rebuildModelPickerItems() {
-	filterText := strings.ToLower(strings.TrimSpace(m.modelPickerFilter.Value()))
-	items := []list.Item{}
-
-	for _, id := range m.modelPickerAll {
-		if filterText == "" || strings.Contains(strings.ToLower(id), filterText) {
-			items = append(items, modelPickerItem{id: id})
-		}
+	ids := cost.SupportedModels()
+	items := make([]list.Item, 0, len(ids))
+	for _, id := range ids {
+		items = append(items, modelPickerItem{id: id})
 	}
 
-	// Create list with a simple delegate
-	delegate := list.NewDefaultDelegate()
-	delegate.Styles.SelectedTitle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#eaeaea")).
-		Background(lipgloss.Color("#303030")).
-		Bold(true)
-	delegate.Styles.SelectedDesc = delegate.Styles.SelectedTitle
-	delegate.Styles.NormalTitle = lipgloss.NewStyle().Foreground(lipgloss.Color("#b0b0b0"))
-	delegate.Styles.NormalDesc = delegate.Styles.NormalTitle
-
-	// Preserve existing list settings if it exists
-	var existingWidth, existingHeight int
-	if m.modelPickerList.Width() > 0 {
-		existingWidth = m.modelPickerList.Width()
-		existingHeight = m.modelPickerList.Height()
-	}
-
-	l := list.New(items, delegate, existingWidth, existingHeight)
+	l := list.New(items, newModelPickerDelegate(), 0, 0)
 	l.Title = "Select Model"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
 	l.SetShowPagination(true)
-	l.SetFilteringEnabled(false) // We handle filtering manually
+	l.SetFilteringEnabled(true)
+	l.SetShowFilter(true)
+	// Ensure items are visible immediately (VisibleItems uses filteredItems when filterState != Unfiltered).
+	// Then put the list into Filtering mode so typing edits the filter input.
+	l.SetFilterText("")
+	l.SetFilterState(list.Filtering)
 	l.Styles.Title = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#707070")).
 		Bold(true)
 
-	// Reset selection to top
 	if len(items) > 0 {
 		l.Select(0)
 	}
 
 	m.modelPickerList = l
+	m.layout()
+	return nil
+}
+
+// closeModelPicker closes the model picker modal.
+func (m *Model) closeModelPicker() {
+	m.modelPickerOpen = false
+	m.modelPickerList = list.Model{}
 }
 
 // selectModelFromPicker selects the currently highlighted model and triggers the /model command.
@@ -655,6 +660,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 
+	case list.FilterMatchesMsg:
+		// Critical: bubbles/list filtering runs asynchronously and sends FilterMatchesMsg
+		// back through the Bubble Tea update loop. If we don't forward this message
+		// into the picker list, the visible items will never update.
+		if m.modelPickerOpen {
+			var cmd tea.Cmd
+			m.modelPickerList, cmd = m.modelPickerList.Update(msg)
+			return m, cmd
+		}
+
 	case tea.KeyMsg:
 		// Global quit.
 		if msg.Type == tea.KeyCtrlC {
@@ -668,6 +683,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.closeModelPicker()
 				m.layout()
 				return m, nil
+			case tea.KeyEnter:
+				return m, m.selectModelFromPicker()
+			case tea.KeyUp:
+				m.modelPickerList.CursorUp()
+				return m, nil
+			case tea.KeyDown:
+				m.modelPickerList.CursorDown()
+				return m, nil
+			case tea.KeyPgUp, tea.KeyCtrlU:
+				m.modelPickerList.CursorUp()
+				return m, nil
+			case tea.KeyPgDown, tea.KeyCtrlF:
+				m.modelPickerList.CursorDown()
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.modelPickerList, cmd = m.modelPickerList.Update(msg)
+				return m, cmd
 			}
 		}
 
@@ -770,38 +803,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.layout()
 				return m, nil
 			}
-		}
-
-		// Model picker key handling (when open, intercept keys before other handlers).
-		if m.modelPickerOpen {
-			switch msg.Type {
-			case tea.KeyEsc:
-				m.closeModelPicker()
-				return m, nil
-			case tea.KeyEnter:
-				return m, m.selectModelFromPicker()
-			case tea.KeyUp:
-				m.modelPickerList.CursorUp()
-				return m, nil
-			case tea.KeyDown:
-				m.modelPickerList.CursorDown()
-				return m, nil
-			case tea.KeyPgUp, tea.KeyCtrlU:
-				m.modelPickerList.CursorUp()
-				return m, nil
-			case tea.KeyPgDown, tea.KeyCtrlF:
-				m.modelPickerList.CursorDown()
-				return m, nil
-			}
-			// Handle typing in filter input
-			var cmd tea.Cmd
-			m.modelPickerFilter, cmd = m.modelPickerFilter.Update(msg)
-			m.rebuildModelPickerItems()
-			// Reset cursor to top after filtering
-			if len(m.modelPickerList.Items()) > 0 {
-				m.modelPickerList.Select(0)
-			}
-			return m, cmd
 		}
 
 		// Tab cycles focus between input and activity list.
@@ -1176,18 +1177,8 @@ func (m Model) renderModelPicker(base string) string {
 	m.modelPickerList.SetWidth(modalWidth - 4) // Account for padding/borders
 	m.modelPickerList.SetHeight(listHeight)
 
-	// Size the filter input
-	m.modelPickerFilter.Width = modalWidth - 4
-
 	// Build modal content
-	filterView := m.modelPickerFilter.View()
-	listView := m.modelPickerList.View()
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		filterView,
-		"",
-		listView,
-	)
+	content := m.modelPickerList.View()
 
 	// Style the modal
 	modalStyle := lipgloss.NewStyle().
@@ -1200,24 +1191,6 @@ func (m Model) renderModelPicker(base string) string {
 		Foreground(lipgloss.Color("#eaeaea"))
 
 	modalContent := modalStyle.Render(content)
-
-	// Dim the base view
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#404040"))
-	baseLines := strings.Split(base, "\n")
-
-	// Ensure we have enough lines for the full height
-	for len(baseLines) < m.height {
-		baseLines = append(baseLines, "")
-	}
-	if len(baseLines) > m.height {
-		baseLines = baseLines[:m.height]
-	}
-
-	// Dim all base lines
-	dimmedLines := make([]string, len(baseLines))
-	for i, line := range baseLines {
-		dimmedLines[i] = dimStyle.Render(line)
-	}
 
 	// Split modal content into lines
 	modalLines := strings.Split(modalContent, "\n")
@@ -1239,30 +1212,21 @@ func (m Model) renderModelPicker(base string) string {
 		leftPos = 0
 	}
 
-	// Overlay modal on dimmed base
+	// Render over a blank backdrop.
+	//
+	// We intentionally avoid "overlaying" onto the base UI by slicing strings,
+	// because the base view contains ANSI escape codes (and byte-slicing them
+	// corrupts styles, causing the kind of weird highlight blocks you reported).
 	result := make([]string, m.height)
 	for i := 0; i < m.height; i++ {
-		result[i] = dimmedLines[i]
+		result[i] = strings.Repeat(" ", max(1, m.width))
 
 		// Overlay modal lines
 		if i >= topPos && i < topPos+modalHeightActual {
 			lineIdx := i - topPos
 			if lineIdx < len(modalLines) {
 				modalLine := modalLines[lineIdx]
-				lineWidth := lipgloss.Width(modalLine)
-
-				// Build the overlaid line
-				prefix := ""
-				if leftPos > 0 && leftPos < len(result[i]) {
-					prefix = result[i][:leftPos]
-				}
-				suffix := ""
-				suffixStart := leftPos + lineWidth
-				if suffixStart < len(result[i]) {
-					suffix = result[i][suffixStart:]
-				}
-
-				result[i] = prefix + modalLine + suffix
+				result[i] = strings.Repeat(" ", leftPos) + modalLine
 			}
 		}
 	}

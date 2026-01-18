@@ -502,6 +502,9 @@ func TestCommandPalette_PreservesTrailingArgs(t *testing.T) {
 func TestModelPicker_OpensOnModelCommand(t *testing.T) {
 	runner := &recordingRunner{}
 	m := New(context.Background(), runner, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.showDetails = true
 	m.layout()
 
 	// Type "/model" and submit
@@ -515,14 +518,17 @@ func TestModelPicker_OpensOnModelCommand(t *testing.T) {
 	if updated.turnInFlight {
 		t.Fatalf("expected turnInFlight false (should not submit)")
 	}
-	if cmd == nil {
-		t.Fatalf("expected cmd (textinput.Blink), got nil")
+	if cmd != nil {
+		t.Fatalf("expected no cmd, got %v", cmd)
 	}
 }
 
 func TestModelPicker_FiltersOnTyping(t *testing.T) {
 	runner := &recordingRunner{}
 	m := New(context.Background(), runner, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.showDetails = true
 	m.layout()
 
 	// Open picker
@@ -534,6 +540,14 @@ func TestModelPicker_FiltersOnTyping(t *testing.T) {
 		t.Fatalf("expected modelPickerOpen true")
 	}
 
+	// Prime list internals (VisibleItems can be empty until first render).
+	_ = updated.modelPickerList.View()
+
+	beforeN := len(updated.modelPickerList.VisibleItems())
+	if beforeN == 0 {
+		t.Fatalf("expected visible items > 0 before filtering")
+	}
+
 	// Type filter text
 	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
 	updated2 := m3.(Model)
@@ -542,29 +556,38 @@ func TestModelPicker_FiltersOnTyping(t *testing.T) {
 	m5, _ := updated3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
 	updated4 := m5.(Model)
 
-	if updated4.modelPickerFilter.Value() != "gpt" {
-		t.Fatalf("expected filter value 'gpt', got %q", updated4.modelPickerFilter.Value())
+	// Prime list internals after filter updates.
+	_ = updated4.modelPickerList.View()
+
+	if got := updated4.modelPickerList.FilterValue(); got != "gpt" {
+		t.Fatalf("expected filter value 'gpt', got %q", got)
 	}
 
-	// Check that list is filtered
-	items := updated4.modelPickerList.Items()
-	foundGPT := false
-	for _, item := range items {
-		if modelItem, ok := item.(modelPickerItem); ok {
-			if strings.Contains(modelItem.id, "gpt") {
-				foundGPT = true
-				break
-			}
-		}
+	afterItems := updated4.modelPickerList.VisibleItems()
+	afterN := len(afterItems)
+	if afterN == 0 {
+		t.Fatalf("expected visible items > 0 after filtering")
 	}
-	if !foundGPT {
-		t.Fatalf("expected to find gpt models in filtered list")
+	if afterN > beforeN {
+		t.Fatalf("expected visible items to not increase after filtering: before=%d after=%d", beforeN, afterN)
+	}
+	for _, it := range afterItems {
+		mi, ok := it.(modelPickerItem)
+		if !ok {
+			continue
+		}
+		if !strings.Contains(mi.id, "gpt") {
+			t.Fatalf("expected all visible items to match filter 'gpt'; got %q", mi.id)
+		}
 	}
 }
 
 func TestModelPicker_SelectsModelAndUpdatesLabel(t *testing.T) {
 	runner := &recordingRunner{}
 	m := New(context.Background(), runner, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.showDetails = true
 	m.layout()
 	m.modelID = "old-model"
 
@@ -576,6 +599,9 @@ func TestModelPicker_SelectsModelAndUpdatesLabel(t *testing.T) {
 	if !updated.modelPickerOpen {
 		t.Fatalf("expected modelPickerOpen true")
 	}
+
+	// Prime list internals so selection works consistently.
+	_ = updated.modelPickerList.View()
 
 	// Select first model (should be sorted, likely starting with openai/gpt-4o-mini or similar)
 	if len(updated.modelPickerList.Items()) == 0 {
@@ -620,6 +646,9 @@ func TestModelPicker_SelectsModelAndUpdatesLabel(t *testing.T) {
 func TestModelPicker_EscClosesPicker(t *testing.T) {
 	runner := &recordingRunner{}
 	m := New(context.Background(), runner, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.showDetails = true
 	m.layout()
 
 	// Open picker
@@ -630,6 +659,7 @@ func TestModelPicker_EscClosesPicker(t *testing.T) {
 	if !updated.modelPickerOpen {
 		t.Fatalf("expected modelPickerOpen true")
 	}
+	beforeShowDetails := updated.showDetails
 
 	// Press Esc - should close picker
 	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -637,6 +667,9 @@ func TestModelPicker_EscClosesPicker(t *testing.T) {
 
 	if updated2.modelPickerOpen {
 		t.Fatalf("expected modelPickerOpen false after Esc")
+	}
+	if updated2.showDetails != beforeShowDetails {
+		t.Fatalf("expected showDetails unchanged; before=%t after=%t", beforeShowDetails, updated2.showDetails)
 	}
 	if runner.lastMessage != "" {
 		t.Fatalf("expected runner not called, but got %q", runner.lastMessage)
@@ -646,6 +679,9 @@ func TestModelPicker_EscClosesPicker(t *testing.T) {
 func TestModelPicker_ModelCommandWithArgsStillWorks(t *testing.T) {
 	runner := &recordingRunner{}
 	m := New(context.Background(), runner, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.showDetails = true
 	m.layout()
 
 	// Type "/model openai/gpt-4o" and submit - should NOT open picker
