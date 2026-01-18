@@ -1053,6 +1053,77 @@ func TestCtrlE_PrefillsComposeFileAndLoadsOnExit(t *testing.T) {
 	}
 }
 
+func TestHelpModal_CtrlPOpens_Scrolls_AndEscCloses(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 120
+	m.height = 30
+	m.showDetails = true
+	m.layout()
+
+	// Open help modal.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	opened := m2.(Model)
+	if !opened.helpModalOpen {
+		t.Fatalf("expected helpModalOpen true after ctrl+p")
+	}
+
+	// Ensure view stays within terminal bounds (no weird clipping artifacts).
+	view := opened.View()
+	if got := lipgloss.Height(view); got > opened.height {
+		t.Fatalf("expected View() height <= %d, got %d", opened.height, got)
+	}
+	for i, line := range strings.Split(view, "\n") {
+		if w := lipgloss.Width(line); w > opened.width {
+			t.Fatalf("line %d exceeds terminal width: got %d, want <= %d; line=%q", i+1, w, opened.width, line)
+		}
+	}
+
+	// Scroll down a bit.
+	before := opened.helpViewport.YOffset
+	m3, _ := opened.Update(tea.KeyMsg{Type: tea.KeyDown})
+	scrolled := m3.(Model)
+	if scrolled.helpViewport.YOffset == before {
+		// It's OK for tiny terminals, but with our fixed content it should scroll.
+		t.Fatalf("expected help modal to scroll on Down; before=%d after=%d", before, scrolled.helpViewport.YOffset)
+	}
+
+	// Close on Esc.
+	m4, _ := scrolled.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	closed := m4.(Model)
+	if closed.helpModalOpen {
+		t.Fatalf("expected helpModalOpen false after Esc")
+	}
+}
+
+func TestHelpModal_CtrlPDoesNotOverrideActivityCtrlP(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 120
+	m.height = 30
+	m.showDetails = true
+	m.focus = focusActivityList
+	m.single.Blur()
+	m.multiline.Blur()
+	m.layout()
+
+	// Make activity list have some items so cursor can move.
+	m.activities = []Activity{
+		{ID: "a1", Kind: "noop", Title: "One", Status: ActivityOK},
+		{ID: "a2", Kind: "noop", Title: "Two", Status: ActivityOK},
+	}
+	m.refreshActivityList()
+	m.activityList.Select(1)
+
+	// Ctrl+P is an Activity shortcut (cursor up). Help modal should NOT open.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated := m2.(Model)
+	if updated.helpModalOpen {
+		t.Fatalf("expected help modal not to open when activity focused")
+	}
+	if updated.activityList.Index() != 0 {
+		t.Fatalf("expected ctrl+p to move activity cursor up to 0, got %d", updated.activityList.Index())
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

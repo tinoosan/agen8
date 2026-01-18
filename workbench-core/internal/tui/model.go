@@ -203,6 +203,10 @@ type Model struct {
 	modelPickerOpen bool
 	modelPickerList list.Model
 
+	// Help modal (Ctrl+P)
+	helpModalOpen bool
+	helpViewport  viewport.Model
+
 	// File picker state (workdir-scoped, triggered by typing '@' in input)
 	filePickerOpen     bool
 	filePickerList     list.Model
@@ -865,6 +869,66 @@ func (m *Model) closeModelPicker() {
 	m.modelPickerList = list.Model{}
 }
 
+func (m *Model) openHelpModal() {
+	m.helpModalOpen = true
+	m.helpViewport.SetContent(m.helpModalContent())
+	m.helpViewport.SetYOffset(0)
+	m.layout()
+}
+
+func (m *Model) closeHelpModal() {
+	m.helpModalOpen = false
+	m.helpViewport.SetContent("")
+	m.helpViewport.SetYOffset(0)
+	m.layout()
+}
+
+func (m *Model) helpModalContent() string {
+	// Keep this plain-text (no selection/highlight), and long enough to scroll.
+	lines := []string{
+		"Shortcuts",
+		"",
+		"  ctrl+p  help (this screen)",
+		"  ctrl+a  toggle activity panel",
+		"  tab     cycle focus (input/activity)",
+		"  pgup/pgdn  scroll transcript",
+		"  ctrl+u/ctrl+f  half-page scroll transcript",
+		"  ctrl+g  toggle multiline input",
+		"  enter   send (single-line)",
+		"  ctrl+o  send (multiline)",
+		"  esc     close modal/panels",
+		"",
+		"Composer",
+		"",
+		"  /editor + Enter  open $EDITOR to compose a message (loads back into input)",
+		"  ctrl+e           open $EDITOR with current input prefilled",
+		"",
+		"Slash commands",
+		"",
+		"  /model           open model picker",
+		"  /model <id>      set model",
+		"  /open <path>     open a file via OS",
+		"  /editor <path>   edit a workdir file in $EDITOR",
+		"  /cd <path>       change workdir",
+		"  /pwd             show workdir",
+		"  /workdir         alias for /pwd",
+		"",
+		"Command palette",
+		"",
+		"  Type '/' in input to show commands; Up/Down to select; Enter to autocomplete; Esc to close.",
+		"",
+		"References",
+		"",
+		"  Type '@' to open file picker; Enter inserts an @ref into input; Esc closes.",
+		"",
+		"Tips",
+		"",
+		"  - This modal is scrollable: use Up/Down, PgUp/PgDn, or mouse wheel.",
+		"  - Press Esc to close.",
+	}
+	return strings.Join(lines, "\n")
+}
+
 // selectModelFromPicker selects the currently highlighted model and triggers the /model command.
 func (m *Model) selectModelFromPicker() tea.Cmd {
 	if m.modelPickerList.Items() == nil || len(m.modelPickerList.Items()) == 0 {
@@ -908,6 +972,10 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	details := viewport.New(0, 0)
 	details.Style = lipgloss.NewStyle()
 	details.MouseWheelEnabled = true
+
+	helpVp := viewport.New(0, 0)
+	helpVp.Style = lipgloss.NewStyle()
+	helpVp.MouseWheelEnabled = true
 
 	activity := list.New([]list.Item{}, newActivityDelegate(), 0, 0)
 	activity.Title = "Activity"
@@ -981,6 +1049,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 		transcript:        main,
 		activityList:      activity,
 		activityDetail:    details,
+		helpViewport:      helpVp,
 		showDetails:       true,
 		activityIndexByID: map[string]int{},
 		single:            single,
@@ -1103,6 +1172,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Global quit.
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
+		}
+
+		// Help modal captures keys globally while open.
+		if m.helpModalOpen {
+			if msg.Type == tea.KeyEsc {
+				m.closeHelpModal()
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.helpViewport, cmd = m.helpViewport.Update(msg)
+			return m, cmd
+		}
+
+		// Ctrl+P opens help modal (only when input is focused).
+		if m.focus == focusInput && (msg.Type == tea.KeyCtrlP || strings.EqualFold(msg.String(), "ctrl+p")) {
+			m.openHelpModal()
+			return m, nil
 		}
 
 		// Ctrl+E opens external editor for composing a message, prefilled from current input.
@@ -1621,6 +1707,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	//   otherwise scroll the transcript.
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
+		if m.helpModalOpen {
+			var cmd tea.Cmd
+			m.helpViewport, cmd = m.helpViewport.Update(msg)
+			return m, cmd
+		}
 		// If details are visible and the mouse is within the right pane, scroll details.
 		if m.showDetails && m.activityList.Width() > 0 {
 			leftW := m.transcript.Width
@@ -1649,6 +1740,11 @@ func (m Model) View() string {
 	body := m.renderBody()
 	input := m.renderInput()
 	base := header + "\n" + body + "\n" + input
+
+	// Overlay help modal if open.
+	if m.helpModalOpen {
+		return m.renderHelpModal(base)
+	}
 
 	// Overlay file picker modal if open.
 	if m.filePickerOpen {
@@ -1706,6 +1802,82 @@ func (m Model) editorTitle() string {
 		title += " · error: " + strings.TrimSpace(m.editorErr)
 	}
 	return title
+}
+
+func (m Model) renderHelpModal(base string) string {
+	_ = base
+
+	outerW := 84
+	if outerW > m.width-8 {
+		outerW = m.width - 8
+	}
+	if outerW < 44 {
+		outerW = 44
+	}
+	outerH := 22
+	if outerH > m.height-8 {
+		outerH = m.height - 8
+	}
+	if outerH < 12 {
+		outerH = 12
+	}
+
+	// Keep TOTAL modal size within outerW/outerH (account for padding + border).
+	// totalW = contentW + paddingLR(4) + borderLR(2) = contentW + 6
+	// totalH = contentH + paddingTB(2) + borderTB(2) = contentH + 4
+	contentW := max(10, outerW-6)
+	contentH := max(6, outerH-4)
+
+	// Reserve some space for title + footer inside the content area.
+	vpH := max(1, contentH-3)
+	m.helpViewport.Width = contentW
+	m.helpViewport.Height = vpH
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#eaeaea")).Render("Shortcuts & commands")
+	footer := lipgloss.NewStyle().Foreground(lipgloss.Color("#707070")).Render("↑/↓ scroll  pgup/pgdn faster  esc close")
+	body := m.helpViewport.View()
+	content := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", footer)
+
+	modalStyle := lipgloss.NewStyle().
+		Width(contentW).
+		Height(contentH).
+		Padding(1, 2).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#6bbcff")).
+		Background(lipgloss.Color("#1a1a1a")).
+		Foreground(lipgloss.Color("#eaeaea"))
+
+	modalContent := modalStyle.Render(content)
+	modalLines := strings.Split(modalContent, "\n")
+	modalHeightActual := len(modalLines)
+	modalWidthActual := 0
+	for _, line := range modalLines {
+		if w := lipgloss.Width(line); w > modalWidthActual {
+			modalWidthActual = w
+		}
+	}
+
+	topPos := (m.height - modalHeightActual) / 2
+	if topPos < 0 {
+		topPos = 0
+	}
+	leftPos := (m.width - modalWidthActual) / 2
+	if leftPos < 0 {
+		leftPos = 0
+	}
+
+	// Render over a blank backdrop to avoid ANSI corruption artifacts.
+	result := make([]string, m.height)
+	for i := 0; i < m.height; i++ {
+		result[i] = strings.Repeat(" ", max(1, m.width))
+		if i >= topPos && i < topPos+modalHeightActual {
+			lineIdx := i - topPos
+			if lineIdx < len(modalLines) {
+				result[i] = strings.Repeat(" ", leftPos) + modalLines[lineIdx]
+			}
+		}
+	}
+	return strings.Join(result, "\n")
 }
 
 func (m Model) renderModelPicker(base string) string {
