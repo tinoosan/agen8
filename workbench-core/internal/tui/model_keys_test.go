@@ -289,6 +289,181 @@ func TestActivity_OpenFileViewer_OKey(t *testing.T) {
 	}
 }
 
+func TestCommandPalette_OpensOnSlashPrefix(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.layout()
+
+	// Type "/" - palette should open.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated := m2.(Model)
+	if !updated.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen true after typing '/'")
+	}
+	if len(updated.commandPaletteMatches) == 0 {
+		t.Fatalf("expected commandPaletteMatches to have items")
+	}
+}
+
+func TestCommandPalette_FiltersOnTyping(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.layout()
+
+	// Type "/mo" - should filter to "/model".
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated := m2.(Model)
+	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	updated2 := m3.(Model)
+	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	updated3 := m4.(Model)
+
+	if !updated3.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen true after typing '/mo'")
+	}
+	found := false
+	for _, match := range updated3.commandPaletteMatches {
+		if match == "/model" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected '/model' in matches, got %v", updated3.commandPaletteMatches)
+	}
+}
+
+func TestCommandPalette_EnterAutocompletesWithoutSubmitting(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.layout()
+
+	// Type "/mo" to get "/model" as first match.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated := m2.(Model)
+	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	updated2 := m3.(Model)
+	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	updated3 := m4.(Model)
+
+	if !updated3.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen true")
+	}
+	if updated3.commandPaletteSelected != 0 {
+		t.Fatalf("expected selected index 0, got %d", updated3.commandPaletteSelected)
+	}
+
+	// Press Enter - should autocomplete to "/model" but NOT submit.
+	m5, cmd := updated3.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated4 := m5.(Model)
+
+	if updated4.single.Value() != "/model" {
+		t.Fatalf("expected input value '/model', got %q", updated4.single.Value())
+	}
+	if updated4.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen false after Enter")
+	}
+	if updated4.turnInFlight {
+		t.Fatalf("expected turnInFlight false (should not submit)")
+	}
+	if cmd != nil {
+		t.Fatalf("expected no cmd (should not submit), got %v", cmd)
+	}
+
+	// After autocompletion, typing args (e.g. Space) should NOT reopen the palette.
+	m6, _ := updated4.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	updated5 := m6.(Model)
+	if updated5.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen false after typing space following autocomplete")
+	}
+}
+
+func TestCommandPalette_UpDownNavigation(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.layout()
+
+	// Type "/" to open palette with multiple matches.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated := m2.(Model)
+
+	if !updated.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen true")
+	}
+	if len(updated.commandPaletteMatches) < 2 {
+		t.Fatalf("expected at least 2 matches, got %d", len(updated.commandPaletteMatches))
+	}
+
+	// Press Down - should move selection.
+	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated2 := m3.(Model)
+	if updated2.commandPaletteSelected != 1 {
+		t.Fatalf("expected selected index 1 after Down, got %d", updated2.commandPaletteSelected)
+	}
+
+	// Press Up - should move back.
+	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated3 := m4.(Model)
+	if updated3.commandPaletteSelected != 0 {
+		t.Fatalf("expected selected index 0 after Up, got %d", updated3.commandPaletteSelected)
+	}
+}
+
+func TestCommandPalette_EscClosesPalette(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.layout()
+
+	// Type "/mo" to open palette.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated := m2.(Model)
+	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	updated2 := m3.(Model)
+
+	if !updated2.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen true")
+	}
+
+	// Press Esc - should close palette but keep input.
+	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated3 := m4.(Model)
+
+	if updated3.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen false after Esc")
+	}
+	if updated3.single.Value() != "/m" {
+		t.Fatalf("expected input to remain '/m', got %q", updated3.single.Value())
+	}
+}
+
+func TestCommandPalette_PreservesTrailingArgs(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.layout()
+
+	// Type "/mo arg1 arg2" - should preserve args after autocomplete.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated := m2.(Model)
+	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	updated2 := m3.(Model)
+	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	updated3 := m4.(Model)
+	m5, _ := updated3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	updated4 := m5.(Model)
+	m6, _ := updated4.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	updated5 := m6.(Model)
+	m7, _ := updated5.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	updated6 := m7.(Model)
+	m8, _ := updated6.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	updated7 := m8.(Model)
+
+	if updated7.single.Value() != "/mo arg" {
+		t.Fatalf("expected input '/mo arg', got %q", updated7.single.Value())
+	}
+
+	// Press Enter - should autocomplete to "/model arg".
+	m9, _ := updated7.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated8 := m9.(Model)
+
+	if updated8.single.Value() != "/model arg" {
+		t.Fatalf("expected input '/model arg', got %q", updated8.single.Value())
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

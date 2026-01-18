@@ -212,7 +212,14 @@ func (m Model) renderInput() string {
 	}
 	status = lipgloss.NewStyle().Width(statusW).Render(status)
 
-	content := lipgloss.JoinVertical(lipgloss.Top, status, "", input)
+	// Render command palette if open.
+	palette := m.renderCommandPalette()
+	contentParts := []string{status}
+	if palette != "" {
+		contentParts = append(contentParts, "", palette)
+	}
+	contentParts = append(contentParts, "", input)
+	content := lipgloss.JoinVertical(lipgloss.Top, contentParts...)
 	h := lipgloss.Height(content)
 	if h < 1 {
 		h = 1
@@ -264,4 +271,45 @@ func (m Model) renderStatusLine() string {
 		return ""
 	}
 	return "last: " + strings.Join(parts, " • ")
+}
+
+func (m Model) renderCommandPalette() string {
+	if !m.commandPaletteOpen || len(m.commandPaletteMatches) == 0 {
+		return ""
+	}
+
+	// Limit displayed matches to 6 for readability.
+	maxDisplay := 6
+	displayMatches := m.commandPaletteMatches
+	if len(displayMatches) > maxDisplay {
+		displayMatches = displayMatches[:maxDisplay]
+	}
+
+	// Style for selected vs unselected items.
+	styleSelected := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6bbcff")).
+		Bold(true)
+	styleUnselected := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#c0c0c0"))
+
+	lines := []string{}
+	for i, cmd := range displayMatches {
+		if i == m.commandPaletteSelected {
+			lines = append(lines, styleSelected.Render("  "+cmd))
+		} else {
+			lines = append(lines, styleUnselected.Render("  "+cmd))
+		}
+	}
+
+	// Wrap in a subtle border/background.
+	paletteContent := strings.Join(lines, "\n")
+	paletteW := max(20, m.width-8)
+	paletteStyle := lipgloss.NewStyle().
+		Width(paletteW).
+		Padding(0, 1).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#404040")).
+		Background(lipgloss.Color("#1a1a1a"))
+
+	return paletteStyle.Render(paletteContent)
 }

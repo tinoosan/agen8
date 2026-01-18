@@ -168,6 +168,11 @@ type Model struct {
 	styleHint                lipgloss.Style
 
 	renderer *ContentRenderer
+
+	// Command palette state
+	commandPaletteOpen     bool
+	commandPaletteMatches  []string
+	commandPaletteSelected int
 }
 
 type focusTarget int
@@ -198,6 +203,140 @@ type transcriptItem struct {
 	actionCompletion  string
 	actionIsToolRun   bool
 	actionIsCompleted bool
+}
+
+// Hardcoded list of available slash commands for the command palette.
+var availableCommands = []string{
+	"/model",
+	"/open",
+	"/editor",
+	"/cd",
+	"/pwd",
+	"/workdir",
+}
+
+func isExactCommand(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	for _, cmd := range availableCommands {
+		if s == cmd {
+			return true
+		}
+	}
+	return false
+}
+
+// updateCommandPalette updates the command palette state based on the current input value.
+// It detects if the input starts with "/" and filters commands accordingly.
+func (m *Model) updateCommandPalette() {
+	var inputValue string
+	if m.isMulti {
+		inputValue = m.multiline.Value()
+	} else {
+		inputValue = m.single.Value()
+	}
+
+	// Extract the first token (command part) from the input.
+	fields := strings.Fields(inputValue)
+	var firstToken string
+	if len(fields) > 0 {
+		firstToken = fields[0]
+	} else {
+		// Empty input or only whitespace - use the raw value.
+		firstToken = strings.TrimSpace(inputValue)
+	}
+
+	// Check if we're in command mode (starts with "/").
+	if strings.HasPrefix(firstToken, "/") {
+		// If the user has already completed a valid command token and is now typing
+		// arguments (i.e. there is whitespace after the first token), keep the palette closed.
+		if isExactCommand(firstToken) && strings.ContainsAny(inputValue, " \t\n") {
+			m.commandPaletteOpen = false
+			m.commandPaletteMatches = nil
+			m.commandPaletteSelected = 0
+			return
+		}
+
+		// Filter commands that match the typed prefix.
+		matches := []string{}
+		for _, cmd := range availableCommands {
+			if strings.HasPrefix(cmd, firstToken) {
+				matches = append(matches, cmd)
+			}
+		}
+
+		if len(matches) > 0 {
+			m.commandPaletteOpen = true
+			m.commandPaletteMatches = matches
+			// Ensure selected index is valid.
+			if m.commandPaletteSelected >= len(matches) {
+				m.commandPaletteSelected = 0
+			}
+			if m.commandPaletteSelected < 0 {
+				m.commandPaletteSelected = 0
+			}
+		} else {
+			// No matches, close palette.
+			m.commandPaletteOpen = false
+			m.commandPaletteMatches = nil
+			m.commandPaletteSelected = 0
+		}
+	} else {
+		// Not in command mode, close palette.
+		m.commandPaletteOpen = false
+		m.commandPaletteMatches = nil
+		m.commandPaletteSelected = 0
+	}
+}
+
+// autocompleteCommand replaces the first token in the input with the selected command,
+// preserving any trailing arguments.
+func (m *Model) autocompleteCommand() {
+	if !m.commandPaletteOpen || len(m.commandPaletteMatches) == 0 {
+		return
+	}
+	if m.commandPaletteSelected < 0 || m.commandPaletteSelected >= len(m.commandPaletteMatches) {
+		return
+	}
+
+	selectedCmd := m.commandPaletteMatches[m.commandPaletteSelected]
+
+	var inputValue string
+	if m.isMulti {
+		inputValue = m.multiline.Value()
+	} else {
+		inputValue = m.single.Value()
+	}
+
+	// Extract the first token and any trailing args.
+	fields := strings.Fields(inputValue)
+	if len(fields) == 0 {
+		// Empty input, just set the command.
+		if m.isMulti {
+			m.multiline.SetValue(selectedCmd)
+		} else {
+			m.single.SetValue(selectedCmd)
+		}
+	} else {
+		// Replace first token with selected command, preserve rest.
+		rest := strings.TrimSpace(strings.TrimPrefix(inputValue, fields[0]))
+		newValue := selectedCmd
+		if rest != "" {
+			newValue = selectedCmd + " " + rest
+		}
+		if m.isMulti {
+			m.multiline.SetValue(newValue)
+		} else {
+			m.single.SetValue(newValue)
+		}
+	}
+
+	// Close palette after autocomplete.
+	m.commandPaletteOpen = false
+	m.commandPaletteMatches = nil
+	m.commandPaletteSelected = 0
 }
 
 func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model {
@@ -449,27 +588,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Esc closes the file preview if it's open; otherwise, it closes the activity
-		// panel and returns focus to input.
-		if msg.Type == tea.KeyEsc && m.showDetails && m.fileViewOpen {
-			m.fileViewOpen = false
-			m.fileViewPath = ""
-			m.fileViewContent = ""
-			m.fileViewTruncated = false
-			m.fileViewErr = ""
-			m.refreshActivityDetail()
-			return m, nil
-		}
-		if msg.Type == tea.KeyEsc && m.showDetails {
-			m.showDetails = false
-			m.focus = focusInput
-			if m.isMulti {
-				m.multiline.Focus()
-			} else {
-				m.single.Focus()
+		// Esc closes command palette first (if open), then file preview, then activity panel.
+		if msg.Type == tea.KeyEsc {
+			if m.commandPaletteOpen {
+				m.commandPaletteOpen = false
+				m.commandPaletteMatches = nil
+				m.commandPaletteSelected = 0
+				return m, nil
 			}
-			m.layout()
-			return m, nil
+			if m.showDetails && m.fileViewOpen {
+				m.fileViewOpen = false
+				m.fileViewPath = ""
+				m.fileViewContent = ""
+				m.fileViewTruncated = false
+				m.fileViewErr = ""
+				m.refreshActivityDetail()
+				return m, nil
+			}
+			if m.showDetails {
+				m.showDetails = false
+				m.focus = focusInput
+				if m.isMulti {
+					m.multiline.Focus()
+				} else {
+					m.single.Focus()
+				}
+				m.layout()
+				return m, nil
+			}
 		}
 
 		// Tab cycles focus between input and activity list.
@@ -571,6 +717,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Command palette navigation (Up/Down/Enter) when palette is open.
+		// These keys must be intercepted before they reach the textarea.
+		if m.commandPaletteOpen {
+			switch msg.Type {
+			case tea.KeyUp:
+				if len(m.commandPaletteMatches) > 0 {
+					m.commandPaletteSelected--
+					if m.commandPaletteSelected < 0 {
+						m.commandPaletteSelected = len(m.commandPaletteMatches) - 1
+					}
+				}
+				return m, nil
+			case tea.KeyDown:
+				if len(m.commandPaletteMatches) > 0 {
+					m.commandPaletteSelected++
+					if m.commandPaletteSelected >= len(m.commandPaletteMatches) {
+						m.commandPaletteSelected = 0
+					}
+				}
+				return m, nil
+			case tea.KeyEnter:
+				// Autocomplete the selected command (do not submit).
+				m.autocompleteCommand()
+				return m, nil
+			}
+		}
+
 		if m.isMulti {
 			// In multiline mode, Enter inserts newline.
 			//
@@ -585,10 +758,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Let textarea handle newline.
 				var cmd tea.Cmd
 				m.multiline, cmd = m.multiline.Update(msg)
+				m.updateCommandPalette()
 				return m, cmd
 			}
 			var cmd tea.Cmd
 			m.multiline, cmd = m.multiline.Update(msg)
+			m.updateCommandPalette()
 			return m, cmd
 		}
 
@@ -606,6 +781,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.multiline.Focus()
 			m.layout()
 		}
+		m.updateCommandPalette()
 		return m, cmd
 
 	case eventMsg:
