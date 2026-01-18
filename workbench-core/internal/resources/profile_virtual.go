@@ -29,10 +29,10 @@ type VirtualProfileResource struct {
 	// Example: "profile" maps to the virtual namespace "/profile".
 	Mount string
 
-	Store store.ProfileStore
+	Store store.ProfileVFSStore
 }
 
-func NewVirtualProfileResource(s store.ProfileStore) (*VirtualProfileResource, error) {
+func NewVirtualProfileResource(s store.ProfileVFSStore) (*VirtualProfileResource, error) {
 	if s == nil {
 		return nil, fmt.Errorf("profile store is required")
 	}

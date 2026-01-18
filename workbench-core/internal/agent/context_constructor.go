@@ -39,7 +39,7 @@ type ContextConstructor struct {
 	SessionID string
 
 	TraceStore   store.TraceStore
-	HistoryStore store.HistoryStore
+	HistoryStore store.HistoryReader
 
 	// IncludeHistoryOps controls whether the constructor includes environment/host ops
 	// from history in addition to user/agent messages.

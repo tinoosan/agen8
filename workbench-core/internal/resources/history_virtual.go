@@ -56,7 +56,12 @@ type HistoryResource struct {
 	// Store is the backing store for history.jsonl.
 	//
 	// This is the storage boundary; HistoryResource does not perform direct filesystem IO.
-	Store store.HistoryStore
+	Store store.HistoryReader
+
+	// Appender is the host-side append interface for history.jsonl.
+	//
+	// History is not writable via VFS, but the host records history via sinks.
+	Appender store.HistoryAppender
 }
 
 func NewSessionHistoryResource(cfg config.Config, sessionID string) (*HistoryResource, error) {
@@ -78,6 +83,7 @@ func NewSessionHistoryResource(cfg config.Config, sessionID string) (*HistoryRes
 		Mount:     vfs.MountHistory,
 		SessionID: sessionID,
 		Store:     s,
+		Appender:  s,
 	}, nil
 }
 

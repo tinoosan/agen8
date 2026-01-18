@@ -34,11 +34,11 @@ type VirtualResultsResource struct {
 	Mount string
 
 	// Store is the host-side backing store for call results.
-	Store store.ResultsStore
+	Store store.ResultsView
 }
 
 // NewVirtualResultsResource creates a new virtual /results mount backed by a ResultsStore.
-func NewVirtualResultsResource(s store.ResultsStore) (*VirtualResultsResource, error) {
+func NewVirtualResultsResource(s store.ResultsView) (*VirtualResultsResource, error) {
 	if s == nil {
 		return nil, fmt.Errorf("results store is required")
 	}

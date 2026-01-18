@@ -54,7 +54,7 @@ type Runner struct {
 	// The runner persists response.json and artifact bytes into this store, and
 	// the agent later reads them via fs.read("/results/<callId>/...") through the
 	// mounted VirtualResultsResource.
-	Results store.ResultsStore
+	Results store.ResultWriter
 
 	// ToolRegistry resolves toolId -> ToolInvoker.
 	ToolRegistry ToolRegistry
@@ -150,7 +150,7 @@ func (m MapRegistry) Get(id types.ToolID) (ToolInvoker, bool) {
 // and only returns a non-nil error for runner failures (IO/marshal/host bugs).
 func (r *Runner) Run(ctx context.Context, toolId types.ToolID, actionId string, input json.RawMessage, timeoutMs int) (types.ToolResponse, error) {
 	if r == nil || r.Results == nil {
-		return types.ToolResponse{}, fmt.Errorf("runner ResultsStore is required")
+		return types.ToolResponse{}, fmt.Errorf("runner ResultWriter is required")
 	}
 	if r.ToolRegistry == nil {
 		return types.ToolResponse{}, fmt.Errorf("runner ToolRegistry is required")
@@ -261,7 +261,7 @@ func (r *Runner) Run(ctx context.Context, toolId types.ToolID, actionId string, 
 //   - response.json last (so readers see a complete result)
 func (r *Runner) persist(callID string, resp types.ToolResponse, artifacts []ToolArtifactWrite) error {
 	if r == nil || r.Results == nil {
-		return fmt.Errorf("runner ResultsStore is required")
+		return fmt.Errorf("runner ResultWriter is required")
 	}
 	// Write artifacts first so response.json references are safe.
 	for _, a := range artifacts {

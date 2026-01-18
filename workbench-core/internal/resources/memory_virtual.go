@@ -35,10 +35,10 @@ type VirtualMemoryResource struct {
 	// Example: "memory" maps to the virtual namespace "/memory".
 	Mount string
 
-	Store store.MemoryStore
+	Store store.MemoryVFSStore
 }
 
-func NewVirtualMemoryResource(s store.MemoryStore) (*VirtualMemoryResource, error) {
+func NewVirtualMemoryResource(s store.MemoryVFSStore) (*VirtualMemoryResource, error) {
 	if s == nil {
 		return nil, fmt.Errorf("memory store is required")
 	}

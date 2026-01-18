@@ -141,7 +141,7 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts RunC
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
-	historySink := &events.HistorySink{Store: historyRes.Store}
+	historySink := &events.HistorySink{Store: historyRes.Appender}
 
 	// Stream events into the TUI, while still persisting them to the run event log
 	// and session history.
@@ -931,7 +931,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
-	historySink := &events.HistorySink{Store: historyRes.Store}
+	historySink := &events.HistorySink{Store: historyRes.Appender}
 
 	emitter := &events.Emitter{
 		RunID: run.RunId,
@@ -1304,8 +1304,8 @@ type tuiTurnRunner struct {
 
 	mustEmit func(ctx context.Context, ev events.Event)
 
-	memStore     store.MemoryStore
-	profileStore store.ProfileStore
+	memStore     store.MemoryCommitter
+	profileStore store.ProfileCommitter
 	memEval      *agent.MemoryEvaluator
 	profileEval  *agent.ProfileEvaluator
 

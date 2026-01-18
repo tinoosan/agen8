@@ -201,7 +201,7 @@ func RunChat(ctx context.Context, cfg config.Config, run types.Run, opts RunChat
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
-	historySink := &events.HistorySink{Store: historyRes.Store}
+	historySink := &events.HistorySink{Store: historyRes.Appender}
 
 	emitter := &events.Emitter{
 		RunID: run.RunId,

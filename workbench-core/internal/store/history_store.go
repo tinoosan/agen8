@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -32,19 +31,8 @@ type HistoryCursor string
 // - cursorAfter is the next cursor to use to fetch only new content.
 // - cursorAfter MUST be deterministic for the same underlying data and options.
 type HistoryStore interface {
-	// ReadAll returns the full history JSONL bytes (0+ lines).
-	ReadAll(ctx context.Context) ([]byte, error)
-
-	// AppendLine appends one JSON object as a JSONL line.
-	//
-	// line should be a single JSON object. The store will ensure a trailing newline.
-	AppendLine(ctx context.Context, line []byte) error
-
-	// LinesSince returns a bounded set of JSONL lines starting from cursor.
-	LinesSince(ctx context.Context, cursor HistoryCursor, opts HistorySinceOptions) (HistoryBatch, error)
-
-	// LinesLatest returns a bounded set of JSONL lines from the end of the history log.
-	LinesLatest(ctx context.Context, opts HistoryLatestOptions) (HistoryBatch, error)
+	HistoryAppender
+	HistoryReader
 }
 
 type HistorySinceOptions struct {

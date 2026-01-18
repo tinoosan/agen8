@@ -1087,8 +1087,34 @@ func TestHelpModal_CtrlPOpens_Scrolls_AndEscCloses(t *testing.T) {
 		t.Fatalf("expected help modal to scroll on Down; before=%d after=%d", before, scrolled.helpViewport.YOffset)
 	}
 
+	// Vim keys should work too.
+	beforeJK := scrolled.helpViewport.YOffset
+	mJK1, _ := scrolled.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	scrolledJ := mJK1.(Model)
+	if scrolledJ.helpViewport.YOffset <= beforeJK {
+		t.Fatalf("expected 'j' to scroll down; before=%d after=%d", beforeJK, scrolledJ.helpViewport.YOffset)
+	}
+	mJK2, _ := scrolledJ.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	scrolledK := mJK2.(Model)
+	if scrolledK.helpViewport.YOffset >= scrolledJ.helpViewport.YOffset {
+		t.Fatalf("expected 'k' to scroll up; before=%d after=%d", scrolledJ.helpViewport.YOffset, scrolledK.helpViewport.YOffset)
+	}
+
+	// Clamp: repeated scrolling should stop at the bottom (no infinite blank scroll).
+	bottom := scrolledK
+	for i := 0; i < 200; i++ {
+		mNext, _ := bottom.Update(tea.KeyMsg{Type: tea.KeyDown})
+		bottom = mNext.(Model)
+	}
+	atBottom := bottom.helpViewport.YOffset
+	mNext, _ := bottom.Update(tea.KeyMsg{Type: tea.KeyDown})
+	bottom2 := mNext.(Model)
+	if bottom2.helpViewport.YOffset != atBottom {
+		t.Fatalf("expected YOffset to clamp at bottom; before=%d after=%d", atBottom, bottom2.helpViewport.YOffset)
+	}
+
 	// Close on Esc.
-	m4, _ := scrolled.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m4, _ := bottom2.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	closed := m4.(Model)
 	if closed.helpModalOpen {
 		t.Fatalf("expected helpModalOpen false after Esc")

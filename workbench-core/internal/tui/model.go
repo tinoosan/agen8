@@ -204,8 +204,10 @@ type Model struct {
 	modelPickerList list.Model
 
 	// Help modal (Ctrl+P)
-	helpModalOpen bool
-	helpViewport  viewport.Model
+	helpModalOpen  bool
+	helpViewport   viewport.Model
+	helpModalText  string
+	helpModalLines int
 
 	// File picker state (workdir-scoped, triggered by typing '@' in input)
 	filePickerOpen     bool
@@ -871,7 +873,18 @@ func (m *Model) closeModelPicker() {
 
 func (m *Model) openHelpModal() {
 	m.helpModalOpen = true
-	m.helpViewport.SetContent(m.helpModalContent())
+	m.helpModalText = m.helpModalContent()
+	m.helpModalLines = 0
+	if m.helpModalText != "" {
+		m.helpModalLines = len(strings.Split(m.helpModalText, "\n"))
+	}
+	m.helpViewport.SetContent(m.helpModalText)
+	m.helpViewport.SetYOffset(0)
+
+	// Ensure viewport has a real size immediately so scrolling clamps correctly.
+	contentW, _, vpH := m.helpModalDims()
+	m.helpViewport.Width = contentW
+	m.helpViewport.Height = vpH
 	m.helpViewport.SetYOffset(0)
 	m.layout()
 }
@@ -880,7 +893,57 @@ func (m *Model) closeHelpModal() {
 	m.helpModalOpen = false
 	m.helpViewport.SetContent("")
 	m.helpViewport.SetYOffset(0)
+	m.helpModalText = ""
+	m.helpModalLines = 0
 	m.layout()
+}
+
+func (m *Model) helpModalDims() (contentW, contentH, vpH int) {
+	outerW := 84
+	if outerW > m.width-8 {
+		outerW = m.width - 8
+	}
+	if outerW < 44 {
+		outerW = 44
+	}
+	outerH := 22
+	if outerH > m.height-8 {
+		outerH = m.height - 8
+	}
+	if outerH < 12 {
+		outerH = 12
+	}
+
+	// Keep TOTAL modal size within outerW/outerH (account for padding + border).
+	// totalW = contentW + paddingLR(4) + borderLR(2) = contentW + 6
+	// totalH = contentH + paddingTB(2) + borderTB(2) = contentH + 4
+	contentW = max(10, outerW-6)
+	contentH = max(6, outerH-4)
+
+	// Reserve some space for title + footer inside the content area.
+	vpH = max(1, contentH-3)
+	return contentW, contentH, vpH
+}
+
+func (m *Model) clampHelpViewport() {
+	if !m.helpModalOpen {
+		return
+	}
+	h := m.helpViewport.Height
+	if h < 1 {
+		h = 1
+	}
+	maxY := 0
+	if m.helpModalLines > h {
+		maxY = m.helpModalLines - h
+	}
+	if m.helpViewport.YOffset < 0 {
+		m.helpViewport.SetYOffset(0)
+		return
+	}
+	if m.helpViewport.YOffset > maxY {
+		m.helpViewport.SetYOffset(maxY)
+	}
 }
 
 func (m *Model) helpModalContent() string {
@@ -1180,8 +1243,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.closeHelpModal()
 				return m, nil
 			}
+			// Vim keys.
+			switch msg.String() {
+			case "j":
+				msg = tea.KeyMsg{Type: tea.KeyDown}
+			case "k":
+				msg = tea.KeyMsg{Type: tea.KeyUp}
+			}
 			var cmd tea.Cmd
 			m.helpViewport, cmd = m.helpViewport.Update(msg)
+			m.clampHelpViewport()
 			return m, cmd
 		}
 
@@ -1710,6 +1781,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.helpModalOpen {
 			var cmd tea.Cmd
 			m.helpViewport, cmd = m.helpViewport.Update(msg)
+			m.clampHelpViewport()
 			return m, cmd
 		}
 		// If details are visible and the mouse is within the right pane, scroll details.
@@ -1806,30 +1878,7 @@ func (m Model) editorTitle() string {
 
 func (m Model) renderHelpModal(base string) string {
 	_ = base
-
-	outerW := 84
-	if outerW > m.width-8 {
-		outerW = m.width - 8
-	}
-	if outerW < 44 {
-		outerW = 44
-	}
-	outerH := 22
-	if outerH > m.height-8 {
-		outerH = m.height - 8
-	}
-	if outerH < 12 {
-		outerH = 12
-	}
-
-	// Keep TOTAL modal size within outerW/outerH (account for padding + border).
-	// totalW = contentW + paddingLR(4) + borderLR(2) = contentW + 6
-	// totalH = contentH + paddingTB(2) + borderTB(2) = contentH + 4
-	contentW := max(10, outerW-6)
-	contentH := max(6, outerH-4)
-
-	// Reserve some space for title + footer inside the content area.
-	vpH := max(1, contentH-3)
+	contentW, contentH, vpH := m.helpModalDims()
 	m.helpViewport.Width = contentW
 	m.helpViewport.Height = vpH
 

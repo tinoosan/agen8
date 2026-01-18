@@ -27,7 +27,7 @@ type HistorySink struct {
 	// Store is the backing store for history.jsonl.
 	//
 	// This is the storage boundary; HistorySink does not perform direct filesystem IO.
-	Store store.HistoryStore
+	Store store.HistoryAppender
 
 	// Model is the model identifier used for this run (for provenance).
 	// Example: "openai/gpt-5-mini".
