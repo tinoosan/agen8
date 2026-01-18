@@ -38,7 +38,11 @@ type ResultsStore interface {
 
 var (
 	// ErrResultsNotFound indicates a requested callId or artifact is not present in the store.
-	ErrResultsNotFound = errors.New("results not found")
+	//
+	// This is joined with ErrNotFound so callers can check either:
+	//   - errors.Is(err, store.ErrResultsNotFound)
+	//   - errors.Is(err, store.ErrNotFound)
+	ErrResultsNotFound = errors.Join(ErrNotFound, errors.New("results not found"))
 )
 
 // ArtifactMeta describes one artifact stored under a call.

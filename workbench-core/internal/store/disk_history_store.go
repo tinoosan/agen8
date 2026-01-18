@@ -131,7 +131,7 @@ func (s *DiskHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor, o
 
 	offset, err := HistoryCursorToInt64(cursor)
 	if err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, fmt.Errorf("invalid cursor")
+		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, fmt.Errorf("invalid cursor: %w", ErrInvalid)
 	}
 
 	f, err := os.Open(s.Path)

@@ -107,7 +107,7 @@ func TraceCursorToInt64(c TraceCursor) (int64, error) {
 	}
 	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil || n < 0 {
-		return 0, fmt.Errorf("invalid cursor")
+		return 0, fmt.Errorf("invalid cursor: %w", ErrInvalid)
 	}
 	return n, nil
 }

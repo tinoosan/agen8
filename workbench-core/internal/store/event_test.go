@@ -3,6 +3,7 @@ package store
 import (
 	"bufio"
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -41,6 +42,19 @@ func TestEventStore(t *testing.T) {
 
 		if lineCount != 1 {
 			t.Errorf("Expected 1 line in event file, got %d", lineCount)
+		}
+	})
+
+	t.Run("AppendEvent_NonexistentRun_IsErrNotFound", func(t *testing.T) {
+		err := AppendEvent(cfg, "run-does-not-exist", "test_event", "hello world", nil)
+		if err == nil {
+			t.Fatalf("expected error")
+		}
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("expected errors.Is(err, ErrNotFound) to be true, err=%v", err)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected errors.Is(err, os.ErrNotExist) to be true, err=%v", err)
 		}
 	})
 

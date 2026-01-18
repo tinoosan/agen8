@@ -1,6 +1,8 @@
 package store
 
 import (
+	"errors"
+	"os"
 	"testing"
 
 	"github.com/tinoosan/workbench-core/internal/config"
@@ -58,5 +60,20 @@ func TestRecordTurnInSession_UpdatesGoalAndSummary(t *testing.T) {
 	}
 	if updated.UpdatedAt == nil {
 		t.Fatalf("expected updatedAt to be set")
+	}
+}
+
+func TestLoadSession_NotFound_IsErrNotFound(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+
+	_, err := LoadSession(cfg, "does-not-exist")
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected errors.Is(err, ErrNotFound) to be true, err=%v", err)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected errors.Is(err, os.ErrNotExist) to be true, err=%v", err)
 	}
 }

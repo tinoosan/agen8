@@ -82,7 +82,7 @@ func LoadRun(cfg config.Config, runId string) (types.Run, error) {
 	b, err := os.ReadFile(targetPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return types.Run{}, fmt.Errorf("run.json file %s does not exist: %w", targetPath, err)
+			return types.Run{}, fmt.Errorf("run.json file %s does not exist: %w", targetPath, errors.Join(ErrNotFound, err))
 		}
 		return types.Run{}, fmt.Errorf("error reading run.json file %s: %w", targetPath, err)
 	}
@@ -94,7 +94,7 @@ func LoadRun(cfg config.Config, runId string) (types.Run, error) {
 	}
 
 	if run.RunId == "" {
-		return types.Run{}, fmt.Errorf("invalid run.json: missing runId")
+		return types.Run{}, fmt.Errorf("invalid run.json: missing runId: %w", ErrInvalid)
 	}
 	return run, nil
 }
@@ -131,7 +131,7 @@ func StopRun(cfg config.Config, runId string, status types.RunStatus, errorMsg s
 	}
 
 	if status != types.StatusFailed && status != types.StatusDone && status != types.StatusCanceled {
-		return types.Run{}, fmt.Errorf("error stopping run %s, invalid status '%s'", runId, status)
+		return types.Run{}, fmt.Errorf("error stopping run %s, invalid status '%s': %w", runId, status, ErrInvalid)
 	}
 
 	run, err := LoadRun(cfg, runId)
@@ -140,7 +140,7 @@ func StopRun(cfg config.Config, runId string, status types.RunStatus, errorMsg s
 	}
 
 	if run.Status == types.StatusDone || run.Status == types.StatusFailed || run.Status == types.StatusCanceled {
-		return types.Run{}, fmt.Errorf("run %s cannot be stopped due to invalid state %s", run.RunId, run.Status)
+		return types.Run{}, fmt.Errorf("run %s cannot be stopped due to invalid state %s: %w", run.RunId, run.Status, ErrConflict)
 	}
 
 	now := time.Now()
@@ -154,7 +154,7 @@ func StopRun(cfg config.Config, runId string, status types.RunStatus, errorMsg s
 	if status == types.StatusFailed {
 
 		if errorMsg == "" {
-			return types.Run{}, fmt.Errorf("error stopping run, error message is required for failed runs")
+			return types.Run{}, fmt.Errorf("error stopping run, error message is required for failed runs: %w", ErrInvalid)
 		}
 		run.Status = status
 		run.FinishedAt = &now

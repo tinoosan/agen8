@@ -62,7 +62,7 @@ func LoadSession(cfg config.Config, sessionID string) (types.Session, error) {
 	b, err := os.ReadFile(targetPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return types.Session{}, fmt.Errorf("session.json file %s does not exist: %w", targetPath, err)
+			return types.Session{}, fmt.Errorf("session.json file %s does not exist: %w", targetPath, errors.Join(ErrNotFound, err))
 		}
 		return types.Session{}, fmt.Errorf("error reading session.json file %s: %w", targetPath, err)
 	}
@@ -71,7 +71,7 @@ func LoadSession(cfg config.Config, sessionID string) (types.Session, error) {
 		return types.Session{}, fmt.Errorf("error unmarshalling json file %s: %w", targetPath, err)
 	}
 	if strings.TrimSpace(s.SessionID) == "" {
-		return types.Session{}, fmt.Errorf("invalid session.json: missing sessionId")
+		return types.Session{}, fmt.Errorf("invalid session.json: missing sessionId: %w", ErrInvalid)
 	}
 	return s, nil
 }

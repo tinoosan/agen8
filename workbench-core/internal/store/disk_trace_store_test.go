@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -62,5 +63,15 @@ func TestDiskTraceStore_EventsSince_CursorAdvancesDeterministically(t *testing.T
 	}
 	if len(batch2.Events) != 0 {
 		t.Fatalf("expected 0 events, got %d", len(batch2.Events))
+	}
+}
+
+func TestTraceCursorToInt64_Invalid_IsErrInvalid(t *testing.T) {
+	_, err := TraceCursorToInt64(TraceCursor("not-a-number"))
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected errors.Is(err, ErrInvalid) to be true, err=%v", err)
 	}
 }

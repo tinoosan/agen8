@@ -63,7 +63,7 @@ func AppendEvent(cfg config.Config, runId, eventType, message string, data map[s
 	_, err := os.Stat(runFilePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("cannot append event, %s does not exist: %w", runFilePath, err)
+			return fmt.Errorf("cannot append event, %s does not exist: %w", runFilePath, errors.Join(ErrNotFound, err))
 		}
 		return fmt.Errorf("cannot append event, error reading run.json file %s: %w", runFilePath, err)
 	}

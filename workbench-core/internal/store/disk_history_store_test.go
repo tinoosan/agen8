@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -41,5 +42,15 @@ func TestDiskHistoryStore_CursorSince(t *testing.T) {
 	}
 	if b2.CursorAfter != b1.CursorAfter {
 		t.Fatalf("expected cursorAfter unchanged")
+	}
+}
+
+func TestHistoryCursorToInt64_Invalid_IsErrInvalid(t *testing.T) {
+	_, err := HistoryCursorToInt64(HistoryCursor("not-a-number"))
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected errors.Is(err, ErrInvalid) to be true, err=%v", err)
 	}
 }

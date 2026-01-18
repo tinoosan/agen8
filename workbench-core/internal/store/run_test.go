@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -115,6 +116,12 @@ func TestLoadRun(t *testing.T) {
 		if err == nil {
 			t.Error("Expected error for non-existent run, got nil")
 		}
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("expected errors.Is(err, ErrNotFound) to be true, err=%v", err)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected errors.Is(err, os.ErrNotExist) to be true, err=%v", err)
+		}
 	})
 
 	t.Run("MalformedJSON", func(t *testing.T) {
@@ -146,6 +153,9 @@ func TestLoadRun(t *testing.T) {
 		_, err := LoadRun(cfg, runId)
 		if err == nil {
 			t.Error("Expected error for missing runId, got nil")
+		}
+		if !errors.Is(err, ErrInvalid) {
+			t.Fatalf("expected errors.Is(err, ErrInvalid) to be true, err=%v", err)
 		}
 	})
 }
@@ -215,6 +225,9 @@ func TestStopRun(t *testing.T) {
 		if err == nil {
 			t.Error("Expected error for missing error message, got nil")
 		}
+		if !errors.Is(err, ErrInvalid) {
+			t.Fatalf("expected errors.Is(err, ErrInvalid) to be true, err=%v", err)
+		}
 	})
 
 	t.Run("ErrorInvalidStatus", func(t *testing.T) {
@@ -226,6 +239,9 @@ func TestStopRun(t *testing.T) {
 		_, err = StopRun(cfg, run.RunId, types.StatusRunning, "")
 		if err == nil {
 			t.Error("Expected error for transition to status 'running', got nil")
+		}
+		if !errors.Is(err, ErrInvalid) {
+			t.Fatalf("expected errors.Is(err, ErrInvalid) to be true, err=%v", err)
 		}
 	})
 
@@ -244,6 +260,9 @@ func TestStopRun(t *testing.T) {
 		_, err = StopRun(cfg, run.RunId, types.StatusDone, "")
 		if err == nil {
 			t.Error("Expected error for already stopped run, got nil")
+		}
+		if !errors.Is(err, ErrConflict) {
+			t.Fatalf("expected errors.Is(err, ErrConflict) to be true, err=%v", err)
 		}
 	})
 }

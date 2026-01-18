@@ -44,7 +44,7 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts 
 	}
 	offset, err := TraceCursorToInt64(cursor)
 	if err != nil {
-		return TraceBatch{}, fmt.Errorf("disk trace store: invalid cursor")
+		return TraceBatch{}, fmt.Errorf("disk trace store: invalid cursor: %w", ErrInvalid)
 	}
 
 	maxBytes := opts.MaxBytes
