@@ -22,7 +22,7 @@ func TestBuiltinTrace_EventsSince_CursorAdvances(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	inv := tools.BuiltinTraceInvoker{Store: store.DiskTraceStore{Dir: dir}}
+	inv := tools.BuiltinTraceInvoker{Store: store.DiskTraceStore{DiskStore: store.DiskStore{Dir: dir}}}
 	req := types.ToolRequest{
 		Version:  "v1",
 		CallID:   "c1",

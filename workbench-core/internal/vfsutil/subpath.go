@@ -1,9 +1,12 @@
 package vfsutil
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"strings"
+
+	werrors "github.com/tinoosan/workbench-core/internal/errors"
 )
 
 // NormalizeResourceSubpath enforces the VFS resource contract for subpaths:
@@ -27,13 +30,13 @@ func NormalizeResourceSubpath(subpath string) (clean string, parts []string, err
 		return s, nil, nil
 	}
 	if strings.HasPrefix(s, "/") {
-		return "", nil, fmt.Errorf("absolute paths not allowed: %q", subpath)
+		return "", nil, fmt.Errorf("absolute paths not allowed: %q: %w", subpath, werrors.ErrInvalidPath)
 	}
 
 	// Reject any explicit parent directory segments, even if they would clean away.
 	for _, seg := range strings.Split(s, "/") {
 		if seg == ".." {
-			return "", nil, fmt.Errorf("invalid path: escapes mount root")
+			return "", nil, fmt.Errorf("invalid path: escapes mount root: %w", errors.Join(werrors.ErrInvalidPath, werrors.ErrEscapesRoot))
 		}
 	}
 
@@ -42,7 +45,7 @@ func NormalizeResourceSubpath(subpath string) (clean string, parts []string, err
 		return ".", nil, nil
 	}
 	if clean == ".." || strings.HasPrefix(clean, "../") {
-		return "", nil, fmt.Errorf("invalid path: escapes mount root")
+		return "", nil, fmt.Errorf("invalid path: escapes mount root: %w", errors.Join(werrors.ErrInvalidPath, werrors.ErrEscapesRoot))
 	}
 
 	parts = strings.Split(clean, "/")
@@ -65,18 +68,18 @@ func CleanRelPath(rel string) (string, error) {
 	}
 	if strings.HasPrefix(rel, "/") {
 		// Keep this phrasing stable; multiple resources/stores rely on substring checks.
-		return "", fmt.Errorf("invalid path: absolute paths not allowed")
+		return "", fmt.Errorf("invalid path: absolute paths not allowed: %w", werrors.ErrInvalidPath)
 	}
 	for _, seg := range strings.Split(rel, "/") {
 		if seg == ".." {
-			return "", fmt.Errorf("invalid path: escapes mount root")
+			return "", fmt.Errorf("invalid path: escapes mount root: %w", errors.Join(werrors.ErrInvalidPath, werrors.ErrEscapesRoot))
 		}
 	}
 	clean := path.Clean(rel)
 	// Allow "." (callers can disallow it if they require a concrete filename),
 	// but never allow escaping upward.
 	if clean == ".." || strings.HasPrefix(clean, "../") {
-		return "", fmt.Errorf("invalid path: escapes mount root")
+		return "", fmt.Errorf("invalid path: escapes mount root: %w", errors.Join(werrors.ErrInvalidPath, werrors.ErrEscapesRoot))
 	}
 	return clean, nil
 }

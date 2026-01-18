@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 // SafeJoinBaseDir converts a resource-relative subpath into a secure OS path under baseDir.
@@ -19,8 +21,8 @@ import (
 //   - SafeJoinBaseDir is for OS filesystem joins where normalization is fine as long as
 //     containment is enforced.
 func SafeJoinBaseDir(baseDir, subpath string) (string, error) {
-	if strings.TrimSpace(baseDir) == "" {
-		return "", fmt.Errorf("baseDir is required")
+	if err := validate.NonEmpty("baseDir", baseDir); err != nil {
+		return "", err
 	}
 
 	// filepath.Clean turns things like "a/../b" into "b" and "a/../../x" into "../x".
@@ -69,12 +71,12 @@ func SafeJoinBaseDir(baseDir, subpath string) (string, error) {
 //
 // It returns an error if absPath is not absolute or is not contained within baseDir.
 func RelUnderBaseDir(baseDir, absPath string) (string, error) {
-	if strings.TrimSpace(baseDir) == "" {
-		return "", fmt.Errorf("baseDir is required")
+	if err := validate.NonEmpty("baseDir", baseDir); err != nil {
+		return "", err
 	}
 	absPath = strings.TrimSpace(absPath)
-	if absPath == "" {
-		return "", fmt.Errorf("absPath is required")
+	if err := validate.NonEmpty("absPath", absPath); err != nil {
+		return "", err
 	}
 	if !filepath.IsAbs(absPath) {
 		return "", fmt.Errorf("absolute paths required")

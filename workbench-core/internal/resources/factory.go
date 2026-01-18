@@ -9,6 +9,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tools"
+	"github.com/tinoosan/workbench-core/internal/validate"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
@@ -79,7 +80,7 @@ func (f *Factory) ensureHistoryStore(cfg config.Config) (store.HistoryStore, err
 
 func (f *Factory) ensureTraceStore(traceBaseDir string) store.TraceStore {
 	if f.TraceStore == nil {
-		f.TraceStore = store.DiskTraceStore{Dir: traceBaseDir}
+		f.TraceStore = store.DiskTraceStore{DiskStore: store.DiskStore{Dir: traceBaseDir}}
 	}
 	return f.TraceStore
 }
@@ -89,8 +90,8 @@ func (f *Factory) Workspace() (*DirResource, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(f.RunID) == "" {
-		return nil, fmt.Errorf("RunID is required")
+	if err := validate.NonEmpty("RunID", f.RunID); err != nil {
+		return nil, err
 	}
 	return NewWorkspace(cfg, f.RunID)
 }
@@ -100,8 +101,8 @@ func (f *Factory) Trace() (*TraceResource, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(f.RunID) == "" {
-		return nil, fmt.Errorf("RunID is required")
+	if err := validate.NonEmpty("RunID", f.RunID); err != nil {
+		return nil, err
 	}
 	tr, err := NewTraceResource(cfg, f.RunID)
 	if err != nil {
@@ -121,8 +122,8 @@ func (f *Factory) Memory() (*MemoryResource, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(f.RunID) == "" {
-		return nil, fmt.Errorf("RunID is required")
+	if err := validate.NonEmpty("RunID", f.RunID); err != nil {
+		return nil, err
 	}
 	ms, err := f.ensureMemoryStore(cfg)
 	if err != nil {
@@ -148,8 +149,8 @@ func (f *Factory) History() (*HistoryResource, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(f.SessionID) == "" {
-		return nil, fmt.Errorf("SessionID is required")
+	if err := validate.NonEmpty("SessionID", f.SessionID); err != nil {
+		return nil, err
 	}
 	hs, err := f.ensureHistoryStore(cfg)
 	if err != nil {

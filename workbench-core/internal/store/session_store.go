@@ -71,7 +71,7 @@ func LoadSession(cfg config.Config, sessionID string) (types.Session, error) {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return types.Session{}, fmt.Errorf("error unmarshalling json file %s: %w", targetPath, err)
 	}
-	if strings.TrimSpace(s.SessionID) == "" {
+	if err := validate.NonEmpty("sessionId", s.SessionID); err != nil {
 		return types.Session{}, fmt.Errorf("invalid session.json: missing sessionId: %w", ErrInvalid)
 	}
 	return s, nil

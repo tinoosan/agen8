@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
@@ -22,7 +21,7 @@ import (
 // History is append-only: the store supports reading the full log and appending new
 // JSONL lines. Higher-level components decide what to record and with what metadata.
 type DiskHistoryStore struct {
-	Path string
+	DiskStore
 }
 
 // NewDiskHistoryStore constructs a DiskHistoryStore for a sessionID under cfg.DataDir.
@@ -41,7 +40,7 @@ func NewDiskHistoryStoreFromPath(path string) (*DiskHistoryStore, error) {
 	if err := validate.NonEmpty("path", path); err != nil {
 		return nil, err
 	}
-	s := &DiskHistoryStore{Path: path}
+	s := &DiskHistoryStore{DiskStore: DiskStore{Path: path}}
 	if err := s.ensure(); err != nil {
 		return nil, err
 	}
@@ -55,18 +54,7 @@ func (s *DiskHistoryStore) ensure() error {
 	if err := validate.NonEmpty("disk history store path", s.Path); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0755); err != nil {
-		return err
-	}
-	if _, err := os.Stat(s.Path); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err := os.WriteFile(s.Path, []byte{}, 0644); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.EnsureFile(s.Path)
 }
 
 func (s *DiskHistoryStore) ReadAll(_ context.Context) ([]byte, error) {

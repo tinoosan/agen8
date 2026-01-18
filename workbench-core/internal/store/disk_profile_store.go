@@ -25,7 +25,7 @@ import (
 // This makes the "user profile" inspectable and editable on disk while keeping the VFS
 // contract stable and allowing a future swap to other backends (sqlite, cloud, etc).
 type DiskProfileStore struct {
-	BaseDir string
+	DiskStore
 }
 
 // NewDiskProfileStore constructs a DiskProfileStore rooted at cfg.DataDir/profile.
@@ -42,7 +42,7 @@ func NewDiskProfileStoreFromDir(baseDir string) (*DiskProfileStore, error) {
 	if err := validate.NonEmpty("baseDir", baseDir); err != nil {
 		return nil, err
 	}
-	s := &DiskProfileStore{BaseDir: baseDir}
+	s := &DiskProfileStore{DiskStore: DiskStore{Dir: baseDir}}
 	if err := s.ensure(); err != nil {
 		return nil, err
 	}
@@ -53,31 +53,17 @@ func (s *DiskProfileStore) ensure() error {
 	if s == nil {
 		return fmt.Errorf("disk profile store is nil")
 	}
-	if err := validate.NonEmpty("disk profile store baseDir", s.BaseDir); err != nil {
+	if err := validate.NonEmpty("disk profile store baseDir", s.Dir); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(s.BaseDir, 0755); err != nil {
-		return err
-	}
-	for _, name := range []string{"profile.md", "update.md", "commits.jsonl"} {
-		p := filepath.Join(s.BaseDir, name)
-		if _, err := os.Stat(p); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			if err := os.WriteFile(p, []byte{}, 0644); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return s.EnsureDir(s.Dir, "profile.md", "update.md", "commits.jsonl")
 }
 
 func (s *DiskProfileStore) GetProfile(_ context.Context) (string, error) {
 	if err := s.ensure(); err != nil {
 		return "", err
 	}
-	b, err := os.ReadFile(filepath.Join(s.BaseDir, "profile.md"))
+	b, err := os.ReadFile(filepath.Join(s.Dir, "profile.md"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
@@ -94,7 +80,7 @@ func (s *DiskProfileStore) AppendProfile(_ context.Context, text string) error {
 	if text == "" {
 		return nil
 	}
-	p := filepath.Join(s.BaseDir, "profile.md")
+	p := filepath.Join(s.Dir, "profile.md")
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return err
@@ -108,7 +94,7 @@ func (s *DiskProfileStore) GetUpdate(_ context.Context) (string, error) {
 	if err := s.ensure(); err != nil {
 		return "", err
 	}
-	b, err := os.ReadFile(filepath.Join(s.BaseDir, "update.md"))
+	b, err := os.ReadFile(filepath.Join(s.Dir, "update.md"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
@@ -122,7 +108,7 @@ func (s *DiskProfileStore) SetUpdate(_ context.Context, text string) error {
 	if err := s.ensure(); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.BaseDir, "update.md"), []byte(text), 0644)
+	return os.WriteFile(filepath.Join(s.Dir, "update.md"), []byte(text), 0644)
 }
 
 func (s *DiskProfileStore) ClearUpdate(ctx context.Context) error {
@@ -133,7 +119,7 @@ func (s *DiskProfileStore) GetCommitLog(_ context.Context) (string, error) {
 	if err := s.ensure(); err != nil {
 		return "", err
 	}
-	b, err := os.ReadFile(filepath.Join(s.BaseDir, "commits.jsonl"))
+	b, err := os.ReadFile(filepath.Join(s.Dir, "commits.jsonl"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
@@ -154,7 +140,7 @@ func (s *DiskProfileStore) AppendCommitLog(_ context.Context, line types.MemoryC
 	if err != nil {
 		return err
 	}
-	p := filepath.Join(s.BaseDir, "commits.jsonl")
+	p := filepath.Join(s.Dir, "commits.jsonl")
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return err

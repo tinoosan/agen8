@@ -57,7 +57,7 @@ func TestDiskProfileStore_Basics(t *testing.T) {
 		t.Fatalf("AppendCommitLog: %v", err)
 	}
 
-	b, err := os.ReadFile(filepath.Join(s.BaseDir, "commits.jsonl"))
+	b, err := os.ReadFile(filepath.Join(s.Dir, "commits.jsonl"))
 	if err != nil {
 		t.Fatalf("ReadFile commits.jsonl: %v", err)
 	}

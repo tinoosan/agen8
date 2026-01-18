@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 // HistorySink appends enriched, immutable history lines to history.jsonl.
@@ -42,8 +43,8 @@ func (s HistorySink) Emit(ctx context.Context, runID string, event Event) error 
 	if !enabled(event.History) {
 		return nil
 	}
-	if strings.TrimSpace(runID) == "" {
-		return fmt.Errorf("history sink: runID is required")
+	if err := validate.NonEmpty("history sink: runID", runID); err != nil {
+		return err
 	}
 	if s.Store == nil {
 		return fmt.Errorf("history sink: Store is required")

@@ -37,7 +37,7 @@ func TestDiskTraceStore_EventsSince_CursorAdvancesDeterministically(t *testing.T
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	s := DiskTraceStore{Dir: dir}
+	s := DiskTraceStore{DiskStore: DiskStore{Dir: dir}}
 	batch1, err := s.EventsSince(context.Background(), TraceCursorFromInt64(0), TraceSinceOptions{MaxBytes: 1024, Limit: 10})
 	if err != nil {
 		t.Fatalf("EventsSince: %v", err)

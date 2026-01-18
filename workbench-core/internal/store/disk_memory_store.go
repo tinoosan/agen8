@@ -25,7 +25,7 @@ import (
 // This preserves backward compatibility: runs remain inspectable on disk, but the rest
 // of the system interacts only via the virtual "/memory" mount.
 type DiskMemoryStore struct {
-	BaseDir string
+	DiskStore
 }
 
 // NewDiskMemoryStore constructs a DiskMemoryStore for a runId under cfg.DataDir.
@@ -45,7 +45,7 @@ func NewDiskMemoryStoreFromDir(baseDir string) (*DiskMemoryStore, error) {
 	if err := validate.NonEmpty("baseDir", baseDir); err != nil {
 		return nil, err
 	}
-	s := &DiskMemoryStore{BaseDir: baseDir}
+	s := &DiskMemoryStore{DiskStore: DiskStore{Dir: baseDir}}
 	if err := s.ensure(); err != nil {
 		return nil, err
 	}
@@ -56,32 +56,17 @@ func (s *DiskMemoryStore) ensure() error {
 	if s == nil {
 		return fmt.Errorf("disk memory store is nil")
 	}
-	if err := validate.NonEmpty("disk memory store baseDir", s.BaseDir); err != nil {
+	if err := validate.NonEmpty("disk memory store baseDir", s.Dir); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(s.BaseDir, 0755); err != nil {
-		return err
-	}
-	// Ensure files exist so reads behave like empty rather than "file not found".
-	for _, name := range []string{"memory.md", "update.md", "commits.jsonl"} {
-		p := filepath.Join(s.BaseDir, name)
-		if _, err := os.Stat(p); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			if err := os.WriteFile(p, []byte{}, 0644); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return s.EnsureDir(s.Dir, "memory.md", "update.md", "commits.jsonl")
 }
 
 func (s *DiskMemoryStore) GetMemory(_ context.Context) (string, error) {
 	if err := s.ensure(); err != nil {
 		return "", err
 	}
-	b, err := os.ReadFile(filepath.Join(s.BaseDir, "memory.md"))
+	b, err := os.ReadFile(filepath.Join(s.Dir, "memory.md"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
@@ -98,7 +83,7 @@ func (s *DiskMemoryStore) AppendMemory(_ context.Context, text string) error {
 	if text == "" {
 		return nil
 	}
-	p := filepath.Join(s.BaseDir, "memory.md")
+	p := filepath.Join(s.Dir, "memory.md")
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return err
@@ -112,7 +97,7 @@ func (s *DiskMemoryStore) GetUpdate(_ context.Context) (string, error) {
 	if err := s.ensure(); err != nil {
 		return "", err
 	}
-	b, err := os.ReadFile(filepath.Join(s.BaseDir, "update.md"))
+	b, err := os.ReadFile(filepath.Join(s.Dir, "update.md"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
@@ -126,7 +111,7 @@ func (s *DiskMemoryStore) SetUpdate(_ context.Context, text string) error {
 	if err := s.ensure(); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.BaseDir, "update.md"), []byte(text), 0644)
+	return os.WriteFile(filepath.Join(s.Dir, "update.md"), []byte(text), 0644)
 }
 
 func (s *DiskMemoryStore) ClearUpdate(ctx context.Context) error {
@@ -137,7 +122,7 @@ func (s *DiskMemoryStore) GetCommitLog(_ context.Context) (string, error) {
 	if err := s.ensure(); err != nil {
 		return "", err
 	}
-	b, err := os.ReadFile(filepath.Join(s.BaseDir, "commits.jsonl"))
+	b, err := os.ReadFile(filepath.Join(s.Dir, "commits.jsonl"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
@@ -158,7 +143,7 @@ func (s *DiskMemoryStore) AppendCommitLog(_ context.Context, line types.MemoryCo
 	if err != nil {
 		return err
 	}
-	p := filepath.Join(s.BaseDir, "commits.jsonl")
+	p := filepath.Join(s.Dir, "commits.jsonl")
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return err

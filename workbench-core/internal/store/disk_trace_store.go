@@ -33,14 +33,23 @@ const (
 type DiskTraceStore struct {
 	// Dir is the trace directory (BaseDir of TraceResource).
 	// events.jsonl is expected under this directory.
-	Dir string
+	DiskStore
 }
 
 // Kind returns a stable identifier for this store implementation.
 func (s DiskTraceStore) Kind() string { return "disk" }
 
-func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts TraceSinceOptions) (TraceBatch, error) {
+func (s DiskTraceStore) ensure() error {
 	if err := validate.NonEmpty("disk trace store Dir", s.Dir); err != nil {
+		return err
+	}
+	// Ensure directory exists and events.jsonl exists so reads behave like empty rather than not-found.
+	var ds DiskStore
+	return ds.EnsureDir(s.Dir, "events.jsonl")
+}
+
+func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts TraceSinceOptions) (TraceBatch, error) {
+	if err := s.ensure(); err != nil {
 		return TraceBatch{}, err
 	}
 	offset, err := TraceCursorToInt64(cursor)
@@ -156,7 +165,7 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts 
 }
 
 func (s DiskTraceStore) EventsLatest(_ context.Context, opts TraceLatestOptions) (TraceBatch, error) {
-	if err := validate.NonEmpty("disk trace store Dir", s.Dir); err != nil {
+	if err := s.ensure(); err != nil {
 		return TraceBatch{}, err
 	}
 

@@ -1,8 +1,7 @@
 package config
 
 import (
-	"fmt"
-	"strings"
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 // Config holds host runtime configuration that should not be global state.
@@ -24,8 +23,8 @@ func Default() Config {
 }
 
 func (c Config) Validate() error {
-	if strings.TrimSpace(c.DataDir) == "" {
-		return fmt.Errorf("config.DataDir is required")
+	if err := validate.NonEmpty("config.DataDir", c.DataDir); err != nil {
+		return err
 	}
 	return nil
 }
