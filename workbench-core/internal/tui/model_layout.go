@@ -363,8 +363,7 @@ func (m Model) renderCommandPalette() string {
 		Width(contentW).
 		Padding(0, 1).
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#404040")).
-		Background(lipgloss.Color("#1a1a1a"))
+		BorderForeground(lipgloss.Color("#404040"))
 
 	return paletteStyle.Render(paletteContent)
 }

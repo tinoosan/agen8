@@ -1074,7 +1074,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	single := textarea.New()
 	single.Placeholder = "Type a message…"
 	single.Focus()
-	single.Prompt = "you> "
+	single.Prompt = ""
 	single.ShowLineNumbers = false
 	single.SetHeight(1)
 	single.CharLimit = 0

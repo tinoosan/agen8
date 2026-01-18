@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wordwrap"
 )
 
@@ -31,18 +32,19 @@ func (m *Model) rebuildTranscript() {
 	w := max(20, m.transcript.Width)
 
 	// Allocate inner widths so the *rendered* transcript never exceeds `w`,
-	// accounting for borders/padding and the "you>"/"agent>" prefixes.
+	// accounting for borders/padding and speaker chrome.
 	//
 	// User box chrome:
 	//   - border: 1 left + 1 right
 	//   - padding: 1 left + 1 right
-	//   => 4 columns of overhead
+	//   - accent bar: 1 (│) + 1 spacer
+	//   => 6 columns of overhead
 	//
 	// Agent box chrome:
 	//   - padding: 1 left + 1 right
 	//   => 2 columns of overhead
-	userInnerW := max(20, w-4-len("you> "))
-	agentInnerW := max(20, w-2-len("agent> "))
+	userInnerW := max(20, w-6)
+	agentInnerW := max(20, w-2)
 
 	lines := make([]string, 0, len(m.transcriptItems))
 	startLines := make([]int, 0, len(m.transcriptItems))
@@ -55,7 +57,17 @@ func (m *Model) rebuildTranscript() {
 			lineNo++
 		case transcriptUser:
 			// Render user text as markdown so pasted tasks and lists are readable.
-			body := m.styleUserLabel.Render("you> ") + strings.TrimRight(m.renderer.RenderMarkdown(it.text, userInnerW), "\n")
+			rendered := strings.TrimRight(m.renderer.RenderMarkdown(it.text, userInnerW), "\n")
+			h := 1
+			if rendered != "" {
+				h = 1 + strings.Count(rendered, "\n")
+			}
+			accentLines := make([]string, 0, h)
+			for i := 0; i < h; i++ {
+				accentLines = append(accentLines, "│")
+			}
+			accent := m.styleUserLabel.Render(strings.Join(accentLines, "\n"))
+			body := lipgloss.JoinHorizontal(lipgloss.Top, accent, " ", rendered)
 			lines = append(lines, m.styleUserBox.Render(body))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptAgent:
@@ -64,7 +76,6 @@ func (m *Model) rebuildTranscript() {
 			// Important: do not prefix "agent>" inside the markdown source, otherwise
 			// fenced blocks (```json) stop being recognized by the markdown parser.
 			rendered := strings.TrimRight(m.renderer.RenderMarkdown(strings.TrimSpace(it.text), agentInnerW), "\n")
-			rendered = prefixFirstLine(rendered, "agent> ")
 			body := m.styleAgent.Render(rendered)
 			lines = append(lines, m.styleAgentBox.Render(body))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
