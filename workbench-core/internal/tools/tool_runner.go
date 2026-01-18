@@ -38,9 +38,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/workbench-core/internal/jsonutil"
-	"github.com/tinoosan/workbench-core/internal/pathutil"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // Runner executes tool calls and persists their results under /results/<callId>/.
@@ -298,5 +298,5 @@ func validateAndCleanArtifactWrite(a ToolArtifactWrite) (string, error) {
 	if a.MediaType == "" {
 		return "", fmt.Errorf("artifact mediaType is required")
 	}
-	return pathutil.CleanResultsArtifactPath(a.Path)
+	return vfsutil.CleanResultsArtifactPath(a.Path)
 }

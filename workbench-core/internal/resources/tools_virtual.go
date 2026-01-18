@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tinoosan/workbench-core/internal/pathutil"
 	"github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // VirtualToolsResource exposes tool discovery under the VFS mount "/tools",
@@ -49,7 +49,7 @@ func (tr *VirtualToolsResource) List(subpath string) ([]vfs.Entry, error) {
 	if tr == nil || tr.Registry == nil {
 		return nil, fmt.Errorf("tool registry not configured")
 	}
-	clean, _, err := pathutil.NormalizeResourceSubpath(subpath)
+	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (tr *VirtualToolsResource) Read(subpath string) ([]byte, error) {
 	if tr == nil || tr.Registry == nil {
 		return nil, fmt.Errorf("tool registry not configured")
 	}
-	clean, parts, err := pathutil.NormalizeResourceSubpath(subpath)
+	clean, parts, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {
 		return nil, fmt.Errorf("tools read: %w", err)
 	}

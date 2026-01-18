@@ -80,3 +80,30 @@ func CleanRelPath(rel string) (string, error) {
 	}
 	return clean, nil
 }
+
+// CleanResultsArtifactPath validates and cleans a tool-provided artifact path written under
+// "/results/<callId>/".
+//
+// It preserves runner-facing error phrasing while using shared validation underneath.
+func CleanResultsArtifactPath(p string) (string, error) {
+	if strings.TrimSpace(p) == "" {
+		return "", fmt.Errorf("artifact path is required")
+	}
+
+	clean, err := CleanRelPath(p)
+	if err != nil {
+		msg := err.Error()
+		switch {
+		case strings.Contains(msg, "absolute paths not allowed"):
+			return "", fmt.Errorf("artifact path must be relative")
+		case strings.Contains(msg, "escapes mount root"):
+			return "", fmt.Errorf("artifact path escapes results directory")
+		default:
+			return "", err
+		}
+	}
+	if clean == "." {
+		return "", fmt.Errorf("artifact path is invalid")
+	}
+	return clean, nil
+}

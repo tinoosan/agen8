@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/workbench-core/internal/pathutil"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // VirtualResultsResource is a ResultsResource implementation backed by a ResultsStore.
@@ -57,7 +57,7 @@ func (r *VirtualResultsResource) List(subpath string) ([]vfs.Entry, error) {
 	if r == nil || r.Store == nil {
 		return nil, fmt.Errorf("results store not configured")
 	}
-	clean, parts, err := pathutil.NormalizeResourceSubpath(subpath)
+	clean, parts, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (r *VirtualResultsResource) Read(subpath string) ([]byte, error) {
 	if r == nil || r.Store == nil {
 		return nil, fmt.Errorf("results store not configured")
 	}
-	clean, parts, err := pathutil.NormalizeResourceSubpath(subpath)
+	clean, parts, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {
 		return nil, err
 	}

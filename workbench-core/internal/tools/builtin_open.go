@@ -11,8 +11,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/internal/pathutil"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 var builtinOpenManifest = []byte(`{
@@ -128,7 +128,7 @@ func (o *BuiltinOpenInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 	if in.Path == "" {
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: "path is required"}
 	}
-	if _, err := pathutil.CleanRelPath(in.Path); err != nil {
+	if _, err := vfsutil.CleanRelPath(in.Path); err != nil {
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid path: %v", err)}
 	}
 
