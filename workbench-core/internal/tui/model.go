@@ -1444,9 +1444,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Telemetry toggle (hidden by default).
-		// Use Ctrl+T as the primary toggle so we don't hijack normal typing.
-		// For convenience, allow plain "t" when the input is empty.
-		if msg.Type == tea.KeyCtrlT || (strings.EqualFold(msg.String(), "t") && m.single.Value() == "" && m.multiline.Value() == "") {
+		// - When input is focused, only Ctrl+T toggles (so normal typing is never hijacked).
+		// - When Activity list is focused, allow Ctrl+T and plain "t".
+		if (m.focus == focusInput && msg.Type == tea.KeyCtrlT) ||
+			(m.focus == focusActivityList && (msg.Type == tea.KeyCtrlT || strings.EqualFold(msg.String(), "t"))) {
 			m.showTelemetry = !m.showTelemetry
 			m.refreshActivityDetail()
 			return m, nil
@@ -1456,7 +1457,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		//
 		// Note: Ctrl+J is ASCII LF and is often indistinguishable from Enter in many
 		// terminal setups. Use Ctrl+G as the reliable toggle.
-		if msg.Type == tea.KeyCtrlG {
+		if m.focus == focusInput && msg.Type == tea.KeyCtrlG {
 			m.toggleMultiline()
 			return m, nil
 		}

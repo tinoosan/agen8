@@ -148,6 +148,58 @@ func TestKeyRouting_WhenActivityFocused_InputDoesNotConsumeKeys(t *testing.T) {
 	}
 }
 
+func TestKeyRouting_WhenActivityFocused_CtrlTAndCtrlGDoNotToggleInputModes(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.showDetails = true
+	m.focus = focusActivityList
+	m.single.Blur()
+	m.multiline.Blur()
+	m.layout()
+
+	telemetryBefore := m.showTelemetry
+	isMultiBefore := m.isMulti
+
+	// Ctrl+T SHOULD toggle telemetry when activity is focused.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	updated := m2.(Model)
+	if updated.showTelemetry == telemetryBefore {
+		t.Fatalf("expected showTelemetry to toggle when activity focused; before=%v after=%v", telemetryBefore, updated.showTelemetry)
+	}
+
+	// Plain "t" SHOULD toggle telemetry when activity is focused.
+	telemetry2 := updated.showTelemetry
+	m2b, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	updatedB := m2b.(Model)
+	if updatedB.showTelemetry == telemetry2 {
+		t.Fatalf("expected showTelemetry to toggle on 't' when activity focused; before=%v after=%v", telemetry2, updatedB.showTelemetry)
+	}
+
+	// Ctrl+G should NOT toggle multiline when activity is focused.
+	m3, _ := updatedB.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	updated2 := m3.(Model)
+	if updated2.isMulti != isMultiBefore {
+		t.Fatalf("expected isMulti unchanged when activity focused; before=%v after=%v", isMultiBefore, updated2.isMulti)
+	}
+}
+
+func TestKeyRouting_WhenInputFocused_TypingTDoesNotToggleTelemetry(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.focus = focusInput
+	m.showDetails = false
+	m.layout()
+
+	before := m.showTelemetry
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	updated := m2.(Model)
+
+	if updated.showTelemetry != before {
+		t.Fatalf("expected showTelemetry unchanged when input focused and typing 't'; before=%v after=%v", before, updated.showTelemetry)
+	}
+	if updated.single.Value() != "t" {
+		t.Fatalf("expected input to contain %q, got %q", "t", updated.single.Value())
+	}
+}
+
 func TestTranscript_FirstUserMessageVisibleAtTop(t *testing.T) {
 	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
 	m.layout()
