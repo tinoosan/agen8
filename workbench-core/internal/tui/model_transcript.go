@@ -57,7 +57,9 @@ func (m *Model) rebuildTranscript() {
 			lineNo++
 		case transcriptUser:
 			// Render user text as markdown so pasted tasks and lists are readable.
-			rendered := strings.TrimRight(m.renderer.RenderMarkdown(it.text, userInnerW), "\n")
+			// Glamour rendering can include leading/trailing newlines; trim them so the
+			// user box hugs content (no phantom blank rows).
+			rendered := strings.Trim(m.renderer.RenderMarkdown(it.text, userInnerW), "\n")
 			h := 1
 			if rendered != "" {
 				h = 1 + strings.Count(rendered, "\n")
@@ -75,7 +77,7 @@ func (m *Model) rebuildTranscript() {
 			//
 			// Important: do not prefix "agent>" inside the markdown source, otherwise
 			// fenced blocks (```json) stop being recognized by the markdown parser.
-			rendered := strings.TrimRight(m.renderer.RenderMarkdown(strings.TrimSpace(it.text), agentInnerW), "\n")
+			rendered := strings.Trim(m.renderer.RenderMarkdown(strings.TrimSpace(it.text), agentInnerW), "\n")
 			body := m.styleAgent.Render(rendered)
 			lines = append(lines, m.styleAgentBox.Render(body))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
