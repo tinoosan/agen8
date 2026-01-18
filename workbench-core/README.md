@@ -1,0 +1,49 @@
+# Workbench Core
+
+Workbench Core is a local, agentic runtime that exposes an interactive CLI for running sessions, resuming previous runs, and inspecting the resulting artifacts. It is built around a virtual filesystem (VFS) model and stores scoped data in a configurable data directory.
+
+## Quick start
+
+```sh
+# Build the CLI
+go build ./cmd/workbench
+
+# Start a new interactive session
+./workbench
+```
+
+The default run opens a Bubble Tea-powered TUI where each message you submit becomes an agent turn that can discover tools under `/tools`, execute them via `tool.run`, and interact with run-scoped files under `/workspace`. Every run creates a session and writes results into the configured data directory (`data` by default).
+
+## Commands
+
+Most entrypoints live under `cmd/workbench/cmd` and use Cobra. Key commands are:
+
+- `workbench` – starts a fresh interactive session with configurable goal/title/context size.
+- `workbench resume <sessionId>` – resumes an existing session by creating a new run.
+- `workbench list sessions` – lists all session IDs stored under `data`.
+- `workbench list runs <sessionId>` – shows runs (and their statuses) for one session.
+- `workbench show session <sessionId>` – prints the `session.json` metadata for a session.
+- `workbench show history <sessionId>` – emits the recent operation history (JSONL) for debugging.
+- `workbench show run <runId>`/**(not yet implemented)** – placeholder for future run metadata inspection.
+
+## Configuration
+
+All runtime configuration (currently just `dataDir`) is defined in `internal/config/config.go`. The CLI supports:
+
+- `--data-dir` – base directory where runs, sessions, results, workspace, and history live (default: `data`).
+- `--workdir` / `WORKBENCH_WORKDIR` – override the directory mounted at `/workdir` inside the sandbox.
+- `--context-bytes` – limits the token context saved per run (must be > 0).
+- `--title` / `--goal` – defaults used when creating new runs.
+
+The `effectiveConfig()` helper combines the defaults with any CLI overrides before each command runs.
+
+## Project layout
+
+```
+cmd/workbench/
+  cmd/          # Cobra subcommands
+internal/       # core services: app, store, tools, config, history
+go.mod          # module definition and dependencies
+```
+
+You can inspect `internal/app` for the runtime orchestration (chat sessions, TUI hooks) and `internal/store` for how sessions/runs/history are persisted.
