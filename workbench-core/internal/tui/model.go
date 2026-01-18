@@ -186,15 +186,15 @@ type Model struct {
 
 	styleDim lipgloss.Style
 
-	styleUserBox   lipgloss.Style
-	styleUserLabel lipgloss.Style
-	styleAgentBox  lipgloss.Style
+	styleUserBox       lipgloss.Style
+	styleUserLabel     lipgloss.Style
+	styleAgentBox      lipgloss.Style
 	styleFileChangeBox lipgloss.Style
-	styleAgent     lipgloss.Style
-	styleAction    lipgloss.Style
-	styleTelemetry lipgloss.Style
-	styleOutcome   lipgloss.Style
-	styleError     lipgloss.Style
+	styleAgent         lipgloss.Style
+	styleAction        lipgloss.Style
+	styleTelemetry     lipgloss.Style
+	styleOutcome       lipgloss.Style
+	styleError         lipgloss.Style
 
 	styleInputBox            lipgloss.Style
 	styleComposerCardFocused lipgloss.Style
@@ -286,6 +286,15 @@ type pendingFileOp struct {
 }
 
 type fileAfterMsg struct {
+	op   string
+	path string
+
+	text      string
+	truncated bool
+	err       error
+}
+
+type fileBeforeMsg struct {
 	op   string
 	path string
 
@@ -1698,7 +1707,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.pendingFileOps, path)
 
 		verb := "Updated"
-		if !p.hadBefore {
+		if p.op != "fs.patch" && !p.hadBefore {
 			verb = "Created"
 		}
 
@@ -1712,6 +1721,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		md := "**" + verb + "** `" + path + "`\n\n" + preview
 		m.addTranscriptItem(transcriptItem{kind: transcriptFileChange, text: md})
 		m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+		return m, nil
+
+	case fileBeforeMsg:
+		// Best-effort: fill in missing "before" content for Created/Updated labeling
+		// and diff previews (request arrives pre-exec).
+		path := strings.TrimSpace(msg.path)
+		if path == "" {
+			return m, nil
+		}
+		if m.pendingFileOps == nil {
+			return m, nil
+		}
+		p, ok := m.pendingFileOps[path]
+		if !ok || p.hadBefore {
+			return m, nil
+		}
+		// If the read succeeded, we know the file existed and we can diff against it.
+		if msg.err == nil {
+			p.before = msg.text
+			p.hadBefore = true
+			m.pendingFileOps[path] = p
+		}
 		return m, nil
 
 	case workdirPrefetchMsg:
@@ -2518,6 +2549,7 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	case "agent.op.request":
 		op := strings.TrimSpace(ev.Data["op"])
 		path := strings.TrimSpace(ev.Data["path"])
+		var beforeCmd tea.Cmd
 		if (op == "fs.write" || op == "fs.append" || op == "fs.patch") && path != "" {
 			if m.fileSnapCache == nil {
 				m.fileSnapCache = make(map[string]string)
@@ -2538,11 +2570,22 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 				p.patchRedacted = strings.TrimSpace(ev.Data["patchRedacted"]) == "true"
 			}
 			m.pendingFileOps[path] = p
+
+			// Best-effort: if we don't have a cached snapshot, try reading the current
+			// file BEFORE the op executes so we can label Created vs Updated correctly.
+			if !p.hadBefore {
+				if acc, ok := m.runner.(vfsAccessor); ok {
+					beforeCmd = func() tea.Msg {
+						txt, _, truncated, err := acc.ReadVFS(m.ctx, path, maxDiffBytesRead)
+						return fileBeforeMsg{op: op, path: path, text: txt, truncated: truncated, err: err}
+					}
+				}
+			}
 		}
 
 		txt := strings.TrimSpace(rr.Text)
 		if txt == "" {
-			return nil
+			return beforeCmd
 		}
 		m.pendingActionText = txt
 		m.pendingActionIsToolRun = strings.TrimSpace(ev.Data["op"]) == "tool.run"
@@ -2553,7 +2596,7 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 			actionText:      txt,
 			actionIsToolRun: m.pendingActionIsToolRun,
 		})
-		return nil
+		return beforeCmd
 	case "agent.op.response":
 		if !m.waitingForAction || m.pendingActionIdx < 0 {
 			return nil

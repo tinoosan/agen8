@@ -240,6 +240,8 @@ func renderOpRequest(d map[string]string) string {
 		return "Write " + path
 	case "fs.append":
 		return "Append " + path
+	case "fs.patch":
+		return "Patch " + path
 	case "tool.run":
 		// Chat transcript should read like a narrative: show the effective command rather
 		// than the internal toolId/actionId + input payload.

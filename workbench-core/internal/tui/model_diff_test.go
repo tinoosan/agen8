@@ -76,6 +76,56 @@ func TestTranscript_FileWrite_EmitsDiffBlock(t *testing.T) {
 	}
 }
 
+func TestTranscript_FileWrite_LabelsUpdated_WhenFileExistsButNotCached(t *testing.T) {
+	r := stubRunnerWithReadWrite{stubRunnerWithRead{
+		stubRunner: stubRunner{final: "ok"},
+		files: map[string]string{
+			"/workspace/existing.txt": "old\n",
+		},
+	}}
+	m := New(context.Background(), r, make(chan events.Event))
+	m.width = 120
+	m.height = 40
+	m.layout()
+
+	// No cache set (unknown).
+
+	// Request should trigger a pre-read cmd to detect existence.
+	cmd := m.onEvent(events.Event{
+		Type: "agent.op.request",
+		Data: map[string]string{
+			"op":   "fs.write",
+			"path": "/workspace/existing.txt",
+		},
+	})
+	if cmd == nil {
+		t.Fatalf("expected pre-read cmd for before content")
+	}
+	m2, _ := m.Update(cmd())
+	updated2 := m2.(Model)
+
+	// Response triggers after read and then file-change block.
+	cmd2 := updated2.onEvent(events.Event{
+		Type: "agent.op.response",
+		Data: map[string]string{
+			"op":   "fs.write",
+			"path": "/workspace/existing.txt",
+			"ok":   "true",
+		},
+	})
+	updated3 := updated2
+	if cmd2 == nil {
+		t.Fatalf("expected after-read cmd")
+	}
+	m3, _ := updated3.Update(cmd2())
+	updated4 := m3.(Model)
+
+	view := updated4.transcript.View()
+	if !strings.Contains(view, "Updated") {
+		t.Fatalf("expected Updated (not Created) when file existed but wasn't cached, got:\n%s", view)
+	}
+}
+
 func TestTranscript_FilePatch_EmitsPatchBlock(t *testing.T) {
 	r := stubRunnerWithReadWrite{stubRunnerWithRead{
 		stubRunner: stubRunner{final: "ok"},
@@ -98,6 +148,11 @@ func TestTranscript_FilePatch_EmitsPatchBlock(t *testing.T) {
 		},
 	}
 	_ = m.onEvent(req)
+
+	// Ensure the request action line is clean.
+	if got := m.transcript.View(); !strings.Contains(got, "Patch /workspace/b.txt") {
+		t.Fatalf("expected action line %q, got:\n%s", "Patch /workspace/b.txt", got)
+	}
 
 	resp := events.Event{
 		Type: "agent.op.response",
