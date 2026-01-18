@@ -20,6 +20,7 @@ var (
 	pricingFile  string
 	modelID      string
 	enableMouse  bool
+	enableActivity bool
 
 	maxSteps           int
 	maxTraceBytes      int
@@ -63,6 +64,13 @@ new run in that session (workspaces remain run-scoped).
 			_ = os.Setenv("WORKBENCH_MOUSE", "true")
 		} else {
 			_ = os.Unsetenv("WORKBENCH_MOUSE")
+		}
+
+		// Activity panel is opt-in (default closed).
+		if enableActivity {
+			_ = os.Setenv("WORKBENCH_ACTIVITY", "true")
+		} else {
+			_ = os.Unsetenv("WORKBENCH_ACTIVITY")
 		}
 
 		// Pricing is resolved against the effective model at runtime (after session
@@ -124,6 +132,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&defaultGoal, "goal", "interactive chat", "initial goal for the run (workbench only)")
 	enableMouse = envBool("WORKBENCH_MOUSE", false)
 	rootCmd.PersistentFlags().BoolVar(&enableMouse, "mouse", enableMouse, "enable Bubble Tea mouse capture (mouse wheel scrolling; may disable native selection)")
+	enableActivity = envBool("WORKBENCH_ACTIVITY", false)
+	rootCmd.PersistentFlags().BoolVar(&enableActivity, "activity", enableActivity, "show activity panel by default (env WORKBENCH_ACTIVITY)")
 	pricingFile = strings.TrimSpace(os.Getenv("WORKBENCH_PRICING_FILE"))
 	rootCmd.PersistentFlags().StringVar(&pricingFile, "pricing-file", pricingFile, "optional path to pricing json (env WORKBENCH_PRICING_FILE)")
 	modelID = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))

@@ -1113,7 +1113,9 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 		activityList:      activity,
 		activityDetail:    details,
 		helpViewport:      helpVp,
-		showDetails:       true,
+		// Default: start with the activity panel closed. Users can toggle it with
+		// Ctrl+A, or enable it by default via WORKBENCH_ACTIVITY/--activity.
+		showDetails:       false,
 		activityIndexByID: map[string]int{},
 		single:            single,
 		multiline:         multi,
@@ -2501,6 +2503,14 @@ func Run(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) error
 		return fmt.Errorf("tui runner is required")
 	}
 	m := New(ctx, runner, evCh)
+
+	// Activity panel: off by default. Enable via:
+	//   - env: WORKBENCH_ACTIVITY=true/false
+	//   - flag: --activity (wired in cmd/workbench)
+	enableActivity := strings.TrimSpace(os.Getenv("WORKBENCH_ACTIVITY"))
+	if enableActivity != "" {
+		m.showDetails = enableActivity == "1" || strings.EqualFold(enableActivity, "true") || strings.EqualFold(enableActivity, "yes")
+	}
 
 	// Mouse capture enables mouse wheel / trackpad scrolling in the transcript.
 	//
