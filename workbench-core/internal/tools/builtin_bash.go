@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tinoosan/workbench-core/internal/pathutil"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 var builtinBashManifest = []byte(`{"id":"builtin.bash","version":"0.1.0","kind":"builtin","displayName":"Builtin Bash (restricted)","description":"Runs CLI commands inside a host-configured root directory with a small denylist (shells/interpreters/privilege escalation).","actions":[{"id":"exec","displayName":"Execute command","description":"Execute a command with argv and return exitCode/stdout/stderr. Some command names are denied. Absolute path arguments are rejected. stdout/stderr may be truncated; full output may be written as artifacts.","inputSchema":{"type":"object","properties":{"argv":{"type":"array","items":{"type":"string"},"minItems":1},"cwd":{"type":"string"},"stdin":{"type":"string"}},"required":["argv"]},"outputSchema":{"type":"object","properties":{"exitCode":{"type":"integer"},"stdout":{"type":"string"},"stderr":{"type":"string"},"stdoutPath":{"type":"string"},"stderrPath":{"type":"string"}},"required":["exitCode","stdout","stderr"]}}]}`)
@@ -263,7 +263,7 @@ func (b *BuiltinBashInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 		cwd = "."
 	}
 
-	absDir, err := vfsutil.SafeJoinBaseDir(root, cwd)
+	absDir, err := pathutil.SafeJoinBaseDir(root, cwd)
 	if err != nil {
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
 	}

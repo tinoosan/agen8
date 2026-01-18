@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/internal/pathutil"
 	"github.com/tinoosan/workbench-core/internal/vfs"
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // DirResource implements vfs.Resource by mapping virtual paths to a real OS directory.
@@ -257,5 +257,5 @@ func (d *DirResource) Append(subpath string, data []byte) error {
 //   - "../etc/passwd" -> error ✗ (escape attempt)
 //   - "a/../../secrets" -> error ✗ (escape attempt)
 func (d *DirResource) safeJoin(subpath string) (string, error) {
-	return vfsutil.SafeJoinBaseDir(d.BaseDir, subpath)
+	return pathutil.SafeJoinBaseDir(d.BaseDir, subpath)
 }

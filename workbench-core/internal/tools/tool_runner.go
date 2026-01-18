@@ -34,14 +34,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/workbench-core/internal/jsonutil"
+	"github.com/tinoosan/workbench-core/internal/pathutil"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 // Runner executes tool calls and persists their results under /results/<callId>/.
@@ -299,22 +298,5 @@ func validateAndCleanArtifactWrite(a ToolArtifactWrite) (string, error) {
 	if a.MediaType == "" {
 		return "", fmt.Errorf("artifact mediaType is required")
 	}
-
-	clean, err := vfsutil.CleanRelPath(a.Path)
-	if err != nil {
-		// Preserve the runner-facing phrasing while reusing shared path validation.
-		msg := err.Error()
-		switch {
-		case strings.Contains(msg, "absolute paths not allowed"):
-			return "", fmt.Errorf("artifact path must be relative")
-		case strings.Contains(msg, "escapes mount root"):
-			return "", fmt.Errorf("artifact path escapes results directory")
-		default:
-			return "", err
-		}
-	}
-	if clean == "." {
-		return "", fmt.Errorf("artifact path is invalid")
-	}
-	return clean, nil
+	return pathutil.CleanResultsArtifactPath(a.Path)
 }

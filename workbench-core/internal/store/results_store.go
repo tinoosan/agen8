@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
+	"github.com/tinoosan/workbench-core/internal/pathutil"
 )
 
 // ResultsStore is the host-side storage interface for tool call outputs.
@@ -177,7 +177,7 @@ func (s *InMemoryResultsStore) PutArtifact(callID, artifactPath, mediaType strin
 	if content == nil {
 		return fmt.Errorf("content is required")
 	}
-	clean, err := vfsutil.CleanRelPath(artifactPath)
+	clean, err := pathutil.CleanRelPath(artifactPath)
 	if err != nil {
 		return err
 	}
@@ -212,7 +212,7 @@ func (s *InMemoryResultsStore) GetArtifact(callID, artifactPath string) ([]byte,
 	if artifactPath == "" {
 		return nil, "", fmt.Errorf("artifactPath is required")
 	}
-	clean, err := vfsutil.CleanRelPath(artifactPath)
+	clean, err := pathutil.CleanRelPath(artifactPath)
 	if err != nil {
 		return nil, "", err
 	}

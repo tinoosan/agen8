@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tinoosan/workbench-core/internal/pathutil"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 var builtinRipgrepManifest = []byte(`{"id":"builtin.ripgrep","version":"0.1.0","kind":"builtin","displayName":"Builtin Ripgrep","description":"Searches text under a host-configured root directory using ripgrep and returns structured matches.","actions":[{"id":"search","displayName":"Search","description":"Search for query in files under the sandbox root. Returns structured match records (path, line, text).","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"glob":{"type":"array","items":{"type":"string"}},"caseSensitive":{"type":"boolean"},"maxMatches":{"type":"integer"},"contextLines":{"type":"integer"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"matches":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer"},"text":{"type":"string"}},"required":["path","line","text"]}},"truncated":{"type":"boolean"},"limit":{"type":"string"}},"required":["matches","truncated"]}}]}`)
@@ -118,7 +118,7 @@ func (r *BuiltinRipgrepInvoker) Invoke(ctx context.Context, req types.ToolReques
 		paths = []string{"."}
 	}
 	for _, p := range paths {
-		if _, err := vfsutil.CleanRelPath(p); err != nil {
+		if _, err := pathutil.CleanRelPath(p); err != nil {
 			return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid paths: %v", err)}
 		}
 	}
