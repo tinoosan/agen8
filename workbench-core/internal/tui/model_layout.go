@@ -303,9 +303,16 @@ func (m Model) renderCommandPalette() string {
 
 	// Wrap in a subtle border/background.
 	paletteContent := strings.Join(lines, "\n")
-	paletteW := max(20, m.width-8)
+
+	// IMPORTANT: keep the palette's TOTAL rendered width within the composer content width.
+	// lipgloss.Style.Width applies to the content box (excluding border + padding).
+	// Since we use padding(0,1) and a rounded border, total width is:
+	//   contentWidth + (padding L+R=2) + (border L+R=2) = contentWidth + 4
+	// The composer content budget is ~ (m.width-8), so we set contentWidth to (budget-4).
+	outerW := max(20, m.width-8)
+	contentW := max(1, outerW-4)
 	paletteStyle := lipgloss.NewStyle().
-		Width(paletteW).
+		Width(contentW).
 		Padding(0, 1).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#404040")).

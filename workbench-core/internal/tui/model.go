@@ -14,9 +14,11 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/workbench-core/internal/cost"
 	"github.com/tinoosan/workbench-core/internal/events"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
@@ -173,6 +175,12 @@ type Model struct {
 	commandPaletteOpen     bool
 	commandPaletteMatches  []string
 	commandPaletteSelected int
+
+	// Model picker state
+	modelPickerOpen   bool
+	modelPickerFilter textinput.Model
+	modelPickerList   list.Model
+	modelPickerAll    []string
 }
 
 type focusTarget int
@@ -205,6 +213,15 @@ type transcriptItem struct {
 	actionIsCompleted bool
 }
 
+// modelPickerItem implements list.Item for the model picker.
+type modelPickerItem struct {
+	id string
+}
+
+func (m modelPickerItem) FilterValue() string { return m.id }
+func (m modelPickerItem) Title() string       { return m.id }
+func (m modelPickerItem) Description() string { return "" }
+
 // Hardcoded list of available slash commands for the command palette.
 var availableCommands = []string{
 	"/model",
@@ -231,6 +248,12 @@ func isExactCommand(s string) bool {
 // updateCommandPalette updates the command palette state based on the current input value.
 // It detects if the input starts with "/" and filters commands accordingly.
 func (m *Model) updateCommandPalette() {
+	prevOpen := m.commandPaletteOpen
+	prevVisible := 0
+	if prevOpen {
+		prevVisible = min(len(m.commandPaletteMatches), 6)
+	}
+
 	var inputValue string
 	if m.isMulti {
 		inputValue = m.multiline.Value()
@@ -256,6 +279,9 @@ func (m *Model) updateCommandPalette() {
 			m.commandPaletteOpen = false
 			m.commandPaletteMatches = nil
 			m.commandPaletteSelected = 0
+			if prevOpen {
+				m.layout()
+			}
 			return
 		}
 
@@ -288,6 +314,17 @@ func (m *Model) updateCommandPalette() {
 		m.commandPaletteOpen = false
 		m.commandPaletteMatches = nil
 		m.commandPaletteSelected = 0
+	}
+
+	// If the palette visibility/height changed, recompute layout so total View height
+	// stays within the terminal bounds (avoids header/transcript clipping).
+	newOpen := m.commandPaletteOpen
+	newVisible := 0
+	if newOpen {
+		newVisible = min(len(m.commandPaletteMatches), 6)
+	}
+	if prevOpen != newOpen || prevVisible != newVisible {
+		m.layout()
 	}
 }
 
@@ -337,6 +374,112 @@ func (m *Model) autocompleteCommand() {
 	m.commandPaletteOpen = false
 	m.commandPaletteMatches = nil
 	m.commandPaletteSelected = 0
+
+	// Recompute layout so the transcript area expands again.
+	m.layout()
+}
+
+// openModelPicker initializes and opens the model picker modal.
+func (m *Model) openModelPicker() tea.Cmd {
+	m.modelPickerAll = cost.SupportedModels()
+	m.modelPickerOpen = true
+
+	// Initialize filter input
+	filter := textinput.New()
+	filter.Placeholder = "Filter models..."
+	filter.Focus()
+	filter.CharLimit = 100
+	filter.Prompt = ""
+	filter.Width = 40
+	m.modelPickerFilter = filter
+
+	// Initialize list with all models
+	m.rebuildModelPickerItems()
+
+	return textinput.Blink
+}
+
+// closeModelPicker closes the model picker modal.
+func (m *Model) closeModelPicker() {
+	m.modelPickerOpen = false
+	m.modelPickerFilter = textinput.Model{}
+	m.modelPickerList = list.Model{}
+	m.modelPickerAll = nil
+}
+
+// rebuildModelPickerItems rebuilds the list items based on the current filter.
+func (m *Model) rebuildModelPickerItems() {
+	filterText := strings.ToLower(strings.TrimSpace(m.modelPickerFilter.Value()))
+	items := []list.Item{}
+
+	for _, id := range m.modelPickerAll {
+		if filterText == "" || strings.Contains(strings.ToLower(id), filterText) {
+			items = append(items, modelPickerItem{id: id})
+		}
+	}
+
+	// Create list with a simple delegate
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.SelectedTitle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#eaeaea")).
+		Background(lipgloss.Color("#303030")).
+		Bold(true)
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedTitle
+	delegate.Styles.NormalTitle = lipgloss.NewStyle().Foreground(lipgloss.Color("#b0b0b0"))
+	delegate.Styles.NormalDesc = delegate.Styles.NormalTitle
+
+	// Preserve existing list settings if it exists
+	var existingWidth, existingHeight int
+	if m.modelPickerList.Width() > 0 {
+		existingWidth = m.modelPickerList.Width()
+		existingHeight = m.modelPickerList.Height()
+	}
+
+	l := list.New(items, delegate, existingWidth, existingHeight)
+	l.Title = "Select Model"
+	l.SetShowHelp(false)
+	l.SetShowStatusBar(false)
+	l.SetShowPagination(true)
+	l.SetFilteringEnabled(false) // We handle filtering manually
+	l.Styles.Title = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#707070")).
+		Bold(true)
+
+	// Reset selection to top
+	if len(items) > 0 {
+		l.Select(0)
+	}
+
+	m.modelPickerList = l
+}
+
+// selectModelFromPicker selects the currently highlighted model and triggers the /model command.
+func (m *Model) selectModelFromPicker() tea.Cmd {
+	if m.modelPickerList.Items() == nil || len(m.modelPickerList.Items()) == 0 {
+		return nil
+	}
+	selectedItem := m.modelPickerList.SelectedItem()
+	if selectedItem == nil {
+		return nil
+	}
+	item, ok := selectedItem.(modelPickerItem)
+	if !ok {
+		return nil
+	}
+
+	selectedID := item.id
+
+	// Optimistically update the model ID so the label updates instantly
+	m.modelID = selectedID
+
+	// Close the picker
+	m.closeModelPicker()
+
+	// Trigger the host command to persist the change and show transcript message
+	return func() tea.Msg {
+		final, err := m.runner.RunTurn(m.ctx, "/model "+selectedID)
+		return turnDoneMsg{final: final, err: err}
+	}
 }
 
 func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model {
@@ -518,6 +661,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		// Modal: model picker (must capture keys even when input is focused).
+		if m.modelPickerOpen {
+			switch msg.Type {
+			case tea.KeyEsc:
+				m.closeModelPicker()
+				m.layout()
+				return m, nil
+			}
+		}
+
 		// In-TUI editor mode: capture keys and render a full-screen editor.
 		if m.editorOpen {
 			switch msg.Type {
@@ -594,6 +747,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.commandPaletteOpen = false
 				m.commandPaletteMatches = nil
 				m.commandPaletteSelected = 0
+				m.layout()
 				return m, nil
 			}
 			if m.showDetails && m.fileViewOpen {
@@ -616,6 +770,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.layout()
 				return m, nil
 			}
+		}
+
+		// Model picker key handling (when open, intercept keys before other handlers).
+		if m.modelPickerOpen {
+			switch msg.Type {
+			case tea.KeyEsc:
+				m.closeModelPicker()
+				return m, nil
+			case tea.KeyEnter:
+				return m, m.selectModelFromPicker()
+			case tea.KeyUp:
+				m.modelPickerList.CursorUp()
+				return m, nil
+			case tea.KeyDown:
+				m.modelPickerList.CursorDown()
+				return m, nil
+			case tea.KeyPgUp, tea.KeyCtrlU:
+				m.modelPickerList.CursorUp()
+				return m, nil
+			case tea.KeyPgDown, tea.KeyCtrlF:
+				m.modelPickerList.CursorDown()
+				return m, nil
+			}
+			// Handle typing in filter input
+			var cmd tea.Cmd
+			m.modelPickerFilter, cmd = m.modelPickerFilter.Update(msg)
+			m.rebuildModelPickerItems()
+			// Reset cursor to top after filtering
+			if len(m.modelPickerList.Items()) > 0 {
+				m.modelPickerList.Select(0)
+			}
+			return m, cmd
 		}
 
 		// Tab cycles focus between input and activity list.
@@ -910,7 +1096,14 @@ func (m Model) View() string {
 	header := m.renderHeader()
 	body := m.renderBody()
 	input := m.renderInput()
-	return header + "\n" + body + "\n" + input
+	base := header + "\n" + body + "\n" + input
+
+	// Overlay model picker modal if open
+	if m.modelPickerOpen {
+		return m.renderModelPicker(base)
+	}
+
+	return base
 }
 
 func (m Model) renderEditorView() string {
@@ -956,6 +1149,125 @@ func (m Model) editorTitle() string {
 		title += " · error: " + strings.TrimSpace(m.editorErr)
 	}
 	return title
+}
+
+func (m Model) renderModelPicker(base string) string {
+	// Calculate modal dimensions
+	modalWidth := 60
+	if modalWidth > m.width-8 {
+		modalWidth = m.width - 8
+	}
+	if modalWidth < 40 {
+		modalWidth = 40
+	}
+	modalHeight := 20
+	if modalHeight > m.height-8 {
+		modalHeight = m.height - 8
+	}
+	if modalHeight < 10 {
+		modalHeight = 10
+	}
+
+	// Size the list to fit within the modal
+	listHeight := modalHeight - 3 // Account for filter input and borders
+	if listHeight < 4 {
+		listHeight = 4
+	}
+	m.modelPickerList.SetWidth(modalWidth - 4) // Account for padding/borders
+	m.modelPickerList.SetHeight(listHeight)
+
+	// Size the filter input
+	m.modelPickerFilter.Width = modalWidth - 4
+
+	// Build modal content
+	filterView := m.modelPickerFilter.View()
+	listView := m.modelPickerList.View()
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		filterView,
+		"",
+		listView,
+	)
+
+	// Style the modal
+	modalStyle := lipgloss.NewStyle().
+		Width(modalWidth).
+		Height(modalHeight).
+		Padding(1, 2).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#6bbcff")).
+		Background(lipgloss.Color("#1a1a1a")).
+		Foreground(lipgloss.Color("#eaeaea"))
+
+	modalContent := modalStyle.Render(content)
+
+	// Dim the base view
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#404040"))
+	baseLines := strings.Split(base, "\n")
+
+	// Ensure we have enough lines for the full height
+	for len(baseLines) < m.height {
+		baseLines = append(baseLines, "")
+	}
+	if len(baseLines) > m.height {
+		baseLines = baseLines[:m.height]
+	}
+
+	// Dim all base lines
+	dimmedLines := make([]string, len(baseLines))
+	for i, line := range baseLines {
+		dimmedLines[i] = dimStyle.Render(line)
+	}
+
+	// Split modal content into lines
+	modalLines := strings.Split(modalContent, "\n")
+	modalHeightActual := len(modalLines)
+	modalWidthActual := 0
+	for _, line := range modalLines {
+		if w := lipgloss.Width(line); w > modalWidthActual {
+			modalWidthActual = w
+		}
+	}
+
+	// Calculate centering position
+	topPos := (m.height - modalHeightActual) / 2
+	if topPos < 0 {
+		topPos = 0
+	}
+	leftPos := (m.width - modalWidthActual) / 2
+	if leftPos < 0 {
+		leftPos = 0
+	}
+
+	// Overlay modal on dimmed base
+	result := make([]string, m.height)
+	for i := 0; i < m.height; i++ {
+		result[i] = dimmedLines[i]
+
+		// Overlay modal lines
+		if i >= topPos && i < topPos+modalHeightActual {
+			lineIdx := i - topPos
+			if lineIdx < len(modalLines) {
+				modalLine := modalLines[lineIdx]
+				lineWidth := lipgloss.Width(modalLine)
+
+				// Build the overlaid line
+				prefix := ""
+				if leftPos > 0 && leftPos < len(result[i]) {
+					prefix = result[i][:leftPos]
+				}
+				suffix := ""
+				suffixStart := leftPos + lineWidth
+				if suffixStart < len(result[i]) {
+					suffix = result[i][suffixStart:]
+				}
+
+				result[i] = prefix + modalLine + suffix
+			}
+		}
+	}
+
+	return strings.Join(result, "\n")
 }
 
 func (m *Model) openEditor(vpath string) tea.Cmd {
@@ -1077,6 +1389,10 @@ func (m *Model) submitSingle() tea.Cmd {
 	if txt == "" {
 		return nil
 	}
+	// Intercept `/model` with no args to open picker instead of submitting
+	if txt == "/model" {
+		return m.openModelPicker()
+	}
 	return m.submit(txt)
 }
 
@@ -1085,6 +1401,10 @@ func (m *Model) submitMultiline() tea.Cmd {
 	m.multiline.SetValue("")
 	if txt == "" {
 		return nil
+	}
+	// Intercept `/model` with no args to open picker instead of submitting
+	if txt == "/model" {
+		return m.openModelPicker()
 	}
 	return m.submit(txt)
 }

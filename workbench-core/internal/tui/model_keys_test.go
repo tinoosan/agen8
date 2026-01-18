@@ -21,6 +21,16 @@ func (s stubRunner) RunTurn(ctx context.Context, userMsg string) (string, error)
 	return s.final, s.err
 }
 
+type recordingRunner struct {
+	stubRunner
+	lastMessage string
+}
+
+func (r *recordingRunner) RunTurn(ctx context.Context, userMsg string) (string, error) {
+	r.lastMessage = userMsg
+	return "Model set to " + strings.TrimPrefix(userMsg, "/model "), nil
+}
+
 type stubRunnerWithRead struct {
 	stubRunner
 	files map[string]string
@@ -243,6 +253,31 @@ func TestLayout_ViewLinesDoNotExceedTerminalWidth_WhenActivityOpen(t *testing.T)
 	}
 }
 
+func TestLayout_WithCommandPalette_ViewNeverExceedsTerminalBounds(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.showDetails = true
+	m.layout()
+
+	// Open palette by typing "/".
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated := m2.(Model)
+	if !updated.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen true")
+	}
+
+	view := updated.View()
+	if got := lipgloss.Height(view); got > updated.height {
+		t.Fatalf("expected View() height <= %d, got %d", updated.height, got)
+	}
+	for i, line := range strings.Split(view, "\n") {
+		if w := lipgloss.Width(line); w > updated.width {
+			t.Fatalf("line %d exceeds terminal width: got %d, want <= %d; line=%q", i+1, w, updated.width, line)
+		}
+	}
+}
+
 func TestActivity_OpenFileViewer_OKey(t *testing.T) {
 	r := stubRunnerWithRead{
 		stubRunner: stubRunner{final: "ok"},
@@ -461,6 +496,171 @@ func TestCommandPalette_PreservesTrailingArgs(t *testing.T) {
 
 	if updated8.single.Value() != "/model arg" {
 		t.Fatalf("expected input '/model arg', got %q", updated8.single.Value())
+	}
+}
+
+func TestModelPicker_OpensOnModelCommand(t *testing.T) {
+	runner := &recordingRunner{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.layout()
+
+	// Type "/model" and submit
+	m.single.SetValue("/model")
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := m2.(Model)
+
+	if updated.modelPickerOpen != true {
+		t.Fatalf("expected modelPickerOpen true after submitting '/model'")
+	}
+	if updated.turnInFlight {
+		t.Fatalf("expected turnInFlight false (should not submit)")
+	}
+	if cmd == nil {
+		t.Fatalf("expected cmd (textinput.Blink), got nil")
+	}
+}
+
+func TestModelPicker_FiltersOnTyping(t *testing.T) {
+	runner := &recordingRunner{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.layout()
+
+	// Open picker
+	m.single.SetValue("/model")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := m2.(Model)
+
+	if !updated.modelPickerOpen {
+		t.Fatalf("expected modelPickerOpen true")
+	}
+
+	// Type filter text
+	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	updated2 := m3.(Model)
+	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	updated3 := m4.(Model)
+	m5, _ := updated3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	updated4 := m5.(Model)
+
+	if updated4.modelPickerFilter.Value() != "gpt" {
+		t.Fatalf("expected filter value 'gpt', got %q", updated4.modelPickerFilter.Value())
+	}
+
+	// Check that list is filtered
+	items := updated4.modelPickerList.Items()
+	foundGPT := false
+	for _, item := range items {
+		if modelItem, ok := item.(modelPickerItem); ok {
+			if strings.Contains(modelItem.id, "gpt") {
+				foundGPT = true
+				break
+			}
+		}
+	}
+	if !foundGPT {
+		t.Fatalf("expected to find gpt models in filtered list")
+	}
+}
+
+func TestModelPicker_SelectsModelAndUpdatesLabel(t *testing.T) {
+	runner := &recordingRunner{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.layout()
+	m.modelID = "old-model"
+
+	// Open picker
+	m.single.SetValue("/model")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := m2.(Model)
+
+	if !updated.modelPickerOpen {
+		t.Fatalf("expected modelPickerOpen true")
+	}
+
+	// Select first model (should be sorted, likely starting with openai/gpt-4o-mini or similar)
+	if len(updated.modelPickerList.Items()) == 0 {
+		t.Fatalf("expected at least one model in picker")
+	}
+
+	// Press Enter to select
+	m3, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated2 := m3.(Model)
+
+	if updated2.modelPickerOpen {
+		t.Fatalf("expected modelPickerOpen false after selecting")
+	}
+	if cmd == nil {
+		t.Fatalf("expected cmd (RunTurn), got nil")
+	}
+
+	// Check that modelID was optimistically updated
+	selectedItem := updated.modelPickerList.SelectedItem()
+	if selectedItem == nil {
+		t.Fatalf("expected selected item")
+	}
+	modelItem, ok := selectedItem.(modelPickerItem)
+	if !ok {
+		t.Fatalf("expected modelPickerItem")
+	}
+	expectedModel := modelItem.id
+
+	// The optimistic update happens before the command runs
+	// We need to execute the command to see the final state
+	msg := cmd()
+	m4, _ := updated2.Update(msg)
+	_ = m4.(Model)
+
+	// After turnDoneMsg, the modelID should still be set (optimistic update persists)
+	// and the runner should have been called
+	if runner.lastMessage != "/model "+expectedModel {
+		t.Fatalf("expected runner.RunTurn called with '/model %s', got %q", expectedModel, runner.lastMessage)
+	}
+}
+
+func TestModelPicker_EscClosesPicker(t *testing.T) {
+	runner := &recordingRunner{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.layout()
+
+	// Open picker
+	m.single.SetValue("/model")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := m2.(Model)
+
+	if !updated.modelPickerOpen {
+		t.Fatalf("expected modelPickerOpen true")
+	}
+
+	// Press Esc - should close picker
+	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated2 := m3.(Model)
+
+	if updated2.modelPickerOpen {
+		t.Fatalf("expected modelPickerOpen false after Esc")
+	}
+	if runner.lastMessage != "" {
+		t.Fatalf("expected runner not called, but got %q", runner.lastMessage)
+	}
+}
+
+func TestModelPicker_ModelCommandWithArgsStillWorks(t *testing.T) {
+	runner := &recordingRunner{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.layout()
+
+	// Type "/model openai/gpt-4o" and submit - should NOT open picker
+	m.single.SetValue("/model openai/gpt-4o")
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := m2.(Model)
+
+	if updated.modelPickerOpen {
+		t.Fatalf("expected modelPickerOpen false (should submit normally)")
+	}
+	if !updated.turnInFlight {
+		t.Fatalf("expected turnInFlight true (should submit)")
+	}
+	if cmd == nil {
+		t.Fatalf("expected cmd (submit), got nil")
 	}
 }
 
