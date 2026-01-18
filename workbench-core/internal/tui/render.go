@@ -173,7 +173,9 @@ func classifyEvent(ev events.Event) RenderResult {
 		}
 		return res
 	case "workdir.pwd":
-		res.Class = RenderAction
+		// Do not render workdir into the transcript. Workdir is displayed in the header,
+		// and /pwd is often invoked automatically during pre-init.
+		res.Class = RenderIgnore
 		wd := strings.TrimSpace(ev.Data["workdir"])
 		if wd == "" {
 			res.Text = "Workdir"
