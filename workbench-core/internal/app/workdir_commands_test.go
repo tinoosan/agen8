@@ -122,7 +122,7 @@ func TestLazyRunner_CD_DoesNotInitializeSession(t *testing.T) {
 
 	r := &lazyNewSessionTurnRunner{
 		ctx:  context.Background(),
-		opts: RunChatOptions{WorkDir: dir1},
+		opts: resolveRunChatOptions(WithWorkDir(dir1)),
 		evCh: ch,
 	}
 

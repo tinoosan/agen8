@@ -33,11 +33,11 @@ import (
 //
 // This avoids creating on-disk sessions/runs when the user opens Workbench and exits
 // without doing anything.
-func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, maxContextB int, opts RunChatOptions) (retErr error) {
+func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, maxContextB int, opts ...RunChatOption) (retErr error) {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	opts = opts.withDefaults()
+	resolved := resolveRunChatOptions(opts...)
 
 	// The TUI owns stdout/stderr. Avoid mixing standard log output into the screen.
 	oldLogWriter := log.Writer()
@@ -51,7 +51,7 @@ func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, m
 	lazy := &lazyNewSessionTurnRunner{
 		ctx:         runCtx,
 		cfg:         cfg,
-		opts:        opts,
+		opts:        resolved,
 		maxContextB: maxContextB,
 		title:       strings.TrimSpace(title),
 		goal:        strings.TrimSpace(goal),
@@ -107,11 +107,11 @@ func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, m
 //
 // The underlying agent loop contract, tool execution model, and store policies are
 // unchanged. Only presentation and input handling differ from RunChat's REPL.
-func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts RunChatOptions) (retErr error) {
+func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...RunChatOption) (retErr error) {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	opts = opts.withDefaults()
+	resolved := resolveRunChatOptions(opts...)
 
 	// The TUI owns stdout/stderr. Avoid mixing standard log output into the screen.
 	oldLogWriter := log.Writer()
@@ -154,7 +154,7 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts RunC
 		sessionModel = strings.TrimSpace(sess.ActiveModel)
 	}
 
-	model := strings.TrimSpace(opts.Model)
+	model := strings.TrimSpace(resolved.Model)
 	if model == "" {
 		model = sessionModel
 	}
@@ -164,15 +164,15 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts RunC
 	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" || model == "" {
 		return fmt.Errorf("OPENROUTER_API_KEY and OPENROUTER_MODEL (or --model or session.activeModel) are required")
 	}
-	opts.Model = model
+	resolved.Model = model
 
 	// Resolve pricing against the effective model (session-aware).
 	//
 	// If pricing is not known for the model, cost is shown as "unknown".
-	if opts.PriceInPerMTokensUSD <= 0 && opts.PriceOutPerMTokensUSD <= 0 {
-		if inPerM, outPerM, ok, _ := pricingForModel(model, opts.PricingFile); ok {
-			opts.PriceInPerMTokensUSD = inPerM
-			opts.PriceOutPerMTokensUSD = outPerM
+	if resolved.PriceInPerMTokensUSD <= 0 && resolved.PriceOutPerMTokensUSD <= 0 {
+		if inPerM, outPerM, ok, _ := pricingForModel(model, resolved.PricingFile); ok {
+			resolved.PriceInPerMTokensUSD = inPerM
+			resolved.PriceOutPerMTokensUSD = outPerM
 		}
 	}
 
@@ -183,14 +183,14 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts RunC
 			"sessionId":    run.SessionID,
 			"sessionTitle": sessionTitle,
 			"runId":        run.RunId,
-			"userId":       strings.TrimSpace(opts.UserID),
+			"userId":       strings.TrimSpace(resolved.UserID),
 		},
 		Console: boolp(false),
 	})
 
 	historySink.Model = model
 	setHistoryModel := func(next string) { historySink.Model = strings.TrimSpace(next) }
-	setup, err := setupTUIChatRuntime(cfg, run, opts, model, historyRes, mustEmit)
+	setup, err := setupTUIChatRuntime(cfg, run, resolved, model, historyRes, mustEmit)
 	if err != nil {
 		return err
 	}
@@ -199,7 +199,7 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts RunC
 		ctx:              runCtx,
 		cfg:              cfg,
 		run:              run,
-		opts:             opts,
+		opts:             resolved,
 		fs:               setup.FS,
 		agent:            setup.Agent,
 		baseSystemPrompt: setup.BaseSystemPrompt,
@@ -1287,13 +1287,8 @@ func resolveWorkdirVPathFromArg(workdirBase, arg string) (vpath string, display 
 		if workdirBase == "" {
 			return "", "", fmt.Errorf("workdir is not set")
 		}
-		abs := filepath.Clean(ref)
-		rel, err := filepath.Rel(workdirBase, abs)
+		rel, err := vfsutil.RelUnderBaseDir(workdirBase, ref)
 		if err != nil {
-			return "", "", fmt.Errorf("path must be within workdir")
-		}
-		rel = filepath.ToSlash(rel)
-		if rel == ".." || strings.HasPrefix(rel, "../") {
 			return "", "", fmt.Errorf("path must be within workdir")
 		}
 		ref = rel

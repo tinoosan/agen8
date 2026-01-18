@@ -82,6 +82,132 @@ type RunChatOptions struct {
 	PricingFile string
 }
 
+// RunChatOption is a functional option for configuring chat runtime behavior.
+//
+// Options are resolved at the RunChat* entrypoints via resolveRunChatOptions.
+type RunChatOption func(*RunChatOptions)
+
+func defaultRunChatOptions() RunChatOptions {
+	return RunChatOptions{
+		// Model: empty by default (resolved against session/env at runtime)
+		// WorkDir: empty by default (env fallback + Getwd at runtime)
+		MaxSteps:           200,
+		MaxTraceBytes:      8 * 1024,
+		MaxMemoryBytes:     8 * 1024,
+		MaxProfileBytes:    4 * 1024,
+		RecentHistoryPairs: 8,
+		IncludeHistoryOps:  boolPtr(true),
+		// Pricing: empty/0 by default (resolved against builtin table at runtime)
+	}
+}
+
+func resolveRunChatOptions(opts ...RunChatOption) RunChatOptions {
+	o := defaultRunChatOptions()
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt(&o)
+	}
+
+	// Preserve existing env fallbacks.
+	if strings.TrimSpace(o.WorkDir) == "" {
+		o.WorkDir = strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR"))
+	}
+	if strings.TrimSpace(o.PricingFile) == "" {
+		o.PricingFile = strings.TrimSpace(os.Getenv("WORKBENCH_PRICING_FILE"))
+	}
+
+	// Preserve existing defaults for zero/negative values.
+	if o.MaxSteps <= 0 {
+		o.MaxSteps = 200
+	}
+	if o.MaxTraceBytes <= 0 {
+		o.MaxTraceBytes = 8 * 1024
+	}
+	if o.MaxMemoryBytes <= 0 {
+		o.MaxMemoryBytes = 8 * 1024
+	}
+	if o.MaxProfileBytes <= 0 {
+		o.MaxProfileBytes = 4 * 1024
+	}
+	if o.RecentHistoryPairs <= 0 {
+		o.RecentHistoryPairs = 8
+	}
+	if o.IncludeHistoryOps == nil {
+		o.IncludeHistoryOps = boolPtr(true)
+	}
+
+	return o
+}
+
+func WithModel(model string) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.Model = strings.TrimSpace(model)
+	}
+}
+
+func WithWorkDir(workDir string) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.WorkDir = strings.TrimSpace(workDir)
+	}
+}
+
+func WithMaxSteps(maxSteps int) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.MaxSteps = maxSteps
+	}
+}
+
+func WithTraceBytes(maxTraceBytes int) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.MaxTraceBytes = maxTraceBytes
+	}
+}
+
+func WithMemoryBytes(maxMemoryBytes int) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.MaxMemoryBytes = maxMemoryBytes
+	}
+}
+
+func WithProfileBytes(maxProfileBytes int) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.MaxProfileBytes = maxProfileBytes
+	}
+}
+
+func WithRecentHistoryPairs(pairs int) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.RecentHistoryPairs = pairs
+	}
+}
+
+func WithUserID(userID string) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.UserID = strings.TrimSpace(userID)
+	}
+}
+
+func WithIncludeHistoryOps(include bool) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.IncludeHistoryOps = boolPtr(include)
+	}
+}
+
+func WithPricingUSDPerMTokens(priceInPerM, priceOutPerM float64) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.PriceInPerMTokensUSD = priceInPerM
+		o.PriceOutPerMTokensUSD = priceOutPerM
+	}
+}
+
+func WithPricingFile(pricingFile string) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.PricingFile = strings.TrimSpace(pricingFile)
+	}
+}
+
 func (o RunChatOptions) withDefaults() RunChatOptions {
 	if strings.TrimSpace(o.WorkDir) == "" {
 		o.WorkDir = strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR"))

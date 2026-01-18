@@ -24,7 +24,7 @@ func TestLazyRunner_Model_DoesNotInitializeSession(t *testing.T) {
 	ch := make(chan events.Event, 10)
 	r := &lazyNewSessionTurnRunner{
 		ctx:  context.Background(),
-		opts: RunChatOptions{},
+		opts: resolveRunChatOptions(),
 		evCh: ch,
 	}
 
@@ -83,7 +83,7 @@ func TestTUITurnRunner_Model_UpdatesAgentAndSession(t *testing.T) {
 		cfg:  cfg,
 		fs:   vfs.NewFS(),
 		run:  run,
-		opts: RunChatOptions{Model: "openai/gpt-5.2"},
+		opts: resolveRunChatOptions(WithModel("openai/gpt-5.2")),
 		agent: &agent.Agent{
 			Model: "openai/gpt-5.2",
 		},
@@ -130,7 +130,7 @@ func TestTUITurnRunner_Model_InvalidDoesNotChange(t *testing.T) {
 	r := &tuiTurnRunner{
 		fs:   vfs.NewFS(),
 		run:  types.Run{RunId: "run-test", SessionID: "sess-test"},
-		opts: RunChatOptions{Model: "openai/gpt-5.2"},
+		opts: resolveRunChatOptions(WithModel("openai/gpt-5.2")),
 		agent: &agent.Agent{
 			Model: "openai/gpt-5.2",
 		},

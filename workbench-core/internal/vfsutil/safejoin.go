@@ -59,3 +59,43 @@ func SafeJoinBaseDir(baseDir, subpath string) (string, error) {
 
 	return joinedAbs, nil
 }
+
+// RelUnderBaseDir converts an absolute OS path into a clean, forward-slash relative path
+// under baseDir.
+//
+// It is the inverse of SafeJoinBaseDir for the common case where a caller has an absolute
+// path (often user-provided) and needs a stable, resource-style relative path while
+// enforcing containment.
+//
+// It returns an error if absPath is not absolute or is not contained within baseDir.
+func RelUnderBaseDir(baseDir, absPath string) (string, error) {
+	if strings.TrimSpace(baseDir) == "" {
+		return "", fmt.Errorf("baseDir is required")
+	}
+	absPath = strings.TrimSpace(absPath)
+	if absPath == "" {
+		return "", fmt.Errorf("absPath is required")
+	}
+	if !filepath.IsAbs(absPath) {
+		return "", fmt.Errorf("absolute paths required")
+	}
+
+	baseAbs, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("abs baseDir: %w", err)
+	}
+	targetAbs, err := filepath.Abs(filepath.Clean(absPath))
+	if err != nil {
+		return "", fmt.Errorf("abs path: %w", err)
+	}
+
+	rel, err := filepath.Rel(baseAbs, targetAbs)
+	if err != nil {
+		return "", fmt.Errorf("rel: %w", err)
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", fmt.Errorf("invalid path: escapes mount root")
+	}
+	return rel, nil
+}

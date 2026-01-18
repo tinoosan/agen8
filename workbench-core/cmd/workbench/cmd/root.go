@@ -90,21 +90,20 @@ new run in that session (workspaces remain run-scoped).
 			modelOverride = strings.TrimSpace(modelID)
 		}
 
-		opts := app.RunChatOptions{
-			Model:                 modelOverride,
-			WorkDir:               workDir,
-			MaxSteps:              maxSteps,
-			MaxTraceBytes:         maxTraceBytes,
-			MaxMemoryBytes:        maxMemoryBytes,
-			MaxProfileBytes:       maxProfileBytes,
-			RecentHistoryPairs:    recentHistoryPairs,
-			UserID:                userID,
-			IncludeHistoryOps:     &includeHistoryOps,
-			PriceInPerMTokensUSD:  priceInPerM,
-			PriceOutPerMTokensUSD: priceOutPerM,
-			PricingFile:           pricingFile,
+		opts := []app.RunChatOption{
+			app.WithModel(modelOverride),
+			app.WithWorkDir(workDir),
+			app.WithMaxSteps(maxSteps),
+			app.WithTraceBytes(maxTraceBytes),
+			app.WithMemoryBytes(maxMemoryBytes),
+			app.WithProfileBytes(maxProfileBytes),
+			app.WithRecentHistoryPairs(recentHistoryPairs),
+			app.WithUserID(userID),
+			app.WithIncludeHistoryOps(includeHistoryOps),
+			app.WithPricingUSDPerMTokens(priceInPerM, priceOutPerM),
+			app.WithPricingFile(pricingFile),
 		}
-		return app.RunNewChatTUI(cmd.Context(), cfg, title, goal, maxContextB, opts)
+		return app.RunNewChatTUI(cmd.Context(), cfg, title, goal, maxContextB, opts...)
 	},
 }
 

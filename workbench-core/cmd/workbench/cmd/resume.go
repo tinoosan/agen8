@@ -36,20 +36,19 @@ var resumeCmd = &cobra.Command{
 		if cmd.Root().PersistentFlags().Changed("model") {
 			modelOverride = strings.TrimSpace(modelID)
 		}
-		opts := app.RunChatOptions{
-			Model:                 modelOverride,
-			WorkDir:               workDir,
-			MaxSteps:              maxSteps,
-			MaxTraceBytes:         maxTraceBytes,
-			MaxMemoryBytes:        maxMemoryBytes,
-			MaxProfileBytes:       maxProfileBytes,
-			RecentHistoryPairs:    recentHistoryPairs,
-			UserID:                userID,
-			IncludeHistoryOps:     &includeHistoryOps,
-			PriceInPerMTokensUSD:  priceInPerM,
-			PriceOutPerMTokensUSD: priceOutPerM,
-			PricingFile:           pricingFile,
+		opts := []app.RunChatOption{
+			app.WithModel(modelOverride),
+			app.WithWorkDir(workDir),
+			app.WithMaxSteps(maxSteps),
+			app.WithTraceBytes(maxTraceBytes),
+			app.WithMemoryBytes(maxMemoryBytes),
+			app.WithProfileBytes(maxProfileBytes),
+			app.WithRecentHistoryPairs(recentHistoryPairs),
+			app.WithUserID(userID),
+			app.WithIncludeHistoryOps(includeHistoryOps),
+			app.WithPricingUSDPerMTokens(priceInPerM, priceOutPerM),
+			app.WithPricingFile(pricingFile),
 		}
-		return app.RunChatTUI(cmd.Context(), cfg, run, opts)
+		return app.RunChatTUI(cmd.Context(), cfg, run, opts...)
 	},
 }
