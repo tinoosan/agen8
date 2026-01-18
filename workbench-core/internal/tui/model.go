@@ -100,6 +100,11 @@ type Model struct {
 	runner TurnRunner
 	events <-chan events.Event
 
+	// quitByCtrlC is set when the user quits via the ctrl+c keybinding.
+	// Bubble Tea returns nil error for a normal tea.Quit, so we track this to surface
+	// an interrupt signal to callers (for example, to print a resume hint).
+	quitByCtrlC bool
+
 	transcript     viewport.Model
 	activityList   list.Model
 	activityDetail viewport.Model
@@ -107,6 +112,13 @@ type Model struct {
 	transcriptItems         []transcriptItem
 	transcriptItemStartLine []int
 	lastTurnUserItemIdx     int
+
+	// fileSnapCache is a best-effort in-memory cache of files touched during this
+	// session/run, used to render diff previews in the transcript.
+	fileSnapCache map[string]string // vpath -> last-known text (possibly truncated)
+
+	// pendingFileOps tracks the last in-flight file op per path (request->response).
+	pendingFileOps map[string]pendingFileOp // vpath -> pending op metadata
 
 	activities        []Activity
 	activityIndexByID map[string]int
@@ -177,6 +189,7 @@ type Model struct {
 	styleUserBox   lipgloss.Style
 	styleUserLabel lipgloss.Style
 	styleAgentBox  lipgloss.Style
+	styleFileChangeBox lipgloss.Style
 	styleAgent     lipgloss.Style
 	styleAction    lipgloss.Style
 	styleTelemetry lipgloss.Style
@@ -240,6 +253,7 @@ const (
 	transcriptAgent
 	transcriptAction
 	transcriptError
+	transcriptFileChange
 )
 
 type transcriptItem struct {
@@ -253,6 +267,31 @@ type transcriptItem struct {
 	actionCompletion  string
 	actionIsToolRun   bool
 	actionIsCompleted bool
+}
+
+const maxDiffBytesRead = 128 * 1024
+
+type pendingFileOp struct {
+	op   string
+	path string
+
+	// Best-effort previous content (from in-memory cache only).
+	before    string
+	hadBefore bool
+
+	// For fs.patch we can show the patch itself (previewed/redacted by host).
+	patchPreview   string
+	patchTruncated bool
+	patchRedacted  bool
+}
+
+type fileAfterMsg struct {
+	op   string
+	path string
+
+	text      string
+	truncated bool
+	err       error
 }
 
 // modelPickerItem implements list.Item for the model picker.
@@ -1142,6 +1181,10 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 			BorderForeground(lipgloss.Color("#404040")),
 		styleAgentBox: lipgloss.NewStyle().
 			Padding(0, 1),
+		styleFileChangeBox: lipgloss.NewStyle().
+			Padding(0, 1).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#303030")),
 		styleAgent: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#eaeaea")),
 		styleAction: lipgloss.NewStyle().
@@ -1236,6 +1279,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// Global quit.
 		if msg.Type == tea.KeyCtrlC {
+			m.quitByCtrlC = true
 			return m, tea.Quit
 		}
 
@@ -1614,8 +1658,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case eventMsg:
 		ev := events.Event(msg)
-		m.onEvent(ev)
+		evCmd := m.onEvent(ev)
 		cmds := []tea.Cmd{m.waitEvent()}
+		if evCmd != nil {
+			cmds = append(cmds, evCmd)
+		}
 		if ev.Type == "ui.editor.open" {
 			if v := strings.TrimSpace(ev.Data["vpath"]); v != "" {
 				if strings.TrimSpace(ev.Data["purpose"]) == "compose" {
@@ -1625,6 +1672,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Batch(cmds...)
+
+	case fileAfterMsg:
+		// Best-effort: update cache and render a transcript diff/patch block.
+		path := strings.TrimSpace(msg.path)
+		if path == "" || msg.err != nil {
+			return m, nil
+		}
+		if m.fileSnapCache == nil {
+			m.fileSnapCache = make(map[string]string)
+		}
+		if m.pendingFileOps == nil {
+			m.pendingFileOps = make(map[string]pendingFileOp)
+		}
+		p, ok := m.pendingFileOps[path]
+		if !ok {
+			// No pending metadata; still update cache and skip transcript.
+			m.fileSnapCache[path] = msg.text
+			return m, nil
+		}
+
+		before := p.before
+		after := msg.text
+		m.fileSnapCache[path] = after
+		delete(m.pendingFileOps, path)
+
+		verb := "Updated"
+		if !p.hadBefore {
+			verb = "Created"
+		}
+
+		preview, truncated := buildFileChangePreview(p.op, path, before, after, p.hadBefore, msg.truncated, p.patchPreview, p.patchTruncated, p.patchRedacted)
+		if strings.TrimSpace(preview) == "" {
+			return m, nil
+		}
+		if truncated {
+			preview = strings.TrimRight(preview, "\n") + "\n\n_(truncated)_\n"
+		}
+		md := "**" + verb + "** `" + path + "`\n\n" + preview
+		m.addTranscriptItem(transcriptItem{kind: transcriptFileChange, text: md})
+		m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+		return m, nil
 
 	case workdirPrefetchMsg:
 		if msg.err != nil {
@@ -2331,7 +2419,7 @@ func (m *Model) appendDetails(line string) {
 	_ = line
 }
 
-func (m *Model) onEvent(ev events.Event) {
+func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	rr := classifyEvent(ev)
 	m.observeActivityEvent(ev)
 
@@ -2423,14 +2511,38 @@ func (m *Model) onEvent(ev events.Event) {
 
 	// Chat transcript: only compact action summaries, paired request+response.
 	if rr.Class != RenderAction {
-		return
+		return nil
 	}
 
 	switch ev.Type {
 	case "agent.op.request":
+		op := strings.TrimSpace(ev.Data["op"])
+		path := strings.TrimSpace(ev.Data["path"])
+		if (op == "fs.write" || op == "fs.append" || op == "fs.patch") && path != "" {
+			if m.fileSnapCache == nil {
+				m.fileSnapCache = make(map[string]string)
+			}
+			if m.pendingFileOps == nil {
+				m.pendingFileOps = make(map[string]pendingFileOp)
+			}
+			before, ok := m.fileSnapCache[path]
+			p := pendingFileOp{
+				op:        op,
+				path:      path,
+				before:    before,
+				hadBefore: ok,
+			}
+			if op == "fs.patch" {
+				p.patchPreview = strings.TrimSpace(ev.Data["patchPreview"])
+				p.patchTruncated = strings.TrimSpace(ev.Data["patchTruncated"]) == "true"
+				p.patchRedacted = strings.TrimSpace(ev.Data["patchRedacted"]) == "true"
+			}
+			m.pendingFileOps[path] = p
+		}
+
 		txt := strings.TrimSpace(rr.Text)
 		if txt == "" {
-			return
+			return nil
 		}
 		m.pendingActionText = txt
 		m.pendingActionIsToolRun = strings.TrimSpace(ev.Data["op"]) == "tool.run"
@@ -2441,9 +2553,10 @@ func (m *Model) onEvent(ev events.Event) {
 			actionText:      txt,
 			actionIsToolRun: m.pendingActionIsToolRun,
 		})
+		return nil
 	case "agent.op.response":
 		if !m.waitingForAction || m.pendingActionIdx < 0 {
-			return
+			return nil
 		}
 		comp := strings.TrimSpace(rr.Text)
 		if m.pendingActionIdx < len(m.transcriptItems) {
@@ -2459,16 +2572,30 @@ func (m *Model) onEvent(ev events.Event) {
 		m.pendingActionIdx = -1
 		m.pendingActionIsToolRun = false
 		m.rebuildTranscript()
+
+		// If this was a successful file op, read the resulting file content so we can
+		// render a diff/patch preview in the transcript.
+		op := strings.TrimSpace(ev.Data["op"])
+		path := strings.TrimSpace(ev.Data["path"])
+		if (op == "fs.write" || op == "fs.append" || op == "fs.patch") && strings.TrimSpace(ev.Data["ok"]) == "true" && path != "" {
+			if acc, ok := m.runner.(vfsAccessor); ok {
+				return func() tea.Msg {
+					txt, _, truncated, err := acc.ReadVFS(m.ctx, path, maxDiffBytesRead)
+					return fileAfterMsg{op: op, path: path, text: txt, truncated: truncated, err: err}
+				}
+			}
+		}
+		return nil
 	default:
 		txt := strings.TrimSpace(rr.Text)
 		if txt == "" {
-			return
+			return nil
 		}
 		// Host-side command errors should appear as errors in the transcript.
 		if ev.Type == "workdir.error" {
 			m.addTranscriptItem(transcriptItem{kind: transcriptError, text: txt})
 			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
-			return
+			return nil
 		}
 		comp := "✓ ok"
 		if ev.Type == "refs.ambiguous" || ev.Type == "refs.unresolved" {
@@ -2480,6 +2607,7 @@ func (m *Model) onEvent(ev events.Event) {
 			actionCompletion:  comp,
 			actionIsCompleted: true,
 		})
+		return nil
 	}
 }
 
@@ -2535,6 +2663,14 @@ func Run(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) error
 	}
 
 	p := tea.NewProgram(m, opts...)
-	_, err := p.Run()
+	finalModel, err := p.Run()
+	if err == nil {
+		// Bubble Tea ctrl+c is handled as a keybinding above and triggers tea.Quit,
+		// which yields a nil error. Surface an interrupt sentinel so callers can
+		// react (e.g., print resume commands).
+		if fm, ok := finalModel.(Model); ok && fm.quitByCtrlC {
+			return tea.ErrInterrupted
+		}
+	}
 	return err
 }

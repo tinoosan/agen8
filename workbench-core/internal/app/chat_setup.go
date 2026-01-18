@@ -243,6 +243,23 @@ func setupTUIChatRuntime(
 				reqData["textIsJSON"] = "true"
 			}
 		}
+		if req.Op == types.HostOpFSPatch && strings.TrimSpace(req.Text) != "" {
+			// Patch preview is used by the UI to render a compact diff block in the transcript
+			// without needing to re-read large patch payloads.
+			p, tr, red, n, _ := fsWriteTextPreviewForEvent(req.Path, req.Text)
+			if p != "" {
+				reqData["patchPreview"] = p
+			}
+			if tr {
+				reqData["patchTruncated"] = "true"
+			}
+			if red {
+				reqData["patchRedacted"] = "true"
+			}
+			if n != 0 {
+				reqData["patchBytes"] = strconv.Itoa(n)
+			}
+		}
 
 		mustEmit(ctx, events.Event{
 			Type:      "agent.op.request",
@@ -264,6 +281,17 @@ func setupTUIChatRuntime(
 			"op":  resp.Op,
 			"ok":  fmtBool(resp.Ok),
 			"err": resp.Error,
+		}
+		// Include request context so the UI can associate responses with requests
+		// (and render diffs/patch previews for file ops).
+		if strings.TrimSpace(req.Path) != "" {
+			respData["path"] = strings.TrimSpace(req.Path)
+		}
+		if strings.TrimSpace(req.ToolID.String()) != "" {
+			respData["toolId"] = strings.TrimSpace(req.ToolID.String())
+		}
+		if strings.TrimSpace(req.ActionID) != "" {
+			respData["actionId"] = strings.TrimSpace(req.ActionID)
 		}
 		if resp.BytesLen != 0 {
 			respData["bytesLen"] = strconv.Itoa(resp.BytesLen)

@@ -8,7 +8,7 @@ You must respond with **exactly one JSON object** per turn.
 
 It must be either:
 
-- A host operation request (one of: `fs.list`, `fs.read`, `fs.write`, `fs.append`, `tool.run`)
+- A host operation request (one of: `fs.list`, `fs.read`, `fs.write`, `fs.append`, `fs.patch`, `tool.run`)
 - Or a terminal response: `{"op":"final","text":"..."}`
 
 Do not include any other text outside the JSON object.
@@ -39,6 +39,8 @@ VFS operations:
   - `{"op":"fs.write","path":"/workspace/notes.md","text":"..."}`
 - `fs.append(vpath, bytes)`:
   - `{"op":"fs.append","path":"/workspace/notes.md","text":"..."}`
+- `fs.patch(vpath, unifiedDiff)`:
+  - `{"op":"fs.patch","path":"/workspace/notes.md","text":"--- a/notes.md\n+++ b/notes.md\n@@ -1,1 +1,1 @@\n-old\n+new\n"}`
 
 Tool execution:
 
@@ -54,8 +56,20 @@ You can request the host to perform **VFS operations**:
 - `fs.read(vpath)` → read bytes at a VFS path
 - `fs.write(vpath, bytes)` → write/replace bytes at a VFS path
 - `fs.append(vpath, bytes)` → append bytes at a VFS path
+- `fs.patch(vpath, unifiedDiff)` → apply a **strict** unified-diff patch to a file
 
 All paths you use are **VFS paths** (start with `/`).
+
+### File editing guidance (preferred)
+
+- Prefer `fs.patch` for **small edits** to existing files (more precise, less token-heavy than rewriting full files).
+- Use `fs.write` to **create** files or **replace** a file wholesale when that’s the simplest correct change.
+- Use `fs.append` only when appending is semantically correct (logs, resource streams, incremental notes).
+
+`fs.patch` is **strict**:
+- The patch must apply cleanly (no fuzz).
+- Include sufficient context lines in hunks so it applies reliably.
+- If a patch fails, fall back to: `fs.read` the current file, regenerate a correct patch, and retry.
 
 ## 2) Discover Your Environment (Always Start Here)
 

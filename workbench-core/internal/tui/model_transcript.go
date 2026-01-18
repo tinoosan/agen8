@@ -43,8 +43,14 @@ func (m *Model) rebuildTranscript() {
 	// Agent box chrome:
 	//   - padding: 1 left + 1 right
 	//   => 2 columns of overhead
+	//
+	// File-change box chrome:
+	//   - border: 1 left + 1 right
+	//   - padding: 1 left + 1 right
+	//   => 4 columns of overhead
 	userInnerW := max(20, w-6)
 	agentInnerW := max(20, w-2)
+	fileInnerW := max(20, w-4)
 
 	lines := make([]string, 0, len(m.transcriptItems))
 	startLines := make([]int, 0, len(m.transcriptItems))
@@ -97,6 +103,10 @@ func (m *Model) rebuildTranscript() {
 				line += "  " + m.styleDim.Render(strings.TrimSpace(it.actionCompletion))
 			}
 			lines = append(lines, line)
+			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
+		case transcriptFileChange:
+			rendered := strings.Trim(m.renderer.RenderMarkdown(strings.TrimSpace(it.text), fileInnerW), "\n")
+			lines = append(lines, m.styleFileChangeBox.Render(rendered))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		}
 	}
