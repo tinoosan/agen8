@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 // DiskMemoryStore is a run-scoped MemoryStore backed by the existing on-disk layout:
@@ -33,8 +33,8 @@ func NewDiskMemoryStore(cfg config.Config, runId string) (*DiskMemoryStore, erro
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(runId) == "" {
-		return nil, fmt.Errorf("runId is required")
+	if err := validate.NonEmpty("runId", runId); err != nil {
+		return nil, err
 	}
 	baseDir := fsutil.GetRunMemoryDir(cfg.DataDir, runId)
 	return NewDiskMemoryStoreFromDir(baseDir)
@@ -42,8 +42,8 @@ func NewDiskMemoryStore(cfg config.Config, runId string) (*DiskMemoryStore, erro
 
 // NewDiskMemoryStoreFromDir constructs a DiskMemoryStore rooted at baseDir.
 func NewDiskMemoryStoreFromDir(baseDir string) (*DiskMemoryStore, error) {
-	if strings.TrimSpace(baseDir) == "" {
-		return nil, fmt.Errorf("baseDir is required")
+	if err := validate.NonEmpty("baseDir", baseDir); err != nil {
+		return nil, err
 	}
 	s := &DiskMemoryStore{BaseDir: baseDir}
 	if err := s.ensure(); err != nil {
@@ -53,8 +53,11 @@ func NewDiskMemoryStoreFromDir(baseDir string) (*DiskMemoryStore, error) {
 }
 
 func (s *DiskMemoryStore) ensure() error {
-	if s == nil || strings.TrimSpace(s.BaseDir) == "" {
-		return fmt.Errorf("disk memory store baseDir is required")
+	if s == nil {
+		return fmt.Errorf("disk memory store is nil")
+	}
+	if err := validate.NonEmpty("disk memory store baseDir", s.BaseDir); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(s.BaseDir, 0755); err != nil {
 		return err

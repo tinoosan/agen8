@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 // HostExecutor is the host boundary for executing one host primitive.
@@ -79,11 +80,11 @@ func New(cfg Config) (*Agent, error) {
 	if cfg.Exec == nil {
 		return nil, fmt.Errorf("agent Exec is required")
 	}
-	if strings.TrimSpace(cfg.Model) == "" {
-		return nil, fmt.Errorf("agent Model is required")
+	if err := validate.NonEmpty("agent Model", cfg.Model); err != nil {
+		return nil, err
 	}
-	if cfg.MaxSteps <= 0 {
-		return nil, fmt.Errorf("agent MaxSteps must be > 0")
+	if err := validate.Positive("agent MaxSteps", cfg.MaxSteps); err != nil {
+		return nil, err
 	}
 
 	system := strings.TrimSpace(cfg.SystemPrompt)

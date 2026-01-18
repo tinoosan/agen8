@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tinoosan/workbench-core/internal/validate"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
@@ -114,8 +115,8 @@ func (s *InMemoryResultsStore) PutCall(callID string, responseJSON []byte) error
 		return fmt.Errorf("results store is nil")
 	}
 	callID = strings.TrimSpace(callID)
-	if callID == "" {
-		return fmt.Errorf("callID is required")
+	if err := validate.NonEmpty("callID", callID); err != nil {
+		return err
 	}
 	if responseJSON == nil {
 		return fmt.Errorf("responseJSON is required")
@@ -138,8 +139,8 @@ func (s *InMemoryResultsStore) GetCallResponseJSON(callID string) ([]byte, error
 		return nil, fmt.Errorf("results store is nil")
 	}
 	callID = strings.TrimSpace(callID)
-	if callID == "" {
-		return nil, fmt.Errorf("callID is required")
+	if err := validate.NonEmpty("callID", callID); err != nil {
+		return nil, err
 	}
 
 	s.mu.RLock()
@@ -171,15 +172,15 @@ func (s *InMemoryResultsStore) PutArtifact(callID, artifactPath, mediaType strin
 		return fmt.Errorf("results store is nil")
 	}
 	callID = strings.TrimSpace(callID)
-	if callID == "" {
-		return fmt.Errorf("callID is required")
+	if err := validate.NonEmpty("callID", callID); err != nil {
+		return err
 	}
 	artifactPath = strings.TrimSpace(artifactPath)
-	if artifactPath == "" {
-		return fmt.Errorf("artifactPath is required")
+	if err := validate.NonEmpty("artifactPath", artifactPath); err != nil {
+		return err
 	}
-	if mediaType == "" {
-		return fmt.Errorf("mediaType is required")
+	if err := validate.NonEmpty("mediaType", mediaType); err != nil {
+		return err
 	}
 	if content == nil {
 		return fmt.Errorf("content is required")
@@ -212,12 +213,12 @@ func (s *InMemoryResultsStore) GetArtifact(callID, artifactPath string) ([]byte,
 		return nil, "", fmt.Errorf("results store is nil")
 	}
 	callID = strings.TrimSpace(callID)
-	if callID == "" {
-		return nil, "", fmt.Errorf("callID is required")
+	if err := validate.NonEmpty("callID", callID); err != nil {
+		return nil, "", err
 	}
 	artifactPath = strings.TrimSpace(artifactPath)
-	if artifactPath == "" {
-		return nil, "", fmt.Errorf("artifactPath is required")
+	if err := validate.NonEmpty("artifactPath", artifactPath); err != nil {
+		return nil, "", err
 	}
 	clean, err := vfsutil.CleanRelPath(artifactPath)
 	if err != nil {
@@ -242,8 +243,8 @@ func (s *InMemoryResultsStore) ListArtifacts(callID string) ([]ArtifactMeta, err
 		return nil, fmt.Errorf("results store is nil")
 	}
 	callID = strings.TrimSpace(callID)
-	if callID == "" {
-		return nil, fmt.Errorf("callID is required")
+	if err := validate.NonEmpty("callID", callID); err != nil {
+		return nil, err
 	}
 
 	s.mu.RLock()

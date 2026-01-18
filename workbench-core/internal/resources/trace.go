@@ -11,6 +11,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/internal/validate"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
@@ -64,8 +65,8 @@ func NewTraceResource(cfg config.Config, runId string) (*TraceResource, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	if runId == "" {
-		return nil, fmt.Errorf("runId cannot be empty")
+	if err := validate.NonEmpty("runId", runId); err != nil {
+		return nil, err
 	}
 	baseDir := fsutil.GetTraceDir(cfg.DataDir, runId)
 	// create trace directory if it doesn't exist

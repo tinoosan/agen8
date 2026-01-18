@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 // DiskProfileStore is a global ProfileStore backed by an on-disk directory:
@@ -39,8 +39,8 @@ func NewDiskProfileStore(cfg config.Config) (*DiskProfileStore, error) {
 
 // NewDiskProfileStoreFromDir constructs a DiskProfileStore rooted at baseDir.
 func NewDiskProfileStoreFromDir(baseDir string) (*DiskProfileStore, error) {
-	if strings.TrimSpace(baseDir) == "" {
-		return nil, fmt.Errorf("baseDir is required")
+	if err := validate.NonEmpty("baseDir", baseDir); err != nil {
+		return nil, err
 	}
 	s := &DiskProfileStore{BaseDir: baseDir}
 	if err := s.ensure(); err != nil {
@@ -50,8 +50,11 @@ func NewDiskProfileStoreFromDir(baseDir string) (*DiskProfileStore, error) {
 }
 
 func (s *DiskProfileStore) ensure() error {
-	if s == nil || strings.TrimSpace(s.BaseDir) == "" {
-		return fmt.Errorf("disk profile store baseDir is required")
+	if s == nil {
+		return fmt.Errorf("disk profile store is nil")
+	}
+	if err := validate.NonEmpty("disk profile store baseDir", s.BaseDir); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(s.BaseDir, 0755); err != nil {
 		return err

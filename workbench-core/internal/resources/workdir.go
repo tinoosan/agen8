@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tinoosan/workbench-core/internal/validate"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
@@ -16,8 +17,8 @@ import (
 // at "real project files" so the agent can read and modify them via normal fs.* ops.
 func NewWorkdirResource(workdir string) (*DirResource, error) {
 	workdir = strings.TrimSpace(workdir)
-	if workdir == "" {
-		return nil, fmt.Errorf("workdir is required")
+	if err := validate.NonEmpty("workdir", workdir); err != nil {
+		return nil, err
 	}
 	abs, err := filepath.Abs(workdir)
 	if err != nil {

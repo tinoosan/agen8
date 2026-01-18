@@ -33,6 +33,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 // CreateRun initializes a new run with the given goal and context limit.
@@ -58,8 +59,8 @@ func CreateRunInSession(cfg config.Config, sessionID, parentRunID, goal string, 
 	if err := cfg.Validate(); err != nil {
 		return types.Run{}, err
 	}
-	if strings.TrimSpace(sessionID) == "" {
-		return types.Run{}, fmt.Errorf("sessionId is required")
+	if err := validate.NonEmpty("sessionId", sessionID); err != nil {
+		return types.Run{}, err
 	}
 	run := types.NewRun(goal, maxBytesForContext, sessionID, parentRunID)
 	if err := SaveRun(cfg, run); err != nil {

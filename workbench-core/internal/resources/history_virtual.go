@@ -3,11 +3,11 @@ package resources
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/internal/validate"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
@@ -68,8 +68,8 @@ func NewHistoryResource(cfg config.Config, sessionID string) (*HistoryResource, 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(sessionID) == "" {
-		return nil, fmt.Errorf("sessionId cannot be empty")
+	if err := validate.NonEmpty("sessionId", sessionID); err != nil {
+		return nil, err
 	}
 	// Keep BaseDir for debug output / inspection, but store owns the IO.
 	baseDir := fsutil.GetSessionHistoryDir(cfg.DataDir, sessionID)

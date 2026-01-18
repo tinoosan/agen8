@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 const (
@@ -57,14 +59,14 @@ func (r HostOpRequest) Validate() error {
 
 	switch r.Op {
 	case HostOpFinal:
-		if strings.TrimSpace(r.Text) == "" {
-			return fmt.Errorf("final.text is required")
+		if err := validate.NonEmpty("final.text", r.Text); err != nil {
+			return err
 		}
 		return nil
 
 	case HostOpFSList, HostOpFSRead:
-		if strings.TrimSpace(r.Path) == "" {
-			return fmt.Errorf("path is required")
+		if err := validate.NonEmpty("path", r.Path); err != nil {
+			return err
 		}
 		if r.MaxBytes < 0 {
 			return fmt.Errorf("maxBytes must be >= 0")
@@ -72,17 +74,17 @@ func (r HostOpRequest) Validate() error {
 		return nil
 
 	case HostOpFSWrite, HostOpFSAppend:
-		if strings.TrimSpace(r.Path) == "" {
-			return fmt.Errorf("path is required")
+		if err := validate.NonEmpty("path", r.Path); err != nil {
+			return err
 		}
 		return nil
 
 	case HostOpToolRun:
-		if r.ToolID.String() == "" {
-			return fmt.Errorf("toolId is required")
+		if err := validate.NonEmpty("toolId", r.ToolID.String()); err != nil {
+			return err
 		}
-		if strings.TrimSpace(r.ActionID) == "" {
-			return fmt.Errorf("actionId is required")
+		if err := validate.NonEmpty("actionId", r.ActionID); err != nil {
+			return err
 		}
 		if r.Input == nil {
 			return fmt.Errorf("input is required")

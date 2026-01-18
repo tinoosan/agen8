@@ -13,6 +13,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 // CreateSession creates and persists a new session.
@@ -35,8 +36,8 @@ func SaveSession(cfg config.Config, s types.Session) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(s.SessionID) == "" {
-		return fmt.Errorf("sessionId is required")
+	if err := validate.NonEmpty("sessionId", s.SessionID); err != nil {
+		return err
 	}
 	targetPath := fsutil.GetSessionFilePath(cfg.DataDir, s.SessionID)
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
@@ -55,8 +56,8 @@ func LoadSession(cfg config.Config, sessionID string) (types.Session, error) {
 		return types.Session{}, err
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return types.Session{}, fmt.Errorf("sessionId is required")
+	if err := validate.NonEmpty("sessionId", sessionID); err != nil {
+		return types.Session{}, err
 	}
 	targetPath := fsutil.GetSessionFilePath(cfg.DataDir, sessionID)
 	b, err := os.ReadFile(targetPath)
@@ -84,11 +85,11 @@ func AddRunToSession(cfg config.Config, sessionID, runID string) (types.Session,
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	runID = strings.TrimSpace(runID)
-	if sessionID == "" {
-		return types.Session{}, fmt.Errorf("sessionId is required")
+	if err := validate.NonEmpty("sessionId", sessionID); err != nil {
+		return types.Session{}, err
 	}
-	if runID == "" {
-		return types.Session{}, fmt.Errorf("runId is required")
+	if err := validate.NonEmpty("runId", runID); err != nil {
+		return types.Session{}, err
 	}
 	s, err := LoadSession(cfg, sessionID)
 	if err != nil {

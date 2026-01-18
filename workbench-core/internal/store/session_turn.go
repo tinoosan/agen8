@@ -1,12 +1,12 @@
 package store
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 const (
@@ -30,11 +30,11 @@ func RecordTurnInSession(cfg config.Config, sessionID, runID, userText, agentFin
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	runID = strings.TrimSpace(runID)
-	if sessionID == "" {
-		return types.Session{}, fmt.Errorf("sessionId is required")
+	if err := validate.NonEmpty("sessionId", sessionID); err != nil {
+		return types.Session{}, err
 	}
-	if runID == "" {
-		return types.Session{}, fmt.Errorf("runId is required")
+	if err := validate.NonEmpty("runId", runID); err != nil {
+		return types.Session{}, err
 	}
 
 	s, err := LoadSession(cfg, sessionID)

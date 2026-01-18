@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 const (
@@ -39,8 +40,8 @@ type DiskTraceStore struct {
 func (s DiskTraceStore) Kind() string { return "disk" }
 
 func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts TraceSinceOptions) (TraceBatch, error) {
-	if strings.TrimSpace(s.Dir) == "" {
-		return TraceBatch{}, fmt.Errorf("disk trace store: Dir is required")
+	if err := validate.NonEmpty("disk trace store Dir", s.Dir); err != nil {
+		return TraceBatch{}, err
 	}
 	offset, err := TraceCursorToInt64(cursor)
 	if err != nil {
@@ -155,8 +156,8 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts 
 }
 
 func (s DiskTraceStore) EventsLatest(_ context.Context, opts TraceLatestOptions) (TraceBatch, error) {
-	if strings.TrimSpace(s.Dir) == "" {
-		return TraceBatch{}, fmt.Errorf("disk trace store: Dir is required")
+	if err := validate.NonEmpty("disk trace store Dir", s.Dir); err != nil {
+		return TraceBatch{}, err
 	}
 
 	maxBytes := opts.MaxBytes

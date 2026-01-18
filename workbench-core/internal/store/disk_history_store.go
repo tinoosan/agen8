@@ -9,10 +9,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 // DiskHistoryStore is a session-scoped HistoryStore backed by the on-disk history layout:
@@ -30,16 +30,16 @@ func NewDiskHistoryStore(cfg config.Config, sessionID string) (*DiskHistoryStore
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(sessionID) == "" {
-		return nil, fmt.Errorf("sessionId is required")
+	if err := validate.NonEmpty("sessionId", sessionID); err != nil {
+		return nil, err
 	}
 	return NewDiskHistoryStoreFromPath(fsutil.GetSessionHistoryPath(cfg.DataDir, sessionID))
 }
 
 // NewDiskHistoryStoreFromPath constructs a DiskHistoryStore that reads/appends to path.
 func NewDiskHistoryStoreFromPath(path string) (*DiskHistoryStore, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("path is required")
+	if err := validate.NonEmpty("path", path); err != nil {
+		return nil, err
 	}
 	s := &DiskHistoryStore{Path: path}
 	if err := s.ensure(); err != nil {
@@ -49,8 +49,11 @@ func NewDiskHistoryStoreFromPath(path string) (*DiskHistoryStore, error) {
 }
 
 func (s *DiskHistoryStore) ensure() error {
-	if s == nil || strings.TrimSpace(s.Path) == "" {
-		return fmt.Errorf("disk history store path is required")
+	if s == nil {
+		return fmt.Errorf("disk history store is nil")
+	}
+	if err := validate.NonEmpty("disk history store path", s.Path); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0755); err != nil {
 		return err

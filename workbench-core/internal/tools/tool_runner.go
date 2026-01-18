@@ -40,6 +40,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/validate"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
@@ -155,11 +156,11 @@ func (r *Runner) Run(ctx context.Context, toolId types.ToolID, actionId string, 
 	if r.ToolRegistry == nil {
 		return types.ToolResponse{}, fmt.Errorf("runner ToolRegistry is required")
 	}
-	if toolId.String() == "" {
-		return types.ToolResponse{}, fmt.Errorf("toolId is required")
+	if err := validate.NonEmpty("toolId", toolId.String()); err != nil {
+		return types.ToolResponse{}, err
 	}
-	if actionId == "" {
-		return types.ToolResponse{}, fmt.Errorf("actionId is required")
+	if err := validate.NonEmpty("actionId", actionId); err != nil {
+		return types.ToolResponse{}, err
 	}
 	if input == nil {
 		return types.ToolResponse{}, fmt.Errorf("input is required")
@@ -292,11 +293,11 @@ func (r *Runner) persist(callID string, resp types.ToolResponse, artifacts []Too
 // It returns the normalized relative path that will be used for persistence and for
 // ToolResponse.Artifacts[].Path so the agent sees a stable, canonical path.
 func validateAndCleanArtifactWrite(a ToolArtifactWrite) (string, error) {
-	if a.Path == "" {
-		return "", fmt.Errorf("artifact path is required")
+	if err := validate.NonEmpty("artifact path", a.Path); err != nil {
+		return "", err
 	}
-	if a.MediaType == "" {
-		return "", fmt.Errorf("artifact mediaType is required")
+	if err := validate.NonEmpty("artifact mediaType", a.MediaType); err != nil {
+		return "", err
 	}
 	return vfsutil.CleanResultsArtifactPath(a.Path)
 }

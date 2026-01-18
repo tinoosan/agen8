@@ -8,6 +8,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
 // Agent is the minimal "agent loop v0": ask a model what to do next and execute it.
@@ -67,8 +68,8 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 	if a.Exec == nil {
 		return "", nil, 0, fmt.Errorf("agent Exec is required")
 	}
-	if strings.TrimSpace(a.Model) == "" {
-		return "", nil, 0, fmt.Errorf("agent Model is required")
+	if err := validate.NonEmpty("agent Model", a.Model); err != nil {
+		return "", nil, 0, err
 	}
 	if len(msgs) == 0 {
 		return "", nil, 0, fmt.Errorf("msgs is required")
@@ -160,8 +161,8 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 
 // Run executes the agent loop for a single user goal and returns the final response text.
 func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
-	if strings.TrimSpace(goal) == "" {
-		return "", fmt.Errorf("goal is required")
+	if err := validate.NonEmpty("goal", goal); err != nil {
+		return "", err
 	}
 	final, _, _, err := a.RunConversation(ctx, []types.LLMMessage{
 		{Role: "user", Content: goal},

@@ -11,7 +11,6 @@ import (
 	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/events"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/llm"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
@@ -64,11 +63,6 @@ func setupTUIChatRuntime(
 		return nil, fmt.Errorf("model is required")
 	}
 
-	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
-	if err != nil {
-		return nil, fmt.Errorf("create trace: %w", err)
-	}
-
 	fs := vfs.NewFS()
 
 	workdirAbs, err := resolveWorkDir(opts.WorkDir)
@@ -80,58 +74,36 @@ func setupTUIChatRuntime(
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
 
-	workspace, err := resources.NewWorkspace(cfg, run.RunId)
-	if err != nil {
-		return nil, fmt.Errorf("create workspace: %w", err)
+	f := &resources.Factory{
+		DataDir:   cfg.DataDir,
+		SessionID: run.SessionID,
+		RunID:     run.RunId,
 	}
-
-	toolsDir := fsutil.GetToolsDir(cfg.DataDir)
-	_ = os.MkdirAll(toolsDir, 0755)
-
-	builtinProvider, err := tools.NewBuiltinManifestProvider()
-	if err != nil {
-		return nil, fmt.Errorf("load builtin tool manifests: %w", err)
+	// Reuse the existing disk history store instance (used by history sinks) when possible.
+	if hs, ok := historyRes.Store.(store.HistoryStore); ok {
+		f.HistoryStore = hs
+	} else if hs, ok := historyRes.Appender.(store.HistoryStore); ok {
+		f.HistoryStore = hs
 	}
-	diskProvider := tools.NewDiskManifestProvider(toolsDir)
-	toolManifests := tools.NewCompositeToolManifestRegistry(builtinProvider, diskProvider)
-
-	toolsResource, err := resources.NewToolsResource(toolManifests)
-	if err != nil {
-		return nil, fmt.Errorf("create tools resource: %w", err)
+	if err := f.MountAll(fs); err != nil {
+		return nil, err
 	}
-
-	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewResultsResource(resultsStore)
-	if err != nil {
-		return nil, fmt.Errorf("create results: %w", err)
-	}
-
-	memStore, err := store.NewDiskMemoryStore(cfg, run.RunId)
-	if err != nil {
-		return nil, fmt.Errorf("create memory store: %w", err)
-	}
-	memoryRes, err := resources.NewMemoryResource(memStore)
-	if err != nil {
-		return nil, fmt.Errorf("create memory resource: %w", err)
-	}
-
-	profileStore, err := store.NewDiskProfileStore(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("create profile store: %w", err)
-	}
-	profileRes, err := resources.NewProfileResource(profileStore)
-	if err != nil {
-		return nil, fmt.Errorf("create profile resource: %w", err)
-	}
-
-	fs.Mount(vfs.MountWorkspace, workspace)
+	// /workdir depends on a user-provided OS directory, so it is mounted outside the factory.
 	fs.Mount(vfs.MountWorkdir, workdirRes)
-	fs.Mount(vfs.MountResults, resultsRes)
-	fs.Mount(vfs.MountTrace, traceRes)
-	fs.Mount(vfs.MountTools, toolsResource)
-	fs.Mount(vfs.MountMemory, memoryRes)
-	fs.Mount(vfs.MountProfile, profileRes)
-	fs.Mount(vfs.MountHistory, historyRes)
+
+	// Pull resource handles back out for wiring and debug data.
+	_, wsr, _, _ := fs.Resolve("/" + vfs.MountWorkspace)
+	workspace := wsr.(*resources.DirResource)
+	_, trr, _, _ := fs.Resolve("/" + vfs.MountTrace)
+	traceRes := trr.(*resources.TraceResource)
+	_, mr, _, _ := fs.Resolve("/" + vfs.MountMemory)
+	memoryRes := mr.(*resources.VirtualMemoryResource)
+	_, hr, _, _ := fs.Resolve("/" + vfs.MountHistory)
+	historyRes = hr.(*resources.HistoryResource)
+
+	resultsStore := f.ResultsStore
+	memStore := f.MemoryStore
+	profileStore := f.ProfileStore
 
 	mustEmit(context.Background(), events.Event{
 		Type:    "host.mounted",
@@ -154,7 +126,7 @@ func setupTUIChatRuntime(
 		return nil, fmt.Errorf("resolve workdir root: %w", err)
 	}
 
-	traceStore := store.DiskTraceStore{Dir: traceRes.BaseDir}
+	traceStore := f.TraceStore
 	builtinCfg := tools.BuiltinConfig{
 		BashRootDir:    absWorkdirRoot,
 		RipgrepRootDir: absWorkdirRoot,
