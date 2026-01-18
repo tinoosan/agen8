@@ -11,6 +11,30 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
+// ResultWriter is used by the tool runner to persist call outputs.
+type ResultWriter interface {
+	PutCall(callID string, responseJSON []byte) error
+	PutArtifact(callID, artifactPath, mediaType string, content []byte) error
+}
+
+// ResultReader is used by VFS to serve reads.
+type ResultReader interface {
+	GetCallResponseJSON(callID string) ([]byte, error)
+	GetArtifact(callID, artifactPath string) ([]byte, string, error)
+}
+
+// ResultLister is used by VFS to serve listings.
+type ResultLister interface {
+	ListCallIDs() ([]string, error)
+	ListArtifacts(callID string) ([]ArtifactMeta, error)
+}
+
+// ResultsView is the minimal store contract needed by the /results VFS resource.
+type ResultsView interface {
+	ResultReader
+	ResultLister
+}
+
 // ResultsStore is the host-side storage interface for tool call outputs.
 //
 // This is the backing store for the virtual VFS mount "/results".
@@ -241,3 +265,4 @@ func (s *InMemoryResultsStore) ListArtifacts(callID string) ([]ArtifactMeta, err
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
 }
+

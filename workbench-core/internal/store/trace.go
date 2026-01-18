@@ -111,3 +111,4 @@ func TraceCursorToInt64(c TraceCursor) (int64, error) {
 	}
 	return n, nil
 }
+

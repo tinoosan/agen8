@@ -39,26 +39,9 @@ type MemoryContentAppender interface {
 	AppendMemory(ctx context.Context, text string) error
 }
 
-// ProfileContentReader reads committed global profile content.
-type ProfileContentReader interface {
-	GetProfile(ctx context.Context) (string, error)
-}
-
-// ProfileContentAppender appends committed global profile content.
-type ProfileContentAppender interface {
-	AppendProfile(ctx context.Context, text string) error
-}
-
 // MemoryVFSStore is the minimal store contract needed by the /memory VFS resource.
 type MemoryVFSStore interface {
 	MemoryContentReader
-	StagingArea
-	CommitLogReader
-}
-
-// ProfileVFSStore is the minimal store contract needed by the /profile VFS resource.
-type ProfileVFSStore interface {
-	ProfileContentReader
 	StagingArea
 	CommitLogReader
 }
@@ -69,9 +52,19 @@ type MemoryCommitter interface {
 	CommitLogAppender
 }
 
-// ProfileCommitter is the minimal store contract needed to commit profile updates.
-type ProfileCommitter interface {
-	ProfileContentAppender
-	CommitLogAppender
+// MemoryStore is the host-side storage interface backing the virtual VFS mount "/memory".
+//
+// Memory is intentionally simple and stable:
+//   - /memory/memory.md       (committed memory, host-managed; agent can read)
+//   - /memory/update.md       (staging file, agent can write; host evaluates + commits)
+//   - /memory/commits.jsonl   (audit log, host-managed; readable for debugging)
+//
+// This interface allows you to swap storage backends later (disk, sqlite, etc)
+// without changing the agent loop, VFS ops, or evaluation policy.
+type MemoryStore interface {
+	MemoryContentReader
+	MemoryContentAppender
+	StagingArea
+	CommitLog
 }
 
