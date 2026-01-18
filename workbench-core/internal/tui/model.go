@@ -8,10 +8,12 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"sort"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -71,6 +73,17 @@ type editorSaveMsg struct {
 type editorExternalDoneMsg struct {
 	vpath string
 	err   error
+}
+
+type workdirPrefetchMsg struct {
+	workdir string
+	err     error
+}
+
+type preinitStatusMsg struct {
+	workdir string
+	modelID string
+	err     error
 }
 
 type Model struct {
@@ -179,6 +192,13 @@ type Model struct {
 	// Model picker state
 	modelPickerOpen bool
 	modelPickerList list.Model
+
+	// File picker state (workdir-scoped, triggered by typing '@' in input)
+	filePickerOpen     bool
+	filePickerList     list.Model
+	filePickerAllPaths []string // canonical rel paths (slash-separated)
+	filePickerQuery    string   // last applied query (for substring filtering)
+	filePickerWorkdir  string   // workdir used for filePickerAllPaths (absolute)
 }
 
 type focusTarget int
@@ -259,6 +279,375 @@ func (d modelPickerDelegate) Render(w io.Writer, m list.Model, index int, item l
 	maxW := max(1, m.Width()-lipgloss.Width(prefix))
 	line := truncateRight(it.id, maxW)
 	_, _ = fmt.Fprint(w, style.Render(prefix+line))
+}
+
+// filePickerItem implements list.Item for the file picker.
+type filePickerItem struct {
+	rel string // workdir-relative, slash-separated
+}
+
+func (f filePickerItem) FilterValue() string { return f.rel }
+func (f filePickerItem) Title() string       { return f.rel }
+func (f filePickerItem) Description() string { return "" }
+
+type filePickerDelegate struct {
+	styleRow lipgloss.Style
+	styleSel lipgloss.Style
+}
+
+func newFilePickerDelegate() filePickerDelegate {
+	return filePickerDelegate{
+		styleRow: lipgloss.NewStyle().Foreground(lipgloss.Color("#b0b0b0")),
+		// Avoid background/underline styling (can look like text selection).
+		styleSel: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#eaeaea")).
+			Bold(true),
+	}
+}
+
+func (d filePickerDelegate) Height() int  { return 1 }
+func (d filePickerDelegate) Spacing() int { return 0 }
+func (d filePickerDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd {
+	return nil
+}
+
+func (d filePickerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	it, ok := item.(filePickerItem)
+	if !ok {
+		return
+	}
+
+	isSel := index == m.Index()
+	prefix := "  "
+	style := d.styleRow
+	if isSel {
+		prefix = "› "
+		style = d.styleSel
+	}
+
+	// Keep line within list width.
+	maxW := max(1, m.Width()-lipgloss.Width(prefix))
+	line := truncateRight(it.rel, maxW)
+	_, _ = fmt.Fprint(w, style.Render(prefix+line))
+}
+
+func (m *Model) currentInputValue() string {
+	if m.isMulti {
+		return m.multiline.Value()
+	}
+	return m.single.Value()
+}
+
+func (m *Model) setCurrentInputValue(v string) {
+	if m.isMulti {
+		m.multiline.SetValue(v)
+	} else {
+		m.single.SetValue(v)
+	}
+}
+
+func (m *Model) clearCurrentInput() {
+	if m.isMulti {
+		m.multiline.SetValue("")
+	} else {
+		m.single.SetValue("")
+	}
+}
+
+func scanWorkdirFiles(baseDir string, maxVisited int) ([]string, error) {
+	baseDir = strings.TrimSpace(baseDir)
+	if baseDir == "" {
+		return nil, nil
+	}
+	if maxVisited <= 0 {
+		maxVisited = 10000
+	}
+
+	paths := make([]string, 0, 256)
+	visited := 0
+	err := filepath.WalkDir(baseDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			// Skip hidden directories to keep the list bounded and less noisy.
+			if p != baseDir && strings.HasPrefix(d.Name(), ".") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
+		visited++
+		if maxVisited > 0 && visited > maxVisited {
+			return fs.SkipAll
+		}
+
+		rel, err := filepath.Rel(baseDir, p)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		rel = strings.TrimSpace(rel)
+		if rel == "" || rel == "." {
+			return nil
+		}
+		paths = append(paths, rel)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func (m *Model) openFilePicker(initialQuery string) tea.Cmd {
+	m.filePickerOpen = true
+
+	l := list.New([]list.Item{}, newFilePickerDelegate(), 0, 0)
+	l.Title = "Select File"
+	l.SetShowHelp(false)
+	l.SetShowStatusBar(false)
+	l.SetShowPagination(true)
+	// Important: we do substring filtering ourselves from the input's @token.
+	l.SetFilteringEnabled(false)
+	l.SetShowFilter(false)
+	l.Styles.Title = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#707070")).
+		Bold(true)
+	m.filePickerList = l
+
+	m.filePickerAllPaths = nil
+	m.filePickerWorkdir = ""
+	m.applyFilePickerQuery(initialQuery) // ok even if empty list
+
+	wd := strings.TrimSpace(m.workdir)
+	if wd != "" {
+		if all, err := scanWorkdirFiles(wd, 10000); err == nil {
+			m.filePickerAllPaths = all
+			m.filePickerWorkdir = wd
+			m.applyFilePickerQuery(initialQuery)
+		}
+		m.layout()
+		return nil
+	}
+
+	// Workdir not known yet (can happen before first turn). Prefetch it without
+	// creating a run by calling the host /pwd command.
+	m.filePickerList.Title = "Select File (loading workdir…)"
+	m.layout()
+	return func() tea.Msg {
+		wd, err := m.runner.RunTurn(m.ctx, "/pwd")
+		return workdirPrefetchMsg{workdir: strings.TrimSpace(wd), err: err}
+	}
+}
+
+func (m *Model) closeFilePicker() {
+	m.filePickerOpen = false
+	m.filePickerList = list.Model{}
+	m.filePickerAllPaths = nil
+	m.filePickerQuery = ""
+	m.filePickerWorkdir = ""
+}
+
+func (m *Model) applyFilePickerQuery(q string) {
+	q = strings.TrimSpace(q)
+	m.filePickerQuery = q
+
+	// Substring match (case-insensitive) over rel paths.
+	needle := strings.ToLower(q)
+	items := make([]list.Item, 0, 200)
+	for _, rel := range m.filePickerAllPaths {
+		if needle == "" || strings.Contains(strings.ToLower(rel), needle) {
+			items = append(items, filePickerItem{rel: rel})
+			if len(items) >= 500 {
+				break
+			}
+		}
+	}
+	m.filePickerList.SetItems(items)
+	if len(items) > 0 {
+		m.filePickerList.Select(0)
+	}
+
+	// Surface the active query since the underlying input is hidden by the modal.
+	title := "Select File"
+	if strings.TrimSpace(m.filePickerQuery) != "" {
+		title += " (@" + truncateMiddle(m.filePickerQuery, 32) + ")"
+	}
+	if strings.Contains(m.filePickerList.Title, "loading") {
+		// Preserve loading prefix if still loading.
+		if strings.TrimSpace(m.filePickerWorkdir) == "" {
+			m.filePickerList.Title = "Select File (loading workdir…) (@" + truncateMiddle(m.filePickerQuery, 32) + ")"
+			return
+		}
+	}
+	m.filePickerList.Title = title
+}
+
+func atQuoteClose(open rune) rune {
+	switch open {
+	case '"':
+		return '"'
+	case '\'':
+		return '\''
+	case '“':
+		return '”'
+	case '‘':
+		return '’'
+	default:
+		return 0
+	}
+}
+
+// activeAtTokenAtEnd finds the last @token that is currently being edited at the end
+// of the input and returns:
+// - query: token text (without leading @ and without surrounding quotes)
+// - replaceStart/replaceEnd: rune indices to replace with the selected @ref
+func activeAtTokenAtEnd(input string) (query string, replaceStart int, replaceEnd int, ok bool) {
+	rs := []rune(input)
+	n := len(rs)
+	if n == 0 {
+		return "", 0, 0, false
+	}
+
+	for i := n - 1; i >= 0; i-- {
+		if rs[i] != '@' {
+			continue
+		}
+		// Require a token boundary before '@' to avoid matching email-like text.
+		if i > 0 && !unicode.IsSpace(rs[i-1]) {
+			continue
+		}
+
+		// "@": empty query.
+		if i+1 >= n {
+			return "", i, n, true
+		}
+
+		open := rs[i+1]
+		if close := atQuoteClose(open); close != 0 {
+			// Quoted token @"..."/@'...'/@“...”/@‘...’
+			start := i + 2
+			if start > n {
+				start = n
+			}
+			// Find a closing quote.
+			closeIdx := -1
+			for j := start; j < n; j++ {
+				if rs[j] == close {
+					closeIdx = j
+					break
+				}
+			}
+			if closeIdx == -1 {
+				// Still typing (no closing quote); active token must be at end.
+				return string(rs[start:]), i, n, true
+			}
+			// If the quote closed before the end, treat it as not the active token.
+			if closeIdx != n-1 {
+				continue
+			}
+			return string(rs[start:closeIdx]), i, n, true
+		}
+
+		// Unquoted token: consume until whitespace.
+		j := i + 1
+		for j < n && !unicode.IsSpace(rs[j]) {
+			j++
+		}
+		// Active token must reach end-of-input.
+		if j != n {
+			continue
+		}
+		return string(rs[i+1 : n]), i, n, true
+	}
+	return "", 0, 0, false
+}
+
+func formatAtRef(rel string) string {
+	rel = strings.TrimSpace(rel)
+	if rel == "" {
+		return "@"
+	}
+	// Quote only when needed (spaces/tabs/newlines).
+	if strings.ContainsAny(rel, " \t\n") {
+		// Prefer a quote that doesn't appear in the path.
+		if strings.Contains(rel, "'") && !strings.Contains(rel, `"`) {
+			return `@"` + rel + `"`
+		}
+		return `@'` + rel + `'`
+	}
+	return "@" + rel
+}
+
+func isEditorCommand(input string) bool {
+	fields := strings.Fields(strings.TrimSpace(input))
+	return len(fields) > 0 && fields[0] == "/editor"
+}
+
+func (m *Model) syncFilePickerFromInput() tea.Cmd {
+	input := m.currentInputValue()
+	q, _, _, ok := activeAtTokenAtEnd(input)
+	if !ok {
+		if m.filePickerOpen {
+			m.closeFilePicker()
+			m.layout()
+		}
+		return nil
+	}
+	if !m.filePickerOpen {
+		return m.openFilePicker(q)
+	}
+	m.applyFilePickerQuery(q)
+	return nil
+}
+
+func (m *Model) selectFileFromPicker() tea.Cmd {
+	if m.filePickerList.Items() == nil || len(m.filePickerList.Items()) == 0 {
+		return nil
+	}
+	selected := m.filePickerList.SelectedItem()
+	it, ok := selected.(filePickerItem)
+	if !ok {
+		return nil
+	}
+	input := m.currentInputValue()
+	_, start, end, ok := activeAtTokenAtEnd(input)
+	if !ok {
+		// Token was removed; just close.
+		m.closeFilePicker()
+		m.layout()
+		return nil
+	}
+
+	repl := formatAtRef(it.rel)
+	// Add a trailing space so the token is no longer "active" (prevents immediate re-open).
+	repl += " "
+
+	rs := []rune(input)
+	newRs := make([]rune, 0, len(rs)+len([]rune(repl))+2)
+	newRs = append(newRs, rs[:start]...)
+	newRs = append(newRs, []rune(repl)...)
+	if end < len(rs) {
+		newRs = append(newRs, rs[end:]...)
+	}
+	newInput := string(newRs)
+	m.setCurrentInputValue(newInput)
+
+	m.closeFilePicker()
+	m.layout()
+
+	// UX: for /editor, selecting a file should immediately run the command.
+	if isEditorCommand(newInput) {
+		msg := strings.TrimSpace(newInput)
+		m.clearCurrentInput()
+		if msg == "" {
+			return nil
+		}
+		return m.submit(msg)
+	}
+	return nil
 }
 
 // Hardcoded list of available slash commands for the command palette.
@@ -650,7 +1039,29 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.waitEvent()
+	return tea.Batch(
+		m.waitEvent(),
+		func() tea.Msg {
+			wd, err := m.runner.RunTurn(m.ctx, "/pwd")
+			if err != nil {
+				return preinitStatusMsg{err: err}
+			}
+			// /model (or /model show) is a host-side command and works pre-init.
+			out, err := m.runner.RunTurn(m.ctx, "/model")
+			if err != nil {
+				return preinitStatusMsg{workdir: strings.TrimSpace(wd), err: err}
+			}
+			modelID := ""
+			// Expected: "Current model: <id>"
+			if s := strings.TrimSpace(out); s != "" {
+				const pfx = "Current model:"
+				if strings.HasPrefix(s, pfx) {
+					modelID = strings.TrimSpace(strings.TrimPrefix(s, pfx))
+				}
+			}
+			return preinitStatusMsg{workdir: strings.TrimSpace(wd), modelID: strings.TrimSpace(modelID)}
+		},
+	)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -734,6 +1145,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editorNotice = ""
 			}
 			return m, cmd
+		}
+
+		// Modal-ish: file picker (captures navigation/confirm/cancel keys, but lets
+		// normal typing continue to flow into the input).
+		if m.filePickerOpen && m.focus == focusInput {
+			switch msg.Type {
+			case tea.KeyEsc:
+				m.closeFilePicker()
+				m.layout()
+				return m, nil
+			case tea.KeyEnter:
+				return m, m.selectFileFromPicker()
+			case tea.KeyUp:
+				m.filePickerList.CursorUp()
+				return m, nil
+			case tea.KeyDown:
+				m.filePickerList.CursorDown()
+				return m, nil
+			case tea.KeyPgUp, tea.KeyCtrlU:
+				m.filePickerList.CursorUp()
+				return m, nil
+			case tea.KeyPgDown, tea.KeyCtrlF:
+				m.filePickerList.CursorDown()
+				return m, nil
+			}
 		}
 
 		// Transcript scrolling (mouse capture is off by default for native selection).
@@ -946,12 +1382,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var cmd tea.Cmd
 				m.multiline, cmd = m.multiline.Update(msg)
 				m.updateCommandPalette()
-				return m, cmd
+				cmd2 := m.syncFilePickerFromInput()
+				if cmd == nil {
+					return m, cmd2
+				}
+				if cmd2 == nil {
+					return m, cmd
+				}
+				return m, tea.Batch(cmd, cmd2)
 			}
 			var cmd tea.Cmd
 			m.multiline, cmd = m.multiline.Update(msg)
 			m.updateCommandPalette()
-			return m, cmd
+			cmd2 := m.syncFilePickerFromInput()
+			if cmd == nil {
+				return m, cmd2
+			}
+			if cmd2 == nil {
+				return m, cmd
+			}
+			return m, tea.Batch(cmd, cmd2)
 		}
 
 		// Single-line mode: Enter submits.
@@ -969,7 +1419,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.layout()
 		}
 		m.updateCommandPalette()
-		return m, cmd
+		cmd2 := m.syncFilePickerFromInput()
+		if cmd == nil {
+			return m, cmd2
+		}
+		if cmd2 == nil {
+			return m, cmd
+		}
+		return m, tea.Batch(cmd, cmd2)
 
 	case eventMsg:
 		ev := events.Event(msg)
@@ -981,6 +1438,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Batch(cmds...)
+
+	case workdirPrefetchMsg:
+		if msg.err != nil {
+			// Keep picker open but empty; user can still type, or try again later.
+			return m, nil
+		}
+		if strings.TrimSpace(msg.workdir) != "" {
+			m.workdir = strings.TrimSpace(msg.workdir)
+		}
+		// If picker is open, populate it now that we know the workdir.
+		if m.filePickerOpen && strings.TrimSpace(m.workdir) != "" {
+			if all, err := scanWorkdirFiles(m.workdir, 10000); err == nil {
+				m.filePickerAllPaths = all
+				m.filePickerWorkdir = strings.TrimSpace(m.workdir)
+				m.applyFilePickerQuery(m.filePickerQuery)
+				m.filePickerList.Title = "Select File"
+				m.layout()
+			}
+		}
+		return m, nil
+
+	case preinitStatusMsg:
+		// Best-effort; do not surface errors as transcript output.
+		if strings.TrimSpace(msg.workdir) != "" {
+			m.workdir = strings.TrimSpace(msg.workdir)
+		}
+		if strings.TrimSpace(msg.modelID) != "" {
+			m.modelID = strings.TrimSpace(msg.modelID)
+		}
+		// If picker is open and workdir arrived, populate it.
+		if m.filePickerOpen && strings.TrimSpace(m.workdir) != "" && m.filePickerWorkdir == "" {
+			if all, err := scanWorkdirFiles(m.workdir, 10000); err == nil {
+				m.filePickerAllPaths = all
+				m.filePickerWorkdir = strings.TrimSpace(m.workdir)
+				m.applyFilePickerQuery(m.filePickerQuery)
+				if strings.Contains(m.filePickerList.Title, "loading") {
+					m.filePickerList.Title = "Select File"
+				}
+			}
+		}
+		m.layout()
+		return m, nil
 
 	case editorLoadMsg:
 		if strings.TrimSpace(msg.vpath) == "" || msg.vpath != m.editorVPath {
@@ -1098,6 +1597,11 @@ func (m Model) View() string {
 	body := m.renderBody()
 	input := m.renderInput()
 	base := header + "\n" + body + "\n" + input
+
+	// Overlay file picker modal if open.
+	if m.filePickerOpen {
+		return m.renderFilePicker(base)
+	}
 
 	// Overlay model picker modal if open
 	if m.modelPickerOpen {
@@ -1217,6 +1721,84 @@ func (m Model) renderModelPicker(base string) string {
 	// We intentionally avoid "overlaying" onto the base UI by slicing strings,
 	// because the base view contains ANSI escape codes (and byte-slicing them
 	// corrupts styles, causing the kind of weird highlight blocks you reported).
+	result := make([]string, m.height)
+	for i := 0; i < m.height; i++ {
+		result[i] = strings.Repeat(" ", max(1, m.width))
+
+		// Overlay modal lines
+		if i >= topPos && i < topPos+modalHeightActual {
+			lineIdx := i - topPos
+			if lineIdx < len(modalLines) {
+				modalLine := modalLines[lineIdx]
+				result[i] = strings.Repeat(" ", leftPos) + modalLine
+			}
+		}
+	}
+
+	return strings.Join(result, "\n")
+}
+
+func (m Model) renderFilePicker(base string) string {
+	// Calculate modal dimensions.
+	modalWidth := 80
+	if modalWidth > m.width-8 {
+		modalWidth = m.width - 8
+	}
+	if modalWidth < 40 {
+		modalWidth = 40
+	}
+	modalHeight := 22
+	if modalHeight > m.height-8 {
+		modalHeight = m.height - 8
+	}
+	if modalHeight < 10 {
+		modalHeight = 10
+	}
+
+	// Size the list to fit within the modal.
+	listHeight := modalHeight - 2 // no filter input, just title/pagination
+	if listHeight < 4 {
+		listHeight = 4
+	}
+	m.filePickerList.SetWidth(modalWidth - 4) // Account for padding/borders
+	m.filePickerList.SetHeight(listHeight)
+
+	// Build modal content.
+	content := m.filePickerList.View()
+
+	// Style the modal.
+	modalStyle := lipgloss.NewStyle().
+		Width(modalWidth).
+		Height(modalHeight).
+		Padding(1, 2).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#6bbcff")).
+		Foreground(lipgloss.Color("#eaeaea"))
+
+	modalContent := modalStyle.Render(content)
+
+	// Split modal content into lines.
+	modalLines := strings.Split(modalContent, "\n")
+	modalHeightActual := len(modalLines)
+	modalWidthActual := 0
+	for _, line := range modalLines {
+		if w := lipgloss.Width(line); w > modalWidthActual {
+			modalWidthActual = w
+		}
+	}
+
+	// Calculate centering position.
+	topPos := (m.height - modalHeightActual) / 2
+	if topPos < 0 {
+		topPos = 0
+	}
+	leftPos := (m.width - modalWidthActual) / 2
+	if leftPos < 0 {
+		leftPos = 0
+	}
+
+	// Render over a blank backdrop (avoid slicing ANSI from base).
+	_ = base
 	result := make([]string, m.height)
 	for i := 0; i < m.height; i++ {
 		result[i] = strings.Repeat(" ", max(1, m.width))
@@ -1449,6 +2031,21 @@ func (m *Model) onEvent(ev events.Event) {
 		// and open $VISUAL/$EDITOR without creating a run.
 		if wd := strings.TrimSpace(ev.Data["workdir"]); wd != "" {
 			m.workdir = wd
+		}
+	}
+
+	// If a file picker is open and the workdir changed/arrived, refresh it.
+	if m.filePickerOpen {
+		wdNow := strings.TrimSpace(m.workdir)
+		if wdNow != "" && wdNow != m.filePickerWorkdir {
+			if all, err := scanWorkdirFiles(wdNow, 10000); err == nil {
+				m.filePickerAllPaths = all
+				m.filePickerWorkdir = wdNow
+				m.applyFilePickerQuery(m.filePickerQuery)
+				if strings.Contains(m.filePickerList.Title, "loading") {
+					m.filePickerList.Title = "Select File"
+				}
+			}
 		}
 	}
 

@@ -107,6 +107,30 @@ func (m *Model) layout() {
 		m.modelPickerList.SetHeight(innerH)
 	}
 
+	// File picker sizing: ensure the underlying list model has a real viewport so
+	// navigation + selection behave correctly (not just during rendering).
+	if m.filePickerOpen {
+		modalW := 80
+		if modalW > m.width-8 {
+			modalW = m.width - 8
+		}
+		if modalW < 40 {
+			modalW = 40
+		}
+		modalH := 22
+		if modalH > m.height-8 {
+			modalH = m.height - 8
+		}
+		if modalH < 10 {
+			modalH = 10
+		}
+
+		innerW := max(20, modalW-4) // modal padding/border budget
+		innerH := max(4, modalH-2)
+		m.filePickerList.SetWidth(innerW)
+		m.filePickerList.SetHeight(innerH)
+	}
+
 	m.rebuildTranscript()
 	if wasAtBottom {
 		m.transcript.GotoBottom()

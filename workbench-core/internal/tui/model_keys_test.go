@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -49,6 +51,19 @@ func (s stubRunnerWithRead) ReadVFS(ctx context.Context, path string, maxBytes i
 		truncated = true
 	}
 	return string(b), bytesLen, truncated, nil
+}
+
+type runnerWithPwd struct {
+	stubRunner
+	workdir string
+}
+
+func (r runnerWithPwd) RunTurn(ctx context.Context, userMsg string) (string, error) {
+	_ = ctx
+	if strings.TrimSpace(userMsg) == "/pwd" {
+		return strings.TrimSpace(r.workdir), nil
+	}
+	return r.stubRunner.RunTurn(ctx, userMsg)
 }
 
 func TestKeyHandling_EnterSubmitsEvenWhenDetailsVisible(t *testing.T) {
@@ -697,6 +712,238 @@ func TestModelPicker_ModelCommandWithArgsStillWorks(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatalf("expected cmd (submit), got nil")
+	}
+}
+
+func writeTempFile(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	abs := filepath.Join(dir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
+		t.Fatalf("writefile: %v", err)
+	}
+}
+
+func filePickerItems(m Model) []string {
+	out := []string{}
+	for _, it := range m.filePickerList.Items() {
+		fi, ok := it.(filePickerItem)
+		if !ok {
+			continue
+		}
+		out = append(out, fi.rel)
+	}
+	return out
+}
+
+func TestFilePicker_OpensOnAtAndFiltersFromInput(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "workbench-filepicker-*")
+	if err != nil {
+		t.Fatalf("mkdtemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
+
+	writeTempFile(t, tmp, "README.md", "hi")
+	writeTempFile(t, tmp, "cmd/main.go", "package main")
+	writeTempFile(t, tmp, "docs/guide.md", "guide")
+
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.workdir = tmp
+	m.layout()
+
+	// Type "@" -> opens picker.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'@'}})
+	updated := m2.(Model)
+	if !updated.filePickerOpen {
+		t.Fatalf("expected filePickerOpen true after typing '@'")
+	}
+	if len(updated.filePickerList.Items()) == 0 {
+		t.Fatalf("expected file picker to have items")
+	}
+
+	// Type "@read" -> should filter to README.md (case-insensitive substring).
+	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m4 := m3.(Model)
+	m5, _ := m4.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	m6 := m5.(Model)
+	m7, _ := m6.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m8 := m7.(Model)
+	m9, _ := m8.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated2 := m9.(Model)
+
+	items := filePickerItems(updated2)
+	if len(items) == 0 {
+		t.Fatalf("expected items after filtering")
+	}
+	found := false
+	for _, p := range items {
+		if p == "README.md" {
+			found = true
+		}
+		// Ensure all items match substring "read".
+		if !strings.Contains(strings.ToLower(p), "read") {
+			t.Fatalf("expected all items to contain 'read', got %q", p)
+		}
+	}
+	if !found {
+		t.Fatalf("expected README.md in filtered items, got %v", items)
+	}
+}
+
+func TestFilePicker_OpensEvenWhenWorkdirUnknown(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "workbench-filepicker-*")
+	if err != nil {
+		t.Fatalf("mkdtemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
+
+	writeTempFile(t, tmp, "a.txt", "a")
+
+	m := New(context.Background(), runnerWithPwd{workdir: tmp}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	// m.workdir intentionally left empty.
+	m.layout()
+
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'@'}})
+	opened := m2.(Model)
+	if !opened.filePickerOpen {
+		t.Fatalf("expected filePickerOpen true even when workdir unknown")
+	}
+	if cmd == nil {
+		t.Fatalf("expected cmd to prefetch /pwd")
+	}
+
+	// Simulate prefetch completion (Bubble Tea would execute the cmd asynchronously).
+	m3, _ := opened.Update(workdirPrefetchMsg{workdir: tmp})
+	updated := m3.(Model)
+	if strings.TrimSpace(updated.workdir) != tmp {
+		t.Fatalf("expected workdir set to %q, got %q", tmp, updated.workdir)
+	}
+	if len(updated.filePickerList.Items()) == 0 {
+		t.Fatalf("expected picker populated after workdir prefetch")
+	}
+}
+
+func TestFilePicker_EnterInsertsAtRefAndCloses(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "workbench-filepicker-*")
+	if err != nil {
+		t.Fatalf("mkdtemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
+
+	writeTempFile(t, tmp, "a.txt", "a")
+
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.workdir = tmp
+	m.layout()
+
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'@'}})
+	opened := m2.(Model)
+	if !opened.filePickerOpen {
+		t.Fatalf("expected filePickerOpen true after '@'")
+	}
+
+	m3, cmd := opened.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := m3.(Model)
+	if cmd != nil {
+		t.Fatalf("expected no cmd (insert only), got %v", cmd)
+	}
+	if updated.filePickerOpen {
+		t.Fatalf("expected filePickerOpen false after selection")
+	}
+	if updated.single.Value() != "@a.txt " {
+		t.Fatalf("expected input to be %q, got %q", "@a.txt ", updated.single.Value())
+	}
+}
+
+func TestFilePicker_EditorCommand_SelectRunsImmediately(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "workbench-filepicker-*")
+	if err != nil {
+		t.Fatalf("mkdtemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
+
+	writeTempFile(t, tmp, "a.txt", "a")
+
+	runner := &recordingRunner{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.workdir = tmp
+	m.layout()
+
+	m.single.SetValue("/editor ")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'@'}})
+	opened := m2.(Model)
+	if !opened.filePickerOpen {
+		t.Fatalf("expected filePickerOpen true after '@' in /editor arg")
+	}
+
+	m3, cmd := opened.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := m3.(Model)
+	if cmd == nil {
+		t.Fatalf("expected cmd (auto-run /editor) got nil")
+	}
+	if !updated.turnInFlight {
+		t.Fatalf("expected turnInFlight true after selecting for /editor")
+	}
+	if updated.single.Value() != "" {
+		t.Fatalf("expected input cleared, got %q", updated.single.Value())
+	}
+
+	// Execute the cmd and feed it back so the runner records the message.
+	msg := cmd()
+	m4, _ := updated.Update(msg)
+	_ = m4.(Model)
+
+	if runner.lastMessage != "/editor @a.txt" {
+		t.Fatalf("expected runner called with %q, got %q", "/editor @a.txt", runner.lastMessage)
+	}
+}
+
+func TestFilePicker_OpenCommand_DoesNotAutoRun(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "workbench-filepicker-*")
+	if err != nil {
+		t.Fatalf("mkdtemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
+
+	writeTempFile(t, tmp, "a.txt", "a")
+
+	runner := &recordingRunner{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.workdir = tmp
+	m.layout()
+
+	m.single.SetValue("/open ")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'@'}})
+	opened := m2.(Model)
+	if !opened.filePickerOpen {
+		t.Fatalf("expected filePickerOpen true after '@' in /open arg")
+	}
+
+	m3, cmd := opened.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := m3.(Model)
+	if cmd != nil {
+		t.Fatalf("expected no cmd (should not auto-run /open), got %v", cmd)
+	}
+	if updated.turnInFlight {
+		t.Fatalf("expected turnInFlight false after /open selection (insert only)")
+	}
+	if runner.lastMessage != "" {
+		t.Fatalf("expected runner not called, got %q", runner.lastMessage)
+	}
+	if updated.single.Value() != "/open @a.txt " {
+		t.Fatalf("expected input %q, got %q", "/open @a.txt ", updated.single.Value())
 	}
 }
 
