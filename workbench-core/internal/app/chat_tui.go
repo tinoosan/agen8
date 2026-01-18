@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/cost"
@@ -82,7 +84,7 @@ func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, m
 
 	// If the user interrupted the session (Ctrl-C), print a convenient resume command
 	// after the TUI exits.
-	if runCtx.Err() != nil && strings.TrimSpace(lazy.run.SessionID) != "" {
+	if shouldPrintResumeHint(runCtx, err) && strings.TrimSpace(lazy.run.SessionID) != "" {
 		fmt.Fprintln(os.Stderr, "Resume with: workbench resume "+lazy.run.SessionID)
 	}
 
@@ -225,7 +227,7 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 	err = tui.Run(runCtx, engine, evCh)
 	// If the user interrupted the session (Ctrl-C), print a convenient resume command
 	// after the TUI exits.
-	if runCtx.Err() != nil && strings.TrimSpace(run.SessionID) != "" {
+	if shouldPrintResumeHint(runCtx, err) && strings.TrimSpace(run.SessionID) != "" {
 		fmt.Fprintln(os.Stderr, "Resume with: workbench resume "+run.SessionID)
 	}
 	mustEmit(context.Background(), events.Event{
@@ -239,6 +241,21 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 	})
 	close(evCh)
 	return err
+}
+
+func shouldPrintResumeHint(runCtx context.Context, err error) bool {
+	// Prefer the context signal when it exists, but Bubble Tea typically returns
+	// tea.ErrInterrupted on Ctrl-C without necessarily canceling our NotifyContext.
+	if runCtx != nil && runCtx.Err() != nil {
+		return true
+	}
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, tea.ErrInterrupted) {
+		return true
+	}
+	return false
 }
 
 type lazyNewSessionTurnRunner struct {
