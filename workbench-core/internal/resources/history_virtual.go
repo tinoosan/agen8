@@ -126,3 +126,4 @@ func (hr *HistoryResource) Append(subpath string, _ []byte) error {
 	_ = subpath
 	return fmt.Errorf("history append: not supported (history is host-owned and append-only)")
 }
+
