@@ -73,7 +73,9 @@ func CleanRelPath(rel string) (string, error) {
 		}
 	}
 	clean := path.Clean(rel)
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+	// Allow "." (callers can disallow it if they require a concrete filename),
+	// but never allow escaping upward.
+	if clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", fmt.Errorf("invalid path: escapes mount root")
 	}
 	return clean, nil

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
 var builtinBashManifest = []byte(`{"id":"builtin.bash","version":"0.1.0","kind":"builtin","displayName":"Builtin Bash (restricted)","description":"Runs CLI commands inside a host-configured root directory with a small denylist (shells/interpreters/privilege escalation).","actions":[{"id":"exec","displayName":"Execute command","description":"Execute a command with argv and return exitCode/stdout/stderr. Some command names are denied. Absolute path arguments are rejected. stdout/stderr may be truncated; full output may be written as artifacts.","inputSchema":{"type":"object","properties":{"argv":{"type":"array","items":{"type":"string"},"minItems":1},"cwd":{"type":"string"},"stdin":{"type":"string"}},"required":["argv"]},"outputSchema":{"type":"object","properties":{"exitCode":{"type":"integer"},"stdout":{"type":"string"},"stderr":{"type":"string"},"stdoutPath":{"type":"string"},"stderrPath":{"type":"string"}},"required":["exitCode","stdout","stderr"]}}]}`)
@@ -262,7 +263,7 @@ func (b *BuiltinBashInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 		cwd = "."
 	}
 
-	absDir, err := resolveUnderRoot(root, cwd)
+	absDir, err := vfsutil.SafeJoinBaseDir(root, cwd)
 	if err != nil {
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
 	}
@@ -369,45 +370,4 @@ func truncateString(s string, maxBytes int) string {
 		return s
 	}
 	return s[:maxBytes]
-}
-
-// resolveUnderRoot resolves a relative cwd under rootDir and rejects any escape attempt.
-//
-// Policy:
-//   - rel must be resource-relative (not absolute)
-//   - rel must not contain ".." segments
-//   - the resulting path must stay under rootDir after cleaning/joining
-func resolveUnderRoot(rootDir, rel string) (string, error) {
-	if strings.HasPrefix(rel, "/") || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("cwd must be relative")
-	}
-
-	// Reject any explicit parent segments, even if they would clean away.
-	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
-		if seg == ".." {
-			return "", fmt.Errorf("cwd escapes root")
-		}
-	}
-	for _, seg := range strings.Split(rel, "/") {
-		if seg == ".." {
-			return "", fmt.Errorf("cwd escapes root")
-		}
-	}
-
-	cleanRel := filepath.Clean(rel)
-	if cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("cwd escapes root")
-	}
-
-	rootClean := filepath.Clean(rootDir)
-	abs := filepath.Join(rootClean, cleanRel)
-
-	relToRoot, err := filepath.Rel(rootClean, abs)
-	if err != nil {
-		return "", fmt.Errorf("cwd resolution failed")
-	}
-	if relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("cwd escapes root")
-	}
-	return abs, nil
 }
