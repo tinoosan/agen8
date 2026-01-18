@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tinoosan/workbench-core/internal/app"
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/store"
 )
 
 var (
@@ -18,7 +17,6 @@ var (
 	maxContextB  int
 	defaultGoal  string
 	defaultTitle string
-	uiMode       string
 	pricingFile  string
 	modelID      string
 	enableMouse  bool
@@ -41,7 +39,7 @@ var rootCmd = &cobra.Command{
 Workbench is a local, agentic runtime built around a virtual filesystem (VFS).
 
 Running "workbench" starts a new session and a new run, then opens an interactive
-chat REPL. Each message you submit becomes one agent turn that can:
+TUI. Each message you submit becomes one agent turn that can:
   - discover tools via /tools (fs.list + fs.read manifests)
   - execute tools via tool.run (writing /results/<callId>/response.json)
   - read/write run-scoped artifacts in /workspace
@@ -106,24 +104,7 @@ new run in that session (workspaces remain run-scoped).
 			PriceOutPerMTokensUSD: priceOutPerM,
 			PricingFile:           pricingFile,
 		}
-		switch strings.ToLower(strings.TrimSpace(uiMode)) {
-		case "", "tui":
-			return app.RunNewChatTUI(cmd.Context(), cfg, title, goal, maxContextB, opts)
-		case "repl":
-			// The legacy REPL creates the session/run upfront.
-			// (We can make this lazy too, but the TUI is the primary UX.)
-			sess, err := store.CreateSession(cfg, title)
-			if err != nil {
-				return err
-			}
-			run, err := store.CreateRunInSession(cfg, sess.SessionID, "", goal, maxContextB)
-			if err != nil {
-				return err
-			}
-			return app.RunChat(cmd.Context(), cfg, run, opts)
-		default:
-			return fmt.Errorf("unknown --ui %q (expected tui or repl)", uiMode)
-		}
+		return app.RunNewChatTUI(cmd.Context(), cfg, title, goal, maxContextB, opts)
 	},
 }
 
@@ -142,7 +123,6 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&maxContextB, "context-bytes", 8*1024, "run.maxBytesForContext (persisted in run.json)")
 	rootCmd.PersistentFlags().StringVar(&defaultTitle, "title", "workbench", "title for new sessions (workbench only)")
 	rootCmd.PersistentFlags().StringVar(&defaultGoal, "goal", "interactive chat", "initial goal for the run (workbench only)")
-	rootCmd.PersistentFlags().StringVar(&uiMode, "ui", "tui", "interactive UI mode: tui or repl")
 	enableMouse = envBool("WORKBENCH_MOUSE", false)
 	rootCmd.PersistentFlags().BoolVar(&enableMouse, "mouse", enableMouse, "enable Bubble Tea mouse capture (mouse wheel scrolling; may disable native selection)")
 	pricingFile = strings.TrimSpace(os.Getenv("WORKBENCH_PRICING_FILE"))

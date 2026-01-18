@@ -19,8 +19,6 @@ import (
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/cost"
 	"github.com/tinoosan/workbench-core/internal/events"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
-	"github.com/tinoosan/workbench-core/internal/llm"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tools"
@@ -146,20 +144,7 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts RunC
 	// Stream events into the TUI, while still persisting them to the run event log
 	// and session history.
 	evCh := make(chan events.Event, 2048)
-	emitter := &events.Emitter{
-		RunID: run.RunId,
-		Sink: events.MultiSink{
-			events.StoreSink{Cfg: cfg},
-			historySink,
-			tui.EventSink{Ch: evCh},
-		},
-	}
-	mustEmit := func(ctx context.Context, ev events.Event) {
-		if err := emitter.Emit(ctx, ev); err != nil {
-			// In the TUI we can't safely print. Fail fast; this indicates a host bug.
-			panic(fmt.Errorf("emit event: %w", err))
-		}
-	}
+	_, mustEmit := newTUIEmitter(cfg, run.RunId, historySink, evCh, true)
 	boolp := func(b bool) *bool { return &b }
 
 	sessionTitle := ""
@@ -203,286 +188,9 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts RunC
 		Console: boolp(false),
 	})
 
-	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
-	if err != nil {
-		return fmt.Errorf("create trace: %w", err)
-	}
-
-	fs := vfs.NewFS()
-
-	workdirAbs, err := resolveWorkDir(opts.WorkDir)
-	if err != nil {
-		return err
-	}
-	workdirRes, err := resources.NewWorkdirResource(workdirAbs)
-	if err != nil {
-		return fmt.Errorf("create workdir: %w", err)
-	}
-
-	workspace, err := resources.NewRunWorkspace(cfg, run.RunId)
-	if err != nil {
-		return fmt.Errorf("create workspace: %w", err)
-	}
-
-	toolsDir := fsutil.GetToolsDir(cfg.DataDir)
-	_ = os.MkdirAll(toolsDir, 0755)
-
-	builtinProvider, err := tools.NewBuiltinManifestProvider()
-	if err != nil {
-		return fmt.Errorf("load builtin tool manifests: %w", err)
-	}
-	diskProvider := tools.NewDiskManifestProvider(toolsDir)
-	toolManifests := tools.NewCompositeToolManifestRegistry(builtinProvider, diskProvider)
-
-	toolsResource, err := resources.NewVirtualToolsResource(toolManifests)
-	if err != nil {
-		return fmt.Errorf("create tools resource: %w", err)
-	}
-
-	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
-	if err != nil {
-		return fmt.Errorf("create results: %w", err)
-	}
-
-	memStore, err := store.NewDiskMemoryStore(cfg, run.RunId)
-	if err != nil {
-		return fmt.Errorf("create memory store: %w", err)
-	}
-	memoryRes, err := resources.NewVirtualMemoryResource(memStore)
-	if err != nil {
-		return fmt.Errorf("create memory resource: %w", err)
-	}
-
-	profileStore, err := store.NewDiskProfileStore(cfg)
-	if err != nil {
-		return fmt.Errorf("create profile store: %w", err)
-	}
-	profileRes, err := resources.NewVirtualProfileResource(profileStore)
-	if err != nil {
-		return fmt.Errorf("create profile resource: %w", err)
-	}
-
-	fs.Mount(vfs.MountWorkspace, workspace)
-	fs.Mount(vfs.MountWorkdir, workdirRes)
-	fs.Mount(vfs.MountResults, resultsRes)
-	fs.Mount(vfs.MountTrace, traceRes)
-	fs.Mount(vfs.MountTools, toolsResource)
-	fs.Mount(vfs.MountMemory, memoryRes)
-	fs.Mount(vfs.MountProfile, profileRes)
-	fs.Mount(vfs.MountHistory, historyRes)
-
-	mustEmit(context.Background(), events.Event{
-		Type:    "host.mounted",
-		Message: "Mounted VFS resources",
-		Data: map[string]string{
-			"/workspace": workspace.BaseDir,
-			"/workdir":   workdirRes.BaseDir,
-			"/results":   "(virtual)",
-			"/trace":     traceRes.BaseDir,
-			"/tools":     "(virtual)",
-			"/memory":    memoryRes.BaseDir,
-			"/profile":   "(global)",
-			"/history":   historyRes.BaseDir,
-		},
-		Console: boolp(false),
-	})
-
-	absWorkdirRoot, err := filepath.Abs(workdirRes.BaseDir)
-	if err != nil {
-		return fmt.Errorf("resolve workdir root: %w", err)
-	}
-
-	traceStore := store.DiskTraceStore{Dir: traceRes.BaseDir}
-	builtinCfg := tools.BuiltinConfig{
-		BashRootDir:    absWorkdirRoot,
-		RipgrepRootDir: absWorkdirRoot,
-		TraceStore:     traceStore,
-	}
-
-	builtinInvokers := tools.BuiltinInvokerRegistry(builtinCfg)
-	runner := tools.Runner{
-		Results:      resultsStore,
-		ToolRegistry: builtinInvokers,
-	}
-
-	executor := &agent.HostOpExecutor{
-		FS:              fs,
-		Runner:          &runner,
-		DefaultMaxBytes: 4096,
-		MaxReadBytes:    16 * 1024,
-	}
-
 	historySink.Model = model
 	setHistoryModel := func(next string) { historySink.Model = strings.TrimSpace(next) }
-
-	run.Runtime = &types.RunRuntimeConfig{
-		DataDir:               cfg.DataDir,
-		Model:                 model,
-		MaxSteps:              opts.MaxSteps,
-		MaxTraceBytes:         opts.MaxTraceBytes,
-		MaxMemoryBytes:        opts.MaxMemoryBytes,
-		MaxProfileBytes:       opts.MaxProfileBytes,
-		RecentHistoryPairs:    opts.RecentHistoryPairs,
-		IncludeHistoryOps:     derefBool(opts.IncludeHistoryOps, true),
-		PriceInPerMTokensUSD:  opts.PriceInPerMTokensUSD,
-		PriceOutPerMTokensUSD: opts.PriceOutPerMTokensUSD,
-	}
-	_ = store.SaveRun(cfg, run)
-
-	// Persist the active model at the session level so "resume session" is deterministic.
-	if sess, err := store.LoadSession(cfg, run.SessionID); err == nil {
-		if strings.TrimSpace(sess.ActiveModel) != model {
-			sess.ActiveModel = model
-			_ = store.SaveSession(cfg, sess)
-		}
-	}
-
-	client, err := llm.NewOpenRouterClientFromEnv()
-	if err != nil {
-		return fmt.Errorf("create OpenRouter client: %w", err)
-	}
-
-	systemPromptBytes, err := os.ReadFile("internal/agent/INITIAL_PROMPT.md")
-	if err != nil {
-		return fmt.Errorf("read internal/agent/INITIAL_PROMPT.md: %w", err)
-	}
-	baseSystemPrompt := string(systemPromptBytes)
-
-	constructor := &agent.ContextConstructor{
-		FS:                fs,
-		Cfg:               cfg,
-		RunID:             run.RunId,
-		SessionID:         run.SessionID,
-		TraceStore:        traceStore,
-		HistoryStore:      historyRes.Store,
-		IncludeHistoryOps: derefBool(opts.IncludeHistoryOps, true),
-		MaxProfileBytes:   opts.MaxProfileBytes,
-		MaxMemoryBytes:    opts.MaxMemoryBytes,
-		MaxTraceBytes:     opts.MaxTraceBytes,
-		MaxHistoryBytes:   8 * 1024,
-		StatePath:         "/workspace/context_constructor_state.json",
-		ManifestPath:      "/workspace/context_constructor_manifest.json",
-		Emit: func(eventType, message string, data map[string]string) {
-			mustEmit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
-		},
-	}
-	artifactIndex := newArtifactIndex()
-
-	var updater *agent.ContextUpdater
-	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
-		reqData := map[string]string{
-			"op":       req.Op,
-			"path":     req.Path,
-			"toolId":   req.ToolID.String(),
-			"actionId": req.ActionID,
-		}
-		if req.Op == types.HostOpFSRead && req.MaxBytes != 0 {
-			reqData["maxBytes"] = strconv.Itoa(req.MaxBytes)
-		}
-		if req.Op == types.HostOpToolRun && req.TimeoutMs != 0 {
-			reqData["timeoutMs"] = strconv.Itoa(req.TimeoutMs)
-		}
-		if req.Op == types.HostOpToolRun && len(req.Input) != 0 {
-			s, tr, n := toolRunInputForEvent(req.Input)
-			if s != "" {
-				reqData["input"] = s
-			}
-			if tr {
-				reqData["inputTruncated"] = "true"
-			}
-			if n != 0 {
-				reqData["inputBytes"] = strconv.Itoa(n)
-			}
-		}
-		if (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) && strings.TrimSpace(req.Text) != "" {
-			p, tr, red, n, isJSON := fsWriteTextPreviewForEvent(req.Path, req.Text)
-			if p != "" {
-				reqData["textPreview"] = p
-			}
-			if tr {
-				reqData["textTruncated"] = "true"
-			}
-			if red {
-				reqData["textRedacted"] = "true"
-			}
-			if n != 0 {
-				reqData["textBytes"] = strconv.Itoa(n)
-			}
-			if isJSON {
-				reqData["textIsJSON"] = "true"
-			}
-		}
-
-		mustEmit(ctx, events.Event{
-			Type:      "agent.op.request",
-			Message:   "Agent requested host op",
-			Data:      reqData,
-			StoreData: map[string]string{"op": req.Op, "path": req.Path, "toolId": req.ToolID.String(), "actionId": req.ActionID},
-		})
-		resp := executor.Exec(ctx, req)
-		if resp.Ok && (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) {
-			artifactIndex.ObserveWrite(req.Path)
-		}
-		if updater != nil {
-			updater.ObserveHostOp(req, resp)
-		}
-		constructor.ObserveHostOp(req, resp)
-
-		respData := map[string]string{
-			"op":  resp.Op,
-			"ok":  fmtBool(resp.Ok),
-			"err": resp.Error,
-		}
-		if resp.BytesLen != 0 {
-			respData["bytesLen"] = strconv.Itoa(resp.BytesLen)
-		}
-		if resp.Truncated {
-			respData["truncated"] = "true"
-		}
-		if resp.ToolResponse != nil && resp.ToolResponse.CallID != "" {
-			respData["callId"] = resp.ToolResponse.CallID
-		}
-		if resp.Op == types.HostOpToolRun && resp.ToolResponse != nil && len(resp.ToolResponse.Output) != 0 {
-			if p := toolRunOutputPreviewForEvent(resp.ToolResponse.ToolID.String(), resp.ToolResponse.ActionID, resp.ToolResponse.Output); strings.TrimSpace(p) != "" {
-				respData["outputPreview"] = p
-			}
-		}
-		mustEmit(ctx, events.Event{
-			Type:      "agent.op.response",
-			Message:   "Host op completed",
-			Data:      respData,
-			StoreData: map[string]string{"op": resp.Op, "ok": fmtBool(resp.Ok), "err": resp.Error},
-		})
-		return resp
-	}
-
-	mustEmit(context.Background(), events.Event{
-		Type:    "agent.loop.start",
-		Message: "Agent loop started",
-		Data:    map[string]string{"model": model},
-	})
-
-	updater = &agent.ContextUpdater{
-		FS:              fs,
-		TraceStore:      traceStore,
-		MaxProfileBytes: opts.MaxProfileBytes,
-		MaxMemoryBytes:  opts.MaxMemoryBytes,
-		MaxTraceBytes:   opts.MaxTraceBytes,
-		ManifestPath:    "/workspace/context_manifest.json",
-		Emit: func(eventType, message string, data map[string]string) {
-			mustEmit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
-		},
-	}
-
-	a, err := agent.New(agent.Config{
-		LLM:          client,
-		Exec:         agent.HostExecFunc(execWithEvents),
-		Model:        model,
-		SystemPrompt: baseSystemPrompt,
-		Context:      constructor,
-		MaxSteps:     opts.MaxSteps,
-	})
+	setup, err := setupTUIChatRuntime(cfg, run, opts, model, historyRes, mustEmit)
 	if err != nil {
 		return err
 	}
@@ -492,20 +200,20 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts RunC
 		cfg:              cfg,
 		run:              run,
 		opts:             opts,
-		fs:               fs,
-		agent:            a,
-		baseSystemPrompt: baseSystemPrompt,
+		fs:               setup.FS,
+		agent:            setup.Agent,
+		baseSystemPrompt: setup.BaseSystemPrompt,
 		mustEmit:         mustEmit,
-		memStore:         memStore,
-		profileStore:     profileStore,
+		memStore:         setup.MemStore,
+		profileStore:     setup.ProfileStore,
 		memEval:          agent.DefaultMemoryEvaluator(),
 		profileEval:      agent.DefaultProfileEvaluator(),
 		model:            model,
 		setHistoryModel:  setHistoryModel,
-		workdirBase:      workdirRes.BaseDir,
-		builtinInvokers:  builtinInvokers,
-		artifacts:        artifactIndex,
-		constructor:      constructor,
+		workdirBase:      setup.WorkdirBase,
+		builtinInvokers:  setup.BuiltinInvokers,
+		artifacts:        setup.Artifacts,
+		constructor:      setup.Constructor,
 	}
 
 	err = tui.Run(runCtx, engine, evCh)
@@ -933,17 +641,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	}
 	historySink := &events.HistorySink{Store: historyRes.Appender}
 
-	emitter := &events.Emitter{
-		RunID: run.RunId,
-		Sink: events.MultiSink{
-			events.StoreSink{Cfg: cfg},
-			historySink,
-			tui.EventSink{Ch: r.evCh},
-		},
-	}
-	r.mustEmit = func(ctx context.Context, ev events.Event) {
-		_ = emitter.Emit(ctx, ev)
-	}
+	_, r.mustEmit = newTUIEmitter(cfg, run.RunId, historySink, r.evCh, false)
 	boolp := func(b bool) *bool { return &b }
 
 	model := strings.TrimSpace(r.opts.Model)
@@ -982,275 +680,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	sess.ActiveModel = model
 	_ = store.SaveSession(cfg, sess)
 
-	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
-	if err != nil {
-		return fmt.Errorf("create trace: %w", err)
-	}
-
-	fs := vfs.NewFS()
-
-	workdirAbs, err := resolveWorkDir(r.opts.WorkDir)
-	if err != nil {
-		return err
-	}
-	workdirRes, err := resources.NewWorkdirResource(workdirAbs)
-	if err != nil {
-		return fmt.Errorf("create workdir: %w", err)
-	}
-
-	workspace, err := resources.NewRunWorkspace(cfg, run.RunId)
-	if err != nil {
-		return fmt.Errorf("create workspace: %w", err)
-	}
-
-	toolsDir := fsutil.GetToolsDir(cfg.DataDir)
-	_ = os.MkdirAll(toolsDir, 0755)
-
-	builtinProvider, err := tools.NewBuiltinManifestProvider()
-	if err != nil {
-		return fmt.Errorf("load builtin tool manifests: %w", err)
-	}
-	diskProvider := tools.NewDiskManifestProvider(toolsDir)
-	toolManifests := tools.NewCompositeToolManifestRegistry(builtinProvider, diskProvider)
-
-	toolsResource, err := resources.NewVirtualToolsResource(toolManifests)
-	if err != nil {
-		return fmt.Errorf("create tools resource: %w", err)
-	}
-
-	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewVirtualResultsResource(resultsStore)
-	if err != nil {
-		return fmt.Errorf("create results: %w", err)
-	}
-
-	memStore, err := store.NewDiskMemoryStore(cfg, run.RunId)
-	if err != nil {
-		return fmt.Errorf("create memory store: %w", err)
-	}
-	memoryRes, err := resources.NewVirtualMemoryResource(memStore)
-	if err != nil {
-		return fmt.Errorf("create memory resource: %w", err)
-	}
-
-	profileStore, err := store.NewDiskProfileStore(cfg)
-	if err != nil {
-		return fmt.Errorf("create profile store: %w", err)
-	}
-	profileRes, err := resources.NewVirtualProfileResource(profileStore)
-	if err != nil {
-		return fmt.Errorf("create profile resource: %w", err)
-	}
-
-	fs.Mount(vfs.MountWorkspace, workspace)
-	fs.Mount(vfs.MountWorkdir, workdirRes)
-	fs.Mount(vfs.MountResults, resultsRes)
-	fs.Mount(vfs.MountTrace, traceRes)
-	fs.Mount(vfs.MountTools, toolsResource)
-	fs.Mount(vfs.MountMemory, memoryRes)
-	fs.Mount(vfs.MountProfile, profileRes)
-	fs.Mount(vfs.MountHistory, historyRes)
-
-	r.mustEmit(context.Background(), events.Event{
-		Type:    "host.mounted",
-		Message: "Mounted VFS resources",
-		Data: map[string]string{
-			"/workspace": workspace.BaseDir,
-			"/workdir":   workdirRes.BaseDir,
-			"/results":   "(virtual)",
-			"/trace":     traceRes.BaseDir,
-			"/tools":     "(virtual)",
-			"/memory":    memoryRes.BaseDir,
-			"/profile":   "(global)",
-			"/history":   historyRes.BaseDir,
-		},
-		Console: boolp(false),
-	})
-
-	absWorkdirRoot, err := filepath.Abs(workdirRes.BaseDir)
-	if err != nil {
-		return fmt.Errorf("resolve workdir root: %w", err)
-	}
-
-	traceStore := store.DiskTraceStore{Dir: traceRes.BaseDir}
-	builtinCfg := tools.BuiltinConfig{
-		BashRootDir:    absWorkdirRoot,
-		RipgrepRootDir: absWorkdirRoot,
-		TraceStore:     traceStore,
-	}
-
-	builtinInvokers := tools.BuiltinInvokerRegistry(builtinCfg)
-	runner := tools.Runner{
-		Results:      resultsStore,
-		ToolRegistry: builtinInvokers,
-	}
-
-	executor := &agent.HostOpExecutor{
-		FS:              fs,
-		Runner:          &runner,
-		DefaultMaxBytes: 4096,
-		MaxReadBytes:    16 * 1024,
-	}
-
-	run.Runtime = &types.RunRuntimeConfig{
-		DataDir:               cfg.DataDir,
-		Model:                 model,
-		MaxSteps:              r.opts.MaxSteps,
-		MaxTraceBytes:         r.opts.MaxTraceBytes,
-		MaxMemoryBytes:        r.opts.MaxMemoryBytes,
-		MaxProfileBytes:       r.opts.MaxProfileBytes,
-		RecentHistoryPairs:    r.opts.RecentHistoryPairs,
-		IncludeHistoryOps:     derefBool(r.opts.IncludeHistoryOps, true),
-		PriceInPerMTokensUSD:  r.opts.PriceInPerMTokensUSD,
-		PriceOutPerMTokensUSD: r.opts.PriceOutPerMTokensUSD,
-	}
-	_ = store.SaveRun(cfg, run)
-
-	client, err := llm.NewOpenRouterClientFromEnv()
-	if err != nil {
-		return fmt.Errorf("create OpenRouter client: %w", err)
-	}
-
-	systemPromptBytes, err := os.ReadFile("internal/agent/INITIAL_PROMPT.md")
-	if err != nil {
-		return fmt.Errorf("read internal/agent/INITIAL_PROMPT.md: %w", err)
-	}
-	baseSystemPrompt := string(systemPromptBytes)
-
-	constructor := &agent.ContextConstructor{
-		FS:                fs,
-		Cfg:               cfg,
-		RunID:             run.RunId,
-		SessionID:         run.SessionID,
-		TraceStore:        traceStore,
-		HistoryStore:      historyRes.Store,
-		IncludeHistoryOps: derefBool(r.opts.IncludeHistoryOps, true),
-		MaxProfileBytes:   r.opts.MaxProfileBytes,
-		MaxMemoryBytes:    r.opts.MaxMemoryBytes,
-		MaxTraceBytes:     r.opts.MaxTraceBytes,
-		MaxHistoryBytes:   8 * 1024,
-		StatePath:         "/workspace/context_constructor_state.json",
-		ManifestPath:      "/workspace/context_constructor_manifest.json",
-		Emit: func(eventType, message string, data map[string]string) {
-			r.mustEmit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
-		},
-	}
-	artifactIndex := newArtifactIndex()
-
-	var updater *agent.ContextUpdater
-	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
-		reqData := map[string]string{
-			"op":       req.Op,
-			"path":     req.Path,
-			"toolId":   req.ToolID.String(),
-			"actionId": req.ActionID,
-		}
-		if req.Op == types.HostOpFSRead && req.MaxBytes != 0 {
-			reqData["maxBytes"] = strconv.Itoa(req.MaxBytes)
-		}
-		if req.Op == types.HostOpToolRun && req.TimeoutMs != 0 {
-			reqData["timeoutMs"] = strconv.Itoa(req.TimeoutMs)
-		}
-		if req.Op == types.HostOpToolRun && len(req.Input) != 0 {
-			s, tr, n := toolRunInputForEvent(req.Input)
-			if s != "" {
-				reqData["input"] = s
-			}
-			if tr {
-				reqData["inputTruncated"] = "true"
-			}
-			if n != 0 {
-				reqData["inputBytes"] = strconv.Itoa(n)
-			}
-		}
-		if (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) && strings.TrimSpace(req.Text) != "" {
-			p, tr, red, n, isJSON := fsWriteTextPreviewForEvent(req.Path, req.Text)
-			if p != "" {
-				reqData["textPreview"] = p
-			}
-			if tr {
-				reqData["textTruncated"] = "true"
-			}
-			if red {
-				reqData["textRedacted"] = "true"
-			}
-			if n != 0 {
-				reqData["textBytes"] = strconv.Itoa(n)
-			}
-			if isJSON {
-				reqData["textIsJSON"] = "true"
-			}
-		}
-
-		r.mustEmit(ctx, events.Event{
-			Type:      "agent.op.request",
-			Message:   "Agent requested host op",
-			Data:      reqData,
-			StoreData: map[string]string{"op": req.Op, "path": req.Path, "toolId": req.ToolID.String(), "actionId": req.ActionID},
-		})
-		resp := executor.Exec(ctx, req)
-		if resp.Ok && (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) {
-			artifactIndex.ObserveWrite(req.Path)
-		}
-		if updater != nil {
-			updater.ObserveHostOp(req, resp)
-		}
-		constructor.ObserveHostOp(req, resp)
-
-		respData := map[string]string{
-			"op":  resp.Op,
-			"ok":  fmtBool(resp.Ok),
-			"err": resp.Error,
-		}
-		if resp.BytesLen != 0 {
-			respData["bytesLen"] = strconv.Itoa(resp.BytesLen)
-		}
-		if resp.Truncated {
-			respData["truncated"] = "true"
-		}
-		if resp.ToolResponse != nil && resp.ToolResponse.CallID != "" {
-			respData["callId"] = resp.ToolResponse.CallID
-		}
-		if resp.Op == types.HostOpToolRun && resp.ToolResponse != nil && len(resp.ToolResponse.Output) != 0 {
-			if p := toolRunOutputPreviewForEvent(resp.ToolResponse.ToolID.String(), resp.ToolResponse.ActionID, resp.ToolResponse.Output); strings.TrimSpace(p) != "" {
-				respData["outputPreview"] = p
-			}
-		}
-		r.mustEmit(ctx, events.Event{
-			Type:      "agent.op.response",
-			Message:   "Host op completed",
-			Data:      respData,
-			StoreData: map[string]string{"op": resp.Op, "ok": fmtBool(resp.Ok), "err": resp.Error},
-		})
-		return resp
-	}
-
-	r.mustEmit(context.Background(), events.Event{
-		Type:    "agent.loop.start",
-		Message: "Agent loop started",
-		Data:    map[string]string{"model": model},
-	})
-
-	updater = &agent.ContextUpdater{
-		FS:              fs,
-		TraceStore:      traceStore,
-		MaxProfileBytes: r.opts.MaxProfileBytes,
-		MaxMemoryBytes:  r.opts.MaxMemoryBytes,
-		MaxTraceBytes:   r.opts.MaxTraceBytes,
-		ManifestPath:    "/workspace/context_manifest.json",
-		Emit: func(eventType, message string, data map[string]string) {
-			r.mustEmit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
-		},
-	}
-
-	a, err := agent.New(agent.Config{
-		LLM:          client,
-		Exec:         agent.HostExecFunc(execWithEvents),
-		Model:        model,
-		SystemPrompt: baseSystemPrompt,
-		Context:      constructor,
-		MaxSteps:     r.opts.MaxSteps,
-	})
+	setup, err := setupTUIChatRuntime(cfg, run, r.opts, model, historyRes, r.mustEmit)
 	if err != nil {
 		return err
 	}
@@ -1260,20 +690,20 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		cfg:              cfg,
 		run:              run,
 		opts:             r.opts,
-		fs:               fs,
-		agent:            a,
-		baseSystemPrompt: baseSystemPrompt,
+		fs:               setup.FS,
+		agent:            setup.Agent,
+		baseSystemPrompt: setup.BaseSystemPrompt,
 		mustEmit:         r.mustEmit,
-		memStore:         memStore,
-		profileStore:     profileStore,
+		memStore:         setup.MemStore,
+		profileStore:     setup.ProfileStore,
 		memEval:          agent.DefaultMemoryEvaluator(),
 		profileEval:      agent.DefaultProfileEvaluator(),
 		model:            model,
 		setHistoryModel:  setHistoryModel,
-		workdirBase:      workdirRes.BaseDir,
-		builtinInvokers:  builtinInvokers,
-		artifacts:        artifactIndex,
-		constructor:      constructor,
+		workdirBase:      setup.WorkdirBase,
+		builtinInvokers:  setup.BuiltinInvokers,
+		artifacts:        setup.Artifacts,
+		constructor:      setup.Constructor,
 	}
 	r.initialized = true
 	return nil
@@ -1534,139 +964,26 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		})
 	}
 
-	// Memory update ingestion (run-scoped).
-	if b, err := r.fs.Read("/memory/update.md"); err == nil {
-		updateRaw := string(b)
-		if strings.TrimSpace(updateRaw) == "" {
-			r.mustEmit(context.Background(), events.Event{
-				Type:    "memory.evaluate",
-				Message: "No memory update written",
-				Data: map[string]string{
-					"turn":     strconv.Itoa(r.turn),
-					"accepted": "false",
-					"reason":   "no_update",
-					"bytes":    "0",
-				},
-			})
-		} else {
-			trimmed := strings.TrimSpace(updateRaw)
-			hash := agent.SHA256Hex(trimmed)
+	// Memory/profile update ingestion (via shared ContentUpdateProcessor).
+	_ = (&ContentUpdateProcessor{
+		FS:         r.fs,
+		Evaluator:  r.memEval,
+		Store:      memoryCommitterAdapter{r.memStore},
+		Scope:      "memory",
+		UpdatePath: "/memory/update.md",
+		Emit:       r.mustEmit,
+		EmitAudit:  false,
+	}).ProcessUpdate(context.Background(), r.turn, r.run.SessionID, r.run.RunId, r.model)
 
-			accepted, reason, cleaned := r.memEval.Evaluate(updateRaw)
-			r.mustEmit(context.Background(), events.Event{
-				Type:    "memory.evaluate",
-				Message: "Evaluated memory update",
-				Data: map[string]string{
-					"turn":     strconv.Itoa(r.turn),
-					"accepted": fmtBool(accepted),
-					"reason":   reason,
-					"bytes":    strconv.Itoa(len(trimmed)),
-					"sha256":   hash[:12],
-				},
-			})
-
-			if accepted {
-				if err := r.memStore.AppendMemory(context.Background(), formatRunMemoryAppend(strings.TrimSpace(cleaned))); err != nil {
-					r.mustEmit(context.Background(), events.Event{
-						Type:    "memory.commit.error",
-						Message: "Failed to commit memory update",
-						Data:    map[string]string{"err": err.Error()},
-						Store:   boolp(false),
-					})
-				} else {
-					r.mustEmit(context.Background(), events.Event{
-						Type:    "memory.commit",
-						Message: "Committed memory update",
-						Data: map[string]string{
-							"turn":   strconv.Itoa(r.turn),
-							"bytes":  strconv.Itoa(len(strings.TrimSpace(cleaned))),
-							"sha256": hash[:12],
-						},
-					})
-				}
-			}
-
-			_ = r.memStore.AppendCommitLog(context.Background(), types.MemoryCommitLine{
-				Scope:     "memory",
-				SessionID: r.run.SessionID,
-				RunID:     r.run.RunId,
-				Model:     r.model,
-				Turn:      r.turn,
-				Accepted:  accepted,
-				Reason:    reason,
-				Bytes:     len(trimmed),
-				SHA256:    hash,
-			})
-		}
-		_ = r.fs.Write("/memory/update.md", []byte{})
-	}
-
-	// Profile update ingestion (global).
-	if b, err := r.fs.Read("/profile/update.md"); err == nil {
-		updateRaw := string(b)
-		if strings.TrimSpace(updateRaw) == "" {
-			r.mustEmit(context.Background(), events.Event{
-				Type:    "profile.evaluate",
-				Message: "No profile update written",
-				Data: map[string]string{
-					"turn":     strconv.Itoa(r.turn),
-					"accepted": "false",
-					"reason":   "no_update",
-					"bytes":    "0",
-				},
-			})
-		} else {
-			trimmed := strings.TrimSpace(updateRaw)
-			hash := agent.SHA256Hex(trimmed)
-
-			accepted, reason, cleaned := r.profileEval.Evaluate(updateRaw)
-			r.mustEmit(context.Background(), events.Event{
-				Type:    "profile.evaluate",
-				Message: "Evaluated profile update",
-				Data: map[string]string{
-					"turn":     strconv.Itoa(r.turn),
-					"accepted": fmtBool(accepted),
-					"reason":   reason,
-					"bytes":    strconv.Itoa(len(trimmed)),
-					"sha256":   hash[:12],
-				},
-			})
-
-			if accepted {
-				if err := r.profileStore.AppendProfile(context.Background(), formatRunMemoryAppend(strings.TrimSpace(cleaned))); err != nil {
-					r.mustEmit(context.Background(), events.Event{
-						Type:    "profile.commit.error",
-						Message: "Failed to commit profile update",
-						Data:    map[string]string{"err": err.Error()},
-						Store:   boolp(false),
-					})
-				} else {
-					r.mustEmit(context.Background(), events.Event{
-						Type:    "profile.commit",
-						Message: "Committed profile update",
-						Data: map[string]string{
-							"turn":   strconv.Itoa(r.turn),
-							"bytes":  strconv.Itoa(len(strings.TrimSpace(cleaned))),
-							"sha256": hash[:12],
-						},
-					})
-				}
-			}
-
-			_ = r.profileStore.AppendCommitLog(context.Background(), types.MemoryCommitLine{
-				Scope:     "profile",
-				SessionID: r.run.SessionID,
-				RunID:     r.run.RunId,
-				Model:     r.model,
-				Turn:      r.turn,
-				Accepted:  accepted,
-				Reason:    reason,
-				Bytes:     len(trimmed),
-				SHA256:    hash,
-			})
-		}
-		_ = r.fs.Write("/profile/update.md", []byte{})
-	}
+	_ = (&ContentUpdateProcessor{
+		FS:         r.fs,
+		Evaluator:  r.profileEval,
+		Store:      profileCommitterAdapter{r.profileStore},
+		Scope:      "profile",
+		UpdatePath: "/profile/update.md",
+		Emit:       r.mustEmit,
+		EmitAudit:  false,
+	}).ProcessUpdate(context.Background(), r.turn, r.run.SessionID, r.run.RunId, r.model)
 
 	if _, err := store.RecordTurnInSession(r.cfg, r.run.SessionID, r.run.RunId, userMsg, final); err != nil {
 		r.mustEmit(context.Background(), events.Event{

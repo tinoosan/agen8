@@ -50,13 +50,6 @@ var resumeCmd = &cobra.Command{
 			PriceOutPerMTokensUSD: priceOutPerM,
 			PricingFile:           pricingFile,
 		}
-		switch strings.ToLower(strings.TrimSpace(uiMode)) {
-		case "", "tui":
-			return app.RunChatTUI(cmd.Context(), cfg, run, opts)
-		case "repl":
-			return app.RunChat(cmd.Context(), cfg, run, opts)
-		default:
-			return fmt.Errorf("unknown --ui %q (expected tui or repl)", uiMode)
-		}
+		return app.RunChatTUI(cmd.Context(), cfg, run, opts)
 	},
 }
