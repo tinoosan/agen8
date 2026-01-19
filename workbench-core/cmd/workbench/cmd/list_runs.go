@@ -13,7 +13,7 @@ var listRunsCmd = &cobra.Command{
 	Short: "List runs for a session",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := effectiveConfig()
+		cfg, err := effectiveConfig(cmd)
 		if err != nil {
 			return err
 		}

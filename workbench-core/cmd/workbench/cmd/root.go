@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tinoosan/workbench-core/internal/app"
-	"github.com/tinoosan/workbench-core/internal/config"
 )
 
 var (
@@ -80,7 +79,7 @@ new run in that session (workspaces remain run-scoped).
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := effectiveConfig()
+		cfg, err := effectiveConfig(cmd)
 		if err != nil {
 			return err
 		}
@@ -124,7 +123,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", config.Default().DataDir, "base directory for runs/sessions (default: data)")
+	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "", "base directory for runs/sessions (priority: --data-dir, env WORKBENCH_DATA_DIR, default: ~/.workbench or $XDG_STATE_HOME/workbench)")
 	workDir = strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR"))
 	rootCmd.PersistentFlags().StringVar(&workDir, "workdir", workDir, "host working directory to mount at /workdir (default: current directory; env WORKBENCH_WORKDIR)")
 	rootCmd.PersistentFlags().IntVar(&maxContextB, "context-bytes", 8*1024, "run.maxBytesForContext (persisted in run.json)")

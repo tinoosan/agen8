@@ -16,7 +16,7 @@ var showHistoryCmd = &cobra.Command{
 	Short: "Show recent session history (JSONL)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := effectiveConfig()
+		cfg, err := effectiveConfig(cmd)
 		if err != nil {
 			return err
 		}

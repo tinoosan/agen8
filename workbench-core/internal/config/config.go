@@ -12,8 +12,10 @@ type Config struct {
 	// DataDir is the base directory for all workbench data storage.
 	//
 	// All run-scoped data (workspace, events, results, etc.) is stored under
-	// subdirectories of DataDir. The default value "data" creates a local
-	// data directory in the current working directory.
+	// subdirectories of DataDir.
+	//
+	// Note: the CLI resolves the default using ResolveDataDir (home/XDG by
+	// default, with overrides via --data-dir / WORKBENCH_DATA_DIR).
 	DataDir string
 }
 
