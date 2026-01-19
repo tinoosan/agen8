@@ -29,23 +29,26 @@ func buildFileChangePreview(op, path, before, after string, hadBefore bool, afte
 		before = ""
 	}
 
+	fromFile := "a" + path
+	toFile := "b" + path
+	if !hadBefore {
+		fromFile = "/dev/null"
+		toFile = "b" + path
+	}
+
 	ud := difflib.UnifiedDiff{
 		A:        difflib.SplitLines(normalizeNewlines(before)),
 		B:        difflib.SplitLines(normalizeNewlines(after)),
-		FromFile: path,
-		ToFile:   path,
+		FromFile: fromFile,
+		ToFile:   toFile,
 		Context:  3,
 	}
 	diffText, _ := difflib.GetUnifiedDiffString(ud)
 	diffText = strings.TrimSpace(diffText)
 	if diffText == "" {
-		// Fallback: still show something useful.
-		body := after
-		if body == "" {
-			body = "(empty)"
-		}
-		body, tr := capLines(body, maxDiffLines)
-		return "```text\n" + strings.TrimRight(body, "\n") + "\n```", tr || afterTruncated
+		// Still render a diff block so UX is consistent even when the write/patch
+		// doesn't change content.
+		return "```diff\n(no changes)\n```", false
 	}
 
 	diffText, tr := capLines(diffText, maxDiffLines)

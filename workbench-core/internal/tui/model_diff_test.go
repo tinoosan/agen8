@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -10,6 +11,24 @@ import (
 
 type stubRunnerWithReadWrite struct {
 	stubRunnerWithRead
+}
+
+func (s stubRunnerWithReadWrite) ReadVFS(ctx context.Context, path string, maxBytes int) (text string, bytesLen int, truncated bool, err error) {
+	_ = ctx
+	if s.files == nil {
+		return "", 0, false, fs.ErrNotExist
+	}
+	txt, ok := s.files[path]
+	if !ok {
+		return "", 0, false, fs.ErrNotExist
+	}
+	b := []byte(txt)
+	bytesLen = len(b)
+	if maxBytes > 0 && len(b) > maxBytes {
+		b = b[:maxBytes]
+		truncated = true
+	}
+	return string(b), bytesLen, truncated, nil
 }
 
 func (s stubRunnerWithReadWrite) WriteVFS(ctx context.Context, path string, data []byte) error {
@@ -65,7 +84,7 @@ func TestTranscript_FileWrite_EmitsDiffBlock(t *testing.T) {
 		t.Fatalf("expected transcript to contain Updated header, got:\n%s", view)
 	}
 	// Glamour renders code blocks without literal ``` fences; assert diff markers.
-	if !strings.Contains(view, "--- /workspace/a.txt") || !strings.Contains(view, "+++ /workspace/a.txt") {
+	if !strings.Contains(view, "--- a/workspace/a.txt") || !strings.Contains(view, "+++ b/workspace/a.txt") {
 		t.Fatalf("expected transcript to contain unified diff headers, got:\n%s", view)
 	}
 	if !strings.Contains(view, "-there") && !strings.Contains(view, "-there\n") {
@@ -73,6 +92,53 @@ func TestTranscript_FileWrite_EmitsDiffBlock(t *testing.T) {
 	}
 	if !strings.Contains(view, "+world") {
 		t.Fatalf("expected diff to include added line, got:\n%s", view)
+	}
+}
+
+func TestTranscript_FileWrite_Create_ShowsDevNullDiff(t *testing.T) {
+	r := stubRunnerWithReadWrite{stubRunnerWithRead{
+		stubRunner: stubRunner{final: "ok"},
+		files: map[string]string{
+			"/workspace/new.txt": "hello\n",
+		},
+	}}
+	m := New(context.Background(), r, make(chan events.Event))
+	m.width = 120
+	m.height = 40
+	m.layout()
+
+	// No cache; simulate create by ensuring the pre-read returns not-exist.
+	delete(r.files, "/workspace/new.txt")
+
+	cmd := m.onEvent(events.Event{
+		Type: "agent.op.request",
+		Data: map[string]string{"op": "fs.write", "path": "/workspace/new.txt"},
+	})
+	if cmd != nil {
+		// Run the pre-read (expected to fail not-exist and be ignored).
+		m2, _ := m.Update(cmd())
+		m = m2.(Model)
+	}
+
+	// Now simulate the post-write read returning the created content.
+	r.files["/workspace/new.txt"] = "hello\n"
+
+	cmd2 := m.onEvent(events.Event{
+		Type: "agent.op.response",
+		Data: map[string]string{"op": "fs.write", "path": "/workspace/new.txt", "ok": "true"},
+	})
+	if cmd2 == nil {
+		t.Fatalf("expected after-read cmd")
+	}
+	m3, _ := m.Update(cmd2())
+	updated3 := m3.(Model)
+
+	view := updated3.transcript.View()
+	if !strings.Contains(view, "Created") {
+		t.Fatalf("expected Created header, got:\n%s", view)
+	}
+	if !strings.Contains(view, "--- /dev/null") || !strings.Contains(view, "+++ b/workspace/new.txt") {
+		t.Fatalf("expected /dev/null create diff headers, got:\n%s", view)
 	}
 }
 
