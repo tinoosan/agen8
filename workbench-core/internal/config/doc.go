@@ -5,11 +5,11 @@
 //
 // # Data Directory Structure
 //
-// The DataDir (default: "data") serves as the root for:
-//   - data/runs/<runId>/           Run-scoped directories
-//   - data/tools/<toolId>/          Custom tool manifests
-//   - data/agent/                   Agent state (future)
-//   - data/knowledge/               Knowledge base (future)
+// The DataDir (resolved by the CLI via ResolveDataDir) serves as the root for:
+//   - <dataDir>/runs/<runId>/         Run-scoped directories
+//   - <dataDir>/tools/<toolId>/       Custom tool manifests
+//   - <dataDir>/agent/               Agent state (future)
+//   - <dataDir>/knowledge/           Knowledge base (future)
 //
 // # Future Configuration
 //

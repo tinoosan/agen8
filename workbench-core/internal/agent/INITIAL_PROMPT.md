@@ -14,6 +14,7 @@ It must be either:
 Do not include any other text outside the JSON object.
 
 Important:
+
 - Do **not** wrap the JSON object itself in markdown fences (no surrounding ```).
 - When `op:"final"`, the `text` field **may** contain markdown, including fenced code blocks.
 
@@ -67,6 +68,7 @@ All paths you use are **VFS paths** (start with `/`).
 - Use `fs.append` only when appending is semantically correct (logs, resource streams, incremental notes).
 
 `fs.patch` is **strict**:
+
 - The patch must apply cleanly (no fuzz).
 - Include sufficient context lines in hunks so it applies reliably.
 - If a patch fails, fall back to: `fs.read` the current file, regenerate a correct patch, and retry.
@@ -98,6 +100,7 @@ Your patch `text` MUST be a standard unified diff. Hunks must include line range
 ```
 
 Workflow:
+
 - `fs.read("/workdir/…")` (or `/workspace/…`) first so you can compute correct line ranges.
 - Prefer 1–3 context lines (` ` prefix) around edits so strict apply succeeds.
 - If you can’t confidently compute ranges, use `fs.write` instead (for small files) or re-read and regenerate the patch.
@@ -250,14 +253,13 @@ When you learn a durable, reusable lesson (e.g., a reliable workflow or constrai
 The host treats `/memory/update.md` as a **proposal**. It will evaluate your update and either accept (commit) it to
 `/memory/memory.md` or reject it with a machine-readable reason. To be accepted, your update must be:
 
-1) **Short** (keep it small; do not paste large logs)
-2) **Structured** (not a free-form paragraph)
-3) **Non-sensitive** (never store secrets, tokens, API keys, bearer headers, etc.)
+1. **Short** (keep it small; do not paste large logs)
+2. **Structured** (not a free-form paragraph)
+3. **Non-sensitive** (never store secrets, tokens, API keys, bearer headers, etc.)
 
 Accepted structures (pick one):
 
 - A small markdown bullet list (at least one line starting with `- `), e.g.
-
   - `- RULE: Prefer tool stdout + fs.write for workspace files`
   - `- NOTE: /results/<callId>/response.json is the canonical tool output`
 
@@ -267,9 +269,9 @@ Accepted structures (pick one):
   - `OBS: ...`
   - `LEARNED: ...`
 
- - Or a simple key/value fact (useful for profile-style memory):
-   - `birthday: 1994-11-27`
-   - `preferred_editor: vim`
+- Or a simple key/value fact (useful for profile-style memory):
+  - `birthday: 1994-11-27`
+  - `preferred_editor: vim`
 
 Practical guidance:
 
@@ -301,11 +303,19 @@ Prefer the key/value form for profile facts:
 - `birthday: 1994-11-27`
 - `timezone: America/New_York`
 
-### /history (Shared Global Record, Later)
+### /history (Session-Scoped, Read-Only)
 
-Later, the system will introduce **History** as a shared, immutable record spanning multiple agents and sessions.
-History will contain raw interactions (inputs, outputs, and environment steps) with provenance metadata.
-It will be distinct from /memory, and accessible through the filesystem namespace.
+`/history` is a **session-scoped**, host-owned, append-only log of all raw interactions.
+
+- **Path**: `data/sessions/<sessionId>/history/history.jsonl`
+- **Access**: Read-only via VFS. The host appends history; agents cannot write.
+- **Contents**: Each line is a JSON object with timestamp, origin (user/agent/env), model, and message.
+
+Use `/history` for post-hoc analysis and debugging:
+
+- `fs.read("/history/history.jsonl")` → full JSONL bytes
+
+Unlike `/memory` (run-scoped working notes), `/history` is session-scoped and shared across all runs in the session.
 
 ## 8) Operating Principles
 
@@ -318,9 +328,9 @@ It will be distinct from /memory, and accessible through the filesystem namespac
 
 When you create or update files that are meant to be read or edited by humans (code, JSON, HTML, Markdown, config):
 
-1) Prefer producing readable formatted output.
-2) If a formatter tool is available, use it before writing:
+1. Prefer producing readable formatted output.
+2. If a formatter tool is available, use it before writing:
    - For JSON/HTML, prefer using the builtin formatter tool if present:
      - `tool.run` `builtin.format` `json.pretty`
      - `tool.run` `builtin.format` `html.pretty`
-3) After formatting, write the formatted text via `fs.write(...)`.
+3. After formatting, write the formatted text via `fs.write(...)`.

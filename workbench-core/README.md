@@ -12,7 +12,7 @@ go build ./cmd/workbench
 ./workbench
 ```
 
-The default run opens a Bubble Tea-powered TUI where each message you submit becomes an agent turn that can discover tools under `/tools`, execute them via `tool.run`, and interact with run-scoped files under `/workspace`. Every run creates a session and writes results into the configured data directory (`data` by default).
+The default run opens a Bubble Tea-powered TUI where each message you submit becomes an agent turn that can discover tools under `/tools`, execute them via `tool.run`, and interact with run-scoped files under `/workspace`. Every run creates a session and writes results into the configured data directory (default: `~/.workbench` or `$XDG_STATE_HOME/workbench`).
 
 ## Commands
 
@@ -24,18 +24,18 @@ Most entrypoints live under `cmd/workbench/cmd` and use Cobra. Key commands are:
 - `workbench list runs <sessionId>` – shows runs (and their statuses) for one session.
 - `workbench show session <sessionId>` – prints the `session.json` metadata for a session.
 - `workbench show history <sessionId>` – emits the recent operation history (JSONL) for debugging.
-- `workbench show run <runId>`/**(not yet implemented)** – placeholder for future run metadata inspection.
+- `workbench show run <runId>` – prints the `run.json` metadata for a run.
 
 ## Configuration
 
 All runtime configuration (currently just `dataDir`) is defined in `internal/config/config.go`. The CLI supports:
 
-- `--data-dir` – base directory where runs, sessions, results, workspace, and history live (default: `data`).
+- `--data-dir` – base directory where runs, sessions, results, workspace, and history live (priority: `--data-dir`, env `WORKBENCH_DATA_DIR`, default: `~/.workbench` or `$XDG_STATE_HOME/workbench`).
 - `--workdir` / `WORKBENCH_WORKDIR` – override the directory mounted at `/workdir` inside the sandbox.
 - `--context-bytes` – limits the token context saved per run (must be > 0).
 - `--title` / `--goal` – defaults used when creating new runs.
 
-The `effectiveConfig()` helper combines the defaults with any CLI overrides before each command runs.
+The `effectiveConfig()` helper resolves the final config (including `dataDir`) before each command runs.
 
 ## Project layout
 
