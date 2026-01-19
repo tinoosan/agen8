@@ -436,3 +436,115 @@ func mustParseBatchResponse(t *testing.T, msgs []types.LLMMessage) types.HostOpB
 	t.Fatalf("HostOpBatchResponse not found in messages")
 	return types.HostOpBatchResponse{}
 }
+
+func TestAgentLoopV0_RunConversation_BatchSequential_AllowsToolRun(t *testing.T) {
+	llm := &fakeLLM{
+		Replies: []string{
+			`{"op":"batch","operations":[{"op":"tool.run","toolId":"builtin.trace","actionId":"events.summary","input":{},"timeoutMs":5000}]}`,
+			`{"op":"final","text":"done"}`,
+		},
+	}
+
+	var called []types.HostOpRequest
+	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		_ = ctx
+		called = append(called, req)
+		if req.Op != types.HostOpToolRun {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "unexpected op"}
+		}
+		return types.HostOpResponse{
+			Op:  req.Op,
+			Ok:  true,
+			ToolResponse: &types.ToolResponse{
+				Version:  "v1",
+				CallID:   "call_1",
+				ToolID:   req.ToolID,
+				ActionID: req.ActionID,
+				Ok:       true,
+				Output:   json.RawMessage(`{"ok":true}`),
+			},
+		}
+	}
+
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	final, msgs, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if final != "done" {
+		t.Fatalf("unexpected final %q", final)
+	}
+	if len(called) != 1 {
+		t.Fatalf("expected 1 call, got %d (%+v)", len(called), called)
+	}
+	if called[0].Op != types.HostOpToolRun {
+		t.Fatalf("unexpected call[0]: %+v", called[0])
+	}
+
+	br := mustParseBatchResponse(t, msgs)
+	if !br.Ok {
+		t.Fatalf("expected batch ok=true, got false (resp=%+v)", br)
+	}
+	if len(br.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d (resp=%+v)", len(br.Results), br)
+	}
+	if br.Results[0].Op != types.HostOpToolRun || !br.Results[0].Ok {
+		t.Fatalf("unexpected result: %+v", br.Results[0])
+	}
+	if br.Results[0].ToolResponse == nil {
+		t.Fatalf("expected toolResponse in batch result")
+	}
+	if br.Results[0].ToolResponse.CallID != "call_1" {
+		t.Fatalf("unexpected callId %q", br.Results[0].ToolResponse.CallID)
+	}
+}
+
+func TestAgentLoopV0_RunConversation_BatchParallel_AllowsToolRun(t *testing.T) {
+	llm := &fakeLLM{
+		Replies: []string{
+			`{"op":"batch","parallel":true,"operations":[{"op":"tool.run","toolId":"builtin.trace","actionId":"events.summary","input":{},"timeoutMs":5000}]}`,
+			`{"op":"final","text":"done"}`,
+		},
+	}
+
+	var called []types.HostOpRequest
+	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		_ = ctx
+		called = append(called, req)
+		if req.Op != types.HostOpToolRun {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "unexpected op"}
+		}
+		return types.HostOpResponse{
+			Op:  req.Op,
+			Ok:  true,
+			ToolResponse: &types.ToolResponse{
+				Version:  "v1",
+				CallID:   "call_1",
+				ToolID:   req.ToolID,
+				ActionID: req.ActionID,
+				Ok:       true,
+				Output:   json.RawMessage(`{"ok":true}`),
+			},
+		}
+	}
+
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	final, msgs, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if final != "done" {
+		t.Fatalf("unexpected final %q", final)
+	}
+	if len(called) != 1 {
+		t.Fatalf("expected 1 call, got %d (%+v)", len(called), called)
+	}
+
+	br := mustParseBatchResponse(t, msgs)
+	if !br.Ok || len(br.Results) != 1 || br.Results[0].ToolResponse == nil {
+		t.Fatalf("unexpected batch response: %+v", br)
+	}
+	if br.Results[0].ToolResponse.CallID != "call_1" {
+		t.Fatalf("unexpected callId %q", br.Results[0].ToolResponse.CallID)
+	}
+}

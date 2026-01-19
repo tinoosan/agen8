@@ -5,6 +5,7 @@ import "strings"
 // Hardcoded list of available slash commands for the command palette.
 var availableCommands = []string{
 	"/model",
+	"/reasoning",
 	"/open",
 	"/editor",
 	"/cd",
@@ -158,4 +159,3 @@ func (m *Model) autocompleteCommand() {
 	// Recompute layout so the transcript area expands again.
 	m.layout()
 }
-

@@ -485,6 +485,66 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 			})
 		}
 		return resp, true, nil
+	case "reasoning":
+		// Pre-init reasoning commands should not create a new session/run.
+		curEffort := strings.TrimSpace(r.opts.ReasoningEffort)
+		curSummary := strings.TrimSpace(r.opts.ReasoningSummary)
+
+		if strings.TrimSpace(arg) == "" {
+			out := "Reasoning:\n" +
+				"  effort:  " + defaultIfEmpty(curEffort, "(default)") + "\n" +
+				"  summary: " + defaultIfEmpty(curSummary, "(default)")
+			r.emitPreInit(events.Event{
+				Type:    "reasoning.info",
+				Message: "Reasoning",
+				Data:    map[string]string{"text": out},
+				Store:   boolp(false),
+				Console: boolp(false),
+			})
+			return out, true, nil
+		}
+
+		fields := strings.Fields(arg)
+		if len(fields) < 2 {
+			return "Usage: /reasoning effort <none|minimal|low|medium|high|xhigh> OR /reasoning summary <off|auto|concise|detailed>", true, nil
+		}
+
+		kind := strings.ToLower(strings.TrimSpace(fields[0]))
+		val := strings.ToLower(strings.TrimSpace(fields[1]))
+		switch kind {
+		case "effort":
+			switch val {
+			case "none", "minimal", "low", "medium", "high", "xhigh":
+				r.opts.ReasoningEffort = val
+				r.emitPreInit(events.Event{
+					Type:    "reasoning.changed",
+					Message: "Reasoning effort changed",
+					Data:    map[string]string{"effort": val, "summary": curSummary},
+					Store:   boolp(false),
+					Console: boolp(false),
+				})
+				return "", true, nil
+			default:
+				return "Invalid effort. Use: none|minimal|low|medium|high|xhigh", true, nil
+			}
+		case "summary":
+			switch val {
+			case "off", "auto", "concise", "detailed":
+				r.opts.ReasoningSummary = val
+				r.emitPreInit(events.Event{
+					Type:    "reasoning.changed",
+					Message: "Reasoning summary changed",
+					Data:    map[string]string{"effort": curEffort, "summary": val},
+					Store:   boolp(false),
+					Console: boolp(false),
+				})
+				return "", true, nil
+			default:
+				return "Invalid summary. Use: off|auto|concise|detailed", true, nil
+			}
+		default:
+			return "Usage: /reasoning effort <...> OR /reasoning summary <...>", true, nil
+		}
 	case "cd":
 		cur, err := resolveWorkDir(r.opts.WorkDir)
 		if err != nil {
