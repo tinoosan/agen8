@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tinoosan/workbench-core/internal/agent"
+	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
@@ -23,7 +24,7 @@ type RefResolution struct {
 	// Unresolved contains tokens that could not be resolved.
 	Unresolved []string
 
-	// Ambiguous maps token -> candidate rel paths under the workdir.
+	// Ambiguous maps token -> candidate VFS paths (e.g. "/workdir/a.txt", "/workspace/b.txt").
 	Ambiguous map[string][]string
 }
 
@@ -164,6 +165,7 @@ func ResolveAtRefs(fsys *vfs.FS, workdirBase string, artifacts *ArtifactIndex, u
 
 	var res RefResolution
 	res.Ambiguous = make(map[string][]string)
+	workspaceBase := workspaceBaseDirFromVFS(fsys)
 
 	usedBytes := 0
 	for _, tok := range tokens {
@@ -171,7 +173,7 @@ func ResolveAtRefs(fsys *vfs.FS, workdirBase string, artifacts *ArtifactIndex, u
 			break
 		}
 
-		att, ok, amb, err := resolveOneRef(fsys, workdirBase, artifacts, tok, maxBytesPerFile)
+		att, ok, amb, err := resolveOneRef(fsys, workdirBase, workspaceBase, artifacts, tok, maxBytesPerFile)
 		if err != nil {
 			return RefResolution{}, err
 		}
@@ -198,11 +200,17 @@ func ResolveAtRefs(fsys *vfs.FS, workdirBase string, artifacts *ArtifactIndex, u
 	return res, nil
 }
 
-func resolveOneRef(fsys *vfs.FS, workdirBase string, artifacts *ArtifactIndex, token string, maxBytes int) (agent.FileAttachment, bool, []string, error) {
+func resolveOneRef(fsys *vfs.FS, workdirBase, workspaceBase string, artifacts *ArtifactIndex, token string, maxBytes int) (agent.FileAttachment, bool, []string, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return agent.FileAttachment{}, false, nil, nil
 	}
+
+	// Allow explicit VFS paths for disambiguation (restricted to safe mounts).
+	if vp, ok := normalizeExplicitRefVPath(token); ok {
+		return readAttachment(fsys, token, vp, displayNameForVPath(vp), maxBytes)
+	}
+	// Do not allow arbitrary absolute paths or mounts.
 	if strings.HasPrefix(token, "/") {
 		return agent.FileAttachment{}, false, nil, nil
 	}
@@ -222,6 +230,14 @@ func resolveOneRef(fsys *vfs.FS, workdirBase string, artifacts *ArtifactIndex, t
 		} else if ok {
 			return att, true, nil, nil
 		}
+
+		// 1b) exact under /workspace (run-scoped scratch).
+		vp = "/workspace/" + clean
+		if att, ok, err := tryReadVPath(fsys, token, vp, clean, maxBytes); err != nil {
+			return agent.FileAttachment{}, false, nil, err
+		} else if ok {
+			return att, true, nil, nil
+		}
 	}
 
 	// 2) artifact index (scratch outputs).
@@ -229,22 +245,22 @@ func resolveOneRef(fsys *vfs.FS, workdirBase string, artifacts *ArtifactIndex, t
 		return readAttachment(fsys, token, vp, displayNameForVPath(vp), maxBytes)
 	}
 
-	// 3) fuzzy search under workdir.
-	cands, err := fuzzyFindWorkdir(workdirBase, token, 40, 5000)
+	// 3) fuzzy search under workdir + workspace.
+	candsWorkdir, err := fuzzyFindWorkdir(workdirBase, token, 40, 5000)
 	if err != nil {
 		return agent.FileAttachment{}, false, nil, nil
 	}
-	if len(cands) == 1 {
-		rel := cands[0]
-		vp := "/workdir/" + rel
-		if att, ok, err := tryReadVPath(fsys, token, vp, rel, maxBytes); err != nil {
-			return agent.FileAttachment{}, false, nil, err
-		} else if ok {
-			return att, true, nil, nil
-		}
+	candsWorkspace, err := fuzzyFindWorkdir(workspaceBase, token, 40, 5000)
+	if err != nil {
+		return agent.FileAttachment{}, false, nil, nil
 	}
-	if len(cands) > 1 {
-		return agent.FileAttachment{}, false, cands, nil
+	all := mergeCandidateVPaths(candsWorkdir, candsWorkspace)
+	if len(all) == 1 {
+		vp := all[0]
+		return readAttachment(fsys, token, vp, displayNameForVPath(vp), maxBytes)
+	}
+	if len(all) > 1 {
+		return agent.FileAttachment{}, false, all, nil
 	}
 
 	return agent.FileAttachment{}, false, nil, nil
@@ -366,4 +382,80 @@ func fuzzyFindWorkdir(baseDir string, token string, maxCandidates int, maxVisite
 	}
 	sort.Strings(cands)
 	return cands, nil
+}
+
+func workspaceBaseDirFromVFS(fsys *vfs.FS) string {
+	if fsys == nil {
+		return ""
+	}
+	_, r, _, err := fsys.Resolve("/" + vfs.MountWorkspace)
+	if err != nil || r == nil {
+		return ""
+	}
+	dr, ok := r.(*resources.DirResource)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(dr.BaseDir)
+}
+
+func normalizeExplicitRefVPath(token string) (vpath string, ok bool) {
+	token = strings.TrimSpace(token)
+	if token == "" || !strings.HasPrefix(token, "/") {
+		return "", false
+	}
+	switch {
+	case strings.HasPrefix(token, "/workdir/"):
+		sub := strings.TrimPrefix(token, "/workdir/")
+		clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
+		if err != nil || clean == "" || clean == "." {
+			return "", false
+		}
+		return "/workdir/" + clean, true
+	case strings.HasPrefix(token, "/workspace/"):
+		sub := strings.TrimPrefix(token, "/workspace/")
+		clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
+		if err != nil || clean == "" || clean == "." {
+			return "", false
+		}
+		return "/workspace/" + clean, true
+	case strings.HasPrefix(token, "/results/"):
+		sub := strings.TrimPrefix(token, "/results/")
+		clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
+		if err != nil || clean == "" || clean == "." {
+			return "", false
+		}
+		return "/results/" + clean, true
+	default:
+		return "", false
+	}
+}
+
+func mergeCandidateVPaths(workdirRels, workspaceRels []string) []string {
+	seen := make(map[string]bool, len(workdirRels)+len(workspaceRels))
+	out := make([]string, 0, len(workdirRels)+len(workspaceRels))
+	add := func(vp string) {
+		vp = strings.TrimSpace(vp)
+		if vp == "" || seen[vp] {
+			return
+		}
+		seen[vp] = true
+		out = append(out, vp)
+	}
+	for _, rel := range workdirRels {
+		rel = strings.TrimSpace(rel)
+		if rel == "" {
+			continue
+		}
+		add("/workdir/" + rel)
+	}
+	for _, rel := range workspaceRels {
+		rel = strings.TrimSpace(rel)
+		if rel == "" {
+			continue
+		}
+		add("/workspace/" + rel)
+	}
+	sort.Strings(out)
+	return out
 }
