@@ -290,6 +290,66 @@ func TestClient_onResponsesStreamEvent_EmitsReasoningSignalForReasoningTextDelta
 	}
 }
 
+func TestClient_onResponsesStreamEvent_EmitsReasoningSummaryPartAdded(t *testing.T) {
+	var ev responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(`{
+	  "type":"response.reasoning_summary_part.added",
+	  "item_id":"item",
+	  "output_index":0,
+	  "sequence_number":4,
+	  "summary_index":0,
+	  "part":{"type":"summary_text","text":"part summary"}
+	}`), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+
+	var got []types.LLMStreamChunk
+	var saw bool
+	c := &Client{}
+	if err := c.onResponsesStreamEvent(ev, func(sc types.LLMStreamChunk) error {
+		got = append(got, sc)
+		return nil
+	}, nil, nil, &saw); err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
+	}
+	if len(got) != 1 || !got[0].IsReasoning || got[0].Text != "part summary" {
+		t.Fatalf("unexpected chunks: %+v", got)
+	}
+	if !saw {
+		t.Fatalf("expected sawReasoningSummaryText=true")
+	}
+}
+
+func TestClient_onResponsesStreamEvent_EmitsReasoningSummaryTextDoneOnlyWhenNoDeltasSeen(t *testing.T) {
+	var ev responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(`{
+	  "type":"response.reasoning_summary_text.done",
+	  "item_id":"item",
+	  "output_index":0,
+	  "sequence_number":5,
+	  "summary_index":0,
+	  "text":"full summary"
+	}`), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+
+	var got []types.LLMStreamChunk
+	saw := false
+	c := &Client{}
+	if err := c.onResponsesStreamEvent(ev, func(sc types.LLMStreamChunk) error {
+		got = append(got, sc)
+		return nil
+	}, nil, nil, &saw); err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
+	}
+	if len(got) != 1 || !got[0].IsReasoning || got[0].Text != "full summary" {
+		t.Fatalf("unexpected chunks: %+v", got)
+	}
+	if !saw {
+		t.Fatalf("expected sawReasoningSummaryText=true")
+	}
+}
+
 func TestShouldFallbackToChat_ResponsesNotFound(t *testing.T) {
 	apierr := &openai.Error{StatusCode: http.StatusNotFound}
 	if !shouldFallbackToChat(apierr) {

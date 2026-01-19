@@ -146,4 +146,3 @@ func (m *Model) updateThinkingTranscriptItem() {
 		m.transcript.GotoBottom()
 	}
 }
-

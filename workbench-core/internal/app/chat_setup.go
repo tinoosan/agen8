@@ -410,14 +410,14 @@ func setupTUIChatRuntime(
 	}
 
 	a, err := agent.New(agent.Config{
-		LLM:          client,
-		Exec:         agent.HostExecFunc(execWithEvents),
-		Model:        model,
+		LLM:              client,
+		Exec:             agent.HostExecFunc(execWithEvents),
+		Model:            model,
 		ReasoningEffort:  strings.TrimSpace(opts.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(opts.ReasoningSummary),
-		SystemPrompt: baseSystemPrompt,
-		Context:      constructor,
-		MaxSteps:     opts.MaxSteps,
+		SystemPrompt:     baseSystemPrompt,
+		Context:          constructor,
+		MaxSteps:         opts.MaxSteps,
 	})
 	if err != nil {
 		return nil, err

@@ -112,14 +112,14 @@ func New(cfg Config) (*Agent, error) {
 	}
 
 	return &Agent{
-		LLM:          cfg.LLM,
-		Exec:         cfg.Exec,
-		Model:        cfg.Model,
+		LLM:              cfg.LLM,
+		Exec:             cfg.Exec,
+		Model:            cfg.Model,
 		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
-		SystemPrompt: system,
-		Context:      cfg.Context,
-		MaxSteps:     cfg.MaxSteps,
-		Hooks:        cfg.Hooks,
+		SystemPrompt:     system,
+		Context:          cfg.Context,
+		MaxSteps:         cfg.MaxSteps,
+		Hooks:            cfg.Hooks,
 	}, nil
 }
