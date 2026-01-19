@@ -24,8 +24,9 @@ type LLMClient interface {
 //   - Text: incremental assistant content as it arrives
 //   - Done: optional sentinel (providers may also use EOF/[DONE])
 type LLMStreamChunk struct {
-	Text string
-	Done bool
+	Text        string
+	IsReasoning bool // true if this chunk is reasoning/thinking content (provider-specific)
+	Done        bool
 }
 
 // LLMStreamCallback is invoked for each stream chunk.

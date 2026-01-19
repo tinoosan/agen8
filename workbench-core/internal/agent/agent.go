@@ -50,6 +50,12 @@ type Hooks struct {
 	// Phase 1: the agent loop emits only the decoded "final.text" stream.
 	OnToken func(step int, text string)
 
+	// OnStreamChunk is invoked for provider-level stream chunks that should not be
+	// decoded/forwarded as user-visible output.
+	//
+	// Phase 2: used for "thinking" signals (reasoning progress + optional summary).
+	OnStreamChunk func(step int, chunk types.LLMStreamChunk)
+
 	// Logf is an optional logger used to print what the agent is doing.
 	Logf func(format string, args ...any)
 }
