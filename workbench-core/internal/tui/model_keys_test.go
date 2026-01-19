@@ -1000,8 +1000,10 @@ func TestFilePicker_OpenCommand_DoesNotAutoRun(t *testing.T) {
 }
 
 func TestEditorCompose_LoadsComposeFileIntoMultilineOnExit(t *testing.T) {
-	workdir := t.TempDir()
-	composeAbs := filepath.Join(workdir, ".workbench", "compose.md")
+	t.Setenv("EDITOR", "true") // ensure compose uses external editor path
+
+	dataDir := t.TempDir()
+	composeAbs := filepath.Join(dataDir, "compose.md")
 	if err := os.MkdirAll(filepath.Dir(composeAbs), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -1014,25 +1016,24 @@ func TestEditorCompose_LoadsComposeFileIntoMultilineOnExit(t *testing.T) {
 	m.width = 120
 	m.height = 24
 	m.showDetails = true
-	m.workdir = workdir
+	m.dataDir = dataDir
 	m.layout()
 
 	// Simulate host telling us to open compose editor.
 	m2, _ := m.Update(eventMsg(events.Event{
 		Type: "ui.editor.open",
 		Data: map[string]string{
-			"vpath":   "/workdir/.workbench/compose.md",
+			"absPath": composeAbs,
 			"purpose": "compose",
-			"workdir": workdir,
 		},
 	}))
 	updated := m2.(Model)
-	if strings.TrimSpace(updated.externalEditorComposeVPath) == "" {
-		t.Fatalf("expected externalEditorComposeVPath to be set")
+	if strings.TrimSpace(updated.externalEditorComposePath) == "" {
+		t.Fatalf("expected externalEditorComposePath to be set")
 	}
 
 	// Simulate external editor exiting successfully.
-	m3, cmd := updated.Update(editorExternalDoneMsg{vpath: "/workdir/.workbench/compose.md", err: nil})
+	m3, cmd := updated.Update(editorExternalDoneMsg{vpath: composeAbs, err: nil})
 	updated2 := m3.(Model)
 	if cmd == nil {
 		t.Fatalf("expected compose load cmd")
@@ -1056,7 +1057,8 @@ func TestCtrlE_PrefillsComposeFileAndLoadsOnExit(t *testing.T) {
 	t.Setenv("EDITOR", "true") // ensure editorExecCmd can construct a command
 
 	workdir := t.TempDir()
-	composeAbs := filepath.Join(workdir, ".workbench", "compose.md")
+	dataDir := t.TempDir()
+	composeAbs := filepath.Join(dataDir, "compose.md")
 	if err := os.MkdirAll(filepath.Dir(composeAbs), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -1066,6 +1068,7 @@ func TestCtrlE_PrefillsComposeFileAndLoadsOnExit(t *testing.T) {
 	m.height = 24
 	m.showDetails = true
 	m.workdir = workdir
+	m.dataDir = dataDir
 	m.layout()
 
 	// Start with some input.
@@ -1092,7 +1095,7 @@ func TestCtrlE_PrefillsComposeFileAndLoadsOnExit(t *testing.T) {
 		t.Fatalf("write compose: %v", err)
 	}
 
-	m3, loadCmd := updated.Update(editorExternalDoneMsg{vpath: "/workdir/.workbench/compose.md", err: nil})
+	m3, loadCmd := updated.Update(editorExternalDoneMsg{vpath: composeAbs, err: nil})
 	updated2 := m3.(Model)
 	if loadCmd == nil {
 		t.Fatalf("expected compose load cmd")

@@ -317,6 +317,8 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 
 	cmd, arg := splitSlashCommand(line)
 	switch cmd {
+	case "datadir":
+		return strings.TrimSpace(r.cfg.DataDir), true, nil
 	case "editor":
 		cur, err := resolveWorkDir(r.opts.WorkDir)
 		if err != nil {
@@ -324,8 +326,7 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 		}
 		if strings.TrimSpace(arg) == "" {
 			// /editor (no args): compose a message in $EDITOR.
-			composeRel := ".workbench/compose.md"
-			composeAbs := filepath.Join(cur, filepath.FromSlash(composeRel))
+			composeAbs := filepath.Join(strings.TrimSpace(r.cfg.DataDir), "compose.md")
 			_ = os.MkdirAll(filepath.Dir(composeAbs), 0755)
 			_ = os.WriteFile(composeAbs, []byte{}, 0644) // start blank each time
 
@@ -333,9 +334,10 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 				Type:    "ui.editor.open",
 				Message: "Compose message",
 				Data: map[string]string{
-					"vpath":   "/workdir/.workbench/compose.md",
-					"path":    composeRel,
+					"vpath":   "/workdir/.workbench/compose.md", // legacy; TUI prefers absPath for compose
+					"path":    "compose.md",
 					"purpose": "compose",
+					"absPath": composeAbs,
 					// Include the absolute workdir so the TUI can open $EDITOR without
 					// requiring a session/run to exist.
 					"workdir": cur,
@@ -1058,12 +1060,13 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 
 	cmd, arg := splitSlashCommand(line)
 	switch cmd {
+	case "datadir":
+		return strings.TrimSpace(r.cfg.DataDir), true
 	case "editor":
 		if strings.TrimSpace(arg) == "" {
 			// /editor (no args): compose a message in $EDITOR.
 			wd := strings.TrimSpace(r.workdirBase)
-			composeRel := ".workbench/compose.md"
-			composeAbs := filepath.Join(wd, filepath.FromSlash(composeRel))
+			composeAbs := filepath.Join(strings.TrimSpace(r.cfg.DataDir), "compose.md")
 			_ = os.MkdirAll(filepath.Dir(composeAbs), 0755)
 			_ = os.WriteFile(composeAbs, []byte{}, 0644) // start blank each time
 
@@ -1071,9 +1074,10 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 				Type:    "ui.editor.open",
 				Message: "Compose message",
 				Data: map[string]string{
-					"vpath":   "/workdir/.workbench/compose.md",
-					"path":    composeRel,
+					"vpath":   "/workdir/.workbench/compose.md", // legacy; TUI prefers absPath for compose
+					"path":    "compose.md",
 					"purpose": "compose",
+					"absPath": composeAbs,
 					"workdir": wd,
 				},
 				Store:   boolp(false),
