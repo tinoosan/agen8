@@ -110,20 +110,20 @@ type contextCache struct {
 	basePromptHash uint64
 
 	// profile section cache
-	profileReady        bool
-	profileSection      string
-	profileBudgetBytes  int
-	profileBytesTotal   int
-	profileBytesIncl    int
-	profileBytesTrunc   bool
+	profileReady       bool
+	profileSection     string
+	profileBudgetBytes int
+	profileBytesTotal  int
+	profileBytesIncl   int
+	profileBytesTrunc  bool
 
 	// memory section cache
-	memoryReady        bool
-	memorySection      string
-	memoryBudgetBytes  int
-	memoryBytesTotal   int
-	memoryBytesIncl    int
-	memoryBytesTrunc   bool
+	memoryReady       bool
+	memorySection     string
+	memoryBudgetBytes int
+	memoryBytesTotal  int
+	memoryBytesIncl   int
+	memoryBytesTrunc  bool
 
 	// attachments section cache
 	attachReady   bool
