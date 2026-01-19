@@ -2794,9 +2794,6 @@ func (m *Model) formatThinkingText() string {
 	if !m.thinkingActive && m.thinkingDuration > 0 {
 		header = "Thought for " + m.thinkingDuration.Truncate(time.Millisecond).String()
 	}
-	if m.thinkingStep > 0 {
-		header += " (step " + strconv.Itoa(m.thinkingStep) + ")"
-	}
 	summary := strings.TrimSpace(m.thinkingSummary)
 	if summary == "" {
 		return header
