@@ -170,11 +170,13 @@ func applyUnifiedDiffStrict(oldText string, patch string) (string, error) {
 	for _, ln := range lines {
 		if strings.HasPrefix(ln, "@@") {
 			// @@ -a,b +c,d @@ optional heading
-			last := strings.LastIndex(ln, "@@")
-			if last <= 2 {
-				return "", fmt.Errorf("invalid hunk header: %q", ln)
+			// Relaxed parsing: allow missing trailing @@.
+			clean := strings.TrimPrefix(ln, "@@")
+			if idx := strings.Index(clean, "@@"); idx != -1 {
+				clean = clean[:idx]
 			}
-			inner := strings.TrimSpace(ln[2:last])
+			inner := strings.TrimSpace(clean)
+
 			// inner like "-1,3 +1,4"
 			fields := strings.Fields(inner)
 			if len(fields) < 2 {
