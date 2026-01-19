@@ -217,8 +217,8 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	// Budgets (deterministic defaults).
 	profileBudget := clampBudget(orDefault(c.MaxProfileBytes, 4*1024), 0, 8*1024)
 	memBudget := clampBudget(orDefault(c.MaxMemoryBytes, 8*1024), 0, 16*1024)
-	traceBudget := clampBudget(orDefault(c.MaxTraceBytes, 8*1024), 0, 64*1024)
-	histBudget := clampBudget(orDefault(c.MaxHistoryBytes, 8*1024), 0, 64*1024)
+	traceBudget := clampBudget(orDefault(c.MaxTraceBytes, 4*1024), 0, 64*1024)
+	histBudget := clampBudget(orDefault(c.MaxHistoryBytes, 4*1024), 0, 64*1024)
 
 	// Failure bump: if last host op failed or was truncated, prefer more trace/history.
 	failureBump := false
