@@ -25,6 +25,8 @@ const (
 	HostOpToolRun = "tool.run"
 	// HostOpBatch allows submitting multiple independent operations in one turn.
 	HostOpBatch = "batch"
+	// HostOpFSBatch is an alias for HostOpBatch (preferred by some prompts/models).
+	HostOpFSBatch = "fs.batch"
 	// HostOpFinal ends the agent loop for a user turn.
 	HostOpFinal = "final"
 )
@@ -62,7 +64,7 @@ type HostOpBatchRequest struct {
 
 func (r HostOpBatchRequest) Validate() error {
 	r.Op = strings.TrimSpace(r.Op)
-	if r.Op != HostOpBatch {
+	if r.Op != HostOpBatch && r.Op != HostOpFSBatch {
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
 	if len(r.Operations) == 0 {
@@ -110,6 +112,9 @@ func (r HostOpRequest) Validate() error {
 		if err := validate.NonEmpty("path", r.Path); err != nil {
 			return err
 		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+			return fmt.Errorf("path must be an absolute VFS path (start with /)")
+		}
 		if r.MaxBytes < 0 {
 			return fmt.Errorf("maxBytes must be >= 0")
 		}
@@ -119,11 +124,24 @@ func (r HostOpRequest) Validate() error {
 		if err := validate.NonEmpty("path", r.Path); err != nil {
 			return err
 		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+			return fmt.Errorf("path must be an absolute VFS path (start with /)")
+		}
+		// For fs.write/fs.append, require text to avoid silently writing empty files when
+		// models emit unsupported fields (e.g. {"data":...,"encoding":...}) instead of "text".
+		//
+		// If callers truly want an empty write, they can pass "\n" explicitly.
+		if err := validate.NonEmpty("text", r.Text); err != nil {
+			return err
+		}
 		return nil
 
 	case HostOpFSEdit:
 		if err := validate.NonEmpty("path", r.Path); err != nil {
 			return err
+		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+			return fmt.Errorf("path must be an absolute VFS path (start with /)")
 		}
 		if r.Input == nil {
 			return fmt.Errorf("input is required")
@@ -133,6 +151,9 @@ func (r HostOpRequest) Validate() error {
 	case HostOpFSPatch:
 		if err := validate.NonEmpty("path", r.Path); err != nil {
 			return err
+		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+			return fmt.Errorf("path must be an absolute VFS path (start with /)")
 		}
 		if err := validate.NonEmpty("text", r.Text); err != nil {
 			return err

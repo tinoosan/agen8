@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -24,6 +25,10 @@ type Client struct {
 
 	// DefaultMaxTokens is used when LLMRequest.MaxTokens is 0.
 	DefaultMaxTokens int
+
+	// schemaUnsupported is set when the provider rejects json_schema response_format.
+	// Once set, we stop attempting schema requests to avoid repeated 400s.
+	schemaUnsupported atomic.Bool
 }
 
 func NewClientFromEnv() (*Client, error) {
@@ -103,6 +108,9 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 	}
 	if req.Temperature != 0 {
 		params.Temperature = openai.Float(req.Temperature)
+	}
+	if c.schemaUnsupported.Load() {
+		req.ResponseSchema = nil
 	}
 	if sch := req.ResponseSchema; sch != nil && strings.TrimSpace(sch.Name) != "" && sch.Schema != nil {
 		schemaParam := openai.ResponseFormatJSONSchemaJSONSchemaParam{
@@ -188,6 +196,9 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	}
 	if req.Temperature != 0 {
 		params.Temperature = openai.Float(req.Temperature)
+	}
+	if c.schemaUnsupported.Load() {
+		req.ResponseSchema = nil
 	}
 	if sch := req.ResponseSchema; sch != nil && strings.TrimSpace(sch.Name) != "" && sch.Schema != nil {
 		js := responses.ResponseFormatTextJSONSchemaConfigParam{
@@ -302,6 +313,7 @@ func (c *Client) Generate(ctx context.Context, req types.LLMRequest) (types.LLMR
 
 	out, err := c.generateOnce(ctx, req)
 	if err != nil && req.ResponseSchema != nil && shouldFallbackFromJSONSchema(err) {
+		c.schemaUnsupported.Store(true)
 		// Provider/model rejected json_schema (unsupported/invalid). Fall back to JSON object mode.
 		req2 := req
 		req2.ResponseSchema = nil
@@ -472,14 +484,33 @@ func (c *Client) GenerateStream(ctx context.Context, req types.LLMRequest, cb ty
 		return types.LLMResponse{}, fmt.Errorf("llm client is nil")
 	}
 
-	out, err := c.generateStreamOnce(ctx, req, cb)
-	if err != nil && req.ResponseSchema != nil && shouldFallbackFromJSONSchema(err) {
-		req2 := req
-		req2.ResponseSchema = nil
-		req2.JSONOnly = true
-		return c.generateStreamOnce(ctx, req2, cb)
+	// When ResponseSchema is set, prefer enforcing it if possible. Some OpenAI-compatible
+	// providers reject `json_schema` on the Responses API but accept it on Chat Completions.
+	if req.ResponseSchema != nil {
+		// Try Responses API first (keeps reasoning summaries when supported).
+		out, err := c.generateStreamResponses(ctx, req, cb)
+		if err == nil {
+			return out, nil
+		}
+		if shouldFallbackFromJSONSchema(err) {
+			c.schemaUnsupported.Store(true)
+			// Fallback 1: try Chat Completions streaming with the schema.
+			out2, err2 := c.generateStreamChat(ctx, req, cb)
+			if err2 == nil {
+				return out2, nil
+			}
+			// Fallback 2: drop schema and try normal streaming selection.
+			req2 := req
+			req2.ResponseSchema = nil
+			req2.JSONOnly = true
+			return c.generateStreamOnce(ctx, req2, cb)
+		}
+		// Non-schema error: fall back to normal selection.
+		return c.generateStreamOnce(ctx, req, cb)
 	}
-	return out, err
+
+	// No schema: current behavior.
+	return c.generateStreamOnce(ctx, req, cb)
 }
 
 func (c *Client) generateStreamOnce(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
@@ -609,20 +640,62 @@ func shouldFallbackFromJSONSchema(err error) bool {
 		typ := strings.ToLower(strings.TrimSpace(apierr.Type))
 		raw := strings.ToLower(strings.TrimSpace(apierr.RawJSON()))
 		s := msg + " " + param + " " + typ + " " + raw
-		return strings.Contains(s, "json_schema") ||
+		ok := strings.Contains(s, "json_schema") ||
 			strings.Contains(s, "response_format") ||
 			strings.Contains(s, "structured") ||
 			strings.Contains(s, "schema") ||
 			strings.Contains(s, "strict")
+		return ok
 	}
 
 	// Fallback: conservative string matching.
 	s := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(s, "json_schema") ||
+	ok := strings.Contains(s, "json_schema") ||
 		strings.Contains(s, "response_format") ||
 		strings.Contains(s, "structured") ||
 		strings.Contains(s, "schema") ||
 		strings.Contains(s, "strict")
+	return ok
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return truncateErr(err.Error())
+}
+
+func truncateErr(s string) string {
+	const max = 240
+	s = strings.TrimSpace(s)
+	if len(s) > max {
+		return s[:max] + "…"
+	}
+	return s
+}
+
+func responseFormatKindResponses(p responses.ResponseNewParams) string {
+	// p.Text is zero unless JSONOnly/ResponseSchema are set.
+	if p.Text.Format.OfJSONSchema != nil {
+		return "json_schema"
+	}
+	if p.Text.Format.OfJSONObject != nil {
+		return "json_object"
+	}
+	if p.Text.Format.OfText != nil {
+		return "text"
+	}
+	return "none"
+}
+
+func responseFormatKindChat(p openai.ChatCompletionNewParams) string {
+	if p.ResponseFormat.OfJSONSchema != nil {
+		return "json_schema"
+	}
+	if p.ResponseFormat.OfJSONObject != nil {
+		return "json_object"
+	}
+	return "none"
 }
 
 func extraString(fields map[string]respjson.Field, key string) (string, bool) {

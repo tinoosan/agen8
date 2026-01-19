@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"strings"
 
@@ -326,9 +327,12 @@ func TestAgentLoopV0_RunConversation_BatchParallel_PreservesResultOrder(t *testi
 	}
 
 	var called []types.HostOpRequest
+	var mu sync.Mutex
 	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		_ = ctx
+		mu.Lock()
 		called = append(called, req)
+		mu.Unlock()
 		return types.HostOpResponse{Op: req.Op, Ok: true, Text: req.Path}
 	}
 
@@ -508,9 +512,12 @@ func TestAgentLoopV0_RunConversation_BatchParallel_AllowsToolRun(t *testing.T) {
 	}
 
 	var called []types.HostOpRequest
+	var mu sync.Mutex
 	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		_ = ctx
+		mu.Lock()
 		called = append(called, req)
+		mu.Unlock()
 		if req.Op != types.HostOpToolRun {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "unexpected op"}
 		}

@@ -286,6 +286,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if txt != "" {
 				if m.streamingItemIdx < 0 {
 					// Start a streaming agent message at the end of the transcript.
+					// If the last transcript item is a Thinking block, insert a blank spacer
+					// so the agent output is visually separated from the thinking summary.
+					if n := len(m.transcriptItems); n != 0 && m.transcriptItems[n-1].kind == transcriptThinking {
+						m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+					}
 					if m.streamingBuf == nil {
 						m.streamingBuf = &strings.Builder{}
 					} else {
@@ -675,6 +680,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				} else {
 					// No partial output observed; still surface a minimal stop marker.
+					if n := len(m.transcriptItems); n != 0 && m.transcriptItems[n-1].kind == transcriptThinking {
+						m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+					}
 					m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: "_(stopped)_"})
 					m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 				}
@@ -718,10 +726,16 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Fallback: unexpected kind, append normally.
 					m.streamingItemIdx = -1
 					m.streamingBuf = nil
+					if n := len(m.transcriptItems); n != 0 && m.transcriptItems[n-1].kind == transcriptThinking {
+						m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+					}
 					m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: finalText})
 					m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 				}
 			} else {
+				if n := len(m.transcriptItems); n != 0 && m.transcriptItems[n-1].kind == transcriptThinking {
+					m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+				}
 				m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: finalText})
 				m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 			}
