@@ -16,8 +16,10 @@ func buildFileChangePreview(op, path, before, after string, hadBefore bool, afte
 	op = strings.TrimSpace(op)
 	path = strings.TrimSpace(path)
 
-	// fs.patch: show the patch itself when available (it is already a diff).
-	if op == "fs.patch" && strings.TrimSpace(patchPreview) != "" && !patchRedacted {
+	// Prefer a host-provided diff preview (already a diff) when available.
+	// - fs.patch: host previews the patch itself
+	// - fs.write/fs.append/fs.edit: host may provide a diff to avoid client-side races
+	if strings.TrimSpace(patchPreview) != "" && !patchRedacted {
 		body, tr := capLines(patchPreview, maxDiffLines)
 		truncated = tr || patchTruncated
 		return "```diff\n" + strings.TrimRight(body, "\n") + "\n```", truncated

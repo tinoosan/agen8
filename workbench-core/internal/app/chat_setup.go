@@ -17,6 +17,8 @@ import (
 	"github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+
+	"github.com/pmezard/go-difflib/difflib"
 )
 
 type tuiChatSetup struct {
@@ -201,6 +203,20 @@ func setupTUIChatRuntime(
 
 	var updater *agent.ContextUpdater
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		// For file ops, capture "before" deterministically on the host side so the UI
+		// can render diffs without racing on client-side reads.
+		//
+		// NOTE: this reads the whole file; this is acceptable for now because the preview
+		// is hard-capped, and workbench's file ops are typically small.
+		beforeBytes := []byte(nil)
+		hadBefore := false
+		if (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend || req.Op == types.HostOpFSEdit || req.Op == types.HostOpFSPatch) && strings.TrimSpace(req.Path) != "" {
+			if b, err := executor.FS.Read(req.Path); err == nil {
+				beforeBytes = b
+				hadBefore = true
+			}
+		}
+
 		reqData := map[string]string{
 			"op":       req.Op,
 			"path":     req.Path,
@@ -281,6 +297,51 @@ func setupTUIChatRuntime(
 			"op":  resp.Op,
 			"ok":  fmtBool(resp.Ok),
 			"err": resp.Error,
+		}
+
+		// For non-patch file ops, emit a host-generated diff so the UI can display a
+		// reliable preview even when client-side "before" reads race with execution.
+		if resp.Ok && (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend || req.Op == types.HostOpFSEdit) && strings.TrimSpace(req.Path) != "" {
+			before := string(beforeBytes)
+			after := ""
+			switch req.Op {
+			case types.HostOpFSWrite:
+				after = req.Text
+			case types.HostOpFSAppend:
+				after = before + req.Text
+			case types.HostOpFSEdit:
+				if b, err := executor.FS.Read(req.Path); err == nil {
+					after = string(b)
+				}
+			}
+			// Only emit if we have something to diff.
+			if after != "" || hadBefore {
+				fromFile := "a" + strings.TrimSpace(req.Path)
+				toFile := "b" + strings.TrimSpace(req.Path)
+				if !hadBefore {
+					fromFile = "/dev/null"
+				}
+				ud := difflib.UnifiedDiff{
+					A:        difflib.SplitLines(strings.ReplaceAll(before, "\r\n", "\n")),
+					B:        difflib.SplitLines(strings.ReplaceAll(after, "\r\n", "\n")),
+					FromFile: fromFile,
+					ToFile:   toFile,
+					Context:  3,
+				}
+				diffText, _ := difflib.GetUnifiedDiffString(ud)
+				diffText = strings.TrimSpace(diffText)
+				if diffText != "" && !looksSensitiveText(diffText) {
+					// Hard cap to keep event stream small; the UI also caps lines.
+					diffText, tr := capBytes(diffText, 12_000)
+					respData["patchPreview"] = diffText
+					if tr {
+						respData["patchTruncated"] = "true"
+					}
+				} else if diffText != "" {
+					respData["patchPreview"] = "<omitted>"
+					respData["patchRedacted"] = "true"
+				}
+			}
 		}
 		// Include request context so the UI can associate responses with requests
 		// (and render diffs/patch previews for file ops).

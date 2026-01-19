@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,30 +27,6 @@ import (
 )
 
 const composeVPath = "/workdir/.workbench/compose.md"
-
-// #region agent log
-func dbgLogTUI(hypothesisID, location, message string, data map[string]string) {
-	f, err := os.OpenFile("/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	b, err := json.Marshal(map[string]any{
-		"sessionId":    "debug-session",
-		"runId":        "tui",
-		"hypothesisId": hypothesisID,
-		"location":     location,
-		"message":      message,
-		"data":         data,
-		"timestamp":    time.Now().UnixMilli(),
-	})
-	if err != nil {
-		return
-	}
-	_, _ = f.Write(append(b, '\n'))
-}
-
-// #endregion agent log
 
 // TurnRunner executes one user turn and returns the agent final response.
 //
@@ -557,15 +532,6 @@ func (m *Model) scanFilePickerPaths(workdir string) ([]string, error) {
 		}
 		combined = append(combined, "/workspace/"+rel)
 	}
-	// #region agent log
-	dbgLogTUI("H1", "tui/model.go:scanFilePickerPaths", "scanned roots", map[string]string{
-		"workdir":        workdir,
-		"workdirFiles":   strconv.Itoa(len(workdirAll)),
-		"workspaceDir":   wsDir,
-		"workspaceFiles": strconv.Itoa(len(workspaceAll)),
-		"combined":       strconv.Itoa(len(combined)),
-	})
-	// #endregion agent log
 	return combined, nil
 }
 
@@ -590,16 +556,6 @@ func (m *Model) openFilePicker(initialQuery string) tea.Cmd {
 	m.applyFilePickerQuery(initialQuery) // ok even if empty list
 
 	wd := strings.TrimSpace(m.workdir)
-	// #region agent log
-	dbgLogTUI("H1", "tui/model.go:openFilePicker", "openFilePicker", map[string]string{
-		"workdir":      wd,
-		"workspaceDir": strings.TrimSpace(m.activeWorkspaceDir()),
-		"dataDir":      strings.TrimSpace(m.dataDir),
-		"runId":        strings.TrimSpace(m.runID),
-		"sessionId":    strings.TrimSpace(m.sessionID),
-		"initialQuery": strings.TrimSpace(initialQuery),
-	})
-	// #endregion agent log
 	if wd != "" {
 		if all, err := m.scanFilePickerPaths(wd); err == nil {
 			m.filePickerAllPaths = all
@@ -647,13 +603,6 @@ func (m *Model) applyFilePickerQuery(q string) {
 	if len(items) > 0 {
 		m.filePickerList.Select(0)
 	}
-	// #region agent log
-	dbgLogTUI("H4", "tui/model.go:applyFilePickerQuery", "applyFilePickerQuery", map[string]string{
-		"query":         strings.TrimSpace(q),
-		"allPathsCount": strconv.Itoa(len(m.filePickerAllPaths)),
-		"itemsCount":    strconv.Itoa(len(items)),
-	})
-	// #endregion agent log
 
 	// Surface the active query since the underlying input is hidden by the modal.
 	title := "Select File"
@@ -1923,19 +1872,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if path == "" || msg.err != nil {
 			return m, nil
 		}
-		// #region agent log
-		dbgLogTUI("H5", "tui/model.go:fileAfterMsg", "fileAfterMsg", map[string]string{
-			"path": path,
-			"filePicker": func() string {
-				if m.filePickerOpen {
-					return "open"
-				}
-				return "closed"
-			}(),
-			"pickerQuery":   strings.TrimSpace(m.filePickerQuery),
-			"pickerWorkdir": strings.TrimSpace(m.filePickerWorkdir),
-		})
-		// #endregion agent log
 		if m.fileSnapCache == nil {
 			m.fileSnapCache = make(map[string]string)
 		}
@@ -1952,12 +1888,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.filePickerAllPaths = all
 					m.filePickerWorkdir = strings.TrimSpace(m.workdir)
 					m.applyFilePickerQuery(m.filePickerQuery)
-					// #region agent log
-					dbgLogTUI("H5", "tui/model.go:fileAfterMsg", "picker refreshed (no pending)", map[string]string{
-						"allPaths":  strconv.Itoa(len(m.filePickerAllPaths)),
-						"workspace": strings.TrimSpace(m.activeWorkspaceDir()),
-					})
-					// #endregion agent log
 					m.layout()
 				}
 			}
@@ -1990,12 +1920,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filePickerAllPaths = all
 				m.filePickerWorkdir = strings.TrimSpace(m.workdir)
 				m.applyFilePickerQuery(m.filePickerQuery)
-				// #region agent log
-				dbgLogTUI("H5", "tui/model.go:fileAfterMsg", "picker refreshed", map[string]string{
-					"allPaths":  strconv.Itoa(len(m.filePickerAllPaths)),
-					"workspace": strings.TrimSpace(m.activeWorkspaceDir()),
-				})
-				// #endregion agent log
 				m.layout()
 			}
 		}
@@ -3083,7 +3007,6 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 				p.patchRedacted = strings.TrimSpace(ev.Data["patchRedacted"]) == "true"
 			}
 			m.pendingFileOps[path] = p
-
 			// Best-effort: if we don't have a cached snapshot, try reading the current
 			// file BEFORE the op executes so we can label Created vs Updated correctly.
 			if !p.hadBefore {
@@ -3133,6 +3056,18 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		// render a diff/patch preview in the transcript.
 		op := strings.TrimSpace(ev.Data["op"])
 		path := strings.TrimSpace(ev.Data["path"])
+		// If the host provided a patchPreview (diff), attach it to the pending op so
+		// buildFileChangePreview can use it instead of racing on before snapshots.
+		if path != "" && m.pendingFileOps != nil {
+			if p, ok := m.pendingFileOps[path]; ok {
+				if pv := strings.TrimSpace(ev.Data["patchPreview"]); pv != "" {
+					p.patchPreview = pv
+					p.patchTruncated = strings.TrimSpace(ev.Data["patchTruncated"]) == "true"
+					p.patchRedacted = strings.TrimSpace(ev.Data["patchRedacted"]) == "true"
+					m.pendingFileOps[path] = p
+				}
+			}
+		}
 		if (op == "fs.write" || op == "fs.append" || op == "fs.edit" || op == "fs.patch") && strings.TrimSpace(ev.Data["ok"]) == "true" && path != "" {
 			if acc, ok := m.runner.(vfsAccessor); ok {
 				return func() tea.Msg {
