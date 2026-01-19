@@ -206,6 +206,8 @@ func (m Model) Init() tea.Cmd {
 				return preinitStatusMsg{workdir: strings.TrimSpace(wd), err: err}
 			}
 			dd, ddErr := m.runner.RunTurn(m.ctx, "/datadir")
+			// /reasoning is a host-side command and works pre-init.
+			ro, _ := m.runner.RunTurn(m.ctx, "/reasoning")
 
 			modelID := ""
 			// Expected: "Current model: <id>"
@@ -215,15 +217,38 @@ func (m Model) Init() tea.Cmd {
 					modelID = strings.TrimSpace(strings.TrimPrefix(s, pfx))
 				}
 			}
+			reasoningEffort := parseReasoningEffortFromReasoningInfo(ro)
 			// DataDir is best-effort; never block the UI on it.
 			_ = ddErr
 			return preinitStatusMsg{
-				workdir: strings.TrimSpace(wd),
-				modelID: strings.TrimSpace(modelID),
-				dataDir: strings.TrimSpace(dd),
+				workdir:         strings.TrimSpace(wd),
+				modelID:         strings.TrimSpace(modelID),
+				reasoningEffort: strings.TrimSpace(reasoningEffort),
+				dataDir:         strings.TrimSpace(dd),
 			}
 		},
 	)
+}
+
+func parseReasoningEffortFromReasoningInfo(s string) string {
+	// Expected shape (best-effort):
+	//   Reasoning:
+	//     effort:  high
+	//     summary: concise
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for _, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if !strings.HasPrefix(strings.ToLower(t), "effort:") {
+			continue
+		}
+		v := strings.TrimSpace(t[len("effort:"):])
+		// Host prints "(default)" when unset; treat as empty so UI can show a default.
+		if strings.EqualFold(v, "(default)") {
+			return ""
+		}
+		return v
+	}
+	return ""
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -464,6 +489,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if strings.TrimSpace(msg.modelID) != "" {
 			m.modelID = strings.TrimSpace(msg.modelID)
+		}
+		if strings.TrimSpace(msg.reasoningEffort) != "" {
+			m.reasoningEffort = strings.TrimSpace(msg.reasoningEffort)
 		}
 		// If picker is open and workdir arrived, populate it.
 		if m.filePickerOpen && strings.TrimSpace(m.workdir) != "" && m.filePickerWorkdir == "" {
@@ -729,6 +757,18 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	if ev.Type == "model.changed" {
 		if v := strings.TrimSpace(ev.Data["to"]); v != "" {
 			m.modelID = v
+		}
+	}
+	// Reasoning effort can change at runtime via the host /reasoning command.
+	if ev.Type == "reasoning.changed" {
+		if v := strings.TrimSpace(ev.Data["effort"]); v != "" {
+			m.reasoningEffort = v
+		}
+	}
+	// Fallback: /reasoning (no args) emits reasoning.info with a text block.
+	if ev.Type == "reasoning.info" {
+		if v := parseReasoningEffortFromReasoningInfo(ev.Data["text"]); strings.TrimSpace(v) != "" {
+			m.reasoningEffort = strings.TrimSpace(v)
 		}
 	}
 	// Workdir is discovered via host.mounted and updated via /cd at runtime.

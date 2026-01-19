@@ -229,7 +229,15 @@ func (m Model) renderInput() string {
 	if modelID == "" {
 		modelID = "unknown"
 	}
-	modelLabel := m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelID)
+	modelIDDisplay := modelID
+
+	eff := strings.TrimSpace(m.reasoningEffort)
+	if eff == "" {
+		eff = "default"
+	}
+	effortLabel := m.styleComposerStatusKey.Render("effort") + " " + m.styleComposerStatusVal.Render(eff)
+
+	modelLabel := m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
 
 	ids := []string{}
 	if v := strings.TrimSpace(m.sessionID); v != "" {
@@ -246,10 +254,24 @@ func (m Model) renderInput() string {
 	// Status row is rendered inside the composer card.
 	// It uses the same width as the editor so it never overflows the viewport.
 	statusW := max(20, m.width-8)
-	statusLeft := modelLabel
 	statusRight := idsLabel
-	leftW := lipgloss.Width(statusLeft)
 	rightW := lipgloss.Width(statusRight)
+	leftMax := statusW
+	if rightW != 0 {
+		leftMax = max(0, statusW-rightW-1)
+	}
+
+	// Prefer keeping effort visible; truncate the model ID if needed.
+	statusLeft := modelLabel + "  " + effortLabel
+	if leftMax > 0 && lipgloss.Width(statusLeft) > leftMax {
+		excess := lipgloss.Width(statusLeft) - leftMax
+		allowedIDW := max(8, lipgloss.Width(modelIDDisplay)-excess-1)
+		modelIDDisplay = truncateMiddle(modelID, allowedIDW)
+		modelLabel = m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
+		statusLeft = modelLabel + "  " + effortLabel
+	}
+	leftW := lipgloss.Width(statusLeft)
+	rightW = lipgloss.Width(statusRight)
 	midW := max(0, statusW-leftW-rightW-1)
 	status := statusLeft
 	if midW > 0 {

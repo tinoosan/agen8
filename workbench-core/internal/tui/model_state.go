@@ -76,10 +76,11 @@ type workdirPrefetchMsg struct {
 }
 
 type preinitStatusMsg struct {
-	workdir string
-	modelID string
-	dataDir string
-	err     error
+	workdir         string
+	modelID         string
+	reasoningEffort string
+	dataDir         string
+	err             error
 }
 
 type Model struct {
@@ -170,12 +171,13 @@ type Model struct {
 	composeLoadPath            string
 	dataDir                    string
 
-	sessionTitle  string
-	workflowTitle string
-	workdir       string
-	modelID       string
-	sessionID     string
-	runID         string
+	sessionTitle    string
+	workflowTitle   string
+	workdir         string
+	modelID         string
+	reasoningEffort string
+	sessionID       string
+	runID           string
 
 	lastTurnTokensIn  int
 	lastTurnTokensOut int
@@ -302,4 +304,3 @@ type fileBeforeMsg struct {
 	truncated bool
 	err       error
 }
-
