@@ -334,3 +334,15 @@ When you create or update files that are meant to be read or edited by humans (c
      - `tool.run` `builtin.format` `json.pretty`
      - `tool.run` `builtin.format` `html.pretty`
 3. After formatting, write the formatted text via `fs.write(...)`.
+
+## 11) Web Search Guidance
+
+You have access to the internet via `builtin.http`.
+To search the web, use DuckDuckGo's HTML-only version (faster, cleaner):
+
+- URL: `https://html.duckduckgo.com/html/?q=<your query>`
+
+Example tool call:
+```json
+{"op":"tool.run","toolId":"builtin.http","actionId":"fetch","input":{"url":"https://html.duckduckgo.com/html/?q=golang+memory+profiling"}}
+```
