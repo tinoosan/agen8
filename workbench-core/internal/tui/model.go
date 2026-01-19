@@ -118,6 +118,15 @@ type Model struct {
 	streamingItemIdx int
 	streamingBuf     *strings.Builder
 
+	// Thinking (Phase 2): provider reasoning indicator + optional summary for the current turn.
+	thinkingItemIdx  int
+	thinkingStep     int
+	thinkingActive   bool
+	thinkingStarted  time.Time
+	thinkingDuration time.Duration
+	thinkingSummary  string
+	thinkingExpanded bool
+
 	// fileSnapCache is a best-effort in-memory cache of files touched during this
 	// session/run, used to render diff previews in the transcript.
 	fileSnapCache map[string]string // vpath -> last-known text (possibly truncated)
@@ -262,6 +271,7 @@ const (
 	transcriptSpacer transcriptItemKind = iota
 	transcriptUser
 	transcriptAgent
+	transcriptThinking
 	transcriptAction
 	transcriptError
 	transcriptFileChange
@@ -1015,6 +1025,7 @@ func (m *Model) helpModalContent() string {
 		"  tab     cycle focus (input/activity)",
 		"  pgup/pgdn  scroll transcript",
 		"  ctrl+u/ctrl+f  half-page scroll transcript",
+		"  ctrl+y  toggle thinking summary",
 		"  ctrl+g  toggle multiline input",
 		"  enter   send (single-line)",
 		"  ctrl+o  send (multiline)",
@@ -1251,6 +1262,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	m.pendingActionIdx = -1
 	m.lastTurnUserItemIdx = -1
 	m.streamingItemIdx = -1
+	m.thinkingItemIdx = -1
 	return m
 }
 
@@ -1541,6 +1553,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Thinking summary toggle (Phase 2).
+		// Ctrl+T is already used for telemetry, so we use Ctrl+Y.
+		if msg.Type == tea.KeyCtrlY || strings.EqualFold(msg.String(), "ctrl+y") {
+			m.thinkingExpanded = !m.thinkingExpanded
+			m.updateThinkingTranscriptItem()
+			return m, nil
+		}
+
 		// Toggle multiline.
 		//
 		// Note: Ctrl+J is ASCII LF and is often indistinguishable from Enter in many
@@ -1703,6 +1723,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Phase 1 streaming: update in-progress agent transcript inline.
 		if ev.Type == "model.token" {
+			// Bug fix (duplication): ignore late buffered token events after the turn completes.
+			if !m.turnInFlight {
+				return m, m.waitEvent()
+			}
 			txt := ev.Data["text"]
 			if txt != "" {
 				if m.streamingItemIdx < 0 {
@@ -1732,6 +1756,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
+			}
+			return m, m.waitEvent()
+		}
+
+		// Phase 2 thinking: indicator + optional provider-supplied summary.
+		if ev.Type == "model.thinking.start" || ev.Type == "model.thinking.summary" || ev.Type == "model.thinking.end" {
+			// Ignore late buffered thinking events after the turn completes.
+			// We finalize best-effort in turnDoneMsg.
+			if !m.turnInFlight {
+				return m, m.waitEvent()
+			}
+			step := 0
+			if v := strings.TrimSpace(ev.Data["step"]); v != "" {
+				if n, err := strconv.Atoi(v); err == nil {
+					step = n
+				}
+			}
+			switch ev.Type {
+			case "model.thinking.start":
+				m.thinkingActive = true
+				m.thinkingStep = step
+				m.thinkingStarted = time.Now()
+				m.thinkingDuration = 0
+				m.thinkingSummary = ""
+				m.thinkingItemIdx = len(m.transcriptItems)
+				m.addTranscriptItem(transcriptItem{kind: transcriptThinking, text: m.formatThinkingText()})
+			case "model.thinking.summary":
+				if txt := ev.Data["text"]; txt != "" {
+					m.thinkingSummary += txt
+					m.updateThinkingTranscriptItem()
+				}
+			case "model.thinking.end":
+				// Close out thinking for this step.
+				if m.thinkingActive && !m.thinkingStarted.IsZero() {
+					m.thinkingDuration = time.Since(m.thinkingStarted)
+				}
+				m.thinkingActive = false
+				m.thinkingStep = step
+				m.updateThinkingTranscriptItem()
 			}
 			return m, m.waitEvent()
 		}
@@ -1973,10 +2036,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case turnDoneMsg:
 		m.turnInFlight = false
+		// Best-effort: finalize any in-progress thinking indicator. We may receive
+		// a late model.thinking.end after turn completion, but we ignore late events
+		// to prevent duplication.
+		if m.thinkingItemIdx >= 0 {
+			if m.thinkingActive && !m.thinkingStarted.IsZero() {
+				m.thinkingDuration = time.Since(m.thinkingStarted)
+			}
+			m.thinkingActive = false
+			m.thinkingStep = 0
+			m.updateThinkingTranscriptItem()
+		}
 		if msg.err != nil {
 			// Clear any in-progress streaming state on error.
 			m.streamingItemIdx = -1
 			m.streamingBuf = nil
+			m.thinkingItemIdx = -1
+			m.thinkingSummary = ""
 			m.addTranscriptItem(transcriptItem{kind: transcriptError, text: "agent error: " + msg.err.Error()})
 			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 			m.turnTitle = ""
@@ -2689,6 +2765,12 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 	m.waitingForAction = false
 	m.streamingItemIdx = -1
 	m.streamingBuf = nil
+	m.thinkingItemIdx = -1
+	m.thinkingStep = 0
+	m.thinkingActive = false
+	m.thinkingStarted = time.Time{}
+	m.thinkingDuration = 0
+	m.thinkingSummary = ""
 
 	if m.workflowTitle == "" {
 		m.workflowTitle = firstLine(userMsg)
@@ -2701,6 +2783,47 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 		final, err := m.runner.RunTurn(m.ctx, userMsg)
 		_ = final
 		return turnDoneMsg{final: final, err: err}
+	}
+}
+
+func (m *Model) formatThinkingText() string {
+	if m == nil {
+		return ""
+	}
+	header := "Thinking…"
+	if !m.thinkingActive && m.thinkingDuration > 0 {
+		header = "Thought for " + m.thinkingDuration.Truncate(time.Millisecond).String()
+	}
+	if m.thinkingStep > 0 {
+		header += " (step " + strconv.Itoa(m.thinkingStep) + ")"
+	}
+	summary := strings.TrimSpace(m.thinkingSummary)
+	if summary == "" {
+		return header
+	}
+	if !m.thinkingExpanded {
+		return header + "  " + "summary available (Ctrl+Y)"
+	}
+	return header + "\n\nSummary:\n" + summary
+}
+
+func (m *Model) updateThinkingTranscriptItem() {
+	if m == nil {
+		return
+	}
+	if m.thinkingItemIdx < 0 || m.thinkingItemIdx >= len(m.transcriptItems) {
+		return
+	}
+	it := m.transcriptItems[m.thinkingItemIdx]
+	if it.kind != transcriptThinking {
+		return
+	}
+	it.text = m.formatThinkingText()
+	m.transcriptItems[m.thinkingItemIdx] = it
+	wasAtBottom := m.transcript.AtBottom()
+	m.rebuildTranscript()
+	if wasAtBottom {
+		m.transcript.GotoBottom()
 	}
 }
 

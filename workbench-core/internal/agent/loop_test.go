@@ -49,6 +49,30 @@ func (f *fakeStreamingLLM) GenerateStream(ctx context.Context, req types.LLMRequ
 	return types.LLMResponse{Text: f.Final}, nil
 }
 
+type fakeStreamingLLMChunks struct {
+	Chunks []types.LLMStreamChunk
+	Final  string
+}
+
+func (f *fakeStreamingLLMChunks) Generate(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
+	_ = ctx
+	_ = req
+	return types.LLMResponse{Text: f.Final}, nil
+}
+
+func (f *fakeStreamingLLMChunks) GenerateStream(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
+	_ = ctx
+	_ = req
+	for _, c := range f.Chunks {
+		if cb != nil {
+			if err := cb(c); err != nil {
+				return types.LLMResponse{}, err
+			}
+		}
+	}
+	return types.LLMResponse{Text: f.Final}, nil
+}
+
 func TestAgentLoopV0_Run_ExecutesOpsUntilFinal(t *testing.T) {
 	llm := &fakeLLM{
 		Replies: []string{
@@ -92,8 +116,12 @@ func TestAgentLoopV0_Run_StreamsFinalTextOnly(t *testing.T) {
 
 	var streamed string
 	a := &Agent{
-		LLM:      llm,
-		Exec:     HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse { _ = ctx; _ = req; return types.HostOpResponse{Ok: true} }),
+		LLM: llm,
+		Exec: HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+			_ = ctx
+			_ = req
+			return types.HostOpResponse{Ok: true}
+		}),
 		Model:    "test-model",
 		MaxSteps: 2,
 		Hooks: Hooks{
@@ -113,5 +141,72 @@ func TestAgentLoopV0_Run_StreamsFinalTextOnly(t *testing.T) {
 	}
 	if streamed != "hello\nworld" {
 		t.Fatalf("unexpected streamed %q", streamed)
+	}
+}
+
+func TestAgentLoopV0_Run_ForwardsReasoningToHookAndDoesNotAffectOutput(t *testing.T) {
+	finalJSON := `{"op":"final","text":"hello world"}`
+	llm := &fakeStreamingLLMChunks{
+		Chunks: []types.LLMStreamChunk{
+			{IsReasoning: true, Text: "short summary"},
+			{Text: `{"op":"final","text":"hello`},
+			{Text: ` world"}`},
+			{Done: true},
+		},
+		Final: finalJSON,
+	}
+
+	var streamed string
+	var reasoning []types.LLMStreamChunk
+	a := &Agent{
+		LLM: llm,
+		Exec: HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+			_ = ctx
+			_ = req
+			return types.HostOpResponse{Ok: true}
+		}),
+		Model:    "test-model",
+		MaxSteps: 2,
+		Hooks: Hooks{
+			OnToken: func(step int, text string) {
+				_ = step
+				streamed += text
+			},
+			OnStreamChunk: func(step int, chunk types.LLMStreamChunk) {
+				_ = step
+				reasoning = append(reasoning, chunk)
+			},
+		},
+	}
+
+	final, err := a.Run(context.Background(), "goal")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if final != "hello world" {
+		t.Fatalf("unexpected final %q", final)
+	}
+	if streamed != "hello world" {
+		t.Fatalf("unexpected streamed %q", streamed)
+	}
+	if len(reasoning) == 0 {
+		t.Fatalf("expected reasoning chunks")
+	}
+	// Ensure we saw a reasoning chunk and a Done sentinel.
+	seenReasoning := false
+	seenDone := false
+	for _, c := range reasoning {
+		if c.IsReasoning {
+			seenReasoning = true
+		}
+		if c.Done {
+			seenDone = true
+		}
+	}
+	if !seenReasoning {
+		t.Fatalf("expected a reasoning chunk, got %+v", reasoning)
+	}
+	if !seenDone {
+		t.Fatalf("expected a done chunk, got %+v", reasoning)
 	}
 }

@@ -115,6 +115,15 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 			dec := &finalTextStreamDecoder{}
 			resp, err = s.GenerateStream(ctx, req, func(chunk types.LLMStreamChunk) error {
 				if chunk.Done {
+					if a.Hooks.OnStreamChunk != nil {
+						a.Hooks.OnStreamChunk(step, chunk)
+					}
+					return nil
+				}
+				if chunk.IsReasoning {
+					if a.Hooks.OnStreamChunk != nil {
+						a.Hooks.OnStreamChunk(step, chunk)
+					}
 					return nil
 				}
 				if chunk.Text == "" {

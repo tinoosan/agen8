@@ -87,6 +87,10 @@ func (m *Model) rebuildTranscript() {
 			body := m.styleAgent.Render(rendered)
 			lines = append(lines, m.styleAgentBox.Render(body))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
+		case transcriptThinking:
+			// Thinking indicator + optional summary (dimmed).
+			lines = append(lines, m.styleDim.Render(wrapText(strings.TrimSpace(it.text), max(20, w-4))))
+			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptError:
 			lines = append(lines, m.styleError.Render(wrapText(it.text, max(20, w-4))))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")

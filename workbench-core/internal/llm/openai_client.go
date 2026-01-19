@@ -10,6 +10,7 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/respjson"
 	"github.com/openai/openai-go/v3/shared"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
@@ -47,7 +48,7 @@ func NewClientFromEnv() (*Client, error) {
 	)
 
 	return &Client{
-		client:          &cli,
+		client:           &cli,
 		DefaultMaxTokens: defaultMaxTokens,
 	}, nil
 }
@@ -154,16 +155,49 @@ func (c *Client) onStreamChunk(acc *openai.ChatCompletionAccumulator, chunk open
 	if acc != nil {
 		_ = acc.AddChunk(chunk)
 	}
-	if cb == nil {
+	if cb == nil || len(chunk.Choices) == 0 {
 		return nil
 	}
-	if len(chunk.Choices) == 0 {
-		return nil
+
+	delta := chunk.Choices[0].Delta
+
+	// Some OpenAI-compatible providers (including OpenRouter-backed reasoning models)
+	// return reasoning fields that aren't part of the standard SDK struct.
+	//
+	// IMPORTANT: we do not forward raw reasoning text. We only:
+	// - emit a reasoning signal (IsReasoning=true, Text="")
+	// - forward an explicit reasoning summary if provided separately
+	// Summary (safe to show if the provider returns it explicitly).
+	if s, ok := deltaString(delta, "reasoning_summary"); ok {
+		if err := cb(types.LLMStreamChunk{Text: s, IsReasoning: true}); err != nil {
+			return err
+		}
 	}
-	if chunk.Choices[0].Delta.Content == "" {
-		return nil
+	if s, ok := deltaString(delta, "reasoning_summary_text"); ok {
+		if err := cb(types.LLMStreamChunk{Text: s, IsReasoning: true}); err != nil {
+			return err
+		}
 	}
-	return cb(types.LLMStreamChunk{Text: chunk.Choices[0].Delta.Content})
+
+	// Raw reasoning (do not display).
+	if s, ok := deltaString(delta, "reasoning_content"); ok && strings.TrimSpace(s) != "" {
+		if err := cb(types.LLMStreamChunk{IsReasoning: true}); err != nil {
+			return err
+		}
+	}
+	if s, ok := deltaString(delta, "reasoning"); ok && strings.TrimSpace(s) != "" {
+		if err := cb(types.LLMStreamChunk{IsReasoning: true}); err != nil {
+			return err
+		}
+	}
+
+	// Standard streamed content.
+	// Important: do NOT TrimSpace here. Providers can stream single-space deltas,
+	// and the agent's JSON-string decoder relies on receiving them.
+	if delta.Content != "" {
+		return cb(types.LLMStreamChunk{Text: delta.Content, IsReasoning: false})
+	}
+	return nil
 }
 
 func (c *Client) GenerateStream(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
@@ -201,3 +235,59 @@ func (c *Client) GenerateStream(ctx context.Context, req types.LLMRequest, cb ty
 	return c.toResponse(&acc.ChatCompletion)
 }
 
+func extraString(fields map[string]respjson.Field, key string) (string, bool) {
+	if fields == nil || strings.TrimSpace(key) == "" {
+		return "", false
+	}
+	f, ok := fields[key]
+	if !ok || !f.Valid() {
+		return "", false
+	}
+	raw := strings.TrimSpace(f.Raw())
+	if raw == "" || raw == "null" {
+		return "", false
+	}
+	var s string
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		return "", false
+	}
+	if strings.TrimSpace(s) == "" {
+		return "", false
+	}
+	return s, true
+}
+
+func deltaString(delta openai.ChatCompletionChunkChoiceDelta, key string) (string, bool) {
+	if strings.TrimSpace(key) == "" {
+		return "", false
+	}
+
+	// Preferred: parsed extra fields (when available).
+	if fields := delta.JSON.ExtraFields; fields != nil {
+		if s, ok := extraString(fields, key); ok {
+			return s, true
+		}
+	}
+
+	// Fallback: parse raw delta JSON (some providers may not populate ExtraFields).
+	raw := strings.TrimSpace(delta.RawJSON())
+	if raw == "" {
+		return "", false
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return "", false
+	}
+	b, ok := m[key]
+	if !ok || len(b) == 0 || strings.TrimSpace(string(b)) == "null" {
+		return "", false
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return "", false
+	}
+	if strings.TrimSpace(s) == "" {
+		return "", false
+	}
+	return s, true
+}

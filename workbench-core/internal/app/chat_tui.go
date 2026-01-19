@@ -974,10 +974,96 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 			emitTokenBuf()
 		}
 	}
+
+	// Phase 2 thinking: emit UI-only thinking events (not persisted).
+	//
+	// We never display raw reasoning content; we only show an indicator + optional
+	// provider-supplied summary.
+	var thinkingSummaryBuf strings.Builder
+	thinkingActive := false
+	thinkingStep := 0
+	lastThinkingEmit := time.Now()
+	emitThinkingSummary := func() {
+		if thinkingSummaryBuf.Len() == 0 || thinkingStep == 0 {
+			return
+		}
+		txt := thinkingSummaryBuf.String()
+		thinkingSummaryBuf.Reset()
+		lastThinkingEmit = time.Now()
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "model.thinking.summary",
+			Message: "Model thinking summary",
+			Data: map[string]string{
+				"step": strconv.Itoa(thinkingStep),
+				"text": txt,
+			},
+			Store:   boolp(false),
+			History: boolp(false),
+			Console: boolp(false),
+		})
+	}
+	emitThinkingStart := func(step int) {
+		thinkingActive = true
+		thinkingStep = step
+		lastThinkingEmit = time.Now()
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "model.thinking.start",
+			Message: "Model thinking",
+			Data:    map[string]string{"step": strconv.Itoa(step)},
+			Store:   boolp(false),
+			History: boolp(false),
+			Console: boolp(false),
+		})
+	}
+	emitThinkingEnd := func(step int) {
+		emitThinkingSummary()
+		thinkingActive = false
+		thinkingStep = 0
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "model.thinking.end",
+			Message: "Model thinking ended",
+			Data:    map[string]string{"step": strconv.Itoa(step)},
+			Store:   boolp(false),
+			History: boolp(false),
+			Console: boolp(false),
+		})
+	}
+	r.agent.Hooks.OnStreamChunk = func(step int, chunk types.LLMStreamChunk) {
+		if chunk.Done {
+			if thinkingActive {
+				emitThinkingEnd(step)
+			}
+			return
+		}
+		if !chunk.IsReasoning {
+			return
+		}
+		if !thinkingActive || thinkingStep != step {
+			// If a prior step was thinking, close it before starting a new one.
+			if thinkingActive && thinkingStep != 0 {
+				emitThinkingEnd(thinkingStep)
+			}
+			emitThinkingStart(step)
+		}
+		if chunk.Text == "" {
+			// Raw reasoning signal: indicator only.
+			return
+		}
+		thinkingSummaryBuf.WriteString(chunk.Text)
+		// Coalesce to avoid flooding the TUI channel.
+		if thinkingSummaryBuf.Len() >= 256 || time.Since(lastThinkingEmit) >= 80*time.Millisecond {
+			emitThinkingSummary()
+		}
+	}
 	defer func() {
 		emitTokenBuf()
+		// Best-effort flush of thinking summary/indicator.
+		if thinkingActive && thinkingStep != 0 {
+			emitThinkingEnd(thinkingStep)
+		}
 		// Avoid leaking the callback into subsequent turns.
 		r.agent.Hooks.OnToken = nil
+		r.agent.Hooks.OnStreamChunk = nil
 	}()
 
 	r.conversation = append(r.conversation, types.LLMMessage{Role: "user", Content: userMsg})

@@ -115,3 +115,66 @@ func TestClient_onStreamChunk_ForwardsDeltaContent(t *testing.T) {
 	}
 }
 
+func TestClient_onStreamChunk_EmitsReasoningSignal(t *testing.T) {
+	var chunk openai.ChatCompletionChunk
+	if err := json.Unmarshal([]byte(`{
+	  "id":"x",
+	  "object":"chat.completion.chunk",
+	  "created":0,
+	  "model":"m",
+	  "choices":[{"index":0,"delta":{"reasoning_content":"secret"},"finish_reason":""}]
+	}`), &chunk); err != nil {
+		t.Fatalf("unmarshal chunk: %v", err)
+	}
+
+	var got []types.LLMStreamChunk
+	c := &Client{}
+	var acc openai.ChatCompletionAccumulator
+	if err := c.onStreamChunk(&acc, chunk, func(sc types.LLMStreamChunk) error {
+		got = append(got, sc)
+		return nil
+	}); err != nil {
+		t.Fatalf("onStreamChunk: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(got))
+	}
+	if !got[0].IsReasoning {
+		t.Fatalf("expected IsReasoning=true, got %+v", got[0])
+	}
+	if got[0].Text != "" {
+		t.Fatalf("expected no reasoning text to be forwarded, got %q", got[0].Text)
+	}
+}
+
+func TestClient_onStreamChunk_EmitsReasoningSummary(t *testing.T) {
+	var chunk openai.ChatCompletionChunk
+	if err := json.Unmarshal([]byte(`{
+	  "id":"x",
+	  "object":"chat.completion.chunk",
+	  "created":0,
+	  "model":"m",
+	  "choices":[{"index":0,"delta":{"reasoning_summary":"short summary"},"finish_reason":""}]
+	}`), &chunk); err != nil {
+		t.Fatalf("unmarshal chunk: %v", err)
+	}
+
+	var got []types.LLMStreamChunk
+	c := &Client{}
+	var acc openai.ChatCompletionAccumulator
+	if err := c.onStreamChunk(&acc, chunk, func(sc types.LLMStreamChunk) error {
+		got = append(got, sc)
+		return nil
+	}); err != nil {
+		t.Fatalf("onStreamChunk: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(got))
+	}
+	if !got[0].IsReasoning {
+		t.Fatalf("expected IsReasoning=true, got %+v", got[0])
+	}
+	if got[0].Text != "short summary" {
+		t.Fatalf("unexpected summary %q", got[0].Text)
+	}
+}
