@@ -58,6 +58,37 @@ var supportedModelIDs = []string{
 	"openai/gpt-4.1",
 	"openai/gpt-4o",
 	"openai/gpt-4o-mini",
+	"openai/o1-preview",
+	"openai/o1-mini",
+
+	// Anthropic.
+	"anthropic/claude-3.5-sonnet",
+	"anthropic/claude-3-opus",
+	"anthropic/claude-3-haiku",
+
+	// Google.
+	"google/gemini-pro-1.5",
+	"google/gemini-flash-1.5",
+
+	// Meta.
+	"meta-llama/llama-3.1-405b-instruct",
+	"meta-llama/llama-3.1-70b-instruct",
+	"meta-llama/llama-3.2-11b-vision-instruct",
+	"meta-llama/llama-3.2-3b-instruct",
+
+	// Mistral.
+	"mistralai/mistral-large",
+
+	// Z.AI.
+	"z-ai/glm-4.7",
+
+	// DeepSeek.
+	"deepseek/deepseek-chat",
+	"deepseek/deepseek-r1",
+
+	// Qwen.
+	"qwen/qwen-2.5-72b-instruct",
+	"qwen/qwen-2.5-coder-32b-instruct",
 
 	// O-series (example placeholders; add only if you actually use them).
 	// "openai/o3",

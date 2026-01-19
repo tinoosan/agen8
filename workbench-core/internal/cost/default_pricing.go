@@ -51,6 +51,98 @@ func DefaultPricing() PricingFile {
 				InputPerM:  0.25,
 				OutputPerM: 2.0,
 			},
+
+			// OpenAI (Real).
+			"openai/gpt-4o": {
+				InputPerM:  2.50,
+				OutputPerM: 10.00,
+			},
+			"openai/gpt-4o-mini": {
+				InputPerM:  0.15,
+				OutputPerM: 0.60,
+			},
+			"openai/o1-preview": {
+				InputPerM:  15.00,
+				OutputPerM: 60.00,
+			},
+			"openai/o1-mini": {
+				InputPerM:  3.00,
+				OutputPerM: 12.00,
+			},
+
+			// Anthropic.
+			"anthropic/claude-3.5-sonnet": {
+				InputPerM:  3.00,
+				OutputPerM: 15.00,
+			},
+			"anthropic/claude-3-opus": {
+				InputPerM:  15.00,
+				OutputPerM: 75.00,
+			},
+			"anthropic/claude-3-haiku": {
+				InputPerM:  0.25,
+				OutputPerM: 1.25,
+			},
+
+			// Google.
+			"google/gemini-pro-1.5": {
+				InputPerM:  2.50,
+				OutputPerM: 7.50,
+			},
+			"google/gemini-flash-1.5": {
+				InputPerM:  0.075,
+				OutputPerM: 0.30,
+			},
+
+			// Meta.
+			"meta-llama/llama-3.1-405b-instruct": {
+				InputPerM:  2.70,
+				OutputPerM: 2.70,
+			},
+			"meta-llama/llama-3.1-70b-instruct": {
+				InputPerM:  0.35,
+				OutputPerM: 0.40,
+			},
+			"meta-llama/llama-3.2-11b-vision-instruct": {
+				InputPerM:  0.055,
+				OutputPerM: 0.055,
+			},
+			"meta-llama/llama-3.2-3b-instruct": {
+				InputPerM:  0.04, // Often free/cheap, setting conservative
+				OutputPerM: 0.04,
+			},
+
+			// Mistral.
+			"mistralai/mistral-large": {
+				InputPerM:  2.00,
+				OutputPerM: 6.00,
+			},
+
+			// Z.AI.
+			"z-ai/glm-4.7": {
+				InputPerM:  0.40,
+				OutputPerM: 1.50,
+			},
+
+			// DeepSeek.
+			"deepseek/deepseek-chat": {
+				InputPerM:  0.14,
+				OutputPerM: 0.28,
+			},
+			"deepseek/deepseek-r1": {
+				InputPerM:  0.55,
+				OutputPerM: 2.19, // R1 pricing varies, usually higher than V3
+			},
+
+			// Qwen.
+			"qwen/qwen-2.5-72b-instruct": {
+				InputPerM:  0.35,
+				OutputPerM: 0.40,
+			},
+			"qwen/qwen-2.5-coder-32b-instruct": {
+				InputPerM:  0.07,
+				OutputPerM: 0.16,
+			},
 		},
 	}
 }
