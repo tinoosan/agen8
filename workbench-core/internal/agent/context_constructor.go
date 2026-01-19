@@ -85,6 +85,50 @@ type ContextConstructor struct {
 
 	stateLoaded bool
 	traceEvents []types.Event
+
+	// cache holds per-turn cached prompt sections to avoid re-reading/re-formatting
+	// stable inputs (profile/memory/attachments) on every model step.
+	cache contextCache
+
+	// sessionStateLoaded indicates whether we've loaded session-scoped state from disk
+	// (session.json) into in-memory fields like historyCursor.
+	sessionStateLoaded bool
+
+	// sessionCached holds the last session.json we loaded, so we can update/persist
+	// HistoryCursor without re-loading the session every step.
+	sessionCached   types.Session
+	sessionCachedOK bool
+	sessionCachedID string
+
+	// lastPersistedHistoryCursor tracks the last value we successfully persisted
+	// into session.json, so we can avoid redundant writes.
+	lastPersistedHistoryCursor store.HistoryCursor
+}
+
+type contextCache struct {
+	// basePromptHash invalidates cached sections when the caller changes basePrompt.
+	basePromptHash uint64
+
+	// profile section cache
+	profileReady        bool
+	profileSection      string
+	profileBudgetBytes  int
+	profileBytesTotal   int
+	profileBytesIncl    int
+	profileBytesTrunc   bool
+
+	// memory section cache
+	memoryReady        bool
+	memorySection      string
+	memoryBudgetBytes  int
+	memoryBytesTotal   int
+	memoryBytesIncl    int
+	memoryBytesTrunc   bool
+
+	// attachments section cache
+	attachReady   bool
+	attachSection string
+	attachHash    uint64
 }
 
 type constructorState struct {
@@ -204,15 +248,7 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	if err := c.loadStateIfNeeded(ctx); err != nil {
 		return "", err
 	}
-
-	// Pull session-scoped history cursor from session.json (persisted across runs).
-	if c.SessionID != "" {
-		if sess, err := store.LoadSession(c.Cfg, c.SessionID); err == nil {
-			if strings.TrimSpace(sess.HistoryCursor) != "" {
-				c.historyCursor = store.HistoryCursor(strings.TrimSpace(sess.HistoryCursor))
-			}
-		}
-	}
+	c.loadSessionStateIfNeeded()
 
 	// Budgets (deterministic defaults).
 	profileBudget := clampBudget(orDefault(c.MaxProfileBytes, 4*1024), 0, 8*1024)
@@ -248,14 +284,31 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	manifest.Cursors.TraceBefore = c.traceCursor
 	manifest.Cursors.HistoryBefore = c.historyCursor
 
-	system := strings.TrimSpace(basePrompt)
+	basePrompt = strings.TrimSpace(basePrompt)
+	baseHash := hashString(basePrompt)
 
-	// Profile (global).
+	// New turn (step==1) or base prompt changed => invalidate per-turn caches.
+	if step == 1 || (c.cache.basePromptHash != 0 && c.cache.basePromptHash != baseHash) {
+		c.cache = contextCache{}
+		c.cache.basePromptHash = baseHash
+	} else if c.cache.basePromptHash == 0 {
+		c.cache.basePromptHash = baseHash
+	}
+
+	// Profile (global). Cache per turn to avoid re-reading/re-formatting on every step.
 	profilePath := "/profile/profile.md"
-	profileBytes, _ := c.FS.Read(profilePath)
-	profileIncl, profileTrunc := tailUTF8(profileBytes, profileBudget)
-	if len(profileIncl) > 0 {
-		system += "\n\n## User Profile (/profile/profile.md)\n\n" + string(profileIncl) + "\n"
+	if step == 1 || !c.cache.profileReady || c.cache.profileBudgetBytes != profileBudget {
+		profileBytes, _ := c.FS.Read(profilePath)
+		profileIncl, profileTrunc := tailUTF8(profileBytes, profileBudget)
+		c.cache.profileSection = ""
+		if len(profileIncl) > 0 {
+			c.cache.profileSection = "\n\n## User Profile (/profile/profile.md)\n\n" + string(profileIncl) + "\n"
+		}
+		c.cache.profileReady = true
+		c.cache.profileBudgetBytes = profileBudget
+		c.cache.profileBytesTotal = len(profileBytes)
+		c.cache.profileBytesIncl = len(profileIncl)
+		c.cache.profileBytesTrunc = profileTrunc
 	}
 	manifest.Sources = append(manifest.Sources, struct {
 		Source        string `json:"source"`
@@ -267,18 +320,26 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	}{
 		Source:        "profile",
 		Path:          profilePath,
-		BytesTotal:    len(profileBytes),
-		BytesIncluded: len(profileIncl),
-		Truncated:     profileTrunc,
+		BytesTotal:    c.cache.profileBytesTotal,
+		BytesIncluded: c.cache.profileBytesIncl,
+		Truncated:     c.cache.profileBytesTrunc,
 		Reason:        "global user facts/preferences",
 	})
 
-	// Memory (run-scoped).
+	// Memory (run-scoped). Cache per turn (commits happen after a turn completes).
 	memPath := "/memory/memory.md"
-	memBytes, _ := c.FS.Read(memPath)
-	memIncl, memTrunc := tailUTF8(memBytes, memBudget)
-	if len(memIncl) > 0 {
-		system += "\n\n## Run Memory (/memory/memory.md)\n\n" + string(memIncl) + "\n"
+	if step == 1 || !c.cache.memoryReady || c.cache.memoryBudgetBytes != memBudget {
+		memBytes, _ := c.FS.Read(memPath)
+		memIncl, memTrunc := tailUTF8(memBytes, memBudget)
+		c.cache.memorySection = ""
+		if len(memIncl) > 0 {
+			c.cache.memorySection = "\n\n## Run Memory (/memory/memory.md)\n\n" + string(memIncl) + "\n"
+		}
+		c.cache.memoryReady = true
+		c.cache.memoryBudgetBytes = memBudget
+		c.cache.memoryBytesTotal = len(memBytes)
+		c.cache.memoryBytesIncl = len(memIncl)
+		c.cache.memoryBytesTrunc = memTrunc
 	}
 	manifest.Sources = append(manifest.Sources, struct {
 		Source        string `json:"source"`
@@ -290,56 +351,85 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	}{
 		Source:        "memory",
 		Path:          memPath,
-		BytesTotal:    len(memBytes),
-		BytesIncluded: len(memIncl),
-		Truncated:     memTrunc,
+		BytesTotal:    c.cache.memoryBytesTotal,
+		BytesIncluded: c.cache.memoryBytesIncl,
+		Truncated:     c.cache.memoryBytesTrunc,
 		Reason:        "run-scoped working memory",
 	})
 
 	// Turn-scoped file attachments (resolved from @references in the user message).
-	if len(c.FileAttachments) != 0 {
-		system += "\n\n## Referenced Files\n\n"
-		for _, att := range c.FileAttachments {
-			name := strings.TrimSpace(att.DisplayName)
-			if name == "" {
-				name = strings.TrimSpace(att.Token)
+	attachHash := hashAttachments(c.FileAttachments)
+	if step == 1 || !c.cache.attachReady || attachHash != c.cache.attachHash {
+		c.cache.attachHash = attachHash
+		c.cache.attachSection = ""
+		if len(c.FileAttachments) != 0 {
+			var b strings.Builder
+			b.WriteString("\n\n## Referenced Files\n\n")
+			for _, att := range c.FileAttachments {
+				name := strings.TrimSpace(att.DisplayName)
+				if name == "" {
+					name = strings.TrimSpace(att.Token)
+				}
+				if name == "" {
+					name = "<file>"
+				}
+				b.WriteString("### ")
+				b.WriteString(name)
+				b.WriteString("\n\n")
+				b.WriteString("- path: `")
+				b.WriteString(strings.TrimSpace(att.VPath))
+				b.WriteString("`\n")
+				if att.BytesTotal != 0 {
+					b.WriteString("- bytes: ")
+					b.WriteString(strconv.Itoa(att.BytesIncluded))
+					b.WriteString(" (of ")
+					b.WriteString(strconv.Itoa(att.BytesTotal))
+					b.WriteString(")\n")
+				}
+				if att.Truncated {
+					b.WriteString("- truncated: true\n")
+				}
+				b.WriteString("\n")
+				b.WriteString(fencedCodeForPath(att.VPath, att.Content))
+				b.WriteString("\n")
 			}
-			if name == "" {
-				name = "<file>"
-			}
-			system += "### " + name + "\n\n"
-			system += "- path: `" + strings.TrimSpace(att.VPath) + "`\n"
-			if att.BytesTotal != 0 {
-				system += "- bytes: " + strconv.Itoa(att.BytesIncluded) + " (of " + strconv.Itoa(att.BytesTotal) + ")\n"
-			}
-			if att.Truncated {
-				system += "- truncated: true\n"
-			}
-			system += "\n" + fencedCodeForPath(att.VPath, att.Content) + "\n"
-
-			manifest.References = append(manifest.References, struct {
-				Token         string `json:"token"`
-				Path          string `json:"path"`
-				DisplayName   string `json:"displayName"`
-				BytesTotal    int    `json:"bytesTotal"`
-				BytesIncluded int    `json:"bytesIncluded"`
-				Truncated     bool   `json:"truncated"`
-				Reason        string `json:"reason"`
-			}{
-				Token:         strings.TrimSpace(att.Token),
-				Path:          strings.TrimSpace(att.VPath),
-				DisplayName:   strings.TrimSpace(att.DisplayName),
-				BytesTotal:    att.BytesTotal,
-				BytesIncluded: att.BytesIncluded,
-				Truncated:     att.Truncated,
-				Reason:        "user @reference attachment",
-			})
+			c.cache.attachSection = b.String()
 		}
+		c.cache.attachReady = true
+	}
+
+	var systemB strings.Builder
+	systemB.WriteString(basePrompt)
+	systemB.WriteString(c.cache.profileSection)
+	systemB.WriteString(c.cache.memorySection)
+	systemB.WriteString(c.cache.attachSection)
+
+	// Rebuild attachment references for the manifest (cheap, bounded slice).
+	for _, att := range c.FileAttachments {
+		manifest.References = append(manifest.References, struct {
+			Token         string `json:"token"`
+			Path          string `json:"path"`
+			DisplayName   string `json:"displayName"`
+			BytesTotal    int    `json:"bytesTotal"`
+			BytesIncluded int    `json:"bytesIncluded"`
+			Truncated     bool   `json:"truncated"`
+			Reason        string `json:"reason"`
+		}{
+			Token:         strings.TrimSpace(att.Token),
+			Path:          strings.TrimSpace(att.VPath),
+			DisplayName:   strings.TrimSpace(att.DisplayName),
+			BytesTotal:    att.BytesTotal,
+			BytesIncluded: att.BytesIncluded,
+			Truncated:     att.Truncated,
+			Reason:        "user @reference attachment",
+		})
 	}
 
 	// Last op snapshot (cheap, high-signal).
 	if c.LastOp != nil {
-		system += "\n\n## Last Host Op\n\n" + c.summarizeLastOp(failureBump) + "\n"
+		systemB.WriteString("\n\n## Last Host Op\n\n")
+		systemB.WriteString(c.summarizeLastOp(failureBump))
+		systemB.WriteString("\n")
 	}
 
 	// Trace (run-scoped).
@@ -358,7 +448,9 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 			}
 			summary, _, _, _, _ := summarizeTrace(c.traceEvents, includeTypes, traceBudget)
 			if strings.TrimSpace(summary) != "" {
-				system += "\n\n## Recent Ops (from /trace)\n\n" + summary + "\n"
+				systemB.WriteString("\n\n## Recent Ops (from /trace)\n\n")
+				systemB.WriteString(summary)
+				systemB.WriteString("\n")
 			}
 		}
 	}
@@ -377,19 +469,16 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 			manifest.Cursors.HistoryAfter = hb.CursorAfter
 			blk := c.recentHistoryBlock(hb.Lines, 8)
 			if strings.TrimSpace(blk) != "" {
-				system += "\n\n" + blk + "\n"
+				systemB.WriteString("\n\n")
+				systemB.WriteString(blk)
+				systemB.WriteString("\n")
 			}
-			// Persist session-level history cursor.
-			if c.SessionID != "" {
-				if sess, err := store.LoadSession(c.Cfg, c.SessionID); err == nil {
-					sess.HistoryCursor = string(c.historyCursor)
-					_ = store.SaveSession(c.Cfg, sess)
-				}
-			}
+			// Persist session-level history cursor (avoid redundant LoadSession per step).
+			c.persistSessionHistoryCursorIfNeeded()
 		}
 	}
 
-	system = strings.TrimSpace(system)
+	system := strings.TrimSpace(systemB.String())
 
 	_ = c.saveState(ctx)
 	_ = c.writeManifest(ctx, manifest)
@@ -397,8 +486,8 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	if c.Emit != nil {
 		c.Emit("context.constructor", "Constructed context", map[string]string{
 			"step":          strconv.Itoa(step),
-			"profileBytes":  strconv.Itoa(len(profileIncl)),
-			"memoryBytes":   strconv.Itoa(len(memIncl)),
+			"profileBytes":  strconv.Itoa(c.cache.profileBytesIncl),
+			"memoryBytes":   strconv.Itoa(c.cache.memoryBytesIncl),
 			"traceCursor":   string(c.traceCursor),
 			"historyCursor": string(c.historyCursor),
 		})
@@ -546,6 +635,130 @@ func mapSummary(m map[string]string) string {
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, " ")
+}
+
+const (
+	fnv64Offset = 14695981039346656037
+	fnv64Prime  = 1099511628211
+)
+
+type fnv64a struct {
+	h uint64
+}
+
+func newFNV64a() fnv64a {
+	return fnv64a{h: fnv64Offset}
+}
+
+func (f *fnv64a) addByte(b byte) {
+	f.h ^= uint64(b)
+	f.h *= fnv64Prime
+}
+
+func (f *fnv64a) addString(s string) {
+	for i := 0; i < len(s); i++ {
+		f.addByte(s[i])
+	}
+}
+
+func (f *fnv64a) addUint64(v uint64) {
+	// Little-endian bytes to make the encoding stable.
+	for i := 0; i < 8; i++ {
+		f.addByte(byte(v))
+		v >>= 8
+	}
+}
+
+func hashString(s string) uint64 {
+	f := newFNV64a()
+	f.addString(s)
+	return f.h
+}
+
+func hashAttachments(atts []FileAttachment) uint64 {
+	f := newFNV64a()
+	f.addUint64(uint64(len(atts)))
+	for _, a := range atts {
+		f.addString(a.Token)
+		f.addByte(0)
+		f.addString(a.VPath)
+		f.addByte(0)
+		f.addString(a.DisplayName)
+		f.addByte(0)
+		f.addUint64(uint64(a.BytesTotal))
+		f.addUint64(uint64(a.BytesIncluded))
+		if a.Truncated {
+			f.addByte(1)
+		} else {
+			f.addByte(0)
+		}
+		f.addByte(0)
+		// Content is bounded by the host (e.g. 12KB/file); include it so we detect
+		// any mid-turn attachment refresh without relying on pointers.
+		f.addString(a.Content)
+		f.addByte(0)
+	}
+	return f.h
+}
+
+func (c *ContextConstructor) loadSessionStateIfNeeded() {
+	if c == nil {
+		return
+	}
+	sid := strings.TrimSpace(c.SessionID)
+	if sid == "" {
+		c.sessionStateLoaded = true
+		c.sessionCachedOK = false
+		c.sessionCachedID = ""
+		return
+	}
+	if c.sessionStateLoaded && c.sessionCachedID == sid {
+		return
+	}
+	c.sessionStateLoaded = true
+	c.sessionCachedID = sid
+
+	sess, err := store.LoadSession(c.Cfg, sid)
+	if err != nil {
+		c.sessionCachedOK = false
+		return
+	}
+	c.sessionCached = sess
+	c.sessionCachedOK = true
+
+	// Prefer the session-scoped cursor when present (persisted across runs).
+	if strings.TrimSpace(sess.HistoryCursor) != "" {
+		c.historyCursor = store.HistoryCursor(strings.TrimSpace(sess.HistoryCursor))
+	}
+	c.lastPersistedHistoryCursor = store.HistoryCursor(strings.TrimSpace(sess.HistoryCursor))
+}
+
+func (c *ContextConstructor) persistSessionHistoryCursorIfNeeded() {
+	if c == nil {
+		return
+	}
+	sid := strings.TrimSpace(c.SessionID)
+	if sid == "" {
+		return
+	}
+	cur := strings.TrimSpace(string(c.historyCursor))
+	last := strings.TrimSpace(string(c.lastPersistedHistoryCursor))
+	if cur == last {
+		return
+	}
+	// Ensure we have a session object to update and persist.
+	if !c.sessionCachedOK || c.sessionCachedID != sid {
+		c.sessionStateLoaded = false
+		c.loadSessionStateIfNeeded()
+	}
+	if !c.sessionCachedOK {
+		return
+	}
+
+	c.sessionCached.HistoryCursor = string(c.historyCursor)
+	if err := store.SaveSession(c.Cfg, c.sessionCached); err == nil {
+		c.lastPersistedHistoryCursor = c.historyCursor
+	}
 }
 
 func (c *ContextConstructor) loadStateIfNeeded(ctx context.Context) error {
