@@ -209,7 +209,14 @@ func (r *BuiltinRipgrepInvoker) Invoke(ctx context.Context, req types.ToolReques
 		stderrCh <- stderrResult{b: b, err: err}
 	}()
 
-	matches := make([]ripgrepMatch, 0)
+	// We treat maxMatches as a global cap on returned matches.
+	// Note: ripgrep's --max-count is per-file, so we must stop ourselves.
+	matchesCap := 0
+	if maxMatches > 0 && maxMatches <= 256 {
+		matchesCap = maxMatches
+	}
+	matches := make([]ripgrepMatch, 0, matchesCap)
+	reachedMaxMatches := false
 	sc := bufio.NewScanner(stdout)
 	// Allow longer JSON lines than the default 64K.
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -244,10 +251,24 @@ func (r *BuiltinRipgrepInvoker) Invoke(ctx context.Context, req types.ToolReques
 			Line: md.LineNumber,
 			Text: text,
 		})
+
+		if maxMatches > 0 && len(matches) >= maxMatches {
+			reachedMaxMatches = true
+			cancel()
+			break
+		}
 	}
 
 	if err := sc.Err(); err != nil {
 		// Scanner errors are treated as a tool failure.
+		// If we intentionally stopped after reaching maxMatches, ignore any read errors
+		// caused by canceling the process.
+		if reachedMaxMatches {
+			err = nil
+		}
+		if err == nil {
+			// proceed
+		} else {
 		cancel()
 		_ = cmd.Wait()
 		<-stderrCh
@@ -255,6 +276,7 @@ func (r *BuiltinRipgrepInvoker) Invoke(ctx context.Context, req types.ToolReques
 			return ToolCallResult{}, &InvokeError{Code: "timeout", Message: "rg timed out", Retryable: true, Err: ctx.Err()}
 		}
 		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("read rg output: %v", err), Err: err}
+		}
 	}
 
 	waitErr := cmd.Wait()
@@ -267,6 +289,12 @@ func (r *BuiltinRipgrepInvoker) Invoke(ctx context.Context, req types.ToolReques
 			timeoutErr = ctx.Err()
 		}
 		return ToolCallResult{}, &InvokeError{Code: "timeout", Message: "rg timed out", Retryable: true, Err: timeoutErr}
+	}
+
+	// If we canceled intentionally after collecting enough matches, treat any resulting
+	// process termination error as expected (the output is intentionally truncated).
+	if reachedMaxMatches {
+		waitErr = nil
 	}
 	// rg returns exit code 1 when there are no matches; that is not a tool failure.
 	if waitErr != nil {
@@ -289,7 +317,7 @@ func (r *BuiltinRipgrepInvoker) Invoke(ctx context.Context, req types.ToolReques
 		Matches:   matches,
 		Truncated: false,
 	}
-	if maxMatches > 0 && len(matches) >= maxMatches {
+	if maxMatches > 0 && (reachedMaxMatches || len(matches) >= maxMatches) {
 		out.Truncated = true
 		out.Limit = "maxMatches"
 	}
