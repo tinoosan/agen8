@@ -942,6 +942,44 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		})
 	}
 
+	// Phase 1 streaming: emit UI-only token events (not persisted).
+	//
+	// Note: the agent loop already decodes and streams only "final.text".
+	var tokenBuf strings.Builder
+	lastTokenEmit := time.Now()
+	emitTokenBuf := func() {
+		if tokenBuf.Len() == 0 {
+			return
+		}
+		txt := tokenBuf.String()
+		tokenBuf.Reset()
+		lastTokenEmit = time.Now()
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "model.token",
+			Message: "Model token",
+			Data:    map[string]string{"text": txt},
+			Store:   boolp(false),
+			History: boolp(false),
+			Console: boolp(false),
+		})
+	}
+	r.agent.Hooks.OnToken = func(step int, text string) {
+		_ = step
+		if text == "" {
+			return
+		}
+		tokenBuf.WriteString(text)
+		// Coalesce to avoid flooding the TUI channel.
+		if tokenBuf.Len() >= 256 || time.Since(lastTokenEmit) >= 40*time.Millisecond {
+			emitTokenBuf()
+		}
+	}
+	defer func() {
+		emitTokenBuf()
+		// Avoid leaking the callback into subsequent turns.
+		r.agent.Hooks.OnToken = nil
+	}()
+
 	r.conversation = append(r.conversation, types.LLMMessage{Role: "user", Content: userMsg})
 	start := time.Now()
 	final, updated, steps, err := r.agent.RunConversation(ctx, r.conversation)

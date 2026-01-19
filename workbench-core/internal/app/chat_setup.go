@@ -168,9 +168,9 @@ func setupTUIChatRuntime(
 		}
 	}
 
-	client, err := llm.NewOpenRouterClientFromEnv()
+	client, err := llm.NewClientFromEnv()
 	if err != nil {
-		return nil, fmt.Errorf("create OpenRouter client: %w", err)
+		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 
 	systemPromptBytes, err := os.ReadFile("internal/agent/INITIAL_PROMPT.md")

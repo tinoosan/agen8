@@ -23,7 +23,7 @@ workbench-core/bin/
 **/*.exe
 **/*.test
 **/.DS_Store
-.gocache
+
 
 # Misc/Debug
 .DS_Store

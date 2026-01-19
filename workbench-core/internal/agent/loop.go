@@ -101,13 +101,38 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 			system = updated
 		}
 
-		resp, err := a.LLM.Generate(ctx, types.LLMRequest{
+		req := types.LLMRequest{
 			Model:     a.Model,
 			System:    system,
 			Messages:  msgs,
 			MaxTokens: 1024,
 			JSONOnly:  true,
-		})
+		}
+
+		var resp types.LLMResponse
+		var err error
+		if s, ok := a.LLM.(types.LLMClientStreaming); ok {
+			dec := &finalTextStreamDecoder{}
+			resp, err = s.GenerateStream(ctx, req, func(chunk types.LLMStreamChunk) error {
+				if chunk.Done {
+					return nil
+				}
+				if chunk.Text == "" {
+					return nil
+				}
+				// Stream only decoded final.text to the host via OnToken.
+				if a.Hooks.OnToken != nil {
+					if out := dec.Consume(chunk.Text); out != "" {
+						a.Hooks.OnToken(step, out)
+					}
+				} else {
+					_ = dec.Consume(chunk.Text)
+				}
+				return nil
+			})
+		} else {
+			resp, err = a.LLM.Generate(ctx, req)
+		}
 		if err != nil {
 			return "", nil, 0, err
 		}

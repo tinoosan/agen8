@@ -45,6 +45,11 @@ type Hooks struct {
 	// OnLLMUsage is invoked after each model call when token usage is available.
 	OnLLMUsage func(step int, usage types.LLMUsage)
 
+	// OnToken is invoked for streamed output tokens (when the provider supports streaming).
+	//
+	// Phase 1: the agent loop emits only the decoded "final.text" stream.
+	OnToken func(step int, text string)
+
 	// Logf is an optional logger used to print what the agent is doing.
 	Logf func(format string, args ...any)
 }

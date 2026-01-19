@@ -18,6 +18,31 @@ type LLMClient interface {
 	Generate(ctx context.Context, req LLMRequest) (LLMResponse, error)
 }
 
+// LLMStreamChunk is a provider-agnostic streaming output unit.
+//
+// Phase 1 scope:
+//   - Text: incremental assistant content as it arrives
+//   - Done: optional sentinel (providers may also use EOF/[DONE])
+type LLMStreamChunk struct {
+	Text string
+	Done bool
+}
+
+// LLMStreamCallback is invoked for each stream chunk.
+//
+// Returning a non-nil error aborts streaming and should cancel the request.
+type LLMStreamCallback func(chunk LLMStreamChunk) error
+
+// LLMClientStreaming is an optional extension interface for providers that support
+// token streaming.
+//
+// GenerateStream should:
+//   - invoke cb as chunks arrive
+//   - return the final accumulated response text (and optional usage/raw)
+type LLMClientStreaming interface {
+	GenerateStream(ctx context.Context, req LLMRequest, cb LLMStreamCallback) (LLMResponse, error)
+}
+
 // LLMRequest is a provider-agnostic request shape for a text completion.
 //
 // System is the system prompt string (developer instructions). Messages represent the

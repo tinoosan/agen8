@@ -14,9 +14,9 @@
 //
 // # Current Implementation
 //
-// OpenRouterClient is the default implementation, which routes requests through
-// the OpenRouter API (https://openrouter.ai). This provides access to multiple
-// model providers (OpenAI, Anthropic, etc.) through a single API.
+// Client is the default implementation. It uses the official OpenAI Go SDK
+// configured with OpenRouter's OpenAI-compatible base URL (https://openrouter.ai).
+// This provides access to multiple model providers through a single API.
 //
 // # Request/Response Contract
 //
@@ -27,7 +27,7 @@
 //
 // # Authentication
 //
-// The OpenRouter client expects an API key via environment variable:
+// The client expects an API key via environment variable:
 //
 //	export OPENROUTER_API_KEY=sk-or-v1-...
 //

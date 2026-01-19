@@ -114,6 +114,10 @@ type Model struct {
 	transcriptItemStartLine []int
 	lastTurnUserItemIdx     int
 
+	// Streaming (Phase 1): inline incremental agent output for the current turn.
+	streamingItemIdx int
+	streamingBuf     *strings.Builder
+
 	// fileSnapCache is a best-effort in-memory cache of files touched during this
 	// session/run, used to render diff previews in the transcript.
 	fileSnapCache map[string]string // vpath -> last-known text (possibly truncated)
@@ -1246,6 +1250,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 
 	m.pendingActionIdx = -1
 	m.lastTurnUserItemIdx = -1
+	m.streamingItemIdx = -1
 	return m
 }
 
@@ -1695,6 +1700,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case eventMsg:
 		ev := events.Event(msg)
+
+		// Phase 1 streaming: update in-progress agent transcript inline.
+		if ev.Type == "model.token" {
+			txt := ev.Data["text"]
+			if txt != "" {
+				if m.streamingItemIdx < 0 {
+					// Start a streaming agent message at the end of the transcript.
+					if m.streamingBuf == nil {
+						m.streamingBuf = &strings.Builder{}
+					} else {
+						m.streamingBuf.Reset()
+					}
+					m.streamingBuf.WriteString(txt)
+					m.streamingItemIdx = len(m.transcriptItems)
+					m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: m.streamingBuf.String() + "▌"})
+				} else if m.streamingItemIdx < len(m.transcriptItems) {
+					if m.streamingBuf == nil {
+						// Safety: should not happen, but avoid nil deref.
+						m.streamingBuf = &strings.Builder{}
+					}
+					m.streamingBuf.WriteString(txt)
+					wasAtBottom := m.transcript.AtBottom()
+					it := m.transcriptItems[m.streamingItemIdx]
+					if it.kind == transcriptAgent {
+						it.text = m.streamingBuf.String() + "▌"
+						m.transcriptItems[m.streamingItemIdx] = it
+						m.rebuildTranscript()
+						if wasAtBottom {
+							m.transcript.GotoBottom()
+						}
+					}
+				}
+			}
+			return m, m.waitEvent()
+		}
+
 		evCmd := m.onEvent(ev)
 		cmds := []tea.Cmd{m.waitEvent()}
 		if evCmd != nil {
@@ -1933,14 +1974,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case turnDoneMsg:
 		m.turnInFlight = false
 		if msg.err != nil {
+			// Clear any in-progress streaming state on error.
+			m.streamingItemIdx = -1
+			m.streamingBuf = nil
 			m.addTranscriptItem(transcriptItem{kind: transcriptError, text: "agent error: " + msg.err.Error()})
 			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 			m.turnTitle = ""
 			return m, nil
 		}
-		if strings.TrimSpace(msg.final) != "" {
-			m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: strings.TrimSpace(msg.final)})
-			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+		finalText := strings.TrimSpace(msg.final)
+		if finalText != "" {
+			if m.streamingItemIdx >= 0 && m.streamingItemIdx < len(m.transcriptItems) {
+				it := m.transcriptItems[m.streamingItemIdx]
+				if it.kind == transcriptAgent {
+					it.text = finalText
+					m.transcriptItems[m.streamingItemIdx] = it
+					m.streamingItemIdx = -1
+					m.streamingBuf = nil
+					wasAtBottom := m.transcript.AtBottom()
+					m.rebuildTranscript()
+					if wasAtBottom {
+						m.transcript.GotoBottom()
+					}
+					m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+				} else {
+					// Fallback: unexpected kind, append normally.
+					m.streamingItemIdx = -1
+					m.streamingBuf = nil
+					m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: finalText})
+					m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+				}
+			} else {
+				m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: finalText})
+				m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+			}
+		} else {
+			// No final output; clear streaming state.
+			m.streamingItemIdx = -1
+			m.streamingBuf = nil
 		}
 		m.scrollToCurrentTurnStart()
 		m.turnTitle = ""
@@ -2616,6 +2687,8 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 	m.pendingActionIdx = -1
 	m.pendingActionText = ""
 	m.waitingForAction = false
+	m.streamingItemIdx = -1
+	m.streamingBuf = nil
 
 	if m.workflowTitle == "" {
 		m.workflowTitle = firstLine(userMsg)
