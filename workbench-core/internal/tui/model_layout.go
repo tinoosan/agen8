@@ -221,7 +221,11 @@ func (m Model) renderHeader() string {
 		rhsParts = append(rhsParts, fmt.Sprintf("Σ$%.4f", m.totalCostUSD))
 	}
 	if m.turnInFlight {
-		rhsParts = append(rhsParts, "running…")
+		if m.turnCancelRequested {
+			rhsParts = append(rhsParts, "stopping…")
+		} else {
+			rhsParts = append(rhsParts, "running…")
+		}
 	}
 	rhs := m.styleHeaderRHS.Render(strings.Join(rhsParts, "  "))
 
@@ -377,6 +381,13 @@ func (m Model) renderInput() string {
 		hintText = "ctrl+a hide activity  tab focus  esc close  j/k↑/↓ select  e/enter expand  o open file  pgup/pgdn scroll  ctrl+t telemetry  ctrl+g multiline  ctrl+o send (multiline)"
 	} else {
 		hintText = "pgup/pgdn scroll  " + hintText
+	}
+	if m.turnInFlight {
+		if m.turnCancelRequested {
+			hintText = "ctrl+x stopping…  " + hintText
+		} else {
+			hintText = "ctrl+x stop  " + hintText
+		}
 	}
 	footerW := max(20, m.width-2)
 	hintRaw := hintText + "  focus: " + focusName

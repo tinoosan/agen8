@@ -150,6 +150,12 @@ type Model struct {
 
 	focus focusTarget
 
+	// turnCtx/turnCancel manage cancellation of the currently in-flight turn.
+	// This allows stopping model output (and in-flight host ops) without exiting the TUI.
+	turnCtx             context.Context
+	turnCancel          context.CancelFunc
+	turnCancelRequested bool
+
 	turnInFlight bool
 	turnStarted  time.Time
 	turnTitle    string

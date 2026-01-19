@@ -21,6 +21,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if mm, cmd, ok := m.keyGlobalQuit(msg); ok {
 		return mm, cmd
 	}
+	if mm, cmd, ok := m.keyStopTurn(msg); ok {
+		return mm, cmd
+	}
 	if mm, cmd, ok := m.keyHelpModal(msg); ok {
 		return mm, cmd
 	}
@@ -80,6 +83,25 @@ func (m Model) keyGlobalQuit(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, tea.Quit, true
 	}
 	return m, nil, false
+}
+
+func (m Model) keyStopTurn(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	// Ctrl+X stops the current turn (model streaming + host ops) without exiting Workbench.
+	if msg.Type != tea.KeyCtrlX && !strings.EqualFold(msg.String(), "ctrl+x") {
+		return m, nil, false
+	}
+	if !m.turnInFlight {
+		// Treat as handled to avoid forwarding to the input/editor.
+		return m, nil, true
+	}
+	if m.turnCancelRequested {
+		return m, nil, true
+	}
+	m.turnCancelRequested = true
+	if m.turnCancel != nil {
+		m.turnCancel()
+	}
+	return m, nil, true
 }
 
 func (m Model) keyHelpModal(msg tea.KeyMsg) (Model, tea.Cmd, bool) {

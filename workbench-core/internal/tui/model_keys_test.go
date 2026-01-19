@@ -66,6 +66,24 @@ func (r runnerWithPwd) RunTurn(ctx context.Context, userMsg string) (string, err
 	return r.stubRunner.RunTurn(ctx, userMsg)
 }
 
+type blockingRunner struct {
+	started chan struct{}
+}
+
+func (r blockingRunner) RunTurn(ctx context.Context, userMsg string) (string, error) {
+	_ = userMsg
+	if r.started != nil {
+		select {
+		case <-r.started:
+			// already closed
+		default:
+			close(r.started)
+		}
+	}
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
 func TestKeyHandling_EnterSubmitsEvenWhenDetailsVisible(t *testing.T) {
 	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
 	m.showDetails = true
@@ -80,6 +98,53 @@ func TestKeyHandling_EnterSubmitsEvenWhenDetailsVisible(t *testing.T) {
 	}
 	if !updated.turnInFlight {
 		t.Fatalf("expected turnInFlight true")
+	}
+}
+
+func TestKeyHandling_CtrlXStopsTurnWithoutQuitting(t *testing.T) {
+	started := make(chan struct{})
+	m := New(context.Background(), blockingRunner{started: started}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.layout()
+
+	m.single.SetValue("hello")
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := m2.(Model)
+	if cmd == nil {
+		t.Fatalf("expected submit cmd, got nil")
+	}
+	if !updated.turnInFlight {
+		t.Fatalf("expected turnInFlight true after submit")
+	}
+
+	msgCh := make(chan tea.Msg, 1)
+	go func() {
+		msgCh <- cmd()
+	}()
+
+	// Wait for the runner to start (best-effort) so the cancel is meaningful.
+	select {
+	case <-started:
+	default:
+	}
+
+	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	stopping := m3.(Model)
+	if !stopping.turnInFlight {
+		t.Fatalf("expected turnInFlight true immediately after ctrl+x (until turn completes)")
+	}
+
+	doneMsg := <-msgCh
+	m4, _ := stopping.Update(doneMsg)
+	final := m4.(Model)
+	if final.turnInFlight {
+		t.Fatalf("expected turnInFlight false after cancellation completes")
+	}
+	for _, it := range final.transcriptItems {
+		if it.kind == transcriptError && strings.Contains(it.text, "agent error:") {
+			t.Fatalf("expected no agent error transcript line on ctrl+x stop, got: %q", it.text)
+		}
 	}
 }
 

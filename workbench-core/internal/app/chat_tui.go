@@ -1146,6 +1146,10 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	dur := time.Since(start)
 	r.conversation = updated
 	if err != nil {
+		// User-initiated stop should not be surfaced as an agent error event.
+		if errors.Is(err, context.Canceled) {
+			return "", err
+		}
 		r.mustEmit(context.Background(), events.Event{
 			Type:    "agent.error",
 			Message: "Agent loop error",

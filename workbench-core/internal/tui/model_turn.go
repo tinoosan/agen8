@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -83,6 +84,16 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 	m.turnStarted = time.Now()
 	m.turnTitle = userMsg
 	m.turnN++
+	// Reset and re-create per-turn cancel state.
+	if m.turnCancel != nil {
+		// Best-effort: release resources from any prior turn context.
+		m.turnCancel()
+	}
+	turnCtx, turnCancel := context.WithCancel(m.ctx)
+	m.turnCtx = turnCtx
+	m.turnCancel = turnCancel
+	m.turnCancelRequested = false
+
 	m.pendingActionsByOpID = make(map[string]pendingAction)
 	m.pendingFileOpsByOpID = make(map[string]pendingFileOp)
 	m.fileChangesItemIdx = -1
@@ -105,7 +116,7 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 	m.addTranscriptItem(transcriptItem{kind: transcriptUser, text: userMsg})
 
 	return func() tea.Msg {
-		final, err := m.runner.RunTurn(m.ctx, userMsg)
+		final, err := m.runner.RunTurn(turnCtx, userMsg)
 		_ = final
 		return turnDoneMsg{final: final, err: err}
 	}

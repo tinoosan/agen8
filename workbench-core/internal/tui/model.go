@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -628,6 +629,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case turnDoneMsg:
 		m.turnInFlight = false
+		// Clear per-turn cancel state (the turn is over regardless of outcome).
+		m.turnCtx = nil
+		m.turnCancel = nil
 		// Best-effort: finalize any in-progress thinking indicator. We may receive
 		// a late model.thinking.end after turn completion, but we ignore late events
 		// to prevent duplication.
@@ -640,6 +644,50 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateThinkingTranscriptItem()
 		}
 		if msg.err != nil {
+			// Treat user-initiated stop (Ctrl+X) as a normal outcome, not an error.
+			if m.turnCancelRequested || errors.Is(msg.err, context.Canceled) {
+				// Finalize any in-progress streaming state.
+				if m.streamingItemIdx >= 0 && m.streamingItemIdx < len(m.transcriptItems) {
+					it := m.transcriptItems[m.streamingItemIdx]
+					if it.kind == transcriptAgent {
+						txt := ""
+						if m.streamingBuf != nil {
+							txt = m.streamingBuf.String()
+						} else {
+							txt = strings.TrimSuffix(it.text, "▌")
+						}
+						txt = strings.TrimRight(txt, "\n")
+						if txt == "" {
+							txt = "_(stopped)_"
+						} else {
+							txt = txt + "\n\n_(stopped)_"
+						}
+						it.text = txt
+						m.transcriptItems[m.streamingItemIdx] = it
+						m.streamingItemIdx = -1
+						m.streamingBuf = nil
+						wasAtBottom := m.transcript.AtBottom()
+						m.rebuildTranscript()
+						if wasAtBottom {
+							m.transcript.GotoBottom()
+						}
+						m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+					}
+				} else {
+					// No partial output observed; still surface a minimal stop marker.
+					m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: "_(stopped)_"})
+					m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+				}
+				m.streamingItemIdx = -1
+				m.streamingBuf = nil
+				m.thinkingItemIdx = -1
+				m.thinkingSummary = ""
+				m.turnTitle = ""
+				m.turnCancelRequested = false
+				m.scrollToCurrentTurnStart()
+				return m, nil
+			}
+
 			// Clear any in-progress streaming state on error.
 			m.streamingItemIdx = -1
 			m.streamingBuf = nil
@@ -648,6 +696,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addTranscriptItem(transcriptItem{kind: transcriptError, text: "agent error: " + msg.err.Error()})
 			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 			m.turnTitle = ""
+			m.turnCancelRequested = false
 			return m, nil
 		}
 		finalText := strings.TrimSpace(msg.final)
@@ -683,6 +732,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.scrollToCurrentTurnStart()
 		m.turnTitle = ""
+		m.turnCancelRequested = false
 		return m, nil
 	}
 
