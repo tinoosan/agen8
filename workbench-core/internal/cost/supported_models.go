@@ -55,6 +55,7 @@ var supportedModelIDs = []string{
 	"openai/gpt-5.1-codex-mini",
 	"openai/gpt-5.1-codex-max",
 	"openai/gpt-5-mini",
+	"openai/gpt-5-nano",
 	"openai/gpt-4.1",
 	"openai/gpt-4o",
 	"openai/gpt-4o-mini",
@@ -65,6 +66,8 @@ var supportedModelIDs = []string{
 	"anthropic/claude-3.5-sonnet",
 	"anthropic/claude-3-opus",
 	"anthropic/claude-3-haiku",
+	"anthropic/claude-4.5-opus-",
+	"anthropic/claude-4.5-sonnet",
 
 	// Google.
 	"google/gemini-pro-1.5",

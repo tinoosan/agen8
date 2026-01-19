@@ -51,6 +51,14 @@ func DefaultPricing() PricingFile {
 				InputPerM:  0.25,
 				OutputPerM: 2.0,
 			},
+			"openai/gpt-5-mini": {
+				InputPerM:  0.25,
+				OutputPerM: 2.0,
+			},
+			"openai/gpt-5-nano": {
+				InputPerM:  0.05,
+				OutputPerM: 0.40,
+			},
 
 			// OpenAI (Real).
 			"openai/gpt-4o": {
@@ -82,6 +90,14 @@ func DefaultPricing() PricingFile {
 			"anthropic/claude-3-haiku": {
 				InputPerM:  0.25,
 				OutputPerM: 1.25,
+			},
+			"anthropic/claude-4.5-opus-": {
+				InputPerM:  5.00,
+				OutputPerM: 25.00,
+			},
+			"anthropic/claude-4.5-sonnet": {
+				InputPerM:  1.00,
+				OutputPerM: 15.00,
 			},
 
 			// Google.
