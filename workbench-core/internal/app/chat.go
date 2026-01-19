@@ -39,6 +39,14 @@ type RunChatOptions struct {
 	// If empty, the host falls back to OPENROUTER_MODEL.
 	Model string
 
+	// ReasoningEffort is an optional hint for reasoning-capable models.
+	// Examples: "none", "low", "medium", "high".
+	ReasoningEffort string
+
+	// ReasoningSummary controls whether and how providers should emit reasoning summaries.
+	// Examples: "off", "auto", "concise", "detailed".
+	ReasoningSummary string
+
 	// WorkDir is the host working directory to mount at /workdir.
 	//
 	// If empty, the host uses os.Getwd() at startup.
@@ -116,6 +124,20 @@ func resolveRunChatOptions(opts ...RunChatOption) RunChatOptions {
 	}
 	if strings.TrimSpace(o.PricingFile) == "" {
 		o.PricingFile = strings.TrimSpace(os.Getenv("WORKBENCH_PRICING_FILE"))
+	}
+	if strings.TrimSpace(o.ReasoningEffort) == "" {
+		if v := strings.TrimSpace(os.Getenv("WORKBENCH_REASONING_EFFORT")); v != "" {
+			o.ReasoningEffort = v
+		} else {
+			o.ReasoningEffort = strings.TrimSpace(os.Getenv("OPENROUTER_REASONING_EFFORT"))
+		}
+	}
+	if strings.TrimSpace(o.ReasoningSummary) == "" {
+		if v := strings.TrimSpace(os.Getenv("WORKBENCH_REASONING_SUMMARY")); v != "" {
+			o.ReasoningSummary = v
+		} else {
+			o.ReasoningSummary = strings.TrimSpace(os.Getenv("OPENROUTER_REASONING_SUMMARY"))
+		}
 	}
 
 	// Preserve existing defaults for zero/negative values.

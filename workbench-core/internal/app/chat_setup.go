@@ -151,6 +151,8 @@ func setupTUIChatRuntime(
 	run.Runtime = &types.RunRuntimeConfig{
 		DataDir:               cfg.DataDir,
 		Model:                 model,
+		ReasoningEffort:       strings.TrimSpace(opts.ReasoningEffort),
+		ReasoningSummary:      strings.TrimSpace(opts.ReasoningSummary),
 		MaxSteps:              opts.MaxSteps,
 		MaxTraceBytes:         opts.MaxTraceBytes,
 		MaxMemoryBytes:        opts.MaxMemoryBytes,
@@ -164,8 +166,20 @@ func setupTUIChatRuntime(
 
 	// Persist the active model at the session level so resume is deterministic.
 	if sess, err := store.LoadSession(cfg, run.SessionID); err == nil {
+		changed := false
 		if strings.TrimSpace(sess.ActiveModel) != model {
 			sess.ActiveModel = model
+			changed = true
+		}
+		if strings.TrimSpace(sess.ReasoningEffort) != strings.TrimSpace(opts.ReasoningEffort) {
+			sess.ReasoningEffort = strings.TrimSpace(opts.ReasoningEffort)
+			changed = true
+		}
+		if strings.TrimSpace(sess.ReasoningSummary) != strings.TrimSpace(opts.ReasoningSummary) {
+			sess.ReasoningSummary = strings.TrimSpace(opts.ReasoningSummary)
+			changed = true
+		}
+		if changed {
 			_ = store.SaveSession(cfg, sess)
 		}
 	}
@@ -399,6 +413,8 @@ func setupTUIChatRuntime(
 		LLM:          client,
 		Exec:         agent.HostExecFunc(execWithEvents),
 		Model:        model,
+		ReasoningEffort:  strings.TrimSpace(opts.ReasoningEffort),
+		ReasoningSummary: strings.TrimSpace(opts.ReasoningSummary),
 		SystemPrompt: baseSystemPrompt,
 		Context:      constructor,
 		MaxSteps:     opts.MaxSteps,

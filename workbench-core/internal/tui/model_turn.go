@@ -119,12 +119,6 @@ func (m *Model) formatThinkingText() string {
 	}
 	summary := strings.TrimSpace(m.thinkingSummary)
 	if summary == "" {
-		// Make Ctrl+Y visibly do something even before (or if) a provider emits a
-		// reasoning summary. This also helps users distinguish “no summary emitted”
-		// from “toggle is broken”.
-		if m.thinkingExpanded {
-			return header + "\n\nSummary:\n" + "(no summary yet)"
-		}
 		return header
 	}
 	if !m.thinkingExpanded {

@@ -95,6 +95,9 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 		Model:    openai.ChatModel(req.Model),
 		Messages: msgs,
 	}
+	if v := strings.TrimSpace(req.ReasoningEffort); v != "" {
+		params.ReasoningEffort = shared.ReasoningEffort(v)
+	}
 	if maxTokens > 0 {
 		params.MaxTokens = openai.Int(int64(maxTokens))
 	}
@@ -182,9 +185,24 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	}
 
 	// Request reasoning summaries when supported.
-	params.Reasoning = shared.ReasoningParam{
-		GenerateSummary: shared.ReasoningGenerateSummaryAuto, // deprecated but harmless; helps compat
-		Summary:         shared.ReasoningSummaryAuto,
+	params.Reasoning = shared.ReasoningParam{}
+	if v := strings.TrimSpace(req.ReasoningEffort); v != "" {
+		params.Reasoning.Effort = shared.ReasoningEffort(v)
+	}
+	// Summary control:
+	// - empty => default to auto (current behavior)
+	// - "off" => omit summary fields entirely
+	// - otherwise => set to the requested level
+	sv := strings.ToLower(strings.TrimSpace(req.ReasoningSummary))
+	switch sv {
+	case "":
+		params.Reasoning.GenerateSummary = shared.ReasoningGenerateSummaryAuto // deprecated but harmless; helps compat
+		params.Reasoning.Summary = shared.ReasoningSummaryAuto
+	case "off":
+		// omit
+	default:
+		params.Reasoning.GenerateSummary = shared.ReasoningGenerateSummary(sv)
+		params.Reasoning.Summary = shared.ReasoningSummary(sv)
 	}
 
 	return params, nil
@@ -335,7 +353,7 @@ func (c *Client) onStreamChunk(acc *openai.ChatCompletionAccumulator, chunk open
 	return nil
 }
 
-func (c *Client) onResponsesStreamEvent(ev responses.ResponseStreamEventUnion, cb types.LLMStreamCallback, outText *strings.Builder, completed **responses.Response) error {
+func (c *Client) onResponsesStreamEvent(ev responses.ResponseStreamEventUnion, cb types.LLMStreamCallback, outText *strings.Builder, completed **responses.Response, sawReasoningSummaryText *bool) error {
 	if cb == nil {
 		// Still track completion for final response mapping when desired.
 		switch e := ev.AsAny().(type) {
@@ -356,7 +374,43 @@ func (c *Client) onResponsesStreamEvent(ev responses.ResponseStreamEventUnion, c
 		return cb(types.LLMStreamChunk{Text: e.Delta})
 	case responses.ResponseReasoningSummaryTextDeltaEvent:
 		// Provider-supplied reasoning summary (safe to show).
+		if sawReasoningSummaryText != nil {
+			*sawReasoningSummaryText = true
+		}
 		return cb(types.LLMStreamChunk{IsReasoning: true, Text: e.Delta})
+	case responses.ResponseReasoningSummaryPartAddedEvent:
+		// Some providers emit summary parts instead of summary_text deltas.
+		if strings.TrimSpace(e.Part.Text) == "" {
+			return nil
+		}
+		if sawReasoningSummaryText != nil {
+			*sawReasoningSummaryText = true
+		}
+		return cb(types.LLMStreamChunk{IsReasoning: true, Text: e.Part.Text})
+	case responses.ResponseReasoningSummaryPartDoneEvent:
+		// Fallback: emit the part text only if we have not seen any summary deltas.
+		if sawReasoningSummaryText != nil && *sawReasoningSummaryText {
+			return nil
+		}
+		if strings.TrimSpace(e.Part.Text) == "" {
+			return nil
+		}
+		if sawReasoningSummaryText != nil {
+			*sawReasoningSummaryText = true
+		}
+		return cb(types.LLMStreamChunk{IsReasoning: true, Text: e.Part.Text})
+	case responses.ResponseReasoningSummaryTextDoneEvent:
+		// Fallback-only: some providers emit only the final completed summary text.
+		if sawReasoningSummaryText != nil && *sawReasoningSummaryText {
+			return nil
+		}
+		if strings.TrimSpace(e.Text) == "" {
+			return nil
+		}
+		if sawReasoningSummaryText != nil {
+			*sawReasoningSummaryText = true
+		}
+		return cb(types.LLMStreamChunk{IsReasoning: true, Text: e.Text})
 	case responses.ResponseReasoningTextDeltaEvent:
 		// Raw reasoning (never show): indicator only.
 		return cb(types.LLMStreamChunk{IsReasoning: true})
@@ -398,10 +452,11 @@ func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMReque
 
 	var outText strings.Builder
 	var completed *responses.Response
+	sawReasoningSummaryText := false
 
 	for stream.Next() {
 		ev := stream.Current()
-		if err := c.onResponsesStreamEvent(ev, cb, &outText, &completed); err != nil {
+		if err := c.onResponsesStreamEvent(ev, cb, &outText, &completed, &sawReasoningSummaryText); err != nil {
 			return types.LLMResponse{}, err
 		}
 	}

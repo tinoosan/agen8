@@ -128,6 +128,80 @@ func TestClient_buildResponseParams_MapsInstructionsJSONOnlyAndReasoningSummaryA
 	if format == nil || format["type"] != "json_object" {
 		t.Fatalf("expected text.format json_object, got %+v", txt["format"])
 	}
+
+	// Default: no previous_response_id.
+	if _, ok := m["previous_response_id"]; ok {
+		t.Fatalf("expected previous_response_id to be omitted, got %+v", m["previous_response_id"])
+	}
+}
+
+func TestClient_buildResponseParams_IncludesPreviousResponseIDAndDeltaOnlyInput(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli, DefaultMaxTokens: 123}
+
+	params, err := c.buildResponseParams(types.LLMRequest{
+		Model:              "openai/gpt-5.1-codex-mini",
+		System:             "system",
+		PreviousResponseID: "resp_123",
+		Messages: []types.LLMMessage{
+			{Role: "user", Content: "hi"},
+			{Role: "assistant", Content: "ok"},
+		},
+		JSONOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("buildResponseParams: %v", err)
+	}
+
+	b, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if m["previous_response_id"] != "resp_123" {
+		t.Fatalf("expected previous_response_id=resp_123, got %+v", m["previous_response_id"])
+	}
+
+	// Delta-only: input should contain only the newest message.
+	input, _ := m["input"].([]any)
+	if len(input) != 1 {
+		t.Fatalf("expected delta-only input length 1, got %d (input=%+v)", len(input), m["input"])
+	}
+	// Basic sanity: ensure the last message content appears somewhere in the input item JSON.
+	input0b, _ := json.Marshal(input[0])
+	if !strings.Contains(string(input0b), `"ok"`) {
+		t.Fatalf("expected input item to include last message content, got %s", string(input0b))
+	}
+}
+
+func TestClient_toResponseFromResponses_ExtractsResponseIDAndText(t *testing.T) {
+	resp := &responses.Response{
+		ID: "resp_123",
+		Output: []responses.ResponseOutputItemUnion{
+			{
+				Type: "message",
+				Content: []responses.ResponseOutputMessageContentUnion{
+					{Type: "output_text", Text: " ok "},
+				},
+			},
+		},
+	}
+
+	c := &Client{}
+	out, err := c.toResponseFromResponses(resp)
+	if err != nil {
+		t.Fatalf("toResponseFromResponses: %v", err)
+	}
+	if out.Text != "ok" {
+		t.Fatalf("unexpected text %q", out.Text)
+	}
+	if out.ResponseID != "resp_123" {
+		t.Fatalf("expected ResponseID resp_123, got %q", out.ResponseID)
+	}
 }
 
 func TestClient_onResponsesStreamEvent_ForwardsOutputTextDelta(t *testing.T) {
@@ -146,11 +220,12 @@ func TestClient_onResponsesStreamEvent_ForwardsOutputTextDelta(t *testing.T) {
 
 	var got string
 	var out strings.Builder
+	var saw bool
 	c := &Client{}
 	if err := c.onResponsesStreamEvent(ev, func(sc types.LLMStreamChunk) error {
 		got += sc.Text
 		return nil
-	}, &out, nil); err != nil {
+	}, &out, nil, &saw); err != nil {
 		t.Fatalf("onResponsesStreamEvent: %v", err)
 	}
 	if got != "hi" {
@@ -175,11 +250,12 @@ func TestClient_onResponsesStreamEvent_EmitsReasoningSummaryDelta(t *testing.T) 
 	}
 
 	var got []types.LLMStreamChunk
+	var saw bool
 	c := &Client{}
 	if err := c.onResponsesStreamEvent(ev, func(sc types.LLMStreamChunk) error {
 		got = append(got, sc)
 		return nil
-	}, nil, nil); err != nil {
+	}, nil, nil, &saw); err != nil {
 		t.Fatalf("onResponsesStreamEvent: %v", err)
 	}
 	if len(got) != 1 || !got[0].IsReasoning || got[0].Text != "summary" {
@@ -201,11 +277,12 @@ func TestClient_onResponsesStreamEvent_EmitsReasoningSignalForReasoningTextDelta
 	}
 
 	var got []types.LLMStreamChunk
+	var saw bool
 	c := &Client{}
 	if err := c.onResponsesStreamEvent(ev, func(sc types.LLMStreamChunk) error {
 		got = append(got, sc)
 		return nil
-	}, nil, nil); err != nil {
+	}, nil, nil, &saw); err != nil {
 		t.Fatalf("onResponsesStreamEvent: %v", err)
 	}
 	if len(got) != 1 || !got[0].IsReasoning || got[0].Text != "" {

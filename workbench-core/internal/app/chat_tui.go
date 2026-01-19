@@ -18,6 +18,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/workbench-core/internal/agent"
+	"github.com/tinoosan/workbench-core/internal/atref"
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/cost"
 	"github.com/tinoosan/workbench-core/internal/events"
@@ -164,9 +165,13 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 
 	sessionTitle := ""
 	sessionModel := ""
+	sessionReasoningEffort := ""
+	sessionReasoningSummary := ""
 	if sess, err := store.LoadSession(cfg, run.SessionID); err == nil {
 		sessionTitle = strings.TrimSpace(sess.Title)
 		sessionModel = strings.TrimSpace(sess.ActiveModel)
+		sessionReasoningEffort = strings.TrimSpace(sess.ReasoningEffort)
+		sessionReasoningSummary = strings.TrimSpace(sess.ReasoningSummary)
 	}
 
 	model := strings.TrimSpace(resolved.Model)
@@ -180,6 +185,14 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 		return fmt.Errorf("OPENROUTER_API_KEY and OPENROUTER_MODEL (or --model or session.activeModel) are required")
 	}
 	resolved.Model = model
+
+	// Session-scoped reasoning defaults: if the caller/env didn't set them, use the session.
+	if strings.TrimSpace(resolved.ReasoningEffort) == "" {
+		resolved.ReasoningEffort = sessionReasoningEffort
+	}
+	if strings.TrimSpace(resolved.ReasoningSummary) == "" {
+		resolved.ReasoningSummary = sessionReasoningSummary
+	}
 
 	// Resolve pricing against the effective model (session-aware).
 	//
@@ -1328,6 +1341,90 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			Console: boolp(false),
 		})
 		return resp, true
+	case "reasoning":
+		curEffort := strings.TrimSpace(r.opts.ReasoningEffort)
+		curSummary := strings.TrimSpace(r.opts.ReasoningSummary)
+
+		// `/reasoning` (no args): show current settings.
+		if strings.TrimSpace(arg) == "" {
+			out := "Reasoning:\n" +
+				"  effort:  " + defaultIfEmpty(curEffort, "(default)") + "\n" +
+				"  summary: " + defaultIfEmpty(curSummary, "(default)")
+			r.mustEmit(context.Background(), events.Event{
+				Type:    "reasoning.info",
+				Message: "Reasoning",
+				Data:    map[string]string{"text": out},
+				Console: boolp(false),
+			})
+			return out, true
+		}
+
+		fields := strings.Fields(arg)
+		if len(fields) < 2 {
+			return "Usage: /reasoning effort <none|minimal|low|medium|high|xhigh> OR /reasoning summary <off|auto|concise|detailed>", true
+		}
+
+		kind := strings.ToLower(strings.TrimSpace(fields[0]))
+		val := strings.ToLower(strings.TrimSpace(fields[1]))
+
+		applyAndPersist := func() {
+			// Apply to opts + live agent instance
+			r.opts.ReasoningEffort = strings.TrimSpace(curEffort)
+			r.opts.ReasoningSummary = strings.TrimSpace(curSummary)
+			if r.agent != nil {
+				r.agent.ReasoningEffort = strings.TrimSpace(curEffort)
+				r.agent.ReasoningSummary = strings.TrimSpace(curSummary)
+			}
+
+			// Persist to run + session state (best-effort)
+			if r.run.Runtime == nil {
+				r.run.Runtime = &types.RunRuntimeConfig{}
+			}
+			r.run.Runtime.ReasoningEffort = strings.TrimSpace(curEffort)
+			r.run.Runtime.ReasoningSummary = strings.TrimSpace(curSummary)
+			_ = store.SaveRun(r.cfg, r.run)
+
+			if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
+				sess.ReasoningEffort = strings.TrimSpace(curEffort)
+				sess.ReasoningSummary = strings.TrimSpace(curSummary)
+				_ = store.SaveSession(r.cfg, sess)
+			}
+		}
+
+		switch kind {
+		case "effort":
+			switch val {
+			case "none", "minimal", "low", "medium", "high", "xhigh":
+				curEffort = val
+				applyAndPersist()
+				r.mustEmit(context.Background(), events.Event{
+					Type:    "reasoning.changed",
+					Message: "Reasoning effort changed",
+					Data:    map[string]string{"effort": curEffort, "summary": curSummary},
+					Console: boolp(false),
+				})
+				return "", true
+			default:
+				return "Invalid effort. Use: none|minimal|low|medium|high|xhigh", true
+			}
+		case "summary":
+			switch val {
+			case "off", "auto", "concise", "detailed":
+				curSummary = val
+				applyAndPersist()
+				r.mustEmit(context.Background(), events.Event{
+					Type:    "reasoning.changed",
+					Message: "Reasoning summary changed",
+					Data:    map[string]string{"effort": curEffort, "summary": curSummary},
+					Console: boolp(false),
+				})
+				return "", true
+			default:
+				return "Invalid summary. Use: off|auto|concise|detailed", true
+			}
+		default:
+			return "Usage: /reasoning effort <...> OR /reasoning summary <...>", true
+		}
 	case "cd":
 		from := strings.TrimSpace(r.workdirBase)
 		if from == "" {
@@ -1407,6 +1504,14 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 	}
 }
 
+func defaultIfEmpty(v, fallback string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
 func splitSlashCommand(line string) (cmd string, arg string) {
 	line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "/"))
 	if line == "" {
@@ -1437,7 +1542,7 @@ func resolveWorkdirVPathFromArg(workdirBase, arg string) (vpath string, display 
 	// Prefer @token parsing (supports quoting).
 	ref := arg
 	if strings.HasPrefix(strings.TrimSpace(arg), "@") {
-		toks := ExtractAtRefs(arg)
+		toks := atref.ExtractAtRefs(arg)
 		if len(toks) == 0 {
 			return "", "", fmt.Errorf("invalid @reference")
 		}

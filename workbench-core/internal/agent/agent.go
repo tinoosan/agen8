@@ -70,6 +70,14 @@ type Config struct {
 	// Model is required. Example: "openai/gpt-5-mini" (via OpenRouter), etc.
 	Model string
 
+	// ReasoningEffort is an optional hint for reasoning-capable models.
+	// Examples: "none", "low", "medium", "high".
+	ReasoningEffort string
+
+	// ReasoningSummary controls whether and how providers should emit reasoning summaries.
+	// Examples: "off", "auto", "concise", "detailed".
+	ReasoningSummary string
+
 	// SystemPrompt is the base system prompt to pass to the model.
 	// If empty, the agent uses an internal default prompt.
 	SystemPrompt string
@@ -107,6 +115,8 @@ func New(cfg Config) (*Agent, error) {
 		LLM:          cfg.LLM,
 		Exec:         cfg.Exec,
 		Model:        cfg.Model,
+		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
+		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
 		SystemPrompt: system,
 		Context:      cfg.Context,
 		MaxSteps:     cfg.MaxSteps,

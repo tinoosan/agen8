@@ -91,6 +91,10 @@ type RunRuntimeConfig struct {
 	// Pricing configuration used to estimate per-turn cost (USD per 1M tokens).
 	PriceInPerMTokensUSD  float64 `json:"priceInPerMTokensUsd,omitempty"`
 	PriceOutPerMTokensUSD float64 `json:"priceOutPerMTokensUsd,omitempty"`
+
+	// Reasoning configuration (best-effort; provider/model dependent).
+	ReasoningEffort  string `json:"reasoningEffort,omitempty"`
+	ReasoningSummary string `json:"reasoningSummary,omitempty"`
 }
 
 // NewRun initializes a new Run instance with a unique ID and the given parameters.

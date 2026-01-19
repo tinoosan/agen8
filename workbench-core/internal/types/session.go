@@ -37,6 +37,10 @@ type Session struct {
 	// Example: "openai/gpt-5.2".
 	ActiveModel string `json:"activeModel,omitempty"`
 
+	// Reasoning settings are session-scoped so resume is deterministic.
+	ReasoningEffort  string `json:"reasoningEffort,omitempty"`
+	ReasoningSummary string `json:"reasoningSummary,omitempty"`
+
 	// CreatedAt is when the session was created.
 	CreatedAt *time.Time `json:"createdAt"`
 

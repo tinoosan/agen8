@@ -24,6 +24,29 @@ func (f *fakeLLM) Generate(ctx context.Context, req types.LLMRequest) (types.LLM
 	return out, nil
 }
 
+type fakeLLMChaining struct {
+	Replies []string
+	IDs     []string
+
+	SeenPreviousResponseIDs []string
+	i                      int
+}
+
+func (f *fakeLLMChaining) Generate(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
+	_ = ctx
+	f.SeenPreviousResponseIDs = append(f.SeenPreviousResponseIDs, req.PreviousResponseID)
+
+	if f.i >= len(f.Replies) {
+		return types.LLMResponse{Text: `{"op":"final","text":"no more replies"}`}, nil
+	}
+	out := types.LLMResponse{Text: f.Replies[f.i]}
+	if f.i < len(f.IDs) {
+		out.ResponseID = f.IDs[f.i]
+	}
+	f.i++
+	return out, nil
+}
+
 type fakeStreamingLLM struct {
 	Chunks []string
 	Final  string
@@ -99,6 +122,40 @@ func TestAgentLoopV0_Run_ExecutesOpsUntilFinal(t *testing.T) {
 	}
 	if len(called) != 1 || called[0].Op != types.HostOpFSList || called[0].Path != "/tools" {
 		t.Fatalf("unexpected calls: %+v", called)
+	}
+}
+
+func TestAgentLoopV0_Run_PropagatesPreviousResponseIDAcrossSteps(t *testing.T) {
+	llm := &fakeLLMChaining{
+		Replies: []string{
+			`{"op":"fs.list","path":"/tools"}`,
+			`{"op":"final","text":"done"}`,
+		},
+		IDs: []string{"resp_1", "resp_2"},
+	}
+
+	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		_ = ctx
+		_ = req
+		return types.HostOpResponse{Ok: true}
+	}
+
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	final, err := a.Run(context.Background(), "goal")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if final != "done" {
+		t.Fatalf("unexpected final %q", final)
+	}
+	if len(llm.SeenPreviousResponseIDs) < 2 {
+		t.Fatalf("expected at least 2 LLM calls, got %d", len(llm.SeenPreviousResponseIDs))
+	}
+	if llm.SeenPreviousResponseIDs[0] != "" {
+		t.Fatalf("expected first PreviousResponseID empty, got %q", llm.SeenPreviousResponseIDs[0])
+	}
+	if llm.SeenPreviousResponseIDs[1] != "resp_1" {
+		t.Fatalf("expected second PreviousResponseID resp_1, got %q", llm.SeenPreviousResponseIDs[1])
 	}
 }
 

@@ -34,6 +34,12 @@ type Agent struct {
 	// Model is required. Example: "openai/gpt-4o-mini" (via OpenRouter), etc.
 	Model string
 
+	// ReasoningEffort is an optional hint for reasoning-capable models.
+	ReasoningEffort string
+
+	// ReasoningSummary controls whether and how providers should emit reasoning summaries.
+	ReasoningSummary string
+
 	// SystemPrompt is the base system instructions passed to the model.
 	SystemPrompt string
 
@@ -91,6 +97,10 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 	// Copy the slice so the caller can keep their own version if needed.
 	msgs = append([]types.LLMMessage(nil), msgs...)
 
+	// Track the last Responses API response ID so we can preserve reasoning context
+	// across steps via previous_response_id.
+	var lastResponseID string
+
 	for step := 1; step <= maxSteps; step++ {
 		system := baseSystem
 		if a.Context != nil {
@@ -102,11 +112,14 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 		}
 
 		req := types.LLMRequest{
-			Model:     a.Model,
-			System:    system,
-			Messages:  msgs,
-			MaxTokens: 1024,
-			JSONOnly:  true,
+			Model:              a.Model,
+			System:             system,
+			Messages:           msgs,
+			MaxTokens:          1024,
+			JSONOnly:           true,
+			PreviousResponseID: lastResponseID,
+			ReasoningEffort:    strings.TrimSpace(a.ReasoningEffort),
+			ReasoningSummary:   strings.TrimSpace(a.ReasoningSummary),
 		}
 
 		var resp types.LLMResponse
@@ -145,6 +158,15 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 		if err != nil {
 			return "", nil, 0, err
 		}
+
+		// Update chaining state for next step. If we fell back to a provider path that
+		// doesn't return a Responses ID, clear the ID to avoid stale chaining later.
+		if strings.TrimSpace(resp.ResponseID) != "" {
+			lastResponseID = resp.ResponseID
+		} else {
+			lastResponseID = ""
+		}
+
 		if a.Hooks.OnLLMUsage != nil && resp.Usage != nil {
 			a.Hooks.OnLLMUsage(step, *resp.Usage)
 		}

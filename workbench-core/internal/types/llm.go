@@ -56,6 +56,8 @@ type LLMRequest struct {
 	Temperature        float64      // optional: sampling temperature
 	JSONOnly           bool         // optional: request JSON-only output (provider best-effort)
 	PreviousResponseID string       // optional: for Responses API reasoning context
+	ReasoningEffort    string       // optional: none|minimal|low|medium|high|xhigh (provider best-effort)
+	ReasoningSummary   string       // optional: off|auto|concise|detailed (provider best-effort)
 }
 
 // LLMMessage is a minimal chat message.
