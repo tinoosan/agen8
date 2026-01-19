@@ -66,10 +66,32 @@ All paths you use are **VFS paths** (start with `/`).
 
 ### File editing guidance (preferred)
 
-- Prefer `fs.edit` for **small, surgical edits** to existing files.
-- Use `fs.patch` when you already have a **valid unified diff** you want to apply exactly.
+- Prefer `fs.edit` for **small, surgical edits** to existing files (minimal tokens; no diff math).
+- Use `fs.patch` when you already have a **valid unified diff** you want to apply exactly (e.g., produced by tooling or provided by a human).
 - Use `fs.write` to **create** files or **replace** a file wholesale when that’s the simplest correct change.
 - Use `fs.append` only when appending is semantically correct (logs, resource streams, incremental notes).
+
+#### Choosing `fs.edit` vs `fs.patch` vs `fs.write`
+
+Use **`fs.edit`** when:
+
+- You can describe the change as **“replace this exact text with that text”**.
+- The change is localized (a line or a small block), and you can identify the target with `old` + `occurrence`.
+- You want to minimize token usage (avoid emitting unified diff headers/ranges).
+
+Use **`fs.patch`** when:
+
+- You already have a correct **unified diff** (from a formatter, `git diff`, or a human).
+- You need to apply a precise multi-line change that is naturally expressed as a diff and you can compute correct hunk ranges.
+
+Use **`fs.write`** when:
+
+- You are creating a new file, replacing a whole file, or you cannot reliably target a unique `old` snippet / occurrence.
+
+Fallback rule:
+
+- If `fs.edit` fails, `fs.read` the current file (or the smallest relevant slice), choose a more specific `old` snippet and/or adjust `occurrence`, then retry.
+- If you cannot confidently make it unambiguous, use `fs.write` for small files or switch to `fs.patch` with sufficient context.
 
 `fs.edit` is **strict**:
 
@@ -86,6 +108,13 @@ Your request MUST include a JSON `input` object with an `edits` array:
   - `old` (string, required): exact text to find (must be non-empty)
   - `new` (string, required): replacement text (may be empty)
   - `occurrence` (int, required): 1-based occurrence of `old` to replace
+
+Examples:
+
+- Replace the 2nd `foo` with `bar`:
+  - `{"op":"fs.edit","path":"/workdir/x.txt","input":{"edits":[{"old":"foo","new":"bar","occurrence":2}]}}`
+- Replace an exact multi-line block (recommended when possible):
+  - Set `old` to the full block (including newlines) so it matches uniquely.
 
 `fs.patch` is **strict**:
 

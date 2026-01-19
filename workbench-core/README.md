@@ -2,6 +2,17 @@
 
 Workbench Core is a local, agentic runtime that exposes an interactive CLI for running sessions, resuming previous runs, and inspecting the resulting artifacts. It is built around a virtual filesystem (VFS) model and stores scoped data in a configurable data directory.
 
+## AFS abstraction
+
+Workbench also exposes an Agentic File System (AFS) abstraction—the concrete VFS entries under `/tools`, `/workspace`, `/workdir`, `/memory`, `/trace`, and `/results`—that agents learn to discover and manipulate rather than assuming hidden APIs. Every command that touches project files works through this AFS surface, so tooling remains explicit, auditable, and reproducible.
+
+Each AFS mount has a clear role:
+
+- `/workdir` maps to the real project workspace and should host user-visible artifacts.
+- `/workspace` is temporary scratch space scoped to the run.
+- `/tools` exposes discoverable tool manifests and metadata.
+- `/trace`, `/results`, `/memory`, and `/profile` provide debugging, telemetry, and memory utilities.
+
 ## Quick start
 
 ```sh
