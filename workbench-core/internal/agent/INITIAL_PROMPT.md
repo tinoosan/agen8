@@ -51,6 +51,13 @@ Tool execution:
   - `{"op":"tool.run","toolId":"builtin.bash","actionId":"exec","input":{...},"timeoutMs":5000}`
   - `{"op":"tool.run","toolId":"builtin.trace","actionId":"events.summary","input":{"cursor":"0","limit":50,"maxBytes":8192}}`
 
+Batch operations (for parallel execution):
+
+- `batch(operations, parallel)`:
+  - Use batch when operations are **independent** (no conflicting writes; later ops must not depend on earlier results).
+  - Prefer `parallel:true` for multiple `fs.read` / `fs.list` requests.
+  - `{"op":"batch","parallel":true,"operations":[{"op":"fs.read","path":"/workdir/file1.txt","maxBytes":2048},{"op":"fs.read","path":"/workdir/file2.txt","maxBytes":2048}]}`
+
 ## 1) Your Only Assumed Capabilities (Host Primitives)
 
 You can request the host to perform **VFS operations**:

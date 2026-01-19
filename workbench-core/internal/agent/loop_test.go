@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/types"
 )
@@ -266,4 +267,172 @@ func TestAgentLoopV0_Run_ForwardsReasoningToHookAndDoesNotAffectOutput(t *testin
 	if !seenDone {
 		t.Fatalf("expected a done chunk, got %+v", reasoning)
 	}
+}
+
+func TestAgentLoopV0_RunConversation_BatchSequential_ExecutesOpsInOrder(t *testing.T) {
+	llm := &fakeLLM{
+		Replies: []string{
+			`{"op":"batch","operations":[{"op":"fs.read","path":"/a"},{"op":"fs.read","path":"/b"}]}`,
+			`{"op":"final","text":"done"}`,
+		},
+	}
+
+	var called []types.HostOpRequest
+	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		_ = ctx
+		called = append(called, req)
+		return types.HostOpResponse{Op: req.Op, Ok: true, Text: req.Path}
+	}
+
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	final, msgs, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if final != "done" {
+		t.Fatalf("unexpected final %q", final)
+	}
+	if len(called) != 2 {
+		t.Fatalf("expected 2 calls, got %d (%+v)", len(called), called)
+	}
+	if called[0].Op != types.HostOpFSRead || called[0].Path != "/a" {
+		t.Fatalf("unexpected call[0]: %+v", called[0])
+	}
+	if called[1].Op != types.HostOpFSRead || called[1].Path != "/b" {
+		t.Fatalf("unexpected call[1]: %+v", called[1])
+	}
+
+	br := mustParseBatchResponse(t, msgs)
+	if !br.Ok {
+		t.Fatalf("expected batch ok=true, got false (resp=%+v)", br)
+	}
+	if len(br.Results) != 2 {
+		t.Fatalf("expected 2 results, got %d (resp=%+v)", len(br.Results), br)
+	}
+	if br.Results[0].Op != types.HostOpFSRead || br.Results[0].Text != "/a" {
+		t.Fatalf("unexpected result[0]: %+v", br.Results[0])
+	}
+	if br.Results[1].Op != types.HostOpFSRead || br.Results[1].Text != "/b" {
+		t.Fatalf("unexpected result[1]: %+v", br.Results[1])
+	}
+}
+
+func TestAgentLoopV0_RunConversation_BatchParallel_PreservesResultOrder(t *testing.T) {
+	llm := &fakeLLM{
+		Replies: []string{
+			`{"op":"batch","parallel":true,"operations":[{"op":"fs.read","path":"/a"},{"op":"fs.read","path":"/b"}]}`,
+			`{"op":"final","text":"done"}`,
+		},
+	}
+
+	var called []types.HostOpRequest
+	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		_ = ctx
+		called = append(called, req)
+		return types.HostOpResponse{Op: req.Op, Ok: true, Text: req.Path}
+	}
+
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	final, msgs, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if final != "done" {
+		t.Fatalf("unexpected final %q", final)
+	}
+	if len(called) != 2 {
+		t.Fatalf("expected 2 calls, got %d (%+v)", len(called), called)
+	}
+
+	seen := map[string]bool{}
+	for _, c := range called {
+		seen[c.Path] = true
+	}
+	if !seen["/a"] || !seen["/b"] {
+		t.Fatalf("expected calls to /a and /b, got %+v", called)
+	}
+
+	br := mustParseBatchResponse(t, msgs)
+	if !br.Ok {
+		t.Fatalf("expected batch ok=true, got false (resp=%+v)", br)
+	}
+	if len(br.Results) != 2 {
+		t.Fatalf("expected 2 results, got %d (resp=%+v)", len(br.Results), br)
+	}
+	if br.Results[0].Text != "/a" {
+		t.Fatalf("expected result[0].text /a, got %+v", br.Results[0])
+	}
+	if br.Results[1].Text != "/b" {
+		t.Fatalf("expected result[1].text /b, got %+v", br.Results[1])
+	}
+}
+
+func TestAgentLoopV0_RunConversation_InvalidBatch_DoesNotExecuteOps(t *testing.T) {
+	llm := &fakeLLM{
+		Replies: []string{
+			`{"op":"batch","operations":[]}`,
+			`{"op":"final","text":"done"}`,
+		},
+	}
+
+	var called []types.HostOpRequest
+	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		_ = ctx
+		called = append(called, req)
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+	}
+
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	final, msgs, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if final != "done" {
+		t.Fatalf("unexpected final %q", final)
+	}
+	if len(called) != 0 {
+		t.Fatalf("expected no host calls, got %d (%+v)", len(called), called)
+	}
+
+	seenErr := false
+	for _, m := range msgs {
+		if m.Role == "user" && strings.HasPrefix(m.Content, "Your last JSON op was invalid:") {
+			seenErr = true
+			break
+		}
+	}
+	if !seenErr {
+		t.Fatalf("expected invalid-op error feedback in messages")
+	}
+}
+
+func mustParseBatchResponse(t *testing.T, msgs []types.LLMMessage) types.HostOpBatchResponse {
+	t.Helper()
+
+	const prefix = "HostOpBatchResponse:\n"
+	const suffix = "\n\nReturn the next HostOpRequest"
+
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m.Role != "user" {
+			continue
+		}
+		if !strings.HasPrefix(m.Content, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(m.Content, prefix)
+		end := strings.Index(rest, suffix)
+		if end < 0 {
+			end = len(rest)
+		}
+		raw := strings.TrimSpace(rest[:end])
+		var br types.HostOpBatchResponse
+		if err := json.Unmarshal([]byte(raw), &br); err != nil {
+			t.Fatalf("unmarshal HostOpBatchResponse: %v; raw=%q", err, raw)
+		}
+		return br
+	}
+
+	t.Fatalf("HostOpBatchResponse not found in messages")
+	return types.HostOpBatchResponse{}
 }

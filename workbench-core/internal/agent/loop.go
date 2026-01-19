@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/types"
@@ -175,6 +176,80 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 		if a.Hooks.Logf != nil {
 			a.Hooks.Logf("model -> host (step %d): %s", step, strings.TrimSpace(opJSON))
 		}
+
+		// Peek at op first so we can route batch requests before HostOpRequest validation.
+		var opHead struct {
+			Op string `json:"op"`
+		}
+		if err := json.Unmarshal([]byte(opJSON), &opHead); err != nil {
+			// Feed the parse error back to the model as a user message and keep going.
+			msgs = append(msgs,
+				types.LLMMessage{Role: "assistant", Content: resp.Text},
+				types.LLMMessage{Role: "user", Content: "Your last message was not valid JSON for the required schema. Error: " + err.Error() + ". Return ONLY one JSON object."},
+			)
+			continue
+		}
+
+		if strings.TrimSpace(opHead.Op) == types.HostOpBatch {
+			var batchReq types.HostOpBatchRequest
+			if err := json.Unmarshal([]byte(opJSON), &batchReq); err != nil {
+				msgs = append(msgs,
+					types.LLMMessage{Role: "assistant", Content: resp.Text},
+					types.LLMMessage{Role: "user", Content: "Your last JSON op was not valid JSON for the required schema. Error: " + err.Error() + ". Return ONLY one JSON object."},
+				)
+				continue
+			}
+			if err := batchReq.Validate(); err != nil {
+				msgs = append(msgs,
+					types.LLMMessage{Role: "assistant", Content: resp.Text},
+					types.LLMMessage{Role: "user", Content: "Your last JSON op was invalid: " + err.Error() + ". Return ONLY one corrected JSON object."},
+				)
+				continue
+			}
+
+			if a.Hooks.Logf != nil {
+				a.Hooks.Logf("executing batch (step %d): ops=%d parallel=%v", step, len(batchReq.Operations), batchReq.Parallel)
+			}
+
+			results := make([]types.HostOpResponse, len(batchReq.Operations))
+			if batchReq.Parallel {
+				var wg sync.WaitGroup
+				wg.Add(len(batchReq.Operations))
+				for i, sub := range batchReq.Operations {
+					i, sub := i, sub
+					go func() {
+						defer wg.Done()
+						results[i] = a.Exec.Exec(ctx, sub)
+					}()
+				}
+				wg.Wait()
+			} else {
+				for i, sub := range batchReq.Operations {
+					results[i] = a.Exec.Exec(ctx, sub)
+				}
+			}
+
+			okAll := true
+			for _, r := range results {
+				if !r.Ok {
+					okAll = false
+					break
+				}
+			}
+			batchResp := types.HostOpBatchResponse{Ok: okAll, Results: results}
+			batchRespJSON, _ := jsonutil.MarshalPretty(batchResp)
+
+			msgs = append(msgs,
+				types.LLMMessage{Role: "assistant", Content: opJSON},
+				types.LLMMessage{
+					Role: "user",
+					Content: "HostOpBatchResponse:\n" + string(batchRespJSON) +
+						"\n\nReturn the next HostOpRequest as ONE JSON object (or {\"op\":\"final\",\"text\":\"...\"}).",
+				},
+			)
+			continue
+		}
+
 		var op types.HostOpRequest
 		if err := json.Unmarshal([]byte(opJSON), &op); err != nil {
 			// Feed the parse error back to the model as a user message and keep going.
