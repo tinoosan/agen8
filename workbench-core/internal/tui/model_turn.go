@@ -124,7 +124,8 @@ func (m *Model) formatThinkingText() string {
 	if !m.thinkingExpanded {
 		return header + "  " + "summary available (Ctrl+Y)"
 	}
-	return header + "\n\nSummary:\n" + summary
+	// Note: summary is rendered as markdown in the transcript renderer.
+	return header + "\n\n" + summary
 }
 
 func (m *Model) updateThinkingTranscriptItem() {

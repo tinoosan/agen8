@@ -7,6 +7,19 @@ import (
 	"github.com/muesli/reflow/wordwrap"
 )
 
+func splitThinkingText(s string) (header string, summary string) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", ""
+	}
+	parts := strings.SplitN(s, "\n\n", 2)
+	header = strings.TrimSpace(parts[0])
+	if len(parts) == 2 {
+		summary = strings.TrimSpace(parts[1])
+	}
+	return header, summary
+}
+
 func (m *Model) addTranscriptItem(it transcriptItem) {
 	wasAtBottom := m.transcript.AtBottom()
 	wasEmpty := len(m.transcriptItems) == 0
@@ -88,8 +101,31 @@ func (m *Model) rebuildTranscript() {
 			lines = append(lines, m.styleAgentBox.Render(body))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptThinking:
-			// Thinking indicator + optional summary (dimmed).
-			lines = append(lines, m.styleDim.Render(wrapText(strings.TrimSpace(it.text), max(20, w-4))))
+			// Thinking indicator + optional summary (dimmed + subtle gutter).
+			innerW := max(20, w-4) // 2 for gutter + 1 space + 1 margin
+			header, summary := splitThinkingText(it.text)
+			header = wrapText(strings.TrimSpace(header), innerW)
+
+			rendered := strings.TrimSpace(header)
+			if strings.TrimSpace(summary) != "" && m.renderer != nil {
+				mdW := max(20, w-6) // account for gutter + space + a touch of margin
+				md := strings.Trim(m.renderer.RenderMarkdown(summary, mdW), "\n")
+				if md != "" {
+					rendered = strings.TrimSpace(rendered) + "\n\n" + md
+				}
+			}
+			rendered = strings.TrimRight(rendered, "\n")
+			h := 1
+			if rendered != "" {
+				h = 1 + strings.Count(rendered, "\n")
+			}
+			gutterLines := make([]string, 0, h)
+			for i := 0; i < h; i++ {
+				gutterLines = append(gutterLines, "│")
+			}
+			gutter := m.styleDim.Render(strings.Join(gutterLines, "\n"))
+			body := m.styleDim.Render(rendered)
+			lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, gutter, " ", body))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptError:
 			lines = append(lines, m.styleError.Render(wrapText(it.text, max(20, w-4))))
