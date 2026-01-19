@@ -47,3 +47,10 @@ go.mod          # module definition and dependencies
 ```
 
 You can inspect `internal/app` for the runtime orchestration (chat sessions, TUI hooks) and `internal/store` for how sessions/runs/history are persisted.
+
+## Advantages
+
+- **Control:** Runs entirely locally with configurable `dataDir`/`workdir`, so nothing depends on external services.
+- **Transparency:** Every session and run is stored in the data directory, and you can inspect history, artifacts, or metadata via the CLI commands.
+- **Reproducibility:** Sessions create structured state (`session`, `run`, `/workspace`, `/history`), making it easy to resume, replay, or audit work.
+- **Explicit tooling:** Agents discover tools through the `/tools` virtual filesystem and call them via `tool.run`, so integrations are clear instead of hidden behind prompts.
