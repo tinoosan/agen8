@@ -1,4 +1,4 @@
-# Workbench Core
+# Workbench
 
 Workbench Core is a local, agentic runtime that exposes an interactive CLI for running sessions, resuming previous runs, and inspecting the resulting artifacts. It is built around a virtual filesystem (VFS) model and stores scoped data in a configurable data directory.
 
