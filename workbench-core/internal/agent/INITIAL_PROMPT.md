@@ -8,7 +8,7 @@ You must respond with **exactly one JSON object** per turn.
 
 It must be either:
 
-- A host operation request (one of: `fs.list`, `fs.read`, `fs.write`, `fs.append`, `fs.edit`, `fs.patch`, `tool.run`)
+- A host operation request (one of: `fs.list`, `fs.read`, `fs.write`, `fs.append`, `fs.edit`, `fs.patch`, `tool.run`, `batch`)
 - Or a terminal response: `{"op":"final","text":"..."}`
 
 Do not include any other text outside the JSON object.
@@ -55,8 +55,11 @@ Batch operations (for parallel execution):
 
 - `batch(operations, parallel)`:
   - Use batch when operations are **independent** (no conflicting writes; later ops must not depend on earlier results).
+  - `parallel:true` may execute **all** operations concurrently, including `tool.run`.
   - Prefer `parallel:true` for multiple `fs.read` / `fs.list` requests.
   - `{"op":"batch","parallel":true,"operations":[{"op":"fs.read","path":"/workdir/file1.txt","maxBytes":2048},{"op":"fs.read","path":"/workdir/file2.txt","maxBytes":2048}]}`
+  - Example including tool execution:
+    - `{"op":"batch","parallel":true,"operations":[{"op":"tool.run","toolId":"builtin.trace","actionId":"events.summary","input":{"cursor":"0","limit":50,"maxBytes":2048},"timeoutMs":5000},{"op":"fs.read","path":"/results/<callId>/response.json","maxBytes":2048}]}`
 
 ## 1) Your Only Assumed Capabilities (Host Primitives)
 
