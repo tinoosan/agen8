@@ -203,10 +203,10 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 			// Back-compat: accept both op:"fs.batch" and op:"batch", and accept both
 			// field names "operations" (preferred) and "ops" (common model mistake).
 			var batchCompat struct {
-				Op         string              `json:"op"`
+				Op         string                `json:"op"`
 				Operations []types.HostOpRequest `json:"operations"`
 				Ops        []types.HostOpRequest `json:"ops"`
-				Parallel   bool                `json:"parallel,omitempty"`
+				Parallel   bool                  `json:"parallel,omitempty"`
 			}
 			if err := json.Unmarshal([]byte(opJSON), &batchCompat); err != nil {
 				msgs = append(msgs,
