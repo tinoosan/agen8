@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tinoosan/workbench-core/internal/atref"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
@@ -265,7 +266,7 @@ func TestResolveAtRefs_Ambiguous(t *testing.T) {
 func TestExtractAtRefs_Quoted(t *testing.T) {
 	t.Parallel()
 
-	got := ExtractAtRefs(`please open @"my file.md" and @‘notes one.md’ and @cmd/main.go`)
+	got := atref.ExtractAtRefs(`please open @"my file.md" and @‘notes one.md’ and @cmd/main.go`)
 	if len(got) != 3 {
 		t.Fatalf("got %d tokens, want %d (%v)", len(got), 3, got)
 	}

@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/tinoosan/workbench-core/internal/agent"
+	"github.com/tinoosan/workbench-core/internal/atref"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
@@ -28,117 +28,6 @@ type RefResolution struct {
 	Ambiguous map[string][]string
 }
 
-// ExtractAtRefs finds @tokens inside free-form user input.
-//
-// Supported forms:
-//   - Unquoted: @path/to/file.txt
-//   - Quoted:   @"my file.md"  or @'my file.md'
-//   - Smart quotes: @“my file.md” or @‘my file.md’
-//
-// Unquoted tokens are conservative: "@<path-like>" where <path-like> contains only
-// letters/digits plus "._-/".
-func ExtractAtRefs(userText string) []string {
-	userText = strings.ReplaceAll(userText, "\r", "")
-	out := make([]string, 0)
-	seen := map[string]bool{}
-
-	isTokChar := func(r rune) bool {
-		switch {
-		case r >= 'a' && r <= 'z':
-			return true
-		case r >= 'A' && r <= 'Z':
-			return true
-		case r >= '0' && r <= '9':
-			return true
-		case strings.ContainsRune("._-/", r):
-			return true
-		default:
-			return false
-		}
-	}
-
-	for i := 0; i < len(userText); i++ {
-		if userText[i] != '@' {
-			continue
-		}
-		j := i + 1
-		if j >= len(userText) {
-			continue
-		}
-
-		// Quoted token: @"..." / @'...' / @“...” / @‘...’
-		if tok, end, ok := consumeAtQuotedToken(userText, j); ok {
-			if tok != "" && !seen[tok] {
-				seen[tok] = true
-				out = append(out, tok)
-			}
-			i = end - 1
-			continue
-		}
-
-		// Unquoted token.
-		for j < len(userText) {
-			r := rune(userText[j])
-			if !isTokChar(r) {
-				break
-			}
-			j++
-		}
-		if j == i+1 {
-			continue
-		}
-		tok := strings.TrimSpace(userText[i+1 : j])
-		if tok == "" {
-			continue
-		}
-		if !seen[tok] {
-			seen[tok] = true
-			out = append(out, tok)
-		}
-		i = j - 1
-	}
-	return out
-}
-
-func consumeAtQuotedToken(s string, start int) (tok string, end int, ok bool) {
-	if start >= len(s) {
-		return "", start, false
-	}
-	open, openSize := utf8.DecodeRuneInString(s[start:])
-	if open == utf8.RuneError && openSize == 1 {
-		return "", start, false
-	}
-	close := rune(0)
-	switch open {
-	case '"':
-		close = '"'
-	case '\'':
-		close = '\''
-	case '“':
-		close = '”'
-	case '‘':
-		close = '’'
-	default:
-		return "", start, false
-	}
-	// Allow optional @<quote> with no whitespace. start points at the quote.
-	i := start + openSize
-	for i < len(s) {
-		r, size := utf8.DecodeRuneInString(s[i:])
-		if r == utf8.RuneError && size == 1 {
-			i++
-			continue
-		}
-		if r == close {
-			raw := s[start+openSize : i]
-			return strings.TrimSpace(raw), i + size, true
-		}
-		i += size
-	}
-	// No closing quote; treat as not-a-token.
-	return "", start, false
-}
-
 // ResolveAtRefs resolves @tokens to bounded file attachments.
 //
 // Resolution order:
@@ -149,7 +38,7 @@ func ResolveAtRefs(fsys *vfs.FS, workdirBase string, artifacts *ArtifactIndex, u
 	if fsys == nil {
 		return RefResolution{}, fmt.Errorf("fs is required")
 	}
-	tokens := ExtractAtRefs(userText)
+	tokens := atref.ExtractAtRefs(userText)
 	if len(tokens) == 0 {
 		return RefResolution{}, nil
 	}
