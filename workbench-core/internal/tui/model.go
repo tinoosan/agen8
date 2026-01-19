@@ -111,12 +111,12 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 		helpViewport:   helpVp,
 		// Default: start with the activity panel closed. Users can toggle it with
 		// Ctrl+A, or enable it by default via WORKBENCH_ACTIVITY/--activity.
-		showDetails:       false,
-		activityIndexByID: map[string]int{},
+		showDetails:         false,
+		activityIndexByID:   map[string]int{},
 		activityIndexByOpID: map[string]int{},
-		single:            single,
-		multiline:         multi,
-		editorBuf:         editor,
+		single:              single,
+		multiline:           multi,
+		editorBuf:           editor,
 
 		styleHeaderBar: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#c0c0c0")),

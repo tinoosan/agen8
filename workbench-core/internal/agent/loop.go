@@ -118,6 +118,7 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 			Messages:           msgs,
 			MaxTokens:          1024,
 			JSONOnly:           true,
+			ResponseSchema:     hostOpResponseSchema(),
 			PreviousResponseID: lastResponseID,
 			ReasoningEffort:    strings.TrimSpace(a.ReasoningEffort),
 			ReasoningSummary:   strings.TrimSpace(a.ReasoningSummary),
@@ -172,7 +173,14 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 			a.Hooks.OnLLMUsage(step, *resp.Usage)
 		}
 
-		opJSON := extractJSONObject(resp.Text)
+		opJSON, err := extractSingleJSONObject(resp.Text)
+		if err != nil {
+			msgs = append(msgs,
+				types.LLMMessage{Role: "assistant", Content: resp.Text},
+				types.LLMMessage{Role: "user", Content: "Your last message was not valid JSON for the required schema. Error: " + err.Error() + ". Return ONLY one JSON object."},
+			)
+			continue
+		}
 		if a.Hooks.Logf != nil {
 			a.Hooks.Logf("model -> host (step %d): %s", step, strings.TrimSpace(opJSON))
 		}
@@ -334,21 +342,6 @@ Always:
   - Use small reads (maxBytes) unless you need more.
   - If a host op fails (ok=false), recover and try a different op or return final with an explanation.
 `)
-}
-
-func extractJSONObject(s string) string {
-	trim := strings.TrimSpace(s)
-	trim = strings.TrimPrefix(trim, "```json")
-	trim = strings.TrimPrefix(trim, "```")
-	trim = strings.TrimSuffix(trim, "```")
-	trim = strings.TrimSpace(trim)
-
-	start := strings.Index(trim, "{")
-	end := strings.LastIndex(trim, "}")
-	if start >= 0 && end >= 0 && end > start {
-		return trim[start : end+1]
-	}
-	return trim
 }
 
 func validateModelOp(op types.HostOpRequest) error {

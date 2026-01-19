@@ -55,9 +55,31 @@ type LLMRequest struct {
 	MaxTokens          int          // optional: max output tokens
 	Temperature        float64      // optional: sampling temperature
 	JSONOnly           bool         // optional: request JSON-only output (provider best-effort)
+	// ResponseSchema optionally requests Structured Outputs. When set, providers that
+	// support it should constrain output to exactly match the schema.
+	//
+	// Notes:
+	// - Only a subset of JSON Schema is supported in strict mode (provider-specific).
+	// - When ResponseSchema is set, clients should prefer json_schema over json_object.
+	ResponseSchema      *LLMResponseSchema
 	PreviousResponseID string       // optional: for Responses API reasoning context
 	ReasoningEffort    string       // optional: none|minimal|low|medium|high|xhigh (provider best-effort)
 	ReasoningSummary   string       // optional: off|auto|concise|detailed (provider best-effort)
+}
+
+// LLMResponseSchema describes a Structured Outputs schema request.
+//
+// Schema should be a JSON Schema object represented as a Go value suitable for
+// JSON serialization (commonly `map[string]any`).
+type LLMResponseSchema struct {
+	// Name is a short identifier for the schema (provider constraints apply).
+	Name string
+	// Schema is the JSON Schema object for the response format.
+	Schema map[string]any
+	// Strict requests strict schema adherence when supported.
+	Strict bool
+	// Description is optional provider-facing guidance for the schema.
+	Description string
 }
 
 // LLMMessage is a minimal chat message.

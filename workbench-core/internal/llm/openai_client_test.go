@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"errors"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -63,6 +64,51 @@ func TestClient_buildParams_MapsSystemMessagesJSONOnly(t *testing.T) {
 	}
 	if _, ok := m["max_tokens"]; !ok {
 		t.Fatalf("expected max_tokens to be set from default")
+	}
+}
+
+func TestClient_buildParams_UsesJSONSchemaWhenProvided(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli, DefaultMaxTokens: 123}
+
+	params, err := c.buildParams(types.LLMRequest{
+		Model:    "openai/gpt-4o-mini",
+		System:   "system",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
+		JSONOnly: true,
+		ResponseSchema: &types.LLMResponseSchema{
+			Name:   "test_schema",
+			Strict: true,
+			Schema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"op": map[string]any{"type": "string"},
+				},
+				"required": []any{"op"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildParams: %v", err)
+	}
+
+	b, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	rf, _ := m["response_format"].(map[string]any)
+	if rf == nil || rf["type"] != "json_schema" {
+		t.Fatalf("expected response_format json_schema, got %+v", m["response_format"])
+	}
+	js, _ := rf["json_schema"].(map[string]any)
+	if js == nil || js["name"] != "test_schema" {
+		t.Fatalf("expected response_format.json_schema.name=test_schema, got %+v", js)
 	}
 }
 
@@ -132,6 +178,54 @@ func TestClient_buildResponseParams_MapsInstructionsJSONOnlyAndReasoningSummaryA
 	// Default: no previous_response_id.
 	if _, ok := m["previous_response_id"]; ok {
 		t.Fatalf("expected previous_response_id to be omitted, got %+v", m["previous_response_id"])
+	}
+}
+
+func TestClient_buildResponseParams_UsesJSONSchemaWhenProvided(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli, DefaultMaxTokens: 123}
+
+	params, err := c.buildResponseParams(types.LLMRequest{
+		Model:    "openai/gpt-5.1-codex-mini",
+		System:   "system",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
+		JSONOnly: true,
+		ResponseSchema: &types.LLMResponseSchema{
+			Name:   "test_schema",
+			Strict: true,
+			Schema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"op": map[string]any{"type": "string"},
+				},
+				"required": []any{"op"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildResponseParams: %v", err)
+	}
+
+	b, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	txt, _ := m["text"].(map[string]any)
+	if txt == nil {
+		t.Fatalf("expected text config")
+	}
+	format, _ := txt["format"].(map[string]any)
+	if format == nil || format["type"] != "json_schema" {
+		t.Fatalf("expected text.format json_schema, got %+v", txt["format"])
+	}
+	if format["name"] != "test_schema" {
+		t.Fatalf("expected text.format.name=test_schema, got %+v", format["name"])
 	}
 }
 
@@ -354,5 +448,27 @@ func TestShouldFallbackToChat_ResponsesNotFound(t *testing.T) {
 	apierr := &openai.Error{StatusCode: http.StatusNotFound}
 	if !shouldFallbackToChat(apierr) {
 		t.Fatalf("expected fallback")
+	}
+}
+
+func TestShouldFallbackFromJSONSchema(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "plain_string_match", err: &openai.Error{StatusCode: 400, Message: "unsupported response_format json_schema"}, want: true},
+		{name: "plain_errors_new", err: errors.New("response_format json_schema not supported"), want: true},
+		{name: "other_error", err: errors.New("timeout"), want: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldFallbackFromJSONSchema(tt.err); got != tt.want {
+				t.Fatalf("want %v got %v", tt.want, got)
+			}
+		})
 	}
 }

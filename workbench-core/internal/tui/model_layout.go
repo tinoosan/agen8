@@ -39,7 +39,10 @@ func (m *Model) layout() {
 		footerH = 1
 	}
 
-	bodyH := m.height - headerH - footerH
+	// View() inserts explicit newline separators:
+	//   header + "\n" + body + "\n" + input
+	// Account for those 2 rows here so the rendered view never exceeds terminal bounds.
+	bodyH := m.height - headerH - footerH - 2
 	if bodyH < 1 {
 		bodyH = 1
 	}
@@ -72,17 +75,63 @@ func (m *Model) layout() {
 		m.activityList.SetWidth(max(24, innerW))
 
 		// Split the inner height between list and details.
-		// Prefer showing more activity rows; details can be scrolled as needed.
-		listH := int(math.Round(float64(innerH) * 0.70))
-		listH = max(6, listH)
+		//
+		// Prefer showing more activity rows, but keep Details usable on small terminals
+		// via an adaptive split + minimum heights.
+		const (
+			minListH    = 6
+			minDetailH  = 6
+			largeDetail = 0.30
+			smallDetail = 0.45
+		)
+		detailFrac := largeDetail
+		if innerH < 18 {
+			detailFrac = smallDetail
+		}
+		detailH := int(math.Round(float64(innerH) * detailFrac))
+		if detailH < minDetailH {
+			detailH = minDetailH
+		}
+		// Ensure list keeps a minimum when possible.
+		if innerH-detailH < minListH {
+			detailH = max(1, innerH-minListH)
+		}
+		listH := innerH - detailH
+		if listH < minListH {
+			listH = max(1, innerH-minDetailH)
+			detailH = max(1, innerH-listH)
+		}
+		// Final clamp: ensure Details has at least 1 row.
 		if listH > innerH-1 {
 			listH = max(1, innerH-1)
+			detailH = max(1, innerH-listH)
 		}
-		m.activityList.SetHeight(listH)
+
+		// bubbles/list renders a small chrome header (title + spacer) above the items.
+		// `SetHeight` controls the list viewport, but the rendered View() includes that chrome.
+		// Account for it so list+details never exceed the pane height (critical for small terminals).
+		listChromeH := 0
+		if strings.TrimSpace(m.activityList.Title) != "" {
+			listChromeH = 2
+		}
+		m.activityList.SetHeight(max(1, listH-listChromeH))
 
 		m.activityDetail.Width = max(24, innerW)
 		// No extra divider line between list + detail; keep the right pane height exact.
-		m.activityDetail.Height = max(1, innerH-listH)
+		m.activityDetail.Height = max(1, detailH)
+
+		// Defensive clamp: bubbles/list (and viewport) can render slightly taller than the
+		// nominal heights due to internal chrome/newlines. Ensure the combined right pane
+		// content never exceeds innerH, otherwise the overall View can exceed terminal
+		// bounds (see TestLayout_WithCommandPalette_ViewNeverExceedsTerminalBounds).
+		for i := 0; i < 4; i++ {
+			total := lipgloss.Height(m.activityList.View()) + lipgloss.Height(m.activityDetail.View())
+			if total <= innerH {
+				break
+			}
+			over := total - innerH
+			m.activityList.SetHeight(max(1, m.activityList.Height()-over))
+		}
 	}
 
 	// Model picker sizing: ensure the underlying list model has a real viewport so
@@ -201,12 +250,23 @@ func (m Model) renderBody() string {
 	// If the right pane is taller, Bubble Tea will clip the top of the overall view,
 	// which makes the header appear to "disappear" when Activity is toggled.
 	rightBody := lipgloss.JoinVertical(lipgloss.Top, m.activityList.View(), m.activityDetail.View())
-	rightPane := lipgloss.NewStyle().
+	rightPaneStyle := lipgloss.NewStyle().
 		Width(rightW).
-		Height(rightH).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#303030")).
-		Render(rightBody)
+		Height(rightH)
+	// On very small terminals, the border itself can make the right pane taller than the
+	// transcript (since the transcript can shrink below the 2-line border budget). In that
+	// case, render borderless to guarantee the overall View never exceeds terminal bounds.
+	if m.transcript.Height >= 4 {
+		rightPaneStyle = rightPaneStyle.
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#303030"))
+	} else {
+		// Borderless: use the full outer width/height budget.
+		rightPaneStyle = lipgloss.NewStyle().
+			Width(rightW + 2).
+			Height(max(1, m.transcript.Height))
+	}
+	rightPane := rightPaneStyle.Render(rightBody)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, m.transcript.View(), rightPane)
 }

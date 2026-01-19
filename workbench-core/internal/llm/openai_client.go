@@ -104,7 +104,21 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 	if req.Temperature != 0 {
 		params.Temperature = openai.Float(req.Temperature)
 	}
-	if req.JSONOnly {
+	if sch := req.ResponseSchema; sch != nil && strings.TrimSpace(sch.Name) != "" && sch.Schema != nil {
+		schemaParam := openai.ResponseFormatJSONSchemaJSONSchemaParam{
+			Name:   strings.TrimSpace(sch.Name),
+			Schema: sch.Schema,
+		}
+		if strings.TrimSpace(sch.Description) != "" {
+			schemaParam.Description = openai.String(strings.TrimSpace(sch.Description))
+		}
+		if sch.Strict {
+			schemaParam.Strict = openai.Bool(true)
+		}
+		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{JSONSchema: schemaParam},
+		}
+	} else if req.JSONOnly {
 		rf := shared.NewResponseFormatJSONObjectParam()
 		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONObject: &rf,
@@ -175,7 +189,23 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	if req.Temperature != 0 {
 		params.Temperature = openai.Float(req.Temperature)
 	}
-	if req.JSONOnly {
+	if sch := req.ResponseSchema; sch != nil && strings.TrimSpace(sch.Name) != "" && sch.Schema != nil {
+		js := responses.ResponseFormatTextJSONSchemaConfigParam{
+			Name:   strings.TrimSpace(sch.Name),
+			Schema: sch.Schema,
+		}
+		if sch.Strict {
+			js.Strict = openai.Bool(true)
+		}
+		if strings.TrimSpace(sch.Description) != "" {
+			js.Description = openai.String(strings.TrimSpace(sch.Description))
+		}
+		params.Text = responses.ResponseTextConfigParam{
+			Format: responses.ResponseFormatTextConfigUnionParam{
+				OfJSONSchema: &js,
+			},
+		}
+	} else if req.JSONOnly {
 		rf := shared.NewResponseFormatJSONObjectParam()
 		params.Text = responses.ResponseTextConfigParam{
 			Format: responses.ResponseFormatTextConfigUnionParam{
@@ -270,6 +300,18 @@ func (c *Client) Generate(ctx context.Context, req types.LLMRequest) (types.LLMR
 		return types.LLMResponse{}, fmt.Errorf("llm client is nil")
 	}
 
+	out, err := c.generateOnce(ctx, req)
+	if err != nil && req.ResponseSchema != nil && shouldFallbackFromJSONSchema(err) {
+		// Provider/model rejected json_schema (unsupported/invalid). Fall back to JSON object mode.
+		req2 := req
+		req2.ResponseSchema = nil
+		req2.JSONOnly = true
+		return c.generateOnce(ctx, req2)
+	}
+	return out, err
+}
+
+func (c *Client) generateOnce(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
 	// Prefer Responses API (enables reasoning summaries) and fall back to Chat Completions.
 	if out, err := c.generateResponses(ctx, req); err == nil {
 		return out, nil
@@ -429,6 +471,18 @@ func (c *Client) GenerateStream(ctx context.Context, req types.LLMRequest, cb ty
 	if c == nil || c.client == nil {
 		return types.LLMResponse{}, fmt.Errorf("llm client is nil")
 	}
+
+	out, err := c.generateStreamOnce(ctx, req, cb)
+	if err != nil && req.ResponseSchema != nil && shouldFallbackFromJSONSchema(err) {
+		req2 := req
+		req2.ResponseSchema = nil
+		req2.JSONOnly = true
+		return c.generateStreamOnce(ctx, req2, cb)
+	}
+	return out, err
+}
+
+func (c *Client) generateStreamOnce(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
 	// Prefer Responses API (enables reasoning summaries) and fall back to Chat Completions.
 	if out, err := c.generateStreamResponses(ctx, req, cb); err == nil {
 		return out, nil
@@ -533,6 +587,42 @@ func shouldFallbackToChat(err error) bool {
 	default:
 		return false
 	}
+}
+
+func shouldFallbackFromJSONSchema(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Prefer structured inspection of OpenAI-compatible API errors.
+	var apierr *openai.Error
+	if errors.As(err, &apierr) {
+		switch apierr.StatusCode {
+		case 400, 404, 422:
+			// Likely: provider doesn't support json_schema, or rejected strict/schema subset.
+		default:
+			return false
+		}
+		// Avoid calling apierr.Error() here: it depends on Request/Response being non-nil.
+		msg := strings.ToLower(strings.TrimSpace(apierr.Message))
+		param := strings.ToLower(strings.TrimSpace(apierr.Param))
+		typ := strings.ToLower(strings.TrimSpace(apierr.Type))
+		raw := strings.ToLower(strings.TrimSpace(apierr.RawJSON()))
+		s := msg + " " + param + " " + typ + " " + raw
+		return strings.Contains(s, "json_schema") ||
+			strings.Contains(s, "response_format") ||
+			strings.Contains(s, "structured") ||
+			strings.Contains(s, "schema") ||
+			strings.Contains(s, "strict")
+	}
+
+	// Fallback: conservative string matching.
+	s := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(s, "json_schema") ||
+		strings.Contains(s, "response_format") ||
+		strings.Contains(s, "structured") ||
+		strings.Contains(s, "schema") ||
+		strings.Contains(s, "strict")
 }
 
 func extraString(fields map[string]respjson.Field, key string) (string, bool) {
