@@ -187,6 +187,7 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		if op == "" {
 			return
 		}
+		opID := strings.TrimSpace(ev.Data["opId"])
 		m.activitySeq++
 		id := fmt.Sprintf("act-%d", m.activitySeq)
 		now := time.Now()
@@ -218,9 +219,17 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 			act.Title = renderOpRequest(ev.Data)
 		}
 
-		m.pendingActivityID = id
 		m.activities = append(m.activities, act)
 		m.activityIndexByID[id] = len(m.activities) - 1
+		if opID != "" {
+			if m.activityIndexByOpID == nil {
+				m.activityIndexByOpID = map[string]int{}
+			}
+			m.activityIndexByOpID[opID] = len(m.activities) - 1
+		} else {
+			// Back-compat: older hosts don't emit opId; use the old single-inflight behavior.
+			m.pendingActivityID = id
+		}
 		m.refreshActivityList()
 		m.activityList.Select(len(m.activities) - 1)
 		m.refreshActivityDetail()
@@ -229,7 +238,16 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		if strings.TrimSpace(ev.Data["op"]) == "" {
 			return
 		}
-		idx, ok := m.activityIndexByID[m.pendingActivityID]
+		opID := strings.TrimSpace(ev.Data["opId"])
+		idx := -1
+		ok := false
+		if opID != "" && m.activityIndexByOpID != nil {
+			idx, ok = m.activityIndexByOpID[opID]
+		}
+		// Fallback for older hosts / older persisted events: update the last pending activity.
+		if !ok {
+			idx, ok = m.activityIndexByID[m.pendingActivityID]
+		}
 		if !ok || idx < 0 || idx >= len(m.activities) {
 			return
 		}
@@ -253,7 +271,11 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		}
 
 		m.activities[idx] = act
-		m.pendingActivityID = ""
+		if opID != "" && m.activityIndexByOpID != nil {
+			delete(m.activityIndexByOpID, opID)
+		} else {
+			m.pendingActivityID = ""
+		}
 		m.refreshActivityList()
 		m.refreshActivityDetail()
 	}

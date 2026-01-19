@@ -72,7 +72,9 @@ func (m *Model) layout() {
 		m.activityList.SetWidth(max(24, innerW))
 
 		// Split the inner height between list and details.
-		listH := max(6, innerH/2)
+		// Prefer showing more activity rows; details can be scrolled as needed.
+		listH := int(math.Round(float64(innerH) * 0.70))
+		listH = max(6, listH)
 		if listH > innerH-1 {
 			listH = max(1, innerH-1)
 		}

@@ -119,11 +119,21 @@ type Model struct {
 	// session/run, used to render diff previews in the transcript.
 	fileSnapCache map[string]string // vpath -> last-known text (possibly truncated)
 
-	// pendingFileOps tracks the last in-flight file op per path (request->response).
-	pendingFileOps map[string]pendingFileOp // vpath -> pending op metadata
+	// pendingFileOpsByOpID tracks in-flight file ops keyed by host-emitted opId.
+	// This avoids clobbering state under batch parallelism.
+	pendingFileOpsByOpID map[string]pendingFileOp // opId -> pending op metadata
+
+	// fileChanges holds grouped diff blocks for the current turn.
+	fileChangesItemIdx int               // transcript item index for the grouped block, or -1
+	fileChangesByPath  map[string]string // vpath -> rendered markdown snippet (includes diff fence)
+	fileChangesOrder   []string          // stable insertion order of vpaths
 
 	activities        []Activity
 	activityIndexByID map[string]int
+	// activityIndexByOpID maps host-emitted opId -> activity index, so concurrent ops
+	// update the correct row even under batch parallelism.
+	activityIndexByOpID map[string]int
+	// pendingActivityID is legacy fallback for older hosts that don't emit opId.
 	pendingActivityID string
 	activitySeq       int
 	expandOutput      bool
@@ -145,10 +155,7 @@ type Model struct {
 	turnTitle    string
 	turnN        int
 
-	pendingActionIdx       int
-	pendingActionText      string
-	waitingForAction       bool
-	pendingActionIsToolRun bool
+	pendingActionsByOpID map[string]pendingAction // opId -> pending transcript action line
 
 	fileViewOpen      bool
 	fileViewPath      string
@@ -271,6 +278,11 @@ type transcriptItem struct {
 	actionIsCompleted bool
 }
 
+type pendingAction struct {
+	idx       int
+	isToolRun bool
+}
+
 const maxDiffBytesRead = 128 * 1024
 
 type pendingFileOp struct {
@@ -288,6 +300,7 @@ type pendingFileOp struct {
 }
 
 type fileAfterMsg struct {
+	opID string
 	op   string
 	path string
 
@@ -297,6 +310,7 @@ type fileAfterMsg struct {
 }
 
 type fileBeforeMsg struct {
+	opID string
 	op   string
 	path string
 

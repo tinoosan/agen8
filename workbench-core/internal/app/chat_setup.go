@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/config"
@@ -216,7 +217,9 @@ func setupTUIChatRuntime(
 	artifactIndex := newArtifactIndex()
 
 	var updater *agent.ContextUpdater
+	var opSeq uint64
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		opID := fmt.Sprintf("op-%d", atomic.AddUint64(&opSeq, 1))
 		// For file ops, capture "before" deterministically on the host side so the UI
 		// can render diffs without racing on client-side reads.
 		//
@@ -232,6 +235,7 @@ func setupTUIChatRuntime(
 		}
 
 		reqData := map[string]string{
+			"opId":     opID,
 			"op":       req.Op,
 			"path":     req.Path,
 			"toolId":   req.ToolID.String(),
@@ -308,6 +312,7 @@ func setupTUIChatRuntime(
 		constructor.ObserveHostOp(req, resp)
 
 		respData := map[string]string{
+			"opId": opID,
 			"op":  resp.Op,
 			"ok":  fmtBool(resp.Ok),
 			"err": resp.Error,

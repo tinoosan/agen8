@@ -113,6 +113,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 		// Ctrl+A, or enable it by default via WORKBENCH_ACTIVITY/--activity.
 		showDetails:       false,
 		activityIndexByID: map[string]int{},
+		activityIndexByOpID: map[string]int{},
 		single:            single,
 		multiline:         multi,
 		editorBuf:         editor,
@@ -185,7 +186,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 		focus:    focusInput,
 	}
 
-	m.pendingActionIdx = -1
+	m.fileChangesItemIdx = -1
 	m.lastTurnUserItemIdx = -1
 	m.streamingItemIdx = -1
 	m.thinkingItemIdx = -1
@@ -380,6 +381,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case fileAfterMsg:
 		// Best-effort: update cache and render a transcript diff/patch block.
+		opID := strings.TrimSpace(msg.opID)
 		path := strings.TrimSpace(msg.path)
 		if path == "" || msg.err != nil {
 			return m, nil
@@ -387,11 +389,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.fileSnapCache == nil {
 			m.fileSnapCache = make(map[string]string)
 		}
-		if m.pendingFileOps == nil {
-			m.pendingFileOps = make(map[string]pendingFileOp)
+		// Back-compat: when opId isn't available, try matching by path.
+		if opID == "" {
+			opID = m.findPendingFileOpIDByPath(path)
 		}
-		p, ok := m.pendingFileOps[path]
-		if !ok {
+		if opID == "" || m.pendingFileOpsByOpID == nil {
 			// No pending metadata; still update cache and skip transcript.
 			m.fileSnapCache[path] = msg.text
 			// If the file picker is open, refresh it so newly created files appear.
@@ -405,11 +407,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		p, ok := m.pendingFileOpsByOpID[opID]
+		if !ok {
+			// No pending metadata; still update cache and skip transcript.
+			m.fileSnapCache[path] = msg.text
+			return m, nil
+		}
 
 		before := p.before
 		after := msg.text
 		m.fileSnapCache[path] = after
-		delete(m.pendingFileOps, path)
+		delete(m.pendingFileOpsByOpID, opID)
 
 		verb := "Updated"
 		if p.op != "fs.patch" && !p.hadBefore {
@@ -423,9 +431,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if truncated {
 			preview = strings.TrimRight(preview, "\n") + "\n\n_(truncated)_\n"
 		}
-		md := "**" + verb + "** `" + path + "`\n\n" + preview
-		m.addTranscriptItem(transcriptItem{kind: transcriptFileChange, text: md})
-		m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+		snippet := "**" + verb + "** `" + path + "`\n\n" + preview
+		if m.fileChangesByPath == nil {
+			m.fileChangesByPath = make(map[string]string)
+		}
+		if _, exists := m.fileChangesByPath[path]; !exists {
+			m.fileChangesOrder = append(m.fileChangesOrder, path)
+		}
+		m.fileChangesByPath[path] = snippet
+		m.upsertGroupedFileChanges()
 		// If the file picker is open, refresh it so newly created files appear immediately.
 		if m.filePickerOpen && (strings.HasPrefix(path, "/workspace/") || strings.HasPrefix(path, "/workdir/")) && strings.TrimSpace(m.workdir) != "" {
 			if all, err := m.scanFilePickerPaths(m.workdir); err == nil {
@@ -440,14 +454,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fileBeforeMsg:
 		// Best-effort: fill in missing "before" content for Created/Updated labeling
 		// and diff previews (request arrives pre-exec).
+		opID := strings.TrimSpace(msg.opID)
 		path := strings.TrimSpace(msg.path)
-		if path == "" {
+		if opID == "" {
+			opID = m.findPendingFileOpIDByPath(path)
+		}
+		if opID == "" || path == "" {
 			return m, nil
 		}
-		if m.pendingFileOps == nil {
+		if m.pendingFileOpsByOpID == nil {
 			return m, nil
 		}
-		p, ok := m.pendingFileOps[path]
+		p, ok := m.pendingFileOpsByOpID[opID]
 		if !ok || p.hadBefore {
 			return m, nil
 		}
@@ -455,7 +473,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			p.before = msg.text
 			p.hadBefore = true
-			m.pendingFileOps[path] = p
+			m.pendingFileOpsByOpID[opID] = p
 		}
 		return m, nil
 
@@ -840,6 +858,11 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 
 	switch ev.Type {
 	case "agent.op.request":
+		opID := strings.TrimSpace(ev.Data["opId"])
+		// Back-compat: older hosts may not emit opId; use a best-effort synthetic key.
+		if opID == "" {
+			opID = fmt.Sprintf("legacy-%d", time.Now().UnixNano())
+		}
 		op := strings.TrimSpace(ev.Data["op"])
 		path := strings.TrimSpace(ev.Data["path"])
 		var beforeCmd tea.Cmd
@@ -847,8 +870,8 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 			if m.fileSnapCache == nil {
 				m.fileSnapCache = make(map[string]string)
 			}
-			if m.pendingFileOps == nil {
-				m.pendingFileOps = make(map[string]pendingFileOp)
+			if m.pendingFileOpsByOpID == nil {
+				m.pendingFileOpsByOpID = make(map[string]pendingFileOp)
 			}
 			before, ok := m.fileSnapCache[path]
 			p := pendingFileOp{
@@ -862,14 +885,14 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 				p.patchTruncated = strings.TrimSpace(ev.Data["patchTruncated"]) == "true"
 				p.patchRedacted = strings.TrimSpace(ev.Data["patchRedacted"]) == "true"
 			}
-			m.pendingFileOps[path] = p
+			m.pendingFileOpsByOpID[opID] = p
 			// Best-effort: if we don't have a cached snapshot, try reading the current
 			// file BEFORE the op executes so we can label Created vs Updated correctly.
 			if !p.hadBefore {
 				if acc, ok := m.runner.(vfsAccessor); ok {
 					beforeCmd = func() tea.Msg {
 						txt, _, truncated, err := acc.ReadVFS(m.ctx, path, maxDiffBytesRead)
-						return fileBeforeMsg{op: op, path: path, text: txt, truncated: truncated, err: err}
+						return fileBeforeMsg{opID: opID, op: op, path: path, text: txt, truncated: truncated, err: err}
 					}
 				}
 			}
@@ -879,48 +902,64 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		if txt == "" {
 			return beforeCmd
 		}
-		m.pendingActionText = txt
-		m.pendingActionIsToolRun = strings.TrimSpace(ev.Data["op"]) == "tool.run"
-		m.waitingForAction = true
-		m.pendingActionIdx = len(m.transcriptItems)
+		isToolRun := strings.TrimSpace(ev.Data["op"]) == "tool.run"
+		if m.pendingActionsByOpID == nil {
+			m.pendingActionsByOpID = make(map[string]pendingAction)
+		}
+		idx := len(m.transcriptItems)
 		m.addTranscriptItem(transcriptItem{
 			kind:            transcriptAction,
 			actionText:      txt,
-			actionIsToolRun: m.pendingActionIsToolRun,
+			actionIsToolRun: isToolRun,
 		})
+		m.pendingActionsByOpID[opID] = pendingAction{idx: idx, isToolRun: isToolRun}
 		return beforeCmd
 	case "agent.op.response":
-		if !m.waitingForAction || m.pendingActionIdx < 0 {
-			return nil
-		}
 		comp := strings.TrimSpace(rr.Text)
-		if m.pendingActionIdx < len(m.transcriptItems) {
-			it := m.transcriptItems[m.pendingActionIdx]
-			if it.kind == transcriptAction && !it.actionIsCompleted {
-				it.actionCompletion = comp
-				it.actionIsCompleted = true
-				m.transcriptItems[m.pendingActionIdx] = it
+		op := strings.TrimSpace(ev.Data["op"])
+		path := strings.TrimSpace(ev.Data["path"])
+
+		// Back-compat: if opId is missing, try to correlate file ops by path.
+		opID := strings.TrimSpace(ev.Data["opId"])
+		if opID == "" && path != "" && (op == "fs.write" || op == "fs.append" || op == "fs.edit" || op == "fs.patch") {
+			opID = m.findPendingFileOpIDByPath(path)
+		}
+
+		if opID != "" && m.pendingActionsByOpID != nil {
+			if pa, ok := m.pendingActionsByOpID[opID]; ok && pa.idx >= 0 && pa.idx < len(m.transcriptItems) {
+				it := m.transcriptItems[pa.idx]
+				if it.kind == transcriptAction && !it.actionIsCompleted {
+					it.actionCompletion = comp
+					it.actionIsCompleted = true
+					m.transcriptItems[pa.idx] = it
+				}
+				delete(m.pendingActionsByOpID, opID)
+			}
+		} else {
+			// Back-compat: if we can't correlate, mark the most recent incomplete action.
+			for i := len(m.transcriptItems) - 1; i >= 0; i-- {
+				it := m.transcriptItems[i]
+				if it.kind == transcriptAction && !it.actionIsCompleted {
+					it.actionCompletion = comp
+					it.actionIsCompleted = true
+					m.transcriptItems[i] = it
+					break
+				}
 			}
 		}
-		m.pendingActionText = ""
-		m.waitingForAction = false
-		m.pendingActionIdx = -1
-		m.pendingActionIsToolRun = false
 		m.rebuildTranscript()
 
 		// If this was a successful file op, read the resulting file content so we can
 		// render a diff/patch preview in the transcript.
-		op := strings.TrimSpace(ev.Data["op"])
-		path := strings.TrimSpace(ev.Data["path"])
 		// If the host provided a patchPreview (diff), attach it to the pending op so
 		// buildFileChangePreview can use it instead of racing on before snapshots.
-		if path != "" && m.pendingFileOps != nil {
-			if p, ok := m.pendingFileOps[path]; ok {
+		if opID != "" && m.pendingFileOpsByOpID != nil {
+			if p, ok := m.pendingFileOpsByOpID[opID]; ok {
 				if pv := strings.TrimSpace(ev.Data["patchPreview"]); pv != "" {
 					p.patchPreview = pv
 					p.patchTruncated = strings.TrimSpace(ev.Data["patchTruncated"]) == "true"
 					p.patchRedacted = strings.TrimSpace(ev.Data["patchRedacted"]) == "true"
-					m.pendingFileOps[path] = p
+					m.pendingFileOpsByOpID[opID] = p
 				}
 			}
 		}
@@ -928,7 +967,7 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 			if acc, ok := m.runner.(vfsAccessor); ok {
 				return func() tea.Msg {
 					txt, _, truncated, err := acc.ReadVFS(m.ctx, path, maxDiffBytesRead)
-					return fileAfterMsg{op: op, path: path, text: txt, truncated: truncated, err: err}
+					return fileAfterMsg{opID: opID, op: op, path: path, text: txt, truncated: truncated, err: err}
 				}
 			}
 		}
@@ -956,6 +995,73 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		})
 		return nil
 	}
+}
+
+func (m *Model) upsertGroupedFileChanges() {
+	if m == nil {
+		return
+	}
+	if len(m.fileChangesOrder) == 0 || m.fileChangesByPath == nil {
+		return
+	}
+	// Build markdown for the grouped diff block.
+	var b strings.Builder
+	b.WriteString("## File changes\n\n")
+	for i, p := range m.fileChangesOrder {
+		snippet := strings.TrimSpace(m.fileChangesByPath[p])
+		if snippet == "" {
+			continue
+		}
+		if i != 0 {
+			b.WriteString("\n---\n\n")
+		}
+		b.WriteString(snippet)
+		b.WriteString("\n")
+	}
+	md := strings.TrimSpace(b.String())
+	if md == "" {
+		return
+	}
+
+	wasAtBottom := m.transcript.AtBottom()
+	// First insert: append a single file-change box at the end of the transcript.
+	if m.fileChangesItemIdx < 0 || m.fileChangesItemIdx >= len(m.transcriptItems) {
+		m.fileChangesItemIdx = len(m.transcriptItems)
+		m.addTranscriptItem(transcriptItem{kind: transcriptFileChange, text: md})
+		// Do not add a spacer here: in batch parallelism additional action lines may still
+		// arrive, and we want this block to be easy to keep updated in-place.
+		return
+	}
+
+	it := m.transcriptItems[m.fileChangesItemIdx]
+	if it.kind != transcriptFileChange {
+		// Safety: if the slot was overwritten, fall back to appending a new block.
+		m.fileChangesItemIdx = len(m.transcriptItems)
+		m.addTranscriptItem(transcriptItem{kind: transcriptFileChange, text: md})
+		return
+	}
+	it.text = md
+	m.transcriptItems[m.fileChangesItemIdx] = it
+	m.rebuildTranscript()
+	if wasAtBottom {
+		m.transcript.GotoBottom()
+	}
+}
+
+func (m *Model) findPendingFileOpIDByPath(path string) string {
+	if m == nil {
+		return ""
+	}
+	path = strings.TrimSpace(path)
+	if path == "" || m.pendingFileOpsByOpID == nil {
+		return ""
+	}
+	for id, p := range m.pendingFileOpsByOpID {
+		if strings.TrimSpace(p.path) == path {
+			return id
+		}
+	}
+	return ""
 }
 
 func (m Model) waitEvent() tea.Cmd {
