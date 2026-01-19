@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
@@ -142,6 +144,16 @@ func (r *BuiltinRipgrepInvoker) Invoke(ctx context.Context, req types.ToolReques
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("maxMatches exceeds max %d", maxRipgrepMaxMatches)}
 	}
 
+	// Safety: callers may omit timeoutMs. To avoid indefinite hangs, apply a default
+	// timeout when no timeout was provided and the caller context has no deadline.
+	if req.TimeoutMs == 0 {
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+		}
+	}
+
 	argv := make([]string, 0, 16)
 	argv = append(argv, "--json")
 	if !in.CaseSensitive {
@@ -159,6 +171,10 @@ func (r *BuiltinRipgrepInvoker) Invoke(ctx context.Context, req types.ToolReques
 	argv = append(argv, in.Query)
 	argv = append(argv, paths...)
 
+	// Use a derived context so we can cancel the process on early parse failures.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	cmd := exec.CommandContext(ctx, "rg", argv...)
 	cmd.Dir = root
 
@@ -172,15 +188,26 @@ func (r *BuiltinRipgrepInvoker) Invoke(ctx context.Context, req types.ToolReques
 	}
 
 	if err := cmd.Start(); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+			return ToolCallResult{}, &InvokeError{Code: "timeout", Message: "rg timed out", Retryable: true, Err: err}
+		}
 		if errors.Is(err, exec.ErrNotFound) {
 			return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: "rg binary not found (install ripgrep)"}
 		}
 		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
 	}
 
-	// Read stderr fully (bounded by OS). We keep it small by only using it when the
-	// command fails to run correctly.
-	stderrBytes, _ := ioReadAllLimited(stderr, 64*1024)
+	// Drain stderr concurrently to avoid deadlocks when stdout/stderr pipes fill.
+	// Capture up to 64KB for error reporting, and discard the rest.
+	type stderrResult struct {
+		b   []byte
+		err error
+	}
+	stderrCh := make(chan stderrResult, 1)
+	go func() {
+		b, err := ioReadAllLimited(stderr, 64*1024)
+		stderrCh <- stderrResult{b: b, err: err}
+	}()
 
 	matches := make([]ripgrepMatch, 0)
 	sc := bufio.NewScanner(stdout)
@@ -221,11 +248,26 @@ func (r *BuiltinRipgrepInvoker) Invoke(ctx context.Context, req types.ToolReques
 
 	if err := sc.Err(); err != nil {
 		// Scanner errors are treated as a tool failure.
+		cancel()
 		_ = cmd.Wait()
+		<-stderrCh
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return ToolCallResult{}, &InvokeError{Code: "timeout", Message: "rg timed out", Retryable: true, Err: ctx.Err()}
+		}
 		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("read rg output: %v", err), Err: err}
 	}
 
 	waitErr := cmd.Wait()
+	stderrRes := <-stderrCh
+	stderrBytes := stderrRes.b
+
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(waitErr, context.DeadlineExceeded) {
+		timeoutErr := waitErr
+		if timeoutErr == nil {
+			timeoutErr = ctx.Err()
+		}
+		return ToolCallResult{}, &InvokeError{Code: "timeout", Message: "rg timed out", Retryable: true, Err: timeoutErr}
+	}
 	// rg returns exit code 1 when there are no matches; that is not a tool failure.
 	if waitErr != nil {
 		var exitErr *exec.ExitError
@@ -262,5 +304,12 @@ func ioReadAllLimited(r io.Reader, max int64) ([]byte, error) {
 	if max <= 0 {
 		max = 64 * 1024
 	}
-	return io.ReadAll(io.LimitReader(r, max))
+	var out bytes.Buffer
+	_, err := io.Copy(&out, io.LimitReader(r, max))
+	// Drain the remainder so the writer can't block on a full pipe.
+	_, drainErr := io.Copy(io.Discard, r)
+	if err == nil {
+		err = drainErr
+	}
+	return out.Bytes(), err
 }

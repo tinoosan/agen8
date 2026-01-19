@@ -212,7 +212,7 @@ When you decide to run a tool:
    - `toolId`
    - `actionId`
    - `input` (JSON object matching the manifest schema)
-   - optional `timeoutMs`
+   - `timeoutMs` (strongly recommended; default to `30000` when in doubt, especially for repo-wide searches)
 
 The host executes the tool (builtin first) and returns a `ToolResponse`. You then read:
 
