@@ -17,6 +17,8 @@ const (
 	HostOpFSWrite = "fs.write"
 	// HostOpFSAppend appends to a file in the VFS.
 	HostOpFSAppend = "fs.append"
+	// HostOpFSEdit applies structured edits to a file in the VFS (host-generated diff).
+	HostOpFSEdit = "fs.edit"
 	// HostOpFSPatch applies a unified diff patch to a file in the VFS.
 	HostOpFSPatch = "fs.patch"
 	// HostOpToolRun runs a discovered tool via the ToolRunner.
@@ -54,7 +56,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = strings.TrimSpace(r.Op)
 	switch r.Op {
-	case HostOpFSList, HostOpFSRead, HostOpFSWrite, HostOpFSAppend, HostOpFSPatch, HostOpToolRun, HostOpFinal:
+	case HostOpFSList, HostOpFSRead, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpToolRun, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -78,6 +80,15 @@ func (r HostOpRequest) Validate() error {
 	case HostOpFSWrite, HostOpFSAppend:
 		if err := validate.NonEmpty("path", r.Path); err != nil {
 			return err
+		}
+		return nil
+
+	case HostOpFSEdit:
+		if err := validate.NonEmpty("path", r.Path); err != nil {
+			return err
+		}
+		if r.Input == nil {
+			return fmt.Errorf("input is required")
 		}
 		return nil
 

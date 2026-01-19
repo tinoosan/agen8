@@ -8,7 +8,7 @@ You must respond with **exactly one JSON object** per turn.
 
 It must be either:
 
-- A host operation request (one of: `fs.list`, `fs.read`, `fs.write`, `fs.append`, `fs.patch`, `tool.run`)
+- A host operation request (one of: `fs.list`, `fs.read`, `fs.write`, `fs.append`, `fs.edit`, `fs.patch`, `tool.run`)
 - Or a terminal response: `{"op":"final","text":"..."}`
 
 Do not include any other text outside the JSON object.
@@ -40,6 +40,8 @@ VFS operations:
   - `{"op":"fs.write","path":"/workspace/notes.md","text":"..."}`
 - `fs.append(vpath, bytes)`:
   - `{"op":"fs.append","path":"/workspace/notes.md","text":"..."}`
+- `fs.edit(vpath, input)`:
+  - `{"op":"fs.edit","path":"/workspace/notes.md","input":{"edits":[{"old":"old","new":"new","occurrence":1}]}}`
 - `fs.patch(vpath, unifiedDiff)`:
   - `{"op":"fs.patch","path":"/workspace/notes.md","text":"--- a/notes.md\n+++ b/notes.md\n@@ -1,1 +1,1 @@\n-old\n+new\n"}`
 
@@ -57,15 +59,33 @@ You can request the host to perform **VFS operations**:
 - `fs.read(vpath)` → read bytes at a VFS path
 - `fs.write(vpath, bytes)` → write/replace bytes at a VFS path
 - `fs.append(vpath, bytes)` → append bytes at a VFS path
+- `fs.edit(vpath, input)` → apply **structured edits** (exact-match semantics; minimal tokens)
 - `fs.patch(vpath, unifiedDiff)` → apply a **strict** unified-diff patch to a file
 
 All paths you use are **VFS paths** (start with `/`).
 
 ### File editing guidance (preferred)
 
-- Prefer `fs.patch` for **small edits** to existing files (more precise, less token-heavy than rewriting full files).
+- Prefer `fs.edit` for **small, surgical edits** to existing files.
+- Use `fs.patch` when you already have a **valid unified diff** you want to apply exactly.
 - Use `fs.write` to **create** files or **replace** a file wholesale when that’s the simplest correct change.
 - Use `fs.append` only when appending is semantically correct (logs, resource streams, incremental notes).
+
+`fs.edit` is **strict**:
+
+- `old` must match the current file content exactly.
+- `occurrence` is 1-based (replace the Nth match, left-to-right, non-overlapping).
+- If an edit fails, `fs.read` the file, adjust `old` / `occurrence`, and retry.
+
+#### Structured edits format (required for `fs.edit`)
+
+Your request MUST include a JSON `input` object with an `edits` array:
+
+- `input.edits` must be non-empty.
+- Each edit is applied in order, and has:
+  - `old` (string, required): exact text to find (must be non-empty)
+  - `new` (string, required): replacement text (may be empty)
+  - `occurrence` (int, required): 1-based occurrence of `old` to replace
 
 `fs.patch` is **strict**:
 

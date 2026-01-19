@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -94,6 +95,53 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		}
 		return types.HostOpResponse{Op: req.Op, Ok: true}
 
+	case types.HostOpFSEdit:
+		// Structured edit apply (exact-match semantics; minimal tokens).
+		beforeBytes, err := x.FS.Read(req.Path)
+		if err != nil {
+			// Treat missing as empty (edits will fail if old text isn't found).
+			if errors.Is(err, fs.ErrNotExist) || strings.Contains(err.Error(), "not found") {
+				beforeBytes = nil
+			} else {
+				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+			}
+		}
+
+		var in struct {
+			Edits []struct {
+				Old        string `json:"old"`
+				New        string `json:"new"`
+				Occurrence int    `json:"occurrence"`
+			} `json:"edits"`
+		}
+		if err := json.Unmarshal(req.Input, &in); err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "invalid input JSON: " + err.Error()}
+		}
+		if len(in.Edits) == 0 {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "input.edits must be non-empty"}
+		}
+
+		before := string(beforeBytes)
+		after := before
+		for i, e := range in.Edits {
+			if strings.TrimSpace(e.Old) == "" {
+				return types.HostOpResponse{Op: req.Op, Ok: false, Error: fmt.Sprintf("edit[%d].old must be non-empty", i)}
+			}
+			if e.Occurrence <= 0 {
+				return types.HostOpResponse{Op: req.Op, Ok: false, Error: fmt.Sprintf("edit[%d].occurrence must be >= 1", i)}
+			}
+			var err error
+			after, err = replaceNth(after, e.Old, e.New, e.Occurrence)
+			if err != nil {
+				return types.HostOpResponse{Op: req.Op, Ok: false, Error: fmt.Sprintf("edit[%d] failed: %v", i, err)}
+			}
+		}
+
+		if err := x.FS.Write(req.Path, []byte(after)); err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+
 	case types.HostOpFSPatch:
 		// Strict patch apply (must apply cleanly).
 		beforeBytes, err := x.FS.Read(req.Path)
@@ -127,6 +175,29 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 	default:
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: fmt.Sprintf("unknown op %q", req.Op)}
 	}
+}
+
+func replaceNth(s, old, new string, occurrence int) (string, error) {
+	if old == "" {
+		return s, fmt.Errorf("old must be non-empty")
+	}
+	if occurrence <= 0 {
+		return s, fmt.Errorf("occurrence must be >= 1")
+	}
+	idx := 0
+	for i := 1; i <= occurrence; i++ {
+		pos := strings.Index(s[idx:], old)
+		if pos < 0 {
+			return s, fmt.Errorf("old not found at occurrence %d", occurrence)
+		}
+		pos = idx + pos
+		if i == occurrence {
+			return s[:pos] + new + s[pos+len(old):], nil
+		}
+		// Move past this match (non-overlapping occurrences).
+		idx = pos + len(old)
+	}
+	return s, fmt.Errorf("old not found at occurrence %d", occurrence)
 }
 
 // applyUnifiedDiffStrict applies a unified diff patch to oldText with no fuzz.

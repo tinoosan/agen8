@@ -240,6 +240,8 @@ func renderOpRequest(d map[string]string) string {
 		return "Write " + path
 	case "fs.append":
 		return "Append " + path
+	case "fs.edit":
+		return "Edit " + path
 	case "fs.patch":
 		return "Patch " + path
 	case "tool.run":
