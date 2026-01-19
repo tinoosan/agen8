@@ -12,17 +12,15 @@ func TestApplyUnifiedDiffStrict_Reproduction(t *testing.T) {
 		t.Errorf("Standard patch failed: %v", err)
 	}
 
-	// Case 2: Missing trailing @@ (should fail currently, but we want to allow it)
+	// Case 2: Missing trailing @@ (should be allowed)
 	patchNoTrailing := "@@ -2,1 +2,1\n-line2\n+new2\n"
 	if _, err := applyUnifiedDiffStrict(oldText, patchNoTrailing); err != nil {
-		t.Logf("Confirmed: Missing trailing @@ causes error: %v", err)
-	} else {
-		t.Errorf("Unexpected success with missing trailing @@")
+		t.Errorf("Missing trailing @@ patch should be allowed, got error: %v", err)
 	}
 
-	// Case 3: Naked @@ (matches screenshot error?)
+	// Case 3: Naked @@ should still fail
 	patchNaked := "@@\n-line2\n+new2\n"
-	if _, err := applyUnifiedDiffStrict(oldText, patchNaked); err != nil {
-		t.Logf("Confirmed: Naked @@ causes error: %v", err)
+	if _, err := applyUnifiedDiffStrict(oldText, patchNaked); err == nil {
+		t.Errorf("Expected error for naked @@ header")
 	}
 }
