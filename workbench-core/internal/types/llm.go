@@ -49,12 +49,13 @@ type LLMClientStreaming interface {
 // System is the system prompt string (developer instructions). Messages represent the
 // conversational transcript (user/assistant turns).
 type LLMRequest struct {
-	Model       string       // required: model identifier (provider-specific)
-	System      string       // optional: system prompt
-	Messages    []LLMMessage // required: conversation messages
-	MaxTokens   int          // optional: max output tokens
-	Temperature float64      // optional: sampling temperature
-	JSONOnly    bool         // optional: request JSON-only output (provider best-effort)
+	Model              string       // required: model identifier (provider-specific)
+	System             string       // optional: system prompt
+	Messages           []LLMMessage // required: conversation messages
+	MaxTokens          int          // optional: max output tokens
+	Temperature        float64      // optional: sampling temperature
+	JSONOnly           bool         // optional: request JSON-only output (provider best-effort)
+	PreviousResponseID string       // optional: for Responses API reasoning context
 }
 
 // LLMMessage is a minimal chat message.
@@ -65,9 +66,10 @@ type LLMMessage struct {
 
 // LLMResponse is the minimal response used by the agent loop.
 type LLMResponse struct {
-	Text  string          // assistant content (raw text)
-	Raw   json.RawMessage // optional: raw provider JSON response (debug)
-	Usage *LLMUsage       // optional: token usage
+	Text       string          // assistant content (raw text)
+	Raw        json.RawMessage // optional: raw provider JSON response (debug)
+	Usage      *LLMUsage       // optional: token usage
+	ResponseID string          // optional: response ID for Responses API
 }
 
 // LLMUsage contains token usage numbers when a provider returns them.

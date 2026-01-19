@@ -2,11 +2,13 @@ package llm
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -89,92 +91,131 @@ func TestClient_toResponse_MapsTextAndUsage(t *testing.T) {
 	}
 }
 
-func TestClient_onStreamChunk_ForwardsDeltaContent(t *testing.T) {
-	var chunk openai.ChatCompletionChunk
+func TestClient_buildResponseParams_MapsInstructionsJSONOnlyAndReasoningSummaryAuto(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli, DefaultMaxTokens: 123}
+
+	params, err := c.buildResponseParams(types.LLMRequest{
+		Model:    "openai/gpt-5.1-codex-mini",
+		System:   "system",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}, {Role: "assistant", Content: "ok"}},
+		JSONOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("buildResponseParams: %v", err)
+	}
+
+	b, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if m["instructions"] != "system" {
+		t.Fatalf("expected instructions=system, got %+v", m["instructions"])
+	}
+	if _, ok := m["reasoning"].(map[string]any); !ok {
+		t.Fatalf("expected reasoning object, got %+v", m["reasoning"])
+	}
+	txt, _ := m["text"].(map[string]any)
+	if txt == nil {
+		t.Fatalf("expected text config")
+	}
+	format, _ := txt["format"].(map[string]any)
+	if format == nil || format["type"] != "json_object" {
+		t.Fatalf("expected text.format json_object, got %+v", txt["format"])
+	}
+}
+
+func TestClient_onResponsesStreamEvent_ForwardsOutputTextDelta(t *testing.T) {
+	var ev responses.ResponseStreamEventUnion
 	if err := json.Unmarshal([]byte(`{
-	  "id":"x",
-	  "object":"chat.completion.chunk",
-	  "created":0,
-	  "model":"m",
-	  "choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":""}]
-	}`), &chunk); err != nil {
-		t.Fatalf("unmarshal chunk: %v", err)
+	  "type":"response.output_text.delta",
+	  "delta":"hi",
+	  "content_index":0,
+	  "item_id":"item",
+	  "output_index":0,
+	  "sequence_number":1,
+	  "logprobs":[]
+	}`), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
 	}
 
 	var got string
+	var out strings.Builder
 	c := &Client{}
-	var acc openai.ChatCompletionAccumulator
-	if err := c.onStreamChunk(&acc, chunk, func(sc types.LLMStreamChunk) error {
+	if err := c.onResponsesStreamEvent(ev, func(sc types.LLMStreamChunk) error {
 		got += sc.Text
 		return nil
-	}); err != nil {
-		t.Fatalf("onStreamChunk: %v", err)
+	}, &out, nil); err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
 	}
 	if got != "hi" {
 		t.Fatalf("unexpected got %q", got)
 	}
+	if out.String() != "hi" {
+		t.Fatalf("unexpected out %q", out.String())
+	}
 }
 
-func TestClient_onStreamChunk_EmitsReasoningSignal(t *testing.T) {
-	var chunk openai.ChatCompletionChunk
+func TestClient_onResponsesStreamEvent_EmitsReasoningSummaryDelta(t *testing.T) {
+	var ev responses.ResponseStreamEventUnion
 	if err := json.Unmarshal([]byte(`{
-	  "id":"x",
-	  "object":"chat.completion.chunk",
-	  "created":0,
-	  "model":"m",
-	  "choices":[{"index":0,"delta":{"reasoning_content":"secret"},"finish_reason":""}]
-	}`), &chunk); err != nil {
-		t.Fatalf("unmarshal chunk: %v", err)
+	  "type":"response.reasoning_summary_text.delta",
+	  "delta":"summary",
+	  "item_id":"item",
+	  "output_index":0,
+	  "sequence_number":2,
+	  "summary_index":0
+	}`), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
 	}
 
 	var got []types.LLMStreamChunk
 	c := &Client{}
-	var acc openai.ChatCompletionAccumulator
-	if err := c.onStreamChunk(&acc, chunk, func(sc types.LLMStreamChunk) error {
+	if err := c.onResponsesStreamEvent(ev, func(sc types.LLMStreamChunk) error {
 		got = append(got, sc)
 		return nil
-	}); err != nil {
-		t.Fatalf("onStreamChunk: %v", err)
+	}, nil, nil); err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("expected 1 chunk, got %d", len(got))
-	}
-	if !got[0].IsReasoning {
-		t.Fatalf("expected IsReasoning=true, got %+v", got[0])
-	}
-	if got[0].Text != "" {
-		t.Fatalf("expected no reasoning text to be forwarded, got %q", got[0].Text)
+	if len(got) != 1 || !got[0].IsReasoning || got[0].Text != "summary" {
+		t.Fatalf("unexpected chunks: %+v", got)
 	}
 }
 
-func TestClient_onStreamChunk_EmitsReasoningSummary(t *testing.T) {
-	var chunk openai.ChatCompletionChunk
+func TestClient_onResponsesStreamEvent_EmitsReasoningSignalForReasoningTextDelta(t *testing.T) {
+	var ev responses.ResponseStreamEventUnion
 	if err := json.Unmarshal([]byte(`{
-	  "id":"x",
-	  "object":"chat.completion.chunk",
-	  "created":0,
-	  "model":"m",
-	  "choices":[{"index":0,"delta":{"reasoning_summary":"short summary"},"finish_reason":""}]
-	}`), &chunk); err != nil {
-		t.Fatalf("unmarshal chunk: %v", err)
+	  "type":"response.reasoning_text.delta",
+	  "delta":"secret",
+	  "content_index":0,
+	  "item_id":"item",
+	  "output_index":0,
+	  "sequence_number":3
+	}`), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
 	}
 
 	var got []types.LLMStreamChunk
 	c := &Client{}
-	var acc openai.ChatCompletionAccumulator
-	if err := c.onStreamChunk(&acc, chunk, func(sc types.LLMStreamChunk) error {
+	if err := c.onResponsesStreamEvent(ev, func(sc types.LLMStreamChunk) error {
 		got = append(got, sc)
 		return nil
-	}); err != nil {
-		t.Fatalf("onStreamChunk: %v", err)
+	}, nil, nil); err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("expected 1 chunk, got %d", len(got))
+	if len(got) != 1 || !got[0].IsReasoning || got[0].Text != "" {
+		t.Fatalf("unexpected chunks: %+v", got)
 	}
-	if !got[0].IsReasoning {
-		t.Fatalf("expected IsReasoning=true, got %+v", got[0])
-	}
-	if got[0].Text != "short summary" {
-		t.Fatalf("unexpected summary %q", got[0].Text)
+}
+
+func TestShouldFallbackToChat_ResponsesNotFound(t *testing.T) {
+	apierr := &openai.Error{StatusCode: http.StatusNotFound}
+	if !shouldFallbackToChat(apierr) {
+		t.Fatalf("expected fallback")
 	}
 }
