@@ -186,11 +186,12 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 	}
 	resolved.Model = model
 
-	// Session-scoped reasoning defaults: if the caller/env didn't set them, use the session.
-	if strings.TrimSpace(resolved.ReasoningEffort) == "" {
+	// Session-scoped reasoning defaults: prefer session preference over env/default.
+	// (We don't currently expose a CLI flag, so session should win for deterministic resume.)
+	if strings.TrimSpace(sessionReasoningEffort) != "" {
 		resolved.ReasoningEffort = sessionReasoningEffort
 	}
-	if strings.TrimSpace(resolved.ReasoningSummary) == "" {
+	if strings.TrimSpace(sessionReasoningSummary) != "" {
 		resolved.ReasoningSummary = sessionReasoningSummary
 	}
 

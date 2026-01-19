@@ -132,6 +132,10 @@ func resolveRunChatOptions(opts ...RunChatOption) RunChatOptions {
 			o.ReasoningEffort = strings.TrimSpace(os.Getenv("OPENROUTER_REASONING_EFFORT"))
 		}
 	}
+	// Default effort if nothing was specified anywhere.
+	if strings.TrimSpace(o.ReasoningEffort) == "" {
+		o.ReasoningEffort = "medium"
+	}
 	if strings.TrimSpace(o.ReasoningSummary) == "" {
 		if v := strings.TrimSpace(os.Getenv("WORKBENCH_REASONING_SUMMARY")); v != "" {
 			o.ReasoningSummary = v

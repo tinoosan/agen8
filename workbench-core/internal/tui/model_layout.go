@@ -232,10 +232,10 @@ func (m Model) renderInput() string {
 	modelIDDisplay := modelID
 
 	eff := strings.TrimSpace(m.reasoningEffort)
-	if eff == "" {
-		eff = "default"
+	effortLabel := ""
+	if eff != "" {
+		effortLabel = m.styleComposerStatusKey.Render("effort") + " " + m.styleComposerStatusVal.Render(eff)
 	}
-	effortLabel := m.styleComposerStatusKey.Render("effort") + " " + m.styleComposerStatusVal.Render(eff)
 
 	modelLabel := m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
 
@@ -261,14 +261,17 @@ func (m Model) renderInput() string {
 		leftMax = max(0, statusW-rightW-1)
 	}
 
-	// Prefer keeping effort visible; truncate the model ID if needed.
-	statusLeft := modelLabel + "  " + effortLabel
-	if leftMax > 0 && lipgloss.Width(statusLeft) > leftMax {
-		excess := lipgloss.Width(statusLeft) - leftMax
-		allowedIDW := max(8, lipgloss.Width(modelIDDisplay)-excess-1)
-		modelIDDisplay = truncateMiddle(modelID, allowedIDW)
-		modelLabel = m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
+	// Prefer keeping effort visible (when known); truncate the model ID if needed.
+	statusLeft := modelLabel
+	if effortLabel != "" {
 		statusLeft = modelLabel + "  " + effortLabel
+		if leftMax > 0 && lipgloss.Width(statusLeft) > leftMax {
+			excess := lipgloss.Width(statusLeft) - leftMax
+			allowedIDW := max(8, lipgloss.Width(modelIDDisplay)-excess-1)
+			modelIDDisplay = truncateMiddle(modelID, allowedIDW)
+			modelLabel = m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
+			statusLeft = modelLabel + "  " + effortLabel
+		}
 	}
 	leftW := lipgloss.Width(statusLeft)
 	rightW = lipgloss.Width(statusRight)
