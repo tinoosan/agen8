@@ -83,9 +83,11 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 	m.turnStarted = time.Now()
 	m.turnTitle = userMsg
 	m.turnN++
-	m.pendingActionIdx = -1
-	m.pendingActionText = ""
-	m.waitingForAction = false
+	m.pendingActionsByOpID = make(map[string]pendingAction)
+	m.pendingFileOpsByOpID = make(map[string]pendingFileOp)
+	m.fileChangesItemIdx = -1
+	m.fileChangesByPath = make(map[string]string)
+	m.fileChangesOrder = nil
 	m.streamingItemIdx = -1
 	m.streamingBuf = nil
 	m.thinkingItemIdx = -1
@@ -121,10 +123,8 @@ func (m *Model) formatThinkingText() string {
 	if summary == "" {
 		return header
 	}
-	if !m.thinkingExpanded {
-		return header + "  " + "summary available (Ctrl+Y)"
-	}
-	// Note: summary is rendered as markdown in the transcript renderer.
+	// Store canonical text (header + summary). The transcript renderer decides whether
+	// to show the summary based on the global thinkingExpanded toggle.
 	return header + "\n\n" + summary
 }
 

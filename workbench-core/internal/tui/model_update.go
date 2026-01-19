@@ -366,7 +366,11 @@ func (m Model) keyThinkingToggle(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	// Ctrl+T is already used for telemetry, so we use Ctrl+Y.
 	if msg.Type == tea.KeyCtrlY || strings.EqualFold(msg.String(), "ctrl+y") {
 		m.thinkingExpanded = !m.thinkingExpanded
-		m.updateThinkingTranscriptItem()
+		wasAtBottom := m.transcript.AtBottom()
+		m.rebuildTranscript()
+		if wasAtBottom {
+			m.transcript.GotoBottom()
+		}
 		return m, nil, true
 	}
 	return m, nil, false
@@ -530,4 +534,3 @@ func (m Model) keyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	return m, tea.Batch(cmd, cmd2)
 }
-

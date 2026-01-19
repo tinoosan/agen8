@@ -17,6 +17,7 @@ func TestTranscriptThinking_RendersMarkdownSummary(t *testing.T) {
 	m.transcriptItems = []transcriptItem{
 		{kind: transcriptThinking, text: "Thinking…\n\n**Planning next steps**"},
 	}
+	m.thinkingExpanded = true
 	m.rebuildTranscript()
 
 	out := m.transcript.View()

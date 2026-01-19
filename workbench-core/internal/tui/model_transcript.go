@@ -105,9 +105,12 @@ func (m *Model) rebuildTranscript() {
 			innerW := max(20, w-4) // 2 for gutter + 1 space + 1 margin
 			header, summary := splitThinkingText(it.text)
 			header = wrapText(strings.TrimSpace(header), innerW)
+			if !m.thinkingExpanded && strings.TrimSpace(summary) != "" {
+				header = strings.TrimSpace(header) + "  " + "summary available (Ctrl+Y)"
+			}
 
 			rendered := strings.TrimSpace(header)
-			if strings.TrimSpace(summary) != "" && m.renderer != nil {
+			if m.thinkingExpanded && strings.TrimSpace(summary) != "" && m.renderer != nil {
 				mdW := max(20, w-6) // account for gutter + space + a touch of margin
 				md := strings.Trim(m.renderer.RenderMarkdown(summary, mdW), "\n")
 				if md != "" {
