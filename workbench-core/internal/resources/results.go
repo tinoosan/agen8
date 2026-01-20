@@ -147,4 +147,3 @@ func (r *ResultsResource) Write(_ string, _ []byte) error {
 func (r *ResultsResource) Append(_ string, _ []byte) error {
 	return fmt.Errorf("results is read-only")
 }
-

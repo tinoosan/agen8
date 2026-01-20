@@ -100,4 +100,3 @@ func TestVirtualStagingResource_ReadWriteAppendAndReadOnlyMain(t *testing.T) {
 		})
 	}
 }
-

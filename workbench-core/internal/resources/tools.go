@@ -109,4 +109,3 @@ func (tr *ToolsResource) Write(_ string, _ []byte) error {
 func (tr *ToolsResource) Append(_ string, _ []byte) error {
 	return fmt.Errorf("tools append: not supported (tools is read-only)")
 }
-

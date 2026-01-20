@@ -211,4 +211,3 @@ func (m Model) renderModelPicker(base string) string {
 	_ = base
 	return strings.Join(result, "\n")
 }
-

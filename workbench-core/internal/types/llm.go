@@ -5,6 +5,31 @@ import (
 	"encoding/json"
 )
 
+// Tool represents a function/tool the model can call.
+type Tool struct {
+	Type     string       `json:"type"` // "function"
+	Function ToolFunction `json:"function"`
+}
+
+type ToolFunction struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	Parameters  interface{} `json:"parameters,omitempty"` // JSON schema
+	Strict      bool        `json:"strict,omitempty"`
+}
+
+// ToolCall represents a tool/function call from the model.
+type ToolCall struct {
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function ToolCallFunction `json:"function"`
+}
+
+type ToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // JSON string
+}
+
 // LLMClient is the minimal interface used by the agent loop to request a model completion.
 //
 // v0 scope:
@@ -49,22 +74,24 @@ type LLMClientStreaming interface {
 // System is the system prompt string (developer instructions). Messages represent the
 // conversational transcript (user/assistant turns).
 type LLMRequest struct {
-	Model              string       // required: model identifier (provider-specific)
-	System             string       // optional: system prompt
-	Messages           []LLMMessage // required: conversation messages
-	MaxTokens          int          // optional: max output tokens
-	Temperature        float64      // optional: sampling temperature
-	JSONOnly           bool         // optional: request JSON-only output (provider best-effort)
+	Model       string       // required: model identifier (provider-specific)
+	System      string       // optional: system prompt
+	Messages    []LLMMessage // required: conversation messages
+	MaxTokens   int          // optional: max output tokens
+	Temperature float64      // optional: sampling temperature
+	JSONOnly    bool         // optional: request JSON-only output (provider best-effort)
+	Tools       []Tool       `json:"tools,omitempty"`
+	ToolChoice  string       `json:"toolChoice,omitempty"` // "auto", "none", "required"
 	// ResponseSchema optionally requests Structured Outputs. When set, providers that
 	// support it should constrain output to exactly match the schema.
 	//
 	// Notes:
 	// - Only a subset of JSON Schema is supported in strict mode (provider-specific).
 	// - When ResponseSchema is set, clients should prefer json_schema over json_object.
-	ResponseSchema      *LLMResponseSchema
-	PreviousResponseID string       // optional: for Responses API reasoning context
-	ReasoningEffort    string       // optional: none|minimal|low|medium|high|xhigh (provider best-effort)
-	ReasoningSummary   string       // optional: off|auto|concise|detailed (provider best-effort)
+	ResponseSchema     *LLMResponseSchema
+	PreviousResponseID string // optional: for Responses API reasoning context
+	ReasoningEffort    string // optional: none|minimal|low|medium|high|xhigh (provider best-effort)
+	ReasoningSummary   string // optional: off|auto|concise|detailed (provider best-effort)
 }
 
 // LLMResponseSchema describes a Structured Outputs schema request.
@@ -84,8 +111,10 @@ type LLMResponseSchema struct {
 
 // LLMMessage is a minimal chat message.
 type LLMMessage struct {
-	Role    string // "system" | "user" | "assistant"
-	Content string
+	Role       string // "system" | "user" | "assistant" | "tool"
+	Content    string
+	ToolCallID string // used when Role=="tool": tool_call_id
+	ToolCalls  []ToolCall
 }
 
 // LLMResponse is the minimal response used by the agent loop.
@@ -94,6 +123,7 @@ type LLMResponse struct {
 	Raw        json.RawMessage // optional: raw provider JSON response (debug)
 	Usage      *LLMUsage       // optional: token usage
 	ResponseID string          // optional: response ID for Responses API
+	ToolCalls  []ToolCall      `json:"toolCalls,omitempty"`
 }
 
 // LLMUsage contains token usage numbers when a provider returns them.

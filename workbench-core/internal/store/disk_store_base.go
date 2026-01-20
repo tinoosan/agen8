@@ -64,4 +64,3 @@ func (d *DiskStore) EnsureDir(dir string, files ...string) error {
 	}
 	return nil
 }
-

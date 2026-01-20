@@ -180,4 +180,3 @@ func (m Model) renderHelpModal(base string) string {
 	}
 	return strings.Join(result, "\n")
 }
-

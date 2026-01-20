@@ -37,9 +37,9 @@ func NewDiskProfileStoreFromDir(baseDir string) (*DiskProfileStore, error) {
 	}
 	s := &DiskProfileStore{
 		DiskStagingStore: DiskStagingStore{
-			DiskStore:  DiskStore{Dir: baseDir},
-			mainFile:   "profile.md",
-			storeName:  "disk profile store",
+			DiskStore: DiskStore{Dir: baseDir},
+			mainFile:  "profile.md",
+			storeName: "disk profile store",
 		},
 	}
 	if err := s.ensure(); err != nil {

@@ -40,9 +40,9 @@ func NewDiskMemoryStoreFromDir(baseDir string) (*DiskMemoryStore, error) {
 	}
 	s := &DiskMemoryStore{
 		DiskStagingStore: DiskStagingStore{
-			DiskStore:  DiskStore{Dir: baseDir},
-			mainFile:   "memory.md",
-			storeName:  "disk memory store",
+			DiskStore: DiskStore{Dir: baseDir},
+			mainFile:  "memory.md",
+			storeName: "disk memory store",
 		},
 	}
 	if err := s.ensure(); err != nil {

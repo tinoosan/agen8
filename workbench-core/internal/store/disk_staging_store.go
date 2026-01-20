@@ -143,4 +143,3 @@ func (s *DiskStagingStore) AppendCommitLog(_ context.Context, line types.MemoryC
 	_, err = f.Write(append(b, '\n'))
 	return err
 }
-

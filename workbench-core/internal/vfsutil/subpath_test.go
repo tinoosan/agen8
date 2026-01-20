@@ -123,4 +123,3 @@ func TestCleanResultsArtifactPath(t *testing.T) {
 		})
 	}
 }
-

@@ -28,4 +28,3 @@ func Positive(name string, n int) error {
 	}
 	return nil
 }
-

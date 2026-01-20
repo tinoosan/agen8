@@ -382,4 +382,3 @@ func (m Model) renderFilePicker(base string) string {
 
 	return strings.Join(result, "\n")
 }
-

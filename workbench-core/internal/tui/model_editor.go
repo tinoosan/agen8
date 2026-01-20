@@ -363,4 +363,3 @@ func hasMountPrefix(p string, mount string) bool {
 	base := "/" + mount
 	return p == base || strings.HasPrefix(p, base+"/")
 }
-

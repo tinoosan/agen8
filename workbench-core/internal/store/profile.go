@@ -42,4 +42,3 @@ type ProfileStore interface {
 	StagingArea
 	CommitLog
 }
-

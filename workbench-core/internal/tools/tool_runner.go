@@ -37,7 +37,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/validate"
@@ -275,7 +274,7 @@ func (r *Runner) persist(callID string, resp types.ToolResponse, artifacts []Too
 	}
 
 	// Write response.json last.
-	b, err := jsonutil.MarshalPretty(resp)
+	b, err := types.MarshalPretty(resp)
 	if err != nil {
 		return fmt.Errorf("marshal response: %w", err)
 	}

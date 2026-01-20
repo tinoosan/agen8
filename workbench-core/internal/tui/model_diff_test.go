@@ -207,9 +207,9 @@ func TestTranscript_FilePatch_EmitsPatchBlock(t *testing.T) {
 	req := events.Event{
 		Type: "agent.op.request",
 		Data: map[string]string{
-			"op":            "fs.patch",
-			"path":          "/workspace/b.txt",
-			"patchPreview":  "--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-before\n+after\n",
+			"op":             "fs.patch",
+			"path":           "/workspace/b.txt",
+			"patchPreview":   "--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-before\n+after\n",
 			"patchTruncated": "false",
 		},
 	}
@@ -245,4 +245,3 @@ func TestTranscript_FilePatch_EmitsPatchBlock(t *testing.T) {
 		t.Fatalf("expected patch to be rendered, got:\n%s", view)
 	}
 }
-

@@ -31,7 +31,6 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
-	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/validate"
 )
@@ -112,7 +111,7 @@ func SaveRun(cfg config.Config, run types.Run) error {
 		return err
 	}
 
-	b, err := jsonutil.MarshalPretty(run)
+	b, err := types.MarshalPretty(run)
 	if err != nil {
 		return fmt.Errorf("error marshalling run: %w", err)
 	}

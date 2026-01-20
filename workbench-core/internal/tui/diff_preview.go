@@ -74,4 +74,3 @@ func capLines(s string, max int) (string, bool) {
 	}
 	return strings.Join(lines[:max], "\n") + "\n…", true
 }
-

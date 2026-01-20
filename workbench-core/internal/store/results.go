@@ -266,4 +266,3 @@ func (s *InMemoryResultsStore) ListArtifacts(callID string) ([]ArtifactMeta, err
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
 }
-

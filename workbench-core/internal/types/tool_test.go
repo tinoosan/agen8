@@ -72,4 +72,3 @@ func TestToolManifestValidate_DuplicateActionID(t *testing.T) {
 		t.Fatalf("expected error")
 	}
 }
-

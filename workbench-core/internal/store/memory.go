@@ -67,4 +67,3 @@ type MemoryStore interface {
 	StagingArea
 	CommitLog
 }
-

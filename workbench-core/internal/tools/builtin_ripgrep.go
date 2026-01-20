@@ -269,13 +269,13 @@ func (r *BuiltinRipgrepInvoker) Invoke(ctx context.Context, req types.ToolReques
 		if err == nil {
 			// proceed
 		} else {
-		cancel()
-		_ = cmd.Wait()
-		<-stderrCh
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return ToolCallResult{}, &InvokeError{Code: "timeout", Message: "rg timed out", Retryable: true, Err: ctx.Err()}
-		}
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("read rg output: %v", err), Err: err}
+			cancel()
+			_ = cmd.Wait()
+			<-stderrCh
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return ToolCallResult{}, &InvokeError{Code: "timeout", Message: "rg timed out", Retryable: true, Err: ctx.Err()}
+			}
+			return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("read rg output: %v", err), Err: err}
 		}
 	}
 

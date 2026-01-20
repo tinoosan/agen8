@@ -20,4 +20,3 @@ var (
 	// Prefer checking with errors.Is(err, ErrConflict).
 	ErrConflict = errors.Join(werrors.ErrConflict, errors.New("conflict"))
 )
-
