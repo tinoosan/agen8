@@ -74,4 +74,3 @@ func stripOuterCodeFence(s string) string {
 	}
 	return t
 }
-

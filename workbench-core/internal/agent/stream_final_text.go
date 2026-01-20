@@ -19,8 +19,8 @@ type finalTextStreamDecoder struct {
 
 	target valueTarget
 
-	opBuf    []byte
-	opKnown  bool
+	opBuf     []byte
+	opKnown   bool
 	opIsFinal bool
 
 	// If "text" arrives before we know op=="final", buffer decoded text here (bounded).
@@ -303,7 +303,7 @@ func (p *jsonStringParser) Step(b byte) (done bool, out []byte) {
 			hi := p.pendingHigh
 			p.pendingHigh = 0
 			if r >= 0xDC00 && r <= 0xDFFF {
-				code := 0x10000 + ((hi-0xD800)<<10) + (r - 0xDC00)
+				code := 0x10000 + ((hi - 0xD800) << 10) + (r - 0xDC00)
 				return false, runeBytes(rune(code))
 			}
 			// invalid pair
@@ -389,4 +389,3 @@ func splitValidUTF8Prefix(b []byte) (head []byte, tail []byte) {
 	}
 	return nil, b
 }
-

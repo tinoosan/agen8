@@ -21,4 +21,3 @@ var (
 	// ErrRequired indicates a required value was missing.
 	ErrRequired = errors.New("required value missing")
 )
-

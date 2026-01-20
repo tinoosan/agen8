@@ -203,4 +203,3 @@ func FormatAtRef(rel string) string {
 	}
 	return "@" + rel
 }
-

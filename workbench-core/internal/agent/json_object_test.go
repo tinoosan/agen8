@@ -33,4 +33,3 @@ func TestExtractSingleJSONObject(t *testing.T) {
 		})
 	}
 }
-

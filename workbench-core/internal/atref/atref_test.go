@@ -61,4 +61,3 @@ func TestFormatAtRef_QuotesWhenNeeded(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
-

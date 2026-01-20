@@ -50,9 +50,9 @@ func (c RetryConfig) withDefaults() RetryConfig {
 // RetryClient wraps an LLMClient and retries transient failures with exponential backoff.
 //
 // Notes:
-// - This wrapper only retries *transient* failures (rate limits, timeouts, network errors).
-// - It intentionally does NOT retry structured-output schema rejection errors; the underlying
-//   OpenAI client already falls back from json_schema to JSON-object mode when appropriate.
+//   - This wrapper only retries *transient* failures (rate limits, timeouts, network errors).
+//   - It intentionally does NOT retry structured-output schema rejection errors; the underlying
+//     OpenAI client already falls back from json_schema to JSON-object mode when appropriate.
 type RetryClient struct {
 	Wrapped types.LLMClient
 	Config  RetryConfig
@@ -290,4 +290,3 @@ func safeErrorString(err error) (out string) {
 	}()
 	return err.Error()
 }
-
