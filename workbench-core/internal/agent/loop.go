@@ -394,7 +394,7 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 func (a *Agent) finalizeOnMaxSteps(ctx context.Context, baseSystem string, msgs []types.LLMMessage, step int, lastResponseID string) (final string, updated []types.LLMMessage, usedSteps int, err error) {
 	// Ask the model to stop and provide a final summary without further host ops.
 	msgs = append(msgs, types.LLMMessage{
-		Role: "user",
+		Role:    "user",
 		Content: "You have reached the maximum step limit. Return a final response summarizing what has been completed so far, what remains, and any important context for resuming. Return ONLY one JSON object: {\"op\":\"final\",\"text\":\"...\"}.",
 	})
 
