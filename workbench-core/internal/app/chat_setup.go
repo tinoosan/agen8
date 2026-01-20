@@ -102,8 +102,6 @@ func setupTUIChatRuntime(
 	workspace := wsr.(*resources.DirResource)
 	_, trr, _, _ := fs.Resolve("/" + vfs.MountTrace)
 	traceRes := trr.(*resources.TraceResource)
-	_, mr, _, _ := fs.Resolve("/" + vfs.MountMemory)
-	memoryRes := mr.(*resources.MemoryResource)
 	_, hr, _, _ := fs.Resolve("/" + vfs.MountHistory)
 	historyRes = hr.(*resources.HistoryResource)
 
@@ -120,7 +118,7 @@ func setupTUIChatRuntime(
 			"/results":   "(virtual)",
 			"/trace":     traceRes.BaseDir,
 			"/tools":     "(virtual)",
-			"/memory":    memoryRes.BaseDir,
+			"/memory":    "(virtual)",
 			"/profile":   "(global)",
 			"/history":   historyRes.BaseDir,
 		},
@@ -323,9 +321,9 @@ func setupTUIChatRuntime(
 
 		respData := map[string]string{
 			"opId": opID,
-			"op":  resp.Op,
-			"ok":  fmtBool(resp.Ok),
-			"err": resp.Error,
+			"op":   resp.Op,
+			"ok":   fmtBool(resp.Ok),
+			"err":  resp.Error,
 		}
 
 		// For non-patch file ops, emit a host-generated diff so the UI can display a
