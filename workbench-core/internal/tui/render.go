@@ -339,6 +339,211 @@ func renderToolRunTranscript(toolID, actionID, input string) string {
 			m = "GET"
 		}
 		return m + " " + u
+
+	case "builtin.git":
+		switch actionID {
+		case "status":
+			var in struct {
+				Cwd string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			if cwd != "." {
+				return "git status (cwd=" + cwd + ")"
+			}
+			return "git status"
+		case "log":
+			var in struct {
+				N   int    `json:"n"`
+				Cwd string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			n := in.N
+			if n == 0 {
+				n = 20
+			}
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			cmd := fmt.Sprintf("git log -n %d", n)
+			if cwd != "." {
+				cmd += " (cwd=" + cwd + ")"
+			}
+			return cmd
+		case "diff":
+			var in struct {
+				Staged bool   `json:"staged"`
+				File   string `json:"file"`
+				Cwd    string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cmd := "git diff"
+			if in.Staged {
+				cmd += " --staged"
+			}
+			if f := strings.TrimSpace(in.File); f != "" {
+				cmd += " -- " + f
+			}
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			if cwd != "." {
+				cmd += " (cwd=" + cwd + ")"
+			}
+			return cmd
+		case "branch":
+			var in struct {
+				Create string `json:"create"`
+				Cwd    string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			if b := strings.TrimSpace(in.Create); b != "" {
+				cmd := "git branch " + b
+				if cwd != "." {
+					cmd += " (cwd=" + cwd + ")"
+				}
+				return cmd
+			}
+			if cwd != "." {
+				return "git branch (cwd=" + cwd + ")"
+			}
+			return "git branch"
+		case "add":
+			var in struct {
+				Files []string `json:"files"`
+				Cwd   string   `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			n := len(in.Files)
+			cmd := "git add"
+			if n > 0 && n <= 3 {
+				cmd += " " + strings.Join(in.Files, " ")
+			} else if n > 0 {
+				cmd += fmt.Sprintf(" %d files", n)
+			}
+			if cwd != "." {
+				cmd += " (cwd=" + cwd + ")"
+			}
+			return cmd
+		case "commit":
+			var in struct {
+				Message string `json:"message"`
+				Cwd     string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			msg := strings.TrimSpace(in.Message)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			cmd := "git commit"
+			if msg != "" {
+				cmd += " -m " + quoteShort(msg, 60)
+			}
+			if cwd != "." {
+				cmd += " (cwd=" + cwd + ")"
+			}
+			return cmd
+		}
+
+	case "builtin.find":
+		if actionID != "files" {
+			return fmt.Sprintf("%s/%s", toolID, actionID)
+		}
+		var in struct {
+			Cwd        string `json:"cwd"`
+			Pattern    string `json:"pattern"`
+			Type       string `json:"type"`
+			MaxResults int    `json:"maxResults"`
+		}
+		_ = json.Unmarshal([]byte(input), &in)
+		cwd := strings.TrimSpace(in.Cwd)
+		if cwd == "" {
+			cwd = "."
+		}
+		pat := strings.TrimSpace(in.Pattern)
+		typ := strings.TrimSpace(in.Type)
+		s := "find"
+		if pat != "" {
+			s += " pattern=" + quoteShort(pat, 60)
+		}
+		if typ != "" {
+			s += " type=" + typ
+		}
+		if in.MaxResults > 0 {
+			s += fmt.Sprintf(" maxResults=%d", in.MaxResults)
+		}
+		if cwd != "." {
+			s += " cwd=" + cwd
+		}
+		return s
+
+	case "builtin.test":
+		switch actionID {
+		case "detect":
+			return "test detect"
+		case "list":
+			return "test list"
+		case "run":
+			var in struct {
+				Filter  string `json:"filter"`
+				Verbose bool   `json:"verbose"`
+				Cwd     string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			s := "test run"
+			if strings.TrimSpace(in.Filter) != "" {
+				s += " filter=" + quoteShort(strings.TrimSpace(in.Filter), 60)
+			}
+			if in.Verbose {
+				s += " -v"
+			}
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			if cwd != "." {
+				s += " cwd=" + cwd
+			}
+			return s
+		}
+
+	case "builtin.lint":
+		switch actionID {
+		case "detect":
+			return "lint detect"
+		case "run":
+			var in struct {
+				Fix bool `json:"fix"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			if in.Fix {
+				return "lint run --fix"
+			}
+			return "lint run"
+		case "format":
+			var in struct {
+				Files []string `json:"files"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			if n := len(in.Files); n > 0 {
+				return fmt.Sprintf("lint format (%d files)", n)
+			}
+			return "lint format"
+		}
 	}
 
 	// Default: don't leak opaque tool inputs into chat.
@@ -448,6 +653,198 @@ func renderToolRunInspector(toolID, actionID, input string) string {
 			return fmt.Sprintf("%s %s %s maxBytes=%d", base, m, truncateRight(u, 140), in.MaxBytes)
 		}
 		return fmt.Sprintf("%s %s %s", base, m, truncateRight(u, 160))
+
+	case "builtin.git":
+		switch actionID {
+		case "status":
+			var in struct {
+				Cwd string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			return fmt.Sprintf("%s git status cwd=%s", base, cwd)
+		case "log":
+			var in struct {
+				N      int    `json:"n"`
+				Format string `json:"format"`
+				Cwd    string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			n := in.N
+			if n == 0 {
+				n = 20
+			}
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			f := strings.TrimSpace(in.Format)
+			if f == "" {
+				f = "default"
+			}
+			return fmt.Sprintf("%s git log n=%d format=%s cwd=%s", base, n, f, cwd)
+		case "diff":
+			var in struct {
+				Staged bool   `json:"staged"`
+				File   string `json:"file"`
+				Cwd    string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			file := strings.TrimSpace(in.File)
+			if file != "" {
+				return fmt.Sprintf("%s git diff staged=%t file=%s cwd=%s", base, in.Staged, quoteShort(file, 120), cwd)
+			}
+			return fmt.Sprintf("%s git diff staged=%t cwd=%s", base, in.Staged, cwd)
+		case "branch":
+			var in struct {
+				Create string `json:"create"`
+				Cwd    string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			create := strings.TrimSpace(in.Create)
+			if create != "" {
+				return fmt.Sprintf("%s git branch create=%s cwd=%s", base, quoteShort(create, 120), cwd)
+			}
+			return fmt.Sprintf("%s git branch cwd=%s", base, cwd)
+		case "add":
+			var in struct {
+				Files []string `json:"files"`
+				Cwd   string   `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			return fmt.Sprintf("%s git add files=%s cwd=%s", base, listPreview(in.Files, 6), cwd)
+		case "commit":
+			var in struct {
+				Message string `json:"message"`
+				Cwd     string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			msg := strings.TrimSpace(in.Message)
+			if msg != "" {
+				return fmt.Sprintf("%s git commit message=%s cwd=%s", base, quoteShort(msg, 80), cwd)
+			}
+			return fmt.Sprintf("%s git commit cwd=%s", base, cwd)
+		}
+
+	case "builtin.find":
+		if actionID != "files" {
+			break
+		}
+		var in struct {
+			Cwd        string `json:"cwd"`
+			Pattern    string `json:"pattern"`
+			Type       string `json:"type"`
+			MaxResults int    `json:"maxResults"`
+		}
+		_ = json.Unmarshal([]byte(input), &in)
+		cwd := strings.TrimSpace(in.Cwd)
+		if cwd == "" {
+			cwd = "."
+		}
+		pat := strings.TrimSpace(in.Pattern)
+		typ := strings.TrimSpace(in.Type)
+		if in.MaxResults > 0 {
+			return fmt.Sprintf("%s pattern=%s type=%s cwd=%s maxResults=%d", base, quoteShort(pat, 120), typ, cwd, in.MaxResults)
+		}
+		return fmt.Sprintf("%s pattern=%s type=%s cwd=%s", base, quoteShort(pat, 120), typ, cwd)
+
+	case "builtin.test":
+		switch actionID {
+		case "detect":
+			var in struct {
+				Cwd string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			return fmt.Sprintf("%s detect cwd=%s", base, cwd)
+		case "list":
+			var in struct {
+				Cwd string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			return fmt.Sprintf("%s list cwd=%s", base, cwd)
+		case "run":
+			var in struct {
+				Cwd     string `json:"cwd"`
+				Filter  string `json:"filter"`
+				Verbose bool   `json:"verbose"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			filter := strings.TrimSpace(in.Filter)
+			if filter != "" {
+				return fmt.Sprintf("%s run cwd=%s filter=%s verbose=%t", base, cwd, quoteShort(filter, 120), in.Verbose)
+			}
+			return fmt.Sprintf("%s run cwd=%s verbose=%t", base, cwd, in.Verbose)
+		}
+
+	case "builtin.lint":
+		switch actionID {
+		case "detect":
+			var in struct {
+				Cwd string `json:"cwd"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			return fmt.Sprintf("%s detect cwd=%s", base, cwd)
+		case "run":
+			var in struct {
+				Cwd string `json:"cwd"`
+				Fix bool   `json:"fix"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			return fmt.Sprintf("%s run cwd=%s fix=%t", base, cwd, in.Fix)
+		case "format":
+			var in struct {
+				Cwd   string   `json:"cwd"`
+				Files []string `json:"files"`
+			}
+			_ = json.Unmarshal([]byte(input), &in)
+			cwd := strings.TrimSpace(in.Cwd)
+			if cwd == "" {
+				cwd = "."
+			}
+			if len(in.Files) > 0 {
+				return fmt.Sprintf("%s format cwd=%s files=%s", base, cwd, listPreview(in.Files, 6))
+			}
+			return fmt.Sprintf("%s format cwd=%s", base, cwd)
+		}
 
 	case "builtin.format":
 		// Avoid echoing large text payloads; show only metadata.

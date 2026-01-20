@@ -7,7 +7,6 @@ var availableCommands = []string{
 	"/model",
 	"/reasoning",
 	"/copy",
-	"/open",
 	"/editor",
 	"/cd",
 	"/pwd",

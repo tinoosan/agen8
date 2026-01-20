@@ -148,7 +148,9 @@ func setupTUIChatRuntime(
 		FS:              fs,
 		Runner:          &runner,
 		DefaultMaxBytes: 4096,
-		MaxReadBytes:    16 * 1024,
+		// Allow tool manifest reads (/tools/<toolId>) to be non-truncated by default.
+		// Other fs.read operations remain bounded by DefaultMaxBytes unless the agent requests more.
+		MaxReadBytes: 256 * 1024,
 	}
 
 	run.Runtime = &types.RunRuntimeConfig{

@@ -149,6 +149,24 @@ func (m *Model) rebuildTranscript() {
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptFileChange:
 			raw := strings.TrimSpace(it.text)
+			// #region agent log
+			// H1: single-file vs multi-file file-change blocks differ in raw structure
+			// (e.g., group header, number of blank lines), leading to different markdown rendering.
+			rawFirst := raw
+			if idx := strings.IndexByte(rawFirst, '\n'); idx >= 0 {
+				rawFirst = rawFirst[:idx]
+			}
+			if len(rawFirst) > 120 {
+				rawFirst = rawFirst[:120]
+			}
+			debugLog("debug-session", "pre-fix", "H1", "model_transcript.go:transcriptFileChange", "file-change raw header snapshot", map[string]interface{}{
+				"rawLen":        len(raw),
+				"rawFirstLine":  rawFirst,
+				"isGrouped":     strings.HasPrefix(strings.TrimSpace(raw), "## File changes"),
+				"containsFence": strings.Contains(raw, "```diff"),
+			})
+			// #endregion
+
 			// Header is the first line; body is the rest. (We intentionally tolerate
 			// either "\n" or "\n\n" between them.)
 			nl := strings.IndexByte(raw, '\n')
@@ -170,8 +188,32 @@ func (m *Model) rebuildTranscript() {
 			}
 
 			path, added, deleted, hasCounts := parseFileChangeHeaderLine(hdr)
+			// #region agent log
+			// H2: header parsing differs between grouped ("## File changes") and single-file headers,
+			// potentially affecting spacing/styling.
+			debugLog("debug-session", "pre-fix", "H2", "model_transcript.go:transcriptFileChange", "parsed file-change header", map[string]interface{}{
+				"hdr":       hdr,
+				"path":      path,
+				"hasCounts": hasCounts,
+				"added":     added,
+				"deleted":   deleted,
+			})
+			// #endregion
 			headerRendered := renderFileChangeHeaderLine(path, added, deleted, hasCounts, fileInnerW)
 			bodyRendered := strings.Trim(m.renderer.RenderMarkdown(strings.TrimSpace(body), fileInnerW), "\n")
+			// #region agent log
+			// H3: Glamour rendering may emit leading newlines for code blocks depending on context.
+			leadNL := 0
+			for leadNL < len(bodyRendered) && bodyRendered[leadNL] == '\n' {
+				leadNL++
+			}
+			debugLog("debug-session", "pre-fix", "H3", "model_transcript.go:transcriptFileChange", "rendered body newline characteristics", map[string]interface{}{
+				"bodyLen":          len(body),
+				"bodyRenderedLen":  len(bodyRendered),
+				"bodyLeadNewlines": leadNL,
+				"isGrouped":        strings.HasPrefix(strings.TrimSpace(hdr), "## File changes"),
+			})
+			// #endregion
 			// Keep the diff tight to the header (one newline).
 			rendered := headerRendered + "\n" + bodyRendered
 			lines = append(lines, m.styleFileChangeBox.Render(rendered))

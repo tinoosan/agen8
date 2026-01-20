@@ -26,7 +26,7 @@ These are function tools you can call **right now** — no discovery needed:
 
 ### 2. External Tools (Require Discovery)
 
-Use `tool_run` to invoke tools under `/tools` (bash, http, ripgrep, etc):
+Use `tool_run` to invoke tools under `/tools` (bash, http, ripgrep, git, find, test, lint, etc):
 
 1. `fs_read("/tools/<toolId>")` → read the manifest, learn required input fields
 2. `tool_run(toolId, actionId, input, timeoutMs)` → call with correct input
@@ -62,7 +62,7 @@ Workbench may provide **web-search-grounded model responses** (provider-dependen
 2. **Prefer `/workdir`** for user deliverables
 3. **`/workspace` is scratch** — not the user's project
 4. **Inside `batch`**, use dotted ops: `fs.write`, `fs.read`, `tool.run` (not underscores)
-5. **Tool sandboxes** — `builtin.bash` and `builtin.ripgrep` run in the host workdir (use workdir-relative paths in their inputs)
+5. **Tool sandboxes** — builtin tools run in the host workdir (use workdir-relative paths in their inputs), including `builtin.bash`, `builtin.ripgrep`, `builtin.git`, `builtin.find`, `builtin.test`, `builtin.lint`.
 
 ---
 

@@ -97,31 +97,8 @@ func (m *Model) openModelPicker() tea.Cmd {
 
 // closeModelPicker closes the model picker modal.
 func (m *Model) closeModelPicker() {
-	// #region agent log
-	// Hypothesis H2: close path doesn't re-layout/pad, leaving base view shorter than terminal height.
-	debugLog("debug-session", "pre-fix", "H2", "model_model_picker.go:98", "closeModelPicker start", map[string]interface{}{
-		"wasOpen":      m.modelPickerOpen,
-		"termW":        m.width,
-		"termH":        m.height,
-		"transcriptH":  m.transcript.Height,
-		"transcriptW":  m.transcript.Width,
-		"showDetails":  m.showDetails,
-		"turnInFlight": m.turnInFlight,
-	})
-	// #endregion
-
 	m.modelPickerOpen = false
 	m.modelPickerList = list.Model{}
-
-	// #region agent log
-	// Measure the resulting base view height immediately after closing.
-	vh := lipgloss.Height(m.View())
-	debugLog("debug-session", "pre-fix", "H2", "model_model_picker.go:104", "closeModelPicker after close", map[string]interface{}{
-		"viewH": vh,
-		"termH": m.height,
-		"delta": m.height - vh,
-	})
-	// #endregion
 }
 
 // selectModelFromPicker selects the currently highlighted model and triggers the /model command.

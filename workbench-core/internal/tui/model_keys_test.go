@@ -1131,7 +1131,7 @@ func TestFilePicker_EditorCommand_SelectRunsImmediately(t *testing.T) {
 	}
 }
 
-func TestFilePicker_OpenCommand_DoesNotAutoRun(t *testing.T) {
+func TestFilePicker_CdCommand_DoesNotAutoRun(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "workbench-filepicker-*")
 	if err != nil {
 		t.Fatalf("mkdtemp: %v", err)
@@ -1147,26 +1147,26 @@ func TestFilePicker_OpenCommand_DoesNotAutoRun(t *testing.T) {
 	m.workdir = tmp
 	m.layout()
 
-	m.single.SetValue("/open ")
+	m.single.SetValue("/cd ")
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'@'}})
 	opened := m2.(Model)
 	if !opened.filePickerOpen {
-		t.Fatalf("expected filePickerOpen true after '@' in /open arg")
+		t.Fatalf("expected filePickerOpen true after '@' in /cd arg")
 	}
 
 	m3, cmd := opened.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := m3.(Model)
 	if cmd != nil {
-		t.Fatalf("expected no cmd (should not auto-run /open), got %v", cmd)
+		t.Fatalf("expected no cmd (should not auto-run /cd), got %v", cmd)
 	}
 	if updated.turnInFlight {
-		t.Fatalf("expected turnInFlight false after /open selection (insert only)")
+		t.Fatalf("expected turnInFlight false after /cd selection (insert only)")
 	}
 	if runner.lastMessage != "" {
 		t.Fatalf("expected runner not called, got %q", runner.lastMessage)
 	}
-	if updated.single.Value() != "/open @a.txt " {
-		t.Fatalf("expected input %q, got %q", "/open @a.txt ", updated.single.Value())
+	if updated.single.Value() != "/cd @a.txt " {
+		t.Fatalf("expected input %q, got %q", "/cd @a.txt ", updated.single.Value())
 	}
 }
 

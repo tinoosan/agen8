@@ -37,6 +37,14 @@ type HostOpExecutor struct {
 	MaxReadBytes int
 }
 
+const (
+	// defaultToolsReadBytes is the default read budget for tool manifests under /tools/<toolId>.
+	//
+	// Tool manifests can be larger than the general-purpose fs.read default. If manifests are
+	// truncated, the agent can't reliably discover required fields and schemas.
+	defaultToolsReadBytes = 64 * 1024
+)
+
 func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 	if x == nil || x.FS == nil {
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: "host executor missing FS"}
@@ -68,6 +76,10 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		}
 		if maxBytes <= 0 {
 			maxBytes = 4096
+		}
+		// Special-case: tool manifests must not be truncated by default.
+		if strings.HasPrefix(strings.TrimSpace(req.Path), "/tools/") && maxBytes < defaultToolsReadBytes {
+			maxBytes = defaultToolsReadBytes
 		}
 		if x.MaxReadBytes > 0 && maxBytes > x.MaxReadBytes {
 			maxBytes = x.MaxReadBytes
