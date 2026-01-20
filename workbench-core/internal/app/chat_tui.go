@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -386,57 +385,6 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 				// Include the absolute workdir so the TUI can open $EDITOR without
 				// requiring a session/run to exist.
 				"workdir": cur,
-			},
-			Store:   boolp(false),
-			Console: boolp(false),
-		})
-		return "", true, nil
-	case "open":
-		cur, err := resolveWorkDir(r.opts.WorkDir)
-		if err != nil {
-			return "", true, err
-		}
-		_, display, err := resolveWorkdirVPathFromArg(cur, arg)
-		if err != nil {
-			r.emitPreInit(events.Event{
-				Type:    "ui.open.error",
-				Message: "Open",
-				Data: map[string]string{
-					"err": err.Error(),
-				},
-				Store:   boolp(false),
-				Console: boolp(false),
-			})
-			return "", true, nil
-		}
-
-		in, _ := json.Marshal(map[string]string{"path": display})
-		inv := tools.NewBuiltinOpenInvoker(cur)
-		_, invErr := inv.Invoke(r.ctx, types.ToolRequest{
-			Version:  "v1",
-			CallID:   "preinit",
-			ToolID:   types.ToolID("builtin.open"),
-			ActionID: "open",
-			Input:    in,
-		})
-		if invErr != nil {
-			r.emitPreInit(events.Event{
-				Type:    "ui.open.error",
-				Message: "Open",
-				Data: map[string]string{
-					"path": display,
-					"err":  invErr.Error(),
-				},
-				Store:   boolp(false),
-				Console: boolp(false),
-			})
-			return "", true, nil
-		}
-		r.emitPreInit(events.Event{
-			Type:    "ui.open.ok",
-			Message: "Opened file",
-			Data: map[string]string{
-				"path": display,
 			},
 			Store:   boolp(false),
 			Console: boolp(false),
@@ -1411,31 +1359,6 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			Console: boolp(false),
 		})
 		return "", true
-	case "open":
-		_, display, err := resolveWorkdirVPathFromArg(r.workdirBase, arg)
-		if err != nil {
-			r.mustEmit(context.Background(), events.Event{
-				Type:    "ui.open.error",
-				Message: "Open",
-				Data: map[string]string{
-					"err": err.Error(),
-				},
-				Store:   boolp(false),
-				Console: boolp(false),
-			})
-			return "", true
-		}
-		in, _ := json.Marshal(map[string]string{"path": display})
-		// Execute via the normal host primitive pathway so this appears in the Activity feed
-		// (tool.run) without involving the model/agent loop.
-		_ = r.agent.Exec.Exec(context.Background(), types.HostOpRequest{
-			Op:       types.HostOpToolRun,
-			ToolID:   types.ToolID("builtin.open"),
-			ActionID: "open",
-			Input:    in,
-		})
-		return "", true
-
 	case "model":
 		cur := strings.TrimSpace(r.model)
 		if cur == "" {
@@ -1632,7 +1555,6 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		if r.builtinInvokers != nil {
 			r.builtinInvokers[types.ToolID("builtin.bash")] = tools.NewBuiltinBashInvoker(workdirRes.BaseDir)
 			r.builtinInvokers[types.ToolID("builtin.ripgrep")] = tools.NewBuiltinRipgrepInvoker(workdirRes.BaseDir)
-			r.builtinInvokers[types.ToolID("builtin.open")] = tools.NewBuiltinOpenInvoker(workdirRes.BaseDir)
 		}
 
 		r.mustEmit(context.Background(), events.Event{

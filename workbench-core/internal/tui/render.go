@@ -339,22 +339,6 @@ func renderToolRunTranscript(toolID, actionID, input string) string {
 			m = "GET"
 		}
 		return m + " " + u
-
-	case "builtin.open":
-		if actionID != "open" {
-			return fmt.Sprintf("%s/%s", toolID, actionID)
-		}
-		var in struct {
-			Path string `json:"path"`
-		}
-		if err := json.Unmarshal([]byte(input), &in); err != nil {
-			return "Open"
-		}
-		p := strings.TrimSpace(in.Path)
-		if p == "" {
-			return "Open"
-		}
-		return "Open " + p
 	}
 
 	// Default: don't leak opaque tool inputs into chat.
@@ -464,22 +448,6 @@ func renderToolRunInspector(toolID, actionID, input string) string {
 			return fmt.Sprintf("%s %s %s maxBytes=%d", base, m, truncateRight(u, 140), in.MaxBytes)
 		}
 		return fmt.Sprintf("%s %s %s", base, m, truncateRight(u, 160))
-
-	case "builtin.open":
-		if actionID != "open" {
-			break
-		}
-		var in struct {
-			Path string `json:"path"`
-		}
-		if err := json.Unmarshal([]byte(input), &in); err != nil {
-			break
-		}
-		p := strings.TrimSpace(in.Path)
-		if p == "" {
-			break
-		}
-		return fmt.Sprintf("%s path=%s", base, quoteShort(p, 140))
 
 	case "builtin.format":
 		// Avoid echoing large text payloads; show only metadata.
