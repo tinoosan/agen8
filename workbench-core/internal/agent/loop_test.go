@@ -3,6 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"strings"
@@ -98,6 +101,33 @@ func (f *fakeStreamingLLMChunks) GenerateStream(ctx context.Context, req types.L
 	return types.LLMResponse{Text: f.Final}, nil
 }
 
+type fakeLLMWithError struct {
+	Replies []string
+	ErrAt   int // 1-based call index; if 0, never errors
+	Err     error
+
+	calls int
+	i     int
+}
+
+func (f *fakeLLMWithError) Generate(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
+	_ = ctx
+	_ = req
+	f.calls++
+	if f.ErrAt > 0 && f.calls == f.ErrAt {
+		if f.Err != nil {
+			return types.LLMResponse{}, f.Err
+		}
+		return types.LLMResponse{}, errors.New("forced error")
+	}
+	if f.i >= len(f.Replies) {
+		return types.LLMResponse{Text: `{"op":"final","text":"no more replies"}`}, nil
+	}
+	out := types.LLMResponse{Text: f.Replies[f.i]}
+	f.i++
+	return out, nil
+}
+
 func TestAgentLoopV0_Run_ExecutesOpsUntilFinal(t *testing.T) {
 	llm := &fakeLLM{
 		Replies: []string{
@@ -124,6 +154,102 @@ func TestAgentLoopV0_Run_ExecutesOpsUntilFinal(t *testing.T) {
 	}
 	if len(called) != 1 || called[0].Op != types.HostOpFSList || called[0].Path != "/tools" {
 		t.Fatalf("unexpected calls: %+v", called)
+	}
+}
+
+func TestAgentLoopV0_RunConversation_GracefulMaxSteps_Finalizes(t *testing.T) {
+	llm := &fakeLLM{
+		Replies: []string{
+			`{"op":"fs.list","path":"/tools"}`,
+			`{"op":"final","text":"summary"}`,
+		},
+	}
+	var called []types.HostOpRequest
+	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		_ = ctx
+		called = append(called, req)
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+	}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 1}
+	final, msgs, steps, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if final != "summary" {
+		t.Fatalf("unexpected final %q", final)
+	}
+	if steps != 2 {
+		t.Fatalf("expected steps=2 (finalization step), got %d", steps)
+	}
+	if len(msgs) == 0 {
+		t.Fatalf("expected updated messages")
+	}
+	if len(called) != 1 || called[0].Op != types.HostOpFSList {
+		t.Fatalf("expected one fs.list call, got %+v", called)
+	}
+}
+
+func TestAgentLoopV0_RunConversationWithCheckpoints_ResumesWithoutRepeatingOps(t *testing.T) {
+	tmp := t.TempDir()
+	cpPath := filepath.Join(tmp, "agent_checkpoint.json")
+
+	var called []types.HostOpRequest
+	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		_ = ctx
+		called = append(called, req)
+		return types.HostOpResponse{Op: req.Op, Ok: true, Text: req.Path}
+	}
+
+	// First run: execute step 1 then fail on step 2, leaving a checkpoint.
+	llm1 := &fakeLLMWithError{
+		Replies: []string{
+			`{"op":"fs.list","path":"/tools"}`,
+		},
+		ErrAt: 2,
+		Err:   errors.New("transient llm error"),
+	}
+	a1 := &Agent{LLM: llm1, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	_, _, _, err := a1.RunConversationWithCheckpoints(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}}, cpPath)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if len(called) != 1 || called[0].Op != types.HostOpFSList {
+		t.Fatalf("expected one fs.list call in first run, got %+v", called)
+	}
+	if _, err := os.Stat(cpPath); err != nil {
+		t.Fatalf("expected checkpoint file to exist: %v", err)
+	}
+
+	// Second run: resume from checkpoint and run a different op, then final.
+	llm2 := &fakeLLM{
+		Replies: []string{
+			`{"op":"fs.read","path":"/x","maxBytes":10}`,
+			`{"op":"final","text":"done"}`,
+		},
+	}
+	a2 := &Agent{LLM: llm2, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	final, _, steps, err := a2.RunConversationWithCheckpoints(context.Background(), []types.LLMMessage{{Role: "user", Content: "ignored"}}, cpPath)
+	if err != nil {
+		t.Fatalf("RunConversationWithCheckpoints: %v", err)
+	}
+	if final != "done" {
+		t.Fatalf("unexpected final %q", final)
+	}
+	if steps != 3 {
+		t.Fatalf("expected final at step 3, got %d", steps)
+	}
+
+	if len(called) != 2 {
+		t.Fatalf("expected 2 host calls total, got %+v", called)
+	}
+	if called[0].Op != types.HostOpFSList {
+		t.Fatalf("expected first call fs.list, got %+v", called[0])
+	}
+	if called[1].Op != types.HostOpFSRead || called[1].Path != "/x" {
+		t.Fatalf("expected second call fs.read /x, got %+v", called[1])
+	}
+	if _, err := os.Stat(cpPath); err == nil {
+		t.Fatalf("expected checkpoint file to be cleared")
 	}
 }
 

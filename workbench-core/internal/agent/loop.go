@@ -70,6 +70,34 @@ type Agent struct {
 //   - When the model returns {"op":"final","text":"..."}, the agent appends that final JSON
 //     object as the last assistant message and returns text to the host to display.
 func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (final string, updated []types.LLMMessage, steps int, err error) {
+	return a.runConversation(ctx, msgs, 1, "", "", "")
+}
+
+// RunConversationWithCheckpoints executes the agent loop like RunConversation, but
+// persists and resumes from a durable checkpoint at checkpointPath.
+//
+// If a valid checkpoint exists at checkpointPath, it takes precedence over msgs.
+func (a *Agent) RunConversationWithCheckpoints(ctx context.Context, msgs []types.LLMMessage, checkpointPath string) (final string, updated []types.LLMMessage, steps int, err error) {
+	cp, err := LoadAgentCheckpoint(checkpointPath)
+	if err != nil {
+		return "", nil, 0, err
+	}
+	startStep := 1
+	lastResponseID := ""
+	userMsg := ""
+	if cp != nil {
+		msgs = cp.Messages
+		startStep = cp.NextStep
+		lastResponseID = strings.TrimSpace(cp.LastResponseID)
+		userMsg = strings.TrimSpace(cp.UserMessage)
+	}
+	if strings.TrimSpace(userMsg) == "" {
+		userMsg = extractTurnUserMessage(msgs)
+	}
+	return a.runConversation(ctx, msgs, startStep, lastResponseID, checkpointPath, userMsg)
+}
+
+func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, startStep int, lastResponseID string, checkpointPath string, checkpointUserMessage string) (final string, updated []types.LLMMessage, steps int, err error) {
 	if a == nil || a.LLM == nil {
 		return "", nil, 0, fmt.Errorf("agent LLM is required")
 	}
@@ -99,11 +127,20 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 	// Copy the slice so the caller can keep their own version if needed.
 	msgs = append([]types.LLMMessage(nil), msgs...)
 
-	// Track the last Responses API response ID so we can preserve reasoning context
-	// across steps via previous_response_id.
-	var lastResponseID string
+	if startStep < 1 {
+		startStep = 1
+	}
+	lastResponseID = strings.TrimSpace(lastResponseID)
 
-	for step := 1; step <= maxSteps; step++ {
+	turnUserMessage := strings.TrimSpace(checkpointUserMessage)
+	if turnUserMessage == "" {
+		turnUserMessage = extractTurnUserMessage(msgs)
+	}
+
+	// Track last parsed model op (debug-only) for checkpointing.
+	lastOpForCheckpoint := ""
+
+	for step := startStep; step <= maxSteps; step++ {
 		system := baseSystem
 		if a.Context != nil {
 			updated, err := a.Context.SystemPrompt(ctx, baseSystem, step)
@@ -182,6 +219,7 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 			)
 			continue
 		}
+		lastOpForCheckpoint = strings.TrimSpace(opJSON)
 		if a.Hooks.Logf != nil {
 			a.Hooks.Logf("model -> host (step %d): %s", step, strings.TrimSpace(opJSON))
 		}
@@ -271,6 +309,17 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 						"\n\nReturn the next HostOpRequest as ONE JSON object (or {\"op\":\"final\",\"text\":\"...\"}).",
 				},
 			)
+			if strings.TrimSpace(checkpointPath) != "" {
+				if err := SaveAgentCheckpoint(checkpointPath, AgentCheckpoint{
+					UserMessage:    turnUserMessage,
+					NextStep:       step + 1,
+					Messages:       msgs,
+					LastOp:         lastOpForCheckpoint,
+					LastResponseID: lastResponseID,
+				}); err != nil {
+					return "", msgs, step, err
+				}
+			}
 			continue
 		}
 
@@ -295,6 +344,7 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 
 		if op.Op == "final" {
 			msgs = append(msgs, types.LLMMessage{Role: "assistant", Content: strings.TrimSpace(opJSON)})
+			_ = ClearAgentCheckpoint(checkpointPath)
 			return strings.TrimSpace(op.Text), msgs, step, nil
 		}
 
@@ -310,9 +360,141 @@ func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (f
 					"\n\nReturn the next HostOpRequest as ONE JSON object (or {\"op\":\"final\",\"text\":\"...\"}).",
 			},
 		)
+		if strings.TrimSpace(checkpointPath) != "" {
+			if err := SaveAgentCheckpoint(checkpointPath, AgentCheckpoint{
+				UserMessage:    turnUserMessage,
+				NextStep:       step + 1,
+				Messages:       msgs,
+				LastOp:         lastOpForCheckpoint,
+				LastResponseID: lastResponseID,
+			}); err != nil {
+				return "", msgs, step, err
+			}
+		}
 	}
 
-	return "", msgs, maxSteps, fmt.Errorf("agent exceeded max steps (%d) without final", maxSteps)
+	// MaxSteps reached: attempt one-shot graceful finalization.
+	if strings.TrimSpace(checkpointPath) != "" {
+		_ = SaveAgentCheckpoint(checkpointPath, AgentCheckpoint{
+			UserMessage:    turnUserMessage,
+			NextStep:       maxSteps + 1,
+			Messages:       msgs,
+			LastOp:         lastOpForCheckpoint,
+			LastResponseID: lastResponseID,
+		})
+	}
+	final, updated, usedSteps, err := a.finalizeOnMaxSteps(ctx, baseSystem, msgs, maxSteps+1, lastResponseID)
+	if err != nil {
+		return "", updated, maxSteps, fmt.Errorf("agent exceeded max steps (%d) without final: %w", maxSteps, err)
+	}
+	_ = ClearAgentCheckpoint(checkpointPath)
+	return final, updated, usedSteps, nil
+}
+
+func (a *Agent) finalizeOnMaxSteps(ctx context.Context, baseSystem string, msgs []types.LLMMessage, step int, lastResponseID string) (final string, updated []types.LLMMessage, usedSteps int, err error) {
+	// Ask the model to stop and provide a final summary without further host ops.
+	msgs = append(msgs, types.LLMMessage{
+		Role: "user",
+		Content: "You have reached the maximum step limit. Return a final response summarizing what has been completed so far, what remains, and any important context for resuming. Return ONLY one JSON object: {\"op\":\"final\",\"text\":\"...\"}.",
+	})
+
+	system := baseSystem
+	if a.Context != nil {
+		updatedSys, sysErr := a.Context.SystemPrompt(ctx, baseSystem, step)
+		if sysErr != nil {
+			return "", msgs, step, sysErr
+		}
+		system = updatedSys
+	}
+
+	req := types.LLMRequest{
+		Model:              a.Model,
+		System:             system,
+		Messages:           msgs,
+		MaxTokens:          1024,
+		JSONOnly:           true,
+		ResponseSchema:     hostOpResponseSchema(),
+		PreviousResponseID: strings.TrimSpace(lastResponseID),
+		ReasoningEffort:    strings.TrimSpace(a.ReasoningEffort),
+		ReasoningSummary:   strings.TrimSpace(a.ReasoningSummary),
+	}
+
+	var resp types.LLMResponse
+	var callErr error
+	if s, ok := a.LLM.(types.LLMClientStreaming); ok {
+		dec := &finalTextStreamDecoder{}
+		resp, callErr = s.GenerateStream(ctx, req, func(chunk types.LLMStreamChunk) error {
+			if chunk.Done {
+				if a.Hooks.OnStreamChunk != nil {
+					a.Hooks.OnStreamChunk(step, chunk)
+				}
+				return nil
+			}
+			if chunk.IsReasoning {
+				if a.Hooks.OnStreamChunk != nil {
+					a.Hooks.OnStreamChunk(step, chunk)
+				}
+				return nil
+			}
+			if chunk.Text == "" {
+				return nil
+			}
+			if a.Hooks.OnToken != nil {
+				if out := dec.Consume(chunk.Text); out != "" {
+					a.Hooks.OnToken(step, out)
+				}
+			} else {
+				_ = dec.Consume(chunk.Text)
+			}
+			return nil
+		})
+	} else {
+		resp, callErr = a.LLM.Generate(ctx, req)
+	}
+	if callErr != nil {
+		return "", msgs, step, callErr
+	}
+
+	opJSON, parseErr := extractSingleJSONObject(resp.Text)
+	if parseErr != nil {
+		return "", msgs, step, parseErr
+	}
+
+	var op types.HostOpRequest
+	if err := json.Unmarshal([]byte(opJSON), &op); err != nil {
+		return "", msgs, step, err
+	}
+	if err := validateModelOp(op); err != nil {
+		return "", msgs, step, err
+	}
+	if strings.TrimSpace(op.Op) != types.HostOpFinal {
+		return "", msgs, step, fmt.Errorf("expected op=final, got %q", strings.TrimSpace(op.Op))
+	}
+
+	msgs = append(msgs, types.LLMMessage{Role: "assistant", Content: strings.TrimSpace(opJSON)})
+	return strings.TrimSpace(op.Text), msgs, step, nil
+}
+
+func extractTurnUserMessage(msgs []types.LLMMessage) string {
+	// Best-effort heuristic: find the most recent user message that is not a host op response wrapper.
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if strings.TrimSpace(m.Role) != "user" {
+			continue
+		}
+		c := strings.TrimSpace(m.Content)
+		if c == "" {
+			continue
+		}
+		if strings.HasPrefix(c, "HostOpResponse:") || strings.HasPrefix(c, "HostOpBatchResponse:") {
+			continue
+		}
+		if strings.HasPrefix(c, "Your last message was not valid JSON") || strings.HasPrefix(c, "Your last JSON op was invalid:") {
+			continue
+		}
+		return c
+	}
+	return ""
 }
 
 // Run executes the agent loop for a single user goal and returns the final response text.

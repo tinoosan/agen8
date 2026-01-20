@@ -232,6 +232,7 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 		fs:               setup.FS,
 		agent:            setup.Agent,
 		baseSystemPrompt: setup.BaseSystemPrompt,
+		checkpointPath:   setup.CheckpointPath,
 		mustEmit:         mustEmit,
 		memStore:         setup.MemStore,
 		profileStore:     setup.ProfileStore,
@@ -809,6 +810,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		fs:               setup.FS,
 		agent:            setup.Agent,
 		baseSystemPrompt: setup.BaseSystemPrompt,
+		checkpointPath:   setup.CheckpointPath,
 		mustEmit:         r.mustEmit,
 		memStore:         setup.MemStore,
 		profileStore:     setup.ProfileStore,
@@ -845,6 +847,7 @@ type tuiTurnRunner struct {
 
 	agent            *agent.Agent
 	baseSystemPrompt string
+	checkpointPath   string
 	model            string
 	setHistoryModel  func(model string)
 
@@ -1140,23 +1143,77 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		r.agent.Hooks.OnStreamChunk = nil
 	}()
 
-	r.conversation = append(r.conversation, types.LLMMessage{Role: "user", Content: userMsg})
-	start := time.Now()
-	final, updated, steps, err := r.agent.RunConversation(ctx, r.conversation)
-	dur := time.Since(start)
-	r.conversation = updated
-	if err != nil {
-		// User-initiated stop should not be surfaced as an agent error event.
-		if errors.Is(err, context.Canceled) {
+	// Checkpoint/resume: if we crashed mid-turn, a session-scoped checkpoint can
+	// finish the prior turn before processing this input.
+	resumeFinal := ""
+	resumeSteps := 0
+	resumeDur := time.Duration(0)
+	shouldResumeOnly := false
+	if strings.TrimSpace(r.checkpointPath) != "" {
+		if cp, err := agent.LoadAgentCheckpoint(r.checkpointPath); err == nil && cp != nil {
+			// If the user re-sent the same message (common after restart), prefer resuming
+			// the checkpointed turn without duplicating the user message in the transcript.
+			if strings.TrimSpace(cp.UserMessage) != "" && strings.TrimSpace(cp.UserMessage) == strings.TrimSpace(userMsg) {
+				shouldResumeOnly = true
+			}
+
+			startResume := time.Now()
+			out, updated, steps, err := r.agent.RunConversationWithCheckpoints(ctx, r.conversation, r.checkpointPath)
+			resumeDur = time.Since(startResume)
+			resumeSteps = steps
+			r.conversation = updated
+			if err != nil {
+				// User-initiated stop should not be surfaced as an agent error event.
+				if errors.Is(err, context.Canceled) {
+					return "", err
+				}
+				r.mustEmit(context.Background(), events.Event{
+					Type:    "agent.error",
+					Message: "Agent loop error (resume)",
+					Data:    map[string]string{"err": err.Error()},
+					Store:   boolp(false),
+				})
+				return "", err
+			}
+			resumeFinal = out
+		}
+	}
+
+	final := ""
+	steps := 0
+	dur := time.Duration(0)
+
+	if shouldResumeOnly && strings.TrimSpace(resumeFinal) != "" {
+		final = resumeFinal
+		steps = resumeSteps
+		dur = resumeDur
+	} else {
+		// Normal turn: add the user's message and run the agent (checkpoint-aware).
+		r.conversation = append(r.conversation, types.LLMMessage{Role: "user", Content: userMsg})
+		start := time.Now()
+		out, updated, stepCount, err := r.agent.RunConversationWithCheckpoints(ctx, r.conversation, r.checkpointPath)
+		dur = time.Since(start) + resumeDur
+		steps = stepCount + resumeSteps
+		r.conversation = updated
+		if err != nil {
+			// User-initiated stop should not be surfaced as an agent error event.
+			if errors.Is(err, context.Canceled) {
+				return "", err
+			}
+			r.mustEmit(context.Background(), events.Event{
+				Type:    "agent.error",
+				Message: "Agent loop error",
+				Data:    map[string]string{"err": err.Error()},
+				Store:   boolp(false),
+			})
 			return "", err
 		}
-		r.mustEmit(context.Background(), events.Event{
-			Type:    "agent.error",
-			Message: "Agent loop error",
-			Data:    map[string]string{"err": err.Error()},
-			Store:   boolp(false),
-		})
-		return "", err
+
+		if strings.TrimSpace(resumeFinal) != "" {
+			final = "Resumed previous in-flight turn:\n\n" + strings.TrimSpace(resumeFinal) + "\n\n---\n\nResponse to your message:\n\n" + strings.TrimSpace(out)
+		} else {
+			final = out
+		}
 	}
 
 	r.mustEmit(context.Background(), events.Event{

@@ -8,10 +8,12 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/llm"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
@@ -28,6 +30,7 @@ type tuiChatSetup struct {
 	Agent            *agent.Agent
 	BaseSystemPrompt string
 	Constructor      *agent.ContextConstructor
+	CheckpointPath   string
 
 	Artifacts *ArtifactIndex
 
@@ -189,6 +192,13 @@ func setupTUIChatRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
+	// Add resilience against transient provider/network failures.
+	llmClient := types.LLMClient(llm.NewRetryClient(client, llm.RetryConfig{
+		MaxRetries:   3,
+		InitialDelay: 250 * time.Millisecond,
+		MaxDelay:     4 * time.Second,
+		Multiplier:   2.0,
+	}))
 
 	systemPromptBytes, err := os.ReadFile("internal/agent/INITIAL_PROMPT.md")
 	if err != nil {
@@ -415,7 +425,7 @@ func setupTUIChatRuntime(
 	}
 
 	a, err := agent.New(agent.Config{
-		LLM:              client,
+		LLM:              llmClient,
 		Exec:             agent.HostExecFunc(execWithEvents),
 		Model:            model,
 		ReasoningEffort:  strings.TrimSpace(opts.ReasoningEffort),
@@ -428,11 +438,14 @@ func setupTUIChatRuntime(
 		return nil, err
 	}
 
+	checkpointPath := filepath.Join(fsutil.GetSessionDir(cfg.DataDir, run.SessionID), "agent_checkpoint.json")
+
 	return &tuiChatSetup{
 		FS:               fs,
 		Agent:            a,
 		BaseSystemPrompt: baseSystemPrompt,
 		Constructor:      constructor,
+		CheckpointPath:   checkpointPath,
 		Artifacts:        artifactIndex,
 		WorkdirBase:      workdirRes.BaseDir,
 		MemStore:         memStore,
