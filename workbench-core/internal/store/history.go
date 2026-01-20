@@ -2,9 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
-	"strconv"
-	"strings"
 )
 
 // HistoryAppender is used by sinks to record history.
@@ -25,7 +22,7 @@ type HistoryReader interface {
 // history entries deterministically without encoding queries into VFS paths.
 //
 // DiskHistoryStore encodes HistoryCursor as a base-10 int64 byte offset into its JSONL file.
-type HistoryCursor string
+type HistoryCursor = OffsetCursor
 
 // HistoryStore is the host-side storage interface backing the VFS mount "/history".
 //
@@ -86,24 +83,12 @@ type HistoryBatch struct {
 
 // HistoryCursorFromInt64 encodes a byte offset cursor as an opaque token.
 func HistoryCursorFromInt64(offset int64) HistoryCursor {
-	if offset < 0 {
-		offset = 0
-	}
-	return HistoryCursor(strconv.FormatInt(offset, 10))
+	return HistoryCursor(OffsetCursorFromInt64(offset))
 }
 
 // HistoryCursorToInt64 decodes a DiskHistoryStore cursor into a byte offset.
 //
 // If the cursor is empty, it decodes to 0.
 func HistoryCursorToInt64(c HistoryCursor) (int64, error) {
-	s := strings.TrimSpace(string(c))
-	if s == "" {
-		return 0, nil
-	}
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil || n < 0 {
-		return 0, fmt.Errorf("invalid cursor: %w", ErrInvalid)
-	}
-	return n, nil
+	return OffsetCursorToInt64(OffsetCursor(c))
 }
-

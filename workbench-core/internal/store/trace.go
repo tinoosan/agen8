@@ -2,9 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
-	"strconv"
-	"strings"
 )
 
 // TraceCursor is an opaque, stable position token used by trace stores.
@@ -14,7 +11,7 @@ import (
 // string: do not assume it is a byte offset, a timestamp, or an event id.
 //
 // DiskTraceStore encodes TraceCursor as a base-10 int64 byte offset into its JSONL file.
-type TraceCursor string
+type TraceCursor = OffsetCursor
 
 // TraceStore is the pluggable storage interface for run trace/event retrieval.
 //
@@ -91,24 +88,12 @@ type TraceEvent struct {
 //
 // DiskTraceStore uses this encoding. Other stores are free to use different formats.
 func TraceCursorFromInt64(offset int64) TraceCursor {
-	if offset < 0 {
-		offset = 0
-	}
-	return TraceCursor(strconv.FormatInt(offset, 10))
+	return TraceCursor(OffsetCursorFromInt64(offset))
 }
 
 // TraceCursorToInt64 decodes a DiskTraceStore cursor into a byte offset.
 //
 // If the cursor is empty, it decodes to 0.
 func TraceCursorToInt64(c TraceCursor) (int64, error) {
-	s := strings.TrimSpace(string(c))
-	if s == "" {
-		return 0, nil
-	}
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil || n < 0 {
-		return 0, fmt.Errorf("invalid cursor: %w", ErrInvalid)
-	}
-	return n, nil
+	return OffsetCursorToInt64(OffsetCursor(c))
 }
-
