@@ -39,3 +39,6 @@ yarn-error.log*
 
 # Vercel
 .vercel
+
+# Cursor
+.cursor/
