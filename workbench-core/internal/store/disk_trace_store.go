@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinoosan/workbench-core/internal/bytesutil"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/validate"
 )
@@ -119,7 +120,7 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts 
 		bytesConsumed += int64(len(line))
 		linesTotal++
 
-		text := strings.TrimSpace(string(bytes.TrimRight(line, "\n")))
+		text := strings.TrimSpace(string(bytesutil.TrimRightNewlines(line)))
 		if text == "" {
 			if errors.Is(readErr, io.EOF) {
 				break

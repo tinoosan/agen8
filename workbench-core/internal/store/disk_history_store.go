@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/tinoosan/workbench-core/internal/bytesutil"
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/validate"
@@ -83,7 +84,7 @@ func (s *DiskHistoryStore) AppendLine(_ context.Context, line []byte) error {
 	}
 	// Ensure exactly one trailing newline.
 	b := append([]byte(nil), line...)
-	b = bytesTrimRightNewlines(b)
+	b = bytesutil.TrimRightNewlines(b)
 	b = append(b, '\n')
 
 	f, err := os.OpenFile(s.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -93,17 +94,6 @@ func (s *DiskHistoryStore) AppendLine(_ context.Context, line []byte) error {
 	defer f.Close()
 	_, err = f.Write(b)
 	return err
-}
-
-func bytesTrimRightNewlines(b []byte) []byte {
-	for len(b) > 0 {
-		last := b[len(b)-1]
-		if last != '\n' && last != '\r' {
-			break
-		}
-		b = b[:len(b)-1]
-	}
-	return b
 }
 
 func (s *DiskHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor, opts HistorySinceOptions) (HistoryBatch, error) {
@@ -161,7 +151,7 @@ func (s *DiskHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor, o
 		if len(line) > 0 {
 			bytesRead += len(line)
 			linesTotal++
-			trim := bytesTrimRightNewlines(line)
+			trim := bytesutil.TrimRightNewlines(line)
 			if len(trim) > 0 {
 				out = append(out, append([]byte(nil), trim...))
 			}
@@ -247,7 +237,7 @@ func (s *DiskHistoryStore) LinesLatest(_ context.Context, opts HistoryLatestOpti
 	sc.Buffer(make([]byte, 0, 64*1024), 256*1024)
 	var lines [][]byte
 	for sc.Scan() {
-		line := bytesTrimRightNewlines(sc.Bytes())
+		line := bytesutil.TrimRightNewlines(sc.Bytes())
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
