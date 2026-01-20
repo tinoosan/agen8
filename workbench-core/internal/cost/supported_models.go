@@ -66,7 +66,7 @@ var supportedModelIDs = []string{
 	"anthropic/claude-3.5-sonnet",
 	"anthropic/claude-3-opus",
 	"anthropic/claude-3-haiku",
-	"anthropic/claude-4.5-opus-",
+	"anthropic/claude-4.5-opus",
 	"anthropic/claude-4.5-sonnet",
 
 	// Google.
@@ -131,7 +131,9 @@ func SupportsReasoningEffort(modelID string) bool {
 	// Examples from vendor docs: claude-opus-4-*, claude-sonnet-4-*, claude-3-7-sonnet-*
 	if strings.HasPrefix(id, "anthropic/claude-opus-4") ||
 		strings.HasPrefix(id, "anthropic/claude-sonnet-4") ||
-		strings.HasPrefix(id, "anthropic/claude-4") {
+		strings.HasPrefix(id, "anthropic/claude-4") ||
+		strings.HasPrefix(id, "anthropic/claude-4.5-opus-") ||
+		strings.HasPrefix(id, "anthropic/claude-4.5-sonnet") {
 		return true
 	}
 	if strings.Contains(id, "claude-3.7-sonnet") || strings.Contains(id, "claude-3-7-sonnet") {

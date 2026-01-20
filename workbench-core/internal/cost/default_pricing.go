@@ -91,7 +91,7 @@ func DefaultPricing() PricingFile {
 				InputPerM:  0.25,
 				OutputPerM: 1.25,
 			},
-			"anthropic/claude-4.5-opus-": {
+			"anthropic/claude-4.5-opus": {
 				InputPerM:  5.00,
 				OutputPerM: 25.00,
 			},
