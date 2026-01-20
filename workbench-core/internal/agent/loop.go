@@ -208,6 +208,17 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 		if s, ok := a.LLM.(types.LLMClientStreaming); ok {
 			dec := &finalTextStreamDecoder{}
 			// #region agent log
+			streamTextChunkN := 0
+			streamTextBytes := 0
+			streamDecoderEmittedBytes := 0
+			streamRawEmittedBytes := 0
+			streamLoggedFirst := false
+			streamMode := "unknown" // "unknown" | "raw" | "json"
+			streamModeLogged := false
+			var streamPrefix strings.Builder
+			const streamPrefixMax = 1024
+			// #endregion
+			// #region agent log
 			// Capture provider-supplied reasoning summaries (NOT raw chain-of-thought).
 			var reasoningBuf strings.Builder
 			reasoningTextN := 0
@@ -219,6 +230,22 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 					if a.Hooks.OnStreamChunk != nil {
 						a.Hooks.OnStreamChunk(step, chunk)
 					}
+					// #region agent log
+					debuglog.Log("toolcalling", "H16", "loop.go:runConversation", "stream_text_totals", map[string]any{
+						"step":              step,
+						"model":             strings.TrimSpace(a.Model),
+						"toolChoice":        strings.TrimSpace(toolChoice),
+						"jsonOnly":          req.JSONOnly,
+						"hasSchema":         req.ResponseSchema != nil,
+						"mode":              streamMode,
+						"textChunks":        streamTextChunkN,
+						"textBytes":         streamTextBytes,
+						"decoderEmittedB":   streamDecoderEmittedBytes,
+						"decoderEmittedAny": streamDecoderEmittedBytes != 0,
+						"rawEmittedB":       streamRawEmittedBytes,
+						"rawEmittedAny":     streamRawEmittedBytes != 0,
+					})
+					// #endregion
 					// #region agent log
 					if reasoningSignalN != 0 || reasoningTextN != 0 {
 						prev := reasoningBuf.String()
@@ -263,13 +290,149 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 				if chunk.Text == "" {
 					return nil
 				}
-				// Stream only decoded final.text to the host via OnToken.
-				if a.Hooks.OnToken != nil {
-					if out := dec.Consume(chunk.Text); out != "" {
-						a.Hooks.OnToken(step, out)
+				// #region agent log
+				streamTextChunkN++
+				streamTextBytes += len(chunk.Text)
+				// #endregion
+				emit := func(s string) {
+					if s == "" {
+						return
 					}
-				} else {
-					_ = dec.Consume(chunk.Text)
+					// #region agent log
+					streamRawEmittedBytes += len(s)
+					// #endregion
+					if a.Hooks.OnToken != nil {
+						a.Hooks.OnToken(step, s)
+					}
+				}
+
+				// Auto-detect: some providers/models stream plain assistant text, others stream a JSON
+				// envelope like {"op":"final","text":"..."} (or HostOpRequest JSON). We must not drop
+				// plain text, and we also should not stream raw JSON to the UI.
+				if streamMode == "unknown" {
+					// Buffer a small prefix until we see the first non-whitespace character.
+					if streamPrefix.Len() < streamPrefixMax {
+						remain := streamPrefixMax - streamPrefix.Len()
+						if len(chunk.Text) > remain {
+							streamPrefix.WriteString(chunk.Text[:remain])
+						} else {
+							streamPrefix.WriteString(chunk.Text)
+						}
+					}
+					// Decide mode based on the first non-whitespace rune/byte.
+					buf := streamPrefix.String()
+					first := byte(0)
+					for i := 0; i < len(buf); i++ {
+						switch buf[i] {
+						case ' ', '\t', '\r', '\n':
+							continue
+						default:
+							first = buf[i]
+						}
+						if first != 0 {
+							break
+						}
+					}
+					if first == 0 && streamPrefix.Len() < streamPrefixMax {
+						// Still only whitespace so far; wait for more bytes.
+						return nil
+					}
+					if first == '{' {
+						streamMode = "json"
+					} else {
+						streamMode = "raw"
+					}
+					// #region agent log
+					if !streamModeLogged {
+						streamModeLogged = true
+						debuglog.Log("toolcalling", "H16", "loop.go:runConversation", "stream_mode_selected", map[string]any{
+							"step":       step,
+							"model":      strings.TrimSpace(a.Model),
+							"toolChoice": strings.TrimSpace(toolChoice),
+							"mode":       streamMode,
+							"firstByte":  string([]byte{first}),
+						})
+					}
+					// #endregion
+					// Flush buffered prefix through the chosen streaming mode.
+					prefix := streamPrefix.String()
+					streamPrefix.Reset()
+					if streamMode == "raw" {
+						emit(prefix)
+						return nil
+					}
+					out := dec.Consume(prefix)
+					// #region agent log
+					streamDecoderEmittedBytes += len(out)
+					// #endregion
+					if !streamLoggedFirst {
+						streamLoggedFirst = true
+						prev := prefix
+						if len(prev) > 120 {
+							prev = prev[:120] + "…"
+						}
+						debuglog.Log("toolcalling", "H16", "loop.go:runConversation", "stream_first_text", map[string]any{
+							"step":       step,
+							"model":      strings.TrimSpace(a.Model),
+							"toolChoice": strings.TrimSpace(toolChoice),
+							"mode":       streamMode,
+							"chunkLen":   len(prefix),
+							"chunkPrev":  prev,
+							"outLen":     len(out),
+						})
+					}
+					if out != "" {
+						emit(out)
+					}
+					return nil
+				}
+
+				if streamMode == "raw" {
+					if !streamLoggedFirst {
+						streamLoggedFirst = true
+						prev := chunk.Text
+						if len(prev) > 120 {
+							prev = prev[:120] + "…"
+						}
+						// #region agent log
+						debuglog.Log("toolcalling", "H16", "loop.go:runConversation", "stream_first_text", map[string]any{
+							"step":       step,
+							"model":      strings.TrimSpace(a.Model),
+							"toolChoice": strings.TrimSpace(toolChoice),
+							"mode":       streamMode,
+							"chunkLen":   len(chunk.Text),
+							"chunkPrev":  prev,
+							"outLen":     len(chunk.Text),
+						})
+						// #endregion
+					}
+					emit(chunk.Text)
+					return nil
+				}
+
+				// streamMode == "json": only emit decoded final.text (never raw JSON).
+				out := dec.Consume(chunk.Text)
+				// #region agent log
+				streamDecoderEmittedBytes += len(out)
+				// #endregion
+				if !streamLoggedFirst {
+					streamLoggedFirst = true
+					prev := chunk.Text
+					if len(prev) > 120 {
+						prev = prev[:120] + "…"
+					}
+					debuglog.Log("toolcalling", "H16", "loop.go:runConversation", "stream_first_text", map[string]any{
+						"step":       step,
+						"model":      strings.TrimSpace(a.Model),
+						"toolChoice": strings.TrimSpace(toolChoice),
+						"mode":       streamMode,
+						"chunkLen":   len(chunk.Text),
+						"chunkPrev":  prev,
+						"outLen":     len(out),
+					})
+				}
+				if out != "" {
+					emit(out)
 				}
 				return nil
 			})
@@ -896,6 +1059,17 @@ func (a *Agent) finalizeOnMaxSteps(ctx context.Context, baseSystem string, msgs 
 	if s, ok := a.LLM.(types.LLMClientStreaming); ok {
 		dec := &finalTextStreamDecoder{}
 		// #region agent log
+		streamTextChunkN := 0
+		streamTextBytes := 0
+		streamDecoderEmittedBytes := 0
+		streamRawEmittedBytes := 0
+		streamLoggedFirst := false
+		streamMode := "unknown" // "unknown" | "raw" | "json"
+		streamModeLogged := false
+		var streamPrefix strings.Builder
+		const streamPrefixMax = 1024
+		// #endregion
+		// #region agent log
 		// Capture provider-supplied reasoning summaries (NOT raw chain-of-thought).
 		var reasoningBuf strings.Builder
 		reasoningTextN := 0
@@ -907,6 +1081,22 @@ func (a *Agent) finalizeOnMaxSteps(ctx context.Context, baseSystem string, msgs 
 				if a.Hooks.OnStreamChunk != nil {
 					a.Hooks.OnStreamChunk(step, chunk)
 				}
+				// #region agent log
+				debuglog.Log("toolcalling", "H16", "loop.go:finalizeOnMaxSteps", "stream_text_totals", map[string]any{
+					"step":              step,
+					"model":             strings.TrimSpace(a.Model),
+					"toolChoice":        "none",
+					"jsonOnly":          req.JSONOnly,
+					"hasSchema":         req.ResponseSchema != nil,
+					"mode":              streamMode,
+					"textChunks":        streamTextChunkN,
+					"textBytes":         streamTextBytes,
+					"decoderEmittedB":   streamDecoderEmittedBytes,
+					"decoderEmittedAny": streamDecoderEmittedBytes != 0,
+					"rawEmittedB":       streamRawEmittedBytes,
+					"rawEmittedAny":     streamRawEmittedBytes != 0,
+				})
+				// #endregion
 				// #region agent log
 				if reasoningSignalN != 0 || reasoningTextN != 0 {
 					prev := reasoningBuf.String()
@@ -950,12 +1140,137 @@ func (a *Agent) finalizeOnMaxSteps(ctx context.Context, baseSystem string, msgs 
 			if chunk.Text == "" {
 				return nil
 			}
-			if a.Hooks.OnToken != nil {
-				if out := dec.Consume(chunk.Text); out != "" {
-					a.Hooks.OnToken(step, out)
+			// #region agent log
+			streamTextChunkN++
+			streamTextBytes += len(chunk.Text)
+			// #endregion
+			emit := func(s string) {
+				if s == "" {
+					return
 				}
-			} else {
-				_ = dec.Consume(chunk.Text)
+				// #region agent log
+				streamRawEmittedBytes += len(s)
+				// #endregion
+				if a.Hooks.OnToken != nil {
+					a.Hooks.OnToken(step, s)
+				}
+			}
+
+			if streamMode == "unknown" {
+				if streamPrefix.Len() < streamPrefixMax {
+					remain := streamPrefixMax - streamPrefix.Len()
+					if len(chunk.Text) > remain {
+						streamPrefix.WriteString(chunk.Text[:remain])
+					} else {
+						streamPrefix.WriteString(chunk.Text)
+					}
+				}
+				buf := streamPrefix.String()
+				first := byte(0)
+				for i := 0; i < len(buf); i++ {
+					switch buf[i] {
+					case ' ', '\t', '\r', '\n':
+						continue
+					default:
+						first = buf[i]
+					}
+					if first != 0 {
+						break
+					}
+				}
+				if first == 0 && streamPrefix.Len() < streamPrefixMax {
+					return nil
+				}
+				if first == '{' {
+					streamMode = "json"
+				} else {
+					streamMode = "raw"
+				}
+				// #region agent log
+				if !streamModeLogged {
+					streamModeLogged = true
+					debuglog.Log("toolcalling", "H16", "loop.go:finalizeOnMaxSteps", "stream_mode_selected", map[string]any{
+						"step":      step,
+						"model":     strings.TrimSpace(a.Model),
+						"mode":      streamMode,
+						"firstByte": string([]byte{first}),
+					})
+				}
+				// #endregion
+				prefix := streamPrefix.String()
+				streamPrefix.Reset()
+				if streamMode == "raw" {
+					emit(prefix)
+					return nil
+				}
+				out := dec.Consume(prefix)
+				// #region agent log
+				streamDecoderEmittedBytes += len(out)
+				// #endregion
+				if !streamLoggedFirst {
+					streamLoggedFirst = true
+					prev := prefix
+					if len(prev) > 120 {
+						prev = prev[:120] + "…"
+					}
+					debuglog.Log("toolcalling", "H16", "loop.go:finalizeOnMaxSteps", "stream_first_text", map[string]any{
+						"step":      step,
+						"model":     strings.TrimSpace(a.Model),
+						"mode":      streamMode,
+						"chunkLen":  len(prefix),
+						"chunkPrev": prev,
+						"outLen":    len(out),
+					})
+				}
+				if out != "" {
+					emit(out)
+				}
+				return nil
+			}
+
+			if streamMode == "raw" {
+				if !streamLoggedFirst {
+					streamLoggedFirst = true
+					prev := chunk.Text
+					if len(prev) > 120 {
+						prev = prev[:120] + "…"
+					}
+					// #region agent log
+					debuglog.Log("toolcalling", "H16", "loop.go:finalizeOnMaxSteps", "stream_first_text", map[string]any{
+						"step":      step,
+						"model":     strings.TrimSpace(a.Model),
+						"mode":      streamMode,
+						"chunkLen":  len(chunk.Text),
+						"chunkPrev": prev,
+						"outLen":    len(chunk.Text),
+					})
+					// #endregion
+				}
+				emit(chunk.Text)
+				return nil
+			}
+
+			out := dec.Consume(chunk.Text)
+			// #region agent log
+			streamDecoderEmittedBytes += len(out)
+			// #endregion
+			if !streamLoggedFirst {
+				streamLoggedFirst = true
+				prev := chunk.Text
+				if len(prev) > 120 {
+					prev = prev[:120] + "…"
+				}
+				debuglog.Log("toolcalling", "H16", "loop.go:finalizeOnMaxSteps", "stream_first_text", map[string]any{
+					"step":      step,
+					"model":     strings.TrimSpace(a.Model),
+					"mode":      streamMode,
+					"chunkLen":  len(chunk.Text),
+					"chunkPrev": prev,
+					"outLen":    len(out),
+				})
+			}
+			if out != "" {
+				emit(out)
 			}
 			return nil
 		})
