@@ -1019,6 +1019,46 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		})
 	}
 
+	// Emit a UI-only activity entry when the provider returns web citations.
+	// This is the best available signal that web-search grounding actually occurred.
+	r.agent.Hooks.OnWebSearch = func(step int, citations []types.LLMCitation) {
+		if len(citations) == 0 {
+			return
+		}
+		var b strings.Builder
+		for _, c := range citations {
+			u := strings.TrimSpace(c.URL)
+			if u == "" {
+				continue
+			}
+			title := strings.TrimSpace(c.Title)
+			if title == "" {
+				title = u
+			}
+			b.WriteString("- [")
+			b.WriteString(title)
+			b.WriteString("](")
+			b.WriteString(u)
+			b.WriteString(")\n")
+		}
+		sources := strings.TrimSpace(b.String())
+		if sources == "" {
+			return
+		}
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "llm.web.search",
+			Message: "Web search used",
+			Data: map[string]string{
+				"step":    strconv.Itoa(step),
+				"count":   strconv.Itoa(len(citations)),
+				"sources": sources,
+			},
+			Store:   boolp(false),
+			History: boolp(false),
+			Console: boolp(false),
+		})
+	}
+
 	// Phase 1 streaming: emit UI-only token events (not persisted).
 	//
 	// Note: the agent loop already decodes and streams only "final.text".

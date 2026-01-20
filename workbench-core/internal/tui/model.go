@@ -447,7 +447,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// No parentheses (user preference).
 			header = fmt.Sprintf("%s  +%d -%d", displayPath, added, deleted)
 		}
-		snippet := header + "\n\n" + preview
+		// Keep diff close to header (no extra blank line).
+		snippet := header + "\n" + preview
 		if m.fileChangesByPath == nil {
 			m.fileChangesByPath = make(map[string]string)
 		}
@@ -823,6 +824,25 @@ func (m Model) View() string {
 	body := m.renderBody()
 	input := m.renderInput()
 	base := header + "\n" + body + "\n" + input
+
+	// #region agent log
+	// Hypothesis H1/H3: after closing a full-screen modal (model picker), base view renders fewer
+	// lines than the terminal height, leaving stale blank rows behind.
+	baseH := lipgloss.Height(base)
+	if !m.helpModalOpen && !m.filePickerOpen && !m.modelPickerOpen && baseH < m.height {
+		debugLog("debug-session", "pre-fix", "H1", "model.go:819", "base view shorter than terminal height", map[string]interface{}{
+			"baseH":       baseH,
+			"termH":       m.height,
+			"delta":       m.height - baseH,
+			"headerH":     lipgloss.Height(header),
+			"bodyH":       lipgloss.Height(body),
+			"inputH":      lipgloss.Height(input),
+			"transcriptH": m.transcript.Height,
+			"transcriptW": m.transcript.Width,
+			"showDetails": m.showDetails,
+		})
+	}
+	// #endregion
 
 	// Overlay help modal if open.
 	if m.helpModalOpen {

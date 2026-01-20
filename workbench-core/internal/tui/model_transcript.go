@@ -149,8 +149,19 @@ func (m *Model) rebuildTranscript() {
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptFileChange:
 			raw := strings.TrimSpace(it.text)
-			hdr, body, ok := strings.Cut(raw, "\n\n")
-			if !ok || strings.TrimSpace(body) == "" {
+			// Header is the first line; body is the rest. (We intentionally tolerate
+			// either "\n" or "\n\n" between them.)
+			nl := strings.IndexByte(raw, '\n')
+			if nl < 0 {
+				// Fallback: render as markdown.
+				rendered := strings.Trim(m.renderer.RenderMarkdown(raw, fileInnerW), "\n")
+				lines = append(lines, m.styleFileChangeBox.Render(rendered))
+				lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
+				break
+			}
+			hdr := strings.TrimSpace(raw[:nl])
+			body := strings.TrimLeft(raw[nl+1:], "\n")
+			if strings.TrimSpace(body) == "" {
 				// Fallback: render as markdown.
 				rendered := strings.Trim(m.renderer.RenderMarkdown(raw, fileInnerW), "\n")
 				lines = append(lines, m.styleFileChangeBox.Render(rendered))
@@ -161,7 +172,8 @@ func (m *Model) rebuildTranscript() {
 			path, added, deleted, hasCounts := parseFileChangeHeaderLine(hdr)
 			headerRendered := renderFileChangeHeaderLine(path, added, deleted, hasCounts, fileInnerW)
 			bodyRendered := strings.Trim(m.renderer.RenderMarkdown(strings.TrimSpace(body), fileInnerW), "\n")
-			rendered := headerRendered + "\n\n" + bodyRendered
+			// Keep the diff tight to the header (one newline).
+			rendered := headerRendered + "\n" + bodyRendered
 			lines = append(lines, m.styleFileChangeBox.Render(rendered))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		}

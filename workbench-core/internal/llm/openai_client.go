@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -26,6 +27,7 @@ import (
 // OpenAI Go SDK, pointed at OpenRouter's OpenAI-compatible endpoint.
 type Client struct {
 	client *openai.Client
+	baseURL string
 
 	// DefaultMaxTokens is used when LLMRequest.MaxTokens is 0.
 	DefaultMaxTokens int
@@ -45,6 +47,7 @@ func NewClientFromEnv() (*Client, error) {
 	if baseURL == "" {
 		baseURL = "https://openrouter.ai/api/v1"
 	}
+	baseURL = strings.TrimRight(baseURL, "/")
 
 	defaultMaxTokens := 1024
 	if v := strings.TrimSpace(os.Getenv("OPENROUTER_MAX_TOKENS")); v != "" {
@@ -55,13 +58,41 @@ func NewClientFromEnv() (*Client, error) {
 
 	cli := openai.NewClient(
 		option.WithAPIKey(key),
-		option.WithBaseURL(strings.TrimRight(baseURL, "/")),
+		option.WithBaseURL(baseURL),
 	)
 
 	return &Client{
 		client:           &cli,
+		baseURL:          baseURL,
 		DefaultMaxTokens: defaultMaxTokens,
 	}, nil
+}
+
+func isOpenRouterBaseURL(baseURL string) bool {
+	u := strings.ToLower(strings.TrimSpace(baseURL))
+	return strings.Contains(u, "openrouter.ai")
+}
+
+func maybeEnableWebSearchModel(baseURL string, model string, enable bool) string {
+	model = strings.TrimSpace(model)
+	if !enable || model == "" {
+		return model
+	}
+	// OpenRouter supports web search via model variants like ":online".
+	if !isOpenRouterBaseURL(baseURL) {
+		return model
+	}
+	if strings.Contains(model, ":online") {
+		return model
+	}
+	// If a model variant is already set (e.g. ":free"), override to ":online" when web search
+	// is requested (best-effort; OpenRouter supports exactly one variant suffix).
+	if strings.Contains(model, ":") {
+		if i := strings.LastIndex(model, ":"); i > 0 {
+			return model[:i] + ":online"
+		}
+	}
+	return model + ":online"
 }
 
 func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewParams, error) {
@@ -71,6 +102,7 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 	if strings.TrimSpace(req.Model) == "" {
 		return openai.ChatCompletionNewParams{}, fmt.Errorf("model is required")
 	}
+	req.Model = maybeEnableWebSearchModel(c.baseURL, req.Model, req.EnableWebSearch)
 
 	// Message mapping: prepend explicit system prompt as a system message.
 	msgs := make([]openai.ChatCompletionMessageParamUnion, 0, len(req.Messages)+1)
@@ -244,6 +276,7 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	if strings.TrimSpace(req.Model) == "" {
 		return responses.ResponseNewParams{}, fmt.Errorf("model is required")
 	}
+	req.Model = maybeEnableWebSearchModel(c.baseURL, req.Model, req.EnableWebSearch)
 
 	maxTokens := req.MaxTokens
 	if maxTokens == 0 {
@@ -651,6 +684,40 @@ func (c *Client) toResponseFromResponses(resp *responses.Response) (types.LLMRes
 		out.Raw = json.RawMessage(raw)
 	}
 
+	// Best-effort: extract URL citations from raw JSON (provider-specific).
+	// We keep this tolerant to schema differences across OpenAI-compatible providers.
+	if len(out.Raw) != 0 {
+		cits, _ := extractURLCitationsFromResponsesRaw(out.Raw)
+		if len(cits) != 0 {
+			out.Citations = cits
+			// Append a Sources section to the text for user-visible citations.
+			// Avoid duplicating if the model already included a Sources block.
+			if !strings.Contains(strings.ToLower(out.Text), "\nsources:") {
+				var b strings.Builder
+				if strings.TrimSpace(out.Text) != "" {
+					b.WriteString(strings.TrimSpace(out.Text))
+					b.WriteString("\n\n")
+				}
+				b.WriteString("Sources:\n")
+				for _, c := range cits {
+					if strings.TrimSpace(c.URL) == "" {
+						continue
+					}
+					title := strings.TrimSpace(c.Title)
+					if title == "" {
+						title = c.URL
+					}
+					b.WriteString("- [")
+					b.WriteString(title)
+					b.WriteString("](")
+					b.WriteString(c.URL)
+					b.WriteString(")\n")
+				}
+				out.Text = strings.TrimSpace(b.String())
+			}
+		}
+	}
+
 	// Usage is required by the Responses API, but some providers may still return zeros.
 	if resp.Usage.TotalTokens != 0 || resp.Usage.InputTokens != 0 || resp.Usage.OutputTokens != 0 {
 		out.Usage = &types.LLMUsage{
@@ -660,6 +727,97 @@ func (c *Client) toResponseFromResponses(resp *responses.Response) (types.LLMRes
 		}
 	}
 
+	return out, nil
+}
+
+func extractURLCitationsFromResponsesRaw(raw json.RawMessage) ([]types.LLMCitation, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var top map[string]any
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil, err
+	}
+	outAny, ok := top["output"]
+	if !ok {
+		return nil, nil
+	}
+	outArr, ok := outAny.([]any)
+	if !ok {
+		return nil, nil
+	}
+
+	seen := map[string]types.LLMCitation{}
+	for _, item := range outArr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		typ, _ := m["type"].(string)
+		if strings.TrimSpace(typ) != "message" {
+			continue
+		}
+		contentAny, ok := m["content"]
+		if !ok {
+			continue
+		}
+		contentArr, ok := contentAny.([]any)
+		if !ok {
+			continue
+		}
+		for _, citem := range contentArr {
+			cm, ok := citem.(map[string]any)
+			if !ok {
+				continue
+			}
+			ctype, _ := cm["type"].(string)
+			if strings.TrimSpace(ctype) != "output_text" {
+				continue
+			}
+			annAny, ok := cm["annotations"]
+			if !ok {
+				continue
+			}
+			annArr, ok := annAny.([]any)
+			if !ok {
+				continue
+			}
+			for _, ann := range annArr {
+				am, ok := ann.(map[string]any)
+				if !ok {
+					continue
+				}
+				at, _ := am["type"].(string)
+				if strings.TrimSpace(at) != "url_citation" {
+					continue
+				}
+				url, _ := am["url"].(string)
+				url = strings.TrimSpace(url)
+				if url == "" {
+					continue
+				}
+				title, _ := am["title"].(string)
+				title = strings.TrimSpace(title)
+				if _, exists := seen[url]; !exists {
+					seen[url] = types.LLMCitation{URL: url, Title: title}
+				}
+			}
+		}
+	}
+
+	if len(seen) == 0 {
+		return nil, nil
+	}
+	// Stable-ish order: by URL.
+	urls := make([]string, 0, len(seen))
+	for u := range seen {
+		urls = append(urls, u)
+	}
+	sort.Strings(urls)
+	out := make([]types.LLMCitation, 0, len(urls))
+	for _, u := range urls {
+		out = append(out, seen[u])
+	}
 	return out, nil
 }
 

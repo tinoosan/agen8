@@ -182,6 +182,36 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		m.refreshActivityDetail()
 		return
 
+	case "llm.web.search":
+		m.activitySeq++
+		id := fmt.Sprintf("act-%d", m.activitySeq)
+		now := time.Now()
+		fin := now
+
+		n := strings.TrimSpace(ev.Data["count"])
+		title := "Web search"
+		if n != "" {
+			title = "Web search (" + n + " sources)"
+		}
+
+		act := Activity{
+			ID:            id,
+			Kind:          "llm.web.search",
+			Title:         title,
+			Status:        ActivityOK,
+			StartedAt:     now,
+			FinishedAt:    &fin,
+			Duration:      0,
+			Ok:            "true",
+			OutputPreview: strings.TrimSpace(ev.Data["sources"]),
+		}
+		m.activities = append(m.activities, act)
+		m.activityIndexByID[id] = len(m.activities) - 1
+		m.refreshActivityList()
+		m.activityList.Select(len(m.activities) - 1)
+		m.refreshActivityDetail()
+		return
+
 	case "agent.op.request":
 		op := strings.TrimSpace(ev.Data["op"])
 		if op == "" {
@@ -421,7 +451,15 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 		b.WriteString("\n**Written content preview**\n\n_(redacted)_\n")
 	}
 
-	if strings.TrimSpace(a.OutputPreview) != "" {
+	if strings.TrimSpace(a.Kind) == "llm.web.search" && strings.TrimSpace(a.OutputPreview) != "" {
+		b.WriteString("\n**Sources**\n\n")
+		b.WriteString(a.OutputPreview)
+		if !strings.HasSuffix(a.OutputPreview, "\n") {
+			b.WriteString("\n")
+		}
+	}
+
+	if strings.TrimSpace(a.OutputPreview) != "" && strings.TrimSpace(a.Kind) != "llm.web.search" {
 		txt := a.OutputPreview
 		if !expanded && len(txt) > 600 {
 			txt = txt[:599] + "…"

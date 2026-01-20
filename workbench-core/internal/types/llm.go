@@ -82,6 +82,9 @@ type LLMRequest struct {
 	JSONOnly    bool         // optional: request JSON-only output (provider best-effort)
 	Tools       []Tool       `json:"tools,omitempty"`
 	ToolChoice  string       `json:"toolChoice,omitempty"` // "auto", "none", "required"
+	// EnableWebSearch requests real-time web search grounding when supported by the provider.
+	// For OpenRouter this is implemented by using a model variant like ":online".
+	EnableWebSearch bool `json:"enableWebSearch,omitempty"`
 	// ResponseSchema optionally requests Structured Outputs. When set, providers that
 	// support it should constrain output to exactly match the schema.
 	//
@@ -124,6 +127,14 @@ type LLMResponse struct {
 	Usage      *LLMUsage       // optional: token usage
 	ResponseID string          // optional: response ID for Responses API
 	ToolCalls  []ToolCall      `json:"toolCalls,omitempty"`
+	Citations  []LLMCitation   `json:"citations,omitempty"`
+}
+
+// LLMCitation is a URL citation associated with generated text.
+// Providers typically supply these via "url_citation" annotations.
+type LLMCitation struct {
+	URL   string `json:"url"`
+	Title string `json:"title,omitempty"`
 }
 
 // LLMUsage contains token usage numbers when a provider returns them.
