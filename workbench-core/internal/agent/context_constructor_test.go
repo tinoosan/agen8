@@ -89,8 +89,6 @@ func TestContextConstructor_CachesProfileAndMemoryPerTurn(t *testing.T) {
 		RunID:           run.RunId,
 		MaxProfileBytes: 2048,
 		MaxMemoryBytes:  2048,
-		StatePath:       "/workspace/context_constructor_state.json",
-		ManifestPath:    "/workspace/context_constructor_manifest.json",
 	}
 
 	out1, err := cc.SystemPrompt(context.Background(), "base", 1)
@@ -142,8 +140,6 @@ func TestContextConstructor_AttachmentsIncludedAcrossSteps(t *testing.T) {
 		FS:           fs,
 		Cfg:          cfg,
 		RunID:        run.RunId,
-		StatePath:    "/workspace/context_constructor_state.json",
-		ManifestPath: "/workspace/context_constructor_manifest.json",
 	}
 	cc.SetFileAttachments([]FileAttachment{
 		{

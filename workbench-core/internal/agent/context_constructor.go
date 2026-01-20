@@ -5,12 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/config"
+	"github.com/tinoosan/workbench-core/internal/debuglog"
+	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
@@ -55,11 +59,11 @@ type ContextConstructor struct {
 	TraceIncludeTypes []string
 
 	// StatePath is the VFS path used to persist constructor state (run-scoped).
-	// Example: "/workspace/context_constructor_state.json".
+	// Example: "/results/context_constructor_state.json".
 	StatePath string
 
 	// ManifestPath is the VFS path where the constructor writes its last manifest.
-	// Example: "/workspace/context_constructor_manifest.json".
+	// Example: "/results/context_constructor_manifest.json".
 	ManifestPath string
 
 	// Emit is an optional hook for recording constructor actions (events/telemetry).
@@ -455,27 +459,13 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	}
 
 	// History (session-scoped).
-	if c.HistoryStore != nil {
-		var hb store.HistoryBatch
-		var err error
-		if strings.TrimSpace(string(c.historyCursor)) == "" {
-			hb, err = c.HistoryStore.LinesLatest(ctx, store.HistoryLatestOptions{MaxBytes: histBudget, Limit: 200})
-		} else {
-			hb, err = c.HistoryStore.LinesSince(ctx, c.historyCursor, store.HistorySinceOptions{MaxBytes: histBudget, Limit: 200})
-		}
-		if err == nil {
-			c.historyCursor = hb.CursorAfter
-			manifest.Cursors.HistoryAfter = hb.CursorAfter
-			blk := c.recentHistoryBlock(hb.Lines, 8)
-			if strings.TrimSpace(blk) != "" {
-				systemB.WriteString("\n\n")
-				systemB.WriteString(blk)
-				systemB.WriteString("\n")
-			}
-			// Persist session-level history cursor (avoid redundant LoadSession per step).
-			c.persistSessionHistoryCursorIfNeeded()
-		}
-	}
+	//
+	// NOTE: We intentionally do NOT inject conversation history into the system prompt.
+	// The agent already receives the live conversation transcript via req.Messages, and
+	// duplicating session history (especially when it may contain user-only lines) has
+	// caused models to "lose the plot" by latching onto stale prompts.
+	//
+	// /history remains available for explicit debugging via fs.read("/history/history.jsonl").
 
 	system := strings.TrimSpace(systemB.String())
 
@@ -765,10 +755,35 @@ func (c *ContextConstructor) loadStateIfNeeded(ctx context.Context) error {
 		return nil
 	}
 	c.stateLoaded = true
-	if strings.TrimSpace(c.StatePath) == "" {
-		c.StatePath = "/workspace/context_constructor_state.json"
+	_ = ctx
+
+	// #region agent log
+	// Cleanup legacy visible files under /workspace (models often "discover" and read them).
+	// These are not part of the agent contract; they are host bookkeeping.
+	if strings.TrimSpace(c.Cfg.DataDir) != "" && strings.TrimSpace(c.RunID) != "" {
+		wsDir := fsutil.GetWorkspaceDir(c.Cfg.DataDir, c.RunID)
+		legacy := []string{
+			filepath.Join(wsDir, "context_constructor_state.json"),
+			filepath.Join(wsDir, "context_constructor_manifest.json"),
+		}
+		for _, p := range legacy {
+			if err := os.Remove(p); err == nil {
+				debuglog.Log("context", "H12", "context_constructor.go:loadStateIfNeeded", "removed_legacy_workspace_file", map[string]any{"path": p})
+			}
+		}
 	}
-	b, err := c.FS.Read(c.StatePath)
+	// #endregion
+
+	// Store constructor state under the run root on disk (NOT in VFS) so the model cannot
+	// discover/read it via fs.list/fs.read.
+	if strings.TrimSpace(c.StatePath) == "" {
+		if strings.TrimSpace(c.Cfg.DataDir) == "" || strings.TrimSpace(c.RunID) == "" {
+			return nil
+		}
+		c.StatePath = filepath.Join(fsutil.GetRunDir(c.Cfg.DataDir, c.RunID), "context_constructor_state.json")
+	}
+
+	b, err := os.ReadFile(c.StatePath)
 	if err != nil || len(b) == 0 {
 		return nil
 	}
@@ -784,7 +799,10 @@ func (c *ContextConstructor) loadStateIfNeeded(ctx context.Context) error {
 func (c *ContextConstructor) saveState(ctx context.Context) error {
 	_ = ctx
 	if strings.TrimSpace(c.StatePath) == "" {
-		return nil
+		if strings.TrimSpace(c.Cfg.DataDir) == "" || strings.TrimSpace(c.RunID) == "" {
+			return nil
+		}
+		c.StatePath = filepath.Join(fsutil.GetRunDir(c.Cfg.DataDir, c.RunID), "context_constructor_state.json")
 	}
 	st := constructorState{
 		UpdatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
@@ -797,19 +815,39 @@ func (c *ContextConstructor) saveState(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return c.FS.Write(c.StatePath, b)
+	if err := os.MkdirAll(filepath.Dir(c.StatePath), 0o755); err != nil {
+		return err
+	}
+	return fsutil.WriteFileAtomic(c.StatePath, b, 0o644)
 }
 
 func (c *ContextConstructor) writeManifest(ctx context.Context, m ConstructorManifest) error {
 	_ = ctx
 	if strings.TrimSpace(c.ManifestPath) == "" {
-		c.ManifestPath = "/workspace/context_constructor_manifest.json"
+		if strings.TrimSpace(c.Cfg.DataDir) == "" || strings.TrimSpace(c.RunID) == "" {
+			return nil
+		}
+		// Store the manifest under the run root on disk (NOT in VFS) so the model cannot
+		// discover/read it via fs.list/fs.read.
+		c.ManifestPath = filepath.Join(fsutil.GetRunDir(c.Cfg.DataDir, c.RunID), "context_constructor_manifest.json")
 	}
 	b, err := types.MarshalPretty(m)
 	if err != nil {
 		return err
 	}
-	return c.FS.Write(c.ManifestPath, b)
+	// #region agent log
+	debuglog.Log("context", "H9", "context_constructor.go:writeManifest", "write_manifest", map[string]any{
+		"step":        m.Step,
+		"runId":       strings.TrimSpace(m.RunID),
+		"sessionId":   strings.TrimSpace(m.SessionID),
+		"manifestVfs": strings.TrimSpace(c.ManifestPath),
+		"bytes":       len(b),
+	})
+	// #endregion
+	if err := os.MkdirAll(filepath.Dir(c.ManifestPath), 0o755); err != nil {
+		return err
+	}
+	return fsutil.WriteFileAtomic(c.ManifestPath, b, 0o644)
 }
 
 func orDefault(v int, def int) int {
