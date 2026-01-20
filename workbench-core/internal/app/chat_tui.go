@@ -1119,6 +1119,12 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		thinkingActive = true
 		thinkingStep = step
 		lastThinkingEmit = time.Now()
+		// #region agent log
+		cursorDebugLog("H4", "chat_tui.go:emitThinkingStart", "thinking_start_emit", map[string]any{
+			"model": strings.TrimSpace(r.model),
+			"step":  step,
+		})
+		// #endregion
 		r.mustEmit(context.Background(), events.Event{
 			Type:    "model.thinking.start",
 			Message: "Model thinking",
@@ -1132,6 +1138,12 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		emitThinkingSummary()
 		thinkingActive = false
 		thinkingStep = 0
+		// #region agent log
+		cursorDebugLog("H4", "chat_tui.go:emitThinkingEnd", "thinking_end_emit", map[string]any{
+			"model": strings.TrimSpace(r.model),
+			"step":  step,
+		})
+		// #endregion
 		r.mustEmit(context.Background(), events.Event{
 			Type:    "model.thinking.end",
 			Message: "Model thinking ended",
@@ -1141,6 +1153,23 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 			Console: boolp(false),
 		})
 	}
+
+	// Some providers/models (notably Anthropic via OpenRouter) may not emit separate
+	// reasoning/thinking stream chunks that we can classify as `IsReasoning`.
+	// For a consistent UX, proactively start a Thinking block for models we consider
+	// reasoning-capable, and then:
+	// - fill it with provider-supplied summaries when available
+	// - otherwise, show only the duration (ended on stream Done)
+	if cost.SupportsReasoningSummary(strings.TrimSpace(r.model)) {
+		emitThinkingStart(1)
+		// #region agent log
+		cursorDebugLog("H3", "chat_tui.go:RunTurn", "auto_thinking_start", map[string]any{
+			"model": strings.TrimSpace(r.model),
+			"step":  1,
+		})
+		// #endregion
+	}
+
 	r.agent.Hooks.OnStreamChunk = func(step int, chunk types.LLMStreamChunk) {
 		if chunk.Done {
 			if thinkingActive {

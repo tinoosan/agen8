@@ -351,6 +351,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.turnInFlight {
 				return m, m.waitEvent()
 			}
+			// #region agent log
+			if ev.Type == "model.thinking.start" || ev.Type == "model.thinking.end" {
+				cursorDebugLog("H4", "model.go:update", "thinking_event_received", map[string]any{
+					"type":           strings.TrimSpace(ev.Type),
+					"step":           strings.TrimSpace(ev.Data["step"]),
+					"modelID":        strings.TrimSpace(m.modelID),
+					"thinkingActive": m.thinkingActive,
+					"thinkingStep":   m.thinkingStep,
+				})
+			}
+			// #endregion
 			step := 0
 			if v := strings.TrimSpace(ev.Data["step"]); v != "" {
 				if n, err := strconv.Atoi(v); err == nil {
