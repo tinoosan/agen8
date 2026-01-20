@@ -376,9 +376,9 @@ func (m Model) renderInput() string {
 		focusName = "activity"
 	}
 
-	hintText := "ctrl+a activity  tab focus  ctrl+g multiline  enter send  ctrl+c quit"
+	hintText := "ctrl+a activity  tab focus  ctrl+g multiline  ctrl+k copy transcript  enter send  ctrl+c quit"
 	if m.showDetails {
-		hintText = "ctrl+a hide activity  tab focus  esc close  j/k↑/↓ select  e/enter expand  o open file  pgup/pgdn scroll  ctrl+t telemetry  ctrl+g multiline  ctrl+o send (multiline)"
+		hintText = "ctrl+a hide activity  tab focus  esc close  j/k↑/↓ select  e/enter expand  o open file  pgup/pgdn scroll  ctrl+t telemetry  ctrl+g multiline  ctrl+k copy transcript  ctrl+o send (multiline)"
 	} else {
 		hintText = "pgup/pgdn scroll  " + hintText
 	}

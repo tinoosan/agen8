@@ -211,8 +211,8 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(string(openai.ChatCompletionToolChoiceOptionAutoNone))}
 		case "required":
 			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(string(openai.ChatCompletionToolChoiceOptionAutoRequired))}
-			// Reduce complexity: force exactly one tool call per turn.
-			params.ParallelToolCalls = param.NewOpt(false)
+			// Allow multiple tool calls per turn to reduce round-trips. The agent loop
+			// already supports handling multiple tool calls in one response.
 		default:
 			return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported toolChoice %q", req.ToolChoice)
 		}
@@ -443,23 +443,6 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 		"functionCallN":       len(functionCallIDs),
 		"functionCallOutputN": len(functionCallOutputIDs),
 	})
-	// Debug: item-type accounting for tool-calling turns.
-	// Hypothesis covered:
-	// - H3: provider is effectively seeing tool outputs as normal messages due to item-shape mismatch
-	lastRole := ""
-	if len(msgs) != 0 {
-		lastRole = strings.ToLower(strings.TrimSpace(msgs[len(msgs)-1].Role))
-	}
-	debuglog.Log("toolconfusion", "H3", "openai_client.go:buildResponseParams", "responses_input_items", map[string]any{
-		"usesToolCalling":         usesToolCalling,
-		"prevIDUsed":              previousResponseID != "",
-		"msgsLenSent":             len(msgs),
-		"itemsLen":                len(items),
-		"messageItemN":            len(msgs) - toolMsgN,
-		"functionCallItemN":       assistantToolCallN,
-		"functionCallOutputItemN": toolMsgN,
-		"lastRole":                lastRole,
-	})
 	// #endregion
 
 	params := responses.ResponseNewParams{
@@ -572,8 +555,8 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
 				OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsRequired),
 			}
-			// Reduce complexity: force exactly one tool call per turn.
-			params.ParallelToolCalls = param.NewOpt(false)
+			// Allow multiple tool calls per turn to reduce round-trips. The agent loop
+			// already supports handling multiple tool calls in one response.
 		default:
 			return responses.ResponseNewParams{}, fmt.Errorf("unsupported toolChoice %q", req.ToolChoice)
 		}
@@ -694,46 +677,10 @@ func (c *Client) Generate(ctx context.Context, req types.LLMRequest) (types.LLMR
 func (c *Client) generateOnce(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
 	// Prefer Responses API (enables reasoning summaries) and fall back to Chat Completions.
 	if out, err := c.generateResponses(ctx, req); err == nil {
-		// #region agent log
-		// Debug: confirm which provider route was actually used (no raw content).
-		debuglog.Log("toolconfusion", "H2", "openai_client.go:generateOnce", "route_used", map[string]any{
-			"route":      "responses",
-			"model":      strings.TrimSpace(req.Model),
-			"toolsLen":   len(req.Tools),
-			"toolChoice": strings.TrimSpace(req.ToolChoice),
-			"prevIDUsed": strings.TrimSpace(req.PreviousResponseID) != "",
-			"hasSchema":  req.ResponseSchema != nil,
-			"jsonOnly":   req.JSONOnly,
-		})
-		// #endregion
 		return out, nil
 	} else if shouldFallbackToChat(err) {
-		out2, err2 := c.generateChat(ctx, req)
-		// #region agent log
-		// Debug: record fallback path (no raw content).
-		debuglog.Log("toolconfusion", "H2", "openai_client.go:generateOnce", "route_used", map[string]any{
-			"route":      "chat_fallback",
-			"model":      strings.TrimSpace(req.Model),
-			"toolsLen":   len(req.Tools),
-			"toolChoice": strings.TrimSpace(req.ToolChoice),
-			"prevIDUsed": strings.TrimSpace(req.PreviousResponseID) != "",
-			"hasSchema":  req.ResponseSchema != nil,
-			"jsonOnly":   req.JSONOnly,
-		})
-		// #endregion
-		return out2, err2
+		return c.generateChat(ctx, req)
 	} else {
-		// #region agent log
-		debuglog.Log("toolconfusion", "H2", "openai_client.go:generateOnce", "route_used", map[string]any{
-			"route":      "responses_error",
-			"model":      strings.TrimSpace(req.Model),
-			"toolsLen":   len(req.Tools),
-			"toolChoice": strings.TrimSpace(req.ToolChoice),
-			"prevIDUsed": strings.TrimSpace(req.PreviousResponseID) != "",
-			"hasSchema":  req.ResponseSchema != nil,
-			"jsonOnly":   req.JSONOnly,
-		})
-		// #endregion
 		return types.LLMResponse{}, err
 	}
 }

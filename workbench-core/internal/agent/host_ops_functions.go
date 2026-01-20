@@ -17,6 +17,22 @@ func HostOpFunctions() []types.Tool {
 		{
 			Type: "function",
 			Function: types.ToolFunction{
+				Name:        "final_answer",
+				Description: "[CONTROL] End the current turn with the final user-visible response text (markdown allowed). Use this when you are fully done and no more environment actions are needed.",
+				Strict:      true,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"text": map[string]any{"type": "string", "description": "Final response text to show the user (markdown allowed)."},
+					},
+					"required":             []any{"text"},
+					"additionalProperties": false,
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: types.ToolFunction{
 				Name:        "fs_list",
 				Description: "[DIRECT - no discovery needed] List directory contents at a VFS path. Common paths: /workdir (user's project), /workspace (your scratch), /tools (for tool_run discovery only).",
 				Strict:      true,

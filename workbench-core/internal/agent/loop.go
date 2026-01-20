@@ -203,28 +203,6 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			ReasoningSummary:   strings.TrimSpace(a.ReasoningSummary),
 		}
 
-		// #region agent log
-		// Debug: verify the role-shape we send into the LLM call (no raw content).
-		// Hypothesis covered:
-		// - H1: host/tool outputs accidentally end up as role=user messages
-		roleCounts := map[string]int{}
-		for _, m := range msgs {
-			roleCounts[strings.ToLower(strings.TrimSpace(m.Role))]++
-		}
-		lastRole := ""
-		if len(msgs) != 0 {
-			lastRole = strings.ToLower(strings.TrimSpace(msgs[len(msgs)-1].Role))
-		}
-		debuglog.Log("toolconfusion", "H1", "loop.go:runConversation", "llm_request_roles", map[string]any{
-			"step":              step,
-			"toolChoice":        strings.TrimSpace(toolChoice),
-			"msgsLen":           len(msgs),
-			"roleCounts":        roleCounts,
-			"lastRole":          lastRole,
-			"prevResponseIDUsed": strings.TrimSpace(lastResponseID) != "",
-		})
-		// #endregion
-
 		var resp types.LLMResponse
 		var err error
 		if s, ok := a.LLM.(types.LLMClientStreaming); ok {
@@ -517,6 +495,38 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 				which := strings.TrimSpace(tc.Function.Name)
 				lastOpForCheckpoint = "tool_call:" + which
 
+				// Control: end the turn explicitly (no heuristics on assistant prose).
+				if which == "final_answer" {
+					var args struct {
+						Text string `json:"text"`
+					}
+					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+						hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: "final_answer args were not valid JSON: " + err.Error()}
+						hostRespJSON, _ := types.MarshalPretty(hostResp)
+						msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+						appendedToolOutputAnyThisStep = true
+						continue
+					}
+					out := strings.TrimSpace(args.Text)
+					if out == "" {
+						hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: "final_answer.text is required"}
+						hostRespJSON, _ := types.MarshalPretty(hostResp)
+						msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+						appendedToolOutputAnyThisStep = true
+						continue
+					}
+					// Provide a tool output for transcript completeness.
+					hostResp := types.HostOpResponse{Op: "final_answer", Ok: true}
+					hostRespJSON, _ := types.MarshalPretty(hostResp)
+					msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+					appendedToolOutputAnyThisStep = true
+					appendedToolOutputOkThisStep = true
+
+					_ = ClearAgentCheckpoint(checkpointPath)
+					msgs = append(msgs, types.LLMMessage{Role: "assistant", Content: out})
+					return out, msgs, step, nil
+				}
+
 				// Special: tool_batch -> HostOpBatchResponse (tool.run ops)
 				if which == "tool_batch" {
 					var args struct {
@@ -663,81 +673,31 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 					})
 					// #endregion
 					batchReq := types.HostOpBatchRequest{Op: types.HostOpFSBatch, Operations: args.Operations, Parallel: parallel}
-					if err := batchReq.Validate(); err != nil {
-						hint := ""
-						if strings.Contains(err.Error(), "unknown op") && strings.Contains(err.Error(), "_") {
-							hint = "Hint: inside batch.operations[], op must be dotted (fs.write), not underscore (fs_write)."
-						} else if strings.Contains(err.Error(), "path is required") {
-							hint = "Hint: include an absolute VFS path starting with / (e.g. {\"op\":\"fs.write\",\"path\":\"/workspace/x.txt\",\"text\":\"...\"})."
-						} else if strings.Contains(err.Error(), "text is required") {
-							hint = "Hint: fs.write/fs.append/fs.patch require non-empty text."
-						} else if strings.Contains(err.Error(), "input is required") {
-							hint = "Hint: tool.run requires input (object) and timeoutMs."
-						}
-						if hint != "" {
-							// #region agent log
-							opsPreview := make([]map[string]any, 0, 3)
-							for i, sub := range args.Operations {
-								if i >= 3 {
-									break
-								}
-								opsPreview = append(opsPreview, map[string]any{
-									"op":       strings.TrimSpace(sub.Op),
-									"path":     strings.TrimSpace(sub.Path),
-									"maxBytes": sub.MaxBytes,
-									"textLen":  len(sub.Text),
-									"toolId":   sub.ToolID.String(),
-									"actionId": strings.TrimSpace(sub.ActionID),
-									"inputLen": len(sub.Input),
-								})
-							}
-							debuglog.Log("toolcalling", "H11", "loop.go:runConversation", "batch_validate_hint", map[string]any{
-								"step":       step,
-								"tool":       which,
-								"err":        errString(err),
-								"hint":       hint,
-								"opsLen":     len(args.Operations),
-								"opsPreview": opsPreview,
-							})
-							// #endregion
-							batchResp := types.HostOpBatchResponse{Ok: false, Error: err.Error() + " " + hint}
-							batchRespJSON, _ := types.MarshalPretty(batchResp)
-							// #region agent log
-							debuglog.Log("toolcalling", "H8", "loop.go:runConversation", "tool_output_error_sent", map[string]any{
-								"step": step,
-								"tool": which,
-							})
-							// #endregion
-							msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(batchRespJSON)})
-							appendedToolOutputAnyThisStep = true
+					// Execute batch with per-operation validation so a single bad operation
+					// doesn't waste the entire LLM turn (reduces retry loops).
+					results := make([]types.HostOpResponse, len(batchReq.Operations))
+					valid := make([]bool, len(batchReq.Operations))
+					invalidN := 0
+					for i, sub := range batchReq.Operations {
+						if strings.TrimSpace(sub.Op) == types.HostOpFinal {
+							results[i] = types.HostOpResponse{Op: strings.TrimSpace(sub.Op), Ok: false, Error: "final is not allowed in batch"}
+							invalidN++
 							continue
 						}
-						// #region agent log
-						debuglog.Log("toolcalling", "H5", "loop.go:runConversation", "batch_validate_err", map[string]any{
-							"step": step,
-							"tool": which,
-							"err":  errString(err),
-						})
-						// #endregion
-						batchResp := types.HostOpBatchResponse{Ok: false, Error: "batch args invalid: " + err.Error()}
-						batchRespJSON, _ := types.MarshalPretty(batchResp)
-						// #region agent log
-						debuglog.Log("toolcalling", "H8", "loop.go:runConversation", "tool_output_error_sent", map[string]any{
-							"step": step,
-							"tool": which,
-						})
-						// #endregion
-						msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(batchRespJSON)})
-						appendedToolOutputAnyThisStep = true
-						continue
+						if err := sub.Validate(); err != nil {
+							results[i] = types.HostOpResponse{Op: strings.TrimSpace(sub.Op), Ok: false, Error: err.Error()}
+							invalidN++
+							continue
+						}
+						valid[i] = true
 					}
-
-					// Execute batch.
-					results := make([]types.HostOpResponse, len(batchReq.Operations))
 					if batchReq.Parallel {
 						var wg sync.WaitGroup
-						wg.Add(len(batchReq.Operations))
 						for i, sub := range batchReq.Operations {
+							if !valid[i] {
+								continue
+							}
+							wg.Add(1)
 							i, sub := i, sub
 							go func() {
 								defer wg.Done()
@@ -747,6 +707,9 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 						wg.Wait()
 					} else {
 						for i, sub := range batchReq.Operations {
+							if !valid[i] {
+								continue
+							}
 							results[i] = a.Exec.Exec(ctx, sub)
 						}
 					}
@@ -845,23 +808,15 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 		}
 
 		// Fallback path: JSON parsing for providers/models without tool calling output.
-		//
-		// Important: once we've successfully executed at least one tool call in this user turn,
-		// treat any subsequent non-tool-calling assistant output as final. This prevents the
-		// legacy HostOpRequest JSON fallback from creating confusing user-like messages.
-		if turnHasToolOutput {
+		// For environment turns we require tools; plain assistant text is treated as an invalid step.
+		if envWanted, _ := turnFlags["envWanted"].(bool); envWanted {
 			trim := strings.TrimSpace(resp.Text)
 			if trim != "" {
-				// #region agent log
-				debuglog.Log("toolconfusion", "H5", "loop.go:runConversation", "return_final", map[string]any{
-					"step":    step,
-					"reason":  "assistant_text_after_tool_output",
-					"textLen": len(trim),
-				})
-				// #endregion
-				_ = ClearAgentCheckpoint(checkpointPath)
-				msgs = append(msgs, types.LLMMessage{Role: "assistant", Content: trim})
-				return trim, msgs, step, nil
+				msgs = append(msgs,
+					types.LLMMessage{Role: "assistant", Content: resp.Text},
+					types.LLMMessage{Role: "user", Content: "Continue by calling the next tool. Do not respond in plain text. When fully done, call final_answer({\"text\":\"...\"})."},
+				)
+				continue
 			}
 		}
 
@@ -936,35 +891,44 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			}
 			batchReq := types.HostOpBatchRequest{Op: strings.TrimSpace(batchCompat.Op), Operations: ops, Parallel: batchCompat.Parallel}
 
-			if err := batchReq.Validate(); err != nil {
-				msgs = append(msgs,
-					types.LLMMessage{Role: "assistant", Content: resp.Text},
-					types.LLMMessage{Role: "user", Content: "Your last JSON op was invalid: " + err.Error() + ".\n\nBatch rules:\n- Use op:\"fs.batch\" (alias: op:\"batch\")\n- Use field \"operations\" (alias: \"ops\")\n\nReturn ONLY one corrected JSON object."},
-				)
-				continue
-			}
-
 			if a.Hooks.Logf != nil {
 				a.Hooks.Logf("executing batch (step %d): ops=%d parallel=%v", step, len(batchReq.Operations), batchReq.Parallel)
 			}
 
+			// Execute with per-operation validation so a single invalid operation doesn't waste the turn.
 			results := make([]types.HostOpResponse, len(batchReq.Operations))
+			valid := make([]bool, len(batchReq.Operations))
+			for i, sub := range batchReq.Operations {
+				if strings.TrimSpace(sub.Op) == types.HostOpFinal {
+					results[i] = types.HostOpResponse{Op: strings.TrimSpace(sub.Op), Ok: false, Error: "final is not allowed in batch"}
+					continue
+				}
+				if err := sub.Validate(); err != nil {
+					results[i] = types.HostOpResponse{Op: strings.TrimSpace(sub.Op), Ok: false, Error: err.Error()}
+					continue
+				}
+				valid[i] = true
+			}
 			if batchReq.Parallel {
 				var wg sync.WaitGroup
-				wg.Add(len(batchReq.Operations))
 				for i, sub := range batchReq.Operations {
+					if !valid[i] {
+						continue
+					}
+					wg.Add(1)
 					i, sub := i, sub
 					go func() {
 						defer wg.Done()
-						r := a.Exec.Exec(ctx, sub)
-						results[i] = r
+						results[i] = a.Exec.Exec(ctx, sub)
 					}()
 				}
 				wg.Wait()
 			} else {
 				for i, sub := range batchReq.Operations {
-					r := a.Exec.Exec(ctx, sub)
-					results[i] = r
+					if !valid[i] {
+						continue
+					}
+					results[i] = a.Exec.Exec(ctx, sub)
 				}
 			}
 
@@ -1492,12 +1456,13 @@ Critical rules:
   - If the user explicitly requests environment interaction (files, repo, tools, builtin.trace), you MUST use the tools. Do NOT answer from assumptions.
 
 When you need the environment, use the provided function tools:
+  - final_answer (end the turn with the final response)
   - fs_list, fs_read, fs_write, fs_append, fs_edit, fs_patch
   - batch (batch of host ops)
   - tool_run (execute a discovered tool)
 
 To end the turn:
-  - Stop calling tools and respond normally in markdown.
+  - Call final_answer with the final response text.
 
 Batch notes:
   - Prefer batch for multiple independent ops.
@@ -1535,7 +1500,12 @@ func toolChoiceForTurn(userMsg string, turnHasToolOutput bool) (choice string, r
 		"hasFileWord": strings.Contains(s, "file") || strings.Contains(s, "files"),
 		"hasRepoWord": strings.Contains(s, "repo") || strings.Contains(s, "codebase") || strings.Contains(s, "project"),
 	}
-	envWanted := flags["hasAtRef"].(bool) || flags["hasTrace"].(bool) || flags["hasRepoWord"].(bool) || flags["hasFileWord"].(bool) || flags["hasToolWord"].(bool)
+	// Treat "tools" as environment intent only when the user is asking to enumerate/run/discover them,
+	// not when they're using the word "tool" conceptually.
+	hasToolWord := flags["hasToolWord"].(bool)
+	toolIntent := hasToolWord && (strings.Contains(s, "list") || strings.Contains(s, "show") || strings.Contains(s, "available") || strings.Contains(s, "discover") || strings.Contains(s, "run"))
+
+	envWanted := flags["hasAtRef"].(bool) || flags["hasTrace"].(bool) || flags["hasRepoWord"].(bool) || flags["hasFileWord"].(bool) || toolIntent
 	flags["envWanted"] = envWanted
 	flags["turnHasToolOutput"] = turnHasToolOutput
 
@@ -1546,12 +1516,10 @@ func toolChoiceForTurn(userMsg string, turnHasToolOutput bool) (choice string, r
 	}
 
 	// If the user is clearly requesting environment interaction, force tool calling
-	// only until we have tool outputs. After that, allow plain assistant text to end.
-	if envWanted && !turnHasToolOutput {
+	// for the entire turn. The model must call tools repeatedly and end with final_answer.
+	_ = turnHasToolOutput
+	if envWanted {
 		return "required", "explicit_env_request", flags
-	}
-	if envWanted && turnHasToolOutput {
-		return "auto", "env_request_has_tool_output", flags
 	}
 
 	return "auto", "default_auto", flags
