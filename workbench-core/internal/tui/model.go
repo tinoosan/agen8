@@ -430,20 +430,38 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			verb = "Created"
 		}
 
-		preview, truncated := buildFileChangePreview(p.op, path, before, after, p.hadBefore, msg.truncated, p.patchPreview, p.patchTruncated, p.patchRedacted)
+		preview, truncated, added, deleted := buildFileChangePreview(p.op, path, before, after, p.hadBefore, msg.truncated, p.patchPreview, p.patchTruncated, p.patchRedacted)
 		if strings.TrimSpace(preview) == "" {
 			return m, nil
 		}
 		if truncated {
 			preview = strings.TrimRight(preview, "\n") + "\n\n_(truncated)_\n"
 		}
-		snippet := "**" + verb + "** `" + path + "`\n\n" + preview
+		_ = verb // verb is currently unused in the transcript snippet (diff header implies create vs update)
+		displayPath := strings.TrimPrefix(path, "/")
+		if strings.TrimSpace(displayPath) == "" {
+			displayPath = path
+		}
+		header := displayPath
+		if !(added == 0 && deleted == 0) {
+			// No parentheses (user preference).
+			header = fmt.Sprintf("%s  +%d -%d", displayPath, added, deleted)
+		}
+		snippet := header + "\n\n" + preview
 		if m.fileChangesByPath == nil {
 			m.fileChangesByPath = make(map[string]string)
 		}
-		if _, exists := m.fileChangesByPath[path]; !exists {
+		_, exists := m.fileChangesByPath[path]
+		if !exists {
 			m.fileChangesOrder = append(m.fileChangesOrder, path)
-		} else {
+		}
+		// If we already captured a real diff for this path, don't overwrite it with a
+		// later "no changes" write (common when a tool re-writes identical content).
+		if exists && added == 0 && deleted == 0 {
+			// Still keep ordering stable; just skip updating the snippet body.
+			return m, nil
+		}
+		if exists {
 			// Move the path to the end so the most recently changed file is last in the
 			// grouped block (best UX when the block is kept at the bottom).
 			oldIdx := -1

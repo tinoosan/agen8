@@ -79,11 +79,22 @@ func TestTranscript_FileWrite_EmitsDiffBlock(t *testing.T) {
 	m2, _ := m.Update(msg)
 	updated3 := m2.(Model)
 
-	view := updated3.transcript.View()
-	if !strings.Contains(view, "Updated") {
-		t.Fatalf("expected transcript to contain Updated header, got:\n%s", view)
+	// Assert against the raw transcript item text (stable; avoids ANSI styling concerns).
+	raw := ""
+	for i := len(updated3.transcriptItems) - 1; i >= 0; i-- {
+		if updated3.transcriptItems[i].kind == transcriptFileChange {
+			raw = strings.TrimSpace(updated3.transcriptItems[i].text)
+			break
+		}
+	}
+	if raw == "" {
+		t.Fatalf("expected transcript to include a file-change item")
+	}
+	if !strings.HasPrefix(raw, "workspace/a.txt  +1 -1") {
+		t.Fatalf("expected file-change header %q, got:\n%s", "workspace/a.txt  +1 -1", raw)
 	}
 	// Glamour renders code blocks without literal ``` fences; assert diff markers.
+	view := updated3.transcript.View()
 	if !strings.Contains(view, "--- a/workspace/a.txt") || !strings.Contains(view, "+++ b/workspace/a.txt") {
 		t.Fatalf("expected transcript to contain unified diff headers, got:\n%s", view)
 	}
@@ -133,10 +144,20 @@ func TestTranscript_FileWrite_Create_ShowsDevNullDiff(t *testing.T) {
 	m3, _ := m.Update(cmd2())
 	updated3 := m3.(Model)
 
-	view := updated3.transcript.View()
-	if !strings.Contains(view, "Created") {
-		t.Fatalf("expected Created header, got:\n%s", view)
+	raw := ""
+	for i := len(updated3.transcriptItems) - 1; i >= 0; i-- {
+		if updated3.transcriptItems[i].kind == transcriptFileChange {
+			raw = strings.TrimSpace(updated3.transcriptItems[i].text)
+			break
+		}
 	}
+	if raw == "" {
+		t.Fatalf("expected transcript to include a file-change item")
+	}
+	if !strings.HasPrefix(raw, "workspace/new.txt  +1 -0") {
+		t.Fatalf("expected file-change header %q, got:\n%s", "workspace/new.txt  +1 -0", raw)
+	}
+	view := updated3.transcript.View()
 	if !strings.Contains(view, "--- /dev/null") || !strings.Contains(view, "+++ b/workspace/new.txt") {
 		t.Fatalf("expected /dev/null create diff headers, got:\n%s", view)
 	}
@@ -186,9 +207,19 @@ func TestTranscript_FileWrite_LabelsUpdated_WhenFileExistsButNotCached(t *testin
 	m3, _ := updated3.Update(cmd2())
 	updated4 := m3.(Model)
 
-	view := updated4.transcript.View()
-	if !strings.Contains(view, "Updated") {
-		t.Fatalf("expected Updated (not Created) when file existed but wasn't cached, got:\n%s", view)
+	raw := ""
+	for i := len(updated4.transcriptItems) - 1; i >= 0; i-- {
+		if updated4.transcriptItems[i].kind == transcriptFileChange {
+			raw = strings.TrimSpace(updated4.transcriptItems[i].text)
+			break
+		}
+	}
+	if raw == "" {
+		t.Fatalf("expected transcript to include a file-change item")
+	}
+	// For no-op writes, we omit the +0/-0 counts (user preference).
+	if !strings.HasPrefix(raw, "workspace/existing.txt") {
+		t.Fatalf("expected file-change header to start with %q, got:\n%s", "workspace/existing.txt", raw)
 	}
 }
 
@@ -236,6 +267,19 @@ func TestTranscript_FilePatch_EmitsPatchBlock(t *testing.T) {
 	m2, _ := m.Update(msg)
 	updated3 := m2.(Model)
 
+	raw := ""
+	for i := len(updated3.transcriptItems) - 1; i >= 0; i-- {
+		if updated3.transcriptItems[i].kind == transcriptFileChange {
+			raw = strings.TrimSpace(updated3.transcriptItems[i].text)
+			break
+		}
+	}
+	if raw == "" {
+		t.Fatalf("expected transcript to include a file-change item")
+	}
+	if !strings.HasPrefix(raw, "workspace/b.txt  +1 -1") {
+		t.Fatalf("expected file-change header %q, got:\n%s", "workspace/b.txt  +1 -1", raw)
+	}
 	view := updated3.transcript.View()
 	// Glamour renders code blocks without literal ``` fences; assert patch markers.
 	if !strings.Contains(view, "--- a/b.txt") || !strings.Contains(view, "+++ b/b.txt") {

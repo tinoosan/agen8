@@ -148,7 +148,20 @@ func (m *Model) rebuildTranscript() {
 			lines = append(lines, line)
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptFileChange:
-			rendered := strings.Trim(m.renderer.RenderMarkdown(strings.TrimSpace(it.text), fileInnerW), "\n")
+			raw := strings.TrimSpace(it.text)
+			hdr, body, ok := strings.Cut(raw, "\n\n")
+			if !ok || strings.TrimSpace(body) == "" {
+				// Fallback: render as markdown.
+				rendered := strings.Trim(m.renderer.RenderMarkdown(raw, fileInnerW), "\n")
+				lines = append(lines, m.styleFileChangeBox.Render(rendered))
+				lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
+				break
+			}
+
+			path, added, deleted, hasCounts := parseFileChangeHeaderLine(hdr)
+			headerRendered := renderFileChangeHeaderLine(path, added, deleted, hasCounts, fileInnerW)
+			bodyRendered := strings.Trim(m.renderer.RenderMarkdown(strings.TrimSpace(body), fileInnerW), "\n")
+			rendered := headerRendered + "\n\n" + bodyRendered
 			lines = append(lines, m.styleFileChangeBox.Render(rendered))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		}
@@ -219,6 +232,95 @@ func wrapText(s string, width int) string {
 	}
 	// Use a dedicated wrapping lib so reflow behaves consistently across width changes.
 	return wordwrap.String(s, width)
+}
+
+func parseFileChangeHeaderLine(hdr string) (path string, added int, deleted int, hasCounts bool) {
+	hdr = strings.ReplaceAll(hdr, "\r", "")
+	hdr = strings.TrimSpace(hdr)
+	if hdr == "" {
+		return "", 0, 0, false
+	}
+	fields := strings.Fields(hdr)
+	if len(fields) < 3 {
+		return hdr, 0, 0, false
+	}
+	// Expect: "<path> ... +N -M" (we only care about the trailing +N/-M).
+	last := fields[len(fields)-1]
+	prev := fields[len(fields)-2]
+	if !strings.HasPrefix(prev, "+") || !strings.HasPrefix(last, "-") {
+		return hdr, 0, 0, false
+	}
+	// Parse ints; tolerate "+0" "-0".
+	a := strings.TrimPrefix(prev, "+")
+	d := strings.TrimPrefix(last, "-")
+	// manual Atoi without importing strconv here (keep file imports stable)
+	parseInt := func(s string) (int, bool) {
+		if s == "" {
+			return 0, false
+		}
+		n := 0
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			if c < '0' || c > '9' {
+				return 0, false
+			}
+			n = n*10 + int(c-'0')
+		}
+		return n, true
+	}
+	ai, okA := parseInt(a)
+	di, okD := parseInt(d)
+	if !okA || !okD {
+		return hdr, 0, 0, false
+	}
+	path = strings.Join(fields[:len(fields)-2], " ")
+	return path, ai, di, true
+}
+
+func renderFileChangeHeaderLine(path string, added int, deleted int, hasCounts bool, width int) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		path = "unknown"
+	}
+	// Styles: path (blue), + (green), - (red).
+	stylePath := lipgloss.NewStyle().Foreground(lipgloss.Color("#6bbcff")).Bold(true)
+	stylePlus := lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950")).Bold(true)
+	styleMinus := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Bold(true)
+
+	// Hide +0/-0 in the header (user preference).
+	if !hasCounts || (added == 0 && deleted == 0) {
+		// Truncate path to fit.
+		maxPath := max(8, width)
+		path = truncateMiddle(path, maxPath)
+		return stylePath.Render(path)
+	}
+
+	plus := stylePlus.Render("+" + itoa(added))
+	minus := styleMinus.Render("-" + itoa(deleted))
+
+	// Fit within width by truncating the path.
+	countsRaw := "  +" + itoa(added) + " -" + itoa(deleted)
+	availPath := max(8, width-lipgloss.Width(countsRaw))
+	path = truncateMiddle(path, availPath)
+	return stylePath.Render(path) + "  " + plus + " " + minus
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	if n < 0 {
+		// Should not happen for our use, but handle defensively.
+		return "-" + itoa(-n)
+	}
+	var b [32]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + (n % 10))
+		n /= 10
+	}
+	return string(b[i:])
 }
 
 func truncateRight(s string, maxLen int) string {
