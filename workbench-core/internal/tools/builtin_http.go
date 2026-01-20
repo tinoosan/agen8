@@ -19,6 +19,7 @@ var builtinHTTPManifest = []byte(`{
   "kind": "builtin",
   "displayName": "Builtin HTTP",
   "description": "Performs HTTP requests and returns a bounded response preview. Large bodies are written as /results/<callId>/body.* artifacts.",
+  "exposeAsFunctions": true,
   "actions": [
     {
       "id": "fetch",

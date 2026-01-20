@@ -22,6 +22,7 @@ var builtinGitManifest = []byte(`{
   "kind": "builtin",
   "displayName": "Builtin Git",
   "description": "Runs common git operations inside the host-configured root directory and returns structured results with bounded stdout/stderr previews.",
+  "exposeAsFunctions": true,
   "actions": [
     {
       "id": "status",
@@ -212,7 +213,7 @@ const (
 )
 
 type BuiltinGitInvoker struct {
-	RootDir string
+	RootDir  string
 	MaxBytes int
 }
 
@@ -393,15 +394,15 @@ func (g *BuiltinGitInvoker) gitStatus(ctx context.Context, req types.ToolRequest
 
 	head, upstream, ahead, behind, staged, unstaged, untracked, conflicts := parseGitStatusPorcelainV2Z(res.Stdout)
 	out := gitStatusOutput{
-		ExitCode: res.ExitCode,
-		Stdout:   stdoutPreview,
-		Stderr:   stderrPreview,
-		Head:     head,
-		Upstream: upstream,
-		Ahead:    ahead,
-		Behind:   behind,
-		Staged:   staged,
-		Unstaged: unstaged,
+		ExitCode:  res.ExitCode,
+		Stdout:    stdoutPreview,
+		Stderr:    stderrPreview,
+		Head:      head,
+		Upstream:  upstream,
+		Ahead:     ahead,
+		Behind:    behind,
+		Staged:    staged,
+		Unstaged:  unstaged,
 		Untracked: untracked,
 		Conflicts: conflicts,
 	}
@@ -712,10 +713,10 @@ func (g *BuiltinGitInvoker) gitDiff(ctx context.Context, req types.ToolRequest) 
 
 	patchPreview, patchArtifact, patchTruncated := capTextArtifact("diff.patch", res.Stdout, maxBytes)
 	out := gitDiffOutput{
-		ExitCode: res.ExitCode,
-		Stdout:   stdoutPreview,
-		Stderr:   stderrPreview,
-		Patch:    patchPreview,
+		ExitCode:  res.ExitCode,
+		Stdout:    stdoutPreview,
+		Stderr:    stderrPreview,
+		Patch:     patchPreview,
 		Truncated: patchTruncated,
 	}
 
@@ -810,11 +811,11 @@ func (g *BuiltinGitInvoker) gitBranch(ctx context.Context, req types.ToolRequest
 	}
 
 	out := gitBranchOutput{
-		ExitCode:  res.ExitCode,
-		Stdout:    stdoutPreview,
-		Stderr:    stderrPreview,
-		Branches:  branches,
-		Created:   created,
+		ExitCode: res.ExitCode,
+		Stdout:   stdoutPreview,
+		Stderr:   stderrPreview,
+		Branches: branches,
+		Created:  created,
 	}
 	artifacts := make([]ToolArtifactWrite, 0, 2)
 	if stdoutArtifact != nil {
@@ -892,9 +893,9 @@ func (g *BuiltinGitInvoker) gitAdd(ctx context.Context, req types.ToolRequest) (
 	stderrPreview, stderrArtifact, _ := capTextArtifact("stderr.txt", res.Stderr, maxBytes)
 
 	out := gitAddOutput{
-		ExitCode:  res.ExitCode,
-		Stdout:    stdoutPreview,
-		Stderr:    stderrPreview,
+		ExitCode:   res.ExitCode,
+		Stdout:     stdoutPreview,
+		Stderr:     stderrPreview,
 		AddedFiles: make([]string, 0, len(files)),
 	}
 	for _, f := range in.Files {
@@ -993,4 +994,3 @@ func (g *BuiltinGitInvoker) gitCommit(ctx context.Context, req types.ToolRequest
 	}
 	return ToolCallResult{Output: outJSON, Artifacts: artifacts}, nil
 }
-

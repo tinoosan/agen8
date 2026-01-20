@@ -283,6 +283,109 @@ func TestAgentLoopV0_RunConversation_ToolCalling_BatchExecutesAllOps(t *testing.
 	}
 }
 
+func TestAgent_RunConversation_FunctionToolRoutesToToolRun(t *testing.T) {
+	manifest := types.ToolManifest{
+		ID:                types.ToolID("builtin.bash"),
+		Version:           "0.1.0",
+		Kind:              types.ToolKindBuiltin,
+		DisplayName:       "Builtin Bash",
+		Description:       "bash",
+		ExposeAsFunctions: true,
+		Actions: []types.ToolAction{
+			{
+				ID:           types.ActionID("exec"),
+				DisplayName:  "Exec",
+				Description:  "run",
+				InputSchema:  json.RawMessage(`{"type":"object"}`),
+				OutputSchema: json.RawMessage(`{"type":"object"}`),
+			},
+		},
+	}
+
+	llm := &fakeLLMToolCalling{
+		Replies: []types.LLMResponse{
+			{
+				ToolCalls: []types.ToolCall{
+					{
+						ID:   "call_1",
+						Type: "function",
+						Function: types.ToolCallFunction{
+							Name:      "builtin_bash_exec",
+							Arguments: `{"argv":["echo","hi"]}`,
+						},
+					},
+				},
+			},
+			{
+				ToolCalls: []types.ToolCall{
+					{
+						ID:   "call_2",
+						Type: "function",
+						Function: types.ToolCallFunction{
+							Name:      "final_answer",
+							Arguments: `{"text":"done"}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	var mu sync.Mutex
+	var called []types.HostOpRequest
+	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		_ = ctx
+		mu.Lock()
+		called = append(called, req)
+		mu.Unlock()
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+	}
+
+	a, err := New(Config{
+		LLM:           llm,
+		Exec:          HostExecFunc(exec),
+		Model:         "test-model",
+		MaxSteps:      5,
+		ToolManifests: []types.ToolManifest{manifest},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	final, _, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if final != "done" {
+		t.Fatalf("unexpected final %q", final)
+	}
+	if len(called) != 1 {
+		t.Fatalf("expected 1 host call, got %d", len(called))
+	}
+	req := called[0]
+	if req.Op != types.HostOpToolRun {
+		t.Fatalf("expected tool.run, got %q", req.Op)
+	}
+	if req.ToolID != manifest.ID {
+		t.Fatalf("unexpected toolId %q", req.ToolID)
+	}
+	if strings.TrimSpace(req.ActionID) != "exec" {
+		t.Fatalf("unexpected actionId %q", req.ActionID)
+	}
+	if req.TimeoutMs != defaultToolFunctionTimeoutMs {
+		t.Fatalf("unexpected timeout %d", req.TimeoutMs)
+	}
+	var args struct {
+		Argv []string `json:"argv"`
+	}
+	if err := json.Unmarshal(req.Input, &args); err != nil {
+		t.Fatalf("unmarshal input: %v", err)
+	}
+	if len(args.Argv) != 2 || args.Argv[0] != "echo" || args.Argv[1] != "hi" {
+		t.Fatalf("unexpected args %+v", args.Argv)
+	}
+}
+
 func TestAgentLoopV0_RunConversation_GracefulMaxSteps_Finalizes(t *testing.T) {
 	llm := &fakeLLM{
 		Replies: []string{

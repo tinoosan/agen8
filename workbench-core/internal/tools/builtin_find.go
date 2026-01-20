@@ -20,6 +20,7 @@ var builtinFindManifest = []byte(`{
   "kind": "builtin",
   "displayName": "Builtin Find",
   "description": "Finds files and directories under a host-configured root directory using simple glob patterns and returns relative paths.",
+  "exposeAsFunctions": true,
   "actions": [
     {
       "id": "files",
@@ -256,4 +257,3 @@ func matchGlob(pattern, target string) bool {
 	}
 	return ok
 }
-

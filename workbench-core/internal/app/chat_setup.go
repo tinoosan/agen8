@@ -144,6 +144,30 @@ func setupTUIChatRuntime(
 		ToolRegistry: builtinInvokers,
 	}
 
+	builtinManifestProvider, err := tools.NewBuiltinManifestProvider()
+	if err != nil {
+		return nil, fmt.Errorf("load builtin manifests: %w", err)
+	}
+	toolManifests := []types.ToolManifest{}
+	if ids, err := builtinManifestProvider.ListToolIDs(context.Background()); err != nil {
+		return nil, fmt.Errorf("list builtin manifests: %w", err)
+	} else {
+		for _, id := range ids {
+			b, ok, err := builtinManifestProvider.GetManifest(context.Background(), id)
+			if err != nil {
+				return nil, fmt.Errorf("read builtin manifest %s: %w", id.String(), err)
+			}
+			if !ok {
+				continue
+			}
+			m, err := types.ParseBuiltinToolManifest(b)
+			if err != nil {
+				return nil, fmt.Errorf("parse builtin manifest %s: %w", id.String(), err)
+			}
+			toolManifests = append(toolManifests, m)
+		}
+	}
+
 	executor := &agent.HostOpExecutor{
 		FS:              fs,
 		Runner:          &runner,
@@ -464,6 +488,7 @@ func setupTUIChatRuntime(
 		SystemPrompt:     baseSystemPrompt,
 		Context:          constructor,
 		MaxSteps:         opts.MaxSteps,
+		ToolManifests:    toolManifests,
 	})
 	if err != nil {
 		return nil, err

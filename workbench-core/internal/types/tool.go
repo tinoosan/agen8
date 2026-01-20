@@ -142,14 +142,15 @@ func ParseBuiltinToolManifest(b []byte) (ToolManifest, error) {
 // ToolManifest describes a tool's metadata, capabilities, and actions.
 // It is the JSON schema stored at /tools/<toolId>/manifest.json.
 type ToolManifest struct {
-	ID          ToolID       `json:"id"`
-	Version     string       `json:"version"`
-	Kind        ToolKind     `json:"kind"` // builtin or custom
-	DisplayName string       `json:"displayName"`
-	Description string       `json:"description"`
-	SourceRepo  string       `json:"sourceRepo,omitempty"`
-	Actions     []ToolAction `json:"actions"`
-	Env         EnvVar       `json:"env,omitempty"`
+	ID                ToolID       `json:"id"`
+	Version           string       `json:"version"`
+	Kind              ToolKind     `json:"kind"` // builtin or custom
+	DisplayName       string       `json:"displayName"`
+	Description       string       `json:"description"`
+	SourceRepo        string       `json:"sourceRepo,omitempty"`
+	ExposeAsFunctions bool         `json:"exposeAsFunctions,omitempty"`
+	Actions           []ToolAction `json:"actions"`
+	Env               EnvVar       `json:"env,omitempty"`
 }
 
 // ToolAction describes a single callable action within a tool.

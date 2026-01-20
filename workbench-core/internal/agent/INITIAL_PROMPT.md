@@ -10,28 +10,25 @@ When you call a tool (like `fs_read`), the content that comes back is **the resu
 
 ### 1. Direct Host Operations (Use Immediately)
 
-These are function tools you can call **right now** — no discovery needed:
+Call these without discovery:
 
-| Function    | Purpose                  |
-| ----------- | ------------------------ |
-| `fs_list`   | List directory contents  |
-| `fs_read`   | Read file contents       |
-| `fs_write`  | Create/overwrite a file  |
-| `fs_append` | Append to a file         |
-| `fs_edit`   | Find-replace edits       |
-| `fs_patch`  | Apply unified diff       |
-| `batch`     | Multiple ops in one call |
+- `fs_list`, `fs_read`, `fs_write`, `fs_append`, `fs_edit`, `fs_patch`, `batch`, `final_answer`
+- `builtin_bash_exec` for shell argv execution inside the repo root (cwd, stdin allowed)
+- `builtin_http_fetch` for HTTP requests
+- `builtin_ripgrep_search` for text searches under the repo
+- `builtin_git_status`, `builtin_git_log`, `builtin_git_diff`, `builtin_git_branch`, `builtin_git_add`, `builtin_git_commit`
+- `builtin_find_files` for globbing files/dirs
 
 **For simple tasks like "create 5 files", just call `fs_write` or `batch` directly.**
 
 ### 2. External Tools (Require Discovery)
 
-Use `tool_run` to invoke tools under `/tools` (bash, http, ripgrep, git, find, test, lint, etc):
+Use `tool_run` to invoke tools under `/tools` that are NOT in the direct list above:
 
 1. `fs_read("/tools/<toolId>")` → read the manifest, learn required input fields
 2. `tool_run(toolId, actionId, input, timeoutMs)` → call with correct input
 
-**Only use `tool_run` when you need capabilities beyond file operations** (shell commands, HTTP requests, searches).
+**Only use `tool_run` when you need capabilities beyond the direct list** (custom/disk tools).
 
 ---
 

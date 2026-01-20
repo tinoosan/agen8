@@ -96,6 +96,10 @@ type Config struct {
 	// MaxSteps caps the number of model -> host op iterations per user turn.
 	MaxSteps int
 
+	// ToolManifests optionally supplies host-known tool manifests that should be
+	// exposed as direct function tools (no discovery required).
+	ToolManifests []types.ToolManifest
+
 	Hooks Hooks
 }
 
@@ -119,16 +123,20 @@ func New(cfg Config) (*Agent, error) {
 		system = agentLoopV0SystemPrompt()
 	}
 
+	extraTools, routes := ManifestToFunctionTools(cfg.ToolManifests)
+
 	return &Agent{
-		LLM:              cfg.LLM,
-		Exec:             cfg.Exec,
-		Model:            cfg.Model,
-		EnableWebSearch:  cfg.EnableWebSearch,
-		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
-		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
-		SystemPrompt:     system,
-		Context:          cfg.Context,
-		MaxSteps:         cfg.MaxSteps,
-		Hooks:            cfg.Hooks,
+		LLM:                cfg.LLM,
+		Exec:               cfg.Exec,
+		Model:              cfg.Model,
+		EnableWebSearch:    cfg.EnableWebSearch,
+		ReasoningEffort:    strings.TrimSpace(cfg.ReasoningEffort),
+		ReasoningSummary:   strings.TrimSpace(cfg.ReasoningSummary),
+		SystemPrompt:       system,
+		Context:            cfg.Context,
+		MaxSteps:           cfg.MaxSteps,
+		Hooks:              cfg.Hooks,
+		ExtraTools:         extraTools,
+		ToolFunctionRoutes: routes,
 	}, nil
 }

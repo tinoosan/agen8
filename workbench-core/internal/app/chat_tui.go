@@ -1539,11 +1539,11 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 
 		// #region agent log
 		cursorDebugLog("H1", "chat_tui.go:handleSlashCommand", "model_changed_applied", map[string]any{
-			"from":           strings.TrimSpace(cur),
-			"to":             strings.TrimSpace(next),
-			"runnerModel":    strings.TrimSpace(r.model),
-			"optsModel":      strings.TrimSpace(r.opts.Model),
-			"agentModel":     strings.TrimSpace(r.agent.Model),
+			"from":        strings.TrimSpace(cur),
+			"to":          strings.TrimSpace(next),
+			"runnerModel": strings.TrimSpace(r.model),
+			"optsModel":   strings.TrimSpace(r.opts.Model),
+			"agentModel":  strings.TrimSpace(r.agent.Model),
 			"runRuntimeModel": func() string {
 				if r.run.Runtime == nil {
 					return ""

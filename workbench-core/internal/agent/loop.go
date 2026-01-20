@@ -58,6 +58,11 @@ type Agent struct {
 
 	// Hooks are optional observability callbacks invoked by the agent loop.
 	Hooks Hooks
+
+	// ExtraTools are additional function tools exposed by the host (derived from manifests).
+	ExtraTools []types.Tool
+	// ToolFunctionRoutes map function names back to tool.run routes.
+	ToolFunctionRoutes map[string]ToolRoute
 }
 
 // RunConversation executes the agent loop for an existing conversation.
@@ -149,9 +154,12 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 
 	// Enable function/tool calling for host primitives.
 	hostOpTools := HostOpFunctions()
+	if len(a.ExtraTools) != 0 {
+		hostOpTools = append(hostOpTools, a.ExtraTools...)
+	}
 
 	for step := startStep; step <= maxSteps; step++ {
-		toolChoice, toolChoiceReason, turnFlags := toolChoiceForTurn(turnUserMessage, turnHasToolOutput)
+		toolChoice, toolChoiceReason, turnFlags := toolChoiceForTurn(a.Model, turnUserMessage, turnHasToolOutput)
 		// #region agent log
 		debuglog.Log("toolcalling", "H1", "loop.go:runConversation", "step_start", map[string]any{
 			"step":          step,
@@ -159,6 +167,7 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			"msgsLen":       len(msgs),
 			"toolChoice":    toolChoice,
 			"toolChoiceWhy": toolChoiceReason,
+			"model":         strings.TrimSpace(a.Model),
 			"turnUserLen":   len(turnUserMessage),
 			"turnFlags":     turnFlags,
 			"toolsLen":      len(hostOpTools),
@@ -742,7 +751,7 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 					continue
 				}
 
-				op, err := functionCallToHostOp(tc)
+				op, err := functionCallToHostOp(tc, a.ToolFunctionRoutes)
 				if err != nil {
 					// #region agent log
 					debuglog.Log("toolcalling", "H11", "loop.go:runConversation", "tool_call_args_invalid", map[string]any{
@@ -1347,9 +1356,33 @@ func extractTurnUserMessage(msgs []types.LLMMessage) string {
 	return ""
 }
 
-func functionCallToHostOp(tc types.ToolCall) (types.HostOpRequest, error) {
+func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types.HostOpRequest, error) {
 	name := strings.TrimSpace(tc.Function.Name)
 	argsJSON := []byte(tc.Function.Arguments)
+
+	if route, ok := routes[name]; ok {
+		if len(strings.TrimSpace(tc.Function.Arguments)) == 0 {
+			argsJSON = []byte(`{}`)
+		}
+		var input json.RawMessage
+		if err := json.Unmarshal(argsJSON, &input); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		if input == nil {
+			input = json.RawMessage(`{}`)
+		}
+		timeout := route.TimeoutMs
+		if timeout <= 0 {
+			timeout = defaultToolFunctionTimeoutMs
+		}
+		return types.HostOpRequest{
+			Op:        types.HostOpToolRun,
+			ToolID:    route.ToolID,
+			ActionID:  strings.TrimSpace(route.ActionID),
+			Input:     input,
+			TimeoutMs: timeout,
+		}, nil
+	}
 
 	switch name {
 	case "fs_list":
@@ -1511,8 +1544,9 @@ Always:
 `)
 }
 
-func toolChoiceForTurn(userMsg string, turnHasToolOutput bool) (choice string, reason string, flags map[string]any) {
+func toolChoiceForTurn(modelID string, userMsg string, turnHasToolOutput bool) (choice string, reason string, flags map[string]any) {
 	s := strings.ToLower(strings.TrimSpace(userMsg))
+	m := strings.ToLower(strings.TrimSpace(modelID))
 	flags = map[string]any{
 		"empty":       s == "",
 		"isShort":     len(s) <= 8,
@@ -1544,6 +1578,13 @@ func toolChoiceForTurn(userMsg string, turnHasToolOutput bool) (choice string, r
 	// for the entire turn. The model must call tools repeatedly and end with final_answer.
 	_ = turnHasToolOutput
 	if envWanted {
+		// Some models (notably some Anthropic providers) can get stuck in tool loops when
+		// toolChoice is forced to "required". Prefer "auto" so the model can end with a
+		// normal assistant reply when it has enough information, and rely on the system
+		// prompt + repair messages to enforce tool usage when truly needed.
+		if strings.HasPrefix(m, "anthropic/") {
+			return "auto", "anthropic_env_auto", flags
+		}
 		return "required", "explicit_env_request", flags
 	}
 
