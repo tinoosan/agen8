@@ -108,21 +108,6 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 	m.thinkingDuration = 0
 	m.thinkingSummary = ""
 
-	// #region agent log
-	debugLog(debugLogPayload{
-		SessionID:    "debug-session",
-		RunID:        "pre-fix",
-		HypothesisID: "H2",
-		Location:     "model_turn.go:submit",
-		Message:      "turn reset per-turn diff grouping state",
-		Data: map[string]any{
-			"turnN":             m.turnN,
-			"transcriptItems":   len(m.transcriptItems),
-			"fileChangesItemIdx": m.fileChangesItemIdx,
-		},
-	})
-	// #endregion
-
 	if m.workflowTitle == "" {
 		m.workflowTitle = firstLine(userMsg)
 	}

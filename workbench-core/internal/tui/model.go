@@ -454,21 +454,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if oldIdx >= 0 && oldIdx != len(m.fileChangesOrder)-1 {
-				// #region agent log
-				debugLog(debugLogPayload{
-					SessionID:    "debug-session",
-					RunID:        "pre-fix",
-					HypothesisID: "H3",
-					Location:     "model.go:fileAfterMsg",
-					Message:      "moving updated file path to end of grouped diff order",
-					Data: map[string]any{
-						"path":       path,
-						"oldIdx":     oldIdx,
-						"orderLen":   len(m.fileChangesOrder),
-						"tailBefore": m.fileChangesOrder[len(m.fileChangesOrder)-1],
-					},
-				})
-				// #endregion
 				// Remove oldIdx and append.
 				m.fileChangesOrder = append(m.fileChangesOrder[:oldIdx], m.fileChangesOrder[oldIdx+1:]...)
 				m.fileChangesOrder = append(m.fileChangesOrder, path)
@@ -1098,22 +1083,6 @@ func (m *Model) upsertGroupedFileChanges() {
 	if len(m.fileChangesOrder) == 0 || m.fileChangesByPath == nil {
 		return
 	}
-	// #region agent log
-	debugLog(debugLogPayload{
-		SessionID:    "debug-session",
-		RunID:        "pre-fix",
-		HypothesisID: "H1",
-		Location:     "model.go:upsertGroupedFileChanges",
-		Message:      "upsert grouped file-changes block",
-		Data: map[string]any{
-			"fileChangesItemIdx": m.fileChangesItemIdx,
-			"transcriptItems":    len(m.transcriptItems),
-			"fileChangesPaths":   len(m.fileChangesOrder),
-			"wasAtBottom":        m.transcript.AtBottom(),
-			"yOffset":            m.transcript.YOffset,
-		},
-	})
-	// #endregion
 
 	// Build markdown for the grouped diff block.
 	//
@@ -1144,19 +1113,6 @@ func (m *Model) upsertGroupedFileChanges() {
 	wasAtBottom := m.transcript.AtBottom()
 	// First insert: append a single file-change box at the end of the transcript.
 	if m.fileChangesItemIdx < 0 || m.fileChangesItemIdx >= len(m.transcriptItems) {
-		// #region agent log
-		debugLog(debugLogPayload{
-			SessionID:    "debug-session",
-			RunID:        "pre-fix",
-			HypothesisID: "H1",
-			Location:     "model.go:upsertGroupedFileChanges",
-			Message:      "inserting new grouped file-changes transcript item",
-			Data: map[string]any{
-				"insertAtIdx":        len(m.transcriptItems),
-				"fileChangesItemIdx": m.fileChangesItemIdx,
-			},
-		})
-		// #endregion
 		m.fileChangesItemIdx = len(m.transcriptItems)
 		m.addTranscriptItem(transcriptItem{kind: transcriptFileChange, text: md})
 		// Do not add a spacer here: in batch parallelism additional action lines may still
@@ -1167,21 +1123,6 @@ func (m *Model) upsertGroupedFileChanges() {
 	it := m.transcriptItems[m.fileChangesItemIdx]
 	if it.kind != transcriptFileChange {
 		// Safety: if the slot was overwritten, fall back to appending a new block.
-		// #region agent log
-		debugLog(debugLogPayload{
-			SessionID:    "debug-session",
-			RunID:        "pre-fix",
-			HypothesisID: "H1",
-			Location:     "model.go:upsertGroupedFileChanges",
-			Message:      "fileChangesItemIdx slot was not transcriptFileChange; appending new block",
-			Data: map[string]any{
-				"idx":             m.fileChangesItemIdx,
-				"kindAtIdx":       int(it.kind),
-				"appendAt":        len(m.transcriptItems),
-				"transcriptItems": len(m.transcriptItems),
-			},
-		})
-		// #endregion
 		m.fileChangesItemIdx = len(m.transcriptItems)
 		m.addTranscriptItem(transcriptItem{kind: transcriptFileChange, text: md})
 		return
@@ -1192,43 +1133,11 @@ func (m *Model) upsertGroupedFileChanges() {
 	// Instead, keep the newest version at the bottom by re-appending and turning the old
 	// block into a spacer (preserves indices for other in-flight transcript items).
 	if m.fileChangesItemIdx != len(m.transcriptItems)-1 {
-		// #region agent log
-		debugLog(debugLogPayload{
-			SessionID:    "debug-session",
-			RunID:        "pre-fix",
-			HypothesisID: "H1",
-			Location:     "model.go:upsertGroupedFileChanges",
-			Message:      "file-changes block not last; re-appending updated block at end",
-			Data: map[string]any{
-				"idx":             m.fileChangesItemIdx,
-				"transcriptItems": len(m.transcriptItems),
-				"appendAt":        len(m.transcriptItems),
-				"wasAtBottom":     wasAtBottom,
-			},
-		})
-		// #endregion
-
 		m.transcriptItems[m.fileChangesItemIdx] = transcriptItem{kind: transcriptSpacer}
 		m.fileChangesItemIdx = len(m.transcriptItems)
 		m.addTranscriptItem(transcriptItem{kind: transcriptFileChange, text: md})
 		return
 	}
-
-	// #region agent log
-	debugLog(debugLogPayload{
-		SessionID:    "debug-session",
-		RunID:        "pre-fix",
-		HypothesisID: "H1",
-		Location:     "model.go:upsertGroupedFileChanges",
-		Message:      "updating existing grouped file-changes transcript item in-place",
-		Data: map[string]any{
-			"idx":             m.fileChangesItemIdx,
-			"isLast":          m.fileChangesItemIdx == len(m.transcriptItems)-1,
-			"transcriptItems": len(m.transcriptItems),
-			"wasAtBottom":     wasAtBottom,
-		},
-	})
-	// #endregion
 	it.text = md
 	m.transcriptItems[m.fileChangesItemIdx] = it
 	m.rebuildTranscript()
