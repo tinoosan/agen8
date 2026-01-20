@@ -203,6 +203,28 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			ReasoningSummary:   strings.TrimSpace(a.ReasoningSummary),
 		}
 
+		// #region agent log
+		// Debug: verify the role-shape we send into the LLM call (no raw content).
+		// Hypothesis covered:
+		// - H1: host/tool outputs accidentally end up as role=user messages
+		roleCounts := map[string]int{}
+		for _, m := range msgs {
+			roleCounts[strings.ToLower(strings.TrimSpace(m.Role))]++
+		}
+		lastRole := ""
+		if len(msgs) != 0 {
+			lastRole = strings.ToLower(strings.TrimSpace(msgs[len(msgs)-1].Role))
+		}
+		debuglog.Log("toolconfusion", "H1", "loop.go:runConversation", "llm_request_roles", map[string]any{
+			"step":              step,
+			"toolChoice":        strings.TrimSpace(toolChoice),
+			"msgsLen":           len(msgs),
+			"roleCounts":        roleCounts,
+			"lastRole":          lastRole,
+			"prevResponseIDUsed": strings.TrimSpace(lastResponseID) != "",
+		})
+		// #endregion
+
 		var resp types.LLMResponse
 		var err error
 		if s, ok := a.LLM.(types.LLMClientStreaming); ok {
@@ -823,6 +845,26 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 		}
 
 		// Fallback path: JSON parsing for providers/models without tool calling output.
+		//
+		// Important: once we've successfully executed at least one tool call in this user turn,
+		// treat any subsequent non-tool-calling assistant output as final. This prevents the
+		// legacy HostOpRequest JSON fallback from creating confusing user-like messages.
+		if turnHasToolOutput {
+			trim := strings.TrimSpace(resp.Text)
+			if trim != "" {
+				// #region agent log
+				debuglog.Log("toolconfusion", "H5", "loop.go:runConversation", "return_final", map[string]any{
+					"step":    step,
+					"reason":  "assistant_text_after_tool_output",
+					"textLen": len(trim),
+				})
+				// #endregion
+				_ = ClearAgentCheckpoint(checkpointPath)
+				msgs = append(msgs, types.LLMMessage{Role: "assistant", Content: trim})
+				return trim, msgs, step, nil
+			}
+		}
+
 		opJSON, parseErr := extractSingleJSONObject(resp.Text)
 		if parseErr != nil {
 			trim := strings.TrimSpace(resp.Text)
