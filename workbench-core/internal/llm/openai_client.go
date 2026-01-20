@@ -95,6 +95,29 @@ func maybeEnableWebSearchModel(baseURL string, model string, enable bool) string
 	return model + ":online"
 }
 
+func cursorDebugLog(hypothesisId, location, message string, data map[string]any) {
+	// #region agent log
+	const logPath = "/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log"
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	payload := map[string]any{
+		"sessionId":    "debug-session",
+		"runId":        "pre-fix",
+		"hypothesisId": hypothesisId,
+		"location":     location,
+		"message":      message,
+		"data":         data,
+		"timestamp":    time.Now().UnixMilli(),
+	}
+	if b, err := json.Marshal(payload); err == nil {
+		_, _ = f.Write(append(b, '\n'))
+	}
+	// #endregion
+}
+
 func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewParams, error) {
 	if c == nil || c.client == nil {
 		return openai.ChatCompletionNewParams{}, fmt.Errorf("llm client is nil")
@@ -998,6 +1021,18 @@ func (c *Client) GenerateStream(ctx context.Context, req types.LLMRequest, cb ty
 	if c == nil || c.client == nil {
 		return types.LLMResponse{}, fmt.Errorf("llm client is nil")
 	}
+
+	// #region agent log
+	cursorDebugLog("H2", "openai_client.go:GenerateStream", "GenerateStream_request", map[string]any{
+		"model":           strings.TrimSpace(req.Model),
+		"enableWebSearch": req.EnableWebSearch,
+		"baseURL":         strings.TrimSpace(c.baseURL),
+		"hasSchema":       req.ResponseSchema != nil,
+		"jsonOnly":        req.JSONOnly,
+		"toolsLen":        len(req.Tools),
+		"toolChoice":      strings.TrimSpace(req.ToolChoice),
+	})
+	// #endregion
 
 	// #region agent log
 	debuglog.Log("toolcalling", "H2", "openai_client.go:GenerateStream", "route_selected", map[string]any{

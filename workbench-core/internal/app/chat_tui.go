@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +30,29 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfs"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
+
+func cursorDebugLog(hypothesisId, location, message string, data map[string]any) {
+	// #region agent log
+	const logPath = "/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log"
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	payload := map[string]any{
+		"sessionId":    "debug-session",
+		"runId":        "pre-fix",
+		"hypothesisId": hypothesisId,
+		"location":     location,
+		"message":      message,
+		"data":         data,
+		"timestamp":    time.Now().UnixMilli(),
+	}
+	if b, err := json.Marshal(payload); err == nil {
+		_, _ = f.Write(append(b, '\n'))
+	}
+	// #endregion
+}
 
 // RunNewChatTUI starts the TUI immediately, but defers creating a new session/run
 // until the first user message is submitted.
@@ -1069,6 +1093,8 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	var thinkingSummaryBuf strings.Builder
 	thinkingActive := false
 	thinkingStep := 0
+	sawReasoningChunk := false
+	sawNonReasoningText := false
 	lastThinkingEmit := time.Now()
 	emitThinkingSummary := func() {
 		if thinkingSummaryBuf.Len() == 0 || thinkingStep == 0 {
@@ -1123,7 +1149,28 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 			return
 		}
 		if !chunk.IsReasoning {
+			if !sawNonReasoningText && chunk.Text != "" {
+				sawNonReasoningText = true
+				// #region agent log
+				cursorDebugLog("H3", "chat_tui.go:OnStreamChunk", "first_non_reasoning_text_chunk", map[string]any{
+					"step":    step,
+					"model":   strings.TrimSpace(r.model),
+					"textLen": len(chunk.Text),
+				})
+				// #endregion
+			}
 			return
+		}
+		if !sawReasoningChunk {
+			sawReasoningChunk = true
+			// #region agent log
+			cursorDebugLog("H3", "chat_tui.go:OnStreamChunk", "first_reasoning_chunk", map[string]any{
+				"step":    step,
+				"model":   strings.TrimSpace(r.model),
+				"hasText": strings.TrimSpace(chunk.Text) != "",
+				"textLen": len(chunk.Text),
+			})
+			// #endregion
 		}
 		if !thinkingActive || thinkingStep != step {
 			// If a prior step was thinking, close it before starting a new one.
@@ -1460,6 +1507,22 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			sess.ActiveModel = next
 			_ = store.SaveSession(r.cfg, sess)
 		}
+
+		// #region agent log
+		cursorDebugLog("H1", "chat_tui.go:handleSlashCommand", "model_changed_applied", map[string]any{
+			"from":           strings.TrimSpace(cur),
+			"to":             strings.TrimSpace(next),
+			"runnerModel":    strings.TrimSpace(r.model),
+			"optsModel":      strings.TrimSpace(r.opts.Model),
+			"agentModel":     strings.TrimSpace(r.agent.Model),
+			"runRuntimeModel": func() string {
+				if r.run.Runtime == nil {
+					return ""
+				}
+				return strings.TrimSpace(r.run.Runtime.Model)
+			}(),
+		})
+		// #endregion
 
 		r.mustEmit(context.Background(), events.Event{
 			Type:    "model.changed",

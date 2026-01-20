@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,29 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/events"
 )
+
+func cursorDebugLog(hypothesisId, location, message string, data map[string]any) {
+	// #region agent log
+	const logPath = "/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log"
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	payload := map[string]any{
+		"sessionId":    "debug-session",
+		"runId":        "pre-fix",
+		"hypothesisId": hypothesisId,
+		"location":     location,
+		"message":      message,
+		"data":         data,
+		"timestamp":    time.Now().UnixMilli(),
+	}
+	if b, err := json.Marshal(payload); err == nil {
+		_, _ = f.Write(append(b, '\n'))
+	}
+	// #endregion
+}
 
 func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model {
 	main := viewport.New(0, 0)
@@ -871,9 +895,21 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	}
 	// Model identifier can change at runtime via the host /model command.
 	if ev.Type == "model.changed" {
+		// #region agent log
+		cursorDebugLog("H1", "model.go:onEvent", "model_changed_event", map[string]any{
+			"from":        strings.TrimSpace(ev.Data["from"]),
+			"to":          strings.TrimSpace(ev.Data["to"]),
+			"modelBefore": strings.TrimSpace(m.modelID),
+		})
+		// #endregion
 		if v := strings.TrimSpace(ev.Data["to"]); v != "" {
 			m.modelID = v
 		}
+		// #region agent log
+		cursorDebugLog("H1", "model.go:onEvent", "model_changed_applied", map[string]any{
+			"modelAfter": strings.TrimSpace(m.modelID),
+		})
+		// #endregion
 	}
 	// Reasoning effort can change at runtime via the host /reasoning command.
 	if ev.Type == "reasoning.changed" {
