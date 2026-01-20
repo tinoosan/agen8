@@ -590,9 +590,9 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 				if err != nil {
 					// #region agent log
 					debuglog.Log("toolcalling", "H11", "loop.go:runConversation", "tool_call_args_invalid", map[string]any{
-						"step":   step,
-						"tool":   which,
-						"err":    errString(err),
+						"step":    step,
+						"tool":    which,
+						"err":     errString(err),
 						"argsLen": len(tc.Function.Arguments),
 					})
 					// #endregion
