@@ -2,8 +2,8 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,7 +11,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
@@ -358,7 +357,7 @@ func applyUnifiedDiffStrict(oldText string, patch string) (string, error) {
 
 // PrettyJSON is a small helper for demos/logging.
 func PrettyJSON(v any) string {
-	b, err := jsonutil.MarshalPretty(v)
+	b, err := types.MarshalPretty(v)
 	if err != nil {
 		return "<json marshal error: " + err.Error() + ">"
 	}

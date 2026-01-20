@@ -11,7 +11,6 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
-	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/validate"
 )
@@ -43,7 +42,7 @@ func SaveSession(cfg config.Config, s types.Session) error {
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 		return err
 	}
-	b, err := jsonutil.MarshalPretty(s)
+	b, err := types.MarshalPretty(s)
 	if err != nil {
 		return err
 	}

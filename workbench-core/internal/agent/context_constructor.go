@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
@@ -794,7 +793,7 @@ func (c *ContextConstructor) saveState(ctx context.Context) error {
 		TraceCursor:   c.traceCursor,
 		HistoryCursor: c.historyCursor,
 	}
-	b, err := jsonutil.MarshalPretty(st)
+	b, err := types.MarshalPretty(st)
 	if err != nil {
 		return err
 	}
@@ -806,7 +805,7 @@ func (c *ContextConstructor) writeManifest(ctx context.Context, m ConstructorMan
 	if strings.TrimSpace(c.ManifestPath) == "" {
 		c.ManifestPath = "/workspace/context_constructor_manifest.json"
 	}
-	b, err := jsonutil.MarshalPretty(m)
+	b, err := types.MarshalPretty(m)
 	if err != nil {
 		return err
 	}

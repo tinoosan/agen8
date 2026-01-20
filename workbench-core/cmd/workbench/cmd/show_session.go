@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/internal/types"
 )
 
 var showSessionCmd = &cobra.Command{
@@ -26,7 +26,7 @@ var showSessionCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		b, err := jsonutil.MarshalPretty(sess)
+		b, err := types.MarshalPretty(sess)
 		if err != nil {
 			return err
 		}

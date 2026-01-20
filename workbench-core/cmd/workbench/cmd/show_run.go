@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/internal/types"
 )
 
 var showRunCmd = &cobra.Command{
@@ -26,7 +26,7 @@ var showRunCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		b, err := jsonutil.MarshalPretty(run)
+		b, err := types.MarshalPretty(run)
 		if err != nil {
 			return err
 		}

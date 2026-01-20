@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/fsutil"
-	"github.com/tinoosan/workbench-core/internal/jsonutil"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -88,7 +87,7 @@ func SaveAgentCheckpoint(path string, cp AgentCheckpoint) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	b, err := jsonutil.MarshalPretty(cp)
+	b, err := types.MarshalPretty(cp)
 	if err != nil {
 		return err
 	}
@@ -106,4 +105,3 @@ func ClearAgentCheckpoint(path string) error {
 	}
 	return nil
 }
-
