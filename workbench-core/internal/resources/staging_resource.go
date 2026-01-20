@@ -3,6 +3,7 @@ package resources
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/vfs"
@@ -57,16 +58,16 @@ func (s profileStagingStore) GetMain(ctx context.Context) (string, error) {
 }
 
 func NewStagingResource(mount, mainFile string, s StagingStore) (*StagingResource, error) {
-	if s == nil {
-		return nil, fmt.Errorf("%s store is required", mount)
-	}
-	mount = mount
-	mainFile = mainFile
+	mount = strings.TrimSpace(mount)
+	mainFile = strings.TrimSpace(mainFile)
 	if mount == "" {
 		return nil, fmt.Errorf("mount is required")
 	}
 	if mainFile == "" {
 		return nil, fmt.Errorf("main file is required")
+	}
+	if s == nil {
+		return nil, fmt.Errorf("%s store is required", mount)
 	}
 	return &StagingResource{
 		BaseDir:  "",
