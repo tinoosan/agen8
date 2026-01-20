@@ -30,15 +30,10 @@ type ToolManifestRegistry interface {
 	GetManifest(ctx context.Context, toolID types.ToolID) (manifestJSON []byte, ok bool, err error)
 }
 
-// ManifestProvider is one source of tool manifests (builtin, disk, remote, etc).
+// CompositeToolManifestRegistry merges multiple manifest registries with precedence.
 //
-// Providers do not implement precedence rules; CompositeToolManifestRegistry does.
-type ManifestProvider interface {
-	ListToolIDs(ctx context.Context) ([]types.ToolID, error)
-	GetManifest(ctx context.Context, toolID types.ToolID) (manifestJSON []byte, ok bool, err error)
-}
-
-// CompositeToolManifestRegistry merges multiple manifest providers with precedence.
+// Each entry in Providers acts as a "provider" (builtin, disk, remote, etc).
+// Individual providers do not implement precedence rules; this composite does.
 //
 // Provider precedence:
 //   - providers are consulted in order
@@ -47,13 +42,13 @@ type ManifestProvider interface {
 // This is what makes /tools virtualization work: disk tools become "just another provider",
 // and /tools does not rely on any physical directory layout.
 type CompositeToolManifestRegistry struct {
-	Providers []ManifestProvider
+	Providers []ToolManifestRegistry
 
 	// Logf is optional; if set, non-fatal provider errors are logged and skipped.
 	Logf func(format string, args ...any)
 }
 
-func NewCompositeToolManifestRegistry(providers ...ManifestProvider) *CompositeToolManifestRegistry {
+func NewCompositeToolManifestRegistry(providers ...ToolManifestRegistry) *CompositeToolManifestRegistry {
 	return &CompositeToolManifestRegistry{Providers: providers}
 }
 
@@ -144,7 +139,7 @@ func (p *BuiltinManifestProvider) GetManifest(_ context.Context, toolID types.To
 	return append([]byte(nil), b...), true, nil
 }
 
-// DiskManifestProvider exposes on-disk custom tool manifests as one ToolManifest provider.
+// DiskManifestProvider exposes on-disk custom tool manifests as one ToolManifestRegistry provider.
 //
 // Disk structure (current compatibility):
 //
