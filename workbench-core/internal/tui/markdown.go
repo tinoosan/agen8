@@ -121,7 +121,8 @@ func workbenchMarkdownStyle(variant markdownVariant) ansi.StyleConfig {
 
 	style.CodeBlock.Margin = uintPtr(0)
 	style.CodeBlock.Indent = uintPtr(0)
-	style.CodeBlock.StylePrimitive.BlockPrefix = "\n"
+	// Keep code blocks tight to preceding content (diff headers, etc.).
+	style.CodeBlock.StylePrimitive.BlockPrefix = ""
 	style.CodeBlock.StylePrimitive.BlockSuffix = "\n"
 	// Subtle background for code blocks to improve scannability.
 	style.CodeBlock.StylePrimitive.BackgroundColor = stringPtr("#1c1f2b")
