@@ -6,6 +6,7 @@ import "strings"
 var availableCommands = []string{
 	"/model",
 	"/reasoning",
+	"/copy",
 	"/open",
 	"/editor",
 	"/cd",

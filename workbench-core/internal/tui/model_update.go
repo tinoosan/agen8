@@ -24,9 +24,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if mm, cmd, ok := m.keyStopTurn(msg); ok {
 		return mm, cmd
 	}
-	if mm, cmd, ok := m.keyCopyTranscript(msg); ok {
-		return mm, cmd
-	}
 	if mm, cmd, ok := m.keyHelpModal(msg); ok {
 		return mm, cmd
 	}
@@ -78,19 +75,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return mm, cmd
 	}
 	return m.keyInput(msg)
-}
-
-func (m Model) keyCopyTranscript(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	// Ctrl+K copies the full transcript to the clipboard.
-	if msg.Type != tea.KeyCtrlK && !strings.EqualFold(msg.String(), "ctrl+k") {
-		return m, nil, false
-	}
-	txt := m.transcriptForClipboard()
-	if strings.TrimSpace(txt) == "" {
-		// Treat as handled so we don't insert a stray 'k' into the input.
-		return m, nil, true
-	}
-	return m, copyToClipboardCmd(txt), true
 }
 
 func (m Model) keyGlobalQuit(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
