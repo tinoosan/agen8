@@ -13,10 +13,10 @@ func (m *Model) openReasoningEffortPicker() {
 	// #region agent log
 	// Hypothesis H1/H3: picker close causes base view to render < terminal height.
 	debugLog("debug-session", "pre-fix", "H3", "model_reasoning_effort_picker.go:11", "openReasoningEffortPicker", map[string]interface{}{
-		"termH":      m.height,
-		"termW":      m.width,
+		"termH":       m.height,
+		"termW":       m.width,
 		"showDetails": m.showDetails,
-		"effort":     strings.TrimSpace(m.reasoningEffort),
+		"effort":      strings.TrimSpace(m.reasoningEffort),
 	})
 	// #endregion
 
@@ -82,18 +82,28 @@ func (m *Model) selectReasoningEffortFromPicker() tea.Cmd {
 	}
 	val := reasoningEffortOptions[i]
 
+	// Measure before close/layout so we can confirm sizing changes.
+	// #region agent log
+	viewHBefore := lipgloss.Height(m.View())
+	// #endregion
+
 	// Optimistic update so the composer status row updates immediately.
 	m.reasoningEffort = val
 	m.reasoningEffortPickerOpen = false
+	m.reasoningEffortPickerSelected = 0
+	// Critical: the picker changes composer height; recompute layout so transcript expands back.
+	m.layout()
 
 	// #region agent log
 	// Hypothesis H2: selection path closes without re-layout, leaving stale rows.
 	vh := lipgloss.Height(m.View())
 	debugLog("debug-session", "pre-fix", "H2", "model_reasoning_effort_picker.go:36", "selectReasoningEffortFromPicker", map[string]interface{}{
 		"val":   val,
-		"viewH": vh,
-		"termH": m.height,
-		"delta": m.height - vh,
+		"viewHBefore": viewHBefore,
+		"viewHAfter":  vh,
+		"termH":       m.height,
+		"deltaBefore": m.height - viewHBefore,
+		"deltaAfter":  m.height - vh,
 	})
 	// #endregion
 
@@ -102,4 +112,3 @@ func (m *Model) selectReasoningEffortFromPicker() tea.Cmd {
 		return turnDoneMsg{final: final, err: err}
 	}
 }
-
