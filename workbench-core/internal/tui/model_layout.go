@@ -358,6 +358,10 @@ func (m Model) renderInput() string {
 	if palette != "" {
 		contentParts = append(contentParts, "", palette)
 	}
+	// Render reasoning-effort picker if open (in-composer).
+	if p := m.renderReasoningEffortPicker(); p != "" {
+		contentParts = append(contentParts, "", p)
+	}
 	contentParts = append(contentParts, "", input)
 	content := lipgloss.JoinVertical(lipgloss.Top, contentParts...)
 	h := lipgloss.Height(content)
@@ -465,4 +469,45 @@ func (m Model) renderCommandPalette() string {
 		BorderForeground(lipgloss.Color("#404040"))
 
 	return paletteStyle.Render(paletteContent)
+}
+
+func (m Model) renderReasoningEffortPicker() string {
+	if !m.reasoningEffortPickerOpen {
+		return ""
+	}
+
+	// Layout within the composer width budget (same constraints as command palette).
+	outerW := max(20, m.width-8)
+	contentW := max(1, outerW-4) // padding(0,1) + border => +4 total
+
+	styleSelected := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#eaeaea")).
+		Bold(true)
+	styleUnselected := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#b0b0b0"))
+
+	lines := make([]string, 0, len(reasoningEffortOptions))
+	sel := m.reasoningEffortPickerSelected
+	if sel < 0 {
+		sel = 0
+	}
+	for i, opt := range reasoningEffortOptions {
+		prefix := "  "
+		style := styleUnselected
+		if i == sel {
+			prefix = "› "
+			style = styleSelected
+		}
+		line := truncateRight(opt, max(1, contentW-lipgloss.Width(prefix)))
+		lines = append(lines, style.Render(prefix+line))
+	}
+
+	pickerStyle := lipgloss.NewStyle().
+		Width(contentW).
+		Padding(0, 1).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#6bbcff")).
+		Foreground(lipgloss.Color("#eaeaea"))
+
+	return pickerStyle.Render(strings.Join(lines, "\n"))
 }

@@ -111,6 +111,7 @@ func (m *Model) helpModalContent() string {
 		"  /copy            copy full transcript",
 		"  /model           open model picker",
 		"  /model <id>      set model",
+		"  /reasoning effort  open effort picker (none|minimal|low|medium|high|xhigh)",
 		"  /open <path>     open a file via OS",
 		"  /editor <path>   edit a workdir file in $EDITOR",
 		"  /cd <path>       change workdir",

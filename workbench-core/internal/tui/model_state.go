@@ -238,6 +238,10 @@ type Model struct {
 	modelPickerOpen bool
 	modelPickerList list.Model
 
+	// Reasoning effort picker (opened via `/reasoning effort` with no value)
+	reasoningEffortPickerOpen     bool
+	reasoningEffortPickerSelected int
+
 	// Help modal (Ctrl+P)
 	helpModalOpen  bool
 	helpViewport   viewport.Model

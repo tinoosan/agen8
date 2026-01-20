@@ -24,6 +24,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if mm, cmd, ok := m.keyStopTurn(msg); ok {
 		return mm, cmd
 	}
+	if mm, cmd, ok := m.keyReasoningEffortPicker(msg); ok {
+		return mm, cmd
+	}
 	if mm, cmd, ok := m.keyHelpModal(msg); ok {
 		return mm, cmd
 	}
@@ -75,6 +78,48 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return mm, cmd
 	}
 	return m.keyInput(msg)
+}
+
+func (m Model) keyReasoningEffortPicker(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	if !m.reasoningEffortPickerOpen {
+		return m, nil, false
+	}
+
+	// Capture all keys while open; user can Esc to cancel.
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.closeReasoningEffortPicker()
+		return m, nil, true
+	case tea.KeyEnter:
+		return m, m.selectReasoningEffortFromPicker(), true
+	case tea.KeyUp:
+		m.reasoningEffortPickerSelected--
+		if m.reasoningEffortPickerSelected < 0 {
+			m.reasoningEffortPickerSelected = len(reasoningEffortOptions) - 1
+		}
+		return m, nil, true
+	case tea.KeyDown:
+		m.reasoningEffortPickerSelected++
+		if m.reasoningEffortPickerSelected >= len(reasoningEffortOptions) {
+			m.reasoningEffortPickerSelected = 0
+		}
+		return m, nil, true
+	}
+	switch msg.String() {
+	case "j":
+		m.reasoningEffortPickerSelected++
+		if m.reasoningEffortPickerSelected >= len(reasoningEffortOptions) {
+			m.reasoningEffortPickerSelected = 0
+		}
+		return m, nil, true
+	case "k":
+		m.reasoningEffortPickerSelected--
+		if m.reasoningEffortPickerSelected < 0 {
+			m.reasoningEffortPickerSelected = len(reasoningEffortOptions) - 1
+		}
+		return m, nil, true
+	}
+	return m, nil, true
 }
 
 func (m Model) keyGlobalQuit(msg tea.KeyMsg) (Model, tea.Cmd, bool) {

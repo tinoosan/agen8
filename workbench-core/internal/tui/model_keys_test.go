@@ -33,6 +33,17 @@ func (r *recordingRunner) RunTurn(ctx context.Context, userMsg string) (string, 
 	return "Model set to " + strings.TrimPrefix(userMsg, "/model "), nil
 }
 
+type recordingRunnerAny struct {
+	stubRunner
+	lastMessage string
+}
+
+func (r *recordingRunnerAny) RunTurn(ctx context.Context, userMsg string) (string, error) {
+	_ = ctx
+	r.lastMessage = userMsg
+	return "", nil
+}
+
 type stubRunnerWithRead struct {
 	stubRunner
 	files map[string]string
@@ -158,6 +169,101 @@ func TestKeyHandling_TypingEIsNotHijackedByDetails(t *testing.T) {
 	updated := m2.(Model)
 	if updated.single.Value() != "e" {
 		t.Fatalf("expected input to contain %q, got %q", "e", updated.single.Value())
+	}
+}
+
+func TestReasoningEffortPicker_OpensOnReasoningEffortNoValue(t *testing.T) {
+	m := New(context.Background(), &recordingRunnerAny{}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.layout()
+
+	m.single.SetValue("/reasoning effort")
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := m2.(Model)
+
+	if cmd != nil {
+		t.Fatalf("expected no cmd (should open picker only), got %v", cmd)
+	}
+	if !updated.reasoningEffortPickerOpen {
+		t.Fatalf("expected reasoningEffortPickerOpen true")
+	}
+	if updated.turnInFlight {
+		t.Fatalf("expected turnInFlight false (should not submit)")
+	}
+}
+
+func TestReasoningEffortPicker_SelectRunsReasoningCommand(t *testing.T) {
+	runner := &recordingRunnerAny{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.layout()
+
+	// Open picker.
+	m.single.SetValue("/reasoning effort")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	opened := m2.(Model)
+	if !opened.reasoningEffortPickerOpen {
+		t.Fatalf("expected picker open")
+	}
+
+	// Move selection down once from default "medium" -> "high".
+	m3, _ := opened.Update(tea.KeyMsg{Type: tea.KeyDown})
+	moved := m3.(Model)
+	if !moved.reasoningEffortPickerOpen {
+		t.Fatalf("expected picker still open")
+	}
+
+	// Enter selects.
+	beforeInFlight := moved.turnInFlight
+	m4, cmd := moved.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	afterSelect := m4.(Model)
+
+	if cmd == nil {
+		t.Fatalf("expected cmd to run /reasoning effort <val>, got nil")
+	}
+	if afterSelect.reasoningEffortPickerOpen {
+		t.Fatalf("expected picker closed after selection")
+	}
+	if afterSelect.turnInFlight != beforeInFlight {
+		t.Fatalf("expected turnInFlight unchanged; before=%v after=%v", beforeInFlight, afterSelect.turnInFlight)
+	}
+
+	// Execute cmd and feed result back to update loop.
+	msg := cmd()
+	m5, _ := afterSelect.Update(msg)
+	_ = m5.(Model)
+
+	if runner.lastMessage != "/reasoning effort high" {
+		t.Fatalf("expected runner called with %q, got %q", "/reasoning effort high", runner.lastMessage)
+	}
+}
+
+func TestReasoningEffortPicker_EscClosesWithoutRunning(t *testing.T) {
+	runner := &recordingRunnerAny{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.layout()
+
+	m.single.SetValue("/reasoning effort")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	opened := m2.(Model)
+	if !opened.reasoningEffortPickerOpen {
+		t.Fatalf("expected picker open")
+	}
+
+	m3, cmd := opened.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	closed := m3.(Model)
+	if cmd != nil {
+		t.Fatalf("expected no cmd on esc, got %v", cmd)
+	}
+	if closed.reasoningEffortPickerOpen {
+		t.Fatalf("expected picker closed after esc")
+	}
+	if runner.lastMessage != "" {
+		t.Fatalf("expected runner not called, got %q", runner.lastMessage)
 	}
 }
 
