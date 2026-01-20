@@ -24,6 +24,26 @@ func (m *Model) addTranscriptItem(it transcriptItem) {
 	wasAtBottom := m.transcript.AtBottom()
 	wasEmpty := len(m.transcriptItems) == 0
 
+	// #region agent log
+	// Hypothesis H1: a grouped file-changes block is inserted once, then later transcript
+	// items are appended after it, causing subsequent diff updates to mutate an earlier
+	// transcript location (user must scroll up).
+	if m.fileChangesItemIdx >= 0 && m.fileChangesItemIdx == len(m.transcriptItems)-1 && it.kind != transcriptFileChange {
+		debugLog(debugLogPayload{
+			SessionID:    "debug-session",
+			RunID:        "pre-fix",
+			HypothesisID: "H1",
+			Location:     "model_transcript.go:addTranscriptItem",
+			Message:      "appending item after file-changes block (file-changes stops being last)",
+			Data: map[string]any{
+				"appendKind":        int(it.kind),
+				"lenBefore":         len(m.transcriptItems),
+				"fileChangesItemIdx": m.fileChangesItemIdx,
+			},
+		})
+	}
+	// #endregion
+
 	m.transcriptItems = append(m.transcriptItems, it)
 	m.rebuildTranscript()
 	// If the user was at the bottom, keep them there (chat behavior). Otherwise,

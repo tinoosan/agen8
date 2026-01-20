@@ -148,6 +148,28 @@ func TestKeyHandling_CtrlXStopsTurnWithoutQuitting(t *testing.T) {
 	}
 }
 
+func TestKeyHandling_CtrlKCopiesTranscript(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.layout()
+
+	// Seed some transcript content.
+	m.addTranscriptItem(transcriptItem{kind: transcriptUser, text: "hello"})
+	m.addTranscriptItem(transcriptItem{kind: transcriptAgent, text: "world"})
+
+	beforeInFlight := m.turnInFlight
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	updated := m2.(Model)
+
+	if cmd == nil {
+		t.Fatalf("expected clipboard cmd, got nil")
+	}
+	if updated.turnInFlight != beforeInFlight {
+		t.Fatalf("expected turnInFlight unchanged; before=%v after=%v", beforeInFlight, updated.turnInFlight)
+	}
+}
+
 func TestKeyHandling_TypingEIsNotHijackedByDetails(t *testing.T) {
 	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
 	m.showDetails = true

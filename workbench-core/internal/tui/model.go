@@ -462,10 +462,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Location:     "model.go:fileAfterMsg",
 					Message:      "moving updated file path to end of grouped diff order",
 					Data: map[string]any{
-						"path":        path,
-						"oldIdx":      oldIdx,
-						"orderLen":    len(m.fileChangesOrder),
-						"tailBefore":  m.fileChangesOrder[len(m.fileChangesOrder)-1],
+						"path":       path,
+						"oldIdx":     oldIdx,
+						"orderLen":   len(m.fileChangesOrder),
+						"tailBefore": m.fileChangesOrder[len(m.fileChangesOrder)-1],
 					},
 				})
 				// #endregion
@@ -1175,10 +1175,10 @@ func (m *Model) upsertGroupedFileChanges() {
 			Location:     "model.go:upsertGroupedFileChanges",
 			Message:      "fileChangesItemIdx slot was not transcriptFileChange; appending new block",
 			Data: map[string]any{
-				"idx":               m.fileChangesItemIdx,
-				"kindAtIdx":         int(it.kind),
-				"appendAt":          len(m.transcriptItems),
-				"transcriptItems":   len(m.transcriptItems),
+				"idx":             m.fileChangesItemIdx,
+				"kindAtIdx":       int(it.kind),
+				"appendAt":        len(m.transcriptItems),
+				"transcriptItems": len(m.transcriptItems),
 			},
 		})
 		// #endregion
@@ -1200,10 +1200,10 @@ func (m *Model) upsertGroupedFileChanges() {
 			Location:     "model.go:upsertGroupedFileChanges",
 			Message:      "file-changes block not last; re-appending updated block at end",
 			Data: map[string]any{
-				"idx":               m.fileChangesItemIdx,
-				"transcriptItems":   len(m.transcriptItems),
-				"appendAt":          len(m.transcriptItems),
-				"wasAtBottom":       wasAtBottom,
+				"idx":             m.fileChangesItemIdx,
+				"transcriptItems": len(m.transcriptItems),
+				"appendAt":        len(m.transcriptItems),
+				"wasAtBottom":     wasAtBottom,
 			},
 		})
 		// #endregion
@@ -1222,10 +1222,10 @@ func (m *Model) upsertGroupedFileChanges() {
 		Location:     "model.go:upsertGroupedFileChanges",
 		Message:      "updating existing grouped file-changes transcript item in-place",
 		Data: map[string]any{
-			"idx":               m.fileChangesItemIdx,
-			"isLast":            m.fileChangesItemIdx == len(m.transcriptItems)-1,
-			"transcriptItems":   len(m.transcriptItems),
-			"wasAtBottom":       wasAtBottom,
+			"idx":             m.fileChangesItemIdx,
+			"isLast":          m.fileChangesItemIdx == len(m.transcriptItems)-1,
+			"transcriptItems": len(m.transcriptItems),
+			"wasAtBottom":     wasAtBottom,
 		},
 	})
 	// #endregion

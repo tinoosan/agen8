@@ -91,6 +91,7 @@ func (m *Model) helpModalContent() string {
 		"  tab     cycle focus (input/activity)",
 		"  pgup/pgdn  scroll transcript",
 		"  ctrl+u/ctrl+f  half-page scroll transcript",
+		"  ctrl+k  copy transcript",
 		"  ctrl+y  toggle thinking summary",
 		"  ctrl+g  toggle multiline input",
 		"  enter   send (single-line)",
