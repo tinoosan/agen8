@@ -8,7 +8,15 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/glamour/styles"
+)
+
+type markdownVariant int
+
+const (
+	markdownVariantNormal markdownVariant = iota
+	markdownVariantThinking
 )
 
 // markdownRenderer caches Glamour renderers keyed by wrap width.
@@ -16,14 +24,19 @@ import (
 // Glamour renderers are relatively expensive to construct. The TUI re-renders the transcript
 // on resize and when toggling the right pane, so caching keeps the UI responsive.
 type markdownRenderer struct {
+	variant markdownVariant
+
 	mu        sync.Mutex
 	byWidth   map[int]*glamour.TermRenderer
 	lastWidth int
 	last      *glamour.TermRenderer
 }
 
-func newMarkdownRenderer() *markdownRenderer {
-	return &markdownRenderer{byWidth: map[int]*glamour.TermRenderer{}}
+func newMarkdownRenderer(variant markdownVariant) *markdownRenderer {
+	return &markdownRenderer{
+		variant: variant,
+		byWidth: map[int]*glamour.TermRenderer{},
+	}
 }
 
 func (r *markdownRenderer) render(md string, width int) string {
@@ -56,12 +69,34 @@ func (r *markdownRenderer) get(width int) (*glamour.TermRenderer, error) {
 		return tr, nil
 	}
 
+	style := workbenchMarkdownStyle(r.variant)
+
+	tr, err := glamour.NewTermRenderer(
+		glamour.WithStyles(style),
+		glamour.WithWordWrap(width),
+		glamour.WithPreservedNewLines(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create glamour renderer: %w", err)
+	}
+	r.byWidth[width] = tr
+	r.lastWidth = width
+	r.last = tr
+	return tr, nil
+}
+
+func uintPtr(v uint) *uint       { return &v }
+func stringPtr(s string) *string { return &s }
+func boolPtr(b bool) *bool       { return &b }
+
+func workbenchMarkdownStyle(variant markdownVariant) ansi.StyleConfig {
 	// "dark" matches the current Workbench theme; it keeps transcript readable without
 	// introducing loud colors.
 	//
 	// We also tweak the code block styling slightly to make it read as "code" (not prose)
 	// and we preserve newlines so pasted tasks/snippets keep their structure.
 	style := styles.DarkStyleConfig
+
 	// Render markdown as markdown (hide raw markers like "###" and "**").
 	style.H1.StylePrimitive.Prefix = ""
 	style.H2.StylePrimitive.Prefix = ""
@@ -92,23 +127,74 @@ func (r *markdownRenderer) get(width int) (*glamour.TermRenderer, error) {
 	style.CodeBlock.StylePrimitive.BackgroundColor = stringPtr("#1c1f2b")
 	style.CodeBlock.StylePrimitive.Color = stringPtr("#eaeaea")
 
-	tr, err := glamour.NewTermRenderer(
-		glamour.WithStyles(style),
-		glamour.WithWordWrap(width),
-		glamour.WithPreservedNewLines(),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create glamour renderer: %w", err)
+	if variant == markdownVariantThinking {
+		applyThinkingMutedTheme(&style)
 	}
-	r.byWidth[width] = tr
-	r.lastWidth = width
-	r.last = tr
-	return tr, nil
+	return style
 }
 
-func uintPtr(v uint) *uint       { return &v }
-func stringPtr(s string) *string { return &s }
-func boolPtr(b bool) *bool       { return &b }
+func applyThinkingMutedTheme(style *ansi.StyleConfig) {
+	if style == nil {
+		return
+	}
+	// Goal: make the "thinking summary" visually distinct from normal assistant output.
+	// Use Faint (SGR 2) + a muted gray palette so markdown-emitted styling doesn't
+	// overpower the transcript's dim wrapper.
+	const base = "#8a8a8a"
+	const code = "#a0a0a0"
+	const codeBg = "#141414"
+
+	// Document/text surfaces.
+	style.Document.Color = stringPtr(base)
+	style.Document.Faint = boolPtr(true)
+	style.Paragraph.Color = stringPtr(base)
+	style.Paragraph.Faint = boolPtr(true)
+	style.Text.Color = stringPtr(base)
+	style.Text.Faint = boolPtr(true)
+
+	// Headings: keep readable but muted.
+	style.Heading.Color = stringPtr(base)
+	style.Heading.Faint = boolPtr(true)
+	style.H1.Color = stringPtr(base)
+	style.H1.Faint = boolPtr(true)
+	style.H2.Color = stringPtr(base)
+	style.H2.Faint = boolPtr(true)
+	style.H3.Color = stringPtr(base)
+	style.H3.Faint = boolPtr(true)
+	style.H4.Color = stringPtr(base)
+	style.H4.Faint = boolPtr(true)
+	style.H5.Color = stringPtr(base)
+	style.H5.Faint = boolPtr(true)
+	style.H6.Color = stringPtr(base)
+	style.H6.Faint = boolPtr(true)
+
+	// Inline styling.
+	style.Emph.Color = stringPtr(base)
+	style.Emph.Faint = boolPtr(true)
+	style.Strong.Color = stringPtr(base)
+	style.Strong.Faint = boolPtr(true)
+	style.Strikethrough.Color = stringPtr(base)
+	style.Strikethrough.Faint = boolPtr(true)
+
+	// Lists and link chrome.
+	style.List.Color = stringPtr(base)
+	style.List.Faint = boolPtr(true)
+	style.Item.Color = stringPtr(base)
+	style.Item.Faint = boolPtr(true)
+	style.Enumeration.Color = stringPtr(base)
+	style.Enumeration.Faint = boolPtr(true)
+	style.Link.Color = stringPtr(base)
+	style.Link.Faint = boolPtr(true)
+	style.LinkText.Color = stringPtr(base)
+	style.LinkText.Faint = boolPtr(true)
+
+	// Code: slightly higher contrast, but still muted/faint.
+	style.Code.Color = stringPtr(code)
+	style.Code.Faint = boolPtr(true)
+	style.CodeBlock.StylePrimitive.Color = stringPtr(code)
+	style.CodeBlock.StylePrimitive.BackgroundColor = stringPtr(codeBg)
+	style.CodeBlock.StylePrimitive.Faint = boolPtr(true)
+}
 
 // preprocessMarkdown applies small, deterministic markdown rewrites that improve readability
 // in the terminal without changing the meaning of the content.

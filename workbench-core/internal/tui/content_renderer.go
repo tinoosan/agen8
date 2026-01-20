@@ -20,11 +20,15 @@ import (
 //  1. format structured payloads into markdown using the helpers (FormatJSON/FormatCode)
 //  2. render with RenderMarkdown
 type ContentRenderer struct {
-	md *markdownRenderer
+	md         *markdownRenderer
+	mdThinking *markdownRenderer
 }
 
 func newContentRenderer() *ContentRenderer {
-	return &ContentRenderer{md: newMarkdownRenderer()}
+	return &ContentRenderer{
+		md:         newMarkdownRenderer(markdownVariantNormal),
+		mdThinking: newMarkdownRenderer(markdownVariantThinking),
+	}
 }
 
 // RenderMarkdown renders markdown into terminal-friendly styled output.
@@ -36,6 +40,18 @@ func (r *ContentRenderer) RenderMarkdown(markdown string, width int) string {
 		return markdown
 	}
 	return r.md.render(markdown, width)
+}
+
+// RenderThinkingMarkdown renders markdown for the "thinking summary" surface.
+//
+// This is intentionally separate from the main markdown renderer so the UI can
+// apply a muted theme for thinking summaries (making them visually distinct from
+// normal assistant output).
+func (r *ContentRenderer) RenderThinkingMarkdown(markdown string, width int) string {
+	if r == nil || r.mdThinking == nil {
+		return markdown
+	}
+	return r.mdThinking.render(markdown, width)
 }
 
 // FormatCode wraps code in a fenced block using a "safe fence" length.

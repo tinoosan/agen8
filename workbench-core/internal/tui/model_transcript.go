@@ -112,7 +112,7 @@ func (m *Model) rebuildTranscript() {
 			rendered := strings.TrimSpace(header)
 			if m.thinkingExpanded && strings.TrimSpace(summary) != "" && m.renderer != nil {
 				mdW := max(20, w-6) // account for gutter + space + a touch of margin
-				md := strings.Trim(m.renderer.RenderMarkdown(summary, mdW), "\n")
+				md := strings.Trim(m.renderer.RenderThinkingMarkdown(summary, mdW), "\n")
 				if md != "" {
 					rendered = strings.TrimSpace(rendered) + "\n\n" + md
 				}
