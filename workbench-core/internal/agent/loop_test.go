@@ -6,9 +6,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
-	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/types"
 )
@@ -34,7 +34,7 @@ type fakeLLMChaining struct {
 	IDs     []string
 
 	SeenPreviousResponseIDs []string
-	i                      int
+	i                       int
 }
 
 func (f *fakeLLMChaining) Generate(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
@@ -128,6 +128,25 @@ func (f *fakeLLMWithError) Generate(ctx context.Context, req types.LLMRequest) (
 	return out, nil
 }
 
+type fakeLLMToolCalling struct {
+	Replies []types.LLMResponse
+
+	Seen [][]types.LLMMessage
+	i    int
+}
+
+func (f *fakeLLMToolCalling) Generate(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
+	_ = ctx
+	// Capture messages for assertions.
+	f.Seen = append(f.Seen, append([]types.LLMMessage(nil), req.Messages...))
+	if f.i >= len(f.Replies) {
+		return types.LLMResponse{Text: "no more replies"}, nil
+	}
+	out := f.Replies[f.i]
+	f.i++
+	return out, nil
+}
+
 func TestAgentLoopV0_Run_ExecutesOpsUntilFinal(t *testing.T) {
 	llm := &fakeLLM{
 		Replies: []string{
@@ -154,6 +173,113 @@ func TestAgentLoopV0_Run_ExecutesOpsUntilFinal(t *testing.T) {
 	}
 	if len(called) != 1 || called[0].Op != types.HostOpFSList || called[0].Path != "/tools" {
 		t.Fatalf("unexpected calls: %+v", called)
+	}
+}
+
+func TestAgentLoopV0_RunConversation_ToolCalling_ExecutesAndReturnsFinalText(t *testing.T) {
+	llm := &fakeLLMToolCalling{
+		Replies: []types.LLMResponse{
+			{
+				ToolCalls: []types.ToolCall{
+					{ID: "call_1", Type: "function", Function: types.ToolCallFunction{Name: "fs_list", Arguments: `{"path":"/tools"}`}},
+				},
+			},
+			{
+				Text: "done",
+			},
+		},
+	}
+
+	var called []types.HostOpRequest
+	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		_ = ctx
+		called = append(called, req)
+		return types.HostOpResponse{Op: req.Op, Ok: true, Entries: []string{"/tools/builtin.bash"}}
+	}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+
+	final, msgs, steps, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if final != "done" {
+		t.Fatalf("unexpected final %q", final)
+	}
+	if steps != 2 {
+		t.Fatalf("expected steps=2, got %d", steps)
+	}
+	if len(called) != 1 || called[0].Op != types.HostOpFSList || called[0].Path != "/tools" {
+		t.Fatalf("unexpected host calls: %+v", called)
+	}
+	if len(llm.Seen) < 2 {
+		t.Fatalf("expected >=2 model calls, got %d", len(llm.Seen))
+	}
+	// Second model call should include tool output.
+	foundTool := false
+	for _, m := range llm.Seen[1] {
+		if strings.TrimSpace(m.Role) == "tool" && strings.TrimSpace(m.ToolCallID) == "call_1" {
+			foundTool = true
+			break
+		}
+	}
+	if !foundTool {
+		t.Fatalf("expected tool message with toolCallID=call_1 in second request, msgs=%+v", llm.Seen[1])
+	}
+	if len(msgs) == 0 {
+		t.Fatalf("expected updated messages")
+	}
+}
+
+func TestAgentLoopV0_RunConversation_ToolCalling_BatchExecutesAllOps(t *testing.T) {
+	llm := &fakeLLMToolCalling{
+		Replies: []types.LLMResponse{
+			{
+				ToolCalls: []types.ToolCall{
+					{
+						ID:   "call_b",
+						Type: "function",
+						Function: types.ToolCallFunction{
+							Name: "batch",
+							Arguments: `{
+  "parallel": false,
+  "operations": [
+    {"op":"fs.list","path":"/tools"},
+    {"op":"fs.list","path":"/workspace"}
+  ]
+}`,
+						},
+					},
+				},
+			},
+			{
+				Text: "done",
+			},
+		},
+	}
+
+	var mu sync.Mutex
+	var called []types.HostOpRequest
+	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		_ = ctx
+		mu.Lock()
+		called = append(called, req)
+		mu.Unlock()
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+	}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+
+	final, _, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if final != "done" {
+		t.Fatalf("unexpected final %q", final)
+	}
+	if len(called) != 2 {
+		t.Fatalf("expected 2 host calls, got %+v", called)
+	}
+	if called[0].Path != "/tools" || called[1].Path != "/workspace" {
+		t.Fatalf("unexpected host calls order/paths: %+v", called)
 	}
 }
 
@@ -583,8 +709,8 @@ func TestAgentLoopV0_RunConversation_BatchSequential_AllowsToolRun(t *testing.T)
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "unexpected op"}
 		}
 		return types.HostOpResponse{
-			Op:  req.Op,
-			Ok:  true,
+			Op: req.Op,
+			Ok: true,
 			ToolResponse: &types.ToolResponse{
 				Version:  "v1",
 				CallID:   "call_1",
@@ -648,8 +774,8 @@ func TestAgentLoopV0_RunConversation_BatchParallel_AllowsToolRun(t *testing.T) {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "unexpected op"}
 		}
 		return types.HostOpResponse{
-			Op:  req.Op,
-			Ok:  true,
+			Op: req.Op,
+			Ok: true,
 			ToolResponse: &types.ToolResponse{
 				Version:  "v1",
 				CallID:   "call_1",

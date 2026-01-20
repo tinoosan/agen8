@@ -1,8 +1,8 @@
 package llm
 
 import (
-	"errors"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -134,6 +134,111 @@ func TestClient_toResponse_MapsTextAndUsage(t *testing.T) {
 	}
 	if out.Usage == nil || out.Usage.TotalTokens != 15 {
 		t.Fatalf("unexpected usage %+v", out.Usage)
+	}
+}
+
+func TestClient_toResponse_ExtractsFunctionToolCalls(t *testing.T) {
+	resp := &openai.ChatCompletion{
+		Choices: []openai.ChatCompletionChoice{
+			{Message: openai.ChatCompletionMessage{
+				Content: "",
+				ToolCalls: []openai.ChatCompletionMessageToolCallUnion{
+					{
+						ID:   "call_1",
+						Type: "function",
+						Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+							Name:      "fs_list",
+							Arguments: `{"path":"/tools"}`,
+						},
+					},
+				},
+			}},
+		},
+	}
+
+	c := &Client{}
+	out, err := c.toResponse(resp)
+	if err != nil {
+		t.Fatalf("toResponse: %v", err)
+	}
+	if len(out.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %+v", out.ToolCalls)
+	}
+	if out.ToolCalls[0].ID != "call_1" || out.ToolCalls[0].Function.Name != "fs_list" {
+		t.Fatalf("unexpected tool call %+v", out.ToolCalls[0])
+	}
+}
+
+func TestClient_buildParams_MapsToolsAndToolChoiceAndToolMessages(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli, DefaultMaxTokens: 123}
+
+	params, err := c.buildParams(types.LLMRequest{
+		Model:  "openai/gpt-4o-mini",
+		System: "system",
+		Messages: []types.LLMMessage{
+			{Role: "user", Content: "hi"},
+			{Role: "assistant", Content: "", ToolCalls: []types.ToolCall{
+				{ID: "call_1", Type: "function", Function: types.ToolCallFunction{Name: "fs_list", Arguments: `{"path":"/tools"}`}},
+			}},
+			{Role: "tool", ToolCallID: "call_1", Content: `{"ok":true}`},
+		},
+		Tools: []types.Tool{
+			{Type: "function", Function: types.ToolFunction{
+				Name:        "fs_list",
+				Description: "List",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path": map[string]any{"type": "string"},
+					},
+					"required":             []any{"path"},
+					"additionalProperties": false,
+				},
+				Strict: true,
+			}},
+		},
+		ToolChoice: "required",
+	})
+	if err != nil {
+		t.Fatalf("buildParams: %v", err)
+	}
+
+	b, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["tool_choice"] != "required" {
+		t.Fatalf("expected tool_choice=required, got %+v", m["tool_choice"])
+	}
+	if m["parallel_tool_calls"] != false {
+		t.Fatalf("expected parallel_tool_calls=false, got %+v", m["parallel_tool_calls"])
+	}
+	if _, ok := m["tools"].([]any); !ok {
+		t.Fatalf("expected tools array, got %+v", m["tools"])
+	}
+	msgs, _ := m["messages"].([]any)
+	if len(msgs) < 4 {
+		t.Fatalf("expected >=4 messages including system, got %d", len(msgs))
+	}
+	// Verify tool message mapping exists (role=tool with tool_call_id).
+	found := false
+	for _, it := range msgs {
+		mo, _ := it.(map[string]any)
+		if mo == nil {
+			continue
+		}
+		if mo["role"] == "tool" && mo["tool_call_id"] == "call_1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected tool role message with tool_call_id=call_1, msgs=%+v", msgs)
 	}
 }
 

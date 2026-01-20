@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tinoosan/workbench-core/internal/jsonutil"
+	"github.com/tinoosan/workbench-core/internal/debuglog"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/validate"
 )
@@ -137,10 +137,31 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 		turnUserMessage = extractTurnUserMessage(msgs)
 	}
 
+	turnStartIdx := indexOfTurnUserMessage(msgs)
+	turnHasToolOutput := hasToolMessageAfterIdx(msgs, turnStartIdx)
+
 	// Track last parsed model op (debug-only) for checkpointing.
 	lastOpForCheckpoint := ""
 
+	// Enable function/tool calling for host primitives.
+	hostOpTools := HostOpFunctions()
+
 	for step := startStep; step <= maxSteps; step++ {
+		toolChoice, toolChoiceReason, turnFlags := toolChoiceForTurn(turnUserMessage, turnHasToolOutput)
+		// #region agent log
+		debuglog.Log("toolcalling", "H1", "loop.go:runConversation", "step_start", map[string]any{
+			"step":          step,
+			"maxSteps":      maxSteps,
+			"msgsLen":       len(msgs),
+			"toolChoice":    toolChoice,
+			"toolChoiceWhy": toolChoiceReason,
+			"turnUserLen":   len(turnUserMessage),
+			"turnFlags":     turnFlags,
+			"toolsLen":      len(hostOpTools),
+			"checkpointOn":  strings.TrimSpace(checkpointPath) != "",
+		})
+		// #endregion
+
 		system := baseSystem
 		if a.Context != nil {
 			updated, err := a.Context.SystemPrompt(ctx, baseSystem, step)
@@ -149,14 +170,34 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			}
 			system = updated
 		}
+		// Always restate the current user request in the system prompt (not the message list),
+		// so Responses API delta-chaining can omit repeating the user message without models
+		// "forgetting" what they are trying to accomplish.
+		if strings.TrimSpace(turnUserMessage) != "" {
+			system = strings.TrimSpace(system) + "\n\n## Current User Request\n\n" + strings.TrimSpace(turnUserMessage) + "\n"
+		}
+		// #region agent log
+		debuglog.Log("toolcalling", "H3", "loop.go:runConversation", "system_prompt_flags", map[string]any{
+			"step":               step,
+			"hasLegacyJsonRules": strings.Contains(system, "exactly ONE JSON object"),
+			"hasToolCalling":     strings.Contains(system, "tool/function calling") || strings.Contains(system, "tool calling"),
+			"mentionsBatchTool":  strings.Contains(system, "batch(") || strings.Contains(system, "\n  - batch"),
+			"mentionsToolRun":    strings.Contains(system, "tool_run") || strings.Contains(system, "tool.run"),
+			"hasHistoryBlock":    strings.Contains(system, "## Recent Conversation (from /history)"),
+			"hasTurnBlock":       strings.Contains(system, "## Current User Request"),
+			"turnUserLen":        len(strings.TrimSpace(turnUserMessage)),
+		})
+		// #endregion
 
 		req := types.LLMRequest{
 			Model:              a.Model,
 			System:             system,
 			Messages:           msgs,
 			MaxTokens:          1024,
-			JSONOnly:           true,
-			ResponseSchema:     hostOpResponseSchema(),
+			Tools:              hostOpTools,
+			ToolChoice:         toolChoice,
+			JSONOnly:           false,
+			ResponseSchema:     nil,
 			PreviousResponseID: lastResponseID,
 			ReasoningEffort:    strings.TrimSpace(a.ReasoningEffort),
 			ReasoningSummary:   strings.TrimSpace(a.ReasoningSummary),
@@ -166,17 +207,57 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 		var err error
 		if s, ok := a.LLM.(types.LLMClientStreaming); ok {
 			dec := &finalTextStreamDecoder{}
+			// #region agent log
+			// Capture provider-supplied reasoning summaries (NOT raw chain-of-thought).
+			var reasoningBuf strings.Builder
+			reasoningTextN := 0
+			reasoningSignalN := 0
+			reasoningCharsTotal := 0
+			// #endregion
 			resp, err = s.GenerateStream(ctx, req, func(chunk types.LLMStreamChunk) error {
 				if chunk.Done {
 					if a.Hooks.OnStreamChunk != nil {
 						a.Hooks.OnStreamChunk(step, chunk)
 					}
+					// #region agent log
+					if reasoningSignalN != 0 || reasoningTextN != 0 {
+						prev := reasoningBuf.String()
+						if len(prev) > 800 {
+							prev = prev[:800] + "…"
+						}
+						debuglog.Log("toolcalling", "H13", "loop.go:runConversation", "reasoning_summary_seen", map[string]any{
+							"step":               step,
+							"toolChoice":         toolChoice,
+							"reasoningSignalN":   reasoningSignalN,
+							"reasoningTextN":     reasoningTextN,
+							"reasoningChars":     reasoningCharsTotal,
+							"reasoningStoredLen": reasoningBuf.Len(),
+							"reasoningPreview":   prev,
+						})
+					}
+					// #endregion
 					return nil
 				}
 				if chunk.IsReasoning {
 					if a.Hooks.OnStreamChunk != nil {
 						a.Hooks.OnStreamChunk(step, chunk)
 					}
+					// #region agent log
+					reasoningSignalN++
+					if chunk.Text != "" {
+						reasoningTextN++
+						reasoningCharsTotal += len(chunk.Text)
+						// Avoid huge logs: store at most ~8KB for preview/debug.
+						if reasoningBuf.Len() < 8*1024 {
+							remain := 8*1024 - reasoningBuf.Len()
+							if len(chunk.Text) > remain {
+								reasoningBuf.WriteString(chunk.Text[:remain])
+							} else {
+								reasoningBuf.WriteString(chunk.Text)
+							}
+						}
+					}
+					// #endregion
 					return nil
 				}
 				if chunk.Text == "" {
@@ -211,8 +292,399 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			a.Hooks.OnLLMUsage(step, *resp.Usage)
 		}
 
+		// #region agent log
+		firstTool := ""
+		if len(resp.ToolCalls) != 0 {
+			firstTool = strings.TrimSpace(resp.ToolCalls[0].Function.Name)
+		}
+		debuglog.Log("toolcalling", "H1", "loop.go:runConversation", "llm_response", map[string]any{
+			"step":         step,
+			"textLen":      len(resp.Text),
+			"toolCallsLen": len(resp.ToolCalls),
+			"firstTool":    firstTool,
+		})
+		if len(resp.ToolCalls) != 0 {
+			counts := map[string]int{}
+			for _, tc := range resp.ToolCalls {
+				counts[strings.TrimSpace(tc.Function.Name)]++
+			}
+			debuglog.Log("toolcalling", "H2", "loop.go:runConversation", "tool_calls_breakdown", map[string]any{
+				"step":   step,
+				"counts": counts,
+			})
+		}
+		// #endregion
+
+		// Function/tool calling path.
+		// If the model produced tool calls, execute them and feed outputs back as role="tool".
+		if len(resp.ToolCalls) != 0 {
+			// Preserve the assistant tool_calls message in the transcript so tool_call_id references
+			// are valid on the next model call (mirrors OpenAI's tool-calling flow).
+			msgs = append(msgs, types.LLMMessage{
+				Role:      "assistant",
+				Content:   strings.TrimSpace(resp.Text),
+				ToolCalls: resp.ToolCalls,
+			})
+
+			appendedToolOutputAnyThisStep := false
+			appendedToolOutputOkThisStep := false
+			for _, tc := range resp.ToolCalls {
+				which := strings.TrimSpace(tc.Function.Name)
+				lastOpForCheckpoint = "tool_call:" + which
+
+				// Special: tool_batch -> HostOpBatchResponse (tool.run ops)
+				if which == "tool_batch" {
+					var args struct {
+						Parallel *bool `json:"parallel"`
+						Calls    []struct {
+							ToolID    string          `json:"toolId"`
+							ActionID  string          `json:"actionId"`
+							Input     json.RawMessage `json:"input"`
+							TimeoutMs *int            `json:"timeoutMs"`
+						} `json:"calls"`
+					}
+					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+						batchResp := types.HostOpBatchResponse{Ok: false, Error: "tool_batch args were not valid JSON: " + err.Error()}
+						batchRespJSON, _ := types.MarshalPretty(batchResp)
+						// #region agent log
+						debuglog.Log("toolcalling", "H8", "loop.go:runConversation", "tool_output_error_sent", map[string]any{
+							"step": step,
+							"tool": which,
+						})
+						// #endregion
+						msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(batchRespJSON)})
+						appendedToolOutputAnyThisStep = true
+						continue
+					}
+					parallel := false
+					if args.Parallel != nil {
+						parallel = *args.Parallel
+					}
+					// #region agent log
+					debuglog.Log("toolcalling", "H5", "loop.go:runConversation", "tool_batch_exec", map[string]any{
+						"step":     step,
+						"parallel": parallel,
+						"callsLen": len(args.Calls),
+					})
+					// #endregion
+					ops := make([]types.HostOpRequest, 0, len(args.Calls))
+					for _, c := range args.Calls {
+						timeout := 0
+						if c.TimeoutMs != nil {
+							timeout = *c.TimeoutMs
+						}
+						ops = append(ops, types.HostOpRequest{
+							Op:        types.HostOpToolRun,
+							ToolID:    types.ToolID(strings.TrimSpace(c.ToolID)),
+							ActionID:  strings.TrimSpace(c.ActionID),
+							Input:     c.Input,
+							TimeoutMs: timeout,
+						})
+					}
+					batchReq := types.HostOpBatchRequest{Op: types.HostOpFSBatch, Operations: ops, Parallel: parallel}
+					if err := batchReq.Validate(); err != nil {
+						batchResp := types.HostOpBatchResponse{Ok: false, Error: "tool_batch args invalid: " + err.Error()}
+						batchRespJSON, _ := types.MarshalPretty(batchResp)
+						// #region agent log
+						debuglog.Log("toolcalling", "H8", "loop.go:runConversation", "tool_output_error_sent", map[string]any{
+							"step": step,
+							"tool": which,
+						})
+						// #endregion
+						msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(batchRespJSON)})
+						appendedToolOutputAnyThisStep = true
+						continue
+					}
+					results := make([]types.HostOpResponse, len(batchReq.Operations))
+					if batchReq.Parallel {
+						var wg sync.WaitGroup
+						wg.Add(len(batchReq.Operations))
+						for i, sub := range batchReq.Operations {
+							i, sub := i, sub
+							go func() {
+								defer wg.Done()
+								results[i] = a.Exec.Exec(ctx, sub)
+							}()
+						}
+						wg.Wait()
+					} else {
+						for i, sub := range batchReq.Operations {
+							results[i] = a.Exec.Exec(ctx, sub)
+						}
+					}
+					okAll := true
+					for _, r := range results {
+						if !r.Ok {
+							okAll = false
+							break
+						}
+					}
+					batchResp := types.HostOpBatchResponse{Ok: okAll, Results: results}
+					batchRespJSON, _ := types.MarshalPretty(batchResp)
+					msgs = append(msgs, types.LLMMessage{
+						Role:       "tool",
+						ToolCallID: strings.TrimSpace(tc.ID),
+						Content:    string(batchRespJSON),
+					})
+					appendedToolOutputAnyThisStep = true
+					if okAll {
+						appendedToolOutputOkThisStep = true
+					}
+					continue
+				}
+
+				// Special: batch (aka fs_batch) -> HostOpBatchResponse
+				if which == "batch" || which == "fs_batch" {
+					var args struct {
+						Parallel   *bool                 `json:"parallel"`
+						Operations []types.HostOpRequest `json:"operations"`
+					}
+					if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+						// #region agent log
+						debuglog.Log("toolcalling", "H5", "loop.go:runConversation", "batch_args_unmarshal_err", map[string]any{
+							"step": step,
+							"tool": which,
+							"err":  errString(err),
+						})
+						// #endregion
+						batchResp := types.HostOpBatchResponse{Ok: false, Error: "batch args were not valid JSON: " + err.Error()}
+						batchRespJSON, _ := types.MarshalPretty(batchResp)
+						// #region agent log
+						debuglog.Log("toolcalling", "H8", "loop.go:runConversation", "tool_output_error_sent", map[string]any{
+							"step": step,
+							"tool": which,
+						})
+						// #endregion
+						msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(batchRespJSON)})
+						appendedToolOutputAnyThisStep = true
+						continue
+					}
+					parallel := false
+					if args.Parallel != nil {
+						parallel = *args.Parallel
+					}
+					// #region agent log
+					toolRunN := 0
+					for _, sub := range args.Operations {
+						if strings.TrimSpace(sub.Op) == types.HostOpToolRun {
+							toolRunN++
+						}
+					}
+					debuglog.Log("toolcalling", "H5", "loop.go:runConversation", "fs_batch_exec", map[string]any{
+						"step":       step,
+						"parallel":   parallel,
+						"opsLen":     len(args.Operations),
+						"toolRunOps": toolRunN,
+					})
+					// #endregion
+					batchReq := types.HostOpBatchRequest{Op: types.HostOpFSBatch, Operations: args.Operations, Parallel: parallel}
+					if err := batchReq.Validate(); err != nil {
+						hint := ""
+						if strings.Contains(err.Error(), "unknown op") && strings.Contains(err.Error(), "_") {
+							hint = "Hint: inside batch.operations[], op must be dotted (fs.write), not underscore (fs_write)."
+						} else if strings.Contains(err.Error(), "path is required") {
+							hint = "Hint: include an absolute VFS path starting with / (e.g. {\"op\":\"fs.write\",\"path\":\"/workspace/x.txt\",\"text\":\"...\"})."
+						} else if strings.Contains(err.Error(), "text is required") {
+							hint = "Hint: fs.write/fs.append/fs.patch require non-empty text."
+						} else if strings.Contains(err.Error(), "input is required") {
+							hint = "Hint: tool.run requires input (object) and timeoutMs."
+						}
+						if hint != "" {
+							// #region agent log
+							opsPreview := make([]map[string]any, 0, 3)
+							for i, sub := range args.Operations {
+								if i >= 3 {
+									break
+								}
+								opsPreview = append(opsPreview, map[string]any{
+									"op":       strings.TrimSpace(sub.Op),
+									"path":     strings.TrimSpace(sub.Path),
+									"maxBytes": sub.MaxBytes,
+									"textLen":  len(sub.Text),
+									"toolId":   sub.ToolID.String(),
+									"actionId": strings.TrimSpace(sub.ActionID),
+									"inputLen": len(sub.Input),
+								})
+							}
+							debuglog.Log("toolcalling", "H11", "loop.go:runConversation", "batch_validate_hint", map[string]any{
+								"step":       step,
+								"tool":       which,
+								"err":        errString(err),
+								"hint":       hint,
+								"opsLen":     len(args.Operations),
+								"opsPreview": opsPreview,
+							})
+							// #endregion
+							batchResp := types.HostOpBatchResponse{Ok: false, Error: err.Error() + " " + hint}
+							batchRespJSON, _ := types.MarshalPretty(batchResp)
+							// #region agent log
+							debuglog.Log("toolcalling", "H8", "loop.go:runConversation", "tool_output_error_sent", map[string]any{
+								"step": step,
+								"tool": which,
+							})
+							// #endregion
+							msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(batchRespJSON)})
+							appendedToolOutputAnyThisStep = true
+							continue
+						}
+						// #region agent log
+						debuglog.Log("toolcalling", "H5", "loop.go:runConversation", "batch_validate_err", map[string]any{
+							"step": step,
+							"tool": which,
+							"err":  errString(err),
+						})
+						// #endregion
+						batchResp := types.HostOpBatchResponse{Ok: false, Error: "batch args invalid: " + err.Error()}
+						batchRespJSON, _ := types.MarshalPretty(batchResp)
+						// #region agent log
+						debuglog.Log("toolcalling", "H8", "loop.go:runConversation", "tool_output_error_sent", map[string]any{
+							"step": step,
+							"tool": which,
+						})
+						// #endregion
+						msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(batchRespJSON)})
+						appendedToolOutputAnyThisStep = true
+						continue
+					}
+
+					// Execute batch.
+					results := make([]types.HostOpResponse, len(batchReq.Operations))
+					if batchReq.Parallel {
+						var wg sync.WaitGroup
+						wg.Add(len(batchReq.Operations))
+						for i, sub := range batchReq.Operations {
+							i, sub := i, sub
+							go func() {
+								defer wg.Done()
+								results[i] = a.Exec.Exec(ctx, sub)
+							}()
+						}
+						wg.Wait()
+					} else {
+						for i, sub := range batchReq.Operations {
+							results[i] = a.Exec.Exec(ctx, sub)
+						}
+					}
+					okAll := true
+					for _, r := range results {
+						if !r.Ok {
+							okAll = false
+							break
+						}
+					}
+					batchResp := types.HostOpBatchResponse{Ok: okAll, Results: results}
+					batchRespJSON, _ := types.MarshalPretty(batchResp)
+					msgs = append(msgs, types.LLMMessage{
+						Role:       "tool",
+						ToolCallID: strings.TrimSpace(tc.ID),
+						Content:    string(batchRespJSON),
+					})
+					appendedToolOutputAnyThisStep = true
+					if okAll {
+						appendedToolOutputOkThisStep = true
+					}
+					continue
+				}
+
+				op, err := functionCallToHostOp(tc)
+				if err != nil {
+					// #region agent log
+					debuglog.Log("toolcalling", "H11", "loop.go:runConversation", "tool_call_args_invalid", map[string]any{
+						"step":   step,
+						"tool":   which,
+						"err":    errString(err),
+						"argsLen": len(tc.Function.Arguments),
+					})
+					// #endregion
+					hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: "invalid tool call args: " + err.Error()}
+					hostRespJSON, _ := types.MarshalPretty(hostResp)
+					// #region agent log
+					debuglog.Log("toolcalling", "H8", "loop.go:runConversation", "tool_output_error_sent", map[string]any{
+						"step": step,
+						"tool": which,
+					})
+					// #endregion
+					msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+					appendedToolOutputAnyThisStep = true
+					continue
+				}
+
+				// #region agent log
+				// Log op *shape* (not content) so we can see what the model is reading/listing.
+				debuglog.Log("toolcalling", "H11", "loop.go:runConversation", "host_op_exec", map[string]any{
+					"step":     step,
+					"tool":     which,
+					"op":       strings.TrimSpace(op.Op),
+					"path":     strings.TrimSpace(op.Path),
+					"maxBytes": op.MaxBytes,
+					"textLen":  len(op.Text),
+					"toolId":   op.ToolID.String(),
+					"actionId": strings.TrimSpace(op.ActionID),
+					"inputLen": len(op.Input),
+				})
+				// #endregion
+
+				hostResp := a.Exec.Exec(ctx, op)
+				hostRespJSON, _ := types.MarshalPretty(hostResp)
+				msgs = append(msgs, types.LLMMessage{
+					Role:       "tool",
+					ToolCallID: strings.TrimSpace(tc.ID),
+					Content:    string(hostRespJSON),
+				})
+				appendedToolOutputAnyThisStep = true
+				if hostResp.Ok {
+					appendedToolOutputOkThisStep = true
+				}
+			}
+
+			if appendedToolOutputAnyThisStep {
+				// We have satisfied the tool-calling protocol for this step (no dangling call_ids).
+			}
+			if appendedToolOutputOkThisStep {
+				turnHasToolOutput = true
+			}
+
+			// Persist checkpoint after executing tool calls for this step.
+			if strings.TrimSpace(checkpointPath) != "" {
+				if err := SaveAgentCheckpoint(checkpointPath, AgentCheckpoint{
+					UserMessage:    turnUserMessage,
+					NextStep:       step + 1,
+					Messages:       msgs,
+					LastOp:         lastOpForCheckpoint,
+					LastResponseID: lastResponseID,
+				}); err != nil {
+					return "", msgs, step, err
+				}
+			}
+			continue
+		}
+
+		// Fallback path: JSON parsing for providers/models without tool calling output.
 		opJSON, parseErr := extractSingleJSONObject(resp.Text)
 		if parseErr != nil {
+			trim := strings.TrimSpace(resp.Text)
+			// If the model produced a normal assistant reply (not a host op JSON object),
+			// treat it as final (but only if tools were not required for this turn).
+			if trim != "" && !strings.HasPrefix(trim, "{") && !strings.HasPrefix(trim, "```") && !strings.Contains(trim, "\"op\"") {
+				envWanted, _ := turnFlags["envWanted"].(bool)
+				if envWanted && !turnHasToolOutput {
+					msgs = append(msgs, types.LLMMessage{
+						Role:    "user",
+						Content: "You must use the environment tools for this request (do not answer from assumptions). Start by batching what you need (prefer batch(...)).",
+					})
+					continue
+				}
+				// #region agent log
+				debuglog.Log("toolcalling", "H4", "loop.go:runConversation", "return_final", map[string]any{
+					"step":    step,
+					"reason":  "assistant_text_no_tool_calls",
+					"textLen": len(trim),
+				})
+				// #endregion
+				_ = ClearAgentCheckpoint(checkpointPath)
+				msgs = append(msgs, types.LLMMessage{Role: "assistant", Content: trim})
+				return trim, msgs, step, nil
+			}
 			msgs = append(msgs,
 				types.LLMMessage{Role: "assistant", Content: resp.Text},
 				types.LLMMessage{Role: "user", Content: "Your last message was not valid JSON. Error: " + parseErr.Error() + ". Return ONLY one JSON object with a required \"op\" field."},
@@ -299,7 +771,7 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 				}
 			}
 			batchResp := types.HostOpBatchResponse{Ok: okAll, Results: results}
-			batchRespJSON, _ := jsonutil.MarshalPretty(batchResp)
+			batchRespJSON, _ := types.MarshalPretty(batchResp)
 
 			msgs = append(msgs,
 				types.LLMMessage{Role: "assistant", Content: opJSON},
@@ -349,7 +821,7 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 		}
 
 		hostResp := a.Exec.Exec(ctx, op)
-		hostRespJSON, _ := jsonutil.MarshalPretty(hostResp)
+		hostRespJSON, _ := types.MarshalPretty(hostResp)
 
 		// Feed the host response back to the model as the next user turn.
 		msgs = append(msgs,
@@ -423,17 +895,56 @@ func (a *Agent) finalizeOnMaxSteps(ctx context.Context, baseSystem string, msgs 
 	var callErr error
 	if s, ok := a.LLM.(types.LLMClientStreaming); ok {
 		dec := &finalTextStreamDecoder{}
+		// #region agent log
+		// Capture provider-supplied reasoning summaries (NOT raw chain-of-thought).
+		var reasoningBuf strings.Builder
+		reasoningTextN := 0
+		reasoningSignalN := 0
+		reasoningCharsTotal := 0
+		// #endregion
 		resp, callErr = s.GenerateStream(ctx, req, func(chunk types.LLMStreamChunk) error {
 			if chunk.Done {
 				if a.Hooks.OnStreamChunk != nil {
 					a.Hooks.OnStreamChunk(step, chunk)
 				}
+				// #region agent log
+				if reasoningSignalN != 0 || reasoningTextN != 0 {
+					prev := reasoningBuf.String()
+					if len(prev) > 800 {
+						prev = prev[:800] + "…"
+					}
+					debuglog.Log("toolcalling", "H13", "loop.go:finalizeOnMaxSteps", "reasoning_summary_seen", map[string]any{
+						"step":               step,
+						"toolChoice":         "none",
+						"reasoningSignalN":   reasoningSignalN,
+						"reasoningTextN":     reasoningTextN,
+						"reasoningChars":     reasoningCharsTotal,
+						"reasoningStoredLen": reasoningBuf.Len(),
+						"reasoningPreview":   prev,
+					})
+				}
+				// #endregion
 				return nil
 			}
 			if chunk.IsReasoning {
 				if a.Hooks.OnStreamChunk != nil {
 					a.Hooks.OnStreamChunk(step, chunk)
 				}
+				// #region agent log
+				reasoningSignalN++
+				if chunk.Text != "" {
+					reasoningTextN++
+					reasoningCharsTotal += len(chunk.Text)
+					if reasoningBuf.Len() < 8*1024 {
+						remain := 8*1024 - reasoningBuf.Len()
+						if len(chunk.Text) > remain {
+							reasoningBuf.WriteString(chunk.Text[:remain])
+						} else {
+							reasoningBuf.WriteString(chunk.Text)
+						}
+					}
+				}
+				// #endregion
 				return nil
 			}
 			if chunk.Text == "" {
@@ -497,6 +1008,106 @@ func extractTurnUserMessage(msgs []types.LLMMessage) string {
 	return ""
 }
 
+func functionCallToHostOp(tc types.ToolCall) (types.HostOpRequest, error) {
+	name := strings.TrimSpace(tc.Function.Name)
+	argsJSON := []byte(tc.Function.Arguments)
+
+	switch name {
+	case "fs_list":
+		var args struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		return types.HostOpRequest{Op: types.HostOpFSList, Path: strings.TrimSpace(args.Path)}, nil
+
+	case "fs_read":
+		var args struct {
+			Path     string `json:"path"`
+			MaxBytes *int   `json:"maxBytes"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		maxBytes := 0
+		if args.MaxBytes != nil {
+			maxBytes = *args.MaxBytes
+		}
+		return types.HostOpRequest{Op: types.HostOpFSRead, Path: strings.TrimSpace(args.Path), MaxBytes: maxBytes}, nil
+
+	case "fs_write":
+		var args struct {
+			Path string `json:"path"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		return types.HostOpRequest{Op: types.HostOpFSWrite, Path: strings.TrimSpace(args.Path), Text: args.Text}, nil
+
+	case "fs_append":
+		var args struct {
+			Path string `json:"path"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		return types.HostOpRequest{Op: types.HostOpFSAppend, Path: strings.TrimSpace(args.Path), Text: args.Text}, nil
+
+	case "fs_edit":
+		var args struct {
+			Path  string `json:"path"`
+			Edits []struct {
+				Old        string `json:"old"`
+				New        string `json:"new"`
+				Occurrence int    `json:"occurrence"`
+			} `json:"edits"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		inp, _ := json.Marshal(map[string]any{"edits": args.Edits})
+		return types.HostOpRequest{Op: types.HostOpFSEdit, Path: strings.TrimSpace(args.Path), Input: inp}, nil
+
+	case "fs_patch":
+		var args struct {
+			Path string `json:"path"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		return types.HostOpRequest{Op: types.HostOpFSPatch, Path: strings.TrimSpace(args.Path), Text: args.Text}, nil
+
+	case "tool_run":
+		var args struct {
+			ToolID    string          `json:"toolId"`
+			ActionID  string          `json:"actionId"`
+			Input     json.RawMessage `json:"input"`
+			TimeoutMs *int            `json:"timeoutMs"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		timeout := 0
+		if args.TimeoutMs != nil {
+			timeout = *args.TimeoutMs
+		}
+		return types.HostOpRequest{
+			Op:        types.HostOpToolRun,
+			ToolID:    types.ToolID(strings.TrimSpace(args.ToolID)),
+			ActionID:  strings.TrimSpace(args.ActionID),
+			Input:     args.Input,
+			TimeoutMs: timeout,
+		}, nil
+
+	default:
+		return types.HostOpRequest{}, fmt.Errorf("unknown tool function %q", name)
+	}
+}
+
 // Run executes the agent loop for a single user goal and returns the final response text.
 func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 	if err := validate.NonEmpty("goal", goal); err != nil {
@@ -512,50 +1123,114 @@ func agentLoopV0SystemPrompt() string {
 	return strings.TrimSpace(`
 You are an agent running inside a host-controlled environment.
 
-You can ONLY interact with the environment by returning exactly ONE JSON object per turn.
-Do not include any other text, markdown, or code fences.
+Workbench uses tool/function calling for environment operations.
+
+You may either:
+  - call one or more provided tools (functions) to interact with the environment, OR
+  - respond normally in plain text when no environment interaction is needed.
 
 Critical rules:
-  - The JSON object MUST include an "op" string field.
-  - The value of "op" MUST be EXACTLY one of the allowed strings below. Do NOT add extra words.
-    Bad: {"op":"fs.batch DONT USE THIS PLEASE", ...}
-    Good: {"op":"fs.batch", ...}
   - All VFS paths MUST be absolute (start with "/"). Never use "." or relative paths.
-  - Do NOT emit helper/status objects like {"valid":true,...} or {"error":...} as your main response.
+  - Do NOT call tools unnecessarily. If the user says "hi" or asks a question you can answer without file/tool access, answer directly without calling tools.
+  - If the user explicitly requests environment interaction (files, repo, tools, builtin.trace), you MUST use the tools. Do NOT answer from assumptions.
 
-Allowed operations (host primitives; always available):
-  - fs.list:   {"op":"fs.list","path":"/tools"}
-  - fs.read:   {"op":"fs.read","path":"/tools/<toolId>","maxBytes":2048}
-  - fs.write:  {"op":"fs.write","path":"/workspace/file.txt","text":"..."}
-  - fs.append: {"op":"fs.append","path":"/workspace/log.txt","text":"..."}
-  - fs.edit:   {"op":"fs.edit","path":"/workspace/file.txt","input":{"edits":[{"old":"...","new":"...","occurrence":1}]}}
-  - fs.patch:  {"op":"fs.patch","path":"/workspace/file.txt","text":"--- a/file.txt\n+++ b/file.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n"}
-  - tool.run:  {"op":"tool.run","toolId":"<toolId>","actionId":"<actionId>","input":{...},"timeoutMs":5000}
-  - fs.batch:  {"op":"fs.batch","parallel":true,"operations":[{"op":"fs.read","path":"/tools/<toolId>","maxBytes":2048}]}
-  - final:     {"op":"final","text":"..."}   (stop)
+When you need the environment, use the provided function tools:
+  - fs_list, fs_read, fs_write, fs_append, fs_edit, fs_patch
+  - batch (batch of host ops)
+  - tool_run (execute a discovered tool)
+
+To end the turn:
+  - Stop calling tools and respond normally in markdown.
 
 Batch notes:
-  - Alias: {"op":"batch", ...} is also accepted (op:"fs.batch" preferred).
-  - Field alias: "ops" is accepted, but "operations" is preferred.
+  - Prefer batch for multiple independent ops.
+  - If you need 2+ tool executions, DO NOT call tool_run repeatedly. Use batch with multiple operations where each operation is {"op":"tool.run", ... }.
+  - batch.operations is a list of host op objects like {"op":"fs.read",...}, not tool calls.
 
 Tool discovery rules:
   - Tools are discovered via VFS only:
-      fs.list("/tools") returns tool IDs as directory entries.
-      fs.read("/tools/<toolId>") returns the tool manifest JSON bytes.
+      fs_list("/tools") returns tool IDs as directory entries.
+      fs_read("/tools/<toolId>") returns the tool manifest JSON bytes.
   - Do NOT assume tool actions; read the manifest first.
 
 Tool execution + results rules:
-  - To run a tool, use tool.run(...) with the selected toolId/actionId and an input object.
+  - To run a tool, use tool_run(...) with the selected toolId/actionId and an input object.
   - After tool.run, the host persists:
       /results/<callId>/response.json
       /results/<callId>/<artifactPath>
-  - You can read those files with fs.read to inspect outputs/artifacts.
+  - You can read those files with fs_read to inspect outputs/artifacts.
 
 Always:
-  - Prefer discovering tools first.
+  - Prefer discovering tools first when tool usage is required.
   - Use small reads (maxBytes) unless you need more.
-  - If a host op fails (ok=false), recover and try a different op or return final with an explanation.
+  - If a tool or host op fails, recover and try a different approach or answer with what you know.
 `)
+}
+
+func toolChoiceForTurn(userMsg string, turnHasToolOutput bool) (choice string, reason string, flags map[string]any) {
+	s := strings.ToLower(strings.TrimSpace(userMsg))
+	flags = map[string]any{
+		"empty":       s == "",
+		"isShort":     len(s) <= 8,
+		"hasAtRef":    strings.Contains(s, "@"),
+		"hasTrace":    strings.Contains(s, "trace") || strings.Contains(s, "builtin.trace"),
+		"hasToolWord": strings.Contains(s, "tool") || strings.Contains(s, "tools"),
+		"hasFileWord": strings.Contains(s, "file") || strings.Contains(s, "files"),
+		"hasRepoWord": strings.Contains(s, "repo") || strings.Contains(s, "codebase") || strings.Contains(s, "project"),
+	}
+	envWanted := flags["hasAtRef"].(bool) || flags["hasTrace"].(bool) || flags["hasRepoWord"].(bool) || flags["hasFileWord"].(bool) || flags["hasToolWord"].(bool)
+	flags["envWanted"] = envWanted
+	flags["turnHasToolOutput"] = turnHasToolOutput
+
+	// Avoid forcing tools for greetings / very short chit-chat.
+	switch s {
+	case "", "hi", "hey", "hello", "yo", "sup", "thanks", "thank you":
+		return "auto", "greeting_or_empty", flags
+	}
+
+	// If the user is clearly requesting environment interaction, force tool calling
+	// only until we have tool outputs. After that, allow plain assistant text to end.
+	if envWanted && !turnHasToolOutput {
+		return "required", "explicit_env_request", flags
+	}
+	if envWanted && turnHasToolOutput {
+		return "auto", "env_request_has_tool_output", flags
+	}
+
+	return "auto", "default_auto", flags
+}
+
+func indexOfTurnUserMessage(msgs []types.LLMMessage) int {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if strings.TrimSpace(m.Role) != "user" {
+			continue
+		}
+		c := strings.TrimSpace(m.Content)
+		if c == "" {
+			continue
+		}
+		if strings.HasPrefix(c, "HostOpResponse:") || strings.HasPrefix(c, "HostOpBatchResponse:") {
+			continue
+		}
+		if strings.HasPrefix(c, "Your last message was not valid JSON") || strings.HasPrefix(c, "Your last JSON op was invalid:") {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+func hasToolMessageAfterIdx(msgs []types.LLMMessage, idx int) bool {
+	if idx < -1 {
+		idx = -1
+	}
+	for i := idx + 1; i < len(msgs); i++ {
+		if strings.TrimSpace(strings.ToLower(msgs[i].Role)) == "tool" {
+			return true
+		}
+	}
+	return false
 }
 
 func validateModelOp(op types.HostOpRequest) error {

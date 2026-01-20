@@ -9,12 +9,15 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/packages/respjson"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
+	"github.com/tinoosan/workbench-core/internal/debuglog"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -79,9 +82,46 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 		case "system":
 			msgs = append(msgs, openai.SystemMessage(m.Content))
 		case "assistant":
-			msgs = append(msgs, openai.AssistantMessage(m.Content))
+			// If the assistant message included tool calls, preserve them so that
+			// subsequent tool messages (role="tool") can reference tool_call_id.
+			if len(m.ToolCalls) != 0 {
+				tcps := make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(m.ToolCalls))
+				for _, tc := range m.ToolCalls {
+					if strings.TrimSpace(strings.ToLower(tc.Type)) != "function" {
+						return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported toolCall type %q", tc.Type)
+					}
+					id := strings.TrimSpace(tc.ID)
+					name := strings.TrimSpace(tc.Function.Name)
+					args := tc.Function.Arguments
+					if id == "" || name == "" {
+						return openai.ChatCompletionNewParams{}, fmt.Errorf("toolCall id and function.name are required")
+					}
+					tcps = append(tcps, openai.ChatCompletionMessageToolCallUnionParam{
+						OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+							ID: id,
+							Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+								Name:      name,
+								Arguments: args,
+							},
+						},
+					})
+				}
+				ap := openai.ChatCompletionAssistantMessageParam{
+					ToolCalls: tcps,
+				}
+				if strings.TrimSpace(m.Content) != "" {
+					ap.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
+						OfString: param.NewOpt(m.Content),
+					}
+				}
+				msgs = append(msgs, openai.ChatCompletionMessageParamUnion{OfAssistant: &ap})
+			} else {
+				msgs = append(msgs, openai.AssistantMessage(m.Content))
+			}
 		case "developer":
 			msgs = append(msgs, openai.DeveloperMessage(m.Content))
+		case "tool":
+			msgs = append(msgs, openai.ToolMessage(m.Content, strings.TrimSpace(m.ToolCallID)))
 		default:
 			// Treat unknown roles as user.
 			msgs = append(msgs, openai.UserMessage(m.Content))
@@ -132,7 +172,68 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 			OfJSONObject: &rf,
 		}
 	}
+
+	// Tool/function calling (Chat Completions).
+	if len(req.Tools) != 0 {
+		tools := make([]openai.ChatCompletionToolUnionParam, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			if strings.TrimSpace(strings.ToLower(t.Type)) != "function" {
+				return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported tool type %q", t.Type)
+			}
+			name := strings.TrimSpace(t.Function.Name)
+			if name == "" {
+				return openai.ChatCompletionNewParams{}, fmt.Errorf("tool.function.name is required")
+			}
+			schema, ok := t.Function.Parameters.(map[string]any)
+			if !ok && t.Function.Parameters != nil {
+				return openai.ChatCompletionNewParams{}, fmt.Errorf("tool.function.parameters must be a JSON schema object")
+			}
+			fn := shared.FunctionDefinitionParam{
+				Name: name,
+			}
+			if strings.TrimSpace(t.Function.Description) != "" {
+				fn.Description = param.NewOpt(strings.TrimSpace(t.Function.Description))
+			}
+			if t.Function.Strict {
+				fn.Strict = param.NewOpt(true)
+			}
+			if schema != nil {
+				fn.Parameters = shared.FunctionParameters(schema)
+			}
+			tools = append(tools, openai.ChatCompletionFunctionTool(fn))
+		}
+		params.Tools = tools
+
+		switch strings.ToLower(strings.TrimSpace(req.ToolChoice)) {
+		case "", "auto":
+			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(string(openai.ChatCompletionToolChoiceOptionAutoAuto))}
+		case "none":
+			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(string(openai.ChatCompletionToolChoiceOptionAutoNone))}
+		case "required":
+			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(string(openai.ChatCompletionToolChoiceOptionAutoRequired))}
+			// Reduce complexity: force exactly one tool call per turn.
+			params.ParallelToolCalls = param.NewOpt(false)
+		default:
+			return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported toolChoice %q", req.ToolChoice)
+		}
+	}
+
 	return params, nil
+}
+
+func requestUsesToolCalling(req types.LLMRequest) bool {
+	if len(req.Tools) != 0 {
+		return true
+	}
+	for _, m := range req.Messages {
+		if strings.EqualFold(strings.TrimSpace(m.Role), "tool") {
+			return true
+		}
+		if strings.EqualFold(strings.TrimSpace(m.Role), "assistant") && len(m.ToolCalls) != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNewParams, error) {
@@ -152,19 +253,150 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	}
 
 	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
+	usesToolCalling := requestUsesToolCalling(req)
 
 	// Message mapping: Responses API uses an input item list with explicit roles.
 	// System/developer instructions are provided via `Instructions`.
-	msgs := req.Messages
-	// When chaining with previous_response_id, send only the newest message (delta-only)
-	// to avoid duplicating the transcript in the model context.
-	if previousResponseID != "" && len(msgs) > 0 {
-		msgs = msgs[len(msgs)-1:]
+	allMsgs := req.Messages
+	msgs := allMsgs
+
+	isInternalUserRepair := func(s string) bool {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return false
+		}
+		return strings.HasPrefix(s, "Your last message was not valid JSON") ||
+			strings.HasPrefix(s, "Your last JSON op was invalid:") ||
+			strings.HasPrefix(s, "Your last JSON op was not valid JSON") ||
+			strings.HasPrefix(s, "HostOpResponse:") ||
+			strings.HasPrefix(s, "HostOpBatchResponse:")
 	}
 
+	lastRealUserIdx := -1
+	for i := len(allMsgs) - 1; i >= 0; i-- {
+		m := allMsgs[i]
+		if !strings.EqualFold(strings.TrimSpace(m.Role), "user") {
+			continue
+		}
+		c := strings.TrimSpace(m.Content)
+		if c == "" {
+			continue
+		}
+		if isInternalUserRepair(c) {
+			continue
+		}
+		lastRealUserIdx = i
+		break
+	}
+	// When chaining with previous_response_id:
+	// - For non-tool-calling turns, we can send only the newest message (delta-only).
+	// - For tool-calling turns, we must send *all* trailing tool outputs so the model
+	//   can see every tool result from the previous response's tool calls.
+	if previousResponseID != "" && len(msgs) > 0 {
+		if usesToolCalling {
+			// Collect the contiguous trailing tool messages (role="tool"). For some providers
+			// (e.g. Azure), tool outputs alone are rejected unless the corresponding tool call
+			// is also present, so we also include the immediately preceding assistant message
+			// that contains tool call metadata.
+			end := len(msgs)
+			i := end - 1
+			for i >= 0 && strings.EqualFold(strings.TrimSpace(msgs[i].Role), "tool") {
+				i--
+			}
+			// If we found any trailing tool messages, keep them (and maybe the preceding assistant tool-call msg).
+			if i < end-1 {
+				start := i + 1
+				if i >= 0 && strings.EqualFold(strings.TrimSpace(msgs[i].Role), "assistant") && len(msgs[i].ToolCalls) != 0 {
+					start = i
+				}
+				msgs = msgs[start:]
+			} else {
+				msgs = msgs[end-1:]
+			}
+		} else {
+			msgs = msgs[len(msgs)-1:]
+		}
+	}
+
+	// If tools are REQUIRED for this request, ensure the model also sees the user's
+	// actual instruction during chained steps (some models ignore/miss it otherwise).
+	if previousResponseID != "" && usesToolCalling && strings.EqualFold(strings.TrimSpace(req.ToolChoice), "required") && lastRealUserIdx >= 0 {
+		hasUser := false
+		for _, m := range msgs {
+			if !strings.EqualFold(strings.TrimSpace(m.Role), "user") {
+				continue
+			}
+			c := strings.TrimSpace(m.Content)
+			if c == "" || isInternalUserRepair(c) {
+				continue
+			}
+			hasUser = true
+			break
+		}
+		if !hasUser {
+			msgs = append([]types.LLMMessage{allMsgs[lastRealUserIdx]}, msgs...)
+		}
+	}
+
+	// #region agent log
+	// Log the role/content shape we are sending (safe; no raw user text).
+	// This helps diagnose "model didn't receive a message" reports.
+	if previousResponseID != "" {
+		roles := make([]string, 0, len(msgs))
+		lens := make([]int, 0, len(msgs))
+		emptyN := 0
+		userN := 0
+		toolN := 0
+		assistantN := 0
+		for _, m := range msgs {
+			r := strings.ToLower(strings.TrimSpace(m.Role))
+			roles = append(roles, r)
+			l := len(strings.TrimSpace(m.Content))
+			lens = append(lens, l)
+			if l == 0 && r != "tool" {
+				emptyN++
+			}
+			switch r {
+			case "user":
+				userN++
+			case "tool":
+				toolN++
+			case "assistant":
+				assistantN++
+			}
+		}
+		debuglog.Log("toolcalling", "H14", "openai_client.go:buildResponseParams", "responses_input_msgs_shape", map[string]any{
+			"prevIDUsed":   true,
+			"usesToolCall": usesToolCalling,
+			"msgsLen":      len(msgs),
+			"userN":        userN,
+			"assistantN":   assistantN,
+			"toolN":        toolN,
+			"emptyN":       emptyN,
+			"roles":        roles,
+			"contentLens":  lens,
+		})
+	}
+	// #endregion
+
+	// Build input items. For tool calling, we encode tool results as function_call_output items.
 	items := make(responses.ResponseInputParam, 0, len(msgs))
+	toolMsgN := 0
+	assistantToolCallN := 0
+	var functionCallIDs []string
+	var functionCallOutputIDs []string
 	for _, m := range msgs {
 		role := strings.ToLower(strings.TrimSpace(m.Role))
+		if role == "tool" {
+			toolMsgN++
+			callID := strings.TrimSpace(m.ToolCallID)
+			if callID == "" {
+				return responses.ResponseNewParams{}, fmt.Errorf("tool message requires toolCallID")
+			}
+			functionCallOutputIDs = append(functionCallOutputIDs, callID)
+			items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(callID, m.Content))
+			continue
+		}
 		rrole := responses.EasyInputMessageRoleUser
 		switch role {
 		case "system":
@@ -177,7 +409,41 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 			rrole = responses.EasyInputMessageRoleUser
 		}
 		items = append(items, responses.ResponseInputItemParamOfMessage(m.Content, rrole))
+		// If the assistant message carried tool calls, include them as function_call items.
+		for _, tc := range m.ToolCalls {
+			if strings.TrimSpace(strings.ToLower(tc.Type)) != "function" {
+				continue
+			}
+			assistantToolCallN++
+			callID := strings.TrimSpace(tc.ID)
+			name := strings.TrimSpace(tc.Function.Name)
+			args := tc.Function.Arguments
+			if callID == "" || name == "" {
+				continue
+			}
+			functionCallIDs = append(functionCallIDs, callID)
+			items = append(items, responses.ResponseInputItemParamOfFunctionCall(args, callID, name))
+		}
 	}
+
+	// #region agent log
+	debuglog.Log("toolcalling", "H7", "openai_client.go:buildResponseParams", "responses_input_shape", map[string]any{
+		"usesToolCalling":    usesToolCalling,
+		"deltaOnly":          previousResponseID != "" && !usesToolCalling,
+		"deltaToolOutputs":   previousResponseID != "" && usesToolCalling,
+		"previousResponseID": strings.TrimSpace(req.PreviousResponseID) != "",
+		"prevIDUsed":         previousResponseID != "",
+		"msgsLenSent":        len(msgs),
+		"toolMsgN":           toolMsgN,
+		"assistantToolCallN": assistantToolCallN,
+		"toolsLen":           len(req.Tools),
+		"toolChoice":         strings.TrimSpace(req.ToolChoice),
+	})
+	debuglog.Log("toolcalling", "H7", "openai_client.go:buildResponseParams", "responses_input_call_ids", map[string]any{
+		"functionCallN":       len(functionCallIDs),
+		"functionCallOutputN": len(functionCallOutputIDs),
+	})
+	// #endregion
 
 	params := responses.ResponseNewParams{
 		Model: shared.ResponsesModel(req.Model),
@@ -246,6 +512,56 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 		params.Reasoning.Summary = shared.ReasoningSummary(sv)
 	}
 
+	// Tool/function calling (Responses API).
+	if len(req.Tools) != 0 {
+		tools := make([]responses.ToolUnionParam, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			if strings.TrimSpace(strings.ToLower(t.Type)) != "function" {
+				return responses.ResponseNewParams{}, fmt.Errorf("unsupported tool type %q", t.Type)
+			}
+			name := strings.TrimSpace(t.Function.Name)
+			if name == "" {
+				return responses.ResponseNewParams{}, fmt.Errorf("tool.function.name is required")
+			}
+			schema, ok := t.Function.Parameters.(map[string]any)
+			if !ok && t.Function.Parameters != nil {
+				return responses.ResponseNewParams{}, fmt.Errorf("tool.function.parameters must be a JSON schema object")
+			}
+			if schema == nil {
+				schema = map[string]any{}
+			}
+			fn := responses.FunctionToolParam{
+				Name:       name,
+				Parameters: schema,
+				Strict:     param.NewOpt(t.Function.Strict),
+			}
+			if strings.TrimSpace(t.Function.Description) != "" {
+				fn.Description = param.NewOpt(strings.TrimSpace(t.Function.Description))
+			}
+			tools = append(tools, responses.ToolUnionParam{OfFunction: &fn})
+		}
+		params.Tools = tools
+
+		switch strings.ToLower(strings.TrimSpace(req.ToolChoice)) {
+		case "", "auto":
+			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
+				OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto),
+			}
+		case "none":
+			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
+				OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsNone),
+			}
+		case "required":
+			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
+				OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsRequired),
+			}
+			// Reduce complexity: force exactly one tool call per turn.
+			params.ParallelToolCalls = param.NewOpt(false)
+		default:
+			return responses.ResponseNewParams{}, fmt.Errorf("unsupported toolChoice %q", req.ToolChoice)
+		}
+	}
+
 	return params, nil
 }
 
@@ -255,11 +571,25 @@ func (c *Client) toResponse(resp *openai.ChatCompletion) (types.LLMResponse, err
 	}
 
 	text := ""
+	var toolCalls []types.ToolCall
 	if len(resp.Choices) != 0 {
 		text = strings.TrimSpace(resp.Choices[0].Message.Content)
+		for _, tc := range resp.Choices[0].Message.ToolCalls {
+			// Function tool calls.
+			if strings.TrimSpace(tc.Type) == "function" && strings.TrimSpace(tc.Function.Name) != "" {
+				toolCalls = append(toolCalls, types.ToolCall{
+					ID:   strings.TrimSpace(tc.ID),
+					Type: strings.TrimSpace(tc.Type),
+					Function: types.ToolCallFunction{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
+					},
+				})
+			}
+		}
 	}
 
-	out := types.LLMResponse{Text: text}
+	out := types.LLMResponse{Text: text, ToolCalls: toolCalls}
 
 	if raw := strings.TrimSpace(resp.RawJSON()); raw != "" {
 		out.Raw = json.RawMessage(raw)
@@ -284,6 +614,27 @@ func (c *Client) toResponseFromResponses(resp *responses.Response) (types.LLMRes
 
 	text := strings.TrimSpace(resp.OutputText())
 	out := types.LLMResponse{Text: text}
+
+	// Extract function tool calls from Responses output items.
+	for _, it := range resp.Output {
+		if strings.TrimSpace(it.Type) != "function_call" {
+			continue
+		}
+		callID := strings.TrimSpace(it.CallID)
+		name := strings.TrimSpace(it.Name)
+		args := it.Arguments
+		if callID == "" || name == "" {
+			continue
+		}
+		out.ToolCalls = append(out.ToolCalls, types.ToolCall{
+			ID:   callID, // Responses uses call_id; we store it in ToolCall.ID for the agent loop
+			Type: "function",
+			Function: types.ToolCallFunction{
+				Name:      name,
+				Arguments: args,
+			},
+		})
+	}
 
 	// Preserve response ID for follow-up calls via previous_response_id.
 	if strings.TrimSpace(resp.ID) != "" {
@@ -484,6 +835,17 @@ func (c *Client) GenerateStream(ctx context.Context, req types.LLMRequest, cb ty
 		return types.LLMResponse{}, fmt.Errorf("llm client is nil")
 	}
 
+	// #region agent log
+	debuglog.Log("toolcalling", "H2", "openai_client.go:GenerateStream", "route_selected", map[string]any{
+		"route":      "responses",
+		"model":      strings.TrimSpace(req.Model),
+		"hasSchema":  req.ResponseSchema != nil,
+		"jsonOnly":   req.JSONOnly,
+		"toolsLen":   len(req.Tools),
+		"toolChoice": strings.TrimSpace(req.ToolChoice),
+	})
+	// #endregion
+
 	// When ResponseSchema is set, prefer enforcing it if possible. Some OpenAI-compatible
 	// providers reject `json_schema` on the Responses API but accept it on Chat Completions.
 	if req.ResponseSchema != nil {
@@ -530,6 +892,14 @@ func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMReque
 		return types.LLMResponse{}, err
 	}
 
+	start := time.Now()
+	evN := 0
+	// #region agent log
+	debuglog.Log("toolcalling", "H6", "openai_client.go:generateStreamResponses", "responses_stream_start", map[string]any{
+		"model": strings.TrimSpace(req.Model),
+	})
+	// #endregion
+
 	stream := c.client.Responses.NewStreaming(ctx, params)
 	if stream == nil {
 		return types.LLMResponse{}, fmt.Errorf("stream is nil")
@@ -540,12 +910,27 @@ func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMReque
 	sawReasoningSummaryText := false
 
 	for stream.Next() {
+		evN++
 		ev := stream.Current()
 		if err := c.onResponsesStreamEvent(ev, cb, &outText, &completed, &sawReasoningSummaryText); err != nil {
+			// #region agent log
+			debuglog.Log("toolcalling", "H6", "openai_client.go:generateStreamResponses", "responses_stream_event_err", map[string]any{
+				"durMs": time.Since(start).Milliseconds(),
+				"evN":   evN,
+				"err":   err.Error(),
+			})
+			// #endregion
 			return types.LLMResponse{}, err
 		}
 	}
 	if err := stream.Err(); err != nil {
+		// #region agent log
+		debuglog.Log("toolcalling", "H6", "openai_client.go:generateStreamResponses", "responses_stream_err", map[string]any{
+			"durMs": time.Since(start).Milliseconds(),
+			"evN":   evN,
+			"err":   err.Error(),
+		})
+		// #endregion
 		return types.LLMResponse{}, err
 	}
 
@@ -554,6 +939,15 @@ func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMReque
 			return types.LLMResponse{}, err
 		}
 	}
+
+	// #region agent log
+	debuglog.Log("toolcalling", "H6", "openai_client.go:generateStreamResponses", "responses_stream_end", map[string]any{
+		"durMs":        time.Since(start).Milliseconds(),
+		"evN":          evN,
+		"hasCompleted": completed != nil,
+		"outTextLen":   outText.Len(),
+	})
+	// #endregion
 
 	if completed != nil {
 		return c.toResponseFromResponses(completed)

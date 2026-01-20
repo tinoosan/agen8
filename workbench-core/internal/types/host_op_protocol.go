@@ -94,7 +94,7 @@ type HostOpBatchResponse struct {
 // and intentionally lenient for file ops where JSON unmarshalling can't distinguish "missing"
 // vs "present but empty" for string fields like Text.
 func (r HostOpRequest) Validate() error {
-	r.Op = strings.TrimSpace(r.Op)
+	r.Op = normalizeHostOp(strings.TrimSpace(r.Op))
 	switch r.Op {
 	case HostOpFSList, HostOpFSRead, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpToolRun, HostOpFinal:
 	default:
@@ -177,6 +177,34 @@ func (r HostOpRequest) Validate() error {
 	}
 
 	return nil
+}
+
+func normalizeHostOp(op string) string {
+	op = strings.TrimSpace(op)
+	if op == "" {
+		return ""
+	}
+	// Be permissive to common model mistakes: underscores instead of dots and casing.
+	op = strings.ToLower(op)
+	switch op {
+	case "fs_list":
+		return HostOpFSList
+	case "fs_read":
+		return HostOpFSRead
+	case "fs_write":
+		return HostOpFSWrite
+	case "fs_append":
+		return HostOpFSAppend
+	case "fs_edit":
+		return HostOpFSEdit
+	case "fs_patch":
+		return HostOpFSPatch
+	case "tool_run":
+		return HostOpToolRun
+	default:
+		// Already dotted (or unknown): keep as-is (lowercased).
+		return op
+	}
 }
 
 // HostOpResponse is the minimal "host primitive" response envelope.

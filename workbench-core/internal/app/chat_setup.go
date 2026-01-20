@@ -12,6 +12,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/config"
+	"github.com/tinoosan/workbench-core/internal/debuglog"
 	"github.com/tinoosan/workbench-core/internal/events"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/llm"
@@ -216,8 +217,9 @@ func setupTUIChatRuntime(
 		MaxMemoryBytes:    opts.MaxMemoryBytes,
 		MaxTraceBytes:     opts.MaxTraceBytes,
 		MaxHistoryBytes:   8 * 1024,
-		StatePath:         "/workspace/context_constructor_state.json",
-		ManifestPath:      "/workspace/context_constructor_manifest.json",
+		// Store constructor bookkeeping on disk under the run root (NOT in VFS) so the model can't discover it.
+		StatePath:    filepath.Join(fsutil.GetRunDir(cfg.DataDir, run.RunId), "context_constructor_state.json"),
+		ManifestPath: filepath.Join(fsutil.GetRunDir(cfg.DataDir, run.RunId), "context_constructor_manifest.json"),
 		Emit: func(eventType, message string, data map[string]string) {
 			mustEmit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
 		},
@@ -227,6 +229,34 @@ func setupTUIChatRuntime(
 	var updater *agent.ContextUpdater
 	var opSeq uint64
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		// #region agent log
+		// Capture the specific "lost → read context constructor manifest" failure mode.
+		if req.Op == types.HostOpFSList && strings.TrimSpace(req.Path) == "/workspace" {
+			debuglog.Log("context", "H9", "chat_setup.go:execWithEvents", "fs_list_workspace", map[string]any{
+				"model":     strings.TrimSpace(model),
+				"runId":     strings.TrimSpace(run.RunId),
+				"sessionId": strings.TrimSpace(run.SessionID),
+			})
+		}
+		if req.Op == types.HostOpFSRead && strings.TrimSpace(req.Path) == "/workspace/context_constructor_manifest.json" {
+			debuglog.Log("context", "H9", "chat_setup.go:execWithEvents", "fs_read_context_constructor_manifest", map[string]any{
+				"model":     strings.TrimSpace(model),
+				"runId":     strings.TrimSpace(run.RunId),
+				"sessionId": strings.TrimSpace(run.SessionID),
+			})
+		}
+		// Also detect reads if we change the manifest location (keep the old log above intact).
+		// #region agent log
+		if req.Op == types.HostOpFSRead && strings.TrimSpace(req.Path) == "/results/context_constructor_manifest.json" {
+			debuglog.Log("context", "H10", "chat_setup.go:execWithEvents", "fs_read_context_constructor_manifest_results", map[string]any{
+				"model":     strings.TrimSpace(model),
+				"runId":     strings.TrimSpace(run.RunId),
+				"sessionId": strings.TrimSpace(run.SessionID),
+			})
+		}
+		// #endregion
+		// #endregion
+
 		opID := fmt.Sprintf("op-%d", atomic.AddUint64(&opSeq, 1))
 		// For file ops, capture "before" deterministically on the host side so the UI
 		// can render diffs without racing on client-side reads.
