@@ -304,6 +304,12 @@ func (m Model) renderInput() string {
 		effortLabel = m.styleComposerStatusKey.Render("effort") + " " + m.styleComposerStatusVal.Render(eff)
 	}
 
+	webState := "off"
+	if m.webSearchEnabled {
+		webState = "on"
+	}
+	webLabel := m.styleComposerStatusKey.Render("web") + " " + m.styleComposerStatusVal.Render(webState)
+
 	modelLabel := m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
 
 	ids := []string{}
@@ -328,16 +334,25 @@ func (m Model) renderInput() string {
 		leftMax = max(0, statusW-rightW-1)
 	}
 
-	// Prefer keeping effort visible (when known); truncate the model ID if needed.
+	// Prefer keeping web/effort visible; truncate the model ID if needed.
 	statusLeft := modelLabel
 	if effortLabel != "" {
-		statusLeft = modelLabel + "  " + effortLabel
+		statusLeft = modelLabel + "  " + webLabel + "  " + effortLabel
 		if leftMax > 0 && lipgloss.Width(statusLeft) > leftMax {
 			excess := lipgloss.Width(statusLeft) - leftMax
 			allowedIDW := max(8, lipgloss.Width(modelIDDisplay)-excess-1)
 			modelIDDisplay = truncateMiddle(modelID, allowedIDW)
 			modelLabel = m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
-			statusLeft = modelLabel + "  " + effortLabel
+			statusLeft = modelLabel + "  " + webLabel + "  " + effortLabel
+		}
+	} else {
+		statusLeft = modelLabel + "  " + webLabel
+		if leftMax > 0 && lipgloss.Width(statusLeft) > leftMax {
+			excess := lipgloss.Width(statusLeft) - leftMax
+			allowedIDW := max(8, lipgloss.Width(modelIDDisplay)-excess-1)
+			modelIDDisplay = truncateMiddle(modelID, allowedIDW)
+			modelLabel = m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
+			statusLeft = modelLabel + "  " + webLabel
 		}
 	}
 	leftW := lipgloss.Width(statusLeft)

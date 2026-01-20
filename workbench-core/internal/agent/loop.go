@@ -36,6 +36,10 @@ type Agent struct {
 	// Model is required. Example: "openai/gpt-4o-mini" (via OpenRouter), etc.
 	Model string
 
+	// EnableWebSearch controls whether the agent requests web-search-grounded model variants
+	// when supported by the provider (e.g. OpenRouter ":online"). Host controls this.
+	EnableWebSearch bool
+
 	// ReasoningEffort is an optional hint for reasoning-capable models.
 	ReasoningEffort string
 
@@ -198,7 +202,7 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			ToolChoice:         toolChoice,
 			JSONOnly:           false,
 			ResponseSchema:     nil,
-			EnableWebSearch:    true,
+			EnableWebSearch:    a.EnableWebSearch,
 			PreviousResponseID: lastResponseID,
 			ReasoningEffort:    strings.TrimSpace(a.ReasoningEffort),
 			ReasoningSummary:   strings.TrimSpace(a.ReasoningSummary),
@@ -1068,7 +1072,7 @@ func (a *Agent) finalizeOnMaxSteps(ctx context.Context, baseSystem string, msgs 
 		MaxTokens:          1024,
 		JSONOnly:           true,
 		ResponseSchema:     hostOpResponseSchema(),
-		EnableWebSearch:    true,
+		EnableWebSearch:    a.EnableWebSearch,
 		PreviousResponseID: strings.TrimSpace(lastResponseID),
 		ReasoningEffort:    strings.TrimSpace(a.ReasoningEffort),
 		ReasoningSummary:   strings.TrimSpace(a.ReasoningSummary),
@@ -1426,6 +1430,10 @@ func functionCallToHostOp(tc types.ToolCall) (types.HostOpRequest, error) {
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return types.HostOpRequest{}, err
 		}
+		// H3 fix: some models omit input entirely; treat missing input as empty object.
+		if args.Input == nil {
+			args.Input = json.RawMessage(`{}`)
+		}
 		timeout := 0
 		if args.TimeoutMs != nil {
 			timeout = *args.TimeoutMs
@@ -1519,7 +1527,10 @@ func toolChoiceForTurn(userMsg string, turnHasToolOutput bool) (choice string, r
 	hasToolWord := flags["hasToolWord"].(bool)
 	toolIntent := hasToolWord && (strings.Contains(s, "list") || strings.Contains(s, "show") || strings.Contains(s, "available") || strings.Contains(s, "discover") || strings.Contains(s, "run"))
 
-	envWanted := flags["hasAtRef"].(bool) || flags["hasTrace"].(bool) || flags["hasRepoWord"].(bool) || flags["hasFileWord"].(bool) || toolIntent
+	// NOTE: We intentionally do NOT force toolChoice=required solely on "file/files" because
+	// some models get stuck repeatedly calling fs.write/fs.read. For file tasks, system prompt
+	// guidance is usually sufficient with toolChoice=auto.
+	envWanted := flags["hasAtRef"].(bool) || flags["hasTrace"].(bool) || flags["hasRepoWord"].(bool) || toolIntent
 	flags["envWanted"] = envWanted
 	flags["turnHasToolOutput"] = turnHasToolOutput
 

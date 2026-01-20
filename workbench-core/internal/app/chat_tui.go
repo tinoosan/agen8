@@ -435,6 +435,28 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 			})
 		}
 		return resp, true, nil
+	case "web":
+		// `/web` (no args): toggle web search for the next run (run-scoped).
+		if strings.TrimSpace(arg) != "" {
+			return "Usage: /web", true, nil
+		}
+		r.opts.WebSearchEnabled = !r.opts.WebSearchEnabled
+		state := "off"
+		if r.opts.WebSearchEnabled {
+			state = "on"
+		}
+		r.emitPreInit(events.Event{
+			Type:    "web.changed",
+			Message: "Web search toggled",
+			Data: map[string]string{
+				"enabled": fmtBool(r.opts.WebSearchEnabled),
+				"state":   state,
+			},
+			Store:   boolp(false),
+			History: boolp(false),
+			Console: boolp(false),
+		})
+		return "web search: " + state, true, nil
 	case "reasoning":
 		// Pre-init reasoning commands should not create a new session/run.
 		curEffort := strings.TrimSpace(r.opts.ReasoningEffort)
@@ -1359,6 +1381,31 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			Console: boolp(false),
 		})
 		return "", true
+	case "web":
+		// `/web` (no args): toggle web search for this run (run-scoped).
+		if strings.TrimSpace(arg) != "" {
+			return "Usage: /web", true
+		}
+		r.opts.WebSearchEnabled = !r.opts.WebSearchEnabled
+		if r.agent != nil {
+			r.agent.EnableWebSearch = r.opts.WebSearchEnabled
+		}
+		state := "off"
+		if r.opts.WebSearchEnabled {
+			state = "on"
+		}
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "web.changed",
+			Message: "Web search toggled",
+			Data: map[string]string{
+				"enabled": fmtBool(r.opts.WebSearchEnabled),
+				"state":   state,
+			},
+			Store:   boolp(false),
+			History: boolp(false),
+			Console: boolp(false),
+		})
+		return "web search: " + state, true
 	case "model":
 		cur := strings.TrimSpace(r.model)
 		if cur == "" {

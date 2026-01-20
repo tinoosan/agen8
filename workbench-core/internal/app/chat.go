@@ -47,6 +47,10 @@ type RunChatOptions struct {
 	// Examples: "off", "auto", "concise", "detailed".
 	ReasoningSummary string
 
+	// WebSearchEnabled controls whether the host requests web-search-grounded model variants
+	// (provider dependent, e.g. OpenRouter ":online"). This is run-scoped and defaults to off.
+	WebSearchEnabled bool
+
 	// WorkDir is the host working directory to mount at /workdir.
 	//
 	// If empty, the host uses os.Getwd() at startup.
@@ -105,6 +109,7 @@ func defaultRunChatOptions() RunChatOptions {
 		MaxProfileBytes:    4 * 1024,
 		RecentHistoryPairs: 8,
 		IncludeHistoryOps:  boolPtr(true),
+		WebSearchEnabled:   false,
 		// Pricing: empty/0 by default (resolved against builtin table at runtime)
 	}
 }

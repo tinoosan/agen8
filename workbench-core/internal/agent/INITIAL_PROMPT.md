@@ -39,6 +39,7 @@ Use `tool_run` to invoke tools under `/tools` (bash, http, ripgrep, git, find, t
 
 Workbench may provide **web-search-grounded model responses** (provider-dependent).
 
+- Web search is **disabled by default**. The user may enable it via the host command `/web`.
 - If you use information from web search, you **must include citations** in your final response.
 - Prefer a short `Sources:` section with 1–5 links at the end.
 

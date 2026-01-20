@@ -189,6 +189,7 @@ type Model struct {
 	workdir         string
 	modelID         string
 	reasoningEffort string
+	webSearchEnabled bool
 	sessionID       string
 	runID           string
 

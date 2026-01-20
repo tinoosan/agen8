@@ -74,6 +74,10 @@ type Config struct {
 	// Model is required. Example: "openai/gpt-5-mini" (via OpenRouter), etc.
 	Model string
 
+	// EnableWebSearch controls whether the agent requests web-search-grounded model variants
+	// when supported by the provider (e.g. OpenRouter ":online"). Host controls this.
+	EnableWebSearch bool
+
 	// ReasoningEffort is an optional hint for reasoning-capable models.
 	// Examples: "none", "low", "medium", "high".
 	ReasoningEffort string
@@ -119,6 +123,7 @@ func New(cfg Config) (*Agent, error) {
 		LLM:              cfg.LLM,
 		Exec:             cfg.Exec,
 		Model:            cfg.Model,
+		EnableWebSearch:  cfg.EnableWebSearch,
 		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
 		SystemPrompt:     system,

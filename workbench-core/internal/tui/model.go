@@ -881,6 +881,10 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 			m.reasoningEffort = v
 		}
 	}
+	// Web search can be toggled at runtime via the host /web command.
+	if ev.Type == "web.changed" {
+		m.webSearchEnabled = strings.TrimSpace(ev.Data["enabled"]) == "true"
+	}
 	// Fallback: /reasoning (no args) emits reasoning.info with a text block.
 	if ev.Type == "reasoning.info" {
 		if v := parseReasoningEffortFromReasoningInfo(ev.Data["text"]); strings.TrimSpace(v) != "" {

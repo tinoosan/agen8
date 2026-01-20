@@ -460,6 +460,7 @@ func setupTUIChatRuntime(
 		Model:            model,
 		ReasoningEffort:  strings.TrimSpace(opts.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(opts.ReasoningSummary),
+		EnableWebSearch:  opts.WebSearchEnabled,
 		SystemPrompt:     baseSystemPrompt,
 		Context:          constructor,
 		MaxSteps:         opts.MaxSteps,
