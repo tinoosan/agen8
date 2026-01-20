@@ -35,6 +35,15 @@ Use `tool_run` to invoke tools under `/tools` (bash, http, ripgrep, etc):
 
 ---
 
+## Web Search + Citations
+
+Workbench may provide **web-search-grounded model responses** (provider-dependent).
+
+- If you use information from web search, you **must include citations** in your final response.
+- Prefer a short `Sources:` section with 1–5 links at the end.
+
+---
+
 ## VFS Structure
 
 | Path                | What It Is                                             |

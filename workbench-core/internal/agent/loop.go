@@ -198,6 +198,7 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			ToolChoice:         toolChoice,
 			JSONOnly:           false,
 			ResponseSchema:     nil,
+			EnableWebSearch:    true,
 			PreviousResponseID: lastResponseID,
 			ReasoningEffort:    strings.TrimSpace(a.ReasoningEffort),
 			ReasoningSummary:   strings.TrimSpace(a.ReasoningSummary),
@@ -453,6 +454,9 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 
 		if a.Hooks.OnLLMUsage != nil && resp.Usage != nil {
 			a.Hooks.OnLLMUsage(step, *resp.Usage)
+		}
+		if a.Hooks.OnWebSearch != nil && len(resp.Citations) != 0 {
+			a.Hooks.OnWebSearch(step, resp.Citations)
 		}
 
 		// #region agent log
@@ -895,6 +899,15 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 				a.Hooks.Logf("executing batch (step %d): ops=%d parallel=%v", step, len(batchReq.Operations), batchReq.Parallel)
 			}
 
+			// An empty batch is always invalid (it would otherwise "succeed" with zero work).
+			if len(batchReq.Operations) == 0 {
+				msgs = append(msgs,
+					types.LLMMessage{Role: "assistant", Content: opJSON},
+					types.LLMMessage{Role: "user", Content: "Your last JSON op was invalid: operations must be non-empty.\n\nReturn ONLY one corrected JSON object."},
+				)
+				continue
+			}
+
 			// Execute with per-operation validation so a single invalid operation doesn't waste the turn.
 			results := make([]types.HostOpResponse, len(batchReq.Operations))
 			valid := make([]bool, len(batchReq.Operations))
@@ -1055,6 +1068,7 @@ func (a *Agent) finalizeOnMaxSteps(ctx context.Context, baseSystem string, msgs 
 		MaxTokens:          1024,
 		JSONOnly:           true,
 		ResponseSchema:     hostOpResponseSchema(),
+		EnableWebSearch:    true,
 		PreviousResponseID: strings.TrimSpace(lastResponseID),
 		ReasoningEffort:    strings.TrimSpace(a.ReasoningEffort),
 		ReasoningSummary:   strings.TrimSpace(a.ReasoningSummary),

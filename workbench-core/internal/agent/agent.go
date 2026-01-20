@@ -45,6 +45,10 @@ type Hooks struct {
 	// OnLLMUsage is invoked after each model call when token usage is available.
 	OnLLMUsage func(step int, usage types.LLMUsage)
 
+	// OnWebSearch is invoked after a model call when the provider returned URL citations.
+	// This is used by the host UI to show when web-search grounding actually occurred.
+	OnWebSearch func(step int, citations []types.LLMCitation)
+
 	// OnToken is invoked for streamed output tokens (when the provider supports streaming).
 	//
 	// Phase 1: the agent loop emits only the decoded "final.text" stream.
