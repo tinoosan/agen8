@@ -17,6 +17,7 @@ import (
 	"github.com/openai/openai-go/v3/packages/respjson"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
+	"github.com/tinoosan/workbench-core/internal/cost"
 	"github.com/tinoosan/workbench-core/internal/debuglog"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
@@ -140,7 +141,7 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 		Model:    openai.ChatModel(req.Model),
 		Messages: msgs,
 	}
-	if v := strings.TrimSpace(req.ReasoningEffort); v != "" {
+	if v := strings.TrimSpace(req.ReasoningEffort); v != "" && cost.SupportsReasoningEffort(req.Model) {
 		params.ReasoningEffort = shared.ReasoningEffort(v)
 	}
 	if maxTokens > 0 {
@@ -492,24 +493,29 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	}
 
 	// Request reasoning summaries when supported.
-	params.Reasoning = shared.ReasoningParam{}
-	if v := strings.TrimSpace(req.ReasoningEffort); v != "" {
-		params.Reasoning.Effort = shared.ReasoningEffort(v)
-	}
-	// Summary control:
-	// - empty => default to auto (current behavior)
-	// - "off" => omit summary fields entirely
-	// - otherwise => set to the requested level
-	sv := strings.ToLower(strings.TrimSpace(req.ReasoningSummary))
-	switch sv {
-	case "":
-		params.Reasoning.GenerateSummary = shared.ReasoningGenerateSummaryAuto // deprecated but harmless; helps compat
-		params.Reasoning.Summary = shared.ReasoningSummaryAuto
-	case "off":
-		// omit
-	default:
-		params.Reasoning.GenerateSummary = shared.ReasoningGenerateSummary(sv)
-		params.Reasoning.Summary = shared.ReasoningSummary(sv)
+	//
+	// Important: many models reject reasoning params. Keep this best-effort and only
+	// send reasoning config when we expect the model to support explicit reasoning controls.
+	if cost.SupportsReasoningSummary(req.Model) {
+		params.Reasoning = shared.ReasoningParam{}
+		if v := strings.TrimSpace(req.ReasoningEffort); v != "" {
+			params.Reasoning.Effort = shared.ReasoningEffort(v)
+		}
+		// Summary control:
+		// - empty => default to auto (current behavior)
+		// - "off" => omit summary fields entirely
+		// - otherwise => set to the requested level
+		sv := strings.ToLower(strings.TrimSpace(req.ReasoningSummary))
+		switch sv {
+		case "":
+			params.Reasoning.GenerateSummary = shared.ReasoningGenerateSummaryAuto // deprecated but harmless; helps compat
+			params.Reasoning.Summary = shared.ReasoningSummaryAuto
+		case "off":
+			// omit
+		default:
+			params.Reasoning.GenerateSummary = shared.ReasoningGenerateSummary(sv)
+			params.Reasoning.Summary = shared.ReasoningSummary(sv)
+		}
 	}
 
 	// Tool/function calling (Responses API).

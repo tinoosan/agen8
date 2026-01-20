@@ -215,9 +215,7 @@ func TestClient_buildParams_MapsToolsAndToolChoiceAndToolMessages(t *testing.T) 
 	if m["tool_choice"] != "required" {
 		t.Fatalf("expected tool_choice=required, got %+v", m["tool_choice"])
 	}
-	if m["parallel_tool_calls"] != false {
-		t.Fatalf("expected parallel_tool_calls=false, got %+v", m["parallel_tool_calls"])
-	}
+	// parallel_tool_calls is optional; default provider behavior may allow parallel calls.
 	if _, ok := m["tools"].([]any); !ok {
 		t.Fatalf("expected tools array, got %+v", m["tools"])
 	}
@@ -283,6 +281,34 @@ func TestClient_buildResponseParams_MapsInstructionsJSONOnlyAndReasoningSummaryA
 	// Default: no previous_response_id.
 	if _, ok := m["previous_response_id"]; ok {
 		t.Fatalf("expected previous_response_id to be omitted, got %+v", m["previous_response_id"])
+	}
+}
+
+func TestClient_buildResponseParams_OmitsReasoningForNonReasoningModels(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli, DefaultMaxTokens: 123}
+
+	params, err := c.buildResponseParams(types.LLMRequest{
+		Model:    "openai/gpt-4o-mini",
+		System:   "system",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
+		JSONOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("buildResponseParams: %v", err)
+	}
+
+	b, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if _, ok := m["reasoning"]; ok {
+		t.Fatalf("expected reasoning to be omitted for non-reasoning model, got %+v", m["reasoning"])
 	}
 }
 

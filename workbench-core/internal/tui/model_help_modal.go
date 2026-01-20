@@ -108,6 +108,7 @@ func (m *Model) helpModalContent() string {
 		"",
 		"Slash commands",
 		"",
+		"  /copy            copy full transcript",
 		"  /model           open model picker",
 		"  /model <id>      set model",
 		"  /open <path>     open a file via OS",
@@ -149,7 +150,6 @@ func (m Model) renderHelpModal(base string) string {
 		Padding(1, 2).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#6bbcff")).
-		Background(lipgloss.Color("#1a1a1a")).
 		Foreground(lipgloss.Color("#eaeaea"))
 
 	modalContent := modalStyle.Render(content)

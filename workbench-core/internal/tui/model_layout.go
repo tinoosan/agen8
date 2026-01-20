@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wordwrap"
+	"github.com/tinoosan/workbench-core/internal/cost"
 )
 
 func (m *Model) layout() {
@@ -299,7 +300,7 @@ func (m Model) renderInput() string {
 
 	eff := strings.TrimSpace(m.reasoningEffort)
 	effortLabel := ""
-	if eff != "" {
+	if eff != "" && cost.SupportsReasoningEffort(modelID) {
 		effortLabel = m.styleComposerStatusKey.Render("effort") + " " + m.styleComposerStatusVal.Render(eff)
 	}
 
