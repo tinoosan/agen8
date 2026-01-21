@@ -116,7 +116,7 @@ func init() {
 // BuiltinTraceInvoker implements builtin.trace.
 //
 // This tool is a "module as tool": it exposes callable actions that replace the
-// older pattern of encoding dynamic queries into VFS paths (e.g. /trace/events.since/<offset>).
+// older pattern of encoding dynamic queries into VFS paths (e.g. /log/events.since/<offset>).
 //
 // Unlike filesystem resources, module actions:
 // - accept structured inputs

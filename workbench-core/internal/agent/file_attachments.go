@@ -4,7 +4,7 @@ package agent
 //
 // Attachments are a host-side convenience for general agent workflows:
 //   - the user can reference files with @path syntax in the chat input
-//   - the host resolves those references against /workdir (and other sources)
+//   - the host resolves those references against /project (and other sources)
 //   - the constructor injects the referenced file contents into the system prompt
 //     so the model can reason and produce correct edits.
 //
@@ -14,7 +14,7 @@ type FileAttachment struct {
 	// Token is the original @token from the user message (without the "@").
 	Token string
 
-	// VPath is the resolved VFS path for the attachment (e.g. "/workdir/go.mod").
+	// VPath is the resolved VFS path for the attachment (e.g. "/project/go.mod").
 	VPath string
 
 	// DisplayName is a human-friendly label (usually a workdir-relative path).

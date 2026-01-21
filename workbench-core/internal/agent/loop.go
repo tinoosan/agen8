@@ -49,7 +49,7 @@ type Agent struct {
 	// SystemPrompt is the base system instructions passed to the model.
 	SystemPrompt string
 
-	// Context optionally refreshes bounded context (memory/profile/trace/etc) per model step.
+	// Context optionally refreshes bounded context (memory/profile/log/etc) per model step.
 	Context ContextSource
 
 	// MaxSteps caps the number of model -> host op iterations.
@@ -1696,18 +1696,18 @@ func pathCategory(p string) string {
 	switch {
 	case strings.HasPrefix(p, "/tools/") || p == "/tools":
 		return "/tools"
-	case strings.HasPrefix(p, "/workdir/") || p == "/workdir":
-		return "/workdir"
-	case strings.HasPrefix(p, "/workspace/") || p == "/workspace":
-		return "/workspace"
+	case strings.HasPrefix(p, "/project/") || p == "/project":
+		return "/project"
+	case strings.HasPrefix(p, "/scratch/") || p == "/scratch":
+		return "/scratch"
 	case strings.HasPrefix(p, "/results/") || p == "/results":
 		return "/results"
 	case strings.HasPrefix(p, "/profile/") || p == "/profile":
 		return "/profile"
 	case strings.HasPrefix(p, "/memory/") || p == "/memory":
 		return "/memory"
-	case strings.HasPrefix(p, "/trace") || p == "/trace":
-		return "/trace"
+	case strings.HasPrefix(p, "/log") || p == "/log":
+		return "/log"
 	case strings.HasPrefix(p, "/"):
 		return "/"
 	default:
@@ -1731,7 +1731,7 @@ func validationHint(op types.HostOpRequest, err error) string {
 	case types.HostOpFSWrite, types.HostOpFSAppend:
 		return "For " + which + " you must include an absolute \"path\" starting with \"/\" and non-empty \"text\"."
 	case types.HostOpFSEdit:
-		return "For fs.edit you must include an absolute \"path\" starting with \"/\" and an \"input\" object with edits (example: {\"op\":\"fs.edit\",\"path\":\"/workdir/x.txt\",\"input\":{\"edits\":[{\"old\":\"a\",\"new\":\"b\",\"occurrence\":1}]}})."
+		return "For fs.edit you must include an absolute \"path\" starting with \"/\" and an \"input\" object with edits (example: {\"op\":\"fs.edit\",\"path\":\"/project/x.txt\",\"input\":{\"edits\":[{\"old\":\"a\",\"new\":\"b\",\"occurrence\":1}]}})."
 	case types.HostOpFSPatch:
 		return "For fs.patch you must include an absolute \"path\" starting with \"/\" and non-empty \"text\" (unified diff)."
 	case types.HostOpToolRun:

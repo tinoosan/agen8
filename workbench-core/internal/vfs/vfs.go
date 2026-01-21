@@ -4,18 +4,18 @@
 // # Mounting
 //
 // Each Resource is mounted under a mount name and accessed via VFS paths:
-//   - Mount "workspace" => VFS paths like "/workspace/notes.md"
+//   - Mount "workspace" => VFS paths like "/scratch/notes.md"
 //   - Mount "tools"     => VFS paths like "/tools/<toolId>"
-//   - Mount "trace"     => VFS paths like "/trace/events.latest/3"
+//   - Mount "trace"     => VFS paths like "/log/events.latest/3"
 //
 // Path conventions
 //   - VFS paths always start with "/" and include a mount name.
 //   - Resource methods receive a "subpath" relative to the mount, with no leading "/".
-//   - Example: Resolve("/workspace/notes.md") => mount="workspace", subpath="notes.md".
+//   - Example: Resolve("/scratch/notes.md") => mount="workspace", subpath="notes.md".
 //
 // Listing
 //   - List("/") returns the mounted namespaces as directory-like entries:
-//     "/workspace", "/tools", "/trace", ...
+//     "/scratch", "/tools", "/log", ...
 //   - List("/<mount>") delegates to the resource and rewrites returned Entry.Path values
 //     to include the mount prefix (so callers always see full VFS paths).
 package vfs
@@ -28,7 +28,7 @@ import (
 
 // FS is a virtual filesystem that manages a collection of mounted resources.
 // Each resource is mounted under a unique name and can be accessed via virtual
-// paths like "/workspace/path/to/file".
+// paths like "/scratch/path/to/file".
 type FS struct {
 	mounts map[string]Resource
 }
@@ -54,8 +54,8 @@ func (fs *FS) Mount(name string, r Resource) {
 // Resolve takes a virtual path and returns the mount name, corresponding mounted resource,
 // the subpath within that resource, and any error encountered.
 //
-// The path must start with "/" and include a mount name (e.g., "/workspace/a/b").
-// For the path "/workspace/a/b", it returns the mount name "workspace", the resource
+// The path must start with "/" and include a mount name (e.g., "/scratch/a/b").
+// For the path "/scratch/a/b", it returns the mount name "workspace", the resource
 // mounted as "workspace", and the subpath "a/b".
 //
 // Returns an error if the path is empty, doesn't start with "/", or references
@@ -68,16 +68,16 @@ func (fs *FS) Resolve(vpath string) (mountName string, r Resource, subpath strin
 		return "", nil, "", fmt.Errorf("path must start with '/'")
 	}
 
-	// Trim leading slashes so "/workspace/a/b" -> "workspace/a/b".
+	// Trim leading slashes so "/scratch/a/b" -> "workspace/a/b".
 	trimmed := strings.TrimLeft(vpath, "/")
 	if trimmed == "" {
-		return "", nil, "", fmt.Errorf("path must include a mount, e.g. /workspace")
+		return "", nil, "", fmt.Errorf("path must include a mount, e.g. /scratch")
 	}
 
 	// Find the longest matching mount prefix.
 	//
 	// This allows nested mounts like "workspace/cache" to override "workspace"
-	// when resolving "/workspace/cache/x".
+	// when resolving "/scratch/cache/x".
 	best := ""
 	for mn := range fs.mounts {
 		if trimmed == mn || strings.HasPrefix(trimmed, mn+"/") {

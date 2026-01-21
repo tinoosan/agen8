@@ -96,13 +96,13 @@ func setupTUIChatRuntime(
 	if err := f.MountAll(fs); err != nil {
 		return nil, err
 	}
-	// /workdir depends on a user-provided OS directory, so it is mounted outside the factory.
-	fs.Mount(vfs.MountWorkdir, workdirRes)
+	// /project depends on a user-provided OS directory, so it is mounted outside the factory.
+	fs.Mount(vfs.MountProject, workdirRes)
 
 	// Pull resource handles back out for wiring and debug data.
-	_, wsr, _, _ := fs.Resolve("/" + vfs.MountWorkspace)
+	_, wsr, _, _ := fs.Resolve("/" + vfs.MountScratch)
 	workspace := wsr.(*resources.DirResource)
-	_, trr, _, _ := fs.Resolve("/" + vfs.MountTrace)
+	_, trr, _, _ := fs.Resolve("/" + vfs.MountLog)
 	traceRes := trr.(*resources.TraceResource)
 	_, hr, _, _ := fs.Resolve("/" + vfs.MountHistory)
 	historyRes = hr.(*resources.HistoryResource)
@@ -115,14 +115,14 @@ func setupTUIChatRuntime(
 		Type:    "host.mounted",
 		Message: "Mounted VFS resources",
 		Data: map[string]string{
-			"/workspace": workspace.BaseDir,
-			"/workdir":   workdirRes.BaseDir,
-			"/results":   "(virtual)",
-			"/trace":     traceRes.BaseDir,
-			"/tools":     "(virtual)",
-			"/memory":    "(virtual)",
-			"/profile":   "(global)",
-			"/history":   historyRes.BaseDir,
+			"/scratch": workspace.BaseDir,
+			"/project": workdirRes.BaseDir,
+			"/results": "(virtual)",
+			"/log":     traceRes.BaseDir,
+			"/tools":   "(virtual)",
+			"/memory":  "(virtual)",
+			"/profile": "(global)",
+			"/history": historyRes.BaseDir,
 		},
 		Console: boolPtr(false),
 	})
@@ -135,7 +135,7 @@ func setupTUIChatRuntime(
 	traceStore := f.TraceStore
 	builtinCfg := tools.BuiltinConfig{
 		ShellRootDir:  absWorkdirRoot,
-		ShellVFSMount: vfs.MountWorkdir,
+		ShellVFSMount: vfs.MountProject,
 		ShellConfirm:  nil,
 		TraceStore:    traceStore,
 	}
@@ -259,14 +259,14 @@ func setupTUIChatRuntime(
 	execWithEvents := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		// #region agent log
 		// Capture the specific "lost → read context constructor manifest" failure mode.
-		if req.Op == types.HostOpFSList && strings.TrimSpace(req.Path) == "/workspace" {
+		if req.Op == types.HostOpFSList && strings.TrimSpace(req.Path) == "/scratch" {
 			debuglog.Log("context", "H9", "chat_setup.go:execWithEvents", "fs_list_workspace", map[string]any{
 				"model":     strings.TrimSpace(model),
 				"runId":     strings.TrimSpace(run.RunId),
 				"sessionId": strings.TrimSpace(run.SessionID),
 			})
 		}
-		if req.Op == types.HostOpFSRead && strings.TrimSpace(req.Path) == "/workspace/context_constructor_manifest.json" {
+		if req.Op == types.HostOpFSRead && strings.TrimSpace(req.Path) == "/scratch/context_constructor_manifest.json" {
 			debuglog.Log("context", "H9", "chat_setup.go:execWithEvents", "fs_read_context_constructor_manifest", map[string]any{
 				"model":     strings.TrimSpace(model),
 				"runId":     strings.TrimSpace(run.RunId),
@@ -487,7 +487,7 @@ func setupTUIChatRuntime(
 		MaxProfileBytes: opts.MaxProfileBytes,
 		MaxMemoryBytes:  opts.MaxMemoryBytes,
 		MaxTraceBytes:   opts.MaxTraceBytes,
-		ManifestPath:    "/workspace/context_manifest.json",
+		ManifestPath:    "/scratch/context_manifest.json",
 		Emit: func(eventType, message string, data map[string]string) {
 			mustEmit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
 		},

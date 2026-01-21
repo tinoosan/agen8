@@ -410,7 +410,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					cmds = append(cmds, m.openComposeEditor(abs))
 				} else if v := strings.TrimSpace(ev.Data["vpath"]); v != "" {
-					// Back-compat: older hosts used a /workdir compose file.
+					// Back-compat: older hosts used a /project compose file.
 					m.externalEditorComposeVPath = v
 					cmds = append(cmds, m.openEditor(v))
 				}
@@ -438,7 +438,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// No pending metadata; still update cache and skip transcript.
 			m.fileSnapCache[path] = msg.text
 			// If the file picker is open, refresh it so newly created files appear.
-			if m.filePickerOpen && (strings.HasPrefix(path, "/workspace/") || strings.HasPrefix(path, "/workdir/")) && strings.TrimSpace(m.workdir) != "" {
+			if m.filePickerOpen && (strings.HasPrefix(path, "/scratch/") || strings.HasPrefix(path, "/project/")) && strings.TrimSpace(m.workdir) != "" {
 				if all, err := m.scanFilePickerPaths(m.workdir); err == nil {
 					m.filePickerAllPaths = all
 					m.filePickerWorkdir = strings.TrimSpace(m.workdir)
@@ -516,7 +516,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fileChangesByPath[path] = snippet
 		m.upsertGroupedFileChanges()
 		// If the file picker is open, refresh it so newly created files appear immediately.
-		if m.filePickerOpen && (strings.HasPrefix(path, "/workspace/") || strings.HasPrefix(path, "/workdir/")) && strings.TrimSpace(m.workdir) != "" {
+		if m.filePickerOpen && (strings.HasPrefix(path, "/scratch/") || strings.HasPrefix(path, "/project/")) && strings.TrimSpace(m.workdir) != "" {
 			if all, err := m.scanFilePickerPaths(m.workdir); err == nil {
 				m.filePickerAllPaths = all
 				m.filePickerWorkdir = strings.TrimSpace(m.workdir)
@@ -940,7 +940,7 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	}
 	// Workdir is discovered via host.mounted and updated via /cd at runtime.
 	if ev.Type == "host.mounted" {
-		if wd := strings.TrimSpace(ev.Data["/workdir"]); wd != "" {
+		if wd := strings.TrimSpace(ev.Data["/project"]); wd != "" {
 			m.workdir = wd
 		}
 	}

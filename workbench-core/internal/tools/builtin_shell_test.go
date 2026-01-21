@@ -325,12 +325,12 @@ func TestBuiltinShell_Exec_AllowsVFSArguments(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	inv := tools.NewBuiltinShellInvoker(rootDir, nil, vfs.MountWorkdir)
+	inv := tools.NewBuiltinShellInvoker(rootDir, nil, vfs.MountProject)
 	input, err := json.Marshal(struct {
 		Argv []string `json:"argv"`
 		Cwd  string   `json:"cwd"`
 	}{
-		Argv: []string{"ls", "/" + vfs.MountWorkdir},
+		Argv: []string{"ls", "/" + vfs.MountProject},
 		Cwd:  ".",
 	})
 	if err != nil {
@@ -366,7 +366,7 @@ func TestBuiltinShell_Exec_AllowsVFSArguments(t *testing.T) {
 
 func TestBuiltinShell_Exec_TranslatesOutputPathsToVFS(t *testing.T) {
 	rootDir := t.TempDir()
-	inv := tools.NewBuiltinShellInvoker(rootDir, nil, vfs.MountWorkdir)
+	inv := tools.NewBuiltinShellInvoker(rootDir, nil, vfs.MountProject)
 	input, err := json.Marshal(struct {
 		Argv []string `json:"argv"`
 	}{
@@ -395,8 +395,8 @@ func TestBuiltinShell_Exec_TranslatesOutputPathsToVFS(t *testing.T) {
 		t.Fatalf("Unmarshal output: %v", err)
 	}
 	stdout := strings.TrimSpace(out.Stdout)
-	if !strings.Contains(stdout, "/"+vfs.MountWorkdir) {
-		t.Fatalf("stdout=%q; want it to mention /%s", stdout, vfs.MountWorkdir)
+	if !strings.Contains(stdout, "/"+vfs.MountProject) {
+		t.Fatalf("stdout=%q; want it to mention /%s", stdout, vfs.MountProject)
 	}
 	if strings.Contains(stdout, rootDir) {
 		t.Fatalf("stdout=%q; should not expose host path", stdout)

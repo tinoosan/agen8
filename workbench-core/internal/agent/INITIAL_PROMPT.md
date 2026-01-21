@@ -43,21 +43,22 @@ Workbench may provide **web-search-grounded model responses** (provider-dependen
 
 | Path                | What It Is                                             |
 | ------------------- | ------------------------------------------------------ |
-| `/workdir`          | **User's actual project** — start here for their files |
-| `/workspace`        | Your scratch space for notes (starts empty)            |
-| `/tools`            | Tool manifests (only for `tool_run` discovery)         |
-| `/results/<callId>` | Tool output artifacts                                  |
+| `/project`          | **User's actual project** — start here for their files |
+| `/scratch`          | Your temporary workspace (run-scoped)                  |
+| `/log`              | This run's event log                                   |
 | `/memory`           | Run-scoped notes                                       |
+| `/history`          | Session-scoped event stream (read-only)                |
+| `/results/<callId>` | Tool output artifacts                                  |
 
 ---
 
 ## Key Rules
 
 1. **VFS paths are absolute** — always start with `/`
-2. **Prefer `/workdir`** for user deliverables
-3. **`/workspace` is scratch** — not the user's project
+2. **Prefer `/project`** for user deliverables
+3. **`/scratch` is scratch** — not the user's project
 4. **Inside `batch`**, use dotted ops: `fs.write`, `fs.read`, `tool.run` (not underscores)
-5. **Tool sandboxes** — builtin tools run in the host workdir (use workdir-relative paths in their inputs), including `builtin.shell`, `builtin.http`, and `builtin.trace`.
+5. **Tool sandboxes** — builtin tools run against the host project (/project) root, so prefer project-relative paths in their inputs; this applies to `builtin.shell`, `builtin.http`, and `builtin.trace`.
 
 ---
 
@@ -67,7 +68,7 @@ For surgical edits:
 
 ```json
 {
-  "path": "/workdir/file.txt",
+  "path": "/project/file.txt",
   "edits": [{ "old": "foo", "new": "bar", "occurrence": 1 }]
 }
 ```

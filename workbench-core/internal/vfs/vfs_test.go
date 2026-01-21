@@ -51,7 +51,7 @@ func (r fakeResource) Append(path string, data []byte) error {
 
 func TestResolve(t *testing.T) {
 	fs := vfs.NewFS()
-	fs.Mount("workspace", fakeResource{})
+	fs.Mount(vfs.MountScratch, fakeResource{})
 
 	t.Run("Empty", func(t *testing.T) {
 		if _, _, _, err := fs.Resolve(""); err == nil {
@@ -78,21 +78,21 @@ func TestResolve(t *testing.T) {
 	})
 
 	t.Run("ValidMountRoot", func(t *testing.T) {
-		mn, _, subpath, err := fs.Resolve("/workspace")
+		mn, _, subpath, err := fs.Resolve("/scratch")
 		if err != nil {
 			t.Fatalf("Resolve: %v", err)
 		}
-		if mn != "workspace" || subpath != "" {
+		if mn != vfs.MountScratch || subpath != "" {
 			t.Fatalf("got mn=%q subpath=%q", mn, subpath)
 		}
 	})
 
 	t.Run("ValidSubpath", func(t *testing.T) {
-		mn, _, subpath, err := fs.Resolve("/workspace/a/b")
+		mn, _, subpath, err := fs.Resolve("/scratch/a/b")
 		if err != nil {
 			t.Fatalf("Resolve: %v", err)
 		}
-		if mn != "workspace" || subpath != "a/b" {
+		if mn != vfs.MountScratch || subpath != "a/b" {
 			t.Fatalf("got mn=%q subpath=%q", mn, subpath)
 		}
 	})
@@ -122,7 +122,7 @@ func TestListRoot_IsStableAndPrefixed(t *testing.T) {
 
 func TestNotFoundPathFails(t *testing.T) {
 	fs := vfs.NewFS()
-	fs.Mount("workspace", fakeResource{})
+	fs.Mount(vfs.MountScratch, fakeResource{})
 
 	if _, err := fs.List("/nope"); err == nil {
 		t.Fatalf("expected error for unknown mount")
@@ -205,18 +205,18 @@ func TestReadWriteAppend_WrapErrors(t *testing.T) {
 
 func TestVFS_WithDirResourceRoundtrip(t *testing.T) {
 	tmp := t.TempDir()
-	dr, err := resources.NewDirResource(tmp, "workspace")
+	dr, err := resources.NewDirResource(tmp, vfs.MountScratch)
 	if err != nil {
 		t.Fatalf("NewDirResource: %v", err)
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount("workspace", dr)
+	fs.Mount(vfs.MountScratch, dr)
 
-	if err := fs.Write("/workspace/notes.md", []byte("hi")); err != nil {
+	if err := fs.Write("/scratch/notes.md", []byte("hi")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	b, err := fs.Read("/workspace/notes.md")
+	b, err := fs.Read("/scratch/notes.md")
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -224,11 +224,11 @@ func TestVFS_WithDirResourceRoundtrip(t *testing.T) {
 		t.Fatalf("got %q", string(b))
 	}
 
-	entries, err := fs.List("/workspace")
+	entries, err := fs.List("/scratch")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(entries) != 1 || entries[0].Path != "/workspace/notes.md" {
+	if len(entries) != 1 || entries[0].Path != "/scratch/notes.md" {
 		t.Fatalf("unexpected entries: %+v", entries)
 	}
 }

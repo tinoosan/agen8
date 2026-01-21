@@ -10,7 +10,7 @@ var availableCommands = []string{
 	"/editor",
 	"/cd",
 	"/pwd",
-	"/workdir",
+	"/project",
 }
 
 func isExactCommand(s string) bool {

@@ -15,7 +15,7 @@ import (
 // HistorySink appends enriched, immutable history lines to history.jsonl.
 //
 // This sink is intentionally separate from store.AppendEvent:
-//   - store.AppendEvent writes the run's event log and mirrors to /trace for agent polling
+//   - store.AppendEvent writes the run's event log and mirrors to /log for agent polling
 //   - HistorySink writes a "verifiable source of truth" record of raw interactions
 //     between the user, agent, and environment
 //

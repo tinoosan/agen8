@@ -372,7 +372,7 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 				Type:    "ui.editor.open",
 				Message: "Compose message",
 				Data: map[string]string{
-					"vpath":   "/workdir/.workbench/compose.md", // legacy; TUI prefers absPath for compose
+					"vpath":   "/project/.workbench/compose.md", // legacy; TUI prefers absPath for compose
 					"path":    "compose.md",
 					"purpose": "compose",
 					"absPath": composeAbs,
@@ -575,7 +575,7 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 		return "", true, nil
 	case "pwd", "workdir":
 		if cmd == "workdir" && strings.TrimSpace(arg) != "" {
-			// /workdir <path> behaves like /cd <path>.
+			// /project <path> behaves like /cd <path>.
 			cur, err := resolveWorkDir(r.opts.WorkDir)
 			if err != nil {
 				return "", true, err
@@ -641,7 +641,7 @@ func (r *lazyNewSessionTurnRunner) emitPreInit(ev events.Event) {
 // ReadVFS reads a virtual filesystem path from the currently active run.
 //
 // This is used by the TUI to preview "openable" artifacts (e.g. /results/<callId>/response.json
-// or /workspace/<file>) without changing the agent loop contract or introducing a new host op.
+// or /scratch/<file>) without changing the agent loop contract or introducing a new host op.
 //
 // For lazyNewSessionTurnRunner, this is only available after the first turn initializes
 // the session/run and mounts the VFS.
@@ -649,10 +649,10 @@ func (r *lazyNewSessionTurnRunner) ReadVFS(ctx context.Context, path string, max
 	if r == nil {
 		return "", 0, false, fmt.Errorf("runner is nil")
 	}
-	// Support reading from /workdir before the first user message, so /editor can be
+	// Support reading from /project before the first user message, so /editor can be
 	// used without forcing a session/run to be created.
 	if !r.initialized || r.engine == nil {
-		if !strings.HasPrefix(strings.TrimSpace(path), "/workdir/") {
+		if !strings.HasPrefix(strings.TrimSpace(path), "/project/") {
 			return "", 0, false, fmt.Errorf("no active run (send a message first)")
 		}
 		base, err := resolveWorkDir(r.opts.WorkDir)
@@ -663,7 +663,7 @@ func (r *lazyNewSessionTurnRunner) ReadVFS(ctx context.Context, path string, max
 		if err != nil {
 			return "", 0, false, err
 		}
-		sub := strings.TrimPrefix(strings.TrimSpace(path), "/workdir/")
+		sub := strings.TrimPrefix(strings.TrimSpace(path), "/project/")
 		sub, _, err = vfsutil.NormalizeResourceSubpath(sub)
 		if err != nil || sub == "" || sub == "." {
 			return "", 0, false, fmt.Errorf("invalid workdir path: %s", path)
@@ -690,10 +690,10 @@ func (r *lazyNewSessionTurnRunner) WriteVFS(ctx context.Context, path string, da
 	if r == nil {
 		return fmt.Errorf("runner is nil")
 	}
-	// Support writing under /workdir before the first user message, so /editor can
+	// Support writing under /project before the first user message, so /editor can
 	// save without creating a session/run.
 	if !r.initialized || r.engine == nil {
-		if !strings.HasPrefix(strings.TrimSpace(path), "/workdir/") {
+		if !strings.HasPrefix(strings.TrimSpace(path), "/project/") {
 			return fmt.Errorf("no active run (send a message first)")
 		}
 		base, err := resolveWorkDir(r.opts.WorkDir)
@@ -704,7 +704,7 @@ func (r *lazyNewSessionTurnRunner) WriteVFS(ctx context.Context, path string, da
 		if err != nil {
 			return err
 		}
-		sub := strings.TrimPrefix(strings.TrimSpace(path), "/workdir/")
+		sub := strings.TrimPrefix(strings.TrimSpace(path), "/project/")
 		sub, _, err = vfsutil.NormalizeResourceSubpath(sub)
 		if err != nil || sub == "" || sub == "." {
 			return fmt.Errorf("invalid workdir path: %s", path)
@@ -868,7 +868,7 @@ type tuiTurnRunner struct {
 // ReadVFS reads a virtual filesystem path via the run's mounted VFS.
 //
 // The TUI uses this to preview artifacts referenced by Activity items (e.g.
-// /results/<callId>/response.json and /workspace/<file>). This keeps the "open
+// /results/<callId>/response.json and /scratch/<file>). This keeps the "open
 // artifact" UX purely in the UI layer without adding new host primitives.
 func (r *tuiTurnRunner) ReadVFS(ctx context.Context, path string, maxBytes int) (text string, bytesLen int, truncated bool, err error) {
 	if r == nil || r.fs == nil {
@@ -923,7 +923,7 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 
 	// Slash commands are host-side commands and do not call the agent.
 	//
-	// These commands operate on the host's /workdir mount and are safe to run
+	// These commands operate on the host's /project mount and are safe to run
 	// during an interactive session (no restart required).
 	if resp, handled := r.handleSlashCommand(userMsg); handled {
 		return resp, nil
@@ -952,7 +952,7 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	//
 	// This is what enables coding-agent workflows:
 	//   user: "Update @go.mod ..."
-	//   host: resolves /workdir/go.mod and injects it into the system prompt
+	//   host: resolves /project/go.mod and injects it into the system prompt
 	refs, err := ResolveAtRefs(r.fs, r.workdirBase, r.artifacts, userMsg, 6, 48*1024, 12*1024)
 	if err != nil {
 		return "", err
@@ -1419,7 +1419,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 				Type:    "ui.editor.open",
 				Message: "Compose message",
 				Data: map[string]string{
-					"vpath":   "/workdir/.workbench/compose.md", // legacy; TUI prefers absPath for compose
+					"vpath":   "/project/.workbench/compose.md", // legacy; TUI prefers absPath for compose
 					"path":    "compose.md",
 					"purpose": "compose",
 					"absPath": composeAbs,
@@ -1652,7 +1652,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 	case "cd":
 		from := strings.TrimSpace(r.workdirBase)
 		if from == "" {
-			// Should not happen: /workdir is always mounted for a run.
+			// Should not happen: /project is always mounted for a run.
 			from = "."
 		}
 		to, err := resolveWorkDirChange(from, arg)
@@ -1685,14 +1685,14 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			return "", true
 		}
 
-		// Rebind /workdir to the new root. All file operations immediately target the new directory.
-		r.fs.Mount(vfs.MountWorkdir, workdirRes)
+		// Rebind /project to the new root. All file operations immediately target the new directory.
+		r.fs.Mount(vfs.MountProject, workdirRes)
 		r.workdirBase = workdirRes.BaseDir
 		r.opts.WorkDir = workdirRes.BaseDir
 
 		// Update builtin sandbox roots (builtin.shell) to follow the active workdir.
 		if r.builtinInvokers != nil {
-			r.builtinInvokers[types.ToolID("builtin.shell")] = tools.NewBuiltinShellInvoker(workdirRes.BaseDir, nil, vfs.MountWorkdir)
+			r.builtinInvokers[types.ToolID("builtin.shell")] = tools.NewBuiltinShellInvoker(workdirRes.BaseDir, nil, vfs.MountProject)
 		}
 
 		r.mustEmit(context.Background(), events.Event{
@@ -1707,8 +1707,8 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		return "", true
 
 	case "pwd", "workdir":
-		// /workdir with no args behaves like /pwd.
-		// /workdir <path> is an alias for /cd <path>.
+		// /project with no args behaves like /pwd.
+		// /project <path> is an alias for /cd <path>.
 		if cmd == "workdir" && strings.TrimSpace(arg) != "" {
 			return r.handleSlashCommand("/cd " + arg)
 		}
@@ -1793,7 +1793,7 @@ func resolveWorkdirVPathFromArg(workdirBase, arg string) (vpath string, display 
 	if err != nil || clean == "" || clean == "." {
 		return "", "", fmt.Errorf("invalid path: %s", ref)
 	}
-	return "/workdir/" + clean, clean, nil
+	return "/project/" + clean, clean, nil
 }
 
 func handleModelCommandPreInit(currentModel, pricingFile, arg string) (nextModel string, out string, handled bool) {
@@ -1919,11 +1919,11 @@ func (r *tuiTurnRunner) publishToWorkdir(srcVPath string, dstRel string) (string
 		return "", fmt.Errorf("publish: invalid destination %q", dstRel)
 	}
 
-	dstVPath := "/workdir/" + clean
+	dstVPath := "/project/" + clean
 	// Avoid overwriting existing files by default. If it exists, publish under
-	// "/workdir/.workbench/<name>".
+	// "/project/.workbench/<name>".
 	if _, err := r.fs.Read(dstVPath); err == nil {
-		dstVPath = "/workdir/.workbench/" + clean
+		dstVPath = "/project/.workbench/" + clean
 	}
 	if err := r.fs.Write(dstVPath, b); err != nil {
 		return "", fmt.Errorf("publish: write %s: %w", dstVPath, err)

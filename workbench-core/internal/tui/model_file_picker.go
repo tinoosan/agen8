@@ -147,7 +147,7 @@ func (m *Model) scanFilePickerPaths(workdir string) ([]string, error) {
 		if rel == "" || rel == "." {
 			continue
 		}
-		combined = append(combined, "/workspace/"+rel)
+		combined = append(combined, "/scratch/"+rel)
 	}
 	return combined, nil
 }

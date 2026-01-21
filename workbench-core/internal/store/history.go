@@ -31,7 +31,7 @@ type HistoryCursor = OffsetCursor
 //   - agents
 //   - the environment/host
 //
-// Unlike /trace (curated agent-facing events) and /memory (curated host-governed notes),
+// Unlike /log (curated agent-facing events) and /memory (curated host-governed notes),
 // history is immutable and append-only.
 //
 // The agent can read history via VFS, but cannot write to it.

@@ -19,11 +19,11 @@ import (
 )
 
 // ContextUpdater keeps the model's bounded context synchronized with persistent
-// context sources (like /memory) and runtime sources (like /trace).
+// context sources (like /memory) and runtime sources (like /log).
 //
 // This is the "v0" implementation:
 //   - it refreshes context once per model step
-//   - it tracks a byte offset into /trace so it only loads new events
+//   - it tracks a byte offset into /log so it only loads new events
 //   - it injects small bounded excerpts into the system prompt
 //   - it writes a context manifest for transparency/debugging
 type ContextUpdater struct {
@@ -32,8 +32,8 @@ type ContextUpdater struct {
 	// TraceStore is the module-style API used to read trace events.
 	//
 	// This replaces encoding dynamic queries into VFS paths like:
-	//   /trace/events.since/<offset>
-	//   /trace/events.latest/<n>
+	//   /log/events.since/<offset>
+	//   /log/events.latest/<n>
 	//
 	// If nil, the updater falls back to calling methods on the mounted trace resource
 	// (ReadEventsSince/ReadLastEvents), which still avoids dynamic path conventions.
@@ -56,7 +56,7 @@ type ContextUpdater struct {
 	// the module-style events.since cursor API.
 	//
 	// Cursor is treated as opaque by the updater. DiskTraceStore currently encodes it
-	// as a base-10 int64 byte offset into data/runs/<runId>/trace/events.jsonl.
+	// as a base-10 int64 byte offset into data/runs/<runId>/log/events.jsonl.
 	TraceCursor store.TraceCursor
 
 	// MaxMemoryBytes caps how many bytes from /memory/memory.md are injected.
@@ -67,7 +67,7 @@ type ContextUpdater struct {
 	// If zero, a default is used.
 	MaxProfileBytes int
 
-	// MaxTraceBytes caps how many bytes from /trace/events.since/<offset> are injected.
+	// MaxTraceBytes caps how many bytes from /log/events.since/<offset> are injected.
 	// If zero, a default is used.
 	MaxTraceBytes int
 
@@ -294,7 +294,7 @@ func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt strin
 		system = system + "\n\n" + "## Last Host Op\n\n" + summarizeLastOp(policy) + "\n"
 	}
 	if strings.TrimSpace(traceSummary) != "" {
-		system = system + "\n\n" + "## Recent Ops (from /trace)\n\n" + traceSummary + "\n"
+		system = system + "\n\n" + "## Recent Ops (from /log)\n\n" + traceSummary + "\n"
 	}
 	system = strings.TrimSpace(system)
 
@@ -450,7 +450,7 @@ func (u *ContextUpdater) readTraceBatch(ctx context.Context, cursor store.TraceC
 	}
 	cursorBefore = cursor
 	mode = "since"
-	source = "/trace/events.jsonl"
+	source = "/log/events.jsonl"
 
 	if u.TraceStore != nil {
 		b, readErr := u.TraceStore.EventsSince(ctx, cursor, opts)
@@ -458,7 +458,7 @@ func (u *ContextUpdater) readTraceBatch(ctx context.Context, cursor store.TraceC
 	}
 
 	// Fallback: use the mounted trace resource's callable methods (still avoids dynamic paths).
-	_, r, _, resErr := u.FS.Resolve("/trace")
+	_, r, _, resErr := u.FS.Resolve("/log")
 	if resErr == nil {
 		if tr, ok := r.(traceSinceReader); ok {
 			offset, err := store.TraceCursorToInt64(cursor)
@@ -478,7 +478,7 @@ func (u *ContextUpdater) readTraceBatch(ctx context.Context, cursor store.TraceC
 				Returned:       len(events),
 				ReturnedCapped: false,
 			}
-			return mode, "/trace/events.jsonl", batch, cursorBefore, batch.CursorAfter, readErr
+			return mode, "/log/events.jsonl", batch, cursorBefore, batch.CursorAfter, readErr
 		}
 	}
 

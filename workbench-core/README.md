@@ -4,14 +4,14 @@ Workbench Core is a local, agentic runtime that exposes an interactive CLI for r
 
 ## AFS abstraction
 
-Workbench also exposes an Agentic File System (AFS) abstraction—the concrete VFS entries under `/tools`, `/workspace`, `/workdir`, `/memory`, `/trace`, and `/results`—that agents learn to discover and manipulate rather than assuming hidden APIs. Every command that touches project files works through this AFS surface, so tooling remains explicit, auditable, and reproducible.
+Workbench also exposes an Agentic File System (AFS) abstraction—the concrete VFS entries under `/tools`, `/scratch`, `/project`, `/memory`, `/log`, and `/results`—that agents learn to discover and manipulate rather than assuming hidden APIs. Every command that touches project files works through this AFS surface, so tooling remains explicit, auditable, and reproducible.
 
 Each AFS mount has a clear role:
 
-- `/workdir` maps to the real project workspace and should host user-visible artifacts.
-- `/workspace` is temporary scratch space scoped to the run.
+- `/project` maps to the real project workspace and should host user-visible artifacts.
+- `/scratch` is temporary scratch space scoped to the run.
 - `/tools` exposes discoverable tool manifests and metadata.
-- `/trace`, `/results`, `/memory`, and `/profile` provide debugging, telemetry, and memory utilities.
+- `/log`, `/results`, `/memory`, and `/profile` provide debugging, telemetry, and memory utilities.
 
 ## Quick start
 
@@ -23,7 +23,7 @@ go build ./cmd/workbench
 ./workbench
 ```
 
-The default run opens a Bubble Tea-powered TUI where each message you submit becomes an agent turn that can discover tools under `/tools`, execute them via `tool.run`, and interact with run-scoped files under `/workspace`. Every run creates a session and writes results into the configured data directory (default: `~/.workbench` or `$XDG_STATE_HOME/workbench`).
+The default run opens a Bubble Tea-powered TUI where each message you submit becomes an agent turn that can discover tools under `/tools`, execute them via `tool.run`, and interact with run-scoped files under `/scratch`. Every run creates a session and writes results into the configured data directory (default: `~/.workbench` or `$XDG_STATE_HOME/workbench`).
 
 ## Commands
 
@@ -42,7 +42,7 @@ Most entrypoints live under `cmd/workbench/cmd` and use Cobra. Key commands are:
 All runtime configuration (currently just `dataDir`) is defined in `internal/config/config.go`. The CLI supports:
 
 - `--data-dir` – base directory where runs, sessions, results, workspace, and history live (priority: `--data-dir`, env `WORKBENCH_DATA_DIR`, default: `~/.workbench` or `$XDG_STATE_HOME/workbench`).
-- `--workdir` / `WORKBENCH_WORKDIR` – override the directory mounted at `/workdir` inside the sandbox.
+- `--workdir` / `WORKBENCH_WORKDIR` – override the directory mounted at `/project` inside the sandbox.
 - `--context-bytes` – limits the token context saved per run (must be > 0).
 - `--title` / `--goal` – defaults used when creating new runs.
 
@@ -63,5 +63,5 @@ You can inspect `internal/app` for the runtime orchestration (chat sessions, TUI
 
 - **Control:** Runs entirely locally with configurable `dataDir`/`workdir`, so nothing depends on external services.
 - **Transparency:** Every session and run is stored in the data directory, and you can inspect history, artifacts, or metadata via the CLI commands.
-- **Reproducibility:** Sessions create structured state (`session`, `run`, `/workspace`, `/history`), making it easy to resume, replay, or audit work.
+- **Reproducibility:** Sessions create structured state (`session`, `run`, `/scratch`, `/history`), making it easy to resume, replay, or audit work.
 - **Explicit tooling:** Agents discover tools through the `/tools` virtual filesystem and call them via `tool.run`, so integrations are clear instead of hidden behind prompts.

@@ -11,9 +11,9 @@ import (
 // # High-level model
 //
 // - A Run is one agent execution thread (one loop, one tool runner, one workspace).
-// - A Session groups runs that belong to the same "conversation"/workspace timeline.
+// - A Session groups runs that belong to the same "conversation"/scratch timeline.
 //
-// Workspaces are run-scoped (data/runs/<runId>/workspace), but a session can still provide:
+// Workspaces are run-scoped (data/runs/<runId>/scratch), but a session can still provide:
 // - shared history (append-only provenance across runs)
 // - navigation (which run to resume from)
 //

@@ -22,39 +22,39 @@ type TraceResource struct {
 	// subpath that would escape BaseDir (e.g. "..", absolute paths).
 	//
 	// BaseDir is an implementation detail; callers interact via virtual paths
-	// like "/trace/events" through the VFS.
+	// like "/log/events" through the VFS.
 	//
-	// Example: "/data/runs/run-123/trace".
+	// Example: "/data/runs/run-123/log".
 	BaseDir string
 
 	// Mount is the virtual mount name used by the VFS.
-	// Example: "trace" maps to the virtual namespace "/trace".
+	// Example: "trace" maps to the virtual namespace "/log".
 	Mount string
 
 	// RunId is the run this trace directory belongs to.
 	RunId string
 }
 
-// TraceResource exposes a read-only event feed under the VFS mount "/trace".
+// TraceResource exposes a read-only event feed under the VFS mount "/log".
 //
 // VFS usage pattern (agent/host-facing)
 //   - Read full trace log:
-//     fs.Read("/trace/events") => full JSONL bytes
+//     fs.Read("/log/events") => full JSONL bytes
 //   - Pull new events using offsets:
-//     fs.Read("/trace/events.since/<byteOffset>") => bytes from offset to EOF
+//     fs.Read("/log/events.since/<byteOffset>") => bytes from offset to EOF
 //   - Convenience for recent context:
-//     fs.Read("/trace/events.latest/<count>") => last N JSONL lines
+//     fs.Read("/log/events.latest/<count>") => last N JSONL lines
 //
 // Offset semantics
 //   - Offsets are byte offsets into the underlying JSONL file.
 //   - This enables incremental polling loops:
 //     events, nextOffset := store.ListEvents(runId) // nextOffset == file size
-//     later: fs.Read("/trace/events.since/<nextOffset>")
+//     later: fs.Read("/log/events.since/<nextOffset>")
 //
 // Storage model (implementation detail)
 //   - TraceResource is confined to BaseDir and reads BaseDir/events.jsonl only.
 //   - store.AppendEvent mirrors every canonical event log line into:
-//     data/runs/<runId>/trace/events.jsonl
+//     data/runs/<runId>/log/events.jsonl
 //     so offsets behave predictably and the trace mount is self-contained.
 const (
 	maxLatestCount = 200
@@ -84,7 +84,7 @@ func NewTraceResource(cfg config.Config, runId string) (*TraceResource, error) {
 	}
 	return &TraceResource{
 		BaseDir: baseDir,
-		Mount:   vfs.MountTrace,
+		Mount:   vfs.MountLog,
 		RunId:   runId,
 	}, nil
 }

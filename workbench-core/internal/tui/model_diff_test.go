@@ -42,7 +42,7 @@ func TestTranscript_FileWrite_EmitsDiffBlock(t *testing.T) {
 	r := stubRunnerWithReadWrite{stubRunnerWithRead{
 		stubRunner: stubRunner{final: "ok"},
 		files: map[string]string{
-			"/workspace/a.txt": "hello\nworld\n",
+			"/scratch/a.txt": "hello\nworld\n",
 		},
 	}}
 	m := New(context.Background(), r, make(chan events.Event))
@@ -51,13 +51,13 @@ func TestTranscript_FileWrite_EmitsDiffBlock(t *testing.T) {
 	m.layout()
 
 	// Pretend we had a previous snapshot (so we render Updated).
-	m.fileSnapCache = map[string]string{"/workspace/a.txt": "hello\nthere\n"}
+	m.fileSnapCache = map[string]string{"/scratch/a.txt": "hello\nthere\n"}
 
 	req := events.Event{
 		Type: "agent.op.request",
 		Data: map[string]string{
 			"op":   "fs.write",
-			"path": "/workspace/a.txt",
+			"path": "/scratch/a.txt",
 		},
 	}
 	_ = m.onEvent(req)
@@ -66,7 +66,7 @@ func TestTranscript_FileWrite_EmitsDiffBlock(t *testing.T) {
 		Type: "agent.op.response",
 		Data: map[string]string{
 			"op":   "fs.write",
-			"path": "/workspace/a.txt",
+			"path": "/scratch/a.txt",
 			"ok":   "true",
 		},
 	}
@@ -90,12 +90,12 @@ func TestTranscript_FileWrite_EmitsDiffBlock(t *testing.T) {
 	if raw == "" {
 		t.Fatalf("expected transcript to include a file-change item")
 	}
-	if !strings.HasPrefix(raw, "workspace/a.txt  +1 -1") {
-		t.Fatalf("expected file-change header %q, got:\n%s", "workspace/a.txt  +1 -1", raw)
+	if !strings.HasPrefix(raw, "scratch/a.txt  +1 -1") {
+		t.Fatalf("expected file-change header %q, got:\n%s", "scratch/a.txt  +1 -1", raw)
 	}
 	// Glamour renders code blocks without literal ``` fences; assert diff markers.
 	view := updated3.transcript.View()
-	if !strings.Contains(view, "--- a/workspace/a.txt") || !strings.Contains(view, "+++ b/workspace/a.txt") {
+	if !strings.Contains(view, "--- a/scratch/a.txt") || !strings.Contains(view, "+++ b/scratch/a.txt") {
 		t.Fatalf("expected transcript to contain unified diff headers, got:\n%s", view)
 	}
 	if !strings.Contains(view, "-there") && !strings.Contains(view, "-there\n") {
@@ -110,7 +110,7 @@ func TestTranscript_FileWrite_Create_ShowsDevNullDiff(t *testing.T) {
 	r := stubRunnerWithReadWrite{stubRunnerWithRead{
 		stubRunner: stubRunner{final: "ok"},
 		files: map[string]string{
-			"/workspace/new.txt": "hello\n",
+			"/scratch/new.txt": "hello\n",
 		},
 	}}
 	m := New(context.Background(), r, make(chan events.Event))
@@ -119,11 +119,11 @@ func TestTranscript_FileWrite_Create_ShowsDevNullDiff(t *testing.T) {
 	m.layout()
 
 	// No cache; simulate create by ensuring the pre-read returns not-exist.
-	delete(r.files, "/workspace/new.txt")
+	delete(r.files, "/scratch/new.txt")
 
 	cmd := m.onEvent(events.Event{
 		Type: "agent.op.request",
-		Data: map[string]string{"op": "fs.write", "path": "/workspace/new.txt"},
+		Data: map[string]string{"op": "fs.write", "path": "/scratch/new.txt"},
 	})
 	if cmd != nil {
 		// Run the pre-read (expected to fail not-exist and be ignored).
@@ -132,11 +132,11 @@ func TestTranscript_FileWrite_Create_ShowsDevNullDiff(t *testing.T) {
 	}
 
 	// Now simulate the post-write read returning the created content.
-	r.files["/workspace/new.txt"] = "hello\n"
+	r.files["/scratch/new.txt"] = "hello\n"
 
 	cmd2 := m.onEvent(events.Event{
 		Type: "agent.op.response",
-		Data: map[string]string{"op": "fs.write", "path": "/workspace/new.txt", "ok": "true"},
+		Data: map[string]string{"op": "fs.write", "path": "/scratch/new.txt", "ok": "true"},
 	})
 	if cmd2 == nil {
 		t.Fatalf("expected after-read cmd")
@@ -154,11 +154,11 @@ func TestTranscript_FileWrite_Create_ShowsDevNullDiff(t *testing.T) {
 	if raw == "" {
 		t.Fatalf("expected transcript to include a file-change item")
 	}
-	if !strings.HasPrefix(raw, "workspace/new.txt  +1 -0") {
-		t.Fatalf("expected file-change header %q, got:\n%s", "workspace/new.txt  +1 -0", raw)
+	if !strings.HasPrefix(raw, "scratch/new.txt  +1 -0") {
+		t.Fatalf("expected file-change header %q, got:\n%s", "scratch/new.txt  +1 -0", raw)
 	}
 	view := updated3.transcript.View()
-	if !strings.Contains(view, "--- /dev/null") || !strings.Contains(view, "+++ b/workspace/new.txt") {
+	if !strings.Contains(view, "--- /dev/null") || !strings.Contains(view, "+++ b/scratch/new.txt") {
 		t.Fatalf("expected /dev/null create diff headers, got:\n%s", view)
 	}
 }
@@ -167,7 +167,7 @@ func TestTranscript_FileWrite_LabelsUpdated_WhenFileExistsButNotCached(t *testin
 	r := stubRunnerWithReadWrite{stubRunnerWithRead{
 		stubRunner: stubRunner{final: "ok"},
 		files: map[string]string{
-			"/workspace/existing.txt": "old\n",
+			"/scratch/existing.txt": "old\n",
 		},
 	}}
 	m := New(context.Background(), r, make(chan events.Event))
@@ -182,7 +182,7 @@ func TestTranscript_FileWrite_LabelsUpdated_WhenFileExistsButNotCached(t *testin
 		Type: "agent.op.request",
 		Data: map[string]string{
 			"op":   "fs.write",
-			"path": "/workspace/existing.txt",
+			"path": "/scratch/existing.txt",
 		},
 	})
 	if cmd == nil {
@@ -196,7 +196,7 @@ func TestTranscript_FileWrite_LabelsUpdated_WhenFileExistsButNotCached(t *testin
 		Type: "agent.op.response",
 		Data: map[string]string{
 			"op":   "fs.write",
-			"path": "/workspace/existing.txt",
+			"path": "/scratch/existing.txt",
 			"ok":   "true",
 		},
 	})
@@ -218,8 +218,8 @@ func TestTranscript_FileWrite_LabelsUpdated_WhenFileExistsButNotCached(t *testin
 		t.Fatalf("expected transcript to include a file-change item")
 	}
 	// For no-op writes, we omit the +0/-0 counts (user preference).
-	if !strings.HasPrefix(raw, "workspace/existing.txt") {
-		t.Fatalf("expected file-change header to start with %q, got:\n%s", "workspace/existing.txt", raw)
+	if !strings.HasPrefix(raw, "scratch/existing.txt") {
+		t.Fatalf("expected file-change header to start with %q, got:\n%s", "scratch/existing.txt", raw)
 	}
 }
 
@@ -227,7 +227,7 @@ func TestTranscript_FilePatch_EmitsPatchBlock(t *testing.T) {
 	r := stubRunnerWithReadWrite{stubRunnerWithRead{
 		stubRunner: stubRunner{final: "ok"},
 		files: map[string]string{
-			"/workspace/b.txt": "after\n",
+			"/scratch/b.txt": "after\n",
 		},
 	}}
 	m := New(context.Background(), r, make(chan events.Event))
@@ -239,7 +239,7 @@ func TestTranscript_FilePatch_EmitsPatchBlock(t *testing.T) {
 		Type: "agent.op.request",
 		Data: map[string]string{
 			"op":             "fs.patch",
-			"path":           "/workspace/b.txt",
+			"path":           "/scratch/b.txt",
 			"patchPreview":   "--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-before\n+after\n",
 			"patchTruncated": "false",
 		},
@@ -247,15 +247,15 @@ func TestTranscript_FilePatch_EmitsPatchBlock(t *testing.T) {
 	_ = m.onEvent(req)
 
 	// Ensure the request action line is clean.
-	if got := m.transcript.View(); !strings.Contains(got, "Patch /workspace/b.txt") {
-		t.Fatalf("expected action line %q, got:\n%s", "Patch /workspace/b.txt", got)
+	if got := m.transcript.View(); !strings.Contains(got, "Patch /scratch/b.txt") {
+		t.Fatalf("expected action line %q, got:\n%s", "Patch /scratch/b.txt", got)
 	}
 
 	resp := events.Event{
 		Type: "agent.op.response",
 		Data: map[string]string{
 			"op":   "fs.patch",
-			"path": "/workspace/b.txt",
+			"path": "/scratch/b.txt",
 			"ok":   "true",
 		},
 	}
@@ -277,8 +277,8 @@ func TestTranscript_FilePatch_EmitsPatchBlock(t *testing.T) {
 	if raw == "" {
 		t.Fatalf("expected transcript to include a file-change item")
 	}
-	if !strings.HasPrefix(raw, "workspace/b.txt  +1 -1") {
-		t.Fatalf("expected file-change header %q, got:\n%s", "workspace/b.txt  +1 -1", raw)
+	if !strings.HasPrefix(raw, "scratch/b.txt  +1 -1") {
+		t.Fatalf("expected file-change header %q, got:\n%s", "scratch/b.txt  +1 -1", raw)
 	}
 	view := updated3.transcript.View()
 	// Glamour renders code blocks without literal ``` fences; assert patch markers.

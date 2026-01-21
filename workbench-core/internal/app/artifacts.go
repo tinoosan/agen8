@@ -9,7 +9,7 @@ import (
 // ArtifactIndex is a small, in-memory index of files the agent created or touched.
 //
 // This is a UX helper only. The source of truth remains:
-// - VFS mounts (/workspace, /results, /workdir)
+// - VFS mounts (/scratch, /results, /project)
 // - persisted events/history logs
 //
 // The index enables:
@@ -22,11 +22,11 @@ type ArtifactIndex struct {
 // Artifact describes one indexed file.
 type Artifact struct {
 	Name      string    // basename, e.g. "report.md"
-	VPath     string    // e.g. "/workspace/report.md"
+	VPath     string    // e.g. "/scratch/report.md"
 	Origin    string    // "workspace", "results", "workdir"
 	UpdatedAt time.Time // best-effort host time
 
-	// PublishedVPath is set when the artifact is copied to /workdir (or a subdir).
+	// PublishedVPath is set when the artifact is copied to /project (or a subdir).
 	PublishedVPath string
 }
 
@@ -42,11 +42,11 @@ func (x *ArtifactIndex) ObserveWrite(vpath string) {
 	}
 	origin := ""
 	switch {
-	case strings.HasPrefix(vpath, "/workspace/"):
+	case strings.HasPrefix(vpath, "/scratch/"):
 		origin = "workspace"
 	case strings.HasPrefix(vpath, "/results/"):
 		origin = "results"
-	case strings.HasPrefix(vpath, "/workdir/"):
+	case strings.HasPrefix(vpath, "/project/"):
 		origin = "workdir"
 	default:
 		return
@@ -111,7 +111,7 @@ func (x *ArtifactIndex) Resolve(token string) (vpath string, ok bool) {
 	}
 	// Prefer most recently updated match.
 	for i := len(x.items) - 1; i >= 0; i-- {
-		if x.items[i].Name == token || strings.TrimPrefix(x.items[i].VPath, "/workspace/") == token {
+		if x.items[i].Name == token || strings.TrimPrefix(x.items[i].VPath, "/scratch/") == token {
 			return x.items[i].VPath, true
 		}
 	}

@@ -81,7 +81,7 @@ func TestContextConstructor_CachesProfileAndMemoryPerTurn(t *testing.T) {
 	fs := vfs.NewFS()
 	fs.Mount(vfs.MountProfile, countProf)
 	fs.Mount(vfs.MountMemory, countMem)
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	fs.Mount(vfs.MountScratch, wsRes)
 
 	cc := &ContextConstructor{
 		FS:              fs,
@@ -133,18 +133,18 @@ func TestContextConstructor_AttachmentsIncludedAcrossSteps(t *testing.T) {
 
 	// Minimal mounts needed for constructor state persistence.
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	fs.Mount(vfs.MountScratch, wsRes)
 	// Profile/memory mounts can be absent; reads will error and be treated as empty.
 
 	cc := &ContextConstructor{
-		FS:           fs,
-		Cfg:          cfg,
-		RunID:        run.RunId,
+		FS:    fs,
+		Cfg:   cfg,
+		RunID: run.RunId,
 	}
 	cc.SetFileAttachments([]FileAttachment{
 		{
 			Token:         "go.mod",
-			VPath:         "/workdir/go.mod",
+			VPath:         "/project/go.mod",
 			DisplayName:   "go.mod",
 			Content:       "module example.com/foo\n",
 			BytesTotal:    20,

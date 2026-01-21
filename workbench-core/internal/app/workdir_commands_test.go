@@ -24,11 +24,11 @@ func TestTUITurnRunner_CD_RebindsWorkdirAndUpdatesBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource(dir1): %v", err)
 	}
-	fs.Mount(vfs.MountWorkdir, workdirRes1)
+	fs.Mount(vfs.MountProject, workdirRes1)
 
 	// Seed builtin invokers with dir1.
 	builtins := tools.MapRegistry{
-		types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(dir1, nil, vfs.MountWorkdir),
+		types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(dir1, nil, vfs.MountProject),
 	}
 
 	var got []events.Event
@@ -47,8 +47,8 @@ func TestTUITurnRunner_CD_RebindsWorkdirAndUpdatesBuiltins(t *testing.T) {
 	}
 
 	// VFS writes should go to the new directory after /cd.
-	if err := fs.Write("/workdir/hello.txt", []byte("hi")); err != nil {
-		t.Fatalf("fs.Write(/workdir/hello.txt): %v", err)
+	if err := fs.Write("/project/hello.txt", []byte("hi")); err != nil {
+		t.Fatalf("fs.Write(/project/hello.txt): %v", err)
 	}
 	b, err := os.ReadFile(filepath.Join(dir2, "hello.txt"))
 	if err != nil {
@@ -85,10 +85,10 @@ func TestTUITurnRunner_CD_InvalidDirDoesNotChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource(dir1): %v", err)
 	}
-	fs.Mount(vfs.MountWorkdir, workdirRes1)
+	fs.Mount(vfs.MountProject, workdirRes1)
 
 	builtins := tools.MapRegistry{
-		types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(dir1, nil, vfs.MountWorkdir),
+		types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(dir1, nil, vfs.MountProject),
 	}
 
 	r := &tuiTurnRunner{

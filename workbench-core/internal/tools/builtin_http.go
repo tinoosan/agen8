@@ -104,7 +104,7 @@ const (
 //   - Returns a UTF-8 text preview inline (up to 16KB).
 //   - If the body exceeds the inline preview cap, writes the full read body as an artifact:
 //   - /results/<callId>/body.txt (text) or /results/<callId>/body.bin (binary)
-//   - This tool does not write to /workspace directly; the agent can fs.write if it wants
+//   - This tool does not write to /scratch directly; the agent can fs.write if it wants
 //     to persist content in the workspace.
 //
 // Network note:

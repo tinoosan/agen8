@@ -11,7 +11,7 @@ import (
 )
 
 // NewWorkspace creates a directory-backed resource for a run's workspace.
-// The workspace is the agent-writable working directory mounted at "/workspace".
+// The workspace is the agent-writable working directory mounted at "/scratch".
 // Creates the directory if it doesn't exist.
 func NewWorkspace(cfg config.Config, runId string) (*DirResource, error) {
 	if err := cfg.Validate(); err != nil {
@@ -26,5 +26,5 @@ func NewWorkspace(cfg config.Config, runId string) (*DirResource, error) {
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("error creating workspace directory %s: %w", baseDir, err)
 	}
-	return NewDirResource(baseDir, vfs.MountWorkspace)
+	return NewDirResource(baseDir, vfs.MountScratch)
 }

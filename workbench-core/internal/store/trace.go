@@ -17,8 +17,8 @@ type TraceCursor = OffsetCursor
 //
 // This is the "module-first" replacement for encoding queries into VFS paths like:
 //
-//	/trace/events.since/<offset>
-//	/trace/events.latest/<n>
+//	/log/events.since/<offset>
+//	/log/events.latest/<n>
 //
 // Implementations can be backed by:
 // - disk JSONL files (DiskTraceStore)

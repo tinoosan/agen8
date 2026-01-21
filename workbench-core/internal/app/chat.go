@@ -51,7 +51,7 @@ type RunChatOptions struct {
 	// (provider dependent, e.g. OpenRouter ":online"). This is run-scoped and defaults to off.
 	WebSearchEnabled bool
 
-	// WorkDir is the host working directory to mount at /workdir.
+	// WorkDir is the host working directory to mount at /project.
 	//
 	// If empty, the host uses os.Getwd() at startup.
 	WorkDir string

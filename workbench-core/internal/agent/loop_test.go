@@ -244,7 +244,7 @@ func TestAgentLoopV0_RunConversation_ToolCalling_BatchExecutesAllOps(t *testing.
   "parallel": false,
   "operations": [
     {"op":"fs.list","path":"/tools"},
-    {"op":"fs.list","path":"/workspace"}
+    {"op":"fs.list","path":"/scratch"}
   ]
 }`,
 						},
@@ -278,7 +278,7 @@ func TestAgentLoopV0_RunConversation_ToolCalling_BatchExecutesAllOps(t *testing.
 	if len(called) != 2 {
 		t.Fatalf("expected 2 host calls, got %+v", called)
 	}
-	if called[0].Path != "/tools" || called[1].Path != "/workspace" {
+	if called[0].Path != "/tools" || called[1].Path != "/scratch" {
 		t.Fatalf("unexpected host calls order/paths: %+v", called)
 	}
 }

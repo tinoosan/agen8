@@ -47,7 +47,7 @@ func TestEditor_OpenNewFile_SetsNotice(t *testing.T) {
 	r := &fakeVFSRunner{readErr: fs.ErrNotExist}
 	m := New(context.Background(), r, nil)
 
-	cmd := m.openEditor("/workdir/new.txt")
+	cmd := m.openEditor("/project/new.txt")
 	msg := cmd()
 	model, _ := m.Update(msg)
 	m = model.(Model)
@@ -68,7 +68,7 @@ func TestEditor_Save_WritesViaRunner(t *testing.T) {
 	m := New(context.Background(), r, nil)
 
 	// Open editor (new file).
-	cmd := m.openEditor("/workdir/new.txt")
+	cmd := m.openEditor("/project/new.txt")
 	msg := cmd()
 	model, _ := m.Update(msg)
 	m = model.(Model)
@@ -83,10 +83,10 @@ func TestEditor_Save_WritesViaRunner(t *testing.T) {
 	model, _ = m.Update(saveMsg)
 	m = model.(Model)
 
-	if r.lastPath != "/workdir/new.txt" {
+	if r.lastPath != "/project/new.txt" {
 		t.Fatalf("lastPath=%q", r.lastPath)
 	}
-	if got := string(r.writes["/workdir/new.txt"]); got != "hello\n" {
+	if got := string(r.writes["/project/new.txt"]); got != "hello\n" {
 		t.Fatalf("write=%q", got)
 	}
 	if m.editorNotice != "saved" {
@@ -104,7 +104,7 @@ func TestEditor_OpenExistingFile_PropagatesError(t *testing.T) {
 	r := &fakeVFSRunner{readErr: errors.New("boom")}
 	m := New(context.Background(), r, nil)
 
-	cmd := m.openEditor("/workdir/existing.txt")
+	cmd := m.openEditor("/project/existing.txt")
 	msg := cmd()
 	model, _ := m.Update(msg)
 	m = model.(Model)
@@ -121,7 +121,7 @@ func TestEditor_EscClosesAndRestoresFocus(t *testing.T) {
 	r := &fakeVFSRunner{readErr: fs.ErrNotExist}
 	m := New(context.Background(), r, nil)
 
-	cmd := m.openEditor("/workdir/new.txt")
+	cmd := m.openEditor("/project/new.txt")
 	msg := cmd()
 	model, _ := m.Update(msg)
 	m = model.(Model)

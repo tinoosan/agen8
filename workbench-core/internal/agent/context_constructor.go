@@ -451,7 +451,7 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 			}
 			summary, _, _, _, _ := summarizeTrace(c.traceEvents, includeTypes, traceBudget)
 			if strings.TrimSpace(summary) != "" {
-				systemB.WriteString("\n\n## Recent Ops (from /trace)\n\n")
+				systemB.WriteString("\n\n## Recent Ops (from /log)\n\n")
 				systemB.WriteString(summary)
 				systemB.WriteString("\n")
 			}
@@ -758,7 +758,7 @@ func (c *ContextConstructor) loadStateIfNeeded(ctx context.Context) error {
 	_ = ctx
 
 	// #region agent log
-	// Cleanup legacy visible files under /workspace (models often "discover" and read them).
+	// Cleanup legacy visible files under /scratch (models often "discover" and read them).
 	// These are not part of the agent contract; they are host bookkeeping.
 	if strings.TrimSpace(c.Cfg.DataDir) != "" && strings.TrimSpace(c.RunID) != "" {
 		wsDir := fsutil.GetWorkspaceDir(c.Cfg.DataDir, c.RunID)

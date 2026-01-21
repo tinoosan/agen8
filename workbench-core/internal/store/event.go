@@ -30,12 +30,12 @@ type TailedEvent struct {
 //
 // Trace mirror
 //   - AppendEvent also mirrors the exact same bytes (including newline) into:
-//       data/runs/<runId>/trace/events.jsonl
+//       data/runs/<runId>/log/events.jsonl
 //     so the trace VFS mount can be self-contained and offset-based polling is stable.
 //
 // Offset semantics
 //   - ListEvents returns nextOffset as the current file size.
-//   - That offset can be used later to fetch only new bytes (e.g. via /trace/events.since/<offset>).
+//   - That offset can be used later to fetch only new bytes (e.g. via /log/events.since/<offset>).
 
 // AppendEvent records a new event for the specified run.
 // It validates inputs, ensures the run exists, and appends the event to the run's event log.

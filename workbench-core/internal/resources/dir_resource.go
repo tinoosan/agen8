@@ -21,8 +21,8 @@ import (
 //
 // Example:
 //
-//	dr, _ := NewDirResource("/data/runs/run-123/workspace", "workspace")
-//	// Virtual path "/workspace/notes.md" maps to "/data/runs/run-123/workspace/notes.md"
+//	dr, _ := NewDirResource("/data/runs/run-123/scratch", "workspace")
+//	// Virtual path "/scratch/notes.md" maps to "/data/runs/run-123/scratch/notes.md"
 //
 // Security:
 //
@@ -34,20 +34,20 @@ type DirResource struct {
 	// subpath that would escape BaseDir (e.g. "..", absolute paths).
 	//
 	// BaseDir is an implementation detail; callers interact via virtual paths
-	// like "/workspace/notes.md" through the VFS.
+	// like "/scratch/notes.md" through the VFS.
 	//
-	// Example: "/data/runs/run-123/workspace" or "/Users/alice/projects/myapp".
+	// Example: "/data/runs/run-123/scratch" or "/Users/alice/projects/myapp".
 	BaseDir string
 
 	// Mount is the virtual mount name used by the VFS.
-	// Example: "workspace" maps to the virtual namespace "/workspace".
+	// Example: "workspace" maps to the virtual namespace "/scratch".
 	Mount string
 }
 
 // NewDirResource creates a new directory-backed resource.
 //
 // Parameters:
-//   - baseDir: the OS directory path to mount (e.g., "/data/workspace")
+//   - baseDir: the OS directory path to mount (e.g., "/data/scratch")
 //   - mount: the virtual mount name (e.g., "workspace")
 //
 // The mount name will be sanitized by removing leading slashes.
@@ -58,7 +58,7 @@ type DirResource struct {
 //
 // Example:
 //
-//	dr, err := NewDirResource("/data/runs/123/workspace", "workspace")
+//	dr, err := NewDirResource("/data/runs/123/scratch", "workspace")
 //	if err != nil {
 //	    log.Fatal(err)
 //	}

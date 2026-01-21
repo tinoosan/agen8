@@ -10,7 +10,7 @@ func TestResolveWorkdirVPathFromArg_Unquoted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if vp != "/workdir/cmd/main.go" {
+	if vp != "/project/cmd/main.go" {
 		t.Fatalf("vpath=%q", vp)
 	}
 	if display != "cmd/main.go" {
@@ -23,7 +23,7 @@ func TestResolveWorkdirVPathFromArg_QuotedAtRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if vp != "/workdir/my file.md" {
+	if vp != "/project/my file.md" {
 		t.Fatalf("vpath=%q", vp)
 	}
 	if display != "my file.md" {
@@ -38,7 +38,7 @@ func TestResolveWorkdirVPathFromArg_AbsoluteWithinWorkdir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if vp != "/workdir/README.md" {
+	if vp != "/project/README.md" {
 		t.Fatalf("vpath=%q", vp)
 	}
 	if display != "README.md" {

@@ -42,7 +42,7 @@ Running "workbench" starts a new session and a new run, then opens an interactiv
 TUI. Each message you submit becomes one agent turn that can:
   - discover tools via /tools (fs.list + fs.read manifests)
   - execute tools via tool.run (writing /results/<callId>/response.json)
-  - read/write run-scoped artifacts in /workspace
+  - read/write run-scoped artifacts in /scratch
   - write proposed memory updates to /memory/update.md (host decides commits)
 
 Use "workbench resume <sessionId>" to continue a previous session by creating a
@@ -125,7 +125,7 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "", "base directory for runs/sessions (priority: --data-dir, env WORKBENCH_DATA_DIR, default: ~/.workbench or $XDG_STATE_HOME/workbench)")
 	workDir = strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR"))
-	rootCmd.PersistentFlags().StringVar(&workDir, "workdir", workDir, "host working directory to mount at /workdir (default: current directory; env WORKBENCH_WORKDIR)")
+	rootCmd.PersistentFlags().StringVar(&workDir, "workdir", workDir, "host working directory to mount at /project (default: current directory; env WORKBENCH_WORKDIR)")
 	rootCmd.PersistentFlags().IntVar(&maxContextB, "context-bytes", 8*1024, "run.maxBytesForContext (persisted in run.json)")
 	rootCmd.PersistentFlags().StringVar(&defaultTitle, "title", "workbench", "title for new sessions (workbench only)")
 	rootCmd.PersistentFlags().StringVar(&defaultGoal, "goal", "interactive chat", "initial goal for the run (workbench only)")

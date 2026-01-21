@@ -185,7 +185,7 @@ func (f *Factory) Tools() (*ToolsResource, error) {
 
 // MountAll mounts the core resources into fs.
 //
-// Note: /workdir is intentionally excluded since it depends on a user-provided OS path.
+// Note: /project is intentionally excluded since it depends on a user-provided OS path.
 func (f *Factory) MountAll(fs *vfs.FS) error {
 	if fs == nil {
 		return fmt.Errorf("fs is required")
@@ -220,8 +220,8 @@ func (f *Factory) MountAll(fs *vfs.FS) error {
 		return fmt.Errorf("create tools: %w", err)
 	}
 
-	fs.Mount(vfs.MountWorkspace, ws)
-	fs.Mount(vfs.MountTrace, tr)
+	fs.Mount(vfs.MountScratch, ws)
+	fs.Mount(vfs.MountLog, tr)
 	fs.Mount(vfs.MountResults, res)
 	fs.Mount(vfs.MountMemory, mem)
 	fs.Mount(vfs.MountProfile, prof)

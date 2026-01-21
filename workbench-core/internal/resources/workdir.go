@@ -12,8 +12,8 @@ import (
 
 // NewWorkdirResource creates a directory-backed resource for the host working directory.
 //
-// /workdir is intended to map to the OS directory the user launched Workbench from
-// (or a flag override). Unlike /workspace (run-scoped scratch), /workdir should point
+// /project is intended to map to the OS directory the user launched Workbench from
+// (or a flag override). Unlike /scratch (run-scoped scratch), /project should point
 // at "real project files" so the agent can read and modify them via normal fs.* ops.
 func NewWorkdirResource(workdir string) (*DirResource, error) {
 	workdir = strings.TrimSpace(workdir)
@@ -31,5 +31,5 @@ func NewWorkdirResource(workdir string) (*DirResource, error) {
 	if !st.IsDir() {
 		return nil, fmt.Errorf("workdir is not a directory: %s", abs)
 	}
-	return NewDirResource(abs, vfs.MountWorkdir)
+	return NewDirResource(abs, vfs.MountProject)
 }

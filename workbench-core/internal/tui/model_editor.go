@@ -41,10 +41,10 @@ func (m Model) editorTitle() string {
 	vp := strings.TrimSpace(m.editorVPath)
 	name := vp
 	switch {
-	case strings.HasPrefix(vp, "/workdir/"):
-		name = strings.TrimPrefix(vp, "/workdir/")
-	case strings.HasPrefix(vp, "/workspace/"):
-		name = strings.TrimPrefix(vp, "/workspace/")
+	case strings.HasPrefix(vp, "/project/"):
+		name = strings.TrimPrefix(vp, "/project/")
+	case strings.HasPrefix(vp, "/scratch/"):
+		name = strings.TrimPrefix(vp, "/scratch/")
 	}
 	title := "Editing: " + name
 	if m.editorDirty {
@@ -164,15 +164,15 @@ func (m *Model) editorExecCmd(editor string, vpath string) (*exec.Cmd, error) {
 	if editor == "" || vpath == "" {
 		return nil, fmt.Errorf("editor and vpath are required")
 	}
-	if !strings.HasPrefix(vpath, "/workdir/") {
-		return nil, fmt.Errorf("external editor only supports /workdir paths")
+	if !strings.HasPrefix(vpath, "/project/") {
+		return nil, fmt.Errorf("external editor only supports /project paths")
 	}
 	workdir := strings.TrimSpace(m.workdir)
 	if workdir == "" {
 		return nil, fmt.Errorf("workdir is unknown")
 	}
 
-	sub := strings.TrimPrefix(vpath, "/workdir/")
+	sub := strings.TrimPrefix(vpath, "/project/")
 	clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
 	if err != nil || clean == "" || clean == "." {
 		return nil, fmt.Errorf("invalid workdir path: %s", vpath)
@@ -215,10 +215,10 @@ func (m *Model) loadComposeBuffer(vpath string) tea.Cmd {
 	if vpath == "" {
 		vpath = composeVPath
 	}
-	// Compose buffer always lives under /workdir.
-	if !strings.HasPrefix(vpath, "/workdir/") {
+	// Compose buffer always lives under /project.
+	if !strings.HasPrefix(vpath, "/project/") {
 		return func() tea.Msg {
-			return editorComposeLoadMsg{vpath: composeVPath, err: fmt.Errorf("compose buffer must be under /workdir")}
+			return editorComposeLoadMsg{vpath: composeVPath, err: fmt.Errorf("compose buffer must be under /project")}
 		}
 	}
 	workdir := strings.TrimSpace(m.workdir)
@@ -227,7 +227,7 @@ func (m *Model) loadComposeBuffer(vpath string) tea.Cmd {
 			return editorComposeLoadMsg{vpath: composeVPath, err: fmt.Errorf("workdir is unknown")}
 		}
 	}
-	sub := strings.TrimPrefix(vpath, "/workdir/")
+	sub := strings.TrimPrefix(vpath, "/project/")
 	clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
 	if err != nil || clean == "" || clean == "." {
 		return func() tea.Msg {
@@ -345,10 +345,10 @@ func isVFSMountPath(p string) bool {
 		return false
 	}
 	// Treat known VFS mounts as virtual paths.
-	return hasMountPrefix(p, "workdir") ||
-		hasMountPrefix(p, "workspace") ||
+	return hasMountPrefix(p, "project") ||
+		hasMountPrefix(p, "scratch") ||
 		hasMountPrefix(p, "results") ||
-		hasMountPrefix(p, "trace") ||
+		hasMountPrefix(p, "log") ||
 		hasMountPrefix(p, "tools") ||
 		hasMountPrefix(p, "memory") ||
 		hasMountPrefix(p, "profile") ||

@@ -116,7 +116,7 @@ func (m *Model) helpModalContent() string {
 		"  /editor <path>   edit a workdir file in $EDITOR",
 		"  /cd <path>       change workdir",
 		"  /pwd             show workdir",
-		"  /workdir         alias for /pwd",
+		"  /project         alias for /pwd",
 		"",
 		"Command palette",
 		"",

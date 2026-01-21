@@ -24,15 +24,15 @@ type RefResolution struct {
 	// Unresolved contains tokens that could not be resolved.
 	Unresolved []string
 
-	// Ambiguous maps token -> candidate VFS paths (e.g. "/workdir/a.txt", "/workspace/b.txt").
+	// Ambiguous maps token -> candidate VFS paths (e.g. "/project/a.txt", "/scratch/b.txt").
 	Ambiguous map[string][]string
 }
 
 // ResolveAtRefs resolves @tokens to bounded file attachments.
 //
 // Resolution order:
-//  1. exact path under /workdir
-//  2. artifact index match (e.g. recently written /workspace file)
+//  1. exact path under /project
+//  2. artifact index match (e.g. recently written /scratch file)
 //  3. fuzzy file search under workdir (auto-select only if unambiguous)
 func ResolveAtRefs(fsys *vfs.FS, workdirBase string, artifacts *ArtifactIndex, userText string, maxFiles, maxBytesTotal, maxBytesPerFile int) (RefResolution, error) {
 	if fsys == nil {
@@ -112,16 +112,16 @@ func resolveOneRef(fsys *vfs.FS, workdirBase, workspaceBase string, artifacts *A
 	}
 
 	if clean, _, err := vfsutil.NormalizeResourceSubpath(token); err == nil && clean != "" && clean != "." {
-		// 1) exact under /workdir
-		vp := "/workdir/" + clean
+		// 1) exact under /project
+		vp := "/project/" + clean
 		if att, ok, err := tryReadVPath(fsys, token, vp, clean, maxBytes); err != nil {
 			return agent.FileAttachment{}, false, nil, err
 		} else if ok {
 			return att, true, nil, nil
 		}
 
-		// 1b) exact under /workspace (run-scoped scratch).
-		vp = "/workspace/" + clean
+		// 1b) exact under /scratch (run-scoped scratch).
+		vp = "/scratch/" + clean
 		if att, ok, err := tryReadVPath(fsys, token, vp, clean, maxBytes); err != nil {
 			return agent.FileAttachment{}, false, nil, err
 		} else if ok {
@@ -196,10 +196,10 @@ func buildAttachment(token, vpath, display string, full []byte, maxBytes int) ag
 func displayNameForVPath(vpath string) string {
 	vpath = strings.TrimSpace(vpath)
 	switch {
-	case strings.HasPrefix(vpath, "/workdir/"):
-		return strings.TrimPrefix(vpath, "/workdir/")
-	case strings.HasPrefix(vpath, "/workspace/"):
-		return strings.TrimPrefix(vpath, "/workspace/")
+	case strings.HasPrefix(vpath, "/project/"):
+		return strings.TrimPrefix(vpath, "/project/")
+	case strings.HasPrefix(vpath, "/scratch/"):
+		return strings.TrimPrefix(vpath, "/scratch/")
 	case strings.HasPrefix(vpath, "/results/"):
 		return strings.TrimPrefix(vpath, "/results/")
 	default:
@@ -277,7 +277,7 @@ func workspaceBaseDirFromVFS(fsys *vfs.FS) string {
 	if fsys == nil {
 		return ""
 	}
-	_, r, _, err := fsys.Resolve("/" + vfs.MountWorkspace)
+	_, r, _, err := fsys.Resolve("/" + vfs.MountScratch)
 	if err != nil || r == nil {
 		return ""
 	}
@@ -294,20 +294,20 @@ func normalizeExplicitRefVPath(token string) (vpath string, ok bool) {
 		return "", false
 	}
 	switch {
-	case strings.HasPrefix(token, "/workdir/"):
-		sub := strings.TrimPrefix(token, "/workdir/")
+	case strings.HasPrefix(token, "/project/"):
+		sub := strings.TrimPrefix(token, "/project/")
 		clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
 		if err != nil || clean == "" || clean == "." {
 			return "", false
 		}
-		return "/workdir/" + clean, true
-	case strings.HasPrefix(token, "/workspace/"):
-		sub := strings.TrimPrefix(token, "/workspace/")
+		return "/project/" + clean, true
+	case strings.HasPrefix(token, "/scratch/"):
+		sub := strings.TrimPrefix(token, "/scratch/")
 		clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
 		if err != nil || clean == "" || clean == "." {
 			return "", false
 		}
-		return "/workspace/" + clean, true
+		return "/scratch/" + clean, true
 	case strings.HasPrefix(token, "/results/"):
 		sub := strings.TrimPrefix(token, "/results/")
 		clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
@@ -336,14 +336,14 @@ func mergeCandidateVPaths(workdirRels, workspaceRels []string) []string {
 		if rel == "" {
 			continue
 		}
-		add("/workdir/" + rel)
+		add("/project/" + rel)
 	}
 	for _, rel := range workspaceRels {
 		rel = strings.TrimSpace(rel)
 		if rel == "" {
 			continue
 		}
-		add("/workspace/" + rel)
+		add("/scratch/" + rel)
 	}
 	sort.Strings(out)
 	return out

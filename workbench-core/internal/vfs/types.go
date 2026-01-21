@@ -3,20 +3,20 @@ package vfs
 import "time"
 
 const (
-	// MountWorkspace is the mount name for an agent's working directory.
-	// Paths under /workspace are readable and writable by the agent.
-	MountWorkspace = "workspace"
+	// MountScratch is the mount name for an agent's scratchpad workspace.
+	// Paths under /scratch are run-scoped and intended for ephemeral notes/actions.
+	MountScratch = "scratch"
 
-	// MountWorkdir is the mount name for the host working directory.
+	// MountProject is the mount name for the user's primary project directory.
 	//
-	// /workdir maps to the OS directory the user launched Workbench from (or a flag override).
+	// /project maps to the OS directory the user launched Workbench from (or a flag override).
 	// It is intended for "real project files" so the agent can operate on them
-	// while still keeping /workspace as a run-scoped scratch area.
-	MountWorkdir = "workdir"
+	// while still keeping /scratch as a run-scoped scratch area.
+	MountProject = "project"
 
-	// MountTrace is the mount name for the read-only event feed.
-	// The agent can poll /trace/events.since/<offset> for new events.
-	MountTrace = "trace"
+	// MountLog is the mount name for the run's event log.
+	// The agent can poll /log/events.since/<offset> for new events.
+	MountLog = "log"
 
 	// MountTools is the mount name for tool discovery and manifests.
 	// fs.List("/tools") returns tool IDs; fs.Read("/tools/<id>") returns JSON manifest bytes.
@@ -69,7 +69,7 @@ const (
 // Path rules
 //   - The path passed into a Resource method is ALWAYS a subpath relative to the mount.
 //   - It should NOT start with "/".
-//   - Example: if the VFS resolves "/workspace/notes.md":
+//   - Example: if the VFS resolves "/scratch/notes.md":
 //     mount = "workspace"
 //     resource receives path = "notes.md"
 //
@@ -93,7 +93,7 @@ type Resource interface {
 //
 // Path conventions
 //   - Entry.Path should be a FULL VFS path (starting with "/") so callers can use it directly.
-//   - Example: "/workspace/file.txt" or "/mcp-finance/tools/getPrice".
+//   - Example: "/scratch/file.txt" or "/mcp-finance/tools/getPrice".
 //
 // Optional fields
 //   - Some Resources cannot reliably provide size/modification time (e.g. remote MCP servers).

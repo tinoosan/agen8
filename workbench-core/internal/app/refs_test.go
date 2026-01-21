@@ -25,7 +25,7 @@ func TestResolveAtRefs_ExactWorkdirPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkdir, workdirRes)
+	fs.Mount(vfs.MountProject, workdirRes)
 
 	artifacts := newArtifactIndex()
 	res, err := ResolveAtRefs(fs, workdirRes.BaseDir, artifacts, "please edit @cmd/main.go", 6, 48*1024, 12*1024)
@@ -35,7 +35,7 @@ func TestResolveAtRefs_ExactWorkdirPath(t *testing.T) {
 	if len(res.Attachments) != 1 {
 		t.Fatalf("expected 1 attachment, got %d", len(res.Attachments))
 	}
-	if res.Attachments[0].VPath != "/workdir/cmd/main.go" {
+	if res.Attachments[0].VPath != "/project/cmd/main.go" {
 		t.Fatalf("unexpected vpath: %q", res.Attachments[0].VPath)
 	}
 	if res.Attachments[0].BytesIncluded == 0 {
@@ -50,14 +50,14 @@ func TestResolveAtRefs_ArtifactFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkdir, workdirRes)
+	fs.Mount(vfs.MountProject, workdirRes)
 
 	wsDir := t.TempDir()
-	wsRes, err := resources.NewDirResource(wsDir, vfs.MountWorkspace)
+	wsRes, err := resources.NewDirResource(wsDir, vfs.MountScratch)
 	if err != nil {
 		t.Fatalf("NewDirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	fs.Mount(vfs.MountScratch, wsRes)
 
 	if err := os.MkdirAll(filepath.Join(wsDir, "sub"), 0755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -66,7 +66,7 @@ func TestResolveAtRefs_ArtifactFallback(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	artifacts := newArtifactIndex()
-	artifacts.ObserveWrite("/workspace/sub/out.txt")
+	artifacts.ObserveWrite("/scratch/sub/out.txt")
 
 	res, err := ResolveAtRefs(fs, workdirRes.BaseDir, artifacts, "use @out.txt", 6, 48*1024, 12*1024)
 	if err != nil {
@@ -75,7 +75,7 @@ func TestResolveAtRefs_ArtifactFallback(t *testing.T) {
 	if len(res.Attachments) != 1 {
 		t.Fatalf("expected 1 attachment, got %d", len(res.Attachments))
 	}
-	if res.Attachments[0].VPath != "/workspace/sub/out.txt" {
+	if res.Attachments[0].VPath != "/scratch/sub/out.txt" {
 		t.Fatalf("unexpected vpath: %q", res.Attachments[0].VPath)
 	}
 }
@@ -87,14 +87,14 @@ func TestResolveAtRefs_ExactWorkspacePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkdir, workdirRes)
+	fs.Mount(vfs.MountProject, workdirRes)
 
 	wsDir := t.TempDir()
-	wsRes, err := resources.NewDirResource(wsDir, vfs.MountWorkspace)
+	wsRes, err := resources.NewDirResource(wsDir, vfs.MountScratch)
 	if err != nil {
 		t.Fatalf("NewDirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	fs.Mount(vfs.MountScratch, wsRes)
 
 	if err := os.WriteFile(filepath.Join(wsDir, "out.txt"), []byte("hello\n"), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -108,7 +108,7 @@ func TestResolveAtRefs_ExactWorkspacePath(t *testing.T) {
 	if len(res.Attachments) != 1 {
 		t.Fatalf("expected 1 attachment, got %d", len(res.Attachments))
 	}
-	if res.Attachments[0].VPath != "/workspace/out.txt" {
+	if res.Attachments[0].VPath != "/scratch/out.txt" {
 		t.Fatalf("unexpected vpath: %q", res.Attachments[0].VPath)
 	}
 }
@@ -120,14 +120,14 @@ func TestResolveAtRefs_ExplicitVPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkdir, workdirRes)
+	fs.Mount(vfs.MountProject, workdirRes)
 
 	wsDir := t.TempDir()
-	wsRes, err := resources.NewDirResource(wsDir, vfs.MountWorkspace)
+	wsRes, err := resources.NewDirResource(wsDir, vfs.MountScratch)
 	if err != nil {
 		t.Fatalf("NewDirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	fs.Mount(vfs.MountScratch, wsRes)
 
 	if err := os.WriteFile(filepath.Join(workdir, "out.txt"), []byte("workdir\n"), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -137,7 +137,7 @@ func TestResolveAtRefs_ExplicitVPaths(t *testing.T) {
 	}
 
 	artifacts := newArtifactIndex()
-	res, err := ResolveAtRefs(fs, workdirRes.BaseDir, artifacts, "use @/workspace/out.txt and @/workdir/out.txt", 6, 48*1024, 12*1024)
+	res, err := ResolveAtRefs(fs, workdirRes.BaseDir, artifacts, "use @/scratch/out.txt and @/project/out.txt", 6, 48*1024, 12*1024)
 	if err != nil {
 		t.Fatalf("ResolveAtRefs: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestResolveAtRefs_ExplicitVPaths(t *testing.T) {
 	for _, a := range res.Attachments {
 		got[a.VPath] = true
 	}
-	if !got["/workspace/out.txt"] || !got["/workdir/out.txt"] {
+	if !got["/scratch/out.txt"] || !got["/project/out.txt"] {
 		t.Fatalf("unexpected vpaths: %+v", got)
 	}
 }
@@ -175,13 +175,13 @@ func TestResolveAtRefs_FuzzyCrossRootAmbiguous(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkdir, workdirRes)
+	fs.Mount(vfs.MountProject, workdirRes)
 
-	wsRes, err := resources.NewDirResource(wsDir, vfs.MountWorkspace)
+	wsRes, err := resources.NewDirResource(wsDir, vfs.MountScratch)
 	if err != nil {
 		t.Fatalf("NewDirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	fs.Mount(vfs.MountScratch, wsRes)
 
 	artifacts := newArtifactIndex()
 	res, err := ResolveAtRefs(fs, workdirRes.BaseDir, artifacts, "read @dup.txt", 6, 48*1024, 12*1024)
@@ -196,7 +196,7 @@ func TestResolveAtRefs_FuzzyCrossRootAmbiguous(t *testing.T) {
 		t.Fatalf("expected ambiguous candidates for dup.txt")
 	}
 	joined := strings.Join(cands, ",")
-	if !strings.Contains(joined, "/workdir/a/dup.txt") || !strings.Contains(joined, "/workspace/b/dup.txt") {
+	if !strings.Contains(joined, "/project/a/dup.txt") || !strings.Contains(joined, "/scratch/b/dup.txt") {
 		t.Fatalf("unexpected candidates: %v", cands)
 	}
 }
@@ -214,7 +214,7 @@ func TestResolveAtRefs_FuzzyUnambiguous(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkdir, workdirRes)
+	fs.Mount(vfs.MountProject, workdirRes)
 
 	artifacts := newArtifactIndex()
 	res, err := ResolveAtRefs(fs, workdirRes.BaseDir, artifacts, "read @hello.txt", 6, 48*1024, 12*1024)
@@ -224,7 +224,7 @@ func TestResolveAtRefs_FuzzyUnambiguous(t *testing.T) {
 	if len(res.Attachments) != 1 {
 		t.Fatalf("expected 1 attachment, got %d", len(res.Attachments))
 	}
-	if res.Attachments[0].VPath != "/workdir/sub/hello.txt" {
+	if res.Attachments[0].VPath != "/project/sub/hello.txt" {
 		t.Fatalf("unexpected vpath: %q", res.Attachments[0].VPath)
 	}
 }
@@ -248,7 +248,7 @@ func TestResolveAtRefs_Ambiguous(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkdir, workdirRes)
+	fs.Mount(vfs.MountProject, workdirRes)
 
 	artifacts := newArtifactIndex()
 	res, err := ResolveAtRefs(fs, workdirRes.BaseDir, artifacts, "read @dup.txt", 6, 48*1024, 12*1024)

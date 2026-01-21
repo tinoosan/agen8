@@ -12,7 +12,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/events"
 )
 
-const composeVPath = "/workdir/.workbench/compose.md"
+const composeVPath = "/project/.workbench/compose.md"
 
 // TurnRunner executes one user turn and returns the agent final response.
 //
@@ -184,14 +184,14 @@ type Model struct {
 	composeLoadPath            string
 	dataDir                    string
 
-	sessionTitle    string
-	workflowTitle   string
-	workdir         string
-	modelID         string
-	reasoningEffort string
+	sessionTitle     string
+	workflowTitle    string
+	workdir          string
+	modelID          string
+	reasoningEffort  string
 	webSearchEnabled bool
-	sessionID       string
-	runID           string
+	sessionID        string
+	runID            string
 
 	lastTurnTokensIn  int
 	lastTurnTokensOut int

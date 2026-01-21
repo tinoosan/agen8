@@ -51,15 +51,15 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountTrace, traceRes)
+	fs.Mount(vfs.MountLog, traceRes)
 	fs.Mount(vfs.MountMemory, memRes)
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	fs.Mount(vfs.MountScratch, wsRes)
 
 	u := &ContextUpdater{
 		FS:             fs,
 		MaxMemoryBytes: 1024,
 		MaxTraceBytes:  4096,
-		ManifestPath:   "/workspace/context_manifest.json",
+		ManifestPath:   "/scratch/context_manifest.json",
 	}
 
 	system1, m1, err := u.BuildSystemPrompt(context.Background(), "base", 1)
@@ -92,7 +92,7 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 	}
 
 	// Ensure manifest written.
-	if _, err := fs.Read("/workspace/context_manifest.json"); err != nil {
+	if _, err := fs.Read("/scratch/context_manifest.json"); err != nil {
 		t.Fatalf("expected manifest in workspace: %v", err)
 	}
 
@@ -172,9 +172,9 @@ func TestContextUpdater_FiltersTraceEvents(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountTrace, traceRes)
+	fs.Mount(vfs.MountLog, traceRes)
 	fs.Mount(vfs.MountMemory, memRes)
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	fs.Mount(vfs.MountScratch, wsRes)
 
 	u := &ContextUpdater{
 		FS:             fs,
@@ -185,7 +185,7 @@ func TestContextUpdater_FiltersTraceEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSystemPrompt: %v", err)
 	}
-	if !strings.Contains(system, "## Recent Ops (from /trace)") {
+	if !strings.Contains(system, "## Recent Ops (from /log)") {
 		t.Fatalf("expected trace summary section, got:\n%s", system)
 	}
 	if strings.Contains(system, "irrelevant.event") {
@@ -225,9 +225,9 @@ func TestContextUpdater_AdaptiveBudgets(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountTrace, traceRes)
+	fs.Mount(vfs.MountLog, traceRes)
 	fs.Mount(vfs.MountMemory, memRes)
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	fs.Mount(vfs.MountScratch, wsRes)
 
 	u := &ContextUpdater{
 		FS:             fs,
@@ -284,9 +284,9 @@ func TestContextUpdater_FailureBumpAfterBadOp(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountTrace, traceRes)
+	fs.Mount(vfs.MountLog, traceRes)
 	fs.Mount(vfs.MountMemory, memRes)
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	fs.Mount(vfs.MountScratch, wsRes)
 
 	u := &ContextUpdater{
 		FS:             fs,
@@ -294,7 +294,7 @@ func TestContextUpdater_FailureBumpAfterBadOp(t *testing.T) {
 		MaxTraceBytes:  200,
 	}
 
-	u.ObserveHostOp(types.HostOpRequest{Op: types.HostOpFSRead, Path: "/trace/events"}, types.HostOpResponse{
+	u.ObserveHostOp(types.HostOpRequest{Op: types.HostOpFSRead, Path: "/log/events"}, types.HostOpResponse{
 		Op:    types.HostOpFSRead,
 		Ok:    false,
 		Error: "boom",
