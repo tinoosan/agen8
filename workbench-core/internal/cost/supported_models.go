@@ -5,22 +5,75 @@ import (
 	"strings"
 )
 
+// ModelInfo describes a recognition+pricing entry for a model provider.
+// InputPerM/OutputPerM remain 0 when pricing is unknown.
+type ModelInfo struct {
+	ID         string
+	InputPerM  float64
+	OutputPerM float64
+}
+
+var modelInfos = []ModelInfo{
+	// OpenAI (via OpenRouter).
+	{"openai/gpt-5.2", 1.75, 14.0},
+	{"openai/gpt-5.2-chat", 1.75, 14.0},
+	{"openai/gpt-5.2-pro", 21.0, 168.0},
+	{"openai/gpt-5.1", 1.25, 10.0},
+	{"openai/gpt-5.1-chat", 1.25, 10.0},
+	{"openai/gpt-5.1-codex", 1.25, 10.0},
+	{"openai/gpt-5.1-codex-mini", 0.25, 2.0},
+	{"openai/gpt-5.1-codex-max", 1.25, 10.0},
+	{"openai/gpt-5-mini", 0.25, 2.0},
+	{"openai/gpt-5-nano", 0.05, 0.4},
+	{"openai/gpt-4.1", 0, 0}, // Pricing to be confirmed.
+	{"openai/gpt-4o", 2.5, 10.0},
+	{"openai/gpt-4o-mini", 0.15, 0.6},
+	{"openai/o1-preview", 15.0, 60.0},
+	{"openai/o1-mini", 3.0, 12.0},
+
+	// Anthropic.
+	{"anthropic/claude-3.5-sonnet", 3.0, 15.0},
+	{"anthropic/claude-3-opus", 15.0, 75.0},
+	{"anthropic/claude-3-haiku", 0.25, 1.25},
+	{"anthropic/claude-4.5-opus", 5.0, 25.0},
+	{"anthropic/claude-4.5-sonnet", 1.0, 15.0},
+
+	// Google.
+	{"google/gemini-pro-1.5", 2.5, 7.5},
+	{"google/gemini-flash-1.5", 0.075, 0.3},
+
+	// Meta.
+	{"meta-llama/llama-3.1-405b-instruct", 2.7, 2.7},
+	{"meta-llama/llama-3.1-70b-instruct", 0.35, 0.4},
+	{"meta-llama/llama-3.2-11b-vision-instruct", 0.055, 0.055},
+	{"meta-llama/llama-3.2-3b-instruct", 0.04, 0.04},
+
+	// Mistral.
+	{"mistralai/mistral-large", 2.0, 6.0},
+
+	// Z.AI.
+	{"z-ai/glm-4.7", 0.4, 1.5},
+
+	// DeepSeek.
+	{"deepseek/deepseek-chat", 0.14, 0.28},
+	{"deepseek/deepseek-r1", 0.55, 2.19},
+
+	// Qwen.
+	{"qwen/qwen-2.5-72b-instruct", 0.35, 0.4},
+	{"qwen/qwen-2.5-coder-32b-instruct", 0.07, 0.16},
+}
+
 // SupportedModels returns the list of model IDs Workbench recognizes.
 //
 // This list is used by the interactive /model picker to validate user input.
 //
-// Pricing is deliberately separate:
-//   - A supported model may have no pricing entry.
-//   - When pricing is missing, Workbench shows cost as "unknown" (and does not
-//     fabricate a number).
-//
-// To add a model:
-//  1. Add it to `supportedModelIDs`.
-//  2. Optionally add pricing in DefaultPricing().
+// Pricing remains separate: models with zero values are treated as "unknown".
+// To add a model, append it to `modelInfos` and, if you know pricing, set
+// InputPerM/OutputPerM accordingly.
 func SupportedModels() []string {
-	out := make([]string, 0, len(supportedModelIDs))
-	for _, id := range supportedModelIDs {
-		id = strings.TrimSpace(id)
+	out := make([]string, 0, len(modelInfos))
+	for _, info := range modelInfos {
+		id := strings.TrimSpace(info.ID)
 		if id == "" {
 			continue
 		}
@@ -36,66 +89,12 @@ func IsSupportedModel(id string) bool {
 	if id == "" {
 		return false
 	}
-	for _, m := range supportedModelIDs {
-		if strings.TrimSpace(m) == id {
+	for _, info := range modelInfos {
+		if strings.TrimSpace(info.ID) == id {
 			return true
 		}
 	}
 	return false
-}
-
-var supportedModelIDs = []string{
-	// OpenAI (via OpenRouter).
-	"openai/gpt-5.2",
-	"openai/gpt-5.2-chat",
-	"openai/gpt-5.2-pro",
-	"openai/gpt-5.1",
-	"openai/gpt-5.1-chat",
-	"openai/gpt-5.1-codex",
-	"openai/gpt-5.1-codex-mini",
-	"openai/gpt-5.1-codex-max",
-	"openai/gpt-5-mini",
-	"openai/gpt-5-nano",
-	"openai/gpt-4.1",
-	"openai/gpt-4o",
-	"openai/gpt-4o-mini",
-	"openai/o1-preview",
-	"openai/o1-mini",
-
-	// Anthropic.
-	"anthropic/claude-3.5-sonnet",
-	"anthropic/claude-3-opus",
-	"anthropic/claude-3-haiku",
-	"anthropic/claude-4.5-opus",
-	"anthropic/claude-4.5-sonnet",
-
-	// Google.
-	"google/gemini-pro-1.5",
-	"google/gemini-flash-1.5",
-
-	// Meta.
-	"meta-llama/llama-3.1-405b-instruct",
-	"meta-llama/llama-3.1-70b-instruct",
-	"meta-llama/llama-3.2-11b-vision-instruct",
-	"meta-llama/llama-3.2-3b-instruct",
-
-	// Mistral.
-	"mistralai/mistral-large",
-
-	// Z.AI.
-	"z-ai/glm-4.7",
-
-	// DeepSeek.
-	"deepseek/deepseek-chat",
-	"deepseek/deepseek-r1",
-
-	// Qwen.
-	"qwen/qwen-2.5-72b-instruct",
-	"qwen/qwen-2.5-coder-32b-instruct",
-
-	// O-series (example placeholders; add only if you actually use them).
-	// "openai/o3",
-	// "openai/o3-mini",
 }
 
 // SupportsReasoningEffort reports whether the model is expected to support explicit
