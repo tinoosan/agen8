@@ -333,14 +333,20 @@ func (r *lazyNewSessionTurnRunner) RunTurn(ctx context.Context, userMsg string) 
 		return "", nil
 	}
 
+	// If already initialized, delegate immediately to the engine.
+	// The engine handles slash commands (including /model) accurately for an active session,
+	// updating the agent, run, and history state.
+	if r.initialized {
+		return r.engine.RunTurn(ctx, userMsg)
+	}
+
 	// Slash commands are host-side commands and should not create a new session/run.
 	if resp, handled, err := r.handleHostCommandPreInit(userMsg); handled {
 		return resp, err
 	}
-	if !r.initialized {
-		if err := r.initForFirstTurn(userMsg); err != nil {
-			return "", err
-		}
+
+	if err := r.initForFirstTurn(userMsg); err != nil {
+		return "", err
 	}
 	return r.engine.RunTurn(ctx, userMsg)
 }
