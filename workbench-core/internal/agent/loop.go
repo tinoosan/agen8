@@ -58,10 +58,10 @@ type Agent struct {
 //   - When the model returns {"op":"final","text":"..."}, the agent appends that final JSON
 //     object as the last assistant message and returns text to the host to display.
 func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (final string, updated []types.LLMMessage, steps int, err error) {
-	return a.runConversation(ctx, msgs, 1, "")
+	return a.runConversation(ctx, msgs, 1)
 }
 
-func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, startStep int, lastResponseID string) (final string, updated []types.LLMMessage, steps int, err error) {
+func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, startStep int) (final string, updated []types.LLMMessage, steps int, err error) {
 	if a == nil || a.LLM == nil {
 		return "", nil, 0, fmt.Errorf("agent LLM is required")
 	}
@@ -84,7 +84,6 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 	if startStep < 1 {
 		startStep = 1
 	}
-	lastResponseID = strings.TrimSpace(lastResponseID)
 
 	hostOpTools := HostOpFunctions()
 	if len(a.ExtraTools) != 0 {
@@ -103,28 +102,21 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 		}
 
 		req := types.LLMRequest{
-			Model:              a.Model,
-			System:             system,
-			Messages:           msgs,
-			MaxTokens:          1024,
-			Tools:              hostOpTools,
-			ToolChoice:         "auto",
-			JSONOnly:           false,
-			EnableWebSearch:    a.EnableWebSearch,
-			PreviousResponseID: lastResponseID,
-			ReasoningEffort:    strings.TrimSpace(a.ReasoningEffort),
-			ReasoningSummary:   strings.TrimSpace(a.ReasoningSummary),
+			Model:            a.Model,
+			System:           system,
+			Messages:         msgs,
+			MaxTokens:        1024,
+			Tools:            hostOpTools,
+			ToolChoice:       "auto",
+			JSONOnly:         false,
+			EnableWebSearch:  a.EnableWebSearch,
+			ReasoningEffort:  strings.TrimSpace(a.ReasoningEffort),
+			ReasoningSummary: strings.TrimSpace(a.ReasoningSummary),
 		}
 
 		resp, err := a.streamToAccumulator(ctx, step, req)
 		if err != nil {
 			return "", nil, 0, err
-		}
-
-		if strings.TrimSpace(resp.ResponseID) != "" {
-			lastResponseID = resp.ResponseID
-		} else {
-			lastResponseID = ""
 		}
 
 		if a.Hooks.OnLLMUsage != nil && resp.Usage != nil {
@@ -622,8 +614,11 @@ Write durable lessons to ~/memory/update.md~:
 ## Operating Principles
 
 - **Action-first**: do the minimal ops to complete the task
-- **Recover gracefully**: if an op fails, read the file and retry with adjusted input
+- **Recover gracefully**: if an op fails (e.g. path not found), try to List the parent directory or a different path. Do NOT stop to ask the user unless you have tried to fix it.
+- **Assume Defaults**: Do NOT ask clarifying questions about mount paths or scope unless a tool call fails. Assume ~/project~ is the repo root.
 - **Prefer direct ops**: use ~fs_write~/~fs_read~ before reaching for ~tool_run~
+- **Do NOT hallucinate**: do not assume file contents or tool capabilities unless you have verified them with a tool call.
+- **Always provide final answers**: do not stop early just because you have some info; ensure the full request is satisfied.
 `
 	return strings.TrimSpace(strings.ReplaceAll(raw, "~", "`"))
 }
