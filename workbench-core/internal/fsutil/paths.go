@@ -72,6 +72,12 @@ func GetToolsDir(dataDir string) string {
 	return filepath.Join(dataDir, "tools")
 }
 
+// GetSkillsDir returns the path to the user-defined skills directory.
+// Each root is expected to contain extracted SKILL.md content.
+func GetSkillsDir(dataDir string) string {
+	return filepath.Join(dataDir, "skills")
+}
+
 // GetToolManifestPath returns the path to a tool's manifest.json given the tools directory and tool ID.
 func GetToolManifestPath(toolsDir, toolID string) string {
 	return filepath.Join(toolsDir, toolID, "manifest.json")

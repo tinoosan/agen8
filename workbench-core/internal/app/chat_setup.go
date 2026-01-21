@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -98,9 +99,17 @@ func setupTUIChatRuntime(
 	// /project depends on a user-provided OS directory, so it is mounted outside the factory.
 	fs.Mount(vfs.MountProject, workdirRes)
 
+	skillDir := fsutil.GetSkillsDir(cfg.DataDir)
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return nil, fmt.Errorf("prepare skills dir: %w", err)
+	}
+	workdirSkillDir := filepath.Join(workdirAbs, "skills")
+	if err := os.MkdirAll(workdirSkillDir, 0755); err != nil {
+		return nil, fmt.Errorf("prepare workdir skills dir: %w", err)
+	}
 	skillRoots := []string{
-		filepath.Join(cfg.DataDir, "skills"),
-		filepath.Join(workdirAbs, "skills"),
+		skillDir,
+		workdirSkillDir,
 	}
 	skillMgr := skills.NewManager(skillRoots)
 	if err := skillMgr.Scan(); err != nil {
