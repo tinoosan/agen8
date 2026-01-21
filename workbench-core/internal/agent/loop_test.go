@@ -194,7 +194,7 @@ func TestAgentLoopV0_RunConversation_ToolCalling_ExecutesAndReturnsFinalText(t *
 	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		_ = ctx
 		called = append(called, req)
-		return types.HostOpResponse{Op: req.Op, Ok: true, Entries: []string{"/tools/builtin.bash"}}
+		return types.HostOpResponse{Op: req.Op, Ok: true, Entries: []string{"/tools/builtin.shell"}}
 	}
 	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
 
@@ -285,7 +285,7 @@ func TestAgentLoopV0_RunConversation_ToolCalling_BatchExecutesAllOps(t *testing.
 
 func TestAgent_RunConversation_FunctionToolRoutesToToolRun(t *testing.T) {
 	manifest := types.ToolManifest{
-		ID:                types.ToolID("builtin.bash"),
+		ID:                types.ToolID("builtin.shell"),
 		Version:           "0.1.0",
 		Kind:              types.ToolKindBuiltin,
 		DisplayName:       "Builtin Bash",
@@ -310,7 +310,7 @@ func TestAgent_RunConversation_FunctionToolRoutesToToolRun(t *testing.T) {
 						ID:   "call_1",
 						Type: "function",
 						Function: types.ToolCallFunction{
-							Name:      "builtin_bash_exec",
+							Name:      "builtin_shell_exec",
 							Arguments: `{"argv":["echo","hi"]}`,
 						},
 					},

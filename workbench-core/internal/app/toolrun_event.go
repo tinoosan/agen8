@@ -76,7 +76,7 @@ func toolRunOutputPreviewForEvent(toolID, actionID string, raw json.RawMessage) 
 	}
 
 	switch strings.TrimSpace(toolID) {
-	case "builtin.bash":
+	case "builtin.shell":
 		if strings.TrimSpace(actionID) != "exec" {
 			break
 		}
@@ -104,14 +104,14 @@ func toolRunOutputPreviewForEvent(toolID, actionID string, raw json.RawMessage) 
 		switch strings.TrimSpace(actionID) {
 		case "status":
 			var out struct {
-				Head      string   `json:"head"`
-				Staged    []any    `json:"staged"`
-				Unstaged  []any    `json:"unstaged"`
-				Untracked []any    `json:"untracked"`
-				Conflicts []any    `json:"conflicts"`
-				ExitCode  int      `json:"exitCode"`
-				Stderr    string   `json:"stderr"`
-				Stdout    string   `json:"stdout"`
+				Head      string `json:"head"`
+				Staged    []any  `json:"staged"`
+				Unstaged  []any  `json:"unstaged"`
+				Untracked []any  `json:"untracked"`
+				Conflicts []any  `json:"conflicts"`
+				ExitCode  int    `json:"exitCode"`
+				Stderr    string `json:"stderr"`
+				Stdout    string `json:"stdout"`
 			}
 			if err := json.Unmarshal(raw, &out); err != nil {
 				break
@@ -165,8 +165,8 @@ func toolRunOutputPreviewForEvent(toolID, actionID string, raw json.RawMessage) 
 			return s2
 		case "add":
 			var out struct {
-				AddedFiles []any `json:"addedFiles"`
-				ExitCode   int   `json:"exitCode"`
+				AddedFiles []any  `json:"addedFiles"`
+				ExitCode   int    `json:"exitCode"`
 				Stderr     string `json:"stderr"`
 			}
 			if err := json.Unmarshal(raw, &out); err != nil {
@@ -180,8 +180,8 @@ func toolRunOutputPreviewForEvent(toolID, actionID string, raw json.RawMessage) 
 			return s2
 		case "log":
 			var out struct {
-				Commits []any `json:"commits"`
-				ExitCode int  `json:"exitCode"`
+				Commits  []any  `json:"commits"`
+				ExitCode int    `json:"exitCode"`
 				Stderr   string `json:"stderr"`
 			}
 			if err := json.Unmarshal(raw, &out); err != nil {
@@ -195,7 +195,7 @@ func toolRunOutputPreviewForEvent(toolID, actionID string, raw json.RawMessage) 
 			return s2
 		case "branch":
 			var out struct {
-				Branches []any `json:"branches"`
+				Branches []any  `json:"branches"`
 				Created  string `json:"created"`
 				ExitCode int    `json:"exitCode"`
 				Stderr   string `json:"stderr"`

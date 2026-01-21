@@ -54,7 +54,7 @@ func init() {
 		ID:       types.ToolID("builtin.find"),
 		Manifest: builtinFindManifest,
 		NewInvoker: func(cfg BuiltinConfig) ToolInvoker {
-			return NewBuiltinFindInvoker(cfg.BashRootDir)
+			return NewBuiltinFindInvoker(cfg.ShellRootDir)
 		},
 	})
 }

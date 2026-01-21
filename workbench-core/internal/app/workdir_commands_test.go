@@ -28,7 +28,7 @@ func TestTUITurnRunner_CD_RebindsWorkdirAndUpdatesBuiltins(t *testing.T) {
 
 	// Seed builtin invokers with dir1.
 	builtins := tools.MapRegistry{
-		types.ToolID("builtin.bash"):    tools.NewBuiltinBashInvoker(dir1),
+		types.ToolID("builtin.shell"):   tools.NewBuiltinShellInvoker(dir1, nil),
 		types.ToolID("builtin.ripgrep"): tools.NewBuiltinRipgrepInvoker(dir1),
 	}
 
@@ -60,9 +60,9 @@ func TestTUITurnRunner_CD_RebindsWorkdirAndUpdatesBuiltins(t *testing.T) {
 	}
 
 	// Builtin sandbox roots should follow the active workdir.
-	bash := builtins[types.ToolID("builtin.bash")].(*tools.BuiltinBashInvoker)
-	if bash.RootDir != dir2 {
-		t.Fatalf("builtin.bash root=%q, want %q", bash.RootDir, dir2)
+	sh := builtins[types.ToolID("builtin.shell")].(*tools.BuiltinShellInvoker)
+	if sh.RootDir != dir2 {
+		t.Fatalf("builtin.shell root=%q, want %q", sh.RootDir, dir2)
 	}
 	rg := builtins[types.ToolID("builtin.ripgrep")].(*tools.BuiltinRipgrepInvoker)
 	if rg.RootDir != dir2 {
@@ -94,7 +94,7 @@ func TestTUITurnRunner_CD_InvalidDirDoesNotChange(t *testing.T) {
 	fs.Mount(vfs.MountWorkdir, workdirRes1)
 
 	builtins := tools.MapRegistry{
-		types.ToolID("builtin.bash"): tools.NewBuiltinBashInvoker(dir1),
+		types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(dir1, nil),
 	}
 
 	r := &tuiTurnRunner{

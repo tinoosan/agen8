@@ -94,7 +94,7 @@ func init() {
 		ID:       types.ToolID("builtin.test"),
 		Manifest: builtinTestManifest,
 		NewInvoker: func(cfg BuiltinConfig) ToolInvoker {
-			return NewBuiltinTestInvoker(cfg.BashRootDir)
+			return NewBuiltinTestInvoker(cfg.ShellRootDir)
 		},
 	})
 }
@@ -498,4 +498,3 @@ func capBytesToArtifact(path string, b []byte, maxBytes int) (preview string, ar
 	preview = s[:maxBytes]
 	return preview, &ToolArtifactWrite{Path: path, Bytes: append([]byte(nil), b...), MediaType: "text/plain"}, true
 }
-

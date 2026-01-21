@@ -13,7 +13,7 @@ func TestClassifyEvent_OpRequest(t *testing.T) {
 		Message: "Agent requested host op",
 		Data: map[string]string{
 			"op":       "fs.read",
-			"path":     "/tools/builtin.bash",
+			"path":     "/tools/builtin.shell",
 			"toolId":   "",
 			"actionId": "",
 			"maxBytes": "4096",
@@ -23,7 +23,7 @@ func TestClassifyEvent_OpRequest(t *testing.T) {
 	if rr.Class != RenderAction {
 		t.Fatalf("expected action class, got %v", rr.Class)
 	}
-	for _, want := range []string{"Read /tools/builtin.bash"} {
+	for _, want := range []string{"Read /tools/builtin.shell"} {
 		if !strings.Contains(rr.Text, want) {
 			t.Fatalf("expected %q to contain %q", rr.Text, want)
 		}
@@ -55,13 +55,13 @@ func TestClassifyEvent_OpResponse(t *testing.T) {
 }
 
 func TestClassifyEvent_ToolRunRequest_ShowsArgsAndCommand(t *testing.T) {
-	t.Run("builtin.bash exec", func(t *testing.T) {
+	t.Run("builtin.shell exec", func(t *testing.T) {
 		ev := events.Event{
 			Type:    "agent.op.request",
 			Message: "Agent requested host op",
 			Data: map[string]string{
 				"op":       "tool.run",
-				"toolId":   "builtin.bash",
+				"toolId":   "builtin.shell",
 				"actionId": "exec",
 				"input":    `{"argv":["rg","-n","Example Domain","."],"cwd":"."}`,
 			},

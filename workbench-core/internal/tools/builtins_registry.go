@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -14,12 +15,14 @@ import (
 // real host configuration (filesystem roots, caps, env, etc). BuiltinConfig is where the host
 // supplies those runtime knobs.
 type BuiltinConfig struct {
-	// BashRootDir is the OS directory used as the sandbox root for builtin.bash.
-	// It must be an absolute path; builtin.bash rejects cwd escapes and absolute cwd.
-	BashRootDir string
+	// ShellRootDir is the OS directory used as the sandbox root for builtin.shell.
+	// It must be an absolute path; builtin.shell rejects cwd escapes and absolute cwd.
+	ShellRootDir string
+	// ShellConfirm is an optional host callback to confirm execution.
+	ShellConfirm func(ctx context.Context, argv []string, cwd string) (bool, error)
 
 	// RipgrepRootDir is the OS directory used as the sandbox root for builtin.ripgrep.
-	// If empty, builtin.ripgrep falls back to BashRootDir.
+	// If empty, builtin.ripgrep falls back to ShellRootDir.
 	RipgrepRootDir string
 
 	// TraceStore is the run-scoped trace store used by builtin.trace.

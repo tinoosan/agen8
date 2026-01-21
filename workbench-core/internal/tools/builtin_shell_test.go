@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -16,11 +17,11 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
-func TestBuiltinBash_Exec_CatFile_OK(t *testing.T) {
+func TestBuiltinShell_Exec_CatFile_OK(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun(cfg, "builtin bash ok test", 100)
+	run, err := store.CreateRun(cfg, "builtin shell ok test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -42,16 +43,16 @@ func TestBuiltinBash_Exec_CatFile_OK(t *testing.T) {
 	runner := tools.Runner{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.bash"): tools.NewBuiltinBashInvoker(rootDir),
+			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(rootDir, nil),
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.bash"), "exec", json.RawMessage(`{"argv":["cat","hello.txt"],"cwd":"."}`), 0)
+	resp, err := runner.Run(context.Background(), types.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["cat","hello.txt"],"cwd":"."}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !resp.Ok {
-		t.Fatalf("expected ok=true, got %+v", resp)
+		t.Fatalf("expected ok=true, got err=%+v", resp.Error)
 	}
 
 	var out struct {
@@ -82,11 +83,11 @@ func TestBuiltinBash_Exec_CatFile_OK(t *testing.T) {
 	}
 }
 
-func TestBuiltinBash_Exec_RejectsEscapeCwd(t *testing.T) {
+func TestBuiltinShell_Exec_RejectsEscapeCwd(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun(cfg, "builtin bash cwd test", 100)
+	run, err := store.CreateRun(cfg, "builtin shell cwd test", 100)
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -103,11 +104,11 @@ func TestBuiltinBash_Exec_RejectsEscapeCwd(t *testing.T) {
 	runner := tools.Runner{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.bash"): tools.NewBuiltinBashInvoker(t.TempDir()),
+			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(t.TempDir(), nil),
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.bash"), "exec", json.RawMessage(`{"argv":["ls"],"cwd":"../"}`), 0)
+	resp, err := runner.Run(context.Background(), types.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["ls"],"cwd":"../"}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -124,7 +125,7 @@ func TestBuiltinBash_Exec_RejectsEscapeCwd(t *testing.T) {
 	}
 }
 
-func TestBuiltinBash_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
+func TestBuiltinShell_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
@@ -149,20 +150,20 @@ func TestBuiltinBash_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 	fs := vfs.NewFS()
 	fs.Mount(vfs.MountResults, resultsRes)
 
-	inv := tools.NewBuiltinBashInvoker(rootDir)
+	inv := tools.NewBuiltinShellInvoker(rootDir, nil)
 	runner := tools.Runner{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.bash"): inv,
+			types.ToolID("builtin.shell"): inv,
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.bash"), "exec", json.RawMessage(`{"argv":["cat","big.txt"],"cwd":"."}`), 0)
+	resp, err := runner.Run(context.Background(), types.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["cat","big.txt"],"cwd":"."}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !resp.Ok {
-		t.Fatalf("expected ok=true, got %+v", resp)
+		t.Fatalf("expected ok=true, got err=%+v", resp.Error)
 	}
 
 	var out struct {
@@ -193,7 +194,7 @@ func TestBuiltinBash_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 	}
 }
 
-func TestBuiltinBash_Exec_RejectsAbsolutePathArgs(t *testing.T) {
+func TestBuiltinShell_Exec_RejectsAbsolutePathArgs(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
@@ -214,11 +215,11 @@ func TestBuiltinBash_Exec_RejectsAbsolutePathArgs(t *testing.T) {
 	runner := tools.Runner{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.bash"): tools.NewBuiltinBashInvoker(t.TempDir()),
+			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(t.TempDir(), nil),
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.bash"), "exec", json.RawMessage(`{"argv":["cat","/etc/hosts"],"cwd":"."}`), 0)
+	resp, err := runner.Run(context.Background(), types.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["cat","/etc/hosts"],"cwd":"."}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -230,8 +231,56 @@ func TestBuiltinBash_Exec_RejectsAbsolutePathArgs(t *testing.T) {
 	}
 }
 
-func TestDefaultBashDenylist_BlocksHighRiskCommands(t *testing.T) {
-	deny := tools.DefaultBashDenylist()
+func TestBuiltinShell_EnvFiltersSensitiveVars(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("env filtering test is unix-specific")
+	}
+	resultsStore := store.NewInMemoryResultsStore()
+	resultsRes, err := resources.NewResultsResource(resultsStore)
+	if err != nil {
+		t.Fatalf("NewResultsResource: %v", err)
+	}
+
+	fs := vfs.NewFS()
+	fs.Mount(vfs.MountResults, resultsRes)
+
+	rootDir := t.TempDir()
+
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "supersecret")
+	t.Setenv("GIT_DIR", "/tmp/secret")
+	t.Setenv("SAFE_KEY", "keepme")
+
+	runner := tools.Runner{
+		Results: resultsStore,
+		ToolRegistry: tools.MapRegistry{
+			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(rootDir, nil),
+		},
+	}
+
+	resp, err := runner.Run(context.Background(), types.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["env"],"cwd":"."}`), 0)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !resp.Ok {
+		t.Fatalf("expected ok=true, got err=%+v", resp.Error)
+	}
+
+	var out struct {
+		Stdout string `json:"stdout"`
+	}
+	if err := json.Unmarshal(resp.Output, &out); err != nil {
+		t.Fatalf("Unmarshal output: %v", err)
+	}
+	if strings.Contains(out.Stdout, "AWS_SECRET_ACCESS_KEY") {
+		t.Fatalf("stdout should not include filtered env key")
+	}
+	if !strings.Contains(out.Stdout, "SAFE_KEY=keepme") {
+		t.Fatalf("stdout should retain non-sensitive env vars")
+	}
+}
+
+func TestDefaultShellDenylist_BlocksHighRiskCommands(t *testing.T) {
+	deny := tools.DefaultShellDenylist()
 	for _, name := range []string{
 		"bash",
 		"sh",

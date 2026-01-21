@@ -202,7 +202,7 @@ func init() {
 		ID:       types.ToolID("builtin.git"),
 		Manifest: builtinGitManifest,
 		NewInvoker: func(cfg BuiltinConfig) ToolInvoker {
-			return NewBuiltinGitInvoker(cfg.BashRootDir)
+			return NewBuiltinGitInvoker(cfg.ShellRootDir)
 		},
 	})
 }

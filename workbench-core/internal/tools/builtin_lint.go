@@ -98,7 +98,7 @@ func init() {
 		ID:       types.ToolID("builtin.lint"),
 		Manifest: builtinLintManifest,
 		NewInvoker: func(cfg BuiltinConfig) ToolInvoker {
-			return NewBuiltinLintInvoker(cfg.BashRootDir)
+			return NewBuiltinLintInvoker(cfg.ShellRootDir)
 		},
 	})
 }
@@ -585,4 +585,3 @@ func sliceContains(xs []string, want string) bool {
 	}
 	return false
 }
-

@@ -35,12 +35,12 @@ func TestVirtualToolsResource_ListIncludesBuiltin(t *testing.T) {
 	}
 	found := false
 	for _, e := range entries {
-		if e.Path == "/tools/builtin.bash" && e.IsDir {
+		if e.Path == "/tools/builtin.shell" && e.IsDir {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("expected /tools/builtin.bash to be listed, got %+v", entries)
+		t.Fatalf("expected /tools/builtin.shell to be listed, got %+v", entries)
 	}
 }
 

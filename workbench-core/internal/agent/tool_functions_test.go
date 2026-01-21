@@ -9,11 +9,11 @@ import (
 
 func TestManifestToFunctionTools_ExposesFunctionsAndRoutes(t *testing.T) {
 	manifest := types.ToolManifest{
-		ID:                types.ToolID("builtin.bash"),
+		ID:                types.ToolID("builtin.shell"),
 		Version:           "0.1.0",
 		Kind:              types.ToolKindBuiltin,
-		DisplayName:       "Builtin Bash",
-		Description:       "bash",
+		DisplayName:       "Builtin Shell",
+		Description:       "shell",
 		ExposeAsFunctions: true,
 		Actions: []types.ToolAction{
 			{
@@ -31,7 +31,7 @@ func TestManifestToFunctionTools_ExposesFunctionsAndRoutes(t *testing.T) {
 		t.Fatalf("expected 1 function tool, got %d", len(functions))
 	}
 	fn := functions[0].Function
-	if fn.Name != "builtin_bash_exec" {
+	if fn.Name != "builtin_shell_exec" {
 		t.Fatalf("unexpected function name %q", fn.Name)
 	}
 	route, ok := routes[fn.Name]

@@ -27,7 +27,7 @@ func init() {
 		NewInvoker: func(cfg BuiltinConfig) ToolInvoker {
 			root := strings.TrimSpace(cfg.RipgrepRootDir)
 			if root == "" {
-				root = cfg.BashRootDir
+				root = cfg.ShellRootDir
 			}
 			return NewBuiltinRipgrepInvoker(root)
 		},
@@ -41,8 +41,8 @@ const (
 
 // BuiltinRipgrepInvoker implements the builtin tool "builtin.ripgrep" (action: "search").
 //
-// Why this exists (vs using builtin.bash rg ...):
-//   - builtin.bash returns unstructured stdout, which is costly for the model to parse.
+// Why this exists (vs using builtin.shell rg ...):
+//   - builtin.shell returns unstructured stdout, which is costly for the model to parse.
 //   - builtin.ripgrep returns structured match records so the agent can reason cheaply
 //     (path + line + text) and then decide what to open next.
 //

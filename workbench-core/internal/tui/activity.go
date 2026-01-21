@@ -32,7 +32,7 @@ type Activity struct {
 	// Kind is the operation type (fs.read, fs.write, tool.run, ...).
 	Kind string
 
-	// Title is the short human label shown in the list (e.g. "Read /tools/builtin.bash").
+	// Title is the short human label shown in the list (e.g. "Read /tools/builtin.shell").
 	Title string
 
 	// Status is pending/ok/error.
@@ -66,7 +66,7 @@ type Activity struct {
 	CallID        string
 	Ok            string
 	Error         string
-	OutputPreview string // e.g. stdout/stderr preview for builtin.bash when available
+	OutputPreview string // e.g. stdout/stderr preview for builtin.shell when available
 
 	// Response metadata (telemetry only).
 	BytesLen  string

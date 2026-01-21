@@ -77,7 +77,7 @@ const (
 // BuiltinHTTPInvoker implements the builtin tool "builtin.http" (action: "fetch").
 //
 // This tool exists for the common "retrieve a URL" workflow without shelling out to
-// builtin.bash + curl. Like other builtins:
+// builtin.shell + curl. Like other builtins:
 //   - it is discovered via /tools (manifest JSON bytes)
 //   - it is executed via tool.run
 //   - it persists response.json (and any artifacts) under /results/<callId>/...

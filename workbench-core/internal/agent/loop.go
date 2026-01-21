@@ -158,8 +158,11 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 		hostOpTools = append(hostOpTools, a.ExtraTools...)
 	}
 
+	finalizeNudgeSent := false
+
 	for step := startStep; step <= maxSteps; step++ {
-		toolChoice, toolChoiceReason, turnFlags := toolChoiceForTurn(a.Model, turnUserMessage, turnHasToolOutput)
+		toolChoice, toolChoiceReason, turnFlags := toolChoiceForTurn(turnUserMessage, turnHasToolOutput)
+		envWanted, _ := turnFlags["envWanted"].(bool)
 		// #region agent log
 		debuglog.Log("toolcalling", "H1", "loop.go:runConversation", "step_start", map[string]any{
 			"step":          step,
@@ -167,7 +170,6 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			"msgsLen":       len(msgs),
 			"toolChoice":    toolChoice,
 			"toolChoiceWhy": toolChoiceReason,
-			"model":         strings.TrimSpace(a.Model),
 			"turnUserLen":   len(turnUserMessage),
 			"turnFlags":     turnFlags,
 			"toolsLen":      len(hostOpTools),
@@ -201,6 +203,29 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			"turnUserLen":        len(strings.TrimSpace(turnUserMessage)),
 		})
 		// #endregion
+
+		// Loop breaker: some models can get stuck repeatedly calling tools without ever
+		// calling final_answer. After enough tool outputs have been produced, inject a
+		// strong finalization nudge (once) to converge the turn.
+		//
+		// We keep toolChoice as-is (often "required") so the model can satisfy the
+		// protocol by calling final_answer.
+		if envWanted && turnHasToolOutput && !finalizeNudgeSent && step >= 12 {
+			finalizeNudgeSent = true
+			msgs = append(msgs, types.LLMMessage{
+				Role: "user",
+				Content: "You have already used the environment tools for this request. Now STOP calling tools.\n\n" +
+					"Call final_answer({\"text\":\"...\"}) NOW with your best possible response based on the tool outputs you already have.\n\n" +
+					"If something is missing, say exactly what and why, and what the user should provide next.",
+			})
+			// #region agent log
+			debuglog.Log("toolcalling", "H17", "loop.go:runConversation", "finalize_nudge_injected", map[string]any{
+				"step":       step,
+				"toolChoice": toolChoice,
+				"msgsLen":    len(msgs),
+			})
+			// #endregion
+		}
 
 		req := types.LLMRequest{
 			Model:              a.Model,
@@ -1544,9 +1569,8 @@ Always:
 `)
 }
 
-func toolChoiceForTurn(modelID string, userMsg string, turnHasToolOutput bool) (choice string, reason string, flags map[string]any) {
+func toolChoiceForTurn(userMsg string, turnHasToolOutput bool) (choice string, reason string, flags map[string]any) {
 	s := strings.ToLower(strings.TrimSpace(userMsg))
-	m := strings.ToLower(strings.TrimSpace(modelID))
 	flags = map[string]any{
 		"empty":       s == "",
 		"isShort":     len(s) <= 8,
@@ -1578,13 +1602,6 @@ func toolChoiceForTurn(modelID string, userMsg string, turnHasToolOutput bool) (
 	// for the entire turn. The model must call tools repeatedly and end with final_answer.
 	_ = turnHasToolOutput
 	if envWanted {
-		// Some models (notably some Anthropic providers) can get stuck in tool loops when
-		// toolChoice is forced to "required". Prefer "auto" so the model can end with a
-		// normal assistant reply when it has enough information, and rely on the system
-		// prompt + repair messages to enforce tool usage when truly needed.
-		if strings.HasPrefix(m, "anthropic/") {
-			return "auto", "anthropic_env_auto", flags
-		}
 		return "required", "explicit_env_request", flags
 	}
 
@@ -1710,7 +1727,7 @@ func validationHint(op types.HostOpRequest, err error) string {
 	case types.HostOpFSList:
 		return "For fs.list you must include a non-empty absolute \"path\" starting with \"/\" (example: {\"op\":\"fs.list\",\"path\":\"/tools\"})."
 	case types.HostOpFSRead:
-		return "For fs.read you must include a non-empty absolute \"path\" starting with \"/\" (example: {\"op\":\"fs.read\",\"path\":\"/tools/builtin.bash\",\"maxBytes\":2048})."
+		return "For fs.read you must include a non-empty absolute \"path\" starting with \"/\" (example: {\"op\":\"fs.read\",\"path\":\"/tools/builtin.shell\",\"maxBytes\":2048})."
 	case types.HostOpFSWrite, types.HostOpFSAppend:
 		return "For " + which + " you must include an absolute \"path\" starting with \"/\" and non-empty \"text\"."
 	case types.HostOpFSEdit:
@@ -1727,7 +1744,7 @@ func validationHint(op types.HostOpRequest, err error) string {
 		// Common confusions: "cat", "ack", "noop", "http.get".
 		lc := strings.ToLower(which)
 		if lc == "cat" || lc == "ack" || lc == "noop" {
-			return "You used an unknown op. If you want to run a shell command, you must first discover tools (fs.list(\"/tools\")), then use tool.run with builtin.bash."
+			return "You used an unknown op. If you want to run a shell command, you must first discover tools (fs.list(\"/tools\")), then use tool.run with builtin.shell."
 		}
 		if strings.Contains(lc, "http") || strings.Contains(lc, "get") {
 			return "You used an unknown op. If you want HTTP, you must discover tools (fs.list(\"/tools\")), then use tool.run with builtin.http."

@@ -255,7 +255,7 @@ func renderOpRequest(d map[string]string) string {
 
 func renderToolRunTranscript(toolID, actionID, input string) string {
 	switch toolID {
-	case "builtin.bash":
+	case "builtin.shell":
 		if actionID != "exec" {
 			return fmt.Sprintf("%s/%s", toolID, actionID)
 		}
@@ -557,7 +557,7 @@ func renderToolRunInspector(toolID, actionID, input string) string {
 	}
 
 	switch toolID {
-	case "builtin.bash":
+	case "builtin.shell":
 		if actionID != "exec" {
 			break
 		}

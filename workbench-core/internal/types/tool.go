@@ -8,7 +8,7 @@ import (
 )
 
 // ToolID is a unique identifier for a tool in dot-separated format.
-// Example: "github.com.acme.stock" or "workbench.builtin.bash".
+// Example: "github.com.acme.stock" or "workbench.builtin.shell".
 // ToolID is case-insensitive and normalized to lowercase.
 type ToolID string
 
