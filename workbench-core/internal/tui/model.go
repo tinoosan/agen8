@@ -308,6 +308,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			txt := ev.Data["text"]
 			if txt != "" {
+				// If the streaming item is no longer the last transcript entry, start a new one.
+				if m.streamingItemIdx >= 0 {
+					lastIdx := len(m.transcriptItems) - 1
+					if m.streamingItemIdx != lastIdx {
+						m.streamingItemIdx = -1
+						m.streamingBuf = nil
+					}
+				}
 				if m.streamingItemIdx < 0 {
 					// Start a streaming agent message at the end of the transcript.
 					// If the last transcript item is a Thinking block, insert a blank spacer
