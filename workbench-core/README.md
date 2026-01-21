@@ -4,13 +4,13 @@ Workbench Core is a local, agentic runtime that exposes an interactive CLI for r
 
 ## AFS abstraction
 
-Workbench also exposes an Agentic File System (AFS) abstraction—the concrete VFS entries under `/tools`, `/scratch`, `/project`, `/memory`, `/log`, and `/results`—that agents learn to discover and manipulate rather than assuming hidden APIs. Every command that touches project files works through this AFS surface, so tooling remains explicit, auditable, and reproducible.
+Workbench also exposes an Agentic File System (AFS) abstraction—the concrete VFS entries under `/project`, `/scratch`, `/log`, `/memory`, and `/results` (with `/tools` reserved for external/custom tools)—that agents learn to discover and manipulate rather than assuming hidden APIs. Every command that touches project files works through this AFS surface, so tooling remains explicit, auditable, and reproducible.
 
 Each AFS mount has a clear role:
 
 - `/project` maps to the real project workspace and should host user-visible artifacts.
 - `/scratch` is temporary scratch space scoped to the run.
-- `/tools` exposes discoverable tool manifests and metadata.
+- `/tools` exposes discoverable manifests for external/custom tools (builtin tools are defined directly in the system prompt).
 - `/log`, `/results`, `/memory`, and `/profile` provide debugging, telemetry, and memory utilities.
 
 ## Quick start
@@ -23,7 +23,7 @@ go build ./cmd/workbench
 ./workbench
 ```
 
-The default run opens a Bubble Tea-powered TUI where each message you submit becomes an agent turn that can discover tools under `/tools`, execute them via `tool.run`, and interact with run-scoped files under `/scratch`. Every run creates a session and writes results into the configured data directory (default: `~/.workbench` or `$XDG_STATE_HOME/workbench`).
+The default run opens a Bubble Tea-powered TUI where each message you submit becomes an agent turn. Builtin capabilities (shell, HTTP, trace, etc.) are described directly in the system prompt, while `/tools` only surfaces external/custom tools that require discovery via `tool.run`. Agents still interact with run-scoped files under `/scratch`. Every run creates a session and writes results into the configured data directory (default: `~/.workbench` or `$XDG_STATE_HOME/workbench`).
 
 ## Commands
 
@@ -64,4 +64,4 @@ You can inspect `internal/app` for the runtime orchestration (chat sessions, TUI
 - **Control:** Runs entirely locally with configurable `dataDir`/`workdir`, so nothing depends on external services.
 - **Transparency:** Every session and run is stored in the data directory, and you can inspect history, artifacts, or metadata via the CLI commands.
 - **Reproducibility:** Sessions create structured state (`session`, `run`, `/scratch`, `/history`), making it easy to resume, replay, or audit work.
-- **Explicit tooling:** Agents discover tools through the `/tools` virtual filesystem and call them via `tool.run`, so integrations are clear instead of hidden behind prompts.
+- **Explicit tooling:** Builtin capabilities (shell, HTTP, trace) are spelled out in the system prompt, and `/tools` is reserved for external/custom tools that must be discovered and invoked with `tool.run`, keeping integrations transparent.
