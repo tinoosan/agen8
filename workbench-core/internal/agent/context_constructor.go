@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/debuglog"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/internal/skills"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
@@ -41,8 +43,9 @@ type ContextConstructor struct {
 	RunID     string
 	SessionID string
 
-	TraceStore   store.TraceStore
-	HistoryStore store.HistoryReader
+	TraceStore    store.TraceStore
+	HistoryStore  store.HistoryReader
+	SkillsManager *skills.Manager
 
 	// IncludeHistoryOps controls whether the constructor includes environment/host ops
 	// from history in addition to user/agent messages.
@@ -407,6 +410,33 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	systemB.WriteString(c.cache.memorySection)
 	systemB.WriteString(c.cache.attachSection)
 
+	if c.SkillsManager != nil {
+		if entries := c.SkillsManager.Entries(); len(entries) > 0 {
+			systemB.WriteString("\n\n<available_skills>\n")
+			for _, entry := range entries {
+				name := strings.TrimSpace(entry.Skill.Name)
+				if name == "" {
+					name = entry.Dir
+				}
+				description := strings.TrimSpace(entry.Skill.Description)
+				systemB.WriteString("  <skill>\n")
+				systemB.WriteString("    <name>")
+				systemB.WriteString(escapeXML(name))
+				systemB.WriteString("</name>\n")
+				if description != "" {
+					systemB.WriteString("    <description>")
+					systemB.WriteString(escapeXML(description))
+					systemB.WriteString("</description>\n")
+				}
+				systemB.WriteString("    <location>")
+				systemB.WriteString(escapeXML(fmt.Sprintf("/skills/%s/SKILL.md", entry.Dir)))
+				systemB.WriteString("</location>\n")
+				systemB.WriteString("  </skill>\n")
+			}
+			systemB.WriteString("</available_skills>\n")
+		}
+	}
+
 	// Rebuild attachment references for the manifest (cheap, bounded slice).
 	for _, att := range c.FileAttachments {
 		manifest.References = append(manifest.References, struct {
@@ -524,6 +554,17 @@ func guessFenceLang(vpath string) string {
 	default:
 		return ""
 	}
+}
+
+func escapeXML(value string) string {
+	if value == "" {
+		return ""
+	}
+	var b strings.Builder
+	if err := xml.EscapeText(&b, []byte(value)); err != nil {
+		return value
+	}
+	return b.String()
 }
 
 func (c *ContextConstructor) summarizeLastOp(failureBump bool) string {

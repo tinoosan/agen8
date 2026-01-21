@@ -17,6 +17,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/llm"
 	"github.com/tinoosan/workbench-core/internal/resources"
+	"github.com/tinoosan/workbench-core/internal/skills"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/internal/types"
@@ -97,6 +98,16 @@ func setupTUIChatRuntime(
 	// /project depends on a user-provided OS directory, so it is mounted outside the factory.
 	fs.Mount(vfs.MountProject, workdirRes)
 
+	skillRoots := []string{
+		filepath.Join(cfg.DataDir, "skills"),
+		filepath.Join(workdirAbs, "skills"),
+	}
+	skillMgr := skills.NewManager(skillRoots)
+	if err := skillMgr.Scan(); err != nil {
+		return nil, fmt.Errorf("scan skills: %w", err)
+	}
+	fs.Mount("skills", skills.NewResource(skillMgr))
+
 	// Pull resource handles back out for wiring and debug data.
 	_, wsr, _, _ := fs.Resolve("/" + vfs.MountScratch)
 	workspace := wsr.(*resources.DirResource)
@@ -121,6 +132,7 @@ func setupTUIChatRuntime(
 			"/memory":  "(virtual)",
 			"/profile": "(global)",
 			"/history": historyRes.BaseDir,
+			"/skills":  "(virtual)",
 		},
 		Console: boolPtr(false),
 	})
@@ -248,6 +260,7 @@ func setupTUIChatRuntime(
 		SessionID:         run.SessionID,
 		TraceStore:        traceStore,
 		HistoryStore:      historyRes.Store,
+		SkillsManager:     skillMgr,
 		IncludeHistoryOps: derefBool(opts.IncludeHistoryOps, true),
 		MaxProfileBytes:   opts.MaxProfileBytes,
 		MaxMemoryBytes:    opts.MaxMemoryBytes,
