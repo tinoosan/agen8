@@ -145,6 +145,10 @@ func SupportsReasoningEffort(modelID string) bool {
 		return true
 	}
 
+	if strings.HasPrefix(id, "z-ai/glm-4") {
+		return true
+	}
+
 	return false
 }
 
