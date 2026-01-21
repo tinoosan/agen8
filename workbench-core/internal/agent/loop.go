@@ -43,6 +43,9 @@ type Agent struct {
 	// Hooks are optional observability callbacks invoked by the agent loop.
 	Hooks Hooks
 
+	// MaxTokens is the maximum output tokens per turn. If 0, the LLM client's default is used.
+	MaxTokens int
+
 	// ExtraTools are additional function tools exposed by the host (derived from manifests).
 	ExtraTools []types.Tool
 	// ToolFunctionRoutes map function names back to tool.run routes.
@@ -105,7 +108,7 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			Model:            a.Model,
 			System:           system,
 			Messages:         msgs,
-			MaxTokens:        1024,
+			MaxTokens:        a.MaxTokens,
 			Tools:            hostOpTools,
 			ToolChoice:       "auto",
 			JSONOnly:         false,

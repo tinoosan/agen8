@@ -97,6 +97,9 @@ type Config struct {
 	// exposed as direct function tools (no discovery required).
 	ToolManifests []types.ToolManifest
 
+	// MaxTokens restricts the output length. 0 means use client default.
+	MaxTokens int
+
 	Hooks Hooks
 }
 
@@ -128,6 +131,7 @@ func New(cfg Config) (*Agent, error) {
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
 		SystemPrompt:     system,
 		Context:          cfg.Context,
+		MaxTokens:        cfg.MaxTokens,
 
 		Hooks:              cfg.Hooks,
 		ExtraTools:         extraTools,

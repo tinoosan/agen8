@@ -49,7 +49,7 @@ func NewClientFromEnv() (*Client, error) {
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 
-	defaultMaxTokens := 1024
+	defaultMaxTokens := 4096
 	if v := strings.TrimSpace(os.Getenv("OPENROUTER_MAX_TOKENS")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			defaultMaxTokens = n
