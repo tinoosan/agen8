@@ -86,26 +86,6 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 	}
 	lastResponseID = strings.TrimSpace(lastResponseID)
 
-	turnUserMessage := ""
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
-		if strings.TrimSpace(m.Role) != "user" {
-			continue
-		}
-		c := strings.TrimSpace(m.Content)
-		if c == "" {
-			continue
-		}
-		if strings.HasPrefix(c, "HostOpResponse:") {
-			continue
-		}
-		if strings.HasPrefix(c, "Your last message was not valid JSON") || strings.HasPrefix(c, "Your last JSON op was invalid:") {
-			continue
-		}
-		turnUserMessage = c
-		break
-	}
-
 	hostOpTools := HostOpFunctions()
 	if len(a.ExtraTools) != 0 {
 		hostOpTools = append(hostOpTools, a.ExtraTools...)
@@ -120,9 +100,6 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 				return "", nil, 0, err
 			}
 			system = updatedSystem
-		}
-		if strings.TrimSpace(turnUserMessage) != "" {
-			system = strings.TrimSpace(system) + "\n\n## Current User Request\n\n" + strings.TrimSpace(turnUserMessage) + "\n"
 		}
 
 		req := types.LLMRequest{
