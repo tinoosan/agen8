@@ -18,6 +18,89 @@ type fakeLLM struct {
 	i       int
 }
 
+func TestAgentLoopV0_ResolvesRelativePaths(t *testing.T) {
+	tc := types.ToolCall{
+		Type: "function",
+		Function: types.ToolCallFunction{
+			Name:      "fs_read",
+			Arguments: `{"path":"docs/example.txt"}`,
+		},
+	}
+
+	req, err := functionCallToHostOp(tc, nil)
+	if err != nil {
+		t.Fatalf("functionCallToHostOp: %v", err)
+	}
+	if req.Op != types.HostOpFSRead {
+		t.Fatalf("expected fs.read, got %q", req.Op)
+	}
+	if req.Path != "/project/docs/example.txt" {
+		t.Fatalf("expected /project/docs/example.txt, got %q", req.Path)
+	}
+
+	tc = types.ToolCall{
+		Type: "function",
+		Function: types.ToolCallFunction{
+			Name:      "tool_run",
+			Arguments: `{"toolId":"builtin.shell","actionId":"exec","input":{"cwd":"notes"}}`,
+		},
+	}
+	req, err = functionCallToHostOp(tc, nil)
+	if err != nil {
+		t.Fatalf("functionCallToHostOp tool_run: %v", err)
+	}
+	var input map[string]string
+	if err := json.Unmarshal(req.Input, &input); err != nil {
+		t.Fatalf("unmarshal input: %v", err)
+	}
+	if input["cwd"] != "/project/notes" {
+		t.Fatalf("expected cwd /project/notes, got %q", input["cwd"])
+	}
+}
+
+func TestAgentLoopV0_BuiltinShellExec_RoutesToToolRun(t *testing.T) {
+	tc := types.ToolCall{
+		Type: "function",
+		Function: types.ToolCallFunction{
+			Name:      "builtin_shell_exec",
+			Arguments: `{"argv":["ls"],"cwd":"src","stdin":"hi"}`,
+		},
+	}
+	req, err := functionCallToHostOp(tc, nil)
+	if err != nil {
+		t.Fatalf("builtin_shell_exec: %v", err)
+	}
+	if req.Op != types.HostOpToolRun || req.ToolID != types.ToolID("builtin.shell") || req.ActionID != "exec" {
+		t.Fatalf("expected tool.run/builtin.shell, got %+v", req)
+	}
+	var input struct {
+		Argv  []string `json:"argv"`
+		Cwd   string   `json:"cwd"`
+		Stdin string   `json:"stdin"`
+	}
+	if err := json.Unmarshal(req.Input, &input); err != nil {
+		t.Fatalf("unmarshal shell input: %v", err)
+	}
+	if input.Cwd != "/project/src" {
+		t.Fatalf("expected cwd /project/src, got %q", input.Cwd)
+	}
+
+	tc = types.ToolCall{
+		Type: "function",
+		Function: types.ToolCallFunction{
+			Name:      "builtin_http_fetch",
+			Arguments: `{"url":"https://example.com","method":"GET"}`,
+		},
+	}
+	req, err = functionCallToHostOp(tc, nil)
+	if err != nil {
+		t.Fatalf("builtin_http_fetch: %v", err)
+	}
+	if req.ToolID != types.ToolID("builtin.http") || req.ActionID != "fetch" {
+		t.Fatalf("expected builtin.http fetch, got %+v", req)
+	}
+}
+
 func (f *fakeLLM) Generate(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
 	_ = ctx
 	_ = req
@@ -163,7 +246,7 @@ func TestAgentLoopV0_Run_ExecutesOpsUntilFinal(t *testing.T) {
 		return types.HostOpResponse{Op: req.Op, Ok: true, Text: string(b)}
 	}
 
-	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model"}
 	final, err := a.Run(context.Background(), "goal")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -196,7 +279,7 @@ func TestAgentLoopV0_RunConversation_ToolCalling_ExecutesAndReturnsFinalText(t *
 		called = append(called, req)
 		return types.HostOpResponse{Op: req.Op, Ok: true, Entries: []string{"/tools/builtin.shell"}}
 	}
-	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model"}
 
 	final, msgs, steps, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
 	if err != nil {
@@ -266,7 +349,7 @@ func TestAgentLoopV0_RunConversation_ToolCalling_BatchExecutesAllOps(t *testing.
 		mu.Unlock()
 		return types.HostOpResponse{Op: req.Op, Ok: true}
 	}
-	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model"}
 
 	final, _, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
 	if err != nil {
@@ -342,10 +425,10 @@ func TestAgent_RunConversation_FunctionToolRoutesToToolRun(t *testing.T) {
 	}
 
 	a, err := New(Config{
-		LLM:           llm,
-		Exec:          HostExecFunc(exec),
-		Model:         "test-model",
-		MaxSteps:      5,
+		LLM:   llm,
+		Exec:  HostExecFunc(exec),
+		Model: "test-model",
+
 		ToolManifests: []types.ToolManifest{manifest},
 	})
 	if err != nil {
@@ -386,38 +469,6 @@ func TestAgent_RunConversation_FunctionToolRoutesToToolRun(t *testing.T) {
 	}
 }
 
-func TestAgentLoopV0_RunConversation_GracefulMaxSteps_Finalizes(t *testing.T) {
-	llm := &fakeLLM{
-		Replies: []string{
-			`{"op":"fs.list","path":"/tools"}`,
-			`{"op":"final","text":"summary"}`,
-		},
-	}
-	var called []types.HostOpRequest
-	exec := func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
-		_ = ctx
-		called = append(called, req)
-		return types.HostOpResponse{Op: req.Op, Ok: true}
-	}
-	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 1}
-	final, msgs, steps, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
-	if err != nil {
-		t.Fatalf("RunConversation: %v", err)
-	}
-	if final != "summary" {
-		t.Fatalf("unexpected final %q", final)
-	}
-	if steps != 2 {
-		t.Fatalf("expected steps=2 (finalization step), got %d", steps)
-	}
-	if len(msgs) == 0 {
-		t.Fatalf("expected updated messages")
-	}
-	if len(called) != 1 || called[0].Op != types.HostOpFSList {
-		t.Fatalf("expected one fs.list call, got %+v", called)
-	}
-}
-
 func TestAgentLoopV0_RunConversationWithCheckpoints_ResumesWithoutRepeatingOps(t *testing.T) {
 	tmp := t.TempDir()
 	cpPath := filepath.Join(tmp, "agent_checkpoint.json")
@@ -437,7 +488,7 @@ func TestAgentLoopV0_RunConversationWithCheckpoints_ResumesWithoutRepeatingOps(t
 		ErrAt: 2,
 		Err:   errors.New("transient llm error"),
 	}
-	a1 := &Agent{LLM: llm1, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	a1 := &Agent{LLM: llm1, Exec: HostExecFunc(exec), Model: "test-model"}
 	_, _, _, err := a1.RunConversationWithCheckpoints(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}}, cpPath)
 	if err == nil {
 		t.Fatalf("expected error")
@@ -456,7 +507,7 @@ func TestAgentLoopV0_RunConversationWithCheckpoints_ResumesWithoutRepeatingOps(t
 			`{"op":"final","text":"done"}`,
 		},
 	}
-	a2 := &Agent{LLM: llm2, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	a2 := &Agent{LLM: llm2, Exec: HostExecFunc(exec), Model: "test-model"}
 	final, _, steps, err := a2.RunConversationWithCheckpoints(context.Background(), []types.LLMMessage{{Role: "user", Content: "ignored"}}, cpPath)
 	if err != nil {
 		t.Fatalf("RunConversationWithCheckpoints: %v", err)
@@ -497,7 +548,7 @@ func TestAgentLoopV0_Run_PropagatesPreviousResponseIDAcrossSteps(t *testing.T) {
 		return types.HostOpResponse{Ok: true}
 	}
 
-	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model"}
 	final, err := a.Run(context.Background(), "goal")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -536,8 +587,8 @@ func TestAgentLoopV0_Run_StreamsFinalTextOnly(t *testing.T) {
 			_ = req
 			return types.HostOpResponse{Ok: true}
 		}),
-		Model:    "test-model",
-		MaxSteps: 2,
+		Model: "test-model",
+
 		Hooks: Hooks{
 			OnToken: func(step int, text string) {
 				_ = step
@@ -579,8 +630,8 @@ func TestAgentLoopV0_Run_ForwardsReasoningToHookAndDoesNotAffectOutput(t *testin
 			_ = req
 			return types.HostOpResponse{Ok: true}
 		}),
-		Model:    "test-model",
-		MaxSteps: 2,
+		Model: "test-model",
+
 		Hooks: Hooks{
 			OnToken: func(step int, text string) {
 				_ = step
@@ -640,7 +691,7 @@ func TestAgentLoopV0_RunConversation_BatchSequential_ExecutesOpsInOrder(t *testi
 		return types.HostOpResponse{Op: req.Op, Ok: true, Text: req.Path}
 	}
 
-	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model"}
 	final, msgs, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
 	if err != nil {
 		t.Fatalf("RunConversation: %v", err)
@@ -691,7 +742,7 @@ func TestAgentLoopV0_RunConversation_BatchParallel_PreservesResultOrder(t *testi
 		return types.HostOpResponse{Op: req.Op, Ok: true, Text: req.Path}
 	}
 
-	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model"}
 	final, msgs, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
 	if err != nil {
 		t.Fatalf("RunConversation: %v", err)
@@ -741,7 +792,7 @@ func TestAgentLoopV0_RunConversation_InvalidBatch_DoesNotExecuteOps(t *testing.T
 		return types.HostOpResponse{Op: req.Op, Ok: true}
 	}
 
-	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model"}
 	final, msgs, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
 	if err != nil {
 		t.Fatalf("RunConversation: %v", err)
@@ -825,7 +876,7 @@ func TestAgentLoopV0_RunConversation_BatchSequential_AllowsToolRun(t *testing.T)
 		}
 	}
 
-	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model"}
 	final, msgs, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
 	if err != nil {
 		t.Fatalf("RunConversation: %v", err)
@@ -890,7 +941,7 @@ func TestAgentLoopV0_RunConversation_BatchParallel_AllowsToolRun(t *testing.T) {
 		}
 	}
 
-	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model", MaxSteps: 5}
+	a := &Agent{LLM: llm, Exec: HostExecFunc(exec), Model: "test-model"}
 	final, msgs, _, err := a.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "goal"}})
 	if err != nil {
 		t.Fatalf("RunConversation: %v", err)

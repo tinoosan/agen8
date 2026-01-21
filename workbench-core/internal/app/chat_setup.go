@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -180,11 +179,11 @@ func setupTUIChatRuntime(
 	}
 
 	run.Runtime = &types.RunRuntimeConfig{
-		DataDir:               cfg.DataDir,
-		Model:                 model,
-		ReasoningEffort:       strings.TrimSpace(opts.ReasoningEffort),
-		ReasoningSummary:      strings.TrimSpace(opts.ReasoningSummary),
-		MaxSteps:              opts.MaxSteps,
+		DataDir:          cfg.DataDir,
+		Model:            model,
+		ReasoningEffort:  strings.TrimSpace(opts.ReasoningEffort),
+		ReasoningSummary: strings.TrimSpace(opts.ReasoningSummary),
+
 		MaxTraceBytes:         opts.MaxTraceBytes,
 		MaxMemoryBytes:        opts.MaxMemoryBytes,
 		MaxProfileBytes:       opts.MaxProfileBytes,
@@ -227,11 +226,8 @@ func setupTUIChatRuntime(
 		Multiplier:   2.0,
 	}))
 
-	systemPromptBytes, err := os.ReadFile("internal/agent/INITIAL_PROMPT.md")
-	if err != nil {
-		return nil, fmt.Errorf("read internal/agent/INITIAL_PROMPT.md: %w", err)
-	}
-	baseSystemPrompt := string(systemPromptBytes)
+	// Use the default system prompt embedded in the agent package.
+	baseSystemPrompt := ""
 
 	constructor := &agent.ContextConstructor{
 		FS:                fs,
@@ -502,8 +498,8 @@ func setupTUIChatRuntime(
 		EnableWebSearch:  opts.WebSearchEnabled,
 		SystemPrompt:     baseSystemPrompt,
 		Context:          constructor,
-		MaxSteps:         opts.MaxSteps,
-		ToolManifests:    toolManifests,
+
+		ToolManifests: toolManifests,
 	})
 	if err != nil {
 		return nil, err

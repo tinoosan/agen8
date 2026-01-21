@@ -73,9 +73,6 @@ type RunRuntimeConfig struct {
 	// Model is the configured LLM model identifier for this run.
 	Model string `json:"model,omitempty"`
 
-	// MaxSteps is the maximum number of agent loop steps allowed per user turn.
-	MaxSteps int `json:"maxSteps,omitempty"`
-
 	// Context budgets applied by the ContextUpdater per step.
 	MaxTraceBytes   int `json:"maxTraceBytes,omitempty"`
 	MaxMemoryBytes  int `json:"maxMemoryBytes,omitempty"`

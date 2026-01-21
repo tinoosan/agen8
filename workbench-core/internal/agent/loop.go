@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -51,10 +53,6 @@ type Agent struct {
 
 	// Context optionally refreshes bounded context (memory/profile/log/etc) per model step.
 	Context ContextSource
-
-	// MaxSteps caps the number of model -> host op iterations.
-	// If zero, a default is used.
-	MaxSteps int
 
 	// Hooks are optional observability callbacks invoked by the agent loop.
 	Hooks Hooks
@@ -120,14 +118,6 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 		return "", nil, 0, fmt.Errorf("msgs is required")
 	}
 
-	maxSteps := a.MaxSteps
-	if maxSteps == 0 {
-		maxSteps = 20
-	}
-	if maxSteps < 1 {
-		return "", nil, 0, fmt.Errorf("MaxSteps must be >= 1")
-	}
-
 	baseSystem := strings.TrimSpace(a.SystemPrompt)
 	if baseSystem == "" {
 		baseSystem = agentLoopV0SystemPrompt()
@@ -160,13 +150,13 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 
 	finalizeNudgeSent := false
 
-	for step := startStep; step <= maxSteps; step++ {
+	for step := startStep; ; step++ {
 		toolChoice, toolChoiceReason, turnFlags := toolChoiceForTurn(turnUserMessage, turnHasToolOutput)
 		envWanted, _ := turnFlags["envWanted"].(bool)
 		// #region agent log
 		debuglog.Log("toolcalling", "H1", "loop.go:runConversation", "step_start", map[string]any{
-			"step":          step,
-			"maxSteps":      maxSteps,
+			"step": step,
+
 			"msgsLen":       len(msgs),
 			"toolChoice":    toolChoice,
 			"toolChoiceWhy": toolChoiceReason,
@@ -1064,299 +1054,6 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			}
 		}
 	}
-
-	// MaxSteps reached: attempt one-shot graceful finalization.
-	if strings.TrimSpace(checkpointPath) != "" {
-		_ = SaveAgentCheckpoint(checkpointPath, AgentCheckpoint{
-			UserMessage:    turnUserMessage,
-			NextStep:       maxSteps + 1,
-			Messages:       msgs,
-			LastOp:         lastOpForCheckpoint,
-			LastResponseID: lastResponseID,
-		})
-	}
-	final, updated, usedSteps, err := a.finalizeOnMaxSteps(ctx, baseSystem, msgs, maxSteps+1, lastResponseID)
-	if err != nil {
-		return "", updated, maxSteps, fmt.Errorf("agent exceeded max steps (%d) without final: %w", maxSteps, err)
-	}
-	_ = ClearAgentCheckpoint(checkpointPath)
-	return final, updated, usedSteps, nil
-}
-
-func (a *Agent) finalizeOnMaxSteps(ctx context.Context, baseSystem string, msgs []types.LLMMessage, step int, lastResponseID string) (final string, updated []types.LLMMessage, usedSteps int, err error) {
-	// Ask the model to stop and provide a final summary without further host ops.
-	msgs = append(msgs, types.LLMMessage{
-		Role:    "user",
-		Content: "You have reached the maximum step limit. Return a final response summarizing what has been completed so far, what remains, and any important context for resuming. Return ONLY one JSON object: {\"op\":\"final\",\"text\":\"...\"}.",
-	})
-
-	system := baseSystem
-	if a.Context != nil {
-		updatedSys, sysErr := a.Context.SystemPrompt(ctx, baseSystem, step)
-		if sysErr != nil {
-			return "", msgs, step, sysErr
-		}
-		system = updatedSys
-	}
-
-	req := types.LLMRequest{
-		Model:              a.Model,
-		System:             system,
-		Messages:           msgs,
-		MaxTokens:          1024,
-		JSONOnly:           true,
-		ResponseSchema:     hostOpResponseSchema(),
-		EnableWebSearch:    a.EnableWebSearch,
-		PreviousResponseID: strings.TrimSpace(lastResponseID),
-		ReasoningEffort:    strings.TrimSpace(a.ReasoningEffort),
-		ReasoningSummary:   strings.TrimSpace(a.ReasoningSummary),
-	}
-
-	var resp types.LLMResponse
-	var callErr error
-	if s, ok := a.LLM.(types.LLMClientStreaming); ok {
-		dec := &finalTextStreamDecoder{}
-		// #region agent log
-		streamTextChunkN := 0
-		streamTextBytes := 0
-		streamDecoderEmittedBytes := 0
-		streamRawEmittedBytes := 0
-		streamLoggedFirst := false
-		streamMode := "unknown" // "unknown" | "raw" | "json"
-		streamModeLogged := false
-		var streamPrefix strings.Builder
-		const streamPrefixMax = 1024
-		// #endregion
-		// #region agent log
-		// Capture provider-supplied reasoning summaries (NOT raw chain-of-thought).
-		var reasoningBuf strings.Builder
-		reasoningTextN := 0
-		reasoningSignalN := 0
-		reasoningCharsTotal := 0
-		// #endregion
-		resp, callErr = s.GenerateStream(ctx, req, func(chunk types.LLMStreamChunk) error {
-			if chunk.Done {
-				if a.Hooks.OnStreamChunk != nil {
-					a.Hooks.OnStreamChunk(step, chunk)
-				}
-				// #region agent log
-				debuglog.Log("toolcalling", "H16", "loop.go:finalizeOnMaxSteps", "stream_text_totals", map[string]any{
-					"step":              step,
-					"model":             strings.TrimSpace(a.Model),
-					"toolChoice":        "none",
-					"jsonOnly":          req.JSONOnly,
-					"hasSchema":         req.ResponseSchema != nil,
-					"mode":              streamMode,
-					"textChunks":        streamTextChunkN,
-					"textBytes":         streamTextBytes,
-					"decoderEmittedB":   streamDecoderEmittedBytes,
-					"decoderEmittedAny": streamDecoderEmittedBytes != 0,
-					"rawEmittedB":       streamRawEmittedBytes,
-					"rawEmittedAny":     streamRawEmittedBytes != 0,
-				})
-				// #endregion
-				// #region agent log
-				if reasoningSignalN != 0 || reasoningTextN != 0 {
-					prev := reasoningBuf.String()
-					if len(prev) > 800 {
-						prev = prev[:800] + "…"
-					}
-					debuglog.Log("toolcalling", "H13", "loop.go:finalizeOnMaxSteps", "reasoning_summary_seen", map[string]any{
-						"step":               step,
-						"toolChoice":         "none",
-						"reasoningSignalN":   reasoningSignalN,
-						"reasoningTextN":     reasoningTextN,
-						"reasoningChars":     reasoningCharsTotal,
-						"reasoningStoredLen": reasoningBuf.Len(),
-						"reasoningPreview":   prev,
-					})
-				}
-				// #endregion
-				return nil
-			}
-			if chunk.IsReasoning {
-				if a.Hooks.OnStreamChunk != nil {
-					a.Hooks.OnStreamChunk(step, chunk)
-				}
-				// #region agent log
-				reasoningSignalN++
-				if chunk.Text != "" {
-					reasoningTextN++
-					reasoningCharsTotal += len(chunk.Text)
-					if reasoningBuf.Len() < 8*1024 {
-						remain := 8*1024 - reasoningBuf.Len()
-						if len(chunk.Text) > remain {
-							reasoningBuf.WriteString(chunk.Text[:remain])
-						} else {
-							reasoningBuf.WriteString(chunk.Text)
-						}
-					}
-				}
-				// #endregion
-				return nil
-			}
-			if chunk.Text == "" {
-				return nil
-			}
-			// #region agent log
-			streamTextChunkN++
-			streamTextBytes += len(chunk.Text)
-			// #endregion
-			emit := func(s string) {
-				if s == "" {
-					return
-				}
-				// #region agent log
-				streamRawEmittedBytes += len(s)
-				// #endregion
-				if a.Hooks.OnToken != nil {
-					a.Hooks.OnToken(step, s)
-				}
-			}
-
-			if streamMode == "unknown" {
-				if streamPrefix.Len() < streamPrefixMax {
-					remain := streamPrefixMax - streamPrefix.Len()
-					if len(chunk.Text) > remain {
-						streamPrefix.WriteString(chunk.Text[:remain])
-					} else {
-						streamPrefix.WriteString(chunk.Text)
-					}
-				}
-				buf := streamPrefix.String()
-				first := byte(0)
-				for i := 0; i < len(buf); i++ {
-					switch buf[i] {
-					case ' ', '\t', '\r', '\n':
-						continue
-					default:
-						first = buf[i]
-					}
-					if first != 0 {
-						break
-					}
-				}
-				if first == 0 && streamPrefix.Len() < streamPrefixMax {
-					return nil
-				}
-				if first == '{' {
-					streamMode = "json"
-				} else {
-					streamMode = "raw"
-				}
-				// #region agent log
-				if !streamModeLogged {
-					streamModeLogged = true
-					debuglog.Log("toolcalling", "H16", "loop.go:finalizeOnMaxSteps", "stream_mode_selected", map[string]any{
-						"step":      step,
-						"model":     strings.TrimSpace(a.Model),
-						"mode":      streamMode,
-						"firstByte": string([]byte{first}),
-					})
-				}
-				// #endregion
-				prefix := streamPrefix.String()
-				streamPrefix.Reset()
-				if streamMode == "raw" {
-					emit(prefix)
-					return nil
-				}
-				out := dec.Consume(prefix)
-				// #region agent log
-				streamDecoderEmittedBytes += len(out)
-				// #endregion
-				if !streamLoggedFirst {
-					streamLoggedFirst = true
-					prev := prefix
-					if len(prev) > 120 {
-						prev = prev[:120] + "…"
-					}
-					debuglog.Log("toolcalling", "H16", "loop.go:finalizeOnMaxSteps", "stream_first_text", map[string]any{
-						"step":      step,
-						"model":     strings.TrimSpace(a.Model),
-						"mode":      streamMode,
-						"chunkLen":  len(prefix),
-						"chunkPrev": prev,
-						"outLen":    len(out),
-					})
-				}
-				if out != "" {
-					emit(out)
-				}
-				return nil
-			}
-
-			if streamMode == "raw" {
-				if !streamLoggedFirst {
-					streamLoggedFirst = true
-					prev := chunk.Text
-					if len(prev) > 120 {
-						prev = prev[:120] + "…"
-					}
-					// #region agent log
-					debuglog.Log("toolcalling", "H16", "loop.go:finalizeOnMaxSteps", "stream_first_text", map[string]any{
-						"step":      step,
-						"model":     strings.TrimSpace(a.Model),
-						"mode":      streamMode,
-						"chunkLen":  len(chunk.Text),
-						"chunkPrev": prev,
-						"outLen":    len(chunk.Text),
-					})
-					// #endregion
-				}
-				emit(chunk.Text)
-				return nil
-			}
-
-			out := dec.Consume(chunk.Text)
-			// #region agent log
-			streamDecoderEmittedBytes += len(out)
-			// #endregion
-			if !streamLoggedFirst {
-				streamLoggedFirst = true
-				prev := chunk.Text
-				if len(prev) > 120 {
-					prev = prev[:120] + "…"
-				}
-				debuglog.Log("toolcalling", "H16", "loop.go:finalizeOnMaxSteps", "stream_first_text", map[string]any{
-					"step":      step,
-					"model":     strings.TrimSpace(a.Model),
-					"mode":      streamMode,
-					"chunkLen":  len(chunk.Text),
-					"chunkPrev": prev,
-					"outLen":    len(out),
-				})
-			}
-			if out != "" {
-				emit(out)
-			}
-			return nil
-		})
-	} else {
-		resp, callErr = a.LLM.Generate(ctx, req)
-	}
-	if callErr != nil {
-		return "", msgs, step, callErr
-	}
-
-	opJSON, parseErr := extractSingleJSONObject(resp.Text)
-	if parseErr != nil {
-		return "", msgs, step, parseErr
-	}
-
-	var op types.HostOpRequest
-	if err := json.Unmarshal([]byte(opJSON), &op); err != nil {
-		return "", msgs, step, err
-	}
-	if err := validateModelOp(op); err != nil {
-		return "", msgs, step, err
-	}
-	if strings.TrimSpace(op.Op) != types.HostOpFinal {
-		return "", msgs, step, fmt.Errorf("expected op=final, got %q", strings.TrimSpace(op.Op))
-	}
-
-	msgs = append(msgs, types.LLMMessage{Role: "assistant", Content: strings.TrimSpace(opJSON)})
-	return strings.TrimSpace(op.Text), msgs, step, nil
 }
 
 func extractTurnUserMessage(msgs []types.LLMMessage) string {
@@ -1410,6 +1107,75 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 	}
 
 	switch name {
+	case "builtin_shell_exec":
+		var args struct {
+			Argv  []string `json:"argv"`
+			Cwd   string   `json:"cwd"`
+			Stdin string   `json:"stdin"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		if len(args.Argv) == 0 {
+			return types.HostOpRequest{}, fmt.Errorf("argv is required")
+		}
+		inputMap := map[string]any{"argv": args.Argv}
+		if strings.TrimSpace(args.Cwd) != "" {
+			inputMap["cwd"] = resolveVFSPath(args.Cwd)
+		}
+		if args.Stdin != "" {
+			inputMap["stdin"] = args.Stdin
+		}
+		inp, err := json.Marshal(inputMap)
+		if err != nil {
+			return types.HostOpRequest{}, err
+		}
+		return types.HostOpRequest{
+			Op:       types.HostOpToolRun,
+			ToolID:   types.ToolID("builtin.shell"),
+			ActionID: "exec",
+			Input:    inp,
+		}, nil
+
+	case "builtin_http_fetch":
+		var args struct {
+			URL             string            `json:"url"`
+			Method          string            `json:"method"`
+			Headers         map[string]string `json:"headers"`
+			Body            string            `json:"body"`
+			MaxBytes        *int              `json:"maxBytes"`
+			FollowRedirects *bool             `json:"followRedirects"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		inputMap := map[string]any{"url": args.URL}
+		if strings.TrimSpace(args.Method) != "" {
+			inputMap["method"] = args.Method
+		}
+		if args.Headers != nil {
+			inputMap["headers"] = args.Headers
+		}
+		if args.Body != "" {
+			inputMap["body"] = args.Body
+		}
+		if args.MaxBytes != nil {
+			inputMap["maxBytes"] = *args.MaxBytes
+		}
+		if args.FollowRedirects != nil {
+			inputMap["followRedirects"] = *args.FollowRedirects
+		}
+		inp, err := json.Marshal(inputMap)
+		if err != nil {
+			return types.HostOpRequest{}, err
+		}
+		return types.HostOpRequest{
+			Op:       types.HostOpToolRun,
+			ToolID:   types.ToolID("builtin.http"),
+			ActionID: "fetch",
+			Input:    inp,
+		}, nil
+
 	case "fs_list":
 		var args struct {
 			Path string `json:"path"`
@@ -1417,7 +1183,7 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return types.HostOpRequest{}, err
 		}
-		return types.HostOpRequest{Op: types.HostOpFSList, Path: strings.TrimSpace(args.Path)}, nil
+		return types.HostOpRequest{Op: types.HostOpFSList, Path: resolveVFSPath(args.Path)}, nil
 
 	case "fs_read":
 		var args struct {
@@ -1427,11 +1193,12 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return types.HostOpRequest{}, err
 		}
-		maxBytes := 0
+		// Default to 1MB to avoid truncation in standard workflows
+		maxBytes := 1024 * 1024
 		if args.MaxBytes != nil {
 			maxBytes = *args.MaxBytes
 		}
-		return types.HostOpRequest{Op: types.HostOpFSRead, Path: strings.TrimSpace(args.Path), MaxBytes: maxBytes}, nil
+		return types.HostOpRequest{Op: types.HostOpFSRead, Path: resolveVFSPath(args.Path), MaxBytes: maxBytes}, nil
 
 	case "fs_write":
 		var args struct {
@@ -1441,7 +1208,7 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return types.HostOpRequest{}, err
 		}
-		return types.HostOpRequest{Op: types.HostOpFSWrite, Path: strings.TrimSpace(args.Path), Text: args.Text}, nil
+		return types.HostOpRequest{Op: types.HostOpFSWrite, Path: resolveVFSPath(args.Path), Text: args.Text}, nil
 
 	case "fs_append":
 		var args struct {
@@ -1451,7 +1218,7 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return types.HostOpRequest{}, err
 		}
-		return types.HostOpRequest{Op: types.HostOpFSAppend, Path: strings.TrimSpace(args.Path), Text: args.Text}, nil
+		return types.HostOpRequest{Op: types.HostOpFSAppend, Path: resolveVFSPath(args.Path), Text: args.Text}, nil
 
 	case "fs_edit":
 		var args struct {
@@ -1466,7 +1233,7 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 			return types.HostOpRequest{}, err
 		}
 		inp, _ := json.Marshal(map[string]any{"edits": args.Edits})
-		return types.HostOpRequest{Op: types.HostOpFSEdit, Path: strings.TrimSpace(args.Path), Input: inp}, nil
+		return types.HostOpRequest{Op: types.HostOpFSEdit, Path: resolveVFSPath(args.Path), Input: inp}, nil
 
 	case "fs_patch":
 		var args struct {
@@ -1476,7 +1243,7 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return types.HostOpRequest{}, err
 		}
-		return types.HostOpRequest{Op: types.HostOpFSPatch, Path: strings.TrimSpace(args.Path), Text: args.Text}, nil
+		return types.HostOpRequest{Op: types.HostOpFSPatch, Path: resolveVFSPath(args.Path), Text: args.Text}, nil
 
 	case "tool_run":
 		var args struct {
@@ -1491,6 +1258,18 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 		// H3 fix: some models omit input entirely; treat missing input as empty object.
 		if args.Input == nil {
 			args.Input = json.RawMessage(`{}`)
+		}
+		var inputMap map[string]json.RawMessage
+		if err := json.Unmarshal(args.Input, &inputMap); err == nil {
+			if cwdRaw, ok := inputMap["cwd"]; ok {
+				var cwd string
+				if err := json.Unmarshal(cwdRaw, &cwd); err == nil {
+					inputMap["cwd"] = json.RawMessage(strconv.Quote(resolveVFSPath(cwd)))
+					if updated, err := json.Marshal(inputMap); err == nil {
+						args.Input = updated
+					}
+				}
+			}
 		}
 		timeout := 0
 		if args.TimeoutMs != nil {
@@ -1509,6 +1288,22 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 	}
 }
 
+func resolveVFSPath(p string) string {
+	pathStr := strings.TrimSpace(p)
+	if pathStr == "" {
+		return "/project"
+	}
+	if strings.HasPrefix(pathStr, "/") {
+		return pathStr
+	}
+	cleaned := path.Clean(pathStr)
+	joined := path.Join("/project", cleaned)
+	if !strings.HasPrefix(joined, "/project") {
+		return "/project"
+	}
+	return joined
+}
+
 // Run executes the agent loop for a single user goal and returns the final response text.
 func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 	if err := validate.NonEmpty("goal", goal); err != nil {
@@ -1521,52 +1316,125 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 }
 
 func agentLoopV0SystemPrompt() string {
-	return strings.TrimSpace(`
-You are an agent running inside a host-controlled environment.
+	raw := `
+# Workbench Agent
 
-Workbench uses tool/function calling for environment operations.
+You are an agent inside **Workbench**, a coding environment with a virtual filesystem (VFS).
 
-You may either:
-  - call one or more provided tools (functions) to interact with the environment, OR
-  - respond normally in plain text when no environment interaction is needed.
+## Critical: Tool Results Are YOUR Output
 
-Critical rules:
-  - All VFS paths MUST be absolute (start with "/"). Never use "." or relative paths.
-  - Do NOT call tools unnecessarily. If the user says "hi" or asks a question you can answer without file/tool access, answer directly without calling tools.
-  - If the user explicitly requests environment interaction (files, repo, tools, builtin.trace), you MUST use the tools. Do NOT answer from assumptions.
+When you call a tool (like ~fs_read~), the content that comes back is **the result of YOUR action** — not something the user sent you. If you read a file and see its contents, YOU retrieved it. Do not say "thanks for sharing" or treat tool output as user-provided content.
 
-When you need the environment, use the provided function tools:
-  - final_answer (end the turn with the final response)
-  - fs_list, fs_read, fs_write, fs_append, fs_edit, fs_patch
-  - batch (batch of host ops)
-  - tool_run (execute a discovered tool)
+## Your Tools (Two Categories)
 
-To end the turn:
-  - Call final_answer with the final response text.
+### 1. Direct Host Operations (Use Immediately)
 
-Batch notes:
-  - Prefer batch for multiple independent ops.
-  - If you need 2+ tool executions, DO NOT call tool_run repeatedly. Use batch with multiple operations where each operation is {"op":"tool.run", ... }.
-  - batch.operations is a list of host op objects like {"op":"fs.read",...}, not tool calls.
+Call these without discovery:
 
-Tool discovery rules:
-  - Tools are discovered via VFS only:
-      fs_list("/tools") returns tool IDs as directory entries.
-      fs_read("/tools/<toolId>") returns the tool manifest JSON bytes.
-  - Do NOT assume tool actions; read the manifest first.
+- ~fs_list~, ~fs_read~, ~fs_write~, ~fs_append~, ~fs_edit~, ~fs_patch~, ~batch~, ~final_answer~
+- ~builtin_shell_exec~ for shell argv execution inside the repo root (cwd, stdin allowed)
+- ~builtin_http_fetch~ for HTTP requests
 
-Tool execution + results rules:
-  - To run a tool, use tool_run(...) with the selected toolId/actionId and an input object.
-  - After tool.run, the host persists:
-      /results/<callId>/response.json
-      /results/<callId>/<artifactPath>
-  - You can read those files with fs_read to inspect outputs/artifacts.
+**For simple tasks like "create 5 files", just call ~fs_write~ or ~batch~ directly.**
 
-Always:
-  - Prefer discovering tools first when tool usage is required.
-  - Use small reads (maxBytes) unless you need more.
-  - If a tool or host op fails, recover and try a different approach or answer with what you know.
-`)
+### 2. External Tools (Require Discovery)
+
+Use ~tool_run~ to invoke tools under ~/tools~ that are NOT in the direct list above:
+
+1. ~fs_read("/tools/<toolId>")~ → read the manifest, learn required input fields
+2. ~tool_run(toolId, actionId, input, timeoutMs)~ → call with correct input
+
+**Only use ~tool_run~ when you need capabilities beyond the direct list** (custom/disk tools).
+
+---
+
+## Web Search + Citations
+
+Workbench may provide **web-search-grounded model responses** (provider-dependent).
+
+- Web search is **disabled by default**. The user may enable it via the host command ~/web~.
+- If you use information from web search, you **must include citations** in your final response.
+- Prefer a short ~Sources:~ section with 1–5 links at the end.
+
+---
+
+## VFS Structure
+
+| Path                | What It Is                                             |
+| ------------------- | ------------------------------------------------------ |
+| ~/project~          | **User's actual project** — start here for their files |
+| ~/scratch~          | Your temporary workspace (run-scoped)                  |
+| ~/log~              | This run's event log                                   |
+| ~/memory~           | Run-scoped notes                                       |
+| ~/history~          | Session-scoped event stream (read-only)                |
+| ~/results/<callId>~ | Tool output artifacts                                  |
+
+---
+
+## Key Rules
+
+1.  **Stop Rule**: Call ~final_answer~ ONLY when you have fully completed the user's overarching goal or task chain. Do not stop early just because you have some info; ensure the full request is satisfied.
+2.  **Path Resolution**: You may use relative paths (e.g., ~.~ or ~./src~). They will be resolved relative to ~/project~.
+3.  **Tool Usage**:
+    - Use ~fs_*~ tools for file operations.
+    - Use ~builtin_shell_exec~ for advanced search (~grep~, ~find~) or running project binaries. Note: Do NOT try to run ~bash~ or ~sh~ interactive sessions; just pass the command argv directly.
+4.  **No Hallucinations**: Do not call tools that are not in your definition list.
+
+---
+
+## fs_edit Details
+
+For surgical edits:
+
+~~~json
+{
+  "path": "/project/file.txt",
+  "edits": [{ "old": "foo", "new": "bar", "occurrence": 1 }]
+}
+~~~
+
+- ~old~: exact text to find
+- ~new~: replacement text
+- ~occurrence~: 1-based (which match to replace)
+
+If edit fails, ~fs_read~ the file, pick a more specific ~old~ snippet, retry.
+
+---
+
+## fs_patch Details
+
+Apply a unified diff:
+
+~~~diff
+--- a/file.txt
++++ b/file.txt
+@@ -1,3 +1,3 @@
+ context
+-old line
++new line
+ context
+~~~
+
+Hunk headers must include line ranges: ~@@ -1,3 +1,3 @@~ (not just ~@@~).
+
+---
+
+## Memory
+
+Write durable lessons to ~/memory/update.md~:
+
+- Short bullet list: ~- RULE: prefer fs_edit for small changes~
+- Or key/value: ~preferred_editor: vim~
+
+---
+
+## Operating Principles
+
+- **Action-first**: do the minimal ops to complete the task
+- **Recover gracefully**: if an op fails, read the file and retry with adjusted input
+- **Prefer direct ops**: use ~fs_write~/~fs_read~ before reaching for ~tool_run~
+`
+	return strings.TrimSpace(strings.ReplaceAll(raw, "~", "`"))
 }
 
 func toolChoiceForTurn(userMsg string, turnHasToolOutput bool) (choice string, reason string, flags map[string]any) {

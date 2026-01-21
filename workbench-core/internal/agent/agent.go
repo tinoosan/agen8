@@ -93,9 +93,6 @@ type Config struct {
 	// Context optionally refreshes bounded context per model step.
 	Context ContextSource
 
-	// MaxSteps caps the number of model -> host op iterations per user turn.
-	MaxSteps int
-
 	// ToolManifests optionally supplies host-known tool manifests that should be
 	// exposed as direct function tools (no discovery required).
 	ToolManifests []types.ToolManifest
@@ -114,9 +111,6 @@ func New(cfg Config) (*Agent, error) {
 	if err := validate.NonEmpty("agent Model", cfg.Model); err != nil {
 		return nil, err
 	}
-	if err := validate.Positive("agent MaxSteps", cfg.MaxSteps); err != nil {
-		return nil, err
-	}
 
 	system := strings.TrimSpace(cfg.SystemPrompt)
 	if system == "" {
@@ -126,15 +120,15 @@ func New(cfg Config) (*Agent, error) {
 	extraTools, routes := ManifestToFunctionTools(cfg.ToolManifests)
 
 	return &Agent{
-		LLM:                cfg.LLM,
-		Exec:               cfg.Exec,
-		Model:              cfg.Model,
-		EnableWebSearch:    cfg.EnableWebSearch,
-		ReasoningEffort:    strings.TrimSpace(cfg.ReasoningEffort),
-		ReasoningSummary:   strings.TrimSpace(cfg.ReasoningSummary),
-		SystemPrompt:       system,
-		Context:            cfg.Context,
-		MaxSteps:           cfg.MaxSteps,
+		LLM:              cfg.LLM,
+		Exec:             cfg.Exec,
+		Model:            cfg.Model,
+		EnableWebSearch:  cfg.EnableWebSearch,
+		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
+		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
+		SystemPrompt:     system,
+		Context:          cfg.Context,
+
 		Hooks:              cfg.Hooks,
 		ExtraTools:         extraTools,
 		ToolFunctionRoutes: routes,
