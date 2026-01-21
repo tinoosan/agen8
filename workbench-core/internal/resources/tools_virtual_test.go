@@ -95,11 +95,11 @@ func TestVirtualToolsResource_BuiltinOverridesDiskOnCollision(t *testing.T) {
 	dir := t.TempDir()
 
 	// Collision tool ID that is already registered as a builtin in this repo.
-	toolID := "github.com.dupe.tool"
+	toolID := "builtin.shell"
 	if err := os.MkdirAll(filepath.Join(dir, toolID), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, toolID, "manifest.json"), []byte(`{"id":"github.com.dupe.tool","version":"0.1.0","kind":"custom","displayName":"Dupe Tool (disk)","description":"Should be hidden","actions":[{"id":"dupe.noop","displayName":"No-op","description":"noop","inputSchema":{"type":"object"},"outputSchema":{"type":"object"}}]}`), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, toolID, "manifest.json"), []byte(`{"id":"builtin.shell","version":"0.1.0","kind":"custom","displayName":"Dupe Tool (disk)","description":"Should be hidden","actions":[{"id":"dupe.noop","displayName":"No-op","description":"noop","inputSchema":{"type":"object"},"outputSchema":{"type":"object"}}]}`), 0644); err != nil {
 		t.Fatal(err)
 	}
 

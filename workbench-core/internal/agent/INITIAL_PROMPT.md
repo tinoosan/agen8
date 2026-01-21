@@ -15,9 +15,6 @@ Call these without discovery:
 - `fs_list`, `fs_read`, `fs_write`, `fs_append`, `fs_edit`, `fs_patch`, `batch`, `final_answer`
 - `builtin_shell_exec` for shell argv execution inside the repo root (cwd, stdin allowed)
 - `builtin_http_fetch` for HTTP requests
-- `builtin_ripgrep_search` for text searches under the repo
-- `builtin_git_status`, `builtin_git_log`, `builtin_git_diff`, `builtin_git_branch`, `builtin_git_add`, `builtin_git_commit`
-- `builtin_find_files` for globbing files/dirs
 
 **For simple tasks like "create 5 files", just call `fs_write` or `batch` directly.**
 
@@ -60,7 +57,7 @@ Workbench may provide **web-search-grounded model responses** (provider-dependen
 2. **Prefer `/workdir`** for user deliverables
 3. **`/workspace` is scratch** — not the user's project
 4. **Inside `batch`**, use dotted ops: `fs.write`, `fs.read`, `tool.run` (not underscores)
-5. **Tool sandboxes** — builtin tools run in the host workdir (use workdir-relative paths in their inputs), including `builtin.shell`, `builtin.ripgrep`, `builtin.git`, `builtin.find`, `builtin.test`, `builtin.lint`.
+5. **Tool sandboxes** — builtin tools run in the host workdir (use workdir-relative paths in their inputs), including `builtin.shell`, `builtin.http`, and `builtin.trace`.
 
 ---
 

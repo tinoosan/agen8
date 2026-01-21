@@ -147,8 +147,8 @@ func HostOpFunctions() []types.Tool {
 		{
 			Type: "function",
 			Function: types.ToolFunction{
-				Name:        "tool_run",
-				Description: "[REQUIRES DISCOVERY] Run an external tool (shell, http, ripgrep, etc). BEFORE calling: (1) fs_read('/tools/<toolId>') to get the manifest and learn required input fields. Only then call with correct input. For simple file ops, use fs_write/fs_read directly instead.",
+				Name: "tool_run",
+				Description: "[REQUIRES DISCOVERY] Run an external tool (e.g., builtin.trace or custom tools). BEFORE calling: (1) fs_read('/tools/<toolId>') to get the manifest and learn required input fields. Only then call with correct input. For simple file ops, use fs_write/fs_read directly instead.",
 				// NOTE: tool_run.input is tool-defined arbitrary JSON. Some providers (e.g. Azure)
 				// reject strict function schemas when they include arbitrary object properties.
 				Strict: false,

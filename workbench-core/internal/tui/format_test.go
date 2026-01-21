@@ -76,26 +76,4 @@ func TestClassifyEvent_ToolRunRequest_ShowsArgsAndCommand(t *testing.T) {
 			}
 		}
 	})
-
-	t.Run("builtin.ripgrep search", func(t *testing.T) {
-		ev := events.Event{
-			Type:    "agent.op.request",
-			Message: "Agent requested host op",
-			Data: map[string]string{
-				"op":       "tool.run",
-				"toolId":   "builtin.ripgrep",
-				"actionId": "search",
-				"input":    `{"query":"Example Domain","paths":["."],"caseSensitive":false,"maxMatches":50}`,
-			},
-		}
-		rr := classifyEvent(ev)
-		if rr.Class != RenderAction {
-			t.Fatalf("expected action class, got %v", rr.Class)
-		}
-		for _, want := range []string{"rg --json", "-i", "--max-count 50", "Example Domain", "."} {
-			if !strings.Contains(rr.Text, want) {
-				t.Fatalf("expected %q to contain %q", rr.Text, want)
-			}
-		}
-	})
 }

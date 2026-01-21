@@ -68,7 +68,7 @@ const maxToolRunOutputPreviewBytes = 1200
 //
 // It is intentionally conservative:
 //   - hard-caps size
-//   - avoids dumping large structured payloads (e.g., ripgrep matches) in full
+//   - avoids dumping large structured payloads in full
 func toolRunOutputPreviewForEvent(toolID, actionID string, raw json.RawMessage) string {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
@@ -100,239 +100,27 @@ func toolRunOutputPreviewForEvent(toolID, actionID string, raw json.RawMessage) 
 		s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
 		return s2
 
-	case "builtin.git":
-		switch strings.TrimSpace(actionID) {
-		case "status":
-			var out struct {
-				Head      string `json:"head"`
-				Staged    []any  `json:"staged"`
-				Unstaged  []any  `json:"unstaged"`
-				Untracked []any  `json:"untracked"`
-				Conflicts []any  `json:"conflicts"`
-				ExitCode  int    `json:"exitCode"`
-				Stderr    string `json:"stderr"`
-				Stdout    string `json:"stdout"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				break
-			}
-			s := fmt.Sprintf("exitCode=%d staged=%d unstaged=%d untracked=%d conflicts=%d", out.ExitCode, len(out.Staged), len(out.Unstaged), len(out.Untracked), len(out.Conflicts))
-			if strings.TrimSpace(out.Head) != "" {
-				s += " head=" + previewText(out.Head, 80)
-			}
-			if strings.TrimSpace(out.Stderr) != "" && out.ExitCode != 0 {
-				s += " stderr=" + previewText(out.Stderr, 200)
-			}
-			s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-			return s2
-		case "diff":
-			var out struct {
-				Truncated bool   `json:"truncated"`
-				PatchPath string `json:"patchPath"`
-				ExitCode  int    `json:"exitCode"`
-				Stderr    string `json:"stderr"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				break
-			}
-			s := fmt.Sprintf("exitCode=%d truncated=%t", out.ExitCode, out.Truncated)
-			if strings.TrimSpace(out.PatchPath) != "" {
-				s += " patchPath=" + previewText(out.PatchPath, 120)
-			}
-			if strings.TrimSpace(out.Stderr) != "" && out.ExitCode != 0 {
-				s += " stderr=" + previewText(out.Stderr, 200)
-			}
-			s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-			return s2
-		case "commit":
-			var out struct {
-				Committed bool   `json:"committed"`
-				Head      string `json:"head"`
-				ExitCode  int    `json:"exitCode"`
-				Stderr    string `json:"stderr"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				break
-			}
-			s := fmt.Sprintf("exitCode=%d committed=%t", out.ExitCode, out.Committed)
-			if strings.TrimSpace(out.Head) != "" {
-				s += " head=" + previewText(out.Head, 12)
-			}
-			if strings.TrimSpace(out.Stderr) != "" && (out.ExitCode != 0 || !out.Committed) {
-				s += " stderr=" + previewText(out.Stderr, 200)
-			}
-			s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-			return s2
-		case "add":
-			var out struct {
-				AddedFiles []any  `json:"addedFiles"`
-				ExitCode   int    `json:"exitCode"`
-				Stderr     string `json:"stderr"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				break
-			}
-			s := fmt.Sprintf("exitCode=%d added=%d", out.ExitCode, len(out.AddedFiles))
-			if strings.TrimSpace(out.Stderr) != "" && out.ExitCode != 0 {
-				s += " stderr=" + previewText(out.Stderr, 200)
-			}
-			s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-			return s2
-		case "log":
-			var out struct {
-				Commits  []any  `json:"commits"`
-				ExitCode int    `json:"exitCode"`
-				Stderr   string `json:"stderr"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				break
-			}
-			s := fmt.Sprintf("exitCode=%d commits=%d", out.ExitCode, len(out.Commits))
-			if strings.TrimSpace(out.Stderr) != "" && out.ExitCode != 0 {
-				s += " stderr=" + previewText(out.Stderr, 200)
-			}
-			s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-			return s2
-		case "branch":
-			var out struct {
-				Branches []any  `json:"branches"`
-				Created  string `json:"created"`
-				ExitCode int    `json:"exitCode"`
-				Stderr   string `json:"stderr"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				break
-			}
-			s := fmt.Sprintf("exitCode=%d branches=%d", out.ExitCode, len(out.Branches))
-			if strings.TrimSpace(out.Created) != "" {
-				s += " created=" + previewText(out.Created, 80)
-			}
-			if strings.TrimSpace(out.Stderr) != "" && out.ExitCode != 0 {
-				s += " stderr=" + previewText(out.Stderr, 200)
-			}
-			s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-			return s2
+	case "builtin.trace":
+		var base struct {
+			EventsReturned int    `json:"eventsReturned"`
+			Truncated      bool   `json:"truncated"`
+			CursorAfter    string `json:"cursorAfter"`
+			Summary        string `json:"summary"`
 		}
-
-	case "builtin.find":
-		if strings.TrimSpace(actionID) != "files" {
+		if err := json.Unmarshal(raw, &base); err != nil {
 			break
 		}
-		var out struct {
-			Paths     []any  `json:"paths"`
-			Truncated bool   `json:"truncated"`
-			Limit     string `json:"limit"`
+		s := fmt.Sprintf("events=%d", base.EventsReturned)
+		if base.Truncated {
+			s += " truncated=true"
 		}
-		if err := json.Unmarshal(raw, &out); err != nil {
-			break
+		if strings.TrimSpace(base.CursorAfter) != "" {
+			s += " cursor=" + previewText(base.CursorAfter, 32)
 		}
-		s := fmt.Sprintf("paths=%d truncated=%t", len(out.Paths), out.Truncated)
-		if strings.TrimSpace(out.Limit) != "" {
-			s += " limit=" + previewText(out.Limit, 40)
+		if strings.TrimSpace(base.Summary) != "" {
+			s += " summary=" + previewText(base.Summary, 200)
 		}
 		s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-		return s2
-
-	case "builtin.test":
-		switch strings.TrimSpace(actionID) {
-		case "detect":
-			var out struct {
-				Framework string `json:"framework"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				break
-			}
-			s := "framework=" + previewText(strings.TrimSpace(out.Framework), 40)
-			s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-			return s2
-		case "run":
-			var out struct {
-				Framework string `json:"framework"`
-				ExitCode  int    `json:"exitCode"`
-				Passed    bool   `json:"passed"`
-				Stderr    string `json:"stderr"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				break
-			}
-			s := fmt.Sprintf("framework=%s exitCode=%d passed=%t", previewText(strings.TrimSpace(out.Framework), 40), out.ExitCode, out.Passed)
-			if strings.TrimSpace(out.Stderr) != "" && out.ExitCode != 0 {
-				s += " stderr=" + previewText(out.Stderr, 200)
-			}
-			s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-			return s2
-		case "list":
-			var out struct {
-				Framework string `json:"framework"`
-				Files     []any  `json:"files"`
-				Tests     []any  `json:"tests"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				break
-			}
-			s := fmt.Sprintf("framework=%s files=%d tests=%d", previewText(strings.TrimSpace(out.Framework), 40), len(out.Files), len(out.Tests))
-			s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-			return s2
-		}
-
-	case "builtin.lint":
-		switch strings.TrimSpace(actionID) {
-		case "detect":
-			var out struct {
-				Linters    []any `json:"linters"`
-				Formatters []any `json:"formatters"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				break
-			}
-			s := fmt.Sprintf("linters=%d formatters=%d", len(out.Linters), len(out.Formatters))
-			s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-			return s2
-		case "run":
-			var out struct {
-				Tool     string `json:"tool"`
-				ExitCode int    `json:"exitCode"`
-				Stderr   string `json:"stderr"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				break
-			}
-			s := fmt.Sprintf("tool=%s exitCode=%d", previewText(strings.TrimSpace(out.Tool), 40), out.ExitCode)
-			if strings.TrimSpace(out.Stderr) != "" && out.ExitCode != 0 {
-				s += " stderr=" + previewText(out.Stderr, 200)
-			}
-			s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-			return s2
-		case "format":
-			var out struct {
-				Tool         string `json:"tool"`
-				ExitCode     int    `json:"exitCode"`
-				ChangedFiles []any  `json:"changedFiles"`
-				Stderr       string `json:"stderr"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				break
-			}
-			s := fmt.Sprintf("tool=%s exitCode=%d changedFiles=%d", previewText(strings.TrimSpace(out.Tool), 40), out.ExitCode, len(out.ChangedFiles))
-			if strings.TrimSpace(out.Stderr) != "" && out.ExitCode != 0 {
-				s += " stderr=" + previewText(out.Stderr, 200)
-			}
-			s2, _ := capBytes(singleLine(s), maxToolRunOutputPreviewBytes)
-			return s2
-		}
-
-	case "builtin.ripgrep":
-		if strings.TrimSpace(actionID) != "search" {
-			break
-		}
-		var out struct {
-			Matches []any `json:"matches"`
-		}
-		if err := json.Unmarshal(raw, &out); err != nil {
-			break
-		}
-		s := fmt.Sprintf("matches=%d", len(out.Matches))
-		s2, _ := capBytes(s, maxToolRunOutputPreviewBytes)
 		return s2
 
 	case "builtin.http":

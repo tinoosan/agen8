@@ -28,8 +28,7 @@ func TestTUITurnRunner_CD_RebindsWorkdirAndUpdatesBuiltins(t *testing.T) {
 
 	// Seed builtin invokers with dir1.
 	builtins := tools.MapRegistry{
-		types.ToolID("builtin.shell"):   tools.NewBuiltinShellInvoker(dir1, nil),
-		types.ToolID("builtin.ripgrep"): tools.NewBuiltinRipgrepInvoker(dir1),
+		types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(dir1, nil),
 	}
 
 	var got []events.Event
@@ -64,11 +63,6 @@ func TestTUITurnRunner_CD_RebindsWorkdirAndUpdatesBuiltins(t *testing.T) {
 	if sh.RootDir != dir2 {
 		t.Fatalf("builtin.shell root=%q, want %q", sh.RootDir, dir2)
 	}
-	rg := builtins[types.ToolID("builtin.ripgrep")].(*tools.BuiltinRipgrepInvoker)
-	if rg.RootDir != dir2 {
-		t.Fatalf("builtin.ripgrep root=%q, want %q", rg.RootDir, dir2)
-	}
-
 	// Ensure we emitted a workdir.changed event.
 	found := false
 	for _, ev := range got {

@@ -1690,10 +1690,9 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		r.workdirBase = workdirRes.BaseDir
 		r.opts.WorkDir = workdirRes.BaseDir
 
-		// Update builtin sandbox roots (builtin.shell + builtin.ripgrep) to follow the active workdir.
+		// Update builtin sandbox roots (builtin.shell) to follow the active workdir.
 		if r.builtinInvokers != nil {
 			r.builtinInvokers[types.ToolID("builtin.shell")] = tools.NewBuiltinShellInvoker(workdirRes.BaseDir, nil)
-			r.builtinInvokers[types.ToolID("builtin.ripgrep")] = tools.NewBuiltinRipgrepInvoker(workdirRes.BaseDir)
 		}
 
 		r.mustEmit(context.Background(), events.Event{

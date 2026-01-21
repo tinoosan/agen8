@@ -52,9 +52,8 @@ type ResultsView interface {
 //
 // # Search note
 //
-// builtin.ripgrep searches a disk-backed root directory (typically the workspace), and does
-// not see virtual mounts like "/results". Searching virtual mounts requires store-backed
-// search APIs (future work).
+// Builtin tools operate on disk-backed roots (typically the workspace) and do not see virtual
+// mounts like "/results". Searching virtual mounts requires store-backed search APIs (future work).
 type ResultsStore interface {
 	ResultWriter
 	ResultReader

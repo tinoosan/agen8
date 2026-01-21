@@ -21,10 +21,6 @@ type BuiltinConfig struct {
 	// ShellConfirm is an optional host callback to confirm execution.
 	ShellConfirm func(ctx context.Context, argv []string, cwd string) (bool, error)
 
-	// RipgrepRootDir is the OS directory used as the sandbox root for builtin.ripgrep.
-	// If empty, builtin.ripgrep falls back to ShellRootDir.
-	RipgrepRootDir string
-
 	// TraceStore is the run-scoped trace store used by builtin.trace.
 	TraceStore store.TraceStore
 }

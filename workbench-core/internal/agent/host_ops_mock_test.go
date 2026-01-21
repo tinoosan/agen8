@@ -25,7 +25,7 @@ func TestHostOpExecutor_FSRead_ToolsManifest_NotTruncatedByDefault(t *testing.T)
 	fs := vfs.NewFS()
 	fs.Mount(vfs.MountTools, toolsRes)
 
-	full, err := fs.Read("/tools/builtin.git")
+	full, err := fs.Read("/tools/builtin.shell")
 	if err != nil {
 		t.Fatalf("Read full manifest: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestHostOpExecutor_FSRead_ToolsManifest_NotTruncatedByDefault(t *testing.T)
 		DefaultMaxBytes: 4096,
 		MaxReadBytes:    256 * 1024,
 	}
-	resp := exec.Exec(context.Background(), types.HostOpRequest{Op: types.HostOpFSRead, Path: "/tools/builtin.git"})
+	resp := exec.Exec(context.Background(), types.HostOpRequest{Op: types.HostOpFSRead, Path: "/tools/builtin.shell"})
 	if !resp.Ok {
 		t.Fatalf("expected ok=true, got error=%q", resp.Error)
 	}
@@ -52,4 +52,3 @@ func TestHostOpExecutor_FSRead_ToolsManifest_NotTruncatedByDefault(t *testing.T)
 		t.Fatalf("expected text length %d, got %d (bytesB64 len=%d)", len(full), len(resp.Text), len(resp.BytesB64))
 	}
 }
-
