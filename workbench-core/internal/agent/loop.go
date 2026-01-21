@@ -58,34 +58,10 @@ type Agent struct {
 //   - When the model returns {"op":"final","text":"..."}, the agent appends that final JSON
 //     object as the last assistant message and returns text to the host to display.
 func (a *Agent) RunConversation(ctx context.Context, msgs []types.LLMMessage) (final string, updated []types.LLMMessage, steps int, err error) {
-	return a.runConversation(ctx, msgs, 1, "", "", "")
+	return a.runConversation(ctx, msgs, 1, "")
 }
 
-// RunConversationWithCheckpoints executes the agent loop like RunConversation, but
-// persists and resumes from a durable checkpoint at checkpointPath.
-//
-// If a valid checkpoint exists at checkpointPath, it takes precedence over msgs.
-func (a *Agent) RunConversationWithCheckpoints(ctx context.Context, msgs []types.LLMMessage, checkpointPath string) (final string, updated []types.LLMMessage, steps int, err error) {
-	cp, err := LoadAgentCheckpoint(checkpointPath)
-	if err != nil {
-		return "", nil, 0, err
-	}
-	startStep := 1
-	lastResponseID := ""
-	userMsg := ""
-	if cp != nil {
-		msgs = cp.Messages
-		startStep = cp.NextStep
-		lastResponseID = strings.TrimSpace(cp.LastResponseID)
-		userMsg = strings.TrimSpace(cp.UserMessage)
-	}
-	if strings.TrimSpace(userMsg) == "" {
-		userMsg = lastUserMessage(msgs)
-	}
-	return a.runConversation(ctx, msgs, startStep, lastResponseID, checkpointPath, userMsg)
-}
-
-func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, startStep int, lastResponseID string, checkpointPath string, checkpointUserMessage string) (final string, updated []types.LLMMessage, steps int, err error) {
+func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, startStep int, lastResponseID string) (final string, updated []types.LLMMessage, steps int, err error) {
 	if a == nil || a.LLM == nil {
 		return "", nil, 0, fmt.Errorf("agent LLM is required")
 	}
@@ -110,9 +86,24 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 	}
 	lastResponseID = strings.TrimSpace(lastResponseID)
 
-	turnUserMessage := strings.TrimSpace(checkpointUserMessage)
-	if turnUserMessage == "" {
-		turnUserMessage = lastUserMessage(msgs)
+	turnUserMessage := ""
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if strings.TrimSpace(m.Role) != "user" {
+			continue
+		}
+		c := strings.TrimSpace(m.Content)
+		if c == "" {
+			continue
+		}
+		if strings.HasPrefix(c, "HostOpResponse:") {
+			continue
+		}
+		if strings.HasPrefix(c, "Your last message was not valid JSON") || strings.HasPrefix(c, "Your last JSON op was invalid:") {
+			continue
+		}
+		turnUserMessage = c
+		break
 	}
 
 	hostOpTools := HostOpFunctions()
@@ -168,7 +159,6 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 
 		if len(resp.ToolCalls) == 0 {
 			finalText := strings.TrimSpace(resp.Text)
-			_ = ClearAgentCheckpoint(checkpointPath)
 			msgs = append(msgs, types.LLMMessage{Role: "assistant", Content: finalText})
 			return finalText, msgs, step, nil
 		}
@@ -179,10 +169,8 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			ToolCalls: resp.ToolCalls,
 		})
 
-		lastOpForCheckpoint := ""
 		for _, tc := range resp.ToolCalls {
 			which := strings.TrimSpace(tc.Function.Name)
-			lastOpForCheckpoint = "tool_call:" + which
 
 			if which == "final_answer" {
 				var args struct {
@@ -205,7 +193,6 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 				hostResp := types.HostOpResponse{Op: "final_answer", Ok: true}
 				hostRespJSON, _ := types.MarshalPretty(hostResp)
 				msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
-				_ = ClearAgentCheckpoint(checkpointPath)
 				msgs = append(msgs, types.LLMMessage{Role: "assistant", Content: finalText})
 				return finalText, msgs, step, nil
 			}
@@ -223,17 +210,6 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
 		}
 
-		if strings.TrimSpace(checkpointPath) != "" {
-			if err := SaveAgentCheckpoint(checkpointPath, AgentCheckpoint{
-				UserMessage:    turnUserMessage,
-				NextStep:       step + 1,
-				Messages:       msgs,
-				LastOp:         lastOpForCheckpoint,
-				LastResponseID: lastResponseID,
-			}); err != nil {
-				return "", msgs, step, err
-			}
-		}
 	}
 }
 
@@ -540,27 +516,6 @@ func resolveVFSPath(p string) string {
 		return "/project"
 	}
 	return joined
-}
-
-func lastUserMessage(msgs []types.LLMMessage) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
-		if strings.TrimSpace(m.Role) != "user" {
-			continue
-		}
-		c := strings.TrimSpace(m.Content)
-		if c == "" {
-			continue
-		}
-		if strings.HasPrefix(c, "HostOpResponse:") {
-			continue
-		}
-		if strings.HasPrefix(c, "Your last message was not valid JSON") || strings.HasPrefix(c, "Your last JSON op was invalid:") {
-			continue
-		}
-		return c
-	}
-	return ""
 }
 
 // Run executes the agent loop for a single user goal and returns the final response text.

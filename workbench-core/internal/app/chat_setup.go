@@ -31,7 +31,6 @@ type tuiChatSetup struct {
 	Agent            *agent.Agent
 	BaseSystemPrompt string
 	Constructor      *agent.ContextConstructor
-	CheckpointPath   string
 
 	Artifacts *ArtifactIndex
 
@@ -505,14 +504,11 @@ func setupTUIChatRuntime(
 		return nil, err
 	}
 
-	checkpointPath := filepath.Join(fsutil.GetSessionDir(cfg.DataDir, run.SessionID), "agent_checkpoint.json")
-
 	return &tuiChatSetup{
 		FS:               fs,
 		Agent:            a,
 		BaseSystemPrompt: baseSystemPrompt,
 		Constructor:      constructor,
-		CheckpointPath:   checkpointPath,
 		Artifacts:        artifactIndex,
 		WorkdirBase:      workdirRes.BaseDir,
 		MemStore:         memStore,
