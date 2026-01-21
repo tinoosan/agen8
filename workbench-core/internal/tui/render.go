@@ -249,7 +249,7 @@ func renderOpRequest(d map[string]string) string {
 			return cmd
 		}
 		if argv0 := strings.TrimSpace(d["argv0"]); argv0 != "" {
-			return "shell_exec " + argv0
+			return argv0
 		}
 		return "shell_exec"
 	case "http_fetch":

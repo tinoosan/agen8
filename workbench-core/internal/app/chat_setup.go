@@ -618,6 +618,10 @@ func shellArgsToFields(argv []string, cwd string) map[string]string {
 	if len(argv) != 0 {
 		out["argv0"] = argv[0]
 		preview := singleLine(strings.Join(argv, " "))
+		// Better UX for shell: strip the wrapper "bash -c" if present.
+		if len(argv) >= 3 && (argv[0] == "bash" || argv[0] == "sh") && argv[1] == "-c" {
+			preview = singleLine(argv[2])
+		}
 		if p, tr := capBytes(preview, 160); p != "" {
 			out["argvPreview"] = p
 			if tr {

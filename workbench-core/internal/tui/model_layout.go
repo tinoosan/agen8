@@ -82,8 +82,8 @@ func (m *Model) layout() {
 		const (
 			minListH    = 6
 			minDetailH  = 6
-			largeDetail = 0.30
-			smallDetail = 0.45
+			largeDetail = 0.50
+			smallDetail = 0.65
 		)
 		detailFrac := largeDetail
 		if innerH < 18 {

@@ -237,6 +237,7 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 			TextRedacted:  strings.TrimSpace(ev.Data["textRedacted"]) == "true",
 			TextIsJSON:    strings.TrimSpace(ev.Data["textIsJSON"]) == "true",
 			TextBytes:     strings.TrimSpace(ev.Data["textBytes"]),
+			Data:          ev.Data,
 		}
 		if op == "tool.run" {
 			act.Command = strings.TrimSpace(renderToolRunTranscript(act.ToolID, act.ActionID, act.InputJSON))
@@ -300,6 +301,14 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 			act.Status = ActivityError
 		}
 
+		// Merge response data into existing activity data
+		if act.Data == nil {
+			act.Data = make(map[string]string)
+		}
+		for k, v := range ev.Data {
+			act.Data[k] = v
+		}
+
 		m.activities[idx] = act
 		if opID != "" && m.activityIndexByOpID != nil {
 			delete(m.activityIndexByOpID, opID)
@@ -353,13 +362,6 @@ func (m *Model) refreshActivityDetail() {
 
 func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) string {
 	var b strings.Builder
-	b.WriteString("## ")
-	b.WriteString(a.Title)
-	b.WriteString("\n\n")
-
-	b.WriteString("**Title**\n\n")
-	b.WriteString(a.Title)
-	b.WriteString("\n\n")
 
 	b.WriteString("**Fields**\n\n")
 	if strings.TrimSpace(a.Kind) != "" {
@@ -467,6 +469,46 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 		b.WriteString("\n**Tool output preview** _(press `e` to expand)_\n\n")
 		b.WriteString(FormatCode("text", txt))
 		b.WriteString("\n")
+	} else if a.Kind == "shell_exec" {
+		// Specific handling for shell_exec components
+		exitCode := strings.TrimSpace(a.Data["exitCode"])
+		stdout := strings.TrimSpace(a.Data["stdout"])
+		stderr := strings.TrimSpace(a.Data["stderr"])
+		if exitCode != "" {
+			b.WriteString("- exitCode: `")
+			b.WriteString(exitCode)
+			b.WriteString("`\n")
+		}
+		if stdout != "" {
+			b.WriteString("\n**stdout**\n\n")
+			b.WriteString(FormatCode("text", stdout))
+			b.WriteString("\n")
+		}
+		if stderr != "" {
+			b.WriteString("\n**stderr**\n\n")
+			b.WriteString(FormatCode("text", stderr))
+			b.WriteString("\n")
+		}
+	} else if a.Kind == "http_fetch" {
+		status := strings.TrimSpace(a.Data["status"])
+		body := strings.TrimSpace(a.Data["body"])
+		if status != "" {
+			b.WriteString("- status: `")
+			b.WriteString(status)
+			b.WriteString("`\n")
+		}
+		if body != "" {
+			b.WriteString("\n**Body**\n\n")
+			b.WriteString(FormatCode("html", body))
+			b.WriteString("\n")
+		}
+	} else if a.Kind == "trace" {
+		output := strings.TrimSpace(a.Data["output"])
+		if output != "" {
+			b.WriteString("\n**Output**\n\n")
+			b.WriteString(FormatCode("text", output))
+			b.WriteString("\n")
+		}
 	}
 
 	if telemetry {
@@ -528,6 +570,47 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 			b.WriteString("- maxBytes: ")
 			b.WriteString(a.MaxBytes)
 			b.WriteString("\n")
+		}
+
+		// Handle host operations with new telemetry fields
+		if a.Kind == "shell_exec" {
+			if v := strings.TrimSpace(a.Data["argvPreview"]); v != "" {
+				b.WriteString("- command:\n\n")
+				b.WriteString(FormatCode("bash", v))
+				b.WriteString("\n")
+			}
+			if v := strings.TrimSpace(a.Data["cwd"]); v != "" {
+				b.WriteString("- cwd: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+		} else if a.Kind == "http_fetch" {
+			if v := strings.TrimSpace(a.Data["url"]); v != "" {
+				b.WriteString("- url: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["method"]); v != "" {
+				b.WriteString("- method: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+		} else if a.Kind == "trace" {
+			if v := strings.TrimSpace(a.Data["traceAction"]); v != "" {
+				b.WriteString("- action: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["traceKey"]); v != "" {
+				b.WriteString("- key: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["traceInput"]); v != "" {
+				b.WriteString("- input: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
 		}
 	}
 

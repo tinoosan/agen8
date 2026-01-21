@@ -71,6 +71,9 @@ type Activity struct {
 	// Response metadata (telemetry only).
 	BytesLen  string
 	Truncated bool
+
+	// Data holds raw event data for extended display.
+	Data map[string]string
 }
 
 func (a Activity) ShortStatus() string {

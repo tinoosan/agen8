@@ -134,16 +134,21 @@ func (m *Model) rebuildTranscript() {
 			lines = append(lines, m.styleError.Render(wrapText(it.text, max(20, w-4))))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptAction:
-			prefix := "• "
-			if it.actionIsToolRun && !it.actionIsCompleted {
-				prefix = "• Run "
-			}
-			if it.actionIsToolRun && it.actionIsCompleted {
-				prefix = "• Ran "
-			}
-			line := m.styleAction.Render(prefix + wrapText(it.actionText, max(20, w-12)))
-			if it.actionIsCompleted && strings.TrimSpace(it.actionCompletion) != "" {
-				line += "  " + m.styleDim.Render(strings.TrimSpace(it.actionCompletion))
+			line := ""
+			if it.actionIsToolRun {
+				// Tool run: render as " $ command" with a brighter color for the command.
+				// This matches standard terminal aesthetics.
+				prefix := m.styleDim.Render(" $ ")
+				// Use the agent text color (usually white/bright) for the command itself so it stands out.
+				cmd := m.styleAgent.Render(wrapText(it.actionText, max(20, w-12)))
+				line = prefix + cmd
+				if it.actionIsCompleted && strings.TrimSpace(it.actionCompletion) != "" {
+					line += "  " + m.styleDim.Render(strings.TrimSpace(it.actionCompletion))
+				}
+			} else {
+				// Generic action (e.g. "Attached files").
+				prefix := m.styleAction.Render("• ")
+				line = prefix + m.styleAction.Render(wrapText(it.actionText, max(20, w-12)))
 			}
 			lines = append(lines, line)
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
