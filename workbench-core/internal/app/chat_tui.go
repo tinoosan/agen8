@@ -1692,7 +1692,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 
 		// Update builtin sandbox roots (builtin.shell) to follow the active workdir.
 		if r.builtinInvokers != nil {
-			r.builtinInvokers[types.ToolID("builtin.shell")] = tools.NewBuiltinShellInvoker(workdirRes.BaseDir, nil)
+			r.builtinInvokers[types.ToolID("builtin.shell")] = tools.NewBuiltinShellInvoker(workdirRes.BaseDir, nil, vfs.MountWorkdir)
 		}
 
 		r.mustEmit(context.Background(), events.Event{

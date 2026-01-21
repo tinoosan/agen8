@@ -28,7 +28,7 @@ func TestTUITurnRunner_CD_RebindsWorkdirAndUpdatesBuiltins(t *testing.T) {
 
 	// Seed builtin invokers with dir1.
 	builtins := tools.MapRegistry{
-		types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(dir1, nil),
+		types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(dir1, nil, vfs.MountWorkdir),
 	}
 
 	var got []events.Event
@@ -88,7 +88,7 @@ func TestTUITurnRunner_CD_InvalidDirDoesNotChange(t *testing.T) {
 	fs.Mount(vfs.MountWorkdir, workdirRes1)
 
 	builtins := tools.MapRegistry{
-		types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(dir1, nil),
+		types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(dir1, nil, vfs.MountWorkdir),
 	}
 
 	r := &tuiTurnRunner{

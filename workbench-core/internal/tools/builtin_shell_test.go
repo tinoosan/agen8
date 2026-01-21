@@ -43,7 +43,7 @@ func TestBuiltinShell_Exec_CatFile_OK(t *testing.T) {
 	runner := tools.Runner{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(rootDir, nil),
+			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(rootDir, nil, ""),
 		},
 	}
 
@@ -104,7 +104,7 @@ func TestBuiltinShell_Exec_RejectsEscapeCwd(t *testing.T) {
 	runner := tools.Runner{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(t.TempDir(), nil),
+			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(t.TempDir(), nil, ""),
 		},
 	}
 
@@ -150,7 +150,7 @@ func TestBuiltinShell_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 	fs := vfs.NewFS()
 	fs.Mount(vfs.MountResults, resultsRes)
 
-	inv := tools.NewBuiltinShellInvoker(rootDir, nil)
+	inv := tools.NewBuiltinShellInvoker(rootDir, nil, "")
 	runner := tools.Runner{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
@@ -215,7 +215,7 @@ func TestBuiltinShell_Exec_RejectsAbsolutePathArgs(t *testing.T) {
 	runner := tools.Runner{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(t.TempDir(), nil),
+			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(t.TempDir(), nil, ""),
 		},
 	}
 
@@ -253,7 +253,7 @@ func TestBuiltinShell_EnvFiltersSensitiveVars(t *testing.T) {
 	runner := tools.Runner{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(rootDir, nil),
+			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(rootDir, nil, ""),
 		},
 	}
 
@@ -316,5 +316,89 @@ func TestDefaultShellDenylist_BlocksHighRiskCommands(t *testing.T) {
 		if deny[name] {
 			t.Fatalf("expected %q to NOT be denied", name)
 		}
+	}
+}
+
+func TestBuiltinShell_Exec_AllowsVFSArguments(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(rootDir, "foo.txt"), []byte("data"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	inv := tools.NewBuiltinShellInvoker(rootDir, nil, vfs.MountWorkdir)
+	input, err := json.Marshal(struct {
+		Argv []string `json:"argv"`
+		Cwd  string   `json:"cwd"`
+	}{
+		Argv: []string{"ls", "/" + vfs.MountWorkdir},
+		Cwd:  ".",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	req := types.ToolRequest{
+		Version:  "v1",
+		CallID:   "vfs-arg",
+		ToolID:   types.ToolID("builtin.shell"),
+		ActionID: "exec",
+		Input:    input,
+	}
+	resp, err := inv.Invoke(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	var out struct {
+		Stdout string `json:"stdout"`
+		Exit   int    `json:"exitCode"`
+	}
+	if err := json.Unmarshal(resp.Output, &out); err != nil {
+		t.Fatalf("Unmarshal output: %v", err)
+	}
+	if out.Exit != 0 {
+		t.Fatalf("exitCode=%d", out.Exit)
+	}
+	if !strings.Contains(out.Stdout, "foo.txt") {
+		t.Fatalf("stdout=%q; want it to list foo.txt", out.Stdout)
+	}
+}
+
+func TestBuiltinShell_Exec_TranslatesOutputPathsToVFS(t *testing.T) {
+	rootDir := t.TempDir()
+	inv := tools.NewBuiltinShellInvoker(rootDir, nil, vfs.MountWorkdir)
+	input, err := json.Marshal(struct {
+		Argv []string `json:"argv"`
+	}{
+		Argv: []string{"pwd"},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	req := types.ToolRequest{
+		Version:  "v1",
+		CallID:   "vfs-output",
+		ToolID:   types.ToolID("builtin.shell"),
+		ActionID: "exec",
+		Input:    input,
+	}
+	resp, err := inv.Invoke(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	var out struct {
+		Stdout string `json:"stdout"`
+	}
+	if err := json.Unmarshal(resp.Output, &out); err != nil {
+		t.Fatalf("Unmarshal output: %v", err)
+	}
+	stdout := strings.TrimSpace(out.Stdout)
+	if !strings.Contains(stdout, "/"+vfs.MountWorkdir) {
+		t.Fatalf("stdout=%q; want it to mention /%s", stdout, vfs.MountWorkdir)
+	}
+	if strings.Contains(stdout, rootDir) {
+		t.Fatalf("stdout=%q; should not expose host path", stdout)
 	}
 }

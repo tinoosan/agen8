@@ -22,7 +22,7 @@ func init() {
 		ID:       types.ToolID("builtin.shell"),
 		Manifest: builtinShellManifest,
 		NewInvoker: func(cfg BuiltinConfig) ToolInvoker {
-			return NewBuiltinShellInvoker(cfg.ShellRootDir, cfg.ShellConfirm)
+			return NewBuiltinShellInvoker(cfg.ShellRootDir, cfg.ShellConfirm, cfg.ShellVFSMount)
 		},
 	})
 }
@@ -31,18 +31,20 @@ const defaultShellMaxOutputBytes = 64 * 1024
 
 // BuiltinShellInvoker runs a guarded argv under the host workdir.
 type BuiltinShellInvoker struct {
-	RootDir  string
-	Deny     map[string]bool
-	MaxBytes int
-	Confirm  func(ctx context.Context, argv []string, cwd string) (bool, error)
+	RootDir      string
+	VFSMountName string
+	Deny         map[string]bool
+	MaxBytes     int
+	Confirm      func(ctx context.Context, argv []string, cwd string) (bool, error)
 }
 
-func NewBuiltinShellInvoker(rootDir string, confirm func(context.Context, []string, string) (bool, error)) *BuiltinShellInvoker {
+func NewBuiltinShellInvoker(rootDir string, confirm func(context.Context, []string, string) (bool, error), vfsMount string) *BuiltinShellInvoker {
 	return &BuiltinShellInvoker{
-		RootDir:  rootDir,
-		Deny:     DefaultShellDenylist(),
-		MaxBytes: defaultShellMaxOutputBytes,
-		Confirm:  confirm,
+		RootDir:      rootDir,
+		VFSMountName: strings.TrimSpace(vfsMount),
+		Deny:         DefaultShellDenylist(),
+		MaxBytes:     defaultShellMaxOutputBytes,
+		Confirm:      confirm,
 	}
 }
 
@@ -112,9 +114,13 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 	if s.Deny != nil && s.Deny[cmdName] {
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("command %q is denied", cmdName)}
 	}
-	for _, a := range in.Argv[1:] {
-		if looksLikeAbsPathOrFlagValue(a) {
-			return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("absolute paths are not allowed in argv (got %q); use relative paths under cwd", a)}
+	for i := 1; i < len(in.Argv); i++ {
+		if converted, ok := s.translateVFSArgument(in.Argv[i]); ok {
+			in.Argv[i] = converted
+			continue
+		}
+		if looksLikeAbsPathOrFlagValue(in.Argv[i]) {
+			return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("absolute paths are not allowed in argv (got %q); use relative paths under cwd", in.Argv[i])}
 		}
 	}
 
@@ -122,6 +128,7 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 	if cwd == "" {
 		cwd = "."
 	}
+	cwd = s.translateVFSCwd(cwd)
 	absDir, err := vfsutil.SafeJoinBaseDir(root, cwd)
 	if err != nil {
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
@@ -168,10 +175,13 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 	stdoutFull := stdoutBuf.Bytes()
 	stderrFull := stderrBuf.Bytes()
 
+	stdoutText := s.translateOutputPaths(string(stdoutFull))
+	stderrText := s.translateOutputPaths(string(stderrFull))
+
 	out := shellExecOutput{
 		ExitCode: exitCode,
-		Stdout:   truncateString(string(stdoutFull), maxBytes),
-		Stderr:   truncateString(string(stderrFull), maxBytes),
+		Stdout:   truncateString(stdoutText, maxBytes),
+		Stderr:   truncateString(stderrText, maxBytes),
 	}
 
 	artifacts := make([]ToolArtifactWrite, 0, 2)
@@ -179,7 +189,7 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 		out.StdoutPath = "stdout.txt"
 		artifacts = append(artifacts, ToolArtifactWrite{
 			Path:      "stdout.txt",
-			Bytes:     stdoutFull,
+			Bytes:     []byte(stdoutText),
 			MediaType: "text/plain",
 		})
 	}
@@ -187,7 +197,7 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 		out.StderrPath = "stderr.txt"
 		artifacts = append(artifacts, ToolArtifactWrite{
 			Path:      "stderr.txt",
-			Bytes:     stderrFull,
+			Bytes:     []byte(stderrText),
 			MediaType: "text/plain",
 		})
 	}
@@ -269,4 +279,64 @@ func truncateString(s string, max int) string {
 		return s
 	}
 	return s[:max]
+}
+
+func (s *BuiltinShellInvoker) translateVFSArgument(arg string) (string, bool) {
+	mount := strings.TrimSpace(s.VFSMountName)
+	if mount == "" {
+		return arg, false
+	}
+	prefix := "/" + mount
+	if arg == prefix {
+		return s.RootDir, true
+	}
+	if strings.HasPrefix(arg, prefix+"/") {
+		return strings.Replace(arg, prefix, s.RootDir, 1), true
+	}
+	if idx := strings.IndexByte(arg, '='); idx >= 0 {
+		if converted, ok := s.translateVFSArgument(arg[idx+1:]); ok {
+			return arg[:idx+1] + converted, true
+		}
+	}
+	return arg, false
+}
+
+func (s *BuiltinShellInvoker) translateVFSCwd(cwd string) string {
+	if cwd == "" {
+		return cwd
+	}
+	mount := strings.TrimSpace(s.VFSMountName)
+	if mount == "" {
+		return cwd
+	}
+	prefix := "/" + mount
+	if cwd == prefix {
+		return "."
+	}
+	if strings.HasPrefix(cwd, prefix+"/") {
+		rel := strings.TrimPrefix(cwd, prefix+"/")
+		if rel == "" {
+			return "."
+		}
+		return rel
+	}
+	return cwd
+}
+
+func (s *BuiltinShellInvoker) translateOutputPaths(text string) string {
+	mount := strings.TrimSpace(s.VFSMountName)
+	if mount == "" {
+		return text
+	}
+	root := strings.TrimSpace(s.RootDir)
+	if root == "" {
+		return text
+	}
+	hostRoot := filepath.Clean(root)
+	prefix := "/" + mount
+	out := strings.ReplaceAll(text, hostRoot, prefix)
+	if slashRoot := filepath.ToSlash(hostRoot); slashRoot != hostRoot {
+		out = strings.ReplaceAll(out, slashRoot, prefix)
+	}
+	return out
 }

@@ -134,9 +134,10 @@ func setupTUIChatRuntime(
 
 	traceStore := f.TraceStore
 	builtinCfg := tools.BuiltinConfig{
-		ShellRootDir: absWorkdirRoot,
-		ShellConfirm: nil,
-		TraceStore:   traceStore,
+		ShellRootDir:  absWorkdirRoot,
+		ShellVFSMount: vfs.MountWorkdir,
+		ShellConfirm:  nil,
+		TraceStore:    traceStore,
 	}
 
 	builtinInvokers := tools.BuiltinInvokerRegistry(builtinCfg)

@@ -18,6 +18,10 @@ type BuiltinConfig struct {
 	// ShellRootDir is the OS directory used as the sandbox root for builtin.shell.
 	// It must be an absolute path; builtin.shell rejects cwd escapes and absolute cwd.
 	ShellRootDir string
+	// ShellVFSMount is the VFS path prefix (mount name) used for builtin.shell.
+	// When set, stdout/stderr paths are rewritten from the host root into /{mount},
+	// and argv elements that begin with the mount prefix are translated back to host paths.
+	ShellVFSMount string
 	// ShellConfirm is an optional host callback to confirm execution.
 	ShellConfirm func(ctx context.Context, argv []string, cwd string) (bool, error)
 
