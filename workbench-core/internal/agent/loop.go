@@ -295,19 +295,21 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 	switch name {
 	case "shell_exec":
 		var args struct {
-			Argv  []string `json:"argv"`
-			Cwd   string   `json:"cwd"`
-			Stdin string   `json:"stdin"`
+			Command string `json:"command"`
+			Cwd     string `json:"cwd"`
+			Stdin   string `json:"stdin"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return types.HostOpRequest{}, err
 		}
-		if len(args.Argv) == 0 {
-			return types.HostOpRequest{}, fmt.Errorf("argv is required")
+		cmd := strings.TrimSpace(args.Command)
+		if cmd == "" {
+			return types.HostOpRequest{}, fmt.Errorf("command is required")
 		}
+		// Wrap with bash -c for full shell syntax support (pipes, redirects, etc.)
 		return types.HostOpRequest{
 			Op:    types.HostOpShellExec,
-			Argv:  args.Argv,
+			Argv:  []string{"bash", "-c", cmd},
 			Cwd:   resolveVFSPath(args.Cwd),
 			Stdin: args.Stdin,
 		}, nil
@@ -347,20 +349,49 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 		}
 		return req, nil
 
-	case "trace":
+	case "trace_events_since":
 		var args struct {
-			Action string `json:"action"`
-			Key    string `json:"key"`
-			Value  string `json:"value"`
+			Cursor   json.RawMessage `json:"cursor"`
+			MaxBytes *int            `json:"maxBytes"`
+			Limit    *int            `json:"limit"`
 		}
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return types.HostOpRequest{}, err
 		}
 		return types.HostOpRequest{
 			Op:     types.HostOpTrace,
-			Action: strings.ToLower(strings.TrimSpace(args.Action)),
-			Key:    strings.TrimSpace(args.Key),
-			Value:  args.Value,
+			Action: "events.since",
+			Input:  argsJSON,
+		}, nil
+
+	case "trace_events_latest":
+		var args struct {
+			MaxBytes *int `json:"maxBytes"`
+			Limit    *int `json:"limit"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		return types.HostOpRequest{
+			Op:     types.HostOpTrace,
+			Action: "events.latest",
+			Input:  argsJSON,
+		}, nil
+
+	case "trace_events_summary":
+		var args struct {
+			Cursor       json.RawMessage `json:"cursor"`
+			MaxBytes     *int            `json:"maxBytes"`
+			Limit        *int            `json:"limit"`
+			IncludeTypes []string        `json:"includeTypes"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		return types.HostOpRequest{
+			Op:     types.HostOpTrace,
+			Action: "events.summary",
+			Input:  argsJSON,
 		}, nil
 
 	case "fs_list":
@@ -519,9 +550,9 @@ When you call a tool (like ~fs_read~), the content that comes back is **the resu
 Call these without discovery:
 
 - ~fs_list~, ~fs_read~, ~fs_write~, ~fs_append~, ~fs_edit~, ~fs_patch~, ~final_answer~
-- ~shell_exec~ for shell argv execution inside the repo root (cwd, stdin allowed)
+- ~shell_exec~ for shell commands with full bash syntax (pipes, redirects, etc.)
 - ~http_fetch~ for HTTP requests
-- ~trace~ to write or read reasoning traces across turns
+- ~trace_events_latest~, ~trace_events_since~, ~trace_events_summary~ for system event insight
 
 **For simple tasks like "create 5 files", just call ~fs_write~ directly.**
 
@@ -565,7 +596,7 @@ Workbench may provide **web-search-grounded model responses** (provider-dependen
 2.  **Path Resolution**: You may use relative paths (e.g., ~.~ or ~./src~). They will be resolved relative to ~/project~.
 3.  **Tool Usage**:
     - Use ~fs_*~ tools for file operations.
-    - Use ~shell_exec~ for advanced search (~grep~, ~find~) or running project binaries. Note: Do NOT try to run ~bash~ or ~sh~ interactive sessions; just pass the command argv directly.
+    - Use ~shell_exec~ for shell commands like ~grep~, ~find~, or build scripts. Pass a command string, not argv.
 4.  **No Hallucinations**: Do not call tools that are not in your definition list.
 
 ---

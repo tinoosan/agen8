@@ -149,22 +149,16 @@ func HostOpFunctions() []types.Tool {
 			Type: "function",
 			Function: types.ToolFunction{
 				Name:        "shell_exec",
-				Description: "[CORE] Execute a shell command in the project directory. Returns stdout, stderr, and exit code.",
+				Description: "[CORE] Execute a shell command via bash. Supports pipes, redirects, and full shell syntax. Returns stdout, stderr, and exit code.",
 				Strict:      true,
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"argv": map[string]any{
-							"type": "array",
-							"items": map[string]any{
-								"type": "string",
-							},
-							"description": "Command and arguments (e.g., [\"git\", \"status\"]).",
-						},
-						"cwd":   map[string]any{"type": stringOrNull, "description": "Working directory (VFS path, default: /project)."},
-						"stdin": map[string]any{"type": stringOrNull, "description": "Standard input to pipe to the command."},
+						"command": map[string]any{"type": "string", "description": "Shell command to execute (e.g., \"ls -la | grep foo\")."},
+						"cwd":     map[string]any{"type": stringOrNull, "description": "Working directory (VFS path, default: /project)."},
+						"stdin":   map[string]any{"type": stringOrNull, "description": "Standard input to pipe to the command."},
 					},
-					"required":             []any{"argv", "cwd", "stdin"},
+					"required":             []any{"command", "cwd", "stdin"},
 					"additionalProperties": false,
 				},
 			},

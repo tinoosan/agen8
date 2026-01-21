@@ -34,9 +34,9 @@
 // They require no discovery and are handled directly by the host loop:
 //
 //   - File System: fs_list, fs_read, fs_write, fs_append, fs_edit, fs_patch
-//   - Shell: shell_exec — execute commands in the project directory
+//   - Shell: shell_exec — run bash commands with full syntax (pipes, redirects, etc.)
 //   - HTTP: http_fetch — make HTTP requests
-//   - Context: trace — write/read reasoning traces across turns
+//   - Trace: trace_events_latest, trace_events_since, trace_events_summary — system event insight
 //   - Control: final_answer — end the turn with user-visible response
 //
 // These are defined in [agent.HostOpFunctions] and routed in [agent.functionCallToHostOp].

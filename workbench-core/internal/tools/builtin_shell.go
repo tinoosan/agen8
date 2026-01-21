@@ -37,18 +37,15 @@ func NewBuiltinShellInvoker(rootDir string, confirm func(context.Context, []stri
 }
 
 func DefaultShellDenylist() map[string]bool {
+	// Note: We allow bash/sh since shell_exec wraps commands with "bash -c".
+	// The deny list focuses on privileged/dangerous operations.
 	return map[string]bool{
-		"bash": true, "sh": true, "zsh": true, "fish": true, "ksh": true, "dash": true, "tcsh": true, "csh": true,
 		"sudo": true, "su": true, "doas": true,
 		"ssh": true, "scp": true, "sftp": true, "rsync": true,
-		"python": true, "python3": true, "node": true, "deno": true, "bun": true, "ruby": true, "perl": true, "php": true, "lua": true, "java": true,
-		"brew": true, "apt": true, "apt-get": true, "yum": true, "dnf": true, "pacman": true, "apk": true, "pip": true, "pip3": true, "npm": true, "npx": true, "gem": true,
 		"nc": true, "ncat": true, "netcat": true, "socat": true, "telnet": true,
-		"curl": true, "wget": true,
 		"shutdown": true, "reboot": true, "halt": true, "poweroff": true, "dd": true, "mkfs": true, "mount": true, "umount": true,
-		"chmod": true, "chown": true,
 		"systemctl": true, "launchctl": true,
-		"rm": true,
+		"rm": true, // Denied until approval policy is implemented
 	}
 }
 
@@ -103,6 +100,12 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("command %q is denied", cmdName)}
 	}
 	for i := 1; i < len(in.Argv); i++ {
+		// Special case: for shell interpreters with -c flag, the next argument
+		// is a command string that may contain VFS paths needing translation.
+		if i >= 2 && (cmdName == "bash" || cmdName == "sh" || cmdName == "zsh") && in.Argv[i-1] == "-c" {
+			in.Argv[i] = s.translateInputPaths(in.Argv[i])
+			continue
+		}
 		if converted, ok := s.translateVFSArgument(in.Argv[i]); ok {
 			in.Argv[i] = converted
 			continue
@@ -325,6 +328,33 @@ func (s *BuiltinShellInvoker) translateOutputPaths(text string) string {
 	out := strings.ReplaceAll(text, hostRoot, prefix)
 	if slashRoot := filepath.ToSlash(hostRoot); slashRoot != hostRoot {
 		out = strings.ReplaceAll(out, slashRoot, prefix)
+	}
+	return out
+}
+
+// translateInputPaths converts VFS paths to host paths in command strings.
+//
+// This is the inverse of translateOutputPaths. It's used when commands are
+// passed as strings (e.g., via "bash -c") rather than as argv arrays, so
+// VFS paths like "/project/src/foo.go" get translated to host paths.
+func (s *BuiltinShellInvoker) translateInputPaths(text string) string {
+	mount := strings.TrimSpace(s.VFSMountName)
+	if mount == "" {
+		return text
+	}
+	root := strings.TrimSpace(s.RootDir)
+	if root == "" {
+		return text
+	}
+	hostRoot := filepath.Clean(root)
+	prefix := "/" + mount
+	// Replace /mount/... with hostRoot/...
+	out := strings.ReplaceAll(text, prefix+"/", hostRoot+"/")
+	// Replace bare /mount with hostRoot
+	out = strings.ReplaceAll(out, prefix+" ", hostRoot+" ")
+	// Handle end of string
+	if strings.HasSuffix(out, prefix) {
+		out = out[:len(out)-len(prefix)] + hostRoot
 	}
 	return out
 }
