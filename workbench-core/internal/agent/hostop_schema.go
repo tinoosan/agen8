@@ -4,8 +4,8 @@ import "github.com/tinoosan/workbench-core/internal/types"
 
 // hostOpResponseSchema returns the Structured Outputs schema for the agent loop v0:
 // the model must return exactly one JSON object that is either:
-// - a HostOpRequest (fs.* / tool.run / final), or
-// - a HostOpBatchRequest (batch of HostOpRequest operations, excluding final).
+// - a HostOpRequest (fs.* / tool.run)
+// - {"op":"final","text":"..."}
 func hostOpResponseSchema() *types.LLMResponseSchema {
 	// IMPORTANT:
 	// Structured Outputs supports only a subset of JSON Schema in strict mode, and

@@ -26,7 +26,7 @@ import (
 // Client implements types.LLMClient and types.LLMClientStreaming using the official
 // OpenAI Go SDK, pointed at OpenRouter's OpenAI-compatible endpoint.
 type Client struct {
-	client *openai.Client
+	client  *openai.Client
 	baseURL string
 
 	// DefaultMaxTokens is used when LLMRequest.MaxTokens is 0.
@@ -325,8 +325,7 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 		return strings.HasPrefix(s, "Your last message was not valid JSON") ||
 			strings.HasPrefix(s, "Your last JSON op was invalid:") ||
 			strings.HasPrefix(s, "Your last JSON op was not valid JSON") ||
-			strings.HasPrefix(s, "HostOpResponse:") ||
-			strings.HasPrefix(s, "HostOpBatchResponse:")
+			strings.HasPrefix(s, "HostOpResponse:")
 	}
 
 	lastRealUserIdx := -1

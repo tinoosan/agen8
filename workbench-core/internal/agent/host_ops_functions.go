@@ -11,7 +11,6 @@ func HostOpFunctions() []types.Tool {
 	// - all properties listed in required
 	// - optional fields modeled via ["type","null"] and still listed in required
 	intOrNull := []any{"integer", "null"}
-	boolOrNull := []any{"boolean", "null"}
 
 	return []types.Tool{
 		{
@@ -165,59 +164,6 @@ func HostOpFunctions() []types.Tool {
 						"timeoutMs": map[string]any{"type": intOrNull, "description": "Timeout in milliseconds (or null for default)"},
 					},
 					"required":             []any{"toolId", "actionId", "input", "timeoutMs"},
-					"additionalProperties": false,
-				},
-			},
-		},
-		{
-			Type: "function",
-			Function: types.ToolFunction{
-				Name:        "batch",
-				Description: "[DIRECT - no discovery needed] Execute 2+ host ops in one call. Use dotted op names: fs.list, fs.read, fs.write, fs.append, fs.edit, fs.patch, tool.run. For tool.run in batch, you must have read the manifest first.",
-				// NOTE: batch.operations items may include arbitrary nested objects (e.g. tool.run.input),
-				// so strict tool schemas are not universally accepted by providers.
-				Strict: false,
-				Parameters: map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"parallel": map[string]any{"type": boolOrNull, "description": "Run operations in parallel when true (or null for default false)."},
-						"operations": map[string]any{
-							"type": "array",
-							"items": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"op": map[string]any{
-										"type":        "string",
-										"description": "Host op name (dotted, NOT underscore). Example: \"fs.write\" (NOT \"fs_write\").",
-										"enum": []any{
-											"fs.list",
-											"fs.read",
-											"fs.write",
-											"fs.append",
-											"fs.edit",
-											"fs.patch",
-											"tool.run",
-										},
-									},
-									// Common fields (required depending on op):
-									"path":     map[string]any{"type": "string", "description": "VFS path for fs.* ops (required for fs.list/fs.read/fs.write/fs.append/fs.edit/fs.patch)."},
-									"text":     map[string]any{"type": "string", "description": "Text for fs.write/fs.append/fs.patch (required for those ops)."},
-									"maxBytes": map[string]any{"type": "integer", "description": "Max bytes for fs.read (optional)."},
-									"toolId":   map[string]any{"type": "string", "description": "Tool ID for tool.run (required for tool.run)."},
-									"actionId": map[string]any{"type": "string", "description": "Action ID for tool.run (required for tool.run)."},
-									"input": map[string]any{
-										"type":                 "object",
-										"description":          "Input object for fs.edit or tool.run (required for fs.edit and tool.run).",
-										"additionalProperties": true,
-									},
-									"timeoutMs": map[string]any{"type": intOrNull, "description": "Timeout for tool.run (required for tool.run; or null)."},
-								},
-								"required":             []any{"op"},
-								"additionalProperties": true,
-							},
-						},
-					},
-					"required":             []any{"parallel", "operations"},
 					"additionalProperties": false,
 				},
 			},

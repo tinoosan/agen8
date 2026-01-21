@@ -23,10 +23,6 @@ const (
 	HostOpFSPatch = "fs.patch"
 	// HostOpToolRun runs a discovered tool via the ToolRunner.
 	HostOpToolRun = "tool.run"
-	// HostOpBatch allows submitting multiple independent operations in one turn.
-	HostOpBatch = "batch"
-	// HostOpFSBatch is an alias for HostOpBatch (preferred by some prompts/models).
-	HostOpFSBatch = "fs.batch"
 	// HostOpFinal ends the agent loop for a user turn.
 	HostOpFinal = "final"
 )
@@ -50,42 +46,6 @@ type HostOpRequest struct {
 	TimeoutMs int             `json:"timeoutMs,omitempty"`
 	MaxBytes  int             `json:"maxBytes,omitempty"`
 	Text      string          `json:"text,omitempty"`
-}
-
-// HostOpBatchRequest allows submitting multiple independent operations.
-//
-// This is intended to reduce latency for workflows like multi-file reads and directory
-// listings. When Parallel is true, the host may execute operations concurrently.
-type HostOpBatchRequest struct {
-	Op         string          `json:"op"` // must be "batch"
-	Operations []HostOpRequest `json:"operations"`
-	Parallel   bool            `json:"parallel,omitempty"` // execute in parallel vs sequential
-}
-
-func (r HostOpBatchRequest) Validate() error {
-	r.Op = strings.TrimSpace(r.Op)
-	if r.Op != HostOpBatch && r.Op != HostOpFSBatch {
-		return fmt.Errorf("unknown op %q", r.Op)
-	}
-	if len(r.Operations) == 0 {
-		return fmt.Errorf("operations must be non-empty")
-	}
-	for i, op := range r.Operations {
-		if strings.TrimSpace(op.Op) == HostOpFinal {
-			return fmt.Errorf("operations[%d]: op %q is not allowed in batch", i, HostOpFinal)
-		}
-		if err := op.Validate(); err != nil {
-			return fmt.Errorf("operations[%d]: %w", i, err)
-		}
-	}
-	return nil
-}
-
-// HostOpBatchResponse contains results from all operations.
-type HostOpBatchResponse struct {
-	Ok      bool             `json:"ok"`
-	Results []HostOpResponse `json:"results"`
-	Error   string           `json:"error,omitempty"`
 }
 
 // Validate checks the request is well-formed for its declared Op.
