@@ -35,26 +35,10 @@ import (
 	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
-// CreateRun initializes a new run with the given goal and context limit.
-// It creates a unique run ID, a corresponding directory in data/runs,
-// and persists the initial run state as run.json.
-func CreateRun(cfg config.Config, goal string, maxBytesForContext int) (types.Run, error) {
-	if err := cfg.Validate(); err != nil {
-		return types.Run{}, err
-	}
-	// Runs always belong to a session. For now (until a CLI/session loader exists),
-	// CreateRun creates a new session implicitly.
-	sess, err := CreateSession(cfg, goal)
-	if err != nil {
-		return types.Run{}, err
-	}
-	return CreateRunInSession(cfg, sess.SessionID, "", goal, maxBytesForContext)
-}
-
-// CreateRunInSession creates a run within an existing session.
+// CreateSubRun creates a run within an existing session.
 //
 // parentRunID is optional; when set, the new run is considered a "sub-agent" run.
-func CreateRunInSession(cfg config.Config, sessionID, parentRunID, goal string, maxBytesForContext int) (types.Run, error) {
+func CreateSubRun(cfg config.Config, sessionID, parentRunID, goal string, maxBytesForContext int) (types.Run, error) {
 	if err := cfg.Validate(); err != nil {
 		return types.Run{}, err
 	}

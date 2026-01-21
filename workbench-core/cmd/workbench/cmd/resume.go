@@ -27,7 +27,7 @@ var resumeCmd = &cobra.Command{
 			return err
 		}
 		parent := strings.TrimSpace(sess.CurrentRunID)
-		run, err := store.CreateRunInSession(cfg, sessionID, parent, "resume session", maxContextB)
+		run, err := store.CreateSubRun(cfg, sessionID, parent, "resume session", maxContextB)
 		if err != nil {
 			return err
 		}

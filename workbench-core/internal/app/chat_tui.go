@@ -736,15 +736,12 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	}
 
 	cfg := r.cfg
-	sess, err := store.CreateSession(cfg, title)
-	if err != nil {
-		return err
-	}
-	run, err := store.CreateRunInSession(cfg, sess.SessionID, "", goal, r.maxContextB)
+	sess, run, err := store.CreateSession(cfg, goal, r.maxContextB)
 	if err != nil {
 		return err
 	}
 	r.run = run
+	sess.Title = title
 
 	historyRes, err := resources.NewHistoryResource(cfg, run.SessionID)
 	if err != nil {

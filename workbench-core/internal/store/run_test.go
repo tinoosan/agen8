@@ -11,6 +11,15 @@ import (
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
+func mustCreateSessionRun(t *testing.T, cfg config.Config, goal string, maxBytes int) types.Run {
+	t.Helper()
+	_, run, err := CreateSession(cfg, goal, maxBytes)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	return run
+}
+
 func TestCreateRun(t *testing.T) {
 	// Setup temporary data directory
 	tmpDir := t.TempDir()
@@ -19,10 +28,7 @@ func TestCreateRun(t *testing.T) {
 	goal := "Test Goal"
 	maxBytes := 1024
 
-	run, err := CreateRun(cfg, goal, maxBytes)
-	if err != nil {
-		t.Fatalf("CreateRun failed: %v", err)
-	}
+	run := mustCreateSessionRun(t, cfg, goal, maxBytes)
 
 	// Assert returned run fields
 	if run.Goal != goal {
@@ -93,10 +99,7 @@ func TestLoadRun(t *testing.T) {
 
 	t.Run("Success", func(t *testing.T) {
 		goal := "Load Success Goal"
-		run, err := CreateRun(cfg, goal, 100)
-		if err != nil {
-			t.Fatalf("Failed to create run for loading: %v", err)
-		}
+		run := mustCreateSessionRun(t, cfg, goal, 100)
 
 		loaded, err := LoadRun(cfg, run.RunId)
 		if err != nil {
@@ -165,10 +168,7 @@ func TestStopRun(t *testing.T) {
 	cfg := config.Config{DataDir: tmpDir}
 
 	t.Run("SuccessDone", func(t *testing.T) {
-		run, err := CreateRun(cfg, "Stop Success", 100)
-		if err != nil {
-			t.Fatal(err)
-		}
+		run := mustCreateSessionRun(t, cfg, "Stop Success", 100)
 
 		stopped, err := StopRun(cfg, run.RunId, types.StatusDone, "")
 		if err != nil {
@@ -193,10 +193,7 @@ func TestStopRun(t *testing.T) {
 	})
 
 	t.Run("SuccessFailed", func(t *testing.T) {
-		run, err := CreateRun(cfg, "Stop Failed Success", 100)
-		if err != nil {
-			t.Fatal(err)
-		}
+		run := mustCreateSessionRun(t, cfg, "Stop Failed Success", 100)
 
 		errMsg := "some error occurred"
 		stopped, err := StopRun(cfg, run.RunId, types.StatusFailed, errMsg)
@@ -216,12 +213,9 @@ func TestStopRun(t *testing.T) {
 	})
 
 	t.Run("ErrorMissingMessage", func(t *testing.T) {
-		run, err := CreateRun(cfg, "Stop Error Missing Msg", 100)
-		if err != nil {
-			t.Fatal(err)
-		}
+		run := mustCreateSessionRun(t, cfg, "Stop Error Missing Msg", 100)
 
-		_, err = StopRun(cfg, run.RunId, types.StatusFailed, "")
+		_, err := StopRun(cfg, run.RunId, types.StatusFailed, "")
 		if err == nil {
 			t.Error("Expected error for missing error message, got nil")
 		}
@@ -231,12 +225,9 @@ func TestStopRun(t *testing.T) {
 	})
 
 	t.Run("ErrorInvalidStatus", func(t *testing.T) {
-		run, err := CreateRun(cfg, "Stop Error Invalid Status", 100)
-		if err != nil {
-			t.Fatal(err)
-		}
+		run := mustCreateSessionRun(t, cfg, "Stop Error Invalid Status", 100)
 
-		_, err = StopRun(cfg, run.RunId, types.StatusRunning, "")
+		_, err := StopRun(cfg, run.RunId, types.StatusRunning, "")
 		if err == nil {
 			t.Error("Expected error for transition to status 'running', got nil")
 		}
@@ -246,12 +237,9 @@ func TestStopRun(t *testing.T) {
 	})
 
 	t.Run("ErrorAlreadyStopped", func(t *testing.T) {
-		run, err := CreateRun(cfg, "Stop Error Already Stopped", 100)
-		if err != nil {
-			t.Fatal(err)
-		}
+		run := mustCreateSessionRun(t, cfg, "Stop Error Already Stopped", 100)
 
-		_, err = StopRun(cfg, run.RunId, types.StatusDone, "")
+		_, err := StopRun(cfg, run.RunId, types.StatusDone, "")
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -22,9 +22,9 @@ func TestBuiltinHTTP_Fetch_SmallBody_OK(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun(cfg, "builtin http test", 100)
+	_, run, err := store.CreateSession(cfg, "builtin http test", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
@@ -92,9 +92,9 @@ func TestBuiltinHTTP_Fetch_LargeBody_WritesArtifact(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	_, err := store.CreateRun(cfg, "builtin http large test", 100)
+	_, _, err := store.CreateSession(cfg, "builtin http large test", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()

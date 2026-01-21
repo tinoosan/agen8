@@ -16,9 +16,9 @@ func TestEventStore(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := CreateRun(cfg, "Event Test Run", 1024)
+	_, run, err := CreateSession(cfg, "Event Test Run", 1024)
 	if err != nil {
-		t.Fatalf("Failed to create run: %v", err)
+		t.Fatalf("CreateSession failed: %v", err)
 	}
 
 	t.Run("AppendEventWritesOneLine", func(t *testing.T) {

@@ -25,9 +25,9 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun(cfg, "runner test", 100)
+	_, run, err := store.CreateSession(cfg, "runner test", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
@@ -106,9 +106,9 @@ func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun(cfg, "runner unknown tool test", 100)
+	_, run, err := store.CreateSession(cfg, "runner unknown tool test", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
@@ -150,9 +150,9 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun(cfg, "runner invalid artifact test", 100)
+	_, run, err := store.CreateSession(cfg, "runner invalid artifact test", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
@@ -201,9 +201,9 @@ func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun(cfg, "runner invoke error test", 100)
+	_, run, err := store.CreateSession(cfg, "runner invoke error test", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()

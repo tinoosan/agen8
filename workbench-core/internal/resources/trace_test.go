@@ -15,9 +15,9 @@ import (
 func TestTraceResourceListRoot(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun(cfg, "trace list", 100)
+	_, run, err := store.CreateSession(cfg, "trace list", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 	tr, err := NewTraceResource(cfg, run.RunId)
 	if err != nil {
@@ -47,9 +47,9 @@ func TestTraceResourceListRoot(t *testing.T) {
 func TestTraceResourceReadEventsSince(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun(cfg, "trace since", 100)
+	_, run, err := store.CreateSession(cfg, "trace since", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 	tr, err := NewTraceResource(cfg, run.RunId)
 	if err != nil {
@@ -95,9 +95,9 @@ func TestTraceResourceReadEventsSince(t *testing.T) {
 func TestTraceResourceReadEventsLatest(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun(cfg, "trace latest", 100)
+	_, run, err := store.CreateSession(cfg, "trace latest", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 	tr, err := NewTraceResource(cfg, run.RunId)
 	if err != nil {
@@ -134,9 +134,9 @@ func TestTraceResourceReadEventsLatest(t *testing.T) {
 func TestTraceResourceReadEvents(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun(cfg, "trace events", 100)
+	_, run, err := store.CreateSession(cfg, "trace events", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 	tr, err := NewTraceResource(cfg, run.RunId)
 	if err != nil {

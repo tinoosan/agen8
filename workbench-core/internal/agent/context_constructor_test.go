@@ -41,9 +41,9 @@ func (c *countingResource) readsFor(path string) int {
 func TestContextConstructor_CachesProfileAndMemoryPerTurn(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun(cfg, "constructor cache test", 10)
+	_, run, err := store.CreateSession(cfg, "constructor cache test", 10)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	profStore, err := store.NewDiskProfileStore(cfg)
@@ -122,9 +122,9 @@ func TestContextConstructor_CachesProfileAndMemoryPerTurn(t *testing.T) {
 func TestContextConstructor_AttachmentsIncludedAcrossSteps(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun(cfg, "constructor attachments test", 10)
+	_, run, err := store.CreateSession(cfg, "constructor attachments test", 10)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 	wsRes, err := resources.NewWorkspace(cfg, run.RunId)
 	if err != nil {

@@ -18,9 +18,9 @@ func TestDataDirFromEnv_WritesUnderResolvedDir(t *testing.T) {
 	}
 	cfg := config.Config{DataDir: dataDir}
 
-	run, err := CreateRun(cfg, "env data dir test", 256)
+	_, run, err := CreateSession(cfg, "env data dir test", 256)
 	if err != nil {
-		t.Fatalf("CreateRun failed: %v", err)
+		t.Fatalf("CreateSession failed: %v", err)
 	}
 
 	runPath := fsutil.GetRunFilePath(cfg.DataDir, run.RunId)

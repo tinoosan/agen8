@@ -21,9 +21,9 @@ func TestBuiltinShell_Exec_CatFile_OK(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun(cfg, "builtin shell ok test", 100)
+	_, run, err := store.CreateSession(cfg, "builtin shell ok test", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
@@ -87,9 +87,9 @@ func TestBuiltinShell_Exec_RejectsEscapeCwd(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun(cfg, "builtin shell cwd test", 100)
+	_, run, err := store.CreateSession(cfg, "builtin shell cwd test", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
@@ -129,9 +129,9 @@ func TestBuiltinShell_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	run, err := store.CreateRun(cfg, "builtin bash truncation test", 100)
+	_, run, err := store.CreateSession(cfg, "builtin bash truncation test", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
@@ -198,9 +198,9 @@ func TestBuiltinShell_Exec_RejectsAbsolutePathArgs(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	_, err := store.CreateRun(cfg, "builtin bash abs path args test", 100)
+	_, _, err := store.CreateSession(cfg, "builtin bash abs path args test", 100)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()

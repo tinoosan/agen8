@@ -15,19 +15,32 @@ import (
 	"github.com/tinoosan/workbench-core/internal/validate"
 )
 
-// CreateSession creates and persists a new session.
+// CreateSession creates and persists a new session along with its main run.
 //
+// The returned Session+Run pair ensures every session starts with an active Main Run.
 // Sessions are stored under:
 //
 //	data/sessions/<sessionId>/session.json
 //
 // The session history file is created lazily by the history store/sink.
-func CreateSession(cfg config.Config, title string) (types.Session, error) {
+func CreateSession(cfg config.Config, goal string, maxBytesForContext int) (types.Session, types.Run, error) {
 	if err := cfg.Validate(); err != nil {
-		return types.Session{}, err
+		return types.Session{}, types.Run{}, err
 	}
-	s := types.NewSession(title)
-	return s, SaveSession(cfg, s)
+	s := types.NewSession(goal)
+	if err := SaveSession(cfg, s); err != nil {
+		return types.Session{}, types.Run{}, err
+	}
+
+	run := types.NewRun(goal, maxBytesForContext, s.SessionID, "")
+	if err := SaveRun(cfg, run); err != nil {
+		return types.Session{}, types.Run{}, err
+	}
+	updated, err := AddRunToSession(cfg, s.SessionID, run.RunId)
+	if err != nil {
+		return types.Session{}, types.Run{}, err
+	}
+	return updated, run, nil
 }
 
 // SaveSession persists a session's session.json file.

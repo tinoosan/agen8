@@ -17,9 +17,9 @@ import (
 func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun(cfg, "updater test", 10)
+	_, run, err := store.CreateSession(cfg, "updater test", 10)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
@@ -130,9 +130,9 @@ func TestHeadTailUTF8(t *testing.T) {
 func TestContextUpdater_FiltersTraceEvents(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun(cfg, "updater filter test", 10)
+	_, run, err := store.CreateSession(cfg, "updater filter test", 10)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
@@ -202,9 +202,9 @@ func TestContextUpdater_FiltersTraceEvents(t *testing.T) {
 func TestContextUpdater_AdaptiveBudgets(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun(cfg, "updater budget test", 10)
+	_, run, err := store.CreateSession(cfg, "updater budget test", 10)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	traceRes, err := resources.NewTraceResource(cfg, run.RunId)
@@ -261,9 +261,9 @@ func TestContextUpdater_AdaptiveBudgets(t *testing.T) {
 func TestContextUpdater_FailureBumpAfterBadOp(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	run, err := store.CreateRun(cfg, "updater failure bump test", 10)
+	_, run, err := store.CreateSession(cfg, "updater failure bump test", 10)
 	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
+		t.Fatalf("CreateSession: %v", err)
 	}
 
 	traceRes, err := resources.NewTraceResource(cfg, run.RunId)

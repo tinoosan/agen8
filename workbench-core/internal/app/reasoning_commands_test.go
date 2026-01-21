@@ -17,13 +17,9 @@ func TestTUITurnRunner_Reasoning_UpdatesAgentAndSession(t *testing.T) {
 
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	sess, err := store.CreateSession(cfg, "test")
+	sess, run, err := store.CreateSession(cfg, "test", 1024)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
-	}
-	run, err := store.CreateRunInSession(cfg, sess.SessionID, "", "test", 1024)
-	if err != nil {
-		t.Fatalf("CreateRunInSession: %v", err)
 	}
 
 	var got []events.Event
@@ -88,13 +84,9 @@ func TestTUITurnRunner_Reasoning_Info(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.Config{DataDir: t.TempDir()}
-	sess, err := store.CreateSession(cfg, "test")
+	_, run, err := store.CreateSession(cfg, "test", 1024)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
-	}
-	run, err := store.CreateRunInSession(cfg, sess.SessionID, "", "test", 1024)
-	if err != nil {
-		t.Fatalf("CreateRunInSession: %v", err)
 	}
 
 	r := &tuiTurnRunner{

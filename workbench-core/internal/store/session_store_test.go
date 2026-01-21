@@ -11,9 +11,15 @@ import (
 func TestCreateSessionAndAddRun(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	s, err := CreateSession(cfg, "test session")
+	s, run, err := CreateSession(cfg, "test session", 128)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
+	}
+	if run.SessionID != s.SessionID {
+		t.Fatalf("run.SessionID=%q want session %q", run.SessionID, s.SessionID)
+	}
+	if run.ParentRunID != "" {
+		t.Fatalf("main run should have no parent, got %q", run.ParentRunID)
 	}
 	if s.SessionID == "" {
 		t.Fatalf("expected sessionId")
@@ -27,7 +33,7 @@ func TestCreateSessionAndAddRun(t *testing.T) {
 	if updated.CurrentRunID != "run-1" {
 		t.Fatalf("currentRunId=%q", updated.CurrentRunID)
 	}
-	if len(updated.Runs) != 1 || updated.Runs[0] != "run-1" {
+	if len(updated.Runs) != 2 || updated.Runs[0] != run.RunId || updated.Runs[1] != "run-1" {
 		t.Fatalf("runs=%v", updated.Runs)
 	}
 
@@ -43,7 +49,7 @@ func TestCreateSessionAndAddRun(t *testing.T) {
 func TestRecordTurnInSession_UpdatesGoalAndSummary(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	s, err := CreateSession(cfg, "t")
+	s, _, err := CreateSession(cfg, "t", 64)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
