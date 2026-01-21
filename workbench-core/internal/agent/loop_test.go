@@ -91,7 +91,7 @@ func TestAgentLoopV0_ShellAndHTTPHostOps(t *testing.T) {
 		Type: "function",
 		Function: types.ToolCallFunction{
 			Name:      "shell_exec",
-			Arguments: `{"argv":["ls"],"cwd":"src","stdin":"hi"}`,
+			Arguments: `{"command":"ls","cwd":"src","stdin":"hi"}`,
 		},
 	}
 	req, err := functionCallToHostOp(tc, nil)
@@ -101,8 +101,8 @@ func TestAgentLoopV0_ShellAndHTTPHostOps(t *testing.T) {
 	if req.Op != types.HostOpShellExec {
 		t.Fatalf("expected shell_exec host op, got %+v", req)
 	}
-	if req.Cwd != "/project/src" {
-		t.Fatalf("expected cwd /project/src, got %q", req.Cwd)
+	if req.Cwd != "src" {
+		t.Fatalf("expected cwd src, got %q", req.Cwd)
 	}
 
 	tc = types.ToolCall{
@@ -126,8 +126,8 @@ func TestAgentLoopV0_ShellAndHTTPHostOps(t *testing.T) {
 	tc = types.ToolCall{
 		Type: "function",
 		Function: types.ToolCallFunction{
-			Name:      "trace",
-			Arguments: `{"action":"write","key":"note","value":"hello"}`,
+			Name:      "trace_events_latest",
+			Arguments: `{"limit":3}`,
 		},
 	}
 	req, err = functionCallToHostOp(tc, nil)
@@ -137,8 +137,17 @@ func TestAgentLoopV0_ShellAndHTTPHostOps(t *testing.T) {
 	if req.Op != types.HostOpTrace {
 		t.Fatalf("expected trace host op, got %+v", req)
 	}
-	if req.Action != "write" || req.Key != "note" || req.Value != "hello" {
-		t.Fatalf("unexpected trace args: %+v", req)
+	if req.Action != "events.latest" {
+		t.Fatalf("unexpected trace action: %+v", req)
+	}
+	var traceInput struct {
+		Limit *int `json:"limit"`
+	}
+	if err := json.Unmarshal(req.Input, &traceInput); err != nil {
+		t.Fatalf("unmarshal trace input: %v", err)
+	}
+	if traceInput.Limit == nil || *traceInput.Limit != 3 {
+		t.Fatalf("unexpected trace limit: %+v", traceInput.Limit)
 	}
 }
 

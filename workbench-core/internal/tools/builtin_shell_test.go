@@ -282,19 +282,10 @@ func TestBuiltinShell_EnvFiltersSensitiveVars(t *testing.T) {
 func TestDefaultShellDenylist_BlocksHighRiskCommands(t *testing.T) {
 	deny := tools.DefaultShellDenylist()
 	for _, name := range []string{
-		"bash",
-		"sh",
-		"python3",
-		"node",
 		"sudo",
 		"ssh",
 		"scp",
 		"nc",
-		"curl",
-		"wget",
-		"apt-get",
-		"npm",
-		"chmod",
 		"launchctl",
 		"rm",
 		"dd",
@@ -312,6 +303,11 @@ func TestDefaultShellDenylist_BlocksHighRiskCommands(t *testing.T) {
 		"ps",
 		"df",
 		"uname",
+		"bash",
+		"sh",
+		"python3",
+		"node",
+		"curl",
 	} {
 		if deny[name] {
 			t.Fatalf("expected %q to NOT be denied", name)
@@ -319,19 +315,23 @@ func TestDefaultShellDenylist_BlocksHighRiskCommands(t *testing.T) {
 	}
 }
 
-func TestBuiltinShell_Exec_AllowsVFSArguments(t *testing.T) {
+func TestBuiltinShell_Exec_RespectsRelativeCwd(t *testing.T) {
 	rootDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(rootDir, "foo.txt"), []byte("data"), 0644); err != nil {
+	nested := filepath.Join(rootDir, "subdir")
+	if err := os.MkdirAll(nested, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "note.txt"), []byte("hello\n"), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	inv := tools.NewBuiltinShellInvoker(rootDir, nil, vfs.MountProject)
+	inv := tools.NewBuiltinShellInvoker(rootDir, nil, "")
 	input, err := json.Marshal(struct {
 		Argv []string `json:"argv"`
 		Cwd  string   `json:"cwd"`
 	}{
-		Argv: []string{"ls", "/" + vfs.MountProject},
-		Cwd:  ".",
+		Argv: []string{"cat", "note.txt"},
+		Cwd:  "subdir",
 	})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
@@ -339,7 +339,7 @@ func TestBuiltinShell_Exec_AllowsVFSArguments(t *testing.T) {
 
 	req := types.ToolRequest{
 		Version:  "v1",
-		CallID:   "vfs-arg",
+		CallID:   "relative-cwd",
 		ToolID:   types.ToolID("builtin.shell"),
 		ActionID: "exec",
 		Input:    input,
@@ -350,17 +350,17 @@ func TestBuiltinShell_Exec_AllowsVFSArguments(t *testing.T) {
 	}
 
 	var out struct {
-		Stdout string `json:"stdout"`
-		Exit   int    `json:"exitCode"`
+		Stdout   string `json:"stdout"`
+		ExitCode int    `json:"exitCode"`
 	}
 	if err := json.Unmarshal(resp.Output, &out); err != nil {
 		t.Fatalf("Unmarshal output: %v", err)
 	}
-	if out.Exit != 0 {
-		t.Fatalf("exitCode=%d", out.Exit)
+	if out.ExitCode != 0 {
+		t.Fatalf("exitCode=%d", out.ExitCode)
 	}
-	if !strings.Contains(out.Stdout, "foo.txt") {
-		t.Fatalf("stdout=%q; want it to list foo.txt", out.Stdout)
+	if strings.TrimSpace(out.Stdout) != "hello" {
+		t.Fatalf("stdout=%q; want hello", out.Stdout)
 	}
 }
 

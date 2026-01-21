@@ -99,27 +99,19 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 	if s.Deny != nil && s.Deny[cmdName] {
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("command %q is denied", cmdName)}
 	}
+	// Validate argv for path escapes but don't translate VFS paths
+	// (model uses relative paths now, not VFS paths)
 	for i := 1; i < len(in.Argv); i++ {
-		// Special case: for shell interpreters with -c flag, the next argument
-		// is a command string that may contain VFS paths needing translation.
-		if i >= 2 && (cmdName == "bash" || cmdName == "sh" || cmdName == "zsh") && in.Argv[i-1] == "-c" {
-			in.Argv[i] = s.translateInputPaths(in.Argv[i])
-			continue
-		}
-		if converted, ok := s.translateVFSArgument(in.Argv[i]); ok {
-			in.Argv[i] = converted
-			continue
-		}
 		if looksLikeAbsPathOrFlagValue(in.Argv[i]) {
-			return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("absolute paths are not allowed in argv (got %q); use relative paths under cwd", in.Argv[i])}
+			return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("absolute paths are not allowed in argv (got %q); use relative paths", in.Argv[i])}
 		}
 	}
 
+	// Cwd is relative to project root
 	cwd := strings.TrimSpace(in.Cwd)
 	if cwd == "" {
 		cwd = "."
 	}
-	cwd = s.translateVFSCwd(cwd)
 	absDir, err := vfsutil.SafeJoinBaseDir(root, cwd)
 	if err != nil {
 		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
@@ -272,48 +264,6 @@ func truncateString(s string, max int) string {
 	return s[:max]
 }
 
-func (s *BuiltinShellInvoker) translateVFSArgument(arg string) (string, bool) {
-	mount := strings.TrimSpace(s.VFSMountName)
-	if mount == "" {
-		return arg, false
-	}
-	prefix := "/" + mount
-	if arg == prefix {
-		return s.RootDir, true
-	}
-	if strings.HasPrefix(arg, prefix+"/") {
-		return strings.Replace(arg, prefix, s.RootDir, 1), true
-	}
-	if idx := strings.IndexByte(arg, '='); idx >= 0 {
-		if converted, ok := s.translateVFSArgument(arg[idx+1:]); ok {
-			return arg[:idx+1] + converted, true
-		}
-	}
-	return arg, false
-}
-
-func (s *BuiltinShellInvoker) translateVFSCwd(cwd string) string {
-	if cwd == "" {
-		return cwd
-	}
-	mount := strings.TrimSpace(s.VFSMountName)
-	if mount == "" {
-		return cwd
-	}
-	prefix := "/" + mount
-	if cwd == prefix {
-		return "."
-	}
-	if strings.HasPrefix(cwd, prefix+"/") {
-		rel := strings.TrimPrefix(cwd, prefix+"/")
-		if rel == "" {
-			return "."
-		}
-		return rel
-	}
-	return cwd
-}
-
 func (s *BuiltinShellInvoker) translateOutputPaths(text string) string {
 	mount := strings.TrimSpace(s.VFSMountName)
 	if mount == "" {
@@ -328,33 +278,6 @@ func (s *BuiltinShellInvoker) translateOutputPaths(text string) string {
 	out := strings.ReplaceAll(text, hostRoot, prefix)
 	if slashRoot := filepath.ToSlash(hostRoot); slashRoot != hostRoot {
 		out = strings.ReplaceAll(out, slashRoot, prefix)
-	}
-	return out
-}
-
-// translateInputPaths converts VFS paths to host paths in command strings.
-//
-// This is the inverse of translateOutputPaths. It's used when commands are
-// passed as strings (e.g., via "bash -c") rather than as argv arrays, so
-// VFS paths like "/project/src/foo.go" get translated to host paths.
-func (s *BuiltinShellInvoker) translateInputPaths(text string) string {
-	mount := strings.TrimSpace(s.VFSMountName)
-	if mount == "" {
-		return text
-	}
-	root := strings.TrimSpace(s.RootDir)
-	if root == "" {
-		return text
-	}
-	hostRoot := filepath.Clean(root)
-	prefix := "/" + mount
-	// Replace /mount/... with hostRoot/...
-	out := strings.ReplaceAll(text, prefix+"/", hostRoot+"/")
-	// Replace bare /mount with hostRoot
-	out = strings.ReplaceAll(out, prefix+" ", hostRoot+" ")
-	// Handle end of string
-	if strings.HasSuffix(out, prefix) {
-		out = out[:len(out)-len(prefix)] + hostRoot
 	}
 	return out
 }

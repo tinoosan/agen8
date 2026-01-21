@@ -176,13 +176,12 @@ func (r HostOpRequest) Validate() error {
 			return fmt.Errorf("trace.action is required")
 		}
 		switch action {
-		case "write", "read":
-			if err := validate.NonEmpty("trace.key", r.Key); err != nil {
-				return err
+		case "events.since", "events.latest", "events.summary":
+			if r.Input == nil {
+				return fmt.Errorf("trace.input is required")
 			}
-		case "list":
 		default:
-			return fmt.Errorf("trace.action must be one of write/list/read")
+			return fmt.Errorf("trace.action must be one of events.since/events.latest/events.summary")
 		}
 		return nil
 	}

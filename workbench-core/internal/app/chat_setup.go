@@ -178,13 +178,13 @@ func setupTUIChatRuntime(
 		}
 	}
 
-		executor := &agent.HostOpExecutor{
-			FS:            fs,
-			Runner:        &runner,
-			ShellInvoker:  shellInvoker,
-			HTTPInvoker:   httpInvoker,
-			TraceDir:      "/trace",
-			DefaultMaxBytes: 4096,
+	executor := &agent.HostOpExecutor{
+		FS:              fs,
+		Runner:          &runner,
+		ShellInvoker:    shellInvoker,
+		HTTPInvoker:     httpInvoker,
+		TraceInvoker:    traceInvoker,
+		DefaultMaxBytes: 4096,
 		// Allow tool manifest reads (/tools/<toolId>) to be non-truncated by default.
 		// Other fs.read operations remain bounded by DefaultMaxBytes unless the agent requests more.
 		MaxReadBytes: 256 * 1024,
@@ -337,6 +337,19 @@ func setupTUIChatRuntime(
 		if fields := shellStoreFieldsFromInput(req); len(fields) != 0 {
 			for k, v := range fields {
 				storeReq[k] = v
+				reqData[k] = v
+			}
+		}
+		if req.Op == types.HostOpTrace {
+			reqData["traceAction"] = req.Action
+			if len(req.Input) > 0 {
+				reqData["traceInput"] = string(req.Input) // Input is usually small JSON
+			}
+		}
+		if req.Op == types.HostOpHTTPFetch {
+			reqData["url"] = req.URL
+			if req.Method != "" {
+				reqData["method"] = req.Method
 			}
 		}
 		if (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) && strings.TrimSpace(req.Text) != "" {
@@ -471,6 +484,52 @@ func setupTUIChatRuntime(
 			if fields := shellStoreFieldsFromResponse(resp); len(fields) != 0 {
 				for k, v := range fields {
 					storeResp[k] = v
+				}
+			}
+		}
+		if resp.Op == types.HostOpShellExec {
+			respData["exitCode"] = strconv.Itoa(resp.ExitCode)
+			if resp.Stdout != "" {
+				s, tr := capBytes(resp.Stdout, 1000)
+				respData["stdout"] = s
+				if tr {
+					respData["stdoutTruncated"] = "true"
+				}
+			}
+			if resp.Stderr != "" {
+				s, tr := capBytes(resp.Stderr, 1000)
+				respData["stderr"] = s
+				if tr {
+					respData["stderrTruncated"] = "true"
+				}
+			}
+			// Use existing helper to populate store fields (stderr proper path etc)
+			if fields := shellStoreFieldsFromResponse(resp); len(fields) != 0 {
+				for k, v := range fields {
+					storeResp[k] = v
+				}
+			}
+		}
+		if resp.Op == types.HostOpTrace {
+			if resp.Text != "" {
+				// Trace output (from Text field in HostOpResponse)
+				s, tr := capBytes(resp.Text, 1000)
+				respData["output"] = s
+				if tr {
+					respData["outputTruncated"] = "true"
+				}
+			}
+		}
+		if resp.Op == types.HostOpHTTPFetch {
+			respData["status"] = strconv.Itoa(resp.Status)
+			if resp.FinalURL != "" {
+				respData["finalUrl"] = resp.FinalURL
+			}
+			if resp.Body != "" {
+				s, tr := capBytes(resp.Body, 1000)
+				respData["body"] = s
+				if tr {
+					respData["bodyTruncated"] = "true"
 				}
 			}
 		}

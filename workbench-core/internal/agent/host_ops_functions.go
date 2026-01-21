@@ -155,7 +155,7 @@ func HostOpFunctions() []types.Tool {
 					"type": "object",
 					"properties": map[string]any{
 						"command": map[string]any{"type": "string", "description": "Shell command to execute (e.g., \"ls -la | grep foo\")."},
-						"cwd":     map[string]any{"type": stringOrNull, "description": "Working directory (VFS path, default: /project)."},
+						"cwd":     map[string]any{"type": stringOrNull, "description": "Working directory relative to the project root (e.g., \"internal/tools\"; default: \".\"). Do not use /project paths here."},
 						"stdin":   map[string]any{"type": stringOrNull, "description": "Standard input to pipe to the command."},
 					},
 					"required":             []any{"command", "cwd", "stdin"},

@@ -306,11 +306,17 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 		if cmd == "" {
 			return types.HostOpRequest{}, fmt.Errorf("command is required")
 		}
+		// Cwd is passed as-is (relative to project root, or empty for root)
+		// The shell invoker handles validation.
+		cwd := strings.TrimSpace(args.Cwd)
+		if cwd == "" {
+			cwd = "."
+		}
 		// Wrap with bash -c for full shell syntax support (pipes, redirects, etc.)
 		return types.HostOpRequest{
 			Op:    types.HostOpShellExec,
 			Argv:  []string{"bash", "-c", cmd},
-			Cwd:   resolveVFSPath(args.Cwd),
+			Cwd:   cwd,
 			Stdin: args.Stdin,
 		}, nil
 
@@ -593,7 +599,7 @@ Workbench may provide **web-search-grounded model responses** (provider-dependen
 ## Key Rules
 
 1.  **Stop Rule**: Call ~final_answer~ ONLY when you have fully completed the user's overarching goal or task chain; plain assistant text without further tool calls is treated as the final response once you are done. Do not stop early just because you have some info; ensure the full request is satisfied.
-2.  **Path Resolution**: You may use relative paths (e.g., ~.~ or ~./src~). They will be resolved relative to ~/project~.
+2.  **Path Resolution**: Use ~.~ and relative paths (e.g., ~./src~) for shell commands; cwd defaults to the project root. Do NOT prefix shell paths with ~/project~. Absolute VFS paths (/project, /scratch, etc.) are still required for ~fs_*~ tools.
 3.  **Tool Usage**:
     - Use ~fs_*~ tools for file operations.
     - Use ~shell_exec~ for shell commands like ~grep~, ~find~, or build scripts. Pass a command string, not argv.

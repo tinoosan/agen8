@@ -813,7 +813,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.streamingItemIdx = -1
 			m.streamingBuf = nil
 		}
-		m.scrollToCurrentTurnStart()
+		// Keep user at the bottom to see the final response (don't scroll to turn start).
+		m.transcript.GotoBottom()
 		m.turnTitle = ""
 		m.turnCancelRequested = false
 		return m, nil

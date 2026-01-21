@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -33,7 +31,7 @@ type HostOpExecutor struct {
 	// Core invokers for direct host operations.
 	ShellInvoker tools.ToolInvoker
 	HTTPInvoker  tools.ToolInvoker
-	TraceDir     string
+	TraceInvoker tools.ToolInvoker // For all trace actions via BuiltinTraceInvoker
 
 	DefaultMaxBytes int
 
@@ -323,12 +321,22 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			"location":     "agent/host_ops_mock.go:tool.run:exit",
 			"message":      "tool.run response",
 			"data": map[string]any{
-				"toolId":      strings.TrimSpace(resp.ToolID.String()),
-				"actionId":    strings.TrimSpace(resp.ActionID),
-				"ok":          resp.Ok,
-				"callId":      strings.TrimSpace(resp.CallID),
-				"errorCode":   func() string { if resp.Error != nil { return strings.TrimSpace(resp.Error.Code) }; return "" }(),
-				"retryable":   func() bool { if resp.Error != nil { return resp.Error.Retryable }; return false }(),
+				"toolId":   strings.TrimSpace(resp.ToolID.String()),
+				"actionId": strings.TrimSpace(resp.ActionID),
+				"ok":       resp.Ok,
+				"callId":   strings.TrimSpace(resp.CallID),
+				"errorCode": func() string {
+					if resp.Error != nil {
+						return strings.TrimSpace(resp.Error.Code)
+					}
+					return ""
+				}(),
+				"retryable": func() bool {
+					if resp.Error != nil {
+						return resp.Error.Retryable
+					}
+					return false
+				}(),
 				"outputBytes": len(resp.Output),
 				"artifacts":   len(resp.Artifacts),
 			},
@@ -449,74 +457,26 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		}
 
 	case types.HostOpTrace:
-		traceDir := strings.TrimSpace(x.TraceDir)
-		if traceDir == "" {
-			traceDir = "/trace"
+		// Route all trace actions to TraceInvoker (BuiltinTraceInvoker).
+		if x.TraceInvoker == nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "trace invoker not configured"}
 		}
-		traceDir = strings.TrimSuffix(traceDir, "/")
-		switch strings.ToLower(strings.TrimSpace(req.Action)) {
-		case "write":
-			key, err := sanitizeTraceKey(req.Key)
-			if err != nil {
-				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
-			}
-			target := path.Join(traceDir, key)
-			if err := x.FS.Write(target, []byte(req.Value)); err != nil {
-				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
-			}
-			return types.HostOpResponse{Op: req.Op, Ok: true, TraceValue: req.Value}
-		case "read":
-			key, err := sanitizeTraceKey(req.Key)
-			if err != nil {
-				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
-			}
-			target := path.Join(traceDir, key)
-			b, err := x.FS.Read(target)
-			if err != nil {
-				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
-			}
-			return types.HostOpResponse{Op: req.Op, Ok: true, TraceValue: string(b)}
-		case "list":
-			entries, err := x.FS.List(traceDir)
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) || errors.Is(err, fs.ErrNotExist) {
-					return types.HostOpResponse{Op: req.Op, Ok: true}
-				}
-				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
-			}
-			keys := make([]string, 0, len(entries))
-			prefix := traceDir + "/"
-			for _, e := range entries {
-				if e.IsDir {
-					continue
-				}
-				if strings.HasPrefix(e.Path, prefix) {
-					keys = append(keys, strings.TrimPrefix(e.Path, prefix))
-				}
-			}
-			sort.Strings(keys)
-			return types.HostOpResponse{Op: req.Op, Ok: true, TraceKeys: keys}
-		default:
-			return types.HostOpResponse{Op: req.Op, Ok: false, Error: fmt.Sprintf("unsupported trace action %q", req.Action)}
+		toolReq := types.ToolRequest{
+			Version:  "v1",
+			CallID:   "trace." + req.Action,
+			ToolID:   types.ToolID("builtin.trace"),
+			ActionID: req.Action,
+			Input:    req.Input,
 		}
+		result, err := x.TraceInvoker.Invoke(ctx, toolReq)
+		if err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		return types.HostOpResponse{Op: req.Op, Ok: true, Text: string(result.Output)}
 
 	default:
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: fmt.Sprintf("unknown op %q", req.Op)}
 	}
-}
-
-func sanitizeTraceKey(raw string) (string, error) {
-	key := strings.TrimSpace(raw)
-	if key == "" {
-		return "", fmt.Errorf("trace key is required")
-	}
-	if strings.Contains(key, "/") || strings.Contains(key, "\\") {
-		return "", fmt.Errorf("trace key must not contain path separators")
-	}
-	if strings.Contains(key, "..") {
-		return "", fmt.Errorf("trace key must not contain ..")
-	}
-	return key, nil
 }
 
 func replaceNth(s, old, new string, occurrence int) (string, error) {
