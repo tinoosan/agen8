@@ -3,6 +3,7 @@ package resources
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/config"
@@ -220,6 +221,15 @@ func (f *Factory) MountAll(fs *vfs.FS) error {
 		return fmt.Errorf("create tools: %w", err)
 	}
 
+	traceDir := filepath.Join(ws.BaseDir, "trace")
+	if err := os.MkdirAll(traceDir, 0755); err != nil {
+		return fmt.Errorf("create trace dir: %w", err)
+	}
+	traceRes, err := NewDirResource(traceDir, vfs.MountTrace)
+	if err != nil {
+		return fmt.Errorf("create trace resource: %w", err)
+	}
+
 	fs.Mount(vfs.MountScratch, ws)
 	fs.Mount(vfs.MountLog, tr)
 	fs.Mount(vfs.MountResults, res)
@@ -227,6 +237,7 @@ func (f *Factory) MountAll(fs *vfs.FS) error {
 	fs.Mount(vfs.MountProfile, prof)
 	fs.Mount(vfs.MountHistory, hist)
 	fs.Mount(vfs.MountTools, tres)
+	fs.Mount(vfs.MountTrace, traceRes)
 
 	return nil
 }

@@ -244,6 +244,34 @@ func renderOpRequest(d map[string]string) string {
 		return "Edit " + path
 	case "fs.patch":
 		return "Patch " + path
+	case "shell_exec":
+		if cmd := strings.TrimSpace(d["argvPreview"]); cmd != "" {
+			return cmd
+		}
+		if argv0 := strings.TrimSpace(d["argv0"]); argv0 != "" {
+			return "shell_exec " + argv0
+		}
+		return "shell_exec"
+	case "http_fetch":
+		u := strings.TrimSpace(d["url"])
+		if u != "" {
+			m := strings.ToUpper(strings.TrimSpace(d["method"]))
+			if m == "" {
+				m = "GET"
+			}
+			return m + " " + u
+		}
+		return "http_fetch"
+	case "trace":
+		action := strings.TrimSpace(d["traceAction"])
+		key := strings.TrimSpace(d["traceKey"])
+		if action != "" {
+			if key != "" {
+				return fmt.Sprintf("trace.%s %s", action, key)
+			}
+			return "trace." + action
+		}
+		return "trace"
 	case "tool.run":
 		// Chat transcript should read like a narrative: show the effective command rather
 		// than the internal toolId/actionId + input payload.

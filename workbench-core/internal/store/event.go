@@ -94,7 +94,7 @@ func AppendEvent(cfg config.Config, runId, eventType, message string, data map[s
 		return fmt.Errorf("error writing event for run %s: %w", runId, err)
 	}
 
-	traceDir := fsutil.GetTraceDir(cfg.DataDir, runId)
+	traceDir := fsutil.GetLogDir(cfg.DataDir, runId)
 	if err := os.MkdirAll(traceDir, 0755); err != nil {
 		return fmt.Errorf("error creating trace directory %s: %w", traceDir, err)
 	}

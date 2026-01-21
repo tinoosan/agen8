@@ -15,18 +15,6 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
-var builtinShellManifest = []byte(`{"id":"builtin.shell","version":"0.1.0","kind":"builtin","displayName":"Builtin Shell","description":"Execute shell commands (argv) inside the workdir with a small denylist. Absolute paths are rejected.","exposeAsFunctions":true,"actions":[{"id":"exec","displayName":"Execute command","description":"Run a command with argv and optional cwd/stdin. stdout/stderr are truncated and artifacts are written when large.","inputSchema":{"type":"object","properties":{"argv":{"type":"array","items":{"type":"string"},"minItems":1},"cwd":{"type":"string"},"stdin":{"type":"string"}},"required":["argv"]},"outputSchema":{"type":"object","properties":{"exitCode":{"type":"integer"},"stdout":{"type":"string"},"stderr":{"type":"string"},"stdoutPath":{"type":"string"},"stderrPath":{"type":"string"}},"required":["exitCode","stdout","stderr"]}}]}`)
-
-func init() {
-	registerBuiltin(BuiltinDef{
-		ID:       types.ToolID("builtin.shell"),
-		Manifest: builtinShellManifest,
-		NewInvoker: func(cfg BuiltinConfig) ToolInvoker {
-			return NewBuiltinShellInvoker(cfg.ShellRootDir, cfg.ShellConfirm, cfg.ShellVFSMount)
-		},
-	})
-}
-
 const defaultShellMaxOutputBytes = 64 * 1024
 
 // BuiltinShellInvoker runs a guarded argv under the host workdir.

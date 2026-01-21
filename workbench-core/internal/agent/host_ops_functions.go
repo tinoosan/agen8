@@ -11,6 +11,8 @@ func HostOpFunctions() []types.Tool {
 	// - all properties listed in required
 	// - optional fields modeled via ["type","null"] and still listed in required
 	intOrNull := []any{"integer", "null"}
+	stringOrNull := []any{"string", "null"}
+	boolOrNull := []any{"boolean", "null"}
 
 	return []types.Tool{
 		{
@@ -146,8 +148,110 @@ func HostOpFunctions() []types.Tool {
 		{
 			Type: "function",
 			Function: types.ToolFunction{
+				Name:        "shell_exec",
+				Description: "[CORE] Execute a shell command in the project directory. Returns stdout, stderr, and exit code.",
+				Strict:      true,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"argv": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "string",
+							},
+							"description": "Command and arguments (e.g., [\"git\", \"status\"]).",
+						},
+						"cwd":   map[string]any{"type": stringOrNull, "description": "Working directory (VFS path, default: /project)."},
+						"stdin": map[string]any{"type": stringOrNull, "description": "Standard input to pipe to the command."},
+					},
+					"required":             []any{"argv", "cwd", "stdin"},
+					"additionalProperties": false,
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: types.ToolFunction{
+				Name:        "http_fetch",
+				Description: "[CORE] Make an HTTP request. Returns status, headers, and body.",
+				// NOTE: headers is a free-form object (map[string]string) - strict mode
+				// requires additionalProperties=false on all objects, which we can't do.
+				Strict: false,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"url":             map[string]any{"type": "string", "description": "URL to fetch."},
+						"method":          map[string]any{"type": stringOrNull, "description": "HTTP method (default: GET)."},
+						"headers":         map[string]any{"type": []any{"object", "null"}, "description": "Request headers."},
+						"body":            map[string]any{"type": stringOrNull, "description": "Request body."},
+						"maxBytes":        map[string]any{"type": intOrNull, "description": "Max response bytes."},
+						"followRedirects": map[string]any{"type": boolOrNull, "description": "Follow redirects (default: true)."},
+					},
+					"required":             []any{"url"},
+					"additionalProperties": false,
+				},
+			},
+		},
+		// Trace functions - provide insight into system events
+		{
+			Type: "function",
+			Function: types.ToolFunction{
+				Name:        "trace_events_since",
+				Description: "[CORE] Get system events since a cursor position. Returns events with pagination cursor for follow-up queries.",
+				Strict:      false, // cursor can be string or number
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"cursor":   map[string]any{"type": []any{"string", "integer"}, "description": "Cursor position (0 for start, or cursor from previous response)."},
+						"maxBytes": map[string]any{"type": intOrNull, "description": "Max bytes to return."},
+						"limit":    map[string]any{"type": intOrNull, "description": "Max number of events."},
+					},
+					"required":             []any{"cursor"},
+					"additionalProperties": false,
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: types.ToolFunction{
+				Name:        "trace_events_latest",
+				Description: "[CORE] Get the most recent system events. Good for quick insight into what just happened.",
+				Strict:      true,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"maxBytes": map[string]any{"type": intOrNull, "description": "Max bytes to return."},
+						"limit":    map[string]any{"type": intOrNull, "description": "Max number of events (default: 10)."},
+					},
+					"required":             []any{"maxBytes", "limit"},
+					"additionalProperties": false,
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: types.ToolFunction{
+				Name:        "trace_events_summary",
+				Description: "[CORE] Get a summary of system events: event type counts, last timestamp, and recent event messages.",
+				Strict:      false, // cursor can be string or number
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"cursor":       map[string]any{"type": []any{"string", "integer"}, "description": "Cursor position (0 for start)."},
+						"maxBytes":     map[string]any{"type": intOrNull, "description": "Max bytes to scan."},
+						"limit":        map[string]any{"type": intOrNull, "description": "Max events to scan."},
+						"includeTypes": map[string]any{"type": []any{"array", "null"}, "items": map[string]any{"type": "string"}, "description": "Filter to specific event types."},
+					},
+					"required":             []any{"cursor"},
+					"additionalProperties": false,
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: types.ToolFunction{
 				Name:        "tool_run",
-				Description: "[REQUIRES DISCOVERY] Run an external tool (e.g., builtin.trace or custom tools). BEFORE calling: (1) fs_read('/tools/<toolId>') to get the manifest and learn required input fields. Only then call with correct input. For simple file ops, use fs_write/fs_read directly instead.",
+				Description: "[REQUIRES DISCOVERY] Run an external tool (e.g., custom tools provided via /tools). BEFORE calling: (1) fs_read('/tools/<toolId>') to get the manifest and learn required input fields. Only then call with correct input. For simple file ops, use fs_write/fs_read directly instead.",
 				// NOTE: tool_run.input is tool-defined arbitrary JSON. Some providers (e.g. Azure)
 				// reject strict function schemas when they include arbitrary object properties.
 				Strict: false,

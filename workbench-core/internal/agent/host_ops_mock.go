@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +29,11 @@ import (
 type HostOpExecutor struct {
 	FS     *vfs.FS
 	Runner *tools.Runner
+
+	// Core invokers for direct host operations.
+	ShellInvoker tools.ToolInvoker
+	HTTPInvoker  tools.ToolInvoker
+	TraceDir     string
 
 	DefaultMaxBytes int
 
@@ -330,9 +337,186 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		// #endregion
 		return types.HostOpResponse{Op: req.Op, Ok: true, ToolResponse: &resp}
 
+	case types.HostOpShellExec:
+		if x.ShellInvoker == nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "shell invoker not configured"}
+		}
+		payload := map[string]any{"argv": req.Argv}
+		if strings.TrimSpace(req.Cwd) != "" {
+			payload["cwd"] = req.Cwd
+		}
+		if req.Stdin != "" {
+			payload["stdin"] = req.Stdin
+		}
+		inp, err := json.Marshal(payload)
+		if err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		toolReq := types.ToolRequest{
+			Version:  "v1",
+			CallID:   "shell.exec",
+			ToolID:   types.ToolID("builtin.shell"),
+			ActionID: "exec",
+			Input:    inp,
+		}
+		result, err := x.ShellInvoker.Invoke(ctx, toolReq)
+		if err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		var out struct {
+			ExitCode   int    `json:"exitCode"`
+			Stdout     string `json:"stdout"`
+			Stderr     string `json:"stderr"`
+			StdoutPath string `json:"stdoutPath"`
+			StderrPath string `json:"stderrPath"`
+		}
+		if err := json.Unmarshal(result.Output, &out); err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		return types.HostOpResponse{
+			Op:         req.Op,
+			Ok:         true,
+			ExitCode:   out.ExitCode,
+			Stdout:     out.Stdout,
+			Stderr:     out.Stderr,
+			StdoutPath: out.StdoutPath,
+			StderrPath: out.StderrPath,
+		}
+
+	case types.HostOpHTTPFetch:
+		if x.HTTPInvoker == nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "http invoker not configured"}
+		}
+		payload := map[string]any{"url": req.URL}
+		if strings.TrimSpace(req.Method) != "" {
+			payload["method"] = strings.TrimSpace(req.Method)
+		}
+		if req.Headers != nil {
+			payload["headers"] = req.Headers
+		}
+		if req.Body != "" {
+			payload["body"] = req.Body
+		}
+		if req.MaxBytes != 0 {
+			payload["maxBytes"] = req.MaxBytes
+		}
+		if req.FollowRedirects != nil {
+			payload["followRedirects"] = *req.FollowRedirects
+		}
+		inp, err := json.Marshal(payload)
+		if err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		toolReq := types.ToolRequest{
+			Version:  "v1",
+			CallID:   "http.fetch",
+			ToolID:   types.ToolID("builtin.http"),
+			ActionID: "fetch",
+			Input:    inp,
+		}
+		result, err := x.HTTPInvoker.Invoke(ctx, toolReq)
+		if err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		var out struct {
+			FinalURL      string              `json:"finalUrl"`
+			Status        int                 `json:"status"`
+			Headers       map[string][]string `json:"headers"`
+			ContentType   string              `json:"contentType"`
+			BytesRead     int                 `json:"bytesRead"`
+			Truncated     bool                `json:"truncated"`
+			Body          string              `json:"body"`
+			BodyTruncated bool                `json:"bodyTruncated"`
+			BodyPath      string              `json:"bodyPath"`
+			Warning       string              `json:"warning"`
+		}
+		if err := json.Unmarshal(result.Output, &out); err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		return types.HostOpResponse{
+			Op:            req.Op,
+			Ok:            true,
+			FinalURL:      out.FinalURL,
+			Status:        out.Status,
+			Headers:       out.Headers,
+			ContentType:   out.ContentType,
+			BytesRead:     out.BytesRead,
+			Truncated:     out.Truncated,
+			Body:          out.Body,
+			BodyTruncated: out.BodyTruncated,
+			BodyPath:      out.BodyPath,
+			Warning:       out.Warning,
+		}
+
+	case types.HostOpTrace:
+		traceDir := strings.TrimSpace(x.TraceDir)
+		if traceDir == "" {
+			traceDir = "/trace"
+		}
+		traceDir = strings.TrimSuffix(traceDir, "/")
+		switch strings.ToLower(strings.TrimSpace(req.Action)) {
+		case "write":
+			key, err := sanitizeTraceKey(req.Key)
+			if err != nil {
+				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+			}
+			target := path.Join(traceDir, key)
+			if err := x.FS.Write(target, []byte(req.Value)); err != nil {
+				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: req.Op, Ok: true, TraceValue: req.Value}
+		case "read":
+			key, err := sanitizeTraceKey(req.Key)
+			if err != nil {
+				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+			}
+			target := path.Join(traceDir, key)
+			b, err := x.FS.Read(target)
+			if err != nil {
+				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: req.Op, Ok: true, TraceValue: string(b)}
+		case "list":
+			entries, err := x.FS.List(traceDir)
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) || errors.Is(err, fs.ErrNotExist) {
+					return types.HostOpResponse{Op: req.Op, Ok: true}
+				}
+				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+			}
+			keys := make([]string, 0, len(entries))
+			prefix := traceDir + "/"
+			for _, e := range entries {
+				if e.IsDir {
+					continue
+				}
+				if strings.HasPrefix(e.Path, prefix) {
+					keys = append(keys, strings.TrimPrefix(e.Path, prefix))
+				}
+			}
+			sort.Strings(keys)
+			return types.HostOpResponse{Op: req.Op, Ok: true, TraceKeys: keys}
+		default:
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: fmt.Sprintf("unsupported trace action %q", req.Action)}
+		}
+
 	default:
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: fmt.Sprintf("unknown op %q", req.Op)}
 	}
+}
+
+func sanitizeTraceKey(raw string) (string, error) {
+	key := strings.TrimSpace(raw)
+	if key == "" {
+		return "", fmt.Errorf("trace key is required")
+	}
+	if strings.Contains(key, "/") || strings.Contains(key, "\\") {
+		return "", fmt.Errorf("trace key must not contain path separators")
+	}
+	if strings.Contains(key, "..") {
+		return "", fmt.Errorf("trace key must not contain ..")
+	}
+	return key, nil
 }
 
 func replaceNth(s, old, new string, occurrence int) (string, error) {

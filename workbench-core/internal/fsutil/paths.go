@@ -52,9 +52,9 @@ func GetRunDir(dataDir, runId string) string {
 	return filepath.Join(dataDir, "runs", runId)
 }
 
-// GetWorkspaceDir returns the path to a run's workspace directory given the data directory and run ID.
-func GetWorkspaceDir(dataDir, runId string) string {
-	return filepath.Join(dataDir, "runs", runId, "workspace")
+// GetScratchDir returns the path to a run's scratch directory given the data directory and run ID.
+func GetScratchDir(dataDir, runId string) string {
+	return filepath.Join(dataDir, "runs", runId, "scratch")
 }
 
 // GetArtifactDir returns the path to a run's artifact directory given the data directory and run ID.
@@ -62,9 +62,9 @@ func GetArtifactDir(dataDir, runId string) string {
 	return filepath.Join(dataDir, "runs", runId, "artifacts")
 }
 
-// GetTraceDir returns the path to a run's trace directory given the data directory and run ID.
-func GetTraceDir(dataDir, runId string) string {
-	return filepath.Join(dataDir, "runs", runId, "trace")
+// GetLogDir returns the path to a run's log directory given the data directory and run ID.
+func GetLogDir(dataDir, runId string) string {
+	return filepath.Join(dataDir, "runs", runId, "log")
 }
 
 // GetToolsDir returns the path to workbench tools directory given the data directory.

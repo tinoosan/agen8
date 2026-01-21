@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/tinoosan/workbench-core/internal/resources"
@@ -12,7 +13,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
-func TestVirtualToolsResource_ListIncludesBuiltin(t *testing.T) {
+func TestVirtualToolsResource_ListDoesNotIncludeCoreTools(t *testing.T) {
 	builtin, err := tools.NewBuiltinManifestProvider()
 	if err != nil {
 		t.Fatalf("NewBuiltinManifestProvider: %v", err)
@@ -30,17 +31,13 @@ func TestVirtualToolsResource_ListIncludesBuiltin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List /tools: %v", err)
 	}
-	if len(entries) == 0 {
-		t.Fatalf("expected builtin tools to be listed")
+	if len(entries) != 0 {
+		t.Fatalf("expected no tools listed, got %+v", entries)
 	}
-	found := false
 	for _, e := range entries {
-		if e.Path == "/tools/builtin.shell" && e.IsDir {
-			found = true
+		if strings.Contains(e.Path, "builtin.shell") || strings.Contains(e.Path, "builtin.http") || strings.Contains(e.Path, "builtin.trace") {
+			t.Fatalf("core tools should not be listed, got %q", e.Path)
 		}
-	}
-	if !found {
-		t.Fatalf("expected /tools/builtin.shell to be listed, got %+v", entries)
 	}
 }
 
@@ -91,10 +88,10 @@ func TestVirtualToolsResource_DiskToolsAppearWhenPresent(t *testing.T) {
 	}
 }
 
-func TestVirtualToolsResource_BuiltinOverridesDiskOnCollision(t *testing.T) {
+func TestVirtualToolsResource_DiskAppliesWhenNoBuiltin(t *testing.T) {
 	dir := t.TempDir()
 
-	// Collision tool ID that is already registered as a builtin in this repo.
+	// Collision tool ID that used to be registered as a builtin in this repo.
 	toolID := "builtin.shell"
 	if err := os.MkdirAll(filepath.Join(dir, toolID), 0755); err != nil {
 		t.Fatal(err)
@@ -121,10 +118,10 @@ func TestVirtualToolsResource_BuiltinOverridesDiskOnCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	// Ensure we got the builtin manifest, not the disk one.
-	m, err := types.ParseBuiltinToolManifest(b)
+	// Ensure we got the disk manifest since builtin manifests are no longer exposed.
+	m, err := types.ParseUserToolManifest(b)
 	if err != nil {
-		t.Fatalf("ParseBuiltinToolManifest: %v", err)
+		t.Fatalf("ParseUserToolManifest: %v", err)
 	}
 	if m.ID.String() != toolID {
 		t.Fatalf("unexpected tool id %q", m.ID.String())

@@ -13,61 +13,6 @@ import (
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
-var builtinHTTPManifest = []byte(`{
-  "id": "builtin.http",
-  "version": "0.1.0",
-  "kind": "builtin",
-  "displayName": "Builtin HTTP",
-  "description": "Performs HTTP requests and returns a bounded response preview. Large bodies are written as /results/<callId>/body.* artifacts.",
-  "exposeAsFunctions": true,
-  "actions": [
-    {
-      "id": "fetch",
-      "displayName": "Fetch",
-      "description": "Perform an HTTP request (GET by default). Returns status/headers and a bounded response body preview. If the response body is larger than the inline preview cap, the full read body is written as an artifact and referenced by bodyPath.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "url": { "type": "string" },
-          "method": { "type": "string" },
-          "headers": { "type": "object" },
-          "body": { "type": "string" },
-          "maxBytes": { "type": "integer" },
-          "followRedirects": { "type": "boolean" }
-        },
-        "required": ["url"]
-      },
-      "outputSchema": {
-        "type": "object",
-        "properties": {
-          "finalUrl": { "type": "string" },
-          "status": { "type": "integer" },
-          "headers": { "type": "object" },
-          "contentType": { "type": "string" },
-          "bytesRead": { "type": "integer" },
-          "truncated": { "type": "boolean" },
-          "body": { "type": "string" },
-          "bodyTruncated": { "type": "boolean" },
-          "bodyPath": { "type": "string" },
-          "warning": { "type": "string" }
-        },
-        "required": ["finalUrl", "status", "headers", "bytesRead", "truncated", "body", "bodyTruncated"]
-      }
-    }
-  ]
-}`)
-
-func init() {
-	registerBuiltin(BuiltinDef{
-		ID:       types.ToolID("builtin.http"),
-		Manifest: builtinHTTPManifest,
-		NewInvoker: func(cfg BuiltinConfig) ToolInvoker {
-			_ = cfg
-			return NewBuiltinHTTPInvoker()
-		},
-	})
-}
-
 const (
 	defaultHTTPMaxBytes      = 256 * 1024
 	maxHTTPMaxBytes          = 2 * 1024 * 1024

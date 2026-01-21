@@ -11,9 +11,9 @@
 //
 //	GetRunFilePath(dataDir, runId)           -> data/runs/<runId>/run.json
 //	GetEventFilePath(dataDir, runId)         -> data/runs/<runId>/events.jsonl
-//	GetRunWorkspaceDir(dataDir, runId)       -> data/runs/<runId>/scratch
+//	GetScratchDir(dataDir, runId)            -> data/runs/<runId>/scratch
 //	GetResultsDir(dataDir, runId)            -> data/runs/<runId>/results
-//	GetTraceDir(dataDir, runId)              -> data/runs/<runId>/log
+//	GetLogDir(dataDir, runId)                -> data/runs/<runId>/log
 //	GetRunMemoryDir(dataDir, runId)          -> data/runs/<runId>/memory
 //	GetToolsDir(dataDir)                     -> data/tools
 //	GetToolManifestPath(baseDir, toolId)     -> <baseDir>/<toolId>/manifest.json

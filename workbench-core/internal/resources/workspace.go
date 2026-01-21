@@ -21,7 +21,7 @@ func NewWorkspace(cfg config.Config, runId string) (*DirResource, error) {
 		return nil, err
 	}
 
-	baseDir := fsutil.GetWorkspaceDir(cfg.DataDir, runId)
+	baseDir := fsutil.GetScratchDir(cfg.DataDir, runId)
 	// create workspace directory if it doesn't exist
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("error creating workspace directory %s: %w", baseDir, err)

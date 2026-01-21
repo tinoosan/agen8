@@ -68,7 +68,7 @@ func NewTraceResource(cfg config.Config, runId string) (*TraceResource, error) {
 	if err := validate.NonEmpty("runId", runId); err != nil {
 		return nil, err
 	}
-	baseDir := fsutil.GetTraceDir(cfg.DataDir, runId)
+	baseDir := fsutil.GetLogDir(cfg.DataDir, runId)
 	// create trace directory if it doesn't exist
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("error creating trace directory %s: %w", baseDir, err)

@@ -137,8 +137,18 @@ func setupTUIChatRuntime(
 		ShellConfirm:  nil,
 		TraceStore:    traceStore,
 	}
+	shellInvoker := tools.NewBuiltinShellInvoker(absWorkdirRoot, nil, vfs.MountProject)
+	httpInvoker := tools.NewBuiltinHTTPInvoker()
+	traceInvoker := tools.BuiltinTraceInvoker{Store: traceStore}
 
 	builtinInvokers := tools.BuiltinInvokerRegistry(builtinCfg)
+	if builtinInvokers == nil {
+		builtinInvokers = make(tools.MapRegistry)
+	}
+	builtinInvokers[types.ToolID("builtin.shell")] = shellInvoker
+	builtinInvokers[types.ToolID("builtin.http")] = httpInvoker
+	builtinInvokers[types.ToolID("builtin.trace")] = traceInvoker
+
 	runner := tools.Runner{
 		Results:      resultsStore,
 		ToolRegistry: builtinInvokers,
@@ -168,10 +178,13 @@ func setupTUIChatRuntime(
 		}
 	}
 
-	executor := &agent.HostOpExecutor{
-		FS:              fs,
-		Runner:          &runner,
-		DefaultMaxBytes: 4096,
+		executor := &agent.HostOpExecutor{
+			FS:            fs,
+			Runner:        &runner,
+			ShellInvoker:  shellInvoker,
+			HTTPInvoker:   httpInvoker,
+			TraceDir:      "/trace",
+			DefaultMaxBytes: 4096,
 		// Allow tool manifest reads (/tools/<toolId>) to be non-truncated by default.
 		// Other fs.read operations remain bounded by DefaultMaxBytes unless the agent requests more.
 		MaxReadBytes: 256 * 1024,
@@ -518,23 +531,34 @@ func setupTUIChatRuntime(
 }
 
 func shellStoreFieldsFromInput(req types.HostOpRequest) map[string]string {
-	if req.Op != types.HostOpToolRun {
+	switch req.Op {
+	case types.HostOpShellExec:
+		return shellArgsToFields(req.Argv, req.Cwd)
+	case types.HostOpToolRun:
+		if strings.TrimSpace(req.ToolID.String()) != "builtin.shell" || strings.TrimSpace(req.ActionID) != "exec" {
+			return nil
+		}
+		var in struct {
+			Argv []string `json:"argv"`
+			Cwd  string   `json:"cwd"`
+		}
+		if err := json.Unmarshal(req.Input, &in); err != nil {
+			return nil
+		}
+		return shellArgsToFields(in.Argv, in.Cwd)
+	default:
 		return nil
 	}
-	if strings.TrimSpace(req.ToolID.String()) != "builtin.shell" || strings.TrimSpace(req.ActionID) != "exec" {
-		return nil
-	}
-	var in struct {
-		Argv []string `json:"argv"`
-		Cwd  string   `json:"cwd"`
-	}
-	if err := json.Unmarshal(req.Input, &in); err != nil {
+}
+
+func shellArgsToFields(argv []string, cwd string) map[string]string {
+	if len(argv) == 0 && strings.TrimSpace(cwd) == "" {
 		return nil
 	}
 	out := map[string]string{}
-	if len(in.Argv) != 0 {
-		out["argv0"] = in.Argv[0]
-		preview := singleLine(strings.Join(in.Argv, " "))
+	if len(argv) != 0 {
+		out["argv0"] = argv[0]
+		preview := singleLine(strings.Join(argv, " "))
 		if p, tr := capBytes(preview, 160); p != "" {
 			out["argvPreview"] = p
 			if tr {
@@ -542,7 +566,7 @@ func shellStoreFieldsFromInput(req types.HostOpRequest) map[string]string {
 			}
 		}
 	}
-	if cwd := strings.TrimSpace(in.Cwd); cwd != "" {
+	if cwd := strings.TrimSpace(cwd); cwd != "" {
 		out["cwd"] = cwd
 	}
 	if len(out) == 0 {
@@ -552,37 +576,50 @@ func shellStoreFieldsFromInput(req types.HostOpRequest) map[string]string {
 }
 
 func shellStoreFieldsFromResponse(resp types.HostOpResponse) map[string]string {
-	if resp.Op != types.HostOpToolRun {
-		return nil
-	}
-	if resp.ToolResponse == nil {
-		return nil
-	}
-	if strings.TrimSpace(resp.ToolResponse.ToolID.String()) != "builtin.shell" || strings.TrimSpace(resp.ToolResponse.ActionID) != "exec" {
-		return nil
-	}
-	fields := map[string]string{}
-	if resp.ToolResponse.Error != nil && strings.TrimSpace(resp.ToolResponse.Error.Code) != "" {
-		fields["errorCode"] = strings.TrimSpace(resp.ToolResponse.Error.Code)
-	}
-	if len(resp.ToolResponse.Output) != 0 {
-		var out struct {
-			ExitCode   int    `json:"exitCode"`
-			StdoutPath string `json:"stdoutPath"`
-			StderrPath string `json:"stderrPath"`
+	switch resp.Op {
+	case types.HostOpShellExec:
+		fields := map[string]string{
+			"exitCode": strconv.Itoa(resp.ExitCode),
 		}
-		if err := json.Unmarshal(resp.ToolResponse.Output, &out); err == nil {
-			fields["exitCode"] = strconv.Itoa(out.ExitCode)
-			if strings.TrimSpace(out.StdoutPath) != "" {
-				fields["stdoutPath"] = strings.TrimSpace(out.StdoutPath)
+		if strings.TrimSpace(resp.StdoutPath) != "" {
+			fields["stdoutPath"] = strings.TrimSpace(resp.StdoutPath)
+		}
+		if strings.TrimSpace(resp.StderrPath) != "" {
+			fields["stderrPath"] = strings.TrimSpace(resp.StderrPath)
+		}
+		return fields
+	case types.HostOpToolRun:
+		if resp.ToolResponse == nil {
+			return nil
+		}
+		if strings.TrimSpace(resp.ToolResponse.ToolID.String()) != "builtin.shell" || strings.TrimSpace(resp.ToolResponse.ActionID) != "exec" {
+			return nil
+		}
+		fields := map[string]string{}
+		if resp.ToolResponse.Error != nil && strings.TrimSpace(resp.ToolResponse.Error.Code) != "" {
+			fields["errorCode"] = strings.TrimSpace(resp.ToolResponse.Error.Code)
+		}
+		if len(resp.ToolResponse.Output) != 0 {
+			var out struct {
+				ExitCode   int    `json:"exitCode"`
+				StdoutPath string `json:"stdoutPath"`
+				StderrPath string `json:"stderrPath"`
 			}
-			if strings.TrimSpace(out.StderrPath) != "" {
-				fields["stderrPath"] = strings.TrimSpace(out.StderrPath)
+			if err := json.Unmarshal(resp.ToolResponse.Output, &out); err == nil {
+				fields["exitCode"] = strconv.Itoa(out.ExitCode)
+				if strings.TrimSpace(out.StdoutPath) != "" {
+					fields["stdoutPath"] = strings.TrimSpace(out.StdoutPath)
+				}
+				if strings.TrimSpace(out.StderrPath) != "" {
+					fields["stderrPath"] = strings.TrimSpace(out.StderrPath)
+				}
 			}
 		}
-	}
-	if len(fields) == 0 {
+		if len(fields) == 0 {
+			return nil
+		}
+		return fields
+	default:
 		return nil
 	}
-	return fields
 }

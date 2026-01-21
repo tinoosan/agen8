@@ -761,7 +761,7 @@ func (c *ContextConstructor) loadStateIfNeeded(ctx context.Context) error {
 	// Cleanup legacy visible files under /scratch (models often "discover" and read them).
 	// These are not part of the agent contract; they are host bookkeeping.
 	if strings.TrimSpace(c.Cfg.DataDir) != "" && strings.TrimSpace(c.RunID) != "" {
-		wsDir := fsutil.GetWorkspaceDir(c.Cfg.DataDir, c.RunID)
+		wsDir := fsutil.GetScratchDir(c.Cfg.DataDir, c.RunID)
 		legacy := []string{
 			filepath.Join(wsDir, "context_constructor_state.json"),
 			filepath.Join(wsDir, "context_constructor_manifest.json"),

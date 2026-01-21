@@ -32,7 +32,7 @@ type Activity struct {
 	// Kind is the operation type (fs.read, fs.write, tool.run, ...).
 	Kind string
 
-	// Title is the short human label shown in the list (e.g. "Read /tools/builtin.shell").
+	// Title is the short human label shown in the list (e.g. "Read /project/main.go").
 	Title string
 
 	// Status is pending/ok/error.

@@ -53,6 +53,11 @@ const (
 	// In a future multi-agent system, you may add a shared global history mount
 	// alongside per-session histories.
 	MountHistory = "history"
+
+	// MountTrace exposes an agent-specific VFS directory for trace host ops.
+	// It is intentionally separate from /scratch so trace context can be kept apart.
+	// Files written here are raw key/value blobs; the trace host op interacts with /trace/<key>.
+	MountTrace = "trace"
 )
 
 // Resource is the minimal contract a “mounted thing” must implement to behave like a filesystem.

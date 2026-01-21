@@ -121,7 +121,7 @@ func (m *Model) activeWorkspaceDir() string {
 	if dd == "" || rid == "" {
 		return ""
 	}
-	return fsutil.GetWorkspaceDir(dd, rid)
+	return fsutil.GetScratchDir(dd, rid)
 }
 
 func (m *Model) scanFilePickerPaths(workdir string) ([]string, error) {

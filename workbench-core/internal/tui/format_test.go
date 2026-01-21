@@ -12,18 +12,16 @@ func TestClassifyEvent_OpRequest(t *testing.T) {
 		Type:    "agent.op.request",
 		Message: "Agent requested host op",
 		Data: map[string]string{
-			"op":       "fs.read",
-			"path":     "/tools/builtin.shell",
-			"toolId":   "",
-			"actionId": "",
-			"maxBytes": "4096",
+			"op":          "shell_exec",
+			"argvPreview": `rg -n Example Domain`,
+			"argv0":       "rg",
 		},
 	}
 	rr := classifyEvent(ev)
 	if rr.Class != RenderAction {
 		t.Fatalf("expected action class, got %v", rr.Class)
 	}
-	for _, want := range []string{"Read /tools/builtin.shell"} {
+	for _, want := range []string{"rg -n", "Example Domain"} {
 		if !strings.Contains(rr.Text, want) {
 			t.Fatalf("expected %q to contain %q", rr.Text, want)
 		}

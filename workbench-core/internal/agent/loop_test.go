@@ -86,46 +86,59 @@ func TestAgentLoopV0_ResolvesRelativePaths(t *testing.T) {
 	}
 }
 
-func TestAgentLoopV0_BuiltinShellExec_RoutesToToolRun(t *testing.T) {
+func TestAgentLoopV0_ShellAndHTTPHostOps(t *testing.T) {
 	tc := types.ToolCall{
 		Type: "function",
 		Function: types.ToolCallFunction{
-			Name:      "builtin_shell_exec",
+			Name:      "shell_exec",
 			Arguments: `{"argv":["ls"],"cwd":"src","stdin":"hi"}`,
 		},
 	}
 	req, err := functionCallToHostOp(tc, nil)
 	if err != nil {
-		t.Fatalf("builtin_shell_exec: %v", err)
+		t.Fatalf("shell_exec: %v", err)
 	}
-	if req.Op != types.HostOpToolRun || req.ToolID != types.ToolID("builtin.shell") || req.ActionID != "exec" {
-		t.Fatalf("expected tool.run/builtin.shell, got %+v", req)
+	if req.Op != types.HostOpShellExec {
+		t.Fatalf("expected shell_exec host op, got %+v", req)
 	}
-	var input struct {
-		Argv  []string `json:"argv"`
-		Cwd   string   `json:"cwd"`
-		Stdin string   `json:"stdin"`
-	}
-	if err := json.Unmarshal(req.Input, &input); err != nil {
-		t.Fatalf("unmarshal shell input: %v", err)
-	}
-	if input.Cwd != "/project/src" {
-		t.Fatalf("expected cwd /project/src, got %q", input.Cwd)
+	if req.Cwd != "/project/src" {
+		t.Fatalf("expected cwd /project/src, got %q", req.Cwd)
 	}
 
 	tc = types.ToolCall{
 		Type: "function",
 		Function: types.ToolCallFunction{
-			Name:      "builtin_http_fetch",
+			Name:      "http_fetch",
 			Arguments: `{"url":"https://example.com","method":"GET"}`,
 		},
 	}
 	req, err = functionCallToHostOp(tc, nil)
 	if err != nil {
-		t.Fatalf("builtin_http_fetch: %v", err)
+		t.Fatalf("http_fetch: %v", err)
 	}
-	if req.ToolID != types.ToolID("builtin.http") || req.ActionID != "fetch" {
-		t.Fatalf("expected builtin.http fetch, got %+v", req)
+	if req.Op != types.HostOpHTTPFetch {
+		t.Fatalf("expected http_fetch host op, got %+v", req)
+	}
+	if req.URL != "https://example.com" || req.Method != "GET" {
+		t.Fatalf("expected https GET, got %#v", req)
+	}
+
+	tc = types.ToolCall{
+		Type: "function",
+		Function: types.ToolCallFunction{
+			Name:      "trace",
+			Arguments: `{"action":"write","key":"note","value":"hello"}`,
+		},
+	}
+	req, err = functionCallToHostOp(tc, nil)
+	if err != nil {
+		t.Fatalf("trace: %v", err)
+	}
+	if req.Op != types.HostOpTrace {
+		t.Fatalf("expected trace host op, got %+v", req)
+	}
+	if req.Action != "write" || req.Key != "note" || req.Value != "hello" {
+		t.Fatalf("unexpected trace args: %+v", req)
 	}
 }
 

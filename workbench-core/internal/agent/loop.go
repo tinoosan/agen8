@@ -293,7 +293,7 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 	}
 
 	switch name {
-	case "builtin_shell_exec":
+	case "shell_exec":
 		var args struct {
 			Argv  []string `json:"argv"`
 			Cwd   string   `json:"cwd"`
@@ -305,25 +305,14 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 		if len(args.Argv) == 0 {
 			return types.HostOpRequest{}, fmt.Errorf("argv is required")
 		}
-		inputMap := map[string]any{"argv": args.Argv}
-		if strings.TrimSpace(args.Cwd) != "" {
-			inputMap["cwd"] = resolveVFSPath(args.Cwd)
-		}
-		if args.Stdin != "" {
-			inputMap["stdin"] = args.Stdin
-		}
-		inp, err := json.Marshal(inputMap)
-		if err != nil {
-			return types.HostOpRequest{}, err
-		}
 		return types.HostOpRequest{
-			Op:       types.HostOpToolRun,
-			ToolID:   types.ToolID("builtin.shell"),
-			ActionID: "exec",
-			Input:    inp,
+			Op:    types.HostOpShellExec,
+			Argv:  args.Argv,
+			Cwd:   resolveVFSPath(args.Cwd),
+			Stdin: args.Stdin,
 		}, nil
 
-	case "builtin_http_fetch":
+	case "http_fetch":
 		var args struct {
 			URL             string            `json:"url"`
 			Method          string            `json:"method"`
@@ -335,31 +324,43 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return types.HostOpRequest{}, err
 		}
-		inputMap := map[string]any{"url": args.URL}
-		if strings.TrimSpace(args.Method) != "" {
-			inputMap["method"] = args.Method
+		url := strings.TrimSpace(args.URL)
+		if url == "" {
+			return types.HostOpRequest{}, fmt.Errorf("url is required")
+		}
+		req := types.HostOpRequest{
+			Op:     types.HostOpHTTPFetch,
+			URL:    url,
+			Method: strings.TrimSpace(args.Method),
 		}
 		if args.Headers != nil {
-			inputMap["headers"] = args.Headers
+			req.Headers = args.Headers
 		}
-		if args.Body != "" {
-			inputMap["body"] = args.Body
+		if strings.TrimSpace(args.Body) != "" {
+			req.Body = args.Body
 		}
 		if args.MaxBytes != nil {
-			inputMap["maxBytes"] = *args.MaxBytes
+			req.MaxBytes = *args.MaxBytes
 		}
 		if args.FollowRedirects != nil {
-			inputMap["followRedirects"] = *args.FollowRedirects
+			req.FollowRedirects = args.FollowRedirects
 		}
-		inp, err := json.Marshal(inputMap)
-		if err != nil {
+		return req, nil
+
+	case "trace":
+		var args struct {
+			Action string `json:"action"`
+			Key    string `json:"key"`
+			Value  string `json:"value"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
 			return types.HostOpRequest{}, err
 		}
 		return types.HostOpRequest{
-			Op:       types.HostOpToolRun,
-			ToolID:   types.ToolID("builtin.http"),
-			ActionID: "fetch",
-			Input:    inp,
+			Op:     types.HostOpTrace,
+			Action: strings.ToLower(strings.TrimSpace(args.Action)),
+			Key:    strings.TrimSpace(args.Key),
+			Value:  args.Value,
 		}, nil
 
 	case "fs_list":
@@ -518,8 +519,9 @@ When you call a tool (like ~fs_read~), the content that comes back is **the resu
 Call these without discovery:
 
 - ~fs_list~, ~fs_read~, ~fs_write~, ~fs_append~, ~fs_edit~, ~fs_patch~, ~final_answer~
-- ~builtin_shell_exec~ for shell argv execution inside the repo root (cwd, stdin allowed)
-- ~builtin_http_fetch~ for HTTP requests
+- ~shell_exec~ for shell argv execution inside the repo root (cwd, stdin allowed)
+- ~http_fetch~ for HTTP requests
+- ~trace~ to write or read reasoning traces across turns
 
 **For simple tasks like "create 5 files", just call ~fs_write~ directly.**
 
@@ -563,7 +565,7 @@ Workbench may provide **web-search-grounded model responses** (provider-dependen
 2.  **Path Resolution**: You may use relative paths (e.g., ~.~ or ~./src~). They will be resolved relative to ~/project~.
 3.  **Tool Usage**:
     - Use ~fs_*~ tools for file operations.
-    - Use ~builtin_shell_exec~ for advanced search (~grep~, ~find~) or running project binaries. Note: Do NOT try to run ~bash~ or ~sh~ interactive sessions; just pass the command argv directly.
+    - Use ~shell_exec~ for advanced search (~grep~, ~find~) or running project binaries. Note: Do NOT try to run ~bash~ or ~sh~ interactive sessions; just pass the command argv directly.
 4.  **No Hallucinations**: Do not call tools that are not in your definition list.
 
 ---

@@ -23,6 +23,12 @@ const (
 	HostOpFSPatch = "fs.patch"
 	// HostOpToolRun runs a discovered tool via the ToolRunner.
 	HostOpToolRun = "tool.run"
+	// HostOpShellExec executes a shell command.
+	HostOpShellExec = "shell_exec"
+	// HostOpHTTPFetch issues an HTTP request.
+	HostOpHTTPFetch = "http_fetch"
+	// HostOpTrace manages reasoning traces.
+	HostOpTrace = "trace"
 	// HostOpFinal ends the agent loop for a user turn.
 	HostOpFinal = "final"
 )
@@ -46,6 +52,20 @@ type HostOpRequest struct {
 	TimeoutMs int             `json:"timeoutMs,omitempty"`
 	MaxBytes  int             `json:"maxBytes,omitempty"`
 	Text      string          `json:"text,omitempty"`
+	// Shell execution parameters
+	Argv  []string `json:"argv,omitempty"`
+	Cwd   string   `json:"cwd,omitempty"`
+	Stdin string   `json:"stdin,omitempty"`
+	// HTTP fetch parameters
+	URL             string            `json:"url,omitempty"`
+	Method          string            `json:"method,omitempty"`
+	Headers         map[string]string `json:"headers,omitempty"`
+	Body            string            `json:"body,omitempty"`
+	FollowRedirects *bool             `json:"followRedirects,omitempty"`
+	// Trace parameters
+	Action string `json:"action,omitempty"`
+	Key    string `json:"key,omitempty"`
+	Value  string `json:"value,omitempty"`
 }
 
 // Validate checks the request is well-formed for its declared Op.
@@ -56,7 +76,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = normalizeHostOp(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSRead, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpToolRun, HostOpFinal:
+	case HostOpFSList, HostOpFSRead, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpToolRun, HostOpShellExec, HostOpHTTPFetch, HostOpTrace, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -134,6 +154,37 @@ func (r HostOpRequest) Validate() error {
 			return fmt.Errorf("timeoutMs must be >= 0")
 		}
 		return nil
+
+	case HostOpShellExec:
+		if len(r.Argv) == 0 {
+			return fmt.Errorf("argv is required")
+		}
+		return nil
+
+	case HostOpHTTPFetch:
+		if err := validate.NonEmpty("url", r.URL); err != nil {
+			return err
+		}
+		if r.MaxBytes < 0 {
+			return fmt.Errorf("maxBytes must be >= 0")
+		}
+		return nil
+
+	case HostOpTrace:
+		action := strings.ToLower(strings.TrimSpace(r.Action))
+		if action == "" {
+			return fmt.Errorf("trace.action is required")
+		}
+		switch action {
+		case "write", "read":
+			if err := validate.NonEmpty("trace.key", r.Key); err != nil {
+				return err
+			}
+		case "list":
+		default:
+			return fmt.Errorf("trace.action must be one of write/list/read")
+		}
+		return nil
 	}
 
 	return nil
@@ -161,6 +212,16 @@ func normalizeHostOp(op string) string {
 		return HostOpFSPatch
 	case "tool_run":
 		return HostOpToolRun
+	case "shell_exec":
+		return HostOpShellExec
+	case "shell.exec":
+		return HostOpShellExec
+	case "http_fetch":
+		return HostOpHTTPFetch
+	case "http.fetch":
+		return HostOpHTTPFetch
+	case "trace":
+		return HostOpTrace
 	default:
 		// Already dotted (or unknown): keep as-is (lowercased).
 		return op
@@ -183,4 +244,23 @@ type HostOpResponse struct {
 	Truncated bool     `json:"truncated,omitempty"`
 
 	ToolResponse *ToolResponse `json:"toolResponse,omitempty"`
+	// Shell output
+	ExitCode   int    `json:"exitCode,omitempty"`
+	Stdout     string `json:"stdout,omitempty"`
+	Stderr     string `json:"stderr,omitempty"`
+	StdoutPath string `json:"stdoutPath,omitempty"`
+	StderrPath string `json:"stderrPath,omitempty"`
+	// HTTP response
+	FinalURL      string              `json:"finalUrl,omitempty"`
+	Status        int                 `json:"status,omitempty"`
+	Headers       map[string][]string `json:"headers,omitempty"`
+	ContentType   string              `json:"contentType,omitempty"`
+	BytesRead     int                 `json:"bytesRead,omitempty"`
+	Body          string              `json:"body,omitempty"`
+	BodyTruncated bool                `json:"bodyTruncated,omitempty"`
+	BodyPath      string              `json:"bodyPath,omitempty"`
+	Warning       string              `json:"warning,omitempty"`
+	// Trace output
+	TraceKeys  []string `json:"traceKeys,omitempty"`
+	TraceValue string   `json:"value,omitempty"`
 }
