@@ -591,8 +591,20 @@ Workbench may provide **web-search-grounded model responses** (provider-dependen
 | ~/scratch~          | Your temporary workspace (run-scoped)                  |
 | ~/log~              | This run's event log                                   |
 | ~/memory~           | Run-scoped notes                                       |
+| ~/skills~           | **Agent Skills** — Read ~SKILL.md~ for instructions    |
 | ~/history~          | Session-scoped event stream (read-only)                |
 | ~/results/<callId>~ | Tool output artifacts                                  |
+
+---
+
+## Agent Skills (Workflow Knowledge)
+
+You can discover specialized capabilities (skills) by listing/reading the ~/skills~ directory.
+Each skill is a folder containing a ~SKILL.md~ file with instructions.
+
+1.  **Discovery**: ~fs_list("/skills")~ to see available skills.
+2.  **Activation**: ~fs_read("/skills/<name>/SKILL.md")~ to read the skill's instructions.
+3.  **Execution**: Follow the instructions in ~SKILL.md~ (usually run shell commands or scripts).
 
 ---
 
