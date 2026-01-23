@@ -19,6 +19,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/events"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
 func cursorDebugLog(hypothesisId, location, message string, data map[string]any) {
@@ -463,6 +464,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		p, ok := m.pendingFileOpsByOpID[opID]
 		if !ok {
+			cursorDebugLog("H2", "model.go:fileAfterMsg", "pending_file_op_missing", map[string]any{
+				"opId": opID,
+				"path": path,
+			})
 			// No pending metadata; still update cache and skip transcript.
 			m.fileSnapCache[path] = msg.text
 			return m, nil
@@ -562,6 +567,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.before = msg.text
 			p.hadBefore = true
 			m.pendingFileOpsByOpID[opID] = p
+			if path != "" {
+				m.enqueuePendingFileOp(path, opID)
+			}
 		}
 		return m, nil
 
@@ -733,7 +741,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			var approvalErr agent.ErrApprovalRequired
 			if errors.As(msg.err, &approvalErr) {
-				m.startApprovalFlow(approvalErr)
+				diffs := m.generateApprovalDiffs(approvalErr.PendingOps)
+				m.startApprovalFlow(approvalErr, diffs)
 				return m, nil
 			}
 			// Treat user-initiated stop (Ctrl+X) as a normal outcome, not an error.
@@ -873,24 +882,113 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *Model) startApprovalFlow(err agent.ErrApprovalRequired) {
+func (m *Model) startApprovalFlow(err agent.ErrApprovalRequired, diffs []string) {
 	m.awaitingApprovalOps = make([]approvalOp, len(err.PendingOps))
+	m.approvalTranscriptIdxs = nil
 	for i := range err.PendingOps {
 		callID := ""
 		if i < len(err.PendingToolCallIDs) {
 			callID = err.PendingToolCallIDs[i]
 		}
+		diff := ""
+		if i < len(diffs) {
+			diff = diffs[i]
+		}
 		m.awaitingApprovalOps[i] = approvalOp{
 			Req:        err.PendingOps[i],
 			ToolCallID: callID,
+			Diff:       diff,
 		}
 	}
+	m.appendApprovalTranscriptItems()
 	m.layout()
+}
+
+func (m *Model) appendApprovalTranscriptItems() {
+	if m == nil {
+		return
+	}
+	m.approvalTranscriptIdxs = nil
+	for _, op := range m.awaitingApprovalOps {
+		reqCopy := op.Req
+		item := transcriptItem{
+			kind:           transcriptApprovalRequest,
+			approvalOp:     &reqCopy,
+			approvalDiff:   strings.TrimSpace(op.Diff),
+			approvalStatus: "pending",
+		}
+		m.addTranscriptItem(item)
+		m.approvalTranscriptIdxs = append(m.approvalTranscriptIdxs, len(m.transcriptItems)-1)
+	}
+}
+
+func (m *Model) generateApprovalDiffs(ops []types.HostOpRequest) []string {
+	diffs := make([]string, len(ops))
+	type vfsProvider interface {
+		VFS() *vfs.FS
+	}
+	provider, ok := m.runner.(vfsProvider)
+	if !ok {
+		return diffs
+	}
+	fs := provider.VFS()
+	if fs == nil {
+		return diffs
+	}
+	for i, op := range ops {
+		if !isFileModificationOp(op.Op) {
+			continue
+		}
+		diff, err := GeneratePendingOpDiff(fs, op)
+		if err != nil {
+			cursorDebugLog("H2", "model.go:generateApprovalDiffs", "pending_diff_failed", map[string]any{
+				"op":   op.Op,
+				"path": op.Path,
+				"err":  err.Error(),
+			})
+			diff = fmt.Sprintf("```text\n(diff preview unavailable: %s)\n```", err)
+		}
+		diffs[i] = diff
+	}
+	return diffs
+}
+
+func isFileModificationOp(op string) bool {
+	switch strings.ToLower(strings.TrimSpace(op)) {
+	case types.HostOpFSWrite, types.HostOpFSAppend, types.HostOpFSEdit, types.HostOpFSPatch:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *Model) processApproval(approve bool) tea.Cmd {
 	if len(m.awaitingApprovalOps) == 0 {
 		return nil
+	}
+	idx := -1
+	if len(m.approvalTranscriptIdxs) > 0 {
+		idx = m.approvalTranscriptIdxs[0]
+		m.approvalTranscriptIdxs = m.approvalTranscriptIdxs[1:]
+		if len(m.approvalTranscriptIdxs) == 0 {
+			m.approvalTranscriptIdxs = nil
+		}
+	}
+	status := "denied"
+	if approve {
+		status = "approved"
+	}
+	if idx >= 0 && idx < len(m.transcriptItems) {
+		it := m.transcriptItems[idx]
+		if it.kind == transcriptApprovalRequest {
+			it.approvalStatus = status
+			m.transcriptItems[idx] = it
+			wasAtBottom := m.transcript.AtBottom()
+			m.rebuildTranscript()
+			if wasAtBottom {
+				m.transcript.GotoBottom()
+			}
+		}
 	}
 	ctx := m.turnCtx
 	if ctx == nil {
@@ -1147,10 +1245,10 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		op := strings.TrimSpace(ev.Data["op"])
 		path := strings.TrimSpace(ev.Data["path"])
 
-		// Back-compat: if opId is missing, try to correlate file ops by path.
-		opID := strings.TrimSpace(ev.Data["opId"])
-		if opID == "" && path != "" && (op == "fs.write" || op == "fs.append" || op == "fs.edit" || op == "fs.patch") {
-			opID = m.findPendingFileOpIDByPath(path)
+		rawOpID := strings.TrimSpace(ev.Data["opId"])
+		opID := rawOpID
+		if path != "" && isFileModificationOp(op) {
+			opID = m.resolvePendingFileOpID(path, rawOpID)
 		}
 
 		status, isError := actionStatusIcon(ev.Data)
@@ -1387,12 +1485,93 @@ func (m *Model) findPendingFileOpIDByPath(path string) string {
 	if path == "" || m.pendingFileOpsByOpID == nil {
 		return ""
 	}
+	if m.pendingFileOpsQueue != nil {
+		if q, ok := m.pendingFileOpsQueue[path]; ok && len(q) > 0 {
+			return q[0]
+		}
+	}
 	for id, p := range m.pendingFileOpsByOpID {
 		if strings.TrimSpace(p.path) == path {
 			return id
 		}
 	}
 	return ""
+}
+
+func (m *Model) enqueuePendingFileOp(path, opID string) {
+	if m == nil {
+		return
+	}
+	path = strings.TrimSpace(path)
+	opID = strings.TrimSpace(opID)
+	if path == "" || opID == "" {
+		return
+	}
+	if m.pendingFileOpsQueue == nil {
+		m.pendingFileOpsQueue = make(map[string][]string)
+	}
+	m.pendingFileOpsQueue[path] = append(m.pendingFileOpsQueue[path], opID)
+}
+
+func (m *Model) popPendingFileOpID(path string) string {
+	if m == nil {
+		return ""
+	}
+	path = strings.TrimSpace(path)
+	if path == "" || m.pendingFileOpsQueue == nil {
+		return ""
+	}
+	q, ok := m.pendingFileOpsQueue[path]
+	if !ok || len(q) == 0 {
+		delete(m.pendingFileOpsQueue, path)
+		return ""
+	}
+	opID := q[0]
+	if len(q) == 1 {
+		delete(m.pendingFileOpsQueue, path)
+	} else {
+		m.pendingFileOpsQueue[path] = q[1:]
+	}
+	return opID
+}
+
+func (m *Model) removePendingFileOpFromQueue(path, opID string) {
+	if m == nil {
+		return
+	}
+	path = strings.TrimSpace(path)
+	opID = strings.TrimSpace(opID)
+	if path == "" || opID == "" || m.pendingFileOpsQueue == nil {
+		return
+	}
+	q, ok := m.pendingFileOpsQueue[path]
+	if !ok || len(q) == 0 {
+		return
+	}
+	for i, entry := range q {
+		if entry == opID {
+			q = append(q[:i], q[i+1:]...)
+			if len(q) == 0 {
+				delete(m.pendingFileOpsQueue, path)
+			} else {
+				m.pendingFileOpsQueue[path] = q
+			}
+			return
+		}
+	}
+}
+
+func (m *Model) resolvePendingFileOpID(path, opID string) string {
+	path = strings.TrimSpace(path)
+	opID = strings.TrimSpace(opID)
+	if path == "" {
+		return opID
+	}
+	if opID != "" {
+		m.removePendingFileOpFromQueue(path, opID)
+		return opID
+	}
+	return m.popPendingFileOpID(path)
 }
 
 func (m Model) waitEvent() tea.Cmd {

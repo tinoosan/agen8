@@ -83,6 +83,7 @@ type workdirPrefetchMsg struct {
 type approvalOp struct {
 	Req        types.HostOpRequest
 	ToolCallID string
+	Diff       string
 }
 
 type preinitStatusMsg struct {
@@ -134,6 +135,7 @@ type Model struct {
 	// pendingFileOpsByOpID tracks in-flight file ops keyed by host-emitted opId.
 	// This avoids clobbering state under batch parallelism.
 	pendingFileOpsByOpID map[string]pendingFileOp // opId -> pending op metadata
+	pendingFileOpsQueue  map[string][]string
 
 	// fileChanges holds grouped diff blocks for the current turn.
 	fileChangesItemIdx int               // transcript item index for the grouped block, or -1
@@ -267,6 +269,7 @@ type Model struct {
 	approvalPickerOpen     bool
 	approvalPickerSelected int
 	awaitingApprovalOps    []approvalOp
+	approvalTranscriptIdxs []int
 
 	// File picker state (workdir-scoped, triggered by typing '@' in input)
 	filePickerOpen     bool
@@ -293,6 +296,7 @@ const (
 	transcriptActionGroup
 	transcriptError
 	transcriptFileChange
+	transcriptApprovalRequest
 )
 
 type groupedAction struct {
@@ -313,6 +317,11 @@ type transcriptItem struct {
 	// For action lines.
 	groupHeader string
 	groupItems  []groupedAction
+
+	// For approval requests.
+	approvalOp     *types.HostOpRequest
+	approvalDiff   string
+	approvalStatus string
 }
 
 type pendingAction struct {

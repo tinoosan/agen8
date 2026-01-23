@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wordwrap"
+	"github.com/tinoosan/workbench-core/internal/types"
 )
 
 func splitThinkingText(s string) (header string, summary string) {
@@ -261,6 +262,60 @@ func (m *Model) rebuildTranscript() {
 			// Keep the diff tight to the header (one newline).
 			rendered := headerRendered + "\n" + bodyRendered
 			lines = append(lines, m.styleFileChangeBox.Render(rendered))
+			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
+		case transcriptApprovalRequest:
+			var req types.HostOpRequest
+			if it.approvalOp != nil {
+				req = *it.approvalOp
+			}
+			title, desc := approvalPromptText(req)
+			headerText := "Approval Required: " + strings.TrimSpace(title)
+			if strings.TrimSpace(title) == "" {
+				if strings.TrimSpace(req.Op) != "" {
+					headerText = "Approval Required: " + req.Op
+				} else if strings.TrimSpace(req.Path) != "" {
+					headerText = "Approval Required: " + req.Path
+				} else {
+					headerText = "Approval Required"
+				}
+			}
+			header := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#ffb347")).
+				Bold(true).
+				Render(truncateRight(headerText, fileInnerW))
+
+			bodyParts := make([]string, 0, 2)
+			if strings.TrimSpace(desc) != "" {
+				bodyParts = append(bodyParts, desc)
+			}
+			diffContent := strings.TrimSpace(it.approvalDiff)
+			if diffContent != "" {
+				bodyParts = append(bodyParts, diffContent)
+			}
+			if len(bodyParts) == 0 {
+				bodyParts = append(bodyParts, "_(no preview available)_")
+			}
+			body := strings.Join(bodyParts, "\n\n")
+			renderedBody := strings.Trim(m.renderer.RenderMarkdown(body, fileInnerW), "\n")
+
+			statusText := "Waiting for approval..."
+			statusStyle := m.styleDim
+			switch strings.ToLower(strings.TrimSpace(it.approvalStatus)) {
+			case "approved":
+				statusText = "✅ Approved"
+				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950")).Bold(true)
+			case "denied":
+				statusText = "❌ Denied"
+				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Bold(true)
+			}
+			status := statusStyle.Render(statusText)
+
+			content := header
+			if renderedBody != "" {
+				content += "\n" + renderedBody
+			}
+			content += "\n" + status
+			lines = append(lines, m.styleFileChangeBox.Render(strings.TrimRight(content, "\n")))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		}
 	}

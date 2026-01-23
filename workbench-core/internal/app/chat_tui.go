@@ -741,6 +741,13 @@ func (r *lazyNewSessionTurnRunner) WriteVFS(ctx context.Context, path string, da
 	return r.engine.WriteVFS(ctx, path, data)
 }
 
+func (r *lazyNewSessionTurnRunner) VFS() *vfs.FS {
+	if r == nil || r.engine == nil {
+		return nil
+	}
+	return r.engine.VFS()
+}
+
 func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	if r.initialized {
 		return nil
@@ -922,6 +929,13 @@ func (r *tuiTurnRunner) WriteVFS(ctx context.Context, path string, data []byte) 
 	}
 	_ = ctx
 	return r.fs.Write(path, data)
+}
+
+func (r *tuiTurnRunner) VFS() *vfs.FS {
+	if r == nil {
+		return nil
+	}
+	return r.fs
 }
 
 func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, error) {
