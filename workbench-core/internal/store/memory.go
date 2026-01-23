@@ -67,3 +67,12 @@ type MemoryStore interface {
 	StagingArea
 	CommitLog
 }
+
+// PlanFileStore exposes the minimal API needed to persist a separate plan file
+// alongside the standard run memory staging files.
+type PlanFileStore interface {
+	GetPlan(ctx context.Context) (string, error)
+	SetPlan(ctx context.Context, text string) error
+}
+
+const PlanFileName = "plan.md"

@@ -98,11 +98,15 @@ func (sr *StagingResource) List(subpath string) ([]vfs.Entry, error) {
 		return nil, err
 	}
 	if clean == "" || clean == "." {
-		return []vfs.Entry{
+		entries := []vfs.Entry{
 			{Path: sr.MainFile, IsDir: false},
 			{Path: "update.md", IsDir: false},
 			{Path: "commits.jsonl", IsDir: false},
-		}, nil
+		}
+		if _, ok := sr.Store.(store.PlanFileStore); ok {
+			entries = append(entries, vfs.Entry{Path: store.PlanFileName, IsDir: false})
+		}
+		return entries, nil
 	}
 	return nil, fmt.Errorf("invalid subpath %q: cannot list non-root", subpath)
 }
@@ -129,6 +133,13 @@ func (sr *StagingResource) Read(subpath string) ([]byte, error) {
 	case "commits.jsonl":
 		s, err := sr.Store.GetCommitLog(context.Background())
 		return []byte(s), err
+	case store.PlanFileName:
+		planStore, ok := sr.Store.(store.PlanFileStore)
+		if !ok {
+			return nil, fmt.Errorf("%s read: plan file not supported", sr.Mount)
+		}
+		s, err := planStore.GetPlan(context.Background())
+		return []byte(s), err
 	default:
 		return nil, fmt.Errorf("%s read: unknown item %q (allowed: %s, update.md, commits.jsonl)", sr.Mount, clean, sr.MainFile)
 	}
@@ -145,10 +156,18 @@ func (sr *StagingResource) Write(subpath string, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("%s write: %w", sr.Mount, err)
 	}
-	if clean != "update.md" {
+	switch clean {
+	case "update.md":
+		return sr.Store.SetUpdate(context.Background(), string(data))
+	case store.PlanFileName:
+		planStore, ok := sr.Store.(store.PlanFileStore)
+		if !ok {
+			return fmt.Errorf("%s write: plan file not supported", sr.Mount)
+		}
+		return planStore.SetPlan(context.Background(), string(data))
+	default:
 		return fmt.Errorf("%s write: only update.md is writable", sr.Mount)
 	}
-	return sr.Store.SetUpdate(context.Background(), string(data))
 }
 
 // Append appends bytes to update.md.
@@ -160,14 +179,26 @@ func (sr *StagingResource) Append(subpath string, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("%s append: %w", sr.Mount, err)
 	}
-	if clean != "update.md" {
+	switch clean {
+	case "update.md":
+		prev, err := sr.Store.GetUpdate(context.Background())
+		if err != nil {
+			return err
+		}
+		return sr.Store.SetUpdate(context.Background(), prev+string(data))
+	case store.PlanFileName:
+		planStore, ok := sr.Store.(store.PlanFileStore)
+		if !ok {
+			return fmt.Errorf("%s append: plan file not supported", sr.Mount)
+		}
+		prev, err := planStore.GetPlan(context.Background())
+		if err != nil {
+			return err
+		}
+		return planStore.SetPlan(context.Background(), prev+string(data))
+	default:
 		return fmt.Errorf("%s append: only update.md is writable", sr.Mount)
 	}
-	prev, err := sr.Store.GetUpdate(context.Background())
-	if err != nil {
-		return err
-	}
-	return sr.Store.SetUpdate(context.Background(), prev+string(data))
 }
 
 func srMount(sr *StagingResource) string {

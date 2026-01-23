@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
@@ -48,6 +51,9 @@ func NewDiskMemoryStoreFromDir(baseDir string) (*DiskMemoryStore, error) {
 	if err := s.ensure(); err != nil {
 		return nil, err
 	}
+	if err := s.ensurePlan(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -57,4 +63,29 @@ func (s *DiskMemoryStore) GetMemory(ctx context.Context) (string, error) {
 
 func (s *DiskMemoryStore) AppendMemory(ctx context.Context, text string) error {
 	return s.appendMain(ctx, text)
+}
+
+func (s *DiskMemoryStore) ensurePlan() error {
+	return s.EnsureFile(filepath.Join(s.Dir, PlanFileName))
+}
+
+func (s *DiskMemoryStore) GetPlan(ctx context.Context) (string, error) {
+	if err := s.ensurePlan(); err != nil {
+		return "", err
+	}
+	b, err := os.ReadFile(filepath.Join(s.Dir, PlanFileName))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (s *DiskMemoryStore) SetPlan(ctx context.Context, text string) error {
+	if err := s.ensurePlan(); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(s.Dir, PlanFileName), []byte(text), 0644)
 }

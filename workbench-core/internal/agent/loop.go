@@ -629,6 +629,7 @@ func agentLoopV0SystemPrompt() string {
   <planning>
     <rule id="planning.assess">Assess whether the user's request requires multiple distinct steps before acting; complex goals should trigger a plan rather than ad-hoc edits.</rule>
     <rule id="planning.plan">Create /memory/plan.md as an explicit Markdown checklist (e.g., "- [ ] step description") when a multi-step plan is needed, and keep this document in sync with your reasoning so the UI can display each step.</rule>
+    <rule id="planning.storage">Write plan updates to /memory/plan.md (the mount supports writing) so you can track progress and make it visible to the user.</rule>
     <rule id="planning.execute">Execute the plan systematically, checking each "- [ ]" entry only after the associated step succeeds and noting progress by writing "[x]" back into /memory/plan.md.</rule>
     <rule id="planning.adapt">If a step fails, new information arrives, or priorities change, update /memory/plan.md to reflect the revised plan instead of abandoning work.</rule>
     <rule id="planning.finalize">Finalize only once every checklist entry in /memory/plan.md is marked [x]; do not emit final_answer or consider the work done until the plan is complete.</rule>
