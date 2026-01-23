@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/workbench-core/internal/types"
 )
 
 type fakeVFSRunner struct {
@@ -19,6 +20,21 @@ func (r *fakeVFSRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	_ = ctx
 	_ = userMsg
 	return "", nil
+}
+
+func (r *fakeVFSRunner) AppendToolResponse(toolCallID string, resp types.HostOpResponse) {
+	_ = toolCallID
+	_ = resp
+}
+
+func (r *fakeVFSRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest, toolCallID string) (types.HostOpResponse, error) {
+	_ = ctx
+	_ = toolCallID
+	return types.HostOpResponse{Op: req.Op, Ok: true}, nil
+}
+
+func (r *fakeVFSRunner) ResumeTurn(ctx context.Context) (string, error) {
+	return r.RunTurn(ctx, "")
 }
 
 func (r *fakeVFSRunner) ReadVFS(ctx context.Context, path string, maxBytes int) (text string, bytesLen int, truncated bool, err error) {

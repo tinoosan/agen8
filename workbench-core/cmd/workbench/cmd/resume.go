@@ -37,6 +37,7 @@ var resumeCmd = &cobra.Command{
 			modelOverride = strings.TrimSpace(modelID)
 		}
 		opts := []app.RunChatOption{
+			app.WithApprovalsMode(approvalsMode),
 			app.WithModel(modelOverride),
 			app.WithWorkDir(workDir),
 			app.WithMaxSteps(maxSteps),

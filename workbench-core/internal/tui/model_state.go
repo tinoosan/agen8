@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/internal/types"
 )
 
 const composeVPath = "/project/.workbench/compose.md"
@@ -20,6 +21,9 @@ const composeVPath = "/project/.workbench/compose.md"
 // and persistence. The TUI calls this interface and renders events as they stream.
 type TurnRunner interface {
 	RunTurn(ctx context.Context, userMsg string) (final string, err error)
+	ExecHostOp(ctx context.Context, req types.HostOpRequest, toolCallID string) (types.HostOpResponse, error)
+	AppendToolResponse(toolCallID string, resp types.HostOpResponse)
+	ResumeTurn(ctx context.Context) (string, error)
 }
 
 // vfsAccessor is an optional extension interface implemented by the app TurnRunner.
@@ -74,6 +78,11 @@ type editorComposeLoadMsg struct {
 type workdirPrefetchMsg struct {
 	workdir string
 	err     error
+}
+
+type approvalOp struct {
+	Req        types.HostOpRequest
+	ToolCallID string
 }
 
 type preinitStatusMsg struct {
@@ -252,6 +261,12 @@ type Model struct {
 	helpViewport   viewport.Model
 	helpModalText  string
 	helpModalLines int
+
+	// Approval picker (/approval command)
+	approvalsMode          string
+	approvalPickerOpen     bool
+	approvalPickerSelected int
+	awaitingApprovalOps    []approvalOp
 
 	// File picker state (workdir-scoped, triggered by typing '@' in input)
 	filePickerOpen     bool

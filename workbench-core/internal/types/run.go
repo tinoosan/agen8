@@ -92,6 +92,9 @@ type RunRuntimeConfig struct {
 	// Reasoning configuration (best-effort; provider/model dependent).
 	ReasoningEffort  string `json:"reasoningEffort,omitempty"`
 	ReasoningSummary string `json:"reasoningSummary,omitempty"`
+
+	// ApprovalsMode records whether the agent required approvals during this run.
+	ApprovalsMode string `json:"approvalsMode,omitempty"`
 }
 
 // NewRun initializes a new Run instance with a unique ID and the given parameters.

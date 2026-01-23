@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/tinoosan/workbench-core/internal/cost"
+	"github.com/tinoosan/workbench-core/internal/types"
 )
 
 func (m *Model) layout() {
@@ -309,6 +310,7 @@ func (m Model) renderInput() string {
 		webState = "on"
 	}
 	webLabel := m.styleComposerStatusKey.Render("web") + " " + m.styleComposerStatusVal.Render(webState)
+	approvalLabel := m.styleComposerStatusKey.Render("approval") + " " + m.styleComposerStatusVal.Render(defaultIfEmpty(strings.TrimSpace(m.approvalsMode), "enabled"))
 
 	modelLabel := m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
 
@@ -336,23 +338,23 @@ func (m Model) renderInput() string {
 
 	// Prefer keeping web/effort visible; truncate the model ID if needed.
 	statusLeft := modelLabel
+	statusLeft = modelLabel + "  " + webLabel + "  " + approvalLabel
 	if effortLabel != "" {
-		statusLeft = modelLabel + "  " + webLabel + "  " + effortLabel
+		statusLeft += "  " + effortLabel
 		if leftMax > 0 && lipgloss.Width(statusLeft) > leftMax {
 			excess := lipgloss.Width(statusLeft) - leftMax
 			allowedIDW := max(8, lipgloss.Width(modelIDDisplay)-excess-1)
 			modelIDDisplay = truncateMiddle(modelID, allowedIDW)
 			modelLabel = m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
-			statusLeft = modelLabel + "  " + webLabel + "  " + effortLabel
+			statusLeft = modelLabel + "  " + webLabel + "  " + approvalLabel + "  " + effortLabel
 		}
 	} else {
-		statusLeft = modelLabel + "  " + webLabel
 		if leftMax > 0 && lipgloss.Width(statusLeft) > leftMax {
 			excess := lipgloss.Width(statusLeft) - leftMax
 			allowedIDW := max(8, lipgloss.Width(modelIDDisplay)-excess-1)
 			modelIDDisplay = truncateMiddle(modelID, allowedIDW)
 			modelLabel = m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
-			statusLeft = modelLabel + "  " + webLabel
+			statusLeft = modelLabel + "  " + webLabel + "  " + approvalLabel
 		}
 	}
 	leftW := lipgloss.Width(statusLeft)
@@ -375,6 +377,12 @@ func (m Model) renderInput() string {
 	}
 	// Render reasoning-effort picker if open (in-composer).
 	if p := m.renderReasoningEffortPicker(); p != "" {
+		contentParts = append(contentParts, "", p)
+	}
+	if p := m.renderApprovalPicker(); p != "" {
+		contentParts = append(contentParts, "", p)
+	}
+	if p := m.renderApprovalPrompt(); p != "" {
 		contentParts = append(contentParts, "", p)
 	}
 	contentParts = append(contentParts, "", input)
@@ -525,4 +533,130 @@ func (m Model) renderReasoningEffortPicker() string {
 		Foreground(lipgloss.Color("#eaeaea"))
 
 	return pickerStyle.Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) renderApprovalPicker() string {
+	if !m.approvalPickerOpen {
+		return ""
+	}
+
+	outerW := max(20, m.width-8)
+	contentW := max(1, outerW-4)
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#eaeaea")).
+		Bold(true)
+	descStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#b0b0b0"))
+	selectedTitleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6bbcff")).
+		Bold(true)
+	selectedDescStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#9ad0ff"))
+
+	lines := []string{}
+	sel := m.approvalPickerSelected
+	if sel < 0 {
+		sel = 0
+	}
+	for i, opt := range approvalPickerOptions {
+		prefix := "  "
+		tStyle := titleStyle
+		dStyle := descStyle
+		if i == sel {
+			prefix = "› "
+			tStyle = selectedTitleStyle
+			dStyle = selectedDescStyle
+		}
+		titleLine := prefix + truncateRight(opt.title, max(1, contentW-lipgloss.Width(prefix)))
+		descLine := strings.Repeat(" ", lipgloss.Width(prefix)) + truncateRight(opt.description, max(1, contentW-lipgloss.Width(prefix)))
+		lines = append(lines, tStyle.Render(titleLine))
+		lines = append(lines, dStyle.Render(descLine))
+		if i < len(approvalPickerOptions)-1 {
+			lines = append(lines, "")
+		}
+	}
+
+	style := lipgloss.NewStyle().
+		Width(contentW).
+		Padding(0, 1).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#6bbcff")).
+		Foreground(lipgloss.Color("#eaeaea"))
+
+	return style.Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) renderApprovalPrompt() string {
+	if len(m.awaitingApprovalOps) == 0 {
+		return ""
+	}
+	op := m.awaitingApprovalOps[0]
+	title, desc := approvalPromptText(op.Req)
+
+	outerW := max(20, m.width-8)
+	contentW := max(1, outerW-4)
+
+	lines := []string{
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#ffb347")).Bold(true).Render("Approval required"),
+		m.styleBold.Render(truncateRight(title, contentW)),
+		m.styleDim.Render(truncateRight(desc, contentW)),
+		m.styleComposerStatusKey.Copy().Render("press") + " " + m.styleComposerStatusVal.Render("A/Y approve • D/N deny"),
+	}
+
+	style := lipgloss.NewStyle().
+		Width(contentW).
+		Padding(0, 1).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#ffb347")).
+		Foreground(lipgloss.Color("#eaeaea"))
+
+	return style.Render(strings.Join(lines, "\n"))
+}
+
+func approvalPromptText(req types.HostOpRequest) (string, string) {
+	op := strings.ToLower(strings.TrimSpace(req.Op))
+	switch op {
+	case types.HostOpFSWrite:
+		return "Write file", "Path: " + req.Path
+	case types.HostOpFSAppend:
+		return "Append to file", "Path: " + req.Path
+	case types.HostOpFSEdit:
+		return "Edit file", "Path: " + req.Path
+	case types.HostOpFSPatch:
+		return "Patch file", "Path: " + req.Path
+	case types.HostOpShellExec:
+		cmd := strings.Join(req.Argv, " ")
+		if cmd == "" {
+			cmd = "<shell command>"
+		}
+		return "Shell command", "Command: " + cmd
+	case types.HostOpHTTPFetch:
+		method := strings.ToUpper(strings.TrimSpace(req.Method))
+		if method == "" {
+			method = "GET"
+		}
+		return "HTTP request", method + " " + req.URL
+	case types.HostOpToolRun:
+		title := "Tool run"
+		if strings.TrimSpace(req.ToolID.String()) != "" {
+			title = "Tool run: " + req.ToolID.String()
+		}
+		desc := "Action: " + req.ActionID
+		return title, desc
+	default:
+		desc := "Op: " + req.Op
+		if strings.TrimSpace(req.Path) != "" {
+			desc += " " + req.Path
+		}
+		return "Host operation", desc
+	}
+}
+
+func defaultIfEmpty(v, fallback string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return fallback
+	}
+	return v
 }

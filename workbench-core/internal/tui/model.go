@@ -16,7 +16,9 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/internal/types"
 )
 
 func cursorDebugLog(hypothesisId, location, message string, data map[string]any) {
@@ -217,6 +219,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	m.lastTurnUserItemIdx = -1
 	m.streamingItemIdx = -1
 	m.thinkingItemIdx = -1
+	m.approvalsMode = "enabled"
 	return m
 }
 
@@ -728,6 +731,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateThinkingTranscriptItem()
 		}
 		if msg.err != nil {
+			var approvalErr agent.ErrApprovalRequired
+			if errors.As(msg.err, &approvalErr) {
+				m.startApprovalFlow(approvalErr)
+				return m, nil
+			}
 			// Treat user-initiated stop (Ctrl+X) as a normal outcome, not an error.
 			if m.turnCancelRequested || errors.Is(msg.err, context.Canceled) {
 				// Finalize any in-progress streaming state.
@@ -865,6 +873,66 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) startApprovalFlow(err agent.ErrApprovalRequired) {
+	m.awaitingApprovalOps = make([]approvalOp, len(err.PendingOps))
+	for i := range err.PendingOps {
+		callID := ""
+		if i < len(err.PendingToolCallIDs) {
+			callID = err.PendingToolCallIDs[i]
+		}
+		m.awaitingApprovalOps[i] = approvalOp{
+			Req:        err.PendingOps[i],
+			ToolCallID: callID,
+		}
+	}
+	m.layout()
+}
+
+func (m *Model) processApproval(approve bool) tea.Cmd {
+	if len(m.awaitingApprovalOps) == 0 {
+		return nil
+	}
+	ctx := m.turnCtx
+	if ctx == nil {
+		ctx = m.ctx
+	}
+	op := m.awaitingApprovalOps[0]
+	m.awaitingApprovalOps = m.awaitingApprovalOps[1:]
+
+	if approve {
+		resp, err := m.runner.ExecHostOp(ctx, op.Req, op.ToolCallID)
+		if err != nil {
+			resp = types.HostOpResponse{Op: op.Req.Op, Ok: false, Error: err.Error()}
+			m.runner.AppendToolResponse(op.ToolCallID, resp)
+		}
+	} else {
+		resp := types.HostOpResponse{Op: op.Req.Op, Ok: false, Error: "denied"}
+		m.runner.AppendToolResponse(op.ToolCallID, resp)
+	}
+
+	m.layout()
+	if len(m.awaitingApprovalOps) == 0 {
+		return m.resumeAfterApprovals()
+	}
+	return nil
+}
+
+func (m *Model) resumeAfterApprovals() tea.Cmd {
+	if m.turnCancel != nil {
+		m.turnCancel()
+	}
+	turnCtx, turnCancel := context.WithCancel(m.ctx)
+	m.turnCtx = turnCtx
+	m.turnCancel = turnCancel
+	m.turnCancelRequested = false
+	m.turnInFlight = true
+	m.turnStarted = time.Now()
+	return func() tea.Msg {
+		final, err := m.runner.ResumeTurn(turnCtx)
+		return turnDoneMsg{final: final, err: err}
+	}
+}
+
 func (m Model) View() string {
 	if m.editorOpen {
 		return m.renderEditorView()
@@ -945,6 +1013,12 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	// Web search can be toggled at runtime via the host /web command.
 	if ev.Type == "web.changed" {
 		m.webSearchEnabled = strings.TrimSpace(ev.Data["enabled"]) == "true"
+	}
+	// Approval mode can change via /approval or TUI picker.
+	if ev.Type == "approvals.changed" {
+		if v := strings.TrimSpace(ev.Data["mode"]); v != "" {
+			m.approvalsMode = v
+		}
 	}
 	// Fallback: /reasoning (no args) emits reasoning.info with a text block.
 	if ev.Type == "reasoning.info" {

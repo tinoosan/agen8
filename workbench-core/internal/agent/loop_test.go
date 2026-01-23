@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/tinoosan/workbench-core/internal/types"
@@ -228,5 +229,46 @@ func TestAgentLoop_RunConversation_FinalAnswerTool(t *testing.T) {
 	}
 	if len(exec.reqs) != 0 {
 		t.Fatalf("expected no host ops, got %d", len(exec.reqs))
+	}
+}
+func TestAgentLoop_RunConversation_RequiresApproval(t *testing.T) {
+	llm := &fakeStreamingLLM{
+		Responses: []types.LLMResponse{{
+			ToolCalls: []types.ToolCall{{
+				ID: "1",
+				Function: types.ToolCallFunction{
+					Name:      "fs_write",
+					Arguments: `{"path":"/project/secret.txt","text":"oops"}`,
+				},
+			}},
+		}},
+	}
+	exec := &fakeExec{}
+	agent := &Agent{LLM: llm, Exec: exec, Model: "test", ApprovalsMode: "enabled"}
+	final, msgs, _, err := agent.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "write"}})
+	if final != "" {
+		t.Fatalf("expected no final text, got %q", final)
+	}
+	if err == nil {
+		t.Fatal("expected approval error")
+	}
+	var approvalErr ErrApprovalRequired
+	if !errors.As(err, &approvalErr) {
+		t.Fatalf("expected ErrApprovalRequired, got %v", err)
+	}
+	if len(approvalErr.PendingOps) != 1 {
+		t.Fatalf("expected one pending op, got %d", len(approvalErr.PendingOps))
+	}
+	if approvalErr.PendingOps[0].Op != types.HostOpFSWrite {
+		t.Fatalf("unexpected pending op %q", approvalErr.PendingOps[0].Op)
+	}
+	if len(approvalErr.PendingToolCallIDs) != 1 || approvalErr.PendingToolCallIDs[0] != "1" {
+		t.Fatalf("unexpected tool call IDs %v", approvalErr.PendingToolCallIDs)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages (user + assistant), got %d", len(msgs))
+	}
+	if len(exec.reqs) != 0 {
+		t.Fatalf("expected no host ops executed, got %d", len(exec.reqs))
 	}
 }

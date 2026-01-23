@@ -28,6 +28,9 @@ type Agent struct {
 	// when supported by the provider (e.g. OpenRouter ":online"). Host controls this.
 	EnableWebSearch bool
 
+	// ApprovalsMode controls whether dangerous host ops pause for approval.
+	ApprovalsMode string
+
 	// ReasoningEffort is an optional hint for reasoning-capable models.
 	ReasoningEffort string
 
@@ -135,11 +138,18 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			return finalText, msgs, step, nil
 		}
 
-		msgs = append(msgs, types.LLMMessage{
+		assistantMsg := types.LLMMessage{
 			Role:      "assistant",
 			Content:   strings.TrimSpace(resp.Text),
 			ToolCalls: resp.ToolCalls,
-		})
+		}
+		msgs = append(msgs, assistantMsg)
+
+		type pendingHostOp struct {
+			req    types.HostOpRequest
+			callID string
+		}
+		pending := make([]pendingHostOp, 0, len(resp.ToolCalls))
 
 		for _, tc := range resp.ToolCalls {
 			which := strings.TrimSpace(tc.Function.Name)
@@ -176,10 +186,36 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 				msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
 				continue
 			}
+			pending = append(pending, pendingHostOp{req: op, callID: strings.TrimSpace(tc.ID)})
+		}
 
-			hostResp := a.Exec.Exec(ctx, op)
+		if a.ApprovalsMode == "enabled" && len(pending) > 0 {
+			need := false
+			for _, item := range pending {
+				if isDangerousHostOp(item.req) {
+					need = true
+					break
+				}
+			}
+			if need {
+				reqs := make([]types.HostOpRequest, len(pending))
+				ids := make([]string, len(pending))
+				for i, item := range pending {
+					reqs[i] = item.req
+					ids[i] = item.callID
+				}
+				return "", msgs, step, ErrApprovalRequired{
+					AssistantMsg:       assistantMsg,
+					PendingOps:         reqs,
+					PendingToolCallIDs: ids,
+				}
+			}
+		}
+
+		for _, item := range pending {
+			hostResp := a.Exec.Exec(ctx, item.req)
 			hostRespJSON, _ := types.MarshalPretty(hostResp)
-			msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+			msgs = append(msgs, types.LLMMessage{Role: "tool", ToolCallID: item.callID, Content: string(hostRespJSON)})
 		}
 
 	}
@@ -526,6 +562,22 @@ func resolveVFSPath(p string) string {
 		return "/project"
 	}
 	return joined
+}
+
+func isDangerousHostOp(req types.HostOpRequest) bool {
+	op := strings.ToLower(strings.TrimSpace(req.Op))
+	switch op {
+	case types.HostOpFSWrite,
+		types.HostOpFSAppend,
+		types.HostOpFSEdit,
+		types.HostOpFSPatch,
+		types.HostOpShellExec,
+		types.HostOpHTTPFetch,
+		types.HostOpToolRun:
+		return true
+	default:
+		return false
+	}
 }
 
 // Run executes the agent loop for a single user goal and returns the final response text.

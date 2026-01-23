@@ -78,6 +78,9 @@ type Config struct {
 	// when supported by the provider (e.g. OpenRouter ":online"). Host controls this.
 	EnableWebSearch bool
 
+	// ApprovalsMode controls whether the agent requires confirmation for sensitive ops.
+	ApprovalsMode string
+
 	// ReasoningEffort is an optional hint for reasoning-capable models.
 	// Examples: "none", "low", "medium", "high".
 	ReasoningEffort string
@@ -127,6 +130,7 @@ func New(cfg Config) (*Agent, error) {
 		Exec:             cfg.Exec,
 		Model:            cfg.Model,
 		EnableWebSearch:  cfg.EnableWebSearch,
+		ApprovalsMode:    strings.TrimSpace(cfg.ApprovalsMode),
 		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
 		SystemPrompt:     system,

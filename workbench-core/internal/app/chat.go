@@ -51,6 +51,10 @@ type RunChatOptions struct {
 	// (provider dependent, e.g. OpenRouter ":online"). This is run-scoped and defaults to off.
 	WebSearchEnabled bool
 
+	// ApprovalsMode controls whether the agent requires confirmations for privileged ops.
+	// Valid values: "enabled", "disabled". Defaults to "enabled".
+	ApprovalsMode string
+
 	// WorkDir is the host working directory to mount at /project.
 	//
 	// If empty, the host uses os.Getwd() at startup.
@@ -110,6 +114,7 @@ func defaultRunChatOptions() RunChatOptions {
 		RecentHistoryPairs: 8,
 		IncludeHistoryOps:  boolPtr(true),
 		WebSearchEnabled:   false,
+		ApprovalsMode:      "enabled",
 		// Pricing: empty/0 by default (resolved against builtin table at runtime)
 	}
 }
@@ -147,6 +152,14 @@ func resolveRunChatOptions(opts ...RunChatOption) RunChatOptions {
 		} else {
 			o.ReasoningSummary = strings.TrimSpace(os.Getenv("OPENROUTER_REASONING_SUMMARY"))
 		}
+	}
+
+	if normalized := normalizeApprovalsMode(o.ApprovalsMode); normalized != "" {
+		o.ApprovalsMode = normalized
+	} else if normalized := normalizeApprovalsMode(os.Getenv("WORKBENCH_APPROVALS_MODE")); normalized != "" {
+		o.ApprovalsMode = normalized
+	} else {
+		o.ApprovalsMode = "enabled"
 	}
 
 	// Preserve existing defaults for zero/negative values.
@@ -239,6 +252,12 @@ func WithPricingFile(pricingFile string) RunChatOption {
 	}
 }
 
+func WithApprovalsMode(mode string) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.ApprovalsMode = strings.TrimSpace(mode)
+	}
+}
+
 func (o RunChatOptions) withDefaults() RunChatOptions {
 	if strings.TrimSpace(o.WorkDir) == "" {
 		o.WorkDir = strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR"))
@@ -265,6 +284,17 @@ func (o RunChatOptions) withDefaults() RunChatOptions {
 		o.PricingFile = strings.TrimSpace(os.Getenv("WORKBENCH_PRICING_FILE"))
 	}
 	return o
+}
+
+func normalizeApprovalsMode(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "enabled":
+		return "enabled"
+	case "disabled":
+		return "disabled"
+	default:
+		return ""
+	}
 }
 
 func boolPtr(v bool) *bool { return &v }

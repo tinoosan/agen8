@@ -30,6 +30,7 @@ var (
 	includeHistoryOps  bool
 	priceInPerM        float64
 	priceOutPerM       float64
+	approvalsMode      string
 )
 
 var rootCmd = &cobra.Command{
@@ -98,6 +99,7 @@ new run in that session (workspaces remain run-scoped).
 		}
 
 		opts := []app.RunChatOption{
+			app.WithApprovalsMode(approvalsMode),
 			app.WithModel(modelOverride),
 			app.WithWorkDir(workDir),
 			app.WithMaxSteps(maxSteps),
@@ -152,6 +154,9 @@ func init() {
 	priceOutPerM = envFloat("WORKBENCH_PRICE_OUT_PER_M", 0)
 	rootCmd.PersistentFlags().Float64Var(&priceInPerM, "price-in-per-m", priceInPerM, "USD per 1M input tokens (cost estimate)")
 	rootCmd.PersistentFlags().Float64Var(&priceOutPerM, "price-out-per-m", priceOutPerM, "USD per 1M output tokens (cost estimate)")
+
+	approvalsMode = strings.TrimSpace(os.Getenv("WORKBENCH_APPROVALS_MODE"))
+	rootCmd.PersistentFlags().StringVar(&approvalsMode, "approvals-mode", approvalsMode, "approval mode (enabled|disabled; env WORKBENCH_APPROVALS_MODE)")
 
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(listCmd)

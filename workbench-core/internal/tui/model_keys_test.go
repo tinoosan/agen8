@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/internal/types"
 )
 
 type stubRunner struct {
@@ -21,6 +22,21 @@ func (s stubRunner) RunTurn(ctx context.Context, userMsg string) (string, error)
 	_ = ctx
 	_ = userMsg
 	return s.final, s.err
+}
+
+func (s stubRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest, toolCallID string) (types.HostOpResponse, error) {
+	_ = ctx
+	_ = toolCallID
+	return types.HostOpResponse{Op: req.Op, Ok: true}, nil
+}
+
+func (s stubRunner) AppendToolResponse(toolCallID string, resp types.HostOpResponse) {
+	_ = toolCallID
+	_ = resp
+}
+
+func (s stubRunner) ResumeTurn(ctx context.Context) (string, error) {
+	return s.RunTurn(ctx, "")
 }
 
 type recordingRunner struct {
@@ -93,6 +109,21 @@ func (r blockingRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	}
 	<-ctx.Done()
 	return "", ctx.Err()
+}
+
+func (r blockingRunner) AppendToolResponse(toolCallID string, resp types.HostOpResponse) {
+	_ = toolCallID
+	_ = resp
+}
+
+func (r blockingRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest, toolCallID string) (types.HostOpResponse, error) {
+	_ = ctx
+	_ = toolCallID
+	return types.HostOpResponse{Op: req.Op, Ok: true}, nil
+}
+
+func (r blockingRunner) ResumeTurn(ctx context.Context) (string, error) {
+	return r.RunTurn(ctx, "")
 }
 
 func TestKeyHandling_EnterSubmitsEvenWhenDetailsVisible(t *testing.T) {

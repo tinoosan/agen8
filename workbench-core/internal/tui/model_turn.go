@@ -68,6 +68,11 @@ func (m *Model) submitSingle() tea.Cmd {
 		m.openReasoningEffortPicker()
 		return nil
 	}
+	// Intercept `/approval` with no args to open the approval picker.
+	if strings.EqualFold(txt, "/approval") {
+		m.openApprovalPicker()
+		return nil
+	}
 	// Intercept `/model` with no args to open picker instead of submitting
 	if txt == "/model" {
 		return m.openModelPicker()
@@ -90,6 +95,11 @@ func (m *Model) submitMultiline() tea.Cmd {
 		m.openReasoningEffortPicker()
 		return nil
 	}
+	// Intercept `/approval` with no args to open the approval picker.
+	if strings.EqualFold(txt, "/approval") {
+		m.openApprovalPicker()
+		return nil
+	}
 	// Intercept `/model` with no args to open picker instead of submitting
 	if txt == "/model" {
 		return m.openModelPicker()
@@ -98,6 +108,9 @@ func (m *Model) submitMultiline() tea.Cmd {
 }
 
 func (m *Model) submit(userMsg string) tea.Cmd {
+	if len(m.awaitingApprovalOps) > 0 {
+		return nil
+	}
 	m.turnInFlight = true
 	m.turnStarted = time.Now()
 	m.turnTitle = userMsg

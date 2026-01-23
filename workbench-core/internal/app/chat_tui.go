@@ -351,6 +351,27 @@ func (r *lazyNewSessionTurnRunner) RunTurn(ctx context.Context, userMsg string) 
 	return r.engine.RunTurn(ctx, userMsg)
 }
 
+func (r *lazyNewSessionTurnRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest, toolCallID string) (types.HostOpResponse, error) {
+	if r == nil || r.engine == nil {
+		return types.HostOpResponse{}, fmt.Errorf("runner not initialized")
+	}
+	return r.engine.ExecHostOp(ctx, req, toolCallID)
+}
+
+func (r *lazyNewSessionTurnRunner) ResumeTurn(ctx context.Context) (string, error) {
+	if r == nil || r.engine == nil {
+		return "", fmt.Errorf("runner not initialized")
+	}
+	return r.engine.ResumeTurn(ctx)
+}
+
+func (r *lazyNewSessionTurnRunner) AppendToolResponse(toolCallID string, resp types.HostOpResponse) {
+	if r == nil || r.engine == nil {
+		return
+	}
+	r.engine.AppendToolResponse(toolCallID, resp)
+}
+
 func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (resp string, handled bool, err error) {
 	line := strings.TrimSpace(userMsg)
 	if !strings.HasPrefix(line, "/") {
@@ -863,6 +884,11 @@ type tuiTurnRunner struct {
 
 	turn         int
 	conversation []types.LLMMessage
+	turnUserMsg  string
+
+	pendingTurnUsage    types.LLMUsage
+	pendingTurnSteps    int
+	pendingTurnDuration time.Duration
 }
 
 // ReadVFS reads a virtual filesystem path via the run's mounted VFS.
@@ -993,6 +1019,16 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 			Store: boolp(false),
 		})
 	}
+
+	r.pendingTurnUsage = types.LLMUsage{}
+	r.pendingTurnSteps = 0
+	r.pendingTurnDuration = 0
+	r.turnUserMsg = userMsg
+	return r.runThroughAgent(ctx)
+}
+
+func (r *tuiTurnRunner) runThroughAgent(ctx context.Context) (string, error) {
+	boolp := func(b bool) *bool { return &b }
 
 	var turnUsage types.LLMUsage
 	r.agent.Hooks.OnLLMUsage = func(step int, usage types.LLMUsage) {
@@ -1234,12 +1270,19 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	dur := time.Duration(0)
 
 	// Normal turn: add the user's message and run the agent.
-	r.conversation = append(r.conversation, types.LLMMessage{Role: "user", Content: userMsg})
+	r.conversation = append(r.conversation, types.LLMMessage{Role: "user", Content: r.turnUserMsg})
 	start := time.Now()
 	out, updated, stepCount, err := r.agent.RunConversation(ctx, r.conversation)
 	dur = time.Since(start)
 	steps = stepCount
 	r.conversation = updated
+
+	r.pendingTurnUsage.InputTokens += turnUsage.InputTokens
+	r.pendingTurnUsage.OutputTokens += turnUsage.OutputTokens
+	r.pendingTurnUsage.TotalTokens += turnUsage.TotalTokens
+	r.pendingTurnSteps += steps
+	r.pendingTurnDuration += dur
+
 	if err != nil {
 		// User-initiated stop should not be surfaced as an agent error event.
 		if errors.Is(err, context.Canceled) {
@@ -1256,26 +1299,30 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 
 	final = out
 
+	aggSteps := r.pendingTurnSteps
+	aggDur := r.pendingTurnDuration
+	aggUsage := r.pendingTurnUsage
+
 	r.mustEmit(context.Background(), events.Event{
 		Type:    "agent.turn.complete",
 		Message: "Agent completed user request",
 		Data: map[string]string{
 			"turn":       strconv.Itoa(r.turn),
-			"steps":      strconv.Itoa(steps),
-			"durationMs": strconv.FormatInt(dur.Milliseconds(), 10),
-			"duration":   dur.Truncate(time.Millisecond).String(),
+			"steps":      strconv.Itoa(aggSteps),
+			"durationMs": strconv.FormatInt(aggDur.Milliseconds(), 10),
+			"duration":   aggDur.Truncate(time.Millisecond).String(),
 		},
 		Store: boolp(false),
 	})
 
-	if turnUsage.TotalTokens != 0 {
+	if aggUsage.TotalTokens != 0 {
 		r.mustEmit(context.Background(), events.Event{
 			Type:    "llm.usage.total",
 			Message: "Turn usage total",
 			Data: map[string]string{
-				"input":  strconv.Itoa(turnUsage.InputTokens),
-				"output": strconv.Itoa(turnUsage.OutputTokens),
-				"total":  strconv.Itoa(turnUsage.TotalTokens),
+				"input":  strconv.Itoa(aggUsage.InputTokens),
+				"output": strconv.Itoa(aggUsage.OutputTokens),
+				"total":  strconv.Itoa(aggUsage.TotalTokens),
 			},
 			Store: boolp(false),
 		})
@@ -1283,12 +1330,12 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		// Cost estimate is optional: if pricing is unknown, emit a marker so the UI
 		// can clear stale values (and display "?" if desired).
 		pricingKnown := r.opts.PriceInPerMTokensUSD > 0 || r.opts.PriceOutPerMTokensUSD > 0
-		costUSD := estimateTurnCostUSD(turnUsage, r.opts.PriceInPerMTokensUSD, r.opts.PriceOutPerMTokensUSD)
+		costUSD := estimateTurnCostUSD(aggUsage, r.opts.PriceInPerMTokensUSD, r.opts.PriceOutPerMTokensUSD)
 		data := map[string]string{
 			"turn":         strconv.Itoa(r.turn),
-			"input":        strconv.Itoa(turnUsage.InputTokens),
-			"output":       strconv.Itoa(turnUsage.OutputTokens),
-			"total":        strconv.Itoa(turnUsage.TotalTokens),
+			"input":        strconv.Itoa(aggUsage.InputTokens),
+			"output":       strconv.Itoa(aggUsage.OutputTokens),
+			"total":        strconv.Itoa(aggUsage.TotalTokens),
 			"known":        fmtBool(pricingKnown),
 			"priceInPerM":  fmtUSD(r.opts.PriceInPerMTokensUSD),
 			"priceOutPerM": fmtUSD(r.opts.PriceOutPerMTokensUSD),
@@ -1326,7 +1373,7 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		EmitAudit:  false,
 	}).ProcessUpdate(context.Background(), r.turn, r.run.SessionID, r.run.RunId, r.model)
 
-	if _, err := store.RecordTurnInSession(r.cfg, r.run.SessionID, r.run.RunId, userMsg, final); err != nil {
+	if _, err := store.RecordTurnInSession(r.cfg, r.run.SessionID, r.run.RunId, r.turnUserMsg, final); err != nil {
 		r.mustEmit(context.Background(), events.Event{
 			Type:    "session.update.error",
 			Message: "Failed to update session state",
@@ -1342,9 +1389,44 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		})
 	}
 
+	r.pendingTurnUsage = types.LLMUsage{}
+	r.pendingTurnSteps = 0
+	r.pendingTurnDuration = 0
+	r.turnUserMsg = ""
+
 	// NOTE: Do not emit agent.final here. The TUI renders the final response as a
 	// chat message, not as an event line.
 	return final, nil
+}
+
+func (r *tuiTurnRunner) ResumeTurn(ctx context.Context) (string, error) {
+	if r.turnUserMsg == "" {
+		return "", fmt.Errorf("no turn to resume")
+	}
+	return r.runThroughAgent(ctx)
+}
+
+func (r *tuiTurnRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest, toolCallID string) (types.HostOpResponse, error) {
+	if r.agent == nil {
+		return types.HostOpResponse{}, fmt.Errorf("agent not initialized")
+	}
+	resp := r.agent.Exec.Exec(ctx, req)
+	hostRespJSON, _ := types.MarshalPretty(resp)
+	r.conversation = append(r.conversation, types.LLMMessage{
+		Role:       "tool",
+		ToolCallID: toolCallID,
+		Content:    string(hostRespJSON),
+	})
+	return resp, nil
+}
+
+func (r *tuiTurnRunner) AppendToolResponse(toolCallID string, resp types.HostOpResponse) {
+	hostRespJSON, _ := types.MarshalPretty(resp)
+	r.conversation = append(r.conversation, types.LLMMessage{
+		Role:       "tool",
+		ToolCallID: toolCallID,
+		Content:    string(hostRespJSON),
+	})
 }
 
 func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled bool) {
@@ -1603,6 +1685,44 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		default:
 			return "Usage: /reasoning effort <...> OR /reasoning summary <...>", true
 		}
+	case "approval":
+		val := strings.ToLower(strings.TrimSpace(arg))
+		if val == "" {
+			mode := strings.TrimSpace(r.opts.ApprovalsMode)
+			if mode == "" {
+				mode = "enabled"
+			}
+			r.mustEmit(context.Background(), events.Event{
+				Type:    "approvals.info",
+				Message: "Approval mode",
+				Data:    map[string]string{"mode": mode},
+			})
+			return "Approvals mode: " + mode, true
+		}
+		if val != "enabled" && val != "disabled" {
+			return "Usage: /approval <enabled|disabled>", true
+		}
+		if r.opts.ApprovalsMode == val {
+			return "Approvals mode already " + val, true
+		}
+		r.opts.ApprovalsMode = val
+		if r.agent != nil {
+			r.agent.ApprovalsMode = val
+		}
+		if r.run.Runtime == nil {
+			r.run.Runtime = &types.RunRuntimeConfig{}
+		}
+		r.run.Runtime.ApprovalsMode = val
+		_ = store.SaveRun(r.cfg, r.run)
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "approvals.changed",
+			Message: "Approval mode changed",
+			Data: map[string]string{
+				"mode": val,
+			},
+			Console: boolp(false),
+		})
+		return "Approvals mode: " + val, true
 	case "cd":
 		from := strings.TrimSpace(r.workdirBase)
 		if from == "" {
