@@ -36,8 +36,9 @@ type vfsAccessor interface {
 type eventMsg events.Event
 
 type turnDoneMsg struct {
-	final string
-	err   error
+	final          string
+	err            error
+	preserveScroll bool // when true, do not scroll transcript after turn completes
 }
 
 type fileViewMsg struct {

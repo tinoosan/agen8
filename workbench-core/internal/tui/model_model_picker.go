@@ -126,7 +126,7 @@ func (m *Model) selectModelFromPicker() tea.Cmd {
 	// Trigger the host command to persist the change and show transcript message
 	return func() tea.Msg {
 		final, err := m.runner.RunTurn(m.ctx, "/model "+selectedID)
-		return turnDoneMsg{final: final, err: err}
+		return turnDoneMsg{final: final, err: err, preserveScroll: true}
 	}
 }
 

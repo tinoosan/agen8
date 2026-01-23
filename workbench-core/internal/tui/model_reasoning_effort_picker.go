@@ -52,6 +52,6 @@ func (m *Model) selectReasoningEffortFromPicker() tea.Cmd {
 
 	return func() tea.Msg {
 		final, err := m.runner.RunTurn(m.ctx, "/reasoning effort "+val)
-		return turnDoneMsg{final: final, err: err}
+		return turnDoneMsg{final: final, err: err, preserveScroll: true}
 	}
 }

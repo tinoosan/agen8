@@ -824,7 +824,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.streamingBuf = nil
 		}
 		// Anchor the viewport at the start of the turn so the user message stays visible.
-		m.scrollToCurrentTurnStart()
+		// For silent commands (e.g., model picker), preserve the current scroll position.
+		if !msg.preserveScroll {
+			m.scrollToCurrentTurnStart()
+		}
 		m.turnTitle = ""
 		m.turnCancelRequested = false
 		return m, nil
