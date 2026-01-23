@@ -35,7 +35,7 @@ func HostOpFunctions() []types.Tool {
 			Type: "function",
 			Function: types.ToolFunction{
 				Name:        "fs_list",
-				Description: "[DIRECT - no discovery needed] List directory contents at a VFS path. Common paths: /project (user's project), /scratch (your scratch), /tools (for tool_run discovery only).",
+				Description: "[DIRECT - no discovery needed] List directory contents at a VFS path. Common paths: /project (user's project), /scratch (your scratch), /skills (skill documents), /tools (for tool_run discovery only).",
 				Strict:      true,
 				Parameters: map[string]any{
 					"type": "object",
@@ -51,7 +51,7 @@ func HostOpFunctions() []types.Tool {
 			Type: "function",
 			Function: types.ToolFunction{
 				Name:        "fs_read",
-				Description: "[DIRECT - no discovery needed] Read file contents from a VFS path.",
+				Description: "[DIRECT - no discovery needed] Read file contents from a VFS path (skills live under /skills/<skill>/SKILL.md).",
 				Strict:      true,
 				Parameters: map[string]any{
 					"type": "object",

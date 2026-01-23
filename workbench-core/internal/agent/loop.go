@@ -570,7 +570,7 @@ func agentLoopV0SystemPrompt() string {
     <mount path="/scratch">Temporary workspace for this run.</mount>
     <mount path="/log">Event log for this turn.</mount>
     <mount path="/memory">Run-scoped working memory.</mount>
-    <mount path="/skills">Agent skills (SKILL.md).</mount>
+    <mount path="/skills">These are YOUR skills. ALWAYS check /skills before /tools (SKILL.md).</mount>
     <mount path="/history">Session-scoped history (read-only).</mount>
     <mount path="/results/&lt;callId&gt;">Tool output artifacts.</mount>
   </vfs>

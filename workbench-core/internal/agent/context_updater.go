@@ -285,16 +285,24 @@ func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt strin
 
 	system := strings.TrimSpace(basePrompt)
 	if len(profileIncl) > 0 {
-		system = system + "\n\n" + "## User Profile (/profile/profile.md)\n\n" + string(profileIncl) + "\n"
+		system += buildXMLBlock("user_profile", []xmlAttribute{
+			{key: "path", value: "/profile/profile.md"},
+			{key: "bytes_included", value: strconv.Itoa(len(profileIncl))},
+			{key: "bytes_total", value: strconv.Itoa(len(profileBytes))},
+		}, string(profileIncl))
 	}
 	if len(memIncl) > 0 {
-		system = system + "\n\n" + "## Persistent Memory (/memory/memory.md)\n\n" + string(memIncl) + "\n"
+		system += buildXMLBlock("run_memory", []xmlAttribute{
+			{key: "path", value: "/memory/memory.md"},
+			{key: "bytes_included", value: strconv.Itoa(len(memIncl))},
+			{key: "bytes_total", value: strconv.Itoa(len(memBytes))},
+		}, string(memIncl))
 	}
 	if policy.LastOp != nil {
-		system = system + "\n\n" + "## Last Host Op\n\n" + summarizeLastOp(policy) + "\n"
+		system += buildXMLBlock("last_host_op", nil, summarizeLastOp(policy))
 	}
 	if strings.TrimSpace(traceSummary) != "" {
-		system = system + "\n\n" + "## Recent Ops (from /log)\n\n" + traceSummary + "\n"
+		system += buildXMLBlock("recent_ops", nil, traceSummary)
 	}
 	system = strings.TrimSpace(system)
 

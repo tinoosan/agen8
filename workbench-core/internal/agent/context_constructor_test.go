@@ -108,14 +108,14 @@ func TestContextConstructor_CachesProfileAndMemoryPerTurn(t *testing.T) {
 		t.Fatalf("expected memory.md to be read once, got %d", countMem.readsFor("memory.md"))
 	}
 
-	if !strings.Contains(out1, "## User Profile (/profile/profile.md)") || !strings.Contains(out1, "profile: remember me") {
+	if !strings.Contains(out1, `<user_profile path="/profile/profile.md"`) || !strings.Contains(out1, "profile: remember me") {
 		t.Fatalf("expected profile section in step1 prompt, got:\n%s", out1)
 	}
-	if !strings.Contains(out1, "## Run Memory (/memory/memory.md)") || !strings.Contains(out1, "memory: keep this") {
+	if !strings.Contains(out1, `<run_memory path="/memory/memory.md"`) || !strings.Contains(out1, "memory: keep this") {
 		t.Fatalf("expected memory section in step1 prompt, got:\n%s", out1)
 	}
 	// Cached sections should still be present on subsequent steps.
-	if !strings.Contains(out2, "## User Profile (/profile/profile.md)") || !strings.Contains(out2, "## Run Memory (/memory/memory.md)") {
+	if !strings.Contains(out2, "<user_profile") || !strings.Contains(out2, "<run_memory") {
 		t.Fatalf("expected cached sections in step2 prompt, got:\n%s", out2)
 	}
 }
@@ -164,10 +164,10 @@ func TestContextConstructor_AttachmentsIncludedAcrossSteps(t *testing.T) {
 		t.Fatalf("SystemPrompt step2: %v", err)
 	}
 
-	if !strings.Contains(out1, "## Referenced Files") || !strings.Contains(out1, "module example.com/foo") {
+	if !strings.Contains(out1, "<referenced_files>") || !strings.Contains(out1, "module example.com/foo") {
 		t.Fatalf("expected referenced files section in step1 prompt, got:\n%s", out1)
 	}
-	if !strings.Contains(out2, "## Referenced Files") || !strings.Contains(out2, "module example.com/foo") {
+	if !strings.Contains(out2, "<referenced_files>") || !strings.Contains(out2, "module example.com/foo") {
 		t.Fatalf("expected referenced files section in step2 prompt, got:\n%s", out2)
 	}
 }
