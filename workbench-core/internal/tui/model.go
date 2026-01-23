@@ -435,6 +435,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case fileAfterMsg:
+		callID := strings.TrimSpace(msg.callID)
+		if callID != "" && m.approvedCallIDs != nil {
+			delete(m.approvedCallIDs, callID)
+		}
 		// Best-effort: update cache and render a transcript diff/patch block.
 		opID := strings.TrimSpace(msg.opID)
 		path := strings.TrimSpace(msg.path)
@@ -477,6 +481,20 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		after := msg.text
 		m.fileSnapCache[path] = after
 		delete(m.pendingFileOpsByOpID, opID)
+		refreshFilePicker := func() {
+			if m.filePickerOpen && (strings.HasPrefix(path, "/scratch/") || strings.HasPrefix(path, "/project/")) && strings.TrimSpace(m.workdir) != "" {
+				if all, err := m.scanFilePickerPaths(m.workdir); err == nil {
+					m.filePickerAllPaths = all
+					m.filePickerWorkdir = strings.TrimSpace(m.workdir)
+					m.applyFilePickerQuery(m.filePickerQuery)
+					m.layout()
+				}
+			}
+		}
+		if msg.suppressDiff {
+			refreshFilePicker()
+			return m, nil
+		}
 
 		verb := "Updated"
 		if p.op != "fs.patch" && !p.hadBefore {
@@ -533,15 +551,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.fileChangesByPath[path] = snippet
 		m.upsertGroupedFileChanges()
-		// If the file picker is open, refresh it so newly created files appear immediately.
-		if m.filePickerOpen && (strings.HasPrefix(path, "/scratch/") || strings.HasPrefix(path, "/project/")) && strings.TrimSpace(m.workdir) != "" {
-			if all, err := m.scanFilePickerPaths(m.workdir); err == nil {
-				m.filePickerAllPaths = all
-				m.filePickerWorkdir = strings.TrimSpace(m.workdir)
-				m.applyFilePickerQuery(m.filePickerQuery)
-				m.layout()
-			}
-		}
+		refreshFilePicker()
 		return m, nil
 
 	case fileBeforeMsg:
@@ -995,6 +1005,15 @@ func (m *Model) processApproval(approve bool) tea.Cmd {
 		ctx = m.ctx
 	}
 	op := m.awaitingApprovalOps[0]
+	if approve {
+		callID := strings.TrimSpace(op.ToolCallID)
+		if callID != "" {
+			if m.approvedCallIDs == nil {
+				m.approvedCallIDs = make(map[string]bool)
+			}
+			m.approvedCallIDs[callID] = true
+		}
+	}
 	m.awaitingApprovalOps = m.awaitingApprovalOps[1:]
 
 	if approve {
@@ -1244,6 +1263,7 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	case "agent.op.response":
 		op := strings.TrimSpace(ev.Data["op"])
 		path := strings.TrimSpace(ev.Data["path"])
+		callID := strings.TrimSpace(ev.Data["callId"])
 
 		rawOpID := strings.TrimSpace(ev.Data["opId"])
 		opID := rawOpID
@@ -1298,7 +1318,8 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 			if acc, ok := m.runner.(vfsAccessor); ok {
 				return func() tea.Msg {
 					txt, _, truncated, err := acc.ReadVFS(m.ctx, path, maxDiffBytesRead)
-					return fileAfterMsg{opID: opID, op: op, path: path, text: txt, truncated: truncated, err: err}
+					suppress := callID != "" && m.approvedCallIDs != nil && m.approvedCallIDs[callID]
+					return fileAfterMsg{opID: opID, op: op, path: path, text: txt, truncated: truncated, err: err, callID: callID, suppressDiff: suppress}
 				}
 			}
 		}

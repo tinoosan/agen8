@@ -270,6 +270,8 @@ type Model struct {
 	approvalPickerSelected int
 	awaitingApprovalOps    []approvalOp
 	approvalTranscriptIdxs []int
+	// approvedCallIDs tracks ToolCallIDs that were approved so we can suppress duplicate execution diff blocks.
+	approvedCallIDs map[string]bool
 
 	// File picker state (workdir-scoped, triggered by typing '@' in input)
 	filePickerOpen     bool
@@ -350,9 +352,11 @@ type fileAfterMsg struct {
 	op   string
 	path string
 
-	text      string
-	truncated bool
-	err       error
+	text         string
+	truncated    bool
+	err          error
+	callID       string
+	suppressDiff bool
 }
 
 type fileBeforeMsg struct {
