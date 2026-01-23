@@ -119,8 +119,7 @@ func TestBuiltinShell_Exec_UserDeniesCommand(t *testing.T) {
 	if resp.Error == nil || resp.Error.Code != "command_rejected" {
 		t.Fatalf("expected command_rejected error, got %+v", resp.Error)
 	}
-	const expectedMessage = "User denied this command. This is a normal part of the workflow. Do not treat this as a system failure. You should propose an alternative command, ask the user for specialized instructions, or proceed with independent work if possible."
-	if resp.Error.Message != expectedMessage {
+	if resp.Error.Message != types.CommandRejectedErrorMessage {
 		t.Fatalf("unexpected error message: %q", resp.Error.Message)
 	}
 

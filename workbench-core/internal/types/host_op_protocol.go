@@ -31,6 +31,9 @@ const (
 	HostOpTrace = "trace"
 	// HostOpFinal ends the agent loop for a user turn.
 	HostOpFinal = "final"
+
+	CommandRejectedErrorCode    = "command_rejected"
+	CommandRejectedErrorMessage = "User denied this command. This is a normal part of the workflow. Do not treat this as a system failure. You should propose an alternative command, ask the user for specialized instructions, or proceed with independent work if possible."
 )
 
 // HostOpRequest is the minimal "host primitive" request envelope.
@@ -236,6 +239,7 @@ type HostOpResponse struct {
 	Op        string   `json:"op"`
 	Ok        bool     `json:"ok"`
 	Error     string   `json:"error,omitempty"`
+	ErrorCode string   `json:"errorCode,omitempty"`
 	Entries   []string `json:"entries,omitempty"`
 	BytesLen  int      `json:"bytesLen,omitempty"`
 	Text      string   `json:"text,omitempty"`

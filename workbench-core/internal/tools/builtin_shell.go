@@ -127,8 +127,8 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 		}
 		if !ok {
 			return ToolCallResult{}, &InvokeError{
-				Code:    "command_rejected",
-				Message: "User denied this command. This is a normal part of the workflow. Do not treat this as a system failure. You should propose an alternative command, ask the user for specialized instructions, or proceed with independent work if possible.",
+				Code:    types.CommandRejectedErrorCode,
+				Message: types.CommandRejectedErrorMessage,
 			}
 		}
 	}

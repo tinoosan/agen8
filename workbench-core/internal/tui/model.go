@@ -1023,7 +1023,12 @@ func (m *Model) processApproval(approve bool) tea.Cmd {
 			m.runner.AppendToolResponse(op.ToolCallID, resp)
 		}
 	} else {
-		resp := types.HostOpResponse{Op: op.Req.Op, Ok: false, Error: "denied"}
+		resp := types.HostOpResponse{
+			Op:        op.Req.Op,
+			Ok:        false,
+			Error:     types.CommandRejectedErrorMessage,
+			ErrorCode: types.CommandRejectedErrorCode,
+		}
 		m.runner.AppendToolResponse(op.ToolCallID, resp)
 	}
 
