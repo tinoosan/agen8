@@ -31,7 +31,6 @@ func TestBuiltinShell_Exec_CatFile_OK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewResultsResource: %v", err)
 	}
-
 	rootDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(rootDir, "hello.txt"), []byte("hello\n"), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -83,6 +82,53 @@ func TestBuiltinShell_Exec_CatFile_OK(t *testing.T) {
 	}
 }
 
+func TestBuiltinShell_Exec_UserDeniesCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.Config{DataDir: tmpDir}
+
+	_, run, err := store.CreateSession(cfg, "builtin shell denial test", 100)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	resultsStore := store.NewInMemoryResultsStore()
+
+	confirmed := false
+	inv := tools.NewBuiltinShellInvoker(tmpDir, func(ctx context.Context, argv []string, cwd string) (bool, error) {
+		confirmed = true
+		return false, nil
+	}, "")
+
+	runner := tools.Runner{
+		Results: resultsStore,
+		ToolRegistry: tools.MapRegistry{
+			types.ToolID("builtin.shell"): inv,
+		},
+	}
+
+	resp, err := runner.Run(context.Background(), types.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["ls"],"cwd":"."}`), 0)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if resp.Ok {
+		t.Fatalf("expected ok=false, got %+v", resp)
+	}
+	if !confirmed {
+		t.Fatalf("expected confirm hook to run")
+	}
+	if resp.Error == nil || resp.Error.Code != "command_rejected" {
+		t.Fatalf("expected command_rejected error, got %+v", resp.Error)
+	}
+	const expectedMessage = "User denied this command. This is a normal part of the workflow. Do not treat this as a system failure. You should propose an alternative command, ask the user for specialized instructions, or proceed with independent work if possible."
+	if resp.Error.Message != expectedMessage {
+		t.Fatalf("unexpected error message: %q", resp.Error.Message)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
+		t.Fatalf("expected no on-disk results directory")
+	}
+}
+
 func TestBuiltinShell_Exec_RejectsEscapeCwd(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
@@ -93,13 +139,6 @@ func TestBuiltinShell_Exec_RejectsEscapeCwd(t *testing.T) {
 	}
 
 	resultsStore := store.NewInMemoryResultsStore()
-	resultsRes, err := resources.NewResultsResource(resultsStore)
-	if err != nil {
-		t.Fatalf("NewResultsResource: %v", err)
-	}
-
-	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, resultsRes)
 
 	runner := tools.Runner{
 		Results: resultsStore,
