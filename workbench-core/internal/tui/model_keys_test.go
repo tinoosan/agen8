@@ -35,7 +35,8 @@ func (s stubRunner) AppendToolResponse(toolCallID string, resp types.HostOpRespo
 	_ = resp
 }
 
-func (s stubRunner) ResumeTurn(ctx context.Context) (string, error) {
+func (s stubRunner) ResumeTurn(ctx context.Context, toolOutputs []types.LLMMessage) (string, error) {
+	_ = toolOutputs
 	return s.RunTurn(ctx, "")
 }
 
@@ -122,7 +123,8 @@ func (r blockingRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest,
 	return types.HostOpResponse{Op: req.Op, Ok: true}, nil
 }
 
-func (r blockingRunner) ResumeTurn(ctx context.Context) (string, error) {
+func (r blockingRunner) ResumeTurn(ctx context.Context, toolOutputs []types.LLMMessage) (string, error) {
+	_ = toolOutputs
 	return r.RunTurn(ctx, "")
 }
 

@@ -33,7 +33,8 @@ func (r *fakeVFSRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest,
 	return types.HostOpResponse{Op: req.Op, Ok: true}, nil
 }
 
-func (r *fakeVFSRunner) ResumeTurn(ctx context.Context) (string, error) {
+func (r *fakeVFSRunner) ResumeTurn(ctx context.Context, toolOutputs []types.LLMMessage) (string, error) {
+	_ = toolOutputs
 	return r.RunTurn(ctx, "")
 }
 

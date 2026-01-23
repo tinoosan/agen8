@@ -23,7 +23,7 @@ type TurnRunner interface {
 	RunTurn(ctx context.Context, userMsg string) (final string, err error)
 	ExecHostOp(ctx context.Context, req types.HostOpRequest, toolCallID string) (types.HostOpResponse, error)
 	AppendToolResponse(toolCallID string, resp types.HostOpResponse)
-	ResumeTurn(ctx context.Context) (string, error)
+	ResumeTurn(ctx context.Context, toolOutputs []types.LLMMessage) (string, error)
 }
 
 // vfsAccessor is an optional extension interface implemented by the app TurnRunner.

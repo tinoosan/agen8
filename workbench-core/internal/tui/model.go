@@ -912,12 +912,12 @@ func (m *Model) processApproval(approve bool) tea.Cmd {
 
 	m.layout()
 	if len(m.awaitingApprovalOps) == 0 {
-		return m.resumeAfterApprovals()
+		return m.resumeAfterApprovals(nil)
 	}
 	return nil
 }
 
-func (m *Model) resumeAfterApprovals() tea.Cmd {
+func (m *Model) resumeAfterApprovals(toolOutputs []types.LLMMessage) tea.Cmd {
 	if m.turnCancel != nil {
 		m.turnCancel()
 	}
@@ -927,10 +927,7 @@ func (m *Model) resumeAfterApprovals() tea.Cmd {
 	m.turnCancelRequested = false
 	m.turnInFlight = true
 	m.turnStarted = time.Now()
-	return func() tea.Msg {
-		final, err := m.runner.ResumeTurn(turnCtx)
-		return turnDoneMsg{final: final, err: err}
-	}
+	return m.resumeTurnCmd(toolOutputs)
 }
 
 func (m Model) View() string {

@@ -358,11 +358,11 @@ func (r *lazyNewSessionTurnRunner) ExecHostOp(ctx context.Context, req types.Hos
 	return r.engine.ExecHostOp(ctx, req, toolCallID)
 }
 
-func (r *lazyNewSessionTurnRunner) ResumeTurn(ctx context.Context) (string, error) {
+func (r *lazyNewSessionTurnRunner) ResumeTurn(ctx context.Context, toolOutputs []types.LLMMessage) (string, error) {
 	if r == nil || r.engine == nil {
 		return "", fmt.Errorf("runner not initialized")
 	}
-	return r.engine.ResumeTurn(ctx)
+	return r.engine.ResumeTurn(ctx, toolOutputs)
 }
 
 func (r *lazyNewSessionTurnRunner) AppendToolResponse(toolCallID string, resp types.HostOpResponse) {
@@ -882,9 +882,9 @@ type tuiTurnRunner struct {
 	artifacts       *ArtifactIndex
 	constructor     *agent.ContextConstructor
 
-	turn         int
-	conversation []types.LLMMessage
-	turnUserMsg  string
+	turn               int
+	conversation       []types.LLMMessage
+	currentTurnUserMsg string
 
 	pendingTurnUsage    types.LLMUsage
 	pendingTurnSteps    int
@@ -1023,11 +1023,11 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	r.pendingTurnUsage = types.LLMUsage{}
 	r.pendingTurnSteps = 0
 	r.pendingTurnDuration = 0
-	r.turnUserMsg = userMsg
-	return r.runThroughAgent(ctx)
+	r.currentTurnUserMsg = userMsg
+	return r.runThroughAgent(ctx, true, nil)
 }
 
-func (r *tuiTurnRunner) runThroughAgent(ctx context.Context) (string, error) {
+func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool, toolOutputs []types.LLMMessage) (string, error) {
 	boolp := func(b bool) *bool { return &b }
 
 	var turnUsage types.LLMUsage
@@ -1269,8 +1269,13 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context) (string, error) {
 	steps := 0
 	dur := time.Duration(0)
 
-	// Normal turn: add the user's message and run the agent.
-	r.conversation = append(r.conversation, types.LLMMessage{Role: "user", Content: r.turnUserMsg})
+	// Normal turn: add the user's message (if needed), replay recorded tool outputs, and run the agent.
+	if appendUserMsg && r.currentTurnUserMsg != "" {
+		r.conversation = append(r.conversation, types.LLMMessage{Role: "user", Content: r.currentTurnUserMsg})
+	}
+	if len(toolOutputs) > 0 {
+		r.conversation = append(r.conversation, toolOutputs...)
+	}
 	start := time.Now()
 	out, updated, stepCount, err := r.agent.RunConversation(ctx, r.conversation)
 	dur = time.Since(start)
@@ -1373,7 +1378,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context) (string, error) {
 		EmitAudit:  false,
 	}).ProcessUpdate(context.Background(), r.turn, r.run.SessionID, r.run.RunId, r.model)
 
-	if _, err := store.RecordTurnInSession(r.cfg, r.run.SessionID, r.run.RunId, r.turnUserMsg, final); err != nil {
+	if _, err := store.RecordTurnInSession(r.cfg, r.run.SessionID, r.run.RunId, r.currentTurnUserMsg, final); err != nil {
 		r.mustEmit(context.Background(), events.Event{
 			Type:    "session.update.error",
 			Message: "Failed to update session state",
@@ -1392,18 +1397,18 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context) (string, error) {
 	r.pendingTurnUsage = types.LLMUsage{}
 	r.pendingTurnSteps = 0
 	r.pendingTurnDuration = 0
-	r.turnUserMsg = ""
+	r.currentTurnUserMsg = ""
 
 	// NOTE: Do not emit agent.final here. The TUI renders the final response as a
 	// chat message, not as an event line.
 	return final, nil
 }
 
-func (r *tuiTurnRunner) ResumeTurn(ctx context.Context) (string, error) {
-	if r.turnUserMsg == "" {
+func (r *tuiTurnRunner) ResumeTurn(ctx context.Context, toolOutputs []types.LLMMessage) (string, error) {
+	if r.currentTurnUserMsg == "" {
 		return "", fmt.Errorf("no turn to resume")
 	}
-	return r.runThroughAgent(ctx)
+	return r.runThroughAgent(ctx, false, toolOutputs)
 }
 
 func (r *tuiTurnRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest, toolCallID string) (types.HostOpResponse, error) {
