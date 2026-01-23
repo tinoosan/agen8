@@ -101,6 +101,8 @@ type Model struct {
 	transcriptItems         []transcriptItem
 	transcriptItemStartLine []int
 	lastTurnUserItemIdx     int
+	currentActionGroupIdx   int
+	currentActionCategory   string
 
 	// Streaming (Phase 1): inline incremental agent output for the current turn.
 	streamingItemIdx int
@@ -218,6 +220,7 @@ type Model struct {
 	styleTelemetry     lipgloss.Style
 	styleOutcome       lipgloss.Style
 	styleError         lipgloss.Style
+	styleBold          lipgloss.Style
 
 	styleInputBox            lipgloss.Style
 	styleComposerCardFocused lipgloss.Style
@@ -271,10 +274,19 @@ const (
 	transcriptUser
 	transcriptAgent
 	transcriptThinking
-	transcriptAction
+	transcriptActionGroup
 	transcriptError
 	transcriptFileChange
 )
+
+type groupedAction struct {
+	// text is the rendered description shown inside a category bucket.
+	text string
+	// status is a short completion marker ("✓" or "✗").
+	status string
+	// isError controls the styling of the status marker.
+	isError bool
+}
 
 type transcriptItem struct {
 	kind transcriptItemKind
@@ -283,15 +295,13 @@ type transcriptItem struct {
 	text string
 
 	// For action lines.
-	actionText        string
-	actionCompletion  string
-	actionIsToolRun   bool
-	actionIsCompleted bool
+	groupHeader string
+	groupItems  []groupedAction
 }
 
 type pendingAction struct {
-	idx       int
-	isToolRun bool
+	groupIdx  int
+	actionIdx int
 }
 
 const maxDiffBytesRead = 128 * 1024

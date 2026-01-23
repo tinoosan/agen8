@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/atotto/clipboard"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/aymanbagabas/go-osc52/v2"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // transcriptForClipboard renders the current transcript timeline into plain text/markdown
@@ -48,12 +48,23 @@ func (m Model) transcriptForClipboard() string {
 			writeBlock("Assistant", it.text)
 		case transcriptThinking:
 			writeBlock("Thinking", it.text)
-		case transcriptAction:
-			body := strings.TrimSpace(it.actionText)
-			if strings.TrimSpace(it.actionCompletion) != "" {
-				body = strings.TrimSpace(body) + "\n" + strings.TrimSpace(it.actionCompletion)
+		case transcriptActionGroup:
+			header := strings.TrimSpace(it.groupHeader)
+			if header == "" {
+				header = "Action"
 			}
-			writeBlock("Action", body)
+			actionLines := make([]string, 0, len(it.groupItems))
+			for _, item := range it.groupItems {
+				line := strings.TrimSpace(item.text)
+				if line == "" {
+					continue
+				}
+				if item.status != "" {
+					line += " " + item.status
+				}
+				actionLines = append(actionLines, line)
+			}
+			writeBlock(header, strings.Join(actionLines, "\n"))
 		case transcriptFileChange:
 			// Already markdown; preserve as-is.
 			writeBlock("", it.text)
@@ -107,4 +118,3 @@ func copyToClipboardCmd(text string) tea.Cmd {
 		return clipboardDoneMsg{err: err}
 	}
 }
-

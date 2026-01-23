@@ -114,6 +114,7 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 
 	m.pendingActionsByOpID = make(map[string]pendingAction)
 	m.pendingFileOpsByOpID = make(map[string]pendingFileOp)
+	m.resetActionGroupState()
 	m.fileChangesItemIdx = -1
 	m.fileChangesByPath = make(map[string]string)
 	m.fileChangesOrder = nil

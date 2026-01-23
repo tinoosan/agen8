@@ -492,6 +492,36 @@ func renderOpResponse(d map[string]string) string {
 	}
 }
 
+func actionStatusIcon(d map[string]string) (string, bool) {
+	ok := strings.TrimSpace(d["ok"])
+	if ok == "" || ok == "true" {
+		return "✓", false
+	}
+	return "✗", true
+}
+
+func actionCategory(op, toolID string) string {
+	switch strings.TrimSpace(op) {
+	case "fs.list", "fs.read":
+		return "Explored"
+	case "fs.write", "fs.edit", "fs.patch", "fs.append":
+		return "Updated"
+	case "shell_exec":
+		return "Ran"
+	case "http_fetch":
+		return "Called"
+	case "trace":
+		return "Traced"
+	case "tool.run":
+		if strings.TrimSpace(toolID) == "builtin.shell" {
+			return "Ran"
+		}
+		return "Called"
+	default:
+		return "Action"
+	}
+}
+
 func renderTurnComplete(d map[string]string) string {
 	turn := strings.TrimSpace(d["turn"])
 	steps := strings.TrimSpace(d["steps"])

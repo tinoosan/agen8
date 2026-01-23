@@ -24,6 +24,10 @@ func (m *Model) addTranscriptItem(it transcriptItem) {
 	wasAtBottom := m.transcript.AtBottom()
 	wasEmpty := len(m.transcriptItems) == 0
 
+	if it.kind != transcriptActionGroup {
+		m.resetActionGroupState()
+	}
+
 	m.transcriptItems = append(m.transcriptItems, it)
 	m.rebuildTranscript()
 	// If the user was at the bottom, keep them there (chat behavior). Otherwise,
@@ -133,25 +137,32 @@ func (m *Model) rebuildTranscript() {
 		case transcriptError:
 			lines = append(lines, m.styleError.Render(wrapText(it.text, max(20, w-4))))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-		case transcriptAction:
-			line := ""
-			if it.actionIsToolRun {
-				// Tool run: render as " $ command" with a brighter color for the command.
-				// This matches standard terminal aesthetics.
-				prefix := m.styleDim.Render(" $ ")
-				// Use the agent text color (usually white/bright) for the command itself so it stands out.
-				cmd := m.styleAgent.Render(wrapText(it.actionText, max(20, w-12)))
-				line = prefix + cmd
-				if it.actionIsCompleted && strings.TrimSpace(it.actionCompletion) != "" {
-					line += "  " + m.styleDim.Render(strings.TrimSpace(it.actionCompletion))
-				}
-			} else {
-				// Generic action (e.g. "Attached files").
-				prefix := m.styleAction.Render("• ")
-				line = prefix + m.styleAction.Render(wrapText(it.actionText, max(20, w-12)))
+		case transcriptActionGroup:
+			header := strings.TrimSpace(it.groupHeader)
+			if header == "" {
+				header = "Action"
 			}
-			lines = append(lines, line)
-			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
+			lines = append(lines, m.styleBold.Render("• "+header))
+			lineNo++
+
+			for i, item := range it.groupItems {
+				connector := "├"
+				if i == len(it.groupItems)-1 {
+					connector = "└"
+				}
+				actionW := max(20, w-12)
+				content := wrapText(strings.TrimSpace(item.text), actionW)
+				line := m.styleDim.Render(connector+" ") + m.styleAction.Render(content)
+				if item.status != "" {
+					style := m.styleDim
+					if item.isError {
+						style = m.styleError
+					}
+					line += " " + style.Render(item.status)
+				}
+				lines = append(lines, line)
+				lineNo += 1 + strings.Count(line, "\n")
+			}
 		case transcriptFileChange:
 			raw := strings.TrimSpace(it.text)
 			// Grouped file-changes block: render each file entry using the same

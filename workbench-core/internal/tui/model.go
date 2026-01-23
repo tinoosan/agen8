@@ -179,6 +179,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 		styleError: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#ff5f5f")).
 			Bold(true),
+		styleBold: lipgloss.NewStyle().Bold(true),
 
 		styleInputBox: lipgloss.NewStyle().
 			Padding(0, 1).
@@ -207,8 +208,9 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 		styleHint: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#707070")),
 
-		renderer: newContentRenderer(),
-		focus:    focusInput,
+		currentActionGroupIdx: -1,
+		renderer:              newContentRenderer(),
+		focus:                 focusInput,
 	}
 
 	m.fileChangesItemIdx = -1
@@ -821,8 +823,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.streamingItemIdx = -1
 			m.streamingBuf = nil
 		}
-		// Keep user at the bottom to see the final response (don't scroll to turn start).
-		m.transcript.GotoBottom()
+		// Anchor the viewport at the start of the turn so the user message stays visible.
+		m.scrollToCurrentTurnStart()
 		m.turnTitle = ""
 		m.turnCancelRequested = false
 		return m, nil
@@ -1060,20 +1062,14 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		if txt == "" {
 			return beforeCmd
 		}
-		isToolRun := strings.TrimSpace(ev.Data["op"]) == "tool.run"
+		category := actionCategory(op, strings.TrimSpace(ev.Data["toolId"]))
+		groupIdx, actionIdx := m.addGroupedAction(category, groupedAction{text: txt})
 		if m.pendingActionsByOpID == nil {
 			m.pendingActionsByOpID = make(map[string]pendingAction)
 		}
-		idx := len(m.transcriptItems)
-		m.addTranscriptItem(transcriptItem{
-			kind:            transcriptAction,
-			actionText:      txt,
-			actionIsToolRun: isToolRun,
-		})
-		m.pendingActionsByOpID[opID] = pendingAction{idx: idx, isToolRun: isToolRun}
+		m.pendingActionsByOpID[opID] = pendingAction{groupIdx: groupIdx, actionIdx: actionIdx}
 		return beforeCmd
 	case "agent.op.response":
-		comp := strings.TrimSpace(rr.Text)
 		op := strings.TrimSpace(ev.Data["op"])
 		path := strings.TrimSpace(ev.Data["path"])
 
@@ -1083,29 +1079,34 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 			opID = m.findPendingFileOpIDByPath(path)
 		}
 
+		status, isError := actionStatusIcon(ev.Data)
+		statusHandled := false
 		if opID != "" && m.pendingActionsByOpID != nil {
-			if pa, ok := m.pendingActionsByOpID[opID]; ok && pa.idx >= 0 && pa.idx < len(m.transcriptItems) {
-				it := m.transcriptItems[pa.idx]
-				if it.kind == transcriptAction && !it.actionIsCompleted {
-					it.actionCompletion = comp
-					it.actionIsCompleted = true
-					m.transcriptItems[pa.idx] = it
-				}
+			if pa, ok := m.pendingActionsByOpID[opID]; ok {
+				statusHandled = m.markGroupedActionCompleted(pa.groupIdx, pa.actionIdx, status, isError)
 				delete(m.pendingActionsByOpID, opID)
 			}
-		} else {
-			// Back-compat: if we can't correlate, mark the most recent incomplete action.
-			for i := len(m.transcriptItems) - 1; i >= 0; i-- {
+		}
+		if !statusHandled {
+			for i := len(m.transcriptItems) - 1; i >= 0 && !statusHandled; i-- {
 				it := m.transcriptItems[i]
-				if it.kind == transcriptAction && !it.actionIsCompleted {
-					it.actionCompletion = comp
-					it.actionIsCompleted = true
-					m.transcriptItems[i] = it
+				if it.kind != transcriptActionGroup {
+					continue
+				}
+				for j := len(it.groupItems) - 1; j >= 0; j-- {
+					if it.groupItems[j].status != "" {
+						continue
+					}
+					statusHandled = m.markGroupedActionCompleted(i, j, status, isError)
+					if statusHandled {
+						break
+					}
+				}
+				if statusHandled {
 					break
 				}
 			}
 		}
-		m.rebuildTranscript()
 
 		// If this was a successful file op, read the resulting file content so we can
 		// render a diff/patch preview in the transcript.
@@ -1141,16 +1142,13 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 			return nil
 		}
-		comp := "✓ ok"
+		status := ""
+		isError := false
 		if ev.Type == "refs.ambiguous" || ev.Type == "refs.unresolved" {
-			comp = "✗"
+			status = "✗"
+			isError = true
 		}
-		m.addTranscriptItem(transcriptItem{
-			kind:              transcriptAction,
-			actionText:        txt,
-			actionCompletion:  comp,
-			actionIsCompleted: true,
-		})
+		m.addGroupedAction("Action", groupedAction{text: txt, status: status, isError: isError})
 		return nil
 	}
 }
@@ -1223,6 +1221,88 @@ func (m *Model) upsertGroupedFileChanges() {
 	if wasAtBottom {
 		m.transcript.GotoBottom()
 	}
+}
+
+func (m *Model) resetActionGroupState() {
+	if m == nil {
+		return
+	}
+	m.currentActionGroupIdx = -1
+	m.currentActionCategory = ""
+}
+
+func (m *Model) addGroupedAction(category string, action groupedAction) (int, int) {
+	if m == nil {
+		return -1, -1
+	}
+	category = strings.TrimSpace(category)
+	if category == "" {
+		category = "Action"
+	}
+	if m.currentActionGroupIdx >= 0 && m.currentActionCategory == category {
+		return m.appendToCurrentActionGroup(action)
+	}
+	return m.startNewActionGroup(category, action)
+}
+
+func (m *Model) appendToCurrentActionGroup(action groupedAction) (int, int) {
+	if m == nil {
+		return -1, -1
+	}
+	if m.currentActionGroupIdx < 0 || m.currentActionGroupIdx >= len(m.transcriptItems) {
+		return m.startNewActionGroup(m.currentActionCategory, action)
+	}
+	it := m.transcriptItems[m.currentActionGroupIdx]
+	it.groupItems = append(it.groupItems, action)
+	actionIdx := len(it.groupItems) - 1
+	m.transcriptItems[m.currentActionGroupIdx] = it
+	wasAtBottom := m.transcript.AtBottom()
+	m.rebuildTranscript()
+	if wasAtBottom {
+		m.transcript.GotoBottom()
+	}
+	return m.currentActionGroupIdx, actionIdx
+}
+
+func (m *Model) startNewActionGroup(category string, action groupedAction) (int, int) {
+	if m == nil {
+		return -1, -1
+	}
+	m.resetActionGroupState()
+	m.currentActionCategory = category
+	it := transcriptItem{
+		kind:        transcriptActionGroup,
+		groupHeader: category,
+		groupItems:  []groupedAction{action},
+	}
+	m.addTranscriptItem(it)
+	idx := len(m.transcriptItems) - 1
+	m.currentActionGroupIdx = idx
+	return idx, 0
+}
+
+func (m *Model) markGroupedActionCompleted(groupIdx, actionIdx int, status string, isError bool) bool {
+	if m == nil {
+		return false
+	}
+	if groupIdx < 0 || groupIdx >= len(m.transcriptItems) {
+		return false
+	}
+	it := m.transcriptItems[groupIdx]
+	if it.kind != transcriptActionGroup || actionIdx < 0 || actionIdx >= len(it.groupItems) {
+		return false
+	}
+	item := it.groupItems[actionIdx]
+	item.status = status
+	item.isError = isError
+	it.groupItems[actionIdx] = item
+	m.transcriptItems[groupIdx] = it
+	wasAtBottom := m.transcript.AtBottom()
+	m.rebuildTranscript()
+	if wasAtBottom {
+		m.transcript.GotoBottom()
+	}
+	return true
 }
 
 func (m *Model) findPendingFileOpIDByPath(path string) string {
