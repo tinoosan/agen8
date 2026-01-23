@@ -447,12 +447,27 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case fileAfterMsg:
 		callID := strings.TrimSpace(msg.callID)
+		opID := strings.TrimSpace(msg.opID)
+		path := strings.TrimSpace(msg.path)
+		hasApprovalRecord := callID != "" && m.hasApprovalRecord(callID)
 		if callID != "" && m.approvedCallIDs != nil {
 			delete(m.approvedCallIDs, callID)
 		}
+		if !msg.suppressDiff && hasApprovalRecord {
+			msg.suppressDiff = true
+		}
+		if path != "" && m.approvedFileOpsByPath != nil {
+			if count, ok := m.approvedFileOpsByPath[path]; ok && count > 0 {
+				msg.suppressDiff = true
+				remaining := count - 1
+				if remaining == 0 {
+					delete(m.approvedFileOpsByPath, path)
+				} else {
+					m.approvedFileOpsByPath[path] = remaining
+				}
+			}
+		}
 		// Best-effort: update cache and render a transcript diff/patch block.
-		opID := strings.TrimSpace(msg.opID)
-		path := strings.TrimSpace(msg.path)
 		if path == "" || msg.err != nil {
 			return m, nil
 		}
@@ -961,10 +976,12 @@ func (m *Model) appendApprovalTranscriptItems() {
 	for _, op := range m.awaitingApprovalOps {
 		reqCopy := op.Req
 		item := transcriptItem{
-			kind:           transcriptApprovalRequest,
-			approvalOp:     &reqCopy,
-			approvalDiff:   strings.TrimSpace(op.Diff),
-			approvalStatus: "pending",
+			kind:            transcriptApprovalRequest,
+			approvalOp:      &reqCopy,
+			approvalDiff:    strings.TrimSpace(op.Diff),
+			approvalStatus:  "pending",
+			approvalPending: true,
+			approvalCallID:  strings.TrimSpace(op.ToolCallID),
 		}
 		m.addTranscriptItem(item)
 		m.approvalTranscriptIdxs = append(m.approvalTranscriptIdxs, len(m.transcriptItems)-1)
@@ -1031,6 +1048,7 @@ func (m *Model) processApproval(approve bool) tea.Cmd {
 		it := m.transcriptItems[idx]
 		if it.kind == transcriptApprovalRequest {
 			it.approvalStatus = status
+			it.approvalPending = false
 			m.transcriptItems[idx] = it
 			wasAtBottom := m.transcript.AtBottom()
 			m.rebuildTranscript()
@@ -1051,6 +1069,12 @@ func (m *Model) processApproval(approve bool) tea.Cmd {
 				m.approvedCallIDs = make(map[string]bool)
 			}
 			m.approvedCallIDs[callID] = true
+		}
+		if path := strings.TrimSpace(op.Req.Path); path != "" && isFileModificationOp(op.Req.Op) {
+			if m.approvedFileOpsByPath == nil {
+				m.approvedFileOpsByPath = make(map[string]int)
+			}
+			m.approvedFileOpsByPath[path]++
 		}
 	}
 	m.awaitingApprovalOps = m.awaitingApprovalOps[1:]
@@ -1260,6 +1284,10 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		}
 		op := strings.TrimSpace(ev.Data["op"])
 		path := strings.TrimSpace(ev.Data["path"])
+		callID := strings.TrimSpace(ev.Data["callId"])
+		if callID != "" && op != "" && path != "" {
+			m.setApprovalCallID(op, path, callID)
+		}
 		var beforeCmd tea.Cmd
 		if (op == "fs.write" || op == "fs.append" || op == "fs.edit" || op == "fs.patch") && path != "" {
 			if m.fileSnapCache == nil {
@@ -1549,6 +1577,74 @@ func (m *Model) markGroupedActionCompleted(groupIdx, actionIdx int, status strin
 		m.transcript.GotoBottom()
 	}
 	return true
+}
+
+func (m *Model) hasApprovalRecord(callID string) bool {
+	if m == nil {
+		return false
+	}
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return false
+	}
+	for i := len(m.transcriptItems) - 1; i >= 0; i-- {
+		it := m.transcriptItems[i]
+		if it.kind != transcriptApprovalRequest {
+			continue
+		}
+		if strings.TrimSpace(it.approvalCallID) == callID {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) setApprovalCallID(op, path, callID string) {
+	if m == nil {
+		return
+	}
+	op = strings.TrimSpace(op)
+	path = strings.TrimSpace(path)
+	callID = strings.TrimSpace(callID)
+	if op == "" || path == "" || callID == "" {
+		return
+	}
+
+	// Update awaiting approvals so approval/denial events carry the correct callId.
+	for i := range m.awaitingApprovalOps {
+		req := &m.awaitingApprovalOps[i]
+		if strings.TrimSpace(req.ToolCallID) != "" {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(req.Req.Op), op) && strings.TrimSpace(req.Req.Path) == path {
+			req.ToolCallID = callID
+			break
+		}
+	}
+
+	// Update transcript approval items so suppression can match by callId.
+	updated := false
+	for i := range m.transcriptItems {
+		it := m.transcriptItems[i]
+		if it.kind != transcriptApprovalRequest || strings.TrimSpace(it.approvalCallID) != "" {
+			continue
+		}
+		if it.approvalOp == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(it.approvalOp.Op), op) && strings.TrimSpace(it.approvalOp.Path) == path {
+			it.approvalCallID = callID
+			m.transcriptItems[i] = it
+			updated = true
+		}
+	}
+	if updated {
+		wasAtBottom := m.transcript.AtBottom()
+		m.rebuildTranscript()
+		if wasAtBottom {
+			m.transcript.GotoBottom()
+		}
+	}
 }
 
 func (m *Model) findPendingFileOpIDByPath(path string) string {

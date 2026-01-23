@@ -264,6 +264,45 @@ func (m *Model) rebuildTranscript() {
 			lines = append(lines, m.styleFileChangeBox.Render(rendered))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptApprovalRequest:
+			diffContent := strings.TrimSpace(it.approvalDiff)
+			if diffContent != "" {
+				path := ""
+				if it.approvalOp != nil {
+					path = strings.TrimSpace(it.approvalOp.Path)
+				}
+				displayPath := strings.TrimPrefix(path, "/")
+				if strings.TrimSpace(displayPath) == "" {
+					displayPath = strings.TrimSpace(path)
+				}
+				added, deleted, hasCounts := approvalPreviewCounts(diffContent)
+				headerRendered := renderFileChangeHeaderLine(displayPath, added, deleted, hasCounts, fileInnerW)
+				bodyRendered := strings.Trim(m.renderer.RenderMarkdown(diffContent, fileInnerW), "\n")
+				if bodyRendered == "" {
+					bodyRendered = "_(no preview available)_"
+				}
+
+				statusText := "⏳ Waiting for approval..."
+				statusStyle := m.styleDim
+				switch strings.ToLower(strings.TrimSpace(it.approvalStatus)) {
+				case "approved":
+					statusText = "✅ Approved"
+					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950")).Bold(true)
+				case "denied":
+					statusText = "❌ Denied"
+					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Bold(true)
+				}
+
+				content := headerRendered
+				if bodyRendered != "" {
+					content += "\n" + bodyRendered
+				}
+				content = strings.TrimRight(content, "\n")
+				content += "\n" + statusStyle.Render(statusText)
+				lines = append(lines, m.styleFileChangeBox.Render(content))
+				lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
+				break
+			}
+
 			var req types.HostOpRequest
 			if it.approvalOp != nil {
 				req = *it.approvalOp
@@ -288,7 +327,6 @@ func (m *Model) rebuildTranscript() {
 			if strings.TrimSpace(desc) != "" {
 				bodyParts = append(bodyParts, desc)
 			}
-			diffContent := strings.TrimSpace(it.approvalDiff)
 			if diffContent != "" {
 				bodyParts = append(bodyParts, diffContent)
 			}
@@ -486,4 +524,33 @@ func truncateRight(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-1] + "…"
+}
+
+func approvalPreviewCounts(diff string) (int, int, bool) {
+	preview := stripDiffFences(diff)
+	if preview == "" {
+		return 0, 0, false
+	}
+	added, deleted := diffStat(preview)
+	return added, deleted, added != 0 || deleted != 0
+}
+
+func stripDiffFences(diff string) string {
+	s := strings.TrimSpace(diff)
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "```") {
+		if idx := strings.Index(s, "\n"); idx >= 0 {
+			s = s[idx+1:]
+		} else {
+			return ""
+		}
+	}
+	if idx := strings.LastIndex(s, "\n```"); idx >= 0 {
+		s = s[:idx]
+	} else if strings.HasSuffix(s, "```") {
+		s = strings.TrimSuffix(s, "```")
+	}
+	return strings.Trim(s, "\n")
 }

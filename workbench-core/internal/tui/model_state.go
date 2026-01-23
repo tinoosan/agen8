@@ -288,6 +288,8 @@ type Model struct {
 	approvalTranscriptIdxs []int
 	// approvedCallIDs tracks ToolCallIDs that were approved so we can suppress duplicate execution diff blocks.
 	approvedCallIDs map[string]bool
+	// approvedFileOpsByPath tracks approved operations per path awaiting diff suppression.
+	approvedFileOpsByPath map[string]int
 
 	// File picker state (workdir-scoped, triggered by typing '@' in input)
 	filePickerOpen     bool
@@ -337,9 +339,11 @@ type transcriptItem struct {
 	groupItems  []groupedAction
 
 	// For approval requests.
-	approvalOp     *types.HostOpRequest
-	approvalDiff   string
-	approvalStatus string
+	approvalOp      *types.HostOpRequest
+	approvalDiff    string
+	approvalStatus  string
+	approvalPending bool
+	approvalCallID  string
 }
 
 type pendingAction struct {
