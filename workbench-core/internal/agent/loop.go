@@ -574,6 +574,16 @@ func agentLoopV0SystemPrompt() string {
     <mount path="/history">Session-scoped history (read-only).</mount>
     <mount path="/results/&lt;callId&gt;">Tool output artifacts.</mount>
   </vfs>
+  <skill_creation>
+    You can create reusable skills when you notice repeatable patterns. Write a SKILL.md file using YAML front matter (name & description) followed by markdown instructions and supporting sections.
+    1. Start a skill by writing the SKILL.md file:
+       fs.write("/skills/my-skill/SKILL.md", "---\nname: My Skill\ndescription: Brief summary\n---\n# Instructions\nDescribe when and how to run this skill.\n")
+    2. Update or extend a skill with fs.append when needed, or add optional helpers:
+       - scripts/: executable helpers
+       - examples/: reference implementations
+       - resources/: templates or assets
+    Skills appear in <available_skills> after creation and you can inspect /skills/skill-template/SKILL.md for a starter layout.
+  </skill_creation>
   <operating_rules>
     <rule id="stop">Call final_answer only once the overarching goal is complete; plain assistant text without tool calls is treated as final output when finished.</rule>
     <rule id="path_resolution">Shell commands should use relative paths (e.g. ./src) with the project root as cwd; fs_* tools still expect absolute VFS paths.</rule>

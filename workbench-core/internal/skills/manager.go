@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/internal/vfsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,6 +27,8 @@ type SkillEntry struct {
 // Manager discovers skills on disk and caches their metadata.
 type Manager struct {
 	roots []string
+	// WritableRoot is the directory where new/updated skills are persisted.
+	WritableRoot string
 	// entries maps directory name -> skill metadata.
 	entries map[string]*Skill
 }
@@ -177,4 +181,63 @@ func extractFrontMatter(data []byte) ([]byte, bool, error) {
 			return nil, false, nil
 		}
 	}
+}
+
+// AddSkill writes the provided SKILL.md contents and refreshes the registry.
+func (m *Manager) AddSkill(name, skillMd string) error {
+	if m == nil {
+		return fmt.Errorf("skills manager is required")
+	}
+
+	target, err := m.resolveWritablePath(name, "SKILL.md")
+	if err != nil {
+		return err
+	}
+
+	parent := filepath.Dir(target)
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", parent, err)
+	}
+	if err := fsutil.WriteFileAtomic(target, []byte(skillMd), 0644); err != nil {
+		return fmt.Errorf("write %s: %w", target, err)
+	}
+	return m.Scan()
+}
+
+func (m *Manager) resolveWritablePath(skillName, relPath string) (string, error) {
+	root := strings.TrimSpace(m.WritableRoot)
+	if root == "" {
+		return "", fmt.Errorf("skills writable root is not configured")
+	}
+	sanitized, err := sanitizeSkillName(skillName)
+	if err != nil {
+		return "", err
+	}
+	skillBase, err := vfsutil.SafeJoinBaseDir(root, sanitized)
+	if err != nil {
+		return "", fmt.Errorf("skill directory %s: %w", sanitized, err)
+	}
+	cleanRel := strings.TrimLeft(relPath, "/")
+	if cleanRel == "" || cleanRel == "." {
+		return "", fmt.Errorf("relative path under %s is required", sanitized)
+	}
+	target, err := vfsutil.SafeJoinBaseDir(skillBase, cleanRel)
+	if err != nil {
+		return "", fmt.Errorf("skill path %s: %w", cleanRel, err)
+	}
+	return target, nil
+}
+
+func sanitizeSkillName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("skill name is required")
+	}
+	if name == "." || name == ".." {
+		return "", fmt.Errorf("invalid skill name %q", name)
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return "", fmt.Errorf("invalid skill name %q", name)
+	}
+	return name, nil
 }

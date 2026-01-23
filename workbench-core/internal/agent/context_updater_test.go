@@ -185,7 +185,7 @@ func TestContextUpdater_FiltersTraceEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSystemPrompt: %v", err)
 	}
-	if !strings.Contains(system, "## Recent Ops (from /log)") {
+	if !strings.Contains(system, "<recent_ops>") {
 		t.Fatalf("expected trace summary section, got:\n%s", system)
 	}
 	if strings.Contains(system, "irrelevant.event") {

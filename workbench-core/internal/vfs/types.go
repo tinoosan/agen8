@@ -18,6 +18,9 @@ const (
 	// The agent can poll /log/events.since/<offset> for new events.
 	MountLog = "log"
 
+	// MountSkills exposes the user-defined skill directories under /skills.
+	MountSkills = "skills"
+
 	// MountTools is the mount name for tool discovery and manifests.
 	// fs.List("/tools") returns tool IDs; fs.Read("/tools/<id>") returns JSON manifest bytes.
 	MountTools = "tools"

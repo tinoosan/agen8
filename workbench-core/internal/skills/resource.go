@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
@@ -75,14 +76,53 @@ func (r *SkillsResource) Read(path string) ([]byte, error) {
 	return b, nil
 }
 
-// Write is not supported for skills (read-only).
 func (r *SkillsResource) Write(path string, data []byte) error {
-	return fmt.Errorf("skills resource is read-only")
+	if r.manager == nil {
+		return fmt.Errorf("skills manager is required")
+	}
+	skill, relPath, err := parseSkillResourcePath(path)
+	if err != nil {
+		return err
+	}
+	target, err := r.manager.resolveWritablePath(skill, relPath)
+	if err != nil {
+		return err
+	}
+	parent := filepath.Dir(target)
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", parent, err)
+	}
+	if err := fsutil.WriteFileAtomic(target, data, 0644); err != nil {
+		return fmt.Errorf("write %s: %w", target, err)
+	}
+	return r.rescan()
 }
 
-// Append is not supported for skills (read-only).
 func (r *SkillsResource) Append(path string, data []byte) error {
-	return fmt.Errorf("skills resource is read-only")
+	if r.manager == nil {
+		return fmt.Errorf("skills manager is required")
+	}
+	skill, relPath, err := parseSkillResourcePath(path)
+	if err != nil {
+		return err
+	}
+	target, err := r.manager.resolveWritablePath(skill, relPath)
+	if err != nil {
+		return err
+	}
+	parent := filepath.Dir(target)
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", parent, err)
+	}
+	f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("append %s: %w", target, err)
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("append %s: %w", target, err)
+	}
+	return r.rescan()
 }
 
 func (r *SkillsResource) listNamespaces() ([]vfs.Entry, error) {
@@ -146,6 +186,33 @@ func (r *SkillsResource) listSkillDir(dir, subpath string) ([]vfs.Entry, error) 
 	}
 
 	return out, nil
+}
+
+func (r *SkillsResource) rescan() error {
+	if err := r.manager.Scan(); err != nil {
+		return fmt.Errorf("refresh skills: %w", err)
+	}
+	return nil
+}
+
+func parseSkillResourcePath(path string) (string, string, error) {
+	path = strings.Trim(path, "/")
+	if path == "" {
+		return "", "", fmt.Errorf("path is required")
+	}
+	parts := strings.SplitN(path, "/", 2)
+	if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
+		return "", "", fmt.Errorf("path must target a file under /skills/<name>/<file>")
+	}
+	skill, err := sanitizeSkillName(parts[0])
+	if err != nil {
+		return "", "", err
+	}
+	rel := strings.TrimLeft(parts[1], "/")
+	if rel == "" || rel == "." {
+		return "", "", fmt.Errorf("file path required under /skills/%s", skill)
+	}
+	return skill, rel, nil
 }
 
 func (m *Manager) SkillDirs() []string {

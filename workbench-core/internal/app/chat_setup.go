@@ -112,6 +112,7 @@ func setupTUIChatRuntime(
 		workdirSkillDir,
 	}
 	skillMgr := skills.NewManager(skillRoots)
+	skillMgr.WritableRoot = skillDir
 	if err := skillMgr.Scan(); err != nil {
 		return nil, fmt.Errorf("scan skills: %w", err)
 	}
@@ -132,7 +133,7 @@ func setupTUIChatRuntime(
 			"roots": skillRoots,
 		})
 	}
-	fs.Mount("skills", skills.NewResource(skillMgr))
+	fs.Mount(vfs.MountSkills, skills.NewResource(skillMgr))
 
 	// Pull resource handles back out for wiring and debug data.
 	_, wsr, _, _ := fs.Resolve("/" + vfs.MountScratch)
@@ -150,15 +151,15 @@ func setupTUIChatRuntime(
 		Type:    "host.mounted",
 		Message: "Mounted VFS resources",
 		Data: map[string]string{
-			"/scratch": workspace.BaseDir,
-			"/project": workdirRes.BaseDir,
-			"/results": "(virtual)",
-			"/log":     traceRes.BaseDir,
-			"/tools":   "(virtual)",
-			"/memory":  "(virtual)",
-			"/profile": "(global)",
-			"/history": historyRes.BaseDir,
-			"/skills":  "(virtual)",
+			"/scratch":            workspace.BaseDir,
+			"/project":            workdirRes.BaseDir,
+			"/results":            "(virtual)",
+			"/log":                traceRes.BaseDir,
+			"/tools":              "(virtual)",
+			"/memory":             "(virtual)",
+			"/profile":            "(global)",
+			"/history":            historyRes.BaseDir,
+			"/" + vfs.MountSkills: "(virtual)",
 		},
 		Console: boolPtr(false),
 	})
