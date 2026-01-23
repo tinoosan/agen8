@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/atref"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/internal/tui/kit"
 )
 
 // filePickerItem implements list.Item for the file picker.
@@ -61,7 +62,7 @@ func (d filePickerDelegate) Render(w io.Writer, m list.Model, index int, item li
 
 	// Keep line within list width.
 	maxW := max(1, m.Width()-lipgloss.Width(prefix))
-	line := truncateRight(it.rel, maxW)
+	line := kit.TruncateRight(it.rel, maxW)
 	_, _ = fmt.Fprint(w, style.Render(prefix+line))
 }
 
@@ -224,12 +225,12 @@ func (m *Model) applyFilePickerQuery(q string) {
 	// Surface the active query since the underlying input is hidden by the modal.
 	title := "Select File"
 	if strings.TrimSpace(m.filePickerQuery) != "" {
-		title += " (@" + truncateMiddle(m.filePickerQuery, 32) + ")"
+		title += " (@" + kit.TruncateMiddle(m.filePickerQuery, 32) + ")"
 	}
 	if strings.Contains(m.filePickerList.Title, "loading") {
 		// Preserve loading prefix if still loading.
 		if strings.TrimSpace(m.filePickerWorkdir) == "" {
-			m.filePickerList.Title = "Select File (loading workdir…) (@" + truncateMiddle(m.filePickerQuery, 32) + ")"
+			m.filePickerList.Title = "Select File (loading workdir…) (@" + kit.TruncateMiddle(m.filePickerQuery, 32) + ")"
 			return
 		}
 	}
@@ -333,52 +334,18 @@ func (m Model) renderFilePicker(base string) string {
 	// Build modal content.
 	content := m.filePickerList.View()
 
-	// Style the modal.
-	modalStyle := lipgloss.NewStyle().
-		Width(modalWidth).
-		Height(modalHeight).
-		Padding(1, 2).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#6bbcff")).
-		Foreground(lipgloss.Color("#eaeaea"))
-
-	modalContent := modalStyle.Render(content)
-
-	// Split modal content into lines.
-	modalLines := strings.Split(modalContent, "\n")
-	modalHeightActual := len(modalLines)
-	modalWidthActual := 0
-	for _, line := range modalLines {
-		if w := lipgloss.Width(line); w > modalWidthActual {
-			modalWidthActual = w
-		}
+	opts := kit.ModalOptions{
+		Content:      content,
+		ScreenWidth:  m.width,
+		ScreenHeight: m.height,
+		Width:        modalWidth,
+		Height:       modalHeight,
+		Padding:      [2]int{1, 2},
+		BorderStyle:  lipgloss.RoundedBorder(),
+		BorderColor:  lipgloss.Color("#6bbcff"),
+		Foreground:   lipgloss.Color("#eaeaea"),
 	}
 
-	// Calculate centering position.
-	topPos := (m.height - modalHeightActual) / 2
-	if topPos < 0 {
-		topPos = 0
-	}
-	leftPos := (m.width - modalWidthActual) / 2
-	if leftPos < 0 {
-		leftPos = 0
-	}
-
-	// Render over a blank backdrop (avoid slicing ANSI from base).
 	_ = base
-	result := make([]string, m.height)
-	for i := 0; i < m.height; i++ {
-		result[i] = strings.Repeat(" ", max(1, m.width))
-
-		// Overlay modal lines
-		if i >= topPos && i < topPos+modalHeightActual {
-			lineIdx := i - topPos
-			if lineIdx < len(modalLines) {
-				modalLine := modalLines[lineIdx]
-				result[i] = strings.Repeat(" ", leftPos) + modalLine
-			}
-		}
-	}
-
-	return strings.Join(result, "\n")
+	return kit.RenderOverlay(opts)
 }

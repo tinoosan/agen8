@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/internal/tui/kit"
 )
 
 // RenderClass is the presentation class for an incoming host event.
@@ -352,7 +353,7 @@ func renderToolRunInspector(toolID, actionID, input string) string {
 			cwd = "."
 		}
 		if cmd != "" {
-			return fmt.Sprintf("%s argv=%s cwd=%s cmd=%s", base, listPreview(in.Argv, 6), cwd, truncateRight(cmd, 120))
+			return fmt.Sprintf("%s argv=%s cwd=%s cmd=%s", base, listPreview(in.Argv, 6), cwd, kit.TruncateRight(cmd, 120))
 		}
 		return fmt.Sprintf("%s argv=%s cwd=%s", base, listPreview(in.Argv, 6), cwd)
 
@@ -377,15 +378,15 @@ func renderToolRunInspector(toolID, actionID, input string) string {
 			break
 		}
 		if in.MaxBytes > 0 {
-			return fmt.Sprintf("%s %s %s maxBytes=%d", base, m, truncateRight(u, 140), in.MaxBytes)
+			return fmt.Sprintf("%s %s %s maxBytes=%d", base, m, kit.TruncateRight(u, 140), in.MaxBytes)
 		}
-		return fmt.Sprintf("%s %s %s", base, m, truncateRight(u, 160))
+		return fmt.Sprintf("%s %s %s", base, m, kit.TruncateRight(u, 160))
 	case "builtin.trace":
 		return base
 	}
 
 	// Generic fallback: show a compact input preview.
-	return fmt.Sprintf("%s input=%s", base, truncateRight(input, 160))
+	return fmt.Sprintf("%s input=%s", base, kit.TruncateRight(input, 160))
 }
 
 func quoteShort(s string, maxLen int) string {

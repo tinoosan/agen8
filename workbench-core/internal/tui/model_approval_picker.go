@@ -12,6 +12,10 @@ type approvalPickerItem struct {
 	value       string
 }
 
+func (a approvalPickerItem) Title() string       { return a.title }
+func (a approvalPickerItem) Description() string { return a.description }
+func (a approvalPickerItem) FilterValue() string { return a.value }
+
 var approvalPickerOptions = []approvalPickerItem{
 	{
 		title:       "Require Approval (Default)",

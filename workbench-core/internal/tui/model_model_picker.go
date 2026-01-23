@@ -3,12 +3,12 @@ package tui
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/cost"
+	"github.com/tinoosan/workbench-core/internal/tui/kit"
 )
 
 // modelPickerItem implements list.Item for the model picker.
@@ -57,7 +57,7 @@ func (d modelPickerDelegate) Render(w io.Writer, m list.Model, index int, item l
 
 	// Keep line within list width.
 	maxW := max(1, m.Width()-lipgloss.Width(prefix))
-	line := truncateRight(it.id, maxW)
+	line := kit.TruncateRight(it.id, maxW)
 	_, _ = fmt.Fprint(w, style.Render(prefix+line))
 }
 
@@ -158,56 +158,18 @@ func (m Model) renderModelPicker(base string) string {
 	// Build modal content
 	content := m.modelPickerList.View()
 
-	// Style the modal
-	modalStyle := lipgloss.NewStyle().
-		Width(modalWidth).
-		Height(modalHeight).
-		Padding(1, 2).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#6bbcff")).
-		Foreground(lipgloss.Color("#eaeaea"))
-
-	modalContent := modalStyle.Render(content)
-
-	// Split modal content into lines
-	modalLines := strings.Split(modalContent, "\n")
-	modalHeightActual := len(modalLines)
-	modalWidthActual := 0
-	for _, line := range modalLines {
-		if w := lipgloss.Width(line); w > modalWidthActual {
-			modalWidthActual = w
-		}
-	}
-
-	// Calculate centering position
-	topPos := (m.height - modalHeightActual) / 2
-	if topPos < 0 {
-		topPos = 0
-	}
-	leftPos := (m.width - modalWidthActual) / 2
-	if leftPos < 0 {
-		leftPos = 0
-	}
-
-	// Render over a blank backdrop.
-	//
-	// We intentionally avoid "overlaying" onto the base UI by slicing strings,
-	// because the base view contains ANSI escape codes (and byte-slicing them
-	// corrupts styles, causing the kind of weird highlight blocks you reported).
-	result := make([]string, m.height)
-	for i := 0; i < m.height; i++ {
-		result[i] = strings.Repeat(" ", max(1, m.width))
-
-		// Overlay modal lines
-		if i >= topPos && i < topPos+modalHeightActual {
-			lineIdx := i - topPos
-			if lineIdx < len(modalLines) {
-				modalLine := modalLines[lineIdx]
-				result[i] = strings.Repeat(" ", leftPos) + modalLine
-			}
-		}
+	opts := kit.ModalOptions{
+		Content:      content,
+		ScreenWidth:  m.width,
+		ScreenHeight: m.height,
+		Width:        modalWidth,
+		Height:       modalHeight,
+		Padding:      [2]int{1, 2},
+		BorderStyle:  lipgloss.RoundedBorder(),
+		BorderColor:  lipgloss.Color("#6bbcff"),
+		Foreground:   lipgloss.Color("#eaeaea"),
 	}
 
 	_ = base
-	return strings.Join(result, "\n")
+	return kit.RenderOverlay(opts)
 }

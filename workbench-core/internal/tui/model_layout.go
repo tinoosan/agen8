@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/tinoosan/workbench-core/internal/cost"
+	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -217,10 +218,10 @@ func (m Model) renderHeader() string {
 	}
 	if wd := strings.TrimSpace(m.workdir); wd != "" {
 		// Keep the workdir visible but bounded.
-		wd = truncateMiddle(wd, max(16, m.width/3))
+		wd = kit.TruncateMiddle(wd, max(16, m.width/3))
 		mid = mid + " · " + wd
 	}
-	mid = truncateMiddle(mid, max(16, m.width/2))
+	mid = kit.TruncateMiddle(mid, max(16, m.width/2))
 	mid = m.styleHeaderMid.Render(mid)
 
 	rhsParts := []string{}
@@ -334,24 +335,37 @@ func (m Model) renderInput() string {
 	eff := strings.TrimSpace(m.reasoningEffort)
 	effortLabel := ""
 	if eff != "" && cost.SupportsReasoningEffort(modelID) {
-		effortLabel = m.styleComposerStatusKey.Render("effort") + " " + m.styleComposerStatusVal.Render(eff)
+		effortLabel = kit.RenderTag(kit.TagOptions{
+			Key:   "effort",
+			Value: eff,
+		})
 	}
 
 	webState := "off"
 	if m.webSearchEnabled {
 		webState = "on"
 	}
-	webLabel := m.styleComposerStatusKey.Render("web") + " " + m.styleComposerStatusVal.Render(webState)
-	approvalLabel := m.styleComposerStatusKey.Render("approval") + " " + m.styleComposerStatusVal.Render(defaultIfEmpty(strings.TrimSpace(m.approvalsMode), "enabled"))
+	webLabel := kit.RenderTag(kit.TagOptions{
+		Key:   "web",
+		Value: webState,
+	})
 
-	modelLabel := m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
+	approvalLabel := kit.RenderTag(kit.TagOptions{
+		Key:   "approval",
+		Value: defaultIfEmpty(strings.TrimSpace(m.approvalsMode), "enabled"),
+	})
+
+	modelLabel := kit.RenderTag(kit.TagOptions{
+		Key:   "model",
+		Value: modelIDDisplay,
+	})
 
 	ids := []string{}
 	if v := strings.TrimSpace(m.sessionID); v != "" {
-		ids = append(ids, "sess:"+truncateMiddle(v, 10))
+		ids = append(ids, "sess:"+kit.TruncateMiddle(v, 10))
 	}
 	if v := strings.TrimSpace(m.runID); v != "" {
-		ids = append(ids, "run:"+truncateMiddle(v, 10))
+		ids = append(ids, "run:"+kit.TruncateMiddle(v, 10))
 	}
 	idsLabel := ""
 	if len(ids) != 0 {
@@ -376,7 +390,7 @@ func (m Model) renderInput() string {
 		if leftMax > 0 && lipgloss.Width(statusLeft) > leftMax {
 			excess := lipgloss.Width(statusLeft) - leftMax
 			allowedIDW := max(8, lipgloss.Width(modelIDDisplay)-excess-1)
-			modelIDDisplay = truncateMiddle(modelID, allowedIDW)
+			modelIDDisplay = kit.TruncateMiddle(modelID, allowedIDW)
 			modelLabel = m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
 			statusLeft = modelLabel + "  " + webLabel + "  " + approvalLabel + "  " + effortLabel
 		}
@@ -384,7 +398,7 @@ func (m Model) renderInput() string {
 		if leftMax > 0 && lipgloss.Width(statusLeft) > leftMax {
 			excess := lipgloss.Width(statusLeft) - leftMax
 			allowedIDW := max(8, lipgloss.Width(modelIDDisplay)-excess-1)
-			modelIDDisplay = truncateMiddle(modelID, allowedIDW)
+			modelIDDisplay = kit.TruncateMiddle(modelID, allowedIDW)
 			modelLabel = m.styleComposerStatusKey.Render("model") + " " + m.styleComposerStatusVal.Render(modelIDDisplay)
 			statusLeft = modelLabel + "  " + webLabel + "  " + approvalLabel
 		}
@@ -491,32 +505,45 @@ func (m Model) renderCommandPalette() string {
 		displayMatches = displayMatches[:maxDisplay]
 	}
 
-	// Style for selected vs unselected items.
-	styleSelected := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6bbcff")).
-		Bold(true)
-	styleUnselected := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#c0c0c0"))
+	outerW := max(20, m.width-8)
+	contentW := max(1, outerW-4)
 
-	lines := []string{}
+	items := make([]kit.Item, len(displayMatches))
 	for i, cmd := range displayMatches {
-		if i == m.commandPaletteSelected {
-			lines = append(lines, styleSelected.Render("  "+cmd))
-		} else {
-			lines = append(lines, styleUnselected.Render("  "+cmd))
-		}
+		items[i] = commandPaletteItem(cmd)
 	}
 
-	// Wrap in a subtle border/background.
-	paletteContent := strings.Join(lines, "\n")
+	selected := m.commandPaletteSelected
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= len(items) {
+		selected = len(items) - 1
+	}
+
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6bbcff")).
+		Bold(true)
+	unselectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#c0c0c0"))
+
+	opts := kit.SelectorOptions{
+		Width:         contentW,
+		SelectedIndex: selected,
+		ShowPrefix:    true,
+		Styles: kit.SelectorStyles{
+			SelectedTitle:   kit.CloneStyle(selectedStyle),
+			UnselectedTitle: kit.CloneStyle(unselectedStyle),
+		},
+	}
+
+	paletteContent := kit.RenderSelector(items, opts)
 
 	// IMPORTANT: keep the palette's TOTAL rendered width within the composer content width.
 	// lipgloss.Style.Width applies to the content box (excluding border + padding).
 	// Since we use padding(0,1) and a rounded border, total width is:
 	//   contentWidth + (padding L+R=2) + (border L+R=2) = contentWidth + 4
 	// The composer content budget is ~ (m.width-8), so we set contentWidth to (budget-4).
-	outerW := max(20, m.width-8)
-	contentW := max(1, outerW-4)
 	paletteStyle := lipgloss.NewStyle().
 		Width(contentW).
 		Padding(0, 1).
@@ -535,27 +562,26 @@ func (m Model) renderReasoningEffortPicker() string {
 	outerW := max(20, m.width-8)
 	contentW := max(1, outerW-4) // padding(0,1) + border => +4 total
 
-	styleSelected := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#eaeaea")).
-		Bold(true)
-	styleUnselected := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#b0b0b0"))
-
-	lines := make([]string, 0, len(reasoningEffortOptions))
-	sel := m.reasoningEffortPickerSelected
-	if sel < 0 {
-		sel = 0
-	}
+	items := make([]kit.Item, len(reasoningEffortOptions))
 	for i, opt := range reasoningEffortOptions {
-		prefix := "  "
-		style := styleUnselected
-		if i == sel {
-			prefix = "› "
-			style = styleSelected
-		}
-		line := truncateRight(opt, max(1, contentW-lipgloss.Width(prefix)))
-		lines = append(lines, style.Render(prefix+line))
+		items[i] = reasoningEffortItem(opt)
 	}
+
+	selected := m.reasoningEffortPickerSelected
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= len(items) {
+		selected = len(items) - 1
+	}
+
+	opts := kit.SelectorOptions{
+		Width:         contentW,
+		SelectedIndex: selected,
+		ShowPrefix:    true,
+	}
+
+	rendered := kit.RenderSelector(items, opts)
 
 	pickerStyle := lipgloss.NewStyle().
 		Width(contentW).
@@ -564,7 +590,7 @@ func (m Model) renderReasoningEffortPicker() string {
 		BorderForeground(lipgloss.Color("#6bbcff")).
 		Foreground(lipgloss.Color("#eaeaea"))
 
-	return pickerStyle.Render(strings.Join(lines, "\n"))
+	return pickerStyle.Render(rendered)
 }
 
 func (m Model) renderApprovalPicker() string {
@@ -575,38 +601,30 @@ func (m Model) renderApprovalPicker() string {
 	outerW := max(20, m.width-8)
 	contentW := max(1, outerW-4)
 
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#eaeaea")).
-		Bold(true)
-	descStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#b0b0b0"))
-	selectedTitleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6bbcff")).
-		Bold(true)
-	selectedDescStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#9ad0ff"))
-
-	lines := []string{}
-	sel := m.approvalPickerSelected
-	if sel < 0 {
-		sel = 0
-	}
+	items := make([]kit.Item, len(approvalPickerOptions))
 	for i, opt := range approvalPickerOptions {
-		prefix := "  "
-		tStyle := titleStyle
-		dStyle := descStyle
-		if i == sel {
-			prefix = "› "
-			tStyle = selectedTitleStyle
-			dStyle = selectedDescStyle
-		}
-		titleLine := prefix + truncateRight(opt.title, max(1, contentW-lipgloss.Width(prefix)))
-		descLine := strings.Repeat(" ", lipgloss.Width(prefix)) + truncateRight(opt.description, max(1, contentW-lipgloss.Width(prefix)))
-		lines = append(lines, tStyle.Render(titleLine))
-		lines = append(lines, dStyle.Render(descLine))
-		if i < len(approvalPickerOptions)-1 {
-			lines = append(lines, "")
-		}
+		items[i] = opt
+	}
+
+	selected := m.approvalPickerSelected
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= len(items) {
+		selected = len(items) - 1
+	}
+
+	opts := kit.SelectorOptions{
+		Width:         contentW,
+		SelectedIndex: selected,
+		ShowPrefix:    true,
+		Spacing:       1,
+		Styles: kit.SelectorStyles{
+			SelectedTitle:   kit.CloneStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#6bbcff")).Bold(true)),
+			SelectedDesc:    kit.CloneStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#9ad0ff"))),
+			UnselectedTitle: kit.CloneStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#eaeaea")).Bold(true)),
+			UnselectedDesc:  kit.CloneStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#b0b0b0"))),
+		},
 	}
 
 	style := lipgloss.NewStyle().
@@ -616,7 +634,7 @@ func (m Model) renderApprovalPicker() string {
 		BorderForeground(lipgloss.Color("#6bbcff")).
 		Foreground(lipgloss.Color("#eaeaea"))
 
-	return style.Render(strings.Join(lines, "\n"))
+	return style.Render(kit.RenderSelector(items, opts))
 }
 
 func (m Model) renderApprovalPrompt() string {
@@ -631,8 +649,8 @@ func (m Model) renderApprovalPrompt() string {
 
 	lines := []string{
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#ffb347")).Bold(true).Render("Approval required"),
-		m.styleBold.Render(truncateRight(title, contentW)),
-		m.styleDim.Render(truncateRight(desc, contentW)),
+		m.styleBold.Render(kit.TruncateRight(title, contentW)),
+		m.styleDim.Render(kit.TruncateRight(desc, contentW)),
 		m.styleComposerStatusKey.Copy().Render("press") + " " + m.styleComposerStatusVal.Render("A/Y approve • D/N deny"),
 	}
 

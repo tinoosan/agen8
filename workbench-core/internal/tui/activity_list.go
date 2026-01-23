@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/workbench-core/internal/tui/kit"
 )
 
 type activityItem struct {
@@ -83,7 +84,7 @@ func (d activityDelegate) Render(w io.Writer, m list.Model, index int, item list
 		kind = "op"
 	}
 
-	title := truncateRight(it.act.Title, max(1, m.Width()-6))
+	title := kit.TruncateRight(it.act.Title, max(1, m.Width()-6))
 	line1 := fmt.Sprintf("%s%s %s", prefix, d.styleStatus.Render(status), rowStyle.Render(title))
 
 	desc := strings.TrimSpace(it.Description())
@@ -101,5 +102,5 @@ func (d activityDelegate) Render(w io.Writer, m list.Model, index int, item list
 
 	_, _ = fmt.Fprint(w, line1)
 	_, _ = fmt.Fprint(w, "\n")
-	_, _ = fmt.Fprint(w, rowStyle.Render(truncateRight(line2, max(1, m.Width()-2))))
+	_, _ = fmt.Fprint(w, rowStyle.Render(kit.TruncateRight(line2, max(1, m.Width()-2))))
 }

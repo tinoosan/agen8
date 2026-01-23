@@ -6,6 +6,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type reasoningEffortItem string
+
+func (r reasoningEffortItem) Title() string       { return string(r) }
+func (r reasoningEffortItem) Description() string { return "" }
+func (r reasoningEffortItem) FilterValue() string { return string(r) }
+
 var reasoningEffortOptions = []string{"none", "minimal", "low", "medium", "high", "xhigh"}
 
 func (m *Model) openReasoningEffortPicker() {

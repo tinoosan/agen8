@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
 )
 
@@ -22,7 +23,7 @@ func (m Model) renderEditorView() string {
 	bar := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#c0c0c0")).
 		Padding(0, 1).
-		Render(truncateMiddle(title, w))
+		Render(kit.TruncateMiddle(title, w))
 
 	bodyH := max(1, m.height-lipgloss.Height(header)-lipgloss.Height(bar)-2)
 	m.editorBuf.SetHeight(bodyH)

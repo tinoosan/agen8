@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wordwrap"
+	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
@@ -321,7 +322,7 @@ func (m *Model) rebuildTranscript() {
 			header := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#ffb347")).
 				Bold(true).
-				Render(truncateRight(headerText, fileInnerW))
+				Render(kit.TruncateRight(headerText, fileInnerW))
 
 			bodyParts := make([]string, 0, 2)
 			if strings.TrimSpace(desc) != "" {
@@ -391,18 +392,6 @@ func max(a, b int) int {
 	return b
 }
 
-func truncateMiddle(s string, maxLen int) string {
-	s = strings.TrimSpace(s)
-	if maxLen <= 0 || len(s) <= maxLen {
-		return s
-	}
-	if maxLen < 8 {
-		return s[:maxLen]
-	}
-	keep := (maxLen - 1) / 2
-	return s[:keep] + "…" + s[len(s)-keep:]
-}
-
 func firstLine(s string) string {
 	s = strings.ReplaceAll(s, "\r", "")
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
@@ -412,7 +401,7 @@ func firstLine(s string) string {
 	if s == "" {
 		return ""
 	}
-	return truncateMiddle(s, 48)
+	return kit.TruncateMiddle(s, 48)
 }
 
 func wrapText(s string, width int) string {
@@ -482,7 +471,7 @@ func renderFileChangeHeaderLine(path string, added int, deleted int, hasCounts b
 	if !hasCounts || (added == 0 && deleted == 0) {
 		// Truncate path to fit.
 		maxPath := max(8, width)
-		path = truncateMiddle(path, maxPath)
+		path = kit.TruncateMiddle(path, maxPath)
 		return stylePath.Render(path)
 	}
 
@@ -492,7 +481,7 @@ func renderFileChangeHeaderLine(path string, added int, deleted int, hasCounts b
 	// Fit within width by truncating the path.
 	countsRaw := "  +" + itoa(added) + " -" + itoa(deleted)
 	availPath := max(8, width-lipgloss.Width(countsRaw))
-	path = truncateMiddle(path, availPath)
+	path = kit.TruncateMiddle(path, availPath)
 	return stylePath.Render(path) + "  " + plus + " " + minus
 }
 
@@ -512,18 +501,6 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b[i:])
-}
-
-func truncateRight(s string, maxLen int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.TrimSpace(s)
-	if maxLen <= 0 || len(s) <= maxLen {
-		return s
-	}
-	if maxLen < 2 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-1] + "…"
 }
 
 func approvalPreviewCounts(diff string) (int, int, bool) {
