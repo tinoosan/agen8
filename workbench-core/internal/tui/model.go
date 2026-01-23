@@ -60,12 +60,16 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	details.Style = lipgloss.NewStyle()
 	details.MouseWheelEnabled = true
 
+	planView := viewport.New(0, 0)
+	planView.Style = lipgloss.NewStyle()
+	planView.MouseWheelEnabled = true
+
 	helpVp := viewport.New(0, 0)
 	helpVp.Style = lipgloss.NewStyle()
 	helpVp.MouseWheelEnabled = true
 
 	activity := list.New([]list.Item{}, newActivityDelegate(), 0, 0)
-	activity.Title = "Activity"
+	activity.Title = ""
 	activity.SetShowHelp(false)
 	activity.SetShowStatusBar(false)
 	activity.SetShowPagination(false)
@@ -136,6 +140,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 		transcript:     main,
 		activityList:   activity,
 		activityDetail: details,
+		planViewport:   planView,
 		helpViewport:   helpVp,
 		// Default: start with the activity panel closed. Users can toggle it with
 		// Ctrl+A, or enable it by default via WORKBENCH_ACTIVITY/--activity.
@@ -210,6 +215,11 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 			Foreground(lipgloss.Color("#eaeaea")),
 		styleHint: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#707070")),
+		styleRightTabActive: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9ad0ff")).
+			Bold(true),
+		styleRightTabInactive: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#707070")),
 
 		currentActionGroupIdx: -1,
 		renderer:              newContentRenderer(),
@@ -227,6 +237,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.waitEvent(),
+		m.prefetchPlanCmd(),
 		func() tea.Msg {
 			wd, err := m.runner.RunTurn(m.ctx, "/pwd")
 			if err != nil {
@@ -732,6 +743,30 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshActivityDetail()
 		return m, nil
 
+	case planFileMsg:
+		prevHadContent := strings.TrimSpace(m.planMarkdown) != ""
+		m.planLoadErr = ""
+		if msg.err != nil {
+			m.planLoadErr = msg.err.Error()
+		}
+		m.planMarkdown = msg.content
+		newHasContent := strings.TrimSpace(m.planMarkdown) != ""
+		if !m.planAutoExpanded && !prevHadContent && newHasContent {
+			m.planAutoExpanded = true
+			m.planTabActive = true
+			if !m.showDetails {
+				m.showDetails = true
+				m.focus = focusInput
+				if m.isMulti {
+					m.multiline.Focus()
+				} else {
+					m.single.Focus()
+				}
+			}
+		}
+		m.layout()
+		return m, nil
+
 	case turnDoneMsg:
 		m.turnInFlight = false
 		// Clear per-turn cancel state (the turn is over regardless of outcome).
@@ -877,7 +912,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			leftW := m.transcript.Width
 			if msg.X >= leftW {
 				var cmd tea.Cmd
-				m.activityDetail, cmd = m.activityDetail.Update(msg)
+				if m.planTabActive {
+					m.planViewport, cmd = m.planViewport.Update(msg)
+				} else {
+					m.activityDetail, cmd = m.activityDetail.Update(msg)
+				}
 				return m, cmd
 			}
 		}
@@ -1319,6 +1358,15 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 				}
 			}
 		}
+		if strings.EqualFold(strings.TrimSpace(path), planVPath) && strings.TrimSpace(ev.Data["ok"]) == "true" {
+			if acc, ok := m.runner.(vfsAccessor); ok {
+				return func() tea.Msg {
+					txt, _, _, err := acc.ReadVFS(m.ctx, path, planMaxBytes)
+					return planFileMsg{path: path, content: txt, err: err}
+				}
+			}
+			return nil
+		}
 		if (op == "fs.write" || op == "fs.append" || op == "fs.edit" || op == "fs.patch") && strings.TrimSpace(ev.Data["ok"]) == "true" && path != "" {
 			if acc, ok := m.runner.(vfsAccessor); ok {
 				return func() tea.Msg {
@@ -1610,6 +1658,17 @@ func (m Model) waitEvent() tea.Cmd {
 			return nil
 		}
 		return eventMsg(ev)
+	}
+}
+
+func (m Model) prefetchPlanCmd() tea.Cmd {
+	acc, ok := m.runner.(vfsAccessor)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		txt, _, _, err := acc.ReadVFS(m.ctx, planVPath, planMaxBytes)
+		return planFileMsg{path: planVPath, content: txt, err: err}
 	}
 }
 

@@ -58,6 +58,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if mm, cmd, ok := m.keyToggleActivityPanel(msg); ok {
 		return mm, cmd
 	}
+	if mm, cmd, ok := m.keyTogglePlanView(msg); ok {
+		return mm, cmd
+	}
 	if mm, cmd, ok := m.keyEscClosesPanels(msg); ok {
 		return mm, cmd
 	}
@@ -406,6 +409,11 @@ func (m Model) keyTranscriptScrollKeys(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if msg.Type != tea.KeyPgUp && msg.Type != tea.KeyPgDown && msg.Type != tea.KeyCtrlU && msg.Type != tea.KeyCtrlF {
 		return m, nil, false
 	}
+	if m.showDetails && m.planTabActive {
+		var cmd tea.Cmd
+		m.planViewport, cmd = m.planViewport.Update(msg)
+		return m, cmd, true
+	}
 	// Preserve current behavior: when Activity is focused, do not route here.
 	// (The original implementation breaks out to the default fallthrough path.)
 	if m.showDetails && m.focus == focusActivityList {
@@ -436,6 +444,19 @@ func (m Model) keyToggleActivityPanel(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		} else {
 			m.single.Focus()
 		}
+	}
+	m.layout()
+	return m, nil, true
+}
+
+func (m Model) keyTogglePlanView(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	// Alt+P toggles between Activity and Plan tabs in the right pane.
+	if !(strings.EqualFold(msg.String(), "ctrl+alt+p") || strings.EqualFold(msg.String(), "alt+ctrl+p")) {
+		return m, nil, false
+	}
+	m.planTabActive = !m.planTabActive
+	if m.planTabActive && !m.showDetails {
+		m.showDetails = true
 	}
 	m.layout()
 	return m, nil, true

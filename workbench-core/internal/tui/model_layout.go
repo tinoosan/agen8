@@ -73,8 +73,18 @@ func (m *Model) layout() {
 		// cause the header to appear to "disappear" (clipped off the top).
 		innerW := max(24, detailW-2)
 		innerH := max(1, bodyH-2)
+		tabBarH := lipgloss.Height(m.renderRightPaneTabs())
+		if tabBarH < 1 {
+			tabBarH = 1
+		}
+		contentH := innerH - tabBarH
+		if contentH < 1 {
+			contentH = 1
+		}
 
 		m.activityList.SetWidth(max(24, innerW))
+		m.planViewport.Width = max(24, innerW)
+		m.planViewport.Height = max(1, contentH)
 
 		// Split the inner height between list and details.
 		//
@@ -87,26 +97,26 @@ func (m *Model) layout() {
 			smallDetail = 0.65
 		)
 		detailFrac := largeDetail
-		if innerH < 18 {
+		if contentH < 18 {
 			detailFrac = smallDetail
 		}
-		detailH := int(math.Round(float64(innerH) * detailFrac))
+		detailH := int(math.Round(float64(contentH) * detailFrac))
 		if detailH < minDetailH {
 			detailH = minDetailH
 		}
 		// Ensure list keeps a minimum when possible.
-		if innerH-detailH < minListH {
-			detailH = max(1, innerH-minListH)
+		if contentH-detailH < minListH {
+			detailH = max(1, contentH-minListH)
 		}
-		listH := innerH - detailH
+		listH := contentH - detailH
 		if listH < minListH {
-			listH = max(1, innerH-minDetailH)
-			detailH = max(1, innerH-listH)
+			listH = max(1, contentH-minDetailH)
+			detailH = max(1, contentH-listH)
 		}
 		// Final clamp: ensure Details has at least 1 row.
-		if listH > innerH-1 {
-			listH = max(1, innerH-1)
-			detailH = max(1, innerH-listH)
+		if listH > contentH-1 {
+			listH = max(1, contentH-1)
+			detailH = max(1, contentH-listH)
 		}
 
 		// bubbles/list renders a small chrome header (title + spacer) above the items.
@@ -124,14 +134,14 @@ func (m *Model) layout() {
 
 		// Defensive clamp: bubbles/list (and viewport) can render slightly taller than the
 		// nominal heights due to internal chrome/newlines. Ensure the combined right pane
-		// content never exceeds innerH, otherwise the overall View can exceed terminal
+		// content never exceeds contentH, otherwise the overall View can exceed terminal
 		// bounds (see TestLayout_WithCommandPalette_ViewNeverExceedsTerminalBounds).
 		for i := 0; i < 4; i++ {
 			total := lipgloss.Height(m.activityList.View()) + lipgloss.Height(m.activityDetail.View())
-			if total <= innerH {
+			if total <= contentH {
 				break
 			}
-			over := total - innerH
+			over := total - contentH
 			m.activityList.SetHeight(max(1, m.activityList.Height()-over))
 		}
 	}
@@ -189,6 +199,7 @@ func (m *Model) layout() {
 		m.transcript.GotoBottom()
 	}
 	m.refreshActivityDetail()
+	m.refreshPlanView()
 
 	// Recompute once after content/layout changes so the footer measurement stays correct
 	// for the next resize cycle.
@@ -255,7 +266,14 @@ func (m Model) renderBody() string {
 	// Important: keep the right pane height exactly equal to the transcript height.
 	// If the right pane is taller, Bubble Tea will clip the top of the overall view,
 	// which makes the header appear to "disappear" when Activity is toggled.
-	rightBody := lipgloss.JoinVertical(lipgloss.Top, m.activityList.View(), m.activityDetail.View())
+	tabBar := m.renderRightPaneTabs()
+	var rightContent string
+	if m.planTabActive {
+		rightContent = m.planViewport.View()
+	} else {
+		rightContent = lipgloss.JoinVertical(lipgloss.Top, m.activityList.View(), m.activityDetail.View())
+	}
+	rightBody := lipgloss.JoinVertical(lipgloss.Top, tabBar, rightContent)
 	rightPaneStyle := lipgloss.NewStyle().
 		Width(rightW).
 		Height(rightH)
@@ -275,6 +293,20 @@ func (m Model) renderBody() string {
 	rightPane := rightPaneStyle.Render(rightBody)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, m.transcript.View(), rightPane)
+}
+
+func (m Model) renderRightPaneTabs() string {
+	activity := "Activity"
+	plan := "Plan"
+	var activityTab, planTab string
+	if m.planTabActive {
+		activityTab = m.styleRightTabInactive.Render(activity)
+		planTab = m.styleRightTabActive.Render(plan)
+	} else {
+		activityTab = m.styleRightTabActive.Render(activity)
+		planTab = m.styleRightTabInactive.Render(plan)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, activityTab, "  ", planTab)
 }
 
 func (m Model) renderInput() string {

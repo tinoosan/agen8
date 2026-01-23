@@ -13,7 +13,10 @@ import (
 	"github.com/tinoosan/workbench-core/internal/types"
 )
 
-const composeVPath = "/project/.workbench/compose.md"
+const (
+	composeVPath = "/project/.workbench/compose.md"
+	planVPath    = "/memory/plan.md"
+)
 
 // TurnRunner executes one user turn and returns the agent final response.
 //
@@ -50,6 +53,12 @@ type fileViewMsg struct {
 	content   string
 	truncated bool
 	err       error
+}
+
+type planFileMsg struct {
+	path    string
+	content string
+	err     error
 }
 
 type editorLoadMsg struct {
@@ -105,9 +114,14 @@ type Model struct {
 	// an interrupt signal to callers (for example, to print a resume hint).
 	quitByCtrlC bool
 
-	transcript     viewport.Model
-	activityList   list.Model
-	activityDetail viewport.Model
+	transcript       viewport.Model
+	activityList     list.Model
+	activityDetail   viewport.Model
+	planViewport     viewport.Model
+	planMarkdown     string
+	planTabActive    bool
+	planAutoExpanded bool
+	planLoadErr      string
 
 	transcriptItems         []transcriptItem
 	transcriptItemStartLine []int
@@ -242,6 +256,8 @@ type Model struct {
 	styleComposerStatusKey   lipgloss.Style
 	styleComposerStatusVal   lipgloss.Style
 	styleHint                lipgloss.Style
+	styleRightTabActive      lipgloss.Style
+	styleRightTabInactive    lipgloss.Style
 
 	renderer *ContentRenderer
 
@@ -331,7 +347,10 @@ type pendingAction struct {
 	actionIdx int
 }
 
-const maxDiffBytesRead = 128 * 1024
+const (
+	maxDiffBytesRead = 128 * 1024
+	planMaxBytes     = 64 * 1024
+)
 
 type pendingFileOp struct {
 	op   string

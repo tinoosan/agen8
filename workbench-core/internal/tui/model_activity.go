@@ -360,6 +360,94 @@ func (m *Model) refreshActivityDetail() {
 	m.activityDetail.SetContent(strings.TrimRight(m.renderer.RenderMarkdown(header+help+md, w), "\n"))
 }
 
+func (m *Model) refreshPlanView() {
+	if !m.showDetails {
+		return
+	}
+	w := max(24, m.planViewport.Width-4)
+	currentStep := ""
+	body := ""
+	planText := strings.TrimSpace(m.planMarkdown)
+	if planText == "" {
+		if strings.TrimSpace(m.planLoadErr) != "" {
+			body = fmt.Sprintf("_Failed to load plan: %s_", m.planLoadErr)
+		} else {
+			body = "_No plan has been created yet._"
+		}
+	} else {
+		highlighted, active := highlightPlanChecklist(m.planMarkdown)
+		if active != "" {
+			currentStep = fmt.Sprintf("_Current step: %s_\n\n", active)
+		}
+		if strings.TrimSpace(m.planLoadErr) != "" {
+			body = fmt.Sprintf("_Failed to load plan: %s_\n\n%s", m.planLoadErr, highlighted)
+		} else {
+			body = highlighted
+		}
+	}
+	help := "_Ctrl+Alt+P toggles tabs · Ctrl+A toggles sidebar_\n\n"
+	content := currentStep + body + "\n\n" + help
+	if strings.TrimSpace(content) == "" {
+		content = "_Plan view is preparing…_"
+	}
+	m.planViewport.SetContent(strings.TrimRight(m.renderer.RenderMarkdown(content, w), "\n"))
+}
+
+func highlightPlanChecklist(markdown string) (string, string) {
+	text := strings.ReplaceAll(markdown, "\r\n", "\n")
+	lines := strings.Split(text, "\n")
+	active := ""
+	found := false
+	for i, line := range lines {
+		if ok, checked := parsePlanChecklist(line); ok && !checked && !found {
+			active = planChecklistLabel(line)
+			lines[i] = highlightPlanLine(line)
+			found = true
+		}
+	}
+	return strings.Join(lines, "\n"), active
+}
+
+func parsePlanChecklist(line string) (bool, bool) {
+	trimmed := strings.TrimLeft(line, " \t")
+	if len(trimmed) < 5 {
+		return false, false
+	}
+	bullet := trimmed[0]
+	if bullet != '-' && bullet != '*' && bullet != '+' {
+		return false, false
+	}
+	if len(trimmed) < 5 || trimmed[1] != ' ' || trimmed[2] != '[' {
+		return false, false
+	}
+	status := trimmed[3]
+	if trimmed[4] != ']' {
+		return false, false
+	}
+	switch status {
+	case 'x', 'X':
+		return true, true
+	case ' ':
+		return true, false
+	}
+	return false, false
+}
+
+func planChecklistLabel(line string) string {
+	trimmed := strings.TrimLeft(line, " \t")
+	if idx := strings.Index(trimmed, "]"); idx >= 0 {
+		return strings.TrimSpace(trimmed[idx+1:])
+	}
+	return strings.TrimSpace(trimmed)
+}
+
+func highlightPlanLine(line string) string {
+	indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+	body := strings.TrimLeft(line, " \t")
+	body = strings.TrimSpace(body)
+	return indent + "**" + body + "** _(current step)_"
+}
+
 func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) string {
 	var b strings.Builder
 
