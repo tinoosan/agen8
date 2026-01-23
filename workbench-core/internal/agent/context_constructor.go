@@ -308,7 +308,12 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 		profileIncl, profileTrunc := tailUTF8(profileBytes, profileBudget)
 		c.cache.profileSection = ""
 		if len(profileIncl) > 0 {
-			c.cache.profileSection = "\n\n## User Profile (/profile/profile.md)\n\n" + string(profileIncl) + "\n"
+			c.cache.profileSection = buildXMLBlock("user_profile", []xmlAttribute{
+				{key: "path", value: profilePath},
+				{key: "bytes_included", value: strconv.Itoa(c.cache.profileBytesIncl)},
+				{key: "bytes_total", value: strconv.Itoa(c.cache.profileBytesTotal)},
+				{key: "truncated", value: strconv.FormatBool(profileTrunc)},
+			}, string(profileIncl))
 		}
 		c.cache.profileReady = true
 		c.cache.profileBudgetBytes = profileBudget
@@ -339,7 +344,12 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 		memIncl, memTrunc := tailUTF8(memBytes, memBudget)
 		c.cache.memorySection = ""
 		if len(memIncl) > 0 {
-			c.cache.memorySection = "\n\n## Run Memory (/memory/memory.md)\n\n" + string(memIncl) + "\n"
+			c.cache.memorySection = buildXMLBlock("run_memory", []xmlAttribute{
+				{key: "path", value: memPath},
+				{key: "bytes_included", value: strconv.Itoa(c.cache.memoryBytesIncl)},
+				{key: "bytes_total", value: strconv.Itoa(c.cache.memoryBytesTotal)},
+				{key: "truncated", value: strconv.FormatBool(memTrunc)},
+			}, string(memIncl))
 		}
 		c.cache.memoryReady = true
 		c.cache.memoryBudgetBytes = memBudget
@@ -370,7 +380,7 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 		c.cache.attachSection = ""
 		if len(c.FileAttachments) != 0 {
 			var b strings.Builder
-			b.WriteString("\n\n## Referenced Files\n\n")
+			b.WriteString("\n\n<referenced_files>\n")
 			for _, att := range c.FileAttachments {
 				name := strings.TrimSpace(att.DisplayName)
 				if name == "" {
@@ -379,26 +389,35 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 				if name == "" {
 					name = "<file>"
 				}
-				b.WriteString("### ")
-				b.WriteString(name)
-				b.WriteString("\n\n")
-				b.WriteString("- path: `")
-				b.WriteString(strings.TrimSpace(att.VPath))
-				b.WriteString("`\n")
-				if att.BytesTotal != 0 {
-					b.WriteString("- bytes: ")
-					b.WriteString(strconv.Itoa(att.BytesIncluded))
-					b.WriteString(" (of ")
-					b.WriteString(strconv.Itoa(att.BytesTotal))
-					b.WriteString(")\n")
+				pathStr := strings.TrimSpace(att.VPath)
+				b.WriteString("  <file")
+				b.WriteString(" name=\"")
+				b.WriteString(escapeXML(name))
+				b.WriteString("\"")
+				if token := strings.TrimSpace(att.Token); token != "" {
+					b.WriteString(" token=\"")
+					b.WriteString(escapeXML(token))
+					b.WriteString("\"")
 				}
-				if att.Truncated {
-					b.WriteString("- truncated: true\n")
-				}
+				b.WriteString(" path=\"")
+				b.WriteString(escapeXML(pathStr))
+				b.WriteString("\"")
+				b.WriteString(" bytes_included=\"")
+				b.WriteString(strconv.Itoa(att.BytesIncluded))
+				b.WriteString("\"")
+				b.WriteString(" bytes_total=\"")
+				b.WriteString(strconv.Itoa(att.BytesTotal))
+				b.WriteString("\"")
+				b.WriteString(" truncated=\"")
+				b.WriteString(strconv.FormatBool(att.Truncated))
+				b.WriteString("\">")
 				b.WriteString("\n")
-				b.WriteString(fencedCodeForPath(att.VPath, att.Content))
-				b.WriteString("\n")
+				b.WriteString("    <content>")
+				b.WriteString(escapeXML(att.Content))
+				b.WriteString("</content>\n")
+				b.WriteString("  </file>\n")
 			}
+			b.WriteString("</referenced_files>\n")
 			c.cache.attachSection = b.String()
 		}
 		c.cache.attachReady = true
@@ -410,9 +429,9 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	systemB.WriteString(c.cache.memorySection)
 	systemB.WriteString(c.cache.attachSection)
 
+	systemB.WriteString("\n\n<available_skills>\n")
 	if c.SkillsManager != nil {
 		if entries := c.SkillsManager.Entries(); len(entries) > 0 {
-			systemB.WriteString("\n\n<available_skills>\n")
 			for _, entry := range entries {
 				name := strings.TrimSpace(entry.Skill.Name)
 				if name == "" {
@@ -433,9 +452,10 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 				systemB.WriteString("</location>\n")
 				systemB.WriteString("  </skill>\n")
 			}
-			systemB.WriteString("</available_skills>\n")
 		}
 	}
+	systemB.WriteString("</available_skills>\n")
+	systemB.WriteString("\n</system>")
 
 	// Rebuild attachment references for the manifest (cheap, bounded slice).
 	for _, att := range c.FileAttachments {
@@ -515,47 +535,6 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	return system, nil
 }
 
-func fencedCodeForPath(vpath string, content string) string {
-	lang := guessFenceLang(vpath)
-	content = strings.TrimRight(content, "\n")
-	// Avoid accidental fence termination in content; fall back to plain fence.
-	if strings.Contains(content, "```") {
-		lang = ""
-	}
-	if lang != "" {
-		return "```" + lang + "\n" + content + "\n```"
-	}
-	return "```\n" + content + "\n```"
-}
-
-func guessFenceLang(vpath string) string {
-	low := strings.ToLower(strings.TrimSpace(vpath))
-	switch {
-	case strings.HasSuffix(low, ".go"):
-		return "go"
-	case strings.HasSuffix(low, ".mod"):
-		return "go"
-	case strings.HasSuffix(low, ".sum"):
-		return "txt"
-	case strings.HasSuffix(low, ".json"):
-		return "json"
-	case strings.HasSuffix(low, ".yaml"), strings.HasSuffix(low, ".yml"):
-		return "yaml"
-	case strings.HasSuffix(low, ".md"):
-		return "md"
-	case strings.HasSuffix(low, ".sh"):
-		return "sh"
-	case strings.HasSuffix(low, ".ts"):
-		return "ts"
-	case strings.HasSuffix(low, ".js"):
-		return "js"
-	case strings.HasSuffix(low, ".html"), strings.HasSuffix(low, ".htm"):
-		return "html"
-	default:
-		return ""
-	}
-}
-
 func escapeXML(value string) string {
 	if value == "" {
 		return ""
@@ -564,6 +543,33 @@ func escapeXML(value string) string {
 	if err := xml.EscapeText(&b, []byte(value)); err != nil {
 		return value
 	}
+	return b.String()
+}
+
+type xmlAttribute struct {
+	key   string
+	value string
+}
+
+func buildXMLBlock(tag string, attrs []xmlAttribute, content string) string {
+	var b strings.Builder
+	b.WriteString("\n\n<")
+	b.WriteString(tag)
+	for _, attr := range attrs {
+		if attr.value == "" {
+			continue
+		}
+		b.WriteString(" ")
+		b.WriteString(attr.key)
+		b.WriteString("=\"")
+		b.WriteString(escapeXML(attr.value))
+		b.WriteString("\"")
+	}
+	b.WriteString(">\n")
+	b.WriteString(escapeXML(content))
+	b.WriteString("\n</")
+	b.WriteString(tag)
+	b.WriteString(">\n")
 	return b.String()
 }
 
