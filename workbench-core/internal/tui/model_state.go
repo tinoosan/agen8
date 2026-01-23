@@ -15,7 +15,7 @@ import (
 
 const (
 	composeVPath = "/project/.workbench/compose.md"
-	planVPath    = "/memory/plan.md"
+	planVPath    = "/plan/HEAD.md"
 )
 
 // TurnRunner executes one user turn and returns the agent final response.

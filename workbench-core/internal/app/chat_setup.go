@@ -143,6 +143,16 @@ func setupTUIChatRuntime(
 	_, hr, _, _ := fs.Resolve("/" + vfs.MountHistory)
 	historyRes = hr.(*resources.HistoryResource)
 
+	planDir := filepath.Join(workspace.BaseDir, "plan")
+	if err := os.MkdirAll(planDir, 0755); err != nil {
+		return nil, fmt.Errorf("prepare plan dir: %w", err)
+	}
+	planRes, err := resources.NewDirResource(planDir, "plan")
+	if err != nil {
+		return nil, fmt.Errorf("create plan resource: %w", err)
+	}
+	fs.Mount("plan", planRes)
+
 	resultsStore := f.ResultsStore
 	memStore := f.MemoryStore
 	profileStore := f.ProfileStore
@@ -156,6 +166,7 @@ func setupTUIChatRuntime(
 			"/results":            "(virtual)",
 			"/log":                traceRes.BaseDir,
 			"/tools":              "(virtual)",
+			"/plan":               "(virtual)",
 			"/memory":             "(virtual)",
 			"/profile":            "(global)",
 			"/history":            historyRes.BaseDir,

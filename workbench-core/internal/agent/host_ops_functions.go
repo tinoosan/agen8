@@ -35,7 +35,7 @@ func HostOpFunctions() []types.Tool {
 			Type: "function",
 			Function: types.ToolFunction{
 				Name:        "fs_list",
-				Description: "[DIRECT - no discovery needed] List directory contents at a VFS path. Common paths: /project (user's project), /scratch (your scratch), /skills (skill documents), /tools (for tool_run discovery only).",
+				Description: "[DIRECT - no discovery needed] List directory contents at a VFS path. Common paths: /project (user's project), /scratch (your scratch), /plan (planning workspace), /skills (skill documents), /tools (for tool_run discovery only).",
 				Strict:      true,
 				Parameters: map[string]any{
 					"type": "object",
