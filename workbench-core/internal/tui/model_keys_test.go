@@ -211,7 +211,7 @@ func TestReasoningEffortPicker_OpensOnReasoningEffortNoValue(t *testing.T) {
 	m.height = 24
 	m.layout()
 
-	m.single.SetValue("/reasoning effort")
+	m.single.SetValue("/reasoning-effort")
 	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := m2.(Model)
 
@@ -234,7 +234,7 @@ func TestReasoningEffortPicker_SelectRunsReasoningCommand(t *testing.T) {
 	m.layout()
 
 	// Open picker.
-	m.single.SetValue("/reasoning effort")
+	m.single.SetValue("/reasoning-effort")
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	opened := m2.(Model)
 	if !opened.reasoningEffortPickerOpen {
@@ -280,7 +280,7 @@ func TestReasoningEffortPicker_EscClosesWithoutRunning(t *testing.T) {
 	m.height = 24
 	m.layout()
 
-	m.single.SetValue("/reasoning effort")
+	m.single.SetValue("/reasoning-effort")
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	opened := m2.(Model)
 	if !opened.reasoningEffortPickerOpen {

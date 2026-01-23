@@ -63,8 +63,8 @@ func (m *Model) submitSingle() tea.Cmd {
 	if txt == "/copy" {
 		return copyToClipboardCmd(m.transcriptForClipboard())
 	}
-	// Intercept `/reasoning effort` with no value to open a picker (no submission).
-	if strings.EqualFold(txt, "/reasoning effort") {
+	// Intercept `/reasoning-effort` with no value to open a picker (no submission).
+	if strings.EqualFold(txt, "/reasoning-effort") {
 		m.openReasoningEffortPicker()
 		return nil
 	}
@@ -90,8 +90,8 @@ func (m *Model) submitMultiline() tea.Cmd {
 	if txt == "/copy" {
 		return copyToClipboardCmd(m.transcriptForClipboard())
 	}
-	// Intercept `/reasoning effort` with no value to open a picker (no submission).
-	if strings.EqualFold(txt, "/reasoning effort") {
+	// Intercept `/reasoning-effort` with no value to open a picker (no submission).
+	if strings.EqualFold(txt, "/reasoning-effort") {
 		m.openReasoningEffortPicker()
 		return nil
 	}

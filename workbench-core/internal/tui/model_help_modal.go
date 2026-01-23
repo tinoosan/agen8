@@ -112,7 +112,7 @@ func (m *Model) helpModalContent() string {
 		"  /model           open model picker",
 		"  /model <id>      set model",
 		"  /web             toggle web search on/off (run-scoped)",
-		"  /reasoning effort  open effort picker (none|minimal|low|medium|high|xhigh)",
+		"  /reasoning-effort  open effort picker (none|minimal|low|medium|high|xhigh)",
 		"  /editor <path>   edit a workdir file in $EDITOR",
 		"  /cd <path>       change workdir",
 		"  /pwd             show workdir",

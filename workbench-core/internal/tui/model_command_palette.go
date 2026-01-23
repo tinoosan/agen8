@@ -13,7 +13,7 @@ func (c commandPaletteItem) FilterValue() string { return string(c) }
 // Hardcoded list of available slash commands for the command palette.
 var availableCommands = []string{
 	"/model",
-	"/reasoning",
+	"/reasoning-effort",
 	"/approval",
 	"/copy",
 	"/editor",
