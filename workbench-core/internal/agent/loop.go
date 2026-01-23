@@ -571,12 +571,20 @@ Call these without discovery:
 
 ### 2. Skills (Workflow Instructions) — ~/skills~
 
-**Skills are documented workflows** with step-by-step instructions. They live in ~/skills~.
+**Skills are documented workflows** with step-by-step instructions.
 
-- To discover skills: ~fs_list("/skills")~
-- To use a skill: ~fs_read("/skills/<name>/SKILL.md")~, then follow instructions
+**Available skills are listed in the ~\<available_skills\>~ block at the end of this prompt.** Each skill has:
+- ~\<name\>~: identifier
+- ~\<description\>~: what it does
+- ~\<location\>~: path to read (e.g., ~/skills/hello-world/SKILL.md~)
 
-> **When asked to "use a skill" or "check available skills", go to ~/skills~ immediately. Do NOT look in ~/tools~.**
+**To use a skill:**
+1. Look at the ~\<available_skills\>~ block in this prompt
+2. ~fs_read~ the skill's location to get full instructions
+3. Follow the instructions in ~SKILL.md~
+
+> **When asked about \"skills\", refer to the ~\<available_skills\>~ block. Do NOT look in ~/tools~.**
+
 
 ### 3. External Tools (Plugin Capabilities) — ~/tools~
 

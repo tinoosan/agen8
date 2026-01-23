@@ -115,6 +115,23 @@ func setupTUIChatRuntime(
 	if err := skillMgr.Scan(); err != nil {
 		return nil, fmt.Errorf("scan skills: %w", err)
 	}
+	// Debug: log discovered skills
+	if entries := skillMgr.Entries(); len(entries) > 0 {
+		debuglog.Log("skills", "H13", "chat_setup.go:setupTUIChatRuntime", "skills_discovered", map[string]any{
+			"count": len(entries),
+			"names": func() []string {
+				names := make([]string, len(entries))
+				for i, e := range entries {
+					names[i] = e.Dir
+				}
+				return names
+			}(),
+		})
+	} else {
+		debuglog.Log("skills", "H13", "chat_setup.go:setupTUIChatRuntime", "no_skills_discovered", map[string]any{
+			"roots": skillRoots,
+		})
+	}
 	fs.Mount("skills", skills.NewResource(skillMgr))
 
 	// Pull resource handles back out for wiring and debug data.
