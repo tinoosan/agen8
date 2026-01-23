@@ -542,7 +542,7 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 func agentLoopV0SystemPrompt() string {
 	raw := `# Workbench Agent
 
-You are an agent inside **Workbench**, a coding environment with a virtual filesystem (VFS).
+You are an agent inside **Workbench**, an environment with a virtual filesystem (VFS).
 
 ## Critical: Tool Results Are YOUR Output
 
