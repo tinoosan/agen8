@@ -68,6 +68,11 @@ func (m *Model) submitSingle() tea.Cmd {
 		m.openReasoningEffortPicker()
 		return nil
 	}
+	// Intercept `/reasoning-summary` with no value to open a picker (no submission).
+	if strings.EqualFold(txt, "/reasoning-summary") {
+		m.openReasoningSummaryPicker()
+		return nil
+	}
 	// Intercept `/approval` with no args to open the approval picker.
 	if strings.EqualFold(txt, "/approval") {
 		m.openApprovalPicker()
@@ -93,6 +98,11 @@ func (m *Model) submitMultiline() tea.Cmd {
 	// Intercept `/reasoning-effort` with no value to open a picker (no submission).
 	if strings.EqualFold(txt, "/reasoning-effort") {
 		m.openReasoningEffortPicker()
+		return nil
+	}
+	// Intercept `/reasoning-summary` with no value to open a picker (no submission).
+	if strings.EqualFold(txt, "/reasoning-summary") {
+		m.openReasoningSummaryPicker()
 		return nil
 	}
 	// Intercept `/approval` with no args to open the approval picker.

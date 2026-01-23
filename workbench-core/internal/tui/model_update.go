@@ -28,6 +28,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if mm, cmd, ok := m.keyApprovalPrompt(msg); ok {
 		return mm, cmd
 	}
+	if mm, cmd, ok := m.keyReasoningSummaryPicker(msg); ok {
+		return mm, cmd
+	}
 	if mm, cmd, ok := m.keyReasoningEffortPicker(msg); ok {
 		return mm, cmd
 	}
@@ -126,6 +129,47 @@ func (m Model) keyReasoningEffortPicker(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.reasoningEffortPickerSelected--
 		if m.reasoningEffortPickerSelected < 0 {
 			m.reasoningEffortPickerSelected = len(reasoningEffortOptions) - 1
+		}
+		return m, nil, true
+	}
+	return m, nil, true
+}
+
+func (m Model) keyReasoningSummaryPicker(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	if !m.reasoningSummaryPickerOpen {
+		return m, nil, false
+	}
+
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.closeReasoningSummaryPicker()
+		return m, nil, true
+	case tea.KeyEnter:
+		return m, m.selectReasoningSummaryFromPicker(), true
+	case tea.KeyUp:
+		m.reasoningSummaryPickerSelected--
+		if m.reasoningSummaryPickerSelected < 0 {
+			m.reasoningSummaryPickerSelected = len(reasoningSummaryOptions) - 1
+		}
+		return m, nil, true
+	case tea.KeyDown:
+		m.reasoningSummaryPickerSelected++
+		if m.reasoningSummaryPickerSelected >= len(reasoningSummaryOptions) {
+			m.reasoningSummaryPickerSelected = 0
+		}
+		return m, nil, true
+	}
+	switch msg.String() {
+	case "j":
+		m.reasoningSummaryPickerSelected++
+		if m.reasoningSummaryPickerSelected >= len(reasoningSummaryOptions) {
+			m.reasoningSummaryPickerSelected = 0
+		}
+		return m, nil, true
+	case "k":
+		m.reasoningSummaryPickerSelected--
+		if m.reasoningSummaryPickerSelected < 0 {
+			m.reasoningSummaryPickerSelected = len(reasoningSummaryOptions) - 1
 		}
 		return m, nil, true
 	}

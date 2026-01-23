@@ -300,6 +300,97 @@ func TestReasoningEffortPicker_EscClosesWithoutRunning(t *testing.T) {
 	}
 }
 
+func TestReasoningSummaryPicker_OpensOnReasoningSummaryNoValue(t *testing.T) {
+	m := New(context.Background(), &recordingRunnerAny{}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.layout()
+
+	m.single.SetValue("/reasoning-summary")
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := m2.(Model)
+
+	if cmd != nil {
+		t.Fatalf("expected no cmd (should open picker only), got %v", cmd)
+	}
+	if !updated.reasoningSummaryPickerOpen {
+		t.Fatalf("expected reasoningSummaryPickerOpen true")
+	}
+	if updated.turnInFlight {
+		t.Fatalf("expected turnInFlight false (should not submit)")
+	}
+}
+
+func TestReasoningSummaryPicker_SelectRunsReasoningSummaryCommand(t *testing.T) {
+	runner := &recordingRunnerAny{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.layout()
+
+	m.single.SetValue("/reasoning-summary")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	opened := m2.(Model)
+	if !opened.reasoningSummaryPickerOpen {
+		t.Fatalf("expected picker open")
+	}
+
+	m3, _ := opened.Update(tea.KeyMsg{Type: tea.KeyDown})
+	moved := m3.(Model)
+	if !moved.reasoningSummaryPickerOpen {
+		t.Fatalf("expected picker still open")
+	}
+
+	beforeInFlight := moved.turnInFlight
+	m4, cmd := moved.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	afterSelect := m4.(Model)
+
+	if cmd == nil {
+		t.Fatalf("expected cmd to run /reasoning summary <val>, got nil")
+	}
+	if afterSelect.reasoningSummaryPickerOpen {
+		t.Fatalf("expected picker closed after selection")
+	}
+	if afterSelect.turnInFlight != beforeInFlight {
+		t.Fatalf("expected turnInFlight unchanged; before=%v after=%v", beforeInFlight, afterSelect.turnInFlight)
+	}
+
+	msg := cmd()
+	m5, _ := afterSelect.Update(msg)
+	_ = m5.(Model)
+
+	if runner.lastMessage != "/reasoning summary concise" {
+		t.Fatalf("expected runner called with %q, got %q", "/reasoning summary concise", runner.lastMessage)
+	}
+}
+
+func TestReasoningSummaryPicker_EscClosesWithoutRunning(t *testing.T) {
+	runner := &recordingRunnerAny{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.width = 120
+	m.height = 24
+	m.layout()
+
+	m.single.SetValue("/reasoning-summary")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	opened := m2.(Model)
+	if !opened.reasoningSummaryPickerOpen {
+		t.Fatalf("expected picker open")
+	}
+
+	m3, cmd := opened.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	closed := m3.(Model)
+	if cmd != nil {
+		t.Fatalf("expected no cmd on esc, got %v", cmd)
+	}
+	if closed.reasoningSummaryPickerOpen {
+		t.Fatalf("expected picker closed after esc")
+	}
+	if runner.lastMessage != "" {
+		t.Fatalf("expected runner not called, got %q", runner.lastMessage)
+	}
+}
+
 func TestFocus_CtrlATogglesActivityAndFocus(t *testing.T) {
 	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
 	m.showDetails = false

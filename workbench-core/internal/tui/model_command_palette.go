@@ -14,6 +14,7 @@ func (c commandPaletteItem) FilterValue() string { return string(c) }
 var availableCommands = []string{
 	"/model",
 	"/reasoning-effort",
+	"/reasoning-summary",
 	"/approval",
 	"/copy",
 	"/editor",

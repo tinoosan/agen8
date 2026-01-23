@@ -96,11 +96,12 @@ type approvalOp struct {
 }
 
 type preinitStatusMsg struct {
-	workdir         string
-	modelID         string
-	reasoningEffort string
-	dataDir         string
-	err             error
+	workdir          string
+	modelID          string
+	reasoningEffort  string
+	reasoningSummary string
+	dataDir          string
+	err              error
 }
 
 type Model struct {
@@ -217,6 +218,7 @@ type Model struct {
 	workdir          string
 	modelID          string
 	reasoningEffort  string
+	reasoningSummary string
 	webSearchEnabled bool
 	sessionID        string
 	runID            string
@@ -273,6 +275,10 @@ type Model struct {
 	// Reasoning effort picker (opened via `/reasoning effort` with no value)
 	reasoningEffortPickerOpen     bool
 	reasoningEffortPickerSelected int
+
+	// Reasoning summary picker (/reasoning summary command)
+	reasoningSummaryPickerOpen     bool
+	reasoningSummaryPickerSelected int
 
 	// Help modal (Ctrl+P)
 	helpModalOpen  bool

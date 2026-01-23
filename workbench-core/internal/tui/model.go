@@ -261,13 +261,15 @@ func (m Model) Init() tea.Cmd {
 				}
 			}
 			reasoningEffort := parseReasoningEffortFromReasoningInfo(ro)
+			reasoningSummary := parseReasoningSummaryFromReasoningInfo(ro)
 			// DataDir is best-effort; never block the UI on it.
 			_ = ddErr
 			return preinitStatusMsg{
-				workdir:         strings.TrimSpace(wd),
-				modelID:         strings.TrimSpace(modelID),
-				reasoningEffort: strings.TrimSpace(reasoningEffort),
-				dataDir:         strings.TrimSpace(dd),
+				workdir:          strings.TrimSpace(wd),
+				modelID:          strings.TrimSpace(modelID),
+				reasoningEffort:  strings.TrimSpace(reasoningEffort),
+				reasoningSummary: strings.TrimSpace(reasoningSummary),
+				dataDir:          strings.TrimSpace(dd),
 			}
 		},
 	)
@@ -286,6 +288,22 @@ func parseReasoningEffortFromReasoningInfo(s string) string {
 		}
 		v := strings.TrimSpace(t[len("effort:"):])
 		// Host prints "(default)" when unset; treat as empty so UI can show a default.
+		if strings.EqualFold(v, "(default)") {
+			return ""
+		}
+		return v
+	}
+	return ""
+}
+
+func parseReasoningSummaryFromReasoningInfo(s string) string {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for _, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if !strings.HasPrefix(strings.ToLower(t), "summary:") {
+			continue
+		}
+		v := strings.TrimSpace(t[len("summary:"):])
 		if strings.EqualFold(v, "(default)") {
 			return ""
 		}
@@ -642,6 +660,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if strings.TrimSpace(msg.reasoningEffort) != "" {
 			m.reasoningEffort = strings.TrimSpace(msg.reasoningEffort)
+		}
+		if strings.TrimSpace(msg.reasoningSummary) != "" {
+			m.reasoningSummary = strings.TrimSpace(msg.reasoningSummary)
 		}
 		// If picker is open and workdir arrived, populate it.
 		if m.filePickerOpen && strings.TrimSpace(m.workdir) != "" && m.filePickerWorkdir == "" {
@@ -1191,6 +1212,9 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		if v := strings.TrimSpace(ev.Data["effort"]); v != "" {
 			m.reasoningEffort = v
 		}
+		if v := strings.TrimSpace(ev.Data["summary"]); v != "" {
+			m.reasoningSummary = v
+		}
 	}
 	// Web search can be toggled at runtime via the host /web command.
 	if ev.Type == "web.changed" {
@@ -1206,6 +1230,9 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	if ev.Type == "reasoning.info" {
 		if v := parseReasoningEffortFromReasoningInfo(ev.Data["text"]); strings.TrimSpace(v) != "" {
 			m.reasoningEffort = strings.TrimSpace(v)
+		}
+		if u := parseReasoningSummaryFromReasoningInfo(ev.Data["text"]); strings.TrimSpace(u) != "" {
+			m.reasoningSummary = strings.TrimSpace(u)
 		}
 	}
 	// Workdir is discovered via host.mounted and updated via /cd at runtime.

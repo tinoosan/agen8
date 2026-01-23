@@ -425,6 +425,9 @@ func (m Model) renderInput() string {
 	if p := m.renderReasoningEffortPicker(); p != "" {
 		contentParts = append(contentParts, "", p)
 	}
+	if p := m.renderReasoningSummaryPicker(); p != "" {
+		contentParts = append(contentParts, "", p)
+	}
 	if p := m.renderApprovalPicker(); p != "" {
 		contentParts = append(contentParts, "", p)
 	}
@@ -589,6 +592,46 @@ func (m Model) renderReasoningEffortPicker() string {
 		Foreground(lipgloss.Color("#eaeaea"))
 
 	return pickerStyle.Render(rendered)
+}
+
+func (m Model) renderReasoningSummaryPicker() string {
+	if !m.reasoningSummaryPickerOpen {
+		return ""
+	}
+
+	outerW := max(20, m.width-8)
+	contentW := max(1, outerW-4)
+
+	items := make([]kit.Item, len(reasoningSummaryOptions))
+	for i, opt := range reasoningSummaryOptions {
+		items[i] = reasoningSummaryItem(opt)
+	}
+
+	selected := m.reasoningSummaryPickerSelected
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= len(items) {
+		selected = len(items) - 1
+	}
+
+	opts := kit.SelectorOptions{
+		Width:         contentW,
+		MaxHeight:     len(items),
+		SelectedIndex: selected,
+		ShowPrefix:    true,
+	}
+
+	rendered := kit.RenderSelector(items, opts)
+
+	style := lipgloss.NewStyle().
+		Width(contentW).
+		Padding(0, 1).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#6bbcff")).
+		Foreground(lipgloss.Color("#eaeaea"))
+
+	return style.Render(rendered)
 }
 
 func (m Model) renderApprovalPicker() string {
