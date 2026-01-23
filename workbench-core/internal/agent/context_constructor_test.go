@@ -9,6 +9,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/resources"
+	"github.com/tinoosan/workbench-core/internal/skills"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
@@ -168,5 +169,71 @@ func TestContextConstructor_AttachmentsIncludedAcrossSteps(t *testing.T) {
 	}
 	if !strings.Contains(out2, "## Referenced Files") || !strings.Contains(out2, "module example.com/foo") {
 		t.Fatalf("expected referenced files section in step2 prompt, got:\n%s", out2)
+	}
+}
+
+func TestContextConstructor_SkillsInjectedIntoPrompt(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+
+	_, run, err := store.CreateSession(cfg, "constructor skills test", 10)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	wsRes, err := resources.NewWorkspace(cfg, run.RunId)
+	if err != nil {
+		t.Fatalf("NewWorkspace: %v", err)
+	}
+
+	// Create a temporary skills directory with a test skill.
+	skillsDir := t.TempDir()
+	skillDir := skillsDir + "/hello-world"
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatalf("MkdirAll skill dir: %v", err)
+	}
+	skillContent := `---
+name: hello-world
+description: Says hello to the user
+---
+# Hello World Skill
+
+Run the command: echo "Hello"
+`
+	if err := os.WriteFile(skillDir+"/SKILL.md", []byte(skillContent), 0644); err != nil {
+		t.Fatalf("WriteFile SKILL.md: %v", err)
+	}
+
+	// Create and scan skills manager.
+	skillMgr := skills.NewManager([]string{skillsDir})
+	if err := skillMgr.Scan(); err != nil {
+		t.Fatalf("skillMgr.Scan: %v", err)
+	}
+
+	fs := vfs.NewFS()
+	fs.Mount(vfs.MountScratch, wsRes)
+
+	cc := &ContextConstructor{
+		FS:            fs,
+		Cfg:           cfg,
+		RunID:         run.RunId,
+		SkillsManager: skillMgr,
+	}
+
+	out, err := cc.SystemPrompt(context.Background(), "base", 1)
+	if err != nil {
+		t.Fatalf("SystemPrompt: %v", err)
+	}
+
+	// Verify skills are injected.
+	if !strings.Contains(out, "<available_skills>") {
+		t.Fatalf("expected <available_skills> tag in prompt, got:\n%s", out)
+	}
+	if !strings.Contains(out, "hello-world") {
+		t.Fatalf("expected 'hello-world' skill name in prompt, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Says hello to the user") {
+		t.Fatalf("expected skill description in prompt, got:\n%s", out)
+	}
+	if !strings.Contains(out, "/skills/hello-world/SKILL.md") {
+		t.Fatalf("expected skill location in prompt, got:\n%s", out)
 	}
 }
