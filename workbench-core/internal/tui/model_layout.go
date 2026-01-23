@@ -498,18 +498,13 @@ func (m Model) renderCommandPalette() string {
 		return ""
 	}
 
-	// Limit displayed matches to 6 for readability.
 	maxDisplay := 6
-	displayMatches := m.commandPaletteMatches
-	if len(displayMatches) > maxDisplay {
-		displayMatches = displayMatches[:maxDisplay]
-	}
 
 	outerW := max(20, m.width-8)
 	contentW := max(1, outerW-4)
 
-	items := make([]kit.Item, len(displayMatches))
-	for i, cmd := range displayMatches {
+	items := make([]kit.Item, len(m.commandPaletteMatches))
+	for i, cmd := range m.commandPaletteMatches {
 		items[i] = commandPaletteItem(cmd)
 	}
 
@@ -529,6 +524,7 @@ func (m Model) renderCommandPalette() string {
 
 	opts := kit.SelectorOptions{
 		Width:         contentW,
+		MaxHeight:     maxDisplay,
 		SelectedIndex: selected,
 		ShowPrefix:    true,
 		Styles: kit.SelectorStyles{
@@ -575,8 +571,10 @@ func (m Model) renderReasoningEffortPicker() string {
 		selected = len(items) - 1
 	}
 
+	maxHeight := 6
 	opts := kit.SelectorOptions{
 		Width:         contentW,
+		MaxHeight:     maxHeight,
 		SelectedIndex: selected,
 		ShowPrefix:    true,
 	}
@@ -614,8 +612,10 @@ func (m Model) renderApprovalPicker() string {
 		selected = len(items) - 1
 	}
 
+	maxHeight := 6
 	opts := kit.SelectorOptions{
 		Width:         contentW,
+		MaxHeight:     maxHeight,
 		SelectedIndex: selected,
 		ShowPrefix:    true,
 		Spacing:       1,

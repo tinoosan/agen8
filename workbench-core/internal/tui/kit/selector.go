@@ -35,17 +35,29 @@ func RenderSelector(items []Item, opts SelectorOptions) string {
 
 	styles := opts.Styles.withDefaults()
 
-	visibleItems := items
-	if opts.MaxHeight > 0 && len(visibleItems) > opts.MaxHeight {
-		visibleItems = visibleItems[:opts.MaxHeight]
-	}
-
 	selected := opts.SelectedIndex
 	if selected < 0 {
 		selected = 0
 	}
-	if selected >= len(visibleItems) {
-		selected = len(visibleItems) - 1
+	if selected >= len(items) {
+		selected = len(items) - 1
+	}
+
+	scrollOffset := 0
+	visibleItems := items
+	selectedInView := selected
+	if opts.MaxHeight > 0 && len(items) > opts.MaxHeight {
+		maxDisplay := opts.MaxHeight
+		start := selected - maxDisplay/2
+		if start < 0 {
+			start = 0
+		}
+		if start+maxDisplay > len(items) {
+			start = len(items) - maxDisplay
+		}
+		scrollOffset = start
+		visibleItems = items[start : start+maxDisplay]
+		selectedInView = selected - scrollOffset
 	}
 
 	selectedPrefix := "› "
@@ -60,7 +72,7 @@ func RenderSelector(items []Item, opts SelectorOptions) string {
 		prefix := unselectedPrefix
 		titleStyle := styles.UnselectedTitle
 		descStyle := styles.UnselectedDesc
-		if idx == selected {
+		if idx == selectedInView {
 			prefix = selectedPrefix
 			titleStyle = styles.SelectedTitle
 			descStyle = styles.SelectedDesc
