@@ -728,8 +728,9 @@ func TestCommandPalette_FiltersOnTyping(t *testing.T) {
 	}
 }
 
-func TestCommandPalette_EnterAutocompletesWithoutSubmitting(t *testing.T) {
-	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+func TestCommandPalette_EnterSubmitsSelectedCommand(t *testing.T) {
+	runner := &recordingRunnerAny{}
+	m := New(context.Background(), runner, make(chan events.Event))
 	m.layout()
 
 	// Type "/mo" to get "/model" as first match.
@@ -747,28 +748,25 @@ func TestCommandPalette_EnterAutocompletesWithoutSubmitting(t *testing.T) {
 		t.Fatalf("expected selected index 0, got %d", updated3.commandPaletteSelected)
 	}
 
-	// Press Enter - should autocomplete to "/model" but NOT submit.
 	m5, cmd := updated3.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated4 := m5.(Model)
 
-	if updated4.single.Value() != "/model" {
-		t.Fatalf("expected input value '/model', got %q", updated4.single.Value())
-	}
 	if updated4.commandPaletteOpen {
 		t.Fatalf("expected commandPaletteOpen false after Enter")
 	}
-	if updated4.turnInFlight {
-		t.Fatalf("expected turnInFlight false (should not submit)")
+	if !updated4.turnInFlight {
+		t.Fatalf("expected turnInFlight true (command should submit)")
 	}
-	if cmd != nil {
-		t.Fatalf("expected no cmd (should not submit), got %v", cmd)
+	if cmd == nil {
+		t.Fatalf("expected cmd to run /model, got nil")
 	}
 
-	// After autocompletion, typing args (e.g. Space) should NOT reopen the palette.
-	m6, _ := updated4.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
-	updated5 := m6.(Model)
-	if updated5.commandPaletteOpen {
-		t.Fatalf("expected commandPaletteOpen false after typing space following autocomplete")
+	msg := cmd()
+	m6, _ := updated4.Update(msg)
+	_ = m6.(Model)
+
+	if runner.lastMessage != "/model" {
+		t.Fatalf("expected runner called with %q, got %q", "/model", runner.lastMessage)
 	}
 }
 
@@ -829,7 +827,8 @@ func TestCommandPalette_EscClosesPalette(t *testing.T) {
 }
 
 func TestCommandPalette_PreservesTrailingArgs(t *testing.T) {
-	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	runner := &recordingRunnerAny{}
+	m := New(context.Background(), runner, make(chan events.Event))
 	m.layout()
 
 	// Type "/mo arg1 arg2" - should preserve args after autocomplete.
@@ -852,12 +851,26 @@ func TestCommandPalette_PreservesTrailingArgs(t *testing.T) {
 		t.Fatalf("expected input '/mo arg', got %q", updated7.single.Value())
 	}
 
-	// Press Enter - should autocomplete to "/model arg".
-	m9, _ := updated7.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Press Enter - should submit the command "/model arg".
+	m9, cmd := updated7.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated8 := m9.(Model)
 
-	if updated8.single.Value() != "/model arg" {
-		t.Fatalf("expected input '/model arg', got %q", updated8.single.Value())
+	if updated8.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen false after Enter")
+	}
+	if cmd == nil {
+		t.Fatalf("expected cmd to run /model arg, got nil")
+	}
+	if !updated8.turnInFlight {
+		t.Fatalf("expected turnInFlight true")
+	}
+
+	msg := cmd()
+	m10, _ := updated8.Update(msg)
+	_ = m10.(Model)
+
+	if runner.lastMessage != "/model arg" {
+		t.Fatalf("expected runner called with %q, got %q", "/model arg", runner.lastMessage)
 	}
 }
 

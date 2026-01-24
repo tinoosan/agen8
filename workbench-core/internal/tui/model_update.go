@@ -682,9 +682,15 @@ func (m Model) keyCommandPaletteNav(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	case tea.KeyEnter:
-		// Autocomplete the selected command.
+		// Autocomplete the selected command then submit it immediately.
 		m.autocompleteCommand()
-		return m, nil, true
+		var cmd tea.Cmd
+		if m.isMulti {
+			cmd = m.submitMultiline()
+		} else {
+			cmd = m.submitSingle()
+		}
+		return m, cmd, true
 	}
 	return m, nil, false
 }
