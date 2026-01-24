@@ -74,6 +74,7 @@ func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, m
 	defer stopSignals()
 
 	evCh := make(chan events.Event, 2048)
+	boolp := func(b bool) *bool { return &b }
 	lazy := &lazyNewSessionTurnRunner{
 		ctx:         runCtx,
 		cfg:         cfg,
@@ -83,6 +84,29 @@ func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, m
 		goal:        strings.TrimSpace(goal),
 		evCh:        evCh,
 	}
+	// Emit initial approvals + plan mode state before any run is created.
+	mode := strings.TrimSpace(resolved.ApprovalsMode)
+	if mode == "" {
+		mode = "enabled"
+	}
+	lazy.emitPreInit(events.Event{
+		Type:    "approvals.info",
+		Message: "Approval mode",
+		Data:    map[string]string{"mode": mode},
+		Store:   boolp(false),
+		Console: boolp(false),
+	})
+	planState := "off"
+	if resolved.PlanMode {
+		planState = "on"
+	}
+	lazy.emitPreInit(events.Event{
+		Type:    "plan.mode.changed",
+		Message: "Plan mode",
+		Data:    map[string]string{"state": planState},
+		Store:   boolp(false),
+		Console: boolp(false),
+	})
 	wasInterrupted := false
 
 	// If we created a run, ensure it transitions to a terminal state and is persisted.
@@ -237,6 +261,28 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 			"runId":        run.RunId,
 			"userId":       strings.TrimSpace(resolved.UserID),
 		},
+		Console: boolp(false),
+	})
+
+	// Emit initial approvals + plan mode state for the TUI.
+	mode := strings.TrimSpace(resolved.ApprovalsMode)
+	if mode == "" {
+		mode = "enabled"
+	}
+	mustEmit(context.Background(), events.Event{
+		Type:    "approvals.info",
+		Message: "Approval mode",
+		Data:    map[string]string{"mode": mode},
+		Console: boolp(false),
+	})
+	planState := "off"
+	if resolved.PlanMode {
+		planState = "on"
+	}
+	mustEmit(context.Background(), events.Event{
+		Type:    "plan.mode.changed",
+		Message: "Plan mode",
+		Data:    map[string]string{"state": planState},
 		Console: boolp(false),
 	})
 
@@ -843,6 +889,28 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 			"runId":        run.RunId,
 			"userId":       strings.TrimSpace(r.opts.UserID),
 		},
+		Console: boolp(false),
+	})
+
+	// Emit initial approvals + plan mode state for the TUI.
+	mode := strings.TrimSpace(r.opts.ApprovalsMode)
+	if mode == "" {
+		mode = "enabled"
+	}
+	r.mustEmit(context.Background(), events.Event{
+		Type:    "approvals.info",
+		Message: "Approval mode",
+		Data:    map[string]string{"mode": mode},
+		Console: boolp(false),
+	})
+	planState := "off"
+	if r.opts.PlanMode {
+		planState = "on"
+	}
+	r.mustEmit(context.Background(), events.Event{
+		Type:    "plan.mode.changed",
+		Message: "Plan mode",
+		Data:    map[string]string{"state": planState},
 		Console: boolp(false),
 	})
 

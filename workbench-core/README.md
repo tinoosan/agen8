@@ -29,7 +29,7 @@ The default run opens a Bubble Tea-powered TUI where each message you submit bec
 
 Most entrypoints live under `cmd/workbench/cmd` and use Cobra. Key commands are:
 
-- `workbench` – starts a fresh interactive session with configurable goal/title/context size.
+- `workbench` – starts a fresh interactive session with configurable context size.
 - `workbench resume <sessionId>` – resumes an existing session by creating a new run.
 - `workbench list sessions` – lists all session IDs stored under `data`.
 - `workbench list runs <sessionId>` – shows runs (and their statuses) for one session.
@@ -44,7 +44,6 @@ All runtime configuration (currently just `dataDir`) is defined in `internal/con
 - `--data-dir` – base directory where runs, sessions, results, workspace, and history live (priority: `--data-dir`, env `WORKBENCH_DATA_DIR`, default: `~/.workbench` or `$XDG_STATE_HOME/workbench`).
 - `--workdir` / `WORKBENCH_WORKDIR` – override the directory mounted at `/project` inside the sandbox.
 - `--context-bytes` – limits the token context saved per run (must be > 0).
-- `--title` / `--goal` – defaults used when creating new runs.
 
 The `effectiveConfig()` helper resolves the final config (including `dataDir`) before each command runs.
 

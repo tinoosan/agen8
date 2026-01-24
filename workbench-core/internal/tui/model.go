@@ -231,6 +231,12 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	m.streamingItemIdx = -1
 	m.thinkingItemIdx = -1
 	m.approvalsMode = "enabled"
+	// #region agent log
+	logDebug("H3", "model.go:New", "init-state", map[string]interface{}{
+		"approvalsMode": m.approvalsMode,
+		"planMode":      m.planMode,
+	})
+	// #endregion agent log
 	return m
 }
 
@@ -1225,6 +1231,32 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		if v := strings.TrimSpace(ev.Data["mode"]); v != "" {
 			m.approvalsMode = v
 		}
+		// #region agent log
+		logDebug("H1", "model.go:onEvent", "approvals.changed", map[string]interface{}{
+			"mode": strings.TrimSpace(ev.Data["mode"]),
+		})
+		// #endregion agent log
+	}
+	// Approval mode can be initialized from approvals.info event.
+	if ev.Type == "approvals.info" {
+		if v := strings.TrimSpace(ev.Data["mode"]); v != "" {
+			m.approvalsMode = v
+		}
+		// #region agent log
+		logDebug("H1", "model.go:onEvent", "approvals.info", map[string]interface{}{
+			"mode": strings.TrimSpace(ev.Data["mode"]),
+		})
+		// #endregion agent log
+	}
+	// Plan mode can change via /plan command.
+	if ev.Type == "plan.mode.changed" {
+		state := strings.ToLower(strings.TrimSpace(ev.Data["state"]))
+		m.planMode = state == "on" || state == "true" || state == "1"
+		// #region agent log
+		logDebug("H1", "model.go:onEvent", "plan.mode.changed", map[string]interface{}{
+			"state": state,
+		})
+		// #endregion agent log
 	}
 	// Fallback: /reasoning (no args) emits reasoning.info with a text block.
 	if ev.Type == "reasoning.info" {

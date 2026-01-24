@@ -41,15 +41,11 @@ var resumeCmd = &cobra.Command{
 			app.WithPlanMode(planMode),
 			app.WithModel(modelOverride),
 			app.WithWorkDir(workDir),
-			app.WithMaxSteps(maxSteps),
 			app.WithTraceBytes(maxTraceBytes),
 			app.WithMemoryBytes(maxMemoryBytes),
 			app.WithProfileBytes(maxProfileBytes),
 			app.WithRecentHistoryPairs(recentHistoryPairs),
-			app.WithUserID(userID),
 			app.WithIncludeHistoryOps(includeHistoryOps),
-			app.WithPricingUSDPerMTokens(priceInPerM, priceOutPerM),
-			app.WithPricingFile(pricingFile),
 		}
 		return app.RunChatTUI(cmd.Context(), cfg, run, opts...)
 	},

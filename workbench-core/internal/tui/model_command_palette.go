@@ -19,8 +19,6 @@ var availableCommands = []string{
 	"/copy",
 	"/editor",
 	"/cd",
-	"/pwd",
-	"/project",
 	"/plan",
 }
 

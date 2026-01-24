@@ -386,7 +386,7 @@ func (m *Model) refreshPlanView() {
 		}
 	}
 	help := "_Ctrl+Alt+P toggles tabs · Ctrl+A toggles sidebar_\n\n"
-	content := currentStep + body + "\n\n" + help
+		content := currentStep + body + "\n\n" + help
 	if strings.TrimSpace(content) == "" {
 		content = "_Plan view is preparing…_"
 	}

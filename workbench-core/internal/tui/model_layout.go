@@ -332,12 +332,23 @@ func (m Model) renderInput() string {
 	}
 	modelIDDisplay := modelID
 
+	// Use orange for tag keys when in plan mode; keep values white.
+	tagKeyStyle := kit.CloneStyle(kit.StyleStatusKey)
+	tagValueStyle := kit.CloneStyle(kit.StyleStatusValue)
+	if m.planMode {
+		tagKeyStyle = kit.CloneStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#ffb347")).Bold(true))
+	}
+
 	eff := strings.TrimSpace(m.reasoningEffort)
 	effortLabel := ""
 	if eff != "" && cost.SupportsReasoningEffort(modelID) {
 		effortLabel = kit.RenderTag(kit.TagOptions{
 			Key:   "effort",
 			Value: eff,
+			Styles: kit.TagStyles{
+				KeyStyle:   tagKeyStyle,
+				ValueStyle: tagValueStyle,
+			},
 		})
 	}
 
@@ -348,16 +359,28 @@ func (m Model) renderInput() string {
 	webLabel := kit.RenderTag(kit.TagOptions{
 		Key:   "web",
 		Value: webState,
+		Styles: kit.TagStyles{
+			KeyStyle:   tagKeyStyle,
+			ValueStyle: tagValueStyle,
+		},
 	})
 
 	approvalLabel := kit.RenderTag(kit.TagOptions{
 		Key:   "approval",
 		Value: defaultIfEmpty(strings.TrimSpace(m.approvalsMode), "enabled"),
+		Styles: kit.TagStyles{
+			KeyStyle:   tagKeyStyle,
+			ValueStyle: tagValueStyle,
+		},
 	})
 
 	modelLabel := kit.RenderTag(kit.TagOptions{
 		Key:   "model",
 		Value: modelIDDisplay,
+		Styles: kit.TagStyles{
+			KeyStyle:   tagKeyStyle,
+			ValueStyle: tagValueStyle,
+		},
 	})
 
 	ids := []string{}

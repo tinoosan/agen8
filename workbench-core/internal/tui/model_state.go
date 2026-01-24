@@ -220,6 +220,7 @@ type Model struct {
 	reasoningEffort  string
 	reasoningSummary string
 	webSearchEnabled bool
+	planMode         bool
 	sessionID        string
 	runID            string
 

@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -682,17 +684,95 @@ func (m Model) keyCommandPaletteNav(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	case tea.KeyEnter:
-		// Autocomplete the selected command then submit it immediately.
-		m.autocompleteCommand()
-		var cmd tea.Cmd
-		if m.isMulti {
-			cmd = m.submitMultiline()
-		} else {
-			cmd = m.submitSingle()
+		// Autocomplete the selected command then either open a picker or submit.
+		selected := ""
+		if len(m.commandPaletteMatches) > 0 {
+			idx := m.commandPaletteSelected
+			if idx < 0 {
+				idx = 0
+			}
+			if idx >= len(m.commandPaletteMatches) {
+				idx = len(m.commandPaletteMatches) - 1
+			}
+			selected = m.commandPaletteMatches[idx]
 		}
-		return m, cmd, true
+
+		// #region agent log
+		logDebug("H1", "model_update.go:keyCommandPaletteNav:enter", "pre-clear", map[string]interface{}{
+			"selected":  selected,
+			"single":    m.single.Value(),
+			"multiline": m.multiline.Value(),
+			"isMulti":   m.isMulti,
+		})
+		// #endregion agent log
+
+		m.autocompleteCommand()
+
+		switch selected {
+		case "/model":
+			// #region agent log
+			logDebug("H2", "model_update.go:keyCommandPaletteNav:enter", "branch-model", map[string]interface{}{"single": m.single.Value()})
+			// #endregion agent log
+			m.clearCurrentInput()
+			m.openModelPicker()
+			return m, nil, true
+		case "/reasoning-effort":
+			// #region agent log
+			logDebug("H2", "model_update.go:keyCommandPaletteNav:enter", "branch-reasoning-effort", map[string]interface{}{"single": m.single.Value()})
+			// #endregion agent log
+			m.clearCurrentInput()
+			m.openReasoningEffortPicker()
+			return m, nil, true
+		case "/reasoning-summary":
+			// #region agent log
+			logDebug("H2", "model_update.go:keyCommandPaletteNav:enter", "branch-reasoning-summary", map[string]interface{}{"single": m.single.Value()})
+			// #endregion agent log
+			m.clearCurrentInput()
+			m.openReasoningSummaryPicker()
+			return m, nil, true
+		case "/approval":
+			// #region agent log
+			logDebug("H2", "model_update.go:keyCommandPaletteNav:enter", "branch-approval", map[string]interface{}{"single": m.single.Value()})
+			// #endregion agent log
+			m.clearCurrentInput()
+			m.openApprovalPicker()
+			return m, nil, true
+		default:
+			// #region agent log
+			logDebug("H1", "model_update.go:keyCommandPaletteNav:enter", "post-clear", map[string]interface{}{
+				"single":    m.single.Value(),
+				"multiline": m.multiline.Value(),
+			})
+			// #endregion agent log
+			var cmd tea.Cmd
+			if m.isMulti {
+				cmd = m.submitMultiline()
+			} else {
+				cmd = m.submitSingle()
+			}
+			return m, cmd, true
+		}
 	}
 	return m, nil, false
+}
+
+func logDebug(hypothesisId, location, message string, data map[string]interface{}) {
+	f, err := os.OpenFile("/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	payload := map[string]interface{}{
+		"sessionId":    "debug-session",
+		"runId":        "debug-run",
+		"hypothesisId": hypothesisId,
+		"location":     location,
+		"message":      message,
+		"data":         data,
+		"timestamp":    time.Now().UnixMilli(),
+	}
+	enc := json.NewEncoder(f)
+	_ = enc.Encode(payload)
 }
 
 func (m Model) keyInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
