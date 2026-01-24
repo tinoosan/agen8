@@ -65,13 +65,6 @@ func (d modelPickerDelegate) Render(w io.Writer, m list.Model, index int, item l
 func (m *Model) openModelPicker() tea.Cmd {
 	m.modelPickerOpen = true
 
-	// #region agent log
-	logDebug("H2", "model_model_picker.go:openModelPicker", "picker-open", map[string]interface{}{
-		"single":    m.single.Value(),
-		"multiline": m.multiline.Value(),
-	})
-	// #endregion agent log
-
 	ids := cost.SupportedModels()
 	items := make([]list.Item, 0, len(ids))
 	for _, id := range ids {

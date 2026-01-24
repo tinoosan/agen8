@@ -31,13 +31,6 @@ func (m *Model) openReasoningEffortPicker() {
 	}
 	m.reasoningEffortPickerSelected = sel
 	m.layout()
-
-	// #region agent log
-	logDebug("H2", "model_reasoning_effort_picker.go:openReasoningEffortPicker", "picker-open", map[string]interface{}{
-		"single":    m.single.Value(),
-		"multiline": m.multiline.Value(),
-	})
-	// #endregion agent log
 }
 
 func (m *Model) closeReasoningEffortPicker() {
