@@ -683,7 +683,14 @@ func (m Model) keyTogglePlanMode(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.focus = focusInput
 	}
 	m.layout()
-	return m, nil, true
+	return m, func() tea.Msg {
+		state := "off"
+		if m.planMode {
+			state = "on"
+		}
+		final, err := m.runner.RunTurn(m.ctx, "/plan "+state)
+		return turnDoneMsg{final: final, err: err, preserveScroll: true}
+	}, true
 }
 
 func (m Model) keyCommandPaletteNav(msg tea.KeyMsg) (Model, tea.Cmd, bool) {

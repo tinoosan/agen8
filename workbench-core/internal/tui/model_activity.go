@@ -385,7 +385,7 @@ func (m *Model) refreshPlanView() {
 			body = highlighted
 		}
 	}
-	help := "_Ctrl+] toggles tabs · Ctrl+A toggles sidebar_\n\n"
+	help := "_Ctrl+] toggles tabs · Ctrl+A toggles sidebar · /plan edit opens /plan/PLAN.md_\n\n"
 	content := currentStep + body + "\n\n" + help
 	if strings.TrimSpace(content) == "" {
 		content = "_Plan view is preparing…_"

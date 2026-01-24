@@ -116,6 +116,7 @@ func (m *Model) helpModalContent() string {
 		"  /reasoning-summary  open summary picker (off|auto|concise|detailed)",
 		"  /editor <path>   edit a workdir file in $EDITOR",
 		"  /cd <path>       change workdir",
+		"  /plan edit       edit /plan/PLAN.md (narrative plan)",
 		"  /pwd             show workdir",
 		"  /project         alias for /pwd",
 		"",

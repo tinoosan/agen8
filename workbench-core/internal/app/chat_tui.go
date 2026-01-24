@@ -488,6 +488,19 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 		return "", true, nil
 	case "plan":
 		val := strings.ToLower(strings.TrimSpace(arg))
+		if val == "edit" || val == "open" {
+			r.emitPreInit(events.Event{
+				Type:    "ui.editor.open",
+				Message: "Open plan editor",
+				Data: map[string]string{
+					"vpath": "/plan/PLAN.md",
+					"path":  "PLAN.md",
+				},
+				Store:   boolp(false),
+				Console: boolp(false),
+			})
+			return "", true, nil
+		}
 		newState := r.opts.PlanMode
 		switch val {
 		case "":
@@ -497,7 +510,7 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 		case "off", "false", "0":
 			newState = false
 		default:
-			return "Usage: /plan [on|off]", true, nil
+			return "Usage: /plan [on|off|edit]", true, nil
 		}
 		r.opts.PlanMode = newState
 		state := "off"
@@ -1639,6 +1652,19 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		return "web search: " + state, true
 	case "plan":
 		val := strings.ToLower(strings.TrimSpace(arg))
+		if val == "edit" || val == "open" {
+			r.mustEmit(context.Background(), events.Event{
+				Type:    "ui.editor.open",
+				Message: "Open plan editor",
+				Data: map[string]string{
+					"vpath": "/plan/PLAN.md",
+					"path":  "PLAN.md",
+				},
+				Store:   boolp(false),
+				Console: boolp(false),
+			})
+			return "", true
+		}
 		newState := r.planMode
 		switch val {
 		case "":
@@ -1648,7 +1674,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		case "off", "false", "0":
 			newState = false
 		default:
-			return "Usage: /plan [on|off]", true
+			return "Usage: /plan [on|off|edit]", true
 		}
 		r.opts.PlanMode = newState
 		r.planMode = newState

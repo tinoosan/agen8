@@ -448,7 +448,12 @@ func setupTUIChatRuntime(
 			StoreData: storeReq,
 		})
 
-		resp := executor.Exec(ctx, req)
+		resp := types.HostOpResponse{}
+		if guard := enforcePlanChecklist(executor.FS, req); guard != nil {
+			resp = *guard
+		} else {
+			resp = executor.Exec(ctx, req)
+		}
 		if resp.Ok && (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) {
 			artifactIndex.ObserveWrite(req.Path)
 		}

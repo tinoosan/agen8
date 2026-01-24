@@ -627,12 +627,13 @@ func agentLoopV0SystemPrompt() string {
         COMPLEX TASKS REQUIRE A PLAN.
         1. INITIALIZATION: If the user request implies multiple steps, create a Markdown checklist at "/plan/HEAD.md" before any fs_write/fs_shell/fun calls.
         2. FORMAT: The checklist must use "- [ ]" / "- [x]" tokens for each actionable step (e.g., "- [ ] Analyze requirements", "- [ ] Implement feature", "- [ ] Verify results").
-        3. GATE: Without a checklist at "/plan/HEAD.md", do not execute side-effect tools (fs_write, shell_exec, etc.).
-        4. EXECUTION: After each step completes, overwrite "/plan/HEAD.md" with the updated checklist, marking done items with "- [x]".
-        5. ADAPTATION: If the plan evolves, immediately rewrite "/plan/HEAD.md" so the checklist remains the single source of truth.
+        3. NARRATIVE: Use "/plan/PLAN.md" for prose/narrative planning; it does NOT satisfy the checklist gate.
+        4. GATE: Without a checklist at "/plan/HEAD.md", do not execute side-effect tools (fs_write, shell_exec, etc.).
+        5. EXECUTION: After each step completes, overwrite "/plan/HEAD.md" with the updated checklist, marking done items with "- [x]".
+        6. ADAPTATION: If the plan evolves, immediately rewrite "/plan/HEAD.md" so the checklist remains the single source of truth.
       </rule>
-      <rule id="planning.externalize">Plans must live in "/plan/HEAD.md"; don’t keep plan reasoning solely in your head.</rule>
-      <rule id="planning.visibility">Whenever asked about planning, direct the conversation to the checklist at "/plan/HEAD.md"—the mount is always available via fs_list.</rule>
+      <rule id="planning.externalize">Plans must live in "/plan/PLAN.md" (narrative) and "/plan/HEAD.md" (checklist); don’t keep plan reasoning solely in your head.</rule>
+      <rule id="planning.visibility">Whenever asked about planning, point to "/plan/HEAD.md" for the checklist and "/plan/PLAN.md" for narrative context—both mounts are always available via fs_list.</rule>
     </planning>
     <rule id="tool_results">Tool results are YOUR output, not user input.</rule>
     <rule id="skills_vs_tools">Skills live under /skills (see SKILL.md) and are not tools; plugins belong to /tools.</rule>
@@ -654,7 +655,7 @@ func agentLoopV0SystemPrompt() string {
       <op name="trace_events_summary">Summarize trace events.</op>
     </direct_ops>
     <skills>Refer to the <available_skills> block below and fs_read /skills/<skill>/SKILL.md to follow documented workflows.</skills>
-    <planning>Plans go in /plan/HEAD.md as Markdown checklists; start each task with "- [ ]" (e.g., "- [ ] Analyze requirements"), update completed rows to "- [x]", and consult the checklist before touching tools.</planning>
+    <planning>Use /plan/PLAN.md for narrative planning and /plan/HEAD.md for checklist execution. The checklist must be Markdown "- [ ]"/"- [x]" items and must be updated as steps complete or change.</planning>
     <external_tools>Use tool_run only after inspecting /tools/<toolId> manifests; prefer direct ops, skills, and /plan first.</external_tools>
   </capabilities>
   <vfs>
@@ -663,7 +664,7 @@ func agentLoopV0SystemPrompt() string {
     <mount path="/log">Event log for this turn.</mount>
     <mount path="/memory">Run-scoped working memory.</mount>
     <mount path="/skills">These are YOUR skills. ALWAYS check /skills before /tools (SKILL.md).</mount>
-    <mount path="/plan">Planning workspace for complex tasks. Write plans as /plan/HEAD.md checklists.</mount>
+    <mount path="/plan">Planning workspace for complex tasks. /plan/PLAN.md is narrative; /plan/HEAD.md is the checklist.</mount>
     <mount path="/history">Session-scoped history (read-only).</mount>
     <mount path="/results/&lt;callId&gt;">Tool output artifacts.</mount>
   </vfs>
@@ -693,5 +694,5 @@ func agentLoopV0SystemPrompt() string {
 }
 
 const planModePolicyText = `<plan_mode>
-Call update_plan to create or refresh a concise checklist at /plan/HEAD.md whenever the goal requires multiple steps or host operations. After completing items or changing the plan, overwrite /plan/HEAD.md via update_plan so the checklist always reflects the current work. Keep the plan short and actionable.
+Use /plan/PLAN.md for narrative planning and /plan/HEAD.md for the authoritative checklist. Call update_plan to create or refresh a concise checklist at /plan/HEAD.md whenever the goal requires multiple steps or host operations. After completing items or changing the plan, overwrite /plan/HEAD.md via update_plan so the checklist always reflects the current work. Keep the checklist short and actionable.
 </plan_mode>`
