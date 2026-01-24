@@ -65,3 +65,8 @@ You can inspect `internal/app` for the runtime orchestration (chat sessions, TUI
 - **Transparency:** Every session and run is stored in the data directory, and you can inspect history, artifacts, or metadata via the CLI commands.
 - **Reproducibility:** Sessions create structured state (`session`, `run`, `/scratch`, `/history`), making it easy to resume, replay, or audit work.
 - **Explicit tooling:** Builtin capabilities (shell, HTTP, trace) are spelled out in the system prompt, and `/tools` is reserved for external/custom tools that must be discovered and invoked with `tool.run`, keeping integrations transparent.
+
+## Further reading
+
+- [`docs/data-layout.md`](docs/data-layout.md) – detailed runtime data directory layout (sessions, runs, agent mounts).
+- [`docs/cli-usage.md`](docs/cli-usage.md) – command/flag reference for the `workbench` CLI and environment variables.
