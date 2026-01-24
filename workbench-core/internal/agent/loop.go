@@ -625,14 +625,14 @@ func agentLoopV0SystemPrompt() string {
     <planning>
       <rule id="planning">
         COMPLEX TASKS REQUIRE A PLAN.
-        1. INITIALIZATION: If the user request implies multiple steps (e.g., "create X, Y, and Z", "research and write"), you MUST first create a plan file at "/plan/HEAD.md".
-        2. FORMAT: The content MUST be a Markdown checklist (e.g., "- [ ] Step 1" followed by "- [ ] Step 2").
-        3. GATE: DO NOT execute any side-effect tools (fs_write, shell_exec, etc.) until the plan exists at "/plan/HEAD.md".
-        4. EXECUTION: As you complete steps, overwrite "/plan/HEAD.md" with the updated checklist (mark - [x]).
-        5. ADAPTATION: If the plan changes, update "/plan/HEAD.md" immediately.
+        1. INITIALIZATION: If the user request implies multiple steps, create a Markdown checklist at "/plan/HEAD.md" before any fs_write/fs_shell/fun calls.
+        2. FORMAT: The checklist must use "- [ ]" / "- [x]" tokens for each actionable step (e.g., "- [ ] Analyze requirements", "- [ ] Implement feature", "- [ ] Verify results").
+        3. GATE: Without a checklist at "/plan/HEAD.md", do not execute side-effect tools (fs_write, shell_exec, etc.).
+        4. EXECUTION: After each step completes, overwrite "/plan/HEAD.md" with the updated checklist, marking done items with "- [x]".
+        5. ADAPTATION: If the plan evolves, immediately rewrite "/plan/HEAD.md" so the checklist remains the single source of truth.
       </rule>
-      <rule id="planning.externalize">Do not keep the plan in your 'thinking' or 'memory'; it MUST be externalized to /plan/HEAD.md.</rule>
-      <rule id="planning.visibility">Whenever asked how to plan or when the task seems multi-step, reference /plan/HEAD.md directly and treat it as the answer (the mount is always available via fs_list).</rule>
+      <rule id="planning.externalize">Plans must live in "/plan/HEAD.md"; don’t keep plan reasoning solely in your head.</rule>
+      <rule id="planning.visibility">Whenever asked about planning, direct the conversation to the checklist at "/plan/HEAD.md"—the mount is always available via fs_list.</rule>
     </planning>
     <rule id="tool_results">Tool results are YOUR output, not user input.</rule>
     <rule id="skills_vs_tools">Skills live under /skills (see SKILL.md) and are not tools; plugins belong to /tools.</rule>
@@ -654,7 +654,7 @@ func agentLoopV0SystemPrompt() string {
       <op name="trace_events_summary">Summarize trace events.</op>
     </direct_ops>
     <skills>Refer to the <available_skills> block below and fs_read /skills/<skill>/SKILL.md to follow documented workflows.</skills>
-    <planning>For every multi-step goal, create a markdown checklist at /plan/HEAD.md before running fs_write/fs_shell commands; update it as steps complete and consult it when planning work.</planning>
+    <planning>Plans go in /plan/HEAD.md as Markdown checklists; start each task with "- [ ]" (e.g., "- [ ] Analyze requirements"), update completed rows to "- [x]", and consult the checklist before touching tools.</planning>
     <external_tools>Use tool_run only after inspecting /tools/<toolId> manifests; prefer direct ops, skills, and /plan first.</external_tools>
   </capabilities>
   <vfs>
