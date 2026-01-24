@@ -324,6 +324,29 @@ func TestFunctionCallToHostOp_UpdatePlan(t *testing.T) {
 	}
 }
 
+func TestFunctionCallToHostOp_UpdateNarrative(t *testing.T) {
+	tc := types.ToolCall{
+		Type: "function",
+		Function: types.ToolCallFunction{
+			Name:      "update_narrative",
+			Arguments: `{"text":"Narrative plan"}`,
+		},
+	}
+	req, err := functionCallToHostOp(tc, nil)
+	if err != nil {
+		t.Fatalf("functionCallToHostOp update_narrative: %v", err)
+	}
+	if req.Op != types.HostOpFSWrite {
+		t.Fatalf("expected fs.write, got %q", req.Op)
+	}
+	if req.Path != "/plan/PLAN.md" {
+		t.Fatalf("expected /plan/PLAN.md, got %q", req.Path)
+	}
+	if req.Text != "Narrative plan" {
+		t.Fatalf("unexpected narrative text: %q", req.Text)
+	}
+}
+
 func TestIsDangerousHostOp_ExemptsPlanHead(t *testing.T) {
 	req := types.HostOpRequest{
 		Op:   types.HostOpFSWrite,

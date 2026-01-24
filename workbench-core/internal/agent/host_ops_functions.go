@@ -100,6 +100,22 @@ func HostOpFunctions() []types.Tool {
 		{
 			Type: "function",
 			Function: types.ToolFunction{
+				Name:        "update_narrative",
+				Description: "[DIRECT] Overwrite /plan/PLAN.md with narrative planning text.",
+				Strict:      true,
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"text": map[string]any{"type": "string", "description": "Narrative plan text to write to /plan/PLAN.md"},
+					},
+					"required":             []any{"text"},
+					"additionalProperties": false,
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: types.ToolFunction{
 				Name:        "fs_append",
 				Description: "[DIRECT - no discovery needed] Append text to a file at a VFS path.",
 				Strict:      true,
