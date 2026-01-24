@@ -789,6 +789,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newHasContent := strings.TrimSpace(m.planMarkdown) != ""
 		if !m.planAutoExpanded && !prevHadContent && newHasContent {
 			m.planAutoExpanded = true
+			// #region agent log
+			logDebug("plan-file-1", "model.go:planFileMsg", "auto-expand", map[string]interface{}{
+				"planTab":     m.planTabActive,
+				"showDetails": m.showDetails,
+				"focus":       m.focus,
+			})
+			// #endregion agent log
 			m.planTabActive = true
 			if !m.showDetails {
 				m.showDetails = true
@@ -1804,6 +1811,36 @@ func (m Model) prefetchPlanCmd() tea.Cmd {
 		txt, _, _, err := acc.ReadVFS(m.ctx, planVPath, planMaxBytes)
 		return planFileMsg{path: planVPath, content: txt, err: err}
 	}
+}
+
+func (m *Model) syncPlanMode() {
+	// #region agent log
+	logDebug("sync-plan-1", "model.go:syncPlanMode", "entry", map[string]interface{}{
+		"planMode":    m.planMode,
+		"planTab":     m.planTabActive,
+		"showDetails": m.showDetails,
+		"focus":       m.focus,
+	})
+	// #endregion agent log
+	if m.planMode {
+		// #region agent log
+		logDebug("sync-plan-2", "model.go:syncPlanMode", "plan-mode-on-noop", map[string]interface{}{
+			"planMode":    m.planMode,
+			"planTab":     m.planTabActive,
+			"showDetails": m.showDetails,
+			"focus":       m.focus,
+		})
+		// #endregion agent log
+		return
+	}
+	// #region agent log
+	logDebug("sync-plan-3", "model.go:syncPlanMode", "plan-mode-off-noop", map[string]interface{}{
+		"planMode":    m.planMode,
+		"planTab":     m.planTabActive,
+		"showDetails": m.showDetails,
+		"focus":       m.focus,
+	})
+	// #endregion agent log
 }
 
 // Run starts the Workbench Bubble Tea program.
