@@ -21,6 +21,7 @@ var availableCommands = []string{
 	"/cd",
 	"/pwd",
 	"/project",
+	"/plan",
 }
 
 func isExactCommand(s string) bool {

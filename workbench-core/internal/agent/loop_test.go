@@ -21,6 +21,11 @@ func (f *fakeExec) Exec(ctx context.Context, req types.HostOpRequest) types.Host
 type fakeStreamingLLM struct {
 	Responses []types.LLMResponse
 	idx       int
+	Requests  []types.LLMRequest
+}
+
+func (f *fakeStreamingLLM) recordRequest(req types.LLMRequest) {
+	f.Requests = append(f.Requests, req)
 }
 
 func (f *fakeStreamingLLM) nextResponse() types.LLMResponse {
@@ -36,10 +41,12 @@ func (f *fakeStreamingLLM) nextResponse() types.LLMResponse {
 }
 
 func (f *fakeStreamingLLM) Generate(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
+	f.recordRequest(req)
 	return f.nextResponse(), nil
 }
 
 func (f *fakeStreamingLLM) GenerateStream(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
+	f.recordRequest(req)
 	resp := f.nextResponse()
 	if cb != nil && resp.Text != "" {
 		_ = cb(types.LLMStreamChunk{Text: resp.Text})
@@ -270,5 +277,64 @@ func TestAgentLoop_RunConversation_RequiresApproval(t *testing.T) {
 	}
 	if len(exec.reqs) != 0 {
 		t.Fatalf("expected no host ops executed, got %d", len(exec.reqs))
+	}
+}
+
+func TestAgentLoop_RunConversation_PlanModeForcesUpdatePlan(t *testing.T) {
+	llm := &fakeStreamingLLM{
+		Responses: []types.LLMResponse{{Text: "done"}},
+	}
+	exec := &fakeExec{}
+	agent := &Agent{LLM: llm, Exec: exec, Model: "test", PlanMode: true}
+	final, _, _, err := agent.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "plan"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if final != "done" {
+		t.Fatalf("expected final text, got %q", final)
+	}
+	if len(llm.Requests) == 0 {
+		t.Fatalf("expected at least one LLM request, got %d", len(llm.Requests))
+	}
+	if llm.Requests[0].ToolChoice != "function:update_plan" {
+		t.Fatalf("expected first request toolChoice=function:update_plan, got %q", llm.Requests[0].ToolChoice)
+	}
+}
+
+func TestFunctionCallToHostOp_UpdatePlan(t *testing.T) {
+	tc := types.ToolCall{
+		Type: "function",
+		Function: types.ToolCallFunction{
+			Name:      "update_plan",
+			Arguments: `{"plan":"- [ ] Step 1\n- [ ] Step 2"}`,
+		},
+	}
+	req, err := functionCallToHostOp(tc, nil)
+	if err != nil {
+		t.Fatalf("functionCallToHostOp update_plan: %v", err)
+	}
+	if req.Op != types.HostOpFSWrite {
+		t.Fatalf("expected fs.write, got %q", req.Op)
+	}
+	if req.Path != "/plan/HEAD.md" {
+		t.Fatalf("expected /plan/HEAD.md, got %q", req.Path)
+	}
+	if req.Text != "- [ ] Step 1\n- [ ] Step 2" {
+		t.Fatalf("unexpected plan text: %q", req.Text)
+	}
+}
+
+func TestIsDangerousHostOp_ExemptsPlanHead(t *testing.T) {
+	req := types.HostOpRequest{
+		Op:   types.HostOpFSWrite,
+		Path: "/plan/HEAD.md",
+		Text: "- [ ] Step 1",
+	}
+	if isDangerousHostOp(req) {
+		t.Fatalf("expected /plan/HEAD.md write to be non-dangerous, got dangerous")
+	}
+	req.Path = "/project/file.txt"
+	if !isDangerousHostOp(req) {
+		t.Fatalf("expected /project write to remain dangerous")
 	}
 }

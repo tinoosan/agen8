@@ -28,6 +28,9 @@ type Agent struct {
 	// when supported by the provider (e.g. OpenRouter ":online"). Host controls this.
 	EnableWebSearch bool
 
+	// PlanMode enforces the structured planning policy for the first step.
+	PlanMode bool
+
 	// ApprovalsMode controls whether dangerous host ops pause for approval.
 	ApprovalsMode string
 
@@ -106,6 +109,14 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			}
 			system = updatedSystem
 		}
+		if a.PlanMode {
+			system = strings.TrimSpace(system + "\n\n" + planModePolicyText)
+		}
+
+		toolChoice := "auto"
+		if a.PlanMode && step == startStep {
+			toolChoice = "function:update_plan"
+		}
 
 		req := types.LLMRequest{
 			Model:            a.Model,
@@ -113,7 +124,7 @@ func (a *Agent) runConversation(ctx context.Context, msgs []types.LLMMessage, st
 			Messages:         msgs,
 			MaxTokens:        a.MaxTokens,
 			Tools:            hostOpTools,
-			ToolChoice:       "auto",
+			ToolChoice:       toolChoice,
 			JSONOnly:         false,
 			EnableWebSearch:  a.EnableWebSearch,
 			ReasoningEffort:  strings.TrimSpace(a.ReasoningEffort),
@@ -470,6 +481,19 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 		}
 		return types.HostOpRequest{Op: types.HostOpFSWrite, Path: resolveVFSPath(args.Path), Text: args.Text}, nil
 
+	case "update_plan":
+		var args struct {
+			Plan string `json:"plan"`
+		}
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		return types.HostOpRequest{
+			Op:   types.HostOpFSWrite,
+			Path: "/plan/HEAD.md",
+			Text: args.Plan,
+		}, nil
+
 	case "fs_append":
 		var args struct {
 			Path string `json:"path"`
@@ -566,6 +590,9 @@ func resolveVFSPath(p string) string {
 
 func isDangerousHostOp(req types.HostOpRequest) bool {
 	op := strings.ToLower(strings.TrimSpace(req.Op))
+	if op == types.HostOpFSWrite && strings.TrimSpace(req.Path) == "/plan/HEAD.md" {
+		return false
+	}
 	switch op {
 	case types.HostOpFSWrite,
 		types.HostOpFSAppend,
@@ -664,3 +691,7 @@ func agentLoopV0SystemPrompt() string {
   </operating_rules>`
 	return strings.TrimSpace(raw)
 }
+
+const planModePolicyText = `<plan_mode>
+Call update_plan to create or refresh a concise checklist at /plan/HEAD.md whenever the goal requires multiple steps or host operations. After completing items or changing the plan, overwrite /plan/HEAD.md via update_plan so the checklist always reflects the current work. Keep the plan short and actionable.
+</plan_mode>`

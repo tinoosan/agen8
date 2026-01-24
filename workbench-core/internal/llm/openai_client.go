@@ -18,6 +18,7 @@ import (
 	"github.com/openai/openai-go/v3/packages/respjson"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
+	openaiConstant "github.com/openai/openai-go/v3/shared/constant"
 	"github.com/tinoosan/workbench-core/internal/cost"
 	"github.com/tinoosan/workbench-core/internal/debuglog"
 	"github.com/tinoosan/workbench-core/internal/types"
@@ -260,7 +261,8 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 		}
 		params.Tools = tools
 
-		switch strings.ToLower(strings.TrimSpace(req.ToolChoice)) {
+		choice := strings.TrimSpace(req.ToolChoice)
+		switch strings.ToLower(choice) {
 		case "", "auto":
 			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(string(openai.ChatCompletionToolChoiceOptionAutoAuto))}
 		case "none":
@@ -270,6 +272,19 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 			// Allow multiple tool calls per turn to reduce round-trips. The agent loop
 			// already supports handling multiple tool calls in one response.
 		default:
+			if strings.HasPrefix(strings.ToLower(choice), "function:") {
+				funcName := strings.TrimSpace(choice[len("function:"):])
+				if funcName == "" {
+					return openai.ChatCompletionNewParams{}, fmt.Errorf("toolChoice function name is required")
+				}
+				params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
+					OfFunctionToolChoice: &openai.ChatCompletionNamedToolChoiceParam{
+						Function: openai.ChatCompletionNamedToolChoiceFunctionParam{Name: funcName},
+						Type:     openaiConstant.Function("function"),
+					},
+				}
+				break
+			}
 			return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported toolChoice %q", req.ToolChoice)
 		}
 	}
@@ -603,7 +618,8 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 		}
 		params.Tools = tools
 
-		switch strings.ToLower(strings.TrimSpace(req.ToolChoice)) {
+		choice := strings.TrimSpace(req.ToolChoice)
+		switch strings.ToLower(choice) {
 		case "", "auto":
 			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
 				OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto),
@@ -619,6 +635,19 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 			// Allow multiple tool calls per turn to reduce round-trips. The agent loop
 			// already supports handling multiple tool calls in one response.
 		default:
+			if strings.HasPrefix(strings.ToLower(choice), "function:") {
+				funcName := strings.TrimSpace(choice[len("function:"):])
+				if funcName == "" {
+					return responses.ResponseNewParams{}, fmt.Errorf("toolChoice function name is required")
+				}
+				params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
+					OfFunctionTool: &responses.ToolChoiceFunctionParam{
+						Name: funcName,
+						Type: openaiConstant.Function("function"),
+					},
+				}
+				break
+			}
 			return responses.ResponseNewParams{}, fmt.Errorf("unsupported toolChoice %q", req.ToolChoice)
 		}
 	}

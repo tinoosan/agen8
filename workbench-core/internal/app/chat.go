@@ -51,6 +51,9 @@ type RunChatOptions struct {
 	// (provider dependent, e.g. OpenRouter ":online"). This is run-scoped and defaults to off.
 	WebSearchEnabled bool
 
+	// PlanMode enforces the structured plan policy for the first step.
+	PlanMode bool
+
 	// ApprovalsMode controls whether the agent requires confirmations for privileged ops.
 	// Valid values: "enabled", "disabled". Defaults to "enabled".
 	ApprovalsMode string
@@ -188,6 +191,12 @@ func resolveRunChatOptions(opts ...RunChatOption) RunChatOptions {
 func WithModel(model string) RunChatOption {
 	return func(o *RunChatOptions) {
 		o.Model = strings.TrimSpace(model)
+	}
+}
+
+func WithPlanMode(enabled bool) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.PlanMode = enabled
 	}
 }
 

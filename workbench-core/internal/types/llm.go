@@ -81,7 +81,7 @@ type LLMRequest struct {
 	Temperature float64      // optional: sampling temperature
 	JSONOnly    bool         // optional: request JSON-only output (provider best-effort)
 	Tools       []Tool       `json:"tools,omitempty"`
-	ToolChoice  string       `json:"toolChoice,omitempty"` // "auto", "none", "required"
+	ToolChoice  string       `json:"toolChoice,omitempty"` // "auto", "none", "required", or "function:<toolName>"
 	// EnableWebSearch requests real-time web search grounding when supported by the provider.
 	// For OpenRouter this is implemented by using a model variant like ":online".
 	EnableWebSearch bool `json:"enableWebSearch,omitempty"`

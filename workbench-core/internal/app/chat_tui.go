@@ -440,6 +440,35 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 			Console: boolp(false),
 		})
 		return "", true, nil
+	case "plan":
+		val := strings.ToLower(strings.TrimSpace(arg))
+		newState := r.opts.PlanMode
+		switch val {
+		case "":
+			newState = !newState
+		case "on", "true", "1":
+			newState = true
+		case "off", "false", "0":
+			newState = false
+		default:
+			return "Usage: /plan [on|off]", true, nil
+		}
+		r.opts.PlanMode = newState
+		state := "off"
+		if newState {
+			state = "on"
+		}
+		r.emitPreInit(events.Event{
+			Type:    "plan.mode.changed",
+			Message: "Plan mode",
+			Data: map[string]string{
+				"state": state,
+			},
+			Store:   boolp(false),
+			History: boolp(false),
+			Console: boolp(false),
+		})
+		return "plan mode: " + state, true, nil
 	case "model":
 		cur := strings.TrimSpace(r.opts.Model)
 		if cur == "" {
@@ -845,6 +874,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		builtinInvokers:  setup.BuiltinInvokers,
 		artifacts:        setup.Artifacts,
 		constructor:      setup.Constructor,
+		planMode:         r.opts.PlanMode,
 	}
 	r.initialized = true
 	return nil
@@ -888,6 +918,8 @@ type tuiTurnRunner struct {
 	builtinInvokers tools.MapRegistry
 	artifacts       *ArtifactIndex
 	constructor     *agent.ContextConstructor
+
+	planMode bool
 
 	turn               int
 	conversation       []types.LLMMessage
@@ -1537,6 +1569,46 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			Console: boolp(false),
 		})
 		return "web search: " + state, true
+	case "plan":
+		val := strings.ToLower(strings.TrimSpace(arg))
+		newState := r.planMode
+		switch val {
+		case "":
+			newState = !newState
+		case "on", "true", "1":
+			newState = true
+		case "off", "false", "0":
+			newState = false
+		default:
+			return "Usage: /plan [on|off]", true
+		}
+		r.opts.PlanMode = newState
+		r.planMode = newState
+		if r.agent != nil {
+			r.agent.PlanMode = newState
+		}
+		if strings.TrimSpace(r.run.RunId) != "" {
+			if r.run.Runtime == nil {
+				r.run.Runtime = &types.RunRuntimeConfig{}
+			}
+			r.run.Runtime.PlanMode = newState
+			_ = store.SaveRun(r.cfg, r.run)
+		}
+		state := "off"
+		if newState {
+			state = "on"
+		}
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "plan.mode.changed",
+			Message: "Plan mode",
+			Data: map[string]string{
+				"state": state,
+			},
+			Store:   boolp(false),
+			History: boolp(false),
+			Console: boolp(false),
+		})
+		return "plan mode: " + state, true
 	case "model":
 		cur := strings.TrimSpace(r.model)
 		if cur == "" {

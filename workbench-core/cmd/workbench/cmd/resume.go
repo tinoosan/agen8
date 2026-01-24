@@ -38,6 +38,7 @@ var resumeCmd = &cobra.Command{
 		}
 		opts := []app.RunChatOption{
 			app.WithApprovalsMode(approvalsMode),
+			app.WithPlanMode(planMode),
 			app.WithModel(modelOverride),
 			app.WithWorkDir(workDir),
 			app.WithMaxSteps(maxSteps),

@@ -95,6 +95,9 @@ type RunRuntimeConfig struct {
 
 	// ApprovalsMode records whether the agent required approvals during this run.
 	ApprovalsMode string `json:"approvalsMode,omitempty"`
+
+	// PlanMode indicates whether plan mode was enabled for the run.
+	PlanMode bool `json:"planMode,omitempty"`
 }
 
 // NewRun initializes a new Run instance with a unique ID and the given parameters.

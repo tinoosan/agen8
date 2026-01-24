@@ -78,6 +78,9 @@ type Config struct {
 	// when supported by the provider (e.g. OpenRouter ":online"). Host controls this.
 	EnableWebSearch bool
 
+	// PlanMode enforces the structured planning policy for the first step.
+	PlanMode bool
+
 	// ApprovalsMode controls whether the agent requires confirmation for sensitive ops.
 	ApprovalsMode string
 
@@ -130,6 +133,7 @@ func New(cfg Config) (*Agent, error) {
 		Exec:             cfg.Exec,
 		Model:            cfg.Model,
 		EnableWebSearch:  cfg.EnableWebSearch,
+		PlanMode:         cfg.PlanMode,
 		ApprovalsMode:    strings.TrimSpace(cfg.ApprovalsMode),
 		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),

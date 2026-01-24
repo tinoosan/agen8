@@ -246,6 +246,7 @@ func setupTUIChatRuntime(
 		ReasoningEffort:  strings.TrimSpace(opts.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(opts.ReasoningSummary),
 		ApprovalsMode:    strings.TrimSpace(opts.ApprovalsMode),
+		PlanMode:         opts.PlanMode,
 
 		MaxTraceBytes:         opts.MaxTraceBytes,
 		MaxMemoryBytes:        opts.MaxMemoryBytes,
@@ -620,6 +621,7 @@ func setupTUIChatRuntime(
 		ReasoningSummary: strings.TrimSpace(opts.ReasoningSummary),
 		ApprovalsMode:    strings.TrimSpace(opts.ApprovalsMode),
 		EnableWebSearch:  opts.WebSearchEnabled,
+		PlanMode:         opts.PlanMode,
 		SystemPrompt:     baseSystemPrompt,
 		Context:          constructor,
 
