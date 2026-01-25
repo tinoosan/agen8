@@ -85,7 +85,7 @@ func HostOpFunctions() []types.Tool {
 			Type: "function",
 			Function: types.ToolFunction{
 				Name:        "update_plan",
-				Description: "[DIRECT] Overwrite /plan/HEAD.md with the provided markdown plan checklist.",
+				Description: "[DIRECT] Overwrite /plan/HEAD.md with the checklist. Use this at the start of multi-step work AND after each meaningful step to keep progress current.",
 				Strict:      true,
 				Parameters: map[string]any{
 					"type": "object",
@@ -93,22 +93,6 @@ func HostOpFunctions() []types.Tool {
 						"plan": map[string]any{"type": "string", "description": "Checklist-style plan (markdown) to write to /plan/HEAD.md"},
 					},
 					"required":             []any{"plan"},
-					"additionalProperties": false,
-				},
-			},
-		},
-		{
-			Type: "function",
-			Function: types.ToolFunction{
-				Name:        "update_narrative",
-				Description: "[DIRECT] Overwrite /plan/PLAN.md with narrative planning text.",
-				Strict:      true,
-				Parameters: map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"text": map[string]any{"type": "string", "description": "Narrative plan text to write to /plan/PLAN.md"},
-					},
-					"required":             []any{"text"},
 					"additionalProperties": false,
 				},
 			},

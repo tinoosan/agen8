@@ -12,7 +12,6 @@ import (
 
 const (
 	planChecklistPath = "/plan/HEAD.md"
-	planNarrativePath = "/plan/PLAN.md"
 )
 
 type planChecklistStatus struct {
@@ -92,7 +91,7 @@ func isChecklistLine(line string) (bool, bool) {
 
 func shouldBypassPlanChecklist(req types.HostOpRequest) bool {
 	path := strings.TrimSpace(req.Path)
-	if path == planChecklistPath || path == planNarrativePath {
+            if path == planChecklistPath {
 		return true
 	}
 	return false
@@ -120,6 +119,7 @@ func planChecklistWarning(status planChecklistStatus) string {
 	}
 	return ""
 }
+
 
 func appendPlanChecklistWarning(fs *vfs.FS, status planChecklistStatus, warningLine string) {
 	if fs == nil || strings.TrimSpace(warningLine) == "" {

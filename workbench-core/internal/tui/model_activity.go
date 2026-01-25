@@ -366,6 +366,7 @@ func (m *Model) refreshPlanView() {
 	}
 	w := max(24, m.planViewport.Width-4)
 	currentStep := ""
+	progress := ""
 	body := ""
 	planText := strings.TrimSpace(m.planMarkdown)
 	if planText == "" {
@@ -375,9 +376,12 @@ func (m *Model) refreshPlanView() {
 			body = "_No plan has been created yet._"
 		}
 	} else {
-		highlighted, active := highlightPlanChecklist(m.planMarkdown)
+		highlighted, active, done, total := highlightPlanChecklist(m.planMarkdown)
 		if active != "" {
 			currentStep = fmt.Sprintf("_Current step: %s_\n\n", active)
+		}
+		if total > 0 {
+			progress = fmt.Sprintf("_Progress: %d/%d complete._\n\n", done, total)
 		}
 		if strings.TrimSpace(m.planLoadErr) != "" {
 			body = fmt.Sprintf("_Failed to load plan: %s_\n\n%s", m.planLoadErr, highlighted)
@@ -385,27 +389,39 @@ func (m *Model) refreshPlanView() {
 			body = highlighted
 		}
 	}
-	help := "_Ctrl+] toggles tabs · Ctrl+A toggles sidebar · /plan edit opens /plan/PLAN.md_\n\n"
-	content := currentStep + body + "\n\n" + help
+	help := "_Ctrl+] toggles tabs · Ctrl+A toggles sidebar · /plan opens checklist editor_\n\n"
+	content := currentStep + progress + body + "\n\n" + help
 	if strings.TrimSpace(content) == "" {
 		content = "_Plan view is preparing…_"
 	}
 	m.planViewport.SetContent(strings.TrimRight(m.renderer.RenderMarkdown(content, w), "\n"))
 }
 
-func highlightPlanChecklist(markdown string) (string, string) {
+func highlightPlanChecklist(markdown string) (string, string, int, int) {
 	text := strings.ReplaceAll(markdown, "\r\n", "\n")
 	lines := strings.Split(text, "\n")
 	active := ""
 	found := false
+	done := 0
+	total := 0
 	for i, line := range lines {
-		if ok, checked := parsePlanChecklist(line); ok && !checked && !found {
-			active = planChecklistLabel(line)
-			lines[i] = highlightPlanLine(line)
-			found = true
+		if ok, checked := parsePlanChecklist(line); ok {
+			total++
+			if checked {
+				done++
+				lines[i] = formatPlanLine(line, true, false)
+				continue
+			}
+			if !found {
+				active = planChecklistLabel(line)
+				lines[i] = formatPlanLine(line, false, true)
+				found = true
+				continue
+			}
+			lines[i] = formatPlanLine(line, false, false)
 		}
 	}
-	return strings.Join(lines, "\n"), active
+	return strings.Join(lines, "\n"), active, done, total
 }
 
 func parsePlanChecklist(line string) (bool, bool) {
@@ -441,11 +457,24 @@ func planChecklistLabel(line string) string {
 	return strings.TrimSpace(trimmed)
 }
 
-func highlightPlanLine(line string) string {
+func formatPlanLine(line string, checked bool, active bool) string {
 	indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-	body := strings.TrimLeft(line, " \t")
-	body = strings.TrimSpace(body)
-	return indent + "**" + body + "** _(current step)_"
+	label := planChecklistLabel(line)
+	if label == "" {
+		label = strings.TrimSpace(line)
+	}
+	status := " "
+	if checked {
+		status = "x"
+	}
+	text := label
+	if checked {
+		text = "~~" + text + "~~"
+	}
+	if active {
+		text = "**" + text + "** _(current step)_"
+	}
+	return indent + "- [" + status + "] " + text
 }
 
 func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) string {

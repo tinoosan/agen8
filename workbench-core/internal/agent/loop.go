@@ -491,19 +491,6 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 			Text: args.Plan,
 		}, nil
 
-	case "update_narrative":
-		var args struct {
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		return types.HostOpRequest{
-			Op:   types.HostOpFSWrite,
-			Path: "/plan/PLAN.md",
-			Text: args.Text,
-		}, nil
-
 	case "fs_append":
 		var args struct {
 			Path string `json:"path"`
@@ -635,16 +622,17 @@ func agentLoopV0SystemPrompt() string {
     <planning>
       <rule id="planning">
         COMPLEX TASKS REQUIRE A PLAN.
-        1. INITIALIZATION: If the user request implies multiple steps, first write a narrative plan to "/plan/PLAN.md", then create a Markdown checklist at "/plan/HEAD.md" before any fs_write/fs_shell/fun calls.
+        1. INITIALIZATION: If the user request implies multiple steps, create a Markdown checklist at "/plan/HEAD.md" before any fs_write/fs_shell/fun calls.
         2. FORMAT: The checklist must use "- [ ]" / "- [x]" tokens for each actionable step (e.g., "- [ ] Analyze requirements", "- [ ] Implement feature", "- [ ] Verify results").
-        3. NARRATIVE: Use "/plan/PLAN.md" for prose/narrative planning. When you draft or update narrative planning, write it to /plan/PLAN.md (use update_narrative). For multi-step work you MUST write the narrative first, then the checklist. This does NOT satisfy the checklist gate.
+        3. NARRATIVE: Keep narrative planning out of the checklist file. Use your response text for any prose planning; the checklist remains the single source of truth.
         4. GATE: Without a checklist at "/plan/HEAD.md", do not execute side-effect tools (fs_write, shell_exec, etc.).
         5. EXECUTION: After each step completes, overwrite "/plan/HEAD.md" with the updated checklist, marking done items with "- [x]".
-        6. ADAPTATION: If the plan evolves, immediately rewrite "/plan/HEAD.md" so the checklist remains the single source of truth.
+        6. CONTINUOUS: Before starting a new step, re-read the checklist, ensure the next item is accurate, and update it if needed.
+        7. ADAPTATION: If the plan evolves, immediately rewrite "/plan/HEAD.md" so the checklist remains the single source of truth.
         7. SKIP: Do NOT create a plan for greetings/smalltalk, single factual questions, or single small edits. Respond directly instead.
       </rule>
-      <rule id="planning.externalize">Plans must live in "/plan/PLAN.md" (narrative) and "/plan/HEAD.md" (checklist); don’t keep plan reasoning solely in your head.</rule>
-      <rule id="planning.visibility">Whenever asked about planning, point to "/plan/PLAN.md" for narrative context and "/plan/HEAD.md" for the checklist—both mounts are always available via fs_list.</rule>
+      <rule id="planning.externalize">Plans must live in "/plan/HEAD.md" (checklist); don’t keep plan reasoning solely in your head.</rule>
+      <rule id="planning.visibility">Whenever asked about planning, point to "/plan/HEAD.md" for the checklist—the mount is always available via fs_list.</rule>
     </planning>
     <rule id="tool_results">Tool results are YOUR output, not user input.</rule>
     <rule id="skills_vs_tools">Skills live under /skills (see SKILL.md) and are not tools; plugins belong to /tools.</rule>
@@ -666,7 +654,7 @@ func agentLoopV0SystemPrompt() string {
       <op name="trace_events_summary">Summarize trace events.</op>
     </direct_ops>
     <skills>Refer to the <available_skills> block below and fs_read /skills/<skill>/SKILL.md to follow documented workflows.</skills>
-    <planning>For multi-step work, write narrative planning to /plan/PLAN.md first (update_narrative), then write the checklist to /plan/HEAD.md (update_plan). The checklist must be Markdown "- [ ]"/"- [x]" items and must be updated as steps complete or change. Skip planning for greetings/smalltalk, single factual questions, or single small edits.</planning>
+    <planning>For multi-step work, write the checklist to /plan/HEAD.md (update_plan). Keep it current: re-read before each step, mark completed items with "- [x]", and add/adjust items as work changes. Skip planning for greetings/smalltalk, single factual questions, or single small edits.</planning>
     <external_tools>Use tool_run only after inspecting /tools/<toolId> manifests; prefer direct ops, skills, and /plan first.</external_tools>
   </capabilities>
   <vfs>
@@ -675,7 +663,7 @@ func agentLoopV0SystemPrompt() string {
     <mount path="/log">Event log for this turn.</mount>
     <mount path="/memory">Run-scoped working memory.</mount>
     <mount path="/skills">These are YOUR skills. ALWAYS check /skills before /tools (SKILL.md).</mount>
-    <mount path="/plan">Planning workspace for complex tasks. /plan/PLAN.md is narrative; /plan/HEAD.md is the checklist.</mount>
+    <mount path="/plan">Planning workspace for complex tasks. /plan/HEAD.md is the checklist.</mount>
     <mount path="/history">Session-scoped history (read-only).</mount>
     <mount path="/results/&lt;callId&gt;">Tool output artifacts.</mount>
   </vfs>
@@ -705,5 +693,5 @@ func agentLoopV0SystemPrompt() string {
 }
 
 const planModePolicyText = `<plan_mode>
-For multi-step work, write narrative planning to /plan/PLAN.md first (update_narrative), then write the authoritative checklist to /plan/HEAD.md (update_plan). Call update_plan to create or refresh a concise checklist at /plan/HEAD.md whenever the goal requires multiple steps or host operations. After completing items or changing the plan, overwrite /plan/HEAD.md via update_plan so the checklist always reflects the current work. Keep the checklist short and actionable. Skip planning for greetings/smalltalk, single factual questions, or single small edits.
+For multi-step work, write the authoritative checklist to /plan/HEAD.md (update_plan). Re-read the checklist before each step and update it after each step so progress is always accurate. If steps change, rewrite /plan/HEAD.md immediately. Keep the checklist short and actionable. Skip planning for greetings/smalltalk, single factual questions, or single small edits.
 </plan_mode>`

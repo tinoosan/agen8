@@ -22,7 +22,6 @@ import (
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/cost"
 	"github.com/tinoosan/workbench-core/internal/events"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tools"
@@ -313,6 +312,7 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 		builtinInvokers:  setup.BuiltinInvokers,
 		artifacts:        setup.Artifacts,
 		constructor:      setup.Constructor,
+		// refresh tracker removed
 	}
 
 	err = tui.Run(runCtx, engine, evCh)
@@ -488,37 +488,31 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 		})
 		return "", true, nil
 	case "plan":
-		val := strings.ToLower(strings.TrimSpace(arg))
-		if val == "edit" || val == "open" {
-			return "Plan editor is available after the first turn starts.", true, nil
+		cur, err := resolveWorkDir(r.opts.WorkDir)
+		if err != nil {
+			return "", true, err
 		}
-		newState := r.opts.PlanMode
-		switch val {
-		case "":
-			newState = !newState
-		case "on", "true", "1":
-			newState = true
-		case "off", "false", "0":
-			newState = false
-		default:
-			return "Usage: /plan [on|off|edit]", true, nil
+		planDir := filepath.Join(cur, "plan")
+		if err := os.MkdirAll(planDir, 0755); err != nil {
+			return "Unable to open plan editor", true, nil
 		}
-		r.opts.PlanMode = newState
-		state := "off"
-		if newState {
-			state = "on"
+		planPath := filepath.Join(planDir, "HEAD.md")
+		if _, err := os.Stat(planPath); err != nil {
+			_ = os.WriteFile(planPath, []byte{}, 0644)
 		}
 		r.emitPreInit(events.Event{
-			Type:    "plan.mode.changed",
-			Message: "Plan mode",
+			Type:    "ui.editor.open",
+			Message: "Open plan editor",
 			Data: map[string]string{
-				"state": state,
+				"vpath":   "/plan/HEAD.md",
+				"path":    "HEAD.md",
+				"absPath": planPath,
+				"workdir": cur,
 			},
 			Store:   boolp(false),
-			History: boolp(false),
 			Console: boolp(false),
 		})
-		return "plan mode: " + state, true, nil
+		return "", true, nil
 	case "approval":
 		val := strings.ToLower(strings.TrimSpace(arg))
 		if val == "" {
@@ -980,6 +974,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		artifacts:        setup.Artifacts,
 		constructor:      setup.Constructor,
 		planMode:         r.opts.PlanMode,
+		// refresh tracker removed
 	}
 	r.initialized = true
 	return nil
@@ -1453,6 +1448,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 		return "", err
 	}
 
+
 	final = out
 
 	aggSteps := r.pendingTurnSteps
@@ -1675,73 +1671,17 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		})
 		return "web search: " + state, true
 	case "plan":
-		val := strings.ToLower(strings.TrimSpace(arg))
-		if val == "edit" || val == "open" {
-			planDir := filepath.Join(fsutil.GetScratchDir(r.cfg.DataDir, r.run.RunId), "plan")
-			if err := os.MkdirAll(planDir, 0755); err == nil {
-				planPath := filepath.Join(planDir, "PLAN.md")
-				if _, err := os.Stat(planPath); err != nil {
-					_ = os.WriteFile(planPath, []byte{}, 0644)
-				}
-				r.mustEmit(context.Background(), events.Event{
-					Type:    "ui.editor.open",
-					Message: "Open plan editor",
-					Data: map[string]string{
-						"vpath":   "/plan/PLAN.md",
-						"path":    "PLAN.md",
-						"absPath": planPath,
-					},
-					Store:   boolp(false),
-					Console: boolp(false),
-				})
-				return "", true
-			}
-			return "Unable to open plan editor", true
-		}
-		newState := r.planMode
-		switch val {
-		case "":
-			newState = !newState
-		case "on", "true", "1":
-			newState = true
-		case "off", "false", "0":
-			newState = false
-		default:
-			return "Usage: /plan [on|off|edit]", true
-		}
-		r.opts.PlanMode = newState
-		r.planMode = newState
-		if r.agent != nil {
-			r.agent.PlanMode = newState
-		}
-		if strings.TrimSpace(r.run.RunId) != "" {
-			if r.run.Runtime == nil {
-				r.run.Runtime = &types.RunRuntimeConfig{}
-			}
-			r.run.Runtime.PlanMode = newState
-			_ = store.SaveRun(r.cfg, r.run)
-		}
-		if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
-			if sess.PlanMode == nil || *sess.PlanMode != newState {
-				sess.PlanMode = &newState
-				_ = store.SaveSession(r.cfg, sess)
-			}
-		}
-		state := "off"
-		if newState {
-			state = "on"
-		}
 		r.mustEmit(context.Background(), events.Event{
-			Type:    "plan.mode.changed",
-			Message: "Plan mode",
+			Type:    "ui.editor.open",
+			Message: "Open plan editor",
 			Data: map[string]string{
-				"state": state,
+				"vpath": "/plan/HEAD.md",
+				"path":  "HEAD.md",
 			},
 			Store:   boolp(false),
-			History: boolp(false),
 			Console: boolp(false),
 		})
-		return "plan mode: " + state, true
+		return "", true
 	case "model":
 		cur := strings.TrimSpace(r.model)
 		if cur == "" {

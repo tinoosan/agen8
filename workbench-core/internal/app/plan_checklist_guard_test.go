@@ -44,19 +44,6 @@ func TestPlanChecklistHeadValidation(t *testing.T) {
 	}
 }
 
-func TestPlanChecklistNarrativeNotValidated(t *testing.T) {
-	fs := newPlanFS(t)
-	req := types.HostOpRequest{
-		Op:   types.HostOpFSWrite,
-		Path: "/plan/PLAN.md",
-		Text: "freeform narrative",
-	}
-	resp := enforcePlanChecklist(fs, req)
-	if resp != nil {
-		t.Fatalf("expected nil for narrative plan write, got %#v", resp)
-	}
-}
-
 func TestPlanChecklistWarningWhenStale(t *testing.T) {
 	fs := newPlanFS(t)
 	if err := fs.Write("/plan/HEAD.md", []byte("- [x] Done")); err != nil {
