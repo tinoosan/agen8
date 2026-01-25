@@ -60,7 +60,7 @@ func TestTraceResourceReadEventsSince(t *testing.T) {
 		t.Fatalf("AppendEvent first: %v", err)
 	}
 
-	eventPath := fsutil.GetEventFilePath(cfg.DataDir, run.RunId)
+	eventPath := filepath.Join(fsutil.GetLogDir(cfg.DataDir, run.RunId), "events.jsonl")
 	info, err := os.Stat(eventPath)
 	if err != nil {
 		t.Fatalf("stat events.jsonl: %v", err)
@@ -119,7 +119,7 @@ func TestTraceResourceReadEventsLatest(t *testing.T) {
 		t.Fatalf("Read events.latest: %v", err)
 	}
 
-	eventPath := fsutil.GetEventFilePath(cfg.DataDir, run.RunId)
+	eventPath := filepath.Join(fsutil.GetLogDir(cfg.DataDir, run.RunId), "events.jsonl")
 	all, err := os.ReadFile(eventPath)
 	if err != nil {
 		t.Fatalf("ReadFile events.jsonl: %v", err)

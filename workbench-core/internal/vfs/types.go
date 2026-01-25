@@ -50,8 +50,7 @@ const (
 	// agents, and the environment. It is intended as a verifiable source of truth
 	// for provenance, debugging, and compliance.
 	//
-	// In the current implementation, history is session-scoped:
-	//   data/sessions/<sessionId>/history/history.jsonl
+	// In the current implementation, history is session-scoped and stored in SQLite.
 	//
 	// In a future multi-agent system, you may add a shared global history mount
 	// alongside per-session histories.

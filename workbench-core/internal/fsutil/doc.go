@@ -9,8 +9,7 @@
 // The package provides typed path builders that enforce the standard directory
 // structure under DataDir:
 //
-//	GetRunFilePath(dataDir, runId)           -> data/runs/<runId>/run.json
-//	GetEventFilePath(dataDir, runId)         -> data/runs/<runId>/events.jsonl
+//	GetSQLitePath(dataDir)                   -> data/workbench.db
 //	GetScratchDir(dataDir, runId)            -> data/runs/<runId>/scratch
 //	GetResultsDir(dataDir, runId)            -> data/runs/<runId>/results
 //	GetLogDir(dataDir, runId)                -> data/runs/<runId>/log
@@ -27,6 +26,6 @@
 // # Usage
 //
 //	cfg := config.Default()
-//	runPath := fsutil.GetRunFilePath(cfg.DataDir, "run-abc123")
-//	err := fsutil.WriteFileAtomic(runPath, jsonBytes, 0644)
+//	dbPath := fsutil.GetSQLitePath(cfg.DataDir)
+//	_ = dbPath
 package fsutil

@@ -2,17 +2,8 @@
 //
 // Run storage layout (implementation detail)
 //
-// Each run is stored under:
-//
-//	data/runs/<runId>/
-//
-// With canonical files:
-//   - run.json       (run metadata + state)
-//   - events.jsonl   (append-only JSONL event log)
-//
-// And resource-backed directories:
-//   - workspace/     (agent writable working directory)
-//   - trace/         (mirrored event feed for agent polling)
+// Runs are stored in SQLite (data/workbench.db by default).
+// Run-scoped directories for /scratch, /log, /memory, etc. remain on disk.
 //
 // # Results note
 //
@@ -21,16 +12,15 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/validate"
 )
@@ -55,26 +45,29 @@ func CreateSubRun(cfg config.Config, sessionID, parentRunID, goal string, maxByt
 	return run, nil
 }
 
-// LoadRun reads a run's state from disk by its run ID.
-// It returns an error if the file cannot be read, if the JSON is malformed,
+// LoadRun reads a run's state from SQLite by its run ID.
+// It returns an error if the row cannot be read, if the JSON is malformed,
 // or if the loaded data is missing critical fields like runId.
 func LoadRun(cfg config.Config, runId string) (types.Run, error) {
 	if err := cfg.Validate(); err != nil {
 		return types.Run{}, err
 	}
-	targetPath := fsutil.GetRunFilePath(cfg.DataDir, runId)
-	b, err := os.ReadFile(targetPath)
+	db, err := getSQLiteDB(cfg)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return types.Run{}, fmt.Errorf("run.json file %s does not exist: %w", targetPath, errors.Join(ErrNotFound, err))
+		return types.Run{}, err
+	}
+	var b []byte
+	if err := db.QueryRow(`SELECT run_json FROM runs WHERE run_id = ?`, runId).Scan(&b); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return types.Run{}, fmt.Errorf("run %s does not exist: %w", runId, errors.Join(ErrNotFound, os.ErrNotExist))
 		}
-		return types.Run{}, fmt.Errorf("error reading run.json file %s: %w", targetPath, err)
+		return types.Run{}, fmt.Errorf("error reading run %s: %w", runId, err)
 	}
 
 	var run types.Run
 
 	if err := json.Unmarshal(b, &run); err != nil {
-		return types.Run{}, fmt.Errorf("error unmarshalling json file %s: %w", targetPath, err)
+		return types.Run{}, fmt.Errorf("error unmarshalling run json: %w", err)
 	}
 
 	if run.RunId == "" {
@@ -83,24 +76,50 @@ func LoadRun(cfg config.Config, runId string) (types.Run, error) {
 	return run, nil
 }
 
-// SaveRun persists the current state of a run to disk as its run.json file.
-// It ensures the necessary directory structure exists before writing.
+// SaveRun persists the current state of a run to SQLite.
 func SaveRun(cfg config.Config, run types.Run) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	targetPath := fsutil.GetRunFilePath(cfg.DataDir, run.RunId)
-	err := os.MkdirAll(filepath.Dir(targetPath), 0755)
+	db, err := getSQLiteDB(cfg)
 	if err != nil {
 		return err
 	}
-
 	b, err := types.MarshalPretty(run)
 	if err != nil {
 		return fmt.Errorf("error marshalling run: %w", err)
 	}
-	if err := fsutil.WriteFileAtomic(targetPath, b, 0644); err != nil {
-		return fmt.Errorf("error writing run.json file %s: %w", targetPath, err)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	startedAt := timePtrToString(run.StartedAt)
+	finishedAt := timePtrToString(run.FinishedAt)
+	createdAt := startedAt
+	if createdAt == "" {
+		createdAt = now
+	}
+	_, err = db.Exec(
+		`INSERT INTO runs (run_id, session_id, status, goal, run_json, started_at, finished_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(run_id) DO UPDATE SET
+		   session_id=excluded.session_id,
+		   status=excluded.status,
+		   goal=excluded.goal,
+		   run_json=excluded.run_json,
+		   started_at=excluded.started_at,
+		   finished_at=excluded.finished_at,
+		   created_at=COALESCE(runs.created_at, excluded.created_at),
+		   updated_at=excluded.updated_at`,
+		run.RunId,
+		run.SessionID,
+		string(run.Status),
+		run.Goal,
+		string(b),
+		nullIfEmpty(startedAt),
+		nullIfEmpty(finishedAt),
+		createdAt,
+		now,
+	)
+	if err != nil {
+		return fmt.Errorf("error saving run: %w", err)
 	}
 	return nil
 }
@@ -108,7 +127,7 @@ func SaveRun(cfg config.Config, run types.Run) error {
 // StopRun transitions a run to a terminal state (Done or Failed).
 // It updates the Status, sets FinishedAt to the current time,
 // and records an error message if the status is Failed.
-// The updated state is then persisted to disk.
+// The updated state is then persisted to SQLite.
 func StopRun(cfg config.Config, runId string, status types.RunStatus, errorMsg string) (types.Run, error) {
 	if err := cfg.Validate(); err != nil {
 		return types.Run{}, err

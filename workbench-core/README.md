@@ -66,9 +66,9 @@ Most entrypoints live under `cmd/workbench/cmd` and use Cobra. Important workflo
 | `workbench resume <sessionId>` | Open a run that reuses session context. |
 | `workbench list sessions` | List stored session IDs + metadata. |
 | `workbench list runs <sessionId>` | Show run history for a session (statuses, timestamps). |
-| `workbench show session <sessionId>` | Dump session metadata (`session.json`). |
-| `workbench show run <runId>` | Dump run metadata (`run.json`). |
-| `workbench show history <sessionId>` | Print the operation log (`history/history.jsonl`). |
+| `workbench show session <sessionId>` | Dump session metadata. |
+| `workbench show run <runId>` | Dump run metadata. |
+| `workbench show history <sessionId>` | Print the operation log as JSONL. |
 | `workbench --help` | Get command + flag help (Cobra-generated). |
 
 ## Configuration
@@ -77,7 +77,7 @@ Runtime configuration resolves in this order: CLI flags → environment variable
 
 | Flag | Env | Description |
 | ---- | --- | ----------- |
-| `--data-dir` | `WORKBENCH_DATA_DIR` | Base directory containing `sessions`, `runs`, `tools`, `profile`, `agent`. Defaults to `~/.workbench` or `$XDG_STATE_HOME/workbench`. |
+| `--data-dir` | `WORKBENCH_DATA_DIR` | Base directory containing `workbench.db`, `runs`, `tools`, `profile`, `agent`. Defaults to `~/.workbench` or `$XDG_STATE_HOME/workbench`. |
 | `--workdir` | `WORKBENCH_WORKDIR` | Host directory mounted under `/project`. Defaults to the current working directory. |
 | `--context-bytes` | — | How many bytes of context to persist (`run.maxBytesForContext`; default `8*1024`). Must be > 0. |
 | `--model` | `OPENROUTER_MODEL` | Default model ID for LLM calls (overrides session defaults). |
@@ -95,8 +95,8 @@ Helpers in `internal/config/effectiveConfig()` resolve the final configuration b
 
 The CLI stores persistent state under the configured `dataDir`:
 
-- `dataDir/sessions/<sessionId>/session.json` (metadata) and `/history/history.jsonl` (operation log).
-- `dataDir/runs/<runId>/` (containing `run.json`, `events.jsonl`, `scratch`, `artifacts`, `log`, `memory`, `profile`).
+- `dataDir/workbench.db` (sessions, runs, events, history).
+- `dataDir/runs/<runId>/` (containing `scratch`, `artifacts`, `log`, `memory`, `profile`).
 
 Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sample commands, and tips on manually inspecting sessions, runs, and agent mounts.
 

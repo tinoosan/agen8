@@ -1,16 +1,16 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/validate"
 )
@@ -18,11 +18,7 @@ import (
 // CreateSession creates and persists a new session along with its main run.
 //
 // The returned Session+Run pair ensures every session starts with an active Main Run.
-// Sessions are stored under:
-//
-//	data/sessions/<sessionId>/session.json
-//
-// The session history file is created lazily by the history store/sink.
+// Sessions are stored in SQLite (data/workbench.db by default).
 func CreateSession(cfg config.Config, goal string, maxBytesForContext int) (types.Session, types.Run, error) {
 	if err := cfg.Validate(); err != nil {
 		return types.Session{}, types.Run{}, err
@@ -51,15 +47,51 @@ func SaveSession(cfg config.Config, s types.Session) error {
 	if err := validate.NonEmpty("sessionId", s.SessionID); err != nil {
 		return err
 	}
-	targetPath := fsutil.GetSessionFilePath(cfg.DataDir, s.SessionID)
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
 		return err
 	}
 	b, err := types.MarshalPretty(s)
 	if err != nil {
 		return err
 	}
-	return fsutil.WriteFileAtomic(targetPath, b, 0644)
+	runsJSON, err := json.Marshal(s.Runs)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	createdAt := timePtrToString(s.CreatedAt)
+	updatedAt := timePtrToString(s.UpdatedAt)
+	if updatedAt == "" {
+		updatedAt = now
+	}
+	if createdAt == "" {
+		createdAt = now
+	}
+	_, err = db.Exec(
+		`INSERT INTO sessions (session_id, title, current_run_id, current_goal, runs_json, session_json, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(session_id) DO UPDATE SET
+		   title=excluded.title,
+		   current_run_id=excluded.current_run_id,
+		   current_goal=excluded.current_goal,
+		   runs_json=excluded.runs_json,
+		   session_json=excluded.session_json,
+		   created_at=COALESCE(sessions.created_at, excluded.created_at),
+		   updated_at=excluded.updated_at`,
+		s.SessionID,
+		nullIfEmpty(s.Title),
+		nullIfEmpty(s.CurrentRunID),
+		nullIfEmpty(s.CurrentGoal),
+		string(runsJSON),
+		string(b),
+		createdAt,
+		updatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("save session: %w", err)
+	}
+	return nil
 }
 
 // LoadSession reads session.json for a session ID.
@@ -71,17 +103,20 @@ func LoadSession(cfg config.Config, sessionID string) (types.Session, error) {
 	if err := validate.NonEmpty("sessionId", sessionID); err != nil {
 		return types.Session{}, err
 	}
-	targetPath := fsutil.GetSessionFilePath(cfg.DataDir, sessionID)
-	b, err := os.ReadFile(targetPath)
+	db, err := getSQLiteDB(cfg)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return types.Session{}, fmt.Errorf("session.json file %s does not exist: %w", targetPath, errors.Join(ErrNotFound, err))
+		return types.Session{}, err
+	}
+	var b []byte
+	if err := db.QueryRow(`SELECT session_json FROM sessions WHERE session_id = ?`, sessionID).Scan(&b); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return types.Session{}, fmt.Errorf("session %s does not exist: %w", sessionID, errors.Join(ErrNotFound, os.ErrNotExist))
 		}
-		return types.Session{}, fmt.Errorf("error reading session.json file %s: %w", targetPath, err)
+		return types.Session{}, fmt.Errorf("error reading session %s: %w", sessionID, err)
 	}
 	var s types.Session
 	if err := json.Unmarshal(b, &s); err != nil {
-		return types.Session{}, fmt.Errorf("error unmarshalling json file %s: %w", targetPath, err)
+		return types.Session{}, fmt.Errorf("error unmarshalling session json: %w", err)
 	}
 	if err := validate.NonEmpty("sessionId", s.SessionID); err != nil {
 		return types.Session{}, fmt.Errorf("invalid session.json: missing sessionId: %w", ErrInvalid)
@@ -126,20 +161,25 @@ func ListSessionIDs(cfg config.Config) ([]string, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	base := fsutil.GetSessionsDir(cfg.DataDir)
-	des, err := os.ReadDir(base)
+	db, err := getSQLiteDB(cfg)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return []string{}, nil
-		}
 		return nil, err
 	}
-	out := make([]string, 0, len(des))
-	for _, de := range des {
-		if !de.IsDir() {
-			continue
+	rows, err := db.Query(`SELECT session_id FROM sessions ORDER BY session_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
 		}
-		out = append(out, de.Name())
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	sort.Strings(out)
 	return out, nil

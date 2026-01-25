@@ -19,9 +19,7 @@ import (
 //   - HistorySink writes a "verifiable source of truth" record of raw interactions
 //     between the user, agent, and environment
 //
-// On disk (run-scoped today):
-//
-//	data/sessions/<sessionId>/history/history.jsonl
+// Stored in SQLite (session-scoped), and exposed via /history/history.jsonl.
 //
 // The host owns history: it is append-only and should not be writable via VFS.
 type HistorySink struct {

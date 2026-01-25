@@ -18,13 +18,13 @@ func TestDataDirFromEnv_WritesUnderResolvedDir(t *testing.T) {
 	}
 	cfg := config.Config{DataDir: dataDir}
 
-	_, run, err := CreateSession(cfg, "env data dir test", 256)
+	_, _, err = CreateSession(cfg, "env data dir test", 256)
 	if err != nil {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
 
-	runPath := fsutil.GetRunFilePath(cfg.DataDir, run.RunId)
-	if _, err := os.Stat(runPath); err != nil {
-		t.Fatalf("expected run.json to exist at %s: %v", runPath, err)
+	dbPath := fsutil.GetSQLitePath(cfg.DataDir)
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("expected sqlite db to exist at %s: %v", dbPath, err)
 	}
 }

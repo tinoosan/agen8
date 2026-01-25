@@ -71,7 +71,7 @@ func (f *Factory) ensureHistoryStore(cfg config.Config) (store.HistoryStore, err
 	if f.HistoryStore != nil {
 		return f.HistoryStore, nil
 	}
-	hs, err := store.NewDiskHistoryStore(cfg, f.SessionID)
+	hs, err := store.NewSQLiteHistoryStore(cfg, f.SessionID)
 	if err != nil {
 		return nil, err
 	}

@@ -19,14 +19,14 @@ The CLI boots the default Bubble Tea-powered TUI. Every line you send becomes an
 ./workbench resume <sessionId>         # create a new run in that session
 ```
 
-Session metadata lives under `dataDir/sessions/<sessionId>`. Resuming reuses the same goal/context while creating a fresh run workspace under `/scratch`.
+Session metadata lives in `workbench.db` under the data directory. Resuming reuses the same goal/context while creating a fresh run workspace under `/scratch`.
 
 ### 3. Inspect metadata, history, and artifacts
 
 ```sh
-./workbench show session <sessionId>   # print session.json
-./workbench show history <sessionId>   # dump history/history.jsonl
-./workbench show run <runId>           # inspect run.json + status
+./workbench show session <sessionId>   # print session metadata (SQLite-backed)
+./workbench show history <sessionId>   # dump history as JSONL
+./workbench show run <runId>           # inspect run metadata + status
 ```
 
 Pair these commands with `ls`/`cat` inside the `dataDir` to debug agent behavior, inspect artifacts, or replay the operation log.
@@ -37,11 +37,11 @@ Pair these commands with `ls`/`cat` inside the `dataDir` to debug agent behavior
 | ------- | ----------- |
 | `workbench` | Start a fresh session + run (default). |
 | `workbench resume <sessionId>` | Create a new run inside an existing session (increments run index). |
-| `workbench list sessions` | List session IDs along with metadata stored under `<dataDir>/sessions`. |
+| `workbench list sessions` | List session IDs along with metadata stored in SQLite. |
 | `workbench list runs <sessionId>` | Show runs tied to a session, including statuses and timestamps. |
-| `workbench show session <sessionId>` | Print the session metadata (`session.json`). |
-| `workbench show run <runId>` | Print the run metadata (`run.json`). |
-| `workbench show history <sessionId>` | Display the session-scoped operation history (`history/history.jsonl`). |
+| `workbench show session <sessionId>` | Print the session metadata. |
+| `workbench show run <runId>` | Print the run metadata. |
+| `workbench show history <sessionId>` | Display the session-scoped operation history as JSONL. |
 
 Run `workbench <command> --help` to get per-command flag details (Cobra auto-generates these descriptions).
 

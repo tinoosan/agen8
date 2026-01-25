@@ -1,17 +1,16 @@
 package store
 
 import (
-	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/nxadm/tail"
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/types"
@@ -25,8 +24,7 @@ type TailedEvent struct {
 // Event storage overview
 //
 // Canonical event log
-//   - AppendEvent writes an event as one JSON object per line (JSONL) to:
-//       data/runs/<runId>/events.jsonl
+//   - AppendEvent writes an event as one JSON object per line (JSONL) into SQLite.
 //
 // Trace mirror
 //   - AppendEvent also mirrors the exact same bytes (including newline) into:
@@ -34,11 +32,11 @@ type TailedEvent struct {
 //     so the trace VFS mount can be self-contained and offset-based polling is stable.
 //
 // Offset semantics
-//   - ListEvents returns nextOffset as the current file size.
-//   - That offset can be used later to fetch only new bytes (e.g. via /log/events.since/<offset>).
+//   - ListEvents returns nextOffset as the last SQLite sequence id.
+//   - That offset can be used later to fetch only new events via TailEvents.
 
 // AppendEvent records a new event for the specified run.
-// It validates inputs, ensures the run exists, and appends the event to the run's event log.
+// It validates inputs, ensures the run exists, and appends the event to SQLite.
 func AppendEvent(cfg config.Config, runId, eventType, message string, data map[string]string) error {
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -56,41 +54,39 @@ func AppendEvent(cfg config.Config, runId, eventType, message string, data map[s
 		return fmt.Errorf("error appending event, message cannot be blank")
 	}
 
-	targetPath := fsutil.GetEventFilePath(cfg.DataDir, runId)
-	runFilePath := fsutil.GetRunFilePath(cfg.DataDir, runId)
-
-	// We check if a run exists before we attempt to create an event in reference to it
-	_, err := os.Stat(runFilePath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("cannot append event, %s does not exist: %w", runFilePath, errors.Join(ErrNotFound, err))
-		}
-		return fmt.Errorf("cannot append event, error reading run.json file %s: %w", runFilePath, err)
-	}
-
-	event := types.NewEvent(runId, eventType, message, data)
-
-	err = os.MkdirAll(filepath.Dir(targetPath), 0755)
+	db, err := getSQLiteDB(cfg)
 	if err != nil {
 		return err
 	}
+	if err := ensureRunExists(db, runId); err != nil {
+		return err
+	}
 
+	event := types.NewEvent(runId, eventType, message, data)
 	b, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("error marshalling event: %w", err)
 	}
 
-	b = append(b, '\n')
-
-	f, err := os.OpenFile(targetPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("error appending event for run %s: %w", runId, err)
+	dataJSON := ""
+	if len(event.Data) > 0 {
+		if dbuf, err := json.Marshal(event.Data); err == nil {
+			dataJSON = string(dbuf)
+		} else {
+			return fmt.Errorf("error marshalling event data: %w", err)
+		}
 	}
-
-	defer f.Close()
-
-	_, err = f.Write(b)
-	if err != nil {
+	if _, err := db.Exec(
+		`INSERT INTO events (event_id, run_id, ts, type, message, data_json, event_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		event.EventId,
+		runId,
+		event.Timestamp.UTC().Format(time.RFC3339Nano),
+		event.Type,
+		event.Message,
+		nullIfEmpty(dataJSON),
+		string(b),
+	); err != nil {
 		return fmt.Errorf("error writing event for run %s: %w", runId, err)
 	}
 
@@ -105,7 +101,7 @@ func AppendEvent(cfg config.Config, runId, eventType, message string, data map[s
 	}
 	defer tf.Close()
 
-	if _, err := tf.Write(b); err != nil {
+	if _, err := tf.Write(append(b, '\n')); err != nil {
 		return fmt.Errorf("error writing trace event for run %s: %w", runId, err)
 	}
 
@@ -115,64 +111,57 @@ func AppendEvent(cfg config.Config, runId, eventType, message string, data map[s
 }
 
 // ListEvents retrieves all recorded events for a given run ID.
-// It reads from the run's JSONL event log, validates each entry, and returns them in order.
+// It reads from SQLite, validates each entry, and returns them in order.
 func ListEvents(cfg config.Config, runId string) ([]types.Event, int64, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, 0, err
 	}
-	targetPath := fsutil.GetEventFilePath(cfg.DataDir, runId)
-	events := make([]types.Event, 0)
-	f, err := os.Open(targetPath)
+	db, err := getSQLiteDB(cfg)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return events, 0, nil
-		}
-		return nil, 0, fmt.Errorf("error opening %s: %w", targetPath, err)
+		return nil, 0, err
 	}
+	events := make([]types.Event, 0)
+	rows, err := db.Query(`SELECT event_json FROM events WHERE run_id = ? ORDER BY seq`, runId)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
 
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
 	lineNum := 0
-	for scanner.Scan() {
-		var event types.Event
+	for rows.Next() {
 		lineNum++
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			return nil, 0, fmt.Errorf("error reading event at line %d in %s: %w", lineNum, targetPath, err)
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, 0, err
 		}
-
+		var event types.Event
+		if err := json.Unmarshal([]byte(raw), &event); err != nil {
+			return nil, 0, fmt.Errorf("error reading event at row %d: %w", lineNum, err)
+		}
 		if event.RunId != runId {
-			return nil, 0, fmt.Errorf("error reading event at line %d in %s: runId mismatch", lineNum, targetPath)
+			return nil, 0, fmt.Errorf("error reading event at row %d: runId mismatch", lineNum)
 		}
-
 		if event.EventId == "" {
-			return nil, 0, fmt.Errorf("error reading event at line %d in %s: eventId cannot be blank", lineNum, targetPath)
+			return nil, 0, fmt.Errorf("error reading event at row %d: eventId cannot be blank", lineNum)
 		}
-
 		if event.Timestamp.IsZero() {
-			return nil, 0, fmt.Errorf("error reading event at line %d in %s: timestamp cannot be zero", lineNum, targetPath)
+			return nil, 0, fmt.Errorf("error reading event at row %d: timestamp cannot be zero", lineNum)
 		}
-
 		if event.Type == "" {
-			return nil, 0, fmt.Errorf("error reading event at line %d in %s: type cannot be blank", lineNum, targetPath)
+			return nil, 0, fmt.Errorf("error reading event at row %d: type cannot be blank", lineNum)
 		}
-
 		if event.Message == "" {
-			return nil, 0, fmt.Errorf("error reading event at line %d in %s: message cannot be blank", lineNum, targetPath)
+			return nil, 0, fmt.Errorf("error reading event at row %d: message cannot be blank", lineNum)
 		}
 		events = append(events, event)
 	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error scanning %s at line %d: %w", targetPath, lineNum+1, err)
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
 	}
-
-	info, err := f.Stat()
-	if err != nil {
-		return nil, 0, fmt.Errorf("error getting offset for %s: %w", targetPath, err)
+	var nextOffset int64
+	if err := db.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM events WHERE run_id = ?`, runId).Scan(&nextOffset); err != nil {
+		return nil, 0, err
 	}
-
-	nextOffset := info.Size()
 	return events, nextOffset, nil
 }
 
@@ -192,90 +181,92 @@ func TailEvents(cfg config.Config, ctx context.Context, runId string, fromOffset
 		return eventCh, errCh
 	}
 
-	targetPath := fsutil.GetEventFilePath(cfg.DataDir, runId)
-	currentOffset := fromOffset
-
 	go func() {
 		defer close(eventCh)
 		defer close(errCh)
 
-		// Validate offset is non-negative (always, regardless of file existence)
+		// Validate offset is non-negative (always, regardless of run existence)
 		if fromOffset < 0 {
 			errCh <- fmt.Errorf("fromOffset cannot be negative")
 			return
 		}
 
-		// Validate offset against file size if file exists
-		info, err := os.Stat(targetPath)
+		db, err := getSQLiteDB(cfg)
 		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				errCh <- fmt.Errorf("error getting file info for %s: %w", targetPath, err)
-				return
-			}
-			// If file doesn't exist, tail will create a watcher and wait for it
-		} else {
-			if fromOffset > info.Size() {
-				errCh <- fmt.Errorf("fromOffset %d exceeds file size %d", fromOffset, info.Size())
-				return
-			}
-		}
-
-		t, err := tail.TailFile(targetPath, tail.Config{
-			Location:      &tail.SeekInfo{Offset: fromOffset, Whence: io.SeekStart},
-			Follow:        true,
-			ReOpen:        true,
-			Poll:          true,
-			Logger:        tail.DiscardingLogger,
-			CompleteLines: true,
-		})
-		if err != nil {
-			errCh <- fmt.Errorf("error tailing file %s: %w", targetPath, err)
+			errCh <- err
 			return
 		}
-		defer t.Cleanup()
+		currentOffset := fromOffset
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
-				t.Stop()
 				return
-			case line, ok := <-t.Lines:
-				if !ok {
+			case <-ticker.C:
+				rows, err := db.Query(
+					`SELECT seq, event_json FROM events WHERE run_id = ? AND seq > ? ORDER BY seq`,
+					runId,
+					currentOffset,
+				)
+				if err != nil {
+					errCh <- err
 					return
 				}
-				if line.Err != nil {
-					errCh <- fmt.Errorf("error reading line: %w", line.Err)
+				for rows.Next() {
+					var seq int64
+					var raw string
+					if err := rows.Scan(&seq, &raw); err != nil {
+						rows.Close()
+						errCh <- err
+						return
+					}
+					var event types.Event
+					if err := json.Unmarshal([]byte(raw), &event); err != nil {
+						rows.Close()
+						errCh <- fmt.Errorf("error unmarshalling event: %w", err)
+						return
+					}
+					if event.RunId != runId {
+						rows.Close()
+						errCh <- fmt.Errorf("runId mismatch: expected %s, got %s", runId, event.RunId)
+						return
+					}
+					currentOffset = seq
+					select {
+					case <-ctx.Done():
+						rows.Close()
+						return
+					case eventCh <- TailedEvent{
+						Event:      event,
+						NextOffset: currentOffset,
+					}:
+					}
+				}
+				if err := rows.Err(); err != nil {
+					rows.Close()
+					errCh <- err
 					return
 				}
-
-				// Update offset: line length + 1 for newline
-				currentOffset += int64(len(line.Text)) + 1
-
-				// Skip empty lines
-				text := strings.TrimSpace(line.Text)
-				if text == "" {
-					continue
-				}
-
-				var event types.Event
-				if err := json.Unmarshal([]byte(text), &event); err != nil {
-					errCh <- fmt.Errorf("error unmarshalling event: %w", err)
-					return
-				}
-
-				// Validate runId matches
-				if event.RunId != runId {
-					errCh <- fmt.Errorf("runId mismatch: expected %s, got %s", runId, event.RunId)
-					return
-				}
-
-				eventCh <- TailedEvent{
-					Event:      event,
-					NextOffset: currentOffset,
-				}
+				rows.Close()
 			}
 		}
 	}()
 
 	return eventCh, errCh
+}
+
+func ensureRunExists(db *sql.DB, runId string) error {
+	if strings.TrimSpace(runId) == "" {
+		return fmt.Errorf("runId cannot be blank")
+	}
+	var exists int
+	if err := db.QueryRow(`SELECT 1 FROM runs WHERE run_id = ? LIMIT 1`, runId).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("cannot append event, run %s does not exist: %w", runId, errors.Join(ErrNotFound, os.ErrNotExist))
+		}
+		return fmt.Errorf("cannot append event, error reading run %s: %w", runId, err)
+	}
+	return nil
 }

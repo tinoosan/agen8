@@ -1,11 +1,10 @@
 package store
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/types"
@@ -50,46 +49,19 @@ func TestCreateRun(t *testing.T) {
 		t.Error("Expected SessionID to be set, got empty string")
 	}
 
-	// Verify run.json creation
-	runDir := filepath.Join(tmpDir, "runs", run.RunId)
-	jsonPath := filepath.Join(runDir, "run.json")
-
-	if _, err := os.Stat(jsonPath); os.IsNotExist(err) {
-		t.Fatalf("run.json was not created at %s", jsonPath)
-	}
-
-	// Verify JSON content
-	b, err := os.ReadFile(jsonPath)
+	// Verify persisted content via LoadRun
+	loaded, err := LoadRun(cfg, run.RunId)
 	if err != nil {
-		t.Fatalf("Failed to read run.json: %v", err)
+		t.Fatalf("LoadRun failed: %v", err)
 	}
-
-	var savedRun types.Run
-	if err := json.Unmarshal(b, &savedRun); err != nil {
-		t.Fatalf("Failed to unmarshal run.json: %v", err)
+	if loaded.RunId != run.RunId {
+		t.Errorf("RunId mismatch: expected %q, got %q", run.RunId, loaded.RunId)
 	}
-
-	if savedRun.RunId != run.RunId {
-		t.Errorf("JSON RunId mismatch: expected %q, got %q", run.RunId, savedRun.RunId)
+	if loaded.Goal != run.Goal {
+		t.Errorf("Goal mismatch: expected %q, got %q", run.Goal, loaded.Goal)
 	}
-	if savedRun.Goal != run.Goal {
-		t.Errorf("JSON Goal mismatch: expected %q, got %q", run.Goal, savedRun.Goal)
-	}
-	if savedRun.Status != run.Status {
-		t.Errorf("JSON Status mismatch: expected %q, got %q", run.Status, savedRun.Status)
-	}
-
-	// Verify omitempty fields are absent from JSON
-	var raw map[string]interface{}
-	if err := json.Unmarshal(b, &raw); err != nil {
-		t.Fatalf("Failed to unmarshal raw JSON: %v", err)
-	}
-
-	if _, exists := raw["finishedAt"]; exists {
-		t.Error("finishedAt should be omitted from JSON when nil")
-	}
-	if _, exists := raw["error"]; exists {
-		t.Error("error should be omitted from JSON when nil")
+	if loaded.Status != run.Status {
+		t.Errorf("Status mismatch: expected %q, got %q", run.Status, loaded.Status)
 	}
 }
 
@@ -129,15 +101,26 @@ func TestLoadRun(t *testing.T) {
 
 	t.Run("MalformedJSON", func(t *testing.T) {
 		runId := "malformed-run"
-		runDir := filepath.Join(tmpDir, "runs", runId)
-		if err := os.MkdirAll(runDir, 0755); err != nil {
+		db, err := getSQLiteDB(cfg)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(runDir, "run.json"), []byte("{invalid-json}"), 0644); err != nil {
+		_, err = db.Exec(
+			`INSERT INTO runs (run_id, session_id, status, goal, run_json, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			runId,
+			"sess-test",
+			string(types.StatusRunning),
+			"goal",
+			"{invalid-json}",
+			time.Now().UTC().Format(time.RFC3339Nano),
+			time.Now().UTC().Format(time.RFC3339Nano),
+		)
+		if err != nil {
 			t.Fatal(err)
 		}
 
-		_, err := LoadRun(cfg, runId)
+		_, err = LoadRun(cfg, runId)
 		if err == nil {
 			t.Error("Expected error for malformed JSON, got nil")
 		}
@@ -145,15 +128,26 @@ func TestLoadRun(t *testing.T) {
 
 	t.Run("MissingRunId", func(t *testing.T) {
 		runId := "missing-id-run"
-		runDir := filepath.Join(tmpDir, "runs", runId)
-		if err := os.MkdirAll(runDir, 0755); err != nil {
+		db, err := getSQLiteDB(cfg)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(runDir, "run.json"), []byte(`{"goal":"test"}`), 0644); err != nil {
+		_, err = db.Exec(
+			`INSERT INTO runs (run_id, session_id, status, goal, run_json, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			runId,
+			"sess-test",
+			string(types.StatusRunning),
+			"goal",
+			`{"goal":"test"}`,
+			time.Now().UTC().Format(time.RFC3339Nano),
+			time.Now().UTC().Format(time.RFC3339Nano),
+		)
+		if err != nil {
 			t.Fatal(err)
 		}
 
-		_, err := LoadRun(cfg, runId)
+		_, err = LoadRun(cfg, runId)
 		if err == nil {
 			t.Error("Expected error for missing runId, got nil")
 		}
@@ -185,10 +179,10 @@ func TestStopRun(t *testing.T) {
 			t.Errorf("Expected Error to be nil, got %q", *stopped.Error)
 		}
 
-		// Verify on disk
+		// Verify persisted
 		loaded, _ := LoadRun(cfg, run.RunId)
 		if loaded.Status != types.StatusDone {
-			t.Errorf("Disk status expected %q, got %q", types.StatusDone, loaded.Status)
+			t.Errorf("Status expected %q, got %q", types.StatusDone, loaded.Status)
 		}
 	})
 

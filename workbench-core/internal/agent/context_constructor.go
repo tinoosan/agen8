@@ -189,7 +189,7 @@ type ConstructorManifest struct {
 	} `json:"references,omitempty"`
 }
 
-// historyLine is the minimal schema written to /history/history.jsonl by HistorySink.
+// historyLine is the minimal schema emitted by HistorySink and exposed at /history/history.jsonl.
 type historyLine struct {
 	Timestamp string            `json:"ts"`
 	RunID     string            `json:"runId"`

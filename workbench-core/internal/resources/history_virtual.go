@@ -30,8 +30,7 @@ import (
 // compliance verification.
 //
 // Scope
-//   - History is scoped to a session:
-//     data/sessions/<sessionId>/history/history.jsonl
+//   - History is scoped to a session and stored in SQLite (exposed as JSONL via VFS).
 //   - A session can contain multiple runs (including sub-agent runs).
 //
 // Access policy
@@ -74,7 +73,7 @@ func NewHistoryResource(cfg config.Config, sessionID string) (*HistoryResource, 
 	// Keep BaseDir for debug output / inspection, but store owns the IO.
 	baseDir := fsutil.GetSessionHistoryDir(cfg.DataDir, sessionID)
 
-	s, err := store.NewDiskHistoryStore(cfg, sessionID)
+	s, err := store.NewSQLiteHistoryStore(cfg, sessionID)
 	if err != nil {
 		return nil, err
 	}

@@ -10,6 +10,11 @@ package fsutil
 
 import "path/filepath"
 
+// GetSQLitePath returns the path to the Workbench SQLite database.
+func GetSQLitePath(dataDir string) string {
+	return filepath.Join(dataDir, "workbench.db")
+}
+
 // GetSessionsDir returns the path to the sessions directory given the data directory.
 //
 // Sessions group runs and provide shared, append-only history.
@@ -144,4 +149,4 @@ func GetRunMemoryUpdatePath(dataDir, runId string) string {
 	return filepath.Join(GetRunMemoryDir(dataDir, runId), "update.md")
 }
 
-// NOTE: history is session-scoped (data/sessions/<sessionId>/history/history.jsonl).
+// NOTE: history is session-scoped and exposed via /history (SQLite-backed by default).
