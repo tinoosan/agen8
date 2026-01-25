@@ -10,7 +10,7 @@ import (
 	"os"
 
 	"github.com/tinoosan/workbench-core/pkg/bytesutil"
-	"github.com/tinoosan/workbench-core/internal/config"
+	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )

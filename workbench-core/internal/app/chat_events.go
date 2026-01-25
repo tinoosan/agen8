@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tinoosan/workbench-core/internal/config"
+	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/internal/tui"

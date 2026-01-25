@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 func TestDiskMemoryStore_UpdateRoundTripAndClear(t *testing.T) {

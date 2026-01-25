@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/tinoosan/workbench-core/internal/config"
+	"github.com/tinoosan/workbench-core/pkg/config"
 )
 
 func effectiveConfig(cmd *cobra.Command) (config.Config, error) {

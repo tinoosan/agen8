@@ -6,16 +6,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/pkg/llm"
-	"github.com/tinoosan/workbench-core/internal/resources"
-	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/agent"
+	"github.com/tinoosan/workbench-core/pkg/events"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/resources"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	"github.com/tinoosan/workbench-core/pkg/tools"
+	"github.com/tinoosan/workbench-core/pkg/types"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
+	"github.com/tinoosan/workbench-core/pkg/config"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
+	"github.com/tinoosan/workbench-core/internal/store"
 )
 
 type tuiChatSetup struct {
@@ -68,6 +70,22 @@ func setupTUIChatRuntime(
 		return nil, err
 	}
 
+	resultsStore := store.NewInMemoryResultsStore()
+	memStore, err := store.NewDiskMemoryStore(cfg, run.RunId)
+	if err != nil {
+		return nil, err
+	}
+	profileStore, err := store.NewDiskProfileStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	traceStore := store.DiskTraceStore{DiskStore: store.DiskStore{Dir: fsutil.GetLogDir(cfg.DataDir, run.RunId)}}
+
+	historyStore, ok := historyRes.Appender.(pkgstore.HistoryStore)
+	if !ok {
+		return nil, fmt.Errorf("history store must implement HistoryStore")
+	}
+
 	rt, err := runtime.Build(runtime.BuildConfig{
 		Cfg:               cfg,
 		Run:               run,
@@ -77,7 +95,11 @@ func setupTUIChatRuntime(
 		ReasoningSummary:  strings.TrimSpace(opts.ReasoningSummary),
 		ApprovalsMode:     strings.TrimSpace(opts.ApprovalsMode),
 		PlanMode:          opts.PlanMode,
-		HistoryRes:        historyRes,
+		HistoryStore:      historyStore,
+		ResultsStore:      resultsStoreAdapter{InMemoryResultsStore: resultsStore},
+		MemoryStore:       memStore,
+		ProfileStore:      profileStore,
+		TraceStore:        traceStoreAdapter{TraceStore: traceStore},
 		Emit:              mustEmit,
 		IncludeHistoryOps: derefBool(opts.IncludeHistoryOps, true),
 		RecentHistoryPairs: opts.RecentHistoryPairs,
@@ -90,6 +112,15 @@ func setupTUIChatRuntime(
 			return enforcePlanChecklist(fs, req)
 		},
 		ArtifactObserve: artifactIndex.ObserveWrite,
+		PersistRun: func(r types.Run) error {
+			return store.SaveRun(cfg, r)
+		},
+		LoadSession: func(sessionID string) (types.Session, error) {
+			return store.LoadSession(cfg, sessionID)
+		},
+		SaveSession: func(session types.Session) error {
+			return store.SaveSession(cfg, session)
+		},
 	})
 	if err != nil {
 		return nil, err

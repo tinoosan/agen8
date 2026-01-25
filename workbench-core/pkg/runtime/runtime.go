@@ -7,18 +7,18 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/pkg/debuglog"
-	"github.com/tinoosan/workbench-core/internal/resources"
-	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/skills"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
-	internaltools "github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/pkg/agent"
+	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/resources"
+	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/tools"
+	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 type Runtime struct {
@@ -44,7 +44,11 @@ type BuildConfig struct {
 	ReasoningSummary string
 	ApprovalsMode    string
 	PlanMode         bool
-	HistoryRes      *resources.HistoryResource
+	HistoryStore     store.HistoryStore
+	ResultsStore     store.ResultsStore
+	MemoryStore      store.MemoryStore
+	ProfileStore     store.ProfileStore
+	TraceStore       store.TraceStore
 	Emit            func(ctx context.Context, ev events.Event)
 	IncludeHistoryOps bool
 	RecentHistoryPairs int
@@ -55,14 +59,14 @@ type BuildConfig struct {
 	PriceOutPerMTokensUSD float64
 	Guard           func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse
 	ArtifactObserve func(path string)
+	PersistRun      func(run types.Run) error
+	LoadSession     func(sessionID string) (types.Session, error)
+	SaveSession     func(session types.Session) error
 }
 
 func Build(cfg BuildConfig) (*Runtime, error) {
 	if err := cfg.Cfg.Validate(); err != nil {
 		return nil, err
-	}
-	if cfg.HistoryRes == nil {
-		return nil, fmt.Errorf("history resource is required")
 	}
 	if strings.TrimSpace(cfg.WorkdirAbs) == "" {
 		return nil, fmt.Errorf("workdir is required")
@@ -85,37 +89,41 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		PriceInPerMTokensUSD:  cfg.PriceInPerMTokensUSD,
 		PriceOutPerMTokensUSD: cfg.PriceOutPerMTokensUSD,
 	}
-	_ = store.SaveRun(cfg.Cfg, run)
+	if cfg.PersistRun != nil {
+		_ = cfg.PersistRun(run)
+	}
 
-	if sess, err := store.LoadSession(cfg.Cfg, run.SessionID); err == nil {
-		changed := false
-		if strings.TrimSpace(sess.ActiveModel) != strings.TrimSpace(cfg.Model) {
-			sess.ActiveModel = strings.TrimSpace(cfg.Model)
-			changed = true
-		}
-		if strings.TrimSpace(sess.ReasoningEffort) != strings.TrimSpace(cfg.ReasoningEffort) {
-			sess.ReasoningEffort = strings.TrimSpace(cfg.ReasoningEffort)
-			changed = true
-		}
-		if strings.TrimSpace(sess.ReasoningSummary) != strings.TrimSpace(cfg.ReasoningSummary) {
-			sess.ReasoningSummary = strings.TrimSpace(cfg.ReasoningSummary)
-			changed = true
-		}
-		approvalMode := strings.TrimSpace(cfg.ApprovalsMode)
-		if approvalMode == "" {
-			approvalMode = "enabled"
-		}
-		if strings.TrimSpace(sess.ApprovalsMode) != approvalMode {
-			sess.ApprovalsMode = approvalMode
-			changed = true
-		}
-		if sess.PlanMode == nil || *sess.PlanMode != cfg.PlanMode {
-			nextPlanMode := cfg.PlanMode
-			sess.PlanMode = &nextPlanMode
-			changed = true
-		}
-		if changed {
-			_ = store.SaveSession(cfg.Cfg, sess)
+	if cfg.LoadSession != nil {
+		if sess, err := cfg.LoadSession(run.SessionID); err == nil {
+			changed := false
+			if strings.TrimSpace(sess.ActiveModel) != strings.TrimSpace(cfg.Model) {
+				sess.ActiveModel = strings.TrimSpace(cfg.Model)
+				changed = true
+			}
+			if strings.TrimSpace(sess.ReasoningEffort) != strings.TrimSpace(cfg.ReasoningEffort) {
+				sess.ReasoningEffort = strings.TrimSpace(cfg.ReasoningEffort)
+				changed = true
+			}
+			if strings.TrimSpace(sess.ReasoningSummary) != strings.TrimSpace(cfg.ReasoningSummary) {
+				sess.ReasoningSummary = strings.TrimSpace(cfg.ReasoningSummary)
+				changed = true
+			}
+			approvalMode := strings.TrimSpace(cfg.ApprovalsMode)
+			if approvalMode == "" {
+				approvalMode = "enabled"
+			}
+			if strings.TrimSpace(sess.ApprovalsMode) != approvalMode {
+				sess.ApprovalsMode = approvalMode
+				changed = true
+			}
+			if sess.PlanMode == nil || *sess.PlanMode != cfg.PlanMode {
+				nextPlanMode := cfg.PlanMode
+				sess.PlanMode = &nextPlanMode
+				changed = true
+			}
+			if changed && cfg.SaveSession != nil {
+				_ = cfg.SaveSession(sess)
+			}
 		}
 	}
 
@@ -130,11 +138,11 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		DataDir:   cfg.Cfg.DataDir,
 		SessionID: cfg.Run.SessionID,
 		RunID:     cfg.Run.RunId,
-	}
-	if hs, ok := cfg.HistoryRes.Store.(store.HistoryStore); ok {
-		f.HistoryStore = hs
-	} else if hs, ok := cfg.HistoryRes.Appender.(store.HistoryStore); ok {
-		f.HistoryStore = hs
+		ResultsStore: cfg.ResultsStore,
+		MemoryStore:  cfg.MemoryStore,
+		ProfileStore: cfg.ProfileStore,
+		HistoryStore: cfg.HistoryStore,
+		TraceStore:   cfg.TraceStore,
 	}
 	if err := f.MountAll(fs); err != nil {
 		return nil, err
@@ -224,17 +232,17 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		Store: traceStore,
 		FS:    fs,
 	}
-	builtinCfg := internaltools.BuiltinConfig{
+	builtinCfg := builtins.BuiltinConfig{
 		ShellRootDir:  absWorkdirRoot,
 		ShellVFSMount: vfs.MountProject,
 		ShellConfirm:  nil,
 		TraceStore:    traceStore,
 	}
-	shellInvoker := internaltools.NewBuiltinShellInvoker(absWorkdirRoot, nil, vfs.MountProject)
-	httpInvoker := internaltools.NewBuiltinHTTPInvoker()
-	traceInvoker := internaltools.BuiltinTraceInvoker{Store: traceStore}
+	shellInvoker := builtins.NewBuiltinShellInvoker(absWorkdirRoot, nil, vfs.MountProject)
+	httpInvoker := builtins.NewBuiltinHTTPInvoker()
+	traceInvoker := builtins.BuiltinTraceInvoker{Store: traceStore}
 
-	builtinInvokers := internaltools.BuiltinInvokerRegistry(builtinCfg)
+	builtinInvokers := builtins.BuiltinInvokerRegistry(builtinCfg)
 	if builtinInvokers == nil {
 		builtinInvokers = make(tools.MapRegistry)
 	}
@@ -242,7 +250,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	builtinInvokers[tools.ToolID("builtin.http")] = httpInvoker
 	builtinInvokers[tools.ToolID("builtin.trace")] = traceInvoker
 
-	builtinManifestProvider, err := internaltools.NewBuiltinManifestProvider()
+	builtinManifestProvider, err := builtins.NewBuiltinManifestProvider()
 	if err != nil {
 		return nil, fmt.Errorf("load builtin manifests: %w", err)
 	}
@@ -251,7 +259,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	diskManifestProvider := tools.NewDiskManifestProvider(toolsDir)
 	toolManifestRegistry := tools.NewCompositeToolManifestRegistry(builtinManifestProvider, diskManifestProvider)
 
-	toolRuntime, err := internaltools.NewRuntimeWiring(toolManifestRegistry, builtinInvokers)
+	toolRuntime, err := builtins.NewRuntimeWiring(toolManifestRegistry, builtinInvokers)
 	if err != nil {
 		return nil, err
 	}

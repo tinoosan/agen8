@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinoosan/workbench-core/internal/config"
+	"github.com/tinoosan/workbench-core/pkg/config"
 )
 
 func TestEventStore(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 

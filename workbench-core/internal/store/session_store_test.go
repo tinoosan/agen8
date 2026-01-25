@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/config"
+	"github.com/tinoosan/workbench-core/pkg/config"
 )
 
 func TestCreateSessionAndAddRun(t *testing.T) {

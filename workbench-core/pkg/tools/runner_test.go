@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/resources"
-	"github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/resources"
+	internalstore "github.com/tinoosan/workbench-core/internal/store"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/tools"
 )
@@ -24,12 +26,12 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	_, run, err := store.CreateSession(cfg, "runner test", 100)
+	_, run, err := internalstore.CreateSession(cfg, "runner test", 100)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	resultsStore := store.NewInMemoryResultsStore()
+	resultsStore := newTestResultsStore()
 	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
 		t.Fatalf("NewResultsResource: %v", err)
@@ -102,12 +104,12 @@ func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	_, run, err := store.CreateSession(cfg, "runner unknown tool test", 100)
+	_, run, err := internalstore.CreateSession(cfg, "runner unknown tool test", 100)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	resultsStore := store.NewInMemoryResultsStore()
+	resultsStore := newTestResultsStore()
 	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
 		t.Fatalf("NewResultsResource: %v", err)
@@ -145,12 +147,12 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	_, run, err := store.CreateSession(cfg, "runner invalid artifact test", 100)
+	_, run, err := internalstore.CreateSession(cfg, "runner invalid artifact test", 100)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	resultsStore := store.NewInMemoryResultsStore()
+	resultsStore := newTestResultsStore()
 	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
 		t.Fatalf("NewResultsResource: %v", err)
@@ -195,12 +197,12 @@ func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	_, run, err := store.CreateSession(cfg, "runner invoke error test", 100)
+	_, run, err := internalstore.CreateSession(cfg, "runner invoke error test", 100)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	resultsStore := store.NewInMemoryResultsStore()
+	resultsStore := newTestResultsStore()
 	resultsRes, err := resources.NewResultsResource(resultsStore)
 	if err != nil {
 		t.Fatalf("NewResultsResource: %v", err)
@@ -234,4 +236,87 @@ func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
 		t.Fatalf("expected no on-disk results directory")
 	}
+}
+
+type testResultsStore struct {
+	calls map[string]*testCall
+}
+
+type testCall struct {
+	responseJSON []byte
+	artifacts    map[string]testArtifact
+}
+
+type testArtifact struct {
+	data      []byte
+	mediaType string
+}
+
+func newTestResultsStore() *testResultsStore {
+	return &testResultsStore{calls: make(map[string]*testCall)}
+}
+
+func (s *testResultsStore) PutCall(callID string, responseJSON []byte) error {
+	if s.calls[callID] == nil {
+		s.calls[callID] = &testCall{artifacts: make(map[string]testArtifact)}
+	}
+	s.calls[callID].responseJSON = append([]byte(nil), responseJSON...)
+	return nil
+}
+
+func (s *testResultsStore) PutArtifact(callID, artifactPath, mediaType string, content []byte) error {
+	if s.calls[callID] == nil {
+		s.calls[callID] = &testCall{artifacts: make(map[string]testArtifact)}
+	}
+	s.calls[callID].artifacts[artifactPath] = testArtifact{
+		data:      append([]byte(nil), content...),
+		mediaType: mediaType,
+	}
+	return nil
+}
+
+func (s *testResultsStore) GetCallResponseJSON(callID string) ([]byte, error) {
+	c := s.calls[callID]
+	if c == nil || c.responseJSON == nil {
+		return nil, pkgstore.ErrResultsNotFound
+	}
+	return append([]byte(nil), c.responseJSON...), nil
+}
+
+func (s *testResultsStore) ListCallIDs() ([]string, error) {
+	out := make([]string, 0, len(s.calls))
+	for id := range s.calls {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (s *testResultsStore) GetArtifact(callID, artifactPath string) ([]byte, string, error) {
+	c := s.calls[callID]
+	if c == nil {
+		return nil, "", pkgstore.ErrResultsNotFound
+	}
+	a, ok := c.artifacts[artifactPath]
+	if !ok {
+		return nil, "", pkgstore.ErrResultsNotFound
+	}
+	return append([]byte(nil), a.data...), a.mediaType, nil
+}
+
+func (s *testResultsStore) ListArtifacts(callID string) ([]pkgstore.ArtifactMeta, error) {
+	c := s.calls[callID]
+	if c == nil {
+		return nil, pkgstore.ErrResultsNotFound
+	}
+	out := make([]pkgstore.ArtifactMeta, 0, len(c.artifacts))
+	for p, a := range c.artifacts {
+		out = append(out, pkgstore.ArtifactMeta{
+			Path:      p,
+			MediaType: a.mediaType,
+			Size:      int64(len(a.data)),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out, nil
 }

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	internaltools "github.com/tinoosan/workbench-core/internal/tools"
+	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
@@ -204,14 +204,14 @@ func TestReadWriteAppend_WrapErrors(t *testing.T) {
 
 func TestListRoot_ContainsToolsButNotBuiltins(t *testing.T) {
 	tmpDir := t.TempDir()
-	builtin, err := internaltools.NewBuiltinManifestProvider()
+	builtin, err := builtins.NewBuiltinManifestProvider()
 	if err != nil {
 		t.Fatalf("NewBuiltinManifestProvider: %v", err)
 	}
 	disk := pkgtools.NewDiskManifestProvider(tmpDir)
 	reg := pkgtools.NewCompositeToolManifestRegistry(builtin, disk)
 
-	res, err := internaltools.NewToolsResource(reg)
+	res, err := builtins.NewToolsResource(reg)
 	if err != nil {
 		t.Fatalf("NewToolsResource: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestListRoot_IncludesTools_WhenDiskHasItems(t *testing.T) {
 	disk := pkgtools.NewDiskManifestProvider(tmpDir)
 	reg := pkgtools.NewCompositeToolManifestRegistry(disk)
 
-	res, err := internaltools.NewToolsResource(reg)
+	res, err := builtins.NewToolsResource(reg)
 	if err != nil {
 		t.Fatalf("NewToolsResource: %v", err)
 	}

@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/internal/resources"
-	internaltools "github.com/tinoosan/workbench-core/internal/tools"
+	"github.com/tinoosan/workbench-core/pkg/resources"
+	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
@@ -27,15 +27,15 @@ func TestTUITurnRunner_CD_RebindsWorkdirAndUpdatesBuiltins(t *testing.T) {
 	fs.Mount(vfs.MountProject, workdirRes1)
 
 	// Seed builtin invokers with dir1.
-	builtins := pkgtools.MapRegistry{
-		pkgtools.ToolID("builtin.shell"): internaltools.NewBuiltinShellInvoker(dir1, nil, vfs.MountProject),
+	builtinRegistry := pkgtools.MapRegistry{
+		pkgtools.ToolID("builtin.shell"): builtins.NewBuiltinShellInvoker(dir1, nil, vfs.MountProject),
 	}
 
 	var got []events.Event
 	r := &tuiTurnRunner{
 		fs:               fs,
 		workdirBase:      dir1,
-		builtinInvokers:  builtins,
+		builtinInvokers:  builtinRegistry,
 		mustEmit:         func(_ context.Context, ev events.Event) { got = append(got, ev) },
 		constructor:      nil,
 		artifacts:        nil,
@@ -59,7 +59,7 @@ func TestTUITurnRunner_CD_RebindsWorkdirAndUpdatesBuiltins(t *testing.T) {
 	}
 
 	// Builtin sandbox roots should follow the active workdir.
-	sh := builtins[pkgtools.ToolID("builtin.shell")].(*internaltools.BuiltinShellInvoker)
+	sh := builtinRegistry[pkgtools.ToolID("builtin.shell")].(*builtins.BuiltinShellInvoker)
 	if sh.RootDir != dir2 {
 		t.Fatalf("builtin.shell root=%q, want %q", sh.RootDir, dir2)
 	}
@@ -88,7 +88,7 @@ func TestTUITurnRunner_CD_InvalidDirDoesNotChange(t *testing.T) {
 	fs.Mount(vfs.MountProject, workdirRes1)
 
 	builtins := pkgtools.MapRegistry{
-		pkgtools.ToolID("builtin.shell"): internaltools.NewBuiltinShellInvoker(dir1, nil, vfs.MountProject),
+		pkgtools.ToolID("builtin.shell"): builtins.NewBuiltinShellInvoker(dir1, nil, vfs.MountProject),
 	}
 
 	r := &tuiTurnRunner{

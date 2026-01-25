@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/bytesutil"
-	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 

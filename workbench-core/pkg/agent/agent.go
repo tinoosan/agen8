@@ -1,50 +1,126 @@
 package agent
 
 import (
-	internalagent "github.com/tinoosan/workbench-core/internal/agent"
-	"github.com/tinoosan/workbench-core/internal/types"
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/tools"
+	"github.com/tinoosan/workbench-core/pkg/types"
+	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
-type Agent = internalagent.Agent
-type Config = internalagent.Config
-type HostExecutor = internalagent.HostExecutor
-type HostExecFunc = internalagent.HostExecFunc
-type ContextSource = internalagent.ContextSource
-type ContextSourceFunc = internalagent.ContextSourceFunc
-type Hooks = internalagent.Hooks
-type HostOpExecutor = internalagent.HostOpExecutor
-type TraceMiddleware = internalagent.TraceMiddleware
-type ContextConstructor = internalagent.ContextConstructor
-type ContextUpdater = internalagent.ContextUpdater
-type MemoryEvaluator = internalagent.MemoryEvaluator
-type ProfileEvaluator = internalagent.ProfileEvaluator
-type FileAttachment = internalagent.FileAttachment
-type ErrApprovalRequired = internalagent.ErrApprovalRequired
+// HostExecutor is the host boundary for executing one host primitive.
+type HostExecutor interface {
+	Exec(ctx context.Context, req types.HostOpRequest) types.HostOpResponse
+}
 
+// HostExecFunc adapts a function to HostExecutor so hosts can implement
+// primitive dispatchers by passing a standalone function.
+type HostExecFunc func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse
+
+func (f HostExecFunc) Exec(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+	return f(ctx, req)
+}
+
+// ContextSource produces an augmented system prompt per agent step.
+type ContextSource interface {
+	SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error)
+}
+
+// ContextSourceFunc adapts a function to ContextSource so callers can provide
+// inline context selection logic when wiring up an agent.
+type ContextSourceFunc func(ctx context.Context, basePrompt string, step int) (string, error)
+
+func (f ContextSourceFunc) SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error) {
+	return f(ctx, basePrompt, step)
+}
+
+// Hooks are optional observability callbacks invoked by the agent loop.
+type Hooks struct {
+	OnLLMUsage    func(step int, usage llm.LLMUsage)
+	OnWebSearch   func(step int, citations []llm.LLMCitation)
+	OnToken       func(step int, text string)
+	OnStreamChunk func(step int, chunk llm.LLMStreamChunk)
+	Logf          func(format string, args ...any)
+}
+
+// Config configures a new Agent.
+type Config struct {
+	LLM llm.LLMClient
+
+	// Exec is required and represents the host primitive dispatcher.
+	Exec HostExecutor
+
+	// Model is required. Example: "openai/gpt-5-mini" (via OpenRouter), etc.
+	Model string
+
+	// EnableWebSearch controls whether the agent requests web-search-grounded model variants.
+	EnableWebSearch bool
+
+	// PlanMode enforces the structured planning policy for the first step.
+	PlanMode bool
+
+	// ApprovalsMode controls whether the agent requires confirmation for sensitive ops.
+	ApprovalsMode string
+
+	// ReasoningEffort is an optional hint for reasoning-capable models.
+	ReasoningEffort string
+
+	// ReasoningSummary controls whether and how providers should emit reasoning summaries.
+	ReasoningSummary string
+
+	// SystemPrompt is the base system prompt to pass to the model.
+	SystemPrompt string
+
+	// Context optionally refreshes bounded context per model step.
+	Context ContextSource
+
+	// ToolManifests optionally supplies host-known tool manifests that should be
+	// exposed as direct function tools (no discovery required).
+	ToolManifests []tools.ToolManifest
+
+	// MaxTokens restricts the output length. 0 means use client default.
+	MaxTokens int
+
+	Hooks Hooks
+}
+
+// New constructs an Agent from a validated config.
 func New(cfg Config) (*Agent, error) {
-	return internalagent.New(cfg)
-}
+	if cfg.LLM == nil {
+		return nil, fmt.Errorf("agent LLM is required")
+	}
+	if cfg.Exec == nil {
+		return nil, fmt.Errorf("agent Exec is required")
+	}
+	if err := validate.NonEmpty("agent Model", cfg.Model); err != nil {
+		return nil, err
+	}
 
-func DefaultMemoryEvaluator() *MemoryEvaluator {
-	return internalagent.DefaultMemoryEvaluator()
-}
+	system := strings.TrimSpace(cfg.SystemPrompt)
+	if system == "" {
+		system = agentLoopV0SystemPrompt()
+	}
 
-func DefaultProfileEvaluator() *ProfileEvaluator {
-	return internalagent.DefaultProfileEvaluator()
-}
+	extraTools, routes := ManifestToFunctionTools(cfg.ToolManifests)
 
-func SHA256Hex(s string) string {
-	return internalagent.SHA256Hex(s)
-}
+	return &Agent{
+		LLM:              cfg.LLM,
+		Exec:             cfg.Exec,
+		Model:            cfg.Model,
+		EnableWebSearch:  cfg.EnableWebSearch,
+		PlanMode:         cfg.PlanMode,
+		ApprovalsMode:    strings.TrimSpace(cfg.ApprovalsMode),
+		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
+		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
+		SystemPrompt:     system,
+		Context:          cfg.Context,
+		MaxTokens:        cfg.MaxTokens,
 
-func SessionContextBlock(s types.Session) string {
-	return internalagent.SessionContextBlock(s)
-}
-
-func ApplyStructuredEdits(before string, input []byte) (string, error) {
-	return internalagent.ApplyStructuredEdits(before, input)
-}
-
-func ApplyUnifiedDiffStrict(before string, diff string) (string, error) {
-	return internalagent.ApplyUnifiedDiffStrict(before, diff)
+		Hooks:              cfg.Hooks,
+		ExtraTools:         extraTools,
+		ToolFunctionRoutes: routes,
+	}, nil
 }

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/atref"
-	"github.com/tinoosan/workbench-core/internal/resources"
+	"github.com/tinoosan/workbench-core/pkg/atref"
+	"github.com/tinoosan/workbench-core/pkg/resources"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 

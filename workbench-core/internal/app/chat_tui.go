@@ -17,19 +17,19 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tinoosan/workbench-core/internal/atref"
-	"github.com/tinoosan/workbench-core/internal/config"
+	"github.com/tinoosan/workbench-core/pkg/atref"
+	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui"
-	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/resources"
+	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/vfsutil"
 	"github.com/tinoosan/workbench-core/pkg/agent"
-	internaltools "github.com/tinoosan/workbench-core/internal/tools"
+	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
@@ -200,7 +200,11 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 		_, _ = store.StopRun(cfg, run.RunId, status, errMsg)
 	}()
 
-	historyRes, err := resources.NewHistoryResource(cfg, run.SessionID)
+	historyStore, err := store.NewSQLiteHistoryStore(cfg, run.SessionID)
+	if err != nil {
+		return fmt.Errorf("create history store: %w", err)
+	}
+	historyRes, err := resources.NewHistoryResource(cfg, run.SessionID, historyStoreAdapter{HistoryStore: historyStore})
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -884,7 +888,11 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	r.run = run
 	sess.Title = title
 
-	historyRes, err := resources.NewHistoryResource(cfg, run.SessionID)
+	historyStore, err := store.NewSQLiteHistoryStore(cfg, run.SessionID)
+	if err != nil {
+		return fmt.Errorf("create history store: %w", err)
+	}
+	historyRes, err := resources.NewHistoryResource(cfg, run.SessionID, historyStoreAdapter{HistoryStore: historyStore})
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -1938,7 +1946,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 
 		// Update builtin sandbox roots (builtin.shell) to follow the active workdir.
 		if r.builtinInvokers != nil {
-			r.builtinInvokers[pkgtools.ToolID("builtin.shell")] = internaltools.NewBuiltinShellInvoker(workdirRes.BaseDir, nil, vfs.MountProject)
+			r.builtinInvokers[pkgtools.ToolID("builtin.shell")] = builtins.NewBuiltinShellInvoker(workdirRes.BaseDir, nil, vfs.MountProject)
 		}
 
 		r.mustEmit(context.Background(), events.Event{
