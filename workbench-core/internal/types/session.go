@@ -41,6 +41,13 @@ type Session struct {
 	ReasoningEffort  string `json:"reasoningEffort,omitempty"`
 	ReasoningSummary string `json:"reasoningSummary,omitempty"`
 
+	// ApprovalsMode is session-scoped so resume is deterministic.
+	// Valid values: "enabled", "disabled".
+	ApprovalsMode string `json:"approvalsMode,omitempty"`
+
+	// PlanMode is session-scoped so resume is deterministic.
+	PlanMode *bool `json:"planMode,omitempty"`
+
 	// CreatedAt is when the session was created.
 	CreatedAt *time.Time `json:"createdAt"`
 

@@ -273,6 +273,19 @@ func setupTUIChatRuntime(
 			sess.ReasoningSummary = strings.TrimSpace(opts.ReasoningSummary)
 			changed = true
 		}
+		approvalMode := strings.TrimSpace(opts.ApprovalsMode)
+		if approvalMode == "" {
+			approvalMode = "enabled"
+		}
+		if strings.TrimSpace(sess.ApprovalsMode) != approvalMode {
+			sess.ApprovalsMode = approvalMode
+			changed = true
+		}
+		if sess.PlanMode == nil || *sess.PlanMode != opts.PlanMode {
+			nextPlanMode := opts.PlanMode
+			sess.PlanMode = &nextPlanMode
+			changed = true
+		}
 		if changed {
 			_ = store.SaveSession(cfg, sess)
 		}

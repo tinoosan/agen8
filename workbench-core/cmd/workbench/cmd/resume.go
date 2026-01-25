@@ -32,13 +32,25 @@ var resumeCmd = &cobra.Command{
 			return err
 		}
 
+		approvalsOverride := approvalsMode
+		if !cmd.Root().PersistentFlags().Changed("approvals-mode") {
+			if v := strings.TrimSpace(sess.ApprovalsMode); v != "" {
+				approvalsOverride = v
+			}
+		}
+
+		planOverride := planMode
+		if !cmd.Root().PersistentFlags().Changed("plan-mode") && sess.PlanMode != nil {
+			planOverride = *sess.PlanMode
+		}
+
 		modelOverride := ""
 		if cmd.Root().PersistentFlags().Changed("model") {
 			modelOverride = strings.TrimSpace(modelID)
 		}
 		opts := []app.RunChatOption{
-			app.WithApprovalsMode(approvalsMode),
-			app.WithPlanMode(planMode),
+			app.WithApprovalsMode(approvalsOverride),
+			app.WithPlanMode(planOverride),
 			app.WithModel(modelOverride),
 			app.WithWorkDir(workDir),
 			app.WithTraceBytes(maxTraceBytes),

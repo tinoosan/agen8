@@ -64,6 +64,49 @@ func TestLazyRunner_Model_DoesNotInitializeSession(t *testing.T) {
 	}
 }
 
+func TestLazyRunner_Approval_DoesNotInitializeSession(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan events.Event, 10)
+	r := &lazyNewSessionTurnRunner{
+		ctx:  context.Background(),
+		opts: resolveRunChatOptions(),
+		evCh: ch,
+	}
+
+	final, err := r.RunTurn(context.Background(), "/approval disabled")
+	if err != nil {
+		t.Fatalf("RunTurn(/approval): %v", err)
+	}
+	if final == "" {
+		t.Fatalf("expected non-empty response")
+	}
+	if r.initialized {
+		t.Fatalf("expected runner to remain uninitialized")
+	}
+	if r.opts.ApprovalsMode != "disabled" {
+		t.Fatalf("opts.ApprovalsMode=%q, want %q", r.opts.ApprovalsMode, "disabled")
+	}
+
+	found := false
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Type == "approvals.changed" {
+				found = true
+				if ev.Data["mode"] != "disabled" {
+					t.Fatalf("approvals.changed mode=%q, want %q", ev.Data["mode"], "disabled")
+				}
+			}
+		default:
+			if !found {
+				t.Fatalf("expected an approvals.changed event")
+			}
+			return
+		}
+	}
+}
+
 func TestTUITurnRunner_Model_UpdatesAgentAndSession(t *testing.T) {
 	t.Parallel()
 

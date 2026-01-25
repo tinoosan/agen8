@@ -519,6 +519,39 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 			Console: boolp(false),
 		})
 		return "plan mode: " + state, true, nil
+	case "approval":
+		val := strings.ToLower(strings.TrimSpace(arg))
+		if val == "" {
+			mode := strings.TrimSpace(r.opts.ApprovalsMode)
+			if mode == "" {
+				mode = "enabled"
+			}
+			r.emitPreInit(events.Event{
+				Type:    "approvals.info",
+				Message: "Approval mode",
+				Data:    map[string]string{"mode": mode},
+				Store:   boolp(false),
+				History: boolp(false),
+				Console: boolp(false),
+			})
+			return "Approvals mode: " + mode, true, nil
+		}
+		if val != "enabled" && val != "disabled" {
+			return "Usage: /approval <enabled|disabled>", true, nil
+		}
+		if r.opts.ApprovalsMode == val {
+			return "Approvals mode already " + val, true, nil
+		}
+		r.opts.ApprovalsMode = val
+		r.emitPreInit(events.Event{
+			Type:    "approvals.changed",
+			Message: "Approval mode changed",
+			Data:    map[string]string{"mode": val},
+			Store:   boolp(false),
+			History: boolp(false),
+			Console: boolp(false),
+		})
+		return "Approvals mode: " + val, true, nil
 	case "model":
 		cur := strings.TrimSpace(r.opts.Model)
 		if cur == "" {
@@ -1688,6 +1721,12 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			r.run.Runtime.PlanMode = newState
 			_ = store.SaveRun(r.cfg, r.run)
 		}
+		if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
+			if sess.PlanMode == nil || *sess.PlanMode != newState {
+				sess.PlanMode = &newState
+				_ = store.SaveSession(r.cfg, sess)
+			}
+		}
 		state := "off"
 		if newState {
 			state = "on"
@@ -1899,6 +1938,12 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		}
 		r.run.Runtime.ApprovalsMode = val
 		_ = store.SaveRun(r.cfg, r.run)
+		if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
+			if strings.TrimSpace(sess.ApprovalsMode) != val {
+				sess.ApprovalsMode = val
+				_ = store.SaveSession(r.cfg, sess)
+			}
+		}
 		r.mustEmit(context.Background(), events.Event{
 			Type:    "approvals.changed",
 			Message: "Approval mode changed",
