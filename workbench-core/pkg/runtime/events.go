@@ -1,4 +1,4 @@
-package app
+package runtime
 
 import (
 	"bytes"
@@ -9,26 +9,13 @@ import (
 )
 
 const (
-	maxToolRunInputEventBytes = 1024
-)
-
-const (
+	maxToolRunInputEventBytes  = 1024
 	maxFSWriteTextPreviewBytes = 2000
+	maxToolRunOutputPreviewBytes = 1200
 )
 
 // toolRunInputForEvent returns a small, sanitized JSON string representation of a tool.run input payload
 // suitable for emitting in UI events.
-//
-// Why this exists:
-//   - ToolRequest.Input can be arbitrarily large (e.g., formatting a full HTML document).
-//   - Some fields are sensitive (e.g., "stdin", "token") and should not be echoed back verbatim.
-//   - The UI wants enough structure to render human-friendly action lines (argv/query/paths), without
-//     flooding the transcript or inspector.
-//
-// Behavior:
-//   - Best-effort JSON parsing: on parse failure, returns a compact single-line preview.
-//   - Redacts large or sensitive string fields (e.g., "text", "stdin", "token").
-//   - Produces a compact one-line JSON object and hard-caps its size.
 func toolRunInputForEvent(raw json.RawMessage) (sanitized string, truncated bool, originalBytes int) {
 	raw = bytes.TrimSpace(raw)
 	originalBytes = len(raw)
@@ -59,16 +46,7 @@ func toolRunInputForEvent(raw json.RawMessage) (sanitized string, truncated bool
 	return s2, tr, originalBytes
 }
 
-const maxToolRunOutputPreviewBytes = 1200
-
 // toolRunOutputPreviewForEvent returns a small, human-readable summary of a tool.run output payload.
-//
-// This is used only for UI events so the Activity details panel can show a preview without reading
-// /results/<callId>/response.json.
-//
-// It is intentionally conservative:
-//   - hard-caps size
-//   - avoids dumping large structured payloads in full
 func toolRunOutputPreviewForEvent(toolID, actionID string, raw json.RawMessage) string {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
@@ -160,20 +138,11 @@ func toolRunOutputPreviewForEvent(toolID, actionID string, raw json.RawMessage) 
 		return s2
 	}
 
-	// Generic fallback: show a compact JSON string preview.
 	s2, _ := capBytes(singleLine(string(raw)), maxToolRunOutputPreviewBytes)
 	return s2
 }
 
 // fsWriteTextPreviewForEvent returns a small preview of a fs.write/fs.append payload for UI events.
-//
-// The goal is to make the Activity details panel more useful (show what was written) without
-// storing full file contents in the event stream.
-//
-// Behavior:
-// - Hard-caps size.
-// - Best-effort JSON pretty-printing when the content looks like JSON (either by extension or validity).
-// - Redacts obvious secrets (bearer tokens, api keys) conservatively.
 func fsWriteTextPreviewForEvent(path string, text string) (preview string, truncated bool, redacted bool, originalBytes int, isJSON bool) {
 	originalBytes = len([]byte(text))
 	if strings.TrimSpace(text) == "" {
@@ -217,13 +186,10 @@ func redactValue(key string, v any) any {
 	k := strings.ToLower(strings.TrimSpace(key))
 	switch x := v.(type) {
 	case string:
-		// First: content-based redaction (catch secrets even under benign keys).
 		if looksSensitiveText(x) {
 			return "<omitted>"
 		}
-		// Next: key-based policies.
 		if isMessageLikeKey(k) {
-			// Keep UX signal without dumping full text.
 			return previewText(x, 120)
 		}
 		if isSensitiveKey(k) || len(x) > 256 {
@@ -231,7 +197,6 @@ func redactValue(key string, v any) any {
 		}
 		return x
 	case []any:
-		// Keep arrays small and stable (e.g., argv, paths, glob). Redact long strings.
 		out := make([]any, 0, len(x))
 		for _, it := range x {
 			if s, ok := it.(string); ok {
