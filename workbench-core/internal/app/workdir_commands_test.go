@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	internaltools "github.com/tinoosan/workbench-core/internal/tools"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 func TestTUITurnRunner_CD_RebindsWorkdirAndUpdatesBuiltins(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/internal/validate"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/validate"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 // NewWorkdirResource creates a directory-backed resource for the host working directory.

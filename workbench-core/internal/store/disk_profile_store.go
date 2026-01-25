@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
-	"github.com/tinoosan/workbench-core/internal/validate"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
 // DiskProfileStore is a global ProfileStore backed by an on-disk directory:

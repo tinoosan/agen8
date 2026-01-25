@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/internal/validate"
+	"github.com/tinoosan/workbench-core/pkg/validate"
 	"github.com/tinoosan/workbench-core/pkg/tools"
 )
 

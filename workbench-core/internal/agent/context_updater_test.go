@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {

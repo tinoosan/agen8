@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/pkg/llm"
 )
 
 type fakeVFSRunner struct {
@@ -33,7 +34,7 @@ func (r *fakeVFSRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest,
 	return types.HostOpResponse{Op: req.Op, Ok: true}, nil
 }
 
-func (r *fakeVFSRunner) ResumeTurn(ctx context.Context, toolOutputs []types.LLMMessage) (string, error) {
+func (r *fakeVFSRunner) ResumeTurn(ctx context.Context, toolOutputs []llm.LLMMessage) (string, error) {
 	_ = toolOutputs
 	return r.RunTurn(ctx, "")
 }

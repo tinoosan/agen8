@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/pkg/events"
 )
 
 func TestModel_RenderInput_ShowsReasoningEffort(t *testing.T) {

@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/validate"
+	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/validate"
 	"github.com/tinoosan/workbench-core/pkg/tools"
 )
 
@@ -46,11 +47,11 @@ func (f ContextSourceFunc) SystemPrompt(ctx context.Context, basePrompt string, 
 // Hooks are optional observability callbacks invoked by the agent loop.
 type Hooks struct {
 	// OnLLMUsage is invoked after each model call when token usage is available.
-	OnLLMUsage func(step int, usage types.LLMUsage)
+	OnLLMUsage func(step int, usage llm.LLMUsage)
 
 	// OnWebSearch is invoked after a model call when the provider returned URL citations.
 	// This is used by the host UI to show when web-search grounding actually occurred.
-	OnWebSearch func(step int, citations []types.LLMCitation)
+	OnWebSearch func(step int, citations []llm.LLMCitation)
 
 	// OnToken is invoked for streamed output tokens (when the provider supports streaming).
 	//
@@ -61,7 +62,7 @@ type Hooks struct {
 	// decoded/forwarded as user-visible output.
 	//
 	// Phase 2: used for "thinking" signals (reasoning progress + optional summary).
-	OnStreamChunk func(step int, chunk types.LLMStreamChunk)
+	OnStreamChunk func(step int, chunk llm.LLMStreamChunk)
 
 	// Logf is an optional logger used to print what the agent is doing.
 	Logf func(format string, args ...any)
@@ -69,7 +70,7 @@ type Hooks struct {
 
 // Config configures a new Agent.
 type Config struct {
-	LLM types.LLMClient
+	LLM llm.LLMClient
 
 	// Exec is required and represents the host primitive dispatcher.
 	Exec HostExecutor

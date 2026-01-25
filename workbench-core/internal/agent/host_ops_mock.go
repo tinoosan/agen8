@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 

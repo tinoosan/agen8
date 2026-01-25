@@ -6,7 +6,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 func newPlanFS(t *testing.T) *vfs.FS {

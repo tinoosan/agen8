@@ -5,7 +5,8 @@ import (
 	"fmt"
 
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/internal/tui"
 )
 
@@ -20,7 +21,7 @@ func newTUIEmitter(cfg config.Config, runID string, historySink *events.HistoryS
 	emitter := &events.Emitter{
 		RunID: runID,
 		Sink: events.MultiSink{
-			events.StoreSink{Cfg: cfg},
+			events.StoreSink{Store: storeEventAppender{cfg: cfg}},
 			historySink,
 			tui.EventSink{Ch: evCh},
 		},
@@ -32,4 +33,13 @@ func newTUIEmitter(cfg config.Config, runID string, historySink *events.HistoryS
 		}
 	}
 	return emitter, emit
+}
+
+type storeEventAppender struct {
+	cfg config.Config
+}
+
+func (s storeEventAppender) AppendEvent(ctx context.Context, runID, eventType, message string, data map[string]string) error {
+	_ = ctx
+	return store.AppendEvent(s.cfg, runID, eventType, message, data)
 }

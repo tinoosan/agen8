@@ -6,7 +6,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/validate"
+	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
 const (

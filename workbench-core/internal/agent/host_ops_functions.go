@@ -1,11 +1,11 @@
 package agent
 
-import "github.com/tinoosan/workbench-core/internal/types"
+import "github.com/tinoosan/workbench-core/pkg/llm"
 
 // HostOpFunctions returns the core host primitives as function tool definitions.
 //
 // Tool names intentionally use underscores to match common function-calling conventions.
-func HostOpFunctions() []types.Tool {
+func HostOpFunctions() []llm.Tool {
 	// Helpers for strict-mode schemas:
 	// - additionalProperties=false on objects
 	// - all properties listed in required
@@ -14,10 +14,10 @@ func HostOpFunctions() []types.Tool {
 	stringOrNull := []any{"string", "null"}
 	boolOrNull := []any{"boolean", "null"}
 
-	return []types.Tool{
+	return []llm.Tool{
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "final_answer",
 				Description: "[CONTROL] End the current turn with the final user-visible response text (markdown allowed). Use this when you are fully done and no more environment actions are needed.",
 				Strict:      true,
@@ -33,7 +33,7 @@ func HostOpFunctions() []types.Tool {
 		},
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "fs_list",
 				Description: "[DIRECT - no discovery needed] List directory contents at a VFS path. Common paths: /project (user's project), /scratch (your scratch), /plan (planning workspace), /skills (skill documents), /tools (for tool_run discovery only).",
 				Strict:      true,
@@ -49,7 +49,7 @@ func HostOpFunctions() []types.Tool {
 		},
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "fs_read",
 				Description: "[DIRECT - no discovery needed] Read file contents from a VFS path (skills live under /skills/<skill>/SKILL.md).",
 				Strict:      true,
@@ -66,7 +66,7 @@ func HostOpFunctions() []types.Tool {
 		},
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "fs_write",
 				Description: "[DIRECT - no discovery needed] Write/create a file at a VFS path. Just call it with path and text.",
 				Strict:      true,
@@ -83,7 +83,7 @@ func HostOpFunctions() []types.Tool {
 		},
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "update_plan",
 				Description: "[DIRECT] Overwrite /plan/HEAD.md with the checklist. Use this at the start of multi-step work AND after each meaningful step to keep progress current.",
 				Strict:      true,
@@ -99,7 +99,7 @@ func HostOpFunctions() []types.Tool {
 		},
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "fs_append",
 				Description: "[DIRECT - no discovery needed] Append text to a file at a VFS path.",
 				Strict:      true,
@@ -116,7 +116,7 @@ func HostOpFunctions() []types.Tool {
 		},
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "fs_edit",
 				Description: "[DIRECT - no discovery needed] Apply find-replace edits to a file. Each edit has old (exact match), new (replacement), occurrence (1-based).",
 				Strict:      true,
@@ -146,7 +146,7 @@ func HostOpFunctions() []types.Tool {
 		},
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "fs_patch",
 				Description: "[DIRECT - no discovery needed] Apply a unified diff patch to a file.",
 				Strict:      true,
@@ -163,7 +163,7 @@ func HostOpFunctions() []types.Tool {
 		},
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "shell_exec",
 				Description: "[CORE] Execute a shell command via bash. Supports pipes, redirects, and full shell syntax. Returns stdout, stderr, and exit code.",
 				Strict:      true,
@@ -181,7 +181,7 @@ func HostOpFunctions() []types.Tool {
 		},
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "http_fetch",
 				Description: "[CORE] Make an HTTP request. Returns status, headers, and body.",
 				// NOTE: headers is a free-form object (map[string]string) - strict mode
@@ -205,7 +205,7 @@ func HostOpFunctions() []types.Tool {
 		// Trace functions - provide insight into system events
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "trace_events_since",
 				Description: "[CORE] Get system events since a cursor position. Returns events with pagination cursor for follow-up queries.",
 				Strict:      false, // cursor can be string or number
@@ -223,7 +223,7 @@ func HostOpFunctions() []types.Tool {
 		},
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "trace_events_latest",
 				Description: "[CORE] Get the most recent system events. Good for quick insight into what just happened.",
 				Strict:      true,
@@ -240,7 +240,7 @@ func HostOpFunctions() []types.Tool {
 		},
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "trace_events_summary",
 				Description: "[CORE] Get a summary of system events: event type counts, last timestamp, and recent event messages.",
 				Strict:      false, // cursor can be string or number
@@ -259,7 +259,7 @@ func HostOpFunctions() []types.Tool {
 		},
 		{
 			Type: "function",
-			Function: types.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "tool_run",
 				Description: "[REQUIRES DISCOVERY] Run an external tool (e.g., custom tools provided via /tools). BEFORE calling: (1) fs_read('/tools/<toolId>') to get the manifest and learn required input fields. Only then call with correct input. For simple file ops, use fs_write/fs_read directly instead.",
 				// NOTE: tool_run.input is tool-defined arbitrary JSON. Some providers (e.g. Azure)

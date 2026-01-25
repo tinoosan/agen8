@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
+	"github.com/tinoosan/workbench-core/pkg/vfsutil"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 

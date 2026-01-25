@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/internal/fsutil"
-	"github.com/tinoosan/workbench-core/internal/vfs"
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfsutil"
 )
 
 // DirResource implements vfs.Resource by mapping virtual paths to a real OS directory.

@@ -5,11 +5,11 @@ import (
 	"fmt"
 
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/validate"
-	"github.com/tinoosan/workbench-core/internal/vfs"
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
+	"github.com/tinoosan/workbench-core/pkg/validate"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfsutil"
 )
 
 // HistoryResource exposes an immutable, append-only history log under the VFS mount "/history".

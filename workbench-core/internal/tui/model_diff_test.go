@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/pkg/events"
 )
 
 type stubRunnerWithReadWrite struct {

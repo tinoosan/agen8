@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/vfs"
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfsutil"
 )
 
 // ResultsResource is a /results VFS resource backed by a store.ResultsView.

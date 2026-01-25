@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 

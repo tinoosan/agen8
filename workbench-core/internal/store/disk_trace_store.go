@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/workbench-core/internal/bytesutil"
+	"github.com/tinoosan/workbench-core/pkg/bytesutil"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/validate"
+	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
 const (

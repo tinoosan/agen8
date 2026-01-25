@@ -15,7 +15,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/store"
 	internaltools "github.com/tinoosan/workbench-core/internal/tools"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 func TestBuiltinHTTP_Fetch_SmallBody_OK(t *testing.T) {

@@ -19,14 +19,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/workbench-core/internal/atref"
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/cost"
-	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/pkg/cost"
+	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfs"
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
+	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfsutil"
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	internaltools "github.com/tinoosan/workbench-core/internal/tools"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
@@ -406,7 +407,7 @@ func (r *lazyNewSessionTurnRunner) ExecHostOp(ctx context.Context, req types.Hos
 	return r.engine.ExecHostOp(ctx, req, toolCallID)
 }
 
-func (r *lazyNewSessionTurnRunner) ResumeTurn(ctx context.Context, toolOutputs []types.LLMMessage) (string, error) {
+func (r *lazyNewSessionTurnRunner) ResumeTurn(ctx context.Context, toolOutputs []llm.LLMMessage) (string, error) {
 	if r == nil || r.engine == nil {
 		return "", fmt.Errorf("runner not initialized")
 	}
@@ -1023,10 +1024,10 @@ type tuiTurnRunner struct {
 	planMode bool
 
 	turn               int
-	conversation       []types.LLMMessage
+	conversation       []llm.LLMMessage
 	currentTurnUserMsg string
 
-	pendingTurnUsage    types.LLMUsage
+	pendingTurnUsage    llm.LLMUsage
 	pendingTurnSteps    int
 	pendingTurnDuration time.Duration
 }
@@ -1167,18 +1168,18 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 		})
 	}
 
-	r.pendingTurnUsage = types.LLMUsage{}
+	r.pendingTurnUsage = llm.LLMUsage{}
 	r.pendingTurnSteps = 0
 	r.pendingTurnDuration = 0
 	r.currentTurnUserMsg = userMsg
 	return r.runThroughAgent(ctx, true, nil)
 }
 
-func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool, toolOutputs []types.LLMMessage) (string, error) {
+func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool, toolOutputs []llm.LLMMessage) (string, error) {
 	boolp := func(b bool) *bool { return &b }
 
-	var turnUsage types.LLMUsage
-	r.agent.Hooks.OnLLMUsage = func(step int, usage types.LLMUsage) {
+	var turnUsage llm.LLMUsage
+	r.agent.Hooks.OnLLMUsage = func(step int, usage llm.LLMUsage) {
 		turnUsage.InputTokens += usage.InputTokens
 		turnUsage.OutputTokens += usage.OutputTokens
 		turnUsage.TotalTokens += usage.TotalTokens
@@ -1198,7 +1199,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 
 	// Emit a UI-only activity entry when the provider returns web citations.
 	// This is the best available signal that web-search grounding actually occurred.
-	r.agent.Hooks.OnWebSearch = func(step int, citations []types.LLMCitation) {
+	r.agent.Hooks.OnWebSearch = func(step int, citations []llm.LLMCitation) {
 		if len(citations) == 0 {
 			return
 		}
@@ -1353,7 +1354,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 		// #endregion
 	}
 
-	r.agent.Hooks.OnStreamChunk = func(step int, chunk types.LLMStreamChunk) {
+	r.agent.Hooks.OnStreamChunk = func(step int, chunk llm.LLMStreamChunk) {
 		if chunk.Done {
 			if thinkingActive {
 				emitThinkingEnd(step)
@@ -1418,7 +1419,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 
 	// Normal turn: add the user's message (if needed), replay recorded tool outputs, and run the agent.
 	if appendUserMsg && r.currentTurnUserMsg != "" {
-		r.conversation = append(r.conversation, types.LLMMessage{Role: "user", Content: r.currentTurnUserMsg})
+		r.conversation = append(r.conversation, llm.LLMMessage{Role: "user", Content: r.currentTurnUserMsg})
 	}
 	if len(toolOutputs) > 0 {
 		r.conversation = append(r.conversation, toolOutputs...)
@@ -1542,7 +1543,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 		})
 	}
 
-	r.pendingTurnUsage = types.LLMUsage{}
+	r.pendingTurnUsage = llm.LLMUsage{}
 	r.pendingTurnSteps = 0
 	r.pendingTurnDuration = 0
 	r.currentTurnUserMsg = ""
@@ -1552,7 +1553,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 	return final, nil
 }
 
-func (r *tuiTurnRunner) ResumeTurn(ctx context.Context, toolOutputs []types.LLMMessage) (string, error) {
+func (r *tuiTurnRunner) ResumeTurn(ctx context.Context, toolOutputs []llm.LLMMessage) (string, error) {
 	if r.currentTurnUserMsg == "" {
 		return "", fmt.Errorf("no turn to resume")
 	}
@@ -1565,7 +1566,7 @@ func (r *tuiTurnRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest,
 	}
 	resp := r.agent.Exec.Exec(ctx, req)
 	hostRespJSON, _ := types.MarshalPretty(resp)
-	r.conversation = append(r.conversation, types.LLMMessage{
+	r.conversation = append(r.conversation, llm.LLMMessage{
 		Role:       "tool",
 		ToolCallID: toolCallID,
 		Content:    string(hostRespJSON),
@@ -1575,7 +1576,7 @@ func (r *tuiTurnRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest,
 
 func (r *tuiTurnRunner) AppendToolResponse(toolCallID string, resp types.HostOpResponse) {
 	hostRespJSON, _ := types.MarshalPretty(resp)
-	r.conversation = append(r.conversation, types.LLMMessage{
+	r.conversation = append(r.conversation, llm.LLMMessage{
 		Role:       "tool",
 		ToolCallID: toolCallID,
 		Content:    string(hostRespJSON),

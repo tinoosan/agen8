@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/workbench-core/internal/cost"
+	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
 )
 

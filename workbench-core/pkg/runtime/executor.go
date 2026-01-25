@@ -9,10 +9,10 @@ import (
 	"sync/atomic"
 
 	"github.com/pmezard/go-difflib/difflib"
-	"github.com/tinoosan/workbench-core/internal/debuglog"
-	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/pkg/debuglog"
+	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 

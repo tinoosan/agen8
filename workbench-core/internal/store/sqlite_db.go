@@ -11,7 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
 )
 
 var (

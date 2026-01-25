@@ -16,9 +16,10 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 
@@ -1132,7 +1133,7 @@ func (m *Model) processApproval(approve bool) tea.Cmd {
 	return nil
 }
 
-func (m *Model) resumeAfterApprovals(toolOutputs []types.LLMMessage) tea.Cmd {
+func (m *Model) resumeAfterApprovals(toolOutputs []llm.LLMMessage) tea.Cmd {
 	if m.turnCancel != nil {
 		m.turnCancel()
 	}

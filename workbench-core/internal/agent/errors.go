@@ -4,12 +4,13 @@ import (
 	"fmt"
 
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/pkg/llm"
 )
 
 // ErrApprovalRequired is returned when dangerous host ops require user consent.
 type ErrApprovalRequired struct {
 	// AssistantMsg is the assistant message that triggered the tool plans.
-	AssistantMsg types.LLMMessage
+	AssistantMsg llm.LLMMessage
 	// PendingOps are the unexecuted host operations awaiting approval.
 	PendingOps []types.HostOpRequest
 	// PendingToolCallIDs map to the original tool call IDs for each PendingOp.

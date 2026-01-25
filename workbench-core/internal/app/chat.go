@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/internal/cost"
-	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/pkg/cost"
+	"github.com/tinoosan/workbench-core/pkg/llm"
 )
 
 func pricingForModel(modelID, pricingFile string) (inPerM, outPerM float64, known bool, source string) {
@@ -315,7 +315,7 @@ func derefBool(p *bool, def bool) bool {
 	return *p
 }
 
-func estimateTurnCostUSD(usage types.LLMUsage, priceInPerM, priceOutPerM float64) float64 {
+func estimateTurnCostUSD(usage llm.LLMUsage, priceInPerM, priceOutPerM float64) float64 {
 	if usage.InputTokens <= 0 && usage.OutputTokens <= 0 {
 		return 0
 	}

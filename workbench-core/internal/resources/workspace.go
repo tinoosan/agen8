@@ -5,9 +5,9 @@ import (
 	"os"
 
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
-	"github.com/tinoosan/workbench-core/internal/validate"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/validate"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 // NewWorkspace creates a directory-backed resource for a run's workspace.

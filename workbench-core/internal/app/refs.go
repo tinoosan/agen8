@@ -10,8 +10,8 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/atref"
 	"github.com/tinoosan/workbench-core/internal/resources"
-	"github.com/tinoosan/workbench-core/internal/vfs"
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfsutil"
 	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 

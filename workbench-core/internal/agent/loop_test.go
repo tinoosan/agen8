@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/pkg/llm"
 )
 
 type fakeExec struct {
@@ -20,18 +21,18 @@ func (f *fakeExec) Exec(ctx context.Context, req types.HostOpRequest) types.Host
 }
 
 type fakeStreamingLLM struct {
-	Responses []types.LLMResponse
+	Responses []llm.LLMResponse
 	idx       int
-	Requests  []types.LLMRequest
+	Requests  []llm.LLMRequest
 }
 
-func (f *fakeStreamingLLM) recordRequest(req types.LLMRequest) {
+func (f *fakeStreamingLLM) recordRequest(req llm.LLMRequest) {
 	f.Requests = append(f.Requests, req)
 }
 
-func (f *fakeStreamingLLM) nextResponse() types.LLMResponse {
+func (f *fakeStreamingLLM) nextResponse() llm.LLMResponse {
 	if len(f.Responses) == 0 {
-		return types.LLMResponse{}
+		return llm.LLMResponse{}
 	}
 	if f.idx >= len(f.Responses) {
 		return f.Responses[len(f.Responses)-1]
@@ -41,24 +42,24 @@ func (f *fakeStreamingLLM) nextResponse() types.LLMResponse {
 	return resp
 }
 
-func (f *fakeStreamingLLM) Generate(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
+func (f *fakeStreamingLLM) Generate(ctx context.Context, req llm.LLMRequest) (llm.LLMResponse, error) {
 	f.recordRequest(req)
 	return f.nextResponse(), nil
 }
 
-func (f *fakeStreamingLLM) GenerateStream(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
+func (f *fakeStreamingLLM) GenerateStream(ctx context.Context, req llm.LLMRequest, cb llm.LLMStreamCallback) (llm.LLMResponse, error) {
 	f.recordRequest(req)
 	resp := f.nextResponse()
 	if cb != nil && resp.Text != "" {
-		_ = cb(types.LLMStreamChunk{Text: resp.Text})
+		_ = cb(llm.LLMStreamChunk{Text: resp.Text})
 	}
 	return resp, nil
 }
 
 func TestAgentLoopV0_ResolvesRelativePaths(t *testing.T) {
-	tc := types.ToolCall{
+	tc := llm.ToolCall{
 		Type: "function",
-		Function: types.ToolCallFunction{
+		Function: llm.ToolCallFunction{
 			Name:      "fs_read",
 			Arguments: `{"path":"docs/example.txt"}`,
 		},
@@ -75,9 +76,9 @@ func TestAgentLoopV0_ResolvesRelativePaths(t *testing.T) {
 		t.Fatalf("expected /project/docs/example.txt, got %q", req.Path)
 	}
 
-	tc = types.ToolCall{
+	tc = llm.ToolCall{
 		Type: "function",
-		Function: types.ToolCallFunction{
+		Function: llm.ToolCallFunction{
 			Name:      "tool_run",
 			Arguments: `{"toolId":"builtin.shell","actionId":"exec","input":{"cwd":"notes"}}`,
 		},
@@ -96,9 +97,9 @@ func TestAgentLoopV0_ResolvesRelativePaths(t *testing.T) {
 }
 
 func TestAgentLoopV0_ShellAndHTTPHostOps(t *testing.T) {
-	tc := types.ToolCall{
+	tc := llm.ToolCall{
 		Type: "function",
-		Function: types.ToolCallFunction{
+		Function: llm.ToolCallFunction{
 			Name:      "shell_exec",
 			Arguments: `{"command":"ls","cwd":"src","stdin":"hi"}`,
 		},
@@ -114,9 +115,9 @@ func TestAgentLoopV0_ShellAndHTTPHostOps(t *testing.T) {
 		t.Fatalf("expected cwd src, got %q", req.Cwd)
 	}
 
-	tc = types.ToolCall{
+	tc = llm.ToolCall{
 		Type: "function",
-		Function: types.ToolCallFunction{
+		Function: llm.ToolCallFunction{
 			Name:      "http_fetch",
 			Arguments: `{"url":"https://example.com","method":"GET"}`,
 		},
@@ -132,9 +133,9 @@ func TestAgentLoopV0_ShellAndHTTPHostOps(t *testing.T) {
 		t.Fatalf("expected https GET, got %#v", req)
 	}
 
-	tc = types.ToolCall{
+	tc = llm.ToolCall{
 		Type: "function",
-		Function: types.ToolCallFunction{
+		Function: llm.ToolCallFunction{
 			Name:      "trace_events_latest",
 			Arguments: `{"limit":3}`,
 		},
@@ -161,12 +162,12 @@ func TestAgentLoopV0_ShellAndHTTPHostOps(t *testing.T) {
 }
 
 func TestAgentLoop_RunConversation_FinalText(t *testing.T) {
-	llm := &fakeStreamingLLM{
-		Responses: []types.LLMResponse{{Text: "final result"}},
+	streamer := &fakeStreamingLLM{
+		Responses: []llm.LLMResponse{{Text: "final result"}},
 	}
 	exec := &fakeExec{}
-	agent := &Agent{LLM: llm, Exec: exec, Model: "test"}
-	final, msgs, steps, err := agent.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "do it"}})
+	agent := &Agent{LLM: streamer, Exec: exec, Model: "test"}
+	final, msgs, steps, err := agent.RunConversation(context.Background(), []llm.LLMMessage{{Role: "user", Content: "do it"}})
 	if err != nil {
 		t.Fatalf("RunConversation: %v", err)
 	}
@@ -182,12 +183,12 @@ func TestAgentLoop_RunConversation_FinalText(t *testing.T) {
 }
 
 func TestAgentLoop_RunConversation_ExecutesTool(t *testing.T) {
-	llm := &fakeStreamingLLM{
-		Responses: []types.LLMResponse{
+	streamer := &fakeStreamingLLM{
+		Responses: []llm.LLMResponse{
 			{
-				ToolCalls: []types.ToolCall{{
+				ToolCalls: []llm.ToolCall{{
 					ID: "1",
-					Function: types.ToolCallFunction{
+					Function: llm.ToolCallFunction{
 						Name:      "fs_read",
 						Arguments: `{"path":"/project/file.txt"}`,
 					},
@@ -197,8 +198,8 @@ func TestAgentLoop_RunConversation_ExecutesTool(t *testing.T) {
 		},
 	}
 	exec := &fakeExec{}
-	agent := &Agent{LLM: llm, Exec: exec, Model: "test"}
-	final, _, _, err := agent.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "read"}})
+	agent := &Agent{LLM: streamer, Exec: exec, Model: "test"}
+	final, _, _, err := agent.RunConversation(context.Background(), []llm.LLMMessage{{Role: "user", Content: "read"}})
 	if err != nil {
 		t.Fatalf("RunConversation: %v", err)
 	}
@@ -214,11 +215,11 @@ func TestAgentLoop_RunConversation_ExecutesTool(t *testing.T) {
 }
 
 func TestAgentLoop_RunConversation_FinalAnswerTool(t *testing.T) {
-	llm := &fakeStreamingLLM{
-		Responses: []types.LLMResponse{{
-			ToolCalls: []types.ToolCall{{
+	streamer := &fakeStreamingLLM{
+		Responses: []llm.LLMResponse{{
+			ToolCalls: []llm.ToolCall{{
 				ID: "final",
-				Function: types.ToolCallFunction{
+				Function: llm.ToolCallFunction{
 					Name:      "final_answer",
 					Arguments: `{"text":"All done"}`,
 				},
@@ -227,8 +228,8 @@ func TestAgentLoop_RunConversation_FinalAnswerTool(t *testing.T) {
 		}},
 	}
 	exec := &fakeExec{}
-	agent := &Agent{LLM: llm, Exec: exec, Model: "test"}
-	final, _, _, err := agent.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "finish"}})
+	agent := &Agent{LLM: streamer, Exec: exec, Model: "test"}
+	final, _, _, err := agent.RunConversation(context.Background(), []llm.LLMMessage{{Role: "user", Content: "finish"}})
 	if err != nil {
 		t.Fatalf("RunConversation: %v", err)
 	}
@@ -240,11 +241,11 @@ func TestAgentLoop_RunConversation_FinalAnswerTool(t *testing.T) {
 	}
 }
 func TestAgentLoop_RunConversation_RequiresApproval(t *testing.T) {
-	llm := &fakeStreamingLLM{
-		Responses: []types.LLMResponse{{
-			ToolCalls: []types.ToolCall{{
+	streamer := &fakeStreamingLLM{
+		Responses: []llm.LLMResponse{{
+			ToolCalls: []llm.ToolCall{{
 				ID: "1",
-				Function: types.ToolCallFunction{
+				Function: llm.ToolCallFunction{
 					Name:      "fs_write",
 					Arguments: `{"path":"/project/secret.txt","text":"oops"}`,
 				},
@@ -252,8 +253,8 @@ func TestAgentLoop_RunConversation_RequiresApproval(t *testing.T) {
 		}},
 	}
 	exec := &fakeExec{}
-	agent := &Agent{LLM: llm, Exec: exec, Model: "test", ApprovalsMode: "enabled"}
-	final, msgs, _, err := agent.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "write"}})
+	agent := &Agent{LLM: streamer, Exec: exec, Model: "test", ApprovalsMode: "enabled"}
+	final, msgs, _, err := agent.RunConversation(context.Background(), []llm.LLMMessage{{Role: "user", Content: "write"}})
 	if final != "" {
 		t.Fatalf("expected no final text, got %q", final)
 	}
@@ -282,48 +283,48 @@ func TestAgentLoop_RunConversation_RequiresApproval(t *testing.T) {
 }
 
 func TestAgentLoop_RunConversation_PlanModeDoesNotForceToolChoice(t *testing.T) {
-	llm := &fakeStreamingLLM{
-		Responses: []types.LLMResponse{{Text: "done"}},
+	streamer := &fakeStreamingLLM{
+		Responses: []llm.LLMResponse{{Text: "done"}},
 	}
 	exec := &fakeExec{}
-	agent := &Agent{LLM: llm, Exec: exec, Model: "test", PlanMode: true}
-	final, _, _, err := agent.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "plan"}})
+	agent := &Agent{LLM: streamer, Exec: exec, Model: "test", PlanMode: true}
+	final, _, _, err := agent.RunConversation(context.Background(), []llm.LLMMessage{{Role: "user", Content: "plan"}})
 	if err != nil {
 		t.Fatalf("RunConversation: %v", err)
 	}
 	if final != "done" {
 		t.Fatalf("expected final text, got %q", final)
 	}
-	if len(llm.Requests) == 0 {
-		t.Fatalf("expected at least one LLM request, got %d", len(llm.Requests))
+	if len(streamer.Requests) == 0 {
+		t.Fatalf("expected at least one LLM request, got %d", len(streamer.Requests))
 	}
-	if llm.Requests[0].ToolChoice != "auto" {
-		t.Fatalf("expected first request toolChoice=auto, got %q", llm.Requests[0].ToolChoice)
+	if streamer.Requests[0].ToolChoice != "auto" {
+		t.Fatalf("expected first request toolChoice=auto, got %q", streamer.Requests[0].ToolChoice)
 	}
 }
 
 func TestAgentLoop_RunConversation_PlanModeInjectsPolicy(t *testing.T) {
-	llm := &fakeStreamingLLM{
-		Responses: []types.LLMResponse{{Text: "done"}},
+	streamer := &fakeStreamingLLM{
+		Responses: []llm.LLMResponse{{Text: "done"}},
 	}
 	exec := &fakeExec{}
-	agent := &Agent{LLM: llm, Exec: exec, Model: "test", PlanMode: true}
-	_, _, _, err := agent.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "hello"}})
+	agent := &Agent{LLM: streamer, Exec: exec, Model: "test", PlanMode: true}
+	_, _, _, err := agent.RunConversation(context.Background(), []llm.LLMMessage{{Role: "user", Content: "hello"}})
 	if err != nil {
 		t.Fatalf("RunConversation: %v", err)
 	}
-	if len(llm.Requests) == 0 {
-		t.Fatalf("expected at least one LLM request, got %d", len(llm.Requests))
+	if len(streamer.Requests) == 0 {
+		t.Fatalf("expected at least one LLM request, got %d", len(streamer.Requests))
 	}
-	if !strings.Contains(llm.Requests[0].System, planModePolicyText) {
+	if !strings.Contains(streamer.Requests[0].System, planModePolicyText) {
 		t.Fatalf("expected planModePolicyText in system prompt")
 	}
 }
 
 func TestFunctionCallToHostOp_UpdatePlan(t *testing.T) {
-	tc := types.ToolCall{
+	tc := llm.ToolCall{
 		Type: "function",
-		Function: types.ToolCallFunction{
+		Function: llm.ToolCallFunction{
 			Name:      "update_plan",
 			Arguments: `{"plan":"- [ ] Step 1\n- [ ] Step 2"}`,
 		},

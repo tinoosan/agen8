@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/tinoosan/workbench-core/internal/validate"
+	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
 // Config holds host runtime configuration that should not be global state.

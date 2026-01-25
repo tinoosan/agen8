@@ -9,8 +9,9 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/pkg/llm"
 )
 
 const (
@@ -26,7 +27,7 @@ type TurnRunner interface {
 	RunTurn(ctx context.Context, userMsg string) (final string, err error)
 	ExecHostOp(ctx context.Context, req types.HostOpRequest, toolCallID string) (types.HostOpResponse, error)
 	AppendToolResponse(toolCallID string, resp types.HostOpResponse)
-	ResumeTurn(ctx context.Context, toolOutputs []types.LLMMessage) (string, error)
+	ResumeTurn(ctx context.Context, toolOutputs []llm.LLMMessage) (string, error)
 }
 
 // vfsAccessor is an optional extension interface implemented by the app TurnRunner.

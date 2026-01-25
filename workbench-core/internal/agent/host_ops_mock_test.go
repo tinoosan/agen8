@@ -7,7 +7,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	internaltools "github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 

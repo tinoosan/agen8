@@ -5,7 +5,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 func TestVirtualStagingResource_ReadWriteAppendAndReadOnlyMain(t *testing.T) {

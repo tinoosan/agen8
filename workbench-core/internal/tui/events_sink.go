@@ -3,7 +3,7 @@ package tui
 import (
 	"context"
 
-	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/pkg/events"
 )
 
 // EventSink delivers host events to the TUI.

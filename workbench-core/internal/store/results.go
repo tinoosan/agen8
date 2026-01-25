@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinoosan/workbench-core/internal/validate"
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
+	"github.com/tinoosan/workbench-core/pkg/validate"
+	"github.com/tinoosan/workbench-core/pkg/vfsutil"
 )
 
 // ResultWriter is used by the tool runner to persist call outputs.

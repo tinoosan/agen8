@@ -9,7 +9,7 @@ import (
 
 	internaltools "github.com/tinoosan/workbench-core/internal/tools"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 func TestVirtualToolsResource_ListDoesNotIncludeCoreTools(t *testing.T) {
@@ -128,12 +128,12 @@ func TestVirtualToolsResource_DiskAppliesWhenNoBuiltin(t *testing.T) {
 }
 
 func TestVirtualToolsResource_ReadOnlyEnforced(t *testing.T) {
-	builtin, err := tools.NewBuiltinManifestProvider()
+	builtin, err := internaltools.NewBuiltinManifestProvider()
 	if err != nil {
 		t.Fatalf("NewBuiltinManifestProvider: %v", err)
 	}
-	reg := tools.NewCompositeToolManifestRegistry(builtin)
-	res, err := resources.NewToolsResource(reg)
+	reg := pkgtools.NewCompositeToolManifestRegistry(builtin)
+	res, err := internaltools.NewToolsResource(reg)
 	if err != nil {
 		t.Fatalf("NewToolsResource: %v", err)
 	}
@@ -156,11 +156,11 @@ func contains(xs []string, x string) bool {
 }
 
 func TestCompositeToolManifestRegistry_ListDeterministic(t *testing.T) {
-	builtin, err := tools.NewBuiltinManifestProvider()
+	builtin, err := internaltools.NewBuiltinManifestProvider()
 	if err != nil {
 		t.Fatalf("NewBuiltinManifestProvider: %v", err)
 	}
-	reg := tools.NewCompositeToolManifestRegistry(builtin)
+	reg := pkgtools.NewCompositeToolManifestRegistry(builtin)
 	ids1, err := reg.ListToolIDs(nil)
 	if err != nil {
 		t.Fatalf("ListToolIDs: %v", err)

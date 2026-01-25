@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/internal/store"
 	internaltools "github.com/tinoosan/workbench-core/internal/tools"
-	"github.com/tinoosan/workbench-core/internal/validate"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/validate"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 

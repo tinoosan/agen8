@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tinoosan/workbench-core/internal/vfs"
-	"github.com/tinoosan/workbench-core/internal/vfsutil"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfsutil"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 

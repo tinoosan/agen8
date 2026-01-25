@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/pkg/events"
 )
 
 func TestClassifyEvent_OpRequest(t *testing.T) {

@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/events"
-	"github.com/tinoosan/workbench-core/internal/llm"
+	"github.com/tinoosan/workbench-core/pkg/events"
+	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	"github.com/tinoosan/workbench-core/pkg/tools"
@@ -145,12 +145,12 @@ func setupTUIChatRuntime(
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
 	// Add resilience against transient provider/network failures.
-	llmClient := types.LLMClient(llm.NewRetryClient(client, llm.RetryConfig{
+	llmClient := llm.NewRetryClient(client, llm.RetryConfig{
 		MaxRetries:   3,
 		InitialDelay: 250 * time.Millisecond,
 		MaxDelay:     4 * time.Second,
 		Multiplier:   2.0,
-	}))
+	})
 
 	// Use the default system prompt embedded in the agent package.
 	baseSystemPrompt := ""

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
-	"github.com/tinoosan/workbench-core/internal/validate"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
 // DiskMemoryStore is a run-scoped MemoryStore backed by the existing on-disk layout:

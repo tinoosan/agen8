@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/pkg/llm"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
@@ -21,7 +21,7 @@ type ToolRoute struct {
 //
 // Only manifests with ExposeAsFunctions=true are converted. Each action becomes a function
 // named "<toolId>_<actionId>" with dots replaced by underscores for compatibility.
-func ManifestToFunctionTools(manifests []pkgtools.ToolManifest) (tools []types.Tool, routes map[string]ToolRoute) {
+func ManifestToFunctionTools(manifests []pkgtools.ToolManifest) (tools []llm.Tool, routes map[string]ToolRoute) {
 	routes = make(map[string]ToolRoute)
 
 	for _, m := range manifests {
@@ -48,9 +48,9 @@ func ManifestToFunctionTools(manifests []pkgtools.ToolManifest) (tools []types.T
 				}
 			}
 
-			tools = append(tools, types.Tool{
+			tools = append(tools, llm.Tool{
 				Type: "function",
-				Function: types.ToolFunction{
+				Function: llm.ToolFunction{
 					Name:        fnName,
 					Description: desc,
 					Parameters:  params,

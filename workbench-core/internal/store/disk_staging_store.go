@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/internal/types"
-	"github.com/tinoosan/workbench-core/internal/validate"
+	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
 // DiskStagingStore implements the common "main content + staging update + commit log"

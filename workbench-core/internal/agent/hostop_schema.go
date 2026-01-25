@@ -1,12 +1,12 @@
 package agent
 
-import "github.com/tinoosan/workbench-core/internal/types"
+import "github.com/tinoosan/workbench-core/pkg/llm"
 
 // hostOpResponseSchema returns the Structured Outputs schema for the agent loop v0:
 // the model must return exactly one JSON object that is either:
 // - a HostOpRequest (fs.* / tool.run)
 // - {"op":"final","text":"..."}
-func hostOpResponseSchema() *types.LLMResponseSchema {
+func hostOpResponseSchema() *llm.LLMResponseSchema {
 	// IMPORTANT:
 	// Structured Outputs supports only a subset of JSON Schema in strict mode, and
 	// some OpenAI-compatible providers reject advanced constructs like oneOf.
@@ -59,7 +59,7 @@ func hostOpResponseSchema() *types.LLMResponseSchema {
 		},
 	}
 
-	return &types.LLMResponseSchema{
+	return &llm.LLMResponseSchema{
 		Name:        "workbench_host_op",
 		Description: "Workbench agent host operation (one JSON object per turn).",
 		Schema:      schema,

@@ -9,10 +9,10 @@ import (
 	"io"
 	"os"
 
-	"github.com/tinoosan/workbench-core/internal/bytesutil"
+	"github.com/tinoosan/workbench-core/pkg/bytesutil"
 	"github.com/tinoosan/workbench-core/internal/config"
-	"github.com/tinoosan/workbench-core/internal/fsutil"
-	"github.com/tinoosan/workbench-core/internal/validate"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
 // DiskHistoryStore is a session-scoped HistoryStore backed by the on-disk history layout:

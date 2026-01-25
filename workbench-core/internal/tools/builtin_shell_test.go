@@ -13,8 +13,9 @@ import (
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	internaltools "github.com/tinoosan/workbench-core/internal/tools"
+	"github.com/tinoosan/workbench-core/internal/types"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
-	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 func TestBuiltinShell_Exec_CatFile_OK(t *testing.T) {
@@ -318,7 +319,7 @@ func TestBuiltinShell_EnvFiltersSensitiveVars(t *testing.T) {
 }
 
 func TestDefaultShellDenylist_BlocksHighRiskCommands(t *testing.T) {
-	deny := tools.DefaultShellDenylist()
+	deny := internaltools.DefaultShellDenylist()
 	for _, name := range []string{
 		"sudo",
 		"ssh",

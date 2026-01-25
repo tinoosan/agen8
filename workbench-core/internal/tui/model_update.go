@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tinoosan/workbench-core/internal/types"
+	"github.com/tinoosan/workbench-core/pkg/llm"
 )
 
 // Update implements the Bubble Tea update loop.
@@ -273,7 +273,7 @@ func (m Model) keyApprovalPrompt(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	return m, nil, true
 }
 
-func (m *Model) resumeTurnCmd(toolOutputs []types.LLMMessage) tea.Cmd {
+func (m *Model) resumeTurnCmd(toolOutputs []llm.LLMMessage) tea.Cmd {
 	ctx := m.turnCtx
 	if ctx == nil {
 		return nil
@@ -711,46 +711,13 @@ func (m Model) keyCommandPaletteNav(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	case tea.KeyEnter:
 		// Autocomplete the selected command then either open a picker or submit.
-		selected := ""
-		if len(m.commandPaletteMatches) > 0 {
-			idx := m.commandPaletteSelected
-			if idx < 0 {
-				idx = 0
-			}
-			if idx >= len(m.commandPaletteMatches) {
-				idx = len(m.commandPaletteMatches) - 1
-			}
-			selected = m.commandPaletteMatches[idx]
-		}
-
 		m.autocompleteCommand()
-
-		switch selected {
-		case "/model":
-			m.clearCurrentInput()
-			m.openModelPicker()
+		txt := strings.TrimSpace(m.currentInputValue())
+		if txt == "" {
 			return m, nil, true
-		case "/reasoning-effort":
-			m.clearCurrentInput()
-			m.openReasoningEffortPicker()
-			return m, nil, true
-		case "/reasoning-summary":
-			m.clearCurrentInput()
-			m.openReasoningSummaryPicker()
-			return m, nil, true
-		case "/approval":
-			m.clearCurrentInput()
-			m.openApprovalPicker()
-			return m, nil, true
-		default:
-			var cmd tea.Cmd
-			if m.isMulti {
-				cmd = m.submitMultiline()
-			} else {
-				cmd = m.submitSingle()
-			}
-			return m, cmd, true
 		}
+		m.clearCurrentInput()
+		return m, m.submit(txt), true
 	}
 	return m, nil, false
 }
