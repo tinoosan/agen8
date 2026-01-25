@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/events"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 
 func TestGuardMiddleware_ShortCircuits(t *testing.T) {

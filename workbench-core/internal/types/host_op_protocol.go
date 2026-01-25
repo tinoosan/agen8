@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/validate"
+	"github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 const (
@@ -49,7 +50,7 @@ const (
 type HostOpRequest struct {
 	Op        string          `json:"op"`
 	Path      string          `json:"path,omitempty"`
-	ToolID    ToolID          `json:"toolId,omitempty"`
+	ToolID    tools.ToolID    `json:"toolId,omitempty"`
 	ActionID  string          `json:"actionId,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
 	TimeoutMs int             `json:"timeoutMs,omitempty"`
@@ -246,7 +247,7 @@ type HostOpResponse struct {
 	BytesB64  string   `json:"bytesB64,omitempty"`
 	Truncated bool     `json:"truncated,omitempty"`
 
-	ToolResponse *ToolResponse `json:"toolResponse,omitempty"`
+	ToolResponse *tools.ToolResponse `json:"toolResponse,omitempty"`
 	// Shell output
 	ExitCode   int    `json:"exitCode,omitempty"`
 	Stdout     string `json:"stdout,omitempty"`

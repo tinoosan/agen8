@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/tools"
-	"github.com/tinoosan/workbench-core/internal/types"
+	internaltools "github.com/tinoosan/workbench-core/internal/tools"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 func TestBuiltinTrace_EventsSince_CursorAdvances(t *testing.T) {
@@ -22,11 +22,11 @@ func TestBuiltinTrace_EventsSince_CursorAdvances(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	inv := tools.BuiltinTraceInvoker{Store: store.DiskTraceStore{DiskStore: store.DiskStore{Dir: dir}}}
-	req := types.ToolRequest{
+	inv := internaltools.BuiltinTraceInvoker{Store: store.DiskTraceStore{DiskStore: store.DiskStore{Dir: dir}}}
+	req := pkgtools.ToolRequest{
 		Version:  "v1",
 		CallID:   "c1",
-		ToolID:   "builtin.trace",
+		ToolID:   pkgtools.ToolID("builtin.trace"),
 		ActionID: "events.since",
 		Input:    json.RawMessage(`{"cursor":0,"maxBytes":4096,"limit":10}`),
 	}

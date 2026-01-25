@@ -9,9 +9,10 @@ import (
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/tools"
+	internaltools "github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/internal/validate"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // Factory centralizes construction of core VFS resources for a given run/session.
@@ -166,7 +167,7 @@ func (f *Factory) History() (*HistoryResource, error) {
 	}, nil
 }
 
-func (f *Factory) Tools() (*ToolsResource, error) {
+func (f *Factory) Tools() (*internaltools.ToolsResource, error) {
 	cfg, err := f.cfg()
 	if err != nil {
 		return nil, err
@@ -174,14 +175,14 @@ func (f *Factory) Tools() (*ToolsResource, error) {
 	toolsDir := fsutil.GetToolsDir(cfg.DataDir)
 	_ = os.MkdirAll(toolsDir, 0755)
 
-	builtinProvider, err := tools.NewBuiltinManifestProvider()
+	builtinProvider, err := internaltools.NewBuiltinManifestProvider()
 	if err != nil {
 		return nil, err
 	}
-	diskProvider := tools.NewDiskManifestProvider(toolsDir)
-	toolManifests := tools.NewCompositeToolManifestRegistry(builtinProvider, diskProvider)
+	diskProvider := pkgtools.NewDiskManifestProvider(toolsDir)
+	toolManifests := pkgtools.NewCompositeToolManifestRegistry(builtinProvider, diskProvider)
 
-	return NewToolsResource(toolManifests)
+	return internaltools.NewToolsResource(toolManifests)
 }
 
 // MountAll mounts the core resources into fs.

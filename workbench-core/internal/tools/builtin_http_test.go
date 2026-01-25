@@ -13,8 +13,8 @@ import (
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/tools"
-	"github.com/tinoosan/workbench-core/internal/types"
+	internaltools "github.com/tinoosan/workbench-core/internal/tools"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
@@ -42,14 +42,14 @@ func TestBuiltinHTTP_Fetch_SmallBody_OK(t *testing.T) {
 	fs := vfs.NewFS()
 	fs.Mount(vfs.MountResults, resultsRes)
 
-	runner := tools.Runner{
+	runner := pkgtools.Runner{
 		Results: resultsStore,
-		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.http"): tools.NewBuiltinHTTPInvoker(),
+		ToolRegistry: pkgtools.MapRegistry{
+			pkgtools.ToolID("builtin.http"): internaltools.NewBuiltinHTTPInvoker(),
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.http"), "fetch", json.RawMessage(`{"url":"`+srv.URL+`"}`), 0)
+	resp, err := runner.Run(context.Background(), pkgtools.ToolID("builtin.http"), "fetch", json.RawMessage(`{"url":"`+srv.URL+`"}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -114,14 +114,14 @@ func TestBuiltinHTTP_Fetch_LargeBody_WritesArtifact(t *testing.T) {
 	fs := vfs.NewFS()
 	fs.Mount(vfs.MountResults, resultsRes)
 
-	runner := tools.Runner{
+	runner := pkgtools.Runner{
 		Results: resultsStore,
-		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.http"): tools.NewBuiltinHTTPInvoker(),
+		ToolRegistry: pkgtools.MapRegistry{
+			pkgtools.ToolID("builtin.http"): internaltools.NewBuiltinHTTPInvoker(),
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.http"), "fetch", json.RawMessage(`{"url":"`+srv.URL+`"}`), 0)
+	resp, err := runner.Run(context.Background(), pkgtools.ToolID("builtin.http"), "fetch", json.RawMessage(`{"url":"`+srv.URL+`"}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -158,14 +158,14 @@ func TestBuiltinHTTP_Fetch_LargeBody_WritesArtifact(t *testing.T) {
 
 func TestBuiltinHTTP_Fetch_RejectsNonHTTPURL(t *testing.T) {
 	resultsStore := store.NewInMemoryResultsStore()
-	runner := tools.Runner{
+	runner := pkgtools.Runner{
 		Results: resultsStore,
-		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.http"): tools.NewBuiltinHTTPInvoker(),
+		ToolRegistry: pkgtools.MapRegistry{
+			pkgtools.ToolID("builtin.http"): internaltools.NewBuiltinHTTPInvoker(),
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.http"), "fetch", json.RawMessage(`{"url":"file:///etc/hosts"}`), 0)
+	resp, err := runner.Run(context.Background(), pkgtools.ToolID("builtin.http"), "fetch", json.RawMessage(`{"url":"file:///etc/hosts"}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

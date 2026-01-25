@@ -13,6 +13,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 const defaultShellMaxOutputBytes = 64 * 1024
@@ -63,20 +64,20 @@ type shellExecOutput struct {
 	StderrPath string `json:"stderrPath,omitempty"`
 }
 
-func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest) (ToolCallResult, error) {
+func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req pkgtools.ToolRequest) (pkgtools.ToolCallResult, error) {
 	if s == nil {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: "builtin.shell invoker is nil"}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: "builtin.shell invoker is nil"}
 	}
 	if err := req.Validate(); err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: err.Error()}
 	}
 	if req.ActionID != "exec" {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("unsupported action %q (allowed: exec)", req.ActionID)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("unsupported action %q (allowed: exec)", req.ActionID)}
 	}
 
 	root := strings.TrimSpace(s.RootDir)
 	if root == "" || !filepath.IsAbs(root) {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: "rootDir must be absolute"}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: "rootDir must be absolute"}
 	}
 
 	maxBytes := s.MaxBytes
@@ -86,24 +87,24 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 
 	var in shellExecInput
 	if err := json.Unmarshal(req.Input, &in); err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid input JSON: %v", err)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid input JSON: %v", err)}
 	}
 	if len(in.Argv) == 0 {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: "argv is required"}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: "argv is required"}
 	}
 
 	cmdName := in.Argv[0]
 	if strings.Contains(cmdName, "/") || strings.Contains(cmdName, string(filepath.Separator)) {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: "command must be a bare executable name (no path separators)"}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: "command must be a bare executable name (no path separators)"}
 	}
 	if s.Deny != nil && s.Deny[cmdName] {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("command %q is denied", cmdName)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("command %q is denied", cmdName)}
 	}
 	// Validate argv for path escapes but don't translate VFS paths
 	// (model uses relative paths now, not VFS paths)
 	for i := 1; i < len(in.Argv); i++ {
 		if looksLikeAbsPathOrFlagValue(in.Argv[i]) {
-			return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("absolute paths are not allowed in argv (got %q); use relative paths", in.Argv[i])}
+			return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("absolute paths are not allowed in argv (got %q); use relative paths", in.Argv[i])}
 		}
 	}
 
@@ -114,19 +115,19 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 	}
 	absDir, err := vfsutil.SafeJoinBaseDir(root, cwd)
 	if err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: err.Error()}
 	}
 	if st, err := os.Stat(absDir); err != nil || !st.IsDir() {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("cwd %q is not a directory", cwd)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("cwd %q is not a directory", cwd)}
 	}
 
 	if s.Confirm != nil {
 		ok, err := s.Confirm(ctx, in.Argv, cwd)
 		if err != nil {
-			return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
+			return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
 		}
 		if !ok {
-			return ToolCallResult{}, &InvokeError{
+			return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{
 				Code:    types.CommandRejectedErrorCode,
 				Message: types.CommandRejectedErrorMessage,
 			}
@@ -148,13 +149,13 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 	exitCode := 0
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
-			return ToolCallResult{}, &InvokeError{Code: "timeout", Message: "command timed out", Retryable: true, Err: err}
+			return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "timeout", Message: "command timed out", Retryable: true, Err: err}
 		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
-			return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
+			return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
 		}
 	}
 
@@ -170,10 +171,10 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 		Stderr:   truncateString(stderrText, maxBytes),
 	}
 
-	artifacts := make([]ToolArtifactWrite, 0, 2)
+	artifacts := make([]pkgtools.ToolArtifactWrite, 0, 2)
 	if len(stdoutFull) > maxBytes {
 		out.StdoutPath = "stdout.txt"
-		artifacts = append(artifacts, ToolArtifactWrite{
+		artifacts = append(artifacts, pkgtools.ToolArtifactWrite{
 			Path:      "stdout.txt",
 			Bytes:     []byte(stdoutText),
 			MediaType: "text/plain",
@@ -181,7 +182,7 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 	}
 	if len(stderrFull) > maxBytes {
 		out.StderrPath = "stderr.txt"
-		artifacts = append(artifacts, ToolArtifactWrite{
+		artifacts = append(artifacts, pkgtools.ToolArtifactWrite{
 			Path:      "stderr.txt",
 			Bytes:     []byte(stderrText),
 			MediaType: "text/plain",
@@ -190,10 +191,10 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req types.ToolRequest)
 
 	outputJSON, err := json.Marshal(out)
 	if err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
 	}
 
-	return ToolCallResult{Output: outputJSON, Artifacts: artifacts}, nil
+	return pkgtools.ToolCallResult{Output: outputJSON, Artifacts: artifacts}, nil
 }
 
 func filterShellEnv(env []string) []string {

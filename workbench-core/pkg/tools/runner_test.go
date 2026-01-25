@@ -10,14 +10,13 @@ import (
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/tools"
-	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/tools"
 )
 
-type invokerFunc func(ctx context.Context, req types.ToolRequest) (tools.ToolCallResult, error)
+type invokerFunc func(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error)
 
-func (f invokerFunc) Invoke(ctx context.Context, req types.ToolRequest) (tools.ToolCallResult, error) {
+func (f invokerFunc) Invoke(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error) {
 	return f(ctx, req)
 }
 
@@ -39,7 +38,7 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 	fs := vfs.NewFS()
 	fs.Mount(vfs.MountResults, resultsRes)
 
-	inv := invokerFunc(func(ctx context.Context, req types.ToolRequest) (tools.ToolCallResult, error) {
+	inv := invokerFunc(func(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error) {
 		return tools.ToolCallResult{
 			Output: json.RawMessage(`{"ok":true}`),
 			Artifacts: []tools.ToolArtifactWrite{
@@ -49,7 +48,7 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 	})
 
 	reg := tools.MapRegistry{
-		types.ToolID("github.com.acme.stock"): inv,
+		tools.ToolID("github.com.acme.stock"): inv,
 	}
 
 	runner := tools.Runner{
@@ -57,7 +56,7 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 		ToolRegistry: reg,
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("github.com.acme.stock"), "quote.latest", json.RawMessage(`{"symbol":"AAPL"}`), 0)
+	resp, err := runner.Run(context.Background(), tools.ToolID("github.com.acme.stock"), "quote.latest", json.RawMessage(`{"symbol":"AAPL"}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -71,14 +70,13 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 		t.Fatalf("unexpected artifacts: %+v", resp.Artifacts)
 	}
 
-	// response.json written
 	responsePath := "/results/" + resp.CallID + "/response.json"
 	b, err := fs.Read(responsePath)
 	if err != nil {
 		t.Fatalf("Read response.json: %v", err)
 	}
 
-	var saved types.ToolResponse
+	var saved tools.ToolResponse
 	if err := json.Unmarshal(b, &saved); err != nil {
 		t.Fatalf("Unmarshal response.json: %v", err)
 	}
@@ -86,7 +84,6 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 		t.Fatalf("saved response mismatch: %+v", saved)
 	}
 
-	// artifact written
 	artifactPath := "/results/" + resp.CallID + "/quote.json"
 	ab, err := fs.Read(artifactPath)
 	if err != nil {
@@ -96,7 +93,6 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 		t.Fatalf("unexpected artifact bytes: %q", string(ab))
 	}
 
-	// Ensure no on-disk results directory was created for the run.
 	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
 		t.Fatalf("expected no on-disk results directory")
 	}
@@ -125,7 +121,7 @@ func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 		ToolRegistry: tools.MapRegistry{},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("github.com.missing.tool"), "missing.action", json.RawMessage(`{}`), 0)
+	resp, err := runner.Run(context.Background(), tools.ToolID("github.com.missing.tool"), "missing.action", json.RawMessage(`{}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -140,7 +136,6 @@ func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 		t.Fatalf("expected persisted response.json: %v", err)
 	}
 
-	// Ensure no on-disk results directory was created for the run.
 	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
 		t.Fatalf("expected no on-disk results directory")
 	}
@@ -164,7 +159,7 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 	fs := vfs.NewFS()
 	fs.Mount(vfs.MountResults, resultsRes)
 
-	inv := invokerFunc(func(ctx context.Context, req types.ToolRequest) (tools.ToolCallResult, error) {
+	inv := invokerFunc(func(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error) {
 		return tools.ToolCallResult{
 			Output: json.RawMessage(`{"ok":true}`),
 			Artifacts: []tools.ToolArtifactWrite{
@@ -176,11 +171,11 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 	runner := tools.Runner{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
-			types.ToolID("github.com.acme.stock"): inv,
+			tools.ToolID("github.com.acme.stock"): inv,
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("github.com.acme.stock"), "acme.do", json.RawMessage(`{}`), 0)
+	resp, err := runner.Run(context.Background(), tools.ToolID("github.com.acme.stock"), "acme.do", json.RawMessage(`{}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -191,7 +186,6 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 
-	// Ensure no on-disk results directory was created for the run.
 	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
 		t.Fatalf("expected no on-disk results directory")
 	}
@@ -215,18 +209,18 @@ func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
 	fs := vfs.NewFS()
 	fs.Mount(vfs.MountResults, resultsRes)
 
-	inv := invokerFunc(func(ctx context.Context, req types.ToolRequest) (tools.ToolCallResult, error) {
+	inv := invokerFunc(func(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error) {
 		return tools.ToolCallResult{}, &tools.InvokeError{Code: "timeout", Message: "command timed out", Retryable: true}
 	})
 
 	runner := tools.Runner{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
-			types.ToolID("github.com.acme.stock"): inv,
+			tools.ToolID("github.com.acme.stock"): inv,
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("github.com.acme.stock"), "acme.do", json.RawMessage(`{}`), 0)
+	resp, err := runner.Run(context.Background(), tools.ToolID("github.com.acme.stock"), "acme.do", json.RawMessage(`{}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -237,7 +231,6 @@ func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 
-	// Ensure no on-disk results directory was created for the run.
 	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunId, "results")); err == nil {
 		t.Fatalf("expected no on-disk results directory")
 	}

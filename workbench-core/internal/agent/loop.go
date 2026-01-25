@@ -10,6 +10,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/validate"
+	"github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // Agent is the minimalist streaming loop: stream the model response, execute its tool calls, and return the final text.
@@ -558,7 +559,7 @@ func functionCallToHostOp(tc types.ToolCall, routes map[string]ToolRoute) (types
 		}
 		return types.HostOpRequest{
 			Op:        types.HostOpToolRun,
-			ToolID:    types.ToolID(strings.TrimSpace(args.ToolID)),
+			ToolID:    tools.ToolID(strings.TrimSpace(args.ToolID)),
 			ActionID:  strings.TrimSpace(args.ActionID),
 			Input:     args.Input,
 			TimeoutMs: timeout,

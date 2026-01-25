@@ -12,9 +12,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // HostOpExecutor is a tiny "host primitive" dispatcher for demos/tests.
@@ -25,12 +25,12 @@ import (
 //   - tool.run executes via tools.Runner and returns a ToolResponse
 type HostOpExecutor struct {
 	FS     *vfs.FS
-	Runner *tools.Runner
+	Runner *pkgtools.Runner
 
 	// Core invokers for direct host operations.
-	ShellInvoker tools.ToolInvoker
-	HTTPInvoker  tools.ToolInvoker
-	TraceInvoker tools.ToolInvoker // For all trace actions via BuiltinTraceInvoker
+	ShellInvoker pkgtools.ToolInvoker
+	HTTPInvoker  pkgtools.ToolInvoker
+	TraceInvoker pkgtools.ToolInvoker // For all trace actions via BuiltinTraceInvoker
 
 	DefaultMaxBytes int
 
@@ -331,10 +331,10 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		if err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 		}
-		toolReq := types.ToolRequest{
+		toolReq := pkgtools.ToolRequest{
 			Version:  "v1",
 			CallID:   "shell.exec",
-			ToolID:   types.ToolID("builtin.shell"),
+			ToolID:   pkgtools.ToolID("builtin.shell"),
 			ActionID: "exec",
 			Input:    inp,
 		}
@@ -386,10 +386,10 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		if err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 		}
-		toolReq := types.ToolRequest{
+		toolReq := pkgtools.ToolRequest{
 			Version:  "v1",
 			CallID:   "http.fetch",
-			ToolID:   types.ToolID("builtin.http"),
+			ToolID:   pkgtools.ToolID("builtin.http"),
 			ActionID: "fetch",
 			Input:    inp,
 		}
@@ -432,10 +432,10 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		if x.TraceInvoker == nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "trace invoker not configured"}
 		}
-		toolReq := types.ToolRequest{
+		toolReq := pkgtools.ToolRequest{
 			Version:  "v1",
 			CallID:   "trace." + req.Action,
-			ToolID:   types.ToolID("builtin.trace"),
+			ToolID:   pkgtools.ToolID("builtin.trace"),
 			ActionID: req.Action,
 			Input:    req.Input,
 		}

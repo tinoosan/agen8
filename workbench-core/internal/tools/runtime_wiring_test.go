@@ -5,24 +5,24 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/types"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 type noopInvoker struct{}
 
-func (noopInvoker) Invoke(_ context.Context, _ types.ToolRequest) (ToolCallResult, error) {
-	return ToolCallResult{Output: json.RawMessage(`{}`)}, nil
+func (noopInvoker) Invoke(_ context.Context, _ pkgtools.ToolRequest) (pkgtools.ToolCallResult, error) {
+	return pkgtools.ToolCallResult{Output: json.RawMessage(`{}`)}, nil
 }
 
 func TestNewRuntimeWiring_ReturnsResourceAndRegistry(t *testing.T) {
 	manifestBytes := []byte(`{"id":"custom.echo"}`)
-	reg := StaticManifestProvider{
-		Manifests: map[types.ToolID][]byte{
-			types.ToolID("custom.echo"): manifestBytes,
+	reg := pkgtools.StaticManifestProvider{
+		Manifests: map[pkgtools.ToolID][]byte{
+			pkgtools.ToolID("custom.echo"): manifestBytes,
 		},
 	}
-	invokers := MapRegistry{
-		types.ToolID("custom.echo"): noopInvoker{},
+	invokers := pkgtools.MapRegistry{
+		pkgtools.ToolID("custom.echo"): noopInvoker{},
 	}
 
 	wiring, err := NewRuntimeWiring(reg, invokers)
@@ -32,7 +32,7 @@ func TestNewRuntimeWiring_ReturnsResourceAndRegistry(t *testing.T) {
 	if wiring.Resource == nil {
 		t.Fatalf("expected resource to be set")
 	}
-	if _, ok := wiring.Registry.Get(types.ToolID("custom.echo")); !ok {
+	if _, ok := wiring.Registry.Get(pkgtools.ToolID("custom.echo")); !ok {
 		t.Fatalf("expected invoker registry to contain tool")
 	}
 

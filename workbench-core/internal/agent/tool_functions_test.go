@@ -4,20 +4,20 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/types"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 func TestManifestToFunctionTools_ExposesFunctionsAndRoutes(t *testing.T) {
-	manifest := types.ToolManifest{
-		ID:                types.ToolID("builtin.shell"),
+	manifest := pkgtools.ToolManifest{
+		ID:                pkgtools.ToolID("builtin.shell"),
 		Version:           "0.1.0",
-		Kind:              types.ToolKindBuiltin,
+		Kind:              pkgtools.ToolKindBuiltin,
 		DisplayName:       "Builtin Shell",
 		Description:       "shell",
 		ExposeAsFunctions: true,
-		Actions: []types.ToolAction{
+		Actions: []pkgtools.ToolAction{
 			{
-				ID:           types.ActionID("exec"),
+				ID:           pkgtools.ActionID("exec"),
 				DisplayName:  "Exec",
 				Description:  "run",
 				InputSchema:  json.RawMessage(`{"type":"object"}`),
@@ -26,7 +26,7 @@ func TestManifestToFunctionTools_ExposesFunctionsAndRoutes(t *testing.T) {
 		},
 	}
 
-	functions, routes := ManifestToFunctionTools([]types.ToolManifest{manifest})
+	functions, routes := ManifestToFunctionTools([]pkgtools.ToolManifest{manifest})
 	if len(functions) != 1 {
 		t.Fatalf("expected 1 function tool, got %d", len(functions))
 	}

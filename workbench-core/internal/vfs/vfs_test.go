@@ -8,9 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/resources"
-	"github.com/tinoosan/workbench-core/internal/tools"
-	"github.com/tinoosan/workbench-core/internal/types"
+	internaltools "github.com/tinoosan/workbench-core/internal/tools"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
@@ -236,8 +235,8 @@ func TestVFS_WithDirResourceRoundtrip(t *testing.T) {
 func TestVFS_WithToolsResource_ReadOnlyManifest(t *testing.T) {
 	tmp := t.TempDir()
 	builtin := tools.StaticManifestProvider{
-		Manifests: map[types.ToolID][]byte{
-			types.ToolID("github.com.acme.stock"): []byte(`{"id":"github.com.acme.stock"}`),
+		Manifests: map[pkgtools.ToolID][]byte{
+			pkgtools.ToolID("github.com.acme.stock"): []byte(`{"id":"github.com.acme.stock"}`),
 		},
 	}
 
@@ -254,8 +253,8 @@ func TestVFS_WithToolsResource_ReadOnlyManifest(t *testing.T) {
 	}
 
 	disk := tools.NewDiskManifestProvider(tmp)
-	reg := tools.NewCompositeToolManifestRegistry(builtin, disk)
-	toolsRes, err := resources.NewToolsResource(reg)
+	reg := pkgtools.NewCompositeToolManifestRegistry(builtin, disk)
+	toolsRes, err := internaltools.NewToolsResource(reg)
 	if err != nil {
 		t.Fatalf("NewToolsResource: %v", err)
 	}

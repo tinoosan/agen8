@@ -7,6 +7,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/validate"
+	"github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // HostExecutor is the host boundary for executing one host primitive.
@@ -108,7 +109,7 @@ type Config struct {
 
 	// ToolManifests optionally supplies host-known tool manifests that should be
 	// exposed as direct function tools (no discovery required).
-	ToolManifests []types.ToolManifest
+	ToolManifests []tools.ToolManifest
 
 	// MaxTokens restricts the output length. 0 means use client default.
 	MaxTokens int

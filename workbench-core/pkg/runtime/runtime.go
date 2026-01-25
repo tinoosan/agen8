@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/debuglog"
 	"github.com/tinoosan/workbench-core/internal/events"
@@ -15,16 +14,18 @@ import (
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/skills"
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	internaltools "github.com/tinoosan/workbench-core/internal/tools"
+	"github.com/tinoosan/workbench-core/pkg/agent"
+	"github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 type Runtime struct {
 	FS              *vfs.FS
 	Executor        agent.HostExecutor
 	Runner          *tools.Runner
-	ToolManifests   []types.ToolManifest
+	ToolManifests   []tools.ToolManifest
 	BuiltinInvokers tools.MapRegistry
 	TraceMiddleware *agent.TraceMiddleware
 	Constructor     *agent.ContextConstructor
@@ -165,25 +166,25 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		Store: traceStore,
 		FS:    fs,
 	}
-	builtinCfg := tools.BuiltinConfig{
+	builtinCfg := internaltools.BuiltinConfig{
 		ShellRootDir:  absWorkdirRoot,
 		ShellVFSMount: vfs.MountProject,
 		ShellConfirm:  nil,
 		TraceStore:    traceStore,
 	}
-	shellInvoker := tools.NewBuiltinShellInvoker(absWorkdirRoot, nil, vfs.MountProject)
-	httpInvoker := tools.NewBuiltinHTTPInvoker()
-	traceInvoker := tools.BuiltinTraceInvoker{Store: traceStore}
+	shellInvoker := internaltools.NewBuiltinShellInvoker(absWorkdirRoot, nil, vfs.MountProject)
+	httpInvoker := internaltools.NewBuiltinHTTPInvoker()
+	traceInvoker := internaltools.BuiltinTraceInvoker{Store: traceStore}
 
-	builtinInvokers := tools.BuiltinInvokerRegistry(builtinCfg)
+	builtinInvokers := internaltools.BuiltinInvokerRegistry(builtinCfg)
 	if builtinInvokers == nil {
 		builtinInvokers = make(tools.MapRegistry)
 	}
-	builtinInvokers[types.ToolID("builtin.shell")] = shellInvoker
-	builtinInvokers[types.ToolID("builtin.http")] = httpInvoker
-	builtinInvokers[types.ToolID("builtin.trace")] = traceInvoker
+	builtinInvokers[tools.ToolID("builtin.shell")] = shellInvoker
+	builtinInvokers[tools.ToolID("builtin.http")] = httpInvoker
+	builtinInvokers[tools.ToolID("builtin.trace")] = traceInvoker
 
-	builtinManifestProvider, err := tools.NewBuiltinManifestProvider()
+	builtinManifestProvider, err := internaltools.NewBuiltinManifestProvider()
 	if err != nil {
 		return nil, fmt.Errorf("load builtin manifests: %w", err)
 	}
@@ -192,7 +193,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	diskManifestProvider := tools.NewDiskManifestProvider(toolsDir)
 	toolManifestRegistry := tools.NewCompositeToolManifestRegistry(builtinManifestProvider, diskManifestProvider)
 
-	toolRuntime, err := tools.NewRuntimeWiring(toolManifestRegistry, builtinInvokers)
+	toolRuntime, err := internaltools.NewRuntimeWiring(toolManifestRegistry, builtinInvokers)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +204,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		ToolRegistry: toolRuntime.Registry,
 	}
 
-	toolManifests := []types.ToolManifest{}
+	toolManifests := []tools.ToolManifest{}
 	if ids, err := builtinManifestProvider.ListToolIDs(context.Background()); err != nil {
 		return nil, fmt.Errorf("list builtin manifests: %w", err)
 	} else {
@@ -215,7 +216,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			if !ok {
 				continue
 			}
-			m, err := types.ParseBuiltinToolManifest(b)
+			m, err := tools.ParseBuiltinToolManifest(b)
 			if err != nil {
 				return nil, fmt.Errorf("parse builtin manifest %s: %w", id.String(), err)
 			}
@@ -233,7 +234,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			if !ok {
 				continue
 			}
-			m, err := types.ParseUserToolManifest(b)
+			m, err := tools.ParseUserToolManifest(b)
 			if err != nil {
 				return nil, fmt.Errorf("parse disk manifest %s: %w", id.String(), err)
 			}

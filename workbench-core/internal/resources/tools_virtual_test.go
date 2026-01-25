@@ -7,19 +7,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/resources"
-	"github.com/tinoosan/workbench-core/internal/tools"
-	"github.com/tinoosan/workbench-core/internal/types"
+	internaltools "github.com/tinoosan/workbench-core/internal/tools"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
 func TestVirtualToolsResource_ListDoesNotIncludeCoreTools(t *testing.T) {
-	builtin, err := tools.NewBuiltinManifestProvider()
+	builtin, err := internaltools.NewBuiltinManifestProvider()
 	if err != nil {
 		t.Fatalf("NewBuiltinManifestProvider: %v", err)
 	}
-	reg := tools.NewCompositeToolManifestRegistry(builtin)
-	res, err := resources.NewToolsResource(reg)
+	reg := pkgtools.NewCompositeToolManifestRegistry(builtin)
+	res, err := internaltools.NewToolsResource(reg)
 	if err != nil {
 		t.Fatalf("NewToolsResource: %v", err)
 	}
@@ -53,13 +52,13 @@ func TestVirtualToolsResource_DiskToolsAppearWhenPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	disk := tools.NewDiskManifestProvider(dir)
-	builtin, err := tools.NewBuiltinManifestProvider()
+	disk := pkgtools.NewDiskManifestProvider(dir)
+	builtin, err := internaltools.NewBuiltinManifestProvider()
 	if err != nil {
 		t.Fatalf("NewBuiltinManifestProvider: %v", err)
 	}
-	reg := tools.NewCompositeToolManifestRegistry(builtin, disk)
-	res, err := resources.NewToolsResource(reg)
+	reg := pkgtools.NewCompositeToolManifestRegistry(builtin, disk)
+	res, err := internaltools.NewToolsResource(reg)
 	if err != nil {
 		t.Fatalf("NewToolsResource: %v", err)
 	}
@@ -100,13 +99,13 @@ func TestVirtualToolsResource_DiskAppliesWhenNoBuiltin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	disk := tools.NewDiskManifestProvider(dir)
-	builtin, err := tools.NewBuiltinManifestProvider()
+	disk := pkgtools.NewDiskManifestProvider(dir)
+	builtin, err := internaltools.NewBuiltinManifestProvider()
 	if err != nil {
 		t.Fatalf("NewBuiltinManifestProvider: %v", err)
 	}
-	reg := tools.NewCompositeToolManifestRegistry(builtin, disk)
-	res, err := resources.NewToolsResource(reg)
+	reg := pkgtools.NewCompositeToolManifestRegistry(builtin, disk)
+	res, err := internaltools.NewToolsResource(reg)
 	if err != nil {
 		t.Fatalf("NewToolsResource: %v", err)
 	}
@@ -119,7 +118,7 @@ func TestVirtualToolsResource_DiskAppliesWhenNoBuiltin(t *testing.T) {
 		t.Fatalf("Read: %v", err)
 	}
 	// Ensure we got the disk manifest since builtin manifests are no longer exposed.
-	m, err := types.ParseUserToolManifest(b)
+	m, err := pkgtools.ParseUserToolManifest(b)
 	if err != nil {
 		t.Fatalf("ParseUserToolManifest: %v", err)
 	}

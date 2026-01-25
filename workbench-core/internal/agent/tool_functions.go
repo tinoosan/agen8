@@ -5,13 +5,14 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/types"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 const defaultToolFunctionTimeoutMs = 30_000
 
 // ToolRoute maps a function name back to the originating tool/action.
 type ToolRoute struct {
-	ToolID    types.ToolID
+	ToolID    pkgtools.ToolID
 	ActionID  string
 	TimeoutMs int
 }
@@ -20,7 +21,7 @@ type ToolRoute struct {
 //
 // Only manifests with ExposeAsFunctions=true are converted. Each action becomes a function
 // named "<toolId>_<actionId>" with dots replaced by underscores for compatibility.
-func ManifestToFunctionTools(manifests []types.ToolManifest) (tools []types.Tool, routes map[string]ToolRoute) {
+func ManifestToFunctionTools(manifests []pkgtools.ToolManifest) (tools []types.Tool, routes map[string]ToolRoute) {
 	routes = make(map[string]ToolRoute)
 
 	for _, m := range manifests {

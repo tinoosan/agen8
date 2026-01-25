@@ -16,6 +16,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	"github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // ContextUpdater keeps the model's bounded context synchronized with persistent
@@ -75,7 +76,7 @@ type ContextUpdater struct {
 }
 
 type LastToolRun struct {
-	ToolID   types.ToolID `json:"toolId"`
+	ToolID   tools.ToolID `json:"toolId"`
 	ActionID string       `json:"actionId"`
 	CallID   string       `json:"callId"`
 }

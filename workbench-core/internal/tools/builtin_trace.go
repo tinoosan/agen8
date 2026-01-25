@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/types"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // BuiltinTraceInvoker implements builtin.trace.
@@ -55,12 +55,12 @@ type traceLatestOutput struct {
 	Events         []store.TraceEvent `json:"events"`
 }
 
-func (t BuiltinTraceInvoker) Invoke(ctx context.Context, req types.ToolRequest) (ToolCallResult, error) {
+func (t BuiltinTraceInvoker) Invoke(ctx context.Context, req pkgtools.ToolRequest) (pkgtools.ToolCallResult, error) {
 	if err := req.Validate(); err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: err.Error()}
 	}
 	if t.Store == nil {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: "trace store not configured"}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: "trace store not configured"}
 	}
 
 	switch req.ActionID {
@@ -71,23 +71,23 @@ func (t BuiltinTraceInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 	case "events.summary":
 		return t.eventsSummary(ctx, req)
 	default:
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("unsupported action %q (allowed: events.since, events.latest, events.summary)", req.ActionID)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("unsupported action %q (allowed: events.since, events.latest, events.summary)", req.ActionID)}
 	}
 }
 
-func (t BuiltinTraceInvoker) eventsSince(ctx context.Context, req types.ToolRequest) (ToolCallResult, error) {
+func (t BuiltinTraceInvoker) eventsSince(ctx context.Context, req pkgtools.ToolRequest) (pkgtools.ToolCallResult, error) {
 	var in traceSinceInput
 	if err := json.Unmarshal(req.Input, &in); err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid input JSON: %v", err)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid input JSON: %v", err)}
 	}
 	cursor, err := parseCursor(in.Cursor)
 	if err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: err.Error()}
 	}
 
 	batch, err := t.Store.EventsSince(ctx, cursor, store.TraceSinceOptions{MaxBytes: in.MaxBytes, Limit: in.Limit})
 	if err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
 	}
 
 	out := traceSinceOutput{
@@ -101,19 +101,19 @@ func (t BuiltinTraceInvoker) eventsSince(ctx context.Context, req types.ToolRequ
 	}
 	b, err := json.Marshal(out)
 	if err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
 	}
-	return ToolCallResult{Output: b}, nil
+	return pkgtools.ToolCallResult{Output: b}, nil
 }
 
-func (t BuiltinTraceInvoker) eventsLatest(ctx context.Context, req types.ToolRequest) (ToolCallResult, error) {
+func (t BuiltinTraceInvoker) eventsLatest(ctx context.Context, req pkgtools.ToolRequest) (pkgtools.ToolCallResult, error) {
 	var in traceLatestInput
 	if err := json.Unmarshal(req.Input, &in); err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid input JSON: %v", err)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid input JSON: %v", err)}
 	}
 	batch, err := t.Store.EventsLatest(ctx, store.TraceLatestOptions{MaxBytes: in.MaxBytes, Limit: in.Limit})
 	if err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
 	}
 	out := traceLatestOutput{
 		StoreKind:      storeKind(t.Store),
@@ -125,9 +125,9 @@ func (t BuiltinTraceInvoker) eventsLatest(ctx context.Context, req types.ToolReq
 	}
 	b, err := json.Marshal(out)
 	if err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
 	}
-	return ToolCallResult{Output: b}, nil
+	return pkgtools.ToolCallResult{Output: b}, nil
 }
 
 type traceSummaryInput struct {
@@ -149,19 +149,19 @@ type traceSummaryOutput struct {
 	Summary        string            `json:"summary"`
 }
 
-func (t BuiltinTraceInvoker) eventsSummary(ctx context.Context, req types.ToolRequest) (ToolCallResult, error) {
+func (t BuiltinTraceInvoker) eventsSummary(ctx context.Context, req pkgtools.ToolRequest) (pkgtools.ToolCallResult, error) {
 	var in traceSummaryInput
 	if err := json.Unmarshal(req.Input, &in); err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid input JSON: %v", err)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid input JSON: %v", err)}
 	}
 	cursor, err := parseCursor(in.Cursor)
 	if err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: err.Error()}
 	}
 
 	batch, err := t.Store.EventsSince(ctx, cursor, store.TraceSinceOptions{MaxBytes: in.MaxBytes, Limit: in.Limit})
 	if err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
 	}
 
 	counts := make(map[string]int)
@@ -200,9 +200,9 @@ func (t BuiltinTraceInvoker) eventsSummary(ctx context.Context, req types.ToolRe
 	}
 	b, err := json.Marshal(out)
 	if err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
 	}
-	return ToolCallResult{Output: b}, nil
+	return pkgtools.ToolCallResult{Output: b}, nil
 }
 
 func formatSummary(typeCounts map[string]int, lastTimestamp string, lines []string, keepLast int) string {

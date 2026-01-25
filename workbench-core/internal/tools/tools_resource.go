@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // ToolsResource exposes tool discovery under the VFS mount "/tools",
@@ -26,10 +26,10 @@ type ToolsResource struct {
 	// Example: "tools" maps to the virtual namespace "/tools".
 	Mount string
 
-	Registry ToolManifestRegistry
+	Registry pkgtools.ToolManifestRegistry
 }
 
-func NewToolsResource(reg ToolManifestRegistry) (*ToolsResource, error) {
+func NewToolsResource(reg pkgtools.ToolManifestRegistry) (*ToolsResource, error) {
 	if reg == nil {
 		return nil, fmt.Errorf("tool manifest registry is required")
 	}
@@ -87,7 +87,7 @@ func (tr *ToolsResource) Read(subpath string) ([]byte, error) {
 }
 
 func (tr *ToolsResource) readManifest(toolID string) ([]byte, error) {
-	id, err := types.ParseToolID(toolID)
+	id, err := pkgtools.ParseToolID(toolID)
 	if err != nil {
 		return nil, fmt.Errorf("tools read: invalid toolId %q", toolID)
 	}

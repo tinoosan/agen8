@@ -4,20 +4,20 @@ import (
 	"context"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/internal/agent"
-	"github.com/tinoosan/workbench-core/internal/resources"
-	"github.com/tinoosan/workbench-core/internal/tools"
+	"github.com/tinoosan/workbench-core/pkg/agent"
+	internaltools "github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 func TestHostOpExecutor_FSRead_CoreToolManifest_NotFound(t *testing.T) {
-	builtin, err := tools.NewBuiltinManifestProvider()
+	builtin, err := internaltools.NewBuiltinManifestProvider()
 	if err != nil {
 		t.Fatalf("NewBuiltinManifestProvider: %v", err)
 	}
-	reg := tools.NewCompositeToolManifestRegistry(builtin)
-	toolsRes, err := resources.NewToolsResource(reg)
+	reg := pkgtools.NewCompositeToolManifestRegistry(builtin)
+	toolsRes, err := internaltools.NewToolsResource(reg)
 	if err != nil {
 		t.Fatalf("NewToolsResource: %v", err)
 	}

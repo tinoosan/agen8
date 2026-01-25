@@ -6,7 +6,7 @@ import (
 	"sort"
 
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/types"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // BuiltinConfig contains host-provided configuration used when constructing builtin invokers.
@@ -34,9 +34,9 @@ type BuiltinConfig struct {
 // - Manifest is required for discovery (/tools).
 // - NewInvoker is optional; some builtins may be "discoverable" but not executable yet.
 type BuiltinDef struct {
-	ID         types.ToolID
+	ID         pkgtools.ToolID
 	Manifest   []byte
-	NewInvoker func(cfg BuiltinConfig) ToolInvoker
+	NewInvoker func(cfg BuiltinConfig) pkgtools.ToolInvoker
 }
 
 var builtinDefs []BuiltinDef
@@ -71,8 +71,8 @@ func registerBuiltin(def BuiltinDef) {
 //
 // This is typically used as the runner registry during early development, before
 // adding external/custom tool execution.
-func BuiltinInvokerRegistry(cfg BuiltinConfig) MapRegistry {
-	out := make(MapRegistry)
+func BuiltinInvokerRegistry(cfg BuiltinConfig) pkgtools.MapRegistry {
+	out := make(pkgtools.MapRegistry)
 
 	defs := make([]BuiltinDef, len(builtinDefs))
 	copy(defs, builtinDefs)

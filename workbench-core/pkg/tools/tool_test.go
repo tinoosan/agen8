@@ -1,8 +1,6 @@
-package types
+package tools
 
-import (
-	"testing"
-)
+import "testing"
 
 func TestParseToolID(t *testing.T) {
 	t.Run("Normalizes", func(t *testing.T) {

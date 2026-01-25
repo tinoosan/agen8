@@ -17,18 +17,19 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tinoosan/workbench-core/internal/agent"
 	"github.com/tinoosan/workbench-core/internal/atref"
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/cost"
 	"github.com/tinoosan/workbench-core/internal/events"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/internal/tui"
 	"github.com/tinoosan/workbench-core/internal/types"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 	"github.com/tinoosan/workbench-core/internal/vfsutil"
+	"github.com/tinoosan/workbench-core/pkg/agent"
+	internaltools "github.com/tinoosan/workbench-core/internal/tools"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 func cursorDebugLog(hypothesisId, location, message string, data map[string]any) {
@@ -1015,7 +1016,7 @@ type tuiTurnRunner struct {
 	//
 	// It is a map (reference type), so updating entries updates the runner behavior
 	// without reconstructing the entire agent loop.
-	builtinInvokers tools.MapRegistry
+	builtinInvokers pkgtools.MapRegistry
 	artifacts       *ArtifactIndex
 	constructor     *agent.ContextConstructor
 
@@ -1936,7 +1937,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 
 		// Update builtin sandbox roots (builtin.shell) to follow the active workdir.
 		if r.builtinInvokers != nil {
-			r.builtinInvokers[types.ToolID("builtin.shell")] = tools.NewBuiltinShellInvoker(workdirRes.BaseDir, nil, vfs.MountProject)
+			r.builtinInvokers[pkgtools.ToolID("builtin.shell")] = internaltools.NewBuiltinShellInvoker(workdirRes.BaseDir, nil, vfs.MountProject)
 		}
 
 		r.mustEmit(context.Background(), events.Event{

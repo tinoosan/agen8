@@ -12,8 +12,8 @@ import (
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/tools"
-	"github.com/tinoosan/workbench-core/internal/types"
+	internaltools "github.com/tinoosan/workbench-core/internal/tools"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/internal/vfs"
 )
 
@@ -39,14 +39,14 @@ func TestBuiltinShell_Exec_CatFile_OK(t *testing.T) {
 	fs := vfs.NewFS()
 	fs.Mount(vfs.MountResults, resultsRes)
 
-	runner := tools.Runner{
+	runner := pkgtools.Runner{
 		Results: resultsStore,
-		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(rootDir, nil, ""),
+		ToolRegistry: pkgtools.MapRegistry{
+			pkgtools.ToolID("builtin.shell"): internaltools.NewBuiltinShellInvoker(rootDir, nil, ""),
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["cat","hello.txt"],"cwd":"."}`), 0)
+	resp, err := runner.Run(context.Background(), pkgtools.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["cat","hello.txt"],"cwd":"."}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -94,19 +94,19 @@ func TestBuiltinShell_Exec_UserDeniesCommand(t *testing.T) {
 	resultsStore := store.NewInMemoryResultsStore()
 
 	confirmed := false
-	inv := tools.NewBuiltinShellInvoker(tmpDir, func(ctx context.Context, argv []string, cwd string) (bool, error) {
+	inv := internaltools.NewBuiltinShellInvoker(tmpDir, func(ctx context.Context, argv []string, cwd string) (bool, error) {
 		confirmed = true
 		return false, nil
 	}, "")
 
-	runner := tools.Runner{
+	runner := pkgtools.Runner{
 		Results: resultsStore,
-		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.shell"): inv,
+		ToolRegistry: pkgtools.MapRegistry{
+			pkgtools.ToolID("builtin.shell"): inv,
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["ls"],"cwd":"."}`), 0)
+	resp, err := runner.Run(context.Background(), pkgtools.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["ls"],"cwd":"."}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -139,14 +139,14 @@ func TestBuiltinShell_Exec_RejectsEscapeCwd(t *testing.T) {
 
 	resultsStore := store.NewInMemoryResultsStore()
 
-	runner := tools.Runner{
+	runner := pkgtools.Runner{
 		Results: resultsStore,
-		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(t.TempDir(), nil, ""),
+		ToolRegistry: pkgtools.MapRegistry{
+			pkgtools.ToolID("builtin.shell"): internaltools.NewBuiltinShellInvoker(t.TempDir(), nil, ""),
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["ls"],"cwd":"../"}`), 0)
+	resp, err := runner.Run(context.Background(), pkgtools.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["ls"],"cwd":"../"}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -188,15 +188,15 @@ func TestBuiltinShell_Exec_TruncatesAndWritesStdoutArtifact(t *testing.T) {
 	fs := vfs.NewFS()
 	fs.Mount(vfs.MountResults, resultsRes)
 
-	inv := tools.NewBuiltinShellInvoker(rootDir, nil, "")
-	runner := tools.Runner{
+	inv := internaltools.NewBuiltinShellInvoker(rootDir, nil, "")
+	runner := pkgtools.Runner{
 		Results: resultsStore,
-		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.shell"): inv,
+		ToolRegistry: pkgtools.MapRegistry{
+			pkgtools.ToolID("builtin.shell"): inv,
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["cat","big.txt"],"cwd":"."}`), 0)
+	resp, err := runner.Run(context.Background(), pkgtools.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["cat","big.txt"],"cwd":"."}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -250,14 +250,14 @@ func TestBuiltinShell_Exec_RejectsAbsolutePathArgs(t *testing.T) {
 	fs := vfs.NewFS()
 	fs.Mount(vfs.MountResults, resultsRes)
 
-	runner := tools.Runner{
+	runner := pkgtools.Runner{
 		Results: resultsStore,
-		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(t.TempDir(), nil, ""),
+		ToolRegistry: pkgtools.MapRegistry{
+			pkgtools.ToolID("builtin.shell"): internaltools.NewBuiltinShellInvoker(t.TempDir(), nil, ""),
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["cat","/etc/hosts"],"cwd":"."}`), 0)
+	resp, err := runner.Run(context.Background(), pkgtools.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["cat","/etc/hosts"],"cwd":"."}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -288,14 +288,14 @@ func TestBuiltinShell_EnvFiltersSensitiveVars(t *testing.T) {
 	t.Setenv("GIT_DIR", "/tmp/secret")
 	t.Setenv("SAFE_KEY", "keepme")
 
-	runner := tools.Runner{
+	runner := pkgtools.Runner{
 		Results: resultsStore,
-		ToolRegistry: tools.MapRegistry{
-			types.ToolID("builtin.shell"): tools.NewBuiltinShellInvoker(rootDir, nil, ""),
+		ToolRegistry: pkgtools.MapRegistry{
+			pkgtools.ToolID("builtin.shell"): internaltools.NewBuiltinShellInvoker(rootDir, nil, ""),
 		},
 	}
 
-	resp, err := runner.Run(context.Background(), types.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["env"],"cwd":"."}`), 0)
+	resp, err := runner.Run(context.Background(), pkgtools.ToolID("builtin.shell"), "exec", json.RawMessage(`{"argv":["env"],"cwd":"."}`), 0)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -363,7 +363,7 @@ func TestBuiltinShell_Exec_RespectsRelativeCwd(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	inv := tools.NewBuiltinShellInvoker(rootDir, nil, "")
+	inv := internaltools.NewBuiltinShellInvoker(rootDir, nil, "")
 	input, err := json.Marshal(struct {
 		Argv []string `json:"argv"`
 		Cwd  string   `json:"cwd"`
@@ -375,10 +375,10 @@ func TestBuiltinShell_Exec_RespectsRelativeCwd(t *testing.T) {
 		t.Fatalf("json.Marshal: %v", err)
 	}
 
-	req := types.ToolRequest{
+	req := pkgtools.ToolRequest{
 		Version:  "v1",
 		CallID:   "relative-cwd",
-		ToolID:   types.ToolID("builtin.shell"),
+		ToolID:   pkgtools.ToolID("builtin.shell"),
 		ActionID: "exec",
 		Input:    input,
 	}
@@ -404,7 +404,7 @@ func TestBuiltinShell_Exec_RespectsRelativeCwd(t *testing.T) {
 
 func TestBuiltinShell_Exec_TranslatesOutputPathsToVFS(t *testing.T) {
 	rootDir := t.TempDir()
-	inv := tools.NewBuiltinShellInvoker(rootDir, nil, vfs.MountProject)
+	inv := internaltools.NewBuiltinShellInvoker(rootDir, nil, vfs.MountProject)
 	input, err := json.Marshal(struct {
 		Argv []string `json:"argv"`
 	}{
@@ -414,10 +414,10 @@ func TestBuiltinShell_Exec_TranslatesOutputPathsToVFS(t *testing.T) {
 		t.Fatalf("json.Marshal: %v", err)
 	}
 
-	req := types.ToolRequest{
+	req := pkgtools.ToolRequest{
 		Version:  "v1",
 		CallID:   "vfs-output",
-		ToolID:   types.ToolID("builtin.shell"),
+		ToolID:   pkgtools.ToolID("builtin.shell"),
 		ActionID: "exec",
 		Input:    input,
 	}

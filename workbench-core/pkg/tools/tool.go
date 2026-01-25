@@ -1,4 +1,4 @@
-package types
+package tools
 
 import (
 	"encoding/json"
@@ -7,21 +7,12 @@ import (
 	"strings"
 )
 
-// ToolID is a unique identifier for a tool in dot-separated format.
-// Example: "github.com.acme.stock" or "workbench.builtin.shell".
-// ToolID is case-insensitive and normalized to lowercase.
 type ToolID string
-
-// ActionID identifies a specific action within a tool.
-// Example: "exec" or "quote.latest".
-// ActionID is case-insensitive and normalized to lowercase.
 type ActionID string
 
 var toolIDRegex = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_-]+)+$`)
 var actionIDRegex = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_-]+)*$`)
 
-// ParseToolID parses and validates a tool ID string.
-// Returns an error if the ID is empty or doesn't match the expected format.
 func ParseToolID(id string) (ToolID, error) {
 	s := strings.ToLower(strings.TrimSpace(id))
 	if s == "" {
@@ -30,7 +21,6 @@ func ParseToolID(id string) (ToolID, error) {
 	if !toolIDRegex.MatchString(s) {
 		return "", fmt.Errorf("invalid tool ID %q (expected dot-separated id like github.com.acme.tool)", s)
 	}
-
 	return ToolID(s), nil
 }
 
@@ -53,8 +43,6 @@ func (id *ToolID) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// ParseActionID parses and validates an action ID string.
-// Returns an error if the ID is empty or doesn't match the expected format.
 func ParseActionID(id string) (ActionID, error) {
 	s := strings.ToLower(strings.TrimSpace(id))
 	if s == "" {
@@ -85,15 +73,11 @@ func (id *ActionID) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// EnvVar describes environment variable requirements for a tool.
 type EnvVar struct {
-	// Required maps env var name -> description.
 	Required map[string]string `json:"required,omitempty"`
-	// Optional maps env var name -> description.
 	Optional map[string]string `json:"optional,omitempty"`
 }
 
-// ToolKind distinguishes between builtin tools (shipped with workbench) and custom tools.
 type ToolKind string
 
 const (
@@ -101,11 +85,6 @@ const (
 	ToolKindCustom  ToolKind = "custom"
 )
 
-// ParseUserToolManifest parses and validates a tool manifest provided by a user.
-//
-// Policy:
-//   - If kind is omitted, it defaults to "custom".
-//   - "builtin" is reserved for internal manifests and is rejected.
 func ParseUserToolManifest(b []byte) (ToolManifest, error) {
 	var m ToolManifest
 	if err := json.Unmarshal(b, &m); err != nil {
@@ -120,11 +99,6 @@ func ParseUserToolManifest(b []byte) (ToolManifest, error) {
 	return m, m.Validate()
 }
 
-// ParseBuiltinToolManifest parses and validates an internal/built-in tool manifest.
-//
-// Policy:
-//   - If kind is omitted, it defaults to "builtin".
-//   - The parsed manifest must be "builtin".
 func ParseBuiltinToolManifest(b []byte) (ToolManifest, error) {
 	var m ToolManifest
 	if err := json.Unmarshal(b, &m); err != nil {
@@ -139,12 +113,10 @@ func ParseBuiltinToolManifest(b []byte) (ToolManifest, error) {
 	return m, m.Validate()
 }
 
-// ToolManifest describes a tool's metadata, capabilities, and actions.
-// It is the JSON schema stored at /tools/<toolId>/manifest.json.
 type ToolManifest struct {
 	ID                ToolID       `json:"id"`
 	Version           string       `json:"version"`
-	Kind              ToolKind     `json:"kind"` // builtin or custom
+	Kind              ToolKind     `json:"kind"`
 	DisplayName       string       `json:"displayName"`
 	Description       string       `json:"description"`
 	SourceRepo        string       `json:"sourceRepo,omitempty"`
@@ -153,10 +125,8 @@ type ToolManifest struct {
 	Env               EnvVar       `json:"env,omitempty"`
 }
 
-// ToolAction describes a single callable action within a tool.
-// Each action has its own input/output schema and can be invoked independently.
 type ToolAction struct {
-	ID           ActionID        `json:"id"` // eg. workbench.write
+	ID           ActionID        `json:"id"`
 	DisplayName  string          `json:"displayName"`
 	Description  string          `json:"description"`
 	InputSchema  json.RawMessage `json:"inputSchema"`
@@ -205,13 +175,6 @@ func (m ToolManifest) Validate() error {
 		if len(a.OutputSchema) == 0 {
 			return fmt.Errorf("action outputSchema cannot be empty")
 		}
-		if !json.Valid(a.InputSchema) {
-			return fmt.Errorf("action inputSchema is not valid JSON")
-		}
-		if !json.Valid(a.OutputSchema) {
-			return fmt.Errorf("action outputSchema is not valid JSON")
-		}
 	}
-
 	return nil
 }

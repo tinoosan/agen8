@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/internal/types"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 const (
@@ -85,34 +85,34 @@ type httpFetchOutput struct {
 }
 
 // Invoke executes builtin.http fetch.
-func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req types.ToolRequest) (ToolCallResult, error) {
+func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req pkgtools.ToolRequest) (pkgtools.ToolCallResult, error) {
 	if h == nil {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: "builtin.http invoker is nil"}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: "builtin.http invoker is nil"}
 	}
 	if err := req.Validate(); err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error()}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: err.Error()}
 	}
 	if req.ActionID != "fetch" {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("unsupported action %q (allowed: fetch)", req.ActionID)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("unsupported action %q (allowed: fetch)", req.ActionID)}
 	}
 
 	var in httpFetchInput
 	if err := json.Unmarshal(req.Input, &in); err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid input JSON: %v", err)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid input JSON: %v", err)}
 	}
 	in.URL = strings.TrimSpace(in.URL)
 	if in.URL == "" {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: "url is required"}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: "url is required"}
 	}
 
 	u, err := url.Parse(in.URL)
 	if err != nil || u == nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid url %q", in.URL)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("invalid url %q", in.URL)}
 	}
 	switch strings.ToLower(strings.TrimSpace(u.Scheme)) {
 	case "http", "https":
 	default:
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: "url scheme must be http or https"}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: "url scheme must be http or https"}
 	}
 
 	method := strings.ToUpper(strings.TrimSpace(in.Method))
@@ -122,10 +122,10 @@ func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 	default:
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("unsupported method %q", method)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("unsupported method %q", method)}
 	}
 	if (method == http.MethodGet || method == http.MethodHead) && strings.TrimSpace(in.Body) != "" {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("body is not allowed for %s", method)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("body is not allowed for %s", method)}
 	}
 
 	maxBytes := in.MaxBytes
@@ -133,10 +133,10 @@ func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 		maxBytes = defaultHTTPMaxBytes
 	}
 	if maxBytes < 0 {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: "maxBytes must be >= 0"}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: "maxBytes must be >= 0"}
 	}
 	if maxBytes > maxHTTPMaxBytes {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: fmt.Sprintf("maxBytes exceeds max %d", maxHTTPMaxBytes)}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: fmt.Sprintf("maxBytes exceeds max %d", maxHTTPMaxBytes)}
 	}
 
 	var bodyReader io.Reader
@@ -145,7 +145,7 @@ func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, method, u.String(), bodyReader)
 	if err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "invalid_input", Message: err.Error(), Err: err}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: err.Error(), Err: err}
 	}
 	for k, v := range in.Headers {
 		k = strings.TrimSpace(k)
@@ -178,11 +178,11 @@ func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 	if err != nil {
 		if ctx != nil && ctx.Err() != nil {
 			if ctx.Err() == context.DeadlineExceeded {
-				return ToolCallResult{}, &InvokeError{Code: "timeout", Message: "request timed out", Retryable: true, Err: err}
+				return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "timeout", Message: "request timed out", Retryable: true, Err: err}
 			}
-			return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: "request cancelled", Retryable: true, Err: err}
+			return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: "request cancelled", Retryable: true, Err: err}
 		}
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: err.Error(), Err: err}
 	}
 	defer resp.Body.Close()
 
@@ -191,7 +191,7 @@ func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 	limited := io.LimitReader(resp.Body, readLimit+1)
 	bodyBytes, readErr := io.ReadAll(limited)
 	if readErr != nil {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: readErr.Error(), Err: readErr}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: readErr.Error(), Err: readErr}
 	}
 	truncated := len(bodyBytes) > maxBytes
 	if truncated {
@@ -218,7 +218,7 @@ func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 		ContentType: ct,
 	}
 
-	var artifacts []ToolArtifactWrite
+	var artifacts []pkgtools.ToolArtifactWrite
 	fullBodyPath := ""
 	if len(bodyBytes) > httpInlineBodyPreviewCap {
 		if isText {
@@ -234,7 +234,7 @@ func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 				mediaType = "application/octet-stream"
 			}
 		}
-		artifacts = append(artifacts, ToolArtifactWrite{
+		artifacts = append(artifacts, pkgtools.ToolArtifactWrite{
 			Path:      fullBodyPath,
 			Bytes:     append([]byte(nil), bodyBytes...),
 			MediaType: mediaType,
@@ -261,7 +261,7 @@ func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 			if strings.TrimSpace(mediaType) == "" {
 				mediaType = "application/octet-stream"
 			}
-			artifacts = append(artifacts, ToolArtifactWrite{
+			artifacts = append(artifacts, pkgtools.ToolArtifactWrite{
 				Path:      fullBodyPath,
 				Bytes:     append([]byte(nil), bodyBytes...),
 				MediaType: mediaType,
@@ -274,9 +274,9 @@ func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req types.ToolRequest) 
 
 	outJSON, err := json.Marshal(out)
 	if err != nil {
-		return ToolCallResult{}, &InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
+		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
 	}
-	return ToolCallResult{Output: outJSON, Artifacts: artifacts}, nil
+	return pkgtools.ToolCallResult{Output: outJSON, Artifacts: artifacts}, nil
 }
 
 func cloneHeader(h http.Header) map[string][]string {
