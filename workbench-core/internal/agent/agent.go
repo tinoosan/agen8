@@ -18,7 +18,8 @@ type HostExecutor interface {
 	Exec(ctx context.Context, req types.HostOpRequest) types.HostOpResponse
 }
 
-// HostExecFunc adapts a function to HostExecutor.
+// HostExecFunc adapts a function to HostExecutor so hosts can implement
+// primitive dispatchers by passing a standalone function.
 type HostExecFunc func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse
 
 func (f HostExecFunc) Exec(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
@@ -33,7 +34,8 @@ type ContextSource interface {
 	SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error)
 }
 
-// ContextSourceFunc adapts a function to ContextSource.
+// ContextSourceFunc adapts a function to ContextSource so callers can provide
+// inline context selection logic when wiring up an agent.
 type ContextSourceFunc func(ctx context.Context, basePrompt string, step int) (string, error)
 
 func (f ContextSourceFunc) SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error) {
@@ -82,14 +84,19 @@ type Config struct {
 	PlanMode bool
 
 	// ApprovalsMode controls whether the agent requires confirmation for sensitive ops.
+	// Valid values are "enabled" (default) and "disabled". When enabled, host
+	// primitives that are marked as requiring approval pause the loop and surface
+	// a confirmation request via the host UI.
 	ApprovalsMode string
 
 	// ReasoningEffort is an optional hint for reasoning-capable models.
-	// Examples: "none", "low", "medium", "high".
+	// Accepted values are "none", "minimal", "low", "medium", "high",
+	// or "xhigh" (provider best-effort). The agent forwards the hint to the LLM
+	// client so it can request an appropriately detailed reasoning path.
 	ReasoningEffort string
 
 	// ReasoningSummary controls whether and how providers should emit reasoning summaries.
-	// Examples: "off", "auto", "concise", "detailed".
+	// Accepted values are "off", "auto", "concise", or "detailed" (provider best-effort).
 	ReasoningSummary string
 
 	// SystemPrompt is the base system prompt to pass to the model.

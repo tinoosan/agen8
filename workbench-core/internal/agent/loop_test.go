@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/tinoosan/workbench-core/internal/types"
@@ -280,7 +281,7 @@ func TestAgentLoop_RunConversation_RequiresApproval(t *testing.T) {
 	}
 }
 
-func TestAgentLoop_RunConversation_PlanModeForcesUpdatePlan(t *testing.T) {
+func TestAgentLoop_RunConversation_PlanModeDoesNotForceToolChoice(t *testing.T) {
 	llm := &fakeStreamingLLM{
 		Responses: []types.LLMResponse{{Text: "done"}},
 	}
@@ -296,8 +297,26 @@ func TestAgentLoop_RunConversation_PlanModeForcesUpdatePlan(t *testing.T) {
 	if len(llm.Requests) == 0 {
 		t.Fatalf("expected at least one LLM request, got %d", len(llm.Requests))
 	}
-	if llm.Requests[0].ToolChoice != "function:update_plan" {
-		t.Fatalf("expected first request toolChoice=function:update_plan, got %q", llm.Requests[0].ToolChoice)
+	if llm.Requests[0].ToolChoice != "auto" {
+		t.Fatalf("expected first request toolChoice=auto, got %q", llm.Requests[0].ToolChoice)
+	}
+}
+
+func TestAgentLoop_RunConversation_PlanModeInjectsPolicy(t *testing.T) {
+	llm := &fakeStreamingLLM{
+		Responses: []types.LLMResponse{{Text: "done"}},
+	}
+	exec := &fakeExec{}
+	agent := &Agent{LLM: llm, Exec: exec, Model: "test", PlanMode: true}
+	_, _, _, err := agent.RunConversation(context.Background(), []types.LLMMessage{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if len(llm.Requests) == 0 {
+		t.Fatalf("expected at least one LLM request, got %d", len(llm.Requests))
+	}
+	if !strings.Contains(llm.Requests[0].System, planModePolicyText) {
+		t.Fatalf("expected planModePolicyText in system prompt")
 	}
 }
 
