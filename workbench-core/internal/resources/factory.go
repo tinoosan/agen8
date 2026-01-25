@@ -9,10 +9,8 @@ import (
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/internal/store"
-	internaltools "github.com/tinoosan/workbench-core/internal/tools"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
-	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // Factory centralizes construction of core VFS resources for a given run/session.
@@ -167,24 +165,6 @@ func (f *Factory) History() (*HistoryResource, error) {
 	}, nil
 }
 
-func (f *Factory) Tools() (*internaltools.ToolsResource, error) {
-	cfg, err := f.cfg()
-	if err != nil {
-		return nil, err
-	}
-	toolsDir := fsutil.GetToolsDir(cfg.DataDir)
-	_ = os.MkdirAll(toolsDir, 0755)
-
-	builtinProvider, err := internaltools.NewBuiltinManifestProvider()
-	if err != nil {
-		return nil, err
-	}
-	diskProvider := pkgtools.NewDiskManifestProvider(toolsDir)
-	toolManifests := pkgtools.NewCompositeToolManifestRegistry(builtinProvider, diskProvider)
-
-	return internaltools.NewToolsResource(toolManifests)
-}
-
 // MountAll mounts the core resources into fs.
 //
 // Note: /project is intentionally excluded since it depends on a user-provided OS path.
@@ -217,10 +197,6 @@ func (f *Factory) MountAll(fs *vfs.FS) error {
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
-	tres, err := f.Tools()
-	if err != nil {
-		return fmt.Errorf("create tools: %w", err)
-	}
 
 	traceDir := filepath.Join(ws.BaseDir, "trace")
 	if err := os.MkdirAll(traceDir, 0755); err != nil {
@@ -237,7 +213,6 @@ func (f *Factory) MountAll(fs *vfs.FS) error {
 	fs.Mount(vfs.MountMemory, mem)
 	fs.Mount(vfs.MountProfile, prof)
 	fs.Mount(vfs.MountHistory, hist)
-	fs.Mount(vfs.MountTools, tres)
 	fs.Mount(vfs.MountTrace, traceRes)
 
 	return nil
