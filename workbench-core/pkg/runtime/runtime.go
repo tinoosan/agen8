@@ -40,12 +40,19 @@ type BuildConfig struct {
 	Run             types.Run
 	WorkdirAbs      string
 	Model           string
+	ReasoningEffort  string
+	ReasoningSummary string
+	ApprovalsMode    string
+	PlanMode         bool
 	HistoryRes      *resources.HistoryResource
 	Emit            func(ctx context.Context, ev events.Event)
 	IncludeHistoryOps bool
+	RecentHistoryPairs int
 	MaxProfileBytes int
 	MaxMemoryBytes  int
 	MaxTraceBytes   int
+	PriceInPerMTokensUSD  float64
+	PriceOutPerMTokensUSD float64
 	Guard           func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse
 	ArtifactObserve func(path string)
 }
@@ -59,6 +66,57 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 	if strings.TrimSpace(cfg.WorkdirAbs) == "" {
 		return nil, fmt.Errorf("workdir is required")
+	}
+
+	run := cfg.Run
+	run.Runtime = &types.RunRuntimeConfig{
+		DataDir:          cfg.Cfg.DataDir,
+		Model:            cfg.Model,
+		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
+		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
+		ApprovalsMode:    strings.TrimSpace(cfg.ApprovalsMode),
+		PlanMode:         cfg.PlanMode,
+
+		MaxTraceBytes:         cfg.MaxTraceBytes,
+		MaxMemoryBytes:        cfg.MaxMemoryBytes,
+		MaxProfileBytes:       cfg.MaxProfileBytes,
+		RecentHistoryPairs:    cfg.RecentHistoryPairs,
+		IncludeHistoryOps:     cfg.IncludeHistoryOps,
+		PriceInPerMTokensUSD:  cfg.PriceInPerMTokensUSD,
+		PriceOutPerMTokensUSD: cfg.PriceOutPerMTokensUSD,
+	}
+	_ = store.SaveRun(cfg.Cfg, run)
+
+	if sess, err := store.LoadSession(cfg.Cfg, run.SessionID); err == nil {
+		changed := false
+		if strings.TrimSpace(sess.ActiveModel) != strings.TrimSpace(cfg.Model) {
+			sess.ActiveModel = strings.TrimSpace(cfg.Model)
+			changed = true
+		}
+		if strings.TrimSpace(sess.ReasoningEffort) != strings.TrimSpace(cfg.ReasoningEffort) {
+			sess.ReasoningEffort = strings.TrimSpace(cfg.ReasoningEffort)
+			changed = true
+		}
+		if strings.TrimSpace(sess.ReasoningSummary) != strings.TrimSpace(cfg.ReasoningSummary) {
+			sess.ReasoningSummary = strings.TrimSpace(cfg.ReasoningSummary)
+			changed = true
+		}
+		approvalMode := strings.TrimSpace(cfg.ApprovalsMode)
+		if approvalMode == "" {
+			approvalMode = "enabled"
+		}
+		if strings.TrimSpace(sess.ApprovalsMode) != approvalMode {
+			sess.ApprovalsMode = approvalMode
+			changed = true
+		}
+		if sess.PlanMode == nil || *sess.PlanMode != cfg.PlanMode {
+			nextPlanMode := cfg.PlanMode
+			sess.PlanMode = &nextPlanMode
+			changed = true
+		}
+		if changed {
+			_ = store.SaveSession(cfg.Cfg, sess)
+		}
 	}
 
 	fs := vfs.NewFS()

@@ -73,12 +73,19 @@ func setupTUIChatRuntime(
 		Run:               run,
 		WorkdirAbs:        workdirAbs,
 		Model:             model,
+		ReasoningEffort:   strings.TrimSpace(opts.ReasoningEffort),
+		ReasoningSummary:  strings.TrimSpace(opts.ReasoningSummary),
+		ApprovalsMode:     strings.TrimSpace(opts.ApprovalsMode),
+		PlanMode:          opts.PlanMode,
 		HistoryRes:        historyRes,
 		Emit:              mustEmit,
 		IncludeHistoryOps: derefBool(opts.IncludeHistoryOps, true),
+		RecentHistoryPairs: opts.RecentHistoryPairs,
 		MaxProfileBytes:   opts.MaxProfileBytes,
 		MaxMemoryBytes:    opts.MaxMemoryBytes,
 		MaxTraceBytes:     opts.MaxTraceBytes,
+		PriceInPerMTokensUSD:  opts.PriceInPerMTokensUSD,
+		PriceOutPerMTokensUSD: opts.PriceOutPerMTokensUSD,
 		Guard: func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse {
 			return enforcePlanChecklist(fs, req)
 		},
@@ -88,57 +95,6 @@ func setupTUIChatRuntime(
 		return nil, err
 	}
 	fs := rt.FS
-
-	run.Runtime = &types.RunRuntimeConfig{
-		DataDir:          cfg.DataDir,
-		Model:            model,
-		ReasoningEffort:  strings.TrimSpace(opts.ReasoningEffort),
-		ReasoningSummary: strings.TrimSpace(opts.ReasoningSummary),
-		ApprovalsMode:    strings.TrimSpace(opts.ApprovalsMode),
-		PlanMode:         opts.PlanMode,
-
-		MaxTraceBytes:         opts.MaxTraceBytes,
-		MaxMemoryBytes:        opts.MaxMemoryBytes,
-		MaxProfileBytes:       opts.MaxProfileBytes,
-		RecentHistoryPairs:    opts.RecentHistoryPairs,
-		IncludeHistoryOps:     derefBool(opts.IncludeHistoryOps, true),
-		PriceInPerMTokensUSD:  opts.PriceInPerMTokensUSD,
-		PriceOutPerMTokensUSD: opts.PriceOutPerMTokensUSD,
-	}
-	_ = store.SaveRun(cfg, run)
-
-	// Persist the active model at the session level so resume is deterministic.
-	if sess, err := store.LoadSession(cfg, run.SessionID); err == nil {
-		changed := false
-		if strings.TrimSpace(sess.ActiveModel) != model {
-			sess.ActiveModel = model
-			changed = true
-		}
-		if strings.TrimSpace(sess.ReasoningEffort) != strings.TrimSpace(opts.ReasoningEffort) {
-			sess.ReasoningEffort = strings.TrimSpace(opts.ReasoningEffort)
-			changed = true
-		}
-		if strings.TrimSpace(sess.ReasoningSummary) != strings.TrimSpace(opts.ReasoningSummary) {
-			sess.ReasoningSummary = strings.TrimSpace(opts.ReasoningSummary)
-			changed = true
-		}
-		approvalMode := strings.TrimSpace(opts.ApprovalsMode)
-		if approvalMode == "" {
-			approvalMode = "enabled"
-		}
-		if strings.TrimSpace(sess.ApprovalsMode) != approvalMode {
-			sess.ApprovalsMode = approvalMode
-			changed = true
-		}
-		if sess.PlanMode == nil || *sess.PlanMode != opts.PlanMode {
-			nextPlanMode := opts.PlanMode
-			sess.PlanMode = &nextPlanMode
-			changed = true
-		}
-		if changed {
-			_ = store.SaveSession(cfg, sess)
-		}
-	}
 
 	client, err := llm.NewClientFromEnv()
 	if err != nil {
