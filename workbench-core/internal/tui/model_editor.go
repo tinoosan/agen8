@@ -80,6 +80,26 @@ func (m *Model) openEditor(vpath string) tea.Cmd {
 	return m.openInternalEditor(vpath)
 }
 
+func (m *Model) openEditorAbs(absPath string) tea.Cmd {
+	absPath = strings.TrimSpace(absPath)
+	if absPath == "" {
+		return nil
+	}
+	editor := strings.TrimSpace(os.Getenv("VISUAL"))
+	if editor == "" {
+		editor = strings.TrimSpace(os.Getenv("EDITOR"))
+	}
+	if editor != "" {
+		if cmd, err := m.editorExecCmdAbs(editor, absPath); err == nil && cmd != nil {
+			return tea.ExecProcess(cmd, func(err error) tea.Msg {
+				return editorExternalDoneMsg{vpath: absPath, err: err}
+			})
+		}
+	}
+	m.editorComposeOnClose = false
+	return m.openInternalEditorAbs(absPath)
+}
+
 func (m *Model) openComposeEditor(absPath string) tea.Cmd {
 	absPath = strings.TrimSpace(absPath)
 	if absPath == "" {

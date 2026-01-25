@@ -457,6 +457,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.externalEditorComposeVPath = v
 					cmds = append(cmds, m.openEditor(v))
 				}
+			} else if abs := strings.TrimSpace(ev.Data["absPath"]); abs != "" {
+				cmds = append(cmds, m.openEditorAbs(abs))
 			} else if v := strings.TrimSpace(ev.Data["vpath"]); v != "" {
 				cmds = append(cmds, m.openEditor(v))
 			}

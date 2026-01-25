@@ -22,6 +22,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/config"
 	"github.com/tinoosan/workbench-core/internal/cost"
 	"github.com/tinoosan/workbench-core/internal/events"
+	"github.com/tinoosan/workbench-core/internal/fsutil"
 	"github.com/tinoosan/workbench-core/internal/resources"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tools"
@@ -489,17 +490,7 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 	case "plan":
 		val := strings.ToLower(strings.TrimSpace(arg))
 		if val == "edit" || val == "open" {
-			r.emitPreInit(events.Event{
-				Type:    "ui.editor.open",
-				Message: "Open plan editor",
-				Data: map[string]string{
-					"vpath": "/plan/PLAN.md",
-					"path":  "PLAN.md",
-				},
-				Store:   boolp(false),
-				Console: boolp(false),
-			})
-			return "", true, nil
+			return "Plan editor is available after the first turn starts.", true, nil
 		}
 		newState := r.opts.PlanMode
 		switch val {
@@ -1653,17 +1644,26 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 	case "plan":
 		val := strings.ToLower(strings.TrimSpace(arg))
 		if val == "edit" || val == "open" {
-			r.mustEmit(context.Background(), events.Event{
-				Type:    "ui.editor.open",
-				Message: "Open plan editor",
-				Data: map[string]string{
-					"vpath": "/plan/PLAN.md",
-					"path":  "PLAN.md",
-				},
-				Store:   boolp(false),
-				Console: boolp(false),
-			})
-			return "", true
+			planDir := filepath.Join(fsutil.GetScratchDir(r.cfg.DataDir, r.run.RunId), "plan")
+			if err := os.MkdirAll(planDir, 0755); err == nil {
+				planPath := filepath.Join(planDir, "PLAN.md")
+				if _, err := os.Stat(planPath); err != nil {
+					_ = os.WriteFile(planPath, []byte{}, 0644)
+				}
+				r.mustEmit(context.Background(), events.Event{
+					Type:    "ui.editor.open",
+					Message: "Open plan editor",
+					Data: map[string]string{
+						"vpath":   "/plan/PLAN.md",
+						"path":    "PLAN.md",
+						"absPath": planPath,
+					},
+					Store:   boolp(false),
+					Console: boolp(false),
+				})
+				return "", true
+			}
+			return "Unable to open plan editor", true
 		}
 		newState := r.planMode
 		switch val {
