@@ -43,7 +43,7 @@ type ContextConstructor struct {
 	RunID     string
 	SessionID string
 
-	Trace          *TraceMiddleware
+	Trace         *TraceMiddleware
 	HistoryStore  store.HistoryReader
 	SkillsManager *skills.Manager
 
