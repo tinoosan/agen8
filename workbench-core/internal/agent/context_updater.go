@@ -29,15 +29,8 @@ import (
 type ContextUpdater struct {
 	FS *vfs.FS
 
-	// TraceStore is the module-style API used to read trace events.
-	//
-	// This replaces encoding dynamic queries into VFS paths like:
-	//   /log/events.since/<offset>
-	//   /log/events.latest/<n>
-	//
-	// If nil, the updater falls back to calling methods on the mounted trace resource
-	// (ReadEventsSince/ReadLastEvents), which still avoids dynamic path conventions.
-	TraceStore store.TraceStore
+	// Trace provides shared cursor tracking and trace read fallbacks.
+	Trace *TraceMiddleware
 
 	// LastOp/LastResp are the most recent host op request/response observed by the host.
 	//
@@ -51,13 +44,6 @@ type ContextUpdater struct {
 
 	// LastToolRun captures the most recent tool.run call (if any).
 	LastToolRun *LastToolRun
-
-	// TraceCursor is the current cursor into the run trace stream used by
-	// the module-style events.since cursor API.
-	//
-	// Cursor is treated as opaque by the updater. DiskTraceStore currently encodes it
-	// as a base-10 int64 byte offset into data/runs/<runId>/log/events.jsonl.
-	TraceCursor store.TraceCursor
 
 	// MaxMemoryBytes caps how many bytes from /memory/memory.md are injected.
 	// If zero, a default is used.
@@ -86,7 +72,6 @@ type ContextUpdater struct {
 	// If zero, a default is used.
 	MaxTraceEvents int
 
-	traceEvents []types.Event
 }
 
 type LastToolRun struct {
@@ -243,12 +228,21 @@ func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt strin
 	manifest.Memory.BudgetBytes = policy.Budgets.MemoryBytes
 
 	// Trace excerpt (incremental since offset -> parsed -> filtered -> condensed).
-	traceMode, tracePath, batch, cursorBefore, cursorAfter, traceErr := u.readTraceBatch(ctx, policy.TraceCursorBefore, store.TraceSinceOptions{
-		MaxBytes: policy.Budgets.TraceBytes,
-		Limit:    200,
-	})
-	u.TraceCursor = cursorAfter
-	manifest.Policy.TraceCursorAfter = cursorAfter
+	traceMode := "since"
+	tracePath := "/log/events.jsonl"
+	batch := store.TraceBatch{}
+	cursorBefore := policy.TraceCursorBefore
+	cursorAfter := policy.TraceCursorBefore
+	var traceErr error
+	if u.Trace != nil {
+		traceMode, tracePath, batch, cursorBefore, cursorAfter, traceErr = u.Trace.ReadSince(ctx, store.TraceSinceOptions{
+			MaxBytes: policy.Budgets.TraceBytes,
+			Limit:    200,
+		})
+		manifest.Policy.TraceCursorAfter = cursorAfter
+	} else {
+		traceErr = fmt.Errorf("trace middleware not configured")
+	}
 	manifest.Trace.Path = tracePath
 	manifest.Trace.ReadMode = traceMode
 	manifest.Trace.CursorBefore = cursorBefore
@@ -262,20 +256,13 @@ func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt strin
 	manifest.Trace.Events.Parsed = batch.Parsed
 	manifest.Trace.Events.ParseErrors = batch.ParseErrors
 
-	newEvents := toTypesEvents(batch.Events)
-	if traceMode == "since" {
-		u.traceEvents = append(u.traceEvents, newEvents...)
-		if len(u.traceEvents) > maxEvents {
-			u.traceEvents = u.traceEvents[len(u.traceEvents)-maxEvents:]
-		}
-	} else if traceMode == "latest" {
-		u.traceEvents = newEvents
-		if len(u.traceEvents) > maxEvents {
-			u.traceEvents = u.traceEvents[len(u.traceEvents)-maxEvents:]
-		}
+	events := []types.Event(nil)
+	if u.Trace != nil {
+		u.Trace.MaxEvents = maxEvents
+		events = u.Trace.ApplyBatch(traceMode, batch)
 	}
 
-	traceSummary, selected, capped, excluded, trunc := summarizeTrace(u.traceEvents, policy.TraceIncludeTypes, policy.Budgets.TraceBytes)
+	traceSummary, selected, capped, excluded, trunc := summarizeTrace(events, policy.TraceIncludeTypes, policy.Budgets.TraceBytes)
 	manifest.Trace.Events.Selected = selected
 	manifest.Trace.Events.SelectedCapped = capped
 	manifest.Trace.Events.Excluded = excluded
@@ -384,7 +371,9 @@ var _ = types.HostOpRequest{}
 
 func (u *ContextUpdater) computePolicy(step int, baseProfile, baseMem, baseTrace int) ContextPolicy {
 	p := ContextPolicy{Step: step}
-	p.TraceCursorBefore = u.TraceCursor
+	if u.Trace != nil {
+		p.TraceCursorBefore = u.Trace.ensureCursor()
+	}
 	p.TraceIncludeTypes = u.TraceIncludeTypes
 	if len(p.TraceIncludeTypes) == 0 {
 		p.TraceIncludeTypes = defaultTraceIncludeTypes()
@@ -442,55 +431,6 @@ func defaultTraceIncludeTypes() []string {
 		"memory.commit",
 		"context.update",
 	}
-}
-
-type traceSinceReader interface {
-	ReadEventsSince(offset int64) ([]byte, int64, error)
-}
-
-type traceLatestReader interface {
-	ReadLastEvents(count int) ([]byte, error)
-}
-
-func (u *ContextUpdater) readTraceBatch(ctx context.Context, cursor store.TraceCursor, opts store.TraceSinceOptions) (mode, source string, batch store.TraceBatch, cursorBefore, cursorAfter store.TraceCursor, err error) {
-	if strings.TrimSpace(string(cursor)) == "" {
-		cursor = store.TraceCursorFromInt64(0)
-	}
-	cursorBefore = cursor
-	mode = "since"
-	source = "/log/events.jsonl"
-
-	if u.TraceStore != nil {
-		b, readErr := u.TraceStore.EventsSince(ctx, cursor, opts)
-		return mode, source, b, cursorBefore, b.CursorAfter, readErr
-	}
-
-	// Fallback: use the mounted trace resource's callable methods (still avoids dynamic paths).
-	_, r, _, resErr := u.FS.Resolve("/log")
-	if resErr == nil {
-		if tr, ok := r.(traceSinceReader); ok {
-			offset, err := store.TraceCursorToInt64(cursor)
-			if err != nil {
-				return mode, source, store.TraceBatch{CursorAfter: cursor}, cursorBefore, cursor, fmt.Errorf("invalid trace cursor for trace resource fallback")
-			}
-			raw, next, readErr := tr.ReadEventsSince(offset)
-			// Parse raw JSONL into a minimal event shape, then into batch.
-			linesTotal, parsed, parseErrors, events := parseTypesEventJSONL(raw)
-			batch = store.TraceBatch{
-				Events:         toTraceEvents(events),
-				CursorAfter:    store.TraceCursorFromInt64(next),
-				BytesRead:      len(raw),
-				LinesTotal:     linesTotal,
-				Parsed:         parsed,
-				ParseErrors:    parseErrors,
-				Returned:       len(events),
-				ReturnedCapped: false,
-			}
-			return mode, "/log/events.jsonl", batch, cursorBefore, batch.CursorAfter, readErr
-		}
-	}
-
-	return mode, source, store.TraceBatch{CursorAfter: cursor}, cursorBefore, cursor, fmt.Errorf("trace store not configured and trace resource does not support cursor reads")
 }
 
 func parseTypesEventJSONL(b []byte) (linesTotal, parsed, parseErrors int, events []types.Event) {

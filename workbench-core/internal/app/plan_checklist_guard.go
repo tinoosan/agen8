@@ -15,12 +15,12 @@ const (
 )
 
 type planChecklistStatus struct {
-	exists    bool
-	valid     bool
-	hasItems  bool
-	hasOpen   bool
-	text      string
-	rawLines  []string
+	exists   bool
+	valid    bool
+	hasItems bool
+	hasOpen  bool
+	text     string
+	rawLines []string
 }
 
 func planChecklistStatusFromText(text string) planChecklistStatus {
@@ -91,7 +91,7 @@ func isChecklistLine(line string) (bool, bool) {
 
 func shouldBypassPlanChecklist(req types.HostOpRequest) bool {
 	path := strings.TrimSpace(req.Path)
-            if path == planChecklistPath {
+	if path == planChecklistPath {
 		return true
 	}
 	return false
@@ -119,7 +119,6 @@ func planChecklistWarning(status planChecklistStatus) string {
 	}
 	return ""
 }
-
 
 func appendPlanChecklistWarning(fs *vfs.FS, status planChecklistStatus, warningLine string) {
 	if fs == nil || strings.TrimSpace(warningLine) == "" {

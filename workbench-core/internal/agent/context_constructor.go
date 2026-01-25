@@ -43,7 +43,7 @@ type ContextConstructor struct {
 	RunID     string
 	SessionID string
 
-	TraceStore    store.TraceStore
+	Trace          *TraceMiddleware
 	HistoryStore  store.HistoryReader
 	SkillsManager *skills.Manager
 
@@ -86,11 +86,9 @@ type ContextConstructor struct {
 	// - setting/clearing this slice per user turn
 	FileAttachments []FileAttachment
 
-	traceCursor   store.TraceCursor
 	historyCursor store.HistoryCursor
 
 	stateLoaded bool
-	traceEvents []types.Event
 
 	// cache holds per-turn cached prompt sections to avoid re-reading/re-formatting
 	// stable inputs (profile/memory/attachments) on every model step.
@@ -287,7 +285,9 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	manifest.Policy.Budgets.TraceBytes = traceBudget
 	manifest.Policy.Budgets.HistoryBytes = histBudget
 	manifest.Policy.TraceIncludeTypes = includeTypes
-	manifest.Cursors.TraceBefore = c.traceCursor
+	if c.Trace != nil {
+		manifest.Cursors.TraceBefore = c.Trace.ensureCursor()
+	}
 	manifest.Cursors.HistoryBefore = c.historyCursor
 
 	basePrompt = strings.TrimSpace(basePrompt)
@@ -486,20 +486,12 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	}
 
 	// Trace (run-scoped).
-	if c.TraceStore != nil {
-		if strings.TrimSpace(string(c.traceCursor)) == "" {
-			c.traceCursor = store.TraceCursorFromInt64(0)
-		}
-		batch, err := c.TraceStore.EventsSince(ctx, c.traceCursor, store.TraceSinceOptions{MaxBytes: traceBudget, Limit: 200})
+	if c.Trace != nil {
+		mode, _, batch, _, cursorAfter, err := c.Trace.ReadSince(ctx, store.TraceSinceOptions{MaxBytes: traceBudget, Limit: 200})
 		if err == nil {
-			c.traceCursor = batch.CursorAfter
-			manifest.Cursors.TraceAfter = batch.CursorAfter
-			evs := toTypesEvents(batch.Events)
-			c.traceEvents = append(c.traceEvents, evs...)
-			if len(c.traceEvents) > 500 {
-				c.traceEvents = c.traceEvents[len(c.traceEvents)-500:]
-			}
-			summary, _, _, _, _ := summarizeTrace(c.traceEvents, includeTypes, traceBudget)
+			manifest.Cursors.TraceAfter = cursorAfter
+			events := c.Trace.ApplyBatch(mode, batch)
+			summary, _, _, _, _ := summarizeTrace(events, includeTypes, traceBudget)
 			if strings.TrimSpace(summary) != "" {
 				systemB.WriteString("\n\n## Recent Ops (from /log)\n\n")
 				systemB.WriteString(summary)
@@ -523,11 +515,15 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	_ = c.writeManifest(ctx, manifest)
 
 	if c.Emit != nil {
+		traceCursor := ""
+		if c.Trace != nil {
+			traceCursor = string(c.Trace.Cursor)
+		}
 		c.Emit("context.constructor", "Constructed context", map[string]string{
 			"step":          strconv.Itoa(step),
 			"profileBytes":  strconv.Itoa(c.cache.profileBytesIncl),
 			"memoryBytes":   strconv.Itoa(c.cache.memoryBytesIncl),
-			"traceCursor":   string(c.traceCursor),
+			"traceCursor":   traceCursor,
 			"historyCursor": string(c.historyCursor),
 		})
 	}
@@ -838,7 +834,9 @@ func (c *ContextConstructor) loadStateIfNeeded(ctx context.Context) error {
 	if err := json.Unmarshal(b, &st); err != nil {
 		return nil
 	}
-	c.traceCursor = st.TraceCursor
+	if c.Trace != nil {
+		c.Trace.Cursor = st.TraceCursor
+	}
 	c.historyCursor = st.HistoryCursor
 	return nil
 }
@@ -851,11 +849,15 @@ func (c *ContextConstructor) saveState(ctx context.Context) error {
 		}
 		c.StatePath = filepath.Join(fsutil.GetRunDir(c.Cfg.DataDir, c.RunID), "context_constructor_state.json")
 	}
+	traceCursor := store.TraceCursor("")
+	if c.Trace != nil {
+		traceCursor = c.Trace.Cursor
+	}
 	st := constructorState{
 		UpdatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
 		RunID:         c.RunID,
 		SessionID:     c.SessionID,
-		TraceCursor:   c.traceCursor,
+		TraceCursor:   traceCursor,
 		HistoryCursor: c.historyCursor,
 	}
 	b, err := types.MarshalPretty(st)

@@ -181,6 +181,10 @@ func setupTUIChatRuntime(
 	}
 
 	traceStore := f.TraceStore
+	traceMiddleware := &agent.TraceMiddleware{
+		Store: traceStore,
+		FS:    fs,
+	}
 	builtinCfg := tools.BuiltinConfig{
 		ShellRootDir:  absWorkdirRoot,
 		ShellVFSMount: vfs.MountProject,
@@ -199,15 +203,26 @@ func setupTUIChatRuntime(
 	builtinInvokers[types.ToolID("builtin.http")] = httpInvoker
 	builtinInvokers[types.ToolID("builtin.trace")] = traceInvoker
 
-	runner := tools.Runner{
-		Results:      resultsStore,
-		ToolRegistry: builtinInvokers,
-	}
-
 	builtinManifestProvider, err := tools.NewBuiltinManifestProvider()
 	if err != nil {
 		return nil, fmt.Errorf("load builtin manifests: %w", err)
 	}
+	toolsDir := fsutil.GetToolsDir(cfg.DataDir)
+	_ = os.MkdirAll(toolsDir, 0755)
+	diskManifestProvider := tools.NewDiskManifestProvider(toolsDir)
+	toolManifestRegistry := tools.NewCompositeToolManifestRegistry(builtinManifestProvider, diskManifestProvider)
+
+	toolRuntime, err := tools.NewRuntimeWiring(toolManifestRegistry, builtinInvokers)
+	if err != nil {
+		return nil, err
+	}
+	fs.Mount(vfs.MountTools, toolRuntime.Resource)
+
+	runner := tools.Runner{
+		Results:      resultsStore,
+		ToolRegistry: toolRuntime.Registry,
+	}
+
 	toolManifests := []types.ToolManifest{}
 	if ids, err := builtinManifestProvider.ListToolIDs(context.Background()); err != nil {
 		return nil, fmt.Errorf("list builtin manifests: %w", err)
@@ -223,6 +238,24 @@ func setupTUIChatRuntime(
 			m, err := types.ParseBuiltinToolManifest(b)
 			if err != nil {
 				return nil, fmt.Errorf("parse builtin manifest %s: %w", id.String(), err)
+			}
+			toolManifests = append(toolManifests, m)
+		}
+	}
+	if ids, err := diskManifestProvider.ListToolIDs(context.Background()); err != nil {
+		return nil, fmt.Errorf("list disk manifests: %w", err)
+	} else {
+		for _, id := range ids {
+			b, ok, err := diskManifestProvider.GetManifest(context.Background(), id)
+			if err != nil {
+				return nil, fmt.Errorf("read disk manifest %s: %w", id.String(), err)
+			}
+			if !ok {
+				continue
+			}
+			m, err := types.ParseUserToolManifest(b)
+			if err != nil {
+				return nil, fmt.Errorf("parse disk manifest %s: %w", id.String(), err)
 			}
 			toolManifests = append(toolManifests, m)
 		}
@@ -311,7 +344,7 @@ func setupTUIChatRuntime(
 		Cfg:               cfg,
 		RunID:             run.RunId,
 		SessionID:         run.SessionID,
-		TraceStore:        traceStore,
+		Trace:             traceMiddleware,
 		HistoryStore:      historyRes.Store,
 		SkillsManager:     skillMgr,
 		IncludeHistoryOps: derefBool(opts.IncludeHistoryOps, true),
@@ -621,7 +654,7 @@ func setupTUIChatRuntime(
 
 	updater = &agent.ContextUpdater{
 		FS:              fs,
-		TraceStore:      traceStore,
+		Trace:           traceMiddleware,
 		MaxProfileBytes: opts.MaxProfileBytes,
 		MaxMemoryBytes:  opts.MaxMemoryBytes,
 		MaxTraceBytes:   opts.MaxTraceBytes,

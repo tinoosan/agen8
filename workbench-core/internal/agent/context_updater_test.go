@@ -57,6 +57,7 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 
 	u := &ContextUpdater{
 		FS:             fs,
+		Trace:          &TraceMiddleware{FS: fs},
 		MaxMemoryBytes: 1024,
 		MaxTraceBytes:  4096,
 		ManifestPath:   "/scratch/context_manifest.json",
@@ -66,7 +67,7 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSystemPrompt: %v", err)
 	}
-	after1, err := store.TraceCursorToInt64(u.TraceCursor)
+	after1, err := store.TraceCursorToInt64(u.Trace.Cursor)
 	if err != nil {
 		t.Fatalf("CursorToInt64: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 	}
 
 	// Add another event and confirm offset advances again.
-	before := u.TraceCursor
+	before := u.Trace.Cursor
 	if err := store.AppendEvent(cfg, run.RunId, "test.event2", "hello2", map[string]string{}); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestContextUpdater_IncludesMemoryAndAdvancesTraceCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSystemPrompt: %v", err)
 	}
-	if u.TraceCursor == before {
+	if u.Trace.Cursor == before {
 		t.Fatalf("expected trace cursor to advance again")
 	}
 	if m2.Trace.CursorBefore != before {
@@ -178,6 +179,7 @@ func TestContextUpdater_FiltersTraceEvents(t *testing.T) {
 
 	u := &ContextUpdater{
 		FS:             fs,
+		Trace:          &TraceMiddleware{FS: fs},
 		MaxMemoryBytes: 1024,
 		MaxTraceBytes:  2048,
 	}
@@ -231,6 +233,7 @@ func TestContextUpdater_AdaptiveBudgets(t *testing.T) {
 
 	u := &ContextUpdater{
 		FS:             fs,
+		Trace:          &TraceMiddleware{FS: fs},
 		MaxMemoryBytes: 100,
 		MaxTraceBytes:  200,
 	}
@@ -290,6 +293,7 @@ func TestContextUpdater_FailureBumpAfterBadOp(t *testing.T) {
 
 	u := &ContextUpdater{
 		FS:             fs,
+		Trace:          &TraceMiddleware{FS: fs},
 		MaxMemoryBytes: 100,
 		MaxTraceBytes:  200,
 	}
