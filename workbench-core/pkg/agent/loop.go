@@ -4,12 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path"
-	"strconv"
 	"strings"
 
 	"github.com/tinoosan/workbench-core/pkg/llm"
-	"github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
@@ -31,6 +28,7 @@ type Agent struct {
 	MaxTokens          int
 	ExtraTools         []llm.Tool
 	ToolFunctionRoutes map[string]ToolRoute
+	ToolRegistry       *ToolRegistry
 }
 
 // RunConversation executes the agent loop for an existing conversation.
@@ -62,7 +60,10 @@ func (a *Agent) runConversation(ctx context.Context, msgs []llm.LLMMessage, star
 		startStep = 1
 	}
 
-	hostOpTools := HostOpFunctions()
+	hostOpTools := []llm.Tool{FinalAnswerTool()}
+	if a.ToolRegistry != nil {
+		hostOpTools = append(hostOpTools, a.ToolRegistry.Definitions()...)
+	}
 	if len(a.ExtraTools) != 0 {
 		hostOpTools = append(hostOpTools, a.ExtraTools...)
 	}
@@ -153,7 +154,13 @@ func (a *Agent) runConversation(ctx context.Context, msgs []llm.LLMMessage, star
 				return finalText, msgs, step, nil
 			}
 
-			op, err := functionCallToHostOp(tc, a.ToolFunctionRoutes)
+			if a.ToolRegistry == nil {
+				hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: "tool registry is not configured"}
+				hostRespJSON, _ := types.MarshalPretty(hostResp)
+				msgs = append(msgs, llm.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+				continue
+			}
+			op, err := a.ToolRegistry.Dispatch(ctx, which, []byte(tc.Function.Arguments))
 			if err != nil {
 				hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: "invalid tool call args: " + err.Error()}
 				hostRespJSON, _ := types.MarshalPretty(hostResp)
@@ -272,278 +279,6 @@ func (a *Agent) streamToAccumulator(ctx context.Context, step int, req llm.LLMRe
 		return nil
 	})
 	return resp, err
-}
-
-func functionCallToHostOp(tc llm.ToolCall, routes map[string]ToolRoute) (types.HostOpRequest, error) {
-	name := strings.TrimSpace(tc.Function.Name)
-	argsJSON := []byte(tc.Function.Arguments)
-
-	if route, ok := routes[name]; ok {
-		if len(strings.TrimSpace(tc.Function.Arguments)) == 0 {
-			argsJSON = []byte(`{}`)
-		}
-		var input json.RawMessage
-		if err := json.Unmarshal(argsJSON, &input); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		if input == nil {
-			input = json.RawMessage(`{}`)
-		}
-		timeout := route.TimeoutMs
-		if timeout <= 0 {
-			timeout = defaultToolFunctionTimeoutMs
-		}
-		return types.HostOpRequest{
-			Op:        types.HostOpToolRun,
-			ToolID:    route.ToolID,
-			ActionID:  strings.TrimSpace(route.ActionID),
-			Input:     input,
-			TimeoutMs: timeout,
-		}, nil
-	}
-
-	switch name {
-	case "shell_exec":
-		var args struct {
-			Command string `json:"command"`
-			Cwd     string `json:"cwd"`
-			Stdin   string `json:"stdin"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		cmd := strings.TrimSpace(args.Command)
-		if cmd == "" {
-			return types.HostOpRequest{}, fmt.Errorf("command is required")
-		}
-		cwd := strings.TrimSpace(args.Cwd)
-		if cwd == "" {
-			cwd = "."
-		}
-		return types.HostOpRequest{
-			Op:    types.HostOpShellExec,
-			Argv:  []string{"bash", "-c", cmd},
-			Cwd:   cwd,
-			Stdin: args.Stdin,
-		}, nil
-
-	case "http_fetch":
-		var args struct {
-			URL             string            `json:"url"`
-			Method          string            `json:"method"`
-			Headers         map[string]string `json:"headers"`
-			Body            string            `json:"body"`
-			MaxBytes        *int              `json:"maxBytes"`
-			FollowRedirects *bool             `json:"followRedirects"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		url := strings.TrimSpace(args.URL)
-		if url == "" {
-			return types.HostOpRequest{}, fmt.Errorf("url is required")
-		}
-		req := types.HostOpRequest{
-			Op:     types.HostOpHTTPFetch,
-			URL:    url,
-			Method: strings.TrimSpace(args.Method),
-		}
-		if args.Headers != nil {
-			req.Headers = args.Headers
-		}
-		if strings.TrimSpace(args.Body) != "" {
-			req.Body = args.Body
-		}
-		if args.MaxBytes != nil {
-			req.MaxBytes = *args.MaxBytes
-		}
-		if args.FollowRedirects != nil {
-			req.FollowRedirects = args.FollowRedirects
-		}
-		return req, nil
-
-	case "trace_events_since":
-		var args struct {
-			Cursor   json.RawMessage `json:"cursor"`
-			MaxBytes *int            `json:"maxBytes"`
-			Limit    *int            `json:"limit"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		return types.HostOpRequest{
-			Op:     types.HostOpTrace,
-			Action: "events.since",
-			Input:  argsJSON,
-		}, nil
-
-	case "trace_events_latest":
-		var args struct {
-			MaxBytes *int `json:"maxBytes"`
-			Limit    *int `json:"limit"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		return types.HostOpRequest{
-			Op:     types.HostOpTrace,
-			Action: "events.latest",
-			Input:  argsJSON,
-		}, nil
-
-	case "trace_events_summary":
-		var args struct {
-			Cursor       json.RawMessage `json:"cursor"`
-			MaxBytes     *int            `json:"maxBytes"`
-			Limit        *int            `json:"limit"`
-			IncludeTypes []string        `json:"includeTypes"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		return types.HostOpRequest{
-			Op:     types.HostOpTrace,
-			Action: "events.summary",
-			Input:  argsJSON,
-		}, nil
-
-	case "fs_list":
-		var args struct {
-			Path string `json:"path"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		return types.HostOpRequest{Op: types.HostOpFSList, Path: resolveVFSPath(args.Path)}, nil
-
-	case "fs_read":
-		var args struct {
-			Path     string `json:"path"`
-			MaxBytes *int   `json:"maxBytes"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		maxBytes := 1024 * 1024
-		if args.MaxBytes != nil {
-			maxBytes = *args.MaxBytes
-		}
-		return types.HostOpRequest{Op: types.HostOpFSRead, Path: resolveVFSPath(args.Path), MaxBytes: maxBytes}, nil
-
-	case "fs_write":
-		var args struct {
-			Path string `json:"path"`
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		return types.HostOpRequest{Op: types.HostOpFSWrite, Path: resolveVFSPath(args.Path), Text: args.Text}, nil
-
-	case "update_plan":
-		var args struct {
-			Plan string `json:"plan"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		return types.HostOpRequest{
-			Op:   types.HostOpFSWrite,
-			Path: "/plan/HEAD.md",
-			Text: args.Plan,
-		}, nil
-
-	case "fs_append":
-		var args struct {
-			Path string `json:"path"`
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		return types.HostOpRequest{Op: types.HostOpFSAppend, Path: resolveVFSPath(args.Path), Text: args.Text}, nil
-
-	case "fs_edit":
-		var args struct {
-			Path  string `json:"path"`
-			Edits []struct {
-				Old        string `json:"old"`
-				New        string `json:"new"`
-				Occurrence int    `json:"occurrence"`
-			} `json:"edits"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		inp, _ := json.Marshal(map[string]any{"edits": args.Edits})
-		return types.HostOpRequest{Op: types.HostOpFSEdit, Path: resolveVFSPath(args.Path), Input: inp}, nil
-
-	case "fs_patch":
-		var args struct {
-			Path string `json:"path"`
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		return types.HostOpRequest{Op: types.HostOpFSPatch, Path: resolveVFSPath(args.Path), Text: args.Text}, nil
-
-	case "tool_run":
-		var args struct {
-			ToolID    string          `json:"toolId"`
-			ActionID  string          `json:"actionId"`
-			Input     json.RawMessage `json:"input"`
-			TimeoutMs *int            `json:"timeoutMs"`
-		}
-		if err := json.Unmarshal(argsJSON, &args); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		if args.Input == nil {
-			args.Input = json.RawMessage(`{}`)
-		}
-		var inputMap map[string]json.RawMessage
-		if err := json.Unmarshal(args.Input, &inputMap); err == nil {
-			if cwdRaw, ok := inputMap["cwd"]; ok {
-				var cwd string
-				if err := json.Unmarshal(cwdRaw, &cwd); err == nil {
-					inputMap["cwd"] = json.RawMessage(strconv.Quote(resolveVFSPath(cwd)))
-					if updated, err := json.Marshal(inputMap); err == nil {
-						args.Input = updated
-					}
-				}
-			}
-		}
-		timeout := 0
-		if args.TimeoutMs != nil {
-			timeout = *args.TimeoutMs
-		}
-		return types.HostOpRequest{
-			Op:        types.HostOpToolRun,
-			ToolID:    tools.ToolID(strings.TrimSpace(args.ToolID)),
-			ActionID:  strings.TrimSpace(args.ActionID),
-			Input:     args.Input,
-			TimeoutMs: timeout,
-		}, nil
-
-	default:
-		return types.HostOpRequest{}, fmt.Errorf("unknown tool function %q", name)
-	}
-}
-
-func resolveVFSPath(p string) string {
-	pathStr := strings.TrimSpace(p)
-	if pathStr == "" {
-		return "/project"
-	}
-	if strings.HasPrefix(pathStr, "/") {
-		return pathStr
-	}
-	cleaned := path.Clean(pathStr)
-	joined := path.Join("/project", cleaned)
-	if !strings.HasPrefix(joined, "/project") {
-		return "/project"
-	}
-	return joined
 }
 
 func isDangerousHostOp(req types.HostOpRequest) bool {

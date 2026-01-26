@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	agenttools "github.com/tinoosan/workbench-core/pkg/agent/tools"
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -105,6 +106,54 @@ func New(cfg Config) (*Agent, error) {
 	}
 
 	extraTools, routes := ManifestToFunctionTools(cfg.ToolManifests)
+	registry := NewToolRegistry()
+	registry.RegisterRoutes(routes)
+
+	registerTool := func(tool HostTool) error {
+		if err := registry.Register(tool); err != nil {
+			return err
+		}
+		return nil
+	}
+	if err := registerTool(&agenttools.FSListTool{}); err != nil {
+		return nil, err
+	}
+	if err := registerTool(&agenttools.FSReadTool{}); err != nil {
+		return nil, err
+	}
+	if err := registerTool(&agenttools.FSWriteTool{}); err != nil {
+		return nil, err
+	}
+	if err := registerTool(&agenttools.FSAppendTool{}); err != nil {
+		return nil, err
+	}
+	if err := registerTool(&agenttools.FSEditTool{}); err != nil {
+		return nil, err
+	}
+	if err := registerTool(&agenttools.FSPatchTool{}); err != nil {
+		return nil, err
+	}
+	if err := registerTool(&agenttools.UpdatePlanTool{}); err != nil {
+		return nil, err
+	}
+	if err := registerTool(&agenttools.ShellExecTool{}); err != nil {
+		return nil, err
+	}
+	if err := registerTool(&agenttools.HTTPFetchTool{}); err != nil {
+		return nil, err
+	}
+	if err := registerTool(&agenttools.ToolRunTool{}); err != nil {
+		return nil, err
+	}
+	if err := registerTool(&agenttools.TraceEventsLatestTool{}); err != nil {
+		return nil, err
+	}
+	if err := registerTool(&agenttools.TraceEventsSinceTool{}); err != nil {
+		return nil, err
+	}
+	if err := registerTool(&agenttools.TraceEventsSummaryTool{}); err != nil {
+		return nil, err
+	}
 
 	return &Agent{
 		LLM:              cfg.LLM,
@@ -122,5 +171,6 @@ func New(cfg Config) (*Agent, error) {
 		Hooks:              cfg.Hooks,
 		ExtraTools:         extraTools,
 		ToolFunctionRoutes: routes,
+		ToolRegistry:       registry,
 	}, nil
 }

@@ -1,0 +1,47 @@
+package agenttools
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/types"
+)
+
+// FSAppendTool appends text to a file in the VFS.
+type FSAppendTool struct{}
+
+func (t *FSAppendTool) Definition() llm.Tool {
+	return llm.Tool{
+		Type: "function",
+		Function: llm.ToolFunction{
+			Name:        "fs_append",
+			Description: "[DIRECT - no discovery needed] Append text to a file at a VFS path.",
+			Strict:      true,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]any{"type": "string", "description": "VFS path to append to"},
+					"text": map[string]any{"type": "string", "description": "Text to append"},
+				},
+				"required":             []any{"path", "text"},
+				"additionalProperties": false,
+			},
+		},
+	}
+}
+
+func (t *FSAppendTool) Execute(_ context.Context, args json.RawMessage) (types.HostOpRequest, error) {
+	var payload struct {
+		Path string `json:"path"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(args, &payload); err != nil {
+		return types.HostOpRequest{}, err
+	}
+	return types.HostOpRequest{
+		Op:   types.HostOpFSAppend,
+		Path: resolveVFSPath(payload.Path),
+		Text: payload.Text,
+	}, nil
+}
