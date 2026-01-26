@@ -6,18 +6,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent"
+	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/pkg/resources"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
-	"github.com/tinoosan/workbench-core/pkg/config"
-	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
-	"github.com/tinoosan/workbench-core/internal/store"
 )
 
 type tuiChatSetup struct {
@@ -85,27 +85,32 @@ func setupTUIChatRuntime(
 	if !ok {
 		return nil, fmt.Errorf("history store must implement HistoryStore")
 	}
+	constructorStore, err := store.NewSQLiteConstructorStore(cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	rt, err := runtime.Build(runtime.BuildConfig{
-		Cfg:               cfg,
-		Run:               run,
-		WorkdirAbs:        workdirAbs,
-		Model:             model,
-		ReasoningEffort:   strings.TrimSpace(opts.ReasoningEffort),
-		ReasoningSummary:  strings.TrimSpace(opts.ReasoningSummary),
-		ApprovalsMode:     strings.TrimSpace(opts.ApprovalsMode),
-		PlanMode:          opts.PlanMode,
-		HistoryStore:      historyStore,
-		ResultsStore:      resultsStoreAdapter{InMemoryResultsStore: resultsStore},
-		MemoryStore:       memStore,
-		ProfileStore:      profileStore,
-		TraceStore:        traceStoreAdapter{TraceStore: traceStore},
-		Emit:              mustEmit,
-		IncludeHistoryOps: derefBool(opts.IncludeHistoryOps, true),
-		RecentHistoryPairs: opts.RecentHistoryPairs,
-		MaxProfileBytes:   opts.MaxProfileBytes,
-		MaxMemoryBytes:    opts.MaxMemoryBytes,
-		MaxTraceBytes:     opts.MaxTraceBytes,
+		Cfg:                   cfg,
+		Run:                   run,
+		WorkdirAbs:            workdirAbs,
+		Model:                 model,
+		ReasoningEffort:       strings.TrimSpace(opts.ReasoningEffort),
+		ReasoningSummary:      strings.TrimSpace(opts.ReasoningSummary),
+		ApprovalsMode:         strings.TrimSpace(opts.ApprovalsMode),
+		PlanMode:              opts.PlanMode,
+		HistoryStore:          historyStore,
+		ResultsStore:          resultsStoreAdapter{InMemoryResultsStore: resultsStore},
+		MemoryStore:           memStore,
+		ProfileStore:          profileStore,
+		TraceStore:            traceStoreAdapter{TraceStore: traceStore},
+		ConstructorStore:      constructorStore,
+		Emit:                  mustEmit,
+		IncludeHistoryOps:     derefBool(opts.IncludeHistoryOps, true),
+		RecentHistoryPairs:    opts.RecentHistoryPairs,
+		MaxProfileBytes:       opts.MaxProfileBytes,
+		MaxMemoryBytes:        opts.MaxMemoryBytes,
+		MaxTraceBytes:         opts.MaxTraceBytes,
 		PriceInPerMTokensUSD:  opts.PriceInPerMTokensUSD,
 		PriceOutPerMTokensUSD: opts.PriceOutPerMTokensUSD,
 		Guard: func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse {
@@ -180,4 +185,3 @@ func setupTUIChatRuntime(
 		BuiltinInvokers:  rt.BuiltinInvokers,
 	}, nil
 }
-

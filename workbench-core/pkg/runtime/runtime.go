@@ -7,18 +7,18 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tinoosan/workbench-core/pkg/agent"
+	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/debuglog"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
-	"github.com/tinoosan/workbench-core/pkg/skills"
-	"github.com/tinoosan/workbench-core/pkg/vfs"
-	"github.com/tinoosan/workbench-core/pkg/agent"
-	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/resources"
+	"github.com/tinoosan/workbench-core/pkg/skills"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
 	"github.com/tinoosan/workbench-core/pkg/types"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 type Runtime struct {
@@ -36,32 +36,33 @@ type Runtime struct {
 }
 
 type BuildConfig struct {
-	Cfg             config.Config
-	Run             types.Run
-	WorkdirAbs      string
-	Model           string
-	ReasoningEffort  string
-	ReasoningSummary string
-	ApprovalsMode    string
-	PlanMode         bool
-	HistoryStore     store.HistoryStore
-	ResultsStore     store.ResultsStore
-	MemoryStore      store.MemoryStore
-	ProfileStore     store.ProfileStore
-	TraceStore       store.TraceStore
-	Emit            func(ctx context.Context, ev events.Event)
-	IncludeHistoryOps bool
-	RecentHistoryPairs int
-	MaxProfileBytes int
-	MaxMemoryBytes  int
-	MaxTraceBytes   int
+	Cfg                   config.Config
+	Run                   types.Run
+	WorkdirAbs            string
+	Model                 string
+	ReasoningEffort       string
+	ReasoningSummary      string
+	ApprovalsMode         string
+	PlanMode              bool
+	HistoryStore          store.HistoryStore
+	ResultsStore          store.ResultsStore
+	MemoryStore           store.MemoryStore
+	ProfileStore          store.ProfileStore
+	TraceStore            store.TraceStore
+	ConstructorStore      store.ConstructorStateStore
+	Emit                  func(ctx context.Context, ev events.Event)
+	IncludeHistoryOps     bool
+	RecentHistoryPairs    int
+	MaxProfileBytes       int
+	MaxMemoryBytes        int
+	MaxTraceBytes         int
 	PriceInPerMTokensUSD  float64
 	PriceOutPerMTokensUSD float64
-	Guard           func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse
-	ArtifactObserve func(path string)
-	PersistRun      func(run types.Run) error
-	LoadSession     func(sessionID string) (types.Session, error)
-	SaveSession     func(session types.Session) error
+	Guard                 func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse
+	ArtifactObserve       func(path string)
+	PersistRun            func(run types.Run) error
+	LoadSession           func(sessionID string) (types.Session, error)
+	SaveSession           func(session types.Session) error
 }
 
 func Build(cfg BuildConfig) (*Runtime, error) {
@@ -135,9 +136,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 
 	f := &resources.Factory{
-		DataDir:   cfg.Cfg.DataDir,
-		SessionID: cfg.Run.SessionID,
-		RunID:     cfg.Run.RunId,
+		DataDir:      cfg.Cfg.DataDir,
+		SessionID:    cfg.Run.SessionID,
+		RunID:        cfg.Run.RunId,
 		ResultsStore: cfg.ResultsStore,
 		MemoryStore:  cfg.MemoryStore,
 		ProfileStore: cfg.ProfileStore,
@@ -323,6 +324,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		Cfg:               cfg.Cfg,
 		RunID:             cfg.Run.RunId,
 		SessionID:         cfg.Run.SessionID,
+		LoadSession:       cfg.LoadSession,
+		SaveSession:       cfg.SaveSession,
+		StateStore:        cfg.ConstructorStore,
 		Trace:             traceMiddleware,
 		HistoryStore:      historyRes.Store,
 		SkillsManager:     skillMgr,
@@ -331,8 +335,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		MaxMemoryBytes:    cfg.MaxMemoryBytes,
 		MaxTraceBytes:     cfg.MaxTraceBytes,
 		MaxHistoryBytes:   8 * 1024,
-		StatePath:         filepath.Join(fsutil.GetRunDir(cfg.Cfg.DataDir, cfg.Run.RunId), "context_constructor_state.json"),
-		ManifestPath:      filepath.Join(fsutil.GetRunDir(cfg.Cfg.DataDir, cfg.Run.RunId), "context_constructor_manifest.json"),
 		Emit: func(eventType, message string, data map[string]string) {
 			if cfg.Emit != nil {
 				cfg.Emit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
@@ -355,11 +357,11 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 
 	exec := NewExecutor(executor, ExecutorOptions{
-		Emit:            cfg.Emit,
-		Model:           cfg.Model,
-		RunID:           cfg.Run.RunId,
-		SessionID:       cfg.Run.SessionID,
-		FS:              fs,
+		Emit:      cfg.Emit,
+		Model:     cfg.Model,
+		RunID:     cfg.Run.RunId,
+		SessionID: cfg.Run.SessionID,
+		FS:        fs,
 		Guard: func(req types.HostOpRequest) *types.HostOpResponse {
 			if cfg.Guard == nil {
 				return nil

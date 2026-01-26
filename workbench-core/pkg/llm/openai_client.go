@@ -98,8 +98,7 @@ func maybeEnableWebSearchModel(baseURL string, model string, enable bool) string
 
 func cursorDebugLog(hypothesisId, location, message string, data map[string]any) {
 	// #region agent log
-	const logPath = "/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log"
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := debuglog.OpenLogFile()
 	if err != nil {
 		return
 	}

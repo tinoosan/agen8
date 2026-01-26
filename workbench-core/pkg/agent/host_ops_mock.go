@@ -7,14 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/tinoosan/workbench-core/pkg/debuglog"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
-	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // HostOpExecutor is a tiny "host primitive" dispatcher for demos/tests.
@@ -56,8 +56,7 @@ func debugAppendNDJSON(payload map[string]any) {
 	// Debug-mode log sink (NDJSON).
 	//
 	// IMPORTANT: Do not log secrets; keep payloads small.
-	const logPath = "/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log"
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := debuglog.OpenLogFile()
 	if err == nil {
 		if b, jerr := json.Marshal(payload); jerr == nil {
 			_, _ = f.Write(append(b, '\n'))

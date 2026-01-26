@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/debuglog"
-	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/skills"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -28,6 +28,10 @@ type ContextConstructor struct {
 	RunID     string
 	SessionID string
 
+	LoadSession func(sessionID string) (types.Session, error)
+	SaveSession func(session types.Session) error
+	StateStore  store.ConstructorStateStore
+
 	Trace         *TraceMiddleware
 	HistoryStore  store.HistoryReader
 	SkillsManager *skills.Manager
@@ -40,9 +44,6 @@ type ContextConstructor struct {
 	MaxHistoryBytes int
 
 	TraceIncludeTypes []string
-
-	StatePath    string
-	ManifestPath string
 
 	Emit func(eventType, message string, data map[string]string)
 
@@ -202,23 +203,23 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	out := strings.TrimSpace(strings.Join(nonEmpty(sections), "\n\n")) + "\n"
 	if c.Emit != nil {
 		c.Emit("context.constructor", "Context constructor updated", map[string]string{
-			"step":             strconv.Itoa(step),
-			"profile.bytes":    profileTotals,
-			"memory.bytes":     memoryTotals,
+			"step":              strconv.Itoa(step),
+			"profile.bytes":     profileTotals,
+			"memory.bytes":      memoryTotals,
 			"attachments.bytes": attachTotals,
-			"skills.bytes":     skillsTotals,
-			"trace.selected":   strconv.Itoa(traceSelected),
-			"trace.capped":     strconv.Itoa(traceCapped),
-			"trace.excluded":   strconv.Itoa(traceExcluded),
-			"trace.truncated":  strconv.FormatBool(traceTrunc),
-			"history.selected": strconv.Itoa(historySelected),
-			"history.capped":   strconv.Itoa(historyCapped),
-			"history.excluded": strconv.Itoa(historyExcluded),
+			"skills.bytes":      skillsTotals,
+			"trace.selected":    strconv.Itoa(traceSelected),
+			"trace.capped":      strconv.Itoa(traceCapped),
+			"trace.excluded":    strconv.Itoa(traceExcluded),
+			"trace.truncated":   strconv.FormatBool(traceTrunc),
+			"history.selected":  strconv.Itoa(historySelected),
+			"history.capped":    strconv.Itoa(historyCapped),
+			"history.excluded":  strconv.Itoa(historyExcluded),
 			"history.truncated": strconv.FormatBool(historyTrunc),
 		})
 	}
 
-	if c.ManifestPath != "" {
+	if c.StateStore != nil {
 		if err := c.writeManifest(step, traceSelected, traceCapped, traceExcluded, traceTrunc, historySelected, historyCapped, historyExcluded, historyTrunc); err != nil {
 			return out, err
 		}
@@ -401,15 +402,12 @@ func (c *ContextConstructor) ensureStateLoaded(ctx context.Context) error {
 		return nil
 	}
 	c.stateLoaded = true
-	if c.StatePath == "" {
-		c.StatePath = "/results/context_constructor_state.json"
+	if c.StateStore == nil {
+		return nil
 	}
-	if c.ManifestPath == "" {
-		c.ManifestPath = "/results/context_constructor_manifest.json"
-	}
-	raw, err := c.FS.Read(c.StatePath)
+	raw, err := c.StateStore.GetState(ctx, c.RunID)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil
 		}
 		return err
@@ -427,6 +425,9 @@ func (c *ContextConstructor) ensureStateLoaded(ctx context.Context) error {
 }
 
 func (c *ContextConstructor) saveState() error {
+	if c.StateStore == nil {
+		return nil
+	}
 	st := constructorState{
 		UpdatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
 		RunID:         c.RunID,
@@ -438,10 +439,13 @@ func (c *ContextConstructor) saveState() error {
 	if err != nil {
 		return err
 	}
-	return c.FS.Write(c.StatePath, b)
+	return c.StateStore.SetState(context.Background(), c.RunID, b)
 }
 
 func (c *ContextConstructor) writeManifest(step int, traceSelected, traceCapped, traceExcluded int, traceTrunc bool, historySelected, historyCapped, historyExcluded int, historyTrunc bool) error {
+	if c.StateStore == nil {
+		return nil
+	}
 	manifest := ConstructorManifest{
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Step:      step,
@@ -470,7 +474,7 @@ func (c *ContextConstructor) writeManifest(step int, traceSelected, traceCapped,
 	if err != nil {
 		return err
 	}
-	return c.FS.Write(c.ManifestPath, b)
+	return c.StateStore.SetManifest(context.Background(), c.RunID, b)
 }
 
 func buildSource(source, path string, total, incl int, trunc bool, reason string) struct {
@@ -570,15 +574,12 @@ func summarizeHistory(batch store.HistoryBatch, includeOps bool) (summary string
 	return "## Recent History\n\n" + strings.Join(lines, "\n"), selected, capped, excluded, truncated
 }
 
-
 func (c *ContextConstructor) loadSessionState(ctx context.Context) error {
-	sessPath := fsutil.GetSessionFilePath(c.Cfg.DataDir, c.SessionID)
-	raw, err := os.ReadFile(sessPath)
-	if err != nil {
-		return err
+	if c.LoadSession == nil {
+		return fmt.Errorf("context constructor: LoadSession is required")
 	}
-	var sess types.Session
-	if err := json.Unmarshal(raw, &sess); err != nil {
+	sess, err := c.LoadSession(c.SessionID)
+	if err != nil {
 		return err
 	}
 	c.sessionCached = sess
@@ -600,11 +601,10 @@ func (c *ContextConstructor) persistHistoryCursor(ctx context.Context) error {
 	}
 	c.sessionCached.HistoryCursor = string(c.historyCursor)
 	c.sessionCached.UpdatedAt = ptr(time.Now().UTC())
-	b, err := json.Marshal(c.sessionCached)
-	if err != nil {
-		return err
+	if c.SaveSession == nil {
+		return fmt.Errorf("context constructor: SaveSession is required")
 	}
-	if err := os.WriteFile(fsutil.GetSessionFilePath(c.Cfg.DataDir, c.SessionID), b, 0644); err != nil {
+	if err := c.SaveSession(c.sessionCached); err != nil {
 		return err
 	}
 	c.lastPersistedHistoryCursor = c.historyCursor
@@ -647,8 +647,8 @@ func ptr[T any](v T) *T { return &v }
 func init() {
 	if os.Getenv("WORKBENCH_CTX_DEBUG") != "" {
 		debuglog.Log("context", "H12", "constructor", "debug_enabled", map[string]any{
-			"statePath":    "/results/context_constructor_state.json",
-			"manifestPath": "/results/context_constructor_manifest.json",
+			"stateStore":    "configured",
+			"manifestStore": "configured",
 		})
 	}
 }

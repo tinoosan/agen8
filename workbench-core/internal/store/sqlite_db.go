@@ -68,6 +68,16 @@ var sqliteMigrations = []string{
 		line_json TEXT NOT NULL
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_history_session_seq ON history(session_id, seq);`,
+	`CREATE TABLE IF NOT EXISTS constructor_state (
+		run_id TEXT PRIMARY KEY,
+		updated_at TEXT,
+		state_json TEXT NOT NULL
+	);`,
+	`CREATE TABLE IF NOT EXISTS constructor_manifest (
+		run_id TEXT PRIMARY KEY,
+		updated_at TEXT,
+		manifest_json TEXT NOT NULL
+	);`,
 }
 
 func sqlitePath(cfg config.Config) string {

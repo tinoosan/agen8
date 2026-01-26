@@ -203,12 +203,17 @@ func HostOpFunctions() []llm.Tool {
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"toolId":    map[string]any{"type": "string", "description": "Tool id to run (e.g. \"builtin.shell\" or custom)."},
-						"actionId":  map[string]any{"type": "string", "description": "Action id to run (from manifest)."},
-						"input":     map[string]any{"type": "object", "description": "Action input as JSON object."},
+						"toolId":   map[string]any{"type": "string", "description": "Tool id to run (e.g. \"builtin.shell\" or custom)."},
+						"actionId": map[string]any{"type": "string", "description": "Action id to run (from manifest)."},
+						"input": map[string]any{
+							"type":                 "object",
+							"description":          "Action input as JSON object.",
+							"properties":           map[string]any{},
+							"additionalProperties": true,
+						},
 						"timeoutMs": map[string]any{"type": intOrNull, "description": "Timeout override in ms (or null to use default)."},
 					},
-					"required":             []any{"toolId", "actionId", "input", "timeoutMs"},
+					"required":             []string{"toolId", "actionId", "input", "timeoutMs"},
 					"additionalProperties": false,
 				},
 			},

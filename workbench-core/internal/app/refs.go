@@ -8,11 +8,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/pkg/atref"
+	"github.com/tinoosan/workbench-core/internal/atref"
+	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/resources"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/vfsutil"
-	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 
 type RefResolution struct {

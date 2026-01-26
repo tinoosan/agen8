@@ -34,15 +34,7 @@ func ManifestToFunctionTools(manifests []pkgtools.ToolManifest) (tools []llm.Too
 				desc = strings.TrimSpace(action.DisplayName)
 			}
 
-			var params any = map[string]any{"type": "object"}
-			if len(action.InputSchema) != 0 {
-				var parsed any
-				if err := json.Unmarshal(action.InputSchema, &parsed); err == nil {
-					params = parsed
-				} else {
-					params = json.RawMessage(action.InputSchema)
-				}
-			}
+			params := normalizeToolSchema(action.InputSchema)
 
 			tools = append(tools, llm.Tool{
 				Type: "function",
@@ -64,4 +56,72 @@ func ManifestToFunctionTools(manifests []pkgtools.ToolManifest) (tools []llm.Too
 		}
 	}
 	return tools, routes
+}
+
+func normalizeToolSchema(raw json.RawMessage) map[string]any {
+	out := map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{},
+		"additionalProperties": false,
+	}
+	if len(raw) == 0 {
+		return out
+	}
+	var parsed any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return out
+	}
+	m, ok := parsed.(map[string]any)
+	if !ok {
+		return out
+	}
+	return normalizeObjectSchema(m)
+}
+
+func normalizeObjectSchema(schema map[string]any) map[string]any {
+	if schema == nil {
+		return map[string]any{
+			"type":                 "object",
+			"properties":           map[string]any{},
+			"additionalProperties": false,
+		}
+	}
+	if strings.TrimSpace(asString(schema["type"])) == "" {
+		schema["type"] = "object"
+	}
+	props, ok := schema["properties"].(map[string]any)
+	if !ok || props == nil {
+		props = map[string]any{}
+		schema["properties"] = props
+	}
+	if req, ok := schema["required"].([]any); ok {
+		req = filterRequired(req, props)
+		if len(req) > 0 {
+			schema["required"] = req
+		} else {
+			delete(schema, "required")
+		}
+	}
+	schema["additionalProperties"] = false
+	return schema
+}
+
+func filterRequired(req []any, props map[string]any) []any {
+	out := make([]any, 0, len(req))
+	for _, v := range req {
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		if _, exists := props[s]; !exists {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func asString(v any) string {
+	s, _ := v.(string)
+	return s
 }

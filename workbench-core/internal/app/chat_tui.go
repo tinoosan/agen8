@@ -17,20 +17,20 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tinoosan/workbench-core/pkg/atref"
+	"github.com/tinoosan/workbench-core/internal/atref"
+	"github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/internal/tui"
+	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/internal/tui"
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/pkg/resources"
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
+	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/vfsutil"
-	"github.com/tinoosan/workbench-core/pkg/agent"
-	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
-	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 func cursorDebugLog(hypothesisId, location, message string, data map[string]any) {
@@ -1457,7 +1457,6 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 		})
 		return "", err
 	}
-
 
 	final = out
 
