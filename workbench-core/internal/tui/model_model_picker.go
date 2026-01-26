@@ -117,13 +117,6 @@ func (m *Model) selectModelFromPicker() tea.Cmd {
 
 	selectedID := item.id
 
-	// #region agent log
-	cursorDebugLog("H1", "model_model_picker.go:selectModelFromPicker", "picker_selection", map[string]any{
-		"selectedID": selectedID,
-		"currentModelID": m.modelID,
-	})
-	// #endregion
-
 	// Optimistically update the model ID so the label updates instantly
 	m.modelID = selectedID
 
@@ -131,25 +124,8 @@ func (m *Model) selectModelFromPicker() tea.Cmd {
 	m.closeModelPicker()
 
 	// Trigger the host command to persist the change and show transcript message
-	cmdStr := "/model " + selectedID
-	// #region agent log
-	cursorDebugLog("H1", "model_model_picker.go:selectModelFromPicker", "calling_runTurn", map[string]any{
-		"command": cmdStr,
-	})
-	// #endregion
 	return func() tea.Msg {
-		final, err := m.runner.RunTurn(m.ctx, cmdStr)
-		// #region agent log
-		cursorDebugLog("H1", "model_model_picker.go:selectModelFromPicker", "runTurn_complete", map[string]any{
-			"final": final,
-			"err": func() string {
-				if err != nil {
-					return err.Error()
-				}
-				return ""
-			}(),
-		})
-		// #endregion
+		final, err := m.runner.RunTurn(m.ctx, "/model "+selectedID)
 		return turnDoneMsg{final: final, err: err, preserveScroll: true}
 	}
 }

@@ -1201,21 +1201,9 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	}
 	// Model identifier can change at runtime via the host /model command.
 	if ev.Type == "model.changed" {
-		// #region agent log
-		cursorDebugLog("H1", "model.go:onEvent", "model_changed_event", map[string]any{
-			"from":        strings.TrimSpace(ev.Data["from"]),
-			"to":          strings.TrimSpace(ev.Data["to"]),
-			"modelBefore": strings.TrimSpace(m.modelID),
-		})
-		// #endregion
 		if v := strings.TrimSpace(ev.Data["to"]); v != "" {
 			m.modelID = v
 		}
-		// #region agent log
-		cursorDebugLog("H1", "model.go:onEvent", "model_changed_applied", map[string]any{
-			"modelAfter": strings.TrimSpace(m.modelID),
-		})
-		// #endregion
 	}
 	// Reasoning effort can change at runtime via the host /reasoning command.
 	if ev.Type == "reasoning.changed" {
