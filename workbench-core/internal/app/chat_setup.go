@@ -114,6 +114,9 @@ func setupTUIChatRuntime(
 		PriceInPerMTokensUSD:  opts.PriceInPerMTokensUSD,
 		PriceOutPerMTokensUSD: opts.PriceOutPerMTokensUSD,
 		Guard: func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse {
+			if !opts.PlanMode {
+				return nil
+			}
 			return enforcePlanChecklist(fs, req)
 		},
 		ArtifactObserve: artifactIndex.ObserveWrite,

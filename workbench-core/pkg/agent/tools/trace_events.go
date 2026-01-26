@@ -21,11 +21,11 @@ func (t *TraceEventsSinceTool) Definition() llm.Tool {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"cursor":   map[string]any{"type": []any{"object", "string", "null"}, "description": "Trace cursor (from previous trace call)."},
+					"cursor":   map[string]any{"type": []any{"string", "null"}, "description": "Trace cursor (from previous trace call)."},
 					"maxBytes": map[string]any{"type": intOrNull, "description": "Max bytes to read (or null for default)."},
 					"limit":    map[string]any{"type": intOrNull, "description": "Max number of events to return."},
 				},
-				"required":             []any{"cursor"},
+				"required":             []any{"cursor", "maxBytes", "limit"},
 				"additionalProperties": false,
 			},
 		},
@@ -64,7 +64,7 @@ func (t *TraceEventsLatestTool) Definition() llm.Tool {
 					"maxBytes": map[string]any{"type": intOrNull, "description": "Max bytes to read (or null for default)."},
 					"limit":    map[string]any{"type": intOrNull, "description": "Max number of events to return."},
 				},
-				"required":             []any{},
+				"required":             []any{"maxBytes", "limit"},
 				"additionalProperties": false,
 			},
 		},
@@ -99,12 +99,12 @@ func (t *TraceEventsSummaryTool) Definition() llm.Tool {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"cursor":       map[string]any{"type": []any{"object", "string", "null"}, "description": "Trace cursor (from previous trace call)."},
+					"cursor":       map[string]any{"type": []any{"string", "null"}, "description": "Trace cursor (from previous trace call)."},
 					"maxBytes":     map[string]any{"type": intOrNull, "description": "Max bytes to read (or null for default)."},
 					"limit":        map[string]any{"type": intOrNull, "description": "Max number of events to return."},
 					"includeTypes": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Event types to include in summary."},
 				},
-				"required":             []any{"cursor"},
+				"required":             []any{"cursor", "maxBytes", "limit", "includeTypes"},
 				"additionalProperties": false,
 			},
 		},

@@ -51,7 +51,7 @@ func (t *ToolRunTool) Execute(_ context.Context, args json.RawMessage) (types.Ho
 	if err := json.Unmarshal(args, &payload); err != nil {
 		return types.HostOpRequest{}, err
 	}
-	if payload.Input == nil || len(payload.Input) == 0 {
+	if len(payload.Input) == 0 {
 		payload.Input = json.RawMessage(`{}`)
 	}
 	var inputMap map[string]json.RawMessage
