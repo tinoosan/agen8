@@ -16,19 +16,18 @@ type Agent struct {
 	LLM  llm.LLMClient
 	Exec HostExecutor
 
-	Model              string
-	EnableWebSearch    bool
-	PlanMode           bool
-	ApprovalsMode      string
-	ReasoningEffort    string
-	ReasoningSummary   string
-	SystemPrompt       string
-	Context            ContextSource
-	Hooks              Hooks
-	MaxTokens          int
-	ExtraTools         []llm.Tool
-	ToolFunctionRoutes map[string]ToolRoute
-	ToolRegistry       *ToolRegistry
+	Model            string
+	EnableWebSearch  bool
+	PlanMode         bool
+	ApprovalsMode    string
+	ReasoningEffort  string
+	ReasoningSummary string
+	SystemPrompt     string
+	Context          ContextSource
+	Hooks            Hooks
+	MaxTokens        int
+	ExtraTools       []llm.Tool
+	ToolRegistry     *ToolRegistry
 }
 
 // RunConversation executes the agent loop for an existing conversation.

@@ -168,9 +168,9 @@ func New(cfg Config) (*Agent, error) {
 		Context:          cfg.Context,
 		MaxTokens:        cfg.MaxTokens,
 
-		Hooks:              cfg.Hooks,
-		ExtraTools:         extraTools,
-		ToolFunctionRoutes: routes,
-		ToolRegistry:       registry,
+		Hooks:      cfg.Hooks,
+		ExtraTools: extraTools,
+
+		ToolRegistry: registry,
 	}, nil
 }
