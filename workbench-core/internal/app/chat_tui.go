@@ -1107,7 +1107,20 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	//
 	// These commands operate on the host's /project mount and are safe to run
 	// during an interactive session (no restart required).
+	// #region agent log
+	cursorDebugLog("H2", "chat_tui.go:RunTurn", "checking_slash_command", map[string]any{
+		"userMsg": userMsg,
+		"currentModel": r.model,
+	})
+	// #endregion
 	if resp, handled := r.handleSlashCommand(userMsg); handled {
+		// #region agent log
+		cursorDebugLog("H2", "chat_tui.go:RunTurn", "slash_command_handled", map[string]any{
+			"userMsg": userMsg,
+			"response": resp,
+			"modelAfter": r.model,
+		})
+		// #endregion
 		return resp, nil
 	}
 
@@ -1696,8 +1709,25 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		if cur == "" {
 			cur = strings.TrimSpace(r.opts.Model)
 		}
+		// #region agent log
+		cursorDebugLog("H3", "chat_tui.go:handleSlashCommand", "model_command_start", map[string]any{
+			"currentModel": cur,
+			"arg": arg,
+			"agentModel": func() string {
+				if r.agent != nil {
+					return strings.TrimSpace(r.agent.Model)
+				}
+				return ""
+			}(),
+		})
+		// #endregion
 		next, out, ok := handleModelCommandPreInit(cur, r.opts.PricingFile, arg)
 		if !ok {
+			// #region agent log
+			cursorDebugLog("H3", "chat_tui.go:handleSlashCommand", "model_command_not_handled", map[string]any{
+				"arg": arg,
+			})
+			// #endregion
 			return "", false
 		}
 		if strings.TrimSpace(out) != "" {
@@ -1725,12 +1755,40 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		}
 
 		// Update the active model for subsequent LLM calls.
+		// #region agent log
+		cursorDebugLog("H3", "chat_tui.go:handleSlashCommand", "updating_model_before", map[string]any{
+			"from": cur,
+			"to": next,
+			"runnerModelBefore": r.model,
+			"optsModelBefore": r.opts.Model,
+			"agentModelBefore": func() string {
+				if r.agent != nil {
+					return strings.TrimSpace(r.agent.Model)
+				}
+				return ""
+			}(),
+		})
+		// #endregion
 		r.model = next
 		r.opts.Model = next
-		r.agent.Model = next
+		if r.agent != nil {
+			r.agent.Model = next
+		}
 		if r.setHistoryModel != nil {
 			r.setHistoryModel(next)
 		}
+		// #region agent log
+		cursorDebugLog("H3", "chat_tui.go:handleSlashCommand", "updating_model_after", map[string]any{
+			"runnerModelAfter": r.model,
+			"optsModelAfter": r.opts.Model,
+			"agentModelAfter": func() string {
+				if r.agent != nil {
+					return strings.TrimSpace(r.agent.Model)
+				}
+				return ""
+			}(),
+		})
+		// #endregion
 
 		if r.run.Runtime == nil {
 			r.run.Runtime = &types.RunRuntimeConfig{}
