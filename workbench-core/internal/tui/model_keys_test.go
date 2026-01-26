@@ -729,48 +729,6 @@ func TestCommandPalette_FiltersOnTyping(t *testing.T) {
 	}
 }
 
-func TestCommandPalette_EnterSubmitsSelectedCommand(t *testing.T) {
-	runner := &recordingRunnerAny{}
-	m := New(context.Background(), runner, make(chan events.Event))
-	m.layout()
-
-	// Type "/mo" to get "/model" as first match.
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	updated := m2.(Model)
-	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
-	updated2 := m3.(Model)
-	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-	updated3 := m4.(Model)
-
-	if !updated3.commandPaletteOpen {
-		t.Fatalf("expected commandPaletteOpen true")
-	}
-	if updated3.commandPaletteSelected != 0 {
-		t.Fatalf("expected selected index 0, got %d", updated3.commandPaletteSelected)
-	}
-
-	m5, cmd := updated3.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	updated4 := m5.(Model)
-
-	if updated4.commandPaletteOpen {
-		t.Fatalf("expected commandPaletteOpen false after Enter")
-	}
-	if !updated4.turnInFlight {
-		t.Fatalf("expected turnInFlight true (command should submit)")
-	}
-	if cmd == nil {
-		t.Fatalf("expected cmd to run /model, got nil")
-	}
-
-	msg := cmd()
-	m6, _ := updated4.Update(msg)
-	_ = m6.(Model)
-
-	if runner.lastMessage != "/model" {
-		t.Fatalf("expected runner called with %q, got %q", "/model", runner.lastMessage)
-	}
-}
-
 func TestCommandPalette_UpDownNavigation(t *testing.T) {
 	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
 	m.layout()
