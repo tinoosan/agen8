@@ -178,7 +178,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("#303030")),
 		styleAgent: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#eaeaea")),
+			Foreground(lipgloss.Color("#ffffff")),
 		styleAction: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#c0c0c0")),
 		styleTelemetry: lipgloss.NewStyle().
