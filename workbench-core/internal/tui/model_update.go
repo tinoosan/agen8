@@ -716,8 +716,13 @@ func (m Model) keyCommandPaletteNav(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		if txt == "" {
 			return m, nil, true
 		}
-		m.clearCurrentInput()
-		return m, m.submit(txt), true
+		// Use submitSingle/submitMultiline to ensure picker commands are handled correctly.
+		// These functions check for commands like /model, /approval, etc. and open pickers.
+		// Note: These functions handle clearing the input themselves, so we don't clear here.
+		if m.isMulti {
+			return m, m.submitMultiline(), true
+		}
+		return m, m.submitSingle(), true
 	}
 	return m, nil, false
 }
