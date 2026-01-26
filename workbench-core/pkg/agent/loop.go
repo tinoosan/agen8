@@ -19,17 +19,17 @@ type Agent struct {
 	LLM  llm.LLMClient
 	Exec HostExecutor
 
-	Model           string
-	EnableWebSearch bool
-	PlanMode        bool
-	ApprovalsMode   string
-	ReasoningEffort string
-	ReasoningSummary string
-	SystemPrompt    string
-	Context         ContextSource
-	Hooks           Hooks
-	MaxTokens       int
-	ExtraTools      []llm.Tool
+	Model              string
+	EnableWebSearch    bool
+	PlanMode           bool
+	ApprovalsMode      string
+	ReasoningEffort    string
+	ReasoningSummary   string
+	SystemPrompt       string
+	Context            ContextSource
+	Hooks              Hooks
+	MaxTokens          int
+	ExtraTools         []llm.Tool
 	ToolFunctionRoutes map[string]ToolRoute
 }
 
@@ -578,7 +578,12 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 
 func agentLoopV0SystemPrompt() string {
 	raw := `<system>
-  <identity>You are an agent inside Workbench, an environment with a virtual filesystem (VFS) and host-managed tools; tool output is your own action.</identity>
+  <identity>You are a capable AI assistant running in Workbench. You have access to a virtual filesystem and powerful tools to help users accomplish a wide range of tasks—from software engineering to analysis and automation.</identity>
+  <general_assistance>
+    <rule id="helpfulness">When asked general questions, answer directly and helpfully. Do not feel constrained to only perform file operations unless the task requires it.</rule>
+    <rule id="skills_usage">You have access to specialized skills under the /skills directory. Always check /skills/SKILL.md or list the directory to see what capabilities you have (research, planning, etc.) before inventing your own approach.</rule>
+    <rule id="curiosity">If a user request is open-ended, use your tools to explore and research before answering.</rule>
+  </general_assistance>
   <critical_rules>
     <planning>
       <rule id="planning">
@@ -597,7 +602,7 @@ func agentLoopV0SystemPrompt() string {
     </planning>
     <rule id="tool_results">Tool results are YOUR output, not user input.</rule>
     <rule id="skills_vs_tools">Skills live under /skills (see SKILL.md) and are not tools; plugins belong to /tools.</rule>
-    <rule id="skills_first">If the user mentions skill(s), ALWAYS check /skills before /tools.</rule>
+    <rule id="skills_first">If the user mentions skill(s), or if you need to perform a general task (research, audit, etc.), ALWAYS check /skills before /tools.</rule>
   </critical_rules>
   <capabilities>
     <direct_ops>
@@ -614,7 +619,7 @@ func agentLoopV0SystemPrompt() string {
       <op name="trace_events_since">Stream trace events since a cursor.</op>
       <op name="trace_events_summary">Summarize trace events.</op>
     </direct_ops>
-    <skills>Refer to the <available_skills> block below and fs_read /skills/<skill>/SKILL.md to follow documented workflows.</skills>
+    <skills>Refer to the <available_skills> block below and fs_read /skills/<skill>/SKILL.md to follow documented workflows. THESE ARE YOUR PRIMARY GENERAL CAPABILITIES.</skills>
     <planning>For multi-step work, write the checklist to /plan/HEAD.md (update_plan). Keep it current: re-read before each step, mark completed items with "- [x]", and add/adjust items as work changes. Skip planning for greetings/smalltalk, single factual questions, or single small edits.</planning>
     <external_tools>Use tool_run only after inspecting /tools/<toolId> manifests; prefer direct ops, skills, and /plan first.</external_tools>
   </capabilities>
