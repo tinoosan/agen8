@@ -34,7 +34,23 @@ var listRunsCmd = &cobra.Command{
 				fmt.Fprintf(out, "%s\t%s\n", runID, "error:"+err.Error())
 				continue
 			}
-			fmt.Fprintf(out, "%s\t%s\n", run.RunId, run.Status)
+			cost := ""
+			if run.TotalCostUSD > 0 {
+				cost = fmt.Sprintf("$%.4f", run.TotalCostUSD)
+			}
+			tokens := ""
+			if run.TotalTokens != 0 {
+				tokens = fmt.Sprintf("%d tok", run.TotalTokens)
+			}
+			if cost == "" && tokens == "" {
+				fmt.Fprintf(out, "%s\t%s\n", run.RunId, run.Status)
+				continue
+			}
+			if cost != "" && tokens != "" {
+				fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", run.RunId, run.Status, tokens, cost)
+				continue
+			}
+			fmt.Fprintf(out, "%s\t%s\t%s\n", run.RunId, run.Status, strings.TrimSpace(tokens+cost))
 		}
 		return nil
 	},
