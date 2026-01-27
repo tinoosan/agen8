@@ -53,6 +53,9 @@ func SyncRegistry(cfg config.Config, orchestratorRunID string) error {
 		if strings.TrimSpace(run.ParentRunID) != strings.TrimSpace(orchestratorRunID) {
 			continue
 		}
+		tasks, _ := readInboxTasks(cfg, run.RunId)
+		results, _ := ReadOutbox(cfg, run.RunId)
+
 		state := AgentState{
 			RunID:         run.RunId,
 			Status:        string(run.Status),
@@ -74,11 +77,54 @@ func SyncRegistry(cfg config.Config, orchestratorRunID string) error {
 				CostUSD:        run.TotalCostUSD,
 			},
 		}
+		// Derive status from tasks/results for fresher view.
+		if len(tasks) > 0 {
+			state.Status = "pending"
+			for _, t := range tasks {
+				if strings.EqualFold(strings.TrimSpace(t.Status), "in_progress") {
+					state.Status = "busy"
+					state.CurrentTaskID = t.TaskID
+					state.CurrentGoal = strings.TrimSpace(t.Goal)
+					break
+				}
+			}
+			if state.CurrentTaskID == "" && len(tasks) > 0 {
+				state.CurrentTaskID = tasks[0].TaskID
+				state.CurrentGoal = strings.TrimSpace(tasks[0].Goal)
+			}
+		} else if len(results) > 0 {
+			state.Status = "idle"
+		}
+
+		for _, t := range tasks {
+			if t.TaskID == "" {
+				continue
+			}
+			reg.Tasks[t.TaskID] = t
+		}
+		for _, item := range results {
+			if item.TaskResult != nil {
+				tr := item.TaskResult
+				if tr.TaskID != "" {
+					reg.Tasks[tr.TaskID] = types.Task{
+						TaskID:      tr.TaskID,
+						Status:      tr.Status,
+						CompletedAt: tr.CompletedAt,
+						Error:       tr.Error,
+					}
+				}
+				if strings.EqualFold(tr.Status, "succeeded") {
+					state.Stats.TasksCompleted++
+				}
+				if strings.EqualFold(tr.Status, "failed") {
+					state.Stats.TasksFailed++
+				}
+			}
+		}
 		// Capture latest message/result (best-effort).
-		items, _ := ReadOutbox(cfg, run.RunId)
-		if len(items) > 0 {
+		if len(results) > 0 {
 			// pick last item
-			last := items[len(items)-1]
+			last := results[len(results)-1]
 			if last.Message != nil {
 				state.LastMessage = last.Message
 			}
@@ -154,4 +200,37 @@ func ListChildRuns(cfg config.Config, sessionID, parentRunID string) ([]types.Ru
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.Before(*out[j].StartedAt) })
 	return out, nil
+}
+
+// readInboxTasks reads JSON task envelopes from a run's inbox.
+func readInboxTasks(cfg config.Config, runID string) ([]types.Task, error) {
+	inboxDir := filepath.Join(fsutil.GetRunDir(cfg.DataDir, runID), "inbox")
+	entries, err := os.ReadDir(inboxDir)
+	if err != nil {
+		return nil, err
+	}
+	paths := []string{}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".json") {
+			continue
+		}
+		paths = append(paths, filepath.Join(inboxDir, e.Name()))
+	}
+	sort.Strings(paths)
+	tasks := []types.Task{}
+	for _, p := range paths {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var t types.Task
+		if err := json.Unmarshal(b, &t); err != nil {
+			continue
+		}
+		if strings.TrimSpace(t.TaskID) == "" {
+			t.TaskID = strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, nil
 }

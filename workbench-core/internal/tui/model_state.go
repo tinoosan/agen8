@@ -97,6 +97,8 @@ type workdirPrefetchMsg struct {
 	err     error
 }
 
+type swarmRefreshMsg struct{}
+
 type sessionsListMsg struct {
 	sessions []types.Session
 	err      error

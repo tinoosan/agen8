@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -582,7 +583,14 @@ func (m Model) keyToggleSwarmMode(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.refreshSwarmView()
 	}
 	m.layout()
-	return m, nil, true
+	return m, m.swarmRefreshCmd(), true
+}
+
+func (m Model) swarmRefreshCmd() tea.Cmd {
+	if !m.swarmModeActive {
+		return nil
+	}
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return swarmRefreshMsg{} })
 }
 
 func (m Model) keyEscClosesPanels(msg tea.KeyMsg) (Model, tea.Cmd, bool) {

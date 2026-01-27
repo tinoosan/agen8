@@ -11,6 +11,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/orchestrator"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
@@ -152,5 +153,28 @@ func (r *tuiTurnRunner) startSwarmWorker(run types.Run) error {
 	go func() {
 		_ = worker.Run(ctx)
 	}()
+	r.ensureSwarmSyncLoop()
 	return nil
+}
+
+// ensureSwarmSyncLoop starts a best-effort background sync that writes
+// registry/metrics for the orchestrator run while any swarm workers exist.
+func (r *tuiTurnRunner) ensureSwarmSyncLoop() {
+	if r.swarmSyncCancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	r.swarmSyncCancel = cancel
+	go func() {
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				_ = orchestrator.SyncRegistry(r.cfg, r.run.RunId)
+			}
+		}
+	}()
 }

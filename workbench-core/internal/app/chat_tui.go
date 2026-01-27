@@ -1529,7 +1529,8 @@ type tuiTurnRunner struct {
 	pendingTurnSteps    int
 	pendingTurnDuration time.Duration
 
-	swarmWorkers map[string]context.CancelFunc
+	swarmWorkers    map[string]context.CancelFunc
+	swarmSyncCancel context.CancelFunc
 }
 
 // ReadVFS reads a virtual filesystem path via the run's mounted VFS.
@@ -2624,6 +2625,10 @@ func (r *tuiTurnRunner) handleSwarmCommand(arg string) (string, bool) {
 		cancel()
 		delete(r.swarmWorkers, runID)
 		_ = orchestrator.SyncRegistry(r.cfg, r.run.RunId)
+		if len(r.swarmWorkers) == 0 && r.swarmSyncCancel != nil {
+			r.swarmSyncCancel()
+			r.swarmSyncCancel = nil
+		}
 		return "stopped " + runID, true
 	case "list":
 		if r.swarmWorkers == nil || len(r.swarmWorkers) == 0 {

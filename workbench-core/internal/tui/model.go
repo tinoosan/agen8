@@ -343,6 +343,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.updateKey(msg)
 
+	case swarmRefreshMsg:
+		if m.swarmModeActive {
+			m.refreshSwarmView()
+			return m, m.swarmRefreshCmd()
+		}
+		return m, nil
+
 	case eventMsg:
 		ev := events.Event(msg)
 
