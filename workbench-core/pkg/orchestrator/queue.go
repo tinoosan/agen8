@@ -12,14 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
-	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
-
-// CreateChildRun creates a sub-run for an orchestrator.
-func CreateChildRun(cfg config.Config, sessionID, parentRunID, goal string, maxBytesForContext int) (types.Run, error) {
-	return store.CreateSubRun(cfg, sessionID, parentRunID, goal, maxBytesForContext)
-}
 
 // EnqueueTask writes a Task envelope into the target run's inbox directory.
 // Returns the absolute path to the task file.
