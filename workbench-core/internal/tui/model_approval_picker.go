@@ -30,6 +30,9 @@ var approvalPickerOptions = []approvalPickerItem{
 }
 
 func (m *Model) openApprovalPicker() {
+	if m.runtimeChangeLocked("changing approval mode") {
+		return
+	}
 	m.approvalPickerOpen = true
 	m.commandPaletteOpen = false
 	m.commandPaletteMatches = nil

@@ -15,6 +15,9 @@ func (r reasoningSummaryItem) FilterValue() string { return string(r) }
 var reasoningSummaryOptions = []reasoningSummaryItem{"off", "auto", "concise", "detailed"}
 
 func (m *Model) openReasoningSummaryPicker() {
+	if m.runtimeChangeLocked("changing reasoning summary") {
+		return
+	}
 	m.reasoningSummaryPickerOpen = true
 	m.reasoningEffortPickerOpen = false
 	m.commandPaletteOpen = false

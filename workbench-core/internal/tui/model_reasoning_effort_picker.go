@@ -15,6 +15,9 @@ func (r reasoningEffortItem) FilterValue() string { return string(r) }
 var reasoningEffortOptions = []string{"none", "minimal", "low", "medium", "high", "xhigh"}
 
 func (m *Model) openReasoningEffortPicker() {
+	if m.runtimeChangeLocked("changing reasoning effort") {
+		return
+	}
 	m.reasoningEffortPickerOpen = true
 	m.commandPaletteOpen = false
 	m.commandPaletteMatches = nil

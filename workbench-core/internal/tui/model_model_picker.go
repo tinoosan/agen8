@@ -63,6 +63,9 @@ func (d modelPickerDelegate) Render(w io.Writer, m list.Model, index int, item l
 
 // openModelPicker initializes and opens the model picker modal.
 func (m *Model) openModelPicker() tea.Cmd {
+	if m.runtimeChangeLocked("changing model") {
+		return nil
+	}
 	m.modelPickerOpen = true
 
 	ids := cost.SupportedModels()

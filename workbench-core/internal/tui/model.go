@@ -1213,6 +1213,22 @@ func (m *Model) appendDetails(line string) {
 	_ = line
 }
 
+// runtimeChangeLocked returns true when a turn is in-flight. It also surfaces a
+// short notice in the transcript so the user knows why an action was blocked.
+func (m *Model) runtimeChangeLocked(action string) bool {
+	if m == nil || !m.turnInFlight {
+		return false
+	}
+	action = strings.TrimSpace(action)
+	if action == "" {
+		action = "changing settings"
+	}
+	msg := "Wait for the current reply to finish before " + action + "."
+	m.addTranscriptItem(transcriptItem{kind: transcriptError, text: msg})
+	m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+	return true
+}
+
 func (m *Model) shouldSkipTranscriptTurn(userText, agentText string) bool {
 	userText = strings.TrimSpace(userText)
 	agentText = strings.TrimSpace(agentText)

@@ -65,32 +65,48 @@ func (m *Model) submitSingle() tea.Cmd {
 	}
 	// Intercept `/new` to start a new session (no submission).
 	if strings.EqualFold(txt, "/new") {
+		if m.runtimeChangeLocked("starting a new session") {
+			return nil
+		}
 		return m.requestNewSessionSwitch()
 	}
 	// Intercept `/sessions` to open session picker (no submission).
 	if strings.EqualFold(txt, "/sessions") {
 		if m.turnInFlight || len(m.awaitingApprovalOps) > 0 {
+			m.runtimeChangeLocked("switching sessions")
 			return nil
 		}
 		return m.openSessionPicker()
 	}
 	// Intercept `/reasoning-effort` with no value to open a picker (no submission).
 	if strings.EqualFold(txt, "/reasoning-effort") {
+		if m.runtimeChangeLocked("changing reasoning effort") {
+			return nil
+		}
 		m.openReasoningEffortPicker()
 		return nil
 	}
 	// Intercept `/reasoning-summary` with no value to open a picker (no submission).
 	if strings.EqualFold(txt, "/reasoning-summary") {
+		if m.runtimeChangeLocked("changing reasoning summary") {
+			return nil
+		}
 		m.openReasoningSummaryPicker()
 		return nil
 	}
 	// Intercept `/approval` with no args to open the approval picker.
 	if strings.EqualFold(txt, "/approval") {
+		if m.runtimeChangeLocked("changing approval mode") {
+			return nil
+		}
 		m.openApprovalPicker()
 		return nil
 	}
 	// Intercept `/model` with no args to open picker instead of submitting
 	if txt == "/model" {
+		if m.runtimeChangeLocked("changing model") {
+			return nil
+		}
 		return m.openModelPicker()
 	}
 	return m.submit(txt)
@@ -108,32 +124,48 @@ func (m *Model) submitMultiline() tea.Cmd {
 	}
 	// Intercept `/new` to start a new session (no submission).
 	if strings.EqualFold(txt, "/new") {
+		if m.runtimeChangeLocked("starting a new session") {
+			return nil
+		}
 		return m.requestNewSessionSwitch()
 	}
 	// Intercept `/sessions` to open session picker (no submission).
 	if strings.EqualFold(txt, "/sessions") {
 		if m.turnInFlight || len(m.awaitingApprovalOps) > 0 {
+			m.runtimeChangeLocked("switching sessions")
 			return nil
 		}
 		return m.openSessionPicker()
 	}
 	// Intercept `/reasoning-effort` with no value to open a picker (no submission).
 	if strings.EqualFold(txt, "/reasoning-effort") {
+		if m.runtimeChangeLocked("changing reasoning effort") {
+			return nil
+		}
 		m.openReasoningEffortPicker()
 		return nil
 	}
 	// Intercept `/reasoning-summary` with no value to open a picker (no submission).
 	if strings.EqualFold(txt, "/reasoning-summary") {
+		if m.runtimeChangeLocked("changing reasoning summary") {
+			return nil
+		}
 		m.openReasoningSummaryPicker()
 		return nil
 	}
 	// Intercept `/approval` with no args to open the approval picker.
 	if strings.EqualFold(txt, "/approval") {
+		if m.runtimeChangeLocked("changing approval mode") {
+			return nil
+		}
 		m.openApprovalPicker()
 		return nil
 	}
 	// Intercept `/model` with no args to open picker instead of submitting
 	if txt == "/model" {
+		if m.runtimeChangeLocked("changing model") {
+			return nil
+		}
 		return m.openModelPicker()
 	}
 	return m.submit(txt)

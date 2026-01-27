@@ -99,6 +99,9 @@ func (d sessionPickerDelegate) Render(w io.Writer, m list.Model, index int, item
 }
 
 func (m *Model) openSessionPicker() tea.Cmd {
+	if m.runtimeChangeLocked("switching sessions") {
+		return nil
+	}
 	m.sessionPickerOpen = true
 	m.sessionPickerErr = ""
 
