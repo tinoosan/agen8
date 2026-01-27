@@ -36,6 +36,9 @@ type ContextConstructor struct {
 	HistoryStore  store.HistoryReader
 	SkillsManager *skills.Manager
 
+	// SelectedSkill is the currently active skill (in-memory only, not persisted).
+	SelectedSkill string
+
 	IncludeHistoryOps bool
 
 	MaxProfileBytes int
@@ -234,12 +237,7 @@ func (c *ContextConstructor) activeSkillSection(ctx context.Context) (section st
 	if c == nil || c.SkillsManager == nil {
 		return "", "0"
 	}
-	if !c.sessionCachedOK || c.sessionCachedID != c.SessionID {
-		if err := c.loadSessionState(ctx); err != nil {
-			return "", "0"
-		}
-	}
-	skill := strings.TrimSpace(c.sessionCached.SelectedSkill)
+	skill := strings.TrimSpace(c.SelectedSkill)
 	if skill == "" {
 		return "", "0"
 	}

@@ -61,7 +61,7 @@ func TestTUITurnRunner_Skill_UpdatesSessionAndEmitsEvent(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.Config{DataDir: t.TempDir()}
-	sess, run, err := store.CreateSession(cfg, "test", 1024)
+	_, run, err := store.CreateSession(cfg, "test", 1024)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -101,16 +101,8 @@ func TestTUITurnRunner_Skill_UpdatesSessionAndEmitsEvent(t *testing.T) {
 	if r.opts.SelectedSkill != "demo-skill" {
 		t.Fatalf("opts.SelectedSkill=%q, want %q", r.opts.SelectedSkill, "demo-skill")
 	}
-	if r.run.Runtime == nil || r.run.Runtime.SelectedSkill != "demo-skill" {
-		t.Fatalf("run runtime selectedSkill=%q, want %q", r.run.Runtime.SelectedSkill, "demo-skill")
-	}
-
-	updated, err := store.LoadSession(cfg, sess.SessionID)
-	if err != nil {
-		t.Fatalf("LoadSession: %v", err)
-	}
-	if updated.SelectedSkill != "demo-skill" {
-		t.Fatalf("session selectedSkill=%q, want %q", updated.SelectedSkill, "demo-skill")
+	if r.constructor != nil && r.constructor.SelectedSkill != "demo-skill" {
+		t.Fatalf("constructor.SelectedSkill=%q, want %q", r.constructor.SelectedSkill, "demo-skill")
 	}
 
 	found := false
@@ -132,5 +124,8 @@ func TestTUITurnRunner_Skill_UpdatesSessionAndEmitsEvent(t *testing.T) {
 	}
 	if r.opts.SelectedSkill != "" {
 		t.Fatalf("opts.SelectedSkill=%q, want empty", r.opts.SelectedSkill)
+	}
+	if r.constructor != nil && r.constructor.SelectedSkill != "" {
+		t.Fatalf("constructor.SelectedSkill=%q, want empty", r.constructor.SelectedSkill)
 	}
 }

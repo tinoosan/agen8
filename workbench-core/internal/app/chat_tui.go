@@ -210,13 +210,11 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 	sessionModel := ""
 	sessionReasoningEffort := ""
 	sessionReasoningSummary := ""
-	sessionSelectedSkill := ""
 	if sess, err := store.LoadSession(cfg, run.SessionID); err == nil {
 		sessionTitle = strings.TrimSpace(sess.Title)
 		sessionModel = strings.TrimSpace(sess.ActiveModel)
 		sessionReasoningEffort = strings.TrimSpace(sess.ReasoningEffort)
 		sessionReasoningSummary = strings.TrimSpace(sess.ReasoningSummary)
-		sessionSelectedSkill = strings.TrimSpace(sess.SelectedSkill)
 	}
 
 	model := strings.TrimSpace(resolved.Model)
@@ -238,9 +236,6 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 	}
 	if strings.TrimSpace(sessionReasoningSummary) != "" {
 		resolved.ReasoningSummary = sessionReasoningSummary
-	}
-	if strings.TrimSpace(resolved.SelectedSkill) == "" && strings.TrimSpace(sessionSelectedSkill) != "" {
-		resolved.SelectedSkill = sessionSelectedSkill
 	}
 
 	// Resolve pricing against the effective model (session-aware).
@@ -1963,16 +1958,8 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		valLower := strings.ToLower(strings.TrimSpace(val))
 		if valLower == "none" || valLower == "off" {
 			r.opts.SelectedSkill = ""
-			if r.run.Runtime == nil {
-				r.run.Runtime = &types.RunRuntimeConfig{}
-			}
-			r.run.Runtime.SelectedSkill = ""
-			_ = store.SaveRun(r.cfg, r.run)
-			if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
-				if strings.TrimSpace(sess.SelectedSkill) != "" {
-					sess.SelectedSkill = ""
-					_ = store.SaveSession(r.cfg, sess)
-				}
+			if r.constructor != nil {
+				r.constructor.SelectedSkill = ""
 			}
 			r.mustEmit(context.Background(), events.Event{
 				Type:    "skill.changed",
@@ -1988,16 +1975,8 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			}
 		}
 		r.opts.SelectedSkill = val
-		if r.run.Runtime == nil {
-			r.run.Runtime = &types.RunRuntimeConfig{}
-		}
-		r.run.Runtime.SelectedSkill = val
-		_ = store.SaveRun(r.cfg, r.run)
-		if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
-			if strings.TrimSpace(sess.SelectedSkill) != val {
-				sess.SelectedSkill = val
-				_ = store.SaveSession(r.cfg, sess)
-			}
+		if r.constructor != nil {
+			r.constructor.SelectedSkill = val
 		}
 		r.mustEmit(context.Background(), events.Event{
 			Type:    "skill.changed",

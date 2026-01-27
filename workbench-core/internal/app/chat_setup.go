@@ -98,7 +98,6 @@ func setupTUIChatRuntime(
 		ReasoningEffort:       strings.TrimSpace(opts.ReasoningEffort),
 		ReasoningSummary:      strings.TrimSpace(opts.ReasoningSummary),
 		ApprovalsMode:         strings.TrimSpace(opts.ApprovalsMode),
-		SelectedSkill:         strings.TrimSpace(opts.SelectedSkill),
 		HistoryStore:          historyStore,
 		ResultsStore:          resultsStore,
 		MemoryStore:           memStore,

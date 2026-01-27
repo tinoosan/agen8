@@ -30,17 +30,14 @@ func TestContextConstructor_ActiveSkillInjected(t *testing.T) {
 		t.Fatalf("skills scan: %v", err)
 	}
 
-	sess := types.Session{SessionID: "sess-test", SelectedSkill: "demo-skill"}
 	constructor := &ContextConstructor{
 		FS:            vfs.NewFS(),
 		RunID:         "run-test",
 		SessionID:     "sess-test",
 		SkillsManager: mgr,
+		SelectedSkill: "demo-skill",
 		LoadSession: func(sessionID string) (types.Session, error) {
-			if sessionID != sess.SessionID {
-				t.Fatalf("unexpected sessionID=%q", sessionID)
-			}
-			return sess, nil
+			return types.Session{SessionID: sessionID}, nil
 		},
 		MaxProfileBytes: 0,
 		MaxMemoryBytes:  0,
