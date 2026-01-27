@@ -136,6 +136,7 @@ func init() {
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(showCmd)
+	rootCmd.AddCommand(agentsCmd)
 }
 
 func envBool(key string, def bool) bool {
