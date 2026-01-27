@@ -57,6 +57,13 @@ func cursorDebugLog(hypothesisId, location, message string, data map[string]any)
 	// #endregion
 }
 
+const (
+	sessionTitleModel     = "openai/gpt-5-nano"
+	sessionTitleMaxTokens = 256
+)
+
+var generateSessionTitleFn = generateSessionTitle
+
 func emitStartupWarnings(ctx context.Context, emit func(ctx context.Context, ev events.Event), warnings []string) {
 	if emit == nil || len(warnings) == 0 {
 		return
@@ -74,6 +81,209 @@ func emitStartupWarnings(ctx context.Context, emit func(ctx context.Context, ev 
 			Console: boolp(false),
 		})
 	}
+}
+
+func generateSessionTitle(ctx context.Context, userMsg string) (string, error) {
+	userMsg = strings.TrimSpace(userMsg)
+	if userMsg == "" {
+		return "", nil
+	}
+	client, err := llm.NewClientFromEnv()
+	if err != nil {
+		return "", err
+	}
+	llmClient := llm.NewRetryClient(client, llm.RetryConfig{
+		MaxRetries:   2,
+		InitialDelay: 200 * time.Millisecond,
+		MaxDelay:     2 * time.Second,
+		Multiplier:   2.0,
+	})
+
+	req := llm.LLMRequest{
+		Model:       sessionTitleModel,
+		System:      "Create a short, descriptive session title. Use 3-8 words. Return only the title.",
+		Messages:    []llm.LLMMessage{{Role: "user", Content: userMsg}},
+		MaxTokens:   sessionTitleMaxTokens,
+		Temperature: 0.2,
+	}
+
+	var out strings.Builder
+	_, err = llmClient.GenerateStream(ctx, req, func(chunk llm.LLMStreamChunk) error {
+		if chunk.IsReasoning || chunk.Text == "" {
+			return nil
+		}
+		out.WriteString(chunk.Text)
+		return nil
+	})
+	if err == nil {
+		if t := sanitizeSessionTitle(out.String()); t != "" {
+			return t, nil
+		}
+	}
+	resp, err := llmClient.Generate(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	type titleResp struct {
+		Title string `json:"title"`
+	}
+	var parsed titleResp
+	if err := json.Unmarshal([]byte(resp.Text), &parsed); err == nil {
+		if t := sanitizeSessionTitle(parsed.Title); t != "" {
+			return t, nil
+		}
+	}
+	if t := sanitizeSessionTitle(resp.Text); t != "" {
+		return t, nil
+	}
+	if len(resp.Raw) != 0 {
+		if t := sanitizeSessionTitle(extractChatContent(resp.Raw)); t != "" {
+			return t, nil
+		}
+		if t := sanitizeSessionTitle(extractTitleFromReasoning(resp.Raw)); t != "" {
+			return t, nil
+		}
+	}
+	return "", nil
+}
+
+func sanitizeSessionTitle(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	// Flatten to a single line and remove surrounding quotes/punctuation.
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	raw = strings.ReplaceAll(raw, "\n", " ")
+	raw = strings.TrimSpace(raw)
+	raw = strings.Trim(raw, "\"'“”‘’`")
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	// Collapse whitespace.
+	parts := strings.Fields(raw)
+	out := strings.Join(parts, " ")
+	out = strings.TrimRight(out, " .,:;!")
+	return out
+}
+
+func extractChatContent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var payload struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	if len(payload.Choices) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(payload.Choices[0].Message.Content)
+}
+
+func extractTitleFromReasoning(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	// Chat Completions shape: choices[].message.reasoning
+	var chatPayload struct {
+		Choices []struct {
+			Message struct {
+				Reasoning string `json:"reasoning"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &chatPayload); err == nil {
+		if len(chatPayload.Choices) != 0 {
+			if t := titleFromReasoningText(chatPayload.Choices[0].Message.Reasoning); t != "" {
+				return t
+			}
+		}
+	}
+
+	// Responses shape: output[].type=="reasoning" with summary parts.
+	var respPayload struct {
+		Output []struct {
+			Type    string `json:"type"`
+			Summary []struct {
+				Summary string `json:"summary"`
+				Text    string `json:"text"`
+			} `json:"summary"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(raw, &respPayload); err == nil {
+		for _, out := range respPayload.Output {
+			if strings.TrimSpace(out.Type) != "reasoning" {
+				continue
+			}
+			for _, s := range out.Summary {
+				if t := titleFromReasoningText(s.Summary); t != "" {
+					return t
+				}
+				if t := titleFromReasoningText(s.Text); t != "" {
+					return t
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func titleFromReasoningText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	// Prefer quoted titles.
+	for _, q := range []struct{ open, close string }{
+		{`"`, `"`},
+		{`“`, `”`},
+		{`'`, `'`},
+		{`‘`, `’`},
+	} {
+		if i := strings.Index(text, q.open); i >= 0 {
+			if j := strings.Index(text[i+len(q.open):], q.close); j >= 0 {
+				cand := text[i+len(q.open) : i+len(q.open)+j]
+				if t := sanitizeSessionTitle(cand); t != "" {
+					return t
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func resolveSessionTitle(ctx context.Context, configuredTitle, firstUserMsg string, warnings *[]string) string {
+	title := strings.TrimSpace(configuredTitle)
+	if title != "" && !strings.EqualFold(title, "workbench") {
+		return title
+	}
+
+	autoTitle := ""
+	var err error
+	if generateSessionTitleFn != nil {
+		autoTitle, err = generateSessionTitleFn(ctx, firstUserMsg)
+	}
+	autoTitle = strings.TrimSpace(autoTitle)
+	if autoTitle != "" {
+		return autoTitle
+	}
+
+	if warnings != nil {
+		if err != nil {
+			*warnings = append(*warnings, "Session title generation failed; using default title.")
+		} else {
+			*warnings = append(*warnings, "Session title generation returned empty; using default title.")
+		}
+	}
+	return "workbench"
 }
 
 // RunNewChatTUI starts the TUI immediately, but defers creating a new session/run
@@ -983,11 +1193,9 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	}
 
 	title := strings.TrimSpace(r.title)
-	if title == "" || strings.EqualFold(title, "workbench") {
-		title = strings.TrimSpace(firstLineForTitle(firstUserMsg))
-		if title == "" {
-			title = "workbench"
-		}
+	autoTitle := title == "" || strings.EqualFold(title, "workbench")
+	if autoTitle {
+		title = "workbench"
 	}
 	goal := strings.TrimSpace(r.goal)
 	if goal == "" {
@@ -1059,6 +1267,43 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		Console: boolp(false),
 	})
 	emitStartupWarnings(context.Background(), r.mustEmit, r.opts.StartupWarnings)
+
+	if autoTitle {
+		sessionID := run.SessionID
+		firstMsg := firstUserMsg
+		cfgCopy := r.cfg
+		emit := r.mustEmit
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			t := resolveSessionTitle(ctx, "", firstMsg, nil)
+			t = strings.TrimSpace(t)
+			if t == "" || strings.EqualFold(t, "workbench") {
+				return
+			}
+			s, err := store.LoadSession(cfgCopy, sessionID)
+			if err != nil {
+				return
+			}
+			if strings.TrimSpace(s.Title) == t {
+				return
+			}
+			s.Title = t
+			_ = store.SaveSession(cfgCopy, s)
+			if emit != nil {
+				boolp := func(b bool) *bool { return &b }
+				emit(context.Background(), events.Event{
+					Type:    "session.title.changed",
+					Message: "Session title updated",
+					Data: map[string]string{
+						"sessionId":    sessionID,
+						"sessionTitle": t,
+					},
+					Console: boolp(false),
+				})
+			}
+		}()
+	}
 	// Persist the session's active model as early as possible.
 	sess.ActiveModel = model
 	_ = store.SaveSession(cfg, sess)

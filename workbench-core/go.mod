@@ -11,11 +11,10 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/chzyer/readline v1.5.1
 	github.com/google/uuid v1.6.0
+	github.com/hexops/gotextdiff v1.0.3
 	github.com/muesli/reflow v0.3.0
 	github.com/nxadm/tail v1.4.11
 	github.com/openai/openai-go/v3 v3.16.0
-	github.com/pmezard/go-difflib v1.0.0
-	github.com/sourcegraph/go-diff v0.7.0
 	github.com/spf13/cobra v1.8.1
 )
 

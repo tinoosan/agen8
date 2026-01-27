@@ -912,7 +912,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.thinkingSummary = ""
 				m.turnTitle = ""
 				m.turnCancelRequested = false
-				m.scrollToCurrentTurnStart()
+				// Keep scroll at bottom to show the stopped message
 				return m, nil
 			}
 
@@ -964,13 +964,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.streamingItemIdx = -1
 			m.streamingBuf = nil
 		}
-		// Anchor the viewport at the start of the turn so the user message stays visible.
-		// For silent commands (e.g., model picker), preserve the current scroll position.
+		// Keep scroll position at bottom to show the agent's response.
+		// Only scroll to turn start for silent commands (e.g., model picker) or when explicitly requested.
+		// Note: During streaming, wasAtBottom tracking already keeps us at the bottom naturally.
+		m.turnTitle = ""
+		m.turnCancelRequested = false
 		if !msg.preserveScroll {
 			m.scrollToCurrentTurnStart()
 		}
-		m.turnTitle = ""
-		m.turnCancelRequested = false
 		return m, nil
 	}
 
@@ -1229,6 +1230,11 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		}
 		if v := strings.TrimSpace(ev.Data["runId"]); v != "" {
 			m.runID = v
+		}
+	}
+	if ev.Type == "session.title.changed" {
+		if v := strings.TrimSpace(ev.Data["sessionTitle"]); v != "" {
+			m.sessionTitle = v
 		}
 	}
 	// Model identifier comes from agent.loop.start (host source of truth).

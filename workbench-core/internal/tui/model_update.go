@@ -498,11 +498,10 @@ func (m Model) keyTranscriptScrollKeys(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.planViewport, cmd = m.planViewport.Update(msg)
 		return m, cmd, true
 	}
-	// Preserve current behavior: when Activity is focused, do not route here.
-	// (The original implementation breaks out to the default fallthrough path.)
+	// When Activity panel is focused, scroll the activity detail panel instead of transcript.
 	if m.showDetails && m.focus == focusActivityList {
 		var cmd tea.Cmd
-		m.transcript, cmd = m.transcript.Update(msg)
+		m.activityDetail, cmd = m.activityDetail.Update(msg)
 		return m, cmd, true
 	}
 	var cmd tea.Cmd

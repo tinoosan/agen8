@@ -45,12 +45,14 @@ type LLMClientStreaming interface {
 }
 
 type LLMRequest struct {
-	Model              string
-	System             string
-	Messages           []LLMMessage
-	MaxTokens          int
-	Temperature        float64
-	JSONOnly           bool
+	Model       string
+	System      string
+	Messages    []LLMMessage
+	MaxTokens   int
+	Temperature float64
+	JSONOnly    bool
+	// ForceChat bypasses Responses API and uses Chat Completions for this request.
+	ForceChat          bool
 	Tools              []Tool `json:"tools,omitempty"`
 	ToolChoice         string `json:"toolChoice,omitempty"`
 	EnableWebSearch    bool   `json:"enableWebSearch,omitempty"`

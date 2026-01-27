@@ -8,12 +8,14 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/pmezard/go-difflib/difflib"
+	"github.com/hexops/gotextdiff"
+	"github.com/hexops/gotextdiff/myers"
+	"github.com/hexops/gotextdiff/span"
+	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/debuglog"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
-	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 
 type HostOpObserver interface {
@@ -31,13 +33,13 @@ func (f HostExecFunc) Exec(ctx context.Context, req types.HostOpRequest) types.H
 }
 
 type ExecutorOptions struct {
-	Emit           func(ctx context.Context, ev events.Event)
-	Model          string
-	RunID          string
-	SessionID      string
-	FS             *vfs.FS
-	Guard          func(req types.HostOpRequest) *types.HostOpResponse
-	Observers      []HostOpObserver
+	Emit            func(ctx context.Context, ev events.Event)
+	Model           string
+	RunID           string
+	SessionID       string
+	FS              *vfs.FS
+	Guard           func(req types.HostOpRequest) *types.HostOpResponse
+	Observers       []HostOpObserver
 	ArtifactObserve func(path string)
 }
 
@@ -75,11 +77,11 @@ func NewExecutor(base *agent.HostOpExecutor, opts ExecutorOptions) agent.HostExe
 		metaKey:   metaKey,
 	}
 	diffMW := &diffMiddleware{
-		fs:     opts.FS,
+		fs:      opts.FS,
 		metaKey: metaKey,
 	}
 	observerMW := &observerMiddleware{
-		observers:      opts.Observers,
+		observers:       opts.Observers,
 		artifactObserve: opts.ArtifactObserve,
 	}
 	guardMW := &guardMiddleware{guard: opts.Guard}
@@ -391,14 +393,11 @@ func (m *diffMiddleware) Handle(ctx context.Context, req types.HostOpRequest, ne
 	if !meta.HadBefore {
 		fromFile = "/dev/null"
 	}
-	ud := difflib.UnifiedDiff{
-		A:        difflib.SplitLines(strings.ReplaceAll(before, "\r\n", "\n")),
-		B:        difflib.SplitLines(strings.ReplaceAll(after, "\r\n", "\n")),
-		FromFile: fromFile,
-		ToFile:   toFile,
-		Context:  3,
-	}
-	diffText, _ := difflib.GetUnifiedDiffString(ud)
+	before = strings.ReplaceAll(before, "\r\n", "\n")
+	after = strings.ReplaceAll(after, "\r\n", "\n")
+	edits := myers.ComputeEdits(span.URIFromPath(strings.TrimSpace(req.Path)), before, after)
+	ud := gotextdiff.ToUnified(fromFile, toFile, before, edits)
+	diffText := fmt.Sprintf("%s", ud)
 	diffText = strings.TrimSpace(diffText)
 	if diffText == "" {
 		return resp

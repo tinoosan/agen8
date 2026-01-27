@@ -889,6 +889,9 @@ func (c *Client) Generate(ctx context.Context, req types.LLMRequest) (types.LLMR
 }
 
 func (c *Client) generateOnce(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
+	if req.ForceChat {
+		return c.generateChat(ctx, req)
+	}
 	// Prefer Responses API (enables reasoning summaries) and fall back to Chat Completions.
 	if out, err := c.generateResponses(ctx, req); err == nil {
 		return out, nil
@@ -1102,6 +1105,9 @@ func (c *Client) GenerateStream(ctx context.Context, req types.LLMRequest, cb ty
 }
 
 func (c *Client) generateStreamOnce(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
+	if req.ForceChat {
+		return c.generateStreamChat(ctx, req, cb)
+	}
 	// Prefer Responses API (enables reasoning summaries) and fall back to Chat Completions.
 	if out, err := c.generateStreamResponses(ctx, req, cb); err == nil {
 		return out, nil
