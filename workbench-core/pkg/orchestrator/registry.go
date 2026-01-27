@@ -22,14 +22,15 @@ type Registry struct {
 }
 
 type AgentState struct {
-	RunID         string     `json:"runId"`
-	Status        string     `json:"status,omitempty"`
-	CurrentTaskID string     `json:"currentTaskId,omitempty"`
-	CurrentGoal   string     `json:"currentGoal,omitempty"`
-	Plan          []string   `json:"plan,omitempty"`
-	SpawnedAt     string     `json:"spawnedAt,omitempty"`
-	LastPing      string     `json:"lastPing,omitempty"`
-	Stats         AgentStats `json:"stats,omitempty"`
+	RunID         string         `json:"runId"`
+	Status        string         `json:"status,omitempty"`
+	CurrentTaskID string         `json:"currentTaskId,omitempty"`
+	CurrentGoal   string         `json:"currentGoal,omitempty"`
+	Plan          []string       `json:"plan,omitempty"`
+	LastMessage   *types.Message `json:"lastMessage,omitempty"`
+	SpawnedAt     string         `json:"spawnedAt,omitempty"`
+	LastPing      string         `json:"lastPing,omitempty"`
+	Stats         AgentStats     `json:"stats,omitempty"`
 }
 
 type AgentStats struct {

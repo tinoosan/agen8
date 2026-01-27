@@ -115,6 +115,16 @@ func (m *Model) renderSwarmContent(reg orchestrator.Registry, regErr string, met
 				lines = append(lines, "  - "+step)
 			}
 		}
+		if agent.LastMessage != nil {
+			msg := agent.LastMessage
+			title := strings.TrimSpace(msg.Title)
+			body := strings.TrimSpace(msg.Body)
+			if title != "" {
+				lines = append(lines, "  - msg: "+title)
+			} else if body != "" {
+				lines = append(lines, "  - msg: "+body)
+			}
+		}
 		if agent.Stats.CostUSD > 0 || agent.Stats.TokensIn > 0 || agent.Stats.TokensOut > 0 {
 			lines = append(lines, fmt.Sprintf("  - usage: %d in · %d out · $%.4f", agent.Stats.TokensIn, agent.Stats.TokensOut, agent.Stats.CostUSD))
 		}
