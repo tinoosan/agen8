@@ -1238,6 +1238,17 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 			return m.fetchSessionsList()
 		}
 	}
+	if ev.Type == "transcript.turn" {
+		u := strings.TrimSpace(ev.Data["user"])
+		a := strings.TrimSpace(ev.Data["agent"])
+		if u != "" {
+			m.addTranscriptItemWithScroll(transcriptItem{kind: transcriptUser, text: u}, false)
+		}
+		if a != "" {
+			m.addTranscriptItemWithScroll(transcriptItem{kind: transcriptAgent, text: a}, false)
+		}
+		return m.waitEvent()
+	}
 	// Model identifier comes from agent.loop.start (host source of truth).
 	if ev.Type == "agent.loop.start" {
 		if v := strings.TrimSpace(ev.Data["model"]); v != "" {

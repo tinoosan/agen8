@@ -37,8 +37,8 @@ func TestResolveSessionTitle_EmptyGeneratedFallsBack(t *testing.T) {
 
 	var warnings []string
 	got := resolveSessionTitle(context.Background(), "", "user msg", &warnings)
-	if got != "workbench" {
-		t.Fatalf("expected fallback title, got %q", got)
+	if got != "user msg" {
+		t.Fatalf("expected heuristic fallback title, got %q", got)
 	}
 	if len(warnings) != 1 {
 		t.Fatalf("expected warning when title empty, got %v", warnings)

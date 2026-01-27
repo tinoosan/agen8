@@ -135,9 +135,6 @@ func numberedLinesFromUnified(u gotextdiff.Unified) ([]numberedLine, int, int) {
 				toLine++
 			}
 			lines = append(lines, entry)
-			if !strings.HasSuffix(ln.Content, "\n") {
-				lines = append(lines, numberedLine{meta: true, content: "\\ No newline at end of file"})
-			}
 		}
 	}
 	return lines, added, deleted
@@ -175,10 +172,6 @@ func parseUnifiedNumberedLines(unified string) ([]numberedLine, int, int) {
 			continue
 		}
 		if !inHunk {
-			continue
-		}
-		if line == "\\ No newline at end of file" {
-			lines = append(lines, numberedLine{meta: true, content: line})
 			continue
 		}
 		if line == "" {

@@ -60,6 +60,9 @@ func cursorDebugLog(hypothesisId, location, message string, data map[string]any)
 const (
 	sessionTitleModel     = "openai/gpt-5-nano"
 	sessionTitleMaxTokens = 256
+	sessionTitleMaxRunes  = 2000
+	sessionTitleHeadRunes = 1200
+	sessionTitleTailRunes = 600
 )
 
 var generateSessionTitleFn = generateSessionTitle
@@ -83,11 +86,52 @@ func emitStartupWarnings(ctx context.Context, emit func(ctx context.Context, ev 
 	}
 }
 
+func loadTranscriptEvents(hr pkgstore.HistoryReader, runID string) ([]events.Event, error) {
+	if hr == nil || strings.TrimSpace(runID) == "" {
+		return nil, nil
+	}
+	b, err := hr.ReadAll(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(b), "\n")
+	out := []events.Event{}
+	for _, ln := range lines {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		var rec struct {
+			RunID  string            `json:"runId"`
+			Kind   string            `json:"kind"`
+			Data   map[string]string `json:"data"`
+			Origin string            `json:"origin"`
+		}
+		if err := json.Unmarshal([]byte(ln), &rec); err != nil {
+			continue
+		}
+		if strings.TrimSpace(rec.RunID) != strings.TrimSpace(runID) {
+			continue
+		}
+		if strings.TrimSpace(rec.Kind) != "transcript.turn" {
+			continue
+		}
+		out = append(out, events.Event{
+			Type:    "transcript.turn",
+			Message: "Transcript turn",
+			Data:    rec.Data,
+			Origin:  rec.Origin,
+		})
+	}
+	return out, nil
+}
+
 func generateSessionTitle(ctx context.Context, userMsg string) (string, error) {
 	userMsg = strings.TrimSpace(userMsg)
 	if userMsg == "" {
 		return "", nil
 	}
+	userMsg = shrinkForTitle(userMsg)
 	client, err := llm.NewClientFromEnv()
 	if err != nil {
 		return "", err
@@ -281,6 +325,23 @@ func extractTitleFromReasoning(raw json.RawMessage) string {
 	return ""
 }
 
+func fallbackSessionTitle(userMsg string) string {
+	msg := strings.TrimSpace(userMsg)
+	if msg == "" {
+		return ""
+	}
+	msg = shrinkForTitle(msg)
+	msg = sanitizeSessionTitle(msg)
+	if msg == "" {
+		return ""
+	}
+	words := strings.Fields(msg)
+	if len(words) > 10 {
+		words = words[:10]
+	}
+	return strings.TrimSpace(strings.Join(words, " "))
+}
+
 func titleFromReasoningText(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -311,6 +372,7 @@ func resolveSessionTitle(ctx context.Context, configuredTitle, firstUserMsg stri
 		return title
 	}
 
+	fallback := fallbackSessionTitle(firstUserMsg)
 	autoTitle := ""
 	var err error
 	if generateSessionTitleFn != nil {
@@ -319,6 +381,16 @@ func resolveSessionTitle(ctx context.Context, configuredTitle, firstUserMsg stri
 	autoTitle = strings.TrimSpace(autoTitle)
 	if autoTitle != "" {
 		return autoTitle
+	}
+	if fallback != "" {
+		if warnings != nil {
+			if err != nil {
+				*warnings = append(*warnings, "Session title generation failed; using heuristic title.")
+			} else {
+				*warnings = append(*warnings, "Session title generation returned empty; using heuristic title.")
+			}
+		}
+		return fallback
 	}
 
 	if warnings != nil {
@@ -329,6 +401,26 @@ func resolveSessionTitle(ctx context.Context, configuredTitle, firstUserMsg stri
 		}
 	}
 	return "workbench"
+}
+
+// shrinkForTitle shortens very long user messages so they fit comfortably into
+// the small title-generation prompt while preserving both the beginning and
+// end of the message (often where intent is stated).
+func shrinkForTitle(msg string) string {
+	runes := []rune(strings.TrimSpace(msg))
+	if len(runes) <= sessionTitleMaxRunes {
+		return string(runes)
+	}
+	head := sessionTitleHeadRunes
+	tail := sessionTitleTailRunes
+	if head+tail > sessionTitleMaxRunes {
+		// Keep proportions if constants got misconfigured.
+		head = sessionTitleMaxRunes / 2
+		tail = sessionTitleMaxRunes - head
+	}
+	headPart := string(runes[:head])
+	tailPart := string(runes[len(runes)-tail:])
+	return strings.TrimSpace(headPart + " ... " + tailPart)
 }
 
 // RunNewChatTUI starts the TUI immediately, but defers creating a new session/run
@@ -478,6 +570,11 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 	// and session history.
 	evCh := make(chan events.Event, 2048)
 	_, mustEmit := newTUIEmitter(cfg, run.RunId, historySink, evCh, true)
+	if histEvents, err := loadTranscriptEvents(historyStore, run.RunId); err == nil {
+		for _, ev := range histEvents {
+			evCh <- ev
+		}
+	}
 	boolp := func(b bool) *bool { return &b }
 
 	sessionTitle := ""
@@ -1656,6 +1753,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 	//
 	// Note: the agent loop already decodes and streams only "final.text".
 	var tokenBuf strings.Builder
+	var transcriptAgentBuf strings.Builder
 	lastTokenEmit := time.Now()
 	emitTokenBuf := func() {
 		if tokenBuf.Len() == 0 {
@@ -1679,6 +1777,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 			return
 		}
 		tokenBuf.WriteString(text)
+		transcriptAgentBuf.WriteString(text)
 		// Coalesce to avoid flooding the TUI channel.
 		if tokenBuf.Len() >= 256 || time.Since(lastTokenEmit) >= 40*time.Millisecond {
 			emitTokenBuf()
@@ -1854,6 +1953,21 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 	if err != nil {
 		// User-initiated stop should not be surfaced as an agent error event.
 		if errors.Is(err, context.Canceled) {
+			partial := strings.TrimSpace(transcriptAgentBuf.String())
+			// Persist partial transcript so resume shows what was streamed.
+			r.mustEmit(context.Background(), events.Event{
+				Type:    "transcript.turn",
+				Message: "Transcript turn (stopped)",
+				Data: map[string]string{
+					"user":  r.currentTurnUserMsg,
+					"agent": partial,
+				},
+			})
+			_, _ = store.RecordTurnInSession(r.cfg, r.run.SessionID, r.run.RunId, r.currentTurnUserMsg, partial)
+			r.currentTurnUserMsg = ""
+			r.pendingTurnUsage = llm.LLMUsage{}
+			r.pendingTurnSteps = 0
+			r.pendingTurnDuration = 0
 			return "", err
 		}
 		r.mustEmit(context.Background(), events.Event{
@@ -1956,6 +2070,16 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 			Store:   boolp(false),
 		})
 	}
+
+	// Persist transcript turn for replay on resume.
+	r.mustEmit(context.Background(), events.Event{
+		Type:    "transcript.turn",
+		Message: "Transcript turn",
+		Data: map[string]string{
+			"user":  r.currentTurnUserMsg,
+			"agent": final,
+		},
+	})
 
 	r.pendingTurnUsage = llm.LLMUsage{}
 	r.pendingTurnSteps = 0
