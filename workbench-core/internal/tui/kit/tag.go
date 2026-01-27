@@ -44,3 +44,8 @@ func (s TagStyles) withDefaults() TagStyles {
 	}
 	return s
 }
+
+// StylePtr returns a pointer to a copy of the provided style.
+func StylePtr(s lipgloss.Style) *lipgloss.Style {
+	return &s
+}

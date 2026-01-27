@@ -420,8 +420,8 @@ func (m Model) renderInput() string {
 			Key:   "mode",
 			Value: "swarm",
 			Styles: kit.TagStyles{
-				KeyStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Bold(true),
-				ValueStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")),
+				KeyStyle:   kit.StylePtr(lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Bold(true)),
+				ValueStyle: kit.StylePtr(lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))),
 			},
 		})
 		parts = append(parts, modeLabel)
