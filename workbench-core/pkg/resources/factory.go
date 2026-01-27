@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
@@ -135,9 +136,40 @@ func (f *Factory) MountAll(fs *vfs.FS) error {
 		return fmt.Errorf("create trace resource: %w", err)
 	}
 
+	runDir := fsutil.GetRunDir(f.DataDir, f.RunID)
+	inboxDir := filepath.Join(runDir, vfs.MountInbox)
+	if err := os.MkdirAll(inboxDir, 0755); err != nil {
+		return fmt.Errorf("create inbox dir: %w", err)
+	}
+	inboxRes, err := NewDirResource(inboxDir, vfs.MountInbox)
+	if err != nil {
+		return fmt.Errorf("create inbox resource: %w", err)
+	}
+
+	outboxDir := filepath.Join(runDir, vfs.MountOutbox)
+	if err := os.MkdirAll(outboxDir, 0755); err != nil {
+		return fmt.Errorf("create outbox dir: %w", err)
+	}
+	outboxRes, err := NewDirResource(outboxDir, vfs.MountOutbox)
+	if err != nil {
+		return fmt.Errorf("create outbox resource: %w", err)
+	}
+
+	agentsDir := filepath.Join(runDir, vfs.MountAgents)
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		return fmt.Errorf("create agents dir: %w", err)
+	}
+	agentsRes, err := NewDirResource(agentsDir, vfs.MountAgents)
+	if err != nil {
+		return fmt.Errorf("create agents resource: %w", err)
+	}
+
 	fs.Mount(vfs.MountScratch, ws)
 	fs.Mount(vfs.MountLog, tr)
 	fs.Mount(vfs.MountResults, res)
+	fs.Mount(vfs.MountInbox, inboxRes)
+	fs.Mount(vfs.MountOutbox, outboxRes)
+	fs.Mount(vfs.MountAgents, agentsRes)
 	fs.Mount(vfs.MountMemory, mem)
 	fs.Mount(vfs.MountProfile, prof)
 	fs.Mount(vfs.MountHistory, hist)

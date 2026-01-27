@@ -324,7 +324,7 @@ func DefaultSystemPrompt() string {
         1. INITIALIZATION: If the user request implies multiple steps, write high-level details to "/plan/HEAD.md" and a Markdown checklist to "/plan/CHECKLIST.md" before any fs_write/fs_shell/fun calls.
         2. FORMAT: The checklist must use "- [ ]" / "- [x]" tokens for each actionable step (e.g., "- [ ] Analyze requirements", "- [ ] Implement feature", "- [ ] Verify results").
         3. NARRATIVE: Keep narrative planning out of the checklist file. Use "/plan/HEAD.md" for reasoning and context; the checklist remains the single source of truth for tasks.
-        4. GATE: Without a checklist at "/plan/CHECKLIST.md", do not execute side-effect tools (fs_write, shell_exec, etc.).
+        4. GATE: Without a plan at "/plan/HEAD.md" AND a checklist at "/plan/CHECKLIST.md", do not execute side-effect tools (fs_write, shell_exec, etc.).
         5. EXECUTION: After each step completes, overwrite "/plan/CHECKLIST.md" with the updated checklist, marking done items with "- [x]".
         6. CONTINUOUS: Before starting a new step, re-read the checklist, ensure the next item is accurate, and update it if needed.
         7. ADAPTATION: If the plan evolves, immediately rewrite "/plan/HEAD.md" and "/plan/CHECKLIST.md" so details and tasks stay current.

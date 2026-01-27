@@ -29,6 +29,18 @@ const (
 	// Tool results are stored under /results/<callId>/response.json.
 	MountResults = "results"
 
+	// MountInbox is the mount name for run-scoped task inboxes.
+	// The orchestrator writes tasks here; agents poll and consume them.
+	MountInbox = "inbox"
+
+	// MountOutbox is the mount name for run-scoped task results.
+	// Agents write TaskResult envelopes here for the orchestrator to collect.
+	MountOutbox = "outbox"
+
+	// MountAgents is the mount name for orchestration metadata.
+	// This is a run-scoped mount used by orchestrators to store registry/metrics.
+	MountAgents = "agents"
+
 	// MountMemory is the mount name for run-scoped agent memory.
 	// The host may inject /memory/memory.md into the system prompt,
 	// and ingest /memory/update.md after each turn.
@@ -72,11 +84,11 @@ type Resource interface {
 
 // Entry describes one item returned by Resource.List.
 type Entry struct {
-	Path     string
-	IsDir    bool
-	Size     int64
-	ModTime  time.Time
-	HasSize  bool
+	Path       string
+	IsDir      bool
+	Size       int64
+	ModTime    time.Time
+	HasSize    bool
 	HasModTime bool
 }
 
