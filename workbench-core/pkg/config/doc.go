@@ -1,21 +1,29 @@
-// Package config provides configuration settings for the workbench system.
+// Package config centralizes Workbench-wide configuration values.
 //
-// Currently, config is minimal and contains a single variable DataDir which
-// specifies the base directory for all workbench data storage.
+// Right now the package exposes `DataDir`, the base directory where Workbench
+// stores sessions, runs, tools, and runtime artifacts. This directory is resolved
+// via CLI flags (e.g., `--data-dir`), environment variables (`WORKBENCH_DATA_DIR`),
+// or defaults (`~/.workbench`).
 //
-// # Data Directory Structure
+// # Data Layout
 //
-// The DataDir (resolved by the CLI via ResolveDataDir) serves as the root for:
-//   - <dataDir>/runs/<runId>/         Run-scoped directories
-//   - <dataDir>/tools/<toolId>/       Custom tool manifests
-//   - <dataDir>/agent/               Agent state (future)
-//   - <dataDir>/knowledge/           Knowledge base (future)
+// Hosts rely on `config.DataDir` containing the following structure:
 //
-// # Future Configuration
+//   - `<dataDir>/sessions/` – metadata about each session (for resuming + listing)
+//   - `<dataDir>/runs/<runId>/` – per-run artifacts (history, memory, results, traces)
+//   - `<dataDir>/tools/` – discovered tool manifests (custom tools and builtin stubs)
+//   - `<dataDir>/agent/`, `/knowledge/`, `/profile/` – upcoming runtime stores that
+//     will continue to live under `DataDir`.
 //
-// This package will likely expand to support:
-//   - Environment variable overrides
-//   - Configuration file loading (YAML/TOML)
-//   - Per-run configuration
-//   - API keys and credentials
+// # Extension Points
+//
+// This package is intentionally lightweight today, but it is the logical place to
+// add future configuration capabilities, including:
+//   - Configuration file loading (TOML/YAML) that overrides defaults.
+//   - Per-run overrides that may come from `Runtime.BuildConfig`.
+//   - Credential injection for tool access or LLM providers.
+//
+// Consumers should treat the `DataDir` contract as stable: Workbench expects this
+// directory tree to exist before wiring artifacts, so hosts should ensure directories
+// are created and writable prior to runtime initialization.
 package config

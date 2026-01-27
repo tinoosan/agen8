@@ -1,51 +1,30 @@
-// Package types defines Workbench's core data model types and protocols.
+// Package types defines Workbench's core data model types and host/agent protocols.
 //
-// Tool protocol overview (explicit /tools + /results usage)
+// It documents the contracts for host primitives (fs.*, tool.*, shell_exec, http_fetch, trace)
+// plus the tool and event results that the agent and host exchange.
 //
-// The host/agent interacts with tools and tool outputs through two VFS mounts:
-//   - /tools   (discovery + manifest reads)
-//   - /results (responses + artifacts produced by tool calls)
+// # Host Operation Protocol
 //
-// /tools: discovery + manifest only
+// Hosts and agents communicate through `types.HostOpRequest`/`types.HostOpResponse` via
+// `agent.HostExecutor`. Each `Op` (e.g., `fs.read`, `tool.run`, `shell_exec`, `trace.events.latest`)
+// has specific validation rules declared in `HostOpRequest.Validate()`, and the request
+// normalization in `normalizeHostOp` keeps casing + aliasing consistent. All host primitives
+// expect absolute VFS paths for file ops, timeout bounds for tool invocations, and required
+// payloads (text, input JSON, etc.) before they run.
 //
-// VFS API contract:
+// # Tool Data Flow
 //
-//   - fs.List("/tools")
-//     => returns tool IDs as directory-like entries
-//     e.g. "/tools/github.com.acme.stock"
+// Tools are described with `tools.ToolManifest`/`tools.ToolAction`, and their results are
+// captured in `types.ToolResponse`. Tool calls are orchestrated by the runtime's `tools.Runner`,
+// which persists `ToolResponse`/artifacts under `/results/<callId>` so later steps or
+// host-side tooling can inspect what happened. The documents under `/tools` and `/results`
+// form the public API surface for tool discovery, invocation, and auditing.
 //
-//   - fs.Read("/tools/<toolId>")
-//     => returns ONLY the tool manifest JSON bytes
+// # Events, History, and Stability
 //
-// Notes:
-//   - The agent does NOT need to know "manifest.json" as a filename.
-//   - The VFS may also accept fs.Read("/tools/<toolId>/manifest.json") for explicitness.
-//   - The agent should not list inside tool directories; the manifest is the interface surface.
-//
-// Tool storage (implementation detail; should be invisible to the agent):
-//   - Builtins may be in-memory but still appear under /tools.
-//   - Custom tools may exist on disk as:
-//     data/tools/<toolId>/manifest.json
-//     (some deployments may choose:
-//     data/tools/custom/<toolId>/manifest.json
-//     but the VFS interface remains the same).
-//
-// After a tool call finishes, outputs are stored under a call directory keyed by callId:
-//   - /results/<callId>/response.json
-//   - /results/<callId>/<artifact.Path>        (zero or more files)
-//   - /results/index.jsonl                     (append-only index; optional)
-//
-// "artifact" means a file produced by the tool call that can be read later (JSON, CSV, PNG, etc).
-// ToolResponse.Artifacts contains paths RELATIVE to the call directory (e.g. "quote.json" or "artifacts/quote.json").
-//
-// On-disk examples (implementation detail; for a specific runId):
-//
-//	data/runs/<runId>/results/<callId>/response.json
-//	data/runs/<runId>/results/<callId>/<artifact.Path>
-//
-// Rationale for this pattern:
-//   - avoids encoding tool IDs into path segments
-//   - guarantees uniqueness via callId
-//   - supports concurrency cleanly
-//   - tool identity is recorded in response.json (toolId/actionId), not inferred from directory structure
+// Events (see `package events`) use `types.Event` to report logs, tool usage, or debugging data.
+// The `MultiSink` abstraction allows hosts to fan-out events, and `Emitter` enforces that a
+// run ID + sink must exist before emitting. The core types in this package are intended to remain
+// stable within a major release because they define the low-level host/agent protocol. Any
+// change that would break these structs should be guarded by a clear migration or version bump.
 package types
