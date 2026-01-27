@@ -175,9 +175,14 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 	if len(m.awaitingApprovalOps) > 0 {
 		return nil
 	}
+	displayMsg := userMsg
+	submitMsg := userMsg
+	if m.swarmModeActive && !strings.HasPrefix(strings.TrimSpace(submitMsg), "/") {
+		submitMsg = "/swarm spawn " + strings.TrimSpace(submitMsg)
+	}
 	m.turnInFlight = true
 	m.turnStarted = time.Now()
-	m.turnTitle = userMsg
+	m.turnTitle = displayMsg
 	m.turnN++
 	// Reset and re-create per-turn cancel state.
 	if m.turnCancel != nil {
@@ -205,14 +210,14 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 	m.thinkingSummary = ""
 
 	if m.workflowTitle == "" {
-		m.workflowTitle = firstLine(userMsg)
+		m.workflowTitle = firstLine(displayMsg)
 	}
 
 	m.lastTurnUserItemIdx = len(m.transcriptItems)
-	m.addTranscriptItem(transcriptItem{kind: transcriptUser, text: userMsg})
+	m.addTranscriptItem(transcriptItem{kind: transcriptUser, text: displayMsg})
 
 	return func() tea.Msg {
-		final, err := m.runner.RunTurn(turnCtx, userMsg)
+		final, err := m.runner.RunTurn(turnCtx, submitMsg)
 		_ = final
 		return turnDoneMsg{final: final, err: err}
 	}

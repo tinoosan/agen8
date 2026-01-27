@@ -415,7 +415,7 @@ func (m Model) renderInput() string {
 
 	// Prefer keeping web/effort visible; truncate the model ID if needed.
 	parts := []string{modelLabel, webLabel, approvalLabel}
-	if m.swarmTabActive {
+	if m.swarmModeActive {
 		modeLabel := kit.RenderTag(kit.TagOptions{
 			Key:   "mode",
 			Value: "swarm",

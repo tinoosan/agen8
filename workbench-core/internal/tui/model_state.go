@@ -136,6 +136,7 @@ type Model struct {
 	planDetailsMarkdown string
 	planTabActive       bool
 	swarmTabActive      bool
+	swarmModeActive     bool
 	swarmViewport       viewport.Model
 	swarmLoadErr        string
 	planAutoExpanded    bool

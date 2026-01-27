@@ -567,16 +567,18 @@ func (m Model) keyToggleSwarmMode(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if msg.Type != tea.KeyShiftTab && !strings.EqualFold(msg.String(), "shift+tab") {
 		return m, nil, false
 	}
-	if !m.showDetails {
-		m.showDetails = true
-	}
-	if m.swarmTabActive {
+	if m.swarmModeActive {
+		// Turning swarm mode off.
+		m.swarmModeActive = false
 		m.swarmTabActive = false
 	} else {
+		// Turning swarm mode on activates the swarm tab and opens the right pane.
+		m.swarmModeActive = true
+		if !m.showDetails {
+			m.showDetails = true
+		}
 		m.swarmTabActive = true
 		m.planTabActive = false
-	}
-	if m.swarmTabActive {
 		m.refreshSwarmView()
 	}
 	m.layout()

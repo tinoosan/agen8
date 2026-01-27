@@ -26,6 +26,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/orchestrator"
 	"github.com/tinoosan/workbench-core/pkg/resources"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
@@ -2541,7 +2542,7 @@ func (r *tuiTurnRunner) handleSwarmCommand(arg string) (string, bool) {
 	}
 	fields := strings.Fields(arg)
 	if len(fields) == 0 {
-		return "Usage: /swarm spawn <goal> | /swarm start <runId> | /swarm stop <runId> | /swarm list", true
+		return "Usage: /swarm spawn <goal> | /swarm task <runId> <goal> | /swarm start <runId> | /swarm stop <runId> | /swarm list | /swarm sync [runId]", true
 	}
 	switch strings.ToLower(fields[0]) {
 	case "spawn":
@@ -2553,10 +2554,47 @@ func (r *tuiTurnRunner) handleSwarmCommand(arg string) (string, bool) {
 		if err != nil {
 			return "spawn failed: " + err.Error(), true
 		}
+		if _, err := orchestrator.EnqueueTask(r.cfg, run.RunId, types.Task{
+			Goal:            goal,
+			AssignedToRunID: run.RunId,
+		}); err != nil {
+			return "enqueue failed: " + err.Error(), true
+		}
 		if err := r.startSwarmWorker(run); err != nil {
 			return "worker start failed: " + err.Error(), true
 		}
+		if err := orchestrator.SyncRegistry(r.cfg, r.run.RunId); err != nil {
+			return "spawned " + run.RunId + " (sync warn: " + err.Error() + ")", true
+		}
 		return "spawned " + run.RunId, true
+	case "task":
+		if len(fields) < 3 {
+			return "Usage: /swarm task <runId> <goal>", true
+		}
+		runID := strings.TrimSpace(fields[1])
+		goal := strings.TrimSpace(strings.TrimPrefix(arg, "task"))
+		goal = strings.TrimSpace(strings.TrimPrefix(goal, runID))
+		if goal == "" {
+			return "Usage: /swarm task <runId> <goal>", true
+		}
+		if _, err := store.LoadRun(r.cfg, runID); err != nil {
+			return "load failed: " + err.Error(), true
+		}
+		if _, err := orchestrator.EnqueueTask(r.cfg, runID, types.Task{
+			Goal:            goal,
+			AssignedToRunID: runID,
+		}); err != nil {
+			return "enqueue failed: " + err.Error(), true
+		}
+		if r.swarmWorkers == nil || r.swarmWorkers[runID] == nil {
+			if run, err := store.LoadRun(r.cfg, runID); err == nil {
+				_ = r.startSwarmWorker(run) // best-effort; worker may already be running elsewhere
+			}
+		}
+		if err := orchestrator.SyncRegistry(r.cfg, r.run.RunId); err != nil {
+			return "task queued (sync warn: " + err.Error() + ")", true
+		}
+		return "task queued for " + runID, true
 	case "start":
 		if len(fields) < 2 {
 			return "Usage: /swarm start <runId>", true
@@ -2569,6 +2607,7 @@ func (r *tuiTurnRunner) handleSwarmCommand(arg string) (string, bool) {
 		if err := r.startSwarmWorker(run); err != nil {
 			return "worker start failed: " + err.Error(), true
 		}
+		_ = orchestrator.SyncRegistry(r.cfg, r.run.RunId)
 		return "started " + runID, true
 	case "stop":
 		if len(fields) < 2 {
@@ -2584,6 +2623,7 @@ func (r *tuiTurnRunner) handleSwarmCommand(arg string) (string, bool) {
 		}
 		cancel()
 		delete(r.swarmWorkers, runID)
+		_ = orchestrator.SyncRegistry(r.cfg, r.run.RunId)
 		return "stopped " + runID, true
 	case "list":
 		if r.swarmWorkers == nil || len(r.swarmWorkers) == 0 {
@@ -2595,8 +2635,17 @@ func (r *tuiTurnRunner) handleSwarmCommand(arg string) (string, bool) {
 		}
 		sort.Strings(ids)
 		return "workers: " + strings.Join(ids, ", "), true
+	case "sync":
+		target := strings.TrimSpace(r.run.RunId)
+		if len(fields) >= 2 && strings.TrimSpace(fields[1]) != "" {
+			target = strings.TrimSpace(fields[1])
+		}
+		if err := orchestrator.SyncRegistry(r.cfg, target); err != nil {
+			return "sync failed: " + err.Error(), true
+		}
+		return "synced registry", true
 	default:
-		return "Usage: /swarm spawn <goal> | /swarm start <runId> | /swarm stop <runId> | /swarm list", true
+		return "Usage: /swarm spawn <goal> | /swarm task <runId> <goal> | /swarm start <runId> | /swarm stop <runId> | /swarm list | /swarm sync [runId]", true
 	}
 }
 
