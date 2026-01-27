@@ -21,12 +21,14 @@ import (
 //  2. render with RenderMarkdown
 type ContentRenderer struct {
 	md         *markdownRenderer
+	mdAgent    *markdownRenderer
 	mdThinking *markdownRenderer
 }
 
 func newContentRenderer() *ContentRenderer {
 	return &ContentRenderer{
 		md:         newMarkdownRenderer(markdownVariantNormal),
+		mdAgent:    newMarkdownRenderer(markdownVariantAgent),
 		mdThinking: newMarkdownRenderer(markdownVariantThinking),
 	}
 }
@@ -40,6 +42,14 @@ func (r *ContentRenderer) RenderMarkdown(markdown string, width int) string {
 		return markdown
 	}
 	return r.md.render(markdown, width)
+}
+
+// RenderAgentMarkdown renders markdown for agent responses with white text.
+func (r *ContentRenderer) RenderAgentMarkdown(markdown string, width int) string {
+	if r == nil || r.mdAgent == nil {
+		return markdown
+	}
+	return r.mdAgent.render(markdown, width)
 }
 
 // RenderThinkingMarkdown renders markdown for the "thinking summary" surface.

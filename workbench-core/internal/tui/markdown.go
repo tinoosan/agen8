@@ -16,6 +16,7 @@ type markdownVariant int
 
 const (
 	markdownVariantNormal markdownVariant = iota
+	markdownVariantAgent
 	markdownVariantThinking
 )
 
@@ -127,6 +128,28 @@ func workbenchMarkdownStyle(variant markdownVariant) ansi.StyleConfig {
 	// Subtle background for code blocks to improve scannability.
 	style.CodeBlock.StylePrimitive.BackgroundColor = stringPtr("#1c1f2b")
 	style.CodeBlock.StylePrimitive.Color = stringPtr("#eaeaea")
+
+	if variant == markdownVariantAgent {
+		// Set text colors to white for agent responses
+		style.Document.Color = stringPtr("#ffffff")
+		style.Paragraph.Color = stringPtr("#ffffff")
+		style.Text.Color = stringPtr("#ffffff")
+		style.Heading.Color = stringPtr("#ffffff")
+		style.H1.Color = stringPtr("#ffffff")
+		style.H2.Color = stringPtr("#ffffff")
+		style.H3.Color = stringPtr("#ffffff")
+		style.H4.Color = stringPtr("#ffffff")
+		style.H5.Color = stringPtr("#ffffff")
+		style.H6.Color = stringPtr("#ffffff")
+		style.List.Color = stringPtr("#ffffff")
+		style.Item.Color = stringPtr("#ffffff")
+		style.Enumeration.Color = stringPtr("#ffffff")
+		style.Link.Color = stringPtr("#ffffff")
+		style.LinkText.Color = stringPtr("#ffffff")
+		style.Emph.Color = stringPtr("#ffffff")
+		style.Strong.Color = stringPtr("#ffffff")
+		style.Strikethrough.Color = stringPtr("#ffffff")
+	}
 
 	if variant == markdownVariantThinking {
 		applyThinkingMutedTheme(&style)
