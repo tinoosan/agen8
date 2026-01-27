@@ -144,7 +144,7 @@ func setupTUIChatRuntime(
 	})
 
 	// Use the default system prompt embedded in the agent package.
-	baseSystemPrompt := ""
+	baseSystemPrompt := agent.DefaultSystemPrompt()
 
 	constructor := rt.Constructor
 

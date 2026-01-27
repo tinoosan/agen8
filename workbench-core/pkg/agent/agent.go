@@ -99,7 +99,7 @@ func New(cfg Config) (*Agent, error) {
 
 	system := strings.TrimSpace(cfg.SystemPrompt)
 	if system == "" {
-		system = agentLoopV0SystemPrompt()
+		system = DefaultSystemPrompt()
 	}
 
 	extraTools, routes := ManifestToFunctionTools(cfg.ToolManifests)

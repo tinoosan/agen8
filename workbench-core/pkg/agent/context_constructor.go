@@ -169,9 +169,8 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 		return basePrompt, fmt.Errorf("context constructor missing SessionID")
 	}
 
-	basePrompt = strings.TrimSpace(basePrompt)
 	if basePrompt == "" {
-		basePrompt = agentLoopV0SystemPrompt()
+		basePrompt = DefaultSystemPrompt()
 	}
 
 	if err := c.ensureStateLoaded(ctx); err != nil {

@@ -50,7 +50,7 @@ func (a *Agent) runConversation(ctx context.Context, msgs []llm.LLMMessage, star
 
 	baseSystem := strings.TrimSpace(a.SystemPrompt)
 	if baseSystem == "" {
-		baseSystem = agentLoopV0SystemPrompt()
+		baseSystem = DefaultSystemPrompt()
 	}
 
 	msgs = append([]llm.LLMMessage(nil), msgs...)
@@ -308,7 +308,8 @@ func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
 	return final, err
 }
 
-func agentLoopV0SystemPrompt() string {
+// DefaultSystemPrompt returns the built-in system instructions for the agent.
+func DefaultSystemPrompt() string {
 	raw := `<system>
   <identity>You are a capable AI assistant running in Workbench. You have access to a virtual filesystem and powerful tools to help users accomplish a wide range of tasks—from software engineering to analysis and automation.</identity>
   <general_assistance>
