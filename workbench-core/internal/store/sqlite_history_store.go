@@ -10,6 +10,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/pkg/bytesutil"
 	"github.com/tinoosan/workbench-core/pkg/config"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
@@ -128,9 +129,9 @@ func (s *SQLiteHistoryStore) AppendLine(_ context.Context, line []byte) error {
 	return nil
 }
 
-func (s *SQLiteHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor, opts HistorySinceOptions) (HistoryBatch, error) {
+func (s *SQLiteHistoryStore) LinesSince(_ context.Context, cursor pkgstore.HistoryCursor, opts pkgstore.HistorySinceOptions) (pkgstore.HistoryBatch, error) {
 	if err := s.ensure(); err != nil {
-		return HistoryBatch{CursorAfter: cursor}, err
+		return pkgstore.HistoryBatch{CursorAfter: cursor}, err
 	}
 
 	maxBytes := opts.MaxBytes
@@ -142,9 +143,9 @@ func (s *SQLiteHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor,
 		limit = 200
 	}
 
-	offset, err := HistoryCursorToInt64(cursor)
+	offset, err := pkgstore.HistoryCursorToInt64(cursor)
 	if err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, fmt.Errorf("invalid cursor: %w", ErrInvalid)
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, fmt.Errorf("invalid cursor: %w", ErrInvalid)
 	}
 
 	rows, err := s.DB.Query(
@@ -153,7 +154,7 @@ func (s *SQLiteHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor,
 		offset,
 	)
 	if err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(offset)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(offset)}, err
 	}
 	defer rows.Close()
 
@@ -173,7 +174,7 @@ func (s *SQLiteHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor,
 		var seq int64
 		var line string
 		if err := rows.Scan(&seq, &line); err != nil {
-			return HistoryBatch{CursorAfter: HistoryCursorFromInt64(lastSeq)}, err
+			return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(lastSeq)}, err
 		}
 		linesTotal++
 		lastSeq = seq
@@ -190,12 +191,12 @@ func (s *SQLiteHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor,
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(lastSeq)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(lastSeq)}, err
 	}
 
-	return HistoryBatch{
+	return pkgstore.HistoryBatch{
 		Lines:          out,
-		CursorAfter:    HistoryCursorFromInt64(lastSeq),
+		CursorAfter:    pkgstore.HistoryCursorFromInt64(lastSeq),
 		BytesRead:      bytesRead,
 		LinesTotal:     linesTotal,
 		Returned:       len(out),
@@ -204,9 +205,9 @@ func (s *SQLiteHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor,
 	}, nil
 }
 
-func (s *SQLiteHistoryStore) LinesLatest(_ context.Context, opts HistoryLatestOptions) (HistoryBatch, error) {
+func (s *SQLiteHistoryStore) LinesLatest(_ context.Context, opts pkgstore.HistoryLatestOptions) (pkgstore.HistoryBatch, error) {
 	if err := s.ensure(); err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, err
 	}
 
 	maxBytes := opts.MaxBytes
@@ -224,7 +225,7 @@ func (s *SQLiteHistoryStore) LinesLatest(_ context.Context, opts HistoryLatestOp
 		limit,
 	)
 	if err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, err
 	}
 	defer rows.Close()
 
@@ -240,7 +241,7 @@ func (s *SQLiteHistoryStore) LinesLatest(_ context.Context, opts HistoryLatestOp
 		var seq int64
 		var line string
 		if err := rows.Scan(&seq, &line); err != nil {
-			return HistoryBatch{CursorAfter: HistoryCursorFromInt64(lastSeq)}, err
+			return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(lastSeq)}, err
 		}
 		linesTotal++
 		if seq > lastSeq {
@@ -259,7 +260,7 @@ func (s *SQLiteHistoryStore) LinesLatest(_ context.Context, opts HistoryLatestOp
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(lastSeq)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(lastSeq)}, err
 	}
 
 	// Reverse to chronological order.
@@ -267,9 +268,9 @@ func (s *SQLiteHistoryStore) LinesLatest(_ context.Context, opts HistoryLatestOp
 		lines[i], lines[j] = lines[j], lines[i]
 	}
 
-	return HistoryBatch{
+	return pkgstore.HistoryBatch{
 		Lines:          lines,
-		CursorAfter:    HistoryCursorFromInt64(lastSeq),
+		CursorAfter:    pkgstore.HistoryCursorFromInt64(lastSeq),
 		BytesRead:      bytesRead,
 		LinesTotal:     linesTotal,
 		Returned:       len(lines),

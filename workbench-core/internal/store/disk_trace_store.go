@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/bytesutil"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
@@ -49,13 +50,13 @@ func (s DiskTraceStore) ensure() error {
 	return ds.EnsureDir(s.Dir, "events.jsonl")
 }
 
-func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts TraceSinceOptions) (TraceBatch, error) {
+func (s DiskTraceStore) EventsSince(_ context.Context, cursor pkgstore.TraceCursor, opts pkgstore.TraceSinceOptions) (pkgstore.TraceBatch, error) {
 	if err := s.ensure(); err != nil {
-		return TraceBatch{}, err
+		return pkgstore.TraceBatch{}, err
 	}
-	offset, err := TraceCursorToInt64(cursor)
+	offset, err := pkgstore.TraceCursorToInt64(cursor)
 	if err != nil {
-		return TraceBatch{}, fmt.Errorf("disk trace store: invalid cursor: %w", ErrInvalid)
+		return pkgstore.TraceBatch{}, fmt.Errorf("disk trace store: invalid cursor: %w", ErrInvalid)
 	}
 
 	maxBytes := opts.MaxBytes
@@ -71,15 +72,15 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts 
 	f, err := os.Open(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return TraceBatch{CursorAfter: TraceCursorFromInt64(offset)}, nil
+			return pkgstore.TraceBatch{CursorAfter: pkgstore.TraceCursorFromInt64(offset)}, nil
 		}
-		return TraceBatch{}, err
+		return pkgstore.TraceBatch{}, err
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		return TraceBatch{}, err
+		return pkgstore.TraceBatch{}, err
 	}
 	size := info.Size()
 	if offset > size {
@@ -87,14 +88,14 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts 
 	}
 
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return TraceBatch{}, err
+		return pkgstore.TraceBatch{}, err
 	}
 
 	lr := io.LimitReader(f, int64(maxBytes))
 	r := bufio.NewReader(lr)
 
 	var (
-		events        []TraceEvent
+		events        []pkgstore.TraceEvent
 		bytesConsumed int64
 		linesTotal    int
 		parsed        int
@@ -108,7 +109,7 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts 
 			if errors.Is(readErr, io.EOF) {
 				break
 			}
-			return TraceBatch{}, readErr
+			return pkgstore.TraceBatch{}, readErr
 		}
 
 		// If we hit the maxBytes cap mid-line, do NOT consume the partial line.
@@ -133,7 +134,7 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts 
 			parseErrors++
 		} else {
 			parsed++
-			events = append(events, TraceEvent{
+			events = append(events, pkgstore.TraceEvent{
 				Timestamp: ev.Timestamp.UTC().Format(time.RFC3339Nano),
 				Type:      ev.Type,
 				Message:   ev.Message,
@@ -152,9 +153,9 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts 
 	}
 	truncated := cursorAfter < size
 
-	return TraceBatch{
+	return pkgstore.TraceBatch{
 		Events:         events,
-		CursorAfter:    TraceCursorFromInt64(cursorAfter),
+		CursorAfter:    pkgstore.TraceCursorFromInt64(cursorAfter),
 		BytesRead:      int(bytesConsumed),
 		LinesTotal:     linesTotal,
 		Parsed:         parsed,
@@ -165,9 +166,9 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor TraceCursor, opts 
 	}, nil
 }
 
-func (s DiskTraceStore) EventsLatest(_ context.Context, opts TraceLatestOptions) (TraceBatch, error) {
+func (s DiskTraceStore) EventsLatest(_ context.Context, opts pkgstore.TraceLatestOptions) (pkgstore.TraceBatch, error) {
 	if err := s.ensure(); err != nil {
-		return TraceBatch{}, err
+		return pkgstore.TraceBatch{}, err
 	}
 
 	maxBytes := opts.MaxBytes
@@ -183,19 +184,19 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts TraceLatestOptions)
 	f, err := os.Open(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return TraceBatch{CursorAfter: TraceCursorFromInt64(0)}, nil
+			return pkgstore.TraceBatch{CursorAfter: pkgstore.TraceCursorFromInt64(0)}, nil
 		}
-		return TraceBatch{}, err
+		return pkgstore.TraceBatch{}, err
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		return TraceBatch{}, err
+		return pkgstore.TraceBatch{}, err
 	}
 	size := info.Size()
 	if size == 0 {
-		return TraceBatch{CursorAfter: TraceCursorFromInt64(0)}, nil
+		return pkgstore.TraceBatch{CursorAfter: pkgstore.TraceCursorFromInt64(0)}, nil
 	}
 
 	readSize := int64(maxBytes)
@@ -204,11 +205,11 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts TraceLatestOptions)
 	}
 	start := size - readSize
 	if _, err := f.Seek(start, io.SeekStart); err != nil {
-		return TraceBatch{}, err
+		return pkgstore.TraceBatch{}, err
 	}
 	b, err := io.ReadAll(f)
 	if err != nil {
-		return TraceBatch{}, err
+		return pkgstore.TraceBatch{}, err
 	}
 
 	// Split into lines; first line may be partial if we started mid-file.
@@ -216,7 +217,7 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts TraceLatestOptions)
 	linesTotal := 0
 	parsed := 0
 	parseErrors := 0
-	var parsedEvents []TraceEvent
+	var parsedEvents []pkgstore.TraceEvent
 
 	// Parse in order, skipping empty/partial prefixes that fail to unmarshal.
 	for _, ln := range rawLines {
@@ -231,7 +232,7 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts TraceLatestOptions)
 			continue
 		}
 		parsed++
-		parsedEvents = append(parsedEvents, TraceEvent{
+		parsedEvents = append(parsedEvents, pkgstore.TraceEvent{
 			Timestamp: ev.Timestamp.UTC().Format(time.RFC3339Nano),
 			Type:      ev.Type,
 			Message:   ev.Message,
@@ -244,9 +245,9 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts TraceLatestOptions)
 		parsedEvents = parsedEvents[len(parsedEvents)-limit:]
 	}
 
-	return TraceBatch{
+	return pkgstore.TraceBatch{
 		Events:         parsedEvents,
-		CursorAfter:    TraceCursorFromInt64(size),
+		CursorAfter:    pkgstore.TraceCursorFromInt64(size),
 		BytesRead:      len(b),
 		LinesTotal:     linesTotal,
 		Parsed:         parsed,

@@ -8,6 +8,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
@@ -66,14 +67,14 @@ func (s *DiskMemoryStore) AppendMemory(ctx context.Context, text string) error {
 }
 
 func (s *DiskMemoryStore) ensurePlan() error {
-	return s.EnsureFile(filepath.Join(s.Dir, PlanFileName))
+	return s.EnsureFile(filepath.Join(s.Dir, pkgstore.PlanFileName))
 }
 
 func (s *DiskMemoryStore) GetPlan(ctx context.Context) (string, error) {
 	if err := s.ensurePlan(); err != nil {
 		return "", err
 	}
-	b, err := os.ReadFile(filepath.Join(s.Dir, PlanFileName))
+	b, err := os.ReadFile(filepath.Join(s.Dir, pkgstore.PlanFileName))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
@@ -87,5 +88,5 @@ func (s *DiskMemoryStore) SetPlan(ctx context.Context, text string) error {
 	if err := s.ensurePlan(); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.Dir, PlanFileName), []byte(text), 0644)
+	return os.WriteFile(filepath.Join(s.Dir, pkgstore.PlanFileName), []byte(text), 0644)
 }

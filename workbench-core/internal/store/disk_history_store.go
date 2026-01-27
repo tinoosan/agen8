@@ -12,6 +12,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/bytesutil"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
@@ -96,9 +97,9 @@ func (s *DiskHistoryStore) AppendLine(_ context.Context, line []byte) error {
 	return err
 }
 
-func (s *DiskHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor, opts HistorySinceOptions) (HistoryBatch, error) {
+func (s *DiskHistoryStore) LinesSince(_ context.Context, cursor pkgstore.HistoryCursor, opts pkgstore.HistorySinceOptions) (pkgstore.HistoryBatch, error) {
 	if err := s.ensure(); err != nil {
-		return HistoryBatch{CursorAfter: cursor}, err
+		return pkgstore.HistoryBatch{CursorAfter: cursor}, err
 	}
 
 	maxBytes := opts.MaxBytes
@@ -110,30 +111,30 @@ func (s *DiskHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor, o
 		limit = 200
 	}
 
-	offset, err := HistoryCursorToInt64(cursor)
+	offset, err := pkgstore.HistoryCursorToInt64(cursor)
 	if err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, fmt.Errorf("invalid cursor: %w", ErrInvalid)
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, fmt.Errorf("invalid cursor: %w", ErrInvalid)
 	}
 
 	f, err := os.Open(s.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return HistoryBatch{CursorAfter: HistoryCursorFromInt64(offset)}, nil
+			return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(offset)}, nil
 		}
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(offset)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(offset)}, err
 	}
 	defer f.Close()
 
 	st, err := f.Stat()
 	if err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(offset)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(offset)}, err
 	}
 	size := st.Size()
 	if offset > size {
 		offset = size
 	}
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(offset)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(offset)}, err
 	}
 
 	r := bufio.NewReader(f)
@@ -164,7 +165,7 @@ func (s *DiskHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor, o
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return HistoryBatch{CursorAfter: HistoryCursorFromInt64(offset)}, err
+			return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(offset)}, err
 		}
 	}
 
@@ -173,9 +174,9 @@ func (s *DiskHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor, o
 		after = size
 	}
 
-	return HistoryBatch{
+	return pkgstore.HistoryBatch{
 		Lines:          out,
-		CursorAfter:    HistoryCursorFromInt64(after),
+		CursorAfter:    pkgstore.HistoryCursorFromInt64(after),
 		BytesRead:      bytesRead,
 		LinesTotal:     linesTotal,
 		Returned:       len(out),
@@ -184,9 +185,9 @@ func (s *DiskHistoryStore) LinesSince(_ context.Context, cursor HistoryCursor, o
 	}, nil
 }
 
-func (s *DiskHistoryStore) LinesLatest(_ context.Context, opts HistoryLatestOptions) (HistoryBatch, error) {
+func (s *DiskHistoryStore) LinesLatest(_ context.Context, opts pkgstore.HistoryLatestOptions) (pkgstore.HistoryBatch, error) {
 	if err := s.ensure(); err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, err
 	}
 
 	maxBytes := opts.MaxBytes
@@ -201,19 +202,19 @@ func (s *DiskHistoryStore) LinesLatest(_ context.Context, opts HistoryLatestOpti
 	f, err := os.Open(s.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, nil
+			return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, nil
 		}
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, err
 	}
 	defer f.Close()
 
 	st, err := f.Stat()
 	if err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, err
 	}
 	size := st.Size()
 	if size == 0 {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, nil
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, nil
 	}
 
 	start := size - int64(maxBytes)
@@ -221,7 +222,7 @@ func (s *DiskHistoryStore) LinesLatest(_ context.Context, opts HistoryLatestOpti
 		start = 0
 	}
 	if _, err := f.Seek(start, io.SeekStart); err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, err
 	}
 
 	// If we started mid-line, discard the partial first line for clean JSONL parsing.
@@ -230,7 +231,7 @@ func (s *DiskHistoryStore) LinesLatest(_ context.Context, opts HistoryLatestOpti
 	}
 	b, err := io.ReadAll(io.LimitReader(f, int64(maxBytes)))
 	if err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, err
 	}
 
 	sc := bufio.NewScanner(bytes.NewReader(b))
@@ -244,7 +245,7 @@ func (s *DiskHistoryStore) LinesLatest(_ context.Context, opts HistoryLatestOpti
 		lines = append(lines, append([]byte(nil), line...))
 	}
 	if err := sc.Err(); err != nil {
-		return HistoryBatch{CursorAfter: HistoryCursorFromInt64(0)}, err
+		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, err
 	}
 
 	// Keep last N lines.
@@ -254,9 +255,9 @@ func (s *DiskHistoryStore) LinesLatest(_ context.Context, opts HistoryLatestOpti
 		truncated = true
 	}
 
-	return HistoryBatch{
+	return pkgstore.HistoryBatch{
 		Lines:          lines,
-		CursorAfter:    HistoryCursorFromInt64(size),
+		CursorAfter:    pkgstore.HistoryCursorFromInt64(size),
 		BytesRead:      len(b),
 		LinesTotal:     len(lines),
 		Returned:       len(lines),

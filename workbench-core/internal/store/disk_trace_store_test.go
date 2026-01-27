@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 )
 
 func TestDiskTraceStore_EventsSince_CursorAdvancesDeterministically(t *testing.T) {
@@ -38,11 +40,11 @@ func TestDiskTraceStore_EventsSince_CursorAdvancesDeterministically(t *testing.T
 	}
 
 	s := DiskTraceStore{DiskStore: DiskStore{Dir: dir}}
-	batch1, err := s.EventsSince(context.Background(), TraceCursorFromInt64(0), TraceSinceOptions{MaxBytes: 1024, Limit: 10})
+	batch1, err := s.EventsSince(context.Background(), pkgstore.TraceCursorFromInt64(0), pkgstore.TraceSinceOptions{MaxBytes: 1024, Limit: 10})
 	if err != nil {
 		t.Fatalf("EventsSince: %v", err)
 	}
-	after1, err := TraceCursorToInt64(batch1.CursorAfter)
+	after1, err := pkgstore.TraceCursorToInt64(batch1.CursorAfter)
 	if err != nil {
 		t.Fatalf("TraceCursorToInt64: %v", err)
 	}
@@ -54,7 +56,7 @@ func TestDiskTraceStore_EventsSince_CursorAdvancesDeterministically(t *testing.T
 	}
 
 	// Calling again from cursorAfter should return no new events and keep cursor stable.
-	batch2, err := s.EventsSince(context.Background(), batch1.CursorAfter, TraceSinceOptions{MaxBytes: 1024, Limit: 10})
+	batch2, err := s.EventsSince(context.Background(), batch1.CursorAfter, pkgstore.TraceSinceOptions{MaxBytes: 1024, Limit: 10})
 	if err != nil {
 		t.Fatalf("EventsSince: %v", err)
 	}
@@ -67,7 +69,7 @@ func TestDiskTraceStore_EventsSince_CursorAdvancesDeterministically(t *testing.T
 }
 
 func TestTraceCursorToInt64_Invalid_IsErrInvalid(t *testing.T) {
-	_, err := TraceCursorToInt64(TraceCursor("not-a-number"))
+	_, err := pkgstore.TraceCursorToInt64(pkgstore.TraceCursor("not-a-number"))
 	if err == nil {
 		t.Fatalf("expected error")
 	}
