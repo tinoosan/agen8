@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -140,11 +141,26 @@ func (w *Worker) writeTask(ctx context.Context, taskPath string, task types.Task
 }
 
 func (w *Worker) processTask(ctx context.Context, taskPath string, task types.Task) error {
-	final, err := w.cfg.Agent.Run(ctx, strings.TrimSpace(task.Goal))
+	taskID := strings.TrimSpace(task.TaskID)
+	if taskID == "" {
+		taskID = strings.TrimSuffix(path.Base(taskPath), path.Ext(taskPath))
+	}
+	perTaskAgent := w.agentForTask(task)
+
+	goal := strings.TrimSpace(task.Goal)
+	if goal == "" {
+		return w.writeResult(ctx, task, types.TaskResult{
+			TaskID: taskID,
+			RunID:  strings.TrimSpace(task.AssignedToRunID),
+			Status: "failed",
+			Error:  "task goal is empty",
+		})
+	}
+	final, err := perTaskAgent.Run(ctx, goal)
 	now := time.Now()
 	result := types.TaskResult{
-		TaskID:      task.TaskID,
-		RunID:       task.AssignedToRunID,
+		TaskID:      taskID,
+		RunID:       strings.TrimSpace(task.AssignedToRunID),
 		Status:      "succeeded",
 		Summary:     strings.TrimSpace(final),
 		CompletedAt: &now,
@@ -171,7 +187,11 @@ func (w *Worker) writeResult(ctx context.Context, task types.Task, result types.
 	if outbox == "" {
 		outbox = "/outbox"
 	}
-	filename := "result-" + strings.TrimSpace(task.TaskID) + ".json"
+	taskID := strings.TrimSpace(task.TaskID)
+	if taskID == "" {
+		taskID = "task"
+	}
+	filename := "result-" + taskID + ".json"
 	resultPath := path.Join(outbox, filename)
 	b, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
@@ -186,4 +206,149 @@ func (w *Worker) writeResult(ctx context.Context, task types.Task, result types.
 		return fmt.Errorf("write result: %s", resp.Error)
 	}
 	return nil
+}
+
+func (w *Worker) agentForTask(task types.Task) *Agent {
+	agent := w.cfg.Agent
+	if agent == nil {
+		return agent
+	}
+	skills := extractStringList(task.Metadata, "skills")
+	allowedTools := extractStringList(task.Metadata, "allowedTools")
+	if len(skills) == 0 && len(allowedTools) == 0 {
+		return agent
+	}
+	copyAgent := *agent
+	if len(allowedTools) > 0 {
+		copyAgent.ToolRegistry = filterToolRegistry(agent.ToolRegistry, allowedTools)
+		copyAgent.ExtraTools = filterExtraTools(agent.ExtraTools, allowedTools)
+	}
+	if len(skills) > 0 || len(allowedTools) > 0 {
+		copyAgent.SystemPrompt = appendWorkerHints(agent.SystemPrompt, skills, allowedTools)
+	}
+	return &copyAgent
+}
+
+func appendWorkerHints(base string, skills []string, allowedTools []string) string {
+	base = strings.TrimSpace(base)
+	if len(skills) == 0 && len(allowedTools) == 0 {
+		return base
+	}
+	lines := []string{}
+	if len(skills) > 0 {
+		lines = append(lines, "Preferred skills: "+strings.Join(skills, ", "))
+	}
+	if len(allowedTools) > 0 {
+		lines = append(lines, "Allowed tools: "+strings.Join(allowedTools, ", "))
+	}
+	if len(lines) == 0 {
+		return base
+	}
+	return base + "\n\n<worker>\n" + strings.Join(lines, "\n") + "\n</worker>"
+}
+
+func extractStringList(meta map[string]any, key string) []string {
+	if meta == nil {
+		return nil
+	}
+	raw, ok := meta[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []string:
+		return normalizeList(v)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return normalizeList(out)
+	case string:
+		parts := strings.Split(v, ",")
+		return normalizeList(parts)
+	default:
+		return nil
+	}
+}
+
+func normalizeList(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, v := range in {
+		s := strings.TrimSpace(v)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func filterToolRegistry(reg *ToolRegistry, allowed []string) *ToolRegistry {
+	if reg == nil {
+		return reg
+	}
+	allow := buildAllowedSet(allowed)
+	out := NewToolRegistry()
+	for name, tool := range reg.tools {
+		if !allow(name) {
+			continue
+		}
+		_ = out.Register(tool)
+	}
+	for name, route := range reg.routes {
+		if !allow(name) {
+			continue
+		}
+		out.routes[name] = route
+	}
+	return out
+}
+
+func filterExtraTools(tools []llm.Tool, allowed []string) []llm.Tool {
+	if len(tools) == 0 || len(allowed) == 0 {
+		return tools
+	}
+	allow := buildAllowedSet(allowed)
+	out := make([]llm.Tool, 0, len(tools))
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Function.Name)
+		if name == "" {
+			continue
+		}
+		if allow(name) {
+			out = append(out, tool)
+		}
+	}
+	return out
+}
+
+func buildAllowedSet(allowed []string) func(name string) bool {
+	normalized := map[string]bool{}
+	for _, raw := range allowed {
+		if raw == "" {
+			continue
+		}
+		val := strings.ToLower(strings.TrimSpace(raw))
+		normalized[val] = true
+		normalized[strings.ReplaceAll(val, ".", "_")] = true
+	}
+	return func(name string) bool {
+		if len(normalized) == 0 {
+			return true
+		}
+		lower := strings.ToLower(strings.TrimSpace(name))
+		if normalized[lower] {
+			return true
+		}
+		if normalized[strings.ReplaceAll(lower, ".", "_")] {
+			return true
+		}
+		return false
+	}
 }
