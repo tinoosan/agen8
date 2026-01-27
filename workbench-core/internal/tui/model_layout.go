@@ -85,7 +85,9 @@ func (m *Model) layout() {
 
 		m.activityList.SetWidth(max(24, innerW))
 		m.planViewport.Width = max(24, innerW)
+		m.swarmViewport.Width = max(24, innerW)
 		m.planViewport.Height = max(1, contentH)
+		m.swarmViewport.Height = max(1, contentH)
 
 		// Split the inner height between list and details.
 		//
@@ -201,6 +203,7 @@ func (m *Model) layout() {
 	}
 	m.refreshActivityDetail()
 	m.refreshPlanView()
+	m.refreshSwarmView()
 
 	// Recompute once after content/layout changes so the footer measurement stays correct
 	// for the next resize cycle.
@@ -269,7 +272,9 @@ func (m Model) renderBody() string {
 	// which makes the header appear to "disappear" when Activity is toggled.
 	tabBar := m.renderRightPaneTabs()
 	var rightContent string
-	if m.planTabActive {
+	if m.swarmTabActive {
+		rightContent = m.swarmViewport.View()
+	} else if m.planTabActive {
 		rightContent = m.planViewport.View()
 	} else {
 		rightContent = lipgloss.JoinVertical(lipgloss.Top, m.activityList.View(), m.activityDetail.View())
@@ -299,15 +304,22 @@ func (m Model) renderBody() string {
 func (m Model) renderRightPaneTabs() string {
 	activity := "Activity"
 	plan := "Plan"
-	var activityTab, planTab string
-	if m.planTabActive {
+	swarm := "Swarm"
+	var activityTab, planTab, swarmTab string
+	if m.swarmTabActive {
+		activityTab = m.styleRightTabInactive.Render(activity)
+		planTab = m.styleRightTabInactive.Render(plan)
+		swarmTab = m.styleRightTabActive.Render(swarm)
+	} else if m.planTabActive {
 		activityTab = m.styleRightTabInactive.Render(activity)
 		planTab = m.styleRightTabActive.Render(plan)
+		swarmTab = m.styleRightTabInactive.Render(swarm)
 	} else {
 		activityTab = m.styleRightTabActive.Render(activity)
 		planTab = m.styleRightTabInactive.Render(plan)
+		swarmTab = m.styleRightTabInactive.Render(swarm)
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, activityTab, "  ", planTab)
+	return lipgloss.JoinHorizontal(lipgloss.Top, activityTab, "  ", planTab, "  ", swarmTab)
 }
 
 func (m Model) renderInput() string {
@@ -403,6 +415,17 @@ func (m Model) renderInput() string {
 
 	// Prefer keeping web/effort visible; truncate the model ID if needed.
 	parts := []string{modelLabel, webLabel, approvalLabel}
+	if m.swarmTabActive {
+		modeLabel := kit.RenderTag(kit.TagOptions{
+			Key:   "mode",
+			Value: "swarm",
+			Styles: kit.TagStyles{
+				KeyStyle:   lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Bold(true),
+				ValueStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")),
+			},
+		})
+		parts = append(parts, modeLabel)
+	}
 	if effortLabel != "" {
 		parts = append(parts, effortLabel)
 	}
@@ -465,9 +488,9 @@ func (m Model) renderInput() string {
 		focusName = "activity"
 	}
 
-	hintText := "shift+tab plan  ctrl+a activity  tab focus  ctrl+g multiline enter send  ctrl+c quit"
+	hintText := "shift+tab swarm  ctrl+a activity  tab focus  ctrl+g multiline enter send  ctrl+c quit"
 	if m.showDetails {
-		hintText = "ctrl+] tabs  ctrl+a hide activity  tab focus  esc close  j/k↑/↓ select  e/enter expand  o open file  pgup/pgdn scroll  ctrl+t telemetry"
+		hintText = "ctrl+] tabs  shift+tab swarm  ctrl+a hide activity  tab focus  esc close  j/k↑/↓ select  e/enter expand  o open file  pgup/pgdn scroll  ctrl+t telemetry"
 	} else {
 		hintText = "pgup/pgdn scroll  " + hintText
 	}

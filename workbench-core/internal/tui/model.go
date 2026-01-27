@@ -65,6 +65,10 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	planView.Style = lipgloss.NewStyle()
 	planView.MouseWheelEnabled = true
 
+	swarmView := viewport.New(0, 0)
+	swarmView.Style = lipgloss.NewStyle()
+	swarmView.MouseWheelEnabled = true
+
 	helpVp := viewport.New(0, 0)
 	helpVp.Style = lipgloss.NewStyle()
 	helpVp.MouseWheelEnabled = true
@@ -142,6 +146,7 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 		activityList:   activity,
 		activityDetail: details,
 		planViewport:   planView,
+		swarmViewport:  swarmView,
 		helpViewport:   helpVp,
 		// Default: start with the activity panel closed. Users can toggle it with
 		// Ctrl+A, or enable it by default via WORKBENCH_ACTIVITY/--activity.
@@ -833,6 +838,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 			// #endregion agent log
 			m.planTabActive = true
+			m.swarmTabActive = false
 			if !m.showDetails {
 				m.showDetails = true
 				m.focus = focusInput
@@ -989,7 +995,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			leftW := m.transcript.Width
 			if msg.X >= leftW {
 				var cmd tea.Cmd
-				if m.planTabActive {
+				if m.swarmTabActive {
+					m.swarmViewport, cmd = m.swarmViewport.Update(msg)
+				} else if m.planTabActive {
 					m.planViewport, cmd = m.planViewport.Update(msg)
 				} else {
 					m.activityDetail, cmd = m.activityDetail.Update(msg)

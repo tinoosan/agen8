@@ -64,6 +64,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if mm, cmd, ok := m.keyToggleActivityPanel(msg); ok {
 		return mm, cmd
 	}
+	if mm, cmd, ok := m.keyToggleSwarmMode(msg); ok {
+		return mm, cmd
+	}
 	if mm, cmd, ok := m.keyTogglePlanView(msg); ok {
 		return mm, cmd
 	}
@@ -493,6 +496,11 @@ func (m Model) keyTranscriptScrollKeys(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if msg.Type != tea.KeyPgUp && msg.Type != tea.KeyPgDown && msg.Type != tea.KeyCtrlU && msg.Type != tea.KeyCtrlF {
 		return m, nil, false
 	}
+	if m.showDetails && m.swarmTabActive {
+		var cmd tea.Cmd
+		m.swarmViewport, cmd = m.swarmViewport.Update(msg)
+		return m, cmd, true
+	}
 	if m.showDetails && m.planTabActive {
 		var cmd tea.Cmd
 		m.planViewport, cmd = m.planViewport.Update(msg)
@@ -538,11 +546,41 @@ func (m Model) keyTogglePlanView(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	if strings.EqualFold(msg.String(), "ctrl+]") {
-		m.planTabActive = !m.planTabActive
+		if m.planTabActive {
+			m.planTabActive = false
+			m.swarmTabActive = true
+		} else if m.swarmTabActive {
+			m.swarmTabActive = false
+		} else {
+			m.planTabActive = true
+		}
+		if m.swarmTabActive {
+			m.refreshSwarmView()
+		}
 		m.layout()
 		return m, nil, true
 	}
 	return m, nil, false
+}
+
+func (m Model) keyToggleSwarmMode(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	if msg.Type != tea.KeyShiftTab && !strings.EqualFold(msg.String(), "shift+tab") {
+		return m, nil, false
+	}
+	if !m.showDetails {
+		m.showDetails = true
+	}
+	if m.swarmTabActive {
+		m.swarmTabActive = false
+	} else {
+		m.swarmTabActive = true
+		m.planTabActive = false
+	}
+	if m.swarmTabActive {
+		m.refreshSwarmView()
+	}
+	m.layout()
+	return m, nil, true
 }
 
 func (m Model) keyEscClosesPanels(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
