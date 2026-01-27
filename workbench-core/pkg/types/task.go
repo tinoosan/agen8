@@ -13,6 +13,9 @@ type Task struct {
 	Priority        string            `json:"priority,omitempty"`
 	Status          string            `json:"status,omitempty"`
 	CreatedAt       *time.Time        `json:"createdAt,omitempty"`
+	StartedAt       *time.Time        `json:"startedAt,omitempty"`
+	CompletedAt     *time.Time        `json:"completedAt,omitempty"`
+	Error           string            `json:"error,omitempty"`
 	Deadline        *time.Time        `json:"deadline,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
 }
