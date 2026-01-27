@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
-	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 
 func TestTUITurnRunner_Reasoning_UpdatesAgentAndSession(t *testing.T) {
@@ -28,7 +28,7 @@ func TestTUITurnRunner_Reasoning_UpdatesAgentAndSession(t *testing.T) {
 		fs:   vfs.NewFS(),
 		run:  run,
 		opts: resolveRunChatOptions(WithModel("openai/gpt-5.1-codex-mini")),
-		agent: &agent.Agent{
+		agent: &agent.DefaultAgent{
 			Model: "openai/gpt-5.1-codex-mini",
 		},
 		model:            "openai/gpt-5.1-codex-mini",
@@ -43,8 +43,8 @@ func TestTUITurnRunner_Reasoning_UpdatesAgentAndSession(t *testing.T) {
 	if r.opts.ReasoningEffort != "high" {
 		t.Fatalf("opts.ReasoningEffort=%q, want %q", r.opts.ReasoningEffort, "high")
 	}
-	if r.agent.ReasoningEffort != "high" {
-		t.Fatalf("agent.ReasoningEffort=%q, want %q", r.agent.ReasoningEffort, "high")
+	if r.agent.GetReasoningEffort() != "high" {
+		t.Fatalf("agent.ReasoningEffort=%q, want %q", r.agent.GetReasoningEffort(), "high")
 	}
 
 	if _, handled := r.handleSlashCommand("/reasoning summary concise"); !handled {
@@ -53,8 +53,8 @@ func TestTUITurnRunner_Reasoning_UpdatesAgentAndSession(t *testing.T) {
 	if r.opts.ReasoningSummary != "concise" {
 		t.Fatalf("opts.ReasoningSummary=%q, want %q", r.opts.ReasoningSummary, "concise")
 	}
-	if r.agent.ReasoningSummary != "concise" {
-		t.Fatalf("agent.ReasoningSummary=%q, want %q", r.agent.ReasoningSummary, "concise")
+	if r.agent.GetReasoningSummary() != "concise" {
+		t.Fatalf("agent.ReasoningSummary=%q, want %q", r.agent.GetReasoningSummary(), "concise")
 	}
 
 	updated, err := store.LoadSession(cfg, sess.SessionID)
@@ -94,7 +94,7 @@ func TestTUITurnRunner_Reasoning_Info(t *testing.T) {
 		fs:   vfs.NewFS(),
 		run:  run,
 		opts: resolveRunChatOptions(WithModel("openai/gpt-5.1-codex-mini")),
-		agent: &agent.Agent{
+		agent: &agent.DefaultAgent{
 			Model: "openai/gpt-5.1-codex-mini",
 		},
 		model:            "openai/gpt-5.1-codex-mini",

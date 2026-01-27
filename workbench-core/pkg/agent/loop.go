@@ -11,8 +11,8 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
-// Agent is the minimalist streaming loop: stream the model response, execute its tool calls, and return the final text.
-type Agent struct {
+// DefaultAgent is the minimalist streaming loop: stream the model response, execute its tool calls, and return the final text.
+type DefaultAgent struct {
 	LLM  llm.LLMClient
 	Exec HostExecutor
 
@@ -30,11 +30,11 @@ type Agent struct {
 }
 
 // RunConversation executes the agent loop for an existing conversation.
-func (a *Agent) RunConversation(ctx context.Context, msgs []llm.LLMMessage) (final string, updated []llm.LLMMessage, steps int, err error) {
+func (a *DefaultAgent) RunConversation(ctx context.Context, msgs []llm.LLMMessage) (final string, updated []llm.LLMMessage, steps int, err error) {
 	return a.runConversation(ctx, msgs, 1)
 }
 
-func (a *Agent) runConversation(ctx context.Context, msgs []llm.LLMMessage, startStep int) (final string, updated []llm.LLMMessage, steps int, err error) {
+func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessage, startStep int) (final string, updated []llm.LLMMessage, steps int, err error) {
 	if a == nil || a.LLM == nil {
 		return "", nil, 0, fmt.Errorf("agent LLM is required")
 	}
@@ -196,7 +196,7 @@ func (a *Agent) runConversation(ctx context.Context, msgs []llm.LLMMessage, star
 	}
 }
 
-func (a *Agent) streamToAccumulator(ctx context.Context, step int, req llm.LLMRequest) (llm.LLMResponse, error) {
+func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req llm.LLMRequest) (llm.LLMResponse, error) {
 	s, ok := a.LLM.(llm.LLMClientStreaming)
 	if !ok {
 		return llm.LLMResponse{}, fmt.Errorf("LLM client does not support streaming")
@@ -298,7 +298,7 @@ func isDangerousHostOp(req types.HostOpRequest) bool {
 }
 
 // Run executes the agent loop for a single user goal and returns the final response text.
-func (a *Agent) Run(ctx context.Context, goal string) (string, error) {
+func (a *DefaultAgent) Run(ctx context.Context, goal string) (string, error) {
 	if err := validate.NonEmpty("goal", goal); err != nil {
 		return "", err
 	}

@@ -85,8 +85,8 @@ type Config struct {
 	Hooks Hooks
 }
 
-// New constructs an Agent from a validated config.
-func New(cfg Config) (*Agent, error) {
+// New constructs an Agent from a validated config (default role).
+func New(cfg Config) (Agent, error) {
 	if cfg.LLM == nil {
 		return nil, fmt.Errorf("agent LLM is required")
 	}
@@ -149,7 +149,7 @@ func New(cfg Config) (*Agent, error) {
 		return nil, err
 	}
 
-	return &Agent{
+	return &DefaultAgent{
 		LLM:              cfg.LLM,
 		Exec:             cfg.Exec,
 		Model:            cfg.Model,

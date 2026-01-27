@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
-	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 
 func TestLazyRunner_Web_TogglesWithoutInitializingSession(t *testing.T) {
@@ -67,7 +67,7 @@ func TestTUITurnRunner_Web_TogglesAndUpdatesAgent(t *testing.T) {
 		fs:   vfs.NewFS(),
 		run:  fakeRunForTests(),
 		opts: resolveRunChatOptions(WithModel("openai/gpt-5.1-codex-mini")),
-		agent: &agent.Agent{
+		agent: &agent.DefaultAgent{
 			Model:           "openai/gpt-5.1-codex-mini",
 			EnableWebSearch: false,
 		},
@@ -80,7 +80,7 @@ func TestTUITurnRunner_Web_TogglesAndUpdatesAgent(t *testing.T) {
 	if r.opts.WebSearchEnabled {
 		t.Fatalf("expected opts.WebSearchEnabled default off")
 	}
-	if r.agent.EnableWebSearch {
+	if r.agent.WebSearchEnabled() {
 		t.Fatalf("expected agent.EnableWebSearch default off")
 	}
 
@@ -94,7 +94,7 @@ func TestTUITurnRunner_Web_TogglesAndUpdatesAgent(t *testing.T) {
 	if !r.opts.WebSearchEnabled {
 		t.Fatalf("expected opts.WebSearchEnabled on after toggle")
 	}
-	if !r.agent.EnableWebSearch {
+	if !r.agent.WebSearchEnabled() {
 		t.Fatalf("expected agent.EnableWebSearch on after toggle")
 	}
 
@@ -116,4 +116,3 @@ func TestTUITurnRunner_Web_TogglesAndUpdatesAgent(t *testing.T) {
 func fakeRunForTests() (run types.Run) {
 	return types.Run{RunId: "run-test", SessionID: "sess-test"}
 }
-

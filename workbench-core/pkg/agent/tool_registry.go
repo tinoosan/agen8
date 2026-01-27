@@ -24,6 +24,22 @@ func NewToolRegistry() *ToolRegistry {
 	}
 }
 
+// Clone returns a shallow copy of the registry with copies of the maps so mutations
+// on the clone do not affect the original.
+func (r *ToolRegistry) Clone() *ToolRegistry {
+	if r == nil {
+		return nil
+	}
+	out := NewToolRegistry()
+	for k, v := range r.tools {
+		out.tools[k] = v
+	}
+	for k, v := range r.routes {
+		out.routes[k] = v
+	}
+	return out
+}
+
 // Register adds a HostTool to the registry by its Definition() name.
 func (r *ToolRegistry) Register(tool HostTool) error {
 	if r == nil {

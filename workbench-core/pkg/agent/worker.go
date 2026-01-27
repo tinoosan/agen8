@@ -15,7 +15,7 @@ import (
 
 // WorkerConfig configures a task-processing worker that polls /inbox and writes to /outbox.
 type WorkerConfig struct {
-	Agent        *Agent
+	Agent        Agent
 	PollInterval time.Duration
 	InboxPath    string
 	OutboxPath   string
@@ -91,7 +91,7 @@ func (w *Worker) runOnce(ctx context.Context) error {
 }
 
 func (w *Worker) listInbox(ctx context.Context) ([]string, error) {
-	resp := w.cfg.Agent.Exec.Exec(ctx, types.HostOpRequest{
+	resp := w.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
 		Op:   types.HostOpFSList,
 		Path: w.cfg.InboxPath,
 	})
@@ -109,7 +109,7 @@ func (w *Worker) listInbox(ctx context.Context) ([]string, error) {
 }
 
 func (w *Worker) readTask(ctx context.Context, taskPath string) (types.Task, bool) {
-	resp := w.cfg.Agent.Exec.Exec(ctx, types.HostOpRequest{
+	resp := w.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
 		Op:       types.HostOpFSRead,
 		Path:     taskPath,
 		MaxBytes: w.cfg.MaxReadBytes,
@@ -129,7 +129,7 @@ func (w *Worker) writeTask(ctx context.Context, taskPath string, task types.Task
 	if err != nil {
 		return err
 	}
-	resp := w.cfg.Agent.Exec.Exec(ctx, types.HostOpRequest{
+	resp := w.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
 		Op:   types.HostOpFSWrite,
 		Path: taskPath,
 		Text: string(b),
@@ -197,7 +197,7 @@ func (w *Worker) writeResult(ctx context.Context, task types.Task, result types.
 	if err != nil {
 		return err
 	}
-	resp := w.cfg.Agent.Exec.Exec(ctx, types.HostOpRequest{
+	resp := w.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
 		Op:   types.HostOpFSWrite,
 		Path: resultPath,
 		Text: string(b),
@@ -208,25 +208,25 @@ func (w *Worker) writeResult(ctx context.Context, task types.Task, result types.
 	return nil
 }
 
-func (w *Worker) agentForTask(task types.Task) *Agent {
-	agent := w.cfg.Agent
-	if agent == nil {
-		return agent
+func (w *Worker) agentForTask(task types.Task) Agent {
+	base := w.cfg.Agent
+	if base == nil {
+		return base
 	}
 	skills := extractStringList(task.Metadata, "skills")
 	allowedTools := extractStringList(task.Metadata, "allowedTools")
 	if len(skills) == 0 && len(allowedTools) == 0 {
-		return agent
+		return base
 	}
-	copyAgent := *agent
+	cloned := base.Clone()
 	if len(allowedTools) > 0 {
-		copyAgent.ToolRegistry = filterToolRegistry(agent.ToolRegistry, allowedTools)
-		copyAgent.ExtraTools = filterExtraTools(agent.ExtraTools, allowedTools)
+		cloned.SetToolRegistry(filterToolRegistry(base.GetToolRegistry(), allowedTools))
+		cloned.SetExtraTools(filterExtraTools(base.GetExtraTools(), allowedTools))
 	}
 	if len(skills) > 0 || len(allowedTools) > 0 {
-		copyAgent.SystemPrompt = appendWorkerHints(agent.SystemPrompt, skills, allowedTools)
+		cloned.SetSystemPrompt(appendWorkerHints(base.GetSystemPrompt(), skills, allowedTools))
 	}
-	return &copyAgent
+	return cloned
 }
 
 func appendWorkerHints(base string, skills []string, allowedTools []string) string {

@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
-	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 
 func TestLazyRunner_Model_DoesNotInitializeSession(t *testing.T) {
@@ -123,7 +123,7 @@ func TestTUITurnRunner_Model_UpdatesAgentAndSession(t *testing.T) {
 		fs:   vfs.NewFS(),
 		run:  run,
 		opts: resolveRunChatOptions(WithModel("openai/gpt-5.2")),
-		agent: &agent.Agent{
+		agent: &agent.DefaultAgent{
 			Model: "openai/gpt-5.2",
 		},
 		model:            "openai/gpt-5.2",
@@ -138,8 +138,8 @@ func TestTUITurnRunner_Model_UpdatesAgentAndSession(t *testing.T) {
 	if r.model != "openai/gpt-4o" {
 		t.Fatalf("runner model=%q, want %q", r.model, "openai/gpt-4o")
 	}
-	if r.agent.Model != "openai/gpt-4o" {
-		t.Fatalf("agent model=%q, want %q", r.agent.Model, "openai/gpt-4o")
+	if r.agent.GetModel() != "openai/gpt-4o" {
+		t.Fatalf("agent model=%q, want %q", r.agent.GetModel(), "openai/gpt-4o")
 	}
 
 	updated, err := store.LoadSession(cfg, sess.SessionID)
@@ -170,7 +170,7 @@ func TestTUITurnRunner_Model_InvalidDoesNotChange(t *testing.T) {
 		fs:   vfs.NewFS(),
 		run:  types.Run{RunId: "run-test", SessionID: "sess-test"},
 		opts: resolveRunChatOptions(WithModel("openai/gpt-5.2")),
-		agent: &agent.Agent{
+		agent: &agent.DefaultAgent{
 			Model: "openai/gpt-5.2",
 		},
 		model:            "openai/gpt-5.2",
@@ -185,8 +185,8 @@ func TestTUITurnRunner_Model_InvalidDoesNotChange(t *testing.T) {
 	if r.model != "openai/gpt-5.2" {
 		t.Fatalf("runner model=%q, want unchanged", r.model)
 	}
-	if r.agent.Model != "openai/gpt-5.2" {
-		t.Fatalf("agent model=%q, want unchanged", r.agent.Model)
+	if r.agent.GetModel() != "openai/gpt-5.2" {
+		t.Fatalf("agent model=%q, want unchanged", r.agent.GetModel())
 	}
 
 	for _, ev := range got {

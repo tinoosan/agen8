@@ -1500,7 +1500,7 @@ type tuiTurnRunner struct {
 
 	fs *vfs.FS
 
-	agent            *agent.Agent
+	agent            agent.Agent
 	baseSystemPrompt string
 	model            string
 	setHistoryModel  func(model string)
@@ -1623,12 +1623,12 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	// Refresh session state and inject it so the agent stays coherent across runs.
 	if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
 		if blk := agent.SessionContextBlock(sess); strings.TrimSpace(blk) != "" {
-			r.agent.SystemPrompt = strings.TrimSpace(r.baseSystemPrompt) + "\n\n" + blk + "\n"
+			r.agent.SetSystemPrompt(strings.TrimSpace(r.baseSystemPrompt) + "\n\n" + blk + "\n")
 		} else {
-			r.agent.SystemPrompt = r.baseSystemPrompt
+			r.agent.SetSystemPrompt(r.baseSystemPrompt)
 		}
 	} else {
-		r.agent.SystemPrompt = r.baseSystemPrompt
+		r.agent.SetSystemPrompt(r.baseSystemPrompt)
 	}
 
 	r.turn++
@@ -1696,7 +1696,10 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 	boolp := func(b bool) *bool { return &b }
 
 	var turnUsage llm.LLMUsage
-	r.agent.Hooks.OnLLMUsage = func(step int, usage llm.LLMUsage) {
+	hooks := r.agent.GetHooks()
+	r.agent.SetHooks(*hooks) // ensure non-nil
+	hooks = r.agent.GetHooks()
+	hooks.OnLLMUsage = func(step int, usage llm.LLMUsage) {
 		turnUsage.InputTokens += usage.InputTokens
 		turnUsage.OutputTokens += usage.OutputTokens
 		turnUsage.TotalTokens += usage.TotalTokens
@@ -1716,7 +1719,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 
 	// Emit a UI-only activity entry when the provider returns web citations.
 	// This is the best available signal that web-search grounding actually occurred.
-	r.agent.Hooks.OnWebSearch = func(step int, citations []llm.LLMCitation) {
+	hooks.OnWebSearch = func(step int, citations []llm.LLMCitation) {
 		if len(citations) == 0 {
 			return
 		}
@@ -1776,7 +1779,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 			Console: boolp(false),
 		})
 	}
-	r.agent.Hooks.OnToken = func(step int, text string) {
+	hooks.OnToken = func(step int, text string) {
 		_ = step
 		if text == "" {
 			return
@@ -1873,7 +1876,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 		// #endregion
 	}
 
-	r.agent.Hooks.OnStreamChunk = func(step int, chunk llm.LLMStreamChunk) {
+	hooks.OnStreamChunk = func(step int, chunk llm.LLMStreamChunk) {
 		if chunk.Done {
 			if thinkingActive {
 				emitThinkingEnd(step)
@@ -1921,6 +1924,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 			emitThinkingSummary()
 		}
 	}
+	r.agent.SetHooks(*hooks)
 	defer func() {
 		emitTokenBuf()
 		// Best-effort flush of thinking summary/indicator.
@@ -1928,8 +1932,10 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 			emitThinkingEnd(thinkingStep)
 		}
 		// Avoid leaking the callback into subsequent turns.
-		r.agent.Hooks.OnToken = nil
-		r.agent.Hooks.OnStreamChunk = nil
+		h := r.agent.GetHooks()
+		h.OnToken = nil
+		h.OnStreamChunk = nil
+		r.agent.SetHooks(*h)
 	}()
 
 	final := ""
@@ -2125,7 +2131,7 @@ func (r *tuiTurnRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest,
 	if r.agent == nil {
 		return types.HostOpResponse{}, fmt.Errorf("agent not initialized")
 	}
-	resp := r.agent.Exec.Exec(ctx, req)
+	resp := r.agent.ExecHostOp(ctx, req)
 	hostRespJSON, _ := types.MarshalPretty(resp)
 	r.conversation = append(r.conversation, llm.LLMMessage{
 		Role:       "tool",
@@ -2217,7 +2223,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		}
 		r.opts.WebSearchEnabled = !r.opts.WebSearchEnabled
 		if r.agent != nil {
-			r.agent.EnableWebSearch = r.opts.WebSearchEnabled
+			r.agent.SetEnableWebSearch(r.opts.WebSearchEnabled)
 		}
 		state := "off"
 		if r.opts.WebSearchEnabled {
@@ -2284,7 +2290,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		r.model = next
 		r.opts.Model = next
 		if r.agent != nil {
-			r.agent.Model = next
+			r.agent.SetModel(next)
 		}
 		if r.setHistoryModel != nil {
 			r.setHistoryModel(next)
@@ -2310,7 +2316,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			"to":          strings.TrimSpace(next),
 			"runnerModel": strings.TrimSpace(r.model),
 			"optsModel":   strings.TrimSpace(r.opts.Model),
-			"agentModel":  strings.TrimSpace(r.agent.Model),
+			"agentModel":  strings.TrimSpace(r.agent.GetModel()),
 			"runRuntimeModel": func() string {
 				if r.run.Runtime == nil {
 					return ""
@@ -2363,8 +2369,8 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			r.opts.ReasoningEffort = strings.TrimSpace(curEffort)
 			r.opts.ReasoningSummary = strings.TrimSpace(curSummary)
 			if r.agent != nil {
-				r.agent.ReasoningEffort = strings.TrimSpace(curEffort)
-				r.agent.ReasoningSummary = strings.TrimSpace(curSummary)
+				r.agent.SetReasoningEffort(strings.TrimSpace(curEffort))
+				r.agent.SetReasoningSummary(strings.TrimSpace(curSummary))
 			}
 
 			// Persist to run + session state (best-effort)
@@ -2438,7 +2444,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		}
 		r.opts.ApprovalsMode = val
 		if r.agent != nil {
-			r.agent.ApprovalsMode = val
+			r.agent.SetApprovalsMode(val)
 		}
 		if r.run.Runtime == nil {
 			r.run.Runtime = &types.RunRuntimeConfig{}

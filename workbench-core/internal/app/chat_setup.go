@@ -23,7 +23,7 @@ import (
 type tuiChatSetup struct {
 	FS *vfs.FS
 
-	Agent            *agent.Agent
+	Agent            agent.Agent
 	BaseSystemPrompt string
 	Constructor      *agent.ContextConstructor
 
