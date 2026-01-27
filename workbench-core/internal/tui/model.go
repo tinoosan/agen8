@@ -1213,6 +1213,44 @@ func (m *Model) appendDetails(line string) {
 	_ = line
 }
 
+func (m *Model) shouldSkipTranscriptTurn(userText, agentText string) bool {
+	userText = strings.TrimSpace(userText)
+	agentText = strings.TrimSpace(agentText)
+	if userText == "" && agentText == "" {
+		return true
+	}
+
+	lastUser := ""
+	lastAgent := ""
+	for i := len(m.transcriptItems) - 1; i >= 0; i-- {
+		it := m.transcriptItems[i]
+		switch it.kind {
+		case transcriptUser:
+			if lastUser == "" {
+				lastUser = strings.TrimSpace(it.text)
+			}
+		case transcriptAgent:
+			if lastAgent == "" {
+				lastAgent = strings.TrimSpace(it.text)
+			}
+		}
+		if lastUser != "" && lastAgent != "" {
+			break
+		}
+	}
+
+	// If both user and agent already match the tail, skip.
+	if userText != "" && userText == lastUser {
+		if agentText == "" || agentText == lastAgent {
+			return true
+		}
+	}
+	if userText == "" && agentText != "" && agentText == lastAgent {
+		return true
+	}
+	return false
+}
+
 func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	rr := classifyEvent(ev)
 	m.observeActivityEvent(ev)
@@ -1241,6 +1279,9 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	if ev.Type == "transcript.turn" {
 		u := strings.TrimSpace(ev.Data["user"])
 		a := strings.TrimSpace(ev.Data["agent"])
+		if m.shouldSkipTranscriptTurn(u, a) {
+			return m.waitEvent()
+		}
 		if u != "" {
 			m.addTranscriptItemWithScroll(transcriptItem{kind: transcriptUser, text: u}, false)
 		}
