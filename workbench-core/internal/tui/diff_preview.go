@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
-	"github.com/pmezard/go-difflib/difflib"
-	"github.com/sourcegraph/go-diff/diff"
+	"github.com/hexops/gotextdiff"
+	"github.com/hexops/gotextdiff/myers"
+	"github.com/hexops/gotextdiff/span"
 )
 
 const (
@@ -21,7 +23,14 @@ func buildFileChangePreview(op, path, before, after string, hadBefore bool, afte
 	// - fs.patch: host previews the patch itself
 	// - fs.write/fs.append/fs.edit: host may provide a diff to avoid client-side races
 	if strings.TrimSpace(patchPreview) != "" && !patchRedacted {
-		// Stats should reflect the full diff (not the capped preview).
+		preview, statsAdded, statsDeleted, ok := renderUnifiedPreview(patchPreview)
+		if ok {
+			added, deleted = statsAdded, statsDeleted
+			body, tr := capLines(preview, maxDiffLines)
+			truncated = tr || patchTruncated
+			return wrapDiffFence(body), truncated, added, deleted
+		}
+		// Fallback to the raw preview if parsing fails.
 		added, deleted = diffStat(patchPreview)
 		body, tr := capLines(patchPreview, maxDiffLines)
 		truncated = tr || patchTruncated
@@ -41,26 +50,20 @@ func buildFileChangePreview(op, path, before, after string, hadBefore bool, afte
 		toFile = "b" + path
 	}
 
-	ud := difflib.UnifiedDiff{
-		A:        difflib.SplitLines(normalizeNewlines(before)),
-		B:        difflib.SplitLines(normalizeNewlines(after)),
-		FromFile: fromFile,
-		ToFile:   toFile,
-		Context:  3,
-	}
-	diffText, _ := difflib.GetUnifiedDiffString(ud)
-	diffText = strings.TrimSpace(diffText)
-	if diffText == "" {
+	before = normalizeNewlines(before)
+	after = normalizeNewlines(after)
+	edits := myers.ComputeEdits(span.URIFromPath(path), before, after)
+	ud := gotextdiff.ToUnified(fromFile, toFile, before, edits)
+	preview, statsAdded, statsDeleted := renderUnified(ud)
+	if strings.TrimSpace(preview) == "" {
 		// Still render a diff block so UX is consistent even when the write/patch
 		// doesn't change content.
-		return "```diff\n(no changes)\n```", false, 0, 0
+		return "```text\n(no changes)\n```", false, 0, 0
 	}
-
-	// Stats should reflect the full diff (not the capped preview).
-	added, deleted = diffStat(diffText)
-	diffText, tr := capLines(diffText, maxDiffLines)
+	added, deleted = statsAdded, statsDeleted
+	preview, tr := capLines(preview, maxDiffLines)
 	truncated = tr || afterTruncated
-	return "```diff\n" + strings.TrimRight(diffText, "\n") + "\n```", truncated, added, deleted
+	return wrapDiffFence(preview), truncated, added, deleted
 }
 
 func normalizeNewlines(s string) string {
@@ -73,25 +76,7 @@ func diffStat(unified string) (added int, deleted int) {
 	if unified == "" {
 		return 0, 0
 	}
-	// Prefer ParseFileDiff for "bare" unified diffs (---/+++/@@) without a leading
-	// `diff --git` header. This is the format produced by our difflib renderer.
-	if fd, err := diff.ParseFileDiff([]byte(unified)); err == nil && fd != nil {
-		st := fd.Stat()
-		// go-diff treats adjacent '-' + '+' as a "Changed" line (replacement).
-		// For our UI, we want Cursor-like (+A -D) counts where a replacement counts
-		// as one deletion and one addition.
-		return int(st.Added + st.Changed), int(st.Deleted + st.Changed)
-	}
-	// Fallback: multi-file parse (git-style diffs).
-	if fds, err := diff.ParseMultiFileDiff([]byte(unified)); err == nil && len(fds) != 0 {
-		for _, fd := range fds {
-			st := fd.Stat()
-			added += int(st.Added + st.Changed)
-			deleted += int(st.Deleted + st.Changed)
-		}
-		return added, deleted
-	}
-	// Fallback (best-effort): count line prefixes in the unified diff text.
+	// Best-effort: count line prefixes in the unified diff text.
 	for _, ln := range strings.Split(strings.ReplaceAll(unified, "\r\n", "\n"), "\n") {
 		if strings.HasPrefix(ln, "+++") || strings.HasPrefix(ln, "---") {
 			continue
@@ -106,6 +91,212 @@ func diffStat(unified string) (added int, deleted int) {
 		}
 	}
 	return added, deleted
+}
+
+type numberedLine struct {
+	kind    gotextdiff.OpKind
+	lineNo  int
+	content string
+	meta    bool
+}
+
+func renderUnified(u gotextdiff.Unified) (string, int, int) {
+	lines, added, deleted := numberedLinesFromUnified(u)
+	if len(lines) == 0 {
+		return "", 0, 0
+	}
+	return renderNumberedLines(lines), added, deleted
+}
+
+func numberedLinesFromUnified(u gotextdiff.Unified) ([]numberedLine, int, int) {
+	var lines []numberedLine
+	added := 0
+	deleted := 0
+	for hIdx, h := range u.Hunks {
+		if hIdx > 0 {
+			lines = append(lines, numberedLine{meta: true})
+		}
+		fromLine := h.FromLine
+		toLine := h.ToLine
+		for _, ln := range h.Lines {
+			entry := numberedLine{kind: ln.Kind, content: ln.Content}
+			switch ln.Kind {
+			case gotextdiff.Delete:
+				entry.lineNo = fromLine
+				fromLine++
+				deleted++
+			case gotextdiff.Insert:
+				entry.lineNo = toLine
+				toLine++
+				added++
+			default:
+				entry.lineNo = toLine
+				fromLine++
+				toLine++
+			}
+			lines = append(lines, entry)
+			if !strings.HasSuffix(ln.Content, "\n") {
+				lines = append(lines, numberedLine{meta: true, content: "\\ No newline at end of file"})
+			}
+		}
+	}
+	return lines, added, deleted
+}
+
+func renderUnifiedPreview(unified string) (string, int, int, bool) {
+	lines, added, deleted := parseUnifiedNumberedLines(unified)
+	if len(lines) == 0 {
+		return "", 0, 0, false
+	}
+	return renderNumberedLines(lines), added, deleted, true
+}
+
+func parseUnifiedNumberedLines(unified string) ([]numberedLine, int, int) {
+	var lines []numberedLine
+	added := 0
+	deleted := 0
+	fromLine := 0
+	toLine := 0
+	inHunk := false
+	for _, raw := range strings.Split(strings.ReplaceAll(unified, "\r\n", "\n"), "\n") {
+		line := strings.TrimRight(raw, "\r")
+		if strings.HasPrefix(line, "@@") {
+			startFrom, startTo, ok := parseHunkHeader(line)
+			if !ok {
+				inHunk = false
+				continue
+			}
+			if len(lines) > 0 {
+				lines = append(lines, numberedLine{meta: true})
+			}
+			fromLine = startFrom
+			toLine = startTo
+			inHunk = true
+			continue
+		}
+		if !inHunk {
+			continue
+		}
+		if line == "\\ No newline at end of file" {
+			lines = append(lines, numberedLine{meta: true, content: line})
+			continue
+		}
+		if line == "" {
+			continue
+		}
+		prefix := line[0]
+		content := ""
+		if len(line) > 1 {
+			content = line[1:]
+		}
+		switch prefix {
+		case '-':
+			lines = append(lines, numberedLine{kind: gotextdiff.Delete, lineNo: fromLine, content: content})
+			fromLine++
+			deleted++
+		case '+':
+			lines = append(lines, numberedLine{kind: gotextdiff.Insert, lineNo: toLine, content: content})
+			toLine++
+			added++
+		case ' ':
+			lines = append(lines, numberedLine{kind: gotextdiff.Equal, lineNo: toLine, content: content})
+			fromLine++
+			toLine++
+		default:
+			// Ignore unrecognized lines inside hunks.
+		}
+	}
+	return lines, added, deleted
+}
+
+func parseHunkHeader(line string) (fromLine int, toLine int, ok bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 3 {
+		return 0, 0, false
+	}
+	if fields[0] != "@@" {
+		return 0, 0, false
+	}
+	fromSpec := strings.TrimPrefix(fields[1], "-")
+	toSpec := strings.TrimPrefix(fields[2], "+")
+	fromLine, okFrom := parseHunkLineNumber(fromSpec)
+	toLine, okTo := parseHunkLineNumber(toSpec)
+	if !okFrom || !okTo {
+		return 0, 0, false
+	}
+	return fromLine, toLine, true
+}
+
+func parseHunkLineNumber(spec string) (int, bool) {
+	if spec == "" {
+		return 0, false
+	}
+	if idx := strings.IndexByte(spec, ','); idx >= 0 {
+		spec = spec[:idx]
+	}
+	return parsePositiveInt(spec)
+}
+
+func parsePositiveInt(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, true
+}
+
+func renderNumberedLines(lines []numberedLine) string {
+	maxLine := 0
+	for _, ln := range lines {
+		if ln.lineNo > maxLine {
+			maxLine = ln.lineNo
+		}
+	}
+	width := 1
+	if maxLine > 9 {
+		width = 1
+		for n := maxLine; n > 0; n /= 10 {
+			width++
+		}
+		width--
+	}
+	var b strings.Builder
+	for i, ln := range lines {
+		if ln.meta {
+			b.WriteString(ln.content)
+		} else {
+			prefix := " "
+			switch ln.kind {
+			case gotextdiff.Delete:
+				prefix = "-"
+			case gotextdiff.Insert:
+				prefix = "+"
+			default:
+				prefix = " "
+			}
+			content := strings.TrimSuffix(ln.content, "\n")
+			fmt.Fprintf(&b, "%s%*d | %s", prefix, width, ln.lineNo, content)
+		}
+		if i != len(lines)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func wrapDiffFence(body string) string {
+	body = strings.TrimRight(body, "\n")
+	if strings.TrimSpace(body) == "" {
+		return "```text\n(no changes)\n```"
+	}
+	return "```diff\n" + body + "\n```"
 }
 
 func capLines(s string, max int) (string, bool) {

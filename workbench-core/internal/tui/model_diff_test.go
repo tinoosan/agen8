@@ -93,16 +93,13 @@ func TestTranscript_FileWrite_EmitsDiffBlock(t *testing.T) {
 	if !strings.HasPrefix(raw, "scratch/a.txt  +1 -1") {
 		t.Fatalf("expected file-change header %q, got:\n%s", "scratch/a.txt  +1 -1", raw)
 	}
-	// Glamour renders code blocks without literal ``` fences; assert diff markers.
+	// Glamour renders code blocks without literal ``` fences; assert numbered diff markers.
 	view := updated3.transcript.View()
-	if !strings.Contains(view, "--- a/scratch/a.txt") || !strings.Contains(view, "+++ b/scratch/a.txt") {
-		t.Fatalf("expected transcript to contain unified diff headers, got:\n%s", view)
+	if !strings.Contains(view, "-2 | there") {
+		t.Fatalf("expected diff to include removed line with number, got:\n%s", view)
 	}
-	if !strings.Contains(view, "-there") && !strings.Contains(view, "-there\n") {
-		t.Fatalf("expected diff to include removed line, got:\n%s", view)
-	}
-	if !strings.Contains(view, "+world") {
-		t.Fatalf("expected diff to include added line, got:\n%s", view)
+	if !strings.Contains(view, "+2 | world") {
+		t.Fatalf("expected diff to include added line with number, got:\n%s", view)
 	}
 }
 
@@ -158,8 +155,8 @@ func TestTranscript_FileWrite_Create_ShowsDevNullDiff(t *testing.T) {
 		t.Fatalf("expected file-change header %q, got:\n%s", "scratch/new.txt  +1 -0", raw)
 	}
 	view := updated3.transcript.View()
-	if !strings.Contains(view, "--- /dev/null") || !strings.Contains(view, "+++ b/scratch/new.txt") {
-		t.Fatalf("expected /dev/null create diff headers, got:\n%s", view)
+	if !strings.Contains(view, "+1 | hello") {
+		t.Fatalf("expected create diff to include numbered added line, got:\n%s", view)
 	}
 }
 
@@ -281,11 +278,11 @@ func TestTranscript_FilePatch_EmitsPatchBlock(t *testing.T) {
 		t.Fatalf("expected file-change header %q, got:\n%s", "scratch/b.txt  +1 -1", raw)
 	}
 	view := updated3.transcript.View()
-	// Glamour renders code blocks without literal ``` fences; assert patch markers.
-	if !strings.Contains(view, "--- a/b.txt") || !strings.Contains(view, "+++ b/b.txt") {
-		t.Fatalf("expected transcript to contain patch headers, got:\n%s", view)
+	// Glamour renders code blocks without literal ``` fences; assert numbered patch markers.
+	if !strings.Contains(view, "-1 | before") {
+		t.Fatalf("expected patch to include numbered removed line, got:\n%s", view)
 	}
-	if !strings.Contains(view, "@@") {
-		t.Fatalf("expected patch to be rendered, got:\n%s", view)
+	if !strings.Contains(view, "+1 | after") {
+		t.Fatalf("expected patch to include numbered added line, got:\n%s", view)
 	}
 }
