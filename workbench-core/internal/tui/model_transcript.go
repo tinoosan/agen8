@@ -103,8 +103,7 @@ func (m *Model) rebuildTranscript() {
 			// Important: do not prefix "agent>" inside the markdown source, otherwise
 			// fenced blocks (```json) stop being recognized by the markdown parser.
 			rendered := strings.Trim(m.renderer.RenderAgentMarkdown(strings.TrimSpace(it.text), agentInnerW), "\n")
-			body := m.styleAgent.Render(rendered)
-			lines = append(lines, m.styleAgentBox.Render(body))
+			lines = append(lines, m.styleAgentBox.Render(rendered))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		case transcriptThinking:
 			// Thinking indicator + optional summary (dimmed + subtle gutter).
