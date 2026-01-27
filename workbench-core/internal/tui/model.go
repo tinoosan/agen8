@@ -969,9 +969,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Note: During streaming, wasAtBottom tracking already keeps us at the bottom naturally.
 		m.turnTitle = ""
 		m.turnCancelRequested = false
-		if !msg.preserveScroll {
-			m.scrollToCurrentTurnStart()
-		}
 		return m, nil
 	}
 
@@ -1235,6 +1232,10 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	if ev.Type == "session.title.changed" {
 		if v := strings.TrimSpace(ev.Data["sessionTitle"]); v != "" {
 			m.sessionTitle = v
+		}
+		m.layout()
+		if m.sessionPickerOpen {
+			return m.fetchSessionsList()
 		}
 	}
 	// Model identifier comes from agent.loop.start (host source of truth).

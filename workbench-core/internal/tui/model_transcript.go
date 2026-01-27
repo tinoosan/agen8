@@ -23,6 +23,10 @@ func splitThinkingText(s string) (header string, summary string) {
 }
 
 func (m *Model) addTranscriptItem(it transcriptItem) {
+	m.addTranscriptItemWithScroll(it, true)
+}
+
+func (m *Model) addTranscriptItemWithScroll(it transcriptItem, autoScroll bool) {
 	wasAtBottom := m.transcript.AtBottom()
 	wasEmpty := len(m.transcriptItems) == 0
 
@@ -37,7 +41,7 @@ func (m *Model) addTranscriptItem(it transcriptItem) {
 	if wasEmpty {
 		// For the first item, keep the top visible (avoid "first message is cut off").
 		m.transcript.SetYOffset(0)
-	} else if wasAtBottom {
+	} else if autoScroll && wasAtBottom {
 		m.transcript.GotoBottom()
 	}
 }

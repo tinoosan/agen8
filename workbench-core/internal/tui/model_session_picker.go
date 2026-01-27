@@ -118,16 +118,20 @@ func (m *Model) openSessionPicker() tea.Cmd {
 	m.sessionPickerList = l
 	m.layout()
 
-	return func() tea.Msg {
-		sessions, err := m.runner.ListSessions(m.ctx)
-		return sessionsListMsg{sessions: sessions, err: err}
-	}
+	return m.fetchSessionsList()
 }
 
 func (m *Model) closeSessionPicker() {
 	m.sessionPickerOpen = false
 	m.sessionPickerList = list.Model{}
 	m.sessionPickerErr = ""
+}
+
+func (m *Model) fetchSessionsList() tea.Cmd {
+	return func() tea.Msg {
+		sessions, err := m.runner.ListSessions(m.ctx)
+		return sessionsListMsg{sessions: sessions, err: err}
+	}
 }
 
 func (m *Model) selectSessionFromPicker() tea.Cmd {

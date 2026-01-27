@@ -58,7 +58,7 @@ func cursorDebugLog(hypothesisId, location, message string, data map[string]any)
 }
 
 const (
-	sessionTitleModel     = "openai/gpt-5-nano"
+	sessionTitleModel     = "openai/gpt-4.1-nano"
 	sessionTitleMaxTokens = 256
 )
 
@@ -101,10 +101,10 @@ func generateSessionTitle(ctx context.Context, userMsg string) (string, error) {
 
 	req := llm.LLMRequest{
 		Model:       sessionTitleModel,
-		System:      "Create a short, descriptive session title. Use 3-8 words. Return only the title.",
+		System:      "You are a title generator. Summarize the user's message into a short session title (3-8 words). Output only the title text. Do not reply to the user, do not use greetings, do not add punctuation at the end, and do not include quotes or extra words.",
 		Messages:    []llm.LLMMessage{{Role: "user", Content: userMsg}},
 		MaxTokens:   sessionTitleMaxTokens,
-		Temperature: 0.2,
+		Temperature: 0.0,
 	}
 
 	var out strings.Builder

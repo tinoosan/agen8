@@ -518,7 +518,7 @@ func TestTranscript_FirstUserMessageVisibleAtTop(t *testing.T) {
 	}
 }
 
-func TestTranscript_ScrollAnchorsToTurnStartOnCompletion(t *testing.T) {
+func TestTranscript_ScrollStaysAtBottomOnCompletion(t *testing.T) {
 	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
 	// Small viewport to force scrolling with a long agent message.
 	m.width = 120
@@ -543,8 +543,8 @@ func TestTranscript_ScrollAnchorsToTurnStartOnCompletion(t *testing.T) {
 		t.Fatalf("expected transcriptItemStartLine to include user item")
 	}
 	want := updated.transcriptItemStartLine[updated.lastTurnUserItemIdx]
-	if updated.transcript.YOffset != want {
-		t.Fatalf("expected YOffset to anchor to turn start %d, got %d", want, updated.transcript.YOffset)
+	if updated.transcript.YOffset <= want {
+		t.Fatalf("expected YOffset to remain at bottom (> %d), got %d", want, updated.transcript.YOffset)
 	}
 }
 
