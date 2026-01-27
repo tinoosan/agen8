@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/internal/store"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
-	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 
 // ContentEvaluator evaluates whether an agent-written update.md should be committed.
@@ -27,13 +27,13 @@ type ContentCommitter interface {
 	AppendCommitLog(ctx context.Context, line types.MemoryCommitLine) error
 }
 
-type memoryCommitterAdapter struct{ store.MemoryCommitter }
+type memoryCommitterAdapter struct{ pkgstore.MemoryCommitter }
 
 func (a memoryCommitterAdapter) AppendContent(ctx context.Context, text string) error {
 	return a.MemoryCommitter.AppendMemory(ctx, text)
 }
 
-type profileCommitterAdapter struct{ store.ProfileCommitter }
+type profileCommitterAdapter struct{ pkgstore.ProfileCommitter }
 
 func (a profileCommitterAdapter) AppendContent(ctx context.Context, text string) error {
 	return a.ProfileCommitter.AppendProfile(ctx, text)

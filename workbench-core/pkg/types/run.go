@@ -93,6 +93,9 @@ type RunRuntimeConfig struct {
 	ReasoningEffort  string `json:"reasoningEffort,omitempty"`
 	ReasoningSummary string `json:"reasoningSummary,omitempty"`
 
+	// SelectedSkill records the active skill for this run.
+	SelectedSkill string `json:"selectedSkill,omitempty"`
+
 	// ApprovalsMode records whether the agent required approvals during this run.
 	ApprovalsMode string `json:"approvalsMode,omitempty"`
 

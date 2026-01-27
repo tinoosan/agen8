@@ -1230,6 +1230,14 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 			m.approvalsMode = v
 		}
 	}
+	// Skill selection can change via /skill or TUI picker.
+	if ev.Type == "skill.changed" {
+		m.selectedSkill = strings.TrimSpace(ev.Data["skill"])
+	}
+	// Skill selection can be initialized from skill.info event.
+	if ev.Type == "skill.info" {
+		m.selectedSkill = strings.TrimSpace(ev.Data["skill"])
+	}
 	// Plan mode can change via /plan command.
 	if ev.Type == "plan.mode.changed" {
 		state := strings.ToLower(strings.TrimSpace(ev.Data["state"]))

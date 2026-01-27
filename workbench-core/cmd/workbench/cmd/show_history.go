@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tinoosan/workbench-core/internal/store"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 )
 
 var showHistoryTail int
@@ -32,7 +33,7 @@ var showHistoryCmd = &cobra.Command{
 		if limit <= 0 {
 			limit = 50
 		}
-		batch, err := hs.LinesLatest(cmd.Context(), store.HistoryLatestOptions{MaxBytes: 64 * 1024, Limit: limit})
+		batch, err := hs.LinesLatest(cmd.Context(), pkgstore.HistoryLatestOptions{MaxBytes: 64 * 1024, Limit: limit})
 		if err != nil {
 			return err
 		}

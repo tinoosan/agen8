@@ -189,9 +189,11 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	memorySection, memoryTotals := c.memorySection()
 	attachSection, attachTotals := c.attachmentsSection()
 	skillsSection, skillsTotals := c.skillsSection()
+	activeSkillSection, activeSkillTotals := c.activeSkillSection(ctx)
 
 	sections := []string{
 		basePrompt,
+		activeSkillSection,
 		profileSection,
 		memorySection,
 		attachSection,
@@ -208,6 +210,7 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 			"memory.bytes":      memoryTotals,
 			"attachments.bytes": attachTotals,
 			"skills.bytes":      skillsTotals,
+			"active_skill.bytes": activeSkillTotals,
 			"trace.selected":    strconv.Itoa(traceSelected),
 			"trace.capped":      strconv.Itoa(traceCapped),
 			"trace.excluded":    strconv.Itoa(traceExcluded),
@@ -225,6 +228,40 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 		}
 	}
 	return out, nil
+}
+
+func (c *ContextConstructor) activeSkillSection(ctx context.Context) (section string, totals string) {
+	if c == nil || c.SkillsManager == nil {
+		return "", "0"
+	}
+	if !c.sessionCachedOK || c.sessionCachedID != c.SessionID {
+		if err := c.loadSessionState(ctx); err != nil {
+			return "", "0"
+		}
+	}
+	skill := strings.TrimSpace(c.sessionCached.SelectedSkill)
+	if skill == "" {
+		return "", "0"
+	}
+	entry, ok := c.SkillsManager.Get(skill)
+	if !ok || entry == nil || strings.TrimSpace(entry.Path) == "" {
+		return "", "0"
+	}
+	b, err := os.ReadFile(filepath.Join(entry.Path, "SKILL.md"))
+	if err != nil {
+		return "", "0"
+	}
+	content := strings.TrimSpace(string(b))
+	if content == "" {
+		return "", "0"
+	}
+	section = strings.TrimSpace(strings.Join([]string{
+		"<active_skill>",
+		"### " + skill,
+		content,
+		"</active_skill>",
+	}, "\n"))
+	return section, fmt.Sprintf("%d", len(content))
 }
 
 // ObserveHostOp records the most recent host op request/response for adaptive context.

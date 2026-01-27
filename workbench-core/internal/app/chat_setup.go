@@ -31,8 +31,8 @@ type tuiChatSetup struct {
 
 	WorkdirBase string
 
-	MemStore     store.MemoryCommitter
-	ProfileStore store.ProfileCommitter
+	MemStore     pkgstore.MemoryCommitter
+	ProfileStore pkgstore.ProfileCommitter
 
 	// BuiltinInvokers is the in-memory registry used by tool.run for builtins.
 	// It is a map (reference type), so updating entries updates runner behavior.
@@ -98,12 +98,13 @@ func setupTUIChatRuntime(
 		ReasoningEffort:       strings.TrimSpace(opts.ReasoningEffort),
 		ReasoningSummary:      strings.TrimSpace(opts.ReasoningSummary),
 		ApprovalsMode:         strings.TrimSpace(opts.ApprovalsMode),
+		SelectedSkill:         strings.TrimSpace(opts.SelectedSkill),
 		PlanMode:              opts.PlanMode,
 		HistoryStore:          historyStore,
-		ResultsStore:          resultsStoreAdapter{InMemoryResultsStore: resultsStore},
+		ResultsStore:          resultsStore,
 		MemoryStore:           memStore,
 		ProfileStore:          profileStore,
-		TraceStore:            traceStoreAdapter{TraceStore: traceStore},
+		TraceStore:            &traceStore,
 		ConstructorStore:      constructorStore,
 		Emit:                  mustEmit,
 		IncludeHistoryOps:     derefBool(opts.IncludeHistoryOps, true),

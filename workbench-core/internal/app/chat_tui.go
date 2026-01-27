@@ -26,6 +26,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/pkg/resources"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -204,7 +205,7 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 	if err != nil {
 		return fmt.Errorf("create history store: %w", err)
 	}
-	historyRes, err := resources.NewHistoryResource(cfg, run.SessionID, historyStoreAdapter{HistoryStore: historyStore})
+	historyRes, err := resources.NewHistoryResource(cfg, run.SessionID, historyStore)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -220,11 +221,13 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 	sessionModel := ""
 	sessionReasoningEffort := ""
 	sessionReasoningSummary := ""
+	sessionSelectedSkill := ""
 	if sess, err := store.LoadSession(cfg, run.SessionID); err == nil {
 		sessionTitle = strings.TrimSpace(sess.Title)
 		sessionModel = strings.TrimSpace(sess.ActiveModel)
 		sessionReasoningEffort = strings.TrimSpace(sess.ReasoningEffort)
 		sessionReasoningSummary = strings.TrimSpace(sess.ReasoningSummary)
+		sessionSelectedSkill = strings.TrimSpace(sess.SelectedSkill)
 	}
 
 	model := strings.TrimSpace(resolved.Model)
@@ -246,6 +249,9 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 	}
 	if strings.TrimSpace(sessionReasoningSummary) != "" {
 		resolved.ReasoningSummary = sessionReasoningSummary
+	}
+	if strings.TrimSpace(resolved.SelectedSkill) == "" && strings.TrimSpace(sessionSelectedSkill) != "" {
+		resolved.SelectedSkill = sessionSelectedSkill
 	}
 
 	// Resolve pricing against the effective model (session-aware).
@@ -279,6 +285,16 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 		Type:    "approvals.info",
 		Message: "Approval mode",
 		Data:    map[string]string{"mode": mode},
+		Console: boolp(false),
+	})
+	activeSkill := strings.TrimSpace(resolved.SelectedSkill)
+	if activeSkill == "" {
+		activeSkill = "none"
+	}
+	mustEmit(context.Background(), events.Event{
+		Type:    "skill.info",
+		Message: "Skill",
+		Data:    map[string]string{"skill": activeSkill},
 		Console: boolp(false),
 	})
 	planState := "off"
@@ -552,6 +568,47 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 			Console: boolp(false),
 		})
 		return "Approvals mode: " + val, true, nil
+	case "skill":
+		val := strings.TrimSpace(arg)
+		cur := strings.TrimSpace(r.opts.SelectedSkill)
+		if val == "" {
+			active := cur
+			if active == "" {
+				active = "none"
+			}
+			r.emitPreInit(events.Event{
+				Type:    "skill.info",
+				Message: "Skill",
+				Data:    map[string]string{"skill": active},
+				Store:   boolp(false),
+				History: boolp(false),
+				Console: boolp(false),
+			})
+			return "Active skill: " + active, true, nil
+		}
+		valLower := strings.ToLower(strings.TrimSpace(val))
+		if valLower == "none" || valLower == "off" {
+			r.opts.SelectedSkill = ""
+			r.emitPreInit(events.Event{
+				Type:    "skill.changed",
+				Message: "Skill changed",
+				Data:    map[string]string{"skill": ""},
+				Store:   boolp(false),
+				History: boolp(false),
+				Console: boolp(false),
+			})
+			return "Active skill: none", true, nil
+		}
+		r.opts.SelectedSkill = val
+		r.emitPreInit(events.Event{
+			Type:    "skill.changed",
+			Message: "Skill changed",
+			Data:    map[string]string{"skill": val},
+			Store:   boolp(false),
+			History: boolp(false),
+			Console: boolp(false),
+		})
+		return "Active skill: " + val, true, nil
 	case "model":
 		cur := strings.TrimSpace(r.opts.Model)
 		if cur == "" {
@@ -853,6 +910,17 @@ func (r *lazyNewSessionTurnRunner) WriteVFS(ctx context.Context, path string, da
 	return r.engine.WriteVFS(ctx, path, data)
 }
 
+func (r *lazyNewSessionTurnRunner) ListVFS(ctx context.Context, path string) ([]vfs.Entry, error) {
+	if r == nil {
+		return nil, fmt.Errorf("runner is nil")
+	}
+	if !r.initialized || r.engine == nil {
+		return nil, fmt.Errorf("no active run (send a message first)")
+	}
+	_ = ctx
+	return r.engine.ListVFS(ctx, path)
+}
+
 func (r *lazyNewSessionTurnRunner) VFS() *vfs.FS {
 	if r == nil || r.engine == nil {
 		return nil
@@ -892,7 +960,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 	if err != nil {
 		return fmt.Errorf("create history store: %w", err)
 	}
-	historyRes, err := resources.NewHistoryResource(cfg, run.SessionID, historyStoreAdapter{HistoryStore: historyStore})
+	historyRes, err := resources.NewHistoryResource(cfg, run.SessionID, historyStore)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -1015,8 +1083,8 @@ type tuiTurnRunner struct {
 
 	mustEmit func(ctx context.Context, ev events.Event)
 
-	memStore     store.MemoryCommitter
-	profileStore store.ProfileCommitter
+	memStore     pkgstore.MemoryCommitter
+	profileStore pkgstore.ProfileCommitter
 	memEval      *agent.MemoryEvaluator
 	profileEval  *agent.ProfileEvaluator
 
@@ -1063,6 +1131,14 @@ func (r *tuiTurnRunner) ReadVFS(ctx context.Context, path string, maxBytes int) 
 	}
 	_ = ctx
 	return string(b), bytesLen, truncated, nil
+}
+
+func (r *tuiTurnRunner) ListVFS(ctx context.Context, path string) ([]vfs.Entry, error) {
+	if r == nil || r.fs == nil {
+		return nil, fmt.Errorf("vfs not available")
+	}
+	_ = ctx
+	return r.fs.List(path)
 }
 
 func (r *tuiTurnRunner) WriteVFS(ctx context.Context, path string, data []byte) error {
@@ -1904,6 +1980,68 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			Console: boolp(false),
 		})
 		return "Approvals mode: " + val, true
+	case "skill":
+		val := strings.TrimSpace(arg)
+		cur := strings.TrimSpace(r.opts.SelectedSkill)
+		if val == "" {
+			active := cur
+			if active == "" {
+				active = "none"
+			}
+			r.mustEmit(context.Background(), events.Event{
+				Type:    "skill.info",
+				Message: "Skill",
+				Data:    map[string]string{"skill": active},
+				Console: boolp(false),
+			})
+			return "Active skill: " + active, true
+		}
+		valLower := strings.ToLower(strings.TrimSpace(val))
+		if valLower == "none" || valLower == "off" {
+			r.opts.SelectedSkill = ""
+			if r.run.Runtime == nil {
+				r.run.Runtime = &types.RunRuntimeConfig{}
+			}
+			r.run.Runtime.SelectedSkill = ""
+			_ = store.SaveRun(r.cfg, r.run)
+			if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
+				if strings.TrimSpace(sess.SelectedSkill) != "" {
+					sess.SelectedSkill = ""
+					_ = store.SaveSession(r.cfg, sess)
+				}
+			}
+			r.mustEmit(context.Background(), events.Event{
+				Type:    "skill.changed",
+				Message: "Skill changed",
+				Data:    map[string]string{"skill": ""},
+				Console: boolp(false),
+			})
+			return "Active skill: none", true
+		}
+		if r.constructor != nil && r.constructor.SkillsManager != nil {
+			if _, ok := r.constructor.SkillsManager.Get(val); !ok {
+				return "Unknown skill: " + val, true
+			}
+		}
+		r.opts.SelectedSkill = val
+		if r.run.Runtime == nil {
+			r.run.Runtime = &types.RunRuntimeConfig{}
+		}
+		r.run.Runtime.SelectedSkill = val
+		_ = store.SaveRun(r.cfg, r.run)
+		if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
+			if strings.TrimSpace(sess.SelectedSkill) != val {
+				sess.SelectedSkill = val
+				_ = store.SaveSession(r.cfg, sess)
+			}
+		}
+		r.mustEmit(context.Background(), events.Event{
+			Type:    "skill.changed",
+			Message: "Skill changed",
+			Data:    map[string]string{"skill": val},
+			Console: boolp(false),
+		})
+		return "Active skill: " + val, true
 	case "cd":
 		from := strings.TrimSpace(r.workdirBase)
 		if from == "" {

@@ -78,6 +78,11 @@ func (m *Model) submitSingle() tea.Cmd {
 		m.openApprovalPicker()
 		return nil
 	}
+	// Intercept `/skill` with no args to open the skill picker.
+	if strings.EqualFold(txt, "/skill") {
+		m.openSkillPicker()
+		return nil
+	}
 	// Intercept `/model` with no args to open picker instead of submitting
 	if txt == "/model" {
 		return m.openModelPicker()
@@ -108,6 +113,11 @@ func (m *Model) submitMultiline() tea.Cmd {
 	// Intercept `/approval` with no args to open the approval picker.
 	if strings.EqualFold(txt, "/approval") {
 		m.openApprovalPicker()
+		return nil
+	}
+	// Intercept `/skill` with no args to open the skill picker.
+	if strings.EqualFold(txt, "/skill") {
+		m.openSkillPicker()
 		return nil
 	}
 	// Intercept `/model` with no args to open picker instead of submitting

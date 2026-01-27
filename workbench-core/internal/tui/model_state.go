@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/pkg/events"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/llm"
 )
@@ -39,6 +40,10 @@ type TurnRunner interface {
 type vfsAccessor interface {
 	ReadVFS(ctx context.Context, path string, maxBytes int) (text string, bytesLen int, truncated bool, err error)
 	WriteVFS(ctx context.Context, path string, data []byte) error
+}
+
+type vfsLister interface {
+	ListVFS(ctx context.Context, path string) ([]vfs.Entry, error)
 }
 
 type eventMsg events.Event
@@ -273,6 +278,11 @@ type Model struct {
 	// Model picker state
 	modelPickerOpen bool
 	modelPickerList list.Model
+
+	// Skill picker state (/skill command)
+	skillPickerOpen bool
+	skillPickerList list.Model
+	selectedSkill   string
 
 	// Reasoning effort picker (opened via `/reasoning effort` with no value)
 	reasoningEffortPickerOpen     bool

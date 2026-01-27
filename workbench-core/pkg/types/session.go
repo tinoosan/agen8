@@ -28,6 +28,9 @@ type Session struct {
 	ReasoningEffort  string `json:"reasoningEffort,omitempty"`
 	ReasoningSummary string `json:"reasoningSummary,omitempty"`
 
+	// SelectedSkill is session-scoped so resume is deterministic.
+	SelectedSkill string `json:"selectedSkill,omitempty"`
+
 	// ApprovalsMode is session-scoped so resume is deterministic.
 	// Valid values: "enabled", "disabled".
 	ApprovalsMode string `json:"approvalsMode,omitempty"`

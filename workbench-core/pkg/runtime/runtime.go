@@ -43,6 +43,7 @@ type BuildConfig struct {
 	ReasoningEffort       string
 	ReasoningSummary      string
 	ApprovalsMode         string
+	SelectedSkill         string
 	PlanMode              bool
 	HistoryStore          store.HistoryStore
 	ResultsStore          store.ResultsStore
@@ -80,6 +81,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
 		ApprovalsMode:    strings.TrimSpace(cfg.ApprovalsMode),
+		SelectedSkill:    strings.TrimSpace(cfg.SelectedSkill),
 		PlanMode:         cfg.PlanMode,
 
 		MaxTraceBytes:         cfg.MaxTraceBytes,
@@ -107,6 +109,10 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			}
 			if strings.TrimSpace(sess.ReasoningSummary) != strings.TrimSpace(cfg.ReasoningSummary) {
 				sess.ReasoningSummary = strings.TrimSpace(cfg.ReasoningSummary)
+				changed = true
+			}
+			if strings.TrimSpace(sess.SelectedSkill) != strings.TrimSpace(cfg.SelectedSkill) {
+				sess.SelectedSkill = strings.TrimSpace(cfg.SelectedSkill)
 				changed = true
 			}
 			approvalMode := strings.TrimSpace(cfg.ApprovalsMode)
