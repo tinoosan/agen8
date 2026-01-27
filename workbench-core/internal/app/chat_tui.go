@@ -58,7 +58,7 @@ func cursorDebugLog(hypothesisId, location, message string, data map[string]any)
 }
 
 const (
-	sessionTitleModel     = "openai/gpt-4.1-nano"
+	sessionTitleModel     = "openai/gpt-5-nano"
 	sessionTitleMaxTokens = 256
 )
 
@@ -100,11 +100,42 @@ func generateSessionTitle(ctx context.Context, userMsg string) (string, error) {
 	})
 
 	req := llm.LLMRequest{
-		Model:       sessionTitleModel,
-		System:      "You are a title generator. Summarize the user's message into a short session title (3-8 words). Output only the title text. Do not reply to the user, do not use greetings, do not add punctuation at the end, and do not include quotes or extra words.",
-		Messages:    []llm.LLMMessage{{Role: "user", Content: userMsg}},
-		MaxTokens:   sessionTitleMaxTokens,
-		Temperature: 0.0,
+		Model: sessionTitleModel,
+		System: "Task: Generate a session title from the user's message.\n" +
+			"Role: You are not a chat assistant. You only create titles.\n" +
+			"Output rules:\n" +
+			"- Output ONLY the title text (3-8 words).\n" +
+			"- No greetings, no replies, no explanations.\n" +
+			"- No quotes, no trailing punctuation.\n" +
+			"Example:\n" +
+			"User message: \"hi\"\n" +
+			"Title: General chat\n" +
+			"User message: \"build a CLI to batch rename photos by date\"\n" +
+			"Title: Batch rename photos by date",
+		Messages:         []llm.LLMMessage{{Role: "user", Content: userMsg}},
+		MaxTokens:        sessionTitleMaxTokens,
+		Temperature:      0.0,
+		ReasoningEffort:  "minimal",
+		ReasoningSummary: "off",
+		Tools: []llm.Tool{
+			{
+				Type: "function",
+				Function: llm.ToolFunction{
+					Name:        "set_title",
+					Description: "Return the generated session title.",
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"title": map[string]any{"type": "string"},
+						},
+						"required":             []string{"title"},
+						"additionalProperties": false,
+					},
+					Strict: true,
+				},
+			},
+		},
+		ToolChoice: "function:set_title",
 	}
 
 	var out strings.Builder
@@ -123,6 +154,20 @@ func generateSessionTitle(ctx context.Context, userMsg string) (string, error) {
 	resp, err := llmClient.Generate(ctx, req)
 	if err != nil {
 		return "", err
+	}
+	for _, tc := range resp.ToolCalls {
+		if strings.TrimSpace(tc.Function.Name) != "set_title" {
+			continue
+		}
+		type titleResp struct {
+			Title string `json:"title"`
+		}
+		var parsed titleResp
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &parsed); err == nil {
+			if t := sanitizeSessionTitle(parsed.Title); t != "" {
+				return t, nil
+			}
+		}
 	}
 	type titleResp struct {
 		Title string `json:"title"`

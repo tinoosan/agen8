@@ -1468,6 +1468,10 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 				if acc, ok := m.runner.(vfsAccessor); ok {
 					return func() tea.Msg {
 						txt, _, _, err := acc.ReadVFS(m.ctx, normalized, planMaxBytes)
+						if errors.Is(err, os.ErrNotExist) {
+							err = nil
+							txt = ""
+						}
 						return planFileMsg{path: normalized, content: txt, err: err}
 					}
 				}
@@ -1844,10 +1848,18 @@ func (m Model) prefetchPlanCmd() tea.Cmd {
 	return tea.Batch(
 		func() tea.Msg {
 			txt, _, _, err := acc.ReadVFS(m.ctx, planDetailsVPath, planMaxBytes)
+			if errors.Is(err, os.ErrNotExist) {
+				err = nil
+				txt = ""
+			}
 			return planFileMsg{path: planDetailsVPath, content: txt, err: err}
 		},
 		func() tea.Msg {
 			txt, _, _, err := acc.ReadVFS(m.ctx, planVPath, planMaxBytes)
+			if errors.Is(err, os.ErrNotExist) {
+				err = nil
+				txt = ""
+			}
 			return planFileMsg{path: planVPath, content: txt, err: err}
 		},
 	)
