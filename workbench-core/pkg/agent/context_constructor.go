@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -35,9 +34,6 @@ type ContextConstructor struct {
 	Trace         *TraceMiddleware
 	HistoryStore  store.HistoryReader
 	SkillsManager *skills.Manager
-
-	// SelectedSkill is the currently active skill (in-memory only, not persisted).
-	SelectedSkill string
 
 	IncludeHistoryOps bool
 
@@ -192,11 +188,9 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 	memorySection, memoryTotals := c.memorySection()
 	attachSection, attachTotals := c.attachmentsSection()
 	skillsSection, skillsTotals := c.skillsSection()
-	activeSkillSection, activeSkillTotals := c.activeSkillSection(ctx)
 
 	sections := []string{
 		basePrompt,
-		activeSkillSection,
 		profileSection,
 		memorySection,
 		attachSection,
@@ -213,7 +207,6 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 			"memory.bytes":      memoryTotals,
 			"attachments.bytes": attachTotals,
 			"skills.bytes":      skillsTotals,
-			"active_skill.bytes": activeSkillTotals,
 			"trace.selected":    strconv.Itoa(traceSelected),
 			"trace.capped":      strconv.Itoa(traceCapped),
 			"trace.excluded":    strconv.Itoa(traceExcluded),
@@ -231,35 +224,6 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 		}
 	}
 	return out, nil
-}
-
-func (c *ContextConstructor) activeSkillSection(ctx context.Context) (section string, totals string) {
-	if c == nil || c.SkillsManager == nil {
-		return "", "0"
-	}
-	skill := strings.TrimSpace(c.SelectedSkill)
-	if skill == "" {
-		return "", "0"
-	}
-	entry, ok := c.SkillsManager.Get(skill)
-	if !ok || entry == nil || strings.TrimSpace(entry.Path) == "" {
-		return "", "0"
-	}
-	b, err := os.ReadFile(filepath.Join(entry.Path, "SKILL.md"))
-	if err != nil {
-		return "", "0"
-	}
-	content := strings.TrimSpace(string(b))
-	if content == "" {
-		return "", "0"
-	}
-	section = strings.TrimSpace(strings.Join([]string{
-		"<active_skill>",
-		"### " + skill,
-		content,
-		"</active_skill>",
-	}, "\n"))
-	return section, fmt.Sprintf("%d", len(content))
 }
 
 // ObserveHostOp records the most recent host op request/response for adaptive context.
@@ -400,23 +364,22 @@ func (c *ContextConstructor) skillsSection() (section string, totals string) {
 		return "", "0"
 	}
 	var total int
-	out := []string{"## Skills"}
+	out := []string{"<available_skills>"}
 	for _, e := range entries {
-		skillPath := ""
+		dirName := strings.TrimSpace(e.Dir)
+		skillName := dirName
+		desc := ""
 		if e.Skill != nil {
-			skillPath = strings.TrimSpace(e.Skill.Path)
+			if strings.TrimSpace(e.Skill.Name) != "" {
+				skillName = strings.TrimSpace(e.Skill.Name)
+			}
+			desc = strings.TrimSpace(e.Skill.Description)
 		}
-		if skillPath == "" {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(skillPath, "SKILL.md"))
-		if err != nil {
-			continue
-		}
-		total += len(b)
-		out = append(out, fmt.Sprintf("### %s\n\n%s", e.Dir, string(b)))
+		total += len(skillName) + len(desc)
+		out = append(out, fmt.Sprintf("- **%s** (%s): %s", skillName, dirName, desc))
 	}
-	section = strings.TrimSpace(strings.Join(out, "\n\n"))
+	out = append(out, "</available_skills>")
+	section = strings.TrimSpace(strings.Join(out, "\n"))
 	return section, fmt.Sprintf("%d", total)
 }
 

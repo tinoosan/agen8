@@ -271,16 +271,6 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 		Data:    map[string]string{"mode": mode},
 		Console: boolp(false),
 	})
-	activeSkill := strings.TrimSpace(resolved.SelectedSkill)
-	if activeSkill == "" {
-		activeSkill = "none"
-	}
-	mustEmit(context.Background(), events.Event{
-		Type:    "skill.info",
-		Message: "Skill",
-		Data:    map[string]string{"skill": activeSkill},
-		Console: boolp(false),
-	})
 	historySink.Model = model
 	setHistoryModel := func(next string) { historySink.Model = strings.TrimSpace(next) }
 	setup, err := setupTUIChatRuntime(cfg, run, resolved, model, historyRes, mustEmit)
@@ -541,47 +531,6 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 			Console: boolp(false),
 		})
 		return "Approvals mode: " + val, true, nil
-	case "skill":
-		val := strings.TrimSpace(arg)
-		cur := strings.TrimSpace(r.opts.SelectedSkill)
-		if val == "" {
-			active := cur
-			if active == "" {
-				active = "none"
-			}
-			r.emitPreInit(events.Event{
-				Type:    "skill.info",
-				Message: "Skill",
-				Data:    map[string]string{"skill": active},
-				Store:   boolp(false),
-				History: boolp(false),
-				Console: boolp(false),
-			})
-			return "Active skill: " + active, true, nil
-		}
-		valLower := strings.ToLower(strings.TrimSpace(val))
-		if valLower == "none" || valLower == "off" {
-			r.opts.SelectedSkill = ""
-			r.emitPreInit(events.Event{
-				Type:    "skill.changed",
-				Message: "Skill changed",
-				Data:    map[string]string{"skill": ""},
-				Store:   boolp(false),
-				History: boolp(false),
-				Console: boolp(false),
-			})
-			return "Active skill: none", true, nil
-		}
-		r.opts.SelectedSkill = val
-		r.emitPreInit(events.Event{
-			Type:    "skill.changed",
-			Message: "Skill changed",
-			Data:    map[string]string{"skill": val},
-			Store:   boolp(false),
-			History: boolp(false),
-			Console: boolp(false),
-		})
-		return "Active skill: " + val, true, nil
 	case "model":
 		cur := strings.TrimSpace(r.opts.Model)
 		if cur == "" {
@@ -1939,52 +1888,6 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			Console: boolp(false),
 		})
 		return "Approvals mode: " + val, true
-	case "skill":
-		val := strings.TrimSpace(arg)
-		cur := strings.TrimSpace(r.opts.SelectedSkill)
-		if val == "" {
-			active := cur
-			if active == "" {
-				active = "none"
-			}
-			r.mustEmit(context.Background(), events.Event{
-				Type:    "skill.info",
-				Message: "Skill",
-				Data:    map[string]string{"skill": active},
-				Console: boolp(false),
-			})
-			return "Active skill: " + active, true
-		}
-		valLower := strings.ToLower(strings.TrimSpace(val))
-		if valLower == "none" || valLower == "off" {
-			r.opts.SelectedSkill = ""
-			if r.constructor != nil {
-				r.constructor.SelectedSkill = ""
-			}
-			r.mustEmit(context.Background(), events.Event{
-				Type:    "skill.changed",
-				Message: "Skill changed",
-				Data:    map[string]string{"skill": ""},
-				Console: boolp(false),
-			})
-			return "Active skill: none", true
-		}
-		if r.constructor != nil && r.constructor.SkillsManager != nil {
-			if _, ok := r.constructor.SkillsManager.Get(val); !ok {
-				return "Unknown skill: " + val, true
-			}
-		}
-		r.opts.SelectedSkill = val
-		if r.constructor != nil {
-			r.constructor.SelectedSkill = val
-		}
-		r.mustEmit(context.Background(), events.Event{
-			Type:    "skill.changed",
-			Message: "Skill changed",
-			Data:    map[string]string{"skill": val},
-			Console: boolp(false),
-		})
-		return "Active skill: " + val, true
 	case "cd":
 		from := strings.TrimSpace(r.workdirBase)
 		if from == "" {

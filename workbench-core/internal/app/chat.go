@@ -55,10 +55,6 @@ type RunChatOptions struct {
 	// Valid values: "enabled", "disabled". Defaults to "enabled".
 	ApprovalsMode string
 
-	// SelectedSkill is the currently active skill to inject into the system prompt (in-memory only, not persisted).
-	// If empty, no skill is active.
-	SelectedSkill string
-
 	// WorkDir is the host working directory to mount at /project.
 	//
 	// If empty, the host uses os.Getwd() at startup.

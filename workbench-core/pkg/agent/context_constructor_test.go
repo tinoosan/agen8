@@ -8,11 +8,10 @@ import (
 	"testing"
 
 	"github.com/tinoosan/workbench-core/pkg/skills"
-	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
-func TestContextConstructor_ActiveSkillInjected(t *testing.T) {
+func TestContextConstructor_SkillsMetadataInjected(t *testing.T) {
 	t.Parallel()
 
 	baseDir := t.TempDir()
@@ -35,10 +34,6 @@ func TestContextConstructor_ActiveSkillInjected(t *testing.T) {
 		RunID:         "run-test",
 		SessionID:     "sess-test",
 		SkillsManager: mgr,
-		SelectedSkill: "demo-skill",
-		LoadSession: func(sessionID string) (types.Session, error) {
-			return types.Session{SessionID: sessionID}, nil
-		},
 		MaxProfileBytes: 0,
 		MaxMemoryBytes:  0,
 		MaxTraceBytes:   0,
@@ -49,32 +44,28 @@ func TestContextConstructor_ActiveSkillInjected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SystemPrompt: %v", err)
 	}
-	if !strings.Contains(out, "<active_skill>") || !strings.Contains(out, "</active_skill>") {
-		t.Fatalf("expected <active_skill> section, got: %q", out)
+	if !strings.Contains(out, "<available_skills>") || !strings.Contains(out, "</available_skills>") {
+		t.Fatalf("expected <available_skills> section, got: %q", out)
 	}
-	if !strings.Contains(out, "### demo-skill") {
-		t.Fatalf("expected skill header, got: %q", out)
+	if !strings.Contains(out, "Demo Skill") || !strings.Contains(out, "demo-skill") {
+		t.Fatalf("expected skill metadata, got: %q", out)
 	}
-	if !strings.Contains(out, "# Instructions") {
-		t.Fatalf("expected skill content, got: %q", out)
+	if strings.Contains(out, "# Instructions") || strings.Contains(out, "Do demo.") {
+		t.Fatalf("did not expect full skill content, got: %q", out)
 	}
 }
 
-func TestContextConstructor_ActiveSkillOmittedWhenEmpty(t *testing.T) {
+func TestContextConstructor_SkillsOmittedWhenEmpty(t *testing.T) {
 	t.Parallel()
 
 	mgr := skills.NewManager([]string{t.TempDir()})
 	_ = mgr.Scan()
 
-	sess := types.Session{SessionID: "sess-test"}
 	constructor := &ContextConstructor{
 		FS:            vfs.NewFS(),
 		RunID:         "run-test",
 		SessionID:     "sess-test",
 		SkillsManager: mgr,
-		LoadSession: func(sessionID string) (types.Session, error) {
-			return sess, nil
-		},
 		MaxProfileBytes: 0,
 		MaxMemoryBytes:  0,
 		MaxTraceBytes:   0,
@@ -85,7 +76,7 @@ func TestContextConstructor_ActiveSkillOmittedWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SystemPrompt: %v", err)
 	}
-	if strings.Contains(out, "<active_skill>") {
-		t.Fatalf("did not expect <active_skill> section, got: %q", out)
+	if strings.Contains(out, "<available_skills>") {
+		t.Fatalf("did not expect <available_skills> section, got: %q", out)
 	}
 }

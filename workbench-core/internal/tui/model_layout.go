@@ -370,18 +370,6 @@ func (m Model) renderInput() string {
 		},
 	})
 
-	skillLabel := ""
-	if v := strings.TrimSpace(m.selectedSkill); v != "" {
-		skillLabel = kit.RenderTag(kit.TagOptions{
-			Key:   "skill",
-			Value: v,
-			Styles: kit.TagStyles{
-				KeyStyle:   tagKeyStyle,
-				ValueStyle: tagValueStyle,
-			},
-		})
-	}
-
 	modelLabel := kit.RenderTag(kit.TagOptions{
 		Key:   "model",
 		Value: modelIDDisplay,
@@ -413,11 +401,8 @@ func (m Model) renderInput() string {
 		leftMax = max(0, statusW-rightW-1)
 	}
 
-	// Prefer keeping web/skill/effort visible; truncate the model ID if needed.
+	// Prefer keeping web/effort visible; truncate the model ID if needed.
 	parts := []string{modelLabel, webLabel, approvalLabel}
-	if skillLabel != "" {
-		parts = append(parts, skillLabel)
-	}
 	if effortLabel != "" {
 		parts = append(parts, effortLabel)
 	}
@@ -456,9 +441,6 @@ func (m Model) renderInput() string {
 		contentParts = append(contentParts, "", p)
 	}
 	if p := m.renderApprovalPicker(); p != "" {
-		contentParts = append(contentParts, "", p)
-	}
-	if p := m.renderSkillPicker(); p != "" {
 		contentParts = append(contentParts, "", p)
 	}
 	if p := m.renderApprovalPrompt(); p != "" {
@@ -708,36 +690,6 @@ func (m Model) renderApprovalPicker() string {
 		Foreground(lipgloss.Color("#eaeaea"))
 
 	return style.Render(kit.RenderSelector(items, opts))
-}
-
-func (m Model) renderSkillPicker() string {
-	if !m.skillPickerOpen {
-		return ""
-	}
-
-	outerW := max(20, m.width-8)
-	contentW := max(1, outerW-4)
-
-	l := m.skillPickerList
-	if contentW > 0 {
-		maxItems := 6
-		height := maxItems*2 + 4
-		if height < 6 {
-			height = 6
-		}
-		l.SetSize(contentW, height)
-		l.SetWidth(contentW)
-	}
-
-	rendered := l.View()
-	style := lipgloss.NewStyle().
-		Width(contentW).
-		Padding(0, 1).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#6bbcff")).
-		Foreground(lipgloss.Color("#eaeaea"))
-
-	return style.Render(rendered)
 }
 
 func (m Model) renderApprovalPrompt() string {

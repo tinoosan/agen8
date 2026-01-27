@@ -37,9 +37,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if mm, cmd, ok := m.keyApprovalPicker(msg); ok {
 		return mm, cmd
 	}
-	if mm, cmd, ok := m.keySkillPicker(msg); ok {
-		return mm, cmd
-	}
 	if mm, cmd, ok := m.keyHelpModal(msg); ok {
 		return mm, cmd
 	}
@@ -94,41 +91,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return mm, cmd
 	}
 	return m.keyInput(msg)
-}
-
-func (m Model) keySkillPicker(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	if !m.skillPickerOpen {
-		return m, nil, false
-	}
-
-	switch msg.Type {
-	case tea.KeyEsc:
-		m.closeSkillPicker()
-		return m, nil, true
-	case tea.KeyEnter:
-		return m, m.selectSkillFromPicker(), true
-	case tea.KeyUp:
-		m.skillPickerList.CursorUp()
-		return m, nil, true
-	case tea.KeyDown:
-		m.skillPickerList.CursorDown()
-		return m, nil, true
-	case tea.KeyPgUp, tea.KeyCtrlU:
-		m.skillPickerList.CursorUp()
-		return m, nil, true
-	case tea.KeyPgDown, tea.KeyCtrlF:
-		m.skillPickerList.CursorDown()
-		return m, nil, true
-	default:
-		var cmd tea.Cmd
-		m.skillPickerList, cmd = m.skillPickerList.Update(msg)
-		if m.skillPickerList.FilteringEnabled() && m.skillPickerList.FilterState() == list.Filtering {
-			m.skillPickerList.SetFilterText(m.skillPickerList.FilterValue())
-			m.skillPickerList.SetFilterState(list.Filtering)
-			return m, nil, true
-		}
-		return m, cmd, true
-	}
 }
 
 func (m Model) keyReasoningEffortPicker(msg tea.KeyMsg) (Model, tea.Cmd, bool) {

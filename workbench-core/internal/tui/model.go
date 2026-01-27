@@ -1240,14 +1240,6 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 			m.approvalsMode = v
 		}
 	}
-	// Skill selection can change via /skill or TUI picker.
-	if ev.Type == "skill.changed" {
-		m.selectedSkill = strings.TrimSpace(ev.Data["skill"])
-	}
-	// Skill selection can be initialized from skill.info event.
-	if ev.Type == "skill.info" {
-		m.selectedSkill = strings.TrimSpace(ev.Data["skill"])
-	}
 	// Fallback: /reasoning (no args) emits reasoning.info with a text block.
 	if ev.Type == "reasoning.info" {
 		if v := parseReasoningEffortFromReasoningInfo(ev.Data["text"]); strings.TrimSpace(v) != "" {

@@ -281,11 +281,6 @@ type Model struct {
 	modelPickerOpen bool
 	modelPickerList list.Model
 
-	// Skill picker state (/skill command)
-	skillPickerOpen bool
-	skillPickerList list.Model
-	selectedSkill   string
-
 	// Reasoning effort picker (opened via `/reasoning effort` with no value)
 	reasoningEffortPickerOpen     bool
 	reasoningEffortPickerSelected int
