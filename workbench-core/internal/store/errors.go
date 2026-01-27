@@ -1,20 +1,18 @@
 package store
 
-import (
-	"errors"
-)
+import pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 
 var (
 	// ErrNotFound indicates a requested resource does not exist.
 	// Prefer checking with errors.Is(err, ErrNotFound).
-	ErrNotFound = errors.New("not found")
+	ErrNotFound = pkgstore.ErrNotFound
 
 	// ErrInvalid indicates a provided input (or persisted data) is invalid.
 	// Prefer checking with errors.Is(err, ErrInvalid).
-	ErrInvalid = errors.New("invalid")
+	ErrInvalid = pkgstore.ErrInvalid
 
 	// ErrConflict indicates the operation is not allowed due to current state
 	// (e.g. invalid state transition).
 	// Prefer checking with errors.Is(err, ErrConflict).
-	ErrConflict = errors.New("conflict")
+	ErrConflict = pkgstore.ErrConflict
 )
