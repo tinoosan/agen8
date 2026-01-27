@@ -61,7 +61,6 @@ All flags have equivalent environment variables. CLI flags take precedence over 
 | `--history-pairs` | — | `8` | Number of recent (user, agent) pairs included from `/history`. Reducing this limits prompt size. |
 | `--include-history-ops` | `WORKBENCH_INCLUDE_HISTORY_OPS` | `true` (enabled) | Whether to include environment/host operations from `/history`. Disable to reduce noise. |
 | `--approvals-mode` | `WORKBENCH_APPROVALS_MODE` | `enabled` | Approval policy: `enabled` requires approvals, `disabled` turns off approval gating. |
-| `--plan-mode` | `WORKBENCH_PLAN_MODE` | `disabled` | Requires the agent to produce a structured planning step at the start when enabled. |
 
 Use `effectiveConfig()` in `internal/config` to trace how each runtime flag/env resolves at startup.
 

@@ -99,7 +99,6 @@ func setupTUIChatRuntime(
 		ReasoningSummary:      strings.TrimSpace(opts.ReasoningSummary),
 		ApprovalsMode:         strings.TrimSpace(opts.ApprovalsMode),
 		SelectedSkill:         strings.TrimSpace(opts.SelectedSkill),
-		PlanMode:              opts.PlanMode,
 		HistoryStore:          historyStore,
 		ResultsStore:          resultsStore,
 		MemoryStore:           memStore,
@@ -115,9 +114,6 @@ func setupTUIChatRuntime(
 		PriceInPerMTokensUSD:  opts.PriceInPerMTokensUSD,
 		PriceOutPerMTokensUSD: opts.PriceOutPerMTokensUSD,
 		Guard: func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse {
-			if !opts.PlanMode {
-				return nil
-			}
 			return enforcePlanChecklist(fs, req)
 		},
 		ArtifactObserve: artifactIndex.ObserveWrite,
@@ -167,7 +163,6 @@ func setupTUIChatRuntime(
 		ReasoningSummary: strings.TrimSpace(opts.ReasoningSummary),
 		ApprovalsMode:    strings.TrimSpace(opts.ApprovalsMode),
 		EnableWebSearch:  opts.WebSearchEnabled,
-		PlanMode:         opts.PlanMode,
 		SystemPrompt:     baseSystemPrompt,
 		Context:          constructor,
 

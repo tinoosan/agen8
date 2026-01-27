@@ -332,12 +332,8 @@ func (m Model) renderInput() string {
 	}
 	modelIDDisplay := modelID
 
-	// Use orange for tag keys when in plan mode; keep values white.
 	tagKeyStyle := kit.CloneStyle(kit.StyleStatusKey)
 	tagValueStyle := kit.CloneStyle(kit.StyleStatusValue)
-	if m.planMode {
-		tagKeyStyle = kit.CloneStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#ffb347")).Bold(true))
-	}
 
 	eff := strings.TrimSpace(m.reasoningEffort)
 	effortLabel := ""

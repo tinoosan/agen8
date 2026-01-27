@@ -39,18 +39,12 @@ var resumeCmd = &cobra.Command{
 			}
 		}
 
-		planOverride := planMode
-		if !cmd.Root().PersistentFlags().Changed("plan-mode") && sess.PlanMode != nil {
-			planOverride = *sess.PlanMode
-		}
-
 		modelOverride := ""
 		if cmd.Root().PersistentFlags().Changed("model") {
 			modelOverride = strings.TrimSpace(modelID)
 		}
 		opts := []app.RunChatOption{
 			app.WithApprovalsMode(approvalsOverride),
-			app.WithPlanMode(planOverride),
 			app.WithModel(modelOverride),
 			app.WithWorkDir(workDir),
 			app.WithTraceBytes(maxTraceBytes),

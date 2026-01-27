@@ -18,7 +18,6 @@ type Agent struct {
 
 	Model            string
 	EnableWebSearch  bool
-	PlanMode         bool
 	ApprovalsMode    string
 	ReasoningEffort  string
 	ReasoningSummary string
@@ -77,10 +76,6 @@ func (a *Agent) runConversation(ctx context.Context, msgs []llm.LLMMessage, star
 			}
 			system = updatedSystem
 		}
-		if a.PlanMode {
-			system = strings.TrimSpace(system + "\n\n" + planModePolicyText)
-		}
-
 		req := llm.LLMRequest{
 			Model:            a.Model,
 			System:           system,
@@ -282,8 +277,11 @@ func (a *Agent) streamToAccumulator(ctx context.Context, step int, req llm.LLMRe
 
 func isDangerousHostOp(req types.HostOpRequest) bool {
 	op := strings.ToLower(strings.TrimSpace(req.Op))
-	if op == types.HostOpFSWrite && strings.TrimSpace(req.Path) == "/plan/HEAD.md" {
-		return false
+	if op == types.HostOpFSWrite {
+		path := strings.TrimSpace(req.Path)
+		if path == "/plan/HEAD.md" || path == "/plan/CHECKLIST.md" {
+			return false
+		}
 	}
 	switch op {
 	case types.HostOpFSWrite,
@@ -322,17 +320,17 @@ func agentLoopV0SystemPrompt() string {
     <planning>
       <rule id="planning">
         COMPLEX TASKS REQUIRE A PLAN.
-        1. INITIALIZATION: If the user request implies multiple steps, create a Markdown checklist at "/plan/HEAD.md" before any fs_write/fs_shell/fun calls.
+        1. INITIALIZATION: If the user request implies multiple steps, write high-level details to "/plan/HEAD.md" and a Markdown checklist to "/plan/CHECKLIST.md" before any fs_write/fs_shell/fun calls.
         2. FORMAT: The checklist must use "- [ ]" / "- [x]" tokens for each actionable step (e.g., "- [ ] Analyze requirements", "- [ ] Implement feature", "- [ ] Verify results").
-        3. NARRATIVE: Keep narrative planning out of the checklist file. Use your response text for any prose planning; the checklist remains the single source of truth.
-        4. GATE: Without a checklist at "/plan/HEAD.md", do not execute side-effect tools (fs_write, shell_exec, etc.).
-        5. EXECUTION: After each step completes, overwrite "/plan/HEAD.md" with the updated checklist, marking done items with "- [x]".
+        3. NARRATIVE: Keep narrative planning out of the checklist file. Use "/plan/HEAD.md" for reasoning and context; the checklist remains the single source of truth for tasks.
+        4. GATE: Without a checklist at "/plan/CHECKLIST.md", do not execute side-effect tools (fs_write, shell_exec, etc.).
+        5. EXECUTION: After each step completes, overwrite "/plan/CHECKLIST.md" with the updated checklist, marking done items with "- [x]".
         6. CONTINUOUS: Before starting a new step, re-read the checklist, ensure the next item is accurate, and update it if needed.
-        7. ADAPTATION: If the plan evolves, immediately rewrite "/plan/HEAD.md" so the checklist remains the single source of truth.
-        7. SKIP: Do NOT create a plan for greetings/smalltalk, single factual questions, or single small edits. Respond directly instead.
+        7. ADAPTATION: If the plan evolves, immediately rewrite "/plan/HEAD.md" and "/plan/CHECKLIST.md" so details and tasks stay current.
+        8. SKIP: Do NOT create a plan for greetings/smalltalk, single factual questions, or single small edits. Respond directly instead.
       </rule>
-      <rule id="planning.externalize">Plans must live in "/plan/HEAD.md" (checklist); don’t keep plan reasoning solely in your head.</rule>
-      <rule id="planning.visibility">Whenever asked about planning, point to "/plan/HEAD.md" for the checklist—the mount is always available via fs_list.</rule>
+      <rule id="planning.externalize">Plans must live in "/plan/HEAD.md" (details) and "/plan/CHECKLIST.md" (checklist); don’t keep plan reasoning solely in your head.</rule>
+      <rule id="planning.visibility">Whenever asked about planning, point to "/plan/HEAD.md" for details and "/plan/CHECKLIST.md" for the checklist—the mount is always available via fs_list.</rule>
     </planning>
     <rule id="tool_results">Tool results are YOUR output, not user input.</rule>
     <rule id="skills_vs_tools">Skills live under /skills (see SKILL.md) and are not tools; plugins belong to /tools.</rule>
@@ -354,7 +352,7 @@ func agentLoopV0SystemPrompt() string {
       <op name="trace_events_summary">Summarize trace events.</op>
     </direct_ops>
     <skills>Refer to the <available_skills> block below and fs_read /skills/<skill>/SKILL.md to follow documented workflows. THESE ARE YOUR PRIMARY GENERAL CAPABILITIES.</skills>
-    <planning>For multi-step work, write the checklist to /plan/HEAD.md (update_plan). Keep it current: re-read before each step, mark completed items with "- [x]", and add/adjust items as work changes. Skip planning for greetings/smalltalk, single factual questions, or single small edits.</planning>
+    <planning>For multi-step work, write details to /plan/HEAD.md and the checklist to /plan/CHECKLIST.md using fs_write. Keep the checklist current: re-read before each step, mark completed items with "- [x]", and add/adjust items as work changes. Skip planning for greetings/smalltalk, single factual questions, or single small edits.</planning>
     <external_tools>Use tool_run only after inspecting /tools/<toolId> manifests; prefer direct ops, skills, and /plan first.</external_tools>
   </capabilities>
   <vfs>
@@ -363,7 +361,7 @@ func agentLoopV0SystemPrompt() string {
     <mount path="/log">Event log for this turn.</mount>
     <mount path="/memory">Run-scoped working memory.</mount>
     <mount path="/skills">These are YOUR skills. ALWAYS check /skills before /tools (SKILL.md).</mount>
-    <mount path="/plan">Planning workspace for complex tasks. /plan/HEAD.md is the checklist.</mount>
+    <mount path="/plan">Planning workspace for complex tasks. /plan/HEAD.md is details; /plan/CHECKLIST.md is the checklist.</mount>
     <mount path="/history">Session-scoped history (read-only).</mount>
     <mount path="/results/&lt;callId&gt;">Tool output artifacts.</mount>
   </vfs>
@@ -385,13 +383,38 @@ func agentLoopV0SystemPrompt() string {
     <rule id="web_search">Web search is disabled by default; the user can enable it via /web. If you consult search results, include citations and a Sources: list (1–5 links) in your final answer.</rule>
     <rule id="fs_edit">fs_edit expects JSON like {"path": "/project/file", "edits": [{"old": "...", "new": "...", "occurrence": 1}]}; if it fails, re-read the file and try a more specific snippet.</rule>
     <rule id="fs_patch">fs_patch needs a unified diff with hunk headers (e.g., @@ -1,3 +1,3 @@) or adjust until the patch applies cleanly.</rule>
-    <rule id="memory">Write durable lessons to /memory/update.md as a short bullet list or key/value pair.</rule>
+    <memory_management>
+      <rule id="memory.purpose">The /memory directory provides persistent context across sessions. You MUST maintain it proactively.</rule>
+      <rule id="memory.automatic_triggers">
+        Write to /memory/update.md IMMEDIATELY and WITHOUT ASKING when:
+        1. User shares preferences (tools, code style, communication style, workflow)
+        2. User corrects you or provides domain knowledge
+        3. You complete any multi-step task (write summary to memory)
+        4. User mentions their role, project context, or team practices
+        5. You discover useful patterns or anti-patterns in their codebase
+        6. Conversation appears to be ending (user says bye/thanks/done)
+      </rule>
+      <rule id="memory.startup">
+        At the START of every conversation:
+        1. Read /memory/memory.md silently
+        2. If it contains context, acknowledge what you remember about the user
+        3. If empty, proceed normally but watch for information worth remembering
+      </rule>
+      <rule id="memory.format">
+        Keep entries concise, timestamped, and actionable:
+        - Date: YYYY-MM-DD
+        - Category: [preference|correction|decision|pattern|context]
+        - Entry: Brief description with WHY, not just WHAT
+      </rule>
+      <rule id="memory.not_optional">
+        Memory updates are NOT optional. If you learn something about the user or their work, write it immediately. Don't wait for permission. This is a core responsibility, not a courtesy.
+      </rule>
+      <rule id="memory.privacy">
+        Do not write sensitive credentials, API keys, or personal information to memory. Focus on preferences, patterns, and project context.
+      </rule>
+    </memory_management>
     <rule id="principles">Action-first, recover gracefully, assume defaults, prefer direct ops, and never hallucinate; always deliver a final response when work is complete.</rule>
     <rule id="skills_block">When asked about "<available_skills>", inspect the <available_skills> section injected below, and respond by describing each skill's name, description, and location instead of repeating the built-in host-capabilities list.</rule>
   </operating_rules>`
 	return strings.TrimSpace(raw)
 }
-
-const planModePolicyText = `<plan_mode>
-For multi-step work, write the authoritative checklist to /plan/HEAD.md (update_plan). Re-read the checklist before each step and update it after each step so progress is always accurate. If steps change, rewrite /plan/HEAD.md immediately. Keep the checklist short and actionable. Skip planning for greetings/smalltalk, single factual questions, or single small edits.
-</plan_mode>`

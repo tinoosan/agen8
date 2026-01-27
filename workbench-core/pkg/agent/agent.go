@@ -60,9 +60,6 @@ type Config struct {
 	// EnableWebSearch controls whether the agent requests web-search-grounded model variants.
 	EnableWebSearch bool
 
-	// PlanMode enforces the structured planning policy for the first step.
-	PlanMode bool
-
 	// ApprovalsMode controls whether the agent requires confirmation for sensitive ops.
 	ApprovalsMode string
 
@@ -133,9 +130,6 @@ func New(cfg Config) (*Agent, error) {
 	if err := registerTool(&agenttools.FSPatchTool{}); err != nil {
 		return nil, err
 	}
-	if err := registerTool(&agenttools.UpdatePlanTool{}); err != nil {
-		return nil, err
-	}
 	if err := registerTool(&agenttools.ShellExecTool{}); err != nil {
 		return nil, err
 	}
@@ -160,7 +154,6 @@ func New(cfg Config) (*Agent, error) {
 		Exec:             cfg.Exec,
 		Model:            cfg.Model,
 		EnableWebSearch:  cfg.EnableWebSearch,
-		PlanMode:         cfg.PlanMode,
 		ApprovalsMode:    strings.TrimSpace(cfg.ApprovalsMode),
 		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),

@@ -10,14 +10,15 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/pkg/vfs"
-	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/types"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 const (
-	composeVPath = "/project/.workbench/compose.md"
-	planVPath    = "/plan/HEAD.md"
+	composeVPath     = "/project/.workbench/compose.md"
+	planVPath        = "/plan/CHECKLIST.md"
+	planDetailsVPath = "/plan/HEAD.md"
 )
 
 // TurnRunner executes one user turn and returns the agent final response.
@@ -121,14 +122,16 @@ type Model struct {
 	// an interrupt signal to callers (for example, to print a resume hint).
 	quitByCtrlC bool
 
-	transcript       viewport.Model
-	activityList     list.Model
-	activityDetail   viewport.Model
-	planViewport     viewport.Model
-	planMarkdown     string
-	planTabActive    bool
-	planAutoExpanded bool
-	planLoadErr      string
+	transcript          viewport.Model
+	activityList        list.Model
+	activityDetail      viewport.Model
+	planViewport        viewport.Model
+	planMarkdown        string
+	planDetailsMarkdown string
+	planTabActive       bool
+	planAutoExpanded    bool
+	planLoadErr         string
+	planDetailsLoadErr  string
 
 	transcriptItems         []transcriptItem
 	transcriptItemStartLine []int
@@ -226,7 +229,6 @@ type Model struct {
 	reasoningEffort  string
 	reasoningSummary string
 	webSearchEnabled bool
-	planMode         bool
 	sessionID        string
 	runID            string
 

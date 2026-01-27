@@ -25,7 +25,7 @@ func TestPlanChecklistHeadValidation(t *testing.T) {
 	fs := newPlanFS(t)
 	bad := types.HostOpRequest{
 		Op:   types.HostOpFSWrite,
-		Path: "/plan/HEAD.md",
+			Path: "/plan/CHECKLIST.md",
 		Text: "not a checklist",
 	}
 	resp := enforcePlanChecklist(fs, bad)
@@ -35,7 +35,7 @@ func TestPlanChecklistHeadValidation(t *testing.T) {
 
 	good := types.HostOpRequest{
 		Op:   types.HostOpFSWrite,
-		Path: "/plan/HEAD.md",
+			Path: "/plan/CHECKLIST.md",
 		Text: "- [ ] Step 1",
 	}
 	resp = enforcePlanChecklist(fs, good)
@@ -46,7 +46,7 @@ func TestPlanChecklistHeadValidation(t *testing.T) {
 
 func TestPlanChecklistWarningWhenStale(t *testing.T) {
 	fs := newPlanFS(t)
-	if err := fs.Write("/plan/HEAD.md", []byte("- [x] Done")); err != nil {
+	if err := fs.Write("/plan/CHECKLIST.md", []byte("- [x] Done")); err != nil {
 		t.Fatalf("seed checklist: %v", err)
 	}
 	req := types.HostOpRequest{
@@ -56,7 +56,7 @@ func TestPlanChecklistWarningWhenStale(t *testing.T) {
 	if resp == nil || resp.ErrorCode != "plan_checklist_required" {
 		t.Fatalf("expected plan_checklist_required, got %#v", resp)
 	}
-	b, err := fs.Read("/plan/HEAD.md")
+	b, err := fs.Read("/plan/CHECKLIST.md")
 	if err != nil {
 		t.Fatalf("read checklist: %v", err)
 	}

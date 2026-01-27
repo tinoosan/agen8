@@ -24,7 +24,6 @@ var (
 	recentHistoryPairs int
 	includeHistoryOps  bool
 	approvalsMode      string
-	planMode           bool
 )
 
 var rootCmd = &cobra.Command{
@@ -86,7 +85,6 @@ new run in that session (workspaces remain run-scoped).
 
 		opts := []app.RunChatOption{
 			app.WithApprovalsMode(approvalsMode),
-			app.WithPlanMode(planMode),
 			app.WithModel(modelOverride),
 			app.WithWorkDir(workDir),
 			app.WithTraceBytes(maxTraceBytes),
@@ -127,9 +125,6 @@ func init() {
 
 	approvalsMode = strings.TrimSpace(os.Getenv("WORKBENCH_APPROVALS_MODE"))
 	rootCmd.PersistentFlags().StringVar(&approvalsMode, "approvals-mode", approvalsMode, "approval mode (enabled|disabled; env WORKBENCH_APPROVALS_MODE)")
-
-	planMode = envBool("WORKBENCH_PLAN_MODE", false)
-	rootCmd.PersistentFlags().BoolVar(&planMode, "plan-mode", planMode, "enable plan mode (forces initial plan creation; env WORKBENCH_PLAN_MODE)")
 
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(listCmd)

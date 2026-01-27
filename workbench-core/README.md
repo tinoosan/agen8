@@ -87,7 +87,6 @@ Runtime configuration resolves in this order: CLI flags → environment variable
 | `--history-pairs` | — | Number of recent (user, agent) pairs included from `/history` (default `8`). |
 | `--include-history-ops` | `WORKBENCH_INCLUDE_HISTORY_OPS` | Whether to include environment/host operations from `/history` (default: enabled). |
 | `--approvals-mode` | `WORKBENCH_APPROVALS_MODE` | Approval policy: `enabled` (default) or `disabled`. |
-| `--plan-mode` | `WORKBENCH_PLAN_MODE` | When enabled, the agent must produce a structured plan for the first step. |
 
 Helpers in `internal/config/effectiveConfig()` resolve the final configuration before each command runs. See [docs/cli-usage.md](docs/cli-usage.md) for deeper context on flag interactions, environment variables, and examples.
 

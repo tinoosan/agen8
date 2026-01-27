@@ -16,11 +16,11 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/pkg/types"
-	"github.com/tinoosan/workbench-core/pkg/llm"
-	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/agent"
+	"github.com/tinoosan/workbench-core/pkg/events"
+	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/types"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 func cursorDebugLog(hypothesisId, location, message string, data map[string]any) {
@@ -783,14 +783,24 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case planFileMsg:
-		prevHadContent := strings.TrimSpace(m.planMarkdown) != ""
-		m.planLoadErr = ""
-		if msg.err != nil {
-			m.planLoadErr = msg.err.Error()
+		prevHadChecklist := strings.TrimSpace(m.planMarkdown) != ""
+		shouldAutoExpand := false
+		if strings.EqualFold(strings.TrimSpace(msg.path), planDetailsVPath) {
+			m.planDetailsLoadErr = ""
+			if msg.err != nil {
+				m.planDetailsLoadErr = msg.err.Error()
+			}
+			m.planDetailsMarkdown = msg.content
+		} else {
+			m.planLoadErr = ""
+			if msg.err != nil {
+				m.planLoadErr = msg.err.Error()
+			}
+			m.planMarkdown = msg.content
+			newHasChecklist := strings.TrimSpace(m.planMarkdown) != ""
+			shouldAutoExpand = !prevHadChecklist && newHasChecklist
 		}
-		m.planMarkdown = msg.content
-		newHasContent := strings.TrimSpace(m.planMarkdown) != ""
-		if !m.planAutoExpanded && !prevHadContent && newHasContent {
+		if !m.planAutoExpanded && shouldAutoExpand {
 			m.planAutoExpanded = true
 			// #region agent log
 			logDebug("plan-file-1", "model.go:planFileMsg", "auto-expand", map[string]interface{}{
@@ -1238,11 +1248,6 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	if ev.Type == "skill.info" {
 		m.selectedSkill = strings.TrimSpace(ev.Data["skill"])
 	}
-	// Plan mode can change via /plan command.
-	if ev.Type == "plan.mode.changed" {
-		state := strings.ToLower(strings.TrimSpace(ev.Data["state"]))
-		m.planMode = state == "on" || state == "true" || state == "1"
-	}
 	// Fallback: /reasoning (no args) emits reasoning.info with a text block.
 	if ev.Type == "reasoning.info" {
 		if v := parseReasoningEffortFromReasoningInfo(ev.Data["text"]); strings.TrimSpace(v) != "" {
@@ -1430,14 +1435,17 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 				}
 			}
 		}
-		if strings.EqualFold(strings.TrimSpace(path), planVPath) && strings.TrimSpace(ev.Data["ok"]) == "true" {
-			if acc, ok := m.runner.(vfsAccessor); ok {
-				return func() tea.Msg {
-					txt, _, _, err := acc.ReadVFS(m.ctx, path, planMaxBytes)
-					return planFileMsg{path: path, content: txt, err: err}
+		if strings.TrimSpace(ev.Data["ok"]) == "true" {
+			normalized := strings.TrimSpace(path)
+			if strings.EqualFold(normalized, planVPath) || strings.EqualFold(normalized, planDetailsVPath) {
+				if acc, ok := m.runner.(vfsAccessor); ok {
+					return func() tea.Msg {
+						txt, _, _, err := acc.ReadVFS(m.ctx, normalized, planMaxBytes)
+						return planFileMsg{path: normalized, content: txt, err: err}
+					}
 				}
+				return nil
 			}
-			return nil
 		}
 		if (op == "fs.write" || op == "fs.append" || op == "fs.edit" || op == "fs.patch") && strings.TrimSpace(ev.Data["ok"]) == "true" && path != "" {
 			if acc, ok := m.runner.(vfsAccessor); ok {
@@ -1806,40 +1814,16 @@ func (m Model) prefetchPlanCmd() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	return func() tea.Msg {
-		txt, _, _, err := acc.ReadVFS(m.ctx, planVPath, planMaxBytes)
-		return planFileMsg{path: planVPath, content: txt, err: err}
-	}
-}
-
-func (m *Model) syncPlanMode() {
-	// #region agent log
-	logDebug("sync-plan-1", "model.go:syncPlanMode", "entry", map[string]interface{}{
-		"planMode":    m.planMode,
-		"planTab":     m.planTabActive,
-		"showDetails": m.showDetails,
-		"focus":       m.focus,
-	})
-	// #endregion agent log
-	if m.planMode {
-		// #region agent log
-		logDebug("sync-plan-2", "model.go:syncPlanMode", "plan-mode-on-noop", map[string]interface{}{
-			"planMode":    m.planMode,
-			"planTab":     m.planTabActive,
-			"showDetails": m.showDetails,
-			"focus":       m.focus,
-		})
-		// #endregion agent log
-		return
-	}
-	// #region agent log
-	logDebug("sync-plan-3", "model.go:syncPlanMode", "plan-mode-off-noop", map[string]interface{}{
-		"planMode":    m.planMode,
-		"planTab":     m.planTabActive,
-		"showDetails": m.showDetails,
-		"focus":       m.focus,
-	})
-	// #endregion agent log
+	return tea.Batch(
+		func() tea.Msg {
+			txt, _, _, err := acc.ReadVFS(m.ctx, planDetailsVPath, planMaxBytes)
+			return planFileMsg{path: planDetailsVPath, content: txt, err: err}
+		},
+		func() tea.Msg {
+			txt, _, _, err := acc.ReadVFS(m.ctx, planVPath, planMaxBytes)
+			return planFileMsg{path: planVPath, content: txt, err: err}
+		},
+	)
 }
 
 // Run starts the Workbench Bubble Tea program.

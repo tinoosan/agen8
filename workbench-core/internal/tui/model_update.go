@@ -85,9 +85,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if mm, cmd, ok := m.keyActivityPaneFocused(msg); ok {
 		return mm, cmd
 	}
-	if mm, cmd, ok := m.keyTogglePlanMode(msg); ok {
-		return mm, cmd
-	}
 
 	// Only forward key events into the input when input is focused.
 	if m.focus != focusInput {
@@ -651,10 +648,6 @@ func (m Model) keyActivityPaneFocused(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if !(m.showDetails && m.focus == focusActivityList) {
 		return m, nil, false
 	}
-	// Pass through Shift+Tab to keyTogglePlanMode
-	if strings.EqualFold(msg.String(), "shift+tab") || strings.EqualFold(msg.String(), "backtab") {
-		return m, nil, false
-	}
 	switch msg.Type {
 	case tea.KeyUp:
 		m.activityList.CursorUp()
@@ -700,27 +693,6 @@ func (m Model) keyActivityPaneFocused(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, cmd, true
 	}
 	// Do not forward keys to the input when Activity is focused.
-	return m, nil, true
-}
-
-func (m Model) keyTogglePlanMode(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	if !(strings.EqualFold(msg.String(), "shift+tab") || strings.EqualFold(msg.String(), "backtab")) {
-		return m, nil, false
-	}
-	if m.focus != focusInput && !(m.showDetails && m.focus == focusActivityList) {
-		return m, nil, false
-	}
-	m.planMode = !m.planMode
-	m.syncPlanMode()
-	if !m.planMode {
-		if m.isMulti {
-			m.multiline.Focus()
-		} else {
-			m.single.Focus()
-		}
-		m.focus = focusInput
-	}
-	m.layout()
 	return m, nil, true
 }
 

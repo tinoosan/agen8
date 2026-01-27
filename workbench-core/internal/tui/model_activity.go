@@ -365,15 +365,27 @@ func (m *Model) refreshPlanView() {
 		return
 	}
 	w := max(24, m.planViewport.Width-4)
+	detailsBody := ""
+	detailsText := strings.TrimSpace(m.planDetailsMarkdown)
+	if detailsText == "" {
+		if strings.TrimSpace(m.planDetailsLoadErr) != "" {
+			detailsBody = fmt.Sprintf("_Failed to load plan details: %s_", m.planDetailsLoadErr)
+		} else {
+			detailsBody = "_No plan details have been created yet._"
+		}
+	} else {
+		detailsBody = detailsText
+	}
+
 	currentStep := ""
 	progress := ""
-	body := ""
+	checklistBody := ""
 	planText := strings.TrimSpace(m.planMarkdown)
 	if planText == "" {
 		if strings.TrimSpace(m.planLoadErr) != "" {
-			body = fmt.Sprintf("_Failed to load plan: %s_", m.planLoadErr)
+			checklistBody = fmt.Sprintf("_Failed to load checklist: %s_", m.planLoadErr)
 		} else {
-			body = "_No plan has been created yet._"
+			checklistBody = "_No checklist has been created yet._"
 		}
 	} else {
 		highlighted, active, done, total := highlightPlanChecklist(m.planMarkdown)
@@ -384,13 +396,17 @@ func (m *Model) refreshPlanView() {
 			progress = fmt.Sprintf("_Progress: %d/%d complete._\n\n", done, total)
 		}
 		if strings.TrimSpace(m.planLoadErr) != "" {
-			body = fmt.Sprintf("_Failed to load plan: %s_\n\n%s", m.planLoadErr, highlighted)
+			checklistBody = fmt.Sprintf("_Failed to load checklist: %s_\n\n%s", m.planLoadErr, highlighted)
 		} else {
-			body = highlighted
+			checklistBody = highlighted
 		}
 	}
-	help := "_Ctrl+] toggles tabs · Ctrl+A toggles sidebar · /plan opens checklist editor_\n\n"
-	content := currentStep + progress + body + "\n\n" + help
+
+	detailsSection := "### Plan Details\n\n" + detailsBody
+	checklistSection := "### Checklist\n\n" + currentStep + progress + checklistBody
+	content := detailsSection + "\n\n---\n\n" + checklistSection
+	help := "_Ctrl+] toggles tabs · Ctrl+A toggles sidebar · /plan opens checklist editor · /plan/HEAD.md holds details_\n\n"
+	content = content + "\n\n" + help
 	if strings.TrimSpace(content) == "" {
 		content = "_Plan view is preparing…_"
 	}

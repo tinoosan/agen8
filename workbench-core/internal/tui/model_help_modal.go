@@ -115,7 +115,7 @@ func (m *Model) helpModalContent() string {
 		"  /reasoning-effort  open effort picker (none|minimal|low|medium|high|xhigh)",
 		"  /reasoning-summary  open summary picker (off|auto|concise|detailed)",
 		"  /editor <path>   edit a workdir file in $EDITOR",
-		"  /plan            open checklist editor (/plan/HEAD.md)",
+		"  /plan            open checklist editor (/plan/CHECKLIST.md)",
 		"  /cd <path>       change workdir",
 		"  /pwd             show workdir",
 		"  /project         alias for /pwd",

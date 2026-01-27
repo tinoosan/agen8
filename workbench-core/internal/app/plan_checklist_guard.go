@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	planChecklistPath = "/plan/HEAD.md"
+	planChecklistPath = "/plan/CHECKLIST.md"
 )
 
 type planChecklistStatus struct {
@@ -109,10 +109,10 @@ func isSideEffectOp(op string) bool {
 
 func planChecklistWarning(status planChecklistStatus) string {
 	if !status.exists {
-		return "- [ ] Add a checklist to /plan/HEAD.md before running side-effect ops."
+		return "- [ ] Add a checklist to /plan/CHECKLIST.md before running side-effect ops."
 	}
 	if !status.valid || !status.hasItems {
-		return "- [ ] Fix /plan/HEAD.md to contain only checklist items (- [ ]/- [x])."
+		return "- [ ] Fix /plan/CHECKLIST.md to contain only checklist items (- [ ]/- [x])."
 	}
 	if !status.hasOpen {
 		return "- [ ] Add new checklist items for the current work before side-effect ops."
@@ -145,7 +145,7 @@ func validatePlanChecklistWrite(req types.HostOpRequest) (string, bool) {
 	}
 	status := planChecklistStatusFromText(req.Text)
 	if !status.hasItems || !status.valid {
-		return "Checklist writes to /plan/HEAD.md must contain only - [ ] / - [x] items.", true
+		return "Checklist writes to /plan/CHECKLIST.md must contain only - [ ] / - [x] items.", true
 	}
 	return "", false
 }
@@ -175,7 +175,7 @@ func enforcePlanChecklist(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResp
 		return &types.HostOpResponse{
 			Op:        req.Op,
 			Ok:        false,
-			Error:     "Checklist required: update /plan/HEAD.md before running side-effect ops.",
+			Error:     "Checklist required: update /plan/CHECKLIST.md before running side-effect ops.",
 			ErrorCode: "plan_checklist_required",
 			Warning:   warning,
 		}

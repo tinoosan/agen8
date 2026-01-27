@@ -87,7 +87,7 @@ func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, m
 		goal:        strings.TrimSpace(goal),
 		evCh:        evCh,
 	}
-	// Emit initial approvals + plan mode state before any run is created.
+	// Emit initial approvals state before any run is created.
 	mode := strings.TrimSpace(resolved.ApprovalsMode)
 	if mode == "" {
 		mode = "enabled"
@@ -96,17 +96,6 @@ func RunNewChatTUI(ctx context.Context, cfg config.Config, title, goal string, m
 		Type:    "approvals.info",
 		Message: "Approval mode",
 		Data:    map[string]string{"mode": mode},
-		Store:   boolp(false),
-		Console: boolp(false),
-	})
-	planState := "off"
-	if resolved.PlanMode {
-		planState = "on"
-	}
-	lazy.emitPreInit(events.Event{
-		Type:    "plan.mode.changed",
-		Message: "Plan mode",
-		Data:    map[string]string{"state": planState},
 		Store:   boolp(false),
 		Console: boolp(false),
 	})
@@ -276,7 +265,7 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 		Console: boolp(false),
 	})
 
-	// Emit initial approvals + plan mode state for the TUI.
+	// Emit initial approvals state for the TUI.
 	mode := strings.TrimSpace(resolved.ApprovalsMode)
 	if mode == "" {
 		mode = "enabled"
@@ -297,17 +286,6 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 		Data:    map[string]string{"skill": activeSkill},
 		Console: boolp(false),
 	})
-	planState := "off"
-	if resolved.PlanMode {
-		planState = "on"
-	}
-	mustEmit(context.Background(), events.Event{
-		Type:    "plan.mode.changed",
-		Message: "Plan mode",
-		Data:    map[string]string{"state": planState},
-		Console: boolp(false),
-	})
-
 	historySink.Model = model
 	setHistoryModel := func(next string) { historySink.Model = strings.TrimSpace(next) }
 	setup, err := setupTUIChatRuntime(cfg, run, resolved, model, historyRes, mustEmit)
@@ -518,7 +496,7 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 		if err := os.MkdirAll(planDir, 0755); err != nil {
 			return "Unable to open plan editor", true, nil
 		}
-		planPath := filepath.Join(planDir, "HEAD.md")
+		planPath := filepath.Join(planDir, "CHECKLIST.md")
 		if _, err := os.Stat(planPath); err != nil {
 			_ = os.WriteFile(planPath, []byte{}, 0644)
 		}
@@ -526,8 +504,8 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 			Type:    "ui.editor.open",
 			Message: "Open plan editor",
 			Data: map[string]string{
-				"vpath":   "/plan/HEAD.md",
-				"path":    "HEAD.md",
+				"vpath":   "/plan/CHECKLIST.md",
+				"path":    "CHECKLIST.md",
 				"absPath": planPath,
 				"workdir": cur,
 			},
@@ -1001,7 +979,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		Console: boolp(false),
 	})
 
-	// Emit initial approvals + plan mode state for the TUI.
+	// Emit initial approvals state for the TUI.
 	mode := strings.TrimSpace(r.opts.ApprovalsMode)
 	if mode == "" {
 		mode = "enabled"
@@ -1012,17 +990,6 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		Data:    map[string]string{"mode": mode},
 		Console: boolp(false),
 	})
-	planState := "off"
-	if r.opts.PlanMode {
-		planState = "on"
-	}
-	r.mustEmit(context.Background(), events.Event{
-		Type:    "plan.mode.changed",
-		Message: "Plan mode",
-		Data:    map[string]string{"state": planState},
-		Console: boolp(false),
-	})
-
 	// Persist the session's active model as early as possible.
 	sess.ActiveModel = model
 	_ = store.SaveSession(cfg, sess)
@@ -1051,7 +1018,6 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		builtinInvokers:  setup.BuiltinInvokers,
 		artifacts:        setup.Artifacts,
 		constructor:      setup.Constructor,
-		planMode:         r.opts.PlanMode,
 		// refresh tracker removed
 	}
 	r.initialized = true
@@ -1096,8 +1062,6 @@ type tuiTurnRunner struct {
 	builtinInvokers pkgtools.MapRegistry
 	artifacts       *ArtifactIndex
 	constructor     *agent.ContextConstructor
-
-	planMode bool
 
 	turn               int
 	conversation       []llm.LLMMessage
@@ -1760,8 +1724,8 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			Type:    "ui.editor.open",
 			Message: "Open plan editor",
 			Data: map[string]string{
-				"vpath": "/plan/HEAD.md",
-				"path":  "HEAD.md",
+				"vpath": "/plan/CHECKLIST.md",
+				"path":  "CHECKLIST.md",
 			},
 			Store:   boolp(false),
 			Console: boolp(false),

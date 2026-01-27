@@ -35,9 +35,6 @@ type Session struct {
 	// Valid values: "enabled", "disabled".
 	ApprovalsMode string `json:"approvalsMode,omitempty"`
 
-	// PlanMode is session-scoped so resume is deterministic.
-	PlanMode *bool `json:"planMode,omitempty"`
-
 	// CreatedAt is when the session was created.
 	CreatedAt *time.Time `json:"createdAt"`
 
@@ -53,8 +50,8 @@ type Session struct {
 
 	// Plan is an optional short plan for the current goal.
 	//
-	// This enables "plan mode" patterns where a planner agent writes a plan and
-	// then delegates to sub-agent runs. The host should treat this as advisory state
+	// This enables planning workflows where a planner agent writes a plan and then
+	// delegates to sub-agent runs. The host should treat this as advisory state
 	// and keep provenance in /history.
 	Plan string `json:"plan,omitempty"`
 
