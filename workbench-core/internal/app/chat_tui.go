@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -1526,6 +1527,8 @@ type tuiTurnRunner struct {
 	pendingTurnUsage    llm.LLMUsage
 	pendingTurnSteps    int
 	pendingTurnDuration time.Duration
+
+	swarmWorkers map[string]context.CancelFunc
 }
 
 // ReadVFS reads a virtual filesystem path via the run's mounted VFS.
@@ -2151,6 +2154,8 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 
 	cmd, arg := splitSlashCommand(line)
 	switch cmd {
+	case "swarm":
+		return r.handleSwarmCommand(arg)
 	case "datadir":
 		return strings.TrimSpace(r.cfg.DataDir), true
 	case "editor":
@@ -2527,6 +2532,71 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		return strings.TrimSpace(r.workdirBase), true
 	default:
 		return "", false
+	}
+}
+
+func (r *tuiTurnRunner) handleSwarmCommand(arg string) (string, bool) {
+	if r == nil {
+		return "runner not ready", true
+	}
+	fields := strings.Fields(arg)
+	if len(fields) == 0 {
+		return "Usage: /swarm spawn <goal> | /swarm start <runId> | /swarm stop <runId> | /swarm list", true
+	}
+	switch strings.ToLower(fields[0]) {
+	case "spawn":
+		goal := strings.TrimSpace(strings.TrimPrefix(arg, "spawn"))
+		if goal == "" {
+			return "Usage: /swarm spawn <goal>", true
+		}
+		run, err := store.CreateSubRun(r.cfg, r.run.SessionID, r.run.RunId, goal, r.run.MaxBytesForContext)
+		if err != nil {
+			return "spawn failed: " + err.Error(), true
+		}
+		if err := r.startSwarmWorker(run); err != nil {
+			return "worker start failed: " + err.Error(), true
+		}
+		return "spawned " + run.RunId, true
+	case "start":
+		if len(fields) < 2 {
+			return "Usage: /swarm start <runId>", true
+		}
+		runID := strings.TrimSpace(fields[1])
+		run, err := store.LoadRun(r.cfg, runID)
+		if err != nil {
+			return "load failed: " + err.Error(), true
+		}
+		if err := r.startSwarmWorker(run); err != nil {
+			return "worker start failed: " + err.Error(), true
+		}
+		return "started " + runID, true
+	case "stop":
+		if len(fields) < 2 {
+			return "Usage: /swarm stop <runId>", true
+		}
+		runID := strings.TrimSpace(fields[1])
+		if r.swarmWorkers == nil {
+			return "no swarm workers", true
+		}
+		cancel := r.swarmWorkers[runID]
+		if cancel == nil {
+			return "no worker for " + runID, true
+		}
+		cancel()
+		delete(r.swarmWorkers, runID)
+		return "stopped " + runID, true
+	case "list":
+		if r.swarmWorkers == nil || len(r.swarmWorkers) == 0 {
+			return "no swarm workers", true
+		}
+		ids := make([]string, 0, len(r.swarmWorkers))
+		for id := range r.swarmWorkers {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		return "workers: " + strings.Join(ids, ", "), true
+	default:
+		return "Usage: /swarm spawn <goal> | /swarm start <runId> | /swarm stop <runId> | /swarm list", true
 	}
 }
 
