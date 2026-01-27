@@ -109,6 +109,8 @@ func (m *Model) helpModalContent() string {
 		"Slash commands",
 		"",
 		"  /copy            copy full transcript",
+		"  /new             start a new session",
+		"  /sessions        open session picker",
 		"  /model           open model picker",
 		"  /model <id>      set model",
 		"  /web             toggle web search on/off (run-scoped)",

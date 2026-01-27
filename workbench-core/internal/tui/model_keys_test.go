@@ -10,8 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 type stubRunner struct {
@@ -39,6 +39,11 @@ func (s stubRunner) AppendToolResponse(toolCallID string, resp types.HostOpRespo
 func (s stubRunner) ResumeTurn(ctx context.Context, toolOutputs []llm.LLMMessage) (string, error) {
 	_ = toolOutputs
 	return s.RunTurn(ctx, "")
+}
+
+func (s stubRunner) ListSessions(ctx context.Context) ([]types.Session, error) {
+	_ = ctx
+	return nil, nil
 }
 
 type recordingRunner struct {
@@ -127,6 +132,11 @@ func (r blockingRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest,
 func (r blockingRunner) ResumeTurn(ctx context.Context, toolOutputs []llm.LLMMessage) (string, error) {
 	_ = toolOutputs
 	return r.RunTurn(ctx, "")
+}
+
+func (r blockingRunner) ListSessions(ctx context.Context) ([]types.Session, error) {
+	_ = ctx
+	return nil, nil
 }
 
 func TestKeyHandling_EnterSubmitsEvenWhenDetailsVisible(t *testing.T) {

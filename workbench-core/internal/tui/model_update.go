@@ -46,6 +46,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if mm, cmd, ok := m.keyComposePrefill(msg); ok {
 		return mm, cmd
 	}
+	if mm, cmd, ok := m.keySessionPickerModal(msg); ok {
+		return mm, cmd
+	}
 	if mm, cmd, ok := m.keyModelPickerModal(msg); ok {
 		return mm, cmd
 	}
@@ -318,6 +321,43 @@ func (m Model) keyComposePrefill(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, m.openComposeEditorPrefill(), true
 	}
 	return m, nil, false
+}
+
+func (m Model) keySessionPickerModal(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	// Modal: session picker (must capture keys even when input is focused).
+	if !m.sessionPickerOpen {
+		return m, nil, false
+	}
+
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.closeSessionPicker()
+		m.layout()
+		return m, nil, true
+	case tea.KeyEnter:
+		return m, m.selectSessionFromPicker(), true
+	case tea.KeyUp:
+		m.sessionPickerList.CursorUp()
+		return m, nil, true
+	case tea.KeyDown:
+		m.sessionPickerList.CursorDown()
+		return m, nil, true
+	case tea.KeyPgUp, tea.KeyCtrlU:
+		m.sessionPickerList.CursorUp()
+		return m, nil, true
+	case tea.KeyPgDown, tea.KeyCtrlF:
+		m.sessionPickerList.CursorDown()
+		return m, nil, true
+	default:
+		var cmd tea.Cmd
+		m.sessionPickerList, cmd = m.sessionPickerList.Update(msg)
+		if m.sessionPickerList.FilteringEnabled() && m.sessionPickerList.FilterState() == list.Filtering {
+			m.sessionPickerList.SetFilterText(m.sessionPickerList.FilterValue())
+			m.sessionPickerList.SetFilterState(list.Filtering)
+			return m, nil, true
+		}
+		return m, cmd, true
+	}
 }
 
 func (m Model) keyModelPickerModal(msg tea.KeyMsg) (Model, tea.Cmd, bool) {

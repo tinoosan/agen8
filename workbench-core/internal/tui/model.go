@@ -324,6 +324,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Critical: bubbles/list filtering runs asynchronously and sends FilterMatchesMsg
 		// back through the Bubble Tea update loop. If we don't forward this message
 		// into the picker list, the visible items will never update.
+		if m.sessionPickerOpen {
+			var cmd tea.Cmd
+			m.sessionPickerList, cmd = m.sessionPickerList.Update(msg)
+			return m, cmd
+		}
 		if m.modelPickerOpen {
 			var cmd tea.Cmd
 			m.modelPickerList, cmd = m.modelPickerList.Update(msg)
@@ -648,6 +653,24 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.layout()
 			}
 		}
+		return m, nil
+
+	case sessionsListMsg:
+		if msg.err != nil {
+			m.sessionPickerErr = msg.err.Error()
+			m.sessionPickerList.SetItems(nil)
+			m.layout()
+			return m, nil
+		}
+		items := sessionsToPickerItems(msg.sessions)
+		m.sessionPickerList.SetItems(items)
+		// Ensure empty filter shows all items.
+		m.sessionPickerList.SetFilterText(m.sessionPickerList.FilterValue())
+		m.sessionPickerList.SetFilterState(list.Filtering)
+		if len(items) > 0 {
+			m.sessionPickerList.Select(0)
+		}
+		m.layout()
 		return m, nil
 
 	case preinitStatusMsg:
@@ -1173,6 +1196,11 @@ func (m Model) View() string {
 	// Overlay file picker modal if open.
 	if m.filePickerOpen {
 		return m.renderFilePicker(base)
+	}
+
+	// Overlay session picker modal if open.
+	if m.sessionPickerOpen {
+		return m.renderSessionPicker(base)
 	}
 
 	// Overlay model picker modal if open
@@ -1864,6 +1892,14 @@ func Run(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) error
 		// react (e.g., print resume commands).
 		if fm, ok := finalModel.(Model); ok && fm.quitByCtrlC {
 			return tea.ErrInterrupted
+		}
+		if fm, ok := finalModel.(Model); ok {
+			if fm.switchNew || strings.TrimSpace(fm.switchSessionID) != "" {
+				return SwitchSessionError{
+					SessionID: strings.TrimSpace(fm.switchSessionID),
+					New:       fm.switchNew,
+				}
+			}
 		}
 	}
 	return err

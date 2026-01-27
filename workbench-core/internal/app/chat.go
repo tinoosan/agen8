@@ -96,6 +96,9 @@ type RunChatOptions struct {
 	// This is used by runtime /model switching to recompute per-turn cost estimation.
 	// Pricing is still optional: if no entry exists for a model, cost is "unknown".
 	PricingFile string
+
+	// StartupWarnings are optional host notices shown at run start.
+	StartupWarnings []string
 }
 
 // RunChatOption is a functional option for configuring chat runtime behavior.
@@ -183,6 +186,16 @@ func resolveRunChatOptions(opts ...RunChatOption) RunChatOptions {
 	}
 
 	return o
+}
+
+// WithStartupWarning registers a warning to emit once the run starts.
+func WithStartupWarning(msg string) RunChatOption {
+	return func(o *RunChatOptions) {
+		if strings.TrimSpace(msg) == "" {
+			return
+		}
+		o.StartupWarnings = append(o.StartupWarnings, msg)
+	}
 }
 
 func WithModel(model string) RunChatOption {

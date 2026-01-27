@@ -124,6 +124,25 @@ func SaveRun(cfg config.Config, run types.Run) error {
 	return nil
 }
 
+// ReopenRun transitions a terminal run back to StatusRunning so it can be continued.
+// It clears FinishedAt and Error for terminal runs. If already running, it is a no-op.
+func ReopenRun(cfg config.Config, runId string) (types.Run, error) {
+	if err := cfg.Validate(); err != nil {
+		return types.Run{}, err
+	}
+	run, err := LoadRun(cfg, runId)
+	if err != nil {
+		return types.Run{}, err
+	}
+	if run.Status == types.StatusRunning {
+		return run, nil
+	}
+	run.Status = types.StatusRunning
+	run.FinishedAt = nil
+	run.Error = nil
+	return run, SaveRun(cfg, run)
+}
+
 // StopRun transitions a run to a terminal state (Done or Failed).
 // It updates the Status, sets FinishedAt to the current time,
 // and records an error message if the status is Failed.

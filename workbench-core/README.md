@@ -32,7 +32,7 @@ Workbench Core is a local agentic runtime that exposes an interactive CLI for la
 
    ```sh
    ./workbench list sessions             # show session IDs + metadata
-   ./workbench resume <sessionId>        # start a new run in an existing session
+   ./workbench resume <sessionId>        # continue the last run in an existing session
    ./workbench show run <runId>          # view run metadata (JSON)
    ./workbench show history <sessionId>  # print the JSONL operation log
    ```
@@ -54,7 +54,7 @@ Every command that manipulates project files must operate through this explicit 
 - **Sessions** (data stored under `dataDir/sessions/<sessionId>`) hold stable context/goal and track the latest run index.
 - **Runs** (stored under `dataDir/runs/<runId>`) represent a single agent execution with its workspace (`/scratch`), logs, artifacts, and metadata.
 
-You can resume an existing session with `workbench resume <sessionId>` and inspect artifacts using the CLI or by exploring the data directory (see [docs/data-layout.md](docs/data-layout.md)).
+You can resume an existing session with `workbench resume <sessionId>` to continue the last run (use `--new-run` to force a fresh run) and inspect artifacts using the CLI or by exploring the data directory (see [docs/data-layout.md](docs/data-layout.md)).
 
 ## Commands & workflows
 
@@ -63,7 +63,7 @@ Most entrypoints live under `cmd/workbench/cmd` and use Cobra. Important workflo
 | Command | Description |
 | ------- | ----------- |
 | `workbench` | Start a new session + run with default context. |
-| `workbench resume <sessionId>` | Open a run that reuses session context. |
+| `workbench resume <sessionId>` | Continue the last run in a session (use `--new-run` to start fresh). |
 | `workbench list sessions` | List stored session IDs + metadata. |
 | `workbench list runs <sessionId>` | Show run history for a session (statuses, timestamps). |
 | `workbench show session <sessionId>` | Dump session metadata. |

@@ -16,10 +16,10 @@ The CLI boots the default Bubble Tea-powered TUI. Every line you send becomes an
 
 ```sh
 ./workbench list sessions              # see available session IDs
-./workbench resume <sessionId>         # create a new run in that session
+./workbench resume <sessionId>         # continue the last run in that session
 ```
 
-Session metadata lives in `workbench.db` under the data directory. Resuming reuses the same goal/context while creating a fresh run workspace under `/scratch`.
+Session metadata lives in `workbench.db` under the data directory. Resuming reuses the same goal/context and continues the last run workspace (use `--new-run` to start fresh under `/scratch`).
 
 ### 3. Inspect metadata, history, and artifacts
 
@@ -36,7 +36,7 @@ Pair these commands with `ls`/`cat` inside the `dataDir` to debug agent behavior
 | Command | Description |
 | ------- | ----------- |
 | `workbench` | Start a fresh session + run (default). |
-| `workbench resume <sessionId>` | Create a new run inside an existing session (increments run index). |
+| `workbench resume <sessionId>` | Continue the last run in a session (use `--new-run` to start fresh). |
 | `workbench list sessions` | List session IDs along with metadata stored in SQLite. |
 | `workbench list runs <sessionId>` | Show runs tied to a session, including statuses and timestamps. |
 | `workbench show session <sessionId>` | Print the session metadata. |

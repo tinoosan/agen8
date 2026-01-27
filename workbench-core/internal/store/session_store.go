@@ -184,3 +184,36 @@ func ListSessionIDs(cfg config.Config) ([]string, error) {
 	sort.Strings(out)
 	return out, nil
 }
+
+// ListSessions returns all sessions sorted by most recently updated.
+func ListSessions(cfg config.Config) ([]types.Session, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	ids, err := ListSessionIDs(cfg)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]types.Session, 0, len(ids))
+	for _, id := range ids {
+		s, err := LoadSession(cfg, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return sessionSortTime(out[i]).After(sessionSortTime(out[j]))
+	})
+	return out, nil
+}
+
+func sessionSortTime(s types.Session) time.Time {
+	if s.UpdatedAt != nil {
+		return *s.UpdatedAt
+	}
+	if s.CreatedAt != nil {
+		return *s.CreatedAt
+	}
+	return time.Time{}
+}

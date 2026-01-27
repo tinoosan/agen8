@@ -39,8 +39,9 @@ TUI. Each message you submit becomes one agent turn that can:
   - read/write run-scoped artifacts in /scratch
   - write proposed memory updates to /memory/update.md (host decides commits)
 
-Use "workbench resume <sessionId>" to continue a previous session by creating a
-new run in that session (workspaces remain run-scoped).
+Use "workbench resume <sessionId>" to continue a previous session. By default,
+it continues the last run in that session (workspace preserved). Use --new-run
+to force a fresh run.
 `),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// dataDir is resolved per-command via effectiveConfig().
@@ -93,7 +94,13 @@ new run in that session (workspaces remain run-scoped).
 			app.WithRecentHistoryPairs(recentHistoryPairs),
 			app.WithIncludeHistoryOps(includeHistoryOps),
 		}
-		return app.RunNewChatTUI(cmd.Context(), cfg, title, goal, maxContextB, opts...)
+		start := app.ChatStart{
+			Mode:                    app.ChatStartNew,
+			Title:                   title,
+			Goal:                    goal,
+			RespectSessionApprovals: !cmd.Root().PersistentFlags().Changed("approvals-mode"),
+		}
+		return app.RunChatTUILoop(cmd.Context(), cfg, start, maxContextB, opts...)
 	},
 }
 

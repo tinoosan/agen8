@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
+	"github.com/tinoosan/workbench-core/pkg/events"
 )
 
 // RenderClass is the presentation class for an incoming host event.
@@ -80,6 +80,14 @@ func classifyEvent(ev events.Event) RenderResult {
 		return res
 
 	// Host-side helpers (user-facing, compact).
+	case "run.warning":
+		res.Class = RenderAction
+		if txt := strings.TrimSpace(ev.Data["text"]); txt != "" {
+			res.Text = "Warning: " + txt
+		} else {
+			res.Text = "Warning"
+		}
+		return res
 	case "refs.attached":
 		res.Class = RenderAction
 		files := strings.TrimSpace(ev.Data["files"])

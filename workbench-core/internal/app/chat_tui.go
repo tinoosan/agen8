@@ -57,6 +57,25 @@ func cursorDebugLog(hypothesisId, location, message string, data map[string]any)
 	// #endregion
 }
 
+func emitStartupWarnings(ctx context.Context, emit func(ctx context.Context, ev events.Event), warnings []string) {
+	if emit == nil || len(warnings) == 0 {
+		return
+	}
+	boolp := func(b bool) *bool { return &b }
+	for _, w := range warnings {
+		msg := strings.TrimSpace(w)
+		if msg == "" {
+			continue
+		}
+		emit(ctx, events.Event{
+			Type:    "run.warning",
+			Message: "Warning",
+			Data:    map[string]string{"text": msg},
+			Console: boolp(false),
+		})
+	}
+}
+
 // RunNewChatTUI starts the TUI immediately, but defers creating a new session/run
 // until the first user message is submitted.
 //
@@ -271,6 +290,7 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 		Data:    map[string]string{"mode": mode},
 		Console: boolp(false),
 	})
+	emitStartupWarnings(context.Background(), mustEmit, resolved.StartupWarnings)
 	historySink.Model = model
 	setHistoryModel := func(next string) { historySink.Model = strings.TrimSpace(next) }
 	setup, err := setupTUIChatRuntime(cfg, run, resolved, model, historyRes, mustEmit)
@@ -322,6 +342,102 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 	})
 	close(evCh)
 	return err
+}
+
+// ChatStartMode describes how the TUI should start.
+type ChatStartMode string
+
+const (
+	ChatStartNew    ChatStartMode = "new"
+	ChatStartResume ChatStartMode = "resume"
+)
+
+// ChatStart configures the initial session/run for RunChatTUILoop.
+type ChatStart struct {
+	Mode        ChatStartMode
+	SessionID   string
+	Title       string
+	Goal        string
+	ForceNewRun bool
+	// RespectSessionApprovals applies session.ApprovalsMode on resume unless overridden by CLI flags.
+	RespectSessionApprovals bool
+}
+
+// RunChatTUILoop runs the chat TUI and handles in-process session switching.
+func RunChatTUILoop(ctx context.Context, cfg config.Config, start ChatStart, maxContextB int, opts ...RunChatOption) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	current := start
+	for {
+		var err error
+		switch current.Mode {
+		case ChatStartNew:
+			err = RunNewChatTUI(ctx, cfg, current.Title, current.Goal, maxContextB, opts...)
+		case ChatStartResume:
+			run, warnActive, sessionApprovals, err2 := resumeRunForSession(cfg, current.SessionID, maxContextB, current.ForceNewRun)
+			if err2 != nil {
+				return err2
+			}
+			resumeOpts := opts
+			if current.RespectSessionApprovals && strings.TrimSpace(sessionApprovals) != "" {
+				resumeOpts = append(resumeOpts, WithApprovalsMode(sessionApprovals))
+			}
+			if warnActive {
+				resumeOpts = append(resumeOpts, WithStartupWarning("Run appears active; continuing may override another process."))
+			}
+			err = RunChatTUI(ctx, cfg, run, resumeOpts...)
+		default:
+			return fmt.Errorf("unknown chat start mode %q", current.Mode)
+		}
+
+		if err == nil {
+			return nil
+		}
+		var sw tui.SwitchSessionError
+		if errors.As(err, &sw) {
+			if sw.New {
+				current = ChatStart{Mode: ChatStartNew, Title: current.Title, Goal: current.Goal}
+				continue
+			}
+			if strings.TrimSpace(sw.SessionID) != "" {
+				current = ChatStart{Mode: ChatStartResume, SessionID: sw.SessionID}
+				continue
+			}
+			return nil
+		}
+		return err
+	}
+}
+
+func resumeRunForSession(cfg config.Config, sessionID string, maxContextB int, forceNewRun bool) (types.Run, bool, string, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return types.Run{}, false, "", fmt.Errorf("sessionId is required")
+	}
+	sess, err := store.LoadSession(cfg, sessionID)
+	if err != nil {
+		return types.Run{}, false, "", err
+	}
+	parent := strings.TrimSpace(sess.CurrentRunID)
+	if !forceNewRun && parent != "" {
+		if run, err := store.LoadRun(cfg, parent); err == nil {
+			warnActive := run.Status == types.StatusRunning
+			if run.Status != types.StatusRunning {
+				run, err = store.ReopenRun(cfg, run.RunId)
+				if err != nil {
+					return types.Run{}, false, "", err
+				}
+			}
+			_, _ = store.AddRunToSession(cfg, sess.SessionID, run.RunId)
+			return run, warnActive, strings.TrimSpace(sess.ApprovalsMode), nil
+		}
+	}
+	run, err := store.CreateSubRun(cfg, sessionID, parent, "resume session", maxContextB)
+	if err != nil {
+		return types.Run{}, false, "", err
+	}
+	return run, false, strings.TrimSpace(sess.ApprovalsMode), nil
 }
 
 func shouldPrintResumeHint(runCtx context.Context, err error) bool {
@@ -402,6 +518,14 @@ func (r *lazyNewSessionTurnRunner) AppendToolResponse(toolCallID string, resp ty
 		return
 	}
 	r.engine.AppendToolResponse(toolCallID, resp)
+}
+
+func (r *lazyNewSessionTurnRunner) ListSessions(ctx context.Context) ([]types.Session, error) {
+	_ = ctx
+	if r == nil {
+		return nil, fmt.Errorf("runner is nil")
+	}
+	return store.ListSessions(r.cfg)
 }
 
 func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (resp string, handled bool, err error) {
@@ -934,6 +1058,7 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		Data:    map[string]string{"mode": mode},
 		Console: boolp(false),
 	})
+	emitStartupWarnings(context.Background(), r.mustEmit, r.opts.StartupWarnings)
 	// Persist the session's active model as early as possible.
 	sess.ActiveModel = model
 	_ = store.SaveSession(cfg, sess)
@@ -1039,6 +1164,14 @@ func (r *tuiTurnRunner) ReadVFS(ctx context.Context, path string, maxBytes int) 
 	}
 	_ = ctx
 	return string(b), bytesLen, truncated, nil
+}
+
+func (r *tuiTurnRunner) ListSessions(ctx context.Context) ([]types.Session, error) {
+	_ = ctx
+	if r == nil {
+		return nil, fmt.Errorf("runner is nil")
+	}
+	return store.ListSessions(r.cfg)
 }
 
 func (r *tuiTurnRunner) ListVFS(ctx context.Context, path string) ([]vfs.Entry, error) {

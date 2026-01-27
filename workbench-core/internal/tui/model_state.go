@@ -30,6 +30,7 @@ type TurnRunner interface {
 	ExecHostOp(ctx context.Context, req types.HostOpRequest, toolCallID string) (types.HostOpResponse, error)
 	AppendToolResponse(toolCallID string, resp types.HostOpResponse)
 	ResumeTurn(ctx context.Context, toolOutputs []llm.LLMMessage) (string, error)
+	ListSessions(ctx context.Context) ([]types.Session, error)
 }
 
 // vfsAccessor is an optional extension interface implemented by the app TurnRunner.
@@ -94,6 +95,11 @@ type editorComposeLoadMsg struct {
 type workdirPrefetchMsg struct {
 	workdir string
 	err     error
+}
+
+type sessionsListMsg struct {
+	sessions []types.Session
+	err      error
 }
 
 type approvalOp struct {
@@ -280,6 +286,15 @@ type Model struct {
 	// Model picker state
 	modelPickerOpen bool
 	modelPickerList list.Model
+
+	// Session picker state (/sessions command)
+	sessionPickerOpen bool
+	sessionPickerList list.Model
+	sessionPickerErr  string
+
+	// Session switching request (set before quitting)
+	switchSessionID string
+	switchNew       bool
 
 	// Reasoning effort picker (opened via `/reasoning effort` with no value)
 	reasoningEffortPickerOpen     bool

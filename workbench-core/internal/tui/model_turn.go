@@ -63,6 +63,17 @@ func (m *Model) submitSingle() tea.Cmd {
 	if txt == "/copy" {
 		return copyToClipboardCmd(m.transcriptForClipboard())
 	}
+	// Intercept `/new` to start a new session (no submission).
+	if strings.EqualFold(txt, "/new") {
+		return m.requestNewSessionSwitch()
+	}
+	// Intercept `/sessions` to open session picker (no submission).
+	if strings.EqualFold(txt, "/sessions") {
+		if m.turnInFlight || len(m.awaitingApprovalOps) > 0 {
+			return nil
+		}
+		return m.openSessionPicker()
+	}
 	// Intercept `/reasoning-effort` with no value to open a picker (no submission).
 	if strings.EqualFold(txt, "/reasoning-effort") {
 		m.openReasoningEffortPicker()
@@ -94,6 +105,17 @@ func (m *Model) submitMultiline() tea.Cmd {
 	// Intercept `/copy` to copy transcript without submitting a turn.
 	if txt == "/copy" {
 		return copyToClipboardCmd(m.transcriptForClipboard())
+	}
+	// Intercept `/new` to start a new session (no submission).
+	if strings.EqualFold(txt, "/new") {
+		return m.requestNewSessionSwitch()
+	}
+	// Intercept `/sessions` to open session picker (no submission).
+	if strings.EqualFold(txt, "/sessions") {
+		if m.turnInFlight || len(m.awaitingApprovalOps) > 0 {
+			return nil
+		}
+		return m.openSessionPicker()
 	}
 	// Intercept `/reasoning-effort` with no value to open a picker (no submission).
 	if strings.EqualFold(txt, "/reasoning-effort") {

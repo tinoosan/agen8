@@ -9,9 +9,11 @@ import (
 	"github.com/tinoosan/workbench-core/internal/store"
 )
 
+var resumeNewRun bool
+
 var resumeCmd = &cobra.Command{
 	Use:   "resume <sessionId>",
-	Short: "Resume a previous session by starting a new run",
+	Short: "Resume a previous session",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := effectiveConfig(cmd)
@@ -22,20 +24,13 @@ var resumeCmd = &cobra.Command{
 		if sessionID == "" {
 			return fmt.Errorf("sessionId is required")
 		}
-		sess, err := store.LoadSession(cfg, sessionID)
-		if err != nil {
-			return err
-		}
-		parent := strings.TrimSpace(sess.CurrentRunID)
-		run, err := store.CreateSubRun(cfg, sessionID, parent, "resume session", maxContextB)
-		if err != nil {
-			return err
-		}
 
 		approvalsOverride := approvalsMode
 		if !cmd.Root().PersistentFlags().Changed("approvals-mode") {
-			if v := strings.TrimSpace(sess.ApprovalsMode); v != "" {
-				approvalsOverride = v
+			if sess, err := store.LoadSession(cfg, sessionID); err == nil {
+				if v := strings.TrimSpace(sess.ApprovalsMode); v != "" {
+					approvalsOverride = v
+				}
 			}
 		}
 
@@ -53,6 +48,16 @@ var resumeCmd = &cobra.Command{
 			app.WithRecentHistoryPairs(recentHistoryPairs),
 			app.WithIncludeHistoryOps(includeHistoryOps),
 		}
-		return app.RunChatTUI(cmd.Context(), cfg, run, opts...)
+		start := app.ChatStart{
+			Mode:                    app.ChatStartResume,
+			SessionID:               sessionID,
+			ForceNewRun:             resumeNewRun,
+			RespectSessionApprovals: !cmd.Root().PersistentFlags().Changed("approvals-mode"),
+		}
+		return app.RunChatTUILoop(cmd.Context(), cfg, start, maxContextB, opts...)
 	},
+}
+
+func init() {
+	resumeCmd.Flags().BoolVar(&resumeNewRun, "new-run", false, "start a new run instead of continuing the last run")
 }
