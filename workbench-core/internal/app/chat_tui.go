@@ -2032,6 +2032,24 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 			Data:    data,
 			Store:   boolp(false),
 		})
+
+		r.run.TotalTokensIn += aggUsage.InputTokens
+		r.run.TotalTokensOut += aggUsage.OutputTokens
+		r.run.TotalTokens += aggUsage.TotalTokens
+		if pricingKnown && costUSD > 0 {
+			r.run.TotalCostUSD += costUSD
+		}
+		_ = store.SaveRun(r.cfg, r.run)
+
+		if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
+			sess.TotalTokensIn += aggUsage.InputTokens
+			sess.TotalTokensOut += aggUsage.OutputTokens
+			sess.TotalTokens += aggUsage.TotalTokens
+			if pricingKnown && costUSD > 0 {
+				sess.TotalCostUSD += costUSD
+			}
+			_ = store.SaveSession(r.cfg, sess)
+		}
 	}
 
 	// Memory/profile update ingestion (via shared ContentUpdateProcessor).

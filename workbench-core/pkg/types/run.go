@@ -55,6 +55,15 @@ type Run struct {
 	// Error contains the failure message if the run status is StatusFailed.
 	Error *string `json:"error,omitempty"`
 
+	// TotalTokensIn is the cumulative input tokens consumed by this run.
+	TotalTokensIn int `json:"totalTokensIn,omitempty"`
+	// TotalTokensOut is the cumulative output tokens consumed by this run.
+	TotalTokensOut int `json:"totalTokensOut,omitempty"`
+	// TotalTokens is the cumulative input + output tokens for this run.
+	TotalTokens int `json:"totalTokens,omitempty"`
+	// TotalCostUSD is the cumulative estimated cost for this run.
+	TotalCostUSD float64 `json:"totalCostUsd,omitempty"`
+
 	// Runtime captures host/runtime configuration used when executing this run.
 	//
 	// This is primarily for reproducibility and debugging ("why did the agent behave that way?").
