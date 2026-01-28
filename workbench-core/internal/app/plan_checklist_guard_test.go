@@ -64,3 +64,72 @@ func TestPlanChecklistWarningWhenStale(t *testing.T) {
 		t.Fatalf("expected warning appended, got %q", string(b))
 	}
 }
+
+func TestEnsurePlanGateCreatesDefaults(t *testing.T) {
+	fs := newPlanFS(t)
+	if err := EnsurePlanGate(fs); err != nil {
+		t.Fatalf("EnsurePlanGate: %v", err)
+	}
+	head, err := fs.Read(planHeadPath)
+	if err != nil {
+		t.Fatalf("read head: %v", err)
+	}
+	if strings.TrimSpace(string(head)) == "" {
+		t.Fatalf("expected non-empty plan head")
+	}
+	checklist, err := fs.Read(planChecklistPath)
+	if err != nil {
+		t.Fatalf("read checklist: %v", err)
+	}
+	status := planChecklistStatusFromText(string(checklist))
+	if !status.valid || !status.hasItems || !status.hasOpen {
+		t.Fatalf("expected valid checklist with open items, got %#v", status)
+	}
+}
+
+func TestEnsurePlanGateIsIdempotent(t *testing.T) {
+	fs := newPlanFS(t)
+	customHead := "# Custom Plan\n\nDetails"
+	customChecklist := "- [ ] Custom step"
+	if err := fs.Write(planHeadPath, []byte(customHead)); err != nil {
+		t.Fatalf("seed head: %v", err)
+	}
+	if err := fs.Write(planChecklistPath, []byte(customChecklist)); err != nil {
+		t.Fatalf("seed checklist: %v", err)
+	}
+	if err := EnsurePlanGate(fs); err != nil {
+		t.Fatalf("EnsurePlanGate: %v", err)
+	}
+	head, err := fs.Read(planHeadPath)
+	if err != nil {
+		t.Fatalf("read head: %v", err)
+	}
+	if string(head) != customHead {
+		t.Fatalf("expected head unchanged, got %q", string(head))
+	}
+	checklist, err := fs.Read(planChecklistPath)
+	if err != nil {
+		t.Fatalf("read checklist: %v", err)
+	}
+	if string(checklist) != customChecklist {
+		t.Fatalf("expected checklist unchanged, got %q", string(checklist))
+	}
+}
+
+func TestEnsurePlanGateReplacesInvalidChecklist(t *testing.T) {
+	fs := newPlanFS(t)
+	if err := fs.Write(planChecklistPath, []byte("not a checklist")); err != nil {
+		t.Fatalf("seed checklist: %v", err)
+	}
+	if err := EnsurePlanGate(fs); err != nil {
+		t.Fatalf("EnsurePlanGate: %v", err)
+	}
+	checklist, err := fs.Read(planChecklistPath)
+	if err != nil {
+		t.Fatalf("read checklist: %v", err)
+	}
+	status := planChecklistStatusFromText(string(checklist))
+	if !status.valid || !status.hasItems {
+		t.Fatalf("expected valid checklist, got %#v", status)
+	}
+}

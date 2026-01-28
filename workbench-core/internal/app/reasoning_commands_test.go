@@ -23,14 +23,16 @@ func TestTUITurnRunner_Reasoning_UpdatesAgentAndSession(t *testing.T) {
 	}
 
 	var got []events.Event
+	a := &agent.DefaultAgent{
+		Model: "openai/gpt-5.1-codex-mini",
+	}
 	r := &tuiTurnRunner{
-		cfg:  cfg,
-		fs:   vfs.NewFS(),
-		run:  run,
-		opts: resolveRunChatOptions(WithModel("openai/gpt-5.1-codex-mini")),
-		agent: &agent.DefaultAgent{
-			Model: "openai/gpt-5.1-codex-mini",
-		},
+		cfg:              cfg,
+		fs:               vfs.NewFS(),
+		run:              run,
+		opts:             resolveRunChatOptions(WithModel("openai/gpt-5.1-codex-mini")),
+		runner:           a,
+		configurable:     a,
 		model:            "openai/gpt-5.1-codex-mini",
 		setHistoryModel:  func(string) {},
 		mustEmit:         func(_ context.Context, ev events.Event) { got = append(got, ev) },
@@ -43,8 +45,8 @@ func TestTUITurnRunner_Reasoning_UpdatesAgentAndSession(t *testing.T) {
 	if r.opts.ReasoningEffort != "high" {
 		t.Fatalf("opts.ReasoningEffort=%q, want %q", r.opts.ReasoningEffort, "high")
 	}
-	if r.agent.GetReasoningEffort() != "high" {
-		t.Fatalf("agent.ReasoningEffort=%q, want %q", r.agent.GetReasoningEffort(), "high")
+	if r.configurable.GetReasoningEffort() != "high" {
+		t.Fatalf("agent.ReasoningEffort=%q, want %q", r.configurable.GetReasoningEffort(), "high")
 	}
 
 	if _, handled := r.handleSlashCommand("/reasoning summary concise"); !handled {
@@ -53,8 +55,8 @@ func TestTUITurnRunner_Reasoning_UpdatesAgentAndSession(t *testing.T) {
 	if r.opts.ReasoningSummary != "concise" {
 		t.Fatalf("opts.ReasoningSummary=%q, want %q", r.opts.ReasoningSummary, "concise")
 	}
-	if r.agent.GetReasoningSummary() != "concise" {
-		t.Fatalf("agent.ReasoningSummary=%q, want %q", r.agent.GetReasoningSummary(), "concise")
+	if r.configurable.GetReasoningSummary() != "concise" {
+		t.Fatalf("agent.ReasoningSummary=%q, want %q", r.configurable.GetReasoningSummary(), "concise")
 	}
 
 	updated, err := store.LoadSession(cfg, sess.SessionID)
@@ -89,14 +91,16 @@ func TestTUITurnRunner_Reasoning_Info(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
+	a := &agent.DefaultAgent{
+		Model: "openai/gpt-5.1-codex-mini",
+	}
 	r := &tuiTurnRunner{
-		cfg:  cfg,
-		fs:   vfs.NewFS(),
-		run:  run,
-		opts: resolveRunChatOptions(WithModel("openai/gpt-5.1-codex-mini")),
-		agent: &agent.DefaultAgent{
-			Model: "openai/gpt-5.1-codex-mini",
-		},
+		cfg:              cfg,
+		fs:               vfs.NewFS(),
+		run:              run,
+		opts:             resolveRunChatOptions(WithModel("openai/gpt-5.1-codex-mini")),
+		runner:           a,
+		configurable:     a,
 		model:            "openai/gpt-5.1-codex-mini",
 		setHistoryModel:  func(string) {},
 		mustEmit:         func(_ context.Context, _ events.Event) {},

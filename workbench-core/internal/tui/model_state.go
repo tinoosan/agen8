@@ -48,6 +48,10 @@ type vfsLister interface {
 	ListVFS(ctx context.Context, path string) ([]vfs.Entry, error)
 }
 
+type swarmSummaryProvider interface {
+	GetSwarmSummary() string
+}
+
 type eventMsg events.Event
 
 type turnDoneMsg struct {
@@ -141,6 +145,7 @@ type Model struct {
 	swarmModeActive     bool
 	swarmViewport       viewport.Model
 	swarmLoadErr        string
+	swarmContent        string
 	planAutoExpanded    bool
 	planLoadErr         string
 	planDetailsLoadErr  string

@@ -23,9 +23,13 @@ import (
 type tuiChatSetup struct {
 	FS *vfs.FS
 
-	Agent            agent.Agent
+	Runner           agent.Runner
+	Configurable     agent.Configurable
 	BaseSystemPrompt string
 	Constructor      *agent.ContextConstructor
+	LLM              llm.LLMClient
+	Executor         agent.HostExecutor
+	ToolManifests    []tools.ToolManifest
 
 	Artifacts *ArtifactIndex
 
@@ -130,6 +134,9 @@ func setupTUIChatRuntime(
 		return nil, err
 	}
 	fs := rt.FS
+	if err := EnsurePlanGate(fs); err != nil {
+		return nil, fmt.Errorf("ensure plan gate: %w", err)
+	}
 
 	client, err := llm.NewClientFromEnv()
 	if err != nil {
@@ -154,28 +161,29 @@ func setupTUIChatRuntime(
 		Data:    map[string]string{"model": model},
 	})
 
-	a, err := agent.New(agent.Config{
-		LLM:              llmClient,
-		Exec:             rt.Executor,
-		Model:            model,
-		ReasoningEffort:  strings.TrimSpace(opts.ReasoningEffort),
-		ReasoningSummary: strings.TrimSpace(opts.ReasoningSummary),
-		ApprovalsMode:    strings.TrimSpace(opts.ApprovalsMode),
-		EnableWebSearch:  opts.WebSearchEnabled,
-		SystemPrompt:     baseSystemPrompt,
-		Context:          constructor,
-
-		ToolManifests: rt.ToolManifests,
-	})
+	agentCfg := agent.DefaultConfig()
+	agentCfg.Model = model
+	agentCfg.ReasoningEffort = strings.TrimSpace(opts.ReasoningEffort)
+	agentCfg.ReasoningSummary = strings.TrimSpace(opts.ReasoningSummary)
+	agentCfg.ApprovalsMode = strings.TrimSpace(opts.ApprovalsMode)
+	agentCfg.EnableWebSearch = opts.WebSearchEnabled
+	agentCfg.SystemPrompt = baseSystemPrompt
+	agentCfg.Context = constructor
+	agentCfg.ToolManifests = rt.ToolManifests
+	a, err := agent.NewAgent(llmClient, rt.Executor, agentCfg)
 	if err != nil {
 		return nil, err
 	}
 
 	return &tuiChatSetup{
 		FS:               fs,
-		Agent:            a,
+		Runner:           a,
+		Configurable:     a,
 		BaseSystemPrompt: baseSystemPrompt,
 		Constructor:      constructor,
+		LLM:              llmClient,
+		Executor:         rt.Executor,
+		ToolManifests:    rt.ToolManifests,
 		Artifacts:        artifactIndex,
 		WorkdirBase:      rt.WorkdirBase,
 		MemStore:         rt.MemStore,

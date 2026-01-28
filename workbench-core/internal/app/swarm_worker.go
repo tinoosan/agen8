@@ -11,7 +11,6 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/llm"
-	"github.com/tinoosan/workbench-core/pkg/orchestrator"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
@@ -102,6 +101,9 @@ func (r *tuiTurnRunner) startSwarmWorker(run types.Run) error {
 	if err != nil {
 		return fmt.Errorf("build runtime: %w", err)
 	}
+	if err := EnsurePlanGate(rt.FS); err != nil {
+		return fmt.Errorf("ensure plan gate: %w", err)
+	}
 
 	client, err := llm.NewClientFromEnv()
 	if err != nil {
@@ -114,30 +116,28 @@ func (r *tuiTurnRunner) startSwarmWorker(run types.Run) error {
 		Multiplier:   2.0,
 	})
 
-	baseSystemPrompt := agent.DefaultSystemPrompt()
+	baseSystemPrompt := agent.WorkerSystemPrompt()
 	if sess, err := store.LoadSession(r.cfg, run.SessionID); err == nil {
 		if blk := agent.SessionContextBlock(sess); strings.TrimSpace(blk) != "" {
 			baseSystemPrompt = strings.TrimSpace(baseSystemPrompt) + "\n\n" + blk + "\n"
 		}
 	}
 
-	a, err := agent.New(agent.Config{
-		LLM:              llmClient,
-		Exec:             rt.Executor,
-		Model:            model,
-		ReasoningEffort:  strings.TrimSpace(r.opts.ReasoningEffort),
-		ReasoningSummary: strings.TrimSpace(r.opts.ReasoningSummary),
-		ApprovalsMode:    strings.TrimSpace(r.opts.ApprovalsMode),
-		EnableWebSearch:  r.opts.WebSearchEnabled,
-		SystemPrompt:     baseSystemPrompt,
-		Context:          rt.Constructor,
-		ToolManifests:    rt.ToolManifests,
-	})
+	cfg := agent.WorkerConfig()
+	cfg.Model = model
+	cfg.ReasoningEffort = strings.TrimSpace(r.opts.ReasoningEffort)
+	cfg.ReasoningSummary = strings.TrimSpace(r.opts.ReasoningSummary)
+	cfg.ApprovalsMode = strings.TrimSpace(r.opts.ApprovalsMode)
+	cfg.EnableWebSearch = r.opts.WebSearchEnabled
+	cfg.SystemPrompt = baseSystemPrompt
+	cfg.Context = rt.Constructor
+	cfg.ToolManifests = rt.ToolManifests
+	a, err := agent.NewAgent(llmClient, rt.Executor, cfg)
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
 	}
 
-	worker, err := agent.NewWorker(agent.WorkerConfig{
+	worker, err := agent.NewWorker(agent.WorkerRunnerConfig{
 		Agent:        a,
 		PollInterval: 2 * time.Second,
 		InboxPath:    "/inbox",
@@ -153,28 +153,5 @@ func (r *tuiTurnRunner) startSwarmWorker(run types.Run) error {
 	go func() {
 		_ = worker.Run(ctx)
 	}()
-	r.ensureSwarmSyncLoop()
 	return nil
-}
-
-// ensureSwarmSyncLoop starts a best-effort background sync that writes
-// registry/metrics for the orchestrator run while any swarm workers exist.
-func (r *tuiTurnRunner) ensureSwarmSyncLoop() {
-	if r.swarmSyncCancel != nil {
-		return
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	r.swarmSyncCancel = cancel
-	go func() {
-		t := time.NewTicker(2 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				_ = orchestrator.SyncRegistry(r.cfg, r.run.RunId)
-			}
-		}
-	}()
 }

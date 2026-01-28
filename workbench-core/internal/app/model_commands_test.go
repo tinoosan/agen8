@@ -118,14 +118,16 @@ func TestTUITurnRunner_Model_UpdatesAgentAndSession(t *testing.T) {
 	}
 
 	var got []events.Event
+	a := &agent.DefaultAgent{
+		Model: "openai/gpt-5.2",
+	}
 	r := &tuiTurnRunner{
-		cfg:  cfg,
-		fs:   vfs.NewFS(),
-		run:  run,
-		opts: resolveRunChatOptions(WithModel("openai/gpt-5.2")),
-		agent: &agent.DefaultAgent{
-			Model: "openai/gpt-5.2",
-		},
+		cfg:              cfg,
+		fs:               vfs.NewFS(),
+		run:              run,
+		opts:             resolveRunChatOptions(WithModel("openai/gpt-5.2")),
+		runner:           a,
+		configurable:     a,
 		model:            "openai/gpt-5.2",
 		setHistoryModel:  func(string) {},
 		mustEmit:         func(_ context.Context, ev events.Event) { got = append(got, ev) },
@@ -138,8 +140,8 @@ func TestTUITurnRunner_Model_UpdatesAgentAndSession(t *testing.T) {
 	if r.model != "openai/gpt-4o" {
 		t.Fatalf("runner model=%q, want %q", r.model, "openai/gpt-4o")
 	}
-	if r.agent.GetModel() != "openai/gpt-4o" {
-		t.Fatalf("agent model=%q, want %q", r.agent.GetModel(), "openai/gpt-4o")
+	if r.configurable.GetModel() != "openai/gpt-4o" {
+		t.Fatalf("agent model=%q, want %q", r.configurable.GetModel(), "openai/gpt-4o")
 	}
 
 	updated, err := store.LoadSession(cfg, sess.SessionID)
@@ -166,13 +168,15 @@ func TestTUITurnRunner_Model_InvalidDoesNotChange(t *testing.T) {
 	t.Parallel()
 
 	var got []events.Event
+	a := &agent.DefaultAgent{
+		Model: "openai/gpt-5.2",
+	}
 	r := &tuiTurnRunner{
-		fs:   vfs.NewFS(),
-		run:  types.Run{RunId: "run-test", SessionID: "sess-test"},
-		opts: resolveRunChatOptions(WithModel("openai/gpt-5.2")),
-		agent: &agent.DefaultAgent{
-			Model: "openai/gpt-5.2",
-		},
+		fs:               vfs.NewFS(),
+		run:              types.Run{RunId: "run-test", SessionID: "sess-test"},
+		opts:             resolveRunChatOptions(WithModel("openai/gpt-5.2")),
+		runner:           a,
+		configurable:     a,
 		model:            "openai/gpt-5.2",
 		setHistoryModel:  func(string) {},
 		mustEmit:         func(_ context.Context, ev events.Event) { got = append(got, ev) },
@@ -185,8 +189,8 @@ func TestTUITurnRunner_Model_InvalidDoesNotChange(t *testing.T) {
 	if r.model != "openai/gpt-5.2" {
 		t.Fatalf("runner model=%q, want unchanged", r.model)
 	}
-	if r.agent.GetModel() != "openai/gpt-5.2" {
-		t.Fatalf("agent model=%q, want unchanged", r.agent.GetModel())
+	if r.configurable.GetModel() != "openai/gpt-5.2" {
+		t.Fatalf("agent model=%q, want unchanged", r.configurable.GetModel())
 	}
 
 	for _, ev := range got {

@@ -63,14 +63,16 @@ func TestTUITurnRunner_Web_TogglesAndUpdatesAgent(t *testing.T) {
 	t.Parallel()
 
 	var got []events.Event
+	a := &agent.DefaultAgent{
+		Model:           "openai/gpt-5.1-codex-mini",
+		EnableWebSearch: false,
+	}
 	r := &tuiTurnRunner{
-		fs:   vfs.NewFS(),
-		run:  fakeRunForTests(),
-		opts: resolveRunChatOptions(WithModel("openai/gpt-5.1-codex-mini")),
-		agent: &agent.DefaultAgent{
-			Model:           "openai/gpt-5.1-codex-mini",
-			EnableWebSearch: false,
-		},
+		fs:               vfs.NewFS(),
+		run:              fakeRunForTests(),
+		opts:             resolveRunChatOptions(WithModel("openai/gpt-5.1-codex-mini")),
+		runner:           a,
+		configurable:     a,
 		model:            "openai/gpt-5.1-codex-mini",
 		setHistoryModel:  func(string) {},
 		mustEmit:         func(_ context.Context, ev events.Event) { got = append(got, ev) },
@@ -80,7 +82,7 @@ func TestTUITurnRunner_Web_TogglesAndUpdatesAgent(t *testing.T) {
 	if r.opts.WebSearchEnabled {
 		t.Fatalf("expected opts.WebSearchEnabled default off")
 	}
-	if r.agent.WebSearchEnabled() {
+	if r.configurable.WebSearchEnabled() {
 		t.Fatalf("expected agent.EnableWebSearch default off")
 	}
 
@@ -94,7 +96,7 @@ func TestTUITurnRunner_Web_TogglesAndUpdatesAgent(t *testing.T) {
 	if !r.opts.WebSearchEnabled {
 		t.Fatalf("expected opts.WebSearchEnabled on after toggle")
 	}
-	if !r.agent.WebSearchEnabled() {
+	if !r.configurable.WebSearchEnabled() {
 		t.Fatalf("expected agent.EnableWebSearch on after toggle")
 	}
 

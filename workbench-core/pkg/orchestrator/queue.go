@@ -49,6 +49,37 @@ func EnqueueTask(cfg config.Config, runID string, task types.Task) (string, erro
 	return fullPath, nil
 }
 
+// EnqueueMessage writes a Message envelope into the target run's inbox/messages directory.
+func EnqueueMessage(cfg config.Config, runID string, msg types.Message) (string, error) {
+	if err := cfg.Validate(); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(runID) == "" {
+		return "", fmt.Errorf("runID is required")
+	}
+	if strings.TrimSpace(msg.MessageID) == "" {
+		msg.MessageID = "msg-" + uuid.NewString()
+	}
+	if msg.CreatedAt == nil {
+		now := time.Now()
+		msg.CreatedAt = &now
+	}
+	inboxDir := filepath.Join(fsutil.GetRunDir(cfg.DataDir, runID), "inbox", "messages")
+	if err := os.MkdirAll(inboxDir, 0755); err != nil {
+		return "", fmt.Errorf("create inbox messages dir: %w", err)
+	}
+	filename := "message-" + msg.MessageID + ".json"
+	fullPath := filepath.Join(inboxDir, filename)
+	b, err := json.MarshalIndent(msg, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal message: %w", err)
+	}
+	if err := os.WriteFile(fullPath, b, 0644); err != nil {
+		return "", fmt.Errorf("write message: %w", err)
+	}
+	return fullPath, nil
+}
+
 // OutboxItem represents a parsed artifact from a run's outbox.
 type OutboxItem struct {
 	Path       string

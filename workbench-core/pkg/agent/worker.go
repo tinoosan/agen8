@@ -13,8 +13,8 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
-// WorkerConfig configures a task-processing worker that polls /inbox and writes to /outbox.
-type WorkerConfig struct {
+// WorkerRunnerConfig configures a task-processing worker that polls /inbox and writes to /outbox.
+type WorkerRunnerConfig struct {
 	Agent        Agent
 	PollInterval time.Duration
 	InboxPath    string
@@ -26,10 +26,10 @@ type WorkerConfig struct {
 // Worker polls /inbox for Task envelopes, runs the agent, and writes TaskResult to /outbox.
 // It is opt-in and does not affect default agent behavior.
 type Worker struct {
-	cfg WorkerConfig
+	cfg WorkerRunnerConfig
 }
 
-func NewWorker(cfg WorkerConfig) (*Worker, error) {
+func NewWorker(cfg WorkerRunnerConfig) (*Worker, error) {
 	if cfg.Agent == nil {
 		return nil, fmt.Errorf("agent is required")
 	}
@@ -71,6 +71,12 @@ func (w *Worker) runOnce(ctx context.Context) error {
 		return err
 	}
 	for _, p := range paths {
+		if msg, ok := w.readMessage(ctx, p); ok {
+			if err := w.processMessage(ctx, p, msg); err != nil {
+				return err
+			}
+			continue
+		}
 		task, ok := w.readTask(ctx, p)
 		if !ok {
 			continue
@@ -104,6 +110,18 @@ func (w *Worker) listInbox(ctx context.Context) ([]string, error) {
 			paths = append(paths, p)
 		}
 	}
+	// Also include message inbox files (if present).
+	msgResp := w.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
+		Op:   types.HostOpFSList,
+		Path: path.Join(w.cfg.InboxPath, "messages"),
+	})
+	if msgResp.Ok {
+		for _, p := range msgResp.Entries {
+			if strings.HasSuffix(strings.ToLower(p), ".json") {
+				paths = append(paths, path.Join(w.cfg.InboxPath, "messages", p))
+			}
+		}
+	}
 	sort.Strings(paths)
 	return paths, nil
 }
@@ -122,6 +140,90 @@ func (w *Worker) readTask(ctx context.Context, taskPath string) (types.Task, boo
 		return types.Task{}, false
 	}
 	return task, true
+}
+
+func (w *Worker) readMessage(ctx context.Context, msgPath string) (types.Message, bool) {
+	resp := w.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
+		Op:       types.HostOpFSRead,
+		Path:     msgPath,
+		MaxBytes: w.cfg.MaxReadBytes,
+	})
+	if !resp.Ok || strings.TrimSpace(resp.Text) == "" {
+		return types.Message{}, false
+	}
+	var msg types.Message
+	if err := json.Unmarshal([]byte(resp.Text), &msg); err != nil {
+		return types.Message{}, false
+	}
+	if strings.TrimSpace(msg.MessageID) == "" {
+		return types.Message{}, false
+	}
+	return msg, true
+}
+
+func (w *Worker) processMessage(ctx context.Context, msgPath string, msg types.Message) error {
+	if msg.Metadata == nil {
+		msg.Metadata = map[string]string{}
+	}
+	if strings.EqualFold(msg.Metadata["processed"], "true") {
+		return nil
+	}
+	msg.Metadata["processed"] = "true"
+	msg.Metadata["receivedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := w.writeMessage(ctx, msgPath, msg); err != nil {
+		return err
+	}
+	ack := types.Message{
+		MessageID: "ack-" + msg.MessageID,
+		FromRunID: strings.TrimSpace(msg.ToRunID),
+		ToRunID:   strings.TrimSpace(msg.FromRunID),
+		TaskID:    strings.TrimSpace(msg.TaskID),
+		Kind:      "ack",
+		Title:     "message received",
+		Body:      strings.TrimSpace(msg.Title),
+		CreatedAt: func() *time.Time { t := time.Now(); return &t }(),
+	}
+	return w.writeMessageOutbox(ctx, ack)
+}
+
+func (w *Worker) writeMessage(ctx context.Context, msgPath string, msg types.Message) error {
+	b, err := json.MarshalIndent(msg, "", "  ")
+	if err != nil {
+		return err
+	}
+	resp := w.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
+		Op:   types.HostOpFSWrite,
+		Path: msgPath,
+		Text: string(b),
+	})
+	if !resp.Ok {
+		return fmt.Errorf("update message: %s", resp.Error)
+	}
+	return nil
+}
+
+func (w *Worker) writeMessageOutbox(ctx context.Context, msg types.Message) error {
+	outbox := strings.TrimRight(w.cfg.OutboxPath, "/")
+	if outbox == "" {
+		outbox = "/outbox"
+	}
+	if strings.TrimSpace(msg.MessageID) == "" {
+		msg.MessageID = "msg"
+	}
+	path := path.Join(outbox, "message-"+msg.MessageID+".json")
+	b, err := json.MarshalIndent(msg, "", "  ")
+	if err != nil {
+		return err
+	}
+	resp := w.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
+		Op:   types.HostOpFSWrite,
+		Path: path,
+		Text: string(b),
+	})
+	if !resp.Ok {
+		return fmt.Errorf("write message outbox: %s", resp.Error)
+	}
+	return nil
 }
 
 func (w *Worker) writeTask(ctx context.Context, taskPath string, task types.Task) error {
@@ -172,6 +274,20 @@ func (w *Worker) processTask(ctx context.Context, taskPath string, task types.Ta
 	if err := w.writeResult(ctx, task, result); err != nil {
 		return err
 	}
+	// Emit a message summary for the orchestrator.
+	msg := types.Message{
+		MessageID: "task-" + taskID,
+		FromRunID: strings.TrimSpace(task.AssignedToRunID),
+		TaskID:    taskID,
+		Kind:      "result",
+		Title:     "task " + result.Status,
+		Body:      strings.TrimSpace(result.Summary),
+		CreatedAt: &now,
+	}
+	if result.Error != "" {
+		msg.Body = result.Error
+	}
+	_ = w.writeMessageOutbox(ctx, msg)
 
 	task.Status = result.Status
 	task.CompletedAt = result.CompletedAt
@@ -218,13 +334,20 @@ func (w *Worker) agentForTask(task types.Task) Agent {
 	if len(skills) == 0 && len(allowedTools) == 0 {
 		return base
 	}
-	cloned := base.Clone()
+	cfg := base.Config()
 	if len(allowedTools) > 0 {
-		cloned.SetToolRegistry(filterToolRegistry(base.GetToolRegistry(), allowedTools))
-		cloned.SetExtraTools(filterExtraTools(base.GetExtraTools(), allowedTools))
+		cfg.ToolRegistry = filterToolRegistry(base.GetToolRegistry(), allowedTools)
+		cfg.ExtraTools = filterExtraTools(base.GetExtraTools(), allowedTools)
 	}
 	if len(skills) > 0 || len(allowedTools) > 0 {
-		cloned.SetSystemPrompt(appendWorkerHints(base.GetSystemPrompt(), skills, allowedTools))
+		cfg.SystemPrompt = appendWorkerHints(base.GetSystemPrompt(), skills, allowedTools)
+	}
+	cloned, err := base.CloneWithConfig(cfg)
+	if err != nil {
+		if w.cfg.Logf != nil {
+			w.cfg.Logf("worker: clone agent error: %v", err)
+		}
+		return base
 	}
 	return cloned
 }

@@ -3,7 +3,12 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
+	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
@@ -62,6 +67,26 @@ func LoadRegistry(fs *vfs.FS) (Registry, error) {
 		return Registry{}, fmt.Errorf("fs is nil")
 	}
 	b, err := fs.Read(RegistryPath)
+	if err != nil {
+		return Registry{}, err
+	}
+	var reg Registry
+	if err := json.Unmarshal(b, &reg); err != nil {
+		return Registry{}, fmt.Errorf("parse registry: %w", err)
+	}
+	return reg, nil
+}
+
+// LoadRegistryFile reads the registry from the orchestrator run directory.
+func LoadRegistryFile(cfg config.Config, runID string) (Registry, error) {
+	if err := cfg.Validate(); err != nil {
+		return Registry{}, err
+	}
+	if strings.TrimSpace(runID) == "" {
+		return Registry{}, fmt.Errorf("runID is required")
+	}
+	path := filepath.Join(fsutil.GetRunDir(cfg.DataDir, runID), "agents", "registry.json")
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return Registry{}, err
 	}

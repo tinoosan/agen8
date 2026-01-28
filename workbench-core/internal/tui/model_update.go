@@ -568,19 +568,33 @@ func (m Model) keyToggleSwarmMode(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if msg.Type != tea.KeyShiftTab && !strings.EqualFold(msg.String(), "shift+tab") {
 		return m, nil, false
 	}
-	if m.swarmModeActive {
-		// Turning swarm mode off.
-		m.swarmModeActive = false
-		m.swarmTabActive = false
+	if setter, ok := m.runner.(interface{ SetSwarmMode(bool) error }); ok {
+		next := !m.swarmModeActive
+		if err := setter.SetSwarmMode(next); err != nil {
+			m.addTranscriptItem(transcriptItem{kind: transcriptError, text: "swarm mode failed: " + err.Error()})
+			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+			m.layout()
+			return m, nil, true
+		}
+		m.swarmModeActive = next
 	} else {
+		m.addTranscriptItem(transcriptItem{kind: transcriptError, text: "swarm mode unavailable in this session"})
+		m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
+		m.layout()
+		return m, nil, true
+	}
+
+	if m.swarmModeActive {
 		// Turning swarm mode on activates the swarm tab and opens the right pane.
-		m.swarmModeActive = true
 		if !m.showDetails {
 			m.showDetails = true
 		}
 		m.swarmTabActive = true
 		m.planTabActive = false
 		m.refreshSwarmView()
+	} else {
+		// Turning swarm mode off.
+		m.swarmTabActive = false
 	}
 	m.layout()
 	return m, m.swarmRefreshCmd(), true

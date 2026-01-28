@@ -12,6 +12,9 @@ import (
 
 const (
 	planChecklistPath = "/plan/CHECKLIST.md"
+	planHeadPath      = "/plan/HEAD.md"
+	defaultPlanHead   = "# Swarm Plan\n\n- [ ] Define goals and scope\n- [ ] Delegate tasks to workers\n- [ ] Collect updates and summarize\n"
+	defaultChecklist  = "- [ ] Delegation started\n- [ ] Worker updates reviewed\n- [ ] Final summary ready\n"
 )
 
 type planChecklistStatus struct {
@@ -65,6 +68,35 @@ func readPlanChecklist(fs *vfs.FS) (planChecklistStatus, error) {
 	status := planChecklistStatusFromText(string(b))
 	status.exists = true
 	return status, nil
+}
+
+func EnsurePlanGate(fs *vfs.FS) error {
+	if fs == nil {
+		return errors.New("vfs not available")
+	}
+	if err := ensurePlanHead(fs); err != nil {
+		return err
+	}
+	status, err := readPlanChecklist(fs)
+	if err != nil {
+		return err
+	}
+	if status.exists && status.valid && status.hasItems {
+		return nil
+	}
+	return fs.Write(planChecklistPath, []byte(defaultChecklist))
+}
+
+func ensurePlanHead(fs *vfs.FS) error {
+	if fs == nil {
+		return errors.New("vfs not available")
+	}
+	if _, err := fs.Read(planHeadPath); err == nil {
+		return nil
+	} else if !errors.Is(err, iofs.ErrNotExist) && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return fs.Write(planHeadPath, []byte(defaultPlanHead))
 }
 
 func isChecklistLine(line string) (bool, bool) {

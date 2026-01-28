@@ -7,14 +7,15 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
-// Agent is the public interface implemented by all agent roles (default, orchestrator, worker).
-type Agent interface {
-	// Core execution
+// Runner executes agent work without exposing configuration surface area.
+type Runner interface {
 	Run(ctx context.Context, goal string) (string, error)
 	RunConversation(ctx context.Context, msgs []llm.LLMMessage) (final string, updated []llm.LLMMessage, steps int, err error)
 	ExecHostOp(ctx context.Context, req types.HostOpRequest) types.HostOpResponse
+}
 
-	// Configuration getters/setters
+// Configurable exposes agent configuration and cloning helpers for callers that need them.
+type Configurable interface {
 	GetModel() string
 	SetModel(string)
 	WebSearchEnabled() bool
@@ -40,4 +41,16 @@ type Agent interface {
 
 	// Clone returns a shallow copy suitable for per-task customization.
 	Clone() Agent
+
+	// Config returns a snapshot of the agent configuration.
+	Config() AgentConfig
+
+	// CloneWithConfig builds a new agent using the supplied configuration.
+	CloneWithConfig(cfg AgentConfig) (Agent, error)
+}
+
+// Agent is the public interface implemented by all agent roles (default, orchestrator, worker).
+type Agent interface {
+	Runner
+	Configurable
 }

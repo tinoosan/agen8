@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -47,4 +48,35 @@ func (a *DefaultAgent) Clone() Agent {
 		cl.ExtraTools = append([]llm.Tool(nil), a.ExtraTools...)
 	}
 	return &cl
+}
+
+func (a *DefaultAgent) Config() AgentConfig {
+	if a == nil {
+		return AgentConfig{}
+	}
+	cfg := AgentConfig{
+		Model:            a.Model,
+		EnableWebSearch:  a.EnableWebSearch,
+		ApprovalsMode:    a.ApprovalsMode,
+		ReasoningEffort:  a.ReasoningEffort,
+		ReasoningSummary: a.ReasoningSummary,
+		SystemPrompt:     a.SystemPrompt,
+		Context:          a.Context,
+		MaxTokens:        a.MaxTokens,
+		Hooks:            a.Hooks,
+	}
+	if a.ToolRegistry != nil {
+		cfg.ToolRegistry = a.ToolRegistry.Clone()
+	}
+	if a.ExtraTools != nil {
+		cfg.ExtraTools = append([]llm.Tool(nil), a.ExtraTools...)
+	}
+	return cfg
+}
+
+func (a *DefaultAgent) CloneWithConfig(cfg AgentConfig) (Agent, error) {
+	if a == nil {
+		return nil, fmt.Errorf("agent is nil")
+	}
+	return NewAgent(a.LLM, a.Exec, cfg)
 }

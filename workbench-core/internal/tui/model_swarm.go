@@ -3,8 +3,10 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/orchestrator"
 )
@@ -22,11 +24,37 @@ func (m *Model) refreshSwarmView() {
 		m.swarmLoadErr = regErr
 	}
 
-	content := m.renderSwarmContent(reg, regErr, metrics, metricsErr)
-	if strings.TrimSpace(content) == "" {
-		content = "_Swarm view is preparing…_"
+	fallbackSummary := ""
+	if provider, ok := m.runner.(swarmSummaryProvider); ok {
+		fallbackSummary = strings.TrimSpace(provider.GetSwarmSummary())
 	}
-	m.swarmViewport.SetContent(strings.TrimRight(m.renderer.RenderMarkdown(content, w), "\n"))
+	content := ""
+	if fallbackSummary != "" && (strings.TrimSpace(regErr) != "" || len(reg.Agents) == 0) {
+		content = "### Swarm\n\n_Swarm (last known):_\n\n" + fallbackSummary
+	} else {
+		content = m.renderSwarmContent(reg, regErr, metrics, metricsErr)
+	}
+	// #region agent log
+	debugLogSwarmView("tui/model_swarm.go:27", "refreshSwarmView", map[string]any{
+		"regErr":            regErr,
+		"metricsErr":        metricsErr,
+		"agentCount":        len(reg.Agents),
+		"fallbackSummary":   fallbackSummary != "",
+		"fallbackSummaryLn": len(fallbackSummary),
+		"runnerType":        fmt.Sprintf("%T", m.runner),
+		"hasVFSAccessor":    func() bool { _, ok := m.runner.(vfsAccessor); return ok }(),
+	})
+	// #endregion
+	if strings.TrimSpace(content) == "" {
+		if strings.TrimSpace(m.swarmContent) != "" {
+			content = m.swarmContent // keep last good view instead of flickering blank
+		} else {
+			content = "_Swarm view is preparing…_"
+		}
+	}
+	rendered := strings.TrimRight(m.renderer.RenderMarkdown(content, w), "\n")
+	m.swarmContent = content
+	m.swarmViewport.SetContent(rendered)
 }
 
 func (m *Model) loadSwarmRegistry() (orchestrator.Registry, string) {
@@ -36,13 +64,29 @@ func (m *Model) loadSwarmRegistry() (orchestrator.Registry, string) {
 	}
 	text, _, _, err := accessor.ReadVFS(m.ctx, "/agents/registry.json", 128*1024)
 	if err != nil {
+		// #region agent log
+		debugLogSwarmView("tui/model_swarm.go:44", "loadSwarmRegistry read error", map[string]any{
+			"readErr": err.Error(),
+		})
+		// #endregion
 		return orchestrator.Registry{}, err.Error()
 	}
 	if strings.TrimSpace(text) == "" {
+		// #region agent log
+		debugLogSwarmView("tui/model_swarm.go:49", "loadSwarmRegistry empty", map[string]any{
+			"textLen": len(text),
+		})
+		// #endregion
 		return orchestrator.Registry{}, ""
 	}
 	var reg orchestrator.Registry
 	if err := json.Unmarshal([]byte(text), &reg); err != nil {
+		// #region agent log
+		debugLogSwarmView("tui/model_swarm.go:55", "loadSwarmRegistry unmarshal error", map[string]any{
+			"unmarshalErr": err.Error(),
+			"textLen":      len(text),
+		})
+		// #endregion
 		return orchestrator.Registry{}, "invalid registry.json"
 	}
 	return reg, ""
@@ -55,16 +99,54 @@ func (m *Model) loadSwarmMetrics() (orchestrator.Metrics, string) {
 	}
 	text, _, _, err := accessor.ReadVFS(m.ctx, "/agents/metrics.json", 128*1024)
 	if err != nil {
+		// #region agent log
+		debugLogSwarmView("tui/model_swarm.go:66", "loadSwarmMetrics read error", map[string]any{
+			"readErr": err.Error(),
+		})
+		// #endregion
 		return orchestrator.Metrics{}, err.Error()
 	}
 	if strings.TrimSpace(text) == "" {
+		// #region agent log
+		debugLogSwarmView("tui/model_swarm.go:71", "loadSwarmMetrics empty", map[string]any{
+			"textLen": len(text),
+		})
+		// #endregion
 		return orchestrator.Metrics{}, ""
 	}
 	var metrics orchestrator.Metrics
 	if err := json.Unmarshal([]byte(text), &metrics); err != nil {
+		// #region agent log
+		debugLogSwarmView("tui/model_swarm.go:77", "loadSwarmMetrics unmarshal error", map[string]any{
+			"unmarshalErr": err.Error(),
+			"textLen":      len(text),
+		})
+		// #endregion
 		return orchestrator.Metrics{}, "invalid metrics.json"
 	}
 	return metrics, ""
+}
+
+func debugLogSwarmView(location, message string, data map[string]any) {
+	payload := map[string]any{
+		"sessionId":    "debug-session",
+		"runId":        "pre-fix",
+		"hypothesisId": "H2",
+		"location":     location,
+		"message":      message,
+		"data":         data,
+		"timestamp":    time.Now().UnixMilli(),
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile("/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(append(b, '\n'))
+	_ = f.Close()
 }
 
 func (m *Model) renderSwarmContent(reg orchestrator.Registry, regErr string, metrics orchestrator.Metrics, metricsErr string) string {
@@ -128,6 +210,28 @@ func (m *Model) renderSwarmContent(reg orchestrator.Registry, regErr string, met
 		if agent.Stats.CostUSD > 0 || agent.Stats.TokensIn > 0 || agent.Stats.TokensOut > 0 {
 			lines = append(lines, fmt.Sprintf("  - usage: %d in · %d out · $%.4f", agent.Stats.TokensIn, agent.Stats.TokensOut, agent.Stats.CostUSD))
 		}
+	}
+	// Messages summary section.
+	msgLines := []string{}
+	for _, id := range agentIDs {
+		agent := reg.Agents[id]
+		if agent.LastMessage == nil {
+			continue
+		}
+		msg := agent.LastMessage
+		title := strings.TrimSpace(msg.Title)
+		body := strings.TrimSpace(msg.Body)
+		if title == "" {
+			title = body
+		}
+		if title == "" {
+			continue
+		}
+		msgLines = append(msgLines, "- "+id+": "+title)
+	}
+	if len(msgLines) > 0 {
+		lines = append(lines, "\n#### Messages")
+		lines = append(lines, msgLines...)
 	}
 	return strings.Join(lines, "\n") + "\n\n_Ctrl+] tabs · Shift+Tab swarm toggle_"
 }

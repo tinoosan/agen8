@@ -29,6 +29,9 @@ type DefaultAgent struct {
 	ToolRegistry     *ToolRegistry
 }
 
+// Compile-time check: DefaultAgent implements Agent.
+var _ Agent = (*DefaultAgent)(nil)
+
 // RunConversation executes the agent loop for an existing conversation.
 func (a *DefaultAgent) RunConversation(ctx context.Context, msgs []llm.LLMMessage) (final string, updated []llm.LLMMessage, steps int, err error) {
 	return a.runConversation(ctx, msgs, 1)

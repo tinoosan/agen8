@@ -177,9 +177,6 @@ func (m *Model) submit(userMsg string) tea.Cmd {
 	}
 	displayMsg := userMsg
 	submitMsg := userMsg
-	if m.swarmModeActive && !strings.HasPrefix(strings.TrimSpace(submitMsg), "/") {
-		submitMsg = "/swarm spawn " + strings.TrimSpace(submitMsg)
-	}
 	m.turnInFlight = true
 	m.turnStarted = time.Now()
 	m.turnTitle = displayMsg

@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -658,8 +659,12 @@ func RunChatTUI(ctx context.Context, cfg config.Config, run types.Run, opts ...R
 		run:              run,
 		opts:             resolved,
 		fs:               setup.FS,
-		agent:            setup.Agent,
+		runner:           setup.Runner,
+		configurable:     setup.Configurable,
 		baseSystemPrompt: setup.BaseSystemPrompt,
+		llmClient:        setup.LLM,
+		baseExecutor:     setup.Executor,
+		toolManifests:    setup.ToolManifests,
 		mustEmit:         mustEmit,
 		memStore:         setup.MemStore,
 		profileStore:     setup.ProfileStore,
@@ -824,6 +829,9 @@ type lazyNewSessionTurnRunner struct {
 	run         types.Run
 	engine      *tuiTurnRunner
 
+	pendingSwarmSet     bool
+	pendingSwarmEnabled bool
+
 	mustEmit func(ctx context.Context, ev events.Event)
 }
 
@@ -865,6 +873,29 @@ func (r *lazyNewSessionTurnRunner) ResumeTurn(ctx context.Context, toolOutputs [
 		return "", fmt.Errorf("runner not initialized")
 	}
 	return r.engine.ResumeTurn(ctx, toolOutputs)
+}
+
+// SetSwarmMode records the desired swarm mode prior to initialization, or delegates once initialized.
+func (r *lazyNewSessionTurnRunner) SetSwarmMode(enabled bool) error {
+	if r == nil {
+		return fmt.Errorf("runner is nil")
+	}
+	if !r.initialized {
+		r.pendingSwarmSet = true
+		r.pendingSwarmEnabled = enabled
+		return nil
+	}
+	if r.engine == nil {
+		return fmt.Errorf("runner not initialized")
+	}
+	return r.engine.SetSwarmMode(enabled)
+}
+
+func (r *lazyNewSessionTurnRunner) GetSwarmSummary() string {
+	if r == nil || r.engine == nil {
+		return ""
+	}
+	return r.engine.getSwarmSummary()
 }
 
 func (r *lazyNewSessionTurnRunner) AppendToolResponse(toolCallID string, resp types.HostOpResponse) {
@@ -1463,7 +1494,11 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		run:              run,
 		opts:             r.opts,
 		fs:               setup.FS,
-		agent:            setup.Agent,
+		runner:           setup.Runner,
+		configurable:     setup.Configurable,
+		llmClient:        setup.LLM,
+		baseExecutor:     setup.Executor,
+		toolManifests:    setup.ToolManifests,
 		baseSystemPrompt: setup.BaseSystemPrompt,
 		mustEmit:         r.mustEmit,
 		memStore:         setup.MemStore,
@@ -1478,6 +1513,13 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		constructor:      setup.Constructor,
 		// refresh tracker removed
 	}
+
+	if r.pendingSwarmSet {
+		if err := r.engine.SetSwarmMode(r.pendingSwarmEnabled); err != nil {
+			return fmt.Errorf("enable swarm mode: %w", err)
+		}
+	}
+
 	r.initialized = true
 	return nil
 }
@@ -1500,7 +1542,8 @@ type tuiTurnRunner struct {
 
 	fs *vfs.FS
 
-	agent            agent.Agent
+	runner           agent.Runner
+	configurable     agent.Configurable
 	baseSystemPrompt string
 	model            string
 	setHistoryModel  func(model string)
@@ -1529,8 +1572,17 @@ type tuiTurnRunner struct {
 	pendingTurnSteps    int
 	pendingTurnDuration time.Duration
 
-	swarmWorkers    map[string]context.CancelFunc
-	swarmSyncCancel context.CancelFunc
+	swarmWorkers     map[string]context.CancelFunc
+	swarmSyncCancel  context.CancelFunc
+	swarmModeEnabled bool
+
+	llmClient     llm.LLMClient
+	baseExecutor  agent.HostExecutor
+	toolManifests []pkgtools.ToolManifest
+
+	swarmSummary   string
+	swarmSummaryMu sync.Mutex
+	orchToolCalled bool
 }
 
 // ReadVFS reads a virtual filesystem path via the run's mounted VFS.
@@ -1589,6 +1641,35 @@ func (r *tuiTurnRunner) VFS() *vfs.FS {
 	return r.fs
 }
 
+func (r *tuiTurnRunner) setSwarmSummary(summary string) {
+	if r == nil {
+		return
+	}
+	r.swarmSummaryMu.Lock()
+	defer r.swarmSummaryMu.Unlock()
+	r.swarmSummary = summary
+}
+
+func (r *tuiTurnRunner) getSwarmSummary() string {
+	if r == nil {
+		return ""
+	}
+	r.swarmSummaryMu.Lock()
+	defer r.swarmSummaryMu.Unlock()
+	return r.swarmSummary
+}
+
+func (r *tuiTurnRunner) GetSwarmSummary() string {
+	return r.getSwarmSummary()
+}
+
+func (r *tuiTurnRunner) markOrchestratorToolCall() {
+	if r == nil {
+		return
+	}
+	r.orchToolCalled = true
+}
+
 func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, error) {
 	if r == nil {
 		return "", fmt.Errorf("runner is nil")
@@ -1623,12 +1704,12 @@ func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, er
 	// Refresh session state and inject it so the agent stays coherent across runs.
 	if sess, err := store.LoadSession(r.cfg, r.run.SessionID); err == nil {
 		if blk := agent.SessionContextBlock(sess); strings.TrimSpace(blk) != "" {
-			r.agent.SetSystemPrompt(strings.TrimSpace(r.baseSystemPrompt) + "\n\n" + blk + "\n")
+			r.configurable.SetSystemPrompt(strings.TrimSpace(r.baseSystemPrompt) + "\n\n" + blk + "\n")
 		} else {
-			r.agent.SetSystemPrompt(r.baseSystemPrompt)
+			r.configurable.SetSystemPrompt(r.baseSystemPrompt)
 		}
 	} else {
-		r.agent.SetSystemPrompt(r.baseSystemPrompt)
+		r.configurable.SetSystemPrompt(r.baseSystemPrompt)
 	}
 
 	r.turn++
@@ -1696,9 +1777,9 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 	boolp := func(b bool) *bool { return &b }
 
 	var turnUsage llm.LLMUsage
-	hooks := r.agent.GetHooks()
-	r.agent.SetHooks(*hooks) // ensure non-nil
-	hooks = r.agent.GetHooks()
+	hooks := r.configurable.GetHooks()
+	r.configurable.SetHooks(*hooks) // ensure non-nil
+	hooks = r.configurable.GetHooks()
 	hooks.OnLLMUsage = func(step int, usage llm.LLMUsage) {
 		turnUsage.InputTokens += usage.InputTokens
 		turnUsage.OutputTokens += usage.OutputTokens
@@ -1924,7 +2005,7 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 			emitThinkingSummary()
 		}
 	}
-	r.agent.SetHooks(*hooks)
+	r.configurable.SetHooks(*hooks)
 	defer func() {
 		emitTokenBuf()
 		// Best-effort flush of thinking summary/indicator.
@@ -1932,10 +2013,10 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 			emitThinkingEnd(thinkingStep)
 		}
 		// Avoid leaking the callback into subsequent turns.
-		h := r.agent.GetHooks()
+		h := r.configurable.GetHooks()
 		h.OnToken = nil
 		h.OnStreamChunk = nil
-		r.agent.SetHooks(*h)
+		r.configurable.SetHooks(*h)
 	}()
 
 	final := ""
@@ -1950,10 +2031,29 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 		r.conversation = append(r.conversation, toolOutputs...)
 	}
 	start := time.Now()
-	out, updated, stepCount, err := r.agent.RunConversation(ctx, r.conversation)
+	r.orchToolCalled = false
+	out, updated, stepCount, err := r.runner.RunConversation(ctx, r.conversation)
 	dur = time.Since(start)
 	steps = stepCount
 	r.conversation = updated
+
+	// Enforce orchestration tool usage when swarm mode is enabled.
+	if err == nil && r.swarmModeEnabled && !r.orchToolCalled {
+		sys := llm.LLMMessage{
+			Role:    "system",
+			Content: "You must delegate via orchestrator_spawn/orchestrator_task before answering. Plan, delegate, then call orchestrator_sync and summarize.",
+		}
+		msgs := append([]llm.LLMMessage{sys}, r.conversation...)
+		start = time.Now()
+		out, updated, stepCount, err = r.runner.RunConversation(ctx, msgs)
+		dur += time.Since(start)
+		steps += stepCount
+		r.conversation = updated
+	}
+	if err == nil && r.swarmModeEnabled && strings.TrimSpace(out) == "" {
+		_ = orchestrator.SyncRegistry(r.cfg, r.run.RunId)
+		out = "Orchestrator is awaiting worker updates. (No response text returned; sync triggered.)"
+	}
 
 	r.pendingTurnUsage.InputTokens += turnUsage.InputTokens
 	r.pendingTurnUsage.OutputTokens += turnUsage.OutputTokens
@@ -2128,10 +2228,10 @@ func (r *tuiTurnRunner) ResumeTurn(ctx context.Context, toolOutputs []llm.LLMMes
 }
 
 func (r *tuiTurnRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest, toolCallID string) (types.HostOpResponse, error) {
-	if r.agent == nil {
+	if r.runner == nil {
 		return types.HostOpResponse{}, fmt.Errorf("agent not initialized")
 	}
-	resp := r.agent.ExecHostOp(ctx, req)
+	resp := r.runner.ExecHostOp(ctx, req)
 	hostRespJSON, _ := types.MarshalPretty(resp)
 	r.conversation = append(r.conversation, llm.LLMMessage{
 		Role:       "tool",
@@ -2222,8 +2322,8 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			return "Usage: /web", true
 		}
 		r.opts.WebSearchEnabled = !r.opts.WebSearchEnabled
-		if r.agent != nil {
-			r.agent.SetEnableWebSearch(r.opts.WebSearchEnabled)
+		if r.configurable != nil {
+			r.configurable.SetEnableWebSearch(r.opts.WebSearchEnabled)
 		}
 		state := "off"
 		if r.opts.WebSearchEnabled {
@@ -2289,8 +2389,8 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		// Update the active model for subsequent LLM calls.
 		r.model = next
 		r.opts.Model = next
-		if r.agent != nil {
-			r.agent.SetModel(next)
+		if r.configurable != nil {
+			r.configurable.SetModel(next)
 		}
 		if r.setHistoryModel != nil {
 			r.setHistoryModel(next)
@@ -2316,7 +2416,7 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			"to":          strings.TrimSpace(next),
 			"runnerModel": strings.TrimSpace(r.model),
 			"optsModel":   strings.TrimSpace(r.opts.Model),
-			"agentModel":  strings.TrimSpace(r.agent.GetModel()),
+			"agentModel":  strings.TrimSpace(r.configurable.GetModel()),
 			"runRuntimeModel": func() string {
 				if r.run.Runtime == nil {
 					return ""
@@ -2368,9 +2468,9 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			// Apply to opts + live agent instance
 			r.opts.ReasoningEffort = strings.TrimSpace(curEffort)
 			r.opts.ReasoningSummary = strings.TrimSpace(curSummary)
-			if r.agent != nil {
-				r.agent.SetReasoningEffort(strings.TrimSpace(curEffort))
-				r.agent.SetReasoningSummary(strings.TrimSpace(curSummary))
+			if r.configurable != nil {
+				r.configurable.SetReasoningEffort(strings.TrimSpace(curEffort))
+				r.configurable.SetReasoningSummary(strings.TrimSpace(curSummary))
 			}
 
 			// Persist to run + session state (best-effort)
@@ -2443,8 +2543,8 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 			return "Approvals mode already " + val, true
 		}
 		r.opts.ApprovalsMode = val
-		if r.agent != nil {
-			r.agent.SetApprovalsMode(val)
+		if r.configurable != nil {
+			r.configurable.SetApprovalsMode(val)
 		}
 		if r.run.Runtime == nil {
 			r.run.Runtime = &types.RunRuntimeConfig{}
@@ -2631,10 +2731,6 @@ func (r *tuiTurnRunner) handleSwarmCommand(arg string) (string, bool) {
 		cancel()
 		delete(r.swarmWorkers, runID)
 		_ = orchestrator.SyncRegistry(r.cfg, r.run.RunId)
-		if len(r.swarmWorkers) == 0 && r.swarmSyncCancel != nil {
-			r.swarmSyncCancel()
-			r.swarmSyncCancel = nil
-		}
 		return "stopped " + runID, true
 	case "list":
 		if r.swarmWorkers == nil || len(r.swarmWorkers) == 0 {

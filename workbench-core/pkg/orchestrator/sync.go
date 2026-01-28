@@ -44,6 +44,7 @@ func SyncRegistry(cfg config.Config, orchestratorRunID string) error {
 		Agents:            map[string]AgentState{},
 	}
 	metrics := Metrics{Version: "v1", Tokens: TokenTotals{}, CostUSD: CostTotals{ByRun: map[string]float64{}}}
+	childRuns := 0
 
 	for _, runID := range sess.Runs {
 		run, err := store.LoadRun(cfg, runID)
@@ -53,6 +54,7 @@ func SyncRegistry(cfg config.Config, orchestratorRunID string) error {
 		if strings.TrimSpace(run.ParentRunID) != strings.TrimSpace(orchestratorRunID) {
 			continue
 		}
+		childRuns++
 		tasks, _ := readInboxTasks(cfg, run.RunId)
 		results, _ := ReadOutbox(cfg, run.RunId)
 
@@ -148,7 +150,39 @@ func SyncRegistry(cfg config.Config, orchestratorRunID string) error {
 	if err := writeJSON(filepath.Join(agentsDir, "metrics.json"), metrics); err != nil {
 		return err
 	}
+	// #region agent log
+	debugLogSync("orchestrator/sync.go:148", "SyncRegistry summary", map[string]any{
+		"sessionRuns":      len(sess.Runs),
+		"childRuns":        childRuns,
+		"agentCount":       len(reg.Agents),
+		"taskCount":        len(reg.Tasks),
+		"orchestratorRun":  orchestratorRunID,
+		"orchestratorSess": orchRun.SessionID,
+	})
+	// #endregion
 	return nil
+}
+
+func debugLogSync(location, message string, data map[string]any) {
+	payload := map[string]any{
+		"sessionId":    "debug-session",
+		"runId":        "pre-fix",
+		"hypothesisId": "H6",
+		"location":     location,
+		"message":      message,
+		"data":         data,
+		"timestamp":    time.Now().UnixMilli(),
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile("/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(append(b, '\n'))
+	_ = f.Close()
 }
 
 func writeJSON(path string, v any) error {
