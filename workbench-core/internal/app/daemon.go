@@ -73,6 +73,12 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	var traceStore pkgstore.TraceStore
 	var constructorStore pkgstore.ConstructorStateStore
 
+	ms, err := store.NewDiskMemoryStore(cfg)
+	if err != nil {
+		return fmt.Errorf("create memory store: %w", err)
+	}
+	memStore = ms
+
 	// Vector memory store (SQLite-backed) for semantic recall.
 	// Best-effort: daemon can still run without this, but loses long-term recall.
 	var memoryProvider agent.MemoryProvider

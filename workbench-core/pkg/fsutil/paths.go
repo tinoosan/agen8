@@ -94,14 +94,14 @@ func GetAgentMemoryUpdatePath(dataDir string) string {
 	return filepath.Join(GetAgentDir(dataDir), "update.md")
 }
 
-func GetRunMemoryDir(dataDir, runId string) string {
-	return filepath.Join(GetRunDir(dataDir, runId), "memory")
+func GetMemoryDir(dataDir string) string {
+	return filepath.Join(dataDir, "memory")
 }
 
-func GetRunMemoryPath(dataDir, runId string) string {
-	return filepath.Join(GetRunMemoryDir(dataDir, runId), "memory.md")
+func GetMemoryPath(dataDir string) string {
+	return filepath.Join(GetMemoryDir(dataDir), "memory.md")
 }
 
-func GetRunMemoryUpdatePath(dataDir, runId string) string {
-	return filepath.Join(GetRunMemoryDir(dataDir, runId), "update.md")
+func GetMemoryUpdatePath(dataDir string) string {
+	return filepath.Join(GetMemoryDir(dataDir), "update.md")
 }

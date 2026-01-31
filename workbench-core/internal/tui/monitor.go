@@ -223,8 +223,15 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.focusedPanel == panelComposer {
-			key := msg.String()
-			if key == "ctrl+enter" || key == "ctrl+j" || (msg.Type == tea.KeyEnter && msg.Alt) {
+			key := strings.ToLower(msg.String())
+			if key == "ctrl+enter" ||
+				key == "ctrl+j" ||
+				key == "ctrl+m" ||
+				key == "ctrl+o" ||
+				msg.Type == tea.KeyCtrlJ ||
+				msg.Type == tea.KeyCtrlM ||
+				msg.Type == tea.KeyCtrlO ||
+				(msg.Type == tea.KeyEnter && msg.Alt) {
 				cmd := strings.TrimSpace(m.input.Value())
 				m.input.SetValue("")
 				if cmd == "" {

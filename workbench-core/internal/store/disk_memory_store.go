@@ -12,28 +12,25 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
-// DiskMemoryStore is a run-scoped MemoryStore backed by the existing on-disk layout:
+// DiskMemoryStore is a shared MemoryStore backed by the on-disk layout:
 //
-//	data/runs/<runId>/memory/
+//	data/memory/
 //	  memory.md
 //	  update.md
 //	  commits.jsonl
 //
-// This preserves backward compatibility: runs remain inspectable on disk, but the rest
-// of the system interacts only via the virtual "/memory" mount.
+// This keeps memory stable across runs while the rest of the system interacts only
+// via the virtual "/memory" mount.
 type DiskMemoryStore struct {
 	DiskStagingStore
 }
 
-// NewDiskMemoryStore constructs a DiskMemoryStore for a runId under cfg.DataDir.
-func NewDiskMemoryStore(cfg config.Config, runId string) (*DiskMemoryStore, error) {
+// NewDiskMemoryStore constructs a DiskMemoryStore under cfg.DataDir.
+func NewDiskMemoryStore(cfg config.Config) (*DiskMemoryStore, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	if err := validate.NonEmpty("runId", runId); err != nil {
-		return nil, err
-	}
-	baseDir := fsutil.GetRunMemoryDir(cfg.DataDir, runId)
+	baseDir := fsutil.GetMemoryDir(cfg.DataDir)
 	return NewDiskMemoryStoreFromDir(baseDir)
 }
 

@@ -45,7 +45,8 @@ Workbench exposes a virtual filesystem inside each run. Key mounts include:
 
 - `/project` – your host workspace (defaults to the current working directory; overridable via `--workdir`).
 - `/workspace` – run-local workspace mapped to `dataDir/runs/<runId>/workspace`.
-- `/results`, `/log`, `/memory`, `/profile`, `/tools` – mounted read-only to expose structured outputs, telemetry, memory proposals, and discovered tool manifests.
+- `/results`, `/log`, `/profile`, `/tools` – mounted read-only to expose structured outputs, telemetry, and discovered tool manifests.
+- `/memory` – shared agent memory (read `memory.md`, write `update.md` when you want to propose changes).
 
 Every command that manipulates project files must operate through this explicit surface, which keeps tooling auditable and reproducible.
 
@@ -95,7 +96,8 @@ Helpers in `internal/config/effectiveConfig()` resolve the final configuration b
 The CLI stores persistent state under the configured `dataDir`:
 
 - `dataDir/workbench.db` (sessions, runs, events, history).
-- `dataDir/runs/<runId>/` (containing `workspace`, `artifacts`, `log`, `memory`, `profile`).
+- `dataDir/runs/<runId>/` (containing `workspace`, `artifacts`, `log`).
+- `dataDir/memory/` (shared memory across runs: `memory.md`, `update.md`, `commits.jsonl`).
 
 Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sample commands, and tips on manually inspecting sessions, runs, and agent mounts.
 

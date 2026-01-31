@@ -22,7 +22,7 @@ This guide captures common issues and diagnostics that surface when running Work
 ## Advanced diagnostics
 
 - **Trace budget exceeded**: When trace budget (`--trace-bytes`) is exhausted, the agent may stop writing further trace output. Increase the flag or disable tracing to continue.
-- **Memory budget issues**: If the agent stops due to memory injection limits, raise `--memory-bytes` or inspect `/memory` proposals stored under `<dataDir>/runs/<runId>/memory`.
+- **Memory budget issues**: If the agent stops due to memory injection limits, raise `--memory-bytes` or inspect `/memory` proposals stored under `<dataDir>/memory`.
 - **Approval gating**: With `--approvals-mode enabled`, every tool/action needs explicit approval. Switch to `disabled` temporarily while reproducing issues.
 
 ## When to seek help

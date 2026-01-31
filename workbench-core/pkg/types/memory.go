@@ -7,7 +7,7 @@ package types
 //
 // Storage note:
 // - The host writes these records (not the agent).
-// - The default DiskMemoryStore persists them under data/runs/<runId>/memory/commits.jsonl.
+// - The default DiskMemoryStore persists them under data/memory/commits.jsonl.
 type MemoryCommitLine struct {
 	Timestamp string `json:"timestamp"`
 	Model     string `json:"model,omitempty"`

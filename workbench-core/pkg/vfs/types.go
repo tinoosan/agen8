@@ -40,9 +40,9 @@ const (
 	// MountPlan is the mount name for run-scoped planning workspace.
 	MountPlan = "plan"
 
-	// MountMemory is the mount name for run-scoped agent memory.
+	// MountMemory is the mount name for shared agent memory.
 	// The host may inject /memory/memory.md into the system prompt,
-	// and ingest /memory/update.md after each turn.
+	// and ingest /memory/update.md when the agent chooses to write.
 	//
 	// Note: a future multi-agent system will likely introduce a shared, global
 	// history mount for immutable provenance across runs/agents (distinct from /memory).
@@ -52,7 +52,7 @@ const (
 	//
 	// Profile is global across runs and sessions and is intended for durable user facts
 	// and preferences (e.g. timezone, writing style, birthday). It is distinct from
-	// run-scoped /memory, which is working memory for the current run.
+	// shared /memory, which is long-term agent memory across runs.
 	MountProfile = "profile"
 
 	// MountHistory is the mount name for session-scoped history.

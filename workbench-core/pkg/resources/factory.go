@@ -64,9 +64,6 @@ func (f *Factory) Results() (*ResultsResource, error) {
 }
 
 func (f *Factory) Memory() (*MemoryResource, error) {
-	if err := validate.NonEmpty("RunID", f.RunID); err != nil {
-		return nil, err
-	}
 	if f.MemoryStore == nil {
 		return nil, fmt.Errorf("memory store is required")
 	}

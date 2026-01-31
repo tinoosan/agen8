@@ -3,7 +3,7 @@
 // Run storage layout (implementation detail)
 //
 // Runs are stored in SQLite (data/workbench.db by default).
-// Run-scoped directories for /workspace, /log, /memory, etc. remain on disk.
+// Run-scoped directories for /workspace, /log, etc. remain on disk.
 //
 // # Results note
 //

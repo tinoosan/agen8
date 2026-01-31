@@ -175,6 +175,15 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	memStore := cfg.MemoryStore
 	profileStore := cfg.ProfileStore
 
+	if memStore == nil {
+		return nil, fmt.Errorf("memory store is required")
+	}
+	memRes, err := resources.NewMemoryResource(memStore)
+	if err != nil {
+		return nil, fmt.Errorf("create memory resource: %w", err)
+	}
+	fs.Mount(vfs.MountMemory, memRes)
+
 	if cfg.Emit != nil {
 		cfg.Emit(context.Background(), events.Event{
 			Type:    "host.mounted",
@@ -185,6 +194,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 				"/outbox":  outboxDir,
 				"/plan":    planDir,
 				"/skills":  "(virtual)",
+				"/memory":  "(virtual)",
 			},
 			Console: boolPtr(false),
 		})

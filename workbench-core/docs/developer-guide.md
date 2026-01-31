@@ -14,7 +14,7 @@ This guide explains how the CLI, configuration, and internal services collaborat
 
 1. CLI command resolves configuration and calls `app.RunNewChatTUI` (or a similar helper for `resume`).
 2. `app` creates a session (if needed) and `internal/store` manages directories under `<dataDir>/sessions` and `<dataDir>/runs`.
-3. Each run spawns a sandbox with mounts (`/project`, `/workspace`, `/log`, `/memory`, `/results`, `/tools`). Agents interact with `/workspace` and request tools via `tool.run`.
+3. Each run spawns a sandbox with mounts (`/project`, `/workspace`, `/log`, `/memory`, `/results`, `/tools`). `/memory` is shared across runs; agents interact with `/workspace` and request tools via `tool.run`.
 4. Artifact outputs (logs, artifacts, results) stream into the run directory and can be inspected via the CLI or host filesystem.
 
 ## Tooling & extensions

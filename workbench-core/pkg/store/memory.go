@@ -29,12 +29,12 @@ type CommitLog interface {
 	CommitLogAppender
 }
 
-// MemoryContentReader reads committed run-scoped memory content.
+// MemoryContentReader reads committed shared memory content.
 type MemoryContentReader interface {
 	GetMemory(ctx context.Context) (string, error)
 }
 
-// MemoryContentAppender appends committed run-scoped memory content.
+// MemoryContentAppender appends committed shared memory content.
 type MemoryContentAppender interface {
 	AppendMemory(ctx context.Context, text string) error
 }
@@ -69,7 +69,7 @@ type MemoryStore interface {
 }
 
 // PlanFileStore exposes the minimal API needed to persist a separate plan file
-// alongside the standard run memory staging files.
+// alongside the standard memory staging files.
 type PlanFileStore interface {
 	GetPlan(ctx context.Context) (string, error)
 	SetPlan(ctx context.Context, text string) error

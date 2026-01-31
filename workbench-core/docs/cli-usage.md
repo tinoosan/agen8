@@ -33,15 +33,15 @@ Pair these commands with `ls`/`cat` inside the `dataDir` to debug agent behavior
 
 ## Primary commands
 
-| Command | Description |
-| ------- | ----------- |
-| `workbench` | Start a fresh session + run (default). |
-| `workbench resume <sessionId>` | Continue the last run in a session (use `--new-run` to start fresh). |
-| `workbench list sessions` | List session IDs along with metadata stored in SQLite. |
-| `workbench list runs <sessionId>` | Show runs tied to a session, including statuses and timestamps. |
-| `workbench show session <sessionId>` | Print the session metadata. |
-| `workbench show run <runId>` | Print the run metadata. |
-| `workbench show history <sessionId>` | Display the session-scoped operation history as JSONL. |
+| Command                              | Description                                                          |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| `workbench`                          | Start a fresh session + run (default).                               |
+| `workbench resume <sessionId>`       | Continue the last run in a session (use `--new-run` to start fresh). |
+| `workbench list sessions`            | List session IDs along with metadata stored in SQLite.               |
+| `workbench list runs <sessionId>`    | Show runs tied to a session, including statuses and timestamps.      |
+| `workbench show session <sessionId>` | Print the session metadata.                                          |
+| `workbench show run <runId>`         | Print the run metadata.                                              |
+| `workbench show history <sessionId>` | Display the session-scoped operation history as JSONL.               |
 
 Run `workbench <command> --help` to get per-command flag details (Cobra auto-generates these descriptions).
 
@@ -49,18 +49,18 @@ Run `workbench <command> --help` to get per-command flag details (Cobra auto-gen
 
 All flags have equivalent environment variables. CLI flags take precedence over env vars, which in turn override defaults defined in code.
 
-| Flag | Env var | Default | Description |
-| ---- | ------- | ------- | ----------- |
-| `--data-dir` | `WORKBENCH_DATA_DIR` | `~/.workbench` or `$XDG_STATE_HOME/workbench` | Base directory for `sessions`, `runs`, `tools`, `profile`, `agent`. Overrides where persistent data resides. |
-| `--workdir` | `WORKBENCH_WORKDIR` | Current working directory | Host directory mounted at `/project` inside the sandbox. Useful for debugging or running in a different workspace. |
-| `--context-bytes` | — | `8*1024` | Byte budget persisted as `run.maxBytesForContext`. Must be > 0. A smaller budget tightens agent memory. |
-| `--model` | `OPENROUTER_MODEL` | (model configured by agent/system prompt) | Default LLM ID for remote requests. Overrides session defaults and updates CLI prompts. |
-| `--trace-bytes` | — | `8*1024` | Budget for ContextUpdater tracing mode. Limits how much trace data is recorded. |
-| `--memory-bytes` | — | `8*1024` | Budget for memory injected via `/memory`. Affects per-step lookback. |
-| `--profile-bytes` | — | `4*1024` | Budget for profiling data. Useful when collecting diagnostics with `/profile`. |
-| `--history-pairs` | — | `8` | Number of recent (user, agent) pairs included from `/history`. Reducing this limits prompt size. |
-| `--include-history-ops` | `WORKBENCH_INCLUDE_HISTORY_OPS` | `true` (enabled) | Whether to include environment/host operations from `/history`. Disable to reduce noise. |
-| `--approvals-mode` | `WORKBENCH_APPROVALS_MODE` | `enabled` | Approval policy: `enabled` requires approvals, `disabled` turns off approval gating. |
+| Flag                    | Env var                         | Default                                       | Description                                                                                                            |
+| ----------------------- | ------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `--data-dir`            | `WORKBENCH_DATA_DIR`            | `~/.workbench` or `$XDG_STATE_HOME/workbench` | Base directory for `sessions`, `runs`, `tools`, `profile`, `memory`, `agent`. Overrides where persistent data resides. |
+| `--workdir`             | `WORKBENCH_WORKDIR`             | Current working directory                     | Host directory mounted at `/project` inside the sandbox. Useful for debugging or running in a different workspace.     |
+| `--context-bytes`       | —                               | `8*1024`                                      | Byte budget persisted as `run.maxBytesForContext`. Must be > 0. A smaller budget tightens agent memory.                |
+| `--model`               | `OPENROUTER_MODEL`              | (model configured by agent/system prompt)     | Default LLM ID for remote requests. Overrides session defaults and updates CLI prompts.                                |
+| `--trace-bytes`         | —                               | `8*1024`                                      | Budget for ContextUpdater tracing mode. Limits how much trace data is recorded.                                        |
+| `--memory-bytes`        | —                               | `8*1024`                                      | Budget for memory injected via `/memory`. Affects per-step lookback.                                                   |
+| `--profile-bytes`       | —                               | `4*1024`                                      | Budget for profiling data. Useful when collecting diagnostics with `/profile`.                                         |
+| `--history-pairs`       | —                               | `8`                                           | Number of recent (user, agent) pairs included from `/history`. Reducing this limits prompt size.                       |
+| `--include-history-ops` | `WORKBENCH_INCLUDE_HISTORY_OPS` | `true` (enabled)                              | Whether to include environment/host operations from `/history`. Disable to reduce noise.                               |
+| `--approvals-mode`      | `WORKBENCH_APPROVALS_MODE`      | `enabled`                                     | Approval policy: `enabled` requires approvals, `disabled` turns off approval gating.                                   |
 
 Use `effectiveConfig()` in `internal/config` to trace how each runtime flag/env resolves at startup.
 
