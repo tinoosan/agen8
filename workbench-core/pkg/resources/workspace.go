@@ -11,7 +11,7 @@ import (
 )
 
 // NewWorkspace creates a directory-backed resource for a run's workspace.
-	// The workspace is the agent-writable working directory mounted at "/workspace".
+// The workspace is the agent-writable working directory mounted at "/workspace".
 func NewWorkspace(cfg config.Config, runId string) (*DirResource, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err

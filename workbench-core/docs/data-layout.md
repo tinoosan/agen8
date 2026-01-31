@@ -51,14 +51,14 @@ and inspecting `<dataDir>/runs/<id>/log/events.jsonl`). All paths are derived vi
 
 ## Mounting summary
 
-| Mount | Host path | Description |
-| ----- | --------- | ----------- |
-| `/project` | `<workdir>` | Host workspace mounted read/write (configurable with `--workdir`). |
-| `/workspace` | `<dataDir>/runs/<runId>/workspace` | Run-local workspace for ephemeral files. |
-| `/results` | `<dataDir>/runs/<runId>/results` | Structured outputs from tools/agenti runs. |
-| `/log` | `<dataDir>/runs/<runId>/log` | Logs authored by built-in tools and internal agents. |
-| `/memory` | `<dataDir>/runs/<runId>/memory` | Markdown memory proposals. |
-| `/profile` | `<dataDir>/runs/<runId>/profile` | Profiling data from the host. |
-| `/tools` | `<dataDir>/tools` | Discovered tool manifests (injectable into runs). |
+| Mount        | Host path                          | Description                                                        |
+| ------------ | ---------------------------------- | ------------------------------------------------------------------ |
+| `/project`   | `<workdir>`                        | Host workspace mounted read/write (configurable with `--workdir`). |
+| `/workspace` | `<dataDir>/runs/<runId>/workspace` | Run-local workspace for ephemeral files.                           |
+| `/results`   | `<dataDir>/runs/<runId>/results`   | Structured outputs from tools/agenti runs.                         |
+| `/log`       | `<dataDir>/runs/<runId>/log`       | Logs authored by built-in tools and internal agents.               |
+| `/memory`    | `<dataDir>/runs/<runId>/memory`    | Markdown memory proposals.                                         |
+| `/profile`   | `<dataDir>/runs/<runId>/profile`   | Profiling data from the host.                                      |
+| `/tools`     | `<dataDir>/tools`                  | Discovered tool manifests (injectable into runs).                  |
 
 Keeping this mapping in mind helps when debugging via the CLI or via `ls`/`cat` on the host filesystem.

@@ -60,33 +60,33 @@ You can resume an existing session with `workbench resume <sessionId>` to contin
 
 Most entrypoints live under `cmd/workbench/cmd` and use Cobra. Important workflows include:
 
-| Command | Description |
-| ------- | ----------- |
-| `workbench` | Start a new session + run with default context. |
-| `workbench resume <sessionId>` | Continue the last run in a session (use `--new-run` to start fresh). |
-| `workbench list sessions` | List stored session IDs + metadata. |
-| `workbench list runs <sessionId>` | Show run history for a session (statuses, timestamps). |
-| `workbench show session <sessionId>` | Dump session metadata. |
-| `workbench show run <runId>` | Dump run metadata. |
-| `workbench show history <sessionId>` | Print the operation log as JSONL. |
-| `workbench --help` | Get command + flag help (Cobra-generated). |
+| Command                              | Description                                                          |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| `workbench`                          | Start a new session + run with default context.                      |
+| `workbench resume <sessionId>`       | Continue the last run in a session (use `--new-run` to start fresh). |
+| `workbench list sessions`            | List stored session IDs + metadata.                                  |
+| `workbench list runs <sessionId>`    | Show run history for a session (statuses, timestamps).               |
+| `workbench show session <sessionId>` | Dump session metadata.                                               |
+| `workbench show run <runId>`         | Dump run metadata.                                                   |
+| `workbench show history <sessionId>` | Print the operation log as JSONL.                                    |
+| `workbench --help`                   | Get command + flag help (Cobra-generated).                           |
 
 ## Configuration
 
 Runtime configuration resolves in this order: CLI flags → environment variables → defaults.
 
-| Flag | Env | Description |
-| ---- | --- | ----------- |
-| `--data-dir` | `WORKBENCH_DATA_DIR` | Base directory containing `workbench.db`, `runs`, `tools`, `profile`, `agent`. Defaults to `~/.workbench` or `$XDG_STATE_HOME/workbench`. |
-| `--workdir` | `WORKBENCH_WORKDIR` | Host directory mounted under `/project`. Defaults to the current working directory. |
-| `--context-bytes` | — | How many bytes of context to persist (`run.maxBytesForContext`; default `8*1024`). Must be > 0. |
-| `--model` | `OPENROUTER_MODEL` | Default model ID for LLM calls (overrides session defaults). |
-| `--trace-bytes` | — | Byte budget for the ContextUpdater trace (default `8*1024`). |
-| `--memory-bytes` | — | Memory injection budget per step (default `8*1024`). |
-| `--profile-bytes` | — | Budget for profiling data (default `4*1024`). |
-| `--history-pairs` | — | Number of recent (user, agent) pairs included from `/history` (default `8`). |
-| `--include-history-ops` | `WORKBENCH_INCLUDE_HISTORY_OPS` | Whether to include environment/host operations from `/history` (default: enabled). |
-| `--approvals-mode` | `WORKBENCH_APPROVALS_MODE` | Approval policy: `enabled` (default) or `disabled`. |
+| Flag                    | Env                             | Description                                                                                                                               |
+| ----------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `--data-dir`            | `WORKBENCH_DATA_DIR`            | Base directory containing `workbench.db`, `runs`, `tools`, `profile`, `agent`. Defaults to `~/.workbench` or `$XDG_STATE_HOME/workbench`. |
+| `--workdir`             | `WORKBENCH_WORKDIR`             | Host directory mounted under `/project`. Defaults to the current working directory.                                                       |
+| `--context-bytes`       | —                               | How many bytes of context to persist (`run.maxBytesForContext`; default `8*1024`). Must be > 0.                                           |
+| `--model`               | `OPENROUTER_MODEL`              | Default model ID for LLM calls (overrides session defaults).                                                                              |
+| `--trace-bytes`         | —                               | Byte budget for the ContextUpdater trace (default `8*1024`).                                                                              |
+| `--memory-bytes`        | —                               | Memory injection budget per step (default `8*1024`).                                                                                      |
+| `--profile-bytes`       | —                               | Budget for profiling data (default `4*1024`).                                                                                             |
+| `--history-pairs`       | —                               | Number of recent (user, agent) pairs included from `/history` (default `8`).                                                              |
+| `--include-history-ops` | `WORKBENCH_INCLUDE_HISTORY_OPS` | Whether to include environment/host operations from `/history` (default: enabled).                                                        |
+| `--approvals-mode`      | `WORKBENCH_APPROVALS_MODE`      | Approval policy: `enabled` (default) or `disabled`.                                                                                       |
 
 Helpers in `internal/config/effectiveConfig()` resolve the final configuration before each command runs. See [docs/cli-usage.md](docs/cli-usage.md) for deeper context on flag interactions, environment variables, and examples.
 
