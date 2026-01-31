@@ -50,7 +50,7 @@ func (r fakeResource) Append(path string, data []byte) error {
 
 func TestResolve(t *testing.T) {
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountScratch, fakeResource{})
+	fs.Mount(vfs.MountWorkspace, fakeResource{})
 
 	t.Run("Empty", func(t *testing.T) {
 		if _, _, _, err := fs.Resolve(""); err == nil {
@@ -77,21 +77,21 @@ func TestResolve(t *testing.T) {
 	})
 
 	t.Run("ValidMountRoot", func(t *testing.T) {
-		mn, _, subpath, err := fs.Resolve("/scratch")
+		mn, _, subpath, err := fs.Resolve("/workspace")
 		if err != nil {
 			t.Fatalf("Resolve: %v", err)
 		}
-		if mn != vfs.MountScratch || subpath != "" {
+		if mn != vfs.MountWorkspace || subpath != "" {
 			t.Fatalf("got mn=%q subpath=%q", mn, subpath)
 		}
 	})
 
 	t.Run("ValidSubpath", func(t *testing.T) {
-		mn, _, subpath, err := fs.Resolve("/scratch/a/b")
+		mn, _, subpath, err := fs.Resolve("/workspace/a/b")
 		if err != nil {
 			t.Fatalf("Resolve: %v", err)
 		}
-		if mn != vfs.MountScratch || subpath != "a/b" {
+		if mn != vfs.MountWorkspace || subpath != "a/b" {
 			t.Fatalf("got mn=%q subpath=%q", mn, subpath)
 		}
 	})
@@ -121,7 +121,7 @@ func TestListRoot_IsStableAndPrefixed(t *testing.T) {
 
 func TestNotFoundPathFails(t *testing.T) {
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountScratch, fakeResource{})
+	fs.Mount(vfs.MountWorkspace, fakeResource{})
 
 	if _, err := fs.List("/nope"); err == nil {
 		t.Fatalf("expected error for unknown mount")

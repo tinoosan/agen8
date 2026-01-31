@@ -118,14 +118,14 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	}
 
 	// Debug logs for specific context constructor reads.
-	if req.Op == types.HostOpFSList && strings.TrimSpace(req.Path) == "/scratch" {
+	if req.Op == types.HostOpFSList && strings.TrimSpace(req.Path) == "/workspace" {
 		debuglog.Log("context", "H9", "runtime:eventMiddleware", "fs_list_workspace", map[string]any{
 			"model":     strings.TrimSpace(m.model),
 			"runId":     strings.TrimSpace(m.runID),
 			"sessionId": strings.TrimSpace(m.sessionID),
 		})
 	}
-	if req.Op == types.HostOpFSRead && strings.TrimSpace(req.Path) == "/scratch/context_constructor_manifest.json" {
+	if req.Op == types.HostOpFSRead && strings.TrimSpace(req.Path) == "/workspace/context_constructor_manifest.json" {
 		debuglog.Log("context", "H9", "runtime:eventMiddleware", "fs_read_context_constructor_manifest", map[string]any{
 			"model":     strings.TrimSpace(m.model),
 			"runId":     strings.TrimSpace(m.runID),

@@ -508,7 +508,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// No pending metadata; still update cache and skip transcript.
 			m.fileSnapCache[path] = msg.text
 			// If the file picker is open, refresh it so newly created files appear.
-			if m.filePickerOpen && (strings.HasPrefix(path, "/scratch/") || strings.HasPrefix(path, "/project/")) && strings.TrimSpace(m.workdir) != "" {
+			if m.filePickerOpen && (strings.HasPrefix(path, "/workspace/") || strings.HasPrefix(path, "/project/")) && strings.TrimSpace(m.workdir) != "" {
 				if all, err := m.scanFilePickerPaths(m.workdir); err == nil {
 					m.filePickerAllPaths = all
 					m.filePickerWorkdir = strings.TrimSpace(m.workdir)
@@ -534,7 +534,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fileSnapCache[path] = after
 		delete(m.pendingFileOpsByOpID, opID)
 		refreshFilePicker := func() {
-			if m.filePickerOpen && (strings.HasPrefix(path, "/scratch/") || strings.HasPrefix(path, "/project/")) && strings.TrimSpace(m.workdir) != "" {
+			if m.filePickerOpen && (strings.HasPrefix(path, "/workspace/") || strings.HasPrefix(path, "/project/")) && strings.TrimSpace(m.workdir) != "" {
 				if all, err := m.scanFilePickerPaths(m.workdir); err == nil {
 					m.filePickerAllPaths = all
 					m.filePickerWorkdir = strings.TrimSpace(m.workdir)

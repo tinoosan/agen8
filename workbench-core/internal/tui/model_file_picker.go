@@ -122,7 +122,7 @@ func (m *Model) activeWorkspaceDir() string {
 	if dd == "" || rid == "" {
 		return ""
 	}
-	return fsutil.GetScratchDir(dd, rid)
+	return fsutil.GetWorkspaceDir(dd, rid)
 }
 
 func (m *Model) scanFilePickerPaths(workdir string) ([]string, error) {
@@ -148,7 +148,7 @@ func (m *Model) scanFilePickerPaths(workdir string) ([]string, error) {
 		if rel == "" || rel == "." {
 			continue
 		}
-		combined = append(combined, "/scratch/"+rel)
+		combined = append(combined, "/workspace/"+rel)
 	}
 	return combined, nil
 }

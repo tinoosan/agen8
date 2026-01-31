@@ -222,6 +222,18 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.focusedPanel == panelComposer {
+			key := msg.String()
+			if key == "ctrl+enter" || key == "ctrl+j" || (msg.Type == tea.KeyEnter && msg.Alt) {
+				cmd := strings.TrimSpace(m.input.Value())
+				m.input.SetValue("")
+				if cmd == "" {
+					return m, nil
+				}
+				cmd = strings.Join(strings.Fields(cmd), " ")
+				return m, m.handleCommand(cmd)
+			}
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			if m.cancel != nil {
@@ -236,16 +248,6 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusedPanel = (m.focusedPanel + 5) % 6
 			m.updateFocus()
 			return m, nil
-		case "ctrl+enter", "ctrl+j":
-			if m.focusedPanel == panelComposer {
-				cmd := strings.TrimSpace(m.input.Value())
-				m.input.SetValue("")
-				if cmd == "" {
-					return m, nil
-				}
-				cmd = strings.Join(strings.Fields(cmd), " ")
-				return m, m.handleCommand(cmd)
-			}
 		}
 		return m.routeKeyToFocusedPanel(msg)
 	}
@@ -570,10 +572,9 @@ func (m *monitorModel) refreshActivityList() {
 	for _, a := range m.activities {
 		items = append(items, activityItem{act: a})
 	}
-	cur := m.activityList.Index()
 	m.activityList.SetItems(items)
-	if cur >= 0 && cur < len(items) {
-		m.activityList.Select(cur)
+	if len(items) > 0 {
+		m.activityList.Select(len(items) - 1)
 	}
 }
 
@@ -587,14 +588,21 @@ func (m *monitorModel) renderHeader() string {
 		))
 }
 
+func (m *monitorModel) panelStyle(panel panelID) lipgloss.Style {
+	if m.focusedPanel == panel {
+		return m.styles.panelFocused
+	}
+	return m.styles.panel
+}
+
 func (m *monitorModel) renderMainBody() string {
 	layout := m.layout()
 
 	left := lipgloss.JoinVertical(lipgloss.Left,
-		m.styles.panel.Width(layout.leftW).Height(layout.activityH).Render(
+		m.panelStyle(panelActivity).Width(layout.leftW).Height(layout.activityH).Render(
 			m.styles.sectionTitle.Render("Activity Feed")+"\n"+m.activityList.View(),
 		),
-		m.styles.panel.Width(layout.leftW).Height(layout.outputH).Render(
+		m.panelStyle(panelOutput).Width(layout.leftW).Height(layout.outputH).Render(
 			m.styles.sectionTitle.Render("Agent Output")+"\n"+m.agentOutputVP.View(),
 		),
 	)
@@ -629,26 +637,26 @@ func (m *monitorModel) renderCurrentTask(width int, height int) string {
 }
 
 func (m *monitorModel) renderTaskQueue(width int, height int) string {
-	return m.styles.panel.Width(width).Height(height).Render(
+	return m.panelStyle(panelQueue).Width(width).Height(height).Render(
 		m.styles.sectionTitle.Render("Queue") + "\n" + m.taskQueueVP.View(),
 	)
 }
 
 func (m *monitorModel) renderOutbox() string {
-	return m.styles.panel.Render(
+	return m.panelStyle(panelOutbox).Render(
 		m.styles.sectionTitle.Render("Outbox (Recent Results)") + "\n" + m.outboxVP.View(),
 	)
 }
 
 func (m *monitorModel) renderMemory() string {
-	return m.styles.panel.Render(
+	return m.panelStyle(panelMemory).Render(
 		m.styles.sectionTitle.Render("Memory (semantic search)") + "\n" + m.memoryVP.View(),
 	)
 }
 
 func (m *monitorModel) renderComposer() string {
-	help := "Commands: /task \"goal\"   /role <name>   /model <id>   /memory search \"query\"   /quit   (Ctrl+Enter to submit)"
-	return m.styles.commandBar.Render(help + "\n" + m.input.View())
+	help := fmt.Sprintf("Tab: cycle panels (%s)  |  Ctrl+Enter: submit  |  /quit", m.focusedPanelName())
+	return m.commandBarStyle().Render(help + "\n" + m.input.View())
 }
 
 func (m *monitorModel) updateFocus() {
@@ -656,6 +664,32 @@ func (m *monitorModel) updateFocus() {
 		m.input.Focus()
 	} else {
 		m.input.Blur()
+	}
+}
+
+func (m *monitorModel) commandBarStyle() lipgloss.Style {
+	if m.focusedPanel == panelComposer {
+		return m.styles.panelFocused
+	}
+	return m.styles.commandBar
+}
+
+func (m *monitorModel) focusedPanelName() string {
+	switch m.focusedPanel {
+	case panelActivity:
+		return "Activity"
+	case panelOutput:
+		return "Output"
+	case panelQueue:
+		return "Queue"
+	case panelOutbox:
+		return "Outbox"
+	case panelMemory:
+		return "Memory"
+	case panelComposer:
+		return "Composer"
+	default:
+		return "Unknown"
 	}
 }
 
@@ -889,6 +923,7 @@ type monitorStyles struct {
 	headerTitle  lipgloss.Style
 	sectionTitle lipgloss.Style
 	panel        lipgloss.Style
+	panelFocused lipgloss.Style
 	commandBar   lipgloss.Style
 }
 
@@ -897,12 +932,17 @@ func defaultMonitorStyles() *monitorStyles {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(kit.BorderColorDefault).
 		Padding(0, 1)
+	panelFocused := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(kit.BorderColorAccent).
+		Padding(0, 1)
 
 	return &monitorStyles{
 		header:       lipgloss.NewStyle().Padding(0, 1),
 		headerTitle:  lipgloss.NewStyle().Bold(true),
 		sectionTitle: lipgloss.NewStyle().Bold(true),
 		panel:        panel,
+		panelFocused: panelFocused,
 		commandBar:   lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(kit.BorderColorDefault).Padding(0, 1),
 	}
 }

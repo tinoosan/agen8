@@ -24,7 +24,7 @@ type RefResolution struct {
 	// Unresolved contains tokens that could not be resolved.
 	Unresolved []string
 
-	// Ambiguous maps token -> candidate VFS paths (e.g. "/project/a.txt", "/scratch/b.txt").
+	// Ambiguous maps token -> candidate VFS paths (e.g. "/project/a.txt", "/workspace/b.txt").
 	Ambiguous map[string][]string
 }
 
@@ -32,7 +32,7 @@ type RefResolution struct {
 //
 // Resolution order:
 //  1. exact path under /project
-//  2. artifact index match (e.g. recently written /scratch file)
+//  2. artifact index match (e.g. recently written /workspace file)
 //  3. fuzzy file search under workdir (auto-select only if unambiguous)
 func ResolveAtRefs(fsys *vfs.FS, workdirBase string, artifacts *ArtifactIndex, userText string, maxFiles, maxBytesTotal, maxBytesPerFile int) (RefResolution, error) {
 	if fsys == nil {
@@ -120,8 +120,8 @@ func resolveOneRef(fsys *vfs.FS, workdirBase, workspaceBase string, artifacts *A
 			return att, true, nil, nil
 		}
 
-		// 1b) exact under /scratch (run-scoped scratch).
-		vp = "/scratch/" + clean
+		// 1b) exact under /workspace (run-scoped workspace).
+		vp = "/workspace/" + clean
 		if att, ok, err := tryReadVPath(fsys, token, vp, clean, maxBytes); err != nil {
 			return agent.FileAttachment{}, false, nil, err
 		} else if ok {
@@ -129,7 +129,7 @@ func resolveOneRef(fsys *vfs.FS, workdirBase, workspaceBase string, artifacts *A
 		}
 	}
 
-	// 2) artifact index (scratch outputs).
+	// 2) artifact index (workspace outputs).
 	if vp, ok := artifacts.Resolve(token); ok {
 		return readAttachment(fsys, token, vp, displayNameForVPath(vp), maxBytes)
 	}
@@ -198,8 +198,8 @@ func displayNameForVPath(vpath string) string {
 	switch {
 	case strings.HasPrefix(vpath, "/project/"):
 		return strings.TrimPrefix(vpath, "/project/")
-	case strings.HasPrefix(vpath, "/scratch/"):
-		return strings.TrimPrefix(vpath, "/scratch/")
+	case strings.HasPrefix(vpath, "/workspace/"):
+		return strings.TrimPrefix(vpath, "/workspace/")
 	case strings.HasPrefix(vpath, "/results/"):
 		return strings.TrimPrefix(vpath, "/results/")
 	default:
@@ -277,7 +277,7 @@ func workspaceBaseDirFromVFS(fsys *vfs.FS) string {
 	if fsys == nil {
 		return ""
 	}
-	_, r, _, err := fsys.Resolve("/" + vfs.MountScratch)
+	_, r, _, err := fsys.Resolve("/" + vfs.MountWorkspace)
 	if err != nil || r == nil {
 		return ""
 	}
@@ -301,13 +301,13 @@ func normalizeExplicitRefVPath(token string) (vpath string, ok bool) {
 			return "", false
 		}
 		return "/project/" + clean, true
-	case strings.HasPrefix(token, "/scratch/"):
-		sub := strings.TrimPrefix(token, "/scratch/")
+	case strings.HasPrefix(token, "/workspace/"):
+		sub := strings.TrimPrefix(token, "/workspace/")
 		clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
 		if err != nil || clean == "" || clean == "." {
 			return "", false
 		}
-		return "/scratch/" + clean, true
+		return "/workspace/" + clean, true
 	case strings.HasPrefix(token, "/results/"):
 		sub := strings.TrimPrefix(token, "/results/")
 		clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
@@ -343,7 +343,7 @@ func mergeCandidateVPaths(workdirRels, workspaceRels []string) []string {
 		if rel == "" {
 			continue
 		}
-		add("/scratch/" + rel)
+		add("/workspace/" + rel)
 	}
 	sort.Strings(out)
 	return out

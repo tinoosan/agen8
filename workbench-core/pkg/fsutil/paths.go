@@ -38,8 +38,8 @@ func GetRunDir(dataDir, runId string) string {
 	return filepath.Join(dataDir, "runs", runId)
 }
 
-func GetScratchDir(dataDir, runId string) string {
-	return filepath.Join(dataDir, "runs", runId, "scratch")
+func GetWorkspaceDir(dataDir, runId string) string {
+	return filepath.Join(dataDir, "runs", runId, "workspace")
 }
 
 func GetArtifactDir(dataDir, runId string) string {

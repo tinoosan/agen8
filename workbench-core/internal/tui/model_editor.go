@@ -44,8 +44,8 @@ func (m Model) editorTitle() string {
 	switch {
 	case strings.HasPrefix(vp, "/project/"):
 		name = strings.TrimPrefix(vp, "/project/")
-	case strings.HasPrefix(vp, "/scratch/"):
-		name = strings.TrimPrefix(vp, "/scratch/")
+	case strings.HasPrefix(vp, "/workspace/"):
+		name = strings.TrimPrefix(vp, "/workspace/")
 	}
 	title := "Editing: " + name
 	if m.editorDirty {
@@ -367,7 +367,7 @@ func isVFSMountPath(p string) bool {
 	}
 	// Treat known VFS mounts as virtual paths.
 	return hasMountPrefix(p, "project") ||
-		hasMountPrefix(p, "scratch") ||
+		hasMountPrefix(p, "workspace") ||
 		hasMountPrefix(p, "results") ||
 		hasMountPrefix(p, "log") ||
 		hasMountPrefix(p, "tools") ||

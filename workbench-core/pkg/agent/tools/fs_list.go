@@ -16,12 +16,12 @@ func (t *FSListTool) Definition() llm.Tool {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "fs_list",
-			Description: "[DIRECT - no discovery needed] List directory contents at a VFS path. Common paths: /project (user's project), /scratch (your scratch), /plan (planning workspace), /skills (skill documents), /tools (for tool_run discovery only).",
+			Description: "[DIRECT] List directory contents at a VFS path. Common paths: /project (project files), /inbox (task intake), /outbox (task results).",
 			Strict:      true,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path": map[string]any{"type": "string", "description": "VFS path to list (e.g. /tools, /scratch)"},
+					"path": map[string]any{"type": "string", "description": "VFS path to list (e.g. /project, /inbox)"},
 				},
 				"required":             []any{"path"},
 				"additionalProperties": false,

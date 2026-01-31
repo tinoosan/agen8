@@ -25,6 +25,9 @@ var (
 	maxProfileBytes    int
 	recentHistoryPairs int
 	includeHistoryOps  bool
+	webhookAddr        string
+	resultWebhookURL   string
+	healthAddr         string
 )
 
 var rootCmd = &cobra.Command{
@@ -36,17 +39,13 @@ Workbench is a local, agentic runtime built around a virtual filesystem (VFS).
 Running "workbench" starts a new session and run, then starts an always-on daemon
 that continuously processes tasks from /inbox and writes results to /outbox.
 
-Use "workbench chat" to open the interactive TUI viewer (monitoring/configuration).
+Use "workbench monitor <runId>" to open the monitoring TUI viewer.
 
 Each executed task can:
   - discover tools via /tools (fs.list + fs.read manifests)
   - execute tools via tool.run (writing /results/<callId>/response.json)
-  - read/write run-scoped artifacts in /scratch
+  - read/write run-scoped artifacts in /workspace
   - write proposed memory updates to /memory/update.md (host decides commits)
-
-Use "workbench resume <sessionId>" to continue a previous session. By default,
-it continues the last run in that session (workspace preserved). Use --new-run
-to force a fresh run.
 `),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// dataDir is resolved per-command via effectiveConfig().
@@ -90,6 +89,9 @@ to force a fresh run.
 			app.WithModel(modelOverride),
 			app.WithRole(roleName),
 			app.WithWorkDir(workDir),
+			app.WithWebhookAddr(webhookAddr),
+			app.WithResultWebhookURL(resultWebhookURL),
+			app.WithHealthAddr(healthAddr),
 			app.WithTraceBytes(maxTraceBytes),
 			app.WithMemoryBytes(maxMemoryBytes),
 			app.WithProfileBytes(maxProfileBytes),
@@ -122,6 +124,12 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&modelID, "model", modelID, "LLM model identifier (default: env OPENROUTER_MODEL)")
 	roleName = strings.TrimSpace(os.Getenv("WORKBENCH_ROLE"))
 	rootCmd.PersistentFlags().StringVar(&roleName, "role", roleName, "agent role/persona (General|StockResearcher|SoftwareDeveloper; env WORKBENCH_ROLE)")
+	webhookAddr = strings.TrimSpace(os.Getenv("WORKBENCH_WEBHOOK_ADDR"))
+	rootCmd.PersistentFlags().StringVar(&webhookAddr, "webhook-addr", webhookAddr, "listen address for task webhook server (env WORKBENCH_WEBHOOK_ADDR)")
+	resultWebhookURL = strings.TrimSpace(os.Getenv("WORKBENCH_RESULT_WEBHOOK_URL"))
+	rootCmd.PersistentFlags().StringVar(&resultWebhookURL, "result-webhook-url", resultWebhookURL, "POST task results to this webhook URL (env WORKBENCH_RESULT_WEBHOOK_URL)")
+	healthAddr = strings.TrimSpace(os.Getenv("WORKBENCH_HEALTH_ADDR"))
+	rootCmd.PersistentFlags().StringVar(&healthAddr, "health-addr", healthAddr, "listen address for health checks (env WORKBENCH_HEALTH_ADDR)")
 	rootCmd.PersistentFlags().IntVar(&maxTraceBytes, "trace-bytes", 8*1024, "context updater trace budget (bytes)")
 	rootCmd.PersistentFlags().IntVar(&maxMemoryBytes, "memory-bytes", 8*1024, "context updater memory budget (bytes)")
 	rootCmd.PersistentFlags().IntVar(&maxProfileBytes, "profile-bytes", 4*1024, "context updater profile budget (bytes)")
@@ -129,11 +137,7 @@ func init() {
 	includeHistoryOps = envBool("WORKBENCH_INCLUDE_HISTORY_OPS", true)
 	rootCmd.PersistentFlags().BoolVar(&includeHistoryOps, "include-history-ops", includeHistoryOps, "include environment host ops from /history in prompt context (higher cost)")
 
-	rootCmd.AddCommand(resumeCmd)
-	rootCmd.AddCommand(listCmd)
-	rootCmd.AddCommand(showCmd)
 	rootCmd.AddCommand(daemonCmd)
-	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(monitorCmd)
 }
 

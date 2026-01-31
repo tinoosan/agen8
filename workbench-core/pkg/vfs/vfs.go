@@ -37,7 +37,7 @@ func (fs *FS) Resolve(vpath string) (mountName string, r Resource, subpath strin
 
 	trimmed := strings.TrimLeft(vpath, "/")
 	if trimmed == "" {
-		return "", nil, "", fmt.Errorf("path must include a mount, e.g. /scratch")
+		return "", nil, "", fmt.Errorf("path must include a mount, e.g. /workspace")
 	}
 
 	best := ""

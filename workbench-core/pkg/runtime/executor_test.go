@@ -24,7 +24,7 @@ func TestGuardMiddleware_ShortCircuits(t *testing.T) {
 			return &types.HostOpResponse{Op: req.Op, Ok: false, Error: "blocked"}
 		},
 	})
-	resp := exec.Exec(context.Background(), types.HostOpRequest{Op: types.HostOpFSRead, Path: "/scratch"})
+	resp := exec.Exec(context.Background(), types.HostOpRequest{Op: types.HostOpFSRead, Path: "/workspace"})
 	if called {
 		t.Fatalf("expected base executor not to run")
 	}

@@ -16,7 +16,7 @@ func (t *FSWriteTool) Definition() llm.Tool {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "fs_write",
-			Description: "[DIRECT - no discovery needed] Write/create a file at a VFS path. Just call it with path and text.",
+			Description: "[DIRECT] Write/create a file at a VFS path. Typical target: /project/...",
 			Strict:      true,
 			Parameters: map[string]any{
 				"type": "object",

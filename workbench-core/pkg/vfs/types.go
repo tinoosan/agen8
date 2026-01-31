@@ -3,15 +3,15 @@ package vfs
 import "time"
 
 const (
-	// MountScratch is the mount name for an agent's scratchpad workspace.
-	// Paths under /scratch are run-scoped and intended for ephemeral notes/actions.
-	MountScratch = "scratch"
+	// MountWorkspace is the mount name for an agent's workspace.
+	// Paths under /workspace are run-scoped and intended for ephemeral notes/actions.
+	MountWorkspace = "workspace"
 
 	// MountProject is the mount name for the user's primary project directory.
 	//
 	// /project maps to the OS directory the user launched Workbench from (or a flag override).
 	// It is intended for "real project files" so the agent can operate on them
-	// while still keeping /scratch as a run-scoped scratch area.
+	// while still keeping /workspace as a run-scoped workspace area.
 	MountProject = "project"
 
 	// MountLog is the mount name for the run's event log.
@@ -36,6 +36,9 @@ const (
 	// MountOutbox is the mount name for run-scoped task results.
 	// Agents write TaskResult envelopes and audit messages here for the host to collect.
 	MountOutbox = "outbox"
+
+	// MountPlan is the mount name for run-scoped planning workspace.
+	MountPlan = "plan"
 
 	// MountMemory is the mount name for run-scoped agent memory.
 	// The host may inject /memory/memory.md into the system prompt,
@@ -65,7 +68,7 @@ const (
 	MountHistory = "history"
 
 	// MountTrace exposes an agent-specific VFS directory for trace host ops.
-	// It is intentionally separate from /scratch so trace context can be kept apart.
+	// It is intentionally separate from /workspace so trace context can be kept apart.
 	// Files written here are raw key/value blobs; the trace host op interacts with /trace/<key>.
 	MountTrace = "trace"
 )

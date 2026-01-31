@@ -7,76 +7,67 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/pkg/skills"
+	"github.com/tinoosan/workbench-core/pkg/resources"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
-func TestContextConstructor_SkillsMetadataInjected(t *testing.T) {
+func TestContextConstructor_IncludesProfileAndMemory(t *testing.T) {
 	t.Parallel()
 
-	baseDir := t.TempDir()
-	skillDir := filepath.Join(baseDir, "demo-skill")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
-		t.Fatalf("mkdir skill dir: %v", err)
-	}
-	skillContent := "---\nname: Demo Skill\ndescription: Demo\n---\n# Instructions\nDo demo.\n"
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0644); err != nil {
-		t.Fatalf("write SKILL.md: %v", err)
-	}
+	fs := vfs.NewFS()
+	memDir := t.TempDir()
+	profileDir := t.TempDir()
 
-	mgr := skills.NewManager([]string{baseDir})
-	if err := mgr.Scan(); err != nil {
-		t.Fatalf("skills scan: %v", err)
+	memRes, err := resources.NewDirResource(memDir, vfs.MountMemory)
+	if err != nil {
+		t.Fatalf("NewDirResource(memory): %v", err)
+	}
+	profileRes, err := resources.NewDirResource(profileDir, vfs.MountProfile)
+	if err != nil {
+		t.Fatalf("NewDirResource(profile): %v", err)
+	}
+	fs.Mount(vfs.MountMemory, memRes)
+	fs.Mount(vfs.MountProfile, profileRes)
+
+	if err := os.WriteFile(filepath.Join(memDir, "memory.md"), []byte("remember this"), 0644); err != nil {
+		t.Fatalf("write memory.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "profile.md"), []byte("profile info"), 0644); err != nil {
+		t.Fatalf("write profile.md: %v", err)
 	}
 
 	constructor := &ContextConstructor{
-		FS:            vfs.NewFS(),
-		RunID:         "run-test",
-		SessionID:     "sess-test",
-		SkillsManager: mgr,
-		MaxProfileBytes: 0,
-		MaxMemoryBytes:  0,
-		MaxTraceBytes:   0,
-		MaxHistoryBytes: 0,
+		FS:              fs,
+		MaxProfileBytes: 1024,
+		MaxMemoryBytes:  1024,
 	}
 
 	out, err := constructor.SystemPrompt(context.Background(), "base", 1)
 	if err != nil {
 		t.Fatalf("SystemPrompt: %v", err)
 	}
-	if !strings.Contains(out, "<available_skills>") || !strings.Contains(out, "</available_skills>") {
-		t.Fatalf("expected <available_skills> section, got: %q", out)
+	if !strings.Contains(out, "## Profile") || !strings.Contains(out, "profile info") {
+		t.Fatalf("expected profile section, got: %q", out)
 	}
-	if !strings.Contains(out, "Demo Skill") || !strings.Contains(out, "demo-skill") {
-		t.Fatalf("expected skill metadata, got: %q", out)
-	}
-	if strings.Contains(out, "# Instructions") || strings.Contains(out, "Do demo.") {
-		t.Fatalf("did not expect full skill content, got: %q", out)
+	if !strings.Contains(out, "## Memory") || !strings.Contains(out, "remember this") {
+		t.Fatalf("expected memory section, got: %q", out)
 	}
 }
 
-func TestContextConstructor_SkillsOmittedWhenEmpty(t *testing.T) {
+func TestContextConstructor_OmitsWhenEmpty(t *testing.T) {
 	t.Parallel()
 
-	mgr := skills.NewManager([]string{t.TempDir()})
-	_ = mgr.Scan()
-
 	constructor := &ContextConstructor{
-		FS:            vfs.NewFS(),
-		RunID:         "run-test",
-		SessionID:     "sess-test",
-		SkillsManager: mgr,
-		MaxProfileBytes: 0,
-		MaxMemoryBytes:  0,
-		MaxTraceBytes:   0,
-		MaxHistoryBytes: 0,
+		FS:              vfs.NewFS(),
+		MaxProfileBytes: 1024,
+		MaxMemoryBytes:  1024,
 	}
 
 	out, err := constructor.SystemPrompt(context.Background(), "base", 1)
 	if err != nil {
 		t.Fatalf("SystemPrompt: %v", err)
 	}
-	if strings.Contains(out, "<available_skills>") {
-		t.Fatalf("did not expect <available_skills> section, got: %q", out)
+	if strings.Contains(out, "## Profile") || strings.Contains(out, "## Memory") {
+		t.Fatalf("did not expect profile/memory sections, got: %q", out)
 	}
 }

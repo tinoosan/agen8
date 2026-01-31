@@ -36,8 +36,8 @@ func TestSystemPromptSuppression(t *testing.T) {
 			t.Fatalf("Failed to create agent: %v", err)
 		}
 
-		if !strings.Contains(a.Config().SystemPrompt, "COMPLEX TASKS REQUIRE A PLAN") {
-			t.Errorf("Expected default prompt to contain planning rules, but it didn't.\nPrompt: %s", a.Config().SystemPrompt)
+		if !strings.Contains(a.Config().SystemPrompt, "fs_list") {
+			t.Errorf("Expected default prompt to contain core tool list, but it didn't.\nPrompt: %s", a.Config().SystemPrompt)
 		}
 	})
 
@@ -58,8 +58,8 @@ func TestSystemPromptSuppression(t *testing.T) {
 			t.Fatalf("Failed to create agent: %v", err)
 		}
 
-		if !strings.Contains(a.Config().SystemPrompt, "COMPLEX TASKS REQUIRE A PLAN") {
-			t.Errorf("Expected prompt to contain planning rules, but it didn't.")
+		if !strings.Contains(a.Config().SystemPrompt, "fs_list") {
+			t.Errorf("Expected prompt to contain core tool list, but it didn't.")
 		}
 		if !strings.Contains(a.Config().SystemPrompt, contextData) {
 			t.Errorf("Expected prompt to contain context data, but it didn't.")

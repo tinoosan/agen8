@@ -25,6 +25,7 @@ type AutonomousRunnerConfig struct {
 	// and to persist new memories after task completion.
 	Memory            MemoryProvider
 	MemorySearchLimit int
+	Notifier          Notifier
 
 	InboxPath         string
 	OutboxPath        string
@@ -46,6 +47,10 @@ type MemorySnippet struct {
 type MemoryProvider interface {
 	Search(ctx context.Context, query string, limit int) ([]MemorySnippet, error)
 	Save(ctx context.Context, title, content string) error
+}
+
+type Notifier interface {
+	Notify(ctx context.Context, task types.Task, result types.TaskResult) error
 }
 
 // AutonomousRunner is an always-on control loop:
@@ -379,18 +384,6 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 	task.Error = result.Error
 	_ = r.writeTask(ctx, item.Path, task)
 
-	// Best-effort: persist a compact memory of the result.
-	if r.cfg.Memory != nil {
-		memTitle := task.Goal
-		memBody := strings.TrimSpace(result.Summary)
-		if memBody == "" && result.Error != "" {
-			memBody = "Task failed: " + result.Error
-		}
-		if strings.TrimSpace(memTitle) != "" && strings.TrimSpace(memBody) != "" {
-			_ = r.cfg.Memory.Save(ctx, memTitle, memBody)
-		}
-	}
-
 	if r.cfg.Emit != nil {
 		data := map[string]string{
 			"taskId": taskID,
@@ -411,6 +404,15 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 			Message: "Task finished",
 			Data:    data,
 		})
+	}
+	if r.cfg.Notifier != nil {
+		if err := r.cfg.Notifier.Notify(ctx, task, result); err != nil && r.cfg.Emit != nil {
+			r.cfg.Emit(ctx, events.Event{
+				Type:    "task.notify.error",
+				Message: "Task notification failed",
+				Data:    map[string]string{"taskId": taskID, "error": err.Error()},
+			})
+		}
 	}
 	return nil
 }

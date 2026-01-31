@@ -9,7 +9,6 @@ import (
 
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/config"
-	"github.com/tinoosan/workbench-core/pkg/debuglog"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/resources"
@@ -128,90 +127,64 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
-
-	f := &resources.Factory{
-		DataDir:      cfg.Cfg.DataDir,
-		SessionID:    cfg.Run.SessionID,
-		RunID:        cfg.Run.RunId,
-		ResultsStore: cfg.ResultsStore,
-		MemoryStore:  cfg.MemoryStore,
-		ProfileStore: cfg.ProfileStore,
-		HistoryStore: cfg.HistoryStore,
-		TraceStore:   cfg.TraceStore,
-	}
-	if err := f.MountAll(fs); err != nil {
-		return nil, err
-	}
 	fs.Mount(vfs.MountProject, workdirRes)
+
+	runDir := fsutil.GetRunDir(cfg.Cfg.DataDir, cfg.Run.RunId)
+	planDir := filepath.Join(runDir, "plan")
+	if err := os.MkdirAll(planDir, 0755); err != nil {
+		return nil, fmt.Errorf("prepare plan dir: %w", err)
+	}
+	planRes, err := resources.NewDirResource(planDir, vfs.MountPlan)
+	if err != nil {
+		return nil, fmt.Errorf("create plan resource: %w", err)
+	}
+	fs.Mount(vfs.MountPlan, planRes)
 
 	skillDir := fsutil.GetSkillsDir(cfg.Cfg.DataDir)
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		return nil, fmt.Errorf("prepare skills dir: %w", err)
 	}
-	workdirSkillDir := filepath.Join(cfg.WorkdirAbs, "skills")
-	if err := os.MkdirAll(workdirSkillDir, 0755); err != nil {
-		return nil, fmt.Errorf("prepare workdir skills dir: %w", err)
-	}
-	skillRoots := []string{skillDir, workdirSkillDir}
-	skillMgr := skills.NewManager(skillRoots)
+	skillMgr := skills.NewManager([]string{skillDir})
 	skillMgr.WritableRoot = skillDir
 	if err := skillMgr.Scan(); err != nil {
 		return nil, fmt.Errorf("scan skills: %w", err)
 	}
-	if entries := skillMgr.Entries(); len(entries) > 0 {
-		debuglog.Log("skills", "H13", "runtime.Build", "skills_discovered", map[string]any{
-			"count": len(entries),
-			"names": func() []string {
-				names := make([]string, len(entries))
-				for i, e := range entries {
-					names[i] = e.Dir
-				}
-				return names
-			}(),
-		})
-	} else {
-		debuglog.Log("skills", "H13", "runtime.Build", "no_skills_discovered", map[string]any{
-			"roots": skillRoots,
-		})
-	}
 	fs.Mount(vfs.MountSkills, skills.NewResource(skillMgr))
 
-	_, wsr, _, _ := fs.Resolve("/" + vfs.MountScratch)
-	workspace := wsr.(*resources.DirResource)
-	_, trr, _, _ := fs.Resolve("/" + vfs.MountLog)
-	traceRes := trr.(*resources.TraceResource)
-	_, hr, _, _ := fs.Resolve("/" + vfs.MountHistory)
-	historyRes := hr.(*resources.HistoryResource)
-
-	planDir := filepath.Join(workspace.BaseDir, "plan")
-	if err := os.MkdirAll(planDir, 0755); err != nil {
-		return nil, fmt.Errorf("prepare plan dir: %w", err)
+	inboxDir := filepath.Join(runDir, vfs.MountInbox)
+	if err := os.MkdirAll(inboxDir, 0755); err != nil {
+		return nil, fmt.Errorf("prepare inbox dir: %w", err)
 	}
-	planRes, err := resources.NewDirResource(planDir, "plan")
+	inboxRes, err := resources.NewDirResource(inboxDir, vfs.MountInbox)
 	if err != nil {
-		return nil, fmt.Errorf("create plan resource: %w", err)
+		return nil, fmt.Errorf("create inbox resource: %w", err)
 	}
-	fs.Mount("plan", planRes)
+	fs.Mount(vfs.MountInbox, inboxRes)
 
-	resultsStore := f.ResultsStore
-	memStore := f.MemoryStore
-	profileStore := f.ProfileStore
+	outboxDir := filepath.Join(runDir, vfs.MountOutbox)
+	if err := os.MkdirAll(outboxDir, 0755); err != nil {
+		return nil, fmt.Errorf("prepare outbox dir: %w", err)
+	}
+	outboxRes, err := resources.NewDirResource(outboxDir, vfs.MountOutbox)
+	if err != nil {
+		return nil, fmt.Errorf("create outbox resource: %w", err)
+	}
+	fs.Mount(vfs.MountOutbox, outboxRes)
+
+	resultsStore := cfg.ResultsStore
+	memStore := cfg.MemoryStore
+	profileStore := cfg.ProfileStore
 
 	if cfg.Emit != nil {
 		cfg.Emit(context.Background(), events.Event{
 			Type:    "host.mounted",
 			Message: "Mounted VFS resources",
 			Data: map[string]string{
-				"/scratch":            workspace.BaseDir,
-				"/project":            workdirRes.BaseDir,
-				"/results":            "(virtual)",
-				"/log":                traceRes.BaseDir,
-				"/tools":              "(virtual)",
-				"/plan":               "(virtual)",
-				"/memory":             "(virtual)",
-				"/profile":            "(global)",
-				"/history":            historyRes.BaseDir,
-				"/" + vfs.MountSkills: "(virtual)",
+				"/project": workdirRes.BaseDir,
+				"/inbox":   inboxDir,
+				"/outbox":  outboxDir,
+				"/plan":    planDir,
+				"/skills":  "(virtual)",
 			},
 			Console: boolPtr(false),
 		})
@@ -222,7 +195,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("resolve workdir root: %w", err)
 	}
 
-	traceStore := f.TraceStore
+	traceStore := cfg.TraceStore
 	traceMiddleware := &agent.TraceMiddleware{
 		Store: traceStore,
 		FS:    fs,
@@ -245,63 +218,12 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	builtinInvokers[tools.ToolID("builtin.http")] = httpInvoker
 	builtinInvokers[tools.ToolID("builtin.trace")] = traceInvoker
 
-	builtinManifestProvider, err := builtins.NewBuiltinManifestProvider()
-	if err != nil {
-		return nil, fmt.Errorf("load builtin manifests: %w", err)
-	}
-	toolsDir := fsutil.GetToolsDir(cfg.Cfg.DataDir)
-	_ = os.MkdirAll(toolsDir, 0755)
-	diskManifestProvider := tools.NewDiskManifestProvider(toolsDir)
-	toolManifestRegistry := tools.NewCompositeToolManifestRegistry(builtinManifestProvider, diskManifestProvider)
-
-	toolRuntime, err := builtins.NewRuntimeWiring(toolManifestRegistry, builtinInvokers)
-	if err != nil {
-		return nil, err
-	}
-	fs.Mount(vfs.MountTools, toolRuntime.Resource)
-
 	runner := tools.Runner{
 		Results:      resultsStore,
-		ToolRegistry: toolRuntime.Registry,
+		ToolRegistry: tools.MapRegistry{},
 	}
 
 	toolManifests := []tools.ToolManifest{}
-	if ids, err := builtinManifestProvider.ListToolIDs(context.Background()); err != nil {
-		return nil, fmt.Errorf("list builtin manifests: %w", err)
-	} else {
-		for _, id := range ids {
-			b, ok, err := builtinManifestProvider.GetManifest(context.Background(), id)
-			if err != nil {
-				return nil, fmt.Errorf("read builtin manifest %s: %w", id.String(), err)
-			}
-			if !ok {
-				continue
-			}
-			m, err := tools.ParseBuiltinToolManifest(b)
-			if err != nil {
-				return nil, fmt.Errorf("parse builtin manifest %s: %w", id.String(), err)
-			}
-			toolManifests = append(toolManifests, m)
-		}
-	}
-	if ids, err := diskManifestProvider.ListToolIDs(context.Background()); err != nil {
-		return nil, fmt.Errorf("list disk manifests: %w", err)
-	} else {
-		for _, id := range ids {
-			b, ok, err := diskManifestProvider.GetManifest(context.Background(), id)
-			if err != nil {
-				return nil, fmt.Errorf("read disk manifest %s: %w", id.String(), err)
-			}
-			if !ok {
-				continue
-			}
-			m, err := tools.ParseUserToolManifest(b)
-			if err != nil {
-				return nil, fmt.Errorf("parse disk manifest %s: %w", id.String(), err)
-			}
-			toolManifests = append(toolManifests, m)
-		}
-	}
 
 	executor := &agent.HostOpExecutor{
 		FS:              fs,
@@ -314,35 +236,16 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 
 	constructor := &agent.ContextConstructor{
-		FS:                fs,
-		Cfg:               cfg.Cfg,
-		RunID:             cfg.Run.RunId,
-		SessionID:         cfg.Run.SessionID,
-		LoadSession:       cfg.LoadSession,
-		SaveSession:       cfg.SaveSession,
-		StateStore:        cfg.ConstructorStore,
-		Trace:             traceMiddleware,
-		HistoryStore:      historyRes.Store,
-		SkillsManager:     skillMgr,
-		IncludeHistoryOps: cfg.IncludeHistoryOps,
-		MaxProfileBytes:   cfg.MaxProfileBytes,
-		MaxMemoryBytes:    cfg.MaxMemoryBytes,
-		MaxTraceBytes:     cfg.MaxTraceBytes,
-		MaxHistoryBytes:   8 * 1024,
-		Emit: func(eventType, message string, data map[string]string) {
-			if cfg.Emit != nil {
-				cfg.Emit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
-			}
-		},
-	}
-
-	updater := &agent.ContextUpdater{
 		FS:              fs,
-		Trace:           traceMiddleware,
+		Cfg:             cfg.Cfg,
+		RunID:           cfg.Run.RunId,
+		SessionID:       cfg.Run.SessionID,
+		LoadSession:     cfg.LoadSession,
+		SaveSession:     cfg.SaveSession,
+		StateStore:      cfg.ConstructorStore,
 		MaxProfileBytes: cfg.MaxProfileBytes,
 		MaxMemoryBytes:  cfg.MaxMemoryBytes,
 		MaxTraceBytes:   cfg.MaxTraceBytes,
-		ManifestPath:    "/scratch/context_manifest.json",
 		Emit: func(eventType, message string, data map[string]string) {
 			if cfg.Emit != nil {
 				cfg.Emit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
@@ -364,7 +267,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			}
 			return cfg.Guard(fs, req)
 		},
-		Observers:       []HostOpObserver{constructor, updater, auditObs},
+		Observers:       []HostOpObserver{constructor, auditObs},
 		ArtifactObserve: cfg.ArtifactObserve,
 	})
 
@@ -376,7 +279,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		BuiltinInvokers: builtinInvokers,
 		TraceMiddleware: traceMiddleware,
 		Constructor:     constructor,
-		Updater:         updater,
+		Updater:         nil,
 		WorkdirBase:     workdirRes.BaseDir,
 		MemStore:        memStore,
 		ProfileStore:    profileStore,

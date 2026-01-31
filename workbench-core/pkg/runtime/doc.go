@@ -7,7 +7,7 @@
 //
 // # Responsibilities
 //
-//   - VFS Setup: `Build` creates a `vfs.FS`, mounts `/project`, `/scratch`, `/plan`,
+//   - VFS Setup: `Build` creates a `vfs.FS`, mounts `/project`, `/workspace`, `/plan`,
 //     `/results`, `/tools`, `/skills`, `/log`, `/history`, and any other resources the
 //     runtime needs. The `resources.Factory` abstracts how directories, traces, history,
 //     and result artifacts tie back to configured stores.

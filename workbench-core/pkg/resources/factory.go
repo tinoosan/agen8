@@ -155,7 +155,7 @@ func (f *Factory) MountAll(fs *vfs.FS) error {
 		return fmt.Errorf("create outbox resource: %w", err)
 	}
 
-	fs.Mount(vfs.MountScratch, ws)
+	fs.Mount(vfs.MountWorkspace, ws)
 	fs.Mount(vfs.MountLog, tr)
 	fs.Mount(vfs.MountResults, res)
 	fs.Mount(vfs.MountInbox, inboxRes)

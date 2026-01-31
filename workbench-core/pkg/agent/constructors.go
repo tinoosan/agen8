@@ -6,17 +6,11 @@ import (
 
 	agenttools "github.com/tinoosan/workbench-core/pkg/agent/tools"
 	"github.com/tinoosan/workbench-core/pkg/llm"
-	"github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // DefaultConfig returns the default agent configuration.
 func DefaultConfig() AgentConfig {
 	return AgentConfig{SystemPrompt: DefaultSystemPrompt()}
-}
-
-// WorkerConfig returns the worker-focused configuration.
-func WorkerConfig() AgentConfig {
-	return AgentConfig{SystemPrompt: WorkerSystemPrompt()}
 }
 
 // NewAgent constructs an agent from explicit dependencies and configuration.
@@ -77,18 +71,23 @@ func NewDefaultAgent(opts ...Option) (Agent, error) {
 }
 
 // DefaultToolRegistry returns a registry seeded with default tools.
-func DefaultToolRegistry(toolManifests []tools.ToolManifest) (*ToolRegistry, []llm.Tool, error) {
-	return buildToolRegistry(toolManifests, defaultHostTools())
+func DefaultToolRegistry() (*ToolRegistry, error) {
+	registry := NewToolRegistry()
+	for _, tool := range defaultHostTools() {
+		if err := registry.Register(tool); err != nil {
+			return nil, err
+		}
+	}
+	return registry, nil
 }
 
 func registryFromConfig(cfg AgentConfig) (*ToolRegistry, []llm.Tool, error) {
 	extraTools := append([]llm.Tool(nil), cfg.ExtraTools...)
 	if cfg.ToolRegistry == nil {
-		registry, manifestTools, err := DefaultToolRegistry(cfg.ToolManifests)
+		registry, err := DefaultToolRegistry()
 		if err != nil {
 			return nil, nil, err
 		}
-		extraTools = append(extraTools, manifestTools...)
 		return registry, extraTools, nil
 	}
 
@@ -99,32 +98,15 @@ func registryFromConfig(cfg AgentConfig) (*ToolRegistry, []llm.Tool, error) {
 	return registry, extraTools, nil
 }
 
-func buildToolRegistry(toolManifests []tools.ToolManifest, hostTools []HostTool) (*ToolRegistry, []llm.Tool, error) {
-	extraTools, routes := ManifestToFunctionTools(toolManifests)
-	registry := NewToolRegistry()
-	registry.RegisterRoutes(routes)
-	for _, tool := range hostTools {
-		if err := registry.Register(tool); err != nil {
-			return nil, nil, err
-		}
-	}
-	return registry, extraTools, nil
-}
-
 func defaultHostTools() []HostTool {
 	return []HostTool{
 		&agenttools.FSListTool{},
 		&agenttools.FSReadTool{},
 		&agenttools.FSWriteTool{},
-		&agenttools.FSAppendTool{},
 		&agenttools.FSEditTool{},
 		&agenttools.FSPatchTool{},
 		&agenttools.ShellExecTool{},
 		&agenttools.HTTPFetchTool{},
-		&agenttools.ToolRunTool{},
-		&agenttools.TraceEventsLatestTool{},
-		&agenttools.TraceEventsSinceTool{},
-		&agenttools.TraceEventsSummaryTool{},
 	}
 }
 

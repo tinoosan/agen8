@@ -44,7 +44,7 @@ Workbench Core is a local agentic runtime that exposes an interactive CLI for la
 Workbench exposes a virtual filesystem inside each run. Key mounts include:
 
 - `/project` – your host workspace (defaults to the current working directory; overridable via `--workdir`).
-- `/scratch` – run-local workspace mapped to `dataDir/runs/<runId>/scratch`.
+- `/workspace` – run-local workspace mapped to `dataDir/runs/<runId>/workspace`.
 - `/results`, `/log`, `/memory`, `/profile`, `/tools` – mounted read-only to expose structured outputs, telemetry, memory proposals, and discovered tool manifests.
 
 Every command that manipulates project files must operate through this explicit surface, which keeps tooling auditable and reproducible.
@@ -52,7 +52,7 @@ Every command that manipulates project files must operate through this explicit 
 ### Sessions vs. runs
 
 - **Sessions** (data stored under `dataDir/sessions/<sessionId>`) hold stable context/goal and track the latest run index.
-- **Runs** (stored under `dataDir/runs/<runId>`) represent a single agent execution with its workspace (`/scratch`), logs, artifacts, and metadata.
+- **Runs** (stored under `dataDir/runs/<runId>`) represent a single agent execution with its workspace (`/workspace`), logs, artifacts, and metadata.
 
 You can resume an existing session with `workbench resume <sessionId>` to continue the last run (use `--new-run` to force a fresh run) and inspect artifacts using the CLI or by exploring the data directory (see [docs/data-layout.md](docs/data-layout.md)).
 
@@ -95,7 +95,7 @@ Helpers in `internal/config/effectiveConfig()` resolve the final configuration b
 The CLI stores persistent state under the configured `dataDir`:
 
 - `dataDir/workbench.db` (sessions, runs, events, history).
-- `dataDir/runs/<runId>/` (containing `scratch`, `artifacts`, `log`, `memory`, `profile`).
+- `dataDir/runs/<runId>/` (containing `workspace`, `artifacts`, `log`, `memory`, `profile`).
 
 Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sample commands, and tips on manually inspecting sessions, runs, and agent mounts.
 

@@ -19,7 +19,7 @@ The CLI boots the default Bubble Tea-powered TUI. Every line you send becomes an
 ./workbench resume <sessionId>         # continue the last run in that session
 ```
 
-Session metadata lives in `workbench.db` under the data directory. Resuming reuses the same goal/context and continues the last run workspace (use `--new-run` to start fresh under `/scratch`).
+Session metadata lives in `workbench.db` under the data directory. Resuming reuses the same goal/context and continues the last run workspace (use `--new-run` to start fresh under `/workspace`).
 
 ### 3. Inspect metadata, history, and artifacts
 

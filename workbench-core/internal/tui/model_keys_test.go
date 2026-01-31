@@ -655,7 +655,7 @@ func TestActivity_OpenFileViewer_OKey(t *testing.T) {
 	r := stubRunnerWithRead{
 		stubRunner: stubRunner{final: "ok"},
 		files: map[string]string{
-			"/scratch/example.json": "{\n  \"ok\": true\n}\n",
+			"/workspace/example.json": "{\n  \"ok\": true\n}\n",
 		},
 	}
 	m := New(context.Background(), r, make(chan events.Event))
@@ -668,7 +668,7 @@ func TestActivity_OpenFileViewer_OKey(t *testing.T) {
 	m.layout()
 
 	m.activities = []Activity{
-		{ID: "act-1", Kind: "fs.write", Title: "Write /scratch/example.json", Status: ActivityOK, Path: "/scratch/example.json"},
+		{ID: "act-1", Kind: "fs.write", Title: "Write /workspace/example.json", Status: ActivityOK, Path: "/workspace/example.json"},
 	}
 	m.refreshActivityList()
 	m.activityList.Select(0)
@@ -682,8 +682,8 @@ func TestActivity_OpenFileViewer_OKey(t *testing.T) {
 	if !updated.fileViewOpen {
 		t.Fatalf("expected fileViewOpen true")
 	}
-	if updated.fileViewPath != "/scratch/example.json" {
-		t.Fatalf("expected fileViewPath %q, got %q", "/scratch/example.json", updated.fileViewPath)
+	if updated.fileViewPath != "/workspace/example.json" {
+		t.Fatalf("expected fileViewPath %q, got %q", "/workspace/example.json", updated.fileViewPath)
 	}
 
 	msg := cmd()
