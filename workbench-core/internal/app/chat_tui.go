@@ -789,8 +789,12 @@ func resumeRunForSession(cfg config.Config, sessionID string, maxContextB int, f
 			return run, warnActive, strings.TrimSpace(sess.ApprovalsMode), nil
 		}
 	}
-	run, err := store.CreateSubRun(cfg, sessionID, parent, "resume session", maxContextB)
-	if err != nil {
+	// Create a fresh run in the existing session.
+	run := types.NewRun("resume session", maxContextB, sessionID)
+	if err := store.SaveRun(cfg, run); err != nil {
+		return types.Run{}, false, "", err
+	}
+	if _, err := store.AddRunToSession(cfg, sessionID, run.RunId); err != nil {
 		return types.Run{}, false, "", err
 	}
 	return run, false, strings.TrimSpace(sess.ApprovalsMode), nil

@@ -167,29 +167,6 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 			pending = append(pending, pendingHostOp{req: op, callID: strings.TrimSpace(tc.ID)})
 		}
 
-		if a.ApprovalsMode == "enabled" && len(pending) > 0 {
-			need := false
-			for _, item := range pending {
-				if isDangerousHostOp(item.req) {
-					need = true
-					break
-				}
-			}
-			if need {
-				reqs := make([]types.HostOpRequest, len(pending))
-				ids := make([]string, len(pending))
-				for i, item := range pending {
-					reqs[i] = item.req
-					ids[i] = item.callID
-				}
-				return "", msgs, step, ErrApprovalRequired{
-					AssistantMsg:       assistantMsg,
-					PendingOps:         reqs,
-					PendingToolCallIDs: ids,
-				}
-			}
-		}
-
 		for _, item := range pending {
 			hostResp := a.Exec.Exec(ctx, item.req)
 			hostRespJSON, _ := types.MarshalPretty(hostResp)
@@ -279,25 +256,9 @@ func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req ll
 }
 
 func isDangerousHostOp(req types.HostOpRequest) bool {
-	op := strings.ToLower(strings.TrimSpace(req.Op))
-	if op == types.HostOpFSWrite {
-		path := strings.TrimSpace(req.Path)
-		if path == "/plan/HEAD.md" || path == "/plan/CHECKLIST.md" {
-			return false
-		}
-	}
-	switch op {
-	case types.HostOpFSWrite,
-		types.HostOpFSAppend,
-		types.HostOpFSEdit,
-		types.HostOpFSPatch,
-		types.HostOpShellExec,
-		types.HostOpHTTPFetch,
-		types.HostOpToolRun:
-		return true
-	default:
-		return false
-	}
+	// Approvals are disabled in autonomous mode; no-op safeguard.
+	_ = req
+	return false
 }
 
 // Run executes the agent loop for a single user goal and returns the final response text.

@@ -22,28 +22,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/types"
-	"github.com/tinoosan/workbench-core/pkg/validate"
 )
-
-// CreateSubRun creates a run within an existing session.
-//
-// parentRunID is optional; when set, the new run is considered a "sub-agent" run.
-func CreateSubRun(cfg config.Config, sessionID, parentRunID, goal string, maxBytesForContext int) (types.Run, error) {
-	if err := cfg.Validate(); err != nil {
-		return types.Run{}, err
-	}
-	if err := validate.NonEmpty("sessionId", sessionID); err != nil {
-		return types.Run{}, err
-	}
-	run := types.NewRun(goal, maxBytesForContext, sessionID, parentRunID)
-	if err := SaveRun(cfg, run); err != nil {
-		return types.Run{}, err
-	}
-	if _, err := AddRunToSession(cfg, sessionID, run.RunId); err != nil {
-		return types.Run{}, err
-	}
-	return run, nil
-}
 
 // LoadRun reads a run's state from SQLite by its run ID.
 // It returns an error if the row cannot be read, if the JSON is malformed,

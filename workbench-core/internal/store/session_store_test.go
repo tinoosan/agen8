@@ -18,9 +18,6 @@ func TestCreateSessionAndAddRun(t *testing.T) {
 	if run.SessionID != s.SessionID {
 		t.Fatalf("run.SessionID=%q want session %q", run.SessionID, s.SessionID)
 	}
-	if run.ParentRunID != "" {
-		t.Fatalf("main run should have no parent, got %q", run.ParentRunID)
-	}
 	if s.SessionID == "" {
 		t.Fatalf("expected sessionId")
 	}

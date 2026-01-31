@@ -71,12 +71,6 @@ func (w *Worker) runOnce(ctx context.Context) error {
 		return err
 	}
 	for _, p := range paths {
-		if msg, ok := w.readMessage(ctx, p); ok {
-			if err := w.processMessage(ctx, p, msg); err != nil {
-				return err
-			}
-			continue
-		}
 		task, ok := w.readTask(ctx, p)
 		if !ok {
 			continue
@@ -110,18 +104,6 @@ func (w *Worker) listInbox(ctx context.Context) ([]string, error) {
 			paths = append(paths, p)
 		}
 	}
-	// Also include message inbox files (if present).
-	msgResp := w.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
-		Op:   types.HostOpFSList,
-		Path: path.Join(w.cfg.InboxPath, "messages"),
-	})
-	if msgResp.Ok {
-		for _, p := range msgResp.Entries {
-			if strings.HasSuffix(strings.ToLower(p), ".json") {
-				paths = append(paths, path.Join(w.cfg.InboxPath, "messages", p))
-			}
-		}
-	}
 	sort.Strings(paths)
 	return paths, nil
 }
@@ -140,89 +122,6 @@ func (w *Worker) readTask(ctx context.Context, taskPath string) (types.Task, boo
 		return types.Task{}, false
 	}
 	return task, true
-}
-
-func (w *Worker) readMessage(ctx context.Context, msgPath string) (types.Message, bool) {
-	resp := w.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
-		Op:       types.HostOpFSRead,
-		Path:     msgPath,
-		MaxBytes: w.cfg.MaxReadBytes,
-	})
-	if !resp.Ok || strings.TrimSpace(resp.Text) == "" {
-		return types.Message{}, false
-	}
-	var msg types.Message
-	if err := json.Unmarshal([]byte(resp.Text), &msg); err != nil {
-		return types.Message{}, false
-	}
-	if strings.TrimSpace(msg.MessageID) == "" {
-		return types.Message{}, false
-	}
-	return msg, true
-}
-
-func (w *Worker) processMessage(ctx context.Context, msgPath string, msg types.Message) error {
-	if msg.Metadata == nil {
-		msg.Metadata = map[string]string{}
-	}
-	if strings.EqualFold(msg.Metadata["processed"], "true") {
-		return nil
-	}
-	now := time.Now().UTC()
-	msg.Metadata["processed"] = "true"
-	msg.Metadata["receivedAt"] = now.Format(time.RFC3339Nano)
-	if err := w.writeMessage(ctx, msgPath, msg); err != nil {
-		return err
-	}
-	ack := types.Message{
-		MessageID: "ack-" + msg.MessageID,
-		TaskID:    strings.TrimSpace(msg.TaskID),
-		Kind:      "ack",
-		Title:     "message received",
-		Body:      strings.TrimSpace(msg.Title),
-		CreatedAt: &now,
-	}
-	return w.writeMessageOutbox(ctx, ack)
-}
-
-func (w *Worker) writeMessage(ctx context.Context, msgPath string, msg types.Message) error {
-	b, err := json.MarshalIndent(msg, "", "  ")
-	if err != nil {
-		return err
-	}
-	resp := w.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
-		Op:   types.HostOpFSWrite,
-		Path: msgPath,
-		Text: string(b),
-	})
-	if !resp.Ok {
-		return fmt.Errorf("update message: %s", resp.Error)
-	}
-	return nil
-}
-
-func (w *Worker) writeMessageOutbox(ctx context.Context, msg types.Message) error {
-	outbox := strings.TrimRight(w.cfg.OutboxPath, "/")
-	if outbox == "" {
-		outbox = "/outbox"
-	}
-	if strings.TrimSpace(msg.MessageID) == "" {
-		msg.MessageID = "msg"
-	}
-	path := path.Join(outbox, "message-"+msg.MessageID+".json")
-	b, err := json.MarshalIndent(msg, "", "  ")
-	if err != nil {
-		return err
-	}
-	resp := w.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
-		Op:   types.HostOpFSWrite,
-		Path: path,
-		Text: string(b),
-	})
-	if !resp.Ok {
-		return fmt.Errorf("write message outbox: %s", resp.Error)
-	}
-	return nil
 }
 
 func (w *Worker) writeTask(ctx context.Context, taskPath string, task types.Task) error {
@@ -252,7 +151,6 @@ func (w *Worker) processTask(ctx context.Context, taskPath string, task types.Ta
 	if goal == "" {
 		return w.writeResult(ctx, task, types.TaskResult{
 			TaskID: taskID,
-			RunID:  strings.TrimSpace(task.AssignedToRunID),
 			Status: "failed",
 			Error:  "task goal is empty",
 		})
@@ -261,7 +159,6 @@ func (w *Worker) processTask(ctx context.Context, taskPath string, task types.Ta
 	now := time.Now()
 	result := types.TaskResult{
 		TaskID:      taskID,
-		RunID:       strings.TrimSpace(task.AssignedToRunID),
 		Status:      "succeeded",
 		Summary:     strings.TrimSpace(final),
 		CompletedAt: &now,
@@ -273,19 +170,6 @@ func (w *Worker) processTask(ctx context.Context, taskPath string, task types.Ta
 	if err := w.writeResult(ctx, task, result); err != nil {
 		return err
 	}
-	msg := types.Message{
-		MessageID: "task-" + taskID,
-		TaskID:    taskID,
-		Kind:      "result",
-		Title:     "task " + result.Status,
-		Body:      strings.TrimSpace(result.Summary),
-		CreatedAt: &now,
-	}
-	if result.Error != "" {
-		msg.Body = result.Error
-	}
-	_ = w.writeMessageOutbox(ctx, msg)
-
 	task.Status = result.Status
 	task.CompletedAt = result.CompletedAt
 	task.Error = result.Error

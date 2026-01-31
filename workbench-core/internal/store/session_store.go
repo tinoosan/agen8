@@ -28,7 +28,7 @@ func CreateSession(cfg config.Config, goal string, maxBytesForContext int) (type
 		return types.Session{}, types.Run{}, err
 	}
 
-	run := types.NewRun(goal, maxBytesForContext, s.SessionID, "")
+	run := types.NewRun(goal, maxBytesForContext, s.SessionID)
 	if err := SaveRun(cfg, run); err != nil {
 		return types.Session{}, types.Run{}, err
 	}
