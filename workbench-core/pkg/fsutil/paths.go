@@ -58,6 +58,10 @@ func GetSkillsDir(dataDir string) string {
 	return filepath.Join(dataDir, "skills")
 }
 
+func GetRolesDir(dataDir string) string {
+	return filepath.Join(dataDir, "roles")
+}
+
 func GetToolManifestPath(toolsDir, toolID string) string {
 	return filepath.Join(toolsDir, toolID, "manifest.json")
 }

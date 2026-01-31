@@ -224,6 +224,7 @@ func (r *AutonomousRunner) processControlFile(ctx context.Context, controlPath s
 
 	changed := false
 	if strings.TrimSpace(c.Role) != "" {
+		role.ReloadDefaultManager()
 		r.cfg.Role = role.Get(c.Role).Normalize()
 		changed = true
 	}
@@ -439,6 +440,13 @@ func buildAugmentedSystemPrompt(base string, r role.Role, memories []MemorySnipp
 			b.WriteString("Description: ")
 			b.WriteString(rr.Description)
 			b.WriteString("\n")
+		}
+		if rr.Content != "" {
+			b.WriteString("Instructions:\n")
+			b.WriteString(rr.Content)
+			if !strings.HasSuffix(rr.Content, "\n") {
+				b.WriteString("\n")
+			}
 		}
 		if len(rr.StandingGoals) > 0 {
 			b.WriteString("StandingGoals:\n")

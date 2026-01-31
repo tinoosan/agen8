@@ -134,6 +134,23 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err := os.MkdirAll(planDir, 0755); err != nil {
 		return nil, fmt.Errorf("prepare plan dir: %w", err)
 	}
+	ensureFile := func(path string, contents string) error {
+		if st, err := os.Stat(path); err == nil {
+			if st.IsDir() {
+				return fmt.Errorf("path %s is a directory", path)
+			}
+			return nil
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		return os.WriteFile(path, []byte(contents), 0644)
+	}
+	if err := ensureFile(filepath.Join(planDir, "HEAD.md"), "# Current Plan\n\n_No active plan._\n"); err != nil {
+		return nil, fmt.Errorf("prepare plan details: %w", err)
+	}
+	if err := ensureFile(filepath.Join(planDir, "CHECKLIST.md"), "# Task Checklist\n\n_No tasks yet._\n"); err != nil {
+		return nil, fmt.Errorf("prepare plan checklist: %w", err)
+	}
 	planRes, err := resources.NewDirResource(planDir, vfs.MountPlan)
 	if err != nil {
 		return nil, fmt.Errorf("create plan resource: %w", err)
@@ -143,6 +160,10 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	skillDir := fsutil.GetSkillsDir(cfg.Cfg.DataDir)
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		return nil, fmt.Errorf("prepare skills dir: %w", err)
+	}
+	roleDir := fsutil.GetRolesDir(cfg.Cfg.DataDir)
+	if err := os.MkdirAll(roleDir, 0755); err != nil {
+		return nil, fmt.Errorf("prepare roles dir: %w", err)
 	}
 	skillMgr := skills.NewManager([]string{skillDir})
 	skillMgr.WritableRoot = skillDir

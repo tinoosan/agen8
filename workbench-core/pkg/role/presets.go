@@ -44,6 +44,9 @@ var (
 )
 
 func Get(name string) Role {
+	if r, ok := getDefaultRole(name); ok {
+		return r.Normalize()
+	}
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "", "general", "default":
 		return General

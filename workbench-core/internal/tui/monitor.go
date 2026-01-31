@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,6 +52,8 @@ type monitorModel struct {
 	pendingActivityID string
 	activityList      list.Model
 	activityDetail    viewport.Model
+	planViewport      viewport.Model
+	renderer          *ContentRenderer
 	agentOutput       []string
 	agentOutputVP     viewport.Model
 	taskQueue         map[string]taskState
@@ -60,6 +63,10 @@ type monitorModel struct {
 	outboxVP          viewport.Model
 	memResults        []string
 	memoryVP          viewport.Model
+	planMarkdown      string
+	planDetails       string
+	planLoadErr       string
+	planDetailsErr    string
 	stats             monitorStats
 	model             string
 	role              string
@@ -73,8 +80,10 @@ type monitorModel struct {
 }
 
 type monitorStats struct {
-	started   time.Time
-	tasksDone int
+	started         time.Time
+	tasksDone       int
+	lastTurnCostUSD string
+	totalCostUSD    float64
 }
 
 type taskState struct {
@@ -96,6 +105,8 @@ type panelID int
 
 const (
 	panelActivity panelID = iota
+	panelActivityDetail
+	panelPlan
 	panelOutput
 	panelQueue
 	panelOutbox
@@ -157,6 +168,8 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 		activityIndexByOp: map[string]int{},
 		activityList:      activityList,
 		activityDetail:    viewport.New(0, 0),
+		planViewport:      viewport.New(0, 0),
+		renderer:          newContentRenderer(),
 		agentOutput:       []string{},
 		agentOutputVP:     viewport.New(0, 0),
 		taskQueue:         map[string]taskState{},
@@ -177,6 +190,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 		m.observeEvent(e)
 	}
 	m.refreshActivityList()
+	m.loadPlanFiles()
 	m.refreshViewports()
 
 	return m, nil
@@ -248,11 +262,11 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		case "tab":
-			m.focusedPanel = (m.focusedPanel + 1) % 6
+			m.focusedPanel = (m.focusedPanel + 1) % 8
 			m.updateFocus()
 			return m, nil
 		case "shift+tab":
-			m.focusedPanel = (m.focusedPanel + 5) % 6
+			m.focusedPanel = (m.focusedPanel + 7) % 8
 			m.updateFocus()
 			return m, nil
 		}
@@ -408,6 +422,15 @@ func (m *monitorModel) observeEvent(ev types.Event) {
 	}
 	m.observeTaskEvent(ev)
 	m.observeAgentOutput(ev)
+	switch ev.Type {
+	case "llm.cost.total":
+		m.stats.lastTurnCostUSD = strings.TrimSpace(ev.Data["costUsd"])
+		if v := strings.TrimSpace(ev.Data["costUsd"]); v != "" {
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				m.stats.totalCostUSD += f
+			}
+		}
+	}
 }
 
 func (m *monitorModel) observeActivityEvent(ev types.Event) {
@@ -458,6 +481,7 @@ func (m *monitorModel) observeActivityEvent(ev types.Event) {
 			m.pendingActivityID = id
 		}
 		m.refreshActivityList()
+		m.refreshActivityDetail()
 
 	case "agent.op.response":
 		if strings.TrimSpace(ev.Data["op"]) == "" {
@@ -506,7 +530,11 @@ func (m *monitorModel) observeActivityEvent(ev types.Event) {
 		} else {
 			m.pendingActivityID = ""
 		}
+		if isPlanEvent(act.Kind, act.Path) && strings.TrimSpace(act.Ok) == "true" {
+			m.loadPlanFiles()
+		}
 		m.refreshActivityList()
+		m.refreshActivityDetail()
 	}
 }
 
@@ -585,6 +613,73 @@ func (m *monitorModel) refreshActivityList() {
 	}
 }
 
+func (m *monitorModel) refreshActivityDetail() {
+	if m.renderer == nil {
+		return
+	}
+	if len(m.activities) == 0 || m.activityList.Index() < 0 || m.activityList.Index() >= len(m.activities) {
+		m.activityDetail.SetContent("")
+		return
+	}
+	w := imax(24, m.activityDetail.Width-4)
+	header := "### Details\n\n"
+	help := "_PgUp/PgDn scroll · use Activity to change selection_\n\n"
+	act := m.activities[m.activityList.Index()]
+	md := renderActivityDetailMarkdown(act, false, false)
+	m.activityDetail.SetContent(strings.TrimRight(m.renderer.RenderMarkdown(header+help+md, w), "\n"))
+}
+
+func (m *monitorModel) refreshPlanView() {
+	if m.renderer == nil {
+		return
+	}
+	w := imax(24, m.planViewport.Width-4)
+	detailsBody := ""
+	detailsText := strings.TrimSpace(m.planDetails)
+	if detailsText == "" {
+		if strings.TrimSpace(m.planDetailsErr) != "" {
+			detailsBody = fmt.Sprintf("_Failed to load plan details: %s_", m.planDetailsErr)
+		} else {
+			detailsBody = "_No plan details have been created yet._"
+		}
+	} else {
+		detailsBody = detailsText
+	}
+
+	currentStep := ""
+	progress := ""
+	checklistBody := ""
+	planText := strings.TrimSpace(m.planMarkdown)
+	if planText == "" {
+		if strings.TrimSpace(m.planLoadErr) != "" {
+			checklistBody = fmt.Sprintf("_Failed to load checklist: %s_", m.planLoadErr)
+		} else {
+			checklistBody = "_No checklist has been created yet._"
+		}
+	} else {
+		highlighted, active, done, total := highlightPlanChecklist(m.planMarkdown)
+		if active != "" {
+			currentStep = fmt.Sprintf("_Current step: %s_\n\n", active)
+		}
+		if total > 0 {
+			progress = fmt.Sprintf("_Progress: %d/%d complete._\n\n", done, total)
+		}
+		if strings.TrimSpace(m.planLoadErr) != "" {
+			checklistBody = fmt.Sprintf("_Failed to load checklist: %s_\n\n%s", m.planLoadErr, highlighted)
+		} else {
+			checklistBody = highlighted
+		}
+	}
+
+	detailsSection := "### Plan Details\n\n" + detailsBody
+	checklistSection := "### Checklist\n\n" + currentStep + progress + checklistBody
+	content := detailsSection + "\n\n---\n\n" + checklistSection
+	if strings.TrimSpace(content) == "" {
+		content = "_Plan view is preparing…_"
+	}
+	m.planViewport.SetContent(strings.TrimRight(m.renderer.RenderMarkdown(content, w), "\n"))
+}
+
 func (m *monitorModel) renderHeader() string {
 	return m.styles.header.Render(
 		lipgloss.JoinHorizontal(lipgloss.Left,
@@ -615,7 +710,13 @@ func (m *monitorModel) renderMainBody() string {
 	)
 
 	right := lipgloss.JoinVertical(lipgloss.Left,
+		m.panelStyle(panelActivityDetail).Width(layout.rightW).Height(layout.detailH).Render(
+			m.styles.sectionTitle.Render("Activity Details")+"\n"+m.activityDetail.View(),
+		),
 		m.renderCurrentTask(layout.rightW, layout.taskH),
+		m.panelStyle(panelPlan).Width(layout.rightW).Height(layout.planH).Render(
+			m.styles.sectionTitle.Render("Plan")+"\n"+m.planViewport.View(),
+		),
 		m.renderTaskQueue(layout.rightW, layout.queueH),
 		m.styles.panel.Width(layout.rightW).Height(layout.statsH).Render(
 			m.styles.sectionTitle.Render("Stats")+"\n"+renderStats(m.stats),
@@ -685,6 +786,10 @@ func (m *monitorModel) focusedPanelName() string {
 	switch m.focusedPanel {
 	case panelActivity:
 		return "Activity"
+	case panelActivityDetail:
+		return "Details"
+	case panelPlan:
+		return "Plan"
 	case panelOutput:
 		return "Output"
 	case panelQueue:
@@ -704,7 +809,19 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 	switch m.focusedPanel {
 	case panelActivity:
 		var cmd tea.Cmd
+		prev := m.activityList.Index()
 		m.activityList, cmd = m.activityList.Update(msg)
+		if m.activityList.Index() != prev {
+			m.refreshActivityDetail()
+		}
+		return m, cmd
+	case panelActivityDetail:
+		var cmd tea.Cmd
+		m.activityDetail, cmd = m.activityDetail.Update(msg)
+		return m, cmd
+	case panelPlan:
+		var cmd tea.Cmd
+		m.planViewport, cmd = m.planViewport.Update(msg)
 		return m, cmd
 	case panelOutput:
 		var cmd tea.Cmd
@@ -737,7 +854,9 @@ type layoutConfig struct {
 	mainH     int
 	activityH int
 	outputH   int
+	detailH   int
 	taskH     int
+	planH     int
 	queueH    int
 	statsH    int
 	outboxH   int
@@ -765,16 +884,52 @@ func (m *monitorModel) layout() layoutConfig {
 	}
 	activityH := mainH / 2
 	outputH := mainH - activityH
-	taskH := mainH / 2
-	queueH := (mainH - taskH) / 2
-	statsH := mainH - taskH - queueH
+	detailH := imax(6, mainH/2)
+	remaining := mainH - detailH
+	minPanelH := 3
+	allocate := func() (int, int, int, int) {
+		base := remaining / 4
+		if base < minPanelH {
+			base = minPanelH
+		}
+		taskH := base
+		planH := base
+		queueH := base
+		statsH := remaining - taskH - planH - queueH
+		if statsH < minPanelH {
+			statsH = minPanelH
+			need := taskH + planH + queueH + statsH - remaining
+			for need > 0 {
+				if taskH > minPanelH {
+					taskH--
+					need--
+					continue
+				}
+				if planH > minPanelH {
+					planH--
+					need--
+					continue
+				}
+				if queueH > minPanelH {
+					queueH--
+					need--
+					continue
+				}
+				break
+			}
+		}
+		return taskH, planH, queueH, statsH
+	}
+	taskH, planH, queueH, statsH := allocate()
 	return layoutConfig{
 		leftW:     leftW,
 		rightW:    rightW,
 		mainH:     mainH,
 		activityH: activityH,
 		outputH:   outputH,
+		detailH:   detailH,
 		taskH:     taskH,
+		planH:     planH,
 		queueH:    queueH,
 		statsH:    statsH,
 		outboxH:   outboxH,
@@ -795,6 +950,14 @@ func (m *monitorModel) refreshViewports() {
 	m.agentOutputVP.SetContent(strings.Join(m.agentOutput, "\n"))
 	m.agentOutputVP.GotoBottom()
 
+	m.activityDetail.Width = imax(10, layout.rightW-4)
+	m.activityDetail.Height = imax(2, layout.detailH-2)
+	m.refreshActivityDetail()
+
+	m.planViewport.Width = imax(10, layout.rightW-4)
+	m.planViewport.Height = imax(2, layout.planH-2)
+	m.refreshPlanView()
+
 	m.taskQueueVP.Width = imax(10, layout.rightW-4)
 	m.taskQueueVP.Height = imax(2, layout.queueH-2)
 	m.taskQueueVP.SetContent(renderTaskQueue(m.taskQueue))
@@ -808,6 +971,34 @@ func (m *monitorModel) refreshViewports() {
 	m.memoryVP.SetContent(renderMemResults(m.memResults))
 
 	m.input.SetWidth(imax(10, m.width-6))
+}
+
+func (m *monitorModel) loadPlanFiles() {
+	runDir := fsutil.GetRunDir(m.cfg.DataDir, m.runID)
+	planDir := filepath.Join(runDir, "plan")
+
+	load := func(name string) (string, string) {
+		b, err := os.ReadFile(filepath.Join(planDir, name))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return "", ""
+			}
+			return "", err.Error()
+		}
+		return string(b), ""
+	}
+
+	m.planDetails, m.planDetailsErr = load("HEAD.md")
+	m.planMarkdown, m.planLoadErr = load("CHECKLIST.md")
+	m.refreshPlanView()
+}
+
+func isPlanEvent(kind string, path string) bool {
+	if kind != "fs.write" && kind != "fs.append" && kind != "fs.edit" && kind != "fs.patch" {
+		return false
+	}
+	p := strings.TrimSpace(path)
+	return strings.EqualFold(p, "/plan/HEAD.md") || strings.EqualFold(p, "/plan/CHECKLIST.md")
 }
 
 func formatEventLine(e types.Event) string {
@@ -879,7 +1070,15 @@ func renderStats(s monitorStats) string {
 	if !s.started.IsZero() {
 		uptime = time.Since(s.started).Round(time.Second).String()
 	}
-	return fmt.Sprintf("Tasks done: %d\nUptime: %s", s.tasksDone, fallback(uptime, "unknown"))
+	costLine := ""
+	if strings.TrimSpace(s.lastTurnCostUSD) != "" {
+		costLine = fmt.Sprintf("\nLast cost: $%s", s.lastTurnCostUSD)
+	}
+	totalLine := ""
+	if s.totalCostUSD > 0 {
+		totalLine = fmt.Sprintf("\nTotal cost: $%.4f", s.totalCostUSD)
+	}
+	return fmt.Sprintf("Tasks done: %d\nUptime: %s%s%s", s.tasksDone, fallback(uptime, "unknown"), costLine, totalLine)
 }
 
 func renderMemResults(results []string) string {

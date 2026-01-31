@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/llm"
@@ -66,6 +68,13 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err != nil {
 		return err
 	}
+
+	roleDir := fsutil.GetRolesDir(cfg.DataDir)
+	_ = os.MkdirAll(roleDir, 0755)
+	roleMgr := role.NewManager([]string{roleDir})
+	roleMgr.WritableRoot = roleDir
+	_ = roleMgr.Scan()
+	role.SetDefaultManager(roleMgr)
 
 	var resultsStore pkgstore.ResultsStore
 	var memStore pkgstore.MemoryStore
@@ -155,6 +164,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	agentCfg.SystemPrompt = baseSystemPrompt
 	agentCfg.Context = rt.Constructor
 	agentCfg.ToolManifests = rt.ToolManifests
+	agentCfg.Hooks = agent.Hooks{
+		OnLLMUsage: newCostUsageHook(cfg, run, resolved.Model, resolved.PriceInPerMTokensUSD, resolved.PriceOutPerMTokensUSD, mustEmit),
+	}
 
 	a, err := agent.NewAgent(llmClient, rt.Executor, agentCfg)
 	if err != nil {
@@ -223,6 +235,98 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": resolved.Role},
 	})
 	return err
+}
+
+func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, emit func(context.Context, events.Event)) func(step int, usage llm.LLMUsage) {
+	pricingKnown := false
+	if priceIn == 0 && priceOut == 0 {
+		if in, out, ok := cost.DefaultPricing().Lookup(modelID); ok {
+			priceIn = in
+			priceOut = out
+		}
+	}
+	if priceIn != 0 || priceOut != 0 {
+		pricingKnown = true
+	}
+
+	var mu sync.Mutex
+	var session types.Session
+	sessionLoaded := false
+
+	emitUsage := func(input, output, total int) {
+		if emit == nil {
+			return
+		}
+		emit(context.Background(), events.Event{
+			Type:    "llm.usage.total",
+			Message: "LLM usage totals",
+			Data: map[string]string{
+				"input":  fmt.Sprintf("%d", input),
+				"output": fmt.Sprintf("%d", output),
+				"total":  fmt.Sprintf("%d", total),
+			},
+		})
+	}
+	emitCost := func(costUSD float64, known bool) {
+		if emit == nil {
+			return
+		}
+		payload := map[string]string{
+			"known": fmt.Sprintf("%t", known),
+		}
+		if known {
+			payload["costUsd"] = fmt.Sprintf("%.4f", costUSD)
+		}
+		emit(context.Background(), events.Event{
+			Type:    "llm.cost.total",
+			Message: "LLM cost totals",
+			Data:    payload,
+		})
+	}
+
+	return func(step int, usage llm.LLMUsage) {
+		_ = step
+		input := usage.InputTokens
+		output := usage.OutputTokens
+		total := usage.TotalTokens
+		if total == 0 {
+			total = input + output
+		}
+
+		emitUsage(input, output, total)
+
+		costUSD := 0.0
+		if pricingKnown {
+			costUSD = (float64(input)/1_000_000.0)*priceIn + (float64(output)/1_000_000.0)*priceOut
+		}
+		emitCost(costUSD, pricingKnown)
+
+		mu.Lock()
+		defer mu.Unlock()
+		run.TotalTokensIn += input
+		run.TotalTokensOut += output
+		run.TotalTokens += total
+		if pricingKnown {
+			run.TotalCostUSD += costUSD
+		}
+		_ = store.SaveRun(cfg, run)
+
+		if !sessionLoaded {
+			if s, err := store.LoadSession(cfg, run.SessionID); err == nil {
+				session = s
+				sessionLoaded = true
+			}
+		}
+		if sessionLoaded {
+			session.TotalTokensIn += input
+			session.TotalTokensOut += output
+			session.TotalTokens += total
+			if pricingKnown {
+				session.TotalCostUSD += costUSD
+			}
+			_ = store.SaveSession(cfg, session)
+		}
+	}
 }
 
 // daemonEventAppender adapts store.AppendEvent to events.StoreSink (daemon context).

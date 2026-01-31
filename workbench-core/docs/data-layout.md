@@ -44,6 +44,12 @@ Understanding this layout makes it easier to inspect sessions/runs manually (e.g
 and inspecting `<dataDir>/runs/<id>/log/events.jsonl`). All paths are derived via helpers in
 `internal/fsutil` and validated through `internal/store`.
 
+### VFS paths vs. shell cwd
+
+- File operations (`fs.read`, `fs.write`, etc.) use VFS paths like `/project/src/main.go`.
+- Shell commands run in the host workdir root by default; `cwd` should be **relative** (e.g., `src/`), not a `/project/...` path.
+- The sandbox blocks directory traversal outside the workdir for safety.
+
 ## Typical inspection workflow
 
 1. `./workbench list sessions` to find a session ID.

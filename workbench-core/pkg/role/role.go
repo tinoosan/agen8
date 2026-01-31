@@ -10,6 +10,8 @@ import (
 type Role struct {
 	Name        string
 	Description string
+	// Content is optional markdown or plain text instructions loaded from role files.
+	Content string
 
 	// StandingGoals are background objectives the agent should work on when idle.
 	StandingGoals []string
@@ -36,6 +38,7 @@ type Trigger struct {
 func (r Role) Normalize() Role {
 	r.Name = strings.TrimSpace(r.Name)
 	r.Description = strings.TrimSpace(r.Description)
+	r.Content = strings.TrimSpace(r.Content)
 	outGoals := make([]string, 0, len(r.StandingGoals))
 	for _, g := range r.StandingGoals {
 		if s := strings.TrimSpace(g); s != "" {
