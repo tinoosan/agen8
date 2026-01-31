@@ -19,7 +19,7 @@ type Config struct {
 
 // Default returns the default host configuration.
 func Default() Config {
-	return Config{DataDir: "data"}
+	return Config{DataDir: "db"}
 }
 
 func (c Config) Validate() error {

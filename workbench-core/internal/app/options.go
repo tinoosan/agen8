@@ -35,13 +35,13 @@ type RunChatOption func(*RunChatOptions)
 
 func resolveRunChatOptions(opts ...RunChatOption) RunChatOptions {
 	o := RunChatOptions{
-		Model:         strings.TrimSpace(os.Getenv("OPENROUTER_MODEL")),
-		Role:          strings.TrimSpace(os.Getenv("WORKBENCH_ROLE")),
-		WorkDir:       strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR")),
-		WebhookAddr:   strings.TrimSpace(os.Getenv("WORKBENCH_WEBHOOK_ADDR")),
+		Model:            strings.TrimSpace(os.Getenv("OPENROUTER_MODEL")),
+		Role:             strings.TrimSpace(os.Getenv("WORKBENCH_ROLE")),
+		WorkDir:          strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR")),
+		WebhookAddr:      strings.TrimSpace(os.Getenv("WORKBENCH_WEBHOOK_ADDR")),
 		ResultWebhookURL: strings.TrimSpace(os.Getenv("WORKBENCH_RESULT_WEBHOOK_URL")),
-		HealthAddr:    strings.TrimSpace(os.Getenv("WORKBENCH_HEALTH_ADDR")),
-		ApprovalsMode: "disabled",
+		HealthAddr:       strings.TrimSpace(os.Getenv("WORKBENCH_HEALTH_ADDR")),
+		ApprovalsMode:    "disabled",
 	}
 	for _, opt := range opts {
 		if opt != nil {

@@ -91,8 +91,6 @@ var sqliteMigrations = []string{
 		indexed_at TEXT
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at);`,
-	`CREATE INDEX IF NOT EXISTS idx_memories_source_file ON memories(source_file);`,
-	`CREATE INDEX IF NOT EXISTS idx_memories_indexed_at ON memories(indexed_at);`,
 	`CREATE TABLE IF NOT EXISTS memory_embeddings (
 		memory_id TEXT PRIMARY KEY,
 		dim INTEGER NOT NULL,
