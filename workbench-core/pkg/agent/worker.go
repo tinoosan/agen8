@@ -101,7 +101,7 @@ func (w *Worker) listInbox(ctx context.Context) ([]string, error) {
 	paths := make([]string, 0, len(resp.Entries))
 	for _, p := range resp.Entries {
 		if strings.HasSuffix(strings.ToLower(p), ".json") {
-			paths = append(paths, p)
+			paths = append(paths, path.Join(w.cfg.InboxPath, p))
 		}
 	}
 	sort.Strings(paths)
