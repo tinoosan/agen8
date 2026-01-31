@@ -91,7 +91,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	// Vector memory store (SQLite-backed) for semantic recall.
 	// Best-effort: daemon can still run without this, but loses long-term recall.
 	var memoryProvider agent.MemoryProvider
+	var vectorStore *store.VectorMemoryStore
 	if vm, err := store.NewVectorMemoryStore(cfg); err == nil {
+		vectorStore = vm
 		memoryProvider = &vectorMemoryAdapter{store: vm}
 	} else {
 		mustEmit(context.Background(), events.Event{
@@ -118,6 +120,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		MemoryStore:           memStore,
 		ProfileStore:          profileStore,
 		TraceStore:            traceStore,
+		MemoryReindexer:       vectorStore,
 		ConstructorStore:      constructorStore,
 		Emit:                  mustEmit,
 		IncludeHistoryOps:     derefBool(resolved.IncludeHistoryOps, true),
@@ -196,6 +199,21 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 
 	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
+
+	if vectorStore != nil {
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-ticker.C:
+					_ = vectorStore.IndexAllDailyFiles(runCtx)
+				}
+			}
+		}()
+	}
 
 	webhookAddr := strings.TrimSpace(resolved.WebhookAddr)
 	if webhookAddr != "" {

@@ -39,17 +39,8 @@ type StagingResource struct {
 	Store StagingStore
 }
 
-// MemoryResource is kept for compatibility; it is an alias of StagingResource.
-type MemoryResource = StagingResource
-
 // ProfileResource is kept for compatibility; it is an alias of StagingResource.
 type ProfileResource = StagingResource
-
-type memoryStagingStore struct{ store.MemoryVFSStore }
-
-func (s memoryStagingStore) GetMain(ctx context.Context) (string, error) {
-	return s.MemoryVFSStore.GetMemory(ctx)
-}
 
 type profileStagingStore struct{ store.ProfileVFSStore }
 
@@ -75,13 +66,6 @@ func NewStagingResource(mount, mainFile string, s StagingStore) (*StagingResourc
 		MainFile: mainFile,
 		Store:    s,
 	}, nil
-}
-
-func NewMemoryResource(s store.MemoryVFSStore) (*MemoryResource, error) {
-	if s == nil {
-		return nil, fmt.Errorf("memory store is required")
-	}
-	return NewStagingResource(vfs.MountMemory, "memory.md", memoryStagingStore{s})
 }
 
 func NewProfileResource(s store.ProfileVFSStore) (*ProfileResource, error) {

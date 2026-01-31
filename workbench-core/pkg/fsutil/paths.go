@@ -1,6 +1,9 @@
 package fsutil
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"time"
+)
 
 func GetSQLitePath(dataDir string) string {
 	return filepath.Join(dataDir, "workbench.db")
@@ -102,10 +105,10 @@ func GetMemoryDir(dataDir string) string {
 	return filepath.Join(dataDir, "memory")
 }
 
-func GetMemoryPath(dataDir string) string {
-	return filepath.Join(GetMemoryDir(dataDir), "memory.md")
+func GetMemoryMasterPath(dataDir string) string {
+	return filepath.Join(GetMemoryDir(dataDir), "MEMORY.MD")
 }
 
-func GetMemoryUpdatePath(dataDir string) string {
-	return filepath.Join(GetMemoryDir(dataDir), "update.md")
+func GetDailyMemoryPath(dataDir string, date time.Time) string {
+	return filepath.Join(GetMemoryDir(dataDir), date.Format("2006-01-02")+"-memory.md")
 }

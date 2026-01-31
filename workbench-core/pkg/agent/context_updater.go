@@ -14,9 +14,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/tinoosan/workbench-core/pkg/store"
+	"github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
-	"github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // ContextUpdater keeps the model's bounded context synchronized with persistent
@@ -66,7 +66,6 @@ type ContextUpdater struct {
 	// MaxTraceEvents caps the number of recent trace events held in memory for summarization.
 	// If zero, a default is used.
 	MaxTraceEvents int
-
 }
 
 type LastToolRun struct {
@@ -210,7 +209,8 @@ func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt strin
 	manifest.Profile.BudgetBytes = policy.Budgets.ProfileBytes
 
 	// Memory excerpt (tail-biased).
-	memPath := "/memory/memory.md"
+	todayName := time.Now().Format("2006-01-02") + "-memory.md"
+	memPath := "/memory/" + todayName
 	memBytes, memErr := u.FS.Read(memPath)
 	if memErr != nil {
 		memBytes = []byte{}
@@ -275,7 +275,7 @@ func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt strin
 	}
 	if len(memIncl) > 0 {
 		system += buildXMLBlock("run_memory", []xmlAttribute{
-			{key: "path", value: "/memory/memory.md"},
+			{key: "path", value: memPath},
 			{key: "bytes_included", value: strconv.Itoa(len(memIncl))},
 			{key: "bytes_total", value: strconv.Itoa(len(memBytes))},
 		}, string(memIncl))

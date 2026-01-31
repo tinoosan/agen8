@@ -1,14 +1,14 @@
 package types
 
 import (
-    "encoding/json"
-    "fmt"
-    "path/filepath"
-    "strings"
-    "time"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
 
-    "github.com/tinoosan/workbench-core/pkg/tools"
-    "github.com/tinoosan/workbench-core/pkg/validate"
+	"github.com/tinoosan/workbench-core/pkg/tools"
+	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
 const (
@@ -93,23 +93,23 @@ func (r HostOpRequest) Validate() error {
 		}
 		return nil
 
-    case HostOpFSWrite, HostOpFSAppend:
-        if err := validate.NonEmpty("path", r.Path); err != nil {
-            return err
-        }
-        if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
-            return fmt.Errorf("path must be an absolute VFS path (start with /)")
-        }
-        if err := validate.NonEmpty("text", r.Text); err != nil {
-            return err
-        }
+	case HostOpFSWrite, HostOpFSAppend:
+		if err := validate.NonEmpty("path", r.Path); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+			return fmt.Errorf("path must be an absolute VFS path (start with /)")
+		}
+		if err := validate.NonEmpty("text", r.Text); err != nil {
+			return err
+		}
 
-        if strings.HasPrefix(strings.TrimSpace(r.Path), "/memory/") {
-            if err := validateMemoryWritePath(r.Path); err != nil {
-                return err
-            }
-        }
-        return nil
+		if strings.HasPrefix(strings.TrimSpace(r.Path), "/memory/") {
+			if err := validateMemoryWritePath(r.Path); err != nil {
+				return err
+			}
+		}
+		return nil
 
 	case HostOpFSEdit:
 		if err := validate.NonEmpty("path", r.Path); err != nil {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/resources"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
@@ -29,8 +30,9 @@ func TestContextConstructor_IncludesProfileAndMemory(t *testing.T) {
 	fs.Mount(vfs.MountMemory, memRes)
 	fs.Mount(vfs.MountProfile, profileRes)
 
-	if err := os.WriteFile(filepath.Join(memDir, "memory.md"), []byte("remember this"), 0644); err != nil {
-		t.Fatalf("write memory.md: %v", err)
+	today := time.Now().Format("2006-01-02") + "-memory.md"
+	if err := os.WriteFile(filepath.Join(memDir, today), []byte("remember this"), 0644); err != nil {
+		t.Fatalf("write daily memory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(profileDir, "profile.md"), []byte("profile info"), 0644); err != nil {
 		t.Fatalf("write profile.md: %v", err)

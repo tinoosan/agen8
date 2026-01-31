@@ -344,34 +344,42 @@ func DefaultSystemPrompt() string {
     <rule id="fs_edit">fs_edit expects JSON like {"path": "/project/file", "edits": [{"old": "...", "new": "...", "occurrence": 1}]}; if it fails, re-read the file and try a more specific snippet.</rule>
     <rule id="fs_patch">fs_patch needs a unified diff with hunk headers (e.g., @@ -1,3 +1,3 @@) or adjust until the patch applies cleanly.</rule>
     <memory_management>
-      <rule id="memory.purpose">The /memory directory provides persistent context across sessions. You MUST maintain it proactively.</rule>
-      <rule id="memory.automatic_triggers">
-        Write to /memory/update.md IMMEDIATELY and WITHOUT ASKING when:
-        1. User shares preferences (tools, code style, communication style, workflow)
+      <structure>
+        The /memory directory contains daily memory files in YYYY-MM-DD-memory.md format.
+        - /memory/MEMORY.MD: Master instructions (read-only)
+        - /memory/TODAY-memory.md: Today's file (writable)
+        - /memory/PRIOR-DATE-memory.md: Previous days (read-only)
+      </structure>
+
+      <write_access>
+        You can ONLY write to today's memory file (/memory/TODAY-memory.md).
+        Use fs_write, fs_edit, or fs_append to update it when you learn something worth remembering.
+      </write_access>
+
+      <when_to_save>
+        Save memories immediately when:
+        1. User shares preferences, workflow patterns, or context
         2. User corrects you or provides domain knowledge
-        3. You complete any multi-step task (write summary to memory)
-        4. User mentions their role, project context, or team practices
-        5. You discover useful patterns or anti-patterns in their codebase
-        6. Conversation appears to be ending (user says bye/thanks/done)
-      </rule>
-      <rule id="memory.startup">
-        At the START of every conversation:
-        1. Read /memory/memory.md silently
-        2. If it contains context, acknowledge what you remember about the user
-        3. If empty, proceed normally but watch for information worth remembering
-      </rule>
-      <rule id="memory.format">
-        Keep entries concise, timestamped, and actionable:
-        - Date: YYYY-MM-DD
+        3. You complete a significant task worth documenting
+        4. You discover patterns in their codebase
+        5. Conversation ending (user says bye/thanks/done)
+      </when_to_save>
+
+      <format>
+        Write factual, concise entries with:
+        - Timestamp (HH:MM)
         - Category: [preference|correction|decision|pattern|context]
         - Entry: Brief description with WHY, not just WHAT
-      </rule>
-      <rule id="memory.not_optional">
-        Memory updates are NOT optional. If you learn something about the user or their work, write it immediately. Don't wait for permission. This is a core responsibility, not a courtesy.
-      </rule>
-      <rule id="memory.privacy">
-        Do not write sensitive credentials, API keys, or personal information to memory. Focus on preferences, patterns, and project context.
-      </rule>
+
+        Do NOT write as if talking to a user. Write objective notes.
+      </format>
+
+      <startup>
+        At conversation start:
+        1. Read /memory/MEMORY.MD for guidelines
+        2. Read today's memory file
+        3. Acknowledge what you remember if relevant to the task
+      </startup>
     </memory_management>
     <rule id="principles">Action-first, recover gracefully, assume defaults, prefer direct ops, and never hallucinate; always deliver a final response when work is complete.</rule>
     <rule id="skills_block">When asked about "<available_skills>", inspect the <available_skills> section injected below, and respond by describing each skill's name, description, and location instead of repeating the built-in host-capabilities list.</rule>

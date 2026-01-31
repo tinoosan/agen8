@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/skills"
@@ -66,7 +67,8 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 		}
 	}
 	if c.MaxMemoryBytes != 0 {
-		if memory := c.readCap("/memory/memory.md", c.MaxMemoryBytes); memory != "" {
+		todayPath := "/memory/" + time.Now().Format("2006-01-02") + "-memory.md"
+		if memory := c.readCap(todayPath, c.MaxMemoryBytes); memory != "" {
 			sections = append(sections, "## Memory\n\n"+memory)
 		}
 	}

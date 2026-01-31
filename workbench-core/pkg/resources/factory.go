@@ -63,11 +63,12 @@ func (f *Factory) Results() (*ResultsResource, error) {
 	return NewResultsResource(f.ResultsStore)
 }
 
-func (f *Factory) Memory() (*MemoryResource, error) {
-	if f.MemoryStore == nil {
-		return nil, fmt.Errorf("memory store is required")
+func (f *Factory) Memory() (*DailyMemoryResource, error) {
+	if strings.TrimSpace(f.DataDir) == "" {
+		return nil, fmt.Errorf("DataDir is required for memory resource")
 	}
-	return NewMemoryResource(f.MemoryStore)
+	memoryDir := fsutil.GetMemoryDir(f.DataDir)
+	return NewDailyMemoryResource(memoryDir, nil, nil)
 }
 
 func (f *Factory) Profile() (*ProfileResource, error) {

@@ -84,10 +84,15 @@ var sqliteMigrations = []string{
 		memory_id TEXT PRIMARY KEY,
 		title TEXT NOT NULL,
 		filename TEXT NOT NULL,
+		source_file TEXT,
+		chunk_index INTEGER DEFAULT 0,
 		content TEXT NOT NULL,
-		created_at TEXT NOT NULL
+		created_at TEXT NOT NULL,
+		indexed_at TEXT
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at);`,
+	`CREATE INDEX IF NOT EXISTS idx_memories_source_file ON memories(source_file);`,
+	`CREATE INDEX IF NOT EXISTS idx_memories_indexed_at ON memories(indexed_at);`,
 	`CREATE TABLE IF NOT EXISTS memory_embeddings (
 		memory_id TEXT PRIMARY KEY,
 		dim INTEGER NOT NULL,
@@ -162,7 +167,73 @@ func migrateSQLite(db *sql.DB) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("sqlite: commit migration: %w", err)
 	}
+	if err := ensureMemorySchema(db); err != nil {
+		return err
+	}
 	return nil
+}
+
+func ensureMemorySchema(db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("sqlite: db is nil")
+	}
+	cols, err := sqliteTableColumns(db, "memories")
+	if err != nil {
+		return fmt.Errorf("sqlite: memories schema: %w", err)
+	}
+	if !cols["source_file"] {
+		if _, err := db.Exec(`ALTER TABLE memories ADD COLUMN source_file TEXT;`); err != nil {
+			return fmt.Errorf("sqlite: add memories.source_file: %w", err)
+		}
+	}
+	if !cols["chunk_index"] {
+		if _, err := db.Exec(`ALTER TABLE memories ADD COLUMN chunk_index INTEGER DEFAULT 0;`); err != nil {
+			return fmt.Errorf("sqlite: add memories.chunk_index: %w", err)
+		}
+	}
+	if !cols["indexed_at"] {
+		if _, err := db.Exec(`ALTER TABLE memories ADD COLUMN indexed_at TEXT;`); err != nil {
+			return fmt.Errorf("sqlite: add memories.indexed_at: %w", err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE memories SET source_file = filename WHERE source_file IS NULL;`); err != nil {
+		return fmt.Errorf("sqlite: backfill memories.source_file: %w", err)
+	}
+	if _, err := db.Exec(`UPDATE memories SET indexed_at = created_at WHERE indexed_at IS NULL;`); err != nil {
+		return fmt.Errorf("sqlite: backfill memories.indexed_at: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_memories_source_file ON memories(source_file);`); err != nil {
+		return fmt.Errorf("sqlite: index memories.source_file: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_memories_indexed_at ON memories(indexed_at);`); err != nil {
+		return fmt.Errorf("sqlite: index memories.indexed_at: %w", err)
+	}
+	return nil
+}
+
+func sqliteTableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `);`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func timePtrToString(t *time.Time) string {

@@ -30,7 +30,7 @@ type Runtime struct {
 	Constructor     *agent.ContextConstructor
 	Updater         *agent.ContextUpdater
 	WorkdirBase     string
-	MemStore        store.MemoryCommitter
+	MemStore        store.MemoryStore
 	ProfileStore    store.ProfileCommitter
 }
 
@@ -47,6 +47,7 @@ type BuildConfig struct {
 	MemoryStore           store.MemoryStore
 	ProfileStore          store.ProfileStore
 	TraceStore            store.TraceStore
+	MemoryReindexer       resources.MemoryReindexer
 	ConstructorStore      store.ConstructorStateStore
 	Emit                  func(ctx context.Context, ev events.Event)
 	IncludeHistoryOps     bool
@@ -199,7 +200,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if memStore == nil {
 		return nil, fmt.Errorf("memory store is required")
 	}
-	memRes, err := resources.NewMemoryResource(memStore)
+	memRes, err := resources.NewDailyMemoryResource(fsutil.GetMemoryDir(cfg.Cfg.DataDir), cfg.MemoryReindexer, cfg.Emit)
 	if err != nil {
 		return nil, fmt.Errorf("create memory resource: %w", err)
 	}

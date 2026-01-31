@@ -21,11 +21,13 @@ import (
 )
 
 type MemorySearchResult struct {
-	MemoryID string
-	Title    string
-	Filename string
-	Content  string
-	Score    float64
+	MemoryID   string
+	Title      string
+	Filename   string
+	SourceFile string
+	ChunkIndex int
+	Content    string
+	Score      float64
 }
 
 type VectorMemoryStore struct {
@@ -35,6 +37,7 @@ type VectorMemoryStore struct {
 
 	embedModel string
 	emb        openai.EmbeddingService
+	embedFn    func(ctx context.Context, text string) ([]float32, error)
 }
 
 func NewVectorMemoryStore(cfg config.Config) (*VectorMemoryStore, error) {
@@ -105,8 +108,9 @@ func (s *VectorMemoryStore) Save(ctx context.Context, title, content string) (Me
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO memories (memory_id, title, filename, content, created_at) VALUES (?, ?, ?, ?, ?)`,
-		memID, title, filename, content, created,
+		`INSERT INTO memories (memory_id, title, filename, source_file, chunk_index, content, created_at, indexed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		memID, title, filename, filename, 0, content, created, created,
 	); err != nil {
 		return MemorySearchResult{}, err
 	}
@@ -129,6 +133,163 @@ func (s *VectorMemoryStore) Save(ctx context.Context, title, content string) (Me
 	}, nil
 }
 
+func (s *VectorMemoryStore) DeleteEmbeddingsForFile(ctx context.Context, sourceFile string) error {
+	sourceFile = strings.TrimSpace(sourceFile)
+	if sourceFile == "" {
+		return fmt.Errorf("source file is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM memory_embeddings WHERE memory_id IN (SELECT memory_id FROM memories WHERE source_file = ?)`,
+		sourceFile,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM memories WHERE source_file = ?`, sourceFile); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *VectorMemoryStore) ReindexDailyFile(ctx context.Context, filename string, content []byte) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("vector memory store not initialized")
+	}
+	sourceFile := strings.TrimSpace(filepath.Base(filename))
+	if sourceFile == "" {
+		return fmt.Errorf("source file is required")
+	}
+	if err := s.DeleteEmbeddingsForFile(ctx, sourceFile); err != nil {
+		return fmt.Errorf("delete old embeddings: %w", err)
+	}
+	trimmed := strings.TrimSpace(string(content))
+	if trimmed == "" {
+		return nil
+	}
+
+	chunker := &ParagraphChunker{MaxChunkSize: 1000}
+	chunks := chunker.Chunk(trimmed)
+	if len(chunks) == 0 {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	indexedAt := now.Format(time.RFC3339Nano)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for i, chunk := range chunks {
+		if strings.TrimSpace(chunk.Content) == "" {
+			continue
+		}
+		emb, err := s.embed(ctx, chunk.Content)
+		if err != nil {
+			return fmt.Errorf("embed chunk %d: %w", i, err)
+		}
+		blob, err := float32SliceToBlob(emb)
+		if err != nil {
+			return err
+		}
+		memID := fmt.Sprintf("daily-%s-%s-%d", sourceFile, uuid.NewString(), i)
+		title := sourceFile
+		filename := sourceFile
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO memories (memory_id, title, filename, source_file, chunk_index, content, created_at, indexed_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			memID, title, filename, sourceFile, i, chunk.Content, indexedAt, indexedAt,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO memory_embeddings (memory_id, dim, embedding) VALUES (?, ?, ?)`,
+			memID, len(emb), blob,
+		); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *VectorMemoryStore) IndexAllDailyFiles(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("vector memory store not initialized")
+	}
+	entries, err := os.ReadDir(s.memoryDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !isDailyMemoryFileName(name) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		needs, err := s.needsReindex(ctx, name, info.ModTime())
+		if err != nil || !needs {
+			continue
+		}
+		path := filepath.Join(s.memoryDir, name)
+		b, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		_ = s.ReindexDailyFile(ctx, name, b)
+	}
+	return nil
+}
+
+func (s *VectorMemoryStore) needsReindex(ctx context.Context, sourceFile string, modTime time.Time) (bool, error) {
+	var indexedAt string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT indexed_at FROM memories WHERE source_file = ? LIMIT 1`,
+		sourceFile,
+	).Scan(&indexedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return true, nil
+		}
+		return false, err
+	}
+	if strings.TrimSpace(indexedAt) == "" {
+		return true, nil
+	}
+	t, err := time.Parse(time.RFC3339Nano, indexedAt)
+	if err != nil {
+		return true, nil
+	}
+	return modTime.After(t), nil
+}
+
+func isDailyMemoryFileName(name string) bool {
+	if !strings.HasSuffix(name, "-memory.md") {
+		return false
+	}
+	datePart := strings.TrimSuffix(name, "-memory.md")
+	_, err := time.Parse("2006-01-02", datePart)
+	return err == nil
+}
+
 func (s *VectorMemoryStore) Search(ctx context.Context, query string, limit int) ([]MemorySearchResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -143,7 +304,7 @@ func (s *VectorMemoryStore) Search(ctx context.Context, query string, limit int)
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.memory_id, m.title, m.filename, m.content, e.dim, e.embedding
+		SELECT m.memory_id, m.title, m.filename, m.source_file, m.chunk_index, m.content, e.dim, e.embedding
 		FROM memories m
 		JOIN memory_embeddings e ON m.memory_id = e.memory_id
 	`)
@@ -158,10 +319,11 @@ func (s *VectorMemoryStore) Search(ctx context.Context, query string, limit int)
 	}
 	all := make([]scored, 0, 64)
 	for rows.Next() {
-		var id, title, filename, content string
+		var id, title, filename, sourceFile, content string
+		var chunkIndex int
 		var dim int
 		var blob []byte
-		if err := rows.Scan(&id, &title, &filename, &content, &dim, &blob); err != nil {
+		if err := rows.Scan(&id, &title, &filename, &sourceFile, &chunkIndex, &content, &dim, &blob); err != nil {
 			return nil, err
 		}
 		emb, err := blobToFloat32Slice(blob, dim)
@@ -170,11 +332,13 @@ func (s *VectorMemoryStore) Search(ctx context.Context, query string, limit int)
 		}
 		score := cosineSimilarity(qemb, emb)
 		all = append(all, scored{MemorySearchResult: MemorySearchResult{
-			MemoryID: id,
-			Title:    title,
-			Filename: filename,
-			Content:  content,
-			Score:    score,
+			MemoryID:   id,
+			Title:      title,
+			Filename:   filename,
+			SourceFile: sourceFile,
+			ChunkIndex: chunkIndex,
+			Content:    content,
+			Score:      score,
 		}})
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })
@@ -185,6 +349,9 @@ func (s *VectorMemoryStore) Search(ctx context.Context, query string, limit int)
 }
 
 func (s *VectorMemoryStore) embed(ctx context.Context, text string) ([]float32, error) {
+	if s != nil && s.embedFn != nil {
+		return s.embedFn(ctx, text)
+	}
 	resp, err := s.emb.New(ctx, openai.EmbeddingNewParams{
 		Model: openai.EmbeddingModel(s.embedModel),
 		Input: openai.EmbeddingNewParamsInputUnion{
