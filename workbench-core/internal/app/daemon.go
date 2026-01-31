@@ -55,10 +55,15 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return fmt.Errorf("create history: %w", err)
 	}
 	historySink := &events.HistorySink{Store: historyRes.Appender}
+	emitter := &events.Emitter{
+		RunID: run.RunId,
+		Sink: events.MultiSink{
+			events.StoreSink{Store: daemonEventAppender{cfg: cfg}},
+			historySink,
+		},
+	}
 	mustEmit := func(ctx context.Context, ev events.Event) {
-		if historySink != nil {
-			_ = historySink.Emit(ctx, "daemon", ev)
-		}
+		_ = emitter.Emit(ctx, ev)
 	}
 
 	artifactIndex := newArtifactIndex()
@@ -199,4 +204,14 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": resolved.Role},
 	})
 	return err
+}
+
+// daemonEventAppender adapts store.AppendEvent to events.StoreSink (daemon context).
+type daemonEventAppender struct {
+	cfg config.Config
+}
+
+func (s daemonEventAppender) AppendEvent(ctx context.Context, runID, eventType, message string, data map[string]string) error {
+	_ = ctx
+	return store.AppendEvent(s.cfg, runID, eventType, message, data)
 }

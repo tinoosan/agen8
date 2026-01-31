@@ -103,6 +103,10 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 
 	in := textinput.New()
 	in.Placeholder = "/task <goal> | /memory search <query> | /role <name> | /model <id> | /quit"
+	in.PlaceholderStyle = kit.StyleDim
+	in.TextStyle = kit.StyleStatusValue
+	in.Prompt = "> "
+	in.PromptStyle = kit.StyleStatusKey
 	in.Focus()
 
 	tctx, cancel := context.WithCancel(ctx)
