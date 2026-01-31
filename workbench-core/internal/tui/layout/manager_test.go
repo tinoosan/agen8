@@ -14,7 +14,7 @@ func TestPanelSpecReservesChrome(t *testing.T) {
 	style := testStyle()
 	mgr := NewManager(style, true)
 
-	grid := mgr.Calculate(120, 50, 5)
+	grid := mgr.Calculate(120, 50, 5, 6, 6)
 	spec := grid.ActivityFeed
 
 	frameW, frameH := style.GetFrameSize()
@@ -34,7 +34,7 @@ func TestPanelSpecReservesChrome(t *testing.T) {
 
 func TestColumnsShareMainHeight(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
-	grid := mgr.Calculate(120, 40, 5)
+	grid := mgr.Calculate(120, 40, 5, 6, 6)
 
 	leftTotal := grid.ActivityFeed.Height + grid.AgentOutput.Height
 	rightTotal := grid.ActivityDetail.Height + grid.CurrentTask.Height + grid.Plan.Height + grid.TaskQueue.Height + grid.Stats.Height
@@ -51,7 +51,7 @@ func TestColumnsShareMainHeight(t *testing.T) {
 
 func TestSmallTerminalKeepsUsableContent(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
-	grid := mgr.Calculate(80, 24, 5)
+	grid := mgr.Calculate(80, 24, 5, 6, 6)
 
 	panels := []PanelSpec{
 		grid.ActivityFeed, grid.AgentOutput,
@@ -65,5 +65,30 @@ func TestSmallTerminalKeepsUsableContent(t *testing.T) {
 		if p.Height < 3 {
 			t.Fatalf("panel %d height too small: %d", i, p.Height)
 		}
+	}
+}
+
+func TestDynamicPanelHeights(t *testing.T) {
+	mgr := NewManager(testStyle(), true)
+
+	// Hidden panels.
+	grid := mgr.Calculate(120, 50, 5, 0, 0)
+	if grid.Outbox.Height != 0 {
+		t.Fatalf("expected hidden outbox, got height %d", grid.Outbox.Height)
+	}
+	if grid.Memory.Height != 0 {
+		t.Fatalf("expected hidden memory, got height %d", grid.Memory.Height)
+	}
+
+	// Visible panels.
+	grid2 := mgr.Calculate(120, 50, 5, 6, 6)
+	if grid2.Outbox.Height != 6 {
+		t.Fatalf("expected outbox height 6, got %d", grid2.Outbox.Height)
+	}
+
+	mainArea1 := grid.ActivityFeed.Height + grid.AgentOutput.Height
+	mainArea2 := grid2.ActivityFeed.Height + grid2.AgentOutput.Height
+	if mainArea1 <= mainArea2 {
+		t.Fatalf("expected main area to expand when panels hidden: got %d vs %d", mainArea1, mainArea2)
 	}
 }

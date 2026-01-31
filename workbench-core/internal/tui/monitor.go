@@ -282,11 +282,18 @@ func (m *monitorModel) View() string {
 	grid := m.layout()
 	headerLine := m.renderHeader()
 	main := m.renderMainBody(grid)
-	outbox := m.renderOutbox(grid.Outbox)
-	memory := m.renderMemory(grid.Memory)
-	composer := m.renderComposer(grid.Composer)
+	sections := []string{headerLine, main}
 
-	return lipgloss.JoinVertical(lipgloss.Left, headerLine, main, outbox, memory, composer)
+	if grid.Outbox.Height > 0 {
+		sections = append(sections, m.renderOutbox(grid.Outbox))
+	}
+	if grid.Memory.Height > 0 {
+		sections = append(sections, m.renderMemory(grid.Memory))
+	}
+
+	sections = append(sections, m.renderComposer(grid.Composer))
+
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
 func (m *monitorModel) listenEvent() tea.Cmd {
@@ -867,7 +874,30 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 func (m *monitorModel) layout() layoutmgr.GridLayout {
 	manager := layoutmgr.NewManager(m.styles.panel, true)
-	return manager.Calculate(m.width, m.height, 3+m.input.Height())
+	outboxRows := len(m.outboxResults)
+	memoryRows := len(m.memResults)
+
+	outboxHeight := m.calculatePanelHeight(outboxRows, outboxRows == 0, m.focusedPanel == panelOutbox)
+	memoryHeight := m.calculatePanelHeight(memoryRows, memoryRows == 0, m.focusedPanel == panelMemory)
+
+	return manager.Calculate(m.width, m.height, 3+m.input.Height(), outboxHeight, memoryHeight)
+}
+
+func (m *monitorModel) calculatePanelHeight(contentRows int, isEmpty bool, isFocused bool) int {
+	const maxPanelHeight = 6
+
+	if isEmpty && !isFocused {
+		return 0
+	}
+
+	desired := contentRows + 2 // border + title
+	if desired > maxPanelHeight {
+		return maxPanelHeight
+	}
+	if desired < 0 {
+		return 0
+	}
+	return desired
 }
 
 func (m *monitorModel) refreshViewports() {

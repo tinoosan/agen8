@@ -60,12 +60,11 @@ func NewManager(style lipgloss.Style, hasTitle bool) *Manager {
 
 // Calculate produces a GridLayout for the given screen size. inputHeight is the
 // total height of the composer bar (help text + textarea) supplied by the
-// caller.
-func (m *Manager) Calculate(width, height, inputHeight int) GridLayout {
+// caller. outboxHeight and memoryHeight allow callers to dynamically size or
+// hide those panels (use 0 to hide).
+func (m *Manager) Calculate(width, height, inputHeight, outboxHeight, memoryHeight int) GridLayout {
 	const (
 		headerHeight   = 1
-		outboxHeight   = 6
-		memoryHeight   = 6
 		minMainHeight  = 8
 		minLeftWidth   = 36
 		minRightWidth  = 32
@@ -81,6 +80,12 @@ func (m *Manager) Calculate(width, height, inputHeight int) GridLayout {
 	}
 	if inputHeight < 0 {
 		inputHeight = 0
+	}
+	if outboxHeight < 0 {
+		outboxHeight = 0
+	}
+	if memoryHeight < 0 {
+		memoryHeight = 0
 	}
 
 	mainH := height - headerHeight - outboxHeight - memoryHeight - inputHeight
