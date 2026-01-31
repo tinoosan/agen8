@@ -55,6 +55,10 @@ type RunChatOptions struct {
 	// Valid values: "enabled", "disabled". Defaults to "enabled".
 	ApprovalsMode string
 
+	// Role selects the agent's autonomous role/persona (daemon mode).
+	// Examples: "General", "StockResearcher", "SoftwareDeveloper".
+	Role string
+
 	// WorkDir is the host working directory to mount at /project.
 	//
 	// If empty, the host uses os.Getwd() at startup.
@@ -118,6 +122,7 @@ func defaultRunChatOptions() RunChatOptions {
 		IncludeHistoryOps:  boolPtr(true),
 		WebSearchEnabled:   false,
 		ApprovalsMode:      "disabled",
+		Role:               "General",
 		// Pricing: empty/0 by default (resolved against builtin table at runtime)
 	}
 }
@@ -165,6 +170,10 @@ func resolveRunChatOptions(opts ...RunChatOption) RunChatOptions {
 		o.ApprovalsMode = "disabled"
 	}
 
+	if strings.TrimSpace(o.Role) == "" {
+		o.Role = "General"
+	}
+
 	// Preserve existing defaults for zero/negative values.
 	if o.MaxSteps <= 0 {
 		o.MaxSteps = 200
@@ -207,6 +216,12 @@ func WithModel(model string) RunChatOption {
 func WithWorkDir(workDir string) RunChatOption {
 	return func(o *RunChatOptions) {
 		o.WorkDir = strings.TrimSpace(workDir)
+	}
+}
+
+func WithRole(roleName string) RunChatOption {
+	return func(o *RunChatOptions) {
+		o.Role = strings.TrimSpace(roleName)
 	}
 }
 

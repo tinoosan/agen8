@@ -109,7 +109,8 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			}
 			approvalMode := strings.TrimSpace(cfg.ApprovalsMode)
 			if approvalMode == "" {
-				approvalMode = "enabled"
+				// Autonomous-first: approvals are disabled by default.
+				approvalMode = "disabled"
 			}
 			if strings.TrimSpace(sess.ApprovalsMode) != approvalMode {
 				sess.ApprovalsMode = approvalMode

@@ -17,6 +17,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/pkg/resources"
+	"github.com/tinoosan/workbench-core/pkg/role"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -79,6 +80,19 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	constructorStore, err := store.NewSQLiteConstructorStore(cfg)
 	if err != nil {
 		return err
+	}
+
+	// Vector memory store (SQLite-backed) for semantic recall.
+	// Best-effort: daemon can still run without this, but loses long-term recall.
+	var memoryProvider agent.MemoryProvider
+	if vm, err := store.NewVectorMemoryStore(cfg); err == nil {
+		memoryProvider = &vectorMemoryAdapter{store: vm}
+	} else {
+		mustEmit(context.Background(), events.Event{
+			Type:    "daemon.warning",
+			Message: "Vector memory disabled",
+			Data:    map[string]string{"error": err.Error()},
+		})
 	}
 
 	rt, err := runtime.Build(runtime.BuildConfig{
@@ -146,15 +160,21 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return err
 	}
 
-	worker, err := agent.NewWorker(agent.WorkerRunnerConfig{
-		Agent:        a,
-		PollInterval: poll,
-		InboxPath:    "/inbox",
-		OutboxPath:   "/outbox",
-		MaxReadBytes: 96 * 1024,
+	runner, err := agent.NewAutonomousRunner(agent.AutonomousRunnerConfig{
+		Agent:             a,
+		Role:              role.Get(resolved.Role),
+		Memory:            memoryProvider,
+		MemorySearchLimit: 3,
+		InboxPath:         "/inbox",
+		OutboxPath:        "/outbox",
+		PollInterval:      poll,
+		ProactiveInterval: 30 * time.Second,
+		InitialGoal:       goal,
+		MaxReadBytes:      96 * 1024,
 		Logf: func(format string, args ...any) {
-			log.Printf("worker: "+format, args...)
+			log.Printf("daemon: "+format, args...)
 		},
+		Emit: mustEmit,
 	})
 	if err != nil {
 		return err
@@ -165,18 +185,18 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 
 	mustEmit(context.Background(), events.Event{
 		Type:    "daemon.start",
-		Message: "Autonomous worker started",
-		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID},
+		Message: "Autonomous agent started",
+		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": resolved.Role},
 	})
-	err = worker.Run(runCtx)
+	err = runner.Run(runCtx)
 	if err != nil && runCtx.Err() != nil {
 		// context cancellation is expected on shutdown
 		err = nil
 	}
 	mustEmit(context.Background(), events.Event{
 		Type:    "daemon.stop",
-		Message: "Autonomous worker stopped",
-		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID},
+		Message: "Autonomous agent stopped",
+		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": resolved.Role},
 	})
 	return err
 }

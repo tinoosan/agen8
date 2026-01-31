@@ -94,14 +94,6 @@ func (m *Model) submitSingle() tea.Cmd {
 		m.openReasoningSummaryPicker()
 		return nil
 	}
-	// Intercept `/approval` with no args to open the approval picker.
-	if strings.EqualFold(txt, "/approval") {
-		if m.runtimeChangeLocked("changing approval mode") {
-			return nil
-		}
-		m.openApprovalPicker()
-		return nil
-	}
 	// Intercept `/model` with no args to open picker instead of submitting
 	if txt == "/model" {
 		if m.runtimeChangeLocked("changing model") {
@@ -151,14 +143,6 @@ func (m *Model) submitMultiline() tea.Cmd {
 			return nil
 		}
 		m.openReasoningSummaryPicker()
-		return nil
-	}
-	// Intercept `/approval` with no args to open the approval picker.
-	if strings.EqualFold(txt, "/approval") {
-		if m.runtimeChangeLocked("changing approval mode") {
-			return nil
-		}
-		m.openApprovalPicker()
 		return nil
 	}
 	// Intercept `/model` with no args to open picker instead of submitting

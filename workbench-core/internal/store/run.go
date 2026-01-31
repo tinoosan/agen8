@@ -173,3 +173,61 @@ func StopRun(cfg config.Config, runId string, status types.RunStatus, errorMsg s
 
 	return run, SaveRun(cfg, run)
 }
+
+// LatestRunningRun returns the most recently created run that is still StatusRunning.
+// If no running run exists, it returns ErrNotFound.
+func LatestRunningRun(cfg config.Config) (types.Run, error) {
+	if err := cfg.Validate(); err != nil {
+		return types.Run{}, err
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return types.Run{}, err
+	}
+	var raw string
+	if err := db.QueryRow(
+		`SELECT run_json FROM runs WHERE status = ? ORDER BY created_at DESC LIMIT 1`,
+		string(types.StatusRunning),
+	).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return types.Run{}, ErrNotFound
+		}
+		return types.Run{}, err
+	}
+	var run types.Run
+	if err := json.Unmarshal([]byte(raw), &run); err != nil {
+		return types.Run{}, err
+	}
+	if run.RunId == "" {
+		return types.Run{}, ErrInvalid
+	}
+	return run, nil
+}
+
+// LatestRun returns the most recently created run (any status).
+func LatestRun(cfg config.Config) (types.Run, error) {
+	if err := cfg.Validate(); err != nil {
+		return types.Run{}, err
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return types.Run{}, err
+	}
+	var raw string
+	if err := db.QueryRow(
+		`SELECT run_json FROM runs ORDER BY created_at DESC LIMIT 1`,
+	).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return types.Run{}, ErrNotFound
+		}
+		return types.Run{}, err
+	}
+	var run types.Run
+	if err := json.Unmarshal([]byte(raw), &run); err != nil {
+		return types.Run{}, err
+	}
+	if run.RunId == "" {
+		return types.Run{}, ErrInvalid
+	}
+	return run, nil
+}

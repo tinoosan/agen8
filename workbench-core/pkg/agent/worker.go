@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -145,7 +144,7 @@ func (w *Worker) processTask(ctx context.Context, taskPath string, task types.Ta
 	if taskID == "" {
 		taskID = strings.TrimSuffix(path.Base(taskPath), path.Ext(taskPath))
 	}
-	perTaskAgent := w.agentForTask(task)
+	a := w.cfg.Agent
 
 	goal := strings.TrimSpace(task.Goal)
 	if goal == "" {
@@ -155,7 +154,7 @@ func (w *Worker) processTask(ctx context.Context, taskPath string, task types.Ta
 			Error:  "task goal is empty",
 		})
 	}
-	final, err := perTaskAgent.Run(ctx, goal)
+	final, err := a.Run(ctx, goal)
 	now := time.Now()
 	result := types.TaskResult{
 		TaskID:      taskID,
@@ -203,156 +202,4 @@ func (w *Worker) writeResult(ctx context.Context, task types.Task, result types.
 		return fmt.Errorf("write result: %s", resp.Error)
 	}
 	return nil
-}
-
-func (w *Worker) agentForTask(task types.Task) Agent {
-	base := w.cfg.Agent
-	if base == nil {
-		return base
-	}
-	skills := extractStringList(task.Metadata, "skills")
-	allowedTools := extractStringList(task.Metadata, "allowedTools")
-	if len(skills) == 0 && len(allowedTools) == 0 {
-		return base
-	}
-	cfg := base.Config()
-	if len(allowedTools) > 0 {
-		cfg.ToolRegistry = filterToolRegistry(base.GetToolRegistry(), allowedTools)
-		cfg.ExtraTools = filterExtraTools(base.GetExtraTools(), allowedTools)
-	}
-	if len(skills) > 0 || len(allowedTools) > 0 {
-		cfg.SystemPrompt = appendWorkerHints(base.GetSystemPrompt(), skills, allowedTools)
-	}
-	cloned, err := base.CloneWithConfig(cfg)
-	if err != nil {
-		if w.cfg.Logf != nil {
-			w.cfg.Logf("worker: clone agent error: %v", err)
-		}
-		return base
-	}
-	return cloned
-}
-
-func appendWorkerHints(base string, skills []string, allowedTools []string) string {
-	base = strings.TrimSpace(base)
-	if len(skills) == 0 && len(allowedTools) == 0 {
-		return base
-	}
-	lines := []string{}
-	if len(skills) > 0 {
-		lines = append(lines, "Preferred skills: "+strings.Join(skills, ", "))
-	}
-	if len(allowedTools) > 0 {
-		lines = append(lines, "Allowed tools: "+strings.Join(allowedTools, ", "))
-	}
-	if len(lines) == 0 {
-		return base
-	}
-	return base + "\n\n<worker>\n" + strings.Join(lines, "\n") + "\n</worker>"
-}
-
-func extractStringList(meta map[string]any, key string) []string {
-	if meta == nil {
-		return nil
-	}
-	raw, ok := meta[key]
-	if !ok || raw == nil {
-		return nil
-	}
-	switch v := raw.(type) {
-	case []string:
-		return normalizeList(v)
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return normalizeList(out)
-	case string:
-		parts := strings.Split(v, ",")
-		return normalizeList(parts)
-	default:
-		return nil
-	}
-}
-
-func normalizeList(in []string) []string {
-	out := make([]string, 0, len(in))
-	seen := map[string]bool{}
-	for _, v := range in {
-		s := strings.TrimSpace(v)
-		if s == "" || seen[s] {
-			continue
-		}
-		seen[s] = true
-		out = append(out, s)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func filterToolRegistry(reg *ToolRegistry, allowed []string) *ToolRegistry {
-	if reg == nil {
-		return reg
-	}
-	allow := buildAllowedSet(allowed)
-	out := NewToolRegistry()
-	for name, tool := range reg.tools {
-		if !allow(name) {
-			continue
-		}
-		_ = out.Register(tool)
-	}
-	for name, route := range reg.routes {
-		if !allow(name) {
-			continue
-		}
-		out.routes[name] = route
-	}
-	return out
-}
-
-func filterExtraTools(tools []llm.Tool, allowed []string) []llm.Tool {
-	if len(tools) == 0 || len(allowed) == 0 {
-		return tools
-	}
-	allow := buildAllowedSet(allowed)
-	out := make([]llm.Tool, 0, len(tools))
-	for _, tool := range tools {
-		name := strings.TrimSpace(tool.Function.Name)
-		if name == "" {
-			continue
-		}
-		if allow(name) {
-			out = append(out, tool)
-		}
-	}
-	return out
-}
-
-func buildAllowedSet(allowed []string) func(name string) bool {
-	normalized := map[string]bool{}
-	for _, raw := range allowed {
-		if raw == "" {
-			continue
-		}
-		val := strings.ToLower(strings.TrimSpace(raw))
-		normalized[val] = true
-		normalized[strings.ReplaceAll(val, ".", "_")] = true
-	}
-	return func(name string) bool {
-		if len(normalized) == 0 {
-			return true
-		}
-		lower := strings.ToLower(strings.TrimSpace(name))
-		if normalized[lower] {
-			return true
-		}
-		if normalized[strings.ReplaceAll(lower, ".", "_")] {
-			return true
-		}
-		return false
-	}
 }

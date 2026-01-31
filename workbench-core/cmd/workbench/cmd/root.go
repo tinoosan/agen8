@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/tinoosan/workbench-core/internal/app"
@@ -15,6 +16,7 @@ var (
 	workDir        string
 	maxContextB    int
 	modelID        string
+	roleName       string
 	enableMouse    bool
 	enableActivity bool
 
@@ -23,17 +25,20 @@ var (
 	maxProfileBytes    int
 	recentHistoryPairs int
 	includeHistoryOps  bool
-	approvalsMode      string
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "workbench",
-	Short: "Workbench starts an interactive agent session",
+	Short: "Workbench runs an always-on autonomous agent",
 	Long: strings.TrimSpace(`
 Workbench is a local, agentic runtime built around a virtual filesystem (VFS).
 
-Running "workbench" starts a new session and a new run, then opens an interactive
-TUI. Each message you submit becomes one agent turn that can:
+Running "workbench" starts a new session and run, then starts an always-on daemon
+that continuously processes tasks from /inbox and writes results to /outbox.
+
+Use "workbench chat" to open the interactive TUI viewer (monitoring/configuration).
+
+Each executed task can:
   - discover tools via /tools (fs.list + fs.read manifests)
   - execute tools via tool.run (writing /results/<callId>/response.json)
   - read/write run-scoped artifacts in /scratch
@@ -76,17 +81,14 @@ to force a fresh run.
 		if err != nil {
 			return err
 		}
-		title := ""
-		goal := "interactive chat"
-
 		modelOverride := ""
 		if cmd.Root().PersistentFlags().Changed("model") {
 			modelOverride = strings.TrimSpace(modelID)
 		}
 
 		opts := []app.RunChatOption{
-			app.WithApprovalsMode(approvalsMode),
 			app.WithModel(modelOverride),
+			app.WithRole(roleName),
 			app.WithWorkDir(workDir),
 			app.WithTraceBytes(maxTraceBytes),
 			app.WithMemoryBytes(maxMemoryBytes),
@@ -94,13 +96,8 @@ to force a fresh run.
 			app.WithRecentHistoryPairs(recentHistoryPairs),
 			app.WithIncludeHistoryOps(includeHistoryOps),
 		}
-		start := app.ChatStart{
-			Mode:                    app.ChatStartNew,
-			Title:                   title,
-			Goal:                    goal,
-			RespectSessionApprovals: !cmd.Root().PersistentFlags().Changed("approvals-mode"),
-		}
-		return app.RunChatTUILoop(cmd.Context(), cfg, start, maxContextB, opts...)
+		// Always-on autonomous daemon is the default entrypoint.
+		return app.RunDaemon(cmd.Context(), cfg, "autonomous agent", maxContextB, 2*time.Second, opts...)
 	},
 }
 
@@ -123,6 +120,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&enableActivity, "activity", enableActivity, "show activity panel by default (env WORKBENCH_ACTIVITY)")
 	modelID = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
 	rootCmd.PersistentFlags().StringVar(&modelID, "model", modelID, "LLM model identifier (default: env OPENROUTER_MODEL)")
+	roleName = strings.TrimSpace(os.Getenv("WORKBENCH_ROLE"))
+	rootCmd.PersistentFlags().StringVar(&roleName, "role", roleName, "agent role/persona (General|StockResearcher|SoftwareDeveloper; env WORKBENCH_ROLE)")
 	rootCmd.PersistentFlags().IntVar(&maxTraceBytes, "trace-bytes", 8*1024, "context updater trace budget (bytes)")
 	rootCmd.PersistentFlags().IntVar(&maxMemoryBytes, "memory-bytes", 8*1024, "context updater memory budget (bytes)")
 	rootCmd.PersistentFlags().IntVar(&maxProfileBytes, "profile-bytes", 4*1024, "context updater profile budget (bytes)")
@@ -130,13 +129,12 @@ func init() {
 	includeHistoryOps = envBool("WORKBENCH_INCLUDE_HISTORY_OPS", true)
 	rootCmd.PersistentFlags().BoolVar(&includeHistoryOps, "include-history-ops", includeHistoryOps, "include environment host ops from /history in prompt context (higher cost)")
 
-	approvalsMode = strings.TrimSpace(os.Getenv("WORKBENCH_APPROVALS_MODE"))
-	rootCmd.PersistentFlags().StringVar(&approvalsMode, "approvals-mode", approvalsMode, "approval mode (enabled|disabled; env WORKBENCH_APPROVALS_MODE)")
-
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(showCmd)
 	rootCmd.AddCommand(daemonCmd)
+	rootCmd.AddCommand(chatCmd)
+	rootCmd.AddCommand(monitorCmd)
 }
 
 func envBool(key string, def bool) bool {

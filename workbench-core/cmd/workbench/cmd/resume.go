@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tinoosan/workbench-core/internal/app"
-	"github.com/tinoosan/workbench-core/internal/store"
 )
 
 var resumeNewRun bool
@@ -25,22 +24,15 @@ var resumeCmd = &cobra.Command{
 			return fmt.Errorf("sessionId is required")
 		}
 
-		approvalsOverride := approvalsMode
-		if !cmd.Root().PersistentFlags().Changed("approvals-mode") {
-			if sess, err := store.LoadSession(cfg, sessionID); err == nil {
-				if v := strings.TrimSpace(sess.ApprovalsMode); v != "" {
-					approvalsOverride = v
-				}
-			}
-		}
-
 		modelOverride := ""
 		if cmd.Root().PersistentFlags().Changed("model") {
 			modelOverride = strings.TrimSpace(modelID)
 		}
 		opts := []app.RunChatOption{
-			app.WithApprovalsMode(approvalsOverride),
+			// Autonomous-first: approvals are disabled.
+			app.WithApprovalsMode("disabled"),
 			app.WithModel(modelOverride),
+			app.WithRole(roleName),
 			app.WithWorkDir(workDir),
 			app.WithTraceBytes(maxTraceBytes),
 			app.WithMemoryBytes(maxMemoryBytes),
@@ -52,7 +44,7 @@ var resumeCmd = &cobra.Command{
 			Mode:                    app.ChatStartResume,
 			SessionID:               sessionID,
 			ForceNewRun:             resumeNewRun,
-			RespectSessionApprovals: !cmd.Root().PersistentFlags().Changed("approvals-mode"),
+			RespectSessionApprovals: false,
 		}
 		return app.RunChatTUILoop(cmd.Context(), cfg, start, maxContextB, opts...)
 	},

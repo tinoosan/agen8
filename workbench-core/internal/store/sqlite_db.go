@@ -78,6 +78,21 @@ var sqliteMigrations = []string{
 		updated_at TEXT,
 		manifest_json TEXT NOT NULL
 	);`,
+
+	// Vector memory (SQLite-backed). Embeddings are stored as raw float32 little-endian blobs.
+	`CREATE TABLE IF NOT EXISTS memories (
+		memory_id TEXT PRIMARY KEY,
+		title TEXT NOT NULL,
+		filename TEXT NOT NULL,
+		content TEXT NOT NULL,
+		created_at TEXT NOT NULL
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at);`,
+	`CREATE TABLE IF NOT EXISTS memory_embeddings (
+		memory_id TEXT PRIMARY KEY,
+		dim INTEGER NOT NULL,
+		embedding BLOB NOT NULL
+	);`,
 }
 
 func sqlitePath(cfg config.Config) string {

@@ -25,8 +25,10 @@ var daemonCmd = &cobra.Command{
 			modelOverride = modelID
 		}
 		opts := []app.RunChatOption{
-			app.WithApprovalsMode(approvalsMode),
+			// Autonomous-first: approvals are disabled.
+			app.WithApprovalsMode("disabled"),
 			app.WithModel(modelOverride),
+			app.WithRole(roleName),
 			app.WithWorkDir(workDir),
 			app.WithTraceBytes(maxTraceBytes),
 			app.WithMemoryBytes(maxMemoryBytes),
