@@ -11,6 +11,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/orchestrator"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
@@ -152,6 +153,19 @@ func (r *tuiTurnRunner) startSwarmWorker(run types.Run) error {
 	r.swarmWorkers[run.RunId] = cancel
 	go func() {
 		_ = worker.Run(ctx)
+	}()
+	// Keep registry fresh while the worker runs.
+	go func() {
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				_ = orchestrator.SyncRegistry(r.cfg, r.run.RunId)
+			}
+		}
 	}()
 	return nil
 }

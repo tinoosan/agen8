@@ -33,6 +33,7 @@ type AgentState struct {
 	CurrentGoal   string         `json:"currentGoal,omitempty"`
 	Plan          []string       `json:"plan,omitempty"`
 	LastMessage   *types.Message `json:"lastMessage,omitempty"`
+	LastInboxMsg  *types.Message `json:"lastInboxMsg,omitempty"`
 	SpawnedAt     string         `json:"spawnedAt,omitempty"`
 	LastPing      string         `json:"lastPing,omitempty"`
 	Stats         AgentStats     `json:"stats,omitempty"`

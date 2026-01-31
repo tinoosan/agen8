@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -84,17 +83,6 @@ func SaveSession(cfg config.Config, s types.Session) error {
 			s.CurrentRunID = existing.CurrentRunID
 		}
 	}
-	_, callerFile, callerLine, callerOK := runtime.Caller(1)
-	// #region agent log
-	debugLogSession("store/session_store.go:43", "SaveSession enter", map[string]any{
-		"sessionId":  s.SessionID,
-		"runs":       len(s.Runs),
-		"currentRun": strings.TrimSpace(s.CurrentRunID),
-		"callerOK":   callerOK,
-		"callerFile": callerFile,
-		"callerLine": callerLine,
-	})
-	// #endregion
 	db, err := getSQLiteDB(cfg)
 	if err != nil {
 		return err
@@ -186,12 +174,6 @@ func AddRunToSession(cfg config.Config, sessionID, runID string) (types.Session,
 	if err := validate.NonEmpty("runId", runID); err != nil {
 		return types.Session{}, err
 	}
-	// #region agent log
-	debugLogSession("store/session_store.go:129", "AddRunToSession enter", map[string]any{
-		"sessionId": sessionID,
-		"runId":     runID,
-	})
-	// #endregion
 	s, err := LoadSession(cfg, sessionID)
 	if err != nil {
 		return types.Session{}, err
@@ -207,36 +189,7 @@ func AddRunToSession(cfg config.Config, sessionID, runID string) (types.Session,
 		s.Runs = append(s.Runs, runID)
 	}
 	s.CurrentRunID = runID
-	// #region agent log
-	debugLogSession("store/session_store.go:155", "AddRunToSession updated", map[string]any{
-		"sessionId": s.SessionID,
-		"runs":      len(s.Runs),
-		"currentRun": s.CurrentRunID,
-	})
-	// #endregion
 	return s, SaveSession(cfg, s)
-}
-
-func debugLogSession(location, message string, data map[string]any) {
-	payload := map[string]any{
-		"sessionId":    "debug-session",
-		"runId":        "pre-fix",
-		"hypothesisId": "H10",
-		"location":     location,
-		"message":      message,
-		"data":         data,
-		"timestamp":    time.Now().UnixMilli(),
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	f, err := os.OpenFile("/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	_, _ = f.Write(append(b, '\n'))
-	_ = f.Close()
 }
 
 // ListSessionIDs returns all session IDs currently on disk, sorted ascending.

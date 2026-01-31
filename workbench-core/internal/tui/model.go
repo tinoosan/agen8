@@ -353,6 +353,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		ev := events.Event(msg)
 
+		if ev.Type == "swarm.registry.updated" {
+			if m.swarmModeActive {
+				m.refreshSwarmView()
+				return m, tea.Batch(m.waitEvent(), m.swarmRefreshCmd())
+			}
+			return m, m.waitEvent()
+		}
+
 		// Phase 1 streaming: update in-progress agent transcript inline.
 		if ev.Type == "model.token" {
 			// Bug fix (duplication): ignore late buffered token events after the turn completes.

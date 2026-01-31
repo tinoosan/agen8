@@ -1,8 +1,6 @@
 package store
 
 import (
-	"encoding/json"
-	"os"
 	"strings"
 	"time"
 
@@ -43,14 +41,6 @@ func RecordTurnInSession(cfg config.Config, sessionID, runID, userText, agentFin
 	if err != nil {
 		return types.Session{}, err
 	}
-	// #region agent log
-	debugLogSessionTurn("store/session_turn.go:40", "RecordTurnInSession loaded", map[string]any{
-		"sessionId": s.SessionID,
-		"runId":     runID,
-		"runs":      len(s.Runs),
-		"currentRun": s.CurrentRunID,
-	})
-	// #endregion
 
 	userText = strings.TrimSpace(userText)
 	if userText != "" {
@@ -72,14 +62,6 @@ func RecordTurnInSession(cfg config.Config, sessionID, runID, userText, agentFin
 	if !seen {
 		s.Runs = append(s.Runs, runID)
 	}
-	// #region agent log
-	debugLogSessionTurn("store/session_turn.go:62", "RecordTurnInSession updated", map[string]any{
-		"sessionId": s.SessionID,
-		"runId":     runID,
-		"runs":      len(s.Runs),
-		"currentRun": s.CurrentRunID,
-	})
-	// #endregion
 
 	// Append a compact summary line (most recent last).
 	agentFinal = strings.TrimSpace(agentFinal)
@@ -95,28 +77,6 @@ func RecordTurnInSession(cfg config.Config, sessionID, runID, userText, agentFin
 	s.Summary = appendAndCapBytes(s.Summary, line, MaxSessionSummaryBytes)
 
 	return s, SaveSession(cfg, s)
-}
-
-func debugLogSessionTurn(location, message string, data map[string]any) {
-	payload := map[string]any{
-		"sessionId":    "debug-session",
-		"runId":        "pre-fix",
-		"hypothesisId": "H11",
-		"location":     location,
-		"message":      message,
-		"data":         data,
-		"timestamp":    time.Now().UnixMilli(),
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	f, err := os.OpenFile("/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	_, _ = f.Write(append(b, '\n'))
-	_ = f.Close()
 }
 
 func clampString(s string, max int) string {

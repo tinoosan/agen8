@@ -898,6 +898,20 @@ func (r *lazyNewSessionTurnRunner) GetSwarmSummary() string {
 	return r.engine.getSwarmSummary()
 }
 
+func (r *lazyNewSessionTurnRunner) GetSwarmRegistry() (orchestrator.Registry, error) {
+	if r == nil || r.engine == nil {
+		return orchestrator.Registry{}, fmt.Errorf("runner not initialized")
+	}
+	return r.engine.GetSwarmRegistry()
+}
+
+func (r *lazyNewSessionTurnRunner) GetSwarmMetrics() (orchestrator.Metrics, error) {
+	if r == nil || r.engine == nil {
+		return orchestrator.Metrics{}, fmt.Errorf("runner not initialized")
+	}
+	return r.engine.GetSwarmMetrics()
+}
+
 func (r *lazyNewSessionTurnRunner) AppendToolResponse(toolCallID string, resp types.HostOpResponse) {
 	if r == nil || r.engine == nil {
 		return
@@ -1582,6 +1596,11 @@ type tuiTurnRunner struct {
 
 	swarmSummary   string
 	swarmSummaryMu sync.Mutex
+	swarmStateMu   sync.Mutex
+	swarmRegistry  orchestrator.Registry
+	swarmMetrics   orchestrator.Metrics
+	swarmRegOK     bool
+	swarmMetricsOK bool
 	orchToolCalled bool
 }
 
@@ -1661,6 +1680,62 @@ func (r *tuiTurnRunner) getSwarmSummary() string {
 
 func (r *tuiTurnRunner) GetSwarmSummary() string {
 	return r.getSwarmSummary()
+}
+
+func (r *tuiTurnRunner) setSwarmRegistry(reg orchestrator.Registry) {
+	if r == nil {
+		return
+	}
+	r.swarmStateMu.Lock()
+	defer r.swarmStateMu.Unlock()
+	r.swarmRegistry = reg
+	r.swarmRegOK = true
+}
+
+func (r *tuiTurnRunner) setSwarmMetrics(metrics orchestrator.Metrics) {
+	if r == nil {
+		return
+	}
+	r.swarmStateMu.Lock()
+	defer r.swarmStateMu.Unlock()
+	r.swarmMetrics = metrics
+	r.swarmMetricsOK = true
+}
+
+func (r *tuiTurnRunner) clearSwarmState() {
+	if r == nil {
+		return
+	}
+	r.swarmStateMu.Lock()
+	defer r.swarmStateMu.Unlock()
+	r.swarmRegistry = orchestrator.Registry{}
+	r.swarmMetrics = orchestrator.Metrics{}
+	r.swarmRegOK = false
+	r.swarmMetricsOK = false
+}
+
+func (r *tuiTurnRunner) GetSwarmRegistry() (orchestrator.Registry, error) {
+	if r == nil {
+		return orchestrator.Registry{}, fmt.Errorf("runner is nil")
+	}
+	r.swarmStateMu.Lock()
+	defer r.swarmStateMu.Unlock()
+	if !r.swarmRegOK {
+		return orchestrator.Registry{}, fmt.Errorf("swarm registry unavailable")
+	}
+	return r.swarmRegistry, nil
+}
+
+func (r *tuiTurnRunner) GetSwarmMetrics() (orchestrator.Metrics, error) {
+	if r == nil {
+		return orchestrator.Metrics{}, fmt.Errorf("runner is nil")
+	}
+	r.swarmStateMu.Lock()
+	defer r.swarmStateMu.Unlock()
+	if !r.swarmMetricsOK {
+		return orchestrator.Metrics{}, fmt.Errorf("swarm metrics unavailable")
+	}
+	return r.swarmMetrics, nil
 }
 
 func (r *tuiTurnRunner) markOrchestratorToolCall() {

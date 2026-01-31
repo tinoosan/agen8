@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -21,14 +20,6 @@ type orchestratorExecutor struct {
 }
 
 func (x *orchestratorExecutor) Exec(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
-	// #region agent log
-	debugLogOrchestrator("app/orchestrator_executor.go:24", "Exec host op", map[string]any{
-		"op":           string(req.Op),
-		"inputBytes":   len(req.Input),
-		"hasRunner":    x.runner != nil,
-		"orchestrator": true,
-	})
-	// #endregion
 	switch req.Op {
 	case types.HostOpOrchestratorSpawn:
 		if x.runner != nil {
@@ -81,13 +72,6 @@ func (x *orchestratorExecutor) handleSpawn(ctx context.Context, req types.HostOp
 	if goal == "" {
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: "goal is required"}
 	}
-	// #region agent log
-	debugLogOrchestrator("app/orchestrator_executor.go:35", "handleSpawn", map[string]any{
-		"goal":      goal,
-		"parentRun": x.runner.run.RunId,
-		"sessionId": x.runner.run.SessionID,
-	})
-	// #endregion
 	run, err := store.CreateSubRun(x.runner.cfg, x.runner.run.SessionID, x.runner.run.RunId, goal, x.runner.run.MaxBytesForContext)
 	if err != nil {
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
@@ -101,15 +85,11 @@ func (x *orchestratorExecutor) handleSpawn(ctx context.Context, req types.HostOp
 		Priority:        strings.TrimSpace(in.Priority),
 		Metadata:        in.Metadata,
 	})
-	// #region agent log
-	debugLogOrchestrator("app/orchestrator_executor.go:55", "handleSpawn created run", map[string]any{
-		"runId":     run.RunId,
-		"parentRun": x.runner.run.RunId,
-		"sessionId": x.runner.run.SessionID,
-	})
-	// #endregion
-	_ = orchestrator.SyncRegistry(x.runner.cfg, x.runner.run.RunId)
-	return types.HostOpResponse{Op: req.Op, Ok: true, Text: run.RunId}
+	syncErr := orchestrator.SyncRegistry(x.runner.cfg, x.runner.run.RunId)
+	if reg, err := orchestrator.LoadRegistryFile(x.runner.cfg, x.runner.run.RunId); err == nil {
+		x.runner.setSwarmSummary(renderSwarmSummary(reg))
+	}
+	return types.HostOpResponse{Op: req.Op, Ok: true, Text: run.RunId, Error: errString(syncErr)}
 }
 
 type taskInput struct {
@@ -134,14 +114,6 @@ func (x *orchestratorExecutor) handleTask(ctx context.Context, req types.HostOpR
 	if runID == "" || goal == "" {
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: "runId and goal are required"}
 	}
-	// #region agent log
-	debugLogOrchestrator("app/orchestrator_executor.go:77", "handleTask", map[string]any{
-		"runId":     runID,
-		"goal":      goal,
-		"parentRun": x.runner.run.RunId,
-		"sessionId": x.runner.run.SessionID,
-	})
-	// #endregion
 	if run, err := store.LoadRun(x.runner.cfg, runID); err == nil {
 		_ = x.runner.startSwarmWorker(run)
 	}
@@ -157,8 +129,11 @@ func (x *orchestratorExecutor) handleTask(ctx context.Context, req types.HostOpR
 	if _, err := orchestrator.EnqueueTask(x.runner.cfg, runID, task); err != nil {
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 	}
-	_ = orchestrator.SyncRegistry(x.runner.cfg, x.runner.run.RunId)
-	return types.HostOpResponse{Op: req.Op, Ok: true, Text: task.TaskID}
+	syncErr := orchestrator.SyncRegistry(x.runner.cfg, x.runner.run.RunId)
+	if reg, err := orchestrator.LoadRegistryFile(x.runner.cfg, x.runner.run.RunId); err == nil {
+		x.runner.setSwarmSummary(renderSwarmSummary(reg))
+	}
+	return types.HostOpResponse{Op: req.Op, Ok: true, Text: task.TaskID, Error: errString(syncErr)}
 }
 
 type messageInput struct {
@@ -183,17 +158,6 @@ func (x *orchestratorExecutor) handleMessage(ctx context.Context, req types.Host
 	if runID == "" {
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: "runId is required"}
 	}
-	// #region agent log
-	debugLogOrchestrator("app/orchestrator_executor.go:147", "handleMessage parsed", map[string]any{
-		"runId":     runID,
-		"taskId":    strings.TrimSpace(in.TaskID),
-		"kind":      strings.TrimSpace(in.Kind),
-		"titleLen":  len(strings.TrimSpace(in.Title)),
-		"bodyLen":   len(strings.TrimSpace(in.Body)),
-		"parentRun": x.runner.run.RunId,
-		"sessionId": x.runner.run.SessionID,
-	})
-	// #endregion
 	now := time.Now()
 	msg := types.Message{
 		MessageID:   "msg-" + uuid.NewString(),
@@ -208,25 +172,20 @@ func (x *orchestratorExecutor) handleMessage(ctx context.Context, req types.Host
 		Metadata:    in.Metadata,
 	}
 	if _, err := orchestrator.EnqueueMessage(x.runner.cfg, runID, msg); err != nil {
-		// #region agent log
-		debugLogOrchestrator("app/orchestrator_executor.go:171", "handleMessage enqueue error", map[string]any{
-			"runId": runID,
-			"err":   err.Error(),
-		})
-		// #endregion
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 	}
-	// #region agent log
-	debugLogOrchestrator("app/orchestrator_executor.go:175", "handleMessage enqueued", map[string]any{
-		"runId": runID,
-		"msgId": msg.MessageID,
-	})
-	// #endregion
-	_ = orchestrator.SyncRegistry(x.runner.cfg, x.runner.run.RunId)
+	syncErr := orchestrator.SyncRegistry(x.runner.cfg, x.runner.run.RunId)
 	if reg, err := orchestrator.LoadRegistryFile(x.runner.cfg, x.runner.run.RunId); err == nil {
 		x.runner.setSwarmSummary(renderSwarmSummary(reg))
 	}
-	return types.HostOpResponse{Op: req.Op, Ok: true, Text: msg.MessageID}
+	return types.HostOpResponse{Op: req.Op, Ok: true, Text: msg.MessageID, Error: errString(syncErr)}
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func (x *orchestratorExecutor) handleSync(ctx context.Context) types.HostOpResponse {
@@ -279,26 +238,4 @@ func (x *orchestratorExecutor) handleList(ctx context.Context) types.HostOpRespo
 		out = append(out, r.RunId)
 	}
 	return types.HostOpResponse{Op: types.HostOpOrchestratorList, Ok: true, Entries: out}
-}
-
-func debugLogOrchestrator(location, message string, data map[string]any) {
-	payload := map[string]any{
-		"sessionId":    "debug-session",
-		"runId":        "pre-fix",
-		"hypothesisId": "H5",
-		"location":     location,
-		"message":      message,
-		"data":         data,
-		"timestamp":    time.Now().UnixMilli(),
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	f, err := os.OpenFile("/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	_, _ = f.Write(append(b, '\n'))
-	_ = f.Close()
 }

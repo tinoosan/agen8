@@ -44,7 +44,6 @@ func SyncRegistry(cfg config.Config, orchestratorRunID string) error {
 		Agents:            map[string]AgentState{},
 	}
 	metrics := Metrics{Version: "v1", Tokens: TokenTotals{}, CostUSD: CostTotals{ByRun: map[string]float64{}}}
-	childRuns := 0
 
 	for _, runID := range sess.Runs {
 		run, err := store.LoadRun(cfg, runID)
@@ -54,9 +53,9 @@ func SyncRegistry(cfg config.Config, orchestratorRunID string) error {
 		if strings.TrimSpace(run.ParentRunID) != strings.TrimSpace(orchestratorRunID) {
 			continue
 		}
-		childRuns++
 		tasks, _ := readInboxTasks(cfg, run.RunId)
 		results, _ := ReadOutbox(cfg, run.RunId)
+		inboxMsgs, _ := readInboxMessages(cfg, run.RunId)
 
 		state := AgentState{
 			RunID:         run.RunId,
@@ -64,6 +63,7 @@ func SyncRegistry(cfg config.Config, orchestratorRunID string) error {
 			CurrentTaskID: "",
 			CurrentGoal:   strings.TrimSpace(run.Goal),
 			Plan:          nil,
+			LastInboxMsg:  latestMessage(inboxMsgs),
 			SpawnedAt: func() string {
 				if run.StartedAt != nil {
 					return run.StartedAt.UTC().Format(time.RFC3339Nano)
@@ -123,12 +123,11 @@ func SyncRegistry(cfg config.Config, orchestratorRunID string) error {
 				}
 			}
 		}
-		// Capture latest message/result (best-effort).
-		if len(results) > 0 {
-			// pick last item
-			last := results[len(results)-1]
-			if last.Message != nil {
-				state.LastMessage = last.Message
+		// Capture latest message (best-effort): scan from newest to oldest.
+		for i := len(results) - 1; i >= 0; i-- {
+			if results[i].Message != nil {
+				state.LastMessage = results[i].Message
+				break
 			}
 		}
 		reg.Agents[run.RunId] = state
@@ -150,39 +149,7 @@ func SyncRegistry(cfg config.Config, orchestratorRunID string) error {
 	if err := writeJSON(filepath.Join(agentsDir, "metrics.json"), metrics); err != nil {
 		return err
 	}
-	// #region agent log
-	debugLogSync("orchestrator/sync.go:148", "SyncRegistry summary", map[string]any{
-		"sessionRuns":      len(sess.Runs),
-		"childRuns":        childRuns,
-		"agentCount":       len(reg.Agents),
-		"taskCount":        len(reg.Tasks),
-		"orchestratorRun":  orchestratorRunID,
-		"orchestratorSess": orchRun.SessionID,
-	})
-	// #endregion
 	return nil
-}
-
-func debugLogSync(location, message string, data map[string]any) {
-	payload := map[string]any{
-		"sessionId":    "debug-session",
-		"runId":        "pre-fix",
-		"hypothesisId": "H6",
-		"location":     location,
-		"message":      message,
-		"data":         data,
-		"timestamp":    time.Now().UnixMilli(),
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	f, err := os.OpenFile("/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	_, _ = f.Write(append(b, '\n'))
-	_ = f.Close()
 }
 
 func writeJSON(path string, v any) error {
@@ -267,4 +234,55 @@ func readInboxTasks(cfg config.Config, runID string) ([]types.Task, error) {
 		tasks = append(tasks, t)
 	}
 	return tasks, nil
+}
+
+func readInboxMessages(cfg config.Config, runID string) ([]types.Message, error) {
+	inboxDir := filepath.Join(fsutil.GetRunDir(cfg.DataDir, runID), "inbox", "messages")
+	entries, err := os.ReadDir(inboxDir)
+	if err != nil {
+		return nil, err
+	}
+	paths := []string{}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".json") {
+			continue
+		}
+		paths = append(paths, filepath.Join(inboxDir, e.Name()))
+	}
+	sort.Strings(paths)
+	out := make([]types.Message, 0, len(paths))
+	for _, p := range paths {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var msg types.Message
+		if err := json.Unmarshal(b, &msg); err != nil {
+			continue
+		}
+		out = append(out, msg)
+	}
+	return out, nil
+}
+
+func latestMessage(msgs []types.Message) *types.Message {
+	if len(msgs) == 0 {
+		return nil
+	}
+	sort.Slice(msgs, func(i, j int) bool {
+		a := msgs[i].CreatedAt
+		b := msgs[j].CreatedAt
+		if a == nil && b == nil {
+			return i < j
+		}
+		if a == nil {
+			return true
+		}
+		if b == nil {
+			return false
+		}
+		return a.Before(*b)
+	})
+	last := msgs[len(msgs)-1]
+	return &last
 }

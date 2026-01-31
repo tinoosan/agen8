@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/llm"
+	"github.com/tinoosan/workbench-core/pkg/orchestrator"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
@@ -50,6 +51,11 @@ type vfsLister interface {
 
 type swarmSummaryProvider interface {
 	GetSwarmSummary() string
+}
+
+type swarmRegistryProvider interface {
+	GetSwarmRegistry() (orchestrator.Registry, error)
+	GetSwarmMetrics() (orchestrator.Metrics, error)
 }
 
 type eventMsg events.Event
