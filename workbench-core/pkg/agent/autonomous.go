@@ -182,7 +182,11 @@ func (r *AutonomousRunner) drainInbox(ctx context.Context) error {
 			r.cfg.Emit(ctx, events.Event{
 				Type:    "task.queued",
 				Message: "Task queued",
-				Data:    map[string]string{"taskId": taskID, "source": "inbox"},
+				Data: map[string]string{
+					"taskId": taskID,
+					"source": "inbox",
+					"goal":   truncateText(task.Goal, 100),
+				},
 			})
 		}
 	}
@@ -293,7 +297,12 @@ func (r *AutonomousRunner) enqueueSelfGoal(goal string, priority int, source str
 		r.cfg.Emit(context.Background(), events.Event{
 			Type:    "task.generated",
 			Message: "Generated task",
-			Data:    map[string]string{"taskId": taskID, "source": source, "role": r.cfg.Role.Name},
+			Data: map[string]string{
+				"taskId": taskID,
+				"source": source,
+				"role":   r.cfg.Role.Name,
+				"goal":   truncateText(goal, 100),
+			},
 		})
 	}
 }
@@ -323,7 +332,11 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 		r.cfg.Emit(ctx, events.Event{
 			Type:    "task.start",
 			Message: "Task started",
-			Data:    map[string]string{"taskId": taskID, "role": r.cfg.Role.Name},
+			Data: map[string]string{
+				"taskId": taskID,
+				"role":   r.cfg.Role.Name,
+				"goal":   truncateText(goal, 100),
+			},
 		})
 	}
 
@@ -379,7 +392,17 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 	}
 
 	if r.cfg.Emit != nil {
-		data := map[string]string{"taskId": taskID, "status": result.Status, "role": r.cfg.Role.Name}
+		data := map[string]string{
+			"taskId": taskID,
+			"status": result.Status,
+			"role":   r.cfg.Role.Name,
+		}
+		if goal := truncateText(task.Goal, 100); goal != "" {
+			data["goal"] = goal
+		}
+		if summary := truncateText(result.Summary, 200); summary != "" {
+			data["summary"] = summary
+		}
 		if result.Error != "" {
 			data["error"] = result.Error
 		}
@@ -565,4 +588,18 @@ func atoi2(a, b byte) int {
 		return 0
 	}
 	return int(a-'0')*10 + int(b-'0')
+}
+
+func truncateText(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
 }
