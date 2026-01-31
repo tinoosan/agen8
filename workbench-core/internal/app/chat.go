@@ -117,7 +117,7 @@ func defaultRunChatOptions() RunChatOptions {
 		RecentHistoryPairs: 8,
 		IncludeHistoryOps:  boolPtr(true),
 		WebSearchEnabled:   false,
-		ApprovalsMode:      "enabled",
+		ApprovalsMode:      "disabled",
 		// Pricing: empty/0 by default (resolved against builtin table at runtime)
 	}
 }
@@ -162,7 +162,7 @@ func resolveRunChatOptions(opts ...RunChatOption) RunChatOptions {
 	} else if normalized := normalizeApprovalsMode(os.Getenv("WORKBENCH_APPROVALS_MODE")); normalized != "" {
 		o.ApprovalsMode = normalized
 	} else {
-		o.ApprovalsMode = "enabled"
+		o.ApprovalsMode = "disabled"
 	}
 
 	// Preserve existing defaults for zero/negative values.

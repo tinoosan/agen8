@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -63,9 +62,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return mm, cmd
 	}
 	if mm, cmd, ok := m.keyToggleActivityPanel(msg); ok {
-		return mm, cmd
-	}
-	if mm, cmd, ok := m.keyToggleSwarmMode(msg); ok {
 		return mm, cmd
 	}
 	if mm, cmd, ok := m.keyTogglePlanView(msg); ok {
@@ -497,11 +493,6 @@ func (m Model) keyTranscriptScrollKeys(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if msg.Type != tea.KeyPgUp && msg.Type != tea.KeyPgDown && msg.Type != tea.KeyCtrlU && msg.Type != tea.KeyCtrlF {
 		return m, nil, false
 	}
-	if m.showDetails && m.swarmTabActive {
-		var cmd tea.Cmd
-		m.swarmViewport, cmd = m.swarmViewport.Update(msg)
-		return m, cmd, true
-	}
 	if m.showDetails && m.planTabActive {
 		var cmd tea.Cmd
 		m.planViewport, cmd = m.planViewport.Update(msg)
@@ -547,64 +538,11 @@ func (m Model) keyTogglePlanView(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	if strings.EqualFold(msg.String(), "ctrl+]") {
-		if m.planTabActive {
-			m.planTabActive = false
-			m.swarmTabActive = true
-		} else if m.swarmTabActive {
-			m.swarmTabActive = false
-		} else {
-			m.planTabActive = true
-		}
-		if m.swarmTabActive {
-			m.refreshSwarmView()
-		}
+		m.planTabActive = !m.planTabActive
 		m.layout()
 		return m, nil, true
 	}
 	return m, nil, false
-}
-
-func (m Model) keyToggleSwarmMode(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	if msg.Type != tea.KeyShiftTab && !strings.EqualFold(msg.String(), "shift+tab") {
-		return m, nil, false
-	}
-	if setter, ok := m.runner.(interface{ SetSwarmMode(bool) error }); ok {
-		next := !m.swarmModeActive
-		if err := setter.SetSwarmMode(next); err != nil {
-			m.addTranscriptItem(transcriptItem{kind: transcriptError, text: "swarm mode failed: " + err.Error()})
-			m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
-			m.layout()
-			return m, nil, true
-		}
-		m.swarmModeActive = next
-	} else {
-		m.addTranscriptItem(transcriptItem{kind: transcriptError, text: "swarm mode unavailable in this session"})
-		m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
-		m.layout()
-		return m, nil, true
-	}
-
-	if m.swarmModeActive {
-		// Turning swarm mode on activates the swarm tab and opens the right pane.
-		if !m.showDetails {
-			m.showDetails = true
-		}
-		m.swarmTabActive = true
-		m.planTabActive = false
-		m.refreshSwarmView()
-	} else {
-		// Turning swarm mode off.
-		m.swarmTabActive = false
-	}
-	m.layout()
-	return m, m.swarmRefreshCmd(), true
-}
-
-func (m Model) swarmRefreshCmd() tea.Cmd {
-	if !m.swarmModeActive {
-		return nil
-	}
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return swarmRefreshMsg{} })
 }
 
 func (m Model) keyEscClosesPanels(msg tea.KeyMsg) (Model, tea.Cmd, bool) {

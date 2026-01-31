@@ -155,21 +155,11 @@ func (f *Factory) MountAll(fs *vfs.FS) error {
 		return fmt.Errorf("create outbox resource: %w", err)
 	}
 
-	agentsDir := filepath.Join(runDir, vfs.MountAgents)
-	if err := os.MkdirAll(agentsDir, 0755); err != nil {
-		return fmt.Errorf("create agents dir: %w", err)
-	}
-	agentsRes, err := NewDirResource(agentsDir, vfs.MountAgents)
-	if err != nil {
-		return fmt.Errorf("create agents resource: %w", err)
-	}
-
 	fs.Mount(vfs.MountScratch, ws)
 	fs.Mount(vfs.MountLog, tr)
 	fs.Mount(vfs.MountResults, res)
 	fs.Mount(vfs.MountInbox, inboxRes)
 	fs.Mount(vfs.MountOutbox, outboxRes)
-	fs.Mount(vfs.MountAgents, agentsRes)
 	fs.Mount(vfs.MountMemory, mem)
 	fs.Mount(vfs.MountProfile, prof)
 	fs.Mount(vfs.MountHistory, hist)

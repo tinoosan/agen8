@@ -116,10 +116,8 @@ func setupTUIChatRuntime(
 		MaxTraceBytes:         opts.MaxTraceBytes,
 		PriceInPerMTokensUSD:  opts.PriceInPerMTokensUSD,
 		PriceOutPerMTokensUSD: opts.PriceOutPerMTokensUSD,
-		Guard: func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse {
-			return enforcePlanChecklist(fs, req)
-		},
-		ArtifactObserve: artifactIndex.ObserveWrite,
+		Guard:                 nil,
+		ArtifactObserve:       artifactIndex.ObserveWrite,
 		PersistRun: func(r types.Run) error {
 			return store.SaveRun(cfg, r)
 		},
@@ -134,9 +132,6 @@ func setupTUIChatRuntime(
 		return nil, err
 	}
 	fs := rt.FS
-	if err := EnsurePlanGate(fs); err != nil {
-		return nil, fmt.Errorf("ensure plan gate: %w", err)
-	}
 
 	client, err := llm.NewClientFromEnv()
 	if err != nil {

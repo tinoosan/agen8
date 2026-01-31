@@ -168,20 +168,19 @@ func (w *Worker) processMessage(ctx context.Context, msgPath string, msg types.M
 	if strings.EqualFold(msg.Metadata["processed"], "true") {
 		return nil
 	}
+	now := time.Now().UTC()
 	msg.Metadata["processed"] = "true"
-	msg.Metadata["receivedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+	msg.Metadata["receivedAt"] = now.Format(time.RFC3339Nano)
 	if err := w.writeMessage(ctx, msgPath, msg); err != nil {
 		return err
 	}
 	ack := types.Message{
 		MessageID: "ack-" + msg.MessageID,
-		FromRunID: strings.TrimSpace(msg.ToRunID),
-		ToRunID:   strings.TrimSpace(msg.FromRunID),
 		TaskID:    strings.TrimSpace(msg.TaskID),
 		Kind:      "ack",
 		Title:     "message received",
 		Body:      strings.TrimSpace(msg.Title),
-		CreatedAt: func() *time.Time { t := time.Now(); return &t }(),
+		CreatedAt: &now,
 	}
 	return w.writeMessageOutbox(ctx, ack)
 }
@@ -274,10 +273,8 @@ func (w *Worker) processTask(ctx context.Context, taskPath string, task types.Ta
 	if err := w.writeResult(ctx, task, result); err != nil {
 		return err
 	}
-	// Emit a message summary for the orchestrator.
 	msg := types.Message{
 		MessageID: "task-" + taskID,
-		FromRunID: strings.TrimSpace(task.AssignedToRunID),
 		TaskID:    taskID,
 		Kind:      "result",
 		Title:     "task " + result.Status,

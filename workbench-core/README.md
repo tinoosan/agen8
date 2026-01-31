@@ -107,7 +107,7 @@ Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sa
 
 ## Developer resources
 
-- Inspect `internal/app` for session orchestrators and `internal/store` for persistence logic.
+- Inspect `internal/app` for session runtime wiring and `internal/store` for persistence logic.
 - The [Developer guide](docs/developer-guide.md) explains how configuration, session/run lifecycles, and telemetry hooks fit together.
 - Use `/tools` manifests and `tool.run` to extend Workbench with custom tooling following the AFS expectations.
 

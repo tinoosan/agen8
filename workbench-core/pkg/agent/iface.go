@@ -49,7 +49,7 @@ type Configurable interface {
 	CloneWithConfig(cfg AgentConfig) (Agent, error)
 }
 
-// Agent is the public interface implemented by all agent roles (default, orchestrator, worker).
+// Agent is the public interface implemented by all agent roles.
 type Agent interface {
 	Runner
 	Configurable

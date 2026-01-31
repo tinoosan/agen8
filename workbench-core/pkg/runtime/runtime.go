@@ -349,6 +349,8 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		},
 	}
 
+	auditObs := newAuditObserver(fs)
+
 	exec := NewExecutor(executor, ExecutorOptions{
 		Emit:      cfg.Emit,
 		Model:     cfg.Model,
@@ -361,7 +363,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			}
 			return cfg.Guard(fs, req)
 		},
-		Observers:       []HostOpObserver{constructor, updater},
+		Observers:       []HostOpObserver{constructor, updater, auditObs},
 		ArtifactObserve: cfg.ArtifactObserve,
 	})
 

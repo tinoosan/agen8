@@ -32,12 +32,6 @@ const (
 	HostOpTrace = "trace"
 	// HostOpFinal ends the agent loop for a user turn.
 	HostOpFinal = "final"
-	// Orchestrator host ops.
-	HostOpOrchestratorSpawn   = "orchestrator.spawn"
-	HostOpOrchestratorTask    = "orchestrator.task"
-	HostOpOrchestratorMessage = "orchestrator.message"
-	HostOpOrchestratorSync    = "orchestrator.sync"
-	HostOpOrchestratorList    = "orchestrator.list"
 
 	CommandRejectedErrorCode    = "command_rejected"
 	CommandRejectedErrorMessage = "User denied this command. This is a normal part of the workflow. Do not treat this as a system failure. You should propose an alternative command, ask the user for specialized instructions, or proceed with independent work if possible."
@@ -73,8 +67,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = normalizeHostOp(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSRead, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpToolRun, HostOpShellExec, HostOpHTTPFetch, HostOpTrace, HostOpFinal,
-		HostOpOrchestratorSpawn, HostOpOrchestratorTask, HostOpOrchestratorMessage, HostOpOrchestratorSync, HostOpOrchestratorList:
+	case HostOpFSList, HostOpFSRead, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpToolRun, HostOpShellExec, HostOpHTTPFetch, HostOpTrace, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -178,15 +171,6 @@ func (r HostOpRequest) Validate() error {
 			return fmt.Errorf("trace.action must be one of events.since/events.latest/events.summary")
 		}
 		return nil
-
-	case HostOpOrchestratorSpawn, HostOpOrchestratorTask, HostOpOrchestratorMessage, HostOpOrchestratorSync, HostOpOrchestratorList:
-		if r.Op == HostOpOrchestratorSync || r.Op == HostOpOrchestratorList {
-			return nil
-		}
-		if len(r.Input) == 0 {
-			return fmt.Errorf("input is required")
-		}
-		return nil
 	}
 
 	return nil
@@ -223,16 +207,6 @@ func normalizeHostOp(op string) string {
 		return HostOpHTTPFetch
 	case "trace":
 		return HostOpTrace
-	case "orchestrator.spawn", "orchestrator_spawn":
-		return HostOpOrchestratorSpawn
-	case "orchestrator.task", "orchestrator_task":
-		return HostOpOrchestratorTask
-	case "orchestrator.message", "orchestrator_message":
-		return HostOpOrchestratorMessage
-	case "orchestrator.sync", "orchestrator_sync":
-		return HostOpOrchestratorSync
-	case "orchestrator.list", "orchestrator_list":
-		return HostOpOrchestratorList
 	default:
 		return op
 	}

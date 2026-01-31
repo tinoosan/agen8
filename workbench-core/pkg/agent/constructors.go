@@ -14,11 +14,6 @@ func DefaultConfig() AgentConfig {
 	return AgentConfig{SystemPrompt: DefaultSystemPrompt()}
 }
 
-// OrchestratorConfig returns the orchestration-focused configuration.
-func OrchestratorConfig() AgentConfig {
-	return AgentConfig{SystemPrompt: OrchestratorSystemPrompt()}
-}
-
 // WorkerConfig returns the worker-focused configuration.
 func WorkerConfig() AgentConfig {
 	return AgentConfig{SystemPrompt: WorkerSystemPrompt()}
@@ -86,11 +81,6 @@ func DefaultToolRegistry(toolManifests []tools.ToolManifest) (*ToolRegistry, []l
 	return buildToolRegistry(toolManifests, defaultHostTools())
 }
 
-// OrchestratorToolRegistry returns a registry seeded with default + orchestration tools.
-func OrchestratorToolRegistry(toolManifests []tools.ToolManifest) (*ToolRegistry, []llm.Tool, error) {
-	return buildToolRegistry(toolManifests, append(defaultHostTools(), orchestratorHostTools()...))
-}
-
 func registryFromConfig(cfg AgentConfig) (*ToolRegistry, []llm.Tool, error) {
 	extraTools := append([]llm.Tool(nil), cfg.ExtraTools...)
 	if cfg.ToolRegistry == nil {
@@ -135,16 +125,6 @@ func defaultHostTools() []HostTool {
 		&agenttools.TraceEventsLatestTool{},
 		&agenttools.TraceEventsSinceTool{},
 		&agenttools.TraceEventsSummaryTool{},
-	}
-}
-
-func orchestratorHostTools() []HostTool {
-	return []HostTool{
-		&agenttools.OrchestratorSpawnTool{},
-		&agenttools.OrchestratorTaskTool{},
-		&agenttools.OrchestratorMessageTool{},
-		&agenttools.OrchestratorSyncTool{},
-		&agenttools.OrchestratorListTool{},
 	}
 }
 

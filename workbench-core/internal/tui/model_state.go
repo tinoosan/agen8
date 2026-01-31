@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/llm"
-	"github.com/tinoosan/workbench-core/pkg/orchestrator"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
@@ -47,15 +46,6 @@ type vfsAccessor interface {
 
 type vfsLister interface {
 	ListVFS(ctx context.Context, path string) ([]vfs.Entry, error)
-}
-
-type swarmSummaryProvider interface {
-	GetSwarmSummary() string
-}
-
-type swarmRegistryProvider interface {
-	GetSwarmRegistry() (orchestrator.Registry, error)
-	GetSwarmMetrics() (orchestrator.Metrics, error)
 }
 
 type eventMsg events.Event
@@ -107,8 +97,6 @@ type workdirPrefetchMsg struct {
 	err     error
 }
 
-type swarmRefreshMsg struct{}
-
 type sessionsListMsg struct {
 	sessions []types.Session
 	err      error
@@ -147,11 +135,6 @@ type Model struct {
 	planMarkdown        string
 	planDetailsMarkdown string
 	planTabActive       bool
-	swarmTabActive      bool
-	swarmModeActive     bool
-	swarmViewport       viewport.Model
-	swarmLoadErr        string
-	swarmContent        string
 	planAutoExpanded    bool
 	planLoadErr         string
 	planDetailsLoadErr  string

@@ -30,16 +30,12 @@ const (
 	MountResults = "results"
 
 	// MountInbox is the mount name for run-scoped task inboxes.
-	// The orchestrator writes tasks here; agents poll and consume them.
+	// External inputs can drop tasks/messages here; the agent polls and consumes them.
 	MountInbox = "inbox"
 
 	// MountOutbox is the mount name for run-scoped task results.
-	// Agents write TaskResult envelopes here for the orchestrator to collect.
+	// Agents write TaskResult envelopes and audit messages here for the host to collect.
 	MountOutbox = "outbox"
-
-	// MountAgents is the mount name for orchestration metadata.
-	// This is a run-scoped mount used by orchestrators to store registry/metrics.
-	MountAgents = "agents"
 
 	// MountMemory is the mount name for run-scoped agent memory.
 	// The host may inject /memory/memory.md into the system prompt,

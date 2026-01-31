@@ -11,10 +11,8 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -27,7 +25,6 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/llm"
-	"github.com/tinoosan/workbench-core/pkg/orchestrator"
 	"github.com/tinoosan/workbench-core/pkg/resources"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
@@ -829,9 +826,6 @@ type lazyNewSessionTurnRunner struct {
 	run         types.Run
 	engine      *tuiTurnRunner
 
-	pendingSwarmSet     bool
-	pendingSwarmEnabled bool
-
 	mustEmit func(ctx context.Context, ev events.Event)
 }
 
@@ -873,43 +867,6 @@ func (r *lazyNewSessionTurnRunner) ResumeTurn(ctx context.Context, toolOutputs [
 		return "", fmt.Errorf("runner not initialized")
 	}
 	return r.engine.ResumeTurn(ctx, toolOutputs)
-}
-
-// SetSwarmMode records the desired swarm mode prior to initialization, or delegates once initialized.
-func (r *lazyNewSessionTurnRunner) SetSwarmMode(enabled bool) error {
-	if r == nil {
-		return fmt.Errorf("runner is nil")
-	}
-	if !r.initialized {
-		r.pendingSwarmSet = true
-		r.pendingSwarmEnabled = enabled
-		return nil
-	}
-	if r.engine == nil {
-		return fmt.Errorf("runner not initialized")
-	}
-	return r.engine.SetSwarmMode(enabled)
-}
-
-func (r *lazyNewSessionTurnRunner) GetSwarmSummary() string {
-	if r == nil || r.engine == nil {
-		return ""
-	}
-	return r.engine.getSwarmSummary()
-}
-
-func (r *lazyNewSessionTurnRunner) GetSwarmRegistry() (orchestrator.Registry, error) {
-	if r == nil || r.engine == nil {
-		return orchestrator.Registry{}, fmt.Errorf("runner not initialized")
-	}
-	return r.engine.GetSwarmRegistry()
-}
-
-func (r *lazyNewSessionTurnRunner) GetSwarmMetrics() (orchestrator.Metrics, error) {
-	if r == nil || r.engine == nil {
-		return orchestrator.Metrics{}, fmt.Errorf("runner not initialized")
-	}
-	return r.engine.GetSwarmMetrics()
 }
 
 func (r *lazyNewSessionTurnRunner) AppendToolResponse(toolCallID string, resp types.HostOpResponse) {
@@ -1026,7 +983,7 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 		if val == "" {
 			mode := strings.TrimSpace(r.opts.ApprovalsMode)
 			if mode == "" {
-				mode = "enabled"
+				mode = "disabled"
 			}
 			r.emitPreInit(events.Event{
 				Type:    "approvals.info",
@@ -1041,10 +998,9 @@ func (r *lazyNewSessionTurnRunner) handleHostCommandPreInit(userMsg string) (res
 		if val != "enabled" && val != "disabled" {
 			return "Usage: /approval <enabled|disabled>", true, nil
 		}
-		if r.opts.ApprovalsMode == val {
-			return "Approvals mode already " + val, true, nil
+		if r.opts.ApprovalsMode != val {
+			r.opts.ApprovalsMode = val
 		}
-		r.opts.ApprovalsMode = val
 		r.emitPreInit(events.Event{
 			Type:    "approvals.changed",
 			Message: "Approval mode changed",
@@ -1528,12 +1484,6 @@ func (r *lazyNewSessionTurnRunner) initForFirstTurn(firstUserMsg string) error {
 		// refresh tracker removed
 	}
 
-	if r.pendingSwarmSet {
-		if err := r.engine.SetSwarmMode(r.pendingSwarmEnabled); err != nil {
-			return fmt.Errorf("enable swarm mode: %w", err)
-		}
-	}
-
 	r.initialized = true
 	return nil
 }
@@ -1586,22 +1536,9 @@ type tuiTurnRunner struct {
 	pendingTurnSteps    int
 	pendingTurnDuration time.Duration
 
-	swarmWorkers     map[string]context.CancelFunc
-	swarmSyncCancel  context.CancelFunc
-	swarmModeEnabled bool
-
 	llmClient     llm.LLMClient
 	baseExecutor  agent.HostExecutor
 	toolManifests []pkgtools.ToolManifest
-
-	swarmSummary   string
-	swarmSummaryMu sync.Mutex
-	swarmStateMu   sync.Mutex
-	swarmRegistry  orchestrator.Registry
-	swarmMetrics   orchestrator.Metrics
-	swarmRegOK     bool
-	swarmMetricsOK bool
-	orchToolCalled bool
 }
 
 // ReadVFS reads a virtual filesystem path via the run's mounted VFS.
@@ -1658,91 +1595,6 @@ func (r *tuiTurnRunner) VFS() *vfs.FS {
 		return nil
 	}
 	return r.fs
-}
-
-func (r *tuiTurnRunner) setSwarmSummary(summary string) {
-	if r == nil {
-		return
-	}
-	r.swarmSummaryMu.Lock()
-	defer r.swarmSummaryMu.Unlock()
-	r.swarmSummary = summary
-}
-
-func (r *tuiTurnRunner) getSwarmSummary() string {
-	if r == nil {
-		return ""
-	}
-	r.swarmSummaryMu.Lock()
-	defer r.swarmSummaryMu.Unlock()
-	return r.swarmSummary
-}
-
-func (r *tuiTurnRunner) GetSwarmSummary() string {
-	return r.getSwarmSummary()
-}
-
-func (r *tuiTurnRunner) setSwarmRegistry(reg orchestrator.Registry) {
-	if r == nil {
-		return
-	}
-	r.swarmStateMu.Lock()
-	defer r.swarmStateMu.Unlock()
-	r.swarmRegistry = reg
-	r.swarmRegOK = true
-}
-
-func (r *tuiTurnRunner) setSwarmMetrics(metrics orchestrator.Metrics) {
-	if r == nil {
-		return
-	}
-	r.swarmStateMu.Lock()
-	defer r.swarmStateMu.Unlock()
-	r.swarmMetrics = metrics
-	r.swarmMetricsOK = true
-}
-
-func (r *tuiTurnRunner) clearSwarmState() {
-	if r == nil {
-		return
-	}
-	r.swarmStateMu.Lock()
-	defer r.swarmStateMu.Unlock()
-	r.swarmRegistry = orchestrator.Registry{}
-	r.swarmMetrics = orchestrator.Metrics{}
-	r.swarmRegOK = false
-	r.swarmMetricsOK = false
-}
-
-func (r *tuiTurnRunner) GetSwarmRegistry() (orchestrator.Registry, error) {
-	if r == nil {
-		return orchestrator.Registry{}, fmt.Errorf("runner is nil")
-	}
-	r.swarmStateMu.Lock()
-	defer r.swarmStateMu.Unlock()
-	if !r.swarmRegOK {
-		return orchestrator.Registry{}, fmt.Errorf("swarm registry unavailable")
-	}
-	return r.swarmRegistry, nil
-}
-
-func (r *tuiTurnRunner) GetSwarmMetrics() (orchestrator.Metrics, error) {
-	if r == nil {
-		return orchestrator.Metrics{}, fmt.Errorf("runner is nil")
-	}
-	r.swarmStateMu.Lock()
-	defer r.swarmStateMu.Unlock()
-	if !r.swarmMetricsOK {
-		return orchestrator.Metrics{}, fmt.Errorf("swarm metrics unavailable")
-	}
-	return r.swarmMetrics, nil
-}
-
-func (r *tuiTurnRunner) markOrchestratorToolCall() {
-	if r == nil {
-		return
-	}
-	r.orchToolCalled = true
 }
 
 func (r *tuiTurnRunner) RunTurn(ctx context.Context, userMsg string) (string, error) {
@@ -2106,29 +1958,10 @@ func (r *tuiTurnRunner) runThroughAgent(ctx context.Context, appendUserMsg bool,
 		r.conversation = append(r.conversation, toolOutputs...)
 	}
 	start := time.Now()
-	r.orchToolCalled = false
 	out, updated, stepCount, err := r.runner.RunConversation(ctx, r.conversation)
 	dur = time.Since(start)
 	steps = stepCount
 	r.conversation = updated
-
-	// Enforce orchestration tool usage when swarm mode is enabled.
-	if err == nil && r.swarmModeEnabled && !r.orchToolCalled {
-		sys := llm.LLMMessage{
-			Role:    "system",
-			Content: "You must delegate via orchestrator_spawn/orchestrator_task before answering. Plan, delegate, then call orchestrator_sync and summarize.",
-		}
-		msgs := append([]llm.LLMMessage{sys}, r.conversation...)
-		start = time.Now()
-		out, updated, stepCount, err = r.runner.RunConversation(ctx, msgs)
-		dur += time.Since(start)
-		steps += stepCount
-		r.conversation = updated
-	}
-	if err == nil && r.swarmModeEnabled && strings.TrimSpace(out) == "" {
-		_ = orchestrator.SyncRegistry(r.cfg, r.run.RunId)
-		out = "Orchestrator is awaiting worker updates. (No response text returned; sync triggered.)"
-	}
 
 	r.pendingTurnUsage.InputTokens += turnUsage.InputTokens
 	r.pendingTurnUsage.OutputTokens += turnUsage.OutputTokens
@@ -2337,8 +2170,6 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 
 	cmd, arg := splitSlashCommand(line)
 	switch cmd {
-	case "swarm":
-		return r.handleSwarmCommand(arg)
 	case "datadir":
 		return strings.TrimSpace(r.cfg.DataDir), true
 	case "editor":
@@ -2715,119 +2546,6 @@ func (r *tuiTurnRunner) handleSlashCommand(userMsg string) (resp string, handled
 		return strings.TrimSpace(r.workdirBase), true
 	default:
 		return "", false
-	}
-}
-
-func (r *tuiTurnRunner) handleSwarmCommand(arg string) (string, bool) {
-	if r == nil {
-		return "runner not ready", true
-	}
-	fields := strings.Fields(arg)
-	if len(fields) == 0 {
-		return "Usage: /swarm spawn <goal> | /swarm task <runId> <goal> | /swarm start <runId> | /swarm stop <runId> | /swarm list | /swarm sync [runId]", true
-	}
-	switch strings.ToLower(fields[0]) {
-	case "spawn":
-		goal := strings.TrimSpace(strings.TrimPrefix(arg, "spawn"))
-		if goal == "" {
-			return "Usage: /swarm spawn <goal>", true
-		}
-		run, err := store.CreateSubRun(r.cfg, r.run.SessionID, r.run.RunId, goal, r.run.MaxBytesForContext)
-		if err != nil {
-			return "spawn failed: " + err.Error(), true
-		}
-		if _, err := orchestrator.EnqueueTask(r.cfg, run.RunId, types.Task{
-			Goal:            goal,
-			AssignedToRunID: run.RunId,
-		}); err != nil {
-			return "enqueue failed: " + err.Error(), true
-		}
-		if err := r.startSwarmWorker(run); err != nil {
-			return "worker start failed: " + err.Error(), true
-		}
-		if err := orchestrator.SyncRegistry(r.cfg, r.run.RunId); err != nil {
-			return "spawned " + run.RunId + " (sync warn: " + err.Error() + ")", true
-		}
-		return "spawned " + run.RunId, true
-	case "task":
-		if len(fields) < 3 {
-			return "Usage: /swarm task <runId> <goal>", true
-		}
-		runID := strings.TrimSpace(fields[1])
-		goal := strings.TrimSpace(strings.TrimPrefix(arg, "task"))
-		goal = strings.TrimSpace(strings.TrimPrefix(goal, runID))
-		if goal == "" {
-			return "Usage: /swarm task <runId> <goal>", true
-		}
-		if _, err := store.LoadRun(r.cfg, runID); err != nil {
-			return "load failed: " + err.Error(), true
-		}
-		if _, err := orchestrator.EnqueueTask(r.cfg, runID, types.Task{
-			Goal:            goal,
-			AssignedToRunID: runID,
-		}); err != nil {
-			return "enqueue failed: " + err.Error(), true
-		}
-		if r.swarmWorkers == nil || r.swarmWorkers[runID] == nil {
-			if run, err := store.LoadRun(r.cfg, runID); err == nil {
-				_ = r.startSwarmWorker(run) // best-effort; worker may already be running elsewhere
-			}
-		}
-		if err := orchestrator.SyncRegistry(r.cfg, r.run.RunId); err != nil {
-			return "task queued (sync warn: " + err.Error() + ")", true
-		}
-		return "task queued for " + runID, true
-	case "start":
-		if len(fields) < 2 {
-			return "Usage: /swarm start <runId>", true
-		}
-		runID := strings.TrimSpace(fields[1])
-		run, err := store.LoadRun(r.cfg, runID)
-		if err != nil {
-			return "load failed: " + err.Error(), true
-		}
-		if err := r.startSwarmWorker(run); err != nil {
-			return "worker start failed: " + err.Error(), true
-		}
-		_ = orchestrator.SyncRegistry(r.cfg, r.run.RunId)
-		return "started " + runID, true
-	case "stop":
-		if len(fields) < 2 {
-			return "Usage: /swarm stop <runId>", true
-		}
-		runID := strings.TrimSpace(fields[1])
-		if r.swarmWorkers == nil {
-			return "no swarm workers", true
-		}
-		cancel := r.swarmWorkers[runID]
-		if cancel == nil {
-			return "no worker for " + runID, true
-		}
-		cancel()
-		delete(r.swarmWorkers, runID)
-		_ = orchestrator.SyncRegistry(r.cfg, r.run.RunId)
-		return "stopped " + runID, true
-	case "list":
-		if r.swarmWorkers == nil || len(r.swarmWorkers) == 0 {
-			return "no swarm workers", true
-		}
-		ids := make([]string, 0, len(r.swarmWorkers))
-		for id := range r.swarmWorkers {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		return "workers: " + strings.Join(ids, ", "), true
-	case "sync":
-		target := strings.TrimSpace(r.run.RunId)
-		if len(fields) >= 2 && strings.TrimSpace(fields[1]) != "" {
-			target = strings.TrimSpace(fields[1])
-		}
-		if err := orchestrator.SyncRegistry(r.cfg, target); err != nil {
-			return "sync failed: " + err.Error(), true
-		}
-		return "synced registry", true
-	default:
-		return "Usage: /swarm spawn <goal> | /swarm task <runId> <goal> | /swarm start <runId> | /swarm stop <runId> | /swarm list | /swarm sync [runId]", true
 	}
 }
 
