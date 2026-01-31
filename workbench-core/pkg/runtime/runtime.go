@@ -350,7 +350,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		},
 	}
 
-	auditObs := newAuditObserver(fs)
+	auditObs := newAuditObserver(cfg.Run.RunId, cfg.Emit)
 
 	exec := NewExecutor(executor, ExecutorOptions{
 		Emit:      cfg.Emit,

@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/config"
@@ -38,15 +39,26 @@ type monitorModel struct {
 
 	offset int64
 
-	vp    viewport.Model
 	input textinput.Model
 
-	lines []string
+	activity    []string
+	maxActivity int
+
+	taskStatus map[string]string
+	stats      monitorStats
+	memResults []string
+	model      string
+	role       string
 
 	tailCh <-chan store.TailedEvent
 	errCh  <-chan error
 
 	cancel context.CancelFunc
+}
+
+type monitorStats struct {
+	started   time.Time
+	tasksDone int
 }
 
 func RunMonitor(ctx context.Context, cfg config.Config, runID string) error {
@@ -68,17 +80,16 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	}
 
 	evs, off, _ := store.ListEvents(cfg, runID)
-	lines := make([]string, 0, 200)
+	act := make([]string, 0, 200)
+	taskStatus := map[string]string{}
+	stats := monitorStats{started: time.Now()}
 	for _, e := range evs {
-		lines = append(lines, formatEventLine(e))
+		act = append(act, formatEventLine(e))
+		updateStateFromEvent(e, taskStatus, &stats, nil, nil)
 	}
-	if len(lines) > 200 {
-		lines = lines[len(lines)-200:]
+	if len(act) > 200 {
+		act = act[len(act)-200:]
 	}
-
-	vp := viewport.New(0, 0)
-	vp.SetContent(strings.Join(lines, "\n"))
-	vp.GotoBottom()
 
 	in := textinput.New()
 	in.Placeholder = "/task <goal> | /memory search <query> | /role <name> | /model <id> | /quit"
@@ -88,16 +99,18 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	tailCh, errCh := store.TailEvents(cfg, tctx, runID, off)
 
 	return &monitorModel{
-		ctx:    ctx,
-		cfg:    cfg,
-		runID:  runID,
-		offset: off,
-		vp:     vp,
-		input:  in,
-		lines:  lines,
-		tailCh: tailCh,
-		errCh:  errCh,
-		cancel: cancel,
+		ctx:         ctx,
+		cfg:         cfg,
+		runID:       runID,
+		offset:      off,
+		input:       in,
+		activity:    act,
+		maxActivity: 400,
+		taskStatus:  taskStatus,
+		stats:       stats,
+		tailCh:      tailCh,
+		errCh:       errCh,
+		cancel:      cancel,
 	}, nil
 }
 
@@ -108,41 +121,37 @@ func (m *monitorModel) Init() tea.Cmd {
 func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.vp.Width = msg.Width
-		m.vp.Height = imax(3, msg.Height-2)
-		m.vp.SetContent(strings.Join(m.lines, "\n"))
-		m.vp.GotoBottom()
+		// layout recalculated in View; nothing to store.
 		return m, nil
 
 	case tailedEventMsg:
 		m.offset = msg.ev.NextOffset
-		m.lines = append(m.lines, formatEventLine(msg.ev.Event))
-		if len(m.lines) > 400 {
-			m.lines = m.lines[len(m.lines)-400:]
+		line := formatEventLine(msg.ev.Event)
+		m.activity = append(m.activity, line)
+		if len(m.activity) > m.maxActivity {
+			m.activity = m.activity[len(m.activity)-m.maxActivity:]
 		}
-		m.vp.SetContent(strings.Join(m.lines, "\n"))
-		m.vp.GotoBottom()
+		updateStateFromEvent(msg.ev.Event, m.taskStatus, &m.stats, &m.model, &m.role)
 		return m, m.listenEvent()
 
 	case tailErrMsg:
 		if msg.err != nil {
-			m.lines = append(m.lines, "[error] "+msg.err.Error())
-			if len(m.lines) > 400 {
-				m.lines = m.lines[len(m.lines)-400:]
+			m.activity = append(m.activity, "[error] "+msg.err.Error())
+			if len(m.activity) > m.maxActivity {
+				m.activity = m.activity[len(m.activity)-m.maxActivity:]
 			}
-			m.vp.SetContent(strings.Join(m.lines, "\n"))
-			m.vp.GotoBottom()
 		}
 		return m, m.listenErr()
 
 	case commandLinesMsg:
 		if len(msg.lines) != 0 {
-			m.lines = append(m.lines, msg.lines...)
-			if len(m.lines) > 400 {
-				m.lines = m.lines[len(m.lines)-400:]
+			m.activity = append(m.activity, msg.lines...)
+			if len(m.activity) > m.maxActivity {
+				m.activity = m.activity[len(m.activity)-m.maxActivity:]
 			}
-			m.vp.SetContent(strings.Join(m.lines, "\n"))
-			m.vp.GotoBottom()
+			if strings.HasPrefix(strings.TrimSpace(msg.lines[0]), "[memory] search:") {
+				m.memResults = msg.lines[1:]
+			}
 		}
 		return m, nil
 
@@ -170,8 +179,19 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *monitorModel) View() string {
-	header := fmt.Sprintf("Workbench Monitor | run=%s | offset=%d", m.runID, m.offset)
-	return header + "\n" + m.vp.View() + "\n" + m.input.View()
+	header := fmt.Sprintf("Workbench - Always On | Model: %s | Role: %s | Run: %s", fallback(m.model, "(unknown)"), fallback(m.role, "(none)"), m.runID)
+
+	left := lipgloss.NewStyle().Width(60).Render(renderSection("Activity Stream", strings.Join(m.activity, "\n")))
+
+	rightTop := renderQueue(m.taskStatus)
+	rightStats := renderStats(m.stats)
+	rightMem := renderMemResults(m.memResults)
+	right := lipgloss.JoinVertical(lipgloss.Left, renderSection("Task Queue", rightTop), renderSection("Stats", rightStats), renderSection("Memory", rightMem))
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	cmdBar := renderSection("Commands", "/task \"goal\"   /role <name>   /model <id>   /memory search \"query\"   /quit")
+
+	return header + "\n" + body + "\n" + m.input.View() + "\n" + cmdBar
 }
 
 func (m *monitorModel) listenEvent() tea.Cmd {
@@ -316,9 +336,111 @@ func formatEventLine(e types.Event) string {
 	return line
 }
 
-func imax(a, b int) int {
-	if a > b {
-		return a
+func updateStateFromEvent(e types.Event, tasks map[string]string, stats *monitorStats, model *string, role *string) {
+	if tasks == nil {
+		return
 	}
-	return b
+	taskID := strings.TrimSpace(e.Data["taskId"])
+	switch e.Type {
+	case "task.queued", "task.generated":
+		if taskID != "" {
+			tasks[taskID] = "pending"
+		}
+	case "task.start":
+		if taskID != "" {
+			tasks[taskID] = "active"
+		}
+	case "task.done":
+		if taskID != "" {
+			tasks[taskID] = strings.TrimSpace(e.Data["status"])
+		}
+		if stats != nil {
+			stats.tasksDone++
+			if stats.started.IsZero() {
+				stats.started = time.Now()
+			}
+		}
+	}
+	if model != nil {
+		if v := strings.TrimSpace(e.Data["model"]); v != "" {
+			*model = v
+		}
+	}
+	if role != nil {
+		if v := strings.TrimSpace(e.Data["role"]); v != "" {
+			*role = v
+		}
+	}
+}
+
+func renderQueue(tasks map[string]string) string {
+	active := []string{}
+	pending := []string{}
+	done := []string{}
+	for id, st := range tasks {
+		switch strings.ToLower(st) {
+		case "active", "in_progress":
+			active = append(active, id)
+		case "pending", "":
+			pending = append(pending, id)
+		default:
+			done = append(done, fmt.Sprintf("%s (%s)", id, st))
+		}
+	}
+	sort.Strings(active)
+	sort.Strings(pending)
+	sort.Strings(done)
+	var b strings.Builder
+	if len(active) > 0 {
+		b.WriteString("[ACTIVE] ")
+		b.WriteString(strings.Join(active, ", "))
+		b.WriteString("\n")
+	}
+	if len(pending) > 0 {
+		b.WriteString("[PENDING] ")
+		b.WriteString(strings.Join(pending, ", "))
+		b.WriteString("\n")
+	}
+	if len(done) > 0 {
+		b.WriteString("[DONE] ")
+		if len(done) > 3 {
+			done = done[len(done)-3:]
+			b.WriteString(strings.Join(done, ", "))
+			b.WriteString(" (latest 3)")
+		} else {
+			b.WriteString(strings.Join(done, ", "))
+		}
+		b.WriteString("\n")
+	}
+	if b.Len() == 0 {
+		return "No tasks yet."
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func renderStats(s monitorStats) string {
+	uptime := ""
+	if !s.started.IsZero() {
+		uptime = time.Since(s.started).Round(time.Second).String()
+	}
+	return fmt.Sprintf("Tasks done: %d\nUptime: %s", s.tasksDone, fallback(uptime, "unknown"))
+}
+
+func renderMemResults(results []string) string {
+	if len(results) == 0 {
+		return "No memory results."
+	}
+	return strings.Join(results, "\n")
+}
+
+func renderSection(title, body string) string {
+	header := lipgloss.NewStyle().Bold(true).Render(title)
+	return header + "\n" + body
+}
+
+func fallback(v, def string) string {
+	if strings.TrimSpace(v) == "" {
+		return def
+	}
+	return v
 }
