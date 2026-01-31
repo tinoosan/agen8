@@ -4,15 +4,16 @@ import (
 	"context"
 	"fmt"
 
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/vfsutil"
-	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // ToolsResource exposes tool discovery under the VFS mount "/tools".
 type ToolsResource struct {
-	BaseDir string
-	Mount   string
+	vfs.ReadOnlyResource
+	BaseDir  string
+	Mount    string
 	Registry pkgtools.ToolManifestRegistry
 }
 
@@ -21,10 +22,15 @@ func NewToolsResource(reg pkgtools.ToolManifestRegistry) (*ToolsResource, error)
 		return nil, fmt.Errorf("tool manifest registry is required")
 	}
 	return &ToolsResource{
-		BaseDir:  "",
-		Mount:    vfs.MountTools,
-		Registry: reg,
+		ReadOnlyResource: vfs.ReadOnlyResource{Name: "tools"},
+		BaseDir:          "",
+		Mount:            vfs.MountTools,
+		Registry:         reg,
 	}, nil
+}
+
+func (tr *ToolsResource) SupportsNestedList() bool {
+	return false
 }
 
 func (tr *ToolsResource) List(subpath string) ([]vfs.Entry, error) {
@@ -89,9 +95,9 @@ func (tr *ToolsResource) readManifest(toolID string) ([]byte, error) {
 }
 
 func (tr *ToolsResource) Write(_ string, _ []byte) error {
-	return fmt.Errorf("tools write: not supported (tools is read-only)")
+	return tr.ReadOnlyResource.Write("", nil)
 }
 
 func (tr *ToolsResource) Append(_ string, _ []byte) error {
-	return fmt.Errorf("tools append: not supported (tools is read-only)")
+	return tr.ReadOnlyResource.Append("", nil)
 }

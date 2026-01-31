@@ -30,6 +30,7 @@ type ToolCallFunction struct {
 
 type LLMClient interface {
 	Generate(ctx context.Context, req LLMRequest) (LLMResponse, error)
+	SupportsStreaming() bool
 }
 
 type LLMStreamChunk struct {

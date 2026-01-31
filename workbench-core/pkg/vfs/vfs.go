@@ -19,11 +19,32 @@ func NewFS() *FS {
 }
 
 // Mount registers a resource under the given name.
-func (fs *FS) Mount(name string, r Resource) {
+func (fs *FS) Mount(name string, r Resource) error {
+	if err := validateMountPath(name); err != nil {
+		return err
+	}
 	if fs.mounts == nil {
 		fs.mounts = make(map[string]Resource)
 	}
 	fs.mounts[name] = r
+	return nil
+}
+
+func validateMountPath(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("mount path cannot be empty")
+	}
+	if strings.HasPrefix(name, "/") {
+		return fmt.Errorf("mount path must not start with /")
+	}
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("mount path cannot contain ..")
+	}
+	if strings.Contains(name, "/") {
+		return fmt.Errorf("mount path cannot contain '/'")
+	}
+	return nil
 }
 
 // Resolve takes a virtual path and returns the mount name, mounted resource, subpath, and any error.

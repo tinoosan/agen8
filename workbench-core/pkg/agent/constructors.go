@@ -40,7 +40,7 @@ func NewAgent(llmClient llm.LLMClient, exec HostExecutor, cfg AgentConfig) (Agen
 		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
 		SystemPrompt:     strings.TrimSpace(cfg.SystemPrompt),
-		Context:          cfg.Context,
+		PromptSource:     cfg.PromptSource,
 		MaxTokens:        cfg.MaxTokens,
 
 		Hooks:      cfg.Hooks,

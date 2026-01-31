@@ -11,6 +11,13 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
+func mustMount(t *testing.T, fs *vfs.FS, name string, r vfs.Resource) {
+	t.Helper()
+	if err := fs.Mount(name, r); err != nil {
+		t.Fatalf("mount %s: %v", name, err)
+	}
+}
+
 func TestResolveAtRefs_ExactWorkdirPath(t *testing.T) {
 	workdir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(workdir, "cmd"), 0755); err != nil {
@@ -25,7 +32,7 @@ func TestResolveAtRefs_ExactWorkdirPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountProject, workdirRes)
+	mustMount(t, fs, vfs.MountProject, workdirRes)
 
 	artifacts := newArtifactIndex()
 	res, err := ResolveAtRefs(fs, workdirRes.BaseDir, artifacts, "please edit @cmd/main.go", 6, 48*1024, 12*1024)
@@ -50,14 +57,14 @@ func TestResolveAtRefs_ArtifactFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountProject, workdirRes)
+	mustMount(t, fs, vfs.MountProject, workdirRes)
 
 	wsDir := t.TempDir()
 	wsRes, err := resources.NewDirResource(wsDir, vfs.MountWorkspace)
 	if err != nil {
 		t.Fatalf("NewDirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	mustMount(t, fs, vfs.MountWorkspace, wsRes)
 
 	if err := os.MkdirAll(filepath.Join(wsDir, "sub"), 0755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -87,14 +94,14 @@ func TestResolveAtRefs_ExactWorkspacePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountProject, workdirRes)
+	mustMount(t, fs, vfs.MountProject, workdirRes)
 
 	wsDir := t.TempDir()
 	wsRes, err := resources.NewDirResource(wsDir, vfs.MountWorkspace)
 	if err != nil {
 		t.Fatalf("NewDirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	mustMount(t, fs, vfs.MountWorkspace, wsRes)
 
 	if err := os.WriteFile(filepath.Join(wsDir, "out.txt"), []byte("hello\n"), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -120,14 +127,14 @@ func TestResolveAtRefs_ExplicitVPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountProject, workdirRes)
+	mustMount(t, fs, vfs.MountProject, workdirRes)
 
 	wsDir := t.TempDir()
 	wsRes, err := resources.NewDirResource(wsDir, vfs.MountWorkspace)
 	if err != nil {
 		t.Fatalf("NewDirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	mustMount(t, fs, vfs.MountWorkspace, wsRes)
 
 	if err := os.WriteFile(filepath.Join(workdir, "out.txt"), []byte("workdir\n"), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -175,13 +182,13 @@ func TestResolveAtRefs_FuzzyCrossRootAmbiguous(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountProject, workdirRes)
+	mustMount(t, fs, vfs.MountProject, workdirRes)
 
 	wsRes, err := resources.NewDirResource(wsDir, vfs.MountWorkspace)
 	if err != nil {
 		t.Fatalf("NewDirResource: %v", err)
 	}
-	fs.Mount(vfs.MountWorkspace, wsRes)
+	mustMount(t, fs, vfs.MountWorkspace, wsRes)
 
 	artifacts := newArtifactIndex()
 	res, err := ResolveAtRefs(fs, workdirRes.BaseDir, artifacts, "read @dup.txt", 6, 48*1024, 12*1024)
@@ -214,7 +221,7 @@ func TestResolveAtRefs_FuzzyUnambiguous(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountProject, workdirRes)
+	mustMount(t, fs, vfs.MountProject, workdirRes)
 
 	artifacts := newArtifactIndex()
 	res, err := ResolveAtRefs(fs, workdirRes.BaseDir, artifacts, "read @hello.txt", 6, 48*1024, 12*1024)
@@ -248,7 +255,7 @@ func TestResolveAtRefs_Ambiguous(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkdirResource: %v", err)
 	}
-	fs.Mount(vfs.MountProject, workdirRes)
+	mustMount(t, fs, vfs.MountProject, workdirRes)
 
 	artifacts := newArtifactIndex()
 	res, err := ResolveAtRefs(fs, workdirRes.BaseDir, artifacts, "read @dup.txt", 6, 48*1024, 12*1024)

@@ -78,7 +78,7 @@ type RunRuntimeConfig struct {
 	// Model is the configured LLM model identifier for this run.
 	Model string `json:"model,omitempty"`
 
-	// Context budgets applied by the ContextUpdater per step.
+	// Context budgets applied by the PromptUpdater per step.
 	MaxTraceBytes   int `json:"maxTraceBytes,omitempty"`
 	MaxMemoryBytes  int `json:"maxMemoryBytes,omitempty"`
 	MaxProfileBytes int `json:"maxProfileBytes,omitempty"`

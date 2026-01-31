@@ -17,7 +17,7 @@ type AgentConfig struct {
 	ReasoningEffort  string
 	ReasoningSummary string
 	SystemPrompt     string
-	Context          ContextSource
+	PromptSource     PromptSource
 	ToolManifests    []tools.ToolManifest
 	ToolRegistry     *ToolRegistry
 	ExtraTools       []llm.Tool
@@ -101,9 +101,9 @@ func WithSystemPrompt(prompt string) Option {
 	}
 }
 
-func WithContextSource(src ContextSource) Option {
+func WithPromptSource(src PromptSource) Option {
 	return func(cfg *BuildConfig) error {
-		cfg.Context = src
+		cfg.PromptSource = src
 		return nil
 	}
 }

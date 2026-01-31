@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,7 +91,17 @@ func AppendEvent(cfg config.Config, runId, eventType, message string, data map[s
 		return fmt.Errorf("error writing event for run %s: %w", runId, err)
 	}
 
-	traceDir := fsutil.GetLogDir(cfg.DataDir, runId)
+	if err := mirrorTraceEvent(cfg.DataDir, runId, b); err != nil {
+		log.Printf("store: warning: failed to mirror trace event for run %s: %v", runId, err)
+	}
+
+	//f.Sync()
+	return nil
+
+}
+
+func mirrorTraceEvent(dataDir, runId string, payload []byte) error {
+	traceDir := fsutil.GetLogDir(dataDir, runId)
 	if err := os.MkdirAll(traceDir, 0755); err != nil {
 		return fmt.Errorf("error creating trace directory %s: %w", traceDir, err)
 	}
@@ -101,13 +112,10 @@ func AppendEvent(cfg config.Config, runId, eventType, message string, data map[s
 	}
 	defer tf.Close()
 
-	if _, err := tf.Write(append(b, '\n')); err != nil {
+	if _, err := tf.Write(append(payload, '\n')); err != nil {
 		return fmt.Errorf("error writing trace event for run %s: %w", runId, err)
 	}
-
-	//f.Sync()
 	return nil
-
 }
 
 // ListEvents retrieves all recorded events for a given run ID.

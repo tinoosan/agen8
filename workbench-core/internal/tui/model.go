@@ -17,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/pkg/agent"
+	"github.com/tinoosan/workbench-core/pkg/debuglog"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -25,8 +26,7 @@ import (
 
 func cursorDebugLog(hypothesisId, location, message string, data map[string]any) {
 	// #region agent log
-	const logPath = "/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log"
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := debuglog.OpenLogFile()
 	if err != nil {
 		return
 	}

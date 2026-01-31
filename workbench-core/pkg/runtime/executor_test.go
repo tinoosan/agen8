@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/resources"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
-	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 
 func TestGuardMiddleware_ShortCircuits(t *testing.T) {
@@ -40,7 +40,9 @@ func TestDiffMiddleware_EmitsPatchPreview(t *testing.T) {
 		t.Fatalf("workdir resource: %v", err)
 	}
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountProject, res)
+	if err := fs.Mount(vfs.MountProject, res); err != nil {
+		t.Fatalf("mount project: %v", err)
+	}
 
 	base := &agent.HostOpExecutor{FS: fs, DefaultMaxBytes: 4096}
 

@@ -12,7 +12,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
-func TestContextConstructor_IncludesProfileAndMemory(t *testing.T) {
+func TestPromptBuilder_IncludesProfileAndMemory(t *testing.T) {
 	t.Parallel()
 
 	fs := vfs.NewFS()
@@ -27,8 +27,12 @@ func TestContextConstructor_IncludesProfileAndMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDirResource(profile): %v", err)
 	}
-	fs.Mount(vfs.MountMemory, memRes)
-	fs.Mount(vfs.MountProfile, profileRes)
+	if err := fs.Mount(vfs.MountMemory, memRes); err != nil {
+		t.Fatalf("mount memory: %v", err)
+	}
+	if err := fs.Mount(vfs.MountProfile, profileRes); err != nil {
+		t.Fatalf("mount profile: %v", err)
+	}
 
 	today := time.Now().Format("2006-01-02") + "-memory.md"
 	if err := os.WriteFile(filepath.Join(memDir, today), []byte("remember this"), 0644); err != nil {
@@ -38,7 +42,7 @@ func TestContextConstructor_IncludesProfileAndMemory(t *testing.T) {
 		t.Fatalf("write profile.md: %v", err)
 	}
 
-	constructor := &ContextConstructor{
+	constructor := &PromptBuilder{
 		FS:              fs,
 		MaxProfileBytes: 1024,
 		MaxMemoryBytes:  1024,
@@ -56,10 +60,10 @@ func TestContextConstructor_IncludesProfileAndMemory(t *testing.T) {
 	}
 }
 
-func TestContextConstructor_OmitsWhenEmpty(t *testing.T) {
+func TestPromptBuilder_OmitsWhenEmpty(t *testing.T) {
 	t.Parallel()
 
-	constructor := &ContextConstructor{
+	constructor := &PromptBuilder{
 		FS:              vfs.NewFS(),
 		MaxProfileBytes: 1024,
 		MaxMemoryBytes:  1024,

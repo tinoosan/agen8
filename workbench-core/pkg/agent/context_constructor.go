@@ -13,9 +13,9 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
-// ContextConstructor assembles a minimal prompt context for autonomous runs.
+// PromptBuilder assembles a minimal prompt context for autonomous runs.
 // It intentionally avoids session history, trace summaries, and skill metadata.
-type ContextConstructor struct {
+type PromptBuilder struct {
 	FS *vfs.FS
 
 	Cfg config.Config
@@ -50,7 +50,7 @@ type ContextConstructor struct {
 }
 
 // SystemPrompt renders a compact prompt: base + profile + memory.
-func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error) {
+func (c *PromptBuilder) SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error) {
 	if strings.TrimSpace(basePrompt) == "" {
 		basePrompt = DefaultSystemPrompt()
 	}
@@ -83,7 +83,7 @@ func (c *ContextConstructor) SystemPrompt(ctx context.Context, basePrompt string
 }
 
 // ObserveHostOp records the most recent host op request/response.
-func (c *ContextConstructor) ObserveHostOp(req types.HostOpRequest, resp types.HostOpResponse) {
+func (c *PromptBuilder) ObserveHostOp(req types.HostOpRequest, resp types.HostOpResponse) {
 	if c == nil {
 		return
 	}
@@ -101,7 +101,7 @@ func (c *ContextConstructor) ObserveHostOp(req types.HostOpRequest, resp types.H
 }
 
 // SetFileAttachments replaces the current attachment set for this turn.
-func (c *ContextConstructor) SetFileAttachments(attachments []FileAttachment) {
+func (c *PromptBuilder) SetFileAttachments(attachments []FileAttachment) {
 	if c == nil {
 		return
 	}
@@ -109,14 +109,14 @@ func (c *ContextConstructor) SetFileAttachments(attachments []FileAttachment) {
 }
 
 // ClearFileAttachments clears any cached attachments for the current turn.
-func (c *ContextConstructor) ClearFileAttachments() {
+func (c *PromptBuilder) ClearFileAttachments() {
 	if c == nil {
 		return
 	}
 	c.FileAttachments = nil
 }
 
-func (c *ContextConstructor) readCap(path string, maxBytes int) string {
+func (c *PromptBuilder) readCap(path string, maxBytes int) string {
 	b, err := c.FS.Read(path)
 	if err != nil {
 		return ""

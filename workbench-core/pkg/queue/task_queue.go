@@ -50,7 +50,7 @@ func (q *TaskQueue) Next() *Item {
 	defer q.mu.Unlock()
 	for idx, it := range q.items {
 		status := it.Task.Status
-		if status == "" || status == "pending" {
+		if status == "" || status == types.TaskStatusPending {
 			// Remove from queue and return.
 			q.items = append(q.items[:idx], q.items[idx+1:]...)
 			return it
@@ -62,13 +62,17 @@ func (q *TaskQueue) Next() *Item {
 func (q *TaskQueue) IsIdle() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	filtered := q.items[:0]
+	idle := true
 	for _, it := range q.items {
 		status := it.Task.Status
-		if status == "" || status == "pending" || status == "active" || status == "in_progress" {
-			return false
+		if status == "" || status == types.TaskStatusPending || status == types.TaskStatusActive {
+			idle = false
+			filtered = append(filtered, it)
 		}
 	}
-	return true
+	q.items = filtered
+	return idle
 }
 
 func (q *TaskQueue) Snapshot() []Item {

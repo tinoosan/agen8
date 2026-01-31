@@ -15,7 +15,7 @@
 // # Tool Data Flow
 //
 // Tools are described with `tools.ToolManifest`/`tools.ToolAction`, and their results are
-// captured in `types.ToolResponse`. Tool calls are orchestrated by the runtime's `tools.Runner`,
+// captured in `types.ToolResponse`. Tool calls are orchestrated by the runtime's `tools.Orchestrator`,
 // which persists `ToolResponse`/artifacts under `/results/<callId>` so later steps or
 // host-side tooling can inspect what happened. The documents under `/tools` and `/results`
 // form the public API surface for tool discovery, invocation, and auditing.

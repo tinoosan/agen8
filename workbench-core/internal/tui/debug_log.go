@@ -2,12 +2,13 @@ package tui
 
 import (
 	"encoding/json"
-	"os"
 	"time"
+
+	"github.com/tinoosan/workbench-core/pkg/debuglog"
 )
 
 func logDebug(hypothesisId, location, message string, data map[string]interface{}) {
-	f, err := os.OpenFile("/Users/santinoonyeme/personal/dev/Projects/workbench/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := debuglog.OpenLogFile()
 	if err != nil {
 		return
 	}

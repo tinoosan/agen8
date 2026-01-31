@@ -10,8 +10,8 @@ type MemoryStore interface {
 	// BaseDir returns the absolute directory on disk where memory files live.
 	BaseDir() string
 
-	// GetMemory returns the contents of the memory file for the provided date (UTC).
-	GetMemory(ctx context.Context, date string) (string, error)
+	// ReadMemory returns the contents of the memory file for the provided date (UTC).
+	ReadMemory(ctx context.Context, date string) (string, error)
 
 	// WriteMemory replaces the memory file for the provided date.
 	WriteMemory(ctx context.Context, date string, text string) error

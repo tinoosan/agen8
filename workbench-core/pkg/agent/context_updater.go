@@ -19,7 +19,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
-// ContextUpdater keeps the model's bounded context synchronized with persistent
+// PromptUpdater keeps the model's bounded context synchronized with persistent
 // context sources (like /memory) and runtime sources (like /log).
 //
 // This is the "v0" implementation:
@@ -27,7 +27,7 @@ import (
 //   - it tracks a byte offset into /log so it only loads new events
 //   - it injects small bounded excerpts into the system prompt
 //   - it writes a context manifest for transparency/debugging
-type ContextUpdater struct {
+type PromptUpdater struct {
 	FS *vfs.FS
 
 	// Trace provides shared cursor tracking and trace read fallbacks.
@@ -99,7 +99,7 @@ type ContextPolicy struct {
 	FailureBump       bool     `json:"failureBump"`
 }
 
-type ContextManifest struct {
+type PromptManifest struct {
 	UpdatedAt string `json:"updatedAt"`
 	Step      int    `json:"step"`
 
@@ -145,7 +145,7 @@ type ContextManifest struct {
 
 // ObserveHostOp records the most recent host op request/response so the next
 // context update can adapt budgets deterministically.
-func (u *ContextUpdater) ObserveHostOp(req types.HostOpRequest, resp types.HostOpResponse) {
+func (u *PromptUpdater) ObserveHostOp(req types.HostOpRequest, resp types.HostOpResponse) {
 	if u == nil {
 		return
 	}
@@ -165,9 +165,9 @@ func (u *ContextUpdater) ObserveHostOp(req types.HostOpRequest, resp types.HostO
 
 // BuildSystemPrompt returns a base system prompt augmented with bounded context excerpts,
 // and a manifest describing what was loaded.
-func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string, step int) (string, ContextManifest, error) {
+func (u *PromptUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string, step int) (string, PromptManifest, error) {
 	if u == nil || u.FS == nil {
-		return "", ContextManifest{}, fmt.Errorf("context updater FS is required")
+		return "", PromptManifest{}, fmt.Errorf("prompt updater FS is required")
 	}
 
 	maxMem := u.MaxMemoryBytes
@@ -187,7 +187,7 @@ func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt strin
 		maxEvents = 500
 	}
 
-	manifest := ContextManifest{
+	manifest := PromptManifest{
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Step:      step,
 	}
@@ -308,8 +308,8 @@ func (u *ContextUpdater) BuildSystemPrompt(ctx context.Context, basePrompt strin
 	return system, manifest, nil
 }
 
-// SystemPrompt implements ContextSource by returning an augmented system prompt for a step.
-func (u *ContextUpdater) SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error) {
+// SystemPrompt implements PromptSource by returning an augmented system prompt for a step.
+func (u *PromptUpdater) SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error) {
 	s, _, err := u.BuildSystemPrompt(ctx, basePrompt, step)
 	return s, err
 }
@@ -353,10 +353,10 @@ func tailUTF8(b []byte, max int) ([]byte, bool) {
 	return out, true
 }
 
-// Ensure ContextUpdater is only used with the agent loop types.
+// Ensure PromptUpdater is only used with the agent loop types.
 var _ = types.HostOpRequest{}
 
-func (u *ContextUpdater) computePolicy(step int, baseProfile, baseMem, baseTrace int) ContextPolicy {
+func (u *PromptUpdater) computePolicy(step int, baseProfile, baseMem, baseTrace int) ContextPolicy {
 	p := ContextPolicy{Step: step}
 	if u.Trace != nil {
 		p.TraceCursorBefore = u.Trace.ensureCursor()

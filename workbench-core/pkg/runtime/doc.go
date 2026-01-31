@@ -11,12 +11,12 @@
 //     `/results`, `/tools`, `/skills`, `/log`, `/history`, and any other resources the
 //     runtime needs. The `resources.Factory` abstracts how directories, traces, history,
 //     and result artifacts tie back to configured stores.
-//   - Tool + Skill Wiring: Runtime maintains a `tools.Runner` plus builtin invokers
+//   - Tool + Skill Wiring: Runtime maintains a `tools.Orchestrator` plus builtin invokers
 //     (fs.*, shell, http, trace) and any optional custom `tools.ToolManifest`s. Skills are
 //     discovered from the data directory or workspace and mounted under `/skills` so the
 //     agent can read their instructions via the VFS.
-//   - Context + Hook Integration: The runtime holds `agent.ContextConstructor` and
-//     `agent.ContextUpdater` structs along with trace middleware so contextual prompts
+//   - Context + Hook Integration: The runtime holds `agent.PromptBuilder` and
+//     `agent.PromptUpdater` structs along with trace middleware so contextual prompts
 //     and reasoning traces flow through each step. It also orchestrates event emission
 //     and persistence callbacks supplied via the `BuildConfig` (history, memory, profile,
 //     results, trace stores, etc.).
@@ -26,12 +26,12 @@
 //
 // # Usage Pattern
 //
-//   cfg := runtime.BuildConfig{...} // provide stores, executors, emit hooks, etc.
-//   rt, err := runtime.Build(cfg)
-//   if err != nil {
-//       return nil, err
-//   }
-//   defer rt.Shutdown(ctx)
+//	cfg := runtime.BuildConfig{...} // provide stores, executors, emit hooks, etc.
+//	rt, err := runtime.Build(cfg)
+//	if err != nil {
+//	    return nil, err
+//	}
+//	defer rt.Shutdown(ctx)
 //
 // The `Runtime` exposes a `HostExecutor` that wires into `agent.New`; it can validate
 // configuration, mount stores, and register builtin tools so higher layers do not

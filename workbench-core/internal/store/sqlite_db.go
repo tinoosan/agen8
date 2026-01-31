@@ -20,6 +20,8 @@ var (
 	sqliteMigrated = map[string]bool{}
 )
 
+const currentSchemaVersion = 1
+
 var sqliteMigrations = []string{
 	`CREATE TABLE IF NOT EXISTS sessions (
 		session_id TEXT PRIMARY KEY,
@@ -156,10 +158,32 @@ func migrateSQLite(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("sqlite: begin migration: %w", err)
 	}
-	for _, stmt := range sqliteMigrations {
-		if _, err := tx.Exec(stmt); err != nil {
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS schema_version (
+		version INTEGER PRIMARY KEY,
+		applied_at TEXT NOT NULL
+	);`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqlite: schema_version: %w", err)
+	}
+	version, err := currentSchema(tx)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if version < currentSchemaVersion {
+		for _, stmt := range sqliteMigrations {
+			if _, err := tx.Exec(stmt); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("sqlite: migrate: %w", err)
+			}
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO schema_version (version, applied_at) VALUES (?, ?)`,
+			currentSchemaVersion,
+			time.Now().UTC().Format(time.RFC3339Nano),
+		); err != nil {
 			_ = tx.Rollback()
-			return fmt.Errorf("sqlite: migrate: %w", err)
+			return fmt.Errorf("sqlite: record schema version: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -169,6 +193,14 @@ func migrateSQLite(db *sql.DB) error {
 		return err
 	}
 	return nil
+}
+
+func currentSchema(tx *sql.Tx) (int, error) {
+	var version int
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&version); err != nil {
+		return 0, fmt.Errorf("sqlite: read schema version: %w", err)
+	}
+	return version, nil
 }
 
 func ensureMemorySchema(db *sql.DB) error {

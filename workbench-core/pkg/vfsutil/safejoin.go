@@ -12,16 +12,15 @@ func SafeJoinBaseDir(baseDir, subpath string) (string, error) {
 	if err := validate.NonEmpty("baseDir", baseDir); err != nil {
 		return "", err
 	}
-	clean := filepath.Clean(subpath)
-
-	if filepath.IsAbs(clean) {
-		return "", fmt.Errorf("absolute paths not allowed")
+	clean, _, err := validateSubpath(subpath)
+	if err != nil {
+		return "", err
 	}
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("invalid path: escapes mount root")
+	if clean == "" {
+		clean = "."
 	}
 
-	joined := filepath.Join(baseDir, clean)
+	joined := filepath.Join(baseDir, filepath.FromSlash(clean))
 
 	baseAbs, err := filepath.Abs(baseDir)
 	if err != nil {

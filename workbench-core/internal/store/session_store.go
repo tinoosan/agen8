@@ -87,6 +87,11 @@ func SaveSession(cfg config.Config, s types.Session) error {
 	if err != nil {
 		return err
 	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	b, err := types.MarshalPretty(s)
 	if err != nil {
 		return err
@@ -104,7 +109,7 @@ func SaveSession(cfg config.Config, s types.Session) error {
 	if createdAt == "" {
 		createdAt = now
 	}
-	_, err = db.Exec(
+	_, err = tx.Exec(
 		`INSERT INTO sessions (session_id, title, current_run_id, current_goal, runs_json, session_json, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(session_id) DO UPDATE SET
@@ -127,7 +132,7 @@ func SaveSession(cfg config.Config, s types.Session) error {
 	if err != nil {
 		return fmt.Errorf("save session: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // LoadSession reads session.json for a session ID.

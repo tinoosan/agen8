@@ -36,7 +36,8 @@ type StagingResource struct {
 	// MainFile is the read-only committed file name (e.g. "memory.md", "profile.md").
 	MainFile string
 
-	Store StagingStore
+	Store     StagingStore
+	planStore store.PlanFileStore
 }
 
 // ProfileResource is kept for compatibility; it is an alias of StagingResource.
@@ -60,11 +61,16 @@ func NewStagingResource(mount, mainFile string, s StagingStore) (*StagingResourc
 	if s == nil {
 		return nil, fmt.Errorf("%s store is required", mount)
 	}
+	var planStore store.PlanFileStore
+	if pfs, ok := s.(store.PlanFileStore); ok {
+		planStore = pfs
+	}
 	return &StagingResource{
-		BaseDir:  "",
-		Mount:    mount,
-		MainFile: mainFile,
-		Store:    s,
+		BaseDir:   "",
+		Mount:     mount,
+		MainFile:  mainFile,
+		Store:     s,
+		planStore: planStore,
 	}, nil
 }
 
@@ -73,6 +79,10 @@ func NewProfileResource(s store.ProfileVFSStore) (*ProfileResource, error) {
 		return nil, fmt.Errorf("profile store is required")
 	}
 	return NewStagingResource(vfs.MountProfile, "profile.md", profileStagingStore{s})
+}
+
+func (sr *StagingResource) SupportsNestedList() bool {
+	return false
 }
 
 // List lists entries under subpath relative to the mount.
@@ -87,7 +97,7 @@ func (sr *StagingResource) List(subpath string) ([]vfs.Entry, error) {
 			{Path: "update.md", IsDir: false},
 			{Path: "commits.jsonl", IsDir: false},
 		}
-		if _, ok := sr.Store.(store.PlanFileStore); ok {
+		if sr.planStore != nil {
 			entries = append(entries, vfs.Entry{Path: store.PlanFileName, IsDir: false})
 		}
 		return entries, nil
@@ -118,11 +128,10 @@ func (sr *StagingResource) Read(subpath string) ([]byte, error) {
 		s, err := sr.Store.GetCommitLog(context.Background())
 		return []byte(s), err
 	case store.PlanFileName:
-		planStore, ok := sr.Store.(store.PlanFileStore)
-		if !ok {
+		if sr.planStore == nil {
 			return nil, fmt.Errorf("%s read: plan file not supported", sr.Mount)
 		}
-		s, err := planStore.GetPlan(context.Background())
+		s, err := sr.planStore.GetPlan(context.Background())
 		return []byte(s), err
 	default:
 		return nil, fmt.Errorf("%s read: unknown item %q (allowed: %s, update.md, commits.jsonl)", sr.Mount, clean, sr.MainFile)
@@ -144,11 +153,10 @@ func (sr *StagingResource) Write(subpath string, data []byte) error {
 	case "update.md":
 		return sr.Store.SetUpdate(context.Background(), string(data))
 	case store.PlanFileName:
-		planStore, ok := sr.Store.(store.PlanFileStore)
-		if !ok {
+		if sr.planStore == nil {
 			return fmt.Errorf("%s write: plan file not supported", sr.Mount)
 		}
-		return planStore.SetPlan(context.Background(), string(data))
+		return sr.planStore.SetPlan(context.Background(), string(data))
 	default:
 		return fmt.Errorf("%s write: only update.md is writable", sr.Mount)
 	}
@@ -171,15 +179,14 @@ func (sr *StagingResource) Append(subpath string, data []byte) error {
 		}
 		return sr.Store.SetUpdate(context.Background(), prev+string(data))
 	case store.PlanFileName:
-		planStore, ok := sr.Store.(store.PlanFileStore)
-		if !ok {
+		if sr.planStore == nil {
 			return fmt.Errorf("%s append: plan file not supported", sr.Mount)
 		}
-		prev, err := planStore.GetPlan(context.Background())
+		prev, err := sr.planStore.GetPlan(context.Background())
 		if err != nil {
 			return err
 		}
-		return planStore.SetPlan(context.Background(), prev+string(data))
+		return sr.planStore.SetPlan(context.Background(), prev+string(data))
 	default:
 		return fmt.Errorf("%s append: only update.md is writable", sr.Mount)
 	}

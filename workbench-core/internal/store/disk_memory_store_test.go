@@ -21,18 +21,18 @@ func TestDiskMemoryStore_DailyRoundTrip(t *testing.T) {
 	if err := s.WriteMemory(ctx, today, content); err != nil {
 		t.Fatalf("WriteMemory: %v", err)
 	}
-	got, err := s.GetMemory(ctx, today)
+	got, err := s.ReadMemory(ctx, today)
 	if err != nil {
-		t.Fatalf("GetMemory: %v", err)
+		t.Fatalf("ReadMemory: %v", err)
 	}
 	if got != content {
-		t.Fatalf("GetMemory mismatch: got %q want %q", got, content)
+		t.Fatalf("ReadMemory mismatch: got %q want %q", got, content)
 	}
 
 	if err := s.AppendMemory(ctx, today, "\nmore"); err != nil {
 		t.Fatalf("AppendMemory: %v", err)
 	}
-	got, _ = s.GetMemory(ctx, today)
+	got, _ = s.ReadMemory(ctx, today)
 	if got != content+"\nmore" {
 		t.Fatalf("AppendMemory result mismatch: %q", got)
 	}

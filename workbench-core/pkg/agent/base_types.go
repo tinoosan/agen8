@@ -19,15 +19,15 @@ func (f HostExecFunc) Exec(ctx context.Context, req types.HostOpRequest) types.H
 	return f(ctx, req)
 }
 
-// ContextSource produces an augmented system prompt per agent step.
-type ContextSource interface {
+// PromptSource produces an augmented system prompt per agent step.
+type PromptSource interface {
 	SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error)
 }
 
-// ContextSourceFunc adapts a function to ContextSource.
-type ContextSourceFunc func(ctx context.Context, basePrompt string, step int) (string, error)
+// PromptSourceFunc adapts a function to PromptSource.
+type PromptSourceFunc func(ctx context.Context, basePrompt string, step int) (string, error)
 
-func (f ContextSourceFunc) SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error) {
+func (f PromptSourceFunc) SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error) {
 	return f(ctx, basePrompt, step)
 }
 

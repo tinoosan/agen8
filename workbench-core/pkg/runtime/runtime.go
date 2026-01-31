@@ -23,12 +23,12 @@ import (
 type Runtime struct {
 	FS              *vfs.FS
 	Executor        agent.HostExecutor
-	Runner          *tools.Runner
+	Runner          *tools.Orchestrator
 	ToolManifests   []tools.ToolManifest
 	BuiltinInvokers tools.MapRegistry
 	TraceMiddleware *agent.TraceMiddleware
-	Constructor     *agent.ContextConstructor
-	Updater         *agent.ContextUpdater
+	Constructor     *agent.PromptBuilder
+	Updater         *agent.PromptUpdater
 	WorkdirBase     string
 	MemStore        store.MemoryStore
 	ProfileStore    store.ProfileCommitter
@@ -57,6 +57,7 @@ type BuildConfig struct {
 	MaxTraceBytes         int
 	PriceInPerMTokensUSD  float64
 	PriceOutPerMTokensUSD float64
+	AuditReads            bool
 	Guard                 func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse
 	ArtifactObserve       func(path string)
 	PersistRun            func(run types.Run) error
@@ -64,12 +65,37 @@ type BuildConfig struct {
 	SaveSession           func(session types.Session) error
 }
 
-func Build(cfg BuildConfig) (*Runtime, error) {
+func (cfg BuildConfig) Validate() error {
 	if err := cfg.Cfg.Validate(); err != nil {
-		return nil, err
+		return err
 	}
 	if strings.TrimSpace(cfg.WorkdirAbs) == "" {
-		return nil, fmt.Errorf("workdir is required")
+		return fmt.Errorf("workdir is required")
+	}
+	if cfg.ResultsStore == nil {
+		return fmt.Errorf("results store is required")
+	}
+	if cfg.MemoryStore == nil {
+		return fmt.Errorf("memory store is required")
+	}
+	if cfg.ProfileStore == nil {
+		return fmt.Errorf("profile store is required")
+	}
+	if cfg.HistoryStore == nil {
+		return fmt.Errorf("history store is required")
+	}
+	if cfg.TraceStore == nil {
+		return fmt.Errorf("trace store is required")
+	}
+	if cfg.ConstructorStore == nil {
+		return fmt.Errorf("constructor store is required")
+	}
+	return nil
+}
+
+func Build(cfg BuildConfig) (*Runtime, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 
 	run := cfg.Run
@@ -89,7 +115,13 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		PriceOutPerMTokensUSD: cfg.PriceOutPerMTokensUSD,
 	}
 	if cfg.PersistRun != nil {
-		_ = cfg.PersistRun(run)
+		if err := cfg.PersistRun(run); err != nil && cfg.Emit != nil {
+			cfg.Emit(context.Background(), events.Event{
+				Type:    "runtime.warning",
+				Message: "Failed to persist run state",
+				Data:    map[string]string{"error": err.Error()},
+			})
+		}
 	}
 
 	if cfg.LoadSession != nil {
@@ -117,7 +149,13 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 				changed = true
 			}
 			if changed && cfg.SaveSession != nil {
-				_ = cfg.SaveSession(sess)
+				if err := cfg.SaveSession(sess); err != nil && cfg.Emit != nil {
+					cfg.Emit(context.Background(), events.Event{
+						Type:    "runtime.warning",
+						Message: "Failed to persist session state",
+						Data:    map[string]string{"error": err.Error()},
+					})
+				}
 			}
 		}
 	}
@@ -128,7 +166,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create workdir: %w", err)
 	}
-	fs.Mount(vfs.MountProject, workdirRes)
+	if err := fs.Mount(vfs.MountProject, workdirRes); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountProject, err)
+	}
 
 	runDir := fsutil.GetRunDir(cfg.Cfg.DataDir, cfg.Run.RunId)
 	planDir := filepath.Join(runDir, "plan")
@@ -156,7 +196,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create plan resource: %w", err)
 	}
-	fs.Mount(vfs.MountPlan, planRes)
+	if err := fs.Mount(vfs.MountPlan, planRes); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountPlan, err)
+	}
 
 	skillDir := fsutil.GetSkillsDir(cfg.Cfg.DataDir)
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
@@ -171,7 +213,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err := skillMgr.Scan(); err != nil {
 		return nil, fmt.Errorf("scan skills: %w", err)
 	}
-	fs.Mount(vfs.MountSkills, skills.NewResource(skillMgr))
+	if err := fs.Mount(vfs.MountSkills, skills.NewResource(skillMgr)); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountSkills, err)
+	}
 
 	inboxDir := filepath.Join(runDir, vfs.MountInbox)
 	if err := os.MkdirAll(inboxDir, 0755); err != nil {
@@ -181,7 +225,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create inbox resource: %w", err)
 	}
-	fs.Mount(vfs.MountInbox, inboxRes)
+	if err := fs.Mount(vfs.MountInbox, inboxRes); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountInbox, err)
+	}
 
 	outboxDir := filepath.Join(runDir, vfs.MountOutbox)
 	if err := os.MkdirAll(outboxDir, 0755); err != nil {
@@ -191,7 +237,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create outbox resource: %w", err)
 	}
-	fs.Mount(vfs.MountOutbox, outboxRes)
+	if err := fs.Mount(vfs.MountOutbox, outboxRes); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountOutbox, err)
+	}
 
 	resultsStore := cfg.ResultsStore
 	memStore := cfg.MemoryStore
@@ -204,7 +252,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create memory resource: %w", err)
 	}
-	fs.Mount(vfs.MountMemory, memRes)
+	if err := fs.Mount(vfs.MountMemory, memRes); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountMemory, err)
+	}
 
 	if cfg.Emit != nil {
 		cfg.Emit(context.Background(), events.Event{
@@ -250,7 +300,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	builtinInvokers[tools.ToolID("builtin.http")] = httpInvoker
 	builtinInvokers[tools.ToolID("builtin.trace")] = traceInvoker
 
-	runner := tools.Runner{
+	runner := tools.Orchestrator{
 		Results:      resultsStore,
 		ToolRegistry: tools.MapRegistry{},
 	}
@@ -267,7 +317,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		MaxReadBytes:    256 * 1024,
 	}
 
-	constructor := &agent.ContextConstructor{
+	constructor := &agent.PromptBuilder{
 		FS:              fs,
 		Cfg:             cfg.Cfg,
 		RunID:           cfg.Run.RunId,
@@ -285,7 +335,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		},
 	}
 
-	auditObs := newAuditObserver(cfg.Run.RunId, cfg.Emit)
+	auditObs := newAuditObserver(cfg.Run.RunId, cfg.Emit, cfg.AuditReads)
 
 	exec := NewExecutor(executor, ExecutorOptions{
 		Emit:      cfg.Emit,

@@ -17,6 +17,7 @@ import (
 //
 // Write/Append are not supported: results is read-only to the agent.
 type ResultsResource struct {
+	vfs.ReadOnlyResource
 	// BaseDir is unused by this resource, but kept for consistency/debugging.
 	BaseDir string
 
@@ -33,10 +34,15 @@ func NewResultsResource(s store.ResultsView) (*ResultsResource, error) {
 		return nil, fmt.Errorf("results store is required")
 	}
 	return &ResultsResource{
-		BaseDir: "",
-		Mount:   vfs.MountResults,
-		Store:   s,
+		ReadOnlyResource: vfs.ReadOnlyResource{Name: "results"},
+		BaseDir:          "",
+		Mount:            vfs.MountResults,
+		Store:            s,
 	}, nil
+}
+
+func (r *ResultsResource) SupportsNestedList() bool {
+	return true
 }
 
 // List lists entries under subpath.
@@ -124,10 +130,10 @@ func (r *ResultsResource) Read(subpath string) ([]byte, error) {
 
 // Write is not supported; /results is read-only to the agent.
 func (r *ResultsResource) Write(_ string, _ []byte) error {
-	return fmt.Errorf("results is read-only")
+	return r.ReadOnlyResource.Write("", nil)
 }
 
 // Append is not supported; /results is read-only to the agent.
 func (r *ResultsResource) Append(_ string, _ []byte) error {
-	return fmt.Errorf("results is read-only")
+	return r.ReadOnlyResource.Append("", nil)
 }

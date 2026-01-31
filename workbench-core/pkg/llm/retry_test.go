@@ -27,6 +27,10 @@ func (f *fakeRetryLLM) Generate(ctx context.Context, req types.LLMRequest) (type
 	return f.out, nil
 }
 
+func (f *fakeRetryLLM) SupportsStreaming() bool {
+	return false
+}
+
 type fakeRetryStreamingLLM struct {
 	failBeforeEmit bool
 	failAfterEmit  bool
@@ -39,6 +43,10 @@ func (f *fakeRetryStreamingLLM) Generate(ctx context.Context, req types.LLMReque
 	_ = ctx
 	_ = req
 	return f.out, nil
+}
+
+func (f *fakeRetryStreamingLLM) SupportsStreaming() bool {
+	return true
 }
 
 func (f *fakeRetryStreamingLLM) GenerateStream(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {

@@ -75,6 +75,8 @@ const (
 
 // Resource is the minimal contract a “mounted thing” must implement to behave like a filesystem.
 type Resource interface {
+	// SupportsNestedList returns true if List() supports non-root subpaths.
+	SupportsNestedList() bool
 	List(path string) ([]Entry, error)
 	Read(path string) ([]byte, error)
 	Write(path string, data []byte) error
@@ -82,6 +84,16 @@ type Resource interface {
 }
 
 // Entry describes one item returned by Resource.List.
+//
+// Path conventions:
+//   - Empty string ("") represents the resource root and will be rewritten by the VFS
+//     layer to the mount point path.
+//   - Paths must be relative (no leading "/").
+//   - Paths should use "/" separators (not platform-specific separators).
+//
+// Metadata conventions:
+//   - HasSize/HasModTime should be true for real filesystem-backed entries.
+//   - HasSize/HasModTime should be false for virtual/generated entries.
 type Entry struct {
 	Path       string
 	IsDir      bool

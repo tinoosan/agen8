@@ -64,6 +64,11 @@ func SaveRun(cfg config.Config, run types.Run) error {
 	if err != nil {
 		return err
 	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	b, err := types.MarshalPretty(run)
 	if err != nil {
 		return fmt.Errorf("error marshalling run: %w", err)
@@ -75,7 +80,7 @@ func SaveRun(cfg config.Config, run types.Run) error {
 	if createdAt == "" {
 		createdAt = now
 	}
-	_, err = db.Exec(
+	_, err = tx.Exec(
 		`INSERT INTO runs (run_id, session_id, status, goal, run_json, started_at, finished_at, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(run_id) DO UPDATE SET
@@ -100,7 +105,7 @@ func SaveRun(cfg config.Config, run types.Run) error {
 	if err != nil {
 		return fmt.Errorf("error saving run: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ReopenRun transitions a terminal run back to StatusRunning so it can be continued.

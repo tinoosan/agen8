@@ -153,15 +153,33 @@ func (f *Factory) MountAll(fs *vfs.FS) error {
 		return fmt.Errorf("create outbox resource: %w", err)
 	}
 
-	fs.Mount(vfs.MountWorkspace, ws)
-	fs.Mount(vfs.MountLog, tr)
-	fs.Mount(vfs.MountResults, res)
-	fs.Mount(vfs.MountInbox, inboxRes)
-	fs.Mount(vfs.MountOutbox, outboxRes)
-	fs.Mount(vfs.MountMemory, mem)
-	fs.Mount(vfs.MountProfile, prof)
-	fs.Mount(vfs.MountHistory, hist)
-	fs.Mount(vfs.MountTrace, traceRes)
+	if err := fs.Mount(vfs.MountWorkspace, ws); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountWorkspace, err)
+	}
+	if err := fs.Mount(vfs.MountLog, tr); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountLog, err)
+	}
+	if err := fs.Mount(vfs.MountResults, res); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountResults, err)
+	}
+	if err := fs.Mount(vfs.MountInbox, inboxRes); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountInbox, err)
+	}
+	if err := fs.Mount(vfs.MountOutbox, outboxRes); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountOutbox, err)
+	}
+	if err := fs.Mount(vfs.MountMemory, mem); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountMemory, err)
+	}
+	if err := fs.Mount(vfs.MountProfile, prof); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountProfile, err)
+	}
+	if err := fs.Mount(vfs.MountHistory, hist); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountHistory, err)
+	}
+	if err := fs.Mount(vfs.MountTrace, traceRes); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountTrace, err)
+	}
 
 	return nil
 }

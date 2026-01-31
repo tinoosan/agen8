@@ -56,9 +56,9 @@ func (s *DiskMemoryStore) BaseDir() string {
 	return s.Dir
 }
 
-// GetMemory returns the memory contents for the given date (format YYYY-MM-DD).
+// ReadMemory returns the memory contents for the given date (format YYYY-MM-DD).
 // If date is empty, it defaults to today (local time).
-func (s *DiskMemoryStore) GetMemory(ctx context.Context, date string) (string, error) {
+func (s *DiskMemoryStore) ReadMemory(ctx context.Context, date string) (string, error) {
 	path, err := s.dailyPath(date)
 	if err != nil {
 		return "", err
@@ -82,7 +82,7 @@ func (s *DiskMemoryStore) WriteMemory(ctx context.Context, date string, text str
 	if err := s.ensure(); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, []byte(text), 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(path, []byte(text), 0644); err != nil {
 		return err
 	}
 	return nil

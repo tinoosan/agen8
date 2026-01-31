@@ -61,7 +61,7 @@ func (a *DefaultAgent) Config() AgentConfig {
 		ReasoningEffort:  a.ReasoningEffort,
 		ReasoningSummary: a.ReasoningSummary,
 		SystemPrompt:     a.SystemPrompt,
-		Context:          a.Context,
+		PromptSource:     a.PromptSource,
 		MaxTokens:        a.MaxTokens,
 		Hooks:            a.Hooks,
 	}

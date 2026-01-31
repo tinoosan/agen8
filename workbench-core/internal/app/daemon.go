@@ -35,7 +35,10 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	resolved := resolveRunChatOptions(opts...)
+	resolved, err := resolveRunChatOptions(opts...)
+	if err != nil {
+		return err
+	}
 	if maxContextB <= 0 {
 		maxContextB = 8 * 1024
 	}
@@ -80,13 +83,36 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	var memStore pkgstore.MemoryStore
 	var profileStore pkgstore.ProfileStore
 	var traceStore pkgstore.TraceStore
+	var historyStore pkgstore.HistoryStore
 	var constructorStore pkgstore.ConstructorStateStore
+
+	resultsStore = store.NewInMemoryResultsStore()
 
 	ms, err := store.NewDiskMemoryStore(cfg)
 	if err != nil {
 		return fmt.Errorf("create memory store: %w", err)
 	}
 	memStore = ms
+
+	ps, err := store.NewDiskProfileStore(cfg)
+	if err != nil {
+		return fmt.Errorf("create profile store: %w", err)
+	}
+	profileStore = ps
+
+	traceStore = store.DiskTraceStore{DiskStore: store.DiskStore{Dir: fsutil.GetLogDir(cfg.DataDir, run.RunId)}}
+
+	hs, err := store.NewSQLiteHistoryStore(cfg, run.SessionID)
+	if err != nil {
+		return fmt.Errorf("create history store: %w", err)
+	}
+	historyStore = hs
+
+	cs, err := store.NewSQLiteConstructorStore(cfg)
+	if err != nil {
+		return fmt.Errorf("create constructor store: %w", err)
+	}
+	constructorStore = cs
 
 	// Vector memory store (SQLite-backed) for semantic recall.
 	// Best-effort: daemon can still run without this, but loses long-term recall.
@@ -96,7 +122,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		vectorStore = vm
 		memoryProvider = &vectorMemoryAdapter{store: vm}
 	} else {
-		mustEmit(context.Background(), events.Event{
+		mustEmit(ctx, events.Event{
 			Type:    "daemon.warning",
 			Message: "Vector memory disabled",
 			Data:    map[string]string{"error": err.Error()},
@@ -116,6 +142,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		ReasoningEffort:       strings.TrimSpace(resolved.ReasoningEffort),
 		ReasoningSummary:      strings.TrimSpace(resolved.ReasoningSummary),
 		ApprovalsMode:         strings.TrimSpace(resolved.ApprovalsMode),
+		HistoryStore:          historyStore,
 		ResultsStore:          resultsStore,
 		MemoryStore:           memStore,
 		ProfileStore:          profileStore,
@@ -165,7 +192,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	agentCfg.ApprovalsMode = strings.TrimSpace(resolved.ApprovalsMode)
 	agentCfg.EnableWebSearch = resolved.WebSearchEnabled
 	agentCfg.SystemPrompt = baseSystemPrompt
-	agentCfg.Context = rt.Constructor
+	agentCfg.PromptSource = rt.Constructor
 	agentCfg.ToolManifests = rt.ToolManifests
 	agentCfg.Hooks = agent.Hooks{
 		OnLLMUsage: newCostUsageHook(cfg, run, resolved.Model, resolved.PriceInPerMTokensUSD, resolved.PriceOutPerMTokensUSD, mustEmit),
@@ -173,7 +200,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 
 	a, err := agent.NewAgent(llmClient, rt.Executor, agentCfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("create agent: %w", err)
 	}
 
 	runner, err := agent.NewAutonomousRunner(agent.AutonomousRunnerConfig{
@@ -194,7 +221,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Emit: mustEmit,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("create autonomous runner: %w", err)
 	}
 
 	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -215,16 +242,17 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		}()
 	}
 
+	var serverWG sync.WaitGroup
 	webhookAddr := strings.TrimSpace(resolved.WebhookAddr)
 	if webhookAddr != "" {
-		startWebhookServer(runCtx, webhookAddr, cfg, run, mustEmit)
+		startWebhookServer(runCtx, webhookAddr, cfg, run, mustEmit, &serverWG)
 	}
 	healthAddr := strings.TrimSpace(resolved.HealthAddr)
 	if healthAddr != "" && healthAddr != webhookAddr {
-		startHealthServer(runCtx, healthAddr, mustEmit)
+		startHealthServer(runCtx, healthAddr, mustEmit, &serverWG)
 	}
 
-	mustEmit(context.Background(), events.Event{
+	mustEmit(runCtx, events.Event{
 		Type:    "daemon.start",
 		Message: "Autonomous agent started",
 		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": resolved.Role},
@@ -240,18 +268,19 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		if err != nil {
 			errMsg = err.Error()
 		}
-		mustEmit(context.Background(), events.Event{
+		mustEmit(runCtx, events.Event{
 			Type:    "daemon.runner.error",
 			Message: "Runner exited unexpectedly; restarting",
 			Data:    map[string]string{"error": errMsg},
 		})
 		time.Sleep(2 * time.Second)
 	}
-	mustEmit(context.Background(), events.Event{
+	mustEmit(runCtx, events.Event{
 		Type:    "daemon.stop",
 		Message: "Autonomous agent stopped",
 		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": resolved.Role},
 	})
+	serverWG.Wait()
 	return err
 }
 
@@ -275,6 +304,7 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 		if emit == nil {
 			return
 		}
+		// Use background context so usage events persist even if the run cancels.
 		emit(context.Background(), events.Event{
 			Type:    "llm.usage.total",
 			Message: "LLM usage totals",
@@ -289,6 +319,7 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 		if emit == nil {
 			return
 		}
+		// Use background context so cost events persist even if the run cancels.
 		payload := map[string]string{
 			"known": fmt.Sprintf("%t", known),
 		}
@@ -327,7 +358,16 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 		if pricingKnown {
 			run.TotalCostUSD += costUSD
 		}
-		_ = store.SaveRun(cfg, run)
+		if err := store.SaveRun(cfg, run); err != nil {
+			log.Printf("daemon: warning: failed to save run: %v", err)
+			if emit != nil {
+				emit(context.Background(), events.Event{
+					Type:    "daemon.warning",
+					Message: "Failed to persist run state",
+					Data:    map[string]string{"error": err.Error()},
+				})
+			}
+		}
 
 		if !sessionLoaded {
 			if s, err := store.LoadSession(cfg, run.SessionID); err == nil {
@@ -342,7 +382,16 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 			if pricingKnown {
 				session.TotalCostUSD += costUSD
 			}
-			_ = store.SaveSession(cfg, session)
+			if err := store.SaveSession(cfg, session); err != nil {
+				log.Printf("daemon: warning: failed to save session: %v", err)
+				if emit != nil {
+					emit(context.Background(), events.Event{
+						Type:    "daemon.warning",
+						Message: "Failed to persist session state",
+						Data:    map[string]string{"error": err.Error()},
+					})
+				}
+			}
 		}
 	}
 }
@@ -357,7 +406,7 @@ func (s daemonEventAppender) AppendEvent(ctx context.Context, runID, eventType, 
 	return store.AppendEvent(s.cfg, runID, eventType, message, data)
 }
 
-func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run types.Run, emit func(context.Context, events.Event)) {
+func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run types.Run, emit func(context.Context, events.Event), wg *sync.WaitGroup) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -399,7 +448,7 @@ func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run
 			TaskID:    taskID,
 			Goal:      goal,
 			Priority:  payload.Priority,
-			Status:    "pending",
+			Status:    types.TaskStatusPending,
 			CreatedAt: &now,
 			Inputs:    payload.Inputs,
 			Metadata:  payload.Metadata,
@@ -420,7 +469,7 @@ func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run
 			return
 		}
 		if emit != nil {
-			emit(context.Background(), events.Event{
+			emit(ctx, events.Event{
 				Type:    "webhook.task.queued",
 				Message: "Webhook task queued",
 				Data:    map[string]string{"taskId": taskID},
@@ -431,16 +480,25 @@ func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run
 	})
 
 	srv := &http.Server{Addr: addr, Handler: mux}
+	if wg != nil {
+		wg.Add(2)
+	}
 	go func() {
+		if wg != nil {
+			defer wg.Done()
+		}
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 	go func() {
+		if wg != nil {
+			defer wg.Done()
+		}
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			if emit != nil {
-				emit(context.Background(), events.Event{
+				emit(ctx, events.Event{
 					Type:    "webhook.error",
 					Message: "Webhook server error",
 					Data:    map[string]string{"error": err.Error()},
@@ -450,23 +508,32 @@ func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run
 	}()
 }
 
-func startHealthServer(ctx context.Context, addr string, emit func(context.Context, events.Event)) {
+func startHealthServer(ctx context.Context, addr string, emit func(context.Context, events.Event), wg *sync.WaitGroup) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	srv := &http.Server{Addr: addr, Handler: mux}
+	if wg != nil {
+		wg.Add(2)
+	}
 	go func() {
+		if wg != nil {
+			defer wg.Done()
+		}
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 	go func() {
+		if wg != nil {
+			defer wg.Done()
+		}
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			if emit != nil {
-				emit(context.Background(), events.Event{
+				emit(ctx, events.Event{
 					Type:    "health.error",
 					Message: "Health server error",
 					Data:    map[string]string{"error": err.Error()},

@@ -82,7 +82,7 @@ Runtime configuration resolves in this order: CLI flags → environment variable
 | `--workdir`             | `WORKBENCH_WORKDIR`             | Host directory mounted under `/project`. Defaults to the current working directory.                                                       |
 | `--context-bytes`       | —                               | How many bytes of context to persist (`run.maxBytesForContext`; default `8*1024`). Must be > 0.                                           |
 | `--model`               | `OPENROUTER_MODEL`              | Default model ID for LLM calls (overrides session defaults).                                                                              |
-| `--trace-bytes`         | —                               | Byte budget for the ContextUpdater trace (default `8*1024`).                                                                              |
+| `--trace-bytes`         | —                               | Byte budget for the PromptUpdater trace (default `8*1024`).                                                                               |
 | `--memory-bytes`        | —                               | Memory injection budget per step (default `8*1024`).                                                                                      |
 | `--profile-bytes`       | —                               | Budget for profiling data (default `4*1024`).                                                                                             |
 | `--history-pairs`       | —                               | Number of recent (user, agent) pairs included from `/history` (default `8`).                                                              |

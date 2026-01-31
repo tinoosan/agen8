@@ -18,6 +18,9 @@ type HistoryReader interface {
 type HistoryCursor = OffsetCursor
 
 // HistoryStore is the host-side storage interface backing the VFS mount "/history".
+//
+// SQLite-backed history is the canonical source of truth. Disk-backed history is
+// provided for VFS compatibility and should be treated as a mirror.
 type HistoryStore interface {
 	HistoryAppender
 	HistoryReader

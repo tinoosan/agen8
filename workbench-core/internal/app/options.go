@@ -31,9 +31,16 @@ type RunChatOptions struct {
 	PriceOutPerMTokensUSD float64
 }
 
-type RunChatOption func(*RunChatOptions)
+type RunChatOption func(*RunChatOptions) error
 
-func resolveRunChatOptions(opts ...RunChatOption) RunChatOptions {
+func (o RunChatOptions) WithDefaults() RunChatOptions {
+	if strings.TrimSpace(o.ApprovalsMode) == "" {
+		o.ApprovalsMode = "disabled"
+	}
+	return o
+}
+
+func resolveRunChatOptions(opts ...RunChatOption) (RunChatOptions, error) {
 	o := RunChatOptions{
 		Model:            strings.TrimSpace(os.Getenv("OPENROUTER_MODEL")),
 		Role:             strings.TrimSpace(os.Getenv("WORKBENCH_ROLE")),
@@ -41,154 +48,173 @@ func resolveRunChatOptions(opts ...RunChatOption) RunChatOptions {
 		WebhookAddr:      strings.TrimSpace(os.Getenv("WORKBENCH_WEBHOOK_ADDR")),
 		ResultWebhookURL: strings.TrimSpace(os.Getenv("WORKBENCH_RESULT_WEBHOOK_URL")),
 		HealthAddr:       strings.TrimSpace(os.Getenv("WORKBENCH_HEALTH_ADDR")),
-		ApprovalsMode:    "disabled",
 	}
 	for _, opt := range opts {
 		if opt != nil {
-			opt(&o)
+			if err := opt(&o); err != nil {
+				return RunChatOptions{}, err
+			}
 		}
 	}
-	return o
+	return o.WithDefaults(), nil
 }
 
 func WithModel(model string) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		model = strings.TrimSpace(model)
 		if model != "" {
 			o.Model = model
 		}
+		return nil
 	}
 }
 
 func WithRole(role string) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		role = strings.TrimSpace(role)
 		if role != "" {
 			o.Role = role
 		}
+		return nil
 	}
 }
 
 func WithWorkDir(dir string) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		dir = strings.TrimSpace(dir)
 		if dir != "" {
 			o.WorkDir = dir
 		}
+		return nil
 	}
 }
 
 func WithWebhookAddr(addr string) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		addr = strings.TrimSpace(addr)
 		if addr != "" {
 			o.WebhookAddr = addr
 		}
+		return nil
 	}
 }
 
 func WithResultWebhookURL(url string) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		url = strings.TrimSpace(url)
 		if url != "" {
 			o.ResultWebhookURL = url
 		}
+		return nil
 	}
 }
 
 func WithHealthAddr(addr string) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		addr = strings.TrimSpace(addr)
 		if addr != "" {
 			o.HealthAddr = addr
 		}
+		return nil
 	}
 }
 
 func WithApprovalsMode(mode string) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		mode = strings.TrimSpace(mode)
 		if mode != "" {
 			o.ApprovalsMode = mode
 		}
+		return nil
 	}
 }
 
 func WithReasoningEffort(effort string) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		effort = strings.TrimSpace(effort)
 		if effort != "" {
 			o.ReasoningEffort = effort
 		}
+		return nil
 	}
 }
 
 func WithReasoningSummary(summary string) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		summary = strings.TrimSpace(summary)
 		if summary != "" {
 			o.ReasoningSummary = summary
 		}
+		return nil
 	}
 }
 
 func WithWebSearch(enabled bool) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		o.WebSearchEnabled = enabled
+		return nil
 	}
 }
 
 func WithRecentHistoryPairs(pairs int) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		o.RecentHistoryPairs = pairs
+		return nil
 	}
 }
 
 func WithIncludeHistoryOps(enabled bool) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		o.IncludeHistoryOps = &enabled
+		return nil
 	}
 }
 
 func WithTraceBytes(maxBytes int) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		o.MaxTraceBytes = maxBytes
+		return nil
 	}
 }
 
 func WithMemoryBytes(maxBytes int) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		o.MaxMemoryBytes = maxBytes
+		return nil
 	}
 }
 
 func WithProfileBytes(maxBytes int) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		o.MaxProfileBytes = maxBytes
+		return nil
 	}
 }
 
 func WithPriceInPerMTokensUSD(price float64) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		o.PriceInPerMTokensUSD = price
+		return nil
 	}
 }
 
 func WithPriceOutPerMTokensUSD(price float64) RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		o.PriceOutPerMTokensUSD = price
+		return nil
 	}
 }
 
 func WithEnvWebSearch() RunChatOption {
-	return func(o *RunChatOptions) {
+	return func(o *RunChatOptions) error {
 		raw := strings.TrimSpace(os.Getenv("WORKBENCH_WEB_SEARCH"))
 		if raw == "" {
-			return
+			return nil
 		}
 		if v, err := strconv.ParseBool(raw); err == nil {
 			o.WebSearchEnabled = v
 		}
+		return nil
 	}
 }
 

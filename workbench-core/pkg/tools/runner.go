@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type Runner struct {
+type Orchestrator struct {
 	Results      ResultWriter
 	ToolRegistry ToolRegistry
 }
@@ -70,12 +70,12 @@ func (m MapRegistry) Get(id ToolID) (ToolInvoker, bool) {
 	return inv, ok
 }
 
-func (r *Runner) Run(ctx context.Context, toolId ToolID, actionId string, input json.RawMessage, timeoutMs int) (ToolResponse, error) {
+func (r *Orchestrator) Run(ctx context.Context, toolId ToolID, actionId string, input json.RawMessage, timeoutMs int) (ToolResponse, error) {
 	if r == nil || r.Results == nil {
-		return ToolResponse{}, fmt.Errorf("runner ResultWriter is required")
+		return ToolResponse{}, fmt.Errorf("orchestrator ResultWriter is required")
 	}
 	if r.ToolRegistry == nil {
-		return ToolResponse{}, fmt.Errorf("runner ToolRegistry is required")
+		return ToolResponse{}, fmt.Errorf("orchestrator ToolRegistry is required")
 	}
 	if err := nonEmpty("toolId", toolId.String()); err != nil {
 		return ToolResponse{}, err
@@ -176,9 +176,9 @@ func (r *Runner) Run(ctx context.Context, toolId ToolID, actionId string, input 
 	return resp, nil
 }
 
-func (r *Runner) persist(callID string, resp ToolResponse, artifacts []ToolArtifactWrite) error {
+func (r *Orchestrator) persist(callID string, resp ToolResponse, artifacts []ToolArtifactWrite) error {
 	if r == nil || r.Results == nil {
-		return fmt.Errorf("runner ResultWriter is required")
+		return fmt.Errorf("orchestrator ResultWriter is required")
 	}
 	for _, a := range artifacts {
 		if _, err := validateAndCleanArtifactWrite(a); err != nil {

@@ -8,12 +8,12 @@ import (
 	"sort"
 	"testing"
 
+	internalstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/resources"
-	internalstore "github.com/tinoosan/workbench-core/internal/store"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
-	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/tools"
+	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 type invokerFunc func(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error)
@@ -38,7 +38,9 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, resultsRes)
+	if err := fs.Mount(vfs.MountResults, resultsRes); err != nil {
+		t.Fatalf("mount results: %v", err)
+	}
 
 	inv := invokerFunc(func(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error) {
 		return tools.ToolCallResult{
@@ -53,7 +55,7 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 		tools.ToolID("github.com.acme.stock"): inv,
 	}
 
-	runner := tools.Runner{
+	runner := tools.Orchestrator{
 		Results:      resultsStore,
 		ToolRegistry: reg,
 	}
@@ -116,9 +118,11 @@ func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, resultsRes)
+	if err := fs.Mount(vfs.MountResults, resultsRes); err != nil {
+		t.Fatalf("mount results: %v", err)
+	}
 
-	runner := tools.Runner{
+	runner := tools.Orchestrator{
 		Results:      resultsStore,
 		ToolRegistry: tools.MapRegistry{},
 	}
@@ -159,7 +163,9 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, resultsRes)
+	if err := fs.Mount(vfs.MountResults, resultsRes); err != nil {
+		t.Fatalf("mount results: %v", err)
+	}
 
 	inv := invokerFunc(func(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error) {
 		return tools.ToolCallResult{
@@ -170,7 +176,7 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 		}, nil
 	})
 
-	runner := tools.Runner{
+	runner := tools.Orchestrator{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
 			tools.ToolID("github.com.acme.stock"): inv,
@@ -209,13 +215,15 @@ func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, resultsRes)
+	if err := fs.Mount(vfs.MountResults, resultsRes); err != nil {
+		t.Fatalf("mount results: %v", err)
+	}
 
 	inv := invokerFunc(func(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error) {
 		return tools.ToolCallResult{}, &tools.InvokeError{Code: "timeout", Message: "command timed out", Retryable: true}
 	})
 
-	runner := tools.Runner{
+	runner := tools.Orchestrator{
 		Results: resultsStore,
 		ToolRegistry: tools.MapRegistry{
 			tools.ToolID("github.com.acme.stock"): inv,

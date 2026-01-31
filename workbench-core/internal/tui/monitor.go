@@ -373,7 +373,7 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 			TaskID:    id,
 			Goal:      goal,
 			Priority:  priority,
-			Status:    "pending",
+			Status:    types.TaskStatusPending,
 			CreatedAt: &now,
 		}
 		b, _ := json.MarshalIndent(task, "", "  ")
@@ -558,7 +558,7 @@ func (m *monitorModel) observeTaskEvent(ev types.Event) {
 		m.taskQueue[taskID] = taskState{
 			TaskID: taskID,
 			Goal:   strings.TrimSpace(ev.Data["goal"]),
-			Status: "pending",
+			Status: string(types.TaskStatusPending),
 		}
 	case "task.start":
 		taskID := strings.TrimSpace(ev.Data["taskId"])

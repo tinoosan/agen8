@@ -13,24 +13,25 @@ import (
 // auditObserver emits side-effectful host ops as structured events (stored via StoreSink as JSONL).
 // This replaces per-file audit JSON in /outbox.
 type auditObserver struct {
-	emit  func(ctx context.Context, ev events.Event)
-	runID string
-	seq   *uint64
+	emit       func(ctx context.Context, ev events.Event)
+	runID      string
+	seq        *uint64
+	auditReads bool
 }
 
-func newAuditObserver(runID string, emit func(ctx context.Context, ev events.Event)) *auditObserver {
+func newAuditObserver(runID string, emit func(ctx context.Context, ev events.Event), auditReads bool) *auditObserver {
 	if emit == nil {
 		return nil
 	}
 	var zero uint64
-	return &auditObserver{emit: emit, runID: strings.TrimSpace(runID), seq: &zero}
+	return &auditObserver{emit: emit, runID: strings.TrimSpace(runID), seq: &zero, auditReads: auditReads}
 }
 
 func (o *auditObserver) ObserveHostOp(req types.HostOpRequest, resp types.HostOpResponse) {
 	if o == nil || o.emit == nil {
 		return
 	}
-	if !isSideEffectOp(req.Op) {
+	if !shouldAuditOp(req.Op, o.auditReads) {
 		return
 	}
 	seq := atomic.AddUint64(o.seq, 1)
@@ -69,8 +70,10 @@ func maybeInt(v int) string {
 	return fmt.Sprintf("%d", v)
 }
 
-func isSideEffectOp(op string) bool {
+func shouldAuditOp(op string, auditReads bool) bool {
 	switch strings.ToLower(strings.TrimSpace(op)) {
+	case types.HostOpFSRead, types.HostOpFSList:
+		return auditReads
 	case types.HostOpFSWrite, types.HostOpFSAppend, types.HostOpFSEdit, types.HostOpFSPatch,
 		types.HostOpShellExec, types.HostOpHTTPFetch, types.HostOpToolRun:
 		return true

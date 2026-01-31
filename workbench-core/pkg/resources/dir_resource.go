@@ -34,6 +34,10 @@ func NewDirResource(baseDir, mount string) (*DirResource, error) {
 	}, nil
 }
 
+func (d *DirResource) SupportsNestedList() bool {
+	return true
+}
+
 func (d *DirResource) List(subpath string) ([]vfs.Entry, error) {
 	targetPath, err := d.safeJoin(subpath)
 	if err != nil {

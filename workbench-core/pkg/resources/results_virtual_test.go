@@ -25,7 +25,9 @@ func TestVirtualResultsResource_ListAndRead(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountResults, res)
+	if err := fs.Mount(vfs.MountResults, res); err != nil {
+		t.Fatalf("mount results: %v", err)
+	}
 
 	entries, err := fs.List("/results")
 	if err != nil {

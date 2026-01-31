@@ -888,6 +888,10 @@ func (c *Client) Generate(ctx context.Context, req types.LLMRequest) (types.LLMR
 	return out, err
 }
 
+func (c *Client) SupportsStreaming() bool {
+	return c != nil && c.client != nil
+}
+
 func (c *Client) generateOnce(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
 	if req.ForceChat {
 		return c.generateChat(ctx, req)

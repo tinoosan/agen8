@@ -1,6 +1,8 @@
 package resources
 
 import (
+	"bufio"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -14,9 +16,12 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/validate"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/vfsutil"
+	_ "modernc.org/sqlite"
 )
 
 type TraceResource struct {
+	vfs.ReadOnlyResource
+	Cfg config.Config
 	// BaseDir is the OS directory backing this resource (the sandbox root).
 	BaseDir string
 	// Mount is the virtual mount name used by the VFS.
@@ -52,10 +57,16 @@ func NewTraceResource(cfg config.Config, runId string) (*TraceResource, error) {
 		}
 	}
 	return &TraceResource{
-		BaseDir: baseDir,
-		Mount:   vfs.MountLog,
-		RunId:   runId,
+		ReadOnlyResource: vfs.ReadOnlyResource{Name: "trace"},
+		Cfg:              cfg,
+		BaseDir:          baseDir,
+		Mount:            vfs.MountLog,
+		RunId:            runId,
 	}, nil
+}
+
+func (tr *TraceResource) SupportsNestedList() bool {
+	return false
 }
 
 // List lists entries under subpath relative to BaseDir.
@@ -65,6 +76,7 @@ func (tr *TraceResource) List(subpath string) ([]vfs.Entry, error) {
 		return nil, err
 	}
 	if clean == "" || clean == "." {
+		// events.since/<offset> and events.latest/<count> are virtual query endpoints.
 		return []vfs.Entry{
 			{Path: "events", IsDir: false},
 			{Path: "events.latest", IsDir: false},
@@ -88,6 +100,9 @@ func (tr *TraceResource) Read(subpath string) ([]byte, error) {
 	case "events":
 		if len(parts) != 1 {
 			return nil, fmt.Errorf("trace read: 'events' does not take a suffix (got %q)", clean)
+		}
+		if err := tr.ensureEventsFile(); err != nil {
+			return nil, fmt.Errorf("trace read: ensure events: %w", err)
 		}
 		targetPath := filepath.Join(tr.BaseDir, "events.jsonl")
 		return readFile(targetPath, "events")
@@ -138,16 +153,14 @@ func (tr *TraceResource) Read(subpath string) ([]byte, error) {
 //
 // Trace resources are read-only, so this always returns an error.
 func (tr *TraceResource) Write(subpath string, _ []byte) error {
-	_ = subpath
-	return fmt.Errorf("write not supported for trace resource")
+	return tr.ReadOnlyResource.Write(subpath, nil)
 }
 
 // Append appends bytes to the file at subpath (creating parent directories if needed).
 //
 // Trace resources are read-only, so this always returns an error.
 func (tr *TraceResource) Append(subpath string, _ []byte) error {
-	_ = subpath
-	return fmt.Errorf("append not supported for trace resource")
+	return tr.ReadOnlyResource.Append(subpath, nil)
 }
 
 // ReadEventsSince reads events.jsonl from the given byte offset and returns the
@@ -158,6 +171,9 @@ func (tr *TraceResource) ReadEventsSince(offset int64) ([]byte, int64, error) {
 
 	if offset < 0 {
 		return nil, 0, fmt.Errorf("trace %s: offset cannot be negative (%d)", logicalName, offset)
+	}
+	if err := tr.ensureEventsFile(); err != nil {
+		return nil, 0, fmt.Errorf("trace %s: ensure events: %w", logicalName, err)
 	}
 
 	f, err := os.Open(targetPath)
@@ -206,6 +222,9 @@ func (tr *TraceResource) ReadLastEvents(count int) ([]byte, error) {
 	if count > maxLatestCount {
 		return nil, fmt.Errorf("trace %s: count exceeds max %d", logicalName, maxLatestCount)
 	}
+	if err := tr.ensureEventsFile(); err != nil {
+		return nil, fmt.Errorf("trace %s: ensure events: %w", logicalName, err)
+	}
 
 	f, err := os.Open(targetPath)
 	if err != nil {
@@ -232,6 +251,59 @@ func (tr *TraceResource) ReadLastEvents(count int) ([]byte, error) {
 
 	out := strings.Join(lines[len(lines)-count:], "\n") + "\n"
 	return []byte(out), nil
+}
+
+func (tr *TraceResource) ensureEventsFile() error {
+	targetPath := filepath.Join(tr.BaseDir, "events.jsonl")
+	if _, err := os.Stat(targetPath); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("trace ensure events: stat %s: %w", targetPath, err)
+	}
+	return tr.rebuildEventsFile(targetPath)
+}
+
+func (tr *TraceResource) rebuildEventsFile(targetPath string) error {
+	if err := os.MkdirAll(tr.BaseDir, 0755); err != nil {
+		return fmt.Errorf("trace rebuild: mkdir %s: %w", tr.BaseDir, err)
+	}
+
+	dbPath := fsutil.GetSQLitePath(tr.Cfg.DataDir)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return fmt.Errorf("trace rebuild: open sqlite: %w", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT event_json FROM events WHERE run_id = ? ORDER BY seq`, tr.RunId)
+	if err != nil {
+		return fmt.Errorf("trace rebuild: query events: %w", err)
+	}
+	defer rows.Close()
+
+	f, err := os.Create(targetPath)
+	if err != nil {
+		return fmt.Errorf("trace rebuild: create %s: %w", targetPath, err)
+	}
+	defer f.Close()
+
+	writer := bufio.NewWriter(f)
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return fmt.Errorf("trace rebuild: scan event: %w", err)
+		}
+		if _, err := writer.WriteString(raw + "\n"); err != nil {
+			return fmt.Errorf("trace rebuild: write event: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("trace rebuild: rows error: %w", err)
+	}
+	if err := writer.Flush(); err != nil {
+		return fmt.Errorf("trace rebuild: flush: %w", err)
+	}
+	return nil
 }
 
 func readFile(targetPath, logicalName string) ([]byte, error) {

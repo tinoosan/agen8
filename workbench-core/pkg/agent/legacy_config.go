@@ -33,8 +33,8 @@ type Config struct {
 	// SystemPrompt is the base system prompt to pass to the model.
 	SystemPrompt string
 
-	// Context optionally refreshes bounded context per model step.
-	Context ContextSource
+	// PromptSource optionally refreshes bounded context per model step.
+	PromptSource PromptSource
 
 	// ToolManifests optionally supplies host-known tool manifests that should be
 	// exposed as direct function tools (no discovery required).
@@ -55,7 +55,7 @@ func New(cfg Config) (Agent, error) {
 		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
 		SystemPrompt:     cfg.SystemPrompt,
-		Context:          cfg.Context,
+		PromptSource:     cfg.PromptSource,
 		ToolManifests:    cfg.ToolManifests,
 		MaxTokens:        cfg.MaxTokens,
 		Hooks:            cfg.Hooks,

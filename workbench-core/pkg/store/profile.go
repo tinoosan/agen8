@@ -27,6 +27,10 @@ type ProfileCommitter interface {
 
 // ProfileStore is the host-side storage interface backing the virtual VFS mount "/profile".
 //
+// Interface composition allows partial implementations for specific use-cases
+// (e.g. ProfileVFSStore for read-only VFS access, ProfileCommitter for write-only commit flows).
+// A full ProfileStore must implement all four interfaces below.
+//
 // Profile is global (shared across runs and sessions) and is intended for durable user facts
 // and preferences (e.g. timezone, writing style, birthday).
 //

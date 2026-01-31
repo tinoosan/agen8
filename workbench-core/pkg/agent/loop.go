@@ -22,7 +22,7 @@ type DefaultAgent struct {
 	ReasoningEffort  string
 	ReasoningSummary string
 	SystemPrompt     string
-	Context          ContextSource
+	PromptSource     PromptSource
 	Hooks            Hooks
 	MaxTokens        int
 	ExtraTools       []llm.Tool
@@ -72,8 +72,8 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 	for step := startStep; ; step++ {
 
 		system := baseSystem
-		if a.Context != nil {
-			updatedSystem, err := a.Context.SystemPrompt(ctx, baseSystem, step)
+		if a.PromptSource != nil {
+			updatedSystem, err := a.PromptSource.SystemPrompt(ctx, baseSystem, step)
 			if err != nil {
 				return "", nil, 0, err
 			}

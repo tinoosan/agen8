@@ -21,21 +21,27 @@ func NewResource(manager *Manager) *SkillsResource {
 	return &SkillsResource{manager: manager}
 }
 
+func (r *SkillsResource) SupportsNestedList() bool {
+	return true
+}
+
 func (r *SkillsResource) List(path string) ([]vfs.Entry, error) {
 	if r.manager == nil {
 		return nil, fmt.Errorf("skills manager is required")
 	}
 
-	path = strings.Trim(path, "/")
-	if path == "" {
+	clean, parts, err := vfsutil.NormalizeResourceSubpath(path)
+	if err != nil {
+		return nil, err
+	}
+	if clean == "" || clean == "." {
 		return r.listNamespaces()
 	}
 
-	parts := strings.SplitN(path, "/", 2)
 	dir := parts[0]
 	subpath := ""
-	if len(parts) == 2 {
-		subpath = parts[1]
+	if len(parts) > 1 {
+		subpath = strings.Join(parts[1:], "/")
 	}
 
 	skill, ok := r.manager.Get(dir)
@@ -64,15 +70,17 @@ func (r *SkillsResource) Read(path string) ([]byte, error) {
 	if r.manager == nil {
 		return nil, fmt.Errorf("skills manager is required")
 	}
-	path = strings.Trim(path, "/")
-	if path == "" {
+	clean, parts, err := vfsutil.NormalizeResourceSubpath(path)
+	if err != nil {
+		return nil, fmt.Errorf("skills read: %w", err)
+	}
+	if clean == "" || clean == "." {
 		return nil, fmt.Errorf("skills read: path required")
 	}
-	parts := strings.SplitN(path, "/", 2)
 	dir := parts[0]
 	subpath := ""
-	if len(parts) == 2 {
-		subpath = parts[1]
+	if len(parts) > 1 {
+		subpath = strings.Join(parts[1:], "/")
 	}
 	skill, ok := r.manager.Get(dir)
 	if !ok {
@@ -92,15 +100,17 @@ func (r *SkillsResource) Write(path string, data []byte) error {
 	if r.manager == nil {
 		return fmt.Errorf("skills manager is required")
 	}
-	path = strings.Trim(path, "/")
-	if path == "" {
+	clean, parts, err := vfsutil.NormalizeResourceSubpath(path)
+	if err != nil {
+		return fmt.Errorf("skills write: %w", err)
+	}
+	if clean == "" || clean == "." {
 		return fmt.Errorf("skills write: path required")
 	}
-	parts := strings.SplitN(path, "/", 2)
 	dir := parts[0]
 	subpath := ""
-	if len(parts) == 2 {
-		subpath = parts[1]
+	if len(parts) > 1 {
+		subpath = strings.Join(parts[1:], "/")
 	}
 	if subpath == "" {
 		return fmt.Errorf("skills write: subpath required")

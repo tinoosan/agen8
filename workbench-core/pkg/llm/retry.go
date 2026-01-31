@@ -22,7 +22,7 @@ type RetryConfig struct {
 	Multiplier   float64
 }
 
-func (c RetryConfig) withDefaults() RetryConfig {
+func (c RetryConfig) WithDefaults() RetryConfig {
 	if c.MaxRetries < 0 {
 		c.MaxRetries = 0
 	}
@@ -50,7 +50,7 @@ func NewRetryClient(client types.LLMClient, cfg RetryConfig) *RetryClient {
 	}
 	return &RetryClient{
 		Wrapped: client,
-		Config:  cfg.withDefaults(),
+		Config:  cfg.WithDefaults(),
 	}
 }
 
@@ -59,7 +59,7 @@ func (c *RetryClient) Generate(ctx context.Context, req types.LLMRequest) (types
 		return types.LLMResponse{}, fmt.Errorf("retry client is nil")
 	}
 
-	cfg := c.Config.withDefaults()
+	cfg := c.Config.WithDefaults()
 	if cfg.MaxRetries == 0 {
 		return c.Wrapped.Generate(ctx, req)
 	}
@@ -86,16 +86,26 @@ func (c *RetryClient) Generate(ctx context.Context, req types.LLMRequest) (types
 	return types.LLMResponse{}, lastErr
 }
 
+func (c *RetryClient) SupportsStreaming() bool {
+	if c == nil || c.Wrapped == nil {
+		return false
+	}
+	return c.Wrapped.SupportsStreaming()
+}
+
 func (c *RetryClient) GenerateStream(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
 	if c == nil || c.Wrapped == nil {
 		return types.LLMResponse{}, fmt.Errorf("retry client is nil")
 	}
-	streaming, ok := c.Wrapped.(types.LLMClientStreaming)
-	if !ok {
+	if !c.SupportsStreaming() {
 		return types.LLMResponse{}, fmt.Errorf("LLM client does not support streaming")
 	}
+	streaming, ok := c.Wrapped.(types.LLMClientStreaming)
+	if !ok {
+		return types.LLMResponse{}, fmt.Errorf("LLM client does not implement streaming")
+	}
 
-	cfg := c.Config.withDefaults()
+	cfg := c.Config.WithDefaults()
 	if cfg.MaxRetries == 0 {
 		return streaming.GenerateStream(ctx, req, cb)
 	}

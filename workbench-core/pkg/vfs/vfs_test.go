@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
+	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
@@ -18,6 +18,10 @@ type fakeResource struct {
 	readFn   func(string) ([]byte, error)
 	writeFn  func(string, []byte) error
 	appendFn func(string, []byte) error
+}
+
+func (r fakeResource) SupportsNestedList() bool {
+	return true
 }
 
 func (r fakeResource) List(path string) ([]vfs.Entry, error) {
@@ -48,9 +52,16 @@ func (r fakeResource) Append(path string, data []byte) error {
 	return r.appendFn(path, data)
 }
 
+func mustMount(t *testing.T, fs *vfs.FS, name string, r vfs.Resource) {
+	t.Helper()
+	if err := fs.Mount(name, r); err != nil {
+		t.Fatalf("mount %s: %v", name, err)
+	}
+}
+
 func TestResolve(t *testing.T) {
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountWorkspace, fakeResource{})
+	mustMount(t, fs, vfs.MountWorkspace, fakeResource{})
 
 	t.Run("Empty", func(t *testing.T) {
 		if _, _, _, err := fs.Resolve(""); err == nil {
@@ -99,8 +110,8 @@ func TestResolve(t *testing.T) {
 
 func TestListRoot_IsStableAndPrefixed(t *testing.T) {
 	fs := vfs.NewFS()
-	fs.Mount("b", fakeResource{})
-	fs.Mount("a", fakeResource{})
+	mustMount(t, fs, "b", fakeResource{})
+	mustMount(t, fs, "a", fakeResource{})
 
 	entries, err := fs.List("/")
 	if err != nil {
@@ -121,7 +132,7 @@ func TestListRoot_IsStableAndPrefixed(t *testing.T) {
 
 func TestNotFoundPathFails(t *testing.T) {
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountWorkspace, fakeResource{})
+	mustMount(t, fs, vfs.MountWorkspace, fakeResource{})
 
 	if _, err := fs.List("/nope"); err == nil {
 		t.Fatalf("expected error for unknown mount")
@@ -133,8 +144,8 @@ func TestNotFoundPathFails(t *testing.T) {
 
 func TestResolve_LongestPrefixWins(t *testing.T) {
 	fs := vfs.NewFS()
-	fs.Mount("a", fakeResource{})
-	fs.Mount("a/b", fakeResource{})
+	mustMount(t, fs, "a", fakeResource{})
+	mustMount(t, fs, "a/b", fakeResource{})
 
 	mn, _, subpath, err := fs.Resolve("/a/b/c")
 	if err != nil {
@@ -150,7 +161,7 @@ func TestResolve_LongestPrefixWins(t *testing.T) {
 
 func TestList_RewritesPathsWithMountPrefix(t *testing.T) {
 	fs := vfs.NewFS()
-	fs.Mount("m", fakeResource{
+	mustMount(t, fs, "m", fakeResource{
 		listFn: func(subpath string) ([]vfs.Entry, error) {
 			if subpath != "" {
 				t.Fatalf("expected subpath '', got %q", subpath)
@@ -179,7 +190,7 @@ func TestList_RewritesPathsWithMountPrefix(t *testing.T) {
 
 func TestReadWriteAppend_WrapErrors(t *testing.T) {
 	fs := vfs.NewFS()
-	fs.Mount("m", fakeResource{
+	mustMount(t, fs, "m", fakeResource{
 		readFn: func(subpath string) ([]byte, error) {
 			return nil, errors.New("boom")
 		},
@@ -217,7 +228,7 @@ func TestListRoot_ContainsToolsButNotBuiltins(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountTools, res)
+	mustMount(t, fs, vfs.MountTools, res)
 
 	entries, err := fs.List("/tools")
 	if err != nil {
@@ -247,7 +258,7 @@ func TestListRoot_IncludesTools_WhenDiskHasItems(t *testing.T) {
 	}
 
 	fs := vfs.NewFS()
-	fs.Mount(vfs.MountTools, res)
+	mustMount(t, fs, vfs.MountTools, res)
 
 	entries, err := fs.List("/tools")
 	if err != nil {

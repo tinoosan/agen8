@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
@@ -102,7 +103,7 @@ func (s *DiskStagingStore) SetUpdate(_ context.Context, text string) error {
 	if err := s.ensure(); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.Dir, "update.md"), []byte(text), 0644)
+	return fsutil.WriteFileAtomic(filepath.Join(s.Dir, "update.md"), []byte(text), 0644)
 }
 
 func (s *DiskStagingStore) ClearUpdate(ctx context.Context) error {

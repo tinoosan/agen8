@@ -29,6 +29,10 @@ type MemoryReindexer interface {
 	ReindexDailyFile(ctx context.Context, filename string, content []byte) error
 }
 
+// NewDailyMemoryResource creates a resource for daily memory files.
+//
+// The vectorStore parameter is optional and can be nil. When provided, memory files
+// are reindexed on write. When nil, reindexing is skipped.
 func NewDailyMemoryResource(baseDir string, vectorStore MemoryReindexer, emit func(ctx context.Context, ev events.Event)) (*DailyMemoryResource, error) {
 	baseDir = strings.TrimSpace(baseDir)
 	if baseDir == "" {
@@ -42,6 +46,10 @@ func NewDailyMemoryResource(baseDir string, vectorStore MemoryReindexer, emit fu
 		VectorStore: vectorStore,
 		Emit:        emit,
 	}, nil
+}
+
+func (r *DailyMemoryResource) SupportsNestedList() bool {
+	return false
 }
 
 func (r *DailyMemoryResource) List(subpath string) ([]vfs.Entry, error) {

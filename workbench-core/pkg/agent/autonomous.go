@@ -7,6 +7,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +38,36 @@ type AutonomousRunnerConfig struct {
 	Emit              func(ctx context.Context, ev events.Event)
 }
 
+func (cfg AutonomousRunnerConfig) Validate() error {
+	if cfg.Agent == nil {
+		return fmt.Errorf("agent is required")
+	}
+	return nil
+}
+
+func (cfg AutonomousRunnerConfig) WithDefaults() AutonomousRunnerConfig {
+	cfg.Role = cfg.Role.Normalize()
+	if strings.TrimSpace(cfg.InboxPath) == "" {
+		cfg.InboxPath = "/inbox"
+	}
+	if strings.TrimSpace(cfg.OutboxPath) == "" {
+		cfg.OutboxPath = "/outbox"
+	}
+	if cfg.PollInterval <= 0 {
+		cfg.PollInterval = 5 * time.Second
+	}
+	if cfg.ProactiveInterval <= 0 {
+		cfg.ProactiveInterval = 30 * time.Second
+	}
+	if cfg.MemorySearchLimit <= 0 {
+		cfg.MemorySearchLimit = 3
+	}
+	if cfg.MaxReadBytes <= 0 {
+		cfg.MaxReadBytes = 96 * 1024
+	}
+	return cfg
+}
+
 type MemorySnippet struct {
 	Title    string
 	Filename string
@@ -63,33 +94,16 @@ type AutonomousRunner struct {
 
 	q *queue.TaskQueue
 
+	mu          sync.RWMutex
 	seenTaskIDs map[string]bool
 	lastFired   map[string]time.Time
 }
 
 func NewAutonomousRunner(cfg AutonomousRunnerConfig) (*AutonomousRunner, error) {
-	if cfg.Agent == nil {
-		return nil, fmt.Errorf("agent is required")
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
-	cfg.Role = cfg.Role.Normalize()
-	if strings.TrimSpace(cfg.InboxPath) == "" {
-		cfg.InboxPath = "/inbox"
-	}
-	if strings.TrimSpace(cfg.OutboxPath) == "" {
-		cfg.OutboxPath = "/outbox"
-	}
-	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = 5 * time.Second
-	}
-	if cfg.ProactiveInterval <= 0 {
-		cfg.ProactiveInterval = 30 * time.Second
-	}
-	if cfg.MemorySearchLimit <= 0 {
-		cfg.MemorySearchLimit = 3
-	}
-	if cfg.MaxReadBytes <= 0 {
-		cfg.MaxReadBytes = 96 * 1024
-	}
+	cfg = cfg.WithDefaults()
 	return &AutonomousRunner{
 		cfg:         cfg,
 		q:           queue.New(),
@@ -161,27 +175,27 @@ func (r *AutonomousRunner) drainInbox(ctx context.Context) error {
 			task.TaskID = taskID
 		}
 
-		status := strings.ToLower(strings.TrimSpace(task.Status))
+		task.NormalizeStatus()
+		status := string(task.Status)
 		switch status {
-		case "active", "in_progress", "succeeded", "failed", "canceled":
+		case string(types.TaskStatusActive), string(types.TaskStatusSucceeded), string(types.TaskStatusFailed), string(types.TaskStatusCanceled):
 			continue
 		default:
 			// allow enqueue
 		}
 
+		r.mu.Lock()
 		if r.seenTaskIDs[taskID] {
+			r.mu.Unlock()
 			continue
 		}
 		r.seenTaskIDs[taskID] = true
+		r.mu.Unlock()
 
 		if task.CreatedAt == nil {
 			now := time.Now()
 			task.CreatedAt = &now
 		}
-		if task.Status == "" {
-			task.Status = "pending"
-		}
-
 		r.q.Enqueue(&queue.Item{Task: task, Path: p})
 		if r.cfg.Emit != nil {
 			r.cfg.Emit(ctx, events.Event{
@@ -266,10 +280,15 @@ func (r *AutonomousRunner) maybeEnqueueProactive(ctx context.Context) {
 	now := time.Now()
 	for _, t := range r.cfg.Role.Triggers {
 		key := triggerKey(r.cfg.Role.Name, t)
-		if !shouldFireTrigger(now, t, r.lastFired[key]) {
+		r.mu.RLock()
+		lastFired := r.lastFired[key]
+		r.mu.RUnlock()
+		if !shouldFireTrigger(now, t, lastFired) {
 			continue
 		}
+		r.mu.Lock()
 		r.lastFired[key] = now
+		r.mu.Unlock()
 		if strings.TrimSpace(t.Goal) == "" {
 			continue
 		}
@@ -294,7 +313,7 @@ func (r *AutonomousRunner) enqueueSelfGoal(goal string, priority int, source str
 		TaskID:    taskID,
 		Goal:      goal,
 		Priority:  priority,
-		Status:    "pending",
+		Status:    types.TaskStatusPending,
 		CreatedAt: &now,
 		Metadata:  map[string]any{"source": source, "role": r.cfg.Role.Name},
 	}
@@ -330,7 +349,7 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 	}
 
 	now := time.Now()
-	task.Status = "active"
+	task.Status = types.TaskStatusActive
 	task.StartedAt = &now
 	_ = r.writeTask(ctx, item.Path, task)
 
@@ -370,12 +389,12 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 
 	result := types.TaskResult{
 		TaskID:      taskID,
-		Status:      "succeeded",
+		Status:      types.TaskStatusSucceeded,
 		Summary:     strings.TrimSpace(final),
 		CompletedAt: &doneAt,
 	}
 	if err != nil {
-		result.Status = "failed"
+		result.Status = types.TaskStatusFailed
 		result.Error = err.Error()
 	}
 	_ = r.writeResult(ctx, task, result)
@@ -388,7 +407,7 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 	if r.cfg.Emit != nil {
 		data := map[string]string{
 			"taskId": taskID,
-			"status": result.Status,
+			"status": string(result.Status),
 			"role":   r.cfg.Role.Name,
 		}
 		if goal := truncateText(task.Goal, 100); goal != "" {

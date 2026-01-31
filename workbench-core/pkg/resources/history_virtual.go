@@ -14,6 +14,7 @@ import (
 
 // HistoryResource exposes an immutable, append-only history log under the VFS mount "/history".
 type HistoryResource struct {
+	vfs.ReadOnlyResource
 	// BaseDir is the OS directory backing this resource (for debug/inspection).
 	BaseDir string
 	// Mount is the virtual mount name used by the VFS.
@@ -39,12 +40,17 @@ func NewHistoryResource(cfg config.Config, sessionID string, s store.HistoryStor
 	}
 	baseDir := fsutil.GetSessionHistoryDir(cfg.DataDir, sessionID)
 	return &HistoryResource{
-		BaseDir:   baseDir,
-		Mount:     vfs.MountHistory,
-		SessionID: sessionID,
-		Store:     s,
-		Appender:  s,
+		ReadOnlyResource: vfs.ReadOnlyResource{Name: "history"},
+		BaseDir:          baseDir,
+		Mount:            vfs.MountHistory,
+		SessionID:        sessionID,
+		Store:            s,
+		Appender:         s,
 	}, nil
+}
+
+func (hr *HistoryResource) SupportsNestedList() bool {
+	return false
 }
 
 // List lists entries under subpath relative to BaseDir.
@@ -79,12 +85,10 @@ func (hr *HistoryResource) Read(subpath string) ([]byte, error) {
 
 // Write replaces the file at subpath (creating parent directories if needed).
 func (hr *HistoryResource) Write(subpath string, _ []byte) error {
-	_ = subpath
-	return fmt.Errorf("history write: not supported (history is host-owned and append-only)")
+	return hr.ReadOnlyResource.Write(subpath, nil)
 }
 
 // Append appends bytes to the file at subpath (creating parent directories if needed).
 func (hr *HistoryResource) Append(subpath string, _ []byte) error {
-	_ = subpath
-	return fmt.Errorf("history append: not supported (history is host-owned and append-only)")
+	return hr.ReadOnlyResource.Append(subpath, nil)
 }

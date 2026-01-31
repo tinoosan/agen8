@@ -30,6 +30,10 @@ type ResultsView interface {
 }
 
 // ResultsStore is the host-side storage interface for tool call outputs.
+//
+// Interface composition allows partial implementations for specific use-cases
+// (e.g. ResultsView for read-only VFS access). A full ResultsStore must implement
+// all three interfaces below.
 type ResultsStore interface {
 	ResultWriter
 	ResultReader

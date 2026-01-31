@@ -22,10 +22,10 @@ import (
 // This is not the final host API; it is a concrete reference for the agent-facing
 // request/response flow:
 //   - fs.list/fs.read/fs.write/fs.append are always available
-//   - tool.run executes via tools.Runner and returns a ToolResponse
+//   - tool.run executes via tools.Orchestrator and returns a ToolResponse
 type HostOpExecutor struct {
 	FS     *vfs.FS
-	Runner *pkgtools.Runner
+	Runner *pkgtools.Orchestrator
 
 	// Core invokers for direct host operations.
 	ShellInvoker pkgtools.ToolInvoker
