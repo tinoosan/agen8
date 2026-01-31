@@ -152,6 +152,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	activityList.SetShowStatusBar(false)
 	activityList.SetShowFilter(false)
 	activityList.SetShowHelp(false)
+	activityList.SetShowPagination(false)
 
 	tctx, cancel := context.WithCancel(ctx)
 	evs, off, _ := store.ListEvents(cfg, runID)
@@ -609,7 +610,17 @@ func (m *monitorModel) refreshActivityList() {
 	}
 	m.activityList.SetItems(items)
 	if len(items) > 0 {
-		m.activityList.Select(len(items) - 1)
+		lastIdx := len(items) - 1
+		m.activityList.Select(lastIdx)
+
+		// Manually drive pagination to the end so the newest entry is visible.
+		if pages := m.activityList.Paginator.TotalPages; pages > 0 {
+			m.activityList.Paginator.Page = pages - 1
+			itemsOnPage := m.activityList.Paginator.ItemsOnPage(len(m.activityList.VisibleItems()))
+			for itemsOnPage > 0 && m.activityList.Cursor() < itemsOnPage-1 {
+				m.activityList.CursorDown()
+			}
+		}
 	}
 }
 
@@ -619,6 +630,7 @@ func (m *monitorModel) refreshActivityDetail() {
 	}
 	if len(m.activities) == 0 || m.activityList.Index() < 0 || m.activityList.Index() >= len(m.activities) {
 		m.activityDetail.SetContent("")
+		m.activityDetail.GotoTop()
 		return
 	}
 	w := imax(24, m.activityDetail.Width-4)
@@ -627,6 +639,7 @@ func (m *monitorModel) refreshActivityDetail() {
 	act := m.activities[m.activityList.Index()]
 	md := renderActivityDetailMarkdown(act, false, false)
 	m.activityDetail.SetContent(strings.TrimRight(m.renderer.RenderMarkdown(header+help+md, w), "\n"))
+	m.activityDetail.GotoTop()
 }
 
 func (m *monitorModel) refreshPlanView() {
@@ -678,6 +691,7 @@ func (m *monitorModel) refreshPlanView() {
 		content = "_Plan view is preparing…_"
 	}
 	m.planViewport.SetContent(strings.TrimRight(m.renderer.RenderMarkdown(content, w), "\n"))
+	m.planViewport.GotoTop()
 }
 
 func (m *monitorModel) renderHeader() string {
@@ -864,14 +878,102 @@ type layoutConfig struct {
 	composerH int
 }
 
+// allocateHeights distributes a total height across panels while honoring minimums.
+// If total < sum(mins), panels are shrunk proportionally but never below 1.
+// Any remainder from integer division is given to earlier panels.
+func allocateHeights(total int, mins []int, weights []int) []int {
+	n := len(mins)
+	if len(weights) != n {
+		weights = make([]int, n)
+		for i := range weights {
+			weights[i] = 1
+		}
+	}
+	sumMin := 0
+	for _, v := range mins {
+		sumMin += v
+	}
+	heights := make([]int, n)
+
+	if total <= sumMin {
+		// Scale down proportionally
+		for i := range mins {
+			heights[i] = max(1, mins[i]*total/max(1, sumMin))
+		}
+		// Fix rounding
+		curr := 0
+		for _, v := range heights {
+			curr += v
+		}
+		for i := 0; curr < total && i < n; i++ {
+			heights[i]++
+			curr++
+		}
+		for i := 0; curr > total && i < n; i++ {
+			if heights[i] > 1 {
+				heights[i]--
+				curr--
+			}
+		}
+		return heights
+	}
+
+	// Enough space: assign mins then distribute remainder by weights.
+	for i := range mins {
+		heights[i] = mins[i]
+	}
+	remain := total - sumMin
+	sumW := 0
+	for _, w := range weights {
+		sumW += w
+	}
+	if sumW == 0 {
+		sumW = n
+		for i := range weights {
+			weights[i] = 1
+		}
+	}
+	for i := range heights {
+		heights[i] += remain * weights[i] / sumW
+	}
+	// Distribute leftover from division
+	curr := 0
+	for _, v := range heights {
+		curr += v
+	}
+	for i := 0; curr < total && i < n; i++ {
+		heights[i]++
+		curr++
+	}
+	return heights
+}
+
 func (m *monitorModel) layout() layoutConfig {
 	headerH := 1
+
+	_, frameY := m.styles.panel.GetFrameSize()
+	sectionH := lipgloss.Height(m.styles.sectionTitle.Render("X"))
+
+	minActivity := frameY + sectionH + 3 // two-line delegate + spacing
+	minOutput := frameY + sectionH + 3
+	minDetail := frameY + sectionH + 3
+	minTask := frameY + sectionH + 2
+	minPlan := frameY + sectionH + 3
+	minQueue := frameY + sectionH + 2
+	minStats := frameY + sectionH + 2
+	minOutbox := frameY + sectionH + 2
+	minMemory := frameY + sectionH + 2
+
 	composerH := 3 + m.input.Height()
-	outboxH := 6
-	memoryH := 6
+	composerH = max(composerH, frameY+sectionH+m.input.Height())
+
+	// Allow outbox/memory to shrink but keep minimums.
+	outboxH := max(6, minOutbox)
+	memoryH := max(6, minMemory)
+
 	mainH := m.height - headerH - composerH - outboxH - memoryH
-	if mainH < 8 {
-		mainH = 8
+	if mainH < minActivity+minOutput {
+		mainH = minActivity + minOutput
 	}
 	leftW := int(float64(m.width) * 0.65)
 	if leftW < 40 {
@@ -882,45 +984,15 @@ func (m *monitorModel) layout() layoutConfig {
 		rightW = 30
 		leftW = m.width - rightW
 	}
-	activityH := mainH / 2
-	outputH := mainH - activityH
-	detailH := imax(6, mainH/2)
-	remaining := mainH - detailH
-	minPanelH := 3
-	allocate := func() (int, int, int, int) {
-		base := remaining / 4
-		if base < minPanelH {
-			base = minPanelH
-		}
-		taskH := base
-		planH := base
-		queueH := base
-		statsH := remaining - taskH - planH - queueH
-		if statsH < minPanelH {
-			statsH = minPanelH
-			need := taskH + planH + queueH + statsH - remaining
-			for need > 0 {
-				if taskH > minPanelH {
-					taskH--
-					need--
-					continue
-				}
-				if planH > minPanelH {
-					planH--
-					need--
-					continue
-				}
-				if queueH > minPanelH {
-					queueH--
-					need--
-					continue
-				}
-				break
-			}
-		}
-		return taskH, planH, queueH, statsH
-	}
-	taskH, planH, queueH, statsH := allocate()
+	// Left column: Activity + Output
+	leftHeights := allocateHeights(mainH, []int{minActivity, minOutput}, []int{2, 1})
+	activityH, outputH := leftHeights[0], leftHeights[1]
+
+	// Right column: Detail, Task, Plan, Queue, Stats
+	rightMins := []int{minDetail, minTask, minPlan, minQueue, minStats}
+	rightWeights := []int{3, 1, 2, 1, 1}
+	rightHeights := allocateHeights(mainH, rightMins, rightWeights)
+	detailH, taskH, planH, queueH, statsH := rightHeights[0], rightHeights[1], rightHeights[2], rightHeights[3], rightHeights[4]
 	return layoutConfig{
 		leftW:     leftW,
 		rightW:    rightW,
@@ -944,30 +1016,42 @@ func (m *monitorModel) refreshViewports() {
 	}
 	layout := m.layout()
 
-	m.activityList.SetSize(imax(10, layout.leftW-4), imax(2, layout.activityH-2))
-	m.agentOutputVP.Width = imax(10, layout.leftW-4)
-	m.agentOutputVP.Height = imax(2, layout.outputH-2)
+	frameX, frameY := m.styles.panel.GetFrameSize()
+	sectionH := lipgloss.Height(m.styles.sectionTitle.Render("X")) // all titles are single-line
+
+	leftInnerW := imax(10, layout.leftW-frameX)
+	leftAvail := func(panelH int) int { return imax(2, panelH-frameY-sectionH) }
+
+	m.activityList.SetSize(leftInnerW, leftAvail(layout.activityH))
+
+	m.agentOutputVP.Width = leftInnerW
+	m.agentOutputVP.Height = leftAvail(layout.outputH)
 	m.agentOutputVP.SetContent(strings.Join(m.agentOutput, "\n"))
 	m.agentOutputVP.GotoBottom()
 
-	m.activityDetail.Width = imax(10, layout.rightW-4)
-	m.activityDetail.Height = imax(2, layout.detailH-2)
+	rightInnerW := imax(10, layout.rightW-frameX)
+	rightAvail := func(panelH int) int { return imax(2, panelH-frameY-sectionH) }
+
+	m.activityDetail.Width = rightInnerW
+	m.activityDetail.Height = rightAvail(layout.detailH)
 	m.refreshActivityDetail()
 
-	m.planViewport.Width = imax(10, layout.rightW-4)
-	m.planViewport.Height = imax(2, layout.planH-2)
+	m.planViewport.Width = rightInnerW
+	m.planViewport.Height = rightAvail(layout.planH)
 	m.refreshPlanView()
 
-	m.taskQueueVP.Width = imax(10, layout.rightW-4)
-	m.taskQueueVP.Height = imax(2, layout.queueH-2)
+	m.taskQueueVP.Width = rightInnerW
+	m.taskQueueVP.Height = rightAvail(layout.queueH)
 	m.taskQueueVP.SetContent(renderTaskQueue(m.taskQueue))
 
-	m.outboxVP.Width = imax(10, m.width-4)
-	m.outboxVP.Height = imax(2, layout.outboxH-2)
+	fullInnerW := imax(10, m.width-frameX)
+	fullAvail := func(panelH int) int { return imax(2, panelH-frameY-sectionH) }
+	m.outboxVP.Width = fullInnerW
+	m.outboxVP.Height = fullAvail(layout.outboxH)
 	m.outboxVP.SetContent(renderOutboxLines(m.outboxResults))
 
-	m.memoryVP.Width = imax(10, m.width-4)
-	m.memoryVP.Height = imax(2, layout.memoryH-2)
+	m.memoryVP.Width = fullInnerW
+	m.memoryVP.Height = fullAvail(layout.memoryH)
 	m.memoryVP.SetContent(renderMemResults(m.memResults))
 
 	m.input.SetWidth(imax(10, m.width-6))
