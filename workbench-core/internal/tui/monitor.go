@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
 	"github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -49,6 +51,14 @@ type monitorModel struct {
 	memResults []string
 	model      string
 	role       string
+
+	activityVP viewport.Model
+	queueVP    viewport.Model
+	memoryVP   viewport.Model
+
+	width  int
+	height int
+	styles *monitorStyles
 
 	tailCh <-chan store.TailedEvent
 	errCh  <-chan error
@@ -98,6 +108,10 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	tctx, cancel := context.WithCancel(ctx)
 	tailCh, errCh := store.TailEvents(cfg, tctx, runID, off)
 
+	activityVP := viewport.New(0, 0)
+	queueVP := viewport.New(0, 0)
+	memoryVP := viewport.New(0, 0)
+
 	return &monitorModel{
 		ctx:         ctx,
 		cfg:         cfg,
@@ -108,6 +122,10 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 		maxActivity: 400,
 		taskStatus:  taskStatus,
 		stats:       stats,
+		activityVP:  activityVP,
+		queueVP:     queueVP,
+		memoryVP:    memoryVP,
+		styles:      defaultMonitorStyles(),
 		tailCh:      tailCh,
 		errCh:       errCh,
 		cancel:      cancel,
@@ -121,7 +139,9 @@ func (m *monitorModel) Init() tea.Cmd {
 func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		// layout recalculated in View; nothing to store.
+		m.width = msg.Width
+		m.height = msg.Height
+		m.refreshViewports()
 		return m, nil
 
 	case tailedEventMsg:
@@ -132,6 +152,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activity = m.activity[len(m.activity)-m.maxActivity:]
 		}
 		updateStateFromEvent(msg.ev.Event, m.taskStatus, &m.stats, &m.model, &m.role)
+		m.refreshViewports()
 		return m, m.listenEvent()
 
 	case tailErrMsg:
@@ -141,6 +162,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activity = m.activity[len(m.activity)-m.maxActivity:]
 			}
 		}
+		m.refreshViewports()
 		return m, m.listenErr()
 
 	case commandLinesMsg:
@@ -153,6 +175,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.memResults = msg.lines[1:]
 			}
 		}
+		m.refreshViewports()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -179,19 +202,29 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *monitorModel) View() string {
-	header := fmt.Sprintf("Workbench - Always On | Model: %s | Role: %s | Run: %s", fallback(m.model, "(unknown)"), fallback(m.role, "(none)"), m.runID)
+	left := m.styles.panel.Render(m.styles.sectionTitle.Render("Activity Stream") + "\n" + m.activityVP.View())
+	rightQueue := m.styles.panel.Render(m.styles.sectionTitle.Render("Task Queue") + "\n" + m.queueVP.View())
+	rightStats := m.styles.panel.Render(m.styles.sectionTitle.Render("Stats") + "\n" + renderStats(m.stats))
+	right := lipgloss.JoinVertical(lipgloss.Left, rightQueue, rightStats)
+	memory := m.styles.panel.Render(m.styles.sectionTitle.Render("Memory (semantic search)") + "\n" + m.memoryVP.View())
+	cmdBar := m.styles.commandBar.Render("Commands: /task \"goal\"   /role <name>   /model <id>   /memory search \"query\"   /quit\n" + m.input.View())
 
-	left := lipgloss.NewStyle().Width(60).Render(renderSection("Activity Stream", strings.Join(m.activity, "\n")))
+	headerLine := m.styles.header.Render(
+		lipgloss.JoinHorizontal(lipgloss.Left,
+			m.styles.headerTitle.Render("Workbench - Always On"),
+			kit.RenderTag(kit.TagOptions{Key: "Model", Value: fallback(m.model, "(unknown)")}),
+			kit.RenderTag(kit.TagOptions{Key: "Role", Value: fallback(m.role, "(none)")}),
+			kit.RenderTag(kit.TagOptions{Key: "Run", Value: m.runID}),
+		))
 
-	rightTop := renderQueue(m.taskStatus)
-	rightStats := renderStats(m.stats)
-	rightMem := renderMemResults(m.memResults)
-	right := lipgloss.JoinVertical(lipgloss.Left, renderSection("Task Queue", rightTop), renderSection("Stats", rightStats), renderSection("Memory", rightMem))
+	body := lipgloss.JoinVertical(lipgloss.Left,
+		headerLine,
+		lipgloss.JoinHorizontal(lipgloss.Top, left, right),
+		memory,
+		cmdBar,
+	)
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	cmdBar := renderSection("Commands", "/task \"goal\"   /role <name>   /model <id>   /memory search \"query\"   /quit")
-
-	return header + "\n" + body + "\n" + m.input.View() + "\n" + cmdBar
+	return body
 }
 
 func (m *monitorModel) listenEvent() tea.Cmd {
@@ -443,4 +476,62 @@ func fallback(v, def string) string {
 		return def
 	}
 	return v
+}
+
+type monitorStyles struct {
+	header       lipgloss.Style
+	headerTitle  lipgloss.Style
+	sectionTitle lipgloss.Style
+	panel        lipgloss.Style
+	commandBar   lipgloss.Style
+}
+
+func defaultMonitorStyles() *monitorStyles {
+	panel := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(kit.BorderColorDefault).
+		Padding(0, 1)
+
+	return &monitorStyles{
+		header:       lipgloss.NewStyle().Padding(0, 1),
+		headerTitle:  lipgloss.NewStyle().Bold(true),
+		sectionTitle: lipgloss.NewStyle().Bold(true),
+		panel:        panel,
+		commandBar:   lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(kit.BorderColorDefault).Padding(0, 1),
+	}
+}
+
+func (m *monitorModel) refreshViewports() {
+	if m.width == 0 || m.height == 0 {
+		return
+	}
+	headerH := 1
+	footerH := 2
+	memoryH := 7
+	mainH := m.height - headerH - footerH - memoryH
+	if mainH < 6 {
+		mainH = 6
+	}
+	leftW := int(float64(m.width) * 0.62)
+	if leftW < 40 {
+		leftW = 40
+	}
+	rightW := m.width - leftW
+	if rightW < 30 {
+		rightW = 30
+		leftW = m.width - rightW
+	}
+
+	m.activityVP.Width = leftW - 4
+	m.activityVP.Height = mainH - 2
+	m.activityVP.SetContent(strings.Join(m.activity, "\n"))
+	m.activityVP.GotoBottom()
+
+	m.queueVP.Width = rightW - 4
+	m.queueVP.Height = mainH/2 - 1
+	m.queueVP.SetContent(renderQueue(m.taskStatus))
+
+	m.memoryVP.Width = m.width - 4
+	m.memoryVP.Height = memoryH - 2
+	m.memoryVP.SetContent(renderMemResults(m.memResults))
 }
