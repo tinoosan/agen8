@@ -66,7 +66,10 @@ func (m *Model) layout() {
 		mainW = m.width - detailW
 	}
 
-	m.transcript.Width = max(40, mainW)
+	// m.transcript.Width = max(40, mainW)
+	// FIX: Do not enforce a hard minimum of 40 if the terminal is too narrow.
+	// We prioritizing fitting the sidebar (if open) and letting the transcript take the rest.
+	m.transcript.Width = max(1, mainW)
 	if detailW != 0 {
 		// The right pane has a border, so its inner content must be sized to
 		// fit within (detailW-2)x(bodyH-2). If we let inner components render

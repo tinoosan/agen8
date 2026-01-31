@@ -1488,3 +1488,20 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+func TestLayout_VeryNarrowTerminal_RespectsWidth(t *testing.T) {
+	// Regression test for issue where transcript forced min-width 40 + sidebar 32 > 60.
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 60
+	m.height = 30
+	m.showDetails = true
+	m.layout()
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	for i, line := range lines {
+		if w := lipgloss.Width(line); w > m.width {
+			t.Errorf("line %d exceeds terminal width %d: width=%d content=%q", i+1, m.width, w, line)
+		}
+	}
+}

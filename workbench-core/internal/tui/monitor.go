@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
+	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -278,11 +279,12 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *monitorModel) View() string {
+	grid := m.layout()
 	headerLine := m.renderHeader()
-	main := m.renderMainBody()
-	outbox := m.renderOutbox()
-	memory := m.renderMemory()
-	composer := m.renderComposer()
+	main := m.renderMainBody(grid)
+	outbox := m.renderOutbox(grid.Outbox)
+	memory := m.renderMemory(grid.Memory)
+	composer := m.renderComposer(grid.Composer)
 
 	return lipgloss.JoinVertical(lipgloss.Left, headerLine, main, outbox, memory, composer)
 }
@@ -711,28 +713,26 @@ func (m *monitorModel) panelStyle(panel panelID) lipgloss.Style {
 	return m.styles.panel
 }
 
-func (m *monitorModel) renderMainBody() string {
-	layout := m.layout()
-
+func (m *monitorModel) renderMainBody(grid layoutmgr.GridLayout) string {
 	left := lipgloss.JoinVertical(lipgloss.Left,
-		m.panelStyle(panelActivity).Width(layout.leftW).Height(layout.activityH).Render(
+		m.panelStyle(panelActivity).Width(grid.ActivityFeed.Width).Height(grid.ActivityFeed.Height).Render(
 			m.styles.sectionTitle.Render("Activity Feed")+"\n"+m.activityList.View(),
 		),
-		m.panelStyle(panelOutput).Width(layout.leftW).Height(layout.outputH).Render(
+		m.panelStyle(panelOutput).Width(grid.AgentOutput.Width).Height(grid.AgentOutput.Height).Render(
 			m.styles.sectionTitle.Render("Agent Output")+"\n"+m.agentOutputVP.View(),
 		),
 	)
 
 	right := lipgloss.JoinVertical(lipgloss.Left,
-		m.panelStyle(panelActivityDetail).Width(layout.rightW).Height(layout.detailH).Render(
+		m.panelStyle(panelActivityDetail).Width(grid.ActivityDetail.Width).Height(grid.ActivityDetail.Height).Render(
 			m.styles.sectionTitle.Render("Activity Details")+"\n"+m.activityDetail.View(),
 		),
-		m.renderCurrentTask(layout.rightW, layout.taskH),
-		m.panelStyle(panelPlan).Width(layout.rightW).Height(layout.planH).Render(
+		m.renderCurrentTask(grid.CurrentTask),
+		m.panelStyle(panelPlan).Width(grid.Plan.Width).Height(grid.Plan.Height).Render(
 			m.styles.sectionTitle.Render("Plan")+"\n"+m.planViewport.View(),
 		),
-		m.renderTaskQueue(layout.rightW, layout.queueH),
-		m.styles.panel.Width(layout.rightW).Height(layout.statsH).Render(
+		m.renderTaskQueue(grid.TaskQueue),
+		m.styles.panel.Width(grid.Stats.Width).Height(grid.Stats.Height).Render(
 			m.styles.sectionTitle.Render("Stats")+"\n"+renderStats(m.stats),
 		),
 	)
@@ -740,45 +740,48 @@ func (m *monitorModel) renderMainBody() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
-func (m *monitorModel) renderCurrentTask(width int, height int) string {
+func (m *monitorModel) renderCurrentTask(spec layoutmgr.PanelSpec) string {
 	body := kit.StyleDim.Render("No active task")
 	if m.currentTask != nil {
 		t := m.currentTask
 		duration := time.Since(t.StartedAt).Round(time.Second)
 		body = fmt.Sprintf(
 			"%s\n%s\n%s\n%s",
-			kit.StyleStatusKey.Render("Goal: ")+truncateText(t.Goal, imax(10, width-12)),
+			kit.StyleStatusKey.Render("Goal: ")+truncateText(t.Goal, imax(10, spec.ContentWidth-12)),
 			kit.StyleStatusKey.Render("Status: ")+fallback(t.Status, "unknown"),
 			kit.StyleStatusKey.Render("Started: ")+t.StartedAt.Format("15:04:05"),
 			kit.StyleStatusKey.Render("Duration: ")+duration.String(),
 		)
 	}
-	return m.styles.panel.Width(width).Height(height).Render(
+	return m.styles.panel.Width(spec.Width).Height(spec.Height).Render(
 		m.styles.sectionTitle.Render("Current Task") + "\n" + body,
 	)
 }
 
-func (m *monitorModel) renderTaskQueue(width int, height int) string {
-	return m.panelStyle(panelQueue).Width(width).Height(height).Render(
+func (m *monitorModel) renderTaskQueue(spec layoutmgr.PanelSpec) string {
+	return m.panelStyle(panelQueue).Width(spec.Width).Height(spec.Height).Render(
 		m.styles.sectionTitle.Render("Queue") + "\n" + m.taskQueueVP.View(),
 	)
 }
 
-func (m *monitorModel) renderOutbox() string {
-	return m.panelStyle(panelOutbox).Render(
+func (m *monitorModel) renderOutbox(spec layoutmgr.PanelSpec) string {
+	return m.panelStyle(panelOutbox).Width(spec.Width).Height(spec.Height).Render(
 		m.styles.sectionTitle.Render("Outbox (Recent Results)") + "\n" + m.outboxVP.View(),
 	)
 }
 
-func (m *monitorModel) renderMemory() string {
-	return m.panelStyle(panelMemory).Render(
+func (m *monitorModel) renderMemory(spec layoutmgr.PanelSpec) string {
+	return m.panelStyle(panelMemory).Width(spec.Width).Height(spec.Height).Render(
 		m.styles.sectionTitle.Render("Memory (semantic search)") + "\n" + m.memoryVP.View(),
 	)
 }
 
-func (m *monitorModel) renderComposer() string {
+func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 	help := fmt.Sprintf("Tab: cycle panels (%s)  |  Ctrl+Enter: submit  |  /quit", m.focusedPanelName())
-	return m.commandBarStyle().Render(help + "\n" + m.input.View())
+	return m.commandBarStyle().
+		Width(spec.Width).
+		Height(spec.Height).
+		Render(help + "\n" + m.input.View())
 }
 
 func (m *monitorModel) updateFocus() {
@@ -862,199 +865,48 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 	}
 }
 
-type layoutConfig struct {
-	leftW     int
-	rightW    int
-	mainH     int
-	activityH int
-	outputH   int
-	detailH   int
-	taskH     int
-	planH     int
-	queueH    int
-	statsH    int
-	outboxH   int
-	memoryH   int
-	composerH int
-}
-
-// allocateHeights distributes a total height across panels while honoring minimums.
-// If total < sum(mins), panels are shrunk proportionally but never below 1.
-// Any remainder from integer division is given to earlier panels.
-func allocateHeights(total int, mins []int, weights []int) []int {
-	n := len(mins)
-	if len(weights) != n {
-		weights = make([]int, n)
-		for i := range weights {
-			weights[i] = 1
-		}
-	}
-	sumMin := 0
-	for _, v := range mins {
-		sumMin += v
-	}
-	heights := make([]int, n)
-
-	if total <= sumMin {
-		// Scale down proportionally
-		for i := range mins {
-			heights[i] = max(1, mins[i]*total/max(1, sumMin))
-		}
-		// Fix rounding
-		curr := 0
-		for _, v := range heights {
-			curr += v
-		}
-		for i := 0; curr < total && i < n; i++ {
-			heights[i]++
-			curr++
-		}
-		for i := 0; curr > total && i < n; i++ {
-			if heights[i] > 1 {
-				heights[i]--
-				curr--
-			}
-		}
-		return heights
-	}
-
-	// Enough space: assign mins then distribute remainder by weights.
-	for i := range mins {
-		heights[i] = mins[i]
-	}
-	remain := total - sumMin
-	sumW := 0
-	for _, w := range weights {
-		sumW += w
-	}
-	if sumW == 0 {
-		sumW = n
-		for i := range weights {
-			weights[i] = 1
-		}
-	}
-	for i := range heights {
-		heights[i] += remain * weights[i] / sumW
-	}
-	// Distribute leftover from division
-	curr := 0
-	for _, v := range heights {
-		curr += v
-	}
-	for i := 0; curr < total && i < n; i++ {
-		heights[i]++
-		curr++
-	}
-	return heights
-}
-
-func (m *monitorModel) layout() layoutConfig {
-	headerH := 1
-
-	_, frameY := m.styles.panel.GetFrameSize()
-	sectionH := lipgloss.Height(m.styles.sectionTitle.Render("X"))
-
-	minActivity := frameY + sectionH + 3 // two-line delegate + spacing
-	minOutput := frameY + sectionH + 3
-	minDetail := frameY + sectionH + 3
-	minTask := frameY + sectionH + 2
-	minPlan := frameY + sectionH + 3
-	minQueue := frameY + sectionH + 2
-	minStats := frameY + sectionH + 2
-	minOutbox := frameY + sectionH + 2
-	minMemory := frameY + sectionH + 2
-
-	composerH := 3 + m.input.Height()
-	composerH = max(composerH, frameY+sectionH+m.input.Height())
-
-	// Allow outbox/memory to shrink but keep minimums.
-	outboxH := max(6, minOutbox)
-	memoryH := max(6, minMemory)
-
-	mainH := m.height - headerH - composerH - outboxH - memoryH
-	if mainH < minActivity+minOutput {
-		mainH = minActivity + minOutput
-	}
-	leftW := int(float64(m.width) * 0.65)
-	if leftW < 40 {
-		leftW = 40
-	}
-	rightW := m.width - leftW
-	if rightW < 30 {
-		rightW = 30
-		leftW = m.width - rightW
-	}
-	// Left column: Activity + Output
-	leftHeights := allocateHeights(mainH, []int{minActivity, minOutput}, []int{2, 1})
-	activityH, outputH := leftHeights[0], leftHeights[1]
-
-	// Right column: Detail, Task, Plan, Queue, Stats
-	rightMins := []int{minDetail, minTask, minPlan, minQueue, minStats}
-	rightWeights := []int{3, 1, 2, 1, 1}
-	rightHeights := allocateHeights(mainH, rightMins, rightWeights)
-	detailH, taskH, planH, queueH, statsH := rightHeights[0], rightHeights[1], rightHeights[2], rightHeights[3], rightHeights[4]
-	return layoutConfig{
-		leftW:     leftW,
-		rightW:    rightW,
-		mainH:     mainH,
-		activityH: activityH,
-		outputH:   outputH,
-		detailH:   detailH,
-		taskH:     taskH,
-		planH:     planH,
-		queueH:    queueH,
-		statsH:    statsH,
-		outboxH:   outboxH,
-		memoryH:   memoryH,
-		composerH: composerH,
-	}
+func (m *monitorModel) layout() layoutmgr.GridLayout {
+	manager := layoutmgr.NewManager(m.styles.panel, true)
+	return manager.Calculate(m.width, m.height, 3+m.input.Height())
 }
 
 func (m *monitorModel) refreshViewports() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
-	layout := m.layout()
+	grid := m.layout()
 
-	frameX, frameY := m.styles.panel.GetFrameSize()
-	sectionH := lipgloss.Height(m.styles.sectionTitle.Render("X")) // all titles are single-line
+	m.activityList.SetSize(
+		imax(10, grid.ActivityFeed.ContentWidth),
+		imax(1, grid.ActivityFeed.ContentHeight),
+	)
 
-	leftInnerW := imax(10, layout.leftW-frameX)
-	leftAvail := func(panelH int) int { return imax(2, panelH-frameY-sectionH) }
-
-	m.activityList.SetSize(leftInnerW, leftAvail(layout.activityH))
-
-	m.agentOutputVP.Width = leftInnerW
-	m.agentOutputVP.Height = leftAvail(layout.outputH)
+	m.agentOutputVP.Width = imax(10, grid.AgentOutput.ContentWidth)
+	m.agentOutputVP.Height = imax(1, grid.AgentOutput.ContentHeight)
 	m.agentOutputVP.SetContent(strings.Join(m.agentOutput, "\n"))
 	m.agentOutputVP.GotoBottom()
 
-	rightInnerW := imax(10, layout.rightW-frameX)
-	rightAvail := func(panelH int) int { return imax(2, panelH-frameY-sectionH) }
-
-	m.activityDetail.Width = rightInnerW
-	m.activityDetail.Height = rightAvail(layout.detailH)
+	m.activityDetail.Width = imax(10, grid.ActivityDetail.ContentWidth)
+	m.activityDetail.Height = imax(1, grid.ActivityDetail.ContentHeight)
 	m.refreshActivityDetail()
 
-	m.planViewport.Width = rightInnerW
-	m.planViewport.Height = rightAvail(layout.planH)
+	m.planViewport.Width = imax(10, grid.Plan.ContentWidth)
+	m.planViewport.Height = imax(1, grid.Plan.ContentHeight)
 	m.refreshPlanView()
 
-	m.taskQueueVP.Width = rightInnerW
-	m.taskQueueVP.Height = rightAvail(layout.queueH)
+	m.taskQueueVP.Width = imax(10, grid.TaskQueue.ContentWidth)
+	m.taskQueueVP.Height = imax(1, grid.TaskQueue.ContentHeight)
 	m.taskQueueVP.SetContent(renderTaskQueue(m.taskQueue))
 
-	fullInnerW := imax(10, m.width-frameX)
-	fullAvail := func(panelH int) int { return imax(2, panelH-frameY-sectionH) }
-	m.outboxVP.Width = fullInnerW
-	m.outboxVP.Height = fullAvail(layout.outboxH)
+	m.outboxVP.Width = imax(10, grid.Outbox.ContentWidth)
+	m.outboxVP.Height = imax(1, grid.Outbox.ContentHeight)
 	m.outboxVP.SetContent(renderOutboxLines(m.outboxResults))
 
-	m.memoryVP.Width = fullInnerW
-	m.memoryVP.Height = fullAvail(layout.memoryH)
+	m.memoryVP.Width = imax(10, grid.Memory.ContentWidth)
+	m.memoryVP.Height = imax(1, grid.Memory.ContentHeight)
 	m.memoryVP.SetContent(renderMemResults(m.memResults))
 
-	m.input.SetWidth(imax(10, m.width-6))
+	m.input.SetWidth(imax(10, grid.Composer.ContentWidth))
 }
 
 func (m *monitorModel) loadPlanFiles() {

@@ -1,12 +1,14 @@
 package types
 
 import (
-	"encoding/json"
-	"fmt"
-	"strings"
+    "encoding/json"
+    "fmt"
+    "path/filepath"
+    "strings"
+    "time"
 
-	"github.com/tinoosan/workbench-core/pkg/tools"
-	"github.com/tinoosan/workbench-core/pkg/validate"
+    "github.com/tinoosan/workbench-core/pkg/tools"
+    "github.com/tinoosan/workbench-core/pkg/validate"
 )
 
 const (
@@ -91,17 +93,23 @@ func (r HostOpRequest) Validate() error {
 		}
 		return nil
 
-	case HostOpFSWrite, HostOpFSAppend:
-		if err := validate.NonEmpty("path", r.Path); err != nil {
-			return err
-		}
-		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
-			return fmt.Errorf("path must be an absolute VFS path (start with /)")
-		}
-		if err := validate.NonEmpty("text", r.Text); err != nil {
-			return err
-		}
-		return nil
+    case HostOpFSWrite, HostOpFSAppend:
+        if err := validate.NonEmpty("path", r.Path); err != nil {
+            return err
+        }
+        if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+            return fmt.Errorf("path must be an absolute VFS path (start with /)")
+        }
+        if err := validate.NonEmpty("text", r.Text); err != nil {
+            return err
+        }
+
+        if strings.HasPrefix(strings.TrimSpace(r.Path), "/memory/") {
+            if err := validateMemoryWritePath(r.Path); err != nil {
+                return err
+            }
+        }
+        return nil
 
 	case HostOpFSEdit:
 		if err := validate.NonEmpty("path", r.Path); err != nil {
@@ -210,6 +218,34 @@ func normalizeHostOp(op string) string {
 	default:
 		return op
 	}
+}
+
+// validateMemoryWritePath enforces that memory writes target only today's daily memory file.
+func validateMemoryWritePath(path string) error {
+	trimmed := strings.TrimSpace(path)
+
+	// Allow master instructions file; write protection handled by resource layer.
+	if strings.EqualFold(filepath.Base(trimmed), "MEMORY.MD") {
+		return nil
+	}
+
+	base := filepath.Base(trimmed)
+	if !strings.HasSuffix(base, "-memory.md") {
+		return fmt.Errorf("memory files must use format YYYY-MM-DD-memory.md")
+	}
+
+	datePart := strings.TrimSuffix(base, "-memory.md")
+	fileDate, err := time.Parse("2006-01-02", datePart)
+	if err != nil {
+		return fmt.Errorf("invalid date format in memory filename: %w", err)
+	}
+
+	today := time.Now().Format("2006-01-02")
+	if fileDate.Format("2006-01-02") != today {
+		return fmt.Errorf("can only write to today's memory file: /memory/%s-memory.md", today)
+	}
+
+	return nil
 }
 
 // HostOpResponse is the minimal "host primitive" response envelope.
