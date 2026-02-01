@@ -3,13 +3,12 @@ package store
 import (
 	"errors"
 	"time"
+
+	"github.com/tinoosan/workbench-core/pkg/ports"
 )
 
 // ResultWriter is used by the tool runner to persist call outputs.
-type ResultWriter interface {
-	PutCall(callID string, responseJSON []byte) error
-	PutArtifact(callID, artifactPath, mediaType string, content []byte) error
-}
+type ResultWriter = ports.ResultWriter
 
 // ResultReader is used by VFS to serve reads.
 type ResultReader interface {

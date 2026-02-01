@@ -8,12 +8,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tinoosan/workbench-core/pkg/ports"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
-type HistoryAppender interface {
-	AppendLine(ctx context.Context, line []byte) error
-}
+type HistoryAppender = ports.HistoryAppender
 
 // HistorySink appends enriched history lines to a history store.
 type HistorySink struct {

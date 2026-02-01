@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tinoosan/workbench-core/pkg/ports"
 )
 
 type Orchestrator struct {
@@ -17,10 +18,7 @@ type Orchestrator struct {
 	ToolRegistry ToolRegistry
 }
 
-type ResultWriter interface {
-	PutArtifact(callID, relPath, mediaType string, data []byte) error
-	PutCall(callID string, data []byte) error
-}
+type ResultWriter = ports.ResultWriter
 
 type ToolRegistry interface {
 	Get(toolId ToolID) (ToolInvoker, bool)
