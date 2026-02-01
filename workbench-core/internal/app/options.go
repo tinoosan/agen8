@@ -25,7 +25,6 @@ type RunChatOptions struct {
 
 	MaxTraceBytes   int
 	MaxMemoryBytes  int
-	MaxUserProfileBytes int
 
 	PriceInPerMTokensUSD  float64
 	PriceOutPerMTokensUSD float64
@@ -49,10 +48,6 @@ func resolveRunChatOptions(opts ...RunChatOption) (RunChatOptions, error) {
 		ResultWebhookURL: strings.TrimSpace(os.Getenv("WORKBENCH_RESULT_WEBHOOK_URL")),
 		HealthAddr:       strings.TrimSpace(os.Getenv("WORKBENCH_HEALTH_ADDR")),
 	}
-	if strings.TrimSpace(o.Profile) == "" {
-		// Back-compat for older flag/env naming.
-		o.Profile = strings.TrimSpace(os.Getenv("WORKBENCH_ROLE"))
-	}
 	for _, opt := range opts {
 		if opt != nil {
 			if err := opt(&o); err != nil {
@@ -68,16 +63,6 @@ func WithModel(model string) RunChatOption {
 		model = strings.TrimSpace(model)
 		if model != "" {
 			o.Model = model
-		}
-		return nil
-	}
-}
-
-func WithRole(role string) RunChatOption {
-	return func(o *RunChatOptions) error {
-		role = strings.TrimSpace(role)
-		if role != "" {
-			o.Profile = role
 		}
 		return nil
 	}
@@ -194,20 +179,6 @@ func WithTraceBytes(maxBytes int) RunChatOption {
 func WithMemoryBytes(maxBytes int) RunChatOption {
 	return func(o *RunChatOptions) error {
 		o.MaxMemoryBytes = maxBytes
-		return nil
-	}
-}
-
-func WithProfileBytes(maxBytes int) RunChatOption {
-	return func(o *RunChatOptions) error {
-		o.MaxUserProfileBytes = maxBytes
-		return nil
-	}
-}
-
-func WithUserProfileBytes(maxBytes int) RunChatOption {
-	return func(o *RunChatOptions) error {
-		o.MaxUserProfileBytes = maxBytes
 		return nil
 	}
 }

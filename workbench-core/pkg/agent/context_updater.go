@@ -45,10 +45,6 @@ type PromptUpdater struct {
 	// If zero, a default is used.
 	MaxMemoryBytes int
 
-	// MaxProfileBytes caps how many bytes from /user_profile/user_profile.md are injected.
-	// If zero, a default is used.
-	MaxProfileBytes int
-
 	// MaxTraceBytes caps how many bytes from /log/events.since/<offset> are injected.
 	// If zero, a default is used.
 	MaxTraceBytes int
@@ -91,7 +87,6 @@ type ContextPolicy struct {
 	LastToolRun *LastToolRun `json:"lastToolRun,omitempty"`
 
 	Budgets struct {
-		ProfileBytes int `json:"profileBytes"`
 		MemoryBytes  int `json:"memoryBytes"`
 		TraceBytes   int `json:"traceBytes"`
 	} `json:"budgets"`
@@ -105,14 +100,6 @@ type PromptManifest struct {
 	Step      int    `json:"step"`
 
 	Policy ContextPolicy `json:"policy"`
-
-	Profile struct {
-		Path          string `json:"path"`
-		BytesTotal    int    `json:"bytesTotal"`
-		BytesIncluded int    `json:"bytesIncluded"`
-		Truncated     bool   `json:"truncated"`
-		BudgetBytes   int    `json:"budgetBytes"`
-	} `json:"profile"`
 
 	Memory struct {
 		Path          string `json:"path"`
@@ -175,10 +162,6 @@ func (u *PromptUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string
 	if maxMem == 0 {
 		maxMem = 8 * 1024
 	}
-	maxProfile := u.MaxProfileBytes
-	if maxProfile == 0 {
-		maxProfile = 4 * 1024
-	}
 	maxTrace := u.MaxTraceBytes
 	if maxTrace == 0 {
 		maxTrace = 8 * 1024
@@ -193,26 +176,8 @@ func (u *PromptUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string
 		Step:      step,
 	}
 
-	policy := u.computePolicy(step, maxProfile, maxMem, maxTrace)
+	policy := u.computePolicy(step, maxMem, maxTrace)
 	manifest.Policy = policy
-
-		// Profile excerpt (tail-biased; global user preferences/facts).
-		profilePath := "/user_profile/user_profile.md"
-		profileBytes, profileErr := u.FS.Read(profilePath)
-		if profileErr != nil {
-			// Legacy fallback.
-			profilePath = "/profile/profile.md"
-			profileBytes, profileErr = u.FS.Read(profilePath)
-		}
-		if profileErr != nil {
-			profileBytes = []byte{}
-		}
-	profileIncl, profileTrunc := tailUTF8(profileBytes, policy.Budgets.ProfileBytes)
-	manifest.Profile.Path = profilePath
-	manifest.Profile.BytesTotal = len(profileBytes)
-	manifest.Profile.BytesIncluded = len(profileIncl)
-	manifest.Profile.Truncated = profileTrunc
-	manifest.Profile.BudgetBytes = policy.Budgets.ProfileBytes
 
 	// Memory excerpt (tail-biased).
 	todayName := time.Now().Format("2006-01-02") + "-memory.md"
@@ -272,13 +237,6 @@ func (u *PromptUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string
 	manifest.Trace.BudgetBytes = policy.Budgets.TraceBytes
 
 	system := strings.TrimSpace(basePrompt)
-	if len(profileIncl) > 0 {
-		system += buildXMLBlock("user_profile", []xmlAttribute{
-			{key: "path", value: "/user_profile/user_profile.md"},
-			{key: "bytes_included", value: strconv.Itoa(len(profileIncl))},
-			{key: "bytes_total", value: strconv.Itoa(len(profileBytes))},
-		}, string(profileIncl))
-	}
 	if len(memIncl) > 0 {
 		system += buildXMLBlock("run_memory", []xmlAttribute{
 			{key: "path", value: memPath},
@@ -308,7 +266,6 @@ func (u *PromptUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string
 			Origin:  "env",
 			Data: map[string]string{
 				"step":             strconv.Itoa(step),
-				"profileBytes":     strconv.Itoa(manifest.Profile.BytesIncluded),
 				"memoryBytes":      strconv.Itoa(manifest.Memory.BytesIncluded),
 				"traceBytes":       strconv.Itoa(manifest.Trace.BytesIncluded),
 				"traceOffsetAfter": string(manifest.Trace.CursorAfter),
@@ -367,7 +324,7 @@ func tailUTF8(b []byte, max int) ([]byte, bool) {
 // Ensure PromptUpdater is only used with the agent loop types.
 var _ = types.HostOpRequest{}
 
-func (u *PromptUpdater) computePolicy(step int, baseProfile, baseMem, baseTrace int) ContextPolicy {
+func (u *PromptUpdater) computePolicy(step int, baseMem, baseTrace int) ContextPolicy {
 	p := ContextPolicy{Step: step}
 	if u.Trace != nil {
 		p.TraceCursorBefore = u.Trace.ensureCursor()
@@ -377,7 +334,6 @@ func (u *PromptUpdater) computePolicy(step int, baseProfile, baseMem, baseTrace 
 		p.TraceIncludeTypes = defaultTraceIncludeTypes()
 	}
 
-	profileBudget := baseProfile
 	memBudget := baseMem
 	traceBudget := baseTrace
 	if step == 1 {
@@ -393,7 +349,6 @@ func (u *PromptUpdater) computePolicy(step int, baseProfile, baseMem, baseTrace 
 	}
 	p.FailureBump = lastFailed
 
-	p.Budgets.ProfileBytes = clampBudget(profileBudget, 0, baseProfile*2)
 	p.Budgets.MemoryBytes = clampBudget(memBudget, 0, baseMem*2)
 	p.Budgets.TraceBytes = clampBudget(traceBudget, 0, baseTrace*4)
 

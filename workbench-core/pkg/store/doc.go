@@ -8,7 +8,6 @@
 //   - `HistoryStore`: Appends to the immutable history log and loads recent op pairs.
 //   - `ResultsStore` / `ResultsView`: Persists tool call metadata, responses, and artifacts.
 //   - `MemoryStore` / `MemoryCommitter`: Captures agent memory commits for later context injection.
-//   - `UserProfileStore` / `UserProfileCommitter`: Stores user profile state used for context injection.
 //   - `TraceStore`: Persists reasoning traces for debugging or analysis.
 //   - `ConstructorStateStore`: Holds per-run constructor state + manifest blobs so agents can resume safely.
 //
@@ -21,7 +20,5 @@
 //
 // # Stability
 //
-// These interfaces are considered stable because they capture the persistence contracts the agent
-// depends on. Adding new stores should generally not remove existing interfaces, and any
-// extensions should aim for backward compatibility to avoid forcing a migration for hosts.
+// These interfaces capture the persistence contracts the agent depends on.
 package store

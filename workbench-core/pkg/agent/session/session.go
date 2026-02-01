@@ -60,6 +60,8 @@ type Session struct {
 
 	hbCh   chan profile.HeartbeatJob
 	hbStop context.CancelFunc
+
+	queuedEmitted map[string]struct{}
 }
 
 func New(cfg Config) (*Session, error) {
@@ -107,6 +109,7 @@ func New(cfg Config) (*Session, error) {
 	}
 
 	s := &Session{cfg: cfg}
+	s.queuedEmitted = make(map[string]struct{})
 	if err := s.setProfile(cfg.Profile, cfg.ProfileDir); err != nil {
 		return nil, err
 	}
@@ -121,8 +124,17 @@ func (s *Session) Run(ctx context.Context) error {
 	s.startHeartbeats(ctx)
 	defer s.stopHeartbeats()
 
-	ticker := time.NewTicker(s.cfg.PollInterval)
-	defer ticker.Stop()
+	basePoll := s.cfg.PollInterval
+	if basePoll <= 0 {
+		basePoll = 2 * time.Second
+	}
+	maxPoll := basePoll * 8
+	if maxPoll < 10*time.Second {
+		maxPoll = 10 * time.Second
+	}
+	poll := basePoll
+	timer := time.NewTimer(poll)
+	defer timer.Stop()
 
 	for {
 		select {
@@ -130,11 +142,27 @@ func (s *Session) Run(ctx context.Context) error {
 			return ctx.Err()
 		case job := <-s.hbCh:
 			s.handleHeartbeat(ctx, job)
-		case <-ticker.C:
-			if err := s.drainInbox(ctx); err != nil {
+		case <-timer.C:
+			hadCandidates, err := s.drainInbox(ctx)
+			if err != nil {
 				s.logf("inbox drain error: %v", err)
 				s.emitBestEffort(ctx, events.Event{Type: "daemon.error", Message: "Inbox drain error", Data: map[string]string{"error": err.Error()}})
 			}
+			if hadCandidates {
+				poll = basePoll
+			} else if poll < maxPoll {
+				poll *= 2
+				if poll > maxPoll {
+					poll = maxPoll
+				}
+			}
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(poll)
 		}
 	}
 }
@@ -257,10 +285,17 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 		s.logf("heartbeat enqueue failed: %v", err)
 		return
 	}
+	s.emitTaskQueuedOnce(ctx, taskID, task.Goal, "heartbeat")
 	s.emitBestEffort(ctx, events.Event{
 		Type:    "task.heartbeat.enqueued",
 		Message: "Heartbeat task enqueued",
-		Data:    map[string]string{"taskId": taskID, "profile": s.activeProfile.ID, "job": job.Name},
+		Data:    map[string]string{"taskId": taskID, "profile": s.activeProfile.ID, "job": job.Name, "goal": truncateText(task.Goal, 200)},
+	})
+	// Also emit the generic queued event so the monitor queue panel can display it.
+	s.emitBestEffort(ctx, events.Event{
+		Type:    "task.generated",
+		Message: "Task generated",
+		Data:    map[string]string{"taskId": taskID, "profile": s.activeProfile.ID, "goal": truncateText(task.Goal, 200)},
 	})
 }
 
@@ -272,15 +307,16 @@ func (s *Session) inboxCount(ctx context.Context) (int, error) {
 	return len(resp.Entries), nil
 }
 
-func (s *Session) drainInbox(ctx context.Context) error {
+func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 	resp := s.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{Op: types.HostOpFSList, Path: s.cfg.InboxPath})
 	if !resp.Ok {
-		return fmt.Errorf("list inbox: %s", resp.Error)
+		return false, fmt.Errorf("list inbox: %s", resp.Error)
 	}
 	paths := normalizeListEntries(s.cfg.InboxPath, resp.Entries)
 	sort.Strings(paths)
 
 	var errs error
+	hadCandidates := false
 	for _, p := range paths {
 		if !strings.HasSuffix(strings.ToLower(p), ".json") {
 			continue
@@ -288,6 +324,7 @@ func (s *Session) drainInbox(ctx context.Context) error {
 		if strings.Contains(p, "/poison/") || strings.Contains(p, "/archive/") {
 			continue
 		}
+		hadCandidates = true
 
 		raw, ok := s.readText(ctx, p)
 		if !ok || strings.TrimSpace(raw) == "" {
@@ -314,6 +351,8 @@ func (s *Session) drainInbox(ctx context.Context) error {
 			continue
 		}
 
+		s.emitTaskQueuedOnce(ctx, taskID, task.Goal, "inbox")
+
 		claim, err := s.cfg.Store.Claim(ctx, taskID, s.cfg.LeaseTTL)
 		if err != nil {
 			errs = errors.Join(errs, fmt.Errorf("claim %s: %w", taskID, err))
@@ -334,7 +373,7 @@ func (s *Session) drainInbox(ctx context.Context) error {
 			errs = errors.Join(errs, err)
 		}
 	}
-	return errs
+	return hadCandidates, errs
 }
 
 func (s *Session) runTask(ctx context.Context, taskPath, taskID string, task types.Task) error {
@@ -397,8 +436,15 @@ func (s *Session) runTask(ctx context.Context, taskPath, taskID string, task typ
 		tr.Error = err.Error()
 	}
 
+	base := deliverablesBase(doneAt, taskID)
+	copied := []string(nil)
 	if len(runRes.Artifacts) != 0 {
-		tr.Artifacts = s.materializeDeliverables(ctx, taskID, runRes.Artifacts)
+		copied = s.materializeDeliverables(ctx, base, runRes.Artifacts)
+	}
+	if summaryPath := s.writeTaskSummary(ctx, base, taskID, task.Goal, tr, copied); summaryPath != "" {
+		tr.Artifacts = append([]string{summaryPath}, copied...)
+	} else {
+		tr.Artifacts = copied
 	}
 
 	// Emit completion events before updating task state (ordering).
@@ -407,15 +453,20 @@ func (s *Session) runTask(ctx context.Context, taskPath, taskID string, task typ
 		if g := truncateText(task.Goal, 100); g != "" {
 			data["goal"] = g
 		}
-		if sum := truncateText(tr.Summary, 200); sum != "" {
+		if sum := truncateText(tr.Summary, 900); sum != "" {
 			data["summary"] = sum
 		}
 		if tr.Error != "" {
 			data["error"] = tr.Error
 		}
+		if len(tr.Artifacts) != 0 {
+			data["artifacts"] = fmt.Sprintf("%d", len(tr.Artifacts))
+			// Always include the first artifact path (typically SUMMARY.md).
+			data["artifact0"] = tr.Artifacts[0]
+		}
 		_ = s.cfg.Events.Emit(ctx, events.Event{Type: "task.done", Message: "Task finished", Data: data})
 		if len(tr.Artifacts) != 0 {
-			_ = s.cfg.Events.Emit(ctx, events.Event{Type: "task.delivered", Message: "Task deliverables recorded", Data: map[string]string{"taskId": taskID, "count": fmt.Sprintf("%d", len(tr.Artifacts))}})
+			_ = s.cfg.Events.Emit(ctx, events.Event{Type: "task.delivered", Message: "Task deliverables recorded", Data: map[string]string{"taskId": taskID, "count": fmt.Sprintf("%d", len(tr.Artifacts)), "summaryPath": tr.Artifacts[0]}})
 		}
 	}
 
@@ -437,6 +488,32 @@ func (s *Session) runTask(ctx context.Context, taskPath, taskID string, task typ
 		}
 	}
 	return nil
+}
+
+func (s *Session) emitTaskQueuedOnce(ctx context.Context, taskID, goal, source string) {
+	if s == nil || s.cfg.Events == nil {
+		return
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return
+	}
+	if s.queuedEmitted == nil {
+		s.queuedEmitted = make(map[string]struct{})
+	}
+	if _, ok := s.queuedEmitted[taskID]; ok {
+		return
+	}
+	// Prevent unbounded growth for long-lived daemons.
+	if len(s.queuedEmitted) > 5000 {
+		s.queuedEmitted = make(map[string]struct{})
+	}
+	s.queuedEmitted[taskID] = struct{}{}
+	payload := map[string]string{"taskId": taskID, "profile": s.activeProfile.ID, "goal": truncateText(goal, 200)}
+	if strings.TrimSpace(source) != "" {
+		payload["source"] = strings.TrimSpace(source)
+	}
+	_ = s.cfg.Events.Emit(ctx, events.Event{Type: "task.queued", Message: "Task queued", Data: payload})
 }
 
 func (s *Session) quarantineTask(ctx context.Context, taskPath string, task types.Task) error {
@@ -485,7 +562,7 @@ func (s *Session) writeResult(ctx context.Context, taskID string, result types.T
 	return s.writeJSON(ctx, resultPath, result)
 }
 
-func (s *Session) materializeDeliverables(ctx context.Context, taskID string, artifacts []string) []string {
+func (s *Session) materializeDeliverables(ctx context.Context, base string, artifacts []string) []string {
 	uniq := make([]string, 0, len(artifacts))
 	seen := map[string]struct{}{}
 	for _, p := range artifacts {
@@ -503,8 +580,6 @@ func (s *Session) materializeDeliverables(ctx context.Context, taskID string, ar
 		return nil
 	}
 
-	date := time.Now().UTC().Format("2006-01-02")
-	base := path.Join("/workspace", "deliverables", date, taskID)
 	out := make([]string, 0, len(uniq))
 
 	for _, src := range uniq {
@@ -524,6 +599,77 @@ func (s *Session) materializeDeliverables(ctx context.Context, taskID string, ar
 		out = append(out, src)
 	}
 	return out
+}
+
+func deliverablesBase(when time.Time, taskID string) string {
+	date := when.UTC().Format("2006-01-02")
+	return path.Join("/workspace", "deliverables", date, taskID)
+}
+
+func (s *Session) writeTaskSummary(ctx context.Context, base, taskID, goal string, tr types.TaskResult, copiedArtifacts []string) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return ""
+	}
+	p := path.Join(base, "SUMMARY.md")
+	var b strings.Builder
+	b.WriteString("# Task Summary\n\n")
+	b.WriteString("- TaskID: `")
+	b.WriteString(taskID)
+	b.WriteString("`\n")
+	if strings.TrimSpace(goal) != "" {
+		b.WriteString("- Goal: ")
+		b.WriteString(strings.TrimSpace(goal))
+		b.WriteString("\n")
+	}
+	b.WriteString("- Status: `")
+	b.WriteString(string(tr.Status))
+	b.WriteString("`\n")
+	if tr.CompletedAt != nil && !tr.CompletedAt.IsZero() {
+		b.WriteString("- CompletedAt: `")
+		b.WriteString(tr.CompletedAt.UTC().Format(time.RFC3339Nano))
+		b.WriteString("`\n")
+	}
+	if strings.TrimSpace(s.activeProfile.ID) != "" {
+		b.WriteString("- Profile: `")
+		b.WriteString(s.activeProfile.ID)
+		b.WriteString("`\n")
+	}
+	if strings.TrimSpace(tr.Error) != "" {
+		b.WriteString("\n## Error\n\n")
+		b.WriteString("```\n")
+		b.WriteString(strings.TrimSpace(tr.Error))
+		b.WriteString("\n```\n")
+	}
+
+	b.WriteString("\n## Summary\n\n")
+	if strings.TrimSpace(tr.Summary) == "" {
+		b.WriteString("_No summary returned._\n")
+	} else {
+		b.WriteString(strings.TrimSpace(tr.Summary))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n## Deliverables\n\n")
+	if len(copiedArtifacts) == 0 {
+		b.WriteString("_No deliverables were recorded._\n")
+	} else {
+		for _, a := range copiedArtifacts {
+			a = strings.TrimSpace(a)
+			if a == "" {
+				continue
+			}
+			b.WriteString("- `")
+			b.WriteString(a)
+			b.WriteString("`\n")
+		}
+	}
+
+	resp := s.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{Op: types.HostOpFSWrite, Path: p, Text: b.String()})
+	if !resp.Ok {
+		return ""
+	}
+	return p
 }
 
 func (s *Session) readText(ctx context.Context, p string) (string, bool) {

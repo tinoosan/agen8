@@ -12,4 +12,6 @@ heartbeat:
   - name: keep_work_artifacts_organized
     interval: 30m
     goal: "Keep work artifacts organized under /workspace with clear names and brief summaries."
-
+  - name: improve_your_capabilities
+    interval: 1h
+    goal: "Improve your capabilities by reviewing the /skills directory and adding new skills as needed. Use the /skills/skill-template.md as a guide. Don't force it"

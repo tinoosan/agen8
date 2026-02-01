@@ -35,7 +35,6 @@ var daemonCmd = &cobra.Command{
 			app.WithHealthAddr(healthAddr),
 			app.WithTraceBytes(maxTraceBytes),
 			app.WithMemoryBytes(maxMemoryBytes),
-			app.WithUserProfileBytes(maxUserProfileBytes),
 			app.WithRecentHistoryPairs(recentHistoryPairs),
 			app.WithIncludeHistoryOps(includeHistoryOps),
 		}

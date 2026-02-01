@@ -81,7 +81,6 @@ type RunRuntimeConfig struct {
 	// Context budgets applied by the PromptUpdater per step.
 	MaxTraceBytes   int `json:"maxTraceBytes,omitempty"`
 	MaxMemoryBytes  int `json:"maxMemoryBytes,omitempty"`
-	MaxProfileBytes int `json:"maxProfileBytes,omitempty"`
 
 	// RecentHistoryPairs controls how much recent /history is injected on resume.
 	RecentHistoryPairs int `json:"recentHistoryPairs,omitempty"`

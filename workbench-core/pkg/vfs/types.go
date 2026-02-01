@@ -53,14 +53,6 @@ const (
 	// history mount for immutable provenance across runs/agents (distinct from /memory).
 	MountMemory = "memory"
 
-	// MountUserProfile is the mount name for user-scoped profile memory.
-	//
-	// User profile is global across runs and sessions and is intended for durable user facts
-	// and preferences (e.g. timezone, writing style, birthday). It is distinct from:
-	// - shared /memory (agent long-term memory)
-	// - agent Profiles (static persona configs under /profiles on disk)
-	MountUserProfile = "user_profile"
-
 	// MountHistory is the mount name for session-scoped history.
 	//
 	// History is an immutable, append-only log of raw interactions between users,

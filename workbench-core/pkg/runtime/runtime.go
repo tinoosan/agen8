@@ -32,7 +32,6 @@ type Runtime struct {
 	Updater         *agent.PromptUpdater
 	WorkdirBase     string
 	MemStore        store.DailyMemoryStore
-	UserProfileStore store.UserProfileCommitter
 }
 
 type BuildConfig struct {
@@ -46,14 +45,12 @@ type BuildConfig struct {
 	HistoryStore          store.HistoryStore
 	ResultsStore          store.ResultsStore
 	MemoryStore           store.DailyMemoryStore
-	UserProfileStore      store.UserProfileStore
 	TraceStore            store.TraceStore
 	MemoryReindexer       resources.MemoryReindexer
 	ConstructorStore      store.ConstructorStateStore
 	Emit                  func(ctx context.Context, ev events.Event)
 	IncludeHistoryOps     bool
 	RecentHistoryPairs    int
-	MaxProfileBytes       int
 	MaxMemoryBytes        int
 	MaxTraceBytes         int
 	PriceInPerMTokensUSD  float64
@@ -78,9 +75,6 @@ func (cfg BuildConfig) Validate() error {
 	}
 	if cfg.MemoryStore == nil {
 		return fmt.Errorf("memory store is required")
-	}
-	if cfg.UserProfileStore == nil {
-		return fmt.Errorf("user profile store is required")
 	}
 	if cfg.HistoryStore == nil {
 		return fmt.Errorf("history store is required")
@@ -109,7 +103,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 
 		MaxTraceBytes:         cfg.MaxTraceBytes,
 		MaxMemoryBytes:        cfg.MaxMemoryBytes,
-		MaxProfileBytes:       cfg.MaxProfileBytes,
 		RecentHistoryPairs:    cfg.RecentHistoryPairs,
 		IncludeHistoryOps:     cfg.IncludeHistoryOps,
 		PriceInPerMTokensUSD:  cfg.PriceInPerMTokensUSD,
@@ -248,7 +241,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 
 	resultsStore := cfg.ResultsStore
 	memStore := cfg.MemoryStore
-	userProfileStore := cfg.UserProfileStore
 
 	if memStore == nil {
 		return nil, fmt.Errorf("memory store is required")
@@ -260,15 +252,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err := fs.Mount(vfs.MountMemory, memRes); err != nil {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountMemory, err)
 	}
-	userProfRes, err := resources.NewUserProfileResource(userProfileStore)
-	if err != nil {
-		return nil, fmt.Errorf("create user profile resource: %w", err)
-	}
-	if err := fs.Mount(vfs.MountUserProfile, userProfRes); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountUserProfile, err)
-	}
-	// Legacy alias for older agents/tools/tests.
-	_ = fs.Mount("profile", userProfRes)
 
 	if cfg.Emit != nil {
 		cfg.Emit(context.Background(), events.Event{
@@ -280,12 +263,11 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 				"/inbox":     inboxDir,
 				"/outbox":    outboxDir,
 				"/plan":      planDir,
-					"/skills":    "(virtual)",
-					"/memory":    "(virtual)",
-					"/user_profile": "(virtual)",
-				},
-				Console: boolPtr(false),
-			})
+				"/skills":    "(virtual)",
+				"/memory":    "(virtual)",
+			},
+			Console: boolPtr(false),
+		})
 	}
 
 	absWorkdirRoot, err := filepath.Abs(workdirRes.BaseDir)
@@ -341,7 +323,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		LoadSession:     cfg.LoadSession,
 		SaveSession:     cfg.SaveSession,
 		StateStore:      cfg.ConstructorStore,
-		MaxProfileBytes: cfg.MaxProfileBytes,
 		MaxMemoryBytes:  cfg.MaxMemoryBytes,
 		MaxTraceBytes:   cfg.MaxTraceBytes,
 		Emit:            cfg.Emit,
@@ -376,7 +357,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		Updater:         nil,
 		WorkdirBase:     workdirRes.BaseDir,
 		MemStore:        memStore,
-		UserProfileStore: userProfileStore,
 	}, nil
 }
 

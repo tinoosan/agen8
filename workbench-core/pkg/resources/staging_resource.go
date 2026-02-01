@@ -25,28 +25,19 @@ type StagingStore interface {
 }
 
 // StagingResource is a parameterized virtual resource implementing the same
-// VFS contract used by /memory and /user_profile.
+// VFS contract used by staging mounts like /memory.
 type StagingResource struct {
 	// BaseDir is unused by this resource, but kept for consistency/debugging.
 	BaseDir string
 
-	// Mount is the virtual mount name used by the VFS (e.g. "memory", "user_profile").
+	// Mount is the virtual mount name used by the VFS (e.g. "memory").
 	Mount string
 
-	// MainFile is the read-only committed file name (e.g. "memory.md", "user_profile.md").
+	// MainFile is the read-only committed file name (e.g. "memory.md").
 	MainFile string
 
 	Store     StagingStore
 	planStore store.PlanFileStore
-}
-
-// UserProfileResource is a StagingResource configured for /user_profile.
-type UserProfileResource = StagingResource
-
-type userProfileStagingStore struct{ store.UserProfileVFSStore }
-
-func (s userProfileStagingStore) GetMain(ctx context.Context) (string, error) {
-	return s.UserProfileVFSStore.GetUserProfile(ctx)
 }
 
 func NewStagingResource(mount, mainFile string, s StagingStore) (*StagingResource, error) {
@@ -72,13 +63,6 @@ func NewStagingResource(mount, mainFile string, s StagingStore) (*StagingResourc
 		Store:     s,
 		planStore: planStore,
 	}, nil
-}
-
-func NewUserProfileResource(s store.UserProfileVFSStore) (*UserProfileResource, error) {
-	if s == nil {
-		return nil, fmt.Errorf("user profile store is required")
-	}
-	return NewStagingResource(vfs.MountUserProfile, "user_profile.md", userProfileStagingStore{s})
 }
 
 func (sr *StagingResource) SupportsNestedList() bool {

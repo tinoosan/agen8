@@ -109,6 +109,8 @@ type outboxEntry struct {
 	Status    string
 	Summary   string
 	Error     string
+	SummaryPath string
+	ArtifactsCount int
 	Timestamp time.Time
 }
 
@@ -238,7 +240,14 @@ func loadPendingTasksFromInbox(cfg config.Config, runID string) ([]taskState, er
 	}
 	var out []taskState
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), "task-") || !strings.HasSuffix(e.Name(), ".json") {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		if strings.HasPrefix(name, "control-") {
+			continue
+		}
+		if strings.Contains(name, "poison") || strings.Contains(name, "archive") {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(inboxDir, e.Name()))
@@ -251,7 +260,7 @@ func loadPendingTasksFromInbox(cfg config.Config, runID string) ([]taskState, er
 		}
 		taskID := strings.TrimSpace(t.TaskID)
 		if taskID == "" {
-			taskID = strings.TrimSuffix(e.Name(), ".json")
+			taskID = strings.TrimSuffix(name, ".json")
 		}
 		out = append(out, taskState{
 			TaskID: taskID,
@@ -896,12 +905,21 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		}
 		m.currentTask = nil
 		m.stats.tasksDone++
+		artifact0 := strings.TrimSpace(ev.Data["artifact0"])
+		artCount := 0
+		if v := strings.TrimSpace(ev.Data["artifacts"]); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				artCount = n
+			}
+		}
 		m.outboxResults = append(m.outboxResults, outboxEntry{
 			TaskID:    taskID,
 			Goal:      strings.TrimSpace(ev.Data["goal"]),
 			Status:    strings.TrimSpace(ev.Data["status"]),
 			Summary:   strings.TrimSpace(ev.Data["summary"]),
 			Error:     strings.TrimSpace(ev.Data["error"]),
+			SummaryPath: artifact0,
+			ArtifactsCount: artCount,
 			Timestamp: ev.Timestamp,
 		})
 			if len(m.outboxResults) > 10 {
@@ -948,16 +966,48 @@ func (m *monitorModel) appendAgentOutput(line string) {
 }
 
 func (m *monitorModel) refreshActivityList() {
+	// Preserve selection unless the user was following the tail.
+	prevIdx := m.activityList.Index()
+	prevID := ""
+	oldItems := m.activityList.Items()
+	wasFollowingTail := false
+	if len(oldItems) > 0 && prevIdx == len(oldItems)-1 {
+		wasFollowingTail = true
+	}
+	if prevIdx >= 0 && prevIdx < len(m.activities) {
+		prevID = m.activities[prevIdx].ID
+	}
+
 	items := make([]list.Item, 0, len(m.activities))
 	for _, a := range m.activities {
 		items = append(items, activityItem{act: a})
 	}
 	m.activityList.SetItems(items)
-	if len(items) > 0 {
-		lastIdx := len(items) - 1
-		m.activityList.Select(lastIdx)
+	if len(items) == 0 {
+		return
+	}
 
-		// Manually drive pagination to the end so the newest entry is visible.
+	selectIdx := 0
+	if wasFollowingTail {
+		selectIdx = len(items) - 1
+	} else if strings.TrimSpace(prevID) != "" {
+		selectIdx = -1
+		for i := range m.activities {
+			if m.activities[i].ID == prevID {
+				selectIdx = i
+				break
+			}
+		}
+		if selectIdx < 0 {
+			selectIdx = min(max(prevIdx, 0), len(items)-1)
+		}
+	} else {
+		selectIdx = min(max(prevIdx, 0), len(items)-1)
+	}
+	m.activityList.Select(selectIdx)
+
+	// Only force pagination when following the tail.
+	if wasFollowingTail {
 		if pages := m.activityList.Paginator.TotalPages; pages > 0 {
 			m.activityList.Paginator.Page = pages - 1
 			itemsOnPage := m.activityList.Paginator.ItemsOnPage(len(m.activityList.VisibleItems()))
@@ -1477,20 +1527,27 @@ func renderOutboxLines(results []outboxEntry) string {
 	}
 	lines := make([]string, 0, len(results))
 	for _, r := range results {
-		goal := truncateText(r.Goal, 30)
-		summary := truncateText(r.Summary, 60)
+		goal := truncateText(r.Goal, 60)
+		summary := truncateText(r.Summary, 420)
 		status := r.Status
 		if status == "" {
 			status = "unknown"
 		}
-		detail := summary
-		if strings.TrimSpace(detail) == "" && strings.TrimSpace(r.Error) != "" {
-			detail = "error: " + truncateText(r.Error, 90)
-		} else if strings.TrimSpace(r.Error) != "" && (status == "failed" || status == "canceled" || status == "quarantined") {
-			detail = detail + " (error: " + truncateText(r.Error, 70) + ")"
+		header := fmt.Sprintf("%s %q -> %s", shortID(r.TaskID), goal, status)
+		lines = append(lines, header)
+		if strings.TrimSpace(summary) != "" {
+			lines = append(lines, "  summary: "+summary)
 		}
-		line := fmt.Sprintf("%s %q -> %s: %s", shortID(r.TaskID), goal, status, detail)
-		lines = append(lines, line)
+		if strings.TrimSpace(r.Error) != "" && (status == "failed" || status == "canceled" || status == "quarantined") {
+			lines = append(lines, "  error: "+truncateText(r.Error, 260))
+		}
+		if r.ArtifactsCount > 0 || strings.TrimSpace(r.SummaryPath) != "" {
+			info := fmt.Sprintf("  deliverables: %d", r.ArtifactsCount)
+			if strings.TrimSpace(r.SummaryPath) != "" {
+				info += " (summary: " + r.SummaryPath + ")"
+			}
+			lines = append(lines, info)
+		}
 	}
 	return strings.Join(lines, "\n")
 }

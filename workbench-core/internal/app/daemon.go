@@ -83,7 +83,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 
 	var resultsStore store.ResultsStore
 	var memStore store.DailyMemoryStore
-	var userProfileStore store.UserProfileStore
 	var traceStore store.TraceStore
 	var historyStore store.HistoryStore
 	var constructorStore store.ConstructorStateStore
@@ -95,12 +94,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return fmt.Errorf("create memory store: %w", err)
 	}
 	memStore = ms
-
-	ps, err := implstore.NewDiskUserProfileStore(cfg)
-	if err != nil {
-		return fmt.Errorf("create user profile store: %w", err)
-	}
-	userProfileStore = ps
 
 	traceStore = implstore.DiskTraceStore{DiskStore: implstore.DiskStore{Dir: fsutil.GetLogDir(cfg.DataDir, run.RunID)}}
 
@@ -147,14 +140,12 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		HistoryStore:          historyStore,
 		ResultsStore:          resultsStore,
 		MemoryStore:           memStore,
-		UserProfileStore:      userProfileStore,
 		TraceStore:            traceStore,
 		MemoryReindexer:       vectorStore,
 		ConstructorStore:      constructorStore,
 		Emit:                  mustEmit,
 		IncludeHistoryOps:     derefBool(resolved.IncludeHistoryOps, true),
 		RecentHistoryPairs:    resolved.RecentHistoryPairs,
-		MaxProfileBytes:       resolved.MaxUserProfileBytes,
 		MaxMemoryBytes:        resolved.MaxMemoryBytes,
 		MaxTraceBytes:         resolved.MaxTraceBytes,
 		PriceInPerMTokensUSD:  resolved.PriceInPerMTokensUSD,
