@@ -17,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
+	"github.com/muesli/reflow/wordwrap"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
@@ -388,20 +389,21 @@ func (m *monitorModel) View() string {
 
 func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine string) string {
 	main := m.renderMainBodyDashboard(grid)
-	sections := []string{headerLine, "", main, "", m.renderComposer(grid.Composer), m.renderStatusBar(grid)}
+	sections := []string{headerLine, "", main, "", m.renderComposer(grid.Composer), m.renderStatusBar(grid.ScreenWidth)}
 	if m.runStatus != types.StatusRunning {
 		warning := m.styles.header.Render(kit.StyleDim.Render("Run is not active; start the daemon first or use --run-id to attach to the running run."))
-		sections = []string{headerLine, warning, "", main, "", m.renderComposer(grid.Composer), m.renderStatusBar(grid)}
+		sections = []string{headerLine, warning, "", main, "", m.renderComposer(grid.Composer), m.renderStatusBar(grid.ScreenWidth)}
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
-func (m *monitorModel) renderStatusBar(grid layoutmgr.GridLayout) string {
+func (m *monitorModel) renderStatusBar(width int) string {
 	line := "Tab: cycle panels  |  Ctrl+Enter: submit  |  /quit"
 	if !m.isCompactMode() {
 		line += "  |  Ctrl+]/Ctrl+[ cycle side panel (Activity | Plan | Tasks)"
 	}
-	return m.styles.header.Render(kit.StyleDim.Render(line))
+	wrapped := wordwrap.String(line, max(20, width-2))
+	return m.styles.header.Render(kit.StyleDim.Render(wrapped))
 }
 
 // compactTabNames for the tab bar in compact mode.
@@ -1113,9 +1115,10 @@ func (m *monitorModel) layout() layoutmgr.GridLayout {
 	if m.isCompactMode() {
 		return manager.CalculateCompact(m.width, m.height, composerHeight)
 	}
+	statusBarH := lipgloss.Height(m.renderStatusBar(m.width))
 	outboxRows := len(m.outboxResults)
 	outboxHeight := m.calculatePanelHeight(outboxRows, outboxRows == 0, m.focusedPanel == panelOutbox)
-	return manager.CalculateDashboard(m.width, m.height, composerHeight, outboxHeight)
+	return manager.CalculateDashboard(m.width, m.height, composerHeight, outboxHeight, statusBarH)
 }
 
 func (m *monitorModel) calculatePanelHeight(contentRows int, isEmpty bool, isFocused bool) int {

@@ -113,7 +113,7 @@ const (
 // CalculateDashboard produces a GridLayout for dashboard mode (two columns).
 // Left: AgentOutput (flex) + Outbox (fixed). Right: single SidePanel (tabbed Activity | Plan | Tasks).
 // Outbox and Composer use left column width only.
-func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight int) GridLayout {
+func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight, statusBarHeight int) GridLayout {
 	const (
 		minLeftWidth  = 60
 		minRightWidth = 32
@@ -133,7 +133,7 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight
 	if outboxHeight < 0 {
 		outboxHeight = 0
 	}
-	reserved := DashHeaderHeight + DashStatusBarHeight + DashWarningHeight + composerHeight + DashGapAfterHeader + DashGapBeforeComposer
+	reserved := DashHeaderHeight + max(1, statusBarHeight) + DashWarningHeight + composerHeight + DashGapAfterHeader + DashGapBeforeComposer
 	remainingHeight := height - reserved
 	if remainingHeight < 1 {
 		remainingHeight = 1

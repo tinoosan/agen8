@@ -97,7 +97,7 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
 	composerHeight := 4
 	outboxHeight := 6
-	grid := mgr.CalculateDashboard(120, 35, composerHeight, outboxHeight)
+	grid := mgr.CalculateDashboard(120, 35, composerHeight, outboxHeight, 1)
 
 	reserved := DashHeaderHeight + DashStatusBarHeight + DashWarningHeight + composerHeight + DashGapAfterHeader + DashGapBeforeComposer
 	mainH := 35 - reserved
@@ -119,7 +119,7 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 
 func TestCalculateDashboard_SidePanelHasContentRoom(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
-	grid := mgr.CalculateDashboard(120, 35, 4, 6)
+	grid := mgr.CalculateDashboard(120, 35, 4, 6, 1)
 
 	if grid.SidePanel.ContentHeight < 5 {
 		t.Fatalf("side panel ContentHeight want >= 5 (for tab content), got %d", grid.SidePanel.ContentHeight)
@@ -128,7 +128,7 @@ func TestCalculateDashboard_SidePanelHasContentRoom(t *testing.T) {
 
 func TestCalculateDashboard_OutboxComposerLeftColumnOnly(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
-	grid := mgr.CalculateDashboard(120, 35, 4, 6)
+	grid := mgr.CalculateDashboard(120, 35, 4, 6, 1)
 
 	leftW := grid.AgentOutput.Width
 	if grid.Outbox.Width != leftW {
