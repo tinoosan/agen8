@@ -12,6 +12,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/resources"
+	"github.com/tinoosan/workbench-core/pkg/role"
 	"github.com/tinoosan/workbench-core/pkg/skills"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/tools"
@@ -208,6 +209,11 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err := os.MkdirAll(roleDir, 0755); err != nil {
 		return nil, fmt.Errorf("prepare roles dir: %w", err)
 	}
+	roleMgr := role.NewManager([]string{roleDir})
+	if err := roleMgr.Scan(); err != nil {
+		return nil, fmt.Errorf("scan roles: %w", err)
+	}
+	role.SetDefaultManager(roleMgr)
 	skillMgr := skills.NewManager([]string{skillDir})
 	skillMgr.WritableRoot = skillDir
 	if err := skillMgr.Scan(); err != nil {

@@ -73,10 +73,14 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 
 	roleDir := fsutil.GetRolesDir(cfg.DataDir)
-	_ = os.MkdirAll(roleDir, 0755)
+	if err := os.MkdirAll(roleDir, 0755); err != nil {
+		return fmt.Errorf("prepare roles dir: %w", err)
+	}
 	roleMgr := role.NewManager([]string{roleDir})
 	roleMgr.WritableRoot = roleDir
-	_ = roleMgr.Scan()
+	if err := roleMgr.Scan(); err != nil {
+		return fmt.Errorf("scan roles: %w", err)
+	}
 	role.SetDefaultManager(roleMgr)
 
 	var resultsStore pkgstore.ResultsStore
@@ -203,9 +207,14 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return fmt.Errorf("create agent: %w", err)
 	}
 
+	selectedRole, err := resolveRole(roleMgr, strings.TrimSpace(resolved.Role))
+	if err != nil {
+		return err
+	}
+
 	runner, err := agent.NewAutonomousRunner(agent.AutonomousRunnerConfig{
 		Agent:             a,
-		Role:              role.Get(resolved.Role),
+		Role:              selectedRole,
 		Memory:            memoryProvider,
 		MemorySearchLimit: 3,
 		Notifier:          notifier,
@@ -255,7 +264,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	mustEmit(runCtx, events.Event{
 		Type:    "daemon.start",
 		Message: "Autonomous agent started",
-		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": resolved.Role},
+		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": selectedRole.ID},
 	})
 	log.Printf("daemon: run id %s — attach monitor with: workbench monitor --run-id %s", run.RunId, run.RunId)
 	for {
@@ -279,10 +288,27 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	mustEmit(runCtx, events.Event{
 		Type:    "daemon.stop",
 		Message: "Autonomous agent stopped",
-		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": resolved.Role},
+		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": selectedRole.ID},
 	})
 	serverWG.Wait()
 	return err
+}
+
+func resolveRole(mgr *role.Manager, requested string) (role.Role, error) {
+	if mgr == nil {
+		return role.Role{}, fmt.Errorf("role manager is nil")
+	}
+	entries := mgr.Entries()
+	if len(entries) == 0 {
+		return role.Role{}, fmt.Errorf("no valid roles found")
+	}
+	if strings.TrimSpace(requested) == "" {
+		return entries[0], nil
+	}
+	if r, ok := mgr.Get(requested); ok {
+		return r, nil
+	}
+	return role.Role{}, fmt.Errorf("role %s not found", requested)
 }
 
 func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, emit func(context.Context, events.Event)) func(step int, usage llm.LLMUsage) {

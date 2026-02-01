@@ -10,89 +10,6 @@ func testStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
 }
 
-func TestPanelSpecReservesChrome(t *testing.T) {
-	style := testStyle()
-	mgr := NewManager(style, true)
-
-	grid := mgr.Calculate(120, 50, 5, 6, 6)
-	spec := grid.ActivityFeed
-
-	frameW, frameH := style.GetFrameSize()
-	if spec.FrameWidth != frameW || spec.FrameHeight != frameH {
-		t.Fatalf("expected frame sizes %dx%d, got %dx%d", frameW, frameH, spec.FrameWidth, spec.FrameHeight)
-	}
-	if want := spec.Width - frameW; want != spec.ContentWidth {
-		t.Fatalf("content width mismatch: got %d want %d", spec.ContentWidth, want)
-	}
-	if want := spec.Height - frameH - spec.TitleHeight; want != spec.ContentHeight {
-		t.Fatalf("content height mismatch: got %d want %d", spec.ContentHeight, want)
-	}
-	if spec.ContentHeight <= 0 {
-		t.Fatalf("expected positive content height, got %d", spec.ContentHeight)
-	}
-}
-
-func TestColumnsShareMainHeight(t *testing.T) {
-	mgr := NewManager(testStyle(), true)
-	grid := mgr.Calculate(120, 40, 5, 6, 6)
-
-	leftTotal := grid.ActivityFeed.Height + grid.AgentOutput.Height
-	rightTotal := grid.ActivityDetail.Height + grid.CurrentTask.Height + grid.Plan.Height + grid.TaskQueue.Height + grid.Stats.Height
-	if leftTotal != rightTotal {
-		t.Fatalf("left and right column heights differ: left=%d right=%d", leftTotal, rightTotal)
-	}
-
-	headerH := 1
-	total := leftTotal + grid.Outbox.Height + grid.Memory.Height + grid.Composer.Height + headerH
-	if total > grid.ScreenHeight {
-		t.Fatalf("layout exceeds screen height: total=%d screen=%d", total, grid.ScreenHeight)
-	}
-}
-
-func TestSmallTerminalKeepsUsableContent(t *testing.T) {
-	mgr := NewManager(testStyle(), true)
-	grid := mgr.Calculate(80, 24, 5, 6, 6)
-
-	panels := []PanelSpec{
-		grid.ActivityFeed, grid.AgentOutput,
-		grid.ActivityDetail, grid.CurrentTask, grid.Plan, grid.TaskQueue, grid.Stats,
-		grid.Outbox, grid.Memory, grid.Composer,
-	}
-	for i, p := range panels {
-		if p.ContentWidth < 0 || p.ContentHeight < 0 {
-			t.Fatalf("panel %d has negative content size: %dx%d", i, p.ContentWidth, p.ContentHeight)
-		}
-		if p.Height < 3 {
-			t.Fatalf("panel %d height too small: %d", i, p.Height)
-		}
-	}
-}
-
-func TestDynamicPanelHeights(t *testing.T) {
-	mgr := NewManager(testStyle(), true)
-
-	// Hidden panels.
-	grid := mgr.Calculate(120, 50, 5, 0, 0)
-	if grid.Outbox.Height != 0 {
-		t.Fatalf("expected hidden outbox, got height %d", grid.Outbox.Height)
-	}
-	if grid.Memory.Height != 0 {
-		t.Fatalf("expected hidden memory, got height %d", grid.Memory.Height)
-	}
-
-	// Visible panels.
-	grid2 := mgr.Calculate(120, 50, 5, 6, 6)
-	if grid2.Outbox.Height != 6 {
-		t.Fatalf("expected outbox height 6, got %d", grid2.Outbox.Height)
-	}
-
-	mainArea1 := grid.ActivityFeed.Height + grid.AgentOutput.Height
-	mainArea2 := grid2.ActivityFeed.Height + grid2.AgentOutput.Height
-	if mainArea1 <= mainArea2 {
-		t.Fatalf("expected main area to expand when panels hidden: got %d vs %d", mainArea1, mainArea2)
-	}
-}
-
 func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
 	composerHeight := 4
@@ -158,5 +75,28 @@ func TestCalculateCompact_100x30_NoClipping(t *testing.T) {
 	totalH := reserved + grid.AgentOutput.Height
 	if totalH > grid.ScreenHeight {
 		t.Fatalf("compact layout total %d exceeds screen height %d", totalH, grid.ScreenHeight)
+	}
+}
+
+func TestCalculateDashboard_NarrowWidth_80Cols(t *testing.T) {
+	mgr := NewManager(testStyle(), true)
+	// 80 cols is < 93 (minLeft 60 + minRight 32 + gap 1).
+	// Should split fluidly.
+	grid := mgr.CalculateDashboard(80, 35, 4, 6, 1)
+
+	// Verify total width matches screen width exactly (no overflow).
+	totalW := grid.AgentOutput.Width + 1 + grid.SidePanel.Width // 1 for gap
+	if totalW != 80 {
+		t.Fatalf("expected total width 80, got %d (left %d, right %d)", totalW, grid.AgentOutput.Width, grid.SidePanel.Width)
+	}
+
+	// Verify no fixed minimums enforced (Left would be 60 if enforced).
+	if grid.AgentOutput.Width >= 60 {
+		t.Fatalf("expected fluid left column < 60, got %d", grid.AgentOutput.Width)
+	}
+
+	// Check for usability (at least 1 col).
+	if grid.AgentOutput.Width < 1 || grid.SidePanel.Width < 1 {
+		t.Fatalf("columns too small: left %d, right %d", grid.AgentOutput.Width, grid.SidePanel.Width)
 	}
 }

@@ -331,21 +331,23 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancel()
 			}
 			return m, tea.Quit
-		case "tab":
+		case "tab", "shift+tab":
 			if m.isCompactMode() {
-				m.compactTab = (m.compactTab + 1) % 4
+				// Toggle focus between the Composer and the current tab's panel.
+				if m.focusedPanel == panelComposer {
+					m.focusedPanel = m.compactTabToPanel()
+				} else {
+					m.focusedPanel = panelComposer
+				}
+				m.updateFocus()
 				return m, nil
 			}
-			m.focusedPanel = (m.focusedPanel + 1) % 8
-			m.syncDashboardSideTabFromFocus()
-			m.updateFocus()
-			return m, nil
-		case "shift+tab":
-			if m.isCompactMode() {
-				m.compactTab = (m.compactTab + 3) % 4
-				return m, nil
+			// Normal dashboard cycling
+			if msg.String() == "tab" {
+				m.focusedPanel = (m.focusedPanel + 1) % 8
+			} else {
+				m.focusedPanel = (m.focusedPanel + 7) % 8 // (curr - 1) mod 8
 			}
-			m.focusedPanel = (m.focusedPanel + 7) % 8
 			m.syncDashboardSideTabFromFocus()
 			m.updateFocus()
 			return m, nil
@@ -366,6 +368,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.isCompactMode() {
 			m.focusedPanel = m.compactTabToPanel()
+			m.updateFocus()
 		}
 		return m.routeKeyToFocusedPanel(msg)
 	}
@@ -389,12 +392,23 @@ func (m *monitorModel) View() string {
 
 func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine string) string {
 	main := m.renderMainBodyDashboard(grid)
-	sections := []string{headerLine, "", main, "", m.renderComposer(grid.Composer), m.renderStatusBar(grid.ScreenWidth)}
+	statusBar := m.renderStatusBar(grid.ScreenWidth)
+	sections := []string{headerLine, "", main, "", m.renderComposer(grid.Composer), statusBar}
 	if m.runStatus != types.StatusRunning {
-		warning := m.styles.header.Render(kit.StyleDim.Render("Run is not active; start the daemon first or use --run-id to attach to the running run."))
-		sections = []string{headerLine, warning, "", main, "", m.renderComposer(grid.Composer), m.renderStatusBar(grid.ScreenWidth)}
+		w := m.width
+		if w <= 0 {
+			w = 80
+		}
+		warning := m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render("Run is not active; start the daemon first or use --run-id to attach to the running run."))
+		sections = []string{headerLine, warning, "", main, "", m.renderComposer(grid.Composer), statusBar}
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	final := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	// Guarantee view never exceeds terminal width (handles m.width==0 or any section overflow).
+	effectiveWidth := m.width
+	if effectiveWidth <= 0 {
+		effectiveWidth = 80
+	}
+	return lipgloss.NewStyle().MaxWidth(effectiveWidth).Render(final)
 }
 
 func (m *monitorModel) renderStatusBar(width int) string {
@@ -402,8 +416,12 @@ func (m *monitorModel) renderStatusBar(width int) string {
 	if !m.isCompactMode() {
 		line += "  |  Ctrl+]/Ctrl+[ cycle side panel (Activity | Plan | Tasks)"
 	}
-	wrapped := wordwrap.String(line, max(20, width-2))
-	return m.styles.header.Render(kit.StyleDim.Render(wrapped))
+	w := width
+	if w <= 0 {
+		w = 80
+	}
+	wrapped := wordwrap.String(line, max(20, w-2))
+	return m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render(wrapped))
 }
 
 // compactTabNames for the tab bar in compact mode.
@@ -419,6 +437,8 @@ func (m *monitorModel) compactTabToPanel() panelID {
 		return panelPlan
 	case 3:
 		return panelOutbox
+	case 4:
+		return panelComposer
 	default:
 		return panelOutput
 	}
@@ -463,12 +483,18 @@ func (m *monitorModel) renderCompact(grid layoutmgr.GridLayout, headerLine strin
 		Width(grid.AgentOutput.InnerWidth()).Height(contentHeight).
 		Render(content)
 	sections := []string{headerLine, tabBar, main, m.renderComposer(grid.Composer)}
-	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	final := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	effectiveWidth := m.width
+	if effectiveWidth <= 0 {
+		effectiveWidth = 80
+	}
+	return lipgloss.NewStyle().MaxWidth(effectiveWidth).Render(final)
 }
 
 func (m *monitorModel) renderCompactTabBar() string {
 	parts := make([]string, len(compactTabNames))
 	for i, name := range compactTabNames {
+		// Only highlight a tab if it's selected. If m.compactTab == 4 (Composer), all tabs are dim.
 		if i == m.compactTab {
 			parts[i] = m.styles.sectionTitle.Render(name)
 		} else {
@@ -916,13 +942,17 @@ func (m *monitorModel) refreshPlanView() {
 }
 
 func (m *monitorModel) renderHeader() string {
-	return m.styles.header.Render(
-		lipgloss.JoinHorizontal(lipgloss.Left,
-			m.styles.headerTitle.Render("Workbench - Always On"),
-			kit.RenderTag(kit.TagOptions{Key: "Model", Value: fallback(m.model, "(unknown)")}),
-			kit.RenderTag(kit.TagOptions{Key: "Role", Value: fallback(m.role, "(none)")}),
-			kit.RenderTag(kit.TagOptions{Key: "Run", Value: m.runID}),
-		))
+	content := lipgloss.JoinHorizontal(lipgloss.Left,
+		m.styles.headerTitle.Render("Workbench - Always On"),
+		kit.RenderTag(kit.TagOptions{Key: "Model", Value: fallback(m.model, "(unknown)")}),
+		kit.RenderTag(kit.TagOptions{Key: "Role", Value: fallback(m.role, "(none)")}),
+		kit.RenderTag(kit.TagOptions{Key: "Run", Value: m.runID}),
+	)
+	w := m.width
+	if w <= 0 {
+		w = 80
+	}
+	return m.styles.header.Copy().MaxWidth(w).Render(content)
 }
 
 func (m *monitorModel) panelStyle(panel panelID) lipgloss.Style {
@@ -959,7 +989,11 @@ func (m *monitorModel) renderMainBodyDashboard(grid layoutmgr.GridLayout) string
 
 	const gapCols = 1
 	gap := strings.Repeat(" ", gapCols)
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, gap, right)
+	row := lipgloss.JoinHorizontal(lipgloss.Top, left, gap, right)
+	// Strict overflow protection: ensure the row doesn't exceed screen width.
+	// logic in manager.go guarantees left + gap + right <= width, but
+	// we add a hard clamp here to catch any rendering artifacts.
+	return lipgloss.NewStyle().MaxWidth(grid.ScreenWidth).Render(row)
 }
 
 func (m *monitorModel) renderDashboardSidePanelTabBar(grid layoutmgr.GridLayout) string {
@@ -1150,7 +1184,7 @@ func (m *monitorModel) refreshViewports() {
 		m.activityList.SetSize(w, h/2)
 		m.agentOutputVP.Width = w
 		m.agentOutputVP.Height = h
-		m.agentOutputVP.SetContent(strings.Join(m.agentOutput, "\n"))
+		m.agentOutputVP.SetContent(wrapViewportText(strings.Join(m.agentOutput, "\n"), w))
 		m.agentOutputVP.GotoBottom()
 		m.activityDetail.Width = w
 		m.activityDetail.Height = h / 2
@@ -1160,13 +1194,13 @@ func (m *monitorModel) refreshViewports() {
 		m.refreshPlanView()
 		m.outboxVP.Width = w
 		m.outboxVP.Height = h
-		m.outboxVP.SetContent(renderOutboxLines(m.outboxResults))
+		m.outboxVP.SetContent(wrapViewportText(renderOutboxLines(m.outboxResults), w))
 		m.taskQueueVP.Width = w
 		m.taskQueueVP.Height = imax(1, grid.TaskQueue.ContentHeight)
-		m.taskQueueVP.SetContent(renderTaskQueue(m.taskQueue))
+		m.taskQueueVP.SetContent(wrapViewportText(renderTaskQueue(m.taskQueue), w))
 		m.memoryVP.Width = w
 		m.memoryVP.Height = h
-		m.memoryVP.SetContent(renderMemResults(m.memResults))
+		m.memoryVP.SetContent(wrapViewportText(renderMemResults(m.memResults), w))
 		m.input.SetWidth(imax(10, grid.Composer.ContentWidth))
 		return
 	}
@@ -1174,12 +1208,12 @@ func (m *monitorModel) refreshViewports() {
 	w := imax(10, grid.AgentOutput.ContentWidth)
 	m.agentOutputVP.Width = w
 	m.agentOutputVP.Height = imax(1, grid.AgentOutput.ContentHeight)
-	m.agentOutputVP.SetContent(strings.Join(m.agentOutput, "\n"))
+	m.agentOutputVP.SetContent(wrapViewportText(strings.Join(m.agentOutput, "\n"), w))
 	m.agentOutputVP.GotoBottom()
 
 	m.outboxVP.Width = imax(10, grid.Outbox.ContentWidth)
 	m.outboxVP.Height = imax(1, grid.Outbox.ContentHeight)
-	m.outboxVP.SetContent(renderOutboxLines(m.outboxResults))
+	m.outboxVP.SetContent(wrapViewportText(renderOutboxLines(m.outboxResults), m.outboxVP.Width))
 
 	sideW := imax(10, grid.SidePanel.ContentWidth)
 	contentH := imax(1, grid.SidePanel.ContentHeight-1)
@@ -1208,10 +1242,10 @@ func (m *monitorModel) refreshViewports() {
 	m.refreshPlanView()
 	m.taskQueueVP.Width = sideW
 	m.taskQueueVP.Height = imax(1, queueH)
-	m.taskQueueVP.SetContent(renderTaskQueue(m.taskQueue))
+	m.taskQueueVP.SetContent(wrapViewportText(renderTaskQueue(m.taskQueue), sideW))
 	m.memoryVP.Width = imax(10, grid.Memory.ContentWidth)
 	m.memoryVP.Height = imax(1, grid.Memory.ContentHeight)
-	m.memoryVP.SetContent(renderMemResults(m.memResults))
+	m.memoryVP.SetContent(wrapViewportText(renderMemResults(m.memResults), m.memoryVP.Width))
 	m.input.SetWidth(imax(10, grid.Composer.ContentWidth))
 }
 
@@ -1328,6 +1362,25 @@ func renderMemResults(results []string) string {
 		return "No memory results."
 	}
 	return strings.Join(results, "\n")
+}
+
+// wrapViewportText hard-wraps long lines so the viewport never renders lines wider
+// than its configured width (which would otherwise get clipped by the terminal).
+func wrapViewportText(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			out = append(out, "")
+			continue
+		}
+		wrapped := wordwrap.String(line, width)
+		out = append(out, strings.Split(wrapped, "\n")...)
+	}
+	return strings.Join(out, "\n")
 }
 
 func shortID(id string) string {

@@ -42,11 +42,18 @@ func (cfg AutonomousRunnerConfig) Validate() error {
 	if cfg.Agent == nil {
 		return fmt.Errorf("agent is required")
 	}
+	if _, err := cfg.Role.Normalize(); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (cfg AutonomousRunnerConfig) WithDefaults() AutonomousRunnerConfig {
-	cfg.Role = cfg.Role.Normalize()
+func (cfg AutonomousRunnerConfig) WithDefaults() (AutonomousRunnerConfig, error) {
+	normalizedRole, err := cfg.Role.Normalize()
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Role = normalizedRole
 	if strings.TrimSpace(cfg.InboxPath) == "" {
 		cfg.InboxPath = "/inbox"
 	}
@@ -65,7 +72,7 @@ func (cfg AutonomousRunnerConfig) WithDefaults() AutonomousRunnerConfig {
 	if cfg.MaxReadBytes <= 0 {
 		cfg.MaxReadBytes = 96 * 1024
 	}
-	return cfg
+	return cfg, nil
 }
 
 type MemorySnippet struct {
@@ -85,8 +92,8 @@ type Notifier interface {
 }
 
 // AutonomousRunner is an always-on control loop:
-// - pulls tasks from /inbox
-// - generates its own tasks based on Role triggers when idle
+// - pulls tasks from /inbox (manual/external)
+// - generates bounded autonomous tasks only when role obligations need attention
 // - executes tasks via the underlying Agent
 // - writes results to /outbox
 type AutonomousRunner struct {
@@ -94,21 +101,28 @@ type AutonomousRunner struct {
 
 	q *queue.TaskQueue
 
-	mu          sync.RWMutex
-	seenTaskIDs map[string]bool
-	lastFired   map[string]time.Time
+	mu sync.RWMutex
+
+	seenTaskIDs          map[string]bool
+	lastSatisfied        map[string]time.Time
+	pendingObligationRun map[string]int
 }
 
 func NewAutonomousRunner(cfg AutonomousRunnerConfig) (*AutonomousRunner, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	cfg = cfg.WithDefaults()
+	var err error
+	cfg, err = cfg.WithDefaults()
+	if err != nil {
+		return nil, err
+	}
 	return &AutonomousRunner{
-		cfg:         cfg,
-		q:           queue.New(),
-		seenTaskIDs: map[string]bool{},
-		lastFired:   map[string]time.Time{},
+		cfg:                  cfg,
+		q:                    queue.New(),
+		seenTaskIDs:          map[string]bool{},
+		lastSatisfied:        map[string]time.Time{},
+		pendingObligationRun: map[string]int{},
 	}, nil
 }
 
@@ -131,7 +145,7 @@ func (r *AutonomousRunner) Run(ctx context.Context) error {
 			_ = r.drainInbox(ctx)
 
 		case <-roleTicker.C:
-			r.maybeEnqueueProactive(ctx)
+			r.maybeEnqueueObligationTasks(ctx)
 		default:
 			// Execute next task if available.
 			if item := r.q.Next(); item != nil {
@@ -243,8 +257,14 @@ func (r *AutonomousRunner) processControlFile(ctx context.Context, controlPath s
 	changed := false
 	if strings.TrimSpace(c.Role) != "" {
 		role.ReloadDefaultManager()
-		r.cfg.Role = role.Get(c.Role).Normalize()
-		changed = true
+		if newRole, ok := role.GetDefault(c.Role); ok {
+			if normalized, err := newRole.Normalize(); err == nil {
+				r.cfg.Role = normalized
+				changed = true
+			}
+		} else {
+			c.Error = "role not found"
+		}
 	}
 	if strings.TrimSpace(c.Model) != "" {
 		r.cfg.Agent.SetModel(strings.TrimSpace(c.Model))
@@ -269,59 +289,112 @@ func (r *AutonomousRunner) processControlFile(ctx context.Context, controlPath s
 		r.cfg.Emit(ctx, events.Event{
 			Type:    "daemon.control",
 			Message: "Control update applied",
-			Data:    map[string]string{"role": r.cfg.Role.Name, "model": r.cfg.Agent.GetModel()},
+			Data:    map[string]string{"role": r.cfg.Role.ID, "model": r.cfg.Agent.GetModel()},
 		})
 	}
 	return nil
 }
 
-func (r *AutonomousRunner) maybeEnqueueProactive(ctx context.Context) {
-	// Only generate new work when idle (no queued work).
-	if !r.q.IsIdle() {
-		return
-	}
-
+func (r *AutonomousRunner) maybeEnqueueObligationTasks(ctx context.Context) {
 	now := time.Now()
-	for _, t := range r.cfg.Role.Triggers {
-		key := triggerKey(r.cfg.Role.Name, t)
-		r.mu.RLock()
-		lastFired := r.lastFired[key]
-		r.mu.RUnlock()
-		if !shouldFireTrigger(now, t, lastFired) {
+	roleCfg := r.cfg.Role
+	maxPerCycle := roleCfg.TaskPolicy.MaxTasksPerCycle
+	if maxPerCycle <= 0 {
+		maxPerCycle = 1
+	}
+
+	// Build status for each obligation.
+	unsatisfied := []role.Obligation{}
+	expiring := []role.Obligation{}
+
+	r.mu.RLock()
+	for _, ob := range roleCfg.Obligations {
+		last := r.lastSatisfied[ob.ID]
+		if last.IsZero() {
+			unsatisfied = append(unsatisfied, ob)
 			continue
 		}
-		r.mu.Lock()
-		r.lastFired[key] = now
-		r.mu.Unlock()
-		if strings.TrimSpace(t.Goal) == "" {
+		if ob.ValidityDuration <= 0 {
+			// symbolic validity: treat as satisfied until explicit refresh needed
 			continue
 		}
-		r.enqueueSelfGoal(t.Goal, 5, "trigger")
+		elapsed := now.Sub(last)
+		if elapsed >= ob.ValidityDuration {
+			unsatisfied = append(unsatisfied, ob)
+			continue
+		}
+		if elapsed >= ob.ValidityDuration-r.cfg.ProactiveInterval {
+			expiring = append(expiring, ob)
+		}
+	}
+	r.mu.RUnlock()
+
+	createRules := roleCfg.TaskPolicy.CreateTasksOnlyIf
+	if len(createRules) == 0 {
 		return
 	}
 
-	// If nothing fired, pick a standing goal (first) as background work.
-	if len(r.cfg.Role.StandingGoals) > 0 {
-		r.enqueueSelfGoal(r.cfg.Role.StandingGoals[0], 9, "standing")
+	created := 0
+	enqueue := func(ob role.Obligation, reason string) {
+		if created >= maxPerCycle {
+			return
+		}
+		if r.hasPendingObligationTask(ob.ID) {
+			return
+		}
+		goal := fmt.Sprintf("Refresh evidence for obligation %s (%s)", ob.ID, ob.Evidence)
+		r.enqueueSelfGoal(goal, 5, reason, ob.ID)
+		created++
+	}
+
+	for _, rule := range createRules {
+		switch strings.ToLower(strings.TrimSpace(rule)) {
+		case "obligation_unsatisfied":
+			for _, ob := range unsatisfied {
+				enqueue(ob, "obligation")
+				if created >= maxPerCycle {
+					return
+				}
+			}
+		case "obligation_expiring":
+			for _, ob := range expiring {
+				enqueue(ob, "obligation")
+				if created >= maxPerCycle {
+					return
+				}
+			}
+		}
+		if created >= maxPerCycle {
+			return
+		}
 	}
 }
 
-func (r *AutonomousRunner) enqueueSelfGoal(goal string, priority int, source string) {
+func (r *AutonomousRunner) enqueueSelfGoal(goal string, priority int, source string, obligationID ...string) {
 	goal = strings.TrimSpace(goal)
 	if goal == "" {
 		return
 	}
 	now := time.Now()
 	taskID := "self-" + uuid.NewString()
+	metadata := map[string]any{"source": source, "role": r.cfg.Role.ID}
+	if len(obligationID) > 0 && strings.TrimSpace(obligationID[0]) != "" {
+		metadata["obligation"] = strings.TrimSpace(obligationID[0])
+	}
 	task := types.Task{
 		TaskID:    taskID,
 		Goal:      goal,
 		Priority:  priority,
 		Status:    types.TaskStatusPending,
 		CreatedAt: &now,
-		Metadata:  map[string]any{"source": source, "role": r.cfg.Role.Name},
+		Metadata:  metadata,
 	}
 	r.q.Enqueue(&queue.Item{Task: task})
+	if obID, ok := metadata["obligation"].(string); ok && obID != "" {
+		r.mu.Lock()
+		r.pendingObligationRun[obID]++
+		r.mu.Unlock()
+	}
 	if r.cfg.Emit != nil {
 		r.cfg.Emit(context.Background(), events.Event{
 			Type:    "task.generated",
@@ -329,7 +402,7 @@ func (r *AutonomousRunner) enqueueSelfGoal(goal string, priority int, source str
 			Data: map[string]string{
 				"taskId": taskID,
 				"source": source,
-				"role":   r.cfg.Role.Name,
+				"role":   r.cfg.Role.ID,
 				"goal":   truncateText(goal, 100),
 			},
 		})
@@ -363,7 +436,7 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 			Message: "Task started",
 			Data: map[string]string{
 				"taskId": taskID,
-				"role":   r.cfg.Role.Name,
+				"role":   r.cfg.Role.ID,
 				"goal":   truncateText(goal, 100),
 			},
 		})
@@ -371,7 +444,7 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 
 	// Inject role + relevant memories by cloning the agent with an augmented system prompt.
 	runAgent := a
-	if r.cfg.Memory != nil || r.cfg.Role.Name != "" || r.cfg.Role.Description != "" {
+	if r.cfg.Memory != nil || r.cfg.Role.ID != "" || r.cfg.Role.Description != "" {
 		memSnips := []MemorySnippet{}
 		if r.cfg.Memory != nil {
 			if ms, err := r.cfg.Memory.Search(ctx, goal, r.cfg.MemorySearchLimit); err == nil {
@@ -408,11 +481,13 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 	task.Error = result.Error
 	_ = r.writeTask(ctx, item.Path, task)
 
+	r.onTaskFinished(task, result)
+
 	if r.cfg.Emit != nil {
 		data := map[string]string{
 			"taskId": taskID,
 			"status": string(result.Status),
-			"role":   r.cfg.Role.Name,
+			"role":   r.cfg.Role.ID,
 		}
 		if goal := truncateText(task.Goal, 100); goal != "" {
 			data["goal"] = goal
@@ -448,15 +523,18 @@ func buildAugmentedSystemPrompt(base string, r role.Role, memories []MemorySnipp
 		b.WriteString(base)
 	}
 
-	rr := r.Normalize()
-	if rr.Name != "" || rr.Description != "" {
+	rr := r
+	if normalized, err := r.Normalize(); err == nil {
+		rr = normalized
+	}
+	if rr.ID != "" || rr.Description != "" {
 		if b.Len() > 0 {
 			b.WriteString("\n\n")
 		}
 		b.WriteString("<role>\n")
-		if rr.Name != "" {
-			b.WriteString("Name: ")
-			b.WriteString(rr.Name)
+		if rr.ID != "" {
+			b.WriteString("ID: ")
+			b.WriteString(rr.ID)
 			b.WriteString("\n")
 		}
 		if rr.Description != "" {
@@ -464,21 +542,40 @@ func buildAugmentedSystemPrompt(base string, r role.Role, memories []MemorySnipp
 			b.WriteString(rr.Description)
 			b.WriteString("\n")
 		}
-		if rr.Content != "" {
-			b.WriteString("Instructions:\n")
-			b.WriteString(rr.Content)
-			if !strings.HasSuffix(rr.Content, "\n") {
-				b.WriteString("\n")
-			}
-		}
-		if len(rr.StandingGoals) > 0 {
-			b.WriteString("StandingGoals:\n")
-			for _, g := range rr.StandingGoals {
-				if strings.TrimSpace(g) == "" {
+		if len(rr.SkillBias) > 0 {
+			b.WriteString("SkillBias:\n")
+			for _, s := range rr.SkillBias {
+				if strings.TrimSpace(s) == "" {
 					continue
 				}
 				b.WriteString("- ")
-				b.WriteString(strings.TrimSpace(g))
+				b.WriteString(strings.TrimSpace(s))
+				b.WriteString("\n")
+			}
+		}
+		if len(rr.Obligations) > 0 {
+			b.WriteString("Obligations:\n")
+			for _, ob := range rr.Obligations {
+				if strings.TrimSpace(ob.ID) == "" {
+					continue
+				}
+				b.WriteString("- id: ")
+				b.WriteString(strings.TrimSpace(ob.ID))
+				if strings.TrimSpace(ob.ValidityRaw) != "" {
+					b.WriteString("  validity: ")
+					b.WriteString(strings.TrimSpace(ob.ValidityRaw))
+				}
+				if strings.TrimSpace(ob.Evidence) != "" {
+					b.WriteString("  evidence: ")
+					b.WriteString(strings.TrimSpace(ob.Evidence))
+				}
+				b.WriteString("\n")
+			}
+		}
+		if strings.TrimSpace(rr.Guidance) != "" {
+			b.WriteString("Guidance:\n")
+			b.WriteString(strings.TrimSpace(rr.Guidance))
+			if !strings.HasSuffix(rr.Guidance, "\n") {
 				b.WriteString("\n")
 			}
 		}
@@ -585,44 +682,6 @@ func (r *AutonomousRunner) writeResult(ctx context.Context, task types.Task, res
 	return nil
 }
 
-func triggerKey(roleName string, t role.Trigger) string {
-	return strings.ToLower(strings.TrimSpace(roleName)) + "|" + strings.ToLower(strings.TrimSpace(t.Type)) + "|" + strings.TrimSpace(t.TimeOfDay) + "|" + strings.TrimSpace(t.Goal)
-}
-
-func shouldFireTrigger(now time.Time, t role.Trigger, last time.Time) bool {
-	switch strings.ToLower(strings.TrimSpace(t.Type)) {
-	case "interval":
-		if t.Interval <= 0 {
-			return false
-		}
-		if last.IsZero() {
-			return true
-		}
-		return now.Sub(last) >= t.Interval
-
-	case "time_of_day":
-		hhmm := strings.TrimSpace(t.TimeOfDay)
-		if len(hhmm) != 5 || hhmm[2] != ':' {
-			return false
-		}
-		target := time.Date(now.Year(), now.Month(), now.Day(), atoi2(hhmm[0], hhmm[1]), atoi2(hhmm[3], hhmm[4]), 0, 0, now.Location())
-		// Fire if we're within the same minute window and haven't fired today.
-		if now.Before(target) || now.Sub(target) > time.Minute {
-			return false
-		}
-		return last.IsZero() || last.YearDay() != now.YearDay() || last.Year() != now.Year()
-	default:
-		return false
-	}
-}
-
-func atoi2(a, b byte) int {
-	if a < '0' || a > '9' || b < '0' || b > '9' {
-		return 0
-	}
-	return int(a-'0')*10 + int(b-'0')
-}
-
 func truncateText(s string, max int) string {
 	if max <= 0 {
 		return ""
@@ -635,4 +694,35 @@ func truncateText(s string, max int) string {
 		return s[:max]
 	}
 	return s[:max-3] + "..."
+}
+
+func (r *AutonomousRunner) hasPendingObligationTask(obligationID string) bool {
+	if strings.TrimSpace(obligationID) == "" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.pendingObligationRun[obligationID] > 0
+}
+
+func (r *AutonomousRunner) onTaskFinished(task types.Task, result types.TaskResult) {
+	obligationID := ""
+	if task.Metadata != nil {
+		if v, ok := task.Metadata["obligation"]; ok {
+			if s, ok := v.(string); ok {
+				obligationID = strings.TrimSpace(s)
+			}
+		}
+	}
+
+	if obligationID != "" {
+		r.mu.Lock()
+		if result.Status == types.TaskStatusSucceeded {
+			r.lastSatisfied[obligationID] = time.Now()
+		}
+		if r.pendingObligationRun[obligationID] > 0 {
+			r.pendingObligationRun[obligationID]--
+		}
+		r.mu.Unlock()
+	}
 }

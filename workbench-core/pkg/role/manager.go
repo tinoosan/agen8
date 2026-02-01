@@ -1,7 +1,6 @@
 package role
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -9,12 +8,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
+// Manager discovers roles from the filesystem.
+// Roles are expected at <dataDir>/roles/<role_name>/ROLE.md
+// Only front matter is authoritative; body is guidance.
 type Manager struct {
 	roots        []string
 	WritableRoot string
@@ -22,21 +22,19 @@ type Manager struct {
 }
 
 func NewManager(roots []string) *Manager {
-	copied := make([]string, 0, len(roots))
+	filtered := make([]string, 0, len(roots))
 	for _, r := range roots {
 		if strings.TrimSpace(r) == "" {
 			continue
 		}
-		copied = append(copied, r)
+		filtered = append(filtered, r)
 	}
-	return &Manager{
-		roots:   copied,
-		entries: make(map[string]Role),
-	}
+	return &Manager{roots: filtered, entries: map[string]Role{}}
 }
 
+// Scan loads all roles. Fails if no valid roles are found.
 func (m *Manager) Scan() error {
-	entries := make(map[string]Role)
+	entries := map[string]Role{}
 	for _, rawRoot := range m.roots {
 		root, err := filepath.Abs(rawRoot)
 		if err != nil {
@@ -57,34 +55,33 @@ func (m *Manager) Scan() error {
 			return fmt.Errorf("read root %s: %w", root, err)
 		}
 		for _, de := range dirEntries {
-			if de.IsDir() {
+			if !de.IsDir() {
 				continue
 			}
-			name := de.Name()
-			if !strings.HasSuffix(strings.ToLower(name), ".md") {
-				continue
-			}
-			rolePath := filepath.Join(root, name)
-			role, err := loadRoleFile(rolePath)
+			roleDir := filepath.Join(root, de.Name())
+			rolePath := filepath.Join(roleDir, "ROLE.md")
+			r, err := loadRoleFile(rolePath)
 			if err != nil {
 				if os.IsNotExist(err) {
 					continue
 				}
 				return fmt.Errorf("load role %s: %w", rolePath, err)
 			}
-			key := strings.ToLower(strings.TrimSpace(role.Name))
+			key := strings.ToLower(strings.TrimSpace(r.ID))
 			if key == "" {
-				key = strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
-				role.Name = strings.TrimSuffix(name, filepath.Ext(name))
+				key = strings.ToLower(strings.TrimSpace(de.Name()))
 			}
 			if key == "" {
 				continue
 			}
-			if _, ok := entries[key]; ok {
-				continue
+			if _, exists := entries[key]; exists {
+				return fmt.Errorf("duplicate role id %s", key)
 			}
-			entries[key] = role
+			entries[key] = r
 		}
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("no valid roles found in roots: %v", m.roots)
 	}
 	m.entries = entries
 	return nil
@@ -106,40 +103,19 @@ func (m *Manager) Entries() []Role {
 	return out
 }
 
-func (m *Manager) Get(name string) (Role, bool) {
-	if m == nil || len(m.entries) == 0 {
+func (m *Manager) Get(id string) (Role, bool) {
+	if m == nil {
 		return Role{}, false
 	}
-	key := strings.ToLower(strings.TrimSpace(name))
+	key := strings.ToLower(strings.TrimSpace(id))
 	if key == "" {
 		return Role{}, false
 	}
-	if r, ok := m.entries[key]; ok {
-		return r, true
-	}
-	for k, r := range m.entries {
-		if strings.EqualFold(k, key) || strings.EqualFold(r.Name, name) {
-			return r, true
-		}
-	}
-	return Role{}, false
+	r, ok := m.entries[key]
+	return r, ok
 }
 
-type roleFrontMatter struct {
-	Name          string             `yaml:"name"`
-	Description   string             `yaml:"description"`
-	StandingGoals []string           `yaml:"standing_goals"`
-	Triggers      []roleTriggerFront `yaml:"triggers"`
-}
-
-type roleTriggerFront struct {
-	Type      string `yaml:"type"`
-	Interval  string `yaml:"interval"`
-	TimeOfDay string `yaml:"time_of_day"`
-	Time      string `yaml:"time"`
-	Goal      string `yaml:"goal"`
-}
-
+// loadRoleFile parses ROLE.md front matter using the required schema.
 func loadRoleFile(path string) (Role, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -150,43 +126,26 @@ func loadRoleFile(path string) (Role, error) {
 		return Role{}, err
 	}
 	role := Role{
-		Name:          strings.TrimSpace(meta.Name),
-		Description:   strings.TrimSpace(meta.Description),
-		StandingGoals: meta.StandingGoals,
-		Content:       strings.TrimSpace(body),
+		ID:          strings.TrimSpace(meta.ID),
+		Description: strings.TrimSpace(meta.Description),
+		SkillBias:   meta.SkillBias,
+		Obligations: meta.Obligations,
+		TaskPolicy:  meta.TaskPolicy,
+		Guidance:    strings.TrimSpace(body),
 	}
-	for _, t := range meta.Triggers {
-		trigger := Trigger{
-			Type: strings.ToLower(strings.TrimSpace(t.Type)),
-			Goal: strings.TrimSpace(t.Goal),
-		}
-		if trigger.Type == "" {
-			continue
-		}
-		if trigger.Type == "interval" {
-			interval := strings.TrimSpace(t.Interval)
-			if interval == "" {
-				continue
-			}
-			d, err := time.ParseDuration(interval)
-			if err != nil {
-				return Role{}, fmt.Errorf("parse interval %q: %w", interval, err)
-			}
-			trigger.Interval = d
-		}
-		if trigger.Type == "time_of_day" {
-			tod := strings.TrimSpace(t.TimeOfDay)
-			if tod == "" {
-				tod = strings.TrimSpace(t.Time)
-			}
-			if tod == "" {
-				continue
-			}
-			trigger.TimeOfDay = tod
-		}
-		role.Triggers = append(role.Triggers, trigger)
+	normalized, err := role.Normalize()
+	if err != nil {
+		return Role{}, err
 	}
-	return role.Normalize(), nil
+	return normalized, nil
+}
+
+type roleFrontMatter struct {
+	ID          string       `yaml:"id"`
+	Description string       `yaml:"description"`
+	SkillBias   []string     `yaml:"skill_bias"`
+	Obligations []Obligation `yaml:"obligations"`
+	TaskPolicy  TaskPolicy   `yaml:"task_policy"`
 }
 
 func parseRoleMarkdown(data []byte) (roleFrontMatter, string, error) {
@@ -195,78 +154,105 @@ func parseRoleMarkdown(data []byte) (roleFrontMatter, string, error) {
 		return roleFrontMatter{}, "", err
 	}
 	if !ok {
-		return roleFrontMatter{}, strings.TrimSpace(string(data)), nil
+		return roleFrontMatter{}, "", fmt.Errorf("ROLE.md missing YAML front matter")
 	}
 	var meta roleFrontMatter
 	if err := yaml.Unmarshal(front, &meta); err != nil {
-		return roleFrontMatter{}, "", fmt.Errorf("parse role front matter: %w", err)
+		return roleFrontMatter{}, "", fmt.Errorf("parse ROLE.md front matter: %w", err)
 	}
 	return meta, strings.TrimSpace(body), nil
 }
 
 func splitFrontMatter(data []byte) ([]byte, string, bool, error) {
-	r := bufio.NewReader(bytes.NewReader(data))
-	first, err := r.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return nil, "", false, err
-	}
-	if strings.TrimSpace(first) != "---" {
-		return nil, strings.TrimSpace(string(data)), false, nil
-	}
-	var front bytes.Buffer
-	var body bytes.Buffer
-	inFront := true
+	r := bytes.NewReader(data)
+	var frontBuf bytes.Buffer
+	var bodyBuf bytes.Buffer
+	inFront := false
+	doneFront := false
+
 	for {
-		line, err := r.ReadString('\n')
-		if err != nil && err != io.EOF {
-			return nil, "", false, err
-		}
-		if inFront && strings.TrimSpace(line) == "---" {
-			inFront = false
-			if err == io.EOF {
-				break
-			}
-			continue
-		}
-		if inFront {
-			front.WriteString(line)
-		} else {
-			body.WriteString(line)
-		}
+		line, err := readLine(r)
 		if err == io.EOF {
 			break
 		}
+		if err != nil {
+			return nil, "", false, err
+		}
+		trimmed := strings.TrimSpace(line)
+		if !inFront {
+			if trimmed == "---" {
+				inFront = true
+				continue
+			}
+			// no front matter
+			return nil, strings.TrimSpace(string(data)), false, nil
+		}
+		if inFront && trimmed == "---" {
+			doneFront = true
+			break
+		}
+		if inFront {
+			frontBuf.WriteString(line)
+			if !strings.HasSuffix(line, "\n") {
+				frontBuf.WriteString("\n")
+			}
+		}
 	}
-	return front.Bytes(), strings.TrimSpace(body.String()), true, nil
+
+	if !doneFront {
+		return nil, "", false, fmt.Errorf("unterminated front matter")
+	}
+
+	// Remainder is body.
+	rest, _ := io.ReadAll(r)
+	bodyBuf.Write(rest)
+	return frontBuf.Bytes(), strings.TrimSpace(bodyBuf.String()), true, nil
 }
 
+func readLine(r *bytes.Reader) (string, error) {
+	var buf bytes.Buffer
+	for {
+		b, err := r.ReadByte()
+		if err != nil {
+			if err == io.EOF {
+				if buf.Len() == 0 {
+					return "", io.EOF
+				}
+				return buf.String(), io.EOF
+			}
+			return "", err
+		}
+		buf.WriteByte(b)
+		if b == '\n' {
+			return buf.String(), nil
+		}
+	}
+}
+
+// Default manager for control plane updates.
 var (
-	defaultManagerMu sync.RWMutex
-	defaultManager   *Manager
+	defaultManager *Manager
 )
 
 func SetDefaultManager(m *Manager) {
-	defaultManagerMu.Lock()
-	defer defaultManagerMu.Unlock()
 	defaultManager = m
 }
 
 func ReloadDefaultManager() {
-	defaultManagerMu.RLock()
-	m := defaultManager
-	defaultManagerMu.RUnlock()
-	if m == nil {
+	if defaultManager == nil {
 		return
 	}
-	_ = m.Scan()
+	_ = defaultManager.Scan()
 }
 
-func getDefaultRole(name string) (Role, bool) {
-	defaultManagerMu.RLock()
-	m := defaultManager
-	defaultManagerMu.RUnlock()
-	if m == nil {
+func getDefaultRole(id string) (Role, bool) {
+	if defaultManager == nil {
 		return Role{}, false
 	}
-	return m.Get(name)
+	return defaultManager.Get(id)
+}
+
+// GetDefault looks up a role from the default manager.
+func GetDefault(id string) (Role, bool) {
+	return getDefaultRole(id)
 }
