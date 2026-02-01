@@ -24,7 +24,7 @@ type Factory struct {
 
 	ResultsStore store.ResultsStore
 	MemoryStore  store.DailyMemoryStore
-	ProfileStore store.ProfileStore
+	UserProfileStore store.UserProfileStore
 	HistoryStore store.HistoryStore
 	TraceStore   store.TraceStore
 }
@@ -71,11 +71,11 @@ func (f *Factory) Memory() (*DailyMemoryResource, error) {
 	return NewDailyMemoryResource(memoryDir, nil, nil)
 }
 
-func (f *Factory) Profile() (*ProfileResource, error) {
-	if f.ProfileStore == nil {
-		return nil, fmt.Errorf("profile store is required")
+func (f *Factory) UserProfile() (*UserProfileResource, error) {
+	if f.UserProfileStore == nil {
+		return nil, fmt.Errorf("user profile store is required")
 	}
-	return NewProfileResource(f.ProfileStore)
+	return NewUserProfileResource(f.UserProfileStore)
 }
 
 func (f *Factory) History() (*HistoryResource, error) {
@@ -116,9 +116,9 @@ func (f *Factory) MountAll(fs *vfs.FS) error {
 	if err != nil {
 		return fmt.Errorf("create memory: %w", err)
 	}
-	prof, err := f.Profile()
+	prof, err := f.UserProfile()
 	if err != nil {
-		return fmt.Errorf("create profile: %w", err)
+		return fmt.Errorf("create user profile: %w", err)
 	}
 	hist, err := f.History()
 	if err != nil {
@@ -171,9 +171,11 @@ func (f *Factory) MountAll(fs *vfs.FS) error {
 	if err := fs.Mount(vfs.MountMemory, mem); err != nil {
 		return fmt.Errorf("mount %s: %w", vfs.MountMemory, err)
 	}
-	if err := fs.Mount(vfs.MountProfile, prof); err != nil {
-		return fmt.Errorf("mount %s: %w", vfs.MountProfile, err)
+	if err := fs.Mount(vfs.MountUserProfile, prof); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountUserProfile, err)
 	}
+	// Legacy alias for older agents/tools/tests.
+	_ = fs.Mount("profile", prof)
 	if err := fs.Mount(vfs.MountHistory, hist); err != nil {
 		return fmt.Errorf("mount %s: %w", vfs.MountHistory, err)
 	}

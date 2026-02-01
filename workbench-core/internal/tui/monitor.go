@@ -108,6 +108,7 @@ type outboxEntry struct {
 	Goal      string
 	Status    string
 	Summary   string
+	Error     string
 	Timestamp time.Time
 }
 
@@ -151,7 +152,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	stats := monitorStats{started: time.Now()}
 
 	in := textarea.New()
-	in.Placeholder = "/task <goal>  |  /memory search <query>  |  /role <name>  |  /model <id>  |  /quit"
+	in.Placeholder = "/task <goal>  |  /memory search <query>  |  /profile <id|path>  |  /model <id>  |  /quit"
 	in.SetHeight(2)
 	in.CharLimit = 500
 	in.ShowLineNumbers = false
@@ -634,13 +635,13 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 		goal = strings.Trim(goal, "\"")
 		return m.enqueueTask(goal, 0)
 	}
-	if strings.HasPrefix(raw, "/role ") {
-		roleName := strings.TrimSpace(strings.TrimPrefix(raw, "/role "))
-		return m.writeControl(map[string]any{"role": roleName})
+	if strings.HasPrefix(raw, "/profile ") || strings.HasPrefix(raw, "/role ") {
+		ref := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(raw, "/profile "), "/role "))
+		return m.writeControl("switch_profile", map[string]any{"profile": ref})
 	}
 	if strings.HasPrefix(raw, "/model ") {
 		model := strings.TrimSpace(strings.TrimPrefix(raw, "/model "))
-		return m.writeControl(map[string]any{"model": model})
+		return m.writeControl("set_model", map[string]any{"model": model})
 	}
 	if strings.HasPrefix(raw, "/memory search ") {
 		query := strings.TrimSpace(strings.TrimPrefix(raw, "/memory search "))
@@ -683,17 +684,24 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 	}
 }
 
-func (m *monitorModel) writeControl(payload map[string]any) tea.Cmd {
+func (m *monitorModel) writeControl(command string, args map[string]any) tea.Cmd {
 	return func() tea.Msg {
 		runDir := fsutil.GetRunDir(m.cfg.DataDir, m.runID)
 		inboxDir := filepath.Join(runDir, "inbox")
 		_ = os.MkdirAll(inboxDir, 0755)
-		payload["processed"] = false
+		payload := map[string]any{
+			"type":    "control",
+			"command": strings.TrimSpace(command),
+		}
+		if len(args) != 0 {
+			payload["args"] = args
+		}
 		b, _ := json.MarshalIndent(payload, "", "  ")
-		if err := os.WriteFile(filepath.Join(inboxDir, "control.json"), b, 0644); err != nil {
+		id := "control-" + uuid.NewString()
+		if err := os.WriteFile(filepath.Join(inboxDir, id+".json"), b, 0644); err != nil {
 			return commandLinesMsg{lines: []string{"[control] error: " + err.Error()}}
 		}
-		return commandLinesMsg{lines: []string{"[control] updated"}}
+		return commandLinesMsg{lines: []string{"[control] queued " + id}}
 	}
 }
 
@@ -723,7 +731,7 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 	if v := strings.TrimSpace(ev.Data["model"]); v != "" {
 		m.model = v
 	}
-	if v := strings.TrimSpace(ev.Data["role"]); v != "" {
+	if v := strings.TrimSpace(ev.Data["profile"]); v != "" {
 		m.role = v
 	}
 	if strings.HasPrefix(ev.Type, "agent.op.") {
@@ -893,6 +901,22 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 			Goal:      strings.TrimSpace(ev.Data["goal"]),
 			Status:    strings.TrimSpace(ev.Data["status"]),
 			Summary:   strings.TrimSpace(ev.Data["summary"]),
+			Error:     strings.TrimSpace(ev.Data["error"]),
+			Timestamp: ev.Timestamp,
+		})
+			if len(m.outboxResults) > 10 {
+				m.outboxResults = m.outboxResults[len(m.outboxResults)-10:]
+			}
+	case "task.quarantined":
+		taskID := strings.TrimSpace(ev.Data["taskId"])
+		if taskID == "" {
+			return
+		}
+		m.outboxResults = append(m.outboxResults, outboxEntry{
+			TaskID:    taskID,
+			Goal:      strings.TrimSpace(ev.Data["goal"]),
+			Status:    "quarantined",
+			Error:     strings.TrimSpace(ev.Data["error"]),
 			Timestamp: ev.Timestamp,
 		})
 		if len(m.outboxResults) > 10 {
@@ -903,9 +927,11 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 
 func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 	switch ev.Type {
-	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning":
+	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning", "daemon.error", "daemon.runner.error":
 		m.appendAgentOutput(formatEventLine(ev))
-	case "task.queued", "task.generated", "task.start", "task.done":
+	case "task.queued", "task.generated", "task.start", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped":
+		m.appendAgentOutput(formatEventLine(ev))
+	case "control.check", "control.success", "control.error":
 		m.appendAgentOutput(formatEventLine(ev))
 	}
 }
@@ -1020,7 +1046,7 @@ func (m *monitorModel) renderHeader() string {
 	content := lipgloss.JoinHorizontal(lipgloss.Left,
 		m.styles.headerTitle.Render("Workbench - Always On"),
 		kit.RenderTag(kit.TagOptions{Key: "Model", Value: fallback(m.model, "(unknown)")}),
-		kit.RenderTag(kit.TagOptions{Key: "Role", Value: fallback(m.role, "(none)")}),
+			kit.RenderTag(kit.TagOptions{Key: "Profile", Value: fallback(m.role, "(none)")}),
 		kit.RenderTag(kit.TagOptions{Key: "Run", Value: m.runID}),
 	)
 	w := m.width
@@ -1408,11 +1434,17 @@ func formatEventLine(e types.EventRecord) string {
 	if v := strings.TrimSpace(e.Data["summary"]); v != "" {
 		line += " summary=" + truncateText(v, 60)
 	}
+	if v := strings.TrimSpace(e.Data["error"]); v != "" {
+		line += " error=" + truncateText(v, 80)
+	}
 	if v := strings.TrimSpace(e.Data["op"]); v != "" {
 		line += " op=" + v
 	}
 	if v := strings.TrimSpace(e.Data["path"]); v != "" {
 		line += " path=" + truncateText(v, 40)
+	}
+	if v := strings.TrimSpace(e.Data["poisonPath"]); v != "" {
+		line += " poison=" + truncateText(v, 40)
 	}
 	return line
 }
@@ -1451,7 +1483,13 @@ func renderOutboxLines(results []outboxEntry) string {
 		if status == "" {
 			status = "unknown"
 		}
-		line := fmt.Sprintf("%s %q -> %s: %s", shortID(r.TaskID), goal, status, summary)
+		detail := summary
+		if strings.TrimSpace(detail) == "" && strings.TrimSpace(r.Error) != "" {
+			detail = "error: " + truncateText(r.Error, 90)
+		} else if strings.TrimSpace(r.Error) != "" && (status == "failed" || status == "canceled" || status == "quarantined") {
+			detail = detail + " (error: " + truncateText(r.Error, 70) + ")"
+		}
+		line := fmt.Sprintf("%s %q -> %s: %s", shortID(r.TaskID), goal, status, detail)
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")

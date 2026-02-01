@@ -12,7 +12,6 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/resources"
-	"github.com/tinoosan/workbench-core/pkg/role"
 	"github.com/tinoosan/workbench-core/pkg/skills"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/tools"
@@ -33,7 +32,7 @@ type Runtime struct {
 	Updater         *agent.PromptUpdater
 	WorkdirBase     string
 	MemStore        store.DailyMemoryStore
-	ProfileStore    store.ProfileCommitter
+	UserProfileStore store.UserProfileCommitter
 }
 
 type BuildConfig struct {
@@ -47,7 +46,7 @@ type BuildConfig struct {
 	HistoryStore          store.HistoryStore
 	ResultsStore          store.ResultsStore
 	MemoryStore           store.DailyMemoryStore
-	ProfileStore          store.ProfileStore
+	UserProfileStore      store.UserProfileStore
 	TraceStore            store.TraceStore
 	MemoryReindexer       resources.MemoryReindexer
 	ConstructorStore      store.ConstructorStateStore
@@ -80,8 +79,8 @@ func (cfg BuildConfig) Validate() error {
 	if cfg.MemoryStore == nil {
 		return fmt.Errorf("memory store is required")
 	}
-	if cfg.ProfileStore == nil {
-		return fmt.Errorf("profile store is required")
+	if cfg.UserProfileStore == nil {
+		return fmt.Errorf("user profile store is required")
 	}
 	if cfg.HistoryStore == nil {
 		return fmt.Errorf("history store is required")
@@ -214,15 +213,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		return nil, fmt.Errorf("prepare skills dir: %w", err)
 	}
-	roleDir := fsutil.GetRolesDir(cfg.Cfg.DataDir)
-	if err := os.MkdirAll(roleDir, 0755); err != nil {
-		return nil, fmt.Errorf("prepare roles dir: %w", err)
-	}
-	roleMgr := role.NewManager([]string{roleDir})
-	if err := roleMgr.Scan(); err != nil {
-		return nil, fmt.Errorf("scan roles: %w", err)
-	}
-	role.SetDefaultManager(roleMgr)
 	skillMgr := skills.NewManager([]string{skillDir})
 	skillMgr.WritableRoot = skillDir
 	if err := skillMgr.Scan(); err != nil {
@@ -258,7 +248,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 
 	resultsStore := cfg.ResultsStore
 	memStore := cfg.MemoryStore
-	profileStore := cfg.ProfileStore
+	userProfileStore := cfg.UserProfileStore
 
 	if memStore == nil {
 		return nil, fmt.Errorf("memory store is required")
@@ -270,6 +260,15 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err := fs.Mount(vfs.MountMemory, memRes); err != nil {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountMemory, err)
 	}
+	userProfRes, err := resources.NewUserProfileResource(userProfileStore)
+	if err != nil {
+		return nil, fmt.Errorf("create user profile resource: %w", err)
+	}
+	if err := fs.Mount(vfs.MountUserProfile, userProfRes); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountUserProfile, err)
+	}
+	// Legacy alias for older agents/tools/tests.
+	_ = fs.Mount("profile", userProfRes)
 
 	if cfg.Emit != nil {
 		cfg.Emit(context.Background(), events.Event{
@@ -281,11 +280,12 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 				"/inbox":     inboxDir,
 				"/outbox":    outboxDir,
 				"/plan":      planDir,
-				"/skills":    "(virtual)",
-				"/memory":    "(virtual)",
-			},
-			Console: boolPtr(false),
-		})
+					"/skills":    "(virtual)",
+					"/memory":    "(virtual)",
+					"/user_profile": "(virtual)",
+				},
+				Console: boolPtr(false),
+			})
 	}
 
 	absWorkdirRoot, err := filepath.Abs(workdirRes.BaseDir)
@@ -376,7 +376,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		Updater:         nil,
 		WorkdirBase:     workdirRes.BaseDir,
 		MemStore:        memStore,
-		ProfileStore:    profileStore,
+		UserProfileStore: userProfileStore,
 	}, nil
 }
 

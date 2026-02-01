@@ -33,22 +33,22 @@ type DefaultAgent struct {
 var _ Agent = (*DefaultAgent)(nil)
 
 // RunConversation executes the agent loop for an existing conversation.
-func (a *DefaultAgent) RunConversation(ctx context.Context, msgs []llm.LLMMessage) (final string, updated []llm.LLMMessage, steps int, err error) {
+func (a *DefaultAgent) RunConversation(ctx context.Context, msgs []llm.LLMMessage) (final RunResult, updated []llm.LLMMessage, steps int, err error) {
 	return a.runConversation(ctx, msgs, 1)
 }
 
-func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessage, startStep int) (final string, updated []llm.LLMMessage, steps int, err error) {
+func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessage, startStep int) (final RunResult, updated []llm.LLMMessage, steps int, err error) {
 	if a == nil || a.LLM == nil {
-		return "", nil, 0, fmt.Errorf("agent LLM is required")
+		return RunResult{}, nil, 0, fmt.Errorf("agent LLM is required")
 	}
 	if a.Exec == nil {
-		return "", nil, 0, fmt.Errorf("agent Exec is required")
+		return RunResult{}, nil, 0, fmt.Errorf("agent Exec is required")
 	}
 	if err := validate.NonEmpty("agent Model", a.Model); err != nil {
-		return "", nil, 0, err
+		return RunResult{}, nil, 0, err
 	}
 	if len(msgs) == 0 {
-		return "", nil, 0, fmt.Errorf("msgs is required")
+		return RunResult{}, nil, 0, fmt.Errorf("msgs is required")
 	}
 
 	baseSystem := strings.TrimSpace(a.SystemPrompt)
@@ -72,13 +72,13 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 	for step := startStep; ; step++ {
 
 		system := baseSystem
-		if a.PromptSource != nil {
-			updatedSystem, err := a.PromptSource.SystemPrompt(ctx, baseSystem, step)
-			if err != nil {
-				return "", nil, 0, err
+			if a.PromptSource != nil {
+				updatedSystem, err := a.PromptSource.SystemPrompt(ctx, baseSystem, step)
+				if err != nil {
+					return RunResult{}, nil, 0, err
+				}
+				system = updatedSystem
 			}
-			system = updatedSystem
-		}
 		req := llm.LLMRequest{
 			Model:            a.Model,
 			System:           system,
@@ -94,7 +94,7 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 
 		resp, err := a.streamToAccumulator(ctx, step, req)
 		if err != nil {
-			return "", nil, 0, err
+			return RunResult{}, nil, 0, err
 		}
 
 		if a.Hooks.OnLLMUsage != nil && resp.Usage != nil {
@@ -107,7 +107,7 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 		if len(resp.ToolCalls) == 0 {
 			finalText := strings.TrimSpace(resp.Text)
 			msgs = append(msgs, llm.LLMMessage{Role: "assistant", Content: finalText})
-			return finalText, msgs, step, nil
+			return RunResult{Text: finalText}, msgs, step, nil
 		}
 
 		assistantMsg := llm.LLMMessage{
@@ -128,7 +128,8 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 
 			if which == "final_answer" {
 				var args struct {
-					Text string `json:"text"`
+					Text      string   `json:"text"`
+					Artifacts []string `json:"artifacts"`
 				}
 				dec := json.NewDecoder(strings.NewReader(tc.Function.Arguments))
 				if err := dec.Decode(&args); err != nil {
@@ -148,7 +149,7 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 				hostRespJSON, _ := types.MarshalPretty(hostResp)
 				msgs = append(msgs, llm.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
 				msgs = append(msgs, llm.LLMMessage{Role: "assistant", Content: finalText})
-				return finalText, msgs, step, nil
+				return RunResult{Text: finalText, Artifacts: args.Artifacts}, msgs, step, nil
 			}
 
 			if a.ToolRegistry == nil {
@@ -261,10 +262,10 @@ func isDangerousHostOp(req types.HostOpRequest) bool {
 	return false
 }
 
-// Run executes the agent loop for a single user goal and returns the final response text.
-func (a *DefaultAgent) Run(ctx context.Context, goal string) (string, error) {
+// Run executes the agent loop for a single user goal and returns the final result.
+func (a *DefaultAgent) Run(ctx context.Context, goal string) (RunResult, error) {
 	if err := validate.NonEmpty("goal", goal); err != nil {
-		return "", err
+		return RunResult{}, err
 	}
 	final, _, _, err := a.RunConversation(ctx, []llm.LLMMessage{
 		{Role: "user", Content: goal},

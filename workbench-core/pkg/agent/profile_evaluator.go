@@ -5,16 +5,16 @@ import (
 	"strings"
 )
 
-// ProfileEvaluator is a deterministic host policy gate for global user profile updates.
-type ProfileEvaluator struct {
+// UserProfileEvaluator is a deterministic host policy gate for global user profile updates.
+type UserProfileEvaluator struct {
 	MaxBytes  int
 	DenyRegex []*regexp.Regexp
 }
 
-// DefaultProfileEvaluator returns the default profile update policy.
-func DefaultProfileEvaluator() *ProfileEvaluator {
+// DefaultUserProfileEvaluator returns the default user profile update policy.
+func DefaultUserProfileEvaluator() *UserProfileEvaluator {
 	me := DefaultMemoryEvaluator()
-	return &ProfileEvaluator{
+	return &UserProfileEvaluator{
 		MaxBytes:  1024,
 		DenyRegex: me.DenyRegex,
 	}
@@ -29,8 +29,8 @@ var forbiddenProfileKeys = map[string]bool{
 	"LEARNED": true,
 }
 
-// Evaluate checks whether a profile update should be committed to /profile/profile.md.
-func (e *ProfileEvaluator) Evaluate(update string) (accepted bool, reason string, cleaned string) {
+// Evaluate checks whether a user profile update should be committed to /user_profile/user_profile.md.
+func (e *UserProfileEvaluator) Evaluate(update string) (accepted bool, reason string, cleaned string) {
 	if e == nil {
 		return false, "evaluator_missing", ""
 	}
@@ -77,3 +77,9 @@ func (e *ProfileEvaluator) Evaluate(update string) (accepted bool, reason string
 	}
 	return true, "accepted", strings.TrimSpace(update) + "\n"
 }
+
+// Deprecated: legacy naming; use UserProfileEvaluator.
+type ProfileEvaluator = UserProfileEvaluator
+
+// Deprecated: legacy naming; use DefaultUserProfileEvaluator.
+func DefaultProfileEvaluator() *UserProfileEvaluator { return DefaultUserProfileEvaluator() }

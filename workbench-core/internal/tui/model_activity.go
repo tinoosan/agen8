@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -687,6 +688,26 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 			b.WriteString("- command:\n\n")
 			b.WriteString(FormatCode("bash", a.Command))
 			b.WriteString("\n")
+		}
+		if strings.TrimSpace(a.ToolID) == "builtin.http" && strings.TrimSpace(a.ActionID) == "fetch" && strings.TrimSpace(a.InputJSON) != "" {
+			var in struct {
+				URL    string `json:"url"`
+				Method string `json:"method"`
+			}
+			if err := json.Unmarshal([]byte(a.InputJSON), &in); err == nil {
+				u := strings.TrimSpace(in.URL)
+				m := strings.ToUpper(strings.TrimSpace(in.Method))
+				if m == "" {
+					m = "GET"
+				}
+				if u != "" {
+					b.WriteString("- request: `")
+					b.WriteString(m)
+					b.WriteString(" ")
+					b.WriteString(u)
+					b.WriteString("`\n")
+				}
+			}
 		}
 		if strings.TrimSpace(a.InputJSON) != "" {
 			b.WriteString("\n- input:\n\n")

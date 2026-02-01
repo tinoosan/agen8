@@ -8,14 +8,21 @@ func FinalAnswerTool() llm.Tool {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "final_answer",
-			Description: "[CONTROL] End the current turn with the final user-visible response text (markdown allowed). Use this when you are fully done and no more environment actions are needed.",
+			Description: "[CONTROL] End the current turn with the final user-visible response text (markdown allowed) and optional deliverable artifact paths.",
 			Strict:      true,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"text": map[string]any{"type": "string", "description": "Final response text to show the user (markdown allowed)."},
+					"artifacts": map[string]any{
+						"type":        "array",
+						"description": "Optional deliverable artifact paths (VFS paths).",
+						"items":       map[string]any{"type": "string"},
+					},
 				},
-				"required":             []any{"text"},
+				// Some providers (notably Azure) validate strict function schemas by requiring every property
+				// to appear in `required`. `artifacts` remains semantically optional: callers can pass an empty array.
+				"required":             []any{"text", "artifacts"},
 				"additionalProperties": false,
 			},
 		},

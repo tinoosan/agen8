@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestMaybeSeedRepoDefaults_CopiesRolesAndSkills(t *testing.T) {
+func TestMaybeSeedRepoDefaults_CopiesProfilesAndSkills(t *testing.T) {
 	tmp := t.TempDir()
 	prev, err := os.Getwd()
 	if err != nil {
@@ -17,11 +17,11 @@ func TestMaybeSeedRepoDefaults_CopiesRolesAndSkills(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	if err := os.MkdirAll(filepath.Join("defaults", "roles", "general"), 0o755); err != nil {
-		t.Fatalf("mkdir roles: %v", err)
+	if err := os.MkdirAll(filepath.Join("defaults", "profiles", "general"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join("defaults", "roles", "general", "ROLE.md"), []byte("---\nid: general\ndescription: x\nobligations:\n- id: o\n  validity: \"1m\"\n  evidence: e\ntask_policy:\n  create_tasks_only_if: [obligation_unsatisfied]\n  max_tasks_per_cycle: 1\n---\n"), 0o644); err != nil {
-		t.Fatalf("write role: %v", err)
+	if err := os.WriteFile(filepath.Join("defaults", "profiles", "general", "profile.yaml"), []byte("id: general\ndescription: x\nprompts:\n  system_prompt: hello\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join("defaults", "skills"), 0o755); err != nil {
 		t.Fatalf("mkdir skills: %v", err)
@@ -35,11 +35,10 @@ func TestMaybeSeedRepoDefaults_CopiesRolesAndSkills(t *testing.T) {
 		t.Fatalf("maybeSeedRepoDefaults: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(dataDir, "roles", "general", "ROLE.md")); err != nil {
-		t.Fatalf("expected seeded role, stat: %v", err)
+	if _, err := os.Stat(filepath.Join(dataDir, "profiles", "general", "profile.yaml")); err != nil {
+		t.Fatalf("expected seeded profile, stat: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "skills", "coding.md")); err != nil {
 		t.Fatalf("expected seeded skill, stat: %v", err)
 	}
 }
-

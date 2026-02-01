@@ -28,14 +28,14 @@ var daemonCmd = &cobra.Command{
 			// Autonomous-first: approvals are disabled.
 			app.WithApprovalsMode("disabled"),
 			app.WithModel(modelOverride),
-			app.WithRole(roleName),
+			app.WithProfile(profileRef),
 			app.WithWorkDir(workDir),
 			app.WithWebhookAddr(webhookAddr),
 			app.WithResultWebhookURL(resultWebhookURL),
 			app.WithHealthAddr(healthAddr),
 			app.WithTraceBytes(maxTraceBytes),
 			app.WithMemoryBytes(maxMemoryBytes),
-			app.WithProfileBytes(maxProfileBytes),
+			app.WithUserProfileBytes(maxUserProfileBytes),
 			app.WithRecentHistoryPairs(recentHistoryPairs),
 			app.WithIncludeHistoryOps(includeHistoryOps),
 		}

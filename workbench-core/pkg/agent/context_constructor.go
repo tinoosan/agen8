@@ -50,7 +50,7 @@ type PromptBuilder struct {
 	FileAttachments []FileAttachment
 }
 
-// SystemPrompt renders a compact prompt: base + profile + memory.
+	// SystemPrompt renders a compact prompt: base + user_profile + memory.
 func (c *PromptBuilder) SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error) {
 	if strings.TrimSpace(basePrompt) == "" {
 		basePrompt = DefaultSystemPrompt()
@@ -63,8 +63,10 @@ func (c *PromptBuilder) SystemPrompt(ctx context.Context, basePrompt string, ste
 	}
 
 	if c.MaxProfileBytes != 0 {
-		if profile := c.readCap("/profile/profile.md", c.MaxProfileBytes); profile != "" {
-			sections = append(sections, "## Profile\n\n"+profile)
+		if profile := c.readCap("/user_profile/user_profile.md", c.MaxProfileBytes); profile != "" {
+			sections = append(sections, "## User Profile\n\n"+profile)
+		} else if legacy := c.readCap("/profile/profile.md", c.MaxProfileBytes); legacy != "" {
+			sections = append(sections, "## User Profile\n\n"+legacy)
 		}
 	}
 	if c.MaxMemoryBytes != 0 {

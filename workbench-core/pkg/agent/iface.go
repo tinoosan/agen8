@@ -13,8 +13,8 @@ import (
 // Distinct from tools.Orchestrator (tool runner) and internal/tui.TurnRunner (TUI turn).
 // The interactive TUI uses TurnRunner for a single user turn plus resume/session helpers.
 type Runner interface {
-	Run(ctx context.Context, goal string) (string, error)
-	RunConversation(ctx context.Context, msgs []llm.LLMMessage) (final string, updated []llm.LLMMessage, steps int, err error)
+	Run(ctx context.Context, goal string) (RunResult, error)
+	RunConversation(ctx context.Context, msgs []llm.LLMMessage) (final RunResult, updated []llm.LLMMessage, steps int, err error)
 	ExecHostOp(ctx context.Context, req types.HostOpRequest) types.HostOpResponse
 }
 
@@ -57,4 +57,10 @@ type Configurable interface {
 type Agent interface {
 	Runner
 	Configurable
+}
+
+// RunResult is the finalized output of one agent execution.
+type RunResult struct {
+	Text      string
+	Artifacts []string
 }

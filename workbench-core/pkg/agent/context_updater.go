@@ -45,7 +45,7 @@ type PromptUpdater struct {
 	// If zero, a default is used.
 	MaxMemoryBytes int
 
-	// MaxProfileBytes caps how many bytes from /profile/profile.md are injected.
+	// MaxProfileBytes caps how many bytes from /user_profile/user_profile.md are injected.
 	// If zero, a default is used.
 	MaxProfileBytes int
 
@@ -196,12 +196,17 @@ func (u *PromptUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string
 	policy := u.computePolicy(step, maxProfile, maxMem, maxTrace)
 	manifest.Policy = policy
 
-	// Profile excerpt (tail-biased; global user preferences/facts).
-	profilePath := "/profile/profile.md"
-	profileBytes, profileErr := u.FS.Read(profilePath)
-	if profileErr != nil {
-		profileBytes = []byte{}
-	}
+		// Profile excerpt (tail-biased; global user preferences/facts).
+		profilePath := "/user_profile/user_profile.md"
+		profileBytes, profileErr := u.FS.Read(profilePath)
+		if profileErr != nil {
+			// Legacy fallback.
+			profilePath = "/profile/profile.md"
+			profileBytes, profileErr = u.FS.Read(profilePath)
+		}
+		if profileErr != nil {
+			profileBytes = []byte{}
+		}
 	profileIncl, profileTrunc := tailUTF8(profileBytes, policy.Budgets.ProfileBytes)
 	manifest.Profile.Path = profilePath
 	manifest.Profile.BytesTotal = len(profileBytes)
@@ -269,7 +274,7 @@ func (u *PromptUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string
 	system := strings.TrimSpace(basePrompt)
 	if len(profileIncl) > 0 {
 		system += buildXMLBlock("user_profile", []xmlAttribute{
-			{key: "path", value: "/profile/profile.md"},
+			{key: "path", value: "/user_profile/user_profile.md"},
 			{key: "bytes_included", value: strconv.Itoa(len(profileIncl))},
 			{key: "bytes_total", value: strconv.Itoa(len(profileBytes))},
 		}, string(profileIncl))

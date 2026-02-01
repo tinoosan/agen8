@@ -18,4 +18,4 @@ Use these patterns for new code and when updating existing components.
 
 - Explicit parameters: `NewFS()`, `NewDirResource(baseDir, mount)`
 - Functional options: `NewDefaultAgent(opts...)`
-- Struct config: `Build(runtime.BuildConfig)`, `NewAutonomousRunner(AutonomousRunnerConfig)`
+- Struct config: `Build(runtime.BuildConfig)`, `session.New(session.Config)`

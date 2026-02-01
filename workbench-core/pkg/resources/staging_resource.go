@@ -20,33 +20,33 @@ type StagingStore interface {
 	store.StagingArea
 	store.CommitLogReader
 
-	// GetMain returns the committed main content for this mount (e.g. memory.md or profile.md).
+	// GetMain returns the committed main content for this mount (e.g. memory.md or user_profile.md).
 	GetMain(ctx context.Context) (string, error)
 }
 
 // StagingResource is a parameterized virtual resource implementing the same
-// VFS contract used by /memory and /profile.
+// VFS contract used by /memory and /user_profile.
 type StagingResource struct {
 	// BaseDir is unused by this resource, but kept for consistency/debugging.
 	BaseDir string
 
-	// Mount is the virtual mount name used by the VFS (e.g. "memory", "profile").
+	// Mount is the virtual mount name used by the VFS (e.g. "memory", "user_profile").
 	Mount string
 
-	// MainFile is the read-only committed file name (e.g. "memory.md", "profile.md").
+	// MainFile is the read-only committed file name (e.g. "memory.md", "user_profile.md").
 	MainFile string
 
 	Store     StagingStore
 	planStore store.PlanFileStore
 }
 
-// ProfileResource is kept for compatibility; it is an alias of StagingResource.
-type ProfileResource = StagingResource
+// UserProfileResource is a StagingResource configured for /user_profile.
+type UserProfileResource = StagingResource
 
-type profileStagingStore struct{ store.ProfileVFSStore }
+type userProfileStagingStore struct{ store.UserProfileVFSStore }
 
-func (s profileStagingStore) GetMain(ctx context.Context) (string, error) {
-	return s.ProfileVFSStore.GetProfile(ctx)
+func (s userProfileStagingStore) GetMain(ctx context.Context) (string, error) {
+	return s.UserProfileVFSStore.GetUserProfile(ctx)
 }
 
 func NewStagingResource(mount, mainFile string, s StagingStore) (*StagingResource, error) {
@@ -74,11 +74,11 @@ func NewStagingResource(mount, mainFile string, s StagingStore) (*StagingResourc
 	}, nil
 }
 
-func NewProfileResource(s store.ProfileVFSStore) (*ProfileResource, error) {
+func NewUserProfileResource(s store.UserProfileVFSStore) (*UserProfileResource, error) {
 	if s == nil {
-		return nil, fmt.Errorf("profile store is required")
+		return nil, fmt.Errorf("user profile store is required")
 	}
-	return NewStagingResource(vfs.MountProfile, "profile.md", profileStagingStore{s})
+	return NewStagingResource(vfs.MountUserProfile, "user_profile.md", userProfileStagingStore{s})
 }
 
 func (sr *StagingResource) SupportsNestedList() bool {

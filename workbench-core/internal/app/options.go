@@ -10,7 +10,7 @@ import (
 // It is intentionally minimal and only includes fields still used outside the chat TUI.
 type RunChatOptions struct {
 	Model            string
-	Role             string
+	Profile          string
 	WorkDir          string
 	WebhookAddr      string
 	ResultWebhookURL string
@@ -25,7 +25,7 @@ type RunChatOptions struct {
 
 	MaxTraceBytes   int
 	MaxMemoryBytes  int
-	MaxProfileBytes int
+	MaxUserProfileBytes int
 
 	PriceInPerMTokensUSD  float64
 	PriceOutPerMTokensUSD float64
@@ -43,11 +43,15 @@ func (o RunChatOptions) WithDefaults() RunChatOptions {
 func resolveRunChatOptions(opts ...RunChatOption) (RunChatOptions, error) {
 	o := RunChatOptions{
 		Model:            strings.TrimSpace(os.Getenv("OPENROUTER_MODEL")),
-		Role:             strings.TrimSpace(os.Getenv("WORKBENCH_ROLE")),
+		Profile:          strings.TrimSpace(os.Getenv("WORKBENCH_PROFILE")),
 		WorkDir:          strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR")),
 		WebhookAddr:      strings.TrimSpace(os.Getenv("WORKBENCH_WEBHOOK_ADDR")),
 		ResultWebhookURL: strings.TrimSpace(os.Getenv("WORKBENCH_RESULT_WEBHOOK_URL")),
 		HealthAddr:       strings.TrimSpace(os.Getenv("WORKBENCH_HEALTH_ADDR")),
+	}
+	if strings.TrimSpace(o.Profile) == "" {
+		// Back-compat for older flag/env naming.
+		o.Profile = strings.TrimSpace(os.Getenv("WORKBENCH_ROLE"))
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -73,7 +77,17 @@ func WithRole(role string) RunChatOption {
 	return func(o *RunChatOptions) error {
 		role = strings.TrimSpace(role)
 		if role != "" {
-			o.Role = role
+			o.Profile = role
+		}
+		return nil
+	}
+}
+
+func WithProfile(profile string) RunChatOption {
+	return func(o *RunChatOptions) error {
+		profile = strings.TrimSpace(profile)
+		if profile != "" {
+			o.Profile = profile
 		}
 		return nil
 	}
@@ -186,7 +200,14 @@ func WithMemoryBytes(maxBytes int) RunChatOption {
 
 func WithProfileBytes(maxBytes int) RunChatOption {
 	return func(o *RunChatOptions) error {
-		o.MaxProfileBytes = maxBytes
+		o.MaxUserProfileBytes = maxBytes
+		return nil
+	}
+}
+
+func WithUserProfileBytes(maxBytes int) RunChatOption {
+	return func(o *RunChatOptions) error {
+		o.MaxUserProfileBytes = maxBytes
 		return nil
 	}
 }

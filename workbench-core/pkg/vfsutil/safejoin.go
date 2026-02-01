@@ -2,6 +2,7 @@ package vfsutil
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -12,12 +13,16 @@ func SafeJoinBaseDir(baseDir, subpath string) (string, error) {
 	if err := validate.NonEmpty("baseDir", baseDir); err != nil {
 		return "", err
 	}
-	clean, _, err := validateSubpath(subpath)
-	if err != nil {
-		return "", err
+	sub := strings.TrimSpace(subpath)
+	if strings.HasPrefix(sub, "/") {
+		return "", fmt.Errorf("absolute paths not allowed: %q: %w", subpath, ErrInvalidPath)
 	}
-	if clean == "" {
+	clean := path.Clean(strings.TrimPrefix(sub, "./"))
+	if sub == "" || clean == "." {
 		clean = "."
+	}
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("invalid path: escapes mount root")
 	}
 
 	joined := filepath.Join(baseDir, filepath.FromSlash(clean))

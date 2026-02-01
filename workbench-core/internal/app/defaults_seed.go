@@ -26,8 +26,8 @@ func maybeSeedRepoDefaults(dataDir string) error {
 		return fmt.Errorf("prepare data dir: %w", err)
 	}
 
-	if err := seedDir(filepath.Join(defaultsRoot, "roles"), filepath.Join(dataDir, "roles")); err != nil {
-		return fmt.Errorf("seed roles: %w", err)
+	if err := seedDir(filepath.Join(defaultsRoot, "profiles"), filepath.Join(dataDir, "profiles")); err != nil {
+		return fmt.Errorf("seed profiles: %w", err)
 	}
 	if err := seedDir(filepath.Join(defaultsRoot, "skills"), filepath.Join(dataDir, "skills")); err != nil {
 		return fmt.Errorf("seed skills: %w", err)
@@ -47,7 +47,7 @@ func findRepoDefaultsRoot() (string, bool) {
 			filepath.Join(dir, "workbench-core", "defaults"),
 		}
 		for _, candidate := range candidates {
-			if isDir(filepath.Join(candidate, "roles")) || isDir(filepath.Join(candidate, "skills")) {
+			if isDir(filepath.Join(candidate, "profiles")) || isDir(filepath.Join(candidate, "skills")) {
 				return candidate, true
 			}
 		}

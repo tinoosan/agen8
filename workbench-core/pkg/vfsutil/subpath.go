@@ -20,7 +20,7 @@ func CleanRelPath(rel string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if clean == "." || clean == "" {
+	if clean == "" {
 		return "", fmt.Errorf("invalid path: empty")
 	}
 	return clean, nil

@@ -8,7 +8,7 @@
 //   - `HistoryStore`: Appends to the immutable history log and loads recent op pairs.
 //   - `ResultsStore` / `ResultsView`: Persists tool call metadata, responses, and artifacts.
 //   - `MemoryStore` / `MemoryCommitter`: Captures agent memory commits for later context injection.
-//   - `ProfileStore` / `ProfileCommitter`: Stores profiling events emitted by the agent.
+//   - `UserProfileStore` / `UserProfileCommitter`: Stores user profile state used for context injection.
 //   - `TraceStore`: Persists reasoning traces for debugging or analysis.
 //   - `ConstructorStateStore`: Holds per-run constructor state + manifest blobs so agents can resume safely.
 //

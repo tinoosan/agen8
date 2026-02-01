@@ -65,6 +65,10 @@ func GetRolesDir(dataDir string) string {
 	return filepath.Join(dataDir, "roles")
 }
 
+func GetProfilesDir(dataDir string) string {
+	return filepath.Join(dataDir, "profiles")
+}
+
 func GetToolManifestPath(toolsDir, toolID string) string {
 	return filepath.Join(toolsDir, toolID, "manifest.json")
 }
@@ -77,21 +81,33 @@ func GetAgentDir(dataDir string) string {
 	return filepath.Join(dataDir, "agent")
 }
 
-func GetProfileDir(dataDir string) string {
-	return filepath.Join(dataDir, "profile")
+func GetUserProfileDir(dataDir string) string {
+	return filepath.Join(dataDir, "user_profile")
 }
 
-func GetProfilePath(dataDir string) string {
-	return filepath.Join(GetProfileDir(dataDir), "profile.md")
+func GetUserProfilePath(dataDir string) string {
+	return filepath.Join(GetUserProfileDir(dataDir), "user_profile.md")
 }
 
-func GetProfileUpdatePath(dataDir string) string {
-	return filepath.Join(GetProfileDir(dataDir), "update.md")
+func GetUserProfileUpdatePath(dataDir string) string {
+	return filepath.Join(GetUserProfileDir(dataDir), "update.md")
 }
 
-func GetProfileCommitsPath(dataDir string) string {
-	return filepath.Join(GetProfileDir(dataDir), "commits.jsonl")
+func GetUserProfileCommitsPath(dataDir string) string {
+	return filepath.Join(GetUserProfileDir(dataDir), "commits.jsonl")
 }
+
+// Deprecated: legacy naming; use GetUserProfileDir.
+func GetProfileDir(dataDir string) string { return GetUserProfileDir(dataDir) }
+
+// Deprecated: legacy naming; use GetUserProfilePath.
+func GetProfilePath(dataDir string) string { return GetUserProfilePath(dataDir) }
+
+// Deprecated: legacy naming; use GetUserProfileUpdatePath.
+func GetProfileUpdatePath(dataDir string) string { return GetUserProfileUpdatePath(dataDir) }
+
+// Deprecated: legacy naming; use GetUserProfileCommitsPath.
+func GetProfileCommitsPath(dataDir string) string { return GetUserProfileCommitsPath(dataDir) }
 
 func GetAgentMemoryPath(dataDir string) string {
 	return filepath.Join(GetAgentDir(dataDir), "memory.md")

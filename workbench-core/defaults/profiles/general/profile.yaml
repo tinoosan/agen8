@@ -1,0 +1,15 @@
+id: general
+description: General-purpose autonomous agent profile for broad problem solving and coordination.
+skills:
+  - coding
+  - reporting
+prompts:
+  system_prompt_path: prompt.md
+heartbeat:
+  - name: keep_inbox_clear
+    interval: 10m
+    goal: "Keep the inbox processed; no active tasks left unattended."
+  - name: keep_work_artifacts_organized
+    interval: 30m
+    goal: "Keep work artifacts organized under /workspace with clear names and brief summaries."
+

@@ -23,14 +23,14 @@ func TestPromptBuilder_IncludesProfileAndMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDirResource(memory): %v", err)
 	}
-	profileRes, err := resources.NewDirResource(profileDir, vfs.MountProfile)
+	profileRes, err := resources.NewDirResource(profileDir, vfs.MountUserProfile)
 	if err != nil {
 		t.Fatalf("NewDirResource(profile): %v", err)
 	}
 	if err := fs.Mount(vfs.MountMemory, memRes); err != nil {
 		t.Fatalf("mount memory: %v", err)
 	}
-	if err := fs.Mount(vfs.MountProfile, profileRes); err != nil {
+	if err := fs.Mount(vfs.MountUserProfile, profileRes); err != nil {
 		t.Fatalf("mount profile: %v", err)
 	}
 
@@ -38,8 +38,8 @@ func TestPromptBuilder_IncludesProfileAndMemory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(memDir, today), []byte("remember this"), 0644); err != nil {
 		t.Fatalf("write daily memory: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(profileDir, "profile.md"), []byte("profile info"), 0644); err != nil {
-		t.Fatalf("write profile.md: %v", err)
+	if err := os.WriteFile(filepath.Join(profileDir, "user_profile.md"), []byte("profile info"), 0644); err != nil {
+		t.Fatalf("write user_profile.md: %v", err)
 	}
 
 	constructor := &PromptBuilder{
@@ -52,7 +52,7 @@ func TestPromptBuilder_IncludesProfileAndMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SystemPrompt: %v", err)
 	}
-	if !strings.Contains(out, "## Profile") || !strings.Contains(out, "profile info") {
+	if !strings.Contains(out, "## User Profile") || !strings.Contains(out, "profile info") {
 		t.Fatalf("expected profile section, got: %q", out)
 	}
 	if !strings.Contains(out, "## Memory") || !strings.Contains(out, "remember this") {
@@ -73,7 +73,7 @@ func TestPromptBuilder_OmitsWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SystemPrompt: %v", err)
 	}
-	if strings.Contains(out, "## Profile") || strings.Contains(out, "## Memory") {
+	if strings.Contains(out, "## User Profile") || strings.Contains(out, "## Memory") {
 		t.Fatalf("did not expect profile/memory sections, got: %q", out)
 	}
 }

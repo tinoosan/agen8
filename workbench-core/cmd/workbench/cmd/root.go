@@ -16,13 +16,13 @@ var (
 	workDir        string
 	maxContextB    int
 	modelID        string
-	roleName       string
+	profileRef     string
 	enableMouse    bool
 	enableActivity bool
 
 	maxTraceBytes      int
 	maxMemoryBytes     int
-	maxProfileBytes    int
+	maxUserProfileBytes int
 	recentHistoryPairs int
 	includeHistoryOps  bool
 	webhookAddr        string
@@ -89,14 +89,14 @@ Each executed task can:
 
 		opts := []app.RunChatOption{
 			app.WithModel(modelOverride),
-			app.WithRole(roleName),
+			app.WithProfile(profileRef),
 			app.WithWorkDir(workDir),
 			app.WithWebhookAddr(webhookAddr),
 			app.WithResultWebhookURL(resultWebhookURL),
 			app.WithHealthAddr(healthAddr),
 			app.WithTraceBytes(maxTraceBytes),
 			app.WithMemoryBytes(maxMemoryBytes),
-			app.WithProfileBytes(maxProfileBytes),
+			app.WithUserProfileBytes(maxUserProfileBytes),
 			app.WithRecentHistoryPairs(recentHistoryPairs),
 			app.WithIncludeHistoryOps(includeHistoryOps),
 		}
@@ -124,8 +124,13 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&enableActivity, "activity", enableActivity, "show activity panel by default (env WORKBENCH_ACTIVITY)")
 	modelID = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
 	rootCmd.PersistentFlags().StringVar(&modelID, "model", modelID, "LLM model identifier (default: env OPENROUTER_MODEL)")
-	roleName = strings.TrimSpace(os.Getenv("WORKBENCH_ROLE"))
-	rootCmd.PersistentFlags().StringVar(&roleName, "role", roleName, "agent role/persona (General|StockResearcher|SoftwareDeveloper; env WORKBENCH_ROLE)")
+	profileRef = strings.TrimSpace(os.Getenv("WORKBENCH_PROFILE"))
+	if profileRef == "" {
+		profileRef = strings.TrimSpace(os.Getenv("WORKBENCH_ROLE"))
+	}
+	rootCmd.PersistentFlags().StringVar(&profileRef, "profile", profileRef, "agent profile id or path (env WORKBENCH_PROFILE)")
+	// Back-compat alias.
+	rootCmd.PersistentFlags().StringVar(&profileRef, "role", profileRef, "DEPRECATED: use --profile (env WORKBENCH_PROFILE)")
 	webhookAddr = strings.TrimSpace(os.Getenv("WORKBENCH_WEBHOOK_ADDR"))
 	rootCmd.PersistentFlags().StringVar(&webhookAddr, "webhook-addr", webhookAddr, "listen address for task webhook server (env WORKBENCH_WEBHOOK_ADDR)")
 	resultWebhookURL = strings.TrimSpace(os.Getenv("WORKBENCH_RESULT_WEBHOOK_URL"))
@@ -134,13 +139,16 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&healthAddr, "health-addr", healthAddr, "listen address for health checks (env WORKBENCH_HEALTH_ADDR)")
 	rootCmd.PersistentFlags().IntVar(&maxTraceBytes, "trace-bytes", 8*1024, "context updater trace budget (bytes)")
 	rootCmd.PersistentFlags().IntVar(&maxMemoryBytes, "memory-bytes", 8*1024, "context updater memory budget (bytes)")
-	rootCmd.PersistentFlags().IntVar(&maxProfileBytes, "profile-bytes", 4*1024, "context updater profile budget (bytes)")
+	rootCmd.PersistentFlags().IntVar(&maxUserProfileBytes, "user-profile-bytes", 4*1024, "context updater user profile budget (bytes)")
+	// Back-compat alias (deprecated).
+	rootCmd.PersistentFlags().IntVar(&maxUserProfileBytes, "profile-bytes", 4*1024, "DEPRECATED: use --user-profile-bytes")
 	rootCmd.PersistentFlags().IntVar(&recentHistoryPairs, "history-pairs", 8, "number of recent (user,agent) pairs injected from /history")
 	includeHistoryOps = envBool("WORKBENCH_INCLUDE_HISTORY_OPS", true)
 	rootCmd.PersistentFlags().BoolVar(&includeHistoryOps, "include-history-ops", includeHistoryOps, "include environment host ops from /history in prompt context (higher cost)")
 
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(monitorCmd)
+	rootCmd.AddCommand(profilesCmd)
 }
 
 func envBool(key string, def bool) bool {

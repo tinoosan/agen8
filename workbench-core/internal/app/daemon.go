@@ -19,12 +19,15 @@ import (
 	"github.com/google/uuid"
 	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent"
+	agentevents "github.com/tinoosan/workbench-core/pkg/agent/events"
+	"github.com/tinoosan/workbench-core/pkg/agent/session"
+	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/llm"
-	"github.com/tinoosan/workbench-core/pkg/role"
+	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -78,20 +81,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return err
 	}
 
-	roleDir := fsutil.GetRolesDir(cfg.DataDir)
-	if err := os.MkdirAll(roleDir, 0755); err != nil {
-		return fmt.Errorf("prepare roles dir: %w", err)
-	}
-	roleMgr := role.NewManager([]string{roleDir})
-	roleMgr.WritableRoot = roleDir
-	if err := roleMgr.Scan(); err != nil {
-		return fmt.Errorf("scan roles: %w", err)
-	}
-	role.SetDefaultManager(roleMgr)
-
 	var resultsStore store.ResultsStore
 	var memStore store.DailyMemoryStore
-	var profileStore store.ProfileStore
+	var userProfileStore store.UserProfileStore
 	var traceStore store.TraceStore
 	var historyStore store.HistoryStore
 	var constructorStore store.ConstructorStateStore
@@ -104,11 +96,11 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 	memStore = ms
 
-	ps, err := implstore.NewDiskProfileStore(cfg)
+	ps, err := implstore.NewDiskUserProfileStore(cfg)
 	if err != nil {
-		return fmt.Errorf("create profile store: %w", err)
+		return fmt.Errorf("create user profile store: %w", err)
 	}
-	profileStore = ps
+	userProfileStore = ps
 
 	traceStore = implstore.DiskTraceStore{DiskStore: implstore.DiskStore{Dir: fsutil.GetLogDir(cfg.DataDir, run.RunID)}}
 
@@ -155,14 +147,14 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		HistoryStore:          historyStore,
 		ResultsStore:          resultsStore,
 		MemoryStore:           memStore,
-		ProfileStore:          profileStore,
+		UserProfileStore:      userProfileStore,
 		TraceStore:            traceStore,
 		MemoryReindexer:       vectorStore,
 		ConstructorStore:      constructorStore,
 		Emit:                  mustEmit,
 		IncludeHistoryOps:     derefBool(resolved.IncludeHistoryOps, true),
 		RecentHistoryPairs:    resolved.RecentHistoryPairs,
-		MaxProfileBytes:       resolved.MaxProfileBytes,
+		MaxProfileBytes:       resolved.MaxUserProfileBytes,
 		MaxMemoryBytes:        resolved.MaxMemoryBytes,
 		MaxTraceBytes:         resolved.MaxTraceBytes,
 		PriceInPerMTokensUSD:  resolved.PriceInPerMTokensUSD,
@@ -212,32 +204,47 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
 	}
-
-	selectedRole, err := resolveRole(roleMgr, strings.TrimSpace(resolved.Role))
+	prof, profDir, err := resolveProfileRef(cfg, strings.TrimSpace(resolved.Profile))
 	if err != nil {
 		return err
 	}
 
-	runner, err := agent.NewAutonomousRunner(agent.AutonomousRunnerConfig{
+	runDir := fsutil.GetRunDir(cfg.DataDir, run.RunID)
+	taskStore, err := state.NewSQLiteStore(filepath.Join(runDir, "state", "tasks.db"))
+	if err != nil {
+		return fmt.Errorf("create task state store: %w", err)
+	}
+	emitBlocking := func(ctx context.Context, ev events.Event) error {
+		return emitter.Emit(ctx, ev)
+	}
+	ordered := agentevents.NewWriter(emitBlocking)
+
+	sess, err := session.New(session.Config{
 		Agent:             a,
-		Role:              selectedRole,
+		Profile:           prof,
+		ProfileDir:        profDir,
+		ResolveProfile: func(ref string) (*profile.Profile, string, error) {
+			return resolveProfileRef(cfg, strings.TrimSpace(ref))
+		},
+		Store:             taskStore,
+		Events:            ordered,
 		Memory:            memoryProvider,
 		MemorySearchLimit: 3,
 		Notifier:          notifier,
 		InboxPath:         "/inbox",
 		OutboxPath:        "/outbox",
 		PollInterval:      poll,
-		ProactiveInterval: 30 * time.Second,
-		// goal is run metadata; don't enqueue a synthetic startup task.
-		InitialGoal:  "",
-		MaxReadBytes:      96 * 1024,
+		MaxReadBytes:      256 * 1024,
+		LeaseTTL:          2 * time.Minute,
+		MaxRetries:        3,
+		MaxPending:        50,
+		InstanceID:        run.RunID,
 		Logf: func(format string, args ...any) {
 			log.Printf("daemon: "+format, args...)
 		},
-		Emit: mustEmit,
 	})
 	if err != nil {
-		return fmt.Errorf("create autonomous runner: %w", err)
+		return fmt.Errorf("create session: %w", err)
 	}
 
 	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -271,11 +278,11 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	mustEmit(runCtx, events.Event{
 		Type:    "daemon.start",
 		Message: "Autonomous agent started",
-		Data:    map[string]string{"runId": run.RunID, "sessionId": run.SessionID, "role": selectedRole.ID},
+		Data:    map[string]string{"runId": run.RunID, "sessionId": run.SessionID, "profile": prof.ID},
 	})
 	log.Printf("daemon: run id %s — attach monitor with: workbench monitor --run-id %s", run.RunID, run.RunID)
 	for {
-		err = runner.Run(runCtx)
+		err = sess.Run(runCtx)
 		if runCtx.Err() != nil {
 			// context cancellation is expected on shutdown
 			err = nil
@@ -295,27 +302,32 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	mustEmit(runCtx, events.Event{
 		Type:    "daemon.stop",
 		Message: "Autonomous agent stopped",
-		Data:    map[string]string{"runId": run.RunID, "sessionId": run.SessionID, "role": selectedRole.ID},
+		Data:    map[string]string{"runId": run.RunID, "sessionId": run.SessionID, "profile": prof.ID},
 	})
 	serverWG.Wait()
 	return err
 }
 
-func resolveRole(mgr *role.Manager, requested string) (role.Role, error) {
-	if mgr == nil {
-		return role.Role{}, fmt.Errorf("role manager is nil")
+func resolveProfileRef(cfg config.Config, requested string) (*profile.Profile, string, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, "", err
 	}
-	entries := mgr.Entries()
-	if len(entries) == 0 {
-		return role.Role{}, fmt.Errorf("no valid roles found")
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		requested = "general"
 	}
-	if strings.TrimSpace(requested) == "" {
-		return entries[0], nil
+	if st, err := os.Stat(requested); err == nil {
+		if st.IsDir() {
+			p, err := profile.Load(requested)
+			return p, requested, err
+		}
+		dir := filepath.Dir(requested)
+		p, err := profile.Load(requested)
+		return p, dir, err
 	}
-	if r, ok := mgr.Get(requested); ok {
-		return r, nil
-	}
-	return role.Role{}, fmt.Errorf("role %s not found", requested)
+	dir := filepath.Join(fsutil.GetProfilesDir(cfg.DataDir), requested)
+	p, err := profile.Load(dir)
+	return p, dir, err
 }
 
 func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, emit func(context.Context, events.Event)) func(step int, usage llm.LLMUsage) {
