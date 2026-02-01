@@ -3,9 +3,13 @@
 package vfs
 
 import (
+	"errors"
 	"fmt"
+	iofs "io/fs"
 	"sort"
 	"strings"
+
+	"github.com/tinoosan/workbench-core/pkg/store"
 )
 
 // FS is a virtual filesystem that manages a collection of mounted resources.
@@ -38,11 +42,14 @@ func validateMountPath(name string) error {
 	if strings.HasPrefix(name, "/") {
 		return fmt.Errorf("mount path must not start with /")
 	}
-	if strings.Contains(name, "..") {
-		return fmt.Errorf("mount path cannot contain ..")
-	}
-	if strings.Contains(name, "/") {
-		return fmt.Errorf("mount path cannot contain '/'")
+	for _, seg := range strings.Split(name, "/") {
+		if seg == "" {
+			return fmt.Errorf("mount path cannot contain empty segments")
+		}
+		switch seg {
+		case ".", "..":
+			return fmt.Errorf("mount path contains invalid segment %q", seg)
+		}
 	}
 	return nil
 }
@@ -70,7 +77,7 @@ func (fs *FS) Resolve(vpath string) (mountName string, r Resource, subpath strin
 		}
 	}
 	if best == "" {
-		return "", nil, "", fmt.Errorf("not found: unknown mount for path %q", vpath)
+		return "", nil, "", errors.Join(store.ErrNotFound, iofs.ErrNotExist, fmt.Errorf("not found: unknown mount for path %q", vpath))
 	}
 
 	r = fs.mounts[best]

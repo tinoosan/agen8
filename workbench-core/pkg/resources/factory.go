@@ -23,7 +23,7 @@ type Factory struct {
 	RunID     string
 
 	ResultsStore store.ResultsStore
-	MemoryStore  store.MemoryStore
+	MemoryStore  store.DailyMemoryStore
 	ProfileStore store.ProfileStore
 	HistoryStore store.HistoryStore
 	TraceStore   store.TraceStore

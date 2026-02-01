@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 
 	"github.com/tinoosan/workbench-core/pkg/events"
 )
@@ -16,20 +17,27 @@ type EventSink struct {
 	Ch chan<- events.Event
 }
 
-func (s EventSink) Emit(_ context.Context, _ string, event events.Event) error {
+func (s EventSink) Emit(_ context.Context, _ string, event events.Event) (err error) {
 	if s.Ch == nil {
 		return nil
 	}
+	dropped := false
 	// The host may emit a final "run completed" event after the UI has begun shutting
 	// down. If the channel has already been closed, sending would panic. Treat that
 	// as a no-op: events are still persisted by other sinks (store/history).
 	defer func() {
-		_ = recover()
+		if recover() != nil {
+			dropped = true
+		}
+		if dropped {
+			err = errors.Join(err, events.ErrDropped)
+		}
 	}()
 	select {
 	case s.Ch <- event:
 	default:
 		// If the UI is slow, drop rather than block the host loop.
+		dropped = true
 	}
-	return nil
+	return err
 }

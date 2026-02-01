@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tinoosan/workbench-core/pkg/debuglog"
+	"github.com/tinoosan/workbench-core/pkg/store"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
@@ -213,7 +214,7 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 	case types.HostOpFSEdit:
 		beforeBytes, err := x.FS.Read(req.Path)
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) || strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
 				beforeBytes = nil
 			} else {
 				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
@@ -234,7 +235,7 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 	case types.HostOpFSPatch:
 		beforeBytes, err := x.FS.Read(req.Path)
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) || strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
 				beforeBytes = nil
 			} else {
 				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}

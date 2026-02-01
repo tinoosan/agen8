@@ -20,17 +20,17 @@ type Role struct {
 // Obligation declares a requirement the agent must keep satisfied.
 // Validity is either a duration (e.g. "30m") or a symbolic string.
 type Obligation struct {
-	ID               string
-	ValidityRaw      string
-	ValidityDuration time.Duration
-	ValiditySymbolic string
-	Evidence         string
+	ID               string        `yaml:"id"`
+	ValidityRaw      string        `yaml:"validity"`
+	ValidityDuration time.Duration `yaml:"-"`
+	ValiditySymbolic string        `yaml:"-"`
+	Evidence         string        `yaml:"evidence"`
 }
 
 // TaskPolicy bounds autonomous task creation.
 type TaskPolicy struct {
-	CreateTasksOnlyIf []string
-	MaxTasksPerCycle  int
+	CreateTasksOnlyIf []string `yaml:"create_tasks_only_if"`
+	MaxTasksPerCycle  int      `yaml:"max_tasks_per_cycle"`
 }
 
 // Normalize trims fields, parses validity, and applies defaults.

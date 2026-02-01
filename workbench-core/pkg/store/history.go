@@ -1,11 +1,13 @@
 package store
 
-import "context"
+import (
+	"context"
+
+	"github.com/tinoosan/workbench-core/pkg/ports"
+)
 
 // HistoryAppender is used by sinks to record history.
-type HistoryAppender interface {
-	AppendLine(ctx context.Context, line []byte) error
-}
+type HistoryAppender = ports.HistoryAppender
 
 // HistoryReader is used by VFS/context to read history.
 type HistoryReader interface {

@@ -129,7 +129,7 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor pkgstore.TraceCurs
 			continue
 		}
 
-		var ev types.Event
+		var ev types.EventRecord
 		if err := json.Unmarshal([]byte(text), &ev); err != nil {
 			parseErrors++
 		} else {
@@ -226,7 +226,7 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts pkgstore.TraceLates
 			continue
 		}
 		linesTotal++
-		var ev types.Event
+		var ev types.EventRecord
 		if err := json.Unmarshal([]byte(ln), &ev); err != nil {
 			parseErrors++
 			continue

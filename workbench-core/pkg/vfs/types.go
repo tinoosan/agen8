@@ -18,7 +18,7 @@ const (
 	// The agent can poll /log/events.since/<offset> for new events.
 	MountLog = "log"
 
-	// MountSkills exposes the user-defined skill directories under /skills.
+	// MountSkills exposes the user-defined skill files under /skills.
 	MountSkills = "skills"
 
 	// MountTools is the mount name for tool discovery and manifests.

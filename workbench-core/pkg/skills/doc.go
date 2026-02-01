@@ -1,8 +1,8 @@
 // Package skills manages the skills system for the workbench.
 //
 // Skills are reusable capabilities that the agent can discover and use. They are
-// typically defined as directories within the `/skills` VFS mount, containing a
-// `SKILL.md` instruction file and optional helper scripts or resources.
+// defined as markdown files within the `/skills` VFS mount (backed by
+// <dataDir>/skills/<skill_name>.md on disk).
 //
 // # Key Responsibilities
 //

@@ -72,7 +72,9 @@ func NewManager(style lipgloss.Style, hasTitle bool) *Manager {
 // Reserves headerHeight (1), composerHeight; gives the rest to AgentOutput full width.
 // Other panels get zero height so they are not shown.
 func (m *Manager) CalculateCompact(width, height, composerHeight int) GridLayout {
-	const headerHeight = 1
+	// Compact view renders: header + tab bar + main panels + composer.
+	// Reserve 2 rows so main panels never overflow vertically.
+	const headerHeight = 2
 	if width < 0 {
 		width = 0
 	}
@@ -89,14 +91,27 @@ func (m *Manager) CalculateCompact(width, height, composerHeight int) GridLayout
 	grid := GridLayout{ScreenWidth: width, ScreenHeight: height}
 	grid.AgentOutput = m.spec(width, mainH)
 	grid.Composer = m.spec(width, composerHeight)
+	// Compact mode still needs per-tab panel specs so each tab can render its own
+	// box(es) without overflowing horizontally.
+	feedH := int(math.Round(float64(mainH) * 0.40))
+	if feedH < 6 {
+		feedH = 6
+	}
+	if feedH > mainH-6 {
+		feedH = max(1, mainH-6)
+	}
+	detailH := mainH - feedH
+	if detailH < 1 {
+		detailH = 1
+	}
 	grid.SidePanel = m.spec(width, 0)
-	grid.ActivityFeed = m.spec(width, 0)
-	grid.ActivityDetail = m.spec(width, 0)
+	grid.ActivityFeed = m.spec(width, feedH)
+	grid.ActivityDetail = m.spec(width, detailH)
 	grid.CurrentTask = m.spec(width, 0)
-	grid.Plan = m.spec(width, 0)
+	grid.Plan = m.spec(width, mainH)
 	grid.TaskQueue = m.spec(width, 0)
 	grid.Stats = m.spec(width, 0)
-	grid.Outbox = m.spec(width, 0)
+	grid.Outbox = m.spec(width, mainH)
 	grid.Memory = m.spec(width, 0)
 	return grid
 }
@@ -197,13 +212,45 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight
 	grid.AgentOutput = m.spec(leftW, agentOutputH)
 	grid.Outbox = m.spec(leftW, outboxH)
 	grid.Composer = m.spec(leftW, composerHeight)
-	grid.SidePanel = m.spec(rightW, mainH)
-	grid.ActivityFeed = m.spec(rightW, 0)
-	grid.ActivityDetail = m.spec(rightW, 0)
-	grid.CurrentTask = m.spec(rightW, 0)
-	grid.TaskQueue = m.spec(rightW, 0)
-	grid.Plan = m.spec(rightW, 0)
-	grid.Stats = m.spec(rightW, 0)
+	grid.SidePanel = m.spec(rightW, 0)
+
+	// Side panel tabs render their own panels directly.
+	// Reserve 1 row for the side tab bar, so right column height matches left.
+	sideContentH := mainH - 1
+	if sideContentH < 1 {
+		sideContentH = 1
+	}
+	feedH := int(math.Round(float64(sideContentH) * 0.40))
+	if feedH < 7 {
+		feedH = 7
+	}
+	if feedH > sideContentH-7 {
+		feedH = max(1, sideContentH-7)
+	}
+	detailH := sideContentH - feedH
+	if detailH < 1 {
+		detailH = 1
+	}
+	grid.ActivityFeed = m.spec(rightW, feedH)
+	grid.ActivityDetail = m.spec(rightW, detailH)
+	grid.Plan = m.spec(rightW, sideContentH)
+
+	// Tasks tab: Current task + Queue + Stats.
+	currentTaskH := 7
+	statsH := 5
+	if sideContentH < 14 {
+		// Tight terminals: prioritize queue.
+		currentTaskH = 5
+		statsH = 4
+	}
+	queueH := sideContentH - currentTaskH - statsH
+	if queueH < 1 {
+		queueH = 1
+		statsH = max(1, sideContentH-currentTaskH-queueH)
+	}
+	grid.CurrentTask = m.spec(rightW, currentTaskH)
+	grid.TaskQueue = m.spec(rightW, queueH)
+	grid.Stats = m.spec(rightW, statsH)
 	grid.Memory = m.spec(leftW, 0)
 	return grid
 }

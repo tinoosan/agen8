@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -57,7 +58,7 @@ type PromptUpdater struct {
 	ManifestPath string
 
 	// Emit is an optional hook for recording updater actions (events/telemetry).
-	Emit func(eventType, message string, data map[string]string)
+	Emit events.EmitFunc
 
 	// TraceIncludeTypes is an allowlist of event types that are relevant to agent reasoning.
 	// If empty, a default allowlist is used.
@@ -251,13 +252,13 @@ func (u *PromptUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string
 	manifest.Trace.Events.Parsed = batch.Parsed
 	manifest.Trace.Events.ParseErrors = batch.ParseErrors
 
-	events := []types.Event(nil)
+	traceEvents := []types.EventRecord(nil)
 	if u.Trace != nil {
 		u.Trace.MaxEvents = maxEvents
-		events = u.Trace.ApplyBatch(traceMode, batch)
+		traceEvents = u.Trace.ApplyBatch(traceMode, batch)
 	}
 
-	traceSummary, selected, capped, excluded, trunc := summarizeTrace(events, policy.TraceIncludeTypes, policy.Budgets.TraceBytes)
+	traceSummary, selected, capped, excluded, trunc := summarizeTrace(traceEvents, policy.TraceIncludeTypes, policy.Budgets.TraceBytes)
 	manifest.Trace.Events.Selected = selected
 	manifest.Trace.Events.SelectedCapped = capped
 	manifest.Trace.Events.Excluded = excluded
@@ -296,12 +297,17 @@ func (u *PromptUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string
 	}
 
 	if u.Emit != nil {
-		u.Emit("context.update", "Context updated", map[string]string{
-			"step":             strconv.Itoa(step),
-			"profileBytes":     strconv.Itoa(manifest.Profile.BytesIncluded),
-			"memoryBytes":      strconv.Itoa(manifest.Memory.BytesIncluded),
-			"traceBytes":       strconv.Itoa(manifest.Trace.BytesIncluded),
-			"traceOffsetAfter": string(manifest.Trace.CursorAfter),
+		u.Emit(ctx, events.Event{
+			Type:    "context.update",
+			Message: "Context updated",
+			Origin:  "env",
+			Data: map[string]string{
+				"step":             strconv.Itoa(step),
+				"profileBytes":     strconv.Itoa(manifest.Profile.BytesIncluded),
+				"memoryBytes":      strconv.Itoa(manifest.Memory.BytesIncluded),
+				"traceBytes":       strconv.Itoa(manifest.Trace.BytesIncluded),
+				"traceOffsetAfter": string(manifest.Trace.CursorAfter),
+			},
 		})
 	}
 
@@ -416,7 +422,7 @@ func defaultTraceIncludeTypes() []string {
 	}
 }
 
-func parseTypesEventJSONL(b []byte) (linesTotal, parsed, parseErrors int, events []types.Event) {
+func parseTypesEventJSONL(b []byte) (linesTotal, parsed, parseErrors int, events []types.EventRecord) {
 	if len(b) == 0 {
 		return 0, 0, 0, nil
 	}
@@ -428,7 +434,7 @@ func parseTypesEventJSONL(b []byte) (linesTotal, parsed, parseErrors int, events
 			continue
 		}
 		linesTotal++
-		var ev types.Event
+		var ev types.EventRecord
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			parseErrors++
 			continue
@@ -442,7 +448,7 @@ func parseTypesEventJSONL(b []byte) (linesTotal, parsed, parseErrors int, events
 	return linesTotal, parsed, parseErrors, events
 }
 
-func toTraceEvents(in []types.Event) []store.TraceEvent {
+func toTraceEvents(in []types.EventRecord) []store.TraceEvent {
 	out := make([]store.TraceEvent, 0, len(in))
 	for _, ev := range in {
 		out = append(out, store.TraceEvent{
@@ -455,10 +461,10 @@ func toTraceEvents(in []types.Event) []store.TraceEvent {
 	return out
 }
 
-func toTypesEvents(in []store.TraceEvent) []types.Event {
-	out := make([]types.Event, 0, len(in))
+func toTypesEvents(in []store.TraceEvent) []types.EventRecord {
+	out := make([]types.EventRecord, 0, len(in))
 	for _, ev := range in {
-		out = append(out, types.Event{
+		out = append(out, types.EventRecord{
 			Timestamp: parseRFC3339Time(ev.Timestamp),
 			Type:      ev.Type,
 			Message:   ev.Message,
@@ -486,13 +492,13 @@ func max(a, b int) int {
 	return b
 }
 
-func summarizeTrace(all []types.Event, includeTypes []string, budgetBytes int) (summary string, selected, capped, excluded int, truncated bool) {
+func summarizeTrace(all []types.EventRecord, includeTypes []string, budgetBytes int) (summary string, selected, capped, excluded int, truncated bool) {
 	include := make(map[string]bool, len(includeTypes))
 	for _, t := range includeTypes {
 		include[t] = true
 	}
 
-	filtered := make([]types.Event, 0, len(all))
+	filtered := make([]types.EventRecord, 0, len(all))
 	for _, ev := range all {
 		if include[ev.Type] {
 			filtered = append(filtered, ev)
@@ -537,7 +543,7 @@ func summarizeTrace(all []types.Event, includeTypes []string, budgetBytes int) (
 	return strings.TrimSpace(b.String()), selected, capped, excluded, truncated
 }
 
-func summarizeTraceEvent(ev types.Event) string {
+func summarizeTraceEvent(ev types.EventRecord) string {
 	switch ev.Type {
 	case "agent.op.request":
 		return "op.request " + kv(ev.Data, "op", "path", "toolId", "actionId")

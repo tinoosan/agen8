@@ -18,7 +18,7 @@ import (
 )
 
 type TailedEvent struct {
-	Event      types.Event
+	Event      types.EventRecord
 	NextOffset int64
 }
 
@@ -63,7 +63,7 @@ func AppendEvent(cfg config.Config, runId, eventType, message string, data map[s
 		return err
 	}
 
-	event := types.NewEvent(runId, eventType, message, data)
+	event := types.NewEventRecord(runId, eventType, message, data)
 	b, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("error marshalling event: %w", err)
@@ -120,7 +120,7 @@ func mirrorTraceEvent(dataDir, runId string, payload []byte) error {
 
 // ListEvents retrieves all recorded events for a given run ID.
 // It reads from SQLite, validates each entry, and returns them in order.
-func ListEvents(cfg config.Config, runId string) ([]types.Event, int64, error) {
+func ListEvents(cfg config.Config, runId string) ([]types.EventRecord, int64, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, 0, err
 	}
@@ -128,7 +128,7 @@ func ListEvents(cfg config.Config, runId string) ([]types.Event, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	events := make([]types.Event, 0)
+	events := make([]types.EventRecord, 0)
 	rows, err := db.Query(`SELECT event_json FROM events WHERE run_id = ? ORDER BY seq`, runId)
 	if err != nil {
 		return nil, 0, err
@@ -142,7 +142,7 @@ func ListEvents(cfg config.Config, runId string) ([]types.Event, int64, error) {
 		if err := rows.Scan(&raw); err != nil {
 			return nil, 0, err
 		}
-		var event types.Event
+		var event types.EventRecord
 		if err := json.Unmarshal([]byte(raw), &event); err != nil {
 			return nil, 0, fmt.Errorf("error reading event at row %d: %w", lineNum, err)
 		}
@@ -230,7 +230,7 @@ func TailEvents(cfg config.Config, ctx context.Context, runId string, fromOffset
 						errCh <- err
 						return
 					}
-					var event types.Event
+					var event types.EventRecord
 					if err := json.Unmarshal([]byte(raw), &event); err != nil {
 						rows.Close()
 						errCh <- fmt.Errorf("error unmarshalling event: %w", err)

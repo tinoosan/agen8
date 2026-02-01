@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -16,7 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tinoosan/workbench-core/internal/store"
+	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/cost"
@@ -25,7 +26,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/pkg/role"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
-	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
+	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -37,6 +38,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 	resolved, err := resolveRunChatOptions(opts...)
 	if err != nil {
+		return err
+	}
+	if err := maybeSeedRepoDefaults(cfg.DataDir); err != nil {
 		return err
 	}
 	if maxContextB <= 0 {
@@ -51,7 +55,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 
 	// Create session/run up front.
-	_, run, err := store.CreateSession(cfg, goal, maxContextB)
+	_, run, err := implstore.CreateSession(cfg, goal, maxContextB)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
@@ -63,7 +67,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		},
 	}
 	mustEmit := func(ctx context.Context, ev events.Event) {
-		_ = emitter.Emit(ctx, ev)
+		if err := emitter.Emit(ctx, ev); err != nil && !errors.Is(err, events.ErrDropped) {
+			log.Printf("events: emit failed: %v", err)
+		}
 	}
 
 	artifactIndex := newArtifactIndex()
@@ -83,36 +89,36 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 	role.SetDefaultManager(roleMgr)
 
-	var resultsStore pkgstore.ResultsStore
-	var memStore pkgstore.MemoryStore
-	var profileStore pkgstore.ProfileStore
-	var traceStore pkgstore.TraceStore
-	var historyStore pkgstore.HistoryStore
-	var constructorStore pkgstore.ConstructorStateStore
+	var resultsStore store.ResultsStore
+	var memStore store.DailyMemoryStore
+	var profileStore store.ProfileStore
+	var traceStore store.TraceStore
+	var historyStore store.HistoryStore
+	var constructorStore store.ConstructorStateStore
 
-	resultsStore = store.NewInMemoryResultsStore()
+	resultsStore = implstore.NewInMemoryResultsStore()
 
-	ms, err := store.NewDiskMemoryStore(cfg)
+	ms, err := implstore.NewDiskMemoryStore(cfg)
 	if err != nil {
 		return fmt.Errorf("create memory store: %w", err)
 	}
 	memStore = ms
 
-	ps, err := store.NewDiskProfileStore(cfg)
+	ps, err := implstore.NewDiskProfileStore(cfg)
 	if err != nil {
 		return fmt.Errorf("create profile store: %w", err)
 	}
 	profileStore = ps
 
-	traceStore = store.DiskTraceStore{DiskStore: store.DiskStore{Dir: fsutil.GetLogDir(cfg.DataDir, run.RunId)}}
+	traceStore = implstore.DiskTraceStore{DiskStore: implstore.DiskStore{Dir: fsutil.GetLogDir(cfg.DataDir, run.RunId)}}
 
-	hs, err := store.NewSQLiteHistoryStore(cfg, run.SessionID)
+	hs, err := implstore.NewSQLiteHistoryStore(cfg, run.SessionID)
 	if err != nil {
 		return fmt.Errorf("create history store: %w", err)
 	}
 	historyStore = hs
 
-	cs, err := store.NewSQLiteConstructorStore(cfg)
+	cs, err := implstore.NewSQLiteConstructorStore(cfg)
 	if err != nil {
 		return fmt.Errorf("create constructor store: %w", err)
 	}
@@ -120,9 +126,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 
 	// Vector memory store (SQLite-backed) for semantic recall.
 	// Best-effort: daemon can still run without this, but loses long-term recall.
-	var memoryProvider agent.MemoryProvider
-	var vectorStore *store.VectorMemoryStore
-	if vm, err := store.NewVectorMemoryStore(cfg); err == nil {
+	var memoryProvider agent.MemoryRecallProvider
+	var vectorStore *implstore.VectorMemoryStore
+	if vm, err := implstore.NewVectorMemoryStore(cfg); err == nil {
 		vectorStore = vm
 		memoryProvider = &vectorMemoryAdapter{store: vm}
 	} else {
@@ -164,13 +170,13 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Guard:                 nil,
 		ArtifactObserve:       artifactIndex.ObserveWrite,
 		PersistRun: func(r types.Run) error {
-			return store.SaveRun(cfg, r)
+			return implstore.SaveRun(cfg, r)
 		},
 		LoadSession: func(sessionID string) (types.Session, error) {
-			return store.LoadSession(cfg, sessionID)
+			return implstore.LoadSession(cfg, sessionID)
 		},
 		SaveSession: func(session types.Session) error {
-			return store.SaveSession(cfg, session)
+			return implstore.SaveSession(cfg, session)
 		},
 	})
 	if err != nil {
@@ -385,7 +391,7 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 		if pricingKnown {
 			run.TotalCostUSD += costUSD
 		}
-		if err := store.SaveRun(cfg, run); err != nil {
+		if err := implstore.SaveRun(cfg, run); err != nil {
 			log.Printf("daemon: warning: failed to save run: %v", err)
 			if emit != nil {
 				emit(context.Background(), events.Event{
@@ -397,7 +403,7 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 		}
 
 		if !sessionLoaded {
-			if s, err := store.LoadSession(cfg, run.SessionID); err == nil {
+			if s, err := implstore.LoadSession(cfg, run.SessionID); err == nil {
 				session = s
 				sessionLoaded = true
 			}
@@ -409,7 +415,7 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 			if pricingKnown {
 				session.TotalCostUSD += costUSD
 			}
-			if err := store.SaveSession(cfg, session); err != nil {
+			if err := implstore.SaveSession(cfg, session); err != nil {
 				log.Printf("daemon: warning: failed to save session: %v", err)
 				if emit != nil {
 					emit(context.Background(), events.Event{
@@ -423,14 +429,14 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 	}
 }
 
-// daemonEventAppender adapts store.AppendEvent to events.StoreSink (daemon context).
+// daemonEventAppender adapts internal store.AppendEvent to events.StoreSink (daemon context).
 type daemonEventAppender struct {
 	cfg config.Config
 }
 
 func (s daemonEventAppender) AppendEvent(ctx context.Context, runID, eventType, message string, data map[string]string) error {
 	_ = ctx
-	return store.AppendEvent(s.cfg, runID, eventType, message, data)
+	return implstore.AppendEvent(s.cfg, runID, eventType, message, data)
 }
 
 func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run types.Run, emit func(context.Context, events.Event), wg *sync.WaitGroup) {

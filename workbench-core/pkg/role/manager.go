@@ -141,6 +141,7 @@ func loadRoleFile(path string) (Role, error) {
 }
 
 type roleFrontMatter struct {
+	// YAML uses snake_case for multiword keys to keep ROLE.md configuration consistent and readable.
 	ID          string       `yaml:"id"`
 	Description string       `yaml:"description"`
 	SkillBias   []string     `yaml:"skill_bias"`

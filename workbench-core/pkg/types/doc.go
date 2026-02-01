@@ -22,9 +22,14 @@
 //
 // # Events, History, and Stability
 //
-// Events (see `package events`) use `types.Event` to report logs, tool usage, or debugging data.
-// The `MultiSink` abstraction allows hosts to fan-out events, and `Emitter` enforces that a
-// run ID + sink must exist before emitting. The core types in this package are intended to remain
-// stable within a major release because they define the low-level host/agent protocol. Any
-// change that would break these structs should be guarded by a clear migration or version bump.
+// Events (see `package events`) use `events.Event` as the runtime emission payload for logs,
+// tool usage, and telemetry. When persisted, those payloads are recorded as `types.EventRecord`
+// (event id + timestamp) by the host-side event store.
+//
+// The `events.MultiSink` abstraction allows hosts to fan-out events, and `events.Emitter`
+// enforces that a run ID + sink must exist before emitting.
+//
+// The core types in this package are intended to remain stable within a major release because
+// they define the low-level host/agent protocol. Any change that would break these structs should
+// be guarded by a clear migration or version bump.
 package types

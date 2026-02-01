@@ -22,7 +22,7 @@ func NewResource(manager *Manager) *SkillsResource {
 }
 
 func (r *SkillsResource) SupportsNestedList() bool {
-	return true
+	return false
 }
 
 func (r *SkillsResource) List(path string) ([]vfs.Entry, error) {
@@ -35,35 +35,13 @@ func (r *SkillsResource) List(path string) ([]vfs.Entry, error) {
 		return nil, err
 	}
 	if clean == "" || clean == "." {
-		return r.listNamespaces()
+		return r.listSkillFiles()
 	}
 
-	dir := parts[0]
-	subpath := ""
-	if len(parts) > 1 {
-		subpath = strings.Join(parts[1:], "/")
+	if len(parts) != 1 {
+		return nil, fmt.Errorf("skills: nested paths are not supported")
 	}
-
-	skill, ok := r.manager.Get(dir)
-	if !ok {
-		return nil, fmt.Errorf("skills: not found %q", dir)
-	}
-	if subpath == "" {
-		return r.listSkillDir(skill.Path)
-	}
-
-	full, err := vfsutil.SafeJoinBaseDir(skill.Path, subpath)
-	if err != nil {
-		return nil, err
-	}
-	st, err := os.Stat(full)
-	if err != nil {
-		return nil, err
-	}
-	if !st.IsDir() {
-		return nil, fmt.Errorf("skills: %q is not a directory", subpath)
-	}
-	return r.listSkillDir(full)
+	return nil, fmt.Errorf("skills: %q is a file", parts[0])
 }
 
 func (r *SkillsResource) Read(path string) ([]byte, error) {
@@ -77,23 +55,18 @@ func (r *SkillsResource) Read(path string) ([]byte, error) {
 	if clean == "" || clean == "." {
 		return nil, fmt.Errorf("skills read: path required")
 	}
-	dir := parts[0]
-	subpath := ""
-	if len(parts) > 1 {
-		subpath = strings.Join(parts[1:], "/")
+	if len(parts) != 1 {
+		return nil, fmt.Errorf("skills read: path must be a single file under /skills")
 	}
-	skill, ok := r.manager.Get(dir)
-	if !ok {
-		return nil, fmt.Errorf("skills: not found %q", dir)
-	}
-	if subpath == "" {
-		return nil, fmt.Errorf("skills read: path required")
-	}
-	full, err := vfsutil.SafeJoinBaseDir(skill.Path, subpath)
+	name, err := parseSkillFilename(parts[0])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("skills read: %w", err)
 	}
-	return os.ReadFile(full)
+	skill, ok := r.manager.Get(name)
+	if !ok {
+		return nil, fmt.Errorf("skills: not found %q", name)
+	}
+	return os.ReadFile(skill.Path)
 }
 
 func (r *SkillsResource) Write(path string, data []byte) error {
@@ -107,15 +80,14 @@ func (r *SkillsResource) Write(path string, data []byte) error {
 	if clean == "" || clean == "." {
 		return fmt.Errorf("skills write: path required")
 	}
-	dir := parts[0]
-	subpath := ""
-	if len(parts) > 1 {
-		subpath = strings.Join(parts[1:], "/")
+	if len(parts) != 1 {
+		return fmt.Errorf("skills write: path must be a single file under /skills")
 	}
-	if subpath == "" {
-		return fmt.Errorf("skills write: subpath required")
+	name, err := parseSkillFilename(parts[0])
+	if err != nil {
+		return fmt.Errorf("skills write: %w", err)
 	}
-	full, err := r.manager.resolveWritablePath(dir, subpath)
+	full, err := r.manager.resolveWritablePath(name)
 	if err != nil {
 		return err
 	}
@@ -132,20 +104,21 @@ func (r *SkillsResource) Append(path string, data []byte) error {
 	if r.manager == nil {
 		return fmt.Errorf("skills manager is required")
 	}
-	path = strings.Trim(path, "/")
-	if path == "" {
+	clean, parts, err := vfsutil.NormalizeResourceSubpath(path)
+	if err != nil {
+		return fmt.Errorf("skills append: %w", err)
+	}
+	if clean == "" || clean == "." {
 		return fmt.Errorf("skills append: path required")
 	}
-	parts := strings.SplitN(path, "/", 2)
-	dir := parts[0]
-	subpath := ""
-	if len(parts) == 2 {
-		subpath = parts[1]
+	if len(parts) != 1 {
+		return fmt.Errorf("skills append: path must be a single file under /skills")
 	}
-	if subpath == "" {
-		return fmt.Errorf("skills append: subpath required")
+	name, err := parseSkillFilename(parts[0])
+	if err != nil {
+		return fmt.Errorf("skills append: %w", err)
 	}
-	full, err := r.manager.resolveWritablePath(dir, subpath)
+	full, err := r.manager.resolveWritablePath(name)
 	if err != nil {
 		return err
 	}
@@ -166,36 +139,38 @@ func (r *SkillsResource) Append(path string, data []byte) error {
 	return r.manager.Scan()
 }
 
-func (r *SkillsResource) listNamespaces() ([]vfs.Entry, error) {
+func (r *SkillsResource) listSkillFiles() ([]vfs.Entry, error) {
 	entries := r.manager.Entries()
 	if len(entries) == 0 {
 		return []vfs.Entry{}, nil
 	}
 	out := make([]vfs.Entry, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, vfs.NewDirEntry(e.Dir))
-	}
-	return out, nil
-}
-
-func (r *SkillsResource) listSkillDir(dir string) ([]vfs.Entry, error) {
-	des, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]vfs.Entry, 0, len(des))
-	for _, de := range des {
-		name := de.Name()
-		if de.IsDir() {
-			out = append(out, vfs.NewDirEntry(name))
-			continue
-		}
-		info, err := de.Info()
+		info, err := os.Stat(e.Skill.Path)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, vfs.NewFileEntry(name, info.Size(), info.ModTime()))
+		out = append(out, vfs.NewFileEntry(e.Dir+".md", info.Size(), info.ModTime()))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
+}
+
+func parseSkillFilename(filename string) (string, error) {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return "", fmt.Errorf("skill filename is required")
+	}
+	name := filename
+	if strings.HasSuffix(strings.ToLower(name), ".md") {
+		name = strings.TrimSuffix(name, name[len(name)-3:])
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("skill name is required")
+	}
+	if _, err := sanitizeSkillName(name); err != nil {
+		return "", err
+	}
+	return name, nil
 }

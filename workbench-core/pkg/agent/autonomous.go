@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -24,7 +25,7 @@ type AutonomousRunnerConfig struct {
 
 	// Memory, if set, is used to retrieve relevant memories for the current task
 	// and to persist new memories after task completion.
-	Memory            MemoryProvider
+	Memory            MemoryRecallProvider
 	MemorySearchLimit int
 	Notifier          Notifier
 
@@ -82,10 +83,17 @@ type MemorySnippet struct {
 	Score    float64
 }
 
-type MemoryProvider interface {
+// MemoryRecallProvider provides best-effort semantic recall and persistence for the agent.
+// This is distinct from the daily memory file store (`store.DailyMemoryStore`).
+type MemoryRecallProvider interface {
 	Search(ctx context.Context, query string, limit int) ([]MemorySnippet, error)
 	Save(ctx context.Context, title, content string) error
 }
+
+// MemoryProvider is kept for backwards compatibility.
+//
+// Deprecated: use MemoryRecallProvider.
+type MemoryProvider = MemoryRecallProvider
 
 type Notifier interface {
 	Notify(ctx context.Context, task types.Task, result types.TaskResult) error
@@ -137,28 +145,50 @@ func (r *AutonomousRunner) Run(ctx context.Context) error {
 	defer roleTicker.Stop()
 
 	for {
+		// Execute next task if available.
+		if item := r.q.Next(); item != nil {
+			if err := r.executeQueuedTask(ctx, item); err != nil {
+				r.reportError(ctx, "task.execute", err)
+			}
+			// Drain inbox immediately so tasks that arrived during execution are picked up without waiting for the ticker.
+			if err := r.drainInbox(ctx); err != nil {
+				r.reportError(ctx, "inbox.drain", err)
+			}
+			continue
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 
 		case <-inboxTicker.C:
-			_ = r.drainInbox(ctx)
+			if err := r.drainInbox(ctx); err != nil {
+				r.reportError(ctx, "inbox.drain", err)
+			}
 
 		case <-roleTicker.C:
 			r.maybeEnqueueObligationTasks(ctx)
-		default:
-			// Execute next task if available.
-			if item := r.q.Next(); item != nil {
-				_ = r.executeQueuedTask(ctx, item)
-				// Drain inbox immediately so tasks that arrived during execution are picked up without waiting for the ticker.
-				_ = r.drainInbox(ctx)
-				continue
-			}
-			// When idle, drain inbox once so a newly dropped task is picked up within one cycle.
-			_ = r.drainInbox(ctx)
-			// Yield a bit when idle.
-			time.Sleep(50 * time.Millisecond)
 		}
+	}
+}
+
+func (r *AutonomousRunner) reportError(ctx context.Context, kind string, err error) {
+	if err == nil {
+		return
+	}
+	if r.cfg.Logf != nil {
+		r.cfg.Logf("autonomous runner error (%s): %v", strings.TrimSpace(kind), err)
+	}
+	if r.cfg.Emit != nil {
+		data := map[string]string{"error": err.Error()}
+		if strings.TrimSpace(kind) != "" {
+			data["kind"] = strings.TrimSpace(kind)
+		}
+		r.cfg.Emit(ctx, events.Event{
+			Type:    "daemon.error",
+			Message: "Autonomous runner error",
+			Data:    data,
+		})
 	}
 }
 
@@ -176,10 +206,14 @@ func (r *AutonomousRunner) drainInbox(ctx context.Context) error {
 	}
 	sort.Strings(paths)
 
+	var errs error
 	for _, p := range paths {
 		// Control plane: allow the monitor to update role/model asynchronously.
 		if path.Base(p) == "control.json" {
-			_ = r.processControlFile(ctx, p)
+			if err := r.processControlFile(ctx, p); err != nil {
+				errs = errors.Join(errs, err)
+				r.reportError(ctx, "control.process", err)
+			}
 			continue
 		}
 
@@ -227,7 +261,7 @@ func (r *AutonomousRunner) drainInbox(ctx context.Context) error {
 			})
 		}
 	}
-	return nil
+	return errs
 }
 
 func (r *AutonomousRunner) processControlFile(ctx context.Context, controlPath string) error {
@@ -243,12 +277,15 @@ func (r *AutonomousRunner) processControlFile(ctx context.Context, controlPath s
 		Path:     controlPath,
 		MaxBytes: r.cfg.MaxReadBytes,
 	})
-	if !resp.Ok || strings.TrimSpace(resp.Text) == "" {
+	if !resp.Ok {
+		return fmt.Errorf("read control file: %s", resp.Error)
+	}
+	if strings.TrimSpace(resp.Text) == "" {
 		return nil
 	}
 	var c control
 	if err := json.Unmarshal([]byte(resp.Text), &c); err != nil {
-		return nil
+		return fmt.Errorf("parse control file: %w", err)
 	}
 	if c.Processed {
 		return nil
@@ -258,7 +295,10 @@ func (r *AutonomousRunner) processControlFile(ctx context.Context, controlPath s
 	if strings.TrimSpace(c.Role) != "" {
 		role.ReloadDefaultManager()
 		if newRole, ok := role.GetDefault(c.Role); ok {
-			if normalized, err := newRole.Normalize(); err == nil {
+			normalized, err := newRole.Normalize()
+			if err != nil {
+				c.Error = fmt.Sprintf("role invalid: %v", err)
+			} else {
 				r.cfg.Role = normalized
 				changed = true
 			}
@@ -278,13 +318,16 @@ func (r *AutonomousRunner) processControlFile(ctx context.Context, controlPath s
 	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
-		return nil
+		return fmt.Errorf("marshal control response: %w", err)
 	}
-	_ = r.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
+	wresp := r.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{
 		Op:   types.HostOpFSWrite,
 		Path: controlPath,
 		Text: string(b),
 	})
+	if !wresp.Ok {
+		return fmt.Errorf("write control response: %s", wresp.Error)
+	}
 	if r.cfg.Emit != nil && changed {
 		r.cfg.Emit(ctx, events.Event{
 			Type:    "daemon.control",
@@ -428,7 +471,10 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 	now := time.Now()
 	task.Status = types.TaskStatusActive
 	task.StartedAt = &now
-	_ = r.writeTask(ctx, item.Path, task)
+	var persistErr error
+	if err := r.writeTask(ctx, item.Path, task); err != nil {
+		persistErr = errors.Join(persistErr, err)
+	}
 
 	if r.cfg.Emit != nil {
 		r.cfg.Emit(ctx, events.Event{
@@ -474,12 +520,16 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 		result.Status = types.TaskStatusFailed
 		result.Error = err.Error()
 	}
-	_ = r.writeResult(ctx, task, result)
+	if err := r.writeResult(ctx, task, result); err != nil {
+		persistErr = errors.Join(persistErr, err)
+	}
 
 	task.Status = result.Status
 	task.CompletedAt = result.CompletedAt
 	task.Error = result.Error
-	_ = r.writeTask(ctx, item.Path, task)
+	if err := r.writeTask(ctx, item.Path, task); err != nil {
+		persistErr = errors.Join(persistErr, err)
+	}
 
 	r.onTaskFinished(task, result)
 
@@ -513,7 +563,7 @@ func (r *AutonomousRunner) executeQueuedTask(ctx context.Context, item *queue.It
 			})
 		}
 	}
-	return nil
+	return persistErr
 }
 
 func buildAugmentedSystemPrompt(base string, r role.Role, memories []MemorySnippet) string {

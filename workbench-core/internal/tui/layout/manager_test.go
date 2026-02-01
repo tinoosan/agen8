@@ -25,8 +25,15 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 	if leftTotal > mainH {
 		t.Fatalf("left column height %d exceeds main height %d", leftTotal, mainH)
 	}
-	if grid.SidePanel.Height > mainH {
-		t.Fatalf("side panel height %d exceeds main height %d", grid.SidePanel.Height, mainH)
+	// Right column now renders per-tab panels directly; reserve 1 row for the tab bar.
+	if got := grid.ActivityFeed.Height + grid.ActivityDetail.Height + 1; got > mainH {
+		t.Fatalf("activity panels height %d exceeds main height %d", got, mainH)
+	}
+	if got := grid.Plan.Height + 1; got > mainH {
+		t.Fatalf("plan panel height %d exceeds main height %d", got, mainH)
+	}
+	if got := grid.CurrentTask.Height + grid.TaskQueue.Height + grid.Stats.Height + 1; got > mainH {
+		t.Fatalf("tasks panels height %d exceeds main height %d", got, mainH)
 	}
 	totalH := reserved + mainH
 	if totalH > grid.ScreenHeight {
@@ -34,12 +41,15 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 	}
 }
 
-func TestCalculateDashboard_SidePanelHasContentRoom(t *testing.T) {
+func TestCalculateDashboard_ActivityPanelsHaveContentRoom(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
 	grid := mgr.CalculateDashboard(120, 35, 4, 6, 1)
 
-	if grid.SidePanel.ContentHeight < 5 {
-		t.Fatalf("side panel ContentHeight want >= 5 (for tab content), got %d", grid.SidePanel.ContentHeight)
+	if grid.ActivityFeed.ContentHeight < 3 {
+		t.Fatalf("activity feed ContentHeight want >= 3, got %d", grid.ActivityFeed.ContentHeight)
+	}
+	if grid.ActivityDetail.ContentHeight < 3 {
+		t.Fatalf("activity detail ContentHeight want >= 3, got %d", grid.ActivityDetail.ContentHeight)
 	}
 }
 
@@ -64,7 +74,7 @@ func TestCalculateCompact_100x30_NoClipping(t *testing.T) {
 	composerHeight := 4
 	grid := mgr.CalculateCompact(100, 30, composerHeight)
 
-	reserved := 1 + composerHeight
+	reserved := 2 + composerHeight
 	mainH := 30 - reserved
 	if grid.AgentOutput.Height > mainH {
 		t.Fatalf("compact main area height %d exceeds remaining %d", grid.AgentOutput.Height, mainH)
@@ -85,9 +95,9 @@ func TestCalculateDashboard_NarrowWidth_80Cols(t *testing.T) {
 	grid := mgr.CalculateDashboard(80, 35, 4, 6, 1)
 
 	// Verify total width matches screen width exactly (no overflow).
-	totalW := grid.AgentOutput.Width + 1 + grid.SidePanel.Width // 1 for gap
+	totalW := grid.AgentOutput.Width + 1 + grid.ActivityFeed.Width // 1 for gap
 	if totalW != 80 {
-		t.Fatalf("expected total width 80, got %d (left %d, right %d)", totalW, grid.AgentOutput.Width, grid.SidePanel.Width)
+		t.Fatalf("expected total width 80, got %d (left %d, right %d)", totalW, grid.AgentOutput.Width, grid.ActivityFeed.Width)
 	}
 
 	// Verify no fixed minimums enforced (Left would be 60 if enforced).
@@ -96,7 +106,7 @@ func TestCalculateDashboard_NarrowWidth_80Cols(t *testing.T) {
 	}
 
 	// Check for usability (at least 1 col).
-	if grid.AgentOutput.Width < 1 || grid.SidePanel.Width < 1 {
-		t.Fatalf("columns too small: left %d, right %d", grid.AgentOutput.Width, grid.SidePanel.Width)
+	if grid.AgentOutput.Width < 1 || grid.ActivityFeed.Width < 1 {
+		t.Fatalf("columns too small: left %d, right %d", grid.AgentOutput.Width, grid.ActivityFeed.Width)
 	}
 }

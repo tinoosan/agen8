@@ -1,6 +1,9 @@
 package events
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // StoreAppender is a minimal interface for persisting events.
 type StoreAppender interface {
@@ -22,6 +25,18 @@ func (s StoreSink) Emit(ctx context.Context, runID string, event Event) error {
 	data := event.Data
 	if event.StoreData != nil {
 		data = event.StoreData
+	}
+	origin := strings.TrimSpace(event.Origin)
+	if origin != "" {
+		// Never mutate the input map.
+		out := make(map[string]string, len(data)+1)
+		for k, v := range data {
+			out[k] = v
+		}
+		if _, ok := out["origin"]; !ok {
+			out["origin"] = origin
+		}
+		data = out
 	}
 	return s.Store.AppendEvent(ctx, runID, event.Type, event.Message, data)
 }

@@ -6,7 +6,7 @@ import "context"
 // In the daily-memory design, the store provides access to a directory of memory files:
 //   - /memory/MEMORY.MD                 (master instructions, read-only)
 //   - /memory/YYYY-MM-DD-memory.md      (daily files; only today is writable)
-type MemoryStore interface {
+type DailyMemoryStore interface {
 	// BaseDir returns the absolute directory on disk where memory files live.
 	BaseDir() string
 
@@ -22,6 +22,11 @@ type MemoryStore interface {
 	// ListMemoryFiles returns the filenames present under the memory dir.
 	ListMemoryFiles(ctx context.Context) ([]string, error)
 }
+
+// MemoryStore is kept for backwards compatibility.
+//
+// Deprecated: use DailyMemoryStore.
+type MemoryStore = DailyMemoryStore
 
 // PlanFileStore exposes the minimal API needed to persist a separate plan file
 // alongside the standard memory staging files.

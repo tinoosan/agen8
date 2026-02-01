@@ -31,7 +31,7 @@ type Runtime struct {
 	Constructor     *agent.PromptBuilder
 	Updater         *agent.PromptUpdater
 	WorkdirBase     string
-	MemStore        store.MemoryStore
+	MemStore        store.DailyMemoryStore
 	ProfileStore    store.ProfileCommitter
 }
 
@@ -45,7 +45,7 @@ type BuildConfig struct {
 	ApprovalsMode         string
 	HistoryStore          store.HistoryStore
 	ResultsStore          store.ResultsStore
-	MemoryStore           store.MemoryStore
+	MemoryStore           store.DailyMemoryStore
 	ProfileStore          store.ProfileStore
 	TraceStore            store.TraceStore
 	MemoryReindexer       resources.MemoryReindexer
@@ -334,11 +334,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		MaxProfileBytes: cfg.MaxProfileBytes,
 		MaxMemoryBytes:  cfg.MaxMemoryBytes,
 		MaxTraceBytes:   cfg.MaxTraceBytes,
-		Emit: func(eventType, message string, data map[string]string) {
-			if cfg.Emit != nil {
-				cfg.Emit(context.Background(), events.Event{Type: eventType, Message: message, Data: data})
-			}
-		},
+		Emit:            cfg.Emit,
 	}
 
 	auditObs := newAuditObserver(cfg.Run.RunId, cfg.Emit, cfg.AuditReads)

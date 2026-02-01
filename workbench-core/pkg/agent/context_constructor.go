@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/skills"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -40,7 +41,7 @@ type PromptBuilder struct {
 
 	TraceIncludeTypes []string
 
-	Emit func(eventType, message string, data map[string]string)
+	Emit events.EmitFunc
 
 	LastOp      *types.HostOpRequest
 	LastResp    *types.HostOpResponse
@@ -75,8 +76,13 @@ func (c *PromptBuilder) SystemPrompt(ctx context.Context, basePrompt string, ste
 
 	out := strings.TrimSpace(strings.Join(nonEmpty(sections), "\n\n")) + "\n"
 	if c.Emit != nil {
-		c.Emit("context.constructor", "Context constructor updated", map[string]string{
-			"step": fmt.Sprintf("%d", step),
+		c.Emit(ctx, events.Event{
+			Type:    "context.constructor",
+			Message: "Context constructor updated",
+			Origin:  "env",
+			Data: map[string]string{
+				"step": fmt.Sprintf("%d", step),
+			},
 		})
 	}
 	return out, nil

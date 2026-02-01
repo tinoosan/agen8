@@ -13,7 +13,7 @@ func TestAuditObserverEmitsEvent(t *testing.T) {
 	obs := newAuditObserver("run-1", func(ctx context.Context, ev events.Event) {
 		_ = ctx
 		got = append(got, ev.Type)
-	})
+	}, true)
 	if obs == nil {
 		t.Fatalf("observer is nil")
 	}

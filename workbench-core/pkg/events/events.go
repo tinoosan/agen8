@@ -2,11 +2,21 @@ package events
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
 
+var (
+	// ErrDropped indicates an event was intentionally dropped (e.g. non-blocking UI sinks)
+	// and not delivered to that sink. Callers may treat this as non-fatal.
+	ErrDropped = errors.New("event dropped")
+)
+
 // Event is the unified event payload emitted by the host.
+//
+// Note: This is not the persisted event record. Persisted events are stored as
+// `types.EventRecord` (event id + timestamp) by the host-side event store.
 type Event struct {
 	Type      string
 	Message   string
@@ -17,6 +27,10 @@ type Event struct {
 	History   *bool
 	Origin    string
 }
+
+// EmitFunc is a convenience type for components that need to emit events without
+// depending on a full Sink/Emitter.
+type EmitFunc func(ctx context.Context, ev Event)
 
 func (e Event) validate() error {
 	if e.Type == "" {
@@ -42,15 +56,16 @@ type Sink interface {
 type MultiSink []Sink
 
 func (m MultiSink) Emit(ctx context.Context, runID string, event Event) error {
+	var errs error
 	for _, s := range m {
 		if s == nil {
 			continue
 		}
 		if err := s.Emit(ctx, runID, event); err != nil {
-			return err
+			errs = errors.Join(errs, err)
 		}
 	}
-	return nil
+	return errs
 }
 
 type Emitter struct {

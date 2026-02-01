@@ -16,7 +16,7 @@ func (t *FSReadTool) Definition() llm.Tool {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "fs_read",
-			Description: "[DIRECT - no discovery needed] Read file contents from a VFS path (skills live under /skills/<skill>/SKILL.md).",
+			Description: "[DIRECT - no discovery needed] Read file contents from a VFS path (skills live under /skills/<skill_name>.md).",
 			Strict:      true,
 			Parameters: map[string]any{
 				"type": "object",

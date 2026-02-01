@@ -23,6 +23,8 @@ func (m MockClient) Generate(ctx context.Context, req llm.LLMRequest) (llm.LLMRe
 	return llm.LLMResponse{}, nil
 }
 
+func (m MockClient) SupportsStreaming() bool { return false }
+
 func TestSystemPromptSuppression(t *testing.T) {
 	// 1. Test that empty config uses default prompt
 	t.Run("EmptySystemPrompt_UsesDefault", func(t *testing.T) {

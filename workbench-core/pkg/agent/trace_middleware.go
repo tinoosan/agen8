@@ -18,7 +18,7 @@ type TraceMiddleware struct {
 	FS    *vfs.FS
 
 	Cursor store.TraceCursor
-	Events []types.Event
+	Events []types.EventRecord
 
 	MaxEvents int
 }
@@ -40,7 +40,7 @@ func (m *TraceMiddleware) maxEvents() int {
 	return m.MaxEvents
 }
 
-func (m *TraceMiddleware) ApplyBatch(mode string, batch store.TraceBatch) []types.Event {
+func (m *TraceMiddleware) ApplyBatch(mode string, batch store.TraceBatch) []types.EventRecord {
 	if m == nil {
 		return nil
 	}

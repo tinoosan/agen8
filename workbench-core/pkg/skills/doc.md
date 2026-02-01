@@ -7,16 +7,15 @@ Here’s documentation for the `pkg/skills/resource.go` module, written with the
 Backend engineers or contributors working on Workbench’s VFS/skill integrations. You should read this before modifying how `/skills` behaves, adding new skill capabilities, or troubleshooting why your skill files aren’t visible.
 
 ## Purpose Summary
-`SkillsResource` is the VFS-backed layer that exposes every skill directory to agents via the `/skills` mount. It translates VFS paths into the actual skill directories and files on disk, while enforcing safety checks, sorting, and refresh semantics so the agent always sees the current skill tree.
+`SkillsResource` is the VFS-backed layer that exposes every skill markdown file to agents via the `/skills` mount. It translates VFS paths into the actual skill files on disk, while enforcing safety checks, sorting, and refresh semantics so the agent always sees the current skill set.
 
 ## High-Level Structure
 
 ```
-Agent request                SkillsResource          Skill Manager         Real Skill Dir
+Agent request                SkillsResource          Skill Manager         Real Skill Path
 ---------------            ------------------      -----------------     --------------
-/skills/                     -> List() / Read()   -> Find entry metadata  -> /skills/<name>/...
-/skills/my-skill/file.md     -> read file content
-/skills/my-skill/subdir/     -> list dir entries
+/skills/                     -> List() / Read()   -> Find entry metadata  -> <dataDir>/skills/<name>.md
+/skills/my-skill.md          -> read file content
 ```
 
 ### Key Components
@@ -24,25 +23,24 @@ Agent request                SkillsResource          Skill Manager         Real 
 | Component | Role |
 |---|---|
 | `SkillsResource` | Handles VFS requests (`List`, `Read`, `Write`, `Append`) and delegates to the manager. |
-| `Manager` | Tracks registered skill directories, resolves writable paths, rescans when files change. |
-| `parseSkillResourcePath` | Normalizes and validates agent-supplied paths to prevent escaping skill directories. |
-| `listSkillDir`, `listNamespaces` | Enumerate directories/files, sort them lexicographically, and provide metadata for the VFS response. |
+| `Manager` | Tracks registered skill files, resolves writable paths, rescans when files change. |
+| `parseSkillFilename` | Normalizes and validates agent-supplied filenames to prevent traversal. |
+| `listSkillFiles` | Enumerates skill files, sorts them, and provides metadata for the VFS response. |
 
 ## Usage Patterns
 
 | Action | VFS Path | Behavior |
 |---|---|---|
-| List available skills | `/skills` | `List("")` -> `SkillDirs()` returns sorted namespaces as directories. |
-| Inspect a skill file | `/skills/<name>/SKILL.md` | `Read()` ensures the skill exists, unlocks safe path via `vfsutil.SafeJoinBaseDir`, and returns file bytes. |
-| Modify skill file | `Write` or `Append` to `/skills/<name>/...` | Delegates to manager’s writable path (usually inside `/skills` workspace). After modification, `rescan()` refreshes the manager so the new content is immediately visible. |
+| List available skills | `/skills` | `List("")` -> returns sorted `*.md` skill files. |
+| Inspect a skill file | `/skills/<name>.md` | `Read()` ensures the skill exists and returns file bytes. |
+| Modify skill file | `Write` or `Append` to `/skills/<name>.md` | Writes to `<dataDir>/skills/<name>.md`, then rescans so the update is immediately visible. |
 
 #### Example
-To show the README of the `explain-code` skill:
+To read the `explain-code` skill:
 ```
-GET /skills/explain-code/README.md
+GET /skills/explain-code.md
 -> SkillsResource.Read()
    -> manager.Get("explain-code")
-   -> SafeJoinBaseDir(skill.Path, "README.md")
 ```
 
 ## Implementation Details & Gotchas
@@ -53,8 +51,8 @@ GET /skills/explain-code/README.md
 - **Error surfacing:** Every filesystem error (e.g., `os.Stat`, `os.ReadFile`) is wrapped with contextual text to make troubleshooting simpler when viewing logs.
 
 ### Gotchas
-- `parseSkillResourcePath` insists on two segments (`<skill>/<file>`); forgetting the filename results in a `"path must target a file under /skills/<name>"` error.
-- Writable paths are resolved relative to the skill’s writable directory. For read-only/external skills, writes are rejected.
+- Paths must be a single file under `/skills` (no nested skill directories).
+- Writable paths are resolved under the configured writable root (`<dataDir>/skills`). For read-only/external skills, writes are rejected.
 - Modifications require `fsutil.WriteFileAtomic` to avoid partial writes—this means the agent cannot append data atomically without abiding by this wrapper.
 
 ## Navigation Aids
@@ -64,10 +62,10 @@ GET /skills/explain-code/README.md
 | `Read(path string)` | Reads files; requires validated path and returns file bytes. |
 | `Write(path string, data []byte)` | Handles skill edits (used when the agent creates or updates skill files). |
 | `Append(...)` | Appends to a skill file and triggers rescan. |
-| `listSkillDir` | Internal helper to enumerate entries inside a skill directory. |
-| `parseSkillResourcePath` | Normalizes user input and guards against invalid skill names. |
+| `listSkillFiles` | Internal helper to enumerate discovered skill files. |
+| `parseSkillFilename` | Normalizes user input and guards against invalid skill names. |
 
 ## Summary
-`pkg/skills/resource.go` is your gateway between the `/skills` virtual mount and the physical skill directories. It enforces safe paths, deterministic listings, and auto-refreshing of the skill catalog after writes. When you update skill behavior or add new directories, follow this flow: register the skill via the manager, rely on `SkillsResource` for safe access, and remember to rescan so the agent sees the latest files.
+`pkg/skills/resource.go` is your gateway between the `/skills` virtual mount and the physical skill files. It enforces safe paths, deterministic listings, and auto-refreshing of the skill catalog after writes. When you update skill behavior or add new skills, follow this flow: register the skill via the manager, rely on `SkillsResource` for safe access, and remember to rescan so the agent sees the latest files.
 
 Let me know if you’d like a diagram or further breakdown of the manager interactions!
