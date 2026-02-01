@@ -77,7 +77,7 @@ type monitorModel struct {
 	planDetailsErr    string
 	stats             monitorStats
 	model             string
-	role              string
+	profile           string
 	focusedPanel      panelID
 	compactTab        int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
 	dashboardSideTab  int // 0=Activity, 1=Plan, 2=Tasks; used when dashboard mode
@@ -644,8 +644,8 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 		goal = strings.Trim(goal, "\"")
 		return m.enqueueTask(goal, 0)
 	}
-	if strings.HasPrefix(raw, "/profile ") || strings.HasPrefix(raw, "/role ") {
-		ref := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(raw, "/profile "), "/role "))
+	if strings.HasPrefix(raw, "/profile ") {
+		ref := strings.TrimSpace(strings.TrimPrefix(raw, "/profile "))
 		return m.writeControl("switch_profile", map[string]any{"profile": ref})
 	}
 	if strings.HasPrefix(raw, "/model ") {
@@ -741,7 +741,7 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 		m.model = v
 	}
 	if v := strings.TrimSpace(ev.Data["profile"]); v != "" {
-		m.role = v
+		m.profile = v
 	}
 	if strings.HasPrefix(ev.Type, "agent.op.") {
 		m.observeActivityEvent(ev)
@@ -1096,7 +1096,7 @@ func (m *monitorModel) renderHeader() string {
 	content := lipgloss.JoinHorizontal(lipgloss.Left,
 		m.styles.headerTitle.Render("Workbench - Always On"),
 		kit.RenderTag(kit.TagOptions{Key: "Model", Value: fallback(m.model, "(unknown)")}),
-			kit.RenderTag(kit.TagOptions{Key: "Profile", Value: fallback(m.role, "(none)")}),
+			kit.RenderTag(kit.TagOptions{Key: "Profile", Value: fallback(m.profile, "(none)")}),
 		kit.RenderTag(kit.TagOptions{Key: "Run", Value: m.runID}),
 	)
 	w := m.width

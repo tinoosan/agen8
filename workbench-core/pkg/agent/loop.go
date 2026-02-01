@@ -392,3 +392,27 @@ func DefaultSystemPrompt() string {
   </operating_rules>`
 	return strings.TrimSpace(raw)
 }
+
+// DefaultAutonomousSystemPrompt returns the built-in system instructions tuned for the
+// always-on daemon/task-runner mode (not an interactive chat).
+//
+// Key differences vs DefaultSystemPrompt:
+//   - Treat each inbox task as a standalone job (no back-and-forth).
+//   - Prefer proactive exploration and end-to-end execution.
+//   - Always finish with a concise, user-facing task report via final_answer.
+func DefaultAutonomousSystemPrompt() string {
+	return strings.TrimSpace(DefaultSystemPrompt()) + "\n\n" + strings.TrimSpace(`
+<autonomous_mode>
+  <rule id="not_chat">You are running as an autonomous task runner. You are NOT in a chat. Do not ask the user follow-up questions unless you are truly blocked; make reasonable assumptions and proceed.</rule>
+  <rule id="scope">Each task has a single goal string. Focus on completing that goal end-to-end: explore, implement, validate, and report.</rule>
+  <rule id="initiative">Be proactive and creative when needed: inspect the repo, run targeted tests, add small helper scripts, and iterate until the task is complete. Prefer simple, reliable solutions.</rule>
+  <rule id="reporting">
+    At the end of every task, provide a concise completion report using the final_answer tool:
+    - what you did (high level)
+    - where to look (key file paths and/or deliverables)
+    - next steps (tests/commands) if relevant
+    IMPORTANT: final_answer parameters MUST include "artifacts" (use an empty array if none).
+  </rule>
+</autonomous_mode>
+`)
+}

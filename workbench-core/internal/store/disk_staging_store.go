@@ -16,7 +16,7 @@ import (
 )
 
 // DiskStagingStore implements the common "main content + staging update + commit log"
-// pattern used by /memory and /user_profile disk-backed stores.
+// pattern used by disk-backed staging stores like /memory.
 //
 // Layout under s.Dir:
 //   - <mainFile>       (committed main content, host-managed; agent can read)
@@ -25,7 +25,7 @@ import (
 type DiskStagingStore struct {
 	DiskStore
 
-	mainFile  string // e.g. "memory.md" or "user_profile.md"
+	mainFile  string // e.g. "memory.md"
 	storeName string // e.g. "disk memory store" (for stable error messages)
 }
 

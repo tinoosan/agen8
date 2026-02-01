@@ -20,7 +20,7 @@ type StagingStore interface {
 	store.StagingArea
 	store.CommitLogReader
 
-	// GetMain returns the committed main content for this mount (e.g. memory.md or user_profile.md).
+	// GetMain returns the committed main content for this mount (e.g. memory.md).
 	GetMain(ctx context.Context) (string, error)
 }
 

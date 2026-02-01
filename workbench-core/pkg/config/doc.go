@@ -13,8 +13,7 @@
 //   - `<dataDir>/runs/<runId>/` – per-run artifacts (history, results, traces)
 //   - `<dataDir>/memory/` – shared memory staging (`memory.md`, `update.md`, `commits.jsonl`)
 //   - `<dataDir>/tools/` – discovered tool manifests (custom tools and builtin stubs)
-//   - `<dataDir>/agent/`, `/knowledge/`, `/user_profile/` – upcoming runtime stores that
-//     will continue to live under `DataDir`.
+//   - `<dataDir>/agent/`, `/knowledge/` – upcoming runtime stores that will continue to live under `DataDir`.
 //
 // # Extension Points
 //

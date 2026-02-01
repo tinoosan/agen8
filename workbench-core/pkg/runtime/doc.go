@@ -18,8 +18,8 @@
 //   - Context + Hook Integration: The runtime holds `agent.PromptBuilder` and
 //     `agent.PromptUpdater` structs along with trace middleware so contextual prompts
 //     and reasoning traces flow through each step. It also orchestrates event emission
-//     and persistence callbacks supplied via the `BuildConfig` (history, memory, profile,
-//     results, trace stores, etc.).
+//     and persistence callbacks supplied via the `BuildConfig` (history, memory, results,
+//     trace stores, etc.).
 //   - Guardrails: BuildConfig allows hosts to enforce op guards, artifact observers,
 //     run persistence hooks, and session loading/saving so runtime initialization can
 //     surface runtime-specific behavior without leaking implementation details.

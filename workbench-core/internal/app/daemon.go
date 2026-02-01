@@ -177,7 +177,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Multiplier:   2.0,
 	})
 
-	baseSystemPrompt := agent.DefaultSystemPrompt()
+	baseSystemPrompt := agent.DefaultAutonomousSystemPrompt()
 	agentCfg := agent.DefaultConfig()
 	agentCfg.Model = resolved.Model
 	agentCfg.ReasoningEffort = strings.TrimSpace(resolved.ReasoningEffort)

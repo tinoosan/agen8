@@ -45,7 +45,7 @@ Workbench exposes a virtual filesystem inside each run. Key mounts include:
 
 - `/project` – your host workspace (defaults to the current working directory; overridable via `--workdir`).
 - `/workspace` – run-local workspace mapped to `dataDir/runs/<runId>/workspace`.
-- `/results`, `/log`, `/user_profile`, `/tools` – mounted read-only to expose structured outputs, telemetry, and discovered tool manifests.
+- `/results`, `/log`, `/tools` – mounted read-only to expose structured outputs, telemetry, and discovered tool manifests.
 - `/memory` – shared agent memory (read `memory.md`, write `update.md` when you want to propose changes).
 
 Every command that manipulates project files must operate through this explicit surface, which keeps tooling auditable and reproducible.
@@ -79,13 +79,12 @@ Runtime configuration resolves in this order: CLI flags → environment variable
 
 | Flag                    | Env                             | Description                                                                                                                               |
 | ----------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `--data-dir`            | `WORKBENCH_DATA_DIR`            | Base directory containing `workbench.db`, `runs`, `tools`, `user_profile`, `agent`. Defaults to `~/.workbench` or `$XDG_STATE_HOME/workbench`. |
+| `--data-dir`            | `WORKBENCH_DATA_DIR`            | Base directory containing `workbench.db`, `runs`, `tools`, `agent`. Defaults to `~/.workbench` or `$XDG_STATE_HOME/workbench`. |
 | `--workdir`             | `WORKBENCH_WORKDIR`             | Host directory mounted under `/project`. Defaults to the current working directory.                                                       |
 | `--context-bytes`       | —                               | How many bytes of context to persist (`run.maxBytesForContext`; default `8*1024`). Must be > 0.                                           |
 | `--model`               | `OPENROUTER_MODEL`              | Default model ID for LLM calls (overrides session defaults).                                                                              |
 | `--trace-bytes`         | —                               | Byte budget for the PromptUpdater trace (default `8*1024`).                                                                               |
 | `--memory-bytes`        | —                               | Memory injection budget per step (default `8*1024`).                                                                                      |
-| `--user-profile-bytes`  | —                               | Budget for user profile context injected from `/user_profile` (default `4*1024`).                                                          |
 | `--history-pairs`       | —                               | Number of recent (user, agent) pairs included from `/history` (default `8`).                                                              |
 | `--include-history-ops` | `WORKBENCH_INCLUDE_HISTORY_OPS` | Whether to include environment/host operations from `/history` (default: enabled).                                                        |
 | `--approvals-mode`      | `WORKBENCH_APPROVALS_MODE`      | Approval policy: `enabled` (default) or `disabled`.                                                                                       |
