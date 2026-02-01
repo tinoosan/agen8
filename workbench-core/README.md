@@ -61,16 +61,17 @@ You can resume an existing session with `workbench resume <sessionId>` to contin
 
 Most entrypoints live under `cmd/workbench/cmd` and use Cobra. Important workflows include:
 
-| Command                              | Description                                                          |
-| ------------------------------------ | -------------------------------------------------------------------- |
-| `workbench`                          | Start a new session + run with default context.                      |
-| `workbench resume <sessionId>`       | Continue the last run in a session (use `--new-run` to start fresh). |
-| `workbench list sessions`            | List stored session IDs + metadata.                                  |
-| `workbench list runs <sessionId>`    | Show run history for a session (statuses, timestamps).               |
-| `workbench show session <sessionId>` | Dump session metadata.                                               |
-| `workbench show run <runId>`         | Dump run metadata.                                                   |
-| `workbench show history <sessionId>` | Print the operation log as JSONL.                                    |
-| `workbench --help`                   | Get command + flag help (Cobra-generated).                           |
+| Command                              | Description                                                                                                                                                                  |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workbench`                          | Start a new session + run with default context (daemon).                                                                                                                     |
+| `workbench monitor`                  | Open the monitoring TUI. Start the daemon first, then run monitor so it attaches to the active run; use `--run-id <id>` with the run ID printed at daemon startup if needed. |
+| `workbench resume <sessionId>`       | Continue the last run in a session (use `--new-run` to start fresh).                                                                                                         |
+| `workbench list sessions`            | List stored session IDs + metadata.                                                                                                                                          |
+| `workbench list runs <sessionId>`    | Show run history for a session (statuses, timestamps).                                                                                                                       |
+| `workbench show session <sessionId>` | Dump session metadata.                                                                                                                                                       |
+| `workbench show run <runId>`         | Dump run metadata.                                                                                                                                                           |
+| `workbench show history <sessionId>` | Print the operation log as JSONL.                                                                                                                                            |
+| `workbench --help`                   | Get command + flag help (Cobra-generated).                                                                                                                                   |
 
 ## Configuration
 

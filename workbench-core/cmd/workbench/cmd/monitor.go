@@ -14,6 +14,7 @@ var monitorRunID string
 var monitorCmd = &cobra.Command{
 	Use:   "monitor",
 	Short: "Open monitoring dashboard for the running agent",
+	Long:  "Start the daemon first (workbench or workbench daemon), then run workbench monitor so it attaches to the active run. Use --run-id <id> with the run ID printed at daemon startup if needed.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := effectiveConfig(cmd)
 		if err != nil {

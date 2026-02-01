@@ -39,7 +39,9 @@ Workbench is a local, agentic runtime built around a virtual filesystem (VFS).
 Running "workbench" starts a new session and run, then starts an always-on daemon
 that continuously processes tasks from /inbox and writes results to /outbox.
 
-Use "workbench monitor <runId>" to open the monitoring TUI viewer.
+Start the daemon first, then run "workbench monitor" so the monitor attaches to
+the active run (or use "workbench monitor --run-id <id>" with the run ID printed
+at daemon startup).
 
 Each executed task can:
   - discover tools via /tools (fs.list + fs.read manifests)

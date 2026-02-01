@@ -257,6 +257,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Message: "Autonomous agent started",
 		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": resolved.Role},
 	})
+	log.Printf("daemon: run id %s — attach monitor with: workbench monitor --run-id %s", run.RunId, run.RunId)
 	for {
 		err = runner.Run(runCtx)
 		if runCtx.Err() != nil {

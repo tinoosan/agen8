@@ -38,9 +38,10 @@ type commandLinesMsg struct {
 }
 
 type monitorModel struct {
-	ctx   context.Context
-	cfg   config.Config
-	runID string
+	ctx       context.Context
+	cfg       config.Config
+	runID     string
+	runStatus types.RunStatus // loaded at init; used to show "run not active" warning
 
 	offset int64
 
@@ -159,10 +160,16 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	evs, off, _ := store.ListEvents(cfg, runID)
 	tailCh, errCh := store.TailEvents(cfg, tctx, runID, off)
 
+	runStatus := types.StatusDone
+	if r, err := store.LoadRun(cfg, runID); err == nil {
+		runStatus = r.Status
+	}
+
 	m := &monitorModel{
 		ctx:               ctx,
 		cfg:               cfg,
 		runID:             runID,
+		runStatus:         runStatus,
 		offset:            off,
 		input:             in,
 		activities:        []Activity{},
@@ -283,6 +290,10 @@ func (m *monitorModel) View() string {
 	headerLine := m.renderHeader()
 	main := m.renderMainBody(grid)
 	sections := []string{headerLine, main}
+	if m.runStatus != types.StatusRunning {
+		warning := m.styles.header.Render(kit.StyleDim.Render("Run is not active; start the daemon first or use --run-id to attach to the running run."))
+		sections = []string{headerLine, warning, main}
+	}
 
 	if grid.Outbox.Height > 0 {
 		sections = append(sections, m.renderOutbox(grid.Outbox))
@@ -380,7 +391,7 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 		if err := os.WriteFile(filepath.Join(inboxDir, id+".json"), b, 0644); err != nil {
 			return commandLinesMsg{lines: []string{"[queued] error: " + err.Error()}}
 		}
-		return commandLinesMsg{lines: []string{"[queued] " + id + " " + goal}}
+		return commandLinesMsg{lines: []string{"[queued] " + id + " " + goal + " — task queued to run " + m.runID}}
 	}
 }
 
@@ -890,7 +901,7 @@ func (m *monitorModel) calculatePanelHeight(contentRows int, isEmpty bool, isFoc
 		return 0
 	}
 
-	desired := contentRows + 2 // border + title
+	desired := contentRows + 3 // border(2) + title(1)
 	if desired > maxPanelHeight {
 		return maxPanelHeight
 	}

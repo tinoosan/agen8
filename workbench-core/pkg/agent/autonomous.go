@@ -136,8 +136,12 @@ func (r *AutonomousRunner) Run(ctx context.Context) error {
 			// Execute next task if available.
 			if item := r.q.Next(); item != nil {
 				_ = r.executeQueuedTask(ctx, item)
+				// Drain inbox immediately so tasks that arrived during execution are picked up without waiting for the ticker.
+				_ = r.drainInbox(ctx)
 				continue
 			}
+			// When idle, drain inbox once so a newly dropped task is picked up within one cycle.
+			_ = r.drainInbox(ctx)
 			// Yield a bit when idle.
 			time.Sleep(50 * time.Millisecond)
 		}

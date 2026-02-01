@@ -89,8 +89,11 @@ func (m *Manager) Calculate(width, height, inputHeight, outboxHeight, memoryHeig
 	}
 
 	mainH := height - headerHeight - outboxHeight - memoryHeight - inputHeight
-	if mainH < minMainHeight {
-		mainH = minMainHeight
+	// CRITICAL FIX: Do NOT enforce minMainHeight if it pushes total height > screen height.
+	// We allow mainH to shrink (even to 0) rather than creating a layout that is taller
+	// than the terminal, which causes the top to be clipped.
+	if mainH < 1 {
+		mainH = 1
 	}
 
 	leftW := int(math.Round(float64(width) * 0.60))
@@ -106,21 +109,50 @@ func (m *Manager) Calculate(width, height, inputHeight, outboxHeight, memoryHeig
 		leftW = max(0, width-rightW)
 	}
 
-	activityH := max(minPanelHeight, int(math.Round(float64(mainH)*0.45)))
-	outputH := mainH - activityH
-	if outputH < minPanelHeight {
-		outputH = minPanelHeight
-		activityH = max(minPanelHeight, mainH-outputH)
+	// Proportional split for Activity vs Output.
+	// We want roughly 45% for activity, but MUST respect minPanelHeight IF we have space.
+	// If space is tight (mainH < 8), we simply split what we have.
+	var activityH, outputH int
+	if mainH < minPanelHeight*2 {
+		// Not enough room for minimums. Split proportionally to avoid overflow.
+		activityH = mainH / 2
+		outputH = mainH - activityH
+	} else {
+		// Normal sizing with minimum guarantees.
+		activityH = int(math.Round(float64(mainH) * 0.45))
+		if activityH < minPanelHeight {
+			activityH = minPanelHeight
+		}
+		outputH = mainH - activityH
+		if outputH < minPanelHeight {
+			outputH = minPanelHeight
+			activityH = mainH - outputH
+		}
 	}
 
-	detailH := max(minDetailH, int(math.Round(float64(mainH)*0.40)))
-	// Ensure room for the remaining four right-hand panels.
-	if detailH > mainH-(minPanelHeight*4) {
-		detailH = max(minPanelHeight, mainH-(minPanelHeight*4))
+	var detailH, taskH, planH, queueH, statsH int
+	if mainH < 24 { // Adjusted threshold: 8(detail) + 4*4(others) = 24.
+		// Height is constrained. Split proportionally.
+		// Detail gets ~30%, others ~17.5% each.
+		detailH = int(float64(mainH) * 0.30)
+		if detailH < 1 {
+			detailH = 1
+		}
+		rem := mainH - detailH
+		// Split remainder evenly among 4.
+		base := rem / 4
+		taskH, planH, queueH, statsH = base, base, base, base
+		// Assign remainder to Stats to ensure sum = mainH
+		statsH = rem - (base * 3)
+	} else {
+		detailH = max(minDetailH, int(math.Round(float64(mainH)*0.40)))
+		// Ensure room for the remaining four right-hand panels.
+		if detailH > mainH-(minPanelHeight*4) {
+			detailH = max(minPanelHeight, mainH-(minPanelHeight*4))
+		}
+		remaining := max(0, mainH-detailH)
+		taskH, planH, queueH, statsH = allocateRemaining(remaining, minPanelHeight)
 	}
-
-	remaining := max(0, mainH-detailH)
-	taskH, planH, queueH, statsH := allocateRemaining(remaining, minPanelHeight)
 
 	// Clamp totals so right column height matches mainH.
 	rightTotal := detailH + taskH + planH + queueH + statsH
