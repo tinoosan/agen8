@@ -26,8 +26,8 @@ type TraceResource struct {
 	BaseDir string
 	// Mount is the virtual mount name used by the VFS.
 	Mount string
-	// RunId is the run this trace directory belongs to.
-	RunId string
+	// RunID is the run this trace directory belongs to.
+	RunID string
 }
 
 // TraceResource exposes a read-only event feed under the VFS mount "/log".
@@ -36,14 +36,14 @@ const (
 	maxSinceBytes  = 64 * 1024
 )
 
-func NewTraceResource(cfg config.Config, runId string) (*TraceResource, error) {
+func NewTraceResource(cfg config.Config, runID string) (*TraceResource, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	if err := validate.NonEmpty("runId", runId); err != nil {
+	if err := validate.NonEmpty("runID", runID); err != nil {
 		return nil, err
 	}
-	baseDir := fsutil.GetLogDir(cfg.DataDir, runId)
+	baseDir := fsutil.GetLogDir(cfg.DataDir, runID)
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("error creating trace directory %s: %w", baseDir, err)
 	}
@@ -61,7 +61,7 @@ func NewTraceResource(cfg config.Config, runId string) (*TraceResource, error) {
 		Cfg:              cfg,
 		BaseDir:          baseDir,
 		Mount:            vfs.MountLog,
-		RunId:            runId,
+		RunID:            runID,
 	}, nil
 }
 
@@ -275,7 +275,7 @@ func (tr *TraceResource) rebuildEventsFile(targetPath string) error {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(`SELECT event_json FROM events WHERE run_id = ? ORDER BY seq`, tr.RunId)
+	rows, err := db.Query(`SELECT event_json FROM events WHERE run_id = ? ORDER BY seq`, tr.RunID)
 	if err != nil {
 		return fmt.Errorf("trace rebuild: query events: %w", err)
 	}

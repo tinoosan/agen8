@@ -30,7 +30,7 @@ func TestCreateSessionAndAddRun(t *testing.T) {
 	if updated.CurrentRunID != "run-1" {
 		t.Fatalf("currentRunId=%q", updated.CurrentRunID)
 	}
-	if len(updated.Runs) != 2 || updated.Runs[0] != run.RunId || updated.Runs[1] != "run-1" {
+	if len(updated.Runs) != 2 || updated.Runs[0] != run.RunID || updated.Runs[1] != "run-1" {
 		t.Fatalf("runs=%v", updated.Runs)
 	}
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 	"github.com/tinoosan/workbench-core/pkg/vfsutil"
 )
@@ -27,6 +28,7 @@ var dailyNameRE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-memory\.md$`)
 
 type MemoryReindexer interface {
 	ReindexDailyFile(ctx context.Context, filename string, content []byte) error
+	Search(ctx context.Context, query string, limit int) ([]types.SearchResult, error)
 }
 
 // NewDailyMemoryResource creates a resource for daily memory files.
@@ -141,6 +143,20 @@ func (r *DailyMemoryResource) Append(subpath string, data []byte) error {
 		r.reindexBestEffort(name, updated)
 	}
 	return nil
+}
+
+func (r *DailyMemoryResource) Search(ctx context.Context, subpath string, query string, limit int) ([]types.SearchResult, error) {
+	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
+	if err != nil {
+		return nil, err
+	}
+	if clean != "" && clean != "." {
+		return nil, fmt.Errorf("invalid subpath %q: search only supported at root", subpath)
+	}
+	if r == nil || r.VectorStore == nil {
+		return nil, fmt.Errorf("memory search not configured")
+	}
+	return r.VectorStore.Search(ctx, query, limit)
 }
 
 func (r *DailyMemoryResource) reindexBestEffort(name string, data []byte) {

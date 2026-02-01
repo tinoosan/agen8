@@ -9,10 +9,10 @@ import (
 // Event represents a single recorded action or state change within a workbench run.
 // Events are persisted in an append-only JSONL format for auditability.
 type EventRecord struct {
-	// EventId is a unique identifier for this specific event (e.g., "event-<uuid>").
-	EventId string `json:"eventId"`
-	// RunId is the identifier of the run this event belongs to.
-	RunId string `json:"runId"`
+	// EventID is a unique identifier for this specific event (e.g., "event-<uuid>").
+	EventID string `json:"eventId"`
+	// RunID is the identifier of the run this event belongs to.
+	RunID string `json:"runId"`
 	// Timestamp is when the event was recorded.
 	Timestamp time.Time `json:"timestamp"`
 	// Type is the category of the event (e.g., "action_start", "result").
@@ -29,10 +29,10 @@ type EventRecord struct {
 type Event = EventRecord
 
 // NewEventRecord initializes a new EventRecord with a unique ID and the current timestamp.
-func NewEventRecord(runId, eventType, message string, data map[string]string) EventRecord {
+func NewEventRecord(runID, eventType, message string, data map[string]string) EventRecord {
 	return EventRecord{
-		EventId:   "event-" + uuid.NewString(),
-		RunId:     runId,
+		EventID:   "event-" + uuid.NewString(),
+		RunID:     runID,
 		Timestamp: time.Now(),
 		Type:      eventType,
 		Message:   message,
@@ -43,6 +43,6 @@ func NewEventRecord(runId, eventType, message string, data map[string]string) Ev
 // NewEvent initializes a new EventRecord.
 //
 // Deprecated: use NewEventRecord.
-func NewEvent(runId, eventType, message string, data map[string]string) EventRecord {
-	return NewEventRecord(runId, eventType, message, data)
+func NewEvent(runID, eventType, message string, data map[string]string) EventRecord {
+	return NewEventRecord(runID, eventType, message, data)
 }

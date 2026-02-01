@@ -7,11 +7,11 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
-// Runner executes goal-oriented agent work without exposing configuration surface area.
+// Runner is the agent execution interface (goal/conversation). It executes goal-oriented
+// agent work without exposing configuration surface area.
 //
-// This is the core agent loop interface used by autonomous execution and host-managed
-// conversation runners. The interactive TUI uses a separate, host-owned interface
-// (`internal/tui.TurnRunner`) that models a single user turn plus resume/session helpers.
+// Distinct from tools.Orchestrator (tool runner) and internal/tui.TurnRunner (TUI turn).
+// The interactive TUI uses TurnRunner for a single user turn plus resume/session helpers.
 type Runner interface {
 	Run(ctx context.Context, goal string) (string, error)
 	RunConversation(ctx context.Context, msgs []llm.LLMMessage) (final string, updated []llm.LLMMessage, steps int, err error)

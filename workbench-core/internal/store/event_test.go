@@ -22,12 +22,12 @@ func TestEventStore(t *testing.T) {
 	}
 
 	t.Run("AppendEventWritesOneLine", func(t *testing.T) {
-		err := AppendEvent(cfg, run.RunId, "test_event", "hello world", map[string]string{"foo": "bar"})
+		err := AppendEvent(cfg, run.RunID, "test_event", "hello world", map[string]string{"foo": "bar"})
 		if err != nil {
 			t.Fatalf("AppendEvent failed: %v", err)
 		}
 
-		tracePath := filepath.Join(cfg.DataDir, "runs", run.RunId, "log", "events.jsonl")
+		tracePath := filepath.Join(cfg.DataDir, "runs", run.RunID, "log", "events.jsonl")
 		f, err := os.Open(tracePath)
 		if err != nil {
 			t.Fatalf("Failed to open event file: %v", err)
@@ -60,12 +60,12 @@ func TestEventStore(t *testing.T) {
 
 	t.Run("ListEventsReturnsInOrder", func(t *testing.T) {
 		// Append a second event
-		err := AppendEvent(cfg, run.RunId, "second_event", "second message", nil)
+		err := AppendEvent(cfg, run.RunID, "second_event", "second message", nil)
 		if err != nil {
 			t.Fatalf("Failed to append second event: %v", err)
 		}
 
-		events, offset, err := ListEvents(cfg, run.RunId)
+		events, offset, err := ListEvents(cfg, run.RunID)
 		if err != nil {
 			t.Fatalf("ListEvents failed: %v", err)
 		}
@@ -90,19 +90,19 @@ func TestEventStore(t *testing.T) {
 	t.Run("TailEventsReturnsFromOffset", func(t *testing.T) {
 		// We already have 2 events from previous tests
 		// Get offset before adding more
-		_, offset, err := ListEvents(cfg, run.RunId)
+		_, offset, err := ListEvents(cfg, run.RunID)
 		if err != nil {
 			t.Fatalf("ListEvents failed: %v", err)
 		}
 
 		// Add 2 more events
-		AppendEvent(cfg, run.RunId, "third_event", "third message", nil)
-		AppendEvent(cfg, run.RunId, "fourth_event", "fourth message", nil)
+		AppendEvent(cfg, run.RunID, "third_event", "third message", nil)
+		AppendEvent(cfg, run.RunID, "fourth_event", "fourth message", nil)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		eventCh, errCh := TailEvents(cfg, ctx, run.RunId, offset)
+		eventCh, errCh := TailEvents(cfg, ctx, run.RunID, offset)
 
 		var tailedEvents []TailedEvent
 		done := false
@@ -142,7 +142,7 @@ func TestEventStore(t *testing.T) {
 
 	t.Run("TailEventsReceivesNewEvents", func(t *testing.T) {
 		// Get current offset
-		_, offset, err := ListEvents(cfg, run.RunId)
+		_, offset, err := ListEvents(cfg, run.RunID)
 		if err != nil {
 			t.Fatalf("ListEvents failed: %v", err)
 		}
@@ -150,13 +150,13 @@ func TestEventStore(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		eventCh, errCh := TailEvents(cfg, ctx, run.RunId, offset)
+		eventCh, errCh := TailEvents(cfg, ctx, run.RunID, offset)
 
 		// Append a new event after starting to tail
 		// Give the tail library time to set up file watching
 		go func() {
 			time.Sleep(500 * time.Millisecond)
-			AppendEvent(cfg, run.RunId, "new_event", "new message", nil)
+			AppendEvent(cfg, run.RunID, "new_event", "new message", nil)
 		}()
 
 		var tailedEvents []TailedEvent

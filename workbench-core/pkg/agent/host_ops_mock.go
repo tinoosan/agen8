@@ -22,7 +22,7 @@ import (
 //
 // This is not the final host API; it is a concrete reference for the agent-facing
 // request/response flow:
-//   - fs.list/fs.read/fs.write/fs.append are always available
+//   - fs.list/fs.read/fs.search/fs.write/fs.append are always available
 //   - tool.run executes via tools.Orchestrator and returns a ToolResponse
 type HostOpExecutor struct {
 	FS     *vfs.FS
@@ -199,6 +199,13 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			Truncated: truncated,
 		}
 
+	case types.HostOpFSSearch:
+		results, err := x.FS.Search(ctx, req.Path, req.Query, req.Limit)
+		if err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		return types.HostOpResponse{Op: req.Op, Ok: true, Results: results}
+
 	case types.HostOpFSWrite:
 		if err := x.FS.Write(req.Path, []byte(req.Text)); err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
@@ -352,9 +359,18 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		if err := json.Unmarshal(result.Output, &out); err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 		}
+		ok := out.ExitCode == 0
+		errMsg := ""
+		if !ok {
+			errMsg = strings.TrimSpace(out.Stderr)
+			if errMsg == "" {
+				errMsg = fmt.Sprintf("shell_exec exited with code %d", out.ExitCode)
+			}
+		}
 		return types.HostOpResponse{
 			Op:         req.Op,
-			Ok:         true,
+			Ok:         ok,
+			Error:      errMsg,
 			ExitCode:   out.ExitCode,
 			Stdout:     out.Stdout,
 			Stderr:     out.Stderr,

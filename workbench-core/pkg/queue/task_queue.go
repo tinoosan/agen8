@@ -3,7 +3,6 @@ package queue
 import (
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -41,7 +40,7 @@ func (q *TaskQueue) Enqueue(items ...*Item) {
 		if q.items[i].Task.Priority != q.items[j].Task.Priority {
 			return q.items[i].Task.Priority < q.items[j].Task.Priority
 		}
-		return taskTime(q.items[i].Task).Before(taskTime(q.items[j].Task))
+		return q.items[i].Task.SortTime().Before(q.items[j].Task.SortTime())
 	})
 }
 
@@ -86,11 +85,4 @@ func (q *TaskQueue) Snapshot() []Item {
 		out = append(out, *it)
 	}
 	return out
-}
-
-func taskTime(task types.Task) time.Time {
-	if task.CreatedAt != nil {
-		return task.CreatedAt.UTC()
-	}
-	return time.Time{}
 }

@@ -42,20 +42,20 @@ func TestCreateRun(t *testing.T) {
 	if run.StartedAt == nil {
 		t.Error("Expected StartedAt to be set, got nil")
 	}
-	if run.RunId == "" {
-		t.Error("Expected RunId to be set, got empty string")
+	if run.RunID == "" {
+		t.Error("Expected RunID to be set, got empty string")
 	}
 	if run.SessionID == "" {
 		t.Error("Expected SessionID to be set, got empty string")
 	}
 
 	// Verify persisted content via LoadRun
-	loaded, err := LoadRun(cfg, run.RunId)
+	loaded, err := LoadRun(cfg, run.RunID)
 	if err != nil {
 		t.Fatalf("LoadRun failed: %v", err)
 	}
-	if loaded.RunId != run.RunId {
-		t.Errorf("RunId mismatch: expected %q, got %q", run.RunId, loaded.RunId)
+	if loaded.RunID != run.RunID {
+		t.Errorf("RunID mismatch: expected %q, got %q", run.RunID, loaded.RunID)
 	}
 	if loaded.Goal != run.Goal {
 		t.Errorf("Goal mismatch: expected %q, got %q", run.Goal, loaded.Goal)
@@ -73,13 +73,13 @@ func TestLoadRun(t *testing.T) {
 		goal := "Load Success Goal"
 		run := mustCreateSessionRun(t, cfg, goal, 100)
 
-		loaded, err := LoadRun(cfg, run.RunId)
+		loaded, err := LoadRun(cfg, run.RunID)
 		if err != nil {
 			t.Fatalf("LoadRun failed: %v", err)
 		}
 
-		if loaded.RunId != run.RunId {
-			t.Errorf("Expected RunId %q, got %q", run.RunId, loaded.RunId)
+		if loaded.RunID != run.RunID {
+			t.Errorf("Expected RunID %q, got %q", run.RunID, loaded.RunID)
 		}
 		if loaded.Goal != goal {
 			t.Errorf("Expected goal %q, got %q", goal, loaded.Goal)
@@ -126,7 +126,7 @@ func TestLoadRun(t *testing.T) {
 		}
 	})
 
-	t.Run("MissingRunId", func(t *testing.T) {
+	t.Run("MissingRunID", func(t *testing.T) {
 		runId := "missing-id-run"
 		db, err := getSQLiteDB(cfg)
 		if err != nil {
@@ -164,7 +164,7 @@ func TestStopRun(t *testing.T) {
 	t.Run("SuccessDone", func(t *testing.T) {
 		run := mustCreateSessionRun(t, cfg, "Stop Success", 100)
 
-		stopped, err := StopRun(cfg, run.RunId, types.StatusDone, "")
+		stopped, err := StopRun(cfg, run.RunID, types.StatusDone, "")
 		if err != nil {
 			t.Fatalf("StopRun failed: %v", err)
 		}
@@ -180,7 +180,7 @@ func TestStopRun(t *testing.T) {
 		}
 
 		// Verify persisted
-		loaded, _ := LoadRun(cfg, run.RunId)
+		loaded, _ := LoadRun(cfg, run.RunID)
 		if loaded.Status != types.StatusDone {
 			t.Errorf("Status expected %q, got %q", types.StatusDone, loaded.Status)
 		}
@@ -190,7 +190,7 @@ func TestStopRun(t *testing.T) {
 		run := mustCreateSessionRun(t, cfg, "Stop Failed Success", 100)
 
 		errMsg := "some error occurred"
-		stopped, err := StopRun(cfg, run.RunId, types.StatusFailed, errMsg)
+		stopped, err := StopRun(cfg, run.RunID, types.StatusFailed, errMsg)
 		if err != nil {
 			t.Fatalf("StopRun failed: %v", err)
 		}
@@ -209,7 +209,7 @@ func TestStopRun(t *testing.T) {
 	t.Run("ErrorMissingMessage", func(t *testing.T) {
 		run := mustCreateSessionRun(t, cfg, "Stop Error Missing Msg", 100)
 
-		_, err := StopRun(cfg, run.RunId, types.StatusFailed, "")
+		_, err := StopRun(cfg, run.RunID, types.StatusFailed, "")
 		if err == nil {
 			t.Error("Expected error for missing error message, got nil")
 		}
@@ -221,7 +221,7 @@ func TestStopRun(t *testing.T) {
 	t.Run("ErrorInvalidStatus", func(t *testing.T) {
 		run := mustCreateSessionRun(t, cfg, "Stop Error Invalid Status", 100)
 
-		_, err := StopRun(cfg, run.RunId, types.StatusRunning, "")
+		_, err := StopRun(cfg, run.RunID, types.StatusRunning, "")
 		if err == nil {
 			t.Error("Expected error for transition to status 'running', got nil")
 		}
@@ -233,13 +233,13 @@ func TestStopRun(t *testing.T) {
 	t.Run("ErrorAlreadyStopped", func(t *testing.T) {
 		run := mustCreateSessionRun(t, cfg, "Stop Error Already Stopped", 100)
 
-		_, err := StopRun(cfg, run.RunId, types.StatusDone, "")
+		_, err := StopRun(cfg, run.RunID, types.StatusDone, "")
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		// Try to stop again
-		_, err = StopRun(cfg, run.RunId, types.StatusDone, "")
+		_, err = StopRun(cfg, run.RunID, types.StatusDone, "")
 		if err == nil {
 			t.Error("Expected error for already stopped run, got nil")
 		}

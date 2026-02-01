@@ -30,6 +30,14 @@ type Task struct {
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
+// SortTime returns the time used for ordering tasks (CreatedAt if set, else zero time).
+func (t Task) SortTime() time.Time {
+	if t.CreatedAt != nil {
+		return t.CreatedAt.UTC()
+	}
+	return time.Time{}
+}
+
 // NormalizeStatus lowercases and defaults the task status.
 func (t *Task) NormalizeStatus() {
 	if t == nil {

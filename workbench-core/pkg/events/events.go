@@ -16,7 +16,7 @@ var (
 // Event is the unified event payload emitted by the host.
 //
 // Note: This is not the persisted event record. Persisted events are stored as
-// `types.EventRecord` (event id + timestamp) by the host-side event store.
+// types.EventRecord (event id, run id, timestamp, type, message, and optional data) by the host-side event store.
 type Event struct {
 	Type      string
 	Message   string

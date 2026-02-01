@@ -15,8 +15,8 @@
 // # Tool Data Flow
 //
 // Tools are described with `tools.ToolManifest`/`tools.ToolAction`, and their results are
-// captured in `types.ToolResponse`. Tool calls are orchestrated by the runtime's `tools.Orchestrator`,
-// which persists `ToolResponse`/artifacts under `/results/<callId>` so later steps or
+// captured in `tools.ToolResponse`. Tool calls are orchestrated by the runtime's `tools.Orchestrator`,
+// which persists `tools.ToolResponse`/artifacts under `/results/<callId>` so later steps or
 // host-side tooling can inspect what happened. The documents under `/tools` and `/results`
 // form the public API surface for tool discovery, invocation, and auditing.
 //
@@ -24,7 +24,7 @@
 //
 // Events (see `package events`) use `events.Event` as the runtime emission payload for logs,
 // tool usage, and telemetry. When persisted, those payloads are recorded as `types.EventRecord`
-// (event id + timestamp) by the host-side event store.
+// (event id, run id, timestamp, type, message, and optional data; see EventRecord) by the host-side event store.
 //
 // The `events.MultiSink` abstraction allows hosts to fan-out events, and `events.Emitter`
 // enforces that a run ID + sink must exist before emitting.

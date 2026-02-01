@@ -23,9 +23,9 @@ var monitorCmd = &cobra.Command{
 		runID := strings.TrimSpace(monitorRunID)
 		if runID == "" {
 			if r, err := store.LatestRunningRun(cfg); err == nil {
-				runID = r.RunId
+				runID = r.RunID
 			} else if r, err := store.LatestRun(cfg); err == nil {
-				runID = r.RunId
+				runID = r.RunID
 			} else {
 				return fmt.Errorf("no runs found to monitor")
 			}

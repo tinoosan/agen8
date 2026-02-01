@@ -102,6 +102,7 @@ func defaultHostTools() []HostTool {
 	return []HostTool{
 		&agenttools.FSListTool{},
 		&agenttools.FSReadTool{},
+		&agenttools.FSSearchTool{},
 		&agenttools.FSWriteTool{},
 		&agenttools.FSEditTool{},
 		&agenttools.FSPatchTool{},

@@ -32,7 +32,7 @@ func CreateSession(cfg config.Config, goal string, maxBytesForContext int) (type
 	if err := SaveRun(cfg, run); err != nil {
 		return types.Session{}, types.Run{}, err
 	}
-	updated, err := AddRunToSession(cfg, s.SessionID, run.RunId)
+	updated, err := AddRunToSession(cfg, s.SessionID, run.RunID)
 	if err != nil {
 		return types.Session{}, types.Run{}, err
 	}

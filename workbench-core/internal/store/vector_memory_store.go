@@ -18,6 +18,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 type MemorySearchResult struct {
@@ -290,7 +291,7 @@ func isDailyMemoryFileName(name string) bool {
 	return err == nil
 }
 
-func (s *VectorMemoryStore) Search(ctx context.Context, query string, limit int) ([]MemorySearchResult, error) {
+func (s *VectorMemoryStore) Search(ctx context.Context, query string, limit int) ([]types.SearchResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, nil
@@ -313,9 +314,9 @@ func (s *VectorMemoryStore) Search(ctx context.Context, query string, limit int)
 	}
 	defer rows.Close()
 
-	out := make([]MemorySearchResult, 0, limit)
+	out := make([]types.SearchResult, 0, limit)
 	type scored struct {
-		MemorySearchResult
+		types.SearchResult
 	}
 	all := make([]scored, 0, 64)
 	for rows.Next() {
@@ -326,24 +327,32 @@ func (s *VectorMemoryStore) Search(ctx context.Context, query string, limit int)
 		if err := rows.Scan(&id, &title, &filename, &sourceFile, &chunkIndex, &content, &dim, &blob); err != nil {
 			return nil, err
 		}
+		_ = id
+		_ = sourceFile
+		_ = chunkIndex
 		emb, err := blobToFloat32Slice(blob, dim)
 		if err != nil {
 			continue
 		}
 		score := cosineSimilarity(qemb, emb)
-		all = append(all, scored{MemorySearchResult: MemorySearchResult{
-			MemoryID:   id,
-			Title:      title,
-			Filename:   filename,
-			SourceFile: sourceFile,
-			ChunkIndex: chunkIndex,
-			Content:    content,
-			Score:      score,
+		path := strings.TrimSpace(filename)
+		if path != "" && !strings.HasPrefix(path, "/") {
+			path = "/memory/" + path
+		}
+		snippet := strings.TrimSpace(content)
+		if len(snippet) > 500 {
+			snippet = snippet[:500] + "…"
+		}
+		all = append(all, scored{SearchResult: types.SearchResult{
+			Title:   strings.TrimSpace(title),
+			Path:    path,
+			Snippet: snippet,
+			Score:   score,
 		}})
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })
 	for i := 0; i < len(all) && i < limit; i++ {
-		out = append(out, all[i].MemorySearchResult)
+		out = append(out, all[i].SearchResult)
 	}
 	return out, nil
 }

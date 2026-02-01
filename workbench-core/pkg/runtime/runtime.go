@@ -22,8 +22,9 @@ import (
 )
 
 type Runtime struct {
-	FS              *vfs.FS
-	Executor        agent.HostExecutor
+	FS       *vfs.FS
+	Executor agent.HostExecutor
+	// Runner is the tool orchestrator (executes tool.run host ops).
 	Runner          *tools.Orchestrator
 	ToolManifests   []tools.ToolManifest
 	BuiltinInvokers tools.MapRegistry
@@ -171,7 +172,15 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountProject, err)
 	}
 
-	runDir := fsutil.GetRunDir(cfg.Cfg.DataDir, cfg.Run.RunId)
+	runDir := fsutil.GetRunDir(cfg.Cfg.DataDir, cfg.Run.RunID)
+	wsRes, err := resources.NewWorkspace(cfg.Cfg, cfg.Run.RunID)
+	if err != nil {
+		return nil, fmt.Errorf("create workspace resource: %w", err)
+	}
+	if err := fs.Mount(vfs.MountWorkspace, wsRes); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountWorkspace, err)
+	}
+
 	planDir := filepath.Join(runDir, "plan")
 	if err := os.MkdirAll(planDir, 0755); err != nil {
 		return nil, fmt.Errorf("prepare plan dir: %w", err)
@@ -267,12 +276,13 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			Type:    "host.mounted",
 			Message: "Mounted VFS resources",
 			Data: map[string]string{
-				"/project": workdirRes.BaseDir,
-				"/inbox":   inboxDir,
-				"/outbox":  outboxDir,
-				"/plan":    planDir,
-				"/skills":  "(virtual)",
-				"/memory":  "(virtual)",
+				"/project":   workdirRes.BaseDir,
+				"/workspace": wsRes.BaseDir,
+				"/inbox":     inboxDir,
+				"/outbox":    outboxDir,
+				"/plan":      planDir,
+				"/skills":    "(virtual)",
+				"/memory":    "(virtual)",
 			},
 			Console: boolPtr(false),
 		})
@@ -326,7 +336,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	constructor := &agent.PromptBuilder{
 		FS:              fs,
 		Cfg:             cfg.Cfg,
-		RunID:           cfg.Run.RunId,
+		RunID:           cfg.Run.RunID,
 		SessionID:       cfg.Run.SessionID,
 		LoadSession:     cfg.LoadSession,
 		SaveSession:     cfg.SaveSession,
@@ -337,12 +347,12 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		Emit:            cfg.Emit,
 	}
 
-	auditObs := newAuditObserver(cfg.Run.RunId, cfg.Emit, cfg.AuditReads)
+	auditObs := newAuditObserver(cfg.Run.RunID, cfg.Emit, cfg.AuditReads)
 
 	exec := NewExecutor(executor, ExecutorOptions{
 		Emit:      cfg.Emit,
 		Model:     cfg.Model,
-		RunID:     cfg.Run.RunId,
+		RunID:     cfg.Run.RunID,
 		SessionID: cfg.Run.SessionID,
 		FS:        fs,
 		Guard: func(req types.HostOpRequest) *types.HostOpResponse {

@@ -12,15 +12,15 @@ import (
 
 // NewWorkspace creates a directory-backed resource for a run's workspace.
 // The workspace is the agent-writable working directory mounted at "/workspace".
-func NewWorkspace(cfg config.Config, runId string) (*DirResource, error) {
+func NewWorkspace(cfg config.Config, runID string) (*DirResource, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	if err := validate.NonEmpty("runId", runId); err != nil {
+	if err := validate.NonEmpty("runID", runID); err != nil {
 		return nil, err
 	}
 
-	baseDir := fsutil.GetWorkspaceDir(cfg.DataDir, runId)
+	baseDir := fsutil.GetWorkspaceDir(cfg.DataDir, runID)
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("error creating workspace directory %s: %w", baseDir, err)
 	}

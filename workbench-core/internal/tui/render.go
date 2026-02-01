@@ -245,6 +245,15 @@ func renderOpRequest(d map[string]string) string {
 		return "List " + path
 	case "fs.read":
 		return "Read " + path
+	case "fs.search":
+		q := strings.TrimSpace(d["query"])
+		if path != "" && q != "" {
+			return fmt.Sprintf("Search %s for %q", path, q)
+		}
+		if path != "" {
+			return "Search " + path
+		}
+		return "Search"
 	case "fs.write":
 		return "Write " + path
 	case "fs.append":
@@ -511,7 +520,7 @@ func actionStatusIcon(d map[string]string) (string, bool) {
 
 func actionCategory(op, toolID string) string {
 	switch strings.TrimSpace(op) {
-	case "fs.list", "fs.read":
+	case "fs.list", "fs.read", "fs.search":
 		return "Explored"
 	case "fs.write", "fs.edit", "fs.patch", "fs.append":
 		return "Updated"

@@ -103,8 +103,8 @@ func TestDailyMemoryResource_ReindexAndSearch(t *testing.T) {
 	if len(results) == 0 {
 		t.Fatalf("expected search results, got 0")
 	}
-	if !strings.Contains(results[0].Content, "Alpha") {
-		t.Fatalf("unexpected search content: %q", results[0].Content)
+	if !strings.Contains(results[0].Snippet, "Alpha") {
+		t.Fatalf("unexpected search content: %q", results[0].Snippet)
 	}
 }
 

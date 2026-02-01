@@ -15,6 +15,7 @@ import (
 type HistoryAppender = ports.HistoryAppender
 
 // HistorySink appends enriched history lines to a history store.
+// Each history line's "kind" field is the event type from the source event.
 type HistorySink struct {
 	Store HistoryAppender
 	Model string

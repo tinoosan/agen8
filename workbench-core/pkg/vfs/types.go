@@ -1,6 +1,11 @@
 package vfs
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"github.com/tinoosan/workbench-core/pkg/types"
+)
 
 const (
 	// MountWorkspace is the mount name for an agent's workspace.
@@ -81,6 +86,11 @@ type Resource interface {
 	Read(path string) ([]byte, error)
 	Write(path string, data []byte) error
 	Append(path string, data []byte) error
+}
+
+// Searchable is an optional interface for resources that can perform semantic or indexed search.
+type Searchable interface {
+	Search(ctx context.Context, path string, query string, limit int) ([]types.SearchResult, error)
 }
 
 // Entry describes one item returned by Resource.List.

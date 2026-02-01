@@ -26,8 +26,8 @@ import (
 
 // LoadRun reads a run's state from SQLite by its run ID.
 // It returns an error if the row cannot be read, if the JSON is malformed,
-// or if the loaded data is missing critical fields like runId.
-func LoadRun(cfg config.Config, runId string) (types.Run, error) {
+// or if the loaded data is missing critical fields like runID.
+func LoadRun(cfg config.Config, runID string) (types.Run, error) {
 	if err := cfg.Validate(); err != nil {
 		return types.Run{}, err
 	}
@@ -36,11 +36,11 @@ func LoadRun(cfg config.Config, runId string) (types.Run, error) {
 		return types.Run{}, err
 	}
 	var b []byte
-	if err := db.QueryRow(`SELECT run_json FROM runs WHERE run_id = ?`, runId).Scan(&b); err != nil {
+	if err := db.QueryRow(`SELECT run_json FROM runs WHERE run_id = ?`, runID).Scan(&b); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return types.Run{}, fmt.Errorf("run %s does not exist: %w", runId, errors.Join(ErrNotFound, os.ErrNotExist))
+			return types.Run{}, fmt.Errorf("run %s does not exist: %w", runID, errors.Join(ErrNotFound, os.ErrNotExist))
 		}
-		return types.Run{}, fmt.Errorf("error reading run %s: %w", runId, err)
+		return types.Run{}, fmt.Errorf("error reading run %s: %w", runID, err)
 	}
 
 	var run types.Run
@@ -49,8 +49,8 @@ func LoadRun(cfg config.Config, runId string) (types.Run, error) {
 		return types.Run{}, fmt.Errorf("error unmarshalling run json: %w", err)
 	}
 
-	if run.RunId == "" {
-		return types.Run{}, fmt.Errorf("invalid run.json: missing runId: %w", ErrInvalid)
+	if run.RunID == "" {
+		return types.Run{}, fmt.Errorf("invalid run.json: missing runID: %w", ErrInvalid)
 	}
 	return run, nil
 }
@@ -92,7 +92,7 @@ func SaveRun(cfg config.Config, run types.Run) error {
 		   finished_at=excluded.finished_at,
 		   created_at=COALESCE(runs.created_at, excluded.created_at),
 		   updated_at=excluded.updated_at`,
-		run.RunId,
+		run.RunID,
 		run.SessionID,
 		string(run.Status),
 		run.Goal,
@@ -110,11 +110,11 @@ func SaveRun(cfg config.Config, run types.Run) error {
 
 // ReopenRun transitions a terminal run back to StatusRunning so it can be continued.
 // It clears FinishedAt and Error for terminal runs. If already running, it is a no-op.
-func ReopenRun(cfg config.Config, runId string) (types.Run, error) {
+func ReopenRun(cfg config.Config, runID string) (types.Run, error) {
 	if err := cfg.Validate(); err != nil {
 		return types.Run{}, err
 	}
-	run, err := LoadRun(cfg, runId)
+	run, err := LoadRun(cfg, runID)
 	if err != nil {
 		return types.Run{}, err
 	}
@@ -131,22 +131,22 @@ func ReopenRun(cfg config.Config, runId string) (types.Run, error) {
 // It updates the Status, sets FinishedAt to the current time,
 // and records an error message if the status is Failed.
 // The updated state is then persisted to SQLite.
-func StopRun(cfg config.Config, runId string, status types.RunStatus, errorMsg string) (types.Run, error) {
+func StopRun(cfg config.Config, runID string, status types.RunStatus, errorMsg string) (types.Run, error) {
 	if err := cfg.Validate(); err != nil {
 		return types.Run{}, err
 	}
 
 	if status != types.StatusFailed && status != types.StatusDone && status != types.StatusCanceled {
-		return types.Run{}, fmt.Errorf("error stopping run %s, invalid status '%s': %w", runId, status, ErrInvalid)
+		return types.Run{}, fmt.Errorf("error stopping run %s, invalid status '%s': %w", runID, status, ErrInvalid)
 	}
 
-	run, err := LoadRun(cfg, runId)
+	run, err := LoadRun(cfg, runID)
 	if err != nil {
 		return types.Run{}, fmt.Errorf("error stopping run: %w", err)
 	}
 
 	if run.Status == types.StatusDone || run.Status == types.StatusFailed || run.Status == types.StatusCanceled {
-		return types.Run{}, fmt.Errorf("run %s cannot be stopped due to invalid state %s: %w", run.RunId, run.Status, ErrConflict)
+		return types.Run{}, fmt.Errorf("run %s cannot be stopped due to invalid state %s: %w", run.RunID, run.Status, ErrConflict)
 	}
 
 	now := time.Now()
@@ -203,7 +203,7 @@ func LatestRunningRun(cfg config.Config) (types.Run, error) {
 	if err := json.Unmarshal([]byte(raw), &run); err != nil {
 		return types.Run{}, err
 	}
-	if run.RunId == "" {
+	if run.RunID == "" {
 		return types.Run{}, ErrInvalid
 	}
 	return run, nil
@@ -231,7 +231,7 @@ func LatestRun(cfg config.Config) (types.Run, error) {
 	if err := json.Unmarshal([]byte(raw), &run); err != nil {
 		return types.Run{}, err
 	}
-	if run.RunId == "" {
+	if run.RunID == "" {
 		return types.Run{}, ErrInvalid
 	}
 	return run, nil

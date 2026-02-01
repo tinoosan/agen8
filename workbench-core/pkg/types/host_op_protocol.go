@@ -16,6 +16,8 @@ const (
 	HostOpFSList = "fs.list"
 	// HostOpFSRead reads a file from the VFS.
 	HostOpFSRead = "fs.read"
+	// HostOpFSSearch searches a VFS mount for matching content (e.g. /memory vector search).
+	HostOpFSSearch = "fs.search"
 	// HostOpFSWrite writes/replaces a file in the VFS.
 	HostOpFSWrite = "fs.write"
 	// HostOpFSAppend appends to a file in the VFS.
@@ -43,6 +45,8 @@ const (
 type HostOpRequest struct {
 	Op        string          `json:"op"`
 	Path      string          `json:"path,omitempty"`
+	Query     string          `json:"query,omitempty"`
+	Limit     int             `json:"limit,omitempty"`
 	ToolID    tools.ToolID    `json:"toolId,omitempty"`
 	ActionID  string          `json:"actionId,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
@@ -69,7 +73,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = normalizeHostOp(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSRead, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpToolRun, HostOpShellExec, HostOpHTTPFetch, HostOpTrace, HostOpFinal:
+	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpToolRun, HostOpShellExec, HostOpHTTPFetch, HostOpTrace, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -90,6 +94,21 @@ func (r HostOpRequest) Validate() error {
 		}
 		if r.MaxBytes < 0 {
 			return fmt.Errorf("maxBytes must be >= 0")
+		}
+		return nil
+
+	case HostOpFSSearch:
+		if err := validate.NonEmpty("path", r.Path); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+			return fmt.Errorf("path must be an absolute VFS path (start with /)")
+		}
+		if err := validate.NonEmpty("query", r.Query); err != nil {
+			return err
+		}
+		if r.Limit < 0 {
+			return fmt.Errorf("limit must be >= 0")
 		}
 		return nil
 
@@ -195,6 +214,8 @@ func normalizeHostOp(op string) string {
 		return HostOpFSList
 	case "fs_read":
 		return HostOpFSRead
+	case "fs_search":
+		return HostOpFSSearch
 	case "fs_write":
 		return HostOpFSWrite
 	case "fs_append":
@@ -248,17 +269,26 @@ func validateMemoryWritePath(path string) error {
 	return nil
 }
 
+// SearchResult is one result returned by fs.search.
+type SearchResult struct {
+	Title   string  `json:"title,omitempty"`
+	Path    string  `json:"path,omitempty"`
+	Snippet string  `json:"snippet,omitempty"`
+	Score   float64 `json:"score,omitempty"`
+}
+
 // HostOpResponse is the minimal "host primitive" response envelope.
 type HostOpResponse struct {
-	Op        string   `json:"op"`
-	Ok        bool     `json:"ok"`
-	Error     string   `json:"error,omitempty"`
-	ErrorCode string   `json:"errorCode,omitempty"`
-	Entries   []string `json:"entries,omitempty"`
-	BytesLen  int      `json:"bytesLen,omitempty"`
-	Text      string   `json:"text,omitempty"`
-	BytesB64  string   `json:"bytesB64,omitempty"`
-	Truncated bool     `json:"truncated,omitempty"`
+	Op        string         `json:"op"`
+	Ok        bool           `json:"ok"`
+	Error     string         `json:"error,omitempty"`
+	ErrorCode string         `json:"errorCode,omitempty"`
+	Entries   []string       `json:"entries,omitempty"`
+	Results   []SearchResult `json:"results,omitempty"`
+	BytesLen  int            `json:"bytesLen,omitempty"`
+	Text      string         `json:"text,omitempty"`
+	BytesB64  string         `json:"bytesB64,omitempty"`
+	Truncated bool           `json:"truncated,omitempty"`
 
 	ToolResponse *tools.ToolResponse `json:"toolResponse,omitempty"`
 	// Shell output

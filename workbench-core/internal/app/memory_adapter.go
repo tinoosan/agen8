@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent"
@@ -21,10 +22,12 @@ func (v *vectorMemoryAdapter) Search(ctx context.Context, query string, limit in
 	}
 	out := make([]agent.MemorySnippet, 0, len(results))
 	for _, r := range results {
+		filename := strings.TrimSpace(r.Path)
+		filename = strings.TrimPrefix(filename, "/memory/")
 		out = append(out, agent.MemorySnippet{
 			Title:    r.Title,
-			Filename: r.Filename,
-			Content:  r.Content,
+			Filename: filename,
+			Content:  r.Snippet,
 			Score:    r.Score,
 		})
 	}

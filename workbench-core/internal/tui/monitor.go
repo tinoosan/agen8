@@ -274,7 +274,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tailedEventMsg:
-		if msg.ev.Event.EventId != "" {
+		if msg.ev.Event.EventID != "" {
 			m.offset = msg.ev.NextOffset
 			m.observeEvent(msg.ev.Event)
 		}
@@ -713,7 +713,7 @@ func (m *monitorModel) searchMemory(query string) tea.Cmd {
 		}
 		lines := []string{"[memory] search: " + query}
 		for _, r := range results {
-			lines = append(lines, fmt.Sprintf("  - %.3f %s (%s)", r.Score, r.Title, r.Filename))
+			lines = append(lines, fmt.Sprintf("  - %.3f %s (%s)", r.Score, r.Title, r.Path))
 		}
 		return commandLinesMsg{lines: lines}
 	}

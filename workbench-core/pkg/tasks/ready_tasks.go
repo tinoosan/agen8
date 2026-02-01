@@ -2,7 +2,6 @@ package tasks
 
 import (
 	"sort"
-	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -17,19 +16,12 @@ func ReadyTasks(tasks map[string]types.Task) []types.Task {
 		if out[i].Priority != out[j].Priority {
 			return out[i].Priority < out[j].Priority
 		}
-		ti := taskTime(out[i])
-		tj := taskTime(out[j])
+		ti := out[i].SortTime()
+		tj := out[j].SortTime()
 		if !ti.Equal(tj) {
 			return ti.Before(tj)
 		}
 		return out[i].TaskID < out[j].TaskID
 	})
 	return out
-}
-
-func taskTime(task types.Task) time.Time {
-	if task.CreatedAt != nil {
-		return task.CreatedAt.UTC()
-	}
-	return time.Time{}
 }

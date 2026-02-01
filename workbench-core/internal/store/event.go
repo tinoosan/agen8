@@ -38,13 +38,15 @@ type TailedEvent struct {
 
 // AppendEvent records a new event for the specified run.
 // It validates inputs, ensures the run exists, and appends the event to SQLite.
-func AppendEvent(cfg config.Config, runId, eventType, message string, data map[string]string) error {
+// On success, the event is persisted to SQLite. A best-effort mirror is written to the
+// run's trace log; mirror failure is logged but does not fail AppendEvent.
+func AppendEvent(cfg config.Config, runID, eventType, message string, data map[string]string) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
 
-	if runId == "" {
-		return fmt.Errorf("error appending event, runId cannot be blank")
+	if runID == "" {
+		return fmt.Errorf("error appending event, runID cannot be blank")
 	}
 
 	if eventType == "" {
@@ -59,11 +61,11 @@ func AppendEvent(cfg config.Config, runId, eventType, message string, data map[s
 	if err != nil {
 		return err
 	}
-	if err := ensureRunExists(db, runId); err != nil {
+	if err := ensureRunExists(db, runID); err != nil {
 		return err
 	}
 
-	event := types.NewEventRecord(runId, eventType, message, data)
+	event := types.NewEventRecord(runID, eventType, message, data)
 	b, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("error marshalling event: %w", err)
@@ -80,19 +82,19 @@ func AppendEvent(cfg config.Config, runId, eventType, message string, data map[s
 	if _, err := db.Exec(
 		`INSERT INTO events (event_id, run_id, ts, type, message, data_json, event_json)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		event.EventId,
-		runId,
+		event.EventID,
+		runID,
 		event.Timestamp.UTC().Format(time.RFC3339Nano),
 		event.Type,
 		event.Message,
 		nullIfEmpty(dataJSON),
 		string(b),
 	); err != nil {
-		return fmt.Errorf("error writing event for run %s: %w", runId, err)
+		return fmt.Errorf("error writing event for run %s: %w", runID, err)
 	}
 
-	if err := mirrorTraceEvent(cfg.DataDir, runId, b); err != nil {
-		log.Printf("store: warning: failed to mirror trace event for run %s: %v", runId, err)
+	if err := mirrorTraceEvent(cfg.DataDir, runID, b); err != nil {
+		log.Printf("store: warning: failed to mirror trace event for run %s: %v", runID, err)
 	}
 
 	//f.Sync()
@@ -100,27 +102,27 @@ func AppendEvent(cfg config.Config, runId, eventType, message string, data map[s
 
 }
 
-func mirrorTraceEvent(dataDir, runId string, payload []byte) error {
-	traceDir := fsutil.GetLogDir(dataDir, runId)
+func mirrorTraceEvent(dataDir, runID string, payload []byte) error {
+	traceDir := fsutil.GetLogDir(dataDir, runID)
 	if err := os.MkdirAll(traceDir, 0755); err != nil {
 		return fmt.Errorf("error creating trace directory %s: %w", traceDir, err)
 	}
 	tracePath := filepath.Join(traceDir, "events.jsonl")
 	tf, err := os.OpenFile(tracePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("error appending trace event for run %s: %w", runId, err)
+		return fmt.Errorf("error appending trace event for run %s: %w", runID, err)
 	}
 	defer tf.Close()
 
 	if _, err := tf.Write(append(payload, '\n')); err != nil {
-		return fmt.Errorf("error writing trace event for run %s: %w", runId, err)
+		return fmt.Errorf("error writing trace event for run %s: %w", runID, err)
 	}
 	return nil
 }
 
 // ListEvents retrieves all recorded events for a given run ID.
 // It reads from SQLite, validates each entry, and returns them in order.
-func ListEvents(cfg config.Config, runId string) ([]types.EventRecord, int64, error) {
+func ListEvents(cfg config.Config, runID string) ([]types.EventRecord, int64, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, 0, err
 	}
@@ -129,7 +131,7 @@ func ListEvents(cfg config.Config, runId string) ([]types.EventRecord, int64, er
 		return nil, 0, err
 	}
 	events := make([]types.EventRecord, 0)
-	rows, err := db.Query(`SELECT event_json FROM events WHERE run_id = ? ORDER BY seq`, runId)
+	rows, err := db.Query(`SELECT event_json FROM events WHERE run_id = ? ORDER BY seq`, runID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -146,10 +148,10 @@ func ListEvents(cfg config.Config, runId string) ([]types.EventRecord, int64, er
 		if err := json.Unmarshal([]byte(raw), &event); err != nil {
 			return nil, 0, fmt.Errorf("error reading event at row %d: %w", lineNum, err)
 		}
-		if event.RunId != runId {
-			return nil, 0, fmt.Errorf("error reading event at row %d: runId mismatch", lineNum)
+		if event.RunID != runID {
+			return nil, 0, fmt.Errorf("error reading event at row %d: runID mismatch", lineNum)
 		}
-		if event.EventId == "" {
+		if event.EventID == "" {
 			return nil, 0, fmt.Errorf("error reading event at row %d: eventId cannot be blank", lineNum)
 		}
 		if event.Timestamp.IsZero() {
@@ -167,7 +169,7 @@ func ListEvents(cfg config.Config, runId string) ([]types.EventRecord, int64, er
 		return nil, 0, err
 	}
 	var nextOffset int64
-	if err := db.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM events WHERE run_id = ?`, runId).Scan(&nextOffset); err != nil {
+	if err := db.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM events WHERE run_id = ?`, runID).Scan(&nextOffset); err != nil {
 		return nil, 0, err
 	}
 	return events, nextOffset, nil
@@ -178,7 +180,7 @@ func ListEvents(cfg config.Config, runId string) ([]types.EventRecord, int64, er
 // Each TailedEvent includes the NextOffset for resuming after refresh.
 // The caller should cancel the context to stop tailing.
 // Both returned channels are closed when the function exits.
-func TailEvents(cfg config.Config, ctx context.Context, runId string, fromOffset int64) (<-chan TailedEvent, <-chan error) {
+func TailEvents(cfg config.Config, ctx context.Context, runID string, fromOffset int64) (<-chan TailedEvent, <-chan error) {
 	eventCh := make(chan TailedEvent)
 	errCh := make(chan error, 1)
 
@@ -215,7 +217,7 @@ func TailEvents(cfg config.Config, ctx context.Context, runId string, fromOffset
 			case <-ticker.C:
 				rows, err := db.Query(
 					`SELECT seq, event_json FROM events WHERE run_id = ? AND seq > ? ORDER BY seq`,
-					runId,
+					runID,
 					currentOffset,
 				)
 				if err != nil {
@@ -236,9 +238,9 @@ func TailEvents(cfg config.Config, ctx context.Context, runId string, fromOffset
 						errCh <- fmt.Errorf("error unmarshalling event: %w", err)
 						return
 					}
-					if event.RunId != runId {
+					if event.RunID != runID {
 						rows.Close()
-						errCh <- fmt.Errorf("runId mismatch: expected %s, got %s", runId, event.RunId)
+						errCh <- fmt.Errorf("runID mismatch: expected %s, got %s", runID, event.RunID)
 						return
 					}
 					currentOffset = seq
@@ -265,16 +267,16 @@ func TailEvents(cfg config.Config, ctx context.Context, runId string, fromOffset
 	return eventCh, errCh
 }
 
-func ensureRunExists(db *sql.DB, runId string) error {
-	if strings.TrimSpace(runId) == "" {
-		return fmt.Errorf("runId cannot be blank")
+func ensureRunExists(db *sql.DB, runID string) error {
+	if strings.TrimSpace(runID) == "" {
+		return fmt.Errorf("runID cannot be blank")
 	}
 	var exists int
-	if err := db.QueryRow(`SELECT 1 FROM runs WHERE run_id = ? LIMIT 1`, runId).Scan(&exists); err != nil {
+	if err := db.QueryRow(`SELECT 1 FROM runs WHERE run_id = ? LIMIT 1`, runID).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("cannot append event, run %s does not exist: %w", runId, errors.Join(ErrNotFound, os.ErrNotExist))
+			return fmt.Errorf("cannot append event, run %s does not exist: %w", runID, errors.Join(ErrNotFound, os.ErrNotExist))
 		}
-		return fmt.Errorf("cannot append event, error reading run %s: %w", runId, err)
+		return fmt.Errorf("cannot append event, error reading run %s: %w", runID, err)
 	}
 	return nil
 }

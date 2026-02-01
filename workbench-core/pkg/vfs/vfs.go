@@ -3,6 +3,7 @@
 package vfs
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	iofs "io/fs"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/pkg/store"
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 // FS is a virtual filesystem that manages a collection of mounted resources.
@@ -126,6 +128,19 @@ func (fs *FS) Append(vpath string, data []byte) error {
 		return fmt.Errorf("append %s:%s: %w", mountName, subpath, err)
 	}
 	return nil
+}
+
+// Search searches a mounted resource (if supported) for a query.
+func (fs *FS) Search(ctx context.Context, vpath, query string, limit int) ([]types.SearchResult, error) {
+	mountName, r, subpath, err := fs.Resolve(vpath)
+	if err != nil {
+		return nil, err
+	}
+	searchable, ok := r.(Searchable)
+	if !ok {
+		return nil, errors.Join(store.ErrInvalid, fmt.Errorf("search not supported for mount %q", mountName))
+	}
+	return searchable.Search(ctx, subpath, query, limit)
 }
 
 // List returns a list of entries under the given subpath.

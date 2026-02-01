@@ -163,6 +163,16 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	if req.Op == types.HostOpFSRead && req.MaxBytes != 0 {
 		reqData["maxBytes"] = strconv.Itoa(req.MaxBytes)
 	}
+	if req.Op == types.HostOpFSSearch {
+		if strings.TrimSpace(req.Query) != "" {
+			reqData["query"] = strings.TrimSpace(req.Query)
+			storeReq["query"] = strings.TrimSpace(req.Query)
+		}
+		if req.Limit != 0 {
+			reqData["limit"] = strconv.Itoa(req.Limit)
+			storeReq["limit"] = strconv.Itoa(req.Limit)
+		}
+	}
 	if req.Op == types.HostOpToolRun && req.TimeoutMs != 0 {
 		reqData["timeoutMs"] = strconv.Itoa(req.TimeoutMs)
 	}
@@ -333,6 +343,9 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 				meta.RespData["bodyTruncated"] = "true"
 			}
 		}
+	}
+	if resp.Op == types.HostOpFSSearch {
+		meta.RespData["results"] = strconv.Itoa(len(resp.Results))
 	}
 
 	m.emit(ctx, events.Event{

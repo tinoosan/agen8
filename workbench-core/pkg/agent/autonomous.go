@@ -114,6 +114,7 @@ type AutonomousRunner struct {
 	seenTaskIDs          map[string]bool
 	lastSatisfied        map[string]time.Time
 	pendingObligationRun map[string]int
+	inboxEmptyStreak     int
 }
 
 func NewAutonomousRunner(cfg AutonomousRunnerConfig) (*AutonomousRunner, error) {
@@ -139,8 +140,8 @@ func (r *AutonomousRunner) Run(ctx context.Context) error {
 		r.enqueueSelfGoal(r.cfg.InitialGoal, 0, "startup")
 	}
 
-	inboxTicker := time.NewTicker(r.cfg.PollInterval)
-	defer inboxTicker.Stop()
+	inboxTimer := time.NewTimer(r.cfg.PollInterval)
+	defer inboxTimer.Stop()
 	roleTicker := time.NewTicker(r.cfg.ProactiveInterval)
 	defer roleTicker.Stop()
 
@@ -151,8 +152,10 @@ func (r *AutonomousRunner) Run(ctx context.Context) error {
 				r.reportError(ctx, "task.execute", err)
 			}
 			// Drain inbox immediately so tasks that arrived during execution are picked up without waiting for the ticker.
-			if err := r.drainInbox(ctx); err != nil {
+			if nextDelay, err := r.handleInboxDrain(ctx); err != nil {
 				r.reportError(ctx, "inbox.drain", err)
+			} else {
+				resetTimer(inboxTimer, nextDelay)
 			}
 			continue
 		}
@@ -161,9 +164,12 @@ func (r *AutonomousRunner) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 
-		case <-inboxTicker.C:
-			if err := r.drainInbox(ctx); err != nil {
+		case <-inboxTimer.C:
+			if nextDelay, err := r.handleInboxDrain(ctx); err != nil {
 				r.reportError(ctx, "inbox.drain", err)
+				resetTimer(inboxTimer, r.cfg.PollInterval)
+			} else {
+				resetTimer(inboxTimer, nextDelay)
 			}
 
 		case <-roleTicker.C:
@@ -192,17 +198,56 @@ func (r *AutonomousRunner) reportError(ctx context.Context, kind string, err err
 	}
 }
 
-func (r *AutonomousRunner) drainInbox(ctx context.Context) error {
+func (r *AutonomousRunner) handleInboxDrain(ctx context.Context) (time.Duration, error) {
+	count, err := r.drainInbox(ctx)
+	if err != nil {
+		return r.cfg.PollInterval, err
+	}
+	return r.nextInboxDelay(count == 0), nil
+}
+
+func (r *AutonomousRunner) nextInboxDelay(empty bool) time.Duration {
+	if !empty {
+		r.inboxEmptyStreak = 0
+		return r.cfg.PollInterval
+	}
+	r.inboxEmptyStreak++
+	var delay time.Duration
+	switch r.inboxEmptyStreak {
+	case 1:
+		delay = 10 * time.Second
+	case 2:
+		delay = 30 * time.Second
+	default:
+		delay = 60 * time.Second
+	}
+	if delay < r.cfg.PollInterval {
+		delay = r.cfg.PollInterval
+	}
+	return delay
+}
+
+func (r *AutonomousRunner) drainInbox(ctx context.Context) (int, error) {
 	a := r.cfg.Agent
 	resp := a.ExecHostOp(ctx, types.HostOpRequest{Op: types.HostOpFSList, Path: r.cfg.InboxPath})
 	if !resp.Ok {
-		return fmt.Errorf("list inbox: %s", resp.Error)
+		return 0, fmt.Errorf("list inbox: %s", resp.Error)
 	}
 	paths := make([]string, 0, len(resp.Entries))
 	for _, p := range resp.Entries {
-		if strings.HasSuffix(strings.ToLower(p), ".json") {
-			paths = append(paths, path.Join(r.cfg.InboxPath, p))
+		p = strings.TrimSpace(p)
+		if p == "" || !strings.HasSuffix(strings.ToLower(p), ".json") {
+			continue
 		}
+		if strings.HasPrefix(p, r.cfg.InboxPath) {
+			paths = append(paths, p)
+			continue
+		}
+		if strings.HasPrefix(p, "/") {
+			paths = append(paths, p)
+			continue
+		}
+		paths = append(paths, path.Join(r.cfg.InboxPath, p))
 	}
 	sort.Strings(paths)
 
@@ -261,7 +306,20 @@ func (r *AutonomousRunner) drainInbox(ctx context.Context) error {
 			})
 		}
 	}
-	return errs
+	return len(paths), errs
+}
+
+func resetTimer(t *time.Timer, d time.Duration) {
+	if t == nil {
+		return
+	}
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+	t.Reset(d)
 }
 
 func (r *AutonomousRunner) processControlFile(ctx context.Context, controlPath string) error {

@@ -38,6 +38,7 @@ func (s EventSink) Emit(_ context.Context, _ string, event events.Event) (err er
 	default:
 		// If the UI is slow, drop rather than block the host loop.
 		dropped = true
+		err = errors.Join(err, events.ErrDropped)
 	}
 	return err
 }

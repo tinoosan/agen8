@@ -61,7 +61,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 
 	emitter := &events.Emitter{
-		RunID: run.RunId,
+		RunID: run.RunID,
 		Sink: events.MultiSink{
 			events.StoreSink{Store: daemonEventAppender{cfg: cfg}},
 		},
@@ -110,7 +110,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 	profileStore = ps
 
-	traceStore = implstore.DiskTraceStore{DiskStore: implstore.DiskStore{Dir: fsutil.GetLogDir(cfg.DataDir, run.RunId)}}
+	traceStore = implstore.DiskTraceStore{DiskStore: implstore.DiskStore{Dir: fsutil.GetLogDir(cfg.DataDir, run.RunID)}}
 
 	hs, err := implstore.NewSQLiteHistoryStore(cfg, run.SessionID)
 	if err != nil {
@@ -228,7 +228,8 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		OutboxPath:        "/outbox",
 		PollInterval:      poll,
 		ProactiveInterval: 30 * time.Second,
-		InitialGoal:       goal,
+		// goal is run metadata; don't enqueue a synthetic startup task.
+		InitialGoal:  "",
 		MaxReadBytes:      96 * 1024,
 		Logf: func(format string, args ...any) {
 			log.Printf("daemon: "+format, args...)
@@ -270,9 +271,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	mustEmit(runCtx, events.Event{
 		Type:    "daemon.start",
 		Message: "Autonomous agent started",
-		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": selectedRole.ID},
+		Data:    map[string]string{"runId": run.RunID, "sessionId": run.SessionID, "role": selectedRole.ID},
 	})
-	log.Printf("daemon: run id %s — attach monitor with: workbench monitor --run-id %s", run.RunId, run.RunId)
+	log.Printf("daemon: run id %s — attach monitor with: workbench monitor --run-id %s", run.RunID, run.RunID)
 	for {
 		err = runner.Run(runCtx)
 		if runCtx.Err() != nil {
@@ -294,7 +295,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	mustEmit(runCtx, events.Event{
 		Type:    "daemon.stop",
 		Message: "Autonomous agent stopped",
-		Data:    map[string]string{"runId": run.RunId, "sessionId": run.SessionID, "role": selectedRole.ID},
+		Data:    map[string]string{"runId": run.RunID, "sessionId": run.SessionID, "role": selectedRole.ID},
 	})
 	serverWG.Wait()
 	return err
@@ -435,6 +436,7 @@ type daemonEventAppender struct {
 }
 
 func (s daemonEventAppender) AppendEvent(ctx context.Context, runID, eventType, message string, data map[string]string) error {
+	// Context is not yet passed to the store; reserved for future cancellation/timeout.
 	_ = ctx
 	return implstore.AppendEvent(s.cfg, runID, eventType, message, data)
 }
@@ -486,7 +488,7 @@ func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run
 			Inputs:    payload.Inputs,
 			Metadata:  payload.Metadata,
 		}
-		runDir := fsutil.GetRunDir(cfg.DataDir, run.RunId)
+		runDir := fsutil.GetRunDir(cfg.DataDir, run.RunID)
 		inboxDir := filepath.Join(runDir, "inbox")
 		if err := os.MkdirAll(inboxDir, 0755); err != nil {
 			http.Error(w, "inbox error: "+err.Error(), http.StatusInternalServerError)

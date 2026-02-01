@@ -102,9 +102,8 @@ func TestAutonomousRunner_DoesNotBusyLoopInboxListWhenIdle(t *testing.T) {
 	_ = r.Run(ctx)
 
 	calls := r.cfg.Agent.(*countingAgent).listCalls.Load()
-	// With a 100ms poll interval and no work, we should not see inbox listing in a tight loop.
-	// Allow a small cushion for scheduler timing.
-	if calls > 6 {
-		t.Fatalf("expected <= 6 fs.list calls while idle; got %d", calls)
+	// With exponential-ish backoff on empty inbox, we should see very few list calls.
+	if calls > 2 {
+		t.Fatalf("expected <= 2 fs.list calls while idle; got %d", calls)
 	}
 }

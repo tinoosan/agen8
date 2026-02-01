@@ -6,6 +6,7 @@ import (
 )
 
 // StoreAppender is a minimal interface for persisting events.
+// Context is reserved for future cancellation/timeout; current implementations may ignore it.
 type StoreAppender interface {
 	AppendEvent(ctx context.Context, runID, eventType, message string, data map[string]string) error
 }

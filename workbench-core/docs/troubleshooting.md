@@ -19,6 +19,11 @@ This guide captures common issues and diagnostics that surface when running Work
 - **Data directory not honored**: CLI flags > env vars > defaults. Explicitly pass `--data-dir` when starting Workbench or set `WORKBENCH_DATA_DIR`. Use `./workbench --help` to confirm recognized flags.
 - **Workdir mismatch**: `--workdir` controls the `/project` mount. Verify the host path exists before launching runs; otherwise the mount fails and the CLI logs an error.
 
+## Retries and timeouts
+
+- **Retries**: LLM calls use exponential backoff (see `pkg/llm/retry`). Tool runs and store writes are not retried; they use a single attempt with timeout where applicable.
+- **Timeouts**: Tool invocations respect the `timeoutMs` passed in the host op; the runtime does not add retries for transient tool failures.
+
 ## Advanced diagnostics
 
 - **Trace budget exceeded**: When trace budget (`--trace-bytes`) is exhausted, the agent may stop writing further trace output. Increase the flag or disable tracing to continue.

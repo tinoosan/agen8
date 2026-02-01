@@ -32,8 +32,8 @@ var RunStatuses = map[string]RunStatus{
 
 // Run represents the state and metadata of a single workbench execution.
 type Run struct {
-	// RunId is the unique identifier for this run (e.g., "run-<uuid>").
-	RunId string `json:"runId"`
+	// RunID is the unique identifier for this run (e.g., "run-<uuid>").
+	RunID string `json:"runId"`
 	// SessionID is the session this run belongs to (e.g., "sess-<uuid>").
 	//
 	// A session groups multiple runs and provides shared, append-only history across them.
@@ -105,10 +105,10 @@ type RunRuntimeConfig struct {
 // NewRun initializes a new Run instance with a unique ID and the given parameters.
 // It sets the initial status to StatusRunning and the start time to now.
 func NewRun(goal string, maxBytesForContext int, sessionID string) Run {
-	runId := "run-" + uuid.NewString()
+	runID := "run-" + uuid.NewString()
 	now := time.Now()
 	return Run{
-		RunId:              runId,
+		RunID:              runID,
 		SessionID:          sessionID,
 		Goal:               goal,
 		Status:             StatusRunning,
