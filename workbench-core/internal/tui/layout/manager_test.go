@@ -92,3 +92,77 @@ func TestDynamicPanelHeights(t *testing.T) {
 		t.Fatalf("expected main area to expand when panels hidden: got %d vs %d", mainArea1, mainArea2)
 	}
 }
+
+func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
+	mgr := NewManager(testStyle(), true)
+	composerHeight := 4
+	outboxHeight := 6
+	grid := mgr.CalculateDashboard(120, 35, composerHeight, outboxHeight)
+
+	reserved := DashHeaderHeight + DashStatusBarHeight + composerHeight + DashGapAfterHeader + DashGapBeforeComposer
+	mainH := 35 - reserved
+	if mainH < 1 {
+		mainH = 1
+	}
+	leftTotal := grid.AgentOutput.Height + grid.Outbox.Height
+	if leftTotal > mainH {
+		t.Fatalf("left column height %d exceeds main height %d", leftTotal, mainH)
+	}
+	rightTotal := grid.ActivityFeed.Height + grid.ActivityDetail.Height + grid.CurrentTask.Height +
+		grid.TaskQueue.Height + grid.Plan.Height + grid.Stats.Height
+	if rightTotal > mainH {
+		t.Fatalf("right column height %d exceeds main height %d", rightTotal, mainH)
+	}
+	totalH := reserved + mainH
+	if totalH > grid.ScreenHeight {
+		t.Fatalf("layout total %d exceeds screen height %d", totalH, grid.ScreenHeight)
+	}
+}
+
+func TestCalculateDashboard_ActivityDetailPlanMinFiveLines(t *testing.T) {
+	mgr := NewManager(testStyle(), true)
+	// Use 120x48 so main height is enough for detail and plan to get at least 5 content lines each.
+	grid := mgr.CalculateDashboard(120, 48, 4, 6)
+
+	if grid.ActivityDetail.ContentHeight < 5 {
+		t.Fatalf("activity detail ContentHeight want >= 5, got %d", grid.ActivityDetail.ContentHeight)
+	}
+	if grid.Plan.ContentHeight < 5 {
+		t.Fatalf("plan ContentHeight want >= 5, got %d", grid.Plan.ContentHeight)
+	}
+}
+
+func TestCalculateDashboard_OutboxComposerLeftColumnOnly(t *testing.T) {
+	mgr := NewManager(testStyle(), true)
+	grid := mgr.CalculateDashboard(120, 35, 4, 6)
+
+	leftW := grid.AgentOutput.Width
+	if grid.Outbox.Width != leftW {
+		t.Fatalf("outbox width want %d (left column), got %d", leftW, grid.Outbox.Width)
+	}
+	if grid.Composer.Width != leftW {
+		t.Fatalf("composer width want %d (left column), got %d", leftW, grid.Composer.Width)
+	}
+	if grid.Outbox.Width >= grid.ScreenWidth || grid.Composer.Width >= grid.ScreenWidth {
+		t.Fatalf("outbox and composer must be left-column only (width < screen width %d)", grid.ScreenWidth)
+	}
+}
+
+func TestCalculateCompact_100x30_NoClipping(t *testing.T) {
+	mgr := NewManager(testStyle(), true)
+	composerHeight := 4
+	grid := mgr.CalculateCompact(100, 30, composerHeight)
+
+	reserved := 1 + composerHeight
+	mainH := 30 - reserved
+	if grid.AgentOutput.Height > mainH {
+		t.Fatalf("compact main area height %d exceeds remaining %d", grid.AgentOutput.Height, mainH)
+	}
+	if grid.Composer.Height != composerHeight {
+		t.Fatalf("composer height want %d, got %d", composerHeight, grid.Composer.Height)
+	}
+	totalH := reserved + grid.AgentOutput.Height
+	if totalH > grid.ScreenHeight {
+		t.Fatalf("compact layout total %d exceeds screen height %d", totalH, grid.ScreenHeight)
+	}
+}

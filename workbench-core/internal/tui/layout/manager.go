@@ -19,6 +19,14 @@ type PanelSpec struct {
 	TitleHeight   int
 }
 
+// InnerHeight returns the content-box height for lipgloss (total - frame) so
+// that total rendered height equals spec.Height and no clipping occurs.
+func (p PanelSpec) InnerHeight() int { return max(0, p.Height-p.FrameHeight) }
+
+// InnerWidth returns the content-box width for lipgloss (total - frame) so
+// that total rendered width equals spec.Width.
+func (p PanelSpec) InnerWidth() int { return max(0, p.Width-p.FrameWidth) }
+
 // GridLayout contains the computed panel specs for the monitor dashboard.
 type GridLayout struct {
 	ScreenWidth  int
@@ -56,6 +64,152 @@ func NewManager(style lipgloss.Style, hasTitle bool) *Manager {
 		titleH = 1
 	}
 	return &Manager{style: style, frameW: frameW, frameH: frameH, titleHeight: titleH}
+}
+
+// CalculateCompact produces a GridLayout for compact mode (single main area + composer).
+// Reserves headerHeight (1), composerHeight; gives the rest to AgentOutput full width.
+// Other panels get zero height so they are not shown.
+func (m *Manager) CalculateCompact(width, height, composerHeight int) GridLayout {
+	const headerHeight = 1
+	if width < 0 {
+		width = 0
+	}
+	if height < 0 {
+		height = 0
+	}
+	if composerHeight < 0 {
+		composerHeight = 0
+	}
+	mainH := height - headerHeight - composerHeight
+	if mainH < 1 {
+		mainH = 1
+	}
+	grid := GridLayout{ScreenWidth: width, ScreenHeight: height}
+	grid.AgentOutput = m.spec(width, mainH)
+	grid.Composer = m.spec(width, composerHeight)
+	// Zero-height specs for panels not shown in compact mode
+	grid.ActivityFeed = m.spec(width, 0)
+	grid.ActivityDetail = m.spec(width, 0)
+	grid.CurrentTask = m.spec(width, 0)
+	grid.Plan = m.spec(width, 0)
+	grid.TaskQueue = m.spec(width, 0)
+	grid.Stats = m.spec(width, 0)
+	grid.Outbox = m.spec(width, 0)
+	grid.Memory = m.spec(width, 0)
+	return grid
+}
+
+// Dashboard reserved row constants: used by CalculateDashboard so total view fits.
+const (
+	DashHeaderHeight      = 1
+	DashStatusBarHeight   = 1
+	DashWarningHeight     = 1
+	DashGapAfterHeader    = 1
+	DashGapBeforeComposer = 1
+)
+
+// CalculateDashboard produces a GridLayout for dashboard mode (two columns).
+// Reserves header, status bar, composer height, and gaps; allocates remainder to
+// left (AgentOutput flex + Outbox fixed) and right (Activity, ActivityDetail,
+// CurrentTask, Queue, Plan, Stats). Outbox and Composer use left column width only.
+func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight int) GridLayout {
+	const (
+		minLeftWidth  = 60
+		minRightWidth = 32
+		gapCols       = 1
+		outboxFixedH  = 6
+		outboxMinH    = 4
+		activityH     = 8
+		currentTaskH  = 4
+		queueH        = 5
+		planH         = 8
+		statsH        = 5
+		minDetailH    = 5
+	)
+	if width < 0 {
+		width = 0
+	}
+	if height < 0 {
+		height = 0
+	}
+	if composerHeight < 0 {
+		composerHeight = 0
+	}
+	if outboxHeight < 0 {
+		outboxHeight = 0
+	}
+	reserved := DashHeaderHeight + DashStatusBarHeight + DashWarningHeight + composerHeight + DashGapAfterHeader + DashGapBeforeComposer
+	remainingHeight := height - reserved
+	if remainingHeight < 1 {
+		remainingHeight = 1
+	}
+
+	leftW := int(math.Round(float64(width) * 0.66))
+	if leftW < minLeftWidth {
+		leftW = minLeftWidth
+	}
+	if leftW > width-minRightWidth-gapCols {
+		leftW = max(0, width-minRightWidth-gapCols)
+	}
+	rightW := width - leftW - gapCols
+	if rightW < minRightWidth {
+		rightW = minRightWidth
+		leftW = max(0, width-rightW-gapCols)
+	}
+
+	outboxH := outboxHeight
+	if outboxH > 0 && outboxH < outboxMinH {
+		outboxH = outboxMinH
+	}
+	if outboxH > outboxFixedH {
+		outboxH = outboxFixedH
+	}
+	mainH := remainingHeight
+	agentOutputH := mainH - outboxH
+	if agentOutputH < 1 {
+		agentOutputH = 1
+		outboxH = mainH - 1
+	}
+
+	fixedRight := activityH + currentTaskH + queueH + planH + statsH
+	detailH := mainH - fixedRight
+	if mainH < fixedRight+minDetailH {
+		detailH = 1
+		rest := mainH - 1
+		activityH := rest * 8 / 30
+		taskH := rest * 4 / 30
+		queueH := rest * 5 / 30
+		planH := rest * 8 / 30
+		statsH := rest * 5 / 30
+		grid := GridLayout{ScreenWidth: width, ScreenHeight: height}
+		grid.AgentOutput = m.spec(leftW, agentOutputH)
+		grid.Outbox = m.spec(leftW, outboxH)
+		grid.Composer = m.spec(leftW, composerHeight)
+		grid.ActivityFeed = m.spec(rightW, activityH)
+		grid.ActivityDetail = m.spec(rightW, detailH)
+		grid.CurrentTask = m.spec(rightW, taskH)
+		grid.TaskQueue = m.spec(rightW, queueH)
+		grid.Plan = m.spec(rightW, planH)
+		grid.Stats = m.spec(rightW, statsH)
+		grid.Memory = m.spec(leftW, 0)
+		return grid
+	}
+	if detailH < 1 {
+		detailH = 1
+	}
+
+	grid := GridLayout{ScreenWidth: width, ScreenHeight: height}
+	grid.AgentOutput = m.spec(leftW, agentOutputH)
+	grid.Outbox = m.spec(leftW, outboxH)
+	grid.Composer = m.spec(leftW, composerHeight)
+	grid.ActivityFeed = m.spec(rightW, activityH)
+	grid.ActivityDetail = m.spec(rightW, detailH)
+	grid.CurrentTask = m.spec(rightW, currentTaskH)
+	grid.TaskQueue = m.spec(rightW, queueH)
+	grid.Plan = m.spec(rightW, planH)
+	grid.Stats = m.spec(rightW, statsH)
+	grid.Memory = m.spec(leftW, 0)
+	return grid
 }
 
 // Calculate produces a GridLayout for the given screen size. inputHeight is the

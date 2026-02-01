@@ -73,6 +73,7 @@ type monitorModel struct {
 	model             string
 	role              string
 	focusedPanel      panelID
+	compactTab        int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
 	width             int
 	height            int
 	styles            *monitorStyles
@@ -114,6 +115,12 @@ const (
 	panelOutbox
 	panelMemory
 	panelComposer
+)
+
+// Breakpoints for responsive layout: below these use compact mode (tabs/single column).
+const (
+	compactModeMinWidth  = 110
+	compactModeMinHeight = 32
 )
 
 func RunMonitor(ctx context.Context, cfg config.Config, runID string) error {
@@ -271,13 +278,24 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		case "tab":
+			if m.isCompactMode() {
+				m.compactTab = (m.compactTab + 1) % 4
+				return m, nil
+			}
 			m.focusedPanel = (m.focusedPanel + 1) % 8
 			m.updateFocus()
 			return m, nil
 		case "shift+tab":
+			if m.isCompactMode() {
+				m.compactTab = (m.compactTab + 3) % 4
+				return m, nil
+			}
 			m.focusedPanel = (m.focusedPanel + 7) % 8
 			m.updateFocus()
 			return m, nil
+		}
+		if m.isCompactMode() {
+			m.focusedPanel = m.compactTabToPanel()
 		}
 		return m.routeKeyToFocusedPanel(msg)
 	}
@@ -285,26 +303,92 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *monitorModel) isCompactMode() bool {
+	return m.width < compactModeMinWidth || m.height < compactModeMinHeight
+}
+
 func (m *monitorModel) View() string {
 	grid := m.layout()
 	headerLine := m.renderHeader()
-	main := m.renderMainBody(grid)
-	sections := []string{headerLine, main}
+
+	if m.isCompactMode() {
+		return m.renderCompact(grid, headerLine)
+	}
+	return m.renderDashboard(grid, headerLine)
+}
+
+func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine string) string {
+	main := m.renderMainBodyDashboard(grid)
+	sections := []string{headerLine, "", main, "", m.renderComposer(grid.Composer), m.renderStatusBar(grid)}
 	if m.runStatus != types.StatusRunning {
 		warning := m.styles.header.Render(kit.StyleDim.Render("Run is not active; start the daemon first or use --run-id to attach to the running run."))
-		sections = []string{headerLine, warning, main}
+		sections = []string{headerLine, warning, "", main, "", m.renderComposer(grid.Composer), m.renderStatusBar(grid)}
 	}
-
-	if grid.Outbox.Height > 0 {
-		sections = append(sections, m.renderOutbox(grid.Outbox))
-	}
-	if grid.Memory.Height > 0 {
-		sections = append(sections, m.renderMemory(grid.Memory))
-	}
-
-	sections = append(sections, m.renderComposer(grid.Composer))
-
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+func (m *monitorModel) renderStatusBar(grid layoutmgr.GridLayout) string {
+	return m.styles.header.Render(kit.StyleDim.Render("Tab: cycle panels  |  Ctrl+Enter: submit  |  /quit"))
+}
+
+// compactTabNames for the tab bar in compact mode.
+var compactTabNames = []string{"Output", "Activity", "Plan", "Outbox"}
+
+func (m *monitorModel) compactTabToPanel() panelID {
+	switch m.compactTab {
+	case 0:
+		return panelOutput
+	case 1:
+		return panelActivity
+	case 2:
+		return panelPlan
+	case 3:
+		return panelOutbox
+	default:
+		return panelOutput
+	}
+}
+
+// renderCompact builds the view for compact mode: header + tab bar + main content + composer.
+func (m *monitorModel) renderCompact(grid layoutmgr.GridLayout, headerLine string) string {
+	tabBar := m.renderCompactTabBar()
+	contentHeight := grid.AgentOutput.InnerHeight() - 1
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	content := m.renderCompactTabContent(grid, contentHeight)
+	main := m.panelStyle(panelOutput).
+		Width(grid.AgentOutput.InnerWidth()).Height(contentHeight).
+		Render(content)
+	sections := []string{headerLine, tabBar, main, m.renderComposer(grid.Composer)}
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+func (m *monitorModel) renderCompactTabBar() string {
+	parts := make([]string, len(compactTabNames))
+	for i, name := range compactTabNames {
+		if i == m.compactTab {
+			parts[i] = m.styles.sectionTitle.Render(name)
+		} else {
+			parts[i] = kit.StyleDim.Render(name)
+		}
+	}
+	return m.styles.header.Render(strings.Join(parts, "  |  "))
+}
+
+func (m *monitorModel) renderCompactTabContent(grid layoutmgr.GridLayout, contentHeight int) string {
+	switch m.compactTab {
+	case 0:
+		return m.styles.sectionTitle.Render("Agent Output") + "\n" + m.agentOutputVP.View()
+	case 1:
+		return m.styles.sectionTitle.Render("Activity") + "\n" + m.activityList.View() + "\n" + m.activityDetail.View()
+	case 2:
+		return m.styles.sectionTitle.Render("Plan") + "\n" + m.planViewport.View()
+	case 3:
+		return m.styles.sectionTitle.Render("Outbox") + "\n" + m.outboxVP.View()
+	default:
+		return m.styles.sectionTitle.Render("Output") + "\n" + m.agentOutputVP.View()
+	}
 }
 
 func (m *monitorModel) listenEvent() tea.Cmd {
@@ -731,31 +815,39 @@ func (m *monitorModel) panelStyle(panel panelID) lipgloss.Style {
 	return m.styles.panel
 }
 
-func (m *monitorModel) renderMainBody(grid layoutmgr.GridLayout) string {
-	left := lipgloss.JoinVertical(lipgloss.Left,
-		m.panelStyle(panelActivity).Width(grid.ActivityFeed.Width).Height(grid.ActivityFeed.Height).Render(
-			m.styles.sectionTitle.Render("Activity Feed")+"\n"+m.activityList.View(),
+// renderMainBodyDashboard builds the two-column dashboard: left = AgentOutput + Outbox,
+// right = Activity, ActivityDetail, CurrentTask, Queue, Plan, Stats.
+func (m *monitorModel) renderMainBodyDashboard(grid layoutmgr.GridLayout) string {
+	leftParts := []string{
+		m.panelStyle(panelOutput).Width(grid.AgentOutput.InnerWidth()).Height(grid.AgentOutput.InnerHeight()).Render(
+			m.styles.sectionTitle.Render("Agent Output") + "\n" + m.agentOutputVP.View(),
 		),
-		m.panelStyle(panelOutput).Width(grid.AgentOutput.Width).Height(grid.AgentOutput.Height).Render(
-			m.styles.sectionTitle.Render("Agent Output")+"\n"+m.agentOutputVP.View(),
-		),
-	)
+	}
+	if grid.Outbox.Height > 0 {
+		leftParts = append(leftParts, m.renderOutbox(grid.Outbox))
+	}
+	left := lipgloss.JoinVertical(lipgloss.Left, leftParts...)
 
 	right := lipgloss.JoinVertical(lipgloss.Left,
-		m.panelStyle(panelActivityDetail).Width(grid.ActivityDetail.Width).Height(grid.ActivityDetail.Height).Render(
+		m.panelStyle(panelActivity).Width(grid.ActivityFeed.InnerWidth()).Height(grid.ActivityFeed.InnerHeight()).Render(
+			m.styles.sectionTitle.Render("Activity Feed")+"\n"+m.activityList.View(),
+		),
+		m.panelStyle(panelActivityDetail).Width(grid.ActivityDetail.InnerWidth()).Height(grid.ActivityDetail.InnerHeight()).Render(
 			m.styles.sectionTitle.Render("Activity Details")+"\n"+m.activityDetail.View(),
 		),
 		m.renderCurrentTask(grid.CurrentTask),
-		m.panelStyle(panelPlan).Width(grid.Plan.Width).Height(grid.Plan.Height).Render(
+		m.renderTaskQueue(grid.TaskQueue),
+		m.panelStyle(panelPlan).Width(grid.Plan.InnerWidth()).Height(grid.Plan.InnerHeight()).Render(
 			m.styles.sectionTitle.Render("Plan")+"\n"+m.planViewport.View(),
 		),
-		m.renderTaskQueue(grid.TaskQueue),
-		m.styles.panel.Width(grid.Stats.Width).Height(grid.Stats.Height).Render(
+		m.styles.panel.Width(grid.Stats.InnerWidth()).Height(grid.Stats.InnerHeight()).Render(
 			m.styles.sectionTitle.Render("Stats")+"\n"+renderStats(m.stats),
 		),
 	)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	const gapCols = 1
+	gap := strings.Repeat(" ", gapCols)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, gap, right)
 }
 
 func (m *monitorModel) renderCurrentTask(spec layoutmgr.PanelSpec) string {
@@ -771,25 +863,25 @@ func (m *monitorModel) renderCurrentTask(spec layoutmgr.PanelSpec) string {
 			kit.StyleStatusKey.Render("Duration: ")+duration.String(),
 		)
 	}
-	return m.styles.panel.Width(spec.Width).Height(spec.Height).Render(
+	return m.styles.panel.Width(spec.InnerWidth()).Height(spec.InnerHeight()).Render(
 		m.styles.sectionTitle.Render("Current Task") + "\n" + body,
 	)
 }
 
 func (m *monitorModel) renderTaskQueue(spec layoutmgr.PanelSpec) string {
-	return m.panelStyle(panelQueue).Width(spec.Width).Height(spec.Height).Render(
+	return m.panelStyle(panelQueue).Width(spec.InnerWidth()).Height(spec.InnerHeight()).Render(
 		m.styles.sectionTitle.Render("Queue") + "\n" + m.taskQueueVP.View(),
 	)
 }
 
 func (m *monitorModel) renderOutbox(spec layoutmgr.PanelSpec) string {
-	return m.panelStyle(panelOutbox).Width(spec.Width).Height(spec.Height).Render(
+	return m.panelStyle(panelOutbox).Width(spec.InnerWidth()).Height(spec.InnerHeight()).Render(
 		m.styles.sectionTitle.Render("Outbox (Recent Results)") + "\n" + m.outboxVP.View(),
 	)
 }
 
 func (m *monitorModel) renderMemory(spec layoutmgr.PanelSpec) string {
-	return m.panelStyle(panelMemory).Width(spec.Width).Height(spec.Height).Render(
+	return m.panelStyle(panelMemory).Width(spec.InnerWidth()).Height(spec.InnerHeight()).Render(
 		m.styles.sectionTitle.Render("Memory (semantic search)") + "\n" + m.memoryVP.View(),
 	)
 }
@@ -797,8 +889,8 @@ func (m *monitorModel) renderMemory(spec layoutmgr.PanelSpec) string {
 func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 	help := fmt.Sprintf("Tab: cycle panels (%s)  |  Ctrl+Enter: submit  |  /quit", m.focusedPanelName())
 	return m.commandBarStyle().
-		Width(spec.Width).
-		Height(spec.Height).
+		Width(spec.InnerWidth()).
+		Height(spec.InnerHeight()).
 		Render(help + "\n" + m.input.View())
 }
 
@@ -885,13 +977,13 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 func (m *monitorModel) layout() layoutmgr.GridLayout {
 	manager := layoutmgr.NewManager(m.styles.panel, true)
+	composerHeight := 3 + m.input.Height()
+	if m.isCompactMode() {
+		return manager.CalculateCompact(m.width, m.height, composerHeight)
+	}
 	outboxRows := len(m.outboxResults)
-	memoryRows := len(m.memResults)
-
 	outboxHeight := m.calculatePanelHeight(outboxRows, outboxRows == 0, m.focusedPanel == panelOutbox)
-	memoryHeight := m.calculatePanelHeight(memoryRows, memoryRows == 0, m.focusedPanel == panelMemory)
-
-	return manager.Calculate(m.width, m.height, 3+m.input.Height(), outboxHeight, memoryHeight)
+	return manager.CalculateDashboard(m.width, m.height, composerHeight, outboxHeight)
 }
 
 func (m *monitorModel) calculatePanelHeight(contentRows int, isEmpty bool, isFocused bool) int {
@@ -916,6 +1008,33 @@ func (m *monitorModel) refreshViewports() {
 		return
 	}
 	grid := m.layout()
+
+	if m.isCompactMode() {
+		w := imax(10, grid.AgentOutput.ContentWidth)
+		h := imax(1, grid.AgentOutput.ContentHeight-1)
+		m.activityList.SetSize(w, h/2)
+		m.agentOutputVP.Width = w
+		m.agentOutputVP.Height = h
+		m.agentOutputVP.SetContent(strings.Join(m.agentOutput, "\n"))
+		m.agentOutputVP.GotoBottom()
+		m.activityDetail.Width = w
+		m.activityDetail.Height = h / 2
+		m.refreshActivityDetail()
+		m.planViewport.Width = w
+		m.planViewport.Height = h
+		m.refreshPlanView()
+		m.outboxVP.Width = w
+		m.outboxVP.Height = h
+		m.outboxVP.SetContent(renderOutboxLines(m.outboxResults))
+		m.taskQueueVP.Width = w
+		m.taskQueueVP.Height = imax(1, grid.TaskQueue.ContentHeight)
+		m.taskQueueVP.SetContent(renderTaskQueue(m.taskQueue))
+		m.memoryVP.Width = w
+		m.memoryVP.Height = h
+		m.memoryVP.SetContent(renderMemResults(m.memResults))
+		m.input.SetWidth(imax(10, grid.Composer.ContentWidth))
+		return
+	}
 
 	m.activityList.SetSize(
 		imax(10, grid.ActivityFeed.ContentWidth),
