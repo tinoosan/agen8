@@ -99,7 +99,7 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 	outboxHeight := 6
 	grid := mgr.CalculateDashboard(120, 35, composerHeight, outboxHeight)
 
-	reserved := DashHeaderHeight + DashStatusBarHeight + composerHeight + DashGapAfterHeader + DashGapBeforeComposer
+	reserved := DashHeaderHeight + DashStatusBarHeight + DashWarningHeight + composerHeight + DashGapAfterHeader + DashGapBeforeComposer
 	mainH := 35 - reserved
 	if mainH < 1 {
 		mainH = 1
@@ -108,10 +108,8 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 	if leftTotal > mainH {
 		t.Fatalf("left column height %d exceeds main height %d", leftTotal, mainH)
 	}
-	rightTotal := grid.ActivityFeed.Height + grid.ActivityDetail.Height + grid.CurrentTask.Height +
-		grid.TaskQueue.Height + grid.Plan.Height + grid.Stats.Height
-	if rightTotal > mainH {
-		t.Fatalf("right column height %d exceeds main height %d", rightTotal, mainH)
+	if grid.SidePanel.Height > mainH {
+		t.Fatalf("side panel height %d exceeds main height %d", grid.SidePanel.Height, mainH)
 	}
 	totalH := reserved + mainH
 	if totalH > grid.ScreenHeight {
@@ -119,16 +117,12 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 	}
 }
 
-func TestCalculateDashboard_ActivityDetailPlanMinFiveLines(t *testing.T) {
+func TestCalculateDashboard_SidePanelHasContentRoom(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
-	// Use 120x48 so main height is enough for detail and plan to get at least 5 content lines each.
-	grid := mgr.CalculateDashboard(120, 48, 4, 6)
+	grid := mgr.CalculateDashboard(120, 35, 4, 6)
 
-	if grid.ActivityDetail.ContentHeight < 5 {
-		t.Fatalf("activity detail ContentHeight want >= 5, got %d", grid.ActivityDetail.ContentHeight)
-	}
-	if grid.Plan.ContentHeight < 5 {
-		t.Fatalf("plan ContentHeight want >= 5, got %d", grid.Plan.ContentHeight)
+	if grid.SidePanel.ContentHeight < 5 {
+		t.Fatalf("side panel ContentHeight want >= 5 (for tab content), got %d", grid.SidePanel.ContentHeight)
 	}
 }
 

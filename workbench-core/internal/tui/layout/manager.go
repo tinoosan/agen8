@@ -32,6 +32,8 @@ type GridLayout struct {
 	ScreenWidth  int
 	ScreenHeight int
 
+	// SidePanel is the single right-column tabbed panel (Activity | Plan | Tasks).
+	SidePanel      PanelSpec
 	ActivityFeed   PanelSpec
 	AgentOutput    PanelSpec
 	ActivityDetail PanelSpec
@@ -87,7 +89,7 @@ func (m *Manager) CalculateCompact(width, height, composerHeight int) GridLayout
 	grid := GridLayout{ScreenWidth: width, ScreenHeight: height}
 	grid.AgentOutput = m.spec(width, mainH)
 	grid.Composer = m.spec(width, composerHeight)
-	// Zero-height specs for panels not shown in compact mode
+	grid.SidePanel = m.spec(width, 0)
 	grid.ActivityFeed = m.spec(width, 0)
 	grid.ActivityDetail = m.spec(width, 0)
 	grid.CurrentTask = m.spec(width, 0)
@@ -109,9 +111,8 @@ const (
 )
 
 // CalculateDashboard produces a GridLayout for dashboard mode (two columns).
-// Reserves header, status bar, composer height, and gaps; allocates remainder to
-// left (AgentOutput flex + Outbox fixed) and right (Activity, ActivityDetail,
-// CurrentTask, Queue, Plan, Stats). Outbox and Composer use left column width only.
+// Left: AgentOutput (flex) + Outbox (fixed). Right: single SidePanel (tabbed Activity | Plan | Tasks).
+// Outbox and Composer use left column width only.
 func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight int) GridLayout {
 	const (
 		minLeftWidth  = 60
@@ -119,12 +120,6 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight
 		gapCols       = 1
 		outboxFixedH  = 6
 		outboxMinH    = 4
-		activityH     = 8
-		currentTaskH  = 4
-		queueH        = 5
-		planH         = 8
-		statsH        = 5
-		minDetailH    = 5
 	)
 	if width < 0 {
 		width = 0
@@ -171,43 +166,17 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight
 		outboxH = mainH - 1
 	}
 
-	fixedRight := activityH + currentTaskH + queueH + planH + statsH
-	detailH := mainH - fixedRight
-	if mainH < fixedRight+minDetailH {
-		detailH = 1
-		rest := mainH - 1
-		activityH := rest * 8 / 30
-		taskH := rest * 4 / 30
-		queueH := rest * 5 / 30
-		planH := rest * 8 / 30
-		statsH := rest * 5 / 30
-		grid := GridLayout{ScreenWidth: width, ScreenHeight: height}
-		grid.AgentOutput = m.spec(leftW, agentOutputH)
-		grid.Outbox = m.spec(leftW, outboxH)
-		grid.Composer = m.spec(leftW, composerHeight)
-		grid.ActivityFeed = m.spec(rightW, activityH)
-		grid.ActivityDetail = m.spec(rightW, detailH)
-		grid.CurrentTask = m.spec(rightW, taskH)
-		grid.TaskQueue = m.spec(rightW, queueH)
-		grid.Plan = m.spec(rightW, planH)
-		grid.Stats = m.spec(rightW, statsH)
-		grid.Memory = m.spec(leftW, 0)
-		return grid
-	}
-	if detailH < 1 {
-		detailH = 1
-	}
-
 	grid := GridLayout{ScreenWidth: width, ScreenHeight: height}
 	grid.AgentOutput = m.spec(leftW, agentOutputH)
 	grid.Outbox = m.spec(leftW, outboxH)
 	grid.Composer = m.spec(leftW, composerHeight)
-	grid.ActivityFeed = m.spec(rightW, activityH)
-	grid.ActivityDetail = m.spec(rightW, detailH)
-	grid.CurrentTask = m.spec(rightW, currentTaskH)
-	grid.TaskQueue = m.spec(rightW, queueH)
-	grid.Plan = m.spec(rightW, planH)
-	grid.Stats = m.spec(rightW, statsH)
+	grid.SidePanel = m.spec(rightW, mainH)
+	grid.ActivityFeed = m.spec(rightW, 0)
+	grid.ActivityDetail = m.spec(rightW, 0)
+	grid.CurrentTask = m.spec(rightW, 0)
+	grid.TaskQueue = m.spec(rightW, 0)
+	grid.Plan = m.spec(rightW, 0)
+	grid.Stats = m.spec(rightW, 0)
 	grid.Memory = m.spec(leftW, 0)
 	return grid
 }
@@ -341,7 +310,7 @@ func (m *Manager) Calculate(width, height, inputHeight, outboxHeight, memoryHeig
 	}
 
 	grid := GridLayout{ScreenWidth: width, ScreenHeight: height}
-
+	grid.SidePanel = m.spec(rightW, 0)
 	grid.ActivityFeed = m.spec(leftW, activityH)
 	grid.AgentOutput = m.spec(leftW, mainH-activityH)
 	grid.ActivityDetail = m.spec(rightW, detailH)
@@ -349,11 +318,9 @@ func (m *Manager) Calculate(width, height, inputHeight, outboxHeight, memoryHeig
 	grid.Plan = m.spec(rightW, planH)
 	grid.TaskQueue = m.spec(rightW, queueH)
 	grid.Stats = m.spec(rightW, statsH)
-
 	grid.Outbox = m.spec(width, outboxHeight)
 	grid.Memory = m.spec(width, memoryHeight)
 	grid.Composer = m.spec(width, inputHeight)
-
 	return grid
 }
 

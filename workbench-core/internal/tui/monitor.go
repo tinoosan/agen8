@@ -37,6 +37,11 @@ type commandLinesMsg struct {
 	lines []string
 }
 
+type taskQueuedLocallyMsg struct {
+	TaskID string
+	Goal   string
+}
+
 type monitorModel struct {
 	ctx       context.Context
 	cfg       config.Config
@@ -74,6 +79,7 @@ type monitorModel struct {
 	role              string
 	focusedPanel      panelID
 	compactTab        int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
+	dashboardSideTab  int // 0=Activity, 1=Plan, 2=Tasks; used when dashboard mode
 	width             int
 	height            int
 	styles            *monitorStyles
@@ -205,11 +211,53 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	for _, e := range evs {
 		m.observeEvent(e)
 	}
+	pending, _ := loadPendingTasksFromInbox(cfg, runID)
+	for _, ts := range pending {
+		m.taskQueue[ts.TaskID] = ts
+	}
 	m.refreshActivityList()
 	m.loadPlanFiles()
 	m.refreshViewports()
 
 	return m, nil
+}
+
+// loadPendingTasksFromInbox reads task-*.json from the run's inbox and returns
+// taskState slices with Status pending. Used so the queue shows tasks added
+// before the monitor started or via webhook.
+func loadPendingTasksFromInbox(cfg config.Config, runID string) ([]taskState, error) {
+	inboxDir := filepath.Join(fsutil.GetRunDir(cfg.DataDir, runID), "inbox")
+	entries, err := os.ReadDir(inboxDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []taskState
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "task-") || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(inboxDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var t types.Task
+		if err := json.Unmarshal(data, &t); err != nil {
+			continue
+		}
+		taskID := strings.TrimSpace(t.TaskID)
+		if taskID == "" {
+			taskID = strings.TrimSuffix(e.Name(), ".json")
+		}
+		out = append(out, taskState{
+			TaskID: taskID,
+			Goal:   strings.TrimSpace(t.Goal),
+			Status: string(types.TaskStatusPending),
+		})
+	}
+	return out, nil
 }
 
 func (m *monitorModel) Init() tea.Cmd {
@@ -251,6 +299,11 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewports()
 		return m, nil
 
+	case taskQueuedLocallyMsg:
+		m.taskQueue[msg.TaskID] = taskState{TaskID: msg.TaskID, Goal: msg.Goal, Status: string(types.TaskStatusPending)}
+		m.refreshViewports()
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.focusedPanel == panelComposer {
 			key := strings.ToLower(msg.String())
@@ -283,6 +336,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.focusedPanel = (m.focusedPanel + 1) % 8
+			m.syncDashboardSideTabFromFocus()
 			m.updateFocus()
 			return m, nil
 		case "shift+tab":
@@ -291,8 +345,23 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.focusedPanel = (m.focusedPanel + 7) % 8
+			m.syncDashboardSideTabFromFocus()
 			m.updateFocus()
 			return m, nil
+		case "ctrl+]":
+			if !m.isCompactMode() {
+				m.dashboardSideTab = (m.dashboardSideTab + 1) % 3
+				m.focusedPanel = m.dashboardSideTabToPanel()
+				m.updateFocus()
+				return m, nil
+			}
+		case "ctrl+[":
+			if !m.isCompactMode() {
+				m.dashboardSideTab = (m.dashboardSideTab + 2) % 3
+				m.focusedPanel = m.dashboardSideTabToPanel()
+				m.updateFocus()
+				return m, nil
+			}
 		}
 		if m.isCompactMode() {
 			m.focusedPanel = m.compactTabToPanel()
@@ -328,7 +397,11 @@ func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine str
 }
 
 func (m *monitorModel) renderStatusBar(grid layoutmgr.GridLayout) string {
-	return m.styles.header.Render(kit.StyleDim.Render("Tab: cycle panels  |  Ctrl+Enter: submit  |  /quit"))
+	line := "Tab: cycle panels  |  Ctrl+Enter: submit  |  /quit"
+	if !m.isCompactMode() {
+		line += "  |  Ctrl+]/Ctrl+[ cycle side panel (Activity | Plan | Tasks)"
+	}
+	return m.styles.header.Render(kit.StyleDim.Render(line))
 }
 
 // compactTabNames for the tab bar in compact mode.
@@ -346,6 +419,33 @@ func (m *monitorModel) compactTabToPanel() panelID {
 		return panelOutbox
 	default:
 		return panelOutput
+	}
+}
+
+// dashboardSideTabNames for the side-panel tab bar in dashboard mode.
+var dashboardSideTabNames = []string{"Activity", "Plan", "Tasks"}
+
+func (m *monitorModel) dashboardSideTabToPanel() panelID {
+	switch m.dashboardSideTab {
+	case 0:
+		return panelActivity
+	case 1:
+		return panelPlan
+	case 2:
+		return panelQueue
+	default:
+		return panelActivity
+	}
+}
+
+func (m *monitorModel) syncDashboardSideTabFromFocus() {
+	switch m.focusedPanel {
+	case panelActivity, panelActivityDetail:
+		m.dashboardSideTab = 0
+	case panelPlan:
+		m.dashboardSideTab = 1
+	case panelQueue:
+		m.dashboardSideTab = 2
 	}
 }
 
@@ -475,7 +575,12 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 		if err := os.WriteFile(filepath.Join(inboxDir, id+".json"), b, 0644); err != nil {
 			return commandLinesMsg{lines: []string{"[queued] error: " + err.Error()}}
 		}
-		return commandLinesMsg{lines: []string{"[queued] " + id + " " + goal + " — task queued to run " + m.runID}}
+		return tea.Batch(
+			func() tea.Msg {
+				return commandLinesMsg{lines: []string{"[queued] " + id + " " + goal + " — task queued to run " + m.runID}}
+			},
+			func() tea.Msg { return taskQueuedLocallyMsg{TaskID: id, Goal: goal} },
+		)
 	}
 }
 
@@ -655,6 +760,16 @@ func (m *monitorModel) observeTaskEvent(ev types.Event) {
 			Goal:   strings.TrimSpace(ev.Data["goal"]),
 			Status: string(types.TaskStatusPending),
 		}
+	case "webhook.task.queued":
+		taskID := strings.TrimSpace(ev.Data["taskId"])
+		if taskID == "" {
+			return
+		}
+		m.taskQueue[taskID] = taskState{
+			TaskID: taskID,
+			Goal:   strings.TrimSpace(ev.Data["goal"]),
+			Status: string(types.TaskStatusPending),
+		}
 	case "task.start":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
@@ -816,7 +931,7 @@ func (m *monitorModel) panelStyle(panel panelID) lipgloss.Style {
 }
 
 // renderMainBodyDashboard builds the two-column dashboard: left = AgentOutput + Outbox,
-// right = Activity, ActivityDetail, CurrentTask, Queue, Plan, Stats.
+// right = tabbed side panel (Activity | Plan | Tasks) with one content area.
 func (m *monitorModel) renderMainBodyDashboard(grid layoutmgr.GridLayout) string {
 	leftParts := []string{
 		m.panelStyle(panelOutput).Width(grid.AgentOutput.InnerWidth()).Height(grid.AgentOutput.InnerHeight()).Render(
@@ -828,50 +943,67 @@ func (m *monitorModel) renderMainBodyDashboard(grid layoutmgr.GridLayout) string
 	}
 	left := lipgloss.JoinVertical(lipgloss.Left, leftParts...)
 
-	right := lipgloss.JoinVertical(lipgloss.Left,
-		m.panelStyle(panelActivity).Width(grid.ActivityFeed.InnerWidth()).Height(grid.ActivityFeed.InnerHeight()).Render(
-			m.styles.sectionTitle.Render("Activity Feed")+"\n"+m.activityList.View(),
-		),
-		m.panelStyle(panelActivityDetail).Width(grid.ActivityDetail.InnerWidth()).Height(grid.ActivityDetail.InnerHeight()).Render(
-			m.styles.sectionTitle.Render("Activity Details")+"\n"+m.activityDetail.View(),
-		),
-		m.renderCurrentTask(grid.CurrentTask),
-		m.renderTaskQueue(grid.TaskQueue),
-		m.panelStyle(panelPlan).Width(grid.Plan.InnerWidth()).Height(grid.Plan.InnerHeight()).Render(
-			m.styles.sectionTitle.Render("Plan")+"\n"+m.planViewport.View(),
-		),
-		m.styles.panel.Width(grid.Stats.InnerWidth()).Height(grid.Stats.InnerHeight()).Render(
-			m.styles.sectionTitle.Render("Stats")+"\n"+renderStats(m.stats),
-		),
-	)
+	tabBar := m.renderDashboardSidePanelTabBar(grid)
+	contentInnerH := grid.SidePanel.InnerHeight() - 1
+	if contentInnerH < 1 {
+		contentInnerH = 1
+	}
+	content := m.renderDashboardSidePanelContent(grid)
+	sidePanelStyle := m.panelStyle(m.dashboardSideTabToPanel())
+	sidePanelContent := sidePanelStyle.
+		Width(grid.SidePanel.InnerWidth()).Height(contentInnerH).
+		Render(content)
+	right := lipgloss.JoinVertical(lipgloss.Left, tabBar, sidePanelContent)
 
 	const gapCols = 1
 	gap := strings.Repeat(" ", gapCols)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, gap, right)
 }
 
-func (m *monitorModel) renderCurrentTask(spec layoutmgr.PanelSpec) string {
-	body := kit.StyleDim.Render("No active task")
-	if m.currentTask != nil {
-		t := m.currentTask
-		duration := time.Since(t.StartedAt).Round(time.Second)
-		body = fmt.Sprintf(
-			"%s\n%s\n%s\n%s",
-			kit.StyleStatusKey.Render("Goal: ")+truncateText(t.Goal, imax(10, spec.ContentWidth-12)),
-			kit.StyleStatusKey.Render("Status: ")+fallback(t.Status, "unknown"),
-			kit.StyleStatusKey.Render("Started: ")+t.StartedAt.Format("15:04:05"),
-			kit.StyleStatusKey.Render("Duration: ")+duration.String(),
-		)
+func (m *monitorModel) renderDashboardSidePanelTabBar(grid layoutmgr.GridLayout) string {
+	parts := make([]string, len(dashboardSideTabNames))
+	for i, name := range dashboardSideTabNames {
+		if i == m.dashboardSideTab {
+			parts[i] = m.styles.sectionTitle.Render(name)
+		} else {
+			parts[i] = kit.StyleDim.Render(name)
+		}
 	}
-	return m.styles.panel.Width(spec.InnerWidth()).Height(spec.InnerHeight()).Render(
-		m.styles.sectionTitle.Render("Current Task") + "\n" + body,
-	)
+	line := strings.Join(parts, "  |  ")
+	return m.styles.header.Render(line)
 }
 
-func (m *monitorModel) renderTaskQueue(spec layoutmgr.PanelSpec) string {
-	return m.panelStyle(panelQueue).Width(spec.InnerWidth()).Height(spec.InnerHeight()).Render(
-		m.styles.sectionTitle.Render("Queue") + "\n" + m.taskQueueVP.View(),
-	)
+func (m *monitorModel) renderDashboardSidePanelContent(grid layoutmgr.GridLayout) string {
+	w := grid.SidePanel.InnerWidth()
+	switch m.dashboardSideTab {
+	case 0:
+		listPart := m.styles.sectionTitle.Render("Activity Feed") + "\n" + m.activityList.View()
+		detailPart := m.styles.sectionTitle.Render("Activity Details") + "\n" + m.activityDetail.View()
+		return lipgloss.JoinVertical(lipgloss.Left, listPart, detailPart)
+	case 1:
+		return m.styles.sectionTitle.Render("Plan") + "\n" + m.planViewport.View()
+	case 2:
+		currentTaskBody := kit.StyleDim.Render("No active task")
+		if m.currentTask != nil {
+			t := m.currentTask
+			duration := time.Since(t.StartedAt).Round(time.Second)
+			currentTaskBody = fmt.Sprintf(
+				"%s\n%s\n%s\n%s",
+				kit.StyleStatusKey.Render("Goal: ")+truncateText(t.Goal, imax(10, w-12)),
+				kit.StyleStatusKey.Render("Status: ")+fallback(t.Status, "unknown"),
+				kit.StyleStatusKey.Render("Started: ")+t.StartedAt.Format("15:04:05"),
+				kit.StyleStatusKey.Render("Duration: ")+duration.String(),
+			)
+		}
+		taskBlock := m.styles.sectionTitle.Render("Current Task") + "\n" + currentTaskBody
+		queueBlock := m.styles.sectionTitle.Render("Queue") + "\n" + m.taskQueueVP.View()
+		statsBlock := m.styles.sectionTitle.Render("Stats") + "\n" + renderStats(m.stats)
+		return lipgloss.JoinVertical(lipgloss.Left, taskBlock, "", "", queueBlock, statsBlock)
+	default:
+		listPart := m.styles.sectionTitle.Render("Activity Feed") + "\n" + m.activityList.View()
+		detailPart := m.styles.sectionTitle.Render("Activity Details") + "\n" + m.activityDetail.View()
+		return lipgloss.JoinVertical(lipgloss.Left, listPart, detailPart)
+	}
 }
 
 func (m *monitorModel) renderOutbox(spec layoutmgr.PanelSpec) string {
@@ -1036,36 +1168,47 @@ func (m *monitorModel) refreshViewports() {
 		return
 	}
 
-	m.activityList.SetSize(
-		imax(10, grid.ActivityFeed.ContentWidth),
-		imax(1, grid.ActivityFeed.ContentHeight),
-	)
-
-	m.agentOutputVP.Width = imax(10, grid.AgentOutput.ContentWidth)
+	w := imax(10, grid.AgentOutput.ContentWidth)
+	m.agentOutputVP.Width = w
 	m.agentOutputVP.Height = imax(1, grid.AgentOutput.ContentHeight)
 	m.agentOutputVP.SetContent(strings.Join(m.agentOutput, "\n"))
 	m.agentOutputVP.GotoBottom()
-
-	m.activityDetail.Width = imax(10, grid.ActivityDetail.ContentWidth)
-	m.activityDetail.Height = imax(1, grid.ActivityDetail.ContentHeight)
-	m.refreshActivityDetail()
-
-	m.planViewport.Width = imax(10, grid.Plan.ContentWidth)
-	m.planViewport.Height = imax(1, grid.Plan.ContentHeight)
-	m.refreshPlanView()
-
-	m.taskQueueVP.Width = imax(10, grid.TaskQueue.ContentWidth)
-	m.taskQueueVP.Height = imax(1, grid.TaskQueue.ContentHeight)
-	m.taskQueueVP.SetContent(renderTaskQueue(m.taskQueue))
 
 	m.outboxVP.Width = imax(10, grid.Outbox.ContentWidth)
 	m.outboxVP.Height = imax(1, grid.Outbox.ContentHeight)
 	m.outboxVP.SetContent(renderOutboxLines(m.outboxResults))
 
+	sideW := imax(10, grid.SidePanel.ContentWidth)
+	contentH := imax(1, grid.SidePanel.ContentHeight-1)
+	listH := 20
+	if listH > contentH-2 {
+		listH = contentH * 45 / 100
+		if listH < 4 {
+			listH = 4
+		}
+	}
+	detailH := contentH - listH - 1
+	if detailH < 1 {
+		detailH = 1
+	}
+	planH := contentH - 1
+	queueH := contentH - 12
+	if queueH < 1 {
+		queueH = 1
+	}
+	m.activityList.SetSize(sideW, listH)
+	m.activityDetail.Width = sideW
+	m.activityDetail.Height = detailH
+	m.refreshActivityDetail()
+	m.planViewport.Width = sideW
+	m.planViewport.Height = imax(1, planH)
+	m.refreshPlanView()
+	m.taskQueueVP.Width = sideW
+	m.taskQueueVP.Height = imax(1, queueH)
+	m.taskQueueVP.SetContent(renderTaskQueue(m.taskQueue))
 	m.memoryVP.Width = imax(10, grid.Memory.ContentWidth)
 	m.memoryVP.Height = imax(1, grid.Memory.ContentHeight)
 	m.memoryVP.SetContent(renderMemResults(m.memResults))
-
 	m.input.SetWidth(imax(10, grid.Composer.ContentWidth))
 }
 
