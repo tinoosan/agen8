@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -126,6 +127,14 @@ const (
 	panelMemory
 	panelComposer
 )
+
+var dashboardFocusCycle = []panelID{
+	panelOutput,
+	panelOutbox,
+	panelActivity,
+	panelActivityDetail,
+	panelComposer,
+}
 
 // Breakpoints for responsive layout: below these use compact mode (tabs/single column).
 const (
@@ -399,12 +408,17 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateFocus()
 				return m, nil
 			}
-			// Normal dashboard cycling
-			if msg.String() == "tab" {
-				m.focusedPanel = (m.focusedPanel + 1) % 8
-			} else {
-				m.focusedPanel = (m.focusedPanel + 7) % 8 // (curr - 1) mod 8
+			idx := slices.Index(dashboardFocusCycle, m.focusedPanel)
+			if idx < 0 {
+				idx = 0
 			}
+			cycleLen := len(dashboardFocusCycle)
+			if msg.String() == "tab" {
+				idx = (idx + 1) % cycleLen
+			} else {
+				idx = (idx + cycleLen - 1) % cycleLen
+			}
+			m.focusedPanel = dashboardFocusCycle[idx]
 			m.syncDashboardSideTabFromFocus()
 			m.updateFocus()
 			return m, nil
