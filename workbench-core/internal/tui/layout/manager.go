@@ -39,7 +39,7 @@ type GridLayout struct {
 	ActivityDetail PanelSpec
 	CurrentTask    PanelSpec
 	Plan           PanelSpec
-	TaskQueue      PanelSpec
+	Inbox          PanelSpec
 	Stats          PanelSpec
 	Outbox         PanelSpec
 	Memory         PanelSpec
@@ -109,7 +109,7 @@ func (m *Manager) CalculateCompact(width, height, composerHeight int) GridLayout
 	grid.ActivityDetail = m.spec(width, detailH)
 	grid.CurrentTask = m.spec(width, 0)
 	grid.Plan = m.spec(width, mainH)
-	grid.TaskQueue = m.spec(width, 0)
+	grid.Inbox = m.spec(width, 0)
 	grid.Stats = m.spec(width, 0)
 	grid.Outbox = m.spec(width, mainH)
 	grid.Memory = m.spec(width, 0)
@@ -126,8 +126,7 @@ const (
 )
 
 // CalculateDashboard produces a GridLayout for dashboard mode (two columns).
-// Left: AgentOutput (flex) + Outbox (fixed). Right: single SidePanel (tabbed Activity | Plan | Tasks).
-// Outbox and Composer use left column width only.
+// Left: AgentOutput (flex). Right: single SidePanel (tabbed Activity | Plan | Tasks) with a persistent Stats row aligned to the Composer.
 func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight, statusBarHeight int) GridLayout {
 	const (
 		minLeftWidth  = 60
@@ -194,23 +193,9 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight
 		}
 	}
 
-	outboxH := outboxHeight
-	if outboxH > 0 && outboxH < outboxMinH {
-		outboxH = outboxMinH
-	}
-	if outboxH > outboxFixedH {
-		outboxH = outboxFixedH
-	}
 	mainH := remainingHeight
-	agentOutputH := mainH - outboxH
-	if agentOutputH < 1 {
-		agentOutputH = 1
-		outboxH = mainH - 1
-	}
-
 	grid := GridLayout{ScreenWidth: width, ScreenHeight: height}
-	grid.AgentOutput = m.spec(leftW, agentOutputH)
-	grid.Outbox = m.spec(leftW, outboxH)
+	grid.AgentOutput = m.spec(leftW, mainH)
 	grid.Composer = m.spec(leftW, composerHeight)
 	grid.SidePanel = m.spec(rightW, 0)
 
@@ -235,22 +220,33 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight
 	grid.ActivityDetail = m.spec(rightW, detailH)
 	grid.Plan = m.spec(rightW, sideContentH)
 
-	// Tasks tab: Current task + Queue + Stats.
-	currentTaskH := 7
-	statsH := 5
-	if sideContentH < 14 {
-		// Tight terminals: prioritize queue.
-		currentTaskH = 5
-		statsH = 4
+	outboxH := outboxHeight
+	if outboxH > 0 && outboxH < outboxMinH {
+		outboxH = outboxMinH
 	}
-	queueH := sideContentH - currentTaskH - statsH
-	if queueH < 1 {
-		queueH = 1
-		statsH = max(1, sideContentH-currentTaskH-queueH)
+	if outboxH > outboxFixedH {
+		outboxH = outboxFixedH
 	}
+	if outboxH > sideContentH {
+		outboxH = sideContentH
+	}
+	remaining := sideContentH - outboxH
+	if remaining < 0 {
+		remaining = 0
+		outboxH = sideContentH
+	}
+
+	var currentTaskH, inboxH int
+	if remaining > 0 {
+		heights := distributeRows(remaining, []int{7, 6})
+		currentTaskH = heights[0]
+		inboxH = heights[1]
+	}
+
 	grid.CurrentTask = m.spec(rightW, currentTaskH)
-	grid.TaskQueue = m.spec(rightW, queueH)
-	grid.Stats = m.spec(rightW, statsH)
+	grid.Inbox = m.spec(rightW, inboxH)
+	grid.Outbox = m.spec(rightW, outboxH)
+	grid.Stats = m.spec(rightW, composerHeight)
 	grid.Memory = m.spec(leftW, 0)
 	return grid
 }
@@ -280,4 +276,60 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func distributeRows(total int, weights []int) []int {
+	result := make([]int, len(weights))
+	if total <= 0 {
+		return result
+	}
+	if total < len(weights) {
+		for i := 0; i < total && i < len(weights); i++ {
+			result[i] = 1
+		}
+		return result
+	}
+
+	sum := 0
+	adj := make([]int, len(weights))
+	for i, w := range weights {
+		if w < 1 {
+			w = 1
+		}
+		adj[i] = w
+		sum += w
+	}
+	if sum == 0 {
+		sum = len(weights)
+		for i := range adj {
+			adj[i] = 1
+		}
+	}
+
+	assigned := 0
+	for i, w := range adj {
+		share := int(math.Round(float64(w) * float64(total) / float64(sum)))
+		if share < 1 {
+			share = 1
+		}
+		result[i] = share
+		assigned += share
+	}
+
+	diff := total - assigned
+	idx := 0
+	for diff != 0 {
+		if diff > 0 {
+			result[idx%len(result)]++
+			diff--
+		} else if result[idx%len(result)] > 1 {
+			result[idx%len(result)]--
+			diff++
+		}
+		idx++
+		if idx > len(result)*10 {
+			break
+		}
+	}
+	return result
 }

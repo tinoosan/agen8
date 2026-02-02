@@ -65,8 +65,8 @@ type monitorModel struct {
 	renderer          *ContentRenderer
 	agentOutput       []string
 	agentOutputVP     viewport.Model
-	taskQueue         map[string]taskState
-	taskQueueVP       viewport.Model
+	inbox             map[string]taskState
+	inboxVP           viewport.Model
 	currentTask       *taskState
 	outboxResults     []outboxEntry
 	outboxVP          viewport.Model
@@ -122,7 +122,7 @@ const (
 	panelActivityDetail
 	panelPlan
 	panelOutput
-	panelQueue
+	panelInbox
 	panelOutbox
 	panelMemory
 	panelComposer
@@ -207,8 +207,8 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 		renderer:          newContentRenderer(),
 		agentOutput:       []string{},
 		agentOutputVP:     viewport.New(0, 0),
-		taskQueue:         map[string]taskState{},
-		taskQueueVP:       viewport.New(0, 0),
+		inbox:             map[string]taskState{},
+		inboxVP:           viewport.New(0, 0),
 		outboxResults:     []outboxEntry{},
 		outboxVP:          viewport.New(0, 0),
 		memResults:        []string{},
@@ -226,7 +226,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	}
 	pending, _ := loadPendingTasksFromInbox(cfg, runID)
 	for _, ts := range pending {
-		m.taskQueue[ts.TaskID] = ts
+		m.inbox[ts.TaskID] = ts
 	}
 	m.refreshActivityList()
 	m.loadPlanFiles()
@@ -320,7 +320,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case taskQueuedLocallyMsg:
-		m.taskQueue[msg.TaskID] = taskState{TaskID: msg.TaskID, Goal: msg.Goal, Status: string(types.TaskStatusPending)}
+		m.inbox[msg.TaskID] = taskState{TaskID: msg.TaskID, Goal: msg.Goal, Status: string(types.TaskStatusPending)}
 		m.refreshViewports()
 		return m, nil
 
@@ -467,14 +467,15 @@ func (m *monitorModel) View() string {
 func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine string) string {
 	main := m.renderMainBodyDashboard(grid)
 	statusBar := m.renderStatusBar(grid.ScreenWidth)
-	sections := []string{headerLine, "", main, "", m.renderComposer(grid.Composer), statusBar}
+	composerRow := m.renderComposerRowWithStats(grid)
+	sections := []string{headerLine, "", main, "", composerRow, statusBar}
 	if m.runStatus != types.StatusRunning {
 		w := m.width
 		if w <= 0 {
 			w = 80
 		}
 		warning := m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render("Agent is not active; start the daemon first or use --agent-id to attach to the running agent."))
-		sections = []string{headerLine, warning, "", main, "", m.renderComposer(grid.Composer), statusBar}
+		sections = []string{headerLine, warning, "", main, "", composerRow, statusBar}
 	}
 	final := lipgloss.JoinVertical(lipgloss.Left, sections...)
 	// Guarantee view never exceeds terminal width (handles m.width==0 or any section overflow).
@@ -531,7 +532,7 @@ func (m *monitorModel) dashboardSideTabToPanel() panelID {
 	case 1:
 		return panelPlan
 	case 2:
-		return panelQueue
+		return panelInbox
 	default:
 		return panelActivity
 	}
@@ -543,7 +544,7 @@ func (m *monitorModel) syncDashboardSideTabFromFocus() {
 		m.dashboardSideTab = 0
 	case panelPlan:
 		m.dashboardSideTab = 1
-	case panelQueue:
+	case panelInbox, panelOutbox:
 		m.dashboardSideTab = 2
 	}
 }
@@ -885,7 +886,7 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		if taskID == "" {
 			return
 		}
-		m.taskQueue[taskID] = taskState{
+		m.inbox[taskID] = taskState{
 			TaskID: taskID,
 			Goal:   strings.TrimSpace(ev.Data["goal"]),
 			Status: string(types.TaskStatusPending),
@@ -895,7 +896,7 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		if taskID == "" {
 			return
 		}
-		m.taskQueue[taskID] = taskState{
+		m.inbox[taskID] = taskState{
 			TaskID: taskID,
 			Goal:   strings.TrimSpace(ev.Data["goal"]),
 			Status: string(types.TaskStatusPending),
@@ -905,13 +906,13 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		if taskID == "" {
 			return
 		}
-		ts := m.taskQueue[taskID]
+		ts := m.inbox[taskID]
 		ts.TaskID = taskID
 		ts.Goal = strings.TrimSpace(ev.Data["goal"])
 		ts.Status = "active"
 		ts.StartedAt = ev.Timestamp
 		m.currentTask = &ts
-		delete(m.taskQueue, taskID)
+		delete(m.inbox, taskID)
 	case "task.done":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
@@ -1136,9 +1137,6 @@ func (m *monitorModel) renderMainBodyDashboard(grid layoutmgr.GridLayout) string
 			m.styles.sectionTitle.Render("Agent Output") + "\n" + m.agentOutputVP.View(),
 		),
 	}
-	if grid.Outbox.Height > 0 {
-		leftParts = append(leftParts, m.renderOutbox(grid.Outbox))
-	}
 	left := lipgloss.JoinVertical(lipgloss.Left, leftParts...)
 
 	tabBar := m.renderDashboardSidePanelTabBar(grid)
@@ -1210,15 +1208,18 @@ func (m *monitorModel) renderDashboardSidePanels(grid layoutmgr.GridLayout) stri
 			Width(grid.CurrentTask.InnerWidth()).
 			Height(grid.CurrentTask.InnerHeight()).
 			Render(m.styles.sectionTitle.Render("Current Task") + "\n" + currentTaskBody)
-		queue := m.panelStyle(panelQueue).
-			Width(grid.TaskQueue.InnerWidth()).
-			Height(grid.TaskQueue.InnerHeight()).
-			Render(m.styles.sectionTitle.Render("Queue") + "\n" + m.taskQueueVP.View())
-		stats := m.styles.panel.
-			Width(grid.Stats.InnerWidth()).
-			Height(grid.Stats.InnerHeight()).
-			Render(m.styles.sectionTitle.Render("Stats") + "\n" + renderStats(m.stats))
-		return lipgloss.JoinVertical(lipgloss.Left, current, queue, stats)
+		parts := []string{current}
+		if grid.Inbox.Height > 0 {
+			inbox := m.panelStyle(panelInbox).
+				Width(grid.Inbox.InnerWidth()).
+				Height(grid.Inbox.InnerHeight()).
+				Render(m.styles.sectionTitle.Render("Inbox") + "\n" + m.inboxVP.View())
+			parts = append(parts, inbox)
+		}
+		if grid.Outbox.Height > 0 {
+			parts = append(parts, m.renderOutbox(grid.Outbox))
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, parts...)
 	default:
 		feed := m.panelStyle(panelActivity).
 			Width(grid.ActivityFeed.InnerWidth()).
@@ -1259,6 +1260,31 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 		Render(help + "\n" + m.input.View())
 }
 
+func (m *monitorModel) renderComposerRowWithStats(grid layoutmgr.GridLayout) string {
+	composer := m.renderComposer(grid.Composer)
+	if grid.Stats.Height <= 0 || grid.Stats.Width <= 0 {
+		return composer
+	}
+	stats := m.renderStatsPanel(grid.Stats)
+	gap := strings.Repeat(" ", 1)
+	row := lipgloss.JoinHorizontal(lipgloss.Top, composer, gap, stats)
+	width := grid.ScreenWidth
+	if width <= 0 {
+		width = 80
+	}
+	return lipgloss.NewStyle().MaxWidth(width).Render(row)
+}
+
+func (m *monitorModel) renderStatsPanel(spec layoutmgr.PanelSpec) string {
+	if spec.Height <= 0 || spec.Width <= 0 {
+		return ""
+	}
+	return m.styles.panel.
+		Width(spec.InnerWidth()).
+		Height(spec.InnerHeight()).
+		Render(m.styles.sectionTitle.Render("Stats") + "\n" + renderStats(m.stats))
+}
+
 func (m *monitorModel) updateFocus() {
 	if m.focusedPanel == panelComposer {
 		m.input.Focus()
@@ -1284,8 +1310,8 @@ func (m *monitorModel) focusedPanelName() string {
 		return "Plan"
 	case panelOutput:
 		return "Output"
-	case panelQueue:
-		return "Queue"
+	case panelInbox:
+		return "Inbox"
 	case panelOutbox:
 		return "Outbox"
 	case panelMemory:
@@ -1319,9 +1345,9 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 		var cmd tea.Cmd
 		m.agentOutputVP, cmd = m.agentOutputVP.Update(msg)
 		return m, cmd
-	case panelQueue:
+	case panelInbox:
 		var cmd tea.Cmd
-		m.taskQueueVP, cmd = m.taskQueueVP.Update(msg)
+		m.inboxVP, cmd = m.inboxVP.Update(msg)
 		return m, cmd
 	case panelOutbox:
 		var cmd tea.Cmd
@@ -1408,9 +1434,9 @@ func (m *monitorModel) refreshViewports() {
 		m.outboxVP.SetContent(wrapViewportText(renderOutboxLines(m.outboxResults), outboxW))
 
 		// Keep auxiliary viewports sized to something sane even if not visible in compact mode.
-		m.taskQueueVP.Width = outW
-		m.taskQueueVP.Height = imax(1, outH)
-		m.taskQueueVP.SetContent(wrapViewportText(renderTaskQueue(m.taskQueue), outW))
+		m.inboxVP.Width = outW
+		m.inboxVP.Height = imax(1, outH)
+		m.inboxVP.SetContent(wrapViewportText(renderInbox(m.inbox), outW))
 		m.memoryVP.Width = outW
 		m.memoryVP.Height = outH
 		m.memoryVP.SetContent(wrapViewportText(renderMemResults(m.memResults), outW))
@@ -1444,11 +1470,11 @@ func (m *monitorModel) refreshViewports() {
 	m.planViewport.Width = planW
 	m.planViewport.Height = planH
 	m.refreshPlanView()
-	queueW := imax(10, grid.TaskQueue.ContentWidth)
-	queueH := imax(1, grid.TaskQueue.ContentHeight)
-	m.taskQueueVP.Width = queueW
-	m.taskQueueVP.Height = queueH
-	m.taskQueueVP.SetContent(wrapViewportText(renderTaskQueue(m.taskQueue), queueW))
+	inboxW := imax(10, grid.Inbox.ContentWidth)
+	inboxH := imax(1, grid.Inbox.ContentHeight)
+	m.inboxVP.Width = inboxW
+	m.inboxVP.Height = inboxH
+	m.inboxVP.SetContent(wrapViewportText(renderInbox(m.inbox), inboxW))
 	m.memoryVP.Width = imax(10, grid.Memory.ContentWidth)
 	m.memoryVP.Height = imax(1, grid.Memory.ContentHeight)
 	m.memoryVP.SetContent(wrapViewportText(renderMemResults(m.memResults), m.memoryVP.Width))
@@ -1513,9 +1539,9 @@ func formatEventLine(e types.EventRecord) string {
 	return line
 }
 
-func renderTaskQueue(tasks map[string]taskState) string {
+func renderInbox(tasks map[string]taskState) string {
 	if len(tasks) == 0 {
-		return "No pending tasks."
+		return "No pending inbox tasks."
 	}
 	ids := make([]string, 0, len(tasks))
 	for id := range tasks {

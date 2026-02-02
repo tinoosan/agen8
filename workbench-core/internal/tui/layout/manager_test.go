@@ -21,9 +21,8 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 	if mainH < 1 {
 		mainH = 1
 	}
-	leftTotal := grid.AgentOutput.Height + grid.Outbox.Height
-	if leftTotal > mainH {
-		t.Fatalf("left column height %d exceeds main height %d", leftTotal, mainH)
+	if grid.AgentOutput.Height > mainH {
+		t.Fatalf("left column height %d exceeds main height %d", grid.AgentOutput.Height, mainH)
 	}
 	// Right column now renders per-tab panels directly; reserve 1 row for the tab bar.
 	if got := grid.ActivityFeed.Height + grid.ActivityDetail.Height + 1; got > mainH {
@@ -32,8 +31,15 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 	if got := grid.Plan.Height + 1; got > mainH {
 		t.Fatalf("plan panel height %d exceeds main height %d", got, mainH)
 	}
-	if got := grid.CurrentTask.Height + grid.TaskQueue.Height + grid.Stats.Height + 1; got > mainH {
-		t.Fatalf("tasks panels height %d exceeds main height %d", got, mainH)
+	sideContentH := mainH - 1
+	if sideContentH < 0 {
+		sideContentH = 0
+	}
+	if got := grid.CurrentTask.Height + grid.Inbox.Height + grid.Outbox.Height; got > sideContentH {
+		t.Fatalf("tasks panels height %d exceeds side content height %d", got, sideContentH)
+	}
+	if grid.Stats.Height != composerHeight {
+		t.Fatalf("stats height want %d, got %d", composerHeight, grid.Stats.Height)
 	}
 	totalH := reserved + mainH
 	if totalH > grid.ScreenHeight {
@@ -53,19 +59,20 @@ func TestCalculateDashboard_ActivityPanelsHaveContentRoom(t *testing.T) {
 	}
 }
 
-func TestCalculateDashboard_OutboxComposerLeftColumnOnly(t *testing.T) {
+func TestCalculateDashboard_ComposerStatsAlignment(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
-	grid := mgr.CalculateDashboard(120, 35, 4, 6, 1)
+	composerHeight := 4
+	grid := mgr.CalculateDashboard(120, 35, composerHeight, 6, 1)
 
 	leftW := grid.AgentOutput.Width
-	if grid.Outbox.Width != leftW {
-		t.Fatalf("outbox width want %d (left column), got %d", leftW, grid.Outbox.Width)
-	}
 	if grid.Composer.Width != leftW {
 		t.Fatalf("composer width want %d (left column), got %d", leftW, grid.Composer.Width)
 	}
-	if grid.Outbox.Width >= grid.ScreenWidth || grid.Composer.Width >= grid.ScreenWidth {
-		t.Fatalf("outbox and composer must be left-column only (width < screen width %d)", grid.ScreenWidth)
+	if grid.Stats.Width != grid.ActivityFeed.Width {
+		t.Fatalf("stats width want %d (right column), got %d", grid.ActivityFeed.Width, grid.Stats.Width)
+	}
+	if grid.Stats.Height != composerHeight {
+		t.Fatalf("stats height want %d, got %d", composerHeight, grid.Stats.Height)
 	}
 }
 
