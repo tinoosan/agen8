@@ -92,13 +92,16 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 			ReasoningSummary: strings.TrimSpace(a.ReasoningSummary),
 		}
 
-		resp, err := a.streamToAccumulator(ctx, step, req)
+		resp, reasoningSummary, err := a.streamToAccumulator(ctx, step, req)
 		if err != nil {
 			return RunResult{}, nil, 0, err
 		}
 
 		if a.Hooks.OnLLMUsage != nil && resp.Usage != nil {
 			a.Hooks.OnLLMUsage(step, *resp.Usage)
+		}
+		if a.Hooks.OnStep != nil {
+			a.Hooks.OnStep(step, a.Model, strings.TrimSpace(reasoningSummary))
 		}
 		if a.Hooks.OnWebSearch != nil && len(resp.Citations) != 0 {
 			a.Hooks.OnWebSearch(step, resp.Citations)
@@ -177,15 +180,20 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 	}
 }
 
-func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req llm.LLMRequest) (llm.LLMResponse, error) {
+func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req llm.LLMRequest) (llm.LLMResponse, string, error) {
 	s, ok := a.LLM.(llm.LLMClientStreaming)
 	if !ok {
-		return llm.LLMResponse{}, fmt.Errorf("LLM client does not support streaming")
+		return llm.LLMResponse{}, "", fmt.Errorf("LLM client does not support streaming")
 	}
 	dec := &finalTextStreamDecoder{}
 	var streamMode string
 	var streamPrefix strings.Builder
 	const streamPrefixMax = 1024
+	var reasoningBuf strings.Builder
+	// Large safety cap to avoid unbounded memory growth if a provider emits extensive
+	// reasoning text. For typical "reasoning summary" streams this should behave like
+	// "no truncation".
+	const reasoningMax = 1024 * 1024
 	emit := func(token string) {
 		if token == "" {
 			return
@@ -197,6 +205,14 @@ func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req ll
 	resp, err := s.GenerateStream(ctx, req, func(chunk llm.LLMStreamChunk) error {
 		if a.Hooks.OnStreamChunk != nil {
 			a.Hooks.OnStreamChunk(step, chunk)
+		}
+		if chunk.IsReasoning && chunk.Text != "" && reasoningBuf.Len() < reasoningMax {
+			remain := reasoningMax - reasoningBuf.Len()
+			if len(chunk.Text) > remain {
+				reasoningBuf.WriteString(chunk.Text[:remain])
+			} else {
+				reasoningBuf.WriteString(chunk.Text)
+			}
 		}
 		if chunk.Done || chunk.IsReasoning || chunk.Text == "" {
 			return nil
@@ -253,7 +269,7 @@ func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req ll
 		}
 		return nil
 	})
-	return resp, err
+	return resp, reasoningBuf.String(), err
 }
 
 func isDangerousHostOp(req types.HostOpRequest) bool {

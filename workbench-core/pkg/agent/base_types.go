@@ -37,5 +37,6 @@ type Hooks struct {
 	OnWebSearch   func(step int, citations []llm.LLMCitation)
 	OnToken       func(step int, text string)
 	OnStreamChunk func(step int, chunk llm.LLMStreamChunk)
+	OnStep        func(step int, model string, reasoningSummary string)
 	Logf          func(format string, args ...any)
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -189,6 +190,22 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	agentCfg.ToolManifests = rt.ToolManifests
 	agentCfg.Hooks = agent.Hooks{
 		OnLLMUsage: newCostUsageHook(cfg, run, resolved.Model, resolved.PriceInPerMTokensUSD, resolved.PriceOutPerMTokensUSD, mustEmit),
+		OnStep: func(step int, model, summary string) {
+			model = strings.TrimSpace(model)
+			summary = strings.TrimSpace(summary)
+			data := map[string]string{
+				"step":  strconv.Itoa(step),
+				"model": model,
+			}
+			if summary != "" {
+				data["reasoningSummary"] = summary
+			}
+			mustEmit(ctx, events.Event{
+				Type:    "agent.step",
+				Message: fmt.Sprintf("Step %d completed", step),
+				Data:    data,
+			})
+		},
 	}
 
 	a, err := agent.NewAgent(llmClient, rt.Executor, agentCfg)

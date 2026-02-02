@@ -72,6 +72,8 @@ type monitorModel struct {
 	outboxVP          viewport.Model
 	memResults        []string
 	memoryVP          viewport.Model
+	thinkingEntries   []thinkingEntry
+	thinkingVP        viewport.Model
 	planMarkdown      string
 	planDetails       string
 	planLoadErr       string
@@ -81,7 +83,7 @@ type monitorModel struct {
 	profile           string
 	focusedPanel      panelID
 	compactTab        int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
-	dashboardSideTab  int // 0=Activity, 1=Plan, 2=Tasks; used when dashboard mode
+	dashboardSideTab  int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
 	width             int
 	height            int
 	styles            *monitorStyles
@@ -115,26 +117,24 @@ type outboxEntry struct {
 	Timestamp      time.Time
 }
 
+type thinkingEntry struct {
+	Summary string
+}
+
 type panelID int
 
 const (
 	panelActivity panelID = iota
 	panelActivityDetail
 	panelPlan
+	panelCurrentTask
 	panelOutput
 	panelInbox
 	panelOutbox
 	panelMemory
 	panelComposer
+	panelThinking
 )
-
-var dashboardFocusCycle = []panelID{
-	panelOutput,
-	panelOutbox,
-	panelActivity,
-	panelActivityDetail,
-	panelComposer,
-}
 
 // Breakpoints for responsive layout: below these use compact mode (tabs/single column).
 const (
@@ -213,6 +213,8 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 		outboxVP:          viewport.New(0, 0),
 		memResults:        []string{},
 		memoryVP:          viewport.New(0, 0),
+		thinkingEntries:   []thinkingEntry{},
+		thinkingVP:        viewport.New(0, 0),
 		stats:             stats,
 		styles:            defaultMonitorStyles(),
 		focusedPanel:      panelComposer,
@@ -397,6 +399,14 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancel()
 			}
 			return m, tea.Quit
+		case "ctrl+y":
+			if !m.isCompactMode() {
+				m.dashboardSideTab = 3
+				m.focusedPanel = panelThinking
+				m.updateFocus()
+				m.refreshViewports()
+				return m, nil
+			}
 		case "tab", "shift+tab":
 			if m.isCompactMode() {
 				// Toggle focus between the Composer and the current tab's panel.
@@ -408,30 +418,34 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateFocus()
 				return m, nil
 			}
-			idx := slices.Index(dashboardFocusCycle, m.focusedPanel)
+			cycle := m.dashboardTabFocusCycle()
+			if len(cycle) == 0 {
+				cycle = []panelID{panelComposer}
+			}
+			idx := slices.Index(cycle, m.focusedPanel)
 			if idx < 0 {
 				idx = 0
 			}
-			cycleLen := len(dashboardFocusCycle)
-			if msg.String() == "tab" {
-				idx = (idx + 1) % cycleLen
-			} else {
-				idx = (idx + cycleLen - 1) % cycleLen
+			switch msg.String() {
+			case "tab":
+				idx = (idx + 1) % len(cycle)
+			case "shift+tab":
+				idx = (idx + len(cycle) - 1) % len(cycle)
 			}
-			m.focusedPanel = dashboardFocusCycle[idx]
+			m.focusedPanel = cycle[idx]
 			m.syncDashboardSideTabFromFocus()
 			m.updateFocus()
 			return m, nil
 		case "ctrl+]":
 			if !m.isCompactMode() {
-				m.dashboardSideTab = (m.dashboardSideTab + 1) % 3
+				m.dashboardSideTab = (m.dashboardSideTab + 1) % len(dashboardSideTabNames)
 				m.focusedPanel = m.dashboardSideTabToPanel()
 				m.updateFocus()
 				return m, nil
 			}
 		case "ctrl+[":
 			if !m.isCompactMode() {
-				m.dashboardSideTab = (m.dashboardSideTab + 2) % 3
+				m.dashboardSideTab = (m.dashboardSideTab + len(dashboardSideTabNames) - 1) % len(dashboardSideTabNames)
 				m.focusedPanel = m.dashboardSideTabToPanel()
 				m.updateFocus()
 				return m, nil
@@ -491,7 +505,7 @@ func (m *monitorModel) renderStatusBar(width int) string {
 	if m.isCompactMode() {
 		line += "  |  Ctrl+]/Ctrl+[ switch tab (Output | Activity | Plan | Outbox)  |  Ctrl+Up/Down focus Activity Feed/Details"
 	} else {
-		line += "  |  Ctrl+]/Ctrl+[ cycle side panel (Activity | Plan | Tasks)  |  Ctrl+Up/Down focus Activity Feed/Details"
+		line += "  |  Ctrl+]/Ctrl+[ cycle side panel (Activity | Plan | Tasks | Thoughts)  |  Ctrl+Y Thoughts tab  |  Ctrl+Up/Down focus Activity Feed/Details"
 	}
 	w := width
 	if w <= 0 {
@@ -523,7 +537,7 @@ func (m *monitorModel) compactTabToPanel() panelID {
 }
 
 // dashboardSideTabNames for the side-panel tab bar in dashboard mode.
-var dashboardSideTabNames = []string{"Activity", "Plan", "Tasks"}
+var dashboardSideTabNames = []string{"Activity", "Plan", "Tasks", "Thoughts"}
 
 func (m *monitorModel) dashboardSideTabToPanel() panelID {
 	switch m.dashboardSideTab {
@@ -532,7 +546,9 @@ func (m *monitorModel) dashboardSideTabToPanel() panelID {
 	case 1:
 		return panelPlan
 	case 2:
-		return panelInbox
+		return panelCurrentTask
+	case 3:
+		return panelThinking
 	default:
 		return panelActivity
 	}
@@ -544,8 +560,49 @@ func (m *monitorModel) syncDashboardSideTabFromFocus() {
 		m.dashboardSideTab = 0
 	case panelPlan:
 		m.dashboardSideTab = 1
-	case panelInbox, panelOutbox:
+	case panelInbox, panelOutbox, panelCurrentTask:
 		m.dashboardSideTab = 2
+	case panelThinking:
+		m.dashboardSideTab = 3
+	}
+}
+
+func (m *monitorModel) dashboardTabFocusCycle() []panelID {
+	switch m.dashboardSideTab {
+	case 0:
+		return []panelID{
+			panelComposer,
+			panelOutput,
+			panelActivity,
+			panelActivityDetail,
+		}
+	case 1:
+		return []panelID{
+			panelComposer,
+			panelOutput,
+			panelPlan,
+		}
+	case 2:
+		return []panelID{
+			panelComposer,
+			panelOutput,
+			panelCurrentTask,
+			panelInbox,
+			panelOutbox,
+		}
+	case 3:
+		return []panelID{
+			panelComposer,
+			panelOutput,
+			panelThinking,
+		}
+	default:
+		return []panelID{
+			panelComposer,
+			panelOutput,
+			panelActivity,
+			panelActivityDetail,
+		}
 	}
 }
 
@@ -764,6 +821,12 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 	m.observeTaskEvent(ev)
 	m.observeAgentOutput(ev)
 	switch ev.Type {
+	case "agent.step":
+		summary := strings.TrimSpace(ev.Data["reasoningSummary"])
+		if summary != "" {
+			m.thinkingEntries = append(m.thinkingEntries, thinkingEntry{Summary: summary})
+			m.refreshThinkingViewport()
+		}
 	case "llm.cost.total":
 		m.stats.lastTurnCostUSD = strings.TrimSpace(ev.Data["costUsd"])
 		if v := strings.TrimSpace(ev.Data["costUsd"]); v != "" {
@@ -1107,6 +1170,54 @@ func (m *monitorModel) refreshPlanView() {
 	m.planViewport.GotoTop()
 }
 
+func (m *monitorModel) refreshThinkingViewport() {
+	if len(m.thinkingEntries) == 0 {
+		m.thinkingVP.SetContent(kit.StyleDim.Render("No thoughts captured yet."))
+		m.thinkingVP.GotoTop()
+		return
+	}
+
+	// Timeline view (no timestamps): show a vertical connector with a bullet per entry.
+	w := imax(10, m.thinkingVP.Width)
+	contentW := imax(10, w-4)
+
+	var out []string
+	for i, e := range m.thinkingEntries {
+		summary := strings.TrimSpace(e.Summary)
+		if summary == "" {
+			continue
+		}
+
+		rendered := summary
+		if m.renderer != nil {
+			rendered = strings.TrimRight(m.renderer.RenderMarkdown(summary, contentW), "\n")
+		}
+		rendered = wrapViewportText(rendered, contentW)
+		lines := strings.Split(rendered, "\n")
+		if len(lines) == 0 {
+			continue
+		}
+
+		out = append(out, "○ "+strings.TrimRight(lines[0], " "))
+		for _, line := range lines[1:] {
+			out = append(out, "  "+strings.TrimRight(line, " "))
+		}
+
+		if i < len(m.thinkingEntries)-1 {
+			out = append(out, "│")
+		}
+	}
+
+	if len(out) == 0 {
+		m.thinkingVP.SetContent(kit.StyleDim.Render("No thoughts captured yet."))
+		m.thinkingVP.GotoTop()
+		return
+	}
+
+	m.thinkingVP.SetContent(strings.Join(out, "\n"))
+	m.thinkingVP.GotoBottom()
+}
+
 func (m *monitorModel) renderHeader() string {
 	content := lipgloss.JoinHorizontal(lipgloss.Left,
 		m.styles.headerTitle.Render("Workbench - Always On"),
@@ -1129,7 +1240,7 @@ func (m *monitorModel) panelStyle(panel panelID) lipgloss.Style {
 }
 
 // renderMainBodyDashboard builds the two-column dashboard: left = AgentOutput + Outbox,
-// right = tabbed side panels (Activity | Plan | Tasks) rendered as their own boxes so
+// right = tabbed side panels (Activity | Plan | Tasks | Thoughts) rendered as their own boxes so
 // each subpanel can be focused and scrolled.
 func (m *monitorModel) renderMainBodyDashboard(grid layoutmgr.GridLayout) string {
 	leftParts := []string{
@@ -1196,15 +1307,14 @@ func (m *monitorModel) renderDashboardSidePanels(grid layoutmgr.GridLayout) stri
 		if m.currentTask != nil {
 			t := m.currentTask
 			duration := time.Since(t.StartedAt).Round(time.Second)
-			currentTaskBody = fmt.Sprintf(
-				"%s\n%s\n%s\n%s",
-				kit.StyleStatusKey.Render("Goal: ")+truncateText(t.Goal, imax(10, w-12)),
-				kit.StyleStatusKey.Render("Status: ")+fallback(t.Status, "unknown"),
-				kit.StyleStatusKey.Render("Started: ")+t.StartedAt.Format("15:04:05"),
-				kit.StyleStatusKey.Render("Duration: ")+duration.String(),
-			)
+			currentTaskBody = strings.Join([]string{
+				kit.StyleStatusKey.Render("Goal:    ") + kit.StyleStatusValue.Render(truncateText(t.Goal, imax(10, w-12))),
+				kit.StyleStatusKey.Render("Status:  ") + kit.StyleStatusValue.Render(fallback(t.Status, "unknown")),
+				kit.StyleStatusKey.Render("Started: ") + t.StartedAt.Format("15:04:05"),
+				kit.StyleStatusKey.Render("Elapsed: ") + duration.String(),
+			}, "\n")
 		}
-		current := m.styles.panel.
+		current := m.panelStyle(panelCurrentTask).
 			Width(grid.CurrentTask.InnerWidth()).
 			Height(grid.CurrentTask.InnerHeight()).
 			Render(m.styles.sectionTitle.Render("Current Task") + "\n" + currentTaskBody)
@@ -1220,6 +1330,11 @@ func (m *monitorModel) renderDashboardSidePanels(grid layoutmgr.GridLayout) stri
 			parts = append(parts, m.renderOutbox(grid.Outbox))
 		}
 		return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	case 3:
+		return m.panelStyle(panelThinking).
+			Width(grid.Plan.InnerWidth()).
+			Height(grid.Plan.InnerHeight()).
+			Render(m.styles.sectionTitle.Render("Thoughts") + "\n" + m.thinkingVP.View())
 	default:
 		feed := m.panelStyle(panelActivity).
 			Width(grid.ActivityFeed.InnerWidth()).
@@ -1250,7 +1365,7 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 	if m.isCompactMode() {
 		help += "  |  Ctrl+]/Ctrl+[ switch tab  |  Ctrl+Up/Down focus Activity Feed/Details"
 	} else {
-		help += "  |  Ctrl+]/Ctrl+[ cycle side panel  |  Ctrl+Up/Down focus Activity Feed/Details"
+		help += "  |  Ctrl+]/Ctrl+[ cycle side panel  |  Ctrl+Y Thoughts tab  |  Ctrl+Up/Down focus Activity Feed/Details"
 	}
 	// Keep the composer help single-line; wrapped help breaks vertical layout budgets.
 	help = kit.TruncateRight(help, max(1, spec.ContentWidth))
@@ -1308,6 +1423,8 @@ func (m *monitorModel) focusedPanelName() string {
 		return "Details"
 	case panelPlan:
 		return "Plan"
+	case panelCurrentTask:
+		return "Current Task"
 	case panelOutput:
 		return "Output"
 	case panelInbox:
@@ -1318,6 +1435,8 @@ func (m *monitorModel) focusedPanelName() string {
 		return "Memory"
 	case panelComposer:
 		return "Composer"
+	case panelThinking:
+		return "Thoughts"
 	default:
 		return "Unknown"
 	}
@@ -1341,6 +1460,9 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 		var cmd tea.Cmd
 		m.planViewport, cmd = m.planViewport.Update(msg)
 		return m, cmd
+	case panelCurrentTask:
+		// Current task panel is static, no interactive model.
+		return m, nil
 	case panelOutput:
 		var cmd tea.Cmd
 		m.agentOutputVP, cmd = m.agentOutputVP.Update(msg)
@@ -1356,6 +1478,10 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 	case panelMemory:
 		var cmd tea.Cmd
 		m.memoryVP, cmd = m.memoryVP.Update(msg)
+		return m, cmd
+	case panelThinking:
+		var cmd tea.Cmd
+		m.thinkingVP, cmd = m.thinkingVP.Update(msg)
 		return m, cmd
 	case panelComposer:
 		var cmd tea.Cmd
@@ -1375,8 +1501,8 @@ func (m *monitorModel) layout() layoutmgr.GridLayout {
 		return manager.CalculateCompact(m.width, m.height, composerHeight)
 	}
 	statusBarH := lipgloss.Height(m.renderStatusBar(m.width))
-	outboxRows := len(m.outboxResults)
-	outboxHeight := m.calculatePanelHeight(outboxRows, outboxRows == 0, m.focusedPanel == panelOutbox)
+	// Tasks tab uses equal distribution; outboxHeight is no longer needed for sizing.
+	outboxHeight := 0
 	return manager.CalculateDashboard(m.width, m.height, composerHeight, outboxHeight, statusBarH)
 }
 
@@ -1408,8 +1534,7 @@ func (m *monitorModel) refreshViewports() {
 		outH := imax(1, grid.AgentOutput.ContentHeight)
 		m.agentOutputVP.Width = outW
 		m.agentOutputVP.Height = outH
-		m.agentOutputVP.SetContent(wrapViewportText(strings.Join(m.agentOutput, "\n"), outW))
-		m.agentOutputVP.GotoBottom()
+		m.refreshAgentOutputViewport()
 
 		feedW := imax(10, grid.ActivityFeed.ContentWidth)
 		feedH := imax(1, grid.ActivityFeed.ContentHeight)
@@ -1431,7 +1556,7 @@ func (m *monitorModel) refreshViewports() {
 		outboxH := imax(1, grid.Outbox.ContentHeight)
 		m.outboxVP.Width = outboxW
 		m.outboxVP.Height = outboxH
-		m.outboxVP.SetContent(wrapViewportText(renderOutboxLines(m.outboxResults), outboxW))
+		m.outboxVP.SetContent(wrapViewportText(renderOutboxLines(m.outboxResults, m.renderer, outboxW), outboxW))
 
 		// Keep auxiliary viewports sized to something sane even if not visible in compact mode.
 		m.inboxVP.Width = outW
@@ -1440,6 +1565,9 @@ func (m *monitorModel) refreshViewports() {
 		m.memoryVP.Width = outW
 		m.memoryVP.Height = outH
 		m.memoryVP.SetContent(wrapViewportText(renderMemResults(m.memResults), outW))
+		m.thinkingVP.Width = outW
+		m.thinkingVP.Height = outH
+		m.refreshThinkingViewport()
 
 		m.input.SetWidth(imax(10, grid.Composer.ContentWidth))
 		return
@@ -1448,12 +1576,11 @@ func (m *monitorModel) refreshViewports() {
 	w := imax(10, grid.AgentOutput.ContentWidth)
 	m.agentOutputVP.Width = w
 	m.agentOutputVP.Height = imax(1, grid.AgentOutput.ContentHeight)
-	m.agentOutputVP.SetContent(wrapViewportText(strings.Join(m.agentOutput, "\n"), w))
-	m.agentOutputVP.GotoBottom()
+	m.refreshAgentOutputViewport()
 
 	m.outboxVP.Width = imax(10, grid.Outbox.ContentWidth)
 	m.outboxVP.Height = imax(1, grid.Outbox.ContentHeight)
-	m.outboxVP.SetContent(wrapViewportText(renderOutboxLines(m.outboxResults), m.outboxVP.Width))
+	m.outboxVP.SetContent(wrapViewportText(renderOutboxLines(m.outboxResults, m.renderer, m.outboxVP.Width), m.outboxVP.Width))
 
 	feedW := imax(10, grid.ActivityFeed.ContentWidth)
 	feedH := imax(1, grid.ActivityFeed.ContentHeight)
@@ -1470,6 +1597,9 @@ func (m *monitorModel) refreshViewports() {
 	m.planViewport.Width = planW
 	m.planViewport.Height = planH
 	m.refreshPlanView()
+	m.thinkingVP.Width = planW
+	m.thinkingVP.Height = planH
+	m.refreshThinkingViewport()
 	inboxW := imax(10, grid.Inbox.ContentWidth)
 	inboxH := imax(1, grid.Inbox.ContentHeight)
 	m.inboxVP.Width = inboxW
@@ -1539,9 +1669,79 @@ func formatEventLine(e types.EventRecord) string {
 	return line
 }
 
+func outputLineStyle(line string) lipgloss.Style {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return lipgloss.NewStyle()
+	}
+	// formatEventLine: "[15:04:05] <type>: <message>"
+	eventType := ""
+	if strings.HasPrefix(line, "[") {
+		if end := strings.Index(line, "]"); end != -1 {
+			inside := strings.TrimSpace(line[1:end])
+			rest := strings.TrimSpace(line[end+1:])
+			// If the bracket looks like a timestamp, parse the event type after it.
+			if strings.Count(inside, ":") >= 2 {
+				if colon := strings.Index(rest, ":"); colon != -1 {
+					eventType = strings.TrimSpace(rest[:colon])
+				}
+			} else {
+				// Monitor-local status lines like "[error]" or "[control] ..."
+				eventType = inside
+				if eventType == "queued" {
+					eventType = "task.queued"
+				}
+			}
+		}
+	}
+	switch eventType {
+	case "error", "daemon.error", "daemon.runner.error":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))
+	case "task.done", "task.delivered":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950"))
+	case "task.start", "task.queued", "task.generated":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#6bbcff"))
+	case "control", "control.check", "control.success", "control.error":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#d29922"))
+	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#a371f7"))
+	case "task.quarantined":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))
+	default:
+		return kit.StyleDim
+	}
+}
+
+func (m *monitorModel) refreshAgentOutputViewport() {
+	w := m.agentOutputVP.Width
+	if w <= 0 {
+		w = 80
+	}
+	lines := make([]string, 0, len(m.agentOutput))
+	for _, rawLine := range m.agentOutput {
+		rawLine = strings.TrimSpace(rawLine)
+		if rawLine == "" {
+			lines = append(lines, "")
+			continue
+		}
+		style := outputLineStyle(rawLine)
+		wrapped := wordwrap.String(rawLine, w)
+		for _, sub := range strings.Split(wrapped, "\n") {
+			sub = strings.TrimRight(sub, " ")
+			if sub == "" {
+				lines = append(lines, "")
+				continue
+			}
+			lines = append(lines, style.Render(sub))
+		}
+	}
+	m.agentOutputVP.SetContent(strings.Join(lines, "\n"))
+	m.agentOutputVP.GotoBottom()
+}
+
 func renderInbox(tasks map[string]taskState) string {
 	if len(tasks) == 0 {
-		return "No pending inbox tasks."
+		return kit.StyleDim.Render("No pending inbox tasks.")
 	}
 	ids := make([]string, 0, len(tasks))
 	for id := range tasks {
@@ -1552,37 +1752,67 @@ func renderInbox(tasks map[string]taskState) string {
 	for _, id := range ids {
 		task := tasks[id]
 		goal := truncateText(task.Goal, 48)
+		// Use bullet + bold ID for better visual hierarchy
+		line := "• " + kit.StyleBold.Render(shortID(id))
 		if goal != "" {
-			lines = append(lines, fmt.Sprintf("%s - %s", shortID(id), goal))
-		} else {
-			lines = append(lines, shortID(id))
+			line += " — " + goal
 		}
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }
 
-func renderOutboxLines(results []outboxEntry) string {
+func renderOutboxLines(results []outboxEntry, renderer *ContentRenderer, width int) string {
 	if len(results) == 0 {
-		return "No completed tasks yet."
+		return kit.StyleDim.Render("No completed tasks yet.")
 	}
 	lines := make([]string, 0, len(results))
 	for _, r := range results {
-		goal := truncateText(r.Goal, 60)
-		summary := truncateText(r.Summary, 420)
+		goal := truncateText(r.Goal, 50)
+		summary := strings.TrimSpace(r.Summary)
 		status := r.Status
 		if status == "" {
 			status = "unknown"
 		}
-		header := fmt.Sprintf("%s %q -> %s", shortID(r.TaskID), goal, status)
+
+		// Color-code status for quick visual scanning
+		statusStr := status
+		switch status {
+		case "succeeded":
+			statusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#98c379")).Render(status)
+		case "failed", "quarantined", "canceled":
+			statusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75")).Render(status)
+		}
+
+		// Header: bullet + bold ID + dim goal -> colored status
+		header := "• " + kit.StyleBold.Render(shortID(r.TaskID)) + " " +
+			kit.StyleDim.Render("\""+goal+"\"") + " → " + statusStr
 		lines = append(lines, header)
-		if strings.TrimSpace(summary) != "" {
-			lines = append(lines, "  summary: "+summary)
+
+		// Summary with markdown rendering
+		if summary != "" {
+			summaryRendered := summary
+			if renderer != nil && width > 0 {
+				// Render markdown and indent each line
+				rendered := strings.TrimRight(renderer.RenderMarkdown(summary, width-4), "\n")
+				renderedLines := strings.Split(rendered, "\n")
+				for i, line := range renderedLines {
+					if i == 0 {
+						summaryRendered = "  └ " + line
+					} else {
+						summaryRendered += "\n    " + line
+					}
+				}
+			} else {
+				summaryRendered = "  └ " + summary
+			}
+			lines = append(lines, summaryRendered)
 		}
 		if strings.TrimSpace(r.Error) != "" && (status == "failed" || status == "canceled" || status == "quarantined") {
-			lines = append(lines, "  error: "+truncateText(r.Error, 260))
+			lines = append(lines, "  └ "+lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75")).Render("error: "+strings.TrimSpace(r.Error)))
 		}
 		if r.ArtifactsCount > 0 || strings.TrimSpace(r.SummaryPath) != "" {
-			info := fmt.Sprintf("  deliverables: %d", r.ArtifactsCount)
+			info := fmt.Sprintf("  └ deliverables: %d", r.ArtifactsCount)
 			if strings.TrimSpace(r.SummaryPath) != "" {
 				info += " (summary: " + r.SummaryPath + ")"
 			}

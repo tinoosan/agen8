@@ -220,28 +220,13 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight
 	grid.ActivityDetail = m.spec(rightW, detailH)
 	grid.Plan = m.spec(rightW, sideContentH)
 
-	outboxH := outboxHeight
-	if outboxH > 0 && outboxH < outboxMinH {
-		outboxH = outboxMinH
-	}
-	if outboxH > outboxFixedH {
-		outboxH = outboxFixedH
-	}
-	if outboxH > sideContentH {
-		outboxH = sideContentH
-	}
-	remaining := sideContentH - outboxH
-	if remaining < 0 {
-		remaining = 0
-		outboxH = sideContentH
-	}
-
-	var currentTaskH, inboxH int
-	if remaining > 0 {
-		heights := distributeRows(remaining, []int{7, 6})
-		currentTaskH = heights[0]
-		inboxH = heights[1]
-	}
+	// Tasks tab: equal distribution among CurrentTask, Inbox, Outbox.
+	// This guarantees currentTaskH + inboxH + outboxH = sideContentH (no overflow).
+	panelH := sideContentH / 3
+	remainder := sideContentH % 3
+	currentTaskH := panelH
+	inboxH := panelH
+	outboxH := panelH + remainder // Give remainder to bottom panel for visual balance
 
 	grid.CurrentTask = m.spec(rightW, currentTaskH)
 	grid.Inbox = m.spec(rightW, inboxH)
