@@ -17,19 +17,24 @@ import (
 )
 
 type SQLiteStore struct {
-	path string
+	path    string
+	agentID string
 
 	mu  sync.Mutex
 	db  *sql.DB
 	once sync.Once
 }
 
-func NewSQLiteStore(path string) (*SQLiteStore, error) {
+func NewSQLiteStore(path string, agentID string) (*SQLiteStore, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, fmt.Errorf("sqlite store path is required")
 	}
-	return &SQLiteStore{path: path}, nil
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return nil, fmt.Errorf("agentID is required")
+	}
+	return &SQLiteStore{path: path, agentID: agentID}, nil
 }
 
 func (s *SQLiteStore) init() error {
@@ -56,21 +61,28 @@ func (s *SQLiteStore) init() error {
 			return
 		}
 		if _, err := db.Exec(`
-			CREATE TABLE IF NOT EXISTS task_state (
-				task_id TEXT PRIMARY KEY,
+			CREATE TABLE IF NOT EXISTS agent_task_state (
+				agent_id TEXT NOT NULL,
+				task_id TEXT NOT NULL,
 				status TEXT NOT NULL,
 				attempts INTEGER NOT NULL,
 				lease_until TEXT,
 				updated_at TEXT NOT NULL,
 				result_json TEXT,
-				error TEXT
+				error TEXT,
+				PRIMARY KEY (agent_id, task_id)
 			);
 		`); err != nil {
 			_ = db.Close()
 			initErr = fmt.Errorf("sqlite: create task_state: %w", err)
 			return
 		}
-		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_state_status ON task_state(status);`); err != nil {
+		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_task_state_agent_status ON agent_task_state(agent_id, status);`); err != nil {
+			_ = db.Close()
+			initErr = fmt.Errorf("sqlite: create index: %w", err)
+			return
+		}
+		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_task_state_lease ON agent_task_state(agent_id, lease_until);`); err != nil {
 			_ = db.Close()
 			initErr = fmt.Errorf("sqlite: create index: %w", err)
 			return
@@ -111,10 +123,10 @@ func (s *SQLiteStore) RecoverExpired(ctx context.Context, now time.Time) error {
 		return err
 	}
 	_, err = db.ExecContext(ctx, `
-		UPDATE task_state
+		UPDATE agent_task_state
 		SET status = ?, updated_at = ?, error = COALESCE(error, 'lease expired')
-		WHERE status = ? AND lease_until IS NOT NULL AND lease_until != '' AND lease_until < ?;
-	`, string(StatusFailed), now.UTC().Format(time.RFC3339Nano), string(StatusActive), now.UTC().Format(time.RFC3339Nano))
+		WHERE agent_id = ? AND status = ? AND lease_until IS NOT NULL AND lease_until != '' AND lease_until < ?;
+	`, string(StatusFailed), now.UTC().Format(time.RFC3339Nano), s.agentID, string(StatusActive), now.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("recover expired: %w", err)
 	}
@@ -145,13 +157,13 @@ func (s *SQLiteStore) Claim(ctx context.Context, taskID string, ttl time.Duratio
 	var status string
 	var attempts int
 	var leaseRaw string
-	row := tx.QueryRowContext(ctx, `SELECT status, attempts, COALESCE(lease_until, '') FROM task_state WHERE task_id = ?`, taskID)
+	row := tx.QueryRowContext(ctx, `SELECT status, attempts, COALESCE(lease_until, '') FROM agent_task_state WHERE agent_id = ? AND task_id = ?`, s.agentID, taskID)
 	switch err := row.Scan(&status, &attempts, &leaseRaw); err {
 	case sql.ErrNoRows:
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO task_state (task_id, status, attempts, lease_until, updated_at)
-			VALUES (?, ?, ?, ?, ?)
-		`, taskID, string(StatusActive), 1, leaseUntil.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+			INSERT INTO agent_task_state (agent_id, task_id, status, attempts, lease_until, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, s.agentID, taskID, string(StatusActive), 1, leaseUntil.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
 			return ClaimResult{}, fmt.Errorf("claim insert: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -176,10 +188,10 @@ func (s *SQLiteStore) Claim(ctx context.Context, taskID string, ttl time.Duratio
 
 	attempts++
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE task_state
+		UPDATE agent_task_state
 		SET status = ?, attempts = ?, lease_until = ?, updated_at = ?
-		WHERE task_id = ?
-	`, string(StatusActive), attempts, leaseUntil.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), taskID); err != nil {
+		WHERE agent_id = ? AND task_id = ?
+	`, string(StatusActive), attempts, leaseUntil.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), s.agentID, taskID); err != nil {
 		return ClaimResult{}, fmt.Errorf("claim update: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -203,10 +215,10 @@ func (s *SQLiteStore) Extend(ctx context.Context, taskID string, ttl time.Durati
 	now := time.Now().UTC()
 	leaseUntil := now.Add(ttl)
 	_, err = db.ExecContext(ctx, `
-		UPDATE task_state
+		UPDATE agent_task_state
 		SET lease_until = ?, updated_at = ?
-		WHERE task_id = ? AND status = ?
-	`, leaseUntil.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), taskID, string(StatusActive))
+		WHERE agent_id = ? AND task_id = ? AND status = ?
+	`, leaseUntil.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), s.agentID, taskID, string(StatusActive))
 	if err != nil {
 		return fmt.Errorf("extend: %w", err)
 	}
@@ -235,10 +247,10 @@ func (s *SQLiteStore) Complete(ctx context.Context, taskID string, result types.
 		status = StatusFailed
 	}
 	_, err = db.ExecContext(ctx, `
-		UPDATE task_state
+		UPDATE agent_task_state
 		SET status = ?, lease_until = '', updated_at = ?, result_json = ?, error = ?
-		WHERE task_id = ?
-	`, string(status), now.Format(time.RFC3339Nano), string(b), strings.TrimSpace(result.Error), taskID)
+		WHERE agent_id = ? AND task_id = ?
+	`, string(status), now.Format(time.RFC3339Nano), string(b), strings.TrimSpace(result.Error), s.agentID, taskID)
 	if err != nil {
 		return fmt.Errorf("complete: %w", err)
 	}
@@ -256,10 +268,10 @@ func (s *SQLiteStore) Quarantine(ctx context.Context, taskID string, errMsg stri
 	}
 	now := time.Now().UTC()
 	_, err = db.ExecContext(ctx, `
-		UPDATE task_state
+		UPDATE agent_task_state
 		SET status = ?, lease_until = '', updated_at = ?, error = ?
-		WHERE task_id = ?
-	`, string(StatusQuarantined), now.Format(time.RFC3339Nano), strings.TrimSpace(errMsg), taskID)
+		WHERE agent_id = ? AND task_id = ?
+	`, string(StatusQuarantined), now.Format(time.RFC3339Nano), strings.TrimSpace(errMsg), s.agentID, taskID)
 	if err != nil {
 		return fmt.Errorf("quarantine: %w", err)
 	}
@@ -283,9 +295,9 @@ func (s *SQLiteStore) Get(ctx context.Context, taskID string) (Record, bool, err
 	var errMsg string
 	row := db.QueryRowContext(ctx, `
 		SELECT status, attempts, COALESCE(lease_until, ''), updated_at, COALESCE(result_json, ''), COALESCE(error, '')
-		FROM task_state
-		WHERE task_id = ?
-	`, taskID)
+		FROM agent_task_state
+		WHERE agent_id = ? AND task_id = ?
+	`, s.agentID, taskID)
 	if err := row.Scan(&status, &attempts, &leaseRaw, &updatedRaw, &resultJSON, &errMsg); err != nil {
 		if err == sql.ErrNoRows {
 			return Record{}, false, nil
@@ -308,4 +320,3 @@ func (s *SQLiteStore) Get(ctx context.Context, taskID string) (Record, bool, err
 	}
 	return rec, true, nil
 }
-

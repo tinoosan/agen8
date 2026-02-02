@@ -63,32 +63,29 @@ func (m *Manager) Scan() error {
 			return fmt.Errorf("read root %s: %w", root, err)
 		}
 		for _, de := range dirEntries {
-			if de.IsDir() {
+			if !de.IsDir() {
 				continue
 			}
-			filename := de.Name()
-			if strings.HasPrefix(filename, ".") {
+			dirName := strings.TrimSpace(de.Name())
+			if dirName == "" || strings.HasPrefix(dirName, ".") {
 				continue
 			}
-			if strings.ToLower(filepath.Ext(filename)) != ".md" {
+			if _, err := sanitizeSkillName(dirName); err != nil {
 				continue
 			}
-			skillName := strings.TrimSuffix(filename, filepath.Ext(filename))
-			if strings.TrimSpace(skillName) == "" {
+			if _, ok := entries[dirName]; ok {
 				continue
 			}
-			if _, ok := entries[skillName]; ok {
-				continue
-			}
-			skillPath := filepath.Join(root, filename)
-			skill, err := m.loadSkillFile(skillName, skillPath)
+			skillDir := filepath.Join(root, dirName)
+			skillPath := filepath.Join(skillDir, "SKILL.md")
+			skill, err := m.loadSkillFile(dirName, skillDir, skillPath)
 			if err != nil {
 				if os.IsNotExist(err) {
 					continue
 				}
 				return fmt.Errorf("load skill %s: %w", skillPath, err)
 			}
-			entries[skillName] = skill
+			entries[dirName] = skill
 		}
 	}
 	m.entries = entries
@@ -119,7 +116,7 @@ func (m *Manager) Get(dir string) (*Skill, bool) {
 	return skill, ok
 }
 
-func (m *Manager) loadSkillFile(skillName, skillFilePath string) (*Skill, error) {
+func (m *Manager) loadSkillFile(skillName, skillDir, skillFilePath string) (*Skill, error) {
 	data, err := os.ReadFile(skillFilePath)
 	if err != nil {
 		return nil, err
@@ -131,6 +128,7 @@ func (m *Manager) loadSkillFile(skillName, skillFilePath string) (*Skill, error)
 	return &Skill{
 		Name:        defaultIfBlank(strings.TrimSpace(meta.Name), skillName),
 		Description: strings.TrimSpace(meta.Description),
+		Dir:         skillDir,
 		Path:        skillFilePath,
 	}, nil
 }
@@ -184,7 +182,7 @@ func (m *Manager) AddSkill(name, skillMd string) error {
 	if m == nil {
 		return fmt.Errorf("skills manager is required")
 	}
-	target, err := m.resolveWritablePath(name)
+	target, err := m.resolveWritableSkillFile(name)
 	if err != nil {
 		return err
 	}
@@ -198,7 +196,11 @@ func (m *Manager) AddSkill(name, skillMd string) error {
 	return m.Scan()
 }
 
-func (m *Manager) resolveWritablePath(skillName string) (string, error) {
+func (m *Manager) resolveWritableSkillFile(skillName string) (string, error) {
+	return m.resolveWritableFile(skillName, "SKILL.md")
+}
+
+func (m *Manager) resolveWritableFile(skillName string, rel string) (string, error) {
 	root := strings.TrimSpace(m.WritableRoot)
 	if root == "" {
 		return "", fmt.Errorf("skills writable root is not configured")
@@ -207,7 +209,11 @@ func (m *Manager) resolveWritablePath(skillName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	target, err := vfsutil.SafeJoinBaseDir(root, sanitized+".md")
+	rel = strings.TrimLeft(strings.TrimSpace(rel), "/")
+	if rel == "" {
+		return "", fmt.Errorf("skill relative path is required")
+	}
+	target, err := vfsutil.SafeJoinBaseDir(root, filepath.ToSlash(filepath.Join(sanitized, rel)))
 	if err != nil {
 		return "", fmt.Errorf("skill file %s: %w", sanitized, err)
 	}

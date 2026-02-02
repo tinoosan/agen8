@@ -63,7 +63,7 @@ type Session struct {
 
 	// Runs is an ordered list of run IDs created in this session.
 	//
-	// Runs are stored separately under data/runs/<runId>/; this list is an index.
+	// Runs are stored separately under data/agents/<agentId>/; this list is an index.
 	Runs []string `json:"runs,omitempty"`
 
 	// HistoryCursor is the host-maintained cursor used for incremental history retrieval.

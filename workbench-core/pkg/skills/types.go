@@ -4,5 +4,6 @@ package skills
 type Skill struct {
 	Name        string
 	Description string
-	Path        string
+	Dir         string
+	Path        string // absolute path to SKILL.md
 }

@@ -104,14 +104,14 @@ type taskState struct {
 }
 
 type outboxEntry struct {
-	TaskID    string
-	Goal      string
-	Status    string
-	Summary   string
-	Error     string
-	SummaryPath string
+	TaskID         string
+	Goal           string
+	Status         string
+	Summary        string
+	Error          string
+	SummaryPath    string
 	ArtifactsCount int
-	Timestamp time.Time
+	Timestamp      time.Time
 }
 
 type panelID int
@@ -230,7 +230,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 // taskState slices with Status pending. Used so the queue shows tasks added
 // before the monitor started or via webhook.
 func loadPendingTasksFromInbox(cfg config.Config, runID string) ([]taskState, error) {
-	inboxDir := filepath.Join(fsutil.GetRunDir(cfg.DataDir, runID), "inbox")
+	inboxDir := filepath.Join(fsutil.GetAgentDir(cfg.DataDir, runID), "inbox")
 	entries, err := os.ReadDir(inboxDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -459,7 +459,7 @@ func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine str
 		if w <= 0 {
 			w = 80
 		}
-		warning := m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render("Run is not active; start the daemon first or use --run-id to attach to the running run."))
+		warning := m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render("Agent is not active; start the daemon first or use --agent-id to attach to the running agent."))
 		sections = []string{headerLine, warning, "", main, "", m.renderComposer(grid.Composer), statusBar}
 	}
 	final := lipgloss.JoinVertical(lipgloss.Left, sections...)
@@ -668,7 +668,7 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 		if goal == "" {
 			return commandLinesMsg{lines: []string{"[queued] error: goal is empty"}}
 		}
-		runDir := fsutil.GetRunDir(m.cfg.DataDir, m.runID)
+		runDir := fsutil.GetAgentDir(m.cfg.DataDir, m.runID)
 		inboxDir := filepath.Join(runDir, "inbox")
 		_ = os.MkdirAll(inboxDir, 0755)
 		now := time.Now()
@@ -695,7 +695,7 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 
 func (m *monitorModel) writeControl(command string, args map[string]any) tea.Cmd {
 	return func() tea.Msg {
-		runDir := fsutil.GetRunDir(m.cfg.DataDir, m.runID)
+		runDir := fsutil.GetAgentDir(m.cfg.DataDir, m.runID)
 		inboxDir := filepath.Join(runDir, "inbox")
 		_ = os.MkdirAll(inboxDir, 0755)
 		payload := map[string]any{
@@ -913,18 +913,18 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 			}
 		}
 		m.outboxResults = append(m.outboxResults, outboxEntry{
-			TaskID:    taskID,
-			Goal:      strings.TrimSpace(ev.Data["goal"]),
-			Status:    strings.TrimSpace(ev.Data["status"]),
-			Summary:   strings.TrimSpace(ev.Data["summary"]),
-			Error:     strings.TrimSpace(ev.Data["error"]),
-			SummaryPath: artifact0,
+			TaskID:         taskID,
+			Goal:           strings.TrimSpace(ev.Data["goal"]),
+			Status:         strings.TrimSpace(ev.Data["status"]),
+			Summary:        strings.TrimSpace(ev.Data["summary"]),
+			Error:          strings.TrimSpace(ev.Data["error"]),
+			SummaryPath:    artifact0,
 			ArtifactsCount: artCount,
-			Timestamp: ev.Timestamp,
+			Timestamp:      ev.Timestamp,
 		})
-			if len(m.outboxResults) > 10 {
-				m.outboxResults = m.outboxResults[len(m.outboxResults)-10:]
-			}
+		if len(m.outboxResults) > 10 {
+			m.outboxResults = m.outboxResults[len(m.outboxResults)-10:]
+		}
 	case "task.quarantined":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
@@ -1096,8 +1096,8 @@ func (m *monitorModel) renderHeader() string {
 	content := lipgloss.JoinHorizontal(lipgloss.Left,
 		m.styles.headerTitle.Render("Workbench - Always On"),
 		kit.RenderTag(kit.TagOptions{Key: "Model", Value: fallback(m.model, "(unknown)")}),
-			kit.RenderTag(kit.TagOptions{Key: "Profile", Value: fallback(m.profile, "(none)")}),
-		kit.RenderTag(kit.TagOptions{Key: "Run", Value: m.runID}),
+		kit.RenderTag(kit.TagOptions{Key: "Profile", Value: fallback(m.profile, "(none)")}),
+		kit.RenderTag(kit.TagOptions{Key: "Agent", Value: m.runID}),
 	)
 	w := m.width
 	if w <= 0 {
@@ -1442,7 +1442,7 @@ func (m *monitorModel) refreshViewports() {
 }
 
 func (m *monitorModel) loadPlanFiles() {
-	runDir := fsutil.GetRunDir(m.cfg.DataDir, m.runID)
+	runDir := fsutil.GetAgentDir(m.cfg.DataDir, m.runID)
 	planDir := filepath.Join(runDir, "plan")
 
 	load := func(name string) (string, string) {

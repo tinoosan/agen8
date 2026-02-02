@@ -28,7 +28,7 @@ const (
 
 // DiskTraceStore reads the current on-disk trace format:
 //
-//	data/runs/<runId>/log/events.jsonl
+//	data/agents/<agentId>/log/events.jsonl
 //
 // The file is produced by store.AppendEvent, which mirrors canonical run events into
 // the trace directory.

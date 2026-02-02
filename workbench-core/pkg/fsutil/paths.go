@@ -29,28 +29,24 @@ func GetSessionHistoryPath(dataDir, sessionID string) string {
 	return filepath.Join(GetSessionHistoryDir(dataDir, sessionID), "history.jsonl")
 }
 
-func GetRunFilePath(dataDir, runID string) string {
-	return filepath.Join(dataDir, "runs", runID, "run.json")
+func GetAgentsDir(dataDir string) string {
+	return filepath.Join(dataDir, "agents")
 }
 
-func GetEventFilePath(dataDir, runID string) string {
-	return filepath.Join(dataDir, "runs", runID, "events.jsonl")
-}
-
-func GetRunDir(dataDir, runID string) string {
-	return filepath.Join(dataDir, "runs", runID)
+func GetAgentDir(dataDir, agentID string) string {
+	return filepath.Join(GetAgentsDir(dataDir), agentID)
 }
 
 func GetWorkspaceDir(dataDir, runID string) string {
-	return filepath.Join(dataDir, "runs", runID, "workspace")
+	return filepath.Join(GetAgentDir(dataDir, runID), "workspace")
 }
 
 func GetArtifactDir(dataDir, runID string) string {
-	return filepath.Join(dataDir, "runs", runID, "artifacts")
+	return filepath.Join(GetAgentDir(dataDir, runID), "artifacts")
 }
 
 func GetLogDir(dataDir, runID string) string {
-	return filepath.Join(dataDir, "runs", runID, "log")
+	return filepath.Join(GetAgentDir(dataDir, runID), "log")
 }
 
 func GetToolsDir(dataDir string) string {
@@ -70,19 +66,7 @@ func GetToolManifestPath(toolsDir, toolID string) string {
 }
 
 func GetResultsDir(dataDir, runID string) string {
-	return filepath.Join(dataDir, "runs", runID, "results")
-}
-
-func GetAgentDir(dataDir string) string {
-	return filepath.Join(dataDir, "agent")
-}
-
-func GetAgentMemoryPath(dataDir string) string {
-	return filepath.Join(GetAgentDir(dataDir), "memory.md")
-}
-
-func GetAgentMemoryUpdatePath(dataDir string) string {
-	return filepath.Join(GetAgentDir(dataDir), "update.md")
+	return filepath.Join(GetAgentDir(dataDir, runID), "results")
 }
 
 func GetMemoryDir(dataDir string) string {

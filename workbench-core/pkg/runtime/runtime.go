@@ -164,13 +164,29 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountProject, err)
 	}
 
-	runDir := fsutil.GetRunDir(cfg.Cfg.DataDir, cfg.Run.RunID)
+	runDir := fsutil.GetAgentDir(cfg.Cfg.DataDir, cfg.Run.RunID)
 	wsRes, err := resources.NewWorkspace(cfg.Cfg, cfg.Run.RunID)
 	if err != nil {
 		return nil, fmt.Errorf("create workspace resource: %w", err)
 	}
 	if err := fs.Mount(vfs.MountWorkspace, wsRes); err != nil {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountWorkspace, err)
+	}
+
+	resultsRes, err := resources.NewResultsResource(cfg.ResultsStore)
+	if err != nil {
+		return nil, fmt.Errorf("create results resource: %w", err)
+	}
+	if err := fs.Mount(vfs.MountResults, resultsRes); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountResults, err)
+	}
+
+	logRes, err := resources.NewTraceResource(cfg.Cfg, cfg.Run.RunID)
+	if err != nil {
+		return nil, fmt.Errorf("create log resource: %w", err)
+	}
+	if err := fs.Mount(vfs.MountLog, logRes); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountLog, err)
 	}
 
 	planDir := filepath.Join(runDir, "plan")
@@ -215,6 +231,26 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountSkills, err)
 	}
 
+	toolsDir := fsutil.GetToolsDir(cfg.Cfg.DataDir)
+	if err := os.MkdirAll(toolsDir, 0755); err != nil {
+		return nil, fmt.Errorf("prepare tools dir: %w", err)
+	}
+	builtinProvider, err := builtins.NewBuiltinManifestProvider()
+	if err != nil {
+		return nil, fmt.Errorf("create builtin manifest provider: %w", err)
+	}
+	manifestReg := tools.NewCompositeToolManifestRegistry(
+		builtinProvider,
+		tools.NewDiskManifestProvider(toolsDir),
+	)
+	toolsRes, err := builtins.NewToolsResource(manifestReg)
+	if err != nil {
+		return nil, fmt.Errorf("create tools resource: %w", err)
+	}
+	if err := fs.Mount(vfs.MountTools, toolsRes); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountTools, err)
+	}
+
 	inboxDir := filepath.Join(runDir, vfs.MountInbox)
 	if err := os.MkdirAll(inboxDir, 0755); err != nil {
 		return nil, fmt.Errorf("prepare inbox dir: %w", err)
@@ -241,6 +277,23 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 
 	resultsStore := cfg.ResultsStore
 	memStore := cfg.MemoryStore
+	toolManifests := []tools.ToolManifest{}
+	if ids, err := manifestReg.ListToolIDs(context.Background()); err == nil {
+		for _, id := range ids {
+			b, ok, err := manifestReg.GetManifest(context.Background(), id)
+			if err != nil || !ok {
+				continue
+			}
+			if m, err := tools.ParseBuiltinToolManifest(b); err == nil {
+				toolManifests = append(toolManifests, m)
+				continue
+			}
+			if m, err := tools.ParseUserToolManifest(b); err == nil {
+				toolManifests = append(toolManifests, m)
+				continue
+			}
+		}
+	}
 
 	if memStore == nil {
 		return nil, fmt.Errorf("memory store is required")
@@ -260,10 +313,13 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			Data: map[string]string{
 				"/project":   workdirRes.BaseDir,
 				"/workspace": wsRes.BaseDir,
+				"/results":   "(virtual)",
 				"/inbox":     inboxDir,
 				"/outbox":    outboxDir,
+				"/log":       "(virtual)",
 				"/plan":      planDir,
 				"/skills":    "(virtual)",
+				"/tools":     "(virtual)",
 				"/memory":    "(virtual)",
 			},
 			Console: boolPtr(false),
@@ -302,8 +358,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		Results:      resultsStore,
 		ToolRegistry: tools.MapRegistry{},
 	}
-
-	toolManifests := []tools.ToolManifest{}
 
 	executor := &agent.HostOpExecutor{
 		FS:              fs,

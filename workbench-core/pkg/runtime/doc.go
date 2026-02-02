@@ -9,8 +9,7 @@
 //
 //   - VFS Setup: `Build` creates a `vfs.FS`, mounts `/project`, `/workspace`, `/plan`,
 //     `/results`, `/tools`, `/skills`, `/log`, `/history`, and any other resources the
-//     runtime needs. The `resources.Factory` abstracts how directories, traces, history,
-//     and result artifacts tie back to configured stores.
+//     runtime needs.
 //   - Tool + Skill Wiring: Runtime maintains a `tools.Orchestrator` plus builtin invokers
 //     (fs.*, shell, http, trace) and any optional custom `tools.ToolManifest`s. Skills are
 //     discovered from the data directory or workspace and mounted under `/skills` so the

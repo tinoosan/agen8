@@ -97,7 +97,7 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 		t.Fatalf("unexpected artifact bytes: %q", string(ab))
 	}
 
-	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunID, "results")); err == nil {
+	if _, err := os.Stat(filepath.Join(tmpDir, "agents", run.RunID, "results")); err == nil {
 		t.Fatalf("expected no on-disk results directory")
 	}
 }
@@ -142,7 +142,7 @@ func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 		t.Fatalf("expected persisted response.json: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunID, "results")); err == nil {
+	if _, err := os.Stat(filepath.Join(tmpDir, "agents", run.RunID, "results")); err == nil {
 		t.Fatalf("expected no on-disk results directory")
 	}
 }
@@ -194,7 +194,7 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 
-	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunID, "results")); err == nil {
+	if _, err := os.Stat(filepath.Join(tmpDir, "agents", run.RunID, "results")); err == nil {
 		t.Fatalf("expected no on-disk results directory")
 	}
 }
@@ -241,7 +241,7 @@ func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 
-	if _, err := os.Stat(filepath.Join(tmpDir, "runs", run.RunID, "results")); err == nil {
+	if _, err := os.Stat(filepath.Join(tmpDir, "agents", run.RunID, "results")); err == nil {
 		t.Fatalf("expected no on-disk results directory")
 	}
 }

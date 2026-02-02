@@ -29,7 +29,7 @@ type TailedEvent struct {
 //
 // Trace mirror
 //   - AppendEvent also mirrors the exact same bytes (including newline) into:
-//       data/runs/<runId>/log/events.jsonl
+//       data/agents/<agentId>/log/events.jsonl
 //     so the trace VFS mount can be self-contained and offset-based polling is stable.
 //
 // Offset semantics

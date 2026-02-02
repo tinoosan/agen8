@@ -200,8 +200,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return err
 	}
 
-	runDir := fsutil.GetRunDir(cfg.DataDir, run.RunID)
-	taskStore, err := state.NewSQLiteStore(filepath.Join(runDir, "state", "tasks.db"))
+	taskStore, err := state.NewSQLiteStore(fsutil.GetSQLitePath(cfg.DataDir), run.RunID)
 	if err != nil {
 		return fmt.Errorf("create task state store: %w", err)
 	}
@@ -211,9 +210,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	ordered := agentevents.NewWriter(emitBlocking)
 
 	sess, err := session.New(session.Config{
-		Agent:             a,
-		Profile:           prof,
-		ProfileDir:        profDir,
+		Agent:      a,
+		Profile:    prof,
+		ProfileDir: profDir,
 		ResolveProfile: func(ref string) (*profile.Profile, string, error) {
 			return resolveProfileRef(cfg, strings.TrimSpace(ref))
 		},
@@ -271,7 +270,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Message: "Autonomous agent started",
 		Data:    map[string]string{"runId": run.RunID, "sessionId": run.SessionID, "profile": prof.ID},
 	})
-	log.Printf("daemon: run id %s — attach monitor with: workbench monitor --run-id %s", run.RunID, run.RunID)
+	log.Printf("daemon: agent id %s — attach monitor with: workbench monitor --agent-id %s", run.RunID, run.RunID)
 	for {
 		err = sess.Run(runCtx)
 		if runCtx.Err() != nil {
@@ -491,7 +490,7 @@ func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run
 			Inputs:    payload.Inputs,
 			Metadata:  payload.Metadata,
 		}
-		runDir := fsutil.GetRunDir(cfg.DataDir, run.RunID)
+		runDir := fsutil.GetAgentDir(cfg.DataDir, run.RunID)
 		inboxDir := filepath.Join(runDir, "inbox")
 		if err := os.MkdirAll(inboxDir, 0755); err != nil {
 			http.Error(w, "inbox error: "+err.Error(), http.StatusInternalServerError)

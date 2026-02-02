@@ -39,7 +39,7 @@ Running "workbench" starts a new session and run, then starts an always-on daemo
 that continuously processes tasks from /inbox and writes results to /outbox.
 
 Start the daemon first, then run "workbench monitor" so the monitor attaches to
-the active run (or use "workbench monitor --run-id <id>" with the run ID printed
+the active agent (or use "workbench monitor --agent-id <id>" with the agent ID printed
 at daemon startup).
 
 Each executed task can:
@@ -112,7 +112,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "", "base directory for runs/sessions (priority: --data-dir, env WORKBENCH_DATA_DIR, default: ~/.workbench or $XDG_STATE_HOME/workbench)")
+	rootCmd.PersistentFlags().StringVar(&dataDir, "data-dir", "", "base directory for agents/sessions (priority: --data-dir, env WORKBENCH_DATA_DIR, default: ~/.workbench or $XDG_STATE_HOME/workbench)")
 	workDir = strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR"))
 	rootCmd.PersistentFlags().StringVar(&workDir, "workdir", workDir, "host working directory to mount at /project (default: current directory; env WORKBENCH_WORKDIR)")
 	rootCmd.PersistentFlags().IntVar(&maxContextB, "context-bytes", 8*1024, "run.maxBytesForContext (persisted in run.json)")

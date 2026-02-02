@@ -11,7 +11,7 @@ import (
 
 func TestSQLiteStore_ClaimAndComplete(t *testing.T) {
 	dir := t.TempDir()
-	s, err := NewSQLiteStore(filepath.Join(dir, "tasks.db"))
+	s, err := NewSQLiteStore(filepath.Join(dir, "workbench.db"), "agent-test")
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestSQLiteStore_ClaimAndComplete(t *testing.T) {
 
 func TestSQLiteStore_Claim_Expires(t *testing.T) {
 	dir := t.TempDir()
-	s, err := NewSQLiteStore(filepath.Join(dir, "tasks.db"))
+	s, err := NewSQLiteStore(filepath.Join(dir, "workbench.db"), "agent-test")
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
@@ -65,4 +65,3 @@ func TestSQLiteStore_Claim_Expires(t *testing.T) {
 		t.Fatalf("expected re-claim after lease expiry, got: %+v", got2)
 	}
 }
-

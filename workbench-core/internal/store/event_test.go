@@ -27,7 +27,7 @@ func TestEventStore(t *testing.T) {
 			t.Fatalf("AppendEvent failed: %v", err)
 		}
 
-		tracePath := filepath.Join(cfg.DataDir, "runs", run.RunID, "log", "events.jsonl")
+		tracePath := filepath.Join(cfg.DataDir, "agents", run.RunID, "log", "events.jsonl")
 		f, err := os.Open(tracePath)
 		if err != nil {
 			t.Fatalf("Failed to open event file: %v", err)
