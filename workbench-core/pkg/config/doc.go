@@ -10,7 +10,7 @@
 // Hosts rely on `config.DataDir` containing the following structure:
 //
 //   - `<dataDir>/sessions/` – metadata about each session (for resuming + listing)
-//   - `<dataDir>/runs/<runId>/` – per-run artifacts (history, results, traces)
+//   - `<dataDir>/agents/<agentId>/` – per-agent artifacts (workspace, results, traces)
 //   - `<dataDir>/memory/` – shared memory staging (`memory.md`, `update.md`, `commits.jsonl`)
 //   - `<dataDir>/tools/` – discovered tool manifests (custom tools and builtin stubs)
 //   - `<dataDir>/agent/`, `/knowledge/` – upcoming runtime stores that will continue to live under `DataDir`.

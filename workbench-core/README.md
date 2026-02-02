@@ -44,7 +44,7 @@ Workbench Core is a local agentic runtime that exposes an interactive CLI for la
 Workbench exposes a virtual filesystem inside each run. Key mounts include:
 
 - `/project` – your host workspace (defaults to the current working directory; overridable via `--workdir`).
-- `/workspace` – run-local workspace mapped to `dataDir/runs/<runId>/workspace`.
+- `/workspace` – agent-local workspace mapped to `dataDir/agents/<agentId>/workspace`.
 - `/results`, `/log`, `/tools` – mounted read-only to expose structured outputs, telemetry, and discovered tool manifests.
 - `/memory` – shared agent memory (read `memory.md`, write `update.md` when you want to propose changes).
 
@@ -53,7 +53,7 @@ Every command that manipulates project files must operate through this explicit 
 ### Sessions vs. runs
 
 - **Sessions** (data stored under `dataDir/sessions/<sessionId>`) hold stable context/goal and track the latest run index.
-- **Runs** (stored under `dataDir/runs/<runId>`) represent a single agent execution with its workspace (`/workspace`), logs, artifacts, and metadata.
+- **Agents** (stored under `dataDir/agents/<agentId>`) represent a single autonomous runtime instance with its workspace (`/workspace`), logs, artifacts, and metadata.
 
 You can resume an existing session with `workbench resume <sessionId>` to continue the last run (use `--new-run` to force a fresh run) and inspect artifacts using the CLI or by exploring the data directory (see [docs/data-layout.md](docs/data-layout.md)).
 
@@ -64,7 +64,7 @@ Most entrypoints live under `cmd/workbench/cmd` and use Cobra. Important workflo
 | Command                              | Description                                                                                                                                                                  |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `workbench`                          | Start a new session + run with default context (daemon).                                                                                                                     |
-| `workbench monitor`                  | Open the monitoring TUI. Start the daemon first, then run monitor so it attaches to the active run; use `--run-id <id>` with the run ID printed at daemon startup if needed. |
+| `workbench monitor`                  | Open the monitoring TUI. Start the daemon first, then run monitor so it attaches to the active agent; use `--agent-id <id>` with the agent ID printed at daemon startup if needed. |
 | `workbench resume <sessionId>`       | Continue the last run in a session (use `--new-run` to start fresh).                                                                                                         |
 | `workbench list sessions`            | List stored session IDs + metadata.                                                                                                                                          |
 | `workbench list runs <sessionId>`    | Show run history for a session (statuses, timestamps).                                                                                                                       |
@@ -96,14 +96,14 @@ Helpers in `internal/config/effectiveConfig()` resolve the final configuration b
 The CLI stores persistent state under the configured `dataDir`:
 
 - `dataDir/workbench.db` (sessions, runs, events, history).
-- `dataDir/runs/<runId>/` (containing `workspace`, `artifacts`, `log`).
+- `dataDir/agents/<agentId>/` (containing `workspace`, `artifacts`, `log`, `inbox`, `outbox`).
 - `dataDir/memory/` (shared memory across runs: `memory.md`, `update.md`, `commits.jsonl`).
 
 Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sample commands, and tips on manually inspecting sessions, runs, and agent mounts.
 
 ## Troubleshooting
 
-- Logs live under `dataDir/runs/<runId>/log` (JSON/trace artifacts). Use `./workbench show run <runId>` to understand failure reasons.
+- Logs live under `dataDir/agents/<agentId>/log` (JSON/trace artifacts). Use `./workbench show run <agentId>` to understand failure reasons.
 - Re-run `./workbench resume <sessionId>` with `--context-bytes`/`--trace-bytes` overrides to debug context issues.
 - The [Troubleshooting guide](docs/troubleshooting.md) covers common problems (build issues, stuck runs, missing artifacts) and quick remediations.
 

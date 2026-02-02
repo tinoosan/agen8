@@ -14,8 +14,8 @@ Backend engineers or contributors working on Workbench’s VFS/skill integration
 ```
 Agent request                SkillsResource          Skill Manager         Real Skill Path
 ---------------            ------------------      -----------------     --------------
-/skills/                     -> List() / Read()   -> Find entry metadata  -> <dataDir>/skills/<name>.md
-/skills/my-skill.md          -> read file content
+/skills/                     -> List() / Read()   -> Find entry metadata  -> <dataDir>/skills/<name>/SKILL.md
+/skills/my-skill/SKILL.md    -> read file content
 ```
 
 ### Key Components
@@ -31,14 +31,14 @@ Agent request                SkillsResource          Skill Manager         Real 
 
 | Action | VFS Path | Behavior |
 |---|---|---|
-| List available skills | `/skills` | `List("")` -> returns sorted `*.md` skill files. |
-| Inspect a skill file | `/skills/<name>.md` | `Read()` ensures the skill exists and returns file bytes. |
-| Modify skill file | `Write` or `Append` to `/skills/<name>.md` | Writes to `<dataDir>/skills/<name>.md`, then rescans so the update is immediately visible. |
+| List available skills | `/skills` | `List("")` -> returns sorted skill directories. |
+| Inspect a skill file | `/skills/<name>/SKILL.md` | `Read()` ensures the skill exists and returns file bytes. |
+| Modify skill file | `Write` or `Append` to `/skills/<name>/SKILL.md` | Writes to `<dataDir>/skills/<name>/SKILL.md`, then rescans so the update is immediately visible. |
 
 #### Example
 To read the `explain-code` skill:
 ```
-GET /skills/explain-code.md
+GET /skills/explain-code/SKILL.md
 -> SkillsResource.Read()
    -> manager.Get("explain-code")
 ```
@@ -51,7 +51,7 @@ GET /skills/explain-code.md
 - **Error surfacing:** Every filesystem error (e.g., `os.Stat`, `os.ReadFile`) is wrapped with contextual text to make troubleshooting simpler when viewing logs.
 
 ### Gotchas
-- Paths must be a single file under `/skills` (no nested skill directories).
+- Skills are directories under `/skills` and `SKILL.md` is the entrypoint.
 - Writable paths are resolved under the configured writable root (`<dataDir>/skills`). For read-only/external skills, writes are rejected.
 - Modifications require `fsutil.WriteFileAtomic` to avoid partial writes—this means the agent cannot append data atomically without abiding by this wrapper.
 

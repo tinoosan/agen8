@@ -24,7 +24,7 @@ Shared memory lives outside run directories:
 
 - `memory/` – shared memory staging (`memory.md`, `update.md`, `commits.jsonl`).
 
-Event logs are mirrored to `<dataDir>/runs/<runId>/log/events.jsonl` so `/log` remains offset-based.
+Event logs are mirrored to `<dataDir>/agents/<agentId>/log/events.jsonl` so `/log` remains offset-based.
 
 Helper functions in `internal/fsutil/paths.go` ensure this layout remains consistent (`GetRunDir`,
 `GetArtifactDir`, etc.), so other packages can rely on deterministic paths.
@@ -34,13 +34,13 @@ Helper functions in `internal/fsutil/paths.go` ensure this layout remains consis
 Workbench exposes an Agentic File System (AFS) inside each run:
 
 - `/project` – the host working directory (default `.`) mounted via `--workdir` / `WORKBENCH_WORKDIR`.
-- `/workspace` – the run-local workspace (maps to `<dataDir>/runs/<runId>/workspace`).
+- `/workspace` – the agent-local workspace (maps to `<dataDir>/agents/<agentId>/workspace`).
 - `/results` – where tool.run writes structured responses: `/results/<callId>/response.json`.
 - `/log`, `/tools` – read-only mounts that surface logs and discovered tool manifests (`internal/tools`).
 - `/memory` – shared agent memory (read `memory.md`, write `update.md` when you want to propose changes).
 
 Understanding this layout makes it easier to inspect sessions/runs manually (e.g., querying `workbench.db`
-and inspecting `<dataDir>/runs/<id>/log/events.jsonl`). All paths are derived via helpers in
+and inspecting `<dataDir>/agents/<id>/log/events.jsonl`). All paths are derived via helpers in
 `internal/fsutil` and validated through `internal/store`.
 
 ### VFS paths vs. shell cwd
@@ -54,7 +54,7 @@ and inspecting `<dataDir>/runs/<id>/log/events.jsonl`). All paths are derived vi
 1. `./workbench list sessions` to find a session ID.
 2. `./workbench show session <id>` or query `workbench.db` to inspect goals.
 3. `./workbench list runs <id>` plus `workbench.db` to review a specific run.
-4. Tail `<dataDir>/runs/<runId>/log/events.jsonl` or inspect `/log` via the TUI to see agent/host interactions.
+4. Tail `<dataDir>/agents/<agentId>/log/events.jsonl` or inspect `/log` via the TUI to see agent/host interactions.
 5. Explore `/workspace`, `/artifacts`, `/results` to replay what the agent created or wrote.
 
 ## Mounting summary
@@ -62,9 +62,9 @@ and inspecting `<dataDir>/runs/<id>/log/events.jsonl`). All paths are derived vi
 | Mount        | Host path                          | Description                                                        |
 | ------------ | ---------------------------------- | ------------------------------------------------------------------ |
 | `/project`   | `<workdir>`                        | Host workspace mounted read/write (configurable with `--workdir`). |
-| `/workspace` | `<dataDir>/runs/<runId>/workspace` | Run-local workspace for ephemeral files.                           |
-| `/results`   | `<dataDir>/runs/<runId>/results`   | Structured outputs from tools/agenti runs.                         |
-| `/log`       | `<dataDir>/runs/<runId>/log`       | Logs authored by built-in tools and internal agents.               |
+| `/workspace` | `<dataDir>/agents/<agentId>/workspace` | Agent-local workspace for ephemeral files.                           |
+| `/results`   | `<dataDir>/agents/<agentId>/results`   | Structured outputs from tools/agent runs.                            |
+| `/log`       | `<dataDir>/agents/<agentId>/log`       | Logs authored by built-in tools and internal agents.                 |
 | `/memory`    | `<dataDir>/memory`                 | Shared memory staging (`memory.md`, `update.md`, `commits.jsonl`). |
 | `/tools`     | `<dataDir>/tools`                  | Discovered tool manifests (injectable into runs).                  |
 

@@ -4,14 +4,14 @@ This guide captures common issues and diagnostics that surface when running Work
 
 ## General checks
 
-- **Permissions**: Ensure `WORKBENCH_DATA_DIR` (or default `~/.workbench`) is writable by your user; otherwise the CLI cannot persist runs/sessions.
+- **Permissions**: Ensure `WORKBENCH_DATA_DIR` (or default `~/.workbench`) is writable by your user; otherwise the CLI cannot persist agents/sessions.
 - **Go toolchain**: `go version` should match the version declared in `go.mod`. Rebuild the CLI if dependencies change.
 - **Environment variables**: Unset conflicting vars (e.g., `WORKBENCH_WORKDIR` pointing to a nonexistent path) before running the CLI.
 
 ## Session/run issues
 
-- **Stuck run/resume**: Use `./workbench show run <runId>` to inspect `status`, `error`, or `lastTrace`. Check `<dataDir>/runs/<runId>/log/events.jsonl` for the precise host/agent steps.
-- **Missing artifacts**: Look under `<dataDir>/runs/<runId>/artifacts` and `/results` to verify tool outputs. If paths are missing, inspect agent operations via the TUI history or logs.
+- **Stuck agent/resume**: Use `./workbench show run <agentId>` to inspect `status`, `error`, or `lastTrace`. Check `<dataDir>/agents/<agentId>/log/events.jsonl` for the precise host/agent steps.
+- **Missing artifacts**: Look under `<dataDir>/agents/<agentId>/artifacts` and `/results` to verify tool outputs. If paths are missing, inspect agent operations via the TUI history or logs.
 - **Context truncation**: Reduce `--context-bytes` or `--history-pairs`, then start a fresh run. Context overruns show up in trace logs (look for `PromptUpdater` warnings in `log/events.jsonl`).
 
 ## Configuration problems
@@ -36,7 +36,7 @@ Collect the following before raising an issue:
 
 1. CLI command and flags you ran.
 2. `runId`, `sessionId`, and the timestamps when the problem occurred.
-3. Relevant logs under `<dataDir>/runs/<runId>/log/events.jsonl`.
+3. Relevant logs under `<dataDir>/agents/<agentId>/log/events.jsonl`.
 4. Any overrides (`WORKBENCH_DATA_DIR`, `WORKBENCH_WORKDIR`, `OPENROUTER_MODEL`).
 
 Share these details in the issue or in-team discussion for faster triage.

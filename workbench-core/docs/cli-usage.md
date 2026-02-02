@@ -74,7 +74,7 @@ The CLI constructs `RunChatOptions` from resolved configuration and passes them 
 ## Troubleshooting tips
 
 - Ensure `$WORKBENCH_DATA_DIR` is writable; otherwise, sessions/runs fail to persist.
-- `./workbench show run <runId>` + `cat <dataDir>/runs/<runId>/log/events.jsonl` reveal runtime problems.
+- `./workbench show run <agentId>` + `cat <dataDir>/agents/<agentId>/log/events.jsonl` reveal runtime problems.
 - If the CLI exits immediately, check `~/.workbench/.trace.json` (if present) for tracing context budget violations.
 - Use `./workbench --help` to confirm new flags introduced in newer releases.
 

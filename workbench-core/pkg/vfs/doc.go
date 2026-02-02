@@ -2,7 +2,7 @@
 //
 // The agent interacts with files, results, tools, and artifacts through this mount
 // table. `FS` manages mount points such as `/project`, `/workspace`, `/results`, `/tools`,
-// `/history`, `/log`, and `/skills`. Resources implement `Reader`, `Writer`, and
+// `/log`, and `/skills`. Resources implement `Reader`, `Writer`, and
 // `Lister` semantics so the runtime can attach real directories, synthetic logs, or
 // memory-backed buffers without leaking implementation details.
 //
@@ -12,7 +12,7 @@
 //   - Mount Point: Named location (`vfs.MountProject`, `vfs.MountSkills`, etc.) that maps
 //     to a `Resource` implementation.
 //   - Resource: Implements file operations for its mount (`DirResource`, `TraceResource`,
-//     `HistoryResource`, etc.). Resources can enforce permissions, apply caching, or
+//     etc.). Resources can enforce permissions, apply caching, or
 //     synthesize data for the agent.
 //
 // # Usage Pattern
