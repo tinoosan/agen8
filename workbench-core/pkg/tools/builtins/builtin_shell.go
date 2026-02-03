@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfsutil"
-	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 const defaultShellMaxOutputBytes = 64 * 1024
@@ -55,11 +55,9 @@ type shellExecInput struct {
 }
 
 type shellExecOutput struct {
-	ExitCode   int    `json:"exitCode"`
-	Stdout     string `json:"stdout"`
-	Stderr     string `json:"stderr"`
-	StdoutPath string `json:"stdoutPath,omitempty"`
-	StderrPath string `json:"stderrPath,omitempty"`
+	ExitCode int    `json:"exitCode"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
 }
 
 func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req pkgtools.ToolRequest) (pkgtools.ToolCallResult, error) {
@@ -166,30 +164,12 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req pkgtools.ToolReque
 		Stderr:   truncateString(stderrText, maxBytes),
 	}
 
-	artifacts := make([]pkgtools.ToolArtifactWrite, 0, 2)
-	if len(stdoutFull) > maxBytes {
-		out.StdoutPath = "stdout.txt"
-		artifacts = append(artifacts, pkgtools.ToolArtifactWrite{
-			Path:      "stdout.txt",
-			Bytes:     []byte(stdoutText),
-			MediaType: "text/plain",
-		})
-	}
-	if len(stderrFull) > maxBytes {
-		out.StderrPath = "stderr.txt"
-		artifacts = append(artifacts, pkgtools.ToolArtifactWrite{
-			Path:      "stderr.txt",
-			Bytes:     []byte(stderrText),
-			MediaType: "text/plain",
-		})
-	}
-
 	outputJSON, err := json.Marshal(out)
 	if err != nil {
 		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
 	}
 
-	return pkgtools.ToolCallResult{Output: outputJSON, Artifacts: artifacts}, nil
+	return pkgtools.ToolCallResult{Output: outputJSON}, nil
 }
 
 func filterShellEnv(env []string) []string {

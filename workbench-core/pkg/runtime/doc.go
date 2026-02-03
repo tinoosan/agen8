@@ -8,16 +8,15 @@
 // # Responsibilities
 //
 //   - VFS Setup: `Build` creates a `vfs.FS`, mounts `/project`, `/workspace`, `/plan`,
-//     `/results`, `/tools`, `/skills`, `/log`, `/history`, and any other resources the
+//     `/skills`, `/log`, `/history`, and any other resources the
 //     runtime needs.
-//   - Tool + Skill Wiring: Runtime maintains a `tools.Orchestrator` plus builtin invokers
-//     (fs.*, shell, http, trace) and any optional custom `tools.ToolManifest`s. Skills are
-//     discovered from the data directory or workspace and mounted under `/skills` so the
-//     agent can read their instructions via the VFS.
+//   - Tool + Skill Wiring: Runtime configures built-in host tools (fs.*, shell, http, trace).
+//     Skills are discovered from the data directory and mounted under `/skills` so the agent
+//     can read their instructions via the VFS.
 //   - Context + Hook Integration: The runtime holds `agent.PromptBuilder` and
 //     `agent.PromptUpdater` structs along with trace middleware so contextual prompts
 //     and reasoning traces flow through each step. It also orchestrates event emission
-//     and persistence callbacks supplied via the `BuildConfig` (history, memory, results,
+//     and persistence callbacks supplied via the `BuildConfig` (history, memory,
 //     trace stores, etc.).
 //   - Guardrails: BuildConfig allows hosts to enforce op guards, artifact observers,
 //     run persistence hooks, and session loading/saving so runtime initialization can

@@ -33,17 +33,16 @@ type PromptBuilder struct {
 	SkillsManager *skills.Manager
 
 	IncludeHistoryOps bool
-	MaxMemoryBytes  int
-	MaxTraceBytes   int
-	MaxHistoryBytes int
+	MaxMemoryBytes    int
+	MaxTraceBytes     int
+	MaxHistoryBytes   int
 
 	TraceIncludeTypes []string
 
 	Emit events.EmitFunc
 
-	LastOp      *types.HostOpRequest
-	LastResp    *types.HostOpResponse
-	LastToolRun *LastToolRun
+	LastOp   *types.HostOpRequest
+	LastResp *types.HostOpResponse
 
 	FileAttachments []FileAttachment
 }
@@ -90,13 +89,6 @@ func (c *PromptBuilder) ObserveHostOp(req types.HostOpRequest, resp types.HostOp
 	respCopy := resp
 	c.LastOp = &reqCopy
 	c.LastResp = &respCopy
-	if req.Op == types.HostOpToolRun && resp.ToolResponse != nil {
-		c.LastToolRun = &LastToolRun{
-			ToolID:   req.ToolID,
-			ActionID: req.ActionID,
-			CallID:   resp.ToolResponse.CallID,
-		}
-	}
 }
 
 // SetFileAttachments replaces the current attachment set for this turn.

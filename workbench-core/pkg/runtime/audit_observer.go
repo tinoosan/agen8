@@ -75,7 +75,7 @@ func shouldAuditOp(op string, auditReads bool) bool {
 	case types.HostOpFSRead, types.HostOpFSList:
 		return auditReads
 	case types.HostOpFSWrite, types.HostOpFSAppend, types.HostOpFSEdit, types.HostOpFSPatch,
-		types.HostOpShellExec, types.HostOpHTTPFetch, types.HostOpToolRun:
+		types.HostOpShellExec, types.HostOpHTTPFetch:
 		return true
 	default:
 		return false

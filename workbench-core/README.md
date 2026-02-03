@@ -26,7 +26,7 @@ Workbench Core is a local agentic runtime that exposes an interactive CLI for la
    ./workbench
    ```
 
-   The Bubble Tea-powered UI treats each user message as an agent turn. The embedded system prompt lists builtin capabilities (shell, HTTP, trace, etc.), while `/tools` exposes discoverable external tools via `tool.run`.
+   The Bubble Tea-powered UI treats each user message as an agent turn. The embedded system prompt lists built-in capabilities (shell, HTTP, trace, etc.).
 
 3. **Resume work or inspect state** after exiting the TUI:
 
@@ -45,8 +45,10 @@ Workbench exposes a virtual filesystem inside each run. Key mounts include:
 
 - `/project` – your host workspace (defaults to the current working directory; overridable via `--workdir`).
 - `/workspace` – agent-local workspace mapped to `dataDir/agents/<agentId>/workspace`.
-- `/results`, `/log`, `/tools` – mounted read-only to expose structured outputs, telemetry, and discovered tool manifests.
-- `/memory` – shared agent memory (read `memory.md`, write `update.md` when you want to propose changes).
+- `/log` – run event stream and trace excerpts.
+- `/skills` – user-defined skills (read `/skills/<skill_name>/SKILL.md`).
+- `/plan` – planning workspace (`HEAD.md` + `CHECKLIST.md`).
+- `/memory` – shared agent memory (`MEMORY.MD` + daily `YYYY-MM-DD-memory.md` files).
 
 Every command that manipulates project files must operate through this explicit surface, which keeps tooling auditable and reproducible.
 
@@ -79,7 +81,7 @@ Runtime configuration resolves in this order: CLI flags → environment variable
 
 | Flag                    | Env                             | Description                                                                                                                               |
 | ----------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `--data-dir`            | `WORKBENCH_DATA_DIR`            | Base directory containing `workbench.db`, `runs`, `tools`, `agent`. Defaults to `~/.workbench` or `$XDG_STATE_HOME/workbench`. |
+| `--data-dir`            | `WORKBENCH_DATA_DIR`            | Base directory containing `workbench.db`, `sessions`, `agents`, and shared `memory`. Defaults to `~/.workbench` or `$XDG_STATE_HOME/workbench`. |
 | `--workdir`             | `WORKBENCH_WORKDIR`             | Host directory mounted under `/project`. Defaults to the current working directory.                                                       |
 | `--context-bytes`       | —                               | How many bytes of context to persist (`run.maxBytesForContext`; default `8*1024`). Must be > 0.                                           |
 | `--model`               | `OPENROUTER_MODEL`              | Default model ID for LLM calls (overrides session defaults).                                                                              |
@@ -96,7 +98,7 @@ The CLI stores persistent state under the configured `dataDir`:
 
 - `dataDir/workbench.db` (sessions, runs, events, history).
 - `dataDir/agents/<agentId>/` (containing `workspace`, `artifacts`, `log`, `inbox`, `outbox`).
-- `dataDir/memory/` (shared memory across runs: `memory.md`, `update.md`, `commits.jsonl`).
+- `dataDir/memory/` (shared memory across runs: `MEMORY.MD`, plus daily `YYYY-MM-DD-memory.md` files).
 
 Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sample commands, and tips on manually inspecting sessions, runs, and agent mounts.
 
@@ -110,6 +112,6 @@ Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sa
 
 - Inspect `internal/app` for session runtime wiring and `internal/store` for persistence logic.
 - The [Developer guide](docs/developer-guide.md) explains how configuration, session/run lifecycles, and telemetry hooks fit together.
-- Use `/tools` manifests and `tool.run` to extend Workbench with custom tooling following the AFS expectations.
+- Inspect `pkg/agent/hosttools` for the built-in host tool surface and `pkg/tools/builtins` for host-side implementations.
 
 Contributions are welcome—submit documentation fixes or enhancements alongside code changes to keep the docs aligned with evolving runtime behavior.

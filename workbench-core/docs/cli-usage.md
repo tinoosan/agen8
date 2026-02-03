@@ -10,7 +10,7 @@ The `workbench` binary exposes a Cobra-powered CLI that orchestrates sessions, r
 ./workbench
 ```
 
-The CLI boots the default Bubble Tea-powered TUI. Every line you send becomes an agent turn. Builtin capabilities (shell, HTTP, tracing, etc.) appear directly in the system prompt, while `/tools` only surfaces external/custom tools that must be discovered via `tool.run`.
+The CLI boots the default Bubble Tea-powered TUI. Every line you send becomes an agent turn. Built-in capabilities (shell, HTTP, tracing, etc.) appear directly in the system prompt.
 
 ### 2. Resume progress in an existing session
 

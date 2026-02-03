@@ -10,17 +10,15 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
-// HostToolRegistry stores host tools and optional routes for manifest-based tools.
+// HostToolRegistry stores host tools.
 type HostToolRegistry struct {
-	tools  map[string]HostTool
-	routes map[string]ToolRoute
+	tools map[string]HostTool
 }
 
 // NewHostToolRegistry constructs an empty registry.
 func NewHostToolRegistry() *HostToolRegistry {
 	return &HostToolRegistry{
-		tools:  make(map[string]HostTool),
-		routes: make(map[string]ToolRoute),
+		tools: make(map[string]HostTool),
 	}
 }
 
@@ -33,9 +31,6 @@ func (r *HostToolRegistry) Clone() *HostToolRegistry {
 	out := NewHostToolRegistry()
 	for k, v := range r.tools {
 		out.tools[k] = v
-	}
-	for k, v := range r.routes {
-		out.routes[k] = v
 	}
 	return out
 }
@@ -58,22 +53,6 @@ func (r *HostToolRegistry) Register(tool HostTool) error {
 	}
 	r.tools[name] = tool
 	return nil
-}
-
-// RegisterRoutes adds manifest-based tool routes for function dispatch.
-func (r *HostToolRegistry) RegisterRoutes(routes map[string]ToolRoute) {
-	if r == nil || routes == nil {
-		return
-	}
-	for name, route := range routes {
-		if strings.TrimSpace(name) == "" {
-			continue
-		}
-		if _, exists := r.routes[name]; exists {
-			continue
-		}
-		r.routes[name] = route
-	}
 }
 
 // Definitions returns all registered tool definitions.
@@ -99,30 +78,6 @@ func (r *HostToolRegistry) Dispatch(ctx context.Context, name string, args json.
 	}
 	if tool, ok := r.tools[trimmed]; ok {
 		return tool.Execute(ctx, args)
-	}
-	if route, ok := r.routes[trimmed]; ok {
-		argsJSON := args
-		if len(strings.TrimSpace(string(argsJSON))) == 0 {
-			argsJSON = []byte(`{}`)
-		}
-		var input json.RawMessage
-		if err := json.Unmarshal(argsJSON, &input); err != nil {
-			return types.HostOpRequest{}, err
-		}
-		if input == nil {
-			input = json.RawMessage(`{}`)
-		}
-		timeout := route.TimeoutMs
-		if timeout <= 0 {
-			timeout = defaultToolFunctionTimeoutMs
-		}
-		return types.HostOpRequest{
-			Op:        types.HostOpToolRun,
-			ToolID:    route.ToolID,
-			ActionID:  strings.TrimSpace(route.ActionID),
-			Input:     input,
-			TimeoutMs: timeout,
-		}, nil
 	}
 	return types.HostOpRequest{}, fmt.Errorf("unknown tool function %q", trimmed)
 }

@@ -17,7 +17,7 @@ func (t *HTTPFetchTool) Definition() llmtypes.Tool {
 	return llmtypes.Tool{
 		Type: "function",
 		Function: llmtypes.ToolFunction{
-			Name:        "http.fetch",
+			Name:        "http_fetch",
 			Description: "[CORE] Make an HTTP request. Returns status, headers, and body.",
 			Strict:      false,
 			Parameters: map[string]any{

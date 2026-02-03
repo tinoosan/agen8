@@ -14,19 +14,14 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/resources"
 	"github.com/tinoosan/workbench-core/pkg/skills"
 	"github.com/tinoosan/workbench-core/pkg/store"
-	"github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 type Runtime struct {
-	FS       *vfs.FS
-	Executor agent.HostExecutor
-	// Runner is the tool orchestrator (executes tool.run host ops).
-	Runner          *tools.Orchestrator
-	ToolManifests   []tools.ToolManifest
-	BuiltinInvokers tools.MapRegistry
+	FS              *vfs.FS
+	Executor        agent.HostExecutor
 	TraceMiddleware *agent.TraceMiddleware
 	Constructor     *agent.PromptBuilder
 	Updater         *agent.PromptUpdater
@@ -43,7 +38,6 @@ type BuildConfig struct {
 	ReasoningSummary      string
 	ApprovalsMode         string
 	HistoryStore          store.HistoryStore
-	ResultsStore          store.ResultsStore
 	MemoryStore           store.DailyMemoryStore
 	TraceStore            store.TraceStore
 	MemoryReindexer       resources.MemoryReindexer
@@ -69,9 +63,6 @@ func (cfg BuildConfig) Validate() error {
 	}
 	if strings.TrimSpace(cfg.WorkdirAbs) == "" {
 		return fmt.Errorf("workdir is required")
-	}
-	if cfg.ResultsStore == nil {
-		return fmt.Errorf("results store is required")
 	}
 	if cfg.MemoryStore == nil {
 		return fmt.Errorf("memory store is required")
@@ -223,26 +214,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountSkills, err)
 	}
 
-	toolsDir := fsutil.GetToolsDir(cfg.Cfg.DataDir)
-	if err := os.MkdirAll(toolsDir, 0755); err != nil {
-		return nil, fmt.Errorf("prepare tools dir: %w", err)
-	}
-	builtinProvider, err := builtins.NewBuiltinManifestProvider()
-	if err != nil {
-		return nil, fmt.Errorf("create builtin manifest provider: %w", err)
-	}
-	manifestReg := tools.NewCompositeToolManifestRegistry(
-		builtinProvider,
-		tools.NewDiskManifestProvider(toolsDir),
-	)
-	toolsRes, err := builtins.NewToolsResource(manifestReg)
-	if err != nil {
-		return nil, fmt.Errorf("create tools resource: %w", err)
-	}
-	if err := fs.Mount(vfs.MountTools, toolsRes); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountTools, err)
-	}
-
 	inboxDir := filepath.Join(runDir, vfs.MountInbox)
 	if err := os.MkdirAll(inboxDir, 0755); err != nil {
 		return nil, fmt.Errorf("prepare inbox dir: %w", err)
@@ -267,25 +238,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountOutbox, err)
 	}
 
-	resultsStore := cfg.ResultsStore
 	memStore := cfg.MemoryStore
-	toolManifests := []tools.ToolManifest{}
-	if ids, err := manifestReg.ListToolIDs(context.Background()); err == nil {
-		for _, id := range ids {
-			b, ok, err := manifestReg.GetManifest(context.Background(), id)
-			if err != nil || !ok {
-				continue
-			}
-			if m, err := tools.ParseBuiltinToolManifest(b); err == nil {
-				toolManifests = append(toolManifests, m)
-				continue
-			}
-			if m, err := tools.ParseUserToolManifest(b); err == nil {
-				toolManifests = append(toolManifests, m)
-				continue
-			}
-		}
-	}
 
 	if memStore == nil {
 		return nil, fmt.Errorf("memory store is required")
@@ -305,13 +258,11 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			Data: map[string]string{
 				"/project":   workdirRes.BaseDir,
 				"/workspace": wsRes.BaseDir,
-				"/results":   "(virtual)",
 				"/inbox":     inboxDir,
 				"/outbox":    outboxDir,
 				"/log":       "(virtual)",
 				"/plan":      planDir,
 				"/skills":    "(virtual)",
-				"/tools":     "(virtual)",
 				"/memory":    "(virtual)",
 			},
 			Console: boolPtr(false),
@@ -328,32 +279,12 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		Store: traceStore,
 		FS:    fs,
 	}
-	builtinCfg := builtins.BuiltinConfig{
-		ShellRootDir:  absWorkdirRoot,
-		ShellVFSMount: vfs.MountProject,
-		ShellConfirm:  nil,
-		TraceStore:    traceStore,
-	}
 	shellInvoker := builtins.NewBuiltinShellInvoker(absWorkdirRoot, nil, vfs.MountProject)
 	httpInvoker := builtins.NewBuiltinHTTPInvoker()
 	traceInvoker := builtins.BuiltinTraceInvoker{Store: traceStore}
 
-	builtinInvokers := builtins.BuiltinInvokerRegistry(builtinCfg)
-	if builtinInvokers == nil {
-		builtinInvokers = make(tools.MapRegistry)
-	}
-	builtinInvokers[tools.ToolID("builtin.shell")] = shellInvoker
-	builtinInvokers[tools.ToolID("builtin.http")] = httpInvoker
-	builtinInvokers[tools.ToolID("builtin.trace")] = traceInvoker
-
-	runner := tools.Orchestrator{
-		Results:      resultsStore,
-		ToolRegistry: tools.MapRegistry{},
-	}
-
 	executor := &agent.HostOpExecutor{
 		FS:              fs,
-		Runner:          &runner,
 		ShellInvoker:    shellInvoker,
 		HTTPInvoker:     httpInvoker,
 		TraceInvoker:    traceInvoker,
@@ -395,9 +326,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	return &Runtime{
 		FS:              fs,
 		Executor:        exec,
-		Runner:          &runner,
-		ToolManifests:   toolManifests,
-		BuiltinInvokers: builtinInvokers,
 		TraceMiddleware: traceMiddleware,
 		Constructor:     constructor,
 		Updater:         nil,

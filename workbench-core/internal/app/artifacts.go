@@ -9,7 +9,7 @@ import (
 // ArtifactIndex is a small, in-memory index of files the agent created or touched.
 //
 // This is a UX helper only. The source of truth remains:
-// - VFS mounts (/workspace, /results, /project)
+// - VFS mounts (/workspace, /project)
 // - persisted events/history logs
 //
 // The index enables:
@@ -23,7 +23,7 @@ type ArtifactIndex struct {
 type Artifact struct {
 	Name      string    // basename, e.g. "report.md"
 	VPath     string    // e.g. "/workspace/report.md"
-	Origin    string    // "workspace", "results", "workdir"
+	Origin    string    // "workspace", "workdir"
 	UpdatedAt time.Time // best-effort host time
 
 	// PublishedVPath is set when the artifact is copied to /project (or a subdir).
@@ -44,8 +44,6 @@ func (x *ArtifactIndex) ObserveWrite(vpath string) {
 	switch {
 	case strings.HasPrefix(vpath, "/workspace/"):
 		origin = "workspace"
-	case strings.HasPrefix(vpath, "/results/"):
-		origin = "results"
 	case strings.HasPrefix(vpath, "/project/"):
 		origin = "workdir"
 	default:

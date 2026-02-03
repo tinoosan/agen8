@@ -21,17 +21,6 @@ func (a activityItem) Title() string {
 }
 
 func (a activityItem) Description() string {
-	// Show tool id/action for tool.run; otherwise keep empty.
-	if a.act.Kind == "tool.run" {
-		id := strings.TrimSpace(a.act.ToolID)
-		act := strings.TrimSpace(a.act.ActionID)
-		if id != "" && act != "" {
-			return fmt.Sprintf("%s/%s", id, act)
-		}
-		if id != "" {
-			return id
-		}
-	}
 	return ""
 }
 

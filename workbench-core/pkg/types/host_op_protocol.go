@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
@@ -26,8 +25,6 @@ const (
 	HostOpFSEdit = "fs.edit"
 	// HostOpFSPatch applies a unified diff patch to a file in the VFS.
 	HostOpFSPatch = "fs.patch"
-	// HostOpToolRun runs a discovered tool via the ToolRunner.
-	HostOpToolRun = "tool.run"
 	// HostOpShellExec executes a shell command.
 	HostOpShellExec = "shell.exec"
 	// HostOpHTTPFetch issues an HTTP request.
@@ -47,8 +44,6 @@ type HostOpRequest struct {
 	Path      string          `json:"path,omitempty"`
 	Query     string          `json:"query,omitempty"`
 	Limit     int             `json:"limit,omitempty"`
-	ToolID    tools.ToolID    `json:"toolId,omitempty"`
-	ActionID  string          `json:"actionId,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
 	TimeoutMs int             `json:"timeoutMs,omitempty"`
 	MaxBytes  int             `json:"maxBytes,omitempty"`
@@ -73,7 +68,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = normalizeHostOp(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpToolRun, HostOpShellExec, HostOpHTTPFetch, HostOpTrace, HostOpFinal:
+	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpTrace, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -154,21 +149,6 @@ func (r HostOpRequest) Validate() error {
 		}
 		return nil
 
-	case HostOpToolRun:
-		if err := validate.NonEmpty("toolId", r.ToolID.String()); err != nil {
-			return err
-		}
-		if err := validate.NonEmpty("actionId", r.ActionID); err != nil {
-			return err
-		}
-		if r.Input == nil {
-			return fmt.Errorf("input is required")
-		}
-		if r.TimeoutMs < 0 {
-			return fmt.Errorf("timeoutMs must be >= 0")
-		}
-		return nil
-
 	case HostOpShellExec:
 		if len(r.Argv) == 0 {
 			return fmt.Errorf("argv is required")
@@ -225,8 +205,6 @@ func normalizeHostOp(op string) string {
 		return HostOpFSEdit
 	case "fs_patch":
 		return HostOpFSPatch
-	case "tool_run":
-		return HostOpToolRun
 	case "shell_exec":
 		return HostOpShellExec
 	case "shell.exec":
@@ -296,14 +274,10 @@ type HostOpResponse struct {
 	Text      string         `json:"text,omitempty"`
 	BytesB64  string         `json:"bytesB64,omitempty"`
 	Truncated bool           `json:"truncated,omitempty"`
-
-	ToolResponse *tools.ToolResponse `json:"toolResponse,omitempty"`
 	// Shell output
-	ExitCode   int    `json:"exitCode,omitempty"`
-	Stdout     string `json:"stdout,omitempty"`
-	Stderr     string `json:"stderr,omitempty"`
-	StdoutPath string `json:"stdoutPath,omitempty"`
-	StderrPath string `json:"stderrPath,omitempty"`
+	ExitCode int    `json:"exitCode,omitempty"`
+	Stdout   string `json:"stdout,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
 	// HTTP response
 	FinalURL      string              `json:"finalUrl,omitempty"`
 	Status        int                 `json:"status,omitempty"`
@@ -312,7 +286,6 @@ type HostOpResponse struct {
 	BytesRead     int                 `json:"bytesRead,omitempty"`
 	Body          string              `json:"body,omitempty"`
 	BodyTruncated bool                `json:"bodyTruncated,omitempty"`
-	BodyPath      string              `json:"bodyPath,omitempty"`
 	Warning       string              `json:"warning,omitempty"`
 	// Trace output
 	TraceKeys  []string `json:"traceKeys,omitempty"`

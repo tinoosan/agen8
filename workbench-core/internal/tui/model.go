@@ -1259,7 +1259,7 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		if txt == "" {
 			return beforeCmd
 		}
-		category := actionCategory(op, strings.TrimSpace(ev.Data["toolId"]))
+		category := actionCategory(op)
 		groupIdx, actionIdx := m.addGroupedAction(category, groupedAction{text: txt})
 		if m.pendingActionsByOpID == nil {
 			m.pendingActionsByOpID = make(map[string]pendingAction)

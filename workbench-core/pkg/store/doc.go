@@ -6,8 +6,7 @@
 // # Key Responsibilities
 //
 //   - `HistoryStore`: Appends to the immutable history log and loads recent op pairs.
-//   - `ResultsStore` / `ResultsView`: Persists tool call metadata, responses, and artifacts.
-//   - `MemoryStore` / `MemoryCommitter`: Captures agent memory commits for later context injection.
+//   - `DailyMemoryStore`: Captures shared memory files for later context injection.
 //   - `TraceStore`: Persists reasoning traces for debugging or analysis.
 //   - `ConstructorStateStore`: Holds per-run constructor state + manifest blobs so agents can resume safely.
 //
@@ -15,7 +14,7 @@
 //
 // Hosts implement the interfaces they need and pass them into `runtime.BuildConfig`. The
 // runtime wires them into `resources.Factory`, which then exposes read-only VFS resources
-// (`/results`, `/history`, `/trace`) and persistence hooks. Tests can use the provided
+// (`/history`, `/log`, `/memory`) and persistence hooks. Tests can use the provided
 // in-memory helpers or mocks while production hosts rely on durable backends.
 //
 // # Stability
@@ -29,8 +28,7 @@
 //     opaque and consume it with the same implementation that produced it.
 //   - `HistoryStore`: journaling interface that appends events and reads them back via `LinesSince`
 //     and `LinesLatest`.
-//   - `ResultsStore` / `ResultsView`: structured storage for tool-call outputs and artifacts.
-//   - `MemoryStore` / `MemoryCommitter`: captures and replays agent memory commits during a run.
+//   - `DailyMemoryStore`: reads and writes memory files under the shared /memory mount.
 //   - `TraceStore`: captures reasoning traces for debugging, diagnostics, and analysis.
 //   - `ConstructorStateStore`: holds per-run constructor state + manifest blobs so agents can resume safely.
 package store

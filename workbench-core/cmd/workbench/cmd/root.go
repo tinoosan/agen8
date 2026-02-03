@@ -43,10 +43,8 @@ the active agent (or use "workbench monitor --agent-id <id>" with the agent ID p
 at daemon startup).
 
 Each executed task can:
-  - discover tools via /tools (fs.list + fs.read manifests)
-  - execute tools via tool.run (writing /results/<callId>/response.json)
   - read/write run-scoped artifacts in /workspace
-  - write proposed memory updates to /memory/update.md (host decides commits)
+  - read/write shared memory in /memory (daily files; only today's file is writable)
 `),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// dataDir is resolved per-command via effectiveConfig().

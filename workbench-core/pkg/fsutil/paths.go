@@ -49,24 +49,12 @@ func GetLogDir(dataDir, runID string) string {
 	return filepath.Join(GetAgentDir(dataDir, runID), "log")
 }
 
-func GetToolsDir(dataDir string) string {
-	return filepath.Join(dataDir, "tools")
-}
-
 func GetSkillsDir(dataDir string) string {
 	return filepath.Join(dataDir, "skills")
 }
 
 func GetProfilesDir(dataDir string) string {
 	return filepath.Join(dataDir, "profiles")
-}
-
-func GetToolManifestPath(toolsDir, toolID string) string {
-	return filepath.Join(toolsDir, toolID, "manifest.json")
-}
-
-func GetResultsDir(dataDir, runID string) string {
-	return filepath.Join(GetAgentDir(dataDir, runID), "results")
 }
 
 func GetMemoryDir(dataDir string) string {

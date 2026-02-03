@@ -45,7 +45,6 @@ type httpFetchOutput struct {
 
 	Body          string `json:"body"`
 	BodyTruncated bool   `json:"bodyTruncated"`
-	BodyPath      string `json:"bodyPath,omitempty"`
 	Warning       string `json:"warning,omitempty"`
 }
 
@@ -182,29 +181,6 @@ func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req pkgtools.ToolReques
 		ContentType: ct,
 	}
 
-	var artifacts []pkgtools.ToolArtifactWrite
-	fullBodyPath := ""
-	if len(bodyBytes) > httpInlineBodyPreviewCap {
-		if isText {
-			fullBodyPath = "body.txt"
-		} else {
-			fullBodyPath = "body.bin"
-		}
-		mediaType := ct
-		if strings.TrimSpace(mediaType) == "" {
-			if isText {
-				mediaType = "text/plain; charset=utf-8"
-			} else {
-				mediaType = "application/octet-stream"
-			}
-		}
-		artifacts = append(artifacts, pkgtools.ToolArtifactWrite{
-			Path:      fullBodyPath,
-			Bytes:     append([]byte(nil), bodyBytes...),
-			MediaType: mediaType,
-		})
-	}
-
 	if isText {
 		preview := string(bodyBytes)
 		if len(preview) > httpInlineBodyPreviewCap {
@@ -218,28 +194,16 @@ func (h *BuiltinHTTPInvoker) Invoke(ctx context.Context, req pkgtools.ToolReques
 	} else {
 		out.Body = ""
 		out.Warning = "response body is binary or non-text; preview omitted"
-		if fullBodyPath == "" && len(bodyBytes) > 0 {
-			fullBodyPath = "body.bin"
-			mediaType := ct
-			if strings.TrimSpace(mediaType) == "" {
-				mediaType = "application/octet-stream"
-			}
-			artifacts = append(artifacts, pkgtools.ToolArtifactWrite{
-				Path:      fullBodyPath,
-				Bytes:     append([]byte(nil), bodyBytes...),
-				MediaType: mediaType,
-			})
+		if out.Truncated {
+			out.BodyTruncated = true
 		}
-	}
-	if fullBodyPath != "" {
-		out.BodyPath = fullBodyPath
 	}
 
 	outJSON, err := json.Marshal(out)
 	if err != nil {
 		return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "tool_failed", Message: fmt.Sprintf("marshal output: %v", err), Err: err}
 	}
-	return pkgtools.ToolCallResult{Output: outJSON, Artifacts: artifacts}, nil
+	return pkgtools.ToolCallResult{Output: outJSON}, nil
 }
 
 func cloneHeader(h http.Header) map[string][]string {

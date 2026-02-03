@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io/fs"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/tinoosan/workbench-core/pkg/debuglog"
@@ -23,10 +22,8 @@ import (
 // This is not the final host API; it is a concrete reference for the agent-facing
 // request/response flow:
 //   - fs.list/fs.read/fs.search/fs.write/fs.append are always available
-//   - tool.run executes via tools.Orchestrator and returns a ToolResponse
 type HostOpExecutor struct {
-	FS     *vfs.FS
-	Runner *pkgtools.Orchestrator
+	FS *vfs.FS
 
 	// Core invokers for direct host operations.
 	ShellInvoker pkgtools.ToolInvoker
@@ -43,14 +40,6 @@ type HostOpExecutor struct {
 	// If zero, no explicit cap is applied beyond DefaultMaxBytes / req.MaxBytes behavior.
 	MaxReadBytes int
 }
-
-const (
-	// defaultToolsReadBytes is the default read budget for tool manifests under /tools/<toolId>.
-	//
-	// Tool manifests can be larger than the general-purpose fs.read default. If manifests are
-	// truncated, the agent can't reliably discover required fields and schemas.
-	defaultToolsReadBytes = 64 * 1024
-)
 
 func debugAppendNDJSON(payload map[string]any) {
 	// #region agent log
@@ -72,28 +61,6 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: "host executor missing FS"}
 	}
 	if err := req.Validate(); err != nil {
-		// #region agent log
-		// H3: validate failures on tool.run (often missing input) can cause tool loops.
-		if strings.TrimSpace(req.Op) == types.HostOpToolRun || strings.TrimSpace(req.Op) == "tool_run" {
-			debugAppendNDJSON(map[string]any{
-				"sessionId":    "debug-session",
-				"runId":        "tools-trouble-pre",
-				"hypothesisId": "H3",
-				"location":     "agent/host_ops_mock.go:validate",
-				"message":      "host op validate failed",
-				"data": map[string]any{
-					"op":        strings.TrimSpace(req.Op),
-					"toolId":    strings.TrimSpace(req.ToolID.String()),
-					"actionId":  strings.TrimSpace(req.ActionID),
-					"inputNil":  req.Input == nil,
-					"inputLen":  len(req.Input),
-					"timeoutMs": req.TimeoutMs,
-					"error":     err.Error(),
-				},
-				"timestamp": time.Now().UnixMilli(),
-			})
-		}
-		// #endregion
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 	}
 
@@ -110,27 +77,6 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		return types.HostOpResponse{Op: req.Op, Ok: true, Entries: out}
 
 	case types.HostOpFSRead:
-		// #region agent log
-		// H1/H3: reads to /tools may be truncated or invalid, causing discovery failures.
-		isTools := strings.HasPrefix(strings.TrimSpace(req.Path), "/tools/")
-		if isTools {
-			debugAppendNDJSON(map[string]any{
-				"sessionId":    "debug-session",
-				"runId":        "tools-trouble-pre",
-				"hypothesisId": "H1",
-				"location":     "agent/host_ops_mock.go:fs.read:entry",
-				"message":      "fs.read request",
-				"data": map[string]any{
-					"path":         strings.TrimSpace(req.Path),
-					"reqMaxBytes":  req.MaxBytes,
-					"defaultMax":   x.DefaultMaxBytes,
-					"maxReadBytes": x.MaxReadBytes,
-				},
-				"timestamp": time.Now().UnixMilli(),
-			})
-		}
-		// #endregion
-
 		b, err := x.FS.Read(req.Path)
 		if err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
@@ -142,54 +88,10 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		if maxBytes <= 0 {
 			maxBytes = 4096
 		}
-		// Special-case: tool manifests must not be truncated by default.
-		if strings.HasPrefix(strings.TrimSpace(req.Path), "/tools/") && maxBytes < defaultToolsReadBytes {
-			maxBytes = defaultToolsReadBytes
-		}
 		if x.MaxReadBytes > 0 && maxBytes > x.MaxReadBytes {
 			maxBytes = x.MaxReadBytes
 		}
-		// #region agent log
-		if strings.HasPrefix(strings.TrimSpace(req.Path), "/tools/") {
-			debugAppendNDJSON(map[string]any{
-				"sessionId":    "debug-session",
-				"runId":        "tools-trouble-pre",
-				"hypothesisId": "H1",
-				"location":     "agent/host_ops_mock.go:fs.read:budget",
-				"message":      "fs.read budget selected",
-				"data": map[string]any{
-					"path":        strings.TrimSpace(req.Path),
-					"bytesLen":    len(b),
-					"maxBytes":    maxBytes,
-					"toolsBoost":  defaultToolsReadBytes,
-					"maxReadCap":  x.MaxReadBytes,
-					"defaultMax":  x.DefaultMaxBytes,
-					"reqMaxBytes": req.MaxBytes,
-				},
-				"timestamp": time.Now().UnixMilli(),
-			})
-		}
-		// #endregion
 		text, b64, truncated := encodeReadPayload(b, maxBytes)
-		// #region agent log
-		if strings.HasPrefix(strings.TrimSpace(req.Path), "/tools/") {
-			debugAppendNDJSON(map[string]any{
-				"sessionId":    "debug-session",
-				"runId":        "tools-trouble-pre",
-				"hypothesisId": "H1",
-				"location":     "agent/host_ops_mock.go:fs.read:exit",
-				"message":      "fs.read response",
-				"data": map[string]any{
-					"path":         strings.TrimSpace(req.Path),
-					"bytesLen":     len(b),
-					"returnedText": len(text),
-					"returnedB64":  len(b64),
-					"truncated":    truncated,
-				},
-				"timestamp": time.Now().UnixMilli(),
-			})
-		}
-		// #endregion
 		return types.HostOpResponse{
 			Op:        req.Op,
 			Ok:        true,
@@ -257,72 +159,6 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		}
 		return types.HostOpResponse{Op: req.Op, Ok: true}
 
-	case types.HostOpToolRun:
-		// #region agent log
-		// H2/H3/H4: tool.run failures (unknown_tool, invalid_input, timeout) explain "trouble with tools".
-		debugAppendNDJSON(map[string]any{
-			"sessionId":    "debug-session",
-			"runId":        "tools-trouble-pre",
-			"hypothesisId": "H2",
-			"location":     "agent/host_ops_mock.go:tool.run:entry",
-			"message":      "tool.run request",
-			"data": map[string]any{
-				"toolId":     strings.TrimSpace(req.ToolID.String()),
-				"actionId":   strings.TrimSpace(req.ActionID),
-				"timeoutMs":  req.TimeoutMs,
-				"inputBytes": len(req.Input),
-			},
-			"timestamp": time.Now().UnixMilli(),
-		})
-		// #endregion
-		if x.Runner == nil {
-			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "host executor missing Runner"}
-		}
-		resp, err := x.Runner.Run(ctx, req.ToolID, req.ActionID, req.Input, req.TimeoutMs)
-		if err != nil {
-			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
-		}
-		// #region agent log
-		hid := "H2"
-		if resp.Error != nil {
-			// H3 invalid_input and H4 timeout/tool_failed are common failure modes.
-			if strings.TrimSpace(resp.Error.Code) == "invalid_input" {
-				hid = "H3"
-			} else if strings.TrimSpace(resp.Error.Code) == "timeout" || strings.TrimSpace(resp.Error.Code) == "tool_failed" || strings.TrimSpace(resp.Error.Code) == "unknown_tool" {
-				hid = "H4"
-			}
-		}
-		debugAppendNDJSON(map[string]any{
-			"sessionId":    "debug-session",
-			"runId":        "tools-trouble-pre",
-			"hypothesisId": hid,
-			"location":     "agent/host_ops_mock.go:tool.run:exit",
-			"message":      "tool.run response",
-			"data": map[string]any{
-				"toolId":   strings.TrimSpace(resp.ToolID.String()),
-				"actionId": strings.TrimSpace(resp.ActionID),
-				"ok":       resp.Ok,
-				"callId":   strings.TrimSpace(resp.CallID),
-				"errorCode": func() string {
-					if resp.Error != nil {
-						return strings.TrimSpace(resp.Error.Code)
-					}
-					return ""
-				}(),
-				"retryable": func() bool {
-					if resp.Error != nil {
-						return resp.Error.Retryable
-					}
-					return false
-				}(),
-				"outputBytes": len(resp.Output),
-				"artifacts":   len(resp.Artifacts),
-			},
-			"timestamp": time.Now().UnixMilli(),
-		})
-		// #endregion
-		return types.HostOpResponse{Op: req.Op, Ok: true, ToolResponse: &resp}
-
 	case types.HostOpShellExec:
 		if x.ShellInvoker == nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "shell invoker not configured"}
@@ -350,11 +186,9 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 		}
 		var out struct {
-			ExitCode   int    `json:"exitCode"`
-			Stdout     string `json:"stdout"`
-			Stderr     string `json:"stderr"`
-			StdoutPath string `json:"stdoutPath"`
-			StderrPath string `json:"stderrPath"`
+			ExitCode int    `json:"exitCode"`
+			Stdout   string `json:"stdout"`
+			Stderr   string `json:"stderr"`
 		}
 		if err := json.Unmarshal(result.Output, &out); err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
@@ -368,14 +202,12 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			}
 		}
 		return types.HostOpResponse{
-			Op:         req.Op,
-			Ok:         ok,
-			Error:      errMsg,
-			ExitCode:   out.ExitCode,
-			Stdout:     out.Stdout,
-			Stderr:     out.Stderr,
-			StdoutPath: out.StdoutPath,
-			StderrPath: out.StderrPath,
+			Op:       req.Op,
+			Ok:       ok,
+			Error:    errMsg,
+			ExitCode: out.ExitCode,
+			Stdout:   out.Stdout,
+			Stderr:   out.Stderr,
 		}
 
 	case types.HostOpHTTPFetch:
@@ -422,7 +254,6 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			Truncated     bool                `json:"truncated"`
 			Body          string              `json:"body"`
 			BodyTruncated bool                `json:"bodyTruncated"`
-			BodyPath      string              `json:"bodyPath"`
 			Warning       string              `json:"warning"`
 		}
 		if err := json.Unmarshal(result.Output, &out); err != nil {
@@ -439,7 +270,6 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			Truncated:     out.Truncated,
 			Body:          out.Body,
 			BodyTruncated: out.BodyTruncated,
-			BodyPath:      out.BodyPath,
 			Warning:       out.Warning,
 		}
 

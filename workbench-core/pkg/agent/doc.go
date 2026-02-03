@@ -7,15 +7,15 @@
 //
 // # Core Components
 //
-//   - AgentConfig: Captures the configuration (model, tool manifests, prompts, hooks)
+//   - AgentConfig: Captures the configuration (model, prompts, hooks)
 //     and `NewAgent` returns an `Agent` that can run goals.
 //   - HostExecutor: The host primitive dispatcher that receives `types.HostOpRequest`
 //     and returns `types.HostOpResponse` values (see `types.HostExecFunc` for a helper).
 //   - PromptSource / PromptBuilder: Hooks for inserting step-specific context
 //     (file snippets, memories, dynamic prompts) into the agent before it queries the LLM.
 //   - Hooks: Callbacks for observing token usage, tool runs, streams, and logging.
-//   - HostToolRegistry: Registers builtin tools (fs.*, shell.exec, http.fetch, trace.run, tool.run)
-//     and exposes additional tools provided via Config.ToolManifests.
+//   - HostToolRegistry: Registers builtin tool-call functions (fs_*, shell_exec, http_fetch, trace_run)
+//     which map onto host ops (fs.*, shell.exec, http.fetch, trace.run).
 //
 // # Usage Pattern
 //
@@ -43,7 +43,4 @@
 // designed to remain stable across patch releases. Hosts hooking into these APIs
 // should treat the validation performed by `New` and the built-in tool wiring as
 // contract guarantees—changing those behaviors will be accompanied by version bumps.
-// Additional tools exposed through `Config.ToolManifests` are registered with the
-// same registry that handles builtin host operations, so there is a single place to
-// audit tool availability and runtime routing.
 package agent

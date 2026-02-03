@@ -1,8 +1,8 @@
 // Package vfs provides the Virtual File System (VFS) abstraction for Workbench.
 //
-// The agent interacts with files, results, tools, and artifacts through this mount
-// table. `FS` manages mount points such as `/project`, `/workspace`, `/results`, `/tools`,
-// `/log`, and `/skills`. Resources implement `Reader`, `Writer`, and
+// The agent interacts with files and runtime artifacts through this mount table.
+// `FS` manages mount points such as `/project`, `/workspace`, `/log`, and `/skills`.
+// Resources implement `Reader`, `Writer`, and
 // `Lister` semantics so the runtime can attach real directories, synthetic logs, or
 // memory-backed buffers without leaking implementation details.
 //
@@ -21,6 +21,5 @@
 // an `agent.HostExecutor` that forwards host operations to these mounts. Hosts can
 // also add their own mounts (e.g., `/plan` or `/secrets`) by registering resources
 // before handing the FS to the agent. Keep in mind that VFS paths are always absolute
-// (`/foo/bar`) and that `/tools` is reserved for tool discovery; hosts should not
-// list inside tool directories, only read the manifest via `/tools/<toolId>`.
+// (`/foo/bar`).
 package vfs

@@ -2,14 +2,10 @@ package vfs_test
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
-	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
-	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
@@ -210,61 +206,5 @@ func TestReadWriteAppend_WrapErrors(t *testing.T) {
 	}
 	if err := fs.Append("/m/a.txt", []byte("x")); err == nil || !strings.Contains(err.Error(), "append m:a.txt") {
 		t.Fatalf("expected wrapped append error, got %v", err)
-	}
-}
-
-func TestListRoot_ContainsToolsButNotBuiltins(t *testing.T) {
-	tmpDir := t.TempDir()
-	builtin, err := builtins.NewBuiltinManifestProvider()
-	if err != nil {
-		t.Fatalf("NewBuiltinManifestProvider: %v", err)
-	}
-	disk := pkgtools.NewDiskManifestProvider(tmpDir)
-	reg := pkgtools.NewCompositeToolManifestRegistry(builtin, disk)
-
-	res, err := builtins.NewToolsResource(reg)
-	if err != nil {
-		t.Fatalf("NewToolsResource: %v", err)
-	}
-
-	fs := vfs.NewFS()
-	mustMount(t, fs, vfs.MountTools, res)
-
-	entries, err := fs.List("/tools")
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("expected builtin tools to be hidden, got %v", entries)
-	}
-}
-
-func TestListRoot_IncludesTools_WhenDiskHasItems(t *testing.T) {
-	tmpDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(tmpDir, "example.tool"), 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	manifest := `{"id":"example.tool","version":"1.0.0","kind":"custom","displayName":"Example Tool","description":"Example tool","actions":[{"id":"exec","displayName":"Exec","description":"Exec action","inputSchema":{},"outputSchema":{}}]}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "example.tool", "manifest.json"), []byte(manifest), 0644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	disk := pkgtools.NewDiskManifestProvider(tmpDir)
-	reg := pkgtools.NewCompositeToolManifestRegistry(disk)
-
-	res, err := builtins.NewToolsResource(reg)
-	if err != nil {
-		t.Fatalf("NewToolsResource: %v", err)
-	}
-
-	fs := vfs.NewFS()
-	mustMount(t, fs, vfs.MountTools, res)
-
-	entries, err := fs.List("/tools")
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(entries) != 1 || entries[0].Path != "/tools/example.tool" {
-		t.Fatalf("expected /tools/example.tool entry, got %v", entries)
 	}
 }

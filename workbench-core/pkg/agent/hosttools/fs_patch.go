@@ -15,7 +15,7 @@ func (t *FSPatchTool) Definition() llmtypes.Tool {
 	return llmtypes.Tool{
 		Type: "function",
 		Function: llmtypes.ToolFunction{
-			Name:        "fs.patch",
+			Name:        "fs_patch",
 			Description: "[DIRECT - no discovery needed] Apply a unified diff patch to a file.",
 			Strict:      true,
 			Parameters: map[string]any{

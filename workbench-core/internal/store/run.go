@@ -4,11 +4,6 @@
 //
 // Runs are stored in SQLite (data/workbench.db by default).
 // Run-scoped directories for /workspace, /log, etc. remain on disk.
-//
-// # Results note
-//
-// The agent sees a "/results" mount in the VFS, but the default implementation is now
-// virtual (ResultsStore-backed) rather than an on-disk "results/" directory.
 package store
 
 import (

@@ -26,14 +26,6 @@ const (
 	// MountSkills exposes the user-defined skill files under /skills.
 	MountSkills = "skills"
 
-	// MountTools is the mount name for tool discovery and manifests.
-	// fs.List("/tools") returns tool IDs; fs.Read("/tools/<id>") returns JSON manifest bytes.
-	MountTools = "tools"
-
-	// MountResults is the mount name for tool call outputs.
-	// Tool results are stored under /results/<callId>/response.json.
-	MountResults = "results"
-
 	// MountInbox is the mount name for run-scoped task inboxes.
 	// External inputs can drop tasks/messages here; the agent polls and consumes them.
 	MountInbox = "inbox"
@@ -46,8 +38,7 @@ const (
 	MountPlan = "plan"
 
 	// MountMemory is the mount name for shared agent memory.
-	// The host may inject /memory/memory.md into the system prompt,
-	// and ingest /memory/update.md when the agent chooses to write.
+	// The host may inject today's /memory/<YYYY-MM-DD>-memory.md into the system prompt.
 	//
 	// Note: a future multi-agent system will likely introduce a shared, global
 	// history mount for immutable provenance across runs/agents (distinct from /memory).

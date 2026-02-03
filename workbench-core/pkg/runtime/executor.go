@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -126,13 +125,6 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 			"sessionId": strings.TrimSpace(m.sessionID),
 		})
 	}
-	if req.Op == types.HostOpFSRead && strings.TrimSpace(req.Path) == "/results/context_constructor_manifest.json" {
-		debuglog.Log("context", "H10", "runtime:eventMiddleware", "fs_read_context_constructor_manifest_results", map[string]any{
-			"model":     strings.TrimSpace(m.model),
-			"runId":     strings.TrimSpace(m.runID),
-			"sessionId": strings.TrimSpace(m.sessionID),
-		})
-	}
 
 	opID := fmt.Sprintf("op-%d", atomic.AddUint64(m.seq, 1))
 	meta := &opContext{
@@ -147,12 +139,8 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	reqData["opId"] = opID
 	reqData["op"] = req.Op
 	reqData["path"] = req.Path
-	reqData["toolId"] = req.ToolID.String()
-	reqData["actionId"] = req.ActionID
 	storeReq["op"] = req.Op
 	storeReq["path"] = req.Path
-	storeReq["toolId"] = req.ToolID.String()
-	storeReq["actionId"] = req.ActionID
 
 	if req.Op == types.HostOpFSRead && req.MaxBytes != 0 {
 		reqData["maxBytes"] = strconv.Itoa(req.MaxBytes)
@@ -165,21 +153,6 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 		if req.Limit != 0 {
 			reqData["limit"] = strconv.Itoa(req.Limit)
 			storeReq["limit"] = strconv.Itoa(req.Limit)
-		}
-	}
-	if req.Op == types.HostOpToolRun && req.TimeoutMs != 0 {
-		reqData["timeoutMs"] = strconv.Itoa(req.TimeoutMs)
-	}
-	if req.Op == types.HostOpToolRun && len(req.Input) != 0 {
-		s, tr, n := toolRunInputForEvent(req.Input)
-		if s != "" {
-			reqData["input"] = s
-		}
-		if tr {
-			reqData["inputTruncated"] = "true"
-		}
-		if n != 0 {
-			reqData["inputBytes"] = strconv.Itoa(n)
 		}
 	}
 	if fields := shellStoreFieldsFromInput(req); len(fields) != 0 {
@@ -268,31 +241,11 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	if strings.TrimSpace(req.Path) != "" {
 		meta.RespData["path"] = strings.TrimSpace(req.Path)
 	}
-	if strings.TrimSpace(req.ToolID.String()) != "" {
-		meta.RespData["toolId"] = strings.TrimSpace(req.ToolID.String())
-	}
-	if strings.TrimSpace(req.ActionID) != "" {
-		meta.RespData["actionId"] = strings.TrimSpace(req.ActionID)
-	}
 	if resp.BytesLen != 0 {
 		meta.RespData["bytesLen"] = strconv.Itoa(resp.BytesLen)
 	}
 	if resp.Truncated {
 		meta.RespData["truncated"] = "true"
-	}
-	if resp.ToolResponse != nil && resp.ToolResponse.CallID != "" {
-		meta.RespData["callId"] = resp.ToolResponse.CallID
-		meta.StoreResp["callId"] = resp.ToolResponse.CallID
-	}
-	if resp.Op == types.HostOpToolRun && resp.ToolResponse != nil && len(resp.ToolResponse.Output) != 0 {
-		if p := toolRunOutputPreviewForEvent(resp.ToolResponse.ToolID.String(), resp.ToolResponse.ActionID, resp.ToolResponse.Output); strings.TrimSpace(p) != "" {
-			meta.RespData["outputPreview"] = p
-		}
-		if fields := shellStoreFieldsFromResponse(resp); len(fields) != 0 {
-			for k, v := range fields {
-				meta.StoreResp[k] = v
-			}
-		}
 	}
 	if resp.Op == types.HostOpShellExec {
 		meta.RespData["exitCode"] = strconv.Itoa(resp.ExitCode)
@@ -458,18 +411,6 @@ func shellStoreFieldsFromInput(req types.HostOpRequest) map[string]string {
 	switch req.Op {
 	case types.HostOpShellExec:
 		return shellArgsToFields(req.Argv, req.Cwd)
-	case types.HostOpToolRun:
-		if strings.TrimSpace(req.ToolID.String()) != "builtin.shell" || strings.TrimSpace(req.ActionID) != "exec" {
-			return nil
-		}
-		var in struct {
-			Argv []string `json:"argv"`
-			Cwd  string   `json:"cwd"`
-		}
-		if err := json.Unmarshal(req.Input, &in); err != nil {
-			return nil
-		}
-		return shellArgsToFields(in.Argv, in.Cwd)
 	default:
 		return nil
 	}
@@ -507,43 +448,6 @@ func shellStoreFieldsFromResponse(resp types.HostOpResponse) map[string]string {
 	case types.HostOpShellExec:
 		fields := map[string]string{
 			"exitCode": strconv.Itoa(resp.ExitCode),
-		}
-		if strings.TrimSpace(resp.StdoutPath) != "" {
-			fields["stdoutPath"] = strings.TrimSpace(resp.StdoutPath)
-		}
-		if strings.TrimSpace(resp.StderrPath) != "" {
-			fields["stderrPath"] = strings.TrimSpace(resp.StderrPath)
-		}
-		return fields
-	case types.HostOpToolRun:
-		if resp.ToolResponse == nil {
-			return nil
-		}
-		if strings.TrimSpace(resp.ToolResponse.ToolID.String()) != "builtin.shell" || strings.TrimSpace(resp.ToolResponse.ActionID) != "exec" {
-			return nil
-		}
-		fields := map[string]string{}
-		if resp.ToolResponse.Error != nil && strings.TrimSpace(resp.ToolResponse.Error.Code) != "" {
-			fields["errorCode"] = strings.TrimSpace(resp.ToolResponse.Error.Code)
-		}
-		if len(resp.ToolResponse.Output) != 0 {
-			var out struct {
-				ExitCode   int    `json:"exitCode"`
-				StdoutPath string `json:"stdoutPath"`
-				StderrPath string `json:"stderrPath"`
-			}
-			if err := json.Unmarshal(resp.ToolResponse.Output, &out); err == nil {
-				fields["exitCode"] = strconv.Itoa(out.ExitCode)
-				if strings.TrimSpace(out.StdoutPath) != "" {
-					fields["stdoutPath"] = strings.TrimSpace(out.StdoutPath)
-				}
-				if strings.TrimSpace(out.StderrPath) != "" {
-					fields["stderrPath"] = strings.TrimSpace(out.StderrPath)
-				}
-			}
-		}
-		if len(fields) == 0 {
-			return nil
 		}
 		return fields
 	default:

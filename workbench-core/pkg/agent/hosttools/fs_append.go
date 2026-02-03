@@ -15,7 +15,7 @@ func (t *FSAppendTool) Definition() llmtypes.Tool {
 	return llmtypes.Tool{
 		Type: "function",
 		Function: llmtypes.ToolFunction{
-			Name:        "fs.append",
+			Name:        "fs_append",
 			Description: "[DIRECT - no discovery needed] Append text to a file at a VFS path.",
 			Strict:      true,
 			Parameters: map[string]any{

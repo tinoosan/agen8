@@ -200,8 +200,6 @@ func displayNameForVPath(vpath string) string {
 		return strings.TrimPrefix(vpath, "/project/")
 	case strings.HasPrefix(vpath, "/workspace/"):
 		return strings.TrimPrefix(vpath, "/workspace/")
-	case strings.HasPrefix(vpath, "/results/"):
-		return strings.TrimPrefix(vpath, "/results/")
 	default:
 		return vpath
 	}
@@ -308,13 +306,6 @@ func normalizeExplicitRefVPath(token string) (vpath string, ok bool) {
 			return "", false
 		}
 		return "/workspace/" + clean, true
-	case strings.HasPrefix(token, "/results/"):
-		sub := strings.TrimPrefix(token, "/results/")
-		clean, _, err := vfsutil.NormalizeResourceSubpath(sub)
-		if err != nil || clean == "" || clean == "." {
-			return "", false
-		}
-		return "/results/" + clean, true
 	default:
 		return "", false
 	}

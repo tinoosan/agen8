@@ -83,13 +83,10 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return err
 	}
 
-	var resultsStore store.ResultsStore
 	var memStore store.DailyMemoryStore
 	var traceStore store.TraceStore
 	var historyStore store.HistoryStore
 	var constructorStore store.ConstructorStateStore
-
-	resultsStore = implstore.NewInMemoryResultsStore()
 
 	ms, err := implstore.NewDiskMemoryStore(cfg)
 	if err != nil {
@@ -140,7 +137,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		ReasoningSummary:      strings.TrimSpace(resolved.ReasoningSummary),
 		ApprovalsMode:         strings.TrimSpace(resolved.ApprovalsMode),
 		HistoryStore:          historyStore,
-		ResultsStore:          resultsStore,
 		MemoryStore:           memStore,
 		TraceStore:            traceStore,
 		MemoryReindexer:       vectorStore,
@@ -188,7 +184,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	agentCfg.EnableWebSearch = resolved.WebSearchEnabled
 	agentCfg.SystemPrompt = baseSystemPrompt
 	agentCfg.PromptSource = rt.Constructor
-	agentCfg.ToolManifests = rt.ToolManifests
 	agentCfg.Hooks = agent.Hooks{
 		OnLLMUsage: newCostUsageHook(cfg, run, resolved.Model, resolved.PriceInPerMTokensUSD, resolved.PriceOutPerMTokensUSD, mustEmit),
 		OnStep: func(step int, model, summary string) {

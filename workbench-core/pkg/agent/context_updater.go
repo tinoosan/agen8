@@ -15,7 +15,6 @@ import (
 
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/store"
-	"github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
@@ -38,10 +37,7 @@ type PromptUpdater struct {
 	LastOp   *types.HostOpRequest
 	LastResp *types.HostOpResponse
 
-	// LastToolRun captures the most recent tool.run call (if any).
-	LastToolRun *LastToolRun
-
-	// MaxMemoryBytes caps how many bytes from /memory/memory.md are injected.
+	// MaxMemoryBytes caps how many bytes from today's /memory/<YYYY-MM-DD>-memory.md are injected.
 	// If zero, a default is used.
 	MaxMemoryBytes int
 
@@ -65,12 +61,6 @@ type PromptUpdater struct {
 	MaxTraceEvents int
 }
 
-type LastToolRun struct {
-	ToolID   tools.ToolID `json:"toolId"`
-	ActionID string       `json:"actionId"`
-	CallID   string       `json:"callId"`
-}
-
 // ContextPolicy is the per-step, deterministic decision describing what context to inject.
 //
 // This is recorded into context_manifest.json for auditability.
@@ -84,11 +74,9 @@ type ContextPolicy struct {
 	LastResp  *types.HostOpResponse `json:"lastResp,omitempty"`
 	LastError string                `json:"lastError,omitempty"`
 
-	LastToolRun *LastToolRun `json:"lastToolRun,omitempty"`
-
 	Budgets struct {
-		MemoryBytes  int `json:"memoryBytes"`
-		TraceBytes   int `json:"traceBytes"`
+		MemoryBytes int `json:"memoryBytes"`
+		TraceBytes  int `json:"traceBytes"`
 	} `json:"budgets"`
 
 	TraceIncludeTypes []string `json:"traceIncludeTypes"`
@@ -141,14 +129,6 @@ func (u *PromptUpdater) ObserveHostOp(req types.HostOpRequest, resp types.HostOp
 	respCopy := resp
 	u.LastOp = &reqCopy
 	u.LastResp = &respCopy
-
-	if req.Op == types.HostOpToolRun && resp.ToolResponse != nil {
-		u.LastToolRun = &LastToolRun{
-			ToolID:   req.ToolID,
-			ActionID: req.ActionID,
-			CallID:   resp.ToolResponse.CallID,
-		}
-	}
 }
 
 // BuildSystemPrompt returns a base system prompt augmented with bounded context excerpts,
@@ -354,7 +334,6 @@ func (u *PromptUpdater) computePolicy(step int, baseMem, baseTrace int) ContextP
 
 	p.LastOp = u.LastOp
 	p.LastResp = u.LastResp
-	p.LastToolRun = u.LastToolRun
 	if u.LastResp != nil && !u.LastResp.Ok {
 		p.LastError = strings.TrimSpace(u.LastResp.Error)
 	}
@@ -549,14 +528,6 @@ func summarizeLastOp(p ContextPolicy) string {
 		b.WriteString(" path=")
 		b.WriteString(p.LastOp.Path)
 	}
-	if p.LastOp.ToolID.String() != "" {
-		b.WriteString(" toolId=")
-		b.WriteString(p.LastOp.ToolID.String())
-	}
-	if p.LastOp.ActionID != "" {
-		b.WriteString(" actionId=")
-		b.WriteString(p.LastOp.ActionID)
-	}
 	if p.LastResp != nil {
 		b.WriteString("\nresponse: ok=")
 		b.WriteString(strconv.FormatBool(p.LastResp.Ok))
@@ -567,14 +538,6 @@ func summarizeLastOp(p ContextPolicy) string {
 		if p.LastResp.Truncated {
 			b.WriteString(" truncated=true")
 		}
-	}
-	if p.LastToolRun != nil && p.LastToolRun.CallID != "" {
-		b.WriteString("\nlastToolRun: toolId=")
-		b.WriteString(p.LastToolRun.ToolID.String())
-		b.WriteString(" actionId=")
-		b.WriteString(p.LastToolRun.ActionID)
-		b.WriteString(" callId=")
-		b.WriteString(p.LastToolRun.CallID)
 	}
 	if p.FailureBump {
 		b.WriteString("\npolicy: failure bump active")

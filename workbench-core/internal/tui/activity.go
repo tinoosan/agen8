@@ -29,7 +29,7 @@ const (
 type Activity struct {
 	ID string
 
-	// Kind is the operation type (fs.read, fs.write, tool.run, ...).
+	// Kind is the operation type (fs.read, fs.write, shell.exec, ...).
 	Kind string
 
 	// Title is the short human label shown in the list (e.g. "Read /project/main.go").
@@ -44,14 +44,10 @@ type Activity struct {
 	Duration   time.Duration
 
 	// Inputs are the relevant operation inputs. Keep small and readable.
-	From      string
-	To        string
-	Path      string
-	MaxBytes  string
-	ToolID    string
-	ActionID  string
-	InputJSON string // sanitized one-line JSON from the event (tool.run only)
-	Command   string // effective command line (tool.run only)
+	From     string
+	To       string
+	Path     string
+	MaxBytes string
 
 	// For fs.write/fs.append, this is a small preview of the payload that was written.
 	// The host provides this as an event field so the UI can show "what changed"
@@ -63,10 +59,9 @@ type Activity struct {
 	TextBytes     string // telemetry-only
 
 	// Outputs are small summaries suitable for a details panel.
-	CallID        string
 	Ok            string
 	Error         string
-	OutputPreview string // e.g. stdout/stderr preview for builtin.shell when available
+	OutputPreview string
 
 	// Response metadata (telemetry only).
 	BytesLen  string
@@ -88,9 +83,7 @@ func (a Activity) ShortStatus() string {
 }
 
 func (a Activity) HasDetails() bool {
-	return strings.TrimSpace(a.InputJSON) != "" ||
-		strings.TrimSpace(a.TextPreview) != "" ||
+	return strings.TrimSpace(a.TextPreview) != "" ||
 		strings.TrimSpace(a.OutputPreview) != "" ||
-		strings.TrimSpace(a.Error) != "" ||
-		strings.TrimSpace(a.CallID) != ""
+		strings.TrimSpace(a.Error) != ""
 }

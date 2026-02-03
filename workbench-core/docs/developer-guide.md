@@ -14,13 +14,12 @@ This guide explains how the CLI, configuration, and internal services collaborat
 
 1. CLI command resolves configuration and calls `app.RunDaemon`.
 2. `app` creates a session and an agent ID; `internal/store` manages directories under `<dataDir>/sessions` and `<dataDir>/agents`.
-3. Each agent instance mounts (`/project`, `/workspace`, `/log`, `/memory`, `/results`, `/tools`) and processes tasks from `/inbox`.
-4. Artifact outputs (logs, artifacts, results) stream into the agent directory and can be inspected via the CLI or host filesystem.
+3. Each agent instance mounts (`/project`, `/workspace`, `/log`, `/memory`, `/skills`, `/plan`, `/inbox`, `/outbox`) and processes tasks from `/inbox`.
+4. Artifact outputs (logs, workspace files) stream into the agent directory and can be inspected via the CLI or host filesystem.
 
 ## Tooling & extensions
 
-- Custom tools live under `<dataDir>/tools`. The agent discovers them through `/tools` manifests.
-- Builtin tools (shell, HTTP, trace) are defined directly in the system prompt and do not require manifest discovery.
+- Built-in host tools (fs.*, shell.exec, http.fetch, trace.run) are defined directly in the system prompt.
 
 ## Debugging tips for contributors
 

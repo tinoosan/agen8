@@ -406,10 +406,15 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateFilePicker(msg)
 		}
 
-		// Help modal hotkey
-		if msg.String() == "?" && m.focusedPanel != panelComposer {
-			m.openHelpModal()
-			return m, nil
+		// Help modal hotkey:
+		// - When not composing, "?" should always open help.
+		// - When composing, allow "?" to open help only if the composer is empty
+		//   (otherwise treat it as a literal character the user wants to type).
+		if msg.String() == "?" {
+			if m.focusedPanel != panelComposer || strings.TrimSpace(m.input.Value()) == "" {
+				m.openHelpModal()
+				return m, nil
+			}
 		}
 
 		if m.focusedPanel == panelComposer {
@@ -1016,9 +1021,6 @@ func (m *monitorModel) observeActivityEvent(ev types.EventRecord) {
 			StartedAt:     now,
 			Path:          strings.TrimSpace(ev.Data["path"]),
 			MaxBytes:      strings.TrimSpace(ev.Data["maxBytes"]),
-			ToolID:        strings.TrimSpace(ev.Data["toolId"]),
-			ActionID:      strings.TrimSpace(ev.Data["actionId"]),
-			InputJSON:     strings.TrimSpace(ev.Data["input"]),
 			TextPreview:   strings.TrimSpace(ev.Data["textPreview"]),
 			TextTruncated: strings.TrimSpace(ev.Data["textTruncated"]) == "true",
 			TextRedacted:  strings.TrimSpace(ev.Data["textRedacted"]) == "true",
@@ -1026,16 +1028,7 @@ func (m *monitorModel) observeActivityEvent(ev types.EventRecord) {
 			TextBytes:     strings.TrimSpace(ev.Data["textBytes"]),
 			Data:          ev.Data,
 		}
-		if op == "tool.run" {
-			act.Command = strings.TrimSpace(renderToolRunTranscript(act.ToolID, act.ActionID, act.InputJSON))
-			if act.Command != "" {
-				act.Title = "Run " + act.Command
-			} else {
-				act.Title = "Run tool"
-			}
-		} else {
-			act.Title = renderOpRequest(ev.Data)
-		}
+		act.Title = renderOpRequest(ev.Data)
 
 		m.activities = append(m.activities, act)
 		m.activityIndexByID[id] = len(m.activities) - 1
@@ -1071,8 +1064,6 @@ func (m *monitorModel) observeActivityEvent(ev types.EventRecord) {
 
 		act.Ok = strings.TrimSpace(ev.Data["ok"])
 		act.Error = strings.TrimSpace(ev.Data["err"])
-		act.CallID = strings.TrimSpace(ev.Data["callId"])
-		act.OutputPreview = strings.TrimSpace(ev.Data["outputPreview"])
 		act.BytesLen = strings.TrimSpace(ev.Data["bytesLen"])
 		act.Truncated = strings.TrimSpace(ev.Data["truncated"]) == "true"
 
@@ -1189,11 +1180,25 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning", "daemon.error", "daemon.runner.error":
 		m.appendAgentOutput(formatEventLine(ev))
 	case "task.queued", "task.generated", "task.start", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped":
-		m.appendAgentOutput(formatEventLine(ev))
+		for _, line := range formatTaskEventLines(ev) {
+			m.appendAgentOutput(line)
+		}
 	case "control.check", "control.success", "control.error":
 		m.appendAgentOutput(formatEventLine(ev))
 	case "agent.error", "agent.turn.complete":
 		m.appendAgentOutput(formatEventLine(ev))
+	case "agent.op.request":
+		txt := strings.TrimSpace(renderOpRequest(ev.Data))
+		if txt == "" {
+			txt = strings.TrimSpace(ev.Data["op"])
+		}
+		m.appendAgentOutput(fmt.Sprintf("[%s] op: %s", ev.Timestamp.Local().Format("15:04:05"), txt))
+	case "agent.op.response":
+		txt := strings.TrimSpace(renderOpResponse(ev.Data))
+		if txt == "" {
+			txt = strings.TrimSpace(ev.Data["ok"])
+		}
+		m.appendAgentOutput(fmt.Sprintf("[%s] op: %s", ev.Timestamp.Local().Format("15:04:05"), txt))
 	}
 }
 
@@ -1203,8 +1208,45 @@ func (m *monitorModel) appendAgentOutput(line string) {
 		return
 	}
 	m.agentOutput = append(m.agentOutput, line)
-	if len(m.agentOutput) > 200 {
-		m.agentOutput = m.agentOutput[len(m.agentOutput)-200:]
+	if len(m.agentOutput) > 1000 {
+		m.agentOutput = m.agentOutput[len(m.agentOutput)-1000:]
+	}
+}
+
+func formatTaskEventLines(ev types.EventRecord) []string {
+	ts := ev.Timestamp.Local().Format("15:04:05")
+	switch ev.Type {
+	case "task.done", "task.quarantined":
+		taskID := strings.TrimSpace(ev.Data["taskId"])
+		goal := strings.TrimSpace(ev.Data["goal"])
+		status := strings.TrimSpace(ev.Data["status"])
+		if status == "" && ev.Type == "task.quarantined" {
+			status = "quarantined"
+		}
+		if status == "" {
+			status = "done"
+		}
+		header := fmt.Sprintf("[%s] %s: %s %s", ts, ev.Type, shortID(taskID), status)
+		if goal != "" {
+			header += " goal=" + strconv.Quote(goal)
+		}
+		lines := []string{header}
+
+		if summary := strings.TrimSpace(ev.Data["summary"]); summary != "" {
+			lines = append(lines, "  summary: "+summary)
+		}
+		if errStr := strings.TrimSpace(ev.Data["error"]); errStr != "" {
+			lines = append(lines, "  error: "+errStr)
+		}
+		if p := strings.TrimSpace(ev.Data["artifact0"]); p != "" {
+			lines = append(lines, "  summaryPath: "+p)
+		}
+		if p := strings.TrimSpace(ev.Data["poisonPath"]); p != "" {
+			lines = append(lines, "  poison: "+p)
+		}
+		return lines
+	default:
+		return []string{formatEventLine(ev)}
 	}
 }
 

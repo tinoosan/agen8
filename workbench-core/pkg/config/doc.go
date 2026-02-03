@@ -1,7 +1,7 @@
 // Package config centralizes Workbench-wide configuration values.
 //
 // Right now the package exposes `DataDir`, the base directory where Workbench
-// stores sessions, runs, tools, and runtime artifacts. This directory is resolved
+// stores sessions, runs, and runtime artifacts. This directory is resolved
 // via CLI flags (e.g., `--data-dir`), environment variables (`WORKBENCH_DATA_DIR`),
 // or defaults (`~/.workbench`).
 //
@@ -10,9 +10,8 @@
 // Hosts rely on `config.DataDir` containing the following structure:
 //
 //   - `<dataDir>/sessions/` – metadata about each session (for resuming + listing)
-//   - `<dataDir>/agents/<agentId>/` – per-agent artifacts (workspace, results, traces)
-//   - `<dataDir>/memory/` – shared memory staging (`memory.md`, `update.md`, `commits.jsonl`)
-//   - `<dataDir>/tools/` – discovered tool manifests (custom tools and builtin stubs)
+//   - `<dataDir>/agents/<agentId>/` – per-agent artifacts (workspace, log, inbox/outbox, plan)
+//   - `<dataDir>/memory/` – shared memory (`MEMORY.MD`, plus daily `YYYY-MM-DD-memory.md` files)
 //   - `<dataDir>/agent/`, `/knowledge/` – upcoming runtime stores that will continue to live under `DataDir`.
 //
 // # Extension Points

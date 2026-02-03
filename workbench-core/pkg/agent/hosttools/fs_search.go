@@ -15,7 +15,7 @@ func (t *FSSearchTool) Definition() llmtypes.Tool {
 	return llmtypes.Tool{
 		Type: "function",
 		Function: llmtypes.ToolFunction{
-			Name:        "fs.search",
+			Name:        "fs_search",
 			Description: "[DIRECT] Search a VFS mount using a semantic/indexed search (e.g. /memory). Prefer this over reading whole memory files.",
 			Strict:      true,
 			Parameters: map[string]any{

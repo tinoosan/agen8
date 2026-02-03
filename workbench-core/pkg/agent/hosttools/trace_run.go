@@ -17,7 +17,7 @@ func (t *TraceRunTool) Definition() llmtypes.Tool {
 	return llmtypes.Tool{
 		Type: "function",
 		Function: llmtypes.ToolFunction{
-			Name:        "trace.run",
+			Name:        "trace_run",
 			Description: "[DIRECT] Run a trace action (events.latest, events.since, events.summary).",
 			Strict:      true,
 			Parameters: map[string]any{

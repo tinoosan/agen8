@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	"github.com/tinoosan/workbench-core/pkg/events"
 )
 
@@ -236,9 +235,6 @@ func classifyEvent(ev events.Event) RenderResult {
 func renderOpRequest(d map[string]string) string {
 	op := strings.TrimSpace(d["op"])
 	path := strings.TrimSpace(d["path"])
-	toolID := strings.TrimSpace(d["toolId"])
-	actionID := strings.TrimSpace(d["actionId"])
-	input := strings.TrimSpace(d["input"])
 
 	switch op {
 	case "fs.list":
@@ -290,167 +286,9 @@ func renderOpRequest(d map[string]string) string {
 			return "trace." + action
 		}
 		return "trace.run"
-	case "tool.run":
-		// Chat transcript should read like a narrative: show the effective command rather
-		// than the internal toolId/actionId + input payload.
-		return renderToolRunTranscript(toolID, actionID, input)
 	default:
-		return compactKV(d, []string{"op", "path", "toolId", "actionId"})
+		return compactKV(d, []string{"op", "path"})
 	}
-}
-
-func renderToolRunTranscript(toolID, actionID, input string) string {
-	switch toolID {
-	case "builtin.shell":
-		if actionID != "exec" {
-			return fmt.Sprintf("%s/%s", toolID, actionID)
-		}
-		var in struct {
-			Argv []string `json:"argv"`
-		}
-		if err := json.Unmarshal([]byte(input), &in); err != nil {
-			return fmt.Sprintf("%s/%s", toolID, actionID)
-		}
-		// Show the command the tool will run (argv-joined with quoting).
-		if cmd := shellJoin(in.Argv); cmd != "" {
-			return cmd
-		}
-		return fmt.Sprintf("%s/%s", toolID, actionID)
-
-	case "builtin.http":
-		if actionID != "fetch" {
-			return fmt.Sprintf("%s/%s", toolID, actionID)
-		}
-		var in struct {
-			URL    string `json:"url"`
-			Method string `json:"method"`
-		}
-		if err := json.Unmarshal([]byte(input), &in); err != nil {
-			return fmt.Sprintf("%s/%s", toolID, actionID)
-		}
-		u := strings.TrimSpace(in.URL)
-		if u == "" {
-			return fmt.Sprintf("%s/%s", toolID, actionID)
-		}
-		m := strings.ToUpper(strings.TrimSpace(in.Method))
-		if m == "" {
-			m = "GET"
-		}
-		return m + " " + u
-
-	case "builtin.trace":
-		return fmt.Sprintf("builtin.trace/%s", actionID)
-	}
-
-	// Default: don't leak opaque tool inputs into chat.
-	return fmt.Sprintf("%s/%s", toolID, actionID)
-}
-
-func renderToolRunInspector(toolID, actionID, input string) string {
-	base := fmt.Sprintf("Run %s/%s", toolID, actionID)
-	if input == "" {
-		return base
-	}
-
-	switch toolID {
-	case "builtin.shell":
-		if actionID != "exec" {
-			break
-		}
-		var in struct {
-			Argv []string `json:"argv"`
-			Cwd  string   `json:"cwd"`
-		}
-		if err := json.Unmarshal([]byte(input), &in); err != nil {
-			break
-		}
-		cmd := shellJoin(in.Argv)
-		cwd := strings.TrimSpace(in.Cwd)
-		if cwd == "" {
-			cwd = "."
-		}
-		if cmd != "" {
-			return fmt.Sprintf("%s argv=%s cwd=%s cmd=%s", base, listPreview(in.Argv, 6), cwd, kit.TruncateRight(cmd, 120))
-		}
-		return fmt.Sprintf("%s argv=%s cwd=%s", base, listPreview(in.Argv, 6), cwd)
-
-	case "builtin.http":
-		if actionID != "fetch" {
-			break
-		}
-		var in struct {
-			URL      string `json:"url"`
-			Method   string `json:"method"`
-			MaxBytes int    `json:"maxBytes"`
-		}
-		if err := json.Unmarshal([]byte(input), &in); err != nil {
-			break
-		}
-		u := strings.TrimSpace(in.URL)
-		m := strings.ToUpper(strings.TrimSpace(in.Method))
-		if m == "" {
-			m = "GET"
-		}
-		if u == "" {
-			break
-		}
-		if in.MaxBytes > 0 {
-			return fmt.Sprintf("%s %s %s maxBytes=%d", base, m, kit.TruncateRight(u, 140), in.MaxBytes)
-		}
-		return fmt.Sprintf("%s %s %s", base, m, kit.TruncateRight(u, 160))
-	case "builtin.trace":
-		return base
-	}
-
-	// Generic fallback: show a compact input preview.
-	return fmt.Sprintf("%s input=%s", base, kit.TruncateRight(input, 160))
-}
-
-func quoteShort(s string, maxLen int) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return `""`
-	}
-	if maxLen > 0 && len(s) > maxLen {
-		s = s[:maxLen-1] + "…"
-	}
-	return strconv.Quote(s)
-}
-
-func shellJoin(argv []string) string {
-	if len(argv) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(argv))
-	for _, a := range argv {
-		parts = append(parts, shellQuote(a))
-	}
-	return strings.Join(parts, " ")
-}
-
-func shellQuote(s string) string {
-	if s == "" {
-		return `""`
-	}
-	// Keep common CLI tokens unquoted for readability.
-	if isShellSafeToken(s) {
-		return s
-	}
-	return strconv.Quote(s)
-}
-
-func isShellSafeToken(s string) bool {
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= 'A' && r <= 'Z':
-		case r >= '0' && r <= '9':
-		case strings.ContainsRune("._-/=:+@", r):
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 func listPreview(items []string, maxItems int) string {
@@ -488,20 +326,6 @@ func renderOpResponse(d map[string]string) string {
 		}
 		return prefix + " ok"
 
-	case "tool.run":
-		callID := strings.TrimSpace(d["callId"])
-		short := callID
-		if len(short) > 8 {
-			short = short[:8]
-		}
-		if ok != "true" && errStr != "" {
-			return prefix + " " + errStr
-		}
-		if callID != "" {
-			return prefix + " call=" + short
-		}
-		return prefix + " ok"
-
 	default:
 		if errStr != "" && ok != "true" {
 			return prefix + " " + errStr
@@ -518,7 +342,7 @@ func actionStatusIcon(d map[string]string) (string, bool) {
 	return "✗", true
 }
 
-func actionCategory(op, toolID string) string {
+func actionCategory(op string) string {
 	switch strings.TrimSpace(op) {
 	case "fs.list", "fs.read", "fs.search":
 		return "Explored"
@@ -530,11 +354,6 @@ func actionCategory(op, toolID string) string {
 		return "Called"
 	case "trace.run", "trace":
 		return "Traced"
-	case "tool.run":
-		if strings.TrimSpace(toolID) == "builtin.shell" {
-			return "Ran"
-		}
-		return "Called"
 	default:
 		return "Action"
 	}

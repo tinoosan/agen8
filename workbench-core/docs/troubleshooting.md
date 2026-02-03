@@ -11,7 +11,7 @@ This guide captures common issues and diagnostics that surface when running Work
 ## Session/run issues
 
 - **Stuck agent/resume**: Use `./workbench show run <agentId>` to inspect `status`, `error`, or `lastTrace`. Check `<dataDir>/agents/<agentId>/log/events.jsonl` for the precise host/agent steps.
-- **Missing artifacts**: Look under `<dataDir>/agents/<agentId>/artifacts` and `/results` to verify tool outputs. If paths are missing, inspect agent operations via the TUI history or logs.
+- **Missing artifacts**: Look under `<dataDir>/agents/<agentId>/workspace` and `<dataDir>/agents/<agentId>/artifacts`. If paths are missing, inspect agent operations via the TUI history or logs.
 - **Context truncation**: Reduce `--context-bytes` or `--history-pairs`, then start a fresh run. Context overruns show up in trace logs (look for `PromptUpdater` warnings in `log/events.jsonl`).
 
 ## Configuration problems

@@ -1,24 +1,15 @@
 // Package types defines Workbench's core data model types and host/agent protocols.
 //
-// It documents the contracts for host primitives (fs.*, tool.*, shell.exec, http.fetch, trace.run)
-// plus the tool and event results that the agent and host exchange.
+// It documents the contracts for host primitives (fs.*, shell.exec, http.fetch, trace.run)
+// plus the event results that the agent and host exchange.
 //
 // # Host Operation Protocol
 //
 // Hosts and agents communicate through `types.HostOpRequest`/`types.HostOpResponse` via
-// `agent.HostExecutor`. Each `Op` (e.g., `fs.read`, `tool.run`, `shell.exec`, `trace.run`)
+// `agent.HostExecutor`. Each `Op` (e.g., `fs.read`, `shell.exec`, `trace.run`)
 // has specific validation rules declared in `HostOpRequest.Validate()`, and the request
 // normalization in `normalizeHostOp` keeps casing + aliasing consistent. All host primitives
-// expect absolute VFS paths for file ops, timeout bounds for tool invocations, and required
-// payloads (text, input JSON, etc.) before they run.
-//
-// # Tool Data Flow
-//
-// Tools are described with `tools.ToolManifest`/`tools.ToolAction`, and their results are
-// captured in `tools.ToolResponse`. Tool calls are orchestrated by the runtime's `tools.Orchestrator`,
-// which persists `tools.ToolResponse`/artifacts under `/results/<callId>` so later steps or
-// host-side tooling can inspect what happened. The documents under `/tools` and `/results`
-// form the public API surface for tool discovery, invocation, and auditing.
+// expect absolute VFS paths for file ops and required payloads (text, input JSON, etc.) before they run.
 //
 // # Events, History, and Stability
 //

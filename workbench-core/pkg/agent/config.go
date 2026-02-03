@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
-	"github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
@@ -18,7 +17,6 @@ type AgentConfig struct {
 	ReasoningSummary string
 	SystemPrompt     string
 	PromptSource     PromptSource
-	ToolManifests    []tools.ToolManifest
 	HostToolRegistry *HostToolRegistry
 	ExtraTools       []llmtypes.Tool
 	MaxTokens        int
@@ -104,13 +102,6 @@ func WithSystemPrompt(prompt string) Option {
 func WithPromptSource(src PromptSource) Option {
 	return func(cfg *BuildConfig) error {
 		cfg.PromptSource = src
-		return nil
-	}
-}
-
-func WithToolManifests(m []tools.ToolManifest) Option {
-	return func(cfg *BuildConfig) error {
-		cfg.ToolManifests = m
 		return nil
 	}
 }

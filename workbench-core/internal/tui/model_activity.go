@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -230,9 +229,6 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 			StartedAt:     now,
 			Path:          strings.TrimSpace(ev.Data["path"]),
 			MaxBytes:      strings.TrimSpace(ev.Data["maxBytes"]),
-			ToolID:        strings.TrimSpace(ev.Data["toolId"]),
-			ActionID:      strings.TrimSpace(ev.Data["actionId"]),
-			InputJSON:     strings.TrimSpace(ev.Data["input"]),
 			TextPreview:   strings.TrimSpace(ev.Data["textPreview"]),
 			TextTruncated: strings.TrimSpace(ev.Data["textTruncated"]) == "true",
 			TextRedacted:  strings.TrimSpace(ev.Data["textRedacted"]) == "true",
@@ -240,16 +236,7 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 			TextBytes:     strings.TrimSpace(ev.Data["textBytes"]),
 			Data:          ev.Data,
 		}
-		if op == "tool.run" {
-			act.Command = strings.TrimSpace(renderToolRunTranscript(act.ToolID, act.ActionID, act.InputJSON))
-			if act.Command != "" {
-				act.Title = "Run " + act.Command
-			} else {
-				act.Title = "Run tool"
-			}
-		} else {
-			act.Title = renderOpRequest(ev.Data)
-		}
+		act.Title = renderOpRequest(ev.Data)
 
 		m.activities = append(m.activities, act)
 		m.activityIndexByID[id] = len(m.activities) - 1
@@ -288,8 +275,6 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 
 		act.Ok = strings.TrimSpace(ev.Data["ok"])
 		act.Error = strings.TrimSpace(ev.Data["err"])
-		act.CallID = strings.TrimSpace(ev.Data["callId"])
-		act.OutputPreview = strings.TrimSpace(ev.Data["outputPreview"])
 		act.BytesLen = strings.TrimSpace(ev.Data["bytesLen"])
 		act.Truncated = strings.TrimSpace(ev.Data["truncated"]) == "true"
 
@@ -518,21 +503,6 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 		b.WriteString(a.Path)
 		b.WriteString("`\n")
 	}
-	if strings.TrimSpace(a.ToolID) != "" {
-		b.WriteString("- Tool: `")
-		b.WriteString(a.ToolID)
-		b.WriteString("`\n")
-	}
-	if strings.TrimSpace(a.ActionID) != "" {
-		b.WriteString("- Action: `")
-		b.WriteString(a.ActionID)
-		b.WriteString("`\n")
-	}
-	if strings.TrimSpace(a.CallID) != "" {
-		b.WriteString("- CallID: `")
-		b.WriteString(a.CallID)
-		b.WriteString("`\n")
-	}
 	b.WriteString("- Status: ")
 	b.WriteString(string(a.Status))
 	b.WriteString(" ")
@@ -683,37 +653,6 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 			b.WriteString(strings.TrimSpace(a.To))
 			b.WriteString("`\n")
 		}
-	case "tool.run":
-		if strings.TrimSpace(a.Command) != "" {
-			b.WriteString("- command:\n\n")
-			b.WriteString(FormatCode("bash", a.Command))
-			b.WriteString("\n")
-		}
-		if strings.TrimSpace(a.ToolID) == "builtin.http" && strings.TrimSpace(a.ActionID) == "fetch" && strings.TrimSpace(a.InputJSON) != "" {
-			var in struct {
-				URL    string `json:"url"`
-				Method string `json:"method"`
-			}
-			if err := json.Unmarshal([]byte(a.InputJSON), &in); err == nil {
-				u := strings.TrimSpace(in.URL)
-				m := strings.ToUpper(strings.TrimSpace(in.Method))
-				if m == "" {
-					m = "GET"
-				}
-				if u != "" {
-					b.WriteString("- request: `")
-					b.WriteString(m)
-					b.WriteString(" ")
-					b.WriteString(u)
-					b.WriteString("`\n")
-				}
-			}
-		}
-		if strings.TrimSpace(a.InputJSON) != "" {
-			b.WriteString("\n- input:\n\n")
-			b.WriteString(FormatJSON(a.InputJSON))
-			b.WriteString("\n")
-		}
 	default:
 		if strings.TrimSpace(a.Path) != "" {
 			b.WriteString("- path: `")
@@ -773,9 +712,6 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 
 func openablePathsForActivity(a Activity) []string {
 	paths := make([]string, 0, 2)
-	if strings.TrimSpace(a.Kind) == "tool.run" && strings.TrimSpace(a.CallID) != "" {
-		paths = append(paths, "/results/"+a.CallID+"/response.json")
-	}
 	if strings.HasPrefix(strings.TrimSpace(a.Kind), "fs.") && strings.TrimSpace(a.Path) != "" {
 		paths = append(paths, a.Path)
 	}
