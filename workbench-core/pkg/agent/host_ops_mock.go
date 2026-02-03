@@ -27,6 +27,9 @@ import (
 type BrowserManager interface {
 	Start(ctx context.Context, headless bool) (sessionID string, err error)
 	Navigate(ctx context.Context, sessionID, url, waitFor string) (title string, finalURL string, err error)
+	// Dismiss attempts to dismiss cookie consent banners and popups.
+	// kind: cookies|popups|all; mode: accept|reject|close; maxClicks caps total clicks across strategies.
+	Dismiss(ctx context.Context, sessionID, kind, mode string, maxClicks int) (json.RawMessage, error)
 	Click(ctx context.Context, sessionID, selector, waitFor string) error
 	Fill(ctx context.Context, sessionID, selector, text, waitFor string) error
 	Extract(ctx context.Context, sessionID, selector, attribute string) (json.RawMessage, error)
@@ -347,15 +350,19 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		}
 
 		var params struct {
-			Action    string `json:"action"`
-			SessionID string `json:"sessionId"`
-			URL       string `json:"url"`
-			Selector  string `json:"selector"`
-			Text      string `json:"text"`
-			WaitFor   string `json:"waitFor"`
-			Attribute string `json:"attribute"`
-			Headless  *bool  `json:"headless"`
-			FullPage  *bool  `json:"fullPage"`
+			Action      string `json:"action"`
+			SessionID   string `json:"sessionId"`
+			URL         string `json:"url"`
+			Selector    string `json:"selector"`
+			Text        string `json:"text"`
+			WaitFor     string `json:"waitFor"`
+			Attribute   string `json:"attribute"`
+			Kind        string `json:"kind"`
+			Mode        string `json:"mode"`
+			MaxClicks   *int   `json:"maxClicks"`
+			AutoDismiss *bool  `json:"autoDismiss"`
+			Headless    *bool  `json:"headless"`
+			FullPage    *bool  `json:"fullPage"`
 		}
 		if err := json.Unmarshal(req.Input, &params); err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
@@ -383,8 +390,39 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			if err != nil {
 				return types.HostOpResponse{Op: "browser.navigate", Ok: false, Error: err.Error()}
 			}
+			autoDismiss := true
+			if params.AutoDismiss != nil {
+				autoDismiss = *params.AutoDismiss
+			}
+			if autoDismiss {
+				// Best-effort: accept cookie consent banners that block interaction.
+				_, _ = x.Browser.Dismiss(ctx, params.SessionID, "cookies", "accept", 3)
+			}
 			b, _ := json.Marshal(map[string]string{"title": title, "url": finalURL})
 			return types.HostOpResponse{Op: "browser.navigate", Ok: true, Text: string(b)}
+
+		case "dismiss":
+			maxClicks := 3
+			if params.MaxClicks != nil && *params.MaxClicks > 0 {
+				maxClicks = *params.MaxClicks
+			}
+			kind := strings.TrimSpace(params.Kind)
+			if kind == "" {
+				kind = "cookies"
+			}
+			mode := strings.TrimSpace(params.Mode)
+			if mode == "" {
+				if kind == "popups" {
+					mode = "close"
+				} else {
+					mode = "accept"
+				}
+			}
+			out, err := x.Browser.Dismiss(ctx, params.SessionID, kind, mode, maxClicks)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.dismiss", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.dismiss", Ok: true, Text: strings.TrimSpace(string(out))}
 
 		case "click":
 			if err := x.Browser.Click(ctx, params.SessionID, params.Selector, params.WaitFor); err != nil {

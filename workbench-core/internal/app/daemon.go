@@ -83,6 +83,42 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return err
 	}
 
+	// Load .env (best-effort) so onboarding can be "drop a file and go".
+	// Existing environment variables always win (no override).
+	//
+	// We load from both:
+	//   - the current working directory
+	//   - the resolved workdir (mounted at /project)
+	//
+	// This supports workflows where users run the daemon from a different directory
+	// than the mounted repo.
+	if cwd, err := os.Getwd(); err == nil {
+		if derr := loadDotEnvFromDir(cwd); derr != nil {
+			mustEmit(ctx, events.Event{
+				Type:    "daemon.warning",
+				Message: ".env load failed (cwd); continuing",
+				Data:    map[string]string{"error": derr.Error()},
+			})
+		}
+		if strings.TrimSpace(workdirAbs) != "" && strings.TrimSpace(workdirAbs) != strings.TrimSpace(cwd) {
+			if derr := loadDotEnvFromDir(workdirAbs); derr != nil {
+				mustEmit(ctx, events.Event{
+					Type:    "daemon.warning",
+					Message: ".env load failed (workdir); continuing",
+					Data:    map[string]string{"error": derr.Error()},
+				})
+			}
+		}
+	} else if strings.TrimSpace(workdirAbs) != "" {
+		if derr := loadDotEnvFromDir(workdirAbs); derr != nil {
+			mustEmit(ctx, events.Event{
+				Type:    "daemon.warning",
+				Message: ".env load failed (workdir); continuing",
+				Data:    map[string]string{"error": derr.Error()},
+			})
+		}
+	}
+
 	var memStore store.DailyMemoryStore
 	var traceStore store.TraceStore
 	var historyStore store.HistoryStore

@@ -151,12 +151,20 @@ func (m *BrowserSessionManager) Start(ctx context.Context, headless bool) (strin
 		return "", fmt.Errorf("new browser context: %w", err)
 	}
 
+	// Default Playwright timeout is 30s; for human-like browsing and JS-heavy pages,
+	// use a larger default.
+	const defaultTimeoutMs = 2 * 60 * 1000
+	ctxx.SetDefaultTimeout(defaultTimeoutMs)
+	ctxx.SetDefaultNavigationTimeout(defaultTimeoutMs)
+
 	page, err := ctxx.NewPage()
 	if err != nil {
 		_ = ctxx.Close()
 		_ = browser.Close()
 		return "", fmt.Errorf("new page: %w", err)
 	}
+	page.SetDefaultTimeout(defaultTimeoutMs)
+	page.SetDefaultNavigationTimeout(defaultTimeoutMs)
 
 	now := time.Now()
 	s := &browserSession{
@@ -180,7 +188,11 @@ func (m *BrowserSessionManager) Navigate(ctx context.Context, sessionID, url, wa
 		if strings.TrimSpace(url) == "" {
 			return fmt.Errorf("url is required")
 		}
-		if _, err := s.page.Goto(strings.TrimSpace(url)); err != nil {
+		if _, err := s.page.Goto(strings.TrimSpace(url), playwright.PageGotoOptions{
+			// Prefer DOMContentLoaded so we can interact with the page sooner; many sites
+			// never reach "load" due to long-polling and ads.
+			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+		}); err != nil {
 			return err
 		}
 		waitFor = strings.TrimSpace(waitFor)
@@ -256,6 +268,83 @@ func (m *BrowserSessionManager) Extract(ctx context.Context, sessionID, selector
 		return nil
 	})
 	return out, err
+}
+
+func (m *BrowserSessionManager) Dismiss(ctx context.Context, sessionID, kind, mode string, maxClicks int) (json.RawMessage, error) {
+	if maxClicks <= 0 {
+		maxClicks = 3
+	}
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if kind == "" {
+		kind = "cookies"
+	}
+	switch kind {
+	case "cookies", "popups", "all":
+	default:
+		return nil, fmt.Errorf("kind must be cookies|popups|all")
+	}
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		if kind == "popups" {
+			mode = "close"
+		} else {
+			mode = "accept"
+		}
+	}
+	switch mode {
+	case "accept", "reject", "close":
+	default:
+		return nil, fmt.Errorf("mode must be accept|reject|close")
+	}
+
+	type clickedItem struct {
+		Selector  string `json:"selector"`
+		FrameURL  string `json:"frameUrl,omitempty"`
+		FrameName string `json:"frameName,omitempty"`
+	}
+	clicked := make([]clickedItem, 0, maxClicks)
+
+	err := m.withSession(ctx, sessionID, func(s *browserSession) error {
+		selectors := dismissSelectors(kind, mode)
+		if len(selectors) == 0 {
+			return nil
+		}
+
+		frames := prioritizeFrames(s.page, kind)
+		for _, fr := range frames {
+			if len(clicked) >= maxClicks {
+				break
+			}
+			for _, sel := range selectors {
+				if len(clicked) >= maxClicks {
+					break
+				}
+				if tryDismissClick(fr, sel, mode == "close") {
+					clicked = append(clicked, clickedItem{
+						Selector:  sel,
+						FrameURL:  strings.TrimSpace(fr.URL()),
+						FrameName: strings.TrimSpace(fr.Name()),
+					})
+					// Give the page a moment to apply DOM changes.
+					s.page.WaitForTimeout(150)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	out := map[string]any{
+		"clicked": clicked,
+		"count":   len(clicked),
+	}
+	b, jerr := json.Marshal(out)
+	if jerr != nil {
+		return nil, jerr
+	}
+	return b, nil
 }
 
 func (m *BrowserSessionManager) Screenshot(ctx context.Context, sessionID, absPath string, fullPage bool) error {
@@ -454,4 +543,151 @@ func selectorAllExpr(attr string) string {
 		b, _ := json.Marshal(attr)
 		return fmt.Sprintf(`(elements) => elements.map(el => el.getAttribute(%s))`, string(b))
 	}
+}
+
+func prioritizeFrames(page playwright.Page, kind string) []playwright.Frame {
+	if page == nil {
+		return nil
+	}
+	frames := page.Frames()
+	if len(frames) <= 1 {
+		return frames
+	}
+	main := frames[0]
+	rest := frames[1:]
+
+	// Heuristic: cookie consent often lives in a dedicated iframe.
+	var priority []playwright.Frame
+	priority = append(priority, main)
+	for _, fr := range rest {
+		u := strings.ToLower(strings.TrimSpace(fr.URL()))
+		n := strings.ToLower(strings.TrimSpace(fr.Name()))
+		if strings.Contains(u, "consent") || strings.Contains(u, "cookie") || strings.Contains(u, "gdpr") ||
+			strings.Contains(n, "consent") || strings.Contains(n, "cookie") || strings.Contains(n, "gdpr") {
+			priority = append(priority, fr)
+		}
+	}
+	for _, fr := range rest {
+		u := strings.ToLower(strings.TrimSpace(fr.URL()))
+		n := strings.ToLower(strings.TrimSpace(fr.Name()))
+		if strings.Contains(u, "consent") || strings.Contains(u, "cookie") || strings.Contains(u, "gdpr") ||
+			strings.Contains(n, "consent") || strings.Contains(n, "cookie") || strings.Contains(n, "gdpr") {
+			continue
+		}
+		priority = append(priority, fr)
+	}
+
+	// When just trying to close generic popups, checking every frame can be slow/noisy.
+	if kind == "popups" && len(priority) > 5 {
+		return priority[:5]
+	}
+	return priority
+}
+
+func tryDismissClick(frame playwright.Frame, selector string, force bool) bool {
+	if frame == nil || strings.TrimSpace(selector) == "" {
+		return false
+	}
+	loc := frame.Locator(selector).First()
+	if n, err := loc.Count(); err != nil || n == 0 {
+		return false
+	}
+	timeout := 1200.0
+	noWait := true
+	if err := loc.Click(playwright.LocatorClickOptions{
+		Timeout:     playwright.Float(timeout),
+		NoWaitAfter: playwright.Bool(noWait),
+		Force:       playwright.Bool(force),
+	}); err != nil {
+		return false
+	}
+	return true
+}
+
+func dismissSelectors(kind, mode string) []string {
+	// Order matters: try well-known vendors first, then generic text-based matches.
+	var out []string
+	add := func(sel ...string) { out = append(out, sel...) }
+
+	isCookies := kind == "cookies" || kind == "all"
+	isPopups := kind == "popups" || kind == "all"
+
+	if isCookies {
+		switch mode {
+		case "accept":
+			add(
+				// OneTrust
+				`#onetrust-accept-btn-handler`,
+				`#onetrust-accept-btn-handler button`,
+				`#onetrust-banner-sdk button#onetrust-accept-btn-handler`,
+				// Cookiebot
+				`#CybotCookiebotDialogBodyLevelButtonAccept`,
+				`#CybotCookiebotDialogBodyButtonAccept`,
+				`#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll`,
+				// Didomi
+				`#didomi-notice-agree-button`,
+				`button#didomi-notice-agree-button`,
+				// Quantcast / IAB
+				`button:has-text("I agree")`,
+				`button:has-text("Accept all")`,
+				`button:has-text("Accept All")`,
+				`button:has-text("Accept")`,
+				`button:has-text("Agree")`,
+				`button:has-text("OK")`,
+				`button:has-text("Got it")`,
+				`button:has-text("Continue")`,
+				`text=Accept all`,
+				`text=I agree`,
+			)
+		case "reject":
+			add(
+				// OneTrust
+				`#onetrust-reject-all-handler`,
+				`#onetrust-reject-all-handler button`,
+				`#onetrust-banner-sdk button#onetrust-reject-all-handler`,
+				// Cookiebot
+				`#CybotCookiebotDialogBodyLevelButtonReject`,
+				`#CybotCookiebotDialogBodyButtonDecline`,
+				// Didomi
+				`#didomi-notice-disagree-button`,
+				`button#didomi-notice-disagree-button`,
+				// Generic
+				`button:has-text("Reject all")`,
+				`button:has-text("Reject")`,
+				`button:has-text("Decline")`,
+				`button:has-text("Deny")`,
+				`button:has-text("Only necessary")`,
+				`button:has-text("Necessary only")`,
+				`text=Reject all`,
+			)
+		case "close":
+			// Some cookie dialogs are best dismissed via close button.
+			add(
+				`button[aria-label*="close" i]`,
+				`[aria-label*="close" i]`,
+				`button:has-text("Close")`,
+				`text=Close`,
+				`button:has-text("×")`,
+			)
+		}
+	}
+
+	if isPopups {
+		switch mode {
+		case "close", "accept", "reject":
+			add(
+				`button[aria-label*="close" i]`,
+				`[aria-label*="close" i]`,
+				`button:has-text("Close")`,
+				`button:has-text("No thanks")`,
+				`button:has-text("Not now")`,
+				`button:has-text("Dismiss")`,
+				`button:has-text("×")`,
+				`[data-testid*="close" i]`,
+				`[data-test*="close" i]`,
+			)
+		}
+	}
+
+	return out
 }
