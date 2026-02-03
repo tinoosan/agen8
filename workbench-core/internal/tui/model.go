@@ -19,7 +19,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/debuglog"
 	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
@@ -1164,7 +1164,7 @@ func (m *Model) processApproval(approve bool) tea.Cmd {
 	return nil
 }
 
-func (m *Model) resumeAfterApprovals(toolOutputs []llm.LLMMessage) tea.Cmd {
+func (m *Model) resumeAfterApprovals(toolOutputs []llmtypes.LLMMessage) tea.Cmd {
 	if m.turnCancel != nil {
 		m.turnCancel()
 	}

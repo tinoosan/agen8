@@ -10,7 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -36,7 +36,7 @@ func (s stubRunner) AppendToolResponse(toolCallID string, resp types.HostOpRespo
 	_ = resp
 }
 
-func (s stubRunner) ResumeTurn(ctx context.Context, toolOutputs []llm.LLMMessage) (string, error) {
+func (s stubRunner) ResumeTurn(ctx context.Context, toolOutputs []llmtypes.LLMMessage) (string, error) {
 	_ = toolOutputs
 	return s.RunTurn(ctx, "")
 }
@@ -129,7 +129,7 @@ func (r blockingRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest,
 	return types.HostOpResponse{Op: req.Op, Ok: true}, nil
 }
 
-func (r blockingRunner) ResumeTurn(ctx context.Context, toolOutputs []llm.LLMMessage) (string, error) {
+func (r blockingRunner) ResumeTurn(ctx context.Context, toolOutputs []llmtypes.LLMMessage) (string, error) {
 	_ = toolOutputs
 	return r.RunTurn(ctx, "")
 }

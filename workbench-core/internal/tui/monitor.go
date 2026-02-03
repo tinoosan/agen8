@@ -90,6 +90,30 @@ type monitorModel struct {
 	tailCh            <-chan store.TailedEvent
 	errCh             <-chan error
 	cancel            context.CancelFunc
+
+	// Modal overlay state (only one modal open at a time)
+	helpModalOpen bool
+
+	// Model picker
+	modelPickerOpen bool
+	modelPickerList list.Model
+
+	// Command palette (inline autocomplete above composer)
+	commandPaletteOpen     bool
+	commandPaletteMatches  []string
+	commandPaletteSelected int
+
+	// Reasoning pickers
+	reasoningEffortPickerOpen      bool
+	reasoningEffortPickerSelected  int
+	reasoningSummaryPickerOpen     bool
+	reasoningSummaryPickerSelected int
+
+	// File picker (for @ references)
+	filePickerOpen     bool
+	filePickerList     list.Model
+	filePickerAllPaths []string
+	filePickerQuery    string
 }
 
 type monitorStats struct {
@@ -326,7 +350,39 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewports()
 		return m, nil
 
+	case monitorFilePickerPathsMsg:
+		m.handleFilePickerPaths(msg.paths)
+		return m, nil
+
 	case tea.KeyMsg:
+		// Modal overlay handling - if any modal is open, handle it first
+		if m.helpModalOpen {
+			switch msg.String() {
+			case "esc", "escape", "?":
+				m.closeHelpModal()
+				return m, nil
+			}
+			return m, nil // Consume all other keys when help is open
+		}
+		if m.modelPickerOpen {
+			return m.updateModelPicker(msg)
+		}
+		if m.reasoningEffortPickerOpen {
+			return m.updateReasoningEffortPicker(msg)
+		}
+		if m.reasoningSummaryPickerOpen {
+			return m.updateReasoningSummaryPicker(msg)
+		}
+		if m.filePickerOpen {
+			return m.updateFilePicker(msg)
+		}
+
+		// Help modal hotkey
+		if msg.String() == "?" && m.focusedPanel != panelComposer {
+			m.openHelpModal()
+			return m, nil
+		}
+
 		if m.focusedPanel == panelComposer {
 			key := strings.ToLower(msg.String())
 			if key == "ctrl+enter" ||
@@ -472,10 +528,31 @@ func (m *monitorModel) View() string {
 	grid := m.layout()
 	headerLine := m.renderHeader()
 
+	var base string
 	if m.isCompactMode() {
-		return m.renderCompact(grid, headerLine)
+		base = m.renderCompact(grid, headerLine)
+	} else {
+		base = m.renderDashboard(grid, headerLine)
 	}
-	return m.renderDashboard(grid, headerLine)
+
+	// Render modal overlays on top
+	if m.helpModalOpen {
+		return m.renderHelpModal(base)
+	}
+	if m.modelPickerOpen {
+		return m.renderModelPicker(base)
+	}
+	if m.reasoningEffortPickerOpen {
+		return m.renderReasoningEffortPicker(base)
+	}
+	if m.reasoningSummaryPickerOpen {
+		return m.renderReasoningSummaryPicker(base)
+	}
+	if m.filePickerOpen {
+		return m.renderFilePicker(base)
+	}
+
+	return base
 }
 
 func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine string) string {
@@ -711,6 +788,11 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 		return tea.Quit
 	}
 
+	if raw == "/help" {
+		m.openHelpModal()
+		return nil
+	}
+
 	if strings.HasPrefix(raw, "/task ") {
 		goal := strings.TrimSpace(strings.TrimPrefix(raw, "/task "))
 		goal = strings.Trim(goal, "\"")
@@ -720,10 +802,26 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 		ref := strings.TrimSpace(strings.TrimPrefix(raw, "/profile "))
 		return m.writeControl("switch_profile", map[string]any{"profile": ref})
 	}
+
+	// /model with no arg opens picker, with arg sets directly
+	if raw == "/model" {
+		return m.openModelPicker()
+	}
 	if strings.HasPrefix(raw, "/model ") {
 		model := strings.TrimSpace(strings.TrimPrefix(raw, "/model "))
 		return m.writeControl("set_model", map[string]any{"model": model})
 	}
+
+	// Reasoning commands
+	if raw == "/reasoning-effort" {
+		m.openReasoningEffortPicker()
+		return nil
+	}
+	if raw == "/reasoning-summary" {
+		m.openReasoningSummaryPicker()
+		return nil
+	}
+
 	if strings.HasPrefix(raw, "/memory search ") {
 		query := strings.TrimSpace(strings.TrimPrefix(raw, "/memory search "))
 		query = strings.Trim(query, "\"")

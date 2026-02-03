@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 )
 
 // Update implements the Bubble Tea update loop.
@@ -273,7 +273,7 @@ func (m Model) keyApprovalPrompt(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	return m, nil, true
 }
 
-func (m *Model) resumeTurnCmd(toolOutputs []llm.LLMMessage) tea.Cmd {
+func (m *Model) resumeTurnCmd(toolOutputs []llmtypes.LLMMessage) tea.Cmd {
 	ctx := m.turnCtx
 	if ctx == nil {
 		return nil

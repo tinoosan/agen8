@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -34,7 +34,7 @@ func (r *fakeVFSRunner) ExecHostOp(ctx context.Context, req types.HostOpRequest,
 	return types.HostOpResponse{Op: req.Op, Ok: true}, nil
 }
 
-func (r *fakeVFSRunner) ResumeTurn(ctx context.Context, toolOutputs []llm.LLMMessage) (string, error) {
+func (r *fakeVFSRunner) ResumeTurn(ctx context.Context, toolOutputs []llmtypes.LLMMessage) (string, error) {
 	_ = toolOutputs
 	return r.RunTurn(ctx, "")
 }

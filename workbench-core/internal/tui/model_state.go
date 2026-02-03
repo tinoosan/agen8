@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
@@ -29,7 +29,7 @@ type TurnRunner interface {
 	RunTurn(ctx context.Context, userMsg string) (final string, err error)
 	ExecHostOp(ctx context.Context, req types.HostOpRequest, toolCallID string) (types.HostOpResponse, error)
 	AppendToolResponse(toolCallID string, resp types.HostOpResponse)
-	ResumeTurn(ctx context.Context, toolOutputs []llm.LLMMessage) (string, error)
+	ResumeTurn(ctx context.Context, toolOutputs []llmtypes.LLMMessage) (string, error)
 	ListSessions(ctx context.Context) ([]types.Session, error)
 }
 
