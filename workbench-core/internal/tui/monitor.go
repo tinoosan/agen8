@@ -58,45 +58,45 @@ type monitorModel struct {
 
 	input textarea.Model
 
-	activities        []Activity
-	activityIndexByID map[string]int
-	activityIndexByOp map[string]int
-	activitySeq       int
-	pendingActivityID string
-	activityList      list.Model
-	activityDetail    viewport.Model
-	activityDetailAct string
-	planViewport      viewport.Model
-	renderer          *ContentRenderer
-	agentOutput       []string
-	agentOutputVP     viewport.Model
-	agentOutputPending map[string]agentOutputPendingEntry
+	activities                 []Activity
+	activityIndexByID          map[string]int
+	activityIndexByOp          map[string]int
+	activitySeq                int
+	pendingActivityID          string
+	activityList               list.Model
+	activityDetail             viewport.Model
+	activityDetailAct          string
+	planViewport               viewport.Model
+	renderer                   *ContentRenderer
+	agentOutput                []string
+	agentOutputVP              viewport.Model
+	agentOutputPending         map[string]agentOutputPendingEntry
 	agentOutputPendingFallback *agentOutputPendingEntry
-	inbox             map[string]taskState
-	inboxVP           viewport.Model
-	currentTask       *taskState
-	outboxResults     []outboxEntry
-	outboxVP          viewport.Model
-	memResults        []string
-	memoryVP          viewport.Model
-	thinkingEntries   []thinkingEntry
-	thinkingVP        viewport.Model
-	planMarkdown      string
-	planDetails       string
-	planLoadErr       string
-	planDetailsErr    string
-	stats             monitorStats
-	model             string
-	profile           string
-	focusedPanel      panelID
-	compactTab        int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
-	dashboardSideTab  int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
-	width             int
-	height            int
-	styles            *monitorStyles
-	tailCh            <-chan store.TailedEvent
-	errCh             <-chan error
-	cancel            context.CancelFunc
+	inbox                      map[string]taskState
+	inboxVP                    viewport.Model
+	currentTask                *taskState
+	outboxResults              []outboxEntry
+	outboxVP                   viewport.Model
+	memResults                 []string
+	memoryVP                   viewport.Model
+	thinkingEntries            []thinkingEntry
+	thinkingVP                 viewport.Model
+	planMarkdown               string
+	planDetails                string
+	planLoadErr                string
+	planDetailsErr             string
+	stats                      monitorStats
+	model                      string
+	profile                    string
+	focusedPanel               panelID
+	compactTab                 int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
+	dashboardSideTab           int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
+	width                      int
+	height                     int
+	styles                     *monitorStyles
+	tailCh                     <-chan store.TailedEvent
+	errCh                      <-chan error
+	cancel                     context.CancelFunc
 
 	// Modal overlay state (only one modal open at a time)
 	helpModalOpen bool
@@ -1238,16 +1238,13 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
 			return
 		}
-		status := strings.TrimSpace(renderOpResponse(ev.Data))
-		if status == "" {
-			status = strings.TrimSpace(ev.Data["ok"])
-		}
 		opID := strings.TrimSpace(ev.Data["opId"])
 		entry, ok := m.takeAgentOutputPending(opID)
 		if !ok {
 			return
 		}
-		line := fmt.Sprintf("[%s] op: %s (%s)", entry.timestamp, entry.desc, status)
+		status := formatAgentOutputStatus(ev)
+		line := fmt.Sprintf("[%s] op: %s — %s", entry.timestamp, entry.desc, status)
 		if entry.index >= 0 && entry.index < len(m.agentOutput) {
 			m.agentOutput[entry.index] = line
 		}
@@ -1313,6 +1310,22 @@ func (m *monitorModel) takeAgentOutputPending(opID string) (agentOutputPendingEn
 		return entry, true
 	}
 	return agentOutputPendingEntry{}, false
+}
+
+func formatAgentOutputStatus(ev types.EventRecord) string {
+	parts := []string{}
+	if strings.TrimSpace(ev.Data["ok"]) == "true" {
+		parts = append(parts, "ok")
+	} else {
+		parts = append(parts, "failed")
+	}
+	if status := strings.TrimSpace(ev.Data["status"]); status != "" {
+		parts = append(parts, "status="+status)
+	}
+	if errStr := strings.TrimSpace(ev.Data["err"]); errStr != "" {
+		parts = append(parts, "error="+errStr)
+	}
+	return strings.Join(parts, " ")
 }
 
 func formatTaskEventLines(ev types.EventRecord) []string {

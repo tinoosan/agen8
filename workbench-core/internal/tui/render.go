@@ -283,9 +283,9 @@ func renderOpRequest(d map[string]string) string {
 			if body := strings.TrimSpace(d["body"]); body != "" {
 				bodyText := "body: " + singleLinePreview(body, 120)
 				if strings.TrimSpace(d["bodyTruncated"]) == "true" {
-					bodyText += " (truncated)"
+					bodyText += " truncated"
 				}
-				desc = desc + " (" + bodyText + ")"
+				desc = desc + " " + bodyText
 			}
 			return desc
 		}

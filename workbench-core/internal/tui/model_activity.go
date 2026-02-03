@@ -683,29 +683,29 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 				b.WriteString(v)
 				b.WriteString("`\n")
 			}
-	} else if a.Kind == "http.fetch" || a.Kind == "http_fetch" {
-		if v := strings.TrimSpace(a.Data["url"]); v != "" {
-			b.WriteString("- url: `")
-			b.WriteString(v)
-			b.WriteString("`\n")
-		}
-		if v := strings.TrimSpace(a.Data["method"]); v != "" {
-			b.WriteString("- method: `")
-			b.WriteString(v)
-			b.WriteString("`\n")
-		}
-		if v := strings.TrimSpace(a.Data["body"]); v != "" {
-			b.WriteString("- body: `")
-			b.WriteString(v)
-			b.WriteString("`")
-			if strings.TrimSpace(a.Data["bodyTruncated"]) == "true" {
-				b.WriteString(" _(truncated)_")
+		} else if a.Kind == "http.fetch" || a.Kind == "http_fetch" {
+			if v := strings.TrimSpace(a.Data["url"]); v != "" {
+				b.WriteString("- url: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
 			}
-			b.WriteString("\n")
-		}
-	} else if a.Kind == "trace.run" || a.Kind == "trace" {
-		if v := strings.TrimSpace(a.Data["traceAction"]); v != "" {
-			b.WriteString("- action: `")
+			if v := strings.TrimSpace(a.Data["method"]); v != "" {
+				b.WriteString("- method: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["body"]); v != "" {
+				b.WriteString("- body: `")
+				b.WriteString(v)
+				b.WriteString("`")
+				if strings.TrimSpace(a.Data["bodyTruncated"]) == "true" {
+					b.WriteString(" _(truncated)_")
+				}
+				b.WriteString("\n")
+			}
+		} else if a.Kind == "trace.run" || a.Kind == "trace" {
+			if v := strings.TrimSpace(a.Data["traceAction"]); v != "" {
+				b.WriteString("- action: `")
 				b.WriteString(v)
 				b.WriteString("`\n")
 			}

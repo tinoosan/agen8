@@ -169,9 +169,14 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	}
 	if req.Op == types.HostOpHTTPFetch {
 		reqData["url"] = req.URL
-		if req.Method != "" {
-			reqData["method"] = req.Method
+		method := strings.TrimSpace(req.Method)
+		if method == "" {
+			method = "GET"
+		} else {
+			method = strings.ToUpper(method)
 		}
+		reqData["method"] = method
+		storeReq["method"] = method
 		if body := strings.TrimSpace(req.Body); body != "" {
 			if looksSensitiveText(body) {
 				reqData["body"] = "<omitted>"
