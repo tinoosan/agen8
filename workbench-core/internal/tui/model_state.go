@@ -102,12 +102,6 @@ type sessionsListMsg struct {
 	err      error
 }
 
-type approvalOp struct {
-	Req        types.HostOpRequest
-	ToolCallID string
-	Diff       string
-}
-
 type preinitStatusMsg struct {
 	workdir          string
 	modelID          string
@@ -310,17 +304,6 @@ type Model struct {
 	helpModalText  string
 	helpModalLines int
 
-	// Approval picker (/approval command)
-	approvalsMode          string
-	approvalPickerOpen     bool
-	approvalPickerSelected int
-	awaitingApprovalOps    []approvalOp
-	approvalTranscriptIdxs []int
-	// approvedCallIDs tracks ToolCallIDs that were approved so we can suppress duplicate execution diff blocks.
-	approvedCallIDs map[string]bool
-	// approvedFileOpsByPath tracks approved operations per path awaiting diff suppression.
-	approvedFileOpsByPath map[string]int
-
 	// File picker state (workdir-scoped, triggered by typing '@' in input)
 	filePickerOpen     bool
 	filePickerList     list.Model
@@ -346,7 +329,6 @@ const (
 	transcriptActionGroup
 	transcriptError
 	transcriptFileChange
-	transcriptApprovalRequest
 )
 
 type groupedAction struct {
@@ -367,13 +349,6 @@ type transcriptItem struct {
 	// For action lines.
 	groupHeader string
 	groupItems  []groupedAction
-
-	// For approval requests.
-	approvalOp      *types.HostOpRequest
-	approvalDiff    string
-	approvalStatus  string
-	approvalPending bool
-	approvalCallID  string
 }
 
 type pendingAction struct {
@@ -405,11 +380,9 @@ type fileAfterMsg struct {
 	op   string
 	path string
 
-	text         string
-	truncated    bool
-	err          error
-	callID       string
-	suppressDiff bool
+	text      string
+	truncated bool
+	err       error
 }
 
 type fileBeforeMsg struct {

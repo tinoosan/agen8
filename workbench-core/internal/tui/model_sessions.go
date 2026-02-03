@@ -3,7 +3,7 @@ package tui
 import tea "github.com/charmbracelet/bubbletea"
 
 func (m *Model) requestNewSessionSwitch() tea.Cmd {
-	if m.turnInFlight || len(m.awaitingApprovalOps) > 0 {
+	if m.turnInFlight {
 		return nil
 	}
 	m.switchNew = true

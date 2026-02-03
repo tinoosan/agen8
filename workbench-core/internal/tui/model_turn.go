@@ -72,7 +72,7 @@ func (m *Model) submitSingle() tea.Cmd {
 	}
 	// Intercept `/sessions` to open session picker (no submission).
 	if strings.EqualFold(txt, "/sessions") {
-		if m.turnInFlight || len(m.awaitingApprovalOps) > 0 {
+		if m.turnInFlight {
 			m.runtimeChangeLocked("switching sessions")
 			return nil
 		}
@@ -123,7 +123,7 @@ func (m *Model) submitMultiline() tea.Cmd {
 	}
 	// Intercept `/sessions` to open session picker (no submission).
 	if strings.EqualFold(txt, "/sessions") {
-		if m.turnInFlight || len(m.awaitingApprovalOps) > 0 {
+		if m.turnInFlight {
 			m.runtimeChangeLocked("switching sessions")
 			return nil
 		}
@@ -156,9 +156,6 @@ func (m *Model) submitMultiline() tea.Cmd {
 }
 
 func (m *Model) submit(userMsg string) tea.Cmd {
-	if len(m.awaitingApprovalOps) > 0 {
-		return nil
-	}
 	displayMsg := userMsg
 	submitMsg := userMsg
 	m.turnInFlight = true

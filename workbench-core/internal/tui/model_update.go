@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 )
 
 // Update implements the Bubble Tea update loop.
@@ -25,16 +24,10 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if mm, cmd, ok := m.keyStopTurn(msg); ok {
 		return mm, cmd
 	}
-	if mm, cmd, ok := m.keyApprovalPrompt(msg); ok {
-		return mm, cmd
-	}
 	if mm, cmd, ok := m.keyReasoningSummaryPicker(msg); ok {
 		return mm, cmd
 	}
 	if mm, cmd, ok := m.keyReasoningEffortPicker(msg); ok {
-		return mm, cmd
-	}
-	if mm, cmd, ok := m.keyApprovalPicker(msg); ok {
 		return mm, cmd
 	}
 	if mm, cmd, ok := m.keyHelpModal(msg); ok {
@@ -179,48 +172,6 @@ func (m Model) keyReasoningSummaryPicker(msg tea.KeyMsg) (Model, tea.Cmd, bool) 
 	return m, nil, true
 }
 
-func (m Model) keyApprovalPicker(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	if !m.approvalPickerOpen {
-		return m, nil, false
-	}
-
-	switch msg.Type {
-	case tea.KeyEsc:
-		m.closeApprovalPicker()
-		return m, nil, true
-	case tea.KeyEnter:
-		return m, m.selectApprovalOptionFromPicker(), true
-	case tea.KeyUp:
-		m.approvalPickerSelected--
-		if m.approvalPickerSelected < 0 {
-			m.approvalPickerSelected = len(approvalPickerOptions) - 1
-		}
-		return m, nil, true
-	case tea.KeyDown:
-		m.approvalPickerSelected++
-		if m.approvalPickerSelected >= len(approvalPickerOptions) {
-			m.approvalPickerSelected = 0
-		}
-		return m, nil, true
-	default:
-		switch msg.String() {
-		case "j":
-			m.approvalPickerSelected++
-			if m.approvalPickerSelected >= len(approvalPickerOptions) {
-				m.approvalPickerSelected = 0
-			}
-			return m, nil, true
-		case "k":
-			m.approvalPickerSelected--
-			if m.approvalPickerSelected < 0 {
-				m.approvalPickerSelected = len(approvalPickerOptions) - 1
-			}
-			return m, nil, true
-		}
-	}
-	return m, nil, true
-}
-
 func (m Model) keyGlobalQuit(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if msg.Type == tea.KeyCtrlC {
 		m.quitByCtrlC = true
@@ -246,42 +197,6 @@ func (m Model) keyStopTurn(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.turnCancel()
 	}
 	return m, nil, true
-}
-
-func (m Model) keyApprovalPrompt(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	if len(m.awaitingApprovalOps) == 0 {
-		return m, nil, false
-	}
-	if m.approvalPickerOpen {
-		return m, nil, false
-	}
-
-	switch msg.Type {
-	case tea.KeyEsc:
-		return m, m.processApproval(false), true
-	}
-
-	switch strings.ToLower(msg.String()) {
-	case "a", "y":
-		return m, m.processApproval(true), true
-	case "d", "n":
-		return m, m.processApproval(false), true
-	case "s":
-		// Allow 's' as shortcut for skip/deny.
-		return m, m.processApproval(false), true
-	}
-	return m, nil, true
-}
-
-func (m *Model) resumeTurnCmd(toolOutputs []llmtypes.LLMMessage) tea.Cmd {
-	ctx := m.turnCtx
-	if ctx == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		final, err := m.runner.ResumeTurn(ctx, toolOutputs)
-		return turnDoneMsg{final: final, err: err}
-	}
 }
 
 func (m Model) keyHelpModal(msg tea.KeyMsg) (Model, tea.Cmd, bool) {

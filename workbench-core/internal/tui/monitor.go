@@ -384,6 +384,11 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.focusedPanel == panelComposer {
+			// Handle command palette key events first
+			if m.handleCommandPaletteKey(msg) {
+				return m, nil
+			}
+
 			key := strings.ToLower(msg.String())
 			if key == "ctrl+enter" ||
 				key == "ctrl+j" ||

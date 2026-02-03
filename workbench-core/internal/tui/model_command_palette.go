@@ -17,7 +17,6 @@ var availableCommands = []string{
 	"/model",
 	"/reasoning-effort",
 	"/reasoning-summary",
-	"/approval",
 	"/copy",
 	"/editor",
 	"/cd",
