@@ -1177,34 +1177,54 @@ func (m *monitorModel) refreshThinkingViewport() {
 		return
 	}
 
-	// Timeline view (no timestamps): show a vertical connector with a bullet per entry.
+	// Timeline view: colored nodes with a dimmed vertical spine.
 	w := imax(10, m.thinkingVP.Width)
-	contentW := imax(10, w-4)
+	const prefixW = 4 // "● " or "│ "
+	contentW := imax(1, w-prefixW)
 
-	var out []string
+	// Styles for the timeline
+	nodeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#a371f7")) // Purple node
+	spineStyle := kit.StyleDim
+	titleStyle := kit.StyleBold
+
+	out := make([]string, 0, len(m.thinkingEntries)*3)
+	last := len(m.thinkingEntries) - 1
+
 	for i, e := range m.thinkingEntries {
 		summary := strings.TrimSpace(e.Summary)
 		if summary == "" {
 			continue
 		}
 
-		rendered := summary
+		// Render content with markdown
+		body := summary
 		if m.renderer != nil {
-			rendered = strings.TrimRight(m.renderer.RenderMarkdown(summary, contentW), "\n")
+			body = strings.TrimRight(m.renderer.RenderMarkdown(summary, contentW), "\n")
 		}
-		rendered = wrapViewportText(rendered, contentW)
-		lines := strings.Split(rendered, "\n")
+		body = wrapViewportText(body, contentW)
+		lines := strings.Split(body, "\n")
 		if len(lines) == 0 {
 			continue
 		}
 
-		out = append(out, "○ "+strings.TrimRight(lines[0], " "))
-		for _, line := range lines[1:] {
-			out = append(out, "  "+strings.TrimRight(line, " "))
+		// First line gets a colored bullet, rest get the spine
+		for lineIdx, line := range lines {
+			line = strings.TrimRight(line, " ")
+			if lineIdx == 0 {
+				// Node with colored bullet and bold first line
+				out = append(out, nodeStyle.Render("●")+" "+titleStyle.Render(line))
+			} else if i == last {
+				// Last entry: no spine for continuation lines
+				out = append(out, "  "+line)
+			} else {
+				// Continuation line with spine
+				out = append(out, spineStyle.Render("│")+" "+line)
+			}
 		}
 
-		if i < len(m.thinkingEntries)-1 {
-			out = append(out, "│")
+		// Spacer between entries (if not last)
+		if i < last {
+			out = append(out, spineStyle.Render("│"))
 		}
 	}
 
