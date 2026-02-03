@@ -18,8 +18,8 @@ func (t *ToolRunTool) Definition() llmtypes.Tool {
 	return llmtypes.Tool{
 		Type: "function",
 		Function: llmtypes.ToolFunction{
-			Name:        "tool_run",
-			Description: "[DISCOVERY] Run a discovered tool by id + action. Use fs_list/fs_read on /tools to discover manifests.",
+			Name:        "tool.run",
+			Description: "[DISCOVERY] Run a discovered tool by id + action. Use fs.list/fs.read on /tools to discover manifests.",
 			Strict:      true,
 			Parameters: map[string]any{
 				"type": "object",

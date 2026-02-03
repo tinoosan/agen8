@@ -364,7 +364,7 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		if !ok {
 			errMsg = strings.TrimSpace(out.Stderr)
 			if errMsg == "" {
-				errMsg = fmt.Sprintf("shell_exec exited with code %d", out.ExitCode)
+				errMsg = fmt.Sprintf("shell.exec exited with code %d", out.ExitCode)
 			}
 		}
 		return types.HostOpResponse{

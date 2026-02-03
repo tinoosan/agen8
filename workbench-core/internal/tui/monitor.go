@@ -44,6 +44,10 @@ type taskQueuedLocallyMsg struct {
 	Goal   string
 }
 
+type tickMsg struct {
+	now time.Time
+}
+
 type monitorModel struct {
 	ctx       context.Context
 	cfg       config.Config
@@ -97,6 +101,10 @@ type monitorModel struct {
 	// Model picker
 	modelPickerOpen bool
 	modelPickerList list.Model
+
+	// Profile picker
+	profilePickerOpen bool
+	profilePickerList list.Model
 
 	// Command palette (inline autocomplete above composer)
 	commandPaletteOpen     bool
@@ -245,6 +253,14 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 		errCh:             errCh,
 		cancel:            cancel,
 	}
+	// Disable mouse handling so terminals don't enter mouse-reporting mode.
+	m.activityDetail.MouseWheelEnabled = false
+	m.planViewport.MouseWheelEnabled = false
+	m.agentOutputVP.MouseWheelEnabled = false
+	m.inboxVP.MouseWheelEnabled = false
+	m.outboxVP.MouseWheelEnabled = false
+	m.memoryVP.MouseWheelEnabled = false
+	m.thinkingVP.MouseWheelEnabled = false
 
 	for _, e := range evs {
 		m.observeEvent(e)
@@ -306,7 +322,7 @@ func loadPendingTasksFromInbox(cfg config.Config, runID string) ([]taskState, er
 }
 
 func (m *monitorModel) Init() tea.Cmd {
-	return tea.Batch(m.listenEvent(), m.listenErr())
+	return tea.Batch(m.listenEvent(), m.listenErr(), m.tick())
 }
 
 func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -316,6 +332,11 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.refreshViewports()
 		return m, nil
+
+	case tickMsg:
+		// Re-render time-based UI (uptime, elapsed timers) even when no new events arrive.
+		m.refreshViewports()
+		return m, m.tick()
 
 	case tailedEventMsg:
 		if msg.ev.Event.EventID != "" {
@@ -344,6 +365,11 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewports()
 		return m, nil
 
+	case monitorEditorDoneMsg:
+		m.handleEditorDone(msg)
+		m.refreshViewports()
+		return m, nil
+
 	case taskQueuedLocallyMsg:
 		m.inbox[msg.TaskID] = taskState{TaskID: msg.TaskID, Goal: msg.Goal, Status: string(types.TaskStatusPending)}
 		m.refreshViewports()
@@ -362,6 +388,9 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, nil // Consume all other keys when help is open
+		}
+		if m.profilePickerOpen {
+			return m.updateProfilePicker(msg)
 		}
 		if m.modelPickerOpen {
 			return m.updateModelPicker(msg)
@@ -386,6 +415,12 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Handle command palette key events first
 			if cmd, ok := m.handleCommandPaletteKey(msg); ok {
 				return m, cmd
+			}
+
+			if strings.EqualFold(msg.String(), "ctrl+e") {
+				seed := strings.TrimSpace(m.input.Value())
+				m.input.SetValue("")
+				return m, m.openComposeEditor(seed)
 			}
 
 			key := strings.ToLower(msg.String())
@@ -523,6 +558,10 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *monitorModel) tick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg{now: t} })
+}
+
 func (m *monitorModel) isCompactMode() bool {
 	return m.width < compactModeMinWidth || m.height < compactModeMinHeight
 }
@@ -541,6 +580,9 @@ func (m *monitorModel) View() string {
 	// Render modal overlays on top
 	if m.helpModalOpen {
 		return m.renderHelpModal(base)
+	}
+	if m.profilePickerOpen {
+		return m.renderProfilePicker(base)
 	}
 	if m.modelPickerOpen {
 		return m.renderModelPicker(base)
@@ -785,49 +827,61 @@ func (m *monitorModel) listenErr() tea.Cmd {
 
 func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 	raw = strings.TrimSpace(raw)
-	if raw == "/quit" {
+	cmd, rest := splitMonitorCommand(raw)
+	if cmd == "" {
+		return nil
+	}
+
+	if cmd == "/quit" {
 		if m.cancel != nil {
 			m.cancel()
 		}
 		return tea.Quit
 	}
 
-	if raw == "/help" {
+	if cmd == "/help" {
 		m.openHelpModal()
 		return nil
 	}
 
-	if strings.HasPrefix(raw, "/task ") {
-		goal := strings.TrimSpace(strings.TrimPrefix(raw, "/task "))
+	if cmd == "/editor" {
+		return m.openComposeEditor("")
+	}
+
+	if cmd == "/task" {
+		goal := strings.TrimSpace(rest)
 		goal = strings.Trim(goal, "\"")
 		return m.enqueueTask(goal, 0)
 	}
-	if strings.HasPrefix(raw, "/profile ") {
-		ref := strings.TrimSpace(strings.TrimPrefix(raw, "/profile "))
+	if cmd == "/profile" && strings.TrimSpace(rest) == "" {
+		return m.openProfilePicker()
+	}
+	if cmd == "/profile" && strings.TrimSpace(rest) != "" {
+		ref := strings.TrimSpace(rest)
 		return m.writeControl("switch_profile", map[string]any{"profile": ref})
 	}
 
 	// /model with no arg opens picker, with arg sets directly
-	if raw == "/model" {
+	if cmd == "/model" && strings.TrimSpace(rest) == "" {
 		return m.openModelPicker()
 	}
-	if strings.HasPrefix(raw, "/model ") {
-		model := strings.TrimSpace(strings.TrimPrefix(raw, "/model "))
+	if cmd == "/model" && strings.TrimSpace(rest) != "" {
+		model := strings.TrimSpace(rest)
 		return m.writeControl("set_model", map[string]any{"model": model})
 	}
 
 	// Reasoning commands
-	if raw == "/reasoning-effort" {
+	if cmd == "/reasoning-effort" {
 		m.openReasoningEffortPicker()
 		return nil
 	}
-	if raw == "/reasoning-summary" {
+	if cmd == "/reasoning-summary" {
 		m.openReasoningSummaryPicker()
 		return nil
 	}
 
-	if strings.HasPrefix(raw, "/memory search ") {
-		query := strings.TrimSpace(strings.TrimPrefix(raw, "/memory search "))
+	if cmd == "/memory search" {
+		query := strings.TrimSpace(rest)
 		query = strings.Trim(query, "\"")
 		return m.searchMemory(query)
 	}

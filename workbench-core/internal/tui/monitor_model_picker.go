@@ -108,6 +108,13 @@ func (m *monitorModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.modelPickerList, cmd = m.modelPickerList.Update(msg)
+	// Keep filtering deterministic (mirrors main TUI behavior). bubbles/list filtering
+	// can return async commands that don't run in some flows; re-apply synchronously.
+	if m.modelPickerList.FilteringEnabled() && m.modelPickerList.FilterState() == list.Filtering {
+		m.modelPickerList.SetFilterText(m.modelPickerList.FilterValue())
+		m.modelPickerList.SetFilterState(list.Filtering)
+		return m, nil
+	}
 	return m, cmd
 }
 

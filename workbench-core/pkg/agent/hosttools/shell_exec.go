@@ -17,7 +17,7 @@ func (t *ShellExecTool) Definition() llmtypes.Tool {
 	return llmtypes.Tool{
 		Type: "function",
 		Function: llmtypes.ToolFunction{
-			Name:        "shell_exec",
+			Name:        "shell.exec",
 			Description: "[CORE] Execute a shell command via bash. Supports pipes, redirects, and full shell syntax. Returns stdout, stderr, and exit code.",
 			Strict:      true,
 			Parameters: map[string]any{

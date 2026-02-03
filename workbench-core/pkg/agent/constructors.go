@@ -104,10 +104,13 @@ func defaultHostTools() []HostTool {
 		&hosttools.FSReadTool{},
 		&hosttools.FSSearchTool{},
 		&hosttools.FSWriteTool{},
+		&hosttools.FSAppendTool{},
 		&hosttools.FSEditTool{},
 		&hosttools.FSPatchTool{},
+		&hosttools.ToolRunTool{},
 		&hosttools.ShellExecTool{},
 		&hosttools.HTTPFetchTool{},
+		&hosttools.TraceRunTool{},
 	}
 }
 

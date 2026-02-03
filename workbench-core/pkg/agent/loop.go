@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
@@ -79,6 +81,12 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			}
 			system = updatedSystem
 		}
+
+		// Deterministic context compaction: prevent long-running tool loops from accumulating
+		// unbounded message history (especially large tool outputs). This is a first-line
+		// defense; it does not require a separate summarizer model.
+		msgs = compactConversationForBudget(msgs, system, compactBudgetBytesFromEnv())
+
 		req := llmtypes.LLMRequest{
 			Model:            a.Model,
 			System:           system,
@@ -272,6 +280,143 @@ func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req ll
 	return resp, reasoningBuf.String(), err
 }
 
+func compactBudgetBytesFromEnv() int {
+	// Default budget aims to keep requests well under typical 128k-token windows without tokenization.
+	// (Roughly: 4 bytes/char, 4 chars/token => ~16 bytes/token => 1.5MB ~= ~96k tokens.)
+	const def = 1536 * 1024
+	if v := strings.TrimSpace(os.Getenv("WORKBENCH_CONTEXT_BUDGET_BYTES")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
+
+func compactConversationForBudget(msgs []llmtypes.LLMMessage, system string, budgetBytes int) []llmtypes.LLMMessage {
+	if budgetBytes <= 0 || len(msgs) == 0 {
+		return msgs
+	}
+	if estimateConversationBytes(system, msgs) <= budgetBytes {
+		return msgs
+	}
+
+	// Copy so we don't mutate caller-owned slices.
+	out := append([]llmtypes.LLMMessage(nil), msgs...)
+
+	// Phase 1: truncate older tool outputs (largest contributor) while keeping recent turns intact.
+	const keepRecentToolMsgs = 8
+	const toolMsgMaxChars = 1600
+	toolSeen := 0
+	for i := len(out) - 1; i >= 0; i-- {
+		if out[i].Role != "tool" {
+			continue
+		}
+		toolSeen++
+		if toolSeen <= keepRecentToolMsgs {
+			continue
+		}
+		out[i].Content = truncateWithMarker(out[i].Content, toolMsgMaxChars, " [truncated: older tool output omitted for context budget]")
+	}
+	if estimateConversationBytes(system, out) <= budgetBytes {
+		return out
+	}
+
+	// Phase 2: keep the first user goal message (if present) + a recent suffix.
+	const keepTailMsgs = 40
+	cut := max(0, len(out)-keepTailMsgs)
+	cut = adjustCutForToolMessages(out, cut)
+
+	prefix := []llmtypes.LLMMessage(nil)
+	if len(out) > 0 {
+		// Preserve the first non-system message (typically the user's goal).
+		prefix = append(prefix, out[0])
+	}
+	tail := out
+	if cut > 0 && cut < len(out) {
+		tail = out[cut:]
+	}
+	// Avoid duplicating the first message if it's already in tail.
+	if len(prefix) != 0 && len(tail) != 0 && messagesEqual(prefix[0], tail[0]) {
+		prefix = nil
+	}
+
+	notice := llmtypes.LLMMessage{
+		Role: "developer",
+		Content: strings.TrimSpace(strings.Join([]string{
+			"Context was compacted automatically to stay within a safe budget for long-running tasks.",
+			"Older tool outputs and earlier conversation turns may be truncated/omitted.",
+			"Re-open required details via tools (e.g., fs.read) rather than relying on long scrollback.",
+		}, " ")),
+	}
+
+	compacted := append([]llmtypes.LLMMessage(nil), prefix...)
+	// Insert notice after preserved first message if present.
+	if len(compacted) != 0 {
+		compacted = append(compacted, notice)
+	} else {
+		compacted = append(compacted, notice)
+	}
+	compacted = append(compacted, tail...)
+
+	// Final guard: if still over budget, drop more from the head of the tail.
+	for estimateConversationBytes(system, compacted) > budgetBytes && len(compacted) > 10 {
+		// Keep the notice and trim the oldest message after it.
+		dropIdx := 0
+		if len(prefix) != 0 {
+			dropIdx = 2 // prefix[0] + notice
+		} else {
+			dropIdx = 1 // notice
+		}
+		if dropIdx >= 0 && dropIdx < len(compacted) {
+			compacted = append(compacted[:dropIdx], compacted[dropIdx+1:]...)
+		} else {
+			break
+		}
+	}
+
+	return compacted
+}
+
+func estimateConversationBytes(system string, msgs []llmtypes.LLMMessage) int {
+	total := len(system)
+	for _, m := range msgs {
+		total += len(m.Role) + len(m.Content) + len(m.ToolCallID)
+		for _, tc := range m.ToolCalls {
+			total += len(tc.ID) + len(tc.Type) + len(tc.Function.Name) + len(tc.Function.Arguments)
+		}
+	}
+	return total
+}
+
+func truncateWithMarker(s string, maxChars int, marker string) string {
+	s = strings.TrimSpace(s)
+	if maxChars <= 0 || s == "" || len(s) <= maxChars {
+		return s
+	}
+	if marker == "" {
+		marker = "…"
+	}
+	if maxChars <= len(marker) {
+		return s[:maxChars]
+	}
+	return strings.TrimSpace(s[:maxChars-len(marker)]) + marker
+}
+
+func adjustCutForToolMessages(msgs []llmtypes.LLMMessage, cut int) int {
+	// Ensure we don't start the kept tail with a tool message (tool messages should follow an assistant tool call).
+	for cut < len(msgs) && cut > 0 && msgs[cut].Role == "tool" {
+		cut++
+	}
+	if cut > len(msgs) {
+		cut = len(msgs)
+	}
+	return cut
+}
+
+func messagesEqual(a, b llmtypes.LLMMessage) bool {
+	return a.Role == b.Role && a.Content == b.Content && a.ToolCallID == b.ToolCallID
+}
+
 func isDangerousHostOp(req types.HostOpRequest) bool {
 	// Approvals are disabled in autonomous mode; no-op safeguard.
 	_ = req
@@ -302,17 +447,17 @@ func DefaultSystemPrompt() string {
     <planning>
       <rule id="planning">
         COMPLEX TASKS REQUIRE A PLAN.
-        1. INITIALIZATION: If the user request implies multiple steps, write high-level details to "/plan/HEAD.md" and a Markdown checklist to "/plan/CHECKLIST.md" before any fs_write/fs_shell/fun calls.
+        1. INITIALIZATION: If the user request implies multiple steps, write high-level details to "/plan/HEAD.md" and a Markdown checklist to "/plan/CHECKLIST.md" before any fs.* / shell.exec / tool.run calls.
         2. FORMAT: The checklist must use "- [ ]" / "- [x]" tokens for each actionable step (e.g., "- [ ] Analyze requirements", "- [ ] Implement feature", "- [ ] Verify results").
         3. NARRATIVE: Keep narrative planning out of the checklist file. Use "/plan/HEAD.md" for reasoning and context; the checklist remains the single source of truth for tasks.
-        4. GATE: Without a plan at "/plan/HEAD.md" AND a checklist at "/plan/CHECKLIST.md", do not execute side-effect tools (fs_write, shell_exec, etc.).
+        4. GATE: Without a plan at "/plan/HEAD.md" AND a checklist at "/plan/CHECKLIST.md", do not execute side-effect tools (fs.write, shell.exec, tool.run, etc.).
         5. EXECUTION: After each step completes, overwrite "/plan/CHECKLIST.md" with the updated checklist, marking done items with "- [x]".
         6. CONTINUOUS: Before starting a new step, re-read the checklist, ensure the next item is accurate, and update it if needed.
         7. ADAPTATION: If the plan evolves, immediately rewrite "/plan/HEAD.md" and "/plan/CHECKLIST.md" so details and tasks stay current.
         8. SKIP: Do NOT create a plan for greetings/smalltalk, single factual questions, or single small edits. Respond directly instead.
       </rule>
       <rule id="planning.externalize">Plans must live in "/plan/HEAD.md" (details) and "/plan/CHECKLIST.md" (checklist); don’t keep plan reasoning solely in your head.</rule>
-      <rule id="planning.visibility">Whenever asked about planning, point to "/plan/HEAD.md" for details and "/plan/CHECKLIST.md" for the checklist—the mount is always available via fs_list.</rule>
+      <rule id="planning.visibility">Whenever asked about planning, point to "/plan/HEAD.md" for details and "/plan/CHECKLIST.md" for the checklist—the mount is always available via fs.list.</rule>
     </planning>
     <rule id="tool_results">Tool results are YOUR output, not user input.</rule>
     <rule id="skills_vs_tools">Skills live under /skills (see /skills/<skill_name>/SKILL.md) and are not tools; plugins belong to /tools.</rule>
@@ -321,23 +466,21 @@ func DefaultSystemPrompt() string {
   </critical_rules>
   <capabilities>
     <direct_ops>
-      <op name="fs_list">List VFS paths.</op>
-      <op name="fs_read">Read file contents.</op>
-      <op name="fs_search">Search a VFS mount using a semantic/indexed search (e.g. /memory).</op>
-      <op name="fs_write">Write new files.</op>
-      <op name="fs_append">Append to files.</op>
-      <op name="fs_edit">Make precise edits via JSON diffs.</op>
-      <op name="fs_patch">Apply unified-diff patches.</op>
+      <op name="fs.list">List VFS paths.</op>
+      <op name="fs.read">Read file contents.</op>
+      <op name="fs.search">Search a VFS mount using a semantic/indexed search (e.g. /memory).</op>
+      <op name="fs.write">Write new files.</op>
+      <op name="fs.append">Append to files.</op>
+      <op name="fs.edit">Make precise edits via JSON diffs.</op>
+      <op name="fs.patch">Apply unified-diff patches.</op>
       <op name="final_answer">Emit the final response once the user's goal is complete.</op>
-      <op name="shell_exec">Run shell commands (pipes, redirects, etc.).</op>
-      <op name="http_fetch">Make HTTP requests.</op>
-      <op name="trace_events_latest">Read the latest trace events.</op>
-      <op name="trace_events_since">Stream trace events since a cursor.</op>
-      <op name="trace_events_summary">Summarize trace events.</op>
+      <op name="shell.exec">Run shell commands (pipes, redirects, etc.).</op>
+      <op name="http.fetch">Make HTTP requests.</op>
+      <op name="trace.run">Run trace actions (e.g. events.latest/events.since/events.summary).</op>
     </direct_ops>
-    <skills>Refer to the <available_skills> block below and fs_read /skills/<skill>/SKILL.md to follow documented workflows. THESE ARE YOUR PRIMARY GENERAL CAPABILITIES.</skills>
-    <planning>For multi-step work, write details to /plan/HEAD.md and the checklist to /plan/CHECKLIST.md using fs_write. Keep the checklist current: re-read before each step, mark completed items with "- [x]", and add/adjust items as work changes. Skip planning for greetings/smalltalk, single factual questions, or single small edits.</planning>
-    <external_tools>Use tool_run only after inspecting /tools/<toolId> manifests; prefer direct ops, skills, and /plan first.</external_tools>
+    <skills>Refer to the <available_skills> block below and fs.read /skills/<skill>/SKILL.md to follow documented workflows. THESE ARE YOUR PRIMARY GENERAL CAPABILITIES.</skills>
+    <planning>For multi-step work, write details to /plan/HEAD.md and the checklist to /plan/CHECKLIST.md using fs.write. Keep the checklist current: re-read before each step, mark completed items with "- [x]", and add/adjust items as work changes. Skip planning for greetings/smalltalk, single factual questions, or single small edits.</planning>
+    <external_tools>Use tool.run only after inspecting /tools/<toolId> manifests; prefer direct ops, skills, and /plan first.</external_tools>
   </capabilities>
   <vfs>
     <mount path="/project">User's actual project files.</mount>
@@ -360,10 +503,10 @@ func DefaultSystemPrompt() string {
   </skill_creation>
   <operating_rules>
     <rule id="stop">Call final_answer only once the overarching goal is complete; plain assistant text without tool calls is treated as final output when finished.</rule>
-    <rule id="path_resolution">Shell commands should use relative paths (e.g. ./src) with the project root as cwd; fs_* tools still expect absolute VFS paths.</rule>
-    <rule id="tool_usage">Use fs_* for file operations, shell_exec for shell commands, http_fetch for HTTP, and trace event helpers for diagnostics; do not invent other tools.</rule>
-    <rule id="fs_edit">fs_edit expects JSON like {"path": "/project/file", "edits": [{"old": "...", "new": "...", "occurrence": 1}]}; if it fails, re-read the file and try a more specific snippet.</rule>
-    <rule id="fs_patch">fs_patch needs a unified diff with hunk headers (e.g., @@ -1,3 +1,3 @@) or adjust until the patch applies cleanly.</rule>
+    <rule id="path_resolution">Shell commands should use relative paths (e.g. ./src) with the project root as cwd; fs.* tools still expect absolute VFS paths.</rule>
+    <rule id="tool_usage">Use fs.* for file operations, shell.exec for shell commands, http.fetch for HTTP, trace.run for diagnostics, and tool.run for discovered tools; do not invent other tools.</rule>
+    <rule id="fs_edit">fs.edit expects JSON like {"path": "/project/file", "edits": [{"old": "...", "new": "...", "occurrence": 1}]}; if it fails, re-read the file and try a more specific snippet.</rule>
+    <rule id="fs_patch">fs.patch needs a unified diff with hunk headers (e.g., @@ -1,3 +1,3 @@) or adjust until the patch applies cleanly.</rule>
     <memory_management>
       <structure>
         The /memory directory contains daily memory files in YYYY-MM-DD-memory.md format.
@@ -373,13 +516,13 @@ func DefaultSystemPrompt() string {
       </structure>
 
       <read_strategy>
-        Prefer fs_search on /memory for recall instead of reading entire memory files.
-        Use fs_read only when you need full context from a specific file.
+        Prefer fs.search on /memory for recall instead of reading entire memory files.
+        Use fs.read only when you need full context from a specific file.
       </read_strategy>
 
       <write_access>
         You can ONLY write to today's memory file (/memory/TODAY-memory.md).
-        Use fs_write, fs_edit, or fs_append to update it when you learn something worth remembering.
+        Use fs.write, fs.edit, or fs.append to update it when you learn something worth remembering.
       </write_access>
 
       <when_to_save>

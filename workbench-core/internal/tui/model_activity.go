@@ -603,8 +603,8 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 		b.WriteString("\n**Tool output preview** _(press `e` to expand)_\n\n")
 		b.WriteString(FormatCode("text", txt))
 		b.WriteString("\n")
-	} else if a.Kind == "shell_exec" {
-		// Specific handling for shell_exec components
+	} else if a.Kind == "shell.exec" || a.Kind == "shell_exec" {
+		// Specific handling for shell.exec components
 		exitCode := strings.TrimSpace(a.Data["exitCode"])
 		stdout := strings.TrimSpace(a.Data["stdout"])
 		stderr := strings.TrimSpace(a.Data["stderr"])
@@ -623,7 +623,7 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 			b.WriteString(FormatCode("text", stderr))
 			b.WriteString("\n")
 		}
-	} else if a.Kind == "http_fetch" {
+	} else if a.Kind == "http.fetch" || a.Kind == "http_fetch" {
 		status := strings.TrimSpace(a.Data["status"])
 		body := strings.TrimSpace(a.Data["body"])
 		if status != "" {
@@ -636,7 +636,7 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 			b.WriteString(FormatCode("html", body))
 			b.WriteString("\n")
 		}
-	} else if a.Kind == "trace" {
+	} else if a.Kind == "trace.run" || a.Kind == "trace" {
 		output := strings.TrimSpace(a.Data["output"])
 		if output != "" {
 			b.WriteString("\n**Output**\n\n")
@@ -727,7 +727,7 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 		}
 
 		// Handle host operations with new telemetry fields
-		if a.Kind == "shell_exec" {
+		if a.Kind == "shell.exec" || a.Kind == "shell_exec" {
 			if v := strings.TrimSpace(a.Data["argvPreview"]); v != "" {
 				b.WriteString("- command:\n\n")
 				b.WriteString(FormatCode("bash", v))
@@ -738,7 +738,7 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 				b.WriteString(v)
 				b.WriteString("`\n")
 			}
-		} else if a.Kind == "http_fetch" {
+		} else if a.Kind == "http.fetch" || a.Kind == "http_fetch" {
 			if v := strings.TrimSpace(a.Data["url"]); v != "" {
 				b.WriteString("- url: `")
 				b.WriteString(v)
@@ -749,7 +749,7 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 				b.WriteString(v)
 				b.WriteString("`\n")
 			}
-		} else if a.Kind == "trace" {
+		} else if a.Kind == "trace.run" || a.Kind == "trace" {
 			if v := strings.TrimSpace(a.Data["traceAction"]); v != "" {
 				b.WriteString("- action: `")
 				b.WriteString(v)

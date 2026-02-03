@@ -14,12 +14,15 @@ Navigation:
   Ctrl+] / Ctrl+[     Cycle side tabs (Activity | Plan | Tasks | Thoughts)
   Ctrl+Up / Ctrl+Down Focus Activity Feed / Details
   Ctrl+Y              Jump to Thoughts tab
+  Ctrl+E              Open $EDITOR for composer
 
 Commands (type in composer, submit with Ctrl+Enter):
   /task <goal>           Queue a new task for the agent
   /model                 Open model picker
   /model <id>            Set model directly
+  /profile               Open profile picker
   /profile <ref>         Switch agent profile
+  /editor                Open $EDITOR to compose (loads back into composer)
   /memory search <query> Search vector memory
   /reasoning-effort      Set reasoning effort level
   /reasoning-summary     Set reasoning summary mode

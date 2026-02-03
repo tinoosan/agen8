@@ -50,7 +50,9 @@ func NewClientFromEnv() (*Client, error) {
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 
-	defaultMaxTokens := 256000
+	// DefaultMaxTokens is the default *output* token budget for a request when the caller does not specify one.
+	// Keep this conservative to avoid requesting impossible generations that exceed the model context window.
+	defaultMaxTokens := 8192
 	if v := strings.TrimSpace(os.Getenv("OPENROUTER_MAX_TOKENS")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			defaultMaxTokens = n

@@ -209,6 +209,7 @@ func normalizeHostOp(op string) string {
 		return ""
 	}
 	op = strings.ToLower(op)
+	// Backwards-compat: legacy snake_case op aliases are deprecated but still accepted.
 	switch op {
 	case "fs_list":
 		return HostOpFSList
