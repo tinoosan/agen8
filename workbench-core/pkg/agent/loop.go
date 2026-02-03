@@ -475,6 +475,7 @@ func DefaultSystemPrompt() string {
       <op name="final_answer">Emit the final response once the user's goal is complete.</op>
       <op name="shell_exec">Run shell commands (pipes, redirects, etc.).</op>
       <op name="http_fetch">Make HTTP requests.</op>
+      <op name="browser">Interactive web browser for JavaScript-rendered content, multi-step navigation, and visual capture (screenshots/PDFs). Call browser with action "start" to create a session, then use actions navigate/click/type/extract/screenshot/pdf, and close sessions when done.</op>
       <op name="trace_run">Run trace actions (e.g. events.latest/events.since/events.summary).</op>
     </direct_ops>
     <skills>Refer to the <available_skills> block below and fs_read /skills/<skill>/SKILL.md to follow documented workflows. THESE ARE YOUR PRIMARY GENERAL CAPABILITIES.</skills>
@@ -501,6 +502,7 @@ func DefaultSystemPrompt() string {
     <rule id="stop">Call final_answer only once the overarching goal is complete; plain assistant text without tool calls is treated as final output when finished.</rule>
     <rule id="path_resolution">Shell commands should use relative paths (e.g. ./src) with the project root as cwd; fs_* tools still expect absolute VFS paths.</rule>
     <rule id="tool_usage">Use fs_* for file operations, shell_exec for shell commands, http_fetch for HTTP, and trace_run for diagnostics; do not invent other tools.</rule>
+    <rule id="browser_usage">Use browser for JS-heavy sites, multi-step interactions (login/forms/navigation), or when you need screenshots/PDFs. Prefer http_fetch for simple APIs and static pages.</rule>
     <rule id="fs_edit">fs_edit expects JSON like {"path": "/project/file", "edits": [{"old": "...", "new": "...", "occurrence": 1}]}; if it fails, re-read the file and try a more specific snippet.</rule>
     <rule id="fs_patch">fs_patch needs a unified diff with hunk headers (e.g., @@ -1,3 +1,3 @@) or adjust until the patch applies cleanly.</rule>
     <memory_management>

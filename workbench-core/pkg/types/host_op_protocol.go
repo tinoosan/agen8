@@ -29,6 +29,8 @@ const (
 	HostOpShellExec = "shell.exec"
 	// HostOpHTTPFetch issues an HTTP request.
 	HostOpHTTPFetch = "http.fetch"
+	// HostOpBrowser performs an interactive browser action (stateful session).
+	HostOpBrowser = "browser"
 	// HostOpTrace runs a trace action (e.g. events.latest).
 	HostOpTrace = "trace.run"
 	// HostOpFinal ends the agent loop for a user turn.
@@ -68,7 +70,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = normalizeHostOp(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpTrace, HostOpFinal:
+	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -161,6 +163,12 @@ func (r HostOpRequest) Validate() error {
 		}
 		if r.MaxBytes < 0 {
 			return fmt.Errorf("maxBytes must be >= 0")
+		}
+		return nil
+
+	case HostOpBrowser:
+		if r.Input == nil {
+			return fmt.Errorf("browser.input is required")
 		}
 		return nil
 

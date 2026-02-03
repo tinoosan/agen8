@@ -109,6 +109,7 @@ func defaultHostTools() []HostTool {
 		&hosttools.FSPatchTool{},
 		&hosttools.ShellExecTool{},
 		&hosttools.HTTPFetchTool{},
+		&hosttools.BrowserTool{},
 		&hosttools.TraceRunTool{},
 	}
 }

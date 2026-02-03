@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/config"
@@ -27,6 +28,10 @@ type Runtime struct {
 	Updater         *agent.PromptUpdater
 	WorkdirBase     string
 	MemStore        store.DailyMemoryStore
+
+	Browser agent.BrowserManager
+
+	browserCleanupCancel context.CancelFunc
 }
 
 type BuildConfig struct {
@@ -280,17 +285,40 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		FS:    fs,
 	}
 	shellInvoker := builtins.NewBuiltinShellInvoker(absWorkdirRoot, nil, vfs.MountProject)
+
 	httpInvoker := builtins.NewBuiltinHTTPInvoker()
 	traceInvoker := builtins.BuiltinTraceInvoker{Store: traceStore}
+
+	browserMgr, err := builtins.NewBrowserSessionManager(30 * time.Minute)
+	if err != nil {
+		return nil, fmt.Errorf("create browser manager: %w", err)
+	}
 
 	executor := &agent.HostOpExecutor{
 		FS:              fs,
 		ShellInvoker:    shellInvoker,
 		HTTPInvoker:     httpInvoker,
 		TraceInvoker:    traceInvoker,
+		Browser:         browserMgr,
+		WorkspaceDir:    wsRes.BaseDir,
 		DefaultMaxBytes: 4096,
 		MaxReadBytes:    256 * 1024,
 	}
+
+	// Periodically cleanup idle browser sessions.
+	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-cleanupCtx.Done():
+				return
+			case <-ticker.C:
+				browserMgr.CleanupStale()
+			}
+		}
+	}()
 
 	constructor := &agent.PromptBuilder{
 		FS:             fs,
@@ -333,14 +361,29 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	})
 
 	return &Runtime{
-		FS:              fs,
-		Executor:        exec,
-		TraceMiddleware: traceMiddleware,
-		Constructor:     constructor,
-		Updater:         updater,
-		WorkdirBase:     workdirRes.BaseDir,
-		MemStore:        memStore,
+		FS:                   fs,
+		Executor:             exec,
+		TraceMiddleware:      traceMiddleware,
+		Constructor:          constructor,
+		Updater:              updater,
+		WorkdirBase:          workdirRes.BaseDir,
+		MemStore:             memStore,
+		Browser:              browserMgr,
+		browserCleanupCancel: cleanupCancel,
 	}, nil
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func (r *Runtime) Shutdown(_ context.Context) error {
+	if r == nil {
+		return nil
+	}
+	if r.browserCleanupCancel != nil {
+		r.browserCleanupCancel()
+	}
+	if r.Browser != nil {
+		return r.Browser.Shutdown()
+	}
+	return nil
+}

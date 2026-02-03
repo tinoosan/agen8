@@ -7,15 +7,34 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/tinoosan/workbench-core/pkg/debuglog"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
+
+// BrowserManager abstracts interactive browser sessions for HostOpBrowser.
+//
+// It is an interface so tests can stub it and so the agent package does not
+// depend on a specific browser implementation.
+type BrowserManager interface {
+	Start(ctx context.Context, headless bool) (sessionID string, err error)
+	Navigate(ctx context.Context, sessionID, url, waitFor string) (title string, finalURL string, err error)
+	Click(ctx context.Context, sessionID, selector, waitFor string) error
+	Fill(ctx context.Context, sessionID, selector, text, waitFor string) error
+	Extract(ctx context.Context, sessionID, selector, attribute string) (json.RawMessage, error)
+	Screenshot(ctx context.Context, sessionID, absPath string, fullPage bool) error
+	PDF(ctx context.Context, sessionID, absPath string) error
+	Close(ctx context.Context, sessionID string) error
+	CleanupStale()
+	Shutdown() error
+}
 
 // HostOpExecutor is a tiny "host primitive" dispatcher for demos/tests.
 //
@@ -29,6 +48,11 @@ type HostOpExecutor struct {
 	ShellInvoker pkgtools.ToolInvoker
 	HTTPInvoker  pkgtools.ToolInvoker
 	TraceInvoker pkgtools.ToolInvoker // For all trace actions via BuiltinTraceInvoker
+	Browser      BrowserManager
+
+	// WorkspaceDir is the host filesystem path backing the /workspace VFS mount.
+	// It is used for browser screenshots and PDFs.
+	WorkspaceDir string
 
 	DefaultMaxBytes int
 
@@ -290,6 +314,111 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 		}
 		return types.HostOpResponse{Op: req.Op, Ok: true, Text: string(result.Output)}
+
+	case types.HostOpBrowser:
+		if x.Browser == nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "browser not configured"}
+		}
+		if req.Input == nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "browser.input is required"}
+		}
+
+		var params struct {
+			Action    string `json:"action"`
+			SessionID string `json:"sessionId"`
+			URL       string `json:"url"`
+			Selector  string `json:"selector"`
+			Text      string `json:"text"`
+			WaitFor   string `json:"waitFor"`
+			Attribute string `json:"attribute"`
+			Headless  *bool  `json:"headless"`
+			FullPage  *bool  `json:"fullPage"`
+		}
+		if err := json.Unmarshal(req.Input, &params); err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		action := strings.ToLower(strings.TrimSpace(params.Action))
+		if action == "" {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "action is required"}
+		}
+
+		switch action {
+		case "start":
+			headless := true
+			if params.Headless != nil {
+				headless = *params.Headless
+			}
+			sessionID, err := x.Browser.Start(ctx, headless)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.start", Ok: false, Error: err.Error()}
+			}
+			b, _ := json.Marshal(map[string]string{"sessionId": sessionID})
+			return types.HostOpResponse{Op: "browser.start", Ok: true, Text: string(b)}
+
+		case "navigate":
+			title, finalURL, err := x.Browser.Navigate(ctx, params.SessionID, params.URL, params.WaitFor)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.navigate", Ok: false, Error: err.Error()}
+			}
+			b, _ := json.Marshal(map[string]string{"title": title, "url": finalURL})
+			return types.HostOpResponse{Op: "browser.navigate", Ok: true, Text: string(b)}
+
+		case "click":
+			if err := x.Browser.Click(ctx, params.SessionID, params.Selector, params.WaitFor); err != nil {
+				return types.HostOpResponse{Op: "browser.click", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.click", Ok: true}
+
+		case "type":
+			if err := x.Browser.Fill(ctx, params.SessionID, params.Selector, params.Text, params.WaitFor); err != nil {
+				return types.HostOpResponse{Op: "browser.type", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.type", Ok: true}
+
+		case "extract":
+			data, err := x.Browser.Extract(ctx, params.SessionID, params.Selector, params.Attribute)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.extract", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.extract", Ok: true, Text: strings.TrimSpace(string(data))}
+
+		case "screenshot":
+			if strings.TrimSpace(x.WorkspaceDir) == "" {
+				return types.HostOpResponse{Op: "browser.screenshot", Ok: false, Error: "workspace dir not configured"}
+			}
+			fullPage := true
+			if params.FullPage != nil {
+				fullPage = *params.FullPage
+			}
+			filename := fmt.Sprintf("screenshot-%s.png", uuid.NewString()[:8])
+			absPath := filepath.Join(x.WorkspaceDir, filename)
+			if err := x.Browser.Screenshot(ctx, params.SessionID, absPath, fullPage); err != nil {
+				return types.HostOpResponse{Op: "browser.screenshot", Ok: false, Error: err.Error()}
+			}
+			b, _ := json.Marshal(map[string]string{"path": filepath.ToSlash(filepath.Join("/workspace", filename))})
+			return types.HostOpResponse{Op: "browser.screenshot", Ok: true, Text: string(b)}
+
+		case "pdf":
+			if strings.TrimSpace(x.WorkspaceDir) == "" {
+				return types.HostOpResponse{Op: "browser.pdf", Ok: false, Error: "workspace dir not configured"}
+			}
+			filename := fmt.Sprintf("document-%s.pdf", uuid.NewString()[:8])
+			absPath := filepath.Join(x.WorkspaceDir, filename)
+			if err := x.Browser.PDF(ctx, params.SessionID, absPath); err != nil {
+				return types.HostOpResponse{Op: "browser.pdf", Ok: false, Error: err.Error()}
+			}
+			b, _ := json.Marshal(map[string]string{"path": filepath.ToSlash(filepath.Join("/workspace", filename))})
+			return types.HostOpResponse{Op: "browser.pdf", Ok: true, Text: string(b)}
+
+		case "close":
+			if err := x.Browser.Close(ctx, params.SessionID); err != nil {
+				return types.HostOpResponse{Op: "browser.close", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.close", Ok: true}
+
+		default:
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "unknown browser action: " + action}
+		}
 
 	default:
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: fmt.Sprintf("unknown op %q", req.Op)}

@@ -26,3 +26,20 @@ func TestHostOpRequest_TraceValidation_RejectsUnknownActions(t *testing.T) {
 		t.Fatalf("expected error for unsupported action")
 	}
 }
+
+func TestHostOpRequest_BrowserValidation_RequiresInput(t *testing.T) {
+	req := HostOpRequest{Op: HostOpBrowser}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for missing input")
+	}
+}
+
+func TestHostOpRequest_BrowserValidation_AllowsInput(t *testing.T) {
+	req := HostOpRequest{
+		Op:    HostOpBrowser,
+		Input: json.RawMessage(`{"action":"start"}`),
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}

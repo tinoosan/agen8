@@ -163,6 +163,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err != nil {
 		return err
 	}
+	defer func() { _ = rt.Shutdown(context.Background()) }()
 
 	client, err := llm.NewClientFromEnv()
 	if err != nil {
