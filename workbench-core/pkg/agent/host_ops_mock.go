@@ -15,6 +15,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/debuglog"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	pkgtools "github.com/tinoosan/workbench-core/pkg/tools"
+	"github.com/tinoosan/workbench-core/pkg/tools/builtins"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
@@ -49,6 +50,7 @@ type HostOpExecutor struct {
 	HTTPInvoker  pkgtools.ToolInvoker
 	TraceInvoker pkgtools.ToolInvoker // For all trace actions via BuiltinTraceInvoker
 	Browser      BrowserManager
+	EmailClient  builtins.EmailSender
 
 	// WorkspaceDir is the host filesystem path backing the /workspace VFS mount.
 	// It is used for browser screenshots and PDFs.
@@ -314,6 +316,27 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 		}
 		return types.HostOpResponse{Op: req.Op, Ok: true, Text: string(result.Output)}
+
+	case types.HostOpEmail:
+		if x.EmailClient == nil {
+			return types.HostOpResponse{
+				Op:    req.Op,
+				Ok:    false,
+				Error: "email not configured (set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN, and GMAIL_USER)",
+			}
+		}
+		var params struct {
+			To      string `json:"to"`
+			Subject string `json:"subject"`
+			Body    string `json:"body"`
+		}
+		if err := json.Unmarshal(req.Input, &params); err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		if err := x.EmailClient.Send(params.To, params.Subject, params.Body); err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		return types.HostOpResponse{Op: req.Op, Ok: true}
 
 	case types.HostOpBrowser:
 		if x.Browser == nil {

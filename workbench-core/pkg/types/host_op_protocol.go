@@ -33,6 +33,8 @@ const (
 	HostOpBrowser = "browser"
 	// HostOpTrace runs a trace action (e.g. events.latest).
 	HostOpTrace = "trace.run"
+	// HostOpEmail sends an email notification.
+	HostOpEmail = "email"
 	// HostOpFinal ends the agent loop for a user turn.
 	HostOpFinal = "agent.final"
 
@@ -70,7 +72,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = normalizeHostOp(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpFinal:
+	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -184,6 +186,12 @@ func (r HostOpRequest) Validate() error {
 			}
 		default:
 			return fmt.Errorf("trace.action must be one of events.since/events.latest/events.summary")
+		}
+		return nil
+
+	case HostOpEmail:
+		if r.Input == nil {
+			return fmt.Errorf("email.input is required")
 		}
 		return nil
 	}

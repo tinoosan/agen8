@@ -9,17 +9,19 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.4
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
-	github.com/chzyer/readline v1.5.1
 	github.com/google/uuid v1.6.0
 	github.com/hexops/gotextdiff v1.0.3
 	github.com/muesli/reflow v0.3.0
-	github.com/nxadm/tail v1.4.11
 	github.com/openai/openai-go/v3 v3.16.0
 	github.com/playwright-community/playwright-go v0.4501.1
 	github.com/spf13/cobra v1.8.1
+	golang.org/x/oauth2 v0.34.0
+	gopkg.in/yaml.v3 v3.0.1
+	modernc.org/sqlite v1.44.3
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
@@ -31,11 +33,11 @@ require (
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
-	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/kr/text v0.2.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
@@ -63,10 +65,7 @@ require (
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/term v0.31.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
-	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.44.3 // indirect
 )

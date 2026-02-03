@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -294,11 +295,67 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("create browser manager: %w", err)
 	}
 
+	// Initialize email sender (optional; send-only).
+	//
+	// Gmail OAuth2 (XOAUTH2) configuration (no password-based SMTP for now).
+	dotEnv := loadDotEnv(cfg.WorkdirAbs)
+	var emailClient builtins.EmailSender
+	{
+		user := envWithFallback("GMAIL_USER", dotEnv, "GMAIL_SMTP_USER", "GMAIL_USERNAME", "GMAIL_EMAIL")
+		from := envWithFallback("GMAIL_FROM", dotEnv)
+		clientID := envWithFallback("GOOGLE_OAUTH_CLIENT_ID", dotEnv)
+		clientSecret := envWithFallback("GOOGLE_OAUTH_CLIENT_SECRET", dotEnv)
+		refreshToken := envWithFallback("GOOGLE_OAUTH_REFRESH_TOKEN", dotEnv)
+		accessToken := envWithFallback("GOOGLE_OAUTH_ACCESS_TOKEN", dotEnv)
+
+		port := 587
+		if portStr := envWithFallback("GMAIL_SMTP_PORT", dotEnv); portStr != "" {
+			if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
+				port = p
+			}
+		}
+
+		if strings.TrimSpace(user) != "" && (accessToken != "" || (clientID != "" && clientSecret != "" && refreshToken != "")) {
+			c, err := builtins.NewGmailOAuthClient(builtins.GmailOAuthConfig{
+				User:         user,
+				From:         from,
+				ClientID:     clientID,
+				ClientSecret: clientSecret,
+				RefreshToken: refreshToken,
+				AccessToken:  accessToken,
+				Host:         "smtp.gmail.com",
+				Port:         port,
+			})
+			if err != nil {
+				if cfg.Emit != nil {
+					cfg.Emit(context.Background(), events.Event{
+						Type:    "runtime.warning",
+						Message: "Email configured but OAuth setup invalid; email disabled",
+						Data:    map[string]string{"error": err.Error()},
+					})
+				}
+			} else {
+				emailClient = c
+			}
+		} else if strings.TrimSpace(user) != "" || clientID != "" || clientSecret != "" || refreshToken != "" || accessToken != "" {
+			if cfg.Emit != nil {
+				cfg.Emit(context.Background(), events.Event{
+					Type:    "runtime.warning",
+					Message: "Email configured but missing required OAuth values; email disabled",
+					Data: map[string]string{
+						"requires": "GMAIL_USER and GOOGLE_OAUTH_CLIENT_ID/GOOGLE_OAUTH_CLIENT_SECRET/GOOGLE_OAUTH_REFRESH_TOKEN (or GOOGLE_OAUTH_ACCESS_TOKEN)",
+					},
+				})
+			}
+		}
+	}
+
 	executor := &agent.HostOpExecutor{
 		FS:              fs,
 		ShellInvoker:    shellInvoker,
 		HTTPInvoker:     httpInvoker,
 		TraceInvoker:    traceInvoker,
+		EmailClient:     emailClient,
 		Browser:         browserMgr,
 		WorkspaceDir:    wsRes.BaseDir,
 		DefaultMaxBytes: 4096,
@@ -374,6 +431,61 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func loadDotEnv(root string) map[string]string {
+	if strings.TrimSpace(root) == "" {
+		return nil
+	}
+	path := filepath.Join(root, ".env")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		if key == "" {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func envWithFallback(key string, dotEnv map[string]string, aliases ...string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	for _, alias := range aliases {
+		if v := strings.TrimSpace(os.Getenv(alias)); v != "" {
+			return v
+		}
+	}
+	if dotEnv == nil {
+		return ""
+	}
+	if v, ok := dotEnv[key]; ok && strings.TrimSpace(v) != "" {
+		return strings.TrimSpace(v)
+	}
+	for _, alias := range aliases {
+		if v, ok := dotEnv[alias]; ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
 
 func (r *Runtime) Shutdown(_ context.Context) error {
 	if r == nil {

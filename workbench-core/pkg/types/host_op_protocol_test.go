@@ -43,3 +43,20 @@ func TestHostOpRequest_BrowserValidation_AllowsInput(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 }
+
+func TestHostOpRequest_EmailValidation_RequiresInput(t *testing.T) {
+	req := HostOpRequest{Op: HostOpEmail}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for missing input")
+	}
+}
+
+func TestHostOpRequest_EmailValidation_AllowsInput(t *testing.T) {
+	req := HostOpRequest{
+		Op:    HostOpEmail,
+		Input: json.RawMessage(`{"to":"a@example.com","subject":"s","body":"b"}`),
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}

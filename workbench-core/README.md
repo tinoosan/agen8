@@ -92,6 +92,39 @@ Runtime configuration resolves in this order: CLI flags → environment variable
 
 Helpers in `internal/config/effectiveConfig()` resolve the final configuration before each command runs. See [docs/cli-usage.md](docs/cli-usage.md) for deeper context on flag interactions, environment variables, and examples.
 
+## Email notifications (Gmail OAuth2)
+
+Workbench can send **plain-text** email notifications through Gmail using OAuth2 (XOAUTH2 over SMTP).
+
+### Setup
+
+Workbench loads variables from the real environment first; if missing, it falls back to a `.env` file in your session/workdir root.
+
+Set these environment variables (or put them in `.env`):
+
+```sh
+export GMAIL_USER="you@gmail.com"
+export GMAIL_FROM="you@gmail.com"                 # optional; defaults to GMAIL_USER
+
+export GOOGLE_OAUTH_CLIENT_ID="..."
+export GOOGLE_OAUTH_CLIENT_SECRET="..."
+export GOOGLE_OAUTH_REFRESH_TOKEN="..."
+
+# Optional (debug only): use an access token directly instead of refreshing.
+export GOOGLE_OAUTH_ACCESS_TOKEN="..."
+```
+
+Notes:
+
+- You must create an OAuth client in Google Cloud, enable Gmail access, and generate a refresh token for the `https://mail.google.com/` scope.
+- Workbench uses STARTTLS on port 587; implicit TLS on port 465 is not supported.
+
+### Agent usage
+
+The built-in tool name is `email(to, subject, body)`. You can explicitly ask the agent to send an email, or configure autonomous mode to send completion summaries.
+
+If SMTP is not configured, email requests fail with a clear error and the agent continues normally.
+
 ## Inspecting runtime state
 
 The CLI stores persistent state under the configured `dataDir`:

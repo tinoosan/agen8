@@ -475,6 +475,7 @@ func DefaultSystemPrompt() string {
       <op name="final_answer">Emit the final response once the user's goal is complete.</op>
       <op name="shell_exec">Run shell commands (pipes, redirects, etc.).</op>
       <op name="http_fetch">Make HTTP requests.</op>
+      <op name="email">Send email notifications (plain text).</op>
       <op name="browser">Interactive web browser for JavaScript-rendered content, multi-step navigation, and visual capture (screenshots/PDFs). Call browser with action "start" to create a session, then use actions navigate/click/type/extract/screenshot/pdf, and close sessions when done.</op>
       <op name="trace_run">Run trace actions (e.g. events.latest/events.since/events.summary).</op>
     </direct_ops>
@@ -573,6 +574,7 @@ func DefaultAutonomousSystemPrompt() string {
     - where to look (key file paths and/or deliverables)
     - next steps (tests/commands) if relevant
     IMPORTANT: final_answer parameters MUST include "artifacts" (use an empty array if none).
+    If email is configured and available, also send an email notification with the task goal, a brief summary, key deliverables, and next steps.
   </rule>
 </autonomous_mode>
 `)
