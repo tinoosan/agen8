@@ -26,4 +26,11 @@
 // Consumers should treat the `DataDir` contract as stable: Workbench expects this
 // directory tree to exist before wiring artifacts, so hosts should ensure directories
 // are created and writable prior to runtime initialization.
+//
+// # Consumption
+//
+//   - CLI: `config.DataDir` is populated during CLI initialization via flags such as `--data-dir`.
+//   - Environment: `WORKBENCH_DATA_DIR` can override CLI defaults without modifying code.
+//   - Runtime: `runtime.BuildConfig` reads `config.DataDir` before constructing resources and mounts.
+//   - Host tooling: hosts may add wrappers that call `config.EnsureDataDir` helpers to guard directory setup.
 package config

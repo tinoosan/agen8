@@ -21,4 +21,16 @@
 // # Stability
 //
 // These interfaces capture the persistence contracts the agent depends on.
+
+// # Key Interfaces and Tokens
+//
+//   - `HistoryCursor`: opaque token returned by history readers that encodes a store-specific
+//     read position (byte offset for disk, sequence number for SQLite). Hosts must treat it as
+//     opaque and consume it with the same implementation that produced it.
+//   - `HistoryStore`: journaling interface that appends events and reads them back via `LinesSince`
+//     and `LinesLatest`.
+//   - `ResultsStore` / `ResultsView`: structured storage for tool-call outputs and artifacts.
+//   - `MemoryStore` / `MemoryCommitter`: captures and replays agent memory commits during a run.
+//   - `TraceStore`: captures reasoning traces for debugging, diagnostics, and analysis.
+//   - `ConstructorStateStore`: holds per-run constructor state + manifest blobs so agents can resume safely.
 package store

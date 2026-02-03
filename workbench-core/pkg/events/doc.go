@@ -25,4 +25,14 @@
 // or `History` flags, consumers should implement sinks that honor those hints.
 // This package is a stable foundation for logging + observability, so changes to the
 // `Event` schema should be treated as breaking and accompanied by release notes.
+//
+// # API Surfaces
+//
+//   - `Event`: carries the runtime type, message, metadata maps, and delivery hints
+//     that sinks use to decide whether to write to console, history, or other stores.
+//   - `Sink`: consumes `Event` payloads bound to a run ID; hosts ship `Sink`
+//     implementations such as console, history, or store sinks.
+//   - `MultiSink`: fans events out to multiple sinks while collecting partial errors.
+//   - `Emitter`: wraps a run ID + sink pair so much of the runtime can emit without
+//     managing the sink lifecycle.
 package events

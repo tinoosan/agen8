@@ -1,12 +1,12 @@
 // Package types defines Workbench's core data model types and host/agent protocols.
 //
-// It documents the contracts for host primitives (fs.*, tool.*, shell_exec, http_fetch, trace)
+// It documents the contracts for host primitives (fs.*, tool.*, shell.exec, http.fetch, trace.run)
 // plus the tool and event results that the agent and host exchange.
 //
 // # Host Operation Protocol
 //
 // Hosts and agents communicate through `types.HostOpRequest`/`types.HostOpResponse` via
-// `agent.HostExecutor`. Each `Op` (e.g., `fs.read`, `tool.run`, `shell_exec`, `trace.events.latest`)
+// `agent.HostExecutor`. Each `Op` (e.g., `fs.read`, `tool.run`, `shell.exec`, `trace.run`)
 // has specific validation rules declared in `HostOpRequest.Validate()`, and the request
 // normalization in `normalizeHostOp` keeps casing + aliasing consistent. All host primitives
 // expect absolute VFS paths for file ops, timeout bounds for tool invocations, and required

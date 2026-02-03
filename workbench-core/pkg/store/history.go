@@ -2,12 +2,12 @@ package store
 
 import (
 	"context"
-
-	"github.com/tinoosan/workbench-core/pkg/ports"
 )
 
 // HistoryAppender is used by sinks to record history.
-type HistoryAppender = ports.HistoryAppender
+type HistoryAppender interface {
+	AppendLine(ctx context.Context, line []byte) error
+}
 
 // HistoryReader is used by VFS/context to read history.
 type HistoryReader interface {
@@ -16,7 +16,13 @@ type HistoryReader interface {
 	LinesLatest(ctx context.Context, opts HistoryLatestOptions) (HistoryBatch, error)
 }
 
-// HistoryCursor is an opaque position token used for incremental history retrieval.
+// HistoryCursor is an opaque position token.
+//
+// IMPORTANT: Cursors are NOT interchangeable between store implementations:
+// - DiskHistoryStore: cursor represents byte offset in JSONL file
+// - SQLiteHistoryStore: cursor represents sequence number in database
+//
+// Always use the same store type that produced a cursor to consume it.
 type HistoryCursor = OffsetCursor
 
 // HistoryStore is the host-side storage interface backing the VFS mount "/history".
