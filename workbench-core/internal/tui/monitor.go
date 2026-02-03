@@ -65,6 +65,7 @@ type monitorModel struct {
 	pendingActivityID string
 	activityList      list.Model
 	activityDetail    viewport.Model
+	activityDetailAct string
 	planViewport      viewport.Model
 	renderer          *ContentRenderer
 	agentOutput       []string
@@ -1003,7 +1004,10 @@ func (m *monitorModel) observeActivityEvent(ev types.EventRecord) {
 		opID := strings.TrimSpace(ev.Data["opId"])
 		m.activitySeq++
 		id := fmt.Sprintf("act-%d", m.activitySeq)
-		now := time.Now()
+		now := ev.Timestamp
+		if now.IsZero() {
+			now = time.Now()
+		}
 
 		act := Activity{
 			ID:            id,
@@ -1041,7 +1045,7 @@ func (m *monitorModel) observeActivityEvent(ev types.EventRecord) {
 			m.pendingActivityID = id
 		}
 		m.refreshActivityList()
-		m.refreshActivityDetail()
+		m.refreshActivityDetail(false)
 
 	case "agent.op.response":
 		if strings.TrimSpace(ev.Data["op"]) == "" {
@@ -1060,7 +1064,10 @@ func (m *monitorModel) observeActivityEvent(ev types.EventRecord) {
 			return
 		}
 		act := m.activities[idx]
-		now := time.Now()
+		now := ev.Timestamp
+		if now.IsZero() {
+			now = time.Now()
+		}
 
 		act.Ok = strings.TrimSpace(ev.Data["ok"])
 		act.Error = strings.TrimSpace(ev.Data["err"])
@@ -1094,7 +1101,7 @@ func (m *monitorModel) observeActivityEvent(ev types.EventRecord) {
 			m.loadPlanFiles()
 		}
 		m.refreshActivityList()
-		m.refreshActivityDetail()
+		m.refreshActivityDetail(false)
 	}
 }
 
@@ -1185,6 +1192,8 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 		m.appendAgentOutput(formatEventLine(ev))
 	case "control.check", "control.success", "control.error":
 		m.appendAgentOutput(formatEventLine(ev))
+	case "agent.error", "agent.turn.complete":
+		m.appendAgentOutput(formatEventLine(ev))
 	}
 }
 
@@ -1206,6 +1215,10 @@ func (m *monitorModel) refreshActivityList() {
 	oldItems := m.activityList.Items()
 	wasFollowingTail := false
 	if len(oldItems) > 0 && prevIdx == len(oldItems)-1 {
+		wasFollowingTail = true
+	}
+	// On first population, default to following the tail (most recent activity).
+	if len(oldItems) == 0 && len(m.activities) > 0 {
 		wasFollowingTail = true
 	}
 	if prevIdx >= 0 && prevIdx < len(m.activities) {
@@ -1252,15 +1265,17 @@ func (m *monitorModel) refreshActivityList() {
 	}
 }
 
-func (m *monitorModel) refreshActivityDetail() {
+func (m *monitorModel) refreshActivityDetail(forceTop bool) {
 	if m.renderer == nil {
 		return
 	}
 	if len(m.activities) == 0 || m.activityList.Index() < 0 || m.activityList.Index() >= len(m.activities) {
 		m.activityDetail.SetContent("")
+		m.activityDetailAct = ""
 		m.activityDetail.GotoTop()
 		return
 	}
+	prevYOffset := m.activityDetail.YOffset
 	w := imax(24, m.activityDetail.Width-4)
 	header := "### Details\n\n"
 	help := "_PgUp/PgDn scroll · use Activity to change selection_\n\n"
@@ -1269,7 +1284,12 @@ func (m *monitorModel) refreshActivityDetail() {
 	rendered := strings.TrimRight(m.renderer.RenderMarkdown(header+help+md, w), "\n")
 	rendered = wrapViewportText(rendered, imax(10, m.activityDetail.Width))
 	m.activityDetail.SetContent(rendered)
-	m.activityDetail.GotoTop()
+	if forceTop || m.activityDetailAct != act.ID {
+		m.activityDetail.GotoTop()
+	} else if prevYOffset > 0 {
+		m.activityDetail.YOffset = prevYOffset
+	}
+	m.activityDetailAct = act.ID
 }
 
 func (m *monitorModel) refreshPlanView() {
@@ -1668,7 +1688,7 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 		prev := m.activityList.Index()
 		m.activityList, cmd = m.activityList.Update(msg)
 		if m.activityList.Index() != prev {
-			m.refreshActivityDetail()
+			m.refreshActivityDetail(true)
 		}
 		return m, cmd
 	case panelActivityDetail:
@@ -1768,7 +1788,7 @@ func (m *monitorModel) refreshViewports() {
 		detailH := imax(1, grid.ActivityDetail.ContentHeight)
 		m.activityDetail.Width = detailW
 		m.activityDetail.Height = detailH
-		m.refreshActivityDetail()
+		m.refreshActivityDetail(false)
 
 		planW := imax(10, grid.Plan.ContentWidth)
 		planH := imax(1, grid.Plan.ContentHeight)
@@ -1814,7 +1834,7 @@ func (m *monitorModel) refreshViewports() {
 	detailH := imax(1, grid.ActivityDetail.ContentHeight)
 	m.activityDetail.Width = detailW
 	m.activityDetail.Height = detailH
-	m.refreshActivityDetail()
+	m.refreshActivityDetail(false)
 
 	planW := imax(10, grid.Plan.ContentWidth)
 	planH := imax(1, grid.Plan.ContentHeight)
@@ -1921,12 +1941,16 @@ func outputLineStyle(line string) lipgloss.Style {
 	switch eventType {
 	case "error", "daemon.error", "daemon.runner.error":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))
+	case "agent.error":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))
 	case "task.done", "task.delivered":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950"))
 	case "task.start", "task.queued", "task.generated":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#6bbcff"))
 	case "control", "control.check", "control.success", "control.error":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#d29922"))
+	case "agent.turn.complete":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950"))
 	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#a371f7"))
 	case "task.quarantined":
