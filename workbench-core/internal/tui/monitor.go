@@ -66,10 +66,13 @@ type monitorModel struct {
 	activityList               list.Model
 	activityDetail             viewport.Model
 	activityDetailAct          string
+	activityFollowingTail      bool
 	planViewport               viewport.Model
+	planFollowingTop           bool
 	renderer                   *ContentRenderer
 	agentOutput                []string
 	agentOutputVP              viewport.Model
+	agentOutputFollow          bool
 	agentOutputPending         map[string]agentOutputPendingEntry
 	agentOutputPendingFallback *agentOutputPendingEntry
 	inbox                      map[string]taskState
@@ -81,6 +84,7 @@ type monitorModel struct {
 	memoryVP                   viewport.Model
 	thinkingEntries            []thinkingEntry
 	thinkingVP                 viewport.Model
+	thinkingAutoScroll         bool
 	planMarkdown               string
 	planDetails                string
 	planLoadErr                string
@@ -234,35 +238,39 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	}
 
 	m := &monitorModel{
-		ctx:               ctx,
-		cfg:               cfg,
-		runID:             runID,
-		runStatus:         runStatus,
-		offset:            off,
-		input:             in,
-		activities:        []Activity{},
-		activityIndexByID: map[string]int{},
-		activityIndexByOp: map[string]int{},
-		activityList:      activityList,
-		activityDetail:    viewport.New(0, 0),
-		planViewport:      viewport.New(0, 0),
-		renderer:          newContentRenderer(),
-		agentOutput:       []string{},
-		agentOutputVP:     viewport.New(0, 0),
-		inbox:             map[string]taskState{},
-		inboxVP:           viewport.New(0, 0),
-		outboxResults:     []outboxEntry{},
-		outboxVP:          viewport.New(0, 0),
-		memResults:        []string{},
-		memoryVP:          viewport.New(0, 0),
-		thinkingEntries:   []thinkingEntry{},
-		thinkingVP:        viewport.New(0, 0),
-		stats:             stats,
-		styles:            defaultMonitorStyles(),
-		focusedPanel:      panelComposer,
-		tailCh:            tailCh,
-		errCh:             errCh,
-		cancel:            cancel,
+		ctx:                   ctx,
+		cfg:                   cfg,
+		runID:                 runID,
+		runStatus:             runStatus,
+		offset:                off,
+		input:                 in,
+		activities:            []Activity{},
+		activityIndexByID:     map[string]int{},
+		activityIndexByOp:     map[string]int{},
+		activityList:          activityList,
+		activityDetail:        viewport.New(0, 0),
+		activityFollowingTail: true,
+		planViewport:          viewport.New(0, 0),
+		planFollowingTop:      true,
+		renderer:              newContentRenderer(),
+		agentOutput:           []string{},
+		agentOutputVP:         viewport.New(0, 0),
+		agentOutputFollow:     true,
+		inbox:                 map[string]taskState{},
+		inboxVP:               viewport.New(0, 0),
+		outboxResults:         []outboxEntry{},
+		outboxVP:              viewport.New(0, 0),
+		memResults:            []string{},
+		memoryVP:              viewport.New(0, 0),
+		thinkingEntries:       []thinkingEntry{},
+		thinkingVP:            viewport.New(0, 0),
+		thinkingAutoScroll:    true,
+		stats:                 stats,
+		styles:                defaultMonitorStyles(),
+		focusedPanel:          panelComposer,
+		tailCh:                tailCh,
+		errCh:                 errCh,
+		cancel:                cancel,
 	}
 	// Disable mouse handling so terminals don't enter mouse-reporting mode.
 	m.activityDetail.MouseWheelEnabled = false
@@ -1370,11 +1378,7 @@ func (m *monitorModel) refreshActivityList() {
 	prevIdx := m.activityList.Index()
 	prevID := ""
 	oldItems := m.activityList.Items()
-	wasFollowingTail := false
-	if len(oldItems) > 0 && prevIdx == len(oldItems)-1 {
-		wasFollowingTail = true
-	}
-	// On first population, default to following the tail (most recent activity).
+	wasFollowingTail := m.activityFollowingTail
 	if len(oldItems) == 0 && len(m.activities) > 0 {
 		wasFollowingTail = true
 	}
@@ -1409,6 +1413,7 @@ func (m *monitorModel) refreshActivityList() {
 		selectIdx = min(max(prevIdx, 0), len(items)-1)
 	}
 	m.activityList.Select(selectIdx)
+	m.activityFollowingTail = selectIdx == len(items)-1
 
 	// Only force pagination when following the tail.
 	if wasFollowingTail {
@@ -1453,6 +1458,7 @@ func (m *monitorModel) refreshPlanView() {
 	if m.renderer == nil {
 		return
 	}
+	prevYOffset := m.planViewport.YOffset
 	w := imax(24, m.planViewport.Width-4)
 	detailsBody := ""
 	detailsText := strings.TrimSpace(m.planDetails)
@@ -1500,15 +1506,21 @@ func (m *monitorModel) refreshPlanView() {
 	rendered := strings.TrimRight(m.renderer.RenderMarkdown(content, w), "\n")
 	rendered = wrapViewportText(rendered, imax(10, m.planViewport.Width))
 	m.planViewport.SetContent(rendered)
-	m.planViewport.GotoTop()
+	if m.planFollowingTop {
+		m.planViewport.GotoTop()
+	} else {
+		m.planViewport.SetYOffset(prevYOffset)
+	}
 }
 
 func (m *monitorModel) refreshThinkingViewport() {
 	if len(m.thinkingEntries) == 0 {
 		m.thinkingVP.SetContent(kit.StyleDim.Render("No thoughts captured yet."))
+		m.thinkingAutoScroll = true
 		m.thinkingVP.GotoTop()
 		return
 	}
+	prevYOffset := m.thinkingVP.YOffset
 
 	// Timeline view: colored nodes with a dimmed vertical spine.
 	w := imax(10, m.thinkingVP.Width)
@@ -1569,7 +1581,11 @@ func (m *monitorModel) refreshThinkingViewport() {
 	}
 
 	m.thinkingVP.SetContent(strings.Join(out, "\n"))
-	m.thinkingVP.GotoBottom()
+	if m.thinkingAutoScroll {
+		m.thinkingVP.GotoBottom()
+	} else {
+		m.thinkingVP.SetYOffset(prevYOffset)
+	}
 }
 
 func (m *monitorModel) renderHeader() string {
@@ -1732,7 +1748,7 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 
 	modelLabel := kit.RenderTag(kit.TagOptions{
 		Key:   "model",
-		Value: kit.TruncateMiddle(modelID, 24),
+		Value: modelID,
 		Styles: kit.TagStyles{
 			KeyStyle:   tagKeyStyle,
 			ValueStyle: tagValueStyle,
@@ -1847,6 +1863,9 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 		if m.activityList.Index() != prev {
 			m.refreshActivityDetail(true)
 		}
+		if isScrollKey(msg) {
+			m.activityFollowingTail = len(m.activities) > 0 && m.activityList.Index() == len(m.activities)-1
+		}
 		return m, cmd
 	case panelActivityDetail:
 		var cmd tea.Cmd
@@ -1855,6 +1874,9 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 	case panelPlan:
 		var cmd tea.Cmd
 		m.planViewport, cmd = m.planViewport.Update(msg)
+		if isScrollKey(msg) {
+			m.planFollowingTop = m.planViewport.YOffset <= 0
+		}
 		return m, cmd
 	case panelCurrentTask:
 		// Current task panel is static, no interactive model.
@@ -1862,6 +1884,9 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 	case panelOutput:
 		var cmd tea.Cmd
 		m.agentOutputVP, cmd = m.agentOutputVP.Update(msg)
+		if isScrollKey(msg) {
+			m.agentOutputFollow = m.agentOutputAtBottom()
+		}
 		return m, cmd
 	case panelInbox:
 		var cmd tea.Cmd
@@ -1878,6 +1903,9 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 	case panelThinking:
 		var cmd tea.Cmd
 		m.thinkingVP, cmd = m.thinkingVP.Update(msg)
+		if isScrollKey(msg) {
+			m.thinkingAutoScroll = m.thinkingAtBottom()
+		}
 		return m, cmd
 	case panelComposer:
 		var cmd tea.Cmd
@@ -2122,6 +2150,7 @@ func (m *monitorModel) refreshAgentOutputViewport() {
 	if w <= 0 {
 		w = 80
 	}
+	prevYOffset := m.agentOutputVP.YOffset
 	lines := make([]string, 0, len(m.agentOutput))
 	for _, rawLine := range m.agentOutput {
 		rawLine = strings.TrimSpace(rawLine)
@@ -2141,7 +2170,33 @@ func (m *monitorModel) refreshAgentOutputViewport() {
 		}
 	}
 	m.agentOutputVP.SetContent(strings.Join(lines, "\n"))
-	m.agentOutputVP.GotoBottom()
+	if m.agentOutputFollow {
+		m.agentOutputVP.GotoBottom()
+	} else {
+		m.agentOutputVP.SetYOffset(prevYOffset)
+	}
+}
+
+func (m *monitorModel) agentOutputAtBottom() bool {
+	return m.agentOutputVP.AtBottom()
+}
+
+func (m *monitorModel) thinkingAtBottom() bool {
+	return m.thinkingVP.AtBottom()
+}
+
+func isScrollKey(msg tea.KeyMsg) bool {
+	switch msg.Type {
+	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown, tea.KeyHome, tea.KeyEnd,
+		tea.KeyCtrlU, tea.KeyCtrlD, tea.KeyCtrlB, tea.KeyCtrlF:
+		return true
+	case tea.KeyRunes:
+		switch strings.TrimSpace(msg.String()) {
+		case "j", "k", "J", "K":
+			return true
+		}
+	}
+	return false
 }
 
 func renderInbox(tasks map[string]taskState) string {
