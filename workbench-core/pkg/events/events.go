@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 var (
@@ -13,30 +15,18 @@ var (
 	ErrDropped = errors.New("event dropped")
 )
 
-// Event is the unified event payload emitted by the host.
-//
-// Note: This is not the persisted event record. Persisted events are stored as
-// types.EventRecord (event id, run id, timestamp, type, message, and optional data) by the host-side event store.
-type Event struct {
-	Type      string
-	Message   string
-	Data      map[string]string
-	StoreData map[string]string
-	Console   *bool
-	Store     *bool
-	History   *bool
-	Origin    string
-}
+// Event is the unified event payload used both for emission and storage.
+type Event = types.EventRecord
 
 // EmitFunc is a convenience type for components that need to emit events without
 // depending on a full Sink/Emitter.
-type EmitFunc func(ctx context.Context, ev Event)
+type EmitFunc func(ctx context.Context, ev types.EventRecord)
 
-func (e Event) validate() error {
-	if e.Type == "" {
+func validateEvent(e types.EventRecord) error {
+	if strings.TrimSpace(e.Type) == "" {
 		return fmt.Errorf("event type is required")
 	}
-	if e.Message == "" {
+	if strings.TrimSpace(e.Message) == "" {
 		return fmt.Errorf("event message is required")
 	}
 	return nil
@@ -50,7 +40,7 @@ func enabled(ptr *bool) bool {
 }
 
 type Sink interface {
-	Emit(ctx context.Context, runID string, event Event) error
+	Emit(ctx context.Context, runID string, event types.EventRecord) error
 }
 
 type MultiSink []Sink
@@ -73,7 +63,7 @@ type Emitter struct {
 	Sink  Sink
 }
 
-func (e *Emitter) Emit(ctx context.Context, event Event) error {
+func (e *Emitter) Emit(ctx context.Context, event types.EventRecord) error {
 	if e == nil {
 		return fmt.Errorf("events emitter is nil")
 	}
@@ -83,7 +73,7 @@ func (e *Emitter) Emit(ctx context.Context, event Event) error {
 	if e.Sink == nil {
 		return fmt.Errorf("events emitter sink is required")
 	}
-	if err := event.validate(); err != nil {
+	if err := validateEvent(event); err != nil {
 		return err
 	}
 	return e.Sink.Emit(ctx, e.RunID, event)
