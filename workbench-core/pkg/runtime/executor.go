@@ -172,6 +172,18 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 		if req.Method != "" {
 			reqData["method"] = req.Method
 		}
+		if body := strings.TrimSpace(req.Body); body != "" {
+			if looksSensitiveText(body) {
+				reqData["body"] = "<omitted>"
+			} else {
+				if preview, truncated := capBytes(body, maxHTTPBodyPreviewBytes); preview != "" {
+					reqData["body"] = preview
+					if truncated {
+						reqData["bodyTruncated"] = "true"
+					}
+				}
+			}
+		}
 	}
 	if (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) && strings.TrimSpace(req.Text) != "" {
 		p, tr, red, n, isJSON := fsWriteTextPreviewForEvent(req.Path, req.Text)

@@ -213,6 +213,9 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		return
 
 	case "agent.op.request":
+		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
+			return
+		}
 		op := strings.TrimSpace(ev.Data["op"])
 		if op == "" {
 			return
@@ -254,6 +257,9 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		m.refreshActivityDetail()
 
 	case "agent.op.response":
+		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
+			return
+		}
 		if strings.TrimSpace(ev.Data["op"]) == "" {
 			return
 		}
@@ -677,20 +683,29 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 				b.WriteString(v)
 				b.WriteString("`\n")
 			}
-		} else if a.Kind == "http.fetch" || a.Kind == "http_fetch" {
-			if v := strings.TrimSpace(a.Data["url"]); v != "" {
-				b.WriteString("- url: `")
-				b.WriteString(v)
-				b.WriteString("`\n")
+	} else if a.Kind == "http.fetch" || a.Kind == "http_fetch" {
+		if v := strings.TrimSpace(a.Data["url"]); v != "" {
+			b.WriteString("- url: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["method"]); v != "" {
+			b.WriteString("- method: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["body"]); v != "" {
+			b.WriteString("- body: `")
+			b.WriteString(v)
+			b.WriteString("`")
+			if strings.TrimSpace(a.Data["bodyTruncated"]) == "true" {
+				b.WriteString(" _(truncated)_")
 			}
-			if v := strings.TrimSpace(a.Data["method"]); v != "" {
-				b.WriteString("- method: `")
-				b.WriteString(v)
-				b.WriteString("`\n")
-			}
-		} else if a.Kind == "trace.run" || a.Kind == "trace" {
-			if v := strings.TrimSpace(a.Data["traceAction"]); v != "" {
-				b.WriteString("- action: `")
+			b.WriteString("\n")
+		}
+	} else if a.Kind == "trace.run" || a.Kind == "trace" {
+		if v := strings.TrimSpace(a.Data["traceAction"]); v != "" {
+			b.WriteString("- action: `")
 				b.WriteString(v)
 				b.WriteString("`\n")
 			}

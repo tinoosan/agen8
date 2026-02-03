@@ -9,6 +9,7 @@ import (
 
 const (
 	maxFSWriteTextPreviewBytes = 2000
+	maxHTTPBodyPreviewBytes    = 1024
 )
 
 // fsWriteTextPreviewForEvent returns a small preview of a fs.write/fs.append payload for UI events.

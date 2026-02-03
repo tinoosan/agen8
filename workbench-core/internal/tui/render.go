@@ -56,6 +56,12 @@ func rawEventJSON(ev events.Event) string {
 func classifyEvent(ev events.Event) RenderResult {
 	res := RenderResult{Raw: rawEventJSON(ev)}
 
+	if (ev.Type == "agent.op.request" || ev.Type == "agent.op.response") &&
+		shouldHideInboxOp(strings.TrimSpace(ev.Data["op"]), strings.TrimSpace(ev.Data["path"])) {
+		res.Class = RenderIgnore
+		return res
+	}
+
 	switch ev.Type {
 	// Noisy or non-user-facing events (still visible in details).
 	case "host.mounted", "run.started", "run.completed", "agent.loop.start":
@@ -273,7 +279,15 @@ func renderOpRequest(d map[string]string) string {
 			if m == "" {
 				m = "GET"
 			}
-			return m + " " + u
+			desc := m + " " + u
+			if body := strings.TrimSpace(d["body"]); body != "" {
+				bodyText := "body: " + singleLinePreview(body, 120)
+				if strings.TrimSpace(d["bodyTruncated"]) == "true" {
+					bodyText += " (truncated)"
+				}
+				desc = desc + " (" + bodyText + ")"
+			}
+			return desc
 		}
 		return "http.fetch"
 	case "trace.run", "trace":
@@ -331,6 +345,36 @@ func renderOpResponse(d map[string]string) string {
 			return prefix + " " + errStr
 		}
 		return prefix + " ok"
+	}
+}
+
+func singleLinePreview(s string, max int) string {
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.TrimSpace(s)
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	if max < 2 {
+		return s[:max]
+	}
+	return s[:max-1] + "…"
+}
+
+func shouldHideInboxOp(op, path string) bool {
+	op = strings.TrimSpace(op)
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	if !strings.HasPrefix(path, "/inbox") {
+		return false
+	}
+	switch op {
+	case "fs.list", "fs.read":
+		return true
+	default:
+		return false
 	}
 }
 

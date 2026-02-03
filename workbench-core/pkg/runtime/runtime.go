@@ -305,6 +305,15 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		Emit:           cfg.Emit,
 	}
 
+	updater := &agent.PromptUpdater{
+		FS:             fs,
+		Trace:          traceMiddleware,
+		MaxMemoryBytes: cfg.MaxMemoryBytes,
+		MaxTraceBytes:  cfg.MaxTraceBytes,
+		Emit:           cfg.Emit,
+		ManifestPath:   "/workspace/context_constructor_manifest.json",
+	}
+
 	auditObs := newAuditObserver(cfg.Run.RunID, cfg.Emit, cfg.AuditReads)
 
 	exec := NewExecutor(executor, ExecutorOptions{
@@ -319,7 +328,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			}
 			return cfg.Guard(fs, req)
 		},
-		Observers:       []HostOpObserver{constructor, auditObs},
+		Observers:       []HostOpObserver{constructor, updater, auditObs},
 		ArtifactObserve: cfg.ArtifactObserve,
 	})
 
@@ -328,7 +337,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		Executor:        exec,
 		TraceMiddleware: traceMiddleware,
 		Constructor:     constructor,
-		Updater:         nil,
+		Updater:         updater,
 		WorkdirBase:     workdirRes.BaseDir,
 		MemStore:        memStore,
 	}, nil

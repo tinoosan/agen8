@@ -183,7 +183,11 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	agentCfg.ApprovalsMode = strings.TrimSpace(resolved.ApprovalsMode)
 	agentCfg.EnableWebSearch = resolved.WebSearchEnabled
 	agentCfg.SystemPrompt = baseSystemPrompt
-	agentCfg.PromptSource = rt.Constructor
+	var promptSource agent.PromptSource = rt.Constructor
+	if rt.Updater != nil {
+		promptSource = rt.Updater
+	}
+	agentCfg.PromptSource = promptSource
 	agentCfg.Hooks = agent.Hooks{
 		OnLLMUsage: newCostUsageHook(cfg, run, resolved.Model, resolved.PriceInPerMTokensUSD, resolved.PriceOutPerMTokensUSD, mustEmit),
 		OnStep: func(step int, model, summary string) {

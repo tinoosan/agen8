@@ -70,6 +70,8 @@ type monitorModel struct {
 	renderer          *ContentRenderer
 	agentOutput       []string
 	agentOutputVP     viewport.Model
+	agentOutputPending map[string]agentOutputPendingEntry
+	agentOutputPendingFallback *agentOutputPendingEntry
 	inbox             map[string]taskState
 	inboxVP           viewport.Model
 	currentTask       *taskState
@@ -154,6 +156,12 @@ type thinkingEntry struct {
 	Summary string
 }
 
+type agentOutputPendingEntry struct {
+	index     int
+	timestamp string
+	desc      string
+}
+
 type panelID int
 
 const (
@@ -168,6 +176,8 @@ const (
 	panelComposer
 	panelThinking
 )
+
+const maxAgentOutputLines = 1000
 
 // Breakpoints for responsive layout: below these use compact mode (tabs/single column).
 const (
@@ -1002,6 +1012,9 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 func (m *monitorModel) observeActivityEvent(ev types.EventRecord) {
 	switch ev.Type {
 	case "agent.op.request":
+		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
+			return
+		}
 		op := strings.TrimSpace(ev.Data["op"])
 		if op == "" {
 			return
@@ -1041,6 +1054,9 @@ func (m *monitorModel) observeActivityEvent(ev types.EventRecord) {
 		m.refreshActivityDetail(false)
 
 	case "agent.op.response":
+		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
+			return
+		}
 		if strings.TrimSpace(ev.Data["op"]) == "" {
 			return
 		}
@@ -1188,29 +1204,115 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 	case "agent.error", "agent.turn.complete":
 		m.appendAgentOutput(formatEventLine(ev))
 	case "agent.op.request":
+		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
+			return
+		}
 		txt := strings.TrimSpace(renderOpRequest(ev.Data))
 		if txt == "" {
 			txt = strings.TrimSpace(ev.Data["op"])
 		}
-		m.appendAgentOutput(fmt.Sprintf("[%s] op: %s", ev.Timestamp.Local().Format("15:04:05"), txt))
-	case "agent.op.response":
-		txt := strings.TrimSpace(renderOpResponse(ev.Data))
-		if txt == "" {
-			txt = strings.TrimSpace(ev.Data["ok"])
+		ts := ev.Timestamp.Local().Format("15:04:05")
+		line := fmt.Sprintf("[%s] op: %s", ts, txt)
+		idx := m.appendAgentOutputLine(line)
+		if idx < 0 {
+			return
 		}
-		m.appendAgentOutput(fmt.Sprintf("[%s] op: %s", ev.Timestamp.Local().Format("15:04:05"), txt))
+		entry := agentOutputPendingEntry{
+			index:     idx,
+			timestamp: ts,
+			desc:      txt,
+		}
+		if opID := strings.TrimSpace(ev.Data["opId"]); opID != "" {
+			if m.agentOutputPending == nil {
+				m.agentOutputPending = map[string]agentOutputPendingEntry{}
+			}
+			m.agentOutputPending[opID] = entry
+		} else {
+			m.agentOutputPendingFallback = &agentOutputPendingEntry{
+				index:     idx,
+				timestamp: ts,
+				desc:      txt,
+			}
+		}
+	case "agent.op.response":
+		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
+			return
+		}
+		status := strings.TrimSpace(renderOpResponse(ev.Data))
+		if status == "" {
+			status = strings.TrimSpace(ev.Data["ok"])
+		}
+		opID := strings.TrimSpace(ev.Data["opId"])
+		entry, ok := m.takeAgentOutputPending(opID)
+		if !ok {
+			return
+		}
+		line := fmt.Sprintf("[%s] op: %s (%s)", entry.timestamp, entry.desc, status)
+		if entry.index >= 0 && entry.index < len(m.agentOutput) {
+			m.agentOutput[entry.index] = line
+		}
 	}
 }
 
 func (m *monitorModel) appendAgentOutput(line string) {
+	_ = m.appendAgentOutputLine(line)
+}
+
+func (m *monitorModel) appendAgentOutputLine(line string) int {
 	line = strings.TrimSpace(line)
 	if line == "" {
-		return
+		return -1
 	}
 	m.agentOutput = append(m.agentOutput, line)
-	if len(m.agentOutput) > 1000 {
-		m.agentOutput = m.agentOutput[len(m.agentOutput)-1000:]
+	trimmed := 0
+	if len(m.agentOutput) > maxAgentOutputLines {
+		trimmed = len(m.agentOutput) - maxAgentOutputLines
+		m.agentOutput = m.agentOutput[trimmed:]
 	}
+	if trimmed > 0 {
+		m.trimAgentOutputPending(trimmed)
+	}
+	return len(m.agentOutput) - 1
+}
+
+func (m *monitorModel) trimAgentOutputPending(removed int) {
+	if removed <= 0 {
+		return
+	}
+	if len(m.agentOutputPending) != 0 {
+		for id, entry := range m.agentOutputPending {
+			entry.index -= removed
+			if entry.index < 0 {
+				delete(m.agentOutputPending, id)
+				continue
+			}
+			m.agentOutputPending[id] = entry
+		}
+	}
+	if m.agentOutputPendingFallback != nil {
+		m.agentOutputPendingFallback.index -= removed
+		if m.agentOutputPendingFallback.index < 0 {
+			m.agentOutputPendingFallback = nil
+		}
+	}
+}
+
+func (m *monitorModel) takeAgentOutputPending(opID string) (agentOutputPendingEntry, bool) {
+	if opID != "" && len(strings.TrimSpace(opID)) > 0 {
+		if m.agentOutputPending != nil {
+			if entry, ok := m.agentOutputPending[opID]; ok {
+				delete(m.agentOutputPending, opID)
+				return entry, true
+			}
+		}
+		return agentOutputPendingEntry{}, false
+	}
+	if m.agentOutputPendingFallback != nil {
+		entry := *m.agentOutputPendingFallback
+		m.agentOutputPendingFallback = nil
+		return entry, true
+	}
+	return agentOutputPendingEntry{}, false
 }
 
 func formatTaskEventLines(ev types.EventRecord) []string {
