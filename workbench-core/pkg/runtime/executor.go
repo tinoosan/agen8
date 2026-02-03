@@ -139,6 +139,7 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	reqData["opId"] = opID
 	reqData["op"] = req.Op
 	reqData["path"] = req.Path
+	storeReq["opId"] = opID
 	storeReq["op"] = req.Op
 	storeReq["path"] = req.Path
 
@@ -176,15 +177,19 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 			method = strings.ToUpper(method)
 		}
 		reqData["method"] = method
+		storeReq["url"] = req.URL
 		storeReq["method"] = method
 		if body := strings.TrimSpace(req.Body); body != "" {
 			if looksSensitiveText(body) {
 				reqData["body"] = "<omitted>"
+				storeReq["body"] = "<omitted>"
 			} else {
 				if preview, truncated := capBytes(body, maxHTTPBodyPreviewBytes); preview != "" {
 					reqData["body"] = preview
+					storeReq["body"] = preview
 					if truncated {
 						reqData["bodyTruncated"] = "true"
+						storeReq["bodyTruncated"] = "true"
 					}
 				}
 			}
@@ -240,9 +245,10 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 		"err":  resp.Error,
 	}
 	meta.StoreResp = map[string]string{
-		"op":  resp.Op,
-		"ok":  fmtBool(resp.Ok),
-		"err": resp.Error,
+		"opId": meta.OpID,
+		"op":   resp.Op,
+		"ok":   fmtBool(resp.Ok),
+		"err":  resp.Error,
 	}
 
 	if meta.PatchPreview != "" {
@@ -306,6 +312,10 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 			if tr {
 				meta.RespData["bodyTruncated"] = "true"
 			}
+		}
+		meta.StoreResp["status"] = strconv.Itoa(resp.Status)
+		if resp.FinalURL != "" {
+			meta.StoreResp["finalUrl"] = resp.FinalURL
 		}
 	}
 	if resp.Op == types.HostOpFSSearch {
