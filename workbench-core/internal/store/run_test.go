@@ -161,16 +161,16 @@ func TestStopRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}
 
-	t.Run("SuccessDone", func(t *testing.T) {
+	t.Run("SuccessSucceeded", func(t *testing.T) {
 		run := mustCreateSessionRun(t, cfg, "Stop Success", 100)
 
-		stopped, err := StopRun(cfg, run.RunID, types.StatusDone, "")
+		stopped, err := StopRun(cfg, run.RunID, types.StatusSucceeded, "")
 		if err != nil {
 			t.Fatalf("StopRun failed: %v", err)
 		}
 
-		if stopped.Status != types.StatusDone {
-			t.Errorf("Expected status %q, got %q", types.StatusDone, stopped.Status)
+		if stopped.Status != types.StatusSucceeded {
+			t.Errorf("Expected status %q, got %q", types.StatusSucceeded, stopped.Status)
 		}
 		if stopped.FinishedAt == nil {
 			t.Error("Expected FinishedAt to be set")
@@ -181,8 +181,8 @@ func TestStopRun(t *testing.T) {
 
 		// Verify persisted
 		loaded, _ := LoadRun(cfg, run.RunID)
-		if loaded.Status != types.StatusDone {
-			t.Errorf("Status expected %q, got %q", types.StatusDone, loaded.Status)
+		if loaded.Status != types.StatusSucceeded {
+			t.Errorf("Status expected %q, got %q", types.StatusSucceeded, loaded.Status)
 		}
 	})
 
@@ -233,13 +233,13 @@ func TestStopRun(t *testing.T) {
 	t.Run("ErrorAlreadyStopped", func(t *testing.T) {
 		run := mustCreateSessionRun(t, cfg, "Stop Error Already Stopped", 100)
 
-		_, err := StopRun(cfg, run.RunID, types.StatusDone, "")
+		_, err := StopRun(cfg, run.RunID, types.StatusSucceeded, "")
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		// Try to stop again
-		_, err = StopRun(cfg, run.RunID, types.StatusDone, "")
+		_, err = StopRun(cfg, run.RunID, types.StatusSucceeded, "")
 		if err == nil {
 			t.Error("Expected error for already stopped run, got nil")
 		}

@@ -127,7 +127,7 @@ func ReopenRun(cfg config.Config, runID string) (types.Run, error) {
 	return run, SaveRun(cfg, run)
 }
 
-// StopRun transitions a run to a terminal state (Done or Failed).
+// StopRun transitions a run to a terminal state (Succeeded, Failed, or Canceled).
 // It updates the Status, sets FinishedAt to the current time,
 // and records an error message if the status is Failed.
 // The updated state is then persisted to SQLite.
@@ -136,7 +136,7 @@ func StopRun(cfg config.Config, runID string, status types.RunStatus, errorMsg s
 		return types.Run{}, err
 	}
 
-	if status != types.StatusFailed && status != types.StatusDone && status != types.StatusCanceled {
+	if status != types.StatusFailed && status != types.StatusSucceeded && status != types.StatusCanceled {
 		return types.Run{}, fmt.Errorf("error stopping run %s, invalid status '%s': %w", runID, status, ErrInvalid)
 	}
 
@@ -145,13 +145,13 @@ func StopRun(cfg config.Config, runID string, status types.RunStatus, errorMsg s
 		return types.Run{}, fmt.Errorf("error stopping run: %w", err)
 	}
 
-	if run.Status == types.StatusDone || run.Status == types.StatusFailed || run.Status == types.StatusCanceled {
+	if run.Status == types.StatusSucceeded || run.Status == types.StatusFailed || run.Status == types.StatusCanceled {
 		return types.Run{}, fmt.Errorf("run %s cannot be stopped due to invalid state %s: %w", run.RunID, run.Status, ErrConflict)
 	}
 
 	now := time.Now()
 
-	if status == types.StatusDone {
+	if status == types.StatusSucceeded {
 		run.Status = status
 		run.FinishedAt = &now
 		run.Error = nil
