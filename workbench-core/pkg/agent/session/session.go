@@ -58,6 +58,10 @@ type Session struct {
 	activeProfileDir string
 	activePromptText string
 
+	// lastTaskOutcome is a short, single-line summary of the most recently completed task.
+	// It is used to provide immediate continuity between sequential tasks in the run loop.
+	lastTaskOutcome string
+
 	hbCh   chan profile.HeartbeatJob
 	hbStop context.CancelFunc
 
@@ -413,7 +417,7 @@ func (s *Session) runTask(ctx context.Context, taskPath, taskID string, task typ
 				memSnips = ms
 			}
 		}
-		aug := buildSystemPrompt(runAgent.GetSystemPrompt(), *s.activeProfile, s.activePromptText, memSnips)
+		aug := buildSystemPrompt(runAgent.GetSystemPrompt(), *s.activeProfile, s.activePromptText, memSnips, s.lastTaskOutcome)
 		if strings.TrimSpace(aug) != "" {
 			cfg := runAgent.Config()
 			cfg.SystemPrompt = aug
@@ -434,6 +438,18 @@ func (s *Session) runTask(ctx context.Context, taskPath, taskID string, task typ
 	if err != nil {
 		tr.Status = types.TaskStatusFailed
 		tr.Error = err.Error()
+	}
+
+	// Preserve a tiny, immediate continuity signal for Task N+1 without relying on async memory indexing.
+	// Stored value is strictly truncated and later re-sanitized at prompt construction.
+	{
+		outcome := strings.TrimSpace(tr.Summary)
+		if outcome == "" {
+			outcome = strings.TrimSpace(tr.Error)
+		} else if tr.Status == types.TaskStatusFailed && strings.TrimSpace(tr.Error) != "" {
+			outcome = strings.TrimSpace(outcome) + " | " + strings.TrimSpace(tr.Error)
+		}
+		s.lastTaskOutcome = truncateText(outcome, 150)
 	}
 
 	base := deliverablesBase(doneAt, taskID)

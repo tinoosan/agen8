@@ -7,7 +7,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/profile"
 )
 
-func buildSystemPrompt(base string, p profile.Profile, profilePrompt string, memories []agent.MemorySnippet) string {
+func buildSystemPrompt(base string, p profile.Profile, profilePrompt string, memories []agent.MemorySnippet, previousOutcome string) string {
 	base = strings.TrimSpace(base)
 	var b strings.Builder
 	if base != "" {
@@ -47,6 +47,12 @@ func buildSystemPrompt(base string, p profile.Profile, profilePrompt string, mem
 	}
 	b.WriteString("</profile>")
 
+	if prev := sanitizePreviousOutcome(previousOutcome); prev != "" {
+		b.WriteString("\n\n<previous_outcome>")
+		b.WriteString(prev)
+		b.WriteString("</previous_outcome>")
+	}
+
 	if len(memories) != 0 {
 		b.WriteString("\n\n<memories>\n")
 		for i, m := range memories {
@@ -76,4 +82,22 @@ func buildSystemPrompt(base string, p profile.Profile, profilePrompt string, mem
 	}
 
 	return strings.TrimSpace(b.String())
+}
+
+func sanitizePreviousOutcome(in string) string {
+	// Goal: keep the injected context tiny, single-line, and safe-ish for tag embedding.
+	in = strings.TrimSpace(in)
+	if in == "" {
+		return ""
+	}
+	// Collapse all whitespace (including newlines) to single spaces.
+	in = strings.Join(strings.Fields(in), " ")
+	// Avoid tag-breaking and keep content plain.
+	in = strings.ReplaceAll(in, "<", "")
+	in = strings.ReplaceAll(in, ">", "")
+	if len(in) > 199 {
+		// Strictly cap to < 200 characters.
+		in = in[:196] + "..."
+	}
+	return strings.TrimSpace(in)
 }

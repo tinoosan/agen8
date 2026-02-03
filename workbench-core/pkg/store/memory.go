@@ -22,17 +22,3 @@ type DailyMemoryStore interface {
 	// ListMemoryFiles returns the filenames present under the memory dir.
 	ListMemoryFiles(ctx context.Context) ([]string, error)
 }
-
-// MemoryStore is kept for backwards compatibility.
-//
-// Deprecated: use DailyMemoryStore.
-type MemoryStore = DailyMemoryStore
-
-// PlanFileStore exposes the minimal API needed to persist a separate plan file
-// alongside the standard memory staging files.
-type PlanFileStore interface {
-	GetPlan(ctx context.Context) (string, error)
-	SetPlan(ctx context.Context, text string) error
-}
-
-const PlanFileName = "plan.md"

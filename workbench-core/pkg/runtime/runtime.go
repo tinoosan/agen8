@@ -173,14 +173,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountWorkspace, err)
 	}
 
-	resultsRes, err := resources.NewResultsResource(cfg.ResultsStore)
-	if err != nil {
-		return nil, fmt.Errorf("create results resource: %w", err)
-	}
-	if err := fs.Mount(vfs.MountResults, resultsRes); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountResults, err)
-	}
-
 	logRes, err := resources.NewTraceResource(cfg.Cfg, cfg.Run.RunID)
 	if err != nil {
 		return nil, fmt.Errorf("create log resource: %w", err)
@@ -370,16 +362,16 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 
 	constructor := &agent.PromptBuilder{
-		FS:              fs,
-		Cfg:             cfg.Cfg,
-		RunID:           cfg.Run.RunID,
-		SessionID:       cfg.Run.SessionID,
-		LoadSession:     cfg.LoadSession,
-		SaveSession:     cfg.SaveSession,
-		StateStore:      cfg.ConstructorStore,
-		MaxMemoryBytes:  cfg.MaxMemoryBytes,
-		MaxTraceBytes:   cfg.MaxTraceBytes,
-		Emit:            cfg.Emit,
+		FS:             fs,
+		Cfg:            cfg.Cfg,
+		RunID:          cfg.Run.RunID,
+		SessionID:      cfg.Run.SessionID,
+		LoadSession:    cfg.LoadSession,
+		SaveSession:    cfg.SaveSession,
+		StateStore:     cfg.ConstructorStore,
+		MaxMemoryBytes: cfg.MaxMemoryBytes,
+		MaxTraceBytes:  cfg.MaxTraceBytes,
+		Emit:           cfg.Emit,
 	}
 
 	auditObs := newAuditObserver(cfg.Run.RunID, cfg.Emit, cfg.AuditReads)

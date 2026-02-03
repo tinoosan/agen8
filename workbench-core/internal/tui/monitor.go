@@ -187,7 +187,6 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	stats := monitorStats{started: time.Now()}
 
 	in := textarea.New()
-	in.Placeholder = "/task <goal>  |  /memory search <query>  |  /profile <id|path>  |  /model <id>  |  /quit"
 	in.SetHeight(2)
 	in.CharLimit = 500
 	in.ShowLineNumbers = false
@@ -1344,9 +1343,7 @@ func (m *monitorModel) refreshThinkingViewport() {
 
 func (m *monitorModel) renderHeader() string {
 	content := lipgloss.JoinHorizontal(lipgloss.Left,
-		m.styles.headerTitle.Render("Workbench - Always On"),
-		kit.RenderTag(kit.TagOptions{Key: "Model", Value: fallback(m.model, "(unknown)")}),
-		kit.RenderTag(kit.TagOptions{Key: "Profile", Value: fallback(m.profile, "(none)")}),
+		m.styles.headerTitle.Render("Workbench - Always On "),
 		kit.RenderTag(kit.TagOptions{Key: "Agent", Value: m.runID}),
 	)
 	w := m.width

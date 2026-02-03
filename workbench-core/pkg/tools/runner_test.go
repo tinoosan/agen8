@@ -3,17 +3,11 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"sort"
 	"testing"
 
-	internalstore "github.com/tinoosan/workbench-core/internal/store"
-	"github.com/tinoosan/workbench-core/pkg/config"
-	"github.com/tinoosan/workbench-core/pkg/resources"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/tools"
-	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 type invokerFunc func(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error)
@@ -23,24 +17,7 @@ func (f invokerFunc) Invoke(ctx context.Context, req tools.ToolRequest) (tools.T
 }
 
 func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfg := config.Config{DataDir: tmpDir}
-
-	_, run, err := internalstore.CreateSession(cfg, "runner test", 100)
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
 	resultsStore := newTestResultsStore()
-	resultsRes, err := resources.NewResultsResource(resultsStore)
-	if err != nil {
-		t.Fatalf("NewResultsResource: %v", err)
-	}
-
-	fs := vfs.NewFS()
-	if err := fs.Mount(vfs.MountResults, resultsRes); err != nil {
-		t.Fatalf("mount results: %v", err)
-	}
 
 	inv := invokerFunc(func(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error) {
 		return tools.ToolCallResult{
@@ -74,10 +51,9 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 		t.Fatalf("unexpected artifacts: %+v", resp.Artifacts)
 	}
 
-	responsePath := "/results/" + resp.CallID + "/response.json"
-	b, err := fs.Read(responsePath)
+	b, err := resultsStore.GetCallResponseJSON(resp.CallID)
 	if err != nil {
-		t.Fatalf("Read response.json: %v", err)
+		t.Fatalf("GetCallResponseJSON: %v", err)
 	}
 
 	var saved tools.ToolResponse
@@ -88,39 +64,17 @@ func TestRunner_Run_PersistsResponseAndArtifacts(t *testing.T) {
 		t.Fatalf("saved response mismatch: %+v", saved)
 	}
 
-	artifactPath := "/results/" + resp.CallID + "/quote.json"
-	ab, err := fs.Read(artifactPath)
+	ab, _, err := resultsStore.GetArtifact(resp.CallID, "quote.json")
 	if err != nil {
-		t.Fatalf("Read artifact: %v", err)
+		t.Fatalf("GetArtifact: %v", err)
 	}
 	if string(ab) != `{"price":123}` {
 		t.Fatalf("unexpected artifact bytes: %q", string(ab))
 	}
-
-	if _, err := os.Stat(filepath.Join(tmpDir, "agents", run.RunID, "results")); err == nil {
-		t.Fatalf("expected no on-disk results directory")
-	}
 }
 
 func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfg := config.Config{DataDir: tmpDir}
-
-	_, run, err := internalstore.CreateSession(cfg, "runner unknown tool test", 100)
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
 	resultsStore := newTestResultsStore()
-	resultsRes, err := resources.NewResultsResource(resultsStore)
-	if err != nil {
-		t.Fatalf("NewResultsResource: %v", err)
-	}
-
-	fs := vfs.NewFS()
-	if err := fs.Mount(vfs.MountResults, resultsRes); err != nil {
-		t.Fatalf("mount results: %v", err)
-	}
 
 	runner := tools.Orchestrator{
 		Results:      resultsStore,
@@ -138,34 +92,13 @@ func TestRunner_Run_UnknownTool_PersistsErrorResponse(t *testing.T) {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 
-	if _, err := fs.Read("/results/" + resp.CallID + "/response.json"); err != nil {
-		t.Fatalf("expected persisted response.json: %v", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(tmpDir, "agents", run.RunID, "results")); err == nil {
-		t.Fatalf("expected no on-disk results directory")
+	if _, err := resultsStore.GetCallResponseJSON(resp.CallID); err != nil {
+		t.Fatalf("expected persisted response JSON: %v", err)
 	}
 }
 
 func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfg := config.Config{DataDir: tmpDir}
-
-	_, run, err := internalstore.CreateSession(cfg, "runner invalid artifact test", 100)
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
 	resultsStore := newTestResultsStore()
-	resultsRes, err := resources.NewResultsResource(resultsStore)
-	if err != nil {
-		t.Fatalf("NewResultsResource: %v", err)
-	}
-
-	fs := vfs.NewFS()
-	if err := fs.Mount(vfs.MountResults, resultsRes); err != nil {
-		t.Fatalf("mount results: %v", err)
-	}
 
 	inv := invokerFunc(func(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error) {
 		return tools.ToolCallResult{
@@ -193,31 +126,10 @@ func TestRunner_Run_InvalidArtifactPath_ReturnsToolError(t *testing.T) {
 	if resp.Error == nil || resp.Error.Code != "invalid_artifact" {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
-
-	if _, err := os.Stat(filepath.Join(tmpDir, "agents", run.RunID, "results")); err == nil {
-		t.Fatalf("expected no on-disk results directory")
-	}
 }
 
 func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfg := config.Config{DataDir: tmpDir}
-
-	_, run, err := internalstore.CreateSession(cfg, "runner invoke error test", 100)
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
 	resultsStore := newTestResultsStore()
-	resultsRes, err := resources.NewResultsResource(resultsStore)
-	if err != nil {
-		t.Fatalf("NewResultsResource: %v", err)
-	}
-
-	fs := vfs.NewFS()
-	if err := fs.Mount(vfs.MountResults, resultsRes); err != nil {
-		t.Fatalf("mount results: %v", err)
-	}
 
 	inv := invokerFunc(func(ctx context.Context, req tools.ToolRequest) (tools.ToolCallResult, error) {
 		return tools.ToolCallResult{}, &tools.InvokeError{Code: "timeout", Message: "command timed out", Retryable: true}
@@ -240,9 +152,8 @@ func TestRunner_Run_InvokeError_UsesProvidedCode(t *testing.T) {
 	if resp.Error == nil || resp.Error.Code != "timeout" || !resp.Error.Retryable {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
-
-	if _, err := os.Stat(filepath.Join(tmpDir, "agents", run.RunID, "results")); err == nil {
-		t.Fatalf("expected no on-disk results directory")
+	if _, err := resultsStore.GetCallResponseJSON(resp.CallID); err != nil {
+		t.Fatalf("expected persisted response JSON: %v", err)
 	}
 }
 

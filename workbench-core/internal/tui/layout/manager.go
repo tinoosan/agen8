@@ -126,8 +126,9 @@ const (
 )
 
 // CalculateDashboard produces a GridLayout for dashboard mode (two columns).
-// Left: AgentOutput (flex). Right: single SidePanel (tabbed Activity | Plan | Tasks) with a persistent Stats row aligned to the Composer.
-func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight, statusBarHeight int) GridLayout {
+// Left: AgentOutput (flex). Right: single SidePanel (tabbed Activity | Plan | Tasks | Thoughts).
+// Bottom: full-width Composer and Stats panels stacked vertically.
+func (m *Manager) CalculateDashboard(width, height, composerHeight, statsHeight, statusBarHeight int) GridLayout {
 	const (
 		minLeftWidth  = 60
 		minRightWidth = 32
@@ -144,10 +145,10 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight
 	if composerHeight < 0 {
 		composerHeight = 0
 	}
-	if outboxHeight < 0 {
-		outboxHeight = 0
+	if statsHeight < 0 {
+		statsHeight = 0
 	}
-	reserved := DashHeaderHeight + max(1, statusBarHeight) + DashWarningHeight + composerHeight + DashGapAfterHeader + DashGapBeforeComposer
+	reserved := DashHeaderHeight + max(1, statusBarHeight) + DashWarningHeight + composerHeight + statsHeight + DashGapAfterHeader + DashGapBeforeComposer
 	remainingHeight := height - reserved
 	if remainingHeight < 1 {
 		remainingHeight = 1
@@ -196,7 +197,7 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight
 	mainH := remainingHeight
 	grid := GridLayout{ScreenWidth: width, ScreenHeight: height}
 	grid.AgentOutput = m.spec(leftW, mainH)
-	grid.Composer = m.spec(leftW, composerHeight)
+	grid.Composer = m.spec(width, composerHeight)
 	grid.SidePanel = m.spec(rightW, 0)
 
 	// Side panel tabs render their own panels directly.
@@ -231,7 +232,7 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, outboxHeight
 	grid.CurrentTask = m.spec(rightW, currentTaskH)
 	grid.Inbox = m.spec(rightW, inboxH)
 	grid.Outbox = m.spec(rightW, outboxH)
-	grid.Stats = m.spec(rightW, composerHeight)
+	grid.Stats = m.spec(width, statsHeight)
 	grid.Memory = m.spec(leftW, 0)
 	return grid
 }
