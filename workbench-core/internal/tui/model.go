@@ -16,12 +16,9 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/debuglog"
 	"github.com/tinoosan/workbench-core/pkg/events"
-	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
-	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 func cursorDebugLog(hypothesisId, location, message string, data map[string]any) {
@@ -231,7 +228,6 @@ func New(ctx context.Context, runner TurnRunner, evCh <-chan events.Event) Model
 	m.lastTurnUserItemIdx = -1
 	m.streamingItemIdx = -1
 	m.thinkingItemIdx = -1
-	m.approvalsMode = "enabled"
 	return m
 }
 
@@ -472,27 +468,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case fileAfterMsg:
-		callID := strings.TrimSpace(msg.callID)
 		opID := strings.TrimSpace(msg.opID)
 		path := strings.TrimSpace(msg.path)
-		hasApprovalRecord := callID != "" && m.hasApprovalRecord(callID)
-		if callID != "" && m.approvedCallIDs != nil {
-			delete(m.approvedCallIDs, callID)
-		}
-		if !msg.suppressDiff && hasApprovalRecord {
-			msg.suppressDiff = true
-		}
-		if path != "" && m.approvedFileOpsByPath != nil {
-			if count, ok := m.approvedFileOpsByPath[path]; ok && count > 0 {
-				msg.suppressDiff = true
-				remaining := count - 1
-				if remaining == 0 {
-					delete(m.approvedFileOpsByPath, path)
-				} else {
-					m.approvedFileOpsByPath[path] = remaining
-				}
-			}
-		}
 		// Best-effort: update cache and render a transcript diff/patch block.
 		if path == "" || msg.err != nil {
 			return m, nil
@@ -543,11 +520,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		if msg.suppressDiff {
-			refreshFilePicker()
-			return m, nil
-		}
-
 		verb := "Updated"
 		if p.op != "fs.patch" && !p.hadBefore {
 			verb = "Created"
@@ -863,12 +835,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateThinkingTranscriptItem()
 		}
 		if msg.err != nil {
-			var approvalErr agent.ErrApprovalRequired
-			if errors.As(msg.err, &approvalErr) {
-				diffs := m.generateApprovalDiffs(approvalErr.PendingOps)
-				m.startApprovalFlow(approvalErr, diffs)
-				return m, nil
-			}
 			// Treat user-initiated stop (Ctrl+X) as a normal outcome, not an error.
 			if m.turnCancelRequested || errors.Is(msg.err, context.Canceled) {
 				// Finalize any in-progress streaming state.
@@ -1008,79 +974,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *Model) startApprovalFlow(err agent.ErrApprovalRequired, diffs []string) {
-	m.awaitingApprovalOps = make([]approvalOp, len(err.PendingOps))
-	m.approvalTranscriptIdxs = nil
-	for i := range err.PendingOps {
-		callID := ""
-		if i < len(err.PendingToolCallIDs) {
-			callID = err.PendingToolCallIDs[i]
-		}
-		diff := ""
-		if i < len(diffs) {
-			diff = diffs[i]
-		}
-		m.awaitingApprovalOps[i] = approvalOp{
-			Req:        err.PendingOps[i],
-			ToolCallID: callID,
-			Diff:       diff,
-		}
-	}
-	m.appendApprovalTranscriptItems()
-	m.layout()
-}
-
-func (m *Model) appendApprovalTranscriptItems() {
-	if m == nil {
-		return
-	}
-	m.approvalTranscriptIdxs = nil
-	for _, op := range m.awaitingApprovalOps {
-		reqCopy := op.Req
-		item := transcriptItem{
-			kind:            transcriptApprovalRequest,
-			approvalOp:      &reqCopy,
-			approvalDiff:    strings.TrimSpace(op.Diff),
-			approvalStatus:  "pending",
-			approvalPending: true,
-			approvalCallID:  strings.TrimSpace(op.ToolCallID),
-		}
-		m.addTranscriptItem(item)
-		m.approvalTranscriptIdxs = append(m.approvalTranscriptIdxs, len(m.transcriptItems)-1)
-	}
-}
-
-func (m *Model) generateApprovalDiffs(ops []types.HostOpRequest) []string {
-	diffs := make([]string, len(ops))
-	type vfsProvider interface {
-		VFS() *vfs.FS
-	}
-	provider, ok := m.runner.(vfsProvider)
-	if !ok {
-		return diffs
-	}
-	fs := provider.VFS()
-	if fs == nil {
-		return diffs
-	}
-	for i, op := range ops {
-		if !isFileModificationOp(op.Op) {
-			continue
-		}
-		diff, err := GeneratePendingOpDiff(fs, op)
-		if err != nil {
-			cursorDebugLog("H2", "model.go:generateApprovalDiffs", "pending_diff_failed", map[string]any{
-				"op":   op.Op,
-				"path": op.Path,
-				"err":  err.Error(),
-			})
-			diff = fmt.Sprintf("```text\n(diff preview unavailable: %s)\n```", err)
-		}
-		diffs[i] = diff
-	}
-	return diffs
-}
-
 func isFileModificationOp(op string) bool {
 	switch strings.ToLower(strings.TrimSpace(op)) {
 	case types.HostOpFSWrite, types.HostOpFSAppend, types.HostOpFSEdit, types.HostOpFSPatch:
@@ -1088,93 +981,6 @@ func isFileModificationOp(op string) bool {
 	default:
 		return false
 	}
-}
-
-func (m *Model) processApproval(approve bool) tea.Cmd {
-	if len(m.awaitingApprovalOps) == 0 {
-		return nil
-	}
-	idx := -1
-	if len(m.approvalTranscriptIdxs) > 0 {
-		idx = m.approvalTranscriptIdxs[0]
-		m.approvalTranscriptIdxs = m.approvalTranscriptIdxs[1:]
-		if len(m.approvalTranscriptIdxs) == 0 {
-			m.approvalTranscriptIdxs = nil
-		}
-	}
-	status := "denied"
-	if approve {
-		status = "approved"
-	}
-	if idx >= 0 && idx < len(m.transcriptItems) {
-		it := m.transcriptItems[idx]
-		if it.kind == transcriptApprovalRequest {
-			it.approvalStatus = status
-			it.approvalPending = false
-			m.transcriptItems[idx] = it
-			wasAtBottom := m.transcript.AtBottom()
-			m.rebuildTranscript()
-			if wasAtBottom {
-				m.transcript.GotoBottom()
-			}
-		}
-	}
-	ctx := m.turnCtx
-	if ctx == nil {
-		ctx = m.ctx
-	}
-	op := m.awaitingApprovalOps[0]
-	if approve {
-		callID := strings.TrimSpace(op.ToolCallID)
-		if callID != "" {
-			if m.approvedCallIDs == nil {
-				m.approvedCallIDs = make(map[string]bool)
-			}
-			m.approvedCallIDs[callID] = true
-		}
-		if path := strings.TrimSpace(op.Req.Path); path != "" && isFileModificationOp(op.Req.Op) {
-			if m.approvedFileOpsByPath == nil {
-				m.approvedFileOpsByPath = make(map[string]int)
-			}
-			m.approvedFileOpsByPath[path]++
-		}
-	}
-	m.awaitingApprovalOps = m.awaitingApprovalOps[1:]
-
-	if approve {
-		resp, err := m.runner.ExecHostOp(ctx, op.Req, op.ToolCallID)
-		if err != nil {
-			resp = types.HostOpResponse{Op: op.Req.Op, Ok: false, Error: err.Error()}
-			m.runner.AppendToolResponse(op.ToolCallID, resp)
-		}
-	} else {
-		resp := types.HostOpResponse{
-			Op:        op.Req.Op,
-			Ok:        false,
-			Error:     types.CommandRejectedErrorMessage,
-			ErrorCode: types.CommandRejectedErrorCode,
-		}
-		m.runner.AppendToolResponse(op.ToolCallID, resp)
-	}
-
-	m.layout()
-	if len(m.awaitingApprovalOps) == 0 {
-		return m.resumeAfterApprovals(nil)
-	}
-	return nil
-}
-
-func (m *Model) resumeAfterApprovals(toolOutputs []llmtypes.LLMMessage) tea.Cmd {
-	if m.turnCancel != nil {
-		m.turnCancel()
-	}
-	turnCtx, turnCancel := context.WithCancel(m.ctx)
-	m.turnCtx = turnCtx
-	m.turnCancel = turnCancel
-	m.turnCancelRequested = false
-	m.turnInFlight = true
-	m.turnStarted = time.Now()
-	return m.resumeTurnCmd(toolOutputs)
 }
 
 func (m Model) View() string {
@@ -1331,18 +1137,6 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	if ev.Type == "web.changed" {
 		m.webSearchEnabled = strings.TrimSpace(ev.Data["enabled"]) == "true"
 	}
-	// Approval mode can change via /approval or TUI picker.
-	if ev.Type == "approvals.changed" {
-		if v := strings.TrimSpace(ev.Data["mode"]); v != "" {
-			m.approvalsMode = v
-		}
-	}
-	// Approval mode can be initialized from approvals.info event.
-	if ev.Type == "approvals.info" {
-		if v := strings.TrimSpace(ev.Data["mode"]); v != "" {
-			m.approvalsMode = v
-		}
-	}
 	// Fallback: /reasoning (no args) emits reasoning.info with a text block.
 	if ev.Type == "reasoning.info" {
 		if v := parseReasoningEffortFromReasoningInfo(ev.Data["text"]); strings.TrimSpace(v) != "" {
@@ -1428,10 +1222,6 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		}
 		op := strings.TrimSpace(ev.Data["op"])
 		path := strings.TrimSpace(ev.Data["path"])
-		callID := strings.TrimSpace(ev.Data["callId"])
-		if callID != "" && op != "" && path != "" {
-			m.setApprovalCallID(op, path, callID)
-		}
 		var beforeCmd tea.Cmd
 		if (op == "fs.write" || op == "fs.append" || op == "fs.edit" || op == "fs.patch") && path != "" {
 			if m.fileSnapCache == nil {
@@ -1479,7 +1269,6 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 	case "agent.op.response":
 		op := strings.TrimSpace(ev.Data["op"])
 		path := strings.TrimSpace(ev.Data["path"])
-		callID := strings.TrimSpace(ev.Data["callId"])
 
 		rawOpID := strings.TrimSpace(ev.Data["opId"])
 		opID := rawOpID
@@ -1550,8 +1339,7 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 			if acc, ok := m.runner.(vfsAccessor); ok {
 				return func() tea.Msg {
 					txt, _, truncated, err := acc.ReadVFS(m.ctx, path, maxDiffBytesRead)
-					suppress := callID != "" && m.approvedCallIDs != nil && m.approvedCallIDs[callID]
-					return fileAfterMsg{opID: opID, op: op, path: path, text: txt, truncated: truncated, err: err, callID: callID, suppressDiff: suppress}
+					return fileAfterMsg{opID: opID, op: op, path: path, text: txt, truncated: truncated, err: err}
 				}
 			}
 		}
@@ -1728,74 +1516,6 @@ func (m *Model) markGroupedActionCompleted(groupIdx, actionIdx int, status strin
 		m.transcript.GotoBottom()
 	}
 	return true
-}
-
-func (m *Model) hasApprovalRecord(callID string) bool {
-	if m == nil {
-		return false
-	}
-	callID = strings.TrimSpace(callID)
-	if callID == "" {
-		return false
-	}
-	for i := len(m.transcriptItems) - 1; i >= 0; i-- {
-		it := m.transcriptItems[i]
-		if it.kind != transcriptApprovalRequest {
-			continue
-		}
-		if strings.TrimSpace(it.approvalCallID) == callID {
-			return true
-		}
-	}
-	return false
-}
-
-func (m *Model) setApprovalCallID(op, path, callID string) {
-	if m == nil {
-		return
-	}
-	op = strings.TrimSpace(op)
-	path = strings.TrimSpace(path)
-	callID = strings.TrimSpace(callID)
-	if op == "" || path == "" || callID == "" {
-		return
-	}
-
-	// Update awaiting approvals so approval/denial events carry the correct callId.
-	for i := range m.awaitingApprovalOps {
-		req := &m.awaitingApprovalOps[i]
-		if strings.TrimSpace(req.ToolCallID) != "" {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(req.Req.Op), op) && strings.TrimSpace(req.Req.Path) == path {
-			req.ToolCallID = callID
-			break
-		}
-	}
-
-	// Update transcript approval items so suppression can match by callId.
-	updated := false
-	for i := range m.transcriptItems {
-		it := m.transcriptItems[i]
-		if it.kind != transcriptApprovalRequest || strings.TrimSpace(it.approvalCallID) != "" {
-			continue
-		}
-		if it.approvalOp == nil {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(it.approvalOp.Op), op) && strings.TrimSpace(it.approvalOp.Path) == path {
-			it.approvalCallID = callID
-			m.transcriptItems[i] = it
-			updated = true
-		}
-	}
-	if updated {
-		wasAtBottom := m.transcript.AtBottom()
-		m.rebuildTranscript()
-		if wasAtBottom {
-			m.transcript.GotoBottom()
-		}
-	}
 }
 
 func (m *Model) findPendingFileOpIDByPath(path string) string {

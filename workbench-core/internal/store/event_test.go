@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 func TestEventStore(t *testing.T) {
@@ -22,7 +23,17 @@ func TestEventStore(t *testing.T) {
 	}
 
 	t.Run("AppendEventWritesOneLine", func(t *testing.T) {
-		err := AppendEvent(cfg, run.RunID, "test_event", "hello world", map[string]string{"foo": "bar"})
+		err := AppendEvent(context.Background(), cfg, types.EventRecord{
+			RunID:     run.RunID,
+			Type:      "test_event",
+			Message:   "hello world",
+			Data:      map[string]string{"foo": "bar"},
+			Origin:    "",
+			Store:     nil,
+			Console:   nil,
+			History:   nil,
+			StoreData: nil,
+		})
 		if err != nil {
 			t.Fatalf("AppendEvent failed: %v", err)
 		}
@@ -46,7 +57,11 @@ func TestEventStore(t *testing.T) {
 	})
 
 	t.Run("AppendEvent_NonexistentRun_IsErrNotFound", func(t *testing.T) {
-		err := AppendEvent(cfg, "run-does-not-exist", "test_event", "hello world", nil)
+		err := AppendEvent(context.Background(), cfg, types.EventRecord{
+			RunID:   "run-does-not-exist",
+			Type:    "test_event",
+			Message: "hello world",
+		})
 		if err == nil {
 			t.Fatalf("expected error")
 		}
@@ -60,7 +75,11 @@ func TestEventStore(t *testing.T) {
 
 	t.Run("ListEventsReturnsInOrder", func(t *testing.T) {
 		// Append a second event
-		err := AppendEvent(cfg, run.RunID, "second_event", "second message", nil)
+		err := AppendEvent(context.Background(), cfg, types.EventRecord{
+			RunID:   run.RunID,
+			Type:    "second_event",
+			Message: "second message",
+		})
 		if err != nil {
 			t.Fatalf("Failed to append second event: %v", err)
 		}
@@ -96,8 +115,8 @@ func TestEventStore(t *testing.T) {
 		}
 
 		// Add 2 more events
-		AppendEvent(cfg, run.RunID, "third_event", "third message", nil)
-		AppendEvent(cfg, run.RunID, "fourth_event", "fourth message", nil)
+		_ = AppendEvent(context.Background(), cfg, types.EventRecord{RunID: run.RunID, Type: "third_event", Message: "third message"})
+		_ = AppendEvent(context.Background(), cfg, types.EventRecord{RunID: run.RunID, Type: "fourth_event", Message: "fourth message"})
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -156,7 +175,7 @@ func TestEventStore(t *testing.T) {
 		// Give the tail library time to set up file watching
 		go func() {
 			time.Sleep(500 * time.Millisecond)
-			AppendEvent(cfg, run.RunID, "new_event", "new message", nil)
+			_ = AppendEvent(context.Background(), cfg, types.EventRecord{RunID: run.RunID, Type: "new_event", Message: "new message"})
 		}()
 
 		var tailedEvents []TailedEvent

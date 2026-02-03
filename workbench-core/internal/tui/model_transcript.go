@@ -6,7 +6,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
-	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 func splitThinkingText(s string) (header string, summary string) {
@@ -267,98 +266,6 @@ func (m *Model) rebuildTranscript() {
 			rendered := headerRendered + "\n" + bodyRendered
 			lines = append(lines, m.styleFileChangeBox.Render(rendered))
 			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-		case transcriptApprovalRequest:
-			diffContent := strings.TrimSpace(it.approvalDiff)
-			if diffContent != "" {
-				path := ""
-				if it.approvalOp != nil {
-					path = strings.TrimSpace(it.approvalOp.Path)
-				}
-				displayPath := strings.TrimPrefix(path, "/")
-				if strings.TrimSpace(displayPath) == "" {
-					displayPath = strings.TrimSpace(path)
-				}
-				added, deleted, hasCounts := approvalPreviewCounts(diffContent)
-				headerRendered := renderFileChangeHeaderLine(displayPath, added, deleted, hasCounts, fileInnerW)
-				bodyRendered := strings.Trim(m.renderer.RenderMarkdown(diffContent, fileInnerW), "\n")
-				if bodyRendered == "" {
-					bodyRendered = "_(no preview available)_"
-				}
-
-				statusText := "⏳ Waiting for approval..."
-				statusStyle := m.styleDim
-				switch strings.ToLower(strings.TrimSpace(it.approvalStatus)) {
-				case "approved":
-					statusText = "✅ Approved"
-					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950")).Bold(true)
-				case "denied":
-					statusText = "❌ Denied"
-					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Bold(true)
-				}
-
-				content := headerRendered
-				if bodyRendered != "" {
-					content += "\n" + bodyRendered
-				}
-				content = strings.TrimRight(content, "\n")
-				content += "\n" + statusStyle.Render(statusText)
-				lines = append(lines, m.styleFileChangeBox.Render(content))
-				lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-				break
-			}
-
-			var req types.HostOpRequest
-			if it.approvalOp != nil {
-				req = *it.approvalOp
-			}
-			title, desc := approvalPromptText(req)
-			headerText := "Approval Required: " + strings.TrimSpace(title)
-			if strings.TrimSpace(title) == "" {
-				if strings.TrimSpace(req.Op) != "" {
-					headerText = "Approval Required: " + req.Op
-				} else if strings.TrimSpace(req.Path) != "" {
-					headerText = "Approval Required: " + req.Path
-				} else {
-					headerText = "Approval Required"
-				}
-			}
-			header := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#ffb347")).
-				Bold(true).
-				Render(kit.TruncateRight(headerText, fileInnerW))
-
-			bodyParts := make([]string, 0, 2)
-			if strings.TrimSpace(desc) != "" {
-				bodyParts = append(bodyParts, desc)
-			}
-			if diffContent != "" {
-				bodyParts = append(bodyParts, diffContent)
-			}
-			if len(bodyParts) == 0 {
-				bodyParts = append(bodyParts, "_(no preview available)_")
-			}
-			body := strings.Join(bodyParts, "\n\n")
-			renderedBody := strings.Trim(m.renderer.RenderMarkdown(body, fileInnerW), "\n")
-
-			statusText := "Waiting for approval..."
-			statusStyle := m.styleDim
-			switch strings.ToLower(strings.TrimSpace(it.approvalStatus)) {
-			case "approved":
-				statusText = "✅ Approved"
-				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950")).Bold(true)
-			case "denied":
-				statusText = "❌ Denied"
-				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f")).Bold(true)
-			}
-			status := statusStyle.Render(statusText)
-
-			content := header
-			if renderedBody != "" {
-				content += "\n" + renderedBody
-			}
-			content += "\n" + status
-			lines = append(lines, m.styleFileChangeBox.Render(strings.TrimRight(content, "\n")))
-			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
 		}
 	}
 
@@ -504,33 +411,4 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b[i:])
-}
-
-func approvalPreviewCounts(diff string) (int, int, bool) {
-	preview := stripDiffFences(diff)
-	if preview == "" {
-		return 0, 0, false
-	}
-	added, deleted := diffStat(preview)
-	return added, deleted, added != 0 || deleted != 0
-}
-
-func stripDiffFences(diff string) string {
-	s := strings.TrimSpace(diff)
-	if s == "" {
-		return ""
-	}
-	if strings.HasPrefix(s, "```") {
-		if idx := strings.Index(s, "\n"); idx >= 0 {
-			s = s[idx+1:]
-		} else {
-			return ""
-		}
-	}
-	if idx := strings.LastIndex(s, "\n```"); idx >= 0 {
-		s = s[:idx]
-	} else if strings.HasSuffix(s, "```") {
-		s = strings.TrimSuffix(s, "```")
-	}
-	return strings.Trim(s, "\n")
 }

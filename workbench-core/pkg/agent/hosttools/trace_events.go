@@ -4,17 +4,17 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 // TraceEventsSinceTool streams trace events since a cursor.
 type TraceEventsSinceTool struct{}
 
-func (t *TraceEventsSinceTool) Definition() llm.Tool {
-	return llm.Tool{
+func (t *TraceEventsSinceTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "trace_events_since",
 			Description: "[DIRECT] Stream trace events since a cursor.",
 			Strict:      true,
@@ -51,10 +51,10 @@ func (t *TraceEventsSinceTool) Execute(_ context.Context, args json.RawMessage) 
 // TraceEventsLatestTool reads the latest trace events.
 type TraceEventsLatestTool struct{}
 
-func (t *TraceEventsLatestTool) Definition() llm.Tool {
-	return llm.Tool{
+func (t *TraceEventsLatestTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "trace_events_latest",
 			Description: "[DIRECT] Read the latest trace events.",
 			Strict:      true,
@@ -89,10 +89,10 @@ func (t *TraceEventsLatestTool) Execute(_ context.Context, args json.RawMessage)
 // TraceEventsSummaryTool summarizes trace events.
 type TraceEventsSummaryTool struct{}
 
-func (t *TraceEventsSummaryTool) Definition() llm.Tool {
-	return llm.Tool{
+func (t *TraceEventsSummaryTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "trace_events_summary",
 			Description: "[DIRECT] Summarize trace events.",
 			Strict:      true,

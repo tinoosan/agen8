@@ -643,7 +643,7 @@ func (m Model) keyCommandPaletteNav(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		// Use submitSingle/submitMultiline to ensure picker commands are handled correctly.
-		// These functions check for commands like /model, /approval, etc. and open pickers.
+		// These functions check for commands like /model, etc. and open pickers.
 		// Note: These functions handle clearing the input themselves, so we don't clear here.
 		if m.isMulti {
 			return m, m.submitMultiline(), true

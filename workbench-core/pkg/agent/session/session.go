@@ -25,8 +25,8 @@ type ResolveProfileFunc func(ref string) (*profile.Profile, string, error)
 type Config struct {
 	Agent agent.Agent
 
-	Profile    *profile.Profile
-	ProfileDir string
+	Profile        *profile.Profile
+	ProfileDir     string
 	ResolveProfile ResolveProfileFunc
 
 	Store  state.Store
@@ -41,8 +41,8 @@ type Config struct {
 	PollInterval time.Duration
 	MaxReadBytes int
 
-	LeaseTTL     time.Duration
-	LeaseExtend  time.Duration
+	LeaseTTL    time.Duration
+	LeaseExtend time.Duration
 
 	MaxRetries int
 	MaxPending int

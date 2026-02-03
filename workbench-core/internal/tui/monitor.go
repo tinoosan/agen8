@@ -1487,18 +1487,63 @@ func (m *monitorModel) renderMemory(spec layoutmgr.PanelSpec) string {
 }
 
 func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
-	help := fmt.Sprintf("Tab: focus (%s)  |  Ctrl+Enter: submit  |  /quit", m.focusedPanelName())
-	if m.isCompactMode() {
-		help += "  |  Ctrl+]/Ctrl+[ switch tab  |  Ctrl+Up/Down focus Activity Feed/Details"
-	} else {
-		help += "  |  Ctrl+]/Ctrl+[ cycle side panel  |  Ctrl+Y Thoughts tab  |  Ctrl+Up/Down focus Activity Feed/Details"
+	contentW := max(20, spec.ContentWidth)
+
+	// Status row: model | profile | help hints
+	modelID := strings.TrimSpace(m.model)
+	if modelID == "" {
+		modelID = "default"
 	}
-	// Keep the composer help single-line; wrapped help breaks vertical layout budgets.
-	help = kit.TruncateRight(help, max(1, spec.ContentWidth))
+	profileRef := strings.TrimSpace(m.profile)
+	if profileRef == "" {
+		profileRef = "default"
+	}
+
+	tagKeyStyle := kit.CloneStyle(kit.StyleStatusKey)
+	tagValueStyle := kit.CloneStyle(kit.StyleStatusValue)
+
+	modelLabel := kit.RenderTag(kit.TagOptions{
+		Key:   "model",
+		Value: kit.TruncateMiddle(modelID, 24),
+		Styles: kit.TagStyles{
+			KeyStyle:   tagKeyStyle,
+			ValueStyle: tagValueStyle,
+		},
+	})
+	profileLabel := kit.RenderTag(kit.TagOptions{
+		Key:   "profile",
+		Value: kit.TruncateMiddle(profileRef, 12),
+		Styles: kit.TagStyles{
+			KeyStyle:   tagKeyStyle,
+			ValueStyle: tagValueStyle,
+		},
+	})
+
+	statusLeft := modelLabel + "  " + profileLabel
+	statusLeft = kit.TruncateRight(statusLeft, contentW)
+
+	status := lipgloss.NewStyle().Width(contentW).Render(statusLeft)
+
+	// Help hints
+	help := "Tab: focus  |  Ctrl+Enter: submit  |  ?: help  |  /commands"
+	help = kit.StyleDim.Render(kit.TruncateRight(help, contentW))
+
+	// Build content parts: status, palette (if open), input
+	contentParts := []string{status}
+
+	// Render command palette if open
+	if palette := m.renderCommandPalette(); palette != "" {
+		contentParts = append(contentParts, "", palette)
+	}
+
+	contentParts = append(contentParts, m.input.View(), help)
+
+	content := lipgloss.JoinVertical(lipgloss.Left, contentParts...)
+
 	return m.commandBarStyle().
 		Width(spec.InnerWidth()).
 		Height(spec.InnerHeight()).
-		Render(help + "\n" + m.input.View())
+		Render(content)
 }
 
 func (m *monitorModel) renderComposerRowWithStats(grid layoutmgr.GridLayout) string {
@@ -1612,6 +1657,7 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 	case panelComposer:
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
+		m.updateCommandPalette()
 		return m, cmd
 	default:
 		return m, nil
@@ -1621,8 +1667,9 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 func (m *monitorModel) layout() layoutmgr.GridLayout {
 	manager := layoutmgr.NewManager(m.styles.panel, true)
 	// textarea.View() renders an extra row beyond Height() in some configurations
-	// (prompt/cursor line). Budget an extra line so the composer panel never expands.
-	composerHeight := 4 + m.input.Height()
+	// (prompt/cursor line). The composer content also includes a status row + help row.
+	// Budget enough lines so the composer panel never expands beyond its spec.
+	composerHeight := 5 + m.input.Height()
 	if m.isCompactMode() {
 		return manager.CalculateCompact(m.width, m.height, composerHeight)
 	}

@@ -9,7 +9,6 @@ import (
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	"github.com/tinoosan/workbench-core/pkg/cost"
-	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 func (m *Model) layout() {
@@ -364,15 +363,6 @@ func (m Model) renderInput() string {
 		},
 	})
 
-	approvalLabel := kit.RenderTag(kit.TagOptions{
-		Key:   "approval",
-		Value: defaultIfEmpty(strings.TrimSpace(m.approvalsMode), "enabled"),
-		Styles: kit.TagStyles{
-			KeyStyle:   tagKeyStyle,
-			ValueStyle: tagValueStyle,
-		},
-	})
-
 	modelLabel := kit.RenderTag(kit.TagOptions{
 		Key:   "model",
 		Value: modelIDDisplay,
@@ -405,7 +395,7 @@ func (m Model) renderInput() string {
 	}
 
 	// Prefer keeping web/effort visible; truncate the model ID if needed.
-	parts := []string{modelLabel, webLabel, approvalLabel}
+	parts := []string{modelLabel, webLabel}
 	if effortLabel != "" {
 		parts = append(parts, effortLabel)
 	}
@@ -441,12 +431,6 @@ func (m Model) renderInput() string {
 		contentParts = append(contentParts, "", p)
 	}
 	if p := m.renderReasoningSummaryPicker(); p != "" {
-		contentParts = append(contentParts, "", p)
-	}
-	if p := m.renderApprovalPicker(); p != "" {
-		contentParts = append(contentParts, "", p)
-	}
-	if p := m.renderApprovalPrompt(); p != "" {
 		contentParts = append(contentParts, "", p)
 	}
 	contentParts = append(contentParts, "", input)
@@ -647,118 +631,6 @@ func (m Model) renderReasoningSummaryPicker() string {
 		Foreground(lipgloss.Color("#eaeaea"))
 
 	return style.Render(rendered)
-}
-
-func (m Model) renderApprovalPicker() string {
-	if !m.approvalPickerOpen {
-		return ""
-	}
-
-	outerW := max(20, m.width-8)
-	contentW := max(1, outerW-4)
-
-	items := make([]kit.Item, len(approvalPickerOptions))
-	for i, opt := range approvalPickerOptions {
-		items[i] = opt
-	}
-
-	selected := m.approvalPickerSelected
-	if selected < 0 {
-		selected = 0
-	}
-	if selected >= len(items) {
-		selected = len(items) - 1
-	}
-
-	maxHeight := 6
-	opts := kit.SelectorOptions{
-		Width:         contentW,
-		MaxHeight:     maxHeight,
-		SelectedIndex: selected,
-		ShowPrefix:    true,
-		Spacing:       1,
-		Styles: kit.SelectorStyles{
-			SelectedTitle:   kit.CloneStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#6bbcff")).Bold(true)),
-			SelectedDesc:    kit.CloneStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#9ad0ff"))),
-			UnselectedTitle: kit.CloneStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#eaeaea")).Bold(true)),
-			UnselectedDesc:  kit.CloneStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#b0b0b0"))),
-		},
-	}
-
-	style := lipgloss.NewStyle().
-		Width(contentW).
-		Padding(0, 1).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#6bbcff")).
-		Foreground(lipgloss.Color("#eaeaea"))
-
-	return style.Render(kit.RenderSelector(items, opts))
-}
-
-func (m Model) renderApprovalPrompt() string {
-	if len(m.awaitingApprovalOps) == 0 {
-		return ""
-	}
-	op := m.awaitingApprovalOps[0]
-	title, desc := approvalPromptText(op.Req)
-
-	outerW := max(20, m.width-8)
-	contentW := max(1, outerW-4)
-
-	lines := []string{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#ffb347")).Bold(true).Render("Approval required"),
-		m.styleBold.Render(kit.TruncateRight(title, contentW)),
-		m.styleDim.Render(kit.TruncateRight(desc, contentW)),
-		m.styleComposerStatusKey.Copy().Render("press") + " " + m.styleComposerStatusVal.Render("A/Y approve • D/N deny"),
-	}
-
-	style := lipgloss.NewStyle().
-		Width(contentW).
-		Padding(0, 1).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#ffb347")).
-		Foreground(lipgloss.Color("#eaeaea"))
-
-	return style.Render(strings.Join(lines, "\n"))
-}
-
-func approvalPromptText(req types.HostOpRequest) (string, string) {
-	op := strings.ToLower(strings.TrimSpace(req.Op))
-	switch op {
-	case types.HostOpFSWrite:
-		return "Write file", "Path: " + req.Path
-	case types.HostOpFSAppend:
-		return "Append to file", "Path: " + req.Path
-	case types.HostOpFSEdit:
-		return "Edit file", "Path: " + req.Path
-	case types.HostOpFSPatch:
-		return "Patch file", "Path: " + req.Path
-	case types.HostOpShellExec:
-		cmd := strings.Join(req.Argv, " ")
-		if cmd == "" {
-			cmd = "<shell command>"
-		}
-		return "Shell command", "Command: " + cmd
-	case types.HostOpHTTPFetch:
-		method := strings.ToUpper(strings.TrimSpace(req.Method))
-		if method == "" {
-			method = "GET"
-		}
-		return "HTTP request", method + " " + req.URL
-	case types.HostOpToolRun:
-		title := "Tool run"
-		if strings.TrimSpace(req.ToolID.String()) != "" {
-			title = "Tool run: " + req.ToolID.String()
-		}
-		desc := "Action: " + req.ActionID
-		return title, desc
-	default:
-		desc := "Op: " + req.Op
-		if strings.TrimSpace(req.Path) != "" {
-			desc += " " + req.Path
-		}
-		return "Host operation", desc
-	}
 }
 
 func defaultIfEmpty(v, fallback string) string {

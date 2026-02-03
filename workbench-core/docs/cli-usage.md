@@ -59,7 +59,6 @@ All flags have equivalent environment variables. CLI flags take precedence over 
 | `--memory-bytes`        | —                               | `8*1024`                                      | Budget for memory injected via `/memory`. Affects per-step lookback.                                                   |
 | `--history-pairs`       | —                               | `8`                                           | Number of recent (user, agent) pairs included from `/history`. Reducing this limits prompt size.                       |
 | `--include-history-ops` | `WORKBENCH_INCLUDE_HISTORY_OPS` | `true` (enabled)                              | Whether to include environment/host operations from `/history`. Disable to reduce noise.                               |
-| `--approvals-mode`      | `WORKBENCH_APPROVALS_MODE`      | `enabled`                                     | Approval policy: `enabled` requires approvals, `disabled` turns off approval gating.                                   |
 
 Use `effectiveConfig()` in `internal/config` to trace how each runtime flag/env resolves at startup.
 

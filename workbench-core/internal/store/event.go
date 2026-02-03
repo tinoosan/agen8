@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -40,19 +41,30 @@ type TailedEvent struct {
 // It validates inputs, ensures the run exists, and appends the event to SQLite.
 // On success, the event is persisted to SQLite. A best-effort mirror is written to the
 // run's trace log; mirror failure is logged but does not fail AppendEvent.
-func AppendEvent(cfg config.Config, runID, eventType, message string, data map[string]string) error {
+func AppendEvent(ctx context.Context, cfg config.Config, event types.EventRecord) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
 
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+
+	runID := strings.TrimSpace(event.RunID)
 	if runID == "" {
 		return fmt.Errorf("error appending event, runID cannot be blank")
 	}
 
+	eventType := strings.TrimSpace(event.Type)
 	if eventType == "" {
 		return fmt.Errorf("error appending event, eventType cannot be blank")
 	}
 
+	message := strings.TrimSpace(event.Message)
 	if message == "" {
 		return fmt.Errorf("error appending event, message cannot be blank")
 	}
@@ -65,12 +77,14 @@ func AppendEvent(cfg config.Config, runID, eventType, message string, data map[s
 		return err
 	}
 
-	origin := ""
+	origin := strings.TrimSpace(event.Origin)
+	data := event.Data
 	if data != nil {
+		// Back-compat: accept "origin" stored in the Data map, but do not persist it there.
 		if rawOrigin, ok := data["origin"]; ok {
-			origin = strings.TrimSpace(rawOrigin)
-		}
-		if origin != "" {
+			if origin == "" {
+				origin = strings.TrimSpace(rawOrigin)
+			}
 			// Never mutate the input map.
 			if len(data) == 1 {
 				data = nil
@@ -87,16 +101,26 @@ func AppendEvent(cfg config.Config, runID, eventType, message string, data map[s
 		}
 	}
 
-	event := types.NewEventRecord(runID, eventType, message, data)
+	if strings.TrimSpace(event.EventID) == "" {
+		event.EventID = "event-" + uuid.NewString()
+	}
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now()
+	}
+	event.RunID = runID
+	event.Type = eventType
+	event.Message = message
+	event.Data = data
 	event.Origin = origin
+
 	b, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("error marshalling event: %w", err)
 	}
 
 	dataJSON := ""
-	if len(event.Data) > 0 {
-		if dbuf, err := json.Marshal(event.Data); err == nil {
+	if len(data) > 0 {
+		if dbuf, err := json.Marshal(data); err == nil {
 			dataJSON = string(dbuf)
 		} else {
 			return fmt.Errorf("error marshalling event data: %w", err)

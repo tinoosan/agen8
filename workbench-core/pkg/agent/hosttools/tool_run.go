@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -14,10 +14,10 @@ import (
 // ToolRunTool executes a discovered tool by id + action.
 type ToolRunTool struct{}
 
-func (t *ToolRunTool) Definition() llm.Tool {
-	return llm.Tool{
+func (t *ToolRunTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "tool_run",
 			Description: "[DISCOVERY] Run a discovered tool by id + action. Use fs_list/fs_read on /tools to discover manifests.",
 			Strict:      true,

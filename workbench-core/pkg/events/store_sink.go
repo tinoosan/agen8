@@ -3,12 +3,14 @@ package events
 import (
 	"context"
 	"strings"
+
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 // StoreAppender is a minimal interface for persisting events.
 // Context is reserved for future cancellation/timeout; current implementations may ignore it.
 type StoreAppender interface {
-	AppendEvent(ctx context.Context, runID, eventType, message string, data map[string]string) error
+	AppendEvent(ctx context.Context, event types.EventRecord) error
 }
 
 // StoreSink appends events to an event store.
@@ -23,21 +25,12 @@ func (s StoreSink) Emit(ctx context.Context, runID string, event Event) error {
 	if s.Store == nil {
 		return nil
 	}
-	data := event.Data
-	if event.StoreData != nil {
-		data = event.StoreData
+	ev := event
+	if strings.TrimSpace(ev.RunID) == "" {
+		ev.RunID = runID
 	}
-	origin := strings.TrimSpace(event.Origin)
-	if origin != "" {
-		// Never mutate the input map.
-		out := make(map[string]string, len(data)+1)
-		for k, v := range data {
-			out[k] = v
-		}
-		if _, ok := out["origin"]; !ok {
-			out["origin"] = origin
-		}
-		data = out
+	if ev.StoreData != nil {
+		ev.Data = ev.StoreData
 	}
-	return s.Store.AppendEvent(ctx, runID, event.Type, event.Message, data)
+	return s.Store.AppendEvent(ctx, ev)
 }

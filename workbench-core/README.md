@@ -87,7 +87,6 @@ Runtime configuration resolves in this order: CLI flags → environment variable
 | `--memory-bytes`        | —                               | Memory injection budget per step (default `8*1024`).                                                                                      |
 | `--history-pairs`       | —                               | Number of recent (user, agent) pairs included from `/history` (default `8`).                                                              |
 | `--include-history-ops` | `WORKBENCH_INCLUDE_HISTORY_OPS` | Whether to include environment/host operations from `/history` (default: enabled).                                                        |
-| `--approvals-mode`      | `WORKBENCH_APPROVALS_MODE`      | Approval policy: `enabled` (default) or `disabled`.                                                                                       |
 
 Helpers in `internal/config/effectiveConfig()` resolve the final configuration before each command runs. See [docs/cli-usage.md](docs/cli-usage.md) for deeper context on flag interactions, environment variables, and examples.
 

@@ -28,6 +28,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	"github.com/tinoosan/workbench-core/pkg/store"
@@ -337,7 +338,7 @@ func resolveProfileRef(cfg config.Config, requested string) (*profile.Profile, s
 	return p, dir, err
 }
 
-func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, emit func(context.Context, events.Event)) func(step int, usage llm.LLMUsage) {
+func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, emit func(context.Context, events.Event)) func(step int, usage llmtypes.LLMUsage) {
 	pricingKnown := false
 	if priceIn == 0 && priceOut == 0 {
 		if in, out, ok := cost.DefaultPricing().Lookup(modelID); ok {
@@ -386,7 +387,7 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 		})
 	}
 
-	return func(step int, usage llm.LLMUsage) {
+	return func(step int, usage llmtypes.LLMUsage) {
 		_ = step
 		input := usage.InputTokens
 		output := usage.OutputTokens
@@ -454,10 +455,8 @@ type daemonEventAppender struct {
 	cfg config.Config
 }
 
-func (s daemonEventAppender) AppendEvent(ctx context.Context, runID, eventType, message string, data map[string]string) error {
-	// Context is not yet passed to the store; reserved for future cancellation/timeout.
-	_ = ctx
-	return implstore.AppendEvent(s.cfg, runID, eventType, message, data)
+func (s daemonEventAppender) AppendEvent(ctx context.Context, event types.EventRecord) error {
+	return implstore.AppendEvent(ctx, s.cfg, event)
 }
 
 func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run types.Run, emit func(context.Context, events.Event), wg *sync.WaitGroup) {

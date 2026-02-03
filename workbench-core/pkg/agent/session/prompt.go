@@ -77,4 +77,3 @@ func buildSystemPrompt(base string, p profile.Profile, profilePrompt string, mem
 
 	return strings.TrimSpace(b.String())
 }
-
