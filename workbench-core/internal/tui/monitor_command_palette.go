@@ -33,6 +33,15 @@ func isExactMonitorCommand(s string) bool {
 	return false
 }
 
+func monitorCommandInvokesWithoutArgs(cmd string) bool {
+	switch strings.TrimSpace(cmd) {
+	case "/model", "/reasoning-effort", "/reasoning-summary", "/help", "/quit":
+		return true
+	default:
+		return false
+	}
+}
+
 // updateCommandPalette updates the command palette state based on the current input value.
 // It detects if the input starts with "/" and filters commands accordingly.
 func (m *monitorModel) updateCommandPalette() {
@@ -128,33 +137,65 @@ func (m *monitorModel) autocompleteCommand() {
 }
 
 // handleCommandPaletteKey processes keyboard events when the command palette is showing.
-// Returns true if the key was consumed, false otherwise.
-func (m *monitorModel) handleCommandPaletteKey(msg tea.KeyMsg) bool {
+// Returns (cmd, consumed) where cmd can be non-nil for immediate-invoke commands.
+func (m *monitorModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	if !m.commandPaletteOpen {
-		return false
+		return nil, false
 	}
 
 	switch msg.String() {
 	case "tab", "right":
 		m.autocompleteCommand()
-		return true
+		return nil, true
 	case "up", "ctrl+p":
 		if m.commandPaletteSelected > 0 {
 			m.commandPaletteSelected--
 		}
-		return true
+		return nil, true
 	case "down", "ctrl+n":
 		if m.commandPaletteSelected < len(m.commandPaletteMatches)-1 {
 			m.commandPaletteSelected++
 		}
-		return true
+		return nil, true
+	case "enter":
+		if len(m.commandPaletteMatches) == 0 {
+			return nil, true
+		}
+		selected := m.commandPaletteSelected
+		if selected < 0 || selected >= len(m.commandPaletteMatches) {
+			selected = 0
+		}
+		selectedCmd := m.commandPaletteMatches[selected]
+
+		// Determine whether the user already typed anything beyond the first token.
+		inputValue := strings.TrimSpace(m.input.Value())
+		fields := strings.Fields(inputValue)
+		firstToken := ""
+		if len(fields) > 0 {
+			firstToken = fields[0]
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(inputValue, firstToken))
+		hasRest := rest != ""
+
+		// If no args are present and the command is invokable, invoke immediately.
+		// Otherwise, just autocomplete so the user can continue typing (submit uses Ctrl+Enter).
+		if !hasRest && monitorCommandInvokesWithoutArgs(selectedCmd) {
+			m.input.SetValue("")
+			m.commandPaletteOpen = false
+			m.commandPaletteMatches = nil
+			m.commandPaletteSelected = 0
+			return m.handleCommand(selectedCmd), true
+		}
+
+		m.autocompleteCommand()
+		return nil, true
 	case "esc", "escape":
 		m.commandPaletteOpen = false
 		m.commandPaletteMatches = nil
 		m.commandPaletteSelected = 0
-		return true
+		return nil, true
 	}
-	return false
+	return nil, false
 }
 
 // renderCommandPalette renders the inline command palette if open.

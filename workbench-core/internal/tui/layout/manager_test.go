@@ -13,10 +13,10 @@ func testStyle() lipgloss.Style {
 func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
 	composerHeight := 4
-	outboxHeight := 6
-	grid := mgr.CalculateDashboard(120, 35, composerHeight, outboxHeight, 1)
+	statsHeight := 5
+	grid := mgr.CalculateDashboard(120, 35, composerHeight, statsHeight, 1)
 
-	reserved := DashHeaderHeight + DashStatusBarHeight + DashWarningHeight + composerHeight + DashGapAfterHeader + DashGapBeforeComposer
+	reserved := DashHeaderHeight + DashStatusBarHeight + DashWarningHeight + composerHeight + statsHeight + DashGapAfterHeader + DashGapBeforeComposer
 	mainH := 35 - reserved
 	if mainH < 1 {
 		mainH = 1
@@ -38,8 +38,8 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 	if got := grid.CurrentTask.Height + grid.Inbox.Height + grid.Outbox.Height; got > sideContentH {
 		t.Fatalf("tasks panels height %d exceeds side content height %d", got, sideContentH)
 	}
-	if grid.Stats.Height != composerHeight {
-		t.Fatalf("stats height want %d, got %d", composerHeight, grid.Stats.Height)
+	if grid.Stats.Height != statsHeight {
+		t.Fatalf("stats height want %d, got %d", statsHeight, grid.Stats.Height)
 	}
 	totalH := reserved + mainH
 	if totalH > grid.ScreenHeight {
@@ -49,7 +49,7 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 
 func TestCalculateDashboard_ActivityPanelsHaveContentRoom(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
-	grid := mgr.CalculateDashboard(120, 35, 4, 6, 1)
+	grid := mgr.CalculateDashboard(120, 35, 4, 5, 1)
 
 	if grid.ActivityFeed.ContentHeight < 3 {
 		t.Fatalf("activity feed ContentHeight want >= 3, got %d", grid.ActivityFeed.ContentHeight)
@@ -62,17 +62,20 @@ func TestCalculateDashboard_ActivityPanelsHaveContentRoom(t *testing.T) {
 func TestCalculateDashboard_ComposerStatsAlignment(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
 	composerHeight := 4
-	grid := mgr.CalculateDashboard(120, 35, composerHeight, 6, 1)
+	statsHeight := 5
+	grid := mgr.CalculateDashboard(120, 35, composerHeight, statsHeight, 1)
 
-	leftW := grid.AgentOutput.Width
-	if grid.Composer.Width != leftW {
-		t.Fatalf("composer width want %d (left column), got %d", leftW, grid.Composer.Width)
+	if grid.Composer.Width != grid.ScreenWidth {
+		t.Fatalf("composer width want %d (full width), got %d", grid.ScreenWidth, grid.Composer.Width)
 	}
-	if grid.Stats.Width != grid.ActivityFeed.Width {
-		t.Fatalf("stats width want %d (right column), got %d", grid.ActivityFeed.Width, grid.Stats.Width)
+	if grid.Stats.Width != grid.ScreenWidth {
+		t.Fatalf("stats width want %d (full width), got %d", grid.ScreenWidth, grid.Stats.Width)
 	}
-	if grid.Stats.Height != composerHeight {
-		t.Fatalf("stats height want %d, got %d", composerHeight, grid.Stats.Height)
+	if grid.Composer.Height != composerHeight {
+		t.Fatalf("composer height want %d, got %d", composerHeight, grid.Composer.Height)
+	}
+	if grid.Stats.Height != statsHeight {
+		t.Fatalf("stats height want %d, got %d", statsHeight, grid.Stats.Height)
 	}
 }
 
@@ -99,7 +102,7 @@ func TestCalculateDashboard_NarrowWidth_80Cols(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
 	// 80 cols is < 93 (minLeft 60 + minRight 32 + gap 1).
 	// Should split fluidly.
-	grid := mgr.CalculateDashboard(80, 35, 4, 6, 1)
+	grid := mgr.CalculateDashboard(80, 35, 4, 5, 1)
 
 	// Verify total width matches screen width exactly (no overflow).
 	totalW := grid.AgentOutput.Width + 1 + grid.ActivityFeed.Width // 1 for gap

@@ -843,6 +843,84 @@ func TestCommandPalette_PreservesTrailingArgs(t *testing.T) {
 	}
 }
 
+func TestCommandPalette_EnterInsertsArgCommandsWithoutSubmitting(t *testing.T) {
+	runner := &recordingRunnerAny{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.layout()
+
+	// Type "/c" to match /copy and /cd.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated := m2.(Model)
+	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	updated2 := m3.(Model)
+
+	if !updated2.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen true after typing '/c'")
+	}
+	if len(updated2.commandPaletteMatches) < 2 {
+		t.Fatalf("expected at least 2 matches for '/c', got %d", len(updated2.commandPaletteMatches))
+	}
+
+	// Move selection from /copy to /cd.
+	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated3 := m4.(Model)
+
+	// Press Enter - should autocomplete to "/cd " but not submit a turn.
+	m5, cmd := updated3.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated4 := m5.(Model)
+
+	if updated4.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen false after Enter")
+	}
+	if cmd != nil {
+		t.Fatalf("expected no cmd for insert-only /cd, got non-nil")
+	}
+	if updated4.turnInFlight {
+		t.Fatalf("expected turnInFlight false after insert-only /cd")
+	}
+	if got := updated4.single.Value(); got != "/cd " {
+		t.Fatalf("expected input %q, got %q", "/cd ", got)
+	}
+	if runner.lastMessage != "" {
+		t.Fatalf("expected runner not called, got %q", runner.lastMessage)
+	}
+}
+
+func TestCommandPalette_EnterInvokesPickerCommand_WhenNoArgs(t *testing.T) {
+	runner := &recordingRunnerAny{}
+	m := New(context.Background(), runner, make(chan events.Event))
+	m.layout()
+
+	// Type "/mo" to match /model.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated := m2.(Model)
+	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	updated2 := m3.(Model)
+	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	updated3 := m4.(Model)
+
+	if !updated3.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen true after typing '/mo'")
+	}
+
+	// Press Enter - should accept /model and open the picker (no runner submission).
+	m5, cmd := updated3.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated4 := m5.(Model)
+
+	if updated4.commandPaletteOpen {
+		t.Fatalf("expected commandPaletteOpen false after Enter")
+	}
+	if cmd != nil {
+		t.Fatalf("expected nil cmd from openModelPicker, got non-nil")
+	}
+	if !updated4.modelPickerOpen {
+		t.Fatalf("expected modelPickerOpen true after accepting /model")
+	}
+	if runner.lastMessage != "" {
+		t.Fatalf("expected runner not called, got %q", runner.lastMessage)
+	}
+}
+
 func TestModelPicker_OpensOnModelCommand(t *testing.T) {
 	runner := &recordingRunner{}
 	m := New(context.Background(), runner, make(chan events.Event))

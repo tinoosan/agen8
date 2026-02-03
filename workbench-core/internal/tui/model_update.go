@@ -636,19 +636,53 @@ func (m Model) keyCommandPaletteNav(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	case tea.KeyEnter:
-		// Autocomplete the selected command then either open a picker or submit.
-		m.autocompleteCommand()
-		txt := strings.TrimSpace(m.currentInputValue())
-		if txt == "" {
+		if len(m.commandPaletteMatches) == 0 {
 			return m, nil, true
 		}
-		// Use submitSingle/submitMultiline to ensure picker commands are handled correctly.
-		// These functions check for commands like /model, etc. and open pickers.
-		// Note: These functions handle clearing the input themselves, so we don't clear here.
-		if m.isMulti {
-			return m, m.submitMultiline(), true
+		// Enter accepts the highlighted command. If the user has already started typing
+		// arguments, Enter should still submit as before. If there are no args yet:
+		//   - picker/no-arg commands invoke immediately
+		//   - arg-taking commands only insert the command + trailing space
+		selected := m.commandPaletteSelected
+		if selected < 0 || selected >= len(m.commandPaletteMatches) {
+			selected = 0
 		}
-		return m, m.submitSingle(), true
+		selectedCmd := m.commandPaletteMatches[selected]
+
+		// Determine whether the user has already typed anything beyond the first token.
+		inputValue := strings.TrimSpace(m.currentInputValue())
+		fields := strings.Fields(inputValue)
+		firstToken := ""
+		if len(fields) > 0 {
+			firstToken = fields[0]
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(inputValue, firstToken))
+		hasRest := rest != ""
+
+		m.autocompleteCommand()
+
+		// If args exist, treat Enter as "submit" (existing behavior).
+		if hasRest {
+			if m.isMulti {
+				return m, m.submitMultiline(), true
+			}
+			return m, m.submitSingle(), true
+		}
+
+		// No args yet: only submit for commands that are useful with no args.
+		if commandPaletteInvokesWithoutArgs(selectedCmd) {
+			if m.isMulti {
+				return m, m.submitMultiline(), true
+			}
+			return m, m.submitSingle(), true
+		}
+
+		// Otherwise, keep input editable and add a trailing space for convenience.
+		txt := m.currentInputValue()
+		if strings.TrimSpace(txt) != "" && !strings.HasSuffix(txt, " ") {
+			m.setCurrentInputValue(txt + " ")
+		}
+		return m, nil, true
 	}
 	return m, nil, false
 }

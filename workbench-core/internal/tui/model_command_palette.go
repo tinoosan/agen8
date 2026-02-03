@@ -23,6 +23,15 @@ var availableCommands = []string{
 	"/plan",
 }
 
+func commandPaletteInvokesWithoutArgs(cmd string) bool {
+	switch strings.TrimSpace(cmd) {
+	case "/new", "/sessions", "/model", "/reasoning-effort", "/reasoning-summary", "/copy", "/editor", "/plan":
+		return true
+	default:
+		return false
+	}
+}
+
 func isExactCommand(s string) bool {
 	s = strings.TrimSpace(s)
 	if s == "" {

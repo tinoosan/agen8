@@ -232,7 +232,16 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, statsHeight,
 	grid.CurrentTask = m.spec(rightW, currentTaskH)
 	grid.Inbox = m.spec(rightW, inboxH)
 	grid.Outbox = m.spec(rightW, outboxH)
-	grid.Stats = m.spec(width, statsHeight)
+	// Stats is rendered as inline lines (no panel chrome). Use a raw spec with no frame/title budget.
+	grid.Stats = PanelSpec{
+		Width:         width,
+		Height:        statsHeight,
+		ContentWidth:  width,
+		ContentHeight: statsHeight,
+		FrameWidth:    0,
+		FrameHeight:   0,
+		TitleHeight:   0,
+	}
 	grid.Memory = m.spec(leftW, 0)
 	return grid
 }

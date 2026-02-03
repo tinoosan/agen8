@@ -187,8 +187,8 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	stats := monitorStats{started: time.Now()}
 
 	in := textarea.New()
-	in.SetHeight(2)
-	in.CharLimit = 500
+	in.SetHeight(6)
+	in.CharLimit = 0
 	in.ShowLineNumbers = false
 	in.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	in.FocusedStyle.Placeholder = kit.StyleDim
@@ -384,8 +384,8 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.focusedPanel == panelComposer {
 			// Handle command palette key events first
-			if m.handleCommandPaletteKey(msg) {
-				return m, nil
+			if cmd, ok := m.handleCommandPaletteKey(msg); ok {
+				return m, cmd
 			}
 
 			key := strings.ToLower(msg.String())
@@ -402,7 +402,6 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if cmd == "" {
 					return m, nil
 				}
-				cmd = strings.Join(strings.Fields(cmd), " ")
 				return m, m.handleCommand(cmd)
 			}
 		}
@@ -562,15 +561,16 @@ func (m *monitorModel) View() string {
 func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine string) string {
 	main := m.renderMainBodyDashboard(grid)
 	statusBar := m.renderStatusBar(grid.ScreenWidth)
-	composerRow := m.renderComposerRowWithStats(grid)
-	sections := []string{headerLine, "", main, "", composerRow, statusBar}
+	composer := m.renderComposer(grid.Composer)
+	stats := m.renderStatsInline(grid.Stats.Width)
+	sections := []string{headerLine, "", main, "", composer, stats, statusBar}
 	if m.runStatus != types.StatusRunning {
 		w := m.width
 		if w <= 0 {
 			w = 80
 		}
 		warning := m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render("Agent is not active; start the daemon first or use --agent-id to attach to the running agent."))
-		sections = []string{headerLine, warning, "", main, "", composerRow, statusBar}
+		sections = []string{headerLine, warning, "", main, "", composer, stats, statusBar}
 	}
 	final := lipgloss.JoinVertical(lipgloss.Left, sections...)
 	// Guarantee view never exceeds terminal width (handles m.width==0 or any section overflow).
@@ -1521,10 +1521,6 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 
 	status := lipgloss.NewStyle().Width(contentW).Render(statusLeft)
 
-	// Help hints
-	help := "Tab: focus  |  Ctrl+Enter: submit  |  ?: help  |  /commands"
-	help = kit.StyleDim.Render(kit.TruncateRight(help, contentW))
-
 	// Build content parts: status, palette (if open), input
 	contentParts := []string{status}
 
@@ -1533,7 +1529,7 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 		contentParts = append(contentParts, "", palette)
 	}
 
-	contentParts = append(contentParts, m.input.View(), help)
+	contentParts = append(contentParts, m.input.View())
 
 	content := lipgloss.JoinVertical(lipgloss.Left, contentParts...)
 
@@ -1541,21 +1537,6 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 		Width(spec.InnerWidth()).
 		Height(spec.InnerHeight()).
 		Render(content)
-}
-
-func (m *monitorModel) renderComposerRowWithStats(grid layoutmgr.GridLayout) string {
-	composer := m.renderComposer(grid.Composer)
-	if grid.Stats.Height <= 0 || grid.Stats.Width <= 0 {
-		return composer
-	}
-	stats := m.renderStatsPanel(grid.Stats)
-	gap := strings.Repeat(" ", 1)
-	row := lipgloss.JoinHorizontal(lipgloss.Top, composer, gap, stats)
-	width := grid.ScreenWidth
-	if width <= 0 {
-		width = 80
-	}
-	return lipgloss.NewStyle().MaxWidth(width).Render(row)
 }
 
 func (m *monitorModel) renderStatsPanel(spec layoutmgr.PanelSpec) string {
@@ -1566,6 +1547,22 @@ func (m *monitorModel) renderStatsPanel(spec layoutmgr.PanelSpec) string {
 		Width(spec.InnerWidth()).
 		Height(spec.InnerHeight()).
 		Render(m.styles.sectionTitle.Render("Stats") + "\n" + renderStats(m.stats))
+}
+
+func (m *monitorModel) renderStatsInline(width int) string {
+	w := width
+	if w <= 0 {
+		w = m.width
+	}
+	if w <= 0 {
+		w = 80
+	}
+	lines := strings.Split(renderStats(m.stats), "\n")
+	for i := range lines {
+		lines[i] = kit.TruncateRight(strings.TrimRight(lines[i], " \t"), imax(1, w-2))
+		lines[i] = m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render(lines[i]))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *monitorModel) updateFocus() {
@@ -1670,10 +1667,13 @@ func (m *monitorModel) layout() layoutmgr.GridLayout {
 	if m.isCompactMode() {
 		return manager.CalculateCompact(m.width, m.height, composerHeight)
 	}
+	// Stats panel is rendered below the composer (full width).
+	statsHeight := lipgloss.Height(renderStats(m.stats))
+	if statsHeight < 1 {
+		statsHeight = 1
+	}
 	statusBarH := lipgloss.Height(m.renderStatusBar(m.width))
-	// Tasks tab uses equal distribution; outboxHeight is no longer needed for sizing.
-	outboxHeight := 0
-	return manager.CalculateDashboard(m.width, m.height, composerHeight, outboxHeight, statusBarH)
+	return manager.CalculateDashboard(m.width, m.height, composerHeight, statsHeight, statusBarH)
 }
 
 func (m *monitorModel) calculatePanelHeight(contentRows int, isEmpty bool, isFocused bool) int {
