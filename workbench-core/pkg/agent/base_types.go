@@ -3,20 +3,13 @@ package agent
 import (
 	"context"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 // HostExecutor is the host boundary for executing one host primitive.
 type HostExecutor interface {
 	Exec(ctx context.Context, req types.HostOpRequest) types.HostOpResponse
-}
-
-// HostExecFunc adapts a function to HostExecutor so hosts can pass a standalone function.
-type HostExecFunc func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse
-
-func (f HostExecFunc) Exec(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
-	return f(ctx, req)
 }
 
 // PromptSource produces an augmented system prompt per agent step.
@@ -33,10 +26,10 @@ func (f PromptSourceFunc) SystemPrompt(ctx context.Context, basePrompt string, s
 
 // Hooks are optional observability callbacks invoked by the agent loop.
 type Hooks struct {
-	OnLLMUsage    func(step int, usage llm.LLMUsage)
-	OnWebSearch   func(step int, citations []llm.LLMCitation)
+	OnLLMUsage    func(step int, usage llmtypes.LLMUsage)
+	OnWebSearch   func(step int, citations []llmtypes.LLMCitation)
 	OnToken       func(step int, text string)
-	OnStreamChunk func(step int, chunk llm.LLMStreamChunk)
+	OnStreamChunk func(step int, chunk llmtypes.LLMStreamChunk)
 	OnStep        func(step int, model string, reasoningSummary string)
 	Logf          func(format string, args ...any)
 }

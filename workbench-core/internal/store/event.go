@@ -65,7 +65,30 @@ func AppendEvent(cfg config.Config, runID, eventType, message string, data map[s
 		return err
 	}
 
+	origin := ""
+	if data != nil {
+		if rawOrigin, ok := data["origin"]; ok {
+			origin = strings.TrimSpace(rawOrigin)
+		}
+		if origin != "" {
+			// Never mutate the input map.
+			if len(data) == 1 {
+				data = nil
+			} else {
+				out := make(map[string]string, len(data)-1)
+				for k, v := range data {
+					if k == "origin" {
+						continue
+					}
+					out[k] = v
+				}
+				data = out
+			}
+		}
+	}
+
 	event := types.NewEventRecord(runID, eventType, message, data)
+	event.Origin = origin
 	b, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("error marshalling event: %w", err)

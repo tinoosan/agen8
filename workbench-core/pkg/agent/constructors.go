@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	agenttools "github.com/tinoosan/workbench-core/pkg/agent/tools"
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	hosttools "github.com/tinoosan/workbench-core/pkg/agent/hosttools"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 )
 
 // DefaultConfig returns the default agent configuration.
@@ -14,7 +14,7 @@ func DefaultConfig() AgentConfig {
 }
 
 // NewAgent constructs an agent from explicit dependencies and configuration.
-func NewAgent(llmClient llm.LLMClient, exec HostExecutor, cfg AgentConfig) (Agent, error) {
+func NewAgent(llmClient llmtypes.LLMClient, exec HostExecutor, cfg AgentConfig) (Agent, error) {
 	if llmClient == nil {
 		return nil, errMissingLLM()
 	}
@@ -70,9 +70,9 @@ func NewDefaultAgent(opts ...Option) (Agent, error) {
 	return NewAgent(cfg.LLM, cfg.Exec, cfg.AgentConfig)
 }
 
-// DefaultToolRegistry returns a registry seeded with default tools.
-func DefaultToolRegistry() (*ToolRegistry, error) {
-	registry := NewToolRegistry()
+// DefaultHostToolRegistry returns a registry seeded with default tools.
+func DefaultHostToolRegistry() (*HostToolRegistry, error) {
+	registry := NewHostToolRegistry()
 	for _, tool := range defaultHostTools() {
 		if err := registry.Register(tool); err != nil {
 			return nil, err
@@ -81,33 +81,33 @@ func DefaultToolRegistry() (*ToolRegistry, error) {
 	return registry, nil
 }
 
-func registryFromConfig(cfg AgentConfig) (*ToolRegistry, []llm.Tool, error) {
-	extraTools := append([]llm.Tool(nil), cfg.ExtraTools...)
-	if cfg.ToolRegistry == nil {
-		registry, err := DefaultToolRegistry()
+func registryFromConfig(cfg AgentConfig) (*HostToolRegistry, []llmtypes.Tool, error) {
+	extraTools := append([]llmtypes.Tool(nil), cfg.ExtraTools...)
+	if cfg.HostToolRegistry == nil {
+		registry, err := DefaultHostToolRegistry()
 		if err != nil {
 			return nil, nil, err
 		}
 		return registry, extraTools, nil
 	}
 
-	registry := cfg.ToolRegistry.Clone()
+	registry := cfg.HostToolRegistry.Clone()
 	if registry == nil {
-		registry = NewToolRegistry()
+		registry = NewHostToolRegistry()
 	}
 	return registry, extraTools, nil
 }
 
 func defaultHostTools() []HostTool {
 	return []HostTool{
-		&agenttools.FSListTool{},
-		&agenttools.FSReadTool{},
-		&agenttools.FSSearchTool{},
-		&agenttools.FSWriteTool{},
-		&agenttools.FSEditTool{},
-		&agenttools.FSPatchTool{},
-		&agenttools.ShellExecTool{},
-		&agenttools.HTTPFetchTool{},
+		&hosttools.FSListTool{},
+		&hosttools.FSReadTool{},
+		&hosttools.FSSearchTool{},
+		&hosttools.FSWriteTool{},
+		&hosttools.FSEditTool{},
+		&hosttools.FSPatchTool{},
+		&hosttools.ShellExecTool{},
+		&hosttools.HTTPFetchTool{},
 	}
 }
 

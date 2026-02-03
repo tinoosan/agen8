@@ -23,13 +23,7 @@ type HostOpObserver interface {
 }
 
 type HostOpMiddleware interface {
-	Handle(ctx context.Context, req types.HostOpRequest, next HostExecFunc) types.HostOpResponse
-}
-
-type HostExecFunc func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse
-
-func (f HostExecFunc) Exec(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
-	return f(ctx, req)
+	Handle(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse
 }
 
 type ExecutorOptions struct {
@@ -46,18 +40,18 @@ type ExecutorOptions struct {
 // ChainExecutor composes middleware around a base executor.
 func ChainExecutor(base agent.HostExecutor, middleware ...HostOpMiddleware) agent.HostExecutor {
 	if base == nil {
-		return HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "host executor missing"}
 		})
 	}
 	if len(middleware) == 0 {
 		return base
 	}
-	next := HostExecFunc(base.Exec)
+	next := types.HostExecFunc(base.Exec)
 	for i := len(middleware) - 1; i >= 0; i-- {
 		mw := middleware[i]
 		inner := next
-		next = HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		next = types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 			return mw.Handle(ctx, req, inner)
 		})
 	}
@@ -112,7 +106,7 @@ type eventMiddleware struct {
 	metaKey   opContextKey
 }
 
-func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, next HostExecFunc) types.HostOpResponse {
+func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
 	if m == nil || m.emit == nil {
 		return next(ctx, req)
 	}
@@ -362,7 +356,7 @@ type diffMiddleware struct {
 	metaKey opContextKey
 }
 
-func (m *diffMiddleware) Handle(ctx context.Context, req types.HostOpRequest, next HostExecFunc) types.HostOpResponse {
+func (m *diffMiddleware) Handle(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
 	meta, _ := ctx.Value(m.metaKey).(*opContext)
 	if meta != nil && m.fs != nil {
 		if (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend || req.Op == types.HostOpFSEdit || req.Op == types.HostOpFSPatch) && strings.TrimSpace(req.Path) != "" {
@@ -431,7 +425,7 @@ type observerMiddleware struct {
 	artifactObserve func(path string)
 }
 
-func (m *observerMiddleware) Handle(ctx context.Context, req types.HostOpRequest, next HostExecFunc) types.HostOpResponse {
+func (m *observerMiddleware) Handle(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
 	resp := next(ctx, req)
 	if resp.Ok && (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) {
 		if m.artifactObserve != nil {
@@ -450,7 +444,7 @@ type guardMiddleware struct {
 	guard func(req types.HostOpRequest) *types.HostOpResponse
 }
 
-func (m *guardMiddleware) Handle(ctx context.Context, req types.HostOpRequest, next HostExecFunc) types.HostOpResponse {
+func (m *guardMiddleware) Handle(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
 	if m == nil || m.guard == nil {
 		return next(ctx, req)
 	}

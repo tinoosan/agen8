@@ -21,12 +21,15 @@ type EventRecord struct {
 	Message string `json:"message"`
 	// Data contains additional structured metadata related to the event.
 	Data map[string]string `json:"data,omitempty"`
-}
+	// Origin identifies the source of the event (e.g. "agent", "user", "env").
+	Origin string `json:"origin,omitempty"`
 
-// Event is kept for backwards compatibility. Prefer EventRecord for persisted events.
-//
-// Deprecated: use EventRecord.
-type Event = EventRecord
+	// Emission control (not persisted)
+	StoreData map[string]string `json:"-"`
+	Console   *bool             `json:"-"`
+	Store     *bool             `json:"-"`
+	History   *bool             `json:"-"`
+}
 
 // NewEventRecord initializes a new EventRecord with a unique ID and the current timestamp.
 func NewEventRecord(runID, eventType, message string, data map[string]string) EventRecord {
@@ -38,11 +41,4 @@ func NewEventRecord(runID, eventType, message string, data map[string]string) Ev
 		Message:   message,
 		Data:      data,
 	}
-}
-
-// NewEvent initializes a new EventRecord.
-//
-// Deprecated: use NewEventRecord.
-func NewEvent(runID, eventType, message string, data map[string]string) EventRecord {
-	return NewEventRecord(runID, eventType, message, data)
 }

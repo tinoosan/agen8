@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -18,34 +18,34 @@ func (a *DefaultAgent) ExecHostOp(ctx context.Context, req types.HostOpRequest) 
 	return a.Exec.Exec(ctx, req)
 }
 
-func (a *DefaultAgent) GetModel() string                { return a.Model }
-func (a *DefaultAgent) SetModel(v string)               { a.Model = v }
-func (a *DefaultAgent) WebSearchEnabled() bool          { return a.EnableWebSearch }
-func (a *DefaultAgent) SetEnableWebSearch(v bool)       { a.EnableWebSearch = v }
-func (a *DefaultAgent) GetApprovalsMode() string        { return a.ApprovalsMode }
-func (a *DefaultAgent) SetApprovalsMode(v string)       { a.ApprovalsMode = v }
-func (a *DefaultAgent) GetReasoningEffort() string      { return a.ReasoningEffort }
-func (a *DefaultAgent) SetReasoningEffort(v string)     { a.ReasoningEffort = v }
-func (a *DefaultAgent) GetReasoningSummary() string     { return a.ReasoningSummary }
-func (a *DefaultAgent) SetReasoningSummary(v string)    { a.ReasoningSummary = v }
-func (a *DefaultAgent) GetSystemPrompt() string         { return a.SystemPrompt }
-func (a *DefaultAgent) SetSystemPrompt(v string)        { a.SystemPrompt = v }
-func (a *DefaultAgent) GetHooks() *Hooks                { return &a.Hooks }
-func (a *DefaultAgent) SetHooks(h Hooks)                { a.Hooks = h }
-func (a *DefaultAgent) GetToolRegistry() *ToolRegistry  { return a.ToolRegistry }
-func (a *DefaultAgent) SetToolRegistry(r *ToolRegistry) { a.ToolRegistry = r }
-func (a *DefaultAgent) GetExtraTools() []llm.Tool       { return a.ExtraTools }
-func (a *DefaultAgent) SetExtraTools(tools []llm.Tool)  { a.ExtraTools = tools }
+func (a *DefaultAgent) GetModel() string                       { return a.Model }
+func (a *DefaultAgent) SetModel(v string)                      { a.Model = v }
+func (a *DefaultAgent) WebSearchEnabled() bool                 { return a.EnableWebSearch }
+func (a *DefaultAgent) SetEnableWebSearch(v bool)              { a.EnableWebSearch = v }
+func (a *DefaultAgent) GetApprovalsMode() string               { return a.ApprovalsMode }
+func (a *DefaultAgent) SetApprovalsMode(v string)              { a.ApprovalsMode = v }
+func (a *DefaultAgent) GetReasoningEffort() string             { return a.ReasoningEffort }
+func (a *DefaultAgent) SetReasoningEffort(v string)            { a.ReasoningEffort = v }
+func (a *DefaultAgent) GetReasoningSummary() string            { return a.ReasoningSummary }
+func (a *DefaultAgent) SetReasoningSummary(v string)           { a.ReasoningSummary = v }
+func (a *DefaultAgent) GetSystemPrompt() string                { return a.SystemPrompt }
+func (a *DefaultAgent) SetSystemPrompt(v string)               { a.SystemPrompt = v }
+func (a *DefaultAgent) GetHooks() *Hooks                       { return &a.Hooks }
+func (a *DefaultAgent) SetHooks(h Hooks)                       { a.Hooks = h }
+func (a *DefaultAgent) GetToolRegistry() ToolRegistryProvider  { return a.ToolRegistry }
+func (a *DefaultAgent) SetToolRegistry(r ToolRegistryProvider) { a.ToolRegistry = r }
+func (a *DefaultAgent) GetExtraTools() []llmtypes.Tool         { return a.ExtraTools }
+func (a *DefaultAgent) SetExtraTools(tools []llmtypes.Tool)    { a.ExtraTools = tools }
 func (a *DefaultAgent) Clone() Agent {
 	if a == nil {
 		return nil
 	}
 	cl := *a
 	if a.ToolRegistry != nil {
-		cl.ToolRegistry = a.ToolRegistry.Clone()
+		cl.ToolRegistry = cloneToolRegistry(a.ToolRegistry)
 	}
 	if a.ExtraTools != nil {
-		cl.ExtraTools = append([]llm.Tool(nil), a.ExtraTools...)
+		cl.ExtraTools = append([]llmtypes.Tool(nil), a.ExtraTools...)
 	}
 	return &cl
 }
@@ -65,11 +65,11 @@ func (a *DefaultAgent) Config() AgentConfig {
 		MaxTokens:        a.MaxTokens,
 		Hooks:            a.Hooks,
 	}
-	if a.ToolRegistry != nil {
-		cfg.ToolRegistry = a.ToolRegistry.Clone()
+	if hr := hostToolRegistryFromProvider(a.ToolRegistry); hr != nil {
+		cfg.HostToolRegistry = hr.Clone()
 	}
 	if a.ExtraTools != nil {
-		cfg.ExtraTools = append([]llm.Tool(nil), a.ExtraTools...)
+		cfg.ExtraTools = append([]llmtypes.Tool(nil), a.ExtraTools...)
 	}
 	return cfg
 }
@@ -79,4 +79,25 @@ func (a *DefaultAgent) CloneWithConfig(cfg AgentConfig) (Agent, error) {
 		return nil, fmt.Errorf("agent is nil")
 	}
 	return NewAgent(a.LLM, a.Exec, cfg)
+}
+
+func cloneToolRegistry(r ToolRegistryProvider) ToolRegistryProvider {
+	if r == nil {
+		return nil
+	}
+	if hr, ok := r.(*HostToolRegistry); ok {
+		return hr.Clone()
+	}
+	if c, ok := r.(interface{ Clone() ToolRegistryProvider }); ok {
+		return c.Clone()
+	}
+	return r
+}
+
+func hostToolRegistryFromProvider(r ToolRegistryProvider) *HostToolRegistry {
+	if r == nil {
+		return nil
+	}
+	hr, _ := r.(*HostToolRegistry)
+	return hr
 }

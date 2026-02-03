@@ -2,8 +2,9 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -14,8 +15,14 @@ import (
 // The interactive TUI uses TurnRunner for a single user turn plus resume/session helpers.
 type Runner interface {
 	Run(ctx context.Context, goal string) (RunResult, error)
-	RunConversation(ctx context.Context, msgs []llm.LLMMessage) (final RunResult, updated []llm.LLMMessage, steps int, err error)
+	RunConversation(ctx context.Context, msgs []llmtypes.LLMMessage) (final RunResult, updated []llmtypes.LLMMessage, steps int, err error)
 	ExecHostOp(ctx context.Context, req types.HostOpRequest) types.HostOpResponse
+}
+
+// ToolRegistryProvider supplies tool definitions and resolves tool calls into host ops.
+type ToolRegistryProvider interface {
+	Definitions() []llmtypes.Tool
+	Dispatch(ctx context.Context, name string, args json.RawMessage) (types.HostOpRequest, error)
 }
 
 // Configurable exposes agent configuration and cloning helpers for callers that need them.
@@ -38,10 +45,10 @@ type Configurable interface {
 	SetHooks(Hooks)
 
 	// Tools
-	GetToolRegistry() *ToolRegistry
-	SetToolRegistry(*ToolRegistry)
-	GetExtraTools() []llm.Tool
-	SetExtraTools([]llm.Tool)
+	GetToolRegistry() ToolRegistryProvider
+	SetToolRegistry(ToolRegistryProvider)
+	GetExtraTools() []llmtypes.Tool
+	SetExtraTools([]llmtypes.Tool)
 
 	// Clone returns a shallow copy suitable for per-task customization.
 	Clone() Agent

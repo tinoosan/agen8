@@ -15,7 +15,7 @@ import (
 
 func TestGuardMiddleware_ShortCircuits(t *testing.T) {
 	called := false
-	base := HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		called = true
 		return types.HostOpResponse{Op: req.Op, Ok: true}
 	})

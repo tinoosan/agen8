@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/tools"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
@@ -19,8 +19,8 @@ type AgentConfig struct {
 	SystemPrompt     string
 	PromptSource     PromptSource
 	ToolManifests    []tools.ToolManifest
-	ToolRegistry     *ToolRegistry
-	ExtraTools       []llm.Tool
+	HostToolRegistry *HostToolRegistry
+	ExtraTools       []llmtypes.Tool
 	MaxTokens        int
 	Hooks            Hooks
 }
@@ -34,7 +34,7 @@ func (cfg *AgentConfig) validate() error {
 
 // BuildConfig captures dependencies plus the agent configuration.
 type BuildConfig struct {
-	LLM  llm.LLMClient
+	LLM  llmtypes.LLMClient
 	Exec HostExecutor
 	AgentConfig
 }
@@ -43,7 +43,7 @@ type BuildConfig struct {
 type Option func(*BuildConfig) error
 
 // WithLLM sets the LLM client (required).
-func WithLLM(c llm.LLMClient) Option {
+func WithLLM(c llmtypes.LLMClient) Option {
 	return func(cfg *BuildConfig) error {
 		cfg.LLM = c
 		return nil
@@ -122,14 +122,14 @@ func WithMaxTokens(n int) Option {
 	}
 }
 
-func WithToolRegistry(r *ToolRegistry) Option {
+func WithHostToolRegistry(r *HostToolRegistry) Option {
 	return func(cfg *BuildConfig) error {
-		cfg.ToolRegistry = r
+		cfg.HostToolRegistry = r
 		return nil
 	}
 }
 
-func WithExtraTools(tools []llm.Tool) Option {
+func WithExtraTools(tools []llmtypes.Tool) Option {
 	return func(cfg *BuildConfig) error {
 		cfg.ExtraTools = tools
 		return nil

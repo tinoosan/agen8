@@ -1,6 +1,8 @@
 package types
 
 import (
+	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -9,11 +11,41 @@ import (
 // RunStatus represents the current state of a workbench run.
 type RunStatus string
 
+func (s *RunStatus) UnmarshalJSON(b []byte) error {
+	if s == nil {
+		return nil
+	}
+	if strings.TrimSpace(string(b)) == "null" {
+		*s = ""
+		return nil
+	}
+	var raw string
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	switch raw {
+	case "done":
+		*s = StatusSucceeded
+	case string(StatusRunning):
+		*s = StatusRunning
+	case string(StatusSucceeded):
+		*s = StatusSucceeded
+	case string(StatusFailed):
+		*s = StatusFailed
+	case string(StatusCanceled):
+		*s = StatusCanceled
+	default:
+		*s = RunStatus(raw)
+	}
+	return nil
+}
+
 const (
 	// StatusRunning indicates the run is currently in progress.
 	StatusRunning RunStatus = "running"
-	// StatusDone indicates the run has completed successfully.
-	StatusDone RunStatus = "done"
+	// StatusSucceeded indicates the run has completed successfully.
+	StatusSucceeded RunStatus = "succeeded"
 	// StatusFailed indicates the run stopped due to an error.
 	StatusFailed RunStatus = "failed"
 	// StatusCanceled indicates the run was interrupted by the user or host.
@@ -22,12 +54,16 @@ const (
 	StatusCanceled RunStatus = "canceled"
 )
 
+// StatusDone is kept for migration; prefer StatusSucceeded.
+const StatusDone = StatusSucceeded
+
 // RunStatuses maps status strings to their typed RunStatus values.
 var RunStatuses = map[string]RunStatus{
-	string(StatusRunning):  StatusRunning,
-	string(StatusDone):     StatusDone,
-	string(StatusFailed):   StatusFailed,
-	string(StatusCanceled): StatusCanceled,
+	string(StatusRunning):   StatusRunning,
+	string(StatusSucceeded): StatusSucceeded,
+	string(StatusFailed):    StatusFailed,
+	string(StatusCanceled):  StatusCanceled,
+	"done":                  StatusSucceeded,
 }
 
 // Run represents the state and metadata of a single workbench execution.
@@ -79,8 +115,8 @@ type RunRuntimeConfig struct {
 	Model string `json:"model,omitempty"`
 
 	// Context budgets applied by the PromptUpdater per step.
-	MaxTraceBytes   int `json:"maxTraceBytes,omitempty"`
-	MaxMemoryBytes  int `json:"maxMemoryBytes,omitempty"`
+	MaxTraceBytes  int `json:"maxTraceBytes,omitempty"`
+	MaxMemoryBytes int `json:"maxMemoryBytes,omitempty"`
 
 	// RecentHistoryPairs controls how much recent /history is injected on resume.
 	RecentHistoryPairs int `json:"recentHistoryPairs,omitempty"`

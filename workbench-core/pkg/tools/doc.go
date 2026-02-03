@@ -19,7 +19,7 @@
 //
 // # Runtime Flow
 //
-//  1. Hosts register tools with a `ToolRegistry` implementation (`MapRegistry` is
+//  1. Hosts register tools with a `ToolInvokerRegistry` implementation (`MapRegistry` is
 //     useful for tests). Builtins use `Register` helpers so they can be verified
 //     before being exposed to the agent.
 //  2. When the agent issues a `tool.run` host operation, the `Orchestrator` validates the
