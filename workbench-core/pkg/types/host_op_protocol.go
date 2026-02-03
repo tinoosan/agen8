@@ -29,13 +29,13 @@ const (
 	// HostOpToolRun runs a discovered tool via the ToolRunner.
 	HostOpToolRun = "tool.run"
 	// HostOpShellExec executes a shell command.
-	HostOpShellExec = "shell_exec"
+	HostOpShellExec = "shell.exec"
 	// HostOpHTTPFetch issues an HTTP request.
-	HostOpHTTPFetch = "http_fetch"
-	// HostOpTrace manages reasoning traces.
-	HostOpTrace = "trace"
+	HostOpHTTPFetch = "http.fetch"
+	// HostOpTrace runs a trace action (e.g. events.latest).
+	HostOpTrace = "trace.run"
 	// HostOpFinal ends the agent loop for a user turn.
-	HostOpFinal = "final"
+	HostOpFinal = "agent.final"
 
 	CommandRejectedErrorCode    = "command_rejected"
 	CommandRejectedErrorMessage = "User denied this command. This is a normal part of the workflow. Do not treat this as a system failure. You should propose an alternative command, ask the user for specialized instructions, or proceed with independent work if possible."
@@ -236,6 +236,12 @@ func normalizeHostOp(op string) string {
 		return HostOpHTTPFetch
 	case "trace":
 		return HostOpTrace
+	case "trace.run":
+		return HostOpTrace
+	case "final":
+		return HostOpFinal
+	case "agent.final":
+		return HostOpFinal
 	default:
 		return op
 	}

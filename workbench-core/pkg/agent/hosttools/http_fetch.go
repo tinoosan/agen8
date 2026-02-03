@@ -1,4 +1,4 @@
-package agenttools
+package hosttools
 
 import (
 	"context"
@@ -6,17 +6,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 // HTTPFetchTool performs an HTTP request.
 type HTTPFetchTool struct{}
 
-func (t *HTTPFetchTool) Definition() llm.Tool {
-	return llm.Tool{
+func (t *HTTPFetchTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "http_fetch",
 			Description: "[CORE] Make an HTTP request. Returns status, headers, and body.",
 			Strict:      false,

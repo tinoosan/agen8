@@ -1,20 +1,20 @@
-package agenttools
+package hosttools
 
 import (
 	"context"
 	"encoding/json"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 // FSWriteTool writes a file in the VFS.
 type FSWriteTool struct{}
 
-func (t *FSWriteTool) Definition() llm.Tool {
-	return llm.Tool{
+func (t *FSWriteTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "fs_write",
 			Description: "[DIRECT] Write/create a file at a VFS path. Typical target: /project/...",
 			Strict:      true,

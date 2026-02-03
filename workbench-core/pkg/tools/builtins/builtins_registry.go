@@ -42,7 +42,7 @@ func registerBuiltin(def BuiltinDef) {
 	builtinDefs = append(builtinDefs, def)
 }
 
-// BuiltinInvokerRegistry constructs an in-memory ToolRegistry for executable builtins.
+// BuiltinInvokerRegistry constructs an in-memory ToolInvokerRegistry for executable builtins.
 func BuiltinInvokerRegistry(cfg BuiltinConfig) pkgtools.MapRegistry {
 	out := make(pkgtools.MapRegistry)
 

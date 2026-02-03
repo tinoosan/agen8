@@ -15,12 +15,12 @@ import (
 
 type Orchestrator struct {
 	Results      ResultWriter
-	ToolRegistry ToolRegistry
+	ToolRegistry ToolInvokerRegistry
 }
 
 type ResultWriter = ports.ResultWriter
 
-type ToolRegistry interface {
+type ToolInvokerRegistry interface {
 	Get(toolId ToolID) (ToolInvoker, bool)
 }
 
@@ -73,7 +73,7 @@ func (r *Orchestrator) Run(ctx context.Context, toolId ToolID, actionId string, 
 		return ToolResponse{}, fmt.Errorf("orchestrator ResultWriter is required")
 	}
 	if r.ToolRegistry == nil {
-		return ToolResponse{}, fmt.Errorf("orchestrator ToolRegistry is required")
+		return ToolResponse{}, fmt.Errorf("orchestrator ToolInvokerRegistry is required")
 	}
 	if err := nonEmpty("toolId", toolId.String()); err != nil {
 		return ToolResponse{}, err

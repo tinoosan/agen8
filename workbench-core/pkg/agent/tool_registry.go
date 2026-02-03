@@ -6,19 +6,19 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
-// ToolRegistry stores host tools and optional routes for manifest-based tools.
-type ToolRegistry struct {
+// HostToolRegistry stores host tools and optional routes for manifest-based tools.
+type HostToolRegistry struct {
 	tools  map[string]HostTool
 	routes map[string]ToolRoute
 }
 
-// NewToolRegistry constructs an empty registry.
-func NewToolRegistry() *ToolRegistry {
-	return &ToolRegistry{
+// NewHostToolRegistry constructs an empty registry.
+func NewHostToolRegistry() *HostToolRegistry {
+	return &HostToolRegistry{
 		tools:  make(map[string]HostTool),
 		routes: make(map[string]ToolRoute),
 	}
@@ -26,11 +26,11 @@ func NewToolRegistry() *ToolRegistry {
 
 // Clone returns a shallow copy of the registry with copies of the maps so mutations
 // on the clone do not affect the original.
-func (r *ToolRegistry) Clone() *ToolRegistry {
+func (r *HostToolRegistry) Clone() *HostToolRegistry {
 	if r == nil {
 		return nil
 	}
-	out := NewToolRegistry()
+	out := NewHostToolRegistry()
 	for k, v := range r.tools {
 		out.tools[k] = v
 	}
@@ -41,7 +41,7 @@ func (r *ToolRegistry) Clone() *ToolRegistry {
 }
 
 // Register adds a HostTool to the registry by its Definition() name.
-func (r *ToolRegistry) Register(tool HostTool) error {
+func (r *HostToolRegistry) Register(tool HostTool) error {
 	if r == nil {
 		return fmt.Errorf("tool registry is nil")
 	}
@@ -61,7 +61,7 @@ func (r *ToolRegistry) Register(tool HostTool) error {
 }
 
 // RegisterRoutes adds manifest-based tool routes for function dispatch.
-func (r *ToolRegistry) RegisterRoutes(routes map[string]ToolRoute) {
+func (r *HostToolRegistry) RegisterRoutes(routes map[string]ToolRoute) {
 	if r == nil || routes == nil {
 		return
 	}
@@ -77,11 +77,11 @@ func (r *ToolRegistry) RegisterRoutes(routes map[string]ToolRoute) {
 }
 
 // Definitions returns all registered tool definitions.
-func (r *ToolRegistry) Definitions() []llm.Tool {
+func (r *HostToolRegistry) Definitions() []llmtypes.Tool {
 	if r == nil {
 		return nil
 	}
-	out := make([]llm.Tool, 0, len(r.tools))
+	out := make([]llmtypes.Tool, 0, len(r.tools))
 	for _, tool := range r.tools {
 		out = append(out, tool.Definition())
 	}
@@ -89,7 +89,7 @@ func (r *ToolRegistry) Definitions() []llm.Tool {
 }
 
 // Dispatch resolves a tool call to a HostOpRequest.
-func (r *ToolRegistry) Dispatch(ctx context.Context, name string, args json.RawMessage) (types.HostOpRequest, error) {
+func (r *HostToolRegistry) Dispatch(ctx context.Context, name string, args json.RawMessage) (types.HostOpRequest, error) {
 	if r == nil {
 		return types.HostOpRequest{}, fmt.Errorf("tool registry is nil")
 	}

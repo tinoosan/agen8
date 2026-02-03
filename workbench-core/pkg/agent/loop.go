@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
 // DefaultAgent is the minimalist streaming loop: stream the model response, execute its tool calls, and return the final text.
 type DefaultAgent struct {
-	LLM  llm.LLMClient
+	LLM  llmtypes.LLMClient
 	Exec HostExecutor
 
 	Model            string
@@ -25,19 +25,19 @@ type DefaultAgent struct {
 	PromptSource     PromptSource
 	Hooks            Hooks
 	MaxTokens        int
-	ExtraTools       []llm.Tool
-	ToolRegistry     *ToolRegistry
+	ExtraTools       []llmtypes.Tool
+	ToolRegistry     ToolRegistryProvider
 }
 
 // Compile-time check: DefaultAgent implements Agent.
 var _ Agent = (*DefaultAgent)(nil)
 
 // RunConversation executes the agent loop for an existing conversation.
-func (a *DefaultAgent) RunConversation(ctx context.Context, msgs []llm.LLMMessage) (final RunResult, updated []llm.LLMMessage, steps int, err error) {
+func (a *DefaultAgent) RunConversation(ctx context.Context, msgs []llmtypes.LLMMessage) (final RunResult, updated []llmtypes.LLMMessage, steps int, err error) {
 	return a.runConversation(ctx, msgs, 1)
 }
 
-func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessage, startStep int) (final RunResult, updated []llm.LLMMessage, steps int, err error) {
+func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMMessage, startStep int) (final RunResult, updated []llmtypes.LLMMessage, steps int, err error) {
 	if a == nil || a.LLM == nil {
 		return RunResult{}, nil, 0, fmt.Errorf("agent LLM is required")
 	}
@@ -56,12 +56,12 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 		baseSystem = DefaultSystemPrompt()
 	}
 
-	msgs = append([]llm.LLMMessage(nil), msgs...)
+	msgs = append([]llmtypes.LLMMessage(nil), msgs...)
 	if startStep < 1 {
 		startStep = 1
 	}
 
-	hostOpTools := []llm.Tool{FinalAnswerTool()}
+	hostOpTools := []llmtypes.Tool{FinalAnswerTool()}
 	if a.ToolRegistry != nil {
 		hostOpTools = append(hostOpTools, a.ToolRegistry.Definitions()...)
 	}
@@ -79,7 +79,7 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 			}
 			system = updatedSystem
 		}
-		req := llm.LLMRequest{
+		req := llmtypes.LLMRequest{
 			Model:            a.Model,
 			System:           system,
 			Messages:         msgs,
@@ -109,11 +109,11 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 
 		if len(resp.ToolCalls) == 0 {
 			finalText := strings.TrimSpace(resp.Text)
-			msgs = append(msgs, llm.LLMMessage{Role: "assistant", Content: finalText})
+			msgs = append(msgs, llmtypes.LLMMessage{Role: "assistant", Content: finalText})
 			return RunResult{Text: finalText}, msgs, step, nil
 		}
 
-		assistantMsg := llm.LLMMessage{
+		assistantMsg := llmtypes.LLMMessage{
 			Role:      "assistant",
 			Content:   strings.TrimSpace(resp.Text),
 			ToolCalls: resp.ToolCalls,
@@ -138,34 +138,34 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 				if err := dec.Decode(&args); err != nil {
 					hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: "final_answer args were not valid JSON: " + err.Error()}
 					hostRespJSON, _ := types.MarshalPretty(hostResp)
-					msgs = append(msgs, llm.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
 					continue
 				}
 				finalText := strings.TrimSpace(args.Text)
 				if finalText == "" {
 					hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: "final_answer.text is required"}
 					hostRespJSON, _ := types.MarshalPretty(hostResp)
-					msgs = append(msgs, llm.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
 					continue
 				}
 				hostResp := types.HostOpResponse{Op: "final_answer", Ok: true}
 				hostRespJSON, _ := types.MarshalPretty(hostResp)
-				msgs = append(msgs, llm.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
-				msgs = append(msgs, llm.LLMMessage{Role: "assistant", Content: finalText})
+				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+				msgs = append(msgs, llmtypes.LLMMessage{Role: "assistant", Content: finalText})
 				return RunResult{Text: finalText, Artifacts: args.Artifacts}, msgs, step, nil
 			}
 
 			if a.ToolRegistry == nil {
 				hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: "tool registry is not configured"}
 				hostRespJSON, _ := types.MarshalPretty(hostResp)
-				msgs = append(msgs, llm.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
 				continue
 			}
 			op, err := a.ToolRegistry.Dispatch(ctx, which, []byte(tc.Function.Arguments))
 			if err != nil {
 				hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: "invalid tool call args: " + err.Error()}
 				hostRespJSON, _ := types.MarshalPretty(hostResp)
-				msgs = append(msgs, llm.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
 				continue
 			}
 			pending = append(pending, pendingHostOp{req: op, callID: strings.TrimSpace(tc.ID)})
@@ -174,16 +174,16 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llm.LLMMessag
 		for _, item := range pending {
 			hostResp := a.Exec.Exec(ctx, item.req)
 			hostRespJSON, _ := types.MarshalPretty(hostResp)
-			msgs = append(msgs, llm.LLMMessage{Role: "tool", ToolCallID: item.callID, Content: string(hostRespJSON)})
+			msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: item.callID, Content: string(hostRespJSON)})
 		}
 
 	}
 }
 
-func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req llm.LLMRequest) (llm.LLMResponse, string, error) {
-	s, ok := a.LLM.(llm.LLMClientStreaming)
+func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req llmtypes.LLMRequest) (llmtypes.LLMResponse, string, error) {
+	s, ok := a.LLM.(llmtypes.LLMClientStreaming)
 	if !ok {
-		return llm.LLMResponse{}, "", fmt.Errorf("LLM client does not support streaming")
+		return llmtypes.LLMResponse{}, "", fmt.Errorf("LLM client does not support streaming")
 	}
 	dec := &finalTextStreamDecoder{}
 	var streamMode string
@@ -202,7 +202,7 @@ func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req ll
 			a.Hooks.OnToken(step, token)
 		}
 	}
-	resp, err := s.GenerateStream(ctx, req, func(chunk llm.LLMStreamChunk) error {
+	resp, err := s.GenerateStream(ctx, req, func(chunk llmtypes.LLMStreamChunk) error {
 		if a.Hooks.OnStreamChunk != nil {
 			a.Hooks.OnStreamChunk(step, chunk)
 		}
@@ -283,7 +283,7 @@ func (a *DefaultAgent) Run(ctx context.Context, goal string) (RunResult, error) 
 	if err := validate.NonEmpty("goal", goal); err != nil {
 		return RunResult{}, err
 	}
-	final, _, _, err := a.RunConversation(ctx, []llm.LLMMessage{
+	final, _, _, err := a.RunConversation(ctx, []llmtypes.LLMMessage{
 		{Role: "user", Content: goal},
 	})
 	return final, err

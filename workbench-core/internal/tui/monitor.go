@@ -186,7 +186,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	evs, off, _ := store.ListEvents(cfg, runID)
 	tailCh, errCh := store.TailEvents(cfg, tctx, runID, off)
 
-	runStatus := types.StatusDone
+	runStatus := types.StatusSucceeded
 	if r, err := store.LoadRun(cfg, runID); err == nil {
 		runStatus = r.Status
 	}
@@ -1208,16 +1208,17 @@ func (m *monitorModel) refreshThinkingViewport() {
 		}
 
 		// First line gets a colored bullet, rest get the spine
+		// Use consistent prefix width: glyph (1 char) + space = 2 columns
 		for lineIdx, line := range lines {
 			line = strings.TrimRight(line, " ")
 			if lineIdx == 0 {
-				// Node with colored bullet and bold first line
+				// Node with colored bullet and bold first line (● + space = 2 cols)
 				out = append(out, nodeStyle.Render("●")+" "+titleStyle.Render(line))
 			} else if i == last {
-				// Last entry: no spine for continuation lines
+				// Last entry: blank prefix instead of spine (2 spaces = 2 cols)
 				out = append(out, "  "+line)
 			} else {
-				// Continuation line with spine
+				// Continuation line with spine (│ + space = 2 cols)
 				out = append(out, spineStyle.Render("│")+" "+line)
 			}
 		}
@@ -1349,7 +1350,9 @@ func (m *monitorModel) renderDashboardSidePanels(grid layoutmgr.GridLayout) stri
 		if grid.Outbox.Height > 0 {
 			parts = append(parts, m.renderOutbox(grid.Outbox))
 		}
-		return lipgloss.JoinVertical(lipgloss.Left, parts...)
+		// Constrain total height to sideContentH (= grid.Plan.Height) to prevent overflow.
+		joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
+		return lipgloss.NewStyle().MaxHeight(grid.Plan.Height).Render(joined)
 	case 3:
 		return m.panelStyle(panelThinking).
 			Width(grid.Plan.InnerWidth()).

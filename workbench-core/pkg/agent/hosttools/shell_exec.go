@@ -1,4 +1,4 @@
-package agenttools
+package hosttools
 
 import (
 	"context"
@@ -6,17 +6,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 // ShellExecTool executes a shell command.
 type ShellExecTool struct{}
 
-func (t *ShellExecTool) Definition() llm.Tool {
-	return llm.Tool{
+func (t *ShellExecTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "shell_exec",
 			Description: "[CORE] Execute a shell command via bash. Supports pipes, redirects, and full shell syntax. Returns stdout, stderr, and exit code.",
 			Strict:      true,

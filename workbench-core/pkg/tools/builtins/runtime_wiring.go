@@ -10,11 +10,11 @@ import (
 // RuntimeWiring bundles discovery and invocation wiring for tools.
 type RuntimeWiring struct {
 	Resource vfs.Resource
-	Registry pkgtools.ToolRegistry
+	Registry pkgtools.ToolInvokerRegistry
 }
 
 // NewRuntimeWiring constructs a tools resource and runner registry from a manifest registry.
-func NewRuntimeWiring(manifests pkgtools.ToolManifestRegistry, invokers pkgtools.ToolRegistry) (*RuntimeWiring, error) {
+func NewRuntimeWiring(manifests pkgtools.ToolManifestRegistry, invokers pkgtools.ToolInvokerRegistry) (*RuntimeWiring, error) {
 	if manifests == nil {
 		return nil, fmt.Errorf("tool manifest registry is required")
 	}

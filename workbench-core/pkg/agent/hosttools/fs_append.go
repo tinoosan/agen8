@@ -1,20 +1,20 @@
-package agenttools
+package hosttools
 
 import (
 	"context"
 	"encoding/json"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 // FSAppendTool appends text to a file in the VFS.
 type FSAppendTool struct{}
 
-func (t *FSAppendTool) Definition() llm.Tool {
-	return llm.Tool{
+func (t *FSAppendTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "fs_append",
 			Description: "[DIRECT - no discovery needed] Append text to a file at a VFS path.",
 			Strict:      true,

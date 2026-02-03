@@ -1,9 +1,9 @@
 package agent
 
-import "github.com/tinoosan/workbench-core/pkg/llm"
+import llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 
 // hostOpResponseSchema returns the Structured Outputs schema for the agent loop v0.
-func hostOpResponseSchema() *llm.LLMResponseSchema {
+func hostOpResponseSchema() *llmtypes.LLMResponseSchema {
 	schema := map[string]any{
 		"type":     "object",
 		"required": []any{"op"},
@@ -23,7 +23,7 @@ func hostOpResponseSchema() *llm.LLMResponseSchema {
 		},
 	}
 
-	return &llm.LLMResponseSchema{
+	return &llmtypes.LLMResponseSchema{
 		Name:        "workbench_host_op",
 		Description: "Workbench agent host operation (one JSON object per turn).",
 		Schema:      schema,

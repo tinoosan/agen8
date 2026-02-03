@@ -1,4 +1,4 @@
-package agenttools
+package hosttools
 
 import "testing"
 
@@ -24,4 +24,3 @@ func TestFSSearchTool_DefinitionRequiredIncludesLimit(t *testing.T) {
 		}
 	}
 }
-

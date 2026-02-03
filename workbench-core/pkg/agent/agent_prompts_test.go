@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -19,8 +19,8 @@ func (m MockExecutor) Exec(ctx context.Context, req types.HostOpRequest) types.H
 // MockClient implements llm.LLMClient for testing
 type MockClient struct{}
 
-func (m MockClient) Generate(ctx context.Context, req llm.LLMRequest) (llm.LLMResponse, error) {
-	return llm.LLMResponse{}, nil
+func (m MockClient) Generate(ctx context.Context, req llmtypes.LLMRequest) (llmtypes.LLMResponse, error) {
+	return llmtypes.LLMResponse{}, nil
 }
 
 func (m MockClient) SupportsStreaming() bool { return false }

@@ -12,7 +12,7 @@ func TestClassifyEvent_OpRequest(t *testing.T) {
 		Type:    "agent.op.request",
 		Message: "Agent requested host op",
 		Data: map[string]string{
-			"op":          "shell_exec",
+			"op":          "shell.exec",
 			"argvPreview": `rg -n Example Domain`,
 			"argv0":       "rg",
 		},

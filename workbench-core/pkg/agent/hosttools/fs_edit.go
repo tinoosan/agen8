@@ -1,20 +1,20 @@
-package agenttools
+package hosttools
 
 import (
 	"context"
 	"encoding/json"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 // FSEditTool applies structured edits to a file in the VFS.
 type FSEditTool struct{}
 
-func (t *FSEditTool) Definition() llm.Tool {
-	return llm.Tool{
+func (t *FSEditTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "fs_edit",
 			Description: "[DIRECT - no discovery needed] Apply find-replace edits to a file. Each edit has old (exact match), new (replacement), occurrence (1-based).",
 			Strict:      true,

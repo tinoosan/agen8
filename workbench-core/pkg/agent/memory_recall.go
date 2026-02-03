@@ -15,9 +15,3 @@ type MemoryRecallProvider interface {
 	Search(ctx context.Context, query string, limit int) ([]MemorySnippet, error)
 	Save(ctx context.Context, title, content string) error
 }
-
-// MemoryProvider is kept for backwards compatibility.
-//
-// Deprecated: use MemoryRecallProvider.
-type MemoryProvider = MemoryRecallProvider
-

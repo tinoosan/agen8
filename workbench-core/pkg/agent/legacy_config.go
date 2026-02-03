@@ -3,14 +3,14 @@ package agent
 import (
 	"strings"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/tools"
 )
 
 // Config is the legacy configuration struct preserved for compatibility.
 // New maps this struct to functional options.
 type Config struct {
-	LLM llm.LLMClient
+	LLM llmtypes.LLMClient
 
 	// Exec is required and represents the host primitive dispatcher.
 	Exec HostExecutor

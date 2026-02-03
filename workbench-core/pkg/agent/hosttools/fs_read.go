@@ -1,20 +1,20 @@
-package agenttools
+package hosttools
 
 import (
 	"context"
 	"encoding/json"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 // FSReadTool reads a file from the VFS.
 type FSReadTool struct{}
 
-func (t *FSReadTool) Definition() llm.Tool {
-	return llm.Tool{
+func (t *FSReadTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "fs_read",
 			Description: "[DIRECT - no discovery needed] Read file contents from a VFS path (skills live under /skills/<skill_name>/SKILL.md).",
 			Strict:      true,

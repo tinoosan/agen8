@@ -262,15 +262,15 @@ func renderOpRequest(d map[string]string) string {
 		return "Edit " + path
 	case "fs.patch":
 		return "Patch " + path
-	case "shell_exec":
+	case "shell.exec", "shell_exec":
 		if cmd := strings.TrimSpace(d["argvPreview"]); cmd != "" {
 			return cmd
 		}
 		if argv0 := strings.TrimSpace(d["argv0"]); argv0 != "" {
 			return argv0
 		}
-		return "shell_exec"
-	case "http_fetch":
+		return "shell.exec"
+	case "http.fetch", "http_fetch":
 		u := strings.TrimSpace(d["url"])
 		if u != "" {
 			m := strings.ToUpper(strings.TrimSpace(d["method"]))
@@ -279,8 +279,8 @@ func renderOpRequest(d map[string]string) string {
 			}
 			return m + " " + u
 		}
-		return "http_fetch"
-	case "trace":
+		return "http.fetch"
+	case "trace.run", "trace":
 		action := strings.TrimSpace(d["traceAction"])
 		key := strings.TrimSpace(d["traceKey"])
 		if action != "" {
@@ -289,7 +289,7 @@ func renderOpRequest(d map[string]string) string {
 			}
 			return "trace." + action
 		}
-		return "trace"
+		return "trace.run"
 	case "tool.run":
 		// Chat transcript should read like a narrative: show the effective command rather
 		// than the internal toolId/actionId + input payload.
@@ -524,11 +524,11 @@ func actionCategory(op, toolID string) string {
 		return "Explored"
 	case "fs.write", "fs.edit", "fs.patch", "fs.append":
 		return "Updated"
-	case "shell_exec":
+	case "shell.exec", "shell_exec":
 		return "Ran"
-	case "http_fetch":
+	case "http.fetch", "http_fetch":
 		return "Called"
-	case "trace":
+	case "trace.run", "trace":
 		return "Traced"
 	case "tool.run":
 		if strings.TrimSpace(toolID) == "builtin.shell" {

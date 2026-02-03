@@ -1,12 +1,12 @@
 package agent
 
-import "github.com/tinoosan/workbench-core/pkg/llm"
+import llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 
 // FinalAnswerTool returns the control tool that ends the current turn.
-func FinalAnswerTool() llm.Tool {
-	return llm.Tool{
+func FinalAnswerTool() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "final_answer",
 			Description: "[CONTROL] End the current turn with the final user-visible response text (markdown allowed) and optional deliverable artifact paths.",
 			Strict:      true,

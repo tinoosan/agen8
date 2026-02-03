@@ -1,20 +1,20 @@
-package agenttools
+package hosttools
 
 import (
 	"context"
 	"encoding/json"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 // FSSearchTool searches a VFS mount using a semantic index (e.g. /memory).
 type FSSearchTool struct{}
 
-func (t *FSSearchTool) Definition() llm.Tool {
-	return llm.Tool{
+func (t *FSSearchTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "fs_search",
 			Description: "[DIRECT] Search a VFS mount using a semantic/indexed search (e.g. /memory). Prefer this over reading whole memory files.",
 			Strict:      true,

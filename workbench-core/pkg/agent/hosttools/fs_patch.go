@@ -1,20 +1,20 @@
-package agenttools
+package hosttools
 
 import (
 	"context"
 	"encoding/json"
 
-	"github.com/tinoosan/workbench-core/pkg/llm"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 // FSPatchTool applies a unified diff patch to a file in the VFS.
 type FSPatchTool struct{}
 
-func (t *FSPatchTool) Definition() llm.Tool {
-	return llm.Tool{
+func (t *FSPatchTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
 		Type: "function",
-		Function: llm.ToolFunction{
+		Function: llmtypes.ToolFunction{
 			Name:        "fs_patch",
 			Description: "[DIRECT - no discovery needed] Apply a unified diff patch to a file.",
 			Strict:      true,

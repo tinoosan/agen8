@@ -1,4 +1,4 @@
-package agenttools
+package hosttools
 
 var (
 	intOrNull    = []any{"integer", "null"}
