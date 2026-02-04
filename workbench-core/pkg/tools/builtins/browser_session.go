@@ -17,15 +17,22 @@ import (
 
 const (
 	DefaultBrowserMaxSessions = 5
+	defaultBrowserTimeoutMs   = 2 * 60 * 1000
 )
 
 type browserSession struct {
 	id        string
 	browser   playwright.Browser
 	context   playwright.BrowserContext
-	page      playwright.Page
+	pages     map[string]playwright.Page
+	activeID  string
 	createdAt time.Time
 	lastUsed  time.Time
+
+	userAgent    string
+	viewportW    int
+	viewportH    int
+	extraHeaders map[string]string
 
 	opMu   sync.Mutex
 	closed bool
@@ -123,7 +130,7 @@ func (m *BrowserSessionManager) SetMaxSessions(n int) {
 	m.maxSessions = n
 }
 
-func (m *BrowserSessionManager) Start(ctx context.Context, headless bool) (string, error) {
+func (m *BrowserSessionManager) Start(ctx context.Context, headless bool, userAgent string, viewportWidth, viewportHeight int, extraHeaders map[string]string) (string, error) {
 	_ = ctx
 	if err := m.ensurePlaywright(); err != nil {
 		return "", fmt.Errorf("start playwright: %w", err)
@@ -145,7 +152,33 @@ func (m *BrowserSessionManager) Start(ctx context.Context, headless bool) (strin
 		return "", fmt.Errorf("launch chromium: %w", err)
 	}
 
-	ctxx, err := browser.NewContext()
+	userAgent = strings.TrimSpace(userAgent)
+	var uaPtr *string
+	if userAgent != "" {
+		uaPtr = playwright.String(userAgent)
+	}
+	var viewport *playwright.Size
+	if viewportWidth > 0 && viewportHeight > 0 {
+		viewport = &playwright.Size{Width: viewportWidth, Height: viewportHeight}
+	}
+	var headers map[string]string
+	if len(extraHeaders) != 0 {
+		headers = make(map[string]string, len(extraHeaders))
+		for k, v := range extraHeaders {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			headers[k] = v
+		}
+	}
+
+	ctxx, err := browser.NewContext(playwright.BrowserNewContextOptions{
+		AcceptDownloads:  playwright.Bool(true),
+		UserAgent:        uaPtr,
+		Viewport:         viewport,
+		ExtraHttpHeaders: headers,
+	})
 	if err != nil {
 		_ = browser.Close()
 		return "", fmt.Errorf("new browser context: %w", err)
@@ -153,9 +186,8 @@ func (m *BrowserSessionManager) Start(ctx context.Context, headless bool) (strin
 
 	// Default Playwright timeout is 30s; for human-like browsing and JS-heavy pages,
 	// use a larger default.
-	const defaultTimeoutMs = 2 * 60 * 1000
-	ctxx.SetDefaultTimeout(defaultTimeoutMs)
-	ctxx.SetDefaultNavigationTimeout(defaultTimeoutMs)
+	ctxx.SetDefaultTimeout(defaultBrowserTimeoutMs)
+	ctxx.SetDefaultNavigationTimeout(defaultBrowserTimeoutMs)
 
 	page, err := ctxx.NewPage()
 	if err != nil {
@@ -163,18 +195,25 @@ func (m *BrowserSessionManager) Start(ctx context.Context, headless bool) (strin
 		_ = browser.Close()
 		return "", fmt.Errorf("new page: %w", err)
 	}
-	page.SetDefaultTimeout(defaultTimeoutMs)
-	page.SetDefaultNavigationTimeout(defaultTimeoutMs)
+	page.SetDefaultTimeout(defaultBrowserTimeoutMs)
+	page.SetDefaultNavigationTimeout(defaultBrowserTimeoutMs)
 
 	now := time.Now()
 	s := &browserSession{
-		id:        uuid.NewString(),
-		browser:   browser,
-		context:   ctxx,
-		page:      page,
-		createdAt: now,
-		lastUsed:  now,
+		id:           uuid.NewString(),
+		browser:      browser,
+		context:      ctxx,
+		pages:        map[string]playwright.Page{},
+		createdAt:    now,
+		lastUsed:     now,
+		userAgent:    userAgent,
+		viewportW:    viewportWidth,
+		viewportH:    viewportHeight,
+		extraHeaders: headers,
 	}
+	pageID := uuid.NewString()[:8]
+	s.pages[pageID] = page
+	s.activeID = pageID
 
 	m.mu.Lock()
 	m.sessions[s.id] = s
@@ -183,61 +222,115 @@ func (m *BrowserSessionManager) Start(ctx context.Context, headless bool) (strin
 	return s.id, nil
 }
 
-func (m *BrowserSessionManager) Navigate(ctx context.Context, sessionID, url, waitFor string) (title string, finalURL string, err error) {
-	err = m.withSession(ctx, sessionID, func(s *browserSession) error {
+func (m *BrowserSessionManager) Navigate(ctx context.Context, sessionID, url, waitFor string, timeoutMs int) (title string, finalURL string, err error) {
+	err = m.withActivePage(ctx, sessionID, func(s *browserSession, page playwright.Page) error {
+		_ = s
 		if strings.TrimSpace(url) == "" {
 			return fmt.Errorf("url is required")
 		}
-		if _, err := s.page.Goto(strings.TrimSpace(url), playwright.PageGotoOptions{
+		opts := playwright.PageGotoOptions{
 			// Prefer DOMContentLoaded so we can interact with the page sooner; many sites
 			// never reach "load" due to long-polling and ads.
 			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-		}); err != nil {
+		}
+		if timeoutMs > 0 {
+			opts.Timeout = playwright.Float(float64(timeoutMs))
+		}
+		if _, err := page.Goto(strings.TrimSpace(url), opts); err != nil {
 			return err
 		}
 		waitFor = strings.TrimSpace(waitFor)
 		if waitFor != "" {
-			if _, err := s.page.WaitForSelector(waitFor); err != nil {
+			loc := page.Locator(waitFor).First()
+			if err := loc.WaitFor(); err != nil {
 				return err
 			}
 		}
-		t, _ := s.page.Title()
+		t, _ := page.Title()
 		title = strings.TrimSpace(t)
-		finalURL = strings.TrimSpace(s.page.URL())
+		finalURL = strings.TrimSpace(page.URL())
 		return nil
 	})
 	return
 }
 
-func (m *BrowserSessionManager) Click(ctx context.Context, sessionID, selector, waitFor string) error {
-	return m.withSession(ctx, sessionID, func(s *browserSession) error {
+func (m *BrowserSessionManager) Click(ctx context.Context, sessionID, selector, waitFor string, expectPopup bool, timeoutMs int) (popupPageID, popupTitle, popupURL string, err error) {
+	err = m.withActivePage(ctx, sessionID, func(s *browserSession, page playwright.Page) error {
 		selector = strings.TrimSpace(selector)
 		if selector == "" {
 			return fmt.Errorf("selector is required")
 		}
-		if err := s.page.Click(selector); err != nil {
+		waitFor = strings.TrimSpace(waitFor)
+
+		clickFn := func() error {
+			loc := page.Locator(selector).First()
+			opts := playwright.LocatorClickOptions{
+				NoWaitAfter: playwright.Bool(true),
+			}
+			if timeoutMs > 0 {
+				opts.Timeout = playwright.Float(float64(timeoutMs))
+			}
+			return loc.Click(opts)
+		}
+
+		if expectPopup {
+			opts := playwright.PageExpectPopupOptions{}
+			if timeoutMs > 0 {
+				opts.Timeout = playwright.Float(float64(timeoutMs))
+			}
+			popup, err := page.ExpectPopup(clickFn, opts)
+			if err != nil {
+				return err
+			}
+			id := uuid.NewString()[:8]
+			if s.pages == nil {
+				s.pages = make(map[string]playwright.Page)
+			}
+			s.pages[id] = popup
+			s.activeID = id
+			configurePageDefaults(popup)
+			if s.viewportW > 0 && s.viewportH > 0 {
+				_ = popup.SetViewportSize(s.viewportW, s.viewportH)
+			}
+			if waitFor != "" {
+				_ = popup.Locator(waitFor).First().WaitFor()
+			}
+			popupPageID = id
+			t, _ := popup.Title()
+			popupTitle = strings.TrimSpace(t)
+			popupURL = strings.TrimSpace(popup.URL())
+			return nil
+		}
+
+		if err := clickFn(); err != nil {
 			return err
 		}
-		waitFor = strings.TrimSpace(waitFor)
 		if waitFor != "" {
-			_, _ = s.page.WaitForSelector(waitFor)
+			_ = page.Locator(waitFor).First().WaitFor()
 		}
 		return nil
 	})
+	return
 }
 
-func (m *BrowserSessionManager) Fill(ctx context.Context, sessionID, selector, text, waitFor string) error {
-	return m.withSession(ctx, sessionID, func(s *browserSession) error {
+func (m *BrowserSessionManager) Fill(ctx context.Context, sessionID, selector, text, waitFor string, timeoutMs int) error {
+	return m.withActivePage(ctx, sessionID, func(s *browserSession, page playwright.Page) error {
+		_ = s
 		selector = strings.TrimSpace(selector)
 		if selector == "" {
 			return fmt.Errorf("selector is required")
 		}
-		if err := s.page.Fill(selector, text); err != nil {
+		loc := page.Locator(selector).First()
+		fillOpts := playwright.LocatorFillOptions{}
+		if timeoutMs > 0 {
+			fillOpts.Timeout = playwright.Float(float64(timeoutMs))
+		}
+		if err := loc.Fill(text, fillOpts); err != nil {
 			return err
 		}
 		waitFor = strings.TrimSpace(waitFor)
 		if waitFor != "" {
-			_, _ = s.page.WaitForSelector(waitFor)
+			_ = page.Locator(waitFor).First().WaitFor()
 		}
 		return nil
 	})
@@ -245,7 +338,8 @@ func (m *BrowserSessionManager) Fill(ctx context.Context, sessionID, selector, t
 
 func (m *BrowserSessionManager) Extract(ctx context.Context, sessionID, selector, attribute string) (json.RawMessage, error) {
 	var out json.RawMessage
-	err := m.withSession(ctx, sessionID, func(s *browserSession) error {
+	err := m.withActivePage(ctx, sessionID, func(s *browserSession, page playwright.Page) error {
+		_ = s
 		selector = strings.TrimSpace(selector)
 		if selector == "" {
 			return fmt.Errorf("selector is required")
@@ -256,7 +350,7 @@ func (m *BrowserSessionManager) Extract(ctx context.Context, sessionID, selector
 		}
 
 		expr := selectorAllExpr(attribute)
-		result, err := s.page.EvalOnSelectorAll(selector, expr)
+		result, err := page.EvalOnSelectorAll(selector, expr)
 		if err != nil {
 			return err
 		}
@@ -304,13 +398,14 @@ func (m *BrowserSessionManager) Dismiss(ctx context.Context, sessionID, kind, mo
 	}
 	clicked := make([]clickedItem, 0, maxClicks)
 
-	err := m.withSession(ctx, sessionID, func(s *browserSession) error {
+	err := m.withActivePage(ctx, sessionID, func(s *browserSession, page playwright.Page) error {
+		_ = s
 		selectors := dismissSelectors(kind, mode)
 		if len(selectors) == 0 {
 			return nil
 		}
 
-		frames := prioritizeFrames(s.page, kind)
+		frames := prioritizeFrames(page, kind)
 		for _, fr := range frames {
 			if len(clicked) >= maxClicks {
 				break
@@ -326,7 +421,7 @@ func (m *BrowserSessionManager) Dismiss(ctx context.Context, sessionID, kind, mo
 						FrameName: strings.TrimSpace(fr.Name()),
 					})
 					// Give the page a moment to apply DOM changes.
-					s.page.WaitForTimeout(150)
+					page.WaitForTimeout(150)
 				}
 			}
 		}
@@ -347,16 +442,572 @@ func (m *BrowserSessionManager) Dismiss(ctx context.Context, sessionID, kind, mo
 	return b, nil
 }
 
+func (m *BrowserSessionManager) Wait(ctx context.Context, sessionID, waitType, url, selector, state string, timeoutMs int, sleepMs int) error {
+	_ = ctx
+	waitType = strings.ToLower(strings.TrimSpace(waitType))
+	url = strings.TrimSpace(url)
+	selector = strings.TrimSpace(selector)
+	state = strings.ToLower(strings.TrimSpace(state))
+
+	if waitType == "" {
+		switch {
+		case selector != "":
+			waitType = "selector"
+		case url != "":
+			waitType = "url"
+		case sleepMs > 0:
+			waitType = "timeout"
+		case state != "":
+			waitType = "load"
+		default:
+			waitType = "load"
+		}
+	}
+
+	return m.withActivePage(ctx, sessionID, func(_ *browserSession, page playwright.Page) error {
+		switch waitType {
+		case "selector":
+			if selector == "" {
+				return fmt.Errorf("selector is required for waitType=selector")
+			}
+			opts := playwright.LocatorWaitForOptions{}
+			if st := selectorState(state); st != nil {
+				opts.State = st
+			}
+			if timeoutMs > 0 {
+				opts.Timeout = playwright.Float(float64(timeoutMs))
+			}
+			return page.Locator(selector).First().WaitFor(opts)
+		case "url":
+			if url == "" {
+				return fmt.Errorf("url is required for waitType=url")
+			}
+			opts := playwright.PageWaitForURLOptions{
+				WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+			}
+			if timeoutMs > 0 {
+				opts.Timeout = playwright.Float(float64(timeoutMs))
+			}
+			return page.WaitForURL(url, opts)
+		case "networkidle":
+			opts := playwright.PageWaitForLoadStateOptions{
+				State: playwright.LoadStateNetworkidle,
+			}
+			if timeoutMs > 0 {
+				opts.Timeout = playwright.Float(float64(timeoutMs))
+			}
+			return page.WaitForLoadState(opts)
+		case "load", "domcontentloaded":
+			opts := playwright.PageWaitForLoadStateOptions{
+				State: loadState(state),
+			}
+			if opts.State == nil {
+				// Default to domcontentloaded: more reliable on modern sites.
+				opts.State = playwright.LoadStateDomcontentloaded
+			}
+			if timeoutMs > 0 {
+				opts.Timeout = playwright.Float(float64(timeoutMs))
+			}
+			return page.WaitForLoadState(opts)
+		case "timeout", "sleep":
+			if sleepMs <= 0 {
+				if timeoutMs > 0 {
+					sleepMs = timeoutMs
+				} else {
+					return fmt.Errorf("sleepMs is required for waitType=timeout")
+				}
+			}
+			time.Sleep(time.Duration(sleepMs) * time.Millisecond)
+			return nil
+		default:
+			return fmt.Errorf("unknown waitType: %s", waitType)
+		}
+	})
+}
+
+func (m *BrowserSessionManager) Hover(ctx context.Context, sessionID, selector string, timeoutMs int) error {
+	return m.withActivePage(ctx, sessionID, func(_ *browserSession, page playwright.Page) error {
+		selector = strings.TrimSpace(selector)
+		if selector == "" {
+			return fmt.Errorf("selector is required")
+		}
+		opts := playwright.LocatorHoverOptions{}
+		if timeoutMs > 0 {
+			opts.Timeout = playwright.Float(float64(timeoutMs))
+		}
+		return page.Locator(selector).First().Hover(opts)
+	})
+}
+
+func (m *BrowserSessionManager) Press(ctx context.Context, sessionID, selector, key string, timeoutMs int) error {
+	return m.withActivePage(ctx, sessionID, func(_ *browserSession, page playwright.Page) error {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return fmt.Errorf("key is required")
+		}
+		selector = strings.TrimSpace(selector)
+		if selector == "" {
+			// Page-level key press.
+			return page.Keyboard().Press(key)
+		}
+		opts := playwright.LocatorPressOptions{}
+		if timeoutMs > 0 {
+			opts.Timeout = playwright.Float(float64(timeoutMs))
+		}
+		return page.Locator(selector).First().Press(key, opts)
+	})
+}
+
+func (m *BrowserSessionManager) Scroll(ctx context.Context, sessionID string, dx, dy int) error {
+	return m.withActivePage(ctx, sessionID, func(_ *browserSession, page playwright.Page) error {
+		return page.Mouse().Wheel(float64(dx), float64(dy))
+	})
+}
+
+func (m *BrowserSessionManager) Select(ctx context.Context, sessionID, selector string, values []string, timeoutMs int) (json.RawMessage, error) {
+	var out json.RawMessage
+	err := m.withActivePage(ctx, sessionID, func(_ *browserSession, page playwright.Page) error {
+		selector = strings.TrimSpace(selector)
+		if selector == "" {
+			return fmt.Errorf("selector is required")
+		}
+		clean := make([]string, 0, len(values))
+		for _, v := range values {
+			v = strings.TrimSpace(v)
+			if v != "" {
+				clean = append(clean, v)
+			}
+		}
+		if len(clean) == 0 {
+			return fmt.Errorf("value(s) are required")
+		}
+		opts := playwright.LocatorSelectOptionOptions{}
+		if timeoutMs > 0 {
+			opts.Timeout = playwright.Float(float64(timeoutMs))
+		}
+		vs := clean
+		selected, err := page.Locator(selector).First().SelectOption(playwright.SelectOptionValues{
+			ValuesOrLabels: &vs,
+		}, opts)
+		if err != nil {
+			return err
+		}
+		b, err := json.Marshal(selected)
+		if err != nil {
+			return err
+		}
+		out = b
+		return nil
+	})
+	return out, err
+}
+
+func (m *BrowserSessionManager) SetChecked(ctx context.Context, sessionID, selector string, checked bool, timeoutMs int) error {
+	return m.withActivePage(ctx, sessionID, func(_ *browserSession, page playwright.Page) error {
+		selector = strings.TrimSpace(selector)
+		if selector == "" {
+			return fmt.Errorf("selector is required")
+		}
+		if checked {
+			opts := playwright.LocatorCheckOptions{}
+			if timeoutMs > 0 {
+				opts.Timeout = playwright.Float(float64(timeoutMs))
+			}
+			return page.Locator(selector).First().Check(opts)
+		}
+		opts := playwright.LocatorUncheckOptions{}
+		if timeoutMs > 0 {
+			opts.Timeout = playwright.Float(float64(timeoutMs))
+		}
+		return page.Locator(selector).First().Uncheck(opts)
+	})
+}
+
+func (m *BrowserSessionManager) Upload(ctx context.Context, sessionID, selector, absPath string, timeoutMs int) error {
+	return m.withActivePage(ctx, sessionID, func(_ *browserSession, page playwright.Page) error {
+		selector = strings.TrimSpace(selector)
+		if selector == "" {
+			return fmt.Errorf("selector is required")
+		}
+		absPath = strings.TrimSpace(absPath)
+		if absPath == "" || !filepath.IsAbs(absPath) {
+			return fmt.Errorf("absPath must be an absolute path")
+		}
+		if _, err := os.Stat(absPath); err != nil {
+			return err
+		}
+		opts := playwright.LocatorSetInputFilesOptions{}
+		if timeoutMs > 0 {
+			opts.Timeout = playwright.Float(float64(timeoutMs))
+		}
+		return page.Locator(selector).First().SetInputFiles(absPath, opts)
+	})
+}
+
+func (m *BrowserSessionManager) Download(ctx context.Context, sessionID, selector, absPath string, timeoutMs int) (json.RawMessage, error) {
+	var out json.RawMessage
+	err := m.withActivePage(ctx, sessionID, func(_ *browserSession, page playwright.Page) error {
+		selector = strings.TrimSpace(selector)
+		if selector == "" {
+			return fmt.Errorf("selector is required")
+		}
+		absPath = strings.TrimSpace(absPath)
+		if absPath == "" || !filepath.IsAbs(absPath) {
+			return fmt.Errorf("absPath must be an absolute path")
+		}
+		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+			return err
+		}
+		clickFn := func() error {
+			opts := playwright.LocatorClickOptions{
+				NoWaitAfter: playwright.Bool(true),
+			}
+			if timeoutMs > 0 {
+				opts.Timeout = playwright.Float(float64(timeoutMs))
+			}
+			return page.Locator(selector).First().Click(opts)
+		}
+		edOpts := playwright.PageExpectDownloadOptions{}
+		if timeoutMs > 0 {
+			edOpts.Timeout = playwright.Float(float64(timeoutMs))
+		}
+		dl, err := page.ExpectDownload(clickFn, edOpts)
+		if err != nil {
+			return err
+		}
+		if err := dl.SaveAs(absPath); err != nil {
+			return err
+		}
+		b, err := json.Marshal(map[string]string{
+			"suggestedFilename": strings.TrimSpace(dl.SuggestedFilename()),
+			"url":               strings.TrimSpace(dl.URL()),
+		})
+		if err != nil {
+			return err
+		}
+		out = b
+		return nil
+	})
+	return out, err
+}
+
+func (m *BrowserSessionManager) GoBack(ctx context.Context, sessionID string, timeoutMs int) (title string, finalURL string, err error) {
+	err = m.withActivePage(ctx, sessionID, func(_ *browserSession, page playwright.Page) error {
+		opts := playwright.PageGoBackOptions{}
+		if timeoutMs > 0 {
+			opts.Timeout = playwright.Float(float64(timeoutMs))
+		}
+		_, err := page.GoBack(opts)
+		if err != nil {
+			return err
+		}
+		t, _ := page.Title()
+		title = strings.TrimSpace(t)
+		finalURL = strings.TrimSpace(page.URL())
+		return nil
+	})
+	return
+}
+
+func (m *BrowserSessionManager) GoForward(ctx context.Context, sessionID string, timeoutMs int) (title string, finalURL string, err error) {
+	err = m.withActivePage(ctx, sessionID, func(_ *browserSession, page playwright.Page) error {
+		opts := playwright.PageGoForwardOptions{}
+		if timeoutMs > 0 {
+			opts.Timeout = playwright.Float(float64(timeoutMs))
+		}
+		_, err := page.GoForward(opts)
+		if err != nil {
+			return err
+		}
+		t, _ := page.Title()
+		title = strings.TrimSpace(t)
+		finalURL = strings.TrimSpace(page.URL())
+		return nil
+	})
+	return
+}
+
+func (m *BrowserSessionManager) Reload(ctx context.Context, sessionID string, timeoutMs int) (title string, finalURL string, err error) {
+	err = m.withActivePage(ctx, sessionID, func(_ *browserSession, page playwright.Page) error {
+		opts := playwright.PageReloadOptions{
+			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+		}
+		if timeoutMs > 0 {
+			opts.Timeout = playwright.Float(float64(timeoutMs))
+		}
+		_, err := page.Reload(opts)
+		if err != nil {
+			return err
+		}
+		t, _ := page.Title()
+		title = strings.TrimSpace(t)
+		finalURL = strings.TrimSpace(page.URL())
+		return nil
+	})
+	return
+}
+
+func (m *BrowserSessionManager) TabNew(ctx context.Context, sessionID, url string, setActive bool, timeoutMs int) (pageID, title, finalURL string, err error) {
+	err = m.withSession(ctx, sessionID, func(s *browserSession) error {
+		if s.context == nil {
+			return fmt.Errorf("browser context is nil")
+		}
+		p, err := s.context.NewPage()
+		if err != nil {
+			return err
+		}
+		configurePageDefaults(p)
+		if s.viewportW > 0 && s.viewportH > 0 {
+			_ = p.SetViewportSize(s.viewportW, s.viewportH)
+		}
+		id := uuid.NewString()[:8]
+		if s.pages == nil {
+			s.pages = make(map[string]playwright.Page)
+		}
+		s.pages[id] = p
+		if setActive {
+			s.activeID = id
+		}
+		url = strings.TrimSpace(url)
+		if url != "" {
+			gotoOpts := playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateDomcontentloaded}
+			if timeoutMs > 0 {
+				gotoOpts.Timeout = playwright.Float(float64(timeoutMs))
+			}
+			if _, err := p.Goto(url, gotoOpts); err != nil {
+				return err
+			}
+		}
+		t, _ := p.Title()
+		title = strings.TrimSpace(t)
+		finalURL = strings.TrimSpace(p.URL())
+		pageID = id
+		return nil
+	})
+	return
+}
+
+func (m *BrowserSessionManager) TabList(ctx context.Context, sessionID string) (json.RawMessage, error) {
+	var out json.RawMessage
+	err := m.withSession(ctx, sessionID, func(s *browserSession) error {
+		type tab struct {
+			PageID string `json:"pageId"`
+			URL    string `json:"url"`
+			Title  string `json:"title"`
+			Active bool   `json:"active"`
+		}
+		tabs := make([]tab, 0, len(s.pages))
+		for id, p := range s.pages {
+			if p == nil {
+				continue
+			}
+			t, _ := p.Title()
+			tabs = append(tabs, tab{
+				PageID: id,
+				URL:    strings.TrimSpace(p.URL()),
+				Title:  strings.TrimSpace(t),
+				Active: id == s.activeID,
+			})
+		}
+		b, err := json.Marshal(tabs)
+		if err != nil {
+			return err
+		}
+		out = b
+		return nil
+	})
+	return out, err
+}
+
+func (m *BrowserSessionManager) TabSwitch(ctx context.Context, sessionID, pageID string) error {
+	return m.withSession(ctx, sessionID, func(s *browserSession) error {
+		pageID = strings.TrimSpace(pageID)
+		if pageID == "" {
+			return fmt.Errorf("pageId is required")
+		}
+		if s.pages == nil || s.pages[pageID] == nil {
+			return fmt.Errorf("tab not found: %s", pageID)
+		}
+		s.activeID = pageID
+		return nil
+	})
+}
+
+func (m *BrowserSessionManager) TabClose(ctx context.Context, sessionID, pageID string) error {
+	return m.withSession(ctx, sessionID, func(s *browserSession) error {
+		pageID = strings.TrimSpace(pageID)
+		if pageID == "" {
+			pageID = s.activeID
+		}
+		p := s.pages[pageID]
+		if p == nil {
+			return fmt.Errorf("tab not found: %s", pageID)
+		}
+		_ = p.Close()
+		delete(s.pages, pageID)
+		if s.activeID == pageID {
+			s.activeID = ""
+			for id := range s.pages {
+				s.activeID = id
+				break
+			}
+		}
+		return nil
+	})
+}
+
+func (m *BrowserSessionManager) StorageSave(ctx context.Context, sessionID, absPath string) error {
+	return m.withSession(ctx, sessionID, func(s *browserSession) error {
+		_ = ctx
+		if s.context == nil {
+			return fmt.Errorf("browser context is nil")
+		}
+		absPath = strings.TrimSpace(absPath)
+		if absPath == "" || !filepath.IsAbs(absPath) {
+			return fmt.Errorf("absPath must be an absolute path")
+		}
+		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+			return err
+		}
+		_, err := s.context.StorageState(absPath)
+		return err
+	})
+}
+
+func (m *BrowserSessionManager) StorageLoad(ctx context.Context, sessionID, absPath string) error {
+	return m.withSession(ctx, sessionID, func(s *browserSession) error {
+		_ = ctx
+		if s.browser == nil {
+			return fmt.Errorf("browser is nil")
+		}
+		absPath = strings.TrimSpace(absPath)
+		if absPath == "" || !filepath.IsAbs(absPath) {
+			return fmt.Errorf("absPath must be an absolute path")
+		}
+		if _, err := os.Stat(absPath); err != nil {
+			return err
+		}
+
+		// Close existing pages/context and recreate a new context populated with storage state.
+		for id, p := range s.pages {
+			if p != nil {
+				_ = p.Close()
+			}
+			delete(s.pages, id)
+		}
+		if s.context != nil {
+			_ = s.context.Close()
+		}
+
+		var viewport *playwright.Size
+		if s.viewportW > 0 && s.viewportH > 0 {
+			viewport = &playwright.Size{Width: s.viewportW, Height: s.viewportH}
+		}
+		opts := playwright.BrowserNewContextOptions{
+			AcceptDownloads:  playwright.Bool(true),
+			Viewport:         viewport,
+			ExtraHttpHeaders: s.extraHeaders,
+			StorageStatePath: playwright.String(absPath),
+		}
+		if strings.TrimSpace(s.userAgent) != "" {
+			opts.UserAgent = playwright.String(strings.TrimSpace(s.userAgent))
+		}
+		ctxx, err := s.browser.NewContext(opts)
+		if err != nil {
+			return err
+		}
+		ctxx.SetDefaultTimeout(defaultBrowserTimeoutMs)
+		ctxx.SetDefaultNavigationTimeout(defaultBrowserTimeoutMs)
+		s.context = ctxx
+
+		p, err := ctxx.NewPage()
+		if err != nil {
+			_ = ctxx.Close()
+			return err
+		}
+		configurePageDefaults(p)
+		if s.viewportW > 0 && s.viewportH > 0 {
+			_ = p.SetViewportSize(s.viewportW, s.viewportH)
+		}
+		id := uuid.NewString()[:8]
+		if s.pages == nil {
+			s.pages = make(map[string]playwright.Page)
+		}
+		s.pages[id] = p
+		s.activeID = id
+		return nil
+	})
+}
+
+func (m *BrowserSessionManager) SetExtraHeaders(ctx context.Context, sessionID string, headers map[string]string) error {
+	return m.withSession(ctx, sessionID, func(s *browserSession) error {
+		if s.context == nil {
+			return fmt.Errorf("browser context is nil")
+		}
+		if headers == nil {
+			headers = map[string]string{}
+		}
+		s.extraHeaders = make(map[string]string, len(headers))
+		for k, v := range headers {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			s.extraHeaders[k] = v
+		}
+		return s.context.SetExtraHTTPHeaders(s.extraHeaders)
+	})
+}
+
+func (m *BrowserSessionManager) SetViewport(ctx context.Context, sessionID string, width, height int) error {
+	return m.withSession(ctx, sessionID, func(s *browserSession) error {
+		if width <= 0 || height <= 0 {
+			return fmt.Errorf("width and height must be > 0")
+		}
+		s.viewportW = width
+		s.viewportH = height
+		for _, p := range s.pages {
+			if p != nil {
+				_ = p.SetViewportSize(width, height)
+			}
+		}
+		return nil
+	})
+}
+
+func (m *BrowserSessionManager) ExtractLinks(ctx context.Context, sessionID, selector string) (json.RawMessage, error) {
+	var out json.RawMessage
+	err := m.withActivePage(ctx, sessionID, func(_ *browserSession, page playwright.Page) error {
+		selector = strings.TrimSpace(selector)
+		if selector == "" {
+			selector = "a"
+		}
+		expr := `(elements) => elements.map(el => ({ text: ((el.innerText || el.textContent || "") + "").trim(), href: (el.href || el.getAttribute("href") || "") + "" }))`
+		result, err := page.EvalOnSelectorAll(selector, expr)
+		if err != nil {
+			return err
+		}
+		b, err := json.Marshal(result)
+		if err != nil {
+			return err
+		}
+		out = b
+		return nil
+	})
+	return out, err
+}
+
 func (m *BrowserSessionManager) Screenshot(ctx context.Context, sessionID, absPath string, fullPage bool) error {
 	_ = ctx
-	return m.withSession(ctx, sessionID, func(s *browserSession) error {
+	return m.withActivePage(ctx, sessionID, func(s *browserSession, page playwright.Page) error {
+		_ = s
 		if strings.TrimSpace(absPath) == "" || !filepath.IsAbs(absPath) {
 			return fmt.Errorf("absPath must be an absolute path")
 		}
 		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
 			return err
 		}
-		_, err := s.page.Screenshot(playwright.PageScreenshotOptions{
+		_, err := page.Screenshot(playwright.PageScreenshotOptions{
 			Path:     playwright.String(absPath),
 			FullPage: playwright.Bool(fullPage),
 		})
@@ -366,14 +1017,15 @@ func (m *BrowserSessionManager) Screenshot(ctx context.Context, sessionID, absPa
 
 func (m *BrowserSessionManager) PDF(ctx context.Context, sessionID, absPath string) error {
 	_ = ctx
-	return m.withSession(ctx, sessionID, func(s *browserSession) error {
+	return m.withActivePage(ctx, sessionID, func(s *browserSession, page playwright.Page) error {
+		_ = s
 		if strings.TrimSpace(absPath) == "" || !filepath.IsAbs(absPath) {
 			return fmt.Errorf("absPath must be an absolute path")
 		}
 		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
 			return err
 		}
-		_, err := s.page.PDF(playwright.PagePdfOptions{
+		_, err := page.PDF(playwright.PagePdfOptions{
 			Path: playwright.String(absPath),
 		})
 		return err
@@ -493,6 +1145,27 @@ func (m *BrowserSessionManager) withSession(_ context.Context, sessionID string,
 	return nil
 }
 
+func (m *BrowserSessionManager) withActivePage(ctx context.Context, sessionID string, fn func(*browserSession, playwright.Page) error) error {
+	return m.withSession(ctx, sessionID, func(s *browserSession) error {
+		if s.pages == nil || strings.TrimSpace(s.activeID) == "" {
+			return fmt.Errorf("no active tab in session")
+		}
+		page := s.pages[s.activeID]
+		if page == nil {
+			return fmt.Errorf("active tab not found: %s", s.activeID)
+		}
+		return fn(s, page)
+	})
+}
+
+func configurePageDefaults(page playwright.Page) {
+	if page == nil {
+		return
+	}
+	page.SetDefaultTimeout(defaultBrowserTimeoutMs)
+	page.SetDefaultNavigationTimeout(defaultBrowserTimeoutMs)
+}
+
 func closeSession(s *browserSession) error {
 	if s == nil {
 		return nil
@@ -504,14 +1177,19 @@ func closeSession(s *browserSession) error {
 		return nil
 	}
 	s.closed = true
-	page := s.page
+	pages := make([]playwright.Page, 0, len(s.pages))
+	for _, p := range s.pages {
+		if p != nil {
+			pages = append(pages, p)
+		}
+	}
 	ctxx := s.context
 	browser := s.browser
 	s.opMu.Unlock()
 
 	// Best-effort close order.
-	if page != nil {
-		_ = page.Close()
+	for _, p := range pages {
+		_ = p.Close()
 	}
 	if ctxx != nil {
 		_ = ctxx.Close()
@@ -542,6 +1220,38 @@ func selectorAllExpr(attr string) string {
 		// Safe string interpolation: embed as JSON string literal.
 		b, _ := json.Marshal(attr)
 		return fmt.Sprintf(`(elements) => elements.map(el => el.getAttribute(%s))`, string(b))
+	}
+}
+
+func selectorState(state string) *playwright.WaitForSelectorState {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "":
+		return nil
+	case "attached":
+		return playwright.WaitForSelectorStateAttached
+	case "detached":
+		return playwright.WaitForSelectorStateDetached
+	case "visible":
+		return playwright.WaitForSelectorStateVisible
+	case "hidden":
+		return playwright.WaitForSelectorStateHidden
+	default:
+		return nil
+	}
+}
+
+func loadState(state string) *playwright.LoadState {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "":
+		return nil
+	case "load":
+		return playwright.LoadStateLoad
+	case "domcontentloaded", "domcontent", "dom":
+		return playwright.LoadStateDomcontentloaded
+	case "networkidle", "network":
+		return playwright.LoadStateNetworkidle
+	default:
+		return nil
 	}
 }
 
