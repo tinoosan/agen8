@@ -30,3 +30,20 @@ func TestSessionIndexesCreated(t *testing.T) {
 		}
 	}
 }
+
+func TestEventTypeIndexCreated(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		t.Fatalf("getSQLiteDB: %v", err)
+	}
+
+	var name string
+	err = db.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_events_run_type'`,
+	).Scan(&name)
+	if err != nil {
+		t.Errorf("index idx_events_run_type not found: %v", err)
+	}
+}

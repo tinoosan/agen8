@@ -265,7 +265,25 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	activityList.SetShowPagination(false)
 
 	tctx, cancel := context.WithCancel(ctx)
-	evs, off, _ := store.ListEvents(cfg, runID)
+	// Best-effort: load a small recent window for initial display without scanning the full log.
+	var evs []types.EventRecord
+	{
+		filter := store.EventFilter{
+			RunID:    runID,
+			Limit:    200,
+			SortDesc: true, // newest first
+		}
+		if recent, _, err := store.ListEventsPaginated(cfg, filter); err == nil {
+			// Observe in chronological order (oldest -> newest) to preserve ordering semantics.
+			slices.Reverse(recent)
+			evs = recent
+		}
+	}
+
+	off := int64(0)
+	if latest, err := store.GetLatestEventSeq(cfg, runID); err == nil {
+		off = latest
+	}
 	tailCh, errCh := store.TailEvents(cfg, tctx, runID, off)
 
 	runStatus := types.StatusSucceeded

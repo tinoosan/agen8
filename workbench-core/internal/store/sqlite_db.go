@@ -20,7 +20,7 @@ var (
 	sqliteMigrated = map[string]bool{}
 )
 
-const currentSchemaVersion = 2
+const currentSchemaVersion = 3
 
 var sqliteMigrations = []string{
 	`CREATE TABLE IF NOT EXISTS sessions (
@@ -59,6 +59,8 @@ var sqliteMigrations = []string{
 		event_json TEXT NOT NULL
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_events_run_seq ON events(run_id, seq);`,
+	// Event type index for filtered queries.
+	`CREATE INDEX IF NOT EXISTS idx_events_run_type ON events(run_id, type);`,
 	`CREATE TABLE IF NOT EXISTS history (
 		seq INTEGER PRIMARY KEY AUTOINCREMENT,
 		id TEXT NOT NULL,

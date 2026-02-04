@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -204,6 +205,132 @@ func TestEventStore(t *testing.T) {
 
 		if tailedEvents[0].Event.Type != "new_event" {
 			t.Errorf("Expected new_event, got %s", tailedEvents[0].Event.Type)
+		}
+	})
+
+	t.Run("ListEventsPaginated_CursorPagination", func(t *testing.T) {
+		_, runPaged, err := CreateSession(cfg, "Event Paged Run", 1024)
+		if err != nil {
+			t.Fatalf("CreateSession failed: %v", err)
+		}
+
+		// Append 10 events.
+		for i := 0; i < 10; i++ {
+			if err := AppendEvent(context.Background(), cfg, types.EventRecord{
+				RunID:   runPaged.RunID,
+				Type:    "paged",
+				Message: fmt.Sprintf("event %d", i),
+			}); err != nil {
+				t.Fatalf("AppendEvent %d: %v", i, err)
+			}
+		}
+
+		filter := EventFilter{RunID: runPaged.RunID, Types: []string{"paged"}, Limit: 4}
+		b1, cursor, err := ListEventsPaginated(cfg, filter)
+		if err != nil {
+			t.Fatalf("ListEventsPaginated: %v", err)
+		}
+		if len(b1) != 4 {
+			t.Fatalf("expected 4 events in batch 1, got %d", len(b1))
+		}
+		if cursor == 0 {
+			t.Fatalf("expected non-zero cursor")
+		}
+
+		filter.AfterSeq = cursor
+		b2, cursor, err := ListEventsPaginated(cfg, filter)
+		if err != nil {
+			t.Fatalf("ListEventsPaginated batch 2: %v", err)
+		}
+		if len(b2) != 4 {
+			t.Fatalf("expected 4 events in batch 2, got %d", len(b2))
+		}
+
+		filter.AfterSeq = cursor
+		b3, _, err := ListEventsPaginated(cfg, filter)
+		if err != nil {
+			t.Fatalf("ListEventsPaginated batch 3: %v", err)
+		}
+		if len(b3) != 2 {
+			t.Fatalf("expected 2 events in batch 3, got %d", len(b3))
+		}
+
+		// Verify total retrieved (only those with type "paged"; other test events exist too).
+		total := len(b1) + len(b2) + len(b3)
+		if total != 10 {
+			t.Fatalf("expected 10 total events, got %d", total)
+		}
+	})
+
+	t.Run("ListEventsPaginated_TypeFilterAndCount", func(t *testing.T) {
+		_, run2, err := CreateSession(cfg, "Event Filter Run", 1024)
+		if err != nil {
+			t.Fatalf("CreateSession failed: %v", err)
+		}
+
+		AppendEvent(context.Background(), cfg, types.EventRecord{RunID: run2.RunID, Type: "info", Message: "info 1"})
+		AppendEvent(context.Background(), cfg, types.EventRecord{RunID: run2.RunID, Type: "error", Message: "error 1"})
+		AppendEvent(context.Background(), cfg, types.EventRecord{RunID: run2.RunID, Type: "info", Message: "info 2"})
+		AppendEvent(context.Background(), cfg, types.EventRecord{RunID: run2.RunID, Type: "warning", Message: "warning 1"})
+
+		filter := EventFilter{RunID: run2.RunID, Types: []string{"info"}, Limit: 100}
+		evs, _, err := ListEventsPaginated(cfg, filter)
+		if err != nil {
+			t.Fatalf("ListEventsPaginated: %v", err)
+		}
+		if len(evs) != 2 {
+			t.Fatalf("expected 2 info events, got %d", len(evs))
+		}
+		for _, e := range evs {
+			if e.Type != "info" {
+				t.Fatalf("expected type 'info', got %q", e.Type)
+			}
+		}
+
+		count, err := CountEvents(cfg, EventFilter{RunID: run2.RunID})
+		if err != nil {
+			t.Fatalf("CountEvents: %v", err)
+		}
+		if count != 4 {
+			t.Fatalf("expected 4 events, got %d", count)
+		}
+	})
+
+	t.Run("GetLatestEventSeq", func(t *testing.T) {
+		_, run3, err := CreateSession(cfg, "Event Seq Run", 1024)
+		if err != nil {
+			t.Fatalf("CreateSession failed: %v", err)
+		}
+
+		seq, err := GetLatestEventSeq(cfg, run3.RunID)
+		if err != nil {
+			t.Fatalf("GetLatestEventSeq: %v", err)
+		}
+		if seq != 0 {
+			t.Fatalf("expected seq 0 for no events, got %d", seq)
+		}
+
+		for i := 0; i < 3; i++ {
+			_ = AppendEvent(context.Background(), cfg, types.EventRecord{
+				RunID:   run3.RunID,
+				Type:    "test",
+				Message: fmt.Sprintf("event %d", i),
+			})
+		}
+
+		seq2, err := GetLatestEventSeq(cfg, run3.RunID)
+		if err != nil {
+			t.Fatalf("GetLatestEventSeq: %v", err)
+		}
+		if seq2 <= 0 {
+			t.Fatalf("expected non-zero seq after adding events")
+		}
+	})
+
+	t.Run("ListEventsPaginated_EmptyRunID", func(t *testing.T) {
+		_, _, err := ListEventsPaginated(cfg, EventFilter{})
+		if err == nil {
+			t.Fatalf("expected error for empty runID")
 		}
 	})
 }
