@@ -300,6 +300,69 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
+	// Background session retention: strictly prune sessions older than 30 days.
+	{
+		const (
+			sessionRetention = 30 * 24 * time.Hour
+			pruneInterval    = 6 * time.Hour
+		)
+		go func() {
+			pruneOnce := func() {
+				pruneCtx, cancel := context.WithTimeout(runCtx, 2*time.Minute)
+				defer cancel()
+				res, err := implstore.PruneOldSessions(pruneCtx, cfg, sessionRetention)
+				if err != nil {
+					log.Printf("daemon: prune sessions failed: %v", err)
+					mustEmit(runCtx, events.Event{
+						Type:    "daemon.prune.error",
+						Message: "Session pruning failed",
+						Data:    map[string]string{"error": err.Error()},
+					})
+					return
+				}
+				if res.Sessions <= 0 {
+					return
+				}
+				log.Printf(
+					"daemon: pruned %d sessions (runs=%d events=%d history=%d activities=%d constructor_state=%d constructor_manifest=%d)",
+					res.Sessions,
+					res.Runs,
+					res.Events,
+					res.History,
+					res.Activities,
+					res.ConstructorState,
+					res.ConstructorManifest,
+				)
+				mustEmit(runCtx, events.Event{
+					Type:    "daemon.prune",
+					Message: "Pruned old sessions",
+					Data: map[string]string{
+						"sessions":             strconv.FormatInt(res.Sessions, 10),
+						"runs":                 strconv.FormatInt(res.Runs, 10),
+						"events":               strconv.FormatInt(res.Events, 10),
+						"history":              strconv.FormatInt(res.History, 10),
+						"activities":           strconv.FormatInt(res.Activities, 10),
+						"constructor_state":    strconv.FormatInt(res.ConstructorState, 10),
+						"constructor_manifest": strconv.FormatInt(res.ConstructorManifest, 10),
+					},
+				})
+			}
+
+			// Best-effort run at startup, then periodically.
+			pruneOnce()
+			ticker := time.NewTicker(pruneInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-ticker.C:
+					pruneOnce()
+				}
+			}
+		}()
+	}
+
 	var serverWG sync.WaitGroup
 	webhookAddr := strings.TrimSpace(resolved.WebhookAddr)
 	if webhookAddr != "" {

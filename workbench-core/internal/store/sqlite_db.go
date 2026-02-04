@@ -3,8 +3,11 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -104,6 +107,63 @@ func sqlitePath(cfg config.Config) string {
 	return fsutil.GetSQLitePath(cfg.DataDir)
 }
 
+const (
+	defaultSQLiteMaxOpenConns  = 25
+	defaultSQLiteMaxIdleConns  = 25
+	defaultSQLiteConnMaxLife   = 5 * time.Minute
+	defaultSQLiteBusyTimeoutMS = 10000
+)
+
+func sqliteMaxOpenConns() int {
+	return envInt("WORKBENCH_SQLITE_MAX_OPEN_CONNS", defaultSQLiteMaxOpenConns)
+}
+
+func sqliteMaxIdleConns() int {
+	return envInt("WORKBENCH_SQLITE_MAX_IDLE_CONNS", defaultSQLiteMaxIdleConns)
+}
+
+func sqliteConnMaxLifetime() time.Duration {
+	return envDuration("WORKBENCH_SQLITE_CONN_MAX_LIFETIME", defaultSQLiteConnMaxLife)
+}
+
+func sqliteBusyTimeoutMS() int {
+	return envInt("WORKBENCH_SQLITE_BUSY_TIMEOUT_MS", defaultSQLiteBusyTimeoutMS)
+}
+
+func envInt(name string, def int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return def
+	}
+	return v
+}
+
+func envDuration(name string, def time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return def
+	}
+	return d
+}
+
+func sqliteDSN(path string) string {
+	// Use a file URI so per-connection PRAGMAs apply across the connection pool.
+	q := url.Values{}
+	q.Add("_pragma", "journal_mode(WAL)")
+	q.Add("_pragma", "foreign_keys(1)")
+	q.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", sqliteBusyTimeoutMS()))
+	u := url.URL{Scheme: "file", Path: path, RawQuery: q.Encode()}
+	return u.String()
+}
+
 func getSQLiteDB(cfg config.Config) (*sql.DB, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -118,11 +178,18 @@ func getSQLiteDB(cfg config.Config) (*sql.DB, error) {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			return nil, fmt.Errorf("sqlite: create data dir: %w", err)
 		}
-		opened, err := sql.Open("sqlite", path)
+		opened, err := sql.Open("sqlite", sqliteDSN(path))
 		if err != nil {
 			return nil, fmt.Errorf("sqlite: open db: %w", err)
 		}
-		opened.SetMaxOpenConns(1)
+		maxOpen := sqliteMaxOpenConns()
+		maxIdle := sqliteMaxIdleConns()
+		if maxIdle > maxOpen {
+			maxIdle = maxOpen
+		}
+		opened.SetMaxOpenConns(maxOpen)
+		opened.SetMaxIdleConns(maxIdle)
+		opened.SetConnMaxLifetime(sqliteConnMaxLifetime())
 		sqliteMu.Lock()
 		sqliteDBs[path] = opened
 		sqliteMu.Unlock()
@@ -151,7 +218,7 @@ func migrateSQLite(db *sql.DB) error {
 	if _, err := db.Exec(`PRAGMA foreign_keys=ON;`); err != nil {
 		return fmt.Errorf("sqlite: enable foreign keys: %w", err)
 	}
-	if _, err := db.Exec(`PRAGMA busy_timeout=5000;`); err != nil {
+	if _, err := db.Exec(fmt.Sprintf(`PRAGMA busy_timeout=%d;`, sqliteBusyTimeoutMS())); err != nil {
 		return fmt.Errorf("sqlite: set busy_timeout: %w", err)
 	}
 	tx, err := db.Begin()
