@@ -153,6 +153,10 @@ type outboxEntry struct {
 	Error          string
 	SummaryPath    string
 	ArtifactsCount int
+	InputTokens    int
+	OutputTokens   int
+	TotalTokens    int
+	CostUSD        float64
 	Timestamp      time.Time
 }
 
@@ -1168,6 +1172,30 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 				artCount = n
 			}
 		}
+		inputTokens := 0
+		outputTokens := 0
+		totalTokens := 0
+		if v := strings.TrimSpace(ev.Data["inputTokens"]); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				inputTokens = n
+			}
+		}
+		if v := strings.TrimSpace(ev.Data["outputTokens"]); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				outputTokens = n
+			}
+		}
+		if v := strings.TrimSpace(ev.Data["totalTokens"]); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				totalTokens = n
+			}
+		}
+		costUSD := 0.0
+		if v := strings.TrimSpace(ev.Data["costUsd"]); v != "" {
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				costUSD = f
+			}
+		}
 		m.outboxResults = append(m.outboxResults, outboxEntry{
 			TaskID:         taskID,
 			Goal:           strings.TrimSpace(ev.Data["goal"]),
@@ -1176,6 +1204,10 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 			Error:          strings.TrimSpace(ev.Data["error"]),
 			SummaryPath:    artifact0,
 			ArtifactsCount: artCount,
+			InputTokens:    inputTokens,
+			OutputTokens:   outputTokens,
+			TotalTokens:    totalTokens,
+			CostUSD:        costUSD,
 			Timestamp:      ev.Timestamp,
 		})
 		if len(m.outboxResults) > 10 {
@@ -2277,6 +2309,18 @@ func renderOutboxLines(results []outboxEntry, renderer *ContentRenderer, width i
 				info += " (summary: " + r.SummaryPath + ")"
 			}
 			lines = append(lines, info)
+		}
+		if r.TotalTokens > 0 || r.CostUSD > 0 {
+			parts := make([]string, 0, 2)
+			if r.TotalTokens > 0 {
+				parts = append(parts, fmt.Sprintf("tokens: %d (%d in + %d out)", r.TotalTokens, r.InputTokens, r.OutputTokens))
+			}
+			if r.CostUSD > 0 {
+				parts = append(parts, fmt.Sprintf("cost: $%.4f", r.CostUSD))
+			}
+			if len(parts) != 0 {
+				lines = append(lines, "  └ "+strings.Join(parts, " • "))
+			}
 		}
 	}
 	return strings.Join(lines, "\n")

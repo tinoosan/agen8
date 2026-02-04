@@ -25,14 +25,34 @@ import (
 // It is an interface so tests can stub it and so the agent package does not
 // depend on a specific browser implementation.
 type BrowserManager interface {
-	Start(ctx context.Context, headless bool) (sessionID string, err error)
-	Navigate(ctx context.Context, sessionID, url, waitFor string) (title string, finalURL string, err error)
+	Start(ctx context.Context, headless bool, userAgent string, viewportWidth, viewportHeight int, extraHeaders map[string]string) (sessionID string, err error)
+	Navigate(ctx context.Context, sessionID, url, waitFor string, timeoutMs int) (title string, finalURL string, err error)
+	Wait(ctx context.Context, sessionID, waitType, url, selector, state string, timeoutMs int, sleepMs int) error
 	// Dismiss attempts to dismiss cookie consent banners and popups.
 	// kind: cookies|popups|all; mode: accept|reject|close; maxClicks caps total clicks across strategies.
 	Dismiss(ctx context.Context, sessionID, kind, mode string, maxClicks int) (json.RawMessage, error)
-	Click(ctx context.Context, sessionID, selector, waitFor string) error
-	Fill(ctx context.Context, sessionID, selector, text, waitFor string) error
+	Click(ctx context.Context, sessionID, selector, waitFor string, expectPopup bool, timeoutMs int) (popupPageID, popupTitle, popupURL string, err error)
+	Fill(ctx context.Context, sessionID, selector, text, waitFor string, timeoutMs int) error
+	Hover(ctx context.Context, sessionID, selector string, timeoutMs int) error
+	Press(ctx context.Context, sessionID, selector, key string, timeoutMs int) error
+	Scroll(ctx context.Context, sessionID string, dx, dy int) error
+	Select(ctx context.Context, sessionID, selector string, values []string, timeoutMs int) (json.RawMessage, error)
+	SetChecked(ctx context.Context, sessionID, selector string, checked bool, timeoutMs int) error
+	Upload(ctx context.Context, sessionID, selector, absPath string, timeoutMs int) error
+	Download(ctx context.Context, sessionID, selector, absPath string, timeoutMs int) (json.RawMessage, error)
+	GoBack(ctx context.Context, sessionID string, timeoutMs int) (title string, finalURL string, err error)
+	GoForward(ctx context.Context, sessionID string, timeoutMs int) (title string, finalURL string, err error)
+	Reload(ctx context.Context, sessionID string, timeoutMs int) (title string, finalURL string, err error)
+	TabNew(ctx context.Context, sessionID, url string, setActive bool, timeoutMs int) (pageID, title, finalURL string, err error)
+	TabList(ctx context.Context, sessionID string) (json.RawMessage, error)
+	TabSwitch(ctx context.Context, sessionID, pageID string) error
+	TabClose(ctx context.Context, sessionID, pageID string) error
+	StorageSave(ctx context.Context, sessionID, absPath string) error
+	StorageLoad(ctx context.Context, sessionID, absPath string) error
+	SetExtraHeaders(ctx context.Context, sessionID string, headers map[string]string) error
+	SetViewport(ctx context.Context, sessionID string, width, height int) error
 	Extract(ctx context.Context, sessionID, selector, attribute string) (json.RawMessage, error)
+	ExtractLinks(ctx context.Context, sessionID, selector string) (json.RawMessage, error)
 	Screenshot(ctx context.Context, sessionID, absPath string, fullPage bool) error
 	PDF(ctx context.Context, sessionID, absPath string) error
 	Close(ctx context.Context, sessionID string) error
@@ -58,6 +78,9 @@ type HostOpExecutor struct {
 	// WorkspaceDir is the host filesystem path backing the /workspace VFS mount.
 	// It is used for browser screenshots and PDFs.
 	WorkspaceDir string
+	// ProjectDir is the host filesystem path backing the /project VFS mount.
+	// It is used for browser uploads (e.g., resumes) when the agent references /project paths.
+	ProjectDir string
 
 	DefaultMaxBytes int
 
@@ -350,19 +373,37 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		}
 
 		var params struct {
-			Action      string `json:"action"`
-			SessionID   string `json:"sessionId"`
-			URL         string `json:"url"`
-			Selector    string `json:"selector"`
-			Text        string `json:"text"`
-			WaitFor     string `json:"waitFor"`
-			Attribute   string `json:"attribute"`
-			Kind        string `json:"kind"`
-			Mode        string `json:"mode"`
-			MaxClicks   *int   `json:"maxClicks"`
-			AutoDismiss *bool  `json:"autoDismiss"`
-			Headless    *bool  `json:"headless"`
-			FullPage    *bool  `json:"fullPage"`
+			Action      string   `json:"action"`
+			SessionID   string   `json:"sessionId"`
+			URL         string   `json:"url"`
+			WaitType    string   `json:"waitType"`
+			State       string   `json:"state"`
+			SleepMs     *int     `json:"sleepMs"`
+			Selector    string   `json:"selector"`
+			Text        string   `json:"text"`
+			WaitFor     string   `json:"waitFor"`
+			Attribute   string   `json:"attribute"`
+			Kind        string   `json:"kind"`
+			Mode        string   `json:"mode"`
+			MaxClicks   *int     `json:"maxClicks"`
+			AutoDismiss *bool    `json:"autoDismiss"`
+			TimeoutMs   *int     `json:"timeoutMs"`
+			Headless    *bool    `json:"headless"`
+			UserAgent   string   `json:"userAgent"`
+			ViewportW   *int     `json:"viewportWidth"`
+			ViewportH   *int     `json:"viewportHeight"`
+			HeadersJSON string   `json:"headersJson"`
+			ExpectPopup *bool    `json:"expectPopup"`
+			SetActive   *bool    `json:"setActive"`
+			PageID      string   `json:"pageId"`
+			Key         string   `json:"key"`
+			DX          *int     `json:"dx"`
+			DY          *int     `json:"dy"`
+			Value       string   `json:"value"`
+			Values      []string `json:"values"`
+			FilePath    string   `json:"filePath"`
+			Filename    string   `json:"filename"`
+			FullPage    *bool    `json:"fullPage"`
 		}
 		if err := json.Unmarshal(req.Input, &params); err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
@@ -378,7 +419,20 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			if params.Headless != nil {
 				headless = *params.Headless
 			}
-			sessionID, err := x.Browser.Start(ctx, headless)
+			viewportW, viewportH := 0, 0
+			if params.ViewportW != nil {
+				viewportW = *params.ViewportW
+			}
+			if params.ViewportH != nil {
+				viewportH = *params.ViewportH
+			}
+			var extraHeaders map[string]string
+			if strings.TrimSpace(params.HeadersJSON) != "" {
+				if err := json.Unmarshal([]byte(params.HeadersJSON), &extraHeaders); err != nil {
+					return types.HostOpResponse{Op: "browser.start", Ok: false, Error: "headersJson must be a JSON object of string values: " + err.Error()}
+				}
+			}
+			sessionID, err := x.Browser.Start(ctx, headless, strings.TrimSpace(params.UserAgent), viewportW, viewportH, extraHeaders)
 			if err != nil {
 				return types.HostOpResponse{Op: "browser.start", Ok: false, Error: err.Error()}
 			}
@@ -386,7 +440,11 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			return types.HostOpResponse{Op: "browser.start", Ok: true, Text: string(b)}
 
 		case "navigate":
-			title, finalURL, err := x.Browser.Navigate(ctx, params.SessionID, params.URL, params.WaitFor)
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			title, finalURL, err := x.Browser.Navigate(ctx, params.SessionID, params.URL, params.WaitFor, timeoutMs)
 			if err != nil {
 				return types.HostOpResponse{Op: "browser.navigate", Ok: false, Error: err.Error()}
 			}
@@ -400,6 +458,20 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			}
 			b, _ := json.Marshal(map[string]string{"title": title, "url": finalURL})
 			return types.HostOpResponse{Op: "browser.navigate", Ok: true, Text: string(b)}
+
+		case "wait":
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			sleepMs := 0
+			if params.SleepMs != nil && *params.SleepMs > 0 {
+				sleepMs = *params.SleepMs
+			}
+			if err := x.Browser.Wait(ctx, params.SessionID, strings.TrimSpace(params.WaitType), params.URL, params.Selector, strings.TrimSpace(params.State), timeoutMs, sleepMs); err != nil {
+				return types.HostOpResponse{Op: "browser.wait", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.wait", Ok: true}
 
 		case "dismiss":
 			maxClicks := 3
@@ -425,16 +497,280 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			return types.HostOpResponse{Op: "browser.dismiss", Ok: true, Text: strings.TrimSpace(string(out))}
 
 		case "click":
-			if err := x.Browser.Click(ctx, params.SessionID, params.Selector, params.WaitFor); err != nil {
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			expectPopup := false
+			if params.ExpectPopup != nil {
+				expectPopup = *params.ExpectPopup
+			}
+			pageID, title, finalURL, err := x.Browser.Click(ctx, params.SessionID, params.Selector, params.WaitFor, expectPopup, timeoutMs)
+			if err != nil {
 				return types.HostOpResponse{Op: "browser.click", Ok: false, Error: err.Error()}
+			}
+			if strings.TrimSpace(pageID) != "" {
+				b, _ := json.Marshal(map[string]string{"pageId": strings.TrimSpace(pageID), "title": strings.TrimSpace(title), "url": strings.TrimSpace(finalURL)})
+				return types.HostOpResponse{Op: "browser.click", Ok: true, Text: string(b)}
 			}
 			return types.HostOpResponse{Op: "browser.click", Ok: true}
 
 		case "type":
-			if err := x.Browser.Fill(ctx, params.SessionID, params.Selector, params.Text, params.WaitFor); err != nil {
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			if err := x.Browser.Fill(ctx, params.SessionID, params.Selector, params.Text, params.WaitFor, timeoutMs); err != nil {
 				return types.HostOpResponse{Op: "browser.type", Ok: false, Error: err.Error()}
 			}
 			return types.HostOpResponse{Op: "browser.type", Ok: true}
+
+		case "hover":
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			if err := x.Browser.Hover(ctx, params.SessionID, params.Selector, timeoutMs); err != nil {
+				return types.HostOpResponse{Op: "browser.hover", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.hover", Ok: true}
+
+		case "press":
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			if err := x.Browser.Press(ctx, params.SessionID, params.Selector, params.Key, timeoutMs); err != nil {
+				return types.HostOpResponse{Op: "browser.press", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.press", Ok: true}
+
+		case "scroll":
+			dx := 0
+			if params.DX != nil {
+				dx = *params.DX
+			}
+			dy := 500
+			if params.DY != nil {
+				dy = *params.DY
+			}
+			if err := x.Browser.Scroll(ctx, params.SessionID, dx, dy); err != nil {
+				return types.HostOpResponse{Op: "browser.scroll", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.scroll", Ok: true}
+
+		case "select":
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			vals := append([]string(nil), params.Values...)
+			if strings.TrimSpace(params.Value) != "" {
+				vals = append([]string{strings.TrimSpace(params.Value)}, vals...)
+			}
+			out, err := x.Browser.Select(ctx, params.SessionID, params.Selector, vals, timeoutMs)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.select", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.select", Ok: true, Text: strings.TrimSpace(string(out))}
+
+		case "check", "uncheck":
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			checked := action == "check"
+			if err := x.Browser.SetChecked(ctx, params.SessionID, params.Selector, checked, timeoutMs); err != nil {
+				return types.HostOpResponse{Op: "browser." + action, Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser." + action, Ok: true}
+
+		case "upload":
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			abs, err := x.resolveBrowserFilePath(params.FilePath)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.upload", Ok: false, Error: err.Error()}
+			}
+			if err := x.Browser.Upload(ctx, params.SessionID, params.Selector, abs, timeoutMs); err != nil {
+				return types.HostOpResponse{Op: "browser.upload", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.upload", Ok: true}
+
+		case "download":
+			if strings.TrimSpace(x.WorkspaceDir) == "" {
+				return types.HostOpResponse{Op: "browser.download", Ok: false, Error: "workspace dir not configured"}
+			}
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			filename := strings.TrimSpace(params.Filename)
+			if filename == "" {
+				filename = fmt.Sprintf("download-%s", uuid.NewString()[:8])
+			}
+			rel, err := safeRelPath(filename)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.download", Ok: false, Error: err.Error()}
+			}
+			absPath := filepath.Join(x.WorkspaceDir, rel)
+			out, err := x.Browser.Download(ctx, params.SessionID, params.Selector, absPath, timeoutMs)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.download", Ok: false, Error: err.Error()}
+			}
+			resp := map[string]any{"path": filepath.ToSlash(filepath.Join("/workspace", rel))}
+			if len(out) != 0 {
+				var extra map[string]any
+				if jerr := json.Unmarshal(out, &extra); jerr == nil {
+					for k, v := range extra {
+						if k == "path" {
+							continue
+						}
+						resp[k] = v
+					}
+				}
+			}
+			b, _ := json.Marshal(resp)
+			return types.HostOpResponse{Op: "browser.download", Ok: true, Text: string(b)}
+
+		case "back":
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			title, finalURL, err := x.Browser.GoBack(ctx, params.SessionID, timeoutMs)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.back", Ok: false, Error: err.Error()}
+			}
+			b, _ := json.Marshal(map[string]string{"title": title, "url": finalURL})
+			return types.HostOpResponse{Op: "browser.back", Ok: true, Text: string(b)}
+
+		case "forward":
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			title, finalURL, err := x.Browser.GoForward(ctx, params.SessionID, timeoutMs)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.forward", Ok: false, Error: err.Error()}
+			}
+			b, _ := json.Marshal(map[string]string{"title": title, "url": finalURL})
+			return types.HostOpResponse{Op: "browser.forward", Ok: true, Text: string(b)}
+
+		case "reload":
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			title, finalURL, err := x.Browser.Reload(ctx, params.SessionID, timeoutMs)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.reload", Ok: false, Error: err.Error()}
+			}
+			b, _ := json.Marshal(map[string]string{"title": title, "url": finalURL})
+			return types.HostOpResponse{Op: "browser.reload", Ok: true, Text: string(b)}
+
+		case "tab_new":
+			timeoutMs := 0
+			if params.TimeoutMs != nil && *params.TimeoutMs > 0 {
+				timeoutMs = *params.TimeoutMs
+			}
+			setActive := true
+			if params.SetActive != nil {
+				setActive = *params.SetActive
+			}
+			pageID, title, finalURL, err := x.Browser.TabNew(ctx, params.SessionID, params.URL, setActive, timeoutMs)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.tab_new", Ok: false, Error: err.Error()}
+			}
+			b, _ := json.Marshal(map[string]string{"pageId": pageID, "title": title, "url": finalURL})
+			return types.HostOpResponse{Op: "browser.tab_new", Ok: true, Text: string(b)}
+
+		case "tab_list":
+			out, err := x.Browser.TabList(ctx, params.SessionID)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.tab_list", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.tab_list", Ok: true, Text: strings.TrimSpace(string(out))}
+
+		case "tab_switch":
+			if err := x.Browser.TabSwitch(ctx, params.SessionID, params.PageID); err != nil {
+				return types.HostOpResponse{Op: "browser.tab_switch", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.tab_switch", Ok: true}
+
+		case "tab_close":
+			if err := x.Browser.TabClose(ctx, params.SessionID, params.PageID); err != nil {
+				return types.HostOpResponse{Op: "browser.tab_close", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.tab_close", Ok: true}
+
+		case "storage_save":
+			if strings.TrimSpace(x.WorkspaceDir) == "" {
+				return types.HostOpResponse{Op: "browser.storage_save", Ok: false, Error: "workspace dir not configured"}
+			}
+			filename := strings.TrimSpace(params.Filename)
+			if filename == "" {
+				filename = fmt.Sprintf("storage-%s.json", uuid.NewString()[:8])
+			}
+			rel, err := safeRelPath(filename)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.storage_save", Ok: false, Error: err.Error()}
+			}
+			absPath := filepath.Join(x.WorkspaceDir, rel)
+			if err := x.Browser.StorageSave(ctx, params.SessionID, absPath); err != nil {
+				return types.HostOpResponse{Op: "browser.storage_save", Ok: false, Error: err.Error()}
+			}
+			b, _ := json.Marshal(map[string]string{"path": filepath.ToSlash(filepath.Join("/workspace", rel))})
+			return types.HostOpResponse{Op: "browser.storage_save", Ok: true, Text: string(b)}
+
+		case "storage_load":
+			if strings.TrimSpace(x.WorkspaceDir) == "" {
+				return types.HostOpResponse{Op: "browser.storage_load", Ok: false, Error: "workspace dir not configured"}
+			}
+			filename := strings.TrimSpace(params.Filename)
+			if filename == "" {
+				return types.HostOpResponse{Op: "browser.storage_load", Ok: false, Error: "filename is required"}
+			}
+			rel, err := safeRelPath(filename)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.storage_load", Ok: false, Error: err.Error()}
+			}
+			absPath := filepath.Join(x.WorkspaceDir, rel)
+			if err := x.Browser.StorageLoad(ctx, params.SessionID, absPath); err != nil {
+				return types.HostOpResponse{Op: "browser.storage_load", Ok: false, Error: err.Error()}
+			}
+			b, _ := json.Marshal(map[string]string{"path": filepath.ToSlash(filepath.Join("/workspace", rel))})
+			return types.HostOpResponse{Op: "browser.storage_load", Ok: true, Text: string(b)}
+
+		case "set_headers":
+			var hdr map[string]string
+			if strings.TrimSpace(params.HeadersJSON) != "" {
+				if err := json.Unmarshal([]byte(params.HeadersJSON), &hdr); err != nil {
+					return types.HostOpResponse{Op: "browser.set_headers", Ok: false, Error: "headersJson must be a JSON object of string values: " + err.Error()}
+				}
+			}
+			if err := x.Browser.SetExtraHeaders(ctx, params.SessionID, hdr); err != nil {
+				return types.HostOpResponse{Op: "browser.set_headers", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.set_headers", Ok: true}
+
+		case "set_viewport":
+			w, h := 0, 0
+			if params.ViewportW != nil {
+				w = *params.ViewportW
+			}
+			if params.ViewportH != nil {
+				h = *params.ViewportH
+			}
+			if w <= 0 || h <= 0 {
+				return types.HostOpResponse{Op: "browser.set_viewport", Ok: false, Error: "viewportWidth and viewportHeight are required"}
+			}
+			if err := x.Browser.SetViewport(ctx, params.SessionID, w, h); err != nil {
+				return types.HostOpResponse{Op: "browser.set_viewport", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.set_viewport", Ok: true}
 
 		case "extract":
 			data, err := x.Browser.Extract(ctx, params.SessionID, params.Selector, params.Attribute)
@@ -442,6 +778,17 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 				return types.HostOpResponse{Op: "browser.extract", Ok: false, Error: err.Error()}
 			}
 			return types.HostOpResponse{Op: "browser.extract", Ok: true, Text: strings.TrimSpace(string(data))}
+
+		case "extract_links":
+			selector := strings.TrimSpace(params.Selector)
+			if selector == "" {
+				selector = "a"
+			}
+			data, err := x.Browser.ExtractLinks(ctx, params.SessionID, selector)
+			if err != nil {
+				return types.HostOpResponse{Op: "browser.extract_links", Ok: false, Error: err.Error()}
+			}
+			return types.HostOpResponse{Op: "browser.extract_links", Ok: true, Text: strings.TrimSpace(string(data))}
 
 		case "screenshot":
 			if strings.TrimSpace(x.WorkspaceDir) == "" {
@@ -493,6 +840,63 @@ func PrettyJSON(v any) string {
 		return "<json marshal error: " + err.Error() + ">"
 	}
 	return string(b)
+}
+
+func safeRelPath(spec string) (string, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return "", fmt.Errorf("filename is required")
+	}
+	if strings.Contains(spec, "\\") {
+		spec = strings.ReplaceAll(spec, "\\", "/")
+	}
+	if strings.HasPrefix(spec, "/") {
+		return "", fmt.Errorf("filename must be a relative path")
+	}
+	clean := filepath.Clean(spec)
+	if clean == "." || clean == "" {
+		return "", fmt.Errorf("filename is required")
+	}
+	if strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
+		return "", fmt.Errorf("filename must not contain '..'")
+	}
+	return clean, nil
+}
+
+func (x *HostOpExecutor) resolveBrowserFilePath(vpath string) (string, error) {
+	vpath = strings.TrimSpace(vpath)
+	if vpath == "" {
+		return "", fmt.Errorf("filePath is required")
+	}
+	if strings.HasPrefix(vpath, "/workspace/") || vpath == "/workspace" {
+		if strings.TrimSpace(x.WorkspaceDir) == "" {
+			return "", fmt.Errorf("workspace dir not configured")
+		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(vpath, "/workspace"), "/")
+		if rel == "" {
+			return "", fmt.Errorf("filePath must point to a file under /workspace (not the directory)")
+		}
+		r, err := safeRelPath(rel)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(x.WorkspaceDir, r), nil
+	}
+	if strings.HasPrefix(vpath, "/project/") || vpath == "/project" {
+		if strings.TrimSpace(x.ProjectDir) == "" {
+			return "", fmt.Errorf("project dir not configured")
+		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(vpath, "/project"), "/")
+		if rel == "" {
+			return "", fmt.Errorf("filePath must point to a file under /project (not the directory)")
+		}
+		r, err := safeRelPath(rel)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(x.ProjectDir, r), nil
+	}
+	return "", fmt.Errorf("filePath must be a VFS path under /project or /workspace")
 }
 
 func encodeReadPayload(b []byte, maxBytes int) (text string, bytesB64 string, truncated bool) {

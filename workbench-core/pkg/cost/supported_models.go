@@ -36,6 +36,7 @@ var modelInfos = []ModelInfo{
 	{"z-ai/glm-4.7", 0.4, 1.5, true},
 	{"deepseek/deepseek-chat", 0.14, 0.28, false},
 	{"deepseek/deepseek-r1", 0.55, 2.19, true},
+	{"openrouter/free", 0, 0, true},
 }
 
 func SupportedModels() []string {

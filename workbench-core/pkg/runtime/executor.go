@@ -171,18 +171,35 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	}
 	if req.Op == types.HostOpBrowser && len(req.Input) > 0 {
 		var bReq struct {
-			Action      string `json:"action"`
-			SessionID   string `json:"sessionId"`
-			URL         string `json:"url"`
-			Selector    string `json:"selector"`
-			WaitFor     string `json:"waitFor"`
-			Attribute   string `json:"attribute"`
-			Kind        string `json:"kind"`
-			Mode        string `json:"mode"`
-			MaxClicks   *int   `json:"maxClicks"`
-			AutoDismiss *bool  `json:"autoDismiss"`
-			Headless    *bool  `json:"headless"`
-			FullPage    *bool  `json:"fullPage"`
+			Action      string   `json:"action"`
+			SessionID   string   `json:"sessionId"`
+			URL         string   `json:"url"`
+			WaitType    string   `json:"waitType"`
+			State       string   `json:"state"`
+			SleepMs     *int     `json:"sleepMs"`
+			Selector    string   `json:"selector"`
+			WaitFor     string   `json:"waitFor"`
+			Attribute   string   `json:"attribute"`
+			Kind        string   `json:"kind"`
+			Mode        string   `json:"mode"`
+			MaxClicks   *int     `json:"maxClicks"`
+			AutoDismiss *bool    `json:"autoDismiss"`
+			TimeoutMs   *int     `json:"timeoutMs"`
+			Headless    *bool    `json:"headless"`
+			FullPage    *bool    `json:"fullPage"`
+			UserAgent   string   `json:"userAgent"`
+			ViewportW   *int     `json:"viewportWidth"`
+			ViewportH   *int     `json:"viewportHeight"`
+			ExpectPopup *bool    `json:"expectPopup"`
+			SetActive   *bool    `json:"setActive"`
+			PageID      string   `json:"pageId"`
+			Key         string   `json:"key"`
+			DX          *int     `json:"dx"`
+			DY          *int     `json:"dy"`
+			Value       string   `json:"value"`
+			Values      []string `json:"values"`
+			FilePath    string   `json:"filePath"`
+			Filename    string   `json:"filename"`
 			// NOTE: We intentionally do not log "text" to avoid leaking secrets.
 		}
 		if err := json.Unmarshal(req.Input, &bReq); err == nil {
@@ -234,6 +251,22 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 				reqData["maxClicks"] = strconv.Itoa(*bReq.MaxClicks)
 				storeReq["maxClicks"] = strconv.Itoa(*bReq.MaxClicks)
 			}
+			if strings.TrimSpace(bReq.WaitType) != "" {
+				reqData["waitType"] = strings.TrimSpace(bReq.WaitType)
+				storeReq["waitType"] = strings.TrimSpace(bReq.WaitType)
+			}
+			if strings.TrimSpace(bReq.State) != "" {
+				reqData["state"] = strings.TrimSpace(bReq.State)
+				storeReq["state"] = strings.TrimSpace(bReq.State)
+			}
+			if bReq.SleepMs != nil {
+				reqData["sleepMs"] = strconv.Itoa(*bReq.SleepMs)
+				storeReq["sleepMs"] = strconv.Itoa(*bReq.SleepMs)
+			}
+			if bReq.TimeoutMs != nil {
+				reqData["timeoutMs"] = strconv.Itoa(*bReq.TimeoutMs)
+				storeReq["timeoutMs"] = strconv.Itoa(*bReq.TimeoutMs)
+			}
 			if bReq.AutoDismiss != nil {
 				reqData["autoDismiss"] = fmtBool(*bReq.AutoDismiss)
 				storeReq["autoDismiss"] = fmtBool(*bReq.AutoDismiss)
@@ -245,6 +278,64 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 			if bReq.FullPage != nil {
 				reqData["fullPage"] = fmtBool(*bReq.FullPage)
 				storeReq["fullPage"] = fmtBool(*bReq.FullPage)
+			}
+			if strings.TrimSpace(bReq.UserAgent) != "" {
+				if p, tr := capBytes(singleLine(bReq.UserAgent), 160); p != "" {
+					reqData["userAgent"] = p
+					storeReq["userAgent"] = p
+					if tr {
+						reqData["userAgentTruncated"] = "true"
+						storeReq["userAgentTruncated"] = "true"
+					}
+				}
+			}
+			if bReq.ViewportW != nil {
+				reqData["viewportWidth"] = strconv.Itoa(*bReq.ViewportW)
+				storeReq["viewportWidth"] = strconv.Itoa(*bReq.ViewportW)
+			}
+			if bReq.ViewportH != nil {
+				reqData["viewportHeight"] = strconv.Itoa(*bReq.ViewportH)
+				storeReq["viewportHeight"] = strconv.Itoa(*bReq.ViewportH)
+			}
+			if bReq.ExpectPopup != nil {
+				reqData["expectPopup"] = fmtBool(*bReq.ExpectPopup)
+				storeReq["expectPopup"] = fmtBool(*bReq.ExpectPopup)
+			}
+			if bReq.SetActive != nil {
+				reqData["setActive"] = fmtBool(*bReq.SetActive)
+				storeReq["setActive"] = fmtBool(*bReq.SetActive)
+			}
+			if strings.TrimSpace(bReq.PageID) != "" {
+				reqData["pageId"] = strings.TrimSpace(bReq.PageID)
+				storeReq["pageId"] = strings.TrimSpace(bReq.PageID)
+			}
+			if strings.TrimSpace(bReq.Key) != "" {
+				reqData["key"] = strings.TrimSpace(bReq.Key)
+				storeReq["key"] = strings.TrimSpace(bReq.Key)
+			}
+			if bReq.DX != nil {
+				reqData["dx"] = strconv.Itoa(*bReq.DX)
+				storeReq["dx"] = strconv.Itoa(*bReq.DX)
+			}
+			if bReq.DY != nil {
+				reqData["dy"] = strconv.Itoa(*bReq.DY)
+				storeReq["dy"] = strconv.Itoa(*bReq.DY)
+			}
+			if strings.TrimSpace(bReq.Value) != "" {
+				reqData["value"] = strings.TrimSpace(bReq.Value)
+				storeReq["value"] = strings.TrimSpace(bReq.Value)
+			}
+			if len(bReq.Values) != 0 {
+				reqData["valuesCount"] = strconv.Itoa(len(bReq.Values))
+				storeReq["valuesCount"] = strconv.Itoa(len(bReq.Values))
+			}
+			if strings.TrimSpace(bReq.FilePath) != "" {
+				reqData["filePath"] = "<omitted>"
+				storeReq["filePath"] = "<omitted>"
+			}
+			if strings.TrimSpace(bReq.Filename) != "" {
+				reqData["filename"] = strings.TrimSpace(bReq.Filename)
+				storeReq["filename"] = strings.TrimSpace(bReq.Filename)
 			}
 			reqData["text"] = "<omitted>"
 			storeReq["text"] = "<omitted>"
@@ -406,57 +497,54 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	if strings.HasPrefix(resp.Op, "browser.") {
 		meta.RespData["browserOp"] = resp.Op
 		if strings.TrimSpace(resp.Text) != "" {
-			switch resp.Op {
-			case "browser.start":
-				var out struct {
-					SessionID string `json:"sessionId"`
+			var mOut map[string]any
+			if err := json.Unmarshal([]byte(resp.Text), &mOut); err == nil {
+				if v, ok := mOut["sessionId"].(string); ok && strings.TrimSpace(v) != "" {
+					meta.RespData["sessionId"] = strings.TrimSpace(v)
+					meta.StoreResp["sessionId"] = strings.TrimSpace(v)
 				}
-				if err := json.Unmarshal([]byte(resp.Text), &out); err == nil && strings.TrimSpace(out.SessionID) != "" {
-					meta.RespData["sessionId"] = strings.TrimSpace(out.SessionID)
-					meta.StoreResp["sessionId"] = strings.TrimSpace(out.SessionID)
+				if v, ok := mOut["pageId"].(string); ok && strings.TrimSpace(v) != "" {
+					meta.RespData["pageId"] = strings.TrimSpace(v)
+					meta.StoreResp["pageId"] = strings.TrimSpace(v)
 				}
-			case "browser.navigate":
-				var out struct {
-					Title string `json:"title"`
-					URL   string `json:"url"`
-				}
-				if err := json.Unmarshal([]byte(resp.Text), &out); err == nil {
-					if strings.TrimSpace(out.Title) != "" {
-						if p, tr := capBytes(singleLine(out.Title), 200); p != "" {
-							meta.RespData["title"] = p
-							if tr {
-								meta.RespData["titleTruncated"] = "true"
-							}
+				if v, ok := mOut["title"].(string); ok && strings.TrimSpace(v) != "" {
+					if p, tr := capBytes(singleLine(v), 200); p != "" {
+						meta.RespData["title"] = p
+						if tr {
+							meta.RespData["titleTruncated"] = "true"
 						}
 					}
-					if strings.TrimSpace(out.URL) != "" {
-						meta.RespData["url"] = strings.TrimSpace(out.URL)
-						meta.StoreResp["url"] = strings.TrimSpace(out.URL)
-					}
 				}
-			case "browser.screenshot", "browser.pdf":
-				var out struct {
-					Path string `json:"path"`
+				if v, ok := mOut["url"].(string); ok && strings.TrimSpace(v) != "" {
+					meta.RespData["url"] = strings.TrimSpace(v)
+					meta.StoreResp["url"] = strings.TrimSpace(v)
 				}
-				if err := json.Unmarshal([]byte(resp.Text), &out); err == nil && strings.TrimSpace(out.Path) != "" {
-					meta.RespData["path"] = strings.TrimSpace(out.Path)
-					meta.StoreResp["path"] = strings.TrimSpace(out.Path)
+				if v, ok := mOut["path"].(string); ok && strings.TrimSpace(v) != "" {
+					meta.RespData["path"] = strings.TrimSpace(v)
+					meta.StoreResp["path"] = strings.TrimSpace(v)
 				}
-			case "browser.dismiss":
-				var out struct {
-					Count int `json:"count"`
+				if v, ok := mOut["count"].(float64); ok {
+					meta.RespData["count"] = strconv.Itoa(int(v))
+					meta.StoreResp["count"] = strconv.Itoa(int(v))
 				}
-				if err := json.Unmarshal([]byte(resp.Text), &out); err == nil {
-					meta.RespData["dismissCount"] = strconv.Itoa(out.Count)
-					meta.StoreResp["dismissCount"] = strconv.Itoa(out.Count)
+				if v, ok := mOut["dismissCount"].(float64); ok {
+					meta.RespData["dismissCount"] = strconv.Itoa(int(v))
+					meta.StoreResp["dismissCount"] = strconv.Itoa(int(v))
 				}
-			case "browser.extract":
-				meta.RespData["extractBytes"] = strconv.Itoa(len(resp.Text))
-				meta.StoreResp["extractBytes"] = strconv.Itoa(len(resp.Text))
+				if v, ok := mOut["suggestedFilename"].(string); ok && strings.TrimSpace(v) != "" {
+					meta.RespData["suggestedFilename"] = strings.TrimSpace(v)
+					meta.StoreResp["suggestedFilename"] = strings.TrimSpace(v)
+				}
+			} else if resp.Op == "browser.extract" || resp.Op == "browser.extract_links" || resp.Op == "browser.tab_list" {
+				meta.RespData["bytes"] = strconv.Itoa(len(resp.Text))
+				meta.StoreResp["bytes"] = strconv.Itoa(len(resp.Text))
+			}
+
+			if resp.Op == "browser.extract" || resp.Op == "browser.extract_links" {
 				var arr []any
 				if err := json.Unmarshal([]byte(resp.Text), &arr); err == nil {
-					meta.RespData["extractItems"] = strconv.Itoa(len(arr))
-					meta.StoreResp["extractItems"] = strconv.Itoa(len(arr))
+					meta.RespData["items"] = strconv.Itoa(len(arr))
+					meta.StoreResp["items"] = strconv.Itoa(len(arr))
 				}
 			}
 		}

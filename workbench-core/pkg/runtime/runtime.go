@@ -358,6 +358,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		EmailClient:     emailClient,
 		Browser:         browserMgr,
 		WorkspaceDir:    wsRes.BaseDir,
+		ProjectDir:      absWorkdirRoot,
 		DefaultMaxBytes: 4096,
 		MaxReadBytes:    256 * 1024,
 	}
