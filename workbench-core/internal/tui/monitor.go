@@ -52,6 +52,15 @@ type tickMsg struct {
 
 type uiRefreshMsg struct{}
 
+type planReloadMsg struct{}
+
+type planFilesLoadedMsg struct {
+	checklist    string
+	checklistErr string
+	details      string
+	detailsErr   string
+}
+
 type inboxLoadedMsg struct {
 	tasks      []taskState
 	totalCount int
@@ -70,11 +79,16 @@ type activityLoadedMsg struct {
 	page       int
 }
 
+type MonitorResult struct {
+	SwitchToRunID string
+}
+
 type monitorModel struct {
 	ctx       context.Context
 	cfg       config.Config
 	runID     string
 	runStatus types.RunStatus // loaded at init; used to show "run not active" warning
+	result    *MonitorResult
 
 	offset int64
 
@@ -105,42 +119,53 @@ type monitorModel struct {
 
 	taskStore agentstate.TaskStore
 
-	inbox              map[string]taskState
-	inboxVP            viewport.Model
-	currentTask        *taskState
-	inboxList          []taskState
-	inboxPage          int
-	inboxPageSize      int
-	inboxTotalCount    int
-	outboxResults      []outboxEntry
-	outboxVP           viewport.Model
-	outboxPage         int
-	outboxPageSize     int
-	outboxTotalCount   int
-	memResults         []string
-	memoryVP           viewport.Model
-	thinkingEntries    []thinkingEntry
-	thinkingVP         viewport.Model
-	thinkingAutoScroll bool
-	planMarkdown       string
-	planDetails        string
-	planLoadErr        string
-	planDetailsErr     string
-	stats              monitorStats
-	model              string
-	profile            string
-	focusedPanel       panelID
-	compactTab         int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
-	dashboardSideTab   int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
-	width              int
-	height             int
-	styles             *monitorStyles
-	tailCh             <-chan store.TailedEvent
-	errCh              <-chan error
-	cancel             context.CancelFunc
+	inbox               map[string]taskState
+	inboxVP             viewport.Model
+	currentTask         *taskState
+	inboxList           []taskState
+	inboxPage           int
+	inboxPageSize       int
+	inboxTotalCount     int
+	outboxResults       []outboxEntry
+	outboxVP            viewport.Model
+	outboxPage          int
+	outboxPageSize      int
+	outboxTotalCount    int
+	memResults          []string
+	memoryVP            viewport.Model
+	thinkingEntries     []thinkingEntry
+	thinkingVP          viewport.Model
+	thinkingAutoScroll  bool
+	planMarkdown        string
+	planDetails         string
+	planLoadErr         string
+	planDetailsErr      string
+	planReloadScheduled bool
+	planReloadDebounce  time.Duration
+	stats               monitorStats
+	model               string
+	profile             string
+	focusedPanel        panelID
+	compactTab          int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
+	dashboardSideTab    int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
+	width               int
+	height              int
+	styles              *monitorStyles
+	tailCh              <-chan store.TailedEvent
+	errCh               <-chan error
+	cancel              context.CancelFunc
 
 	// Modal overlay state (only one modal open at a time)
 	helpModalOpen bool
+
+	// Session picker
+	sessionPickerOpen     bool
+	sessionPickerList     list.Model
+	sessionPickerErr      string
+	sessionPickerPage     int
+	sessionPickerPageSize int
+	sessionPickerTotal    int
+	sessionPickerFilter   string
 
 	// Model picker
 	modelPickerOpen bool
@@ -252,15 +277,19 @@ const (
 )
 
 func RunMonitor(ctx context.Context, cfg config.Config, runID string) error {
-	m, err := newMonitorModel(ctx, cfg, runID)
+	var result MonitorResult
+	m, err := newMonitorModel(ctx, cfg, runID, &result)
 	if err != nil {
 		return err
 	}
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	if err == nil && strings.TrimSpace(result.SwitchToRunID) != "" {
+		return &MonitorSwitchRunError{RunID: strings.TrimSpace(result.SwitchToRunID)}
+	}
 	return err
 }
 
-func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*monitorModel, error) {
+func newMonitorModel(ctx context.Context, cfg config.Config, runID string, result *MonitorResult) (*monitorModel, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -332,6 +361,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 		cfg:                   cfg,
 		runID:                 runID,
 		runStatus:             runStatus,
+		result:                result,
 		offset:                off,
 		input:                 in,
 		activityPageItems:     []Activity{},
@@ -369,6 +399,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 		errCh:                 errCh,
 		cancel:                cancel,
 		uiRefreshDebounce:     33 * time.Millisecond,
+		planReloadDebounce:    100 * time.Millisecond,
 	}
 	// Disable mouse handling so terminals don't enter mouse-reporting mode.
 	m.activityDetail.MouseWheelEnabled = false
@@ -416,6 +447,9 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.observeEvent(msg.ev.Event)
 		}
 		cmds := []tea.Cmd{m.listenEvent()}
+		if shouldReloadPlanOnEvent(msg.ev.Event) {
+			cmds = append(cmds, m.schedulePlanReload())
+		}
 		// Keep paginated lists in sync without loading everything into memory.
 		switch msg.ev.Event.Type {
 		case "task.queued", "task.generated", "webhook.task.queued", "task.start":
@@ -492,10 +526,38 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dirtyActivity = true
 		return m, m.scheduleUIRefresh()
 
+	case sessionsListMsg:
+		if msg.err != nil {
+			m.sessionPickerErr = msg.err.Error()
+			m.sessionPickerList.SetItems(nil)
+			return m, m.scheduleUIRefresh()
+		}
+		m.sessionPickerErr = ""
+		m.sessionPickerTotal = msg.total
+		m.sessionPickerPage = msg.page
+		items := sessionsToPickerItems(msg.sessions)
+		m.sessionPickerList.SetItems(items)
+		if len(items) > 0 {
+			m.sessionPickerList.Select(0)
+		}
+		return m, m.scheduleUIRefresh()
+
 	case uiRefreshMsg:
 		m.uiRefreshScheduled = false
 		m.refreshViewports()
 		return m, nil
+
+	case planReloadMsg:
+		m.planReloadScheduled = false
+		return m, m.loadPlanFilesCmd()
+
+	case planFilesLoadedMsg:
+		m.planMarkdown = msg.checklist
+		m.planLoadErr = msg.checklistErr
+		m.planDetails = msg.details
+		m.planDetailsErr = msg.detailsErr
+		m.dirtyPlan = true
+		return m, m.scheduleUIRefresh()
 
 	case monitorFilePickerPathsMsg:
 		m.handleFilePickerPaths(msg.paths)
@@ -510,6 +572,9 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, nil // Consume all other keys when help is open
+		}
+		if m.sessionPickerOpen {
+			return m.updateSessionPicker(msg)
 		}
 		if m.profilePickerOpen {
 			return m.updateProfilePicker(msg)
@@ -716,6 +781,21 @@ func (m *monitorModel) scheduleUIRefresh() tea.Cmd {
 		d = 0
 	}
 	return tea.Tick(d, func(time.Time) tea.Msg { return uiRefreshMsg{} })
+}
+
+func (m *monitorModel) schedulePlanReload() tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	if m.planReloadScheduled {
+		return nil
+	}
+	m.planReloadScheduled = true
+	d := m.planReloadDebounce
+	if d <= 0 {
+		d = 0
+	}
+	return tea.Tick(d, func(time.Time) tea.Msg { return planReloadMsg{} })
 }
 
 func (m *monitorModel) loadInboxPage() tea.Cmd {
@@ -1025,6 +1105,9 @@ func (m *monitorModel) View() string {
 	if m.helpModalOpen {
 		return m.renderHelpModal(base)
 	}
+	if m.sessionPickerOpen {
+		return m.renderSessionPicker(base)
+	}
 	if m.profilePickerOpen {
 		return m.renderProfilePicker(base)
 	}
@@ -1275,9 +1358,14 @@ func (m *monitorModel) listenErr() tea.Cmd {
 
 func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 	raw = strings.TrimSpace(raw)
-	cmd, rest := splitMonitorCommand(raw)
-	if cmd == "" {
+	if raw == "" {
 		return nil
+	}
+	cmd, rest := splitMonitorCommand(raw)
+	// Treat any non-command submission as a task goal.
+	// A "command" is a known slash-command token (e.g. "/help", "/model").
+	if cmd == "" || !strings.HasPrefix(cmd, "/") || !isExactMonitorCommand(cmd) {
+		return m.enqueueTask(strings.TrimSpace(raw), 0)
 	}
 
 	if cmd == "/quit" {
@@ -1296,10 +1384,11 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 		return m.openComposeEditor("")
 	}
 
-	if cmd == "/task" {
-		goal := strings.TrimSpace(rest)
-		goal = strings.Trim(goal, "\"")
-		return m.enqueueTask(goal, 0)
+	if cmd == "/sessions" {
+		if strings.TrimSpace(rest) != "" {
+			return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /sessions"}} }
+		}
+		return m.openSessionPicker()
 	}
 	if cmd == "/profile" && strings.TrimSpace(rest) == "" {
 		return m.openProfilePicker()
@@ -2421,7 +2510,31 @@ func (m *monitorModel) refreshViewports() {
 }
 
 func (m *monitorModel) loadPlanFiles() {
-	runDir := fsutil.GetAgentDir(m.cfg.DataDir, m.runID)
+	checklist, checklistErr, details, detailsErr := readPlanFiles(m.cfg.DataDir, m.runID)
+	m.planMarkdown, m.planLoadErr = checklist, checklistErr
+	m.planDetails, m.planDetailsErr = details, detailsErr
+	m.dirtyPlan = true
+}
+
+func (m *monitorModel) loadPlanFilesCmd() tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	dataDir := m.cfg.DataDir
+	runID := m.runID
+	return func() tea.Msg {
+		checklist, checklistErr, details, detailsErr := readPlanFiles(dataDir, runID)
+		return planFilesLoadedMsg{
+			checklist:    checklist,
+			checklistErr: checklistErr,
+			details:      details,
+			detailsErr:   detailsErr,
+		}
+	}
+}
+
+func readPlanFiles(dataDir, runID string) (checklist string, checklistErr string, details string, detailsErr string) {
+	runDir := fsutil.GetAgentDir(dataDir, runID)
 	planDir := filepath.Join(runDir, "plan")
 
 	load := func(name string) (string, string) {
@@ -2435,9 +2548,20 @@ func (m *monitorModel) loadPlanFiles() {
 		return string(b), ""
 	}
 
-	m.planDetails, m.planDetailsErr = load("HEAD.md")
-	m.planMarkdown, m.planLoadErr = load("CHECKLIST.md")
-	m.dirtyPlan = true
+	details, detailsErr = load("HEAD.md")
+	checklist, checklistErr = load("CHECKLIST.md")
+	return checklist, checklistErr, details, detailsErr
+}
+
+func shouldReloadPlanOnEvent(ev types.EventRecord) bool {
+	// Some runtimes may emit direct fs.* events; others wrap ops in agent.op.* with op/path in data.
+	if isPlanEvent(ev.Type, ev.Data["path"]) {
+		return true
+	}
+	if ev.Type != "agent.op.response" {
+		return false
+	}
+	return isPlanEvent(ev.Data["op"], ev.Data["path"])
 }
 
 func isPlanEvent(kind string, path string) bool {
