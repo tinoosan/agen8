@@ -24,7 +24,6 @@ Type a message and press Ctrl+Enter to queue a task, or use a command (below):
   /profile               Open profile picker
   /profile <ref>         Switch agent profile
   /editor                Open $EDITOR to compose (loads back into composer)
-  /memory search <query> Search vector memory
   /reasoning-effort      Set reasoning effort level
   /reasoning-summary     Set reasoning summary mode
   /help                  Show this help modal
