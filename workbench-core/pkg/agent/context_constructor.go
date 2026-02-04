@@ -6,10 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/events"
-	"github.com/tinoosan/workbench-core/pkg/skills"
-	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
@@ -19,32 +16,9 @@ import (
 type PromptBuilder struct {
 	FS *vfs.FS
 
-	Cfg config.Config
-
-	RunID     string
-	SessionID string
-
-	LoadSession func(sessionID string) (types.Session, error)
-	SaveSession func(session types.Session) error
-	StateStore  store.ConstructorStateStore
-
-	Trace         *TraceMiddleware
-	HistoryStore  store.HistoryReader
-	SkillsManager *skills.Manager
-
-	IncludeHistoryOps bool
-	MaxMemoryBytes    int
-	MaxTraceBytes     int
-	MaxHistoryBytes   int
-
-	TraceIncludeTypes []string
+	MaxMemoryBytes int
 
 	Emit events.EmitFunc
-
-	LastOp   *types.HostOpRequest
-	LastResp *types.HostOpResponse
-
-	FileAttachments []FileAttachment
 }
 
 // SystemPrompt renders a compact prompt: base + memory.
@@ -82,29 +56,6 @@ func (c *PromptBuilder) SystemPrompt(ctx context.Context, basePrompt string, ste
 
 // ObserveHostOp records the most recent host op request/response.
 func (c *PromptBuilder) ObserveHostOp(req types.HostOpRequest, resp types.HostOpResponse) {
-	if c == nil {
-		return
-	}
-	reqCopy := req
-	respCopy := resp
-	c.LastOp = &reqCopy
-	c.LastResp = &respCopy
-}
-
-// SetFileAttachments replaces the current attachment set for this turn.
-func (c *PromptBuilder) SetFileAttachments(attachments []FileAttachment) {
-	if c == nil {
-		return
-	}
-	c.FileAttachments = attachments
-}
-
-// ClearFileAttachments clears any cached attachments for the current turn.
-func (c *PromptBuilder) ClearFileAttachments() {
-	if c == nil {
-		return
-	}
-	c.FileAttachments = nil
 }
 
 func (c *PromptBuilder) readCap(path string, maxBytes int) string {

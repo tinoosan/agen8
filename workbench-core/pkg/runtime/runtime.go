@@ -379,14 +379,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 
 	constructor := &agent.PromptBuilder{
 		FS:             fs,
-		Cfg:            cfg.Cfg,
-		RunID:          cfg.Run.RunID,
-		SessionID:      cfg.Run.SessionID,
-		LoadSession:    cfg.LoadSession,
-		SaveSession:    cfg.SaveSession,
-		StateStore:     cfg.ConstructorStore,
 		MaxMemoryBytes: cfg.MaxMemoryBytes,
-		MaxTraceBytes:  cfg.MaxTraceBytes,
 		Emit:           cfg.Emit,
 	}
 
