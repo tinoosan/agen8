@@ -50,6 +50,8 @@ type tickMsg struct {
 	now time.Time
 }
 
+type uiRefreshMsg struct{}
+
 type inboxLoadedMsg struct {
 	tasks      []taskState
 	totalCount int
@@ -164,6 +166,19 @@ type monitorModel struct {
 	filePickerList     list.Model
 	filePickerAllPaths []string
 	filePickerQuery    string
+
+	// Incremental rendering (avoid rebuilding all viewports on every event).
+	dirtyLayout      bool
+	dirtyAgentOutput bool
+	dirtyInbox       bool
+	dirtyOutbox      bool
+	dirtyActivity    bool
+	dirtyPlan        bool
+	dirtyThinking    bool
+	dirtyMemory      bool
+
+	uiRefreshScheduled bool
+	uiRefreshDebounce  time.Duration
 }
 
 type monitorStats struct {
@@ -225,6 +240,9 @@ const (
 	// This replaces the old 1000-line hard limit with a much larger buffer.
 	agentOutputMaxLines  = 50_000
 	agentOutputDropChunk = 5_000
+
+	// Keep a small, bounded thoughts history to avoid unbounded RAM growth.
+	maxThinkingEntries = 50
 )
 
 // Breakpoints for responsive layout: below these use compact mode (tabs/single column).
@@ -350,6 +368,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 		tailCh:                tailCh,
 		errCh:                 errCh,
 		cancel:                cancel,
+		uiRefreshDebounce:     33 * time.Millisecond,
 	}
 	// Disable mouse handling so terminals don't enter mouse-reporting mode.
 	m.activityDetail.MouseWheelEnabled = false
@@ -382,12 +401,13 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.dirtyLayout = true
 		m.refreshViewports()
 		return m, nil
 
 	case tickMsg:
 		// Re-render time-based UI (uptime, elapsed timers) even when no new events arrive.
-		m.refreshViewports()
+		// The View() computes elapsed durations on demand; no need to rebuild viewports.
 		return m, m.tick()
 
 	case tailedEventMsg:
@@ -421,15 +441,14 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		m.refreshViewports()
+		cmds = append(cmds, m.scheduleUIRefresh())
 		return m, tea.Batch(cmds...)
 
 	case tailErrMsg:
 		if msg.err != nil {
 			m.appendAgentOutput("[error] " + msg.err.Error())
 		}
-		m.refreshViewports()
-		return m, m.listenErr()
+		return m, tea.Batch(m.listenErr(), m.scheduleUIRefresh())
 
 	case commandLinesMsg:
 		if len(msg.lines) != 0 {
@@ -438,41 +457,43 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if strings.HasPrefix(strings.TrimSpace(msg.lines[0]), "[memory] search:") {
 				m.memResults = msg.lines[1:]
+				m.dirtyMemory = true
 			}
 		}
-		m.refreshViewports()
-		return m, nil
+		return m, m.scheduleUIRefresh()
 
 	case monitorEditorDoneMsg:
 		m.handleEditorDone(msg)
-		m.refreshViewports()
-		return m, nil
+		return m, m.scheduleUIRefresh()
 
 	case taskQueuedLocallyMsg:
 		m.inbox[msg.TaskID] = taskState{TaskID: msg.TaskID, Goal: msg.Goal, Status: string(types.TaskStatusPending)}
-		m.refreshViewports()
-		return m, tea.Batch(m.loadInboxPage())
+		m.dirtyInbox = true
+		return m, tea.Batch(m.loadInboxPage(), m.scheduleUIRefresh())
 
 	case inboxLoadedMsg:
 		m.inboxList = msg.tasks
 		m.inboxTotalCount = msg.totalCount
 		m.inboxPage = msg.page
-		m.refreshViewports()
-		return m, nil
+		m.dirtyInbox = true
+		return m, m.scheduleUIRefresh()
 
 	case outboxLoadedMsg:
 		m.outboxResults = msg.entries
 		m.outboxTotalCount = msg.totalCount
 		m.outboxPage = msg.page
-		m.refreshViewports()
-		return m, nil
+		m.dirtyOutbox = true
+		return m, m.scheduleUIRefresh()
 
 	case activityLoadedMsg:
 		m.activityPageItems = msg.activities
 		m.activityTotalCount = msg.totalCount
 		m.activityPage = msg.page
-		m.refreshActivityList()
-		m.refreshActivityDetail(false)
+		m.dirtyActivity = true
+		return m, m.scheduleUIRefresh()
+
+	case uiRefreshMsg:
+		m.uiRefreshScheduled = false
 		m.refreshViewports()
 		return m, nil
 
@@ -680,6 +701,21 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *monitorModel) tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg{now: t} })
+}
+
+func (m *monitorModel) scheduleUIRefresh() tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	if m.uiRefreshScheduled {
+		return nil
+	}
+	m.uiRefreshScheduled = true
+	d := m.uiRefreshDebounce
+	if d <= 0 {
+		d = 0
+	}
+	return tea.Tick(d, func(time.Time) tea.Msg { return uiRefreshMsg{} })
 }
 
 func (m *monitorModel) loadInboxPage() tea.Cmd {
@@ -1390,8 +1426,7 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 	case "agent.step":
 		summary := strings.TrimSpace(ev.Data["reasoningSummary"])
 		if summary != "" {
-			m.thinkingEntries = append(m.thinkingEntries, thinkingEntry{Summary: summary})
-			m.refreshThinkingViewport()
+			m.appendThinkingEntry(summary)
 		}
 	case "llm.cost.total":
 		m.stats.lastTurnCostUSD = strings.TrimSpace(ev.Data["costUsd"])
@@ -1505,15 +1540,16 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 		opID := strings.TrimSpace(ev.Data["opId"])
 		entry, ok := m.takeAgentOutputPending(opID)
 		status := formatAgentOutputStatus(ev)
-		if ok {
-			line := fmt.Sprintf("[%s] op: %s — %s", entry.timestamp, entry.desc, status)
-			if entry.index >= 0 && entry.index < len(m.agentOutput) {
-				m.agentOutput[entry.index] = line
-				// The updated line may re-wrap, so invalidate cached layout metadata.
-				m.agentOutputLayoutWidth = 0
-				return
+			if ok {
+				line := fmt.Sprintf("[%s] op: %s — %s", entry.timestamp, entry.desc, status)
+				if entry.index >= 0 && entry.index < len(m.agentOutput) {
+					m.agentOutput[entry.index] = line
+					// The updated line may re-wrap, so invalidate cached layout metadata.
+					m.agentOutputLayoutWidth = 0
+					m.dirtyAgentOutput = true
+					return
+				}
 			}
-		}
 		// If the pending entry was dropped from the output buffer, fall back to appending a new line.
 		ts := ev.Timestamp.Local().Format("15:04:05")
 		txt := strings.TrimSpace(renderOpRequest(ev.Data))
@@ -1536,6 +1572,7 @@ func (m *monitorModel) appendAgentOutputLine(line string) int {
 	}
 	m.agentOutput = append(m.agentOutput, line)
 	m.trimAgentOutputBuffer()
+	m.dirtyAgentOutput = true
 	// Incrementally maintain layout metadata when possible (for virtualization).
 	w := m.agentOutputVP.Width
 	if w <= 0 {
@@ -1554,6 +1591,22 @@ func (m *monitorModel) appendAgentOutputLine(line string) int {
 	m.agentOutputLineHeights = append(m.agentOutputLineHeights, h)
 	m.agentOutputTotalLines += h
 	return len(m.agentOutput) - 1
+}
+
+func (m *monitorModel) appendThinkingEntry(summary string) {
+	if m == nil {
+		return
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return
+	}
+	m.thinkingEntries = append(m.thinkingEntries, thinkingEntry{Summary: summary})
+	if maxThinkingEntries > 0 && len(m.thinkingEntries) > maxThinkingEntries {
+		start := len(m.thinkingEntries) - maxThinkingEntries
+		m.thinkingEntries = append([]thinkingEntry(nil), m.thinkingEntries[start:]...)
+	}
+	m.dirtyThinking = true
 }
 
 func (m *monitorModel) trimAgentOutputBuffer() {
@@ -2281,86 +2334,90 @@ func (m *monitorModel) refreshViewports() {
 	}
 	grid := m.layout()
 
-	if m.isCompactMode() {
-		outW := imax(10, grid.AgentOutput.ContentWidth)
-		outH := imax(1, grid.AgentOutput.ContentHeight)
-		m.agentOutputVP.Width = outW
-		m.agentOutputVP.Height = outH
-		m.refreshAgentOutputViewport()
-
-		feedW := imax(10, grid.ActivityFeed.ContentWidth)
-		feedH := imax(1, grid.ActivityFeed.ContentHeight)
-		m.activityList.SetSize(feedW, feedH)
-
-		detailW := imax(10, grid.ActivityDetail.ContentWidth)
-		detailH := imax(1, grid.ActivityDetail.ContentHeight)
-		m.activityDetail.Width = detailW
-		m.activityDetail.Height = detailH
-		m.refreshActivityDetail(false)
-
-		planW := imax(10, grid.Plan.ContentWidth)
-		planH := imax(1, grid.Plan.ContentHeight)
-		m.planViewport.Width = planW
-		m.planViewport.Height = planH
-		m.refreshPlanView()
-
-		outboxW := imax(10, grid.Outbox.ContentWidth)
-		outboxH := imax(1, grid.Outbox.ContentHeight)
-		m.outboxVP.Width = outboxW
-		m.outboxVP.Height = outboxH
-		m.outboxVP.SetContent(wrapViewportText(m.outboxViewportContent(outboxW), outboxW))
-
-		// Keep auxiliary viewports sized to something sane even if not visible in compact mode.
-		m.inboxVP.Width = outW
-		m.inboxVP.Height = imax(1, outH)
-		m.inboxVP.SetContent(wrapViewportText(m.inboxViewportContent(outW), outW))
-		m.memoryVP.Width = outW
-		m.memoryVP.Height = outH
-		m.memoryVP.SetContent(wrapViewportText(renderMemResults(m.memResults), outW))
-		m.thinkingVP.Width = outW
-		m.thinkingVP.Height = outH
-		m.refreshThinkingViewport()
-
-		m.input.SetWidth(imax(10, grid.Composer.ContentWidth))
-		return
+	resizeVP := func(vp *viewport.Model, w, h int) bool {
+		if vp == nil {
+			return false
+		}
+		changed := vp.Width != w || vp.Height != h
+		vp.Width = w
+		vp.Height = h
+		return changed
 	}
 
-	w := imax(10, grid.AgentOutput.ContentWidth)
-	m.agentOutputVP.Width = w
-	m.agentOutputVP.Height = imax(1, grid.AgentOutput.ContentHeight)
-	m.refreshAgentOutputViewport()
+	compact := m.isCompactMode()
 
-	m.outboxVP.Width = imax(10, grid.Outbox.ContentWidth)
-	m.outboxVP.Height = imax(1, grid.Outbox.ContentHeight)
-	m.outboxVP.SetContent(wrapViewportText(m.outboxViewportContent(m.outboxVP.Width), m.outboxVP.Width))
+	// Resize first (size changes can force re-wrap).
+	if resizeVP(&m.agentOutputVP, imax(10, grid.AgentOutput.ContentWidth), imax(1, grid.AgentOutput.ContentHeight)) {
+		m.dirtyAgentOutput = true
+	}
+	if resizeVP(&m.outboxVP, imax(10, grid.Outbox.ContentWidth), imax(1, grid.Outbox.ContentHeight)) {
+		m.dirtyOutbox = true
+	}
+	if resizeVP(&m.activityDetail, imax(10, grid.ActivityDetail.ContentWidth), imax(1, grid.ActivityDetail.ContentHeight)) {
+		m.dirtyActivity = true
+	}
+	if resizeVP(&m.planViewport, imax(10, grid.Plan.ContentWidth), imax(1, grid.Plan.ContentHeight)) {
+		m.dirtyPlan = true
+	}
+	// Thoughts share the same spec as Plan/SidePanel in dashboard mode; in compact mode it's not visible.
+	if resizeVP(&m.thinkingVP, m.planViewport.Width, m.planViewport.Height) {
+		m.dirtyThinking = true
+	}
+	if resizeVP(&m.inboxVP, imax(10, grid.Inbox.ContentWidth), imax(1, grid.Inbox.ContentHeight)) {
+		m.dirtyInbox = true
+	}
+	if resizeVP(&m.memoryVP, imax(10, grid.Memory.ContentWidth), imax(1, grid.Memory.ContentHeight)) {
+		m.dirtyMemory = true
+	}
 
 	feedW := imax(10, grid.ActivityFeed.ContentWidth)
 	feedH := imax(1, grid.ActivityFeed.ContentHeight)
 	m.activityList.SetSize(feedW, feedH)
 
-	detailW := imax(10, grid.ActivityDetail.ContentWidth)
-	detailH := imax(1, grid.ActivityDetail.ContentHeight)
-	m.activityDetail.Width = detailW
-	m.activityDetail.Height = detailH
-	m.refreshActivityDetail(false)
-
-	planW := imax(10, grid.Plan.ContentWidth)
-	planH := imax(1, grid.Plan.ContentHeight)
-	m.planViewport.Width = planW
-	m.planViewport.Height = planH
-	m.refreshPlanView()
-	m.thinkingVP.Width = planW
-	m.thinkingVP.Height = planH
-	m.refreshThinkingViewport()
-	inboxW := imax(10, grid.Inbox.ContentWidth)
-	inboxH := imax(1, grid.Inbox.ContentHeight)
-	m.inboxVP.Width = inboxW
-	m.inboxVP.Height = inboxH
-	m.inboxVP.SetContent(wrapViewportText(m.inboxViewportContent(inboxW), inboxW))
-	m.memoryVP.Width = imax(10, grid.Memory.ContentWidth)
-	m.memoryVP.Height = imax(1, grid.Memory.ContentHeight)
-	m.memoryVP.SetContent(wrapViewportText(renderMemResults(m.memResults), m.memoryVP.Width))
 	m.input.SetWidth(imax(10, grid.Composer.ContentWidth))
+
+	// Refresh only what is (or will be) visible, and only when dirty.
+	outputVisible := !compact || m.compactTab == 0
+	activityVisible := (compact && m.compactTab == 1) || (!compact && m.dashboardSideTab == 0)
+	planVisible := (compact && m.compactTab == 2) || (!compact && m.dashboardSideTab == 1)
+	outboxVisible := (compact && m.compactTab == 3) || (!compact && m.dashboardSideTab == 2)
+	inboxVisible := !compact && m.dashboardSideTab == 2
+	thinkingVisible := !compact && m.dashboardSideTab == 3
+	memoryVisible := grid.Memory.Height > 0 || m.focusedPanel == panelMemory
+
+	if outputVisible && (m.dirtyLayout || m.dirtyAgentOutput) {
+		m.refreshAgentOutputViewport()
+	}
+	if activityVisible && (m.dirtyLayout || m.dirtyActivity) {
+		m.refreshActivityList()
+		m.refreshActivityDetail(false)
+	}
+	if planVisible && (m.dirtyLayout || m.dirtyPlan) {
+		m.refreshPlanView()
+	}
+	if outboxVisible && (m.dirtyLayout || m.dirtyOutbox) {
+		w := m.outboxVP.Width
+		m.outboxVP.SetContent(wrapViewportText(m.outboxViewportContent(w), w))
+	}
+	if inboxVisible && (m.dirtyLayout || m.dirtyInbox) {
+		w := m.inboxVP.Width
+		m.inboxVP.SetContent(wrapViewportText(m.inboxViewportContent(w), w))
+	}
+	if thinkingVisible && (m.dirtyLayout || m.dirtyThinking) {
+		m.refreshThinkingViewport()
+	}
+	if memoryVisible && (m.dirtyLayout || m.dirtyMemory) {
+		m.memoryVP.SetContent(wrapViewportText(renderMemResults(m.memResults), m.memoryVP.Width))
+	}
+
+	m.dirtyLayout = false
+	m.dirtyAgentOutput = false
+	m.dirtyInbox = false
+	m.dirtyOutbox = false
+	m.dirtyActivity = false
+	m.dirtyPlan = false
+	m.dirtyThinking = false
+	m.dirtyMemory = false
 }
 
 func (m *monitorModel) loadPlanFiles() {
@@ -2380,7 +2437,7 @@ func (m *monitorModel) loadPlanFiles() {
 
 	m.planDetails, m.planDetailsErr = load("HEAD.md")
 	m.planMarkdown, m.planLoadErr = load("CHECKLIST.md")
-	m.refreshPlanView()
+	m.dirtyPlan = true
 }
 
 func isPlanEvent(kind string, path string) bool {
