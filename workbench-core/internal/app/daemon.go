@@ -131,7 +131,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 	memStore = ms
 
-	traceStore = implstore.DiskTraceStore{DiskStore: implstore.DiskStore{Dir: fsutil.GetLogDir(cfg.DataDir, run.RunID)}}
+	traceStore = implstore.SQLiteTraceStore{Cfg: cfg, RunID: run.RunID}
 
 	hs, err := implstore.NewSQLiteHistoryStore(cfg, run.SessionID)
 	if err != nil {

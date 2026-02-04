@@ -20,7 +20,7 @@ var (
 	sqliteMigrated = map[string]bool{}
 )
 
-const currentSchemaVersion = 3
+const currentSchemaVersion = 4
 
 var sqliteMigrations = []string{
 	`CREATE TABLE IF NOT EXISTS sessions (
@@ -85,6 +85,19 @@ var sqliteMigrations = []string{
 		updated_at TEXT,
 		manifest_json TEXT NOT NULL
 	);`,
+	`CREATE TABLE IF NOT EXISTS activities (
+		run_id TEXT NOT NULL,
+		activity_id TEXT PRIMARY KEY,
+		seq INTEGER NOT NULL,
+		kind TEXT NOT NULL,
+		title TEXT NOT NULL,
+		status TEXT NOT NULL,
+		started_at TEXT NOT NULL,
+		finished_at TEXT,
+		meta_json TEXT
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_activities_run_seq ON activities(run_id, seq);`,
+	`CREATE INDEX IF NOT EXISTS idx_activities_run_id ON activities(run_id);`,
 }
 
 func sqlitePath(cfg config.Config) string {

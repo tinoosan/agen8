@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -23,7 +22,7 @@ func TestEventStore(t *testing.T) {
 		t.Fatalf("CreateSession failed: %v", err)
 	}
 
-	t.Run("AppendEventWritesOneLine", func(t *testing.T) {
+	t.Run("AppendEvent_DoesNotWriteEventsJSONL", func(t *testing.T) {
 		err := AppendEvent(context.Background(), cfg, types.EventRecord{
 			RunID:     run.RunID,
 			Type:      "test_event",
@@ -40,20 +39,10 @@ func TestEventStore(t *testing.T) {
 		}
 
 		tracePath := filepath.Join(cfg.DataDir, "agents", run.RunID, "log", "events.jsonl")
-		f, err := os.Open(tracePath)
-		if err != nil {
-			t.Fatalf("Failed to open event file: %v", err)
-		}
-		defer f.Close()
-
-		scanner := bufio.NewScanner(f)
-		lineCount := 0
-		for scanner.Scan() {
-			lineCount++
-		}
-
-		if lineCount != 1 {
-			t.Errorf("Expected 1 line in trace event file, got %d", lineCount)
+		if _, err := os.Stat(tracePath); err == nil {
+			t.Fatalf("expected %s to not be created", tracePath)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected os.ErrNotExist, got %v", err)
 		}
 	})
 

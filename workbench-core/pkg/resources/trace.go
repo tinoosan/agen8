@@ -1,15 +1,12 @@
 package resources
 
 import (
-	"bufio"
 	"database/sql"
-	"errors"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
@@ -46,15 +43,6 @@ func NewTraceResource(cfg config.Config, runID string) (*TraceResource, error) {
 	baseDir := fsutil.GetLogDir(cfg.DataDir, runID)
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("error creating trace directory %s: %w", baseDir, err)
-	}
-	eventsPath := filepath.Join(baseDir, "events.jsonl")
-	if _, err := os.Stat(eventsPath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("error checking trace events %s: %w", eventsPath, err)
-		}
-		if err := os.WriteFile(eventsPath, []byte{}, 0644); err != nil {
-			return nil, fmt.Errorf("error creating trace events %s: %w", eventsPath, err)
-		}
 	}
 	return &TraceResource{
 		ReadOnlyResource: vfs.ReadOnlyResource{Name: "trace"},
@@ -101,11 +89,7 @@ func (tr *TraceResource) Read(subpath string) ([]byte, error) {
 		if len(parts) != 1 {
 			return nil, fmt.Errorf("trace read: 'events' does not take a suffix (got %q)", clean)
 		}
-		if err := tr.ensureEventsFile(); err != nil {
-			return nil, fmt.Errorf("trace read: ensure events: %w", err)
-		}
-		targetPath := filepath.Join(tr.BaseDir, "events.jsonl")
-		return readFile(targetPath, "events")
+		return tr.readAllEventsJSONL()
 	case "events.since":
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("trace read: expected 'events.since/<offset>' (got %q)", clean)
@@ -167,152 +151,135 @@ func (tr *TraceResource) Append(subpath string, _ []byte) error {
 // bytes plus the next offset (current file size).
 func (tr *TraceResource) ReadEventsSince(offset int64) ([]byte, int64, error) {
 	logicalName := "events.since"
-	targetPath := filepath.Join(tr.BaseDir, "events.jsonl")
-
 	if offset < 0 {
 		return nil, 0, fmt.Errorf("trace %s: offset cannot be negative (%d)", logicalName, offset)
 	}
-	if err := tr.ensureEventsFile(); err != nil {
-		return nil, 0, fmt.Errorf("trace %s: ensure events: %w", logicalName, err)
-	}
-
-	f, err := os.Open(targetPath)
+	db, err := tr.openSQLite()
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return []byte{}, 0, nil
+		return nil, offset, fmt.Errorf("trace %s: open sqlite: %w", logicalName, err)
+	}
+	defer db.Close()
+
+	// Offset is treated as SQLite event seq (cursor), not an on-disk byte offset.
+	// This keeps /log fully virtual and avoids maintaining a mirrored JSONL file.
+	rows, err := db.Query(
+		`SELECT seq, event_json FROM events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
+		tr.RunID,
+		offset,
+		2000,
+	)
+	if err != nil {
+		return nil, offset, fmt.Errorf("trace %s: query events: %w", logicalName, err)
+	}
+	defer rows.Close()
+
+	var (
+		b         []byte
+		nextSeq   = offset
+		bytesUsed = 0
+	)
+	for rows.Next() {
+		var seq int64
+		var raw string
+		if err := rows.Scan(&seq, &raw); err != nil {
+			return nil, nextSeq, fmt.Errorf("trace %s: scan: %w", logicalName, err)
 		}
-		return nil, 0, fmt.Errorf("trace %s: open %s: %w", logicalName, targetPath, err)
+		line := []byte(raw + "\n")
+		if bytesUsed+len(line) > maxSinceBytes {
+			break
+		}
+		b = append(b, line...)
+		bytesUsed += len(line)
+		nextSeq = seq
 	}
-	defer f.Close()
-
-	info, err := f.Stat()
-	if err != nil {
-		return nil, 0, fmt.Errorf("trace %s: stat %s: %w", logicalName, targetPath, err)
+	if err := rows.Err(); err != nil {
+		return nil, nextSeq, fmt.Errorf("trace %s: rows error: %w", logicalName, err)
 	}
-
-	size := info.Size()
-	if offset > size {
-		return []byte{}, size, nil
-	}
-	if size-offset > maxSinceBytes {
-		return nil, size, fmt.Errorf("trace %s: requested %d bytes exceeds max %d", logicalName, size-offset, maxSinceBytes)
-	}
-
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return nil, 0, fmt.Errorf("trace %s: seek %s to %d: %w", logicalName, targetPath, offset, err)
-	}
-
-	b, err := io.ReadAll(f)
-	if err != nil {
-		return nil, 0, fmt.Errorf("trace %s: read %s from %d: %w", logicalName, targetPath, offset, err)
-	}
-
-	return b, size, nil
+	return b, nextSeq, nil
 }
 
 // ReadLastEvents reads the last N events (JSONL lines) from events.jsonl.
 // If count is 0, it returns empty.
 func (tr *TraceResource) ReadLastEvents(count int) ([]byte, error) {
 	logicalName := "events.latest"
-	targetPath := filepath.Join(tr.BaseDir, "events.jsonl")
-
 	if count == 0 {
 		return []byte{}, nil
 	}
 	if count > maxLatestCount {
 		return nil, fmt.Errorf("trace %s: count exceeds max %d", logicalName, maxLatestCount)
 	}
-	if err := tr.ensureEventsFile(); err != nil {
-		return nil, fmt.Errorf("trace %s: ensure events: %w", logicalName, err)
-	}
-
-	f, err := os.Open(targetPath)
+	db, err := tr.openSQLite()
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return []byte{}, nil
+		return nil, fmt.Errorf("trace %s: open sqlite: %w", logicalName, err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query(
+		`SELECT event_json FROM events WHERE run_id = ? ORDER BY seq DESC LIMIT ?`,
+		tr.RunID,
+		count,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("trace %s: query events: %w", logicalName, err)
+	}
+	defer rows.Close()
+
+	lines := make([]string, 0, count)
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("trace %s: scan event: %w", logicalName, err)
 		}
-		return nil, fmt.Errorf("trace %s: open %s: %w", logicalName, targetPath, err)
+		lines = append(lines, raw)
 	}
-	defer f.Close()
-
-	b, err := io.ReadAll(f)
-	if err != nil {
-		return nil, fmt.Errorf("trace %s: read %s: %w", logicalName, targetPath, err)
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("trace %s: rows error: %w", logicalName, err)
 	}
-
-	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	if len(lines) == 1 && lines[0] == "" {
+	// Reverse to chronological order.
+	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+		lines[i], lines[j] = lines[j], lines[i]
+	}
+	if len(lines) == 0 {
 		return []byte{}, nil
 	}
-
-	if count >= len(lines) {
-		return []byte(strings.Join(lines, "\n") + "\n"), nil
-	}
-
-	out := strings.Join(lines[len(lines)-count:], "\n") + "\n"
-	return []byte(out), nil
+	return []byte(strings.Join(lines, "\n") + "\n"), nil
 }
 
-func (tr *TraceResource) ensureEventsFile() error {
-	targetPath := filepath.Join(tr.BaseDir, "events.jsonl")
-	if _, err := os.Stat(targetPath); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("trace ensure events: stat %s: %w", targetPath, err)
-	}
-	return tr.rebuildEventsFile(targetPath)
-}
-
-func (tr *TraceResource) rebuildEventsFile(targetPath string) error {
-	if err := os.MkdirAll(tr.BaseDir, 0755); err != nil {
-		return fmt.Errorf("trace rebuild: mkdir %s: %w", tr.BaseDir, err)
-	}
-
+func (tr *TraceResource) openSQLite() (*sql.DB, error) {
 	dbPath := fsutil.GetSQLitePath(tr.Cfg.DataDir)
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		return fmt.Errorf("trace rebuild: open sqlite: %w", err)
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	db.SetConnMaxIdleTime(30 * time.Second)
+	return db, nil
+}
+
+func (tr *TraceResource) readAllEventsJSONL() ([]byte, error) {
+	db, err := tr.openSQLite()
+	if err != nil {
+		return nil, fmt.Errorf("trace events: open sqlite: %w", err)
 	}
 	defer db.Close()
 
 	rows, err := db.Query(`SELECT event_json FROM events WHERE run_id = ? ORDER BY seq`, tr.RunID)
 	if err != nil {
-		return fmt.Errorf("trace rebuild: query events: %w", err)
+		return nil, fmt.Errorf("trace events: query: %w", err)
 	}
 	defer rows.Close()
 
-	f, err := os.Create(targetPath)
-	if err != nil {
-		return fmt.Errorf("trace rebuild: create %s: %w", targetPath, err)
-	}
-	defer f.Close()
-
-	writer := bufio.NewWriter(f)
+	var b []byte
 	for rows.Next() {
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
-			return fmt.Errorf("trace rebuild: scan event: %w", err)
+			return nil, fmt.Errorf("trace events: scan: %w", err)
 		}
-		if _, err := writer.WriteString(raw + "\n"); err != nil {
-			return fmt.Errorf("trace rebuild: write event: %w", err)
-		}
+		b = append(b, raw...)
+		b = append(b, '\n')
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("trace rebuild: rows error: %w", err)
-	}
-	if err := writer.Flush(); err != nil {
-		return fmt.Errorf("trace rebuild: flush: %w", err)
-	}
-	return nil
-}
-
-func readFile(targetPath, logicalName string) ([]byte, error) {
-	b, err := os.ReadFile(targetPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("trace %s: file %s does not exist: %w", logicalName, targetPath, err)
-		}
-		return nil, fmt.Errorf("trace %s: error reading file %s: %w", logicalName, targetPath, err)
+		return nil, fmt.Errorf("trace events: rows: %w", err)
 	}
 	return b, nil
 }

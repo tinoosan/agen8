@@ -6,15 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tinoosan/workbench-core/pkg/config"
-	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -43,21 +40,15 @@ type EventFilter struct {
 // Event storage overview
 //
 // Canonical event log
-//   - AppendEvent writes an event as one JSON object per line (JSONL) into SQLite.
+//   - AppendEvent writes an event record into SQLite.
 //
-// Trace mirror
-//   - AppendEvent also mirrors the exact same bytes (including newline) into:
-//       data/agents/<agentId>/log/events.jsonl
-//     so the trace VFS mount can be self-contained and offset-based polling is stable.
-//
-// Offset semantics
-//   - ListEvents returns nextOffset as the last SQLite sequence id.
-//   - That offset can be used later to fetch only new events via TailEvents.
+// Activity index
+//   - AppendEvent also maintains a compact activities index in SQLite so UIs can paginate
+//     activity history without scanning the full event log.
 
 // AppendEvent records a new event for the specified run.
 // It validates inputs, ensures the run exists, and appends the event to SQLite.
-// On success, the event is persisted to SQLite. A best-effort mirror is written to the
-// run's trace log; mirror failure is logged but does not fail AppendEvent.
+// On success, the event and any derived indexes are persisted to SQLite.
 func AppendEvent(ctx context.Context, cfg config.Config, event types.EventRecord) error {
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -143,7 +134,18 @@ func AppendEvent(ctx context.Context, cfg config.Config, event types.EventRecord
 			return fmt.Errorf("error marshalling event data: %w", err)
 		}
 	}
-	if _, err := db.Exec(
+
+	txCtx := ctx
+	if txCtx == nil {
+		txCtx = context.Background()
+	}
+	tx, err := db.BeginTx(txCtx, nil)
+	if err != nil {
+		return fmt.Errorf("error beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.Exec(
 		`INSERT INTO events (event_id, run_id, ts, type, message, data_json, event_json)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		event.EventID,
@@ -153,35 +155,23 @@ func AppendEvent(ctx context.Context, cfg config.Config, event types.EventRecord
 		event.Message,
 		nullIfEmpty(dataJSON),
 		string(b),
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf("error writing event for run %s: %w", runID, err)
 	}
+	eventSeq, _ := res.LastInsertId()
 
-	if err := mirrorTraceEvent(cfg.DataDir, runID, b); err != nil {
-		log.Printf("store: warning: failed to mirror trace event for run %s: %v", runID, err)
+	// Maintain Activity index for agent operations.
+	if err := upsertActivityFromEventTx(tx, runID, eventSeq, event); err != nil {
+		return fmt.Errorf("error upserting activity: %w", err)
 	}
 
 	//f.Sync()
-	return nil
-
-}
-
-func mirrorTraceEvent(dataDir, runID string, payload []byte) error {
-	traceDir := fsutil.GetLogDir(dataDir, runID)
-	if err := os.MkdirAll(traceDir, 0755); err != nil {
-		return fmt.Errorf("error creating trace directory %s: %w", traceDir, err)
-	}
-	tracePath := filepath.Join(traceDir, "events.jsonl")
-	tf, err := os.OpenFile(tracePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("error appending trace event for run %s: %w", runID, err)
-	}
-	defer tf.Close()
-
-	if _, err := tf.Write(append(payload, '\n')); err != nil {
-		return fmt.Errorf("error writing trace event for run %s: %w", runID, err)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("error committing event append: %w", err)
 	}
 	return nil
+
 }
 
 // ListEvents retrieves all recorded events for a given run ID.

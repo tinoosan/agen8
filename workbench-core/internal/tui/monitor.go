@@ -62,6 +62,12 @@ type outboxLoadedMsg struct {
 	page       int
 }
 
+type activityLoadedMsg struct {
+	activities []Activity
+	totalCount int
+	page       int
+}
+
 type monitorModel struct {
 	ctx       context.Context
 	cfg       config.Config
@@ -72,11 +78,10 @@ type monitorModel struct {
 
 	input textarea.Model
 
-	activities                 []Activity
-	activityIndexByID          map[string]int
-	activityIndexByOp          map[string]int
-	activitySeq                int
-	pendingActivityID          string
+	activityPageItems          []Activity
+	activityPage               int
+	activityPageSize           int
+	activityTotalCount         int
 	activityList               list.Model
 	activityDetail             viewport.Model
 	activityDetailAct          string
@@ -215,6 +220,13 @@ const (
 	panelThinking
 )
 
+const (
+	// Keep a large, bounded agent output history to avoid unbounded RAM growth.
+	// This replaces the old 1000-line hard limit with a much larger buffer.
+	agentOutputMaxLines  = 50_000
+	agentOutputDropChunk = 5_000
+)
+
 // Breakpoints for responsive layout: below these use compact mode (tabs/single column).
 const (
 	compactModeMinWidth  = 110
@@ -304,9 +316,10 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 		runStatus:             runStatus,
 		offset:                off,
 		input:                 in,
-		activities:            []Activity{},
-		activityIndexByID:     map[string]int{},
-		activityIndexByOp:     map[string]int{},
+		activityPageItems:     []Activity{},
+		activityPage:          0,
+		activityPageSize:      200,
+		activityTotalCount:    0,
 		activityList:          activityList,
 		activityDetail:        viewport.New(0, 0),
 		activityFollowingTail: true,
@@ -350,7 +363,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	for _, e := range evs {
 		m.observeEvent(e)
 	}
-	m.refreshActivityList()
+	// Activity feed is loaded from SQLite (paginated) via loadActivityPage.
 	m.loadPlanFiles()
 	m.refreshViewports()
 
@@ -361,7 +374,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 // shows tasks added before the monitor started or via webhook, without scanning
 // inbox files.
 func (m *monitorModel) Init() tea.Cmd {
-	return tea.Batch(m.listenEvent(), m.listenErr(), m.tick(), m.loadInboxPage(), m.loadOutboxPage())
+	return tea.Batch(m.listenEvent(), m.listenErr(), m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage())
 }
 
 func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -391,6 +404,22 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.loadInboxPage(), m.loadOutboxPage())
 		case "task.delivered":
 			cmds = append(cmds, m.loadOutboxPage())
+		case "agent.op.request", "agent.op.response":
+			if m.activityFollowingTail {
+				// If a new page is created, overshoot so loadActivityPage clamps to the new last page.
+				m.activityPage = max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize))
+				cmds = append(cmds, m.loadActivityPage())
+			} else if msg.ev.Event.Type == "agent.op.response" {
+				opID := strings.TrimSpace(msg.ev.Event.Data["opId"])
+				if opID != "" {
+					for _, a := range m.activityPageItems {
+						if strings.TrimSpace(a.ID) == opID {
+							cmds = append(cmds, m.loadActivityPage())
+							break
+						}
+					}
+				}
+			}
 		}
 		m.refreshViewports()
 		return m, tea.Batch(cmds...)
@@ -435,6 +464,15 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.outboxResults = msg.entries
 		m.outboxTotalCount = msg.totalCount
 		m.outboxPage = msg.page
+		m.refreshViewports()
+		return m, nil
+
+	case activityLoadedMsg:
+		m.activityPageItems = msg.activities
+		m.activityTotalCount = msg.totalCount
+		m.activityPage = msg.page
+		m.refreshActivityList()
+		m.refreshActivityDetail(false)
 		m.refreshViewports()
 		return m, nil
 
@@ -621,8 +659,8 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateFocus()
 		}
 
-		// Pagination controls for Inbox/Outbox when focused.
-		if m.focusedPanel == panelInbox || m.focusedPanel == panelOutbox {
+		// Pagination controls for paginated panels when focused.
+		if m.focusedPanel == panelActivity || m.focusedPanel == panelInbox || m.focusedPanel == panelOutbox {
 			switch msg.String() {
 			case "n", "right":
 				return m.handleNextPage()
@@ -791,8 +829,62 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 	}
 }
 
+func (m *monitorModel) loadActivityPage() tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	pageSize := m.activityPageSize
+	if pageSize <= 0 {
+		pageSize = 200
+	}
+	page := m.activityPage
+	if page < 0 {
+		page = 0
+	}
+	prevActivities := append([]Activity(nil), m.activityPageItems...)
+	prevTotal := m.activityTotalCount
+	prevPage := m.activityPage
+
+	return func() tea.Msg {
+		total, err := store.CountActivities(m.ctx, m.cfg, m.runID)
+		if err != nil {
+			return activityLoadedMsg{activities: prevActivities, totalCount: prevTotal, page: prevPage}
+		}
+		if total <= 0 {
+			return activityLoadedMsg{activities: []Activity{}, totalCount: 0, page: 0}
+		}
+		maxPage := (total + pageSize - 1) / pageSize
+		if maxPage > 0 {
+			maxPage--
+		}
+		if page > maxPage {
+			page = maxPage
+		}
+		if page < 0 {
+			page = 0
+		}
+
+		acts, err := store.ListActivities(m.ctx, m.cfg, m.runID, pageSize, page*pageSize)
+		if err != nil {
+			return activityLoadedMsg{activities: prevActivities, totalCount: prevTotal, page: prevPage}
+		}
+		out := make([]Activity, 0, len(acts))
+		for _, a := range acts {
+			out = append(out, a)
+		}
+		return activityLoadedMsg{activities: out, totalCount: total, page: page}
+	}
+}
+
 func (m *monitorModel) handleNextPage() (tea.Model, tea.Cmd) {
 	switch m.focusedPanel {
+	case panelActivity:
+		maxPage := max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize)-1)
+		if m.activityPage < maxPage {
+			m.activityPage++
+			m.activityFollowingTail = m.activityPage == maxPage
+			return m, m.loadActivityPage()
+		}
 	case panelInbox:
 		maxPage := max(0, (m.inboxTotalCount+m.inboxPageSize-1)/max(1, m.inboxPageSize)-1)
 		if m.inboxPage < maxPage {
@@ -811,6 +903,12 @@ func (m *monitorModel) handleNextPage() (tea.Model, tea.Cmd) {
 
 func (m *monitorModel) handlePrevPage() (tea.Model, tea.Cmd) {
 	switch m.focusedPanel {
+	case panelActivity:
+		if m.activityPage > 0 {
+			m.activityPage--
+			m.activityFollowingTail = false
+			return m, m.loadActivityPage()
+		}
 	case panelInbox:
 		if m.inboxPage > 0 {
 			m.inboxPage--
@@ -827,6 +925,12 @@ func (m *monitorModel) handlePrevPage() (tea.Model, tea.Cmd) {
 
 func (m *monitorModel) handleFirstPage() (tea.Model, tea.Cmd) {
 	switch m.focusedPanel {
+	case panelActivity:
+		if m.activityPage != 0 {
+			m.activityPage = 0
+			m.activityFollowingTail = false
+			return m, m.loadActivityPage()
+		}
 	case panelInbox:
 		if m.inboxPage != 0 {
 			m.inboxPage = 0
@@ -843,6 +947,13 @@ func (m *monitorModel) handleFirstPage() (tea.Model, tea.Cmd) {
 
 func (m *monitorModel) handleLastPage() (tea.Model, tea.Cmd) {
 	switch m.focusedPanel {
+	case panelActivity:
+		maxPage := max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize)-1)
+		if m.activityPage != maxPage {
+			m.activityPage = maxPage
+			m.activityFollowingTail = true
+			return m, m.loadActivityPage()
+		}
 	case panelInbox:
 		maxPage := max(0, (m.inboxTotalCount+m.inboxPageSize-1)/max(1, m.inboxPageSize)-1)
 		if m.inboxPage != maxPage {
@@ -1065,10 +1176,14 @@ func (m *monitorModel) renderCompactTabContent(grid layoutmgr.GridLayout) string
 			Height(grid.AgentOutput.InnerHeight()).
 			Render(m.styles.sectionTitle.Render("Agent Output") + "\n" + m.agentOutputVP.View())
 	case 1:
+		feedBody := m.activityList.View()
+		if footer := m.renderPaginationFooter(m.activityPage, m.activityPageSize, m.activityTotalCount); footer != "" {
+			feedBody = strings.TrimRight(feedBody, "\n") + "\n" + footer
+		}
 		feed := m.panelStyle(panelActivity).
 			Width(grid.ActivityFeed.InnerWidth()).
 			Height(grid.ActivityFeed.InnerHeight()).
-			Render(m.styles.sectionTitle.Render("Activity Feed") + "\n" + m.activityList.View())
+			Render(m.styles.sectionTitle.Render("Activity Feed") + "\n" + feedBody)
 		detail := m.panelStyle(panelActivityDetail).
 			Width(grid.ActivityDetail.InnerWidth()).
 			Height(grid.ActivityDetail.InnerHeight()).
@@ -1269,9 +1384,6 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 	if v := strings.TrimSpace(ev.Data["profile"]); v != "" {
 		m.profile = v
 	}
-	if strings.HasPrefix(ev.Type, "agent.op.") {
-		m.observeActivityEvent(ev)
-	}
 	m.observeTaskEvent(ev)
 	m.observeAgentOutput(ev)
 	switch ev.Type {
@@ -1283,109 +1395,6 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 		}
 	case "llm.cost.total":
 		m.stats.lastTurnCostUSD = strings.TrimSpace(ev.Data["costUsd"])
-	}
-}
-
-func (m *monitorModel) observeActivityEvent(ev types.EventRecord) {
-	switch ev.Type {
-	case "agent.op.request":
-		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
-			return
-		}
-		op := strings.TrimSpace(ev.Data["op"])
-		if op == "" {
-			return
-		}
-		opID := strings.TrimSpace(ev.Data["opId"])
-		m.activitySeq++
-		id := fmt.Sprintf("act-%d", m.activitySeq)
-		now := ev.Timestamp
-		if now.IsZero() {
-			now = time.Now()
-		}
-
-		act := Activity{
-			ID:            id,
-			Kind:          op,
-			Status:        ActivityPending,
-			StartedAt:     now,
-			Path:          strings.TrimSpace(ev.Data["path"]),
-			MaxBytes:      strings.TrimSpace(ev.Data["maxBytes"]),
-			TextPreview:   strings.TrimSpace(ev.Data["textPreview"]),
-			TextTruncated: strings.TrimSpace(ev.Data["textTruncated"]) == "true",
-			TextRedacted:  strings.TrimSpace(ev.Data["textRedacted"]) == "true",
-			TextIsJSON:    strings.TrimSpace(ev.Data["textIsJSON"]) == "true",
-			TextBytes:     strings.TrimSpace(ev.Data["textBytes"]),
-			Data:          ev.Data,
-		}
-		act.Title = renderOpRequest(ev.Data)
-
-		m.activities = append(m.activities, act)
-		m.activityIndexByID[id] = len(m.activities) - 1
-		if opID != "" {
-			m.activityIndexByOp[opID] = len(m.activities) - 1
-		} else {
-			m.pendingActivityID = id
-		}
-		m.refreshActivityList()
-		m.refreshActivityDetail(false)
-
-	case "agent.op.response":
-		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
-			return
-		}
-		if strings.TrimSpace(ev.Data["op"]) == "" {
-			return
-		}
-		opID := strings.TrimSpace(ev.Data["opId"])
-		idx := -1
-		ok := false
-		if opID != "" {
-			idx, ok = m.activityIndexByOp[opID]
-		}
-		if !ok {
-			idx, ok = m.activityIndexByID[m.pendingActivityID]
-		}
-		if !ok || idx < 0 || idx >= len(m.activities) {
-			return
-		}
-		act := m.activities[idx]
-		now := ev.Timestamp
-		if now.IsZero() {
-			now = time.Now()
-		}
-
-		act.Ok = strings.TrimSpace(ev.Data["ok"])
-		act.Error = strings.TrimSpace(ev.Data["err"])
-		act.BytesLen = strings.TrimSpace(ev.Data["bytesLen"])
-		act.Truncated = strings.TrimSpace(ev.Data["truncated"]) == "true"
-
-		fin := now
-		act.FinishedAt = &fin
-		act.Duration = fin.Sub(act.StartedAt)
-		if act.Ok == "true" {
-			act.Status = ActivityOK
-		} else {
-			act.Status = ActivityError
-		}
-		if act.Data == nil {
-			act.Data = make(map[string]string)
-		}
-		for k, v := range ev.Data {
-			act.Data[k] = v
-		}
-
-		m.activities[idx] = act
-		if opID != "" {
-			delete(m.activityIndexByOp, opID)
-		} else {
-			m.pendingActivityID = ""
-		}
-		if isPlanEvent(act.Kind, act.Path) && strings.TrimSpace(act.Ok) == "true" {
-			m.loadPlanFiles()
-		}
-		m.refreshActivityList()
-		m.refreshActivityDetail(false)
 	}
 }
 
@@ -1495,14 +1504,24 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 		}
 		opID := strings.TrimSpace(ev.Data["opId"])
 		entry, ok := m.takeAgentOutputPending(opID)
-		if !ok {
-			return
-		}
 		status := formatAgentOutputStatus(ev)
-		line := fmt.Sprintf("[%s] op: %s — %s", entry.timestamp, entry.desc, status)
-		if entry.index >= 0 && entry.index < len(m.agentOutput) {
-			m.agentOutput[entry.index] = line
+		if ok {
+			line := fmt.Sprintf("[%s] op: %s — %s", entry.timestamp, entry.desc, status)
+			if entry.index >= 0 && entry.index < len(m.agentOutput) {
+				m.agentOutput[entry.index] = line
+				// The updated line may re-wrap, so invalidate cached layout metadata.
+				m.agentOutputLayoutWidth = 0
+				return
+			}
 		}
+		// If the pending entry was dropped from the output buffer, fall back to appending a new line.
+		ts := ev.Timestamp.Local().Format("15:04:05")
+		txt := strings.TrimSpace(renderOpRequest(ev.Data))
+		if txt == "" {
+			txt = strings.TrimSpace(ev.Data["op"])
+		}
+		line := fmt.Sprintf("[%s] op: %s — %s", ts, txt, status)
+		m.appendAgentOutput(line)
 	}
 }
 
@@ -1516,6 +1535,7 @@ func (m *monitorModel) appendAgentOutputLine(line string) int {
 		return -1
 	}
 	m.agentOutput = append(m.agentOutput, line)
+	m.trimAgentOutputBuffer()
 	// Incrementally maintain layout metadata when possible (for virtualization).
 	w := m.agentOutputVP.Width
 	if w <= 0 {
@@ -1534,6 +1554,83 @@ func (m *monitorModel) appendAgentOutputLine(line string) int {
 	m.agentOutputLineHeights = append(m.agentOutputLineHeights, h)
 	m.agentOutputTotalLines += h
 	return len(m.agentOutput) - 1
+}
+
+func (m *monitorModel) trimAgentOutputBuffer() {
+	if m == nil {
+		return
+	}
+	maxLines := agentOutputMaxLines
+	if maxLines <= 0 {
+		return
+	}
+	if len(m.agentOutput) <= maxLines {
+		return
+	}
+
+	// Drop a chunk at a time to amortize copying costs once we hit the limit.
+	drop := len(m.agentOutput) - (maxLines - agentOutputDropChunk)
+	if agentOutputDropChunk <= 0 {
+		drop = len(m.agentOutput) - maxLines
+	}
+	if drop <= 0 {
+		drop = 1
+	}
+	if drop >= len(m.agentOutput) {
+		m.agentOutput = nil
+		m.agentOutputPending = nil
+		m.agentOutputPendingFallback = nil
+		m.agentOutputLayoutWidth = 0
+		m.agentOutputLogicalYOffset = 0
+		m.agentOutputFollow = true
+		return
+	}
+
+	removedLogicalLines := 0
+	// appendAgentOutputLine() trims before it appends incremental layout metadata, so
+	// lineHeights may be for the previous length (len(agentOutput)-1) or the current length.
+	if m.agentOutputLayoutWidth != 0 && (len(m.agentOutputLineHeights) == len(m.agentOutput) || len(m.agentOutputLineHeights) == len(m.agentOutput)-1) && drop <= len(m.agentOutputLineHeights) {
+		for i := 0; i < drop; i++ {
+			removedLogicalLines += m.agentOutputLineHeights[i]
+		}
+	}
+
+	// Re-slice into a fresh backing array so we don't retain references to the dropped prefix.
+	kept := append([]string(nil), m.agentOutput[drop:]...)
+	m.agentOutput = kept
+
+	// Adjust pending op indices so responses still update the correct lines when possible.
+	if m.agentOutputPending != nil {
+		for opID, entry := range m.agentOutputPending {
+			entry.index -= drop
+			if entry.index < 0 {
+				delete(m.agentOutputPending, opID)
+				continue
+			}
+			m.agentOutputPending[opID] = entry
+		}
+		if len(m.agentOutputPending) == 0 {
+			m.agentOutputPending = nil
+		}
+	}
+	if m.agentOutputPendingFallback != nil {
+		e := *m.agentOutputPendingFallback
+		e.index -= drop
+		if e.index < 0 {
+			m.agentOutputPendingFallback = nil
+		} else {
+			m.agentOutputPendingFallback = &e
+		}
+	}
+
+	// Preserve scroll position as best-effort by shifting the logical y-offset down by the number
+	// of wrapped lines we removed (when known). Always clamp on refresh.
+	if removedLogicalLines > 0 && m.agentOutputLogicalYOffset > 0 {
+		m.agentOutputLogicalYOffset = max(0, m.agentOutputLogicalYOffset-removedLogicalLines)
+	}
+
+	// Invalidate layout metadata; it no longer matches after dropping a prefix.
+	m.agentOutputLayoutWidth = 0
 }
 
 func (m *monitorModel) takeAgentOutputPending(opID string) (agentOutputPendingEntry, bool) {
@@ -1608,64 +1705,45 @@ func formatTaskEventLines(ev types.EventRecord) []string {
 }
 
 func (m *monitorModel) refreshActivityList() {
-	// Preserve selection unless the user was following the tail.
 	prevIdx := m.activityList.Index()
 	prevID := ""
-	oldItems := m.activityList.Items()
 	wasFollowingTail := m.activityFollowingTail
-	if len(oldItems) == 0 && len(m.activities) > 0 {
-		wasFollowingTail = true
-	}
-	if prevIdx >= 0 && prevIdx < len(m.activities) {
-		prevID = m.activities[prevIdx].ID
+	if prevIdx >= 0 && prevIdx < len(m.activityPageItems) {
+		prevID = m.activityPageItems[prevIdx].ID
 	}
 
-	items := make([]list.Item, 0, len(m.activities))
-	for _, a := range m.activities {
+	items := make([]list.Item, 0, len(m.activityPageItems))
+	for _, a := range m.activityPageItems {
 		items = append(items, activityItem{act: a})
 	}
 	m.activityList.SetItems(items)
 	if len(items) == 0 {
+		m.activityFollowingTail = true
 		return
 	}
 
-	selectIdx := 0
+	selectIdx := min(max(prevIdx, 0), len(items)-1)
 	if wasFollowingTail {
 		selectIdx = len(items) - 1
 	} else if strings.TrimSpace(prevID) != "" {
-		selectIdx = -1
-		for i := range m.activities {
-			if m.activities[i].ID == prevID {
+		for i := range m.activityPageItems {
+			if m.activityPageItems[i].ID == prevID {
 				selectIdx = i
 				break
 			}
 		}
-		if selectIdx < 0 {
-			selectIdx = min(max(prevIdx, 0), len(items)-1)
-		}
-	} else {
-		selectIdx = min(max(prevIdx, 0), len(items)-1)
 	}
 	m.activityList.Select(selectIdx)
-	m.activityFollowingTail = selectIdx == len(items)-1
 
-	// Only force pagination when following the tail.
-	if wasFollowingTail {
-		if pages := m.activityList.Paginator.TotalPages; pages > 0 {
-			m.activityList.Paginator.Page = pages - 1
-			itemsOnPage := m.activityList.Paginator.ItemsOnPage(len(m.activityList.VisibleItems()))
-			for itemsOnPage > 0 && m.activityList.Cursor() < itemsOnPage-1 {
-				m.activityList.CursorDown()
-			}
-		}
-	}
+	maxPage := max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize)-1)
+	m.activityFollowingTail = (m.activityPage >= maxPage) && (selectIdx == len(items)-1)
 }
 
 func (m *monitorModel) refreshActivityDetail(forceTop bool) {
 	if m.renderer == nil {
 		return
 	}
-	if len(m.activities) == 0 || m.activityList.Index() < 0 || m.activityList.Index() >= len(m.activities) {
+	if len(m.activityPageItems) == 0 || m.activityList.Index() < 0 || m.activityList.Index() >= len(m.activityPageItems) {
 		m.activityDetail.SetContent("")
 		m.activityDetailAct = ""
 		m.activityDetail.GotoTop()
@@ -1675,7 +1753,7 @@ func (m *monitorModel) refreshActivityDetail(forceTop bool) {
 	w := imax(24, m.activityDetail.Width-4)
 	header := "### Details\n\n"
 	help := "_PgUp/PgDn scroll · use Activity to change selection_\n\n"
-	act := m.activities[m.activityList.Index()]
+	act := m.activityPageItems[m.activityList.Index()]
 	md := renderActivityDetailMarkdown(act, false, false)
 	rendered := strings.TrimRight(m.renderer.RenderMarkdown(header+help+md, w), "\n")
 	rendered = wrapViewportText(rendered, imax(10, m.activityDetail.Width))
@@ -1889,10 +1967,14 @@ func (m *monitorModel) renderDashboardSidePanelTabBar(grid layoutmgr.GridLayout)
 func (m *monitorModel) renderDashboardSidePanels(grid layoutmgr.GridLayout) string {
 	switch m.dashboardSideTab {
 	case 0:
+		feedBody := m.activityList.View()
+		if footer := m.renderPaginationFooter(m.activityPage, m.activityPageSize, m.activityTotalCount); footer != "" {
+			feedBody = strings.TrimRight(feedBody, "\n") + "\n" + footer
+		}
 		feed := m.panelStyle(panelActivity).
 			Width(grid.ActivityFeed.InnerWidth()).
 			Height(grid.ActivityFeed.InnerHeight()).
-			Render(m.styles.sectionTitle.Render("Activity Feed") + "\n" + m.activityList.View())
+			Render(m.styles.sectionTitle.Render("Activity Feed") + "\n" + feedBody)
 		detail := m.panelStyle(panelActivityDetail).
 			Width(grid.ActivityDetail.InnerWidth()).
 			Height(grid.ActivityDetail.InnerHeight()).
@@ -1940,10 +2022,14 @@ func (m *monitorModel) renderDashboardSidePanels(grid layoutmgr.GridLayout) stri
 			Height(grid.Plan.InnerHeight()).
 			Render(m.styles.sectionTitle.Render("Thoughts") + "\n" + m.thinkingVP.View())
 	default:
+		feedBody := m.activityList.View()
+		if footer := m.renderPaginationFooter(m.activityPage, m.activityPageSize, m.activityTotalCount); footer != "" {
+			feedBody = strings.TrimRight(feedBody, "\n") + "\n" + footer
+		}
 		feed := m.panelStyle(panelActivity).
 			Width(grid.ActivityFeed.InnerWidth()).
 			Height(grid.ActivityFeed.InnerHeight()).
-			Render(m.styles.sectionTitle.Render("Activity Feed") + "\n" + m.activityList.View())
+			Render(m.styles.sectionTitle.Render("Activity Feed") + "\n" + feedBody)
 		detail := m.panelStyle(panelActivityDetail).
 			Width(grid.ActivityDetail.InnerWidth()).
 			Height(grid.ActivityDetail.InnerHeight()).
@@ -2098,7 +2184,8 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 			m.refreshActivityDetail(true)
 		}
 		if isScrollKey(msg) {
-			m.activityFollowingTail = len(m.activities) > 0 && m.activityList.Index() == len(m.activities)-1
+			maxPage := max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize)-1)
+			m.activityFollowingTail = len(m.activityPageItems) > 0 && m.activityPage >= maxPage && m.activityList.Index() == len(m.activityPageItems)-1
 		}
 		return m, cmd
 	case panelActivityDetail:
