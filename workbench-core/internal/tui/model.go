@@ -374,14 +374,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.streamingBuf = &strings.Builder{}
 					}
 					m.streamingBuf.WriteString(txt)
-					wasAtBottom := m.transcript.AtBottom()
+					wasAtBottom := m.transcriptAtBottom()
 					it := m.transcriptItems[m.streamingItemIdx]
 					if it.kind == transcriptAgent {
 						it.text = m.streamingBuf.String() + "▌"
 						m.transcriptItems[m.streamingItemIdx] = it
+						if m.transcriptRenderCache != nil {
+							delete(m.transcriptRenderCache, m.streamingItemIdx)
+						}
 						m.rebuildTranscript()
 						if wasAtBottom {
-							m.transcript.GotoBottom()
+							m.transcriptGotoBottom()
 						}
 					}
 				}
@@ -857,10 +860,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.transcriptItems[m.streamingItemIdx] = it
 						m.streamingItemIdx = -1
 						m.streamingBuf = nil
-						wasAtBottom := m.transcript.AtBottom()
+						wasAtBottom := m.transcriptAtBottom()
 						m.rebuildTranscript()
 						if wasAtBottom {
-							m.transcript.GotoBottom()
+							m.transcriptGotoBottom()
 						}
 						m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 					}
@@ -895,18 +898,22 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		finalText := strings.TrimSpace(msg.final)
 		if finalText != "" {
-			if m.streamingItemIdx >= 0 && m.streamingItemIdx < len(m.transcriptItems) {
-				it := m.transcriptItems[m.streamingItemIdx]
-				if it.kind == transcriptAgent {
-					it.text = finalText
-					m.transcriptItems[m.streamingItemIdx] = it
-					m.streamingItemIdx = -1
-					m.streamingBuf = nil
-					wasAtBottom := m.transcript.AtBottom()
-					m.rebuildTranscript()
-					if wasAtBottom {
-						m.transcript.GotoBottom()
-					}
+				if m.streamingItemIdx >= 0 && m.streamingItemIdx < len(m.transcriptItems) {
+					it := m.transcriptItems[m.streamingItemIdx]
+					if it.kind == transcriptAgent {
+						streamIdx := m.streamingItemIdx
+						it.text = finalText
+						m.transcriptItems[m.streamingItemIdx] = it
+						m.streamingItemIdx = -1
+						m.streamingBuf = nil
+						wasAtBottom := m.transcriptAtBottom()
+						if m.transcriptRenderCache != nil {
+							delete(m.transcriptRenderCache, streamIdx)
+						}
+						m.rebuildTranscript()
+						if wasAtBottom {
+							m.transcriptGotoBottom()
+						}
 					m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 				} else {
 					// Fallback: unexpected kind, append normally.
@@ -1400,7 +1407,7 @@ func (m *Model) upsertGroupedFileChanges() {
 		return
 	}
 
-	wasAtBottom := m.transcript.AtBottom()
+	wasAtBottom := m.transcriptAtBottom()
 	// First insert: append a single file-change box at the end of the transcript.
 	if m.fileChangesItemIdx < 0 || m.fileChangesItemIdx >= len(m.transcriptItems) {
 		m.fileChangesItemIdx = len(m.transcriptItems)
@@ -1432,7 +1439,7 @@ func (m *Model) upsertGroupedFileChanges() {
 	m.transcriptItems[m.fileChangesItemIdx] = it
 	m.rebuildTranscript()
 	if wasAtBottom {
-		m.transcript.GotoBottom()
+		m.transcriptGotoBottom()
 	}
 }
 
@@ -1469,10 +1476,10 @@ func (m *Model) appendToCurrentActionGroup(action groupedAction) (int, int) {
 	it.groupItems = append(it.groupItems, action)
 	actionIdx := len(it.groupItems) - 1
 	m.transcriptItems[m.currentActionGroupIdx] = it
-	wasAtBottom := m.transcript.AtBottom()
+	wasAtBottom := m.transcriptAtBottom()
 	m.rebuildTranscript()
 	if wasAtBottom {
-		m.transcript.GotoBottom()
+		m.transcriptGotoBottom()
 	}
 	return m.currentActionGroupIdx, actionIdx
 }
@@ -1510,10 +1517,10 @@ func (m *Model) markGroupedActionCompleted(groupIdx, actionIdx int, status strin
 	item.isError = isError
 	it.groupItems[actionIdx] = item
 	m.transcriptItems[groupIdx] = it
-	wasAtBottom := m.transcript.AtBottom()
+	wasAtBottom := m.transcriptAtBottom()
 	m.rebuildTranscript()
 	if wasAtBottom {
-		m.transcript.GotoBottom()
+		m.transcriptGotoBottom()
 	}
 	return true
 }

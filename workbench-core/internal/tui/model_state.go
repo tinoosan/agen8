@@ -135,6 +135,11 @@ type Model struct {
 
 	transcriptItems         []transcriptItem
 	transcriptItemStartLine []int
+	// Virtualized transcript rendering state (keeps items in memory, renders a window).
+	transcriptRenderCache   map[int]*renderedItem // item index -> cached render
+	transcriptWindow        transcriptWindow
+	transcriptTotalLines    int // estimated total line count for all items
+	transcriptLogicalYOffset int // scroll position in absolute lines (top of full transcript)
 	lastTurnUserItemIdx     int
 	currentActionGroupIdx   int
 	currentActionCategory   string
@@ -393,4 +398,26 @@ type fileBeforeMsg struct {
 	text      string
 	truncated bool
 	err       error
+}
+
+// renderedItem caches the rendered string and computed height for a transcript item.
+// Height is invalidated when viewport width changes.
+type renderedItem struct {
+	rendered string
+	height   int
+	width    int
+}
+
+// transcriptWindow tracks the currently visible rendering window.
+type transcriptWindow struct {
+	// Item range being rendered (inclusive).
+	firstItem int
+	lastItem  int
+
+	// Buffer sizes (items, not lines).
+	bufferAbove int
+	bufferBelow int
+
+	// Offset tracking for viewport coordinate translation.
+	contentStartLine int
 }

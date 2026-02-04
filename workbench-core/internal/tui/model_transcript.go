@@ -26,7 +26,7 @@ func (m *Model) addTranscriptItem(it transcriptItem) {
 }
 
 func (m *Model) addTranscriptItemWithScroll(it transcriptItem, autoScroll bool) {
-	wasAtBottom := m.transcript.AtBottom()
+	wasAtBottom := m.transcriptAtBottom()
 	wasEmpty := len(m.transcriptItems) == 0
 
 	if it.kind != transcriptActionGroup {
@@ -39,13 +39,25 @@ func (m *Model) addTranscriptItemWithScroll(it transcriptItem, autoScroll bool) 
 	// preserve their scroll position.
 	if wasEmpty {
 		// For the first item, keep the top visible (avoid "first message is cut off").
-		m.transcript.SetYOffset(0)
+		m.transcriptSetYOffsetGlobal(0)
 	} else if autoScroll && wasAtBottom {
-		m.transcript.GotoBottom()
+		m.transcriptGotoBottom()
 	}
 }
 
 func (m *Model) rebuildTranscript() {
+	if m == nil {
+		return
+	}
+	// For small transcripts, keep the simple full rebuild.
+	if len(m.transcriptItems) <= 50 {
+		m.rebuildTranscriptFull()
+		return
+	}
+	m.rebuildTranscriptWindowed()
+}
+
+func (m *Model) rebuildTranscriptFull() {
 	// Important: wrap content to the *actual* transcript viewport width.
 	//
 	// If we wrap to a larger width than the viewport, the terminal will soft-wrap
@@ -79,197 +91,14 @@ func (m *Model) rebuildTranscript() {
 	lineNo := 0
 	for _, it := range m.transcriptItems {
 		startLines = append(startLines, lineNo)
-		switch it.kind {
-		case transcriptSpacer:
-			lines = append(lines, m.styleDim.Render(""))
-			lineNo++
-		case transcriptUser:
-			// Render user text as markdown so pasted tasks and lists are readable.
-			// Glamour rendering can include leading/trailing newlines; trim them so the
-			// user box hugs content (no phantom blank rows).
-			rendered := strings.Trim(m.renderer.RenderMarkdown(it.text, userInnerW), "\n")
-			h := 1
-			if rendered != "" {
-				h = 1 + strings.Count(rendered, "\n")
-			}
-			accentLines := make([]string, 0, h)
-			for i := 0; i < h; i++ {
-				accentLines = append(accentLines, "│")
-			}
-			accent := m.styleUserLabel.Render(strings.Join(accentLines, "\n"))
-			body := lipgloss.JoinHorizontal(lipgloss.Top, accent, " ", rendered)
-			lines = append(lines, m.styleUserBox.Render(body))
-			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-		case transcriptAgent:
-			// Render agent answers as markdown (code blocks, bullets, tables).
-			//
-			// Important: do not prefix "agent>" inside the markdown source, otherwise
-			// fenced blocks (```json) stop being recognized by the markdown parser.
-			rendered := strings.Trim(m.renderer.RenderAgentMarkdown(strings.TrimSpace(it.text), agentInnerW), "\n")
-			lines = append(lines, m.styleAgentBox.Render(rendered))
-			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-		case transcriptThinking:
-			// Thinking indicator + optional summary (dimmed + subtle gutter).
-			innerW := max(20, w-4) // 2 for gutter + 1 space + 1 margin
-			header, summary := splitThinkingText(it.text)
-			header = wrapText(strings.TrimSpace(header), innerW)
-			if !m.thinkingExpanded && strings.TrimSpace(summary) != "" {
-				header = strings.TrimSpace(header) + "  " + "summary available (Ctrl+Y)"
-			}
-
-			rendered := strings.TrimSpace(header)
-			if m.thinkingExpanded && strings.TrimSpace(summary) != "" && m.renderer != nil {
-				mdW := max(20, w-6) // account for gutter + space + a touch of margin
-				md := strings.Trim(m.renderer.RenderThinkingMarkdown(summary, mdW), "\n")
-				if md != "" {
-					rendered = strings.TrimSpace(rendered) + "\n\n" + md
-				}
-			}
-			rendered = strings.TrimRight(rendered, "\n")
-			h := 1
-			if rendered != "" {
-				h = 1 + strings.Count(rendered, "\n")
-			}
-			gutterLines := make([]string, 0, h)
-			for i := 0; i < h; i++ {
-				gutterLines = append(gutterLines, "│")
-			}
-			gutter := m.styleDim.Render(strings.Join(gutterLines, "\n"))
-			body := m.styleDim.Render(rendered)
-			lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, gutter, " ", body))
-			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-		case transcriptError:
-			lines = append(lines, m.styleError.Render(wrapText(it.text, max(20, w-4))))
-			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-		case transcriptActionGroup:
-			header := strings.TrimSpace(it.groupHeader)
-			if header == "" {
-				header = "Action"
-			}
-			lines = append(lines, m.styleBold.Render("• "+header))
-			lineNo++
-
-			for i, item := range it.groupItems {
-				connector := "├"
-				if i == len(it.groupItems)-1 {
-					connector = "└"
-				}
-				actionW := max(20, w-12)
-				content := wrapText(strings.TrimSpace(item.text), actionW)
-				line := m.styleDim.Render(connector+" ") + m.styleAction.Render(content)
-				if item.status != "" {
-					style := m.styleDim
-					if item.isError {
-						style = m.styleError
-					}
-					line += " " + style.Render(item.status)
-				}
-				lines = append(lines, line)
-				lineNo += 1 + strings.Count(line, "\n")
-			}
-		case transcriptFileChange:
-			raw := strings.TrimSpace(it.text)
-			// Grouped file-changes block: render each file entry using the same
-			// header+diff formatting as single-file blocks.
-			//
-			// Hypothesis H2: In grouped blocks, our previous "first line is header"
-			// logic treated "## File changes" as the header, leaving per-file headers
-			// unstyled and formatted differently than the single-file case.
-			if strings.HasPrefix(strings.TrimSpace(raw), "## File changes") {
-				rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "## File changes"))
-				rest = strings.TrimLeft(rest, "\n")
-				parts := []string{}
-				if strings.TrimSpace(rest) != "" {
-					parts = strings.Split(rest, "\n---\n\n")
-					if len(parts) == 1 {
-						parts = strings.Split(rest, "\n---\n")
-					}
-				}
-
-				// Render a plain title (no markdown "##") so it doesn't look like raw markdown.
-				title := lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#6bbcff")).
-					Bold(true).
-					Render("File changes")
-
-				renderedParts := make([]string, 0, len(parts))
-				for _, part := range parts {
-					part = strings.TrimSpace(part)
-					if part == "" {
-						continue
-					}
-					nl := strings.IndexByte(part, '\n')
-					if nl < 0 {
-						// Fallback: render as markdown.
-						renderedParts = append(renderedParts, strings.Trim(m.renderer.RenderMarkdown(part, fileInnerW), "\n"))
-						continue
-					}
-					hdr := strings.TrimSpace(part[:nl])
-					body := strings.TrimLeft(part[nl+1:], "\n")
-					if strings.TrimSpace(body) == "" {
-						renderedParts = append(renderedParts, strings.Trim(m.renderer.RenderMarkdown(part, fileInnerW), "\n"))
-						continue
-					}
-					pth, a, d, okCounts := parseFileChangeHeaderLine(hdr)
-					hdrR := renderFileChangeHeaderLine(pth, a, d, okCounts, fileInnerW)
-					bodyR := strings.Trim(m.renderer.RenderMarkdown(strings.TrimSpace(body), fileInnerW), "\n")
-					renderedParts = append(renderedParts, hdrR+"\n"+bodyR)
-				}
-
-				dividerW := fileInnerW
-				if dividerW > 32 {
-					dividerW = 32
-				}
-				if dividerW < 10 {
-					dividerW = 10
-				}
-				divider := m.styleDim.Render(strings.Repeat("─", dividerW))
-				content := title
-				for i, rp := range renderedParts {
-					if strings.TrimSpace(rp) == "" {
-						continue
-					}
-					content += "\n" + rp
-					if i != len(renderedParts)-1 {
-						content += "\n\n" + divider + "\n"
-					}
-				}
-				lines = append(lines, m.styleFileChangeBox.Render(strings.TrimRight(content, "\n")))
-				lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-				break
-			}
-
-			// Header is the first line; body is the rest. (We intentionally tolerate
-			// either "\n" or "\n\n" between them.)
-			nl := strings.IndexByte(raw, '\n')
-			if nl < 0 {
-				// Fallback: render as markdown.
-				rendered := strings.Trim(m.renderer.RenderMarkdown(raw, fileInnerW), "\n")
-				lines = append(lines, m.styleFileChangeBox.Render(rendered))
-				lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-				break
-			}
-			hdr := strings.TrimSpace(raw[:nl])
-			body := strings.TrimLeft(raw[nl+1:], "\n")
-			if strings.TrimSpace(body) == "" {
-				// Fallback: render as markdown.
-				rendered := strings.Trim(m.renderer.RenderMarkdown(raw, fileInnerW), "\n")
-				lines = append(lines, m.styleFileChangeBox.Render(rendered))
-				lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-				break
-			}
-
-			path, added, deleted, hasCounts := parseFileChangeHeaderLine(hdr)
-			headerRendered := renderFileChangeHeaderLine(path, added, deleted, hasCounts, fileInnerW)
-			bodyRendered := strings.Trim(m.renderer.RenderMarkdown(strings.TrimSpace(body), fileInnerW), "\n")
-			// Keep the diff tight to the header (one newline).
-			rendered := headerRendered + "\n" + bodyRendered
-			lines = append(lines, m.styleFileChangeBox.Render(rendered))
-			lineNo += 1 + strings.Count(lines[len(lines)-1], "\n")
-		}
+		rendered := m.renderTranscriptItem(it, w, userInnerW, agentInnerW, fileInnerW)
+		lines = append(lines, rendered)
+		lineNo += 1 + strings.Count(rendered, "\n")
 	}
 
 	m.transcriptItemStartLine = startLines
+	m.transcriptTotalLines = lineNo
+	m.transcriptLogicalYOffset = m.transcript.YOffset
 	m.transcript.SetContent(strings.Join(lines, "\n"))
 	// Clamp scroll when content shrinks or re-wrap changes line count.
 	m.transcript.SetYOffset(m.transcript.YOffset)
@@ -292,7 +121,7 @@ func (m *Model) scrollToCurrentTurnStart() {
 	if idx < 0 || idx >= len(m.transcriptItemStartLine) {
 		return
 	}
-	m.transcript.SetYOffset(m.transcriptItemStartLine[idx])
+	m.transcriptSetYOffsetGlobal(m.transcriptItemStartLine[idx])
 }
 
 func max(a, b int) int {
@@ -322,6 +151,385 @@ func wrapText(s string, width int) string {
 	}
 	// Use a dedicated wrapping lib so reflow behaves consistently across width changes.
 	return wordwrap.String(s, width)
+}
+
+func (m *Model) transcriptIsWindowed() bool {
+	return len(m.transcriptItems) > 50
+}
+
+func (m *Model) transcriptAtBottom() bool {
+	if m == nil {
+		return true
+	}
+	if !m.transcriptIsWindowed() {
+		return m.transcript.AtBottom()
+	}
+	bottom := max(0, m.transcriptTotalLines-m.transcript.Height)
+	return m.transcriptLogicalYOffset >= bottom
+}
+
+func (m *Model) transcriptGotoBottom() {
+	if m == nil {
+		return
+	}
+	if !m.transcriptIsWindowed() {
+		m.transcript.GotoBottom()
+		m.transcriptLogicalYOffset = m.transcript.YOffset
+		return
+	}
+	m.transcriptLogicalYOffset = max(0, m.transcriptTotalLines-m.transcript.Height)
+	m.rebuildTranscript()
+}
+
+func (m *Model) transcriptSetYOffsetGlobal(y int) {
+	if m == nil {
+		return
+	}
+	if !m.transcriptIsWindowed() {
+		m.transcript.SetYOffset(y)
+		m.transcriptLogicalYOffset = m.transcript.YOffset
+		return
+	}
+	maxY := max(0, m.transcriptTotalLines-m.transcript.Height)
+	if y < 0 {
+		y = 0
+	}
+	if y > maxY {
+		y = maxY
+	}
+	m.transcriptLogicalYOffset = y
+	m.rebuildTranscript()
+}
+
+func (m *Model) renderTranscriptItem(it transcriptItem, w, userInnerW, agentInnerW, fileInnerW int) string {
+	switch it.kind {
+	case transcriptSpacer:
+		return m.styleDim.Render("")
+	case transcriptUser:
+		rendered := strings.Trim(m.renderer.RenderMarkdown(it.text, userInnerW), "\n")
+		h := 1
+		if rendered != "" {
+			h = 1 + strings.Count(rendered, "\n")
+		}
+		accentLines := make([]string, 0, h)
+		for i := 0; i < h; i++ {
+			accentLines = append(accentLines, "│")
+		}
+		accent := m.styleUserLabel.Render(strings.Join(accentLines, "\n"))
+		body := lipgloss.JoinHorizontal(lipgloss.Top, accent, " ", rendered)
+		return m.styleUserBox.Render(body)
+	case transcriptAgent:
+		rendered := strings.Trim(m.renderer.RenderAgentMarkdown(strings.TrimSpace(it.text), agentInnerW), "\n")
+		return m.styleAgentBox.Render(rendered)
+	case transcriptThinking:
+		innerW := max(20, w-4) // 2 for gutter + 1 space + 1 margin
+		header, summary := splitThinkingText(it.text)
+		header = wrapText(strings.TrimSpace(header), innerW)
+		if !m.thinkingExpanded && strings.TrimSpace(summary) != "" {
+			header = strings.TrimSpace(header) + "  " + "summary available (Ctrl+Y)"
+		}
+
+		rendered := strings.TrimSpace(header)
+		if m.thinkingExpanded && strings.TrimSpace(summary) != "" && m.renderer != nil {
+			mdW := max(20, w-6) // account for gutter + space + a touch of margin
+			md := strings.Trim(m.renderer.RenderThinkingMarkdown(summary, mdW), "\n")
+			if md != "" {
+				rendered = strings.TrimSpace(rendered) + "\n\n" + md
+			}
+		}
+		rendered = strings.TrimRight(rendered, "\n")
+		h := 1
+		if rendered != "" {
+			h = 1 + strings.Count(rendered, "\n")
+		}
+		gutterLines := make([]string, 0, h)
+		for i := 0; i < h; i++ {
+			gutterLines = append(gutterLines, "│")
+		}
+		gutter := m.styleDim.Render(strings.Join(gutterLines, "\n"))
+		body := m.styleDim.Render(rendered)
+		return lipgloss.JoinHorizontal(lipgloss.Top, gutter, " ", body)
+	case transcriptError:
+		return m.styleError.Render(wrapText(it.text, max(20, w-4)))
+	case transcriptActionGroup:
+		header := strings.TrimSpace(it.groupHeader)
+		if header == "" {
+			header = "Action"
+		}
+		var b strings.Builder
+		b.WriteString(m.styleBold.Render("• " + header))
+		b.WriteString("\n")
+		for i, item := range it.groupItems {
+			connector := "├"
+			if i == len(it.groupItems)-1 {
+				connector = "└"
+			}
+			actionW := max(20, w-12)
+			content := wrapText(strings.TrimSpace(item.text), actionW)
+			line := m.styleDim.Render(connector+" ") + m.styleAction.Render(content)
+			if item.status != "" {
+				style := m.styleDim
+				if item.isError {
+					style = m.styleError
+				}
+				line += " " + style.Render(item.status)
+			}
+			b.WriteString(line)
+			if i != len(it.groupItems)-1 {
+				b.WriteString("\n")
+			}
+		}
+		return b.String()
+	case transcriptFileChange:
+		raw := strings.TrimSpace(it.text)
+		if strings.HasPrefix(strings.TrimSpace(raw), "## File changes") {
+			rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "## File changes"))
+			rest = strings.TrimLeft(rest, "\n")
+			parts := []string{}
+			if strings.TrimSpace(rest) != "" {
+				parts = strings.Split(rest, "\n---\n\n")
+				if len(parts) == 1 {
+					parts = strings.Split(rest, "\n---\n")
+				}
+			}
+
+			title := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6bbcff")).
+				Bold(true).
+				Render("File changes")
+
+			renderedParts := make([]string, 0, len(parts))
+			for _, part := range parts {
+				part = strings.TrimSpace(part)
+				if part == "" {
+					continue
+				}
+				nl := strings.IndexByte(part, '\n')
+				if nl < 0 {
+					renderedParts = append(renderedParts, strings.Trim(m.renderer.RenderMarkdown(part, fileInnerW), "\n"))
+					continue
+				}
+				hdr := strings.TrimSpace(part[:nl])
+				body := strings.TrimLeft(part[nl+1:], "\n")
+				if strings.TrimSpace(body) == "" {
+					renderedParts = append(renderedParts, strings.Trim(m.renderer.RenderMarkdown(part, fileInnerW), "\n"))
+					continue
+				}
+				pth, a, d, okCounts := parseFileChangeHeaderLine(hdr)
+				hdrR := renderFileChangeHeaderLine(pth, a, d, okCounts, fileInnerW)
+				bodyR := strings.Trim(m.renderer.RenderMarkdown(strings.TrimSpace(body), fileInnerW), "\n")
+				renderedParts = append(renderedParts, hdrR+"\n"+bodyR)
+			}
+
+			dividerW := fileInnerW
+			if dividerW > 32 {
+				dividerW = 32
+			}
+			if dividerW < 10 {
+				dividerW = 10
+			}
+			divider := m.styleDim.Render(strings.Repeat("─", dividerW))
+			content := title
+			for i, rp := range renderedParts {
+				if strings.TrimSpace(rp) == "" {
+					continue
+				}
+				content += "\n" + rp
+				if i != len(renderedParts)-1 {
+					content += "\n\n" + divider + "\n"
+				}
+			}
+			return m.styleFileChangeBox.Render(strings.TrimRight(content, "\n"))
+		}
+
+		nl := strings.IndexByte(raw, '\n')
+		if nl < 0 {
+			rendered := strings.Trim(m.renderer.RenderMarkdown(raw, fileInnerW), "\n")
+			return m.styleFileChangeBox.Render(rendered)
+		}
+		hdr := strings.TrimSpace(raw[:nl])
+		body := strings.TrimLeft(raw[nl+1:], "\n")
+		if strings.TrimSpace(body) == "" {
+			rendered := strings.Trim(m.renderer.RenderMarkdown(raw, fileInnerW), "\n")
+			return m.styleFileChangeBox.Render(rendered)
+		}
+
+		path, added, deleted, hasCounts := parseFileChangeHeaderLine(hdr)
+		headerRendered := renderFileChangeHeaderLine(path, added, deleted, hasCounts, fileInnerW)
+		bodyRendered := strings.Trim(m.renderer.RenderMarkdown(strings.TrimSpace(body), fileInnerW), "\n")
+		rendered := headerRendered + "\n" + bodyRendered
+		return m.styleFileChangeBox.Render(rendered)
+	default:
+		return it.text
+	}
+}
+
+func (m *Model) estimateItemHeight(idx int) int {
+	if idx < 0 || idx >= len(m.transcriptItems) {
+		return 1
+	}
+	it := m.transcriptItems[idx]
+	w := max(40, m.transcript.Width)
+	switch it.kind {
+	case transcriptSpacer:
+		return 1
+	case transcriptUser:
+		lines := 3
+		if w > 6 {
+			lines += len(it.text) / max(1, (w-6))
+		}
+		return max(3, lines)
+	case transcriptAgent:
+		lines := 2
+		if w > 2 {
+			lines += len(it.text) / max(1, (w-2))
+		}
+		if lines > 100 {
+			lines = 100
+		}
+		return max(2, lines)
+	case transcriptThinking:
+		return 3 + strings.Count(it.text, "\n")
+	case transcriptActionGroup:
+		return 2 + len(it.groupItems)*2
+	case transcriptFileChange:
+		return 6 + strings.Count(it.text, "\n")
+	case transcriptError:
+		lines := 2
+		if w > 4 {
+			lines += len(it.text) / max(1, (w-4))
+		}
+		return max(2, lines)
+	default:
+		return 3
+	}
+}
+
+func (m *Model) getItemHeight(idx int) int {
+	if m.transcriptRenderCache != nil {
+		if cached, ok := m.transcriptRenderCache[idx]; ok {
+			if cached.width == m.transcript.Width {
+				return cached.height
+			}
+		}
+	}
+	return m.estimateItemHeight(idx)
+}
+
+func (m *Model) findItemAtLine(lineNo int) int {
+	n := len(m.transcriptItemStartLine)
+	if n == 0 {
+		return 0
+	}
+	if lineNo <= 0 {
+		return 0
+	}
+	lo, hi := 0, n-1
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if m.transcriptItemStartLine[mid] <= lineNo {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
+}
+
+func (m *Model) rebuildTranscriptWindowed() {
+	w := max(20, m.transcript.Width)
+	userInnerW := max(20, w-6)
+	agentInnerW := max(20, w-2)
+	fileInnerW := max(20, w-4)
+
+	if m.transcriptRenderCache == nil {
+		m.transcriptRenderCache = make(map[int]*renderedItem)
+	}
+
+	// Update start line table using cached heights/estimates.
+	startLines := make([]int, len(m.transcriptItems))
+	lineNo := 0
+	for i := range m.transcriptItems {
+		startLines[i] = lineNo
+		lineNo += m.getItemHeight(i)
+	}
+	m.transcriptItemStartLine = startLines
+	m.transcriptTotalLines = lineNo
+
+	// Clamp logical scroll.
+	maxY := max(0, m.transcriptTotalLines-m.transcript.Height)
+	if m.transcriptLogicalYOffset < 0 {
+		m.transcriptLogicalYOffset = 0
+	}
+	if m.transcriptLogicalYOffset > maxY {
+		m.transcriptLogicalYOffset = maxY
+	}
+
+	visibleStart := m.transcriptLogicalYOffset
+	visibleEnd := visibleStart + m.transcript.Height
+
+	firstVisible := m.findItemAtLine(visibleStart)
+	lastVisible := m.findItemAtLine(visibleEnd)
+	firstVisible = max(0, firstVisible)
+	lastVisible = min(len(m.transcriptItems)-1, lastVisible)
+
+	bufferAbove := 10
+	bufferBelow := 10
+	firstRender := max(0, firstVisible-bufferAbove)
+	lastRender := min(len(m.transcriptItems)-1, lastVisible+bufferBelow)
+
+	windowStartLine := 0
+	if len(m.transcriptItemStartLine) != 0 {
+		windowStartLine = m.transcriptItemStartLine[firstRender]
+	}
+
+	lines := make([]string, 0, lastRender-firstRender+1)
+	for i := firstRender; i <= lastRender; i++ {
+		if cached, ok := m.transcriptRenderCache[i]; ok && cached.width == w {
+			lines = append(lines, cached.rendered)
+			continue
+		}
+		rendered := m.renderTranscriptItem(m.transcriptItems[i], w, userInnerW, agentInnerW, fileInnerW)
+		height := 1 + strings.Count(rendered, "\n")
+		m.transcriptRenderCache[i] = &renderedItem{rendered: rendered, height: height, width: w}
+		lines = append(lines, rendered)
+	}
+
+	m.transcriptWindow = transcriptWindow{
+		firstItem:        firstRender,
+		lastItem:         lastRender,
+		bufferAbove:      bufferAbove,
+		bufferBelow:      bufferBelow,
+		contentStartLine: windowStartLine,
+	}
+
+	m.transcript.SetContent(strings.Join(lines, "\n"))
+	rel := m.transcriptLogicalYOffset - windowStartLine
+	if rel < 0 {
+		rel = 0
+	}
+	m.transcript.SetYOffset(rel)
+}
+
+func (m *Model) cleanupRenderCache() {
+	if m == nil || m.transcriptRenderCache == nil {
+		return
+	}
+	if len(m.transcriptItems) == 0 {
+		m.transcriptRenderCache = nil
+		return
+	}
+	firstVisible := m.findItemAtLine(m.transcriptLogicalYOffset)
+	lastVisible := m.findItemAtLine(m.transcriptLogicalYOffset + m.transcript.Height)
+	keepRadius := 100
+	keepFrom := max(0, firstVisible-keepRadius)
+	keepTo := min(len(m.transcriptItems)-1, lastVisible+keepRadius)
+
+	for idx := range m.transcriptRenderCache {
+		if idx < keepFrom || idx > keepTo {
+			delete(m.transcriptRenderCache, idx)
+		}
+	}
 }
 
 func parseFileChangeHeaderLine(hdr string) (path string, added int, deleted int, hasCounts bool) {

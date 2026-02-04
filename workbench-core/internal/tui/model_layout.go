@@ -12,7 +12,8 @@ import (
 )
 
 func (m *Model) layout() {
-	wasAtBottom := m.transcript.AtBottom()
+	wasAtBottom := m.transcriptAtBottom()
+	prevTranscriptW := m.transcript.Width
 
 	// Width-dependent components (header + footer) can wrap when the terminal is narrow.
 	// We compute their real rendered heights so the header is never "pushed off" by a
@@ -69,6 +70,10 @@ func (m *Model) layout() {
 	// FIX: Do not enforce a hard minimum of 40 if the terminal is too narrow.
 	// We prioritizing fitting the sidebar (if open) and letting the transcript take the rest.
 	m.transcript.Width = max(1, mainW)
+	if m.transcript.Width != prevTranscriptW {
+		// Invalidate width-sensitive render cache.
+		m.transcriptRenderCache = nil
+	}
 	if detailW != 0 {
 		// The right pane has a border, so its inner content must be sized to
 		// fit within (detailW-2)x(bodyH-2). If we let inner components render
@@ -199,7 +204,7 @@ func (m *Model) layout() {
 
 	m.rebuildTranscript()
 	if wasAtBottom {
-		m.transcript.GotoBottom()
+		m.transcriptGotoBottom()
 	}
 	m.refreshActivityDetail()
 	m.refreshPlanView()

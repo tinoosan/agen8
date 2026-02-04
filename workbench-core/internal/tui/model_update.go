@@ -419,8 +419,25 @@ func (m Model) keyTranscriptScrollKeys(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.activityDetail, cmd = m.activityDetail.Update(msg)
 		return m, cmd, true
 	}
+	if m.transcriptIsWindowed() {
+		// Windowed transcript: maintain a global line offset and rebuild the visible window.
+		delta := 0
+		switch msg.Type {
+		case tea.KeyPgUp:
+			delta = -m.transcript.Height
+		case tea.KeyPgDown:
+			delta = m.transcript.Height
+		case tea.KeyCtrlU:
+			delta = -max(1, m.transcript.Height/2)
+		case tea.KeyCtrlF:
+			delta = max(1, m.transcript.Height/2)
+		}
+		m.transcriptSetYOffsetGlobal(m.transcriptLogicalYOffset + delta)
+		return m, nil, true
+	}
 	var cmd tea.Cmd
 	m.transcript, cmd = m.transcript.Update(msg)
+	m.transcriptLogicalYOffset = m.transcript.YOffset
 	return m, cmd, true
 }
 
@@ -537,10 +554,10 @@ func (m Model) keyThinkingToggle(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	// Ctrl+T is already used for telemetry, so we use Ctrl+Y.
 	if msg.Type == tea.KeyCtrlY || strings.EqualFold(msg.String(), "ctrl+y") {
 		m.thinkingExpanded = !m.thinkingExpanded
-		wasAtBottom := m.transcript.AtBottom()
+		wasAtBottom := m.transcriptAtBottom()
 		m.rebuildTranscript()
 		if wasAtBottom {
-			m.transcript.GotoBottom()
+			m.transcriptGotoBottom()
 		}
 		return m, nil, true
 	}

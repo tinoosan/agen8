@@ -231,9 +231,9 @@ func (m *Model) updateThinkingTranscriptItem() {
 	}
 	it.text = m.formatThinkingText()
 	m.transcriptItems[m.thinkingItemIdx] = it
-	wasAtBottom := m.transcript.AtBottom()
+	wasAtBottom := m.transcriptAtBottom()
 	m.rebuildTranscript()
 	if wasAtBottom {
-		m.transcript.GotoBottom()
+		m.transcriptGotoBottom()
 	}
 }
