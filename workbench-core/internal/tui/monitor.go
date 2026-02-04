@@ -244,6 +244,11 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	if err != nil {
 		return nil, err
 	}
+	if rs, err := taskStore.GetRunStats(ctx, runID); err == nil {
+		stats.totalCostUSD = rs.TotalCost
+		// Best-effort: show tasks already completed before monitor attached.
+		stats.tasksDone = rs.Succeeded + rs.Failed
+	}
 
 	in := textarea.New()
 	in.SetHeight(6)
@@ -1276,11 +1281,6 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 		}
 	case "llm.cost.total":
 		m.stats.lastTurnCostUSD = strings.TrimSpace(ev.Data["costUsd"])
-		if v := strings.TrimSpace(ev.Data["costUsd"]); v != "" {
-			if f, err := strconv.ParseFloat(v, 64); err == nil {
-				m.stats.totalCostUSD += f
-			}
-		}
 	}
 }
 
@@ -1428,6 +1428,12 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		}
 		m.currentTask = nil
 		m.stats.tasksDone++
+		if v := strings.TrimSpace(ev.Data["costUsd"]); v != "" {
+			m.stats.lastTurnCostUSD = v
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				m.stats.totalCostUSD += f
+			}
+		}
 	case "task.quarantined":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
@@ -2686,9 +2692,20 @@ func renderOutboxLines(results []outboxEntry, renderer *ContentRenderer, width i
 			statusStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75")).Render(status)
 		}
 
-		// Header: bullet + bold ID + dim goal -> colored status
+		// Header: bullet + bold ID + dim goal -> colored status (+ cost/tokens).
+		metaParts := make([]string, 0, 2)
+		if r.CostUSD > 0 {
+			metaParts = append(metaParts, fmt.Sprintf("$%.4f", r.CostUSD))
+		}
+		if r.TotalTokens > 0 {
+			metaParts = append(metaParts, fmt.Sprintf("%d tok", r.TotalTokens))
+		}
+		meta := ""
+		if len(metaParts) != 0 {
+			meta = " " + kit.StyleDim.Render("("+strings.Join(metaParts, " • ")+")")
+		}
 		header := "• " + kit.StyleBold.Render(shortID(r.TaskID)) + " " +
-			kit.StyleDim.Render("\""+goal+"\"") + " → " + statusStr
+			kit.StyleDim.Render("\""+goal+"\"") + " → " + statusStr + meta
 		lines = append(lines, header)
 
 		// Summary with markdown rendering

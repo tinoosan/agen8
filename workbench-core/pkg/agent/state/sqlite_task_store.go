@@ -298,6 +298,47 @@ func allowedSortColumn(sortBy string) (string, bool) {
 	}
 }
 
+func (s *SQLiteTaskStore) GetRunStats(ctx context.Context, runID string) (RunStats, error) {
+	db, err := s.dbConn()
+	if err != nil {
+		return RunStats{}, err
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return RunStats{}, fmt.Errorf("runID is required")
+	}
+
+	var total int
+	var succeeded int
+	var failed int
+	var cost float64
+	var tokens int
+	var durationSeconds int64
+
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*) as total,
+			SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) as succeeded,
+			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+			COALESCE(SUM(cost_usd), 0.0) as cost,
+			COALESCE(SUM(total_tokens), 0) as tokens,
+			COALESCE(SUM(duration_seconds), 0) as duration
+		FROM tasks
+		WHERE run_id = ?
+	`, runID).Scan(&total, &succeeded, &failed, &cost, &tokens, &durationSeconds); err != nil {
+		return RunStats{}, err
+	}
+
+	return RunStats{
+		TotalTasks:    total,
+		Succeeded:     succeeded,
+		Failed:        failed,
+		TotalCost:     cost,
+		TotalTokens:   tokens,
+		TotalDuration: time.Duration(durationSeconds) * time.Second,
+	}, nil
+}
+
 func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]types.Task, error) {
 	db, err := s.dbConn()
 	if err != nil {

@@ -13,6 +13,11 @@ type TaskReader interface {
 	// GetTask retrieves a single task by ID.
 	GetTask(ctx context.Context, taskID string) (types.Task, error)
 
+	// GetRunStats aggregates task statistics for a run.
+	// This is intended to be efficient (single query) and should not require loading
+	// all tasks into memory.
+	GetRunStats(ctx context.Context, runID string) (RunStats, error)
+
 	// ListTasks queries tasks with filtering, sorting, and pagination.
 	ListTasks(ctx context.Context, filter TaskFilter) ([]types.Task, error)
 
@@ -74,6 +79,16 @@ type TaskFilter struct {
 	// Sorting
 	SortBy   string // Field name: "created_at", "completed_at", "cost_usd"
 	SortDesc bool
+}
+
+// RunStats captures aggregated statistics for tasks in a run.
+type RunStats struct {
+	TotalTasks    int
+	Succeeded     int
+	Failed        int
+	TotalCost     float64
+	TotalTokens   int
+	TotalDuration time.Duration
 }
 
 var (

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/tinoosan/workbench-core/internal/store"
@@ -86,21 +88,61 @@ var tasksListCmd = &cobra.Command{
 			return err
 		}
 
+		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tSTATUS\tCOST\tTOKENS\tGOAL")
 		for _, t := range tasks {
 			goal := strings.TrimSpace(t.Goal)
 			if len(goal) > 80 {
 				goal = goal[:79] + "…"
 			}
-			cost := ""
-			if t.CostUSD > 0 {
-				cost = fmt.Sprintf("$%.4f", t.CostUSD)
-			}
-			tokens := ""
-			if t.TotalTokens > 0 {
-				tokens = fmt.Sprintf("%d", t.TotalTokens)
-			}
-			fmt.Fprintf(os.Stdout, "%s\t%s\t%s\t%s\t%s\n", t.TaskID, t.Status, cost, tokens, goal)
+			cost := fmt.Sprintf("$%.4f", t.CostUSD)
+			tokens := fmt.Sprintf("%d", t.TotalTokens)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", t.TaskID, t.Status, cost, tokens, goal)
 		}
+		_ = w.Flush()
+		return nil
+	},
+}
+
+var tasksStatsCmd = &cobra.Command{
+	Use:   "stats",
+	Short: "Show aggregated run statistics",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := effectiveConfig(cmd)
+		if err != nil {
+			return err
+		}
+
+		runID := strings.TrimSpace(tasksRunID)
+		if runID == "" {
+			if r, err := store.LatestRunningRun(cfg); err == nil {
+				runID = r.RunID
+			} else if r, err := store.LatestRun(cfg); err == nil {
+				runID = r.RunID
+			} else {
+				return fmt.Errorf("no runs found")
+			}
+		}
+
+		ts, err := agentstate.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+		if err != nil {
+			return err
+		}
+
+		stats, err := ts.GetRunStats(cmd.Context(), runID)
+		if err != nil {
+			return err
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+		fmt.Fprintf(w, "Run:\t%s\n", runID)
+		fmt.Fprintf(w, "Total tasks:\t%d\n", stats.TotalTasks)
+		fmt.Fprintf(w, "Succeeded:\t%d\n", stats.Succeeded)
+		fmt.Fprintf(w, "Failed:\t%d\n", stats.Failed)
+		fmt.Fprintf(w, "Total tokens:\t%d\n", stats.TotalTokens)
+		fmt.Fprintf(w, "Total cost:\t$%.4f\n", stats.TotalCost)
+		fmt.Fprintf(w, "Total duration:\t%s\n", stats.TotalDuration.Round(time.Second).String())
+		_ = w.Flush()
 		return nil
 	},
 }
@@ -115,5 +157,7 @@ func init() {
 	tasksListCmd.Flags().BoolVar(&tasksDesc, "desc", false, "sort descending")
 
 	tasksCmd.AddCommand(tasksListCmd)
+	tasksStatsCmd.Flags().StringVar(&tasksRunID, "run-id", "", "filter by run id (default: latest running run)")
+	tasksCmd.AddCommand(tasksStatsCmd)
 	rootCmd.AddCommand(tasksCmd)
 }
