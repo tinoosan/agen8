@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -138,38 +137,14 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			which := strings.TrimSpace(tc.Function.Name)
 
 			if which == "final_answer" {
-				var args struct {
-					Text      string   `json:"text"`
-					Status    string   `json:"status"`
-					Error     string   `json:"error"`
-					Artifacts []string `json:"artifacts"`
-				}
-				dec := json.NewDecoder(strings.NewReader(tc.Function.Arguments))
-				if err := dec.Decode(&args); err != nil {
-					hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: "final_answer args were not valid JSON: " + err.Error()}
+				args, err := parseFinalAnswerArgs(tc.Function.Arguments)
+				if err != nil {
+					hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: err.Error()}
 					hostRespJSON, _ := types.MarshalPretty(hostResp)
 					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
 					continue
 				}
 				finalText := strings.TrimSpace(args.Text)
-				if finalText == "" {
-					hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: "final_answer.text is required"}
-					hostRespJSON, _ := types.MarshalPretty(hostResp)
-					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
-					continue
-				}
-				status := strings.ToLower(strings.TrimSpace(args.Status))
-				if status == "" {
-					status = string(types.TaskStatusSucceeded)
-				}
-				switch status {
-				case string(types.TaskStatusSucceeded), string(types.TaskStatusFailed):
-				default:
-					hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: "final_answer.status must be 'succeeded' or 'failed'"}
-					hostRespJSON, _ := types.MarshalPretty(hostResp)
-					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
-					continue
-				}
 				hostResp := types.HostOpResponse{Op: "final_answer", Ok: true}
 				hostRespJSON, _ := types.MarshalPretty(hostResp)
 				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
@@ -177,7 +152,7 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 				return RunResult{
 					Text:      finalText,
 					Artifacts: args.Artifacts,
-					Status:    types.TaskStatus(status),
+					Status:    args.Status,
 					Error:     strings.TrimSpace(args.Error),
 				}, msgs, step, nil
 			}
