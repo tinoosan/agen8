@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +48,18 @@ type tickMsg struct {
 	now time.Time
 }
 
+type inboxLoadedMsg struct {
+	tasks      []taskState
+	totalCount int
+	page       int
+}
+
+type outboxLoadedMsg struct {
+	entries    []outboxEntry
+	totalCount int
+	page       int
+}
+
 type monitorModel struct {
 	ctx       context.Context
 	cfg       config.Config
@@ -76,32 +87,42 @@ type monitorModel struct {
 	agentOutputFollow          bool
 	agentOutputPending         map[string]agentOutputPendingEntry
 	agentOutputPendingFallback *agentOutputPendingEntry
-	inbox                      map[string]taskState
-	inboxVP                    viewport.Model
-	currentTask                *taskState
-	outboxResults              []outboxEntry
-	outboxVP                   viewport.Model
-	memResults                 []string
-	memoryVP                   viewport.Model
-	thinkingEntries            []thinkingEntry
-	thinkingVP                 viewport.Model
-	thinkingAutoScroll         bool
-	planMarkdown               string
-	planDetails                string
-	planLoadErr                string
-	planDetailsErr             string
-	stats                      monitorStats
-	model                      string
-	profile                    string
-	focusedPanel               panelID
-	compactTab                 int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
-	dashboardSideTab           int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
-	width                      int
-	height                     int
-	styles                     *monitorStyles
-	tailCh                     <-chan store.TailedEvent
-	errCh                      <-chan error
-	cancel                     context.CancelFunc
+
+	taskStore agentstate.TaskStore
+
+	inbox              map[string]taskState
+	inboxVP            viewport.Model
+	currentTask        *taskState
+	inboxList          []taskState
+	inboxPage          int
+	inboxPageSize      int
+	inboxTotalCount    int
+	outboxResults      []outboxEntry
+	outboxVP           viewport.Model
+	outboxPage         int
+	outboxPageSize     int
+	outboxTotalCount   int
+	memResults         []string
+	memoryVP           viewport.Model
+	thinkingEntries    []thinkingEntry
+	thinkingVP         viewport.Model
+	thinkingAutoScroll bool
+	planMarkdown       string
+	planDetails        string
+	planLoadErr        string
+	planDetailsErr     string
+	stats              monitorStats
+	model              string
+	profile            string
+	focusedPanel       panelID
+	compactTab         int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
+	dashboardSideTab   int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
+	width              int
+	height             int
+	styles             *monitorStyles
+	tailCh             <-chan store.TailedEvent
+	errCh              <-chan error
+	cancel             context.CancelFunc
 
 	// Modal overlay state (only one modal open at a time)
 	helpModalOpen bool
@@ -214,6 +235,11 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 
 	stats := monitorStats{started: time.Now()}
 
+	taskStore, err := agentstate.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		return nil, err
+	}
+
 	in := textarea.New()
 	in.SetHeight(6)
 	in.CharLimit = 0
@@ -263,13 +289,19 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 		agentOutputFollow:     true,
 		inbox:                 map[string]taskState{},
 		inboxVP:               viewport.New(0, 0),
+		inboxList:             []taskState{},
+		inboxPage:             0,
+		inboxPageSize:         50,
 		outboxResults:         []outboxEntry{},
 		outboxVP:              viewport.New(0, 0),
+		outboxPage:            0,
+		outboxPageSize:        50,
 		memResults:            []string{},
 		memoryVP:              viewport.New(0, 0),
 		thinkingEntries:       []thinkingEntry{},
 		thinkingVP:            viewport.New(0, 0),
 		thinkingAutoScroll:    true,
+		taskStore:             taskStore,
 		stats:                 stats,
 		styles:                defaultMonitorStyles(),
 		focusedPanel:          panelComposer,
@@ -289,10 +321,6 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	for _, e := range evs {
 		m.observeEvent(e)
 	}
-	pending, _ := loadPendingTasksFromSQLite(tctx, cfg, runID)
-	for _, ts := range pending {
-		m.inbox[ts.TaskID] = ts
-	}
 	m.refreshActivityList()
 	m.loadPlanFiles()
 	m.refreshViewports()
@@ -303,42 +331,8 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 // loadPendingTasksFromSQLite queries pending tasks for the run. Used so the queue
 // shows tasks added before the monitor started or via webhook, without scanning
 // inbox files.
-func loadPendingTasksFromSQLite(ctx context.Context, cfg config.Config, runID string) ([]taskState, error) {
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return nil, nil
-	}
-	ts, err := agentstate.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
-	if err != nil {
-		return nil, err
-	}
-	tasks, err := ts.ListTasks(ctx, agentstate.TaskFilter{
-		RunID:    runID,
-		Status:   []types.TaskStatus{types.TaskStatusPending},
-		SortBy:   "created_at",
-		SortDesc: false,
-		Limit:    500,
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]taskState, 0, len(tasks))
-	for _, t := range tasks {
-		taskID := strings.TrimSpace(t.TaskID)
-		if taskID == "" {
-			continue
-		}
-		out = append(out, taskState{
-			TaskID: taskID,
-			Goal:   strings.TrimSpace(t.Goal),
-			Status: string(types.TaskStatusPending),
-		})
-	}
-	return out, nil
-}
-
 func (m *monitorModel) Init() tea.Cmd {
-	return tea.Batch(m.listenEvent(), m.listenErr(), m.tick())
+	return tea.Batch(m.listenEvent(), m.listenErr(), m.tick(), m.loadInboxPage(), m.loadOutboxPage())
 }
 
 func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -359,8 +353,18 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.offset = msg.ev.NextOffset
 			m.observeEvent(msg.ev.Event)
 		}
+		cmds := []tea.Cmd{m.listenEvent()}
+		// Keep paginated lists in sync without loading everything into memory.
+		switch msg.ev.Event.Type {
+		case "task.queued", "task.generated", "webhook.task.queued", "task.start":
+			cmds = append(cmds, m.loadInboxPage())
+		case "task.done", "task.quarantined":
+			cmds = append(cmds, m.loadInboxPage(), m.loadOutboxPage())
+		case "task.delivered":
+			cmds = append(cmds, m.loadOutboxPage())
+		}
 		m.refreshViewports()
-		return m, m.listenEvent()
+		return m, tea.Batch(cmds...)
 
 	case tailErrMsg:
 		if msg.err != nil {
@@ -388,6 +392,20 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case taskQueuedLocallyMsg:
 		m.inbox[msg.TaskID] = taskState{TaskID: msg.TaskID, Goal: msg.Goal, Status: string(types.TaskStatusPending)}
+		m.refreshViewports()
+		return m, tea.Batch(m.loadInboxPage())
+
+	case inboxLoadedMsg:
+		m.inboxList = msg.tasks
+		m.inboxTotalCount = msg.totalCount
+		m.inboxPage = msg.page
+		m.refreshViewports()
+		return m, nil
+
+	case outboxLoadedMsg:
+		m.outboxResults = msg.entries
+		m.outboxTotalCount = msg.totalCount
+		m.outboxPage = msg.page
 		m.refreshViewports()
 		return m, nil
 
@@ -573,6 +591,20 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.updateFocus()
 		}
+
+		// Pagination controls for Inbox/Outbox when focused.
+		if m.focusedPanel == panelInbox || m.focusedPanel == panelOutbox {
+			switch msg.String() {
+			case "n", "right":
+				return m.handleNextPage()
+			case "p", "left":
+				return m.handlePrevPage()
+			case "g":
+				return m.handleFirstPage()
+			case "G":
+				return m.handleLastPage()
+			}
+		}
 		return m.routeKeyToFocusedPanel(msg)
 	}
 
@@ -581,6 +613,221 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *monitorModel) tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg{now: t} })
+}
+
+func (m *monitorModel) loadInboxPage() tea.Cmd {
+	if m == nil || m.taskStore == nil {
+		return nil
+	}
+	pageSize := m.inboxPageSize
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	page := m.inboxPage
+	if page < 0 {
+		page = 0
+	}
+	prevTasks := append([]taskState(nil), m.inboxList...)
+	prevTotal := m.inboxTotalCount
+	prevPage := m.inboxPage
+
+	return func() tea.Msg {
+		total, err := m.taskStore.CountTasks(m.ctx, agentstate.TaskFilter{
+			RunID:    m.runID,
+			Status:   []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive},
+			Limit:    0,
+			Offset:   0,
+			SortBy:   "",
+			SortDesc: false,
+		})
+		if err != nil {
+			return inboxLoadedMsg{tasks: prevTasks, totalCount: prevTotal, page: prevPage}
+		}
+		if total <= 0 {
+			return inboxLoadedMsg{tasks: []taskState{}, totalCount: 0, page: 0}
+		}
+		maxPage := (total + pageSize - 1) / pageSize
+		if maxPage > 0 {
+			maxPage--
+		}
+		if page > maxPage {
+			page = maxPage
+		}
+		if page < 0 {
+			page = 0
+		}
+
+		tasks, err := m.taskStore.ListTasks(m.ctx, agentstate.TaskFilter{
+			RunID:    m.runID,
+			Status:   []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive},
+			SortBy:   "created_at",
+			SortDesc: false,
+			Limit:    pageSize,
+			Offset:   page * pageSize,
+		})
+		if err != nil {
+			return inboxLoadedMsg{tasks: prevTasks, totalCount: prevTotal, page: prevPage}
+		}
+		out := make([]taskState, 0, len(tasks))
+		for _, t := range tasks {
+			ts := taskState{
+				TaskID: strings.TrimSpace(t.TaskID),
+				Goal:   strings.TrimSpace(t.Goal),
+				Status: strings.TrimSpace(string(t.Status)),
+			}
+			if t.StartedAt != nil && !t.StartedAt.IsZero() {
+				ts.StartedAt = *t.StartedAt
+			}
+			if ts.TaskID != "" {
+				out = append(out, ts)
+			}
+		}
+		return inboxLoadedMsg{tasks: out, totalCount: total, page: page}
+	}
+}
+
+func (m *monitorModel) loadOutboxPage() tea.Cmd {
+	if m == nil || m.taskStore == nil {
+		return nil
+	}
+	pageSize := m.outboxPageSize
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	page := m.outboxPage
+	if page < 0 {
+		page = 0
+	}
+	prevEntries := append([]outboxEntry(nil), m.outboxResults...)
+	prevTotal := m.outboxTotalCount
+	prevPage := m.outboxPage
+
+	return func() tea.Msg {
+		total, err := m.taskStore.CountTasks(m.ctx, agentstate.TaskFilter{
+			RunID:    m.runID,
+			Status:   []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled},
+			Limit:    0,
+			Offset:   0,
+			SortBy:   "",
+			SortDesc: false,
+		})
+		if err != nil {
+			return outboxLoadedMsg{entries: prevEntries, totalCount: prevTotal, page: prevPage}
+		}
+		if total <= 0 {
+			return outboxLoadedMsg{entries: []outboxEntry{}, totalCount: 0, page: 0}
+		}
+		maxPage := (total + pageSize - 1) / pageSize
+		if maxPage > 0 {
+			maxPage--
+		}
+		if page > maxPage {
+			page = maxPage
+		}
+		if page < 0 {
+			page = 0
+		}
+
+		tasks, err := m.taskStore.ListTasks(m.ctx, agentstate.TaskFilter{
+			RunID:    m.runID,
+			Status:   []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled},
+			SortBy:   "completed_at",
+			SortDesc: true,
+			Limit:    pageSize,
+			Offset:   page * pageSize,
+		})
+		if err != nil {
+			return outboxLoadedMsg{entries: prevEntries, totalCount: prevTotal, page: prevPage}
+		}
+		out := make([]outboxEntry, 0, len(tasks))
+		for _, t := range tasks {
+			ts := time.Time{}
+			if t.CompletedAt != nil && !t.CompletedAt.IsZero() {
+				ts = *t.CompletedAt
+			}
+			out = append(out, outboxEntry{
+				TaskID:       strings.TrimSpace(t.TaskID),
+				Goal:         strings.TrimSpace(t.Goal),
+				Status:       strings.TrimSpace(string(t.Status)),
+				Summary:      strings.TrimSpace(t.Summary),
+				Error:        strings.TrimSpace(t.Error),
+				InputTokens:  t.InputTokens,
+				OutputTokens: t.OutputTokens,
+				TotalTokens:  t.TotalTokens,
+				CostUSD:      t.CostUSD,
+				Timestamp:    ts,
+			})
+		}
+		return outboxLoadedMsg{entries: out, totalCount: total, page: page}
+	}
+}
+
+func (m *monitorModel) handleNextPage() (tea.Model, tea.Cmd) {
+	switch m.focusedPanel {
+	case panelInbox:
+		maxPage := max(0, (m.inboxTotalCount+m.inboxPageSize-1)/max(1, m.inboxPageSize)-1)
+		if m.inboxPage < maxPage {
+			m.inboxPage++
+			return m, m.loadInboxPage()
+		}
+	case panelOutbox:
+		maxPage := max(0, (m.outboxTotalCount+m.outboxPageSize-1)/max(1, m.outboxPageSize)-1)
+		if m.outboxPage < maxPage {
+			m.outboxPage++
+			return m, m.loadOutboxPage()
+		}
+	}
+	return m, nil
+}
+
+func (m *monitorModel) handlePrevPage() (tea.Model, tea.Cmd) {
+	switch m.focusedPanel {
+	case panelInbox:
+		if m.inboxPage > 0 {
+			m.inboxPage--
+			return m, m.loadInboxPage()
+		}
+	case panelOutbox:
+		if m.outboxPage > 0 {
+			m.outboxPage--
+			return m, m.loadOutboxPage()
+		}
+	}
+	return m, nil
+}
+
+func (m *monitorModel) handleFirstPage() (tea.Model, tea.Cmd) {
+	switch m.focusedPanel {
+	case panelInbox:
+		if m.inboxPage != 0 {
+			m.inboxPage = 0
+			return m, m.loadInboxPage()
+		}
+	case panelOutbox:
+		if m.outboxPage != 0 {
+			m.outboxPage = 0
+			return m, m.loadOutboxPage()
+		}
+	}
+	return m, nil
+}
+
+func (m *monitorModel) handleLastPage() (tea.Model, tea.Cmd) {
+	switch m.focusedPanel {
+	case panelInbox:
+		maxPage := max(0, (m.inboxTotalCount+m.inboxPageSize-1)/max(1, m.inboxPageSize)-1)
+		if m.inboxPage != maxPage {
+			m.inboxPage = maxPage
+			return m, m.loadInboxPage()
+		}
+	case panelOutbox:
+		maxPage := max(0, (m.outboxTotalCount+m.outboxPageSize-1)/max(1, m.outboxPageSize)-1)
+		if m.outboxPage != maxPage {
+			m.outboxPage = maxPage
+			return m, m.loadOutboxPage()
+		}
+	}
+	return m, nil
 }
 
 func (m *monitorModel) isCompactMode() bool {
@@ -807,7 +1054,7 @@ func (m *monitorModel) renderCompactTabContent(grid layoutmgr.GridLayout) string
 		return m.panelStyle(panelOutbox).
 			Width(grid.Outbox.InnerWidth()).
 			Height(grid.Outbox.InnerHeight()).
-			Render(m.styles.sectionTitle.Render("Outbox (Recent Results)") + "\n" + m.outboxVP.View())
+			Render(m.styles.sectionTitle.Render("Outbox") + "\n" + m.outboxVP.View())
 	default:
 		return m.panelStyle(panelOutput).
 			Width(grid.AgentOutput.InnerWidth()).
@@ -1158,69 +1405,13 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		}
 		m.currentTask = nil
 		m.stats.tasksDone++
-		artifact0 := strings.TrimSpace(ev.Data["artifact0"])
-		artCount := 0
-		if v := strings.TrimSpace(ev.Data["artifacts"]); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				artCount = n
-			}
-		}
-		inputTokens := 0
-		outputTokens := 0
-		totalTokens := 0
-		if v := strings.TrimSpace(ev.Data["inputTokens"]); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				inputTokens = n
-			}
-		}
-		if v := strings.TrimSpace(ev.Data["outputTokens"]); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				outputTokens = n
-			}
-		}
-		if v := strings.TrimSpace(ev.Data["totalTokens"]); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				totalTokens = n
-			}
-		}
-		costUSD := 0.0
-		if v := strings.TrimSpace(ev.Data["costUsd"]); v != "" {
-			if f, err := strconv.ParseFloat(v, 64); err == nil {
-				costUSD = f
-			}
-		}
-		m.outboxResults = append(m.outboxResults, outboxEntry{
-			TaskID:         taskID,
-			Goal:           strings.TrimSpace(ev.Data["goal"]),
-			Status:         strings.TrimSpace(ev.Data["status"]),
-			Summary:        strings.TrimSpace(ev.Data["summary"]),
-			Error:          strings.TrimSpace(ev.Data["error"]),
-			SummaryPath:    artifact0,
-			ArtifactsCount: artCount,
-			InputTokens:    inputTokens,
-			OutputTokens:   outputTokens,
-			TotalTokens:    totalTokens,
-			CostUSD:        costUSD,
-			Timestamp:      ev.Timestamp,
-		})
-		if len(m.outboxResults) > 10 {
-			m.outboxResults = m.outboxResults[len(m.outboxResults)-10:]
-		}
 	case "task.quarantined":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
 			return
 		}
-		m.outboxResults = append(m.outboxResults, outboxEntry{
-			TaskID:    taskID,
-			Goal:      strings.TrimSpace(ev.Data["goal"]),
-			Status:    "quarantined",
-			Error:     strings.TrimSpace(ev.Data["error"]),
-			Timestamp: ev.Timestamp,
-		})
-		if len(m.outboxResults) > 10 {
-			m.outboxResults = m.outboxResults[len(m.outboxResults)-10:]
-		}
+		// Best-effort: clear any active task view; outbox panel is loaded via pagination.
+		m.currentTask = nil
 	}
 }
 
@@ -1745,7 +1936,7 @@ func (m *monitorModel) renderDashboardSidePanels(grid layoutmgr.GridLayout) stri
 
 func (m *monitorModel) renderOutbox(spec layoutmgr.PanelSpec) string {
 	return m.panelStyle(panelOutbox).Width(spec.InnerWidth()).Height(spec.InnerHeight()).Render(
-		m.styles.sectionTitle.Render("Outbox (Recent Results)") + "\n" + m.outboxVP.View(),
+		m.styles.sectionTitle.Render("Outbox") + "\n" + m.outboxVP.View(),
 	)
 }
 
@@ -2010,12 +2201,12 @@ func (m *monitorModel) refreshViewports() {
 		outboxH := imax(1, grid.Outbox.ContentHeight)
 		m.outboxVP.Width = outboxW
 		m.outboxVP.Height = outboxH
-		m.outboxVP.SetContent(wrapViewportText(renderOutboxLines(m.outboxResults, m.renderer, outboxW), outboxW))
+		m.outboxVP.SetContent(wrapViewportText(m.outboxViewportContent(outboxW), outboxW))
 
 		// Keep auxiliary viewports sized to something sane even if not visible in compact mode.
 		m.inboxVP.Width = outW
 		m.inboxVP.Height = imax(1, outH)
-		m.inboxVP.SetContent(wrapViewportText(renderInbox(m.inbox), outW))
+		m.inboxVP.SetContent(wrapViewportText(m.inboxViewportContent(outW), outW))
 		m.memoryVP.Width = outW
 		m.memoryVP.Height = outH
 		m.memoryVP.SetContent(wrapViewportText(renderMemResults(m.memResults), outW))
@@ -2034,7 +2225,7 @@ func (m *monitorModel) refreshViewports() {
 
 	m.outboxVP.Width = imax(10, grid.Outbox.ContentWidth)
 	m.outboxVP.Height = imax(1, grid.Outbox.ContentHeight)
-	m.outboxVP.SetContent(wrapViewportText(renderOutboxLines(m.outboxResults, m.renderer, m.outboxVP.Width), m.outboxVP.Width))
+	m.outboxVP.SetContent(wrapViewportText(m.outboxViewportContent(m.outboxVP.Width), m.outboxVP.Width))
 
 	feedW := imax(10, grid.ActivityFeed.ContentWidth)
 	feedH := imax(1, grid.ActivityFeed.ContentHeight)
@@ -2058,7 +2249,7 @@ func (m *monitorModel) refreshViewports() {
 	inboxH := imax(1, grid.Inbox.ContentHeight)
 	m.inboxVP.Width = inboxW
 	m.inboxVP.Height = inboxH
-	m.inboxVP.SetContent(wrapViewportText(renderInbox(m.inbox), inboxW))
+	m.inboxVP.SetContent(wrapViewportText(m.inboxViewportContent(inboxW), inboxW))
 	m.memoryVP.Width = imax(10, grid.Memory.ContentWidth)
 	m.memoryVP.Height = imax(1, grid.Memory.ContentHeight)
 	m.memoryVP.SetContent(wrapViewportText(renderMemResults(m.memResults), m.memoryVP.Width))
@@ -2224,21 +2415,71 @@ func isScrollKey(msg tea.KeyMsg) bool {
 	return false
 }
 
-func renderInbox(tasks map[string]taskState) string {
+func (m *monitorModel) renderPaginationFooter(page, pageSize, totalCount int) string {
+	if totalCount <= 0 || pageSize <= 0 {
+		return ""
+	}
+
+	totalPages := (totalCount + pageSize - 1) / pageSize
+	if totalPages <= 1 {
+		return ""
+	}
+	if page < 0 {
+		page = 0
+	}
+	if page >= totalPages {
+		page = totalPages - 1
+	}
+	start := page*pageSize + 1
+	end := start + pageSize - 1
+	if end > totalCount {
+		end = totalCount
+	}
+
+	style := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Italic(true).
+		Faint(true)
+	return style.Render(fmt.Sprintf(
+		"%d-%d of %d | Page %d/%d | n/→ next  p/← prev  g first  G last",
+		start, end, totalCount, page+1, totalPages,
+	))
+}
+
+func (m *monitorModel) inboxViewportContent(width int) string {
+	body := renderInbox(m.inboxList)
+	footer := m.renderPaginationFooter(m.inboxPage, m.inboxPageSize, m.inboxTotalCount)
+	if footer != "" {
+		body = strings.TrimRight(body, "\n") + "\n" + footer
+	}
+	return body
+}
+
+func (m *monitorModel) outboxViewportContent(width int) string {
+	body := renderOutboxLines(m.outboxResults, m.renderer, width)
+	footer := m.renderPaginationFooter(m.outboxPage, m.outboxPageSize, m.outboxTotalCount)
+	if footer != "" {
+		body = strings.TrimRight(body, "\n") + "\n" + footer
+	}
+	return body
+}
+
+func renderInbox(tasks []taskState) string {
 	if len(tasks) == 0 {
 		return kit.StyleDim.Render("No pending inbox tasks.")
 	}
-	ids := make([]string, 0, len(tasks))
-	for id := range tasks {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	lines := make([]string, 0, len(ids))
-	for _, id := range ids {
-		task := tasks[id]
+	lines := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		id := strings.TrimSpace(task.TaskID)
+		if id == "" {
+			continue
+		}
 		goal := truncateText(task.Goal, 48)
 		// Use bullet + bold ID for better visual hierarchy
 		line := "• " + kit.StyleBold.Render(shortID(id))
+		if strings.TrimSpace(task.Status) != "" && strings.TrimSpace(task.Status) != string(types.TaskStatusPending) {
+			line += " " + kit.StyleDim.Render("["+strings.TrimSpace(task.Status)+"]")
+		}
 		if goal != "" {
 			line += " — " + goal
 		}
