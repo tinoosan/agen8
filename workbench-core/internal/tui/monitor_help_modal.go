@@ -16,8 +16,9 @@ Navigation:
   Ctrl+Y              Jump to Thoughts tab
   Ctrl+E              Open $EDITOR for composer
 
-Commands (type in composer, submit with Ctrl+Enter):
-  /task <goal>           Queue a new task for the agent
+Type a message and press Ctrl+Enter to queue a task, or use a command (below):
+  /task <goal>            Queue a task (explicit)
+  /sessions               Switch session (reattach to its current run)
   /model                 Open model picker
   /model <id>            Set model directly
   /profile               Open profile picker
@@ -36,6 +37,7 @@ Modal Controls:
   Escape                 Close any open modal
   Enter                  Confirm selection
   ↑/↓ or j/k             Navigate list items
+  Ctrl+N/P or PgDn/PgUp   Next/prev page (session picker)
   Type to filter         Filter list items
 
 Press Escape or ? to close this help`

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -30,7 +31,15 @@ var monitorCmd = &cobra.Command{
 				return fmt.Errorf("no runs found to monitor")
 			}
 		}
-		return tui.RunMonitor(cmd.Context(), cfg, agentID)
+		err = tui.RunMonitor(cmd.Context(), cfg, agentID)
+		if err == nil {
+			return nil
+		}
+		var e *tui.MonitorSwitchRunError
+		if errors.As(err, &e) {
+			return tui.RunMonitor(cmd.Context(), cfg, e.RunID)
+		}
+		return err
 	},
 }
 

@@ -2,13 +2,14 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -36,9 +37,9 @@ func TestIsCompactMode_Breakpoints(t *testing.T) {
 }
 
 func TestSplitMonitorCommand_WhitespaceTolerant(t *testing.T) {
-	cmd, rest := splitMonitorCommand("/task\nhello world\n")
-	if cmd != "/task" {
-		t.Fatalf("expected cmd %q, got %q", "/task", cmd)
+	cmd, rest := splitMonitorCommand("/model\nhello world\n")
+	if cmd != "/model" {
+		t.Fatalf("expected cmd %q, got %q", "/model", cmd)
 	}
 	if rest != "hello world" {
 		t.Fatalf("expected rest %q, got %q", "hello world", rest)
@@ -53,12 +54,79 @@ func TestSplitMonitorCommand_WhitespaceTolerant(t *testing.T) {
 	}
 }
 
+func TestMonitorHandleCommand_EnqueuesTasksForNonCommands(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	runID := "test-run-handle-command"
+
+	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+
+	runDir := fsutil.GetAgentDir(cfg.DataDir, runID)
+	inboxDir := filepath.Join(runDir, "inbox")
+
+	assertQueued := func(input string, wantGoal string) {
+		t.Helper()
+		cmd := m.handleCommand(input)
+		if cmd == nil {
+			t.Fatalf("handleCommand(%q) returned nil; want enqueue cmd", input)
+		}
+		_ = cmd()
+
+		ents, err := os.ReadDir(inboxDir)
+		if err != nil {
+			t.Fatalf("ReadDir(inbox): %v", err)
+		}
+		if len(ents) == 0 {
+			t.Fatalf("expected at least 1 task file in inbox")
+		}
+		// Read the most recently created task file (best-effort).
+		var newest string
+		var newestInfo os.FileInfo
+		for _, e := range ents {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			fi, err := e.Info()
+			if err != nil {
+				continue
+			}
+			if newestInfo == nil || fi.ModTime().After(newestInfo.ModTime()) {
+				newestInfo = fi
+				newest = e.Name()
+			}
+		}
+		if newest == "" {
+			t.Fatalf("expected a .json task file in inbox")
+		}
+		b, err := os.ReadFile(filepath.Join(inboxDir, newest))
+		if err != nil {
+			t.Fatalf("ReadFile(task): %v", err)
+		}
+		var task types.Task
+		if err := json.Unmarshal(b, &task); err != nil {
+			t.Fatalf("Unmarshal(task): %v", err)
+		}
+		if task.Goal != wantGoal {
+			t.Fatalf("task goal = %q, want %q", task.Goal, wantGoal)
+		}
+	}
+
+	// Plain text should enqueue as task.
+	assertQueued("hello world", "hello world")
+	// Unknown slash commands should also enqueue as task.
+	assertQueued("/not-a-command hello", "/not-a-command hello")
+}
+
 func TestMonitorModelPicker_FilteringWorks(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
 	runID := "test-run-model-filter"
-	m, err := newMonitorModel(ctx, cfg, runID)
+	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
 	if err != nil {
 		t.Fatalf("newMonitorModel: %v", err)
 	}
@@ -127,7 +195,7 @@ func TestMonitorProfilePicker_FilterAndSelectWritesControl(t *testing.T) {
 	writeProfile(filepath.Join(profilesDir, "stock_analyst"), "stock_analyst", "Stocks and markets")
 
 	runID := "test-run-profile-filter"
-	m, err := newMonitorModel(ctx, cfg, runID)
+	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
 	if err != nil {
 		t.Fatalf("newMonitorModel: %v", err)
 	}
@@ -200,7 +268,7 @@ func TestMonitorView_NoClipping_DashboardMode(t *testing.T) {
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
 	runID := "test-run-no-clip-dashboard"
-	m, err := newMonitorModel(ctx, cfg, runID)
+	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
 	if err != nil {
 		t.Fatalf("newMonitorModel: %v", err)
 	}
@@ -230,7 +298,7 @@ func TestMonitorView_NoClipping_100x30_Compact(t *testing.T) {
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
 	runID := "test-run-no-clip-100x30"
-	m, err := newMonitorModel(ctx, cfg, runID)
+	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
 	if err != nil {
 		t.Fatalf("newMonitorModel: %v", err)
 	}
