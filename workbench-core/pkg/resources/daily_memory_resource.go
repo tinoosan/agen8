@@ -3,6 +3,7 @@ package resources
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -137,6 +138,72 @@ func (r *DailyMemoryResource) Search(ctx context.Context, subpath string, query 
 	if clean != "" && clean != "." {
 		return nil, fmt.Errorf("invalid subpath %q: search only supported at root", subpath)
 	}
+
+	re, reOK, qLower := compileSearchQuery(query)
+	if files, rgTried, rgErr := rgFilesWithMatches(ctx, rgFilesWithMatchesOpts{
+		Dir:         r.BaseDir,
+		Query:       query,
+		RegexOK:     reOK,
+		MaxFilesize: "2M",
+		Globs:       []string{"MEMORY.MD", "*-memory.md"},
+		MaxFiles:    max(1000, limit*200),
+	}); rgTried && rgErr == nil {
+		if len(files) == 0 {
+			return nil, nil
+		}
+		allow := func(name string) bool {
+			return strings.EqualFold(name, "MEMORY.MD") || dailyNameRE.MatchString(name)
+		}
+		// Enforce allowlist (rg globs are broader than our naming rules).
+		filtered := make([]string, 0, len(files))
+		for _, name := range files {
+			name = strings.TrimPrefix(name, "./")
+			name = strings.TrimPrefix(name, ".\\")
+			if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+				continue
+			}
+			if !allow(name) {
+				continue
+			}
+			filtered = append(filtered, name)
+		}
+		sort.Strings(filtered)
+
+		if limit <= 0 {
+			limit = 5
+		}
+		out := make([]types.SearchResult, 0, min(limit, len(filtered)))
+		for _, name := range filtered {
+			if ctx != nil {
+				select {
+				case <-ctx.Done():
+					return out, ctx.Err()
+				default:
+				}
+			}
+			m, err := bestMatchInFile(ctx, filepath.Join(r.BaseDir, name), re, reOK, qLower)
+			if err != nil {
+				if ctx != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+					return out, err
+				}
+				continue
+			}
+			if m.score <= 0 {
+				continue
+			}
+			out = append(out, types.SearchResult{
+				Title:   name,
+				Path:    "/memory/" + name,
+				Snippet: fmt.Sprintf("%s:%d: %s", name, m.line, m.text),
+				Score:   m.score,
+			})
+			if len(out) >= limit {
+				break
+			}
+		}
+		return out, nil
+	}
+
 	return searchTextFiles(ctx, r.BaseDir, query, limit, func(name string) bool {
 		return strings.EqualFold(name, "MEMORY.MD") || dailyNameRE.MatchString(name)
 	}, "/memory/")

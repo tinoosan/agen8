@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -136,7 +135,15 @@ func (d *DirResource) Append(subpath string, data []byte) error {
 }
 
 func (d *DirResource) Search(ctx context.Context, subpath string, query string, limit int) ([]types.SearchResult, error) {
-	targetPath, err := d.safeJoin(subpath)
+	cleanSubpath, _, err := vfsutil.NormalizeResourceSubpath(subpath)
+	if err != nil {
+		return nil, err
+	}
+	if cleanSubpath == "." {
+		cleanSubpath = ""
+	}
+
+	targetPath, err := d.safeJoin(cleanSubpath)
 	if err != nil {
 		return nil, fmt.Errorf("safeJoin %s: %w", subpath, err)
 	}
@@ -148,9 +155,89 @@ func (d *DirResource) Search(ctx context.Context, subpath string, query string, 
 		limit = 5
 	}
 
-	re, reErr := regexp.Compile(query)
-	reOK := reErr == nil
-	qLower := strings.ToLower(query)
+	re, reOK, qLower := compileSearchQuery(query)
+
+	if files, rgTried, rgErr := rgFilesWithMatches(ctx, rgFilesWithMatchesOpts{
+		Dir:         targetPath,
+		Query:       query,
+		RegexOK:     reOK,
+		MaxFilesize: "2M",
+		MaxFiles:    max(2000, limit*500),
+	}); rgTried && rgErr == nil {
+		if len(files) == 0 {
+			return nil, nil
+		}
+
+		type hit struct {
+			path    string
+			snippet string
+			score   float64
+		}
+		best := map[string]hit{}
+		for _, relToTarget := range files {
+			if ctx != nil {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				default:
+				}
+			}
+
+			relToTarget = strings.TrimPrefix(relToTarget, "./")
+			relToTarget = filepath.ToSlash(relToTarget)
+			if relToTarget == "" || strings.HasPrefix(relToTarget, "../") {
+				continue
+			}
+
+			abs := filepath.Join(targetPath, filepath.FromSlash(relToTarget))
+			m, err := bestMatchInFile(ctx, abs, re, reOK, qLower)
+			if err != nil {
+				if ctx != nil && errors.Is(err, context.Canceled) {
+					return nil, err
+				}
+				continue
+			}
+			if m.score <= 0 {
+				continue
+			}
+
+			relToBase := filepath.ToSlash(filepath.Join(cleanSubpath, relToTarget))
+			relToBase = strings.TrimPrefix(relToBase, "./")
+			best[relToBase] = hit{
+				path:    relToBase,
+				snippet: fmt.Sprintf("%d: %s", m.line, m.text),
+				score:   m.score,
+			}
+		}
+
+		paths := make([]string, 0, len(best))
+		for p := range best {
+			paths = append(paths, p)
+		}
+		sort.Slice(paths, func(i, j int) bool {
+			hi := best[paths[i]]
+			hj := best[paths[j]]
+			if hi.score != hj.score {
+				return hi.score > hj.score
+			}
+			return hi.path < hj.path
+		})
+		if len(paths) > limit {
+			paths = paths[:limit]
+		}
+
+		out := make([]types.SearchResult, 0, len(paths))
+		for _, p := range paths {
+			h := best[p]
+			out = append(out, types.SearchResult{
+				Title:   p,
+				Path:    "/" + strings.TrimLeft(d.Mount, "/") + "/" + p,
+				Snippet: p + ":" + h.snippet,
+				Score:   h.score,
+			})
+		}
+		return out, nil
+	}
 
 	type hit struct {
 		path    string
