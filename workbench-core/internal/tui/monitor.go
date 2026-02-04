@@ -1540,16 +1540,16 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 		opID := strings.TrimSpace(ev.Data["opId"])
 		entry, ok := m.takeAgentOutputPending(opID)
 		status := formatAgentOutputStatus(ev)
-			if ok {
-				line := fmt.Sprintf("[%s] op: %s — %s", entry.timestamp, entry.desc, status)
-				if entry.index >= 0 && entry.index < len(m.agentOutput) {
-					m.agentOutput[entry.index] = line
-					// The updated line may re-wrap, so invalidate cached layout metadata.
-					m.agentOutputLayoutWidth = 0
-					m.dirtyAgentOutput = true
-					return
-				}
+		if ok {
+			line := fmt.Sprintf("[%s] op: %s — %s", entry.timestamp, entry.desc, status)
+			if entry.index >= 0 && entry.index < len(m.agentOutput) {
+				m.agentOutput[entry.index] = line
+				// The updated line may re-wrap, so invalidate cached layout metadata.
+				m.agentOutputLayoutWidth = 0
+				m.dirtyAgentOutput = true
+				return
 			}
+		}
 		// If the pending entry was dropped from the output buffer, fall back to appending a new line.
 		ts := ev.Timestamp.Local().Format("15:04:05")
 		txt := strings.TrimSpace(renderOpRequest(ev.Data))
@@ -2387,37 +2387,37 @@ func (m *monitorModel) refreshViewports() {
 
 	if outputVisible && (m.dirtyLayout || m.dirtyAgentOutput) {
 		m.refreshAgentOutputViewport()
+		m.dirtyAgentOutput = false
 	}
 	if activityVisible && (m.dirtyLayout || m.dirtyActivity) {
 		m.refreshActivityList()
 		m.refreshActivityDetail(false)
+		m.dirtyActivity = false
 	}
 	if planVisible && (m.dirtyLayout || m.dirtyPlan) {
 		m.refreshPlanView()
+		m.dirtyPlan = false
 	}
 	if outboxVisible && (m.dirtyLayout || m.dirtyOutbox) {
 		w := m.outboxVP.Width
 		m.outboxVP.SetContent(wrapViewportText(m.outboxViewportContent(w), w))
+		m.dirtyOutbox = false
 	}
 	if inboxVisible && (m.dirtyLayout || m.dirtyInbox) {
 		w := m.inboxVP.Width
 		m.inboxVP.SetContent(wrapViewportText(m.inboxViewportContent(w), w))
+		m.dirtyInbox = false
 	}
 	if thinkingVisible && (m.dirtyLayout || m.dirtyThinking) {
 		m.refreshThinkingViewport()
+		m.dirtyThinking = false
 	}
 	if memoryVisible && (m.dirtyLayout || m.dirtyMemory) {
 		m.memoryVP.SetContent(wrapViewportText(renderMemResults(m.memResults), m.memoryVP.Width))
+		m.dirtyMemory = false
 	}
 
 	m.dirtyLayout = false
-	m.dirtyAgentOutput = false
-	m.dirtyInbox = false
-	m.dirtyOutbox = false
-	m.dirtyActivity = false
-	m.dirtyPlan = false
-	m.dirtyThinking = false
-	m.dirtyMemory = false
 }
 
 func (m *monitorModel) loadPlanFiles() {
