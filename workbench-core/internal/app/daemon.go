@@ -21,6 +21,7 @@ import (
 	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	agentevents "github.com/tinoosan/workbench-core/pkg/agent/events"
+	hosttools "github.com/tinoosan/workbench-core/pkg/agent/hosttools"
 	"github.com/tinoosan/workbench-core/pkg/agent/session"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
@@ -245,6 +246,26 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		},
 	}
 
+	taskStore, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		return fmt.Errorf("create task store: %w", err)
+	}
+
+	// Seed default tools and inject the DB-backed task_create tool.
+	registry, err := agent.DefaultHostToolRegistry()
+	if err != nil {
+		return fmt.Errorf("create host tool registry: %w", err)
+	}
+	if err := registry.Register(&hosttools.TaskCreateTool{
+		Store:     taskStore,
+		SessionID: run.SessionID,
+		RunID:     run.RunID,
+		InboxPath: "/inbox",
+	}); err != nil {
+		return fmt.Errorf("register task_create tool: %w", err)
+	}
+	agentCfg.HostToolRegistry = registry
+
 	a, err := agent.NewAgent(llmClient, rt.Executor, agentCfg)
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
@@ -252,11 +273,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	prof, profDir, err := resolveProfileRef(cfg, strings.TrimSpace(resolved.Profile))
 	if err != nil {
 		return err
-	}
-
-	taskStore, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
-	if err != nil {
-		return fmt.Errorf("create task store: %w", err)
 	}
 	emitBlocking := func(ctx context.Context, ev events.Event) error {
 		return emitter.Emit(ctx, ev)

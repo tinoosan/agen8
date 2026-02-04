@@ -44,7 +44,7 @@ func steeringReminderMessage() string {
 Before ending the task:
 1) Verify the goal is complete and your work is validated.
 2) Send the completion email using the email tool (email MUST happen BEFORE final_answer; final_answer ends the run).
-3) Call final_answer with the completion report (and an "artifacts" array).
+3) Call final_answer with the completion report, "status", "error", and an "artifacts" array (use empty string/empty array when not applicable).
 </reminder>
 `
 }

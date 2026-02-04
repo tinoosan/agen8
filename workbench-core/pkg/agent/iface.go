@@ -70,4 +70,6 @@ type Agent interface {
 type RunResult struct {
 	Text      string
 	Artifacts []string
+	Status    types.TaskStatus
+	Error     string
 }

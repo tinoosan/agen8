@@ -559,6 +559,28 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	if err != nil {
 		tr.Status = types.TaskStatusFailed
 		tr.Error = err.Error()
+	} else {
+		resStatus := strings.ToLower(strings.TrimSpace(string(runRes.Status)))
+		if resStatus == "" {
+			resStatus = string(types.TaskStatusSucceeded)
+		}
+		switch resStatus {
+		case string(types.TaskStatusSucceeded):
+			// ok
+		case string(types.TaskStatusFailed):
+			tr.Status = types.TaskStatusFailed
+			tr.Error = strings.TrimSpace(runRes.Error)
+			if tr.Error == "" {
+				tr.Error = "task failed"
+			}
+		case string(types.TaskStatusCanceled):
+			tr.Status = types.TaskStatusCanceled
+			tr.Error = strings.TrimSpace(runRes.Error)
+		default:
+			// Unknown status: treat as a failure so tasks don't appear "green" accidentally.
+			tr.Status = types.TaskStatusFailed
+			tr.Error = fmt.Sprintf("invalid agent status %q", resStatus)
+		}
 	}
 
 	// Preserve a tiny, immediate continuity signal for Task N+1 without relying on async memory indexing.

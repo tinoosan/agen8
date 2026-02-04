@@ -118,7 +118,7 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 		if len(resp.ToolCalls) == 0 {
 			finalText := strings.TrimSpace(resp.Text)
 			msgs = append(msgs, llmtypes.LLMMessage{Role: "assistant", Content: finalText})
-			return RunResult{Text: finalText}, msgs, step, nil
+			return RunResult{Text: finalText, Status: types.TaskStatusSucceeded}, msgs, step, nil
 		}
 
 		assistantMsg := llmtypes.LLMMessage{
@@ -140,6 +140,8 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			if which == "final_answer" {
 				var args struct {
 					Text      string   `json:"text"`
+					Status    string   `json:"status"`
+					Error     string   `json:"error"`
 					Artifacts []string `json:"artifacts"`
 				}
 				dec := json.NewDecoder(strings.NewReader(tc.Function.Arguments))
@@ -156,11 +158,28 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
 					continue
 				}
+				status := strings.ToLower(strings.TrimSpace(args.Status))
+				if status == "" {
+					status = string(types.TaskStatusSucceeded)
+				}
+				switch status {
+				case string(types.TaskStatusSucceeded), string(types.TaskStatusFailed):
+				default:
+					hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: "final_answer.status must be 'succeeded' or 'failed'"}
+					hostRespJSON, _ := types.MarshalPretty(hostResp)
+					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+					continue
+				}
 				hostResp := types.HostOpResponse{Op: "final_answer", Ok: true}
 				hostRespJSON, _ := types.MarshalPretty(hostResp)
 				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
 				msgs = append(msgs, llmtypes.LLMMessage{Role: "assistant", Content: finalText})
-				return RunResult{Text: finalText, Artifacts: args.Artifacts}, msgs, step, nil
+				return RunResult{
+					Text:      finalText,
+					Artifacts: args.Artifacts,
+					Status:    types.TaskStatus(status),
+					Error:     strings.TrimSpace(args.Error),
+				}, msgs, step, nil
 			}
 
 			if a.ToolRegistry == nil {
@@ -564,14 +583,17 @@ func DefaultSystemPrompt() string {
 //   - Always finish with a concise, user-facing task report via final_answer.
 func DefaultAutonomousSystemPrompt() string {
 	return strings.TrimSpace(DefaultSystemPrompt()) + "\n\n" + strings.TrimSpace(`
-<autonomous_mode>
-  <rule id="not_chat">You are running as an autonomous task runner. You are NOT in a chat. Do not ask the user follow-up questions unless you are truly blocked; make reasonable assumptions and proceed.</rule>
-  <rule id="scope">Each task has a single goal string. Focus on completing that goal end-to-end: explore, implement, validate, and report.</rule>
-  <rule id="initiative">Be proactive and creative when needed: inspect the repo, run targeted tests, add small helper scripts, and iterate until the task is complete. Prefer simple, reliable solutions.</rule>
-  <rule id="reporting">
-    CRITICAL REQUIREMENT: You MUST complete these steps IN ORDER before ending the task:
-    Step 1: Prepare a completion report (plain text)
-    - what you did (high level summary)
+	<autonomous_mode>
+	  <rule id="not_chat">You are running as an autonomous task runner. You are NOT in a chat. Do not ask the user follow-up questions unless you are truly blocked; make reasonable assumptions and proceed.</rule>
+	  <rule id="scope">Each task has a single goal string. Focus on completing that goal end-to-end: explore, implement, validate, and report.</rule>
+	  <rule id="honest_reporting">Honest reporting is mandatory. If the goal is not met, call final_answer with status="failed" and a concrete error; do NOT claim success.</rule>
+	  <rule id="recursive_tasks">If you are blocked on a subproblem (missing info, flaky dependency, time-based wait), create a follow-up task via task_create to resolve it, then report current task status accurately.</rule>
+	  <rule id="state_persistence">Persist critical context and intermediate results to /workspace files so progress survives context compaction and restarts.</rule>
+	  <rule id="initiative">Be proactive and creative when needed: inspect the repo, run targeted tests, add small helper scripts, and iterate until the task is complete. Prefer simple, reliable solutions.</rule>
+	  <rule id="reporting">
+	    CRITICAL REQUIREMENT: You MUST complete these steps IN ORDER before ending the task:
+	    Step 1: Prepare a completion report (plain text)
+	    - what you did (high level summary)
     - where to look (key file paths, URLs, deliverables)
     - next steps (tests/commands) if relevant
 
@@ -583,9 +605,9 @@ func DefaultAutonomousSystemPrompt() string {
     ⚠️  THE TASK IS NOT COMPLETE UNTIL THE EMAIL IS SENT ⚠️
     Only skip the email if the email tool returns an error indicating it is not configured.
 
-    Step 3: Call final_answer with the completion report (this ends the task)
-    - IMPORTANT: final_answer parameters MUST include "artifacts" array (use an empty array if none).
-  </rule>
-</autonomous_mode>
-`)
+	    Step 3: Call final_answer with the completion report (this ends the task)
+	    - IMPORTANT: final_answer parameters MUST include "status", "error", and "artifacts" (use empty string/empty array when not applicable).
+	  </rule>
+	</autonomous_mode>
+	`)
 }
