@@ -22,6 +22,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
+	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -288,7 +289,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	for _, e := range evs {
 		m.observeEvent(e)
 	}
-	pending, _ := loadPendingTasksFromInbox(cfg, runID)
+	pending, _ := loadPendingTasksFromSQLite(tctx, cfg, runID)
 	for _, ts := range pending {
 		m.inbox[ts.TaskID] = ts
 	}
@@ -299,41 +300,33 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string) (*mon
 	return m, nil
 }
 
-// loadPendingTasksFromInbox reads task-*.json from the run's inbox and returns
-// taskState slices with Status pending. Used so the queue shows tasks added
-// before the monitor started or via webhook.
-func loadPendingTasksFromInbox(cfg config.Config, runID string) ([]taskState, error) {
-	inboxDir := filepath.Join(fsutil.GetAgentDir(cfg.DataDir, runID), "inbox")
-	entries, err := os.ReadDir(inboxDir)
+// loadPendingTasksFromSQLite queries pending tasks for the run. Used so the queue
+// shows tasks added before the monitor started or via webhook, without scanning
+// inbox files.
+func loadPendingTasksFromSQLite(ctx context.Context, cfg config.Config, runID string) ([]taskState, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, nil
+	}
+	ts, err := agentstate.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	var out []taskState
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".json") {
-			continue
-		}
-		if strings.HasPrefix(name, "control-") {
-			continue
-		}
-		if strings.Contains(name, "poison") || strings.Contains(name, "archive") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(inboxDir, e.Name()))
-		if err != nil {
-			continue
-		}
-		var t types.Task
-		if err := json.Unmarshal(data, &t); err != nil {
-			continue
-		}
+	tasks, err := ts.ListTasks(ctx, agentstate.TaskFilter{
+		RunID:    runID,
+		Status:   []types.TaskStatus{types.TaskStatusPending},
+		SortBy:   "created_at",
+		SortDesc: false,
+		Limit:    500,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]taskState, 0, len(tasks))
+	for _, t := range tasks {
 		taskID := strings.TrimSpace(t.TaskID)
 		if taskID == "" {
-			taskID = strings.TrimSuffix(name, ".json")
+			continue
 		}
 		out = append(out, taskState{
 			TaskID: taskID,

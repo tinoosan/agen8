@@ -1,0 +1,119 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"github.com/tinoosan/workbench-core/internal/store"
+	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/types"
+)
+
+var (
+	tasksRunID   string
+	tasksSession string
+
+	tasksStatus string
+	tasksLimit  int
+	tasksOffset int
+	tasksSortBy string
+	tasksDesc   bool
+)
+
+var tasksCmd = &cobra.Command{
+	Use:   "tasks",
+	Short: "Query and manage tasks",
+}
+
+var tasksListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List tasks",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := effectiveConfig(cmd)
+		if err != nil {
+			return err
+		}
+
+		runID := strings.TrimSpace(tasksRunID)
+		if runID == "" {
+			if r, err := store.LatestRunningRun(cfg); err == nil {
+				runID = r.RunID
+			} else if r, err := store.LatestRun(cfg); err == nil {
+				runID = r.RunID
+			} else {
+				return fmt.Errorf("no runs found")
+			}
+		}
+
+		sessionID := strings.TrimSpace(tasksSession)
+		if sessionID == "" {
+			if r, err := store.LoadRun(cfg, runID); err == nil {
+				sessionID = r.SessionID
+			}
+		}
+
+		ts, err := agentstate.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+		if err != nil {
+			return err
+		}
+
+		filter := agentstate.TaskFilter{
+			RunID:    runID,
+			Limit:    tasksLimit,
+			Offset:   tasksOffset,
+			SortBy:   strings.TrimSpace(tasksSortBy),
+			SortDesc: tasksDesc,
+		}
+		if sessionID != "" {
+			filter.SessionID = sessionID
+		}
+		if st := strings.TrimSpace(tasksStatus); st != "" {
+			parts := strings.Split(st, ",")
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p == "" {
+					continue
+				}
+				filter.Status = append(filter.Status, types.TaskStatus(p))
+			}
+		}
+
+		tasks, err := ts.ListTasks(cmd.Context(), filter)
+		if err != nil {
+			return err
+		}
+
+		for _, t := range tasks {
+			goal := strings.TrimSpace(t.Goal)
+			if len(goal) > 80 {
+				goal = goal[:79] + "…"
+			}
+			cost := ""
+			if t.CostUSD > 0 {
+				cost = fmt.Sprintf("$%.4f", t.CostUSD)
+			}
+			tokens := ""
+			if t.TotalTokens > 0 {
+				tokens = fmt.Sprintf("%d", t.TotalTokens)
+			}
+			fmt.Fprintf(os.Stdout, "%s\t%s\t%s\t%s\t%s\n", t.TaskID, t.Status, cost, tokens, goal)
+		}
+		return nil
+	},
+}
+
+func init() {
+	tasksListCmd.Flags().StringVar(&tasksRunID, "run-id", "", "filter by run id (default: latest running run)")
+	tasksListCmd.Flags().StringVar(&tasksSession, "session-id", "", "filter by session id (default: inferred from run)")
+	tasksListCmd.Flags().StringVar(&tasksStatus, "status", "", "comma-separated statuses (pending,active,succeeded,failed,canceled)")
+	tasksListCmd.Flags().IntVar(&tasksLimit, "limit", 50, "max tasks to show")
+	tasksListCmd.Flags().IntVar(&tasksOffset, "offset", 0, "skip N tasks")
+	tasksListCmd.Flags().StringVar(&tasksSortBy, "sort-by", "created_at", "sort field (created_at,completed_at,cost_usd,priority,updated_at)")
+	tasksListCmd.Flags().BoolVar(&tasksDesc, "desc", false, "sort descending")
+
+	tasksCmd.AddCommand(tasksListCmd)
+	rootCmd.AddCommand(tasksCmd)
+}

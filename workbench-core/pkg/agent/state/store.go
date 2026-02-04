@@ -2,56 +2,83 @@ package state
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
-type Status string
+// TaskReader queries tasks from storage.
+type TaskReader interface {
+	// GetTask retrieves a single task by ID.
+	GetTask(ctx context.Context, taskID string) (types.Task, error)
 
-const (
-	StatusActive      Status = "active"
-	StatusSucceeded   Status = "succeeded"
-	StatusFailed      Status = "failed"
-	StatusCanceled    Status = "canceled"
-	StatusQuarantined Status = "quarantined"
+	// ListTasks queries tasks with filtering, sorting, and pagination.
+	ListTasks(ctx context.Context, filter TaskFilter) ([]types.Task, error)
+
+	// CountTasks returns the total count matching the filter (for pagination).
+	CountTasks(ctx context.Context, filter TaskFilter) (int, error)
+}
+
+// TaskWriter creates and deletes tasks.
+type TaskWriter interface {
+	// CreateTask inserts a new task.
+	CreateTask(ctx context.Context, task types.Task) error
+
+	// DeleteTask removes a task (for cleanup/testing).
+	DeleteTask(ctx context.Context, taskID string) error
+}
+
+// TaskUpdater modifies existing task data.
+type TaskUpdater interface {
+	// UpdateTask updates task fields (full replacement). Use this for general
+	// field updates (goal, priority, metadata, etc.).
+	UpdateTask(ctx context.Context, task types.Task) error
+
+	// CompleteTask marks a task as succeeded/failed/canceled and records the result.
+	CompleteTask(ctx context.Context, taskID string, result types.TaskResult) error
+}
+
+// TaskLeaser manages task execution leases (for distributed execution).
+type TaskLeaser interface {
+	// ClaimTask attempts to acquire a lease for execution.
+	ClaimTask(ctx context.Context, taskID string, ttl time.Duration) error
+
+	// ExtendLease extends the lease for a long-running task.
+	ExtendLease(ctx context.Context, taskID string, ttl time.Duration) error
+
+	// RecoverExpiredLeases finds tasks with expired leases and marks them failed.
+	RecoverExpiredLeases(ctx context.Context) error
+}
+
+// TaskStore combines all task storage operations.
+type TaskStore interface {
+	TaskReader
+	TaskWriter
+	TaskUpdater
+	TaskLeaser
+}
+
+// TaskFilter specifies query criteria for ListTasks.
+type TaskFilter struct {
+	SessionID string // Filter by session
+	RunID     string // Filter by run
+	Status    []types.TaskStatus
+	FromDate  *time.Time // Created after this time
+	ToDate    *time.Time // Created before this time
+
+	// Pagination
+	Limit  int // Max results (default: 50)
+	Offset int // Skip N results
+
+	// Sorting
+	SortBy   string // Field name: "created_at", "completed_at", "cost_usd"
+	SortDesc bool
+}
+
+var (
+	ErrTaskNotFound  = errors.New("task not found")
+	ErrTaskClaimed   = errors.New("task already claimed by another worker")
+	ErrTaskTerminal  = errors.New("task is in terminal state (completed/failed/canceled)")
+	ErrInvalidFilter = errors.New("invalid task filter")
 )
-
-type Record struct {
-	TaskID     string
-	Status     Status
-	Attempts   int
-	LeaseUntil time.Time
-	UpdatedAt  time.Time
-
-	Result *types.TaskResult
-	Error  string
-}
-
-type ClaimResult struct {
-	Claimed    bool
-	Attempts   int
-	LeaseUntil time.Time
-}
-
-type Store interface {
-	// RecoverExpired marks tasks with expired leases as failed so they can be re-queued or inspected.
-	RecoverExpired(ctx context.Context, now time.Time) error
-
-	// Claim attempts to acquire a lease on a task. It returns Claimed=false if another worker holds the lease
-	// or the task is terminal/quarantined.
-	Claim(ctx context.Context, taskID string, ttl time.Duration) (ClaimResult, error)
-
-	// Extend extends a task's lease (for long-running tasks).
-	Extend(ctx context.Context, taskID string, ttl time.Duration) error
-
-	// Complete records a task result and marks the task terminal.
-	Complete(ctx context.Context, taskID string, result types.TaskResult) error
-
-	// Quarantine marks a task quarantined and records an error.
-	Quarantine(ctx context.Context, taskID string, errMsg string) error
-
-	// Get returns the current record, if present.
-	Get(ctx context.Context, taskID string) (Record, bool, error)
-}
-

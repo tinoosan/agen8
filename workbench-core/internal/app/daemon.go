@@ -254,9 +254,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return err
 	}
 
-	taskStore, err := state.NewSQLiteStore(fsutil.GetSQLitePath(cfg.DataDir), run.RunID)
+	taskStore, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
 	if err != nil {
-		return fmt.Errorf("create task state store: %w", err)
+		return fmt.Errorf("create task store: %w", err)
 	}
 	emitBlocking := func(ctx context.Context, ev events.Event) error {
 		return emitter.Emit(ctx, ev)
@@ -270,7 +270,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		ResolveProfile: func(ref string) (*profile.Profile, string, error) {
 			return resolveProfileRef(cfg, strings.TrimSpace(ref))
 		},
-		Store:             taskStore,
+		TaskStore:         taskStore,
 		Events:            ordered,
 		Memory:            memoryProvider,
 		MemorySearchLimit: 3,
@@ -282,6 +282,8 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		LeaseTTL:          2 * time.Minute,
 		MaxRetries:        3,
 		MaxPending:        50,
+		SessionID:         run.SessionID,
+		RunID:             run.RunID,
 		InstanceID:        run.RunID,
 		Logf: func(format string, args ...any) {
 			log.Printf("daemon: "+format, args...)
@@ -312,7 +314,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	var serverWG sync.WaitGroup
 	webhookAddr := strings.TrimSpace(resolved.WebhookAddr)
 	if webhookAddr != "" {
-		startWebhookServer(runCtx, webhookAddr, cfg, run, mustEmit, &serverWG)
+		startWebhookServer(runCtx, webhookAddr, cfg, run, taskStore, mustEmit, &serverWG)
 	}
 	healthAddr := strings.TrimSpace(resolved.HealthAddr)
 	if healthAddr != "" && healthAddr != webhookAddr {
@@ -495,7 +497,7 @@ func (s daemonEventAppender) AppendEvent(ctx context.Context, event types.EventR
 	return implstore.AppendEvent(ctx, s.cfg, event)
 }
 
-func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run types.Run, emit func(context.Context, events.Event), wg *sync.WaitGroup) {
+func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run types.Run, taskStore state.TaskStore, emit func(context.Context, events.Event), wg *sync.WaitGroup) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -535,6 +537,8 @@ func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run
 		now := time.Now()
 		task := types.Task{
 			TaskID:    taskID,
+			SessionID: run.SessionID,
+			RunID:     run.RunID,
 			Goal:      goal,
 			Priority:  payload.Priority,
 			Status:    types.TaskStatusPending,
@@ -542,21 +546,26 @@ func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run
 			Inputs:    payload.Inputs,
 			Metadata:  payload.Metadata,
 		}
-		runDir := fsutil.GetAgentDir(cfg.DataDir, run.RunID)
-		inboxDir := filepath.Join(runDir, "inbox")
-		if err := os.MkdirAll(inboxDir, 0755); err != nil {
-			http.Error(w, "inbox error: "+err.Error(), http.StatusInternalServerError)
+
+		if taskStore == nil {
+			http.Error(w, "task store not configured", http.StatusInternalServerError)
 			return
 		}
-		b, err := json.MarshalIndent(task, "", "  ")
-		if err != nil {
-			http.Error(w, "encode error: "+err.Error(), http.StatusInternalServerError)
+		if err := taskStore.CreateTask(ctx, task); err != nil {
+			http.Error(w, "create task error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if err := os.WriteFile(filepath.Join(inboxDir, taskID+".json"), b, 0644); err != nil {
-			http.Error(w, "write error: "+err.Error(), http.StatusInternalServerError)
-			return
+
+		// Best-effort archive of the inbound payload for external integrations/debugging.
+		{
+			runDir := fsutil.GetAgentDir(cfg.DataDir, run.RunID)
+			archiveDir := filepath.Join(runDir, "inbox", "archive")
+			_ = os.MkdirAll(archiveDir, 0o755)
+			if b, err := json.MarshalIndent(task, "", "  "); err == nil {
+				_ = os.WriteFile(filepath.Join(archiveDir, taskID+".json"), b, 0o644)
+			}
 		}
+
 		if emit != nil {
 			emit(ctx, events.Event{
 				Type:    "webhook.task.queued",

@@ -19,6 +19,8 @@ const (
 // Task is a unit of work delivered via /inbox for a single autonomous agent.
 type Task struct {
 	TaskID      string         `json:"taskId"`
+	SessionID   string         `json:"sessionId,omitempty"`
+	RunID       string         `json:"runId,omitempty"`
 	Goal        string         `json:"goal"`
 	Inputs      map[string]any `json:"inputs,omitempty"`
 	Priority    int            `json:"priority,omitempty"` // 0 = highest
@@ -26,8 +28,20 @@ type Task struct {
 	CreatedAt   *time.Time     `json:"createdAt,omitempty"`
 	StartedAt   *time.Time     `json:"startedAt,omitempty"`
 	CompletedAt *time.Time     `json:"completedAt,omitempty"`
+	UpdatedAt   *time.Time     `json:"updatedAt,omitempty"`
+	LeaseUntil  *time.Time     `json:"leaseUntil,omitempty"`
+	Attempts    int            `json:"attempts,omitempty"`
 	Error       string         `json:"error,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
+	Summary     string         `json:"summary,omitempty"`
+	Artifacts   []string       `json:"artifacts,omitempty"`
+
+	// Best-effort LLM usage totals for the task (populated after completion).
+	InputTokens     int     `json:"inputTokens,omitempty"`
+	OutputTokens    int     `json:"outputTokens,omitempty"`
+	TotalTokens     int     `json:"totalTokens,omitempty"`
+	CostUSD         float64 `json:"costUSD,omitempty"`
+	DurationSeconds int     `json:"durationSeconds,omitempty"`
 }
 
 // SortTime returns the time used for ordering tasks (CreatedAt if set, else zero time).
@@ -60,4 +74,10 @@ type TaskResult struct {
 	Artifacts   []string   `json:"artifacts,omitempty"`
 	Error       string     `json:"error,omitempty"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
+
+	// Best-effort LLM usage totals for the task (if available).
+	InputTokens  int     `json:"inputTokens,omitempty"`
+	OutputTokens int     `json:"outputTokens,omitempty"`
+	TotalTokens  int     `json:"totalTokens,omitempty"`
+	CostUSD      float64 `json:"costUSD,omitempty"`
 }

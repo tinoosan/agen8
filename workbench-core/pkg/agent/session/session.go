@@ -15,7 +15,9 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	agentevents "github.com/tinoosan/workbench-core/pkg/agent/events"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
+	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/events"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -29,8 +31,8 @@ type Config struct {
 	ProfileDir     string
 	ResolveProfile ResolveProfileFunc
 
-	Store  state.Store
-	Events *agentevents.Writer
+	TaskStore state.TaskStore
+	Events    *agentevents.Writer
 
 	Memory            agent.MemoryRecallProvider
 	MemorySearchLimit int
@@ -46,6 +48,9 @@ type Config struct {
 
 	MaxRetries int
 	MaxPending int
+
+	SessionID string
+	RunID     string
 
 	InstanceID string
 	Logf       func(format string, args ...any)
@@ -75,8 +80,14 @@ func New(cfg Config) (*Session, error) {
 	if cfg.Profile == nil {
 		return nil, fmt.Errorf("profile is required")
 	}
-	if cfg.Store == nil {
-		return nil, fmt.Errorf("task state store is required")
+	if cfg.TaskStore == nil {
+		return nil, fmt.Errorf("task store is required")
+	}
+	if strings.TrimSpace(cfg.SessionID) == "" {
+		return nil, fmt.Errorf("sessionID is required")
+	}
+	if strings.TrimSpace(cfg.RunID) == "" {
+		return nil, fmt.Errorf("runID is required")
 	}
 	if strings.TrimSpace(cfg.InboxPath) == "" {
 		cfg.InboxPath = "/inbox"
@@ -124,7 +135,7 @@ func (s *Session) Run(ctx context.Context) error {
 	if s == nil {
 		return fmt.Errorf("session is nil")
 	}
-	_ = s.cfg.Store.RecoverExpired(ctx, time.Now().UTC())
+	_ = s.cfg.TaskStore.RecoverExpiredLeases(ctx)
 	s.startHeartbeats(ctx)
 	defer s.stopHeartbeats()
 
@@ -253,7 +264,7 @@ func (s *Session) setProfile(p *profile.Profile, dir string) error {
 
 func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob) {
 	// Backpressure: if inbox is already large, skip emitting more tasks.
-	if count, err := s.inboxCount(ctx); err == nil && count > s.cfg.MaxPending {
+	if count, err := s.cfg.TaskStore.CountTasks(ctx, state.TaskFilter{RunID: s.cfg.RunID, Status: []types.TaskStatus{types.TaskStatusPending}}); err == nil && count > s.cfg.MaxPending {
 		s.emitBestEffort(ctx, events.Event{
 			Type:    "task.heartbeat.skipped",
 			Message: "Heartbeat skipped due to backpressure",
@@ -266,12 +277,17 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 	window := now.Truncate(job.Interval).Unix()
 	taskID := fmt.Sprintf("heartbeat-%s-%s-%s-%d", s.activeProfile.ID, s.cfg.InstanceID, job.Name, window)
 
-	if _, ok, _ := s.cfg.Store.Get(ctx, taskID); ok {
+	if _, err := s.cfg.TaskStore.GetTask(ctx, taskID); err == nil {
+		return
+	} else if !errors.Is(err, state.ErrTaskNotFound) {
+		s.logf("heartbeat get task failed: %v", err)
 		return
 	}
 
 	task := types.Task{
 		TaskID:    taskID,
+		SessionID: s.cfg.SessionID,
+		RunID:     s.cfg.RunID,
 		Goal:      strings.TrimSpace(job.Goal),
 		Priority:  5,
 		Status:    types.TaskStatusPending,
@@ -283,9 +299,7 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 			"window":  window,
 		},
 	}
-	filename := taskID + ".json"
-	taskPath := path.Join(strings.TrimRight(s.cfg.InboxPath, "/"), filename)
-	if err := s.writeJSON(ctx, taskPath, task); err != nil {
+	if err := s.cfg.TaskStore.CreateTask(ctx, task); err != nil {
 		s.logf("heartbeat enqueue failed: %v", err)
 		return
 	}
@@ -303,15 +317,11 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 	})
 }
 
-func (s *Session) inboxCount(ctx context.Context) (int, error) {
-	resp := s.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{Op: types.HostOpFSList, Path: s.cfg.InboxPath})
-	if !resp.Ok {
-		return 0, fmt.Errorf("list inbox: %s", resp.Error)
-	}
-	return len(resp.Entries), nil
-}
-
 func (s *Session) drainInbox(ctx context.Context) (bool, error) {
+	// Ingest new tasks from /inbox JSON into SQLite, then execute DB-backed pending tasks.
+	//
+	// Note: /inbox JSON files are treated as write-only "envelopes" for external integrations.
+	// SQLite is the source of truth; the daemon prefers DB queries for listing/pagination.
 	resp := s.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{Op: types.HostOpFSList, Path: s.cfg.InboxPath})
 	if !resp.Ok {
 		return false, fmt.Errorf("list inbox: %s", resp.Error)
@@ -320,7 +330,7 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 	sort.Strings(paths)
 
 	var errs error
-	hadCandidates := false
+	hadWork := false
 	for _, p := range paths {
 		if !strings.HasSuffix(strings.ToLower(p), ".json") {
 			continue
@@ -328,7 +338,19 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 		if strings.Contains(p, "/poison/") || strings.Contains(p, "/archive/") {
 			continue
 		}
-		hadCandidates = true
+
+		taskID := strings.TrimSuffix(path.Base(p), path.Ext(p))
+		if strings.TrimSpace(taskID) == "" {
+			continue
+		}
+
+		// If already ingested, skip file reads entirely.
+		if _, err := s.cfg.TaskStore.GetTask(ctx, taskID); err == nil {
+			continue
+		} else if err != nil && !errors.Is(err, state.ErrTaskNotFound) {
+			errs = errors.Join(errs, fmt.Errorf("get task %s: %w", taskID, err))
+			continue
+		}
 
 		raw, ok := s.readText(ctx, p)
 		if !ok || strings.TrimSpace(raw) == "" {
@@ -338,6 +360,7 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 		// Control tasks: first-class and never passed to the LLM.
 		if handled, err := s.tryHandleControl(ctx, p, raw); err != nil {
 			errs = errors.Join(errs, err)
+			continue
 		} else if handled {
 			continue
 		}
@@ -346,45 +369,95 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 		if err := json.Unmarshal([]byte(raw), &task); err != nil {
 			continue
 		}
-		taskID := strings.TrimSpace(task.TaskID)
-		if taskID == "" {
-			taskID = strings.TrimSuffix(path.Base(p), path.Ext(p))
+		if strings.TrimSpace(task.TaskID) == "" {
 			task.TaskID = taskID
 		}
-		if strings.TrimSpace(task.Goal) == "" {
+		task.Goal = strings.TrimSpace(task.Goal)
+		if task.Goal == "" {
+			continue
+		}
+		if task.CreatedAt == nil || task.CreatedAt.IsZero() {
+			now := time.Now().UTC()
+			task.CreatedAt = &now
+		}
+		if strings.TrimSpace(string(task.Status)) == "" {
+			task.Status = types.TaskStatusPending
+		}
+		task.SessionID = strings.TrimSpace(task.SessionID)
+		if task.SessionID == "" {
+			task.SessionID = s.cfg.SessionID
+		}
+		task.RunID = strings.TrimSpace(task.RunID)
+		if task.RunID == "" {
+			task.RunID = s.cfg.RunID
+		}
+
+		if err := s.cfg.TaskStore.CreateTask(ctx, task); err != nil {
+			// Ignore duplicates (e.g., concurrent ingestion).
+			continue
+		}
+		hadWork = true
+		s.emitTaskQueuedOnce(ctx, task.TaskID, task.Goal, "inbox")
+	}
+
+	// Execute pending tasks from SQLite.
+	pending, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+		RunID:  s.cfg.RunID,
+		Status: []types.TaskStatus{types.TaskStatusPending},
+		SortBy: "priority",
+		Limit:  s.cfg.MaxPending,
+	})
+	if err != nil {
+		errs = errors.Join(errs, err)
+		return hadWork, errs
+	}
+	if len(pending) != 0 {
+		hadWork = true
+	}
+
+	for _, task := range pending {
+		taskID := strings.TrimSpace(task.TaskID)
+		if taskID == "" {
 			continue
 		}
 
-		s.emitTaskQueuedOnce(ctx, taskID, task.Goal, "inbox")
+		if err := s.cfg.TaskStore.ClaimTask(ctx, taskID, s.cfg.LeaseTTL); err != nil {
+			switch {
+			case errors.Is(err, state.ErrTaskClaimed), errors.Is(err, state.ErrTaskTerminal), errors.Is(err, state.ErrTaskNotFound):
+				continue
+			default:
+				errs = errors.Join(errs, fmt.Errorf("claim %s: %w", taskID, err))
+				continue
+			}
+		}
 
-		claim, err := s.cfg.Store.Claim(ctx, taskID, s.cfg.LeaseTTL)
+		claimed, err := s.cfg.TaskStore.GetTask(ctx, taskID)
 		if err != nil {
-			errs = errors.Join(errs, fmt.Errorf("claim %s: %w", taskID, err))
+			errs = errors.Join(errs, fmt.Errorf("get claimed %s: %w", taskID, err))
 			continue
 		}
-		if !claim.Claimed {
-			continue
-		}
-
-		if claim.Attempts > s.cfg.MaxRetries {
-			if err := s.quarantineTask(ctx, p, task); err != nil {
+		if claimed.Attempts > s.cfg.MaxRetries {
+			if err := s.quarantineTask(ctx, claimed); err != nil {
 				errs = errors.Join(errs, err)
 			}
 			continue
 		}
 
-		if err := s.runTask(ctx, p, taskID, task); err != nil {
+		if err := s.runTask(ctx, taskID, claimed); err != nil {
 			errs = errors.Join(errs, err)
 		}
 	}
-	return hadCandidates, errs
+
+	return hadWork, errs
 }
 
-func (s *Session) runTask(ctx context.Context, taskPath, taskID string, task types.Task) error {
+func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) error {
 	now := time.Now()
 	task.Status = types.TaskStatusActive
 	task.StartedAt = &now
-	_ = s.writeJSON(ctx, taskPath, task)
+	task.SessionID = s.cfg.SessionID
+	task.RunID = s.cfg.RunID
+	_ = s.cfg.TaskStore.UpdateTask(ctx, task)
 
 	if s.cfg.Events != nil {
 		_ = s.cfg.Events.Emit(ctx, events.Event{
@@ -404,7 +477,7 @@ func (s *Session) runTask(ctx context.Context, taskPath, taskID string, task typ
 			case <-leaseCtx.Done():
 				return
 			case <-t.C:
-				_ = s.cfg.Store.Extend(leaseCtx, taskID, s.cfg.LeaseTTL)
+				_ = s.cfg.TaskStore.ExtendLease(leaseCtx, taskID, s.cfg.LeaseTTL)
 			}
 		}
 	}()
@@ -427,13 +500,61 @@ func (s *Session) runTask(ctx context.Context, taskPath, taskID string, task typ
 		}
 	}
 
+	var cumulativeInputTokens int
+	var cumulativeOutputTokens int
+	var costInPerM float64
+	var costOutPerM float64
+	var pricingKnown bool
+	{
+		modelID := strings.TrimSpace(runAgent.GetModel())
+		if in, out, ok := cost.DefaultPricing().Lookup(modelID); ok {
+			costInPerM = in
+			costOutPerM = out
+			pricingKnown = in != 0 || out != 0
+		}
+		cfg := runAgent.Config()
+		orig := cfg.Hooks.OnLLMUsage
+		cfg.Hooks.OnLLMUsage = func(step int, usage llmtypes.LLMUsage) {
+			if orig != nil {
+				orig(step, usage)
+			}
+			cumulativeInputTokens += usage.InputTokens
+			cumulativeOutputTokens += usage.OutputTokens
+			if s.cfg.Events != nil {
+				_ = s.cfg.Events.Emit(ctx, events.Event{
+					Type:    "task.usage",
+					Message: "Task LLM usage",
+					Data: map[string]string{
+						"taskId":       taskID,
+						"step":         fmt.Sprintf("%d", step),
+						"inputTokens":  fmt.Sprintf("%d", usage.InputTokens),
+						"outputTokens": fmt.Sprintf("%d", usage.OutputTokens),
+					},
+				})
+			}
+		}
+		cfg.PromptSource = agent.NewSteeringPromptSource(cfg.PromptSource)
+		if cloned, err := runAgent.CloneWithConfig(cfg); err == nil && cloned != nil {
+			runAgent = cloned
+		}
+	}
+
 	runRes, err := runAgent.Run(ctx, strings.TrimSpace(task.Goal))
 	doneAt := time.Now()
+	totalTokens := cumulativeInputTokens + cumulativeOutputTokens
+	costUSD := 0.0
+	if pricingKnown {
+		costUSD = (float64(cumulativeInputTokens)/1_000_000.0)*costInPerM + (float64(cumulativeOutputTokens)/1_000_000.0)*costOutPerM
+	}
 	tr := types.TaskResult{
-		TaskID:      taskID,
-		Status:      types.TaskStatusSucceeded,
-		Summary:     strings.TrimSpace(runRes.Text),
-		CompletedAt: &doneAt,
+		TaskID:       taskID,
+		Status:       types.TaskStatusSucceeded,
+		Summary:      strings.TrimSpace(runRes.Text),
+		CompletedAt:  &doneAt,
+		InputTokens:  cumulativeInputTokens,
+		OutputTokens: cumulativeOutputTokens,
+		TotalTokens:  totalTokens,
+		CostUSD:      costUSD,
 	}
 	if err != nil {
 		tr.Status = types.TaskStatusFailed
@@ -475,6 +596,14 @@ func (s *Session) runTask(ctx context.Context, taskPath, taskID string, task typ
 		if tr.Error != "" {
 			data["error"] = tr.Error
 		}
+		if tr.TotalTokens > 0 {
+			data["inputTokens"] = fmt.Sprintf("%d", tr.InputTokens)
+			data["outputTokens"] = fmt.Sprintf("%d", tr.OutputTokens)
+			data["totalTokens"] = fmt.Sprintf("%d", tr.TotalTokens)
+		}
+		if tr.CostUSD > 0 {
+			data["costUsd"] = fmt.Sprintf("%.4f", tr.CostUSD)
+		}
 		if len(tr.Artifacts) != 0 {
 			data["artifacts"] = fmt.Sprintf("%d", len(tr.Artifacts))
 			// Always include the first artifact path (typically SUMMARY.md).
@@ -486,7 +615,7 @@ func (s *Session) runTask(ctx context.Context, taskPath, taskID string, task typ
 		}
 	}
 
-	if err := s.cfg.Store.Complete(ctx, taskID, tr); err != nil {
+	if err := s.cfg.TaskStore.CompleteTask(ctx, taskID, tr); err != nil {
 		return err
 	}
 
@@ -496,7 +625,16 @@ func (s *Session) runTask(ctx context.Context, taskPath, taskID string, task typ
 	task.Status = tr.Status
 	task.CompletedAt = tr.CompletedAt
 	task.Error = tr.Error
-	_ = s.writeJSON(ctx, taskPath, task)
+	task.Summary = tr.Summary
+	task.Artifacts = append([]string(nil), tr.Artifacts...)
+	task.InputTokens = tr.InputTokens
+	task.OutputTokens = tr.OutputTokens
+	task.TotalTokens = tr.TotalTokens
+	task.CostUSD = tr.CostUSD
+	if task.StartedAt != nil && tr.CompletedAt != nil && !task.StartedAt.IsZero() && !tr.CompletedAt.IsZero() {
+		task.DurationSeconds = int(tr.CompletedAt.Sub(*task.StartedAt).Round(time.Second).Seconds())
+	}
+	_ = s.cfg.TaskStore.UpdateTask(ctx, task)
 
 	if s.cfg.Notifier != nil {
 		if err := s.cfg.Notifier.Notify(ctx, task, tr); err != nil {
@@ -532,39 +670,34 @@ func (s *Session) emitTaskQueuedOnce(ctx context.Context, taskID, goal, source s
 	_ = s.cfg.Events.Emit(ctx, events.Event{Type: "task.queued", Message: "Task queued", Data: payload})
 }
 
-func (s *Session) quarantineTask(ctx context.Context, taskPath string, task types.Task) error {
+func (s *Session) quarantineTask(ctx context.Context, task types.Task) error {
 	taskID := strings.TrimSpace(task.TaskID)
 	if taskID == "" {
-		taskID = strings.TrimSuffix(path.Base(taskPath), path.Ext(taskPath))
+		return fmt.Errorf("taskID is required")
 	}
 	poisonPath := path.Join(strings.TrimRight(s.cfg.InboxPath, "/"), "poison", time.Now().UTC().Format("20060102T150405Z")+"-"+taskID+".json")
-	raw, ok := s.readText(ctx, taskPath)
-	if ok && strings.TrimSpace(raw) != "" {
-		_ = s.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{Op: types.HostOpFSWrite, Path: poisonPath, Text: raw})
-	}
-	lastErr := strings.TrimSpace(task.Error)
-	if lastErr == "" {
-		if rec, ok, err := s.cfg.Store.Get(ctx, taskID); err == nil && ok {
-			if rec.Result != nil && strings.TrimSpace(rec.Result.Error) != "" {
-				lastErr = strings.TrimSpace(rec.Result.Error)
-			} else if strings.TrimSpace(rec.Error) != "" {
-				lastErr = strings.TrimSpace(rec.Error)
-			}
+	{
+		task.Error = fallback(strings.TrimSpace(task.Error), "max retries exceeded")
+		b, _ := json.MarshalIndent(task, "", "  ")
+		if strings.TrimSpace(string(b)) != "" {
+			_ = s.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{Op: types.HostOpFSWrite, Path: poisonPath, Text: string(b)})
 		}
 	}
-	_ = s.cfg.Store.Quarantine(ctx, taskID, "max retries exceeded")
+
+	doneAt := time.Now()
+	tr := types.TaskResult{
+		TaskID:      taskID,
+		Status:      types.TaskStatusFailed,
+		Error:       "quarantined: max retries exceeded",
+		CompletedAt: &doneAt,
+	}
+	_ = s.cfg.TaskStore.CompleteTask(ctx, taskID, tr)
+
 	s.emitBestEffort(ctx, events.Event{
 		Type:    "task.quarantined",
 		Message: "Task quarantined",
-		Data:    map[string]string{"taskId": taskID, "poisonPath": poisonPath, "error": fallback(lastErr, "max retries exceeded")},
+		Data:    map[string]string{"taskId": taskID, "poisonPath": poisonPath, "error": fallback(strings.TrimSpace(task.Error), "max retries exceeded")},
 	})
-
-	// Mark original task file terminal-ish to discourage manual re-run without intervention.
-	now := time.Now()
-	task.Status = types.TaskStatusFailed
-	task.Error = "quarantined: max retries exceeded"
-	task.CompletedAt = &now
-	_ = s.writeJSON(ctx, taskPath, task)
 	return nil
 }
 
@@ -656,6 +789,16 @@ func (s *Session) writeTaskSummary(ctx context.Context, base, taskID, goal strin
 		b.WriteString("```\n")
 		b.WriteString(strings.TrimSpace(tr.Error))
 		b.WriteString("\n```\n")
+	}
+
+	if tr.TotalTokens > 0 || tr.CostUSD > 0 {
+		b.WriteString("\n## Usage\n\n")
+		if tr.TotalTokens > 0 {
+			b.WriteString(fmt.Sprintf("- Tokens: `%d` total (`%d` input + `%d` output)\n", tr.TotalTokens, tr.InputTokens, tr.OutputTokens))
+		}
+		if tr.CostUSD > 0 {
+			b.WriteString(fmt.Sprintf("- Estimated cost: `$%.4f` USD\n", tr.CostUSD))
+		}
 	}
 
 	b.WriteString("\n## Summary\n\n")
