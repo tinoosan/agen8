@@ -142,10 +142,10 @@ Testing: <test coverage>
 
 ## Example
 
-**Task**: "Fix the billing summary to include VAT per invoice"
+**Task**: "Fix the billing summary to include VAT per invoice" 
 
 **Execution**:
-1. Located invoice rendering logic in `billing/invoice.go`
+1. Located invoice rendering logic in `billing/invoice.go` 
 2. Added `CalculateVAT(subtotal float64) float64` function
 3. Updated `Invoice.Total()` to include VAT
 4. Modified `TestInvoiceTotal` to verify VAT calculation

@@ -4,6 +4,8 @@ skills:
   - coding
   - reporting
   - acting
+  - planning
+  - hybrid_web
 prompts:
   system_prompt_path: prompt.md
 heartbeat:
