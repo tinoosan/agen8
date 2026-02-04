@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -44,6 +45,18 @@ func (s stubRunner) ResumeTurn(ctx context.Context, toolOutputs []llmtypes.LLMMe
 func (s stubRunner) ListSessions(ctx context.Context) ([]types.Session, error) {
 	_ = ctx
 	return nil, nil
+}
+
+func (s stubRunner) ListSessionsPaginated(ctx context.Context, filter store.SessionFilter) ([]types.Session, error) {
+	_ = ctx
+	_ = filter
+	return nil, nil
+}
+
+func (s stubRunner) CountSessions(ctx context.Context, filter store.SessionFilter) (int, error) {
+	_ = ctx
+	_ = filter
+	return 0, nil
 }
 
 type recordingRunner struct {
@@ -137,6 +150,18 @@ func (r blockingRunner) ResumeTurn(ctx context.Context, toolOutputs []llmtypes.L
 func (r blockingRunner) ListSessions(ctx context.Context) ([]types.Session, error) {
 	_ = ctx
 	return nil, nil
+}
+
+func (r blockingRunner) ListSessionsPaginated(ctx context.Context, filter store.SessionFilter) ([]types.Session, error) {
+	_ = ctx
+	_ = filter
+	return nil, nil
+}
+
+func (r blockingRunner) CountSessions(ctx context.Context, filter store.SessionFilter) (int, error) {
+	_ = ctx
+	_ = filter
+	return 0, nil
 }
 
 func TestKeyHandling_EnterSubmitsEvenWhenDetailsVisible(t *testing.T) {

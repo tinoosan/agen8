@@ -221,6 +221,10 @@ func (m Model) keyHelpModal(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 }
 
 func (m Model) keyOpenHelpModal(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	// Do not open help while any modal is active.
+	if m.sessionPickerOpen || m.modelPickerOpen || m.filePickerOpen || m.editorOpen || m.helpModalOpen {
+		return m, nil, false
+	}
 	// Ctrl+P opens help modal (only when input is focused).
 	if m.focus == focusInput && (msg.Type == tea.KeyCtrlP || strings.EqualFold(msg.String(), "ctrl+p")) {
 		m.openHelpModal()
@@ -251,25 +255,40 @@ func (m Model) keySessionPickerModal(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	case tea.KeyEnter:
 		return m, m.selectSessionFromPicker(), true
+	case tea.KeyCtrlN, tea.KeyPgDown:
+		pageSize := m.sessionPickerPageSize
+		if pageSize <= 0 {
+			pageSize = 50
+		}
+		maxPage := (m.sessionPickerTotal+pageSize-1)/pageSize - 1
+		if maxPage < 0 {
+			maxPage = 0
+		}
+		if m.sessionPickerPage < maxPage {
+			m.sessionPickerPage++
+			return m, m.fetchSessionsPage(), true
+		}
+		return m, nil, true
+	case tea.KeyCtrlP, tea.KeyPgUp:
+		if m.sessionPickerPage > 0 {
+			m.sessionPickerPage--
+			return m, m.fetchSessionsPage(), true
+		}
+		return m, nil, true
 	case tea.KeyUp:
 		m.sessionPickerList.CursorUp()
 		return m, nil, true
 	case tea.KeyDown:
 		m.sessionPickerList.CursorDown()
 		return m, nil, true
-	case tea.KeyPgUp, tea.KeyCtrlU:
-		m.sessionPickerList.CursorUp()
-		return m, nil, true
-	case tea.KeyPgDown, tea.KeyCtrlF:
-		m.sessionPickerList.CursorDown()
-		return m, nil, true
 	default:
 		var cmd tea.Cmd
 		m.sessionPickerList, cmd = m.sessionPickerList.Update(msg)
-		if m.sessionPickerList.FilteringEnabled() && m.sessionPickerList.FilterState() == list.Filtering {
-			m.sessionPickerList.SetFilterText(m.sessionPickerList.FilterValue())
-			m.sessionPickerList.SetFilterState(list.Filtering)
-			return m, nil, true
+		newFilter := strings.TrimSpace(m.sessionPickerList.FilterInput.Value())
+		if newFilter != m.sessionPickerFilter {
+			m.sessionPickerFilter = newFilter
+			m.sessionPickerPage = 0
+			return m, tea.Batch(cmd, m.fetchSessionsPage()), true
 		}
 		return m, cmd, true
 	}

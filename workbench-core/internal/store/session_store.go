@@ -15,6 +15,34 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
+// SessionFilter specifies filtering and pagination for session queries.
+type SessionFilter struct {
+	// Filtering
+	TitleContains string // case-insensitive substring match against title/current goal
+
+	// Pagination
+	Limit  int // max results (default: 50, 0 = use default)
+	Offset int // skip N sessions
+
+	// Sorting
+	SortBy   string // "updated_at" (default), "created_at", "title"
+	SortDesc bool   // true = DESC (default), false = ASC
+}
+
+// allowedSessionSortColumn validates sort column to prevent SQL injection.
+func allowedSessionSortColumn(col string) (string, bool) {
+	switch strings.TrimSpace(strings.ToLower(col)) {
+	case "", "updated_at":
+		return "updated_at", true
+	case "created_at":
+		return "created_at", true
+	case "title":
+		return "title", true
+	default:
+		return "", false
+	}
+}
+
 // CreateSession creates and persists a new session along with its main run.
 //
 // The returned Session+Run pair ensures every session starts with an active Main Run.
@@ -247,6 +275,103 @@ func ListSessions(cfg config.Config) ([]types.Session, error) {
 		return sessionSortTime(out[i]).After(sessionSortTime(out[j]))
 	})
 	return out, nil
+}
+
+// ListSessionsPaginated returns sessions with server-side pagination.
+// Uses SQL LIMIT/OFFSET for efficient querying of large session sets.
+func ListSessionsPaginated(cfg config.Config, filter SessionFilter) ([]types.Session, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	sortCol, ok := allowedSessionSortColumn(filter.SortBy)
+	if !ok {
+		return nil, fmt.Errorf("invalid sort column: %s", filter.SortBy)
+	}
+
+	sortDir := "DESC"
+	if !filter.SortDesc {
+		sortDir = "ASC"
+	}
+
+	query := `SELECT session_json FROM sessions WHERE 1=1`
+	args := []any{}
+
+	titleContains := strings.TrimSpace(filter.TitleContains)
+	if titleContains != "" {
+		query += ` AND (title LIKE ? COLLATE NOCASE OR current_goal LIKE ? COLLATE NOCASE)`
+		pattern := "%" + titleContains + "%"
+		args = append(args, pattern, pattern)
+	}
+
+	// Ensure a stable ordering across pages.
+	query += fmt.Sprintf(` ORDER BY %s %s, session_id ASC`, sortCol, sortDir)
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	query += ` LIMIT ?`
+	args = append(args, limit)
+
+	if filter.Offset > 0 {
+		query += ` OFFSET ?`
+		args = append(args, filter.Offset)
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]types.Session, 0, limit)
+	for rows.Next() {
+		var b []byte
+		if err := rows.Scan(&b); err != nil {
+			return nil, err
+		}
+		var s types.Session
+		if err := json.Unmarshal(b, &s); err != nil {
+			return nil, fmt.Errorf("unmarshal session: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// CountSessions returns the total number of sessions matching the filter.
+// Used for pagination UI ("page X of Y").
+func CountSessions(cfg config.Config, filter SessionFilter) (int, error) {
+	if err := cfg.Validate(); err != nil {
+		return 0, err
+	}
+
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return 0, err
+	}
+
+	query := `SELECT COUNT(*) FROM sessions WHERE 1=1`
+	args := []any{}
+
+	titleContains := strings.TrimSpace(filter.TitleContains)
+	if titleContains != "" {
+		query += ` AND (title LIKE ? COLLATE NOCASE OR current_goal LIKE ? COLLATE NOCASE)`
+		pattern := "%" + titleContains + "%"
+		args = append(args, pattern, pattern)
+	}
+
+	var count int
+	if err := db.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func sessionSortTime(s types.Session) time.Time {

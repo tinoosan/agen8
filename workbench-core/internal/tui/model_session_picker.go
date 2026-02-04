@@ -3,13 +3,13 @@ package tui
 import (
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -104,16 +104,30 @@ func (m *Model) openSessionPicker() tea.Cmd {
 	}
 	m.sessionPickerOpen = true
 	m.sessionPickerErr = ""
+	if m.sessionPickerPageSize == 0 {
+		m.sessionPickerPageSize = 50
+	}
+	m.sessionPickerPage = 0
+	m.sessionPickerTotal = 0
+	m.sessionPickerFilter = ""
 
 	l := list.New(nil, newSessionPickerDelegate(), 0, 0)
 	l.Title = "Select Session"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
-	l.SetShowPagination(true)
+	l.SetShowPagination(false)
 	l.SetFilteringEnabled(true)
 	l.SetShowFilter(true)
 	l.SetFilterText("")
 	l.SetFilterState(list.Filtering)
+	// Disable client-side filtering; we use FilterInput as a query for server-side search.
+	l.Filter = func(_ string, targets []string) []list.Rank {
+		ranks := make([]list.Rank, len(targets))
+		for i := range targets {
+			ranks[i] = list.Rank{Index: i}
+		}
+		return ranks
+	}
 	l.Styles.Title = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#707070")).
 		Bold(true)
@@ -121,19 +135,37 @@ func (m *Model) openSessionPicker() tea.Cmd {
 	m.sessionPickerList = l
 	m.layout()
 
-	return m.fetchSessionsList()
+	return m.fetchSessionsPage()
 }
 
 func (m *Model) closeSessionPicker() {
 	m.sessionPickerOpen = false
 	m.sessionPickerList = list.Model{}
 	m.sessionPickerErr = ""
+	m.sessionPickerPage = 0
+	m.sessionPickerTotal = 0
+	m.sessionPickerFilter = ""
 }
 
-func (m *Model) fetchSessionsList() tea.Cmd {
+func (m *Model) fetchSessionsPage() tea.Cmd {
 	return func() tea.Msg {
-		sessions, err := m.runner.ListSessions(m.ctx)
-		return sessionsListMsg{sessions: sessions, err: err}
+		filter := store.SessionFilter{
+			TitleContains: m.sessionPickerFilter,
+			Limit:         m.sessionPickerPageSize,
+			Offset:        m.sessionPickerPage * m.sessionPickerPageSize,
+			SortBy:        "updated_at",
+			SortDesc:      true,
+		}
+
+		total, err := m.runner.CountSessions(m.ctx, filter)
+		if err != nil {
+			return sessionsListMsg{err: err}
+		}
+		sessions, err := m.runner.ListSessionsPaginated(m.ctx, filter)
+		if err != nil {
+			return sessionsListMsg{err: err}
+		}
+		return sessionsListMsg{sessions: sessions, total: total, page: m.sessionPickerPage, err: nil}
 	}
 }
 
@@ -175,7 +207,7 @@ func (m Model) renderSessionPicker(base string) string {
 		modalHeight = 12
 	}
 
-	listHeight := modalHeight - 3
+	listHeight := modalHeight - 4
 	if listHeight < 4 {
 		listHeight = 4
 	}
@@ -187,6 +219,7 @@ func (m Model) renderSessionPicker(base string) string {
 		errLine := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff8080")).Render("Error: " + m.sessionPickerErr)
 		content = errLine + "\n\n" + content
 	}
+	content += "\n" + m.renderSessionPickerFooter()
 
 	opts := kit.ModalOptions{
 		Content:      content,
@@ -204,14 +237,28 @@ func (m Model) renderSessionPicker(base string) string {
 	return kit.RenderOverlay(opts)
 }
 
+func (m *Model) renderSessionPickerFooter() string {
+	if m.sessionPickerTotal == 0 {
+		if strings.TrimSpace(m.sessionPickerErr) != "" {
+			return m.styleDim.Render("Ctrl+N/P: page")
+		}
+		return m.styleDim.Render("No sessions")
+	}
+
+	pageSize := m.sessionPickerPageSize
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	maxPage := (m.sessionPickerTotal + pageSize - 1) / pageSize
+	currentPage := m.sessionPickerPage + 1
+
+	pageInfo := fmt.Sprintf("Page %d of %d (%d sessions)", currentPage, maxPage, m.sessionPickerTotal)
+	return m.styleDim.Render(pageInfo + " • Ctrl+N/P: page")
+}
+
 func sessionsToPickerItems(sessions []types.Session) []list.Item {
 	out := make([]list.Item, 0, len(sessions))
-	sorted := make([]types.Session, 0, len(sessions))
-	sorted = append(sorted, sessions...)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sessionSortTime(sorted[i]).After(sessionSortTime(sorted[j]))
-	})
-	for _, s := range sorted {
+	for _, s := range sessions {
 		out = append(out, sessionPickerItem{
 			id:        strings.TrimSpace(s.SessionID),
 			title:     strings.TrimSpace(s.Title),

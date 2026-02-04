@@ -20,7 +20,7 @@ var (
 	sqliteMigrated = map[string]bool{}
 )
 
-const currentSchemaVersion = 1
+const currentSchemaVersion = 2
 
 var sqliteMigrations = []string{
 	`CREATE TABLE IF NOT EXISTS sessions (
@@ -33,6 +33,9 @@ var sqliteMigrations = []string{
 		created_at TEXT,
 		updated_at TEXT
 	);`,
+	// Session indexes for pagination and sorting.
+	`CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);`,
+	`CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at DESC);`,
 	`CREATE TABLE IF NOT EXISTS runs (
 		run_id TEXT PRIMARY KEY,
 		session_id TEXT NOT NULL,

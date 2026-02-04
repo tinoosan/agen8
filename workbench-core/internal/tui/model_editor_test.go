@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/workbench-core/internal/store"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -42,6 +43,18 @@ func (r *fakeVFSRunner) ResumeTurn(ctx context.Context, toolOutputs []llmtypes.L
 func (r *fakeVFSRunner) ListSessions(ctx context.Context) ([]types.Session, error) {
 	_ = ctx
 	return nil, nil
+}
+
+func (r *fakeVFSRunner) ListSessionsPaginated(ctx context.Context, filter store.SessionFilter) ([]types.Session, error) {
+	_ = ctx
+	_ = filter
+	return nil, nil
+}
+
+func (r *fakeVFSRunner) CountSessions(ctx context.Context, filter store.SessionFilter) (int, error) {
+	_ = ctx
+	_ = filter
+	return 0, nil
 }
 
 func (r *fakeVFSRunner) ReadVFS(ctx context.Context, path string, maxBytes int) (text string, bytesLen int, truncated bool, err error) {

@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -31,6 +32,9 @@ type TurnRunner interface {
 	AppendToolResponse(toolCallID string, resp types.HostOpResponse)
 	ResumeTurn(ctx context.Context, toolOutputs []llmtypes.LLMMessage) (string, error)
 	ListSessions(ctx context.Context) ([]types.Session, error)
+
+	ListSessionsPaginated(ctx context.Context, filter store.SessionFilter) ([]types.Session, error)
+	CountSessions(ctx context.Context, filter store.SessionFilter) (int, error)
 }
 
 // vfsAccessor is an optional extension interface implemented by the app TurnRunner.
@@ -99,6 +103,8 @@ type workdirPrefetchMsg struct {
 
 type sessionsListMsg struct {
 	sessions []types.Session
+	total    int
+	page     int
 	err      error
 }
 
@@ -136,13 +142,13 @@ type Model struct {
 	transcriptItems         []transcriptItem
 	transcriptItemStartLine []int
 	// Virtualized transcript rendering state (keeps items in memory, renders a window).
-	transcriptRenderCache   map[int]*renderedItem // item index -> cached render
-	transcriptWindow        transcriptWindow
-	transcriptTotalLines    int // estimated total line count for all items
+	transcriptRenderCache    map[int]*renderedItem // item index -> cached render
+	transcriptWindow         transcriptWindow
+	transcriptTotalLines     int // estimated total line count for all items
 	transcriptLogicalYOffset int // scroll position in absolute lines (top of full transcript)
-	lastTurnUserItemIdx     int
-	currentActionGroupIdx   int
-	currentActionCategory   string
+	lastTurnUserItemIdx      int
+	currentActionGroupIdx    int
+	currentActionCategory    string
 
 	// Streaming (Phase 1): inline incremental agent output for the current turn.
 	streamingItemIdx int
@@ -287,9 +293,13 @@ type Model struct {
 	modelPickerList list.Model
 
 	// Session picker state (/sessions command)
-	sessionPickerOpen bool
-	sessionPickerList list.Model
-	sessionPickerErr  string
+	sessionPickerOpen     bool
+	sessionPickerList     list.Model
+	sessionPickerErr      string
+	sessionPickerPage     int
+	sessionPickerPageSize int
+	sessionPickerTotal    int
+	sessionPickerFilter   string
 
 	// Session switching request (set before quitting)
 	switchSessionID string

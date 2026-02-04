@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -87,6 +88,12 @@ type monitorModel struct {
 	agentOutputFollow          bool
 	agentOutputPending         map[string]agentOutputPendingEntry
 	agentOutputPendingFallback *agentOutputPendingEntry
+	agentOutputLogicalYOffset  int
+	agentOutputTotalLines      int
+	agentOutputLayoutWidth     int
+	agentOutputLineStarts      []int
+	agentOutputLineHeights     []int
+	agentOutputWindowStartLine int
 
 	taskStore agentstate.TaskStore
 
@@ -206,8 +213,6 @@ const (
 	panelComposer
 	panelThinking
 )
-
-const maxAgentOutputLines = 1000
 
 // Breakpoints for responsive layout: below these use compact mode (tabs/single column).
 const (
@@ -1485,37 +1490,24 @@ func (m *monitorModel) appendAgentOutputLine(line string) int {
 		return -1
 	}
 	m.agentOutput = append(m.agentOutput, line)
-	trimmed := 0
-	if len(m.agentOutput) > maxAgentOutputLines {
-		trimmed = len(m.agentOutput) - maxAgentOutputLines
-		m.agentOutput = m.agentOutput[trimmed:]
+	// Incrementally maintain layout metadata when possible (for virtualization).
+	w := m.agentOutputVP.Width
+	if w <= 0 {
+		w = 80
 	}
-	if trimmed > 0 {
-		m.trimAgentOutputPending(trimmed)
+	// If width changed or metadata is out of sync, fall back to recompute on next refresh.
+	if m.agentOutputLayoutWidth != w || len(m.agentOutputLineStarts) != len(m.agentOutput)-1 || len(m.agentOutputLineHeights) != len(m.agentOutput)-1 {
+		m.agentOutputLayoutWidth = 0
+		return len(m.agentOutput) - 1
 	}
+	start := m.agentOutputTotalLines
+	h := 1
+	wrapped := wordwrap.String(line, w)
+	h = 1 + strings.Count(wrapped, "\n")
+	m.agentOutputLineStarts = append(m.agentOutputLineStarts, start)
+	m.agentOutputLineHeights = append(m.agentOutputLineHeights, h)
+	m.agentOutputTotalLines += h
 	return len(m.agentOutput) - 1
-}
-
-func (m *monitorModel) trimAgentOutputPending(removed int) {
-	if removed <= 0 {
-		return
-	}
-	if len(m.agentOutputPending) != 0 {
-		for id, entry := range m.agentOutputPending {
-			entry.index -= removed
-			if entry.index < 0 {
-				delete(m.agentOutputPending, id)
-				continue
-			}
-			m.agentOutputPending[id] = entry
-		}
-	}
-	if m.agentOutputPendingFallback != nil {
-		m.agentOutputPendingFallback.index -= removed
-		if m.agentOutputPendingFallback.index < 0 {
-			m.agentOutputPendingFallback = nil
-		}
-	}
 }
 
 func (m *monitorModel) takeAgentOutputPending(opID string) (agentOutputPendingEntry, bool) {
@@ -2098,12 +2090,14 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 		// Current task panel is static, no interactive model.
 		return m, nil
 	case panelOutput:
-		var cmd tea.Cmd
-		m.agentOutputVP, cmd = m.agentOutputVP.Update(msg)
 		if isScrollKey(msg) {
+			m.applyAgentOutputScroll(msg)
+			m.refreshAgentOutputViewport()
 			m.agentOutputFollow = m.agentOutputAtBottom()
+			return m, nil
 		}
-		return m, cmd
+		// Non-scroll keys: nothing to do (viewport is read-only).
+		return m, nil
 	case panelInbox:
 		var cmd tea.Cmd
 		m.inboxVP, cmd = m.inboxVP.Update(msg)
@@ -2362,14 +2356,56 @@ func outputLineStyle(line string) lipgloss.Style {
 }
 
 func (m *monitorModel) refreshAgentOutputViewport() {
+	if m == nil {
+		return
+	}
 	w := m.agentOutputVP.Width
 	if w <= 0 {
 		w = 80
 	}
-	prevYOffset := m.agentOutputVP.YOffset
-	lines := make([]string, 0, len(m.agentOutput))
-	for _, rawLine := range m.agentOutput {
-		rawLine = strings.TrimSpace(rawLine)
+	h := m.agentOutputVP.Height
+	if h <= 0 {
+		h = 1
+	}
+
+	m.ensureAgentOutputLayout(w)
+	maxY := m.agentOutputMaxYOffset(h)
+	if m.agentOutputFollow {
+		m.agentOutputLogicalYOffset = maxY
+	}
+	if m.agentOutputLogicalYOffset < 0 {
+		m.agentOutputLogicalYOffset = 0
+	}
+	if m.agentOutputLogicalYOffset > maxY {
+		m.agentOutputLogicalYOffset = maxY
+	}
+
+	if len(m.agentOutput) == 0 {
+		m.agentOutputWindowStartLine = 0
+		m.agentOutputVP.SetContent(kit.StyleDim.Render("No output yet."))
+		m.agentOutputVP.SetYOffset(0)
+		return
+	}
+
+	visibleStart := m.agentOutputLogicalYOffset
+	visibleEnd := visibleStart + h
+	firstVisible := m.findAgentOutputItemAtLine(visibleStart)
+	lastVisible := m.findAgentOutputItemAtLine(visibleEnd)
+	firstVisible = max(0, firstVisible)
+	lastVisible = min(len(m.agentOutput)-1, lastVisible)
+
+	const bufferItems = 50
+	firstRender := max(0, firstVisible-bufferItems)
+	lastRender := min(len(m.agentOutput)-1, lastVisible+bufferItems)
+	windowStartLine := 0
+	if firstRender >= 0 && firstRender < len(m.agentOutputLineStarts) {
+		windowStartLine = m.agentOutputLineStarts[firstRender]
+	}
+	m.agentOutputWindowStartLine = windowStartLine
+
+	lines := make([]string, 0, (lastRender-firstRender+1)*2)
+	for i := firstRender; i <= lastRender; i++ {
+		rawLine := strings.TrimSpace(m.agentOutput[i])
 		if rawLine == "" {
 			lines = append(lines, "")
 			continue
@@ -2386,19 +2422,141 @@ func (m *monitorModel) refreshAgentOutputViewport() {
 		}
 	}
 	m.agentOutputVP.SetContent(strings.Join(lines, "\n"))
-	if m.agentOutputFollow {
-		m.agentOutputVP.GotoBottom()
-	} else {
-		m.agentOutputVP.SetYOffset(prevYOffset)
+	rel := m.agentOutputLogicalYOffset - windowStartLine
+	if rel < 0 {
+		rel = 0
 	}
+	m.agentOutputVP.SetYOffset(rel)
 }
 
 func (m *monitorModel) agentOutputAtBottom() bool {
-	return m.agentOutputVP.AtBottom()
+	if m == nil {
+		return true
+	}
+	h := m.agentOutputVP.Height
+	if h <= 0 {
+		h = 1
+	}
+	maxY := m.agentOutputMaxYOffset(h)
+	return m.agentOutputLogicalYOffset >= maxY
 }
 
 func (m *monitorModel) thinkingAtBottom() bool {
 	return m.thinkingVP.AtBottom()
+}
+
+func (m *monitorModel) ensureAgentOutputLayout(width int) {
+	if m == nil {
+		return
+	}
+	if width <= 0 {
+		width = 80
+	}
+	if m.agentOutputLayoutWidth == width && len(m.agentOutputLineStarts) == len(m.agentOutput) && len(m.agentOutputLineHeights) == len(m.agentOutput) {
+		return
+	}
+
+	m.agentOutputLayoutWidth = width
+	m.agentOutputLineStarts = make([]int, len(m.agentOutput))
+	m.agentOutputLineHeights = make([]int, len(m.agentOutput))
+	lineNo := 0
+	for i, rawLine := range m.agentOutput {
+		m.agentOutputLineStarts[i] = lineNo
+		rawLine = strings.TrimSpace(rawLine)
+		h := 1
+		if rawLine != "" {
+			wrapped := wordwrap.String(rawLine, width)
+			h = 1 + strings.Count(wrapped, "\n")
+		}
+		m.agentOutputLineHeights[i] = h
+		lineNo += h
+	}
+	m.agentOutputTotalLines = lineNo
+}
+
+func (m *monitorModel) agentOutputMaxYOffset(viewportHeight int) int {
+	if m == nil {
+		return 0
+	}
+	if viewportHeight <= 0 {
+		viewportHeight = 1
+	}
+	return max(0, m.agentOutputTotalLines-viewportHeight)
+}
+
+func (m *monitorModel) findAgentOutputItemAtLine(lineNo int) int {
+	if len(m.agentOutputLineStarts) == 0 {
+		return 0
+	}
+	if lineNo <= 0 {
+		return 0
+	}
+	// Largest start <= lineNo
+	i := sort.Search(len(m.agentOutputLineStarts), func(i int) bool {
+		return m.agentOutputLineStarts[i] > lineNo
+	})
+	if i <= 0 {
+		return 0
+	}
+	if i >= len(m.agentOutputLineStarts) {
+		return len(m.agentOutputLineStarts) - 1
+	}
+	return i - 1
+}
+
+func (m *monitorModel) applyAgentOutputScroll(msg tea.KeyMsg) {
+	if m == nil {
+		return
+	}
+	h := m.agentOutputVP.Height
+	if h <= 0 {
+		h = 1
+	}
+	maxY := m.agentOutputMaxYOffset(h)
+	delta := 0
+	abs := false
+	absVal := 0
+
+	switch msg.Type {
+	case tea.KeyUp:
+		delta = -1
+	case tea.KeyDown:
+		delta = 1
+	case tea.KeyPgUp, tea.KeyCtrlB:
+		delta = -h
+	case tea.KeyPgDown, tea.KeyCtrlF:
+		delta = h
+	case tea.KeyCtrlU:
+		delta = -max(1, h/2)
+	case tea.KeyCtrlD:
+		delta = max(1, h/2)
+	case tea.KeyHome:
+		abs = true
+		absVal = 0
+	case tea.KeyEnd:
+		abs = true
+		absVal = maxY
+	case tea.KeyRunes:
+		switch strings.TrimSpace(msg.String()) {
+		case "k", "K":
+			delta = -1
+		case "j", "J":
+			delta = 1
+		}
+	}
+
+	if abs {
+		m.agentOutputLogicalYOffset = absVal
+	} else {
+		m.agentOutputLogicalYOffset += delta
+	}
+	if m.agentOutputLogicalYOffset < 0 {
+		m.agentOutputLogicalYOffset = 0
+	}
+	if m.agentOutputLogicalYOffset > maxY {
+		m.agentOutputLogicalYOffset = maxY
+	}
+	m.agentOutputFollow = m.agentOutputLogicalYOffset >= maxY
 }
 
 func isScrollKey(msg tea.KeyMsg) bool {

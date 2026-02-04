@@ -637,11 +637,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.layout()
 			return m, nil
 		}
+		m.sessionPickerTotal = msg.total
+		m.sessionPickerPage = msg.page
 		items := sessionsToPickerItems(msg.sessions)
 		m.sessionPickerList.SetItems(items)
-		// Ensure empty filter shows all items.
-		m.sessionPickerList.SetFilterText(m.sessionPickerList.FilterValue())
-		m.sessionPickerList.SetFilterState(list.Filtering)
 		if len(items) > 0 {
 			m.sessionPickerList.Select(0)
 		}
@@ -898,22 +897,22 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		finalText := strings.TrimSpace(msg.final)
 		if finalText != "" {
-				if m.streamingItemIdx >= 0 && m.streamingItemIdx < len(m.transcriptItems) {
-					it := m.transcriptItems[m.streamingItemIdx]
-					if it.kind == transcriptAgent {
-						streamIdx := m.streamingItemIdx
-						it.text = finalText
-						m.transcriptItems[m.streamingItemIdx] = it
-						m.streamingItemIdx = -1
-						m.streamingBuf = nil
-						wasAtBottom := m.transcriptAtBottom()
-						if m.transcriptRenderCache != nil {
-							delete(m.transcriptRenderCache, streamIdx)
-						}
-						m.rebuildTranscript()
-						if wasAtBottom {
-							m.transcriptGotoBottom()
-						}
+			if m.streamingItemIdx >= 0 && m.streamingItemIdx < len(m.transcriptItems) {
+				it := m.transcriptItems[m.streamingItemIdx]
+				if it.kind == transcriptAgent {
+					streamIdx := m.streamingItemIdx
+					it.text = finalText
+					m.transcriptItems[m.streamingItemIdx] = it
+					m.streamingItemIdx = -1
+					m.streamingBuf = nil
+					wasAtBottom := m.transcriptAtBottom()
+					if m.transcriptRenderCache != nil {
+						delete(m.transcriptRenderCache, streamIdx)
+					}
+					m.rebuildTranscript()
+					if wasAtBottom {
+						m.transcriptGotoBottom()
+					}
 					m.addTranscriptItem(transcriptItem{kind: transcriptSpacer})
 				} else {
 					// Fallback: unexpected kind, append normally.
@@ -1102,7 +1101,7 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		}
 		m.layout()
 		if m.sessionPickerOpen {
-			return m.fetchSessionsList()
+			return m.fetchSessionsPage()
 		}
 	}
 	if ev.Type == "transcript.turn" {

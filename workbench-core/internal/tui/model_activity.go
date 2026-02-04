@@ -255,6 +255,10 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		m.refreshActivityList()
 		m.activityList.Select(len(m.activities) - 1)
 		m.refreshActivityDetail()
+		if len(m.activities) != 0 && len(m.activities)%500 == 0 {
+			m.cleanupActivityIndexes()
+			m.cleanupRenderCache()
+		}
 
 	case "agent.op.response":
 		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
@@ -309,6 +313,50 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		}
 		m.refreshActivityList()
 		m.refreshActivityDetail()
+		if len(m.activities) != 0 && len(m.activities)%500 == 0 {
+			m.cleanupActivityIndexes()
+			m.cleanupRenderCache()
+		}
+	}
+}
+
+// cleanupActivityIndexes prunes activity index maps to prevent unbounded memory growth.
+// It keeps enough recent IDs for user navigation while ensuring in-flight op tracking
+// remains accurate.
+func (m *Model) cleanupActivityIndexes() {
+	if m == nil {
+		return
+	}
+	const keepRecent = 2000
+	n := len(m.activities)
+	if n == 0 {
+		m.activityIndexByID = map[string]int{}
+		if m.activityIndexByOpID != nil {
+			m.activityIndexByOpID = map[string]int{}
+		}
+		return
+	}
+	start := 0
+	if n > keepRecent {
+		start = n - keepRecent
+	}
+
+	rebuilt := make(map[string]int, keepRecent)
+	for i := start; i < n; i++ {
+		id := strings.TrimSpace(m.activities[i].ID)
+		if id == "" {
+			continue
+		}
+		rebuilt[id] = i
+	}
+	m.activityIndexByID = rebuilt
+
+	if m.activityIndexByOpID != nil {
+		for opID, idx := range m.activityIndexByOpID {
+			if idx < start || idx >= n {
+				delete(m.activityIndexByOpID, opID)
+			}
+		}
 	}
 }
 
