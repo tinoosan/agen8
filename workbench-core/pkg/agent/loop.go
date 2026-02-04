@@ -486,7 +486,7 @@ func DefaultSystemPrompt() string {
     <direct_ops>
       <op name="fs_list">List VFS paths.</op>
       <op name="fs_read">Read file contents.</op>
-      <op name="fs_search">Search a VFS mount using a semantic/indexed search (e.g. /memory).</op>
+      <op name="fs_search">Search files under a VFS path using keyword/regex text search (e.g. /memory, /project).</op>
       <op name="fs_write">Write new files.</op>
       <op name="fs_append">Append to files.</op>
       <op name="fs_edit">Make precise edits via JSON diffs.</op>

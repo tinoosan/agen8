@@ -1,15 +1,16 @@
 package resources
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
-	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
@@ -19,23 +20,13 @@ import (
 // DailyMemoryResource exposes the /memory mount backed by daily files on disk.
 // It enforces that only today's file is writable; past days and MEMORY.MD are read-only.
 type DailyMemoryResource struct {
-	BaseDir     string
-	VectorStore MemoryReindexer
-	Emit        func(ctx context.Context, ev events.Event)
+	BaseDir string
 }
 
 var dailyNameRE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-memory\.md$`)
 
-type MemoryReindexer interface {
-	ReindexDailyFile(ctx context.Context, filename string, content []byte) error
-	Search(ctx context.Context, query string, limit int) ([]types.SearchResult, error)
-}
-
 // NewDailyMemoryResource creates a resource for daily memory files.
-//
-// The vectorStore parameter is optional and can be nil. When provided, memory files
-// are reindexed on write. When nil, reindexing is skipped.
-func NewDailyMemoryResource(baseDir string, vectorStore MemoryReindexer, emit func(ctx context.Context, ev events.Event)) (*DailyMemoryResource, error) {
+func NewDailyMemoryResource(baseDir string) (*DailyMemoryResource, error) {
 	baseDir = strings.TrimSpace(baseDir)
 	if baseDir == "" {
 		return nil, fmt.Errorf("baseDir is required")
@@ -44,9 +35,7 @@ func NewDailyMemoryResource(baseDir string, vectorStore MemoryReindexer, emit fu
 		return nil, fmt.Errorf("mkdir memory dir: %w", err)
 	}
 	return &DailyMemoryResource{
-		BaseDir:     baseDir,
-		VectorStore: vectorStore,
-		Emit:        emit,
+		BaseDir: baseDir,
 	}, nil
 }
 
@@ -117,7 +106,6 @@ func (r *DailyMemoryResource) Write(subpath string, data []byte) error {
 	if err := fsutil.WriteFileAtomic(path, data, 0644); err != nil {
 		return err
 	}
-	r.reindexBestEffort(name, data)
 	return nil
 }
 
@@ -138,10 +126,6 @@ func (r *DailyMemoryResource) Append(subpath string, data []byte) error {
 	if _, err := f.Write(data); err != nil {
 		return err
 	}
-	updated, err := os.ReadFile(path)
-	if err == nil {
-		r.reindexBestEffort(name, updated)
-	}
 	return nil
 }
 
@@ -153,28 +137,9 @@ func (r *DailyMemoryResource) Search(ctx context.Context, subpath string, query 
 	if clean != "" && clean != "." {
 		return nil, fmt.Errorf("invalid subpath %q: search only supported at root", subpath)
 	}
-	if r == nil || r.VectorStore == nil {
-		return nil, fmt.Errorf("memory search not configured")
-	}
-	return r.VectorStore.Search(ctx, query, limit)
-}
-
-func (r *DailyMemoryResource) reindexBestEffort(name string, data []byte) {
-	if r == nil || r.VectorStore == nil {
-		return
-	}
-	if !dailyNameRE.MatchString(name) {
-		return
-	}
-	if err := r.VectorStore.ReindexDailyFile(context.Background(), name, data); err != nil {
-		if r.Emit != nil {
-			r.Emit(context.Background(), events.Event{
-				Type:    "memory.reindex.failed",
-				Message: "Vector reindex failed",
-				Data:    map[string]string{"file": name, "error": err.Error()},
-			})
-		}
-	}
+	return searchTextFiles(ctx, r.BaseDir, query, limit, func(name string) bool {
+		return strings.EqualFold(name, "MEMORY.MD") || dailyNameRE.MatchString(name)
+	}, "/memory/")
 }
 
 func (r *DailyMemoryResource) cleanFile(subpath string) (string, error) {
@@ -207,4 +172,104 @@ func (r *DailyMemoryResource) ensureWritable(name string) error {
 		return fmt.Errorf("can only write to today's memory file: %s", today)
 	}
 	return nil
+}
+
+func searchTextFiles(ctx context.Context, baseDir string, query string, limit int, allow func(name string) bool, vfsPrefix string) ([]types.SearchResult, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	baseDir = strings.TrimSpace(baseDir)
+	query = strings.TrimSpace(query)
+	if baseDir == "" {
+		return nil, fmt.Errorf("baseDir is required")
+	}
+	if query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+
+	re, reErr := regexp.Compile(query)
+	reOK := reErr == nil
+	qLower := strings.ToLower(query)
+
+	des, err := os.ReadDir(baseDir)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(des))
+	for _, de := range des {
+		if de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if allow != nil && !allow(name) {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	results := make([]types.SearchResult, 0, limit)
+	for _, name := range names {
+		if ctx != nil {
+			select {
+			case <-ctx.Done():
+				return results, ctx.Err()
+			default:
+			}
+		}
+
+		p := filepath.Join(baseDir, name)
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		sc := bufio.NewScanner(f)
+		buf := make([]byte, 0, 64*1024)
+		sc.Buffer(buf, 1024*1024)
+
+		lineN := 0
+		bestScore := 0.0
+		bestSnippet := ""
+		for sc.Scan() {
+			lineN++
+			ln := sc.Text()
+			match := false
+			matchN := 0
+			if reOK && re != nil {
+				idxs := re.FindAllStringIndex(ln, -1)
+				if len(idxs) != 0 {
+					match = true
+					matchN = len(idxs)
+				}
+			} else {
+				if strings.Contains(strings.ToLower(ln), qLower) {
+					match = true
+					matchN = 1
+				}
+			}
+			if !match {
+				continue
+			}
+			score := float64(matchN)
+			if score > bestScore {
+				bestScore = score
+				bestSnippet = fmt.Sprintf("%s:%d: %s", name, lineN, strings.TrimSpace(ln))
+			}
+		}
+		_ = f.Close()
+		if bestScore <= 0 || bestSnippet == "" {
+			continue
+		}
+
+		results = append(results, types.SearchResult{
+			Title:   name,
+			Path:    strings.TrimRight(vfsPrefix, "/") + "/" + name,
+			Snippet: bestSnippet,
+			Score:   bestScore,
+		})
+		if len(results) >= limit {
+			break
+		}
+	}
+	return results, nil
 }

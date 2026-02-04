@@ -8,7 +8,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
-// FSSearchTool searches a VFS mount using a semantic index (e.g. /memory).
+// FSSearchTool searches a VFS mount using keyword/regex text search.
 type FSSearchTool struct{}
 
 func (t *FSSearchTool) Definition() llmtypes.Tool {
@@ -16,13 +16,13 @@ func (t *FSSearchTool) Definition() llmtypes.Tool {
 		Type: "function",
 		Function: llmtypes.ToolFunction{
 			Name:        "fs_search",
-			Description: "[DIRECT] Search a VFS mount using a semantic/indexed search (e.g. /memory). Prefer this over reading whole memory files.",
+			Description: "[DIRECT] Search files under a VFS path using keyword/regex text search. Prefer this over reading whole memory files.",
 			Strict:      true,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path":  map[string]any{"type": "string", "description": "VFS path to search (e.g. /memory)"},
-					"query": map[string]any{"type": "string", "description": "Search query"},
+					"query": map[string]any{"type": "string", "description": "Search query (keyword or regex)"},
 					"limit": map[string]any{"type": "integer", "description": "Max results (default 5)"},
 				},
 				"required":             []any{"path", "query", "limit"},

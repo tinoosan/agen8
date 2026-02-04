@@ -46,7 +46,6 @@ type BuildConfig struct {
 	HistoryStore          store.HistoryStore
 	MemoryStore           store.DailyMemoryStore
 	TraceStore            store.TraceStore
-	MemoryReindexer       resources.MemoryReindexer
 	ConstructorStore      store.ConstructorStateStore
 	Emit                  func(ctx context.Context, ev events.Event)
 	IncludeHistoryOps     bool
@@ -249,7 +248,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if memStore == nil {
 		return nil, fmt.Errorf("memory store is required")
 	}
-	memRes, err := resources.NewDailyMemoryResource(fsutil.GetMemoryDir(cfg.Cfg.DataDir), cfg.MemoryReindexer, cfg.Emit)
+	memRes, err := resources.NewDailyMemoryResource(fsutil.GetMemoryDir(cfg.Cfg.DataDir))
 	if err != nil {
 		return nil, fmt.Errorf("create memory resource: %w", err)
 	}

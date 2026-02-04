@@ -25,6 +25,7 @@ import (
 	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/resources"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -1244,11 +1245,12 @@ func (m *monitorModel) searchMemory(query string) tea.Cmd {
 		if query == "" {
 			return commandLinesMsg{lines: []string{"[memory] error: query is empty"}}
 		}
-		vm, err := store.NewVectorMemoryStore(m.cfg)
+		memDir := fsutil.GetMemoryDir(m.cfg.DataDir)
+		res, err := resources.NewDailyMemoryResource(memDir)
 		if err != nil {
 			return commandLinesMsg{lines: []string{"[memory] error: " + err.Error()}}
 		}
-		results, err := vm.Search(m.ctx, query, 5)
+		results, err := res.Search(m.ctx, "", query, 5)
 		if err != nil {
 			return commandLinesMsg{lines: []string{"[memory] error: " + err.Error()}}
 		}

@@ -145,20 +145,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 	constructorStore = cs
 
-	// Vector memory store (SQLite-backed) for semantic recall.
-	// Best-effort: daemon can still run without this, but loses long-term recall.
-	var memoryProvider agent.MemoryRecallProvider
-	var vectorStore *implstore.VectorMemoryStore
-	if vm, err := implstore.NewVectorMemoryStore(cfg); err == nil {
-		vectorStore = vm
-		memoryProvider = &vectorMemoryAdapter{store: vm}
-	} else {
-		mustEmit(ctx, events.Event{
-			Type:    "daemon.warning",
-			Message: "Vector memory disabled",
-			Data:    map[string]string{"error": err.Error()},
-		})
-	}
+	// Text-based memory recall provider backed by daily memory files.
+	// Semantic/vector recall is intentionally not used.
+	var memoryProvider agent.MemoryRecallProvider = &textMemoryAdapter{store: memStore}
 
 	var notifier agent.Notifier
 	if strings.TrimSpace(resolved.ResultWebhookURL) != "" {
@@ -176,7 +165,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		HistoryStore:          historyStore,
 		MemoryStore:           memStore,
 		TraceStore:            traceStore,
-		MemoryReindexer:       vectorStore,
 		ConstructorStore:      constructorStore,
 		Emit:                  mustEmit,
 		IncludeHistoryOps:     derefBool(resolved.IncludeHistoryOps, true),
@@ -311,21 +299,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 
 	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
-
-	if vectorStore != nil {
-		go func() {
-			ticker := time.NewTicker(5 * time.Minute)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-runCtx.Done():
-					return
-				case <-ticker.C:
-					_ = vectorStore.IndexAllDailyFiles(runCtx)
-				}
-			}
-		}()
-	}
 
 	var serverWG sync.WaitGroup
 	webhookAddr := strings.TrimSpace(resolved.WebhookAddr)
