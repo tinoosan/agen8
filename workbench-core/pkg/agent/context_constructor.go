@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -31,13 +30,6 @@ func (c *PromptBuilder) SystemPrompt(ctx context.Context, basePrompt string, ste
 	sections := []string{strings.TrimSpace(basePrompt)}
 	if c == nil || c.FS == nil {
 		return strings.TrimSpace(basePrompt), nil
-	}
-
-	if c.MaxMemoryBytes != 0 {
-		todayPath := "/memory/" + time.Now().Format("2006-01-02") + "-memory.md"
-		if memory := c.readCap(todayPath, c.MaxMemoryBytes); memory != "" {
-			sections = append(sections, "## Memory\n\n"+memory)
-		}
 	}
 
 	out := strings.TrimSpace(strings.Join(nonEmpty(sections), "\n\n")) + "\n"

@@ -159,19 +159,8 @@ func (u *PromptUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string
 	policy := u.computePolicy(step, maxMem, maxTrace)
 	manifest.Policy = policy
 
-	// Memory excerpt (tail-biased).
-	todayName := time.Now().Format("2006-01-02") + "-memory.md"
-	memPath := "/memory/" + todayName
-	memBytes, memErr := u.FS.Read(memPath)
-	if memErr != nil {
-		memBytes = []byte{}
-	}
-	memIncl, memTrunc := tailUTF8(memBytes, policy.Budgets.MemoryBytes)
-	manifest.Memory.Path = memPath
-	manifest.Memory.BytesTotal = len(memBytes)
-	manifest.Memory.BytesIncluded = len(memIncl)
-	manifest.Memory.Truncated = memTrunc
-	manifest.Memory.BudgetBytes = policy.Budgets.MemoryBytes
+	// Memory excerpt (removed for token optimization: rely on tool-based retrieval).
+	// manifest.Memory fields kept for struct compatibility but will be empty.
 
 	// Trace excerpt (incremental since offset -> parsed -> filtered -> condensed).
 	traceMode := "since"
@@ -217,13 +206,7 @@ func (u *PromptUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string
 	manifest.Trace.BudgetBytes = policy.Budgets.TraceBytes
 
 	system := strings.TrimSpace(basePrompt)
-	if len(memIncl) > 0 {
-		system += buildXMLBlock("run_memory", []xmlAttribute{
-			{key: "path", value: memPath},
-			{key: "bytes_included", value: strconv.Itoa(len(memIncl))},
-			{key: "bytes_total", value: strconv.Itoa(len(memBytes))},
-		}, string(memIncl))
-	}
+
 	if policy.LastOp != nil {
 		system += buildXMLBlock("last_host_op", nil, summarizeLastOp(policy))
 	}
