@@ -3,8 +3,10 @@ package state
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -92,7 +94,9 @@ type RunStats struct {
 }
 
 var (
-	ErrTaskNotFound  = errors.New("task not found")
+	// ErrTaskNotFound indicates the requested task does not exist.
+	// Wraps pkgstore.ErrNotFound so callers can use errors.Is(err, pkgstore.ErrNotFound).
+	ErrTaskNotFound  = fmt.Errorf("%w: task", pkgstore.ErrNotFound)
 	ErrTaskClaimed   = errors.New("task already claimed by another worker")
 	ErrTaskTerminal  = errors.New("task is in terminal state (completed/failed/canceled)")
 	ErrInvalidFilter = errors.New("invalid task filter")
