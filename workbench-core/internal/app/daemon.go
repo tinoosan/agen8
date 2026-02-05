@@ -592,11 +592,11 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 
 		mu.Lock()
 		defer mu.Unlock()
-		run.TotalTokensIn += input
-		run.TotalTokensOut += output
+		run.InputTokens += input
+		run.OutputTokens += output
 		run.TotalTokens += total
 		if pricingKnown {
-			run.TotalCostUSD += costUSD
+			run.CostUSD += costUSD
 		}
 		if err := implstore.SaveRun(cfg, run); err != nil {
 			log.Printf("daemon: warning: failed to save run: %v", err)
@@ -616,11 +616,11 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 			}
 		}
 		if sessionLoaded {
-			session.TotalTokensIn += input
-			session.TotalTokensOut += output
+			session.InputTokens += input
+			session.OutputTokens += output
 			session.TotalTokens += total
 			if pricingKnown {
-				session.TotalCostUSD += costUSD
+				session.CostUSD += costUSD
 			}
 			if err := implstore.SaveSession(cfg, session); err != nil {
 				log.Printf("daemon: warning: failed to save session: %v", err)

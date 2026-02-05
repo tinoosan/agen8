@@ -62,6 +62,8 @@ func (s *RPCServer) Serve(ctx context.Context, in io.Reader, out io.Writer) erro
 
 	enc := json.NewEncoder(out)
 	outCh := make(chan protocol.Message, 1024)
+	stopCh := make(chan struct{})
+	var closeOnce sync.Once
 	writerDone := make(chan struct{})
 	var writerErr error
 	var writerMu sync.Mutex
@@ -77,6 +79,13 @@ func (s *RPCServer) Serve(ctx context.Context, in io.Reader, out io.Writer) erro
 		if writerErr == nil {
 			writerErr = err
 		}
+	}
+
+	closeOut := func() {
+		closeOnce.Do(func() {
+			close(stopCh)
+			close(outCh)
+		})
 	}
 
 	go func() {
@@ -101,6 +110,8 @@ func (s *RPCServer) Serve(ctx context.Context, in io.Reader, out io.Writer) erro
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-stopCh:
+			return io.ErrClosedPipe
 		case <-writerDone:
 			if err := writeErr(); err != nil {
 				return err
@@ -114,6 +125,8 @@ func (s *RPCServer) Serve(ctx context.Context, in io.Reader, out io.Writer) erro
 	sendNotification := func(msg protocol.Message) {
 		select {
 		case <-ctx.Done():
+			return
+		case <-stopCh:
 			return
 		case <-writerDone:
 			return
@@ -131,6 +144,8 @@ func (s *RPCServer) Serve(ctx context.Context, in io.Reader, out io.Writer) erro
 			for {
 				select {
 				case <-ctx.Done():
+					return
+				case <-stopCh:
 					return
 				case msg, ok := <-s.notifyCh:
 					if !ok {
@@ -153,12 +168,24 @@ func (s *RPCServer) Serve(ctx context.Context, in io.Reader, out io.Writer) erro
 		var msg protocol.Message
 		if err := dec.Decode(&msg); err != nil {
 			if errors.Is(err, io.EOF) {
-				close(outCh)
+				// Best-effort: flush any already-queued notifications before shutdown.
+				if s.notifyCh != nil {
+					for {
+						select {
+						case n := <-s.notifyCh:
+							sendNotification(n)
+						default:
+							goto drained
+						}
+					}
+				}
+			drained:
+				closeOut()
 				<-writerDone
 				return nil
 			}
 			_ = sendResponse(protocol.NewErrorResponse(nil, &protocol.RPCError{Code: protocol.CodeParseError, Message: "parse error"}))
-			close(outCh)
+			closeOut()
 			<-writerDone
 			return err
 		}
@@ -170,7 +197,7 @@ func (s *RPCServer) Serve(ctx context.Context, in io.Reader, out io.Writer) erro
 
 		resp := s.handleRequest(ctx, msg)
 		if err := sendResponse(resp); err != nil {
-			close(outCh)
+			closeOut()
 			<-writerDone
 			return err
 		}
@@ -457,9 +484,9 @@ func threadFromSession(run types.Run, sess types.Session) protocol.Thread {
 		ActiveModel: strings.TrimSpace(sess.ActiveModel),
 		ActiveRunID: protocol.RunID(strings.TrimSpace(run.RunID)),
 
-		TotalTokensIn:  sess.TotalTokensIn,
-		TotalTokensOut: sess.TotalTokensOut,
-		TotalTokens:    sess.TotalTokens,
-		TotalCostUSD:   sess.TotalCostUSD,
+		InputTokens:  sess.InputTokens,
+		OutputTokens: sess.OutputTokens,
+		TotalTokens:  sess.TotalTokens,
+		CostUSD:      sess.CostUSD,
 	}
 }

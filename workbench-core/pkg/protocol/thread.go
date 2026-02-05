@@ -18,8 +18,8 @@ type Thread struct {
 	ActiveRunID RunID `json:"activeRunId,omitempty"`
 
 	// Best-effort aggregates for client display.
-	TotalTokensIn  int     `json:"totalTokensIn,omitempty"`
-	TotalTokensOut int     `json:"totalTokensOut,omitempty"`
-	TotalTokens    int     `json:"totalTokens,omitempty"`
-	TotalCostUSD   float64 `json:"totalCostUsd,omitempty"`
+	InputTokens  int     `json:"inputTokens,omitempty"`
+	OutputTokens int     `json:"outputTokens,omitempty"`
+	TotalTokens  int     `json:"totalTokens,omitempty"`
+	CostUSD      float64 `json:"costUsd,omitempty"`
 }
