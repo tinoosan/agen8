@@ -31,6 +31,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/profile"
+	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -66,10 +67,30 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return fmt.Errorf("create session: %w", err)
 	}
 
+	// Phase 2: protocol notifications are emitted alongside existing events.
+	// Phase 3 will consume this channel to send JSON-RPC notifications to clients.
+	notifyCh := make(chan protocol.Message, 1000)
+	protocolSink := protocol.NewSink(
+		func(method string, params any) error {
+			msg, err := protocol.NewNotification(method, params)
+			if err != nil {
+				return err
+			}
+			select {
+			case notifyCh <- msg:
+			default:
+				// Drop if buffer is full (non-blocking, like UI sinks).
+			}
+			return nil
+		},
+		protocol.WithThreadID(protocol.ThreadID(run.SessionID)),
+	)
+
 	emitter := &events.Emitter{
 		RunID: run.RunID,
 		Sink: events.MultiSink{
 			events.StoreSink{Store: daemonEventAppender{cfg: cfg}},
+			protocolSink,
 		},
 	}
 	mustEmit := func(ctx context.Context, ev events.Event) {
