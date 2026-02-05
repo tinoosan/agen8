@@ -41,6 +41,9 @@ type Config struct {
 	InboxPath    string
 	OutboxPath   string
 	PollInterval time.Duration
+	// WakeCh, when signaled, nudges the session loop to drain the inbox immediately.
+	// This is used by the app server to provide low-latency turn.create.
+	WakeCh       <-chan struct{}
 	MaxReadBytes int
 
 	LeaseTTL    time.Duration
@@ -151,33 +154,40 @@ func (s *Session) Run(ctx context.Context) error {
 	timer := time.NewTimer(poll)
 	defer timer.Stop()
 
+	tick := func() error {
+		hadCandidates, err := s.drainInbox(ctx)
+		if err != nil {
+			s.logf("inbox drain error: %v", err)
+			s.emitBestEffort(ctx, events.Event{Type: "daemon.error", Message: "Inbox drain error", Data: map[string]string{"error": err.Error()}})
+		}
+		if hadCandidates {
+			poll = basePoll
+		} else if poll < maxPoll {
+			poll *= 2
+			if poll > maxPoll {
+				poll = maxPoll
+			}
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(poll)
+		return err
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case job := <-s.hbCh:
 			s.handleHeartbeat(ctx, job)
+		case <-s.cfg.WakeCh:
+			_ = tick()
 		case <-timer.C:
-			hadCandidates, err := s.drainInbox(ctx)
-			if err != nil {
-				s.logf("inbox drain error: %v", err)
-				s.emitBestEffort(ctx, events.Event{Type: "daemon.error", Message: "Inbox drain error", Data: map[string]string{"error": err.Error()}})
-			}
-			if hadCandidates {
-				poll = basePoll
-			} else if poll < maxPoll {
-				poll *= 2
-				if poll > maxPoll {
-					poll = maxPoll
-				}
-			}
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			timer.Reset(poll)
+			_ = tick()
 		}
 	}
 }

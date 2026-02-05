@@ -35,6 +35,7 @@ const (
 type Item struct {
 	ID        ItemID          `json:"id"`
 	TurnID    TurnID          `json:"turnId"`
+	RunID     RunID           `json:"runId,omitempty"`
 	Type      ItemType        `json:"type"`
 	Status    ItemStatus      `json:"status"`
 	CreatedAt time.Time       `json:"createdAt,omitempty"`

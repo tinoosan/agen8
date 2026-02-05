@@ -123,6 +123,7 @@ func (s *Sink) mapEventLocked(runID string, ev types.EventRecord) []notification
 	}
 	ts := eventTime(s.now, ev)
 	threadID := ensureThreadID(s.threadID, runID)
+	protoRunID := RunID(strings.TrimSpace(runID))
 
 	switch kind {
 	case "task.start", "task.started":
@@ -134,6 +135,7 @@ func (s *Sink) mapEventLocked(runID string, ev types.EventRecord) []notification
 		turn := Turn{
 			ID:        turnID,
 			ThreadID:  threadID,
+			RunID:     protoRunID,
 			Status:    TurnStatusInProgress,
 			CreatedAt: ts,
 		}
@@ -151,6 +153,7 @@ func (s *Sink) mapEventLocked(runID string, ev types.EventRecord) []notification
 			item := Item{
 				ID:        itemIDForTurn(turn.ID, "user"),
 				TurnID:    turn.ID,
+				RunID:     protoRunID,
 				Type:      ItemTypeUserMessage,
 				Status:    ItemStatusStarted,
 				CreatedAt: ts,
@@ -178,6 +181,7 @@ func (s *Sink) mapEventLocked(runID string, ev types.EventRecord) []notification
 			turn = &Turn{
 				ID:        turnID,
 				ThreadID:  threadID,
+				RunID:     protoRunID,
 				Status:    TurnStatusInProgress,
 				CreatedAt: ts,
 			}
@@ -211,6 +215,7 @@ func (s *Sink) mapEventLocked(runID string, ev types.EventRecord) []notification
 			item := Item{
 				ID:        itemIDForTurn(turn.ID, "assistant"),
 				TurnID:    turn.ID,
+				RunID:     protoRunID,
 				Type:      ItemTypeAgentMessage,
 				Status:    ItemStatusStarted,
 				CreatedAt: ts,
@@ -255,6 +260,7 @@ func (s *Sink) mapEventLocked(runID string, ev types.EventRecord) []notification
 		item := Item{
 			ID:        ItemID(opID),
 			TurnID:    turn.ID,
+			RunID:     protoRunID,
 			Type:      ItemTypeToolExecution,
 			Status:    ItemStatusStarted,
 			CreatedAt: ts,
@@ -291,6 +297,7 @@ func (s *Sink) mapEventLocked(runID string, ev types.EventRecord) []notification
 			item = &Item{
 				ID:        ItemID(opID),
 				TurnID:    turn.ID,
+				RunID:     protoRunID,
 				Type:      ItemTypeToolExecution,
 				Status:    ItemStatusStarted,
 				CreatedAt: ts,
@@ -342,6 +349,7 @@ func (s *Sink) mapEventLocked(runID string, ev types.EventRecord) []notification
 		item := Item{
 			ID:        itemIDForTurn(turn.ID, "reasoning-"+mapGet(ev.Data, "step")),
 			TurnID:    turn.ID,
+			RunID:     protoRunID,
 			Type:      ItemTypeReasoning,
 			Status:    ItemStatusStarted,
 			CreatedAt: ts,
@@ -368,6 +376,7 @@ func (s *Sink) mapEventLocked(runID string, ev types.EventRecord) []notification
 		item := Item{
 			ID:        ItemID(newID("item-")),
 			TurnID:    turn.ID,
+			RunID:     protoRunID,
 			Type:      ItemTypeUserMessage,
 			Status:    ItemStatusStarted,
 			CreatedAt: ts,
@@ -393,6 +402,7 @@ func (s *Sink) mapEventLocked(runID string, ev types.EventRecord) []notification
 		item := Item{
 			ID:        ItemID(newID("item-")),
 			TurnID:    turn.ID,
+			RunID:     protoRunID,
 			Type:      ItemTypeAgentMessage,
 			Status:    ItemStatusStreaming,
 			CreatedAt: ts,

@@ -110,6 +110,9 @@ func TestSink_OpRequestResponseEmitsToolItems(t *testing.T) {
 	if started.Item.ID != "op-1" || started.Item.TurnID != "task-1" || started.Item.Type != ItemTypeToolExecution {
 		t.Fatalf("started item = %#v", started.Item)
 	}
+	if started.Item.RunID != "run-1" {
+		t.Fatalf("started item runId = %q want %q", started.Item.RunID, "run-1")
+	}
 
 	// Tool response.
 	got = nil
@@ -128,6 +131,9 @@ func TestSink_OpRequestResponseEmitsToolItems(t *testing.T) {
 	}
 	if completed.Item.ID != "op-1" || completed.Item.Status != ItemStatusCompleted {
 		t.Fatalf("completed item = %#v", completed.Item)
+	}
+	if completed.Item.RunID != "run-1" {
+		t.Fatalf("completed item runId = %q want %q", completed.Item.RunID, "run-1")
 	}
 	var te ToolExecutionContent
 	if err := completed.Item.DecodeContent(&te); err != nil {

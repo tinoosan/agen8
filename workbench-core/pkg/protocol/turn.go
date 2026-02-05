@@ -20,6 +20,7 @@ const (
 type Turn struct {
 	ID        TurnID     `json:"id"`
 	ThreadID  ThreadID   `json:"threadId"`
+	RunID     RunID      `json:"runId,omitempty"`
 	Status    TurnStatus `json:"status"`
 	CreatedAt time.Time  `json:"createdAt"`
 

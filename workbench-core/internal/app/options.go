@@ -12,6 +12,7 @@ type RunChatOptions struct {
 	Model            string
 	Profile          string
 	WorkDir          string
+	ProtocolStdio    bool
 	WebhookAddr      string
 	ResultWebhookURL string
 	HealthAddr       string
@@ -23,8 +24,8 @@ type RunChatOptions struct {
 	RecentHistoryPairs int
 	IncludeHistoryOps  *bool
 
-	MaxTraceBytes   int
-	MaxMemoryBytes  int
+	MaxTraceBytes  int
+	MaxMemoryBytes int
 
 	PriceInPerMTokensUSD  float64
 	PriceOutPerMTokensUSD float64
@@ -84,6 +85,13 @@ func WithWorkDir(dir string) RunChatOption {
 		if dir != "" {
 			o.WorkDir = dir
 		}
+		return nil
+	}
+}
+
+func WithProtocolStdio(enabled bool) RunChatOption {
+	return func(o *RunChatOptions) error {
+		o.ProtocolStdio = enabled
 		return nil
 	}
 }

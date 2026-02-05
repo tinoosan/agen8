@@ -14,6 +14,9 @@ type Thread struct {
 	// ActiveModel is the model identifier in use for this thread (e.g. "openai/gpt-5.2").
 	ActiveModel string `json:"activeModel,omitempty"`
 
+	// ActiveRunID identifies the current agent-instance run served by the app server.
+	ActiveRunID RunID `json:"activeRunId,omitempty"`
+
 	// Best-effort aggregates for client display.
 	TotalTokensIn  int     `json:"totalTokensIn,omitempty"`
 	TotalTokensOut int     `json:"totalTokensOut,omitempty"`

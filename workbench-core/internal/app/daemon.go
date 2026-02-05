@@ -35,6 +35,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
+	"golang.org/x/term"
 )
 
 // RunDaemon starts a headless worker that continuously polls /inbox and writes results to /outbox.
@@ -67,11 +68,61 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return fmt.Errorf("create session: %w", err)
 	}
 
-	// Phase 2: protocol notifications are emitted alongside existing events.
-	// Phase 3 will consume this channel to send JSON-RPC notifications to clients.
-	notifyCh := make(chan protocol.Message, 1000)
+	// Enable protocol STDIO when explicitly requested or when piping (non-TTY stdin+stdout).
+	protocolEnabled := resolved.ProtocolStdio
+	if !protocolEnabled {
+		inTTY := term.IsTerminal(int(os.Stdin.Fd()))
+		outTTY := term.IsTerminal(int(os.Stdout.Fd()))
+		if !inTTY && !outTTY {
+			protocolEnabled = true
+		}
+	}
+
+	var notifyCh chan protocol.Message
+	var index *protocol.Index
+	if protocolEnabled {
+		index = protocol.NewIndex(10_000, 2_000)
+		notifyCh = make(chan protocol.Message, 1000)
+
+		// Warm the index by replaying stored events for this run.
+		{
+			replaySink := protocol.NewSink(func(method string, params any) error {
+				index.Apply(method, params)
+				return nil
+			}, protocol.WithThreadID(protocol.ThreadID(run.SessionID)))
+
+			var after int64
+			for {
+				batch, next, err := implstore.ListEventsPaginated(cfg, implstore.EventFilter{
+					RunID:    run.RunID,
+					Limit:    1000,
+					AfterSeq: after,
+				})
+				if err != nil {
+					log.Printf("daemon: protocol warmup failed: %v", err)
+					break
+				}
+				if len(batch) == 0 {
+					break
+				}
+				for _, ev := range batch {
+					_ = replaySink.Emit(context.Background(), run.RunID, ev)
+				}
+				after = next
+			}
+		}
+	}
+
+	// Protocol sink converts host events into protocol notifications (Phase 2) and, when
+	// enabled, feeds the protocol index + notification channel used by the app server (Phase 3).
 	protocolSink := protocol.NewSink(
 		func(method string, params any) error {
+			if index != nil {
+				index.Apply(method, params)
+			}
+			if notifyCh == nil {
+				return nil
+			}
 			msg, err := protocol.NewNotification(method, params)
 			if err != nil {
 				return err
@@ -79,7 +130,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 			select {
 			case notifyCh <- msg:
 			default:
-				// Drop if buffer is full (non-blocking, like UI sinks).
+				// Drop if buffer is full (best-effort).
 			}
 			return nil
 		},
@@ -260,6 +311,8 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return fmt.Errorf("create task store: %w", err)
 	}
 
+	wakeCh := make(chan struct{}, 1)
+
 	// Seed default tools and inject the DB-backed task_create tool.
 	registry, err := agent.DefaultHostToolRegistry()
 	if err != nil {
@@ -303,6 +356,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		InboxPath:         "/inbox",
 		OutboxPath:        "/outbox",
 		PollInterval:      poll,
+		WakeCh:            wakeCh,
 		MaxReadBytes:      256 * 1024,
 		LeaseTTL:          2 * time.Minute,
 		MaxRetries:        3,
@@ -320,6 +374,27 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 
 	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
+
+	if protocolEnabled {
+		srv := NewRPCServer(RPCServerConfig{
+			Cfg:       cfg,
+			Run:       run,
+			TaskStore: taskStore,
+			NotifyCh:  notifyCh,
+			Index:     index,
+			Wake: func() {
+				select {
+				case wakeCh <- struct{}{}:
+				default:
+				}
+			},
+		})
+		go func() {
+			if err := srv.Serve(runCtx, os.Stdin, os.Stdout); err != nil && runCtx.Err() == nil {
+				log.Printf("daemon: protocol server stopped: %v", err)
+			}
+		}()
+	}
 
 	// Background session retention: strictly prune sessions older than 30 days.
 	{

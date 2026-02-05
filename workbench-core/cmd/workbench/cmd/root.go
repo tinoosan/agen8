@@ -19,6 +19,7 @@ var (
 	profileRef     string
 	enableMouse    bool
 	enableActivity bool
+	protocolStdio  bool
 
 	maxTraceBytes      int
 	maxMemoryBytes     int
@@ -41,6 +42,10 @@ that continuously processes tasks from /inbox and writes results to /outbox.
 Start the daemon first, then run "workbench monitor" so the monitor attaches to
 the active agent (or use "workbench monitor --agent-id <id>" with the agent ID printed
 at daemon startup).
+
+Protocol mode:
+  - Use --protocol-stdio to enable JSON-RPC 2.0 over stdin/stdout.
+  - Protocol mode is also auto-enabled when both stdin and stdout are non-TTY (piped).
 
 Each executed task can:
   - read/write run-scoped artifacts in /workspace
@@ -88,6 +93,7 @@ Each executed task can:
 			app.WithModel(modelOverride),
 			app.WithProfile(profileRef),
 			app.WithWorkDir(workDir),
+			app.WithProtocolStdio(protocolStdio),
 			app.WithWebhookAddr(webhookAddr),
 			app.WithResultWebhookURL(resultWebhookURL),
 			app.WithHealthAddr(healthAddr),
@@ -118,6 +124,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&enableMouse, "mouse", enableMouse, "enable Bubble Tea mouse capture (mouse wheel scrolling; may disable native selection)")
 	enableActivity = envBool("WORKBENCH_ACTIVITY", false)
 	rootCmd.PersistentFlags().BoolVar(&enableActivity, "activity", enableActivity, "show activity panel by default (env WORKBENCH_ACTIVITY)")
+	rootCmd.PersistentFlags().BoolVar(&protocolStdio, "protocol-stdio", false, "enable JSON-RPC protocol over stdin/stdout (auto-enabled when piping)")
 	modelID = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
 	rootCmd.PersistentFlags().StringVar(&modelID, "model", modelID, "LLM model identifier (default: env OPENROUTER_MODEL)")
 	profileRef = strings.TrimSpace(os.Getenv("WORKBENCH_PROFILE"))
