@@ -29,4 +29,3 @@ func (t *Thread) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
-

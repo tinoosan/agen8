@@ -13,9 +13,9 @@ func (s *Session) UnmarshalJSON(data []byte) error {
 	type sessionWire struct {
 		sessionAlias
 
-		CostUSD   float64  `json:"-"`
-		CostNew   *float64 `json:"costUSD,omitempty"`
-		CostOld   *float64 `json:"costUsd,omitempty"`
+		CostUSD float64  `json:"-"`
+		CostNew *float64 `json:"costUSD,omitempty"`
+		CostOld *float64 `json:"costUsd,omitempty"`
 	}
 	var w sessionWire
 	if err := json.Unmarshal(data, &w); err != nil {
@@ -131,4 +131,3 @@ func (tr *TaskResult) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
-

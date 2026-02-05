@@ -16,4 +16,3 @@ func NormalizeTaskID(raw string) (normalized string, changed bool) {
 		return "task-" + raw, true
 	}
 }
-

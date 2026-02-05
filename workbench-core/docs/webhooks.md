@@ -32,6 +32,9 @@ export WORKBENCH_WEBHOOK_ADDR=":8080"
 }
 ```
 
+If you provide a `taskId` that does not start with `task-` (or `heartbeat-`), Workbench normalizes it to `task-<id>`.
+When normalization occurs, the original value is recorded in `metadata.originalTaskId`.
+
 ### Response
 
 ```json

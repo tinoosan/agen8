@@ -11,4 +11,3 @@ func getCostUSD(data map[string]string) string {
 	}
 	return strings.TrimSpace(data["costUsd"])
 }
-

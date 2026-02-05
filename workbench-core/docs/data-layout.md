@@ -39,6 +39,8 @@ Workbench exposes an Agentic File System (AFS) inside each run:
 - `/skills` – read-only mount that surfaces user-defined skills.
 - `/plan` – run-scoped planning workspace (`HEAD.md` + `CHECKLIST.md`).
 - `/inbox`, `/outbox` – run-scoped task IO.
+  - Task IDs are normalized on ingress for readability: unprefixed IDs become `task-<id>`.
+  - When normalization occurs, the original value is recorded in task metadata as `originalTaskId`.
 - `/memory` – shared agent memory (`MEMORY.MD`, plus daily `YYYY-MM-DD-memory.md` files).
 
 Understanding this layout makes it easier to inspect sessions/runs manually (e.g., querying `workbench.db`
