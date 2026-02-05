@@ -15,7 +15,7 @@
 //     (file snippets, memories, dynamic prompts) into the agent before it queries the LLM.
 //   - Hooks: Callbacks for observing token usage, tool runs, streams, and logging.
 //   - HostToolRegistry: Registers builtin tool-call functions (fs_*, shell_exec, http_fetch, trace_run)
-//     which map onto host ops (fs.*, shell.exec, http.fetch, browser, trace.run).
+//     which map onto host ops (fs_*, shell_exec, http_fetch, browser, trace_run).
 //
 // # Usage Pattern
 //

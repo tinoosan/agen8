@@ -26,7 +26,7 @@ func TestActivities_UpsertFromAgentOpEvents(t *testing.T) {
 		Message:   "Agent requested host op",
 		Data: map[string]string{
 			"opId":       "op-1",
-			"op":         "fs.read",
+			"op":         "fs_read",
 			"path":       "/project/main.go",
 			"maxBytes":   "1234",
 			"textIsJSON": "false",
@@ -43,7 +43,7 @@ func TestActivities_UpsertFromAgentOpEvents(t *testing.T) {
 		Message:   "Host op completed",
 		Data: map[string]string{
 			"opId":     "op-1",
-			"op":       "fs.read",
+			"op":       "fs_read",
 			"ok":       "true",
 			"bytesLen": "12",
 		},
@@ -70,8 +70,8 @@ func TestActivities_UpsertFromAgentOpEvents(t *testing.T) {
 	if a.ID != "op-1" {
 		t.Fatalf("id=%q want %q", a.ID, "op-1")
 	}
-	if a.Kind != "fs.read" {
-		t.Fatalf("kind=%q want %q", a.Kind, "fs.read")
+	if a.Kind != "fs_read" {
+		t.Fatalf("kind=%q want %q", a.Kind, "fs_read")
 	}
 	if a.Status != types.ActivityOK {
 		t.Fatalf("status=%q want %q", a.Status, types.ActivityOK)

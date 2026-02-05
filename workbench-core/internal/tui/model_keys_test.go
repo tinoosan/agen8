@@ -693,7 +693,7 @@ func TestActivity_OpenFileViewer_OKey(t *testing.T) {
 	m.layout()
 
 	m.activities = []Activity{
-		{ID: "act-1", Kind: "fs.write", Title: "Write /workspace/example.json", Status: ActivityOK, Path: "/workspace/example.json"},
+		{ID: "act-1", Kind: "fs_write", Title: "Write /workspace/example.json", Status: ActivityOK, Path: "/workspace/example.json"},
 	}
 	m.refreshActivityList()
 	m.activityList.Select(0)

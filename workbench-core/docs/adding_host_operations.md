@@ -282,7 +282,7 @@ Use browser for:
 - Multi-step interactions (login, forms, navigation)
 - Visual verification (screenshots, PDFs)
 
-Use http.fetch for:
+Use http_fetch for:
 - Simple API calls
 - Static content
 - Performance-critical requests
@@ -359,7 +359,7 @@ func TestBrowserOperation(t *testing.T) {
 Study these for reference:
 
 ### Simple Operation (No State)
-- **fs.list, fs.read, fs.write** (`host_ops_mock.go` lines 68-160)
+- **fs_list, fs_read, fs_write** (`host_ops_mock.go` lines 68-160)
 - Direct VFS operations, no external state
 
 ### Invoker Pattern (Stateful)

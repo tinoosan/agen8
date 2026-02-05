@@ -7,7 +7,7 @@ import (
 
 func TestRenderActivityDetailMarkdown_FSWrite_ShowsContentPreview(t *testing.T) {
 	a := Activity{
-		Kind:        "fs.write",
+		Kind:        "fs_write",
 		Title:       "Write /workspace/example.json",
 		Path:        "/workspace/example.json",
 		TextPreview: `{"a":1,"b":{"c":2}}`,

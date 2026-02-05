@@ -594,7 +594,7 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 		}
 	}
 
-	if (a.Kind == "fs.write" || a.Kind == "fs.append") && !a.TextRedacted && strings.TrimSpace(a.TextPreview) != "" {
+	if (a.Kind == "fs_write" || a.Kind == "fs_append") && !a.TextRedacted && strings.TrimSpace(a.TextPreview) != "" {
 		lang := guessCodeFenceLang(a.Path, a.TextIsJSON)
 		b.WriteString("\n**Written content preview**")
 		if a.TextTruncated {
@@ -607,7 +607,7 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 			b.WriteString(FormatCode(lang, a.TextPreview))
 		}
 		b.WriteString("\n")
-	} else if (a.Kind == "fs.write" || a.Kind == "fs.append") && a.TextRedacted {
+	} else if (a.Kind == "fs_write" || a.Kind == "fs_append") && a.TextRedacted {
 		b.WriteString("\n**Written content preview**\n\n_(redacted)_\n")
 	}
 
@@ -627,8 +627,8 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 		b.WriteString("\n**Tool output preview** _(press `e` to expand)_\n\n")
 		b.WriteString(FormatCode("text", txt))
 		b.WriteString("\n")
-	} else if a.Kind == "shell.exec" || a.Kind == "shell_exec" {
-		// Specific handling for shell.exec components
+	} else if a.Kind == "shell_exec" {
+		// Specific handling for shell_exec components
 		exitCode := strings.TrimSpace(a.Data["exitCode"])
 		stdout := strings.TrimSpace(a.Data["stdout"])
 		stderr := strings.TrimSpace(a.Data["stderr"])
@@ -647,7 +647,7 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 			b.WriteString(FormatCode("text", stderr))
 			b.WriteString("\n")
 		}
-	} else if a.Kind == "http.fetch" || a.Kind == "http_fetch" {
+	} else if a.Kind == "http_fetch" {
 		status := strings.TrimSpace(a.Data["status"])
 		body := strings.TrimSpace(a.Data["body"])
 		if status != "" {
@@ -660,7 +660,7 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 			b.WriteString(FormatCode("html", body))
 			b.WriteString("\n")
 		}
-	} else if a.Kind == "trace.run" || a.Kind == "trace" {
+	} else if a.Kind == "trace_run" {
 		output := strings.TrimSpace(a.Data["output"])
 		if output != "" {
 			b.WriteString("\n**Output**\n\n")
@@ -671,12 +671,12 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 
 	if telemetry {
 		b.WriteString("\n**Telemetry**\n\n")
-		if strings.TrimSpace(a.MaxBytes) != "" && a.Kind == "fs.read" {
+		if strings.TrimSpace(a.MaxBytes) != "" && a.Kind == "fs_read" {
 			b.WriteString("- maxBytes: ")
 			b.WriteString(a.MaxBytes)
 			b.WriteString("\n")
 		}
-		if strings.TrimSpace(a.TextBytes) != "" && (a.Kind == "fs.write" || a.Kind == "fs.append") {
+		if strings.TrimSpace(a.TextBytes) != "" && (a.Kind == "fs_write" || a.Kind == "fs_append") {
 			b.WriteString("- textBytes: ")
 			b.WriteString(a.TextBytes)
 			b.WriteString("\n")
@@ -713,14 +713,14 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 			b.WriteString(a.Path)
 			b.WriteString("`\n")
 		}
-		if telemetry && strings.TrimSpace(a.MaxBytes) != "" && a.Kind == "fs.read" {
+		if telemetry && strings.TrimSpace(a.MaxBytes) != "" && a.Kind == "fs_read" {
 			b.WriteString("- maxBytes: ")
 			b.WriteString(a.MaxBytes)
 			b.WriteString("\n")
 		}
 
 		// Handle host operations with new telemetry fields
-		if a.Kind == "shell.exec" || a.Kind == "shell_exec" {
+		if a.Kind == "shell_exec" {
 			if v := strings.TrimSpace(a.Data["argvPreview"]); v != "" {
 				b.WriteString("- command:\n\n")
 				b.WriteString(FormatCode("bash", v))
@@ -731,7 +731,7 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 				b.WriteString(v)
 				b.WriteString("`\n")
 			}
-		} else if a.Kind == "http.fetch" || a.Kind == "http_fetch" {
+		} else if a.Kind == "http_fetch" {
 			if v := strings.TrimSpace(a.Data["url"]); v != "" {
 				b.WriteString("- url: `")
 				b.WriteString(v)
@@ -751,7 +751,7 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 				}
 				b.WriteString("\n")
 			}
-		} else if a.Kind == "trace.run" || a.Kind == "trace" {
+		} else if a.Kind == "trace_run" {
 			if v := strings.TrimSpace(a.Data["traceAction"]); v != "" {
 				b.WriteString("- action: `")
 				b.WriteString(v)
@@ -775,7 +775,7 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 
 func openablePathsForActivity(a Activity) []string {
 	paths := make([]string, 0, 2)
-	if strings.HasPrefix(strings.TrimSpace(a.Kind), "fs.") && strings.TrimSpace(a.Path) != "" {
+	if strings.HasPrefix(strings.TrimSpace(a.Kind), "fs_") && strings.TrimSpace(a.Path) != "" {
 		paths = append(paths, a.Path)
 	}
 	return paths

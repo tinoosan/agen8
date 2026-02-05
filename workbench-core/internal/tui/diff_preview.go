@@ -20,8 +20,8 @@ func buildFileChangePreview(op, path, before, after string, hadBefore bool, afte
 	path = strings.TrimSpace(path)
 
 	// Prefer a host-provided diff preview (already a diff) when available.
-	// - fs.patch: host previews the patch itself
-	// - fs.write/fs.append/fs.edit: host may provide a diff to avoid client-side races
+	// - fs_patch: host previews the patch itself
+	// - fs_write/fs_append/fs_edit: host may provide a diff to avoid client-side races
 	if strings.TrimSpace(patchPreview) != "" && !patchRedacted {
 		preview, statsAdded, statsDeleted, ok := renderUnifiedPreview(patchPreview)
 		if ok {

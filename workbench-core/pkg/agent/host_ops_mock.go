@@ -64,7 +64,7 @@ type BrowserManager interface {
 //
 // This is not the final host API; it is a concrete reference for the agent-facing
 // request/response flow:
-//   - fs.list/fs.read/fs.search/fs.write/fs.append are always available
+//   - fs_list/fs_read/fs_search/fs_write/fs_append are always available
 type HostOpExecutor struct {
 	FS *vfs.FS
 
@@ -84,7 +84,7 @@ type HostOpExecutor struct {
 
 	DefaultMaxBytes int
 
-	// MaxReadBytes caps fs.read payload size returned to the model.
+	// MaxReadBytes caps fs_read payload size returned to the model.
 	//
 	// This protects the model context window and cost from accidental "read the whole file"
 	// requests (e.g. reading large HTML pages, logs, or binary blobs).
@@ -228,7 +228,7 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		}
 		toolReq := pkgtools.ToolRequest{
 			Version:  "v1",
-			CallID:   "shell.exec",
+			CallID:   "shell_exec",
 			ToolID:   pkgtools.ToolID("builtin.shell"),
 			ActionID: "exec",
 			Input:    inp,
@@ -250,7 +250,7 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		if !ok {
 			errMsg = strings.TrimSpace(out.Stderr)
 			if errMsg == "" {
-				errMsg = fmt.Sprintf("shell.exec exited with code %d", out.ExitCode)
+				errMsg = fmt.Sprintf("shell_exec exited with code %d", out.ExitCode)
 			}
 		}
 		return types.HostOpResponse{
@@ -288,7 +288,7 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 		}
 		toolReq := pkgtools.ToolRequest{
 			Version:  "v1",
-			CallID:   "http.fetch",
+			CallID:   "http_fetch",
 			ToolID:   pkgtools.ToolID("builtin.http"),
 			ActionID: "fetch",
 			Input:    inp,

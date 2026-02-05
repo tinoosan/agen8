@@ -524,7 +524,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		verb := "Updated"
-		if p.op != "fs.patch" && !p.hadBefore {
+		if p.op != "fs_patch" && !p.hadBefore {
 			verb = "Created"
 		}
 
@@ -1229,7 +1229,7 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		op := strings.TrimSpace(ev.Data["op"])
 		path := strings.TrimSpace(ev.Data["path"])
 		var beforeCmd tea.Cmd
-		if (op == "fs.write" || op == "fs.append" || op == "fs.edit" || op == "fs.patch") && path != "" {
+		if (op == "fs_write" || op == "fs_append" || op == "fs_edit" || op == "fs_patch") && path != "" {
 			if m.fileSnapCache == nil {
 				m.fileSnapCache = make(map[string]string)
 			}
@@ -1243,7 +1243,7 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 				before:    before,
 				hadBefore: ok,
 			}
-			if op == "fs.patch" {
+			if op == "fs_patch" {
 				p.patchPreview = strings.TrimSpace(ev.Data["patchPreview"])
 				p.patchTruncated = strings.TrimSpace(ev.Data["patchTruncated"]) == "true"
 				p.patchRedacted = strings.TrimSpace(ev.Data["patchRedacted"]) == "true"
@@ -1341,7 +1341,7 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 				return nil
 			}
 		}
-		if (op == "fs.write" || op == "fs.append" || op == "fs.edit" || op == "fs.patch") && strings.TrimSpace(ev.Data["ok"]) == "true" && path != "" {
+		if (op == "fs_write" || op == "fs_append" || op == "fs_edit" || op == "fs_patch") && strings.TrimSpace(ev.Data["ok"]) == "true" && path != "" {
 			if acc, ok := m.runner.(vfsAccessor); ok {
 				return func() tea.Msg {
 					txt, _, truncated, err := acc.ReadVFS(m.ctx, path, maxDiffBytesRead)

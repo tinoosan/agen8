@@ -384,7 +384,7 @@ type pendingFileOp struct {
 	before    string
 	hadBefore bool
 
-	// For fs.patch we can show the patch itself (previewed/redacted by host).
+	// For fs_patch we can show the patch itself (previewed/redacted by host).
 	patchPreview   string
 	patchTruncated bool
 	patchRedacted  bool

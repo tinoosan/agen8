@@ -12,7 +12,7 @@ const (
 	maxHTTPBodyPreviewBytes    = 1024
 )
 
-// fsWriteTextPreviewForEvent returns a small preview of a fs.write/fs.append payload for UI events.
+// fsWriteTextPreviewForEvent returns a small preview of a fs_write/fs_append payload for UI events.
 func fsWriteTextPreviewForEvent(path string, text string) (preview string, truncated bool, redacted bool, originalBytes int, isJSON bool) {
 	originalBytes = len([]byte(text))
 	if strings.TrimSpace(text) == "" {

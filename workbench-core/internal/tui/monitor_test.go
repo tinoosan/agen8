@@ -122,9 +122,9 @@ func TestMonitorHandleCommand_EnqueuesTasksForNonCommands(t *testing.T) {
 }
 
 func TestShouldReloadPlanOnEvent(t *testing.T) {
-	t.Run("fs.write", func(t *testing.T) {
+	t.Run("fs_write", func(t *testing.T) {
 		ev := types.EventRecord{
-			Type: "fs.write",
+			Type: "fs_write",
 			Data: map[string]string{"path": "/plan/HEAD.md"},
 		}
 		if !shouldReloadPlanOnEvent(ev) {
@@ -132,30 +132,30 @@ func TestShouldReloadPlanOnEvent(t *testing.T) {
 		}
 	})
 
-	t.Run("agent.op.request fs.write", func(t *testing.T) {
+	t.Run("agent.op.request fs_write", func(t *testing.T) {
 		ev := types.EventRecord{
 			Type: "agent.op.request",
-			Data: map[string]string{"op": "fs.write", "path": "/plan/CHECKLIST.md"},
+			Data: map[string]string{"op": "fs_write", "path": "/plan/CHECKLIST.md"},
 		}
 		if !shouldReloadPlanOnEvent(ev) {
 			t.Fatalf("expected plan reload for %v", ev)
 		}
 	})
 
-	t.Run("agent.op.response fs.write with path", func(t *testing.T) {
+	t.Run("agent.op.response fs_write with path", func(t *testing.T) {
 		ev := types.EventRecord{
 			Type: "agent.op.response",
-			Data: map[string]string{"op": "fs.write", "path": "/plan/HEAD.md"},
+			Data: map[string]string{"op": "fs_write", "path": "/plan/HEAD.md"},
 		}
 		if !shouldReloadPlanOnEvent(ev) {
 			t.Fatalf("expected plan reload for %v", ev)
 		}
 	})
 
-	t.Run("agent.op.response fs.read", func(t *testing.T) {
+	t.Run("agent.op.response fs_read", func(t *testing.T) {
 		ev := types.EventRecord{
 			Type: "agent.op.response",
-			Data: map[string]string{"op": "fs.read", "path": "/plan/HEAD.md"},
+			Data: map[string]string{"op": "fs_read", "path": "/plan/HEAD.md"},
 		}
 		if shouldReloadPlanOnEvent(ev) {
 			t.Fatalf("did not expect plan reload for %v", ev)

@@ -12,31 +12,31 @@ import (
 
 const (
 	// HostOpFSList lists directory entries in the VFS.
-	HostOpFSList = "fs.list"
+	HostOpFSList = "fs_list"
 	// HostOpFSRead reads a file from the VFS.
-	HostOpFSRead = "fs.read"
+	HostOpFSRead = "fs_read"
 	// HostOpFSSearch searches a VFS mount for matching content (e.g. /memory vector search).
-	HostOpFSSearch = "fs.search"
+	HostOpFSSearch = "fs_search"
 	// HostOpFSWrite writes/replaces a file in the VFS.
-	HostOpFSWrite = "fs.write"
+	HostOpFSWrite = "fs_write"
 	// HostOpFSAppend appends to a file in the VFS.
-	HostOpFSAppend = "fs.append"
+	HostOpFSAppend = "fs_append"
 	// HostOpFSEdit applies structured edits to a file in the VFS (host-generated diff).
-	HostOpFSEdit = "fs.edit"
+	HostOpFSEdit = "fs_edit"
 	// HostOpFSPatch applies a unified diff patch to a file in the VFS.
-	HostOpFSPatch = "fs.patch"
+	HostOpFSPatch = "fs_patch"
 	// HostOpShellExec executes a shell command.
-	HostOpShellExec = "shell.exec"
+	HostOpShellExec = "shell_exec"
 	// HostOpHTTPFetch issues an HTTP request.
-	HostOpHTTPFetch = "http.fetch"
+	HostOpHTTPFetch = "http_fetch"
 	// HostOpBrowser performs an interactive browser action (stateful session).
 	HostOpBrowser = "browser"
 	// HostOpTrace runs a trace action (e.g. events.latest).
-	HostOpTrace = "trace.run"
+	HostOpTrace = "trace_run"
 	// HostOpEmail sends an email notification.
 	HostOpEmail = "email"
 	// HostOpFinal ends the agent loop for a user turn.
-	HostOpFinal = "agent.final"
+	HostOpFinal = "agent_final"
 
 	CommandRejectedErrorCode    = "command_rejected"
 	CommandRejectedErrorMessage = "User denied this command. This is a normal part of the workflow. Do not treat this as a system failure. You should propose an alternative command, ask the user for specialized instructions, or proceed with independent work if possible."
@@ -70,7 +70,7 @@ type HostOpRequest struct {
 
 // Validate checks the request is well-formed for its declared Op.
 func (r HostOpRequest) Validate() error {
-	r.Op = normalizeHostOp(strings.TrimSpace(r.Op))
+	r.Op = strings.ToLower(strings.TrimSpace(r.Op))
 	switch r.Op {
 	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpFinal:
 	default:
@@ -199,49 +199,6 @@ func (r HostOpRequest) Validate() error {
 	return nil
 }
 
-func normalizeHostOp(op string) string {
-	op = strings.TrimSpace(op)
-	if op == "" {
-		return ""
-	}
-	op = strings.ToLower(op)
-	// Backwards-compat: legacy snake_case op aliases are deprecated but still accepted.
-	switch op {
-	case "fs_list":
-		return HostOpFSList
-	case "fs_read":
-		return HostOpFSRead
-	case "fs_search":
-		return HostOpFSSearch
-	case "fs_write":
-		return HostOpFSWrite
-	case "fs_append":
-		return HostOpFSAppend
-	case "fs_edit":
-		return HostOpFSEdit
-	case "fs_patch":
-		return HostOpFSPatch
-	case "shell_exec":
-		return HostOpShellExec
-	case "shell.exec":
-		return HostOpShellExec
-	case "http_fetch":
-		return HostOpHTTPFetch
-	case "http.fetch":
-		return HostOpHTTPFetch
-	case "trace":
-		return HostOpTrace
-	case "trace.run":
-		return HostOpTrace
-	case "final":
-		return HostOpFinal
-	case "agent.final":
-		return HostOpFinal
-	default:
-		return op
-	}
-}
-
 // validateMemoryWritePath enforces that memory writes target only today's daily memory file.
 func validateMemoryWritePath(path string) error {
 	trimmed := strings.TrimSpace(path)
@@ -270,7 +227,7 @@ func validateMemoryWritePath(path string) error {
 	return nil
 }
 
-// SearchResult is one result returned by fs.search.
+// SearchResult is one result returned by fs_search.
 type SearchResult struct {
 	Title   string  `json:"title,omitempty"`
 	Path    string  `json:"path,omitempty"`

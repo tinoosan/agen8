@@ -32,7 +32,7 @@ Use this skill whenever the task depends on software the workspace does not alre
 
 ## Quality checks
 
-- The new tooling must be callable from the agent's host commands (`shell.exec`, verification scripts).
+- The new tooling must be callable from the agent's host commands (`shell_exec`, verification scripts).
 - Retest the scenario that triggered the installation to prove the failure disappears.
 - Documentation updated so future developers can reproduce the environment.
 - No leftover artifacts from failed installation attempts.

@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 )
 
 func (m *monitorModel) openSessionPicker() tea.Cmd {
@@ -75,7 +75,10 @@ func (m *monitorModel) closeSessionPicker() {
 
 func (m *monitorModel) fetchSessionsPage() tea.Cmd {
 	return func() tea.Msg {
-		filter := store.SessionFilter{
+		if m.session == nil {
+			return sessionsListMsg{err: fmt.Errorf("session store not configured")}
+		}
+		filter := pkgstore.SessionFilter{
 			TitleContains: m.sessionPickerFilter,
 			Limit:         m.sessionPickerPageSize,
 			Offset:        m.sessionPickerPage * m.sessionPickerPageSize,
@@ -83,11 +86,11 @@ func (m *monitorModel) fetchSessionsPage() tea.Cmd {
 			SortDesc:      true,
 		}
 
-		total, err := store.CountSessions(m.cfg, filter)
+		total, err := m.session.CountSessions(m.ctx, filter)
 		if err != nil {
 			return sessionsListMsg{err: err}
 		}
-		sessions, err := store.ListSessionsPaginated(m.cfg, filter)
+		sessions, err := m.session.ListSessionsPaginated(m.ctx, filter)
 		if err != nil {
 			return sessionsListMsg{err: err}
 		}
@@ -158,7 +161,11 @@ func (m *monitorModel) selectSessionFromPicker() tea.Cmd {
 		return nil
 	}
 
-	s, err := store.LoadSession(m.cfg, sessID)
+	if m.session == nil {
+		m.sessionPickerErr = "session store not configured"
+		return nil
+	}
+	s, err := m.session.LoadSession(m.ctx, sessID)
 	if err != nil {
 		m.sessionPickerErr = err.Error()
 		return nil

@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// ApplyStructuredEdits applies structured edits (fs.edit) to the provided text.
+// ApplyStructuredEdits applies structured edits (fs_edit) to the provided text.
 func ApplyStructuredEdits(before string, input json.RawMessage) (string, error) {
 	var in struct {
 		Edits []struct {
@@ -40,7 +40,7 @@ func ApplyStructuredEdits(before string, input json.RawMessage) (string, error) 
 	return after, nil
 }
 
-// ApplyUnifiedDiffStrict applies a unified diff patch (fs.patch) with no fuzz.
+// ApplyUnifiedDiffStrict applies a unified diff patch (fs_patch) with no fuzz.
 func ApplyUnifiedDiffStrict(oldText string, patch string) (string, error) {
 	type hunk struct {
 		oldStart int

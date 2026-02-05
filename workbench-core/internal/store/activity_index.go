@@ -20,7 +20,7 @@ func shouldHideInboxOp(op, path string) bool {
 		return false
 	}
 	switch op {
-	case "fs.list", "fs.read":
+	case "fs_list", "fs_read":
 		return true
 	default:
 		return false
@@ -45,11 +45,11 @@ func activityTitleFromRequest(d map[string]string) string {
 	path := strings.TrimSpace(d["path"])
 
 	switch op {
-	case "fs.list":
+	case "fs_list":
 		return "List " + path
-	case "fs.read":
+	case "fs_read":
 		return "Read " + path
-	case "fs.search":
+	case "fs_search":
 		q := strings.TrimSpace(d["query"])
 		if path != "" && q != "" {
 			return fmt.Sprintf("Search %s for %q", path, q)
@@ -58,23 +58,23 @@ func activityTitleFromRequest(d map[string]string) string {
 			return "Search " + path
 		}
 		return "Search"
-	case "fs.write":
+	case "fs_write":
 		return "Write " + path
-	case "fs.append":
+	case "fs_append":
 		return "Append " + path
-	case "fs.edit":
+	case "fs_edit":
 		return "Edit " + path
-	case "fs.patch":
+	case "fs_patch":
 		return "Patch " + path
-	case "shell.exec", "shell_exec":
+	case "shell_exec":
 		if cmd := strings.TrimSpace(d["argvPreview"]); cmd != "" {
 			return cmd
 		}
 		if argv0 := strings.TrimSpace(d["argv0"]); argv0 != "" {
 			return argv0
 		}
-		return "shell.exec"
-	case "http.fetch", "http_fetch":
+		return "shell_exec"
+	case "http_fetch":
 		u := strings.TrimSpace(d["url"])
 		if u != "" {
 			m := strings.ToUpper(strings.TrimSpace(d["method"]))
@@ -91,8 +91,8 @@ func activityTitleFromRequest(d map[string]string) string {
 			}
 			return desc
 		}
-		return "http.fetch"
-	case "trace.run", "trace":
+		return "http_fetch"
+	case "trace_run":
 		action := strings.TrimSpace(d["traceAction"])
 		key := strings.TrimSpace(d["traceKey"])
 		if action != "" {
@@ -101,7 +101,7 @@ func activityTitleFromRequest(d map[string]string) string {
 			}
 			return "trace." + action
 		}
-		return "trace.run"
+		return "trace_run"
 	default:
 		if op != "" && path != "" {
 			return op + " " + path

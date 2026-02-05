@@ -47,7 +47,7 @@ and inspecting `<dataDir>/agents/<id>/log/events.jsonl`). All paths are derived 
 
 ### VFS paths vs. shell cwd
 
-- File operations (`fs.read`, `fs.write`, etc.) use VFS paths like `/project/src/main.go`.
+- File operations (`fs_read`, `fs_write`, etc.) use VFS paths like `/project/src/main.go`.
 - Shell commands run in the host workdir root by default; `cwd` should be **relative** (e.g., `src/`), not a `/project/...` path.
 - The sandbox blocks directory traversal outside the workdir for safety.
 

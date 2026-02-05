@@ -19,7 +19,7 @@ This guide explains how the CLI, configuration, and internal services collaborat
 
 ## Tooling & extensions
 
-- Built-in host tools (fs.*, shell.exec, http.fetch, trace.run) are defined directly in the system prompt.
+- Built-in host tools (fs_*, shell_exec, http_fetch, trace_run) are defined directly in the system prompt.
 
 ## Debugging tips for contributors
 

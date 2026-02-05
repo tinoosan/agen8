@@ -424,7 +424,7 @@ func (s *EventSink) mapEventLocked(runID string, ev types.EventRecord) []notific
 		out = append(out, notificationCall{method: NotifyItemCompleted, params: ItemNotificationParams{Item: item}})
 		return out
 
-	case "agent.final":
+	case "agent_final":
 		turn := s.activeTurn[runID]
 		if turn == nil {
 			if s.diagnostics != nil {

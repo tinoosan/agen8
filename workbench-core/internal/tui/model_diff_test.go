@@ -56,7 +56,7 @@ func TestTranscript_FileWrite_EmitsDiffBlock(t *testing.T) {
 	req := events.Event{
 		Type: "agent.op.request",
 		Data: map[string]string{
-			"op":   "fs.write",
+			"op":   "fs_write",
 			"path": "/workspace/a.txt",
 		},
 	}
@@ -65,7 +65,7 @@ func TestTranscript_FileWrite_EmitsDiffBlock(t *testing.T) {
 	resp := events.Event{
 		Type: "agent.op.response",
 		Data: map[string]string{
-			"op":   "fs.write",
+			"op":   "fs_write",
 			"path": "/workspace/a.txt",
 			"ok":   "true",
 		},
@@ -120,7 +120,7 @@ func TestTranscript_FileWrite_Create_ShowsDevNullDiff(t *testing.T) {
 
 	cmd := m.onEvent(events.Event{
 		Type: "agent.op.request",
-		Data: map[string]string{"op": "fs.write", "path": "/workspace/new.txt"},
+		Data: map[string]string{"op": "fs_write", "path": "/workspace/new.txt"},
 	})
 	if cmd != nil {
 		// Run the pre-read (expected to fail not-exist and be ignored).
@@ -133,7 +133,7 @@ func TestTranscript_FileWrite_Create_ShowsDevNullDiff(t *testing.T) {
 
 	cmd2 := m.onEvent(events.Event{
 		Type: "agent.op.response",
-		Data: map[string]string{"op": "fs.write", "path": "/workspace/new.txt", "ok": "true"},
+		Data: map[string]string{"op": "fs_write", "path": "/workspace/new.txt", "ok": "true"},
 	})
 	if cmd2 == nil {
 		t.Fatalf("expected after-read cmd")
@@ -178,7 +178,7 @@ func TestTranscript_FileWrite_LabelsUpdated_WhenFileExistsButNotCached(t *testin
 	cmd := m.onEvent(events.Event{
 		Type: "agent.op.request",
 		Data: map[string]string{
-			"op":   "fs.write",
+			"op":   "fs_write",
 			"path": "/workspace/existing.txt",
 		},
 	})
@@ -192,7 +192,7 @@ func TestTranscript_FileWrite_LabelsUpdated_WhenFileExistsButNotCached(t *testin
 	cmd2 := updated2.onEvent(events.Event{
 		Type: "agent.op.response",
 		Data: map[string]string{
-			"op":   "fs.write",
+			"op":   "fs_write",
 			"path": "/workspace/existing.txt",
 			"ok":   "true",
 		},
@@ -235,7 +235,7 @@ func TestTranscript_FilePatch_EmitsPatchBlock(t *testing.T) {
 	req := events.Event{
 		Type: "agent.op.request",
 		Data: map[string]string{
-			"op":             "fs.patch",
+			"op":             "fs_patch",
 			"path":           "/workspace/b.txt",
 			"patchPreview":   "--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-before\n+after\n",
 			"patchTruncated": "false",
@@ -251,7 +251,7 @@ func TestTranscript_FilePatch_EmitsPatchBlock(t *testing.T) {
 	resp := events.Event{
 		Type: "agent.op.response",
 		Data: map[string]string{
-			"op":   "fs.patch",
+			"op":   "fs_patch",
 			"path": "/workspace/b.txt",
 			"ok":   "true",
 		},

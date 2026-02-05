@@ -6,9 +6,9 @@ import (
 	iofs "io/fs"
 	"strings"
 
+	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
-	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 
 // GeneratePendingOpDiff builds a diff preview for a file operation before execution.
@@ -54,7 +54,7 @@ func computeAfterState(before string, op types.HostOpRequest) (string, error) {
 		return before + op.Text, nil
 	case types.HostOpFSEdit:
 		if len(op.Input) == 0 {
-			return "", fmt.Errorf("fs.edit input missing")
+			return "", fmt.Errorf("fs_edit input missing")
 		}
 		return agent.ApplyStructuredEdits(before, op.Input)
 	case types.HostOpFSPatch:

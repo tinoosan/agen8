@@ -2,7 +2,7 @@ package agent
 
 import "unicode/utf8"
 
-// finalTextStreamDecoder incrementally decodes only the {"op":"agent.final","text":"..."} text field
+// finalTextStreamDecoder incrementally decodes only the {"op":"agent_final","text":"..."} text field
 // from a streamed JSON object and yields decoded text as it becomes available.
 type finalTextStreamDecoder struct {
 	state decodeState
@@ -155,7 +155,7 @@ func (d *finalTextStreamDecoder) Consume(in string) string {
 				if d.target == tOp {
 					d.opKnown = true
 					op := string(d.opBuf)
-					d.opIsFinal = op == "final" || op == "agent.final"
+					d.opIsFinal = op == "agent_final"
 					if !d.opIsFinal {
 						d.pendingText = nil
 					} else {

@@ -99,7 +99,7 @@ func TestSink_OpRequestResponseEmitsToolItems(t *testing.T) {
 		Type:      "agent.op.request",
 		Message:   "Agent requested host op",
 		Timestamp: now,
-		Data:      map[string]string{"opId": "op-1", "op": "fs.read", "path": "/foo.txt"},
+		Data:      map[string]string{"opId": "op-1", "op": "fs_read", "path": "/foo.txt"},
 	}})
 	if len(got) != 1 || got[0].method != NotifyItemStarted {
 		t.Fatalf("got = %#v", got)
@@ -121,7 +121,7 @@ func TestSink_OpRequestResponseEmitsToolItems(t *testing.T) {
 		Type:      "agent.op.response",
 		Message:   "Host op completed",
 		Timestamp: now,
-		Data:      map[string]string{"opId": "op-1", "op": "fs.read", "ok": "true", "bytesLen": "10"},
+		Data:      map[string]string{"opId": "op-1", "op": "fs_read", "ok": "true", "bytesLen": "10"},
 	}})
 	if len(got) != 1 || got[0].method != NotifyItemCompleted {
 		t.Fatalf("got = %#v", got)
@@ -140,7 +140,7 @@ func TestSink_OpRequestResponseEmitsToolItems(t *testing.T) {
 	if err := completed.Item.DecodeContent(&te); err != nil {
 		t.Fatalf("DecodeContent: %v", err)
 	}
-	if te.ToolName != "fs.read" || !te.Ok || len(te.Output) == 0 {
+	if te.ToolName != "fs_read" || !te.Ok || len(te.Output) == 0 {
 		t.Fatalf("tool content = %#v", te)
 	}
 }

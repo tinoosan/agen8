@@ -128,7 +128,7 @@ func shouldSuppressOp(op, path string) bool {
 		return false
 	}
 	switch op {
-	case "fs.list", "fs.read":
+	case "fs_list", "fs_read":
 		return true
 	default:
 		return false
