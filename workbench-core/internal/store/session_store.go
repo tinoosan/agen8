@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
@@ -129,8 +130,8 @@ func SaveSession(cfg config.Config, s types.Session) error {
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	createdAt := timePtrToString(s.CreatedAt)
-	updatedAt := timePtrToString(s.UpdatedAt)
+	createdAt := timeutil.FormatRFC3339Nano(s.CreatedAt)
+	updatedAt := timeutil.FormatRFC3339Nano(s.UpdatedAt)
 	if updatedAt == "" {
 		updatedAt = now
 	}
@@ -272,7 +273,12 @@ func ListSessions(cfg config.Config) ([]types.Session, error) {
 		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return sessionSortTime(out[i]).After(sessionSortTime(out[j]))
+		left := timeutil.FirstNonZero(out[i].UpdatedAt, out[i].CreatedAt)
+		right := timeutil.FirstNonZero(out[j].UpdatedAt, out[j].CreatedAt)
+		if left.Equal(right) {
+			return strings.Compare(out[i].SessionID, out[j].SessionID) < 0
+		}
+		return left.After(right)
 	})
 	return out, nil
 }
@@ -372,14 +378,4 @@ func CountSessions(cfg config.Config, filter SessionFilter) (int, error) {
 		return 0, err
 	}
 	return count, nil
-}
-
-func sessionSortTime(s types.Session) time.Time {
-	if s.UpdatedAt != nil {
-		return *s.UpdatedAt
-	}
-	if s.CreatedAt != nil {
-		return *s.CreatedAt
-	}
-	return time.Time{}
 }

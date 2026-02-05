@@ -23,7 +23,7 @@ var (
 	sqliteMigrated = map[string]bool{}
 )
 
-const currentSchemaVersion = 4
+const currentSchemaVersion = 5
 
 var sqliteMigrations = []string{
 	`CREATE TABLE IF NOT EXISTS sessions (
@@ -244,6 +244,10 @@ func migrateSQLite(db *sql.DB) error {
 				return fmt.Errorf("sqlite: migrate: %w", err)
 			}
 		}
+		if err := ensureTasksFinishedColumn(tx); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
 		if _, err := tx.Exec(
 			`INSERT INTO schema_version (version, applied_at) VALUES (?, ?)`,
 			currentSchemaVersion,
@@ -267,9 +271,40 @@ func currentSchema(tx *sql.Tx) (int, error) {
 	return version, nil
 }
 
-func timePtrToString(t *time.Time) string {
-	if t == nil {
-		return ""
+func ensureTasksFinishedColumn(tx *sql.Tx) error {
+	rows, err := tx.Query(`PRAGMA table_info(tasks)`)
+	if err != nil {
+		return fmt.Errorf("sqlite: tasks table info: %w", err)
 	}
-	return t.UTC().Format(time.RFC3339Nano)
+	defer rows.Close()
+
+	hasCompleted := false
+	hasFinished := false
+	for rows.Next() {
+		var cid int
+		var name string
+		var typ string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("sqlite: scan tasks column: %w", err)
+		}
+		switch name {
+		case "finished_at":
+			hasFinished = true
+		case "completed_at":
+			hasCompleted = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("sqlite: read tasks columns: %w", err)
+	}
+	if !hasCompleted || hasFinished {
+		return nil
+	}
+	if _, err := tx.Exec(`ALTER TABLE tasks RENAME COLUMN completed_at TO finished_at`); err != nil {
+		return fmt.Errorf("sqlite: rename tasks column: %w", err)
+	}
+	return nil
 }

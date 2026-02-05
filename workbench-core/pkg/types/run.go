@@ -1,70 +1,18 @@
 package types
 
 import (
-	"encoding/json"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// RunStatus represents the current state of a workbench run.
-type RunStatus string
-
-func (s *RunStatus) UnmarshalJSON(b []byte) error {
-	if s == nil {
-		return nil
-	}
-	if strings.TrimSpace(string(b)) == "null" {
-		*s = ""
-		return nil
-	}
-	var raw string
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return err
-	}
-	raw = strings.ToLower(strings.TrimSpace(raw))
-	switch raw {
-	case "done":
-		*s = StatusSucceeded
-	case string(StatusRunning):
-		*s = StatusRunning
-	case string(StatusSucceeded):
-		*s = StatusSucceeded
-	case string(StatusFailed):
-		*s = StatusFailed
-	case string(StatusCanceled):
-		*s = StatusCanceled
-	default:
-		*s = RunStatus(raw)
-	}
-	return nil
-}
-
+// Run status constants (kept for readability; type removed)
 const (
-	// StatusRunning indicates the run is currently in progress.
-	StatusRunning RunStatus = "running"
-	// StatusSucceeded indicates the run has completed successfully.
-	StatusSucceeded RunStatus = "succeeded"
-	// StatusFailed indicates the run stopped due to an error.
-	StatusFailed RunStatus = "failed"
-	// StatusCanceled indicates the run was interrupted by the user or host.
-	//
-	// This is a terminal state used when a run is intentionally stopped (e.g. SIGINT / Ctrl-C).
-	StatusCanceled RunStatus = "canceled"
+	RunStatusRunning   = "running"
+	RunStatusSucceeded = "succeeded"
+	RunStatusFailed    = "failed"
+	RunStatusCanceled  = "canceled"
 )
-
-// StatusDone is kept for migration; prefer StatusSucceeded.
-const StatusDone = StatusSucceeded
-
-// RunStatuses maps status strings to their typed RunStatus values.
-var RunStatuses = map[string]RunStatus{
-	string(StatusRunning):   StatusRunning,
-	string(StatusSucceeded): StatusSucceeded,
-	string(StatusFailed):    StatusFailed,
-	string(StatusCanceled):  StatusCanceled,
-	"done":                  StatusSucceeded,
-}
 
 // Run represents the state and metadata of a single workbench execution.
 type Run struct {
@@ -77,14 +25,14 @@ type Run struct {
 	// Goal is the high-level description of what this run is trying to accomplish.
 	Goal string `json:"goal"`
 	// Status is the current operating state of the run.
-	Status RunStatus `json:"status"`
+	Status string `json:"status"`
 	// StartedAt is the timestamp when the run was initialized.
 	StartedAt *time.Time `json:"startedAt"`
 	// FinishedAt is the timestamp when the run reached a terminal state.
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 	// MaxBytesForContext is the maximum token/byte limit allowed for agent context.
 	MaxBytesForContext int `json:"maxBytesForContext"`
-	// Error contains the failure message if the run status is StatusFailed.
+	// Error contains the failure message if the run status is RunStatusFailed.
 	Error *string `json:"error,omitempty"`
 
 	// TotalTokensIn is the cumulative input tokens consumed by this run.
@@ -138,7 +86,7 @@ type RunRuntimeConfig struct {
 }
 
 // NewRun initializes a new Run instance with a unique ID and the given parameters.
-// It sets the initial status to StatusRunning and the start time to now.
+// It sets the initial status to RunStatusRunning and the start time to now.
 func NewRun(goal string, maxBytesForContext int, sessionID string) Run {
 	runID := "run-" + uuid.NewString()
 	now := time.Now()
@@ -146,7 +94,7 @@ func NewRun(goal string, maxBytesForContext int, sessionID string) Run {
 		RunID:              runID,
 		SessionID:          sessionID,
 		Goal:               goal,
-		Status:             StatusRunning,
+		Status:             RunStatusRunning,
 		StartedAt:          &now,
 		MaxBytesForContext: maxBytesForContext,
 		Error:              nil,

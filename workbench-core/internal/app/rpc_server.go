@@ -15,6 +15,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -384,7 +385,7 @@ func (s *RPCServer) turnCancel(ctx context.Context, p protocol.TurnCancelParams)
 			ThreadID:  protocol.ThreadID(strings.TrimSpace(task.SessionID)),
 			RunID:     protocol.RunID(strings.TrimSpace(task.RunID)),
 			Status:    protocol.TurnStatusCanceled,
-			CreatedAt: timePtrOrNowUTC(task.CreatedAt),
+			CreatedAt: timeutil.OrNow(task.CreatedAt),
 		}}, nil
 
 	case string(types.TaskStatusActive):
@@ -396,7 +397,7 @@ func (s *RPCServer) turnCancel(ctx context.Context, p protocol.TurnCancelParams)
 			ThreadID:  protocol.ThreadID(strings.TrimSpace(task.SessionID)),
 			RunID:     protocol.RunID(strings.TrimSpace(task.RunID)),
 			Status:    protocol.TurnStatusCompleted,
-			CreatedAt: timePtrOrNowUTC(task.CreatedAt),
+			CreatedAt: timeutil.OrNow(task.CreatedAt),
 		}}, nil
 
 	case string(types.TaskStatusFailed):
@@ -409,7 +410,7 @@ func (s *RPCServer) turnCancel(ctx context.Context, p protocol.TurnCancelParams)
 			ThreadID:  protocol.ThreadID(strings.TrimSpace(task.SessionID)),
 			RunID:     protocol.RunID(strings.TrimSpace(task.RunID)),
 			Status:    protocol.TurnStatusFailed,
-			CreatedAt: timePtrOrNowUTC(task.CreatedAt),
+			CreatedAt: timeutil.OrNow(task.CreatedAt),
 			Error:     pe,
 		}}, nil
 
@@ -419,7 +420,7 @@ func (s *RPCServer) turnCancel(ctx context.Context, p protocol.TurnCancelParams)
 			ThreadID:  protocol.ThreadID(strings.TrimSpace(task.SessionID)),
 			RunID:     protocol.RunID(strings.TrimSpace(task.RunID)),
 			Status:    protocol.TurnStatusCanceled,
-			CreatedAt: timePtrOrNowUTC(task.CreatedAt),
+			CreatedAt: timeutil.OrNow(task.CreatedAt),
 		}}, nil
 
 	default:
@@ -448,7 +449,7 @@ func toRPCError(err error) *protocol.RPCError {
 }
 
 func threadFromSession(run types.Run, sess types.Session) protocol.Thread {
-	createdAt := timePtrOrNowUTC(sess.CreatedAt)
+	createdAt := timeutil.OrNow(sess.CreatedAt)
 	return protocol.Thread{
 		ID:          protocol.ThreadID(strings.TrimSpace(sess.SessionID)),
 		Title:       strings.TrimSpace(sess.Title),
@@ -461,11 +462,4 @@ func threadFromSession(run types.Run, sess types.Session) protocol.Thread {
 		TotalTokens:    sess.TotalTokens,
 		TotalCostUSD:   sess.TotalCostUSD,
 	}
-}
-
-func timePtrOrNowUTC(t *time.Time) time.Time {
-	if t != nil && !t.IsZero() {
-		return t.UTC()
-	}
-	return time.Now().UTC()
 }

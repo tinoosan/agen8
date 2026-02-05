@@ -77,7 +77,7 @@ type TaskFilter struct {
 	Offset int // Skip N results
 
 	// Sorting
-	SortBy   string // Field name: "created_at", "completed_at", "cost_usd"
+	SortBy   string // Field name: "created_at", "finished_at" (or "completed_at"), "cost_usd"
 	SortDesc bool
 }
 

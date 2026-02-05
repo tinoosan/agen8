@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -69,8 +70,8 @@ func SaveRun(cfg config.Config, run types.Run) error {
 		return fmt.Errorf("error marshalling run: %w", err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	startedAt := timePtrToString(run.StartedAt)
-	finishedAt := timePtrToString(run.FinishedAt)
+	startedAt := timeutil.FormatRFC3339Nano(run.StartedAt)
+	finishedAt := timeutil.FormatRFC3339Nano(run.FinishedAt)
 	createdAt := startedAt
 	if createdAt == "" {
 		createdAt = now
@@ -89,7 +90,7 @@ func SaveRun(cfg config.Config, run types.Run) error {
 		   updated_at=excluded.updated_at`,
 		run.RunID,
 		run.SessionID,
-		string(run.Status),
+		run.Status,
 		run.Goal,
 		string(b),
 		nullIfEmpty(startedAt),
@@ -103,7 +104,7 @@ func SaveRun(cfg config.Config, run types.Run) error {
 	return tx.Commit()
 }
 
-// ReopenRun transitions a terminal run back to StatusRunning so it can be continued.
+// ReopenRun transitions a terminal run back to RunStatusRunning so it can be continued.
 // It clears FinishedAt and Error for terminal runs. If already running, it is a no-op.
 func ReopenRun(cfg config.Config, runID string) (types.Run, error) {
 	if err := cfg.Validate(); err != nil {
@@ -113,10 +114,10 @@ func ReopenRun(cfg config.Config, runID string) (types.Run, error) {
 	if err != nil {
 		return types.Run{}, err
 	}
-	if run.Status == types.StatusRunning {
+	if run.Status == types.RunStatusRunning {
 		return run, nil
 	}
-	run.Status = types.StatusRunning
+	run.Status = types.RunStatusRunning
 	run.FinishedAt = nil
 	run.Error = nil
 	return run, SaveRun(cfg, run)
@@ -126,12 +127,12 @@ func ReopenRun(cfg config.Config, runID string) (types.Run, error) {
 // It updates the Status, sets FinishedAt to the current time,
 // and records an error message if the status is Failed.
 // The updated state is then persisted to SQLite.
-func StopRun(cfg config.Config, runID string, status types.RunStatus, errorMsg string) (types.Run, error) {
+func StopRun(cfg config.Config, runID string, status string, errorMsg string) (types.Run, error) {
 	if err := cfg.Validate(); err != nil {
 		return types.Run{}, err
 	}
 
-	if status != types.StatusFailed && status != types.StatusSucceeded && status != types.StatusCanceled {
+	if status != types.RunStatusFailed && status != types.RunStatusSucceeded && status != types.RunStatusCanceled {
 		return types.Run{}, fmt.Errorf("error stopping run %s, invalid status '%s': %w", runID, status, ErrInvalid)
 	}
 
@@ -140,19 +141,19 @@ func StopRun(cfg config.Config, runID string, status types.RunStatus, errorMsg s
 		return types.Run{}, fmt.Errorf("error stopping run: %w", err)
 	}
 
-	if run.Status == types.StatusSucceeded || run.Status == types.StatusFailed || run.Status == types.StatusCanceled {
+	if run.Status == types.RunStatusSucceeded || run.Status == types.RunStatusFailed || run.Status == types.RunStatusCanceled {
 		return types.Run{}, fmt.Errorf("run %s cannot be stopped due to invalid state %s: %w", run.RunID, run.Status, ErrConflict)
 	}
 
 	now := time.Now()
 
-	if status == types.StatusSucceeded {
+	if status == types.RunStatusSucceeded {
 		run.Status = status
 		run.FinishedAt = &now
 		run.Error = nil
 	}
 
-	if status == types.StatusFailed {
+	if status == types.RunStatusFailed {
 
 		if errorMsg == "" {
 			return types.Run{}, fmt.Errorf("error stopping run, error message is required for failed runs: %w", ErrInvalid)
@@ -162,7 +163,7 @@ func StopRun(cfg config.Config, runID string, status types.RunStatus, errorMsg s
 		run.Error = &errorMsg
 	}
 
-	if status == types.StatusCanceled {
+	if status == types.RunStatusCanceled {
 		if strings.TrimSpace(errorMsg) == "" {
 			errorMsg = "canceled"
 		}
@@ -174,7 +175,7 @@ func StopRun(cfg config.Config, runID string, status types.RunStatus, errorMsg s
 	return run, SaveRun(cfg, run)
 }
 
-// LatestRunningRun returns the most recently created run that is still StatusRunning.
+// LatestRunningRun returns the most recently created run that is still RunStatusRunning.
 // If no running run exists, it returns ErrNotFound.
 func LatestRunningRun(cfg config.Config) (types.Run, error) {
 	if err := cfg.Validate(); err != nil {
@@ -187,7 +188,7 @@ func LatestRunningRun(cfg config.Config) (types.Run, error) {
 	var raw string
 	if err := db.QueryRow(
 		`SELECT run_json FROM runs WHERE status = ? ORDER BY created_at DESC LIMIT 1`,
-		string(types.StatusRunning),
+		types.RunStatusRunning,
 	).Scan(&raw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return types.Run{}, ErrNotFound

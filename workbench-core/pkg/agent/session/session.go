@@ -19,6 +19,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/events"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/profile"
+	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -386,7 +387,7 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 		if task.Goal == "" {
 			continue
 		}
-		if task.CreatedAt == nil || task.CreatedAt.IsZero() {
+		if !timeutil.IsSet(task.CreatedAt) {
 			now := time.Now().UTC()
 			task.CreatedAt = &now
 		}
@@ -663,7 +664,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	task.OutputTokens = tr.OutputTokens
 	task.TotalTokens = tr.TotalTokens
 	task.CostUSD = tr.CostUSD
-	if task.StartedAt != nil && tr.CompletedAt != nil && !task.StartedAt.IsZero() && !tr.CompletedAt.IsZero() {
+	if timeutil.IsSet(task.StartedAt) && timeutil.IsSet(tr.CompletedAt) {
 		task.DurationSeconds = int(tr.CompletedAt.Sub(*task.StartedAt).Round(time.Second).Seconds())
 	}
 	_ = s.cfg.TaskStore.UpdateTask(ctx, task)
@@ -806,7 +807,7 @@ func (s *Session) writeTaskSummary(ctx context.Context, base, taskID, goal strin
 	b.WriteString("- Status: `")
 	b.WriteString(string(tr.Status))
 	b.WriteString("`\n")
-	if tr.CompletedAt != nil && !tr.CompletedAt.IsZero() {
+	if timeutil.IsSet(tr.CompletedAt) {
 		b.WriteString("- CompletedAt: `")
 		b.WriteString(tr.CompletedAt.UTC().Format(time.RFC3339Nano))
 		b.WriteString("`\n")

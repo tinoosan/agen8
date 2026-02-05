@@ -153,7 +153,7 @@ func init() {
 	tasksListCmd.Flags().StringVar(&tasksStatus, "status", "", "comma-separated statuses (pending,active,succeeded,failed,canceled)")
 	tasksListCmd.Flags().IntVar(&tasksLimit, "limit", 50, "max tasks to show")
 	tasksListCmd.Flags().IntVar(&tasksOffset, "offset", 0, "skip N tasks")
-	tasksListCmd.Flags().StringVar(&tasksSortBy, "sort-by", "created_at", "sort field (created_at,completed_at,cost_usd,priority,updated_at)")
+	tasksListCmd.Flags().StringVar(&tasksSortBy, "sort-by", "created_at", "sort field (created_at,finished_at,completed_at,cost_usd,priority,updated_at)")
 	tasksListCmd.Flags().BoolVar(&tasksDesc, "desc", false, "sort descending")
 
 	tasksCmd.AddCommand(tasksListCmd)

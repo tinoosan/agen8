@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -21,9 +22,10 @@ func eventTime(now func() time.Time, ev types.EventRecord) time.Time {
 		return ev.Timestamp
 	}
 	if now != nil {
-		return now().UTC()
+		v := now()
+		return timeutil.OrNow(&v)
 	}
-	return time.Now().UTC()
+	return timeutil.OrNow(nil)
 }
 
 func trimType(ev types.EventRecord) string {

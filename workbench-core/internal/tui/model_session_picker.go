@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
+	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -269,18 +269,8 @@ func sessionsToPickerItems(sessions []types.Session) []list.Item {
 	return out
 }
 
-func sessionSortTime(s types.Session) time.Time {
-	if s.UpdatedAt != nil {
-		return *s.UpdatedAt
-	}
-	if s.CreatedAt != nil {
-		return *s.CreatedAt
-	}
-	return time.Time{}
-}
-
 func formatSessionTime(s types.Session) string {
-	t := sessionSortTime(s)
+	t := timeutil.FirstNonZero(s.UpdatedAt, s.CreatedAt)
 	if t.IsZero() {
 		return ""
 	}

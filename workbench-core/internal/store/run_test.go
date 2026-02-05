@@ -36,8 +36,8 @@ func TestCreateRun(t *testing.T) {
 	if run.MaxBytesForContext != maxBytes {
 		t.Errorf("Expected maxBytes %d, got %d", maxBytes, run.MaxBytesForContext)
 	}
-	if run.Status != types.StatusRunning {
-		t.Errorf("Expected status %q, got %q", types.StatusRunning, run.Status)
+	if run.Status != types.RunStatusRunning {
+		t.Errorf("Expected status %q, got %q", types.RunStatusRunning, run.Status)
 	}
 	if run.StartedAt == nil {
 		t.Error("Expected StartedAt to be set, got nil")
@@ -110,7 +110,7 @@ func TestLoadRun(t *testing.T) {
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			runId,
 			"sess-test",
-			string(types.StatusRunning),
+			types.RunStatusRunning,
 			"goal",
 			"{invalid-json}",
 			time.Now().UTC().Format(time.RFC3339Nano),
@@ -137,7 +137,7 @@ func TestLoadRun(t *testing.T) {
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			runId,
 			"sess-test",
-			string(types.StatusRunning),
+			types.RunStatusRunning,
 			"goal",
 			`{"goal":"test"}`,
 			time.Now().UTC().Format(time.RFC3339Nano),
@@ -164,13 +164,13 @@ func TestStopRun(t *testing.T) {
 	t.Run("SuccessSucceeded", func(t *testing.T) {
 		run := mustCreateSessionRun(t, cfg, "Stop Success", 100)
 
-		stopped, err := StopRun(cfg, run.RunID, types.StatusSucceeded, "")
+		stopped, err := StopRun(cfg, run.RunID, types.RunStatusSucceeded, "")
 		if err != nil {
 			t.Fatalf("StopRun failed: %v", err)
 		}
 
-		if stopped.Status != types.StatusSucceeded {
-			t.Errorf("Expected status %q, got %q", types.StatusSucceeded, stopped.Status)
+		if stopped.Status != types.RunStatusSucceeded {
+			t.Errorf("Expected status %q, got %q", types.RunStatusSucceeded, stopped.Status)
 		}
 		if stopped.FinishedAt == nil {
 			t.Error("Expected FinishedAt to be set")
@@ -181,8 +181,8 @@ func TestStopRun(t *testing.T) {
 
 		// Verify persisted
 		loaded, _ := LoadRun(cfg, run.RunID)
-		if loaded.Status != types.StatusSucceeded {
-			t.Errorf("Status expected %q, got %q", types.StatusSucceeded, loaded.Status)
+		if loaded.Status != types.RunStatusSucceeded {
+			t.Errorf("Status expected %q, got %q", types.RunStatusSucceeded, loaded.Status)
 		}
 	})
 
@@ -190,13 +190,13 @@ func TestStopRun(t *testing.T) {
 		run := mustCreateSessionRun(t, cfg, "Stop Failed Success", 100)
 
 		errMsg := "some error occurred"
-		stopped, err := StopRun(cfg, run.RunID, types.StatusFailed, errMsg)
+		stopped, err := StopRun(cfg, run.RunID, types.RunStatusFailed, errMsg)
 		if err != nil {
 			t.Fatalf("StopRun failed: %v", err)
 		}
 
-		if stopped.Status != types.StatusFailed {
-			t.Errorf("Expected status %q, got %q", types.StatusFailed, stopped.Status)
+		if stopped.Status != types.RunStatusFailed {
+			t.Errorf("Expected status %q, got %q", types.RunStatusFailed, stopped.Status)
 		}
 		if stopped.FinishedAt == nil {
 			t.Error("Expected FinishedAt to be set")
@@ -209,7 +209,7 @@ func TestStopRun(t *testing.T) {
 	t.Run("ErrorMissingMessage", func(t *testing.T) {
 		run := mustCreateSessionRun(t, cfg, "Stop Error Missing Msg", 100)
 
-		_, err := StopRun(cfg, run.RunID, types.StatusFailed, "")
+		_, err := StopRun(cfg, run.RunID, types.RunStatusFailed, "")
 		if err == nil {
 			t.Error("Expected error for missing error message, got nil")
 		}
@@ -221,7 +221,7 @@ func TestStopRun(t *testing.T) {
 	t.Run("ErrorInvalidStatus", func(t *testing.T) {
 		run := mustCreateSessionRun(t, cfg, "Stop Error Invalid Status", 100)
 
-		_, err := StopRun(cfg, run.RunID, types.StatusRunning, "")
+		_, err := StopRun(cfg, run.RunID, types.RunStatusRunning, "")
 		if err == nil {
 			t.Error("Expected error for transition to status 'running', got nil")
 		}
@@ -233,13 +233,13 @@ func TestStopRun(t *testing.T) {
 	t.Run("ErrorAlreadyStopped", func(t *testing.T) {
 		run := mustCreateSessionRun(t, cfg, "Stop Error Already Stopped", 100)
 
-		_, err := StopRun(cfg, run.RunID, types.StatusSucceeded, "")
+		_, err := StopRun(cfg, run.RunID, types.RunStatusSucceeded, "")
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		// Try to stop again
-		_, err = StopRun(cfg, run.RunID, types.StatusSucceeded, "")
+		_, err = StopRun(cfg, run.RunID, types.RunStatusSucceeded, "")
 		if err == nil {
 			t.Error("Expected error for already stopped run, got nil")
 		}

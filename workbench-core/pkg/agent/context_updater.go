@@ -15,6 +15,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/store"
+	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
@@ -387,24 +388,13 @@ func toTypesEvents(in []store.TraceEvent) []types.EventRecord {
 	out := make([]types.EventRecord, 0, len(in))
 	for _, ev := range in {
 		out = append(out, types.EventRecord{
-			Timestamp: parseRFC3339Time(ev.Timestamp),
+			Timestamp: timeutil.ParseRFC3339Nano(ev.Timestamp),
 			Type:      ev.Type,
 			Message:   ev.Message,
 			Data:      ev.Data,
 		})
 	}
 	return out
-}
-
-func parseRFC3339Time(s string) time.Time {
-	if strings.TrimSpace(s) == "" {
-		return time.Time{}
-	}
-	t, err := time.Parse(time.RFC3339Nano, s)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
 }
 
 func max(a, b int) int {

@@ -26,6 +26,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/resources"
+	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -87,7 +88,7 @@ type monitorModel struct {
 	ctx       context.Context
 	cfg       config.Config
 	runID     string
-	runStatus types.RunStatus // loaded at init; used to show "run not active" warning
+	runStatus string // loaded at init; used to show "run not active" warning
 	result    *MonitorResult
 
 	offset int64
@@ -351,7 +352,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	}
 	tailCh, errCh := store.TailEvents(cfg, tctx, runID, off)
 
-	runStatus := types.StatusSucceeded
+	runStatus := types.RunStatusSucceeded
 	if r, err := store.LoadRun(cfg, runID); err == nil {
 		runStatus = r.Status
 	}
@@ -858,7 +859,7 @@ func (m *monitorModel) loadInboxPage() tea.Cmd {
 				Goal:   strings.TrimSpace(t.Goal),
 				Status: strings.TrimSpace(string(t.Status)),
 			}
-			if t.StartedAt != nil && !t.StartedAt.IsZero() {
+			if timeutil.IsSet(t.StartedAt) {
 				ts.StartedAt = *t.StartedAt
 			}
 			if ts.TaskID != "" {
@@ -914,7 +915,7 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 		tasks, err := m.taskStore.ListTasks(m.ctx, agentstate.TaskFilter{
 			RunID:    m.runID,
 			Status:   []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled},
-			SortBy:   "completed_at",
+			SortBy:   "finished_at",
 			SortDesc: true,
 			Limit:    pageSize,
 			Offset:   page * pageSize,
@@ -925,7 +926,7 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 		out := make([]outboxEntry, 0, len(tasks))
 		for _, t := range tasks {
 			ts := time.Time{}
-			if t.CompletedAt != nil && !t.CompletedAt.IsZero() {
+			if timeutil.IsSet(t.CompletedAt) {
 				ts = *t.CompletedAt
 			}
 			out = append(out, outboxEntry{
@@ -1133,7 +1134,7 @@ func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine str
 	composer := m.renderComposer(grid.Composer)
 	stats := m.renderStatsInline(grid.Stats.Width)
 	sections := []string{headerLine, "", main, "", composer, stats, statusBar}
-	if m.runStatus != types.StatusRunning {
+	if m.runStatus != types.RunStatusRunning {
 		w := m.width
 		if w <= 0 {
 			w = 80

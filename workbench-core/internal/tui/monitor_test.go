@@ -316,7 +316,7 @@ func TestMonitorView_NoClipping_DashboardMode(t *testing.T) {
 	}
 	m.width = 120
 	m.height = 45
-	m.runStatus = types.StatusRunning
+	m.runStatus = types.RunStatusRunning
 	m.layout()
 	m.refreshViewports()
 

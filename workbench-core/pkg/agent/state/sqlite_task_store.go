@@ -14,6 +14,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
@@ -73,7 +74,7 @@ func (s *SQLiteTaskStore) init() error {
 				status TEXT NOT NULL,
 				created_at TEXT NOT NULL,
 				started_at TEXT,
-				completed_at TEXT,
+				finished_at TEXT,
 				summary TEXT,
 				artifacts_json TEXT,
 				error TEXT,
@@ -97,7 +98,7 @@ func (s *SQLiteTaskStore) init() error {
 			`CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);`,
 			`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);`,
 			`CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC);`,
-			`CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(completed_at DESC);`,
+			`CREATE INDEX IF NOT EXISTS idx_tasks_finished ON tasks(finished_at DESC);`,
 			`CREATE INDEX IF NOT EXISTS idx_tasks_cost ON tasks(cost_usd DESC);`,
 			`CREATE INDEX IF NOT EXISTS idx_tasks_run_status ON tasks(run_id, status);`,
 		}
@@ -127,15 +128,7 @@ func (s *SQLiteTaskStore) dbConn() (*sql.DB, error) {
 }
 
 func parseTime(raw string) time.Time {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return time.Time{}
-	}
-	t, err := time.Parse(time.RFC3339Nano, raw)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
+	return timeutil.ParseRFC3339Nano(raw)
 }
 
 func (s *SQLiteTaskStore) CreateTask(ctx context.Context, task types.Task) error {
@@ -219,14 +212,14 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (types.Tas
 	var metadataJSON string
 	var createdRaw string
 	var startedRaw string
-	var completedRaw string
+	var finishedRaw string
 	var updatedRaw string
 	var leaseRaw string
 	err = db.QueryRowContext(ctx, `
 		SELECT
 			task_id, session_id, run_id, goal,
 			COALESCE(inputs_json, '{}'), priority, status,
-			created_at, COALESCE(started_at, ''), COALESCE(completed_at, ''),
+			created_at, COALESCE(started_at, ''), COALESCE(finished_at, ''),
 			COALESCE(summary, ''), COALESCE(artifacts_json, '[]'),
 			COALESCE(error, ''), attempts, COALESCE(lease_until, ''),
 			updated_at,
@@ -238,7 +231,7 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (types.Tas
 	`, taskID).Scan(
 		&t.TaskID, &t.SessionID, &t.RunID, &t.Goal,
 		&inputsJSON, &t.Priority, &status,
-		&createdRaw, &startedRaw, &completedRaw,
+		&createdRaw, &startedRaw, &finishedRaw,
 		&t.Summary, &artifactsJSON,
 		&t.Error, &t.Attempts, &leaseRaw,
 		&updatedRaw,
@@ -264,7 +257,7 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (types.Tas
 	if tt := parseTime(startedRaw); !tt.IsZero() {
 		t.StartedAt = &tt
 	}
-	if tt := parseTime(completedRaw); !tt.IsZero() {
+	if tt := parseTime(finishedRaw); !tt.IsZero() {
 		t.CompletedAt = &tt
 	}
 	if tt := parseTime(updatedRaw); !tt.IsZero() {
@@ -281,8 +274,8 @@ func allowedSortColumn(sortBy string) (string, bool) {
 	switch strings.TrimSpace(sortBy) {
 	case "", "created_at":
 		return "created_at", true
-	case "completed_at":
-		return "completed_at", true
+	case "completed_at", "finished_at":
+		return "finished_at", true
 	case "cost_usd":
 		return "cost_usd", true
 	case "priority":
@@ -360,7 +353,7 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 		SELECT
 			task_id, session_id, run_id, goal,
 			priority, status, created_at,
-			COALESCE(started_at, ''), COALESCE(completed_at, ''),
+			COALESCE(started_at, ''), COALESCE(finished_at, ''),
 			COALESCE(summary, ''), COALESCE(error, ''),
 			attempts, COALESCE(lease_until, ''),
 			input_tokens, output_tokens, total_tokens, cost_usd,
@@ -424,13 +417,13 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 		var status string
 		var createdRaw string
 		var startedRaw string
-		var completedRaw string
+		var finishedRaw string
 		var leaseRaw string
 		var updatedRaw string
 		if err := rows.Scan(
 			&t.TaskID, &t.SessionID, &t.RunID, &t.Goal,
 			&t.Priority, &status, &createdRaw,
-			&startedRaw, &completedRaw,
+			&startedRaw, &finishedRaw,
 			&t.Summary, &t.Error,
 			&t.Attempts, &leaseRaw,
 			&t.InputTokens, &t.OutputTokens, &t.TotalTokens, &t.CostUSD,
@@ -445,7 +438,7 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 		if tt := parseTime(startedRaw); !tt.IsZero() {
 			t.StartedAt = &tt
 		}
-		if tt := parseTime(completedRaw); !tt.IsZero() {
+		if tt := parseTime(finishedRaw); !tt.IsZero() {
 			t.CompletedAt = &tt
 		}
 		if tt := parseTime(updatedRaw); !tt.IsZero() {
@@ -529,12 +522,12 @@ func (s *SQLiteTaskStore) UpdateTask(ctx context.Context, task types.Task) error
 	artifactsJSON, _ := json.Marshal(task.Artifacts)
 
 	startedAt := ""
-	if task.StartedAt != nil && !task.StartedAt.IsZero() {
-		startedAt = task.StartedAt.UTC().Format(time.RFC3339Nano)
+	if timeutil.IsSet(task.StartedAt) {
+		startedAt = timeutil.FormatRFC3339Nano(task.StartedAt)
 	}
-	completedAt := ""
-	if task.CompletedAt != nil && !task.CompletedAt.IsZero() {
-		completedAt = task.CompletedAt.UTC().Format(time.RFC3339Nano)
+	finishedAt := ""
+	if timeutil.IsSet(task.CompletedAt) {
+		finishedAt = timeutil.FormatRFC3339Nano(task.CompletedAt)
 	}
 	leaseUntil := ""
 	if task.LeaseUntil != nil && !task.LeaseUntil.IsZero() {
@@ -544,7 +537,7 @@ func (s *SQLiteTaskStore) UpdateTask(ctx context.Context, task types.Task) error
 	_, err = db.ExecContext(ctx, `
 		UPDATE tasks
 		SET session_id = ?, run_id = ?, goal = ?, inputs_json = ?, priority = ?,
-		    status = ?, started_at = ?, completed_at = ?, summary = ?, artifacts_json = ?,
+		    status = ?, started_at = ?, finished_at = ?, summary = ?, artifacts_json = ?,
 		    error = ?, attempts = ?, lease_until = ?, updated_at = ?,
 		    input_tokens = ?, output_tokens = ?, total_tokens = ?, cost_usd = ?, duration_seconds = ?,
 		    metadata_json = ?
@@ -552,7 +545,7 @@ func (s *SQLiteTaskStore) UpdateTask(ctx context.Context, task types.Task) error
 	`, strings.TrimSpace(task.SessionID), strings.TrimSpace(task.RunID), strings.TrimSpace(task.Goal), string(inputsJSON), task.Priority,
 		strings.TrimSpace(string(task.Status)),
 		nullIfEmpty(startedAt),
-		nullIfEmpty(completedAt),
+		nullIfEmpty(finishedAt),
 		strings.TrimSpace(task.Summary),
 		string(artifactsJSON),
 		strings.TrimSpace(task.Error),
@@ -678,9 +671,9 @@ func (s *SQLiteTaskStore) CompleteTask(ctx context.Context, taskID string, resul
 		status = types.TaskStatusFailed
 	}
 	now := time.Now().UTC()
-	completedAt := now
-	if result.CompletedAt != nil && !result.CompletedAt.IsZero() {
-		completedAt = result.CompletedAt.UTC()
+	finishedAt := now
+	if timeutil.IsSet(result.CompletedAt) {
+		finishedAt = result.CompletedAt.UTC()
 	}
 	artifactsJSON, _ := json.Marshal(result.Artifacts)
 
@@ -691,11 +684,11 @@ func (s *SQLiteTaskStore) CompleteTask(ctx context.Context, taskID string, resul
 
 	_, err = db.ExecContext(ctx, `
 		UPDATE tasks
-		SET status = ?, completed_at = ?, summary = ?, artifacts_json = ?, error = ?,
+		SET status = ?, finished_at = ?, summary = ?, artifacts_json = ?, error = ?,
 		    input_tokens = ?, output_tokens = ?, total_tokens = ?, cost_usd = ?,
 		    lease_until = NULL, updated_at = ?
 		WHERE task_id = ?
-	`, string(status), completedAt.Format(time.RFC3339Nano),
+`, string(status), finishedAt.Format(time.RFC3339Nano),
 		strings.TrimSpace(result.Summary), string(artifactsJSON), strings.TrimSpace(result.Error),
 		result.InputTokens, result.OutputTokens, total, result.CostUSD,
 		now.Format(time.RFC3339Nano), taskID)
