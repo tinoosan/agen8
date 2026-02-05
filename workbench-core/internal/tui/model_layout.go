@@ -14,6 +14,17 @@ import (
 func (m *Model) layout() {
 	wasAtBottom := m.transcriptAtBottom()
 	prevTranscriptW := m.transcript.Width
+	if m.showDetails && m.width < detailsPaneMinTerminalWidth {
+		m.showDetails = false
+		if m.focus == focusActivityList {
+			m.focus = focusInput
+			if m.isMulti {
+				m.multiline.Focus()
+			} else {
+				m.single.Focus()
+			}
+		}
+	}
 
 	// Width-dependent components (header + footer) can wrap when the terminal is narrow.
 	// We compute their real rendered heights so the header is never "pushed off" by a

@@ -352,6 +352,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	activityList.SetShowPagination(false)
 
 	tctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	// Best-effort: load a small recent window for initial display without scanning the full log.
 	var evs []types.EventRecord
 	{

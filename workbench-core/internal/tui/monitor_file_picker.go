@@ -218,19 +218,18 @@ func (m *monitorModel) selectFileFromPicker() tea.Cmd {
 }
 
 func (m *monitorModel) renderFilePicker(base string) string {
-	modalWidth := 80
-	if modalWidth > m.width-8 {
-		modalWidth = m.width - 8
+	maxModalW := max(1, m.width-8)
+	modalWidth := min(80, maxModalW)
+	minModalW := min(40, maxModalW)
+	if modalWidth < minModalW {
+		modalWidth = minModalW
 	}
-	if modalWidth < 40 {
-		modalWidth = 40
-	}
-	modalHeight := 22
-	if modalHeight > m.height-8 {
-		modalHeight = m.height - 8
-	}
-	if modalHeight < 10 {
-		modalHeight = 10
+
+	maxModalH := max(1, m.height-8)
+	modalHeight := min(22, maxModalH)
+	minModalH := min(10, maxModalH)
+	if modalHeight < minModalH {
+		modalHeight = minModalH
 	}
 
 	listHeight := modalHeight - 2

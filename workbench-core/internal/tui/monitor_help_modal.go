@@ -63,19 +63,23 @@ func (m *monitorModel) renderHelpModal(base string) string {
 	}
 
 	modalWidth := maxLineWidth + 6 // padding + border
-	if modalWidth > m.width-8 {
-		modalWidth = m.width - 8
+	maxModalW := max(1, m.width-8)
+	if modalWidth > maxModalW {
+		modalWidth = maxModalW
 	}
-	if modalWidth < 50 {
-		modalWidth = 50
+	minModalW := min(50, maxModalW)
+	if modalWidth < minModalW {
+		modalWidth = minModalW
 	}
 
 	modalHeight := len(lines) + 4 // padding + border
-	if modalHeight > m.height-6 {
-		modalHeight = m.height - 6
+	maxModalH := max(1, m.height-6)
+	if modalHeight > maxModalH {
+		modalHeight = maxModalH
 	}
-	if modalHeight < 15 {
-		modalHeight = 15
+	minModalH := min(15, maxModalH)
+	if modalHeight < minModalH {
+		modalHeight = minModalH
 	}
 
 	// Style the help text

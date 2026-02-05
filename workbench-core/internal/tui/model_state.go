@@ -20,6 +20,8 @@ const (
 	composeVPath     = "/project/.workbench/compose.md"
 	planVPath        = "/plan/CHECKLIST.md"
 	planDetailsVPath = "/plan/HEAD.md"
+	// The details pane needs enough width for both transcript and sidebar.
+	detailsPaneMinTerminalWidth = 72
 )
 
 // TurnRunner executes one user turn and returns the agent final response.

@@ -465,6 +465,10 @@ func (m Model) keyToggleActivityPanel(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if msg.Type != tea.KeyCtrlA {
 		return m, nil, false
 	}
+	if !m.showDetails && m.width < detailsPaneMinTerminalWidth {
+		// Ignore open requests on narrow terminals where the split cannot fit.
+		return m, nil, true
+	}
 	m.showDetails = !m.showDetails
 	if m.showDetails {
 		m.focus = focusActivityList

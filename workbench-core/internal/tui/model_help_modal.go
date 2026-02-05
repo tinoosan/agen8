@@ -34,19 +34,18 @@ func (m *Model) closeHelpModal() {
 }
 
 func (m *Model) helpModalDims() (contentW, contentH, vpH int) {
-	outerW := 84
-	if outerW > m.width-8 {
-		outerW = m.width - 8
+	maxOuterW := max(1, m.width-8)
+	outerW := min(84, maxOuterW)
+	minOuterW := min(44, maxOuterW)
+	if outerW < minOuterW {
+		outerW = minOuterW
 	}
-	if outerW < 44 {
-		outerW = 44
-	}
-	outerH := 22
-	if outerH > m.height-8 {
-		outerH = m.height - 8
-	}
-	if outerH < 12 {
-		outerH = 12
+
+	maxOuterH := max(1, m.height-8)
+	outerH := min(22, maxOuterH)
+	minOuterH := min(12, maxOuterH)
+	if outerH < minOuterH {
+		outerH = minOuterH
 	}
 
 	// Keep TOTAL modal size within outerW/outerH (account for padding + border).

@@ -192,19 +192,18 @@ func (m *Model) selectSessionFromPicker() tea.Cmd {
 }
 
 func (m Model) renderSessionPicker(base string) string {
-	modalWidth := 80
-	if modalWidth > m.width-8 {
-		modalWidth = m.width - 8
+	maxModalW := max(1, m.width-8)
+	modalWidth := min(80, maxModalW)
+	minModalW := min(48, maxModalW)
+	if modalWidth < minModalW {
+		modalWidth = minModalW
 	}
-	if modalWidth < 48 {
-		modalWidth = 48
-	}
-	modalHeight := 22
-	if modalHeight > m.height-8 {
-		modalHeight = m.height - 8
-	}
-	if modalHeight < 12 {
-		modalHeight = 12
+
+	maxModalH := max(1, m.height-8)
+	modalHeight := min(22, maxModalH)
+	minModalH := min(12, maxModalH)
+	if modalHeight < minModalH {
+		modalHeight = minModalH
 	}
 
 	listHeight := modalHeight - 4

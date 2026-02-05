@@ -807,7 +807,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 			// #endregion agent log
 			m.planTabActive = true
-			if !m.showDetails {
+			if !m.showDetails && m.width >= detailsPaneMinTerminalWidth {
 				m.showDetails = true
 				m.focus = focusInput
 				if m.isMulti {

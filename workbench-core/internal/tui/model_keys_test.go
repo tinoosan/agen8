@@ -429,6 +429,8 @@ func TestReasoningSummaryPicker_EscClosesWithoutRunning(t *testing.T) {
 
 func TestFocus_CtrlATogglesActivityAndFocus(t *testing.T) {
 	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
 	m.showDetails = false
 	m.layout()
 
@@ -450,8 +452,48 @@ func TestFocus_CtrlATogglesActivityAndFocus(t *testing.T) {
 	}
 }
 
+func TestFocus_CtrlANarrowTerminal_DoesNotOpenActivity(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = detailsPaneMinTerminalWidth - 1
+	m.height = 24
+	m.showDetails = false
+	m.layout()
+
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	updated := m2.(Model)
+	if updated.showDetails {
+		t.Fatalf("expected showDetails to remain false below min width %d", detailsPaneMinTerminalWidth)
+	}
+	if updated.focus != focusInput {
+		t.Fatalf("expected focusInput to remain active, got %v", updated.focus)
+	}
+}
+
+func TestPlanAutoExpand_NarrowTerminal_DoesNotOpenActivityPane(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = detailsPaneMinTerminalWidth - 1
+	m.height = 24
+	m.showDetails = false
+	m.layout()
+
+	m2, _ := m.Update(planFileMsg{path: planVPath, content: "- [ ] one item"})
+	updated := m2.(Model)
+
+	if !updated.planAutoExpanded {
+		t.Fatalf("expected planAutoExpanded true after first checklist load")
+	}
+	if !updated.planTabActive {
+		t.Fatalf("expected planTabActive true after checklist auto-expand")
+	}
+	if updated.showDetails {
+		t.Fatalf("expected showDetails false below min width %d", detailsPaneMinTerminalWidth)
+	}
+}
+
 func TestKeyRouting_WhenActivityFocused_InputDoesNotConsumeKeys(t *testing.T) {
 	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
 	m.showDetails = true
 	m.focus = focusActivityList
 	m.single.Blur()
@@ -481,6 +523,8 @@ func TestKeyRouting_WhenActivityFocused_InputDoesNotConsumeKeys(t *testing.T) {
 
 func TestKeyRouting_WhenActivityFocused_CtrlTAndCtrlGDoNotToggleInputModes(t *testing.T) {
 	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = 120
+	m.height = 24
 	m.showDetails = true
 	m.focus = focusActivityList
 	m.single.Blur()
@@ -598,6 +642,25 @@ func TestLayout_NarrowTerminal_HeaderStillVisibleWhenFooterWraps(t *testing.T) {
 	firstLine := strings.SplitN(view, "\n", 2)[0]
 	if !strings.Contains(firstLine, "workbench") {
 		t.Fatalf("expected header line to contain %q, got %q", "workbench", firstLine)
+	}
+}
+
+func TestLayout_NarrowTerminal_ClosesActivityPaneDefensively(t *testing.T) {
+	m := New(context.Background(), stubRunner{final: "ok"}, make(chan events.Event))
+	m.width = detailsPaneMinTerminalWidth - 1
+	m.height = 24
+	m.showDetails = true
+	m.focus = focusActivityList
+	m.single.Blur()
+	m.multiline.Blur()
+
+	m.layout()
+
+	if m.showDetails {
+		t.Fatalf("expected showDetails false below min width %d", detailsPaneMinTerminalWidth)
+	}
+	if m.focus != focusInput {
+		t.Fatalf("expected focusInput after defensive close, got %v", m.focus)
 	}
 }
 

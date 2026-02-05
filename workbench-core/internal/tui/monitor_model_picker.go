@@ -146,19 +146,18 @@ func (m *monitorModel) selectModelFromPicker() tea.Cmd {
 
 func (m *monitorModel) renderModelPicker(base string) string {
 	// Calculate modal dimensions
-	modalWidth := 60
-	if modalWidth > m.width-8 {
-		modalWidth = m.width - 8
+	maxModalW := max(1, m.width-8)
+	modalWidth := min(60, maxModalW)
+	minModalW := min(40, maxModalW)
+	if modalWidth < minModalW {
+		modalWidth = minModalW
 	}
-	if modalWidth < 40 {
-		modalWidth = 40
-	}
-	modalHeight := 20
-	if modalHeight > m.height-8 {
-		modalHeight = m.height - 8
-	}
-	if modalHeight < 10 {
-		modalHeight = 10
+
+	maxModalH := max(1, m.height-8)
+	modalHeight := min(20, maxModalH)
+	minModalH := min(10, maxModalH)
+	if modalHeight < minModalH {
+		modalHeight = minModalH
 	}
 
 	// Size the list to fit within the modal
