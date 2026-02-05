@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -32,7 +33,7 @@ func (s *SQLiteConstructorStore) GetState(_ context.Context, runID string) ([]by
 	var raw []byte
 	if err := s.DB.QueryRow(`SELECT state_json FROM constructor_state WHERE run_id = ?`, runID).Scan(&raw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("constructor state not found: %w", pkgstore.ErrNotFound)
+			return nil, fmt.Errorf("constructor state not found: %w", errors.Join(pkgstore.ErrNotFound, os.ErrNotExist))
 		}
 		return nil, err
 	}
@@ -67,7 +68,7 @@ func (s *SQLiteConstructorStore) GetManifest(_ context.Context, runID string) ([
 	var raw []byte
 	if err := s.DB.QueryRow(`SELECT manifest_json FROM constructor_manifest WHERE run_id = ?`, runID).Scan(&raw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("constructor manifest not found: %w", pkgstore.ErrNotFound)
+			return nil, fmt.Errorf("constructor manifest not found: %w", errors.Join(pkgstore.ErrNotFound, os.ErrNotExist))
 		}
 		return nil, err
 	}

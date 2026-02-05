@@ -201,6 +201,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	var traceStore store.TraceStore
 	var historyStore store.HistoryStore
 	var constructorStore store.ConstructorStateStore
+	var sessionStore store.SessionReaderWriter
 
 	ms, err := implstore.NewDiskMemoryStore(cfg)
 	if err != nil {
@@ -221,6 +222,12 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return fmt.Errorf("create constructor store: %w", err)
 	}
 	constructorStore = cs
+
+	ss, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		return fmt.Errorf("create session store: %w", err)
+	}
+	sessionStore = ss
 
 	// Text-based memory recall provider backed by daily memory files.
 	// Semantic/vector recall is intentionally not used.
@@ -256,10 +263,10 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 			return implstore.SaveRun(cfg, r)
 		},
 		LoadSession: func(sessionID string) (types.Session, error) {
-			return implstore.LoadSession(cfg, sessionID)
+			return sessionStore.LoadSession(context.Background(), sessionID)
 		},
 		SaveSession: func(session types.Session) error {
-			return implstore.SaveSession(cfg, session)
+			return sessionStore.SaveSession(context.Background(), session)
 		},
 	})
 	if err != nil {
@@ -292,7 +299,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 	agentCfg.PromptSource = promptSource
 	agentCfg.Hooks = agent.Hooks{
-		OnLLMUsage: newCostUsageHook(cfg, run, resolved.Model, resolved.PriceInPerMTokensUSD, resolved.PriceOutPerMTokensUSD, mustEmit),
+		OnLLMUsage: newCostUsageHook(cfg, run, resolved.Model, resolved.PriceInPerMTokensUSD, resolved.PriceOutPerMTokensUSD, sessionStore, mustEmit),
 		OnStep: func(step int, model, summary string) {
 			model = strings.TrimSpace(model)
 			summary = strings.TrimSpace(summary)
@@ -381,6 +388,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 			Cfg:       cfg,
 			Run:       run,
 			TaskStore: taskStore,
+			Session:   sessionStore,
 			NotifyCh:  notifyCh,
 			Index:     index,
 			Wake: func() {
@@ -525,7 +533,7 @@ func resolveProfileRef(cfg config.Config, requested string) (*profile.Profile, s
 	return p, dir, err
 }
 
-func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, emit func(context.Context, events.Event)) func(step int, usage llmtypes.LLMUsage) {
+func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, sessionStore store.SessionReaderWriter, emit func(context.Context, events.Event)) func(step int, usage llmtypes.LLMUsage) {
 	pricingKnown := false
 	if priceIn == 0 && priceOut == 0 {
 		if in, out, ok := cost.DefaultPricing().Lookup(modelID); ok {
@@ -611,9 +619,11 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 		}
 
 		if !sessionLoaded {
-			if s, err := implstore.LoadSession(cfg, run.SessionID); err == nil {
-				session = s
-				sessionLoaded = true
+			if sessionStore != nil {
+				if s, err := sessionStore.LoadSession(context.Background(), run.SessionID); err == nil {
+					session = s
+					sessionLoaded = true
+				}
 			}
 		}
 		if sessionLoaded {
@@ -623,7 +633,7 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 			if pricingKnown {
 				session.CostUSD += costUSD
 			}
-			if err := implstore.SaveSession(cfg, session); err != nil {
+			if err := sessionStore.SaveSession(context.Background(), session); err != nil {
 				log.Printf("daemon: warning: failed to save session: %v", err)
 				if emit != nil {
 					emit(context.Background(), events.Event{

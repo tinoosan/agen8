@@ -25,7 +25,7 @@ func TestHistorySink_AppendsJSONL(t *testing.T) {
 	}
 
 	if err := sink.Emit(context.Background(), Message{RunID: "run-1", Payload: Event{
-		Type:    "agent.final",
+		Type:    "agent_final",
 		Message: "done",
 		Data:    map[string]string{"text": "ok"},
 	}}); err != nil {
@@ -54,7 +54,7 @@ func TestHistorySink_AppendsJSONL(t *testing.T) {
 	if got.RunID != "run-1" {
 		t.Fatalf("runId: %q", got.RunID)
 	}
-	if got.Kind != "agent.final" {
+	if got.Kind != "agent_final" {
 		t.Fatalf("kind: %q", got.Kind)
 	}
 	if got.Origin != "agent" {

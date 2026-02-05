@@ -24,7 +24,7 @@ const (
 type Activity struct {
 	ID string `json:"id"`
 
-	// Kind is the operation type (fs.read, fs.write, shell.exec, ...).
+	// Kind is the operation type (fs_read, fs_write, shell_exec, ...).
 	Kind string `json:"kind"`
 
 	// Title is the short human label shown in the list (e.g. "Read /project/main.go").
@@ -44,7 +44,7 @@ type Activity struct {
 	Path     string `json:"path,omitempty"`
 	MaxBytes string `json:"maxBytes,omitempty"`
 
-	// For fs.write/fs.append, this is a small preview of the payload that was written.
+	// For fs_write/fs_append, this is a small preview of the payload that was written.
 	TextPreview   string `json:"textPreview,omitempty"`
 	TextTruncated bool   `json:"textTruncated,omitempty"`
 	TextRedacted  bool   `json:"textRedacted,omitempty"`

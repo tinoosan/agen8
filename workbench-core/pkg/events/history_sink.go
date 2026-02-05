@@ -80,6 +80,8 @@ func inferOrigin(kind string) string {
 	switch {
 	case kind == "user.message":
 		return "user"
+	case kind == "agent_final":
+		return "agent"
 	case strings.HasPrefix(kind, "agent."):
 		if kind == "agent.op.response" || kind == "agent.turn.complete" {
 			return "env"

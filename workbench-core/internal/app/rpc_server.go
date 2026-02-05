@@ -15,6 +15,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -27,6 +28,8 @@ type RPCServer struct {
 	run types.Run
 
 	taskStore state.TaskStore
+	session   pkgstore.SessionReaderWriter
+	initErr   error
 
 	notifyCh <-chan protocol.Message
 	index    *protocol.Index
@@ -38,16 +41,31 @@ type RPCServerConfig struct {
 	Cfg       config.Config
 	Run       types.Run
 	TaskStore state.TaskStore
+	Session   pkgstore.SessionReaderWriter
 	NotifyCh  <-chan protocol.Message
 	Index     *protocol.Index
 	Wake      func()
 }
 
 func NewRPCServer(cfg RPCServerConfig) *RPCServer {
+	var sess pkgstore.SessionReaderWriter
+	var initErr error
+	if cfg.Session != nil {
+		sess = cfg.Session
+	} else {
+		st, err := implstore.NewSQLiteSessionStore(cfg.Cfg)
+		if err != nil {
+			initErr = err
+		} else {
+			sess = st
+		}
+	}
 	return &RPCServer{
 		cfg:       cfg.Cfg,
 		run:       cfg.Run,
 		taskStore: cfg.TaskStore,
+		session:   sess,
+		initErr:   initErr,
 		notifyCh:  cfg.NotifyCh,
 		index:     cfg.Index,
 		wake:      cfg.Wake,
@@ -58,6 +76,12 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 func (s *RPCServer) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	if s == nil {
 		return fmt.Errorf("rpc server is nil")
+	}
+	if s.initErr != nil {
+		return s.initErr
+	}
+	if s.session == nil {
+		return fmt.Errorf("session store not configured")
 	}
 
 	enc := json.NewEncoder(out)
@@ -304,7 +328,7 @@ func (s *RPCServer) threadGet(ctx context.Context, p protocol.ThreadGetParams) (
 	if strings.TrimSpace(string(p.ThreadID)) != strings.TrimSpace(string(want)) {
 		return protocol.ThreadGetResult{}, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 	}
-	sess, err := implstore.LoadSession(s.cfg, s.run.SessionID)
+	sess, err := s.session.LoadSession(ctx, s.run.SessionID)
 	if err != nil {
 		return protocol.ThreadGetResult{}, err
 	}
@@ -312,8 +336,7 @@ func (s *RPCServer) threadGet(ctx context.Context, p protocol.ThreadGetParams) (
 }
 
 func (s *RPCServer) threadCreate(ctx context.Context, p protocol.ThreadCreateParams) (protocol.ThreadCreateResult, error) {
-	_ = ctx
-	sess, err := implstore.LoadSession(s.cfg, s.run.SessionID)
+	sess, err := s.session.LoadSession(ctx, s.run.SessionID)
 	if err != nil {
 		return protocol.ThreadCreateResult{}, err
 	}
@@ -327,7 +350,7 @@ func (s *RPCServer) threadCreate(ctx context.Context, p protocol.ThreadCreatePar
 		changed = true
 	}
 	if changed {
-		if err := implstore.SaveSession(s.cfg, sess); err != nil {
+		if err := s.session.SaveSession(ctx, sess); err != nil {
 			return protocol.ThreadCreateResult{}, err
 		}
 	}

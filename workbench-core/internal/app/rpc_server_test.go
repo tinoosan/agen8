@@ -8,19 +8,26 @@ import (
 	"testing"
 	"time"
 
-	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	"github.com/tinoosan/workbench-core/pkg/store"
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 func TestRPCServer_ThreadGet_ReturnsActiveRunID(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
-	_, run, err := implstore.CreateSession(cfg, "goal", 8*1024)
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
+
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	sessStore := store.NewMemorySessionStore()
+	if err := sessStore.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
 	}
+
 	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
 	if err != nil {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
@@ -30,6 +37,7 @@ func TestRPCServer_ThreadGet_ReturnsActiveRunID(t *testing.T) {
 		Cfg:       cfg,
 		Run:       run,
 		TaskStore: ts,
+		Session:   sessStore,
 		NotifyCh:  nil,
 		Index:     protocol.NewIndex(0, 0),
 		Wake:      nil,
@@ -73,10 +81,16 @@ func TestRPCServer_ThreadGet_ReturnsActiveRunID(t *testing.T) {
 
 func TestRPCServer_TurnCreate_CreatesTaskAndWakes(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
-	_, run, err := implstore.CreateSession(cfg, "goal", 8*1024)
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
+
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	sessStore := store.NewMemorySessionStore()
+	if err := sessStore.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
 	}
+
 	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
 	if err != nil {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
@@ -87,6 +101,7 @@ func TestRPCServer_TurnCreate_CreatesTaskAndWakes(t *testing.T) {
 		Cfg:       cfg,
 		Run:       run,
 		TaskStore: ts,
+		Session:   sessStore,
 		NotifyCh:  nil,
 		Index:     protocol.NewIndex(0, 0),
 		Wake: func() {
@@ -148,10 +163,16 @@ func TestRPCServer_TurnCreate_CreatesTaskAndWakes(t *testing.T) {
 
 func TestRPCServer_ForwardsNotifications(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
-	_, run, err := implstore.CreateSession(cfg, "goal", 8*1024)
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
+
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	sessStore := store.NewMemorySessionStore()
+	if err := sessStore.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
 	}
+
 	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
 	if err != nil {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
@@ -163,6 +184,7 @@ func TestRPCServer_ForwardsNotifications(t *testing.T) {
 		Cfg:       cfg,
 		Run:       run,
 		TaskStore: ts,
+		Session:   sessStore,
 		NotifyCh:  notifyCh,
 		Index:     idx,
 		Wake:      nil,

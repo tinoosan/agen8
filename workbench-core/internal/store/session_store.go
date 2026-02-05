@@ -11,24 +11,16 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
 // SessionFilter specifies filtering and pagination for session queries.
-type SessionFilter struct {
-	// Filtering
-	TitleContains string // case-insensitive substring match against title/current goal
-
-	// Pagination
-	Limit  int // max results (default: 50, 0 = use default)
-	Offset int // skip N sessions
-
-	// Sorting
-	SortBy   string // "updated_at" (default), "created_at", "title"
-	SortDesc bool   // true = DESC (default), false = ASC
-}
+//
+// This is a type alias so internal and pkg store layers cannot diverge.
+type SessionFilter = pkgstore.SessionFilter
 
 // allowedSessionSortColumn validates sort column to prevent SQL injection.
 func allowedSessionSortColumn(col string) (string, bool) {

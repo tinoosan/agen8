@@ -146,7 +146,7 @@ func (fs *FS) Search(ctx context.Context, vpath, query string, limit int) ([]typ
 // List returns a list of entries under the given subpath.
 func (fs *FS) List(vpath string) ([]Entry, error) {
 	if vpath == "/" {
-		return fs.listRoot()
+		return fs.rootEntries()
 	}
 	mountName, r, subpath, err := fs.Resolve(vpath)
 	if err != nil {
@@ -169,7 +169,7 @@ func (fs *FS) List(vpath string) ([]Entry, error) {
 	return out, nil
 }
 
-func (fs *FS) listRoot() ([]Entry, error) {
+func (fs *FS) rootEntries() ([]Entry, error) {
 	if len(fs.mounts) == 0 {
 		return []Entry{}, nil
 	}

@@ -26,6 +26,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/resources"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -90,6 +91,7 @@ type monitorModel struct {
 	runID     string
 	runStatus string // loaded at init; used to show "run not active" warning
 	result    *MonitorResult
+	session   pkgstore.SessionQuery
 
 	offset int64
 
@@ -357,12 +359,18 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		runStatus = r.Status
 	}
 
+	sessionStore, err := store.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	m := &monitorModel{
 		ctx:                   ctx,
 		cfg:                   cfg,
 		runID:                 runID,
 		runStatus:             runStatus,
 		result:                result,
+		session:               sessionStore,
 		offset:                off,
 		input:                 in,
 		activityPageItems:     []Activity{},
