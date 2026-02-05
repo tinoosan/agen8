@@ -436,6 +436,7 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 
 	if strings.TrimSpace(req.Path) != "" {
 		meta.RespData["path"] = strings.TrimSpace(req.Path)
+		meta.StoreResp["path"] = strings.TrimSpace(req.Path)
 	}
 	if resp.BytesLen != 0 {
 		meta.RespData["bytesLen"] = strconv.Itoa(resp.BytesLen)

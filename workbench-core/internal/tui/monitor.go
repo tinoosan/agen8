@@ -2558,17 +2558,33 @@ func shouldReloadPlanOnEvent(ev types.EventRecord) bool {
 	if isPlanEvent(ev.Type, ev.Data["path"]) {
 		return true
 	}
-	if ev.Type != "agent.op.response" {
+	switch ev.Type {
+	case "agent.op.request", "agent.op.response":
+		// Note: stored agent.op.response events may omit "path" depending on StoreData policy,
+		// so also triggering off agent.op.request keeps the Plan panel in sync.
+		return isPlanEvent(ev.Data["op"], ev.Data["path"])
+	default:
 		return false
 	}
-	return isPlanEvent(ev.Data["op"], ev.Data["path"])
 }
 
 func isPlanEvent(kind string, path string) bool {
-	if kind != "fs.write" && kind != "fs.append" && kind != "fs.edit" && kind != "fs.patch" {
+	k := strings.TrimSpace(strings.ToLower(kind))
+	// Events can be emitted as:
+	// - fs.* event types ("fs.write")
+	// - agent.op.* events with "op" values like "Write"
+	if k != "fs.write" && k != "fs.append" && k != "fs.edit" && k != "fs.patch" &&
+		k != "write" && k != "append" && k != "edit" && k != "patch" {
 		return false
 	}
 	p := strings.TrimSpace(path)
+	if p == "" {
+		return false
+	}
+	// Some emitters omit the leading slash.
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
 	return strings.EqualFold(p, "/plan/HEAD.md") || strings.EqualFold(p, "/plan/CHECKLIST.md")
 }
 
