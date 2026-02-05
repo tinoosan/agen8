@@ -86,3 +86,30 @@ func TestIndex_ListByTurn_CursorPagination(t *testing.T) {
 		t.Fatalf("page3 len=%d cur3=%q", len(page3), cur3)
 	}
 }
+
+func TestIndex_ApplyTurnCanceledUpdatesTurnState(t *testing.T) {
+	x := NewIndex(0, 0)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	turn := Turn{
+		ID:        "task-1",
+		ThreadID:  "sess-1",
+		RunID:     "run-1",
+		Status:    TurnStatusCanceled,
+		CreatedAt: now,
+	}
+
+	x.Apply(NotifyTurnCanceled, TurnNotificationParams{Turn: turn})
+
+	// Ensure turn notification is ingested and indexed without breaking item listing.
+	_ = x.turns[turn.ID]
+	if got := x.turns[turn.ID]; got.Status != TurnStatusCanceled {
+		t.Fatalf("turn.status = %q want %q", got.Status, TurnStatusCanceled)
+	}
+	items, next := x.ListByTurn(turn.ID, "", 10)
+	if len(items) != 0 {
+		t.Fatalf("items len = %d want 0", len(items))
+	}
+	if next != "" {
+		t.Fatalf("next cursor = %q want empty", next)
+	}
+}

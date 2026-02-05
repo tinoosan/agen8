@@ -52,7 +52,7 @@ func (x *Index) Apply(method string, params any) {
 	defer x.mu.Unlock()
 
 	switch method {
-	case NotifyTurnStarted, NotifyTurnCompleted, NotifyTurnFailed:
+	case NotifyTurnStarted, NotifyTurnCompleted, NotifyTurnFailed, NotifyTurnCanceled:
 		var p TurnNotificationParams
 		if !coerceParams(params, &p) {
 			return

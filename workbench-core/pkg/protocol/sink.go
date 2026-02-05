@@ -238,6 +238,8 @@ func (s *EventSink) mapEventLocked(runID string, ev types.EventRecord) []notific
 		switch turn.Status {
 		case TurnStatusFailed:
 			out = append(out, notificationCall{method: NotifyTurnFailed, params: TurnNotificationParams{Turn: *turn}})
+		case TurnStatusCanceled:
+			out = append(out, notificationCall{method: NotifyTurnCanceled, params: TurnNotificationParams{Turn: *turn}})
 		default:
 			out = append(out, notificationCall{method: NotifyTurnCompleted, params: TurnNotificationParams{Turn: *turn}})
 		}

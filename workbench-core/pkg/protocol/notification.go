@@ -5,6 +5,7 @@ const (
 	NotifyTurnStarted   = "turn.started"
 	NotifyTurnCompleted = "turn.completed"
 	NotifyTurnFailed    = "turn.failed"
+	NotifyTurnCanceled  = "turn.canceled"
 
 	NotifyItemStarted   = "item.started"
 	NotifyItemDelta     = "item.delta"
