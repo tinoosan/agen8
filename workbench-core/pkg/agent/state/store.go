@@ -10,6 +10,28 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
+// Task storage contracts
+//
+// Task IDs
+//   - Most task IDs are canonicalized to the form "task-<id>" by ingress (webhook or /inbox ingestion).
+//   - Heartbeat tasks use "heartbeat-..." IDs and are exempt from "task-" normalization.
+//   - Ingestion may preserve an unprefixed/original ID in task metadata as "originalTaskId".
+//
+// Errors
+//   - ErrTaskNotFound wraps pkg/store.ErrNotFound so callers can use errors.Is(err, pkg/store.ErrNotFound).
+//   - Implementations should return ErrTaskNotFound (or an error wrapping it) when a task is missing.
+//   - Lease operations may return ErrTaskClaimed / ErrTaskTerminal for expected contention/terminal states.
+//
+// Leases
+//   - ClaimTask should be treated as "acquire lease" and should fail with ErrTaskClaimed if held elsewhere.
+//   - ExtendLease should be idempotent for the current lease holder and should not revive terminal tasks.
+//   - RecoverExpiredLeases should mark tasks failed when their lease has elapsed without completion.
+//
+// Filtering/pagination
+//   - ListTasks should honor Limit/Offset for pagination and SortBy/SortDesc for ordering.
+//   - Invalid filters/sort keys should return ErrInvalidFilter.
+//   - SortBy values are implementation-defined but typically include: created_at, finished_at (or completed_at), cost_usd.
+
 // TaskReader queries tasks from storage.
 type TaskReader interface {
 	// GetTask retrieves a single task by ID.

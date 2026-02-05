@@ -42,7 +42,7 @@ type Run struct {
 	// TotalTokens is the cumulative input + output tokens for this run.
 	TotalTokens int `json:"totalTokens,omitempty"`
 	// CostUSD is the cumulative estimated cost for this run.
-	CostUSD float64 `json:"costUsd,omitempty"`
+	CostUSD float64 `json:"costUSD,omitempty"`
 
 	// Runtime captures host/runtime configuration used when executing this run.
 	//
@@ -74,8 +74,8 @@ type RunRuntimeConfig struct {
 	IncludeHistoryOps bool `json:"includeHistoryOps,omitempty"`
 
 	// Pricing configuration used to estimate per-turn cost (USD per 1M tokens).
-	PriceInPerMTokensUSD  float64 `json:"priceInPerMTokensUsd,omitempty"`
-	PriceOutPerMTokensUSD float64 `json:"priceOutPerMTokensUsd,omitempty"`
+	PriceInPerMTokensUSD  float64 `json:"priceInPerMTokensUSD,omitempty"`
+	PriceOutPerMTokensUSD float64 `json:"priceOutPerMTokensUSD,omitempty"`
 
 	// Reasoning configuration (best-effort; provider/model dependent).
 	ReasoningEffort  string `json:"reasoningEffort,omitempty"`

@@ -21,5 +21,5 @@ type Thread struct {
 	InputTokens  int     `json:"inputTokens,omitempty"`
 	OutputTokens int     `json:"outputTokens,omitempty"`
 	TotalTokens  int     `json:"totalTokens,omitempty"`
-	CostUSD      float64 `json:"costUsd,omitempty"`
+	CostUSD      float64 `json:"costUSD,omitempty"`
 }

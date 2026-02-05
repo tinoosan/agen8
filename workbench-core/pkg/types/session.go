@@ -81,7 +81,7 @@ type Session struct {
 	// TotalTokens is the cumulative input + output tokens for this session.
 	TotalTokens int `json:"totalTokens,omitempty"`
 	// CostUSD is the cumulative estimated cost for this session.
-	CostUSD float64 `json:"costUsd,omitempty"`
+	CostUSD float64 `json:"costUSD,omitempty"`
 }
 
 // NewSession creates a new session with a unique ID.

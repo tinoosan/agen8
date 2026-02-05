@@ -1200,11 +1200,11 @@ func (m *Model) onEvent(ev events.Event) tea.Cmd {
 		m.totalTokens += m.lastTurnTokens
 	case "llm.cost.total":
 		known := parseBool(ev.Data["known"])
-		m.lastTurnCostUSD = strings.TrimSpace(ev.Data["costUsd"])
+		m.lastTurnCostUSD = getCostUSD(ev.Data)
 		if !known && m.lastTurnCostUSD == "" {
 			m.lastTurnCostUSD = "?"
 		}
-		if v := strings.TrimSpace(ev.Data["costUsd"]); v != "" {
+		if v := getCostUSD(ev.Data); v != "" {
 			if f, err := strconv.ParseFloat(v, 64); err == nil {
 				m.totalCostUSD += f
 			}

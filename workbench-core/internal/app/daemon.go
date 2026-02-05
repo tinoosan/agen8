@@ -573,7 +573,7 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 			"known": fmt.Sprintf("%t", known),
 		}
 		if known {
-			payload["costUsd"] = fmt.Sprintf("%.4f", costUSD)
+			payload["costUSD"] = fmt.Sprintf("%.4f", costUSD)
 		}
 		emit(context.Background(), events.Event{
 			Type:    "llm.cost.total",
@@ -689,9 +689,18 @@ func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run
 			http.Error(w, "goal is required", http.StatusBadRequest)
 			return
 		}
-		taskID := strings.TrimSpace(payload.TaskID)
+		origTaskID := strings.TrimSpace(payload.TaskID)
+		taskID := origTaskID
 		if taskID == "" {
 			taskID = "task-" + uuid.NewString()
+		} else if norm, changed := types.NormalizeTaskID(taskID); changed {
+			taskID = norm
+			if payload.Metadata == nil {
+				payload.Metadata = map[string]any{}
+			}
+			payload.Metadata["originalTaskId"] = origTaskID
+		} else {
+			taskID = norm
 		}
 		now := time.Now()
 		task := types.Task{

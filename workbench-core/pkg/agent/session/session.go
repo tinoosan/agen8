@@ -345,17 +345,26 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 			continue
 		}
 
-		taskID := strings.TrimSuffix(path.Base(p), path.Ext(p))
-		if strings.TrimSpace(taskID) == "" {
+		fileID := strings.TrimSuffix(path.Base(p), path.Ext(p))
+		if strings.TrimSpace(fileID) == "" {
 			continue
 		}
+		normFileID, _ := types.NormalizeTaskID(fileID)
 
 		// If already ingested, skip file reads entirely.
-		if _, err := s.cfg.TaskStore.GetTask(ctx, taskID); err == nil {
+		if _, err := s.cfg.TaskStore.GetTask(ctx, fileID); err == nil {
 			continue
 		} else if err != nil && !errors.Is(err, state.ErrTaskNotFound) {
-			errs = errors.Join(errs, fmt.Errorf("get task %s: %w", taskID, err))
+			errs = errors.Join(errs, fmt.Errorf("get task %s: %w", fileID, err))
 			continue
+		}
+		if normFileID != fileID {
+			if _, err := s.cfg.TaskStore.GetTask(ctx, normFileID); err == nil {
+				continue
+			} else if err != nil && !errors.Is(err, state.ErrTaskNotFound) {
+				errs = errors.Join(errs, fmt.Errorf("get task %s: %w", normFileID, err))
+				continue
+			}
 		}
 
 		raw, ok := s.readText(ctx, p)
@@ -375,8 +384,18 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 		if err := json.Unmarshal([]byte(raw), &task); err != nil {
 			continue
 		}
-		if strings.TrimSpace(task.TaskID) == "" {
-			task.TaskID = taskID
+		rawID := strings.TrimSpace(task.TaskID)
+		if rawID == "" {
+			rawID = fileID
+		}
+		if normalized, changed := types.NormalizeTaskID(rawID); strings.TrimSpace(normalized) != "" {
+			task.TaskID = normalized
+			if changed {
+				if task.Metadata == nil {
+					task.Metadata = map[string]any{}
+				}
+				task.Metadata["originalTaskId"] = rawID
+			}
 		}
 		task.Goal = strings.TrimSpace(task.Goal)
 		if task.Goal == "" {
@@ -630,7 +649,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			data["totalTokens"] = fmt.Sprintf("%d", tr.TotalTokens)
 		}
 		if tr.CostUSD > 0 {
-			data["costUsd"] = fmt.Sprintf("%.4f", tr.CostUSD)
+			data["costUSD"] = fmt.Sprintf("%.4f", tr.CostUSD)
 		}
 		if len(tr.Artifacts) != 0 {
 			data["artifacts"] = fmt.Sprintf("%d", len(tr.Artifacts))

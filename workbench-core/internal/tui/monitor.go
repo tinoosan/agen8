@@ -56,11 +56,18 @@ type uiRefreshMsg struct{}
 
 type planReloadMsg struct{}
 
+type sessionTotalsReloadMsg struct{}
+
 type planFilesLoadedMsg struct {
 	checklist    string
 	checklistErr string
 	details      string
 	detailsErr   string
+}
+
+type sessionTotalsLoadedMsg struct {
+	session types.Session
+	err     error
 }
 
 type inboxLoadedMsg struct {
@@ -92,6 +99,7 @@ type monitorModel struct {
 	runStatus string // loaded at init; used to show "run not active" warning
 	result    *MonitorResult
 	session   pkgstore.SessionQuery
+	sessionID string
 
 	offset int64
 
@@ -122,41 +130,43 @@ type monitorModel struct {
 
 	taskStore agentstate.TaskStore
 
-	inbox               map[string]taskState
-	inboxVP             viewport.Model
-	currentTask         *taskState
-	inboxList           []taskState
-	inboxPage           int
-	inboxPageSize       int
-	inboxTotalCount     int
-	outboxResults       []outboxEntry
-	outboxVP            viewport.Model
-	outboxPage          int
-	outboxPageSize      int
-	outboxTotalCount    int
-	memResults          []string
-	memoryVP            viewport.Model
-	thinkingEntries     []thinkingEntry
-	thinkingVP          viewport.Model
-	thinkingAutoScroll  bool
-	planMarkdown        string
-	planDetails         string
-	planLoadErr         string
-	planDetailsErr      string
-	planReloadScheduled bool
-	planReloadDebounce  time.Duration
-	stats               monitorStats
-	model               string
-	profile             string
-	focusedPanel        panelID
-	compactTab          int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
-	dashboardSideTab    int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
-	width               int
-	height              int
-	styles              *monitorStyles
-	tailCh              <-chan store.TailedEvent
-	errCh               <-chan error
-	cancel              context.CancelFunc
+	inbox                        map[string]taskState
+	inboxVP                      viewport.Model
+	currentTask                  *taskState
+	inboxList                    []taskState
+	inboxPage                    int
+	inboxPageSize                int
+	inboxTotalCount              int
+	outboxResults                []outboxEntry
+	outboxVP                     viewport.Model
+	outboxPage                   int
+	outboxPageSize               int
+	outboxTotalCount             int
+	memResults                   []string
+	memoryVP                     viewport.Model
+	thinkingEntries              []thinkingEntry
+	thinkingVP                   viewport.Model
+	thinkingAutoScroll           bool
+	planMarkdown                 string
+	planDetails                  string
+	planLoadErr                  string
+	planDetailsErr               string
+	planReloadScheduled          bool
+	planReloadDebounce           time.Duration
+	sessionTotalsReloadScheduled bool
+	sessionTotalsReloadDebounce  time.Duration
+	stats                        monitorStats
+	model                        string
+	profile                      string
+	focusedPanel                 panelID
+	compactTab                   int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
+	dashboardSideTab             int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
+	width                        int
+	height                       int
+	styles                       *monitorStyles
+	tailCh                       <-chan store.TailedEvent
+	errCh                        <-chan error
+	cancel                       context.CancelFunc
 
 	// Modal overlay state (only one modal open at a time)
 	helpModalOpen bool
@@ -210,8 +220,18 @@ type monitorModel struct {
 }
 
 type monitorStats struct {
-	started         time.Time
-	tasksDone       int
+	started time.Time
+
+	tasksDone int
+
+	lastTurnTokensIn  int
+	lastTurnTokensOut int
+	lastTurnTokens    int
+
+	totalTokensIn  int
+	totalTokensOut int
+	totalTokens    int
+
 	lastTurnCostUSD string
 	totalCostUSD    float64
 }
@@ -308,7 +328,6 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		return nil, err
 	}
 	if rs, err := taskStore.GetRunStats(ctx, runID); err == nil {
-		stats.totalCostUSD = rs.TotalCost
 		// Best-effort: show tasks already completed before monitor attached.
 		stats.tasksDone = rs.Succeeded + rs.Failed
 	}
@@ -355,8 +374,10 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	tailCh, errCh := store.TailEvents(cfg, tctx, runID, off)
 
 	runStatus := types.RunStatusSucceeded
+	runSessionID := ""
 	if r, err := store.LoadRun(cfg, runID); err == nil {
 		runStatus = r.Status
+		runSessionID = strings.TrimSpace(r.SessionID)
 	}
 
 	sessionStore, err := store.NewSQLiteSessionStore(cfg)
@@ -364,51 +385,62 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		return nil, err
 	}
 
+	if runSessionID != "" {
+		if sess, err := sessionStore.LoadSession(ctx, runSessionID); err == nil {
+			stats.totalTokensIn = sess.InputTokens
+			stats.totalTokensOut = sess.OutputTokens
+			stats.totalTokens = sess.TotalTokens
+			stats.totalCostUSD = sess.CostUSD
+		}
+	}
+
 	m := &monitorModel{
-		ctx:                   ctx,
-		cfg:                   cfg,
-		runID:                 runID,
-		runStatus:             runStatus,
-		result:                result,
-		session:               sessionStore,
-		offset:                off,
-		input:                 in,
-		activityPageItems:     []Activity{},
-		activityPage:          0,
-		activityPageSize:      200,
-		activityTotalCount:    0,
-		activityList:          activityList,
-		activityDetail:        viewport.New(0, 0),
-		activityFollowingTail: true,
-		planViewport:          viewport.New(0, 0),
-		planFollowingTop:      true,
-		renderer:              newContentRenderer(),
-		agentOutput:           []string{},
-		agentOutputVP:         viewport.New(0, 0),
-		agentOutputFollow:     true,
-		inbox:                 map[string]taskState{},
-		inboxVP:               viewport.New(0, 0),
-		inboxList:             []taskState{},
-		inboxPage:             0,
-		inboxPageSize:         50,
-		outboxResults:         []outboxEntry{},
-		outboxVP:              viewport.New(0, 0),
-		outboxPage:            0,
-		outboxPageSize:        50,
-		memResults:            []string{},
-		memoryVP:              viewport.New(0, 0),
-		thinkingEntries:       []thinkingEntry{},
-		thinkingVP:            viewport.New(0, 0),
-		thinkingAutoScroll:    true,
-		taskStore:             taskStore,
-		stats:                 stats,
-		styles:                defaultMonitorStyles(),
-		focusedPanel:          panelComposer,
-		tailCh:                tailCh,
-		errCh:                 errCh,
-		cancel:                cancel,
-		uiRefreshDebounce:     33 * time.Millisecond,
-		planReloadDebounce:    100 * time.Millisecond,
+		ctx:                         ctx,
+		cfg:                         cfg,
+		runID:                       runID,
+		runStatus:                   runStatus,
+		result:                      result,
+		session:                     sessionStore,
+		sessionID:                   runSessionID,
+		offset:                      off,
+		input:                       in,
+		activityPageItems:           []Activity{},
+		activityPage:                0,
+		activityPageSize:            200,
+		activityTotalCount:          0,
+		activityList:                activityList,
+		activityDetail:              viewport.New(0, 0),
+		activityFollowingTail:       true,
+		planViewport:                viewport.New(0, 0),
+		planFollowingTop:            true,
+		renderer:                    newContentRenderer(),
+		agentOutput:                 []string{},
+		agentOutputVP:               viewport.New(0, 0),
+		agentOutputFollow:           true,
+		inbox:                       map[string]taskState{},
+		inboxVP:                     viewport.New(0, 0),
+		inboxList:                   []taskState{},
+		inboxPage:                   0,
+		inboxPageSize:               50,
+		outboxResults:               []outboxEntry{},
+		outboxVP:                    viewport.New(0, 0),
+		outboxPage:                  0,
+		outboxPageSize:              50,
+		memResults:                  []string{},
+		memoryVP:                    viewport.New(0, 0),
+		thinkingEntries:             []thinkingEntry{},
+		thinkingVP:                  viewport.New(0, 0),
+		thinkingAutoScroll:          true,
+		taskStore:                   taskStore,
+		stats:                       stats,
+		styles:                      defaultMonitorStyles(),
+		focusedPanel:                panelComposer,
+		tailCh:                      tailCh,
+		errCh:                       errCh,
+		cancel:                      cancel,
+		uiRefreshDebounce:           33 * time.Millisecond,
+		planReloadDebounce:          100 * time.Millisecond,
+		sessionTotalsReloadDebounce: 150 * time.Millisecond,
 	}
 	// Disable mouse handling so terminals don't enter mouse-reporting mode.
 	m.activityDetail.MouseWheelEnabled = false
@@ -458,6 +490,10 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{m.listenEvent()}
 		if shouldReloadPlanOnEvent(msg.ev.Event) {
 			cmds = append(cmds, m.schedulePlanReload())
+		}
+		switch msg.ev.Event.Type {
+		case "llm.cost.total", "llm.usage.total":
+			cmds = append(cmds, m.scheduleSessionTotalsReload())
 		}
 		// Keep paginated lists in sync without loading everything into memory.
 		switch msg.ev.Event.Type {
@@ -560,12 +596,25 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.planReloadScheduled = false
 		return m, m.loadPlanFilesCmd()
 
+	case sessionTotalsReloadMsg:
+		m.sessionTotalsReloadScheduled = false
+		return m, m.loadSessionTotalsCmd()
+
 	case planFilesLoadedMsg:
 		m.planMarkdown = msg.checklist
 		m.planLoadErr = msg.checklistErr
 		m.planDetails = msg.details
 		m.planDetailsErr = msg.detailsErr
 		m.dirtyPlan = true
+		return m, m.scheduleUIRefresh()
+
+	case sessionTotalsLoadedMsg:
+		if msg.err == nil {
+			m.stats.totalTokensIn = msg.session.InputTokens
+			m.stats.totalTokensOut = msg.session.OutputTokens
+			m.stats.totalTokens = msg.session.TotalTokens
+			m.stats.totalCostUSD = msg.session.CostUSD
+		}
 		return m, m.scheduleUIRefresh()
 
 	case monitorFilePickerPathsMsg:
@@ -805,6 +854,32 @@ func (m *monitorModel) schedulePlanReload() tea.Cmd {
 		d = 0
 	}
 	return tea.Tick(d, func(time.Time) tea.Msg { return planReloadMsg{} })
+}
+
+func (m *monitorModel) scheduleSessionTotalsReload() tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	if m.sessionTotalsReloadScheduled {
+		return nil
+	}
+	m.sessionTotalsReloadScheduled = true
+	d := m.sessionTotalsReloadDebounce
+	if d <= 0 {
+		d = 0
+	}
+	return tea.Tick(d, func(time.Time) tea.Msg { return sessionTotalsReloadMsg{} })
+}
+
+func (m *monitorModel) loadSessionTotalsCmd() tea.Cmd {
+	if m == nil || m.session == nil || strings.TrimSpace(m.sessionID) == "" {
+		return nil
+	}
+	sessionID := strings.TrimSpace(m.sessionID)
+	return func() tea.Msg {
+		sess, err := m.session.LoadSession(m.ctx, sessionID)
+		return sessionTotalsLoadedMsg{session: sess, err: err}
+	}
 }
 
 func (m *monitorModel) loadInboxPage() tea.Cmd {
@@ -1526,8 +1601,16 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 		if summary != "" {
 			m.appendThinkingEntry(summary)
 		}
+	case "llm.usage.total":
+		m.stats.lastTurnTokensIn = parseInt(ev.Data["input"])
+		m.stats.lastTurnTokensOut = parseInt(ev.Data["output"])
+		m.stats.lastTurnTokens = parseInt(ev.Data["total"])
 	case "llm.cost.total":
-		m.stats.lastTurnCostUSD = strings.TrimSpace(ev.Data["costUsd"])
+		known := parseBool(ev.Data["known"])
+		m.stats.lastTurnCostUSD = getCostUSD(ev.Data)
+		if !known && m.stats.lastTurnCostUSD == "" {
+			m.stats.lastTurnCostUSD = "?"
+		}
 	}
 }
 
@@ -1572,11 +1655,8 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		}
 		m.currentTask = nil
 		m.stats.tasksDone++
-		if v := strings.TrimSpace(ev.Data["costUsd"]); v != "" {
+		if v := getCostUSD(ev.Data); v != "" {
 			m.stats.lastTurnCostUSD = v
-			if f, err := strconv.ParseFloat(v, 64); err == nil {
-				m.stats.totalCostUSD += f
-			}
 		}
 	case "task.quarantined":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
@@ -3053,6 +3133,14 @@ func renderStats(s monitorStats) string {
 	if !s.started.IsZero() {
 		uptime = time.Since(s.started).Round(time.Second).String()
 	}
+	lastTokensLine := ""
+	if s.lastTurnTokens > 0 {
+		lastTokensLine = fmt.Sprintf("\nLast tokens: %d (%d in + %d out)", s.lastTurnTokens, s.lastTurnTokensIn, s.lastTurnTokensOut)
+	}
+	totalTokensLine := ""
+	if s.totalTokens > 0 {
+		totalTokensLine = fmt.Sprintf("\nTotal tokens: %d (%d in + %d out)", s.totalTokens, s.totalTokensIn, s.totalTokensOut)
+	}
 	costLine := ""
 	if strings.TrimSpace(s.lastTurnCostUSD) != "" {
 		costLine = fmt.Sprintf("\nLast cost: $%s", s.lastTurnCostUSD)
@@ -3061,7 +3149,7 @@ func renderStats(s monitorStats) string {
 	if s.totalCostUSD > 0 {
 		totalLine = fmt.Sprintf("\nTotal cost: $%.4f", s.totalCostUSD)
 	}
-	return fmt.Sprintf("Tasks done: %d\nUptime: %s%s%s", s.tasksDone, fallback(uptime, "unknown"), costLine, totalLine)
+	return fmt.Sprintf("Tasks done: %d\nUptime: %s%s%s%s%s", s.tasksDone, fallback(uptime, "unknown"), lastTokensLine, totalTokensLine, costLine, totalLine)
 }
 
 func renderMemResults(results []string) string {
