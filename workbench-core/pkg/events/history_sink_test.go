@@ -24,11 +24,11 @@ func TestHistorySink_AppendsJSONL(t *testing.T) {
 		Now:   func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
 	}
 
-	if err := sink.Emit(context.Background(), "run-1", Event{
+	if err := sink.Emit(context.Background(), Message{RunID: "run-1", Payload: Event{
 		Type:    "agent.final",
 		Message: "done",
 		Data:    map[string]string{"text": "ok"},
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
 

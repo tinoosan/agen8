@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/agent"
-	agentevents "github.com/tinoosan/workbench-core/pkg/agent/events"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/cost"
+	"github.com/tinoosan/workbench-core/pkg/emit"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/profile"
@@ -33,7 +33,7 @@ type Config struct {
 	ResolveProfile ResolveProfileFunc
 
 	TaskStore state.TaskStore
-	Events    *agentevents.Writer
+	Events    emit.Emitter[events.Event]
 
 	Memory            agent.MemoryRecallProvider
 	MemorySearchLimit int

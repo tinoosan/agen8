@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tinoosan/workbench-core/pkg/emit"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -18,14 +19,14 @@ func TestSink_TaskStartEmitsTurnAndUserItem(t *testing.T) {
 	now := time.Date(2026, 2, 5, 12, 0, 0, 0, time.UTC)
 	var got []capturedNotification
 
-	s := NewSink(func(method string, params any) error {
-		b, err := json.Marshal(params)
+	s := NewEventSink(emit.SinkFunc[Notification](func(_ context.Context, msg emit.Message[Notification]) error {
+		b, err := json.Marshal(msg.Payload.Params)
 		if err != nil {
 			t.Fatalf("marshal params: %v", err)
 		}
-		got = append(got, capturedNotification{method: method, params: b})
+		got = append(got, capturedNotification{method: msg.Payload.Method, params: b})
 		return nil
-	}, WithThreadID("sess-1"), WithNow(func() time.Time { return now }))
+	}), WithThreadID("sess-1"), WithNow(func() time.Time { return now }))
 
 	ev := types.EventRecord{
 		Type:      "task.start",
@@ -33,7 +34,7 @@ func TestSink_TaskStartEmitsTurnAndUserItem(t *testing.T) {
 		Timestamp: now,
 		Data:      map[string]string{"taskId": "task-1", "goal": "do the thing"},
 	}
-	if err := s.Emit(context.Background(), "run-1", ev); err != nil {
+	if err := s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: ev}); err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
 
@@ -75,31 +76,31 @@ func TestSink_TaskStartEmitsTurnAndUserItem(t *testing.T) {
 func TestSink_OpRequestResponseEmitsToolItems(t *testing.T) {
 	now := time.Date(2026, 2, 5, 12, 0, 0, 0, time.UTC)
 	var got []capturedNotification
-	s := NewSink(func(method string, params any) error {
-		b, err := json.Marshal(params)
+	s := NewEventSink(emit.SinkFunc[Notification](func(_ context.Context, msg emit.Message[Notification]) error {
+		b, err := json.Marshal(msg.Payload.Params)
 		if err != nil {
 			t.Fatalf("marshal params: %v", err)
 		}
-		got = append(got, capturedNotification{method: method, params: b})
+		got = append(got, capturedNotification{method: msg.Payload.Method, params: b})
 		return nil
-	}, WithThreadID("sess-1"), WithNow(func() time.Time { return now }))
+	}), WithThreadID("sess-1"), WithNow(func() time.Time { return now }))
 
 	// Start a turn.
-	_ = s.Emit(context.Background(), "run-1", types.EventRecord{
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
 		Type:      "task.start",
 		Message:   "Task started",
 		Timestamp: now,
 		Data:      map[string]string{"taskId": "task-1", "goal": "read a file"},
-	})
+	}})
 	got = nil
 
 	// Tool request.
-	_ = s.Emit(context.Background(), "run-1", types.EventRecord{
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
 		Type:      "agent.op.request",
 		Message:   "Agent requested host op",
 		Timestamp: now,
 		Data:      map[string]string{"opId": "op-1", "op": "fs.read", "path": "/foo.txt"},
-	})
+	}})
 	if len(got) != 1 || got[0].method != NotifyItemStarted {
 		t.Fatalf("got = %#v", got)
 	}
@@ -116,12 +117,12 @@ func TestSink_OpRequestResponseEmitsToolItems(t *testing.T) {
 
 	// Tool response.
 	got = nil
-	_ = s.Emit(context.Background(), "run-1", types.EventRecord{
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
 		Type:      "agent.op.response",
 		Message:   "Host op completed",
 		Timestamp: now,
 		Data:      map[string]string{"opId": "op-1", "op": "fs.read", "ok": "true", "bytesLen": "10"},
-	})
+	}})
 	if len(got) != 1 || got[0].method != NotifyItemCompleted {
 		t.Fatalf("got = %#v", got)
 	}
@@ -147,29 +148,29 @@ func TestSink_OpRequestResponseEmitsToolItems(t *testing.T) {
 func TestSink_TaskDoneEmitsAgentMessageAndTurnCompleted(t *testing.T) {
 	now := time.Date(2026, 2, 5, 12, 0, 0, 0, time.UTC)
 	var got []capturedNotification
-	s := NewSink(func(method string, params any) error {
-		b, err := json.Marshal(params)
+	s := NewEventSink(emit.SinkFunc[Notification](func(_ context.Context, msg emit.Message[Notification]) error {
+		b, err := json.Marshal(msg.Payload.Params)
 		if err != nil {
 			t.Fatalf("marshal params: %v", err)
 		}
-		got = append(got, capturedNotification{method: method, params: b})
+		got = append(got, capturedNotification{method: msg.Payload.Method, params: b})
 		return nil
-	}, WithThreadID("sess-1"), WithNow(func() time.Time { return now }))
+	}), WithThreadID("sess-1"), WithNow(func() time.Time { return now }))
 
-	_ = s.Emit(context.Background(), "run-1", types.EventRecord{
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
 		Type:      "task.start",
 		Message:   "Task started",
 		Timestamp: now,
 		Data:      map[string]string{"taskId": "task-1", "goal": "say hi"},
-	})
+	}})
 	got = nil
 
-	_ = s.Emit(context.Background(), "run-1", types.EventRecord{
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
 		Type:      "task.done",
 		Message:   "Task finished",
 		Timestamp: now,
 		Data:      map[string]string{"taskId": "task-1", "status": "succeeded", "summary": "hello"},
-	})
+	}})
 
 	if len(got) != 3 {
 		t.Fatalf("notifications = %d want %d", len(got), 3)
@@ -194,29 +195,29 @@ func TestSink_TaskDoneEmitsAgentMessageAndTurnCompleted(t *testing.T) {
 func TestSink_StepEmitsReasoningItem(t *testing.T) {
 	now := time.Date(2026, 2, 5, 12, 0, 0, 0, time.UTC)
 	var got []capturedNotification
-	s := NewSink(func(method string, params any) error {
-		b, err := json.Marshal(params)
+	s := NewEventSink(emit.SinkFunc[Notification](func(_ context.Context, msg emit.Message[Notification]) error {
+		b, err := json.Marshal(msg.Payload.Params)
 		if err != nil {
 			t.Fatalf("marshal params: %v", err)
 		}
-		got = append(got, capturedNotification{method: method, params: b})
+		got = append(got, capturedNotification{method: msg.Payload.Method, params: b})
 		return nil
-	}, WithThreadID("sess-1"), WithNow(func() time.Time { return now }))
+	}), WithThreadID("sess-1"), WithNow(func() time.Time { return now }))
 
-	_ = s.Emit(context.Background(), "run-1", types.EventRecord{
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
 		Type:      "task.start",
 		Message:   "Task started",
 		Timestamp: now,
 		Data:      map[string]string{"taskId": "task-1", "goal": "reason"},
-	})
+	}})
 	got = nil
 
-	_ = s.Emit(context.Background(), "run-1", types.EventRecord{
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
 		Type:      "agent.step",
 		Message:   "Step 1 completed",
 		Timestamp: now,
 		Data:      map[string]string{"step": "1", "reasoningSummary": "did stuff"},
-	})
+	}})
 
 	if len(got) != 2 || got[0].method != NotifyItemStarted || got[1].method != NotifyItemCompleted {
 		t.Fatalf("got = %#v", got)
@@ -234,5 +235,30 @@ func TestSink_StepEmitsReasoningItem(t *testing.T) {
 	}
 	if rc.Step != 1 || rc.Summary != "did stuff" {
 		t.Fatalf("reasoning = %#v", rc)
+	}
+}
+
+func TestEventSink_Diagnostics_MissingActiveTurn(t *testing.T) {
+	now := time.Date(2026, 2, 5, 12, 0, 0, 0, time.UTC)
+	var diags []Diagnostic
+
+	s := NewEventSink(emit.SinkFunc[Notification](func(_ context.Context, _ emit.Message[Notification]) error {
+		return nil
+	}), WithThreadID("sess-1"), WithNow(func() time.Time { return now }), WithDiagnostics(func(d Diagnostic) {
+		diags = append(diags, d)
+	}))
+
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
+		Type:      "agent.step",
+		Message:   "Step 1 completed",
+		Timestamp: now,
+		Data:      map[string]string{"step": "1", "reasoningSummary": "did stuff"},
+	}})
+
+	if len(diags) != 1 {
+		t.Fatalf("diags=%d want 1", len(diags))
+	}
+	if diags[0].Reason != "missing_active_turn" {
+		t.Fatalf("reason=%q want %q", diags[0].Reason, "missing_active_turn")
 	}
 }

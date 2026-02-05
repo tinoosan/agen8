@@ -17,10 +17,11 @@ type EventSink struct {
 	Ch chan<- events.Event
 }
 
-func (s EventSink) Emit(_ context.Context, _ string, event events.Event) (err error) {
+func (s EventSink) Emit(_ context.Context, msg events.Message) (err error) {
 	if s.Ch == nil {
 		return nil
 	}
+	event := msg.Payload
 	dropped := false
 	// The host may emit a final "run completed" event after the UI has begun shutting
 	// down. If the channel has already been closed, sending would panic. Treat that

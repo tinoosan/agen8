@@ -30,7 +30,7 @@
 //
 //   - `Event`: carries the runtime type, message, metadata maps, and delivery hints
 //     that sinks use to decide whether to write to console, history, or other stores.
-//   - `Sink`: consumes `Event` payloads bound to a run ID; hosts ship `Sink`
+//   - `Sink`: consumes `Event` payloads wrapped in an `events.Message` (run ID + payload); hosts ship `Sink`
 //     implementations such as console, history, or store sinks.
 //   - `MultiSink`: fans events out to multiple sinks while collecting partial errors.
 //   - `Emitter`: wraps a run ID + sink pair so much of the runtime can emit without

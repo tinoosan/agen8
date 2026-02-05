@@ -20,12 +20,12 @@ import (
 	"github.com/google/uuid"
 	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent"
-	agentevents "github.com/tinoosan/workbench-core/pkg/agent/events"
 	hosttools "github.com/tinoosan/workbench-core/pkg/agent/hosttools"
 	"github.com/tinoosan/workbench-core/pkg/agent/session"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/cost"
+	"github.com/tinoosan/workbench-core/pkg/emit"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/llm"
@@ -86,10 +86,13 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 
 		// Warm the index by replaying stored events for this run.
 		{
-			replaySink := protocol.NewSink(func(method string, params any) error {
-				index.Apply(method, params)
-				return nil
-			}, protocol.WithThreadID(protocol.ThreadID(run.SessionID)))
+			replaySink := protocol.NewEventSink(
+				emit.SinkFunc[protocol.Notification](func(_ context.Context, msg emit.Message[protocol.Notification]) error {
+					index.Apply(msg.Payload.Method, msg.Payload.Params)
+					return nil
+				}),
+				protocol.WithThreadID(protocol.ThreadID(run.SessionID)),
+			)
 
 			var after int64
 			for {
@@ -106,7 +109,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 					break
 				}
 				for _, ev := range batch {
-					_ = replaySink.Emit(context.Background(), run.RunID, ev)
+					_ = replaySink.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: run.RunID, Payload: ev})
 				}
 				after = next
 			}
@@ -115,25 +118,25 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 
 	// Protocol sink converts host events into protocol notifications (Phase 2) and, when
 	// enabled, feeds the protocol index + notification channel used by the app server (Phase 3).
-	protocolSink := protocol.NewSink(
-		func(method string, params any) error {
+	protocolSink := protocol.NewEventSink(
+		emit.SinkFunc[protocol.Notification](func(_ context.Context, msg emit.Message[protocol.Notification]) error {
 			if index != nil {
-				index.Apply(method, params)
+				index.Apply(msg.Payload.Method, msg.Payload.Params)
 			}
 			if notifyCh == nil {
 				return nil
 			}
-			msg, err := protocol.NewNotification(method, params)
+			out, err := protocol.NewNotification(msg.Payload.Method, msg.Payload.Params)
 			if err != nil {
 				return err
 			}
 			select {
-			case notifyCh <- msg:
+			case notifyCh <- out:
 			default:
 				// Drop if buffer is full (best-effort).
 			}
 			return nil
-		},
+		}),
 		protocol.WithThreadID(protocol.ThreadID(run.SessionID)),
 	)
 
@@ -144,8 +147,10 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 			protocolSink,
 		},
 	}
+	orderedEmitter := emit.NewOrderedEmitter[events.Event](emitter)
+	defer orderedEmitter.Close()
 	mustEmit := func(ctx context.Context, ev events.Event) {
-		if err := emitter.Emit(ctx, ev); err != nil && !errors.Is(err, events.ErrDropped) {
+		if err := orderedEmitter.Emit(ctx, ev); err != nil && !errors.Is(err, events.ErrDropped) {
 			log.Printf("events: emit failed: %v", err)
 		}
 	}
@@ -336,10 +341,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err != nil {
 		return err
 	}
-	emitBlocking := func(ctx context.Context, ev events.Event) error {
-		return emitter.Emit(ctx, ev)
-	}
-	ordered := agentevents.NewWriter(emitBlocking)
 
 	sess, err := session.New(session.Config{
 		Agent:      a,
@@ -349,7 +350,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 			return resolveProfileRef(cfg, strings.TrimSpace(ref))
 		},
 		TaskStore:         taskStore,
-		Events:            ordered,
+		Events:            orderedEmitter,
 		Memory:            memoryProvider,
 		MemorySearchLimit: 3,
 		Notifier:          notifier,

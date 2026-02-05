@@ -9,7 +9,8 @@ import (
 // ConsoleSink prints compact JSON event lines to the terminal.
 type ConsoleSink struct{}
 
-func (ConsoleSink) Emit(_ context.Context, _ string, event Event) error {
+func (ConsoleSink) Emit(_ context.Context, msg Message) error {
+	event := msg.Payload
 	if !enabled(event.Console) {
 		return nil
 	}

@@ -2,17 +2,17 @@ package events
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/tinoosan/workbench-core/pkg/emit"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 var (
 	// ErrDropped indicates an event was intentionally dropped (e.g. non-blocking UI sinks)
 	// and not delivered to that sink. Callers may treat this as non-fatal.
-	ErrDropped = errors.New("event dropped")
+	ErrDropped = emit.ErrDropped
 )
 
 // Event is the unified event payload used both for emission and storage.
@@ -39,24 +39,10 @@ func enabled(ptr *bool) bool {
 	return *ptr
 }
 
-type Sink interface {
-	Emit(ctx context.Context, runID string, event types.EventRecord) error
-}
-
-type MultiSink []Sink
-
-func (m MultiSink) Emit(ctx context.Context, runID string, event Event) error {
-	var errs error
-	for _, s := range m {
-		if s == nil {
-			continue
-		}
-		if err := s.Emit(ctx, runID, event); err != nil {
-			errs = errors.Join(errs, err)
-		}
-	}
-	return errs
-}
+type Message = emit.Message[Event]
+type Sink = emit.Sink[Event]
+type SinkFunc = emit.SinkFunc[Event]
+type MultiSink = emit.MultiSink[Event]
 
 type Emitter struct {
 	RunID string
@@ -76,5 +62,5 @@ func (e *Emitter) Emit(ctx context.Context, event types.EventRecord) error {
 	if err := validateEvent(event); err != nil {
 		return err
 	}
-	return e.Sink.Emit(ctx, e.RunID, event)
+	return e.Sink.Emit(ctx, Message{RunID: e.RunID, Payload: event})
 }

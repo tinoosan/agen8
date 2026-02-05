@@ -8,6 +8,7 @@
 // Transport is JSON-RPC 2.0 framed messages. A client sends requests to create/get
 // threads and turns, and receives server notifications as turns and items progress.
 //
-// This package is types-only: it defines the JSON schema and constants used on the
-// wire without importing internal packages or changing existing behavior.
+// In addition to wire types + constants, this package provides an adapter sink
+// (see EventSink) that maps host events (`types.EventRecord`) into protocol
+// notifications.
 package protocol

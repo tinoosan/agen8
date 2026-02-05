@@ -20,7 +20,9 @@ type HistorySink struct {
 	Now   func() time.Time
 }
 
-func (s HistorySink) Emit(ctx context.Context, runID string, event Event) error {
+func (s HistorySink) Emit(ctx context.Context, msg Message) error {
+	runID := msg.RunID
+	event := msg.Payload
 	if !enabled(event.History) {
 		return nil
 	}

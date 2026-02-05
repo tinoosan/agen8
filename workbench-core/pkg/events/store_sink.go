@@ -18,7 +18,9 @@ type StoreSink struct {
 	Store StoreAppender
 }
 
-func (s StoreSink) Emit(ctx context.Context, runID string, event Event) error {
+func (s StoreSink) Emit(ctx context.Context, msg Message) error {
+	runID := msg.RunID
+	event := msg.Payload
 	if !enabled(event.Store) {
 		return nil
 	}
