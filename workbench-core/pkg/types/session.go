@@ -74,14 +74,14 @@ type Session struct {
 	// Cursor is treated as opaque at the module boundary.
 	HistoryCursor string `json:"historyCursor,omitempty"`
 
-	// TotalTokensIn is the cumulative input tokens consumed by all runs in this session.
-	TotalTokensIn int `json:"totalTokensIn,omitempty"`
-	// TotalTokensOut is the cumulative output tokens consumed by all runs in this session.
-	TotalTokensOut int `json:"totalTokensOut,omitempty"`
+	// InputTokens is the cumulative input tokens consumed by all runs in this session.
+	InputTokens int `json:"inputTokens,omitempty"`
+	// OutputTokens is the cumulative output tokens consumed by all runs in this session.
+	OutputTokens int `json:"outputTokens,omitempty"`
 	// TotalTokens is the cumulative input + output tokens for this session.
 	TotalTokens int `json:"totalTokens,omitempty"`
-	// TotalCostUSD is the cumulative estimated cost for this session.
-	TotalCostUSD float64 `json:"totalCostUsd,omitempty"`
+	// CostUSD is the cumulative estimated cost for this session.
+	CostUSD float64 `json:"costUsd,omitempty"`
 }
 
 // NewSession creates a new session with a unique ID.

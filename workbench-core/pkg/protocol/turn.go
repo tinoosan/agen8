@@ -28,11 +28,5 @@ type Turn struct {
 	StepCount int `json:"stepCount,omitempty"`
 
 	// Error is present when Status is failed.
-	Error *TurnError `json:"error,omitempty"`
-}
-
-// TurnError describes a turn failure.
-type TurnError struct {
-	Code    int    `json:"code,omitempty"`
-	Message string `json:"message,omitempty"`
+	Error *Error `json:"error,omitempty"`
 }

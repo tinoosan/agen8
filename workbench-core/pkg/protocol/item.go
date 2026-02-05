@@ -40,13 +40,7 @@ type Item struct {
 	Status    ItemStatus      `json:"status"`
 	CreatedAt time.Time       `json:"createdAt,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
-	Error     *ItemError      `json:"error,omitempty"`
-}
-
-// ItemError describes an item failure.
-type ItemError struct {
-	Code    int    `json:"code,omitempty"`
-	Message string `json:"message,omitempty"`
+	Error     *Error          `json:"error,omitempty"`
 }
 
 // DecodeContent unmarshals i.Content into v.

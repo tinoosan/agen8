@@ -401,7 +401,7 @@ func (s *RPCServer) turnCancel(ctx context.Context, p protocol.TurnCancelParams)
 		}}, nil
 
 	case string(types.TaskStatusFailed):
-		pe := &protocol.TurnError{Message: strings.TrimSpace(task.Error)}
+		pe := &protocol.Error{Message: strings.TrimSpace(task.Error)}
 		if pe.Message == "" {
 			pe.Message = "task failed"
 		}

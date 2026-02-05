@@ -202,9 +202,9 @@ func (s *Sink) mapEventLocked(runID string, ev types.EventRecord) []notification
 		}
 		if turn.Status == TurnStatusFailed {
 			if msg := mapGet(ev.Data, "error"); msg != "" {
-				turn.Error = &TurnError{Message: msg}
+				turn.Error = &Error{Message: msg}
 			} else {
-				turn.Error = &TurnError{Message: "task failed"}
+				turn.Error = &Error{Message: "task failed"}
 			}
 		}
 
@@ -329,7 +329,7 @@ func (s *Sink) mapEventLocked(runID string, ev types.EventRecord) []notification
 		if okParsed && !okVal {
 			item.Status = ItemStatusFailed
 			if msg := mapGet(ev.Data, "err"); msg != "" {
-				item.Error = &ItemError{Message: msg}
+				item.Error = &Error{Message: msg}
 			}
 		}
 
