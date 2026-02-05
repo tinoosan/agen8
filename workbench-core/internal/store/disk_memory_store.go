@@ -79,6 +79,9 @@ func (s *DiskMemoryStore) WriteMemory(ctx context.Context, date string, text str
 	if err != nil {
 		return err
 	}
+	if err := s.ensureTodayWritable(path); err != nil {
+		return err
+	}
 	if err := s.ensure(); err != nil {
 		return err
 	}
@@ -92,6 +95,9 @@ func (s *DiskMemoryStore) WriteMemory(ctx context.Context, date string, text str
 func (s *DiskMemoryStore) AppendMemory(ctx context.Context, date string, text string) error {
 	path, err := s.dailyPath(date)
 	if err != nil {
+		return err
+	}
+	if err := s.ensureTodayWritable(path); err != nil {
 		return err
 	}
 	if err := s.ensureDaily(path); err != nil {
@@ -176,6 +182,15 @@ func (s *DiskMemoryStore) dailyPath(date string) (string, error) {
 	}
 	filename := fmt.Sprintf("%s-memory.md", d)
 	return filepath.Join(s.Dir, filename), nil
+}
+
+func (s *DiskMemoryStore) ensureTodayWritable(path string) error {
+	base := filepath.Base(strings.TrimSpace(path))
+	today := time.Now().Format("2006-01-02") + "-memory.md"
+	if base != today {
+		return fmt.Errorf("can only write to today's memory file: %s", today)
+	}
+	return nil
 }
 
 func defaultMemoryMaster() string {

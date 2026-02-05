@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -46,10 +47,11 @@ func TestDiskMemoryStore_ListMemoryFiles(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// Write yesterday to ensure multiple files exist.
+	// Create yesterday file directly to ensure multiple files exist.
 	yesterday := time.Now().Add(-24 * time.Hour).Format("2006-01-02")
-	if err := s.WriteMemory(ctx, yesterday, "old"); err != nil {
-		t.Fatalf("WriteMemory yesterday: %v", err)
+	yesterdayPath := filepath.Join(dir, yesterday+"-memory.md")
+	if err := os.WriteFile(yesterdayPath, []byte("old"), 0644); err != nil {
+		t.Fatalf("write yesterday file: %v", err)
 	}
 
 	files, err := s.ListMemoryFiles(ctx)
@@ -74,5 +76,41 @@ func TestDiskMemoryStore_ListMemoryFiles(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Fatalf("stat %s: %v", f, err)
 		}
+	}
+}
+
+func TestDiskMemoryStore_WriteMemory_RejectsNonToday(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewDiskMemoryStoreFromDir(dir)
+	if err != nil {
+		t.Fatalf("NewDiskMemoryStoreFromDir: %v", err)
+	}
+	ctx := context.Background()
+
+	yesterday := time.Now().Add(-24 * time.Hour).Format("2006-01-02")
+	err = s.WriteMemory(ctx, yesterday, "old")
+	if err == nil {
+		t.Fatalf("expected error when writing non-today memory file")
+	}
+	if !strings.Contains(err.Error(), "can only write to today's memory file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDiskMemoryStore_AppendMemory_RejectsNonToday(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewDiskMemoryStoreFromDir(dir)
+	if err != nil {
+		t.Fatalf("NewDiskMemoryStoreFromDir: %v", err)
+	}
+	ctx := context.Background()
+
+	yesterday := time.Now().Add(-24 * time.Hour).Format("2006-01-02")
+	err = s.AppendMemory(ctx, yesterday, "old")
+	if err == nil {
+		t.Fatalf("expected error when appending non-today memory file")
+	}
+	if !strings.Contains(err.Error(), "can only write to today's memory file") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
