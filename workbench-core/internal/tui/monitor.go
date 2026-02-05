@@ -453,7 +453,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Keep paginated lists in sync without loading everything into memory.
 		switch msg.ev.Event.Type {
-		case "task.queued", "task.generated", "webhook.task.queued", "task.start":
+		case "task.queued", "webhook.task.queued", "task.start":
 			cmds = append(cmds, m.loadInboxPage())
 		case "task.done", "task.quarantined":
 			cmds = append(cmds, m.loadInboxPage(), m.loadOutboxPage())
@@ -1525,7 +1525,7 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 
 func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 	switch ev.Type {
-	case "task.queued", "task.generated":
+	case "task.queued":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
 			return
@@ -1584,7 +1584,7 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 	switch ev.Type {
 	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning", "daemon.error", "daemon.runner.error":
 		m.appendAgentOutput(formatEventLine(ev))
-	case "task.queued", "task.generated", "task.start", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped":
+	case "task.queued", "task.start", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped":
 		for _, line := range formatTaskEventLines(ev) {
 			m.appendAgentOutput(line)
 		}
@@ -2572,9 +2572,9 @@ func shouldReloadPlanOnEvent(ev types.EventRecord) bool {
 func isPlanEvent(kind string, path string) bool {
 	k := strings.TrimSpace(strings.ToLower(kind))
 	// Events can be emitted as:
-	// - fs.* event types ("fs.write")
+	// - fs_* event types ("fs_write")
 	// - agent.op.* events with "op" values like "Write"
-	if k != "fs.write" && k != "fs.append" && k != "fs.edit" && k != "fs.patch" &&
+	if k != "fs_write" && k != "fs_append" && k != "fs_edit" && k != "fs_patch" &&
 		k != "write" && k != "append" && k != "edit" && k != "patch" {
 		return false
 	}
@@ -2651,7 +2651,7 @@ func outputLineStyle(line string) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))
 	case "task.done", "task.delivered":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950"))
-	case "task.start", "task.queued", "task.generated":
+	case "task.start", "task.queued":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#6bbcff"))
 	case "control", "control.check", "control.success", "control.error":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#d29922"))

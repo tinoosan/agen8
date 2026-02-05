@@ -321,11 +321,6 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 		Data:    map[string]string{"taskId": taskID, "profile": s.activeProfile.ID, "job": job.Name, "goal": truncateText(task.Goal, 200)},
 	})
 	// Also emit the generic queued event so the monitor queue panel can display it.
-	s.emitBestEffort(ctx, events.Event{
-		Type:    "task.generated",
-		Message: "Task generated",
-		Data:    map[string]string{"taskId": taskID, "profile": s.activeProfile.ID, "goal": truncateText(task.Goal, 200)},
-	})
 }
 
 func (s *Session) drainInbox(ctx context.Context) (bool, error) {
