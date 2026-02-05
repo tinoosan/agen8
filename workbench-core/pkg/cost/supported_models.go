@@ -32,11 +32,14 @@ var modelInfos = []ModelInfo{
 	{"anthropic/claude-3-opus", 15.0, 75.0, false},
 	{"anthropic/claude-3-haiku", 0.25, 1.25, false},
 	{"anthropic/claude-4.5-opus", 5.0, 25.0, true},
+	{"anthropic/claude-opus-4.6", 5.0, 25.0, true},
 	{"anthropic/claude-4.5-sonnet", 1.0, 15.0, true},
 	{"z-ai/glm-4.7", 0.4, 1.5, true},
 	{"deepseek/deepseek-chat", 0.14, 0.28, false},
 	{"deepseek/deepseek-r1", 0.55, 2.19, true},
 	{"openrouter/free", 0, 0, true},
+	{"moonshotai/kimi-k2-thinking", 0.4, 1.75, true},
+	{"moonshotai/kimi-k2.5", 0.45, 2.50, true},
 }
 
 func SupportedModels() []string {

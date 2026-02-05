@@ -229,36 +229,20 @@ func ListEvents(cfg config.Config, runID string) ([]types.EventRecord, int64, er
 	return events, nextOffset, nil
 }
 
-// ListEventsPaginated returns events with server-side pagination.
-// Uses SQL LIMIT/OFFSET or cursor-based pagination for efficient querying.
-//
-// The returned cursor is suitable for chaining:
-//   - ASC: use it as AfterSeq for the next page.
-//   - DESC: use it as BeforeSeq for the next page.
-func ListEventsPaginated(cfg config.Config, filter EventFilter) ([]types.EventRecord, int64, error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, 0, err
-	}
-
-	runID := strings.TrimSpace(filter.RunID)
-	if runID == "" {
-		return nil, 0, fmt.Errorf("runID is required in EventFilter")
-	}
-
-	db, err := getSQLiteDB(cfg)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	query := `SELECT seq, event_json FROM events WHERE run_id = ?`
+// buildEventFilterClause builds the shared WHERE clause fragment and query args
+// for filtering events by run ID, cursor bounds (AfterSeq/BeforeSeq), and type list.
+// It returns a clause like " AND seq > ? AND type IN (?,?)" and the corresponding args
+// (the initial "run_id = ?" / runID arg is included as the first element).
+func buildEventFilterClause(runID string, filter EventFilter) (string, []any) {
+	clause := `run_id = ?`
 	args := []any{runID}
 
 	if filter.AfterSeq > 0 {
-		query += ` AND seq > ?`
+		clause += ` AND seq > ?`
 		args = append(args, filter.AfterSeq)
 	}
 	if filter.BeforeSeq > 0 {
-		query += ` AND seq < ?`
+		clause += ` AND seq < ?`
 		args = append(args, filter.BeforeSeq)
 	}
 
@@ -281,8 +265,35 @@ func ListEventsPaginated(cfg config.Config, filter EventFilter) ([]types.EventRe
 			placeholders[i] = "?"
 			args = append(args, t)
 		}
-		query += fmt.Sprintf(` AND type IN (%s)`, strings.Join(placeholders, ","))
+		clause += fmt.Sprintf(` AND type IN (%s)`, strings.Join(placeholders, ","))
 	}
+
+	return clause, args
+}
+
+// ListEventsPaginated returns events with server-side pagination.
+// Uses SQL LIMIT/OFFSET or cursor-based pagination for efficient querying.
+//
+// The returned cursor is suitable for chaining:
+//   - ASC: use it as AfterSeq for the next page.
+//   - DESC: use it as BeforeSeq for the next page.
+func ListEventsPaginated(cfg config.Config, filter EventFilter) ([]types.EventRecord, int64, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, 0, err
+	}
+
+	runID := strings.TrimSpace(filter.RunID)
+	if runID == "" {
+		return nil, 0, fmt.Errorf("runID is required in EventFilter")
+	}
+
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	whereClause, args := buildEventFilterClause(runID, filter)
+	query := `SELECT seq, event_json FROM events WHERE ` + whereClause
 
 	if filter.SortDesc {
 		query += ` ORDER BY seq DESC`
@@ -359,39 +370,8 @@ func CountEvents(cfg config.Config, filter EventFilter) (int, error) {
 		return 0, err
 	}
 
-	query := `SELECT COUNT(*) FROM events WHERE run_id = ?`
-	args := []any{runID}
-
-	if filter.AfterSeq > 0 {
-		query += ` AND seq > ?`
-		args = append(args, filter.AfterSeq)
-	}
-	if filter.BeforeSeq > 0 {
-		query += ` AND seq < ?`
-		args = append(args, filter.BeforeSeq)
-	}
-
-	typesFilter := make([]string, 0, len(filter.Types))
-	seenTypes := make(map[string]struct{}, len(filter.Types))
-	for _, t := range filter.Types {
-		tt := strings.TrimSpace(t)
-		if tt == "" {
-			continue
-		}
-		if _, ok := seenTypes[tt]; ok {
-			continue
-		}
-		seenTypes[tt] = struct{}{}
-		typesFilter = append(typesFilter, tt)
-	}
-	if len(typesFilter) > 0 {
-		placeholders := make([]string, len(typesFilter))
-		for i, t := range typesFilter {
-			placeholders[i] = "?"
-			args = append(args, t)
-		}
-		query += fmt.Sprintf(` AND type IN (%s)`, strings.Join(placeholders, ","))
-	}
+	whereClause, args := buildEventFilterClause(runID, filter)
+	query := `SELECT COUNT(*) FROM events WHERE ` + whereClause
 
 	var count int
 	if err := db.QueryRow(query, args...).Scan(&count); err != nil {
