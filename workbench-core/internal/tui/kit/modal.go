@@ -100,7 +100,11 @@ func RenderOverlay(opts ModalOptions) string {
 			lineIdx := i - top
 			if lineIdx < len(lines) {
 				line := lines[lineIdx]
-				canvas[i] = strings.Repeat(" ", left) + line
+				composed := strings.Repeat(" ", left) + line
+				if lipgloss.Width(composed) > opts.ScreenWidth {
+					composed = lipgloss.NewStyle().MaxWidth(opts.ScreenWidth).Render(composed)
+				}
+				canvas[i] = composed
 			}
 		}
 	}

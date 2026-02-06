@@ -109,19 +109,36 @@ func (m *monitorModel) renderReasoningSummaryPicker(base string) string {
 
 // renderOptionsPicker renders a simple options picker modal.
 func (m *monitorModel) renderOptionsPicker(base, title string, options []string, selected int) string {
-	modalWidth := 40
-	if modalWidth > m.width-8 {
-		modalWidth = m.width - 8
+	maxModalW := m.width - 8
+	if maxModalW < 1 {
+		maxModalW = 1
 	}
-	if modalWidth < 30 {
-		modalWidth = 30
+	modalWidth := 40
+	if modalWidth > maxModalW {
+		modalWidth = maxModalW
+	}
+	minModalW := 30
+	if minModalW > maxModalW {
+		minModalW = maxModalW
+	}
+	if modalWidth < minModalW {
+		modalWidth = minModalW
+	}
+
+	maxModalH := m.height - 6
+	if maxModalH < 1 {
+		maxModalH = 1
 	}
 	modalHeight := len(options) + 6
-	if modalHeight > m.height-6 {
-		modalHeight = m.height - 6
+	if modalHeight > maxModalH {
+		modalHeight = maxModalH
 	}
-	if modalHeight < 8 {
-		modalHeight = 8
+	minModalH := 8
+	if minModalH > maxModalH {
+		minModalH = maxModalH
+	}
+	if modalHeight < minModalH {
+		modalHeight = minModalH
 	}
 
 	styleTitle := lipgloss.NewStyle().

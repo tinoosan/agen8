@@ -4,30 +4,55 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 func TruncateRight(s string, maxLen int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.TrimSpace(s)
-	if maxLen <= 0 || len(s) <= maxLen {
+	if maxLen <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= maxLen {
 		return s
 	}
-	if maxLen < 2 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-1] + "…"
+	return runewidth.Truncate(s, maxLen, "…")
 }
 
 func TruncateMiddle(s string, maxLen int) string {
 	s = strings.TrimSpace(s)
-	if maxLen <= 0 || len(s) <= maxLen {
+	if maxLen <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= maxLen {
 		return s
 	}
-	if maxLen < 8 {
-		return s[:maxLen]
+	if maxLen == 1 {
+		return "…"
 	}
-	keep := (maxLen - 1) / 2
-	return s[:keep] + "…" + s[len(s)-keep:]
+	leftBudget := (maxLen - 1) / 2
+	rightBudget := maxLen - 1 - leftBudget
+	left := runewidth.Truncate(s, leftBudget, "")
+	right := truncateFromRightWidth(s, rightBudget)
+	return left + "…" + right
+}
+
+func truncateFromRightWidth(s string, maxWidth int) string {
+	if maxWidth <= 0 || s == "" {
+		return ""
+	}
+	runes := []rune(s)
+	start := len(runes)
+	width := 0
+	for i := len(runes) - 1; i >= 0; i-- {
+		rw := runewidth.RuneWidth(runes[i])
+		if width+rw > maxWidth {
+			break
+		}
+		width += rw
+		start = i
+	}
+	return string(runes[start:])
 }
 
 func CloneStyle(s lipgloss.Style) *lipgloss.Style {

@@ -14,7 +14,7 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
 	composerHeight := 4
 	statsHeight := 5
-	grid := mgr.CalculateDashboard(120, 35, composerHeight, statsHeight, 1)
+	grid := mgr.CalculateDashboard(120, 35, composerHeight, statsHeight, 1, true)
 
 	reserved := DashHeaderHeight + DashStatusBarHeight + DashWarningHeight + composerHeight + statsHeight + DashGapAfterHeader + DashGapBeforeComposer
 	mainH := 35 - reserved
@@ -49,7 +49,7 @@ func TestCalculateDashboard_120x35_NoClipping(t *testing.T) {
 
 func TestCalculateDashboard_ActivityPanelsHaveContentRoom(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
-	grid := mgr.CalculateDashboard(120, 35, 4, 5, 1)
+	grid := mgr.CalculateDashboard(120, 35, 4, 5, 1, true)
 
 	if grid.ActivityFeed.ContentHeight < 3 {
 		t.Fatalf("activity feed ContentHeight want >= 3, got %d", grid.ActivityFeed.ContentHeight)
@@ -63,7 +63,7 @@ func TestCalculateDashboard_ComposerStatsAlignment(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
 	composerHeight := 4
 	statsHeight := 5
-	grid := mgr.CalculateDashboard(120, 35, composerHeight, statsHeight, 1)
+	grid := mgr.CalculateDashboard(120, 35, composerHeight, statsHeight, 1, true)
 
 	if grid.Composer.Width != grid.ScreenWidth {
 		t.Fatalf("composer width want %d (full width), got %d", grid.ScreenWidth, grid.Composer.Width)
@@ -102,7 +102,7 @@ func TestCalculateDashboard_NarrowWidth_80Cols(t *testing.T) {
 	mgr := NewManager(testStyle(), true)
 	// 80 cols is < 93 (minLeft 60 + minRight 32 + gap 1).
 	// Should split fluidly.
-	grid := mgr.CalculateDashboard(80, 35, 4, 5, 1)
+	grid := mgr.CalculateDashboard(80, 35, 4, 5, 1, true)
 
 	// Verify total width matches screen width exactly (no overflow).
 	totalW := grid.AgentOutput.Width + 1 + grid.ActivityFeed.Width // 1 for gap
@@ -118,5 +118,28 @@ func TestCalculateDashboard_NarrowWidth_80Cols(t *testing.T) {
 	// Check for usability (at least 1 col).
 	if grid.AgentOutput.Width < 1 || grid.ActivityFeed.Width < 1 {
 		t.Fatalf("columns too small: left %d, right %d", grid.AgentOutput.Width, grid.ActivityFeed.Width)
+	}
+}
+
+func TestCalculateCompact_VerySmallHeight(t *testing.T) {
+	mgr := NewManager(testStyle(), true)
+	grid := mgr.CalculateCompact(80, 5, 2)
+
+	budget := grid.AgentOutput.Height
+	if got := grid.ActivityFeed.Height + grid.ActivityDetail.Height; got > budget {
+		t.Fatalf("activity sections height %d exceeds compact budget %d", got, budget)
+	}
+}
+
+func TestCalculateDashboard_VerySmallHeight(t *testing.T) {
+	mgr := NewManager(testStyle(), true)
+	grid := mgr.CalculateDashboard(80, 10, 4, 1, 1, true)
+
+	budget := grid.AgentOutput.Height - 1
+	if budget < 1 {
+		budget = 1
+	}
+	if got := grid.ActivityFeed.Height + grid.ActivityDetail.Height; got > budget {
+		t.Fatalf("activity sections height %d exceeds dashboard side budget %d", got, budget)
 	}
 }

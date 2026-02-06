@@ -104,6 +104,9 @@ func (m *Manager) CalculateCompact(width, height, composerHeight int) GridLayout
 	if detailH < 1 {
 		detailH = 1
 	}
+	if feedH+detailH > mainH {
+		detailH = max(0, mainH-feedH)
+	}
 	grid.SidePanel = m.spec(width, 0)
 	grid.ActivityFeed = m.spec(width, feedH)
 	grid.ActivityDetail = m.spec(width, detailH)
@@ -128,7 +131,7 @@ const (
 // CalculateDashboard produces a GridLayout for dashboard mode (two columns).
 // Left: AgentOutput (flex). Right: single SidePanel (tabbed Activity | Plan | Tasks | Thoughts).
 // Bottom: full-width Composer and Stats panels stacked vertically.
-func (m *Manager) CalculateDashboard(width, height, composerHeight, statsHeight, statusBarHeight int) GridLayout {
+func (m *Manager) CalculateDashboard(width, height, composerHeight, statsHeight, statusBarHeight int, showWarning bool) GridLayout {
 	const (
 		minLeftWidth  = 60
 		minRightWidth = 32
@@ -148,7 +151,11 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, statsHeight,
 	if statsHeight < 0 {
 		statsHeight = 0
 	}
-	reserved := DashHeaderHeight + max(1, statusBarHeight) + DashWarningHeight + composerHeight + statsHeight + DashGapAfterHeader + DashGapBeforeComposer
+	warningHeight := 0
+	if showWarning {
+		warningHeight = DashWarningHeight
+	}
+	reserved := DashHeaderHeight + max(1, statusBarHeight) + warningHeight + composerHeight + statsHeight + DashGapAfterHeader + DashGapBeforeComposer
 	remainingHeight := height - reserved
 	if remainingHeight < 1 {
 		remainingHeight = 1
@@ -216,6 +223,9 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, statsHeight,
 	detailH := sideContentH - feedH
 	if detailH < 1 {
 		detailH = 1
+	}
+	if feedH+detailH > sideContentH {
+		detailH = max(0, sideContentH-feedH)
 	}
 	grid.ActivityFeed = m.spec(rightW, feedH)
 	grid.ActivityDetail = m.spec(rightW, detailH)

@@ -352,7 +352,6 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	activityList.SetShowPagination(false)
 
 	tctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	// Best-effort: load a small recent window for initial display without scanning the full log.
 	var evs []types.EventRecord
 	{
@@ -383,6 +382,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 
 	sessionStore, err := store.NewSQLiteSessionStore(cfg)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
@@ -1273,6 +1273,7 @@ func (m *monitorModel) compactTabToPanel() panelID {
 
 // dashboardSideTabNames for the side-panel tab bar in dashboard mode.
 var dashboardSideTabNames = []string{"Activity", "Plan", "Tasks", "Thoughts"}
+var dashboardSideTabNamesShort = []string{"Act", "Plan", "Tasks", "Think"}
 
 func (m *monitorModel) dashboardSideTabToPanel() panelID {
 	switch m.dashboardSideTab {
@@ -2133,14 +2134,17 @@ func (m *monitorModel) refreshThinkingViewport() {
 }
 
 func (m *monitorModel) renderHeader() string {
-	content := lipgloss.JoinHorizontal(lipgloss.Left,
-		m.styles.headerTitle.Render("Workbench - Always On "),
-		kit.RenderTag(kit.TagOptions{Key: "Agent", Value: m.runID}),
-	)
+	titleRendered := m.styles.headerTitle.Render("Workbench - Always On ")
 	w := m.width
 	if w <= 0 {
 		w = 80
 	}
+	maxRunIDW := max(6, w-lipgloss.Width(titleRendered)-8)
+	runIDDisplay := kit.TruncateMiddle(m.runID, maxRunIDW)
+	content := lipgloss.JoinHorizontal(lipgloss.Left,
+		titleRendered,
+		kit.RenderTag(kit.TagOptions{Key: "Agent", Value: runIDDisplay}),
+	)
 	return m.styles.header.Copy().MaxWidth(w).Render(content)
 }
 
@@ -2177,15 +2181,6 @@ func (m *monitorModel) renderMainBodyDashboard(grid layoutmgr.GridLayout) string
 }
 
 func (m *monitorModel) renderDashboardSidePanelTabBar(grid layoutmgr.GridLayout) string {
-	parts := make([]string, len(dashboardSideTabNames))
-	for i, name := range dashboardSideTabNames {
-		if i == m.dashboardSideTab {
-			parts[i] = m.styles.sectionTitle.Render(name)
-		} else {
-			parts[i] = kit.StyleDim.Render(name)
-		}
-	}
-	line := strings.Join(parts, "  |  ")
 	w := grid.ActivityFeed.Width
 	if w <= 0 {
 		w = m.width
@@ -2193,6 +2188,25 @@ func (m *monitorModel) renderDashboardSidePanelTabBar(grid layoutmgr.GridLayout)
 	if w <= 0 {
 		w = 80
 	}
+
+	names := dashboardSideTabNames
+	if w < 42 {
+		names = dashboardSideTabNamesShort
+	}
+	separator := "  |  "
+	if w < 35 {
+		separator = " | "
+	}
+
+	parts := make([]string, len(names))
+	for i, name := range names {
+		if i == m.dashboardSideTab {
+			parts[i] = m.styles.sectionTitle.Render(name)
+		} else {
+			parts[i] = kit.StyleDim.Render(name)
+		}
+	}
+	line := strings.Join(parts, separator)
 	return m.styles.header.Copy().MaxWidth(w).Render(line)
 }
 
@@ -2487,7 +2501,8 @@ func (m *monitorModel) layout() layoutmgr.GridLayout {
 		statsHeight = 1
 	}
 	statusBarH := lipgloss.Height(m.renderStatusBar(m.width))
-	return manager.CalculateDashboard(m.width, m.height, composerHeight, statsHeight, statusBarH)
+	showWarning := m.runStatus != types.RunStatusRunning
+	return manager.CalculateDashboard(m.width, m.height, composerHeight, statsHeight, statusBarH, showWarning)
 }
 
 func (m *monitorModel) calculatePanelHeight(contentRows int, isEmpty bool, isFocused bool) int {

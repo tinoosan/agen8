@@ -11,6 +11,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/google/uuid v1.6.0
 	github.com/hexops/gotextdiff v1.0.3
+	github.com/mattn/go-runewidth v0.0.16
 	github.com/muesli/reflow v0.3.0
 	github.com/openai/openai-go/v3 v3.16.0
 	github.com/playwright-community/playwright-go v0.4501.1
@@ -42,7 +43,6 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
-	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
