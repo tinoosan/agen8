@@ -1,0 +1,48 @@
+id: startup_team
+description: Virtual startup team that ideates, validates, builds, and operates a business to generate revenue.
+team:
+  model: moonshotai/kimi-k2.5
+  roles:
+    - name: ceo
+      coordinator: true
+      description: Sets vision and strategy, delegates execution to the team, and drives the business toward revenue.
+      prompts:
+        system_prompt_path: ceo-prompt.md
+      skills:
+        - project_management
+        - reporting
+      heartbeat:
+        - name: coordinator-check-in
+          interval: 10m
+          goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
+        - name: coordinator-daily-brief
+          interval: 24h
+          goal: "Produce a consolidated business progress brief from completed role outputs."
+
+    - name: cto
+      description: Owns technical architecture, builds the product, and ships working software.
+      prompts:
+        system_prompt_path: cto-prompt.md
+      skills:
+        - coding
+        - planning
+        - automation
+
+    - name: growth-lead
+      description: Researches markets, acquires users, and runs marketing and outreach campaigns.
+      prompts:
+        system_prompt_path: growth-lead-prompt.md
+      skills:
+        - planning
+        - hybrid_web
+        - market_monitoring
+        - automation
+
+    - name: finance-ops
+      description: Manages business model, budgets, revenue tracking, and operational finances.
+      prompts:
+        system_prompt_path: finance-ops-prompt.md
+      skills:
+        - financial_analysis
+        - planning
+        - reporting
