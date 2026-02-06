@@ -1,0 +1,48 @@
+id: artist_management_team
+description: Multi-role artist management team for career planning, marketing, releases, and finances.
+team:
+  model: moonshotai/kimi-k2.5
+  roles:
+    - name: artist-manager
+      coordinator: true
+      description: Central career management hub that delegates to specialists and tracks delivery.
+      prompts:
+        system_prompt_path: artist-manager-prompt.md
+      skills:
+        - project_management
+        - reporting
+      heartbeat:
+        - name: coordinator-check-in
+          interval: 10m
+          goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
+        - name: coordinator-daily-brief
+          interval: 24h
+          goal: "Produce a consolidated activity brief from completed role outputs."
+
+    - name: marketing-strategist
+      description: Develops marketing plans, audience research, and campaign strategies.
+      prompts:
+        system_prompt_path: marketing-strategist-prompt.md
+      skills:
+        - planning
+        - hybrid_web
+        - reporting
+        - automation
+
+    - name: release-coordinator
+      description: Manages release schedules, distribution research, and playlist or PR outreach.
+      prompts:
+        system_prompt_path: release-coordinator-prompt.md
+      skills:
+        - planning
+        - automation
+        - reporting
+
+    - name: business-manager
+      description: Handles royalty analysis, deal evaluation, and budget planning.
+      prompts:
+        system_prompt_path: business-manager-prompt.md
+      skills:
+        - financial_analysis
+        - planning
+        - reporting
