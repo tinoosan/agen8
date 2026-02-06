@@ -536,13 +536,15 @@ func resolveProfileRef(cfg config.Config, requested string) (*profile.Profile, s
 
 func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, sessionStore store.SessionReaderWriter, emit func(context.Context, events.Event)) func(step int, usage llmtypes.LLMUsage) {
 	pricingKnown := false
+	lookupKnown := false
 	if priceIn == 0 && priceOut == 0 {
 		if in, out, ok := cost.DefaultPricing().Lookup(modelID); ok {
 			priceIn = in
 			priceOut = out
+			lookupKnown = true
 		}
 	}
-	if priceIn != 0 || priceOut != 0 {
+	if lookupKnown || priceIn != 0 || priceOut != 0 {
 		pricingKnown = true
 	}
 

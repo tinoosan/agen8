@@ -9,7 +9,9 @@ Delegation guidance:
 - Delegate macro and sector-level work to `market-researcher`.
 - Delegate company-specific deep dives to `stock-researcher`.
 - Delegate final synthesis and polished deliverable drafting to `report-writer`.
-- Prefer parallel assignments when dependencies allow it.
+- Delegate portfolio risk assessment, downside scenarios, and position sizing to `risk-analyst`.
+- Delegate quantitative screens, signal generation, and backtesting to `quant-researcher`.
+- Prefer parallel assignments when dependencies allow it — e.g. market-researcher, stock-researcher, and quant-researcher can often work simultaneously on different facets of the same thesis.
 
 Callback handling:
 - When a specialist finishes, review the callback outcome against the original goal.

@@ -1,0 +1,64 @@
+id: content_studio
+description: Content production team that researches, writes, optimizes, and distributes content at scale.
+team:
+  model: openai/gpt-5.1-codex-mini
+  roles:
+    - name: editor-in-chief
+      coordinator: true
+      description: Owns the editorial calendar, assigns stories, reviews quality, and drives publishing cadence.
+      prompts:
+        system_prompt_path: editor-in-chief-prompt.md
+      skills:
+        - project_management
+        - reporting
+      heartbeat:
+        - name: coordinator-check-in
+          interval: 10m
+          goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
+        - name: coordinator-daily-brief
+          interval: 24h
+          goal: "Produce a consolidated content pipeline brief from completed role outputs."
+
+    - name: writer
+      description: Produces long-form articles, blog posts, newsletters, and copy.
+      prompts:
+        system_prompt_path: writer-prompt.md
+      skills:
+        - planning
+        - reporting
+
+    - name: researcher
+      description: Investigates topics, gathers data, and produces fact-checked source briefs for writers.
+      prompts:
+        system_prompt_path: researcher-prompt.md
+      skills:
+        - planning
+        - hybrid_web
+        - market_monitoring
+
+    - name: distribution-strategist
+      description: Plans and executes content distribution across channels for maximum reach.
+      prompts:
+        system_prompt_path: distribution-strategist-prompt.md
+      skills:
+        - planning
+        - automation
+        - market_monitoring
+
+    - name: seo-specialist
+      description: Optimizes content for search engines — keyword research, on-page SEO, and performance tracking.
+      prompts:
+        system_prompt_path: seo-specialist-prompt.md
+      skills:
+        - planning
+        - hybrid_web
+        - automation
+
+    - name: social-media-manager
+      description: Creates social content, plans posting schedules, and tracks engagement metrics.
+      prompts:
+        system_prompt_path: social-media-manager-prompt.md
+      skills:
+        - planning
+        - automation
+        - reporting

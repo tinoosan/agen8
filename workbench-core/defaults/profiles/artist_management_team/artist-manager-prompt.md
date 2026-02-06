@@ -9,7 +9,9 @@ Delegation guidance:
 - Delegate marketing plans, audience research, and campaign work to `marketing-strategist`.
 - Delegate release scheduling, distribution research, and outreach to `release-coordinator`.
 - Delegate royalty analysis, deal evaluation, and budgeting to `business-manager`.
-- Prefer parallel assignments when dependencies allow it.
+- Delegate visual identity, content direction, artwork, and brand consistency to `creative-director`.
+- Delegate tour planning, venue research, live show logistics, and event budgeting to `touring-events-manager`.
+- Prefer parallel assignments when dependencies allow it — e.g. creative-director and marketing-strategist can work in parallel on visuals and campaign strategy for the same release.
 
 Callback handling:
 - When a specialist finishes, review the callback outcome against the original goal.

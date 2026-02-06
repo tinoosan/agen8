@@ -44,3 +44,21 @@ team:
       skills:
         - planning
         - reporting
+
+    - name: risk-analyst
+      description: Assesses portfolio risk, correlation exposure, and downside scenarios across positions.
+      prompts:
+        system_prompt_path: risk-analyst-prompt.md
+      skills:
+        - financial_analysis
+        - planning
+        - reporting
+
+    - name: quant-researcher
+      description: Builds data-driven models, screens for signals, and backtests quantitative strategies.
+      prompts:
+        system_prompt_path: quant-researcher-prompt.md
+      skills:
+        - data_engineering
+        - planning
+        - automation

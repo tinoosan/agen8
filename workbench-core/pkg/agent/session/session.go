@@ -689,7 +689,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		if in, out, ok := cost.DefaultPricing().Lookup(modelID); ok {
 			costInPerM = in
 			costOutPerM = out
-			pricingKnown = in != 0 || out != 0
+			pricingKnown = true
 		}
 		cfg := runAgent.Config()
 		orig := cfg.Hooks.OnLLMUsage

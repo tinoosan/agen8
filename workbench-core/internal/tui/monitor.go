@@ -24,6 +24,7 @@ import (
 	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
 	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/resources"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
@@ -272,6 +273,29 @@ type monitorStats struct {
 	pricingKnown    bool
 }
 
+func pricingKnownForRunID(cfg config.Config, runID string) bool {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return false
+	}
+	run, err := store.LoadRun(cfg, runID)
+	if err != nil {
+		return false
+	}
+	if run.Runtime == nil {
+		return false
+	}
+	if run.Runtime.PriceInPerMTokensUSD != 0 || run.Runtime.PriceOutPerMTokensUSD != 0 {
+		return true
+	}
+	modelID := strings.TrimSpace(run.Runtime.Model)
+	if modelID == "" {
+		return false
+	}
+	_, _, ok := cost.DefaultPricing().Lookup(modelID)
+	return ok
+}
+
 type taskState struct {
 	TaskID       string
 	AssignedRole string
@@ -475,7 +499,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 			stats.totalTokensOut = sess.OutputTokens
 			stats.totalTokens = sess.TotalTokens
 			stats.totalCostUSD = sess.CostUSD
-			stats.pricingKnown = sess.CostUSD > 0 || sess.TotalTokens == 0
+			stats.pricingKnown = sess.TotalTokens == 0 || sess.CostUSD > 0 || pricingKnownForRunID(cfg, runID)
 		}
 	}
 
@@ -943,7 +967,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stats.totalTokensOut = msg.session.OutputTokens
 			m.stats.totalTokens = msg.session.TotalTokens
 			m.stats.totalCostUSD = msg.session.CostUSD
-			m.stats.pricingKnown = msg.session.CostUSD > 0 || msg.session.TotalTokens == 0
+			m.stats.pricingKnown = msg.session.TotalTokens == 0 || msg.session.CostUSD > 0 || pricingKnownForRunID(m.cfg, m.runID)
 		}
 		return m, m.scheduleUIRefresh()
 
@@ -1487,7 +1511,7 @@ func (m *monitorModel) loadTeamStatus() tea.Cmd {
 			}
 			totalTokens += stats.TotalTokens
 			totalCostUSD += stats.TotalCost
-			if stats.TotalTokens > 0 && stats.TotalCost <= 0 {
+			if stats.TotalTokens > 0 && stats.TotalCost <= 0 && !pricingKnownForRunID(m.cfg, runID) {
 				pricingKnown = false
 			}
 		}

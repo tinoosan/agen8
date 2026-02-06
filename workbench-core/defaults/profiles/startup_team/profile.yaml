@@ -1,7 +1,7 @@
 id: startup_team
 description: Virtual startup team that ideates, validates, builds, and operates a business to generate revenue.
 team:
-  model: moonshotai/kimi-k2.5
+  model: openai/gpt-5.1-codex-mini
   roles:
     - name: ceo
       coordinator: true
@@ -45,4 +45,22 @@ team:
       skills:
         - financial_analysis
         - planning
+        - reporting
+
+    - name: designer
+      description: Owns product design, branding, landing pages, and visual identity.
+      prompts:
+        system_prompt_path: designer-prompt.md
+      skills:
+        - planning
+        - hybrid_web
+        - reporting
+
+    - name: operations-lead
+      description: Manages day-to-day operations, vendor relationships, processes, and logistics.
+      prompts:
+        system_prompt_path: operations-lead-prompt.md
+      skills:
+        - planning
+        - automation
         - reporting

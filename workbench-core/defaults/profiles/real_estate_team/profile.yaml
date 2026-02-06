@@ -1,0 +1,65 @@
+id: real_estate_team
+description: Real estate investment team that analyzes markets, underwrites deals, and builds portfolio strategies.
+team:
+  model: openai/gpt-5.1-codex-mini
+  roles:
+    - name: portfolio-manager
+      coordinator: true
+      description: Sets investment thesis, delegates research and analysis, and makes portfolio-level decisions.
+      prompts:
+        system_prompt_path: portfolio-manager-prompt.md
+      skills:
+        - project_management
+        - reporting
+      heartbeat:
+        - name: coordinator-check-in
+          interval: 10m
+          goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
+        - name: coordinator-daily-brief
+          interval: 24h
+          goal: "Produce a consolidated investment pipeline brief from completed role outputs."
+
+    - name: market-analyst
+      description: Tracks real estate market trends, demographics, and economic indicators by region.
+      prompts:
+        system_prompt_path: market-analyst-prompt.md
+      skills:
+        - market_monitoring
+        - hybrid_web
+        - planning
+
+    - name: deal-underwriter
+      description: Evaluates individual property deals — financials, risk, and return projections.
+      prompts:
+        system_prompt_path: deal-underwriter-prompt.md
+      skills:
+        - financial_analysis
+        - planning
+        - reporting
+
+    - name: property-researcher
+      description: Sources properties, gathers comparable data, and produces property-level research briefs.
+      prompts:
+        system_prompt_path: property-researcher-prompt.md
+      skills:
+        - hybrid_web
+        - planning
+        - reporting
+
+    - name: financial-modeler
+      description: Builds financial models, cash flow projections, and scenario analyses for investments.
+      prompts:
+        system_prompt_path: financial-modeler-prompt.md
+      skills:
+        - financial_analysis
+        - data_engineering
+        - planning
+
+    - name: legal-researcher
+      description: Researches zoning, regulations, tax implications, and legal structures for real estate deals.
+      prompts:
+        system_prompt_path: legal-researcher-prompt.md
+      skills:
+        - hybrid_web
+        - planning
+        - reporting

@@ -46,3 +46,21 @@ team:
         - financial_analysis
         - planning
         - reporting
+
+    - name: creative-director
+      description: Owns visual identity, content creation direction, artwork, and brand consistency.
+      prompts:
+        system_prompt_path: creative-director-prompt.md
+      skills:
+        - planning
+        - hybrid_web
+        - reporting
+
+    - name: touring-events-manager
+      description: Plans live shows, tours, fan events, and manages event logistics and budgets.
+      prompts:
+        system_prompt_path: touring-events-manager-prompt.md
+      skills:
+        - planning
+        - automation
+        - financial_analysis
