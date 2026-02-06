@@ -55,27 +55,26 @@ func SupportedModels() []string {
 	return out
 }
 
-func IsSupportedModel(id string) bool {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return false
-	}
-	for _, info := range modelInfos {
-		if strings.TrimSpace(info.ID) == id {
-			return true
-		}
-	}
-	return false
-}
-
 func SupportsReasoningEffort(modelID string) bool {
 	id := strings.ToLower(strings.TrimSpace(modelID))
 	if id == "" {
 		return false
 	}
 	for _, info := range modelInfos {
-		if strings.EqualFold(info.ID, id) {
+		if strings.EqualFold(strings.TrimSpace(info.ID), id) {
 			return info.IsReasoning
+		}
+	}
+	for _, info := range modelInfos {
+		key := strings.TrimSpace(info.ID)
+		if key == "" {
+			continue
+		}
+		if idx := strings.LastIndex(key, "/"); idx >= 0 && idx+1 < len(key) {
+			suffix := strings.ToLower(strings.TrimSpace(key[idx+1:]))
+			if suffix == id {
+				return info.IsReasoning
+			}
 		}
 	}
 	return false

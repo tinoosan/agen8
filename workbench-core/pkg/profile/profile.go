@@ -11,11 +11,12 @@ import (
 )
 
 type Profile struct {
-	ID          string        `yaml:"id"`
-	Description string        `yaml:"description"`
-	Prompts     PromptConfig  `yaml:"prompts,omitempty"`
-	Skills      []string      `yaml:"skills,omitempty"`
+	ID          string         `yaml:"id"`
+	Description string         `yaml:"description"`
+	Prompts     PromptConfig   `yaml:"prompts,omitempty"`
+	Skills      []string       `yaml:"skills,omitempty"`
 	Heartbeat   []HeartbeatJob `yaml:"heartbeat,omitempty"`
+	Team        *TeamConfig    `yaml:"team,omitempty"`
 }
 
 type PromptConfig struct {
@@ -27,6 +28,21 @@ type HeartbeatJob struct {
 	Name     string        `yaml:"name"`
 	Interval time.Duration `yaml:"interval"`
 	Goal     string        `yaml:"goal"`
+}
+
+type TeamConfig struct {
+	Model string       `yaml:"model,omitempty"`
+	Roles []RoleConfig `yaml:"roles"`
+}
+
+type RoleConfig struct {
+	Name        string         `yaml:"name"`
+	Description string         `yaml:"description"`
+	Prompts     PromptConfig   `yaml:"prompts,omitempty"`
+	Skills      []string       `yaml:"skills,omitempty"`
+	Model       string         `yaml:"model,omitempty"`
+	Coordinator bool           `yaml:"coordinator,omitempty"`
+	Heartbeat   []HeartbeatJob `yaml:"heartbeat,omitempty"`
 }
 
 // Load reads one profile from a profile directory (containing profile.yaml).
@@ -101,6 +117,36 @@ func (p Profile) Normalize(profileDir string) (Profile, error) {
 		p.Heartbeat[i].Name = strings.TrimSpace(p.Heartbeat[i].Name)
 		p.Heartbeat[i].Goal = strings.TrimSpace(p.Heartbeat[i].Goal)
 	}
+	if p.Team != nil {
+		p.Team.Model = strings.TrimSpace(p.Team.Model)
+		for i := range p.Team.Roles {
+			r := &p.Team.Roles[i]
+			r.Name = strings.TrimSpace(r.Name)
+			r.Description = strings.TrimSpace(r.Description)
+			r.Prompts.SystemPrompt = strings.TrimSpace(r.Prompts.SystemPrompt)
+			r.Prompts.SystemPromptPath = strings.TrimSpace(r.Prompts.SystemPromptPath)
+			r.Model = strings.TrimSpace(r.Model)
+			uniqRoleSkills := make([]string, 0, len(r.Skills))
+			seenRoleSkills := map[string]struct{}{}
+			for _, s := range r.Skills {
+				s = strings.TrimSpace(s)
+				if s == "" {
+					continue
+				}
+				key := strings.ToLower(s)
+				if _, ok := seenRoleSkills[key]; ok {
+					continue
+				}
+				seenRoleSkills[key] = struct{}{}
+				uniqRoleSkills = append(uniqRoleSkills, s)
+			}
+			r.Skills = uniqRoleSkills
+			for j := range r.Heartbeat {
+				r.Heartbeat[j].Name = strings.TrimSpace(r.Heartbeat[j].Name)
+				r.Heartbeat[j].Goal = strings.TrimSpace(r.Heartbeat[j].Goal)
+			}
+		}
+	}
 
 	if err := p.Validate(profileDir); err != nil {
 		return Profile{}, err
@@ -115,22 +161,11 @@ func (p Profile) Validate(profileDir string) error {
 	if strings.TrimSpace(p.Description) == "" {
 		return fmt.Errorf("profile %s: description is required", p.ID)
 	}
-	if strings.TrimSpace(p.Prompts.SystemPrompt) == "" && strings.TrimSpace(p.Prompts.SystemPromptPath) == "" {
+	if p.Team == nil && strings.TrimSpace(p.Prompts.SystemPrompt) == "" && strings.TrimSpace(p.Prompts.SystemPromptPath) == "" {
 		return fmt.Errorf("profile %s: prompts.system_prompt or prompts.system_prompt_path is required", p.ID)
 	}
-	if strings.TrimSpace(p.Prompts.SystemPromptPath) != "" {
-		if strings.Contains(p.Prompts.SystemPromptPath, string(filepath.Separator)+string(filepath.Separator)) {
-			return fmt.Errorf("profile %s: prompts.system_prompt_path is invalid", p.ID)
-		}
-		if strings.Contains(p.Prompts.SystemPromptPath, "..") {
-			return fmt.Errorf("profile %s: prompts.system_prompt_path must be relative to profile dir", p.ID)
-		}
-		if strings.TrimSpace(profileDir) != "" {
-			pth := filepath.Join(profileDir, p.Prompts.SystemPromptPath)
-			if _, err := os.Stat(pth); err != nil {
-				return fmt.Errorf("profile %s: prompt file not found: %s", p.ID, p.Prompts.SystemPromptPath)
-			}
-		}
+	if err := validatePromptPath(profileDir, p.Prompts.SystemPromptPath, fmt.Sprintf("profile %s", p.ID)); err != nil {
+		return err
 	}
 	for _, hb := range p.Heartbeat {
 		if strings.TrimSpace(hb.Name) == "" {
@@ -143,6 +178,69 @@ func (p Profile) Validate(profileDir string) error {
 			return fmt.Errorf("profile %s: heartbeat job %s goal is required", p.ID, hb.Name)
 		}
 	}
+	if p.Team != nil {
+		if len(p.Team.Roles) == 0 {
+			return fmt.Errorf("profile %s: team.roles must contain at least one role", p.ID)
+		}
+		seenRoles := map[string]struct{}{}
+		coordinators := 0
+		for i, role := range p.Team.Roles {
+			ref := fmt.Sprintf("profile %s role[%d]", p.ID, i)
+			if role.Name == "" {
+				return fmt.Errorf("%s: name is required", ref)
+			}
+			if role.Description == "" {
+				return fmt.Errorf("%s (%s): description is required", ref, role.Name)
+			}
+			if role.Prompts.SystemPrompt == "" && role.Prompts.SystemPromptPath == "" {
+				return fmt.Errorf("%s (%s): prompts.system_prompt or prompts.system_prompt_path is required", ref, role.Name)
+			}
+			if err := validatePromptPath(profileDir, role.Prompts.SystemPromptPath, fmt.Sprintf("%s (%s)", ref, role.Name)); err != nil {
+				return err
+			}
+			for _, hb := range role.Heartbeat {
+				if strings.TrimSpace(hb.Name) == "" {
+					return fmt.Errorf("%s (%s): heartbeat job name is required", ref, role.Name)
+				}
+				if hb.Interval <= 0 {
+					return fmt.Errorf("%s (%s): heartbeat job %s interval must be > 0", ref, role.Name, hb.Name)
+				}
+				if strings.TrimSpace(hb.Goal) == "" {
+					return fmt.Errorf("%s (%s): heartbeat job %s goal is required", ref, role.Name, hb.Name)
+				}
+			}
+			key := strings.ToLower(role.Name)
+			if _, ok := seenRoles[key]; ok {
+				return fmt.Errorf("profile %s: duplicate team role name %q", p.ID, role.Name)
+			}
+			seenRoles[key] = struct{}{}
+			if role.Coordinator {
+				coordinators++
+			}
+		}
+		if coordinators != 1 {
+			return fmt.Errorf("profile %s: exactly one team role must set coordinator: true", p.ID)
+		}
+	}
 	return nil
 }
 
+func validatePromptPath(profileDir, promptPath, scope string) error {
+	promptPath = strings.TrimSpace(promptPath)
+	if promptPath == "" {
+		return nil
+	}
+	if strings.Contains(promptPath, string(filepath.Separator)+string(filepath.Separator)) {
+		return fmt.Errorf("%s: prompts.system_prompt_path is invalid", scope)
+	}
+	if strings.Contains(promptPath, "..") {
+		return fmt.Errorf("%s: prompts.system_prompt_path must be relative to profile dir", scope)
+	}
+	if strings.TrimSpace(profileDir) != "" {
+		pth := filepath.Join(profileDir, promptPath)
+		if _, err := os.Stat(pth); err != nil {
+			return fmt.Errorf("%s: prompt file not found: %s", scope, promptPath)
+		}
+	}
+	return nil
+}

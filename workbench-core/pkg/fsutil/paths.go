@@ -1,8 +1,10 @@
 package fsutil
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
-	"time"
+	"strings"
 )
 
 func GetSQLitePath(dataDir string) string {
@@ -15,10 +17,6 @@ func GetSessionsDir(dataDir string) string {
 
 func GetSessionDir(dataDir, sessionID string) string {
 	return filepath.Join(GetSessionsDir(dataDir), sessionID)
-}
-
-func GetSessionFilePath(dataDir, sessionID string) string {
-	return filepath.Join(GetSessionDir(dataDir, sessionID), "session.json")
 }
 
 func GetSessionHistoryDir(dataDir, sessionID string) string {
@@ -37,12 +35,20 @@ func GetAgentDir(dataDir, agentID string) string {
 	return filepath.Join(GetAgentsDir(dataDir), agentID)
 }
 
-func GetWorkspaceDir(dataDir, runID string) string {
-	return filepath.Join(GetAgentDir(dataDir, runID), "workspace")
+func GetTeamDir(dataDir, teamID string) string {
+	return filepath.Join(dataDir, "teams", teamID)
 }
 
-func GetArtifactDir(dataDir, runID string) string {
-	return filepath.Join(GetAgentDir(dataDir, runID), "artifacts")
+func GetTeamWorkspaceDir(dataDir, teamID string) string {
+	return filepath.Join(GetTeamDir(dataDir, teamID), "workspace")
+}
+
+func GetTeamLogPath(dataDir, teamID string) string {
+	return filepath.Join(GetTeamDir(dataDir, teamID), "daemon.log")
+}
+
+func GetWorkspaceDir(dataDir, runID string) string {
+	return filepath.Join(GetAgentDir(dataDir, runID), "workspace")
 }
 
 func GetLogDir(dataDir, runID string) string {
@@ -53,18 +59,30 @@ func GetSkillsDir(dataDir string) string {
 	return filepath.Join(dataDir, "skills")
 }
 
+func GetAgentsHomeDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	home = strings.TrimSpace(home)
+	if home == "" {
+		return "", fmt.Errorf("home directory is empty")
+	}
+	return filepath.Join(home, ".agents"), nil
+}
+
+func GetAgentsSkillsDir() (string, error) {
+	agentsHome, err := GetAgentsHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(agentsHome, "skills"), nil
+}
+
 func GetProfilesDir(dataDir string) string {
 	return filepath.Join(dataDir, "profiles")
 }
 
 func GetMemoryDir(dataDir string) string {
 	return filepath.Join(dataDir, "memory")
-}
-
-func GetMemoryMasterPath(dataDir string) string {
-	return filepath.Join(GetMemoryDir(dataDir), "MEMORY.MD")
-}
-
-func GetDailyMemoryPath(dataDir string, date time.Time) string {
-	return filepath.Join(GetMemoryDir(dataDir), date.Format("2006-01-02")+"-memory.md")
 }

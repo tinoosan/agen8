@@ -1,0 +1,43 @@
+id: market_stock_team
+description: Multi-role market and stock research team profile.
+team:
+  model: openai/gpt-5-nano
+  roles:
+    - name: head-analyst
+      coordinator: true
+      description: Coordinates tasks, synthesizes findings, and delivers final conclusions.
+      prompts:
+        system_prompt_path: head-analyst-prompt.md
+      skills:
+        - planning
+        - reporting
+      heartbeat:
+        - name: coordinator-check-in
+          interval: 10m
+          goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
+        - name: coordinator-daily-brief
+          interval: 24h
+          goal: "Produce a consolidated market and stock brief from completed role outputs."
+
+    - name: market-researcher
+      description: Investigates macro themes, sector rotation, and broad market conditions.
+      prompts:
+        system_prompt_path: market-researcher-prompt.md
+      skills:
+        - market_monitoring
+        - hybrid_web
+
+    - name: stock-researcher
+      description: Analyzes company fundamentals, catalysts, and valuation signals.
+      prompts:
+        system_prompt_path: stock-researcher-prompt.md
+      skills:
+        - financial_analysis
+        - market_monitoring
+
+    - name: report-writer
+      description: Produces concise final reports and executive-ready summaries.
+      prompts:
+        system_prompt_path: report-writer-prompt.md
+      skills:
+        - reporting

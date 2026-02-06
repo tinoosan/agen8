@@ -11,7 +11,7 @@
 //     `/skills`, `/log`, `/history`, and any other resources the
 //     runtime needs.
 //   - Tool + Skill Wiring: Runtime configures built-in host tools (fs.*, shell, http, browser, trace).
-//     Skills are discovered from the data directory and mounted under `/skills` so the agent
+//     Skills are discovered from `~/.agents/skills` and mounted under `/skills` so the agent
 //     can read their instructions via the VFS.
 //   - Context + Hook Integration: The runtime holds `agent.PromptBuilder` and
 //     `agent.PromptUpdater` structs along with trace middleware so contextual prompts

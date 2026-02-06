@@ -1,0 +1,12 @@
+id: stock_researcher
+description: Focused profile for equity and company-level stock research.
+skills:
+  - financial_analysis
+  - market_monitoring
+  - reporting
+prompts:
+  system_prompt_path: prompt.md
+heartbeat:
+  - name: refresh-watchlist
+    interval: 8h
+    goal: "Refresh watchlist names with notable price, estimate, or catalyst changes."

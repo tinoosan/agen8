@@ -56,6 +56,13 @@ type Config struct {
 	SessionID string
 	RunID     string
 
+	TeamID               string
+	RoleName             string
+	IsCoordinator        bool
+	CoordinatorRole      string
+	TeamRoles            []string // all role names, for prompt injection
+	TeamRoleDescriptions map[string]string
+
 	InstanceID string
 	Logf       func(format string, args ...any)
 }
@@ -74,7 +81,7 @@ type Session struct {
 	hbCh   chan profile.HeartbeatJob
 	hbStop context.CancelFunc
 
-	queuedEmitted map[string]struct{}
+	queuedEmitted map[string]time.Time
 }
 
 func New(cfg Config) (*Session, error) {
@@ -126,9 +133,40 @@ func New(cfg Config) (*Session, error) {
 	if strings.TrimSpace(cfg.InstanceID) == "" {
 		cfg.InstanceID = "instance"
 	}
+	if strings.TrimSpace(cfg.TeamID) != "" {
+		cfg.TeamID = strings.TrimSpace(cfg.TeamID)
+		cfg.RoleName = strings.TrimSpace(cfg.RoleName)
+		cfg.CoordinatorRole = strings.TrimSpace(cfg.CoordinatorRole)
+		if cfg.RoleName == "" {
+			return nil, fmt.Errorf("roleName is required in team mode")
+		}
+		if cfg.CoordinatorRole == "" {
+			cfg.CoordinatorRole = cfg.RoleName
+		}
+		roles := make([]string, 0, len(cfg.TeamRoles))
+		seen := map[string]struct{}{}
+		for _, role := range cfg.TeamRoles {
+			role = strings.TrimSpace(role)
+			if role == "" {
+				continue
+			}
+			if _, ok := seen[role]; ok {
+				continue
+			}
+			seen[role] = struct{}{}
+			roles = append(roles, role)
+		}
+		if len(roles) == 0 {
+			roles = append(roles, cfg.RoleName)
+			if cfg.CoordinatorRole != cfg.RoleName {
+				roles = append(roles, cfg.CoordinatorRole)
+			}
+		}
+		cfg.TeamRoles = roles
+	}
 
 	s := &Session{cfg: cfg}
-	s.queuedEmitted = make(map[string]struct{})
+	s.queuedEmitted = make(map[string]time.Time)
 	if err := s.setProfile(cfg.Profile, cfg.ProfileDir); err != nil {
 		return nil, err
 	}
@@ -196,6 +234,15 @@ func (s *Session) Run(ctx context.Context) error {
 func (s *Session) emitBestEffort(ctx context.Context, ev events.Event) {
 	if s == nil || s.cfg.Events == nil {
 		return
+	}
+	if ev.Data == nil {
+		ev.Data = map[string]string{}
+	}
+	if strings.TrimSpace(s.cfg.TeamID) != "" {
+		ev.Data["teamId"] = s.cfg.TeamID
+	}
+	if strings.TrimSpace(s.cfg.RoleName) != "" {
+		ev.Data["role"] = s.cfg.RoleName
 	}
 	_ = s.cfg.Events.Emit(ctx, ev)
 }
@@ -275,7 +322,15 @@ func (s *Session) setProfile(p *profile.Profile, dir string) error {
 
 func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob) {
 	// Backpressure: if inbox is already large, skip emitting more tasks.
-	if count, err := s.cfg.TaskStore.CountTasks(ctx, state.TaskFilter{RunID: s.cfg.RunID, Status: []types.TaskStatus{types.TaskStatusPending}}); err == nil && count > s.cfg.MaxPending {
+	filter := state.TaskFilter{RunID: s.cfg.RunID, Status: []types.TaskStatus{types.TaskStatusPending}}
+	if strings.TrimSpace(s.cfg.TeamID) != "" {
+		filter = state.TaskFilter{
+			TeamID:       s.cfg.TeamID,
+			AssignedRole: s.cfg.RoleName,
+			Status:       []types.TaskStatus{types.TaskStatusPending},
+		}
+	}
+	if count, err := s.cfg.TaskStore.CountTasks(ctx, filter); err == nil && count > s.cfg.MaxPending {
 		s.emitBestEffort(ctx, events.Event{
 			Type:    "task.heartbeat.skipped",
 			Message: "Heartbeat skipped due to backpressure",
@@ -296,13 +351,16 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 	}
 
 	task := types.Task{
-		TaskID:    taskID,
-		SessionID: s.cfg.SessionID,
-		RunID:     s.cfg.RunID,
-		Goal:      strings.TrimSpace(job.Goal),
-		Priority:  5,
-		Status:    types.TaskStatusPending,
-		CreatedAt: &now,
+		TaskID:       taskID,
+		SessionID:    s.cfg.SessionID,
+		RunID:        s.cfg.RunID,
+		TeamID:       strings.TrimSpace(s.cfg.TeamID),
+		AssignedRole: strings.TrimSpace(s.cfg.RoleName),
+		CreatedBy:    strings.TrimSpace(s.cfg.RoleName),
+		Goal:         strings.TrimSpace(job.Goal),
+		Priority:     5,
+		Status:       types.TaskStatusPending,
+		CreatedAt:    &now,
 		Metadata: map[string]any{
 			"source":  "heartbeat",
 			"profile": s.activeProfile.ID,
@@ -416,6 +474,19 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 		if task.RunID == "" {
 			task.RunID = s.cfg.RunID
 		}
+		if strings.TrimSpace(s.cfg.TeamID) != "" {
+			task.TeamID = strings.TrimSpace(task.TeamID)
+			if task.TeamID == "" {
+				task.TeamID = s.cfg.TeamID
+			}
+			task.AssignedRole = strings.TrimSpace(task.AssignedRole)
+			if task.AssignedRole == "" {
+				task.AssignedRole = s.cfg.RoleName
+			}
+			if strings.TrimSpace(task.CreatedBy) == "" {
+				task.CreatedBy = s.cfg.RoleName
+			}
+		}
 
 		if err := s.cfg.TaskStore.CreateTask(ctx, task); err != nil {
 			// Ignore duplicates (e.g., concurrent ingestion).
@@ -426,12 +497,7 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 	}
 
 	// Execute pending tasks from SQLite.
-	pending, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
-		RunID:  s.cfg.RunID,
-		Status: []types.TaskStatus{types.TaskStatusPending},
-		SortBy: "priority",
-		Limit:  s.cfg.MaxPending,
-	})
+	pending, err := s.listPendingTasks(ctx)
 	if err != nil {
 		errs = errors.Join(errs, err)
 		return hadWork, errs
@@ -448,7 +514,7 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 
 		if err := s.cfg.TaskStore.ClaimTask(ctx, taskID, s.cfg.LeaseTTL); err != nil {
 			switch {
-			case errors.Is(err, state.ErrTaskClaimed), errors.Is(err, state.ErrTaskTerminal), errors.Is(err, state.ErrTaskNotFound):
+			case errors.Is(err, state.ErrTaskClaimed), errors.Is(err, state.ErrTaskTerminal), errors.Is(err, state.ErrTaskNotFound), isSQLiteBusyErr(err):
 				continue
 			default:
 				errs = errors.Join(errs, fmt.Errorf("claim %s: %w", taskID, err))
@@ -476,16 +542,93 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 	return hadWork, errs
 }
 
+func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
+	if strings.TrimSpace(s.cfg.TeamID) == "" {
+		return s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+			RunID:  s.cfg.RunID,
+			Status: []types.TaskStatus{types.TaskStatusPending},
+			SortBy: "priority",
+			Limit:  s.cfg.MaxPending,
+		})
+	}
+
+	limit := s.cfg.MaxPending
+	if limit <= 0 {
+		limit = 50
+	}
+	tasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+		TeamID:       s.cfg.TeamID,
+		AssignedRole: s.cfg.RoleName,
+		Status:       []types.TaskStatus{types.TaskStatusPending},
+		SortBy:       "priority",
+		Limit:        limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !s.cfg.IsCoordinator {
+		return tasks, nil
+	}
+	unassigned, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+		TeamID:         s.cfg.TeamID,
+		UnassignedOnly: true,
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "priority",
+		Limit:          limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]types.Task, 0, len(tasks)+len(unassigned))
+	seen := map[string]struct{}{}
+	for _, task := range tasks {
+		if strings.TrimSpace(task.TaskID) == "" {
+			continue
+		}
+		seen[task.TaskID] = struct{}{}
+		out = append(out, task)
+	}
+	for _, task := range unassigned {
+		if strings.TrimSpace(task.TaskID) == "" {
+			continue
+		}
+		if _, ok := seen[task.TaskID]; ok {
+			continue
+		}
+		seen[task.TaskID] = struct{}{}
+		out = append(out, task)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Priority != out[j].Priority {
+			return out[i].Priority < out[j].Priority
+		}
+		return out[i].SortTime().Before(out[j].SortTime())
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) error {
 	now := time.Now()
 	task.Status = types.TaskStatusActive
 	task.StartedAt = &now
 	task.SessionID = s.cfg.SessionID
 	task.RunID = s.cfg.RunID
+	if strings.TrimSpace(s.cfg.TeamID) != "" {
+		task.TeamID = s.cfg.TeamID
+		if strings.TrimSpace(task.AssignedRole) == "" {
+			task.AssignedRole = s.cfg.RoleName
+		}
+		if strings.TrimSpace(task.CreatedBy) == "" {
+			task.CreatedBy = s.cfg.RoleName
+		}
+	}
 	_ = s.cfg.TaskStore.UpdateTask(ctx, task)
 
 	if s.cfg.Events != nil {
-		_ = s.cfg.Events.Emit(ctx, events.Event{
+		s.emitBestEffort(ctx, events.Event{
 			Type:    "task.start",
 			Message: "Task started",
 			Data:    map[string]string{"taskId": taskID, "profile": s.activeProfile.ID, "goal": truncateText(task.Goal, 100)},
@@ -515,7 +658,18 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 				memSnips = ms
 			}
 		}
-		aug := buildSystemPrompt(runAgent.GetSystemPrompt(), *s.activeProfile, s.activePromptText, memSnips, s.lastTaskOutcome)
+		aug := buildSystemPrompt(
+			runAgent.GetSystemPrompt(),
+			*s.activeProfile,
+			s.activePromptText,
+			memSnips,
+			s.lastTaskOutcome,
+			s.cfg.TeamID,
+			s.cfg.RoleName,
+			s.cfg.CoordinatorRole,
+			s.cfg.TeamRoles,
+			s.cfg.TeamRoleDescriptions,
+		)
 		if strings.TrimSpace(aug) != "" {
 			cfg := runAgent.Config()
 			cfg.SystemPrompt = aug
@@ -546,7 +700,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			cumulativeInputTokens += usage.InputTokens
 			cumulativeOutputTokens += usage.OutputTokens
 			if s.cfg.Events != nil {
-				_ = s.cfg.Events.Emit(ctx, events.Event{
+				s.emitBestEffort(ctx, events.Event{
 					Type:    "task.usage",
 					Message: "Task LLM usage",
 					Data: map[string]string{
@@ -656,15 +810,17 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			// Always include the first artifact path (typically SUMMARY.md).
 			data["artifact0"] = tr.Artifacts[0]
 		}
-		_ = s.cfg.Events.Emit(ctx, events.Event{Type: "task.done", Message: "Task finished", Data: data})
+		s.emitBestEffort(ctx, events.Event{Type: "task.done", Message: "Task finished", Data: data})
 		if len(tr.Artifacts) != 0 {
-			_ = s.cfg.Events.Emit(ctx, events.Event{Type: "task.delivered", Message: "Task deliverables recorded", Data: map[string]string{"taskId": taskID, "count": fmt.Sprintf("%d", len(tr.Artifacts)), "summaryPath": tr.Artifacts[0]}})
+			s.emitBestEffort(ctx, events.Event{Type: "task.delivered", Message: "Task deliverables recorded", Data: map[string]string{"taskId": taskID, "count": fmt.Sprintf("%d", len(tr.Artifacts)), "summaryPath": tr.Artifacts[0]}})
 		}
 	}
 
 	if err := s.cfg.TaskStore.CompleteTask(ctx, taskID, tr); err != nil {
 		return err
 	}
+	s.maybeEmitCoordinatorPolicyWarn(ctx, task, tr)
+	s.maybeCreateCoordinatorCallback(ctx, task, tr)
 
 	if err := s.writeResult(ctx, taskID, tr); err != nil {
 		return err
@@ -700,21 +856,170 @@ func (s *Session) emitTaskQueuedOnce(ctx context.Context, taskID, goal, source s
 		return
 	}
 	if s.queuedEmitted == nil {
-		s.queuedEmitted = make(map[string]struct{})
+		s.queuedEmitted = make(map[string]time.Time)
 	}
 	if _, ok := s.queuedEmitted[taskID]; ok {
 		return
 	}
-	// Prevent unbounded growth for long-lived daemons.
+	now := time.Now().UTC()
+	// Prevent unbounded growth for long-lived daemons with age-based eviction.
 	if len(s.queuedEmitted) > 5000 {
-		s.queuedEmitted = make(map[string]struct{})
+		cutoff := now.Add(-20 * time.Minute)
+		for k, ts := range s.queuedEmitted {
+			if ts.Before(cutoff) {
+				delete(s.queuedEmitted, k)
+			}
+		}
+		// Fallback: if still too large, drop oldest entries.
+		if len(s.queuedEmitted) > 5000 {
+			type kv struct {
+				key string
+				at  time.Time
+			}
+			all := make([]kv, 0, len(s.queuedEmitted))
+			for k, ts := range s.queuedEmitted {
+				all = append(all, kv{key: k, at: ts})
+			}
+			sort.Slice(all, func(i, j int) bool { return all[i].at.Before(all[j].at) })
+			drop := len(all) - 4500
+			for i := 0; i < drop && i < len(all); i++ {
+				delete(s.queuedEmitted, all[i].key)
+			}
+		}
 	}
-	s.queuedEmitted[taskID] = struct{}{}
+	s.queuedEmitted[taskID] = now
 	payload := map[string]string{"taskId": taskID, "profile": s.activeProfile.ID, "goal": truncateText(goal, 200)}
 	if strings.TrimSpace(source) != "" {
 		payload["source"] = strings.TrimSpace(source)
 	}
-	_ = s.cfg.Events.Emit(ctx, events.Event{Type: "task.queued", Message: "Task queued", Data: payload})
+	s.emitBestEffort(ctx, events.Event{Type: "task.queued", Message: "Task queued", Data: payload})
+}
+
+func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types.Task, tr types.TaskResult) {
+	if strings.TrimSpace(s.cfg.TeamID) == "" || s.cfg.IsCoordinator {
+		return
+	}
+	coordinatorRole := strings.TrimSpace(s.cfg.CoordinatorRole)
+	if coordinatorRole == "" || strings.EqualFold(coordinatorRole, s.cfg.RoleName) {
+		return
+	}
+	taskID := strings.TrimSpace(task.TaskID)
+	if taskID == "" {
+		return
+	}
+	callbackTaskID := "callback-" + taskID
+	now := time.Now().UTC()
+	callbackGoal := fmt.Sprintf("COORDINATOR REVIEW ONLY: Review %s result from role %q for task %s. Do not do specialist work yourself. Either delegate any needed follow-up to the appropriate role or mark the work complete and update overall team progress.", string(tr.Status), strings.TrimSpace(s.cfg.RoleName), truncateText(taskID, 24))
+	inputs := map[string]any{
+		"sourceTaskId": taskID,
+		"sourceRole":   strings.TrimSpace(s.cfg.RoleName),
+		"sourceStatus": string(tr.Status),
+		"summary":      strings.TrimSpace(tr.Summary),
+		"error":        strings.TrimSpace(tr.Error),
+		"artifacts":    append([]string(nil), tr.Artifacts...),
+	}
+	callback := types.Task{
+		TaskID:       callbackTaskID,
+		SessionID:    "team-" + strings.TrimSpace(s.cfg.TeamID),
+		RunID:        "team-" + strings.TrimSpace(s.cfg.TeamID) + "-callback",
+		TeamID:       strings.TrimSpace(s.cfg.TeamID),
+		AssignedRole: coordinatorRole,
+		CreatedBy:    strings.TrimSpace(s.cfg.RoleName),
+		Goal:         callbackGoal,
+		Inputs:       inputs,
+		Priority:     1,
+		Status:       types.TaskStatusPending,
+		CreatedAt:    &now,
+		Metadata: map[string]any{
+			"source":            "team.callback",
+			"callbackForTaskId": taskID,
+			"sourceRole":        strings.TrimSpace(s.cfg.RoleName),
+			"sourceTaskStatus":  string(tr.Status),
+		},
+	}
+	if err := s.cfg.TaskStore.CreateTask(ctx, callback); err != nil {
+		return // idempotent via deterministic callback task id.
+	}
+	s.emitTaskQueuedOnce(ctx, callbackTaskID, callbackGoal, "team.callback")
+	s.emitBestEffort(ctx, events.Event{
+		Type:    "team.callback.queued",
+		Message: "Worker completion callback queued for coordinator",
+		Data: map[string]string{
+			"taskId":            callbackTaskID,
+			"callbackForTaskId": taskID,
+			"assignedRole":      coordinatorRole,
+		},
+	})
+}
+
+func (s *Session) maybeEmitCoordinatorPolicyWarn(ctx context.Context, task types.Task, tr types.TaskResult) {
+	if strings.TrimSpace(s.cfg.TeamID) == "" || !s.cfg.IsCoordinator {
+		return
+	}
+	createdBy := strings.ToLower(strings.TrimSpace(task.CreatedBy))
+	if createdBy != "user" && createdBy != "webhook" && createdBy != "monitor" {
+		return
+	}
+	if strings.TrimSpace(task.TaskID) == "" {
+		return
+	}
+	// Soft guardrail: for user-originated coordinator tasks, emit warning when no delegation evidence exists.
+	tasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+		TeamID:   s.cfg.TeamID,
+		SortBy:   "created_at",
+		SortDesc: true,
+		Limit:    200,
+	})
+	if err != nil {
+		return
+	}
+	start := time.Time{}
+	if timeutil.IsSet(task.StartedAt) {
+		start = task.StartedAt.UTC()
+	}
+	end := time.Now().UTC()
+	if timeutil.IsSet(tr.CompletedAt) {
+		end = tr.CompletedAt.UTC()
+	}
+	delegated := false
+	for _, candidate := range tasks {
+		if strings.TrimSpace(candidate.TaskID) == "" || strings.EqualFold(candidate.TaskID, task.TaskID) {
+			continue
+		}
+		if strings.TrimSpace(candidate.TeamID) != s.cfg.TeamID {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(candidate.AssignedRole), s.cfg.RoleName) {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(candidate.CreatedBy), s.cfg.RoleName) {
+			continue
+		}
+		if !timeutil.IsSet(candidate.CreatedAt) {
+			continue
+		}
+		createdAt := candidate.CreatedAt.UTC()
+		if !start.IsZero() && createdAt.Before(start.Add(-2*time.Second)) {
+			continue
+		}
+		if createdAt.After(end.Add(2 * time.Second)) {
+			continue
+		}
+		delegated = true
+		break
+	}
+	if delegated {
+		return
+	}
+	s.emitBestEffort(ctx, events.Event{
+		Type:    "team.coordinator.policy.warn",
+		Message: "Coordinator completed a user task without delegation evidence",
+		Data: map[string]string{
+			"taskId": task.TaskID,
+			"role":   s.cfg.RoleName,
+			"status": string(tr.Status),
+		},
+	})
 }
 
 func (s *Session) quarantineTask(ctx context.Context, task types.Task) error {
@@ -938,4 +1243,12 @@ func fallback(v string, def string) string {
 		return def
 	}
 	return v
+}
+
+func isSQLiteBusyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(msg, "sqlite_busy") || strings.Contains(msg, "database is locked")
 }

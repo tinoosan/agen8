@@ -14,7 +14,7 @@ Backend engineers or contributors working on Workbench’s VFS/skill integration
 ```
 Agent request                SkillsResource          Skill Manager         Real Skill Path
 ---------------            ------------------      -----------------     --------------
-/skills/                     -> List() / Read()   -> Find entry metadata  -> <dataDir>/skills/<name>/SKILL.md
+/skills/                     -> List() / Read()   -> Find entry metadata  -> ~/.agents/skills/<name>/SKILL.md
 /skills/my-skill/SKILL.md    -> read file content
 ```
 
@@ -33,7 +33,7 @@ Agent request                SkillsResource          Skill Manager         Real 
 |---|---|---|
 | List available skills | `/skills` | `List("")` -> returns sorted skill directories. |
 | Inspect a skill file | `/skills/<name>/SKILL.md` | `Read()` ensures the skill exists and returns file bytes. |
-| Modify skill file | `Write` or `Append` to `/skills/<name>/SKILL.md` | Writes to `<dataDir>/skills/<name>/SKILL.md`, then rescans so the update is immediately visible. |
+| Modify skill file | `Write` or `Append` to `/skills/<name>/SKILL.md` | Writes to `~/.agents/skills/<name>/SKILL.md`, then rescans so the update is immediately visible. |
 
 #### Example
 To read the `explain-code` skill:
@@ -52,7 +52,7 @@ GET /skills/explain-code/SKILL.md
 
 ### Gotchas
 - Skills are directories under `/skills` and `SKILL.md` is the entrypoint.
-- Writable paths are resolved under the configured writable root (`<dataDir>/skills`). For read-only/external skills, writes are rejected.
+- Writable paths are resolved under the configured writable root (`~/.agents/skills`). For read-only/external skills, writes are rejected.
 - Modifications require `fsutil.WriteFileAtomic` to avoid partial writes—this means the agent cannot append data atomically without abiding by this wrapper.
 
 ## Navigation Aids

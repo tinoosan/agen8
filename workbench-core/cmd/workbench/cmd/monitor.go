@@ -11,6 +11,7 @@ import (
 )
 
 var monitorAgentID string
+var monitorTeamID string
 
 var monitorCmd = &cobra.Command{
 	Use:   "monitor",
@@ -20,6 +21,9 @@ var monitorCmd = &cobra.Command{
 		cfg, err := effectiveConfig(cmd)
 		if err != nil {
 			return err
+		}
+		if strings.TrimSpace(monitorTeamID) != "" {
+			return tui.RunTeamMonitor(cmd.Context(), cfg, strings.TrimSpace(monitorTeamID))
 		}
 		agentID := strings.TrimSpace(monitorAgentID)
 		if agentID == "" {
@@ -45,4 +49,5 @@ var monitorCmd = &cobra.Command{
 
 func init() {
 	monitorCmd.Flags().StringVar(&monitorAgentID, "agent-id", "", "agent ID to attach to (default: latest running agent)")
+	monitorCmd.Flags().StringVar(&monitorTeamID, "team-id", "", "team ID to attach to in teams mode")
 }

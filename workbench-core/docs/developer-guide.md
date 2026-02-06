@@ -8,7 +8,7 @@ This guide explains how the CLI, configuration, and internal services collaborat
 - `internal/config` exposes `effectiveConfig()` which merges CLI flags, environment variables, and defaults. Components call this helper before starting new sessions/runs.
 - `internal/app` orchestrates the autonomous daemon session and wires agents into the runtime.
 - `internal/store` persists sessions, agents, history, and artifacts under the configured `dataDir`.
-- `pkg/fsutil` provides helper functions to resolve deterministic paths (`GetAgentDir`, `GetArtifactDir`, etc.).
+- `pkg/fsutil` provides helper functions to resolve deterministic paths (`GetAgentDir`, etc.).
 
 ## Session/run lifecycle
 

@@ -2,7 +2,7 @@
 //
 // Skills are reusable capabilities that the agent can discover and use. They are
 // defined as directories within the `/skills` VFS mount (backed by
-// <dataDir>/skills/<skill_name>/SKILL.md on disk).
+// ~/.agents/skills/<skill_name>/SKILL.md on disk).
 //
 // # Key Responsibilities
 //

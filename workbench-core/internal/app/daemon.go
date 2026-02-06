@@ -61,13 +61,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if goal == "" {
 		goal = "autonomous agent"
 	}
-
-	// Create session/run up front.
-	_, run, err := implstore.CreateSession(cfg, goal, maxContextB)
-	if err != nil {
-		return fmt.Errorf("create session: %w", err)
-	}
-
 	// Enable protocol STDIO when explicitly requested or when piping (non-TTY stdin+stdout).
 	protocolEnabled := resolved.ProtocolStdio
 	if !protocolEnabled {
@@ -76,6 +69,19 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		if !inTTY && !outTTY {
 			protocolEnabled = true
 		}
+	}
+	prof, profDir, err := resolveProfileRef(cfg, strings.TrimSpace(resolved.Profile))
+	if err != nil {
+		return err
+	}
+	if prof.Team != nil {
+		return runAsTeam(ctx, cfg, prof, profDir, goal, maxContextB, poll, resolved, protocolEnabled)
+	}
+
+	// Create session/run up front.
+	_, run, err := implstore.CreateSession(cfg, goal, maxContextB)
+	if err != nil {
+		return fmt.Errorf("create session: %w", err)
 	}
 
 	var notifyCh chan protocol.Message
@@ -344,11 +350,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
 	}
-	prof, profDir, err := resolveProfileRef(cfg, strings.TrimSpace(resolved.Profile))
-	if err != nil {
-		return err
-	}
-
 	sess, err := session.New(session.Config{
 		Agent:      a,
 		Profile:    prof,

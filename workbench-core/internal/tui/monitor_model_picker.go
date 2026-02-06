@@ -141,6 +141,9 @@ func (m *monitorModel) selectModelFromPicker() tea.Cmd {
 	m.closeModelPicker()
 
 	// Write control file to inbox
+	if m.teamID != "" {
+		return m.writeTeamControl("set_team_model", selectedID)
+	}
 	return m.writeControl("set_model", map[string]any{"model": selectedID})
 }
 

@@ -1,0 +1,12 @@
+id: market_researcher
+description: Focused profile for macro and sector market research.
+skills:
+  - market_monitoring
+  - reporting
+  - hybrid_web
+prompts:
+  system_prompt_path: prompt.md
+heartbeat:
+  - name: refresh-market-signals
+    interval: 12h
+    goal: "Refresh macro and sector-level signals with explicit sources and timestamped observations."

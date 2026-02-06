@@ -411,12 +411,6 @@ func messagesEqual(a, b llmtypes.LLMMessage) bool {
 	return a.Role == b.Role && a.Content == b.Content && a.ToolCallID == b.ToolCallID
 }
 
-func isDangerousHostOp(req types.HostOpRequest) bool {
-	// Approvals are disabled in autonomous mode; no-op safeguard.
-	_ = req
-	return false
-}
-
 // Run executes the agent loop for a single user goal and returns the final result.
 func (a *DefaultAgent) Run(ctx context.Context, goal string) (RunResult, error) {
 	if err := validate.NonEmpty("goal", goal); err != nil {

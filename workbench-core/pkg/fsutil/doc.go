@@ -5,8 +5,8 @@
 //
 // # Helpers
 //
-//   - `GetSkillsDir`/`GetDataDir`: Centralizes how the runtime locates standardized
-//     directories within `config.DataDir` so other code does not duplicate path logic.
+//   - `GetAgentsSkillsDir`: Resolves the open-standard skills path under
+//     `~/.agents/skills` for runtime mounts.
 //   - `AtomicFileWrite`: Ensures files are written via temporary files + rename to
 //     avoid partial writes.
 //   - `Paths` helpers: Validate that runtime-generated paths stay within expected roots.

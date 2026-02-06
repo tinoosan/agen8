@@ -93,6 +93,113 @@ func TestSQLiteStore_Claim_Expires(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_ListTasks_FilterByTeamAndRole(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewSQLiteTaskStore(filepath.Join(dir, "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	tasks := []types.Task{
+		{
+			TaskID:       "team-task-1",
+			SessionID:    "sess-1",
+			RunID:        "run-1",
+			TeamID:       "team-1",
+			AssignedRole: "researcher",
+			CreatedBy:    "head-analyst",
+			Goal:         "collect data",
+			Status:       types.TaskStatusPending,
+			CreatedAt:    &now,
+			Metadata:     map[string]any{},
+			Inputs:       map[string]any{},
+		},
+		{
+			TaskID:       "team-task-2",
+			SessionID:    "sess-2",
+			RunID:        "run-2",
+			TeamID:       "team-1",
+			AssignedRole: "report-writer",
+			CreatedBy:    "head-analyst",
+			Goal:         "write brief",
+			Status:       types.TaskStatusPending,
+			CreatedAt:    &now,
+			Metadata:     map[string]any{},
+			Inputs:       map[string]any{},
+		},
+		{
+			TaskID:       "team-task-3",
+			SessionID:    "sess-3",
+			RunID:        "run-3",
+			TeamID:       "team-2",
+			AssignedRole: "researcher",
+			CreatedBy:    "lead",
+			Goal:         "other team work",
+			Status:       types.TaskStatusPending,
+			CreatedAt:    &now,
+			Metadata:     map[string]any{},
+			Inputs:       map[string]any{},
+		},
+		{
+			TaskID:       "team-task-4",
+			SessionID:    "sess-4",
+			RunID:        "run-4",
+			TeamID:       "team-1",
+			AssignedRole: "",
+			CreatedBy:    "head-analyst",
+			Goal:         "unassigned triage",
+			Status:       types.TaskStatusPending,
+			CreatedAt:    &now,
+			Metadata:     map[string]any{},
+			Inputs:       map[string]any{},
+		},
+	}
+	for _, task := range tasks {
+		task := task
+		if err := s.CreateTask(ctx, task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", task.TaskID, err)
+		}
+	}
+
+	got, err := s.ListTasks(ctx, TaskFilter{
+		TeamID:       "team-1",
+		AssignedRole: "researcher",
+		Status:       []types.TaskStatus{types.TaskStatusPending},
+		SortBy:       "created_at",
+		Limit:        10,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(got))
+	}
+	if got[0].TaskID != "team-task-1" {
+		t.Fatalf("unexpected task ID: %s", got[0].TaskID)
+	}
+	if got[0].CreatedBy != "head-analyst" {
+		t.Fatalf("unexpected createdBy: %s", got[0].CreatedBy)
+	}
+
+	unassigned, err := s.ListTasks(ctx, TaskFilter{
+		TeamID:         "team-1",
+		UnassignedOnly: true,
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "created_at",
+		Limit:          10,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks(unassigned): %v", err)
+	}
+	if len(unassigned) != 1 {
+		t.Fatalf("expected 1 unassigned task, got %d", len(unassigned))
+	}
+	if unassigned[0].TaskID != "team-task-4" {
+		t.Fatalf("unexpected unassigned task: %s", unassigned[0].TaskID)
+	}
+}
+
 func ptrTime(t time.Time) *time.Time {
 	return &t
 }

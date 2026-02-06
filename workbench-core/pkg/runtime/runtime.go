@@ -39,6 +39,7 @@ type BuildConfig struct {
 	Cfg                   config.Config
 	Run                   types.Run
 	WorkdirAbs            string
+	SharedWorkspaceDir    string
 	Model                 string
 	ReasoningEffort       string
 	ReasoningSummary      string
@@ -161,9 +162,21 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 
 	runDir := fsutil.GetAgentDir(cfg.Cfg.DataDir, cfg.Run.RunID)
-	wsRes, err := resources.NewWorkspace(cfg.Cfg, cfg.Run.RunID)
-	if err != nil {
-		return nil, fmt.Errorf("create workspace resource: %w", err)
+	var wsRes *resources.DirResource
+	sharedWorkspaceDir := strings.TrimSpace(cfg.SharedWorkspaceDir)
+	if sharedWorkspaceDir != "" {
+		if err := os.MkdirAll(sharedWorkspaceDir, 0o755); err != nil {
+			return nil, fmt.Errorf("prepare shared workspace dir: %w", err)
+		}
+		wsRes, err = resources.NewDirResource(sharedWorkspaceDir, vfs.MountWorkspace)
+		if err != nil {
+			return nil, fmt.Errorf("create shared workspace resource: %w", err)
+		}
+	} else {
+		wsRes, err = resources.NewWorkspace(cfg.Cfg, cfg.Run.RunID)
+		if err != nil {
+			return nil, fmt.Errorf("create workspace resource: %w", err)
+		}
 	}
 	if err := fs.Mount(vfs.MountWorkspace, wsRes); err != nil {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountWorkspace, err)
@@ -206,7 +219,10 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountPlan, err)
 	}
 
-	skillDir := fsutil.GetSkillsDir(cfg.Cfg.DataDir)
+	skillDir, err := fsutil.GetAgentsSkillsDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve skills dir: %w", err)
+	}
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		return nil, fmt.Errorf("prepare skills dir: %w", err)
 	}

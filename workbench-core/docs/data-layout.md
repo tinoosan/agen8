@@ -27,7 +27,7 @@ Shared memory lives outside run directories:
 Event logs are mirrored to `<dataDir>/agents/<agentId>/log/events.jsonl` so `/log` remains offset-based.
 
 Helper functions in `internal/fsutil/paths.go` ensure this layout remains consistent (`GetRunDir`,
-`GetArtifactDir`, etc.), so other packages can rely on deterministic paths.
+etc.), so other packages can rely on deterministic paths.
 
 ## Agent consumable mounts
 

@@ -1,0 +1,148 @@
+package hosttools
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/tinoosan/workbench-core/pkg/agent/state"
+	"github.com/tinoosan/workbench-core/pkg/types"
+)
+
+type fakeTaskStore struct {
+	tasks map[string]types.Task
+}
+
+func newFakeTaskStore() *fakeTaskStore {
+	return &fakeTaskStore{tasks: map[string]types.Task{}}
+}
+
+func (f *fakeTaskStore) GetTask(_ context.Context, taskID string) (types.Task, error) {
+	if t, ok := f.tasks[taskID]; ok {
+		return t, nil
+	}
+	return types.Task{}, state.ErrTaskNotFound
+}
+
+func (f *fakeTaskStore) GetRunStats(context.Context, string) (state.RunStats, error) {
+	return state.RunStats{}, nil
+}
+
+func (f *fakeTaskStore) ListTasks(context.Context, state.TaskFilter) ([]types.Task, error) {
+	return nil, nil
+}
+
+func (f *fakeTaskStore) CountTasks(context.Context, state.TaskFilter) (int, error) {
+	return 0, nil
+}
+
+func (f *fakeTaskStore) CreateTask(_ context.Context, task types.Task) error {
+	f.tasks[task.TaskID] = task
+	return nil
+}
+
+func (f *fakeTaskStore) DeleteTask(_ context.Context, taskID string) error {
+	delete(f.tasks, taskID)
+	return nil
+}
+
+func (f *fakeTaskStore) UpdateTask(context.Context, types.Task) error {
+	return nil
+}
+
+func (f *fakeTaskStore) CompleteTask(context.Context, string, types.TaskResult) error {
+	return nil
+}
+
+func (f *fakeTaskStore) ClaimTask(context.Context, string, time.Duration) error {
+	return nil
+}
+
+func (f *fakeTaskStore) ExtendLease(context.Context, string, time.Duration) error {
+	return nil
+}
+
+func (f *fakeTaskStore) RecoverExpiredLeases(context.Context) error {
+	return nil
+}
+
+func TestTaskCreateTool_CoordinatorCanAssignAnyRole(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-1",
+		RunID:           "run-1",
+		TeamID:          "team-1",
+		RoleName:        "head-analyst",
+		IsCoordinator:   true,
+		CoordinatorRole: "head-analyst",
+		ValidRoles:      []string{"head-analyst", "researcher", "report-writer"},
+	}
+	args := map[string]any{
+		"goal":         "Research semiconductors",
+		"taskId":       "task-coord-1",
+		"assignedRole": "researcher",
+	}
+	raw, _ := json.Marshal(args)
+	if _, err := tool.Execute(context.Background(), raw); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	task := store.tasks["task-coord-1"]
+	if task.AssignedRole != "researcher" {
+		t.Fatalf("expected assignedRole researcher, got %q", task.AssignedRole)
+	}
+	if task.CreatedBy != "head-analyst" {
+		t.Fatalf("expected createdBy head-analyst, got %q", task.CreatedBy)
+	}
+}
+
+func TestTaskCreateTool_WorkerCannotAssignOtherWorker(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-2",
+		RunID:           "run-2",
+		TeamID:          "team-1",
+		RoleName:        "researcher",
+		IsCoordinator:   false,
+		CoordinatorRole: "head-analyst",
+		ValidRoles:      []string{"head-analyst", "researcher", "report-writer"},
+	}
+	args := map[string]any{
+		"goal":         "Write final report",
+		"taskId":       "task-worker-1",
+		"assignedRole": "report-writer",
+	}
+	raw, _ := json.Marshal(args)
+	if _, err := tool.Execute(context.Background(), raw); err == nil {
+		t.Fatalf("expected permission error")
+	}
+}
+
+func TestTaskCreateTool_WorkerCanEscalateToCoordinator(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-3",
+		RunID:           "run-3",
+		TeamID:          "team-1",
+		RoleName:        "researcher",
+		IsCoordinator:   false,
+		CoordinatorRole: "head-analyst",
+		ValidRoles:      []string{"head-analyst", "researcher", "report-writer"},
+	}
+	args := map[string]any{
+		"goal":         "Need clarification on region scope",
+		"taskId":       "task-worker-2",
+		"assignedRole": "head-analyst",
+	}
+	raw, _ := json.Marshal(args)
+	if _, err := tool.Execute(context.Background(), raw); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	task := store.tasks["task-worker-2"]
+	if task.AssignedRole != "head-analyst" {
+		t.Fatalf("expected assignedRole head-analyst, got %q", task.AssignedRole)
+	}
+}

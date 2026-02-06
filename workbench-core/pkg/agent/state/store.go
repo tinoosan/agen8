@@ -90,11 +90,14 @@ type TaskStore interface {
 
 // TaskFilter specifies query criteria for ListTasks.
 type TaskFilter struct {
-	SessionID string // Filter by session
-	RunID     string // Filter by run
-	Status    []types.TaskStatus
-	FromDate  *time.Time // Created after this time
-	ToDate    *time.Time // Created before this time
+	SessionID      string // Filter by session
+	RunID          string // Filter by run
+	TeamID         string // Filter by team
+	AssignedRole   string // Filter by assigned role
+	UnassignedOnly bool   // Filter tasks where assigned_role is empty
+	Status         []types.TaskStatus
+	FromDate       *time.Time // Created after this time
+	ToDate         *time.Time // Created before this time
 
 	// Pagination
 	Limit  int // Max results (default: 50)

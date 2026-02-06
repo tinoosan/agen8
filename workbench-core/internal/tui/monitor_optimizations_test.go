@@ -14,7 +14,7 @@ func TestAppendThinkingEntry_TrimsToMax(t *testing.T) {
 
 	m := &monitorModel{}
 	for i := 0; i < maxThinkingEntries+10; i++ {
-		m.appendThinkingEntry(fmt.Sprintf("s-%d", i))
+		m.appendThinkingEntry("", fmt.Sprintf("s-%d", i))
 	}
 
 	if len(m.thinkingEntries) != maxThinkingEntries {
@@ -63,7 +63,7 @@ func TestRefreshViewports_DoesNotClearDirtyThinkingWhenHidden(t *testing.T) {
 		dashboardSideTab: 0,
 	}
 
-	m.appendThinkingEntry("hello")
+	m.appendThinkingEntry("", "hello")
 	if !m.dirtyThinking {
 		t.Fatalf("dirtyThinking=false, want true before refresh")
 	}

@@ -19,10 +19,15 @@ import (
 // SQLite is the source of truth for tasks; the /inbox file acts as a durable trigger
 // and provides parity with external integrations that enqueue via VFS writes.
 type TaskCreateTool struct {
-	Store     state.TaskStore
-	SessionID string
-	RunID     string
-	InboxPath string
+	Store           state.TaskStore
+	SessionID       string
+	RunID           string
+	InboxPath       string
+	TeamID          string
+	RoleName        string
+	IsCoordinator   bool
+	CoordinatorRole string
+	ValidRoles      []string
 }
 
 func (t *TaskCreateTool) Definition() llmtypes.Tool {
@@ -60,6 +65,10 @@ func (t *TaskCreateTool) Definition() llmtypes.Tool {
 						"description":          "Optional metadata for the task.",
 						"additionalProperties": true,
 					},
+					"assignedRole": map[string]any{
+						"type":        "string",
+						"description": "Optional role assignment in team mode. Omit to assign to your own role.",
+					},
 				},
 				"required":             []any{"goal"},
 				"additionalProperties": false,
@@ -74,11 +83,12 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	}
 
 	var payload struct {
-		Goal     string         `json:"goal"`
-		Priority *int           `json:"priority"`
-		TaskID   string         `json:"taskId"`
-		Inputs   map[string]any `json:"inputs"`
-		Metadata map[string]any `json:"metadata"`
+		Goal         string         `json:"goal"`
+		Priority     *int           `json:"priority"`
+		TaskID       string         `json:"taskId"`
+		Inputs       map[string]any `json:"inputs"`
+		Metadata     map[string]any `json:"metadata"`
+		AssignedRole string         `json:"assignedRole"`
 	}
 	if err := json.Unmarshal(args, &payload); err != nil {
 		return types.HostOpRequest{}, err
@@ -121,6 +131,21 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		task.Metadata["source"] = "task_create"
 	}
 
+	assignedRole := strings.TrimSpace(payload.AssignedRole)
+	teamID := strings.TrimSpace(t.TeamID)
+	if teamID != "" {
+		roleName := strings.TrimSpace(t.RoleName)
+		if assignedRole == "" {
+			assignedRole = roleName
+		}
+		if err := t.validateAssignedRole(assignedRole); err != nil {
+			return types.HostOpRequest{}, err
+		}
+		task.TeamID = teamID
+		task.AssignedRole = assignedRole
+		task.CreatedBy = roleName
+	}
+
 	if err := t.Store.CreateTask(ctx, task); err != nil {
 		// Treat "already exists" as success for idempotency.
 		if _, gerr := t.Store.GetTask(ctx, taskID); gerr != nil {
@@ -140,4 +165,35 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		Path: resolveVFSPath(inboxPath),
 		Text: string(b),
 	}, nil
+}
+
+func (t *TaskCreateTool) validateAssignedRole(assignedRole string) error {
+	assignedRole = strings.TrimSpace(assignedRole)
+	roleName := strings.TrimSpace(t.RoleName)
+	if assignedRole == "" {
+		return fmt.Errorf("task_create.assignedRole is required in team mode")
+	}
+	validRoles := map[string]struct{}{}
+	for _, role := range t.ValidRoles {
+		role = strings.TrimSpace(role)
+		if role == "" {
+			continue
+		}
+		validRoles[role] = struct{}{}
+	}
+	if len(validRoles) != 0 {
+		if _, ok := validRoles[assignedRole]; !ok {
+			return fmt.Errorf("task_create.assignedRole %q is not a valid team role", assignedRole)
+		}
+	}
+	if t.IsCoordinator {
+		return nil
+	}
+	if assignedRole == roleName {
+		return nil
+	}
+	if assignedRole == strings.TrimSpace(t.CoordinatorRole) {
+		return nil
+	}
+	return fmt.Errorf("task_create.assignedRole %q is not permitted for role %q", assignedRole, roleName)
 }
