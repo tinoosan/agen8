@@ -1710,6 +1710,8 @@ func (m *monitorModel) loadActivityPage() tea.Cmd {
 		for k, v := range m.teamRoleByRunID {
 			roleByRun[k] = v
 		}
+		focusedRunID := strings.TrimSpace(m.focusedRunID)
+		focusedRunRole := strings.TrimSpace(m.focusedRunRole)
 		dataDir := m.cfg.DataDir
 		return func() tea.Msg {
 			if len(runIDs) == 0 {
@@ -1722,6 +1724,9 @@ func (m *monitorModel) loadActivityPage() tea.Cmd {
 					continue
 				}
 				role := strings.TrimSpace(roleByRun[runID])
+				if role == "" && focusedRunID != "" && runID == focusedRunID {
+					role = focusedRunRole
+				}
 				for i := range acts {
 					act := acts[i]
 					if role != "" {
@@ -2930,8 +2935,15 @@ func (m *monitorModel) refreshThinkingViewport() {
 
 	filtered := make([]thinkingEntry, 0, len(m.thinkingEntries))
 	for _, e := range m.thinkingEntries {
-		if strings.TrimSpace(m.focusedRunID) != "" && strings.TrimSpace(e.RunID) != strings.TrimSpace(m.focusedRunID) {
-			continue
+		if strings.TrimSpace(m.focusedRunID) != "" {
+			entryRunID := strings.TrimSpace(e.RunID)
+			focusedRunID := strings.TrimSpace(m.focusedRunID)
+			if entryRunID != focusedRunID {
+				// Backward compatibility: some stored events may not have run IDs.
+				if !(entryRunID == "" && strings.TrimSpace(m.focusedRunRole) != "" && strings.EqualFold(strings.TrimSpace(e.Role), strings.TrimSpace(m.focusedRunRole))) {
+					continue
+				}
+			}
 		}
 		filtered = append(filtered, e)
 	}

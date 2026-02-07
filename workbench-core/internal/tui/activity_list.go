@@ -17,7 +17,30 @@ type activityItem struct {
 
 func (a activityItem) Title() string {
 	// Keep title compact; status icon is rendered by the delegate.
-	return a.act.Title
+	title := strings.TrimSpace(a.act.Title)
+	if title != "" {
+		return title
+	}
+	kind := strings.TrimSpace(a.act.Kind)
+	if kind == "" {
+		kind = "op"
+	}
+	path := strings.TrimSpace(a.act.Path)
+	if path != "" {
+		return kind + " " + path
+	}
+	from := strings.TrimSpace(a.act.From)
+	to := strings.TrimSpace(a.act.To)
+	switch {
+	case from != "" && to != "":
+		return kind + " " + from + " -> " + to
+	case from != "":
+		return kind + " " + from
+	case to != "":
+		return kind + " -> " + to
+	default:
+		return kind
+	}
 }
 
 func (a activityItem) Description() string {

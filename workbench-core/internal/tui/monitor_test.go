@@ -488,6 +488,28 @@ func TestRefreshThinkingViewport_FiltersByFocusedRunID(t *testing.T) {
 	}
 }
 
+func TestRefreshThinkingViewport_FocusedRunFallsBackToRoleWhenRunIDMissing(t *testing.T) {
+	m := &monitorModel{
+		focusedRunID:   "run-a",
+		focusedRunRole: "ceo",
+		thinkingEntries: []thinkingEntry{
+			{RunID: "", Role: "ceo", Summary: "legacy-no-runid"},
+			{RunID: "", Role: "writer", Summary: "other-role"},
+		},
+		thinkingVP: viewport.New(0, 0),
+	}
+	m.thinkingVP.Width = 80
+	m.thinkingVP.Height = 20
+	m.refreshThinkingViewport()
+	view := m.thinkingVP.View()
+	if !strings.Contains(view, "legacy-no-runid") {
+		t.Fatalf("expected role-fallback summary in thinking viewport: %q", view)
+	}
+	if strings.Contains(view, "other-role") {
+		t.Fatalf("did not expect non-matching role summary in thinking viewport: %q", view)
+	}
+}
+
 func TestAgentOutputFocusFilter_HidesUnscopedAndOtherRuns(t *testing.T) {
 	m := &monitorModel{
 		teamID:           "team-a",
@@ -589,5 +611,43 @@ func TestFocusedRunAutoClearsWhenRunRemoved(t *testing.T) {
 	}
 	if m.focusedRunID != "" || m.focusedRunRole != "" {
 		t.Fatalf("expected focused run to auto-clear, got run=%q role=%q", m.focusedRunID, m.focusedRunRole)
+	}
+}
+
+func TestActivityItemTitle_FallbacksWhenTitleMissing(t *testing.T) {
+	tests := []struct {
+		name string
+		act  Activity
+		want string
+	}{
+		{
+			name: "kind+path",
+			act:  Activity{Kind: "fs_read", Path: "/tmp/a.txt"},
+			want: "fs_read /tmp/a.txt",
+		},
+		{
+			name: "from-to",
+			act:  Activity{Kind: "copy", From: "/a", To: "/b"},
+			want: "copy /a -> /b",
+		},
+		{
+			name: "kind-only",
+			act:  Activity{Kind: "shell_exec"},
+			want: "shell_exec",
+		},
+		{
+			name: "default",
+			act:  Activity{},
+			want: "op",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := activityItem{act: tt.act}.Title()
+			if got != tt.want {
+				t.Fatalf("title=%q, want %q", got, tt.want)
+			}
+		})
 	}
 }
