@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -362,5 +364,230 @@ func TestMonitorView_NoClipping_100x30_Compact(t *testing.T) {
 		if w := lipgloss.Width(line); w > 100 {
 			t.Fatalf("line %d width %d exceeds terminal width 100", i+1, w)
 		}
+	}
+}
+
+func TestMonitorHandleCommand_TeamCommandOnlyInTeamMode(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+
+	m, err := newMonitorModel(ctx, cfg, "run-non-team", &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	cmd := m.handleCommand("/team")
+	if cmd == nil {
+		t.Fatalf("expected command output for /team in non-team mode")
+	}
+	msg := cmd()
+	linesMsg, ok := msg.(commandLinesMsg)
+	if !ok || len(linesMsg.lines) == 0 {
+		t.Fatalf("expected commandLinesMsg with error text, got %#v", msg)
+	}
+	if !strings.Contains(linesMsg.lines[0], "only available in team monitor") {
+		t.Fatalf("unexpected command response: %q", linesMsg.lines[0])
+	}
+
+	tm, err := newTeamMonitorModel(ctx, cfg, "team-a", &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newTeamMonitorModel: %v", err)
+	}
+	if cmd := tm.handleCommand("/team extra"); cmd == nil {
+		t.Fatalf("expected usage output for /team extra")
+	}
+	_ = tm.handleCommand("/team")
+	if !tm.teamPickerOpen {
+		t.Fatalf("expected team picker to open for /team in team monitor")
+	}
+}
+
+func TestScopedTaskFilter_FocusedRunUsesRunID(t *testing.T) {
+	m := &monitorModel{
+		teamID:       "team-a",
+		focusedRunID: "run-a",
+	}
+	filter := m.scopedTaskFilter(agentstate.TaskFilter{
+		AssignedRole: "researcher",
+		RunID:        "ignored",
+	})
+	if filter.TeamID != "team-a" {
+		t.Fatalf("TeamID=%q, want %q", filter.TeamID, "team-a")
+	}
+	if filter.RunID != "run-a" {
+		t.Fatalf("RunID=%q, want %q", filter.RunID, "run-a")
+	}
+	if filter.AssignedRole != "" {
+		t.Fatalf("AssignedRole=%q, want empty", filter.AssignedRole)
+	}
+}
+
+func TestLoadPlanFilesCmd_TeamFocusedLoadsSingleRunPlan(t *testing.T) {
+	dataDir := t.TempDir()
+	writePlan := func(runID, head, checklist string) {
+		t.Helper()
+		planDir := filepath.Join(fsutil.GetAgentDir(dataDir, runID), "plan")
+		if err := os.MkdirAll(planDir, 0o755); err != nil {
+			t.Fatalf("mkdir plan dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(planDir, "HEAD.md"), []byte(head), 0o644); err != nil {
+			t.Fatalf("write head: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(planDir, "CHECKLIST.md"), []byte(checklist), 0o644); err != nil {
+			t.Fatalf("write checklist: %v", err)
+		}
+	}
+	writePlan("run-a", "head-a", "check-a")
+	writePlan("run-b", "head-b", "check-b")
+
+	m := &monitorModel{
+		cfg:          config.Config{DataDir: dataDir},
+		teamID:       "team-a",
+		focusedRunID: "run-a",
+		teamRunIDs:   []string{"run-a", "run-b"},
+		teamRoleByRunID: map[string]string{
+			"run-a": "researcher",
+			"run-b": "writer",
+		},
+	}
+
+	cmd := m.loadPlanFilesCmd()
+	if cmd == nil {
+		t.Fatalf("expected non-nil plan load cmd")
+	}
+	msg, ok := cmd().(planFilesLoadedMsg)
+	if !ok {
+		t.Fatalf("unexpected msg type from loadPlanFilesCmd")
+	}
+	if !strings.Contains(msg.details, "head-a") || strings.Contains(msg.details, "head-b") {
+		t.Fatalf("expected focused run details only, got %q", msg.details)
+	}
+	if !strings.Contains(msg.checklist, "check-a") || strings.Contains(msg.checklist, "check-b") {
+		t.Fatalf("expected focused run checklist only, got %q", msg.checklist)
+	}
+}
+
+func TestRefreshThinkingViewport_FiltersByFocusedRunID(t *testing.T) {
+	m := &monitorModel{
+		focusedRunID: "run-a",
+		thinkingEntries: []thinkingEntry{
+			{RunID: "run-a", Role: "researcher", Summary: "focus-summary"},
+			{RunID: "run-b", Role: "writer", Summary: "other-summary"},
+		},
+		thinkingVP: viewport.New(0, 0),
+	}
+	m.thinkingVP.Width = 80
+	m.thinkingVP.Height = 20
+	m.refreshThinkingViewport()
+	view := m.thinkingVP.View()
+	if !strings.Contains(view, "focus-summary") {
+		t.Fatalf("expected focused summary in thinking viewport: %q", view)
+	}
+	if strings.Contains(view, "other-summary") {
+		t.Fatalf("did not expect non-focused summary in thinking viewport: %q", view)
+	}
+}
+
+func TestAgentOutputFocusFilter_HidesUnscopedAndOtherRuns(t *testing.T) {
+	m := &monitorModel{
+		teamID:           "team-a",
+		focusedRunID:     "run-a",
+		agentOutput:      []string{"unscoped line", "focused line", "other line"},
+		agentOutputRunID: []string{"", "run-a", "run-b"},
+		agentOutputVP:    viewport.New(0, 0),
+	}
+	m.agentOutputVP.Width = 80
+	m.agentOutputVP.Height = 20
+	m.refreshAgentOutputViewport()
+	view := m.agentOutputVP.View()
+	if !strings.Contains(view, "focused line") {
+		t.Fatalf("expected focused line in output: %q", view)
+	}
+	if strings.Contains(view, "unscoped line") || strings.Contains(view, "other line") {
+		t.Fatalf("unexpected non-focused lines in output: %q", view)
+	}
+}
+
+func TestTrimAgentOutputBuffer_KeepsRunIDSliceInSync(t *testing.T) {
+	size := agentOutputMaxLines + 15
+	m := &monitorModel{
+		agentOutput:              make([]string, size),
+		agentOutputRunID:         make([]string, size),
+		agentOutputFilteredCache: []string{"cached"},
+	}
+	for i := 0; i < size; i++ {
+		m.agentOutput[i] = "line"
+		m.agentOutputRunID[i] = "run-a"
+	}
+	m.trimAgentOutputBuffer()
+	if len(m.agentOutput) != len(m.agentOutputRunID) {
+		t.Fatalf("agent output/runID length mismatch: %d vs %d", len(m.agentOutput), len(m.agentOutputRunID))
+	}
+	if m.agentOutputFilteredCache != nil {
+		t.Fatalf("expected filtered cache reset after trim")
+	}
+}
+
+func TestTeamPickerSelect_ClearAndRunSelection(t *testing.T) {
+	m := &monitorModel{
+		teamID:     "team-a",
+		teamRunIDs: []string{"run-a", "run-b"},
+		teamRoleByRunID: map[string]string{
+			"run-a": "researcher",
+			"run-b": "writer",
+		},
+	}
+	_ = m.openTeamPicker()
+	if !m.teamPickerOpen {
+		t.Fatalf("expected team picker open")
+	}
+	items := m.teamPickerList.Items()
+	idxRunA := -1
+	for i, raw := range items {
+		item, ok := raw.(teamPickerItem)
+		if ok && item.runID == "run-a" {
+			idxRunA = i
+			break
+		}
+	}
+	if idxRunA < 0 {
+		t.Fatalf("expected run-a item in team picker")
+	}
+	m.teamPickerList.Select(idxRunA)
+	cmd := m.selectFromTeamPicker()
+	if cmd != nil {
+		_ = cmd()
+	}
+	if m.focusedRunID != "run-a" {
+		t.Fatalf("focusedRunID=%q, want %q", m.focusedRunID, "run-a")
+	}
+
+	_ = m.openTeamPicker()
+	m.teamPickerList.Select(0)
+	cmd = m.selectFromTeamPicker()
+	if cmd != nil {
+		_ = cmd()
+	}
+	if m.focusedRunID != "" {
+		t.Fatalf("expected focus to clear, got %q", m.focusedRunID)
+	}
+}
+
+func TestFocusedRunAutoClearsWhenRunRemoved(t *testing.T) {
+	m := &monitorModel{
+		teamID:         "team-a",
+		focusedRunID:   "run-a",
+		focusedRunRole: "researcher",
+		teamRunIDs:     []string{"run-b"},
+		teamRoleByRunID: map[string]string{
+			"run-b": "writer",
+		},
+	}
+	cmd := m.ensureFocusedRunStillValid()
+	if cmd == nil {
+		t.Fatalf("expected lens refresh cmd when focused run disappears")
+	}
+	if m.focusedRunID != "" || m.focusedRunRole != "" {
+		t.Fatalf("expected focused run to auto-clear, got run=%q role=%q", m.focusedRunID, m.focusedRunRole)
 	}
 }

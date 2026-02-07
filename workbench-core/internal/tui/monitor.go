@@ -141,6 +141,8 @@ type monitorModel struct {
 	planFollowingTop           bool
 	renderer                   *ContentRenderer
 	agentOutput                []string
+	agentOutputRunID           []string
+	agentOutputFilteredCache   []string
 	agentOutputVP              viewport.Model
 	agentOutputFollow          bool
 	agentOutputPending         map[string]agentOutputPendingEntry
@@ -212,6 +214,10 @@ type monitorModel struct {
 	profilePickerOpen bool
 	profilePickerList list.Model
 
+	// Team picker
+	teamPickerOpen bool
+	teamPickerList list.Model
+
 	// Command palette (inline autocomplete above composer)
 	commandPaletteOpen     bool
 	commandPaletteMatches  []string
@@ -245,6 +251,8 @@ type monitorModel struct {
 	teamPendingCount     int
 	teamActiveCount      int
 	teamDoneCount        int
+	focusedRunID         string
+	focusedRunRole       string
 	teamRoles            []teamRoleState
 	seenOutboxByTask     map[string]struct{}
 	teamRunIDs           []string
@@ -306,6 +314,7 @@ type taskState struct {
 
 type outboxEntry struct {
 	TaskID         string
+	RunID          string
 	AssignedRole   string
 	Goal           string
 	Status         string
@@ -321,6 +330,7 @@ type outboxEntry struct {
 }
 
 type thinkingEntry struct {
+	RunID   string
 	Role    string
 	Summary string
 }
@@ -524,6 +534,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		planFollowingTop:            true,
 		renderer:                    newContentRenderer(),
 		agentOutput:                 []string{},
+		agentOutputRunID:            []string{},
 		agentOutputVP:               viewport.New(0, 0),
 		agentOutputFollow:           true,
 		inbox:                       map[string]taskState{},
@@ -656,6 +667,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 		planFollowingTop:            true,
 		renderer:                    newContentRenderer(),
 		agentOutput:                 []string{},
+		agentOutputRunID:            []string{},
 		agentOutputVP:               viewport.New(0, 0),
 		agentOutputFollow:           true,
 		inbox:                       map[string]taskState{},
@@ -835,7 +847,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if summary := strings.TrimSpace(entry.Summary); summary != "" {
 					line += " - " + truncateText(summary, 120)
 				}
-				m.appendAgentOutput(line)
+				m.appendAgentOutputForRun(line, strings.TrimSpace(entry.RunID))
 			}
 		}
 		m.dirtyOutbox = true
@@ -860,7 +872,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stats.totalTokens = msg.totalTokens
 		m.stats.totalCostUSD = msg.totalCostUSD
 		m.stats.pricingKnown = msg.pricingKnown
-		return m, m.scheduleUIRefresh()
+		return m, tea.Batch(m.ensureFocusedRunStillValid(), m.scheduleUIRefresh())
 
 	case teamManifestLoadedMsg:
 		if msg.err != nil || msg.manifest == nil {
@@ -892,7 +904,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.teamRoleByRunID = roleByRun
 			}
 		}
-		return m, m.scheduleUIRefresh()
+		return m, tea.Batch(m.ensureFocusedRunStillValid(), m.scheduleUIRefresh())
 
 	case teamEventsLoadedMsg:
 		if len(msg.cursors) != 0 {
@@ -990,6 +1002,9 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.profilePickerOpen {
 			return m.updateProfilePicker(msg)
+		}
+		if m.teamPickerOpen {
+			return m.updateTeamPicker(msg)
 		}
 		if m.modelPickerOpen {
 			return m.updateModelPicker(msg)
@@ -1097,6 +1112,12 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancel()
 			}
 			return m, tea.Quit
+		case "ctrl+g":
+			if strings.TrimSpace(m.teamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
+				m.focusedRunID = ""
+				m.focusedRunRole = ""
+				return m, m.applyFocusLens()
+			}
 		case "ctrl+y":
 			if !m.isCompactMode() {
 				m.dashboardSideTab = 3
@@ -1372,6 +1393,7 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 			}
 			out = append(out, outboxEntry{
 				TaskID:       strings.TrimSpace(t.TaskID),
+				RunID:        strings.TrimSpace(t.RunID),
 				AssignedRole: strings.TrimSpace(t.AssignedRole),
 				Goal:         strings.TrimSpace(t.Goal),
 				Status:       strings.TrimSpace(string(t.Status)),
@@ -1389,6 +1411,12 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 }
 
 func (m *monitorModel) scopedTaskFilter(filter agentstate.TaskFilter) agentstate.TaskFilter {
+	if strings.TrimSpace(m.teamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
+		filter.TeamID = strings.TrimSpace(m.teamID)
+		filter.RunID = strings.TrimSpace(m.focusedRunID)
+		filter.AssignedRole = ""
+		return filter
+	}
 	if strings.TrimSpace(m.teamID) != "" {
 		filter.TeamID = strings.TrimSpace(m.teamID)
 		filter.RunID = ""
@@ -1604,6 +1632,60 @@ func (m *monitorModel) loadTeamManifestCmd() tea.Cmd {
 	}
 }
 
+func (m *monitorModel) ensureFocusedRunStillValid() tea.Cmd {
+	if m == nil || strings.TrimSpace(m.teamID) == "" || strings.TrimSpace(m.focusedRunID) == "" {
+		return nil
+	}
+	target := strings.TrimSpace(m.focusedRunID)
+	valid := false
+	for _, runID := range m.teamRunIDs {
+		if strings.TrimSpace(runID) == target {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		if _, ok := m.teamRoleByRunID[target]; ok {
+			valid = true
+		}
+	}
+	if valid {
+		if role := strings.TrimSpace(m.teamRoleByRunID[target]); role != "" {
+			m.focusedRunRole = role
+		}
+		return nil
+	}
+	m.focusedRunID = ""
+	m.focusedRunRole = ""
+	return m.applyFocusLens()
+}
+
+func (m *monitorModel) applyFocusLens() tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	m.agentOutputFilteredCache = nil
+	m.agentOutputLayoutWidth = 0
+	m.agentOutputLineStarts = nil
+	m.agentOutputLineHeights = nil
+	m.agentOutputTotalLines = 0
+	m.agentOutputWindowStartLine = 0
+	m.dirtyAgentOutput = true
+	m.dirtyActivity = true
+	m.dirtyPlan = true
+	m.dirtyThinking = true
+	m.dirtyInbox = true
+	m.dirtyOutbox = true
+
+	return tea.Batch(
+		m.loadActivityPage(),
+		m.loadInboxPage(),
+		m.loadOutboxPage(),
+		m.loadPlanFilesCmd(),
+		m.scheduleUIRefresh(),
+	)
+}
+
 func (m *monitorModel) loadActivityPage() tea.Cmd {
 	if m == nil {
 		return nil
@@ -1621,6 +1703,9 @@ func (m *monitorModel) loadActivityPage() tea.Cmd {
 		prevTotal := m.activityTotalCount
 		prevPage := m.activityPage
 		runIDs := append([]string(nil), m.teamRunIDs...)
+		if strings.TrimSpace(m.focusedRunID) != "" {
+			runIDs = []string{strings.TrimSpace(m.focusedRunID)}
+		}
 		roleByRun := map[string]string{}
 		for k, v := range m.teamRoleByRunID {
 			roleByRun[k] = v
@@ -1838,6 +1923,9 @@ func (m *monitorModel) View() string {
 	if m.profilePickerOpen {
 		return m.renderProfilePicker(base)
 	}
+	if m.teamPickerOpen {
+		return m.renderTeamPicker(base)
+	}
 	if m.modelPickerOpen {
 		return m.renderModelPicker(base)
 	}
@@ -1883,6 +1971,9 @@ func (m *monitorModel) renderStatusBar(width int) string {
 		line += "  |  Ctrl+]/Ctrl+[ switch tab (Output | Activity | Plan | Outbox)  |  Ctrl+Up/Down focus Activity Feed/Details"
 	} else {
 		line += "  |  Ctrl+]/Ctrl+[ cycle side panel (Activity | Plan | Tasks | Thoughts)  |  Ctrl+Y Thoughts tab  |  Ctrl+Up/Down focus Activity Feed/Details"
+	}
+	if strings.TrimSpace(m.teamID) != "" {
+		line += "  |  /team focus run  |  Ctrl+G clear focus"
 	}
 	w := width
 	if w <= 0 {
@@ -2111,6 +2202,18 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 		return m.openComposeEditor("")
 	}
 
+	if cmd == "/team" {
+		if strings.TrimSpace(m.teamID) == "" {
+			return func() tea.Msg {
+				return commandLinesMsg{lines: []string{"[command] /team is only available in team monitor"}}
+			}
+		}
+		if strings.TrimSpace(rest) != "" {
+			return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /team"}} }
+		}
+		return m.openTeamPicker()
+	}
+
 	if cmd == "/sessions" {
 		if strings.TrimSpace(rest) != "" {
 			return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /sessions"}} }
@@ -2320,7 +2423,7 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 	case "agent.step":
 		summary := strings.TrimSpace(ev.Data["reasoningSummary"])
 		if summary != "" {
-			m.appendThinkingEntry(strings.TrimSpace(ev.Data["role"]), summary)
+			m.appendThinkingEntry(strings.TrimSpace(ev.RunID), strings.TrimSpace(ev.Data["role"]), summary)
 		}
 	case "llm.usage.total":
 		m.stats.lastTurnTokensIn = parseInt(ev.Data["input"])
@@ -2391,6 +2494,7 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 }
 
 func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
+	runID := strings.TrimSpace(ev.RunID)
 	role := strings.TrimSpace(ev.Data["role"])
 	rolePrefix := ""
 	if role != "" {
@@ -2398,15 +2502,15 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 	}
 	switch ev.Type {
 	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning", "daemon.error", "daemon.runner.error":
-		m.appendAgentOutput(formatEventLine(ev))
+		m.appendAgentOutputForRun(formatEventLine(ev), runID)
 	case "task.queued", "task.start", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped":
 		for _, line := range formatTaskEventLines(ev) {
-			m.appendAgentOutput(line)
+			m.appendAgentOutputForRun(line, runID)
 		}
 	case "control.check", "control.success", "control.error":
-		m.appendAgentOutput(formatEventLine(ev))
+		m.appendAgentOutputForRun(formatEventLine(ev), runID)
 	case "agent.error", "agent.turn.complete":
-		m.appendAgentOutput(formatEventLine(ev))
+		m.appendAgentOutputForRun(formatEventLine(ev), runID)
 	case "agent.op.request":
 		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
 			return
@@ -2417,7 +2521,7 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 		}
 		ts := ev.Timestamp.Local().Format("15:04:05")
 		line := fmt.Sprintf("[%s] %sop: %s", ts, rolePrefix, txt)
-		idx := m.appendAgentOutputLine(line)
+		idx := m.appendAgentOutputLine(line, runID)
 		if idx < 0 {
 			return
 		}
@@ -2462,20 +2566,25 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 			txt = strings.TrimSpace(ev.Data["op"])
 		}
 		line := fmt.Sprintf("[%s] %sop: %s — %s", ts, rolePrefix, txt, status)
-		m.appendAgentOutput(line)
+		m.appendAgentOutputForRun(line, runID)
 	}
 }
 
 func (m *monitorModel) appendAgentOutput(line string) {
-	_ = m.appendAgentOutputLine(line)
+	m.appendAgentOutputForRun(line, "")
 }
 
-func (m *monitorModel) appendAgentOutputLine(line string) int {
+func (m *monitorModel) appendAgentOutputForRun(line, runID string) {
+	_ = m.appendAgentOutputLine(line, runID)
+}
+
+func (m *monitorModel) appendAgentOutputLine(line, runID string) int {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return -1
 	}
 	m.agentOutput = append(m.agentOutput, line)
+	m.agentOutputRunID = append(m.agentOutputRunID, strings.TrimSpace(runID))
 	m.trimAgentOutputBuffer()
 	m.dirtyAgentOutput = true
 	// Incrementally maintain layout metadata when possible (for virtualization).
@@ -2498,7 +2607,7 @@ func (m *monitorModel) appendAgentOutputLine(line string) int {
 	return len(m.agentOutput) - 1
 }
 
-func (m *monitorModel) appendThinkingEntry(role string, summary string) {
+func (m *monitorModel) appendThinkingEntry(runID, role string, summary string) {
 	if m == nil {
 		return
 	}
@@ -2507,6 +2616,7 @@ func (m *monitorModel) appendThinkingEntry(role string, summary string) {
 		return
 	}
 	m.thinkingEntries = append(m.thinkingEntries, thinkingEntry{
+		RunID:   strings.TrimSpace(runID),
 		Role:    strings.TrimSpace(role),
 		Summary: summary,
 	})
@@ -2539,6 +2649,8 @@ func (m *monitorModel) trimAgentOutputBuffer() {
 	}
 	if drop >= len(m.agentOutput) {
 		m.agentOutput = nil
+		m.agentOutputRunID = nil
+		m.agentOutputFilteredCache = nil
 		m.agentOutputPending = nil
 		m.agentOutputPendingFallback = nil
 		m.agentOutputLayoutWidth = 0
@@ -2559,6 +2671,12 @@ func (m *monitorModel) trimAgentOutputBuffer() {
 	// Re-slice into a fresh backing array so we don't retain references to the dropped prefix.
 	kept := append([]string(nil), m.agentOutput[drop:]...)
 	m.agentOutput = kept
+	if drop >= len(m.agentOutputRunID) {
+		m.agentOutputRunID = nil
+	} else {
+		m.agentOutputRunID = append([]string(nil), m.agentOutputRunID[drop:]...)
+	}
+	m.agentOutputFilteredCache = nil
 
 	// Adjust pending op indices so responses still update the correct lines when possible.
 	if m.agentOutputPending != nil {
@@ -2810,10 +2928,18 @@ func (m *monitorModel) refreshThinkingViewport() {
 	spineStyle := kit.StyleDim
 	titleStyle := kit.StyleBold
 
-	out := make([]string, 0, len(m.thinkingEntries)*3)
-	last := len(m.thinkingEntries) - 1
+	filtered := make([]thinkingEntry, 0, len(m.thinkingEntries))
+	for _, e := range m.thinkingEntries {
+		if strings.TrimSpace(m.focusedRunID) != "" && strings.TrimSpace(e.RunID) != strings.TrimSpace(m.focusedRunID) {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
 
-	for i, e := range m.thinkingEntries {
+	out := make([]string, 0, len(filtered)*3)
+	last := len(filtered) - 1
+
+	for i, e := range filtered {
 		summary := strings.TrimSpace(e.Summary)
 		if summary == "" {
 			continue
@@ -2878,6 +3004,13 @@ func (m *monitorModel) renderHeader() string {
 			kit.RenderTag(kit.TagOptions{Key: "Team", Value: m.teamID}),
 			kit.RenderTag(kit.TagOptions{Key: "Tasks", Value: fmt.Sprintf("%d pending, %d active, %d done", m.teamPendingCount, m.teamActiveCount, m.teamDoneCount)}),
 		)
+		if strings.TrimSpace(m.focusedRunID) != "" {
+			focusLabel := strings.TrimSpace(m.focusedRunRole)
+			if focusLabel == "" {
+				focusLabel = shortID(strings.TrimSpace(m.focusedRunID))
+			}
+			content = lipgloss.JoinHorizontal(lipgloss.Left, content, kit.RenderTag(kit.TagOptions{Key: "Focus", Value: focusLabel}))
+		}
 	} else {
 		content = lipgloss.JoinHorizontal(lipgloss.Left,
 			m.styles.headerTitle.Render("Workbench - Always On "),
@@ -3387,6 +3520,13 @@ func (m *monitorModel) refreshViewports() {
 
 func (m *monitorModel) loadPlanFiles() {
 	if strings.TrimSpace(m.teamID) != "" {
+		if strings.TrimSpace(m.focusedRunID) != "" {
+			checklist, checklistErr, details, detailsErr := readPlanFiles(m.cfg.DataDir, strings.TrimSpace(m.focusedRunID))
+			m.planMarkdown, m.planLoadErr = checklist, checklistErr
+			m.planDetails, m.planDetailsErr = details, detailsErr
+			m.dirtyPlan = true
+			return
+		}
 		checklist, checklistErr, details, detailsErr := readTeamPlanFiles(m.cfg.DataDir, m.teamRunIDs, m.teamRoleByRunID)
 		m.planMarkdown, m.planLoadErr = checklist, checklistErr
 		m.planDetails, m.planDetailsErr = details, detailsErr
@@ -3405,6 +3545,18 @@ func (m *monitorModel) loadPlanFilesCmd() tea.Cmd {
 	}
 	if strings.TrimSpace(m.teamID) != "" {
 		dataDir := m.cfg.DataDir
+		if strings.TrimSpace(m.focusedRunID) != "" {
+			runID := strings.TrimSpace(m.focusedRunID)
+			return func() tea.Msg {
+				checklist, checklistErr, details, detailsErr := readPlanFiles(dataDir, runID)
+				return planFilesLoadedMsg{
+					checklist:    checklist,
+					checklistErr: checklistErr,
+					details:      details,
+					detailsErr:   detailsErr,
+				}
+			}
+		}
 		runIDs := append([]string(nil), m.teamRunIDs...)
 		roleByRun := map[string]string{}
 		for k, v := range m.teamRoleByRunID {
@@ -3637,6 +3789,28 @@ func outputLineStyle(line string) lipgloss.Style {
 	}
 }
 
+func (m *monitorModel) currentAgentOutputLines() []string {
+	if m == nil {
+		return nil
+	}
+	if strings.TrimSpace(m.teamID) == "" || strings.TrimSpace(m.focusedRunID) == "" {
+		return m.agentOutput
+	}
+	targetRunID := strings.TrimSpace(m.focusedRunID)
+	out := make([]string, 0, len(m.agentOutput))
+	for i, line := range m.agentOutput {
+		if i >= len(m.agentOutputRunID) {
+			break
+		}
+		if strings.TrimSpace(m.agentOutputRunID[i]) != targetRunID {
+			continue
+		}
+		out = append(out, line)
+	}
+	m.agentOutputFilteredCache = out
+	return m.agentOutputFilteredCache
+}
+
 func (m *monitorModel) refreshAgentOutputViewport() {
 	if m == nil {
 		return
@@ -3649,6 +3823,7 @@ func (m *monitorModel) refreshAgentOutputViewport() {
 	if h <= 0 {
 		h = 1
 	}
+	source := m.currentAgentOutputLines()
 
 	m.ensureAgentOutputLayout(w)
 	maxY := m.agentOutputMaxYOffset(h)
@@ -3662,7 +3837,7 @@ func (m *monitorModel) refreshAgentOutputViewport() {
 		m.agentOutputLogicalYOffset = maxY
 	}
 
-	if len(m.agentOutput) == 0 {
+	if len(source) == 0 {
 		m.agentOutputWindowStartLine = 0
 		m.agentOutputVP.SetContent(kit.StyleDim.Render("No output yet."))
 		m.agentOutputVP.SetYOffset(0)
@@ -3674,11 +3849,11 @@ func (m *monitorModel) refreshAgentOutputViewport() {
 	firstVisible := m.findAgentOutputItemAtLine(visibleStart)
 	lastVisible := m.findAgentOutputItemAtLine(visibleEnd)
 	firstVisible = max(0, firstVisible)
-	lastVisible = min(len(m.agentOutput)-1, lastVisible)
+	lastVisible = min(len(source)-1, lastVisible)
 
 	const bufferItems = 50
 	firstRender := max(0, firstVisible-bufferItems)
-	lastRender := min(len(m.agentOutput)-1, lastVisible+bufferItems)
+	lastRender := min(len(source)-1, lastVisible+bufferItems)
 	windowStartLine := 0
 	if firstRender >= 0 && firstRender < len(m.agentOutputLineStarts) {
 		windowStartLine = m.agentOutputLineStarts[firstRender]
@@ -3687,7 +3862,7 @@ func (m *monitorModel) refreshAgentOutputViewport() {
 
 	lines := make([]string, 0, (lastRender-firstRender+1)*2)
 	for i := firstRender; i <= lastRender; i++ {
-		rawLine := strings.TrimSpace(m.agentOutput[i])
+		rawLine := strings.TrimSpace(source[i])
 		if rawLine == "" {
 			lines = append(lines, "")
 			continue
@@ -3734,15 +3909,16 @@ func (m *monitorModel) ensureAgentOutputLayout(width int) {
 	if width <= 0 {
 		width = 80
 	}
-	if m.agentOutputLayoutWidth == width && len(m.agentOutputLineStarts) == len(m.agentOutput) && len(m.agentOutputLineHeights) == len(m.agentOutput) {
+	source := m.currentAgentOutputLines()
+	if m.agentOutputLayoutWidth == width && len(m.agentOutputLineStarts) == len(source) && len(m.agentOutputLineHeights) == len(source) {
 		return
 	}
 
 	m.agentOutputLayoutWidth = width
-	m.agentOutputLineStarts = make([]int, len(m.agentOutput))
-	m.agentOutputLineHeights = make([]int, len(m.agentOutput))
+	m.agentOutputLineStarts = make([]int, len(source))
+	m.agentOutputLineHeights = make([]int, len(source))
 	lineNo := 0
-	for i, rawLine := range m.agentOutput {
+	for i, rawLine := range source {
 		m.agentOutputLineStarts[i] = lineNo
 		rawLine = strings.TrimSpace(rawLine)
 		h := 1

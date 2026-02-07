@@ -14,10 +14,12 @@ Navigation:
   Ctrl+] / Ctrl+[     Cycle side tabs (Activity | Plan | Tasks | Thoughts)
   Ctrl+Up / Ctrl+Down Focus Activity Feed / Details
   Ctrl+Y              Jump to Thoughts tab
+  Ctrl+G              Clear run focus lens (/team)
   Ctrl+E              Open $EDITOR for composer
 
 Type a message and press Ctrl+Enter to queue a task, or use a command (below):
   /task <goal>            Queue a task (explicit)
+  /team                   Focus a single team run (or clear focus)
   /sessions               Switch session (reattach to its current run)
   /model                 Open model picker
   /model <id>            Set model directly
