@@ -119,3 +119,33 @@ func TestStatusConstants_Unique(t *testing.T) {
 	assertUnique("TurnStatus", turnStatuses)
 	assertUnique("ItemStatus", itemStatuses)
 }
+
+func TestArtifactRequest_JSONRoundTrip(t *testing.T) {
+	msg, err := NewRequest("a1", MethodArtifactSearch, ArtifactSearchParams{
+		ThreadID: "thread-1",
+		Query:    "summary",
+		ScopeKey: "role:2026-02-08:ceo",
+		Limit:    25,
+	})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	b, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var decoded Message
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if decoded.Method != MethodArtifactSearch {
+		t.Fatalf("Method = %q, want %q", decoded.Method, MethodArtifactSearch)
+	}
+	var params ArtifactSearchParams
+	if err := json.Unmarshal(decoded.Params, &params); err != nil {
+		t.Fatalf("unmarshal params: %v", err)
+	}
+	if params.Query != "summary" || params.ScopeKey == "" {
+		t.Fatalf("unexpected params: %+v", params)
+	}
+}

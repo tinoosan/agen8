@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +18,30 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
+
+func rpcRoundTrip(t *testing.T, srv *RPCServer, req protocol.Message) protocol.Message {
+	t.Helper()
+	pr, pw := io.Pipe()
+	var out bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx, pr, &out) }()
+
+	if err := json.NewEncoder(pw).Encode(req); err != nil {
+		t.Fatalf("encode req: %v", err)
+	}
+	_ = pw.Close()
+	if err := <-done; err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(out.Bytes()))
+	var resp protocol.Message
+	if err := dec.Decode(&resp); err != nil {
+		t.Fatalf("decode resp: %v", err)
+	}
+	return resp
+}
 
 func TestRPCServer_ThreadGet_ReturnsActiveRunID(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
@@ -226,5 +253,204 @@ func TestRPCServer_ForwardsNotifications(t *testing.T) {
 	}
 	if m1.Method == "" && m2.Method == "" {
 		t.Fatalf("expected a notification method in output")
+	}
+}
+
+func TestRPCServer_ArtifactList_RunScope(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	now := time.Now().UTC()
+	task := types.Task{
+		TaskID:     "task-run-1",
+		SessionID:  run.SessionID,
+		RunID:      run.RunID,
+		Goal:       "run artifact",
+		Status:     types.TaskStatusPending,
+		CreatedAt:  &now,
+		Inputs:     map[string]any{},
+		Metadata:   map[string]any{},
+		CreatedBy:  "user",
+		TaskKind:   "task",
+		TeamID:     "",
+		RoleSnapshot: "",
+	}
+	if err := ts.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	done := now.Add(1 * time.Second)
+	if err := ts.CompleteTask(context.Background(), task.TaskID, types.TaskResult{
+		TaskID:      task.TaskID,
+		Status:      types.TaskStatusSucceeded,
+		Summary:     "ok",
+		CompletedAt: &done,
+		Artifacts:   []string{"/workspace/deliverables/2026-02-08/task-run-1/SUMMARY.md"},
+	}); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodArtifactList, protocol.ArtifactListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+	var res protocol.ArtifactListResult
+	if err := json.Unmarshal(resp.Result, &res); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(res.Nodes) == 0 {
+		t.Fatalf("expected artifact nodes")
+	}
+	foundFile := false
+	for _, n := range res.Nodes {
+		if n.Kind == "file" && strings.Contains(n.VPath, "task-run-1") {
+			foundFile = true
+			break
+		}
+	}
+	if !foundFile {
+		t.Fatalf("expected run-scoped file node, got %+v", res.Nodes)
+	}
+}
+
+func TestRPCServer_ArtifactSearch_ThreadMismatchAndQueryValidation(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodArtifactSearch, protocol.ArtifactSearchParams{
+		ThreadID: "wrong-thread",
+		Query:    "summary",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error == nil || resp.Error.Code != protocol.CodeThreadNotFound {
+		t.Fatalf("expected thread not found, got %+v", resp.Error)
+	}
+
+	req2, _ := protocol.NewRequest("2", protocol.MethodArtifactSearch, protocol.ArtifactSearchParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Query:    "",
+	})
+	resp2 := rpcRoundTrip(t, srv, req2)
+	if resp2.Error == nil || resp2.Error.Code != protocol.CodeInvalidParams {
+		t.Fatalf("expected invalid params, got %+v", resp2.Error)
+	}
+}
+
+func TestRPCServer_ArtifactList_TeamScopeAndGetTruncated(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	now := time.Now().UTC()
+	t1 := types.Task{
+		TaskID:       "callback-task-ceo-001",
+		SessionID:    run.SessionID,
+		RunID:        run.RunID,
+		TeamID:       "team-1",
+		AssignedRole: "ceo",
+		CreatedBy:    "coordinator",
+		Goal:         "CEO callback",
+		Status:       types.TaskStatusPending,
+		CreatedAt:    &now,
+		Inputs:       map[string]any{},
+		Metadata:     map[string]any{},
+	}
+	t2 := types.Task{
+		TaskID:       "task-cto-001",
+		SessionID:    run.SessionID,
+		RunID:        "run-cto-2",
+		TeamID:       "team-1",
+		AssignedRole: "cto",
+		CreatedBy:    "coordinator",
+		Goal:         "CTO task",
+		Status:       types.TaskStatusPending,
+		CreatedAt:    &now,
+		Inputs:       map[string]any{},
+		Metadata:     map[string]any{},
+	}
+	for _, tk := range []types.Task{t1, t2} {
+		if err := ts.CreateTask(context.Background(), tk); err != nil {
+			t.Fatalf("CreateTask(%s): %v", tk.TaskID, err)
+		}
+		done := now.Add(1 * time.Second)
+		if err := ts.CompleteTask(context.Background(), tk.TaskID, types.TaskResult{
+			TaskID:      tk.TaskID,
+			Status:      types.TaskStatusSucceeded,
+			Summary:     "ok",
+			CompletedAt: &done,
+			Artifacts:   []string{"/workspace/deliverables/2026-02-08/" + tk.TaskID + "/SUMMARY.md"},
+		}); err != nil {
+			t.Fatalf("CompleteTask(%s): %v", tk.TaskID, err)
+		}
+	}
+
+	// Materialize file for artifact.get under team workspace.
+	p := filepath.Join(cfg.DataDir, "teams", "team-1", "workspace", "deliverables", "2026-02-08", t1.TaskID, "SUMMARY.md")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(p, []byte("1234567890"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	listReq, _ := protocol.NewRequest("1", protocol.MethodArtifactList, protocol.ArtifactListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+	})
+	listResp := rpcRoundTrip(t, srv, listReq)
+	if listResp.Error != nil {
+		t.Fatalf("list error: %+v", listResp.Error)
+	}
+	var listRes protocol.ArtifactListResult
+	_ = json.Unmarshal(listResp.Result, &listRes)
+	foundCTO := false
+	for _, n := range listRes.Nodes {
+		if n.Kind == "role" && n.Label == "cto" {
+			foundCTO = true
+			break
+		}
+	}
+	if !foundCTO {
+		t.Fatalf("expected team-scope listing to include cto role, got %+v", listRes.Nodes)
+	}
+
+	getReq, _ := protocol.NewRequest("2", protocol.MethodArtifactGet, protocol.ArtifactGetParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		VPath:    "/workspace/deliverables/2026-02-08/" + t1.TaskID + "/SUMMARY.md",
+		MaxBytes: 5,
+	})
+	getResp := rpcRoundTrip(t, srv, getReq)
+	if getResp.Error != nil {
+		t.Fatalf("get error: %+v", getResp.Error)
+	}
+	var getRes protocol.ArtifactGetResult
+	_ = json.Unmarshal(getResp.Result, &getRes)
+	if !getRes.Truncated || getRes.BytesRead != 5 || getRes.Content != "12345" {
+		t.Fatalf("unexpected get result: %+v", getRes)
 	}
 }

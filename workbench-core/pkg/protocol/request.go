@@ -7,6 +7,9 @@ const (
 	MethodTurnCreate   = "turn.create"
 	MethodTurnCancel   = "turn.cancel"
 	MethodItemList     = "item.list"
+	MethodArtifactList   = "artifact.list"
+	MethodArtifactSearch = "artifact.search"
+	MethodArtifactGet    = "artifact.get"
 )
 
 // ThreadCreateParams are the params for thread.create.
@@ -42,4 +45,41 @@ type ItemListParams struct {
 	Cursor string `json:"cursor,omitempty"`
 	// Limit caps the number of items returned.
 	Limit int `json:"limit,omitempty"`
+}
+
+// ArtifactListParams are the params for artifact.list.
+type ArtifactListParams struct {
+	ThreadID ThreadID `json:"threadId"`
+	TeamID   string   `json:"teamId,omitempty"`
+
+	DayBucket string `json:"dayBucket,omitempty"`
+	Role      string `json:"role,omitempty"`
+	TaskKind  string `json:"taskKind,omitempty"`
+	TaskID    string `json:"taskId,omitempty"`
+
+	Limit int `json:"limit,omitempty"`
+}
+
+// ArtifactSearchParams are the params for artifact.search.
+type ArtifactSearchParams struct {
+	ThreadID ThreadID `json:"threadId"`
+	TeamID   string   `json:"teamId,omitempty"`
+	Query    string   `json:"query"`
+	ScopeKey string   `json:"scopeKey,omitempty"`
+
+	DayBucket string `json:"dayBucket,omitempty"`
+	Role      string `json:"role,omitempty"`
+	TaskKind  string `json:"taskKind,omitempty"`
+	TaskID    string `json:"taskId,omitempty"`
+
+	Limit int `json:"limit,omitempty"`
+}
+
+// ArtifactGetParams are the params for artifact.get.
+type ArtifactGetParams struct {
+	ThreadID   ThreadID `json:"threadId"`
+	TeamID     string   `json:"teamId,omitempty"`
+	ArtifactID string   `json:"artifactId,omitempty"`
+	VPath      string   `json:"vpath,omitempty"`
+	MaxBytes   int      `json:"maxBytes,omitempty"`
 }
