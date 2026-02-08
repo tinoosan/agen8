@@ -223,6 +223,24 @@ type monitorModel struct {
 	commandPaletteMatches  []string
 	commandPaletteSelected int
 
+	// Artifact viewer (full-screen takeover)
+	artifactViewerOpen      bool
+	artifactTasks           []types.Task
+	artifactTree            []artifactTreeNode
+	artifactSelected        int
+	artifactContent         string
+	artifactContentRaw      string
+	artifactContentVP       viewport.Model
+	artifactRenderWidth     int
+	artifactRenderRawLen    int
+	artifactRenderedVPath   string
+	artifactNavFocused      bool
+	artifactSelectedVPath   string
+	artifactWorkspaceFiles  []artifactTreeNode
+	artifactRoleExpanded    map[string]bool
+	artifactTaskExpanded    map[string]bool
+	artifactWorkspaceExpand map[string]bool
+
 	// Reasoning pickers
 	reasoningEffortPickerOpen      bool
 	reasoningEffortPickerSelected  int
@@ -551,6 +569,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		thinkingEntries:             []thinkingEntry{},
 		thinkingVP:                  viewport.New(0, 0),
 		thinkingAutoScroll:          true,
+		artifactContentVP:           viewport.New(0, 0),
 		taskStore:                   taskStore,
 		stats:                       stats,
 		styles:                      defaultMonitorStyles(),
@@ -573,6 +592,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	m.outboxVP.MouseWheelEnabled = false
 	m.memoryVP.MouseWheelEnabled = false
 	m.thinkingVP.MouseWheelEnabled = false
+	m.artifactContentVP.MouseWheelEnabled = false
 
 	for _, e := range evs {
 		m.observeEvent(e)
@@ -684,6 +704,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 		thinkingEntries:             []thinkingEntry{},
 		thinkingVP:                  viewport.New(0, 0),
 		thinkingAutoScroll:          true,
+		artifactContentVP:           viewport.New(0, 0),
 		taskStore:                   taskStore,
 		stats:                       monitorStats{started: time.Now()},
 		styles:                      defaultMonitorStyles(),
@@ -705,6 +726,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 	m.outboxVP.MouseWheelEnabled = false
 	m.memoryVP.MouseWheelEnabled = false
 	m.thinkingVP.MouseWheelEnabled = false
+	m.artifactContentVP.MouseWheelEnabled = false
 	if manifest != nil {
 		m.profile = strings.TrimSpace(manifest.ProfileID)
 		m.model = strings.TrimSpace(manifest.TeamModel)
@@ -738,6 +760,10 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		if m.artifactViewerOpen {
+			m.refreshArtifactViewport()
+			return m, nil
+		}
 		m.dirtyLayout = true
 		m.refreshViewports()
 		return m, nil
@@ -983,11 +1009,21 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.scheduleUIRefresh()
 
+	case artifactTreeLoadedMsg:
+		return m, tea.Batch(m.handleArtifactTreeLoaded(msg), m.scheduleUIRefresh())
+
+	case artifactContentLoadedMsg:
+		m.handleArtifactContentLoaded(msg)
+		return m, m.scheduleUIRefresh()
+
 	case monitorFilePickerPathsMsg:
 		m.handleFilePickerPaths(msg.paths)
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.artifactViewerOpen {
+			return m.updateArtifactViewer(msg)
+		}
 		// Modal overlay handling - if any modal is open, handle it first
 		if m.helpModalOpen {
 			switch msg.String() {
@@ -1908,6 +1944,9 @@ func (m *monitorModel) isCompactMode() bool {
 }
 
 func (m *monitorModel) View() string {
+	if m.artifactViewerOpen {
+		return m.renderArtifactViewer()
+	}
 	grid := m.layout()
 	headerLine := m.renderHeader()
 
@@ -2205,6 +2244,12 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 
 	if cmd == "/editor" {
 		return m.openComposeEditor("")
+	}
+	if cmd == "/artifact" {
+		if strings.TrimSpace(rest) != "" {
+			return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /artifact"}} }
+		}
+		return m.openArtifactViewer()
 	}
 
 	if cmd == "/team" {
