@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,11 +15,29 @@ import (
 
 // modelPickerItem implements list.Item for the model picker.
 type monitorModelPickerItem struct {
-	id string
+	id         string
+	provider   string
+	isProvider bool
+	count      int
 }
 
-func (m monitorModelPickerItem) FilterValue() string { return m.id }
-func (m monitorModelPickerItem) Title() string       { return m.id }
+func (m monitorModelPickerItem) FilterValue() string {
+	if m.isProvider {
+		return m.provider
+	}
+	return m.id
+}
+
+func (m monitorModelPickerItem) Title() string {
+	if m.isProvider {
+		if m.count > 0 {
+			return fmt.Sprintf("%s (%d)", m.provider, m.count)
+		}
+		return m.provider
+	}
+	return m.id
+}
+
 func (m monitorModelPickerItem) Description() string { return "" }
 
 type monitorModelPickerDelegate struct {
@@ -54,39 +74,32 @@ func (d monitorModelPickerDelegate) Render(w io.Writer, m list.Model, index int,
 		style = d.styleSel
 	}
 
+	line := it.Title()
 	maxW := max(1, m.Width()-lipgloss.Width(prefix))
-	line := kit.TruncateRight(it.id, maxW)
+	line = kit.TruncateRight(line, maxW)
 	_, _ = fmt.Fprint(w, style.Render(prefix+line))
 }
 
-// openModelPicker initializes and opens the model picker modal.
+// openModelPicker initializes and opens the provider-first model picker modal.
 func (m *monitorModel) openModelPicker() tea.Cmd {
 	m.modelPickerOpen = true
+	m.modelPickerProvider = ""
+	m.modelPickerQuery = ""
+	m.modelPickerProviderView = true
 
-	ids := cost.SupportedModels()
-	items := make([]list.Item, 0, len(ids))
-	for _, id := range ids {
-		items = append(items, monitorModelPickerItem{id: id})
-	}
-
-	l := list.New(items, newMonitorModelPickerDelegate(), 0, 0)
-	l.Title = "Select Model"
+	l := list.New([]list.Item{}, newMonitorModelPickerDelegate(), 0, 0)
+	l.Title = "Select Provider"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
 	l.SetShowPagination(true)
-	l.SetFilteringEnabled(true)
-	l.SetShowFilter(true)
-	l.SetFilterText("")
-	l.SetFilterState(list.Filtering)
+	l.SetFilteringEnabled(false)
+	l.SetShowFilter(false)
 	l.Styles.Title = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#707070")).
 		Bold(true)
 
-	if len(items) > 0 {
-		l.Select(0)
-	}
-
 	m.modelPickerList = l
+	m.refreshModelPickerItems()
 	return nil
 }
 
@@ -94,31 +107,108 @@ func (m *monitorModel) openModelPicker() tea.Cmd {
 func (m *monitorModel) closeModelPicker() {
 	m.modelPickerOpen = false
 	m.modelPickerList = list.Model{}
+	m.modelPickerProvider = ""
+	m.modelPickerQuery = ""
+	m.modelPickerProviderView = false
+}
+
+func (m *monitorModel) refreshModelPickerItems() {
+	if !m.modelPickerOpen {
+		return
+	}
+	q := strings.ToLower(strings.TrimSpace(m.modelPickerQuery))
+	infos := cost.SupportedModelInfos()
+	items := make([]list.Item, 0, len(infos))
+
+	if m.modelPickerProviderView {
+		counts := map[string]int{}
+		for _, info := range infos {
+			provider := strings.TrimSpace(info.Provider)
+			if provider == "" {
+				provider = "unknown"
+			}
+			counts[provider]++
+		}
+		providers := make([]string, 0, len(counts))
+		for provider := range counts {
+			providers = append(providers, provider)
+		}
+		sort.Strings(providers)
+		for _, provider := range providers {
+			candidate := strings.ToLower(provider)
+			if q != "" && !strings.Contains(candidate, q) {
+				continue
+			}
+			items = append(items, monitorModelPickerItem{provider: provider, isProvider: true, count: counts[provider]})
+		}
+		m.modelPickerList.Title = "Select Provider"
+	} else {
+		provider := strings.TrimSpace(m.modelPickerProvider)
+		for _, info := range infos {
+			if !strings.EqualFold(strings.TrimSpace(info.Provider), provider) {
+				continue
+			}
+			candidate := strings.ToLower(strings.TrimSpace(info.ID))
+			if q != "" && !strings.Contains(candidate, q) {
+				continue
+			}
+			items = append(items, monitorModelPickerItem{id: info.ID, provider: provider})
+		}
+		sort.Slice(items, func(i, j int) bool {
+			a, _ := items[i].(monitorModelPickerItem)
+			b, _ := items[j].(monitorModelPickerItem)
+			return a.id < b.id
+		})
+		m.modelPickerList.Title = "Select Model (" + provider + ")"
+	}
+
+	m.modelPickerList.SetItems(items)
+	if len(items) > 0 {
+		m.modelPickerList.Select(0)
+	}
 }
 
 // updateModelPicker handles keyboard input when the model picker is open.
 func (m *monitorModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	s := strings.ToLower(msg.String())
+	switch s {
 	case "esc", "escape":
+		if !m.modelPickerProviderView {
+			m.modelPickerProviderView = true
+			m.modelPickerProvider = ""
+			m.modelPickerQuery = ""
+			m.refreshModelPickerItems()
+			return m, nil
+		}
 		m.closeModelPicker()
 		return m, nil
+	case "backspace":
+		if m.modelPickerQuery != "" {
+			r := []rune(m.modelPickerQuery)
+			m.modelPickerQuery = string(r[:len(r)-1])
+			m.refreshModelPickerItems()
+			return m, nil
+		}
 	case "enter":
 		return m, m.selectModelFromPicker()
 	}
 
-	var cmd tea.Cmd
-	m.modelPickerList, cmd = m.modelPickerList.Update(msg)
-	// Keep filtering deterministic (mirrors main TUI behavior). bubbles/list filtering
-	// can return async commands that don't run in some flows; re-apply synchronously.
-	if m.modelPickerList.FilteringEnabled() && m.modelPickerList.FilterState() == list.Filtering {
-		m.modelPickerList.SetFilterText(m.modelPickerList.FilterValue())
-		m.modelPickerList.SetFilterState(list.Filtering)
+	if len(msg.Runes) > 0 {
+		for _, r := range msg.Runes {
+			if r >= 32 && r != 127 {
+				m.modelPickerQuery += string(r)
+			}
+		}
+		m.refreshModelPickerItems()
 		return m, nil
 	}
+
+	var cmd tea.Cmd
+	m.modelPickerList, cmd = m.modelPickerList.Update(msg)
 	return m, cmd
 }
 
-// selectModelFromPicker selects the currently highlighted model and writes a control file.
+// selectModelFromPicker selects the currently highlighted provider/model.
 func (m *monitorModel) selectModelFromPicker() tea.Cmd {
 	if m.modelPickerList.Items() == nil || len(m.modelPickerList.Items()) == 0 {
 		return nil
@@ -132,15 +222,17 @@ func (m *monitorModel) selectModelFromPicker() tea.Cmd {
 		return nil
 	}
 
+	if item.isProvider {
+		m.modelPickerProviderView = false
+		m.modelPickerProvider = strings.TrimSpace(item.provider)
+		m.modelPickerQuery = ""
+		m.refreshModelPickerItems()
+		return nil
+	}
+
 	selectedID := item.id
-
-	// Optimistically update the model label
 	m.model = selectedID
-
-	// Close the picker
 	m.closeModelPicker()
-
-	// Write control file to inbox
 	if m.teamID != "" {
 		return m.writeTeamControl("set_team_model", selectedID)
 	}
@@ -148,31 +240,34 @@ func (m *monitorModel) selectModelFromPicker() tea.Cmd {
 }
 
 func (m *monitorModel) renderModelPicker(base string) string {
-	// Calculate modal dimensions
 	maxModalW := max(1, m.width-8)
-	modalWidth := min(60, maxModalW)
-	minModalW := min(40, maxModalW)
+	modalWidth := min(70, maxModalW)
+	minModalW := min(46, maxModalW)
 	if modalWidth < minModalW {
 		modalWidth = minModalW
 	}
 
 	maxModalH := max(1, m.height-8)
-	modalHeight := min(20, maxModalH)
+	modalHeight := min(22, maxModalH)
 	minModalH := min(10, maxModalH)
 	if modalHeight < minModalH {
 		modalHeight = minModalH
 	}
 
-	// Size the list to fit within the modal
-	listHeight := modalHeight - 3 // Account for filter input and borders
+	listHeight := modalHeight - 6
 	if listHeight < 4 {
 		listHeight = 4
 	}
-	m.modelPickerList.SetWidth(modalWidth - 4) // Account for padding/borders
+	m.modelPickerList.SetWidth(modalWidth - 4)
 	m.modelPickerList.SetHeight(listHeight)
 
-	// Build modal content
-	content := m.modelPickerList.View()
+	scope := "Global"
+	if !m.modelPickerProviderView {
+		scope = "Provider: " + strings.TrimSpace(m.modelPickerProvider)
+	}
+	searchLine := kit.StyleDim.Render("Search: ") + kit.StyleStatusValue.Render(fallback(m.modelPickerQuery, ""))
+	helpLine := kit.StyleDim.Render("Enter select · Esc back/close · type to search")
+	content := scope + "\n" + searchLine + "\n\n" + m.modelPickerList.View() + "\n" + helpLine
 
 	opts := kit.ModalOptions{
 		Content:      content,

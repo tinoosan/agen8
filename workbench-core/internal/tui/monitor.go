@@ -207,8 +207,11 @@ type monitorModel struct {
 	sessionPickerFilter   string
 
 	// Model picker
-	modelPickerOpen bool
-	modelPickerList list.Model
+	modelPickerOpen         bool
+	modelPickerList         list.Model
+	modelPickerProvider     string
+	modelPickerQuery        string
+	modelPickerProviderView bool
 
 	// Profile picker
 	profilePickerOpen bool

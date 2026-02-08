@@ -165,7 +165,7 @@ func TestShouldReloadPlanOnEvent(t *testing.T) {
 	})
 }
 
-func TestMonitorModelPicker_FilteringWorks(t *testing.T) {
+func TestMonitorModelPicker_ProviderAndScopedFilteringWorks(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
@@ -181,33 +181,77 @@ func TestMonitorModelPicker_FilteringWorks(t *testing.T) {
 	if !m.modelPickerOpen {
 		t.Fatalf("expected modelPickerOpen true")
 	}
+	if !m.modelPickerProviderView {
+		t.Fatalf("expected provider view initially")
+	}
 	if len(m.modelPickerList.Items()) == 0 {
 		t.Fatalf("expected model picker items")
 	}
-	before := len(m.modelPickerList.VisibleItems())
 
-	for _, r := range []rune("anthropic") {
+	for _, r := range []rune("openai") {
 		_, _ = m.updateModelPicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
 
-	if got := m.modelPickerList.FilterValue(); got != "anthropic" {
-		t.Fatalf("expected filter value %q, got %q", "anthropic", got)
+	if got := m.modelPickerQuery; got != "openai" {
+		t.Fatalf("expected picker query %q, got %q", "openai", got)
 	}
-	after := m.modelPickerList.VisibleItems()
-	if len(after) == 0 {
-		t.Fatalf("expected visible items after filtering")
+	items := m.modelPickerList.Items()
+	if len(items) == 0 {
+		t.Fatalf("expected provider items after filtering")
 	}
-	if len(after) > before {
-		t.Fatalf("expected visible items <= before, before=%d after=%d", before, len(after))
-	}
-	for _, it := range after {
+	for _, it := range items {
 		mi, ok := it.(monitorModelPickerItem)
 		if !ok {
 			t.Fatalf("expected monitorModelPickerItem, got %T", it)
 		}
-		if !strings.Contains(strings.ToLower(mi.id), "anthropic") {
-			t.Fatalf("expected filtered item to contain %q, got %q", "anthropic", mi.id)
+		if !mi.isProvider {
+			t.Fatalf("expected provider item, got model item: %+v", mi)
 		}
+		if !strings.Contains(strings.ToLower(mi.provider), "openai") {
+			t.Fatalf("expected provider to match query, got %+v", mi)
+		}
+	}
+
+	_, _ = m.updateModelPicker(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.modelPickerProviderView {
+		t.Fatalf("expected model view after selecting provider")
+	}
+	if got := strings.TrimSpace(m.modelPickerProvider); got == "" {
+		t.Fatalf("expected selected provider in model view")
+	}
+	if got := m.modelPickerQuery; got != "" {
+		t.Fatalf("expected query reset on provider select, got %q", got)
+	}
+
+	for _, r := range []rune("gpt-5") {
+		_, _ = m.updateModelPicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if got := m.modelPickerQuery; got != "gpt-5" {
+		t.Fatalf("expected scoped query %q, got %q", "gpt-5", got)
+	}
+	modelItems := m.modelPickerList.Items()
+	if len(modelItems) == 0 {
+		t.Fatalf("expected model items after scoped filtering")
+	}
+	for _, it := range modelItems {
+		mi, ok := it.(monitorModelPickerItem)
+		if !ok {
+			t.Fatalf("expected monitorModelPickerItem, got %T", it)
+		}
+		if mi.isProvider {
+			t.Fatalf("expected model item, got provider item: %+v", mi)
+		}
+		if !strings.Contains(strings.ToLower(mi.id), "gpt-5") {
+			t.Fatalf("expected scoped model to contain %q, got %q", "gpt-5", mi.id)
+		}
+	}
+
+	_, _ = m.updateModelPicker(tea.KeyMsg{Type: tea.KeyEsc})
+	if !m.modelPickerProviderView {
+		t.Fatalf("expected esc in model view to return to provider view")
+	}
+	if got := strings.TrimSpace(m.modelPickerProvider); got != "" {
+		t.Fatalf("expected provider cleared after back, got %q", got)
 	}
 }
 
