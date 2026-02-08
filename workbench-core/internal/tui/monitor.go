@@ -230,6 +230,7 @@ type monitorModel struct {
 	artifactViewerOpen      bool
 	artifactTasks           []types.Task
 	artifactTree            []artifactTreeNode
+	artifactAllTree         []artifactTreeNode
 	artifactSelected        int
 	artifactContent         string
 	artifactContentRaw      string
@@ -242,6 +243,7 @@ type monitorModel struct {
 	artifactNavFocused      bool
 	artifactSelectedVPath   string
 	artifactWorkspaceFiles  []artifactTreeNode
+	artifactSearchScopeKey  string
 	artifactRoleExpanded    map[string]bool
 	artifactTaskExpanded    map[string]bool
 	artifactWorkspaceExpand map[string]bool

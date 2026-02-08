@@ -101,6 +101,8 @@ func (s *SQLiteTaskStore) init() error {
 			`ALTER TABLE tasks ADD COLUMN team_id TEXT DEFAULT '';`,
 			`ALTER TABLE tasks ADD COLUMN assigned_role TEXT DEFAULT '';`,
 			`ALTER TABLE tasks ADD COLUMN created_by TEXT DEFAULT '';`,
+			`ALTER TABLE tasks ADD COLUMN task_kind TEXT DEFAULT 'task';`,
+			`ALTER TABLE tasks ADD COLUMN role_snapshot TEXT DEFAULT '';`,
 		}
 		for _, migration := range migrations {
 			if _, err := db.Exec(migration); err != nil {
@@ -120,6 +122,7 @@ func (s *SQLiteTaskStore) init() error {
 			`CREATE INDEX IF NOT EXISTS idx_tasks_cost ON tasks(cost_usd DESC);`,
 			`CREATE INDEX IF NOT EXISTS idx_tasks_run_status ON tasks(run_id, status);`,
 			`CREATE INDEX IF NOT EXISTS idx_tasks_team_role ON tasks(team_id, assigned_role);`,
+			`CREATE INDEX IF NOT EXISTS idx_tasks_team_kind ON tasks(team_id, task_kind);`,
 		}
 		for _, idx := range indexes {
 			if _, err := db.Exec(idx); err != nil {
@@ -127,6 +130,43 @@ func (s *SQLiteTaskStore) init() error {
 				initErr = fmt.Errorf("sqlite: create index: %w", err)
 				return
 			}
+		}
+		if _, err := db.Exec(`
+			CREATE TABLE IF NOT EXISTS artifacts (
+				artifact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+				task_id TEXT NOT NULL,
+				team_id TEXT DEFAULT '',
+				run_id TEXT DEFAULT '',
+				role TEXT DEFAULT '',
+				task_kind TEXT DEFAULT 'task',
+				is_summary INTEGER DEFAULT 0,
+				display_name TEXT DEFAULT '',
+				vpath TEXT NOT NULL,
+				disk_path TEXT DEFAULT '',
+				produced_at TEXT NOT NULL,
+				day_bucket TEXT NOT NULL
+			);
+		`); err != nil {
+			_ = db.Close()
+			initErr = fmt.Errorf("sqlite: create artifacts: %w", err)
+			return
+		}
+		artifactIndexes := []string{
+			`CREATE INDEX IF NOT EXISTS idx_artifacts_team_day_role_kind_time ON artifacts(team_id, day_bucket DESC, role, task_kind, produced_at DESC);`,
+			`CREATE INDEX IF NOT EXISTS idx_artifacts_task_id ON artifacts(task_id);`,
+			`CREATE INDEX IF NOT EXISTS idx_artifacts_team_display_name ON artifacts(team_id, display_name);`,
+		}
+		for _, idx := range artifactIndexes {
+			if _, err := db.Exec(idx); err != nil {
+				_ = db.Close()
+				initErr = fmt.Errorf("sqlite: create artifact index: %w", err)
+				return
+			}
+		}
+		if err := s.backfillArtifactIndex(context.Background(), db); err != nil {
+			_ = db.Close()
+			initErr = fmt.Errorf("sqlite: backfill artifacts: %w", err)
+			return
 		}
 		s.db = db
 	})
@@ -189,12 +229,12 @@ func (s *SQLiteTaskStore) CreateTask(ctx context.Context, task types.Task) error
 	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO tasks (
-			task_id, session_id, run_id, team_id, assigned_role, created_by,
+			task_id, session_id, run_id, team_id, assigned_role, role_snapshot, task_kind, created_by,
 			goal, inputs_json, priority,
 			status, created_at, updated_at, metadata_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, strings.TrimSpace(task.TaskID), strings.TrimSpace(task.SessionID), strings.TrimSpace(task.RunID),
-		strings.TrimSpace(task.TeamID), strings.TrimSpace(task.AssignedRole), strings.TrimSpace(task.CreatedBy),
+		strings.TrimSpace(task.TeamID), strings.TrimSpace(task.AssignedRole), strings.TrimSpace(task.RoleSnapshot), normalizeTaskKind(task.TaskKind), strings.TrimSpace(task.CreatedBy),
 		strings.TrimSpace(task.Goal), string(inputsJSON), task.Priority,
 		status, createdAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), string(metadataJSON))
 	if err != nil {
@@ -238,7 +278,7 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (types.Tas
 	var leaseRaw string
 	err = db.QueryRowContext(ctx, `
 		SELECT
-			task_id, session_id, run_id, COALESCE(team_id, ''), COALESCE(assigned_role, ''), COALESCE(created_by, ''), goal,
+			task_id, session_id, run_id, COALESCE(team_id, ''), COALESCE(assigned_role, ''), COALESCE(role_snapshot, ''), COALESCE(task_kind, ''), COALESCE(created_by, ''), goal,
 			COALESCE(inputs_json, '{}'), priority, status,
 			created_at, COALESCE(started_at, ''), COALESCE(finished_at, ''),
 			COALESCE(summary, ''), COALESCE(artifacts_json, '[]'),
@@ -250,7 +290,7 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (types.Tas
 		FROM tasks
 		WHERE task_id = ?
 	`, taskID).Scan(
-		&t.TaskID, &t.SessionID, &t.RunID, &t.TeamID, &t.AssignedRole, &t.CreatedBy, &t.Goal,
+		&t.TaskID, &t.SessionID, &t.RunID, &t.TeamID, &t.AssignedRole, &t.RoleSnapshot, &t.TaskKind, &t.CreatedBy, &t.Goal,
 		&inputsJSON, &t.Priority, &status,
 		&createdRaw, &startedRaw, &finishedRaw,
 		&t.Summary, &artifactsJSON,
@@ -372,7 +412,7 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 
 	q := `
 		SELECT
-			task_id, session_id, run_id, COALESCE(team_id, ''), COALESCE(assigned_role, ''), COALESCE(created_by, ''), goal,
+			task_id, session_id, run_id, COALESCE(team_id, ''), COALESCE(assigned_role, ''), COALESCE(role_snapshot, ''), COALESCE(task_kind, ''), COALESCE(created_by, ''), goal,
 			priority, status, created_at,
 			COALESCE(started_at, ''), COALESCE(finished_at, ''),
 			COALESCE(summary, ''), COALESCE(error, ''),
@@ -453,7 +493,7 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 		var leaseRaw string
 		var updatedRaw string
 		if err := rows.Scan(
-			&t.TaskID, &t.SessionID, &t.RunID, &t.TeamID, &t.AssignedRole, &t.CreatedBy, &t.Goal,
+			&t.TaskID, &t.SessionID, &t.RunID, &t.TeamID, &t.AssignedRole, &t.RoleSnapshot, &t.TaskKind, &t.CreatedBy, &t.Goal,
 			&t.Priority, &status, &createdRaw,
 			&startedRaw, &finishedRaw,
 			&t.Summary, &t.Error,
@@ -579,14 +619,14 @@ func (s *SQLiteTaskStore) UpdateTask(ctx context.Context, task types.Task) error
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = db.ExecContext(ctx, `
 		UPDATE tasks
-		SET session_id = ?, run_id = ?, team_id = ?, assigned_role = ?, created_by = ?,
+		SET session_id = ?, run_id = ?, team_id = ?, assigned_role = ?, role_snapshot = ?, task_kind = ?, created_by = ?,
 		    goal = ?, inputs_json = ?, priority = ?,
 		    status = ?, started_at = ?, finished_at = ?, summary = ?, artifacts_json = ?,
 		    error = ?, attempts = ?, lease_until = ?, updated_at = ?,
 		    input_tokens = ?, output_tokens = ?, total_tokens = ?, cost_usd = ?, duration_seconds = ?,
 		    metadata_json = ?
 		WHERE task_id = ?
-	`, strings.TrimSpace(task.SessionID), strings.TrimSpace(task.RunID), strings.TrimSpace(task.TeamID), strings.TrimSpace(task.AssignedRole), strings.TrimSpace(task.CreatedBy),
+	`, strings.TrimSpace(task.SessionID), strings.TrimSpace(task.RunID), strings.TrimSpace(task.TeamID), strings.TrimSpace(task.AssignedRole), strings.TrimSpace(task.RoleSnapshot), normalizeTaskKind(task.TaskKind), strings.TrimSpace(task.CreatedBy),
 		strings.TrimSpace(task.Goal), string(inputsJSON), task.Priority,
 		strings.TrimSpace(string(task.Status)),
 		nullIfEmpty(startedAt),
@@ -727,7 +767,13 @@ func (s *SQLiteTaskStore) CompleteTask(ctx context.Context, taskID string, resul
 		total = result.InputTokens + result.OutputTokens
 	}
 
-	_, err = db.ExecContext(ctx, `
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE tasks
 		SET status = ?, finished_at = ?, summary = ?, artifacts_json = ?, error = ?,
 		    input_tokens = ?, output_tokens = ?, total_tokens = ?, cost_usd = ?,
@@ -736,8 +782,32 @@ func (s *SQLiteTaskStore) CompleteTask(ctx context.Context, taskID string, resul
 `, string(status), finishedAt.Format(time.RFC3339Nano),
 		strings.TrimSpace(result.Summary), string(artifactsJSON), strings.TrimSpace(result.Error),
 		result.InputTokens, result.OutputTokens, total, result.CostUSD,
-		now.Format(time.RFC3339Nano), taskID)
-	return err
+		now.Format(time.RFC3339Nano), taskID); err != nil {
+		return err
+	}
+
+	var task types.Task
+	var finishedRaw string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT task_id, COALESCE(team_id, ''), COALESCE(run_id, ''), COALESCE(assigned_role, ''),
+		       COALESCE(role_snapshot, ''), COALESCE(task_kind, ''), COALESCE(created_by, ''), COALESCE(goal, ''), COALESCE(status, ''), COALESCE(finished_at, '')
+		FROM tasks
+		WHERE task_id = ?
+	`, taskID).Scan(
+		&task.TaskID, &task.TeamID, &task.RunID, &task.AssignedRole, &task.RoleSnapshot, &task.TaskKind, &task.CreatedBy, &task.Goal, &task.Status, &finishedRaw,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrTaskNotFound
+		}
+		return err
+	}
+	if tt := parseTime(finishedRaw); !tt.IsZero() {
+		task.CompletedAt = &tt
+	}
+	if err := s.upsertArtifactsTx(ctx, tx, task, result); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteTaskStore) RecoverExpiredLeases(ctx context.Context) error {

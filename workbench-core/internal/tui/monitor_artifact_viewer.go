@@ -33,15 +33,20 @@ type artifactTreeNode struct {
 	taskID string
 	goal   string
 	role   string
+	kind   string
+	day    string
 	status string
 	runID  string
 
 	vpath     string
+	diskPath  string
 	name      string
 	isSummary bool
 
 	isHeader         bool
+	isDayHeader      bool
 	isRoleHeader     bool
+	isKindHeader     bool
 	isTaskHeader     bool
 	isWorkspaceGroup bool
 	isWSHeader       bool
@@ -50,9 +55,8 @@ type artifactTreeNode struct {
 }
 
 type artifactTreeLoadedMsg struct {
-	tasks   []types.Task
-	wsFiles []artifactTreeNode
-	err     error
+	groups []agentstate.ArtifactGroup
+	err    error
 }
 
 type artifactContentLoadedMsg struct {
@@ -68,6 +72,7 @@ func (m *monitorModel) openArtifactViewer() tea.Cmd {
 	m.artifactViewerOpen = true
 	m.artifactTasks = nil
 	m.artifactTree = nil
+	m.artifactAllTree = nil
 	m.artifactWorkspaceFiles = nil
 	m.artifactSelected = 0
 	m.artifactSelectedVPath = ""
@@ -78,6 +83,7 @@ func (m *monitorModel) openArtifactViewer() tea.Cmd {
 	m.artifactRenderedVPath = ""
 	m.artifactSearchMode = false
 	m.artifactSearchQuery = ""
+	m.artifactSearchScopeKey = ""
 	m.artifactNavFocused = true
 	m.artifactRoleExpanded = map[string]bool{}
 	m.artifactTaskExpanded = map[string]bool{}
@@ -94,6 +100,7 @@ func (m *monitorModel) closeArtifactViewer() {
 	m.artifactViewerOpen = false
 	m.artifactTasks = nil
 	m.artifactTree = nil
+	m.artifactAllTree = nil
 	m.artifactWorkspaceFiles = nil
 	m.artifactSelected = 0
 	m.artifactSelectedVPath = ""
@@ -104,6 +111,7 @@ func (m *monitorModel) closeArtifactViewer() {
 	m.artifactRenderedVPath = ""
 	m.artifactSearchMode = false
 	m.artifactSearchQuery = ""
+	m.artifactSearchScopeKey = ""
 	m.artifactNavFocused = false
 	m.artifactRoleExpanded = nil
 	m.artifactTaskExpanded = nil
@@ -116,46 +124,27 @@ func (m *monitorModel) loadArtifactTree() tea.Cmd {
 			return artifactTreeLoadedMsg{err: fmt.Errorf("task store is not available")}
 		}
 	}
-	taskStore := m.taskStore
+	indexer, ok := m.taskStore.(agentstate.ArtifactIndexer)
+	if !ok {
+		return func() tea.Msg {
+			return artifactTreeLoadedMsg{err: fmt.Errorf("task store does not support artifact indexing")}
+		}
+	}
 	ctx := m.ctx
 	teamID := strings.TrimSpace(m.teamID)
 	runID := strings.TrimSpace(m.runID)
-	dataDir := strings.TrimSpace(m.cfg.DataDir)
-	teamRunIDs := append([]string(nil), m.teamRunIDs...)
-	roleByRunID := map[string]string{}
-	for k, v := range m.teamRoleByRunID {
-		roleByRunID[k] = v
-	}
 
 	return func() tea.Msg {
-		filter := agentstate.TaskFilter{
-			Status:   []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed},
-			SortBy:   "finished_at",
-			SortDesc: true,
-			Limit:    200,
+		filter := agentstate.ArtifactFilter{
+			TeamID: teamID,
+			RunID:  runID,
+			Limit:  5000,
 		}
-		if teamID != "" {
-			filter.TeamID = teamID
-		} else {
-			filter.RunID = runID
-		}
-
-		tasks, err := taskStore.ListTasks(ctx, filter)
+		groups, err := indexer.ListArtifactGroups(ctx, filter)
 		if err != nil {
 			return artifactTreeLoadedMsg{err: err}
 		}
-
-		tasksForRoleMap := make([]types.Task, 0, len(tasks))
-		for _, t := range tasks {
-			taskID := strings.TrimSpace(t.TaskID)
-			if taskID == "" {
-				continue
-			}
-			tasksForRoleMap = append(tasksForRoleMap, t)
-		}
-
-		wsFiles := scanArtifactWorkspaceFiles(dataDir, teamID, runID, teamRunIDs, tasksForRoleMap, roleByRunID)
-		return artifactTreeLoadedMsg{tasks: tasksForRoleMap, wsFiles: wsFiles}
+		return artifactTreeLoadedMsg{groups: groups}
 	}
 }
 
@@ -527,9 +516,170 @@ func roleForTask(task types.Task, roleByRunID map[string]string) string {
 	return "unassigned"
 }
 
-func (m *monitorModel) buildArtifactTree(tasks []types.Task, wsFiles []artifactTreeNode) []artifactTreeNode {
-	_ = tasks
-	return appendWorkspaceSection(nil, wsFiles, m.artifactWorkspaceExpand, strings.TrimSpace(m.artifactSearchQuery) != "")
+func taskKindLabel(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case agentstate.TaskKindCallback:
+		return "Callback Tasks"
+	case agentstate.TaskKindHeartbeat:
+		return "Heartbeat Tasks"
+	case agentstate.TaskKindCoordinator:
+		return "Coordinator Tasks"
+	case agentstate.TaskKindTask:
+		return "Tasks"
+	default:
+		return "Other Tasks"
+	}
+}
+
+func taskStatusMark(status string) string {
+	switch strings.TrimSpace(status) {
+	case string(types.TaskStatusSucceeded):
+		return "✓"
+	case string(types.TaskStatusFailed):
+		return "✗"
+	case string(types.TaskStatusCanceled):
+		return "∅"
+	default:
+		return "•"
+	}
+}
+
+func (m *monitorModel) buildArtifactTreeFromGroups(groups []agentstate.ArtifactGroup) []artifactTreeNode {
+	if m == nil {
+		return nil
+	}
+	if m.artifactWorkspaceExpand == nil {
+		m.artifactWorkspaceExpand = map[string]bool{}
+	}
+	tree := make([]artifactTreeNode, 0, len(groups)*6)
+	if len(groups) == 0 {
+		return tree
+	}
+	lastDay := ""
+	lastRole := ""
+	lastKind := ""
+	newestDay := strings.TrimSpace(groups[0].DayBucket)
+
+	for _, g := range groups {
+		day := strings.TrimSpace(g.DayBucket)
+		if day == "" {
+			day = "unknown-day"
+		}
+		role := strings.TrimSpace(g.Role)
+		if role == "" {
+			role = "unassigned"
+		}
+		kind := strings.TrimSpace(g.TaskKind)
+		if kind == "" {
+			kind = agentstate.TaskKindOther
+		}
+		taskID := strings.TrimSpace(g.TaskID)
+		if taskID == "" {
+			continue
+		}
+
+		if day != lastDay {
+			lastDay = day
+			lastRole = ""
+			lastKind = ""
+			k := "day:" + day
+			expanded, ok := m.artifactWorkspaceExpand[k]
+			if !ok {
+				expanded = day == newestDay
+				m.artifactWorkspaceExpand[k] = expanded
+			}
+			tree = append(tree, artifactTreeNode{
+				key:         k,
+				name:        day,
+				day:         day,
+				isHeader:    true,
+				isDayHeader: true,
+				expanded:    expanded,
+				depth:       0,
+			})
+		}
+		if role != lastRole {
+			lastRole = role
+			lastKind = ""
+			k := "role:" + day + ":" + role
+			expanded, ok := m.artifactWorkspaceExpand[k]
+			if !ok {
+				expanded = false
+				m.artifactWorkspaceExpand[k] = expanded
+			}
+			tree = append(tree, artifactTreeNode{
+				key:          k,
+				name:         role,
+				role:         role,
+				day:          day,
+				isHeader:     true,
+				isRoleHeader: true,
+				expanded:     expanded,
+				depth:        1,
+			})
+		}
+		if kind != lastKind {
+			lastKind = kind
+			k := "kind:" + day + ":" + role + ":" + kind
+			expanded, ok := m.artifactWorkspaceExpand[k]
+			if !ok {
+				expanded = false
+				m.artifactWorkspaceExpand[k] = expanded
+			}
+			tree = append(tree, artifactTreeNode{
+				key:          k,
+				name:         taskKindLabel(kind),
+				kind:         kind,
+				role:         role,
+				day:          day,
+				isHeader:     true,
+				isKindHeader: true,
+				expanded:     expanded,
+				depth:        2,
+			})
+		}
+
+		taskKey := "task:" + taskID
+		taskExpanded, ok := m.artifactWorkspaceExpand[taskKey]
+		if !ok {
+			taskExpanded = false
+			m.artifactWorkspaceExpand[taskKey] = taskExpanded
+		}
+		tree = append(tree, artifactTreeNode{
+			key:          taskKey,
+			taskID:       taskID,
+			goal:         strings.TrimSpace(g.Goal),
+			role:         role,
+			day:          day,
+			kind:         kind,
+			status:       strings.TrimSpace(g.Status),
+			isHeader:     true,
+			isTaskHeader: true,
+			expanded:     taskExpanded,
+			depth:        3,
+		})
+		for _, f := range g.Files {
+			name := strings.TrimSpace(f.DisplayName)
+			if name == "" {
+				name = filepath.Base(strings.TrimSpace(f.VPath))
+			}
+			tree = append(tree, artifactTreeNode{
+				key:       "file:" + strings.TrimSpace(f.VPath),
+				taskID:    taskID,
+				role:      role,
+				day:       day,
+				kind:      kind,
+				status:    strings.TrimSpace(g.Status),
+				runID:     strings.TrimSpace(f.RunID),
+				vpath:     strings.TrimSpace(f.VPath),
+				diskPath:  strings.TrimSpace(f.DiskPath),
+				name:      name,
+				isSummary: f.IsSummary,
+				depth:     4,
+			})
+		}
+	}
+	return tree
 }
 
 func (m *monitorModel) buildSingleRunArtifactTree(tasks []types.Task, wsFiles []artifactTreeNode) []artifactTreeNode {
@@ -724,7 +874,7 @@ func appendWorkspaceSection(tree, wsFiles []artifactTreeNode, expand map[string]
 	return tree
 }
 
-func (m *monitorModel) loadArtifactContent(vpath, runID string) tea.Cmd {
+func (m *monitorModel) loadArtifactContent(vpath, diskPath, runID string) tea.Cmd {
 	vpath = strings.TrimSpace(vpath)
 	if vpath == "" {
 		return nil
@@ -737,11 +887,14 @@ func (m *monitorModel) loadArtifactContent(vpath, runID string) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		diskPath := resolveArtifactDisk(dataDir, teamID, runID, vpath)
-		if diskPath == "" {
+		resolved := strings.TrimSpace(diskPath)
+		if resolved == "" {
+			resolved = resolveArtifactDisk(dataDir, teamID, runID, vpath)
+		}
+		if resolved == "" {
 			return artifactContentLoadedMsg{vpath: vpath, err: fmt.Errorf("unsupported path: %s", vpath)}
 		}
-		f, err := os.Open(diskPath)
+		f, err := os.Open(resolved)
 		if err != nil {
 			return artifactContentLoadedMsg{vpath: vpath, err: err}
 		}
@@ -841,6 +994,7 @@ func (m *monitorModel) updateArtifactViewer(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 				return m, nil
 			}
 			m.artifactSearchMode = false
+			m.artifactSearchScopeKey = ""
 			return m, nil
 		}
 		m.closeArtifactViewer()
@@ -873,6 +1027,14 @@ func (m *monitorModel) updateArtifactViewer(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	switch strings.ToLower(msg.String()) {
 	case "/", "ctrl+f":
 		m.artifactSearchMode = true
+		if m.artifactSelected >= 0 && m.artifactSelected < len(m.artifactTree) {
+			n := m.artifactTree[m.artifactSelected]
+			if n.isHeader {
+				m.artifactSearchScopeKey = n.key
+			} else {
+				m.artifactSearchScopeKey = ""
+			}
+		}
 		return m, nil
 	case "j", "down":
 		if m.artifactSelected < len(m.artifactTree)-1 {
@@ -935,22 +1097,10 @@ func (m *monitorModel) selectArtifactTreeNode() tea.Cmd {
 		return nil
 	}
 	if node.isHeader {
-		if m.artifactRoleExpanded == nil {
-			m.artifactRoleExpanded = map[string]bool{}
-		}
-		if m.artifactTaskExpanded == nil {
-			m.artifactTaskExpanded = map[string]bool{}
-		}
 		if m.artifactWorkspaceExpand == nil {
 			m.artifactWorkspaceExpand = map[string]bool{}
 		}
-		if node.isRoleHeader {
-			m.artifactRoleExpanded[node.role] = !node.expanded
-		} else if node.isTaskHeader {
-			m.artifactTaskExpanded[node.taskID] = !node.expanded
-		} else if node.isWorkspaceGroup {
-			m.artifactWorkspaceExpand[node.key] = !node.expanded
-		}
+		m.artifactWorkspaceExpand[node.key] = !node.expanded
 		m.rebuildArtifactTreeWithAnchor(node.key, m.artifactSelected)
 		return nil
 	}
@@ -965,18 +1115,12 @@ func (m *monitorModel) selectArtifactTreeNode() tea.Cmd {
 	m.artifactRenderedVPath = ""
 	m.artifactContentVP.SetContent(m.artifactContent)
 	m.artifactContentVP.GotoTop()
-	return m.loadArtifactContent(node.vpath, node.runID)
+	return m.loadArtifactContent(node.vpath, node.diskPath, node.runID)
 }
 
 func (m *monitorModel) collapseSelectedArtifactGroup() {
 	if m == nil || m.artifactSelected < 0 || m.artifactSelected >= len(m.artifactTree) {
 		return
-	}
-	if m.artifactRoleExpanded == nil {
-		m.artifactRoleExpanded = map[string]bool{}
-	}
-	if m.artifactTaskExpanded == nil {
-		m.artifactTaskExpanded = map[string]bool{}
 	}
 	if m.artifactWorkspaceExpand == nil {
 		m.artifactWorkspaceExpand = map[string]bool{}
@@ -984,17 +1128,7 @@ func (m *monitorModel) collapseSelectedArtifactGroup() {
 
 	node := m.artifactTree[m.artifactSelected]
 	if node.isHeader {
-		if node.isRoleHeader && node.expanded {
-			m.artifactRoleExpanded[node.role] = false
-			m.rebuildArtifactTreeWithAnchor(node.key, m.artifactSelected)
-			return
-		}
-		if node.isTaskHeader && node.expanded {
-			m.artifactTaskExpanded[node.taskID] = false
-			m.rebuildArtifactTreeWithAnchor(node.key, m.artifactSelected)
-			return
-		}
-		if node.isWorkspaceGroup && node.expanded {
+		if node.expanded {
 			m.artifactWorkspaceExpand[node.key] = false
 			m.rebuildArtifactTreeWithAnchor(node.key, m.artifactSelected)
 			return
@@ -1006,17 +1140,7 @@ func (m *monitorModel) collapseSelectedArtifactGroup() {
 		if !parent.isHeader {
 			continue
 		}
-		if parent.isTaskHeader && parent.expanded {
-			m.artifactTaskExpanded[parent.taskID] = false
-			m.rebuildArtifactTreeWithAnchor(parent.key, i)
-			return
-		}
-		if parent.isRoleHeader && parent.expanded {
-			m.artifactRoleExpanded[parent.role] = false
-			m.rebuildArtifactTreeWithAnchor(parent.key, i)
-			return
-		}
-		if parent.isWorkspaceGroup && parent.expanded {
+		if parent.expanded {
 			m.artifactWorkspaceExpand[parent.key] = false
 			m.rebuildArtifactTreeWithAnchor(parent.key, i)
 			return
@@ -1026,8 +1150,7 @@ func (m *monitorModel) collapseSelectedArtifactGroup() {
 }
 
 func (m *monitorModel) rebuildArtifactTreeWithAnchor(anchorKey string, anchorIndex int) {
-	m.artifactTree = m.buildArtifactTree(m.artifactTasks, m.artifactWorkspaceFiles)
-	m.applyArtifactSearchFilter()
+	m.applyArtifactVisibilityAndSearch()
 	if len(m.artifactTree) == 0 {
 		m.artifactSelected = 0
 		return
@@ -1045,21 +1168,75 @@ func (m *monitorModel) rebuildArtifactTreeWithAnchor(anchorKey string, anchorInd
 	m.artifactSelected = anchorIndex
 }
 
-func (m *monitorModel) applyArtifactSearchFilter() {
-	query := strings.ToLower(strings.TrimSpace(m.artifactSearchQuery))
-	if query == "" || len(m.artifactTree) == 0 {
+func (m *monitorModel) applyArtifactVisibilityAndSearch() {
+	if len(m.artifactAllTree) == 0 {
+		m.artifactTree = nil
 		return
 	}
+	base := make([]artifactTreeNode, 0, len(m.artifactAllTree))
+	visible := map[int]bool{0: true}
+	for _, node := range m.artifactAllTree {
+		parentVisible := true
+		if node.depth > 0 {
+			parentVisible = visible[node.depth-1]
+		}
+		if node.isHeader {
+			if !parentVisible {
+				visible[node.depth] = false
+				continue
+			}
+			if v, ok := m.artifactWorkspaceExpand[node.key]; ok {
+				node.expanded = v
+			}
+			base = append(base, node)
+			visible[node.depth] = node.expanded
+			continue
+		}
+		if parentVisible {
+			base = append(base, node)
+		}
+	}
+
+	query := strings.ToLower(strings.TrimSpace(m.artifactSearchQuery))
+	if query == "" {
+		m.artifactTree = base
+		return
+	}
+
+	// Search over the full indexed tree, independent of current expansion state.
+	searchTree := make([]artifactTreeNode, 0, len(m.artifactAllTree))
+	if scope := strings.TrimSpace(m.artifactSearchScopeKey); scope != "" {
+		inScope := false
+		scopeDepth := -1
+		for _, n := range m.artifactAllTree {
+			if n.key == scope {
+				inScope = true
+				scopeDepth = n.depth
+				searchTree = append(searchTree, n)
+				continue
+			}
+			if inScope && n.depth <= scopeDepth {
+				inScope = false
+			}
+			if inScope {
+				searchTree = append(searchTree, n)
+			}
+		}
+	}
+	if len(searchTree) == 0 {
+		searchTree = m.artifactAllTree
+	}
+
 	include := map[int]struct{}{}
 	ancestors := map[int]int{}
 	matches := make([]int, 0, 32)
-	for i, node := range m.artifactTree {
+	for i, node := range searchTree {
 		for d := range ancestors {
 			if d > node.depth {
 				delete(ancestors, d)
 			}
 		}
-		if node.isWSHeader || node.isHeader {
+		if node.isHeader {
 			ancestors[node.depth] = i
 		}
 		candidate := strings.ToLower(strings.TrimSpace(
@@ -1074,12 +1251,12 @@ func (m *monitorModel) applyArtifactSearchFilter() {
 		}
 	}
 	for _, idx := range matches {
-		node := m.artifactTree[idx]
-		if !(node.isHeader || node.isWSHeader) {
+		node := searchTree[idx]
+		if !node.isHeader {
 			continue
 		}
-		for j := idx + 1; j < len(m.artifactTree); j++ {
-			if m.artifactTree[j].depth <= node.depth {
+		for j := idx + 1; j < len(searchTree); j++ {
+			if searchTree[j].depth <= node.depth {
 				break
 			}
 			include[j] = struct{}{}
@@ -1090,8 +1267,11 @@ func (m *monitorModel) applyArtifactSearchFilter() {
 		return
 	}
 	filtered := make([]artifactTreeNode, 0, len(include))
-	for i, node := range m.artifactTree {
+	for i, node := range searchTree {
 		if _, ok := include[i]; ok {
+			if node.isHeader {
+				node.expanded = true
+			}
 			filtered = append(filtered, node)
 		}
 	}
@@ -1134,9 +1314,10 @@ func (m *monitorModel) handleArtifactTreeLoaded(msg artifactTreeLoadedMsg) tea.C
 		return nil
 	}
 
-	m.artifactTasks = msg.tasks
-	m.artifactWorkspaceFiles = msg.wsFiles
-	m.artifactTree = m.buildArtifactTree(msg.tasks, msg.wsFiles)
+	m.artifactTasks = nil
+	m.artifactWorkspaceFiles = nil
+	m.artifactAllTree = m.buildArtifactTreeFromGroups(msg.groups)
+	m.applyArtifactVisibilityAndSearch()
 	if len(m.artifactTree) == 0 {
 		m.artifactSelected = 0
 		m.artifactSelectedVPath = ""
@@ -1161,19 +1342,7 @@ func (m *monitorModel) handleArtifactTreeLoaded(msg artifactTreeLoadedMsg) tea.C
 			m.artifactRenderedVPath = ""
 			m.artifactContentVP.SetContent(m.artifactContent)
 			m.artifactContentVP.GotoTop()
-			return m.loadArtifactContent(node.vpath, node.runID)
-		}
-		if idx := m.findArtifactNodeByKey("wsfile:" + strings.TrimSpace(m.artifactSelectedVPath)); idx >= 0 {
-			m.artifactSelected = idx
-			node := m.artifactTree[idx]
-			m.artifactContent = "Loading " + node.name + "..."
-			m.artifactContentRaw = ""
-			m.artifactRenderWidth = 0
-			m.artifactRenderRawLen = 0
-			m.artifactRenderedVPath = ""
-			m.artifactContentVP.SetContent(m.artifactContent)
-			m.artifactContentVP.GotoTop()
-			return m.loadArtifactContent(node.vpath, node.runID)
+			return m.loadArtifactContent(node.vpath, node.diskPath, node.runID)
 		}
 	}
 
@@ -1190,13 +1359,13 @@ func (m *monitorModel) handleArtifactTreeLoaded(msg artifactTreeLoadedMsg) tea.C
 		m.artifactRenderedVPath = ""
 		m.artifactContentVP.SetContent(m.artifactContent)
 		m.artifactContentVP.GotoTop()
-		return m.loadArtifactContent(node.vpath, node.runID)
+		return m.loadArtifactContent(node.vpath, node.diskPath, node.runID)
 	}
 
 	m.artifactSelected = 0
 	m.artifactSelectedVPath = ""
 	m.artifactContentRaw = ""
-	m.artifactContent = "Select a workspace group and file to preview."
+	m.artifactContent = "Select a deliverable file to preview."
 	m.artifactRenderWidth = 0
 	m.artifactRenderRawLen = 0
 	m.artifactRenderedVPath = ""
@@ -1285,7 +1454,7 @@ func (m *monitorModel) renderArtifactViewer() string {
 	}
 	headerLine := m.styles.header.Copy().MaxWidth(w).Render(header)
 
-	navTitle := "Workspace Files"
+	navTitle := "Deliverables"
 	if !m.artifactNavFocused {
 		navTitle = kit.StyleDim.Render(navTitle)
 	}
@@ -1299,9 +1468,9 @@ func (m *monitorModel) renderArtifactViewer() string {
 	right := m.panelStyle(panelOutput).Width(contentW).Height(bodyH).Render(m.styles.sectionTitle.Render(contentTitle) + "\n" + m.artifactContentVP.View())
 	row := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	footer := "esc close · j/k navigate · enter/l/right select or toggle · h/left collapse · tab switch pane · pgup/pgdn scroll"
+	footer := "esc close · j/k navigate · enter/l/right expand/select · h/left collapse · tab switch pane · pgup/pgdn scroll"
 	if m.artifactSearchMode {
-		footer = "search mode: type to filter · enter done · esc clear/exit · backspace delete"
+		footer = "search mode: type to filter (scoped to selected header) · enter done · esc clear/exit · backspace delete"
 	} else {
 		footer += " · / search"
 	}
@@ -1357,51 +1526,26 @@ func (m *monitorModel) renderArtifactNavBody(height, width int) string {
 
 func (m *monitorModel) renderArtifactNode(node artifactTreeNode) string {
 	indent := strings.Repeat("  ", max(0, node.depth))
-	if node.isWSHeader {
-		return artifactStyleSection.Render(indent + "-- " + node.name + " --")
-	}
 	if node.isHeader {
 		icon := "▶"
 		if node.expanded {
 			icon = "▼"
 		}
-		if node.isRoleHeader {
-			return indent + icon + " " + strings.TrimSpace(node.role)
+		if node.isDayHeader {
+			return artifactStyleSection.Copy().Foreground(lipgloss.Color("#a6e3a1")).Render(indent + icon + " " + strings.TrimSpace(node.name))
 		}
-		if node.isWorkspaceGroup {
-			label := strings.TrimSpace(node.name)
-			if label == "" {
-				label = artifactWorkspaceSharedGroup
-			}
-			switch node.depth {
-			case 1:
-				return artifactStyleGroup.Render(indent + icon + " " + label)
-			case 2:
-				return artifactStyleSection.Copy().Foreground(lipgloss.Color("#a6e3a1")).Render(indent + icon + " " + label)
-			case 3:
-				return artifactStyleSection.Copy().Foreground(lipgloss.Color("#f9e2af")).Render(indent + icon + " " + label)
-			default:
-				return artifactStyleSection.Copy().Foreground(lipgloss.Color("#94e2d5")).Render(indent + icon + " " + label)
-			}
+		if node.isRoleHeader {
+			return artifactStyleGroup.Render(indent + icon + " " + strings.TrimSpace(node.name))
+		}
+		if node.isKindHeader {
+			return artifactStyleSection.Copy().Foreground(lipgloss.Color("#f9e2af")).Render(indent + icon + " " + strings.TrimSpace(node.name))
 		}
 		if node.isTaskHeader {
-			status := strings.TrimSpace(node.status)
-			statusMark := ""
-			switch status {
-			case string(types.TaskStatusSucceeded):
-				statusMark = " ✓"
-			case string(types.TaskStatusFailed):
-				statusMark = " ✗"
-			default:
-				if status != "" {
-					statusMark = " [" + status + "]"
-				}
-			}
 			goal := strings.TrimSpace(node.goal)
 			if goal == "" {
 				goal = node.taskID
 			}
-			return indent + icon + " " + truncateText(goal, 44) + statusMark
+			return indent + icon + " " + truncateText(goal, 44) + " " + taskStatusMark(node.status)
 		}
 		label := strings.TrimSpace(node.name)
 		return artifactStyleGroup.Render(indent + icon + " " + label)

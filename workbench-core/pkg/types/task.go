@@ -23,6 +23,8 @@ type Task struct {
 	RunID        string         `json:"runId,omitempty"`
 	TeamID       string         `json:"teamId,omitempty"`
 	AssignedRole string         `json:"assignedRole,omitempty"`
+	RoleSnapshot string         `json:"roleSnapshot,omitempty"`
+	TaskKind     string         `json:"taskKind,omitempty"`
 	CreatedBy    string         `json:"createdBy,omitempty"`
 	Goal         string         `json:"goal"`
 	Inputs       map[string]any `json:"inputs,omitempty"`
