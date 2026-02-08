@@ -234,6 +234,8 @@ type monitorModel struct {
 	artifactRenderWidth     int
 	artifactRenderRawLen    int
 	artifactRenderedVPath   string
+	artifactSearchMode      bool
+	artifactSearchQuery     string
 	artifactNavFocused      bool
 	artifactSelectedVPath   string
 	artifactWorkspaceFiles  []artifactTreeNode

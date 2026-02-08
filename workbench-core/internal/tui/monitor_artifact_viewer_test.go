@@ -111,6 +111,49 @@ func TestWorkspaceScan_TeamGroupsByRoleAndShared(t *testing.T) {
 	}
 }
 
+func TestWorkspaceScan_TeamGroupsByDayAndCategory(t *testing.T) {
+	tmp := t.TempDir()
+	p1 := filepath.Join(tmp, "teams", "team-1", "workspace", "deliverables", "2026-02-08", "callback-task-ceo-20260208", "SUMMARY.md")
+	p2 := filepath.Join(tmp, "teams", "team-1", "workspace", "deliverables", "2026-02-08", "heartbeat-ceo-run-123", "SUMMARY.md")
+	for _, p := range []string{p1, p2} {
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatalf("mkdir path: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("ok"), 0644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+	}
+
+	nodes := scanArtifactWorkspaceFiles(tmp, "team-1", "", nil, nil, nil)
+	hasDay := false
+	hasCallback := false
+	hasHeartbeat := false
+	for _, n := range nodes {
+		if !n.isWorkspaceGroup {
+			continue
+		}
+		if n.depth == 2 && n.name == "2026-02-08" {
+			hasDay = true
+		}
+		if n.depth == 3 && n.name == "Callback Tasks" {
+			hasCallback = true
+		}
+		if n.depth == 3 && n.name == "Heartbeat Tasks" {
+			hasHeartbeat = true
+		}
+	}
+	if !hasDay || !hasCallback || !hasHeartbeat {
+		t.Fatalf("expected day+callback+heartbeat groups, got %+v", nodes)
+	}
+}
+
+func TestWorkspaceEntry_UsesCompactFileLabel(t *testing.T) {
+	e := buildWorkspaceEntry("deliverables/2026-02-08/task-1/reports/final.md", "analyst", "")
+	if e.fileLabel != "reports/final.md" {
+		t.Fatalf("expected compact file label, got %q", e.fileLabel)
+	}
+}
+
 func TestRebuildTree_PreservesSelectionOnExpandCollapse(t *testing.T) {
 	m := &monitorModel{artifactWorkspaceExpand: map[string]bool{}}
 	wsFiles := []artifactTreeNode{
@@ -153,5 +196,87 @@ func TestRebuildTree_FallbackNearestWhenAnchorMissing(t *testing.T) {
 	}
 	if m.artifactTree[m.artifactSelected].key != "wsgroup:analyst" {
 		t.Fatalf("expected fallback to workspace group header, got %q", m.artifactTree[m.artifactSelected].key)
+	}
+}
+
+func TestRebuildTree_SearchFiltersTree(t *testing.T) {
+	m := &monitorModel{
+		artifactWorkspaceExpand: map[string]bool{"wsgroup:analyst": true, "wsday:analyst:2026-02-08": true, "wscat:analyst:2026-02-08:task": true, "wstask:analyst:2026-02-08:task:task-1": true},
+		artifactSearchQuery:     "summary",
+	}
+	wsFiles := []artifactTreeNode{
+		{key: "wsgroup:analyst", name: "analyst", isHeader: true, isWorkspaceGroup: true, expanded: true, depth: 1},
+		{key: "wsday:analyst:2026-02-08", name: "2026-02-08", isHeader: true, isWorkspaceGroup: true, expanded: true, depth: 2},
+		{key: "wscat:analyst:2026-02-08:task", name: "Tasks", isHeader: true, isWorkspaceGroup: true, expanded: true, depth: 3},
+		{key: "wstask:analyst:2026-02-08:task:task-1", name: "task-1", isHeader: true, isWorkspaceGroup: true, expanded: true, depth: 4},
+		{key: "wsfile:/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", vpath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", name: "SUMMARY.md", depth: 5},
+		{key: "wsfile:/workspace/deliverables/2026-02-08/task-1/report.md", vpath: "/workspace/deliverables/2026-02-08/task-1/report.md", name: "report.md", depth: 5},
+	}
+	m.artifactWorkspaceFiles = wsFiles
+	m.rebuildArtifactTreeWithAnchor("", 0)
+	for _, n := range m.artifactTree {
+		if !n.isHeader && !n.isWSHeader && !strings.Contains(strings.ToLower(n.name), "summary") {
+			t.Fatalf("expected only summary file leaf after filter, got %+v", n)
+		}
+	}
+}
+
+func TestAppendWorkspaceSection_ParentCollapseHidesNestedChildren(t *testing.T) {
+	wsFiles := []artifactTreeNode{
+		{key: "wsgroup:ceo", name: "ceo", isHeader: true, isWorkspaceGroup: true, expanded: true, depth: 1},
+		{key: "wsday:ceo:2026-02-08", name: "2026-02-08", isHeader: true, isWorkspaceGroup: true, expanded: true, depth: 2},
+		{key: "wscat:ceo:2026-02-08:task", name: "Tasks", isHeader: true, isWorkspaceGroup: true, expanded: true, depth: 3},
+		{key: "wstask:ceo:2026-02-08:task:task-1", name: "task-1", isHeader: true, isWorkspaceGroup: true, expanded: true, depth: 4},
+		{key: "wsfile:/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", vpath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", name: "SUMMARY.md", depth: 5},
+	}
+	expand := map[string]bool{
+		"wsgroup:ceo":                       false,
+		"wsday:ceo:2026-02-08":              true,
+		"wscat:ceo:2026-02-08:task":         true,
+		"wstask:ceo:2026-02-08:task:task-1": true,
+	}
+	tree := appendWorkspaceSection(nil, wsFiles, expand, false)
+	if len(tree) != 2 {
+		t.Fatalf("expected only section + collapsed parent, got %d nodes: %+v", len(tree), tree)
+	}
+	if tree[1].key != "wsgroup:ceo" {
+		t.Fatalf("expected role node as only visible child, got %q", tree[1].key)
+	}
+}
+
+func TestSearchFilter_MatchesHeaderAndIncludesDescendants(t *testing.T) {
+	m := &monitorModel{
+		artifactWorkspaceExpand: map[string]bool{
+			"wsgroup:ceo":                            true,
+			"wsday:ceo:2026-02-08":                   true,
+			"wscat:ceo:2026-02-08:callback":          true,
+			"wstask:ceo:2026-02-08:callback:cto-001": true,
+		},
+		artifactSearchQuery: "callback",
+	}
+	wsFiles := []artifactTreeNode{
+		{key: "wsgroup:ceo", name: "ceo", isHeader: true, isWorkspaceGroup: true, expanded: true, depth: 1},
+		{key: "wsday:ceo:2026-02-08", name: "2026-02-08", isHeader: true, isWorkspaceGroup: true, expanded: true, depth: 2},
+		{key: "wscat:ceo:2026-02-08:callback", name: "Callback Tasks", isHeader: true, isWorkspaceGroup: true, expanded: true, depth: 3},
+		{key: "wstask:ceo:2026-02-08:callback:cto-001", name: "cto-001", isHeader: true, isWorkspaceGroup: true, expanded: true, depth: 4},
+		{key: "wsfile:/workspace/deliverables/2026-02-08/callback-task-cto-001/SUMMARY.md", vpath: "/workspace/deliverables/2026-02-08/callback-task-cto-001/SUMMARY.md", name: "SUMMARY.md", depth: 5},
+	}
+	m.artifactWorkspaceFiles = wsFiles
+	m.rebuildArtifactTreeWithAnchor("", 0)
+	if len(m.artifactTree) == 0 {
+		t.Fatalf("expected filtered tree to keep callback branch")
+	}
+	foundCategory := false
+	foundFile := false
+	for _, n := range m.artifactTree {
+		if n.key == "wscat:ceo:2026-02-08:callback" {
+			foundCategory = true
+		}
+		if strings.HasPrefix(n.key, "wsfile:") {
+			foundFile = true
+		}
+	}
+	if !foundCategory || !foundFile {
+		t.Fatalf("expected callback header and descendant file to remain, got %+v", m.artifactTree)
 	}
 }
