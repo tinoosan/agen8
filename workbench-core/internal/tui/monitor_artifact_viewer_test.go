@@ -280,3 +280,38 @@ func TestSearchFilter_MatchesHeaderAndIncludesDescendants(t *testing.T) {
 		t.Fatalf("expected callback header and descendant file to remain, got %+v", m.artifactTree)
 	}
 }
+
+func TestSearchFilter_FindsMatchesInCollapsedBranches(t *testing.T) {
+	m := &monitorModel{
+		artifactWorkspaceExpand: map[string]bool{
+			"wsgroup:ceo":                       false,
+			"wsday:ceo:2026-02-08":              false,
+			"wscat:ceo:2026-02-08:task":         false,
+			"wstask:ceo:2026-02-08:task:task-1": false,
+		},
+		artifactSearchQuery: "summary",
+	}
+	wsFiles := []artifactTreeNode{
+		{key: "wsgroup:ceo", name: "ceo", isHeader: true, isWorkspaceGroup: true, expanded: false, depth: 1},
+		{key: "wsday:ceo:2026-02-08", name: "2026-02-08", isHeader: true, isWorkspaceGroup: true, expanded: false, depth: 2},
+		{key: "wscat:ceo:2026-02-08:task", name: "Tasks", isHeader: true, isWorkspaceGroup: true, expanded: false, depth: 3},
+		{key: "wstask:ceo:2026-02-08:task:task-1", name: "task-1", isHeader: true, isWorkspaceGroup: true, expanded: false, depth: 4},
+		{key: "wsfile:/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", vpath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", name: "SUMMARY.md", depth: 5},
+	}
+	m.artifactWorkspaceFiles = wsFiles
+	m.rebuildArtifactTreeWithAnchor("", 0)
+
+	if len(m.artifactTree) == 0 {
+		t.Fatalf("expected non-empty filtered tree")
+	}
+	foundSummary := false
+	for _, n := range m.artifactTree {
+		if strings.HasPrefix(n.key, "wsfile:") && strings.Contains(strings.ToLower(n.name), "summary") {
+			foundSummary = true
+			break
+		}
+	}
+	if !foundSummary {
+		t.Fatalf("expected search to find SUMMARY in collapsed branch, got %+v", m.artifactTree)
+	}
+}

@@ -698,9 +698,10 @@ func appendWorkspaceSection(tree, wsFiles []artifactTreeNode, expand map[string]
 			}
 			expanded := node.expanded
 			if forceExpand {
+				// During search/filtering, always traverse the full tree regardless
+				// of the user's expansion state so matches are never hidden.
 				expanded = true
-			}
-			if expand != nil {
+			} else if expand != nil {
 				if v, ok := expand[node.key]; ok {
 					expanded = v
 				} else {
