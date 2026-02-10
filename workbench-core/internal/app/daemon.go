@@ -234,6 +234,15 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return fmt.Errorf("create session store: %w", err)
 	}
 	sessionStore = ss
+	effectiveModel := strings.TrimSpace(resolved.Model)
+	if loaded, lerr := sessionStore.LoadSession(ctx, run.SessionID); lerr == nil {
+		if active := strings.TrimSpace(loaded.ActiveModel); active != "" {
+			effectiveModel = active
+		}
+	}
+	if effectiveModel == "" {
+		return fmt.Errorf("effective model is required")
+	}
 
 	// Text-based memory recall provider backed by daily memory files.
 	// Semantic/vector recall is intentionally not used.
@@ -248,7 +257,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Cfg:                   cfg,
 		Run:                   run,
 		WorkdirAbs:            workdirAbs,
-		Model:                 resolved.Model,
+		Model:                 effectiveModel,
 		ReasoningEffort:       strings.TrimSpace(resolved.ReasoningEffort),
 		ReasoningSummary:      strings.TrimSpace(resolved.ReasoningSummary),
 		ApprovalsMode:         strings.TrimSpace(resolved.ApprovalsMode),
@@ -292,8 +301,11 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	})
 
 	baseSystemPrompt := agent.DefaultAutonomousSystemPrompt()
+	currentModel := strings.TrimSpace(effectiveModel)
+	var currentModelMu sync.Mutex
+
 	agentCfg := agent.DefaultConfig()
-	agentCfg.Model = resolved.Model
+	agentCfg.Model = effectiveModel
 	agentCfg.ReasoningEffort = strings.TrimSpace(resolved.ReasoningEffort)
 	agentCfg.ReasoningSummary = strings.TrimSpace(resolved.ReasoningSummary)
 	agentCfg.ApprovalsMode = strings.TrimSpace(resolved.ApprovalsMode)
@@ -305,7 +317,21 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 	agentCfg.PromptSource = promptSource
 	agentCfg.Hooks = agent.Hooks{
-		OnLLMUsage: newCostUsageHook(cfg, run, resolved.Model, resolved.PriceInPerMTokensUSD, resolved.PriceOutPerMTokensUSD, sessionStore, mustEmit),
+		OnLLMUsage: newCostUsageHook(
+			cfg,
+			run,
+			effectiveModel,
+			resolved.PriceInPerMTokensUSD,
+			resolved.PriceOutPerMTokensUSD,
+			sessionStore,
+			func() string {
+				currentModelMu.Lock()
+				model := currentModel
+				currentModelMu.Unlock()
+				return model
+			},
+			mustEmit,
+		),
 		OnStep: func(step int, model, summary string) {
 			model = strings.TrimSpace(model)
 			summary = strings.TrimSpace(summary)
@@ -377,7 +403,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
-
 	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
@@ -405,6 +430,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 				if err := sess.SetModel(ctx, model); err != nil {
 					return nil, err
 				}
+				currentModelMu.Lock()
+				currentModel = strings.TrimSpace(model)
+				currentModelMu.Unlock()
 				loaded, err := sessionStore.LoadSession(ctx, run.SessionID)
 				if err == nil {
 					loaded.ActiveModel = strings.TrimSpace(model)
@@ -431,6 +459,45 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 			}
 		}()
 	}
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				loaded, lerr := sessionStore.LoadSession(runCtx, run.SessionID)
+				if lerr != nil {
+					continue
+				}
+				targetModel := strings.TrimSpace(loaded.ActiveModel)
+				if targetModel == "" {
+					continue
+				}
+				currentModelMu.Lock()
+				same := strings.EqualFold(targetModel, currentModel)
+				currentModelMu.Unlock()
+				if same {
+					continue
+				}
+				if err := sess.SetModel(runCtx, targetModel); err != nil {
+					continue
+				}
+				currentModelMu.Lock()
+				currentModel = targetModel
+				currentModelMu.Unlock()
+				mustEmit(runCtx, events.Event{
+					Type:    "control.success",
+					Message: "Model synchronized from session state",
+					Data: map[string]string{
+						"command": "set_model",
+						"model":   targetModel,
+					},
+				})
+			}
+		}
+	}()
 
 	// Background session retention: strictly prune sessions older than 30 days.
 	{
@@ -560,18 +627,23 @@ func resolveProfileRef(cfg config.Config, requested string) (*profile.Profile, s
 	return p, dir, err
 }
 
-func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, sessionStore store.SessionReaderWriter, emit func(context.Context, events.Event)) func(step int, usage llmtypes.LLMUsage) {
-	pricingKnown := false
-	lookupKnown := false
-	if priceIn == 0 && priceOut == 0 {
+func resolvePricing(modelID string, overrideIn, overrideOut float64) (inPerM float64, outPerM float64, known bool) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID != "" {
 		if in, out, ok := cost.DefaultPricing().Lookup(modelID); ok {
-			priceIn = in
-			priceOut = out
-			lookupKnown = true
+			return in, out, true
 		}
 	}
-	if lookupKnown || priceIn != 0 || priceOut != 0 {
-		pricingKnown = true
+	if overrideIn != 0 || overrideOut != 0 {
+		return overrideIn, overrideOut, true
+	}
+	return 0, 0, false
+}
+
+func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, sessionStore store.SessionReaderWriter, currentModel func() string, emit func(context.Context, events.Event)) func(step int, usage llmtypes.LLMUsage) {
+	modelID = strings.TrimSpace(modelID)
+	if currentModel == nil {
+		currentModel = func() string { return modelID }
 	}
 
 	var mu sync.Mutex
@@ -620,11 +692,16 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 			total = input + output
 		}
 
+		model := strings.TrimSpace(currentModel())
+		if model == "" {
+			model = modelID
+		}
+		inPerM, outPerM, pricingKnown := resolvePricing(model, priceIn, priceOut)
 		emitUsage(input, output, total)
 
 		costUSD := 0.0
 		if pricingKnown {
-			costUSD = (float64(input)/1_000_000.0)*priceIn + (float64(output)/1_000_000.0)*priceOut
+			costUSD = (float64(input)/1_000_000.0)*inPerM + (float64(output)/1_000_000.0)*outPerM
 		}
 		emitCost(costUSD, pricingKnown)
 

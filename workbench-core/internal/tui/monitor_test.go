@@ -322,8 +322,8 @@ func TestMonitorProfilePicker_FilterAndSelectWritesControl(t *testing.T) {
 		t.Fatalf("expected commandLinesMsg, got %T", msg)
 	}
 	joined := strings.Join(cl.lines, "\n")
-	if !strings.Contains(joined, "switch_profile queued via RPC only") {
-		t.Fatalf("expected RPC-only profile control message, got %q", joined)
+	if !strings.Contains(joined, "applied switch_profile -> software_dev") {
+		t.Fatalf("expected applied profile control message, got %q", joined)
 	}
 	if m.profile != "software_dev" {
 		t.Fatalf("expected monitor profile %q, got %q", "software_dev", m.profile)
@@ -442,6 +442,42 @@ func TestScopedTaskFilter_FocusedRunUsesRunID(t *testing.T) {
 	}
 	if filter.AssignedRole != "" {
 		t.Fatalf("AssignedRole=%q, want empty", filter.AssignedRole)
+	}
+}
+
+func TestScopedTaskFilter_NonTeamUsesRunID(t *testing.T) {
+	m := &monitorModel{
+		runID: "run-single",
+	}
+	filter := m.scopedTaskFilter(agentstate.TaskFilter{
+		TeamID: "team-should-clear",
+		RunID:  "run-should-replace",
+	})
+	if filter.TeamID != "" {
+		t.Fatalf("TeamID=%q, want empty", filter.TeamID)
+	}
+	if filter.RunID != "run-single" {
+		t.Fatalf("RunID=%q, want %q", filter.RunID, "run-single")
+	}
+}
+
+func TestUpdateTeamManifestLoadedMsg_PrefersPendingRequestedModel(t *testing.T) {
+	m := &monitorModel{
+		teamID: "team-a",
+		model:  "openai/gpt-5",
+	}
+	_, _ = m.Update(teamManifestLoadedMsg{
+		manifest: &teamManifestFile{
+			TeamID:    "team-a",
+			TeamModel: "openai/gpt-5",
+			ModelChange: &teamModelChangeFile{
+				RequestedModel: "anthropic/claude-3.7-sonnet",
+				Status:         "pending",
+			},
+		},
+	})
+	if got := strings.TrimSpace(m.model); got != "anthropic/claude-3.7-sonnet" {
+		t.Fatalf("model=%q, want pending requested model", got)
 	}
 }
 

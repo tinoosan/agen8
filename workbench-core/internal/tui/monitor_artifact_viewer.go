@@ -2,9 +2,7 @@ package tui
 
 import (
 	"fmt"
-	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,8 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
-	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -55,8 +53,8 @@ type artifactTreeNode struct {
 }
 
 type artifactTreeLoadedMsg struct {
-	groups []agentstate.ArtifactGroup
-	err    error
+	nodes []protocol.ArtifactNode
+	err   error
 }
 
 type artifactContentLoadedMsg struct {
@@ -119,32 +117,24 @@ func (m *monitorModel) closeArtifactViewer() {
 }
 
 func (m *monitorModel) loadArtifactTree() tea.Cmd {
-	if m == nil || m.taskStore == nil {
+	if m == nil {
 		return func() tea.Msg {
-			return artifactTreeLoadedMsg{err: fmt.Errorf("task store is not available")}
+			return artifactTreeLoadedMsg{err: fmt.Errorf("monitor is not available")}
 		}
 	}
-	indexer, ok := m.taskStore.(agentstate.ArtifactIndexer)
-	if !ok {
-		return func() tea.Msg {
-			return artifactTreeLoadedMsg{err: fmt.Errorf("task store does not support artifact indexing")}
-		}
-	}
-	ctx := m.ctx
-	teamID := strings.TrimSpace(m.teamID)
-	runID := strings.TrimSpace(m.runID)
-
 	return func() tea.Msg {
-		filter := agentstate.ArtifactFilter{
-			TeamID: teamID,
-			RunID:  runID,
-			Limit:  5000,
+		params := protocol.ArtifactListParams{
+			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+			Limit:    5000,
 		}
-		groups, err := indexer.ListArtifactGroups(ctx, filter)
-		if err != nil {
+		if strings.TrimSpace(m.teamID) != "" {
+			params.TeamID = strings.TrimSpace(m.teamID)
+		}
+		var res protocol.ArtifactListResult
+		if err := m.rpcRoundTrip(protocol.MethodArtifactList, params, &res); err != nil {
 			return artifactTreeLoadedMsg{err: err}
 		}
-		return artifactTreeLoadedMsg{groups: groups}
+		return artifactTreeLoadedMsg{nodes: res.Nodes}
 	}
 }
 
@@ -518,13 +508,13 @@ func roleForTask(task types.Task, roleByRunID map[string]string) string {
 
 func taskKindLabel(kind string) string {
 	switch strings.TrimSpace(kind) {
-	case agentstate.TaskKindCallback:
+	case "callback":
 		return "Callback Tasks"
-	case agentstate.TaskKindHeartbeat:
+	case "heartbeat":
 		return "Heartbeat Tasks"
-	case agentstate.TaskKindCoordinator:
+	case "coordinator":
 		return "Coordinator Tasks"
-	case agentstate.TaskKindTask:
+	case "task":
 		return "Tasks"
 	default:
 		return "Other Tasks"
@@ -544,140 +534,63 @@ func taskStatusMark(status string) string {
 	}
 }
 
-func (m *monitorModel) buildArtifactTreeFromGroups(groups []agentstate.ArtifactGroup) []artifactTreeNode {
+func (m *monitorModel) buildArtifactTreeFromGroups(nodes []protocol.ArtifactNode) []artifactTreeNode {
 	if m == nil {
 		return nil
 	}
 	if m.artifactWorkspaceExpand == nil {
 		m.artifactWorkspaceExpand = map[string]bool{}
 	}
-	tree := make([]artifactTreeNode, 0, len(groups)*6)
-	if len(groups) == 0 {
-		return tree
+	if len(nodes) == 0 {
+		return nil
 	}
-	lastDay := ""
-	lastRole := ""
-	lastKind := ""
-	newestDay := strings.TrimSpace(groups[0].DayBucket)
-
-	for _, g := range groups {
-		day := strings.TrimSpace(g.DayBucket)
-		if day == "" {
-			day = "unknown-day"
+	tree := make([]artifactTreeNode, 0, len(nodes))
+	newestDay := ""
+	for _, n := range nodes {
+		if strings.TrimSpace(n.Kind) == "day" {
+			newestDay = strings.TrimSpace(n.DayBucket)
+			break
 		}
-		role := strings.TrimSpace(g.Role)
-		if role == "" {
-			role = "unassigned"
-		}
-		kind := strings.TrimSpace(g.TaskKind)
-		if kind == "" {
-			kind = agentstate.TaskKindOther
-		}
-		taskID := strings.TrimSpace(g.TaskID)
-		if taskID == "" {
+	}
+	depthByKind := map[string]int{"day": 0, "role": 1, "stream": 2, "task": 3, "file": 4}
+	for _, n := range nodes {
+		kind := strings.TrimSpace(n.Kind)
+		key := strings.TrimSpace(n.NodeKey)
+		if key == "" {
 			continue
 		}
-
-		if day != lastDay {
-			lastDay = day
-			lastRole = ""
-			lastKind = ""
-			k := "day:" + day
-			expanded, ok := m.artifactWorkspaceExpand[k]
-			if !ok {
-				expanded = day == newestDay
-				m.artifactWorkspaceExpand[k] = expanded
+		depth := depthByKind[kind]
+		name := strings.TrimSpace(n.Label)
+		if name == "" {
+			name = filepath.Base(strings.TrimSpace(n.VPath))
+		}
+		item := artifactTreeNode{
+			key:          key,
+			taskID:       strings.TrimSpace(n.TaskID),
+			role:         strings.TrimSpace(n.Role),
+			kind:         strings.TrimSpace(n.TaskKind),
+			day:          strings.TrimSpace(n.DayBucket),
+			status:       strings.TrimSpace(n.Status),
+			vpath:        strings.TrimSpace(n.VPath),
+			diskPath:     strings.TrimSpace(n.DiskPath),
+			name:         name,
+			isSummary:    n.IsSummary,
+			isHeader:     kind != "file",
+			isDayHeader:  kind == "day",
+			isRoleHeader: kind == "role",
+			isKindHeader: kind == "stream",
+			isTaskHeader: kind == "task",
+			depth:        depth,
+		}
+		if item.isHeader {
+			if expanded, ok := m.artifactWorkspaceExpand[key]; ok {
+				item.expanded = expanded
+			} else {
+				item.expanded = kind == "day" && item.day == newestDay
+				m.artifactWorkspaceExpand[key] = item.expanded
 			}
-			tree = append(tree, artifactTreeNode{
-				key:         k,
-				name:        day,
-				day:         day,
-				isHeader:    true,
-				isDayHeader: true,
-				expanded:    expanded,
-				depth:       0,
-			})
 		}
-		if role != lastRole {
-			lastRole = role
-			lastKind = ""
-			k := "role:" + day + ":" + role
-			expanded, ok := m.artifactWorkspaceExpand[k]
-			if !ok {
-				expanded = false
-				m.artifactWorkspaceExpand[k] = expanded
-			}
-			tree = append(tree, artifactTreeNode{
-				key:          k,
-				name:         role,
-				role:         role,
-				day:          day,
-				isHeader:     true,
-				isRoleHeader: true,
-				expanded:     expanded,
-				depth:        1,
-			})
-		}
-		if kind != lastKind {
-			lastKind = kind
-			k := "kind:" + day + ":" + role + ":" + kind
-			expanded, ok := m.artifactWorkspaceExpand[k]
-			if !ok {
-				expanded = false
-				m.artifactWorkspaceExpand[k] = expanded
-			}
-			tree = append(tree, artifactTreeNode{
-				key:          k,
-				name:         taskKindLabel(kind),
-				kind:         kind,
-				role:         role,
-				day:          day,
-				isHeader:     true,
-				isKindHeader: true,
-				expanded:     expanded,
-				depth:        2,
-			})
-		}
-
-		taskKey := "task:" + taskID
-		taskExpanded, ok := m.artifactWorkspaceExpand[taskKey]
-		if !ok {
-			taskExpanded = false
-			m.artifactWorkspaceExpand[taskKey] = taskExpanded
-		}
-		tree = append(tree, artifactTreeNode{
-			key:          taskKey,
-			taskID:       taskID,
-			goal:         strings.TrimSpace(g.Goal),
-			role:         role,
-			day:          day,
-			kind:         kind,
-			status:       strings.TrimSpace(g.Status),
-			isHeader:     true,
-			isTaskHeader: true,
-			expanded:     taskExpanded,
-			depth:        3,
-		})
-		for _, f := range g.Files {
-			name := strings.TrimSpace(f.DisplayName)
-			if name == "" {
-				name = filepath.Base(strings.TrimSpace(f.VPath))
-			}
-			tree = append(tree, artifactTreeNode{
-				key:       "file:" + strings.TrimSpace(f.VPath),
-				taskID:    taskID,
-				role:      role,
-				day:       day,
-				kind:      kind,
-				status:    strings.TrimSpace(g.Status),
-				runID:     strings.TrimSpace(f.RunID),
-				vpath:     strings.TrimSpace(f.VPath),
-				diskPath:  strings.TrimSpace(f.DiskPath),
-				name:      name,
-				isSummary: f.IsSummary,
-				depth:     4,
-			})
-		}
+		tree = append(tree, item)
 	}
 	return tree
 }
@@ -879,37 +792,23 @@ func (m *monitorModel) loadArtifactContent(vpath, diskPath, runID string) tea.Cm
 	if vpath == "" {
 		return nil
 	}
-	dataDir := strings.TrimSpace(m.cfg.DataDir)
-	teamID := strings.TrimSpace(m.teamID)
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		runID = strings.TrimSpace(m.runID)
-	}
-
 	return func() tea.Msg {
-		resolved := strings.TrimSpace(diskPath)
-		if resolved == "" {
-			resolved = resolveArtifactDisk(dataDir, teamID, runID, vpath)
+		_ = diskPath
+		_ = runID
+		params := protocol.ArtifactGetParams{
+			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+			VPath:    vpath,
+			MaxBytes: artifactFileReadLimitBytes,
 		}
-		if resolved == "" {
-			return artifactContentLoadedMsg{vpath: vpath, err: fmt.Errorf("unsupported path: %s", vpath)}
+		if strings.TrimSpace(m.teamID) != "" {
+			params.TeamID = strings.TrimSpace(m.teamID)
 		}
-		f, err := os.Open(resolved)
-		if err != nil {
+		var res protocol.ArtifactGetResult
+		if err := m.rpcRoundTrip(protocol.MethodArtifactGet, params, &res); err != nil {
 			return artifactContentLoadedMsg{vpath: vpath, err: err}
 		}
-		defer f.Close()
-
-		buf := make([]byte, artifactFileReadLimitBytes+1)
-		n, err := f.Read(buf)
-		if err != nil && err != io.EOF {
-			return artifactContentLoadedMsg{vpath: vpath, err: err}
-		}
-		if n > artifactFileReadLimitBytes {
-			n = artifactFileReadLimitBytes
-		}
-		content := string(buf[:n])
-		if n == artifactFileReadLimitBytes {
+		content := res.Content
+		if res.Truncated {
 			content += "\n\n[truncated: file exceeds 256KB]"
 		}
 		return artifactContentLoadedMsg{vpath: vpath, content: content}
@@ -1316,7 +1215,7 @@ func (m *monitorModel) handleArtifactTreeLoaded(msg artifactTreeLoadedMsg) tea.C
 
 	m.artifactTasks = nil
 	m.artifactWorkspaceFiles = nil
-	m.artifactAllTree = m.buildArtifactTreeFromGroups(msg.groups)
+	m.artifactAllTree = m.buildArtifactTreeFromGroups(msg.nodes)
 	m.applyArtifactVisibilityAndSearch()
 	if len(m.artifactTree) == 0 {
 		m.artifactSelected = 0

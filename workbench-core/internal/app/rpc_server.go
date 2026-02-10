@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
@@ -394,6 +396,90 @@ func (s *RPCServer) handleRequest(ctx context.Context, msg protocol.Message) pro
 			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
 		}
 		return m
+	case protocol.MethodSessionGetTotals:
+		var p protocol.SessionGetTotalsParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.sessionGetTotals(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodActivityList:
+		var p protocol.ActivityListParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.activityList(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodTeamGetStatus:
+		var p protocol.TeamGetStatusParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.teamGetStatus(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodTeamGetManifest:
+		var p protocol.TeamGetManifestParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.teamGetManifest(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodPlanGet:
+		var p protocol.PlanGetParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.planGet(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodModelList:
+		var p protocol.ModelListParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.modelList(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
 	case protocol.MethodControlSetModel:
 		var p protocol.ControlSetModelParams
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
@@ -511,6 +597,10 @@ func protocolTaskFromTypesTask(t types.Task) protocol.Task {
 		Summary:          strings.TrimSpace(t.Summary),
 		Error:            strings.TrimSpace(t.Error),
 		Artifacts:        append([]string(nil), t.Artifacts...),
+		InputTokens:      t.InputTokens,
+		OutputTokens:     t.OutputTokens,
+		TotalTokens:      t.TotalTokens,
+		CostUSD:          t.CostUSD,
 		CreatedAt:        timeutil.OrNow(t.CreatedAt),
 		CompletedAt:      timeutil.OrNow(t.CompletedAt),
 	}
@@ -529,12 +619,22 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 		return protocol.TaskListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "view must be inbox or outbox"}
 	}
 	filter := state.TaskFilter{
-		View:     view,
 		TeamID:   scope.teamID,
 		RunID:    scope.runID,
 		SortBy:   "created_at",
 		SortDesc: true,
 		Limit:    clampLimit(p.Limit, 200, 2000),
+		Offset:   max(0, p.Offset),
+	}
+	switch view {
+	case "inbox":
+		filter.Status = []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive}
+		filter.SortBy = "created_at"
+		filter.SortDesc = false
+	case "outbox":
+		filter.Status = []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled}
+		filter.SortBy = "finished_at"
+		filter.SortDesc = true
 	}
 	if at, av := parseAssignee(p.Assignee); av != "" {
 		filter.AssignedTo = av
@@ -544,11 +644,15 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 	if err != nil {
 		return protocol.TaskListResult{}, err
 	}
+	total, err := s.taskStore.CountTasks(ctx, filter)
+	if err != nil {
+		return protocol.TaskListResult{}, err
+	}
 	out := make([]protocol.Task, 0, len(tasks))
 	for _, t := range tasks {
 		out = append(out, protocolTaskFromTypesTask(t))
 	}
-	return protocol.TaskListResult{Tasks: out}, nil
+	return protocol.TaskListResult{Tasks: out, TotalCount: total}, nil
 }
 
 func (s *RPCServer) controlSetModelHandler(ctx context.Context, p protocol.ControlSetModelParams) (protocol.ControlSetModelResult, error) {
@@ -769,6 +873,473 @@ func (s *RPCServer) taskComplete(ctx context.Context, p protocol.TaskCompletePar
 		return protocol.TaskCompleteResult{}, err
 	}
 	return protocol.TaskCompleteResult{Task: protocolTaskFromTypesTask(updated)}, nil
+}
+
+func (s *RPCServer) resolveTeamOrRunScope(ctx context.Context, threadID protocol.ThreadID, teamIDOverride string, runIDOverride string) (artifactScope, error) {
+	scope, err := s.resolveArtifactScope(ctx, threadID, teamIDOverride)
+	if err != nil {
+		return artifactScope{}, err
+	}
+	if strings.TrimSpace(runIDOverride) != "" {
+		scope.runID = strings.TrimSpace(runIDOverride)
+	}
+	return scope, nil
+}
+
+func pricingKnownForRun(cfg config.Config, runID string) bool {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return false
+	}
+	run, err := implstore.LoadRun(cfg, runID)
+	if err != nil || run.Runtime == nil {
+		return false
+	}
+	if run.Runtime.PriceInPerMTokensUSD != 0 || run.Runtime.PriceOutPerMTokensUSD != 0 {
+		return true
+	}
+	modelID := strings.TrimSpace(run.Runtime.Model)
+	if modelID == "" {
+		return false
+	}
+	_, _, ok := cost.DefaultPricing().Lookup(modelID)
+	return ok
+}
+
+func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetTotalsParams) (protocol.SessionGetTotalsResult, error) {
+	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, p.TeamID, p.RunID)
+	if err != nil {
+		return protocol.SessionGetTotalsResult{}, err
+	}
+	if s.taskStore == nil {
+		return protocol.SessionGetTotalsResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "task store not configured"}
+	}
+
+	out := protocol.SessionGetTotalsResult{
+		PricingKnown: true,
+	}
+	if strings.TrimSpace(scope.teamID) == "" {
+		if s.session != nil && strings.TrimSpace(s.run.SessionID) != "" {
+			if sess, err := s.session.LoadSession(ctx, strings.TrimSpace(s.run.SessionID)); err == nil {
+				out.TotalTokensIn = sess.InputTokens
+				out.TotalTokensOut = sess.OutputTokens
+				out.TotalTokens = sess.TotalTokens
+				out.TotalCostUSD = sess.CostUSD
+				out.PricingKnown = sess.TotalTokens == 0 || sess.CostUSD > 0 || pricingKnownForRun(s.cfg, strings.TrimSpace(s.run.RunID))
+			}
+		}
+		stats, err := s.taskStore.GetRunStats(ctx, strings.TrimSpace(scope.runID))
+		if err == nil {
+			out.TasksDone = stats.Succeeded + stats.Failed
+		}
+		return out, nil
+	}
+
+	runIDSet := map[string]struct{}{}
+	tasks, err := s.taskStore.ListTasks(ctx, state.TaskFilter{
+		TeamID:   strings.TrimSpace(scope.teamID),
+		Limit:    500,
+		SortBy:   "created_at",
+		SortDesc: true,
+	})
+	if err != nil {
+		return protocol.SessionGetTotalsResult{}, err
+	}
+	for _, t := range tasks {
+		if r := strings.TrimSpace(t.RunID); r != "" {
+			runIDSet[r] = struct{}{}
+		}
+		if t.Status == types.TaskStatusSucceeded || t.Status == types.TaskStatusFailed || t.Status == types.TaskStatusCanceled {
+			out.TasksDone++
+		}
+	}
+	for runID := range runIDSet {
+		rs, err := s.taskStore.GetRunStats(ctx, runID)
+		if err != nil {
+			continue
+		}
+		out.TotalTokens += rs.TotalTokens
+		out.TotalCostUSD += rs.TotalCost
+		if rs.TotalTokens > 0 && rs.TotalCost <= 0 && !pricingKnownForRun(s.cfg, runID) {
+			out.PricingKnown = false
+		}
+	}
+	if out.TotalTokens == 0 {
+		out.PricingKnown = true
+	}
+	return out, nil
+}
+
+func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListParams) (protocol.ActivityListResult, error) {
+	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, p.TeamID, p.RunID)
+	if err != nil {
+		return protocol.ActivityListResult{}, err
+	}
+	limit := clampLimit(p.Limit, 200, 2000)
+	offset := p.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	if strings.TrimSpace(scope.teamID) == "" {
+		acts, err := implstore.ListActivities(ctx, s.cfg, strings.TrimSpace(scope.runID), limit, offset)
+		if err != nil {
+			return protocol.ActivityListResult{}, err
+		}
+		total, _ := implstore.CountActivities(ctx, s.cfg, strings.TrimSpace(scope.runID))
+		next := 0
+		if offset+len(acts) < total {
+			next = offset + len(acts)
+		}
+		return protocol.ActivityListResult{Activities: acts, TotalCount: total, NextOffset: next}, nil
+	}
+
+	runRole := map[string]string{}
+	runSet := map[string]struct{}{}
+	tasks, err := s.taskStore.ListTasks(ctx, state.TaskFilter{
+		TeamID:   strings.TrimSpace(scope.teamID),
+		Limit:    1000,
+		SortBy:   "created_at",
+		SortDesc: true,
+	})
+	if err != nil {
+		return protocol.ActivityListResult{}, err
+	}
+	for _, t := range tasks {
+		runID := strings.TrimSpace(t.RunID)
+		if runID == "" {
+			continue
+		}
+		runSet[runID] = struct{}{}
+		if _, ok := runRole[runID]; !ok {
+			runRole[runID] = strings.TrimSpace(t.AssignedRole)
+		}
+	}
+	merged := make([]types.Activity, 0, 512)
+	for runID := range runSet {
+		acts, err := implstore.ListActivities(ctx, s.cfg, runID, 300, 0)
+		if err != nil {
+			continue
+		}
+		role := strings.TrimSpace(runRole[runID])
+		if roleFilter := strings.TrimSpace(p.Role); roleFilter != "" && !strings.EqualFold(roleFilter, role) {
+			continue
+		}
+		for i := range acts {
+			if role != "" {
+				acts[i].Title = "[" + role + "] " + strings.TrimSpace(acts[i].Title)
+			}
+			acts[i].ID = runID + ":" + acts[i].ID
+			merged = append(merged, acts[i])
+		}
+	}
+	sort.SliceStable(merged, func(i, j int) bool {
+		if p.SortDesc {
+			return merged[i].StartedAt.After(merged[j].StartedAt)
+		}
+		return merged[i].StartedAt.Before(merged[j].StartedAt)
+	})
+	total := len(merged)
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	out := []types.Activity{}
+	if offset < end {
+		out = append(out, merged[offset:end]...)
+	}
+	next := 0
+	if end < total {
+		next = end
+	}
+	return protocol.ActivityListResult{Activities: out, TotalCount: total, NextOffset: next}, nil
+}
+
+func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusParams) (protocol.TeamGetStatusResult, error) {
+	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, p.TeamID, "")
+	if err != nil {
+		return protocol.TeamGetStatusResult{}, err
+	}
+	if strings.TrimSpace(scope.teamID) == "" {
+		return protocol.TeamGetStatusResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "team scope is required"}
+	}
+	teamID := strings.TrimSpace(scope.teamID)
+	pending, _ := s.taskStore.CountTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusPending}})
+	active, _ := s.taskStore.CountTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusActive}})
+	done, _ := s.taskStore.CountTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled}})
+
+	roleInfo := map[string]string{}
+	roleByRunID := map[string]string{}
+	runIDSet := map[string]struct{}{}
+	pendingTasks, _ := s.taskStore.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusPending}, SortBy: "created_at", SortDesc: false, Limit: 200})
+	activeTasks, _ := s.taskStore.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusActive}, SortBy: "updated_at", SortDesc: true, Limit: 200})
+	completedTasks, _ := s.taskStore.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled}, SortBy: "finished_at", SortDesc: true, Limit: 500})
+
+	for _, task := range pendingTasks {
+		role := strings.TrimSpace(task.AssignedRole)
+		if role == "" {
+			role = "(coordinator)"
+		}
+		if runID := strings.TrimSpace(task.RunID); runID != "" {
+			if _, ok := roleByRunID[runID]; !ok {
+				roleByRunID[runID] = role
+			}
+			runIDSet[runID] = struct{}{}
+		}
+		if _, exists := roleInfo[role]; !exists {
+			roleInfo[role] = "pending: " + truncateText(strings.TrimSpace(task.Goal), 52)
+		}
+	}
+	for _, task := range activeTasks {
+		role := strings.TrimSpace(task.AssignedRole)
+		if role == "" {
+			role = "(coordinator)"
+		}
+		if runID := strings.TrimSpace(task.RunID); runID != "" {
+			if _, ok := roleByRunID[runID]; !ok {
+				roleByRunID[runID] = role
+			}
+			runIDSet[runID] = struct{}{}
+		}
+		roleInfo[role] = "active: " + truncateText(strings.TrimSpace(task.Goal), 52)
+	}
+	for _, task := range completedTasks {
+		role := strings.TrimSpace(task.AssignedRole)
+		if role == "" {
+			role = "(coordinator)"
+		}
+		if runID := strings.TrimSpace(task.RunID); runID != "" {
+			if _, ok := roleByRunID[runID]; !ok {
+				roleByRunID[runID] = role
+			}
+			runIDSet[runID] = struct{}{}
+		}
+	}
+	roleKeys := make([]string, 0, len(roleInfo))
+	for role := range roleInfo {
+		roleKeys = append(roleKeys, role)
+	}
+	sort.Strings(roleKeys)
+	roles := make([]protocol.TeamRoleStatus, 0, len(roleKeys))
+	for _, role := range roleKeys {
+		roles = append(roles, protocol.TeamRoleStatus{Role: role, Info: roleInfo[role]})
+	}
+	runIDs := make([]string, 0, len(runIDSet))
+	for runID := range runIDSet {
+		runIDs = append(runIDs, runID)
+	}
+	sort.Strings(runIDs)
+	totalTokens := 0
+	totalCostUSD := 0.0
+	pricingKnown := true
+	for _, runID := range runIDs {
+		stats, err := s.taskStore.GetRunStats(ctx, runID)
+		if err != nil {
+			continue
+		}
+		totalTokens += stats.TotalTokens
+		totalCostUSD += stats.TotalCost
+		if stats.TotalTokens > 0 && stats.TotalCost <= 0 && !pricingKnownForRun(s.cfg, runID) {
+			pricingKnown = false
+		}
+	}
+	if totalTokens == 0 {
+		pricingKnown = true
+	}
+	return protocol.TeamGetStatusResult{
+		Pending:      pending,
+		Active:       active,
+		Done:         done,
+		Roles:        roles,
+		RunIDs:       runIDs,
+		RoleByRunID:  roleByRunID,
+		TotalTokens:  totalTokens,
+		TotalCostUSD: totalCostUSD,
+		PricingKnown: pricingKnown,
+	}, nil
+}
+
+func (s *RPCServer) teamGetManifest(ctx context.Context, p protocol.TeamGetManifestParams) (protocol.TeamGetManifestResult, error) {
+	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, p.TeamID, "")
+	if err != nil {
+		return protocol.TeamGetManifestResult{}, err
+	}
+	teamID := strings.TrimSpace(scope.teamID)
+	if teamID == "" {
+		return protocol.TeamGetManifestResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "team scope is required"}
+	}
+	path := filepath.Join(fsutil.GetTeamDir(s.cfg.DataDir, teamID), "team.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return protocol.TeamGetManifestResult{}, err
+	}
+	var mf struct {
+		TeamID          string `json:"teamId"`
+		ProfileID       string `json:"profileId"`
+		TeamModel       string `json:"teamModel,omitempty"`
+		ModelChange     *protocol.TeamManifestModelChange `json:"modelChange,omitempty"`
+		CoordinatorRole string `json:"coordinatorRole"`
+		CoordinatorRun  string `json:"coordinatorRunId"`
+		Roles           []protocol.TeamManifestRole `json:"roles"`
+		CreatedAt       string `json:"createdAt"`
+	}
+	if err := json.Unmarshal(raw, &mf); err != nil {
+		return protocol.TeamGetManifestResult{}, err
+	}
+	return protocol.TeamGetManifestResult{
+		TeamID:          strings.TrimSpace(mf.TeamID),
+		ProfileID:       strings.TrimSpace(mf.ProfileID),
+		TeamModel:       strings.TrimSpace(mf.TeamModel),
+		ModelChange:     mf.ModelChange,
+		CoordinatorRole: strings.TrimSpace(mf.CoordinatorRole),
+		CoordinatorRun:  strings.TrimSpace(mf.CoordinatorRun),
+		Roles:           mf.Roles,
+		CreatedAt:       strings.TrimSpace(mf.CreatedAt),
+	}, nil
+}
+
+func readPlanFilesForRun(dataDir, runID string) (checklist string, checklistErr string, details string, detailsErr string) {
+	runDir := fsutil.GetAgentDir(dataDir, runID)
+	planDir := filepath.Join(runDir, "plan")
+	load := func(name string) (string, string) {
+		b, err := os.ReadFile(filepath.Join(planDir, name))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return "", ""
+			}
+			return "", err.Error()
+		}
+		return string(b), ""
+	}
+	details, detailsErr = load("HEAD.md")
+	checklist, checklistErr = load("CHECKLIST.md")
+	return checklist, checklistErr, details, detailsErr
+}
+
+func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (protocol.PlanGetResult, error) {
+	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, p.TeamID, p.RunID)
+	if err != nil {
+		return protocol.PlanGetResult{}, err
+	}
+	if strings.TrimSpace(scope.teamID) == "" {
+		checklist, checklistErr, details, detailsErr := readPlanFilesForRun(s.cfg.DataDir, strings.TrimSpace(scope.runID))
+		return protocol.PlanGetResult{
+			Checklist: checklist, ChecklistErr: checklistErr, Details: details, DetailsErr: detailsErr, SourceRuns: []string{strings.TrimSpace(scope.runID)},
+		}, nil
+	}
+	if strings.TrimSpace(scope.runID) != "" {
+		checklist, checklistErr, details, detailsErr := readPlanFilesForRun(s.cfg.DataDir, strings.TrimSpace(scope.runID))
+		return protocol.PlanGetResult{
+			Checklist: checklist, ChecklistErr: checklistErr, Details: details, DetailsErr: detailsErr, SourceRuns: []string{strings.TrimSpace(scope.runID)},
+		}, nil
+	}
+	aggregate := p.AggregateTeam
+	if !aggregate {
+		return protocol.PlanGetResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "aggregateTeam must be true when runId is omitted in team mode"}
+	}
+	roleByRun := map[string]string{}
+	runSet := map[string]struct{}{}
+	tasks, _ := s.taskStore.ListTasks(ctx, state.TaskFilter{TeamID: strings.TrimSpace(scope.teamID), Limit: 1000, SortBy: "created_at", SortDesc: true})
+	for _, t := range tasks {
+		runID := strings.TrimSpace(t.RunID)
+		if runID == "" {
+			continue
+		}
+		runSet[runID] = struct{}{}
+		if _, ok := roleByRun[runID]; !ok {
+			roleByRun[runID] = strings.TrimSpace(t.AssignedRole)
+		}
+	}
+	runIDs := make([]string, 0, len(runSet))
+	for r := range runSet {
+		runIDs = append(runIDs, r)
+	}
+	sort.Strings(runIDs)
+	if len(runIDs) == 0 {
+		return protocol.PlanGetResult{
+			Checklist: "No team plan files found yet.",
+			Details:   "Waiting for team runs to publish plan files.",
+		}, nil
+	}
+	checkParts := make([]string, 0, len(runIDs))
+	detailParts := make([]string, 0, len(runIDs))
+	errParts := []string{}
+	for _, runID := range runIDs {
+		role := strings.TrimSpace(roleByRun[runID])
+		if role == "" {
+			role = runID
+		}
+		check, checkErr, det, detErr := readPlanFilesForRun(s.cfg.DataDir, runID)
+		if checkErr != "" {
+			errParts = append(errParts, "["+role+"] checklist: "+checkErr)
+		}
+		if detErr != "" {
+			errParts = append(errParts, "["+role+"] details: "+detErr)
+		}
+		if strings.TrimSpace(check) != "" {
+			checkParts = append(checkParts, "## "+role+"\n\n"+strings.TrimSpace(check))
+		}
+		if strings.TrimSpace(det) != "" {
+			detailParts = append(detailParts, "## "+role+"\n\n"+strings.TrimSpace(det))
+		}
+	}
+	checklist := "No team checklist files found yet."
+	if len(checkParts) > 0 {
+		checklist = strings.Join(checkParts, "\n\n---\n\n")
+	}
+	details := "No team plan detail files found yet."
+	if len(detailParts) > 0 {
+		details = strings.Join(detailParts, "\n\n---\n\n")
+	}
+	joinedErr := strings.Join(errParts, " | ")
+	return protocol.PlanGetResult{
+		Checklist: checklist, ChecklistErr: joinedErr, Details: details, DetailsErr: joinedErr, SourceRuns: runIDs,
+	}, nil
+}
+
+func (s *RPCServer) modelList(ctx context.Context, p protocol.ModelListParams) (protocol.ModelListResult, error) {
+	if _, err := s.resolveThreadID(p.ThreadID); err != nil {
+		return protocol.ModelListResult{}, err
+	}
+	_ = ctx
+	providerFilter := strings.ToLower(strings.TrimSpace(p.Provider))
+	query := strings.ToLower(strings.TrimSpace(p.Query))
+	infos := cost.SupportedModelInfos()
+	models := make([]protocol.ModelEntry, 0, len(infos))
+	counts := map[string]int{}
+	for _, info := range infos {
+		provider := strings.TrimSpace(info.Provider)
+		id := strings.TrimSpace(info.ID)
+		if providerFilter != "" && strings.ToLower(provider) != providerFilter {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(id), query) && !strings.Contains(strings.ToLower(provider), query) {
+			continue
+		}
+		counts[provider]++
+		models = append(models, protocol.ModelEntry{
+			ID:          id,
+			Provider:    provider,
+			InputPerM:   info.InputPerM,
+			OutputPerM:  info.OutputPerM,
+			IsReasoning: info.IsReasoning,
+		})
+	}
+	providers := make([]protocol.ModelProvider, 0, len(counts))
+	for name, count := range counts {
+		providers = append(providers, protocol.ModelProvider{Name: name, Count: count})
+	}
+	sort.Slice(providers, func(i, j int) bool { return providers[i].Name < providers[j].Name })
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].Provider != models[j].Provider {
+			return models[i].Provider < models[j].Provider
+		}
+		return models[i].ID < models[j].ID
+	})
+	return protocol.ModelListResult{Providers: providers, Models: models}, nil
 }
 
 func (s *RPCServer) threadGet(ctx context.Context, p protocol.ThreadGetParams) (protocol.ThreadGetResult, error) {
@@ -1388,6 +1959,17 @@ func searchMatchesToNodes(matches []state.ArtifactRecord, byTask map[string]stat
 		})
 	}
 	return out
+}
+
+func truncateText(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
 }
 
 func toRPCError(err error) *protocol.RPCError {

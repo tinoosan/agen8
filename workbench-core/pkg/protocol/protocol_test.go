@@ -149,3 +149,32 @@ func TestArtifactRequest_JSONRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected params: %+v", params)
 	}
 }
+
+func TestSessionTotalsRequest_JSONRoundTrip(t *testing.T) {
+	msg, err := NewRequest("s1", MethodSessionGetTotals, SessionGetTotalsParams{
+		ThreadID: "thread-1",
+		TeamID:   "team-a",
+		RunID:    "run-a",
+	})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	b, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var decoded Message
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if decoded.Method != MethodSessionGetTotals {
+		t.Fatalf("Method = %q, want %q", decoded.Method, MethodSessionGetTotals)
+	}
+	var params SessionGetTotalsParams
+	if err := json.Unmarshal(decoded.Params, &params); err != nil {
+		t.Fatalf("unmarshal params: %v", err)
+	}
+	if params.ThreadID != "thread-1" || params.TeamID != "team-a" || params.RunID != "run-a" {
+		t.Fatalf("unexpected params: %+v", params)
+	}
+}

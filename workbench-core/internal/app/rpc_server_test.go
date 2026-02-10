@@ -509,6 +509,26 @@ func TestRPCServer_TaskFlow_CreateListClaimComplete(t *testing.T) {
 	if claimRes.Task.ClaimedByAgentID != "agent-1" {
 		t.Fatalf("expected claimedByAgentId agent-1, got %q", claimRes.Task.ClaimedByAgentID)
 	}
+	inboxAfterClaimReq, _ := protocol.NewRequest("3b", protocol.MethodTaskList, protocol.TaskListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		View:     "inbox",
+	})
+	inboxAfterClaimResp := rpcRoundTrip(t, srv, inboxAfterClaimReq)
+	if inboxAfterClaimResp.Error != nil {
+		t.Fatalf("task.list inbox after claim error: %+v", inboxAfterClaimResp.Error)
+	}
+	var inboxAfterClaimRes protocol.TaskListResult
+	_ = json.Unmarshal(inboxAfterClaimResp.Result, &inboxAfterClaimRes)
+	foundActive := false
+	for _, tk := range inboxAfterClaimRes.Tasks {
+		if tk.ID == createRes.Task.ID && strings.EqualFold(strings.TrimSpace(tk.Status), string(types.TaskStatusActive)) {
+			foundActive = true
+			break
+		}
+	}
+	if !foundActive {
+		t.Fatalf("expected claimed active task to remain visible in inbox view")
+	}
 
 	completeReq, _ := protocol.NewRequest("4", protocol.MethodTaskComplete, protocol.TaskCompleteParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
@@ -603,5 +623,129 @@ func TestRPCServer_ControlSetProfile_ThreadMismatch(t *testing.T) {
 	}
 	if resp.Error.Code != protocol.CodeThreadNotFound {
 		t.Fatalf("error code = %d want %d", resp.Error.Code, protocol.CodeThreadNotFound)
+	}
+}
+
+func TestRPCServer_SessionGetTotals_AndActivityList(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	sess.InputTokens = 10
+	sess.OutputTokens = 20
+	sess.TotalTokens = 30
+	sess.CostUSD = 1.5
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-a", SessionID: run.SessionID, RunID: run.RunID, Goal: "A",
+		Status: types.TaskStatusSucceeded, CreatedAt: &now, CompletedAt: &now,
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	reqTotals, _ := protocol.NewRequest("1", protocol.MethodSessionGetTotals, protocol.SessionGetTotalsParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		RunID:    run.RunID,
+	})
+	respTotals := rpcRoundTrip(t, srv, reqTotals)
+	if respTotals.Error != nil {
+		t.Fatalf("session.getTotals error: %+v", respTotals.Error)
+	}
+	var totals protocol.SessionGetTotalsResult
+	_ = json.Unmarshal(respTotals.Result, &totals)
+	if totals.TotalTokens != 30 || totals.TotalCostUSD != 1.5 {
+		t.Fatalf("unexpected totals: %+v", totals)
+	}
+
+	reqActs, _ := protocol.NewRequest("2", protocol.MethodActivityList, protocol.ActivityListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		RunID:    run.RunID,
+		Limit:    10,
+	})
+	respActs := rpcRoundTrip(t, srv, reqActs)
+	if respActs.Error != nil {
+		t.Fatalf("activity.list error: %+v", respActs.Error)
+	}
+}
+
+func TestRPCServer_TeamManifestPlanModelEndpoints(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	teamID := "team-1"
+	teamDir := fsutil.GetTeamDir(cfg.DataDir, teamID)
+	if err := os.MkdirAll(teamDir, 0o755); err != nil {
+		t.Fatalf("mkdir team dir: %v", err)
+	}
+	manifest := `{"teamId":"team-1","profileId":"startup","teamModel":"openai/gpt-5-mini","coordinatorRole":"ceo","coordinatorRunId":"run-1","roles":[{"roleName":"ceo","runId":"run-1","sessionId":"sess-1"}],"createdAt":"2026-01-01T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(teamDir, "team.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	runDir := fsutil.GetAgentDir(cfg.DataDir, run.RunID)
+	planDir := filepath.Join(runDir, "plan")
+	_ = os.MkdirAll(planDir, 0o755)
+	_ = os.WriteFile(filepath.Join(planDir, "HEAD.md"), []byte("details"), 0o644)
+	_ = os.WriteFile(filepath.Join(planDir, "CHECKLIST.md"), []byte("checklist"), 0o644)
+
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-team", SessionID: run.SessionID, RunID: run.RunID, TeamID: teamID, AssignedRole: "ceo",
+		Goal: "G", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	reqStatus, _ := protocol.NewRequest("1", protocol.MethodTeamGetStatus, protocol.TeamGetStatusParams{
+		ThreadID: protocol.ThreadID(run.SessionID), TeamID: teamID,
+	})
+	respStatus := rpcRoundTrip(t, srv, reqStatus)
+	if respStatus.Error != nil {
+		t.Fatalf("team.getStatus error: %+v", respStatus.Error)
+	}
+
+	reqManifest, _ := protocol.NewRequest("2", protocol.MethodTeamGetManifest, protocol.TeamGetManifestParams{
+		ThreadID: protocol.ThreadID(run.SessionID), TeamID: teamID,
+	})
+	respManifest := rpcRoundTrip(t, srv, reqManifest)
+	if respManifest.Error != nil {
+		t.Fatalf("team.getManifest error: %+v", respManifest.Error)
+	}
+
+	reqPlan, _ := protocol.NewRequest("3", protocol.MethodPlanGet, protocol.PlanGetParams{
+		ThreadID: protocol.ThreadID(run.SessionID), RunID: run.RunID,
+	})
+	respPlan := rpcRoundTrip(t, srv, reqPlan)
+	if respPlan.Error != nil {
+		t.Fatalf("plan.get error: %+v", respPlan.Error)
+	}
+	var planRes protocol.PlanGetResult
+	_ = json.Unmarshal(respPlan.Result, &planRes)
+	if !strings.Contains(planRes.Checklist, "checklist") {
+		t.Fatalf("unexpected plan result: %+v", planRes)
+	}
+
+	reqModels, _ := protocol.NewRequest("4", protocol.MethodModelList, protocol.ModelListParams{
+		ThreadID: protocol.ThreadID(run.SessionID), Provider: "openai",
+	})
+	respModels := rpcRoundTrip(t, srv, reqModels)
+	if respModels.Error != nil {
+		t.Fatalf("model.list error: %+v", respModels.Error)
+	}
+	var models protocol.ModelListResult
+	_ = json.Unmarshal(respModels.Result, &models)
+	if len(models.Models) == 0 {
+		t.Fatalf("expected model.list results")
 	}
 }

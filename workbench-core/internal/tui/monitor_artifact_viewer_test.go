@@ -4,9 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
+	"github.com/tinoosan/workbench-core/pkg/protocol"
 )
 
 func TestResolveArtifactDisk_TeamMode(t *testing.T) {
@@ -29,19 +28,13 @@ func TestResolveArtifactDisk_RunMode(t *testing.T) {
 
 func TestBuildArtifactTreeFromGroups_DayRoleKindTaskFiles(t *testing.T) {
 	m := &monitorModel{artifactWorkspaceExpand: map[string]bool{}}
-	groups := []agentstate.ArtifactGroup{
-		{
-			DayBucket: "2026-02-08",
-			Role:      "ceo",
-			TaskKind:  agentstate.TaskKindCallback,
-			TaskID:    "callback-task-ceo-1",
-			Goal:      "Review partner notes",
-			Status:    "succeeded",
-			Files: []agentstate.ArtifactRecord{
-				{DisplayName: "SUMMARY.md", VPath: "/workspace/deliverables/2026-02-08/callback-task-ceo-1/SUMMARY.md", IsSummary: true},
-				{DisplayName: "report.md", VPath: "/workspace/deliverables/2026-02-08/callback-task-ceo-1/report.md"},
-			},
-		},
+	groups := []protocol.ArtifactNode{
+		{NodeKey: "day:2026-02-08", Kind: "day", Label: "2026-02-08", DayBucket: "2026-02-08"},
+		{NodeKey: "role:2026-02-08:ceo", Kind: "role", Label: "ceo", DayBucket: "2026-02-08", Role: "ceo"},
+		{NodeKey: "stream:2026-02-08:ceo:callback", Kind: "stream", Label: "Callback Tasks", DayBucket: "2026-02-08", Role: "ceo", TaskKind: "callback"},
+		{NodeKey: "task:callback-task-ceo-1", Kind: "task", Label: "callback-task-ceo-1", DayBucket: "2026-02-08", Role: "ceo", TaskKind: "callback", TaskID: "callback-task-ceo-1", Status: "succeeded"},
+		{NodeKey: "file:/workspace/deliverables/2026-02-08/callback-task-ceo-1/SUMMARY.md", Kind: "file", Label: "SUMMARY.md", VPath: "/workspace/deliverables/2026-02-08/callback-task-ceo-1/SUMMARY.md", IsSummary: true},
+		{NodeKey: "file:/workspace/deliverables/2026-02-08/callback-task-ceo-1/report.md", Kind: "file", Label: "report.md", VPath: "/workspace/deliverables/2026-02-08/callback-task-ceo-1/report.md"},
 	}
 
 	tree := m.buildArtifactTreeFromGroups(groups)
@@ -67,18 +60,12 @@ func TestBuildArtifactTreeFromGroups_DayRoleKindTaskFiles(t *testing.T) {
 
 func TestRebuildTree_PreservesSelectionOnExpandCollapse(t *testing.T) {
 	m := &monitorModel{artifactWorkspaceExpand: map[string]bool{}}
-	groups := []agentstate.ArtifactGroup{
-		{
-			DayBucket: "2026-02-08",
-			Role:      "ceo",
-			TaskKind:  agentstate.TaskKindTask,
-			TaskID:    "task-1",
-			Goal:      "Analyze",
-			Status:    "succeeded",
-			Files: []agentstate.ArtifactRecord{
-				{DisplayName: "SUMMARY.md", VPath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", IsSummary: true},
-			},
-		},
+	groups := []protocol.ArtifactNode{
+		{NodeKey: "day:2026-02-08", Kind: "day", Label: "2026-02-08", DayBucket: "2026-02-08"},
+		{NodeKey: "role:2026-02-08:ceo", Kind: "role", Label: "ceo", DayBucket: "2026-02-08", Role: "ceo"},
+		{NodeKey: "stream:2026-02-08:ceo:task", Kind: "stream", Label: "Tasks", DayBucket: "2026-02-08", Role: "ceo", TaskKind: "task"},
+		{NodeKey: "task:task-1", Kind: "task", Label: "task-1", DayBucket: "2026-02-08", Role: "ceo", TaskKind: "task", TaskID: "task-1", Status: "succeeded"},
+		{NodeKey: "file:/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", Kind: "file", Label: "SUMMARY.md", VPath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", IsSummary: true},
 	}
 	m.artifactAllTree = m.buildArtifactTreeFromGroups(groups)
 	m.applyArtifactVisibilityAndSearch()
@@ -103,20 +90,13 @@ func TestRebuildTree_PreservesSelectionOnExpandCollapse(t *testing.T) {
 
 func TestSearchFilter_FindsInCollapsedBranches(t *testing.T) {
 	m := &monitorModel{artifactWorkspaceExpand: map[string]bool{}}
-	groups := []agentstate.ArtifactGroup{
-		{
-			DayBucket: "2026-02-08",
-			Role:      "ceo",
-			TaskKind:  agentstate.TaskKindTask,
-			TaskID:    "task-1",
-			Goal:      "Analyze",
-			Status:    "succeeded",
-			ProducedAt: time.Now(),
-			Files: []agentstate.ArtifactRecord{
-				{DisplayName: "SUMMARY.md", VPath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", IsSummary: true},
-				{DisplayName: "report.md", VPath: "/workspace/deliverables/2026-02-08/task-1/report.md"},
-			},
-		},
+	groups := []protocol.ArtifactNode{
+		{NodeKey: "day:2026-02-08", Kind: "day", Label: "2026-02-08", DayBucket: "2026-02-08"},
+		{NodeKey: "role:2026-02-08:ceo", Kind: "role", Label: "ceo", DayBucket: "2026-02-08", Role: "ceo"},
+		{NodeKey: "stream:2026-02-08:ceo:task", Kind: "stream", Label: "Tasks", DayBucket: "2026-02-08", Role: "ceo", TaskKind: "task"},
+		{NodeKey: "task:task-1", Kind: "task", Label: "task-1", DayBucket: "2026-02-08", Role: "ceo", TaskKind: "task", TaskID: "task-1", Status: "succeeded"},
+		{NodeKey: "file:/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", Kind: "file", Label: "SUMMARY.md", VPath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", IsSummary: true},
+		{NodeKey: "file:/workspace/deliverables/2026-02-08/task-1/report.md", Kind: "file", Label: "report.md", VPath: "/workspace/deliverables/2026-02-08/task-1/report.md"},
 	}
 	m.artifactAllTree = m.buildArtifactTreeFromGroups(groups)
 	// Collapse everything.

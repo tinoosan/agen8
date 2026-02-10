@@ -248,16 +248,37 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 		}
 		agentCfg.PromptSource = promptSource
 		agentCfg.Hooks = agent.Hooks{
-			OnLLMUsage: newCostUsageHook(cfg, run, teamModel, resolved.PriceInPerMTokensUSD, resolved.PriceOutPerMTokensUSD, sessionStore, func(ctx context.Context, ev events.Event) {
-				if ev.Data == nil {
-					ev.Data = map[string]string{}
-				}
-				ev.Data["teamId"] = teamID
-				ev.Data["role"] = role.Name
-				if err := orderedEmitter.Emit(ctx, ev); err != nil && !errorsIsDropped(err) {
-					log.Printf("events: emit failed: %v", err)
-				}
-			}),
+			OnLLMUsage: newCostUsageHook(
+				cfg,
+				run,
+				teamModel,
+				resolved.PriceInPerMTokensUSD,
+				resolved.PriceOutPerMTokensUSD,
+				sessionStore,
+				func() string {
+					if sessionStore == nil {
+						return strings.TrimSpace(teamModel)
+					}
+					sess, err := sessionStore.LoadSession(context.Background(), strings.TrimSpace(run.SessionID))
+					if err != nil {
+						return strings.TrimSpace(teamModel)
+					}
+					if active := strings.TrimSpace(sess.ActiveModel); active != "" {
+						return active
+					}
+					return strings.TrimSpace(teamModel)
+				},
+				func(ctx context.Context, ev events.Event) {
+					if ev.Data == nil {
+						ev.Data = map[string]string{}
+					}
+					ev.Data["teamId"] = teamID
+					ev.Data["role"] = role.Name
+					if err := orderedEmitter.Emit(ctx, ev); err != nil && !errorsIsDropped(err) {
+						log.Printf("events: emit failed: %v", err)
+					}
+				},
+			),
 			OnStep: func(step int, model, summary string) {
 				data := map[string]string{
 					"step":  strconv.Itoa(step),

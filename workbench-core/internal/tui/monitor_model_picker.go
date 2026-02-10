@@ -3,14 +3,13 @@ package tui
 import (
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
-	"github.com/tinoosan/workbench-core/pkg/cost"
+	"github.com/tinoosan/workbench-core/pkg/protocol"
 )
 
 // modelPickerItem implements list.Item for the model picker.
@@ -117,34 +116,31 @@ func (m *monitorModel) refreshModelPickerItems() {
 		return
 	}
 	q := strings.ToLower(strings.TrimSpace(m.modelPickerQuery))
-	infos := cost.SupportedModelInfos()
-	items := make([]list.Item, 0, len(infos))
+	items := make([]list.Item, 0, 64)
 
 	if m.modelPickerProviderView {
-		counts := map[string]int{}
-		for _, info := range infos {
-			provider := strings.TrimSpace(info.Provider)
-			if provider == "" {
-				provider = "unknown"
-			}
-			counts[provider]++
-		}
-		providers := make([]string, 0, len(counts))
-		for provider := range counts {
-			providers = append(providers, provider)
-		}
-		sort.Strings(providers)
-		for _, provider := range providers {
-			candidate := strings.ToLower(provider)
+		var res protocol.ModelListResult
+		_ = m.rpcRoundTrip(protocol.MethodModelList, protocol.ModelListParams{
+			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+			Query:    strings.TrimSpace(m.modelPickerQuery),
+		}, &res)
+		for _, p := range res.Providers {
+			candidate := strings.ToLower(strings.TrimSpace(p.Name))
 			if q != "" && !strings.Contains(candidate, q) {
 				continue
 			}
-			items = append(items, monitorModelPickerItem{provider: provider, isProvider: true, count: counts[provider]})
+			items = append(items, monitorModelPickerItem{provider: strings.TrimSpace(p.Name), isProvider: true, count: p.Count})
 		}
 		m.modelPickerList.Title = "Select Provider"
 	} else {
 		provider := strings.TrimSpace(m.modelPickerProvider)
-		for _, info := range infos {
+		var res protocol.ModelListResult
+		_ = m.rpcRoundTrip(protocol.MethodModelList, protocol.ModelListParams{
+			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+			Provider: provider,
+			Query:    strings.TrimSpace(m.modelPickerQuery),
+		}, &res)
+		for _, info := range res.Models {
 			if !strings.EqualFold(strings.TrimSpace(info.Provider), provider) {
 				continue
 			}
@@ -152,13 +148,8 @@ func (m *monitorModel) refreshModelPickerItems() {
 			if q != "" && !strings.Contains(candidate, q) {
 				continue
 			}
-			items = append(items, monitorModelPickerItem{id: info.ID, provider: provider})
+			items = append(items, monitorModelPickerItem{id: strings.TrimSpace(info.ID), provider: provider})
 		}
-		sort.Slice(items, func(i, j int) bool {
-			a, _ := items[i].(monitorModelPickerItem)
-			b, _ := items[j].(monitorModelPickerItem)
-			return a.id < b.id
-		})
 		m.modelPickerList.Title = "Select Model (" + provider + ")"
 	}
 

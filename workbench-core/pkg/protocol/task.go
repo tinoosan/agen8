@@ -20,6 +20,10 @@ type Task struct {
 	Summary          string    `json:"summary,omitempty"`
 	Error            string    `json:"error,omitempty"`
 	Artifacts        []string  `json:"artifacts,omitempty"`
+	InputTokens      int       `json:"inputTokens,omitempty"`
+	OutputTokens     int       `json:"outputTokens,omitempty"`
+	TotalTokens      int       `json:"totalTokens,omitempty"`
+	CostUSD          float64   `json:"costUSD,omitempty"`
 	CreatedAt        time.Time `json:"createdAt"`
 	CompletedAt      time.Time `json:"completedAt,omitempty"`
 }
@@ -30,10 +34,12 @@ type TaskListParams struct {
 	TeamID   string   `json:"teamId,omitempty"`
 	Assignee string   `json:"assignee,omitempty"`
 	Limit    int      `json:"limit,omitempty"`
+	Offset   int      `json:"offset,omitempty"`
 }
 
 type TaskListResult struct {
-	Tasks []Task `json:"tasks"`
+	Tasks      []Task `json:"tasks"`
+	TotalCount int    `json:"totalCount,omitempty"`
 }
 
 type TaskCreateParams struct {

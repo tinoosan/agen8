@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,6 +21,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
 	"github.com/muesli/reflow/wordwrap"
+	"github.com/tinoosan/workbench-core/internal/app"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
@@ -26,9 +29,9 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/resources"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
-	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -67,8 +70,10 @@ type planFilesLoadedMsg struct {
 }
 
 type sessionTotalsLoadedMsg struct {
-	session types.Session
-	err     error
+	session      types.Session
+	pricingKnown bool
+	tasksDone    int
+	err          error
 }
 
 type inboxLoadedMsg struct {
@@ -518,6 +523,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 
 	runStatus := types.RunStatusSucceeded
 	runSessionID := ""
+	sessionActiveModel := ""
 	if r, err := store.LoadRun(cfg, runID); err == nil {
 		runStatus = r.Status
 		runSessionID = strings.TrimSpace(r.SessionID)
@@ -535,6 +541,9 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 			stats.totalTokens = sess.TotalTokens
 			stats.totalCostUSD = sess.CostUSD
 			stats.pricingKnown = sess.TotalTokens == 0 || sess.CostUSD > 0 || pricingKnownForRunID(cfg, runID)
+			if active := strings.TrimSpace(sess.ActiveModel); active != "" {
+				sessionActiveModel = active
+			}
 		}
 	}
 
@@ -591,6 +600,9 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		teamRoleByRunID:             map[string]string{},
 		teamEventCursor:             map[string]int64{},
 	}
+	if sessionActiveModel != "" {
+		m.model = sessionActiveModel
+	}
 	// Disable mouse handling so terminals don't enter mouse-reporting mode.
 	m.activityDetail.MouseWheelEnabled = false
 	m.planViewport.MouseWheelEnabled = false
@@ -603,6 +615,9 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 
 	for _, e := range evs {
 		m.observeEvent(e)
+	}
+	if sessionActiveModel != "" {
+		m.model = sessionActiveModel
 	}
 	// Activity feed is loaded from SQLite (paginated) via loadActivityPage.
 	m.loadPlanFiles()
@@ -641,24 +656,10 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 	activityList.SetShowFilter(false)
 	activityList.SetShowHelp(false)
 	activityList.SetShowPagination(false)
-	manifest, _ := loadTeamManifest(cfg.DataDir, teamID)
 	teamRoleByRun := map[string]string{}
 	teamRunIDs := []string{}
 	teamCoordinatorRunID := ""
 	teamCoordinatorRole := ""
-	if manifest != nil {
-		teamCoordinatorRunID = strings.TrimSpace(manifest.CoordinatorRun)
-		teamCoordinatorRole = strings.TrimSpace(manifest.CoordinatorRole)
-		for _, role := range manifest.Roles {
-			runID := strings.TrimSpace(role.RunID)
-			roleName := strings.TrimSpace(role.RoleName)
-			if runID == "" {
-				continue
-			}
-			teamRoleByRun[runID] = roleName
-			teamRunIDs = append(teamRunIDs, runID)
-		}
-	}
 	teamEventCursor := map[string]int64{}
 	for _, runID := range teamRunIDs {
 		if latest, err := store.GetLatestEventSeq(cfg, runID); err == nil {
@@ -734,13 +735,6 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 	m.memoryVP.MouseWheelEnabled = false
 	m.thinkingVP.MouseWheelEnabled = false
 	m.artifactContentVP.MouseWheelEnabled = false
-	if manifest != nil {
-		m.profile = strings.TrimSpace(manifest.ProfileID)
-		m.model = strings.TrimSpace(manifest.TeamModel)
-		m.teamModelChange = manifest.ModelChange
-		m.teamCoordinatorRole = strings.TrimSpace(manifest.CoordinatorRole)
-		m.teamCoordinatorRunID = strings.TrimSpace(manifest.CoordinatorRun)
-	}
 	if m.profile == "" {
 		m.profile = "team"
 	}
@@ -848,6 +842,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case taskQueuedLocallyMsg:
 		m.inbox[msg.TaskID] = taskState{TaskID: msg.TaskID, Goal: msg.Goal, Status: string(types.TaskStatusPending)}
+		m.appendAgentOutput(fmt.Sprintf("[%s] task.queued %s %s", time.Now().Local().Format("15:04:05"), shortID(msg.TaskID), truncateText(strings.TrimSpace(msg.Goal), 80)))
 		m.dirtyInbox = true
 		return m, tea.Batch(m.loadInboxPage(), m.scheduleUIRefresh())
 
@@ -915,7 +910,15 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if profileID := strings.TrimSpace(manifest.ProfileID); profileID != "" {
 			m.profile = profileID
 		}
-		if teamModel := strings.TrimSpace(manifest.TeamModel); teamModel != "" {
+		if modelChange := manifest.ModelChange; modelChange != nil {
+			requested := strings.TrimSpace(modelChange.RequestedModel)
+			status := strings.ToLower(strings.TrimSpace(modelChange.Status))
+			if requested != "" && (status == "pending" || status == "applied") {
+				m.model = requested
+			} else if teamModel := strings.TrimSpace(manifest.TeamModel); teamModel != "" {
+				m.model = teamModel
+			}
+		} else if teamModel := strings.TrimSpace(manifest.TeamModel); teamModel != "" {
 			m.model = teamModel
 		}
 		m.teamModelChange = manifest.ModelChange
@@ -1012,7 +1015,10 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stats.totalTokensOut = msg.session.OutputTokens
 			m.stats.totalTokens = msg.session.TotalTokens
 			m.stats.totalCostUSD = msg.session.CostUSD
-			m.stats.pricingKnown = msg.session.TotalTokens == 0 || msg.session.CostUSD > 0 || pricingKnownForRunID(m.cfg, m.runID)
+			m.stats.pricingKnown = msg.pricingKnown
+			if msg.tasksDone > 0 {
+				m.stats.tasksDone = msg.tasksDone
+			}
 		}
 		return m, m.scheduleUIRefresh()
 
@@ -1292,19 +1298,164 @@ func (m *monitorModel) scheduleSessionTotalsReload() tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return sessionTotalsReloadMsg{} })
 }
 
-func (m *monitorModel) loadSessionTotalsCmd() tea.Cmd {
-	if m == nil || m.session == nil || strings.TrimSpace(m.sessionID) == "" {
-		return nil
+func (m *monitorModel) rpcRun() types.Run {
+	runID := strings.TrimSpace(m.runID)
+	if strings.TrimSpace(m.teamID) != "" {
+		if r := strings.TrimSpace(m.teamCoordinatorRunID); r != "" {
+			runID = r
+		}
 	}
 	sessionID := strings.TrimSpace(m.sessionID)
+	if sessionID == "" {
+		if strings.TrimSpace(m.teamID) != "" {
+			sessionID = "team-" + strings.TrimSpace(m.teamID)
+		} else {
+			sessionID = "sess-" + strings.TrimSpace(m.runID)
+		}
+	}
+	return types.Run{RunID: runID, SessionID: sessionID}
+}
+
+func (m *monitorModel) rpcRoundTrip(method string, params any, out any) error {
+	if m == nil {
+		return fmt.Errorf("monitor is nil")
+	}
+	req, err := protocol.NewRequest("1", method, params)
+	if err != nil {
+		return err
+	}
+	srvCfg := app.RPCServerConfig{
+		Cfg:       m.cfg,
+		Run:       m.rpcRun(),
+		TaskStore: m.taskStore,
+		ControlSetModel: func(ctx context.Context, threadID, target, model string) ([]string, error) {
+			return m.rpcControlSetModel(ctx, threadID, target, model)
+		},
+		ControlSetProfile: func(ctx context.Context, threadID, target, profileRef string) ([]string, error) {
+			return m.rpcControlSetProfile(ctx, threadID, target, profileRef)
+		},
+	}
+	srv := app.NewRPCServer(srvCfg)
+	if rw, ok := m.session.(pkgstore.SessionReaderWriter); ok {
+		srvCfg.Session = rw
+		srv = app.NewRPCServer(srvCfg)
+	}
+	pr, pw := io.Pipe()
+	var buf bytes.Buffer
+	baseCtx := m.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, 2*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx, pr, &buf) }()
+	if err := json.NewEncoder(pw).Encode(req); err != nil {
+		_ = pw.Close()
+		<-done
+		return err
+	}
+	_ = pw.Close()
+	if err := <-done; err != nil {
+		return err
+	}
+	var resp protocol.Message
+	if err := json.NewDecoder(bytes.NewReader(buf.Bytes())).Decode(&resp); err != nil {
+		return err
+	}
+	if resp.Error != nil {
+		return fmt.Errorf("rpc %s: %s", method, strings.TrimSpace(resp.Error.Message))
+	}
+	if out == nil {
+		return nil
+	}
+	return json.Unmarshal(resp.Result, out)
+}
+
+func (m *monitorModel) rpcControlSetModel(ctx context.Context, threadID, target, model string) ([]string, error) {
+	if strings.TrimSpace(threadID) != strings.TrimSpace(m.rpcRun().SessionID) {
+		return nil, fmt.Errorf("thread not found")
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil, fmt.Errorf("model is required")
+	}
+	target = strings.TrimSpace(target)
+
+	if strings.TrimSpace(m.teamID) != "" {
+		return m.queueTeamModelChange(model, target, "rpc.control.setModel")
+	}
+
+	runID := strings.TrimSpace(m.runID)
+	if target != "" && target != runID && target != strings.TrimSpace(m.sessionID) {
+		return nil, fmt.Errorf("target does not match active run")
+	}
+	ss, err := store.NewSQLiteSessionStore(m.cfg)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(m.sessionID) != "" {
+		if sess, serr := ss.LoadSession(ctx, strings.TrimSpace(m.sessionID)); serr == nil {
+			sess.ActiveModel = model
+			_ = ss.SaveSession(ctx, sess)
+		}
+	}
+	return []string{runID}, nil
+}
+
+func (m *monitorModel) rpcControlSetProfile(_ context.Context, threadID, target, profileRef string) ([]string, error) {
+	if strings.TrimSpace(threadID) != strings.TrimSpace(m.rpcRun().SessionID) {
+		return nil, fmt.Errorf("thread not found")
+	}
+	profileRef = strings.TrimSpace(profileRef)
+	if profileRef == "" {
+		return nil, fmt.Errorf("profile is required")
+	}
+	target = strings.TrimSpace(target)
+	if strings.TrimSpace(m.teamID) != "" {
+		return nil, fmt.Errorf("profile switching is not supported in team mode")
+	}
+	runID := strings.TrimSpace(m.runID)
+	if target != "" && target != runID && target != strings.TrimSpace(m.sessionID) {
+		return nil, fmt.Errorf("target does not match active run")
+	}
+	return []string{runID}, nil
+}
+
+func (m *monitorModel) loadSessionTotalsCmd() tea.Cmd {
+	if m == nil {
+		return nil
+	}
 	return func() tea.Msg {
-		sess, err := m.session.LoadSession(m.ctx, sessionID)
-		return sessionTotalsLoadedMsg{session: sess, err: err}
+		params := protocol.SessionGetTotalsParams{
+			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+		}
+		if strings.TrimSpace(m.teamID) != "" {
+			params.TeamID = strings.TrimSpace(m.teamID)
+			if strings.TrimSpace(m.focusedRunID) != "" {
+				params.RunID = strings.TrimSpace(m.focusedRunID)
+			}
+		} else {
+			params.RunID = strings.TrimSpace(m.runID)
+		}
+		var res protocol.SessionGetTotalsResult
+		if err := m.rpcRoundTrip(protocol.MethodSessionGetTotals, params, &res); err != nil {
+			return sessionTotalsLoadedMsg{err: err}
+		}
+		now := time.Now().UTC()
+		return sessionTotalsLoadedMsg{session: types.Session{
+			SessionID:   strings.TrimSpace(m.rpcRun().SessionID),
+			CreatedAt:   &now,
+			InputTokens: res.TotalTokensIn,
+			OutputTokens: res.TotalTokensOut,
+			TotalTokens: res.TotalTokens,
+			CostUSD:     res.TotalCostUSD,
+		}, pricingKnown: res.PricingKnown, tasksDone: res.TasksDone}
 	}
 }
 
 func (m *monitorModel) loadInboxPage() tea.Cmd {
-	if m == nil || m.taskStore == nil {
+	if m == nil {
 		return nil
 	}
 	pageSize := m.inboxPageSize
@@ -1320,20 +1471,32 @@ func (m *monitorModel) loadInboxPage() tea.Cmd {
 	prevPage := m.inboxPage
 
 	return func() tea.Msg {
-		totalFilter := m.scopedTaskFilter(agentstate.TaskFilter{
-			Status:   []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive},
-			Limit:    0,
-			Offset:   0,
-			SortBy:   "",
-			SortDesc: false,
-		})
-		total, err := m.taskStore.CountTasks(m.ctx, totalFilter)
+		fetch := func(targetPage int) (protocol.TaskListResult, error) {
+			params := protocol.TaskListParams{
+				ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+				View:     "inbox",
+				Limit:    pageSize,
+				Offset:   targetPage * pageSize,
+			}
+			if strings.TrimSpace(m.teamID) != "" {
+				params.TeamID = strings.TrimSpace(m.teamID)
+			}
+			var res protocol.TaskListResult
+			if err := m.rpcRoundTrip(protocol.MethodTaskList, params, &res); err != nil {
+				return protocol.TaskListResult{}, err
+			}
+			return res, nil
+		}
+
+		res, err := fetch(page)
 		if err != nil {
 			return inboxLoadedMsg{tasks: prevTasks, totalCount: prevTotal, page: prevPage}
 		}
+		total := res.TotalCount
 		if total <= 0 {
 			return inboxLoadedMsg{tasks: []taskState{}, totalCount: 0, page: 0}
 		}
+		requestedPage := page
 		maxPage := (total + pageSize - 1) / pageSize
 		if maxPage > 0 {
 			maxPage--
@@ -1344,28 +1507,30 @@ func (m *monitorModel) loadInboxPage() tea.Cmd {
 		if page < 0 {
 			page = 0
 		}
-
-		listFilter := m.scopedTaskFilter(agentstate.TaskFilter{
-			Status:   []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive},
-			SortBy:   "created_at",
-			SortDesc: false,
-			Limit:    pageSize,
-			Offset:   page * pageSize,
-		})
-		tasks, err := m.taskStore.ListTasks(m.ctx, listFilter)
-		if err != nil {
-			return inboxLoadedMsg{tasks: prevTasks, totalCount: prevTotal, page: prevPage}
+		if page != requestedPage {
+			res, err = fetch(page)
+			if err != nil {
+				return inboxLoadedMsg{tasks: prevTasks, totalCount: prevTotal, page: prevPage}
+			}
+			if res.TotalCount > 0 {
+				total = res.TotalCount
+			}
 		}
-		out := make([]taskState, 0, len(tasks))
-		for _, t := range tasks {
+
+		out := make([]taskState, 0, len(res.Tasks))
+		for _, t := range res.Tasks {
+			status := strings.TrimSpace(t.Status)
+			if status != string(types.TaskStatusPending) && status != string(types.TaskStatusActive) {
+				continue
+			}
 			ts := taskState{
-				TaskID:       strings.TrimSpace(t.TaskID),
+				TaskID:       strings.TrimSpace(t.ID),
 				AssignedRole: strings.TrimSpace(t.AssignedRole),
 				Goal:         strings.TrimSpace(t.Goal),
-				Status:       strings.TrimSpace(string(t.Status)),
+				Status:       status,
 			}
-			if timeutil.IsSet(t.StartedAt) {
-				ts.StartedAt = *t.StartedAt
+			if !t.CreatedAt.IsZero() {
+				ts.StartedAt = t.CreatedAt
 			}
 			if ts.TaskID != "" {
 				out = append(out, ts)
@@ -1376,7 +1541,7 @@ func (m *monitorModel) loadInboxPage() tea.Cmd {
 }
 
 func (m *monitorModel) loadOutboxPage() tea.Cmd {
-	if m == nil || m.taskStore == nil {
+	if m == nil {
 		return nil
 	}
 	pageSize := m.outboxPageSize
@@ -1392,20 +1557,32 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 	prevPage := m.outboxPage
 
 	return func() tea.Msg {
-		totalFilter := m.scopedTaskFilter(agentstate.TaskFilter{
-			Status:   []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled},
-			Limit:    0,
-			Offset:   0,
-			SortBy:   "",
-			SortDesc: false,
-		})
-		total, err := m.taskStore.CountTasks(m.ctx, totalFilter)
+		fetch := func(targetPage int) (protocol.TaskListResult, error) {
+			params := protocol.TaskListParams{
+				ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+				View:     "outbox",
+				Limit:    pageSize,
+				Offset:   targetPage * pageSize,
+			}
+			if strings.TrimSpace(m.teamID) != "" {
+				params.TeamID = strings.TrimSpace(m.teamID)
+			}
+			var res protocol.TaskListResult
+			if err := m.rpcRoundTrip(protocol.MethodTaskList, params, &res); err != nil {
+				return protocol.TaskListResult{}, err
+			}
+			return res, nil
+		}
+
+		res, err := fetch(page)
 		if err != nil {
 			return outboxLoadedMsg{entries: prevEntries, totalCount: prevTotal, page: prevPage}
 		}
+		total := res.TotalCount
 		if total <= 0 {
 			return outboxLoadedMsg{entries: []outboxEntry{}, totalCount: 0, page: 0}
 		}
+		requestedPage := page
 		maxPage := (total + pageSize - 1) / pageSize
 		if maxPage > 0 {
 			maxPage--
@@ -1416,37 +1593,35 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 		if page < 0 {
 			page = 0
 		}
-
-		listFilter := m.scopedTaskFilter(agentstate.TaskFilter{
-			Status:   []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled},
-			SortBy:   "finished_at",
-			SortDesc: true,
-			Limit:    pageSize,
-			Offset:   page * pageSize,
-		})
-		tasks, err := m.taskStore.ListTasks(m.ctx, listFilter)
-		if err != nil {
-			return outboxLoadedMsg{entries: prevEntries, totalCount: prevTotal, page: prevPage}
+		if page != requestedPage {
+			res, err = fetch(page)
+			if err != nil {
+				return outboxLoadedMsg{entries: prevEntries, totalCount: prevTotal, page: prevPage}
+			}
+			if res.TotalCount > 0 {
+				total = res.TotalCount
+			}
 		}
-		out := make([]outboxEntry, 0, len(tasks))
-		for _, t := range tasks {
-			ts := time.Time{}
-			if timeutil.IsSet(t.CompletedAt) {
-				ts = *t.CompletedAt
+
+		out := make([]outboxEntry, 0, len(res.Tasks))
+		for _, t := range res.Tasks {
+			status := strings.TrimSpace(t.Status)
+			if status != string(types.TaskStatusSucceeded) && status != string(types.TaskStatusFailed) && status != string(types.TaskStatusCanceled) {
+				continue
 			}
 			out = append(out, outboxEntry{
-				TaskID:       strings.TrimSpace(t.TaskID),
-				RunID:        strings.TrimSpace(t.RunID),
+				TaskID:       strings.TrimSpace(t.ID),
+				RunID:        strings.TrimSpace(string(t.RunID)),
 				AssignedRole: strings.TrimSpace(t.AssignedRole),
 				Goal:         strings.TrimSpace(t.Goal),
-				Status:       strings.TrimSpace(string(t.Status)),
+				Status:       status,
 				Summary:      strings.TrimSpace(t.Summary),
 				Error:        strings.TrimSpace(t.Error),
 				InputTokens:  t.InputTokens,
 				OutputTokens: t.OutputTokens,
 				TotalTokens:  t.TotalTokens,
 				CostUSD:      t.CostUSD,
-				Timestamp:    ts,
+				Timestamp:    t.CompletedAt,
 			})
 		}
 		return outboxLoadedMsg{entries: out, totalCount: total, page: page}
@@ -1463,7 +1638,10 @@ func (m *monitorModel) scopedTaskFilter(filter agentstate.TaskFilter) agentstate
 	if strings.TrimSpace(m.teamID) != "" {
 		filter.TeamID = strings.TrimSpace(m.teamID)
 		filter.RunID = ""
+		return filter
 	}
+	filter.TeamID = ""
+	filter.RunID = strings.TrimSpace(m.runID)
 	return filter
 }
 
@@ -1472,133 +1650,27 @@ func (m *monitorModel) loadTeamStatus() tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		pending, _ := m.taskStore.CountTasks(m.ctx, agentstate.TaskFilter{
-			TeamID: m.teamID,
-			Status: []types.TaskStatus{types.TaskStatusPending},
-		})
-		active, _ := m.taskStore.CountTasks(m.ctx, agentstate.TaskFilter{
-			TeamID: m.teamID,
-			Status: []types.TaskStatus{types.TaskStatusActive},
-		})
-		done, _ := m.taskStore.CountTasks(m.ctx, agentstate.TaskFilter{
-			TeamID: m.teamID,
-			Status: []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled},
-		})
-		activeTasks, _ := m.taskStore.ListTasks(m.ctx, agentstate.TaskFilter{
-			TeamID:   m.teamID,
-			Status:   []types.TaskStatus{types.TaskStatusActive},
-			SortBy:   "updated_at",
-			SortDesc: true,
-			Limit:    200,
-		})
-		pendingTasks, _ := m.taskStore.ListTasks(m.ctx, agentstate.TaskFilter{
-			TeamID:   m.teamID,
-			Status:   []types.TaskStatus{types.TaskStatusPending},
-			SortBy:   "created_at",
-			SortDesc: false,
-			Limit:    200,
-		})
-		roleInfo := map[string]string{}
-		roleByRunID := map[string]string{}
-		for runID, role := range m.teamRoleByRunID {
-			if strings.TrimSpace(runID) == "" {
-				continue
-			}
-			roleByRunID[strings.TrimSpace(runID)] = strings.TrimSpace(role)
+		var res protocol.TeamGetStatusResult
+		if err := m.rpcRoundTrip(protocol.MethodTeamGetStatus, protocol.TeamGetStatusParams{
+			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+			TeamID:   strings.TrimSpace(m.teamID),
+		}, &res); err != nil {
+			return teamStatusLoadedMsg{}
 		}
-		runIDSet := map[string]struct{}{}
-		for runID := range roleByRunID {
-			runIDSet[runID] = struct{}{}
-		}
-		for _, task := range pendingTasks {
-			role := strings.TrimSpace(task.AssignedRole)
-			if role == "" {
-				role = "(coordinator)"
-			}
-			if strings.TrimSpace(task.RunID) != "" {
-				if _, ok := roleByRunID[strings.TrimSpace(task.RunID)]; !ok {
-					roleByRunID[strings.TrimSpace(task.RunID)] = role
-				}
-				runIDSet[strings.TrimSpace(task.RunID)] = struct{}{}
-			}
-			if _, exists := roleInfo[role]; exists {
-				continue
-			}
-			roleInfo[role] = "pending: " + truncateText(strings.TrimSpace(task.Goal), 52)
-		}
-		for _, task := range activeTasks {
-			role := strings.TrimSpace(task.AssignedRole)
-			if role == "" {
-				role = "(coordinator)"
-			}
-			if strings.TrimSpace(task.RunID) != "" {
-				if _, ok := roleByRunID[strings.TrimSpace(task.RunID)]; !ok {
-					roleByRunID[strings.TrimSpace(task.RunID)] = role
-				}
-				runIDSet[strings.TrimSpace(task.RunID)] = struct{}{}
-			}
-			roleInfo[role] = "active: " + truncateText(strings.TrimSpace(task.Goal), 52)
-		}
-		completedTasks, _ := m.taskStore.ListTasks(m.ctx, agentstate.TaskFilter{
-			TeamID:   m.teamID,
-			Status:   []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled},
-			SortBy:   "finished_at",
-			SortDesc: true,
-			Limit:    500,
-		})
-		for _, task := range completedTasks {
-			role := strings.TrimSpace(task.AssignedRole)
-			if role == "" {
-				role = "(coordinator)"
-			}
-			if strings.TrimSpace(task.RunID) != "" {
-				if _, ok := roleByRunID[strings.TrimSpace(task.RunID)]; !ok {
-					roleByRunID[strings.TrimSpace(task.RunID)] = role
-				}
-				runIDSet[strings.TrimSpace(task.RunID)] = struct{}{}
-			}
-		}
-		roles := make([]teamRoleState, 0, len(roleInfo))
-		keys := make([]string, 0, len(roleInfo))
-		for role := range roleInfo {
-			keys = append(keys, role)
-		}
-		sort.Strings(keys)
-		for _, role := range keys {
-			roles = append(roles, teamRoleState{Role: role, Info: roleInfo[role]})
-		}
-		runIDs := make([]string, 0, len(runIDSet))
-		for runID := range runIDSet {
-			runIDs = append(runIDs, runID)
-		}
-		sort.Strings(runIDs)
-		totalTokens := 0
-		totalCostUSD := 0.0
-		pricingKnown := true
-		for _, runID := range runIDs {
-			stats, err := m.taskStore.GetRunStats(m.ctx, runID)
-			if err != nil {
-				continue
-			}
-			totalTokens += stats.TotalTokens
-			totalCostUSD += stats.TotalCost
-			if stats.TotalTokens > 0 && stats.TotalCost <= 0 && !pricingKnownForRunID(m.cfg, runID) {
-				pricingKnown = false
-			}
-		}
-		if totalTokens == 0 {
-			pricingKnown = true
+		roles := make([]teamRoleState, 0, len(res.Roles))
+		for _, r := range res.Roles {
+			roles = append(roles, teamRoleState{Role: strings.TrimSpace(r.Role), Info: strings.TrimSpace(r.Info)})
 		}
 		return teamStatusLoadedMsg{
-			pending:      pending,
-			active:       active,
-			done:         done,
+			pending:      res.Pending,
+			active:       res.Active,
+			done:         res.Done,
 			roles:        roles,
-			runIDs:       runIDs,
-			roleByRunID:  roleByRunID,
-			totalTokens:  totalTokens,
-			totalCostUSD: totalCostUSD,
-			pricingKnown: pricingKnown,
+			runIDs:       append([]string(nil), res.RunIDs...),
+			roleByRunID:  res.RoleByRunID,
+			totalTokens:  res.TotalTokens,
+			totalCostUSD: res.TotalCostUSD,
+			pricingKnown: res.PricingKnown,
 		}
 	}
 }
@@ -1667,11 +1739,39 @@ func (m *monitorModel) loadTeamManifestCmd() tea.Cmd {
 	if m == nil || strings.TrimSpace(m.teamID) == "" {
 		return nil
 	}
-	dataDir := m.cfg.DataDir
-	teamID := strings.TrimSpace(m.teamID)
 	return func() tea.Msg {
-		manifest, err := loadTeamManifest(dataDir, teamID)
-		return teamManifestLoadedMsg{manifest: manifest, err: err}
+		var res protocol.TeamGetManifestResult
+		err := m.rpcRoundTrip(protocol.MethodTeamGetManifest, protocol.TeamGetManifestParams{
+			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+			TeamID:   strings.TrimSpace(m.teamID),
+		}, &res)
+		if err != nil {
+			return teamManifestLoadedMsg{manifest: nil, err: err}
+		}
+		manifest := &teamManifestFile{
+			TeamID:          res.TeamID,
+			ProfileID:       res.ProfileID,
+			TeamModel:       res.TeamModel,
+			CoordinatorRole: res.CoordinatorRole,
+			CoordinatorRun:  res.CoordinatorRun,
+			CreatedAt:       res.CreatedAt,
+		}
+		if res.ModelChange != nil {
+			manifest.ModelChange = &teamModelChangeFile{
+				RequestedModel: res.ModelChange.RequestedModel,
+				Status:         res.ModelChange.Status,
+				RequestedAt:    res.ModelChange.RequestedAt,
+				AppliedAt:      res.ModelChange.AppliedAt,
+				Reason:         res.ModelChange.Reason,
+				Error:          res.ModelChange.Error,
+			}
+		}
+		roles := make([]teamManifestRole, 0, len(res.Roles))
+		for _, r := range res.Roles {
+			roles = append(roles, teamManifestRole{RoleName: r.RoleName, RunID: r.RunID, SessionID: r.SessionID})
+		}
+		manifest.Roles = roles
+		return teamManifestLoadedMsg{manifest: manifest, err: nil}
 	}
 }
 
@@ -1733,82 +1833,6 @@ func (m *monitorModel) loadActivityPage() tea.Cmd {
 	if m == nil {
 		return nil
 	}
-	if strings.TrimSpace(m.teamID) != "" {
-		pageSize := m.activityPageSize
-		if pageSize <= 0 {
-			pageSize = 200
-		}
-		page := m.activityPage
-		if page < 0 {
-			page = 0
-		}
-		prevActivities := append([]Activity(nil), m.activityPageItems...)
-		prevTotal := m.activityTotalCount
-		prevPage := m.activityPage
-		runIDs := append([]string(nil), m.teamRunIDs...)
-		if strings.TrimSpace(m.focusedRunID) != "" {
-			runIDs = []string{strings.TrimSpace(m.focusedRunID)}
-		}
-		roleByRun := map[string]string{}
-		for k, v := range m.teamRoleByRunID {
-			roleByRun[k] = v
-		}
-		focusedRunID := strings.TrimSpace(m.focusedRunID)
-		focusedRunRole := strings.TrimSpace(m.focusedRunRole)
-		dataDir := m.cfg.DataDir
-		return func() tea.Msg {
-			if len(runIDs) == 0 {
-				return activityLoadedMsg{activities: []Activity{}, totalCount: 0, page: 0}
-			}
-			merged := make([]Activity, 0, 512)
-			for _, runID := range runIDs {
-				acts, err := store.ListActivities(context.Background(), config.Config{DataDir: dataDir}, runID, 300, 0)
-				if err != nil {
-					continue
-				}
-				role := strings.TrimSpace(roleByRun[runID])
-				if role == "" && focusedRunID != "" && runID == focusedRunID {
-					role = focusedRunRole
-				}
-				for i := range acts {
-					act := acts[i]
-					if role != "" {
-						act.Title = "[" + role + "] " + strings.TrimSpace(act.Title)
-					}
-					act.ID = runID + ":" + act.ID
-					merged = append(merged, act)
-				}
-			}
-			sort.SliceStable(merged, func(i, j int) bool {
-				return merged[i].StartedAt.Before(merged[j].StartedAt)
-			})
-			total := len(merged)
-			if total <= 0 {
-				return activityLoadedMsg{activities: []Activity{}, totalCount: 0, page: 0}
-			}
-			maxPage := (total + pageSize - 1) / pageSize
-			if maxPage > 0 {
-				maxPage--
-			}
-			if page > maxPage {
-				page = maxPage
-			}
-			if page < 0 {
-				page = 0
-			}
-			start := page * pageSize
-			end := start + pageSize
-			if end > total {
-				end = total
-			}
-			if start < 0 || start >= total || start > end {
-				return activityLoadedMsg{activities: prevActivities, totalCount: prevTotal, page: prevPage}
-			}
-			out := make([]Activity, 0, end-start)
-			out = append(out, merged[start:end]...)
-			return activityLoadedMsg{activities: out, totalCount: total, page: page}
-		}
-	}
 	pageSize := m.activityPageSize
 	if pageSize <= 0 {
 		pageSize = 200
@@ -1822,13 +1846,37 @@ func (m *monitorModel) loadActivityPage() tea.Cmd {
 	prevPage := m.activityPage
 
 	return func() tea.Msg {
-		total, err := store.CountActivities(m.ctx, m.cfg, m.runID)
+		fetch := func(targetPage int) (protocol.ActivityListResult, error) {
+			params := protocol.ActivityListParams{
+				ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+				Limit:    pageSize,
+				Offset:   targetPage * pageSize,
+				SortDesc: false,
+			}
+			if strings.TrimSpace(m.teamID) != "" {
+				params.TeamID = strings.TrimSpace(m.teamID)
+				if strings.TrimSpace(m.focusedRunID) != "" {
+					params.RunID = strings.TrimSpace(m.focusedRunID)
+				}
+			} else {
+				params.RunID = strings.TrimSpace(m.runID)
+			}
+			var res protocol.ActivityListResult
+			if err := m.rpcRoundTrip(protocol.MethodActivityList, params, &res); err != nil {
+				return protocol.ActivityListResult{}, err
+			}
+			return res, nil
+		}
+
+		res, err := fetch(page)
 		if err != nil {
 			return activityLoadedMsg{activities: prevActivities, totalCount: prevTotal, page: prevPage}
 		}
+		total := res.TotalCount
 		if total <= 0 {
 			return activityLoadedMsg{activities: []Activity{}, totalCount: 0, page: 0}
 		}
+		requestedPage := page
 		maxPage := (total + pageSize - 1) / pageSize
 		if maxPage > 0 {
 			maxPage--
@@ -1839,13 +1887,17 @@ func (m *monitorModel) loadActivityPage() tea.Cmd {
 		if page < 0 {
 			page = 0
 		}
-
-		acts, err := store.ListActivities(m.ctx, m.cfg, m.runID, pageSize, page*pageSize)
-		if err != nil {
-			return activityLoadedMsg{activities: prevActivities, totalCount: prevTotal, page: prevPage}
+		if page != requestedPage {
+			res, err = fetch(page)
+			if err != nil {
+				return activityLoadedMsg{activities: prevActivities, totalCount: prevTotal, page: prevPage}
+			}
+			if res.TotalCount > 0 {
+				total = res.TotalCount
+			}
 		}
-		out := make([]Activity, 0, len(acts))
-		for _, a := range acts {
+		out := make([]Activity, 0, len(res.Activities))
+		for _, a := range res.Activities {
 			out = append(out, a)
 		}
 		return activityLoadedMsg{activities: out, totalCount: total, page: page}
@@ -2323,37 +2375,25 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 		if goal == "" {
 			return commandLinesMsg{lines: []string{"[queued] error: goal is empty"}}
 		}
-		if m.taskStore == nil {
-			return commandLinesMsg{lines: []string{"[queued] error: task store not available"}}
-		}
-		now := time.Now()
-		id := "task-" + uuid.NewString()
-		task := types.Task{
-			TaskID:    id,
-			SessionID: strings.TrimSpace(m.sessionID),
-			RunID:     strings.TrimSpace(m.runID),
-			Goal:      goal,
-			Priority:  priority,
-			Status:    types.TaskStatusPending,
-			CreatedAt: &now,
-			Inputs:    map[string]any{},
-			Metadata:  map[string]any{"source": "monitor"},
-		}
-		if task.SessionID == "" {
-			task.SessionID = "sess-" + strings.TrimSpace(m.runID)
+		params := protocol.TaskCreateParams{
+			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+			Goal:     goal,
+			Priority: priority,
 		}
 		if strings.TrimSpace(m.teamID) != "" {
-			task.TeamID = strings.TrimSpace(m.teamID)
-			task.AssignedToType = "team"
-			task.AssignedTo = strings.TrimSpace(m.teamID)
-			task.RunID = "team-" + strings.TrimSpace(m.teamID) + "-monitor"
-			task.SessionID = "team-" + strings.TrimSpace(m.teamID)
+			params.AssignedToType = "team"
+			params.AssignedTo = strings.TrimSpace(m.teamID)
 		} else {
-			task.AssignedToType = "agent"
-			task.AssignedTo = strings.TrimSpace(m.runID)
+			params.AssignedToType = "agent"
+			params.AssignedTo = strings.TrimSpace(m.runID)
 		}
-		if err := m.taskStore.CreateTask(m.ctx, task); err != nil {
+		var res protocol.TaskCreateResult
+		if err := m.rpcRoundTrip(protocol.MethodTaskCreate, params, &res); err != nil {
 			return commandLinesMsg{lines: []string{"[queued] error: " + err.Error()}}
+		}
+		id := strings.TrimSpace(res.Task.ID)
+		if id == "" {
+			id = "task-" + uuid.NewString()
 		}
 		suffix := "run " + m.runID
 		extra := []tea.Cmd{}
@@ -2376,9 +2416,6 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 
 func (m *monitorModel) writeControl(command string, args map[string]any) tea.Cmd {
 	return func() tea.Msg {
-		if strings.TrimSpace(m.teamID) != "" {
-			return commandLinesMsg{lines: []string{"[control] not supported in team mode"}}
-		}
 		switch strings.ToLower(strings.TrimSpace(command)) {
 		case "set_model":
 			model := ""
@@ -2390,14 +2427,14 @@ func (m *monitorModel) writeControl(command string, args map[string]any) tea.Cmd
 			if model == "" {
 				return commandLinesMsg{lines: []string{"[control] error: model is required"}}
 			}
-			m.model = model
-			ss, err := store.NewSQLiteSessionStore(m.cfg)
-			if err == nil {
-				if sess, serr := ss.LoadSession(m.ctx, m.sessionID); serr == nil {
-					sess.ActiveModel = model
-					_ = ss.SaveSession(m.ctx, sess)
-				}
+			var res protocol.ControlSetModelResult
+			if err := m.rpcRoundTrip(protocol.MethodControlSetModel, protocol.ControlSetModelParams{
+				ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+				Model:    model,
+			}, &res); err != nil {
+				return commandLinesMsg{lines: []string{"[control] error: " + err.Error()}}
 			}
+			m.model = model
 			return commandLinesMsg{lines: []string{"[control] applied set_model -> " + model}}
 		case "switch_profile":
 			ref := ""
@@ -2409,8 +2446,18 @@ func (m *monitorModel) writeControl(command string, args map[string]any) tea.Cmd
 			if ref == "" {
 				return commandLinesMsg{lines: []string{"[control] error: profile is required"}}
 			}
+			if strings.TrimSpace(m.teamID) != "" {
+				return commandLinesMsg{lines: []string{"[control] error: profile switching is not supported in team mode"}}
+			}
+			var res protocol.ControlSetProfileResult
+			if err := m.rpcRoundTrip(protocol.MethodControlSetProfile, protocol.ControlSetProfileParams{
+				ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+				Profile:  ref,
+			}, &res); err != nil {
+				return commandLinesMsg{lines: []string{"[control] error: " + err.Error()}}
+			}
 			m.profile = ref
-			return commandLinesMsg{lines: []string{"[control] switch_profile queued via RPC only"}}
+			return commandLinesMsg{lines: []string{"[control] applied switch_profile -> " + ref}}
 		default:
 			return commandLinesMsg{lines: []string{"[control] error: unsupported command " + command}}
 		}
@@ -2428,25 +2475,14 @@ func (m *monitorModel) writeTeamControl(command, model string) tea.Cmd {
 		if command == "" || model == "" {
 			return commandLinesMsg{lines: []string{"[control] error: command and model are required"}}
 		}
-		manifestPath := filepath.Join(fsutil.GetTeamDir(m.cfg.DataDir, teamID), "team.json")
-		raw, err := os.ReadFile(manifestPath)
-		if err != nil {
+		var res protocol.ControlSetModelResult
+		if err := m.rpcRoundTrip(protocol.MethodControlSetModel, protocol.ControlSetModelParams{
+			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+			Model:    model,
+		}, &res); err != nil {
 			return commandLinesMsg{lines: []string{"[control] error: " + err.Error()}}
 		}
-		var manifest teamManifestFile
-		if err := json.Unmarshal(raw, &manifest); err != nil {
-			return commandLinesMsg{lines: []string{"[control] error: " + err.Error()}}
-		}
-		manifest.ModelChange = &teamModelChangeFile{
-			RequestedModel: model,
-			Status:         "pending",
-			RequestedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-			Reason:         "monitor-request",
-		}
-		b, _ := json.MarshalIndent(manifest, "", "  ")
-		if err := os.WriteFile(manifestPath, b, 0o644); err != nil {
-			return commandLinesMsg{lines: []string{"[control] error: " + err.Error()}}
-		}
+		m.model = model
 		return tea.Batch(
 			func() tea.Msg {
 				return commandLinesMsg{lines: []string{"[control] queued team model change -> " + model}}
@@ -2454,6 +2490,36 @@ func (m *monitorModel) writeTeamControl(command, model string) tea.Cmd {
 			m.loadTeamManifestCmd(),
 		)
 	}
+}
+
+func (m *monitorModel) queueTeamModelChange(model, target, reason string) ([]string, error) {
+	teamID := strings.TrimSpace(m.teamID)
+	if teamID == "" {
+		return nil, fmt.Errorf("team id is required")
+	}
+	manifestPath := filepath.Join(fsutil.GetTeamDir(m.cfg.DataDir, teamID), "team.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return nil, err
+	}
+	var manifest teamManifestFile
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return nil, err
+	}
+	manifest.ModelChange = &teamModelChangeFile{
+		RequestedModel: strings.TrimSpace(model),
+		Status:         "pending",
+		RequestedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+		Reason:         strings.TrimSpace(reason),
+	}
+	b, _ := json.MarshalIndent(manifest, "", "  ")
+	if err := os.WriteFile(manifestPath, b, 0o644); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(target) != "" {
+		return []string{strings.TrimSpace(target)}, nil
+	}
+	return []string{}, nil
 }
 
 func (m *monitorModel) searchMemory(query string) tea.Cmd {
@@ -2481,7 +2547,11 @@ func (m *monitorModel) searchMemory(query string) tea.Cmd {
 
 func (m *monitorModel) observeEvent(ev types.EventRecord) {
 	if v := strings.TrimSpace(ev.Data["model"]); v != "" {
-		if strings.TrimSpace(m.teamID) == "" || strings.TrimSpace(m.model) == "" || strings.EqualFold(strings.TrimSpace(m.model), "team") {
+		if strings.TrimSpace(m.teamID) != "" {
+			if strings.TrimSpace(m.model) == "" || strings.EqualFold(strings.TrimSpace(m.model), "team") {
+				m.model = v
+			}
+		} else if strings.TrimSpace(m.model) == "" || ev.Type == "control.success" {
 			m.model = v
 		}
 	}
@@ -2544,8 +2614,8 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		ts.Goal = strings.TrimSpace(ev.Data["goal"])
 		ts.Status = "active"
 		ts.StartedAt = ev.Timestamp
+		m.inbox[taskID] = ts
 		m.currentTask = &ts
-		delete(m.inbox, taskID)
 	case "task.done":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
@@ -3599,23 +3669,28 @@ func (m *monitorModel) refreshViewports() {
 }
 
 func (m *monitorModel) loadPlanFiles() {
+	params := protocol.PlanGetParams{
+		ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+	}
 	if strings.TrimSpace(m.teamID) != "" {
+		params.TeamID = strings.TrimSpace(m.teamID)
 		if strings.TrimSpace(m.focusedRunID) != "" {
-			checklist, checklistErr, details, detailsErr := readPlanFiles(m.cfg.DataDir, strings.TrimSpace(m.focusedRunID))
-			m.planMarkdown, m.planLoadErr = checklist, checklistErr
-			m.planDetails, m.planDetailsErr = details, detailsErr
-			m.dirtyPlan = true
-			return
+			params.RunID = strings.TrimSpace(m.focusedRunID)
+		} else {
+			params.AggregateTeam = true
 		}
-		checklist, checklistErr, details, detailsErr := readTeamPlanFiles(m.cfg.DataDir, m.teamRunIDs, m.teamRoleByRunID)
-		m.planMarkdown, m.planLoadErr = checklist, checklistErr
-		m.planDetails, m.planDetailsErr = details, detailsErr
+	} else {
+		params.RunID = strings.TrimSpace(m.runID)
+	}
+	var res protocol.PlanGetResult
+	if err := m.rpcRoundTrip(protocol.MethodPlanGet, params, &res); err != nil {
+		m.planLoadErr = err.Error()
+		m.planDetailsErr = err.Error()
 		m.dirtyPlan = true
 		return
 	}
-	checklist, checklistErr, details, detailsErr := readPlanFiles(m.cfg.DataDir, m.runID)
-	m.planMarkdown, m.planLoadErr = checklist, checklistErr
-	m.planDetails, m.planDetailsErr = details, detailsErr
+	m.planMarkdown, m.planLoadErr = res.Checklist, res.ChecklistErr
+	m.planDetails, m.planDetailsErr = res.Details, res.DetailsErr
 	m.dirtyPlan = true
 }
 
@@ -3623,128 +3698,31 @@ func (m *monitorModel) loadPlanFilesCmd() tea.Cmd {
 	if m == nil {
 		return nil
 	}
-	if strings.TrimSpace(m.teamID) != "" {
-		dataDir := m.cfg.DataDir
-		if strings.TrimSpace(m.focusedRunID) != "" {
-			runID := strings.TrimSpace(m.focusedRunID)
-			return func() tea.Msg {
-				checklist, checklistErr, details, detailsErr := readPlanFiles(dataDir, runID)
-				return planFilesLoadedMsg{
-					checklist:    checklist,
-					checklistErr: checklistErr,
-					details:      details,
-					detailsErr:   detailsErr,
-				}
-			}
-		}
-		runIDs := append([]string(nil), m.teamRunIDs...)
-		roleByRun := map[string]string{}
-		for k, v := range m.teamRoleByRunID {
-			roleByRun[k] = v
-		}
-		return func() tea.Msg {
-			checklist, checklistErr, details, detailsErr := readTeamPlanFiles(dataDir, runIDs, roleByRun)
-			return planFilesLoadedMsg{
-				checklist:    checklist,
-				checklistErr: checklistErr,
-				details:      details,
-				detailsErr:   detailsErr,
-			}
-		}
-	}
-	dataDir := m.cfg.DataDir
-	runID := m.runID
 	return func() tea.Msg {
-		checklist, checklistErr, details, detailsErr := readPlanFiles(dataDir, runID)
-		return planFilesLoadedMsg{
-			checklist:    checklist,
-			checklistErr: checklistErr,
-			details:      details,
-			detailsErr:   detailsErr,
+		params := protocol.PlanGetParams{
+			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
 		}
-	}
-}
-
-func readTeamPlanFiles(dataDir string, runIDs []string, roleByRun map[string]string) (checklist string, checklistErr string, details string, detailsErr string) {
-	if len(runIDs) == 0 {
-		return "No team plan files found yet.", "", "Waiting for team runs to publish plan files.", ""
-	}
-	sort.Strings(runIDs)
-	checkParts := make([]string, 0, len(runIDs))
-	detailParts := make([]string, 0, len(runIDs))
-	errParts := []string{}
-	for _, runID := range runIDs {
-		role := strings.TrimSpace(roleByRun[runID])
-		if role == "" {
-			role = runID
-		}
-		check, checkErr, det, detErr := readPlanFiles(dataDir, runID)
-		if checkErr != "" {
-			errParts = append(errParts, "["+role+"] checklist: "+checkErr)
-		}
-		if detErr != "" {
-			errParts = append(errParts, "["+role+"] details: "+detErr)
-		}
-		if strings.TrimSpace(check) != "" {
-			checkParts = append(checkParts, "## "+role+"\n\n"+strings.TrimSpace(check))
-		}
-		if strings.TrimSpace(det) != "" {
-			detailParts = append(detailParts, "## "+role+"\n\n"+strings.TrimSpace(det))
-		}
-	}
-	if len(checkParts) == 0 {
-		checklist = "No team checklist files found yet."
-	} else {
-		checklist = strings.Join(checkParts, "\n\n---\n\n")
-	}
-	if len(detailParts) == 0 {
-		details = "No team plan detail files found yet."
-	} else {
-		details = strings.Join(detailParts, "\n\n---\n\n")
-	}
-	if len(errParts) != 0 {
-		joined := strings.Join(errParts, " | ")
-		checklistErr = joined
-		detailsErr = joined
-	}
-	return checklist, checklistErr, details, detailsErr
-}
-
-func readPlanFiles(dataDir, runID string) (checklist string, checklistErr string, details string, detailsErr string) {
-	runDir := fsutil.GetAgentDir(dataDir, runID)
-	planDir := filepath.Join(runDir, "plan")
-
-	load := func(name string) (string, string) {
-		b, err := os.ReadFile(filepath.Join(planDir, name))
-		if err != nil {
-			if os.IsNotExist(err) {
-				return "", ""
+		if strings.TrimSpace(m.teamID) != "" {
+			params.TeamID = strings.TrimSpace(m.teamID)
+			if strings.TrimSpace(m.focusedRunID) != "" {
+				params.RunID = strings.TrimSpace(m.focusedRunID)
+			} else {
+				params.AggregateTeam = true
 			}
-			return "", err.Error()
+		} else {
+			params.RunID = strings.TrimSpace(m.runID)
 		}
-		return string(b), ""
+		var res protocol.PlanGetResult
+		if err := m.rpcRoundTrip(protocol.MethodPlanGet, params, &res); err != nil {
+			return planFilesLoadedMsg{checklistErr: err.Error(), detailsErr: err.Error()}
+		}
+		return planFilesLoadedMsg{
+			checklist:    res.Checklist,
+			checklistErr: res.ChecklistErr,
+			details:      res.Details,
+			detailsErr:   res.DetailsErr,
+		}
 	}
-
-	details, detailsErr = load("HEAD.md")
-	checklist, checklistErr = load("CHECKLIST.md")
-	return checklist, checklistErr, details, detailsErr
-}
-
-func loadTeamManifest(dataDir, teamID string) (*teamManifestFile, error) {
-	teamID = strings.TrimSpace(teamID)
-	if teamID == "" {
-		return nil, fmt.Errorf("teamID is required")
-	}
-	path := filepath.Join(fsutil.GetTeamDir(dataDir, teamID), "team.json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var manifest teamManifestFile
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return nil, err
-	}
-	return &manifest, nil
 }
 
 func shouldReloadPlanOnEvent(ev types.EventRecord) bool {

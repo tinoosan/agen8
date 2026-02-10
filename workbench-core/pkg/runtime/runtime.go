@@ -182,14 +182,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountWorkspace, err)
 	}
 
-	logRes, err := resources.NewTraceResource(cfg.Cfg, cfg.Run.RunID)
-	if err != nil {
-		return nil, fmt.Errorf("create log resource: %w", err)
-	}
-	if err := fs.Mount(vfs.MountLog, logRes); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountLog, err)
-	}
-
 	planDir := filepath.Join(runDir, "plan")
 	if err := os.MkdirAll(planDir, 0755); err != nil {
 		return nil, fmt.Errorf("prepare plan dir: %w", err)
@@ -235,31 +227,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountSkills, err)
 	}
 
-	// Compatibility mounts only: task routing/completion is DB-backed.
-	inboxDir := filepath.Join(runDir, vfs.MountInbox)
-	if err := os.MkdirAll(inboxDir, 0755); err != nil {
-		return nil, fmt.Errorf("prepare inbox dir: %w", err)
-	}
-	inboxRes, err := resources.NewDirResource(inboxDir, vfs.MountInbox)
-	if err != nil {
-		return nil, fmt.Errorf("create inbox resource: %w", err)
-	}
-	if err := fs.Mount(vfs.MountInbox, inboxRes); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountInbox, err)
-	}
-
-	outboxDir := filepath.Join(runDir, vfs.MountOutbox)
-	if err := os.MkdirAll(outboxDir, 0755); err != nil {
-		return nil, fmt.Errorf("prepare outbox dir: %w", err)
-	}
-	outboxRes, err := resources.NewDirResource(outboxDir, vfs.MountOutbox)
-	if err != nil {
-		return nil, fmt.Errorf("create outbox resource: %w", err)
-	}
-	if err := fs.Mount(vfs.MountOutbox, outboxRes); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountOutbox, err)
-	}
-
 	memStore := cfg.MemoryStore
 
 	if memStore == nil {
@@ -280,9 +247,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			Data: map[string]string{
 				"/project":   workdirRes.BaseDir,
 				"/workspace": wsRes.BaseDir,
-				"/inbox":     inboxDir,
-				"/outbox":    outboxDir,
-				"/log":       "(virtual)",
 				"/plan":      planDir,
 				"/skills":    "(virtual)",
 				"/memory":    "(virtual)",
