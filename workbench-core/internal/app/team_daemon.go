@@ -175,10 +175,26 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 		if roleGoal == "" {
 			roleGoal = "team role worker"
 		}
-		_, run, err := implstore.CreateSession(cfg, roleGoal, maxContextB)
+		metaSession, run, err := implstore.CreateSession(cfg, roleGoal, maxContextB)
 		if err != nil {
 			return fmt.Errorf("create session for role %s: %w", role.Name, err)
 		}
+		metaSession.System = true
+		metaSession.Mode = "team"
+		metaSession.TeamID = teamID
+		metaSession.Profile = strings.TrimSpace(prof.ID)
+		if strings.TrimSpace(teamModel) != "" {
+			metaSession.ActiveModel = strings.TrimSpace(teamModel)
+		}
+		_ = implstore.SaveSession(cfg, metaSession)
+		if run.Runtime == nil {
+			run.Runtime = &types.RunRuntimeConfig{}
+		}
+		run.Runtime.Profile = strings.TrimSpace(prof.ID)
+		run.Runtime.Model = strings.TrimSpace(teamModel)
+		run.Runtime.TeamID = teamID
+		run.Runtime.Role = strings.TrimSpace(role.Name)
+		_ = implstore.SaveRun(cfg, run)
 
 		traceStore := implstore.SQLiteTraceStore{Cfg: cfg, RunID: run.RunID}
 		historyStore, err := implstore.NewSQLiteHistoryStore(cfg, run.SessionID)
@@ -194,6 +210,7 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 		rt, err := runtime.Build(runtime.BuildConfig{
 			Cfg:                cfg,
 			Run:                run,
+			Profile:            strings.TrimSpace(prof.ID),
 			WorkdirAbs:         workdirAbs,
 			SharedWorkspaceDir: teamWorkspaceDir,
 			Model:              teamModel,
@@ -304,13 +321,13 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("create host tool registry for role %s: %w", role.Name, err)
 		}
-			if err := registry.Register(&hosttools.TaskCreateTool{
-				Store:           taskStore,
-				SessionID:       run.SessionID,
-				RunID:           run.RunID,
-				TeamID:          teamID,
-				RoleName:        role.Name,
-				IsCoordinator:   role.Coordinator,
+		if err := registry.Register(&hosttools.TaskCreateTool{
+			Store:           taskStore,
+			SessionID:       run.SessionID,
+			RunID:           run.RunID,
+			TeamID:          teamID,
+			RoleName:        role.Name,
+			IsCoordinator:   role.Coordinator,
 			CoordinatorRole: coordinatorRole,
 			ValidRoles:      roleNames,
 		}); err != nil {
@@ -334,7 +351,7 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 			Skills:      append([]string(nil), role.Skills...),
 			Heartbeat:   append([]profile.HeartbeatJob(nil), role.Heartbeat...),
 		}
-		sess, err := session.New(session.Config{
+		roleSession, err := session.New(session.Config{
 			Agent:      a,
 			Profile:    roleProfile,
 			ProfileDir: profDir,
@@ -373,7 +390,7 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 		runtimes = append(runtimes, teamRoleRuntime{
 			role: role,
 			run:  run,
-			sess: sess,
+			sess: roleSession,
 			cleanup: func() {
 				orderedEmitter.Close()
 				_ = rt.Shutdown(context.Background())

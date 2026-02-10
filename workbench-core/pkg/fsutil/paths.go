@@ -11,6 +11,10 @@ func GetSQLitePath(dataDir string) string {
 	return filepath.Join(dataDir, "workbench.db")
 }
 
+func GetRPCSocketPath(dataDir string) string {
+	return filepath.Join(dataDir, "rpc.sock")
+}
+
 func GetSessionsDir(dataDir string) string {
 	return filepath.Join(dataDir, "sessions")
 }

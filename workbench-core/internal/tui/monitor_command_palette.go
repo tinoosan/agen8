@@ -10,11 +10,13 @@ import (
 
 // Hardcoded list of available slash commands for the monitor command palette.
 var monitorAvailableCommands = []string{
+	"/new",
 	"/artifact",
 	"/team",
 	"/sessions",
+	"/agents",
+	"/rename-session",
 	"/model",
-	"/profile",
 	"/reasoning-effort",
 	"/reasoning-summary",
 	"/memory search",
@@ -38,7 +40,7 @@ func isExactMonitorCommand(s string) bool {
 
 func monitorCommandInvokesWithoutArgs(cmd string) bool {
 	switch strings.TrimSpace(cmd) {
-	case "/artifact", "/team", "/sessions", "/model", "/profile", "/reasoning-effort", "/reasoning-summary", "/editor", "/help", "/quit":
+	case "/new", "/artifact", "/team", "/sessions", "/agents", "/model", "/reasoning-effort", "/reasoning-summary", "/editor", "/help", "/quit":
 		return true
 	default:
 		return false

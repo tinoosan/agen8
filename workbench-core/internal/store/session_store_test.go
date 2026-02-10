@@ -294,3 +294,28 @@ func TestAllowedSessionSortColumn(t *testing.T) {
 		}
 	}
 }
+
+func TestListSessionsPaginated_FallbackSessionIDFromRow(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, _, err := CreateSession(cfg, "fallback id", 64)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		t.Fatalf("getSQLiteDB: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE sessions SET session_json = ? WHERE session_id = ?`, `{"title":"fallback id"}`, sess.SessionID); err != nil {
+		t.Fatalf("UPDATE sessions: %v", err)
+	}
+	rows, err := ListSessionsPaginated(cfg, SessionFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListSessionsPaginated: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected at least one row")
+	}
+	if rows[0].SessionID == "" {
+		t.Fatalf("expected session id fallback from row key")
+	}
+}

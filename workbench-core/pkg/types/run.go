@@ -59,8 +59,17 @@ type RunRuntimeConfig struct {
 	// DataDir is the workbench data directory used by the host process.
 	DataDir string `json:"dataDir,omitempty"`
 
+	// Profile is the selected profile identifier for this run.
+	Profile string `json:"profile,omitempty"`
+
 	// Model is the configured LLM model identifier for this run.
 	Model string `json:"model,omitempty"`
+
+	// TeamID is set when the run belongs to a team context.
+	TeamID string `json:"teamId,omitempty"`
+
+	// Role is the team role name for team runs (for example: "ceo", "researcher").
+	Role string `json:"role,omitempty"`
 
 	// Context budgets applied by the PromptUpdater per step.
 	MaxTraceBytes  int `json:"maxTraceBytes,omitempty"`

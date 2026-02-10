@@ -32,6 +32,7 @@ type TaskListParams struct {
 	ThreadID ThreadID `json:"threadId"`
 	View     string   `json:"view,omitempty"` // inbox|outbox
 	TeamID   string   `json:"teamId,omitempty"`
+	RunID    string   `json:"runId,omitempty"`
 	Assignee string   `json:"assignee,omitempty"`
 	Limit    int      `json:"limit,omitempty"`
 	Offset   int      `json:"offset,omitempty"`
@@ -44,6 +45,8 @@ type TaskListResult struct {
 
 type TaskCreateParams struct {
 	ThreadID       ThreadID `json:"threadId"`
+	TeamID         string   `json:"teamId,omitempty"`
+	RunID          string   `json:"runId,omitempty"`
 	Goal           string   `json:"goal"`
 	TaskKind       string   `json:"taskKind,omitempty"`
 	AssignedToType string   `json:"assignedToType,omitempty"`

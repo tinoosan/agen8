@@ -79,10 +79,17 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 
 	// Create session/run up front.
-	_, run, err := implstore.CreateSession(cfg, goal, maxContextB)
+	bootstrapSession, run, err := implstore.CreateSession(cfg, goal, maxContextB)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
+	// Mark daemon bootstrap sessions as system/internal so they don't show up in
+	// user-facing session pickers.
+	bootstrapSession.System = true
+	bootstrapSession.Mode = "standalone"
+	bootstrapSession.TeamID = ""
+	bootstrapSession.Profile = strings.TrimSpace(prof.ID)
+	_ = implstore.SaveSession(cfg, bootstrapSession)
 
 	var notifyCh chan protocol.Message
 	var index *protocol.Index
@@ -256,6 +263,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	rt, err := runtime.Build(runtime.BuildConfig{
 		Cfg:                   cfg,
 		Run:                   run,
+		Profile:               strings.TrimSpace(prof.ID),
 		WorkdirAbs:            workdirAbs,
 		Model:                 effectiveModel,
 		ReasoningEffort:       strings.TrimSpace(resolved.ReasoningEffort),
@@ -354,6 +362,20 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err != nil {
 		return fmt.Errorf("create task store: %w", err)
 	}
+	supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
+		Cfg:              cfg,
+		Resolved:         resolved,
+		PollInterval:     poll,
+		TaskStore:        taskStore,
+		SessionStore:     sessionStore,
+		MemoryStore:      memStore,
+		ConstructorStore: constructorStore,
+		LLMClient:        llmClient,
+		Notifier:         notifier,
+		WorkdirAbs:       workdirAbs,
+		BootstrapRunID:   strings.TrimSpace(run.RunID),
+		DefaultProfile:   prof,
+	})
 
 	wakeCh := make(chan struct{}, 1)
 
@@ -405,6 +427,8 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
+	go supervisor.Run(runCtx)
+	defer supervisor.stopAll()
 
 	if protocolEnabled {
 		srv := NewRPCServer(RPCServerConfig{
@@ -577,7 +601,11 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Message: "Autonomous agent started",
 		Data:    map[string]string{"runId": run.RunID, "sessionId": run.SessionID, "profile": prof.ID},
 	})
-	log.Printf("daemon: agent id %s — attach monitor with: workbench monitor --agent-id %s", run.RunID, run.RunID)
+	if protocolEnabled {
+		log.Printf("daemon: protocol control-plane ready — attach monitor with: workbench monitor")
+	} else {
+		log.Printf("daemon: agent id %s — attach monitor with: workbench monitor --agent-id %s", run.RunID, run.RunID)
+	}
 	for {
 		err = sess.Run(runCtx)
 		if runCtx.Err() != nil {

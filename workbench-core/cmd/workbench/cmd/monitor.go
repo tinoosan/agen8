@@ -2,52 +2,67 @@ package cmd
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui"
 )
 
 var monitorAgentID string
 var monitorTeamID string
+var runMonitorFn = tui.RunMonitor
+var runTeamMonitorFn = tui.RunTeamMonitor
+var runDetachedMonitorFn = tui.RunMonitorDetached
 
 var monitorCmd = &cobra.Command{
 	Use:   "monitor",
 	Short: "Open monitoring dashboard for the running agent",
-	Long:  "Start the daemon first (workbench or workbench daemon), then run workbench monitor so it attaches to the active agent. Use --agent-id <id> with the agent ID printed at daemon startup if needed.",
+	Long:  "Start the daemon first (workbench or workbench daemon), then run workbench monitor. With no flags it starts detached; use /new, /sessions, or /agents to attach context.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := effectiveConfig(cmd)
 		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(monitorTeamID) != "" {
-			return tui.RunTeamMonitor(cmd.Context(), cfg, strings.TrimSpace(monitorTeamID))
-		}
+		teamID := strings.TrimSpace(monitorTeamID)
 		agentID := strings.TrimSpace(monitorAgentID)
-		if agentID == "" {
-			if r, err := store.LatestRunningRun(cfg); err == nil {
-				agentID = r.RunID
-			} else if r, err := store.LatestRun(cfg); err == nil {
-				agentID = r.RunID
-			} else {
-				return fmt.Errorf("no runs found to monitor")
+		for {
+			switch {
+			case teamID != "":
+				err = runTeamMonitorFn(cmd.Context(), cfg, teamID)
+			case agentID != "":
+				err = runMonitorFn(cmd.Context(), cfg, agentID)
+			default:
+				err = runDetachedMonitorFn(cmd.Context(), cfg)
 			}
+			if err == nil {
+				return nil
+			}
+			var switchRun *tui.MonitorSwitchRunError
+			if errors.As(err, &switchRun) {
+				next := strings.TrimSpace(switchRun.RunID)
+				if next == "" {
+					return err
+				}
+				teamID = ""
+				agentID = next
+				continue
+			}
+			var switchTeam *tui.MonitorSwitchTeamError
+			if errors.As(err, &switchTeam) {
+				next := strings.TrimSpace(switchTeam.TeamID)
+				if next == "" {
+					return err
+				}
+				agentID = ""
+				teamID = next
+				continue
+			}
+			return err
 		}
-		err = tui.RunMonitor(cmd.Context(), cfg, agentID)
-		if err == nil {
-			return nil
-		}
-		var e *tui.MonitorSwitchRunError
-		if errors.As(err, &e) {
-			return tui.RunMonitor(cmd.Context(), cfg, e.RunID)
-		}
-		return err
 	},
 }
 
 func init() {
-	monitorCmd.Flags().StringVar(&monitorAgentID, "agent-id", "", "agent ID to attach to (default: latest running agent)")
+	monitorCmd.Flags().StringVar(&monitorAgentID, "agent-id", "", "agent ID to attach to")
 	monitorCmd.Flags().StringVar(&monitorTeamID, "team-id", "", "team ID to attach to in teams mode")
 }

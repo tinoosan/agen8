@@ -148,6 +148,9 @@ func (s *MemorySessionStore) ListSessionsPaginated(_ context.Context, filter Ses
 	s.mu.RLock()
 	all := make([]memorySessionEntry, 0, len(s.sessions))
 	for _, ent := range s.sessions {
+		if !filter.IncludeSystem && ent.session.System {
+			continue
+		}
 		if titleContainsLower != "" {
 			if !strings.Contains(strings.ToLower(ent.title), titleContainsLower) &&
 				!strings.Contains(strings.ToLower(ent.currentGoal), titleContainsLower) {
@@ -217,11 +220,15 @@ func (s *MemorySessionStore) CountSessions(_ context.Context, filter SessionFilt
 	titleContainsLower := strings.ToLower(titleContains)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if titleContainsLower == "" {
-		return len(s.sessions), nil
-	}
 	count := 0
 	for _, ent := range s.sessions {
+		if !filter.IncludeSystem && ent.session.System {
+			continue
+		}
+		if titleContainsLower == "" {
+			count++
+			continue
+		}
 		if strings.Contains(strings.ToLower(ent.title), titleContainsLower) ||
 			strings.Contains(strings.ToLower(ent.currentGoal), titleContainsLower) {
 			count++

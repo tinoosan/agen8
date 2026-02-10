@@ -49,8 +49,9 @@ func (s *Session) SwitchProfile(ctx context.Context, ref string) error {
 		Type:    "control.success",
 		Message: "Control request applied",
 		Data: map[string]string{
-			"command": "switch_profile",
-			"profile": ref,
+			"command":                 "switch_profile",
+			"profile":                 ref,
+			"preservesSessionContext": "true",
 		},
 	})
 	return nil
@@ -148,8 +149,9 @@ func (s *Session) tryHandleControl(ctx context.Context, path string, raw string)
 			Type:    typ,
 			Message: msg,
 			Data: map[string]string{
-				"command": strings.TrimSpace(c.Command),
-				"error":   strings.TrimSpace(c.Error),
+				"command":                 strings.TrimSpace(c.Command),
+				"error":                   strings.TrimSpace(c.Error),
+				"preservesSessionContext": fmt.Sprintf("%t", cmd == "switch_profile"),
 			},
 		})
 	}

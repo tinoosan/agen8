@@ -32,3 +32,13 @@ type MonitorSwitchRunError struct {
 func (e *MonitorSwitchRunError) Error() string {
 	return "switch monitor to run: " + strings.TrimSpace(e.RunID)
 }
+
+// MonitorSwitchTeamError is returned by monitor runners when the user switches
+// from single-run monitor to team monitor context.
+type MonitorSwitchTeamError struct {
+	TeamID string
+}
+
+func (e *MonitorSwitchTeamError) Error() string {
+	return "switch monitor to team: " + strings.TrimSpace(e.TeamID)
+}

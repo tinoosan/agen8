@@ -19,12 +19,15 @@ Navigation:
 
 Type a message and press Ctrl+Enter to queue a task, or use a command (below):
   /task <goal>            Queue a task (explicit)
+  /new                    Open new-session wizard
+  /new [goal]             Start standalone session
+  /new team <profile> [goal] Start team session and switch to team monitor
   /team                   Focus a single team run (or clear focus)
   /sessions               Switch session (reattach to its current run)
+  /agents                 Switch agent/run in the active session
+  /rename-session <title> Rename current session
   /model                 Open model picker
   /model <id>            Set model directly
-  /profile               Open profile picker
-  /profile <ref>         Switch agent profile
   /editor                Open $EDITOR to compose (loads back into composer)
   /reasoning-effort      Set reasoning effort level
   /reasoning-summary     Set reasoning summary mode

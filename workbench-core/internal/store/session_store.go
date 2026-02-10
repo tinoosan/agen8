@@ -297,8 +297,11 @@ func ListSessionsPaginated(cfg config.Config, filter SessionFilter) ([]types.Ses
 		sortDir = "ASC"
 	}
 
-	query := `SELECT session_json FROM sessions WHERE 1=1`
+	query := `SELECT session_id, session_json FROM sessions WHERE 1=1`
 	args := []any{}
+	if !filter.IncludeSystem {
+		query += ` AND COALESCE(json_extract(session_json, '$.system'), 0) = 0`
+	}
 
 	titleContains := strings.TrimSpace(filter.TitleContains)
 	if titleContains != "" {
@@ -330,13 +333,20 @@ func ListSessionsPaginated(cfg config.Config, filter SessionFilter) ([]types.Ses
 
 	out := make([]types.Session, 0, limit)
 	for rows.Next() {
+		var sessionID string
 		var b []byte
-		if err := rows.Scan(&b); err != nil {
+		if err := rows.Scan(&sessionID, &b); err != nil {
 			return nil, err
 		}
 		var s types.Session
 		if err := json.Unmarshal(b, &s); err != nil {
 			return nil, fmt.Errorf("unmarshal session: %w", err)
+		}
+		if strings.TrimSpace(s.SessionID) == "" {
+			s.SessionID = strings.TrimSpace(sessionID)
+		}
+		if strings.TrimSpace(s.Title) == "" {
+			s.Title = strings.TrimSpace(s.CurrentGoal)
 		}
 		out = append(out, s)
 	}
@@ -357,6 +367,9 @@ func CountSessions(cfg config.Config, filter SessionFilter) (int, error) {
 
 	query := `SELECT COUNT(*) FROM sessions WHERE 1=1`
 	args := []any{}
+	if !filter.IncludeSystem {
+		query += ` AND COALESCE(json_extract(session_json, '$.system'), 0) = 0`
+	}
 
 	titleContains := strings.TrimSpace(filter.TitleContains)
 	if titleContains != "" {

@@ -7,12 +7,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	implstore "github.com/tinoosan/workbench-core/internal/store"
 	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -55,7 +58,7 @@ func TestSplitMonitorCommand_WhitespaceTolerant(t *testing.T) {
 	}
 }
 
-func TestMonitorHandleCommand_EnqueuesTasksForNonCommands(t *testing.T) {
+func TestMonitorHandleCommand_EnqueuesPlainTextAndRejectsUnknownSlashCommand(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
@@ -93,8 +96,27 @@ func TestMonitorHandleCommand_EnqueuesTasksForNonCommands(t *testing.T) {
 
 	// Plain text should enqueue as task.
 	assertQueued("hello world", "hello world")
-	// Unknown slash commands should also enqueue as task.
-	assertQueued("/not-a-command hello", "/not-a-command hello")
+
+	before, err := m.taskStore.CountTasks(ctx, agentstate.TaskFilter{RunID: runID})
+	if err != nil {
+		t.Fatalf("CountTasks(before): %v", err)
+	}
+	cmd := m.handleCommand("/not-a-command hello")
+	if cmd == nil {
+		t.Fatalf("expected command response for unknown slash command")
+	}
+	msg := cmd()
+	lines, ok := msg.(commandLinesMsg)
+	if !ok || len(lines.lines) == 0 || !strings.Contains(lines.lines[0], "unknown command") {
+		t.Fatalf("expected unknown command output, got %#v", msg)
+	}
+	after, err := m.taskStore.CountTasks(ctx, agentstate.TaskFilter{RunID: runID})
+	if err != nil {
+		t.Fatalf("CountTasks(after): %v", err)
+	}
+	if after != before {
+		t.Fatalf("unexpected task count change: before=%d after=%d", before, after)
+	}
 }
 
 func TestShouldReloadPlanOnEvent(t *testing.T) {
@@ -246,7 +268,7 @@ func TestMonitorModelPicker_ProviderAndScopedFilteringWorks(t *testing.T) {
 	}
 }
 
-func TestMonitorProfilePicker_FilterAndSelectWritesControl(t *testing.T) {
+func TestMonitorProfilePicker_FilterAndSelectStartsNewStandaloneSession(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
@@ -273,7 +295,11 @@ func TestMonitorProfilePicker_FilterAndSelectWritesControl(t *testing.T) {
 	writeProfile(filepath.Join(profilesDir, "software_dev"), "software_dev", "Software development")
 	writeProfile(filepath.Join(profilesDir, "stock_analyst"), "stock_analyst", "Stocks and markets")
 
-	runID := "test-run-profile-filter"
+	_, run, err := implstore.CreateSession(cfg, "profile filter test", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	runID := run.RunID
 	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
 	if err != nil {
 		t.Fatalf("newMonitorModel: %v", err)
@@ -281,7 +307,7 @@ func TestMonitorProfilePicker_FilterAndSelectWritesControl(t *testing.T) {
 	m.width = 120
 	m.height = 40
 
-	_ = m.openProfilePicker()
+	_ = m.openProfilePickerFor("new-standalone", false)
 	if !m.profilePickerOpen {
 		t.Fatalf("expected profilePickerOpen true")
 	}
@@ -293,8 +319,8 @@ func TestMonitorProfilePicker_FilterAndSelectWritesControl(t *testing.T) {
 	for _, r := range []rune("software") {
 		_, _ = m.updateProfilePicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
-	if got := m.profilePickerList.FilterValue(); got != "software" {
-		t.Fatalf("expected filter value %q, got %q", "software", got)
+	if got := m.profilePickerList.FilterInput.Value(); got != "software" {
+		t.Fatalf("expected filter input %q, got %q", "software", got)
 	}
 	visible := m.profilePickerList.VisibleItems()
 	if len(visible) == 0 {
@@ -317,16 +343,433 @@ func TestMonitorProfilePicker_FilterAndSelectWritesControl(t *testing.T) {
 		t.Fatalf("expected profilePickerOpen false after selection")
 	}
 	msg := cmd()
-	cl, ok := msg.(commandLinesMsg)
+	sw, ok := msg.(monitorSwitchRunMsg)
 	if !ok {
-		t.Fatalf("expected commandLinesMsg, got %T", msg)
+		t.Fatalf("expected monitorSwitchRunMsg, got %T", msg)
 	}
-	joined := strings.Join(cl.lines, "\n")
-	if !strings.Contains(joined, "applied switch_profile -> software_dev") {
-		t.Fatalf("expected applied profile control message, got %q", joined)
+	if strings.TrimSpace(sw.RunID) == "" {
+		t.Fatalf("expected non-empty switched run id")
 	}
 	if m.profile != "software_dev" {
 		t.Fatalf("expected monitor profile %q, got %q", "software_dev", m.profile)
+	}
+}
+
+func TestMonitorProfilePicker_DefaultMode_DisallowsProfileSwitch(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+
+	profilesDir := fsutil.GetProfilesDir(cfg.DataDir)
+	if err := os.MkdirAll(filepath.Join(profilesDir, "general"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles/general: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profilesDir, "general", "profile.yaml"), []byte(
+		"id: general\ndescription: General\nprompts:\n  system_prompt: hi\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	_, run, err := implstore.CreateSession(cfg, "profile default mode", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	m, err := newMonitorModel(ctx, cfg, run.RunID, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	_ = m.openProfilePicker()
+	_, cmd := m.updateProfilePicker(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("expected command")
+	}
+	msg := cmd()
+	lines, ok := msg.(commandLinesMsg)
+	if !ok || len(lines.lines) == 0 {
+		t.Fatalf("expected commandLinesMsg, got %#v", msg)
+	}
+	if !strings.Contains(strings.ToLower(lines.lines[0]), "disabled") {
+		t.Fatalf("unexpected response: %q", lines.lines[0])
+	}
+}
+
+func TestMonitorProfilePicker_ArrowKeysMoveSelection(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+
+	profilesDir := fsutil.GetProfilesDir(cfg.DataDir)
+	if err := os.MkdirAll(filepath.Join(profilesDir, "general"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles/general: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(profilesDir, "software_dev"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles/software_dev: %v", err)
+	}
+	writeProfile := func(dir, id, desc string) {
+		t.Helper()
+		raw := "id: " + id + "\ndescription: " + desc + "\nprompts:\n  system_prompt: hello\n"
+		if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(raw), 0o644); err != nil {
+			t.Fatalf("write profile.yaml: %v", err)
+		}
+	}
+	writeProfile(filepath.Join(profilesDir, "general"), "general", "General profile")
+	writeProfile(filepath.Join(profilesDir, "software_dev"), "software_dev", "Software development")
+
+	_, run, err := implstore.CreateSession(cfg, "profile arrows", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	m, err := newMonitorModel(ctx, cfg, run.RunID, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	m.width = 120
+	m.height = 40
+
+	_ = m.openProfilePicker()
+	if len(m.profilePickerList.Items()) < 2 {
+		t.Fatalf("expected at least two profiles")
+	}
+	start := m.profilePickerList.Index()
+	_, _ = m.updateProfilePicker(tea.KeyMsg{Type: tea.KeyDown})
+	if got := m.profilePickerList.Index(); got == start {
+		t.Fatalf("expected down arrow to move selection, still at %d", got)
+	}
+	_, _ = m.updateProfilePicker(tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.profilePickerList.Index(); got != start {
+		t.Fatalf("expected up arrow to return selection to %d, got %d", start, got)
+	}
+}
+
+func TestAgentsToPickerItems_PrefersRoleLabel(t *testing.T) {
+	items := agentsToPickerItems([]protocol.AgentListItem{
+		{
+			RunID:     "run-12345678-1234-1234-1234-1234567890ab",
+			Role:      "cto",
+			Profile:   "market_researcher",
+			Status:    "running",
+			Goal:      "Implement feature",
+			TeamID:    "team-1",
+			SessionID: "sess-1",
+		},
+	})
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	it, ok := items[0].(agentPickerItem)
+	if !ok {
+		t.Fatalf("expected agentPickerItem, got %T", items[0])
+	}
+	if got := strings.TrimSpace(it.Title()); !strings.HasPrefix(got, "cto · market_researcher · ") {
+		t.Fatalf("expected role-prefixed title, got %q", got)
+	}
+}
+
+func TestAgentsToPickerItems_UsesProfileWhenNoRole(t *testing.T) {
+	items := agentsToPickerItems([]protocol.AgentListItem{
+		{
+			RunID:     "run-12345678-1234-1234-1234-1234567890ab",
+			Profile:   "general",
+			Status:    "running",
+			Goal:      "Implement feature",
+			SessionID: "sess-1",
+		},
+	})
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	it, ok := items[0].(agentPickerItem)
+	if !ok {
+		t.Fatalf("expected agentPickerItem, got %T", items[0])
+	}
+	if got := strings.TrimSpace(it.Title()); !strings.HasPrefix(got, "general · ") {
+		t.Fatalf("expected profile-prefixed title, got %q", got)
+	}
+}
+
+func TestParseNewSessionRequest(t *testing.T) {
+	cases := []struct {
+		in          string
+		defaultProf string
+		wantMode    string
+		wantProfile string
+		wantGoal    string
+	}{
+		{"", "general", "standalone", "general", ""},
+		{"ship feature", "general", "standalone", "general", "ship feature"},
+		{"standalone software_dev implement parser", "general", "standalone", "software_dev", "implement parser"},
+		{"team startup_team launch", "general", "team", "startup_team", "launch"},
+		{"team", "general", "team", "", ""},
+	}
+	for _, tc := range cases {
+		got := parseNewSessionRequest(tc.in, tc.defaultProf)
+		if got.Mode != tc.wantMode || got.Profile != tc.wantProfile || got.Goal != tc.wantGoal {
+			t.Fatalf("parseNewSessionRequest(%q) => mode=%q profile=%q goal=%q, want mode=%q profile=%q goal=%q",
+				tc.in, got.Mode, got.Profile, got.Goal, tc.wantMode, tc.wantProfile, tc.wantGoal)
+		}
+	}
+}
+
+func TestMonitorHandleCommand_NewTeamOpensTeamProfileWizard(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+
+	profilesDir := fsutil.GetProfilesDir(cfg.DataDir)
+	if err := os.MkdirAll(filepath.Join(profilesDir, "general"), 0o755); err != nil {
+		t.Fatalf("mkdir general: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(profilesDir, "startup_team"), 0o755); err != nil {
+		t.Fatalf("mkdir startup_team: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profilesDir, "general", "profile.yaml"), []byte(
+		"id: general\ndescription: General\nprompts:\n  system_prompt: hi\n",
+	), 0o644); err != nil {
+		t.Fatalf("write general profile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profilesDir, "startup_team", "profile.yaml"), []byte(
+		"id: startup_team\ndescription: Team\nteam:\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n",
+	), 0o644); err != nil {
+		t.Fatalf("write team profile: %v", err)
+	}
+
+	_, run, err := implstore.CreateSession(cfg, "wizard", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	m, err := newMonitorModel(ctx, cfg, run.RunID, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	if cmd := m.handleCommand("/new team"); cmd != nil {
+		_ = cmd()
+	}
+	if !m.profilePickerOpen {
+		t.Fatalf("expected profile picker open")
+	}
+	if !m.profilePickerTeamOnly {
+		t.Fatalf("expected team-only profile picker")
+	}
+	if got := strings.TrimSpace(m.profilePickerMode); got != "new-team" {
+		t.Fatalf("profilePickerMode=%q want new-team", got)
+	}
+	if len(m.profilePickerList.Items()) != 1 {
+		t.Fatalf("expected only team profiles in picker, got %d", len(m.profilePickerList.Items()))
+	}
+}
+
+func TestMonitorHandleCommand_RenameSession(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	_, run, err := implstore.CreateSession(cfg, "before", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	m, err := newMonitorModel(ctx, cfg, run.RunID, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	cmd := m.handleCommand("/rename-session after rename")
+	if cmd == nil {
+		t.Fatalf("expected command")
+	}
+	_ = cmd()
+	sess, err := m.session.LoadSession(ctx, m.sessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := strings.TrimSpace(sess.Title); got != "after rename" {
+		t.Fatalf("title=%q want %q", got, "after rename")
+	}
+}
+
+func TestMonitorSessionPicker_ShowsVisibleItemsWhenSessionsExist(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+
+	_, run, err := implstore.CreateSession(cfg, "session picker visibility", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, _, err := implstore.CreateSession(cfg, "second session", 8*1024); err != nil {
+		t.Fatalf("CreateSession second: %v", err)
+	}
+
+	m, err := newMonitorModel(ctx, cfg, run.RunID, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	m.width = 120
+	m.height = 40
+
+	cmd := m.openSessionPicker()
+	if cmd == nil {
+		t.Fatalf("expected fetch command from openSessionPicker")
+	}
+	msg := cmd()
+	updatedModel, _ := m.Update(msg)
+	updated, ok := updatedModel.(*monitorModel)
+	if !ok {
+		t.Fatalf("expected *monitorModel, got %T", updatedModel)
+	}
+	if updated.sessionPickerTotal < 2 {
+		t.Fatalf("expected sessionPickerTotal >= 2, got %d", updated.sessionPickerTotal)
+	}
+	if len(updated.sessionPickerList.Items()) == 0 {
+		t.Fatalf("expected picker items, got 0")
+	}
+	if len(updated.sessionPickerList.VisibleItems()) == 0 {
+		t.Fatalf("expected visible picker items, got 0")
+	}
+}
+
+func TestMonitorDetached_SessionPickerLoadsSessions(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+
+	if _, _, err := implstore.CreateSession(cfg, "detached session 1", 8*1024); err != nil {
+		t.Fatalf("CreateSession 1: %v", err)
+	}
+	if _, _, err := implstore.CreateSession(cfg, "detached session 2", 8*1024); err != nil {
+		t.Fatalf("CreateSession 2: %v", err)
+	}
+
+	m, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+	if !m.isDetached() {
+		t.Fatalf("expected detached model")
+	}
+	m.width = 120
+	m.height = 40
+
+	cmd := m.openSessionPicker()
+	if cmd == nil {
+		t.Fatalf("expected fetch command from openSessionPicker")
+	}
+	msg := cmd()
+	updatedModel, _ := m.Update(msg)
+	updated, ok := updatedModel.(*monitorModel)
+	if !ok {
+		t.Fatalf("expected *monitorModel, got %T", updatedModel)
+	}
+	if updated.sessionPickerTotal < 2 {
+		t.Fatalf("expected sessionPickerTotal >= 2, got %d", updated.sessionPickerTotal)
+	}
+	if len(updated.sessionPickerList.Items()) == 0 {
+		t.Fatalf("expected picker items, got 0")
+	}
+	if len(updated.sessionPickerList.VisibleItems()) == 0 {
+		t.Fatalf("expected visible picker items, got 0")
+	}
+}
+
+func TestMonitorSessionPicker_SelectTeamSessionSwitchesTeam(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+
+	m, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+
+	l := list.New(nil, newSessionPickerDelegate(), 0, 0)
+	l.SetItems([]list.Item{
+		sessionPickerItem{
+			id:      "sess-team-1",
+			title:   "Team Session",
+			mode:    "team",
+			teamID:  "team-123",
+			profile: "startup_team",
+		},
+	})
+	l.Select(0)
+	m.sessionPickerList = l
+	m.sessionPickerOpen = true
+
+	cmd := m.selectSessionFromPicker()
+	if cmd == nil {
+		t.Fatalf("expected switch command")
+	}
+	msg := cmd()
+	sw, ok := msg.(monitorSwitchTeamMsg)
+	if !ok {
+		t.Fatalf("expected monitorSwitchTeamMsg, got %T", msg)
+	}
+	if got := strings.TrimSpace(sw.TeamID); got != "team-123" {
+		t.Fatalf("TeamID=%q want %q", got, "team-123")
+	}
+}
+
+func TestMonitorAgentPicker_TeamModeSetsFocusWithoutRunSwitch(t *testing.T) {
+	m := &monitorModel{
+		teamID:          "team-123",
+		teamRoleByRunID: map[string]string{"run-1": "ceo"},
+	}
+	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
+	l.SetItems([]list.Item{
+		agentPickerItem{
+			runID:  "run-1",
+			label:  "ceo · general · run-1",
+			status: "running",
+			role:   "ceo",
+			teamID: "team-123",
+		},
+	})
+	l.Select(0)
+	m.agentPickerList = l
+	m.agentPickerOpen = true
+
+	cmd := m.selectAgentFromPicker()
+	if cmd == nil {
+		t.Fatalf("expected command")
+	}
+	if got := strings.TrimSpace(m.focusedRunID); got != "run-1" {
+		t.Fatalf("focusedRunID=%q want run-1", got)
+	}
+	if got := strings.TrimSpace(m.focusedRunRole); got != "ceo" {
+		t.Fatalf("focusedRunRole=%q want ceo", got)
+	}
+	msg := cmd()
+	if _, ok := msg.(monitorSwitchRunMsg); ok {
+		t.Fatalf("team-mode agent picker must not switch out to run monitor")
+	}
+}
+
+func TestMonitorDetached_EnqueueTaskRequiresContext(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	m, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+	cmd := m.handleCommand("do the thing")
+	if cmd == nil {
+		t.Fatalf("expected command")
+	}
+	msg := cmd()
+	lines, ok := msg.(commandLinesMsg)
+	if !ok || len(lines.lines) == 0 {
+		t.Fatalf("expected commandLinesMsg, got %#v", msg)
+	}
+	if !strings.Contains(strings.ToLower(lines.lines[0]), "no active context") {
+		t.Fatalf("unexpected message: %q", lines.lines[0])
+	}
+}
+
+func TestMonitorCommandPalette_ProfileRemoved(t *testing.T) {
+	for _, cmd := range monitorAvailableCommands {
+		if cmd == "/profile" {
+			t.Fatalf("/profile should not be present in command palette")
+		}
+	}
+	if monitorCommandInvokesWithoutArgs("/profile") {
+		t.Fatalf("/profile should not be invokable")
 	}
 }
 
@@ -569,7 +1012,7 @@ func TestRefreshThinkingViewport_FocusedRunFallsBackToRoleWhenRunIDMissing(t *te
 	}
 }
 
-func TestAgentOutputFocusFilter_HidesUnscopedAndOtherRuns(t *testing.T) {
+func TestAgentOutputFocusFilter_ShowsGlobalAndFocusedRunOnly(t *testing.T) {
 	m := &monitorModel{
 		teamID:           "team-a",
 		focusedRunID:     "run-a",
@@ -584,8 +1027,11 @@ func TestAgentOutputFocusFilter_HidesUnscopedAndOtherRuns(t *testing.T) {
 	if !strings.Contains(view, "focused line") {
 		t.Fatalf("expected focused line in output: %q", view)
 	}
-	if strings.Contains(view, "unscoped line") || strings.Contains(view, "other line") {
-		t.Fatalf("unexpected non-focused lines in output: %q", view)
+	if !strings.Contains(view, "unscoped line") {
+		t.Fatalf("expected unscoped/global line in focused output: %q", view)
+	}
+	if strings.Contains(view, "other line") {
+		t.Fatalf("unexpected other-run line in focused output: %q", view)
 	}
 }
 

@@ -52,6 +52,24 @@ type taskQueuedLocallyMsg struct {
 	Goal   string
 }
 
+type monitorSwitchRunMsg struct {
+	RunID string
+}
+
+type monitorSwitchTeamMsg struct {
+	TeamID string
+}
+
+type monitorReloadedMsg struct {
+	model *monitorModel
+	err   error
+}
+
+type agentsListMsg struct {
+	agents []protocol.AgentListItem
+	err    error
+}
+
 type tickMsg struct {
 	now time.Time
 }
@@ -117,7 +135,8 @@ type activityLoadedMsg struct {
 }
 
 type MonitorResult struct {
-	SwitchToRunID string
+	SwitchToRunID  string
+	SwitchToTeamID string
 }
 
 type monitorModel struct {
@@ -125,6 +144,7 @@ type monitorModel struct {
 	cfg       config.Config
 	runID     string
 	teamID    string
+	detached  bool
 	runStatus string // loaded at init; used to show "run not active" warning
 	result    *MonitorResult
 	session   pkgstore.SessionQuery
@@ -211,6 +231,11 @@ type monitorModel struct {
 	sessionPickerTotal    int
 	sessionPickerFilter   string
 
+	// Agent picker
+	agentPickerOpen bool
+	agentPickerList list.Model
+	agentPickerErr  string
+
 	// Model picker
 	modelPickerOpen         bool
 	modelPickerList         list.Model
@@ -219,12 +244,18 @@ type monitorModel struct {
 	modelPickerProviderView bool
 
 	// Profile picker
-	profilePickerOpen bool
-	profilePickerList list.Model
+	profilePickerOpen     bool
+	profilePickerList     list.Model
+	profilePickerMode     string
+	profilePickerTeamOnly bool
 
 	// Team picker
 	teamPickerOpen bool
 	teamPickerList list.Model
+
+	// New-session wizard
+	newSessionWizardOpen bool
+	newSessionWizardList list.Model
 
 	// Command palette (inline autocomplete above composer)
 	commandPaletteOpen     bool
@@ -443,6 +474,25 @@ func RunMonitor(ctx context.Context, cfg config.Config, runID string) error {
 	if err == nil && strings.TrimSpace(result.SwitchToRunID) != "" {
 		return &MonitorSwitchRunError{RunID: strings.TrimSpace(result.SwitchToRunID)}
 	}
+	if err == nil && strings.TrimSpace(result.SwitchToTeamID) != "" {
+		return &MonitorSwitchTeamError{TeamID: strings.TrimSpace(result.SwitchToTeamID)}
+	}
+	return err
+}
+
+func RunMonitorDetached(ctx context.Context, cfg config.Config) error {
+	var result MonitorResult
+	m, err := newDetachedMonitorModel(ctx, cfg, &result)
+	if err != nil {
+		return err
+	}
+	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	if err == nil && strings.TrimSpace(result.SwitchToRunID) != "" {
+		return &MonitorSwitchRunError{RunID: strings.TrimSpace(result.SwitchToRunID)}
+	}
+	if err == nil && strings.TrimSpace(result.SwitchToTeamID) != "" {
+		return &MonitorSwitchTeamError{TeamID: strings.TrimSpace(result.SwitchToTeamID)}
+	}
 	return err
 }
 
@@ -457,6 +507,12 @@ func RunTeamMonitor(ctx context.Context, cfg config.Config, teamID string) error
 		return err
 	}
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	if err == nil && strings.TrimSpace(result.SwitchToRunID) != "" {
+		return &MonitorSwitchRunError{RunID: strings.TrimSpace(result.SwitchToRunID)}
+	}
+	if err == nil && strings.TrimSpace(result.SwitchToTeamID) != "" {
+		return &MonitorSwitchTeamError{TeamID: strings.TrimSpace(result.SwitchToTeamID)}
+	}
 	return err
 }
 
@@ -524,9 +580,13 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	runStatus := types.RunStatusSucceeded
 	runSessionID := ""
 	sessionActiveModel := ""
+	runProfile := ""
 	if r, err := store.LoadRun(cfg, runID); err == nil {
 		runStatus = r.Status
 		runSessionID = strings.TrimSpace(r.SessionID)
+		if r.Runtime != nil {
+			runProfile = strings.TrimSpace(r.Runtime.Profile)
+		}
 	}
 
 	sessionStore, err := store.NewSQLiteSessionStore(cfg)
@@ -603,6 +663,9 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	if sessionActiveModel != "" {
 		m.model = sessionActiveModel
 	}
+	if runProfile != "" {
+		m.profile = runProfile
+	}
 	// Disable mouse handling so terminals don't enter mouse-reporting mode.
 	m.activityDetail.MouseWheelEnabled = false
 	m.planViewport.MouseWheelEnabled = false
@@ -618,6 +681,9 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	}
 	if sessionActiveModel != "" {
 		m.model = sessionActiveModel
+	}
+	if runProfile != "" {
+		m.profile = runProfile
 	}
 	// Activity feed is loaded from SQLite (paginated) via loadActivityPage.
 	m.loadPlanFiles()
@@ -735,12 +801,159 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 	m.memoryVP.MouseWheelEnabled = false
 	m.thinkingVP.MouseWheelEnabled = false
 	m.artifactContentVP.MouseWheelEnabled = false
+	if manifest, err := loadTeamManifestFromDisk(cfg, teamID); err == nil && manifest != nil {
+		if profileID := strings.TrimSpace(manifest.ProfileID); profileID != "" {
+			m.profile = profileID
+		}
+		if mc := manifest.ModelChange; mc != nil {
+			if requested := strings.TrimSpace(mc.RequestedModel); requested != "" &&
+				(strings.EqualFold(strings.TrimSpace(mc.Status), "pending") ||
+					strings.EqualFold(strings.TrimSpace(mc.Status), "applied")) {
+				m.model = requested
+			}
+		}
+		if strings.TrimSpace(m.model) == "" {
+			if teamModel := strings.TrimSpace(manifest.TeamModel); teamModel != "" {
+				m.model = teamModel
+			}
+		}
+		m.teamModelChange = manifest.ModelChange
+		m.teamCoordinatorRole = strings.TrimSpace(manifest.CoordinatorRole)
+		m.teamCoordinatorRunID = strings.TrimSpace(manifest.CoordinatorRun)
+		roleByRun := map[string]string{}
+		runIDs := make([]string, 0, len(manifest.Roles))
+		for _, role := range manifest.Roles {
+			runID := strings.TrimSpace(role.RunID)
+			if runID == "" {
+				continue
+			}
+			roleByRun[runID] = strings.TrimSpace(role.RoleName)
+			runIDs = append(runIDs, runID)
+			if strings.TrimSpace(role.SessionID) != "" && runID == m.teamCoordinatorRunID && strings.TrimSpace(m.sessionID) == "" {
+				m.sessionID = strings.TrimSpace(role.SessionID)
+			}
+			if strings.TrimSpace(m.sessionID) == "" && strings.TrimSpace(role.SessionID) != "" {
+				m.sessionID = strings.TrimSpace(role.SessionID)
+			}
+		}
+		if len(runIDs) != 0 {
+			m.teamRunIDs = runIDs
+			m.teamRoleByRunID = roleByRun
+		}
+	}
 	if m.profile == "" {
-		m.profile = "team"
+		m.profile = "default"
 	}
 	if m.model == "" {
-		m.model = "team"
+		m.model = "default"
 	}
+	m.refreshViewports()
+	return m, nil
+}
+
+func loadTeamManifestFromDisk(cfg config.Config, teamID string) (*teamManifestFile, error) {
+	path := filepath.Join(fsutil.GetTeamDir(cfg.DataDir, strings.TrimSpace(teamID)), "team.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var manifest teamManifestFile
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return nil, err
+	}
+	return &manifest, nil
+}
+
+func newDetachedMonitorModel(ctx context.Context, cfg config.Config, result *MonitorResult) (*monitorModel, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	taskStore, err := agentstate.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		return nil, err
+	}
+	in := textarea.New()
+	in.SetHeight(6)
+	in.CharLimit = 0
+	in.ShowLineNumbers = false
+	in.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	in.FocusedStyle.Placeholder = kit.StyleDim
+	in.FocusedStyle.Text = kit.StyleStatusValue
+	in.FocusedStyle.Prompt = kit.StyleStatusKey
+	in.Prompt = "> "
+	in.Focus()
+
+	delegate := newActivityDelegate()
+	activityList := list.New([]list.Item{}, delegate, 0, 0)
+	activityList.SetShowTitle(false)
+	activityList.SetShowStatusBar(false)
+	activityList.SetShowFilter(false)
+	activityList.SetShowHelp(false)
+	activityList.SetShowPagination(false)
+
+	sessionStore, err := store.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	m := &monitorModel{
+		ctx:                         ctx,
+		cfg:                         cfg,
+		runStatus:                   types.RunStatusRunning,
+		result:                      result,
+		session:                     sessionStore,
+		sessionID:                   "",
+		input:                       in,
+		activityPageItems:           []Activity{},
+		activityPage:                0,
+		activityPageSize:            200,
+		activityTotalCount:          0,
+		activityList:                activityList,
+		activityDetail:              viewport.New(0, 0),
+		activityFollowingTail:       true,
+		planViewport:                viewport.New(0, 0),
+		planFollowingTop:            true,
+		renderer:                    newContentRenderer(),
+		agentOutput:                 []string{},
+		agentOutputRunID:            []string{},
+		agentOutputVP:               viewport.New(0, 0),
+		agentOutputFollow:           true,
+		inbox:                       map[string]taskState{},
+		inboxVP:                     viewport.New(0, 0),
+		inboxList:                   []taskState{},
+		inboxPage:                   0,
+		inboxPageSize:               50,
+		outboxResults:               []outboxEntry{},
+		outboxVP:                    viewport.New(0, 0),
+		outboxPage:                  0,
+		outboxPageSize:              50,
+		memResults:                  []string{},
+		memoryVP:                    viewport.New(0, 0),
+		thinkingEntries:             []thinkingEntry{},
+		thinkingVP:                  viewport.New(0, 0),
+		thinkingAutoScroll:          true,
+		artifactContentVP:           viewport.New(0, 0),
+		taskStore:                   taskStore,
+		stats:                       monitorStats{started: time.Now()},
+		styles:                      defaultMonitorStyles(),
+		focusedPanel:                panelComposer,
+		uiRefreshDebounce:           33 * time.Millisecond,
+		planReloadDebounce:          100 * time.Millisecond,
+		sessionTotalsReloadDebounce: 150 * time.Millisecond,
+		seenOutboxByTask:            map[string]struct{}{},
+		teamRoleByRunID:             map[string]string{},
+		teamEventCursor:             map[string]int64{},
+		detached:                    true,
+	}
+	m.activityDetail.MouseWheelEnabled = false
+	m.planViewport.MouseWheelEnabled = false
+	m.agentOutputVP.MouseWheelEnabled = false
+	m.inboxVP.MouseWheelEnabled = false
+	m.outboxVP.MouseWheelEnabled = false
+	m.memoryVP.MouseWheelEnabled = false
+	m.thinkingVP.MouseWheelEnabled = false
+	m.artifactContentVP.MouseWheelEnabled = false
+	m.appendAgentOutput("[system] No active context. Use /new, /sessions, or /agents.")
 	m.refreshViewports()
 	return m, nil
 }
@@ -749,11 +962,18 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 // shows tasks added before the monitor started or via webhook, without scanning
 // inbox files.
 func (m *monitorModel) Init() tea.Cmd {
+	if m.isDetached() {
+		return nil
+	}
 	cmds := []tea.Cmd{m.listenEvent(), m.listenErr(), m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage()}
 	if strings.TrimSpace(m.teamID) != "" {
 		cmds = append(cmds, m.loadTeamStatus(), m.loadTeamEvents(), m.loadPlanFilesCmd(), m.loadTeamManifestCmd())
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *monitorModel) isDetached() bool {
+	return m != nil && m.detached
 }
 
 func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -845,6 +1065,30 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.appendAgentOutput(fmt.Sprintf("[%s] task.queued %s %s", time.Now().Local().Format("15:04:05"), shortID(msg.TaskID), truncateText(strings.TrimSpace(msg.Goal), 80)))
 		m.dirtyInbox = true
 		return m, tea.Batch(m.loadInboxPage(), m.scheduleUIRefresh())
+
+	case monitorSwitchRunMsg:
+		runID := strings.TrimSpace(msg.RunID)
+		if runID == "" {
+			return m, m.scheduleUIRefresh()
+		}
+		return m, m.reloadAsRun(runID)
+
+	case monitorSwitchTeamMsg:
+		teamID := strings.TrimSpace(msg.TeamID)
+		if teamID == "" {
+			return m, m.scheduleUIRefresh()
+		}
+		return m, m.reloadAsTeam(teamID)
+
+	case monitorReloadedMsg:
+		if msg.err != nil {
+			m.appendAgentOutput("[switch] error: " + msg.err.Error())
+			return m, m.scheduleUIRefresh()
+		}
+		if msg.model == nil {
+			return m, m.scheduleUIRefresh()
+		}
+		return msg.model, tea.Batch(msg.model.Init(), msg.model.scheduleUIRefresh())
 
 	case inboxLoadedMsg:
 		m.inboxList = msg.tasks
@@ -983,8 +1227,29 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionPickerPage = msg.page
 		items := sessionsToPickerItems(msg.sessions)
 		m.sessionPickerList.SetItems(items)
+		if strings.TrimSpace(m.sessionPickerFilter) == "" {
+			m.sessionPickerList.SetFilterText("")
+			m.sessionPickerList.SetFilterState(list.Unfiltered)
+		} else {
+			m.sessionPickerList.SetFilterText(strings.TrimSpace(m.sessionPickerFilter))
+			m.sessionPickerList.SetFilterState(list.Filtering)
+		}
 		if len(items) > 0 {
 			m.sessionPickerList.Select(0)
+		}
+		return m, m.scheduleUIRefresh()
+
+	case agentsListMsg:
+		if msg.err != nil {
+			m.agentPickerErr = msg.err.Error()
+			m.agentPickerList.SetItems(nil)
+			return m, m.scheduleUIRefresh()
+		}
+		m.agentPickerErr = ""
+		items := agentsToPickerItems(msg.agents)
+		m.agentPickerList.SetItems(items)
+		if len(items) > 0 {
+			m.agentPickerList.Select(0)
 		}
 		return m, m.scheduleUIRefresh()
 
@@ -1048,6 +1313,12 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.sessionPickerOpen {
 			return m.updateSessionPicker(msg)
+		}
+		if m.newSessionWizardOpen {
+			return m.updateNewSessionWizard(msg)
+		}
+		if m.agentPickerOpen {
+			return m.updateAgentPicker(msg)
 		}
 		if m.profilePickerOpen {
 			return m.updateProfilePicker(msg)
@@ -1299,6 +1570,12 @@ func (m *monitorModel) scheduleSessionTotalsReload() tea.Cmd {
 }
 
 func (m *monitorModel) rpcRun() types.Run {
+	if m.isDetached() {
+		return types.Run{
+			RunID:     "detached-control",
+			SessionID: "detached-control",
+		}
+	}
 	runID := strings.TrimSpace(m.runID)
 	if strings.TrimSpace(m.teamID) != "" {
 		if r := strings.TrimSpace(m.teamCoordinatorRunID); r != "" {
@@ -1423,7 +1700,7 @@ func (m *monitorModel) rpcControlSetProfile(_ context.Context, threadID, target,
 }
 
 func (m *monitorModel) loadSessionTotalsCmd() tea.Cmd {
-	if m == nil {
+	if m == nil || m.isDetached() {
 		return nil
 	}
 	return func() tea.Msg {
@@ -1444,18 +1721,18 @@ func (m *monitorModel) loadSessionTotalsCmd() tea.Cmd {
 		}
 		now := time.Now().UTC()
 		return sessionTotalsLoadedMsg{session: types.Session{
-			SessionID:   strings.TrimSpace(m.rpcRun().SessionID),
-			CreatedAt:   &now,
-			InputTokens: res.TotalTokensIn,
+			SessionID:    strings.TrimSpace(m.rpcRun().SessionID),
+			CreatedAt:    &now,
+			InputTokens:  res.TotalTokensIn,
 			OutputTokens: res.TotalTokensOut,
-			TotalTokens: res.TotalTokens,
-			CostUSD:     res.TotalCostUSD,
+			TotalTokens:  res.TotalTokens,
+			CostUSD:      res.TotalCostUSD,
 		}, pricingKnown: res.PricingKnown, tasksDone: res.TasksDone}
 	}
 }
 
 func (m *monitorModel) loadInboxPage() tea.Cmd {
-	if m == nil {
+	if m == nil || m.isDetached() {
 		return nil
 	}
 	pageSize := m.inboxPageSize
@@ -1480,6 +1757,11 @@ func (m *monitorModel) loadInboxPage() tea.Cmd {
 			}
 			if strings.TrimSpace(m.teamID) != "" {
 				params.TeamID = strings.TrimSpace(m.teamID)
+				if strings.TrimSpace(m.focusedRunID) != "" {
+					params.RunID = strings.TrimSpace(m.focusedRunID)
+				}
+			} else {
+				params.RunID = strings.TrimSpace(m.runID)
 			}
 			var res protocol.TaskListResult
 			if err := m.rpcRoundTrip(protocol.MethodTaskList, params, &res); err != nil {
@@ -1541,7 +1823,7 @@ func (m *monitorModel) loadInboxPage() tea.Cmd {
 }
 
 func (m *monitorModel) loadOutboxPage() tea.Cmd {
-	if m == nil {
+	if m == nil || m.isDetached() {
 		return nil
 	}
 	pageSize := m.outboxPageSize
@@ -1566,6 +1848,11 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 			}
 			if strings.TrimSpace(m.teamID) != "" {
 				params.TeamID = strings.TrimSpace(m.teamID)
+				if strings.TrimSpace(m.focusedRunID) != "" {
+					params.RunID = strings.TrimSpace(m.focusedRunID)
+				}
+			} else {
+				params.RunID = strings.TrimSpace(m.runID)
 			}
 			var res protocol.TaskListResult
 			if err := m.rpcRoundTrip(protocol.MethodTaskList, params, &res); err != nil {
@@ -1746,6 +2033,9 @@ func (m *monitorModel) loadTeamManifestCmd() tea.Cmd {
 			TeamID:   strings.TrimSpace(m.teamID),
 		}, &res)
 		if err != nil {
+			if manifest, ferr := loadTeamManifestFromDisk(m.cfg, m.teamID); ferr == nil && manifest != nil {
+				return teamManifestLoadedMsg{manifest: manifest, err: nil}
+			}
 			return teamManifestLoadedMsg{manifest: nil, err: err}
 		}
 		manifest := &teamManifestFile{
@@ -1830,7 +2120,7 @@ func (m *monitorModel) applyFocusLens() tea.Cmd {
 }
 
 func (m *monitorModel) loadActivityPage() tea.Cmd {
-	if m == nil {
+	if m == nil || m.isDetached() {
 		return nil
 	}
 	pageSize := m.activityPageSize
@@ -2023,6 +2313,12 @@ func (m *monitorModel) View() string {
 	if m.sessionPickerOpen {
 		return m.renderSessionPicker(base)
 	}
+	if m.newSessionWizardOpen {
+		return m.renderNewSessionWizard(base)
+	}
+	if m.agentPickerOpen {
+		return m.renderAgentPicker(base)
+	}
 	if m.profilePickerOpen {
 		return m.renderProfilePicker(base)
 	}
@@ -2051,7 +2347,14 @@ func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine str
 	composer := m.renderComposer(grid.Composer)
 	stats := m.renderStatsInline(grid.Stats.Width)
 	sections := []string{headerLine, "", main, "", composer, stats, statusBar}
-	if m.runStatus != types.RunStatusRunning {
+	if m.isDetached() {
+		w := m.width
+		if w <= 0 {
+			w = 80
+		}
+		warning := m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render("No active context. Use /new, /sessions, or /agents."))
+		sections = []string{headerLine, warning, "", main, "", composer, stats, statusBar}
+	} else if m.runStatus != types.RunStatusRunning {
 		w := m.width
 		if w <= 0 {
 			w = 80
@@ -2283,9 +2586,11 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 		return nil
 	}
 	cmd, rest := splitMonitorCommand(raw)
-	// Treat any non-command submission as a task goal.
-	// A "command" is a known slash-command token (e.g. "/help", "/model").
-	if cmd == "" || !strings.HasPrefix(cmd, "/") || !isExactMonitorCommand(cmd) {
+	if strings.HasPrefix(cmd, "/") && !isExactMonitorCommand(cmd) {
+		return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] unknown command: " + cmd}} }
+	}
+	// Treat non-slash submissions as task goals.
+	if cmd == "" || !strings.HasPrefix(cmd, "/") {
 		return m.enqueueTask(strings.TrimSpace(raw), 0)
 	}
 
@@ -2304,9 +2609,50 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 	if cmd == "/editor" {
 		return m.openComposeEditor("")
 	}
+	if cmd == "/new" {
+		if strings.TrimSpace(rest) == "" {
+			return m.openNewSessionWizard()
+		}
+		req := parseNewSessionRequest(strings.TrimSpace(rest), strings.TrimSpace(m.profile))
+		switch req.Mode {
+		case "team":
+			if strings.TrimSpace(req.Profile) == "" {
+				return m.openProfilePickerFor("new-team", true)
+			}
+			return m.startNewTeamSession(req.Profile, req.Goal)
+		case "standalone":
+			return m.startNewStandaloneSession(req.Profile, req.Goal)
+		default:
+			return func() tea.Msg {
+				return commandLinesMsg{lines: []string{"[command] usage: /new [standalone [profile]] [goal] | /new team <profile> [goal]"}}
+			}
+		}
+	}
+	if cmd == "/rename-session" {
+		title := strings.TrimSpace(rest)
+		if title == "" {
+			return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /rename-session <title>"}} }
+		}
+		return func() tea.Msg {
+			var res protocol.SessionRenameResult
+			if err := m.rpcRoundTrip(protocol.MethodSessionRename, protocol.SessionRenameParams{
+				ThreadID:  protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+				SessionID: strings.TrimSpace(m.sessionID),
+				Title:     title,
+			}, &res); err != nil {
+				return commandLinesMsg{lines: []string{"[session] error: " + err.Error()}}
+			}
+			return commandLinesMsg{lines: []string{"[session] renamed: " + strings.TrimSpace(res.Title)}}
+		}
+	}
 	if cmd == "/artifact" {
 		if strings.TrimSpace(rest) != "" {
 			return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /artifact"}} }
+		}
+		if m.isDetached() {
+			return func() tea.Msg {
+				return commandLinesMsg{lines: []string{"[command] no active context; use /new or /sessions first"}}
+			}
 		}
 		return m.openArtifactViewer()
 	}
@@ -2329,19 +2675,33 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 		}
 		return m.openSessionPicker()
 	}
-	if cmd == "/profile" && strings.TrimSpace(rest) == "" {
-		return m.openProfilePicker()
-	}
-	if cmd == "/profile" && strings.TrimSpace(rest) != "" {
-		ref := strings.TrimSpace(rest)
-		return m.writeControl("switch_profile", map[string]any{"profile": ref})
+	if cmd == "/agents" {
+		if strings.TrimSpace(rest) != "" {
+			return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /agents"}} }
+		}
+		if m.isDetached() {
+			return func() tea.Msg {
+				return commandLinesMsg{lines: []string{"[command] select or create a session first: /new or /sessions"}}
+			}
+		}
+		return m.openAgentPicker()
 	}
 
 	// /model with no arg opens picker, with arg sets directly
 	if cmd == "/model" && strings.TrimSpace(rest) == "" {
+		if m.isDetached() {
+			return func() tea.Msg {
+				return commandLinesMsg{lines: []string{"[command] no active context; use /new or /sessions first"}}
+			}
+		}
 		return m.openModelPicker()
 	}
 	if cmd == "/model" && strings.TrimSpace(rest) != "" {
+		if m.isDetached() {
+			return func() tea.Msg {
+				return commandLinesMsg{lines: []string{"[command] no active context; use /new or /sessions first"}}
+			}
+		}
 		model := strings.TrimSpace(rest)
 		if strings.TrimSpace(m.teamID) != "" {
 			return m.writeTeamControl("set_team_model", model)
@@ -2369,8 +2729,139 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 	return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] " + raw}} }
 }
 
+type newSessionRequest struct {
+	Mode    string
+	Profile string
+	Goal    string
+}
+
+func parseNewSessionRequest(rest, defaultProfile string) newSessionRequest {
+	rest = strings.TrimSpace(rest)
+	defaultProfile = strings.TrimSpace(defaultProfile)
+	if defaultProfile == "" {
+		defaultProfile = "general"
+	}
+	if rest == "" {
+		return newSessionRequest{Mode: "standalone", Profile: defaultProfile}
+	}
+	toks := strings.Fields(rest)
+	if len(toks) == 0 {
+		return newSessionRequest{Mode: "standalone", Profile: defaultProfile}
+	}
+	mode := strings.ToLower(strings.TrimSpace(toks[0]))
+	switch mode {
+	case "team":
+		if len(toks) == 1 {
+			return newSessionRequest{Mode: "team"}
+		}
+		return newSessionRequest{
+			Mode:    "team",
+			Profile: strings.TrimSpace(toks[1]),
+			Goal:    strings.TrimSpace(strings.Join(toks[2:], " ")),
+		}
+	case "standalone":
+		if len(toks) == 1 {
+			return newSessionRequest{Mode: "standalone", Profile: defaultProfile}
+		}
+		return newSessionRequest{
+			Mode:    "standalone",
+			Profile: strings.TrimSpace(toks[1]),
+			Goal:    strings.TrimSpace(strings.Join(toks[2:], " ")),
+		}
+	default:
+		return newSessionRequest{
+			Mode:    "standalone",
+			Profile: defaultProfile,
+			Goal:    strings.TrimSpace(rest),
+		}
+	}
+}
+
+func (m *monitorModel) startNewStandaloneSession(profileRef, goal string) tea.Cmd {
+	return func() tea.Msg {
+		var res protocol.SessionStartResult
+		if err := m.rpcRoundTrip(protocol.MethodSessionStart, protocol.SessionStartParams{
+			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+			Mode:     "standalone",
+			Profile:  strings.TrimSpace(profileRef),
+			Goal:     strings.TrimSpace(goal),
+			Model:    strings.TrimSpace(m.model),
+		}, &res); err != nil {
+			return commandLinesMsg{lines: []string{"[session] error: " + err.Error()}}
+		}
+		runID := strings.TrimSpace(res.PrimaryRunID)
+		if runID == "" {
+			return commandLinesMsg{lines: []string{"[session] error: session.start returned empty primaryRunId"}}
+		}
+		return monitorSwitchRunMsg{RunID: runID}
+	}
+}
+
+func (m *monitorModel) startNewTeamSession(profileRef, goal string) tea.Cmd {
+	return func() tea.Msg {
+		var res protocol.SessionStartResult
+		if err := m.rpcRoundTrip(protocol.MethodSessionStart, protocol.SessionStartParams{
+			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+			Mode:     "team",
+			Profile:  strings.TrimSpace(profileRef),
+			Goal:     strings.TrimSpace(goal),
+			Model:    strings.TrimSpace(m.model),
+		}, &res); err != nil {
+			return commandLinesMsg{lines: []string{"[session] error: " + err.Error()}}
+		}
+		teamID := strings.TrimSpace(res.TeamID)
+		if teamID == "" {
+			return commandLinesMsg{lines: []string{"[session] error: session.start(team) returned empty teamId"}}
+		}
+		return monitorSwitchTeamMsg{TeamID: teamID}
+	}
+}
+
+func (m *monitorModel) reloadAsRun(runID string) tea.Cmd {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		if m.cancel != nil {
+			m.cancel()
+		}
+		nm, err := newMonitorModel(m.ctx, m.cfg, runID, m.result)
+		if err != nil {
+			return monitorReloadedMsg{err: err}
+		}
+		nm.width = m.width
+		nm.height = m.height
+		nm.refreshViewports()
+		return monitorReloadedMsg{model: nm}
+	}
+}
+
+func (m *monitorModel) reloadAsTeam(teamID string) tea.Cmd {
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		if m.cancel != nil {
+			m.cancel()
+		}
+		nm, err := newTeamMonitorModel(m.ctx, m.cfg, teamID, m.result)
+		if err != nil {
+			return monitorReloadedMsg{err: err}
+		}
+		nm.width = m.width
+		nm.height = m.height
+		nm.refreshViewports()
+		return monitorReloadedMsg{model: nm}
+	}
+}
+
 func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 	return func() tea.Msg {
+		if m.isDetached() {
+			return commandLinesMsg{lines: []string{"[queued] error: no active context; use /new or /sessions first"}}
+		}
 		goal = strings.TrimSpace(goal)
 		if goal == "" {
 			return commandLinesMsg{lines: []string{"[queued] error: goal is empty"}}
@@ -2381,9 +2872,20 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 			Priority: priority,
 		}
 		if strings.TrimSpace(m.teamID) != "" {
-			params.AssignedToType = "team"
-			params.AssignedTo = strings.TrimSpace(m.teamID)
+			params.TeamID = strings.TrimSpace(m.teamID)
+			if strings.TrimSpace(m.focusedRunID) != "" {
+				params.RunID = strings.TrimSpace(m.focusedRunID)
+				params.AssignedToType = "agent"
+				params.AssignedTo = strings.TrimSpace(m.focusedRunID)
+				if strings.TrimSpace(m.focusedRunRole) != "" {
+					params.AssignedRole = strings.TrimSpace(m.focusedRunRole)
+				}
+			} else {
+				params.AssignedToType = "team"
+				params.AssignedTo = strings.TrimSpace(m.teamID)
+			}
 		} else {
+			params.RunID = strings.TrimSpace(m.runID)
 			params.AssignedToType = "agent"
 			params.AssignedTo = strings.TrimSpace(m.runID)
 		}
@@ -2436,28 +2938,6 @@ func (m *monitorModel) writeControl(command string, args map[string]any) tea.Cmd
 			}
 			m.model = model
 			return commandLinesMsg{lines: []string{"[control] applied set_model -> " + model}}
-		case "switch_profile":
-			ref := ""
-			if args != nil {
-				if v, ok := args["profile"].(string); ok {
-					ref = strings.TrimSpace(v)
-				}
-			}
-			if ref == "" {
-				return commandLinesMsg{lines: []string{"[control] error: profile is required"}}
-			}
-			if strings.TrimSpace(m.teamID) != "" {
-				return commandLinesMsg{lines: []string{"[control] error: profile switching is not supported in team mode"}}
-			}
-			var res protocol.ControlSetProfileResult
-			if err := m.rpcRoundTrip(protocol.MethodControlSetProfile, protocol.ControlSetProfileParams{
-				ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
-				Profile:  ref,
-			}, &res); err != nil {
-				return commandLinesMsg{lines: []string{"[control] error: " + err.Error()}}
-			}
-			m.profile = ref
-			return commandLinesMsg{lines: []string{"[control] applied switch_profile -> " + ref}}
 		default:
 			return commandLinesMsg{lines: []string{"[control] error: unsupported command " + command}}
 		}
@@ -3148,7 +3628,12 @@ func (m *monitorModel) refreshThinkingViewport() {
 
 func (m *monitorModel) renderHeader() string {
 	content := ""
-	if strings.TrimSpace(m.teamID) != "" {
+	if m.isDetached() {
+		content = lipgloss.JoinHorizontal(lipgloss.Left,
+			m.styles.headerTitle.Render("Workbench Control Shell "),
+			kit.RenderTag(kit.TagOptions{Key: "Status", Value: "detached"}),
+		)
+	} else if strings.TrimSpace(m.teamID) != "" {
 		content = lipgloss.JoinHorizontal(lipgloss.Left,
 			m.styles.headerTitle.Render("Workbench TEAM "),
 			kit.RenderTag(kit.TagOptions{Key: "Team", Value: m.teamID}),
@@ -3669,6 +4154,9 @@ func (m *monitorModel) refreshViewports() {
 }
 
 func (m *monitorModel) loadPlanFiles() {
+	if m == nil || m.isDetached() {
+		return
+	}
 	params := protocol.PlanGetParams{
 		ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
 	}
@@ -3695,7 +4183,7 @@ func (m *monitorModel) loadPlanFiles() {
 }
 
 func (m *monitorModel) loadPlanFilesCmd() tea.Cmd {
-	if m == nil {
+	if m == nil || m.isDetached() {
 		return nil
 	}
 	return func() tea.Msg {
@@ -3860,7 +4348,8 @@ func (m *monitorModel) currentAgentOutputLines() []string {
 		if i >= len(m.agentOutputRunID) {
 			break
 		}
-		if strings.TrimSpace(m.agentOutputRunID[i]) != targetRunID {
+		entryRunID := strings.TrimSpace(m.agentOutputRunID[i])
+		if entryRunID != "" && entryRunID != targetRunID {
 			continue
 		}
 		out = append(out, line)

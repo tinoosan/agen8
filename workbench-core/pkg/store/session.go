@@ -10,6 +10,7 @@ import (
 type SessionFilter struct {
 	// Filtering
 	TitleContains string // case-insensitive substring match against title/current goal
+	IncludeSystem bool   // include daemon/system sessions in results
 
 	// Pagination
 	Limit  int // max results (default: 50, 0 = use default)

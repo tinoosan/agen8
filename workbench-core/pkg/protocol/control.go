@@ -18,6 +18,7 @@ type ControlSetProfileParams struct {
 }
 
 type ControlSetProfileResult struct {
-	Accepted  bool     `json:"accepted"`
-	AppliedTo []string `json:"appliedTo,omitempty"`
+	Accepted                bool     `json:"accepted"`
+	AppliedTo               []string `json:"appliedTo,omitempty"`
+	PreservesSessionContext bool     `json:"preservesSessionContext"`
 }

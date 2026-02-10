@@ -8,6 +8,95 @@ type SessionGetTotalsParams struct {
 	RunID    string   `json:"runId,omitempty"`
 }
 
+type SessionStartParams struct {
+	ThreadID ThreadID `json:"threadId"`
+	Mode     string   `json:"mode,omitempty"` // standalone|team
+	Profile  string   `json:"profile,omitempty"`
+	Goal     string   `json:"goal,omitempty"`
+	Model    string   `json:"model,omitempty"`
+}
+
+type SessionStartResult struct {
+	SessionID    string   `json:"sessionId"`
+	PrimaryRunID string   `json:"primaryRunId"`
+	Mode         string   `json:"mode"`
+	Profile      string   `json:"profile,omitempty"`
+	Model        string   `json:"model,omitempty"`
+	TeamID       string   `json:"teamId,omitempty"`
+	RunIDs       []string `json:"runIds,omitempty"`
+}
+
+type SessionListParams struct {
+	ThreadID      ThreadID `json:"threadId"`
+	TitleContains string   `json:"titleContains,omitempty"`
+	Limit         int      `json:"limit,omitempty"`
+	Offset        int      `json:"offset,omitempty"`
+}
+
+type SessionListItem struct {
+	SessionID    string `json:"sessionId"`
+	Title        string `json:"title,omitempty"`
+	CurrentRunID string `json:"currentRunId,omitempty"`
+	ActiveModel  string `json:"activeModel,omitempty"`
+	Mode         string `json:"mode,omitempty"`
+	TeamID       string `json:"teamId,omitempty"`
+	Profile      string `json:"profile,omitempty"`
+	CreatedAt    string `json:"createdAt,omitempty"`
+	UpdatedAt    string `json:"updatedAt,omitempty"`
+}
+
+type SessionListResult struct {
+	Sessions   []SessionListItem `json:"sessions"`
+	TotalCount int               `json:"totalCount,omitempty"`
+}
+
+type SessionRenameParams struct {
+	ThreadID  ThreadID `json:"threadId"`
+	SessionID string   `json:"sessionId,omitempty"`
+	Title     string   `json:"title"`
+}
+
+type SessionRenameResult struct {
+	SessionID string `json:"sessionId"`
+	Title     string `json:"title"`
+}
+
+type AgentListParams struct {
+	ThreadID  ThreadID `json:"threadId"`
+	SessionID string   `json:"sessionId,omitempty"`
+}
+
+type AgentListItem struct {
+	RunID      string `json:"runId"`
+	SessionID  string `json:"sessionId"`
+	Profile    string `json:"profile,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Goal       string `json:"goal,omitempty"`
+	TeamID     string `json:"teamId,omitempty"`
+	Role       string `json:"role,omitempty"`
+	StartedAt  string `json:"startedAt,omitempty"`
+	FinishedAt string `json:"finishedAt,omitempty"`
+}
+
+type AgentListResult struct {
+	Agents []AgentListItem `json:"agents"`
+}
+
+type AgentStartParams struct {
+	ThreadID  ThreadID `json:"threadId"`
+	SessionID string   `json:"sessionId,omitempty"`
+	Profile   string   `json:"profile,omitempty"`
+	Goal      string   `json:"goal,omitempty"`
+	Model     string   `json:"model,omitempty"`
+}
+
+type AgentStartResult struct {
+	RunID     string `json:"runId"`
+	SessionID string `json:"sessionId"`
+	Profile   string `json:"profile,omitempty"`
+	Model     string `json:"model,omitempty"`
+}
+
 type SessionGetTotalsResult struct {
 	LastTurnTokensIn  int     `json:"lastTurnTokensIn"`
 	LastTurnTokensOut int     `json:"lastTurnTokensOut"`

@@ -38,6 +38,7 @@ type Runtime struct {
 type BuildConfig struct {
 	Cfg                   config.Config
 	Run                   types.Run
+	Profile               string
 	WorkdirAbs            string
 	SharedWorkspaceDir    string
 	Model                 string
@@ -93,6 +94,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	run := cfg.Run
 	run.Runtime = &types.RunRuntimeConfig{
 		DataDir:          cfg.Cfg.DataDir,
+		Profile:          strings.TrimSpace(cfg.Profile),
 		Model:            cfg.Model,
 		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),

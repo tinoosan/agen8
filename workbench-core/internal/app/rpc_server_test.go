@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
@@ -268,17 +269,17 @@ func TestRPCServer_ArtifactList_RunScope(t *testing.T) {
 
 	now := time.Now().UTC()
 	task := types.Task{
-		TaskID:     "task-run-1",
-		SessionID:  run.SessionID,
-		RunID:      run.RunID,
-		Goal:       "run artifact",
-		Status:     types.TaskStatusPending,
-		CreatedAt:  &now,
-		Inputs:     map[string]any{},
-		Metadata:   map[string]any{},
-		CreatedBy:  "user",
-		TaskKind:   "task",
-		TeamID:     "",
+		TaskID:       "task-run-1",
+		SessionID:    run.SessionID,
+		RunID:        run.RunID,
+		Goal:         "run artifact",
+		Status:       types.TaskStatusPending,
+		CreatedAt:    &now,
+		Inputs:       map[string]any{},
+		Metadata:     map[string]any{},
+		CreatedBy:    "user",
+		TaskKind:     "task",
+		TeamID:       "",
 		RoleSnapshot: "",
 	}
 	if err := ts.CreateTask(context.Background(), task); err != nil {
@@ -563,6 +564,75 @@ func TestRPCServer_TaskFlow_CreateListClaimComplete(t *testing.T) {
 	}
 }
 
+func TestRPCServer_TaskListAndCreate_RunScopedOverrides(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	runA := types.NewRun("goal", 8*1024, sess.SessionID)
+	runB := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = runA.RunID
+	sess.Runs = []string{runA.RunID, runB.RunID}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: runA, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	createReq, _ := protocol.NewRequest("1", protocol.MethodTaskCreate, protocol.TaskCreateParams{
+		ThreadID: protocol.ThreadID(runA.SessionID),
+		RunID:    runB.RunID,
+		Goal:     "scoped to run b",
+	})
+	createResp := rpcRoundTrip(t, srv, createReq)
+	if createResp.Error != nil {
+		t.Fatalf("task.create error: %+v", createResp.Error)
+	}
+	var createRes protocol.TaskCreateResult
+	_ = json.Unmarshal(createResp.Result, &createRes)
+	if got := strings.TrimSpace(string(createRes.Task.RunID)); got != runB.RunID {
+		t.Fatalf("created task runId=%q, want %q", got, runB.RunID)
+	}
+
+	inboxRunAReq, _ := protocol.NewRequest("2", protocol.MethodTaskList, protocol.TaskListParams{
+		ThreadID: protocol.ThreadID(runA.SessionID),
+		View:     "inbox",
+		RunID:    runA.RunID,
+	})
+	inboxRunAResp := rpcRoundTrip(t, srv, inboxRunAReq)
+	if inboxRunAResp.Error != nil {
+		t.Fatalf("task.list runA error: %+v", inboxRunAResp.Error)
+	}
+	var inboxRunA protocol.TaskListResult
+	_ = json.Unmarshal(inboxRunAResp.Result, &inboxRunA)
+	for _, tk := range inboxRunA.Tasks {
+		if strings.TrimSpace(tk.ID) == strings.TrimSpace(createRes.Task.ID) {
+			t.Fatalf("task for runB unexpectedly returned in runA scope")
+		}
+	}
+
+	inboxRunBReq, _ := protocol.NewRequest("3", protocol.MethodTaskList, protocol.TaskListParams{
+		ThreadID: protocol.ThreadID(runA.SessionID),
+		View:     "inbox",
+		RunID:    runB.RunID,
+	})
+	inboxRunBResp := rpcRoundTrip(t, srv, inboxRunBReq)
+	if inboxRunBResp.Error != nil {
+		t.Fatalf("task.list runB error: %+v", inboxRunBResp.Error)
+	}
+	var inboxRunB protocol.TaskListResult
+	_ = json.Unmarshal(inboxRunBResp.Result, &inboxRunB)
+	found := false
+	for _, tk := range inboxRunB.Tasks {
+		if strings.TrimSpace(tk.ID) == strings.TrimSpace(createRes.Task.ID) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected scoped task in runB inbox")
+	}
+}
+
 func TestRPCServer_ControlSetModel(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")
@@ -626,6 +696,41 @@ func TestRPCServer_ControlSetProfile_ThreadMismatch(t *testing.T) {
 	}
 }
 
+func TestRPCServer_ControlSetProfile_PreservesSessionContext(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	seen := ""
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+		ControlSetProfile: func(_ context.Context, threadID, target, profile string) ([]string, error) {
+			seen = threadID + "|" + target + "|" + profile
+			return []string{run.RunID}, nil
+		},
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodControlSetProfile, protocol.ControlSetProfileParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Profile:  "software_dev",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("control.setProfile error: %+v", resp.Error)
+	}
+	if seen != run.SessionID+"||software_dev" {
+		t.Fatalf("unexpected callback payload: %q", seen)
+	}
+	var res protocol.ControlSetProfileResult
+	_ = json.Unmarshal(resp.Result, &res)
+	if !res.Accepted || !res.PreservesSessionContext || len(res.AppliedTo) != 1 || res.AppliedTo[0] != run.RunID {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
 func TestRPCServer_SessionGetTotals_AndActivityList(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")
@@ -670,6 +775,359 @@ func TestRPCServer_SessionGetTotals_AndActivityList(t *testing.T) {
 	respActs := rpcRoundTrip(t, srv, reqActs)
 	if respActs.Error != nil {
 		t.Fatalf("activity.list error: %+v", respActs.Error)
+	}
+}
+
+func TestRPCServer_SessionStart_Standalone(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	sess.ActiveModel = "openai/gpt-5-nano"
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Mode:     "standalone",
+		Goal:     "fresh start",
+		Profile:  "general",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.start error: %+v", resp.Error)
+	}
+	var out protocol.SessionStartResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if strings.TrimSpace(out.SessionID) == "" || strings.TrimSpace(out.PrimaryRunID) == "" {
+		t.Fatalf("missing ids: %+v", out)
+	}
+	if out.Mode != "standalone" {
+		t.Fatalf("mode = %q, want standalone", out.Mode)
+	}
+	if out.Model != "openai/gpt-5-nano" {
+		t.Fatalf("model = %q, want inherited openai/gpt-5-nano", out.Model)
+	}
+	if got, err := sessStore.LoadSession(context.Background(), out.SessionID); err != nil {
+		t.Fatalf("load created session: %v", err)
+	} else if strings.TrimSpace(got.ActiveModel) != "openai/gpt-5-nano" {
+		t.Fatalf("created session active model = %q", got.ActiveModel)
+	}
+}
+
+func TestRPCServer_SessionStart_InvalidMode(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Mode:     "invalid",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error == nil {
+		t.Fatalf("expected invalid mode error")
+	}
+	if resp.Error.Code != protocol.CodeInvalidParams {
+		t.Fatalf("code = %d want %d", resp.Error.Code, protocol.CodeInvalidParams)
+	}
+}
+
+func TestRPCServer_SessionStart_Team(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "startup_team"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "startup_team", "profile.yaml"), []byte(
+		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        system_prompt: build\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Mode:     "team",
+		Profile:  "startup_team",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.start(team) error: %+v", resp.Error)
+	}
+	var out protocol.SessionStartResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if out.Mode != "team" {
+		t.Fatalf("mode=%q want team", out.Mode)
+	}
+	if strings.TrimSpace(out.TeamID) == "" {
+		t.Fatalf("expected team id, got %+v", out)
+	}
+	if len(out.RunIDs) != 2 {
+		t.Fatalf("expected 2 role runs, got %d", len(out.RunIDs))
+	}
+	if _, err := os.Stat(filepath.Join(fsutil.GetTeamDir(cfg.DataDir, out.TeamID), "team.json")); err != nil {
+		t.Fatalf("expected team manifest: %v", err)
+	}
+	createdSess, err := sessStore.LoadSession(context.Background(), out.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSession(team): %v", err)
+	}
+	if got := strings.TrimSpace(createdSess.Mode); got != "team" {
+		t.Fatalf("session mode=%q want team", got)
+	}
+	if got := strings.TrimSpace(createdSess.TeamID); got != strings.TrimSpace(out.TeamID) {
+		t.Fatalf("session teamID=%q want %q", got, out.TeamID)
+	}
+	if got := strings.TrimSpace(createdSess.Profile); got != "startup_team" {
+		t.Fatalf("session profile=%q want startup_team", got)
+	}
+	firstRun, err := implstore.LoadRun(cfg, out.RunIDs[0])
+	if err != nil {
+		t.Fatalf("LoadRun(team role): %v", err)
+	}
+	if firstRun.Runtime == nil {
+		t.Fatalf("expected runtime metadata for team run")
+	}
+	if got := strings.TrimSpace(firstRun.Runtime.TeamID); got != strings.TrimSpace(out.TeamID) {
+		t.Fatalf("run runtime teamID=%q want %q", got, out.TeamID)
+	}
+	if strings.TrimSpace(firstRun.Runtime.Role) == "" {
+		t.Fatalf("expected run runtime role to be set")
+	}
+}
+
+func TestRPCServer_SessionList_And_AgentList(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sessA, runA, err := implstore.CreateSession(cfg, "alpha goal", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession A: %v", err)
+	}
+	sessB, runB, err := implstore.CreateSession(cfg, "beta goal", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession B: %v", err)
+	}
+	runBLoaded, err := implstore.LoadRun(cfg, runB.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun B: %v", err)
+	}
+	if runBLoaded.Runtime == nil {
+		runBLoaded.Runtime = &types.RunRuntimeConfig{}
+	}
+	runBLoaded.Runtime.Profile = "market_researcher"
+	runBLoaded.Runtime.TeamID = "team-1"
+	runBLoaded.Runtime.Role = "cto"
+	if err := implstore.SaveRun(cfg, runBLoaded); err != nil {
+		t.Fatalf("SaveRun B: %v", err)
+	}
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	bootstrap, _, err := implstore.CreateSession(cfg, "autonomous agent", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession bootstrap: %v", err)
+	}
+	bootstrap.System = true
+	if err := sessStore.SaveSession(context.Background(), bootstrap); err != nil {
+		t.Fatalf("SaveSession bootstrap: %v", err)
+	}
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	now := time.Now().UTC()
+	if err := ts.CreateTask(context.Background(), types.Task{
+		TaskID:       "task-role-inference",
+		SessionID:    sessB.SessionID,
+		RunID:        runB.RunID,
+		TeamID:       "team-1",
+		AssignedRole: "cto",
+		RoleSnapshot: "cto",
+		Goal:         "role task",
+		Status:       types.TaskStatusPending,
+		CreatedAt:    &now,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: runA, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	reqList, _ := protocol.NewRequest("1", protocol.MethodSessionList, protocol.SessionListParams{
+		ThreadID:      protocol.ThreadID(runA.SessionID),
+		TitleContains: "goal",
+		Limit:         10,
+	})
+	respList := rpcRoundTrip(t, srv, reqList)
+	if respList.Error != nil {
+		t.Fatalf("session.list error: %+v", respList.Error)
+	}
+	var listed protocol.SessionListResult
+	_ = json.Unmarshal(respList.Result, &listed)
+	if listed.TotalCount < 2 {
+		t.Fatalf("expected at least 2 sessions, got %+v", listed)
+	}
+	for _, s := range listed.Sessions {
+		if strings.TrimSpace(s.SessionID) == strings.TrimSpace(bootstrap.SessionID) {
+			t.Fatalf("system/bootstrap session should be excluded from session.list")
+		}
+	}
+	if len(listed.Sessions) == 0 {
+		t.Fatalf("expected non-empty sessions page when totalCount=%d", listed.TotalCount)
+	}
+	for _, s := range listed.Sessions {
+		if strings.TrimSpace(s.SessionID) == "" {
+			t.Fatalf("expected sessionId on session.list item, got %+v", s)
+		}
+	}
+	foundSessB := false
+	for _, s := range listed.Sessions {
+		if strings.TrimSpace(s.SessionID) != strings.TrimSpace(sessB.SessionID) {
+			continue
+		}
+		foundSessB = true
+		if got := strings.TrimSpace(s.Mode); got != "team" {
+			t.Fatalf("session %s mode=%q want team", s.SessionID, got)
+		}
+		if got := strings.TrimSpace(s.TeamID); got != "team-1" {
+			t.Fatalf("session %s teamID=%q want team-1", s.SessionID, got)
+		}
+		if got := strings.TrimSpace(s.Profile); got != "market_researcher" {
+			t.Fatalf("session %s profile=%q want market_researcher", s.SessionID, got)
+		}
+	}
+	if !foundSessB {
+		t.Fatalf("expected session %s in session.list", sessB.SessionID)
+	}
+
+	reqAgents, _ := protocol.NewRequest("2", protocol.MethodAgentList, protocol.AgentListParams{
+		ThreadID:  protocol.ThreadID(runA.SessionID),
+		SessionID: sessB.SessionID,
+	})
+	respAgents := rpcRoundTrip(t, srv, reqAgents)
+	if respAgents.Error != nil {
+		t.Fatalf("agent.list error: %+v", respAgents.Error)
+	}
+	var agents protocol.AgentListResult
+	_ = json.Unmarshal(respAgents.Result, &agents)
+	found := false
+	for _, a := range agents.Agents {
+		if strings.TrimSpace(a.RunID) == strings.TrimSpace(runB.RunID) && strings.TrimSpace(a.SessionID) == strings.TrimSpace(sessB.SessionID) {
+			if got := strings.TrimSpace(a.Role); got != "cto" {
+				t.Fatalf("expected role inference %q, got %q", "cto", got)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected run %s in agent.list, got %+v", runB.RunID, agents.Agents)
+	}
+
+	_ = sessA // keep lint happy for created baseline session
+}
+
+func TestRPCServer_SessionRename(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, run, err := implstore.CreateSession(cfg, "old title", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionRename, protocol.SessionRenameParams{
+		ThreadID:  protocol.ThreadID(run.SessionID),
+		SessionID: sess.SessionID,
+		Title:     "new title",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.rename error: %+v", resp.Error)
+	}
+	got, err := sessStore.LoadSession(context.Background(), sess.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if strings.TrimSpace(got.Title) != "new title" {
+		t.Fatalf("title=%q want %q", got.Title, "new title")
+	}
+}
+
+func TestRPCServer_AgentStart(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, run, err := implstore.CreateSession(cfg, "alpha goal", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess.ActiveModel = "openai/gpt-5-nano"
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodAgentStart, protocol.AgentStartParams{
+		ThreadID:  protocol.ThreadID(run.SessionID),
+		SessionID: sess.SessionID,
+		Profile:   "general",
+		Goal:      "next run",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("agent.start error: %+v", resp.Error)
+	}
+	var out protocol.AgentStartResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if strings.TrimSpace(out.RunID) == "" || strings.TrimSpace(out.SessionID) == "" {
+		t.Fatalf("missing ids: %+v", out)
+	}
+	if out.SessionID != sess.SessionID {
+		t.Fatalf("session mismatch: got %s want %s", out.SessionID, sess.SessionID)
+	}
+	if out.Model != "openai/gpt-5-nano" {
+		t.Fatalf("model = %q want inherited openai/gpt-5-nano", out.Model)
+	}
+	loadedSess, err := sessStore.LoadSession(context.Background(), sess.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	found := false
+	for _, id := range loadedSess.Runs {
+		if strings.TrimSpace(id) == strings.TrimSpace(out.RunID) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("new run %s not attached to session %s", out.RunID, sess.SessionID)
 	}
 }
 

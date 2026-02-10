@@ -5,10 +5,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/tinoosan/workbench-core/internal/app"
 )
 
 var (
@@ -32,19 +30,17 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "workbench",
-	Short: "Workbench runs an always-on autonomous agent",
+	Short: "Workbench monitor client",
 	Long: strings.TrimSpace(`
 Workbench is a local, agentic runtime built around a virtual filesystem (VFS).
 
-Running "workbench" starts a new session and run, then starts an always-on daemon
-that continuously processes DB-backed tasks and records results/artifacts in SQLite.
-
-Start the daemon first, then run "workbench monitor" so the monitor attaches to
-the active agent (or use "workbench monitor --agent-id <id>" with the agent ID printed
-at daemon startup).
+Running "workbench" opens the monitor client in detached control mode.
+Start the daemon with "workbench daemon" and use /new, /sessions, or /agents
+from the monitor to attach context.
 
 Protocol mode:
-  - Use --protocol-stdio to enable JSON-RPC 2.0 over stdin/stdout.
+  - Daemon uses --protocol-stdio by default.
+  - Use --protocol-stdio=false to disable JSON-RPC over stdin/stdout.
   - Protocol mode is also auto-enabled when both stdin and stdout are non-TTY (piped).
 
 Each executed task can:
@@ -84,26 +80,7 @@ Each executed task can:
 		if err != nil {
 			return err
 		}
-		modelOverride := ""
-		if cmd.Root().PersistentFlags().Changed("model") {
-			modelOverride = strings.TrimSpace(modelID)
-		}
-
-		opts := []app.RunChatOption{
-			app.WithModel(modelOverride),
-			app.WithProfile(profileRef),
-			app.WithWorkDir(workDir),
-			app.WithProtocolStdio(protocolStdio),
-			app.WithWebhookAddr(webhookAddr),
-			app.WithResultWebhookURL(resultWebhookURL),
-			app.WithHealthAddr(healthAddr),
-			app.WithTraceBytes(maxTraceBytes),
-			app.WithMemoryBytes(maxMemoryBytes),
-			app.WithRecentHistoryPairs(recentHistoryPairs),
-			app.WithIncludeHistoryOps(includeHistoryOps),
-		}
-		// Always-on autonomous daemon is the default entrypoint.
-		return app.RunDaemon(cmd.Context(), cfg, "autonomous agent", maxContextB, 2*time.Second, opts...)
+		return runDetachedMonitorFn(cmd.Context(), cfg)
 	},
 }
 
@@ -124,7 +101,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&enableMouse, "mouse", enableMouse, "enable Bubble Tea mouse capture (mouse wheel scrolling; may disable native selection)")
 	enableActivity = envBool("WORKBENCH_ACTIVITY", false)
 	rootCmd.PersistentFlags().BoolVar(&enableActivity, "activity", enableActivity, "show activity panel by default (env WORKBENCH_ACTIVITY)")
-	rootCmd.PersistentFlags().BoolVar(&protocolStdio, "protocol-stdio", false, "enable JSON-RPC protocol over stdin/stdout (auto-enabled when piping)")
+	protocolStdio = envBool("WORKBENCH_PROTOCOL_STDIO", true)
+	rootCmd.PersistentFlags().BoolVar(&protocolStdio, "protocol-stdio", protocolStdio, "enable JSON-RPC protocol over stdin/stdout (auto-enabled when piping)")
 	modelID = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
 	rootCmd.PersistentFlags().StringVar(&modelID, "model", modelID, "LLM model identifier (default: env OPENROUTER_MODEL)")
 	profileRef = strings.TrimSpace(os.Getenv("WORKBENCH_PROFILE"))

@@ -19,10 +19,17 @@ type sessionPickerItem struct {
 	title     string
 	goal      string
 	updatedAt string
+	mode      string
+	teamID    string
+	profile   string
+	model     string
+	current   string
 }
 
 func (s sessionPickerItem) FilterValue() string {
-	return strings.TrimSpace(strings.Join([]string{s.id, s.title, s.goal}, " "))
+	return strings.TrimSpace(strings.Join([]string{
+		s.id, s.title, s.goal, s.mode, s.teamID, s.profile, s.model, s.current,
+	}, " "))
 }
 func (s sessionPickerItem) Title() string       { return s.id }
 func (s sessionPickerItem) Description() string { return "" }
@@ -52,6 +59,20 @@ func (d sessionPickerDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd {
 func (d sessionPickerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	it, ok := item.(sessionPickerItem)
 	if !ok {
+		isSel := index == m.Index()
+		prefix := "  "
+		style := d.styleRow
+		if isSel {
+			prefix = "› "
+			style = d.styleSel
+		}
+		line := strings.TrimSpace(item.FilterValue())
+		if line == "" {
+			line = "(unknown session)"
+		}
+		maxW := max(1, m.Width()-lipgloss.Width(prefix))
+		line = kit.TruncateRight(line, maxW)
+		_, _ = fmt.Fprint(w, style.Render(prefix+line))
 		return
 	}
 
@@ -67,13 +88,29 @@ func (d sessionPickerDelegate) Render(w io.Writer, m list.Model, index int, item
 	if title == "" {
 		title = it.id
 	}
-	meta := it.id
-	if strings.TrimSpace(it.updatedAt) != "" {
-		meta = it.updatedAt
+	if strings.TrimSpace(title) == "" {
+		title = "(unknown session)"
 	}
+	meta := strings.TrimSpace(it.updatedAt)
 	line := title
-	if it.id != "" && title != it.id {
-		line += " (" + it.id + ")"
+	mode := strings.ToLower(strings.TrimSpace(it.mode))
+	switch mode {
+	case "team":
+		line += " · team"
+	case "standalone":
+		line += " · standalone"
+	}
+	if p := strings.TrimSpace(it.profile); p != "" {
+		line += " · " + p
+	}
+	if m := strings.TrimSpace(it.model); m != "" {
+		line += " · " + kit.TruncateMiddle(m, 24)
+	}
+	if t := strings.TrimSpace(it.teamID); t != "" {
+		line += " · " + shortID(t)
+	}
+	if it.id != "" {
+		line += " · " + shortID(it.id)
 	}
 	if meta != "" {
 		line += " • " + meta
@@ -119,15 +156,7 @@ func (m *Model) openSessionPicker() tea.Cmd {
 	l.SetFilteringEnabled(true)
 	l.SetShowFilter(true)
 	l.SetFilterText("")
-	l.SetFilterState(list.Filtering)
-	// Disable client-side filtering; we use FilterInput as a query for server-side search.
-	l.Filter = func(_ string, targets []string) []list.Rank {
-		ranks := make([]list.Rank, len(targets))
-		for i := range targets {
-			ranks[i] = list.Rank{Index: i}
-		}
-		return ranks
-	}
+	l.SetFilterState(list.Unfiltered)
 	l.Styles.Title = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#707070")).
 		Bold(true)
@@ -258,11 +287,24 @@ func (m *Model) renderSessionPickerFooter() string {
 func sessionsToPickerItems(sessions []types.Session) []list.Item {
 	out := make([]list.Item, 0, len(sessions))
 	for _, s := range sessions {
+		id := strings.TrimSpace(s.SessionID)
+		title := strings.TrimSpace(s.Title)
+		if title == "" {
+			title = strings.TrimSpace(s.CurrentGoal)
+		}
+		if id == "" && title == "" {
+			title = "(unknown session)"
+		}
 		out = append(out, sessionPickerItem{
-			id:        strings.TrimSpace(s.SessionID),
-			title:     strings.TrimSpace(s.Title),
+			id:        id,
+			title:     title,
 			goal:      strings.TrimSpace(s.CurrentGoal),
 			updatedAt: formatSessionTime(s),
+			mode:      strings.TrimSpace(s.Mode),
+			teamID:    strings.TrimSpace(s.TeamID),
+			profile:   strings.TrimSpace(s.Profile),
+			model:     strings.TrimSpace(s.ActiveModel),
+			current:   strings.TrimSpace(s.CurrentRunID),
 		})
 	}
 	return out

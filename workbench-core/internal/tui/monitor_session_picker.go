@@ -8,7 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
-	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
+	"github.com/tinoosan/workbench-core/pkg/protocol"
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 func (m *monitorModel) openSessionPicker() tea.Cmd {
@@ -47,15 +48,7 @@ func (m *monitorModel) openSessionPicker() tea.Cmd {
 	l.SetFilteringEnabled(true)
 	l.SetShowFilter(true)
 	l.SetFilterText("")
-	l.SetFilterState(list.Filtering)
-	// Disable client-side filtering; we use FilterInput as a query for server-side search.
-	l.Filter = func(_ string, targets []string) []list.Rank {
-		ranks := make([]list.Rank, len(targets))
-		for i := range targets {
-			ranks[i] = list.Rank{Index: i}
-		}
-		return ranks
-	}
+	l.SetFilterState(list.Unfiltered)
 	l.Styles.Title = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#707070")).
 		Bold(true)
@@ -75,26 +68,29 @@ func (m *monitorModel) closeSessionPicker() {
 
 func (m *monitorModel) fetchSessionsPage() tea.Cmd {
 	return func() tea.Msg {
-		if m.session == nil {
-			return sessionsListMsg{err: fmt.Errorf("session store not configured")}
-		}
-		filter := pkgstore.SessionFilter{
+		var res protocol.SessionListResult
+		err := m.rpcRoundTrip(protocol.MethodSessionList, protocol.SessionListParams{
+			ThreadID:      protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
 			TitleContains: m.sessionPickerFilter,
 			Limit:         m.sessionPickerPageSize,
 			Offset:        m.sessionPickerPage * m.sessionPickerPageSize,
-			SortBy:        "updated_at",
-			SortDesc:      true,
-		}
-
-		total, err := m.session.CountSessions(m.ctx, filter)
+		}, &res)
 		if err != nil {
 			return sessionsListMsg{err: err}
 		}
-		sessions, err := m.session.ListSessionsPaginated(m.ctx, filter)
-		if err != nil {
-			return sessionsListMsg{err: err}
+		sessions := make([]types.Session, 0, len(res.Sessions))
+		for _, it := range res.Sessions {
+			sessions = append(sessions, types.Session{
+				SessionID:    strings.TrimSpace(it.SessionID),
+				Title:        strings.TrimSpace(it.Title),
+				CurrentRunID: strings.TrimSpace(it.CurrentRunID),
+				ActiveModel:  strings.TrimSpace(it.ActiveModel),
+				Mode:         strings.TrimSpace(it.Mode),
+				TeamID:       strings.TrimSpace(it.TeamID),
+				Profile:      strings.TrimSpace(it.Profile),
+			})
 		}
-		return sessionsListMsg{sessions: sessions, total: total, page: m.sessionPickerPage, err: nil}
+		return sessionsListMsg{sessions: sessions, total: res.TotalCount, page: m.sessionPickerPage, err: nil}
 	}
 }
 
@@ -160,32 +156,48 @@ func (m *monitorModel) selectSessionFromPicker() tea.Cmd {
 	if sessID == "" {
 		return nil
 	}
-
-	if m.session == nil {
-		m.sessionPickerErr = "session store not configured"
-		return nil
+	if strings.EqualFold(strings.TrimSpace(item.mode), "team") && strings.TrimSpace(item.teamID) != "" {
+		teamID := strings.TrimSpace(item.teamID)
+		m.closeSessionPicker()
+		return func() tea.Msg { return monitorSwitchTeamMsg{TeamID: teamID} }
 	}
-	s, err := m.session.LoadSession(m.ctx, sessID)
-	if err != nil {
+
+	var agents protocol.AgentListResult
+	if err := m.rpcRoundTrip(protocol.MethodAgentList, protocol.AgentListParams{
+		ThreadID:  protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+		SessionID: sessID,
+	}, &agents); err != nil {
 		m.sessionPickerErr = err.Error()
 		return nil
 	}
-	runID := strings.TrimSpace(s.CurrentRunID)
+	runID := ""
+	teamID := ""
+	for _, ag := range agents.Agents {
+		candidate := strings.TrimSpace(ag.RunID)
+		if candidate == "" {
+			continue
+		}
+		if teamID == "" {
+			teamID = strings.TrimSpace(ag.TeamID)
+		}
+		runID = candidate
+		if strings.EqualFold(strings.TrimSpace(ag.Status), types.RunStatusRunning) {
+			runID = candidate
+			break
+		}
+	}
+	if strings.TrimSpace(teamID) != "" {
+		m.closeSessionPicker()
+		targetTeamID := strings.TrimSpace(teamID)
+		return func() tea.Msg { return monitorSwitchTeamMsg{TeamID: targetTeamID} }
+	}
 	if runID == "" {
 		m.sessionPickerErr = "session has no current run"
 		return nil
 	}
 
 	m.closeSessionPicker()
-	if m.result != nil {
-		m.result.SwitchToRunID = runID
-		if m.cancel != nil {
-			m.cancel()
-		}
-		return tea.Quit
-	}
-	m.sessionPickerErr = "internal error: missing monitor result"
-	return nil
+	return func() tea.Msg { return monitorSwitchRunMsg{RunID: runID} }
 }
 
 func (m *monitorModel) renderSessionPicker(base string) string {

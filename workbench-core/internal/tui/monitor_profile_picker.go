@@ -98,6 +98,10 @@ func (d monitorProfilePickerDelegate) Render(w io.Writer, m list.Model, index in
 }
 
 func (m *monitorModel) openProfilePicker() tea.Cmd {
+	return m.openProfilePickerFor("switch", false)
+}
+
+func (m *monitorModel) openProfilePickerFor(mode string, teamOnly bool) tea.Cmd {
 	// Close other modals/pickers; only one should be open at a time.
 	m.closeHelpModal()
 	m.closeModelPicker()
@@ -106,10 +110,15 @@ func (m *monitorModel) openProfilePicker() tea.Cmd {
 	m.closeFilePicker()
 
 	m.profilePickerOpen = true
+	m.profilePickerMode = strings.TrimSpace(mode)
+	m.profilePickerTeamOnly = teamOnly
 
-	items, titleSuffix := m.monitorProfilePickerItems()
+	items, titleSuffix := m.monitorProfilePickerItems(teamOnly)
 	l := list.New(items, newMonitorProfilePickerDelegate(), 0, 0)
 	l.Title = "Select Profile"
+	if teamOnly {
+		l.Title = "Select Team Profile"
+	}
 	if strings.TrimSpace(titleSuffix) != "" {
 		l.Title += " " + strings.TrimSpace(titleSuffix)
 	}
@@ -118,9 +127,9 @@ func (m *monitorModel) openProfilePicker() tea.Cmd {
 	l.SetShowPagination(true)
 	l.SetFilteringEnabled(true)
 	l.SetShowFilter(true)
-	// Ensure items are visible immediately (VisibleItems uses filteredItems when filterState != Unfiltered).
+	// Keep initial state unfiltered so arrow navigation works immediately.
 	l.SetFilterText("")
-	l.SetFilterState(list.Filtering)
+	l.SetFilterState(list.Unfiltered)
 	l.Styles.Title = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#707070")).
 		Bold(true)
@@ -132,7 +141,7 @@ func (m *monitorModel) openProfilePicker() tea.Cmd {
 	return nil
 }
 
-func (m *monitorModel) monitorProfilePickerItems() ([]list.Item, string) {
+func (m *monitorModel) monitorProfilePickerItems(teamOnly bool) ([]list.Item, string) {
 	profilesDir := fsutil.GetProfilesDir(m.cfg.DataDir)
 	ents, err := os.ReadDir(profilesDir)
 	if err != nil {
@@ -158,6 +167,9 @@ func (m *monitorModel) monitorProfilePickerItems() ([]list.Item, string) {
 		p, err := profile.Load(dir)
 		if err != nil || p == nil {
 			// Skip invalid profiles rather than breaking the picker.
+			continue
+		}
+		if teamOnly && p.Team == nil {
 			continue
 		}
 		items = append(items, monitorProfilePickerItem{
@@ -186,9 +198,20 @@ func (m *monitorModel) monitorProfilePickerItems() ([]list.Item, string) {
 func (m *monitorModel) closeProfilePicker() {
 	m.profilePickerOpen = false
 	m.profilePickerList = list.Model{}
+	m.profilePickerMode = ""
+	m.profilePickerTeamOnly = false
 }
 
 func (m *monitorModel) updateProfilePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		m.profilePickerList.CursorUp()
+		return m, nil
+	case tea.KeyDown:
+		m.profilePickerList.CursorDown()
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "esc", "escape":
 		m.closeProfilePicker()
@@ -197,12 +220,16 @@ func (m *monitorModel) updateProfilePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		return m, m.selectProfileFromPicker()
 	}
 
+	if msg.Type == tea.KeyRunes || msg.Type == tea.KeyBackspace || msg.Type == tea.KeyDelete {
+		if m.profilePickerList.FilteringEnabled() {
+			m.profilePickerList.SetFilterState(list.Filtering)
+		}
+	}
+
 	var cmd tea.Cmd
 	m.profilePickerList, cmd = m.profilePickerList.Update(msg)
 	if m.profilePickerList.FilteringEnabled() && m.profilePickerList.FilterState() == list.Filtering {
-		m.profilePickerList.SetFilterText(m.profilePickerList.FilterValue())
-		m.profilePickerList.SetFilterState(list.Filtering)
-		return m, nil
+		m.profilePickerList.SetFilterText(m.profilePickerList.FilterInput.Value())
 	}
 	return m, cmd
 }
@@ -232,8 +259,17 @@ func (m *monitorModel) selectProfileFromPicker() tea.Cmd {
 	} else {
 		m.profile = ref
 	}
+	mode := strings.TrimSpace(m.profilePickerMode)
 	m.closeProfilePicker()
-	return m.writeControl("switch_profile", map[string]any{"profile": ref})
+	if strings.EqualFold(mode, "new-team") {
+		return m.startNewTeamSession(ref, "")
+	}
+	if strings.EqualFold(mode, "new-standalone") {
+		return m.startNewStandaloneSession(ref, "")
+	}
+	return func() tea.Msg {
+		return commandLinesMsg{lines: []string{"[command] profile switching is disabled; use /new"}}
+	}
 }
 
 func (m *monitorModel) renderProfilePicker(base string) string {

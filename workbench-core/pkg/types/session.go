@@ -24,6 +24,16 @@ type Session struct {
 	// Example: "openai/gpt-5.2".
 	ActiveModel string `json:"activeModel,omitempty"`
 
+	// Mode records the session execution mode.
+	// Valid values: "standalone", "team".
+	Mode string `json:"mode,omitempty"`
+
+	// TeamID is set for team sessions and empty for standalone sessions.
+	TeamID string `json:"teamId,omitempty"`
+
+	// Profile is the profile used to create this session.
+	Profile string `json:"profile,omitempty"`
+
 	// Reasoning settings are session-scoped so resume is deterministic.
 	ReasoningEffort  string `json:"reasoningEffort,omitempty"`
 	ReasoningSummary string `json:"reasoningSummary,omitempty"`
@@ -82,6 +92,10 @@ type Session struct {
 	TotalTokens int `json:"totalTokens,omitempty"`
 	// CostUSD is the cumulative estimated cost for this session.
 	CostUSD float64 `json:"costUSD,omitempty"`
+
+	// System marks daemon bootstrap/internal sessions that should be hidden from
+	// user-facing pickers/lists by default.
+	System bool `json:"system,omitempty"`
 }
 
 // NewSession creates a new session with a unique ID.

@@ -19,6 +19,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
@@ -55,13 +56,13 @@ const (
 )
 
 type RPCServerConfig struct {
-	Cfg       config.Config
-	Run       types.Run
-	TaskStore state.TaskStore
-	Session   pkgstore.SessionReaderWriter
-	NotifyCh  <-chan protocol.Message
-	Index     *protocol.Index
-	Wake      func()
+	Cfg               config.Config
+	Run               types.Run
+	TaskStore         state.TaskStore
+	Session           pkgstore.SessionReaderWriter
+	NotifyCh          <-chan protocol.Message
+	Index             *protocol.Index
+	Wake              func()
 	ControlSetModel   func(ctx context.Context, threadID, target, model string) ([]string, error)
 	ControlSetProfile func(ctx context.Context, threadID, target, profile string) ([]string, error)
 }
@@ -80,14 +81,14 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		}
 	}
 	return &RPCServer{
-		cfg:       cfg.Cfg,
-		run:       cfg.Run,
-		taskStore: cfg.TaskStore,
-		session:   sess,
-		initErr:   initErr,
-		notifyCh:  cfg.NotifyCh,
-		index:     cfg.Index,
-		wake:      cfg.Wake,
+		cfg:               cfg.Cfg,
+		run:               cfg.Run,
+		taskStore:         cfg.TaskStore,
+		session:           sess,
+		initErr:           initErr,
+		notifyCh:          cfg.NotifyCh,
+		index:             cfg.Index,
+		wake:              cfg.Wake,
 		controlSetModel:   cfg.ControlSetModel,
 		controlSetProfile: cfg.ControlSetProfile,
 	}
@@ -396,6 +397,76 @@ func (s *RPCServer) handleRequest(ctx context.Context, msg protocol.Message) pro
 			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
 		}
 		return m
+	case protocol.MethodSessionStart:
+		var p protocol.SessionStartParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.sessionStart(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodSessionList:
+		var p protocol.SessionListParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.sessionList(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodSessionRename:
+		var p protocol.SessionRenameParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.sessionRename(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodAgentList:
+		var p protocol.AgentListParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.agentList(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodAgentStart:
+		var p protocol.AgentStartParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.agentStart(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
 	case protocol.MethodSessionGetTotals:
 		var p protocol.SessionGetTotalsParams
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
@@ -607,7 +678,7 @@ func protocolTaskFromTypesTask(t types.Task) protocol.Task {
 }
 
 func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (protocol.TaskListResult, error) {
-	scope, err := s.resolveArtifactScope(ctx, p.ThreadID, p.TeamID)
+	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, p.TeamID, p.RunID)
 	if err != nil {
 		return protocol.TaskListResult{}, err
 	}
@@ -694,8 +765,475 @@ func (s *RPCServer) controlSetProfileHandler(ctx context.Context, p protocol.Con
 		return protocol.ControlSetProfileResult{}, err
 	}
 	return protocol.ControlSetProfileResult{
-		Accepted:  true,
-		AppliedTo: append([]string(nil), appliedTo...),
+		Accepted:                true,
+		AppliedTo:               append([]string(nil), appliedTo...),
+		PreservesSessionContext: true,
+	}, nil
+}
+
+func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartParams) (protocol.SessionStartResult, error) {
+	if _, err := s.resolveThreadID(p.ThreadID); err != nil {
+		return protocol.SessionStartResult{}, err
+	}
+	mode := strings.ToLower(strings.TrimSpace(p.Mode))
+	if mode == "" {
+		mode = "standalone"
+	}
+	if mode != "standalone" && mode != "team" {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{
+			Code:    protocol.CodeInvalidParams,
+			Message: "mode must be standalone or team",
+		}
+	}
+	if mode == "team" {
+		return s.sessionStartTeam(ctx, p)
+	}
+
+	goal := strings.TrimSpace(p.Goal)
+	if goal == "" {
+		goal = "autonomous agent"
+	}
+	maxContext := s.run.MaxBytesForContext
+	if maxContext <= 0 {
+		maxContext = 8 * 1024
+	}
+	sess, run, err := implstore.CreateSession(s.cfg, goal, maxContext)
+	if err != nil {
+		return protocol.SessionStartResult{}, err
+	}
+	sess.Mode = "standalone"
+	sess.TeamID = ""
+	sess.Profile = strings.TrimSpace(p.Profile)
+
+	activeModel := strings.TrimSpace(p.Model)
+	if activeModel == "" {
+		if existing, lerr := s.session.LoadSession(ctx, strings.TrimSpace(s.run.SessionID)); lerr == nil {
+			activeModel = strings.TrimSpace(existing.ActiveModel)
+		}
+	}
+	if activeModel != "" {
+		sess.ActiveModel = activeModel
+	}
+	if err := s.session.SaveSession(ctx, sess); err != nil {
+		return protocol.SessionStartResult{}, err
+	}
+	if strings.TrimSpace(p.Profile) != "" || activeModel != "" {
+		if created, err := implstore.LoadRun(s.cfg, strings.TrimSpace(run.RunID)); err == nil {
+			if created.Runtime == nil {
+				created.Runtime = &types.RunRuntimeConfig{}
+			}
+			if profileRef := strings.TrimSpace(p.Profile); profileRef != "" {
+				created.Runtime.Profile = profileRef
+			}
+			if activeModel != "" {
+				created.Runtime.Model = activeModel
+			}
+			_ = implstore.SaveRun(s.cfg, created)
+		}
+	}
+
+	return protocol.SessionStartResult{
+		SessionID:    strings.TrimSpace(sess.SessionID),
+		PrimaryRunID: strings.TrimSpace(run.RunID),
+		Mode:         "standalone",
+		Profile:      strings.TrimSpace(p.Profile),
+		Model:        activeModel,
+		RunIDs:       []string{strings.TrimSpace(run.RunID)},
+	}, nil
+}
+
+func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStartParams) (protocol.SessionStartResult, error) {
+	profileRef := strings.TrimSpace(p.Profile)
+	if profileRef == "" {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "team profile is required"}
+	}
+	prof, _, err := resolveProfileRef(s.cfg, profileRef)
+	if err != nil {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "load profile: " + err.Error()}
+	}
+	if prof == nil || prof.Team == nil {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "profile is not a team profile"}
+	}
+	_, coordinatorRole, err := collectTeamRoles(prof.Team.Roles)
+	if err != nil {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
+	}
+
+	goal := strings.TrimSpace(p.Goal)
+	if goal == "" {
+		goal = "team session (" + strings.TrimSpace(prof.ID) + ")"
+	}
+	maxContext := s.run.MaxBytesForContext
+	if maxContext <= 0 {
+		maxContext = 8 * 1024
+	}
+	sess := types.NewSession(goal)
+	sess.CurrentGoal = goal
+	sess.Mode = "team"
+	sess.Profile = strings.TrimSpace(prof.ID)
+	teamID := "team-" + uuid.NewString()
+	sess.TeamID = teamID
+
+	teamModel := strings.TrimSpace(p.Model)
+	if teamModel == "" && prof.Team != nil {
+		teamModel = strings.TrimSpace(prof.Team.Model)
+	}
+	if teamModel == "" {
+		if current, lerr := s.session.LoadSession(ctx, strings.TrimSpace(s.run.SessionID)); lerr == nil {
+			teamModel = strings.TrimSpace(current.ActiveModel)
+		}
+	}
+	if teamModel != "" {
+		sess.ActiveModel = teamModel
+	}
+	if err := s.session.SaveSession(ctx, sess); err != nil {
+		return protocol.SessionStartResult{}, err
+	}
+
+	runtimes := make([]teamRoleRuntime, 0, len(prof.Team.Roles))
+	runIDs := make([]string, 0, len(prof.Team.Roles))
+	primaryRunID := ""
+	for _, role := range prof.Team.Roles {
+		roleName := strings.TrimSpace(role.Name)
+		if roleName == "" {
+			continue
+		}
+		roleGoal := strings.TrimSpace(role.Description)
+		if roleGoal == "" {
+			roleGoal = goal
+		}
+		run := types.NewRun(roleGoal, maxContext, strings.TrimSpace(sess.SessionID))
+		run.Runtime = &types.RunRuntimeConfig{
+			Profile: strings.TrimSpace(prof.ID),
+			Model:   strings.TrimSpace(teamModel),
+			TeamID:  strings.TrimSpace(teamID),
+			Role:    roleName,
+		}
+		if err := implstore.SaveRun(s.cfg, run); err != nil {
+			return protocol.SessionStartResult{}, err
+		}
+		runID := strings.TrimSpace(run.RunID)
+		exists := false
+		for _, id := range sess.Runs {
+			if strings.TrimSpace(id) == runID {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			sess.Runs = append(sess.Runs, runID)
+		}
+		runtimes = append(runtimes, teamRoleRuntime{
+			role: profile.RoleConfig{
+				Name:        roleName,
+				Description: strings.TrimSpace(role.Description),
+			},
+			run: run,
+		})
+		runIDs = append(runIDs, runID)
+		if strings.EqualFold(roleName, coordinatorRole) && primaryRunID == "" {
+			primaryRunID = runID
+		}
+	}
+	if primaryRunID == "" && len(runIDs) > 0 {
+		primaryRunID = runIDs[0]
+	}
+	if primaryRunID == "" {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "team profile produced no runs"}
+	}
+	sess.CurrentRunID = primaryRunID
+	if err := s.session.SaveSession(ctx, sess); err != nil {
+		return protocol.SessionStartResult{}, err
+	}
+
+	if err := os.MkdirAll(fsutil.GetTeamWorkspaceDir(s.cfg.DataDir, teamID), 0o755); err != nil {
+		return protocol.SessionStartResult{}, err
+	}
+	manifest := buildTeamManifest(teamID, strings.TrimSpace(prof.ID), coordinatorRole, primaryRunID, teamModel, runtimes)
+	if err := writeTeamManifestFile(s.cfg, manifest); err != nil {
+		return protocol.SessionStartResult{}, err
+	}
+
+	return protocol.SessionStartResult{
+		SessionID:    strings.TrimSpace(sess.SessionID),
+		PrimaryRunID: primaryRunID,
+		Mode:         "team",
+		Profile:      strings.TrimSpace(prof.ID),
+		Model:        teamModel,
+		TeamID:       teamID,
+		RunIDs:       runIDs,
+	}, nil
+}
+
+func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParams) (protocol.SessionListResult, error) {
+	if _, err := s.resolveThreadID(p.ThreadID); err != nil {
+		return protocol.SessionListResult{}, err
+	}
+	query, ok := s.session.(pkgstore.SessionQuery)
+	if !ok {
+		return protocol.SessionListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "session.list is unavailable"}
+	}
+	filter := pkgstore.SessionFilter{
+		TitleContains: strings.TrimSpace(p.TitleContains),
+		Limit:         clampLimit(p.Limit, 50, 500),
+		Offset:        max(0, p.Offset),
+		SortBy:        "updated_at",
+		SortDesc:      true,
+	}
+	total, err := query.CountSessions(ctx, filter)
+	if err != nil {
+		return protocol.SessionListResult{}, err
+	}
+	sessions, err := query.ListSessionsPaginated(ctx, filter)
+	if err != nil {
+		return protocol.SessionListResult{}, err
+	}
+	out := make([]protocol.SessionListItem, 0, len(sessions))
+	for _, sess := range sessions {
+		mode := strings.TrimSpace(sess.Mode)
+		teamID := strings.TrimSpace(sess.TeamID)
+		profileID := strings.TrimSpace(sess.Profile)
+		runID := strings.TrimSpace(sess.CurrentRunID)
+		if runID == "" && len(sess.Runs) > 0 {
+			runID = strings.TrimSpace(sess.Runs[0])
+		}
+		if runID != "" {
+			if run, rerr := implstore.LoadRun(s.cfg, runID); rerr == nil && run.Runtime != nil {
+				if profileID == "" {
+					profileID = strings.TrimSpace(run.Runtime.Profile)
+				}
+				if teamID == "" {
+					teamID = strings.TrimSpace(run.Runtime.TeamID)
+				}
+			}
+			if _, inferredTeamID := s.inferRunRoleAndTeam(ctx, runID); teamID == "" && inferredTeamID != "" {
+				teamID = strings.TrimSpace(inferredTeamID)
+			}
+		}
+		if mode == "" {
+			if teamID != "" {
+				mode = "team"
+			} else {
+				mode = "standalone"
+			}
+		}
+		item := protocol.SessionListItem{
+			SessionID:    strings.TrimSpace(sess.SessionID),
+			Title:        strings.TrimSpace(sess.Title),
+			CurrentRunID: strings.TrimSpace(sess.CurrentRunID),
+			ActiveModel:  strings.TrimSpace(sess.ActiveModel),
+			Mode:         mode,
+			TeamID:       teamID,
+			Profile:      profileID,
+		}
+		if sess.CreatedAt != nil && !sess.CreatedAt.IsZero() {
+			item.CreatedAt = sess.CreatedAt.UTC().Format(time.RFC3339Nano)
+		}
+		if sess.UpdatedAt != nil && !sess.UpdatedAt.IsZero() {
+			item.UpdatedAt = sess.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		}
+		out = append(out, item)
+	}
+	return protocol.SessionListResult{Sessions: out, TotalCount: total}, nil
+}
+
+func (s *RPCServer) sessionRename(ctx context.Context, p protocol.SessionRenameParams) (protocol.SessionRenameResult, error) {
+	if _, err := s.resolveThreadID(p.ThreadID); err != nil {
+		return protocol.SessionRenameResult{}, err
+	}
+	sessionID := strings.TrimSpace(p.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(s.run.SessionID)
+	}
+	title := strings.TrimSpace(p.Title)
+	if title == "" {
+		return protocol.SessionRenameResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "title is required"}
+	}
+	sess, err := s.session.LoadSession(ctx, sessionID)
+	if err != nil {
+		return protocol.SessionRenameResult{}, err
+	}
+	sess.Title = title
+	if err := s.session.SaveSession(ctx, sess); err != nil {
+		return protocol.SessionRenameResult{}, err
+	}
+	return protocol.SessionRenameResult{SessionID: sessionID, Title: title}, nil
+}
+
+func (s *RPCServer) agentList(ctx context.Context, p protocol.AgentListParams) (protocol.AgentListResult, error) {
+	if _, err := s.resolveThreadID(p.ThreadID); err != nil {
+		return protocol.AgentListResult{}, err
+	}
+	sessionID := strings.TrimSpace(p.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(s.run.SessionID)
+	}
+	sess, err := s.session.LoadSession(ctx, sessionID)
+	if err != nil {
+		return protocol.AgentListResult{}, err
+	}
+	out := make([]protocol.AgentListItem, 0, len(sess.Runs))
+	for _, runID := range sess.Runs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		run, err := implstore.LoadRun(s.cfg, runID)
+		if err != nil {
+			continue
+		}
+		item := protocol.AgentListItem{
+			RunID:     runID,
+			SessionID: strings.TrimSpace(run.SessionID),
+			Status:    strings.TrimSpace(run.Status),
+			Goal:      strings.TrimSpace(run.Goal),
+		}
+		if run.Runtime != nil {
+			item.Profile = strings.TrimSpace(run.Runtime.Profile)
+		}
+		if role, teamID := s.inferRunRoleAndTeam(ctx, runID); role != "" || teamID != "" {
+			item.Role = role
+			item.TeamID = teamID
+		}
+		if run.StartedAt != nil && !run.StartedAt.IsZero() {
+			item.StartedAt = run.StartedAt.UTC().Format(time.RFC3339Nano)
+		}
+		if run.FinishedAt != nil && !run.FinishedAt.IsZero() {
+			item.FinishedAt = run.FinishedAt.UTC().Format(time.RFC3339Nano)
+		}
+		out = append(out, item)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a := out[i].StartedAt
+		b := out[j].StartedAt
+		if a == b {
+			return out[i].RunID > out[j].RunID
+		}
+		return a > b
+	})
+	return protocol.AgentListResult{Agents: out}, nil
+}
+
+func (s *RPCServer) inferRunRoleAndTeam(ctx context.Context, runID string) (role string, teamID string) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return "", ""
+	}
+	if run, err := implstore.LoadRun(s.cfg, runID); err == nil && run.Runtime != nil {
+		role = strings.TrimSpace(run.Runtime.Role)
+		teamID = strings.TrimSpace(run.Runtime.TeamID)
+		if role != "" && teamID != "" {
+			return role, teamID
+		}
+	}
+	if s.taskStore == nil {
+		return strings.TrimSpace(role), strings.TrimSpace(teamID)
+	}
+	tasks, err := s.taskStore.ListTasks(ctx, state.TaskFilter{
+		RunID:    runID,
+		SortBy:   "created_at",
+		SortDesc: true,
+		Limit:    50,
+	})
+	if err != nil || len(tasks) == 0 {
+		return strings.TrimSpace(role), strings.TrimSpace(teamID)
+	}
+	for _, t := range tasks {
+		if strings.TrimSpace(teamID) == "" {
+			teamID = strings.TrimSpace(t.TeamID)
+		}
+		if strings.TrimSpace(role) == "" {
+			role = strings.TrimSpace(t.RoleSnapshot)
+		}
+		if strings.TrimSpace(role) == "" {
+			role = strings.TrimSpace(t.AssignedRole)
+		}
+		if strings.TrimSpace(role) == "" && strings.EqualFold(strings.TrimSpace(t.AssignedToType), "role") {
+			role = strings.TrimSpace(t.AssignedTo)
+		}
+		if role != "" && teamID != "" {
+			break
+		}
+	}
+	return strings.TrimSpace(role), strings.TrimSpace(teamID)
+}
+
+func (s *RPCServer) agentStart(ctx context.Context, p protocol.AgentStartParams) (protocol.AgentStartResult, error) {
+	if _, err := s.resolveThreadID(p.ThreadID); err != nil {
+		return protocol.AgentStartResult{}, err
+	}
+	sessionID := strings.TrimSpace(p.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(s.run.SessionID)
+	}
+	sess, err := s.session.LoadSession(ctx, sessionID)
+	if err != nil {
+		return protocol.AgentStartResult{}, err
+	}
+	maxContext := s.run.MaxBytesForContext
+	if maxContext <= 0 {
+		maxContext = 8 * 1024
+	}
+	goal := strings.TrimSpace(p.Goal)
+	if goal == "" {
+		goal = strings.TrimSpace(sess.CurrentGoal)
+	}
+	if goal == "" {
+		goal = "autonomous agent"
+	}
+	run := types.NewRun(goal, maxContext, sessionID)
+	if run.Runtime == nil {
+		run.Runtime = &types.RunRuntimeConfig{}
+	}
+	run.Runtime.TeamID = strings.TrimSpace(sess.TeamID)
+	run.Runtime.Role = ""
+	if profileRef := strings.TrimSpace(p.Profile); profileRef != "" {
+		run.Runtime.Profile = profileRef
+		sess.Profile = profileRef
+	}
+	if err := implstore.SaveRun(s.cfg, run); err != nil {
+		return protocol.AgentStartResult{}, err
+	}
+	runID := strings.TrimSpace(run.RunID)
+	exists := false
+	for _, id := range sess.Runs {
+		if strings.TrimSpace(id) == runID {
+			exists = true
+			break
+		}
+	}
+	if !exists {
+		sess.Runs = append(sess.Runs, runID)
+	}
+	sess.CurrentRunID = runID
+	if strings.TrimSpace(sess.Mode) == "" {
+		if strings.TrimSpace(sess.TeamID) != "" {
+			sess.Mode = "team"
+		} else {
+			sess.Mode = "standalone"
+		}
+	}
+
+	model := strings.TrimSpace(p.Model)
+	if model == "" {
+		model = strings.TrimSpace(sess.ActiveModel)
+	}
+	if model != "" {
+		if run.Runtime == nil {
+			run.Runtime = &types.RunRuntimeConfig{}
+		}
+		run.Runtime.Model = model
+		_ = implstore.SaveRun(s.cfg, run)
+		sess.ActiveModel = model
+	}
+	if err := s.session.SaveSession(ctx, sess); err != nil {
+		return protocol.AgentStartResult{}, err
+	}
+	return protocol.AgentStartResult{
+		RunID:     runID,
+		SessionID: sessionID,
+		Profile:   strings.TrimSpace(p.Profile),
+		Model:     model,
 	}, nil
 }
 
@@ -713,7 +1251,7 @@ func normalizeAssignedToType(s string) string {
 }
 
 func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams) (protocol.TaskCreateResult, error) {
-	scope, err := s.resolveArtifactScope(ctx, p.ThreadID, "")
+	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, p.TeamID, p.RunID)
 	if err != nil {
 		return protocol.TaskCreateResult{}, err
 	}
@@ -750,10 +1288,17 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 			assignedTo = scope.runID
 		}
 	}
+	taskRunID := strings.TrimSpace(scope.runID)
+	if taskRunID == "" && strings.EqualFold(assignedToType, "agent") {
+		taskRunID = strings.TrimSpace(assignedTo)
+	}
+	if taskRunID == "" {
+		taskRunID = strings.TrimSpace(s.run.RunID)
+	}
 	task := types.Task{
 		TaskID:         taskID,
 		SessionID:      strings.TrimSpace(s.run.SessionID),
-		RunID:          strings.TrimSpace(s.run.RunID),
+		RunID:          taskRunID,
 		TeamID:         strings.TrimSpace(scope.teamID),
 		AssignedRole:   assignedRole,
 		AssignedToType: assignedToType,
@@ -1177,14 +1722,14 @@ func (s *RPCServer) teamGetManifest(ctx context.Context, p protocol.TeamGetManif
 		return protocol.TeamGetManifestResult{}, err
 	}
 	var mf struct {
-		TeamID          string `json:"teamId"`
-		ProfileID       string `json:"profileId"`
-		TeamModel       string `json:"teamModel,omitempty"`
+		TeamID          string                            `json:"teamId"`
+		ProfileID       string                            `json:"profileId"`
+		TeamModel       string                            `json:"teamModel,omitempty"`
 		ModelChange     *protocol.TeamManifestModelChange `json:"modelChange,omitempty"`
-		CoordinatorRole string `json:"coordinatorRole"`
-		CoordinatorRun  string `json:"coordinatorRunId"`
-		Roles           []protocol.TeamManifestRole `json:"roles"`
-		CreatedAt       string `json:"createdAt"`
+		CoordinatorRole string                            `json:"coordinatorRole"`
+		CoordinatorRun  string                            `json:"coordinatorRunId"`
+		Roles           []protocol.TeamManifestRole       `json:"roles"`
+		CreatedAt       string                            `json:"createdAt"`
 	}
 	if err := json.Unmarshal(raw, &mf); err != nil {
 		return protocol.TeamGetManifestResult{}, err
