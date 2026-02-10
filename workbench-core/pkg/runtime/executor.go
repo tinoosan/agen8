@@ -368,6 +368,34 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 			}
 		}
 	}
+	if req.Op == types.HostOpEmail && len(req.Input) > 0 {
+		var emailReq struct {
+			To      string `json:"to"`
+			Subject string `json:"subject"`
+		}
+		if err := json.Unmarshal(req.Input, &emailReq); err == nil {
+			if to := strings.TrimSpace(emailReq.To); to != "" {
+				if p, tr := capBytes(singleLine(to), 200); p != "" {
+					reqData["to"] = p
+					storeReq["to"] = p
+					if tr {
+						reqData["toTruncated"] = "true"
+						storeReq["toTruncated"] = "true"
+					}
+				}
+			}
+			if subject := strings.TrimSpace(emailReq.Subject); subject != "" {
+				if p, tr := capBytes(singleLine(subject), 200); p != "" {
+					reqData["subject"] = p
+					storeReq["subject"] = p
+					if tr {
+						reqData["subjectTruncated"] = "true"
+						storeReq["subjectTruncated"] = "true"
+					}
+				}
+			}
+		}
+	}
 	if (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) && strings.TrimSpace(req.Text) != "" {
 		p, tr, red, n, isJSON := fsWriteTextPreviewForEvent(req.Path, req.Text)
 		if p != "" {

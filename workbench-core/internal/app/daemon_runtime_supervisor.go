@@ -61,8 +61,11 @@ type runtimeSupervisor struct {
 }
 
 type managedRuntime struct {
-	cancel context.CancelFunc
-	done   <-chan struct{}
+	runID     string
+	sessionID string
+	session   *agentsession.Session
+	cancel    context.CancelFunc
+	done      <-chan struct{}
 }
 
 func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
@@ -203,13 +206,24 @@ func (s *runtimeSupervisor) ensureRun(ctx context.Context, sess types.Session, r
 	if runID == s.bootstrapRunID {
 		return nil
 	}
+	run, err := implstore.LoadRun(s.cfg, runID)
+	if err != nil {
+		return err
+	}
+	paused := strings.EqualFold(strings.TrimSpace(run.Status), types.RunStatusPaused)
 
 	s.mu.Lock()
-	if _, ok := s.workers[runID]; ok {
+	if existing, ok := s.workers[runID]; ok {
 		s.mu.Unlock()
+		if existing != nil && existing.session != nil {
+			existing.session.SetPaused(paused)
+		}
 		return nil
 	}
 	s.mu.Unlock()
+	if paused {
+		return nil
+	}
 
 	startFn := s.spawnOverride
 	if startFn == nil {
@@ -450,10 +464,13 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			},
 			emitEvent,
 		),
-		OnStep: func(step int, model, summary string) {
+		OnStep: func(step int, model, effectiveModel, summary string) {
 			data := map[string]string{
 				"step":  strconv.Itoa(step),
 				"model": strings.TrimSpace(model),
+			}
+			if em := strings.TrimSpace(effectiveModel); em != "" {
+				data["effectiveModel"] = em
 			}
 			if s := strings.TrimSpace(summary); s != "" {
 				data["reasoningSummary"] = s
@@ -487,7 +504,8 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	}
 	agentCfg.HostToolRegistry = registry
 
-	a, err := agent.NewAgent(s.llmClient, rt.Executor, agentCfg)
+	runLLMClient := withRetryDiagnostics(s.llmClient, emitEvent)
+	a, err := agent.NewAgent(runLLMClient, rt.Executor, agentCfg)
 	if err != nil {
 		orderedEmitter.Close()
 		_ = rt.Shutdown(context.Background())
@@ -625,5 +643,136 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		}
 	}()
 
-	return &managedRuntime{cancel: cancel, done: done}, nil
+	return &managedRuntime{
+		runID:     strings.TrimSpace(run.RunID),
+		sessionID: strings.TrimSpace(run.SessionID),
+		session:   workerSession,
+		cancel:    cancel,
+		done:      done,
+	}, nil
+}
+
+func (s *runtimeSupervisor) PauseRun(runID string) error {
+	if s == nil {
+		return nil
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id is required")
+	}
+	run, err := implstore.LoadRun(s.cfg, runID)
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(strings.TrimSpace(run.Status), types.RunStatusPaused) {
+		s.mu.Lock()
+		worker := s.workers[runID]
+		s.mu.Unlock()
+		if worker != nil && worker.session != nil {
+			worker.session.SetPaused(true)
+		}
+		return nil
+	}
+	run.Status = types.RunStatusPaused
+	run.FinishedAt = nil
+	run.Error = nil
+	if err := implstore.SaveRun(s.cfg, run); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	worker := s.workers[runID]
+	s.mu.Unlock()
+	if worker != nil && worker.session != nil {
+		worker.session.SetPaused(true)
+	}
+	return nil
+}
+
+func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
+	if s == nil {
+		return nil
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id is required")
+	}
+	run, err := implstore.LoadRun(s.cfg, runID)
+	if err != nil {
+		return err
+	}
+	run.Status = types.RunStatusRunning
+	run.FinishedAt = nil
+	run.Error = nil
+	if err := implstore.SaveRun(s.cfg, run); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	worker := s.workers[runID]
+	s.mu.Unlock()
+	if worker != nil && worker.session != nil {
+		worker.session.SetPaused(false)
+		return nil
+	}
+	if s.sessionStore == nil {
+		return nil
+	}
+	sess, err := s.sessionStore.LoadSession(ctx, strings.TrimSpace(run.SessionID))
+	if err != nil {
+		return err
+	}
+	return s.ensureRun(ctx, sess, runID)
+}
+
+func (s *runtimeSupervisor) PauseSession(ctx context.Context, sessionID string) ([]string, error) {
+	if s == nil {
+		return nil, nil
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if s.sessionStore == nil {
+		return nil, fmt.Errorf("session store not configured")
+	}
+	sess, err := s.sessionStore.LoadSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	runIDs := collectSessionRunIDs(sess)
+	affected := make([]string, 0, len(runIDs))
+	for _, runID := range runIDs {
+		if err := s.PauseRun(runID); err != nil {
+			return affected, err
+		}
+		affected = append(affected, runID)
+	}
+	return affected, nil
+}
+
+func (s *runtimeSupervisor) ResumeSession(ctx context.Context, sessionID string) ([]string, error) {
+	if s == nil {
+		return nil, nil
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if s.sessionStore == nil {
+		return nil, fmt.Errorf("session store not configured")
+	}
+	sess, err := s.sessionStore.LoadSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	runIDs := collectSessionRunIDs(sess)
+	affected := make([]string, 0, len(runIDs))
+	for _, runID := range runIDs {
+		if err := s.ResumeRun(ctx, runID); err != nil {
+			return affected, err
+		}
+		affected = append(affected, runID)
+	}
+	return affected, nil
 }

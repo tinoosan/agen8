@@ -667,6 +667,42 @@ func renderActivityDetailMarkdown(a Activity, telemetry bool, expanded bool) str
 			b.WriteString(FormatCode("text", output))
 			b.WriteString("\n")
 		}
+	} else if a.Kind == "browser" {
+		if v := strings.TrimSpace(a.Data["browserOp"]); v != "" {
+			b.WriteString("- browserOp: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["title"]); v != "" {
+			b.WriteString("- title: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["url"]); v != "" {
+			b.WriteString("- url: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["count"]); v != "" {
+			b.WriteString("- count: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["items"]); v != "" {
+			b.WriteString("- items: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+	} else if a.Kind == "email" {
+		if strings.TrimSpace(a.Ok) == "true" {
+			b.WriteString("- status: sent\n")
+		}
+	} else if a.Kind == "fs_search" {
+		if v := strings.TrimSpace(a.Data["results"]); v != "" {
+			b.WriteString("- results: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
 	}
 
 	if telemetry {
@@ -764,6 +800,64 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 			}
 			if v := strings.TrimSpace(a.Data["traceInput"]); v != "" {
 				b.WriteString("- input: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+		} else if a.Kind == "browser" {
+			if v := strings.TrimSpace(a.Data["action"]); v != "" {
+				b.WriteString("- action: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["url"]); v != "" {
+				b.WriteString("- url: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["selector"]); v != "" {
+				b.WriteString("- selector: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["sessionId"]); v != "" {
+				b.WriteString("- sessionId: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["key"]); v != "" {
+				b.WriteString("- key: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["value"]); v != "" {
+				b.WriteString("- value: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["filename"]); v != "" {
+				b.WriteString("- filename: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+		} else if a.Kind == "email" {
+			if v := strings.TrimSpace(a.Data["to"]); v != "" {
+				b.WriteString("- to: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["subject"]); v != "" {
+				b.WriteString("- subject: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+		} else if a.Kind == "fs_search" {
+			if v := strings.TrimSpace(a.Data["query"]); v != "" {
+				b.WriteString("- query: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["limit"]); v != "" {
+				b.WriteString("- limit: `")
 				b.WriteString(v)
 				b.WriteString("`\n")
 			}

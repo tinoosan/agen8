@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestAppendThinkingEntry_TrimsToMax(t *testing.T) {
@@ -90,5 +91,86 @@ func TestScheduleUIRefresh_Debounces(t *testing.T) {
 	cmd2 := m.scheduleUIRefresh()
 	if cmd2 != nil {
 		t.Fatalf("second scheduleUIRefresh() cmd!=nil, want nil (debounced)")
+	}
+}
+
+func TestActivityTail_DoesNotReenableOnRefreshWhenUserScrolledUp(t *testing.T) {
+	t.Parallel()
+
+	delegate := newActivityDelegate()
+	activityList := list.New([]list.Item{}, delegate, 80, 20)
+	activityList.SetShowTitle(false)
+	activityList.SetShowStatusBar(false)
+	activityList.SetShowFilter(false)
+	activityList.SetShowHelp(false)
+	activityList.SetShowPagination(false)
+
+	m := &monitorModel{
+		activityList:          activityList,
+		activityPageSize:      200,
+		activityPage:          0,
+		activityTotalCount:    3,
+		activityFollowingTail: true,
+		activityPageItems: []Activity{
+			{ID: "a1", Title: "one"},
+			{ID: "a2", Title: "two"},
+			{ID: "a3", Title: "three"},
+		},
+	}
+	m.refreshActivityList()
+	if !m.activityFollowingTail {
+		t.Fatalf("expected tail-follow true after initial refresh")
+	}
+
+	m.focusedPanel = panelActivity
+	_, _ = m.routeKeyToFocusedPanel(tea.KeyMsg{Type: tea.KeyUp})
+	if m.activityFollowingTail {
+		t.Fatalf("expected manual scroll to disable tail-follow")
+	}
+
+	// Simulate background refresh while user is browsing history.
+	m.activityPageItems = []Activity{
+		{ID: "a2", Title: "two"},
+		{ID: "a3", Title: "three"},
+		{ID: "a4", Title: "four"},
+	}
+	m.activityTotalCount = 4
+	m.refreshActivityList()
+	if m.activityFollowingTail {
+		t.Fatalf("tail-follow was re-enabled by refresh; expected false")
+	}
+}
+
+func TestActivityScrollIntent_DisablesTailFollow(t *testing.T) {
+	t.Parallel()
+
+	delegate := newActivityDelegate()
+	activityList := list.New([]list.Item{}, delegate, 80, 20)
+	activityList.SetShowTitle(false)
+	activityList.SetShowStatusBar(false)
+	activityList.SetShowFilter(false)
+	activityList.SetShowHelp(false)
+	activityList.SetShowPagination(false)
+
+	m := &monitorModel{
+		activityList:          activityList,
+		activityPageSize:      200,
+		activityPage:          0,
+		activityTotalCount:    2,
+		activityFollowingTail: true,
+		activityPageItems: []Activity{
+			{ID: "b1", Title: "one"},
+			{ID: "b2", Title: "two"},
+		},
+		focusedPanel: panelActivity,
+	}
+	m.refreshActivityList()
+	if !m.activityFollowingTail {
+		t.Fatalf("expected initial tail-follow true")
+	}
+
+	_, _ = m.routeKeyToFocusedPanel(tea.KeyMsg{Type: tea.KeyPgUp})
+	if m.activityFollowingTail {
+		t.Fatalf("expected tail-follow false after scroll input")
 	}
 }

@@ -105,6 +105,7 @@ type workdirPrefetchMsg struct {
 
 type sessionsListMsg struct {
 	sessions []types.Session
+	items    []list.Item
 	total    int
 	page     int
 	err      error

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1040,6 +1041,214 @@ func TestRPCServer_SessionList_And_AgentList(t *testing.T) {
 	}
 
 	_ = sessA // keep lint happy for created baseline session
+}
+
+func TestRPCServer_AgentPauseResume(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, run, err := implstore.CreateSession(cfg, "pauseable", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	reqPause, _ := protocol.NewRequest("1", protocol.MethodAgentPause, protocol.AgentPauseParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		RunID:    run.RunID,
+	})
+	respPause := rpcRoundTrip(t, srv, reqPause)
+	if respPause.Error != nil {
+		t.Fatalf("agent.pause error: %+v", respPause.Error)
+	}
+	loaded, err := implstore.LoadRun(cfg, run.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun pause: %v", err)
+	}
+	if loaded.Status != types.RunStatusPaused {
+		t.Fatalf("status after pause=%q want %q", loaded.Status, types.RunStatusPaused)
+	}
+
+	reqResume, _ := protocol.NewRequest("2", protocol.MethodAgentResume, protocol.AgentResumeParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		RunID:    run.RunID,
+	})
+	respResume := rpcRoundTrip(t, srv, reqResume)
+	if respResume.Error != nil {
+		t.Fatalf("agent.resume error: %+v", respResume.Error)
+	}
+	loaded, err = implstore.LoadRun(cfg, run.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun resume: %v", err)
+	}
+	if loaded.Status != types.RunStatusRunning {
+		t.Fatalf("status after resume=%q want %q", loaded.Status, types.RunStatusRunning)
+	}
+	_ = sess
+}
+
+func TestRPCServer_SessionPauseResume_AffectsAllRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, runA, err := implstore.CreateSession(cfg, "session pause", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	runB := types.NewRun("secondary", 8*1024, sess.SessionID)
+	if err := implstore.SaveRun(cfg, runB); err != nil {
+		t.Fatalf("SaveRun runB: %v", err)
+	}
+	sess.Runs = append(sess.Runs, runB.RunID)
+	sess.CurrentRunID = runA.RunID
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: runA, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	reqPause, _ := protocol.NewRequest("1", protocol.MethodSessionPause, protocol.SessionPauseParams{
+		ThreadID:  protocol.ThreadID(runA.SessionID),
+		SessionID: sess.SessionID,
+	})
+	respPause := rpcRoundTrip(t, srv, reqPause)
+	if respPause.Error != nil {
+		t.Fatalf("session.pause error: %+v", respPause.Error)
+	}
+	var pauseRes protocol.SessionPauseResult
+	if err := json.Unmarshal(respPause.Result, &pauseRes); err != nil {
+		t.Fatalf("unmarshal pause result: %v", err)
+	}
+	if len(pauseRes.AffectedRunIDs) < 2 {
+		t.Fatalf("expected >=2 affected runs, got %v", pauseRes.AffectedRunIDs)
+	}
+
+	for _, runID := range []string{runA.RunID, runB.RunID} {
+		loaded, err := implstore.LoadRun(cfg, runID)
+		if err != nil {
+			t.Fatalf("LoadRun pause (%s): %v", runID, err)
+		}
+		if loaded.Status != types.RunStatusPaused {
+			t.Fatalf("status after session pause for %s = %q want %q", runID, loaded.Status, types.RunStatusPaused)
+		}
+	}
+
+	reqResume, _ := protocol.NewRequest("2", protocol.MethodSessionResume, protocol.SessionResumeParams{
+		ThreadID:  protocol.ThreadID(runA.SessionID),
+		SessionID: sess.SessionID,
+	})
+	respResume := rpcRoundTrip(t, srv, reqResume)
+	if respResume.Error != nil {
+		t.Fatalf("session.resume error: %+v", respResume.Error)
+	}
+	for _, runID := range []string{runA.RunID, runB.RunID} {
+		loaded, err := implstore.LoadRun(cfg, runID)
+		if err != nil {
+			t.Fatalf("LoadRun resume (%s): %v", runID, err)
+		}
+		if loaded.Status != types.RunStatusRunning {
+			t.Fatalf("status after session resume for %s = %q want %q", runID, loaded.Status, types.RunStatusRunning)
+		}
+	}
+}
+
+func TestRPCServer_SessionList_IncludesPausedCounts(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, runA, err := implstore.CreateSession(cfg, "counts", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	runB := types.NewRun("paused", 8*1024, sess.SessionID)
+	runB.Status = types.RunStatusPaused
+	if err := implstore.SaveRun(cfg, runB); err != nil {
+		t.Fatalf("SaveRun runB: %v", err)
+	}
+	runC := types.NewRun("done", 8*1024, sess.SessionID)
+	runC.Status = types.RunStatusSucceeded
+	if err := implstore.SaveRun(cfg, runC); err != nil {
+		t.Fatalf("SaveRun runC: %v", err)
+	}
+	sess.Runs = append(sess.Runs, runB.RunID, runC.RunID)
+	sess.CurrentRunID = runA.RunID
+
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: runA, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionList, protocol.SessionListParams{
+		ThreadID: protocol.ThreadID(runA.SessionID),
+		Limit:    20,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.list error: %+v", resp.Error)
+	}
+	var listed protocol.SessionListResult
+	if err := json.Unmarshal(resp.Result, &listed); err != nil {
+		t.Fatalf("unmarshal session.list: %v", err)
+	}
+	var got *protocol.SessionListItem
+	for i := range listed.Sessions {
+		if strings.TrimSpace(listed.Sessions[i].SessionID) == strings.TrimSpace(sess.SessionID) {
+			got = &listed.Sessions[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("expected session %s in response", sess.SessionID)
+	}
+	if got.TotalAgents != 3 || got.RunningAgents != 1 || got.PausedAgents != 1 {
+		t.Fatalf("unexpected counts: running=%d paused=%d total=%d", got.RunningAgents, got.PausedAgents, got.TotalAgents)
+	}
+}
+
+func TestRPCServer_LogsRequestAndResponseSummary(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	_, run, err := implstore.CreateSession(cfg, "logging", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	var logs bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(prev)
+
+	req, _ := protocol.NewRequest("1", protocol.MethodThreadGet, protocol.ThreadGetParams{ThreadID: protocol.ThreadID(run.SessionID)})
+	_ = rpcRoundTrip(t, srv, req)
+
+	out := logs.String()
+	if !strings.Contains(out, "rpc.request") {
+		t.Fatalf("expected rpc.request log, got %q", out)
+	}
+	if !strings.Contains(out, "rpc.response") {
+		t.Fatalf("expected rpc.response log, got %q", out)
+	}
 }
 
 func TestRPCServer_SessionRename(t *testing.T) {

@@ -20,6 +20,26 @@ type RetryConfig struct {
 	InitialDelay time.Duration
 	MaxDelay     time.Duration
 	Multiplier   float64
+	OnRetry      func(ctx context.Context, info RetryAttemptInfo)
+}
+
+// RetryAttemptInfo describes a retry that will be attempted.
+type RetryAttemptInfo struct {
+	Class      string
+	Attempt    int
+	Delay      time.Duration
+	StatusCode int
+	Code       string
+	Message    string
+}
+
+// ErrorInfo classifies LLM provider/runtime errors for policy and UI diagnostics.
+type ErrorInfo struct {
+	Class      string
+	Retryable  bool
+	StatusCode int
+	Code       string
+	Message    string
 }
 
 func (c RetryConfig) WithDefaults() RetryConfig {
@@ -64,26 +84,30 @@ func (c *RetryClient) Generate(ctx context.Context, req types.LLMRequest) (types
 		return c.Wrapped.Generate(ctx, req)
 	}
 
-	var lastErr error
-	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
-		if attempt > 0 {
-			delay := backoff(cfg.InitialDelay, cfg.Multiplier, cfg.MaxDelay, attempt)
-			if err := sleep(ctx, delay); err != nil {
-				return types.LLMResponse{}, err
-			}
-		}
-
+	for attempt := 0; ; attempt++ {
 		resp, err := c.Wrapped.Generate(ctx, req)
 		if err == nil {
 			return resp, nil
 		}
-		lastErr = err
-		if !isTransient(err) {
+		info := ClassifyError(err)
+		if !info.Retryable || attempt >= cfg.MaxRetries {
+			return types.LLMResponse{}, err
+		}
+		delay := backoff(cfg.InitialDelay, cfg.Multiplier, cfg.MaxDelay, attempt+1)
+		if cfg.OnRetry != nil {
+			cfg.OnRetry(ctx, RetryAttemptInfo{
+				Class:      info.Class,
+				Attempt:    attempt + 1,
+				Delay:      delay,
+				StatusCode: info.StatusCode,
+				Code:       info.Code,
+				Message:    info.Message,
+			})
+		}
+		if err := sleep(ctx, delay); err != nil {
 			return types.LLMResponse{}, err
 		}
 	}
-
-	return types.LLMResponse{}, lastErr
 }
 
 func (c *RetryClient) SupportsStreaming() bool {
@@ -110,15 +134,7 @@ func (c *RetryClient) GenerateStream(ctx context.Context, req types.LLMRequest, 
 		return streaming.GenerateStream(ctx, req, cb)
 	}
 
-	var lastErr error
-	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
-		if attempt > 0 {
-			delay := backoff(cfg.InitialDelay, cfg.Multiplier, cfg.MaxDelay, attempt)
-			if err := sleep(ctx, delay); err != nil {
-				return types.LLMResponse{}, err
-			}
-		}
-
+	for attempt := 0; ; attempt++ {
 		emitted := false
 		wrappedCb := func(chunk types.LLMStreamChunk) error {
 			if chunk.Text != "" || chunk.Done || chunk.IsReasoning {
@@ -134,13 +150,25 @@ func (c *RetryClient) GenerateStream(ctx context.Context, req types.LLMRequest, 
 		if err == nil {
 			return resp, nil
 		}
-		lastErr = err
-		if emitted || !isTransient(err) {
+		info := ClassifyError(err)
+		if emitted || !info.Retryable || attempt >= cfg.MaxRetries {
+			return types.LLMResponse{}, err
+		}
+		delay := backoff(cfg.InitialDelay, cfg.Multiplier, cfg.MaxDelay, attempt+1)
+		if cfg.OnRetry != nil {
+			cfg.OnRetry(ctx, RetryAttemptInfo{
+				Class:      info.Class,
+				Attempt:    attempt + 1,
+				Delay:      delay,
+				StatusCode: info.StatusCode,
+				Code:       info.Code,
+				Message:    info.Message,
+			})
+		}
+		if err := sleep(ctx, delay); err != nil {
 			return types.LLMResponse{}, err
 		}
 	}
-
-	return types.LLMResponse{}, lastErr
 }
 
 func backoff(initial time.Duration, mult float64, max time.Duration, attempt int) time.Duration {
@@ -163,49 +191,131 @@ func sleep(ctx context.Context, d time.Duration) error {
 }
 
 func isTransient(err error) bool {
+	return ClassifyError(err).Retryable
+}
+
+// ClassifyError returns normalized error metadata for retry policy and UI reporting.
+func ClassifyError(err error) ErrorInfo {
 	if err == nil {
-		return false
+		return ErrorInfo{}
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return true
+		return ErrorInfo{Class: "timeout", Retryable: true, Message: strings.TrimSpace(err.Error())}
 	}
 	if errors.Is(err, io.EOF) {
-		return true
+		return ErrorInfo{Class: "network", Retryable: true, Message: strings.TrimSpace(err.Error())}
 	}
 	if errors.Is(err, net.ErrClosed) {
-		return true
+		return ErrorInfo{Class: "network", Retryable: true, Message: strings.TrimSpace(err.Error())}
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
+		return ErrorInfo{Class: "timeout", Retryable: true, Message: strings.TrimSpace(err.Error())}
 	}
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) {
-		if apiErr.StatusCode >= 500 || apiErr.StatusCode == 429 {
-			return true
-		}
-		if apiErr.StatusCode == 408 {
-			return true
-		}
-		msg := strings.ToLower(strings.TrimSpace(apiErr.Message))
-		if strings.Contains(msg, "timeout") || strings.Contains(msg, "rate limit") {
-			return true
-		}
-		return false
+		return classifyOpenAIError(apiErr)
 	}
 
-	msg := strings.ToLower(err.Error())
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {
+	case looksLikeQuota(msg, ""):
+		return ErrorInfo{Class: "quota", Retryable: false, Message: strings.TrimSpace(err.Error())}
+	case strings.Contains(msg, "unauthorized"), strings.Contains(msg, "invalid api key"), strings.Contains(msg, "authentication"):
+		return ErrorInfo{Class: "auth", Retryable: false, Message: strings.TrimSpace(err.Error())}
+	case strings.Contains(msg, "forbidden"), strings.Contains(msg, "permission"):
+		return ErrorInfo{Class: "permission", Retryable: false, Message: strings.TrimSpace(err.Error())}
+	case strings.Contains(msg, "bad request"), strings.Contains(msg, "invalid request"), strings.Contains(msg, "unprocessable"):
+		return ErrorInfo{Class: "invalid_request", Retryable: false, Message: strings.TrimSpace(err.Error())}
 	case strings.Contains(msg, "timeout"):
-		return true
+		return ErrorInfo{Class: "timeout", Retryable: true, Message: strings.TrimSpace(err.Error())}
 	case strings.Contains(msg, "rate limit"):
-		return true
+		return ErrorInfo{Class: "rate_limit", Retryable: true, Message: strings.TrimSpace(err.Error())}
 	case strings.Contains(msg, "connection reset"):
-		return true
+		return ErrorInfo{Class: "network", Retryable: true, Message: strings.TrimSpace(err.Error())}
 	case strings.Contains(msg, "connection refused"):
-		return true
+		return ErrorInfo{Class: "network", Retryable: true, Message: strings.TrimSpace(err.Error())}
 	case strings.Contains(msg, "connection aborted"):
-		return true
+		return ErrorInfo{Class: "network", Retryable: true, Message: strings.TrimSpace(err.Error())}
 	}
-	return false
+	return ErrorInfo{Class: "unknown", Retryable: false, Message: strings.TrimSpace(err.Error())}
+}
+
+func classifyOpenAIError(apiErr *openai.Error) ErrorInfo {
+	msg := strings.TrimSpace(apiErr.Message)
+	code := strings.TrimSpace(apiErr.Code)
+	info := ErrorInfo{
+		StatusCode: apiErr.StatusCode,
+		Code:       code,
+		Message:    msg,
+	}
+	switch apiErr.StatusCode {
+	case 402:
+		info.Class = "quota"
+		info.Retryable = false
+		return info
+	case 408:
+		info.Class = "timeout"
+		info.Retryable = true
+		return info
+	case 409:
+		info.Class = "server"
+		info.Retryable = true
+		return info
+	case 429:
+		if looksLikeQuota(strings.ToLower(msg), strings.ToLower(code)) {
+			info.Class = "quota"
+			info.Retryable = false
+			return info
+		}
+		info.Class = "rate_limit"
+		info.Retryable = true
+		return info
+	case 401:
+		info.Class = "auth"
+		info.Retryable = false
+		return info
+	case 403:
+		info.Class = "permission"
+		info.Retryable = false
+		return info
+	case 400, 422:
+		info.Class = "invalid_request"
+		info.Retryable = false
+		return info
+	}
+	if apiErr.StatusCode >= 500 {
+		info.Class = "server"
+		info.Retryable = true
+		return info
+	}
+	if looksLikeQuota(strings.ToLower(msg), strings.ToLower(code)) {
+		info.Class = "quota"
+		info.Retryable = false
+		return info
+	}
+	if strings.Contains(strings.ToLower(msg), "timeout") {
+		info.Class = "timeout"
+		info.Retryable = true
+		return info
+	}
+	if strings.Contains(strings.ToLower(msg), "rate limit") {
+		info.Class = "rate_limit"
+		info.Retryable = true
+		return info
+	}
+	info.Class = "unknown"
+	info.Retryable = false
+	return info
+}
+
+func looksLikeQuota(msgLower, codeLower string) bool {
+	return strings.Contains(msgLower, "insufficient_quota") ||
+		strings.Contains(msgLower, "insufficient quota") ||
+		strings.Contains(msgLower, "quota exceeded") ||
+		strings.Contains(msgLower, "out of credits") ||
+		strings.Contains(msgLower, "payment required") ||
+		strings.Contains(msgLower, "no credits") ||
+		strings.Contains(codeLower, "insufficient_quota") ||
+		strings.Contains(codeLower, "insufficient_credits")
 }

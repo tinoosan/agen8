@@ -34,15 +34,18 @@ type SessionListParams struct {
 }
 
 type SessionListItem struct {
-	SessionID    string `json:"sessionId"`
-	Title        string `json:"title,omitempty"`
-	CurrentRunID string `json:"currentRunId,omitempty"`
-	ActiveModel  string `json:"activeModel,omitempty"`
-	Mode         string `json:"mode,omitempty"`
-	TeamID       string `json:"teamId,omitempty"`
-	Profile      string `json:"profile,omitempty"`
-	CreatedAt    string `json:"createdAt,omitempty"`
-	UpdatedAt    string `json:"updatedAt,omitempty"`
+	SessionID     string `json:"sessionId"`
+	Title         string `json:"title,omitempty"`
+	CurrentRunID  string `json:"currentRunId,omitempty"`
+	ActiveModel   string `json:"activeModel,omitempty"`
+	Mode          string `json:"mode,omitempty"`
+	TeamID        string `json:"teamId,omitempty"`
+	Profile       string `json:"profile,omitempty"`
+	RunningAgents int    `json:"runningAgents,omitempty"`
+	PausedAgents  int    `json:"pausedAgents,omitempty"`
+	TotalAgents   int    `json:"totalAgents,omitempty"`
+	CreatedAt     string `json:"createdAt,omitempty"`
+	UpdatedAt     string `json:"updatedAt,omitempty"`
 }
 
 type SessionListResult struct {
@@ -95,6 +98,46 @@ type AgentStartResult struct {
 	SessionID string `json:"sessionId"`
 	Profile   string `json:"profile,omitempty"`
 	Model     string `json:"model,omitempty"`
+}
+
+type AgentPauseParams struct {
+	ThreadID ThreadID `json:"threadId"`
+	RunID    string   `json:"runId"`
+}
+
+type AgentPauseResult struct {
+	RunID  string `json:"runId"`
+	Status string `json:"status"`
+}
+
+type AgentResumeParams struct {
+	ThreadID ThreadID `json:"threadId"`
+	RunID    string   `json:"runId"`
+}
+
+type AgentResumeResult struct {
+	RunID  string `json:"runId"`
+	Status string `json:"status"`
+}
+
+type SessionPauseParams struct {
+	ThreadID  ThreadID `json:"threadId"`
+	SessionID string   `json:"sessionId,omitempty"`
+}
+
+type SessionPauseResult struct {
+	SessionID      string   `json:"sessionId"`
+	AffectedRunIDs []string `json:"affectedRunIds,omitempty"`
+}
+
+type SessionResumeParams struct {
+	ThreadID  ThreadID `json:"threadId"`
+	SessionID string   `json:"sessionId,omitempty"`
+}
+
+type SessionResumeResult struct {
+	SessionID      string   `json:"sessionId"`
+	AffectedRunIDs []string `json:"affectedRunIds,omitempty"`
 }
 
 type SessionGetTotalsResult struct {

@@ -1,11 +1,9 @@
 package tui
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -21,7 +19,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
 	"github.com/muesli/reflow/wordwrap"
-	"github.com/tinoosan/workbench-core/internal/app"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
@@ -79,6 +76,12 @@ type uiRefreshMsg struct{}
 type planReloadMsg struct{}
 
 type sessionTotalsReloadMsg struct{}
+
+type rpcHealthMsg struct {
+	reachable bool
+	err       error
+	manual    bool
+}
 
 type planFilesLoadedMsg struct {
 	checklist    string
@@ -140,15 +143,20 @@ type MonitorResult struct {
 }
 
 type monitorModel struct {
-	ctx       context.Context
-	cfg       config.Config
-	runID     string
-	teamID    string
-	detached  bool
-	runStatus string // loaded at init; used to show "run not active" warning
-	result    *MonitorResult
-	session   pkgstore.SessionQuery
-	sessionID string
+	ctx            context.Context
+	cfg            config.Config
+	runID          string
+	teamID         string
+	detached       bool
+	runStatus      string // loaded at init; used to show "run not active" warning
+	rpcEndpoint    string
+	rpcHealthKnown bool
+	rpcReachable   bool
+	rpcLastErr     string
+	rpcChecking    bool
+	result         *MonitorResult
+	session        pkgstore.SessionQuery
+	sessionID      string
 
 	offset int64
 
@@ -196,6 +204,7 @@ type monitorModel struct {
 	memResults                   []string
 	memoryVP                     viewport.Model
 	thinkingEntries              []thinkingEntry
+	reasoningUsageByStep         map[string]int
 	thinkingVP                   viewport.Model
 	thinkingAutoScroll           bool
 	planMarkdown                 string
@@ -340,6 +349,10 @@ type monitorStats struct {
 	lastTurnCostUSD string
 	totalCostUSD    float64
 	pricingKnown    bool
+
+	lastLLMErrorClass     string
+	lastLLMErrorRetryable bool
+	lastLLMErrorSet       bool
 }
 
 func pricingKnownForRunID(cfg config.Config, runID string) bool {
@@ -465,6 +478,9 @@ const (
 )
 
 func RunMonitor(ctx context.Context, cfg config.Config, runID string) error {
+	if err := ensureRPCReachable(ctx); err != nil {
+		return err
+	}
 	var result MonitorResult
 	m, err := newMonitorModel(ctx, cfg, runID, &result)
 	if err != nil {
@@ -497,6 +513,9 @@ func RunMonitorDetached(ctx context.Context, cfg config.Config) error {
 }
 
 func RunTeamMonitor(ctx context.Context, cfg config.Config, teamID string) error {
+	if err := ensureRPCReachable(ctx); err != nil {
+		return err
+	}
 	teamID = strings.TrimSpace(teamID)
 	if teamID == "" {
 		return fmt.Errorf("teamID is required")
@@ -611,6 +630,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		ctx:                         ctx,
 		cfg:                         cfg,
 		runID:                       runID,
+		rpcEndpoint:                 monitorRPCEndpoint(),
 		runStatus:                   runStatus,
 		result:                      result,
 		session:                     sessionStore,
@@ -643,6 +663,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		memResults:                  []string{},
 		memoryVP:                    viewport.New(0, 0),
 		thinkingEntries:             []thinkingEntry{},
+		reasoningUsageByStep:        map[string]int{},
 		thinkingVP:                  viewport.New(0, 0),
 		thinkingAutoScroll:          true,
 		artifactContentVP:           viewport.New(0, 0),
@@ -744,6 +765,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 		cfg:                         cfg,
 		runID:                       "team:" + teamID,
 		teamID:                      teamID,
+		rpcEndpoint:                 monitorRPCEndpoint(),
 		runStatus:                   types.RunStatusRunning,
 		result:                      result,
 		session:                     nil,
@@ -776,6 +798,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 		memResults:                  []string{},
 		memoryVP:                    viewport.New(0, 0),
 		thinkingEntries:             []thinkingEntry{},
+		reasoningUsageByStep:        map[string]int{},
 		thinkingVP:                  viewport.New(0, 0),
 		thinkingAutoScroll:          true,
 		artifactContentVP:           viewport.New(0, 0),
@@ -899,6 +922,7 @@ func newDetachedMonitorModel(ctx context.Context, cfg config.Config, result *Mon
 	m := &monitorModel{
 		ctx:                         ctx,
 		cfg:                         cfg,
+		rpcEndpoint:                 monitorRPCEndpoint(),
 		runStatus:                   types.RunStatusRunning,
 		result:                      result,
 		session:                     sessionStore,
@@ -930,6 +954,7 @@ func newDetachedMonitorModel(ctx context.Context, cfg config.Config, result *Mon
 		memResults:                  []string{},
 		memoryVP:                    viewport.New(0, 0),
 		thinkingEntries:             []thinkingEntry{},
+		reasoningUsageByStep:        map[string]int{},
 		thinkingVP:                  viewport.New(0, 0),
 		thinkingAutoScroll:          true,
 		artifactContentVP:           viewport.New(0, 0),
@@ -963,7 +988,8 @@ func newDetachedMonitorModel(ctx context.Context, cfg config.Config, result *Mon
 // inbox files.
 func (m *monitorModel) Init() tea.Cmd {
 	if m.isDetached() {
-		return nil
+		m.rpcChecking = true
+		return tea.Batch(m.tick(), m.checkRPCHealthCmd(false))
 	}
 	cmds := []tea.Cmd{m.listenEvent(), m.listenErr(), m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage()}
 	if strings.TrimSpace(m.teamID) != "" {
@@ -992,10 +1018,36 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		// Re-render time-based UI (uptime, elapsed timers) even when no new events arrive.
 		// The View() computes elapsed durations on demand; no need to rebuild viewports.
+		if m.isDetached() {
+			cmds := []tea.Cmd{m.tick()}
+			if !m.rpcChecking {
+				m.rpcChecking = true
+				cmds = append(cmds, m.checkRPCHealthCmd(false))
+			}
+			return m, tea.Batch(cmds...)
+		}
 		if strings.TrimSpace(m.teamID) != "" {
 			return m, tea.Batch(m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage(), m.loadTeamStatus(), m.loadTeamEvents(), m.loadPlanFilesCmd(), m.loadTeamManifestCmd())
 		}
 		return m, m.tick()
+
+	case rpcHealthMsg:
+		m.rpcChecking = false
+		m.rpcHealthKnown = true
+		m.rpcReachable = msg.reachable
+		if msg.err != nil {
+			m.rpcLastErr = msg.err.Error()
+		} else {
+			m.rpcLastErr = ""
+		}
+		if msg.manual {
+			if msg.reachable {
+				m.appendAgentOutput("[system] Daemon RPC connected at " + strings.TrimSpace(m.rpcEndpoint))
+			} else {
+				m.appendAgentOutput("[system] Daemon RPC disconnected: " + strings.TrimSpace(m.rpcLastErr) + " (retry with /reconnect)")
+			}
+		}
+		return m, m.scheduleUIRefresh()
 
 	case tailedEventMsg:
 		if msg.ev.Event.EventID != "" {
@@ -1225,7 +1277,10 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionPickerErr = ""
 		m.sessionPickerTotal = msg.total
 		m.sessionPickerPage = msg.page
-		items := sessionsToPickerItems(msg.sessions)
+		items := msg.items
+		if len(items) == 0 {
+			items = sessionsToPickerItems(msg.sessions)
+		}
 		m.sessionPickerList.SetItems(items)
 		if strings.TrimSpace(m.sessionPickerFilter) == "" {
 			m.sessionPickerList.SetFilterText("")
@@ -1597,56 +1652,68 @@ func (m *monitorModel) rpcRoundTrip(method string, params any, out any) error {
 	if m == nil {
 		return fmt.Errorf("monitor is nil")
 	}
-	req, err := protocol.NewRequest("1", method, params)
-	if err != nil {
-		return err
-	}
-	srvCfg := app.RPCServerConfig{
-		Cfg:       m.cfg,
-		Run:       m.rpcRun(),
-		TaskStore: m.taskStore,
-		ControlSetModel: func(ctx context.Context, threadID, target, model string) ([]string, error) {
-			return m.rpcControlSetModel(ctx, threadID, target, model)
-		},
-		ControlSetProfile: func(ctx context.Context, threadID, target, profileRef string) ([]string, error) {
-			return m.rpcControlSetProfile(ctx, threadID, target, profileRef)
-		},
-	}
-	srv := app.NewRPCServer(srvCfg)
-	if rw, ok := m.session.(pkgstore.SessionReaderWriter); ok {
-		srvCfg.Session = rw
-		srv = app.NewRPCServer(srvCfg)
-	}
-	pr, pw := io.Pipe()
-	var buf bytes.Buffer
 	baseCtx := m.ctx
 	if baseCtx == nil {
 		baseCtx = context.Background()
 	}
 	ctx, cancel := context.WithTimeout(baseCtx, 2*time.Second)
 	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- srv.Serve(ctx, pr, &buf) }()
-	if err := json.NewEncoder(pw).Encode(req); err != nil {
-		_ = pw.Close()
-		<-done
-		return err
+	cli := protocol.TCPClient{
+		Endpoint: strings.TrimSpace(m.rpcEndpoint),
+		Timeout:  2 * time.Second,
 	}
-	_ = pw.Close()
-	if err := <-done; err != nil {
-		return err
+	if err := cli.Call(ctx, method, params, out); err != nil {
+		return fmt.Errorf("rpc %s: %w", method, err)
 	}
-	var resp protocol.Message
-	if err := json.NewDecoder(bytes.NewReader(buf.Bytes())).Decode(&resp); err != nil {
-		return err
+	return nil
+}
+
+func monitorRPCEndpoint() string {
+	v := strings.TrimSpace(os.Getenv("WORKBENCH_RPC_ENDPOINT"))
+	if v != "" {
+		return v
 	}
-	if resp.Error != nil {
-		return fmt.Errorf("rpc %s: %s", method, strings.TrimSpace(resp.Error.Message))
+	return protocol.DefaultRPCEndpoint
+}
+
+func ensureRPCReachable(ctx context.Context) error {
+	return pingRPCEndpoint(ctx, monitorRPCEndpoint())
+}
+
+func (m *monitorModel) checkRPCHealthCmd(manual bool) tea.Cmd {
+	endpoint := strings.TrimSpace(m.rpcEndpoint)
+	if endpoint == "" {
+		endpoint = monitorRPCEndpoint()
 	}
-	if out == nil {
-		return nil
+	return func() tea.Msg {
+		baseCtx := m.ctx
+		if baseCtx == nil {
+			baseCtx = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(baseCtx, 2*time.Second)
+		defer cancel()
+		if err := pingRPCEndpoint(ctx, endpoint); err != nil {
+			return rpcHealthMsg{reachable: false, err: err, manual: manual}
+		}
+		return rpcHealthMsg{reachable: true, manual: manual}
 	}
-	return json.Unmarshal(resp.Result, out)
+}
+
+func pingRPCEndpoint(ctx context.Context, endpoint string) error {
+	p := protocol.SessionListParams{
+		ThreadID: protocol.ThreadID("detached-control"),
+		Limit:    1,
+		Offset:   0,
+	}
+	var out protocol.SessionListResult
+	cli := protocol.TCPClient{
+		Endpoint: strings.TrimSpace(endpoint),
+		Timeout:  2 * time.Second,
+	}
+	if err := cli.Call(ctx, protocol.MethodSessionList, p, &out); err != nil {
+		return fmt.Errorf("daemon RPC unavailable at %s: %w", strings.TrimSpace(endpoint), err)
+	}
+	return nil
 }
 
 func (m *monitorModel) rpcControlSetModel(ctx context.Context, threadID, target, model string) ([]string, error) {
@@ -2352,7 +2419,11 @@ func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine str
 		if w <= 0 {
 			w = 80
 		}
-		warning := m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render("No active context. Use /new, /sessions, or /agents."))
+		warningText := "No active context. Use /new, /sessions, or /agents."
+		if m.rpcHealthKnown && !m.rpcReachable {
+			warningText = "Daemon disconnected at " + strings.TrimSpace(m.rpcEndpoint) + ". Start `workbench daemon` and retry with /reconnect."
+		}
+		warning := m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render(warningText))
 		sections = []string{headerLine, warning, "", main, "", composer, stats, statusBar}
 	} else if m.runStatus != types.RunStatusRunning {
 		w := m.width
@@ -2380,6 +2451,16 @@ func (m *monitorModel) renderStatusBar(width int) string {
 	}
 	if strings.TrimSpace(m.teamID) != "" {
 		line += "  |  /team focus run  |  Ctrl+G clear focus"
+	}
+	if m.stats.lastLLMErrorSet {
+		retryState := "no-retry"
+		if m.stats.lastLLMErrorRetryable {
+			retryState = "retryable"
+		}
+		line += "  |  LLM error: " + fallback(strings.TrimSpace(m.stats.lastLLMErrorClass), "unknown") + " (" + retryState + ")"
+	}
+	if m.rpcHealthKnown && !m.rpcReachable {
+		line += "  |  daemon disconnected (use /reconnect)"
 	}
 	w := width
 	if w <= 0 {
@@ -2485,7 +2566,11 @@ func (m *monitorModel) renderCompact(grid layoutmgr.GridLayout, headerLine strin
 	tabBar := m.renderCompactTabBar()
 	// Each tab renders its own panel(s) so subpanels can be focused and scrolled.
 	content := m.renderCompactTabContent(grid)
-	sections := []string{headerLine, tabBar, content, m.renderComposer(grid.Composer)}
+	sections := []string{headerLine}
+	if m.rpcHealthKnown && !m.rpcReachable {
+		sections = append(sections, kit.StyleDim.Render("Daemon disconnected. Start `workbench daemon` and run /reconnect."))
+	}
+	sections = append(sections, tabBar, content, m.renderComposer(grid.Composer))
 	final := lipgloss.JoinVertical(lipgloss.Left, sections...)
 	effectiveWidth := m.width
 	if effectiveWidth <= 0 {
@@ -2605,6 +2690,10 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 		m.openHelpModal()
 		return nil
 	}
+	if cmd == "/reconnect" {
+		m.rpcChecking = true
+		return m.checkRPCHealthCmd(true)
+	}
 
 	if cmd == "/editor" {
 		return m.openComposeEditor("")
@@ -2685,6 +2774,69 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 			}
 		}
 		return m.openAgentPicker()
+	}
+
+	if cmd == "/pause" {
+		if strings.TrimSpace(rest) != "" {
+			return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /pause"}} }
+		}
+		if m.isDetached() {
+			return func() tea.Msg {
+				return commandLinesMsg{lines: []string{"[command] no active context; use /new or /sessions first"}}
+			}
+		}
+		return func() tea.Msg {
+			threadID := protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID))
+			if strings.TrimSpace(m.teamID) != "" {
+				var res protocol.SessionPauseResult
+				if err := m.rpcRoundTrip(protocol.MethodSessionPause, protocol.SessionPauseParams{
+					ThreadID:  threadID,
+					SessionID: strings.TrimSpace(m.sessionID),
+				}, &res); err != nil {
+					return commandLinesMsg{lines: []string{"[pause] error: " + err.Error()}}
+				}
+				return commandLinesMsg{lines: []string{fmt.Sprintf("[pause] session paused (%d runs)", len(res.AffectedRunIDs))}}
+			}
+			var res protocol.AgentPauseResult
+			if err := m.rpcRoundTrip(protocol.MethodAgentPause, protocol.AgentPauseParams{
+				ThreadID: threadID,
+				RunID:    strings.TrimSpace(m.runID),
+			}, &res); err != nil {
+				return commandLinesMsg{lines: []string{"[pause] error: " + err.Error()}}
+			}
+			return commandLinesMsg{lines: []string{"[pause] run paused: " + shortID(strings.TrimSpace(res.RunID))}}
+		}
+	}
+	if cmd == "/resume" {
+		if strings.TrimSpace(rest) != "" {
+			return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /resume"}} }
+		}
+		if m.isDetached() {
+			return func() tea.Msg {
+				return commandLinesMsg{lines: []string{"[command] no active context; use /new or /sessions first"}}
+			}
+		}
+		return func() tea.Msg {
+			threadID := protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID))
+			if strings.TrimSpace(m.teamID) != "" {
+				var res protocol.SessionResumeResult
+				if err := m.rpcRoundTrip(protocol.MethodSessionResume, protocol.SessionResumeParams{
+					ThreadID:  threadID,
+					SessionID: strings.TrimSpace(m.sessionID),
+				}, &res); err != nil {
+					return commandLinesMsg{lines: []string{"[resume] error: " + err.Error()}}
+				}
+				return commandLinesMsg{lines: []string{fmt.Sprintf("[resume] session resumed (%d runs)", len(res.AffectedRunIDs))}}
+			}
+			var res protocol.AgentResumeResult
+			if err := m.rpcRoundTrip(protocol.MethodAgentResume, protocol.AgentResumeParams{
+				ThreadID: threadID,
+				RunID:    strings.TrimSpace(m.runID),
+			}, &res); err != nil {
+				return commandLinesMsg{lines: []string{"[resume] error: " + err.Error()}}
+			}
+			return commandLinesMsg{lines: []string{"[resume] run resumed: " + shortID(strings.TrimSpace(res.RunID))}}
+		}
 	}
 
 	// /model with no arg opens picker, with arg sets directly
@@ -3026,7 +3178,9 @@ func (m *monitorModel) searchMemory(query string) tea.Cmd {
 }
 
 func (m *monitorModel) observeEvent(ev types.EventRecord) {
-	if v := strings.TrimSpace(ev.Data["model"]); v != "" {
+	if v := strings.TrimSpace(ev.Data["effectiveModel"]); v != "" {
+		m.model = v
+	} else if v := strings.TrimSpace(ev.Data["model"]); v != "" {
 		if strings.TrimSpace(m.teamID) != "" {
 			if strings.TrimSpace(m.model) == "" || strings.EqualFold(strings.TrimSpace(m.model), "team") {
 				m.model = v
@@ -3044,14 +3198,32 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 	m.observeAgentOutput(ev)
 	switch ev.Type {
 	case "agent.step":
+		step := strings.TrimSpace(ev.Data["step"])
+		key := reasoningStepKey(strings.TrimSpace(ev.RunID), strings.TrimSpace(ev.Data["role"]), step)
 		summary := strings.TrimSpace(ev.Data["reasoningSummary"])
 		if summary != "" {
 			m.appendThinkingEntry(strings.TrimSpace(ev.RunID), strings.TrimSpace(ev.Data["role"]), summary)
+			delete(m.reasoningUsageByStep, key)
+		} else if n := m.reasoningUsageByStep[key]; n > 0 {
+			m.appendThinkingEntry(strings.TrimSpace(ev.RunID), strings.TrimSpace(ev.Data["role"]),
+				fmt.Sprintf("Reasoning used (%d tokens); provider did not return a reasoning summary.", n))
+			delete(m.reasoningUsageByStep, key)
 		}
+		m.stats.lastLLMErrorSet = false
+		m.stats.lastLLMErrorClass = ""
 	case "llm.usage.total":
 		m.stats.lastTurnTokensIn = parseInt(ev.Data["input"])
 		m.stats.lastTurnTokensOut = parseInt(ev.Data["output"])
 		m.stats.lastTurnTokens = parseInt(ev.Data["total"])
+		reasoning := parseInt(ev.Data["reasoning"])
+		if reasoning > 0 {
+			step := strings.TrimSpace(ev.Data["step"])
+			key := reasoningStepKey(strings.TrimSpace(ev.RunID), strings.TrimSpace(ev.Data["role"]), step)
+			if m.reasoningUsageByStep == nil {
+				m.reasoningUsageByStep = map[string]int{}
+			}
+			m.reasoningUsageByStep[key] = reasoning
+		}
 	case "llm.cost.total":
 		known := parseBool(ev.Data["known"])
 		m.stats.lastTurnCostUSD = getCostUSD(ev.Data)
@@ -3059,6 +3231,10 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 			m.stats.lastTurnCostUSD = "?"
 		}
 		m.stats.pricingKnown = known
+	case "llm.error":
+		m.stats.lastLLMErrorClass = fallback(strings.TrimSpace(ev.Data["class"]), "unknown")
+		m.stats.lastLLMErrorRetryable = parseBool(ev.Data["retryable"])
+		m.stats.lastLLMErrorSet = true
 	}
 }
 
@@ -3125,6 +3301,8 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 	}
 	switch ev.Type {
 	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning", "daemon.error", "daemon.runner.error":
+		m.appendAgentOutputForRun(formatEventLine(ev), runID)
+	case "llm.error", "llm.retry":
 		m.appendAgentOutputForRun(formatEventLine(ev), runID)
 	case "task.queued", "task.start", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped":
 		for _, line := range formatTaskEventLines(ev) {
@@ -3248,6 +3426,10 @@ func (m *monitorModel) appendThinkingEntry(runID, role string, summary string) {
 		m.thinkingEntries = append([]thinkingEntry(nil), m.thinkingEntries[start:]...)
 	}
 	m.dirtyThinking = true
+}
+
+func reasoningStepKey(runID, role, step string) string {
+	return strings.TrimSpace(runID) + "|" + strings.TrimSpace(role) + "|" + strings.TrimSpace(step)
 }
 
 func (m *monitorModel) trimAgentOutputBuffer() {
@@ -3425,7 +3607,6 @@ func (m *monitorModel) refreshActivityList() {
 	}
 	m.activityList.SetItems(items)
 	if len(items) == 0 {
-		m.activityFollowingTail = true
 		return
 	}
 
@@ -3441,9 +3622,6 @@ func (m *monitorModel) refreshActivityList() {
 		}
 	}
 	m.activityList.Select(selectIdx)
-
-	maxPage := max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize)-1)
-	m.activityFollowingTail = (m.activityPage >= maxPage) && (selectIdx == len(items)-1)
 }
 
 func (m *monitorModel) refreshActivityDetail(forceTop bool) {
@@ -3969,8 +4147,7 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 			m.refreshActivityDetail(true)
 		}
 		if isScrollKey(msg) {
-			maxPage := max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize)-1)
-			m.activityFollowingTail = len(m.activityPageItems) > 0 && m.activityPage >= maxPage && m.activityList.Index() == len(m.activityPageItems)-1
+			m.activityFollowingTail = false
 		}
 		return m, cmd
 	case panelActivityDetail:

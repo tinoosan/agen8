@@ -40,7 +40,7 @@ var modelInfos = []ModelInfo{
 	{"deepseek/deepseek-r1", "deepseek", 0.55, 2.19, true},
 	{"openrouter/free", "openrouter", 0, 0, true},
 	{"moonshotai/kimi-k2-thinking", "moonshotai", 0.4, 1.75, true},
-	{"moonshotai/kimi-k2.5", "moonshotai", 0.45, 2.50, true},
+	{"moonshotai/kimi-k2.5", "moonshotai", 0.45, 2.50, false},
 }
 
 func SupportedModels() []string {

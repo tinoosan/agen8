@@ -108,7 +108,7 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			a.Hooks.OnLLMUsage(step, *resp.Usage)
 		}
 		if a.Hooks.OnStep != nil {
-			a.Hooks.OnStep(step, a.Model, strings.TrimSpace(reasoningSummary))
+			a.Hooks.OnStep(step, a.Model, strings.TrimSpace(resp.EffectiveModel), strings.TrimSpace(reasoningSummary))
 		}
 		if a.Hooks.OnWebSearch != nil && len(resp.Citations) != 0 {
 			a.Hooks.OnWebSearch(step, resp.Citations)

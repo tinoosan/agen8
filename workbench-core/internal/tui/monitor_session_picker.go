@@ -90,7 +90,21 @@ func (m *monitorModel) fetchSessionsPage() tea.Cmd {
 				Profile:      strings.TrimSpace(it.Profile),
 			})
 		}
-		return sessionsListMsg{sessions: sessions, total: res.TotalCount, page: m.sessionPickerPage, err: nil}
+		items := sessionsToPickerItems(sessions)
+		for i := range res.Sessions {
+			if i >= len(items) {
+				break
+			}
+			sp, ok := items[i].(sessionPickerItem)
+			if !ok {
+				continue
+			}
+			sp.runningAgents = max(0, res.Sessions[i].RunningAgents)
+			sp.pausedAgents = max(0, res.Sessions[i].PausedAgents)
+			sp.totalAgents = max(sp.runningAgents+sp.pausedAgents, max(0, res.Sessions[i].TotalAgents))
+			items[i] = sp
+		}
+		return sessionsListMsg{sessions: sessions, items: items, total: res.TotalCount, page: m.sessionPickerPage, err: nil}
 	}
 }
 

@@ -680,18 +680,24 @@ func (c *Client) toResponse(resp *openai.ChatCompletion) (types.LLMResponse, err
 		}
 	}
 
-	out := types.LLMResponse{Text: text, ToolCalls: toolCalls}
+	out := types.LLMResponse{
+		Text:           text,
+		ToolCalls:      toolCalls,
+		EffectiveModel: strings.TrimSpace(resp.Model),
+	}
 
 	if raw := strings.TrimSpace(resp.RawJSON()); raw != "" {
 		out.Raw = json.RawMessage(raw)
 	}
 
 	// If usage was not provided, these will be 0.
-	if resp.Usage.TotalTokens != 0 || resp.Usage.PromptTokens != 0 || resp.Usage.CompletionTokens != 0 {
+	reasoningTokens := int(resp.Usage.CompletionTokensDetails.ReasoningTokens)
+	if resp.Usage.TotalTokens != 0 || resp.Usage.PromptTokens != 0 || resp.Usage.CompletionTokens != 0 || reasoningTokens > 0 {
 		out.Usage = &types.LLMUsage{
-			InputTokens:  int(resp.Usage.PromptTokens),
-			OutputTokens: int(resp.Usage.CompletionTokens),
-			TotalTokens:  int(resp.Usage.TotalTokens),
+			InputTokens:     int(resp.Usage.PromptTokens),
+			OutputTokens:    int(resp.Usage.CompletionTokens),
+			TotalTokens:     int(resp.Usage.TotalTokens),
+			ReasoningTokens: reasoningTokens,
 		}
 	}
 
@@ -704,7 +710,10 @@ func (c *Client) toResponseFromResponses(resp *responses.Response) (types.LLMRes
 	}
 
 	text := strings.TrimSpace(resp.OutputText())
-	out := types.LLMResponse{Text: text}
+	out := types.LLMResponse{
+		Text:           text,
+		EffectiveModel: strings.TrimSpace(string(resp.Model)),
+	}
 
 	// Extract function tool calls from Responses output items.
 	for _, it := range resp.Output {
@@ -771,11 +780,13 @@ func (c *Client) toResponseFromResponses(resp *responses.Response) (types.LLMRes
 	}
 
 	// Usage is required by the Responses API, but some providers may still return zeros.
-	if resp.Usage.TotalTokens != 0 || resp.Usage.InputTokens != 0 || resp.Usage.OutputTokens != 0 {
+	reasoningTokens := int(resp.Usage.OutputTokensDetails.ReasoningTokens)
+	if resp.Usage.TotalTokens != 0 || resp.Usage.InputTokens != 0 || resp.Usage.OutputTokens != 0 || reasoningTokens > 0 {
 		out.Usage = &types.LLMUsage{
-			InputTokens:  int(resp.Usage.InputTokens),
-			OutputTokens: int(resp.Usage.OutputTokens),
-			TotalTokens:  int(resp.Usage.TotalTokens),
+			InputTokens:     int(resp.Usage.InputTokens),
+			OutputTokens:    int(resp.Usage.OutputTokens),
+			TotalTokens:     int(resp.Usage.TotalTokens),
+			ReasoningTokens: reasoningTokens,
 		}
 	}
 
@@ -1191,7 +1202,10 @@ func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMReque
 		return c.toResponseFromResponses(completed)
 	}
 	// Fallback: return whatever we observed as output text.
-	return types.LLMResponse{Text: strings.TrimSpace(outText.String())}, nil
+	return types.LLMResponse{
+		Text:           strings.TrimSpace(outText.String()),
+		EffectiveModel: strings.TrimSpace(req.Model),
+	}, nil
 }
 
 func (c *Client) generateStreamChat(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {

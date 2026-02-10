@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/tinoosan/workbench-core/pkg/protocol"
 )
 
 // RunChatOptions captures runtime options shared by daemon and monitor flows.
@@ -13,6 +15,7 @@ type RunChatOptions struct {
 	Profile          string
 	WorkDir          string
 	ProtocolStdio    bool
+	RPCListen        string
 	WebhookAddr      string
 	ResultWebhookURL string
 	HealthAddr       string
@@ -45,9 +48,13 @@ func resolveRunChatOptions(opts ...RunChatOption) (RunChatOptions, error) {
 		Model:            strings.TrimSpace(os.Getenv("OPENROUTER_MODEL")),
 		Profile:          strings.TrimSpace(os.Getenv("WORKBENCH_PROFILE")),
 		WorkDir:          strings.TrimSpace(os.Getenv("WORKBENCH_WORKDIR")),
+		RPCListen:        strings.TrimSpace(os.Getenv("WORKBENCH_RPC_ENDPOINT")),
 		WebhookAddr:      strings.TrimSpace(os.Getenv("WORKBENCH_WEBHOOK_ADDR")),
 		ResultWebhookURL: strings.TrimSpace(os.Getenv("WORKBENCH_RESULT_WEBHOOK_URL")),
 		HealthAddr:       strings.TrimSpace(os.Getenv("WORKBENCH_HEALTH_ADDR")),
+	}
+	if strings.TrimSpace(o.RPCListen) == "" {
+		o.RPCListen = protocol.DefaultRPCEndpoint
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -92,6 +99,16 @@ func WithWorkDir(dir string) RunChatOption {
 func WithProtocolStdio(enabled bool) RunChatOption {
 	return func(o *RunChatOptions) error {
 		o.ProtocolStdio = enabled
+		return nil
+	}
+}
+
+func WithRPCListen(addr string) RunChatOption {
+	return func(o *RunChatOptions) error {
+		addr = strings.TrimSpace(addr)
+		if addr != "" {
+			o.RPCListen = addr
+		}
 		return nil
 	}
 }

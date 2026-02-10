@@ -296,11 +296,14 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 					}
 				},
 			),
-			OnStep: func(step int, model, summary string) {
+			OnStep: func(step int, model, effectiveModel, summary string) {
 				data := map[string]string{
 					"step":  strconv.Itoa(step),
 					"model": strings.TrimSpace(model),
 					"role":  role.Name,
+				}
+				if em := strings.TrimSpace(effectiveModel); em != "" {
+					data["effectiveModel"] = em
 				}
 				if s := strings.TrimSpace(summary); s != "" {
 					data["reasoningSummary"] = s
@@ -314,6 +317,16 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 				}
 			},
 		}
+		runLLMClient := withRetryDiagnostics(llmClient, func(ctx context.Context, ev events.Event) {
+			if ev.Data == nil {
+				ev.Data = map[string]string{}
+			}
+			ev.Data["teamId"] = teamID
+			ev.Data["role"] = role.Name
+			if err := orderedEmitter.Emit(ctx, ev); err != nil && !errorsIsDropped(err) {
+				log.Printf("events: emit failed: %v", err)
+			}
+		})
 
 		registry, err := agent.DefaultHostToolRegistry()
 		if err != nil {
@@ -337,7 +350,7 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 		}
 		agentCfg.HostToolRegistry = registry
 
-		a, err := agent.NewAgent(llmClient, rt.Executor, agentCfg)
+		a, err := agent.NewAgent(runLLMClient, rt.Executor, agentCfg)
 		if err != nil {
 			orderedEmitter.Close()
 			_ = rt.Shutdown(context.Background())
@@ -443,11 +456,12 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 		startHealthServer(runCtx, healthAddr, nil, &serverWG)
 	}
 	if protocolEnabled {
-		srv := NewRPCServer(RPCServerConfig{
-			Cfg:       cfg,
-			Run:       coordinatorRun,
-			TaskStore: taskStore,
-			Session:   sessionStore,
+		srvCfg := RPCServerConfig{
+			Cfg:            cfg,
+			Run:            coordinatorRun,
+			AllowAnyThread: true,
+			TaskStore:      taskStore,
+			Session:        sessionStore,
 			ControlSetModel: func(ctx context.Context, threadID, target, model string) ([]string, error) {
 				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
 					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
@@ -457,18 +471,156 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 			ControlSetProfile: func(_ context.Context, _ string, _, _ string) ([]string, error) {
 				return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is unavailable in team mode"}
 			},
-		})
+			AgentPause: func(_ context.Context, threadID, runID string) error {
+				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
+					return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				runID = strings.TrimSpace(runID)
+				if runID == "" {
+					return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
+				}
+				for i := range runtimes {
+					if strings.TrimSpace(runtimes[i].run.RunID) != runID {
+						continue
+					}
+					loaded, err := implstore.LoadRun(cfg, runID)
+					if err != nil {
+						return err
+					}
+					loaded.Status = types.RunStatusPaused
+					loaded.FinishedAt = nil
+					loaded.Error = nil
+					if err := implstore.SaveRun(cfg, loaded); err != nil {
+						return err
+					}
+					runtimes[i].sess.SetPaused(true)
+					return nil
+				}
+				return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
+			},
+			AgentResume: func(_ context.Context, threadID, runID string) error {
+				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
+					return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				runID = strings.TrimSpace(runID)
+				if runID == "" {
+					return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
+				}
+				for i := range runtimes {
+					if strings.TrimSpace(runtimes[i].run.RunID) != runID {
+						continue
+					}
+					loaded, err := implstore.LoadRun(cfg, runID)
+					if err != nil {
+						return err
+					}
+					loaded.Status = types.RunStatusRunning
+					loaded.FinishedAt = nil
+					loaded.Error = nil
+					if err := implstore.SaveRun(cfg, loaded); err != nil {
+						return err
+					}
+					runtimes[i].sess.SetPaused(false)
+					return nil
+				}
+				return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
+			},
+			SessionPause: func(_ context.Context, threadID, sessionID string) ([]string, error) {
+				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				sessionID = strings.TrimSpace(sessionID)
+				if sessionID != "" && sessionID != strings.TrimSpace(coordinatorRun.SessionID) {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				affected := make([]string, 0, len(runtimes))
+				for i := range runtimes {
+					runID := strings.TrimSpace(runtimes[i].run.RunID)
+					if runID == "" {
+						continue
+					}
+					loaded, err := implstore.LoadRun(cfg, runID)
+					if err != nil {
+						return affected, err
+					}
+					loaded.Status = types.RunStatusPaused
+					loaded.FinishedAt = nil
+					loaded.Error = nil
+					if err := implstore.SaveRun(cfg, loaded); err != nil {
+						return affected, err
+					}
+					runtimes[i].sess.SetPaused(true)
+					affected = append(affected, runID)
+				}
+				return affected, nil
+			},
+			SessionResume: func(_ context.Context, threadID, sessionID string) ([]string, error) {
+				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				sessionID = strings.TrimSpace(sessionID)
+				if sessionID != "" && sessionID != strings.TrimSpace(coordinatorRun.SessionID) {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				affected := make([]string, 0, len(runtimes))
+				for i := range runtimes {
+					runID := strings.TrimSpace(runtimes[i].run.RunID)
+					if runID == "" {
+						continue
+					}
+					loaded, err := implstore.LoadRun(cfg, runID)
+					if err != nil {
+						return affected, err
+					}
+					loaded.Status = types.RunStatusRunning
+					loaded.FinishedAt = nil
+					loaded.Error = nil
+					if err := implstore.SaveRun(cfg, loaded); err != nil {
+						return affected, err
+					}
+					runtimes[i].sess.SetPaused(false)
+					affected = append(affected, runID)
+				}
+				return affected, nil
+			},
+		}
+		srv := NewRPCServer(srvCfg)
 		go func() {
 			if err := srv.Serve(runCtx, os.Stdin, os.Stdout); err != nil && runCtx.Err() == nil {
 				log.Printf("daemon: team protocol server stopped: %v", err)
 			}
 		}()
+		tcpCfg := srvCfg
+		tcpSrv := NewRPCServer(tcpCfg)
+		if err := serveRPCOverTCP(runCtx, strings.TrimSpace(resolved.RPCListen), tcpSrv); err != nil {
+			return err
+		}
 	}
 
 	go runTeamControlLoop(runCtx, taskStore, runtimes, stateMgr)
 	setupComplete = true
 
-	log.Printf("daemon: team-id %s - attach monitor with: workbench monitor --team-id %s", teamID, teamID)
+	log.Printf("daemon: protocol control-plane ready at %s — attach with: workbench", strings.TrimSpace(resolved.RPCListen))
+
+	for i := range runtimes {
+		rt := runtimes[i]
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-ticker.C:
+					loadedRun, err := implstore.LoadRun(cfg, rt.run.RunID)
+					if err != nil {
+						continue
+					}
+					rt.sess.SetPaused(strings.EqualFold(strings.TrimSpace(loadedRun.Status), types.RunStatusPaused))
+				}
+			}
+		}()
+	}
 
 	g, gctx := errgroup.WithContext(runCtx)
 	for _, rt := range runtimes {

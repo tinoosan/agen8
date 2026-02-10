@@ -53,6 +53,9 @@ func agentsToPickerItems(agents []protocol.AgentListItem) []list.Item {
 		} else if profile != "" {
 			label = profile + " · " + shortID(runID)
 		}
+		if strings.EqualFold(status, "paused") {
+			label = "paused · " + label
+		}
 		summary := strings.TrimSpace(a.Goal)
 		if summary == "" {
 			summary = "(no goal)"

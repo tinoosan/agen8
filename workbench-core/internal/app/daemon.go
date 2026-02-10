@@ -301,12 +301,13 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err != nil {
 		return fmt.Errorf("create LLM client: %w", err)
 	}
-	llmClient := llm.NewRetryClient(client, llm.RetryConfig{
+	baseLLMClient := llm.NewRetryClient(client, llm.RetryConfig{
 		MaxRetries:   3,
 		InitialDelay: 250 * time.Millisecond,
 		MaxDelay:     4 * time.Second,
 		Multiplier:   2.0,
 	})
+	llmClient := withRetryDiagnostics(baseLLMClient, mustEmit)
 
 	baseSystemPrompt := agent.DefaultAutonomousSystemPrompt()
 	currentModel := strings.TrimSpace(effectiveModel)
@@ -340,12 +341,16 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 			},
 			mustEmit,
 		),
-		OnStep: func(step int, model, summary string) {
+		OnStep: func(step int, model, effectiveModel, summary string) {
 			model = strings.TrimSpace(model)
+			effectiveModel = strings.TrimSpace(effectiveModel)
 			summary = strings.TrimSpace(summary)
 			data := map[string]string{
 				"step":  strconv.Itoa(step),
 				"model": model,
+			}
+			if effectiveModel != "" {
+				data["effectiveModel"] = effectiveModel
 			}
 			if summary != "" {
 				data["reasoningSummary"] = summary
@@ -370,7 +375,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		SessionStore:     sessionStore,
 		MemoryStore:      memStore,
 		ConstructorStore: constructorStore,
-		LLMClient:        llmClient,
+		LLMClient:        baseLLMClient,
 		Notifier:         notifier,
 		WorkdirAbs:       workdirAbs,
 		BootstrapRunID:   strings.TrimSpace(run.RunID),
@@ -431,13 +436,14 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	defer supervisor.stopAll()
 
 	if protocolEnabled {
-		srv := NewRPCServer(RPCServerConfig{
-			Cfg:       cfg,
-			Run:       run,
-			TaskStore: taskStore,
-			Session:   sessionStore,
-			NotifyCh:  notifyCh,
-			Index:     index,
+		srvCfg := RPCServerConfig{
+			Cfg:            cfg,
+			Run:            run,
+			AllowAnyThread: true,
+			TaskStore:      taskStore,
+			Session:        sessionStore,
+			NotifyCh:       notifyCh,
+			Index:          index,
 			Wake: func() {
 				select {
 				case wakeCh <- struct{}{}:
@@ -445,24 +451,41 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 				}
 			},
 			ControlSetModel: func(ctx context.Context, threadID, target, model string) ([]string, error) {
-				if strings.TrimSpace(threadID) != strings.TrimSpace(run.SessionID) {
+				threadID = strings.TrimSpace(threadID)
+				if threadID == "" {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
+				}
+				loadedSession, err := sessionStore.LoadSession(ctx, threadID)
+				if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
 					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 				}
-				if tgt := strings.TrimSpace(target); tgt != "" && tgt != run.RunID && tgt != run.SessionID {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "target does not match active run"}
+				target = strings.TrimSpace(target)
+				applied := collectSessionRunIDs(loadedSession)
+				if target != "" && target != threadID {
+					found := false
+					for _, rid := range applied {
+						if strings.TrimSpace(rid) == target {
+							found = true
+							applied = []string{target}
+							break
+						}
+					}
+					if !found {
+						return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "target does not match active run"}
+					}
 				}
-				if err := sess.SetModel(ctx, model); err != nil {
+				loadedSession.ActiveModel = strings.TrimSpace(model)
+				if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
 					return nil, err
 				}
-				currentModelMu.Lock()
-				currentModel = strings.TrimSpace(model)
-				currentModelMu.Unlock()
-				loaded, err := sessionStore.LoadSession(ctx, run.SessionID)
-				if err == nil {
-					loaded.ActiveModel = strings.TrimSpace(model)
-					_ = sessionStore.SaveSession(ctx, loaded)
+				if threadID == strings.TrimSpace(run.SessionID) {
+					if err := sess.SetModel(ctx, model); err == nil {
+						currentModelMu.Lock()
+						currentModel = strings.TrimSpace(model)
+						currentModelMu.Unlock()
+					}
 				}
-				return []string{strings.TrimSpace(run.RunID)}, nil
+				return applied, nil
 			},
 			ControlSetProfile: func(ctx context.Context, threadID, target, profileRef string) ([]string, error) {
 				if strings.TrimSpace(threadID) != strings.TrimSpace(run.SessionID) {
@@ -476,12 +499,186 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 				}
 				return []string{strings.TrimSpace(run.RunID)}, nil
 			},
-		})
+			AgentPause: func(ctx context.Context, threadID, runID string) error {
+				threadID = strings.TrimSpace(threadID)
+				if threadID == "" {
+					return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
+				}
+				loadedSession, err := sessionStore.LoadSession(ctx, threadID)
+				if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
+					return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				runID = strings.TrimSpace(runID)
+				if runID == "" {
+					return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
+				}
+				allowed := false
+				for _, rid := range collectSessionRunIDs(loadedSession) {
+					if strings.TrimSpace(rid) == runID {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				if runID == strings.TrimSpace(run.RunID) && threadID == strings.TrimSpace(run.SessionID) {
+					loaded, err := implstore.LoadRun(cfg, runID)
+					if err != nil {
+						return err
+					}
+					loaded.Status = types.RunStatusPaused
+					loaded.FinishedAt = nil
+					loaded.Error = nil
+					if err := implstore.SaveRun(cfg, loaded); err != nil {
+						return err
+					}
+					sess.SetPaused(true)
+					return nil
+				}
+				return supervisor.PauseRun(runID)
+			},
+			AgentResume: func(ctx context.Context, threadID, runID string) error {
+				threadID = strings.TrimSpace(threadID)
+				if threadID == "" {
+					return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
+				}
+				loadedSession, err := sessionStore.LoadSession(ctx, threadID)
+				if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
+					return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				runID = strings.TrimSpace(runID)
+				if runID == "" {
+					return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
+				}
+				allowed := false
+				for _, rid := range collectSessionRunIDs(loadedSession) {
+					if strings.TrimSpace(rid) == runID {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				if runID == strings.TrimSpace(run.RunID) && threadID == strings.TrimSpace(run.SessionID) {
+					loaded, err := implstore.LoadRun(cfg, runID)
+					if err != nil {
+						return err
+					}
+					loaded.Status = types.RunStatusRunning
+					loaded.FinishedAt = nil
+					loaded.Error = nil
+					if err := implstore.SaveRun(cfg, loaded); err != nil {
+						return err
+					}
+					sess.SetPaused(false)
+					return nil
+				}
+				return supervisor.ResumeRun(ctx, runID)
+			},
+			SessionPause: func(ctx context.Context, threadID, sessionID string) ([]string, error) {
+				threadID = strings.TrimSpace(threadID)
+				if threadID == "" {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
+				}
+				if _, err := sessionStore.LoadSession(ctx, threadID); err != nil {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				sessionID = strings.TrimSpace(sessionID)
+				if sessionID == "" {
+					sessionID = threadID
+				}
+				if sessionID != threadID {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				loadedSession, err := sessionStore.LoadSession(ctx, sessionID)
+				if err != nil {
+					return nil, err
+				}
+				affected := make([]string, 0, len(loadedSession.Runs))
+				for _, rid := range collectSessionRunIDs(loadedSession) {
+					rid = strings.TrimSpace(rid)
+					if rid == "" {
+						continue
+					}
+					if rid == strings.TrimSpace(run.RunID) {
+						loaded, lerr := implstore.LoadRun(cfg, rid)
+						if lerr != nil {
+							return affected, lerr
+						}
+						loaded.Status = types.RunStatusPaused
+						loaded.FinishedAt = nil
+						loaded.Error = nil
+						if lerr := implstore.SaveRun(cfg, loaded); lerr != nil {
+							return affected, lerr
+						}
+						sess.SetPaused(true)
+					} else if perr := supervisor.PauseRun(rid); perr != nil {
+						return affected, perr
+					}
+					affected = append(affected, rid)
+				}
+				return affected, nil
+			},
+			SessionResume: func(ctx context.Context, threadID, sessionID string) ([]string, error) {
+				threadID = strings.TrimSpace(threadID)
+				if threadID == "" {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
+				}
+				if _, err := sessionStore.LoadSession(ctx, threadID); err != nil {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				sessionID = strings.TrimSpace(sessionID)
+				if sessionID == "" {
+					sessionID = threadID
+				}
+				if sessionID != threadID {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				loadedSession, err := sessionStore.LoadSession(ctx, sessionID)
+				if err != nil {
+					return nil, err
+				}
+				affected := make([]string, 0, len(loadedSession.Runs))
+				for _, rid := range collectSessionRunIDs(loadedSession) {
+					rid = strings.TrimSpace(rid)
+					if rid == "" {
+						continue
+					}
+					if rid == strings.TrimSpace(run.RunID) {
+						loaded, lerr := implstore.LoadRun(cfg, rid)
+						if lerr != nil {
+							return affected, lerr
+						}
+						loaded.Status = types.RunStatusRunning
+						loaded.FinishedAt = nil
+						loaded.Error = nil
+						if lerr := implstore.SaveRun(cfg, loaded); lerr != nil {
+							return affected, lerr
+						}
+						sess.SetPaused(false)
+					} else if rerr := supervisor.ResumeRun(ctx, rid); rerr != nil {
+						return affected, rerr
+					}
+					affected = append(affected, rid)
+				}
+				return affected, nil
+			},
+		}
+		srv := NewRPCServer(srvCfg)
 		go func() {
 			if err := srv.Serve(runCtx, os.Stdin, os.Stdout); err != nil && runCtx.Err() == nil {
 				log.Printf("daemon: protocol server stopped: %v", err)
 			}
 		}()
+		tcpCfg := srvCfg
+		tcpCfg.NotifyCh = nil
+		tcpCfg.Index = nil
+		tcpSrv := NewRPCServer(tcpCfg)
+		if err := serveRPCOverTCP(runCtx, strings.TrimSpace(resolved.RPCListen), tcpSrv); err != nil {
+			return err
+		}
 	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
@@ -491,6 +688,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 			case <-runCtx.Done():
 				return
 			case <-ticker.C:
+				if loadedRun, rerr := implstore.LoadRun(cfg, run.RunID); rerr == nil {
+					sess.SetPaused(strings.EqualFold(strings.TrimSpace(loadedRun.Status), types.RunStatusPaused))
+				}
 				loaded, lerr := sessionStore.LoadSession(runCtx, run.SessionID)
 				if lerr != nil {
 					continue
@@ -602,9 +802,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Data:    map[string]string{"runId": run.RunID, "sessionId": run.SessionID, "profile": prof.ID},
 	})
 	if protocolEnabled {
-		log.Printf("daemon: protocol control-plane ready — attach monitor with: workbench monitor")
+		log.Printf("daemon: protocol control-plane ready at %s — attach with: workbench", strings.TrimSpace(resolved.RPCListen))
 	} else {
-		log.Printf("daemon: agent id %s — attach monitor with: workbench monitor --agent-id %s", run.RunID, run.RunID)
+		log.Printf("daemon: agent id %s — attach with: workbench --agent-id %s", run.RunID, run.RunID)
 	}
 	for {
 		err = sess.Run(runCtx)
@@ -668,6 +868,37 @@ func resolvePricing(modelID string, overrideIn, overrideOut float64) (inPerM flo
 	return 0, 0, false
 }
 
+func withRetryDiagnostics(client llmtypes.LLMClient, emit func(context.Context, events.Event)) llmtypes.LLMClient {
+	if client == nil || emit == nil {
+		return client
+	}
+	retryClient, ok := client.(*llm.RetryClient)
+	if !ok || retryClient == nil {
+		return client
+	}
+	cfg := retryClient.Config
+	cfg.OnRetry = func(ctx context.Context, info llm.RetryAttemptInfo) {
+		payload := map[string]string{
+			"class":      strings.TrimSpace(info.Class),
+			"attempt":    fmt.Sprintf("%d", info.Attempt),
+			"delayMs":    fmt.Sprintf("%d", info.Delay.Milliseconds()),
+			"statusCode": fmt.Sprintf("%d", info.StatusCode),
+		}
+		if code := strings.TrimSpace(info.Code); code != "" {
+			payload["code"] = code
+		}
+		if msg := strings.TrimSpace(info.Message); msg != "" {
+			payload["message"] = msg
+		}
+		emit(context.Background(), events.Event{
+			Type:    "llm.retry",
+			Message: "Retrying LLM request",
+			Data:    payload,
+		})
+	}
+	return llm.NewRetryClient(retryClient.Wrapped, cfg)
+}
+
 func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, sessionStore store.SessionReaderWriter, currentModel func() string, emit func(context.Context, events.Event)) func(step int, usage llmtypes.LLMUsage) {
 	modelID = strings.TrimSpace(modelID)
 	if currentModel == nil {
@@ -678,7 +909,7 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 	var session types.Session
 	sessionLoaded := false
 
-	emitUsage := func(input, output, total int) {
+	emitUsage := func(step, input, output, total, reasoning int) {
 		if emit == nil {
 			return
 		}
@@ -687,9 +918,11 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 			Type:    "llm.usage.total",
 			Message: "LLM usage totals",
 			Data: map[string]string{
-				"input":  fmt.Sprintf("%d", input),
-				"output": fmt.Sprintf("%d", output),
-				"total":  fmt.Sprintf("%d", total),
+				"step":      fmt.Sprintf("%d", step),
+				"input":     fmt.Sprintf("%d", input),
+				"output":    fmt.Sprintf("%d", output),
+				"total":     fmt.Sprintf("%d", total),
+				"reasoning": fmt.Sprintf("%d", reasoning),
 			},
 		})
 	}
@@ -712,10 +945,10 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 	}
 
 	return func(step int, usage llmtypes.LLMUsage) {
-		_ = step
 		input := usage.InputTokens
 		output := usage.OutputTokens
 		total := usage.TotalTokens
+		reasoning := usage.ReasoningTokens
 		if total == 0 {
 			total = input + output
 		}
@@ -725,7 +958,7 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 			model = modelID
 		}
 		inPerM, outPerM, pricingKnown := resolvePricing(model, priceIn, priceOut)
-		emitUsage(input, output, total)
+		emitUsage(step, input, output, total, reasoning)
 
 		costUSD := 0.0
 		if pricingKnown {

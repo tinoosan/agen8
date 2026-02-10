@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -71,5 +72,49 @@ func TestDiffMiddleware_EmitsPatchPreview(t *testing.T) {
 
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("temp dir should exist: %v", err)
+	}
+}
+
+func TestEventMiddleware_EmailReqDataIncludesToAndSubject(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+	})
+
+	var gotReq events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+		},
+		seq:     &seq,
+		metaKey: opContextKey{},
+	})
+
+	input, err := json.Marshal(map[string]string{
+		"to":      "team@example.com",
+		"subject": "Build completed",
+		"body":    "done",
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:    types.HostOpEmail,
+		Input: input,
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if got := strings.TrimSpace(gotReq.Data["to"]); got != "team@example.com" {
+		t.Fatalf("expected reqData.to to be set, got %q", got)
+	}
+	if got := strings.TrimSpace(gotReq.Data["subject"]); got != "Build completed" {
+		t.Fatalf("expected reqData.subject to be set, got %q", got)
+	}
+	if _, ok := gotReq.Data["body"]; ok {
+		t.Fatalf("expected reqData.body to be omitted")
 	}
 }

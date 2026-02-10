@@ -82,8 +82,11 @@ type LLMResponse struct {
 	Raw        json.RawMessage // optional: raw provider JSON response (debug)
 	Usage      *LLMUsage       // optional: token usage
 	ResponseID string          // optional: response ID for Responses API
-	ToolCalls  []ToolCall      `json:"toolCalls,omitempty"`
-	Citations  []LLMCitation   `json:"citations,omitempty"`
+	// EffectiveModel is the model name reported by the provider response.
+	// It can differ from the requested model identifier.
+	EffectiveModel string
+	ToolCalls      []ToolCall    `json:"toolCalls,omitempty"`
+	Citations      []LLMCitation `json:"citations,omitempty"`
 }
 
 type LLMCitation struct {
@@ -92,7 +95,8 @@ type LLMCitation struct {
 }
 
 type LLMUsage struct {
-	InputTokens  int
-	OutputTokens int
-	TotalTokens  int
+	InputTokens     int
+	OutputTokens    int
+	TotalTokens     int
+	ReasoningTokens int
 }

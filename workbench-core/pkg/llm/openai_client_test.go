@@ -113,6 +113,7 @@ func TestClient_buildParams_UsesJSONSchemaWhenProvided(t *testing.T) {
 
 func TestClient_toResponse_MapsTextAndUsage(t *testing.T) {
 	resp := &openai.ChatCompletion{
+		Model: "openai/gpt-5-mini-2026-01-01",
 		Choices: []openai.ChatCompletionChoice{
 			{Message: openai.ChatCompletionMessage{Content: " ok "}},
 		},
@@ -120,6 +121,9 @@ func TestClient_toResponse_MapsTextAndUsage(t *testing.T) {
 			PromptTokens:     3,
 			CompletionTokens: 4,
 			TotalTokens:      7,
+			CompletionTokensDetails: openai.CompletionUsageCompletionTokensDetails{
+				ReasoningTokens: 2,
+			},
 		},
 	}
 
@@ -133,6 +137,12 @@ func TestClient_toResponse_MapsTextAndUsage(t *testing.T) {
 	}
 	if got.Usage == nil || got.Usage.TotalTokens != 7 {
 		t.Fatalf("usage = %+v", got.Usage)
+	}
+	if got.Usage.ReasoningTokens != 2 {
+		t.Fatalf("reasoning tokens = %d, want %d", got.Usage.ReasoningTokens, 2)
+	}
+	if got.EffectiveModel != "openai/gpt-5-mini-2026-01-01" {
+		t.Fatalf("effective model = %q", got.EffectiveModel)
 	}
 }
 
@@ -167,6 +177,7 @@ func TestClient_buildResponseParams_JSONSchema(t *testing.T) {
 
 func TestClient_toResponseFromResponses_MapsToolCallsAndUsage(t *testing.T) {
 	resp := &responses.Response{
+		Model: responses.ResponsesModelGPT5Pro,
 		Output: []responses.ResponseOutputItemUnion{
 			responses.ResponseOutputItemUnion{Type: "function_call", CallID: "cid", Name: "tool", Arguments: "{}"},
 		},
@@ -174,6 +185,9 @@ func TestClient_toResponseFromResponses_MapsToolCallsAndUsage(t *testing.T) {
 			InputTokens:  5,
 			OutputTokens: 6,
 			TotalTokens:  11,
+			OutputTokensDetails: responses.ResponseUsageOutputTokensDetails{
+				ReasoningTokens: 3,
+			},
 		},
 	}
 	c := &Client{}
@@ -186,6 +200,12 @@ func TestClient_toResponseFromResponses_MapsToolCallsAndUsage(t *testing.T) {
 	}
 	if got.Usage == nil || got.Usage.TotalTokens != 11 {
 		t.Fatalf("usage = %+v", got.Usage)
+	}
+	if got.Usage.ReasoningTokens != 3 {
+		t.Fatalf("reasoning tokens = %d, want %d", got.Usage.ReasoningTokens, 3)
+	}
+	if got.EffectiveModel == "" {
+		t.Fatalf("expected effective model")
 	}
 }
 

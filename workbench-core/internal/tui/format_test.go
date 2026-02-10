@@ -50,3 +50,76 @@ func TestClassifyEvent_OpResponse(t *testing.T) {
 		t.Fatalf("expected truncated marker, got %q", rr.Text)
 	}
 }
+
+func TestRenderOpRequest_BrowserAndEmail(t *testing.T) {
+	browser := renderOpRequest(map[string]string{
+		"op":       "browser",
+		"action":   "navigate",
+		"url":      "https://example.com",
+		"selector": "#ignored",
+	})
+	if browser != "browse.navigate https://example.com" {
+		t.Fatalf("unexpected browser request rendering: %q", browser)
+	}
+
+	email := renderOpRequest(map[string]string{
+		"op":      "email",
+		"to":      "team@example.com",
+		"subject": "Daily report",
+	})
+	if email != "Email team@example.com: Daily report" {
+		t.Fatalf("unexpected email request rendering: %q", email)
+	}
+}
+
+func TestRenderOpResponse_ToolSpecific(t *testing.T) {
+	tests := []struct {
+		name string
+		data map[string]string
+		want string
+	}{
+		{
+			name: "shell exec exit code",
+			data: map[string]string{"op": "shell_exec", "ok": "true", "exitCode": "0"},
+			want: "✓ exit 0",
+		},
+		{
+			name: "http status",
+			data: map[string]string{"op": "http_fetch", "ok": "true", "status": "200"},
+			want: "✓ 200",
+		},
+		{
+			name: "browser navigate",
+			data: map[string]string{"op": "browser.navigate", "ok": "true", "title": "Example Domain"},
+			want: `✓ navigated "Example Domain"`,
+		},
+		{
+			name: "search results",
+			data: map[string]string{"op": "fs_search", "ok": "true", "results": "3"},
+			want: "✓ 3 results",
+		},
+		{
+			name: "email sent",
+			data: map[string]string{"op": "email", "ok": "true"},
+			want: "✓ sent",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := renderOpResponse(tc.data)
+			if got != tc.want {
+				t.Fatalf("renderOpResponse() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestActionCategory_BrowserAndEmail(t *testing.T) {
+	if got := actionCategory("browser"); got != "Browsed" {
+		t.Fatalf("actionCategory(browser) = %q, want %q", got, "Browsed")
+	}
+	if got := actionCategory("email"); got != "Sent" {
+		t.Fatalf("actionCategory(email) = %q, want %q", got, "Sent")
+	}
+}

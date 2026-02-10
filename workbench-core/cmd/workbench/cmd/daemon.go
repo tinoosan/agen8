@@ -31,6 +31,7 @@ var daemonCmd = &cobra.Command{
 			app.WithProfile(profileRef),
 			app.WithWorkDir(workDir),
 			app.WithProtocolStdio(protocolStdio),
+			app.WithRPCListen(rpcEndpoint),
 			app.WithWebhookAddr(webhookAddr),
 			app.WithResultWebhookURL(resultWebhookURL),
 			app.WithHealthAddr(healthAddr),

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/agent"
@@ -17,6 +18,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/emit"
 	"github.com/tinoosan/workbench-core/pkg/events"
+	"github.com/tinoosan/workbench-core/pkg/llm"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
@@ -80,6 +82,9 @@ type Session struct {
 	hbStop context.CancelFunc
 
 	queuedEmitted map[string]time.Time
+
+	pauseMu sync.RWMutex
+	paused  bool
 }
 
 func New(cfg Config) (*Session, error) {
@@ -214,13 +219,62 @@ func (s *Session) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case job := <-s.hbCh:
+			if s.IsPaused() {
+				continue
+			}
 			s.handleHeartbeat(ctx, job)
 		case <-s.cfg.WakeCh:
+			if s.IsPaused() {
+				poll = basePoll
+				timer.Reset(poll)
+				continue
+			}
 			_ = tick()
 		case <-timer.C:
+			if s.IsPaused() {
+				poll = basePoll
+				timer.Reset(poll)
+				continue
+			}
 			_ = tick()
 		}
 	}
+}
+
+func (s *Session) SetPaused(paused bool) {
+	if s == nil {
+		return
+	}
+	s.pauseMu.Lock()
+	changed := s.paused != paused
+	s.paused = paused
+	s.pauseMu.Unlock()
+	if !changed {
+		return
+	}
+	evType := "run.resumed"
+	evMsg := "Run resumed"
+	if paused {
+		evType = "run.paused"
+		evMsg = "Run paused"
+	}
+	s.emitBestEffort(context.Background(), events.Event{
+		Type:    evType,
+		Message: evMsg,
+		Data: map[string]string{
+			"runId":     strings.TrimSpace(s.cfg.RunID),
+			"sessionId": strings.TrimSpace(s.cfg.SessionID),
+		},
+	})
+}
+
+func (s *Session) IsPaused() bool {
+	if s == nil {
+		return false
+	}
+	s.pauseMu.RLock()
+	defer s.pauseMu.RUnlock()
+	return s.paused
 }
 
 func (s *Session) emitBestEffort(ctx context.Context, ev events.Event) {
@@ -344,19 +398,19 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 	}
 
 	task := types.Task{
-		TaskID:       taskID,
-		SessionID:    s.cfg.SessionID,
-		RunID:        s.cfg.RunID,
-		TeamID:       strings.TrimSpace(s.cfg.TeamID),
-		AssignedRole: strings.TrimSpace(s.cfg.RoleName),
+		TaskID:         taskID,
+		SessionID:      s.cfg.SessionID,
+		RunID:          s.cfg.RunID,
+		TeamID:         strings.TrimSpace(s.cfg.TeamID),
+		AssignedRole:   strings.TrimSpace(s.cfg.RoleName),
 		AssignedToType: "agent",
 		AssignedTo:     strings.TrimSpace(s.cfg.RunID),
-		CreatedBy:    strings.TrimSpace(s.cfg.RoleName),
-		TaskKind:     state.TaskKindHeartbeat,
-		Goal:         strings.TrimSpace(job.Goal),
-		Priority:     5,
-		Status:       types.TaskStatusPending,
-		CreatedAt:    &now,
+		CreatedBy:      strings.TrimSpace(s.cfg.RoleName),
+		TaskKind:       state.TaskKindHeartbeat,
+		Goal:           strings.TrimSpace(job.Goal),
+		Priority:       5,
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
 		Metadata: map[string]any{
 			"source":  "heartbeat",
 			"profile": s.activeProfile.ID,
@@ -467,12 +521,12 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 		return tasks, nil
 	}
 	unassigned, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
-		TeamID:          s.cfg.TeamID,
-		AssignedToType:  "team",
-		AssignedTo:      s.cfg.TeamID,
-		Status:          []types.TaskStatus{types.TaskStatusPending},
-		SortBy:          "priority",
-		Limit:           limit,
+		TeamID:         s.cfg.TeamID,
+		AssignedToType: "team",
+		AssignedTo:     s.cfg.TeamID,
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "priority",
+		Limit:          limit,
 	})
 	if err != nil {
 		return nil, err
@@ -643,6 +697,24 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	if err != nil {
 		tr.Status = types.TaskStatusFailed
 		tr.Error = err.Error()
+		if s.cfg.Events != nil {
+			errInfo := llm.ClassifyError(err)
+			payload := map[string]string{
+				"taskId":     taskID,
+				"class":      fallback(strings.TrimSpace(errInfo.Class), "unknown"),
+				"retryable":  fmt.Sprintf("%t", errInfo.Retryable),
+				"statusCode": fmt.Sprintf("%d", errInfo.StatusCode),
+				"message":    fallback(strings.TrimSpace(errInfo.Message), strings.TrimSpace(err.Error())),
+			}
+			if code := strings.TrimSpace(errInfo.Code); code != "" {
+				payload["code"] = code
+			}
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "llm.error",
+				Message: llmErrorMessage(errInfo),
+				Data:    payload,
+			})
+		}
 	} else {
 		resStatus := strings.ToLower(strings.TrimSpace(string(runRes.Status)))
 		if resStatus == "" {
@@ -821,20 +893,20 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 		"artifacts":    append([]string(nil), tr.Artifacts...),
 	}
 	callback := types.Task{
-		TaskID:       callbackTaskID,
-		SessionID:    "team-" + strings.TrimSpace(s.cfg.TeamID),
-		RunID:        "team-" + strings.TrimSpace(s.cfg.TeamID) + "-callback",
-		TeamID:       strings.TrimSpace(s.cfg.TeamID),
-		AssignedRole: coordinatorRole,
+		TaskID:         callbackTaskID,
+		SessionID:      "team-" + strings.TrimSpace(s.cfg.TeamID),
+		RunID:          "team-" + strings.TrimSpace(s.cfg.TeamID) + "-callback",
+		TeamID:         strings.TrimSpace(s.cfg.TeamID),
+		AssignedRole:   coordinatorRole,
 		AssignedToType: "role",
 		AssignedTo:     coordinatorRole,
-		CreatedBy:    strings.TrimSpace(s.cfg.RoleName),
-		TaskKind:     state.TaskKindCallback,
-		Goal:         callbackGoal,
-		Inputs:       inputs,
-		Priority:     1,
-		Status:       types.TaskStatusPending,
-		CreatedAt:    &now,
+		CreatedBy:      strings.TrimSpace(s.cfg.RoleName),
+		TaskKind:       state.TaskKindCallback,
+		Goal:           callbackGoal,
+		Inputs:         inputs,
+		Priority:       1,
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
 		Metadata: map[string]any{
 			"source":            "team.callback",
 			"callbackForTaskId": taskID,
@@ -1138,6 +1210,29 @@ func fallback(v string, def string) string {
 		return def
 	}
 	return v
+}
+
+func llmErrorMessage(info llm.ErrorInfo) string {
+	switch strings.TrimSpace(info.Class) {
+	case "quota":
+		return "LLM quota/credits exhausted"
+	case "rate_limit":
+		return "LLM rate limit reached"
+	case "network":
+		return "LLM network error"
+	case "timeout":
+		return "LLM request timed out"
+	case "auth":
+		return "LLM authentication failed"
+	case "permission":
+		return "LLM permission denied"
+	case "server":
+		return "LLM provider server error"
+	case "invalid_request":
+		return "LLM request rejected"
+	default:
+		return "LLM request failed"
+	}
 }
 
 func isSQLiteBusyErr(err error) bool {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/tinoosan/workbench-core/pkg/protocol"
 )
 
 var (
@@ -18,6 +19,7 @@ var (
 	enableMouse    bool
 	enableActivity bool
 	protocolStdio  bool
+	rpcEndpoint    string
 
 	maxTraceBytes      int
 	maxMemoryBytes     int
@@ -42,6 +44,7 @@ Protocol mode:
   - Daemon uses --protocol-stdio by default.
   - Use --protocol-stdio=false to disable JSON-RPC over stdin/stdout.
   - Protocol mode is also auto-enabled when both stdin and stdout are non-TTY (piped).
+  - Monitor/daemon control-plane uses --rpc-endpoint (default 127.0.0.1:7777).
 
 Each executed task can:
   - read/write run-scoped artifacts in /workspace
@@ -69,6 +72,9 @@ Each executed task can:
 			_ = os.Setenv("WORKBENCH_ACTIVITY", "true")
 		} else {
 			_ = os.Unsetenv("WORKBENCH_ACTIVITY")
+		}
+		if strings.TrimSpace(rpcEndpoint) != "" {
+			_ = os.Setenv("WORKBENCH_RPC_ENDPOINT", strings.TrimSpace(rpcEndpoint))
 		}
 
 		// Pricing is resolved against the effective model at runtime (after session
@@ -103,6 +109,11 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&enableActivity, "activity", enableActivity, "show activity panel by default (env WORKBENCH_ACTIVITY)")
 	protocolStdio = envBool("WORKBENCH_PROTOCOL_STDIO", true)
 	rootCmd.PersistentFlags().BoolVar(&protocolStdio, "protocol-stdio", protocolStdio, "enable JSON-RPC protocol over stdin/stdout (auto-enabled when piping)")
+	rpcEndpoint = strings.TrimSpace(os.Getenv("WORKBENCH_RPC_ENDPOINT"))
+	if rpcEndpoint == "" {
+		rpcEndpoint = protocol.DefaultRPCEndpoint
+	}
+	rootCmd.PersistentFlags().StringVar(&rpcEndpoint, "rpc-endpoint", rpcEndpoint, "JSON-RPC daemon endpoint for monitor/daemon control-plane")
 	modelID = strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
 	rootCmd.PersistentFlags().StringVar(&modelID, "model", modelID, "LLM model identifier (default: env OPENROUTER_MODEL)")
 	profileRef = strings.TrimSpace(os.Getenv("WORKBENCH_PROFILE"))

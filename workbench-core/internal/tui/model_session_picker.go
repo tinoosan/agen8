@@ -15,20 +15,24 @@ import (
 )
 
 type sessionPickerItem struct {
-	id        string
-	title     string
-	goal      string
-	updatedAt string
-	mode      string
-	teamID    string
-	profile   string
-	model     string
-	current   string
+	id            string
+	title         string
+	goal          string
+	updatedAt     string
+	mode          string
+	teamID        string
+	profile       string
+	model         string
+	current       string
+	runningAgents int
+	pausedAgents  int
+	totalAgents   int
 }
 
 func (s sessionPickerItem) FilterValue() string {
 	return strings.TrimSpace(strings.Join([]string{
 		s.id, s.title, s.goal, s.mode, s.teamID, s.profile, s.model, s.current,
+		fmt.Sprintf("%d", s.runningAgents), fmt.Sprintf("%d", s.pausedAgents), fmt.Sprintf("%d", s.totalAgents),
 	}, " "))
 }
 func (s sessionPickerItem) Title() string       { return s.id }
@@ -106,10 +110,13 @@ func (d sessionPickerDelegate) Render(w io.Writer, m list.Model, index int, item
 	if m := strings.TrimSpace(it.model); m != "" {
 		line += " · " + kit.TruncateMiddle(m, 24)
 	}
+	if it.totalAgents > 0 {
+		line += fmt.Sprintf(" · %d running · %d paused · %d total", it.runningAgents, it.pausedAgents, it.totalAgents)
+	}
 	if t := strings.TrimSpace(it.teamID); t != "" {
 		line += " · " + shortID(t)
 	}
-	if it.id != "" {
+	if it.id != "" && !strings.EqualFold(strings.TrimSpace(title), strings.TrimSpace(it.id)) {
 		line += " · " + shortID(it.id)
 	}
 	if meta != "" {
@@ -296,15 +303,18 @@ func sessionsToPickerItems(sessions []types.Session) []list.Item {
 			title = "(unknown session)"
 		}
 		out = append(out, sessionPickerItem{
-			id:        id,
-			title:     title,
-			goal:      strings.TrimSpace(s.CurrentGoal),
-			updatedAt: formatSessionTime(s),
-			mode:      strings.TrimSpace(s.Mode),
-			teamID:    strings.TrimSpace(s.TeamID),
-			profile:   strings.TrimSpace(s.Profile),
-			model:     strings.TrimSpace(s.ActiveModel),
-			current:   strings.TrimSpace(s.CurrentRunID),
+			id:            id,
+			title:         title,
+			goal:          strings.TrimSpace(s.CurrentGoal),
+			updatedAt:     formatSessionTime(s),
+			mode:          strings.TrimSpace(s.Mode),
+			teamID:        strings.TrimSpace(s.TeamID),
+			profile:       strings.TrimSpace(s.Profile),
+			model:         strings.TrimSpace(s.ActiveModel),
+			current:       strings.TrimSpace(s.CurrentRunID),
+			totalAgents:   len(s.Runs),
+			runningAgents: 0,
+			pausedAgents:  0,
 		})
 	}
 	return out

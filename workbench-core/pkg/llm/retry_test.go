@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"net"
 	"testing"
 	"time"
 
@@ -119,6 +120,28 @@ func TestRetryClient_Generate_DoesNotRetryNonRetryableError(t *testing.T) {
 	}
 }
 
+func TestRetryClient_Generate_DoesNotRetryQuota429(t *testing.T) {
+	inner := &fakeRetryLLM{
+		failures: 5,
+		err:      &openai.Error{StatusCode: 429, Code: "insufficient_quota", Message: "insufficient quota"},
+		out:      types.LLMResponse{Text: `{"op":"final","text":"ok"}`},
+	}
+	r := NewRetryClient(inner, RetryConfig{
+		MaxRetries:   3,
+		InitialDelay: time.Nanosecond,
+		MaxDelay:     time.Nanosecond,
+		Multiplier:   2,
+	})
+
+	_, err := r.Generate(context.Background(), types.LLMRequest{Model: "test", Messages: []types.LLMMessage{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if inner.calls != 1 {
+		t.Fatalf("expected 1 call, got %d", inner.calls)
+	}
+}
+
 func TestRetryClient_GenerateStream_RetriesOnlyBeforeOutputEmitted(t *testing.T) {
 	inner := &fakeRetryStreamingLLM{
 		failBeforeEmit: true,
@@ -187,5 +210,75 @@ func TestRetryClient_Generate_DoesNotRetrySchemaRejectionSignals(t *testing.T) {
 	}
 	if inner.calls != 1 {
 		t.Fatalf("expected 1 call, got %d", inner.calls)
+	}
+}
+
+func TestClassifyError_OpenAIStatusClassification(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		class     string
+		retryable bool
+	}{
+		{
+			name:      "rate-limit 429",
+			err:       &openai.Error{StatusCode: 429, Message: "rate limit"},
+			class:     "rate_limit",
+			retryable: true,
+		},
+		{
+			name:      "quota 429",
+			err:       &openai.Error{StatusCode: 429, Code: "insufficient_quota", Message: "insufficient quota"},
+			class:     "quota",
+			retryable: false,
+		},
+		{
+			name:      "auth 401",
+			err:       &openai.Error{StatusCode: 401, Message: "invalid api key"},
+			class:     "auth",
+			retryable: false,
+		},
+		{
+			name:      "payment required 402",
+			err:       &openai.Error{StatusCode: 402, Message: "payment required"},
+			class:     "quota",
+			retryable: false,
+		},
+		{
+			name:      "permission 403",
+			err:       &openai.Error{StatusCode: 403, Message: "forbidden"},
+			class:     "permission",
+			retryable: false,
+		},
+		{
+			name:      "invalid request 400",
+			err:       &openai.Error{StatusCode: 400, Message: "bad request"},
+			class:     "invalid_request",
+			retryable: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassifyError(tt.err)
+			if got.Class != tt.class {
+				t.Fatalf("class = %q, want %q", got.Class, tt.class)
+			}
+			if got.Retryable != tt.retryable {
+				t.Fatalf("retryable = %t, want %t", got.Retryable, tt.retryable)
+			}
+		})
+	}
+}
+
+func TestClassifyError_NetworkAndTimeout(t *testing.T) {
+	timeoutErr := &net.DNSError{IsTimeout: true}
+	got := ClassifyError(timeoutErr)
+	if got.Class != "timeout" || !got.Retryable {
+		t.Fatalf("timeout classify = %+v", got)
+	}
+
+	got = ClassifyError(fmt.Errorf("connection refused by host"))
+	if got.Class != "network" || !got.Retryable {
+		t.Fatalf("network classify = %+v", got)
 	}
 }

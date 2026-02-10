@@ -9,6 +9,7 @@ import (
 // Run status constants (kept for readability; type removed)
 const (
 	RunStatusRunning   = "running"
+	RunStatusPaused    = "paused"
 	RunStatusSucceeded = "succeeded"
 	RunStatusFailed    = "failed"
 	RunStatusCanceled  = "canceled"

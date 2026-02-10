@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/workbench-core/internal/app"
 	implstore "github.com/tinoosan/workbench-core/internal/store"
 	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
@@ -18,6 +20,67 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
+
+func startMonitorTestRPCServer(t *testing.T, cfg config.Config, runID string) string {
+	t.Helper()
+	taskStore, err := agentstate.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("task store: %v", err)
+	}
+	sessionStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("session store: %v", err)
+	}
+	run := types.NewRun("rpc-test", 8*1024, "sess-rpc-test")
+	if rid := strings.TrimSpace(runID); rid != "" {
+		run.RunID = rid
+	}
+	if err := implstore.SaveRun(cfg, run); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	sess := types.NewSession("rpc-test")
+	sess.SessionID = run.SessionID
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	if err := sessionStore.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+	srv := app.NewRPCServer(app.RPCServerConfig{
+		Cfg:            cfg,
+		Run:            run,
+		AllowAnyThread: true,
+		TaskStore:      taskStore,
+		Session:        sessionStore,
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-ctx.Done()
+		_ = ln.Close()
+	}()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				_ = srv.Serve(ctx, c, c)
+			}(conn)
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		_ = ln.Close()
+	})
+	endpoint := ln.Addr().String()
+	t.Setenv("WORKBENCH_RPC_ENDPOINT", endpoint)
+	return endpoint
+}
 
 func TestIsCompactMode_Breakpoints(t *testing.T) {
 	tests := []struct {
@@ -63,6 +126,7 @@ func TestMonitorHandleCommand_EnqueuesPlainTextAndRejectsUnknownSlashCommand(t *
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
 	runID := "test-run-handle-command"
+	startMonitorTestRPCServer(t, cfg, runID)
 
 	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
 	if err != nil {
@@ -178,11 +242,83 @@ func TestMonitorObserveEvent_CostUSDKey(t *testing.T) {
 	}
 }
 
+func TestMonitorObserveEvent_ThoughtsFallbackFromReasoningTokens(t *testing.T) {
+	m := &monitorModel{
+		reasoningUsageByStep: map[string]int{},
+	}
+	m.observeEvent(types.EventRecord{
+		Type:  "llm.usage.total",
+		RunID: "run-a",
+		Data: map[string]string{
+			"step":      "2",
+			"input":     "11",
+			"output":    "7",
+			"total":     "18",
+			"reasoning": "5",
+		},
+	})
+	m.observeEvent(types.EventRecord{
+		Type:  "agent.step",
+		RunID: "run-a",
+		Data: map[string]string{
+			"step": "2",
+		},
+	})
+	if len(m.thinkingEntries) != 1 {
+		t.Fatalf("expected one thinking entry, got %d", len(m.thinkingEntries))
+	}
+	if !strings.Contains(strings.ToLower(m.thinkingEntries[0].Summary), "reasoning used (5 tokens)") {
+		t.Fatalf("unexpected fallback summary: %q", m.thinkingEntries[0].Summary)
+	}
+}
+
+func TestMonitorObserveEvent_EffectiveModelPreferred(t *testing.T) {
+	m := &monitorModel{}
+	m.observeEvent(types.EventRecord{
+		Type: "agent.step",
+		Data: map[string]string{
+			"model":          "requested-model",
+			"effectiveModel": "provider-model",
+			"step":           "1",
+		},
+	})
+	if got := strings.TrimSpace(m.model); got != "provider-model" {
+		t.Fatalf("model = %q, want provider-model", got)
+	}
+}
+
+func TestMonitorStatusBar_ShowsAndClearsLLMError(t *testing.T) {
+	m := &monitorModel{styles: defaultMonitorStyles()}
+	m.observeEvent(types.EventRecord{
+		Type: "llm.error",
+		Data: map[string]string{
+			"class":     "quota",
+			"retryable": "false",
+		},
+	})
+	line := m.renderStatusBar(220)
+	if !strings.Contains(line, "LLM error: quota (no-retry)") {
+		t.Fatalf("expected llm error indicator, got %q", line)
+	}
+
+	m.observeEvent(types.EventRecord{
+		Type: "agent.step",
+		Data: map[string]string{
+			"step": "1",
+		},
+	})
+	line = m.renderStatusBar(220)
+	if strings.Contains(line, "LLM error:") {
+		t.Fatalf("expected llm error indicator cleared, got %q", line)
+	}
+}
+
 func TestMonitorModelPicker_ProviderAndScopedFilteringWorks(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
 	runID := "test-run-model-filter"
+	startMonitorTestRPCServer(t, cfg, runID)
 	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
 	if err != nil {
 		t.Fatalf("newMonitorModel: %v", err)
@@ -272,6 +408,7 @@ func TestMonitorProfilePicker_FilterAndSelectStartsNewStandaloneSession(t *testi
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
+	startMonitorTestRPCServer(t, cfg, "profile-picker-run")
 
 	// Seed a few profiles.
 	profilesDir := fsutil.GetProfilesDir(cfg.DataDir)
@@ -561,6 +698,7 @@ func TestMonitorHandleCommand_RenameSession(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
+	startMonitorTestRPCServer(t, cfg, "rename-session-run")
 	_, run, err := implstore.CreateSession(cfg, "before", 8*1024)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -587,6 +725,7 @@ func TestMonitorSessionPicker_ShowsVisibleItemsWhenSessionsExist(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
+	startMonitorTestRPCServer(t, cfg, "session-picker-run")
 
 	_, run, err := implstore.CreateSession(cfg, "session picker visibility", 8*1024)
 	if err != nil {
@@ -628,6 +767,7 @@ func TestMonitorDetached_SessionPickerLoadsSessions(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
+	startMonitorTestRPCServer(t, cfg, "detached-picker-run")
 
 	if _, _, err := implstore.CreateSession(cfg, "detached session 1", 8*1024); err != nil {
 		t.Fatalf("CreateSession 1: %v", err)
@@ -664,6 +804,103 @@ func TestMonitorDetached_SessionPickerLoadsSessions(t *testing.T) {
 	}
 	if len(updated.sessionPickerList.VisibleItems()) == 0 {
 		t.Fatalf("expected visible picker items, got 0")
+	}
+}
+
+func TestMonitorDetached_SessionPickerRequiresDaemonRPC(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+
+	if _, _, err := implstore.CreateSession(cfg, "offline session 1", 8*1024); err != nil {
+		t.Fatalf("CreateSession 1: %v", err)
+	}
+	if _, _, err := implstore.CreateSession(cfg, "offline session 2", 8*1024); err != nil {
+		t.Fatalf("CreateSession 2: %v", err)
+	}
+	// Intentionally point at an unused endpoint.
+	t.Setenv("WORKBENCH_RPC_ENDPOINT", "127.0.0.1:1")
+
+	m, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+
+	cmd := m.openSessionPicker()
+	if cmd == nil {
+		t.Fatalf("expected fetch command from openSessionPicker")
+	}
+	msg := cmd()
+	updatedModel, _ := m.Update(msg)
+	updated, ok := updatedModel.(*monitorModel)
+	if !ok {
+		t.Fatalf("expected *monitorModel, got %T", updatedModel)
+	}
+	if strings.TrimSpace(updated.sessionPickerErr) == "" {
+		t.Fatalf("expected rpc error in session picker")
+	}
+	if updated.sessionPickerTotal != 0 {
+		t.Fatalf("expected sessionPickerTotal=0 when rpc unavailable, got %d", updated.sessionPickerTotal)
+	}
+	if len(updated.sessionPickerList.Items()) != 0 {
+		t.Fatalf("expected no session picker items when rpc unavailable, got %d", len(updated.sessionPickerList.Items()))
+	}
+}
+
+func TestMonitorDetached_ViewShowsDisconnectedBanner(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+
+	m, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+	m.width = 120
+	m.height = 40
+	m.rpcHealthKnown = true
+	m.rpcReachable = false
+	view := m.View()
+	if !strings.Contains(view, "Daemon disconnected") {
+		t.Fatalf("expected disconnected banner in view, got: %q", view)
+	}
+}
+
+func TestMonitorHandleCommand_ReconnectUpdatesHealthState(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	t.Setenv("WORKBENCH_RPC_ENDPOINT", "127.0.0.1:1")
+
+	m, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+	cmd := m.handleCommand("/reconnect")
+	if cmd == nil {
+		t.Fatalf("expected reconnect command")
+	}
+	msg := cmd()
+	health, ok := msg.(rpcHealthMsg)
+	if !ok {
+		t.Fatalf("expected rpcHealthMsg, got %T", msg)
+	}
+	if health.reachable {
+		t.Fatalf("expected unreachable for invalid endpoint")
+	}
+	if !health.manual {
+		t.Fatalf("expected manual reconnect msg")
+	}
+	updatedModel, _ := m.Update(msg)
+	updated, ok := updatedModel.(*monitorModel)
+	if !ok {
+		t.Fatalf("expected *monitorModel, got %T", updatedModel)
+	}
+	if !updated.rpcHealthKnown || updated.rpcReachable {
+		t.Fatalf("expected disconnected health state, known=%v reachable=%v", updated.rpcHealthKnown, updated.rpcReachable)
+	}
+	if len(updated.agentOutput) == 0 || !strings.Contains(strings.Join(updated.agentOutput, "\n"), "Daemon RPC disconnected") {
+		t.Fatalf("expected reconnect feedback in agent output")
 	}
 }
 
@@ -926,6 +1163,8 @@ func TestUpdateTeamManifestLoadedMsg_PrefersPendingRequestedModel(t *testing.T) 
 
 func TestLoadPlanFilesCmd_TeamFocusedLoadsSingleRunPlan(t *testing.T) {
 	dataDir := t.TempDir()
+	cfg := config.Config{DataDir: dataDir}
+	endpoint := startMonitorTestRPCServer(t, cfg, "run-a")
 	writePlan := func(runID, head, checklist string) {
 		t.Helper()
 		planDir := filepath.Join(fsutil.GetAgentDir(dataDir, runID), "plan")
@@ -943,14 +1182,10 @@ func TestLoadPlanFilesCmd_TeamFocusedLoadsSingleRunPlan(t *testing.T) {
 	writePlan("run-b", "head-b", "check-b")
 
 	m := &monitorModel{
-		cfg:          config.Config{DataDir: dataDir},
-		teamID:       "team-a",
-		focusedRunID: "run-a",
-		teamRunIDs:   []string{"run-a", "run-b"},
-		teamRoleByRunID: map[string]string{
-			"run-a": "researcher",
-			"run-b": "writer",
-		},
+		cfg:         cfg,
+		sessionID:   "sess-rpc-test",
+		runID:       "run-a",
+		rpcEndpoint: endpoint,
 	}
 
 	cmd := m.loadPlanFilesCmd()
