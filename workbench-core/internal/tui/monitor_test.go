@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,9 +66,6 @@ func TestMonitorHandleCommand_EnqueuesTasksForNonCommands(t *testing.T) {
 		t.Fatalf("newMonitorModel: %v", err)
 	}
 
-	runDir := fsutil.GetAgentDir(cfg.DataDir, runID)
-	inboxDir := filepath.Join(runDir, "inbox")
-
 	assertQueued := func(input string, wantGoal string) {
 		t.Helper()
 		cmd := m.handleCommand(input)
@@ -77,43 +73,21 @@ func TestMonitorHandleCommand_EnqueuesTasksForNonCommands(t *testing.T) {
 			t.Fatalf("handleCommand(%q) returned nil; want enqueue cmd", input)
 		}
 		_ = cmd()
-
-		ents, err := os.ReadDir(inboxDir)
+		tasks, err := m.taskStore.ListTasks(ctx, agentstate.TaskFilter{
+			RunID:    runID,
+			Status:   []types.TaskStatus{types.TaskStatusPending},
+			SortBy:   "created_at",
+			SortDesc: true,
+			Limit:    1,
+		})
 		if err != nil {
-			t.Fatalf("ReadDir(inbox): %v", err)
+			t.Fatalf("ListTasks: %v", err)
 		}
-		if len(ents) == 0 {
-			t.Fatalf("expected at least 1 task file in inbox")
+		if len(tasks) == 0 {
+			t.Fatalf("expected at least one queued task")
 		}
-		// Read the most recently created task file (best-effort).
-		var newest string
-		var newestInfo os.FileInfo
-		for _, e := range ents {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-				continue
-			}
-			fi, err := e.Info()
-			if err != nil {
-				continue
-			}
-			if newestInfo == nil || fi.ModTime().After(newestInfo.ModTime()) {
-				newestInfo = fi
-				newest = e.Name()
-			}
-		}
-		if newest == "" {
-			t.Fatalf("expected a .json task file in inbox")
-		}
-		b, err := os.ReadFile(filepath.Join(inboxDir, newest))
-		if err != nil {
-			t.Fatalf("ReadFile(task): %v", err)
-		}
-		var task types.Task
-		if err := json.Unmarshal(b, &task); err != nil {
-			t.Fatalf("Unmarshal(task): %v", err)
-		}
-		if task.Goal != wantGoal {
-			t.Fatalf("task goal = %q, want %q", task.Goal, wantGoal)
+		if tasks[0].Goal != wantGoal {
+			t.Fatalf("task goal = %q, want %q", tasks[0].Goal, wantGoal)
 		}
 	}
 
@@ -163,6 +137,23 @@ func TestShouldReloadPlanOnEvent(t *testing.T) {
 			t.Fatalf("did not expect plan reload for %v", ev)
 		}
 	})
+}
+
+func TestMonitorObserveEvent_CostUSDKey(t *testing.T) {
+	m := &monitorModel{}
+	m.observeEvent(types.EventRecord{
+		Type: "llm.cost.total",
+		Data: map[string]string{
+			"known":   "true",
+			"costUSD": "1.2345",
+		},
+	})
+	if got := strings.TrimSpace(m.stats.lastTurnCostUSD); got != "1.2345" {
+		t.Fatalf("lastTurnCostUSD = %q, want %q", got, "1.2345")
+	}
+	if !m.stats.pricingKnown {
+		t.Fatalf("expected pricingKnown true")
+	}
 }
 
 func TestMonitorModelPicker_ProviderAndScopedFilteringWorks(t *testing.T) {
@@ -325,26 +316,14 @@ func TestMonitorProfilePicker_FilterAndSelectWritesControl(t *testing.T) {
 	if m.profilePickerOpen {
 		t.Fatalf("expected profilePickerOpen false after selection")
 	}
-	_ = cmd() // write control file
-
-	inboxDir := filepath.Join(fsutil.GetAgentDir(cfg.DataDir, runID), "inbox")
-	matches, err := filepath.Glob(filepath.Join(inboxDir, "control-*.json"))
-	if err != nil {
-		t.Fatalf("glob inbox: %v", err)
+	msg := cmd()
+	cl, ok := msg.(commandLinesMsg)
+	if !ok {
+		t.Fatalf("expected commandLinesMsg, got %T", msg)
 	}
-	if len(matches) == 0 {
-		t.Fatalf("expected control file in inbox, got none")
-	}
-	b, err := os.ReadFile(matches[0])
-	if err != nil {
-		t.Fatalf("read control file: %v", err)
-	}
-	got := string(b)
-	if !strings.Contains(got, "\"command\": \"switch_profile\"") {
-		t.Fatalf("expected switch_profile command, got %s", got)
-	}
-	if !strings.Contains(got, "\"profile\": \"software_dev\"") {
-		t.Fatalf("expected profile software_dev, got %s", got)
+	joined := strings.Join(cl.lines, "\n")
+	if !strings.Contains(joined, "switch_profile queued via RPC only") {
+		t.Fatalf("expected RPC-only profile control message, got %q", joined)
 	}
 	if m.profile != "software_dev" {
 		t.Fatalf("expected monitor profile %q, got %q", "software_dev", m.profile)

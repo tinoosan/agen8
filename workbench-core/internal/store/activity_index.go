@@ -10,18 +10,15 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
-func shouldHideInboxOp(op, path string) bool {
+func shouldHideRoutingNoiseOp(op, path string) bool {
 	op = strings.TrimSpace(op)
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return false
 	}
-	if !strings.HasPrefix(path, "/inbox") {
-		return false
-	}
 	switch op {
 	case "fs_list", "fs_read":
-		return true
+		return strings.HasPrefix(path, "/workspace/deliverables/") || strings.HasPrefix(path, "/workspace/quarantine/")
 	default:
 		return false
 	}
@@ -156,7 +153,7 @@ func upsertActivityRequestTx(tx *sql.Tx, runID string, eventSeq int64, ev types.
 	if op == "" {
 		return nil
 	}
-	if shouldHideInboxOp(op, strings.TrimSpace(ev.Data["path"])) {
+	if shouldHideRoutingNoiseOp(op, strings.TrimSpace(ev.Data["path"])) {
 		return nil
 	}
 
@@ -224,7 +221,7 @@ func upsertActivityResponseTx(tx *sql.Tx, runID string, _ int64, ev types.EventR
 	if op == "" {
 		return nil
 	}
-	if shouldHideInboxOp(op, strings.TrimSpace(ev.Data["path"])) {
+	if shouldHideRoutingNoiseOp(op, strings.TrimSpace(ev.Data["path"])) {
 		return nil
 	}
 

@@ -71,6 +71,9 @@ func (s *SQLiteTaskStore) init() error {
 				run_id TEXT NOT NULL,
 				team_id TEXT DEFAULT '',
 				assigned_role TEXT DEFAULT '',
+				assigned_to_type TEXT DEFAULT 'agent',
+				assigned_to TEXT DEFAULT '',
+				claimed_by TEXT DEFAULT '',
 				created_by TEXT DEFAULT '',
 				goal TEXT NOT NULL,
 				inputs_json TEXT,
@@ -79,6 +82,7 @@ func (s *SQLiteTaskStore) init() error {
 				created_at TEXT NOT NULL,
 				started_at TEXT,
 				finished_at TEXT,
+				completed_at TEXT,
 				summary TEXT,
 				artifacts_json TEXT,
 				error TEXT,
@@ -100,9 +104,13 @@ func (s *SQLiteTaskStore) init() error {
 		migrations := []string{
 			`ALTER TABLE tasks ADD COLUMN team_id TEXT DEFAULT '';`,
 			`ALTER TABLE tasks ADD COLUMN assigned_role TEXT DEFAULT '';`,
+			`ALTER TABLE tasks ADD COLUMN assigned_to_type TEXT DEFAULT 'agent';`,
+			`ALTER TABLE tasks ADD COLUMN assigned_to TEXT DEFAULT '';`,
+			`ALTER TABLE tasks ADD COLUMN claimed_by TEXT DEFAULT '';`,
 			`ALTER TABLE tasks ADD COLUMN created_by TEXT DEFAULT '';`,
 			`ALTER TABLE tasks ADD COLUMN task_kind TEXT DEFAULT 'task';`,
 			`ALTER TABLE tasks ADD COLUMN role_snapshot TEXT DEFAULT '';`,
+			`ALTER TABLE tasks ADD COLUMN completed_at TEXT;`,
 		}
 		for _, migration := range migrations {
 			if _, err := db.Exec(migration); err != nil {
@@ -123,6 +131,8 @@ func (s *SQLiteTaskStore) init() error {
 			`CREATE INDEX IF NOT EXISTS idx_tasks_run_status ON tasks(run_id, status);`,
 			`CREATE INDEX IF NOT EXISTS idx_tasks_team_role ON tasks(team_id, assigned_role);`,
 			`CREATE INDEX IF NOT EXISTS idx_tasks_team_kind ON tasks(team_id, task_kind);`,
+			`CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to ON tasks(assigned_to_type, assigned_to, status);`,
+			`CREATE INDEX IF NOT EXISTS idx_tasks_claimed_by ON tasks(claimed_by, status);`,
 		}
 		for _, idx := range indexes {
 			if _, err := db.Exec(idx); err != nil {
@@ -214,6 +224,32 @@ func (s *SQLiteTaskStore) CreateTask(ctx context.Context, task types.Task) error
 	if task.Metadata == nil {
 		task.Metadata = map[string]any{}
 	}
+	task.AssignedToType = strings.TrimSpace(task.AssignedToType)
+	task.AssignedTo = strings.TrimSpace(task.AssignedTo)
+	if task.AssignedToType == "" {
+		if strings.TrimSpace(task.TeamID) != "" {
+			if strings.TrimSpace(task.AssignedRole) != "" {
+				task.AssignedToType = "role"
+				task.AssignedTo = strings.TrimSpace(task.AssignedRole)
+			} else {
+				task.AssignedToType = "team"
+				task.AssignedTo = strings.TrimSpace(task.TeamID)
+			}
+		} else {
+			task.AssignedToType = "agent"
+			task.AssignedTo = strings.TrimSpace(task.RunID)
+		}
+	}
+	if task.AssignedTo == "" {
+		switch task.AssignedToType {
+		case "team":
+			task.AssignedTo = strings.TrimSpace(task.TeamID)
+		case "role":
+			task.AssignedTo = strings.TrimSpace(task.AssignedRole)
+		case "agent":
+			task.AssignedTo = strings.TrimSpace(task.RunID)
+		}
+	}
 
 	inputsJSON, _ := json.Marshal(task.Inputs)
 	metadataJSON, _ := json.Marshal(task.Metadata)
@@ -229,12 +265,12 @@ func (s *SQLiteTaskStore) CreateTask(ctx context.Context, task types.Task) error
 	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO tasks (
-			task_id, session_id, run_id, team_id, assigned_role, role_snapshot, task_kind, created_by,
+			task_id, session_id, run_id, team_id, assigned_role, assigned_to_type, assigned_to, claimed_by, role_snapshot, task_kind, created_by,
 			goal, inputs_json, priority,
 			status, created_at, updated_at, metadata_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, strings.TrimSpace(task.TaskID), strings.TrimSpace(task.SessionID), strings.TrimSpace(task.RunID),
-		strings.TrimSpace(task.TeamID), strings.TrimSpace(task.AssignedRole), strings.TrimSpace(task.RoleSnapshot), normalizeTaskKind(task.TaskKind), strings.TrimSpace(task.CreatedBy),
+		strings.TrimSpace(task.TeamID), strings.TrimSpace(task.AssignedRole), strings.TrimSpace(task.AssignedToType), strings.TrimSpace(task.AssignedTo), strings.TrimSpace(task.ClaimedByAgentID), strings.TrimSpace(task.RoleSnapshot), normalizeTaskKind(task.TaskKind), strings.TrimSpace(task.CreatedBy),
 		strings.TrimSpace(task.Goal), string(inputsJSON), task.Priority,
 		status, createdAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), string(metadataJSON))
 	if err != nil {
@@ -278,7 +314,7 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (types.Tas
 	var leaseRaw string
 	err = db.QueryRowContext(ctx, `
 		SELECT
-			task_id, session_id, run_id, COALESCE(team_id, ''), COALESCE(assigned_role, ''), COALESCE(role_snapshot, ''), COALESCE(task_kind, ''), COALESCE(created_by, ''), goal,
+			task_id, session_id, run_id, COALESCE(team_id, ''), COALESCE(assigned_role, ''), COALESCE(assigned_to_type, ''), COALESCE(assigned_to, ''), COALESCE(claimed_by, ''), COALESCE(role_snapshot, ''), COALESCE(task_kind, ''), COALESCE(created_by, ''), goal,
 			COALESCE(inputs_json, '{}'), priority, status,
 			created_at, COALESCE(started_at, ''), COALESCE(finished_at, ''),
 			COALESCE(summary, ''), COALESCE(artifacts_json, '[]'),
@@ -290,7 +326,7 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (types.Tas
 		FROM tasks
 		WHERE task_id = ?
 	`, taskID).Scan(
-		&t.TaskID, &t.SessionID, &t.RunID, &t.TeamID, &t.AssignedRole, &t.RoleSnapshot, &t.TaskKind, &t.CreatedBy, &t.Goal,
+		&t.TaskID, &t.SessionID, &t.RunID, &t.TeamID, &t.AssignedRole, &t.AssignedToType, &t.AssignedTo, &t.ClaimedByAgentID, &t.RoleSnapshot, &t.TaskKind, &t.CreatedBy, &t.Goal,
 		&inputsJSON, &t.Priority, &status,
 		&createdRaw, &startedRaw, &finishedRaw,
 		&t.Summary, &artifactsJSON,
@@ -412,7 +448,7 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 
 	q := `
 		SELECT
-			task_id, session_id, run_id, COALESCE(team_id, ''), COALESCE(assigned_role, ''), COALESCE(role_snapshot, ''), COALESCE(task_kind, ''), COALESCE(created_by, ''), goal,
+			task_id, session_id, run_id, COALESCE(team_id, ''), COALESCE(assigned_role, ''), COALESCE(assigned_to_type, ''), COALESCE(assigned_to, ''), COALESCE(claimed_by, ''), COALESCE(role_snapshot, ''), COALESCE(task_kind, ''), COALESCE(created_by, ''), goal,
 			priority, status, created_at,
 			COALESCE(started_at, ''), COALESCE(finished_at, ''),
 			COALESCE(summary, ''), COALESCE(error, ''),
@@ -440,8 +476,32 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 		q += " AND assigned_role = ?"
 		args = append(args, strings.TrimSpace(filter.AssignedRole))
 	}
+	if strings.TrimSpace(filter.AssignedToType) != "" {
+		q += " AND assigned_to_type = ?"
+		args = append(args, strings.TrimSpace(filter.AssignedToType))
+	}
+	if strings.TrimSpace(filter.AssignedTo) != "" {
+		q += " AND assigned_to = ?"
+		args = append(args, strings.TrimSpace(filter.AssignedTo))
+	}
+	if strings.TrimSpace(filter.ClaimedBy) != "" {
+		q += " AND claimed_by = ?"
+		args = append(args, strings.TrimSpace(filter.ClaimedBy))
+	}
+	if strings.TrimSpace(filter.TaskKind) != "" {
+		q += " AND task_kind = ?"
+		args = append(args, normalizeTaskKind(filter.TaskKind))
+	}
 	if filter.UnassignedOnly {
 		q += " AND COALESCE(assigned_role, '') = ''"
+	}
+	switch strings.ToLower(strings.TrimSpace(filter.View)) {
+	case "inbox":
+		q += " AND status = ?"
+		args = append(args, string(types.TaskStatusPending))
+	case "outbox":
+		q += " AND status IN (?, ?, ?)"
+		args = append(args, string(types.TaskStatusSucceeded), string(types.TaskStatusFailed), string(types.TaskStatusCanceled))
 	}
 	if len(filter.Status) != 0 {
 		ph := make([]string, 0, len(filter.Status))
@@ -493,7 +553,7 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 		var leaseRaw string
 		var updatedRaw string
 		if err := rows.Scan(
-			&t.TaskID, &t.SessionID, &t.RunID, &t.TeamID, &t.AssignedRole, &t.RoleSnapshot, &t.TaskKind, &t.CreatedBy, &t.Goal,
+			&t.TaskID, &t.SessionID, &t.RunID, &t.TeamID, &t.AssignedRole, &t.AssignedToType, &t.AssignedTo, &t.ClaimedByAgentID, &t.RoleSnapshot, &t.TaskKind, &t.CreatedBy, &t.Goal,
 			&t.Priority, &status, &createdRaw,
 			&startedRaw, &finishedRaw,
 			&t.Summary, &t.Error,
@@ -553,8 +613,32 @@ func (s *SQLiteTaskStore) CountTasks(ctx context.Context, filter TaskFilter) (in
 		q += " AND assigned_role = ?"
 		args = append(args, strings.TrimSpace(filter.AssignedRole))
 	}
+	if strings.TrimSpace(filter.AssignedToType) != "" {
+		q += " AND assigned_to_type = ?"
+		args = append(args, strings.TrimSpace(filter.AssignedToType))
+	}
+	if strings.TrimSpace(filter.AssignedTo) != "" {
+		q += " AND assigned_to = ?"
+		args = append(args, strings.TrimSpace(filter.AssignedTo))
+	}
+	if strings.TrimSpace(filter.ClaimedBy) != "" {
+		q += " AND claimed_by = ?"
+		args = append(args, strings.TrimSpace(filter.ClaimedBy))
+	}
+	if strings.TrimSpace(filter.TaskKind) != "" {
+		q += " AND task_kind = ?"
+		args = append(args, normalizeTaskKind(filter.TaskKind))
+	}
 	if filter.UnassignedOnly {
 		q += " AND COALESCE(assigned_role, '') = ''"
+	}
+	switch strings.ToLower(strings.TrimSpace(filter.View)) {
+	case "inbox":
+		q += " AND status = ?"
+		args = append(args, string(types.TaskStatusPending))
+	case "outbox":
+		q += " AND status IN (?, ?, ?)"
+		args = append(args, string(types.TaskStatusSucceeded), string(types.TaskStatusFailed), string(types.TaskStatusCanceled))
 	}
 	if len(filter.Status) != 0 {
 		ph := make([]string, 0, len(filter.Status))
@@ -619,17 +703,18 @@ func (s *SQLiteTaskStore) UpdateTask(ctx context.Context, task types.Task) error
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = db.ExecContext(ctx, `
 		UPDATE tasks
-		SET session_id = ?, run_id = ?, team_id = ?, assigned_role = ?, role_snapshot = ?, task_kind = ?, created_by = ?,
+		SET session_id = ?, run_id = ?, team_id = ?, assigned_role = ?, assigned_to_type = ?, assigned_to = ?, claimed_by = ?, role_snapshot = ?, task_kind = ?, created_by = ?,
 		    goal = ?, inputs_json = ?, priority = ?,
-		    status = ?, started_at = ?, finished_at = ?, summary = ?, artifacts_json = ?,
+		    status = ?, started_at = ?, finished_at = ?, completed_at = ?, summary = ?, artifacts_json = ?,
 		    error = ?, attempts = ?, lease_until = ?, updated_at = ?,
 		    input_tokens = ?, output_tokens = ?, total_tokens = ?, cost_usd = ?, duration_seconds = ?,
 		    metadata_json = ?
 		WHERE task_id = ?
-	`, strings.TrimSpace(task.SessionID), strings.TrimSpace(task.RunID), strings.TrimSpace(task.TeamID), strings.TrimSpace(task.AssignedRole), strings.TrimSpace(task.RoleSnapshot), normalizeTaskKind(task.TaskKind), strings.TrimSpace(task.CreatedBy),
+	`, strings.TrimSpace(task.SessionID), strings.TrimSpace(task.RunID), strings.TrimSpace(task.TeamID), strings.TrimSpace(task.AssignedRole), strings.TrimSpace(task.AssignedToType), strings.TrimSpace(task.AssignedTo), strings.TrimSpace(task.ClaimedByAgentID), strings.TrimSpace(task.RoleSnapshot), normalizeTaskKind(task.TaskKind), strings.TrimSpace(task.CreatedBy),
 		strings.TrimSpace(task.Goal), string(inputsJSON), task.Priority,
 		strings.TrimSpace(string(task.Status)),
 		nullIfEmpty(startedAt),
+		nullIfEmpty(finishedAt),
 		nullIfEmpty(finishedAt),
 		strings.TrimSpace(task.Summary),
 		string(artifactsJSON),
@@ -775,11 +860,11 @@ func (s *SQLiteTaskStore) CompleteTask(ctx context.Context, taskID string, resul
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE tasks
-		SET status = ?, finished_at = ?, summary = ?, artifacts_json = ?, error = ?,
+		SET status = ?, finished_at = ?, completed_at = ?, summary = ?, artifacts_json = ?, error = ?,
 		    input_tokens = ?, output_tokens = ?, total_tokens = ?, cost_usd = ?,
 		    lease_until = NULL, updated_at = ?
 		WHERE task_id = ?
-`, string(status), finishedAt.Format(time.RFC3339Nano),
+`, string(status), finishedAt.Format(time.RFC3339Nano), finishedAt.Format(time.RFC3339Nano),
 		strings.TrimSpace(result.Summary), string(artifactsJSON), strings.TrimSpace(result.Error),
 		result.InputTokens, result.OutputTokens, total, result.CostUSD,
 		now.Format(time.RFC3339Nano), taskID); err != nil {

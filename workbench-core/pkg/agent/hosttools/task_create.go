@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path"
 	"strings"
 	"time"
 
@@ -14,15 +13,11 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
-// TaskCreateTool creates a DB-backed task and also writes an /inbox JSON envelope.
-//
-// SQLite is the source of truth for tasks; the /inbox file acts as a durable trigger
-// and provides parity with external integrations that enqueue via VFS writes.
+// TaskCreateTool creates a DB-backed task.
 type TaskCreateTool struct {
 	Store           state.TaskStore
 	SessionID       string
 	RunID           string
-	InboxPath       string
 	TeamID          string
 	RoleName        string
 	IsCoordinator   bool
@@ -35,7 +30,7 @@ func (t *TaskCreateTool) Definition() llmtypes.Tool {
 		Type: "function",
 		Function: llmtypes.ToolFunction{
 			Name:        "task_create",
-			Description: "[TASKS] Create a new pending task (persist to SQLite) and enqueue it via /inbox so the autonomous loop will pick it up.",
+			Description: "[TASKS] Create a new pending task in SQLite. This is DB-routed (no /inbox file writes).",
 			// Keep this tool non-strict: strict mode requires (1) additionalProperties=false
 			// for each object and (2) every property to be required, which doesn't fit
 			// optional inputs/metadata maps.
@@ -111,15 +106,18 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	}
 
 	task := types.Task{
-		TaskID:    taskID,
-		SessionID: strings.TrimSpace(t.SessionID),
-		RunID:     strings.TrimSpace(t.RunID),
-		Goal:      goal,
-		Inputs:    payload.Inputs,
-		Priority:  priority,
-		Status:    types.TaskStatusPending,
-		CreatedAt: &now,
-		Metadata:  payload.Metadata,
+		TaskID:         taskID,
+		SessionID:      strings.TrimSpace(t.SessionID),
+		RunID:          strings.TrimSpace(t.RunID),
+		AssignedToType: "agent",
+		AssignedTo:     strings.TrimSpace(t.RunID),
+		TaskKind:       state.TaskKindTask,
+		Goal:           goal,
+		Inputs:         payload.Inputs,
+		Priority:       priority,
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+		Metadata:       payload.Metadata,
 	}
 	if task.Inputs == nil {
 		task.Inputs = map[string]any{}
@@ -143,6 +141,8 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		}
 		task.TeamID = teamID
 		task.AssignedRole = assignedRole
+		task.AssignedToType = "role"
+		task.AssignedTo = assignedRole
 		task.CreatedBy = roleName
 	}
 
@@ -152,18 +152,9 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 			return types.HostOpRequest{}, err
 		}
 	}
-
-	inbox := strings.TrimRight(strings.TrimSpace(t.InboxPath), "/")
-	if inbox == "" {
-		inbox = "/inbox"
-	}
-	inboxPath := path.Join(inbox, taskID+".json")
-
-	b, _ := json.MarshalIndent(task, "", "  ")
 	return types.HostOpRequest{
-		Op:   types.HostOpFSWrite,
-		Path: resolveVFSPath(inboxPath),
-		Text: string(b),
+		Op:   types.HostOpFSList,
+		Path: "/workspace",
 	}, nil
 }
 

@@ -4,6 +4,8 @@
 //   - Thread: a durable session container (maps to workbench types.Session).
 //   - Turn: a single user -> agent execution cycle within a thread.
 //   - Item: an atomic unit of work within a turn (messages, tool calls, reasoning).
+//   - Task: routed unit of work managed by task.* RPC methods.
+//   - Control: thread-scoped runtime control managed by control.* RPC methods.
 //   - Artifact: indexed deliverable files browsed/searched via artifact.* methods.
 //
 // Transport is JSON-RPC 2.0 framed messages. A client sends requests to create/get

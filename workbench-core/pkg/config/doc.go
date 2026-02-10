@@ -10,7 +10,7 @@
 // Hosts rely on `config.DataDir` containing the following structure:
 //
 //   - `<dataDir>/sessions/` – metadata about each session (for resuming + listing)
-//   - `<dataDir>/agents/<agentId>/` – per-agent artifacts (workspace, log, inbox/outbox, plan)
+//   - `<dataDir>/agents/<agentId>/` – per-agent artifacts (workspace, log, plan, runtime state)
 //   - `<dataDir>/memory/` – shared memory (`MEMORY.MD`, plus daily `YYYY-MM-DD-memory.md` files)
 //   - `<dataDir>/agent/`, `/knowledge/` – upcoming runtime stores that will continue to live under `DataDir`.
 //

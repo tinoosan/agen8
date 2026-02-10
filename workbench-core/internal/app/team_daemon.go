@@ -29,6 +29,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/pkg/profile"
+	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"golang.org/x/sync/errgroup"
@@ -282,14 +283,13 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("create host tool registry for role %s: %w", role.Name, err)
 		}
-		if err := registry.Register(&hosttools.TaskCreateTool{
-			Store:           taskStore,
-			SessionID:       run.SessionID,
-			RunID:           run.RunID,
-			InboxPath:       "/inbox",
-			TeamID:          teamID,
-			RoleName:        role.Name,
-			IsCoordinator:   role.Coordinator,
+			if err := registry.Register(&hosttools.TaskCreateTool{
+				Store:           taskStore,
+				SessionID:       run.SessionID,
+				RunID:           run.RunID,
+				TeamID:          teamID,
+				RoleName:        role.Name,
+				IsCoordinator:   role.Coordinator,
 			CoordinatorRole: coordinatorRole,
 			ValidRoles:      roleNames,
 		}); err != nil {
@@ -325,8 +325,6 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 			Memory:               memoryProvider,
 			MemorySearchLimit:    3,
 			Notifier:             notifier,
-			InboxPath:            "/inbox",
-			OutboxPath:           "/outbox",
 			PollInterval:         poll,
 			MaxReadBytes:         256 * 1024,
 			LeaseTTL:             2 * time.Minute,
@@ -412,6 +410,15 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 			Run:       coordinatorRun,
 			TaskStore: taskStore,
 			Session:   sessionStore,
+			ControlSetModel: func(ctx context.Context, threadID, target, model string) ([]string, error) {
+				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				return requestTeamModelChange(ctx, taskStore, runtimes, stateMgr, model, target, "rpc.control.setModel")
+			},
+			ControlSetProfile: func(_ context.Context, _ string, _, _ string) ([]string, error) {
+				return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is unavailable in team mode"}
+			},
 		})
 		go func() {
 			if err := srv.Serve(runCtx, os.Stdin, os.Stdout); err != nil && runCtx.Err() == nil {
@@ -682,40 +689,56 @@ func teamIsIdle(ctx context.Context, store state.TaskStore, teamID string) bool 
 	return err == nil && active == 0
 }
 
-func writeSetModelControl(dataDir, runID, model string) error {
-	runID = strings.TrimSpace(runID)
-	model = strings.TrimSpace(model)
-	if runID == "" || model == "" {
-		return fmt.Errorf("runID and model are required")
-	}
-	inboxDir := filepath.Join(fsutil.GetAgentDir(dataDir, runID), "inbox")
-	if err := os.MkdirAll(inboxDir, 0o755); err != nil {
-		return err
-	}
-	payload := map[string]any{
-		"type":    "control",
-		"command": "set_model",
-		"args":    map[string]any{"model": model},
-	}
-	b, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return err
-	}
-	file := filepath.Join(inboxDir, "control-set-model-"+uuid.NewString()+".json")
-	return os.WriteFile(file, b, 0o644)
-}
-
-func applyTeamModel(dataDir string, runtimes []teamRoleRuntime, model string) error {
+func applyTeamModel(ctx context.Context, runtimes []teamRoleRuntime, model string, target string) ([]string, error) {
 	model = strings.TrimSpace(model)
 	if model == "" {
-		return fmt.Errorf("model is required")
+		return nil, fmt.Errorf("model is required")
 	}
+	target = strings.TrimSpace(target)
+	applied := make([]string, 0, len(runtimes))
 	for _, rt := range runtimes {
-		if err := writeSetModelControl(dataDir, rt.run.RunID, model); err != nil {
-			return fmt.Errorf("queue set_model for role %s: %w", rt.role.Name, err)
+		runID := strings.TrimSpace(rt.run.RunID)
+		role := strings.TrimSpace(rt.role.Name)
+		if target != "" && target != runID && target != role && target != "run:"+runID && target != "role:"+role {
+			continue
 		}
+		if err := rt.sess.SetModel(ctx, model); err != nil {
+			return nil, fmt.Errorf("set model for role %s: %w", rt.role.Name, err)
+		}
+		applied = append(applied, runID)
 	}
-	return nil
+	if target != "" && len(applied) == 0 {
+		return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "target does not match any team role/run"}
+	}
+	return applied, nil
+}
+
+func requestTeamModelChange(ctx context.Context, taskStore state.TaskStore, runtimes []teamRoleRuntime, stateMgr *teamStateManager, model string, target string, reason string) ([]string, error) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil, fmt.Errorf("model is required")
+	}
+	target = strings.TrimSpace(target)
+	if target != "" {
+		appliedTo, err := applyTeamModel(ctx, runtimes, model, target)
+		if err != nil {
+			_ = stateMgr.markModelFailed(model, err)
+			return nil, err
+		}
+		return appliedTo, stateMgr.markModelApplied(model)
+	}
+	if teamIsIdle(ctx, taskStore, stateMgr.teamID) {
+		appliedTo, err := applyTeamModel(ctx, runtimes, model, "")
+		if err != nil {
+			_ = stateMgr.markModelFailed(model, err)
+			return nil, err
+		}
+		return appliedTo, stateMgr.markModelApplied(model)
+	}
+	if err := stateMgr.queueModelChange(model, reason); err != nil {
+		return nil, err
+	}
+	return []string{}, nil
 }
 
 func runTeamControlLoop(ctx context.Context, taskStore state.TaskStore, runtimes []teamRoleRuntime, stateMgr *teamStateManager) {
@@ -725,39 +748,11 @@ func runTeamControlLoop(ctx context.Context, taskStore state.TaskStore, runtimes
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	handleRequest := func(model, reason string) {
-		if model == "" {
-			return
-		}
-		if teamIsIdle(ctx, taskStore, stateMgr.teamID) {
-			if err := applyTeamModel(stateMgr.cfg.DataDir, runtimes, model); err != nil {
-				_ = stateMgr.markModelFailed(model, err)
-				log.Printf("daemon: team model apply failed: %v", err)
-				return
-			}
-			_ = stateMgr.markModelApplied(model)
-			log.Printf("daemon: team model applied immediately: %s", model)
-			return
-		}
-		if err := stateMgr.queueModelChange(model, reason); err != nil {
-			log.Printf("daemon: queue team model change failed: %v", err)
-			return
-		}
-		log.Printf("daemon: team model queued until idle: %s", model)
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			req, ok, err := stateMgr.readControlRequest()
-			if err != nil {
-				log.Printf("daemon: read team control request failed: %v", err)
-			} else if ok {
-				handleRequest(strings.TrimSpace(req.Model), "monitor-request")
-				_ = stateMgr.clearControlRequest()
-			}
 			manifest := stateMgr.manifestSnapshot()
 			if manifest.ModelChange != nil &&
 				strings.EqualFold(strings.TrimSpace(manifest.ModelChange.Status), "pending") &&
@@ -766,7 +761,7 @@ func runTeamControlLoop(ctx context.Context, taskStore state.TaskStore, runtimes
 				if model == "" {
 					continue
 				}
-				if err := applyTeamModel(stateMgr.cfg.DataDir, runtimes, model); err != nil {
+				if _, err := applyTeamModel(ctx, runtimes, model, ""); err != nil {
 					_ = stateMgr.markModelFailed(model, err)
 					log.Printf("daemon: apply queued team model failed: %v", err)
 					continue

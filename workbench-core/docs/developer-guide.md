@@ -14,7 +14,7 @@ This guide explains how the CLI, configuration, and internal services collaborat
 
 1. CLI command resolves configuration and calls `app.RunDaemon`.
 2. `app` creates a session and an agent ID; `internal/store` manages directories under `<dataDir>/sessions` and `<dataDir>/agents`.
-3. Each agent instance mounts (`/project`, `/workspace`, `/log`, `/memory`, `/skills`, `/plan`, `/inbox`, `/outbox`) and processes tasks from `/inbox`.
+3. Each agent instance mounts (`/project`, `/workspace`, `/log`, `/memory`, `/skills`, `/plan`) and processes tasks from SQLite-backed routing.
 4. Artifact outputs (logs, workspace files) stream into the agent directory and can be inspected via the CLI or host filesystem.
 
 ## Tooling & extensions

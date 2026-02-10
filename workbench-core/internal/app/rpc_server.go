@@ -38,6 +38,9 @@ type RPCServer struct {
 	index    *protocol.Index
 
 	wake func()
+
+	controlSetModel   func(ctx context.Context, threadID, target, model string) ([]string, error)
+	controlSetProfile func(ctx context.Context, threadID, target, profile string) ([]string, error)
 }
 
 const (
@@ -57,6 +60,8 @@ type RPCServerConfig struct {
 	NotifyCh  <-chan protocol.Message
 	Index     *protocol.Index
 	Wake      func()
+	ControlSetModel   func(ctx context.Context, threadID, target, model string) ([]string, error)
+	ControlSetProfile func(ctx context.Context, threadID, target, profile string) ([]string, error)
 }
 
 func NewRPCServer(cfg RPCServerConfig) *RPCServer {
@@ -81,6 +86,8 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		notifyCh:  cfg.NotifyCh,
 		index:     cfg.Index,
 		wake:      cfg.Wake,
+		controlSetModel:   cfg.ControlSetModel,
+		controlSetProfile: cfg.ControlSetProfile,
 	}
 }
 
@@ -159,6 +166,11 @@ func (s *RPCServer) Serve(ctx context.Context, in io.Reader, out io.Writer) erro
 	}
 
 	sendNotification := func(msg protocol.Message) {
+		defer func() {
+			if recover() != nil {
+				// outCh may close concurrently during shutdown; notifications are best-effort.
+			}
+		}()
 		select {
 		case <-ctx.Done():
 			return
@@ -326,6 +338,90 @@ func (s *RPCServer) handleRequest(ctx context.Context, msg protocol.Message) pro
 			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
 		}
 		return m
+	case protocol.MethodTaskList:
+		var p protocol.TaskListParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.taskList(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodTaskCreate:
+		var p protocol.TaskCreateParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.taskCreate(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodTaskClaim:
+		var p protocol.TaskClaimParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.taskClaim(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodTaskComplete:
+		var p protocol.TaskCompleteParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.taskComplete(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodControlSetModel:
+		var p protocol.ControlSetModelParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.controlSetModelHandler(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+	case protocol.MethodControlSetProfile:
+		var p protocol.ControlSetProfileParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.controlSetProfileHandler(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
 	case protocol.MethodArtifactList:
 		var p protocol.ArtifactListParams
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
@@ -372,6 +468,307 @@ func (s *RPCServer) handleRequest(ctx context.Context, msg protocol.Message) pro
 	default:
 		return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeMethodNotFound, Message: "method not found"})
 	}
+}
+
+func (s *RPCServer) resolveThreadID(threadID protocol.ThreadID) (string, error) {
+	thread := strings.TrimSpace(string(threadID))
+	if thread == "" {
+		return "", &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
+	}
+	if thread != strings.TrimSpace(s.run.SessionID) {
+		return "", &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+	}
+	return thread, nil
+}
+
+func parseAssignee(assignee string) (string, string) {
+	assignee = strings.TrimSpace(assignee)
+	if assignee == "" {
+		return "", ""
+	}
+	for _, pfx := range []string{"team:", "role:", "agent:"} {
+		if strings.HasPrefix(assignee, pfx) {
+			return strings.TrimSuffix(pfx, ":"), strings.TrimSpace(strings.TrimPrefix(assignee, pfx))
+		}
+	}
+	return "", assignee
+}
+
+func protocolTaskFromTypesTask(t types.Task) protocol.Task {
+	return protocol.Task{
+		ID:               strings.TrimSpace(t.TaskID),
+		ThreadID:         protocol.ThreadID(strings.TrimSpace(t.SessionID)),
+		RunID:            protocol.RunID(strings.TrimSpace(t.RunID)),
+		TeamID:           strings.TrimSpace(t.TeamID),
+		TaskKind:         strings.TrimSpace(t.TaskKind),
+		AssignedToType:   strings.TrimSpace(t.AssignedToType),
+		AssignedTo:       strings.TrimSpace(t.AssignedTo),
+		AssignedRole:     strings.TrimSpace(t.AssignedRole),
+		ClaimedByAgentID: strings.TrimSpace(t.ClaimedByAgentID),
+		RoleSnapshot:     strings.TrimSpace(t.RoleSnapshot),
+		Goal:             strings.TrimSpace(t.Goal),
+		Status:           strings.TrimSpace(string(t.Status)),
+		Summary:          strings.TrimSpace(t.Summary),
+		Error:            strings.TrimSpace(t.Error),
+		Artifacts:        append([]string(nil), t.Artifacts...),
+		CreatedAt:        timeutil.OrNow(t.CreatedAt),
+		CompletedAt:      timeutil.OrNow(t.CompletedAt),
+	}
+}
+
+func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (protocol.TaskListResult, error) {
+	scope, err := s.resolveArtifactScope(ctx, p.ThreadID, p.TeamID)
+	if err != nil {
+		return protocol.TaskListResult{}, err
+	}
+	view := strings.ToLower(strings.TrimSpace(p.View))
+	if view == "" {
+		view = "inbox"
+	}
+	if view != "inbox" && view != "outbox" {
+		return protocol.TaskListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "view must be inbox or outbox"}
+	}
+	filter := state.TaskFilter{
+		View:     view,
+		TeamID:   scope.teamID,
+		RunID:    scope.runID,
+		SortBy:   "created_at",
+		SortDesc: true,
+		Limit:    clampLimit(p.Limit, 200, 2000),
+	}
+	if at, av := parseAssignee(p.Assignee); av != "" {
+		filter.AssignedTo = av
+		filter.AssignedToType = at
+	}
+	tasks, err := s.taskStore.ListTasks(ctx, filter)
+	if err != nil {
+		return protocol.TaskListResult{}, err
+	}
+	out := make([]protocol.Task, 0, len(tasks))
+	for _, t := range tasks {
+		out = append(out, protocolTaskFromTypesTask(t))
+	}
+	return protocol.TaskListResult{Tasks: out}, nil
+}
+
+func (s *RPCServer) controlSetModelHandler(ctx context.Context, p protocol.ControlSetModelParams) (protocol.ControlSetModelResult, error) {
+	threadID, err := s.resolveThreadID(p.ThreadID)
+	if err != nil {
+		return protocol.ControlSetModelResult{}, err
+	}
+	model := strings.TrimSpace(p.Model)
+	if model == "" {
+		return protocol.ControlSetModelResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "model is required"}
+	}
+	if s.controlSetModel == nil {
+		return protocol.ControlSetModelResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setModel is unavailable"}
+	}
+	appliedTo, err := s.controlSetModel(ctx, threadID, strings.TrimSpace(p.Target), model)
+	if err != nil {
+		return protocol.ControlSetModelResult{}, err
+	}
+	return protocol.ControlSetModelResult{
+		Accepted:  true,
+		AppliedTo: append([]string(nil), appliedTo...),
+	}, nil
+}
+
+func (s *RPCServer) controlSetProfileHandler(ctx context.Context, p protocol.ControlSetProfileParams) (protocol.ControlSetProfileResult, error) {
+	threadID, err := s.resolveThreadID(p.ThreadID)
+	if err != nil {
+		return protocol.ControlSetProfileResult{}, err
+	}
+	profile := strings.TrimSpace(p.Profile)
+	if profile == "" {
+		return protocol.ControlSetProfileResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "profile is required"}
+	}
+	if s.controlSetProfile == nil {
+		return protocol.ControlSetProfileResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is unavailable"}
+	}
+	appliedTo, err := s.controlSetProfile(ctx, threadID, strings.TrimSpace(p.Target), profile)
+	if err != nil {
+		return protocol.ControlSetProfileResult{}, err
+	}
+	return protocol.ControlSetProfileResult{
+		Accepted:  true,
+		AppliedTo: append([]string(nil), appliedTo...),
+	}, nil
+}
+
+func normalizeAssignedToType(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "team":
+		return "team"
+	case "role":
+		return "role"
+	case "agent":
+		return "agent"
+	default:
+		return ""
+	}
+}
+
+func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams) (protocol.TaskCreateResult, error) {
+	scope, err := s.resolveArtifactScope(ctx, p.ThreadID, "")
+	if err != nil {
+		return protocol.TaskCreateResult{}, err
+	}
+	goal := strings.TrimSpace(p.Goal)
+	if goal == "" {
+		return protocol.TaskCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "goal is required"}
+	}
+	now := time.Now().UTC()
+	taskID := "task-" + uuid.NewString()
+	assignedToType := normalizeAssignedToType(p.AssignedToType)
+	assignedTo := strings.TrimSpace(p.AssignedTo)
+	assignedRole := strings.TrimSpace(p.AssignedRole)
+	if assignedToType == "" {
+		if scope.teamID != "" {
+			if assignedRole != "" {
+				assignedToType = "role"
+				assignedTo = assignedRole
+			} else {
+				assignedToType = "team"
+				assignedTo = scope.teamID
+			}
+		} else {
+			assignedToType = "agent"
+			assignedTo = scope.runID
+		}
+	}
+	if assignedTo == "" {
+		switch assignedToType {
+		case "team":
+			assignedTo = scope.teamID
+		case "role":
+			assignedTo = assignedRole
+		case "agent":
+			assignedTo = scope.runID
+		}
+	}
+	task := types.Task{
+		TaskID:         taskID,
+		SessionID:      strings.TrimSpace(s.run.SessionID),
+		RunID:          strings.TrimSpace(s.run.RunID),
+		TeamID:         strings.TrimSpace(scope.teamID),
+		AssignedRole:   assignedRole,
+		AssignedToType: assignedToType,
+		AssignedTo:     assignedTo,
+		TaskKind:       strings.TrimSpace(p.TaskKind),
+		Goal:           goal,
+		Priority:       p.Priority,
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+		Inputs:         map[string]any{},
+		Metadata:       map[string]any{"source": "rpc.task.create"},
+		CreatedBy:      "monitor",
+	}
+	if task.Priority == 0 {
+		task.Priority = 5
+	}
+	if err := s.taskStore.CreateTask(ctx, task); err != nil {
+		return protocol.TaskCreateResult{}, err
+	}
+	if s.wake != nil {
+		s.wake()
+	}
+	got, err := s.taskStore.GetTask(ctx, taskID)
+	if err != nil {
+		return protocol.TaskCreateResult{}, err
+	}
+	return protocol.TaskCreateResult{Task: protocolTaskFromTypesTask(got)}, nil
+}
+
+func (s *RPCServer) taskClaim(ctx context.Context, p protocol.TaskClaimParams) (protocol.TaskClaimResult, error) {
+	scope, err := s.resolveArtifactScope(ctx, p.ThreadID, "")
+	if err != nil {
+		return protocol.TaskClaimResult{}, err
+	}
+	taskID := strings.TrimSpace(p.TaskID)
+	if taskID == "" {
+		return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "taskId is required"}
+	}
+	if err := s.taskStore.ClaimTask(ctx, taskID, 2*time.Minute); err != nil {
+		if errors.Is(err, state.ErrTaskClaimed) {
+			return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "task already claimed"}
+		}
+		if errors.Is(err, state.ErrTaskNotFound) {
+			return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeTurnNotFound, Message: "task not found"}
+		}
+		return protocol.TaskClaimResult{}, err
+	}
+	task, err := s.taskStore.GetTask(ctx, taskID)
+	if err != nil {
+		return protocol.TaskClaimResult{}, err
+	}
+	if scope.teamID != "" {
+		if strings.TrimSpace(task.TeamID) != scope.teamID {
+			return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeTurnNotFound, Message: "task not found"}
+		}
+	} else if strings.TrimSpace(task.RunID) != scope.runID {
+		return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeTurnNotFound, Message: "task not found"}
+	}
+	claimer := strings.TrimSpace(p.AgentID)
+	if claimer == "" {
+		claimer = strings.TrimSpace(s.run.RunID)
+	}
+	task.ClaimedByAgentID = claimer
+	if strings.TrimSpace(task.RoleSnapshot) == "" {
+		task.RoleSnapshot = strings.TrimSpace(task.AssignedRole)
+	}
+	_ = s.taskStore.UpdateTask(ctx, task)
+	task, _ = s.taskStore.GetTask(ctx, taskID)
+	return protocol.TaskClaimResult{Task: protocolTaskFromTypesTask(task)}, nil
+}
+
+func (s *RPCServer) taskComplete(ctx context.Context, p protocol.TaskCompleteParams) (protocol.TaskCompleteResult, error) {
+	scope, err := s.resolveArtifactScope(ctx, p.ThreadID, p.TeamID)
+	if err != nil {
+		return protocol.TaskCompleteResult{}, err
+	}
+	taskID := strings.TrimSpace(p.TaskID)
+	if taskID == "" {
+		return protocol.TaskCompleteResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "taskId is required"}
+	}
+	task, err := s.taskStore.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, state.ErrTaskNotFound) {
+			return protocol.TaskCompleteResult{}, &protocol.ProtocolError{Code: protocol.CodeTurnNotFound, Message: "task not found"}
+		}
+		return protocol.TaskCompleteResult{}, err
+	}
+	if scope.teamID != "" {
+		if strings.TrimSpace(task.TeamID) != scope.teamID {
+			return protocol.TaskCompleteResult{}, &protocol.ProtocolError{Code: protocol.CodeTurnNotFound, Message: "task not found"}
+		}
+	} else if strings.TrimSpace(task.RunID) != scope.runID {
+		return protocol.TaskCompleteResult{}, &protocol.ProtocolError{Code: protocol.CodeTurnNotFound, Message: "task not found"}
+	}
+	status := strings.ToLower(strings.TrimSpace(p.Status))
+	if status == "" {
+		if strings.TrimSpace(p.Error) != "" {
+			status = string(types.TaskStatusFailed)
+		} else {
+			status = string(types.TaskStatusSucceeded)
+		}
+	}
+	done := time.Now().UTC()
+	res := types.TaskResult{
+		TaskID:      taskID,
+		Status:      types.TaskStatus(status),
+		Summary:     strings.TrimSpace(p.Summary),
+		Artifacts:   append([]string(nil), p.Artifacts...),
+		Error:       strings.TrimSpace(p.Error),
+		CompletedAt: &done,
+	}
+	if err := s.taskStore.CompleteTask(ctx, taskID, res); err != nil {
+		return protocol.TaskCompleteResult{}, err
+	}
+	updated, err := s.taskStore.GetTask(ctx, taskID)
+	if err != nil {
+		return protocol.TaskCompleteResult{}, err
+	}
+	return protocol.TaskCompleteResult{Task: protocolTaskFromTypesTask(updated)}, nil
 }
 
 func (s *RPCServer) threadGet(ctx context.Context, p protocol.ThreadGetParams) (protocol.ThreadGetResult, error) {
@@ -429,12 +826,15 @@ func (s *RPCServer) turnCreate(ctx context.Context, p protocol.TurnCreateParams)
 	now := time.Now().UTC()
 	taskID := "task-" + uuid.NewString()
 	task := types.Task{
-		TaskID:    taskID,
-		SessionID: strings.TrimSpace(s.run.SessionID),
-		RunID:     strings.TrimSpace(s.run.RunID),
-		Goal:      strings.TrimSpace(p.Input.Text),
-		Status:    types.TaskStatusPending,
-		CreatedAt: &now,
+		TaskID:         taskID,
+		SessionID:      strings.TrimSpace(s.run.SessionID),
+		RunID:          strings.TrimSpace(s.run.RunID),
+		TaskKind:       state.TaskKindTask,
+		AssignedToType: "agent",
+		AssignedTo:     strings.TrimSpace(s.run.RunID),
+		Goal:           strings.TrimSpace(p.Input.Text),
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
 	}
 	if err := s.taskStore.CreateTask(ctx, task); err != nil {
 		return protocol.TurnCreateResult{}, err
@@ -550,12 +950,8 @@ type artifactScope struct {
 }
 
 func (s *RPCServer) resolveArtifactScope(ctx context.Context, threadID protocol.ThreadID, teamIDOverride string) (artifactScope, error) {
-	thread := strings.TrimSpace(string(threadID))
-	if thread == "" {
-		return artifactScope{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
-	}
-	if thread != strings.TrimSpace(s.run.SessionID) {
-		return artifactScope{}, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+	if _, err := s.resolveThreadID(threadID); err != nil {
+		return artifactScope{}, err
 	}
 
 	teamID := strings.TrimSpace(teamIDOverride)

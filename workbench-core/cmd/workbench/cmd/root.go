@@ -37,7 +37,7 @@ var rootCmd = &cobra.Command{
 Workbench is a local, agentic runtime built around a virtual filesystem (VFS).
 
 Running "workbench" starts a new session and run, then starts an always-on daemon
-that continuously processes tasks from /inbox and writes results to /outbox.
+that continuously processes DB-backed tasks and records results/artifacts in SQLite.
 
 Start the daemon first, then run "workbench monitor" so the monitor attaches to
 the active agent (or use "workbench monitor --agent-id <id>" with the agent ID printed

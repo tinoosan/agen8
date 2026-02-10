@@ -473,8 +473,6 @@ func DefaultSystemPrompt() string {
   <vfs>
     <mount path="/project">User's actual project files.</mount>
     <mount path="/workspace">Run-scoped, writable workspace for artifacts and notes.</mount>
-    <mount path="/inbox">Incoming task envelopes.</mount>
-    <mount path="/outbox">Task results written by the agent.</mount>
     <mount path="/log">Run event stream and trace excerpts.</mount>
     <mount path="/skills">These are YOUR skills. Check /skills/<skill_name>/SKILL.md for documented workflows.</mount>
     <mount path="/plan">Planning workspace for complex tasks. /plan/HEAD.md is details; /plan/CHECKLIST.md is the checklist.</mount>

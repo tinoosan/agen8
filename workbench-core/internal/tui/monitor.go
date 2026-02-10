@@ -2323,60 +2323,53 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 		if goal == "" {
 			return commandLinesMsg{lines: []string{"[queued] error: goal is empty"}}
 		}
-		if strings.TrimSpace(m.teamID) != "" {
-			if m.taskStore == nil {
-				return commandLinesMsg{lines: []string{"[queued] error: task store not available"}}
-			}
-			now := time.Now().UTC()
-			id := "task-" + uuid.NewString()
-			teamSessionID := "team-" + strings.TrimSpace(m.teamID)
-			teamRunID := "team-" + strings.TrimSpace(m.teamID) + "-monitor"
-			task := types.Task{
-				TaskID:    id,
-				SessionID: teamSessionID,
-				RunID:     teamRunID,
-				Goal:      goal,
-				Priority:  priority,
-				Status:    types.TaskStatusPending,
-				CreatedAt: &now,
-				TeamID:    m.teamID,
-				Inputs:    map[string]any{},
-				Metadata: map[string]any{
-					"source": "monitor",
-				},
-			}
-			if err := m.taskStore.CreateTask(m.ctx, task); err != nil {
-				return commandLinesMsg{lines: []string{"[queued] error: " + err.Error()}}
-			}
-			return tea.Batch(
-				func() tea.Msg {
-					return commandLinesMsg{lines: []string{"[queued] " + id + " " + goal + " — task queued to team " + m.teamID}}
-				},
-				func() tea.Msg { return taskQueuedLocallyMsg{TaskID: id, Goal: goal} },
-				m.loadTeamStatus(),
-			)
+		if m.taskStore == nil {
+			return commandLinesMsg{lines: []string{"[queued] error: task store not available"}}
 		}
-		runDir := fsutil.GetAgentDir(m.cfg.DataDir, m.runID)
-		inboxDir := filepath.Join(runDir, "inbox")
-		_ = os.MkdirAll(inboxDir, 0755)
 		now := time.Now()
 		id := "task-" + uuid.NewString()
 		task := types.Task{
 			TaskID:    id,
+			SessionID: strings.TrimSpace(m.sessionID),
+			RunID:     strings.TrimSpace(m.runID),
 			Goal:      goal,
 			Priority:  priority,
 			Status:    types.TaskStatusPending,
 			CreatedAt: &now,
+			Inputs:    map[string]any{},
+			Metadata:  map[string]any{"source": "monitor"},
 		}
-		b, _ := json.MarshalIndent(task, "", "  ")
-		if err := os.WriteFile(filepath.Join(inboxDir, id+".json"), b, 0644); err != nil {
+		if task.SessionID == "" {
+			task.SessionID = "sess-" + strings.TrimSpace(m.runID)
+		}
+		if strings.TrimSpace(m.teamID) != "" {
+			task.TeamID = strings.TrimSpace(m.teamID)
+			task.AssignedToType = "team"
+			task.AssignedTo = strings.TrimSpace(m.teamID)
+			task.RunID = "team-" + strings.TrimSpace(m.teamID) + "-monitor"
+			task.SessionID = "team-" + strings.TrimSpace(m.teamID)
+		} else {
+			task.AssignedToType = "agent"
+			task.AssignedTo = strings.TrimSpace(m.runID)
+		}
+		if err := m.taskStore.CreateTask(m.ctx, task); err != nil {
 			return commandLinesMsg{lines: []string{"[queued] error: " + err.Error()}}
 		}
-		return tea.Batch(
+		suffix := "run " + m.runID
+		extra := []tea.Cmd{}
+		if strings.TrimSpace(m.teamID) != "" {
+			suffix = "team " + m.teamID
+			extra = append(extra, m.loadTeamStatus())
+		}
+		cmds := []tea.Cmd{
 			func() tea.Msg {
-				return commandLinesMsg{lines: []string{"[queued] " + id + " " + goal + " — task queued to run " + m.runID}}
+				return commandLinesMsg{lines: []string{"[queued] " + id + " " + goal + " — task queued to " + suffix}}
 			},
 			func() tea.Msg { return taskQueuedLocallyMsg{TaskID: id, Goal: goal} },
+		}
+		cmds = append(cmds, extra...)
+		return tea.Batch(
+			cmds...,
 		)
 	}
 }
@@ -2386,22 +2379,41 @@ func (m *monitorModel) writeControl(command string, args map[string]any) tea.Cmd
 		if strings.TrimSpace(m.teamID) != "" {
 			return commandLinesMsg{lines: []string{"[control] not supported in team mode"}}
 		}
-		runDir := fsutil.GetAgentDir(m.cfg.DataDir, m.runID)
-		inboxDir := filepath.Join(runDir, "inbox")
-		_ = os.MkdirAll(inboxDir, 0755)
-		payload := map[string]any{
-			"type":    "control",
-			"command": strings.TrimSpace(command),
+		switch strings.ToLower(strings.TrimSpace(command)) {
+		case "set_model":
+			model := ""
+			if args != nil {
+				if v, ok := args["model"].(string); ok {
+					model = strings.TrimSpace(v)
+				}
+			}
+			if model == "" {
+				return commandLinesMsg{lines: []string{"[control] error: model is required"}}
+			}
+			m.model = model
+			ss, err := store.NewSQLiteSessionStore(m.cfg)
+			if err == nil {
+				if sess, serr := ss.LoadSession(m.ctx, m.sessionID); serr == nil {
+					sess.ActiveModel = model
+					_ = ss.SaveSession(m.ctx, sess)
+				}
+			}
+			return commandLinesMsg{lines: []string{"[control] applied set_model -> " + model}}
+		case "switch_profile":
+			ref := ""
+			if args != nil {
+				if v, ok := args["profile"].(string); ok {
+					ref = strings.TrimSpace(v)
+				}
+			}
+			if ref == "" {
+				return commandLinesMsg{lines: []string{"[control] error: profile is required"}}
+			}
+			m.profile = ref
+			return commandLinesMsg{lines: []string{"[control] switch_profile queued via RPC only"}}
+		default:
+			return commandLinesMsg{lines: []string{"[control] error: unsupported command " + command}}
 		}
-		if len(args) != 0 {
-			payload["args"] = args
-		}
-		b, _ := json.MarshalIndent(payload, "", "  ")
-		id := "control-" + uuid.NewString()
-		if err := os.WriteFile(filepath.Join(inboxDir, id+".json"), b, 0644); err != nil {
-			return commandLinesMsg{lines: []string{"[control] error: " + err.Error()}}
-		}
-		return commandLinesMsg{lines: []string{"[control] queued " + id}}
 	}
 }
 
@@ -2416,19 +2428,23 @@ func (m *monitorModel) writeTeamControl(command, model string) tea.Cmd {
 		if command == "" || model == "" {
 			return commandLinesMsg{lines: []string{"[control] error: command and model are required"}}
 		}
-		controlDir := filepath.Join(fsutil.GetTeamDir(m.cfg.DataDir, teamID), "control")
-		if err := os.MkdirAll(controlDir, 0o755); err != nil {
+		manifestPath := filepath.Join(fsutil.GetTeamDir(m.cfg.DataDir, teamID), "team.json")
+		raw, err := os.ReadFile(manifestPath)
+		if err != nil {
 			return commandLinesMsg{lines: []string{"[control] error: " + err.Error()}}
 		}
-		payload := map[string]any{
-			"type":        "team_control",
-			"command":     command,
-			"model":       model,
-			"requestedAt": time.Now().UTC().Format(time.RFC3339Nano),
+		var manifest teamManifestFile
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			return commandLinesMsg{lines: []string{"[control] error: " + err.Error()}}
 		}
-		b, _ := json.MarshalIndent(payload, "", "  ")
-		controlPath := filepath.Join(controlDir, "set-model.json")
-		if err := os.WriteFile(controlPath, b, 0o644); err != nil {
+		manifest.ModelChange = &teamModelChangeFile{
+			RequestedModel: model,
+			Status:         "pending",
+			RequestedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+			Reason:         "monitor-request",
+		}
+		b, _ := json.MarshalIndent(manifest, "", "  ")
+		if err := os.WriteFile(manifestPath, b, 0o644); err != nil {
 			return commandLinesMsg{lines: []string{"[control] error: " + err.Error()}}
 		}
 		return tea.Batch(
@@ -2488,7 +2504,7 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 		m.stats.lastTurnTokens = parseInt(ev.Data["total"])
 	case "llm.cost.total":
 		known := parseBool(ev.Data["known"])
-		m.stats.lastTurnCostUSD = strings.TrimSpace(ev.Data["costUsd"])
+		m.stats.lastTurnCostUSD = getCostUSD(ev.Data)
 		if !known && m.stats.lastTurnCostUSD == "" {
 			m.stats.lastTurnCostUSD = "?"
 		}
@@ -2537,7 +2553,7 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		}
 		m.currentTask = nil
 		m.stats.tasksDone++
-		if v := strings.TrimSpace(ev.Data["costUsd"]); v != "" {
+		if v := getCostUSD(ev.Data); v != "" {
 			m.stats.lastTurnCostUSD = v
 		}
 	case "task.quarantined":

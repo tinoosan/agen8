@@ -454,3 +454,154 @@ func TestRPCServer_ArtifactList_TeamScopeAndGetTruncated(t *testing.T) {
 		t.Fatalf("unexpected get result: %+v", getRes)
 	}
 }
+
+func TestRPCServer_TaskFlow_CreateListClaimComplete(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	createReq, _ := protocol.NewRequest("1", protocol.MethodTaskCreate, protocol.TaskCreateParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Goal:     "Do X",
+	})
+	createResp := rpcRoundTrip(t, srv, createReq)
+	if createResp.Error != nil {
+		t.Fatalf("task.create error: %+v", createResp.Error)
+	}
+	var createRes protocol.TaskCreateResult
+	_ = json.Unmarshal(createResp.Result, &createRes)
+	if strings.TrimSpace(createRes.Task.ID) == "" {
+		t.Fatalf("missing task id")
+	}
+
+	inboxReq, _ := protocol.NewRequest("2", protocol.MethodTaskList, protocol.TaskListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		View:     "inbox",
+	})
+	inboxResp := rpcRoundTrip(t, srv, inboxReq)
+	if inboxResp.Error != nil {
+		t.Fatalf("task.list inbox error: %+v", inboxResp.Error)
+	}
+	var inboxRes protocol.TaskListResult
+	_ = json.Unmarshal(inboxResp.Result, &inboxRes)
+	if len(inboxRes.Tasks) == 0 {
+		t.Fatalf("expected inbox tasks")
+	}
+
+	claimReq, _ := protocol.NewRequest("3", protocol.MethodTaskClaim, protocol.TaskClaimParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TaskID:   createRes.Task.ID,
+		AgentID:  "agent-1",
+	})
+	claimResp := rpcRoundTrip(t, srv, claimReq)
+	if claimResp.Error != nil {
+		t.Fatalf("task.claim error: %+v", claimResp.Error)
+	}
+	var claimRes protocol.TaskClaimResult
+	_ = json.Unmarshal(claimResp.Result, &claimRes)
+	if claimRes.Task.ClaimedByAgentID != "agent-1" {
+		t.Fatalf("expected claimedByAgentId agent-1, got %q", claimRes.Task.ClaimedByAgentID)
+	}
+
+	completeReq, _ := protocol.NewRequest("4", protocol.MethodTaskComplete, protocol.TaskCompleteParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TaskID:   createRes.Task.ID,
+		Summary:  "done",
+		Status:   "succeeded",
+	})
+	completeResp := rpcRoundTrip(t, srv, completeReq)
+	if completeResp.Error != nil {
+		t.Fatalf("task.complete error: %+v", completeResp.Error)
+	}
+
+	outboxReq, _ := protocol.NewRequest("5", protocol.MethodTaskList, protocol.TaskListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		View:     "outbox",
+	})
+	outboxResp := rpcRoundTrip(t, srv, outboxReq)
+	if outboxResp.Error != nil {
+		t.Fatalf("task.list outbox error: %+v", outboxResp.Error)
+	}
+	var outboxRes protocol.TaskListResult
+	_ = json.Unmarshal(outboxResp.Result, &outboxRes)
+	found := false
+	for _, tk := range outboxRes.Tasks {
+		if tk.ID == createRes.Task.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("completed task not found in outbox")
+	}
+}
+
+func TestRPCServer_ControlSetModel(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	seen := ""
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+		ControlSetModel: func(_ context.Context, threadID, target, model string) ([]string, error) {
+			seen = threadID + "|" + target + "|" + model
+			return []string{"run-1"}, nil
+		},
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodControlSetModel, protocol.ControlSetModelParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Model:    "openai/gpt-5.2",
+		Target:   "run-1",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("control.setModel error: %+v", resp.Error)
+	}
+	if seen != run.SessionID+"|run-1|openai/gpt-5.2" {
+		t.Fatalf("unexpected callback payload: %q", seen)
+	}
+	var res protocol.ControlSetModelResult
+	_ = json.Unmarshal(resp.Result, &res)
+	if !res.Accepted || len(res.AppliedTo) != 1 || res.AppliedTo[0] != "run-1" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestRPCServer_ControlSetProfile_ThreadMismatch(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+		ControlSetProfile: func(_ context.Context, _, _, _ string) ([]string, error) {
+			t.Fatalf("callback should not be called")
+			return nil, nil
+		},
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodControlSetProfile, protocol.ControlSetProfileParams{
+		ThreadID: protocol.ThreadID("sess-other"),
+		Profile:  "software_dev",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error == nil {
+		t.Fatalf("expected thread mismatch error")
+	}
+	if resp.Error.Code != protocol.CodeThreadNotFound {
+		t.Fatalf("error code = %d want %d", resp.Error.Code, protocol.CodeThreadNotFound)
+	}
+}

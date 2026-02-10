@@ -38,7 +38,7 @@ import (
 	"golang.org/x/term"
 )
 
-// RunDaemon starts a headless worker that continuously polls /inbox and writes results to /outbox.
+// RunDaemon starts a headless worker that continuously polls DB-backed tasks and emits DB-backed results/events.
 // It is intended as the default autonomous entrypoint; the TUI can be used separately as a viewer.
 func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB int, poll time.Duration, opts ...RunChatOption) error {
 	if err := cfg.Validate(); err != nil {
@@ -340,7 +340,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Store:     taskStore,
 		SessionID: run.SessionID,
 		RunID:     run.RunID,
-		InboxPath: "/inbox",
 	}); err != nil {
 		return fmt.Errorf("register task_create tool: %w", err)
 	}
@@ -362,8 +361,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Memory:            memoryProvider,
 		MemorySearchLimit: 3,
 		Notifier:          notifier,
-		InboxPath:         "/inbox",
-		OutboxPath:        "/outbox",
 		PollInterval:      poll,
 		WakeCh:            wakeCh,
 		MaxReadBytes:      256 * 1024,
@@ -397,6 +394,35 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 				case wakeCh <- struct{}{}:
 				default:
 				}
+			},
+			ControlSetModel: func(ctx context.Context, threadID, target, model string) ([]string, error) {
+				if strings.TrimSpace(threadID) != strings.TrimSpace(run.SessionID) {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				if tgt := strings.TrimSpace(target); tgt != "" && tgt != run.RunID && tgt != run.SessionID {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "target does not match active run"}
+				}
+				if err := sess.SetModel(ctx, model); err != nil {
+					return nil, err
+				}
+				loaded, err := sessionStore.LoadSession(ctx, run.SessionID)
+				if err == nil {
+					loaded.ActiveModel = strings.TrimSpace(model)
+					_ = sessionStore.SaveSession(ctx, loaded)
+				}
+				return []string{strings.TrimSpace(run.RunID)}, nil
+			},
+			ControlSetProfile: func(ctx context.Context, threadID, target, profileRef string) ([]string, error) {
+				if strings.TrimSpace(threadID) != strings.TrimSpace(run.SessionID) {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				if tgt := strings.TrimSpace(target); tgt != "" && tgt != run.RunID && tgt != run.SessionID {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "target does not match active run"}
+				}
+				if err := sess.SwitchProfile(ctx, profileRef); err != nil {
+					return nil, err
+				}
+				return []string{strings.TrimSpace(run.RunID)}, nil
 			},
 		})
 		go func() {

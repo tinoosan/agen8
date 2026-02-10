@@ -26,12 +26,12 @@ const (
 	// MountSkills exposes the user-defined skill files under /skills.
 	MountSkills = "skills"
 
-	// MountInbox is the mount name for run-scoped task inboxes.
-	// External inputs can drop tasks/messages here; the agent polls and consumes them.
+	// MountInbox is a compatibility mount for legacy workflows.
+	// Task routing is DB-backed; /inbox is not used for task transport.
 	MountInbox = "inbox"
 
-	// MountOutbox is the mount name for run-scoped task results.
-	// Agents write TaskResult envelopes and audit messages here for the host to collect.
+	// MountOutbox is a compatibility mount for legacy workflows.
+	// Task completion is persisted in SQLite; /outbox is not used for task transport.
 	MountOutbox = "outbox"
 
 	// MountPlan is the mount name for run-scoped planning workspace.

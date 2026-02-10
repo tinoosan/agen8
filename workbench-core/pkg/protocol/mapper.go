@@ -124,12 +124,10 @@ func shouldSuppressOp(op, path string) bool {
 	if path == "" {
 		return false
 	}
-	if !strings.HasPrefix(path, "/inbox") {
-		return false
-	}
 	switch op {
 	case "fs_list", "fs_read":
-		return true
+		// Suppress high-frequency system scans that are not user-facing routing activity.
+		return strings.HasPrefix(path, "/workspace/deliverables/") || strings.HasPrefix(path, "/workspace/quarantine/")
 	default:
 		return false
 	}

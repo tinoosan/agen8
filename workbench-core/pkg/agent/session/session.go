@@ -39,8 +39,6 @@ type Config struct {
 	MemorySearchLimit int
 	Notifier          agent.Notifier
 
-	InboxPath    string
-	OutboxPath   string
 	PollInterval time.Duration
 	// WakeCh, when signaled, nudges the session loop to drain the inbox immediately.
 	// This is used by the app server to provide low-latency turn.create.
@@ -99,12 +97,6 @@ func New(cfg Config) (*Session, error) {
 	}
 	if strings.TrimSpace(cfg.RunID) == "" {
 		return nil, fmt.Errorf("runID is required")
-	}
-	if strings.TrimSpace(cfg.InboxPath) == "" {
-		cfg.InboxPath = "/inbox"
-	}
-	if strings.TrimSpace(cfg.OutboxPath) == "" {
-		cfg.OutboxPath = "/outbox"
 	}
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 2 * time.Second
@@ -325,9 +317,10 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 	filter := state.TaskFilter{RunID: s.cfg.RunID, Status: []types.TaskStatus{types.TaskStatusPending}}
 	if strings.TrimSpace(s.cfg.TeamID) != "" {
 		filter = state.TaskFilter{
-			TeamID:       s.cfg.TeamID,
-			AssignedRole: s.cfg.RoleName,
-			Status:       []types.TaskStatus{types.TaskStatusPending},
+			TeamID:         s.cfg.TeamID,
+			AssignedToType: "role",
+			AssignedTo:     s.cfg.RoleName,
+			Status:         []types.TaskStatus{types.TaskStatusPending},
 		}
 	}
 	if count, err := s.cfg.TaskStore.CountTasks(ctx, filter); err == nil && count > s.cfg.MaxPending {
@@ -356,7 +349,10 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 		RunID:        s.cfg.RunID,
 		TeamID:       strings.TrimSpace(s.cfg.TeamID),
 		AssignedRole: strings.TrimSpace(s.cfg.RoleName),
+		AssignedToType: "agent",
+		AssignedTo:     strings.TrimSpace(s.cfg.RunID),
 		CreatedBy:    strings.TrimSpace(s.cfg.RoleName),
+		TaskKind:     state.TaskKindHeartbeat,
 		Goal:         strings.TrimSpace(job.Goal),
 		Priority:     5,
 		Status:       types.TaskStatusPending,
@@ -367,6 +363,10 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 			"job":     strings.TrimSpace(job.Name),
 			"window":  window,
 		},
+	}
+	if strings.TrimSpace(task.TeamID) != "" {
+		task.AssignedToType = "role"
+		task.AssignedTo = strings.TrimSpace(task.AssignedRole)
 	}
 	if err := s.cfg.TaskStore.CreateTask(ctx, task); err != nil {
 		s.logf("heartbeat enqueue failed: %v", err)
@@ -382,121 +382,9 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 }
 
 func (s *Session) drainInbox(ctx context.Context) (bool, error) {
-	// Ingest new tasks from /inbox JSON into SQLite, then execute DB-backed pending tasks.
-	//
-	// Note: /inbox JSON files are treated as write-only "envelopes" for external integrations.
-	// SQLite is the source of truth; the daemon prefers DB queries for listing/pagination.
-	resp := s.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{Op: types.HostOpFSList, Path: s.cfg.InboxPath})
-	if !resp.Ok {
-		return false, fmt.Errorf("list inbox: %s", resp.Error)
-	}
-	paths := normalizeListEntries(s.cfg.InboxPath, resp.Entries)
-	sort.Strings(paths)
-
+	// Execute pending tasks from SQLite only (DB-routed protocol v2).
 	var errs error
 	hadWork := false
-	for _, p := range paths {
-		if !strings.HasSuffix(strings.ToLower(p), ".json") {
-			continue
-		}
-		if strings.Contains(p, "/poison/") || strings.Contains(p, "/archive/") {
-			continue
-		}
-
-		fileID := strings.TrimSuffix(path.Base(p), path.Ext(p))
-		if strings.TrimSpace(fileID) == "" {
-			continue
-		}
-		normFileID, _ := types.NormalizeTaskID(fileID)
-
-		// If already ingested, skip file reads entirely.
-		if _, err := s.cfg.TaskStore.GetTask(ctx, fileID); err == nil {
-			continue
-		} else if err != nil && !errors.Is(err, state.ErrTaskNotFound) {
-			errs = errors.Join(errs, fmt.Errorf("get task %s: %w", fileID, err))
-			continue
-		}
-		if normFileID != fileID {
-			if _, err := s.cfg.TaskStore.GetTask(ctx, normFileID); err == nil {
-				continue
-			} else if err != nil && !errors.Is(err, state.ErrTaskNotFound) {
-				errs = errors.Join(errs, fmt.Errorf("get task %s: %w", normFileID, err))
-				continue
-			}
-		}
-
-		raw, ok := s.readText(ctx, p)
-		if !ok || strings.TrimSpace(raw) == "" {
-			continue
-		}
-
-		// Control tasks: first-class and never passed to the LLM.
-		if handled, err := s.tryHandleControl(ctx, p, raw); err != nil {
-			errs = errors.Join(errs, err)
-			continue
-		} else if handled {
-			continue
-		}
-
-		var task types.Task
-		if err := json.Unmarshal([]byte(raw), &task); err != nil {
-			continue
-		}
-		rawID := strings.TrimSpace(task.TaskID)
-		if rawID == "" {
-			rawID = fileID
-		}
-		if normalized, changed := types.NormalizeTaskID(rawID); strings.TrimSpace(normalized) != "" {
-			task.TaskID = normalized
-			if changed {
-				if task.Metadata == nil {
-					task.Metadata = map[string]any{}
-				}
-				task.Metadata["originalTaskId"] = rawID
-			}
-		}
-		task.Goal = strings.TrimSpace(task.Goal)
-		if task.Goal == "" {
-			continue
-		}
-		if !timeutil.IsSet(task.CreatedAt) {
-			now := time.Now().UTC()
-			task.CreatedAt = &now
-		}
-		if strings.TrimSpace(string(task.Status)) == "" {
-			task.Status = types.TaskStatusPending
-		}
-		task.SessionID = strings.TrimSpace(task.SessionID)
-		if task.SessionID == "" {
-			task.SessionID = s.cfg.SessionID
-		}
-		task.RunID = strings.TrimSpace(task.RunID)
-		if task.RunID == "" {
-			task.RunID = s.cfg.RunID
-		}
-		if strings.TrimSpace(s.cfg.TeamID) != "" {
-			task.TeamID = strings.TrimSpace(task.TeamID)
-			if task.TeamID == "" {
-				task.TeamID = s.cfg.TeamID
-			}
-			task.AssignedRole = strings.TrimSpace(task.AssignedRole)
-			if task.AssignedRole == "" {
-				task.AssignedRole = s.cfg.RoleName
-			}
-			if strings.TrimSpace(task.CreatedBy) == "" {
-				task.CreatedBy = s.cfg.RoleName
-			}
-		}
-
-		if err := s.cfg.TaskStore.CreateTask(ctx, task); err != nil {
-			// Ignore duplicates (e.g., concurrent ingestion).
-			continue
-		}
-		hadWork = true
-		s.emitTaskQueuedOnce(ctx, task.TaskID, task.Goal, "inbox")
-	}
-
-	// Execute pending tasks from SQLite.
 	pending, err := s.listPendingTasks(ctx)
 	if err != nil {
 		errs = errors.Join(errs, err)
@@ -527,6 +415,12 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 			errs = errors.Join(errs, fmt.Errorf("get claimed %s: %w", taskID, err))
 			continue
 		}
+		claimed.ClaimedByAgentID = strings.TrimSpace(s.cfg.RunID)
+		if strings.TrimSpace(s.cfg.TeamID) != "" {
+			claimed.RoleSnapshot = strings.TrimSpace(s.cfg.RoleName)
+		}
+		_ = s.cfg.TaskStore.UpdateTask(ctx, claimed)
+
 		if claimed.Attempts > s.cfg.MaxRetries {
 			if err := s.quarantineTask(ctx, claimed); err != nil {
 				errs = errors.Join(errs, err)
@@ -545,10 +439,12 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 	if strings.TrimSpace(s.cfg.TeamID) == "" {
 		return s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
-			RunID:  s.cfg.RunID,
-			Status: []types.TaskStatus{types.TaskStatusPending},
-			SortBy: "priority",
-			Limit:  s.cfg.MaxPending,
+			RunID:          s.cfg.RunID,
+			AssignedToType: "agent",
+			AssignedTo:     s.cfg.RunID,
+			Status:         []types.TaskStatus{types.TaskStatusPending},
+			SortBy:         "priority",
+			Limit:          s.cfg.MaxPending,
 		})
 	}
 
@@ -557,11 +453,12 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 		limit = 50
 	}
 	tasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
-		TeamID:       s.cfg.TeamID,
-		AssignedRole: s.cfg.RoleName,
-		Status:       []types.TaskStatus{types.TaskStatusPending},
-		SortBy:       "priority",
-		Limit:        limit,
+		TeamID:         s.cfg.TeamID,
+		AssignedToType: "role",
+		AssignedTo:     s.cfg.RoleName,
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "priority",
+		Limit:          limit,
 	})
 	if err != nil {
 		return nil, err
@@ -570,11 +467,12 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 		return tasks, nil
 	}
 	unassigned, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
-		TeamID:         s.cfg.TeamID,
-		UnassignedOnly: true,
-		Status:         []types.TaskStatus{types.TaskStatusPending},
-		SortBy:         "priority",
-		Limit:          limit,
+		TeamID:          s.cfg.TeamID,
+		AssignedToType:  "team",
+		AssignedTo:      s.cfg.TeamID,
+		Status:          []types.TaskStatus{types.TaskStatusPending},
+		SortBy:          "priority",
+		Limit:           limit,
 	})
 	if err != nil {
 		return nil, err
@@ -621,10 +519,17 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		if strings.TrimSpace(task.AssignedRole) == "" {
 			task.AssignedRole = s.cfg.RoleName
 		}
+		task.AssignedToType = "role"
+		task.AssignedTo = task.AssignedRole
+		task.RoleSnapshot = strings.TrimSpace(s.cfg.RoleName)
 		if strings.TrimSpace(task.CreatedBy) == "" {
 			task.CreatedBy = s.cfg.RoleName
 		}
+	} else {
+		task.AssignedToType = "agent"
+		task.AssignedTo = strings.TrimSpace(s.cfg.RunID)
 	}
+	task.ClaimedByAgentID = strings.TrimSpace(s.cfg.RunID)
 	_ = s.cfg.TaskStore.UpdateTask(ctx, task)
 
 	if s.cfg.Events != nil {
@@ -822,9 +727,6 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	s.maybeEmitCoordinatorPolicyWarn(ctx, task, tr)
 	s.maybeCreateCoordinatorCallback(ctx, task, tr)
 
-	if err := s.writeResult(ctx, taskID, tr); err != nil {
-		return err
-	}
 	task.Status = tr.Status
 	task.CompletedAt = tr.CompletedAt
 	task.Error = tr.Error
@@ -924,7 +826,10 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 		RunID:        "team-" + strings.TrimSpace(s.cfg.TeamID) + "-callback",
 		TeamID:       strings.TrimSpace(s.cfg.TeamID),
 		AssignedRole: coordinatorRole,
+		AssignedToType: "role",
+		AssignedTo:     coordinatorRole,
 		CreatedBy:    strings.TrimSpace(s.cfg.RoleName),
+		TaskKind:     state.TaskKindCallback,
 		Goal:         callbackGoal,
 		Inputs:       inputs,
 		Priority:     1,
@@ -1027,7 +932,7 @@ func (s *Session) quarantineTask(ctx context.Context, task types.Task) error {
 	if taskID == "" {
 		return fmt.Errorf("taskID is required")
 	}
-	poisonPath := path.Join(strings.TrimRight(s.cfg.InboxPath, "/"), "poison", time.Now().UTC().Format("20060102T150405Z")+"-"+taskID+".json")
+	poisonPath := path.Join("/workspace", "quarantine", time.Now().UTC().Format("20060102T150405Z")+"-"+taskID+".json")
 	{
 		task.Error = fallback(strings.TrimSpace(task.Error), "max retries exceeded")
 		b, _ := json.MarshalIndent(task, "", "  ")
@@ -1051,16 +956,6 @@ func (s *Session) quarantineTask(ctx context.Context, task types.Task) error {
 		Data:    map[string]string{"taskId": taskID, "poisonPath": poisonPath, "error": fallback(strings.TrimSpace(task.Error), "max retries exceeded")},
 	})
 	return nil
-}
-
-func (s *Session) writeResult(ctx context.Context, taskID string, result types.TaskResult) error {
-	outbox := strings.TrimRight(s.cfg.OutboxPath, "/")
-	if outbox == "" {
-		outbox = "/outbox"
-	}
-	filename := "result-" + taskID + ".json"
-	resultPath := path.Join(outbox, filename)
-	return s.writeJSON(ctx, resultPath, result)
 }
 
 func (s *Session) materializeDeliverables(ctx context.Context, base string, artifacts []string) []string {

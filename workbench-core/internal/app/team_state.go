@@ -13,15 +13,6 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 )
 
-const teamControlSetModelFile = "set-model.json"
-
-type teamControlSetModel struct {
-	Type        string `json:"type"`
-	Command     string `json:"command"`
-	Model       string `json:"model"`
-	RequestedAt string `json:"requestedAt"`
-}
-
 type teamStateManager struct {
 	cfg        config.Config
 	teamID     string
@@ -39,14 +30,6 @@ func newTeamStateManager(cfg config.Config, manifest teamManifest) *teamStateMan
 
 func (m *teamStateManager) teamDir() string {
 	return fsutil.GetTeamDir(m.cfg.DataDir, m.teamID)
-}
-
-func (m *teamStateManager) controlDir() string {
-	return filepath.Join(m.teamDir(), "control")
-}
-
-func (m *teamStateManager) controlPath() string {
-	return filepath.Join(m.controlDir(), teamControlSetModelFile)
 }
 
 func (m *teamStateManager) currentModel() string {
@@ -124,40 +107,6 @@ func (m *teamStateManager) markModelFailed(model string, err error) error {
 			Error:          errMsg,
 		}
 	})
-}
-
-func (m *teamStateManager) readControlRequest() (teamControlSetModel, bool, error) {
-	path := m.controlPath()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return teamControlSetModel{}, false, nil
-		}
-		return teamControlSetModel{}, false, err
-	}
-	var req teamControlSetModel
-	if err := json.Unmarshal(raw, &req); err != nil {
-		return teamControlSetModel{}, false, err
-	}
-	if strings.ToLower(strings.TrimSpace(req.Type)) != "team_control" {
-		return teamControlSetModel{}, false, nil
-	}
-	if strings.ToLower(strings.TrimSpace(req.Command)) != "set_team_model" {
-		return teamControlSetModel{}, false, nil
-	}
-	req.Model = strings.TrimSpace(req.Model)
-	if req.Model == "" {
-		return teamControlSetModel{}, false, nil
-	}
-	return req, true, nil
-}
-
-func (m *teamStateManager) clearControlRequest() error {
-	path := m.controlPath()
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
 }
 
 func loadExistingTeamManifest(cfg config.Config, teamID string) (*teamManifest, error) {

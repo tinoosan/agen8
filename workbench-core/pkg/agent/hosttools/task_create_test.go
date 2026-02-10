@@ -85,8 +85,12 @@ func TestTaskCreateTool_CoordinatorCanAssignAnyRole(t *testing.T) {
 		"assignedRole": "researcher",
 	}
 	raw, _ := json.Marshal(args)
-	if _, err := tool.Execute(context.Background(), raw); err != nil {
+	req, err := tool.Execute(context.Background(), raw)
+	if err != nil {
 		t.Fatalf("Execute: %v", err)
+	}
+	if req.Op == types.HostOpFSWrite {
+		t.Fatalf("task_create should not write inbox files")
 	}
 	task := store.tasks["task-coord-1"]
 	if task.AssignedRole != "researcher" {
@@ -138,8 +142,12 @@ func TestTaskCreateTool_WorkerCanEscalateToCoordinator(t *testing.T) {
 		"assignedRole": "head-analyst",
 	}
 	raw, _ := json.Marshal(args)
-	if _, err := tool.Execute(context.Background(), raw); err != nil {
+	req, err := tool.Execute(context.Background(), raw)
+	if err != nil {
 		t.Fatalf("Execute: %v", err)
+	}
+	if req.Op == types.HostOpFSWrite {
+		t.Fatalf("task_create should not write inbox files")
 	}
 	task := store.tasks["task-worker-2"]
 	if task.AssignedRole != "head-analyst" {

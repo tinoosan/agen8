@@ -13,7 +13,7 @@ import (
 // Task storage contracts
 //
 // Task IDs
-//   - Most task IDs are canonicalized to the form "task-<id>" by ingress (webhook or /inbox ingestion).
+//   - Most task IDs are canonicalized to the form "task-<id>" by ingress (webhook/RPC/task tool ingress).
 //   - Heartbeat tasks use "heartbeat-..." IDs and are exempt from "task-" normalization.
 //   - Ingestion may preserve an unprefixed/original ID in task metadata as "originalTaskId".
 //
@@ -94,6 +94,11 @@ type TaskFilter struct {
 	RunID          string // Filter by run
 	TeamID         string // Filter by team
 	AssignedRole   string // Filter by assigned role
+	AssignedToType string // Filter by assignee type: team|role|agent
+	AssignedTo     string // Filter by assignee id/name
+	ClaimedBy      string // Filter by claimed_by agent id
+	TaskKind       string // Filter by task_kind
+	View           string // Logical view: inbox|outbox
 	UnassignedOnly bool   // Filter tasks where assigned_role is empty
 	Status         []types.TaskStatus
 	FromDate       *time.Time // Created after this time

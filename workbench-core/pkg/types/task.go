@@ -16,13 +16,16 @@ const (
 	TaskStatusCanceled  TaskStatus = "canceled"
 )
 
-// Task is a unit of work delivered via /inbox for a single autonomous agent.
+// Task is the canonical DB-backed unit of work for autonomous agents.
 type Task struct {
 	TaskID       string         `json:"taskId"`
 	SessionID    string         `json:"sessionId,omitempty"`
 	RunID        string         `json:"runId,omitempty"`
 	TeamID       string         `json:"teamId,omitempty"`
 	AssignedRole string         `json:"assignedRole,omitempty"`
+	AssignedToType string       `json:"assignedToType,omitempty"` // team | role | agent
+	AssignedTo     string       `json:"assignedTo,omitempty"`     // team id, role name, or agent id
+	ClaimedByAgentID string     `json:"claimedByAgentId,omitempty"`
 	RoleSnapshot string         `json:"roleSnapshot,omitempty"`
 	TaskKind     string         `json:"taskKind,omitempty"`
 	CreatedBy    string         `json:"createdBy,omitempty"`
@@ -71,7 +74,7 @@ func (t *Task) NormalizeStatus() {
 }
 
 // TaskResult captures the outcome of a task.
-// It is serialized to JSON and delivered via /outbox.
+// It is persisted in SQLite and surfaced through task/artifact views.
 type TaskResult struct {
 	TaskID      string     `json:"taskId"`
 	Status      TaskStatus `json:"status"`

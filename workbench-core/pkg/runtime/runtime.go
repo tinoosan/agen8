@@ -235,6 +235,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountSkills, err)
 	}
 
+	// Compatibility mounts only: task routing/completion is DB-backed.
 	inboxDir := filepath.Join(runDir, vfs.MountInbox)
 	if err := os.MkdirAll(inboxDir, 0755); err != nil {
 		return nil, fmt.Errorf("prepare inbox dir: %w", err)

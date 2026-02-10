@@ -10,6 +10,52 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/events"
 )
 
+// SetModel applies a runtime model change to this session.
+func (s *Session) SetModel(ctx context.Context, model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return fmt.Errorf("model is required")
+	}
+	s.cfg.Agent.SetModel(model)
+	s.emitBestEffort(ctx, events.Event{
+		Type:    "control.success",
+		Message: "Control request applied",
+		Data: map[string]string{
+			"command": "set_model",
+			"model":   model,
+		},
+	})
+	return nil
+}
+
+// SwitchProfile swaps the active profile for this session.
+func (s *Session) SwitchProfile(ctx context.Context, ref string) error {
+	if s.cfg.ResolveProfile == nil {
+		return fmt.Errorf("profile switching not configured")
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return fmt.Errorf("profile is required")
+	}
+	p, dir, err := s.cfg.ResolveProfile(ref)
+	if err != nil {
+		return err
+	}
+	if err := s.setProfile(p, dir); err != nil {
+		return err
+	}
+	s.startHeartbeats(ctx)
+	s.emitBestEffort(ctx, events.Event{
+		Type:    "control.success",
+		Message: "Control request applied",
+		Data: map[string]string{
+			"command": "switch_profile",
+			"profile": ref,
+		},
+	})
+	return nil
+}
+
 type controlTask struct {
 	Type      string         `json:"type"`
 	Command   string         `json:"command"`
