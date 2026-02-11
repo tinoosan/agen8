@@ -33,6 +33,13 @@ type LLMClient interface {
 	SupportsStreaming() bool
 }
 
+// LLMClientCompaction is an optional extension for providers that support
+// server-side conversation compaction (for example, OpenAI Responses compact).
+type LLMClientCompaction interface {
+	SupportsServerCompaction() bool
+	CompactConversation(ctx context.Context, req LLMCompactionRequest) (LLMCompactionResponse, error)
+}
+
 type LLMStreamChunk struct {
 	Text        string
 	IsReasoning bool
@@ -61,6 +68,16 @@ type LLMRequest struct {
 	PreviousResponseID string
 	ReasoningEffort    string
 	ReasoningSummary   string
+}
+
+type LLMCompactionRequest struct {
+	Model    string
+	System   string
+	Messages []LLMMessage
+}
+
+type LLMCompactionResponse struct {
+	Messages []LLMMessage
 }
 
 type LLMResponseSchema struct {

@@ -81,10 +81,9 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			system = updatedSystem
 		}
 
-		// Deterministic context compaction: prevent long-running tool loops from accumulating
-		// unbounded message history (especially large tool outputs). This is a first-line
-		// defense; it does not require a separate summarizer model.
-		msgs = compactConversationForBudget(msgs, system, compactBudgetBytesFromEnv())
+		// Keep context bounded for long-running tool loops.
+		// Prefer provider-side compaction when available, then fall back to local compaction.
+		msgs = a.compactConversationForBudget(ctx, msgs, system, compactBudgetBytesFromEnv())
 
 		req := llmtypes.LLMRequest{
 			Model:            a.Model,
@@ -180,6 +179,28 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 		}
 
 	}
+}
+
+func (a *DefaultAgent) compactConversationForBudget(ctx context.Context, msgs []llmtypes.LLMMessage, system string, budgetBytes int) []llmtypes.LLMMessage {
+	if budgetBytes <= 0 || len(msgs) == 0 {
+		return msgs
+	}
+	if estimateConversationBytes(system, msgs) <= budgetBytes {
+		return msgs
+	}
+
+	if compactor, ok := a.LLM.(llmtypes.LLMClientCompaction); ok && compactor.SupportsServerCompaction() {
+		compacted, err := compactor.CompactConversation(ctx, llmtypes.LLMCompactionRequest{
+			Model:    a.Model,
+			System:   system,
+			Messages: msgs,
+		})
+		if err == nil && len(compacted.Messages) != 0 {
+			return compacted.Messages
+		}
+	}
+
+	return compactConversationForBudget(msgs, system, budgetBytes)
 }
 
 func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req llmtypes.LLMRequest) (llmtypes.LLMResponse, string, error) {
@@ -472,7 +493,7 @@ func DefaultSystemPrompt() string {
   </capabilities>
   <vfs>
     <mount path="/project">User's actual project files.</mount>
-    <mount path="/workspace">Run-scoped, writable workspace for artifacts and notes.</mount>
+    <mount path="/workspace">Run-scoped, writable workspace. Save deliverable files directly here (e.g. /workspace/report.pdf) for discoverability.</mount>
     <mount path="/log">Run event stream and trace excerpts.</mount>
     <mount path="/skills">These are YOUR skills. Check /skills/<skill_name>/SKILL.md for documented workflows.</mount>
     <mount path="/plan">Planning workspace for complex tasks. /plan/HEAD.md is details; /plan/CHECKLIST.md is the checklist.</mount>

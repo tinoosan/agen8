@@ -36,6 +36,8 @@ type Client struct {
 	// schemaUnsupported is set when the provider rejects json_schema response_format.
 	// Once set, we stop attempting schema requests to avoid repeated 400s.
 	schemaUnsupported atomic.Bool
+	// compactionUnsupported is set when /responses/compact is not supported by the provider.
+	compactionUnsupported atomic.Bool
 }
 
 func NewClientFromEnv() (*Client, error) {
@@ -477,6 +479,13 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 			rrole = responses.EasyInputMessageRoleDeveloper
 		case "assistant":
 			rrole = responses.EasyInputMessageRoleAssistant
+		case "compaction":
+			enc := strings.TrimSpace(m.Content)
+			if enc == "" {
+				return responses.ResponseNewParams{}, fmt.Errorf("compaction message requires encrypted content")
+			}
+			items = append(items, responses.ResponseInputItemParamOfCompaction(enc))
+			continue
 		default:
 			rrole = responses.EasyInputMessageRoleUser
 		}
@@ -903,6 +912,113 @@ func (c *Client) Generate(ctx context.Context, req types.LLMRequest) (types.LLMR
 
 func (c *Client) SupportsStreaming() bool {
 	return c != nil && c.client != nil
+}
+
+func (c *Client) SupportsServerCompaction() bool {
+	return c != nil && c.client != nil && !c.compactionUnsupported.Load()
+}
+
+func (c *Client) CompactConversation(ctx context.Context, req types.LLMCompactionRequest) (types.LLMCompactionResponse, error) {
+	if c == nil || c.client == nil {
+		return types.LLMCompactionResponse{}, fmt.Errorf("llm client is nil")
+	}
+	if c.compactionUnsupported.Load() {
+		return types.LLMCompactionResponse{}, fmt.Errorf("server compaction is unsupported")
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		return types.LLMCompactionResponse{}, fmt.Errorf("model is required")
+	}
+	input := make([]responses.ResponseInputItemUnionParam, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		role := strings.ToLower(strings.TrimSpace(m.Role))
+		if role == "tool" {
+			callID := strings.TrimSpace(m.ToolCallID)
+			if callID == "" {
+				return types.LLMCompactionResponse{}, fmt.Errorf("tool message requires toolCallID")
+			}
+			input = append(input, responses.ResponseInputItemParamOfFunctionCallOutput(callID, m.Content))
+			continue
+		}
+		switch role {
+		case "compaction":
+			enc := strings.TrimSpace(m.Content)
+			if enc == "" {
+				return types.LLMCompactionResponse{}, fmt.Errorf("compaction message requires encrypted content")
+			}
+			input = append(input, responses.ResponseInputItemParamOfCompaction(enc))
+		case "system", "developer", "assistant":
+			r := responses.EasyInputMessageRoleUser
+			if role == "system" {
+				r = responses.EasyInputMessageRoleSystem
+			} else if role == "developer" {
+				r = responses.EasyInputMessageRoleDeveloper
+			} else if role == "assistant" {
+				r = responses.EasyInputMessageRoleAssistant
+			}
+			input = append(input, responses.ResponseInputItemParamOfMessage(m.Content, r))
+			for _, tc := range m.ToolCalls {
+				if strings.TrimSpace(strings.ToLower(tc.Type)) != "function" {
+					continue
+				}
+				callID := strings.TrimSpace(tc.ID)
+				name := strings.TrimSpace(tc.Function.Name)
+				args := tc.Function.Arguments
+				if callID == "" || name == "" {
+					continue
+				}
+				input = append(input, responses.ResponseInputItemParamOfFunctionCall(args, callID, name))
+			}
+		default:
+			input = append(input, responses.ResponseInputItemParamOfMessage(m.Content, responses.EasyInputMessageRoleUser))
+		}
+	}
+
+	params := responses.ResponseCompactParams{
+		Model: responses.ResponseCompactParamsModel(strings.TrimSpace(req.Model)),
+		Input: responses.ResponseCompactParamsInputUnion{
+			OfResponseInputItemArray: input,
+		},
+	}
+	if strings.TrimSpace(req.System) != "" {
+		params.Instructions = openai.String(strings.TrimSpace(req.System))
+	}
+
+	resp, err := c.client.Responses.Compact(ctx, params)
+	if err != nil {
+		if shouldFallbackToChat(err) {
+			c.compactionUnsupported.Store(true)
+		}
+		return types.LLMCompactionResponse{}, err
+	}
+
+	// Compact API returns all user messages + one compaction item.
+	// Preserve user messages from our local state and append the compacted payload.
+	out := make([]types.LLMMessage, 0, len(req.Messages)+1)
+	for _, m := range req.Messages {
+		if strings.EqualFold(strings.TrimSpace(m.Role), "user") {
+			out = append(out, types.LLMMessage{
+				Role:    "user",
+				Content: m.Content,
+			})
+		}
+	}
+	for _, item := range resp.Output {
+		if strings.TrimSpace(item.Type) != "compaction" {
+			continue
+		}
+		if strings.TrimSpace(item.EncryptedContent) == "" {
+			continue
+		}
+		out = append(out, types.LLMMessage{
+			Role:    "compaction",
+			Content: item.EncryptedContent,
+		})
+		break
+	}
+	if len(out) == 0 {
+		return types.LLMCompactionResponse{}, fmt.Errorf("compaction response did not include reusable items")
+	}
+	return types.LLMCompactionResponse{Messages: out}, nil
 }
 
 func (c *Client) generateOnce(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {

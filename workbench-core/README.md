@@ -37,12 +37,25 @@ Workbench Core is a local agentic runtime that exposes an interactive CLI for la
    ./workbench show history <sessionId>  # print the JSONL operation log
    ```
 
+## The Vision: Kubernetes for Agents
+
+Workbench is designed as a **declarative runtime for autonomous agents**. Just as Kubernetes manages container lifecycles through declarative YAML manifests, Workbench manages agent lifecycles through **Profiles** and **Skills**.
+
+It shifts the paradigm from "building a chain" to "configuring a workstation":
+- **Declarative Identity**: define what an agent *is* (roles, goals, models) in simple YAML.
+- **Portable Capabilities**: define what an agent *can do* in standard Markdown (`SKILL.md`).
+- **Autonomous Lifecycles**: specify how often an agent should "wake up" to process its inbox or clean its workspace via `heartbeats`.
+
 ## Core concepts
 
+### Agent-as-Config
+Workbench treats agents as configuration rather than imperative code. By isolating behavior into profiles and skills, you gain:
+- **Portability**: Move an agent profile from your laptop to a server without changing code.
+- **Auditability**: Every instruction and capability is version-controllable in plain text.
+- **Interoperability**: Skills follow an open standard, allowing them to be shared across different agent instances.
+
 ### Agentic File System (AFS)
-
 Workbench exposes a virtual filesystem inside each run. Key mounts include:
-
 - `/project` – your host workspace (defaults to the current working directory; overridable via `--workdir`).
 - `/workspace` – agent-local workspace mapped to `dataDir/agents/<agentId>/workspace`.
 - `/log` – run event stream and trace excerpts.

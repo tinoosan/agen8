@@ -420,6 +420,37 @@ func TestBuildResponseParams_UnsupportedToolType(t *testing.T) {
 	}
 }
 
+func TestBuildResponseParams_CompactionMessageMapped(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli}
+	params, err := c.buildResponseParams(types.LLMRequest{
+		Model: "openai/gpt-5-mini",
+		Messages: []types.LLMMessage{
+			{Role: "user", Content: "hello"},
+			{Role: "compaction", Content: "encrypted_payload"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildResponseParams: %v", err)
+	}
+	b, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	input, _ := m["input"].([]any)
+	if len(input) != 2 {
+		t.Fatalf("input len=%d, want 2", len(input))
+	}
+	last, _ := input[1].(map[string]any)
+	if last["type"] != "compaction" {
+		t.Fatalf("expected second input item type=compaction, got %+v", last)
+	}
+}
+
 func TestShouldFallbackFromJSONSchema_ReturnsFalseForNonSchemaErrors(t *testing.T) {
 	if shouldFallbackFromJSONSchema(errors.New("other error")) {
 		t.Fatalf("expected no fallback for non-schema error")
