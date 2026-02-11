@@ -190,7 +190,11 @@ func buildTeamBlock(teamID string, roleName string, coordinatorRole string, team
 		b.WriteString("- As coordinator, your only responsibilities are: break down goals, delegate tasks, review callbacks, and track completion.\n")
 		b.WriteString("- As coordinator, NEVER use web_search, file tools, or shell tools for specialist work.\n")
 	}
-	b.WriteString("- You share a workspace at /workspace with all team members.\n")
+	b.WriteString("- You share a workspace at /workspace with all team members. Save your deliverable files to /workspace/")
+	b.WriteString(roleName)
+	b.WriteString("/ (e.g. /workspace/")
+	b.WriteString(roleName)
+	b.WriteString("/report.pdf) for organization.\n")
 	b.WriteString("- Use WriteMemory and AppendMemory tools for memory updates; do not write memory files directly in the workspace.\n")
 	b.WriteString("</team>")
 	return strings.TrimSpace(b.String())

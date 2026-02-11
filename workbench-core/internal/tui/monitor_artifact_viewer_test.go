@@ -26,7 +26,7 @@ func TestResolveArtifactDisk_RunMode(t *testing.T) {
 	}
 }
 
-func TestBuildArtifactTreeFromGroups_DayRoleKindTaskFiles(t *testing.T) {
+func TestBuildArtifactTreeFromGroups_FlatRoleFiles(t *testing.T) {
 	m := &monitorModel{artifactWorkspaceExpand: map[string]bool{}}
 	groups := []protocol.ArtifactNode{
 		{NodeKey: "day:2026-02-08", Kind: "day", Label: "2026-02-08", DayBucket: "2026-02-08"},
@@ -38,23 +38,14 @@ func TestBuildArtifactTreeFromGroups_DayRoleKindTaskFiles(t *testing.T) {
 	}
 
 	tree := m.buildArtifactTreeFromGroups(groups)
-	if len(tree) < 6 {
-		t.Fatalf("expected day+role+kind+task+files nodes, got %d", len(tree))
+	if len(tree) != 3 {
+		t.Fatalf("expected role header + 2 files, got %d", len(tree))
 	}
-	if !tree[0].isDayHeader || tree[0].name != "2026-02-08" {
-		t.Fatalf("expected day header first, got %+v", tree[0])
+	if !tree[0].isRoleHeader || tree[0].name != "ceo" || tree[0].depth != 0 {
+		t.Fatalf("expected role header first at depth 0, got %+v", tree[0])
 	}
-	if !tree[1].isRoleHeader || tree[1].name != "ceo" {
-		t.Fatalf("expected role header second, got %+v", tree[1])
-	}
-	if !tree[2].isKindHeader || tree[2].name != "Callback Tasks" {
-		t.Fatalf("expected callback kind header, got %+v", tree[2])
-	}
-	if !tree[3].isTaskHeader || tree[3].taskID != "callback-task-ceo-1" {
-		t.Fatalf("expected task header, got %+v", tree[3])
-	}
-	if tree[4].name != "SUMMARY.md" || !tree[4].isSummary {
-		t.Fatalf("expected summary file leaf, got %+v", tree[4])
+	if tree[1].name != "SUMMARY.md" || !tree[1].isSummary || tree[1].depth != 1 {
+		t.Fatalf("expected summary file leaf at depth 1, got %+v", tree[1])
 	}
 }
 
@@ -70,20 +61,20 @@ func TestRebuildTree_PreservesSelectionOnExpandCollapse(t *testing.T) {
 	m.artifactAllTree = m.buildArtifactTreeFromGroups(groups)
 	m.applyArtifactVisibilityAndSearch()
 
-	idx := m.findArtifactNodeByKey("role:2026-02-08:ceo")
+	idx := m.findArtifactNodeByKey("roleflat:ceo")
 	if idx < 0 {
 		t.Fatalf("expected role node")
 	}
 	m.artifactSelected = idx
-	m.artifactWorkspaceExpand["role:2026-02-08:ceo"] = true
-	m.rebuildArtifactTreeWithAnchor("role:2026-02-08:ceo", idx)
-	if m.artifactTree[m.artifactSelected].key != "role:2026-02-08:ceo" {
+	m.artifactWorkspaceExpand["roleflat:ceo"] = true
+	m.rebuildArtifactTreeWithAnchor("roleflat:ceo", idx)
+	if m.artifactTree[m.artifactSelected].key != "roleflat:ceo" {
 		t.Fatalf("selection moved unexpectedly to %q", m.artifactTree[m.artifactSelected].key)
 	}
 
-	m.artifactWorkspaceExpand["role:2026-02-08:ceo"] = false
-	m.rebuildArtifactTreeWithAnchor("role:2026-02-08:ceo", m.artifactSelected)
-	if m.artifactTree[m.artifactSelected].key != "role:2026-02-08:ceo" {
+	m.artifactWorkspaceExpand["roleflat:ceo"] = false
+	m.rebuildArtifactTreeWithAnchor("roleflat:ceo", m.artifactSelected)
+	if m.artifactTree[m.artifactSelected].key != "roleflat:ceo" {
 		t.Fatalf("selection should stay on collapsed node, got %q", m.artifactTree[m.artifactSelected].key)
 	}
 }
@@ -119,5 +110,56 @@ func TestSearchFilter_FindsInCollapsedBranches(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected to find summary in collapsed branches, got %+v", m.artifactTree)
+	}
+}
+
+func TestBuildWorkspaceGroupedNodes_FlatAndSkipsDeliverables(t *testing.T) {
+	entries := []workspaceEntry{
+		{role: "researcher", fileLabel: "deliverables/2026-02-08/task-1/SUMMARY.md", vpath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md"},
+		{role: "researcher", fileLabel: "researcher/report.md", vpath: "/workspace/researcher/report.md"},
+		{role: "researcher", fileLabel: "researcher/data/findings.json", vpath: "/workspace/researcher/data/findings.json"},
+	}
+
+	nodes := buildWorkspaceGroupedNodes("researcher", entries)
+	if len(nodes) != 3 {
+		t.Fatalf("expected 1 header + 2 files, got %d: %+v", len(nodes), nodes)
+	}
+	if !nodes[0].isHeader || !nodes[0].isWorkspaceGroup || nodes[0].depth != 1 {
+		t.Fatalf("expected workspace group header at depth 1, got %+v", nodes[0])
+	}
+	if nodes[1].depth != 2 || nodes[2].depth != 2 {
+		t.Fatalf("expected flat file depth=2, got %+v", nodes)
+	}
+	for _, n := range nodes {
+		if strings.Contains(n.vpath, "/workspace/deliverables/") {
+			t.Fatalf("deliverables path should be skipped from workspace group: %+v", n)
+		}
+	}
+}
+
+func TestBuildWorkspaceGroupedNodes_NoHeaderWhenAllFiltered(t *testing.T) {
+	entries := []workspaceEntry{
+		{role: "shared", fileLabel: "deliverables/2026-02-08/task-1/SUMMARY.md", vpath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md"},
+	}
+	nodes := buildWorkspaceGroupedNodes("shared", entries)
+	if len(nodes) != 0 {
+		t.Fatalf("expected no nodes when all entries are filtered, got %+v", nodes)
+	}
+}
+
+func TestInferWorkspaceRole_FromRoleDirectoryAndFallback(t *testing.T) {
+	knownRoles := map[string]struct{}{
+		"researcher": {},
+		"writer":     {},
+	}
+
+	if got := inferWorkspaceRole("researcher/report.md", knownRoles); got != "researcher" {
+		t.Fatalf("expected role from first segment, got %q", got)
+	}
+	if got := inferWorkspaceRole("misc/report.md", knownRoles); got != artifactWorkspaceSharedGroup {
+		t.Fatalf("expected unknown segment to fallback to shared, got %q", got)
+	}
+	if got := inferWorkspaceRole("deliverables/2026-02-08/task-1/SUMMARY.md", knownRoles); got != artifactWorkspaceSharedGroup {
+		t.Fatalf("expected legacy deliverables to fallback to shared, got %q", got)
 	}
 }

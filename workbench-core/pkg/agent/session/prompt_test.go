@@ -18,6 +18,9 @@ func TestBuildTeamBlock(t *testing.T) {
 	if !strings.Contains(block, `assignedRole="head-analyst"`) {
 		t.Fatalf("expected escalation target in team block, got: %s", block)
 	}
+	if !strings.Contains(block, `/workspace/researcher/`) {
+		t.Fatalf("expected role-scoped workspace guidance in team block, got: %s", block)
+	}
 }
 
 func TestBuildSystemPrompt_IncludesTeamBlock(t *testing.T) {

@@ -207,18 +207,17 @@ func scanTeamWorkspaceFiles(dataDir, teamID string, tasks []types.Task, roleByRu
 		return nil
 	}
 
-	roleByTaskID := map[string]string{}
+	knownRoles := map[string]struct{}{}
 	for _, t := range tasks {
-		tid := strings.TrimSpace(t.TaskID)
-		if tid == "" {
-			continue
+		role := strings.TrimSpace(roleForTask(t, roleByRunID))
+		if role != "" {
+			knownRoles[role] = struct{}{}
 		}
-		roleByTaskID[tid] = roleForTask(t, roleByRunID)
 	}
 
 	grouped := map[string][]workspaceEntry{}
 	for _, rel := range relFiles {
-		role := inferWorkspaceRole(rel, roleByTaskID)
+		role := inferWorkspaceRole(rel, knownRoles)
 		grouped[role] = append(grouped[role], buildWorkspaceEntry(rel, role, ""))
 	}
 
@@ -237,36 +236,20 @@ func scanTeamWorkspaceFiles(dataDir, teamID string, tasks []types.Task, roleByRu
 
 type workspaceEntry struct {
 	role      string
-	day       string
-	category  string
-	taskLabel string
 	fileLabel string
 	vpath     string
 }
 
 func buildWorkspaceEntry(rel, role, runID string) workspaceEntry {
 	rel = strings.TrimSpace(filepath.ToSlash(rel))
+	fileLabel := rel
+	if fileLabel == "" {
+		fileLabel = filepath.Base(rel)
+	}
 	e := workspaceEntry{
 		role:      strings.TrimSpace(role),
-		day:       "other",
-		category:  "misc",
-		taskLabel: "root",
-		fileLabel: filepath.Base(rel),
+		fileLabel: fileLabel,
 		vpath:     "/workspace/" + rel,
-	}
-	parts := strings.Split(rel, "/")
-	if len(parts) >= 4 && parts[0] == "deliverables" {
-		e.day = parts[1]
-		taskFolder := strings.TrimSpace(parts[2])
-		e.category = workspaceCategory(taskFolder)
-		e.taskLabel = compactTaskLabel(taskFolder)
-		fileRel := strings.Join(parts[3:], "/")
-		if strings.TrimSpace(fileRel) != "" {
-			e.fileLabel = fileRel
-		}
-		if strings.TrimSpace(e.role) == "" {
-			e.role = roleFromTaskFolder(taskFolder)
-		}
 	}
 	if strings.TrimSpace(e.role) == "" {
 		if strings.TrimSpace(runID) != "" {
@@ -282,21 +265,22 @@ func buildWorkspaceGroupedNodes(role string, entries []workspaceEntry) []artifac
 	if len(entries) == 0 {
 		return nil
 	}
-	sort.SliceStable(entries, func(i, j int) bool {
-		if entries[i].day != entries[j].day {
-			// Keep recent dates first when format is YYYY-MM-DD.
-			return entries[i].day > entries[j].day
+	filtered := make([]workspaceEntry, 0, len(entries))
+	for _, e := range entries {
+		rel := strings.TrimPrefix(strings.TrimSpace(e.vpath), "/workspace/")
+		if strings.HasPrefix(rel, "deliverables/") {
+			continue
 		}
-		if entries[i].category != entries[j].category {
-			return workspaceCategoryRank(entries[i].category) < workspaceCategoryRank(entries[j].category)
-		}
-		if entries[i].taskLabel != entries[j].taskLabel {
-			return entries[i].taskLabel < entries[j].taskLabel
-		}
-		return entries[i].fileLabel < entries[j].fileLabel
+		filtered = append(filtered, e)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		return filtered[i].fileLabel < filtered[j].fileLabel
 	})
 
-	nodes := make([]artifactTreeNode, 0, len(entries)+8)
+	nodes := make([]artifactTreeNode, 0, len(filtered)+1)
 	role = strings.TrimSpace(role)
 	roleKey := "wsgroup:" + role
 	nodes = append(nodes, artifactTreeNode{
@@ -308,134 +292,16 @@ func buildWorkspaceGroupedNodes(role string, entries []workspaceEntry) []artifac
 		expanded:         false,
 		depth:            1,
 	})
-
-	currentDay := ""
-	currentCategory := ""
-	currentTask := ""
-	for _, e := range entries {
-		if e.day != currentDay {
-			currentDay = e.day
-			currentCategory = ""
-			currentTask = ""
-			dayKey := "wsday:" + role + ":" + currentDay
-			nodes = append(nodes, artifactTreeNode{
-				key:              dayKey,
-				role:             role,
-				name:             currentDay,
-				isHeader:         true,
-				isWorkspaceGroup: true,
-				expanded:         false,
-				depth:            2,
-			})
-		}
-		if e.category != currentCategory {
-			currentCategory = e.category
-			currentTask = ""
-			catKey := "wscat:" + role + ":" + currentDay + ":" + currentCategory
-			nodes = append(nodes, artifactTreeNode{
-				key:              catKey,
-				role:             role,
-				name:             workspaceCategoryLabel(currentCategory),
-				isHeader:         true,
-				isWorkspaceGroup: true,
-				expanded:         false,
-				depth:            3,
-			})
-		}
-		if e.taskLabel != currentTask {
-			currentTask = e.taskLabel
-			taskKey := "wstask:" + role + ":" + currentDay + ":" + currentCategory + ":" + currentTask
-			nodes = append(nodes, artifactTreeNode{
-				key:              taskKey,
-				role:             role,
-				name:             currentTask,
-				isHeader:         true,
-				isWorkspaceGroup: true,
-				expanded:         false,
-				depth:            4,
-			})
-		}
+	for _, e := range filtered {
 		nodes = append(nodes, artifactTreeNode{
 			key:   "wsfile:" + e.vpath,
 			role:  role,
 			vpath: e.vpath,
 			name:  e.fileLabel,
-			depth: 5,
+			depth: 2,
 		})
 	}
 	return nodes
-}
-
-func workspaceCategory(taskFolder string) string {
-	tf := strings.ToLower(strings.TrimSpace(taskFolder))
-	switch {
-	case strings.HasPrefix(tf, "callback-task-"):
-		return "callback"
-	case strings.HasPrefix(tf, "heartbeat-"):
-		return "heartbeat"
-	case strings.HasPrefix(tf, "task-"):
-		return "task"
-	default:
-		return "other"
-	}
-}
-
-func workspaceCategoryRank(category string) int {
-	switch strings.TrimSpace(category) {
-	case "callback":
-		return 0
-	case "heartbeat":
-		return 1
-	case "task":
-		return 2
-	case "other":
-		return 3
-	default:
-		return 4
-	}
-}
-
-func workspaceCategoryLabel(category string) string {
-	switch strings.TrimSpace(category) {
-	case "callback":
-		return "Callback Tasks"
-	case "heartbeat":
-		return "Heartbeat Tasks"
-	case "task":
-		return "Tasks"
-	case "other":
-		return "Other Deliverables"
-	default:
-		return "Misc Files"
-	}
-}
-
-func compactTaskLabel(taskFolder string) string {
-	taskFolder = strings.TrimSpace(taskFolder)
-	if strings.HasPrefix(taskFolder, "callback-task-") {
-		return strings.TrimPrefix(taskFolder, "callback-task-")
-	}
-	if strings.HasPrefix(taskFolder, "heartbeat-") {
-		return strings.TrimPrefix(taskFolder, "heartbeat-")
-	}
-	return taskFolder
-}
-
-func roleFromTaskFolder(taskFolder string) string {
-	tf := strings.TrimSpace(strings.ToLower(taskFolder))
-	if strings.HasPrefix(tf, "heartbeat-") {
-		rest := strings.TrimPrefix(tf, "heartbeat-")
-		role := strings.Split(rest, "-run-")[0]
-		return strings.TrimSpace(role)
-	}
-	if strings.HasPrefix(tf, "callback-task-") {
-		rest := strings.TrimPrefix(tf, "callback-task-")
-		parts := strings.Split(rest, "-")
-		if len(parts) > 0 {
-			return strings.TrimSpace(parts[0])
-		}
-	}
-	return ""
 }
 
 func scanWorkspaceRelativeFiles(baseDir string, maxVisited int) []string {
@@ -476,17 +342,17 @@ func scanWorkspaceRelativeFiles(baseDir string, maxVisited int) []string {
 	return files
 }
 
-func inferWorkspaceRole(rel string, roleByTaskID map[string]string) string {
+func inferWorkspaceRole(rel string, knownRoles map[string]struct{}) string {
 	rel = strings.TrimSpace(filepath.ToSlash(rel))
 	if rel == "" {
 		return artifactWorkspaceSharedGroup
 	}
 	parts := strings.Split(rel, "/")
-	if len(parts) >= 3 && parts[0] == "deliverables" {
-		taskID := strings.TrimSpace(parts[2])
-		if taskID != "" {
-			if role := strings.TrimSpace(roleByTaskID[taskID]); role != "" {
-				return role
+	if len(parts) > 0 {
+		candidate := strings.TrimSpace(parts[0])
+		if candidate != "" {
+			if _, ok := knownRoles[candidate]; ok {
+				return candidate
 			}
 		}
 	}
@@ -544,53 +410,78 @@ func (m *monitorModel) buildArtifactTreeFromGroups(nodes []protocol.ArtifactNode
 	if len(nodes) == 0 {
 		return nil
 	}
-	tree := make([]artifactTreeNode, 0, len(nodes))
-	newestDay := ""
-	for _, n := range nodes {
-		if strings.TrimSpace(n.Kind) == "day" {
-			newestDay = strings.TrimSpace(n.DayBucket)
-			break
-		}
-	}
-	depthByKind := map[string]int{"day": 0, "role": 1, "stream": 2, "task": 3, "file": 4}
+	grouped := map[string][]artifactTreeNode{}
+	currentRole := ""
 	for _, n := range nodes {
 		kind := strings.TrimSpace(n.Kind)
-		key := strings.TrimSpace(n.NodeKey)
-		if key == "" {
+		if kind == "role" {
+			currentRole = strings.TrimSpace(n.Role)
+			if currentRole == "" {
+				currentRole = strings.TrimSpace(n.Label)
+			}
 			continue
 		}
-		depth := depthByKind[kind]
+		if kind != "file" {
+			continue
+		}
+		role := strings.TrimSpace(n.Role)
+		if role == "" {
+			role = strings.TrimSpace(currentRole)
+		}
+		if role == "" {
+			role = "unassigned"
+		}
 		name := strings.TrimSpace(n.Label)
 		if name == "" {
 			name = filepath.Base(strings.TrimSpace(n.VPath))
 		}
-		item := artifactTreeNode{
+		grouped[role] = append(grouped[role], artifactTreeNode{
+			key:       "file:" + strings.TrimSpace(n.VPath),
+			taskID:    strings.TrimSpace(n.TaskID),
+			role:      role,
+			kind:      strings.TrimSpace(n.TaskKind),
+			day:       strings.TrimSpace(n.DayBucket),
+			status:    strings.TrimSpace(n.Status),
+			vpath:     strings.TrimSpace(n.VPath),
+			diskPath:  strings.TrimSpace(n.DiskPath),
+			name:      name,
+			isSummary: n.IsSummary,
+			depth:     1,
+		})
+	}
+
+	roles := make([]string, 0, len(grouped))
+	for role := range grouped {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+
+	tree := make([]artifactTreeNode, 0, len(nodes))
+	for _, role := range roles {
+		key := "roleflat:" + role
+		expanded := true
+		if v, ok := m.artifactWorkspaceExpand[key]; ok {
+			expanded = v
+		} else {
+			m.artifactWorkspaceExpand[key] = true
+		}
+		tree = append(tree, artifactTreeNode{
 			key:          key,
-			taskID:       strings.TrimSpace(n.TaskID),
-			role:         strings.TrimSpace(n.Role),
-			kind:         strings.TrimSpace(n.TaskKind),
-			day:          strings.TrimSpace(n.DayBucket),
-			status:       strings.TrimSpace(n.Status),
-			vpath:        strings.TrimSpace(n.VPath),
-			diskPath:     strings.TrimSpace(n.DiskPath),
-			name:         name,
-			isSummary:    n.IsSummary,
-			isHeader:     kind != "file",
-			isDayHeader:  kind == "day",
-			isRoleHeader: kind == "role",
-			isKindHeader: kind == "stream",
-			isTaskHeader: kind == "task",
-			depth:        depth,
-		}
-		if item.isHeader {
-			if expanded, ok := m.artifactWorkspaceExpand[key]; ok {
-				item.expanded = expanded
-			} else {
-				item.expanded = kind == "day" && item.day == newestDay
-				m.artifactWorkspaceExpand[key] = item.expanded
+			role:         role,
+			name:         role,
+			isHeader:     true,
+			isRoleHeader: true,
+			expanded:     expanded,
+			depth:        0,
+		})
+		files := grouped[role]
+		sort.SliceStable(files, func(i, j int) bool {
+			if files[i].isSummary != files[j].isSummary {
+				return files[i].isSummary
 			}
-		}
-		tree = append(tree, item)
+			return files[i].name < files[j].name
+		})
+		tree = append(tree, files...)
 	}
 	return tree
 }

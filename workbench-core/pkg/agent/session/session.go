@@ -752,14 +752,11 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	}
 
 	base := deliverablesBase(doneAt, taskID)
-	copied := []string(nil)
-	if len(runRes.Artifacts) != 0 {
-		copied = s.materializeDeliverables(ctx, base, runRes.Artifacts)
-	}
-	if summaryPath := s.writeTaskSummary(ctx, base, taskID, task.Goal, tr, copied); summaryPath != "" {
-		tr.Artifacts = append([]string{summaryPath}, copied...)
+	artifacts := dedupeArtifactPaths(runRes.Artifacts)
+	if summaryPath := s.writeTaskSummary(ctx, base, taskID, task.Goal, tr, artifacts); summaryPath != "" {
+		tr.Artifacts = append([]string{summaryPath}, artifacts...)
 	} else {
-		tr.Artifacts = copied
+		tr.Artifacts = artifacts
 	}
 
 	// Emit completion events before updating task state (ordering).
@@ -1030,9 +1027,9 @@ func (s *Session) quarantineTask(ctx context.Context, task types.Task) error {
 	return nil
 }
 
-func (s *Session) materializeDeliverables(ctx context.Context, base string, artifacts []string) []string {
-	uniq := make([]string, 0, len(artifacts))
+func dedupeArtifactPaths(artifacts []string) []string {
 	seen := map[string]struct{}{}
+	out := make([]string, 0, len(artifacts))
 	for _, p := range artifacts {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -1042,29 +1039,7 @@ func (s *Session) materializeDeliverables(ctx context.Context, base string, arti
 			continue
 		}
 		seen[p] = struct{}{}
-		uniq = append(uniq, p)
-	}
-	if len(uniq) == 0 {
-		return nil
-	}
-
-	out := make([]string, 0, len(uniq))
-
-	for _, src := range uniq {
-		srcBase := path.Base(src)
-		if srcBase == "" || srcBase == "." || srcBase == "/" {
-			srcBase = "artifact"
-		}
-		dst := path.Join(base, srcBase)
-		// Best-effort copy.
-		resp := s.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{Op: types.HostOpFSRead, Path: src, MaxBytes: 4 * 1024 * 1024})
-		if resp.Ok && strings.TrimSpace(resp.Text) != "" {
-			_ = s.cfg.Agent.ExecHostOp(ctx, types.HostOpRequest{Op: types.HostOpFSWrite, Path: dst, Text: resp.Text})
-			out = append(out, dst)
-			continue
-		}
-		// Fall back to recording the original path.
-		out = append(out, src)
+		out = append(out, p)
 	}
 	return out
 }
@@ -1074,7 +1049,7 @@ func deliverablesBase(when time.Time, taskID string) string {
 	return path.Join("/workspace", "deliverables", date, taskID)
 }
 
-func (s *Session) writeTaskSummary(ctx context.Context, base, taskID, goal string, tr types.TaskResult, copiedArtifacts []string) string {
+func (s *Session) writeTaskSummary(ctx context.Context, base, taskID, goal string, tr types.TaskResult, artifacts []string) string {
 	base = strings.TrimSpace(base)
 	if base == "" {
 		return ""
@@ -1129,10 +1104,10 @@ func (s *Session) writeTaskSummary(ctx context.Context, base, taskID, goal strin
 	}
 
 	b.WriteString("\n## Deliverables\n\n")
-	if len(copiedArtifacts) == 0 {
+	if len(artifacts) == 0 {
 		b.WriteString("_No deliverables were recorded._\n")
 	} else {
-		for _, a := range copiedArtifacts {
+		for _, a := range artifacts {
 			a = strings.TrimSpace(a)
 			if a == "" {
 				continue
