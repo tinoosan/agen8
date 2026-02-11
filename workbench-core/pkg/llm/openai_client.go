@@ -960,12 +960,13 @@ func (c *Client) onStreamChunk(acc *openai.ChatCompletionAccumulator, chunk open
 	// - emit a reasoning signal (IsReasoning=true, Text="")
 	// - forward an explicit reasoning summary if provided separately
 	// Summary (safe to show if the provider returns it explicitly).
-	if s, ok := deltaString(delta, "reasoning_summary"); ok {
+	// Some providers send this as a plain string, while others send an object/array payload.
+	for _, s := range deltaSummaryStrings(delta, "reasoning_summary") {
 		if err := cb(types.LLMStreamChunk{Text: s, IsReasoning: true}); err != nil {
 			return err
 		}
 	}
-	if s, ok := deltaString(delta, "reasoning_summary_text"); ok {
+	for _, s := range deltaSummaryStrings(delta, "reasoning_summary_text") {
 		if err := cb(types.LLMStreamChunk{Text: s, IsReasoning: true}); err != nil {
 			return err
 		}
@@ -1053,6 +1054,24 @@ func (c *Client) onResponsesStreamEvent(ev responses.ResponseStreamEventUnion, c
 	case responses.ResponseReasoningTextDeltaEvent:
 		// Raw reasoning (never show): indicator only.
 		return cb(types.LLMStreamChunk{IsReasoning: true})
+	case responses.ResponseOutputItemDoneEvent:
+		// Some providers emit reasoning summaries only in the completed reasoning item.
+		if sawReasoningSummaryText != nil && *sawReasoningSummaryText {
+			return nil
+		}
+		texts := responseReasoningSummaryTexts(e.Item)
+		if len(texts) == 0 {
+			return nil
+		}
+		if sawReasoningSummaryText != nil {
+			*sawReasoningSummaryText = true
+		}
+		for _, s := range texts {
+			if err := cb(types.LLMStreamChunk{IsReasoning: true, Text: s}); err != nil {
+				return err
+			}
+		}
+		return nil
 	case responses.ResponseCompletedEvent:
 		if completed != nil {
 			r := e.Response
@@ -1399,4 +1418,125 @@ func deltaString(delta openai.ChatCompletionChunkChoiceDelta, key string) (strin
 		return "", false
 	}
 	return s, true
+}
+
+func deltaSummaryStrings(delta openai.ChatCompletionChunkChoiceDelta, key string) []string {
+	if strings.TrimSpace(key) == "" {
+		return nil
+	}
+
+	// Preferred: parsed extra fields (when available).
+	if fields := delta.JSON.ExtraFields; fields != nil {
+		if out := extraSummaryStrings(fields, key); len(out) > 0 {
+			return out
+		}
+	}
+
+	// Fallback: parse raw delta JSON (some providers may not populate ExtraFields).
+	raw := strings.TrimSpace(delta.RawJSON())
+	if raw == "" {
+		return nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil
+	}
+	b, ok := m[key]
+	if !ok || len(b) == 0 || strings.TrimSpace(string(b)) == "null" {
+		return nil
+	}
+	return extractSummaryStringsRaw(b)
+}
+
+func extraSummaryStrings(fields map[string]respjson.Field, key string) []string {
+	if fields == nil || strings.TrimSpace(key) == "" {
+		return nil
+	}
+	f, ok := fields[key]
+	if !ok || !f.Valid() {
+		return nil
+	}
+	raw := strings.TrimSpace(f.Raw())
+	if raw == "" || raw == "null" {
+		return nil
+	}
+	return extractSummaryStringsRaw([]byte(raw))
+}
+
+func extractSummaryStringsRaw(raw []byte) []string {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "" || strings.TrimSpace(string(raw)) == "null" {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil
+	}
+	out := make([]string, 0, 2)
+	appendSummaryStrings(v, &out)
+	return uniqueNonEmptyStrings(out)
+}
+
+func appendSummaryStrings(v any, out *[]string) {
+	switch x := v.(type) {
+	case string:
+		if s := strings.TrimSpace(x); s != "" {
+			*out = append(*out, s)
+		}
+	case []any:
+		for _, item := range x {
+			appendSummaryStrings(item, out)
+		}
+	case map[string]any:
+		// Common summary-carrying keys from OpenAI-compatible providers.
+		keys := []string{"text", "summary_text", "summary", "parts", "content", "delta"}
+		found := false
+		for _, k := range keys {
+			if vv, ok := x[k]; ok {
+				found = true
+				appendSummaryStrings(vv, out)
+			}
+		}
+		if found {
+			return
+		}
+		// Best effort fallback for unknown object shapes: recurse into all values.
+		for _, vv := range x {
+			appendSummaryStrings(vv, out)
+		}
+	}
+}
+
+func uniqueNonEmptyStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		ss := strings.TrimSpace(s)
+		if ss == "" {
+			continue
+		}
+		if _, ok := seen[ss]; ok {
+			continue
+		}
+		seen[ss] = struct{}{}
+		out = append(out, ss)
+	}
+	return out
+}
+
+func responseReasoningSummaryTexts(item responses.ResponseOutputItemUnion) []string {
+	switch v := item.AsAny().(type) {
+	case responses.ResponseReasoningItem:
+		out := make([]string, 0, len(v.Summary))
+		for _, s := range v.Summary {
+			if text := strings.TrimSpace(s.Text); text != "" {
+				out = append(out, text)
+			}
+		}
+		return uniqueNonEmptyStrings(out)
+	default:
+		return nil
+	}
 }

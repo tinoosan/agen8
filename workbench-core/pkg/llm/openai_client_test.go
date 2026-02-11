@@ -209,6 +209,114 @@ func TestClient_toResponseFromResponses_MapsToolCallsAndUsage(t *testing.T) {
 	}
 }
 
+func TestOnResponsesStreamEvent_EmitsReasoningSummaryFromOutputItemDone(t *testing.T) {
+	raw := `{
+		"type":"response.output_item.done",
+		"sequence_number":1,
+		"output_index":0,
+		"item":{
+			"id":"rs_1",
+			"type":"reasoning",
+			"summary":[{"type":"summary_text","text":"Done-event summary"}]
+		}
+	}`
+	var ev responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+
+	c := &Client{}
+	saw := false
+	var got []types.LLMStreamChunk
+	err := c.onResponsesStreamEvent(ev, func(ch types.LLMStreamChunk) error {
+		got = append(got, ch)
+		return nil
+	}, nil, nil, &saw)
+	if err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("chunks = %d, want 1", len(got))
+	}
+	if !got[0].IsReasoning || got[0].Text != "Done-event summary" {
+		t.Fatalf("chunk = %+v", got[0])
+	}
+	if !saw {
+		t.Fatalf("expected sawReasoningSummaryText=true")
+	}
+}
+
+func TestOnResponsesStreamEvent_SkipsOutputItemDoneSummaryWhenAlreadySeen(t *testing.T) {
+	raw := `{
+		"type":"response.output_item.done",
+		"sequence_number":1,
+		"output_index":0,
+		"item":{
+			"id":"rs_1",
+			"type":"reasoning",
+			"summary":[{"type":"summary_text","text":"Done-event summary"}]
+		}
+	}`
+	var ev responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+
+	c := &Client{}
+	saw := true
+	var got []types.LLMStreamChunk
+	err := c.onResponsesStreamEvent(ev, func(ch types.LLMStreamChunk) error {
+		got = append(got, ch)
+		return nil
+	}, nil, nil, &saw)
+	if err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("chunks = %d, want 0", len(got))
+	}
+}
+
+func TestOnStreamChunk_EmitsStructuredReasoningSummary(t *testing.T) {
+	raw := `{
+		"id":"chatcmpl-1",
+		"object":"chat.completion.chunk",
+		"created":123,
+		"model":"openai/gpt-5-nano",
+		"choices":[{
+			"index":0,
+			"delta":{
+				"reasoning_summary":[
+					{"type":"summary_text","text":"first summary"},
+					{"type":"summary_text","text":"second summary"}
+				]
+			}
+		}]
+	}`
+	var chunk openai.ChatCompletionChunk
+	if err := json.Unmarshal([]byte(raw), &chunk); err != nil {
+		t.Fatalf("unmarshal chunk: %v", err)
+	}
+
+	c := &Client{}
+	var got []types.LLMStreamChunk
+	if err := c.onStreamChunk(nil, chunk, func(ch types.LLMStreamChunk) error {
+		got = append(got, ch)
+		return nil
+	}); err != nil {
+		t.Fatalf("onStreamChunk: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("chunks = %d, want 2", len(got))
+	}
+	if !got[0].IsReasoning || got[0].Text != "first summary" {
+		t.Fatalf("first chunk = %+v", got[0])
+	}
+	if !got[1].IsReasoning || got[1].Text != "second summary" {
+		t.Fatalf("second chunk = %+v", got[1])
+	}
+}
+
 func TestShouldFallbackToChat_404(t *testing.T) {
 	err := &openai.Error{StatusCode: 404}
 	if !shouldFallbackToChat(err) {

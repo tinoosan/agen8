@@ -1729,12 +1729,32 @@ func (s *RPCServer) taskComplete(ctx context.Context, p protocol.TaskCompletePar
 }
 
 func (s *RPCServer) resolveTeamOrRunScope(ctx context.Context, threadID protocol.ThreadID, teamIDOverride string, runIDOverride string) (artifactScope, error) {
+	if strings.TrimSpace(runIDOverride) != "" {
+		resolvedThread, err := s.resolveThreadID(threadID)
+		if err != nil {
+			return artifactScope{}, err
+		}
+		scope := artifactScope{
+			sessionID: resolvedThread,
+			teamID:    strings.TrimSpace(teamIDOverride),
+			runID:     strings.TrimSpace(runIDOverride),
+		}
+		if scope.teamID == "" && s.taskStore != nil {
+			tasks, err := s.taskStore.ListTasks(ctx, state.TaskFilter{
+				RunID:    scope.runID,
+				SortBy:   "created_at",
+				SortDesc: true,
+				Limit:    1,
+			})
+			if err == nil && len(tasks) > 0 {
+				scope.teamID = strings.TrimSpace(tasks[0].TeamID)
+			}
+		}
+		return scope, nil
+	}
 	scope, err := s.resolveArtifactScope(ctx, threadID, teamIDOverride)
 	if err != nil {
 		return artifactScope{}, err
-	}
-	if strings.TrimSpace(runIDOverride) != "" {
-		scope.runID = strings.TrimSpace(runIDOverride)
 	}
 	return scope, nil
 }
@@ -2208,7 +2228,17 @@ func (s *RPCServer) threadGet(ctx context.Context, p protocol.ThreadGetParams) (
 }
 
 func (s *RPCServer) threadCreate(ctx context.Context, p protocol.ThreadCreateParams) (protocol.ThreadCreateResult, error) {
-	sess, err := s.session.LoadSession(ctx, s.run.SessionID)
+	threadID := strings.TrimSpace(string(p.ThreadID))
+	if threadID == "" {
+		if s.allowAnyThread {
+			return protocol.ThreadCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
+		}
+		threadID = strings.TrimSpace(s.run.SessionID)
+	}
+	if _, err := s.resolveThreadID(protocol.ThreadID(threadID)); err != nil {
+		return protocol.ThreadCreateResult{}, err
+	}
+	sess, err := s.loadSessionForID(ctx, threadID)
 	if err != nil {
 		return protocol.ThreadCreateResult{}, err
 	}
@@ -2226,7 +2256,7 @@ func (s *RPCServer) threadCreate(ctx context.Context, p protocol.ThreadCreatePar
 			return protocol.ThreadCreateResult{}, err
 		}
 	}
-	return protocol.ThreadCreateResult{Thread: threadFromSession(s.run, sess)}, nil
+	return protocol.ThreadCreateResult{Thread: threadFromSession(defaultRunIDForSession(sess), sess)}, nil
 }
 
 func (s *RPCServer) turnCreate(ctx context.Context, p protocol.TurnCreateParams) (protocol.TurnCreateResult, error) {
@@ -2292,10 +2322,6 @@ func (s *RPCServer) turnCancel(ctx context.Context, p protocol.TurnCancelParams)
 		}
 		return protocol.TurnCancelResult{}, err
 	}
-	if strings.TrimSpace(task.RunID) != strings.TrimSpace(s.run.RunID) || strings.TrimSpace(task.SessionID) != strings.TrimSpace(s.run.SessionID) {
-		return protocol.TurnCancelResult{}, &protocol.ProtocolError{Code: protocol.CodeTurnNotFound, Message: "turn not found"}
-	}
-
 	switch strings.ToLower(strings.TrimSpace(string(task.Status))) {
 	case string(types.TaskStatusPending):
 		doneAt := time.Now().UTC()
@@ -2370,8 +2396,8 @@ func (s *RPCServer) itemList(ctx context.Context, p protocol.ItemListParams) (pr
 
 type artifactScope struct {
 	sessionID string
-	teamID string
-	runID  string
+	teamID    string
+	runID     string
 }
 
 func (s *RPCServer) resolveArtifactScope(ctx context.Context, threadID protocol.ThreadID, teamIDOverride string) (artifactScope, error) {
@@ -2847,14 +2873,14 @@ func toRPCError(err error) *protocol.RPCError {
 	return &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"}
 }
 
-func threadFromSession(run types.Run, sess types.Session) protocol.Thread {
+func threadFromSession(activeRunID string, sess types.Session) protocol.Thread {
 	createdAt := timeutil.OrNow(sess.CreatedAt)
 	return protocol.Thread{
 		ID:          protocol.ThreadID(strings.TrimSpace(sess.SessionID)),
 		Title:       strings.TrimSpace(sess.Title),
 		CreatedAt:   createdAt,
 		ActiveModel: strings.TrimSpace(sess.ActiveModel),
-		ActiveRunID: protocol.RunID(strings.TrimSpace(run.RunID)),
+		ActiveRunID: protocol.RunID(strings.TrimSpace(activeRunID)),
 
 		InputTokens:  sess.InputTokens,
 		OutputTokens: sess.OutputTokens,

@@ -807,6 +807,130 @@ func TestMonitorDetached_SessionPickerLoadsSessions(t *testing.T) {
 	}
 }
 
+func TestMonitorDetached_SessionSwitch_QueuesTasksToSelectedRun(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	bootstrapRunID := "bootstrap-switch-run"
+	startMonitorTestRPCServer(t, cfg, bootstrapRunID)
+
+	_, targetRun, err := implstore.CreateSession(cfg, "target switch session", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession target: %v", err)
+	}
+
+	m, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+	m.width = 120
+	m.height = 40
+
+	cmd := m.openSessionPicker()
+	if cmd == nil {
+		t.Fatalf("expected fetch command from openSessionPicker")
+	}
+	msg := cmd()
+	updatedModel, _ := m.Update(msg)
+	updated, ok := updatedModel.(*monitorModel)
+	if !ok {
+		t.Fatalf("expected *monitorModel, got %T", updatedModel)
+	}
+
+	items := updated.sessionPickerList.Items()
+	targetIdx := -1
+	for i, it := range items {
+		sp, ok := it.(sessionPickerItem)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(sp.id) == strings.TrimSpace(targetRun.SessionID) {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx < 0 {
+		t.Fatalf("target session %q not present in picker", targetRun.SessionID)
+	}
+	updated.sessionPickerList.Select(targetIdx)
+
+	switchCmd := updated.selectSessionFromPicker()
+	if switchCmd == nil {
+		t.Fatalf("expected switch command")
+	}
+	switchMsg := switchCmd()
+	switchRunMsg, ok := switchMsg.(monitorSwitchRunMsg)
+	if !ok {
+		t.Fatalf("expected monitorSwitchRunMsg, got %T", switchMsg)
+	}
+	if got := strings.TrimSpace(switchRunMsg.RunID); got != strings.TrimSpace(targetRun.RunID) {
+		t.Fatalf("switch run id=%q want %q", got, targetRun.RunID)
+	}
+
+	switchedModel, reloadCmd := updated.Update(switchMsg)
+	switched, ok := switchedModel.(*monitorModel)
+	if !ok {
+		t.Fatalf("expected *monitorModel after switch update, got %T", switchedModel)
+	}
+	if reloadCmd == nil {
+		t.Fatalf("expected reload command")
+	}
+	reloadMsg := reloadCmd()
+	reloadedModel, _ := switched.Update(reloadMsg)
+	reloaded, ok := reloadedModel.(*monitorModel)
+	if !ok {
+		t.Fatalf("expected *monitorModel after reload, got %T", reloadedModel)
+	}
+
+	if got := strings.TrimSpace(reloaded.runID); got != strings.TrimSpace(targetRun.RunID) {
+		t.Fatalf("active run=%q want %q", got, targetRun.RunID)
+	}
+	if got := strings.TrimSpace(reloaded.sessionID); got != strings.TrimSpace(targetRun.SessionID) {
+		t.Fatalf("active session=%q want %q", got, targetRun.SessionID)
+	}
+
+	queueCmd := reloaded.handleCommand("task routed to switched run")
+	if queueCmd == nil {
+		t.Fatalf("expected enqueue command")
+	}
+	_ = queueCmd()
+
+	targetTasks, err := reloaded.taskStore.ListTasks(ctx, agentstate.TaskFilter{
+		RunID:    strings.TrimSpace(targetRun.RunID),
+		SortBy:   "created_at",
+		SortDesc: true,
+		Limit:    20,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks target: %v", err)
+	}
+	foundOnTarget := false
+	for _, tk := range targetTasks {
+		if strings.TrimSpace(tk.Goal) == "task routed to switched run" {
+			foundOnTarget = true
+			break
+		}
+	}
+	if !foundOnTarget {
+		t.Fatalf("expected queued task on target run")
+	}
+
+	bootstrapTasks, err := reloaded.taskStore.ListTasks(ctx, agentstate.TaskFilter{
+		RunID:    strings.TrimSpace(bootstrapRunID),
+		SortBy:   "created_at",
+		SortDesc: true,
+		Limit:    20,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks bootstrap: %v", err)
+	}
+	for _, tk := range bootstrapTasks {
+		if strings.TrimSpace(tk.Goal) == "task routed to switched run" {
+			t.Fatalf("task was incorrectly queued on bootstrap run")
+		}
+	}
+}
+
 func TestMonitorDetached_SessionPickerRequiresDaemonRPC(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()

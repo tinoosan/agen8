@@ -488,16 +488,11 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 				return applied, nil
 			},
 			ControlSetProfile: func(ctx context.Context, threadID, target, profileRef string) ([]string, error) {
-				if strings.TrimSpace(threadID) != strings.TrimSpace(run.SessionID) {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				if tgt := strings.TrimSpace(target); tgt != "" && tgt != run.RunID && tgt != run.SessionID {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "target does not match active run"}
-				}
-				if err := sess.SwitchProfile(ctx, profileRef); err != nil {
-					return nil, err
-				}
-				return []string{strings.TrimSpace(run.RunID)}, nil
+				_ = ctx
+				_ = threadID
+				_ = target
+				_ = profileRef
+				return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is disabled; use /new"}
 			},
 			AgentPause: func(ctx context.Context, threadID, runID string) error {
 				threadID = strings.TrimSpace(threadID)

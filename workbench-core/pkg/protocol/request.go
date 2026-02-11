@@ -35,8 +35,9 @@ const (
 
 // ThreadCreateParams are the params for thread.create.
 type ThreadCreateParams struct {
-	Title       string `json:"title,omitempty"`
-	ActiveModel string `json:"activeModel,omitempty"`
+	ThreadID    ThreadID `json:"threadId,omitempty"`
+	Title       string   `json:"title,omitempty"`
+	ActiveModel string   `json:"activeModel,omitempty"`
 }
 
 // ThreadGetParams are the params for thread.get.
