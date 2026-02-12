@@ -7,12 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"github.com/tinoosan/workbench-core/internal/app"
 	implstore "github.com/tinoosan/workbench-core/internal/store"
 	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
@@ -332,6 +334,61 @@ func TestMonitorStatusBar_ShowsAndClearsLLMError(t *testing.T) {
 	line = m.renderStatusBar(220)
 	if strings.Contains(line, "LLM error:") {
 		t.Fatalf("expected llm error indicator cleared, got %q", line)
+	}
+}
+
+func TestMonitorStatusBar_PrioritizesCriticalAlerts(t *testing.T) {
+	m := &monitorModel{
+		styles:         defaultMonitorStyles(),
+		width:          120,
+		height:         40,
+		rpcHealthKnown: true,
+		rpcReachable:   false,
+	}
+	m.stats.lastLLMErrorSet = true
+	m.stats.lastLLMErrorClass = "quota"
+	m.stats.lastLLMErrorRetryable = false
+
+	line := m.renderStatusBar(220)
+	daemonIdx := strings.Index(line, "daemon disconnected")
+	llmIdx := strings.Index(line, "LLM error: quota (no-retry)")
+	verboseIdx := strings.Index(line, "Ctrl+]/Ctrl+[")
+	if daemonIdx < 0 || llmIdx < 0 || verboseIdx < 0 {
+		t.Fatalf("expected daemon, llm, and verbose segments; got %q", line)
+	}
+	if daemonIdx > verboseIdx {
+		t.Fatalf("daemon alert should appear before verbose hints; got %q", line)
+	}
+	if llmIdx > verboseIdx {
+		t.Fatalf("llm alert should appear before verbose hints; got %q", line)
+	}
+}
+
+func TestTruncateText_DisplayWidthSafe(t *testing.T) {
+	got := truncateText("  hello world  ", 8)
+	if got != "hello..." {
+		t.Fatalf("ASCII truncate mismatch: got %q", got)
+	}
+
+	emoji := truncateText("😀😀😀😀", 5)
+	if !utf8.ValidString(emoji) {
+		t.Fatalf("emoji truncate produced invalid utf8: %q", emoji)
+	}
+	if runewidth.StringWidth(emoji) > 5 {
+		t.Fatalf("emoji truncate exceeds width: %q", emoji)
+	}
+
+	cjk := truncateText("你好世界", 7)
+	if !utf8.ValidString(cjk) {
+		t.Fatalf("CJK truncate produced invalid utf8: %q", cjk)
+	}
+	if runewidth.StringWidth(cjk) > 7 {
+		t.Fatalf("CJK truncate exceeds width: %q", cjk)
+	}
+
+	short := truncateText("abcdef", 3)
+	if strings.Contains(short, "...") {
+		t.Fatalf("max<=3 should not append suffix: got %q", short)
 	}
 }
 

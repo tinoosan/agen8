@@ -1191,9 +1191,10 @@ func (m *monitorModel) refreshArtifactViewport() {
 	if m == nil {
 		return
 	}
-	_, contentW, bodyH := artifactLayout(m.width, m.height)
-	contentInnerW := max(10, contentW-2)
-	contentInnerH := max(1, bodyH)
+	frameW, frameH := m.styles.panel.GetFrameSize()
+	_, contentW, bodyH := artifactLayout(m.width, m.height, frameW, frameH)
+	contentInnerW := max(10, contentW)
+	contentInnerH := max(1, bodyH-1)
 	m.artifactContentVP.Width = contentInnerW
 	m.artifactContentVP.Height = contentInnerH
 
@@ -1230,7 +1231,8 @@ func (m *monitorModel) renderArtifactViewer() string {
 		h = 40
 	}
 
-	navW, contentW, bodyH := artifactLayout(w, h)
+	frameW, frameH := m.styles.panel.GetFrameSize()
+	navW, contentW, bodyH := artifactLayout(w, h, frameW, frameH)
 	m.refreshArtifactViewport()
 
 	header := "Artifact Viewer"
@@ -1253,10 +1255,10 @@ func (m *monitorModel) renderArtifactViewer() string {
 		contentTitle = kit.StyleDim.Render(contentTitle)
 	}
 
-	navBody := m.renderArtifactNavBody(max(1, bodyH-1), max(10, navW-2))
+	navBody := m.renderArtifactNavBody(max(1, bodyH-1), max(10, navW))
 	left := m.panelStyle(panelCurrentTask).Width(navW).Height(bodyH).Render(m.styles.sectionTitle.Render(navTitle) + "\n" + navBody)
 	right := m.panelStyle(panelOutput).Width(contentW).Height(bodyH).Render(m.styles.sectionTitle.Render(contentTitle) + "\n" + m.artifactContentVP.View())
-	row := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	row := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 
 	footer := "esc close · j/k navigate · enter/l/right expand/select · h/left collapse · tab switch pane · pgup/pgdn scroll"
 	if m.artifactSearchMode {
@@ -1297,7 +1299,8 @@ func (m *monitorModel) renderArtifactNavBody(height, width int) string {
 		if i == m.artifactSelected {
 			prefix = "▸ "
 		}
-		line := kit.TruncateRight(prefix+m.renderArtifactNode(node), max(1, width))
+		nodeWidth := max(1, width-lipgloss.Width(prefix))
+		line := kit.TruncateRight(prefix+m.renderArtifactNode(node, nodeWidth), max(1, width))
 		if i == m.artifactSelected {
 			line = m.styles.sectionTitle.Render(line)
 		}
@@ -1314,7 +1317,7 @@ func (m *monitorModel) renderArtifactNavBody(height, width int) string {
 	return strings.Join(visible, "\n")
 }
 
-func (m *monitorModel) renderArtifactNode(node artifactTreeNode) string {
+func (m *monitorModel) renderArtifactNode(node artifactTreeNode, width int) string {
 	indent := strings.Repeat("  ", max(0, node.depth))
 	if node.isHeader {
 		icon := "▶"
@@ -1335,7 +1338,10 @@ func (m *monitorModel) renderArtifactNode(node artifactTreeNode) string {
 			if goal == "" {
 				goal = node.taskID
 			}
-			return indent + icon + " " + truncateText(goal, 44) + " " + taskStatusMark(node.status)
+			base := indent + icon + " "
+			suffix := " " + taskStatusMark(node.status)
+			goalMax := max(1, width-lipgloss.Width(base)-lipgloss.Width(suffix))
+			return base + truncateText(goal, goalMax) + suffix
 		}
 		label := strings.TrimSpace(node.name)
 		return artifactStyleGroup.Render(indent + icon + " " + label)
@@ -1347,19 +1353,45 @@ func (m *monitorModel) renderArtifactNode(node artifactTreeNode) string {
 	return artifactStyleFile.Render(indent + "• " + name)
 }
 
-func artifactLayout(width, height int) (navW, contentW, bodyH int) {
+func artifactLayout(width, height, frameW, frameH int) (navW, contentW, bodyH int) {
 	if width <= 0 {
 		width = 120
 	}
 	if height <= 0 {
 		height = 40
 	}
-	navW = max(30, width/3)
-	if navW > width-28 {
-		navW = max(24, width-28)
+	const (
+		gapCols    = 1
+		navMin     = 16
+		contentMin = 20
+	)
+	usableW := width - (2 * frameW) - gapCols
+	if usableW < 2 {
+		usableW = 2
 	}
-	contentW = max(24, width-navW)
-	bodyH = max(8, height-4)
+
+	if usableW >= navMin+contentMin {
+		navW = usableW / 3
+		if navW < navMin {
+			navW = navMin
+		}
+		maxNav := usableW - contentMin
+		if navW > maxNav {
+			navW = maxNav
+		}
+		contentW = usableW - navW
+	} else {
+		navW = usableW / 3
+		if navW < 1 {
+			navW = 1
+		}
+		contentW = usableW - navW
+		if contentW < 1 {
+			contentW = 1
+			navW = usableW - contentW
+		}
+	}
+	bodyH = max(1, height-2-frameH)
 	return navW, contentW, bodyH
 }
 

@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
+	"github.com/mattn/go-runewidth"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
@@ -2476,13 +2477,8 @@ func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine str
 
 func (m *monitorModel) renderStatusBar(width int) string {
 	line := "Tab: focus  |  Ctrl+Enter: submit  |  /quit"
-	if m.isCompactMode() {
-		line += "  |  Ctrl+]/Ctrl+[ switch tab (Output | Activity | Plan | Outbox)  |  Ctrl+Up/Down focus Activity Feed/Details"
-	} else {
-		line += "  |  Ctrl+]/Ctrl+[ cycle side panel (Activity | Plan | Tasks | Thoughts)  |  Ctrl+Y Thoughts tab  |  Ctrl+Up/Down focus Activity Feed/Details"
-	}
-	if strings.TrimSpace(m.teamID) != "" {
-		line += "  |  /team focus run  |  Ctrl+G clear focus"
+	if m.rpcHealthKnown && !m.rpcReachable {
+		line += "  |  daemon disconnected (use /reconnect)"
 	}
 	if m.stats.lastLLMErrorSet {
 		retryState := "no-retry"
@@ -2491,8 +2487,13 @@ func (m *monitorModel) renderStatusBar(width int) string {
 		}
 		line += "  |  LLM error: " + fallback(strings.TrimSpace(m.stats.lastLLMErrorClass), "unknown") + " (" + retryState + ")"
 	}
-	if m.rpcHealthKnown && !m.rpcReachable {
-		line += "  |  daemon disconnected (use /reconnect)"
+	if m.isCompactMode() {
+		line += "  |  Ctrl+]/Ctrl+[ switch tab (Output | Activity | Plan | Outbox)  |  Ctrl+Up/Down focus Activity Feed/Details"
+	} else {
+		line += "  |  Ctrl+]/Ctrl+[ cycle side panel (Activity | Plan | Tasks | Thoughts)  |  Ctrl+Y Thoughts tab  |  Ctrl+Up/Down focus Activity Feed/Details"
+	}
+	if strings.TrimSpace(m.teamID) != "" {
+		line += "  |  /team focus run  |  Ctrl+G clear focus"
 	}
 	w := width
 	if w <= 0 {
@@ -5157,13 +5158,13 @@ func truncateText(s string, max int) string {
 		return ""
 	}
 	s = strings.TrimSpace(s)
-	if s == "" || len(s) <= max {
+	if s == "" || runewidth.StringWidth(s) <= max {
 		return s
 	}
 	if max <= 3 {
-		return s[:max]
+		return runewidth.Truncate(s, max, "")
 	}
-	return s[:max-3] + "..."
+	return runewidth.Truncate(s, max-3, "") + "..."
 }
 
 func fallback(v, def string) string {

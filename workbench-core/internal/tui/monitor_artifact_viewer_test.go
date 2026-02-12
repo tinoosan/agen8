@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 )
 
@@ -161,5 +163,74 @@ func TestInferWorkspaceRole_FromRoleDirectoryAndFallback(t *testing.T) {
 	}
 	if got := inferWorkspaceRole("deliverables/2026-02-08/task-1/SUMMARY.md", knownRoles); got != artifactWorkspaceSharedGroup {
 		t.Fatalf("expected legacy deliverables to fallback to shared, got %q", got)
+	}
+}
+
+func TestArtifactLayout_Invariants(t *testing.T) {
+	frameW, frameH := defaultMonitorStyles().panel.GetFrameSize()
+	const gapCols = 1
+	widths := []int{40, 60, 80, 120, 200}
+	for _, w := range widths {
+		navW, contentW, bodyH := artifactLayout(w, 40, frameW, frameH)
+		if navW+contentW+(2*frameW)+gapCols != w {
+			t.Fatalf("width invariant failed for w=%d: nav=%d content=%d frameW=%d", w, navW, contentW, frameW)
+		}
+		wantBodyH := max(1, 40-2-frameH)
+		if bodyH != wantBodyH {
+			t.Fatalf("bodyH for w=%d = %d, want %d", w, bodyH, wantBodyH)
+		}
+	}
+}
+
+func TestArtifactLayout_VeryNarrowStillNonNegative(t *testing.T) {
+	frameW, frameH := defaultMonitorStyles().panel.GetFrameSize()
+	for _, w := range []int{8, 12, 16} {
+		navW, contentW, bodyH := artifactLayout(w, 12, frameW, frameH)
+		if navW < 1 || contentW < 1 {
+			t.Fatalf("narrow layout invalid for w=%d: nav=%d content=%d", w, navW, contentW)
+		}
+		if bodyH < 1 {
+			t.Fatalf("narrow layout bodyH invalid for w=%d: bodyH=%d", w, bodyH)
+		}
+	}
+}
+
+func TestRefreshArtifactViewport_ReservesTitleRow(t *testing.T) {
+	m := &monitorModel{
+		styles:            defaultMonitorStyles(),
+		width:             120,
+		height:            40,
+		artifactContentVP: viewportWithMouseDisabled(viewport.New(0, 0)),
+	}
+	frameW, frameH := m.styles.panel.GetFrameSize()
+	_, _, bodyH := artifactLayout(m.width, m.height, frameW, frameH)
+	m.refreshArtifactViewport()
+	if got, want := m.artifactContentVP.Height, max(1, bodyH-1); got != want {
+		t.Fatalf("artifactContentVP.Height=%d, want=%d", got, want)
+	}
+}
+
+func TestRenderArtifactNavBody_TaskHeaderUsesDynamicWidth(t *testing.T) {
+	m := &monitorModel{
+		styles:           defaultMonitorStyles(),
+		artifactSelected: -1,
+		artifactTree: []artifactTreeNode{
+			{
+				isHeader:     true,
+				isTaskHeader: true,
+				expanded:     true,
+				depth:        1,
+				goal:         "This is a very long task goal that must be truncated by width",
+				taskID:       "task-1",
+				status:       "succeeded",
+			},
+		},
+	}
+	line := m.renderArtifactNavBody(1, 20)
+	if got := lipgloss.Width(line); got > 20 {
+		t.Fatalf("nav line width=%d exceeds max width 20: %q", got, line)
+	}
+	if !strings.Contains(line, taskStatusMark("succeeded")) {
+		t.Fatalf("expected status mark to be preserved, got %q", line)
 	}
 }
