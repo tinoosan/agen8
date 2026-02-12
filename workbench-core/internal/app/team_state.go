@@ -143,3 +143,28 @@ func writeTeamManifestFile(cfg config.Config, manifest teamManifest) error {
 	}
 	return os.WriteFile(filepath.Join(teamDir, "team.json"), b, 0o644)
 }
+
+func persistTeamManifestModel(cfg config.Config, teamID, model, reason string) error {
+	teamID = strings.TrimSpace(teamID)
+	model = strings.TrimSpace(model)
+	if teamID == "" || model == "" {
+		return nil
+	}
+	manifest, err := loadExistingTeamManifest(cfg, teamID)
+	if err != nil {
+		return err
+	}
+	if manifest == nil {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	manifest.TeamModel = model
+	manifest.ModelChange = &teamModelChange{
+		RequestedModel: model,
+		Status:         "applied",
+		RequestedAt:    now,
+		AppliedAt:      now,
+		Reason:         strings.TrimSpace(reason),
+	}
+	return writeTeamManifestFile(cfg, *manifest)
+}

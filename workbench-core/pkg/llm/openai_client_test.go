@@ -508,10 +508,46 @@ func TestShouldFallbackToChatForRequest_DisablesFallbackForReasoningModel(t *tes
 	}
 }
 
+func TestShouldFallbackToChatForRequest_DisablesFallbackForOpenRouterPolicyError(t *testing.T) {
+	req := types.LLMRequest{Model: "openai/gpt-oss-120b:free"}
+	err := &openai.Error{StatusCode: 404, Message: "No endpoints found matching your data policy (Free model publication). Configure: https://openrouter.ai/settings/privacy"}
+	if shouldFallbackToChatForRequest("https://openrouter.ai/api/v1", req, err) {
+		t.Fatalf("expected no fallback for OpenRouter data policy error")
+	}
+}
+
 func TestShouldFallbackToChat_404(t *testing.T) {
 	err := &openai.Error{StatusCode: 404}
 	if !shouldFallbackToChat(err) {
 		t.Fatalf("expected fallback for 404")
+	}
+}
+
+func TestShouldAllowOpenRouterFreeModelDataCollection_DefaultAndEnv(t *testing.T) {
+	t.Setenv("OPENROUTER_FREE_MODEL_DATA_COLLECTION", "")
+	if !shouldAllowOpenRouterFreeModelDataCollection("openai/gpt-oss-120b:free") {
+		t.Fatalf("expected default allow for :free model")
+	}
+	if shouldAllowOpenRouterFreeModelDataCollection("openai/gpt-5-nano") {
+		t.Fatalf("expected non-free model to remain disabled")
+	}
+
+	t.Setenv("OPENROUTER_FREE_MODEL_DATA_COLLECTION", "false")
+	if shouldAllowOpenRouterFreeModelDataCollection("openai/gpt-oss-120b:free") {
+		t.Fatalf("expected env override to disable free-model data collection")
+	}
+}
+
+func TestShouldRetryOpenRouterFreeModelPolicy(t *testing.T) {
+	err := &openai.Error{StatusCode: 404, Message: "No endpoints found matching your data policy (Free model publication). Configure: https://openrouter.ai/settings/privacy"}
+	if !shouldRetryOpenRouterFreeModelPolicy("https://openrouter.ai/api/v1", "openai/gpt-oss-120b:free", err) {
+		t.Fatalf("expected retry for OpenRouter free-model data-policy error")
+	}
+	if shouldRetryOpenRouterFreeModelPolicy("https://openrouter.ai/api/v1", "openai/gpt-5-nano", err) {
+		t.Fatalf("did not expect retry for non-free model")
+	}
+	if shouldRetryOpenRouterFreeModelPolicy("https://api.openai.com/v1", "openai/gpt-oss-120b:free", err) {
+		t.Fatalf("did not expect retry outside OpenRouter base URL")
 	}
 }
 

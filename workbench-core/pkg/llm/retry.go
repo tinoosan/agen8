@@ -244,10 +244,18 @@ func ClassifyError(err error) ErrorInfo {
 func classifyOpenAIError(apiErr *openai.Error) ErrorInfo {
 	msg := strings.TrimSpace(apiErr.Message)
 	code := strings.TrimSpace(apiErr.Code)
+	msgLower := strings.ToLower(msg)
 	info := ErrorInfo{
 		StatusCode: apiErr.StatusCode,
 		Code:       code,
 		Message:    msg,
+	}
+	if strings.Contains(msgLower, "data policy") ||
+		strings.Contains(msgLower, "free model publication") ||
+		strings.Contains(msgLower, "settings/privacy") {
+		info.Class = "policy"
+		info.Retryable = false
+		return info
 	}
 	switch apiErr.StatusCode {
 	case 402:
@@ -289,17 +297,17 @@ func classifyOpenAIError(apiErr *openai.Error) ErrorInfo {
 		info.Retryable = true
 		return info
 	}
-	if looksLikeQuota(strings.ToLower(msg), strings.ToLower(code)) {
+	if looksLikeQuota(msgLower, strings.ToLower(code)) {
 		info.Class = "quota"
 		info.Retryable = false
 		return info
 	}
-	if strings.Contains(strings.ToLower(msg), "timeout") {
+	if strings.Contains(msgLower, "timeout") {
 		info.Class = "timeout"
 		info.Retryable = true
 		return info
 	}
-	if strings.Contains(strings.ToLower(msg), "rate limit") {
+	if strings.Contains(msgLower, "rate limit") {
 		info.Class = "rate_limit"
 		info.Retryable = true
 		return info

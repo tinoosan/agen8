@@ -470,11 +470,13 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 				}
 				target = strings.TrimSpace(target)
 				applied := collectSessionRunIDs(loadedSession)
+				targetRunID := ""
 				if target != "" && target != threadID {
 					found := false
 					for _, rid := range applied {
 						if strings.TrimSpace(rid) == target {
 							found = true
+							targetRunID = target
 							applied = []string{target}
 							break
 						}
@@ -488,6 +490,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 				if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
 					return nil, err
 				}
+				if teamID := strings.TrimSpace(loadedSession.TeamID); teamID != "" {
+					_ = persistTeamManifestModel(cfg, teamID, strings.TrimSpace(model), "rpc.control.setModel")
+				}
 				if threadID == strings.TrimSpace(run.SessionID) {
 					if err := sess.SetModel(ctx, model); err == nil {
 						currentModelMu.Lock()
@@ -495,6 +500,10 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 						currentModelMu.Unlock()
 					}
 					_ = sess.SetReasoning(ctx, loadedSession.ReasoningEffort, loadedSession.ReasoningSummary)
+				} else {
+					if _, err := supervisor.ApplySessionModel(ctx, threadID, targetRunID, model); err != nil {
+						return nil, err
+					}
 				}
 				return applied, nil
 			},

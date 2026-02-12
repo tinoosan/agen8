@@ -947,7 +947,18 @@ func teamIsIdle(ctx context.Context, store state.TaskStore, teamID string) bool 
 		TeamID: strings.TrimSpace(teamID),
 		Status: []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive},
 	})
-	return err == nil && active == 0
+	if err != nil {
+		return false
+	}
+	heartbeat, err := store.CountTasks(ctx, state.TaskFilter{
+		TeamID:   strings.TrimSpace(teamID),
+		TaskKind: state.TaskKindHeartbeat,
+		Status:   []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive},
+	})
+	if err != nil {
+		return false
+	}
+	return active-heartbeat <= 0
 }
 
 func applyTeamModel(ctx context.Context, runtimes []teamRoleRuntime, model string, target string) ([]string, error) {

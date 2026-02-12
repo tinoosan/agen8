@@ -179,7 +179,7 @@ func buildTeamBlock(teamID string, roleName string, coordinatorRole string, team
 	b.WriteString(roleName)
 	b.WriteString("\" via the shared task list.\n")
 	b.WriteString("- To report results, complete your current task with a detailed summary and artifacts.\n")
-	b.WriteString("- Planning notes (plans/checklists) are internal working notes; do not treat them as deliverables unless explicitly requested.\n")
+	b.WriteString("- Planning notes (plans/checklists) are internal working notes; never include /plan files in final_answer.artifacts.\n")
 	b.WriteString("- To request help or escalate, create a task with assignedRole=\"")
 	b.WriteString(coordinatorRole)
 	b.WriteString("\".\n")

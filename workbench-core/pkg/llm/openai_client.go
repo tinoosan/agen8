@@ -83,6 +83,76 @@ func isOpenAIBaseURL(baseURL string) bool {
 	return strings.Contains(u, "api.openai.com")
 }
 
+func shouldAllowOpenRouterFreeModelDataCollection(model string) bool {
+	id := strings.ToLower(strings.TrimSpace(model))
+	if !strings.Contains(id, ":free") {
+		return false
+	}
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("OPENROUTER_FREE_MODEL_DATA_COLLECTION")))
+	if v == "" {
+		// Default on for :free models so OpenRouter can route models gated by free-model data policy.
+		return true
+	}
+	switch v {
+	case "1", "true", "yes", "on", "allow":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Client) openRouterRequestOptions(model string) []option.RequestOption {
+	if c == nil || !isOpenRouterBaseURL(c.baseURL) {
+		return nil
+	}
+	opts := make([]option.RequestOption, 0, 3)
+	if ref := strings.TrimSpace(os.Getenv("OPENROUTER_HTTP_REFERER")); ref != "" {
+		opts = append(opts, option.WithHeader("HTTP-Referer", ref))
+	}
+	if title := strings.TrimSpace(os.Getenv("OPENROUTER_X_TITLE")); title != "" {
+		opts = append(opts, option.WithHeader("X-Title", title))
+	}
+	if shouldAllowOpenRouterFreeModelDataCollection(model) {
+		opts = append(opts, option.WithJSONSet("provider", map[string]any{
+			"data_collection": "allow",
+		}))
+	}
+	return opts
+}
+
+func shouldRetryOpenRouterFreeModelPolicy(baseURL, model string, err error) bool {
+	if !isOpenRouterBaseURL(baseURL) || !isOpenRouterDataPolicyError(err) {
+		return false
+	}
+	id := strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(id, ":free")
+}
+
+func withOpenRouterForcedDataCollection(opts []option.RequestOption) []option.RequestOption {
+	out := make([]option.RequestOption, 0, len(opts)+1)
+	out = append(out, opts...)
+	out = append(out, option.WithJSONSet("provider", map[string]any{
+		"data_collection": "allow",
+	}))
+	return out
+}
+
+func isOpenRouterDataPolicyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := ""
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		s = strings.ToLower(strings.TrimSpace(apiErr.Message + " " + apiErr.RawJSON()))
+	} else {
+		s = strings.ToLower(strings.TrimSpace(err.Error()))
+	}
+	return strings.Contains(s, "data policy") ||
+		strings.Contains(s, "free model publication") ||
+		strings.Contains(s, "settings/privacy")
+}
+
 func maybeEnableWebSearchModel(baseURL string, model string, enable bool) string {
 	model = strings.TrimSpace(model)
 	if !enable || model == "" {
@@ -1043,7 +1113,11 @@ func (c *Client) generateResponses(ctx context.Context, req types.LLMRequest) (t
 	if err != nil {
 		return types.LLMResponse{}, err
 	}
-	resp, err := c.client.Responses.New(ctx, params)
+	opts := c.openRouterRequestOptions(req.Model)
+	resp, err := c.client.Responses.New(ctx, params, opts...)
+	if err != nil && shouldRetryOpenRouterFreeModelPolicy(c.baseURL, req.Model, err) {
+		resp, err = c.client.Responses.New(ctx, params, withOpenRouterForcedDataCollection(opts)...)
+	}
 	if err != nil {
 		return types.LLMResponse{}, err
 	}
@@ -1055,7 +1129,11 @@ func (c *Client) generateChat(ctx context.Context, req types.LLMRequest) (types.
 	if err != nil {
 		return types.LLMResponse{}, err
 	}
-	resp, err := c.client.Chat.Completions.New(ctx, params)
+	opts := c.openRouterRequestOptions(req.Model)
+	resp, err := c.client.Chat.Completions.New(ctx, params, opts...)
+	if err != nil && shouldRetryOpenRouterFreeModelPolicy(c.baseURL, req.Model, err) {
+		resp, err = c.client.Chat.Completions.New(ctx, params, withOpenRouterForcedDataCollection(opts)...)
+	}
 	if err != nil {
 		return types.LLMResponse{}, err
 	}
@@ -1319,6 +1397,10 @@ func shouldFallbackToChatForRequest(baseURL string, req types.LLMRequest, err er
 	if isOpenAIBaseURL(baseURL) {
 		return false
 	}
+	// OpenRouter policy failures are not route incompatibilities; avoid wasteful route fallback.
+	if isOpenRouterDataPolicyError(err) {
+		return false
+	}
 	// Reasoning-capable models should remain on Responses to preserve summary events.
 	if cost.SupportsReasoningSummary(req.Model) {
 		return false
@@ -1340,7 +1422,7 @@ func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMReque
 	})
 	// #endregion
 
-	stream := c.client.Responses.NewStreaming(ctx, params)
+	stream := c.client.Responses.NewStreaming(ctx, params, c.openRouterRequestOptions(req.Model)...)
 	if stream == nil {
 		return types.LLMResponse{}, fmt.Errorf("stream is nil")
 	}
@@ -1417,7 +1499,7 @@ func (c *Client) generateStreamChat(ctx context.Context, req types.LLMRequest, c
 		return types.LLMResponse{}, err
 	}
 
-	stream := c.client.Chat.Completions.NewStreaming(ctx, params)
+	stream := c.client.Chat.Completions.NewStreaming(ctx, params, c.openRouterRequestOptions(req.Model)...)
 	if stream == nil {
 		return types.LLMResponse{}, fmt.Errorf("stream is nil")
 	}

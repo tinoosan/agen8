@@ -256,6 +256,12 @@ func TestClassifyError_OpenAIStatusClassification(t *testing.T) {
 			class:     "invalid_request",
 			retryable: false,
 		},
+		{
+			name:      "openrouter data policy",
+			err:       &openai.Error{StatusCode: 404, Message: "No endpoints found matching your data policy (Free model publication). Configure: https://openrouter.ai/settings/privacy"},
+			class:     "policy",
+			retryable: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -602,7 +602,7 @@ func DefaultAutonomousSystemPrompt() string {
     Only skip the email if the email tool returns an error indicating it is not configured.
 
 	    Step 3: Call final_answer with the completion report (this ends the task)
-	    - IMPORTANT: final_answer parameters MUST include "status", "error", and "artifacts" (use empty string/empty array when not applicable).
+	    - IMPORTANT: final_answer parameters MUST include "status", "error", and "artifacts" (use empty string/empty array when not applicable). Never include /plan files in artifacts.
 	  </rule>
 	</autonomous_mode>
 	`)

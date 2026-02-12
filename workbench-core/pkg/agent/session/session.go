@@ -751,8 +751,8 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		s.lastTaskOutcome = truncateText(outcome, 150)
 	}
 
-	base := deliverablesBase(doneAt, taskID)
-	artifacts := dedupeArtifactPaths(runRes.Artifacts)
+	base := tasksBase(doneAt, taskID)
+	artifacts := sanitizeArtifactPaths(dedupeArtifactPaths(runRes.Artifacts))
 	if summaryPath := s.writeTaskSummary(ctx, base, taskID, task.Goal, tr, artifacts); summaryPath != "" {
 		tr.Artifacts = append([]string{summaryPath}, artifacts...)
 	} else {
@@ -786,7 +786,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		}
 		s.emitBestEffort(ctx, events.Event{Type: "task.done", Message: "Task finished", Data: data})
 		if len(tr.Artifacts) != 0 {
-			s.emitBestEffort(ctx, events.Event{Type: "task.delivered", Message: "Task deliverables recorded", Data: map[string]string{"taskId": taskID, "count": fmt.Sprintf("%d", len(tr.Artifacts)), "summaryPath": tr.Artifacts[0]}})
+			s.emitBestEffort(ctx, events.Event{Type: "task.delivered", Message: "Task outputs recorded", Data: map[string]string{"taskId": taskID, "count": fmt.Sprintf("%d", len(tr.Artifacts)), "summaryPath": tr.Artifacts[0]}})
 		}
 	}
 
@@ -1044,9 +1044,25 @@ func dedupeArtifactPaths(artifacts []string) []string {
 	return out
 }
 
-func deliverablesBase(when time.Time, taskID string) string {
+func sanitizeArtifactPaths(artifacts []string) []string {
+	out := make([]string, 0, len(artifacts))
+	for _, p := range artifacts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		// Planning files are internal working state and should never be surfaced as deliverables.
+		if strings.HasPrefix(p, "/plan/") || strings.HasPrefix(p, "/workspace/plan/") {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func tasksBase(when time.Time, taskID string) string {
 	date := when.UTC().Format("2006-01-02")
-	return path.Join("/workspace", "deliverables", date, taskID)
+	return path.Join("/workspace", "tasks", date, taskID)
 }
 
 func (s *Session) writeTaskSummary(ctx context.Context, base, taskID, goal string, tr types.TaskResult, artifacts []string) string {
@@ -1201,6 +1217,8 @@ func llmErrorMessage(info llm.ErrorInfo) string {
 		return "LLM authentication failed"
 	case "permission":
 		return "LLM permission denied"
+	case "policy":
+		return "LLM request blocked by provider data policy (check OpenRouter privacy settings for free models)"
 	case "server":
 		return "LLM provider server error"
 	case "invalid_request":

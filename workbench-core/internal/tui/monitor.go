@@ -2502,9 +2502,6 @@ func (m *monitorModel) renderRightFooterPanel(totalWidth, totalHeight int) strin
 		fmt.Sprintf("Last cost: %s", fallback(strings.TrimSpace(m.stats.lastTurnCostUSD), "unknown")),
 		fmt.Sprintf("Total cost: %s", totalCost),
 	}
-	if m.stats.lastLLMErrorSet {
-		lines = append(lines, "LLM err: "+fallback(strings.TrimSpace(m.stats.lastLLMErrorClass), "unknown"))
-	}
 	rendered := make([]string, 0, len(lines))
 	for i, line := range lines {
 		wrapped := wrapViewportText(line, max(10, contentW))
@@ -2531,19 +2528,9 @@ func (m *monitorModel) renderBottomBar(width int) string {
 	if !m.stats.started.IsZero() {
 		uptime = time.Since(m.stats.started).Round(time.Second).String()
 	}
-	tokenSummary := fmt.Sprintf("%d tok (%d in + %d out)", m.stats.totalTokens, m.stats.totalTokensIn, m.stats.totalTokensOut)
-	costSummary := "cost: unknown"
-	if m.stats.totalTokens == 0 {
-		costSummary = "cost: $0.0000"
-	} else if m.stats.totalCostUSD > 0 {
-		costSummary = fmt.Sprintf("cost: $%.4f", m.stats.totalCostUSD)
-	}
-	base := fmt.Sprintf("tasks: %d  |  uptime: %s  |  %s  |  %s", m.stats.tasksDone, uptime, tokenSummary, costSummary)
+	base := fmt.Sprintf("tasks: %d  |  uptime: %s", m.stats.tasksDone, uptime)
 
-	controls := "Tab: focus  |  Ctrl+Enter: submit  |  /quit"
-	if m.rpcHealthKnown && !m.rpcReachable {
-		controls += "  |  daemon disconnected (use /reconnect)"
-	}
+	controls := "Tab: focus"
 	if m.stats.lastLLMErrorSet {
 		retryState := "no-retry"
 		if m.stats.lastLLMErrorRetryable {
@@ -2560,35 +2547,6 @@ func (m *monitorModel) renderBottomBar(width int) string {
 		controls += "  |  /team focus run  |  Ctrl+G clear focus"
 	}
 	line := base + "  |  " + controls
-	line = kit.TruncateRight(line, max(1, w-2))
-	return m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render(line))
-}
-
-func (m *monitorModel) renderStatusBar(width int) string {
-	line := "Tab: focus  |  Ctrl+Enter: submit  |  /quit"
-	if m.rpcHealthKnown && !m.rpcReachable {
-		line += "  |  daemon disconnected (use /reconnect)"
-	}
-	if m.stats.lastLLMErrorSet {
-		retryState := "no-retry"
-		if m.stats.lastLLMErrorRetryable {
-			retryState = "retryable"
-		}
-		line += "  |  LLM error: " + fallback(strings.TrimSpace(m.stats.lastLLMErrorClass), "unknown") + " (" + retryState + ")"
-	}
-	if m.isCompactMode() {
-		line += "  |  Ctrl+]/Ctrl+[ switch tab (Output | Activity | Plan | Outbox)  |  Ctrl+Up/Down focus Activity Feed/Details"
-	} else {
-		line += "  |  Ctrl+]/Ctrl+[ cycle side panel (Activity | Plan | Tasks | Thoughts)  |  Ctrl+Y Thoughts tab  |  Ctrl+Up/Down focus Activity Feed/Details"
-	}
-	if strings.TrimSpace(m.teamID) != "" {
-		line += "  |  /team focus run  |  Ctrl+G clear focus"
-	}
-	w := width
-	if w <= 0 {
-		w = 80
-	}
-	// Keep the status bar single-line; wrapping changes height and breaks layout budgets.
 	line = kit.TruncateRight(line, max(1, w-2))
 	return m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render(line))
 }
@@ -3360,14 +3318,18 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 			}
 		}
 	}
-	if v := strings.TrimSpace(ev.Data["effectiveModel"]); v != "" {
-		m.model = v
-	} else if v := strings.TrimSpace(ev.Data["model"]); v != "" {
-		if strings.TrimSpace(m.teamID) != "" {
-			if strings.TrimSpace(m.model) == "" || strings.EqualFold(strings.TrimSpace(m.model), "team") {
+	// Team monitor model state is sourced from team manifest; avoid overwriting
+	// it with per-run effectiveModel events.
+	if strings.TrimSpace(m.teamID) == "" {
+		if v := strings.TrimSpace(ev.Data["effectiveModel"]); v != "" {
+			m.model = v
+		} else if v := strings.TrimSpace(ev.Data["model"]); v != "" {
+			if strings.TrimSpace(m.model) == "" || ev.Type == "control.success" {
 				m.model = v
 			}
-		} else if strings.TrimSpace(m.model) == "" || ev.Type == "control.success" {
+		}
+	} else if v := strings.TrimSpace(ev.Data["model"]); v != "" {
+		if strings.TrimSpace(m.model) == "" || strings.EqualFold(strings.TrimSpace(m.model), "team") {
 			m.model = v
 		}
 	}
@@ -3931,8 +3893,15 @@ func (m *monitorModel) refreshThinkingViewport() {
 
 	// Timeline view: colored nodes with a dimmed vertical spine.
 	w := imax(10, m.thinkingVP.Width)
-	const prefixW = 4 // "● " or "│ "
-	contentW := imax(1, w-prefixW)
+	const timelinePrefixW = 3 // keep glyph prefixes visually aligned across fonts/styles
+	renderTimelinePrefix := func(prefix string) string {
+		p := prefix
+		if pad := timelinePrefixW - lipgloss.Width(prefix); pad > 0 {
+			p += strings.Repeat(" ", pad)
+		}
+		return p
+	}
+	contentW := imax(1, w-timelinePrefixW)
 
 	// Styles for the timeline
 	nodeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#a371f7")) // Purple node
@@ -3951,6 +3920,9 @@ func (m *monitorModel) refreshThinkingViewport() {
 				}
 			}
 		}
+		if strings.TrimSpace(e.Summary) == "" {
+			continue
+		}
 		filtered = append(filtered, e)
 	}
 
@@ -3959,9 +3931,6 @@ func (m *monitorModel) refreshThinkingViewport() {
 
 	for i, e := range filtered {
 		summary := strings.TrimSpace(e.Summary)
-		if summary == "" {
-			continue
-		}
 		rolePrefix := ""
 		if role := strings.TrimSpace(e.Role); role != "" {
 			rolePrefix = "[" + role + "] "
@@ -3970,33 +3939,35 @@ func (m *monitorModel) refreshThinkingViewport() {
 		// Render content with markdown
 		body := rolePrefix + summary
 		if m.renderer != nil {
-			body = strings.TrimRight(m.renderer.RenderMarkdown(summary, contentW), "\n")
+			body = strings.TrimRight(m.renderer.RenderMarkdown(body, contentW), "\n")
 		}
 		body = wrapViewportText(body, contentW)
-		lines := strings.Split(body, "\n")
+		rawLines := strings.Split(body, "\n")
+		lines := make([]string, 0, len(rawLines))
+		for _, line := range rawLines {
+			lines = append(lines, strings.TrimRight(line, " "))
+		}
 		if len(lines) == 0 {
 			continue
 		}
 
-		// First line gets a colored bullet, rest get the spine
-		// Use consistent prefix width: glyph (1 char) + space = 2 columns
+		// Fixed-gutter renderer: every row gets a deterministic gutter prefix.
 		for lineIdx, line := range lines {
-			line = strings.TrimRight(line, " ")
+			prefix := strings.Repeat(" ", timelinePrefixW)
 			if lineIdx == 0 {
-				// Node with colored bullet and bold first line (● + space = 2 cols)
-				out = append(out, nodeStyle.Render("●")+" "+titleStyle.Render(line))
-			} else if i == last {
-				// Last entry: blank prefix instead of spine (2 spaces = 2 cols)
-				out = append(out, "  "+line)
-			} else {
-				// Continuation line with spine (│ + space = 2 cols)
-				out = append(out, spineStyle.Render("│")+" "+line)
+				prefix = renderTimelinePrefix(nodeStyle.Render("●"))
+				out = append(out, prefix+titleStyle.Render(line))
+				continue
 			}
+			if i != last {
+				prefix = renderTimelinePrefix(spineStyle.Render("│"))
+			}
+			out = append(out, prefix+line)
 		}
 
 		// Spacer between entries (if not last)
 		if i < last {
-			out = append(out, spineStyle.Render("│"))
+			out = append(out, renderTimelinePrefix(spineStyle.Render("│")))
 		}
 	}
 
@@ -4257,29 +4228,18 @@ func (m *monitorModel) composerStatusSegments() []string {
 		segments = append(segments, reasoningSummaryLabel, reasoningEffortLabel)
 	}
 	segments = append(segments, profileLabel)
-	if strings.TrimSpace(m.teamID) != "" {
-		teamLabel := kit.RenderTag(kit.TagOptions{
-			Key:   "team",
-			Value: kit.TruncateMiddle(strings.TrimSpace(m.teamID), 16),
-			Styles: kit.TagStyles{
-				KeyStyle:   tagKeyStyle,
-				ValueStyle: tagValueStyle,
-			},
-		})
-		segments = append(segments, teamLabel)
-		if mc := m.teamModelChange; mc != nil && strings.EqualFold(strings.TrimSpace(mc.Status), "pending") {
-			targetModel := strings.TrimSpace(mc.RequestedModel)
-			if targetModel != "" {
-				modelChangeLabel := kit.RenderTag(kit.TagOptions{
-					Key:   "model-change",
-					Value: "pending -> " + kit.TruncateMiddle(targetModel, 16),
-					Styles: kit.TagStyles{
-						KeyStyle:   tagKeyStyle,
-						ValueStyle: tagValueStyle,
-					},
-				})
-				segments = append(segments, modelChangeLabel)
-			}
+	if mc := m.teamModelChange; mc != nil && strings.EqualFold(strings.TrimSpace(mc.Status), "pending") {
+		targetModel := strings.TrimSpace(mc.RequestedModel)
+		if targetModel != "" {
+			modelChangeLabel := kit.RenderTag(kit.TagOptions{
+				Key:   "model-change",
+				Value: "pending -> " + kit.TruncateMiddle(targetModel, 16),
+				Styles: kit.TagStyles{
+					KeyStyle:   tagKeyStyle,
+					ValueStyle: tagValueStyle,
+				},
+			})
+			segments = append(segments, modelChangeLabel)
 		}
 	}
 	return segments
@@ -4376,32 +4336,6 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 		Width(spec.InnerWidth()).
 		Height(spec.InnerHeight()).
 		Render(content)
-}
-
-func (m *monitorModel) renderStatsPanel(spec layoutmgr.PanelSpec) string {
-	if spec.Height <= 0 || spec.Width <= 0 {
-		return ""
-	}
-	return m.styles.panel.
-		Width(spec.InnerWidth()).
-		Height(spec.InnerHeight()).
-		Render(m.styles.sectionTitle.Render("Stats") + "\n" + renderStats(m.stats))
-}
-
-func (m *monitorModel) renderStatsInline(width int) string {
-	w := width
-	if w <= 0 {
-		w = m.width
-	}
-	if w <= 0 {
-		w = 80
-	}
-	lines := strings.Split(renderStats(m.stats), "\n")
-	for i := range lines {
-		lines[i] = kit.TruncateRight(strings.TrimRight(lines[i], " \t"), imax(1, w-2))
-		lines[i] = m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render(lines[i]))
-	}
-	return strings.Join(lines, "\n")
 }
 
 func (m *monitorModel) updateFocus() {
@@ -5261,33 +5195,6 @@ func renderOutboxLines(results []outboxEntry, renderer *ContentRenderer, width i
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-func renderStats(s monitorStats) string {
-	uptime := ""
-	if !s.started.IsZero() {
-		uptime = time.Since(s.started).Round(time.Second).String()
-	}
-	lastTokensLine := ""
-	if s.lastTurnTokens > 0 {
-		lastTokensLine = fmt.Sprintf("\nLast tokens: %d (%d in + %d out)", s.lastTurnTokens, s.lastTurnTokensIn, s.lastTurnTokensOut)
-	}
-	totalTokensLine := fmt.Sprintf("\nTotal tokens: %d (%d in + %d out)", s.totalTokens, s.totalTokensIn, s.totalTokensOut)
-	costLine := ""
-	if strings.TrimSpace(s.lastTurnCostUSD) != "" {
-		costLine = fmt.Sprintf("\nLast cost: $%s", s.lastTurnCostUSD)
-	}
-	totalLine := "\nTotal cost: Unknown"
-	if s.totalCostUSD > 0 {
-		totalLine = fmt.Sprintf("\nTotal cost: $%.4f", s.totalCostUSD)
-	} else if s.totalTokens == 0 {
-		totalLine = "\nTotal cost: $0.0000"
-	}
-	pricingState := "unknown"
-	if s.pricingKnown || s.totalTokens == 0 || s.totalCostUSD > 0 {
-		pricingState = "known"
-	}
-	return fmt.Sprintf("Tasks done: %d\nUptime: %s%s%s%s%s\nPricing: %s", s.tasksDone, fallback(uptime, "unknown"), lastTokensLine, totalTokensLine, costLine, totalLine, pricingState)
 }
 
 func renderMemResults(results []string) string {

@@ -1969,6 +1969,13 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 			runRole[runID] = strings.TrimSpace(t.AssignedRole)
 		}
 	}
+	if targetRunID := strings.TrimSpace(p.RunID); targetRunID != "" {
+		if _, ok := runSet[targetRunID]; ok {
+			runSet = map[string]struct{}{targetRunID: {}}
+		} else {
+			runSet = map[string]struct{}{}
+		}
+	}
 	merged := make([]types.Activity, 0, 512)
 	for runID := range runSet {
 		acts, err := implstore.ListActivities(ctx, s.cfg, runID, 300, 0)
@@ -2173,6 +2180,46 @@ func readPlanFilesForRun(dataDir, runID string) (checklist string, checklistErr 
 	return checklist, checklistErr, details, detailsErr
 }
 
+func loadTeamManifestRunRoles(dataDir, teamID string) ([]string, map[string]string) {
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		return nil, nil
+	}
+	path := filepath.Join(fsutil.GetTeamDir(dataDir, teamID), "team.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil
+	}
+	var mf struct {
+		CoordinatorRun string                      `json:"coordinatorRunId"`
+		Roles          []protocol.TeamManifestRole `json:"roles"`
+	}
+	if err := json.Unmarshal(raw, &mf); err != nil {
+		return nil, nil
+	}
+	runIDs := make([]string, 0, len(mf.Roles)+1)
+	roleByRun := make(map[string]string, len(mf.Roles)+1)
+	seen := map[string]struct{}{}
+	if runID := strings.TrimSpace(mf.CoordinatorRun); runID != "" {
+		runIDs = append(runIDs, runID)
+		seen[runID] = struct{}{}
+	}
+	for _, role := range mf.Roles {
+		runID := strings.TrimSpace(role.RunID)
+		if runID == "" {
+			continue
+		}
+		if _, ok := seen[runID]; !ok {
+			runIDs = append(runIDs, runID)
+			seen[runID] = struct{}{}
+		}
+		if _, ok := roleByRun[runID]; !ok {
+			roleByRun[runID] = strings.TrimSpace(role.RoleName)
+		}
+	}
+	return runIDs, roleByRun
+}
+
 func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (protocol.PlanGetResult, error) {
 	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, p.TeamID, p.RunID)
 	if err != nil {
@@ -2194,24 +2241,34 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 	if !aggregate {
 		return protocol.PlanGetResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "aggregateTeam must be true when runId is omitted in team mode"}
 	}
-	roleByRun := map[string]string{}
-	runSet := map[string]struct{}{}
+	manifestRunIDs, roleByRun := loadTeamManifestRunRoles(s.cfg.DataDir, strings.TrimSpace(scope.teamID))
+	runIDs := make([]string, 0, len(manifestRunIDs)+16)
+	seenRuns := map[string]struct{}{}
+	for _, runID := range manifestRunIDs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		if _, ok := seenRuns[runID]; ok {
+			continue
+		}
+		runIDs = append(runIDs, runID)
+		seenRuns[runID] = struct{}{}
+	}
 	tasks, _ := s.taskStore.ListTasks(ctx, state.TaskFilter{TeamID: strings.TrimSpace(scope.teamID), Limit: 1000, SortBy: "created_at", SortDesc: true})
 	for _, t := range tasks {
 		runID := strings.TrimSpace(t.RunID)
 		if runID == "" {
 			continue
 		}
-		runSet[runID] = struct{}{}
+		if _, ok := seenRuns[runID]; !ok {
+			runIDs = append(runIDs, runID)
+			seenRuns[runID] = struct{}{}
+		}
 		if _, ok := roleByRun[runID]; !ok {
 			roleByRun[runID] = strings.TrimSpace(t.AssignedRole)
 		}
 	}
-	runIDs := make([]string, 0, len(runSet))
-	for r := range runSet {
-		runIDs = append(runIDs, r)
-	}
-	sort.Strings(runIDs)
 	if len(runIDs) == 0 {
 		return protocol.PlanGetResult{
 			Checklist: "No team plan files found yet.",
@@ -2670,10 +2727,38 @@ func resolveArtifactDiskPath(dataDir, teamID, runID, vpath string) string {
 		return ""
 	}
 	rel := strings.TrimPrefix(vpath, "/workspace/")
-	if strings.TrimSpace(teamID) != "" {
-		return filepath.Join(fsutil.GetTeamWorkspaceDir(dataDir, teamID), rel)
+	resolveLegacy := func(base string) string {
+		legacyRel := strings.TrimPrefix(rel, "tasks/")
+		candidate := filepath.Join(base, "deliverables", legacyRel)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		return ""
 	}
-	return filepath.Join(fsutil.GetWorkspaceDir(dataDir, runID), rel)
+	if strings.TrimSpace(teamID) != "" {
+		base := fsutil.GetTeamWorkspaceDir(dataDir, teamID)
+		candidate := filepath.Join(base, rel)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		if strings.HasPrefix(rel, "tasks/") {
+			if legacy := resolveLegacy(base); legacy != "" {
+				return legacy
+			}
+		}
+		return candidate
+	}
+	base := fsutil.GetWorkspaceDir(dataDir, runID)
+	candidate := filepath.Join(base, rel)
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	if strings.HasPrefix(rel, "tasks/") {
+		if legacy := resolveLegacy(base); legacy != "" {
+			return legacy
+		}
+	}
+	return candidate
 }
 
 func (s *RPCServer) artifactGet(ctx context.Context, p protocol.ArtifactGetParams) (protocol.ArtifactGetResult, error) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,9 +179,138 @@ func (s *SQLiteTaskStore) init() error {
 			initErr = fmt.Errorf("sqlite: backfill artifacts: %w", err)
 			return
 		}
+		if err := migrateDeliverablesToTasks(context.Background(), db, filepath.Dir(s.path)); err != nil {
+			_ = db.Close()
+			initErr = fmt.Errorf("sqlite: migrate deliverables to tasks: %w", err)
+			return
+		}
 		s.db = db
 	})
 	return initErr
+}
+
+func migrateDeliverablesToTasks(ctx context.Context, db *sql.DB, dataDir string) error {
+	dataDir = strings.TrimSpace(dataDir)
+	if db == nil || dataDir == "" {
+		return nil
+	}
+	if err := migrateWorkspaceRootsToTasks(dataDir); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE tasks
+		SET artifacts_json = REPLACE(artifacts_json, '/workspace/deliverables/', '/workspace/tasks/')
+		WHERE COALESCE(artifacts_json, '') LIKE '%/workspace/deliverables/%'
+	`); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE artifacts
+		SET vpath = REPLACE(vpath, '/workspace/deliverables/', '/workspace/tasks/'),
+		    disk_path = REPLACE(disk_path, '/workspace/deliverables/', '/workspace/tasks/')
+		WHERE COALESCE(vpath, '') LIKE '/workspace/deliverables/%'
+		   OR COALESCE(disk_path, '') LIKE '%/workspace/deliverables/%'
+	`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func migrateWorkspaceRootsToTasks(dataDir string) error {
+	agentsDir := filepath.Join(dataDir, "agents")
+	teamsDir := filepath.Join(dataDir, "teams")
+	if err := migrateWorkspaceRoots(filepath.Join(agentsDir), "workspace"); err != nil {
+		return err
+	}
+	if err := migrateWorkspaceRoots(filepath.Join(teamsDir), "workspace"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func migrateWorkspaceRoots(root, workspaceLeaf string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, ent := range entries {
+		if !ent.IsDir() {
+			continue
+		}
+		workspaceDir := filepath.Join(root, ent.Name(), workspaceLeaf)
+		if err := migrateWorkspaceDeliverablesDir(workspaceDir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateWorkspaceDeliverablesDir(workspaceDir string) error {
+	legacyDir := filepath.Join(workspaceDir, "deliverables")
+	targetDir := filepath.Join(workspaceDir, "tasks")
+	if _, err := os.Stat(legacyDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if _, err := os.Stat(targetDir); err != nil {
+		if os.IsNotExist(err) {
+			return os.Rename(legacyDir, targetDir)
+		}
+		return err
+	}
+	if err := filepath.WalkDir(legacyDir, func(src string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(legacyDir, src)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		dst := filepath.Join(targetDir, rel)
+		if d.IsDir() {
+			return os.MkdirAll(dst, 0o755)
+		}
+		if _, err := os.Stat(dst); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		return copyFileNoOverwrite(src, dst)
+	}); err != nil {
+		return err
+	}
+	return os.RemoveAll(legacyDir)
+}
+
+func copyFileNoOverwrite(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
 }
 
 func (s *SQLiteTaskStore) dbConn() (*sql.DB, error) {

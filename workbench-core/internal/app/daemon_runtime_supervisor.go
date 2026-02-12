@@ -826,3 +826,42 @@ func (s *runtimeSupervisor) ApplySessionReasoning(ctx context.Context, sessionID
 	}
 	return applied, nil
 }
+
+func (s *runtimeSupervisor) ApplySessionModel(ctx context.Context, sessionID, targetRunID, model string) ([]string, error) {
+	if s == nil {
+		return nil, nil
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	targetRunID = strings.TrimSpace(targetRunID)
+	model = strings.TrimSpace(model)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if model == "" {
+		return nil, fmt.Errorf("model is required")
+	}
+	s.mu.Lock()
+	workers := make([]*managedRuntime, 0, len(s.workers))
+	for _, w := range s.workers {
+		workers = append(workers, w)
+	}
+	s.mu.Unlock()
+	applied := make([]string, 0, len(workers))
+	for _, worker := range workers {
+		if worker == nil || worker.session == nil {
+			continue
+		}
+		if strings.TrimSpace(worker.sessionID) != sessionID {
+			continue
+		}
+		runID := strings.TrimSpace(worker.runID)
+		if targetRunID != "" && targetRunID != runID {
+			continue
+		}
+		if err := worker.session.SetModel(ctx, model); err != nil {
+			return applied, err
+		}
+		applied = append(applied, runID)
+	}
+	return applied, nil
+}

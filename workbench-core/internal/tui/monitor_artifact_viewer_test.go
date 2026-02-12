@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 )
 
@@ -265,7 +267,7 @@ func TestHandleArtifactTreeLoaded_PrefersFirstTaskSelection(t *testing.T) {
 
 func TestBuildWorkspaceGroupedNodes_FlatAndSkipsDeliverables(t *testing.T) {
 	entries := []workspaceEntry{
-		{role: "researcher", fileLabel: "deliverables/2026-02-08/task-1/SUMMARY.md", vpath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md"},
+		{role: "researcher", fileLabel: "plan/CHECKLIST.md", vpath: "/workspace/plan/CHECKLIST.md"},
 		{role: "researcher", fileLabel: "researcher/report.md", vpath: "/workspace/researcher/report.md"},
 		{role: "researcher", fileLabel: "researcher/data/findings.json", vpath: "/workspace/researcher/data/findings.json"},
 	}
@@ -281,19 +283,55 @@ func TestBuildWorkspaceGroupedNodes_FlatAndSkipsDeliverables(t *testing.T) {
 		t.Fatalf("expected flat file depth=2, got %+v", nodes)
 	}
 	for _, n := range nodes {
-		if strings.Contains(n.vpath, "/workspace/deliverables/") {
-			t.Fatalf("deliverables path should be skipped from workspace group: %+v", n)
+		if strings.Contains(n.vpath, "/workspace/plan/") {
+			t.Fatalf("plan path should be skipped from workspace group: %+v", n)
 		}
 	}
 }
 
 func TestBuildWorkspaceGroupedNodes_NoHeaderWhenAllFiltered(t *testing.T) {
 	entries := []workspaceEntry{
-		{role: "shared", fileLabel: "deliverables/2026-02-08/task-1/SUMMARY.md", vpath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md"},
+		{role: "shared", fileLabel: "plan/CHECKLIST.md", vpath: "/workspace/plan/CHECKLIST.md"},
 	}
 	nodes := buildWorkspaceGroupedNodes("shared", entries)
 	if len(nodes) != 0 {
 		t.Fatalf("expected no nodes when all entries are filtered, got %+v", nodes)
+	}
+}
+
+func TestBuildArtifactTreeFromGroups_AddsFallbackUnreportedDeliverables(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := filepath.Join(dataDir, "teams", "team-1", "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, "researcher"), 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "researcher", "report.md"), []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write fallback file: %v", err)
+	}
+
+	m := &monitorModel{
+		cfg:                     config.Config{DataDir: dataDir},
+		teamID:                  "team-1",
+		artifactWorkspaceExpand: map[string]bool{},
+	}
+	groups := []protocol.ArtifactNode{
+		{NodeKey: "role:2026-02-08:researcher", Kind: "role", Label: "researcher", DayBucket: "2026-02-08", Role: "researcher"},
+		{NodeKey: "task:task-1", Kind: "task", Label: "Analyze", DayBucket: "2026-02-08", Role: "researcher", TaskKind: "task", TaskID: "task-1", Status: "succeeded"},
+		{NodeKey: "file:/workspace/tasks/2026-02-08/task-1/SUMMARY.md", Kind: "file", Label: "SUMMARY.md", VPath: "/workspace/tasks/2026-02-08/task-1/SUMMARY.md", Role: "researcher", TaskID: "task-1", IsSummary: true},
+	}
+
+	tree := m.buildArtifactTreeFromGroups(groups)
+	found := false
+	for _, n := range tree {
+		if n.vpath == "/workspace/researcher/report.md" {
+			found = true
+			if !n.isUnreported {
+				t.Fatalf("expected fallback file to be marked unreported: %+v", n)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected fallback unreported deliverable in tree: %+v", tree)
 	}
 }
 

@@ -312,7 +312,46 @@ func TestMonitorObserveEvent_EffectiveModelPreferred(t *testing.T) {
 	}
 }
 
-func TestMonitorStatusBar_ShowsAndClearsLLMError(t *testing.T) {
+func TestMonitorObserveEvent_TeamIgnoresEffectiveModel(t *testing.T) {
+	m := &monitorModel{
+		teamID: "team-1",
+		model:  "openai/gpt-5",
+	}
+	m.observeEvent(types.EventRecord{
+		Type: "agent.step",
+		Data: map[string]string{
+			"model":          "requested-model",
+			"effectiveModel": "provider-model",
+			"step":           "1",
+		},
+	})
+	if got := strings.TrimSpace(m.model); got != "openai/gpt-5" {
+		t.Fatalf("model = %q, want openai/gpt-5", got)
+	}
+}
+
+func TestMonitorWorkspaceDir_TeamAndRun(t *testing.T) {
+	dataDir := t.TempDir()
+
+	teamMonitor := &monitorModel{
+		cfg:    config.Config{DataDir: dataDir},
+		teamID: "team-1",
+		runID:  "team:team-1",
+	}
+	if got, want := teamMonitor.workspaceDir(), fsutil.GetTeamWorkspaceDir(dataDir, "team-1"); got != want {
+		t.Fatalf("team workspaceDir = %q, want %q", got, want)
+	}
+
+	runMonitor := &monitorModel{
+		cfg:   config.Config{DataDir: dataDir},
+		runID: "run-1",
+	}
+	if got, want := runMonitor.workspaceDir(), fsutil.GetWorkspaceDir(dataDir, "run-1"); got != want {
+		t.Fatalf("run workspaceDir = %q, want %q", got, want)
+	}
+}
+
+func TestMonitorBottomBar_ShowsAndClearsLLMError(t *testing.T) {
 	m := &monitorModel{styles: defaultMonitorStyles()}
 	m.observeEvent(types.EventRecord{
 		Type: "llm.error",
@@ -321,7 +360,7 @@ func TestMonitorStatusBar_ShowsAndClearsLLMError(t *testing.T) {
 			"retryable": "false",
 		},
 	})
-	line := m.renderStatusBar(220)
+	line := m.renderBottomBar(220)
 	if !strings.Contains(line, "LLM error: quota (no-retry)") {
 		t.Fatalf("expected llm error indicator, got %q", line)
 	}
@@ -332,13 +371,13 @@ func TestMonitorStatusBar_ShowsAndClearsLLMError(t *testing.T) {
 			"step": "1",
 		},
 	})
-	line = m.renderStatusBar(220)
+	line = m.renderBottomBar(220)
 	if strings.Contains(line, "LLM error:") {
 		t.Fatalf("expected llm error indicator cleared, got %q", line)
 	}
 }
 
-func TestMonitorStatusBar_PrioritizesCriticalAlerts(t *testing.T) {
+func TestMonitorBottomBar_PrioritizesLLMAlertBeforeHints(t *testing.T) {
 	m := &monitorModel{
 		styles:         defaultMonitorStyles(),
 		width:          120,
@@ -350,15 +389,14 @@ func TestMonitorStatusBar_PrioritizesCriticalAlerts(t *testing.T) {
 	m.stats.lastLLMErrorClass = "quota"
 	m.stats.lastLLMErrorRetryable = false
 
-	line := m.renderStatusBar(220)
-	daemonIdx := strings.Index(line, "daemon disconnected")
+	line := m.renderBottomBar(220)
 	llmIdx := strings.Index(line, "LLM error: quota (no-retry)")
 	verboseIdx := strings.Index(line, "Ctrl+]/Ctrl+[")
-	if daemonIdx < 0 || llmIdx < 0 || verboseIdx < 0 {
-		t.Fatalf("expected daemon, llm, and verbose segments; got %q", line)
+	if llmIdx < 0 || verboseIdx < 0 {
+		t.Fatalf("expected llm and verbose segments; got %q", line)
 	}
-	if daemonIdx > verboseIdx {
-		t.Fatalf("daemon alert should appear before verbose hints; got %q", line)
+	if strings.Contains(line, "daemon disconnected") {
+		t.Fatalf("expected daemon disconnected text removed from bottom bar, got %q", line)
 	}
 	if llmIdx > verboseIdx {
 		t.Fatalf("llm alert should appear before verbose hints; got %q", line)
@@ -1451,6 +1489,29 @@ func TestRefreshThinkingViewport_FocusedRunFallsBackToRoleWhenRunIDMissing(t *te
 	}
 }
 
+func TestRefreshThinkingViewport_UsesAlignedTimelineGutter(t *testing.T) {
+	m := &monitorModel{
+		thinkingEntries: []thinkingEntry{
+			{RunID: "run-a", Role: "researcher", Summary: "first line\nsecond line"},
+			{RunID: "run-b", Role: "writer", Summary: "last line\ntail"},
+		},
+		thinkingVP: viewport.New(0, 0),
+	}
+	m.thinkingVP.Width = 80
+	m.thinkingVP.Height = 20
+	m.refreshThinkingViewport()
+	view := m.thinkingVP.View()
+	if !strings.Contains(view, "●") {
+		t.Fatalf("expected timeline node marker in view: %q", view)
+	}
+	if !strings.Contains(view, "│") {
+		t.Fatalf("expected timeline spine marker in view: %q", view)
+	}
+	if !strings.Contains(view, "second line") || !strings.Contains(view, "tail") {
+		t.Fatalf("expected multiline summaries to render in timeline view: %q", view)
+	}
+}
+
 func TestAgentOutputFocusFilter_ShowsGlobalAndFocusedRunOnly(t *testing.T) {
 	m := &monitorModel{
 		teamID:           "team-a",
@@ -1808,8 +1869,11 @@ func TestRenderBottomBar_SingleLineAndHasCriticalInfo(t *testing.T) {
 	if lipgloss.Height(line) != 1 {
 		t.Fatalf("bottom bar should be single line, got height=%d line=%q", lipgloss.Height(line), line)
 	}
-	if !strings.Contains(line, "tasks: 3") || !strings.Contains(line, "daemon disconnected") {
-		t.Fatalf("expected key metrics/alerts in bottom bar: %q", line)
+	if !strings.Contains(line, "tasks: 3") || !strings.Contains(line, "Tab: focus") {
+		t.Fatalf("expected key metrics/controls in bottom bar: %q", line)
+	}
+	if strings.Contains(line, "daemon disconnected") {
+		t.Fatalf("expected daemon disconnected alert to render in warning banner, not bottom bar: %q", line)
 	}
 }
 

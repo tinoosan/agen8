@@ -1,28 +1,34 @@
 package session
 
 import (
-	"reflect"
 	"testing"
+	"time"
 )
 
-func TestDedupeArtifactPaths(t *testing.T) {
-	in := []string{
-		" /workspace/report.md ",
-		"",
-		"   ",
-		"/workspace/report.md",
-		"/workspace/data/output.json",
-		"/workspace/data/output.json",
-		"/workspace/summary.txt",
+func TestTasksBase_WritesToWorkspaceTasks(t *testing.T) {
+	when := time.Date(2026, 2, 12, 12, 0, 0, 0, time.UTC)
+	got := tasksBase(when, "task-1")
+	want := "/workspace/tasks/2026-02-12/task-1"
+	if got != want {
+		t.Fatalf("tasksBase() = %q, want %q", got, want)
 	}
+}
 
-	got := dedupeArtifactPaths(in)
-	want := []string{
-		"/workspace/report.md",
-		"/workspace/data/output.json",
-		"/workspace/summary.txt",
+func TestSanitizeArtifactPaths_ExcludesPlanFiles(t *testing.T) {
+	in := []string{
+		"/plan/HEAD.md",
+		"/workspace/plan/CHECKLIST.md",
+		"/workspace/tasks/2026-02-12/task-1/SUMMARY.md",
+		"/workspace/researcher/report.md",
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("dedupeArtifactPaths mismatch\nwant: %#v\ngot:  %#v", want, got)
+	got := sanitizeArtifactPaths(in)
+	if len(got) != 2 {
+		t.Fatalf("len(sanitizeArtifactPaths)=%d, want 2 (%+v)", len(got), got)
+	}
+	if got[0] != "/workspace/tasks/2026-02-12/task-1/SUMMARY.md" {
+		t.Fatalf("unexpected first artifact %q", got[0])
+	}
+	if got[1] != "/workspace/researcher/report.md" {
+		t.Fatalf("unexpected second artifact %q", got[1])
 	}
 }

@@ -36,10 +36,11 @@ type artifactTreeNode struct {
 	status string
 	runID  string
 
-	vpath     string
-	diskPath  string
-	name      string
-	isSummary bool
+	vpath        string
+	diskPath     string
+	name         string
+	isSummary    bool
+	isUnreported bool
 
 	isHeader         bool
 	isSectionHeader  bool
@@ -271,7 +272,7 @@ func buildWorkspaceGroupedNodes(role string, entries []workspaceEntry) []artifac
 	filtered := make([]workspaceEntry, 0, len(entries))
 	for _, e := range entries {
 		rel := strings.TrimPrefix(strings.TrimSpace(e.vpath), "/workspace/")
-		if strings.HasPrefix(rel, "deliverables/") {
+		if strings.HasPrefix(rel, "plan/") {
 			continue
 		}
 		filtered = append(filtered, e)
@@ -425,6 +426,7 @@ func (m *monitorModel) buildArtifactTreeFromGroups(nodes []protocol.ArtifactNode
 	}
 	taskByRole := map[string][]artifactTreeNode{}
 	deliverablesByRole := map[string][]artifactTreeNode{}
+	indexedVPaths := map[string]struct{}{}
 	taskRoles := make([]string, 0, 8)
 	deliverableRoles := make([]string, 0, 8)
 	seenTaskRoles := map[string]struct{}{}
@@ -485,6 +487,7 @@ func (m *monitorModel) buildArtifactTreeFromGroups(nodes []protocol.ArtifactNode
 			if vpath == "" {
 				continue
 			}
+			indexedVPaths[vpath] = struct{}{}
 			name := strings.TrimSpace(n.Label)
 			if name == "" {
 				name = filepath.Base(vpath)
@@ -508,6 +511,75 @@ func (m *monitorModel) buildArtifactTreeFromGroups(nodes []protocol.ArtifactNode
 			})
 		default:
 			continue
+		}
+	}
+	knownTasks := make([]types.Task, 0, len(taskRoles)+len(deliverableRoles))
+	knownRoles := map[string]struct{}{}
+	for _, role := range taskRoles {
+		role = strings.TrimSpace(role)
+		if role == "" {
+			continue
+		}
+		if _, ok := knownRoles[role]; ok {
+			continue
+		}
+		knownRoles[role] = struct{}{}
+		knownTasks = append(knownTasks, types.Task{AssignedRole: role})
+	}
+	for _, role := range deliverableRoles {
+		role = strings.TrimSpace(role)
+		if role == "" {
+			continue
+		}
+		if _, ok := knownRoles[role]; ok {
+			continue
+		}
+		knownRoles[role] = struct{}{}
+		knownTasks = append(knownTasks, types.Task{AssignedRole: role})
+	}
+	if strings.TrimSpace(m.cfg.DataDir) != "" {
+		fallbackAdded := map[string]struct{}{}
+		wsNodes := scanArtifactWorkspaceFiles(m.cfg.DataDir, m.teamID, m.runID, m.teamRunIDs, knownTasks, m.teamRoleByRunID)
+		for _, ws := range wsNodes {
+			if ws.isHeader || strings.TrimSpace(ws.vpath) == "" {
+				continue
+			}
+			vpath := strings.TrimSpace(ws.vpath)
+			if _, ok := indexedVPaths[vpath]; ok {
+				continue
+			}
+			if _, ok := fallbackAdded[vpath]; ok {
+				continue
+			}
+			name := strings.TrimSpace(ws.name)
+			if name == "" {
+				name = filepath.Base(vpath)
+			}
+			if strings.EqualFold(name, "SUMMARY.md") {
+				continue
+			}
+			if strings.HasPrefix(strings.TrimPrefix(vpath, "/workspace/"), "plan/") {
+				continue
+			}
+			role := strings.TrimSpace(ws.role)
+			if role == "" {
+				role = "unassigned"
+			}
+			if _, ok := seenDeliverableRoles[role]; !ok {
+				seenDeliverableRoles[role] = struct{}{}
+				deliverableRoles = append(deliverableRoles, role)
+			}
+			deliverablesByRole[role] = append(deliverablesByRole[role], artifactTreeNode{
+				key:          "file:" + vpath,
+				role:         role,
+				vpath:        vpath,
+				diskPath:     strings.TrimSpace(ws.diskPath),
+				name:         name,
+				isSummary:    false,
+				isUnreported: true,
+				depth:        2,
+			})
+			fallbackAdded[vpath] = struct{}{}
 		}
 	}
 
@@ -1511,6 +1583,9 @@ func (m *monitorModel) renderArtifactNode(node artifactTreeNode, width int) stri
 	name := node.name
 	if node.isSummary {
 		name = "SUMMARY.md"
+	}
+	if node.isUnreported {
+		name += " (unreported)"
 	}
 	return artifactStyleFile.Render(indent + "• " + name)
 }

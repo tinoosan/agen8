@@ -12,7 +12,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
-	"github.com/tinoosan/workbench-core/pkg/fsutil"
 )
 
 // monitorFilePickerItem implements list.Item for the file picker.
@@ -95,7 +94,7 @@ func (m *monitorModel) closeFilePicker() {
 // scanFilesForPicker scans the workspace directory for files.
 func (m *monitorModel) scanFilesForPicker() tea.Cmd {
 	return func() tea.Msg {
-		wsDir := fsutil.GetWorkspaceDir(m.cfg.DataDir, m.runID)
+		wsDir := m.workspaceDir()
 		paths, _ := scanMonitorWorkdirFiles(wsDir, 5000)
 		return monitorFilePickerPathsMsg{paths: paths}
 	}

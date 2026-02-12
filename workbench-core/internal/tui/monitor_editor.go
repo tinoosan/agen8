@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tinoosan/workbench-core/pkg/fsutil"
 )
 
 type monitorEditorDoneMsg struct {
@@ -28,7 +27,7 @@ func (m *monitorModel) openComposeEditor(initial string) tea.Cmd {
 
 	// Persist a compose scratch file under the run workspace so it survives across
 	// restarts and stays scoped to the run.
-	wsDir := fsutil.GetWorkspaceDir(m.cfg.DataDir, m.runID)
+	wsDir := m.workspaceDir()
 	_ = os.MkdirAll(wsDir, 0o755)
 	composePath := filepath.Join(wsDir, ".monitor-compose.txt")
 

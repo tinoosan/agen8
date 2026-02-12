@@ -2058,3 +2058,141 @@ func TestRPCServer_TeamManifestPlanModelEndpoints(t *testing.T) {
 		t.Fatalf("expected model.list results")
 	}
 }
+
+func TestRPCServer_ActivityList_TeamRunFilter(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	_, runA, err := implstore.CreateSession(cfg, "goal-a", 8*1024)
+	if err != nil {
+		t.Fatalf("create run-a session: %v", err)
+	}
+	_, runB, err := implstore.CreateSession(cfg, "goal-b", 8*1024)
+	if err != nil {
+		t.Fatalf("create run-b session: %v", err)
+	}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	teamID := "team-1"
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-a", SessionID: run.SessionID, RunID: runA.RunID, TeamID: teamID, AssignedRole: "researcher",
+		Goal: "A", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-b", SessionID: run.SessionID, RunID: runB.RunID, TeamID: teamID, AssignedRole: "writer",
+		Goal: "B", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	if err := implstore.AppendEvent(context.Background(), cfg, types.EventRecord{
+		RunID:     runA.RunID,
+		Timestamp: now,
+		Type:      "agent.op.request",
+		Message:   "run-a op",
+		Data: map[string]string{
+			"opId": "a1",
+			"op":   "fs_read",
+			"path": "/workspace/a.txt",
+		},
+	}); err != nil {
+		t.Fatalf("append event run-a: %v", err)
+	}
+	if err := implstore.AppendEvent(context.Background(), cfg, types.EventRecord{
+		RunID:     runB.RunID,
+		Timestamp: now.Add(1 * time.Second),
+		Type:      "agent.op.request",
+		Message:   "run-b op",
+		Data: map[string]string{
+			"opId": "b1",
+			"op":   "fs_read",
+			"path": "/workspace/b.txt",
+		},
+	}); err != nil {
+		t.Fatalf("append event run-b: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodActivityList, protocol.ActivityListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   teamID,
+		RunID:    runA.RunID,
+		Limit:    50,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("activity.list error: %+v", resp.Error)
+	}
+	var out protocol.ActivityListResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if len(out.Activities) != 1 {
+		t.Fatalf("activities=%d want 1", len(out.Activities))
+	}
+	if !strings.HasPrefix(strings.TrimSpace(out.Activities[0].ID), runA.RunID+":") {
+		t.Fatalf("expected run-a activity only, got id=%q", out.Activities[0].ID)
+	}
+}
+
+func TestRPCServer_PlanGet_AggregateTeamUsesManifestRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	teamID := "team-1"
+	teamDir := fsutil.GetTeamDir(cfg.DataDir, teamID)
+	if err := os.MkdirAll(teamDir, 0o755); err != nil {
+		t.Fatalf("mkdir team dir: %v", err)
+	}
+	manifest := `{"teamId":"team-1","profileId":"startup","teamModel":"openai/gpt-5-mini","coordinatorRole":"ceo","coordinatorRunId":"run-1","roles":[{"roleName":"ceo","runId":"run-1","sessionId":"sess-1"},{"roleName":"writer","runId":"run-2","sessionId":"sess-2"}],"createdAt":"2026-01-01T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(teamDir, "team.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	for _, tc := range []struct {
+		runID     string
+		head      string
+		checklist string
+	}{
+		{runID: "run-1", head: "head-1", checklist: "check-1"},
+		{runID: "run-2", head: "head-2", checklist: "check-2"},
+	} {
+		planDir := filepath.Join(fsutil.GetAgentDir(cfg.DataDir, tc.runID), "plan")
+		if err := os.MkdirAll(planDir, 0o755); err != nil {
+			t.Fatalf("mkdir plan dir: %v", err)
+		}
+		_ = os.WriteFile(filepath.Join(planDir, "HEAD.md"), []byte(tc.head), 0o644)
+		_ = os.WriteFile(filepath.Join(planDir, "CHECKLIST.md"), []byte(tc.checklist), 0o644)
+	}
+
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-1", SessionID: run.SessionID, RunID: "run-1", TeamID: teamID, AssignedRole: "ceo",
+		Goal: "G", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodPlanGet, protocol.PlanGetParams{
+		ThreadID:      protocol.ThreadID(run.SessionID),
+		TeamID:        teamID,
+		AggregateTeam: true,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("plan.get error: %+v", resp.Error)
+	}
+	var out protocol.PlanGetResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if !strings.Contains(out.Checklist, "check-2") {
+		t.Fatalf("expected aggregate checklist to include manifest-only run, got: %q", out.Checklist)
+	}
+	if len(out.SourceRuns) < 2 || strings.TrimSpace(out.SourceRuns[1]) != "run-2" {
+		t.Fatalf("expected source runs to include manifest run-2 in order, got %+v", out.SourceRuns)
+	}
+}
