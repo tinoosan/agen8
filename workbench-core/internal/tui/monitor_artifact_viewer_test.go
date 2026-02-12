@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 )
@@ -28,26 +29,38 @@ func TestResolveArtifactDisk_RunMode(t *testing.T) {
 	}
 }
 
-func TestBuildArtifactTreeFromGroups_FlatRoleFiles(t *testing.T) {
+func TestBuildArtifactTreeFromGroups_TwoSections(t *testing.T) {
 	m := &monitorModel{artifactWorkspaceExpand: map[string]bool{}}
 	groups := []protocol.ArtifactNode{
 		{NodeKey: "day:2026-02-08", Kind: "day", Label: "2026-02-08", DayBucket: "2026-02-08"},
 		{NodeKey: "role:2026-02-08:ceo", Kind: "role", Label: "ceo", DayBucket: "2026-02-08", Role: "ceo"},
 		{NodeKey: "stream:2026-02-08:ceo:callback", Kind: "stream", Label: "Callback Tasks", DayBucket: "2026-02-08", Role: "ceo", TaskKind: "callback"},
 		{NodeKey: "task:callback-task-ceo-1", Kind: "task", Label: "callback-task-ceo-1", DayBucket: "2026-02-08", Role: "ceo", TaskKind: "callback", TaskID: "callback-task-ceo-1", Status: "succeeded"},
-		{NodeKey: "file:/workspace/deliverables/2026-02-08/callback-task-ceo-1/SUMMARY.md", Kind: "file", Label: "SUMMARY.md", VPath: "/workspace/deliverables/2026-02-08/callback-task-ceo-1/SUMMARY.md", IsSummary: true},
+		{NodeKey: "file:/workspace/deliverables/2026-02-08/callback-task-ceo-1/SUMMARY.md", Kind: "file", Label: "SUMMARY.md", VPath: "/workspace/deliverables/2026-02-08/callback-task-ceo-1/SUMMARY.md", TaskID: "callback-task-ceo-1", IsSummary: true},
 		{NodeKey: "file:/workspace/deliverables/2026-02-08/callback-task-ceo-1/report.md", Kind: "file", Label: "report.md", VPath: "/workspace/deliverables/2026-02-08/callback-task-ceo-1/report.md"},
 	}
 
 	tree := m.buildArtifactTreeFromGroups(groups)
-	if len(tree) != 3 {
-		t.Fatalf("expected role header + 2 files, got %d", len(tree))
+	if len(tree) != 6 {
+		t.Fatalf("expected two sections with role/task/file nodes, got %d", len(tree))
 	}
-	if !tree[0].isRoleHeader || tree[0].name != "ceo" || tree[0].depth != 0 {
-		t.Fatalf("expected role header first at depth 0, got %+v", tree[0])
+	if !tree[0].isSectionHeader || tree[0].key != "section:tasks" {
+		t.Fatalf("expected tasks section first, got %+v", tree[0])
 	}
-	if tree[1].name != "SUMMARY.md" || !tree[1].isSummary || tree[1].depth != 1 {
-		t.Fatalf("expected summary file leaf at depth 1, got %+v", tree[1])
+	if !tree[1].isRoleHeader || tree[1].key != "tasks:role:ceo" || tree[1].depth != 1 {
+		t.Fatalf("expected tasks role header at depth 1, got %+v", tree[1])
+	}
+	if tree[2].key != "task:callback-task-ceo-1" || tree[2].depth != 2 {
+		t.Fatalf("expected task leaf at depth 2, got %+v", tree[2])
+	}
+	if !tree[3].isSectionHeader || tree[3].key != "section:deliverables" {
+		t.Fatalf("expected deliverables section, got %+v", tree[3])
+	}
+	if tree[5].name != "report.md" || tree[5].depth != 2 {
+		t.Fatalf("expected deliverable file at depth 2, got %+v", tree[5])
+	}
+	if got := m.artifactTaskSummaryMap["callback-task-ceo-1"]; got != "/workspace/deliverables/2026-02-08/callback-task-ceo-1/SUMMARY.md" {
+		t.Fatalf("expected summary map entry, got %q", got)
 	}
 }
 
@@ -63,20 +76,20 @@ func TestRebuildTree_PreservesSelectionOnExpandCollapse(t *testing.T) {
 	m.artifactAllTree = m.buildArtifactTreeFromGroups(groups)
 	m.applyArtifactVisibilityAndSearch()
 
-	idx := m.findArtifactNodeByKey("roleflat:ceo")
+	idx := m.findArtifactNodeByKey("tasks:role:ceo")
 	if idx < 0 {
 		t.Fatalf("expected role node")
 	}
 	m.artifactSelected = idx
-	m.artifactWorkspaceExpand["roleflat:ceo"] = true
-	m.rebuildArtifactTreeWithAnchor("roleflat:ceo", idx)
-	if m.artifactTree[m.artifactSelected].key != "roleflat:ceo" {
+	m.artifactWorkspaceExpand["tasks:role:ceo"] = true
+	m.rebuildArtifactTreeWithAnchor("tasks:role:ceo", idx)
+	if m.artifactTree[m.artifactSelected].key != "tasks:role:ceo" {
 		t.Fatalf("selection moved unexpectedly to %q", m.artifactTree[m.artifactSelected].key)
 	}
 
-	m.artifactWorkspaceExpand["roleflat:ceo"] = false
-	m.rebuildArtifactTreeWithAnchor("roleflat:ceo", m.artifactSelected)
-	if m.artifactTree[m.artifactSelected].key != "roleflat:ceo" {
+	m.artifactWorkspaceExpand["tasks:role:ceo"] = false
+	m.rebuildArtifactTreeWithAnchor("tasks:role:ceo", m.artifactSelected)
+	if m.artifactTree[m.artifactSelected].key != "tasks:role:ceo" {
 		t.Fatalf("selection should stay on collapsed node, got %q", m.artifactTree[m.artifactSelected].key)
 	}
 }
@@ -92,26 +105,161 @@ func TestSearchFilter_FindsInCollapsedBranches(t *testing.T) {
 		{NodeKey: "file:/workspace/deliverables/2026-02-08/task-1/report.md", Kind: "file", Label: "report.md", VPath: "/workspace/deliverables/2026-02-08/task-1/report.md"},
 	}
 	m.artifactAllTree = m.buildArtifactTreeFromGroups(groups)
-	// Collapse everything.
+	// Collapse all role headers.
 	for _, n := range m.artifactAllTree {
-		if n.isHeader {
+		if n.isHeader && !n.isSectionHeader {
 			m.artifactWorkspaceExpand[n.key] = false
 		}
 	}
-	m.artifactSearchQuery = "summary"
+	m.artifactSearchQuery = "task-1"
 	m.applyArtifactVisibilityAndSearch()
 	if len(m.artifactTree) == 0 {
 		t.Fatalf("expected non-empty filtered tree")
 	}
 	found := false
 	for _, n := range m.artifactTree {
-		if strings.HasPrefix(n.key, "file:") && strings.EqualFold(n.name, "SUMMARY.md") {
+		if strings.HasPrefix(n.key, "task:") && strings.EqualFold(n.taskID, "task-1") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected to find summary in collapsed branches, got %+v", m.artifactTree)
+		t.Fatalf("expected to find task in collapsed branches, got %+v", m.artifactTree)
+	}
+}
+
+func TestSelectArtifactTreeNode_TaskLoadsSummaryPath(t *testing.T) {
+	m := &monitorModel{
+		artifactTaskSummaryMap: map[string]string{"task-1": "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md"},
+		artifactTree:           []artifactTreeNode{{key: "task:task-1", taskID: "task-1"}},
+		artifactSelected:       0,
+		artifactContentVP:      viewportWithMouseDisabled(viewport.New(0, 0)),
+	}
+	cmd := m.selectArtifactTreeNode()
+	if cmd == nil {
+		t.Fatalf("expected load command for task summary")
+	}
+	if got := m.artifactSelectedVPath; got != "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md" {
+		t.Fatalf("unexpected selected summary path %q", got)
+	}
+}
+
+func TestSelectArtifactTreeNode_TaskWithoutSummaryShowsFallback(t *testing.T) {
+	m := &monitorModel{
+		artifactTaskSummaryMap: map[string]string{},
+		artifactTree:           []artifactTreeNode{{key: "task:task-1", taskID: "task-1"}},
+		artifactSelected:       0,
+		artifactContentVP:      viewportWithMouseDisabled(viewport.New(0, 0)),
+	}
+	cmd := m.selectArtifactTreeNode()
+	if cmd != nil {
+		t.Fatalf("expected no command when summary is missing")
+	}
+	if got := m.artifactContent; got != "No summary available for this task." {
+		t.Fatalf("unexpected fallback content %q", got)
+	}
+}
+
+func TestUpdateArtifactViewer_NavigationSkipsSectionHeaders(t *testing.T) {
+	m := &monitorModel{
+		artifactNavFocused: true,
+		artifactTree: []artifactTreeNode{
+			{key: "section:tasks", isHeader: true, isSectionHeader: true, expanded: true},
+			{key: "tasks:role:ceo", isHeader: true, isRoleHeader: true, expanded: true},
+			{key: "task:task-1", taskID: "task-1"},
+		},
+		artifactSelected: 0,
+	}
+	_, _ = m.updateArtifactViewer(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if got := m.artifactTree[m.artifactSelected].key; got != "tasks:role:ceo" {
+		t.Fatalf("expected navigation to skip section header and land on role, got %q", got)
+	}
+	_, _ = m.updateArtifactViewer(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if got := m.artifactTree[m.artifactSelected].key; got != "tasks:role:ceo" {
+		t.Fatalf("expected navigation up to stay off section header, got %q", got)
+	}
+}
+
+func TestCollapseSelectedArtifactGroup_FromLeafCollapsesParentRole(t *testing.T) {
+	m := &monitorModel{
+		artifactWorkspaceExpand: map[string]bool{"tasks:role:ceo": true},
+		artifactTree: []artifactTreeNode{
+			{key: "section:tasks", isHeader: true, isSectionHeader: true, expanded: true, depth: 0},
+			{key: "tasks:role:ceo", isHeader: true, isRoleHeader: true, expanded: true, depth: 1},
+			{key: "task:task-1", taskID: "task-1", depth: 2},
+		},
+		artifactSelected: 2,
+	}
+	m.collapseSelectedArtifactGroup()
+	if got := m.artifactWorkspaceExpand["tasks:role:ceo"]; got {
+		t.Fatalf("expected parent role header to collapse")
+	}
+}
+
+func TestSearchFilter_FindsMatchesAcrossTaskAndDeliverableSections(t *testing.T) {
+	m := &monitorModel{artifactWorkspaceExpand: map[string]bool{}}
+	groups := []protocol.ArtifactNode{
+		{NodeKey: "role:2026-02-08:ceo", Kind: "role", Label: "ceo", DayBucket: "2026-02-08", Role: "ceo"},
+		{NodeKey: "task:task-1", Kind: "task", Label: "Analyze market trends", DayBucket: "2026-02-08", Role: "ceo", TaskKind: "task", TaskID: "task-1", Status: "succeeded"},
+		{NodeKey: "file:/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", Kind: "file", Label: "SUMMARY.md", VPath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", Role: "ceo", TaskID: "task-1", IsSummary: true},
+		{NodeKey: "file:/workspace/deliverables/2026-02-08/task-1/report.md", Kind: "file", Label: "report.md", VPath: "/workspace/deliverables/2026-02-08/task-1/report.md", Role: "ceo", TaskID: "task-1"},
+	}
+	m.artifactAllTree = m.buildArtifactTreeFromGroups(groups)
+	for _, n := range m.artifactAllTree {
+		if n.isRoleHeader {
+			m.artifactWorkspaceExpand[n.key] = false
+		}
+	}
+
+	m.artifactSearchQuery = "market trends"
+	m.applyArtifactVisibilityAndSearch()
+	foundTask := false
+	for _, n := range m.artifactTree {
+		if n.key == "task:task-1" {
+			foundTask = true
+			break
+		}
+	}
+	if !foundTask {
+		t.Fatalf("expected task match in search results, got %+v", m.artifactTree)
+	}
+
+	m.artifactSearchQuery = "report.md"
+	m.applyArtifactVisibilityAndSearch()
+	foundFile := false
+	for _, n := range m.artifactTree {
+		if n.key == "file:/workspace/deliverables/2026-02-08/task-1/report.md" {
+			foundFile = true
+			break
+		}
+	}
+	if !foundFile {
+		t.Fatalf("expected deliverable match in search results, got %+v", m.artifactTree)
+	}
+}
+
+func TestHandleArtifactTreeLoaded_PrefersFirstTaskSelection(t *testing.T) {
+	m := &monitorModel{
+		artifactContentVP: viewportWithMouseDisabled(viewport.New(0, 0)),
+	}
+	msg := artifactTreeLoadedMsg{
+		nodes: []protocol.ArtifactNode{
+			{NodeKey: "role:2026-02-08:ceo", Kind: "role", Label: "ceo", DayBucket: "2026-02-08", Role: "ceo"},
+			{NodeKey: "task:task-1", Kind: "task", Label: "Analyze market trends", DayBucket: "2026-02-08", Role: "ceo", TaskKind: "task", TaskID: "task-1", Status: "succeeded"},
+			{NodeKey: "file:/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", Kind: "file", Label: "SUMMARY.md", VPath: "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md", Role: "ceo", TaskID: "task-1", IsSummary: true},
+			{NodeKey: "file:/workspace/deliverables/2026-02-08/task-1/report.md", Kind: "file", Label: "report.md", VPath: "/workspace/deliverables/2026-02-08/task-1/report.md", Role: "ceo", TaskID: "task-1"},
+		},
+	}
+
+	cmd := m.handleArtifactTreeLoaded(msg)
+	if cmd == nil {
+		t.Fatalf("expected summary load command from first task selection")
+	}
+	if got := m.artifactTree[m.artifactSelected].key; got != "task:task-1" {
+		t.Fatalf("expected first selected node to be task, got %q", got)
+	}
+	if got := m.artifactSelectedVPath; got != "/workspace/deliverables/2026-02-08/task-1/SUMMARY.md" {
+		t.Fatalf("expected selected summary path, got %q", got)
 	}
 }
 

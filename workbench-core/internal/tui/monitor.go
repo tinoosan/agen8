@@ -293,6 +293,7 @@ type monitorModel struct {
 	artifactNavFocused      bool
 	artifactSelectedVPath   string
 	artifactWorkspaceFiles  []artifactTreeNode
+	artifactTaskSummaryMap  map[string]string
 	artifactSearchScopeKey  string
 	artifactRoleExpanded    map[string]bool
 	artifactTaskExpanded    map[string]bool

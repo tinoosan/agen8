@@ -21,6 +21,9 @@ func TestBuildTeamBlock(t *testing.T) {
 	if !strings.Contains(block, `/workspace/researcher/`) {
 		t.Fatalf("expected role-scoped workspace guidance in team block, got: %s", block)
 	}
+	if !strings.Contains(block, "Planning notes (plans/checklists) are internal working notes") {
+		t.Fatalf("expected internal notes guidance in team block, got: %s", block)
+	}
 }
 
 func TestBuildSystemPrompt_IncludesTeamBlock(t *testing.T) {
