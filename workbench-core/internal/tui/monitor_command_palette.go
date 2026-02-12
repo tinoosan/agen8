@@ -207,14 +207,14 @@ func (m *monitorModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 }
 
 // renderCommandPalette renders the inline command palette if open.
-func (m *monitorModel) renderCommandPalette() string {
+func (m *monitorModel) renderCommandPalette(contentW int) string {
 	if !m.commandPaletteOpen || len(m.commandPaletteMatches) == 0 {
 		return ""
 	}
 
 	maxDisplay := 6
-	outerW := max(20, m.width-8)
-	contentW := max(1, outerW-4)
+	outerW := max(20, contentW)
+	paletteW := max(1, outerW-4)
 
 	items := make([]kit.Item, len(m.commandPaletteMatches))
 	for i, cmd := range m.commandPaletteMatches {
@@ -236,7 +236,7 @@ func (m *monitorModel) renderCommandPalette() string {
 		Foreground(lipgloss.Color("#c0c0c0"))
 
 	opts := kit.SelectorOptions{
-		Width:         contentW,
+		Width:         paletteW,
 		MaxHeight:     maxDisplay,
 		SelectedIndex: selected,
 		ShowPrefix:    true,
@@ -249,7 +249,7 @@ func (m *monitorModel) renderCommandPalette() string {
 	paletteContent := kit.RenderSelector(items, opts)
 
 	paletteStyle := lipgloss.NewStyle().
-		Width(contentW).
+		Width(paletteW).
 		Padding(0, 1).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#404040"))

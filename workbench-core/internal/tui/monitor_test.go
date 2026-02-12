@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -1473,6 +1474,53 @@ func TestAgentOutputFocusFilter_ShowsGlobalAndFocusedRunOnly(t *testing.T) {
 	}
 }
 
+func TestFormatTaskEventLines_UsesSummaryMarker(t *testing.T) {
+	ev := types.EventRecord{
+		Type:      "task.done",
+		Timestamp: time.Now(),
+		Data: map[string]string{
+			"taskId":  "task-1",
+			"status":  "succeeded",
+			"summary": "## Result\n- done",
+		},
+	}
+	lines := formatTaskEventLines(ev)
+	found := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, agentOutputSummaryMarker) {
+			found = true
+		}
+		if strings.Contains(line, "summary: ") {
+			t.Fatalf("did not expect legacy summary label in line %q", line)
+		}
+	}
+	if !found {
+		t.Fatalf("expected summary marker line, got %#v", lines)
+	}
+}
+
+func TestRefreshAgentOutputViewport_RendersSummaryMarkdownWithoutSummaryLabel(t *testing.T) {
+	m := &monitorModel{
+		renderer: newContentRenderer(),
+		agentOutput: []string{
+			"[12:00:00] task.done: task-1 succeeded",
+			agentOutputSummaryMarker + "## Result\n- first\n- second",
+		},
+		agentOutputRunID: []string{"", ""},
+		agentOutputVP:    viewport.New(0, 0),
+	}
+	m.agentOutputVP.Width = 80
+	m.agentOutputVP.Height = 20
+	m.refreshAgentOutputViewport()
+	view := m.agentOutputVP.View()
+	if strings.Contains(view, "summary:") {
+		t.Fatalf("unexpected summary label in rendered output: %q", view)
+	}
+	if !strings.Contains(view, "Result") || !strings.Contains(view, "first") {
+		t.Fatalf("expected markdown summary content rendered, got: %q", view)
+	}
+}
+
 func TestTrimAgentOutputBuffer_KeepsRunIDSliceInSync(t *testing.T) {
 	size := agentOutputMaxLines + 15
 	m := &monitorModel{
@@ -1605,6 +1653,7 @@ func TestRenderComposer_ShowsReasoningTagsForReasoningModel(t *testing.T) {
 		input:            textarea.New(),
 		focusedPanel:     panelComposer,
 	}
+	m.input.Prompt = ""
 	spec := layoutmgr.PanelSpec{Width: 100, Height: 8, ContentWidth: 96, ContentHeight: 6}
 	out := m.renderComposer(spec)
 	if !strings.Contains(out, "reasoning-effort") || !strings.Contains(out, "medium") {
@@ -1629,6 +1678,25 @@ func TestRenderComposer_HidesReasoningTagsForNonReasoningModel(t *testing.T) {
 	out := m.renderComposer(spec)
 	if strings.Contains(out, "reasoning-effort") || strings.Contains(out, "reasoning-summary") {
 		t.Fatalf("did not expect reasoning tags in composer output: %q", out)
+	}
+}
+
+func TestRenderComposer_DoesNotShowPromptGlyph(t *testing.T) {
+	m := &monitorModel{
+		model:            "openai/gpt-5-nano",
+		profile:          "general",
+		reasoningEffort:  "medium",
+		reasoningSummary: "auto",
+		styles:           defaultMonitorStyles(),
+		input:            textarea.New(),
+		focusedPanel:     panelComposer,
+	}
+	m.input.SetValue("hello")
+	m.input.Prompt = ""
+	spec := layoutmgr.PanelSpec{Width: 80, Height: 8, ContentWidth: 76, ContentHeight: 6}
+	out := m.renderComposer(spec)
+	if strings.Contains(out, "\n>") || strings.Contains(out, "> ") {
+		t.Fatalf("composer should not render prompt glyph: %q", out)
 	}
 }
 
@@ -1714,12 +1782,104 @@ func TestRenderComposer_WrapsStatusTagsWithoutHardTruncation(t *testing.T) {
 		input:            textarea.New(),
 		focusedPanel:     panelComposer,
 	}
-	spec := layoutmgr.PanelSpec{Width: 56, Height: 8, ContentWidth: 52, ContentHeight: 6}
+	spec := layoutmgr.PanelSpec{Width: 84, Height: 8, ContentWidth: 80, ContentHeight: 6}
 	out := m.renderComposer(spec)
 	if !strings.Contains(out, "profile") {
 		t.Fatalf("expected profile tag in output: %q", out)
 	}
 	if strings.Contains(out, "pr…") {
 		t.Fatalf("unexpected hard-truncated profile tag: %q", out)
+	}
+}
+
+func TestRenderBottomBar_SingleLineAndHasCriticalInfo(t *testing.T) {
+	m := &monitorModel{
+		styles:         defaultMonitorStyles(),
+		rpcHealthKnown: true,
+		rpcReachable:   false,
+	}
+	m.stats.started = time.Now().Add(-2 * time.Minute)
+	m.stats.tasksDone = 3
+	m.stats.totalTokens = 42
+	m.stats.totalTokensIn = 20
+	m.stats.totalTokensOut = 22
+	m.stats.totalCostUSD = 0.1234
+	line := m.renderBottomBar(260)
+	if lipgloss.Height(line) != 1 {
+		t.Fatalf("bottom bar should be single line, got height=%d line=%q", lipgloss.Height(line), line)
+	}
+	if !strings.Contains(line, "tasks: 3") || !strings.Contains(line, "daemon disconnected") {
+		t.Fatalf("expected key metrics/alerts in bottom bar: %q", line)
+	}
+}
+
+func TestRenderOutboxLines_DoesNotRenderSummaryBody(t *testing.T) {
+	out := renderOutboxLines([]outboxEntry{
+		{
+			TaskID:      "task-1",
+			Goal:        "ship monitor UX improvements",
+			Status:      "succeeded",
+			Summary:     "Long markdown summary body that should not be shown in outbox anymore.",
+			SummaryPath: "/workspace/deliverables/2026-02-12/task-1/SUMMARY.md",
+		},
+	}, newContentRenderer(), 80)
+	if strings.Contains(out, "Long markdown summary body") {
+		t.Fatalf("outbox should not include summary body, got: %q", out)
+	}
+	if !strings.Contains(out, "deliverables:") {
+		t.Fatalf("outbox should retain deliverables metadata, got: %q", out)
+	}
+}
+
+func TestRenderRightFooterPanel_ShowsSessionStats(t *testing.T) {
+	m := &monitorModel{styles: defaultMonitorStyles()}
+	m.stats.lastTurnTokens = 200
+	m.stats.lastTurnTokensIn = 120
+	m.stats.lastTurnTokensOut = 80
+	m.stats.totalTokens = 900
+	m.stats.totalTokensIn = 500
+	m.stats.totalTokensOut = 400
+	m.stats.lastTurnCostUSD = "0.0012"
+	m.stats.totalCostUSD = 0.0123
+	m.stats.pricingKnown = true
+	panel := m.renderRightFooterPanel(48, 9)
+	if !strings.Contains(panel, "Session Stats") || !strings.Contains(panel, "Last tokens: 200 (120 in + 80 out)") {
+		t.Fatalf("expected session stats panel content, got: %q", panel)
+	}
+	if !strings.Contains(panel, "Total tokens: 900 (500 in + 400 out)") || !strings.Contains(panel, "Total cost: $0.0123") {
+		t.Fatalf("expected total stats in panel, got: %q", panel)
+	}
+}
+
+func TestComposerStatusText_NarrowWidthSingleLine(t *testing.T) {
+	m := &monitorModel{
+		model:            "openai/gpt-5-nano",
+		profile:          "very_long_profile_name_that_will_not_fit",
+		reasoningEffort:  "medium",
+		reasoningSummary: "auto",
+		styles:           defaultMonitorStyles(),
+	}
+	status, lines := m.composerStatusText(50)
+	if lines != 1 {
+		t.Fatalf("expected single status line for narrow width, got %d (%q)", lines, status)
+	}
+	if lipgloss.Width(status) > 50 {
+		t.Fatalf("status line exceeds width: %q", status)
+	}
+}
+
+func TestRenderMainBodyDashboard_AgentOutputBottomBorderVisible(t *testing.T) {
+	m := &monitorModel{
+		styles:           defaultMonitorStyles(),
+		planViewport:     viewport.New(0, 0),
+		agentOutputVP:    viewport.New(0, 0),
+		dashboardSideTab: 1, // Plan tab keeps dependencies minimal for this render test.
+	}
+	m.agentOutputVP.SetContent("line 1\nline 2\n")
+	manager := layoutmgr.NewManager(m.styles.panel, true)
+	grid := manager.CalculateDashboard(120, 35, 6, 0, 1, false)
+	main := m.renderMainBodyDashboard(grid)
+	if !strings.Contains(main, "╰") || !strings.Contains(main, "╯") {
+		t.Fatalf("expected rounded bottom border to be visible in main dashboard output: %q", main)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -470,8 +471,9 @@ const (
 const (
 	// Keep a large, bounded agent output history to avoid unbounded RAM growth.
 	// This replaces the old 1000-line hard limit with a much larger buffer.
-	agentOutputMaxLines  = 50_000
-	agentOutputDropChunk = 5_000
+	agentOutputMaxLines      = 50_000
+	agentOutputDropChunk     = 5_000
+	agentOutputSummaryMarker = "__WB_SUMMARY__:"
 
 	// Keep a small, bounded thoughts history to avoid unbounded RAM growth.
 	maxThinkingEntries = 50
@@ -562,14 +564,15 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	}
 
 	in := textarea.New()
-	in.SetHeight(6)
+	in.SetHeight(2)
 	in.CharLimit = 0
+	in.Placeholder = "Type a task or command..."
 	in.ShowLineNumbers = false
 	in.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	in.FocusedStyle.Placeholder = kit.StyleDim
 	in.FocusedStyle.Text = kit.StyleStatusValue
 	in.FocusedStyle.Prompt = kit.StyleStatusKey
-	in.Prompt = "> "
+	in.Prompt = ""
 	in.Focus()
 
 	delegate := newActivityDelegate()
@@ -749,14 +752,15 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 	}
 	sessionStore, _ := store.NewSQLiteSessionStore(cfg)
 	in := textarea.New()
-	in.SetHeight(6)
+	in.SetHeight(2)
 	in.CharLimit = 0
+	in.Placeholder = "Type a task or command..."
 	in.ShowLineNumbers = false
 	in.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	in.FocusedStyle.Placeholder = kit.StyleDim
 	in.FocusedStyle.Text = kit.StyleStatusValue
 	in.FocusedStyle.Prompt = kit.StyleStatusKey
-	in.Prompt = "> "
+	in.Prompt = ""
 	in.Focus()
 
 	delegate := newActivityDelegate()
@@ -929,14 +933,15 @@ func newDetachedMonitorModel(ctx context.Context, cfg config.Config, result *Mon
 		return nil, err
 	}
 	in := textarea.New()
-	in.SetHeight(6)
+	in.SetHeight(2)
 	in.CharLimit = 0
+	in.Placeholder = "Type a task or command..."
 	in.ShowLineNumbers = false
 	in.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	in.FocusedStyle.Placeholder = kit.StyleDim
 	in.FocusedStyle.Text = kit.StyleStatusValue
 	in.FocusedStyle.Prompt = kit.StyleStatusKey
-	in.Prompt = "> "
+	in.Prompt = ""
 	in.Focus()
 
 	delegate := newActivityDelegate()
@@ -2443,10 +2448,12 @@ func (m *monitorModel) View() string {
 
 func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine string) string {
 	main := m.renderMainBodyDashboard(grid)
-	statusBar := m.renderStatusBar(grid.ScreenWidth)
-	composer := m.renderComposer(grid.Composer)
-	stats := m.renderStatsInline(grid.Stats.Width)
-	sections := []string{headerLine, "", main, "", composer, stats, statusBar}
+	gap := " "
+	composerLeft := m.renderComposer(grid.Composer)
+	composerRight := m.renderRightFooterPanel(grid.ActivityFeed.Width, grid.Composer.Height)
+	composerRow := lipgloss.JoinHorizontal(lipgloss.Top, composerLeft, gap, composerRight)
+	bottomBar := m.renderBottomBar(grid.ScreenWidth)
+	sections := []string{headerLine, "", main, "", composerRow, bottomBar}
 	if m.isDetached() {
 		w := m.width
 		if w <= 0 {
@@ -2457,14 +2464,14 @@ func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine str
 			warningText = "Daemon disconnected at " + strings.TrimSpace(m.rpcEndpoint) + ". Start `workbench daemon` and retry with /reconnect."
 		}
 		warning := m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render(warningText))
-		sections = []string{headerLine, warning, "", main, "", composer, stats, statusBar}
+		sections = []string{headerLine, warning, "", main, "", composerRow, bottomBar}
 	} else if m.runStatus != types.RunStatusRunning {
 		w := m.width
 		if w <= 0 {
 			w = 80
 		}
 		warning := m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render("Agent is not active; start the daemon first or use --agent-id to attach to the running agent."))
-		sections = []string{headerLine, warning, "", main, "", composer, stats, statusBar}
+		sections = []string{headerLine, warning, "", main, "", composerRow, bottomBar}
 	}
 	final := lipgloss.JoinVertical(lipgloss.Left, sections...)
 	// Guarantee view never exceeds terminal width (handles m.width==0 or any section overflow).
@@ -2473,6 +2480,87 @@ func (m *monitorModel) renderDashboard(grid layoutmgr.GridLayout, headerLine str
 		effectiveWidth = 80
 	}
 	return lipgloss.NewStyle().MaxWidth(effectiveWidth).MaxHeight(m.height).Render(final)
+}
+
+func (m *monitorModel) renderRightFooterPanel(totalWidth, totalHeight int) string {
+	if totalWidth <= 0 || totalHeight <= 0 {
+		return ""
+	}
+	contentW := max(1, totalWidth)
+	contentH := max(1, totalHeight)
+	totalCost := "unknown"
+	if m.stats.totalTokens == 0 {
+		totalCost = "$0.0000"
+	} else if m.stats.totalCostUSD > 0 {
+		totalCost = fmt.Sprintf("$%.4f", m.stats.totalCostUSD)
+	}
+	lines := []string{
+		m.styles.sectionTitle.Render("Session Stats"),
+		fmt.Sprintf("Last tokens: %d (%d in + %d out)", m.stats.lastTurnTokens, m.stats.lastTurnTokensIn, m.stats.lastTurnTokensOut),
+		fmt.Sprintf("Total tokens: %d (%d in + %d out)", m.stats.totalTokens, m.stats.totalTokensIn, m.stats.totalTokensOut),
+		fmt.Sprintf("Last cost: %s", fallback(strings.TrimSpace(m.stats.lastTurnCostUSD), "unknown")),
+		fmt.Sprintf("Total cost: %s", totalCost),
+	}
+	if m.stats.lastLLMErrorSet {
+		lines = append(lines, "LLM err: "+fallback(strings.TrimSpace(m.stats.lastLLMErrorClass), "unknown"))
+	}
+	rendered := make([]string, 0, len(lines))
+	for i, line := range lines {
+		wrapped := wrapViewportText(line, max(10, contentW))
+		for _, part := range strings.Split(wrapped, "\n") {
+			part = kit.TruncateRight(strings.TrimRight(part, " \t"), max(1, contentW))
+			if i > 0 {
+				part = kit.StyleDim.Render(part)
+			}
+			rendered = append(rendered, part)
+		}
+	}
+	if len(rendered) > contentH {
+		rendered = rendered[:contentH]
+	}
+	return lipgloss.NewStyle().Width(contentW).MaxWidth(contentW).MaxHeight(contentH).Render(strings.Join(rendered, "\n"))
+}
+
+func (m *monitorModel) renderBottomBar(width int) string {
+	w := width
+	if w <= 0 {
+		w = 80
+	}
+	uptime := "unknown"
+	if !m.stats.started.IsZero() {
+		uptime = time.Since(m.stats.started).Round(time.Second).String()
+	}
+	tokenSummary := fmt.Sprintf("%d tok (%d in + %d out)", m.stats.totalTokens, m.stats.totalTokensIn, m.stats.totalTokensOut)
+	costSummary := "cost: unknown"
+	if m.stats.totalTokens == 0 {
+		costSummary = "cost: $0.0000"
+	} else if m.stats.totalCostUSD > 0 {
+		costSummary = fmt.Sprintf("cost: $%.4f", m.stats.totalCostUSD)
+	}
+	base := fmt.Sprintf("tasks: %d  |  uptime: %s  |  %s  |  %s", m.stats.tasksDone, uptime, tokenSummary, costSummary)
+
+	controls := "Tab: focus  |  Ctrl+Enter: submit  |  /quit"
+	if m.rpcHealthKnown && !m.rpcReachable {
+		controls += "  |  daemon disconnected (use /reconnect)"
+	}
+	if m.stats.lastLLMErrorSet {
+		retryState := "no-retry"
+		if m.stats.lastLLMErrorRetryable {
+			retryState = "retryable"
+		}
+		controls += "  |  LLM error: " + fallback(strings.TrimSpace(m.stats.lastLLMErrorClass), "unknown") + " (" + retryState + ")"
+	}
+	if m.isCompactMode() {
+		controls += "  |  Ctrl+]/Ctrl+[ switch tab (Output | Activity | Plan | Outbox)"
+	} else {
+		controls += "  |  Ctrl+]/Ctrl+[ cycle side panel (Activity | Plan | Tasks | Thoughts)"
+	}
+	if strings.TrimSpace(m.teamID) != "" {
+		controls += "  |  /team focus run  |  Ctrl+G clear focus"
+	}
+	line := base + "  |  " + controls
+	line = kit.TruncateRight(line, max(1, w-2))
+	return m.styles.header.Copy().MaxWidth(w).Render(kit.StyleDim.Render(line))
 }
 
 func (m *monitorModel) renderStatusBar(width int) string {
@@ -2635,7 +2723,7 @@ func (m *monitorModel) renderCompactTabContent(grid layoutmgr.GridLayout) string
 		return m.panelStyle(panelOutput).
 			Width(grid.AgentOutput.InnerWidth()).
 			Height(grid.AgentOutput.InnerHeight()).
-			Render(m.styles.sectionTitle.Render("Agent Output") + "\n" + m.agentOutputVP.View())
+			Render(m.styles.sectionTitle.Render("Agent Output") + "\n" + strings.TrimRight(m.agentOutputVP.View(), "\n"))
 	case 1:
 		feedBody := m.activityList.View()
 		if footer := m.renderPaginationFooter(m.activityPage, m.activityPageSize, m.activityTotalCount); footer != "" {
@@ -2664,7 +2752,7 @@ func (m *monitorModel) renderCompactTabContent(grid layoutmgr.GridLayout) string
 		return m.panelStyle(panelOutput).
 			Width(grid.AgentOutput.InnerWidth()).
 			Height(grid.AgentOutput.InnerHeight()).
-			Render(m.styles.sectionTitle.Render("Agent Output") + "\n" + m.agentOutputVP.View())
+			Render(m.styles.sectionTitle.Render("Agent Output") + "\n" + strings.TrimRight(m.agentOutputVP.View(), "\n"))
 	}
 }
 
@@ -3492,9 +3580,10 @@ func (m *monitorModel) appendAgentOutputLine(line, runID string) int {
 		return len(m.agentOutput) - 1
 	}
 	start := m.agentOutputTotalLines
-	h := 1
-	wrapped := wordwrap.String(line, w)
-	h = 1 + strings.Count(wrapped, "\n")
+	h := len(m.renderAgentOutputLogicalLines(line, w))
+	if h < 1 {
+		h = 1
+	}
 	m.agentOutputLineStarts = append(m.agentOutputLineStarts, start)
 	m.agentOutputLineHeights = append(m.agentOutputLineHeights, h)
 	m.agentOutputTotalLines += h
@@ -3684,7 +3773,7 @@ func formatTaskEventLines(ev types.EventRecord) []string {
 		lines := []string{header}
 
 		if summary := strings.TrimSpace(ev.Data["summary"]); summary != "" {
-			lines = append(lines, "  summary: "+summary)
+			lines = append(lines, agentOutputSummaryMarker+summary)
 		}
 		if errStr := strings.TrimSpace(ev.Data["error"]); errStr != "" {
 			lines = append(lines, "  error: "+errStr)
@@ -3699,6 +3788,18 @@ func formatTaskEventLines(ev types.EventRecord) []string {
 	default:
 		return []string{formatEventLine(ev)}
 	}
+}
+
+func parseAgentOutputSummaryLine(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, agentOutputSummaryMarker) {
+		return "", false
+	}
+	summary := strings.TrimSpace(strings.TrimPrefix(raw, agentOutputSummaryMarker))
+	if summary == "" {
+		return "", false
+	}
+	return summary, true
 }
 
 func (m *monitorModel) refreshActivityList() {
@@ -3958,7 +4059,7 @@ func (m *monitorModel) panelStyle(panel panelID) lipgloss.Style {
 func (m *monitorModel) renderMainBodyDashboard(grid layoutmgr.GridLayout) string {
 	leftParts := []string{
 		m.panelStyle(panelOutput).Width(grid.AgentOutput.InnerWidth()).Height(grid.AgentOutput.InnerHeight()).Render(
-			m.styles.sectionTitle.Render("Agent Output") + "\n" + m.agentOutputVP.View(),
+			m.styles.sectionTitle.Render("Agent Output") + "\n" + strings.TrimRight(m.agentOutputVP.View(), "\n"),
 		),
 	}
 	left := lipgloss.JoinVertical(lipgloss.Left, leftParts...)
@@ -4096,10 +4197,7 @@ func (m *monitorModel) renderMemory(spec layoutmgr.PanelSpec) string {
 	)
 }
 
-func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
-	contentW := max(20, spec.ContentWidth)
-
-	// Status row: model | profile | help hints
+func (m *monitorModel) composerStatusSegments() []string {
 	modelID := strings.TrimSpace(m.model)
 	if modelID == "" {
 		modelID = "default"
@@ -4155,7 +4253,6 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 				ValueStyle: tagValueStyle,
 			},
 		})
-		// Keep summary/effort high-priority so they remain visible in narrow widths.
 		segments = append(segments, reasoningSummaryLabel, reasoningEffortLabel)
 	}
 	segments = append(segments, profileLabel)
@@ -4184,52 +4281,89 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 			}
 		}
 	}
-	statusLeft := ""
-	for _, seg := range segments {
-		if seg == "" {
-			continue
-		}
-		candidate := seg
-		if statusLeft != "" {
-			candidate = statusLeft + "  " + seg
-		}
-		if lipgloss.Width(candidate) > contentW {
-			break
-		}
-		statusLeft = candidate
-	}
+	return segments
+}
 
-	// Wrap cleanly to additional lines instead of hard truncating tags.
-	wrappedStatusLines := make([]string, 0, 2)
-	currentLine := ""
+func wrapComposerStatusSegments(segments []string, contentW int) []string {
+	lines := make([]string, 0, 2)
+	current := ""
 	for _, seg := range segments {
 		if seg == "" {
 			continue
 		}
-		if currentLine == "" {
-			currentLine = seg
+		if current == "" {
+			current = seg
 			continue
 		}
-		candidate := currentLine + "  " + seg
+		candidate := current + "  " + seg
 		if lipgloss.Width(candidate) <= contentW {
-			currentLine = candidate
+			current = candidate
 			continue
 		}
-		wrappedStatusLines = append(wrappedStatusLines, currentLine)
-		currentLine = seg
+		lines = append(lines, current)
+		current = seg
 	}
-	if currentLine != "" {
-		wrappedStatusLines = append(wrappedStatusLines, currentLine)
+	if current != "" {
+		lines = append(lines, current)
 	}
-	statusLeft = strings.Join(wrappedStatusLines, "\n")
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	return lines
+}
 
-	status := lipgloss.NewStyle().Width(contentW).Render(statusLeft)
+func (m *monitorModel) composerStatusText(contentW int) (string, int) {
+	segments := m.composerStatusSegments()
+	contentW = max(10, contentW)
+	// On narrow widths keep the composer header to a single line so the input area remains obvious.
+	if contentW <= 72 {
+		line := ""
+		for _, seg := range segments {
+			if seg == "" {
+				continue
+			}
+			candidate := seg
+			if line != "" {
+				candidate = line + "  " + seg
+			}
+			if lipgloss.Width(candidate) > contentW {
+				break
+			}
+			line = candidate
+		}
+		if line == "" && len(segments) > 0 {
+			line = segments[0]
+		}
+		return kit.TruncateRight(line, contentW), 1
+	}
+	lines := wrapComposerStatusSegments(segments, contentW)
+	return strings.Join(lines, "\n"), len(lines)
+}
+
+func (m *monitorModel) composerContentLineCount(contentW int) int {
+	_, statusLines := m.composerStatusText(contentW)
+	contentLines := statusLines
+	if palette := m.renderCommandPalette(contentW); palette != "" {
+		contentLines += 1 + lipgloss.Height(palette)
+	}
+	inputH := m.input.Height()
+	if inputH < 1 {
+		inputH = 1
+	}
+	contentLines += inputH
+	return max(1, contentLines)
+}
+
+func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
+	contentW := max(20, spec.ContentWidth)
+	statusText, _ := m.composerStatusText(contentW)
+	status := lipgloss.NewStyle().Width(contentW).Render(statusText)
 
 	// Build content parts: status, palette (if open), input
 	contentParts := []string{status}
 
 	// Render command palette if open
-	if palette := m.renderCommandPalette(); palette != "" {
+	if palette := m.renderCommandPalette(contentW); palette != "" {
 		contentParts = append(contentParts, "", palette)
 	}
 
@@ -4378,21 +4512,56 @@ func (m *monitorModel) routeKeyToFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 func (m *monitorModel) layout() layoutmgr.GridLayout {
 	manager := layoutmgr.NewManager(m.styles.panel, true)
-	// textarea.View() renders an extra row beyond Height() in some configurations
-	// (prompt/cursor line). The composer content also includes a status row + help row.
-	// Budget enough lines so the composer panel never expands beyond its spec.
-	composerHeight := 5 + m.input.Height()
+	frameW, frameH := m.styles.commandBar.GetFrameSize()
+	titleH := 1
+	composerContentW := max(10, m.width-frameW)
+	if !m.isCompactMode() {
+		composerContentW = max(10, m.dashboardLeftColumnWidth(m.width)-frameW)
+	}
+	composerHeight := m.composerContentLineCount(composerContentW) + frameH + titleH
 	if m.isCompactMode() {
 		return manager.CalculateCompact(m.width, m.height, composerHeight)
 	}
-	// Stats panel is rendered below the composer (full width).
-	statsHeight := lipgloss.Height(renderStats(m.stats))
-	if statsHeight < 1 {
-		statsHeight = 1
-	}
-	statusBarH := lipgloss.Height(m.renderStatusBar(m.width))
+	statsHeight := 0
+	statusBarH := lipgloss.Height(m.renderBottomBar(m.width))
 	showWarning := m.runStatus != types.RunStatusRunning
 	return manager.CalculateDashboard(m.width, m.height, composerHeight, statsHeight, statusBarH, showWarning)
+}
+
+func (m *monitorModel) dashboardLeftColumnWidth(width int) int {
+	const (
+		minLeftWidth  = 60
+		minRightWidth = 32
+		gapCols       = 1
+	)
+	if width < 0 {
+		width = 0
+	}
+	minTotalWidth := minLeftWidth + minRightWidth + gapCols
+	if width < minTotalWidth {
+		available := width - gapCols
+		if available < 0 {
+			available = 0
+		}
+		leftW := int(math.Round(float64(available) * 0.66))
+		rightW := available - leftW
+		if leftW < 1 && available >= 2 {
+			leftW = 1
+			rightW = available - 1
+		} else if rightW < 1 && available >= 2 {
+			rightW = 1
+			leftW = available - 1
+		}
+		return leftW
+	}
+	leftW := int(math.Round(float64(width) * 0.66))
+	if leftW < minLeftWidth {
+		leftW = minLeftWidth
+	}
+	if leftW > width-minRightWidth-gapCols {
+		leftW = max(0, width-minRightWidth-gapCols)
+	}
+	return leftW
 }
 
 func (m *monitorModel) calculatePanelHeight(contentRows int, isEmpty bool, isFocused bool) int {
@@ -4709,6 +4878,41 @@ func (m *monitorModel) currentAgentOutputLines() []string {
 	return m.agentOutputFilteredCache
 }
 
+func (m *monitorModel) renderAgentOutputLogicalLines(rawLine string, width int) []string {
+	rawLine = strings.TrimSpace(rawLine)
+	if rawLine == "" {
+		return []string{""}
+	}
+	if summary, ok := parseAgentOutputSummaryLine(rawLine); ok {
+		rendered := summary
+		if m.renderer != nil {
+			rendered = m.renderer.RenderAgentMarkdown(summary, width)
+		}
+		// Guard rail for narrow terminals: ensure markdown output never exceeds viewport width.
+		rendered = wrapViewportText(rendered, max(10, width))
+		rendered = strings.TrimRight(rendered, "\n")
+		if rendered == "" {
+			return []string{""}
+		}
+		return strings.Split(rendered, "\n")
+	}
+	style := outputLineStyle(rawLine)
+	wrapped := wordwrap.String(rawLine, width)
+	out := make([]string, 0, 1+strings.Count(wrapped, "\n"))
+	for _, sub := range strings.Split(wrapped, "\n") {
+		sub = strings.TrimRight(sub, " ")
+		if sub == "" {
+			out = append(out, "")
+			continue
+		}
+		out = append(out, style.Render(sub))
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
+}
+
 func (m *monitorModel) refreshAgentOutputViewport() {
 	if m == nil {
 		return
@@ -4760,21 +4964,7 @@ func (m *monitorModel) refreshAgentOutputViewport() {
 
 	lines := make([]string, 0, (lastRender-firstRender+1)*2)
 	for i := firstRender; i <= lastRender; i++ {
-		rawLine := strings.TrimSpace(source[i])
-		if rawLine == "" {
-			lines = append(lines, "")
-			continue
-		}
-		style := outputLineStyle(rawLine)
-		wrapped := wordwrap.String(rawLine, w)
-		for _, sub := range strings.Split(wrapped, "\n") {
-			sub = strings.TrimRight(sub, " ")
-			if sub == "" {
-				lines = append(lines, "")
-				continue
-			}
-			lines = append(lines, style.Render(sub))
-		}
+		lines = append(lines, m.renderAgentOutputLogicalLines(source[i], w)...)
 	}
 	m.agentOutputVP.SetContent(strings.Join(lines, "\n"))
 	rel := m.agentOutputLogicalYOffset - windowStartLine
@@ -4818,11 +5008,9 @@ func (m *monitorModel) ensureAgentOutputLayout(width int) {
 	lineNo := 0
 	for i, rawLine := range source {
 		m.agentOutputLineStarts[i] = lineNo
-		rawLine = strings.TrimSpace(rawLine)
-		h := 1
-		if rawLine != "" {
-			wrapped := wordwrap.String(rawLine, width)
-			h = 1 + strings.Count(wrapped, "\n")
+		h := len(m.renderAgentOutputLogicalLines(rawLine, width))
+		if h < 1 {
+			h = 1
 		}
 		m.agentOutputLineHeights[i] = h
 		lineNo += h
@@ -5006,13 +5194,14 @@ func renderInbox(tasks []taskState) string {
 }
 
 func renderOutboxLines(results []outboxEntry, renderer *ContentRenderer, width int) string {
+	_ = renderer
+	_ = width
 	if len(results) == 0 {
 		return kit.StyleDim.Render("No completed tasks yet.")
 	}
 	lines := make([]string, 0, len(results))
 	for _, r := range results {
 		goal := truncateText(r.Goal, 50)
-		summary := strings.TrimSpace(r.Summary)
 		status := r.Status
 		if status == "" {
 			status = "unknown"
@@ -5047,25 +5236,6 @@ func renderOutboxLines(results []outboxEntry, renderer *ContentRenderer, width i
 		}
 		lines = append(lines, header)
 
-		// Summary with markdown rendering
-		if summary != "" {
-			summaryRendered := summary
-			if renderer != nil && width > 0 {
-				// Render markdown and indent each line
-				rendered := strings.TrimRight(renderer.RenderMarkdown(summary, width-4), "\n")
-				renderedLines := strings.Split(rendered, "\n")
-				for i, line := range renderedLines {
-					if i == 0 {
-						summaryRendered = "  └ " + line
-					} else {
-						summaryRendered += "\n    " + line
-					}
-				}
-			} else {
-				summaryRendered = "  └ " + summary
-			}
-			lines = append(lines, summaryRendered)
-		}
 		if strings.TrimSpace(r.Error) != "" && (status == "failed" || status == "canceled" || status == "quarantined") {
 			lines = append(lines, "  └ "+lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75")).Render("error: "+strings.TrimSpace(r.Error)))
 		}

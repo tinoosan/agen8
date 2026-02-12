@@ -65,8 +65,8 @@ func TestCalculateDashboard_ComposerStatsAlignment(t *testing.T) {
 	statsHeight := 5
 	grid := mgr.CalculateDashboard(120, 35, composerHeight, statsHeight, 1, true)
 
-	if grid.Composer.Width != grid.ScreenWidth {
-		t.Fatalf("composer width want %d (full width), got %d", grid.ScreenWidth, grid.Composer.Width)
+	if grid.Composer.Width != grid.AgentOutput.Width {
+		t.Fatalf("composer width want left-column width %d, got %d", grid.AgentOutput.Width, grid.Composer.Width)
 	}
 	if grid.Stats.Width != grid.ScreenWidth {
 		t.Fatalf("stats width want %d (full width), got %d", grid.ScreenWidth, grid.Stats.Width)

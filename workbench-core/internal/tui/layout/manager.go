@@ -130,7 +130,7 @@ const (
 
 // CalculateDashboard produces a GridLayout for dashboard mode (two columns).
 // Left: AgentOutput (flex). Right: single SidePanel (tabbed Activity | Plan | Tasks | Thoughts).
-// Bottom: full-width Composer and Stats panels stacked vertically.
+// Bottom: Composer (left-column width) and Stats reserved rows.
 func (m *Manager) CalculateDashboard(width, height, composerHeight, statsHeight, statusBarHeight int, showWarning bool) GridLayout {
 	const (
 		minLeftWidth  = 60
@@ -204,7 +204,7 @@ func (m *Manager) CalculateDashboard(width, height, composerHeight, statsHeight,
 	mainH := remainingHeight
 	grid := GridLayout{ScreenWidth: width, ScreenHeight: height}
 	grid.AgentOutput = m.spec(leftW, mainH)
-	grid.Composer = m.spec(width, composerHeight)
+	grid.Composer = m.spec(leftW, composerHeight)
 	grid.SidePanel = m.spec(rightW, 0)
 
 	// Side panel tabs render their own panels directly.
