@@ -1803,6 +1803,87 @@ func TestRPCServer_SessionPauseResume_AffectsAllRuns(t *testing.T) {
 	}
 }
 
+func TestRPCServer_SessionStop_DefaultSessionFromThread(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, runA, err := implstore.CreateSession(cfg, "session stop", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	runB := types.NewRun("secondary", 8*1024, sess.SessionID)
+	if err := implstore.SaveRun(cfg, runB); err != nil {
+		t.Fatalf("SaveRun runB: %v", err)
+	}
+	sess.Runs = append(sess.Runs, runB.RunID)
+	sess.CurrentRunID = runA.RunID
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: runA, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	reqStop, _ := protocol.NewRequest("1", protocol.MethodSessionStop, protocol.SessionStopParams{
+		ThreadID: protocol.ThreadID(runA.SessionID),
+	})
+	respStop := rpcRoundTrip(t, srv, reqStop)
+	if respStop.Error != nil {
+		t.Fatalf("session.stop error: %+v", respStop.Error)
+	}
+	var stopRes protocol.SessionStopResult
+	if err := json.Unmarshal(respStop.Result, &stopRes); err != nil {
+		t.Fatalf("unmarshal stop result: %v", err)
+	}
+	if got := strings.TrimSpace(stopRes.SessionID); got != runA.SessionID {
+		t.Fatalf("session.stop sessionId=%q want %q", got, runA.SessionID)
+	}
+	for _, runID := range []string{runA.RunID, runB.RunID} {
+		loaded, err := implstore.LoadRun(cfg, runID)
+		if err != nil {
+			t.Fatalf("LoadRun stop (%s): %v", runID, err)
+		}
+		if loaded.Status != types.RunStatusPaused {
+			t.Fatalf("status after session stop for %s = %q want %q", runID, loaded.Status, types.RunStatusPaused)
+		}
+	}
+}
+
+func TestRPCServer_SessionStop_ThreadMismatch(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	_, runA, err := implstore.CreateSession(cfg, "session stop mismatch", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	otherSess, _, err := implstore.CreateSession(cfg, "other", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession other: %v", err)
+	}
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: runA, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+
+	reqStop, _ := protocol.NewRequest("1", protocol.MethodSessionStop, protocol.SessionStopParams{
+		ThreadID:  protocol.ThreadID(runA.SessionID),
+		SessionID: otherSess.SessionID,
+	})
+	respStop := rpcRoundTrip(t, srv, reqStop)
+	if respStop.Error == nil {
+		t.Fatalf("expected error for thread/session mismatch")
+	}
+	if respStop.Error.Code != protocol.CodeThreadNotFound {
+		t.Fatalf("error code=%d want %d", respStop.Error.Code, protocol.CodeThreadNotFound)
+	}
+}
+
 func TestRPCServer_SessionList_IncludesPausedCounts(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess, runA, err := implstore.CreateSession(cfg, "counts", 8*1024)

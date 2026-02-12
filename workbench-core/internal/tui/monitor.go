@@ -448,6 +448,31 @@ type teamManifestRole struct {
 	SessionID string `json:"sessionId"`
 }
 
+func resolveTeamControlSessionID(manifest *teamManifestFile, fallback string) string {
+	fallback = strings.TrimSpace(fallback)
+	if manifest == nil {
+		return fallback
+	}
+	coordinatorRun := strings.TrimSpace(manifest.CoordinatorRun)
+	firstSession := ""
+	for _, role := range manifest.Roles {
+		sessionID := strings.TrimSpace(role.SessionID)
+		if sessionID == "" {
+			continue
+		}
+		if firstSession == "" {
+			firstSession = sessionID
+		}
+		if coordinatorRun != "" && strings.TrimSpace(role.RunID) == coordinatorRun {
+			return sessionID
+		}
+	}
+	if firstSession != "" {
+		return firstSession
+	}
+	return fallback
+}
+
 type agentOutputPendingEntry struct {
 	index     int
 	timestamp string
@@ -871,6 +896,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 		m.teamModelChange = manifest.ModelChange
 		m.teamCoordinatorRole = strings.TrimSpace(manifest.CoordinatorRole)
 		m.teamCoordinatorRunID = strings.TrimSpace(manifest.CoordinatorRun)
+		m.sessionID = resolveTeamControlSessionID(manifest, m.sessionID)
 		roleByRun := map[string]string{}
 		runIDs := make([]string, 0, len(manifest.Roles))
 		for _, role := range manifest.Roles {
@@ -880,12 +906,6 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 			}
 			roleByRun[runID] = strings.TrimSpace(role.RoleName)
 			runIDs = append(runIDs, runID)
-			if strings.TrimSpace(role.SessionID) != "" && runID == m.teamCoordinatorRunID && strings.TrimSpace(m.sessionID) == "" {
-				m.sessionID = strings.TrimSpace(role.SessionID)
-			}
-			if strings.TrimSpace(m.sessionID) == "" && strings.TrimSpace(role.SessionID) != "" {
-				m.sessionID = strings.TrimSpace(role.SessionID)
-			}
 		}
 		if len(runIDs) != 0 {
 			m.teamRunIDs = runIDs
@@ -1259,6 +1279,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.teamModelChange = manifest.ModelChange
 		m.teamCoordinatorRole = strings.TrimSpace(manifest.CoordinatorRole)
 		m.teamCoordinatorRunID = strings.TrimSpace(manifest.CoordinatorRun)
+		m.sessionID = resolveTeamControlSessionID(manifest, m.sessionID)
 		if len(manifest.Roles) != 0 {
 			roleByRun := map[string]string{}
 			runIDs := make([]string, 0, len(manifest.Roles))
@@ -1677,6 +1698,14 @@ func (m *monitorModel) rpcRun() types.Run {
 		}
 	}
 	sessionID := strings.TrimSpace(m.sessionID)
+	if sessionID == "" && strings.TrimSpace(m.teamID) != "" {
+		if manifest, err := loadTeamManifestFromDisk(m.cfg, m.teamID); err == nil && manifest != nil {
+			sessionID = resolveTeamControlSessionID(manifest, sessionID)
+			if sessionID != "" {
+				m.sessionID = sessionID
+			}
+		}
+	}
 	if sessionID == "" {
 		if strings.TrimSpace(m.teamID) != "" {
 			sessionID = "team-" + strings.TrimSpace(m.teamID)
@@ -1685,6 +1714,27 @@ func (m *monitorModel) rpcRun() types.Run {
 		}
 	}
 	return types.Run{RunID: runID, SessionID: sessionID}
+}
+
+func (m *monitorModel) resolveTeamControlSessionID() string {
+	if m == nil {
+		return ""
+	}
+	sessionID := strings.TrimSpace(m.sessionID)
+	if sessionID != "" {
+		return sessionID
+	}
+	teamID := strings.TrimSpace(m.teamID)
+	if teamID == "" {
+		return ""
+	}
+	if manifest, err := loadTeamManifestFromDisk(m.cfg, teamID); err == nil && manifest != nil {
+		sessionID = resolveTeamControlSessionID(manifest, "")
+		if sessionID != "" {
+			m.sessionID = sessionID
+		}
+	}
+	return strings.TrimSpace(sessionID)
 }
 
 func (m *monitorModel) rpcRoundTrip(method string, params any, out any) error {
@@ -2866,17 +2916,31 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 			}
 		}
 		return func() tea.Msg {
-			threadID := protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID))
 			if strings.TrimSpace(m.teamID) != "" {
+				controlSessionID := strings.TrimSpace(m.resolveTeamControlSessionID())
+				if controlSessionID == "" {
+					controlSessionID = strings.TrimSpace(m.rpcRun().SessionID)
+				}
 				var res protocol.SessionPauseResult
 				if err := m.rpcRoundTrip(protocol.MethodSessionPause, protocol.SessionPauseParams{
-					ThreadID:  threadID,
-					SessionID: strings.TrimSpace(m.sessionID),
+					ThreadID:  protocol.ThreadID(controlSessionID),
+					SessionID: controlSessionID,
 				}, &res); err != nil {
+					if strings.Contains(strings.ToLower(err.Error()), "thread not found") {
+						if refreshed := strings.TrimSpace(m.resolveTeamControlSessionID()); refreshed != "" && refreshed != controlSessionID {
+							if rerr := m.rpcRoundTrip(protocol.MethodSessionPause, protocol.SessionPauseParams{
+								ThreadID:  protocol.ThreadID(refreshed),
+								SessionID: refreshed,
+							}, &res); rerr == nil {
+								return commandLinesMsg{lines: []string{fmt.Sprintf("[pause] team paused (%d runs)", len(res.AffectedRunIDs))}}
+							}
+						}
+					}
 					return commandLinesMsg{lines: []string{"[pause] error: " + err.Error()}}
 				}
-				return commandLinesMsg{lines: []string{fmt.Sprintf("[pause] session paused (%d runs)", len(res.AffectedRunIDs))}}
+				return commandLinesMsg{lines: []string{fmt.Sprintf("[pause] team paused (%d runs)", len(res.AffectedRunIDs))}}
 			}
+			threadID := protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID))
 			var res protocol.AgentPauseResult
 			if err := m.rpcRoundTrip(protocol.MethodAgentPause, protocol.AgentPauseParams{
 				ThreadID: threadID,
@@ -2897,17 +2961,31 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 			}
 		}
 		return func() tea.Msg {
-			threadID := protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID))
 			if strings.TrimSpace(m.teamID) != "" {
+				controlSessionID := strings.TrimSpace(m.resolveTeamControlSessionID())
+				if controlSessionID == "" {
+					controlSessionID = strings.TrimSpace(m.rpcRun().SessionID)
+				}
 				var res protocol.SessionResumeResult
 				if err := m.rpcRoundTrip(protocol.MethodSessionResume, protocol.SessionResumeParams{
-					ThreadID:  threadID,
-					SessionID: strings.TrimSpace(m.sessionID),
+					ThreadID:  protocol.ThreadID(controlSessionID),
+					SessionID: controlSessionID,
 				}, &res); err != nil {
+					if strings.Contains(strings.ToLower(err.Error()), "thread not found") {
+						if refreshed := strings.TrimSpace(m.resolveTeamControlSessionID()); refreshed != "" && refreshed != controlSessionID {
+							if rerr := m.rpcRoundTrip(protocol.MethodSessionResume, protocol.SessionResumeParams{
+								ThreadID:  protocol.ThreadID(refreshed),
+								SessionID: refreshed,
+							}, &res); rerr == nil {
+								return commandLinesMsg{lines: []string{fmt.Sprintf("[resume] team resumed (%d runs)", len(res.AffectedRunIDs))}}
+							}
+						}
+					}
 					return commandLinesMsg{lines: []string{"[resume] error: " + err.Error()}}
 				}
-				return commandLinesMsg{lines: []string{fmt.Sprintf("[resume] session resumed (%d runs)", len(res.AffectedRunIDs))}}
+				return commandLinesMsg{lines: []string{fmt.Sprintf("[resume] team resumed (%d runs)", len(res.AffectedRunIDs))}}
 			}
+			threadID := protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID))
 			var res protocol.AgentResumeResult
 			if err := m.rpcRoundTrip(protocol.MethodAgentResume, protocol.AgentResumeParams{
 				ThreadID: threadID,
@@ -2916,6 +2994,46 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 				return commandLinesMsg{lines: []string{"[resume] error: " + err.Error()}}
 			}
 			return commandLinesMsg{lines: []string{"[resume] run resumed: " + shortID(strings.TrimSpace(res.RunID))}}
+		}
+	}
+	if cmd == "/stop" {
+		if strings.TrimSpace(rest) != "" {
+			return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /stop"}} }
+		}
+		if m.isDetached() {
+			return func() tea.Msg {
+				return commandLinesMsg{lines: []string{"[command] no active context; use /new or /sessions first"}}
+			}
+		}
+		return func() tea.Msg {
+			controlSessionID := strings.TrimSpace(m.rpcRun().SessionID)
+			if strings.TrimSpace(m.teamID) != "" {
+				controlSessionID = strings.TrimSpace(m.resolveTeamControlSessionID())
+				if controlSessionID == "" {
+					controlSessionID = strings.TrimSpace(m.rpcRun().SessionID)
+				}
+			}
+			var res protocol.SessionStopResult
+			if err := m.rpcRoundTrip(protocol.MethodSessionStop, protocol.SessionStopParams{
+				ThreadID:  protocol.ThreadID(controlSessionID),
+				SessionID: controlSessionID,
+			}, &res); err != nil {
+				if strings.TrimSpace(m.teamID) != "" && strings.Contains(strings.ToLower(err.Error()), "thread not found") {
+					if refreshed := strings.TrimSpace(m.resolveTeamControlSessionID()); refreshed != "" && refreshed != controlSessionID {
+						if rerr := m.rpcRoundTrip(protocol.MethodSessionStop, protocol.SessionStopParams{
+							ThreadID:  protocol.ThreadID(refreshed),
+							SessionID: refreshed,
+						}, &res); rerr == nil {
+							return commandLinesMsg{lines: []string{fmt.Sprintf("[stop] team stopped (%d runs)", len(res.AffectedRunIDs))}}
+						}
+					}
+				}
+				return commandLinesMsg{lines: []string{"[stop] error: " + err.Error()}}
+			}
+			if strings.TrimSpace(m.teamID) != "" {
+				return commandLinesMsg{lines: []string{fmt.Sprintf("[stop] team stopped (%d runs)", len(res.AffectedRunIDs))}}
+			}
+			return commandLinesMsg{lines: []string{fmt.Sprintf("[stop] session stopped (%d runs)", len(res.AffectedRunIDs))}}
 		}
 	}
 

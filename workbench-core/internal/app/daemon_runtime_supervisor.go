@@ -735,6 +735,44 @@ func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
 	return s.ensureRun(ctx, sess, runID)
 }
 
+func (s *runtimeSupervisor) StopRun(runID string) error {
+	if s == nil {
+		return nil
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("run id is required")
+	}
+	run, err := implstore.LoadRun(s.cfg, runID)
+	if err != nil {
+		return err
+	}
+	run.Status = types.RunStatusPaused
+	run.FinishedAt = nil
+	run.Error = nil
+	if err := implstore.SaveRun(s.cfg, run); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	worker := s.workers[runID]
+	s.mu.Unlock()
+
+	if worker != nil && worker.session != nil {
+		worker.session.SetPaused(true)
+	}
+	if worker != nil && worker.cancel != nil {
+		worker.cancel()
+	}
+	if worker != nil && worker.done != nil {
+		<-worker.done
+	}
+	s.mu.Lock()
+	delete(s.workers, runID)
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *runtimeSupervisor) PauseSession(ctx context.Context, sessionID string) ([]string, error) {
 	if s == nil {
 		return nil, nil
@@ -752,11 +790,31 @@ func (s *runtimeSupervisor) PauseSession(ctx context.Context, sessionID string) 
 	}
 	runIDs := collectSessionRunIDs(sess)
 	affected := make([]string, 0, len(runIDs))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	errs := make([]string, 0, len(runIDs))
 	for _, runID := range runIDs {
-		if err := s.PauseRun(runID); err != nil {
-			return affected, err
+		runID := strings.TrimSpace(runID)
+		if runID == "" {
+			continue
 		}
-		affected = append(affected, runID)
+		wg.Add(1)
+		go func(rid string) {
+			defer wg.Done()
+			if err := s.PauseRun(rid); err != nil {
+				mu.Lock()
+				errs = append(errs, rid+": "+err.Error())
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			affected = append(affected, rid)
+			mu.Unlock()
+		}(runID)
+	}
+	wg.Wait()
+	if len(errs) != 0 {
+		return affected, fmt.Errorf("pause session partial failure: %s", strings.Join(errs, "; "))
 	}
 	return affected, nil
 }
@@ -778,11 +836,77 @@ func (s *runtimeSupervisor) ResumeSession(ctx context.Context, sessionID string)
 	}
 	runIDs := collectSessionRunIDs(sess)
 	affected := make([]string, 0, len(runIDs))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	errs := make([]string, 0, len(runIDs))
 	for _, runID := range runIDs {
-		if err := s.ResumeRun(ctx, runID); err != nil {
-			return affected, err
+		runID := strings.TrimSpace(runID)
+		if runID == "" {
+			continue
 		}
-		affected = append(affected, runID)
+		wg.Add(1)
+		go func(rid string) {
+			defer wg.Done()
+			if err := s.ResumeRun(ctx, rid); err != nil {
+				mu.Lock()
+				errs = append(errs, rid+": "+err.Error())
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			affected = append(affected, rid)
+			mu.Unlock()
+		}(runID)
+	}
+	wg.Wait()
+	if len(errs) != 0 {
+		return affected, fmt.Errorf("resume session partial failure: %s", strings.Join(errs, "; "))
+	}
+	return affected, nil
+}
+
+func (s *runtimeSupervisor) StopSession(ctx context.Context, sessionID string) ([]string, error) {
+	if s == nil {
+		return nil, nil
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if s.sessionStore == nil {
+		return nil, fmt.Errorf("session store not configured")
+	}
+	sess, err := s.sessionStore.LoadSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	runIDs := collectSessionRunIDs(sess)
+	affected := make([]string, 0, len(runIDs))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	errs := make([]string, 0, len(runIDs))
+	for _, runID := range runIDs {
+		runID := strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(rid string) {
+			defer wg.Done()
+			if err := s.StopRun(rid); err != nil {
+				mu.Lock()
+				errs = append(errs, rid+": "+err.Error())
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			affected = append(affected, rid)
+			mu.Unlock()
+		}(runID)
+	}
+	wg.Wait()
+	if len(errs) != 0 {
+		return affected, fmt.Errorf("stop session partial failure: %s", strings.Join(errs, "; "))
 	}
 	return affected, nil
 }

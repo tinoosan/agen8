@@ -695,25 +695,30 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		CostUSD:      costUSD,
 	}
 	if err != nil {
-		tr.Status = types.TaskStatusFailed
-		tr.Error = err.Error()
-		if s.cfg.Events != nil {
-			errInfo := llm.ClassifyError(err)
-			payload := map[string]string{
-				"taskId":     taskID,
-				"class":      fallback(strings.TrimSpace(errInfo.Class), "unknown"),
-				"retryable":  fmt.Sprintf("%t", errInfo.Retryable),
-				"statusCode": fmt.Sprintf("%d", errInfo.StatusCode),
-				"message":    fallback(strings.TrimSpace(errInfo.Message), strings.TrimSpace(err.Error())),
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			tr.Status = types.TaskStatusCanceled
+			tr.Error = "stopped by user"
+		} else {
+			tr.Status = types.TaskStatusFailed
+			tr.Error = err.Error()
+			if s.cfg.Events != nil {
+				errInfo := llm.ClassifyError(err)
+				payload := map[string]string{
+					"taskId":     taskID,
+					"class":      fallback(strings.TrimSpace(errInfo.Class), "unknown"),
+					"retryable":  fmt.Sprintf("%t", errInfo.Retryable),
+					"statusCode": fmt.Sprintf("%d", errInfo.StatusCode),
+					"message":    fallback(strings.TrimSpace(errInfo.Message), strings.TrimSpace(err.Error())),
+				}
+				if code := strings.TrimSpace(errInfo.Code); code != "" {
+					payload["code"] = code
+				}
+				s.emitBestEffort(ctx, events.Event{
+					Type:    "llm.error",
+					Message: llmErrorMessage(errInfo),
+					Data:    payload,
+				})
 			}
-			if code := strings.TrimSpace(errInfo.Code); code != "" {
-				payload["code"] = code
-			}
-			s.emitBestEffort(ctx, events.Event{
-				Type:    "llm.error",
-				Message: llmErrorMessage(errInfo),
-				Data:    payload,
-			})
 		}
 	} else {
 		resStatus := strings.ToLower(strings.TrimSpace(string(runRes.Status)))
@@ -790,7 +795,11 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		}
 	}
 
-	if err := s.cfg.TaskStore.CompleteTask(ctx, taskID, tr); err != nil {
+	completeCtx := ctx
+	if tr.Status == types.TaskStatusCanceled && errors.Is(ctx.Err(), context.Canceled) {
+		completeCtx = context.Background()
+	}
+	if err := s.cfg.TaskStore.CompleteTask(completeCtx, taskID, tr); err != nil {
 		return err
 	}
 	s.maybeEmitCoordinatorPolicyWarn(ctx, task, tr)
@@ -808,11 +817,11 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	if timeutil.IsSet(task.StartedAt) && timeutil.IsSet(tr.CompletedAt) {
 		task.DurationSeconds = int(tr.CompletedAt.Sub(*task.StartedAt).Round(time.Second).Seconds())
 	}
-	_ = s.cfg.TaskStore.UpdateTask(ctx, task)
+	_ = s.cfg.TaskStore.UpdateTask(completeCtx, task)
 
 	if s.cfg.Notifier != nil {
-		if err := s.cfg.Notifier.Notify(ctx, task, tr); err != nil {
-			s.emitBestEffort(ctx, events.Event{Type: "task.notify.error", Message: "Task notification failed", Data: map[string]string{"taskId": taskID, "error": err.Error()}})
+		if err := s.cfg.Notifier.Notify(completeCtx, task, tr); err != nil {
+			s.emitBestEffort(completeCtx, events.Event{Type: "task.notify.error", Message: "Task notification failed", Data: map[string]string{"taskId": taskID, "error": err.Error()}})
 		}
 	}
 	return nil

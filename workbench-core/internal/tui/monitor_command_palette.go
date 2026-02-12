@@ -19,6 +19,7 @@ var monitorAvailableCommands = []string{
 	"/rename-session",
 	"/pause",
 	"/resume",
+	"/stop",
 	"/model",
 	"/reasoning-effort",
 	"/reasoning-summary",
@@ -43,7 +44,7 @@ func isExactMonitorCommand(s string) bool {
 
 func monitorCommandInvokesWithoutArgs(cmd string) bool {
 	switch strings.TrimSpace(cmd) {
-	case "/new", "/reconnect", "/artifact", "/team", "/sessions", "/agents", "/pause", "/resume", "/model", "/reasoning-effort", "/reasoning-summary", "/editor", "/help", "/quit":
+	case "/new", "/reconnect", "/artifact", "/team", "/sessions", "/agents", "/pause", "/resume", "/stop", "/model", "/reasoning-effort", "/reasoning-summary", "/editor", "/help", "/quit":
 		return true
 	default:
 		return false

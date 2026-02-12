@@ -443,6 +443,8 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	defer stopSignals()
 	go supervisor.Run(runCtx)
 	defer supervisor.stopAll()
+	var runLoopMu sync.Mutex
+	var runLoopCancel context.CancelFunc
 
 	if protocolEnabled {
 		srvCfg := RPCServerConfig{
@@ -654,28 +656,48 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 				if err != nil {
 					return nil, err
 				}
-				affected := make([]string, 0, len(loadedSession.Runs))
-				for _, rid := range collectSessionRunIDs(loadedSession) {
-					rid = strings.TrimSpace(rid)
+				runIDs := collectSessionRunIDs(loadedSession)
+				affected := make([]string, 0, len(runIDs))
+				var mu sync.Mutex
+				var wg sync.WaitGroup
+				errs := make([]string, 0, len(runIDs))
+				for _, rid := range runIDs {
+					rid := strings.TrimSpace(rid)
 					if rid == "" {
 						continue
 					}
-					if rid == strings.TrimSpace(run.RunID) {
-						loaded, lerr := implstore.LoadRun(cfg, rid)
-						if lerr != nil {
-							return affected, lerr
+					wg.Add(1)
+					go func(runID string) {
+						defer wg.Done()
+						if runID == strings.TrimSpace(run.RunID) {
+							loaded, lerr := implstore.LoadRun(cfg, runID)
+							if lerr == nil {
+								loaded.Status = types.RunStatusPaused
+								loaded.FinishedAt = nil
+								loaded.Error = nil
+								lerr = implstore.SaveRun(cfg, loaded)
+							}
+							if lerr != nil {
+								mu.Lock()
+								errs = append(errs, runID+": "+lerr.Error())
+								mu.Unlock()
+								return
+							}
+							sess.SetPaused(true)
+						} else if perr := supervisor.PauseRun(runID); perr != nil {
+							mu.Lock()
+							errs = append(errs, runID+": "+perr.Error())
+							mu.Unlock()
+							return
 						}
-						loaded.Status = types.RunStatusPaused
-						loaded.FinishedAt = nil
-						loaded.Error = nil
-						if lerr := implstore.SaveRun(cfg, loaded); lerr != nil {
-							return affected, lerr
-						}
-						sess.SetPaused(true)
-					} else if perr := supervisor.PauseRun(rid); perr != nil {
-						return affected, perr
-					}
-					affected = append(affected, rid)
+						mu.Lock()
+						affected = append(affected, runID)
+						mu.Unlock()
+					}(rid)
+				}
+				wg.Wait()
+				if len(errs) != 0 {
+					return affected, fmt.Errorf("pause session partial failure: %s", strings.Join(errs, "; "))
 				}
 				return affected, nil
 			},
@@ -698,28 +720,118 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 				if err != nil {
 					return nil, err
 				}
-				affected := make([]string, 0, len(loadedSession.Runs))
-				for _, rid := range collectSessionRunIDs(loadedSession) {
-					rid = strings.TrimSpace(rid)
+				runIDs := collectSessionRunIDs(loadedSession)
+				affected := make([]string, 0, len(runIDs))
+				var mu sync.Mutex
+				var wg sync.WaitGroup
+				errs := make([]string, 0, len(runIDs))
+				for _, rid := range runIDs {
+					rid := strings.TrimSpace(rid)
 					if rid == "" {
 						continue
 					}
-					if rid == strings.TrimSpace(run.RunID) {
-						loaded, lerr := implstore.LoadRun(cfg, rid)
-						if lerr != nil {
-							return affected, lerr
+					wg.Add(1)
+					go func(runID string) {
+						defer wg.Done()
+						if runID == strings.TrimSpace(run.RunID) {
+							loaded, lerr := implstore.LoadRun(cfg, runID)
+							if lerr == nil {
+								loaded.Status = types.RunStatusRunning
+								loaded.FinishedAt = nil
+								loaded.Error = nil
+								lerr = implstore.SaveRun(cfg, loaded)
+							}
+							if lerr != nil {
+								mu.Lock()
+								errs = append(errs, runID+": "+lerr.Error())
+								mu.Unlock()
+								return
+							}
+							sess.SetPaused(false)
+						} else if rerr := supervisor.ResumeRun(ctx, runID); rerr != nil {
+							mu.Lock()
+							errs = append(errs, runID+": "+rerr.Error())
+							mu.Unlock()
+							return
 						}
-						loaded.Status = types.RunStatusRunning
-						loaded.FinishedAt = nil
-						loaded.Error = nil
-						if lerr := implstore.SaveRun(cfg, loaded); lerr != nil {
-							return affected, lerr
-						}
-						sess.SetPaused(false)
-					} else if rerr := supervisor.ResumeRun(ctx, rid); rerr != nil {
-						return affected, rerr
+						mu.Lock()
+						affected = append(affected, runID)
+						mu.Unlock()
+					}(rid)
+				}
+				wg.Wait()
+				if len(errs) != 0 {
+					return affected, fmt.Errorf("resume session partial failure: %s", strings.Join(errs, "; "))
+				}
+				return affected, nil
+			},
+			SessionStop: func(ctx context.Context, threadID, sessionID string) ([]string, error) {
+				threadID = strings.TrimSpace(threadID)
+				if threadID == "" {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
+				}
+				if _, err := sessionStore.LoadSession(ctx, threadID); err != nil {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				sessionID = strings.TrimSpace(sessionID)
+				if sessionID == "" {
+					sessionID = threadID
+				}
+				if sessionID != threadID {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				loadedSession, err := sessionStore.LoadSession(ctx, sessionID)
+				if err != nil {
+					return nil, err
+				}
+				runIDs := collectSessionRunIDs(loadedSession)
+				affected := make([]string, 0, len(runIDs))
+				var mu sync.Mutex
+				var wg sync.WaitGroup
+				errs := make([]string, 0, len(runIDs))
+				for _, rid := range runIDs {
+					rid := strings.TrimSpace(rid)
+					if rid == "" {
+						continue
 					}
-					affected = append(affected, rid)
+					wg.Add(1)
+					go func(runID string) {
+						defer wg.Done()
+						if runID == strings.TrimSpace(run.RunID) {
+							loaded, lerr := implstore.LoadRun(cfg, runID)
+							if lerr == nil {
+								loaded.Status = types.RunStatusPaused
+								loaded.FinishedAt = nil
+								loaded.Error = nil
+								lerr = implstore.SaveRun(cfg, loaded)
+							}
+							if lerr != nil {
+								mu.Lock()
+								errs = append(errs, runID+": "+lerr.Error())
+								mu.Unlock()
+								return
+							}
+							sess.SetPaused(true)
+							runLoopMu.Lock()
+							cancel := runLoopCancel
+							runLoopMu.Unlock()
+							if cancel != nil {
+								cancel()
+							}
+						} else if serr := supervisor.StopRun(runID); serr != nil {
+							mu.Lock()
+							errs = append(errs, runID+": "+serr.Error())
+							mu.Unlock()
+							return
+						}
+						mu.Lock()
+						affected = append(affected, runID)
+						mu.Unlock()
+					}(rid)
+				}
+				wg.Wait()
+				if len(errs) != 0 {
+					return affected, fmt.Errorf("stop session partial failure: %s", strings.Join(errs, "; "))
 				}
 				return affected, nil
 			},
@@ -865,7 +977,15 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		log.Printf("daemon: agent id %s — attach with: workbench --agent-id %s", run.RunID, run.RunID)
 	}
 	for {
-		err = sess.Run(runCtx)
+		runLoopCtx, cancelRunLoop := context.WithCancel(runCtx)
+		runLoopMu.Lock()
+		runLoopCancel = cancelRunLoop
+		runLoopMu.Unlock()
+		err = sess.Run(runLoopCtx)
+		cancelRunLoop()
+		runLoopMu.Lock()
+		runLoopCancel = nil
+		runLoopMu.Unlock()
 		if runCtx.Err() != nil {
 			// context cancellation is expected on shutdown
 			err = nil

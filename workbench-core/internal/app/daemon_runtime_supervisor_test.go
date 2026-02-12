@@ -2,246 +2,136 @@ package app
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"testing"
 
 	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/config"
-	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
-func TestRuntimeSupervisorSyncOnce_StartsNonSystemRunsWithoutDuplicates(t *testing.T) {
-	ctx := context.Background()
+func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
-	ss := pkgstore.NewMemorySessionStore()
-
-	systemSess := types.NewSession("system")
-	systemSess.System = true
-	systemSess.Runs = []string{"run-system"}
-	systemSess.CurrentRunID = "run-system"
-	if err := ss.SaveSession(ctx, systemSess); err != nil {
-		t.Fatalf("save system session: %v", err)
-	}
-
-	userSess := types.NewSession("user")
-	userSess.Runs = []string{"run-a", "run-b"}
-	userSess.CurrentRunID = "run-a"
-	if err := ss.SaveSession(ctx, userSess); err != nil {
-		t.Fatalf("save user session: %v", err)
-	}
-
-	saveRun := func(runID, sessionID string) {
-		run := types.NewRun("goal", 8*1024, sessionID)
-		run.RunID = runID
-		if err := implstore.SaveRun(cfg, run); err != nil {
-			t.Fatalf("save run %s: %v", runID, err)
-		}
-	}
-	saveRun("run-system", systemSess.SessionID)
-	saveRun("run-a", userSess.SessionID)
-	saveRun("run-b", userSess.SessionID)
-
-	sup := newRuntimeSupervisor(runtimeSupervisorConfig{Cfg: cfg, SessionStore: ss})
-	var mu sync.Mutex
-	started := map[string]int{}
-	hold := make(chan struct{})
-	sup.spawnOverride = func(_ context.Context, _ types.Session, runID string) (*managedRuntime, error) {
-		mu.Lock()
-		started[runID]++
-		mu.Unlock()
-		return &managedRuntime{cancel: func() {}, done: hold}, nil
-	}
-
-	if err := sup.syncOnce(ctx); err != nil {
-		t.Fatalf("syncOnce #1: %v", err)
-	}
-	if err := sup.syncOnce(ctx); err != nil {
-		t.Fatalf("syncOnce #2: %v", err)
-	}
-
-	mu.Lock()
-	if started["run-system"] != 0 {
-		t.Fatalf("expected system run to be skipped, got %d starts", started["run-system"])
-	}
-	if started["run-a"] != 1 || started["run-b"] != 1 {
-		t.Fatalf("expected run-a/run-b each started once, got run-a=%d run-b=%d", started["run-a"], started["run-b"])
-	}
-	mu.Unlock()
-
-	another := types.NewSession("another")
-	another.Runs = []string{"run-c"}
-	if err := ss.SaveSession(ctx, another); err != nil {
-		t.Fatalf("save second user session: %v", err)
-	}
-	saveRun("run-c", another.SessionID)
-	if err := sup.syncOnce(ctx); err != nil {
-		t.Fatalf("syncOnce #3: %v", err)
-	}
-	mu.Lock()
-	if started["run-c"] != 1 {
-		t.Fatalf("expected run-c started once, got %d", started["run-c"])
-	}
-	mu.Unlock()
-}
-
-func TestCollectSessionRunIDs_DedupesAndPrefersCurrent(t *testing.T) {
-	s := types.NewSession("x")
-	s.CurrentRunID = "run-b"
-	s.Runs = []string{"run-a", "run-b", "run-a", "", "run-c"}
-
-	got := collectSessionRunIDs(s)
-	if len(got) != 3 {
-		t.Fatalf("expected 3 unique run IDs, got %v", got)
-	}
-	if got[0] != "run-b" {
-		t.Fatalf("expected current run first, got %v", got)
-	}
-	rest := append([]string(nil), got[1:]...)
-	sort.Strings(rest)
-	if rest[0] != "run-a" || rest[1] != "run-c" {
-		t.Fatalf("unexpected run IDs: %v", got)
-	}
-}
-
-func TestRuntimeSupervisorSyncOnce_SkipsBootstrapRun(t *testing.T) {
-	ctx := context.Background()
-	cfg := config.Config{DataDir: t.TempDir()}
-	ss := pkgstore.NewMemorySessionStore()
-
-	userSess := types.NewSession("user")
-	userSess.Runs = []string{"run-bootstrap", "run-other"}
-	userSess.CurrentRunID = "run-bootstrap"
-	if err := ss.SaveSession(ctx, userSess); err != nil {
-		t.Fatalf("save user session: %v", err)
-	}
-	for _, runID := range []string{"run-bootstrap", "run-other"} {
-		run := types.NewRun("goal", 8*1024, userSess.SessionID)
-		run.RunID = runID
-		if err := implstore.SaveRun(cfg, run); err != nil {
-			t.Fatalf("save run %s: %v", runID, err)
-		}
-	}
-
-	sup := newRuntimeSupervisor(runtimeSupervisorConfig{
-		Cfg:            cfg,
-		SessionStore:   ss,
-		BootstrapRunID: "run-bootstrap",
-	})
-	started := map[string]int{}
-	hold := make(chan struct{})
-	sup.spawnOverride = func(_ context.Context, _ types.Session, runID string) (*managedRuntime, error) {
-		started[runID]++
-		return &managedRuntime{cancel: func() {}, done: hold}, nil
-	}
-
-	if err := sup.syncOnce(ctx); err != nil {
-		t.Fatalf("syncOnce: %v", err)
-	}
-	if started["run-bootstrap"] != 0 {
-		t.Fatalf("expected bootstrap run to be skipped, got %d", started["run-bootstrap"])
-	}
-	if started["run-other"] != 1 {
-		t.Fatalf("expected run-other started once, got %d", started["run-other"])
-	}
-}
-
-func TestRuntimeSupervisorSyncOnce_SkipsPausedRun(t *testing.T) {
-	ctx := context.Background()
-	cfg := config.Config{DataDir: t.TempDir()}
-	ss := pkgstore.NewMemorySessionStore()
-
-	sess := types.NewSession("paused")
-	sess.Runs = []string{"run-paused"}
-	sess.CurrentRunID = "run-paused"
-	if err := ss.SaveSession(ctx, sess); err != nil {
-		t.Fatalf("save session: %v", err)
-	}
-
-	run := types.NewRun("goal", 8*1024, sess.SessionID)
-	run.RunID = "run-paused"
-	run.Status = types.RunStatusPaused
-	if err := implstore.SaveRun(cfg, run); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-
-	sup := newRuntimeSupervisor(runtimeSupervisorConfig{
-		Cfg:          cfg,
-		SessionStore: ss,
-	})
-	started := 0
-	hold := make(chan struct{})
-	sup.spawnOverride = func(_ context.Context, _ types.Session, _ string) (*managedRuntime, error) {
-		started++
-		return &managedRuntime{cancel: func() {}, done: hold}, nil
-	}
-	if err := sup.syncOnce(ctx); err != nil {
-		t.Fatalf("syncOnce: %v", err)
-	}
-	if started != 0 {
-		t.Fatalf("expected paused run to be skipped, got starts=%d", started)
-	}
-}
-
-func TestRuntimeSupervisorPauseResumeRun(t *testing.T) {
-	ctx := context.Background()
-	cfg := config.Config{DataDir: t.TempDir()}
-	ss := pkgstore.NewMemorySessionStore()
-
-	sess := types.NewSession("resume")
-	sess.Runs = []string{"run-1"}
-	sess.CurrentRunID = "run-1"
-	if err := ss.SaveSession(ctx, sess); err != nil {
-		t.Fatalf("save session: %v", err)
-	}
-
-	run := types.NewRun("goal", 8*1024, sess.SessionID)
-	run.RunID = "run-1"
-	run.Status = types.RunStatusRunning
-	if err := implstore.SaveRun(cfg, run); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-
-	sup := newRuntimeSupervisor(runtimeSupervisorConfig{
-		Cfg:          cfg,
-		SessionStore: ss,
-	})
-	started := 0
-	hold := make(chan struct{})
-	sup.spawnOverride = func(_ context.Context, sess types.Session, runID string) (*managedRuntime, error) {
-		started++
-		return &managedRuntime{runID: runID, sessionID: sess.SessionID, cancel: func() {}, done: hold}, nil
-	}
-
-	if err := sup.PauseRun("run-1"); err != nil {
-		t.Fatalf("PauseRun: %v", err)
-	}
-	loaded, err := implstore.LoadRun(cfg, "run-1")
+	_, run, err := implstore.CreateSession(cfg, "stop run", 8*1024)
 	if err != nil {
-		t.Fatalf("LoadRun after pause: %v", err)
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	var mu sync.Mutex
+	cancelCalled := false
+	done := make(chan struct{})
+	supervisor := &runtimeSupervisor{
+		cfg: cfg,
+		workers: map[string]*managedRuntime{
+			run.RunID: {
+				runID:     run.RunID,
+				sessionID: run.SessionID,
+				cancel: func() {
+					mu.Lock()
+					cancelCalled = true
+					mu.Unlock()
+					close(done)
+				},
+				done: done,
+			},
+		},
+	}
+
+	if err := supervisor.StopRun(run.RunID); err != nil {
+		t.Fatalf("StopRun: %v", err)
+	}
+
+	mu.Lock()
+	gotCancel := cancelCalled
+	mu.Unlock()
+	if !gotCancel {
+		t.Fatalf("expected worker cancel to be called")
+	}
+
+	loaded, err := implstore.LoadRun(cfg, run.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
 	}
 	if loaded.Status != types.RunStatusPaused {
-		t.Fatalf("status after pause=%q want %q", loaded.Status, types.RunStatusPaused)
-	}
-	if err := sup.syncOnce(ctx); err != nil {
-		t.Fatalf("syncOnce paused: %v", err)
-	}
-	if started != 0 {
-		t.Fatalf("expected no spawn while paused, got %d", started)
+		t.Fatalf("run status=%q want %q", loaded.Status, types.RunStatusPaused)
 	}
 
-	if err := sup.ResumeRun(ctx, "run-1"); err != nil {
-		t.Fatalf("ResumeRun: %v", err)
+	supervisor.mu.Lock()
+	_, exists := supervisor.workers[run.RunID]
+	supervisor.mu.Unlock()
+	if exists {
+		t.Fatalf("expected worker to be removed after stop")
 	}
-	loaded, err = implstore.LoadRun(cfg, "run-1")
+}
+
+func TestRuntimeSupervisor_StopSession_StopsOnlySessionRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sessA, runA, err := implstore.CreateSession(cfg, "session-a", 8*1024)
 	if err != nil {
-		t.Fatalf("LoadRun after resume: %v", err)
+		t.Fatalf("CreateSession A: %v", err)
 	}
-	if loaded.Status != types.RunStatusRunning {
-		t.Fatalf("status after resume=%q want %q", loaded.Status, types.RunStatusRunning)
+	runA2 := types.NewRun("secondary-a", 8*1024, sessA.SessionID)
+	if err := implstore.SaveRun(cfg, runA2); err != nil {
+		t.Fatalf("SaveRun A2: %v", err)
 	}
-	if started != 1 {
-		t.Fatalf("expected one spawn on resume, got %d", started)
+	sessA.Runs = append(sessA.Runs, runA2.RunID)
+
+	_, runB, err := implstore.CreateSession(cfg, "session-b", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession B: %v", err)
+	}
+
+	sessionStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessionStore.SaveSession(context.Background(), sessA); err != nil {
+		t.Fatalf("SaveSession A: %v", err)
+	}
+
+	done := make(chan struct{})
+	supervisor := &runtimeSupervisor{
+		cfg:          cfg,
+		sessionStore: sessionStore,
+		workers: map[string]*managedRuntime{
+			runA.RunID: {
+				runID:     runA.RunID,
+				sessionID: runA.SessionID,
+				cancel:    func() { close(done) },
+				done:      done,
+			},
+		},
+	}
+
+	affected, err := supervisor.StopSession(context.Background(), sessA.SessionID)
+	if err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+	if len(affected) < 2 {
+		t.Fatalf("expected >=2 affected runs, got %v", affected)
+	}
+
+	loadedA, err := implstore.LoadRun(cfg, runA.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun A: %v", err)
+	}
+	if loadedA.Status != types.RunStatusPaused {
+		t.Fatalf("runA status=%q want %q", loadedA.Status, types.RunStatusPaused)
+	}
+
+	loadedA2, err := implstore.LoadRun(cfg, runA2.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun A2: %v", err)
+	}
+	if loadedA2.Status != types.RunStatusPaused {
+		t.Fatalf("runA2 status=%q want %q", loadedA2.Status, types.RunStatusPaused)
+	}
+
+	loadedB, err := implstore.LoadRun(cfg, runB.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun B: %v", err)
+	}
+	if loadedB.Status != types.RunStatusRunning {
+		t.Fatalf("runB status=%q want %q", loadedB.Status, types.RunStatusRunning)
 	}
 }

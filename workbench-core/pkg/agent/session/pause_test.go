@@ -73,6 +73,52 @@ func (f *fakeAgent) runs() int {
 	return f.runCount
 }
 
+type blockingAgent struct {
+	cfg agent.AgentConfig
+}
+
+func newBlockingAgent() *blockingAgent {
+	return &blockingAgent{cfg: agent.AgentConfig{Model: "fake-model", Hooks: agent.Hooks{}}}
+}
+
+func (b *blockingAgent) Run(ctx context.Context, _ string) (agent.RunResult, error) {
+	<-ctx.Done()
+	return agent.RunResult{}, ctx.Err()
+}
+
+func (b *blockingAgent) RunConversation(_ context.Context, _ []llmtypes.LLMMessage) (agent.RunResult, []llmtypes.LLMMessage, int, error) {
+	return agent.RunResult{Text: "ok", Status: types.TaskStatusSucceeded}, nil, 0, nil
+}
+
+func (b *blockingAgent) ExecHostOp(_ context.Context, _ types.HostOpRequest) types.HostOpResponse {
+	return types.HostOpResponse{Ok: true}
+}
+
+func (b *blockingAgent) GetModel() string                            { return b.cfg.Model }
+func (b *blockingAgent) SetModel(v string)                           { b.cfg.Model = v }
+func (b *blockingAgent) WebSearchEnabled() bool                      { return b.cfg.EnableWebSearch }
+func (b *blockingAgent) SetEnableWebSearch(v bool)                   { b.cfg.EnableWebSearch = v }
+func (b *blockingAgent) GetApprovalsMode() string                    { return b.cfg.ApprovalsMode }
+func (b *blockingAgent) SetApprovalsMode(v string)                   { b.cfg.ApprovalsMode = v }
+func (b *blockingAgent) GetReasoningEffort() string                  { return b.cfg.ReasoningEffort }
+func (b *blockingAgent) SetReasoningEffort(v string)                 { b.cfg.ReasoningEffort = v }
+func (b *blockingAgent) GetReasoningSummary() string                 { return b.cfg.ReasoningSummary }
+func (b *blockingAgent) SetReasoningSummary(v string)                { b.cfg.ReasoningSummary = v }
+func (b *blockingAgent) GetSystemPrompt() string                     { return b.cfg.SystemPrompt }
+func (b *blockingAgent) SetSystemPrompt(v string)                    { b.cfg.SystemPrompt = v }
+func (b *blockingAgent) GetHooks() *agent.Hooks                      { return &b.cfg.Hooks }
+func (b *blockingAgent) SetHooks(v agent.Hooks)                      { b.cfg.Hooks = v }
+func (b *blockingAgent) GetToolRegistry() agent.ToolRegistryProvider { return nil }
+func (b *blockingAgent) SetToolRegistry(agent.ToolRegistryProvider)  {}
+func (b *blockingAgent) GetExtraTools() []llmtypes.Tool              { return b.cfg.ExtraTools }
+func (b *blockingAgent) SetExtraTools(v []llmtypes.Tool)             { b.cfg.ExtraTools = v }
+func (b *blockingAgent) Clone() agent.Agent                          { return b }
+func (b *blockingAgent) Config() agent.AgentConfig                   { return b.cfg }
+func (b *blockingAgent) CloneWithConfig(cfg agent.AgentConfig) (agent.Agent, error) {
+	b.cfg = cfg
+	return b, nil
+}
+
 func TestSessionPausedSkipsPendingUntilResumed(t *testing.T) {
 	t.Parallel()
 
@@ -190,5 +236,71 @@ func TestSessionPausedSkipsHeartbeatEnqueue(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("heartbeat tasks enqueued while paused: %d", count)
+	}
+}
+
+func TestSessionContextCanceled_RecordsTaskCanceled(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Config{DataDir: t.TempDir()}
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+
+	runID := "run-test-cancel"
+	sessionID := "sess-test-cancel"
+	now := time.Now().UTC()
+	if err := ts.CreateTask(context.Background(), types.Task{
+		TaskID:         "task-cancel",
+		SessionID:      sessionID,
+		RunID:          runID,
+		AssignedToType: "agent",
+		AssignedTo:     runID,
+		Goal:           "long running task",
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	sess, err := New(Config{
+		Agent:        newBlockingAgent(),
+		Profile:      &profile.Profile{ID: "general"},
+		TaskStore:    ts,
+		SessionID:    sessionID,
+		RunID:        runID,
+		PollInterval: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- sess.Run(ctx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	reachedActive := false
+	for time.Now().Before(deadline) {
+		task, gerr := ts.GetTask(context.Background(), "task-cancel")
+		if gerr == nil && task.Status == types.TaskStatusActive {
+			reachedActive = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !reachedActive {
+		t.Fatalf("task did not become active before cancellation")
+	}
+	cancel()
+	<-done
+
+	task, err := ts.GetTask(context.Background(), "task-cancel")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.Status != types.TaskStatusCanceled {
+		t.Fatalf("task status=%q want %q", task.Status, types.TaskStatusCanceled)
 	}
 }

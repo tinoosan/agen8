@@ -20,6 +20,7 @@ const (
 	MethodAgentResume         = "agent.resume"
 	MethodSessionPause        = "session.pause"
 	MethodSessionResume       = "session.resume"
+	MethodSessionStop         = "session.stop"
 	MethodSessionGetTotals    = "session.getTotals"
 	MethodActivityList        = "activity.list"
 	MethodTeamGetStatus       = "team.getStatus"

@@ -1242,13 +1242,23 @@ func TestMonitorDetached_EnqueueTaskRequiresContext(t *testing.T) {
 }
 
 func TestMonitorCommandPalette_ProfileRemoved(t *testing.T) {
+	foundStop := false
 	for _, cmd := range monitorAvailableCommands {
 		if cmd == "/profile" {
 			t.Fatalf("/profile should not be present in command palette")
 		}
+		if cmd == "/stop" {
+			foundStop = true
+		}
+	}
+	if !foundStop {
+		t.Fatalf("/stop should be present in command palette")
 	}
 	if monitorCommandInvokesWithoutArgs("/profile") {
 		t.Fatalf("/profile should not be invokable")
+	}
+	if !monitorCommandInvokesWithoutArgs("/stop") {
+		t.Fatalf("/stop should be invokable without args")
 	}
 }
 
@@ -1403,6 +1413,43 @@ func TestUpdateTeamManifestLoadedMsg_PrefersPendingRequestedModel(t *testing.T) 
 	}
 }
 
+func TestResolveTeamControlSessionID_PrefersCoordinatorSession(t *testing.T) {
+	manifest := &teamManifestFile{
+		CoordinatorRun: "run-coordinator",
+		Roles: []teamManifestRole{
+			{RoleName: "researcher", RunID: "run-research", SessionID: "sess-research"},
+			{RoleName: "coordinator", RunID: "run-coordinator", SessionID: "sess-coordinator"},
+		},
+	}
+	got := resolveTeamControlSessionID(manifest, "")
+	if got != "sess-coordinator" {
+		t.Fatalf("control session=%q want %q", got, "sess-coordinator")
+	}
+}
+
+func TestUpdateTeamManifestLoadedMsg_UpdatesSessionToCoordinator(t *testing.T) {
+	m := &monitorModel{
+		teamID:    "team-a",
+		sessionID: "sess-wrong",
+	}
+	_, _ = m.Update(teamManifestLoadedMsg{
+		manifest: &teamManifestFile{
+			TeamID:         "team-a",
+			CoordinatorRun: "run-coordinator",
+			Roles: []teamManifestRole{
+				{RoleName: "worker", RunID: "run-worker", SessionID: "sess-worker"},
+				{RoleName: "coordinator", RunID: "run-coordinator", SessionID: "sess-coordinator"},
+			},
+		},
+	})
+	if got := strings.TrimSpace(m.sessionID); got != "sess-coordinator" {
+		t.Fatalf("sessionID=%q, want %q", got, "sess-coordinator")
+	}
+	if got := strings.TrimSpace(m.rpcRun().SessionID); got != "sess-coordinator" {
+		t.Fatalf("rpc sessionID=%q, want %q", got, "sess-coordinator")
+	}
+}
+
 func TestLoadPlanFilesCmd_TeamFocusedLoadsSingleRunPlan(t *testing.T) {
 	dataDir := t.TempDir()
 	cfg := config.Config{DataDir: dataDir}
@@ -1443,6 +1490,29 @@ func TestLoadPlanFilesCmd_TeamFocusedLoadsSingleRunPlan(t *testing.T) {
 	}
 	if !strings.Contains(msg.checklist, "check-a") || strings.Contains(msg.checklist, "check-b") {
 		t.Fatalf("expected focused run checklist only, got %q", msg.checklist)
+	}
+}
+
+func TestHandleCommand_StopSession(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	endpoint := startMonitorTestRPCServer(t, cfg, "run-stop")
+	m := &monitorModel{
+		cfg:         cfg,
+		runID:       "run-stop",
+		sessionID:   "sess-rpc-test",
+		rpcEndpoint: endpoint,
+	}
+	cmd := m.handleCommand("/stop")
+	if cmd == nil {
+		t.Fatalf("expected command")
+	}
+	raw := cmd()
+	msg, ok := raw.(commandLinesMsg)
+	if !ok || len(msg.lines) == 0 {
+		t.Fatalf("unexpected message: %#v", raw)
+	}
+	if !strings.Contains(msg.lines[0], "[stop] session stopped") {
+		t.Fatalf("unexpected stop output: %q", msg.lines[0])
 	}
 }
 

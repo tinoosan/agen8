@@ -140,6 +140,16 @@ type SessionResumeResult struct {
 	AffectedRunIDs []string `json:"affectedRunIds,omitempty"`
 }
 
+type SessionStopParams struct {
+	ThreadID  ThreadID `json:"threadId"`
+	SessionID string   `json:"sessionId,omitempty"`
+}
+
+type SessionStopResult struct {
+	SessionID      string   `json:"sessionId"`
+	AffectedRunIDs []string `json:"affectedRunIds,omitempty"`
+}
+
 type SessionGetTotalsResult struct {
 	LastTurnTokensIn  int     `json:"lastTurnTokensIn"`
 	LastTurnTokensOut int     `json:"lastTurnTokensOut"`

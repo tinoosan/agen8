@@ -26,6 +26,9 @@ Type a message and press Ctrl+Enter to queue a task, or use a command (below):
   /sessions               Switch session (reattach to its current run)
   /agents                 Switch agent/run in the active session
   /rename-session <title> Rename current session
+  /pause                 Pause run(s) in current session
+  /resume                Resume paused run(s) in current session
+  /stop                  Hard-stop run(s) and leave them paused
   /model                 Open model picker
   /model <id>            Set model directly
   /editor                Open $EDITOR to compose (loads back into composer)

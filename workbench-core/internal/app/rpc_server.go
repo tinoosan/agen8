@@ -51,6 +51,7 @@ type RPCServer struct {
 	agentResume         func(ctx context.Context, threadID, runID string) error
 	sessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error)
 	sessionResume       func(ctx context.Context, threadID, sessionID string) ([]string, error)
+	sessionStop         func(ctx context.Context, threadID, sessionID string) ([]string, error)
 }
 
 const (
@@ -78,6 +79,7 @@ type RPCServerConfig struct {
 	AgentResume         func(ctx context.Context, threadID, runID string) error
 	SessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error)
 	SessionResume       func(ctx context.Context, threadID, sessionID string) ([]string, error)
+	SessionStop         func(ctx context.Context, threadID, sessionID string) ([]string, error)
 }
 
 func NewRPCServer(cfg RPCServerConfig) *RPCServer {
@@ -110,6 +112,7 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		agentResume:         cfg.AgentResume,
 		sessionPause:        cfg.SessionPause,
 		sessionResume:       cfg.SessionResume,
+		sessionStop:         cfg.SessionStop,
 	}
 }
 
@@ -537,6 +540,21 @@ func (s *RPCServer) handleRequest(ctx context.Context, msg protocol.Message) pro
 			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
 		}
 		res, err := s.sessionResumeHandler(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
+
+	case protocol.MethodSessionStop:
+		var p protocol.SessionStopParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.sessionStopHandler(ctx, p)
 		if err != nil {
 			return protocol.NewErrorResponse(id, toRPCError(err))
 		}
@@ -1567,6 +1585,32 @@ func (s *RPCServer) sessionResumeHandler(ctx context.Context, p protocol.Session
 	return protocol.SessionResumeResult{SessionID: sessionID, AffectedRunIDs: affected}, nil
 }
 
+func (s *RPCServer) sessionStopHandler(ctx context.Context, p protocol.SessionStopParams) (protocol.SessionStopResult, error) {
+	threadID, err := s.resolveThreadID(p.ThreadID)
+	if err != nil {
+		return protocol.SessionStopResult{}, err
+	}
+	sessionID := strings.TrimSpace(p.SessionID)
+	if sessionID == "" {
+		sessionID = threadID
+	}
+	if sessionID == "" {
+		return protocol.SessionStopResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "sessionId is required"}
+	}
+	if s.sessionStop != nil {
+		affected, err := s.sessionStop(ctx, threadID, sessionID)
+		if err != nil {
+			return protocol.SessionStopResult{}, err
+		}
+		return protocol.SessionStopResult{SessionID: sessionID, AffectedRunIDs: affected}, nil
+	}
+	affected, err := s.setSessionPausedState(ctx, threadID, sessionID, true)
+	if err != nil {
+		return protocol.SessionStopResult{}, err
+	}
+	return protocol.SessionStopResult{SessionID: sessionID, AffectedRunIDs: affected}, nil
+}
+
 func (s *RPCServer) setSessionPausedState(ctx context.Context, threadID, sessionID string, paused bool) ([]string, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "sessionId is required"}
@@ -2183,19 +2227,19 @@ func readPlanFilesForRun(dataDir, runID string) (checklist string, checklistErr 
 func loadTeamManifestRunRoles(dataDir, teamID string) ([]string, map[string]string) {
 	teamID = strings.TrimSpace(teamID)
 	if teamID == "" {
-		return nil, nil
+		return nil, map[string]string{}
 	}
 	path := filepath.Join(fsutil.GetTeamDir(dataDir, teamID), "team.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil
+		return nil, map[string]string{}
 	}
 	var mf struct {
 		CoordinatorRun string                      `json:"coordinatorRunId"`
 		Roles          []protocol.TeamManifestRole `json:"roles"`
 	}
 	if err := json.Unmarshal(raw, &mf); err != nil {
-		return nil, nil
+		return nil, map[string]string{}
 	}
 	runIDs := make([]string, 0, len(mf.Roles)+1)
 	roleByRun := make(map[string]string, len(mf.Roles)+1)
@@ -2242,6 +2286,9 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 		return protocol.PlanGetResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "aggregateTeam must be true when runId is omitted in team mode"}
 	}
 	manifestRunIDs, roleByRun := loadTeamManifestRunRoles(s.cfg.DataDir, strings.TrimSpace(scope.teamID))
+	if roleByRun == nil {
+		roleByRun = map[string]string{}
+	}
 	runIDs := make([]string, 0, len(manifestRunIDs)+16)
 	seenRuns := map[string]struct{}{}
 	for _, runID := range manifestRunIDs {
