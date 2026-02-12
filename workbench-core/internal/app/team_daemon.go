@@ -31,6 +31,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"golang.org/x/sync/errgroup"
 )
@@ -68,7 +69,108 @@ type teamRoleRecord struct {
 	SessionID string `json:"sessionId"`
 }
 
-func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, profDir string, goal string, maxContextB int, poll time.Duration, resolved RunChatOptions, protocolEnabled bool) (err error) {
+type teamRunRequest struct {
+	ctx             context.Context
+	cfg             config.Config
+	prof            *profile.Profile
+	profDir         string
+	goal            string
+	maxContextB     int
+	poll            time.Duration
+	resolved        RunChatOptions
+	protocolEnabled bool
+}
+
+type TeamOrchestrator struct {
+	req          teamRunRequest
+	storeBuilder StoreBuilder
+	runtimePhase RuntimeBuilder
+	controlLoop  ControlLoop
+}
+
+type StoreBuilder struct {
+	req *teamRunRequest
+}
+
+type RuntimeBuilder struct {
+	req *teamRunRequest
+}
+
+type ControlLoop struct {
+	req *teamRunRequest
+}
+
+func newTeamOrchestrator(req teamRunRequest) *TeamOrchestrator {
+	o := &TeamOrchestrator{req: req}
+	o.storeBuilder = StoreBuilder{req: &o.req}
+	o.runtimePhase = RuntimeBuilder{req: &o.req}
+	o.controlLoop = ControlLoop{req: &o.req}
+	return o
+}
+
+func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, profDir string, goal string, maxContextB int, poll time.Duration, resolved RunChatOptions, protocolEnabled bool) error {
+	orch := newTeamOrchestrator(teamRunRequest{
+		ctx:             ctx,
+		cfg:             cfg,
+		prof:            prof,
+		profDir:         profDir,
+		goal:            goal,
+		maxContextB:     maxContextB,
+		poll:            poll,
+		resolved:        resolved,
+		protocolEnabled: protocolEnabled,
+	})
+	return orch.Run()
+}
+
+func (o *TeamOrchestrator) Run() error {
+	if o == nil {
+		return fmt.Errorf("team orchestrator is nil")
+	}
+	if err := o.storeBuilder.Validate(); err != nil {
+		return err
+	}
+	if err := o.runtimePhase.Prepare(); err != nil {
+		return err
+	}
+	return o.controlLoop.Run()
+}
+
+func (b *StoreBuilder) Validate() error {
+	if b == nil || b.req == nil {
+		return fmt.Errorf("team store builder is not configured")
+	}
+	if b.req.prof == nil || b.req.prof.Team == nil {
+		return fmt.Errorf("team profile is required")
+	}
+	return nil
+}
+
+func (b *RuntimeBuilder) Prepare() error {
+	if b == nil || b.req == nil {
+		return fmt.Errorf("team runtime builder is not configured")
+	}
+	return nil
+}
+
+func (c *ControlLoop) Run() error {
+	if c == nil || c.req == nil {
+		return fmt.Errorf("team control loop is not configured")
+	}
+	return runAsTeamInternal(
+		c.req.ctx,
+		c.req.cfg,
+		c.req.prof,
+		c.req.profDir,
+		c.req.goal,
+		c.req.maxContextB,
+		c.req.poll,
+		c.req.resolved,
+		c.req.protocolEnabled,
+	)
+}
+
+func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Profile, profDir string, goal string, maxContextB int, poll time.Duration, resolved RunChatOptions, protocolEnabled bool) (err error) {
 	if prof == nil || prof.Team == nil {
 		return fmt.Errorf("team profile is required")
 	}
@@ -467,582 +569,19 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 			AllowAnyThread: true,
 			TaskStore:      taskStore,
 			Session:        sessionStore,
-			ControlSetModel: func(ctx context.Context, threadID, target, model string) ([]string, error) {
-				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				loadedSession, err := sessionStore.LoadSession(ctx, strings.TrimSpace(threadID))
-				if err != nil || strings.TrimSpace(loadedSession.SessionID) != strings.TrimSpace(threadID) {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				loadedSession.ActiveModel = strings.TrimSpace(model)
-				ensureSessionReasoningForModel(&loadedSession, loadedSession.ActiveModel, strings.TrimSpace(resolved.ReasoningEffort), strings.TrimSpace(resolved.ReasoningSummary))
-				if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
-					return nil, err
-				}
-				applied, err := requestTeamModelChange(ctx, taskStore, runtimes, stateMgr, model, target, "rpc.control.setModel")
-				if err != nil {
-					return nil, err
-				}
-				for i := range runtimes {
-					runID := strings.TrimSpace(runtimes[i].run.RunID)
-					if runID == "" {
-						continue
-					}
-					if len(applied) != 0 {
-						match := false
-						for _, id := range applied {
-							if strings.TrimSpace(id) == runID {
-								match = true
-								break
-							}
-						}
-						if !match {
-							continue
-						}
-					}
-					_ = runtimes[i].sess.SetReasoning(ctx, loadedSession.ReasoningEffort, loadedSession.ReasoningSummary)
-				}
-				return applied, nil
-			},
-			ControlSetReasoning: func(ctx context.Context, threadID, target, effort, summary string) ([]string, error) {
-				threadID = strings.TrimSpace(threadID)
-				if threadID != strings.TrimSpace(coordinatorRun.SessionID) {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				loadedSession, err := sessionStore.LoadSession(ctx, threadID)
-				if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				effort = strings.ToLower(strings.TrimSpace(effort))
-				summary = normalizeReasoningSummaryValue(summary)
-				storeSessionReasoningPreference(&loadedSession, strings.TrimSpace(loadedSession.ActiveModel), effort, summary)
-				if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
-					return nil, err
-				}
-
-				target = strings.TrimSpace(target)
-				applied := make([]string, 0, len(runtimes))
-				for i := range runtimes {
-					runID := strings.TrimSpace(runtimes[i].run.RunID)
-					if runID == "" {
-						continue
-					}
-					if target != "" && target != threadID && target != runID {
-						continue
-					}
-					if err := runtimes[i].sess.SetReasoning(ctx, effort, summary); err != nil {
-						return applied, err
-					}
-					applied = append(applied, runID)
-				}
-				if target != "" && target != threadID && len(applied) == 0 {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
-				}
-				return applied, nil
-			},
-			ControlSetProfile: func(_ context.Context, _ string, _, _ string) ([]string, error) {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is unavailable in team mode"}
-			},
-			AgentPause: func(_ context.Context, threadID, runID string) error {
-				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
-					return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				runID = strings.TrimSpace(runID)
-				if runID == "" {
-					return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
-				}
-				for i := range runtimes {
-					if strings.TrimSpace(runtimes[i].run.RunID) != runID {
-						continue
-					}
-					loaded, err := implstore.LoadRun(cfg, runID)
-					if err != nil {
-						return err
-					}
-					loaded.Status = types.RunStatusPaused
-					loaded.FinishedAt = nil
-					loaded.Error = nil
-					if err := implstore.SaveRun(cfg, loaded); err != nil {
-						return err
-					}
-					runtimes[i].sess.SetPaused(true)
-					return nil
-				}
-				return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
-			},
-			AgentResume: func(_ context.Context, threadID, runID string) error {
-				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
-					return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				runID = strings.TrimSpace(runID)
-				if runID == "" {
-					return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
-				}
-				for i := range runtimes {
-					if strings.TrimSpace(runtimes[i].run.RunID) != runID {
-						continue
-					}
-					loaded, err := implstore.LoadRun(cfg, runID)
-					if err != nil {
-						return err
-					}
-					loaded.Status = types.RunStatusRunning
-					loaded.FinishedAt = nil
-					loaded.Error = nil
-					if err := implstore.SaveRun(cfg, loaded); err != nil {
-						return err
-					}
-					runtimes[i].sess.SetPaused(false)
-					return nil
-				}
-				return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
-			},
-			SessionPause: func(_ context.Context, threadID, sessionID string) ([]string, error) {
-				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				sessionID = strings.TrimSpace(sessionID)
-				if sessionID != "" && sessionID != strings.TrimSpace(coordinatorRun.SessionID) {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				affected := make([]string, 0, len(runtimes))
-				var mu sync.Mutex
-				var wg sync.WaitGroup
-				errs := make([]string, 0, len(runtimes))
-				for i := range runtimes {
-					rt := runtimes[i]
-					runID := strings.TrimSpace(rt.run.RunID)
-					if runID == "" {
-						continue
-					}
-					wg.Add(1)
-					go func(runtime teamRoleRuntime, rid string) {
-						defer wg.Done()
-						loaded, err := implstore.LoadRun(cfg, rid)
-						if err == nil {
-							loaded.Status = types.RunStatusPaused
-							loaded.FinishedAt = nil
-							loaded.Error = nil
-							err = implstore.SaveRun(cfg, loaded)
-						}
-						if err != nil {
-							mu.Lock()
-							errs = append(errs, rid+": "+err.Error())
-							mu.Unlock()
-							return
-						}
-						runtime.sess.SetPaused(true)
-						mu.Lock()
-						affected = append(affected, rid)
-						mu.Unlock()
-					}(rt, runID)
-				}
-				wg.Wait()
-				if len(errs) != 0 {
-					return affected, fmt.Errorf("pause session partial failure: %s", strings.Join(errs, "; "))
-				}
-				return affected, nil
-			},
-			SessionResume: func(_ context.Context, threadID, sessionID string) ([]string, error) {
-				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				sessionID = strings.TrimSpace(sessionID)
-				if sessionID != "" && sessionID != strings.TrimSpace(coordinatorRun.SessionID) {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				affected := make([]string, 0, len(runtimes))
-				var mu sync.Mutex
-				var wg sync.WaitGroup
-				errs := make([]string, 0, len(runtimes))
-				for i := range runtimes {
-					rt := runtimes[i]
-					runID := strings.TrimSpace(rt.run.RunID)
-					if runID == "" {
-						continue
-					}
-					wg.Add(1)
-					go func(runtime teamRoleRuntime, rid string) {
-						defer wg.Done()
-						loaded, err := implstore.LoadRun(cfg, rid)
-						if err == nil {
-							loaded.Status = types.RunStatusRunning
-							loaded.FinishedAt = nil
-							loaded.Error = nil
-							err = implstore.SaveRun(cfg, loaded)
-						}
-						if err != nil {
-							mu.Lock()
-							errs = append(errs, rid+": "+err.Error())
-							mu.Unlock()
-							return
-						}
-						runtime.sess.SetPaused(false)
-						mu.Lock()
-						affected = append(affected, rid)
-						mu.Unlock()
-					}(rt, runID)
-				}
-				wg.Wait()
-				if len(errs) != 0 {
-					return affected, fmt.Errorf("resume session partial failure: %s", strings.Join(errs, "; "))
-				}
-				return affected, nil
-			},
-			SessionStop: func(_ context.Context, threadID, sessionID string) ([]string, error) {
-				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				sessionID = strings.TrimSpace(sessionID)
-				if sessionID != "" && sessionID != strings.TrimSpace(coordinatorRun.SessionID) {
-					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-				}
-				affected := make([]string, 0, len(runtimes))
-				var mu sync.Mutex
-				var wg sync.WaitGroup
-				errs := make([]string, 0, len(runtimes))
-				for i := range runtimes {
-					rt := runtimes[i]
-					runID := strings.TrimSpace(rt.run.RunID)
-					if runID == "" {
-						continue
-					}
-					wg.Add(1)
-					go func(runtime teamRoleRuntime, rid string) {
-						defer wg.Done()
-						loaded, err := implstore.LoadRun(cfg, rid)
-						if err == nil {
-							loaded.Status = types.RunStatusPaused
-							loaded.FinishedAt = nil
-							loaded.Error = nil
-							err = implstore.SaveRun(cfg, loaded)
-						}
-						if err != nil {
-							mu.Lock()
-							errs = append(errs, rid+": "+err.Error())
-							mu.Unlock()
-							return
-						}
-						runtime.sess.SetPaused(true)
-						runtimeLoopCancelMu.Lock()
-						cancel := runtimeLoopCancel[rid]
-						runtimeLoopCancelMu.Unlock()
-						if cancel != nil {
-							cancel()
-						}
-						mu.Lock()
-						affected = append(affected, rid)
-						mu.Unlock()
-					}(rt, runID)
-				}
-				wg.Wait()
-				if len(errs) != 0 {
-					return affected, fmt.Errorf("stop session partial failure: %s", strings.Join(errs, "; "))
-				}
-				return affected, nil
-			},
 		}
-		validThreadIDs := map[string]struct{}{}
-		if sessionID := strings.TrimSpace(coordinatorRun.SessionID); sessionID != "" {
-			validThreadIDs[sessionID] = struct{}{}
-		}
-		for _, rt := range runtimes {
-			if sessionID := strings.TrimSpace(rt.run.SessionID); sessionID != "" {
-				validThreadIDs[sessionID] = struct{}{}
-			}
-		}
-		isValidTeamThread := func(threadID string) bool {
-			threadID = strings.TrimSpace(threadID)
-			if threadID == "" {
-				return false
-			}
-			_, ok := validThreadIDs[threadID]
-			return ok
-		}
-		normalizeSessionScope := func(threadID, sessionID string) (string, error) {
-			threadID = strings.TrimSpace(threadID)
-			sessionID = strings.TrimSpace(sessionID)
-			if sessionID == "" {
-				sessionID = threadID
-			}
-			if !isValidTeamThread(sessionID) {
-				return "", &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			return sessionID, nil
-		}
-		srvCfg.ControlSetModel = func(ctx context.Context, threadID, target, model string) ([]string, error) {
-			if !isValidTeamThread(threadID) {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			loadedSession, err := sessionStore.LoadSession(ctx, strings.TrimSpace(threadID))
-			if err != nil || strings.TrimSpace(loadedSession.SessionID) != strings.TrimSpace(threadID) {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			loadedSession.ActiveModel = strings.TrimSpace(model)
-			ensureSessionReasoningForModel(&loadedSession, loadedSession.ActiveModel, strings.TrimSpace(resolved.ReasoningEffort), strings.TrimSpace(resolved.ReasoningSummary))
-			if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
-				return nil, err
-			}
-			applied, err := requestTeamModelChange(ctx, taskStore, runtimes, stateMgr, model, target, "rpc.control.setModel")
-			if err != nil {
-				return nil, err
-			}
-			for i := range runtimes {
-				runID := strings.TrimSpace(runtimes[i].run.RunID)
-				if runID == "" {
-					continue
-				}
-				if len(applied) != 0 {
-					match := false
-					for _, id := range applied {
-						if strings.TrimSpace(id) == runID {
-							match = true
-							break
-						}
-					}
-					if !match {
-						continue
-					}
-				}
-				_ = runtimes[i].sess.SetReasoning(ctx, loadedSession.ReasoningEffort, loadedSession.ReasoningSummary)
-			}
-			return applied, nil
-		}
-		srvCfg.ControlSetReasoning = func(ctx context.Context, threadID, target, effort, summary string) ([]string, error) {
-			threadID = strings.TrimSpace(threadID)
-			if !isValidTeamThread(threadID) {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			loadedSession, err := sessionStore.LoadSession(ctx, threadID)
-			if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			effort = strings.ToLower(strings.TrimSpace(effort))
-			summary = normalizeReasoningSummaryValue(summary)
-			storeSessionReasoningPreference(&loadedSession, strings.TrimSpace(loadedSession.ActiveModel), effort, summary)
-			if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
-				return nil, err
-			}
-
-			target = strings.TrimSpace(target)
-			applied := make([]string, 0, len(runtimes))
-			for i := range runtimes {
-				runID := strings.TrimSpace(runtimes[i].run.RunID)
-				if runID == "" {
-					continue
-				}
-				if target != "" && target != threadID && target != runID {
-					continue
-				}
-				if err := runtimes[i].sess.SetReasoning(ctx, effort, summary); err != nil {
-					return applied, err
-				}
-				applied = append(applied, runID)
-			}
-			if target != "" && target != threadID && len(applied) == 0 {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
-			}
-			return applied, nil
-		}
-		srvCfg.ControlSetProfile = func(_ context.Context, _ string, _, _ string) ([]string, error) {
-			return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is unavailable in team mode"}
-		}
-		srvCfg.AgentPause = func(_ context.Context, threadID, runID string) error {
-			if !isValidTeamThread(threadID) {
-				return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			runID = strings.TrimSpace(runID)
-			if runID == "" {
-				return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
-			}
-			for i := range runtimes {
-				if strings.TrimSpace(runtimes[i].run.RunID) != runID {
-					continue
-				}
-				loaded, err := implstore.LoadRun(cfg, runID)
-				if err != nil {
-					return err
-				}
-				loaded.Status = types.RunStatusPaused
-				loaded.FinishedAt = nil
-				loaded.Error = nil
-				if err := implstore.SaveRun(cfg, loaded); err != nil {
-					return err
-				}
-				runtimes[i].sess.SetPaused(true)
-				return nil
-			}
-			return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
-		}
-		srvCfg.AgentResume = func(_ context.Context, threadID, runID string) error {
-			if !isValidTeamThread(threadID) {
-				return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			runID = strings.TrimSpace(runID)
-			if runID == "" {
-				return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
-			}
-			for i := range runtimes {
-				if strings.TrimSpace(runtimes[i].run.RunID) != runID {
-					continue
-				}
-				loaded, err := implstore.LoadRun(cfg, runID)
-				if err != nil {
-					return err
-				}
-				loaded.Status = types.RunStatusRunning
-				loaded.FinishedAt = nil
-				loaded.Error = nil
-				if err := implstore.SaveRun(cfg, loaded); err != nil {
-					return err
-				}
-				runtimes[i].sess.SetPaused(false)
-				return nil
-			}
-			return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
-		}
-		srvCfg.SessionPause = func(_ context.Context, threadID, sessionID string) ([]string, error) {
-			if !isValidTeamThread(threadID) {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			if _, err := normalizeSessionScope(threadID, sessionID); err != nil {
-				return nil, err
-			}
-			affected := make([]string, 0, len(runtimes))
-			var mu sync.Mutex
-			var wg sync.WaitGroup
-			errs := make([]string, 0, len(runtimes))
-			for i := range runtimes {
-				rt := runtimes[i]
-				runID := strings.TrimSpace(rt.run.RunID)
-				if runID == "" {
-					continue
-				}
-				wg.Add(1)
-				go func(runtime teamRoleRuntime, rid string) {
-					defer wg.Done()
-					loaded, err := implstore.LoadRun(cfg, rid)
-					if err == nil {
-						loaded.Status = types.RunStatusPaused
-						loaded.FinishedAt = nil
-						loaded.Error = nil
-						err = implstore.SaveRun(cfg, loaded)
-					}
-					if err != nil {
-						mu.Lock()
-						errs = append(errs, rid+": "+err.Error())
-						mu.Unlock()
-						return
-					}
-					runtime.sess.SetPaused(true)
-					mu.Lock()
-					affected = append(affected, rid)
-					mu.Unlock()
-				}(rt, runID)
-			}
-			wg.Wait()
-			if len(errs) != 0 {
-				return affected, fmt.Errorf("pause session partial failure: %s", strings.Join(errs, "; "))
-			}
-			return affected, nil
-		}
-		srvCfg.SessionResume = func(_ context.Context, threadID, sessionID string) ([]string, error) {
-			if !isValidTeamThread(threadID) {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			if _, err := normalizeSessionScope(threadID, sessionID); err != nil {
-				return nil, err
-			}
-			affected := make([]string, 0, len(runtimes))
-			var mu sync.Mutex
-			var wg sync.WaitGroup
-			errs := make([]string, 0, len(runtimes))
-			for i := range runtimes {
-				rt := runtimes[i]
-				runID := strings.TrimSpace(rt.run.RunID)
-				if runID == "" {
-					continue
-				}
-				wg.Add(1)
-				go func(runtime teamRoleRuntime, rid string) {
-					defer wg.Done()
-					loaded, err := implstore.LoadRun(cfg, rid)
-					if err == nil {
-						loaded.Status = types.RunStatusRunning
-						loaded.FinishedAt = nil
-						loaded.Error = nil
-						err = implstore.SaveRun(cfg, loaded)
-					}
-					if err != nil {
-						mu.Lock()
-						errs = append(errs, rid+": "+err.Error())
-						mu.Unlock()
-						return
-					}
-					runtime.sess.SetPaused(false)
-					mu.Lock()
-					affected = append(affected, rid)
-					mu.Unlock()
-				}(rt, runID)
-			}
-			wg.Wait()
-			if len(errs) != 0 {
-				return affected, fmt.Errorf("resume session partial failure: %s", strings.Join(errs, "; "))
-			}
-			return affected, nil
-		}
-		srvCfg.SessionStop = func(_ context.Context, threadID, sessionID string) ([]string, error) {
-			if !isValidTeamThread(threadID) {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			if _, err := normalizeSessionScope(threadID, sessionID); err != nil {
-				return nil, err
-			}
-			affected := make([]string, 0, len(runtimes))
-			var mu sync.Mutex
-			var wg sync.WaitGroup
-			errs := make([]string, 0, len(runtimes))
-			for i := range runtimes {
-				rt := runtimes[i]
-				runID := strings.TrimSpace(rt.run.RunID)
-				if runID == "" {
-					continue
-				}
-				wg.Add(1)
-				go func(runtime teamRoleRuntime, rid string) {
-					defer wg.Done()
-					loaded, err := implstore.LoadRun(cfg, rid)
-					if err == nil {
-						loaded.Status = types.RunStatusPaused
-						loaded.FinishedAt = nil
-						loaded.Error = nil
-						err = implstore.SaveRun(cfg, loaded)
-					}
-					if err != nil {
-						mu.Lock()
-						errs = append(errs, rid+": "+err.Error())
-						mu.Unlock()
-						return
-					}
-					runtime.sess.SetPaused(true)
-					runtimeLoopCancelMu.Lock()
-					cancel := runtimeLoopCancel[rid]
-					runtimeLoopCancelMu.Unlock()
-					if cancel != nil {
-						cancel()
-					}
-					mu.Lock()
-					affected = append(affected, rid)
-					mu.Unlock()
-				}(rt, runID)
-			}
-			wg.Wait()
-			if len(errs) != 0 {
-				return affected, fmt.Errorf("stop session partial failure: %s", strings.Join(errs, "; "))
-			}
-			return affected, nil
-		}
+		srvCfg = buildTeamRPCServerConfig(
+			srvCfg,
+			cfg,
+			resolved,
+			coordinatorRun,
+			taskStore,
+			sessionStore,
+			runtimes,
+			stateMgr,
+			&runtimeLoopCancelMu,
+			runtimeLoopCancel,
+		)
 		srv := NewRPCServer(srvCfg)
 		go func() {
 			if err := srv.Serve(runCtx, os.Stdin, os.Stdout); err != nil && runCtx.Err() == nil {
@@ -1125,6 +664,323 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 	}
 	serverWG.Wait()
 	return err
+}
+
+func buildTeamRPCServerConfig(
+	base RPCServerConfig,
+	cfg config.Config,
+	resolved RunChatOptions,
+	coordinatorRun types.Run,
+	taskStore state.TaskStore,
+	sessionStore pkgstore.SessionReaderWriter,
+	runtimes []teamRoleRuntime,
+	stateMgr *teamStateManager,
+	runtimeLoopCancelMu *sync.Mutex,
+	runtimeLoopCancel map[string]context.CancelFunc,
+) RPCServerConfig {
+	validThreadIDs := map[string]struct{}{}
+	if sessionID := strings.TrimSpace(coordinatorRun.SessionID); sessionID != "" {
+		validThreadIDs[sessionID] = struct{}{}
+	}
+	for _, rt := range runtimes {
+		if sessionID := strings.TrimSpace(rt.run.SessionID); sessionID != "" {
+			validThreadIDs[sessionID] = struct{}{}
+		}
+	}
+	isValidTeamThread := func(threadID string) bool {
+		threadID = strings.TrimSpace(threadID)
+		if threadID == "" {
+			return false
+		}
+		_, ok := validThreadIDs[threadID]
+		return ok
+	}
+	normalizeSessionScope := func(threadID, sessionID string) (string, error) {
+		threadID = strings.TrimSpace(threadID)
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" {
+			sessionID = threadID
+		}
+		if !isValidTeamThread(sessionID) {
+			return "", &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+		}
+		return sessionID, nil
+	}
+	base.ControlSetModel = func(ctx context.Context, threadID, target, model string) ([]string, error) {
+		if !isValidTeamThread(threadID) {
+			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+		}
+		loadedSession, err := sessionStore.LoadSession(ctx, strings.TrimSpace(threadID))
+		if err != nil || strings.TrimSpace(loadedSession.SessionID) != strings.TrimSpace(threadID) {
+			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+		}
+		loadedSession.ActiveModel = strings.TrimSpace(model)
+		ensureSessionReasoningForModel(&loadedSession, loadedSession.ActiveModel, strings.TrimSpace(resolved.ReasoningEffort), strings.TrimSpace(resolved.ReasoningSummary))
+		if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
+			return nil, err
+		}
+		applied, err := requestTeamModelChange(ctx, taskStore, runtimes, stateMgr, model, target, "rpc.control.setModel")
+		if err != nil {
+			return nil, err
+		}
+		for i := range runtimes {
+			runID := strings.TrimSpace(runtimes[i].run.RunID)
+			if runID == "" {
+				continue
+			}
+			if len(applied) != 0 {
+				match := false
+				for _, id := range applied {
+					if strings.TrimSpace(id) == runID {
+						match = true
+						break
+					}
+				}
+				if !match {
+					continue
+				}
+			}
+			_ = runtimes[i].sess.SetReasoning(ctx, loadedSession.ReasoningEffort, loadedSession.ReasoningSummary)
+		}
+		return applied, nil
+	}
+	base.ControlSetReasoning = func(ctx context.Context, threadID, target, effort, summary string) ([]string, error) {
+		threadID = strings.TrimSpace(threadID)
+		if !isValidTeamThread(threadID) {
+			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+		}
+		loadedSession, err := sessionStore.LoadSession(ctx, threadID)
+		if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
+			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+		}
+		effort = strings.ToLower(strings.TrimSpace(effort))
+		summary = normalizeReasoningSummaryValue(summary)
+		storeSessionReasoningPreference(&loadedSession, strings.TrimSpace(loadedSession.ActiveModel), effort, summary)
+		if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
+			return nil, err
+		}
+
+		target = strings.TrimSpace(target)
+		applied := make([]string, 0, len(runtimes))
+		for i := range runtimes {
+			runID := strings.TrimSpace(runtimes[i].run.RunID)
+			if runID == "" {
+				continue
+			}
+			if target != "" && target != threadID && target != runID {
+				continue
+			}
+			if err := runtimes[i].sess.SetReasoning(ctx, effort, summary); err != nil {
+				return applied, err
+			}
+			applied = append(applied, runID)
+		}
+		if target != "" && target != threadID && len(applied) == 0 {
+			return nil, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
+		}
+		return applied, nil
+	}
+	base.ControlSetProfile = func(_ context.Context, _ string, _, _ string) ([]string, error) {
+		return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is unavailable in team mode"}
+	}
+	base.AgentPause = func(_ context.Context, threadID, runID string) error {
+		if !isValidTeamThread(threadID) {
+			return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+		}
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
+		}
+		for i := range runtimes {
+			if strings.TrimSpace(runtimes[i].run.RunID) != runID {
+				continue
+			}
+			loaded, err := implstore.LoadRun(cfg, runID)
+			if err != nil {
+				return err
+			}
+			loaded.Status = types.RunStatusPaused
+			loaded.FinishedAt = nil
+			loaded.Error = nil
+			if err := implstore.SaveRun(cfg, loaded); err != nil {
+				return err
+			}
+			runtimes[i].sess.SetPaused(true)
+			return nil
+		}
+		return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
+	}
+	base.AgentResume = func(_ context.Context, threadID, runID string) error {
+		if !isValidTeamThread(threadID) {
+			return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+		}
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
+		}
+		for i := range runtimes {
+			if strings.TrimSpace(runtimes[i].run.RunID) != runID {
+				continue
+			}
+			loaded, err := implstore.LoadRun(cfg, runID)
+			if err != nil {
+				return err
+			}
+			loaded.Status = types.RunStatusRunning
+			loaded.FinishedAt = nil
+			loaded.Error = nil
+			if err := implstore.SaveRun(cfg, loaded); err != nil {
+				return err
+			}
+			runtimes[i].sess.SetPaused(false)
+			return nil
+		}
+		return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
+	}
+	base.SessionPause = func(_ context.Context, threadID, sessionID string) ([]string, error) {
+		if !isValidTeamThread(threadID) {
+			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+		}
+		if _, err := normalizeSessionScope(threadID, sessionID); err != nil {
+			return nil, err
+		}
+		affected := make([]string, 0, len(runtimes))
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		errs := make([]string, 0, len(runtimes))
+		for i := range runtimes {
+			rt := runtimes[i]
+			runID := strings.TrimSpace(rt.run.RunID)
+			if runID == "" {
+				continue
+			}
+			wg.Add(1)
+			go func(runtime teamRoleRuntime, rid string) {
+				defer wg.Done()
+				loaded, err := implstore.LoadRun(cfg, rid)
+				if err == nil {
+					loaded.Status = types.RunStatusPaused
+					loaded.FinishedAt = nil
+					loaded.Error = nil
+					err = implstore.SaveRun(cfg, loaded)
+				}
+				if err != nil {
+					mu.Lock()
+					errs = append(errs, rid+": "+err.Error())
+					mu.Unlock()
+					return
+				}
+				runtime.sess.SetPaused(true)
+				mu.Lock()
+				affected = append(affected, rid)
+				mu.Unlock()
+			}(rt, runID)
+		}
+		wg.Wait()
+		if len(errs) != 0 {
+			return affected, fmt.Errorf("pause session partial failure: %s", strings.Join(errs, "; "))
+		}
+		return affected, nil
+	}
+	base.SessionResume = func(_ context.Context, threadID, sessionID string) ([]string, error) {
+		if !isValidTeamThread(threadID) {
+			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+		}
+		if _, err := normalizeSessionScope(threadID, sessionID); err != nil {
+			return nil, err
+		}
+		affected := make([]string, 0, len(runtimes))
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		errs := make([]string, 0, len(runtimes))
+		for i := range runtimes {
+			rt := runtimes[i]
+			runID := strings.TrimSpace(rt.run.RunID)
+			if runID == "" {
+				continue
+			}
+			wg.Add(1)
+			go func(runtime teamRoleRuntime, rid string) {
+				defer wg.Done()
+				loaded, err := implstore.LoadRun(cfg, rid)
+				if err == nil {
+					loaded.Status = types.RunStatusRunning
+					loaded.FinishedAt = nil
+					loaded.Error = nil
+					err = implstore.SaveRun(cfg, loaded)
+				}
+				if err != nil {
+					mu.Lock()
+					errs = append(errs, rid+": "+err.Error())
+					mu.Unlock()
+					return
+				}
+				runtime.sess.SetPaused(false)
+				mu.Lock()
+				affected = append(affected, rid)
+				mu.Unlock()
+			}(rt, runID)
+		}
+		wg.Wait()
+		if len(errs) != 0 {
+			return affected, fmt.Errorf("resume session partial failure: %s", strings.Join(errs, "; "))
+		}
+		return affected, nil
+	}
+	base.SessionStop = func(_ context.Context, threadID, sessionID string) ([]string, error) {
+		if !isValidTeamThread(threadID) {
+			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+		}
+		if _, err := normalizeSessionScope(threadID, sessionID); err != nil {
+			return nil, err
+		}
+		affected := make([]string, 0, len(runtimes))
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		errs := make([]string, 0, len(runtimes))
+		for i := range runtimes {
+			rt := runtimes[i]
+			runID := strings.TrimSpace(rt.run.RunID)
+			if runID == "" {
+				continue
+			}
+			wg.Add(1)
+			go func(runtime teamRoleRuntime, rid string) {
+				defer wg.Done()
+				loaded, err := implstore.LoadRun(cfg, rid)
+				if err == nil {
+					loaded.Status = types.RunStatusPaused
+					loaded.FinishedAt = nil
+					loaded.Error = nil
+					err = implstore.SaveRun(cfg, loaded)
+				}
+				if err != nil {
+					mu.Lock()
+					errs = append(errs, rid+": "+err.Error())
+					mu.Unlock()
+					return
+				}
+				runtime.sess.SetPaused(true)
+				if runtimeLoopCancelMu != nil {
+					runtimeLoopCancelMu.Lock()
+					cancel := runtimeLoopCancel[rid]
+					runtimeLoopCancelMu.Unlock()
+					if cancel != nil {
+						cancel()
+					}
+				}
+				mu.Lock()
+				affected = append(affected, rid)
+				mu.Unlock()
+			}(rt, runID)
+		}
+		wg.Wait()
+		if len(errs) != 0 {
+			return affected, fmt.Errorf("stop session partial failure: %s", strings.Join(errs, "; "))
+		}
+		return affected, nil
+	}
+	return base
 }
 
 func collectTeamRoles(roles []profile.RoleConfig) ([]string, string, error) {
