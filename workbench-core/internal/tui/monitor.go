@@ -218,6 +218,8 @@ type monitorModel struct {
 	stats                        monitorStats
 	model                        string
 	profile                      string
+	reasoningEffort              string
+	reasoningSummary             string
 	focusedPanel                 panelID
 	compactTab                   int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
 	dashboardSideTab             int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
@@ -599,6 +601,8 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	runStatus := types.RunStatusSucceeded
 	runSessionID := ""
 	sessionActiveModel := ""
+	sessionReasoningEffort := ""
+	sessionReasoningSummary := ""
 	runProfile := ""
 	if r, err := store.LoadRun(cfg, runID); err == nil {
 		runStatus = r.Status
@@ -623,6 +627,8 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 			if active := strings.TrimSpace(sess.ActiveModel); active != "" {
 				sessionActiveModel = active
 			}
+			sessionReasoningEffort = strings.TrimSpace(sess.ReasoningEffort)
+			sessionReasoningSummary = strings.TrimSpace(sess.ReasoningSummary)
 		}
 	}
 
@@ -684,6 +690,12 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	if sessionActiveModel != "" {
 		m.model = sessionActiveModel
 	}
+	if sessionReasoningEffort != "" {
+		m.reasoningEffort = sessionReasoningEffort
+	}
+	if sessionReasoningSummary != "" {
+		m.reasoningSummary = sessionReasoningSummary
+	}
 	if runProfile != "" {
 		m.profile = runProfile
 	}
@@ -702,6 +714,12 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	}
 	if sessionActiveModel != "" {
 		m.model = sessionActiveModel
+	}
+	if sessionReasoningEffort != "" {
+		m.reasoningEffort = sessionReasoningEffort
+	}
+	if sessionReasoningSummary != "" {
+		m.reasoningSummary = sessionReasoningSummary
 	}
 	if runProfile != "" {
 		m.profile = runProfile
@@ -725,6 +743,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 	if err != nil {
 		return nil, err
 	}
+	sessionStore, _ := store.NewSQLiteSessionStore(cfg)
 	in := textarea.New()
 	in.SetHeight(6)
 	in.CharLimit = 0
@@ -768,7 +787,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 		rpcEndpoint:                 monitorRPCEndpoint(),
 		runStatus:                   types.RunStatusRunning,
 		result:                      result,
-		session:                     nil,
+		session:                     sessionStore,
 		sessionID:                   "",
 		offset:                      0,
 		input:                       in,
@@ -862,6 +881,16 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 		if len(runIDs) != 0 {
 			m.teamRunIDs = runIDs
 			m.teamRoleByRunID = roleByRun
+		}
+	}
+	if m.session != nil && strings.TrimSpace(m.sessionID) != "" {
+		if sess, err := m.session.LoadSession(ctx, strings.TrimSpace(m.sessionID)); err == nil {
+			if v := strings.TrimSpace(sess.ReasoningEffort); v != "" {
+				m.reasoningEffort = v
+			}
+			if v := strings.TrimSpace(sess.ReasoningSummary); v != "" {
+				m.reasoningSummary = v
+			}
 		}
 	}
 	if m.profile == "" {
@@ -2863,10 +2892,20 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 
 	// Reasoning commands
 	if cmd == "/reasoning-effort" {
+		if m.isDetached() {
+			return func() tea.Msg {
+				return commandLinesMsg{lines: []string{"[command] no active context; use /new or /sessions first"}}
+			}
+		}
 		m.openReasoningEffortPicker()
 		return nil
 	}
 	if cmd == "/reasoning-summary" {
+		if m.isDetached() {
+			return func() tea.Msg {
+				return commandLinesMsg{lines: []string{"[command] no active context; use /new or /sessions first"}}
+			}
+		}
 		m.openReasoningSummaryPicker()
 		return nil
 	}
@@ -3090,6 +3129,46 @@ func (m *monitorModel) writeControl(command string, args map[string]any) tea.Cmd
 			}
 			m.model = model
 			return commandLinesMsg{lines: []string{"[control] applied set_model -> " + model}}
+		case "set_reasoning":
+			effort := ""
+			summary := ""
+			if args != nil {
+				if v, ok := args["effort"].(string); ok {
+					effort = strings.ToLower(strings.TrimSpace(v))
+				}
+				if v, ok := args["summary"].(string); ok {
+					summary = strings.ToLower(strings.TrimSpace(v))
+				}
+			}
+			if summary == "none" {
+				summary = "off"
+			}
+			if effort == "" && summary == "" {
+				return commandLinesMsg{lines: []string{"[control] error: effort or summary is required"}}
+			}
+			var res protocol.ControlSetReasoningResult
+			if err := m.rpcRoundTrip(protocol.MethodControlSetReasoning, protocol.ControlSetReasoningParams{
+				ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
+				Effort:   effort,
+				Summary:  summary,
+			}, &res); err != nil {
+				return commandLinesMsg{lines: []string{"[control] error: " + err.Error()}}
+			}
+			parts := make([]string, 0, 2)
+			if v := strings.TrimSpace(res.Effort); v != "" {
+				parts = append(parts, "effort="+v)
+			} else if effort != "" {
+				parts = append(parts, "effort="+effort)
+			}
+			if v := strings.TrimSpace(res.Summary); v != "" {
+				parts = append(parts, "summary="+v)
+			} else if summary != "" {
+				parts = append(parts, "summary="+summary)
+			}
+			if len(parts) == 0 {
+				parts = append(parts, "updated")
+			}
+			return commandLinesMsg{lines: []string{"[control] applied set_reasoning -> " + strings.Join(parts, ", ")}}
 		default:
 			return commandLinesMsg{lines: []string{"[control] error: unsupported command " + command}}
 		}
@@ -3178,6 +3257,12 @@ func (m *monitorModel) searchMemory(query string) tea.Cmd {
 }
 
 func (m *monitorModel) observeEvent(ev types.EventRecord) {
+	if v := strings.TrimSpace(ev.Data["effort"]); v != "" {
+		m.reasoningEffort = strings.ToLower(v)
+	}
+	if v := strings.TrimSpace(ev.Data["summary"]); v != "" {
+		m.reasoningSummary = strings.ToLower(v)
+	}
 	if v := strings.TrimSpace(ev.Data["effectiveModel"]); v != "" {
 		m.model = v
 	} else if v := strings.TrimSpace(ev.Data["model"]); v != "" {
@@ -4022,6 +4107,33 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 	})
 
 	statusLeft := modelLabel + "  " + profileLabel
+	if cost.SupportsReasoningSummary(modelID) {
+		effort := strings.TrimSpace(m.reasoningEffort)
+		if effort == "" {
+			effort = "medium"
+		}
+		summary := strings.TrimSpace(m.reasoningSummary)
+		if summary == "" {
+			summary = "auto"
+		}
+		reasoningEffortLabel := kit.RenderTag(kit.TagOptions{
+			Key:   "effort",
+			Value: effort,
+			Styles: kit.TagStyles{
+				KeyStyle:   tagKeyStyle,
+				ValueStyle: tagValueStyle,
+			},
+		})
+		reasoningSummaryLabel := kit.RenderTag(kit.TagOptions{
+			Key:   "summary",
+			Value: summary,
+			Styles: kit.TagStyles{
+				KeyStyle:   tagKeyStyle,
+				ValueStyle: tagValueStyle,
+			},
+		})
+		statusLeft = statusLeft + "  " + reasoningEffortLabel + "  " + reasoningSummaryLabel
+	}
 	if strings.TrimSpace(m.teamID) != "" {
 		teamLabel := kit.RenderTag(kit.TagOptions{
 			Key:   "team",

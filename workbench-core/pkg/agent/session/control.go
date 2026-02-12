@@ -10,6 +10,33 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/events"
 )
 
+func normalizeReasoningEffort(v string) (string, error) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch v {
+	case "":
+		return "", nil
+	case "none", "minimal", "low", "medium", "high", "xhigh":
+		return v, nil
+	default:
+		return "", fmt.Errorf("invalid reasoning effort %q", v)
+	}
+}
+
+func normalizeReasoningSummary(v string) (string, error) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "none" {
+		v = "off"
+	}
+	switch v {
+	case "":
+		return "", nil
+	case "off", "auto", "concise", "detailed":
+		return v, nil
+	default:
+		return "", fmt.Errorf("invalid reasoning summary %q", v)
+	}
+}
+
 // SetModel applies a runtime model change to this session.
 func (s *Session) SetModel(ctx context.Context, model string) error {
 	model = strings.TrimSpace(model)
@@ -24,6 +51,48 @@ func (s *Session) SetModel(ctx context.Context, model string) error {
 			"command": "set_model",
 			"model":   model,
 		},
+	})
+	return nil
+}
+
+// SetReasoning applies runtime reasoning effort/summary changes to this session.
+func (s *Session) SetReasoning(ctx context.Context, effort, summary string) error {
+	if s == nil || s.cfg.Agent == nil {
+		return fmt.Errorf("session agent is not configured")
+	}
+	normalizedEffort, err := normalizeReasoningEffort(effort)
+	if err != nil {
+		return err
+	}
+	normalizedSummary, err := normalizeReasoningSummary(summary)
+	if err != nil {
+		return err
+	}
+	changed := false
+	if normalizedEffort != "" && !strings.EqualFold(strings.TrimSpace(s.cfg.Agent.GetReasoningEffort()), normalizedEffort) {
+		s.cfg.Agent.SetReasoningEffort(normalizedEffort)
+		changed = true
+	}
+	if normalizedSummary != "" && !strings.EqualFold(strings.TrimSpace(s.cfg.Agent.GetReasoningSummary()), normalizedSummary) {
+		s.cfg.Agent.SetReasoningSummary(normalizedSummary)
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	data := map[string]string{
+		"command": "set_reasoning",
+	}
+	if normalizedEffort != "" {
+		data["effort"] = normalizedEffort
+	}
+	if normalizedSummary != "" {
+		data["summary"] = normalizedSummary
+	}
+	s.emitBestEffort(ctx, events.Event{
+		Type:    "control.success",
+		Message: "Control request applied",
+		Data:    data,
 	})
 	return nil
 }

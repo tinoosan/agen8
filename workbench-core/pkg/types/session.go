@@ -37,6 +37,8 @@ type Session struct {
 	// Reasoning settings are session-scoped so resume is deterministic.
 	ReasoningEffort  string `json:"reasoningEffort,omitempty"`
 	ReasoningSummary string `json:"reasoningSummary,omitempty"`
+	// ReasoningByModel stores the user's preferred reasoning settings keyed by model ID.
+	ReasoningByModel map[string]SessionReasoningConfig `json:"reasoningByModel,omitempty"`
 
 	// ApprovalsMode is session-scoped so resume is deterministic.
 	// Valid values: "enabled", "disabled".
@@ -96,6 +98,11 @@ type Session struct {
 	// System marks daemon bootstrap/internal sessions that should be hidden from
 	// user-facing pickers/lists by default.
 	System bool `json:"system,omitempty"`
+}
+
+type SessionReasoningConfig struct {
+	Effort  string `json:"effort,omitempty"`
+	Summary string `json:"summary,omitempty"`
 }
 
 // NewSession creates a new session with a unique ID.

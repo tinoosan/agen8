@@ -362,6 +362,12 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	if model == "" {
 		return nil, fmt.Errorf("run %s has no configured model", runID)
 	}
+	resolvedEffort, resolvedSummary := sessionReasoningForModel(
+		sess,
+		model,
+		strings.TrimSpace(s.resolved.ReasoningEffort),
+		strings.TrimSpace(s.resolved.ReasoningSummary),
+	)
 	run.Runtime.Model = model
 	_ = implstore.SaveRun(s.cfg, run)
 
@@ -405,8 +411,8 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		WorkdirAbs:            s.workdirAbs,
 		SharedWorkspaceDir:    sharedWorkspaceDir,
 		Model:                 model,
-		ReasoningEffort:       strings.TrimSpace(s.resolved.ReasoningEffort),
-		ReasoningSummary:      strings.TrimSpace(s.resolved.ReasoningSummary),
+		ReasoningEffort:       resolvedEffort,
+		ReasoningSummary:      resolvedSummary,
 		ApprovalsMode:         strings.TrimSpace(s.resolved.ApprovalsMode),
 		HistoryStore:          historyStore,
 		MemoryStore:           s.memoryStore,
@@ -436,8 +442,8 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 
 	agentCfg := agent.DefaultConfig()
 	agentCfg.Model = model
-	agentCfg.ReasoningEffort = strings.TrimSpace(s.resolved.ReasoningEffort)
-	agentCfg.ReasoningSummary = strings.TrimSpace(s.resolved.ReasoningSummary)
+	agentCfg.ReasoningEffort = resolvedEffort
+	agentCfg.ReasoningSummary = resolvedSummary
 	agentCfg.ApprovalsMode = strings.TrimSpace(s.resolved.ApprovalsMode)
 	agentCfg.EnableWebSearch = s.resolved.WebSearchEnabled
 	agentCfg.SystemPrompt = agent.DefaultAutonomousSystemPrompt()
@@ -567,35 +573,39 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			},
 		})
 
-		syncModel := func() {
+		syncRuntimeControls := func() {
 			loaded, err := s.sessionStore.LoadSession(workerCtx, strings.TrimSpace(run.SessionID))
 			if err != nil {
 				return
 			}
 			targetModel := strings.TrimSpace(loaded.ActiveModel)
-			if targetModel == "" {
-				return
+			if targetModel != "" {
+				currentModelMu.Lock()
+				same := strings.EqualFold(targetModel, currentModel)
+				currentModelMu.Unlock()
+				if !same {
+					if err := workerSession.SetModel(workerCtx, targetModel); err == nil {
+						currentModelMu.Lock()
+						currentModel = targetModel
+						currentModelMu.Unlock()
+						emitEvent(workerCtx, events.Event{
+							Type:    "control.success",
+							Message: "Model synchronized from session state",
+							Data: map[string]string{
+								"command": "set_model",
+								"model":   targetModel,
+							},
+						})
+					}
+				}
 			}
-			currentModelMu.Lock()
-			same := strings.EqualFold(targetModel, currentModel)
-			currentModelMu.Unlock()
-			if same {
-				return
-			}
-			if err := workerSession.SetModel(workerCtx, targetModel); err != nil {
-				return
-			}
-			currentModelMu.Lock()
-			currentModel = targetModel
-			currentModelMu.Unlock()
-			emitEvent(workerCtx, events.Event{
-				Type:    "control.success",
-				Message: "Model synchronized from session state",
-				Data: map[string]string{
-					"command": "set_model",
-					"model":   targetModel,
-				},
-			})
+			targetEffort, targetSummary := sessionReasoningForModel(
+				loaded,
+				targetModel,
+				strings.TrimSpace(s.resolved.ReasoningEffort),
+				strings.TrimSpace(s.resolved.ReasoningSummary),
+			)
+			_ = workerSession.SetReasoning(workerCtx, targetEffort, targetSummary)
 		}
 
 		backoff := 2 * time.Second
@@ -614,7 +624,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 					ticker.Stop()
 					return
 				case <-ticker.C:
-					syncModel()
+					syncRuntimeControls()
 				case err := <-errCh:
 					stopRunLoop()
 					ticker.Stop()
@@ -775,4 +785,44 @@ func (s *runtimeSupervisor) ResumeSession(ctx context.Context, sessionID string)
 		affected = append(affected, runID)
 	}
 	return affected, nil
+}
+
+func (s *runtimeSupervisor) ApplySessionReasoning(ctx context.Context, sessionID, targetRunID, effort, summary string) ([]string, error) {
+	if s == nil {
+		return nil, nil
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	targetRunID = strings.TrimSpace(targetRunID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	effort = strings.TrimSpace(effort)
+	summary = strings.TrimSpace(summary)
+	if effort == "" && summary == "" {
+		return nil, nil
+	}
+	s.mu.Lock()
+	workers := make([]*managedRuntime, 0, len(s.workers))
+	for _, w := range s.workers {
+		workers = append(workers, w)
+	}
+	s.mu.Unlock()
+	applied := make([]string, 0, len(workers))
+	for _, worker := range workers {
+		if worker == nil || worker.session == nil {
+			continue
+		}
+		if strings.TrimSpace(worker.sessionID) != sessionID {
+			continue
+		}
+		runID := strings.TrimSpace(worker.runID)
+		if targetRunID != "" && targetRunID != runID {
+			continue
+		}
+		if err := worker.session.SetReasoning(ctx, effort, summary); err != nil {
+			return applied, err
+		}
+		applied = append(applied, runID)
+	}
+	return applied, nil
 }

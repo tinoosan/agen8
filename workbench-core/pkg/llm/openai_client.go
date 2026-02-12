@@ -78,6 +78,11 @@ func isOpenRouterBaseURL(baseURL string) bool {
 	return strings.Contains(u, "openrouter.ai")
 }
 
+func isOpenAIBaseURL(baseURL string) bool {
+	u := strings.ToLower(strings.TrimSpace(baseURL))
+	return strings.Contains(u, "api.openai.com")
+}
+
 func maybeEnableWebSearchModel(baseURL string, model string, enable bool) string {
 	model = strings.TrimSpace(model)
 	if !enable || model == "" {
@@ -573,9 +578,6 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	}
 
 	// Request reasoning summaries when supported.
-	//
-	// Important: many models reject reasoning params. Keep this best-effort and only
-	// send reasoning config when we expect the model to support explicit reasoning controls.
 	if cost.SupportsReasoningSummary(req.Model) {
 		params.Reasoning = shared.ReasoningParam{}
 		if v := strings.TrimSpace(req.ReasoningEffort); v != "" {
@@ -583,18 +585,19 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 		}
 		// Summary control:
 		// - empty => default to auto (current behavior)
-		// - "off" => omit summary fields entirely
-		// - otherwise => set to the requested level
+		// - "off"/"none" => omit summary fields entirely
+		// - auto|concise|detailed => set to requested level
+		// - invalid values => default to auto
 		sv := strings.ToLower(strings.TrimSpace(req.ReasoningSummary))
 		switch sv {
 		case "":
-			params.Reasoning.GenerateSummary = shared.ReasoningGenerateSummaryAuto // deprecated but harmless; helps compat
 			params.Reasoning.Summary = shared.ReasoningSummaryAuto
-		case "off":
+		case "off", "none":
 			// omit
-		default:
-			params.Reasoning.GenerateSummary = shared.ReasoningGenerateSummary(sv)
+		case "auto", "concise", "detailed":
 			params.Reasoning.Summary = shared.ReasoningSummary(sv)
+		default:
+			params.Reasoning.Summary = shared.ReasoningSummaryAuto
 		}
 	}
 
@@ -1028,7 +1031,7 @@ func (c *Client) generateOnce(ctx context.Context, req types.LLMRequest) (types.
 	// Prefer Responses API (enables reasoning summaries) and fall back to Chat Completions.
 	if out, err := c.generateResponses(ctx, req); err == nil {
 		return out, nil
-	} else if shouldFallbackToChat(err) {
+	} else if shouldFallbackToChatForRequest(c.baseURL, req, err) {
 		return c.generateChat(ctx, req)
 	} else {
 		return types.LLMResponse{}, err
@@ -1083,6 +1086,11 @@ func (c *Client) onStreamChunk(acc *openai.ChatCompletionAccumulator, chunk open
 		}
 	}
 	for _, s := range deltaSummaryStrings(delta, "reasoning_summary_text") {
+		if err := cb(types.LLMStreamChunk{Text: s, IsReasoning: true}); err != nil {
+			return err
+		}
+	}
+	for _, s := range deltaReasoningDetailsSummaryStrings(delta) {
 		if err := cb(types.LLMStreamChunk{Text: s, IsReasoning: true}); err != nil {
 			return err
 		}
@@ -1182,7 +1190,10 @@ func (c *Client) onResponsesStreamEvent(ev responses.ResponseStreamEventUnion, c
 		if sawReasoningSummaryText != nil {
 			*sawReasoningSummaryText = true
 		}
-		for _, s := range texts {
+		for i, s := range texts {
+			if i > 0 {
+				s = "\n\n" + s
+			}
 			if err := cb(types.LLMStreamChunk{IsReasoning: true, Text: s}); err != nil {
 				return err
 			}
@@ -1195,8 +1206,41 @@ func (c *Client) onResponsesStreamEvent(ev responses.ResponseStreamEventUnion, c
 		}
 		return nil
 	default:
+		return emitReasoningSummaryFromRawEvent(ev, cb, sawReasoningSummaryText)
+	}
+}
+
+func emitReasoningSummaryFromRawEvent(ev responses.ResponseStreamEventUnion, cb types.LLMStreamCallback, sawReasoningSummaryText *bool) error {
+	if cb == nil {
 		return nil
 	}
+	t := strings.ToLower(strings.TrimSpace(ev.Type))
+	if t == "" || !strings.Contains(t, "reasoning_summary") {
+		return nil
+	}
+	out := make([]string, 0, 2)
+	if s := strings.TrimSpace(ev.Delta); s != "" {
+		out = append(out, s)
+	}
+	if s := strings.TrimSpace(ev.Text); s != "" {
+		out = append(out, s)
+	}
+	if s := strings.TrimSpace(ev.Part.Text); s != "" {
+		out = append(out, s)
+	}
+	items := uniqueNonEmptyStrings(out)
+	for i, s := range items {
+		if sawReasoningSummaryText != nil {
+			*sawReasoningSummaryText = true
+		}
+		if i > 0 {
+			s = "\n\n" + s
+		}
+		if err := cb(types.LLMStreamChunk{IsReasoning: true, Text: s}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Client) GenerateStream(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
@@ -1263,11 +1307,23 @@ func (c *Client) generateStreamOnce(ctx context.Context, req types.LLMRequest, c
 	// Prefer Responses API (enables reasoning summaries) and fall back to Chat Completions.
 	if out, err := c.generateStreamResponses(ctx, req, cb); err == nil {
 		return out, nil
-	} else if shouldFallbackToChat(err) {
+	} else if shouldFallbackToChatForRequest(c.baseURL, req, err) {
 		return c.generateStreamChat(ctx, req, cb)
 	} else {
 		return types.LLMResponse{}, err
 	}
+}
+
+func shouldFallbackToChatForRequest(baseURL string, req types.LLMRequest, err error) bool {
+	// For native OpenAI, keep reasoning paths strictly on Responses API.
+	if isOpenAIBaseURL(baseURL) {
+		return false
+	}
+	// Reasoning-capable models should remain on Responses to preserve summary events.
+	if cost.SupportsReasoningSummary(req.Model) {
+		return false
+	}
+	return shouldFallbackToChat(err)
 }
 
 func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
@@ -1316,6 +1372,18 @@ func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMReque
 		})
 		// #endregion
 		return types.LLMResponse{}, err
+	}
+
+	if cb != nil && completed != nil && !sawReasoningSummaryText {
+		for i, s := range responseReasoningSummaryTextsFromResponse(completed) {
+			if i > 0 {
+				s = "\n\n" + s
+			}
+			if err := cb(types.LLMStreamChunk{IsReasoning: true, Text: s}); err != nil {
+				return types.LLMResponse{}, err
+			}
+			sawReasoningSummaryText = true
+		}
 	}
 
 	if cb != nil {
@@ -1564,6 +1632,84 @@ func deltaSummaryStrings(delta openai.ChatCompletionChunkChoiceDelta, key string
 	return extractSummaryStringsRaw(b)
 }
 
+func deltaReasoningDetailsSummaryStrings(delta openai.ChatCompletionChunkChoiceDelta) []string {
+	const key = "reasoning_details"
+	raw := []byte{}
+	if fields := delta.JSON.ExtraFields; fields != nil {
+		if f, ok := fields[key]; ok && f.Valid() {
+			if s := strings.TrimSpace(f.Raw()); s != "" && s != "null" {
+				raw = []byte(s)
+			}
+		}
+	}
+	if len(raw) == 0 {
+		deltaRaw := strings.TrimSpace(delta.RawJSON())
+		if deltaRaw == "" {
+			return nil
+		}
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(deltaRaw), &m); err != nil {
+			return nil
+		}
+		if b, ok := m[key]; ok && len(b) > 0 && strings.TrimSpace(string(b)) != "null" {
+			raw = b
+		}
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil
+	}
+	out := make([]string, 0, 2)
+	appendReasoningDetailSummaries(v, &out)
+	return uniqueNonEmptyStrings(out)
+}
+
+func appendReasoningDetailSummaries(v any, out *[]string) {
+	switch x := v.(type) {
+	case []any:
+		for _, item := range x {
+			appendReasoningDetailSummaries(item, out)
+		}
+	case map[string]any:
+		typ := strings.ToLower(strings.TrimSpace(anyToString(x["type"])))
+		switch typ {
+		case "summary_text", "reasoning_summary", "summary":
+			if s := strings.TrimSpace(anyToString(x["text"])); s != "" {
+				*out = append(*out, s)
+			}
+			if s := strings.TrimSpace(anyToString(x["summary_text"])); s != "" {
+				*out = append(*out, s)
+			}
+			if vv, ok := x["summary"]; ok {
+				appendSummaryStrings(vv, out)
+			}
+		default:
+			// Conservative recursion: only follow explicit summary keys.
+			if vv, ok := x["summary"]; ok {
+				appendReasoningDetailSummaries(vv, out)
+			}
+			if vv, ok := x["summary_text"]; ok {
+				appendReasoningDetailSummaries(vv, out)
+			}
+		}
+	}
+}
+
+func anyToString(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return t
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
 func extraSummaryStrings(fields map[string]respjson.Field, key string) []string {
 	if fields == nil || strings.TrimSpace(key) == "" {
 		return nil
@@ -1643,6 +1789,17 @@ func uniqueNonEmptyStrings(in []string) []string {
 }
 
 func responseReasoningSummaryTexts(item responses.ResponseOutputItemUnion) []string {
+	if strings.EqualFold(strings.TrimSpace(item.Type), "reasoning") && len(item.Summary) > 0 {
+		out := make([]string, 0, len(item.Summary))
+		for _, s := range item.Summary {
+			if text := strings.TrimSpace(s.Text); text != "" {
+				out = append(out, text)
+			}
+		}
+		if len(out) > 0 {
+			return uniqueNonEmptyStrings(out)
+		}
+	}
 	switch v := item.AsAny().(type) {
 	case responses.ResponseReasoningItem:
 		out := make([]string, 0, len(v.Summary))
@@ -1655,4 +1812,54 @@ func responseReasoningSummaryTexts(item responses.ResponseOutputItemUnion) []str
 	default:
 		return nil
 	}
+}
+
+func responseReasoningSummaryTextsFromResponse(resp *responses.Response) []string {
+	if resp == nil {
+		return nil
+	}
+	out := make([]string, 0, 2)
+	for _, item := range resp.Output {
+		out = append(out, responseReasoningSummaryTexts(item)...)
+	}
+	if len(out) == 0 {
+		out = append(out, responseReasoningSummaryTextsFromRaw([]byte(resp.RawJSON()))...)
+	}
+	return uniqueNonEmptyStrings(out)
+}
+
+func responseReasoningSummaryTextsFromRaw(raw []byte) []string {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "" || strings.TrimSpace(string(raw)) == "null" {
+		return nil
+	}
+	var top map[string]any
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil
+	}
+	outputAny, ok := top["output"]
+	if !ok {
+		return nil
+	}
+	outputArr, ok := outputAny.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, 2)
+	for _, itemAny := range outputArr {
+		item, ok := itemAny.(map[string]any)
+		if !ok {
+			continue
+		}
+		typ := strings.ToLower(strings.TrimSpace(anyToString(item["type"])))
+		if typ != "reasoning" {
+			continue
+		}
+		if summaryAny, ok := item["summary"]; ok {
+			appendSummaryStrings(summaryAny, &out)
+		}
+		if summaryTextAny, ok := item["summary_text"]; ok {
+			appendSummaryStrings(summaryTextAny, &out)
+		}
+	}
+	return uniqueNonEmptyStrings(out)
 }

@@ -44,6 +44,21 @@ func TestPricingLookup_CaseInsensitiveSuffixMatch(t *testing.T) {
 	}
 }
 
+func TestPricingLookup_VariantSuffixMatch(t *testing.T) {
+	pf := PricingFile{
+		Models: map[string]ModelPricing{
+			"openai/gpt-5-nano": {InputPerM: 0.05, OutputPerM: 0.4},
+		},
+	}
+	in, out, ok := pf.Lookup("openai/gpt-5-nano:online")
+	if !ok {
+		t.Fatalf("expected variant suffix match")
+	}
+	if in != 0.05 || out != 0.4 {
+		t.Fatalf("unexpected pricing: in=%v out=%v", in, out)
+	}
+}
+
 func TestPricingLookup_Miss(t *testing.T) {
 	pf := PricingFile{
 		Models: map[string]ModelPricing{
@@ -53,6 +68,12 @@ func TestPricingLookup_Miss(t *testing.T) {
 	_, _, ok := pf.Lookup("not-a-model")
 	if ok {
 		t.Fatalf("expected miss")
+	}
+}
+
+func TestSupportsReasoningEffort_VariantSuffixMatch(t *testing.T) {
+	if !SupportsReasoningEffort("openai/gpt-5-nano:online") {
+		t.Fatalf("expected variant model id to be recognized")
 	}
 }
 

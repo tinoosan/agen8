@@ -1243,6 +1243,75 @@ func TestRPCServer_ControlSetModel(t *testing.T) {
 	}
 }
 
+func TestRPCServer_ControlSetReasoning(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	seen := ""
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+		ControlSetReasoning: func(_ context.Context, threadID, target, effort, summary string) ([]string, error) {
+			seen = threadID + "|" + target + "|" + effort + "|" + summary
+			return []string{"run-1"}, nil
+		},
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodControlSetReasoning, protocol.ControlSetReasoningParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Effort:   "medium",
+		Summary:  "none",
+		Target:   "run-1",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("control.setReasoning error: %+v", resp.Error)
+	}
+	if seen != run.SessionID+"|run-1|medium|off" {
+		t.Fatalf("unexpected callback payload: %q", seen)
+	}
+	var res protocol.ControlSetReasoningResult
+	_ = json.Unmarshal(resp.Result, &res)
+	if !res.Accepted || len(res.AppliedTo) != 1 || res.AppliedTo[0] != "run-1" || res.Effort != "medium" || res.Summary != "off" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestRPCServer_ControlSetReasoning_InvalidParams(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+		ControlSetReasoning: func(_ context.Context, _, _, _, _ string) ([]string, error) {
+			t.Fatalf("callback should not be called")
+			return nil, nil
+		},
+	})
+
+	reqMissing, _ := protocol.NewRequest("1", protocol.MethodControlSetReasoning, protocol.ControlSetReasoningParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+	})
+	respMissing := rpcRoundTrip(t, srv, reqMissing)
+	if respMissing.Error == nil || respMissing.Error.Code != protocol.CodeInvalidParams {
+		t.Fatalf("expected invalid params for missing reasoning args, got %+v", respMissing.Error)
+	}
+
+	reqInvalid, _ := protocol.NewRequest("2", protocol.MethodControlSetReasoning, protocol.ControlSetReasoningParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Summary:  "verbose",
+	})
+	respInvalid := rpcRoundTrip(t, srv, reqInvalid)
+	if respInvalid.Error == nil || respInvalid.Error.Code != protocol.CodeInvalidParams {
+		t.Fatalf("expected invalid params for bad summary, got %+v", respInvalid.Error)
+	}
+}
+
 func TestRPCServer_ControlSetProfile_ThreadMismatch(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")

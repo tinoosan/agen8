@@ -16,26 +16,26 @@ type ModelPricing struct {
 }
 
 func (pf PricingFile) Lookup(model string) (inPerM, outPerM float64, ok bool) {
-	model = strings.TrimSpace(model)
+	model = normalizeModelID(model)
 	if model == "" {
 		return 0, 0, false
 	}
 	if p, ok := pf.Models[model]; ok {
 		return p.InputPerM, p.OutputPerM, true
 	}
-	lower := strings.ToLower(model)
+	lower := model
 	for k, p := range pf.Models {
-		if strings.ToLower(strings.TrimSpace(k)) == lower {
+		if normalizeModelID(k) == lower {
 			return p.InputPerM, p.OutputPerM, true
 		}
 	}
 	for k, p := range pf.Models {
-		key := strings.TrimSpace(k)
+		key := normalizeModelID(k)
 		if key == "" {
 			continue
 		}
 		if idx := strings.LastIndex(key, "/"); idx >= 0 && idx+1 < len(key) {
-			suffix := strings.ToLower(strings.TrimSpace(key[idx+1:]))
+			suffix := strings.TrimSpace(key[idx+1:])
 			if suffix == lower {
 				return p.InputPerM, p.OutputPerM, true
 			}

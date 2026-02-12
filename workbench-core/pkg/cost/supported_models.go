@@ -80,22 +80,22 @@ func SupportedModelInfos() []ModelInfo {
 }
 
 func SupportsReasoningEffort(modelID string) bool {
-	id := strings.ToLower(strings.TrimSpace(modelID))
+	id := normalizeModelID(modelID)
 	if id == "" {
 		return false
 	}
 	for _, info := range modelInfos {
-		if strings.EqualFold(strings.TrimSpace(info.ID), id) {
+		if normalizeModelID(info.ID) == id {
 			return info.IsReasoning
 		}
 	}
 	for _, info := range modelInfos {
-		key := strings.TrimSpace(info.ID)
+		key := normalizeModelID(info.ID)
 		if key == "" {
 			continue
 		}
 		if idx := strings.LastIndex(key, "/"); idx >= 0 && idx+1 < len(key) {
-			suffix := strings.ToLower(strings.TrimSpace(key[idx+1:]))
+			suffix := strings.TrimSpace(key[idx+1:])
 			if suffix == id {
 				return info.IsReasoning
 			}
@@ -106,4 +106,28 @@ func SupportsReasoningEffort(modelID string) bool {
 
 func SupportsReasoningSummary(modelID string) bool {
 	return SupportsReasoningEffort(modelID)
+}
+
+func normalizeModelID(modelID string) string {
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	if id == "" {
+		return ""
+	}
+	if i := strings.Index(id, "?"); i >= 0 {
+		id = strings.TrimSpace(id[:i])
+	}
+	if i := strings.Index(id, "#"); i >= 0 {
+		id = strings.TrimSpace(id[:i])
+	}
+	if slash := strings.LastIndex(id, "/"); slash >= 0 && slash+1 < len(id) {
+		head := id[:slash+1]
+		tail := id[slash+1:]
+		if colon := strings.Index(tail, ":"); colon > 0 {
+			tail = tail[:colon]
+		}
+		id = head + tail
+	} else if colon := strings.Index(id, ":"); colon > 0 {
+		id = id[:colon]
+	}
+	return strings.TrimSpace(id)
 }

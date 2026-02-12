@@ -186,6 +186,7 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 		if strings.TrimSpace(teamModel) != "" {
 			metaSession.ActiveModel = strings.TrimSpace(teamModel)
 		}
+		ensureSessionReasoningForModel(&metaSession, metaSession.ActiveModel, strings.TrimSpace(resolved.ReasoningEffort), strings.TrimSpace(resolved.ReasoningSummary))
 		_ = implstore.SaveSession(cfg, metaSession)
 		if run.Runtime == nil {
 			run.Runtime = &types.RunRuntimeConfig{}
@@ -195,6 +196,8 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 		run.Runtime.TeamID = teamID
 		run.Runtime.Role = strings.TrimSpace(role.Name)
 		_ = implstore.SaveRun(cfg, run)
+		roleReasoningEffort := strings.TrimSpace(metaSession.ReasoningEffort)
+		roleReasoningSummary := strings.TrimSpace(metaSession.ReasoningSummary)
 
 		traceStore := implstore.SQLiteTraceStore{Cfg: cfg, RunID: run.RunID}
 		historyStore, err := implstore.NewSQLiteHistoryStore(cfg, run.SessionID)
@@ -214,8 +217,8 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 			WorkdirAbs:         workdirAbs,
 			SharedWorkspaceDir: teamWorkspaceDir,
 			Model:              teamModel,
-			ReasoningEffort:    strings.TrimSpace(resolved.ReasoningEffort),
-			ReasoningSummary:   strings.TrimSpace(resolved.ReasoningSummary),
+			ReasoningEffort:    roleReasoningEffort,
+			ReasoningSummary:   roleReasoningSummary,
 			ApprovalsMode:      strings.TrimSpace(resolved.ApprovalsMode),
 			HistoryStore:       historyStore,
 			MemoryStore:        memStore,
@@ -254,8 +257,8 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 
 		agentCfg := agent.DefaultConfig()
 		agentCfg.Model = teamModel
-		agentCfg.ReasoningEffort = strings.TrimSpace(resolved.ReasoningEffort)
-		agentCfg.ReasoningSummary = strings.TrimSpace(resolved.ReasoningSummary)
+		agentCfg.ReasoningEffort = roleReasoningEffort
+		agentCfg.ReasoningSummary = roleReasoningSummary
 		agentCfg.ApprovalsMode = strings.TrimSpace(resolved.ApprovalsMode)
 		agentCfg.EnableWebSearch = resolved.WebSearchEnabled
 		agentCfg.SystemPrompt = agent.DefaultAutonomousSystemPrompt()
@@ -466,7 +469,75 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 				if strings.TrimSpace(threadID) != strings.TrimSpace(coordinatorRun.SessionID) {
 					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 				}
-				return requestTeamModelChange(ctx, taskStore, runtimes, stateMgr, model, target, "rpc.control.setModel")
+				loadedSession, err := sessionStore.LoadSession(ctx, strings.TrimSpace(threadID))
+				if err != nil || strings.TrimSpace(loadedSession.SessionID) != strings.TrimSpace(threadID) {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				loadedSession.ActiveModel = strings.TrimSpace(model)
+				ensureSessionReasoningForModel(&loadedSession, loadedSession.ActiveModel, strings.TrimSpace(resolved.ReasoningEffort), strings.TrimSpace(resolved.ReasoningSummary))
+				if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
+					return nil, err
+				}
+				applied, err := requestTeamModelChange(ctx, taskStore, runtimes, stateMgr, model, target, "rpc.control.setModel")
+				if err != nil {
+					return nil, err
+				}
+				for i := range runtimes {
+					runID := strings.TrimSpace(runtimes[i].run.RunID)
+					if runID == "" {
+						continue
+					}
+					if len(applied) != 0 {
+						match := false
+						for _, id := range applied {
+							if strings.TrimSpace(id) == runID {
+								match = true
+								break
+							}
+						}
+						if !match {
+							continue
+						}
+					}
+					_ = runtimes[i].sess.SetReasoning(ctx, loadedSession.ReasoningEffort, loadedSession.ReasoningSummary)
+				}
+				return applied, nil
+			},
+			ControlSetReasoning: func(ctx context.Context, threadID, target, effort, summary string) ([]string, error) {
+				threadID = strings.TrimSpace(threadID)
+				if threadID != strings.TrimSpace(coordinatorRun.SessionID) {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				loadedSession, err := sessionStore.LoadSession(ctx, threadID)
+				if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				effort = strings.ToLower(strings.TrimSpace(effort))
+				summary = normalizeReasoningSummaryValue(summary)
+				storeSessionReasoningPreference(&loadedSession, strings.TrimSpace(loadedSession.ActiveModel), effort, summary)
+				if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
+					return nil, err
+				}
+
+				target = strings.TrimSpace(target)
+				applied := make([]string, 0, len(runtimes))
+				for i := range runtimes {
+					runID := strings.TrimSpace(runtimes[i].run.RunID)
+					if runID == "" {
+						continue
+					}
+					if target != "" && target != threadID && target != runID {
+						continue
+					}
+					if err := runtimes[i].sess.SetReasoning(ctx, effort, summary); err != nil {
+						return applied, err
+					}
+					applied = append(applied, runID)
+				}
+				if target != "" && target != threadID && len(applied) == 0 {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
+				}
+				return applied, nil
 			},
 			ControlSetProfile: func(_ context.Context, _ string, _, _ string) ([]string, error) {
 				return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is unavailable in team mode"}

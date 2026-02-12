@@ -175,6 +175,65 @@ func TestClient_buildResponseParams_JSONSchema(t *testing.T) {
 	}
 }
 
+func TestClient_buildResponseParams_ReasoningSummaryNoneMapsToOff(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli}
+
+	params, err := c.buildResponseParams(types.LLMRequest{
+		Model:            "openai/gpt-5-nano",
+		System:           "system",
+		Messages:         []types.LLMMessage{{Role: "user", Content: "hi"}},
+		ReasoningSummary: "none",
+	})
+	if err != nil {
+		t.Fatalf("buildResponseParams: %v", err)
+	}
+	if string(params.Reasoning.Summary) != "" {
+		t.Fatalf("expected summary omitted for none/off, got %+v", params.Reasoning.Summary)
+	}
+}
+
+func TestClient_buildResponseParams_InvalidReasoningSummaryFallsBackToAuto(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli}
+
+	params, err := c.buildResponseParams(types.LLMRequest{
+		Model:            "openai/gpt-5-nano",
+		System:           "system",
+		Messages:         []types.LLMMessage{{Role: "user", Content: "hi"}},
+		ReasoningSummary: "verbose",
+	})
+	if err != nil {
+		t.Fatalf("buildResponseParams: %v", err)
+	}
+	if string(params.Reasoning.Summary) != "auto" {
+		t.Fatalf("expected summary auto fallback, got %+v", params.Reasoning.Summary)
+	}
+	if string(params.Reasoning.GenerateSummary) != "" {
+		t.Fatalf("expected deprecated generate_summary to be omitted, got %+v", params.Reasoning.GenerateSummary)
+	}
+}
+
+func TestClient_buildResponseParams_ReasoningSummaryAutoForOnlineVariant(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli}
+
+	params, err := c.buildResponseParams(types.LLMRequest{
+		Model:    "openai/gpt-5-nano:online",
+		System:   "system",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("buildResponseParams: %v", err)
+	}
+	if string(params.Reasoning.Summary) != "auto" {
+		t.Fatalf("expected summary auto for model variant, got %+v", params.Reasoning.Summary)
+	}
+	if string(params.Reasoning.GenerateSummary) != "" {
+		t.Fatalf("expected deprecated generate_summary to be omitted, got %+v", params.Reasoning.GenerateSummary)
+	}
+}
+
 func TestClient_toResponseFromResponses_MapsToolCallsAndUsage(t *testing.T) {
 	resp := &responses.Response{
 		Model: responses.ResponsesModelGPT5Pro,
@@ -277,6 +336,38 @@ func TestOnResponsesStreamEvent_SkipsOutputItemDoneSummaryWhenAlreadySeen(t *tes
 	}
 }
 
+func TestOnResponsesStreamEvent_EmitsReasoningSummaryFromUnknownRawEvent(t *testing.T) {
+	raw := `{
+		"type":"response.reasoning_summary.delta",
+		"sequence_number":1,
+		"delta":"raw summary variant"
+	}`
+	var ev responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+
+	c := &Client{}
+	saw := false
+	var got []types.LLMStreamChunk
+	err := c.onResponsesStreamEvent(ev, func(ch types.LLMStreamChunk) error {
+		got = append(got, ch)
+		return nil
+	}, nil, nil, &saw)
+	if err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("chunks = %d, want 1", len(got))
+	}
+	if !got[0].IsReasoning || got[0].Text != "raw summary variant" {
+		t.Fatalf("chunk = %+v", got[0])
+	}
+	if !saw {
+		t.Fatalf("expected sawReasoningSummaryText=true")
+	}
+}
+
 func TestOnStreamChunk_EmitsStructuredReasoningSummary(t *testing.T) {
 	raw := `{
 		"id":"chatcmpl-1",
@@ -314,6 +405,106 @@ func TestOnStreamChunk_EmitsStructuredReasoningSummary(t *testing.T) {
 	}
 	if !got[1].IsReasoning || got[1].Text != "second summary" {
 		t.Fatalf("second chunk = %+v", got[1])
+	}
+}
+
+func TestOnStreamChunk_EmitsReasoningSummaryFromReasoningDetails(t *testing.T) {
+	raw := `{
+		"id":"chatcmpl-1",
+		"object":"chat.completion.chunk",
+		"created":123,
+		"model":"openai/gpt-5-nano",
+		"choices":[{
+			"index":0,
+			"delta":{
+				"reasoning_details":[
+					{"type":"reasoning_text","text":"hidden raw reasoning"},
+					{"type":"summary_text","text":"summary from reasoning details"}
+				]
+			}
+		}]
+	}`
+	var chunk openai.ChatCompletionChunk
+	if err := json.Unmarshal([]byte(raw), &chunk); err != nil {
+		t.Fatalf("unmarshal chunk: %v", err)
+	}
+
+	c := &Client{}
+	var got []types.LLMStreamChunk
+	if err := c.onStreamChunk(nil, chunk, func(ch types.LLMStreamChunk) error {
+		got = append(got, ch)
+		return nil
+	}); err != nil {
+		t.Fatalf("onStreamChunk: %v", err)
+	}
+	textChunks := make([]types.LLMStreamChunk, 0, len(got))
+	for _, ch := range got {
+		if strings.TrimSpace(ch.Text) != "" {
+			textChunks = append(textChunks, ch)
+		}
+	}
+	if len(textChunks) != 1 {
+		t.Fatalf("text chunks = %d, want 1 (all chunks=%+v)", len(textChunks), got)
+	}
+	if !textChunks[0].IsReasoning || textChunks[0].Text != "summary from reasoning details" {
+		t.Fatalf("chunk = %+v", textChunks[0])
+	}
+}
+
+func TestResponseReasoningSummaryTextsFromResponse(t *testing.T) {
+	resp := &responses.Response{
+		Output: []responses.ResponseOutputItemUnion{
+			{
+				Type: "reasoning",
+				Summary: []responses.ResponseReasoningItemSummary{
+					{Type: "summary_text", Text: "final summary from completed response"},
+				},
+			},
+		},
+	}
+	got := responseReasoningSummaryTextsFromResponse(resp)
+	if len(got) != 1 {
+		t.Fatalf("summaries = %d, want 1", len(got))
+	}
+	if got[0] != "final summary from completed response" {
+		t.Fatalf("summary = %q", got[0])
+	}
+}
+
+func TestResponseReasoningSummaryTextsFromResponse_FallsBackToRawOutput(t *testing.T) {
+	var resp responses.Response
+	if err := json.Unmarshal([]byte(`{
+		"output":[
+			{
+				"type":"reasoning",
+				"summary":[{"type":"summary_text","text":"summary from raw response"}]
+			}
+		]
+	}`), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	got := responseReasoningSummaryTextsFromResponse(&resp)
+	if len(got) != 1 {
+		t.Fatalf("summaries = %d, want 1", len(got))
+	}
+	if got[0] != "summary from raw response" {
+		t.Fatalf("summary = %q", got[0])
+	}
+}
+
+func TestShouldFallbackToChatForRequest_DisablesFallbackForOpenAIBaseURL(t *testing.T) {
+	req := types.LLMRequest{Model: "openai/gpt-5-nano"}
+	err := &openai.Error{StatusCode: 404}
+	if shouldFallbackToChatForRequest("https://api.openai.com/v1", req, err) {
+		t.Fatalf("expected no fallback for OpenAI base URL")
+	}
+}
+
+func TestShouldFallbackToChatForRequest_DisablesFallbackForReasoningModel(t *testing.T) {
+	req := types.LLMRequest{Model: "openai/gpt-5-nano:online"}
+	err := &openai.Error{StatusCode: 404}
+	if shouldFallbackToChatForRequest("https://openrouter.ai/api/v1", req, err) {
+		t.Fatalf("expected no fallback for reasoning model")
 	}
 }
 
@@ -511,5 +702,45 @@ func TestClient_buildResponseParams_DropsSchemaAfterUnsupported(t *testing.T) {
 	}
 	if params.Text.Format.OfJSONSchema != nil {
 		t.Fatalf("expected schema to be dropped when unsupported")
+	}
+}
+
+func TestOnResponsesStreamEvent_OutputItemDoneAddsSeparatorBetweenSummaryParts(t *testing.T) {
+	raw := `{
+		"type":"response.output_item.done",
+		"sequence_number":1,
+		"output_index":0,
+		"item":{
+			"id":"rs_1",
+			"type":"reasoning",
+			"summary":[
+				{"type":"summary_text","text":"First section"},
+				{"type":"summary_text","text":"Second section"}
+			]
+		}
+	}`
+	var ev responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+
+	c := &Client{}
+	saw := false
+	var got []types.LLMStreamChunk
+	err := c.onResponsesStreamEvent(ev, func(ch types.LLMStreamChunk) error {
+		got = append(got, ch)
+		return nil
+	}, nil, nil, &saw)
+	if err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("chunks = %d, want 2", len(got))
+	}
+	if got[0].Text != "First section" {
+		t.Fatalf("first summary = %q", got[0].Text)
+	}
+	if got[1].Text != "\n\nSecond section" {
+		t.Fatalf("second summary = %q", got[1].Text)
 	}
 }

@@ -44,12 +44,13 @@ type RPCServer struct {
 
 	wake func()
 
-	controlSetModel   func(ctx context.Context, threadID, target, model string) ([]string, error)
-	controlSetProfile func(ctx context.Context, threadID, target, profile string) ([]string, error)
-	agentPause        func(ctx context.Context, threadID, runID string) error
-	agentResume       func(ctx context.Context, threadID, runID string) error
-	sessionPause      func(ctx context.Context, threadID, sessionID string) ([]string, error)
-	sessionResume     func(ctx context.Context, threadID, sessionID string) ([]string, error)
+	controlSetModel     func(ctx context.Context, threadID, target, model string) ([]string, error)
+	controlSetReasoning func(ctx context.Context, threadID, target, effort, summary string) ([]string, error)
+	controlSetProfile   func(ctx context.Context, threadID, target, profile string) ([]string, error)
+	agentPause          func(ctx context.Context, threadID, runID string) error
+	agentResume         func(ctx context.Context, threadID, runID string) error
+	sessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error)
+	sessionResume       func(ctx context.Context, threadID, sessionID string) ([]string, error)
 }
 
 const (
@@ -62,20 +63,21 @@ const (
 )
 
 type RPCServerConfig struct {
-	Cfg               config.Config
-	Run               types.Run
-	AllowAnyThread    bool
-	TaskStore         state.TaskStore
-	Session           pkgstore.SessionReaderWriter
-	NotifyCh          <-chan protocol.Message
-	Index             *protocol.Index
-	Wake              func()
-	ControlSetModel   func(ctx context.Context, threadID, target, model string) ([]string, error)
-	ControlSetProfile func(ctx context.Context, threadID, target, profile string) ([]string, error)
-	AgentPause        func(ctx context.Context, threadID, runID string) error
-	AgentResume       func(ctx context.Context, threadID, runID string) error
-	SessionPause      func(ctx context.Context, threadID, sessionID string) ([]string, error)
-	SessionResume     func(ctx context.Context, threadID, sessionID string) ([]string, error)
+	Cfg                 config.Config
+	Run                 types.Run
+	AllowAnyThread      bool
+	TaskStore           state.TaskStore
+	Session             pkgstore.SessionReaderWriter
+	NotifyCh            <-chan protocol.Message
+	Index               *protocol.Index
+	Wake                func()
+	ControlSetModel     func(ctx context.Context, threadID, target, model string) ([]string, error)
+	ControlSetReasoning func(ctx context.Context, threadID, target, effort, summary string) ([]string, error)
+	ControlSetProfile   func(ctx context.Context, threadID, target, profile string) ([]string, error)
+	AgentPause          func(ctx context.Context, threadID, runID string) error
+	AgentResume         func(ctx context.Context, threadID, runID string) error
+	SessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error)
+	SessionResume       func(ctx context.Context, threadID, sessionID string) ([]string, error)
 }
 
 func NewRPCServer(cfg RPCServerConfig) *RPCServer {
@@ -92,21 +94,22 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		}
 	}
 	return &RPCServer{
-		cfg:               cfg.Cfg,
-		run:               cfg.Run,
-		allowAnyThread:    cfg.AllowAnyThread,
-		taskStore:         cfg.TaskStore,
-		session:           sess,
-		initErr:           initErr,
-		notifyCh:          cfg.NotifyCh,
-		index:             cfg.Index,
-		wake:              cfg.Wake,
-		controlSetModel:   cfg.ControlSetModel,
-		controlSetProfile: cfg.ControlSetProfile,
-		agentPause:        cfg.AgentPause,
-		agentResume:       cfg.AgentResume,
-		sessionPause:      cfg.SessionPause,
-		sessionResume:     cfg.SessionResume,
+		cfg:                 cfg.Cfg,
+		run:                 cfg.Run,
+		allowAnyThread:      cfg.AllowAnyThread,
+		taskStore:           cfg.TaskStore,
+		session:             sess,
+		initErr:             initErr,
+		notifyCh:            cfg.NotifyCh,
+		index:               cfg.Index,
+		wake:                cfg.Wake,
+		controlSetModel:     cfg.ControlSetModel,
+		controlSetReasoning: cfg.ControlSetReasoning,
+		controlSetProfile:   cfg.ControlSetProfile,
+		agentPause:          cfg.AgentPause,
+		agentResume:         cfg.AgentResume,
+		sessionPause:        cfg.SessionPause,
+		sessionResume:       cfg.SessionResume,
 	}
 }
 
@@ -640,6 +643,20 @@ func (s *RPCServer) handleRequest(ctx context.Context, msg protocol.Message) pro
 			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
 		}
 		return m
+	case protocol.MethodControlSetReasoning:
+		var p protocol.ControlSetReasoningParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInvalidParams, Message: "invalid params"})
+		}
+		res, err := s.controlSetReasoningHandler(ctx, p)
+		if err != nil {
+			return protocol.NewErrorResponse(id, toRPCError(err))
+		}
+		m, err := protocol.NewResponse(*id, res)
+		if err != nil {
+			return protocol.NewErrorResponse(id, &protocol.RPCError{Code: protocol.CodeInternalError, Message: "internal error"})
+		}
+		return m
 	case protocol.MethodControlSetProfile:
 		var p protocol.ControlSetProfileParams
 		if err := json.Unmarshal(msg.Params, &p); err != nil {
@@ -887,6 +904,64 @@ func (s *RPCServer) controlSetModelHandler(ctx context.Context, p protocol.Contr
 	}, nil
 }
 
+func normalizeReasoningEffort(v string) (string, error) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch v {
+	case "":
+		return "", nil
+	case "none", "minimal", "low", "medium", "high", "xhigh":
+		return v, nil
+	default:
+		return "", &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "effort must be one of none|minimal|low|medium|high|xhigh"}
+	}
+}
+
+func normalizeReasoningSummary(v string) (string, error) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "none" {
+		v = "off"
+	}
+	switch v {
+	case "":
+		return "", nil
+	case "off", "auto", "concise", "detailed":
+		return v, nil
+	default:
+		return "", &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "summary must be one of off|auto|concise|detailed"}
+	}
+}
+
+func (s *RPCServer) controlSetReasoningHandler(ctx context.Context, p protocol.ControlSetReasoningParams) (protocol.ControlSetReasoningResult, error) {
+	threadID, err := s.resolveThreadID(p.ThreadID)
+	if err != nil {
+		return protocol.ControlSetReasoningResult{}, err
+	}
+	effort, err := normalizeReasoningEffort(p.Effort)
+	if err != nil {
+		return protocol.ControlSetReasoningResult{}, err
+	}
+	summary, err := normalizeReasoningSummary(p.Summary)
+	if err != nil {
+		return protocol.ControlSetReasoningResult{}, err
+	}
+	if effort == "" && summary == "" {
+		return protocol.ControlSetReasoningResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "effort or summary is required"}
+	}
+	if s.controlSetReasoning == nil {
+		return protocol.ControlSetReasoningResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setReasoning is unavailable"}
+	}
+	appliedTo, err := s.controlSetReasoning(ctx, threadID, strings.TrimSpace(p.Target), effort, summary)
+	if err != nil {
+		return protocol.ControlSetReasoningResult{}, err
+	}
+	return protocol.ControlSetReasoningResult{
+		Accepted:  true,
+		AppliedTo: append([]string(nil), appliedTo...),
+		Effort:    effort,
+		Summary:   summary,
+	}, nil
+}
+
 func (s *RPCServer) controlSetProfileHandler(ctx context.Context, p protocol.ControlSetProfileParams) (protocol.ControlSetProfileResult, error) {
 	threadID, err := s.resolveThreadID(p.ThreadID)
 	if err != nil {
@@ -945,9 +1020,13 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	sess.Profile = strings.TrimSpace(p.Profile)
 
 	activeModel := strings.TrimSpace(p.Model)
+	if activeModel == "" && run.Runtime != nil {
+		activeModel = strings.TrimSpace(run.Runtime.Model)
+	}
 	if activeModel != "" {
 		sess.ActiveModel = activeModel
 	}
+	ensureSessionReasoningForModel(&sess, sess.ActiveModel, "", "")
 	if err := s.session.SaveSession(ctx, sess); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
@@ -1015,6 +1094,7 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 	if teamModel != "" {
 		sess.ActiveModel = teamModel
 	}
+	ensureSessionReasoningForModel(&sess, sess.ActiveModel, "", "")
 	if err := s.session.SaveSession(ctx, sess); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
@@ -1381,6 +1461,7 @@ func (s *RPCServer) agentStart(ctx context.Context, p protocol.AgentStartParams)
 		_ = implstore.SaveRun(s.cfg, run)
 		sess.ActiveModel = model
 	}
+	ensureSessionReasoningForModel(&sess, sess.ActiveModel, "", "")
 	if err := s.session.SaveSession(ctx, sess); err != nil {
 		return protocol.AgentStartResult{}, err
 	}
@@ -2252,6 +2333,9 @@ func (s *RPCServer) threadCreate(ctx context.Context, p protocol.ThreadCreatePar
 		changed = true
 	}
 	if changed {
+		ensureSessionReasoningForModel(&sess, sess.ActiveModel, "", "")
+	}
+	if changed {
 		if err := s.session.SaveSession(ctx, sess); err != nil {
 			return protocol.ThreadCreateResult{}, err
 		}
@@ -2880,6 +2964,14 @@ func threadFromSession(activeRunID string, sess types.Session) protocol.Thread {
 		Title:       strings.TrimSpace(sess.Title),
 		CreatedAt:   createdAt,
 		ActiveModel: strings.TrimSpace(sess.ActiveModel),
+		ActiveReasoningEffort: func() string {
+			effort, _ := sessionReasoningForModel(sess, strings.TrimSpace(sess.ActiveModel), "", "")
+			return effort
+		}(),
+		ActiveReasoningSummary: func() string {
+			_, summary := sessionReasoningForModel(sess, strings.TrimSpace(sess.ActiveModel), "", "")
+			return summary
+		}(),
 		ActiveRunID: protocol.RunID(strings.TrimSpace(activeRunID)),
 
 		InputTokens:  sess.InputTokens,

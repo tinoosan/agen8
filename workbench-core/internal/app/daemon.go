@@ -242,7 +242,9 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 	sessionStore = ss
 	effectiveModel := strings.TrimSpace(resolved.Model)
+	loadedSession := types.Session{}
 	if loaded, lerr := sessionStore.LoadSession(ctx, run.SessionID); lerr == nil {
+		loadedSession = loaded
 		if active := strings.TrimSpace(loaded.ActiveModel); active != "" {
 			effectiveModel = active
 		}
@@ -250,6 +252,13 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if effectiveModel == "" {
 		return fmt.Errorf("effective model is required")
 	}
+	ensureSessionReasoningForModel(&loadedSession, effectiveModel, strings.TrimSpace(resolved.ReasoningEffort), strings.TrimSpace(resolved.ReasoningSummary))
+	if strings.TrimSpace(loadedSession.SessionID) != "" {
+		loadedSession.ActiveModel = effectiveModel
+		_ = sessionStore.SaveSession(ctx, loadedSession)
+	}
+	initialReasoningEffort := loadedSession.ReasoningEffort
+	initialReasoningSummary := loadedSession.ReasoningSummary
 
 	// Text-based memory recall provider backed by daily memory files.
 	// Semantic/vector recall is intentionally not used.
@@ -266,8 +275,8 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		Profile:               strings.TrimSpace(prof.ID),
 		WorkdirAbs:            workdirAbs,
 		Model:                 effectiveModel,
-		ReasoningEffort:       strings.TrimSpace(resolved.ReasoningEffort),
-		ReasoningSummary:      strings.TrimSpace(resolved.ReasoningSummary),
+		ReasoningEffort:       initialReasoningEffort,
+		ReasoningSummary:      initialReasoningSummary,
 		ApprovalsMode:         strings.TrimSpace(resolved.ApprovalsMode),
 		HistoryStore:          historyStore,
 		MemoryStore:           memStore,
@@ -315,8 +324,8 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 
 	agentCfg := agent.DefaultConfig()
 	agentCfg.Model = effectiveModel
-	agentCfg.ReasoningEffort = strings.TrimSpace(resolved.ReasoningEffort)
-	agentCfg.ReasoningSummary = strings.TrimSpace(resolved.ReasoningSummary)
+	agentCfg.ReasoningEffort = initialReasoningEffort
+	agentCfg.ReasoningSummary = initialReasoningSummary
 	agentCfg.ApprovalsMode = strings.TrimSpace(resolved.ApprovalsMode)
 	agentCfg.EnableWebSearch = resolved.WebSearchEnabled
 	agentCfg.SystemPrompt = baseSystemPrompt
@@ -475,6 +484,7 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 					}
 				}
 				loadedSession.ActiveModel = strings.TrimSpace(model)
+				ensureSessionReasoningForModel(&loadedSession, loadedSession.ActiveModel, strings.TrimSpace(resolved.ReasoningEffort), strings.TrimSpace(resolved.ReasoningSummary))
 				if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
 					return nil, err
 				}
@@ -484,6 +494,50 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 						currentModel = strings.TrimSpace(model)
 						currentModelMu.Unlock()
 					}
+					_ = sess.SetReasoning(ctx, loadedSession.ReasoningEffort, loadedSession.ReasoningSummary)
+				}
+				return applied, nil
+			},
+			ControlSetReasoning: func(ctx context.Context, threadID, target, effort, summary string) ([]string, error) {
+				threadID = strings.TrimSpace(threadID)
+				if threadID == "" {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
+				}
+				loadedSession, err := sessionStore.LoadSession(ctx, threadID)
+				if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
+					return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+				}
+				target = strings.TrimSpace(target)
+				applied := collectSessionRunIDs(loadedSession)
+				targetRunID := ""
+				if target != "" && target != threadID {
+					found := false
+					for _, rid := range applied {
+						if strings.TrimSpace(rid) == target {
+							found = true
+							targetRunID = target
+							applied = []string{target}
+							break
+						}
+					}
+					if !found {
+						return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "target does not match active run"}
+					}
+				}
+				effort = strings.ToLower(strings.TrimSpace(effort))
+				summary = normalizeReasoningSummaryValue(summary)
+				storeSessionReasoningPreference(&loadedSession, strings.TrimSpace(loadedSession.ActiveModel), effort, summary)
+				if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
+					return nil, err
+				}
+				if threadID == strings.TrimSpace(run.SessionID) {
+					if err := sess.SetReasoning(ctx, effort, summary); err != nil {
+						return nil, err
+					}
+					return applied, nil
+				}
+				if _, err := supervisor.ApplySessionReasoning(ctx, threadID, targetRunID, effort, summary); err != nil {
+					return nil, err
 				}
 				return applied, nil
 			},

@@ -9,11 +9,13 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/app"
 	implstore "github.com/tinoosan/workbench-core/internal/store"
+	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
 	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
@@ -180,6 +182,26 @@ func TestMonitorHandleCommand_EnqueuesPlainTextAndRejectsUnknownSlashCommand(t *
 	}
 	if after != before {
 		t.Fatalf("unexpected task count change: before=%d after=%d", before, after)
+	}
+}
+
+func TestMonitorWriteControl_SetReasoning_UsesRPCMethod(t *testing.T) {
+	m := &monitorModel{
+		runID:       "run-test",
+		sessionID:   "sess-test",
+		rpcEndpoint: "127.0.0.1:1",
+	}
+	msg := m.writeControl("set_reasoning", map[string]any{"summary": "auto"})()
+	lines, ok := msg.(commandLinesMsg)
+	if !ok || len(lines.lines) == 0 {
+		t.Fatalf("expected commandLinesMsg, got %#v", msg)
+	}
+	line := strings.ToLower(strings.TrimSpace(lines.lines[0]))
+	if strings.Contains(line, "unsupported command set_reasoning") {
+		t.Fatalf("expected set_reasoning RPC path, got %q", lines.lines[0])
+	}
+	if !strings.Contains(line, "rpc control.setreasoning") {
+		t.Fatalf("expected control.setReasoning rpc error, got %q", lines.lines[0])
 	}
 }
 
@@ -1513,5 +1535,42 @@ func TestActivityItemTitle_FallbacksWhenTitleMissing(t *testing.T) {
 				t.Fatalf("title=%q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRenderComposer_ShowsReasoningTagsForReasoningModel(t *testing.T) {
+	m := &monitorModel{
+		model:            "openai/gpt-5-nano",
+		profile:          "general",
+		reasoningEffort:  "medium",
+		reasoningSummary: "auto",
+		styles:           defaultMonitorStyles(),
+		input:            textarea.New(),
+		focusedPanel:     panelComposer,
+	}
+	spec := layoutmgr.PanelSpec{Width: 100, Height: 8, ContentWidth: 96, ContentHeight: 6}
+	out := m.renderComposer(spec)
+	if !strings.Contains(out, "effort") || !strings.Contains(out, "medium") {
+		t.Fatalf("expected effort tag in composer output: %q", out)
+	}
+	if !strings.Contains(out, "summary") || !strings.Contains(out, "auto") {
+		t.Fatalf("expected summary tag in composer output: %q", out)
+	}
+}
+
+func TestRenderComposer_HidesReasoningTagsForNonReasoningModel(t *testing.T) {
+	m := &monitorModel{
+		model:            "moonshotai/kimi-k2.5",
+		profile:          "general",
+		reasoningEffort:  "high",
+		reasoningSummary: "detailed",
+		styles:           defaultMonitorStyles(),
+		input:            textarea.New(),
+		focusedPanel:     panelComposer,
+	}
+	spec := layoutmgr.PanelSpec{Width: 100, Height: 8, ContentWidth: 96, ContentHeight: 6}
+	out := m.renderComposer(spec)
+	if strings.Contains(out, "effort") || strings.Contains(out, "summary") {
+		t.Fatalf("did not expect reasoning tags in composer output: %q", out)
 	}
 }

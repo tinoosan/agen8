@@ -13,6 +13,10 @@ type Thread struct {
 
 	// ActiveModel is the model identifier in use for this thread (e.g. "openai/gpt-5.2").
 	ActiveModel string `json:"activeModel,omitempty"`
+	// ActiveReasoningEffort is the active reasoning effort for the selected model.
+	ActiveReasoningEffort string `json:"activeReasoningEffort,omitempty"`
+	// ActiveReasoningSummary is the active reasoning summary level for the selected model.
+	ActiveReasoningSummary string `json:"activeReasoningSummary,omitempty"`
 
 	// ActiveRunID identifies the current agent-instance run served by the app server.
 	ActiveRunID RunID `json:"activeRunId,omitempty"`

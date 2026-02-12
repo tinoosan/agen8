@@ -9,12 +9,20 @@ import (
 )
 
 var monitorReasoningEffortOptions = []string{"none", "minimal", "low", "medium", "high", "xhigh"}
-var monitorReasoningSummaryOptions = []string{"none", "auto", "concise", "detailed"}
+var monitorReasoningSummaryOptions = []string{"off", "auto", "concise", "detailed"}
 
 // openReasoningEffortPicker opens the reasoning effort picker.
 func (m *monitorModel) openReasoningEffortPicker() {
 	m.reasoningEffortPickerOpen = true
-	m.reasoningEffortPickerSelected = 3 // default to medium
+	sel := 3 // default to medium
+	cur := strings.ToLower(strings.TrimSpace(m.reasoningEffort))
+	for i, opt := range monitorReasoningEffortOptions {
+		if strings.EqualFold(opt, cur) {
+			sel = i
+			break
+		}
+	}
+	m.reasoningEffortPickerSelected = sel
 }
 
 // closeReasoningEffortPicker closes the reasoning effort picker.
@@ -52,6 +60,7 @@ func (m *monitorModel) selectReasoningEffort() tea.Cmd {
 	}
 	val := monitorReasoningEffortOptions[m.reasoningEffortPickerSelected]
 	m.closeReasoningEffortPicker()
+	m.reasoningEffort = val
 	return m.writeControl("set_reasoning", map[string]any{"effort": val})
 }
 
@@ -62,7 +71,15 @@ func (m *monitorModel) renderReasoningEffortPicker(base string) string {
 // openReasoningSummaryPicker opens the reasoning summary picker.
 func (m *monitorModel) openReasoningSummaryPicker() {
 	m.reasoningSummaryPickerOpen = true
-	m.reasoningSummaryPickerSelected = 1 // default to auto
+	sel := 1 // default to auto
+	cur := strings.ToLower(strings.TrimSpace(m.reasoningSummary))
+	for i, opt := range monitorReasoningSummaryOptions {
+		if strings.EqualFold(opt, cur) {
+			sel = i
+			break
+		}
+	}
+	m.reasoningSummaryPickerSelected = sel
 }
 
 // closeReasoningSummaryPicker closes the reasoning summary picker.
@@ -100,6 +117,7 @@ func (m *monitorModel) selectReasoningSummary() tea.Cmd {
 	}
 	val := monitorReasoningSummaryOptions[m.reasoningSummaryPickerSelected]
 	m.closeReasoningSummaryPicker()
+	m.reasoningSummary = val
 	return m.writeControl("set_reasoning", map[string]any{"summary": val})
 }
 
