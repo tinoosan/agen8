@@ -35,7 +35,7 @@ var monitorCommandSpecs = []monitorCommandSpec{
 	{name: "/team", desc: "Focus team run", fn: cmdTeam, invokeWithoutArgs: true},
 	{name: "/sessions", desc: "Browse sessions", fn: cmdSessions, invokeWithoutArgs: true},
 	{name: "/agents", desc: "Browse agents", fn: cmdAgents, invokeWithoutArgs: true},
-	{name: "/rename-session", desc: "Rename current session", fn: cmdRenameSession},
+	{name: "/rename", desc: "Rename current session", fn: cmdRenameSession},
 	{name: "/pause", desc: "Pause run(s)", fn: cmdPause, invokeWithoutArgs: true},
 	{name: "/resume", desc: "Resume run(s)", fn: cmdResume, invokeWithoutArgs: true},
 	{name: "/stop", desc: "Hard-stop run(s)", fn: cmdStop, invokeWithoutArgs: true},
