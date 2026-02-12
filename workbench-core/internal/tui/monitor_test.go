@@ -2017,3 +2017,128 @@ func TestRenderMainBodyDashboard_AgentOutputBottomBorderVisible(t *testing.T) {
 		t.Fatalf("expected rounded bottom border to be visible in main dashboard output: %q", main)
 	}
 }
+
+func TestMonitorDispatch_KeyPrecedence_ModalConsumesGlobal(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	m, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+	m.helpModalOpen = true
+
+	model, cmd := m.dispatchUpdate(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated, ok := model.(*monitorModel)
+	if !ok {
+		t.Fatalf("expected *monitorModel, got %T", model)
+	}
+	if cmd != nil {
+		t.Fatalf("expected help modal to consume ctrl+c before global quit")
+	}
+	if !updated.helpModalOpen {
+		t.Fatalf("expected help modal to remain open")
+	}
+}
+
+func TestMonitorDispatch_KeyPrecedence_ArtifactBeforeModal(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	m, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+	m.artifactViewerOpen = true
+	m.helpModalOpen = true
+
+	model, _ := m.dispatchUpdate(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, ok := model.(*monitorModel)
+	if !ok {
+		t.Fatalf("expected *monitorModel, got %T", model)
+	}
+	if updated.artifactViewerOpen {
+		t.Fatalf("expected artifact viewer to close on esc")
+	}
+	if !updated.helpModalOpen {
+		t.Fatalf("expected help modal untouched when artifact viewer handles key first")
+	}
+}
+
+func TestMonitorDispatch_PaginationGatedByFocusedPanel(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	m, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+	m.width = 120
+	m.height = 45
+	m.focusedPanel = panelComposer
+	m.updateFocus()
+	beforeInboxPage := m.inboxPage
+	beforeOutboxPage := m.outboxPage
+	beforeActivityPage := m.activityPage
+
+	model, _ := m.dispatchUpdate(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	updated := model.(*monitorModel)
+
+	if updated.input.Value() != "n" {
+		t.Fatalf("expected key to route to composer input, got %q", updated.input.Value())
+	}
+	if updated.inboxPage != beforeInboxPage || updated.outboxPage != beforeOutboxPage || updated.activityPage != beforeActivityPage {
+		t.Fatalf("expected pagination state unchanged when non-paginated panel is focused")
+	}
+}
+
+func TestMonitorDispatch_CompactTabNavigationParity(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	m, err := newMonitorModel(ctx, cfg, "compact-nav", &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	m.width = 100
+	m.height = 30
+	if !m.isCompactMode() {
+		t.Fatalf("expected compact mode")
+	}
+	m.compactTab = 0
+	m.focusedPanel = panelComposer
+
+	model, _ := m.dispatchUpdate(tea.KeyMsg{Type: tea.KeyCtrlCloseBracket})
+	updated := model.(*monitorModel)
+	if updated.compactTab != 1 {
+		t.Fatalf("compactTab=%d want 1", updated.compactTab)
+	}
+	if updated.focusedPanel != panelComposer {
+		t.Fatalf("focusedPanel=%v want composer in compact mode when composer is focused", updated.focusedPanel)
+	}
+}
+
+func TestMonitorDispatch_DashboardTabNavigationParity(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	m, err := newMonitorModel(ctx, cfg, "dashboard-nav", &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	m.width = 120
+	m.height = 45
+	if m.isCompactMode() {
+		t.Fatalf("expected dashboard mode")
+	}
+	m.dashboardSideTab = 0
+
+	model, _ := m.dispatchUpdate(tea.KeyMsg{Type: tea.KeyCtrlCloseBracket})
+	updated := model.(*monitorModel)
+	if updated.dashboardSideTab != 1 {
+		t.Fatalf("dashboardSideTab=%d want 1", updated.dashboardSideTab)
+	}
+	if updated.focusedPanel != updated.dashboardSideTabToPanel() {
+		t.Fatalf("focusedPanel=%v want %v", updated.focusedPanel, updated.dashboardSideTabToPanel())
+	}
+}

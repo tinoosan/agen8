@@ -13,6 +13,23 @@ import (
 
 func (m *monitorModel) dispatchUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg, tickMsg, rpcHealthMsg:
+		return m.handleWindowAndTick(msg)
+	case tailedEventMsg, tailErrMsg, commandLinesMsg, monitorEditorDoneMsg, taskQueuedLocallyMsg, monitorSwitchRunMsg, monitorSwitchTeamMsg, monitorReloadedMsg:
+		return m.handleTailAndStreamMessages(msg)
+	case inboxLoadedMsg, outboxLoadedMsg, teamStatusLoadedMsg, teamManifestLoadedMsg, teamEventsLoadedMsg, activityLoadedMsg, sessionsListMsg, agentsListMsg, planFilesLoadedMsg, sessionTotalsLoadedMsg, artifactTreeLoadedMsg, artifactContentLoadedMsg, monitorFilePickerPathsMsg:
+		return m.handleLoadedDataMessages(msg)
+	case uiRefreshMsg, planReloadMsg, sessionTotalsReloadMsg:
+		return m.handleMaintenanceMessages(msg)
+	case tea.KeyMsg:
+		return m.handleKeyMessage(msg)
+	}
+
+	return m, nil
+}
+
+func (m *monitorModel) handleWindowAndTick(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -57,7 +74,12 @@ func (m *monitorModel) dispatchUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.scheduleUIRefresh()
+	}
+	return m, nil
+}
 
+func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
 	case tailedEventMsg:
 		if msg.ev.Event.EventID != "" {
 			m.offset = msg.ev.NextOffset
@@ -150,7 +172,12 @@ func (m *monitorModel) dispatchUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.scheduleUIRefresh()
 		}
 		return msg.model, tea.Batch(msg.model.Init(), msg.model.scheduleUIRefresh())
+	}
+	return m, nil
+}
 
+func (m *monitorModel) handleLoadedDataMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
 	case inboxLoadedMsg:
 		m.inboxList = msg.tasks
 		m.inboxTotalCount = msg.totalCount
@@ -318,19 +345,6 @@ func (m *monitorModel) dispatchUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.scheduleUIRefresh()
 
-	case uiRefreshMsg:
-		m.uiRefreshScheduled = false
-		m.refreshViewports()
-		return m, nil
-
-	case planReloadMsg:
-		m.planReloadScheduled = false
-		return m, m.loadPlanFilesCmd()
-
-	case sessionTotalsReloadMsg:
-		m.sessionTotalsReloadScheduled = false
-		return m, m.loadSessionTotalsCmd()
-
 	case planFilesLoadedMsg:
 		m.planMarkdown = msg.checklist
 		m.planLoadErr = msg.checklistErr
@@ -362,225 +376,306 @@ func (m *monitorModel) dispatchUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case monitorFilePickerPathsMsg:
 		m.handleFilePickerPaths(msg.paths)
 		return m, nil
+	}
+	return m, nil
+}
 
-	case tea.KeyMsg:
-		if m.artifactViewerOpen {
-			return m.updateArtifactViewer(msg)
-		}
-		// Modal overlay handling - if any modal is open, handle it first
-		if m.helpModalOpen {
-			switch msg.String() {
-			case "esc", "escape", "?":
-				m.closeHelpModal()
-				return m, nil
-			}
-			return m, nil // Consume all other keys when help is open
-		}
-		if m.sessionPickerOpen {
-			return m.updateSessionPicker(msg)
-		}
-		if m.newSessionWizardOpen {
-			return m.updateNewSessionWizard(msg)
-		}
-		if m.agentPickerOpen {
-			return m.updateAgentPicker(msg)
-		}
-		if m.profilePickerOpen {
-			return m.updateProfilePicker(msg)
-		}
-		if m.teamPickerOpen {
-			return m.updateTeamPicker(msg)
-		}
-		if m.modelPickerOpen {
-			return m.updateModelPicker(msg)
-		}
-		if m.reasoningEffortPickerOpen {
-			return m.updateReasoningEffortPicker(msg)
-		}
-		if m.reasoningSummaryPickerOpen {
-			return m.updateReasoningSummaryPicker(msg)
-		}
-		if m.filePickerOpen {
-			return m.updateFilePicker(msg)
-		}
+func (m *monitorModel) handleMaintenanceMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case uiRefreshMsg:
+		m.uiRefreshScheduled = false
+		m.refreshViewports()
+		return m, nil
 
-		// Help modal hotkey:
-		// - When not composing, "?" should always open help.
-		// - When composing, allow "?" to open help only if the composer is empty
-		//   (otherwise treat it as a literal character the user wants to type).
-		if msg.String() == "?" {
-			if m.focusedPanel != panelComposer || strings.TrimSpace(m.input.Value()) == "" {
-				m.openHelpModal()
-				return m, nil
-			}
-		}
+	case planReloadMsg:
+		m.planReloadScheduled = false
+		return m, m.loadPlanFilesCmd()
 
-		if m.focusedPanel == panelComposer {
-			// Handle command palette key events first
-			if cmd, ok := m.handleCommandPaletteKey(msg); ok {
-				return m, cmd
-			}
+	case sessionTotalsReloadMsg:
+		m.sessionTotalsReloadScheduled = false
+		return m, m.loadSessionTotalsCmd()
+	default:
+		_ = msg
+	}
+	return m, nil
+}
 
-			if strings.EqualFold(msg.String(), "ctrl+e") {
-				seed := strings.TrimSpace(m.input.Value())
-				m.input.SetValue("")
-				return m, m.openComposeEditor(seed)
-			}
+func (m *monitorModel) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if handled, model, cmd := m.routeArtifactViewerKey(msg); handled {
+		return model, cmd
+	}
+	if handled, model, cmd := m.routeModalKey(msg); handled {
+		return model, cmd
+	}
+	if handled, model, cmd := m.routeHelpHotkey(msg); handled {
+		return model, cmd
+	}
+	if handled, model, cmd := m.routeComposerPaletteSubmitKey(msg); handled {
+		return model, cmd
+	}
+	if handled, model, cmd := m.routeLayoutNavigationKey(msg); handled {
+		return model, cmd
+	}
+	if handled, model, cmd := m.routeGlobalShortcutKey(msg); handled {
+		return model, cmd
+	}
+	if m.isCompactMode() {
+		// Keep explicit focus on Activity Details if the user selected it.
+		if !(m.compactTab == 1 && m.focusedPanel == panelActivityDetail) {
+			m.focusedPanel = m.compactTabToPanel()
+		}
+		m.updateFocus()
+	}
+	if handled, model, cmd := m.routePaginationKey(msg); handled {
+		return model, cmd
+	}
+	return m.routeKeyToFocusedPanel(msg)
+}
 
-			key := strings.ToLower(msg.String())
-			if key == "ctrl+enter" ||
-				key == "ctrl+j" ||
-				key == "ctrl+m" ||
-				key == "ctrl+o" ||
-				msg.Type == tea.KeyCtrlJ ||
-				msg.Type == tea.KeyCtrlM ||
-				msg.Type == tea.KeyCtrlO ||
-				(msg.Type == tea.KeyEnter && msg.Alt) {
-				cmd := strings.TrimSpace(m.input.Value())
-				m.input.SetValue("")
-				if cmd == "" {
-					return m, nil
-				}
-				return m, m.handleCommand(cmd)
-			}
-		}
-		// Compact mode: allow switching tabs and focusing Activity subpanels so
-		// long details can be scrolled.
-		if m.isCompactMode() {
-			switch msg.String() {
-			case "ctrl+]":
-				m.compactTab = (m.compactTab + 1) % len(compactTabs)
-				if m.focusedPanel != panelComposer {
-					m.focusedPanel = m.compactTabToPanel()
-				}
-				m.updateFocus()
-				m.refreshViewports()
-				return m, nil
-			case "ctrl+[":
-				m.compactTab = (m.compactTab + len(compactTabs) - 1) % len(compactTabs)
-				if m.focusedPanel != panelComposer {
-					m.focusedPanel = m.compactTabToPanel()
-				}
-				m.updateFocus()
-				m.refreshViewports()
-				return m, nil
-			case "ctrl+down", "ctrl+j":
-				if m.compactTab == 1 && m.focusedPanel != panelComposer { // Activity tab
-					m.focusedPanel = panelActivityDetail
-					m.updateFocus()
-					return m, nil
-				}
-			case "ctrl+up", "ctrl+k":
-				if m.compactTab == 1 && m.focusedPanel != panelComposer { // Activity tab
-					m.focusedPanel = panelActivity
-					m.updateFocus()
-					return m, nil
-				}
-			}
-		}
-		// Dashboard mode: quick focus toggle between Activity Feed and Details.
-		if !m.isCompactMode() && m.dashboardSideTab == 0 && m.focusedPanel != panelComposer {
-			switch msg.String() {
-			case "ctrl+down":
-				m.focusedPanel = panelActivityDetail
-				m.updateFocus()
-				return m, nil
-			case "ctrl+up":
-				m.focusedPanel = panelActivity
-				m.updateFocus()
-				return m, nil
-			}
-		}
+func (m *monitorModel) routeArtifactViewerKey(msg tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
+	if m.artifactViewerOpen {
+		model, cmd := m.updateArtifactViewer(msg)
+		return true, model, cmd
+	}
+	return false, m, nil
+}
+
+func (m *monitorModel) routeModalKey(msg tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
+	// Modal overlay handling - if any modal is open, handle it first.
+	if m.helpModalOpen {
 		switch msg.String() {
-		case "ctrl+c":
-			if m.cancel != nil {
-				m.cancel()
-			}
-			return m, tea.Quit
-		case "ctrl+g":
-			if strings.TrimSpace(m.teamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
-				m.focusedRunID = ""
-				m.focusedRunRole = ""
-				return m, m.applyFocusLens()
-			}
-		case "ctrl+y":
-			if !m.isCompactMode() {
-				m.dashboardSideTab = 3
-				m.focusedPanel = panelThinking
-				m.updateFocus()
-				m.refreshViewports()
-				return m, nil
-			}
-		case "tab", "shift+tab":
-			if m.isCompactMode() {
-				// Toggle focus between the Composer and the current tab's panel.
-				if m.focusedPanel == panelComposer {
-					m.focusedPanel = m.compactTabToPanel()
-				} else {
-					m.focusedPanel = panelComposer
-				}
-				m.updateFocus()
-				return m, nil
-			}
-			cycle := m.dashboardTabFocusCycle()
-			if len(cycle) == 0 {
-				cycle = []panelID{panelComposer}
-			}
-			idx := slices.Index(cycle, m.focusedPanel)
-			if idx < 0 {
-				idx = 0
-			}
-			switch msg.String() {
-			case "tab":
-				idx = (idx + 1) % len(cycle)
-			case "shift+tab":
-				idx = (idx + len(cycle) - 1) % len(cycle)
-			}
-			m.focusedPanel = cycle[idx]
-			m.syncDashboardSideTabFromFocus()
-			m.updateFocus()
-			m.refreshViewports()
-			return m, nil
-		case "ctrl+]":
-			if !m.isCompactMode() {
-				m.dashboardSideTab = (m.dashboardSideTab + 1) % len(dashboardSideTabs)
-				m.focusedPanel = m.dashboardSideTabToPanel()
-				m.updateFocus()
-				m.refreshViewports()
-				return m, nil
-			}
-		case "ctrl+[":
-			if !m.isCompactMode() {
-				m.dashboardSideTab = (m.dashboardSideTab + len(dashboardSideTabs) - 1) % len(dashboardSideTabs)
-				m.focusedPanel = m.dashboardSideTabToPanel()
-				m.updateFocus()
-				m.refreshViewports()
-				return m, nil
-			}
+		case "esc", "escape", "?":
+			m.closeHelpModal()
+			return true, m, nil
 		}
-		if m.isCompactMode() {
-			// Keep explicit focus on Activity Details if the user selected it.
-			if !(m.compactTab == 1 && m.focusedPanel == panelActivityDetail) {
+		return true, m, nil // Consume all other keys when help is open.
+	}
+	if m.sessionPickerOpen {
+		model, cmd := m.updateSessionPicker(msg)
+		return true, model, cmd
+	}
+	if m.newSessionWizardOpen {
+		model, cmd := m.updateNewSessionWizard(msg)
+		return true, model, cmd
+	}
+	if m.agentPickerOpen {
+		model, cmd := m.updateAgentPicker(msg)
+		return true, model, cmd
+	}
+	if m.profilePickerOpen {
+		model, cmd := m.updateProfilePicker(msg)
+		return true, model, cmd
+	}
+	if m.teamPickerOpen {
+		model, cmd := m.updateTeamPicker(msg)
+		return true, model, cmd
+	}
+	if m.modelPickerOpen {
+		model, cmd := m.updateModelPicker(msg)
+		return true, model, cmd
+	}
+	if m.reasoningEffortPickerOpen {
+		model, cmd := m.updateReasoningEffortPicker(msg)
+		return true, model, cmd
+	}
+	if m.reasoningSummaryPickerOpen {
+		model, cmd := m.updateReasoningSummaryPicker(msg)
+		return true, model, cmd
+	}
+	if m.filePickerOpen {
+		model, cmd := m.updateFilePicker(msg)
+		return true, model, cmd
+	}
+	return false, m, nil
+}
+
+func (m *monitorModel) routeHelpHotkey(msg tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
+	// Help modal hotkey:
+	// - When not composing, "?" should always open help.
+	// - When composing, allow "?" to open help only if the composer is empty
+	//   (otherwise treat it as a literal character the user wants to type).
+	if msg.String() == "?" {
+		if m.focusedPanel != panelComposer || strings.TrimSpace(m.input.Value()) == "" {
+			m.openHelpModal()
+			return true, m, nil
+		}
+	}
+	return false, m, nil
+}
+
+func (m *monitorModel) routeComposerPaletteSubmitKey(msg tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
+	if m.focusedPanel != panelComposer {
+		return false, m, nil
+	}
+	// Handle command palette key events first.
+	if cmd, ok := m.handleCommandPaletteKey(msg); ok {
+		return true, m, cmd
+	}
+
+	if strings.EqualFold(msg.String(), "ctrl+e") {
+		seed := strings.TrimSpace(m.input.Value())
+		m.input.SetValue("")
+		return true, m, m.openComposeEditor(seed)
+	}
+
+	key := strings.ToLower(msg.String())
+	if key == "ctrl+enter" ||
+		key == "ctrl+j" ||
+		key == "ctrl+m" ||
+		key == "ctrl+o" ||
+		msg.Type == tea.KeyCtrlJ ||
+		msg.Type == tea.KeyCtrlM ||
+		msg.Type == tea.KeyCtrlO ||
+		(msg.Type == tea.KeyEnter && msg.Alt) {
+		cmd := strings.TrimSpace(m.input.Value())
+		m.input.SetValue("")
+		if cmd == "" {
+			return true, m, nil
+		}
+		return true, m, m.handleCommand(cmd)
+	}
+	return false, m, nil
+}
+
+func (m *monitorModel) routeLayoutNavigationKey(msg tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
+	// Compact mode: allow switching tabs and focusing Activity subpanels so
+	// long details can be scrolled.
+	if m.isCompactMode() {
+		switch msg.String() {
+		case "ctrl+]":
+			m.compactTab = (m.compactTab + 1) % len(compactTabs)
+			if m.focusedPanel != panelComposer {
 				m.focusedPanel = m.compactTabToPanel()
 			}
 			m.updateFocus()
-		}
-
-		// Pagination controls for paginated panels when focused.
-		if m.focusedPanel == panelActivity || m.focusedPanel == panelInbox || m.focusedPanel == panelOutbox {
-			switch msg.String() {
-			case "n", "right":
-				return m.handleNextPage()
-			case "p", "left":
-				return m.handlePrevPage()
-			case "g":
-				return m.handleFirstPage()
-			case "G":
-				return m.handleLastPage()
+			m.refreshViewports()
+			return true, m, nil
+		case "ctrl+[":
+			m.compactTab = (m.compactTab + len(compactTabs) - 1) % len(compactTabs)
+			if m.focusedPanel != panelComposer {
+				m.focusedPanel = m.compactTabToPanel()
+			}
+			m.updateFocus()
+			m.refreshViewports()
+			return true, m, nil
+		case "ctrl+down", "ctrl+j":
+			if m.compactTab == 1 && m.focusedPanel != panelComposer { // Activity tab
+				m.focusedPanel = panelActivityDetail
+				m.updateFocus()
+				return true, m, nil
+			}
+		case "ctrl+up", "ctrl+k":
+			if m.compactTab == 1 && m.focusedPanel != panelComposer { // Activity tab
+				m.focusedPanel = panelActivity
+				m.updateFocus()
+				return true, m, nil
 			}
 		}
-		return m.routeKeyToFocusedPanel(msg)
 	}
+	// Dashboard mode: quick focus toggle between Activity Feed and Details.
+	if !m.isCompactMode() && m.dashboardSideTab == 0 && m.focusedPanel != panelComposer {
+		switch msg.String() {
+		case "ctrl+down":
+			m.focusedPanel = panelActivityDetail
+			m.updateFocus()
+			return true, m, nil
+		case "ctrl+up":
+			m.focusedPanel = panelActivity
+			m.updateFocus()
+			return true, m, nil
+		}
+	}
+	return false, m, nil
+}
 
-	return m, nil
+func (m *monitorModel) routeGlobalShortcutKey(msg tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		if m.cancel != nil {
+			m.cancel()
+		}
+		return true, m, tea.Quit
+	case "ctrl+g":
+		if strings.TrimSpace(m.teamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
+			m.focusedRunID = ""
+			m.focusedRunRole = ""
+			return true, m, m.applyFocusLens()
+		}
+	case "ctrl+y":
+		if !m.isCompactMode() {
+			m.dashboardSideTab = 3
+			m.focusedPanel = panelThinking
+			m.updateFocus()
+			m.refreshViewports()
+			return true, m, nil
+		}
+	case "tab", "shift+tab":
+		if m.isCompactMode() {
+			// Toggle focus between the Composer and the current tab's panel.
+			if m.focusedPanel == panelComposer {
+				m.focusedPanel = m.compactTabToPanel()
+			} else {
+				m.focusedPanel = panelComposer
+			}
+			m.updateFocus()
+			return true, m, nil
+		}
+		cycle := m.dashboardTabFocusCycle()
+		if len(cycle) == 0 {
+			cycle = []panelID{panelComposer}
+		}
+		idx := slices.Index(cycle, m.focusedPanel)
+		if idx < 0 {
+			idx = 0
+		}
+		switch msg.String() {
+		case "tab":
+			idx = (idx + 1) % len(cycle)
+		case "shift+tab":
+			idx = (idx + len(cycle) - 1) % len(cycle)
+		}
+		m.focusedPanel = cycle[idx]
+		m.syncDashboardSideTabFromFocus()
+		m.updateFocus()
+		m.refreshViewports()
+		return true, m, nil
+	case "ctrl+]":
+		if !m.isCompactMode() {
+			m.dashboardSideTab = (m.dashboardSideTab + 1) % len(dashboardSideTabs)
+			m.focusedPanel = m.dashboardSideTabToPanel()
+			m.updateFocus()
+			m.refreshViewports()
+			return true, m, nil
+		}
+	case "ctrl+[":
+		if !m.isCompactMode() {
+			m.dashboardSideTab = (m.dashboardSideTab + len(dashboardSideTabs) - 1) % len(dashboardSideTabs)
+			m.focusedPanel = m.dashboardSideTabToPanel()
+			m.updateFocus()
+			m.refreshViewports()
+			return true, m, nil
+		}
+	}
+	return false, m, nil
+}
+
+func (m *monitorModel) routePaginationKey(msg tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
+	// Pagination controls for paginated panels when focused.
+	if m.focusedPanel == panelActivity || m.focusedPanel == panelInbox || m.focusedPanel == panelOutbox {
+		switch msg.String() {
+		case "n", "right":
+			model, cmd := m.handleNextPage()
+			return true, model, cmd
+		case "p", "left":
+			model, cmd := m.handlePrevPage()
+			return true, model, cmd
+		case "g":
+			model, cmd := m.handleFirstPage()
+			return true, model, cmd
+		case "G":
+			model, cmd := m.handleLastPage()
+			return true, model, cmd
+		}
+	}
+	return false, m, nil
 }

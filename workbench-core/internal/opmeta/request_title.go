@@ -1,0 +1,106 @@
+package opmeta
+
+import (
+	"fmt"
+	"strings"
+)
+
+func ShouldHideRoutingNoiseOp(op, path string) bool {
+	op = strings.TrimSpace(op)
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	switch op {
+	case "fs_list", "fs_read":
+		return strings.HasPrefix(path, "/workspace/deliverables/") || strings.HasPrefix(path, "/workspace/quarantine/")
+	default:
+		return false
+	}
+}
+
+func FormatRequestTitle(d map[string]string) string {
+	op := strings.TrimSpace(d["op"])
+	path := strings.TrimSpace(d["path"])
+
+	switch op {
+	case "fs_list":
+		return "List " + path
+	case "fs_read":
+		return "Read " + path
+	case "fs_search":
+		q := strings.TrimSpace(d["query"])
+		if path != "" && q != "" {
+			return fmt.Sprintf("Search %s for %q", path, q)
+		}
+		if path != "" {
+			return "Search " + path
+		}
+		return "Search"
+	case "fs_write":
+		return "Write " + path
+	case "fs_append":
+		return "Append " + path
+	case "fs_edit":
+		return "Edit " + path
+	case "fs_patch":
+		return "Patch " + path
+	case "shell_exec":
+		if cmd := strings.TrimSpace(d["argvPreview"]); cmd != "" {
+			return cmd
+		}
+		if argv0 := strings.TrimSpace(d["argv0"]); argv0 != "" {
+			return argv0
+		}
+		return "shell_exec"
+	case "http_fetch":
+		u := strings.TrimSpace(d["url"])
+		if u != "" {
+			m := strings.ToUpper(strings.TrimSpace(d["method"]))
+			if m == "" {
+				m = "GET"
+			}
+			desc := m + " " + u
+			if body := strings.TrimSpace(d["body"]); body != "" {
+				bodyText := "body: " + singleLinePreview(body, 120)
+				if strings.TrimSpace(d["bodyTruncated"]) == "true" {
+					bodyText += " truncated"
+				}
+				desc = desc + " " + bodyText
+			}
+			return desc
+		}
+		return "http_fetch"
+	case "trace_run":
+		action := strings.TrimSpace(d["traceAction"])
+		key := strings.TrimSpace(d["traceKey"])
+		if action != "" {
+			if key != "" {
+				return fmt.Sprintf("trace.%s %s", action, key)
+			}
+			return "trace." + action
+		}
+		return "trace_run"
+	default:
+		if op != "" && path != "" {
+			return op + " " + path
+		}
+		if op != "" {
+			return op
+		}
+		return "op"
+	}
+}
+
+func singleLinePreview(s string, max int) string {
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.TrimSpace(s)
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	if max < 2 {
+		return s[:max]
+	}
+	return s[:max-1] + "…"
+}

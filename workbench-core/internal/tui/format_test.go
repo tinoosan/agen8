@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tinoosan/workbench-core/internal/opmeta"
 	"github.com/tinoosan/workbench-core/pkg/events"
 )
 
@@ -121,5 +122,22 @@ func TestActionCategory_BrowserAndEmail(t *testing.T) {
 	}
 	if got := actionCategory("email"); got != "Sent" {
 		t.Fatalf("actionCategory(email) = %q, want %q", got, "Sent")
+	}
+}
+
+func TestRenderOpRequest_SharedOpParityWithOpMeta(t *testing.T) {
+	tests := []map[string]string{
+		{"op": "fs_search", "path": "/workspace", "query": "needle"},
+		{"op": "shell_exec", "argvPreview": "rg -n todo"},
+		{"op": "http_fetch", "method": "POST", "url": "https://example.com", "body": "{\n\"x\":1\n}"},
+		{"op": "http_fetch", "url": "https://example.com"},
+		{"op": "trace_run", "traceAction": "set", "traceKey": "alpha"},
+	}
+	for _, tc := range tests {
+		got := renderOpRequest(tc)
+		want := opmeta.FormatRequestTitle(tc)
+		if got != want {
+			t.Fatalf("renderOpRequest(%v)=%q want %q", tc, got, want)
+		}
 	}
 }
