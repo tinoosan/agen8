@@ -32,6 +32,10 @@ type Client struct {
 
 	// DefaultMaxTokens is used when LLMRequest.MaxTokens is 0.
 	DefaultMaxTokens int
+	// roleMapper canonicalizes input message roles.
+	roleMapper RoleMapper
+	// streamEventHandlers indexes stream handlers by normalized event type.
+	streamEventHandlers map[string][]StreamEventHandler
 
 	// schemaUnsupported is set when the provider rejects json_schema response_format.
 	// Once set, we stop attempting schema requests to avoid repeated 400s.
@@ -41,6 +45,10 @@ type Client struct {
 }
 
 func NewClientFromEnv() (*Client, error) {
+	return NewClientFromEnvWithConfig(OpenAIClientConfig{})
+}
+
+func NewClientFromEnvWithConfig(cfg OpenAIClientConfig) (*Client, error) {
 	key := strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY"))
 	if key == "" {
 		return nil, fmt.Errorf("OPENROUTER_API_KEY is required")
@@ -65,11 +73,17 @@ func NewClientFromEnv() (*Client, error) {
 		option.WithAPIKey(key),
 		option.WithBaseURL(baseURL),
 	)
+	roleMapper := cfg.RoleMapper
+	if roleMapper == nil {
+		roleMapper = defaultRoleMapper{}
+	}
 
 	return &Client{
-		client:           &cli,
-		baseURL:          baseURL,
-		DefaultMaxTokens: defaultMaxTokens,
+		client:              &cli,
+		baseURL:             baseURL,
+		DefaultMaxTokens:    defaultMaxTokens,
+		roleMapper:          roleMapper,
+		streamEventHandlers: buildResponsesStreamEventHandlerIndex(cfg.StreamEventHandlers),
 	}, nil
 }
 
@@ -212,11 +226,14 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 		msgs = append(msgs, openai.SystemMessage(req.System))
 	}
 	for _, m := range req.Messages {
-		role := strings.ToLower(strings.TrimSpace(m.Role))
+		role, err := c.canonicalRole(m.Role)
+		if err != nil {
+			return openai.ChatCompletionNewParams{}, err
+		}
 		switch role {
-		case "system":
+		case RoleSystem:
 			msgs = append(msgs, openai.SystemMessage(m.Content))
-		case "assistant":
+		case RoleAssistant:
 			// If the assistant message included tool calls, preserve them so that
 			// subsequent tool messages (role="tool") can reference tool_call_id.
 			if len(m.ToolCalls) != 0 {
@@ -253,13 +270,14 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 			} else {
 				msgs = append(msgs, openai.AssistantMessage(m.Content))
 			}
-		case "developer":
+		case RoleDeveloper:
 			msgs = append(msgs, openai.DeveloperMessage(m.Content))
-		case "tool":
+		case RoleTool:
 			msgs = append(msgs, openai.ToolMessage(m.Content, strings.TrimSpace(m.ToolCallID)))
-		default:
-			// Treat unknown roles as user.
+		case RoleUser, RoleCompaction:
 			msgs = append(msgs, openai.UserMessage(m.Content))
+		default:
+			return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported message role %q", m.Role)
 		}
 	}
 
@@ -535,8 +553,11 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	var functionCallIDs []string
 	var functionCallOutputIDs []string
 	for _, m := range msgs {
-		role := strings.ToLower(strings.TrimSpace(m.Role))
-		if role == "tool" {
+		role, err := c.canonicalRole(m.Role)
+		if err != nil {
+			return responses.ResponseNewParams{}, err
+		}
+		if role == RoleTool {
 			toolMsgN++
 			callID := strings.TrimSpace(m.ToolCallID)
 			if callID == "" {
@@ -548,21 +569,23 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 		}
 		rrole := responses.EasyInputMessageRoleUser
 		switch role {
-		case "system":
+		case RoleSystem:
 			rrole = responses.EasyInputMessageRoleSystem
-		case "developer":
+		case RoleDeveloper:
 			rrole = responses.EasyInputMessageRoleDeveloper
-		case "assistant":
+		case RoleAssistant:
 			rrole = responses.EasyInputMessageRoleAssistant
-		case "compaction":
+		case RoleCompaction:
 			enc := strings.TrimSpace(m.Content)
 			if enc == "" {
 				return responses.ResponseNewParams{}, fmt.Errorf("compaction message requires encrypted content")
 			}
 			items = append(items, responses.ResponseInputItemParamOfCompaction(enc))
 			continue
-		default:
+		case RoleUser:
 			rrole = responses.EasyInputMessageRoleUser
+		default:
+			return responses.ResponseNewParams{}, fmt.Errorf("unsupported message role %q", m.Role)
 		}
 		items = append(items, responses.ResponseInputItemParamOfMessage(m.Content, rrole))
 		// If the assistant message carried tool calls, include them as function_call items.
@@ -1003,8 +1026,11 @@ func (c *Client) CompactConversation(ctx context.Context, req types.LLMCompactio
 	}
 	input := make([]responses.ResponseInputItemUnionParam, 0, len(req.Messages))
 	for _, m := range req.Messages {
-		role := strings.ToLower(strings.TrimSpace(m.Role))
-		if role == "tool" {
+		role, err := c.canonicalRole(m.Role)
+		if err != nil {
+			return types.LLMCompactionResponse{}, err
+		}
+		if role == RoleTool {
 			callID := strings.TrimSpace(m.ToolCallID)
 			if callID == "" {
 				return types.LLMCompactionResponse{}, fmt.Errorf("tool message requires toolCallID")
@@ -1013,19 +1039,19 @@ func (c *Client) CompactConversation(ctx context.Context, req types.LLMCompactio
 			continue
 		}
 		switch role {
-		case "compaction":
+		case RoleCompaction:
 			enc := strings.TrimSpace(m.Content)
 			if enc == "" {
 				return types.LLMCompactionResponse{}, fmt.Errorf("compaction message requires encrypted content")
 			}
 			input = append(input, responses.ResponseInputItemParamOfCompaction(enc))
-		case "system", "developer", "assistant":
+		case RoleSystem, RoleDeveloper, RoleAssistant, RoleUser:
 			r := responses.EasyInputMessageRoleUser
-			if role == "system" {
+			if role == RoleSystem {
 				r = responses.EasyInputMessageRoleSystem
-			} else if role == "developer" {
+			} else if role == RoleDeveloper {
 				r = responses.EasyInputMessageRoleDeveloper
-			} else if role == "assistant" {
+			} else if role == RoleAssistant {
 				r = responses.EasyInputMessageRoleAssistant
 			}
 			input = append(input, responses.ResponseInputItemParamOfMessage(m.Content, r))
@@ -1042,7 +1068,7 @@ func (c *Client) CompactConversation(ctx context.Context, req types.LLMCompactio
 				input = append(input, responses.ResponseInputItemParamOfFunctionCall(args, callID, name))
 			}
 		default:
-			input = append(input, responses.ResponseInputItemParamOfMessage(m.Content, responses.EasyInputMessageRoleUser))
+			return types.LLMCompactionResponse{}, fmt.Errorf("unsupported message role %q", m.Role)
 		}
 	}
 
@@ -1196,96 +1222,20 @@ func (c *Client) onStreamChunk(acc *openai.ChatCompletionAccumulator, chunk open
 }
 
 func (c *Client) onResponsesStreamEvent(ev responses.ResponseStreamEventUnion, cb types.LLMStreamCallback, outText *strings.Builder, completed **responses.Response, sawReasoningSummaryText *bool) error {
-	if cb == nil {
-		// Still track completion for final response mapping when desired.
-		switch e := ev.AsAny().(type) {
-		case responses.ResponseCompletedEvent:
-			if completed != nil {
-				r := e.Response
-				*completed = &r
-			}
-		}
+	streamCtx := &ResponsesStreamEventContext{
+		Callback:                cb,
+		OutText:                 outText,
+		Completed:               completed,
+		SawReasoningSummaryText: sawReasoningSummaryText,
+	}
+	handled, err := c.dispatchResponsesStreamEvent(ev, streamCtx)
+	if err != nil {
+		return err
+	}
+	if handled || cb == nil {
 		return nil
 	}
-
-	switch e := ev.AsAny().(type) {
-	case responses.ResponseTextDeltaEvent:
-		if outText != nil {
-			outText.WriteString(e.Delta)
-		}
-		return cb(types.LLMStreamChunk{Text: e.Delta})
-	case responses.ResponseReasoningSummaryTextDeltaEvent:
-		// Provider-supplied reasoning summary (safe to show).
-		if sawReasoningSummaryText != nil {
-			*sawReasoningSummaryText = true
-		}
-		return cb(types.LLMStreamChunk{IsReasoning: true, Text: e.Delta})
-	case responses.ResponseReasoningSummaryPartAddedEvent:
-		// Some providers emit summary parts instead of summary_text deltas.
-		if strings.TrimSpace(e.Part.Text) == "" {
-			return nil
-		}
-		if sawReasoningSummaryText != nil {
-			*sawReasoningSummaryText = true
-		}
-		return cb(types.LLMStreamChunk{IsReasoning: true, Text: e.Part.Text})
-	case responses.ResponseReasoningSummaryPartDoneEvent:
-		// Fallback: emit the part text only if we have not seen any summary deltas.
-		if sawReasoningSummaryText != nil && *sawReasoningSummaryText {
-			return nil
-		}
-		if strings.TrimSpace(e.Part.Text) == "" {
-			return nil
-		}
-		if sawReasoningSummaryText != nil {
-			*sawReasoningSummaryText = true
-		}
-		return cb(types.LLMStreamChunk{IsReasoning: true, Text: e.Part.Text})
-	case responses.ResponseReasoningSummaryTextDoneEvent:
-		// Fallback-only: some providers emit only the final completed summary text.
-		if sawReasoningSummaryText != nil && *sawReasoningSummaryText {
-			return nil
-		}
-		if strings.TrimSpace(e.Text) == "" {
-			return nil
-		}
-		if sawReasoningSummaryText != nil {
-			*sawReasoningSummaryText = true
-		}
-		return cb(types.LLMStreamChunk{IsReasoning: true, Text: e.Text})
-	case responses.ResponseReasoningTextDeltaEvent:
-		// Raw reasoning (never show): indicator only.
-		return cb(types.LLMStreamChunk{IsReasoning: true})
-	case responses.ResponseOutputItemDoneEvent:
-		// Some providers emit reasoning summaries only in the completed reasoning item.
-		if sawReasoningSummaryText != nil && *sawReasoningSummaryText {
-			return nil
-		}
-		texts := responseReasoningSummaryTexts(e.Item)
-		if len(texts) == 0 {
-			return nil
-		}
-		if sawReasoningSummaryText != nil {
-			*sawReasoningSummaryText = true
-		}
-		for i, s := range texts {
-			if i > 0 {
-				s = "\n\n" + s
-			}
-			if err := cb(types.LLMStreamChunk{IsReasoning: true, Text: s}); err != nil {
-				return err
-			}
-		}
-		return nil
-	case responses.ResponseCompletedEvent:
-		if completed != nil {
-			r := e.Response
-			*completed = &r
-		}
-		return nil
-	default:
-		return emitReasoningSummaryFromRawEvent(ev, cb, sawReasoningSummaryText)
-	}
+	return emitReasoningSummaryFromRawEvent(ev, cb, sawReasoningSummaryText)
 }
 
 func emitReasoningSummaryFromRawEvent(ev responses.ResponseStreamEventUnion, cb types.LLMStreamCallback, sawReasoningSummaryText *bool) error {

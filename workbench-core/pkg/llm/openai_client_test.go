@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,6 +12,17 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/tinoosan/workbench-core/pkg/llm/types"
 )
+
+type testRoleMapper struct {
+	fn func(raw string) (CanonicalRole, error)
+}
+
+func (m testRoleMapper) Canonicalize(raw string) (CanonicalRole, error) {
+	if m.fn == nil {
+		return "", fmt.Errorf("mapper fn is nil")
+	}
+	return m.fn(raw)
+}
 
 func TestNewClientFromEnv_RequiresAPIKey(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "")
@@ -21,6 +33,111 @@ func TestNewClientFromEnv_RequiresAPIKey(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "OPENROUTER_API_KEY") {
 		t.Fatalf("unexpected error %v", err)
+	}
+}
+
+func TestDefaultRoleMapper_Canonicalize(t *testing.T) {
+	mapper := defaultRoleMapper{}
+	cases := []struct {
+		raw  string
+		want CanonicalRole
+	}{
+		{raw: "user", want: RoleUser},
+		{raw: " system ", want: RoleSystem},
+		{raw: "DEVELOPER", want: RoleDeveloper},
+		{raw: "assistant", want: RoleAssistant},
+		{raw: "tool", want: RoleTool},
+		{raw: "compaction", want: RoleCompaction},
+	}
+	for _, tc := range cases {
+		got, err := mapper.Canonicalize(tc.raw)
+		if err != nil {
+			t.Fatalf("Canonicalize(%q): %v", tc.raw, err)
+		}
+		if got != tc.want {
+			t.Fatalf("Canonicalize(%q)=%q, want %q", tc.raw, got, tc.want)
+		}
+	}
+
+	if _, err := mapper.Canonicalize(""); err == nil {
+		t.Fatalf("expected error for empty role")
+	}
+	if _, err := mapper.Canonicalize("unknown"); err == nil {
+		t.Fatalf("expected error for unknown role")
+	}
+}
+
+func TestNewClientFromEnv_UsesDefaultExtensions(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "k")
+	t.Setenv("OPENROUTER_BASE_URL", "http://example")
+
+	c, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("NewClientFromEnv: %v", err)
+	}
+	if c.roleMapper == nil {
+		t.Fatalf("expected default role mapper")
+	}
+	if len(c.streamEventHandlers) == 0 {
+		t.Fatalf("expected default stream event handlers")
+	}
+}
+
+func TestNewClientFromEnvWithConfig_InstallsCustomMapperAndHandlers(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "k")
+	t.Setenv("OPENROUTER_BASE_URL", "http://example")
+
+	mapper := testRoleMapper{fn: func(raw string) (CanonicalRole, error) {
+		if strings.EqualFold(strings.TrimSpace(raw), "analyst") {
+			return RoleUser, nil
+		}
+		return defaultRoleMapper{}.Canonicalize(raw)
+	}}
+	customHandlerCalled := false
+	customHandler := streamEventHandlerFunc{
+		eventType: "response.custom.delta",
+		fn: func(ev responses.ResponseStreamEventUnion, ctx *ResponsesStreamEventContext) (bool, error) {
+			customHandlerCalled = true
+			if ctx != nil && ctx.Callback != nil {
+				if err := ctx.Callback(types.LLMStreamChunk{Text: "custom"}); err != nil {
+					return true, err
+				}
+			}
+			return true, nil
+		},
+	}
+
+	c, err := NewClientFromEnvWithConfig(OpenAIClientConfig{
+		RoleMapper:          mapper,
+		StreamEventHandlers: []StreamEventHandler{customHandler},
+	})
+	if err != nil {
+		t.Fatalf("NewClientFromEnvWithConfig: %v", err)
+	}
+
+	if _, err := c.buildParams(types.LLMRequest{
+		Model:    "openai/gpt-4o-mini",
+		Messages: []types.LLMMessage{{Role: "analyst", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("expected custom role mapper to allow analyst role: %v", err)
+	}
+
+	var ev responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(`{"type":"response.custom.delta","delta":"x"}`), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	var got []types.LLMStreamChunk
+	if err := c.onResponsesStreamEvent(ev, func(ch types.LLMStreamChunk) error {
+		got = append(got, ch)
+		return nil
+	}, nil, nil, nil); err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
+	}
+	if !customHandlerCalled {
+		t.Fatalf("expected custom stream event handler to be called")
+	}
+	if len(got) != 1 || got[0].Text != "custom" {
+		t.Fatalf("chunks=%+v", got)
 	}
 }
 
@@ -111,6 +228,18 @@ func TestClient_buildParams_UsesJSONSchemaWhenProvided(t *testing.T) {
 	}
 }
 
+func TestClient_buildParams_UnknownRoleReturnsError(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli}
+	_, err := c.buildParams(types.LLMRequest{
+		Model:    "openai/gpt-4o-mini",
+		Messages: []types.LLMMessage{{Role: "unknown-role", Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatalf("expected error for unknown role")
+	}
+}
+
 func TestClient_toResponse_MapsTextAndUsage(t *testing.T) {
 	resp := &openai.ChatCompletion{
 		Model: "openai/gpt-5-mini-2026-01-01",
@@ -172,6 +301,18 @@ func TestClient_buildResponseParams_JSONSchema(t *testing.T) {
 	}
 	if params.Text.Format.OfJSONSchema == nil {
 		t.Fatalf("expected JSON schema response format")
+	}
+}
+
+func TestClient_buildResponseParams_UnknownRoleReturnsError(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli}
+	_, err := c.buildResponseParams(types.LLMRequest{
+		Model:    "openai/gpt-5-mini",
+		Messages: []types.LLMMessage{{Role: "unknown-role", Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatalf("expected error for unknown role")
 	}
 }
 
@@ -365,6 +506,51 @@ func TestOnResponsesStreamEvent_EmitsReasoningSummaryFromUnknownRawEvent(t *test
 	}
 	if !saw {
 		t.Fatalf("expected sawReasoningSummaryText=true")
+	}
+}
+
+func TestOnResponsesStreamEvent_UnknownNonReasoningEventNoOp(t *testing.T) {
+	raw := `{
+		"type":"response.unknown.event",
+		"sequence_number":1,
+		"delta":"noop"
+	}`
+	var ev responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+
+	c := &Client{}
+	var got []types.LLMStreamChunk
+	err := c.onResponsesStreamEvent(ev, func(ch types.LLMStreamChunk) error {
+		got = append(got, ch)
+		return nil
+	}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("chunks = %d, want 0", len(got))
+	}
+}
+
+func TestOnResponsesStreamEvent_CallbackNilTracksCompleted(t *testing.T) {
+	raw := `{
+		"type":"response.completed",
+		"response":{"id":"resp_123","output":[]}
+	}`
+	var ev responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+
+	c := &Client{}
+	var completed *responses.Response
+	if err := c.onResponsesStreamEvent(ev, nil, nil, &completed, nil); err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
+	}
+	if completed == nil || strings.TrimSpace(completed.ID) != "resp_123" {
+		t.Fatalf("completed = %+v", completed)
 	}
 }
 
@@ -675,6 +861,20 @@ func TestBuildResponseParams_CompactionMessageMapped(t *testing.T) {
 	last, _ := input[1].(map[string]any)
 	if last["type"] != "compaction" {
 		t.Fatalf("expected second input item type=compaction, got %+v", last)
+	}
+}
+
+func TestClient_CompactConversation_UnknownRoleReturnsError(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli}
+	_, err := c.CompactConversation(nil, types.LLMCompactionRequest{
+		Model: "openai/gpt-5-mini",
+		Messages: []types.LLMMessage{
+			{Role: "unknown-role", Content: "x"},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected error for unknown role")
 	}
 }
 
