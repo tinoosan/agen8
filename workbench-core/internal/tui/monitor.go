@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -415,6 +416,8 @@ type teamRoleState struct {
 	Role string
 	Info string
 }
+
+var gluedReasoningSectionRE = regexp.MustCompile(`([.!?])[ \t]*([*_]{0,2})([A-Z])`)
 
 type teamManifestFile struct {
 	TeamID          string               `json:"teamId"`
@@ -3257,11 +3260,15 @@ func (m *monitorModel) searchMemory(query string) tea.Cmd {
 }
 
 func (m *monitorModel) observeEvent(ev types.EventRecord) {
-	if v := strings.TrimSpace(ev.Data["effort"]); v != "" {
-		m.reasoningEffort = strings.ToLower(v)
-	}
-	if v := strings.TrimSpace(ev.Data["summary"]); v != "" {
-		m.reasoningSummary = strings.ToLower(v)
+	if ev.Type == "control.success" || ev.Type == "control.check" || ev.Type == "control.error" {
+		if strings.EqualFold(strings.TrimSpace(ev.Data["command"]), "set_reasoning") {
+			if v := strings.TrimSpace(ev.Data["effort"]); v != "" {
+				m.reasoningEffort = strings.ToLower(v)
+			}
+			if v := strings.TrimSpace(ev.Data["summary"]); v != "" {
+				m.reasoningSummary = strings.ToLower(v)
+			}
+		}
 	}
 	if v := strings.TrimSpace(ev.Data["effectiveModel"]); v != "" {
 		m.model = v
@@ -3497,7 +3504,7 @@ func (m *monitorModel) appendThinkingEntry(runID, role string, summary string) {
 	if m == nil {
 		return
 	}
-	summary = strings.TrimSpace(summary)
+	summary = normalizeThinkingSummary(summary)
 	if summary == "" {
 		return
 	}
@@ -3511,6 +3518,21 @@ func (m *monitorModel) appendThinkingEntry(runID, role string, summary string) {
 		m.thinkingEntries = append([]thinkingEntry(nil), m.thinkingEntries[start:]...)
 	}
 	m.dirtyThinking = true
+}
+
+func normalizeThinkingSummary(summary string) string {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return ""
+	}
+	// Some providers emit adjacent reasoning sections without a separator, e.g.
+	// "...in planning.Listing capabilities". Split those into distinct blocks.
+	summary = gluedReasoningSectionRE.ReplaceAllString(summary, "$1\n\n$2$3")
+	summary = strings.ReplaceAll(summary, "\r\n", "\n")
+	for strings.Contains(summary, "\n\n\n") {
+		summary = strings.ReplaceAll(summary, "\n\n\n", "\n\n")
+	}
+	return strings.TrimSpace(summary)
 }
 
 func reasoningStepKey(runID, role, step string) string {
@@ -4099,14 +4121,14 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 	})
 	profileLabel := kit.RenderTag(kit.TagOptions{
 		Key:   "profile",
-		Value: kit.TruncateMiddle(profileRef, 12),
+		Value: profileRef,
 		Styles: kit.TagStyles{
 			KeyStyle:   tagKeyStyle,
 			ValueStyle: tagValueStyle,
 		},
 	})
 
-	statusLeft := modelLabel + "  " + profileLabel
+	segments := []string{modelLabel}
 	if cost.SupportsReasoningSummary(modelID) {
 		effort := strings.TrimSpace(m.reasoningEffort)
 		if effort == "" {
@@ -4117,7 +4139,7 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 			summary = "auto"
 		}
 		reasoningEffortLabel := kit.RenderTag(kit.TagOptions{
-			Key:   "effort",
+			Key:   "reasoning-effort",
 			Value: effort,
 			Styles: kit.TagStyles{
 				KeyStyle:   tagKeyStyle,
@@ -4125,15 +4147,17 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 			},
 		})
 		reasoningSummaryLabel := kit.RenderTag(kit.TagOptions{
-			Key:   "summary",
+			Key:   "reasoning-summary",
 			Value: summary,
 			Styles: kit.TagStyles{
 				KeyStyle:   tagKeyStyle,
 				ValueStyle: tagValueStyle,
 			},
 		})
-		statusLeft = statusLeft + "  " + reasoningEffortLabel + "  " + reasoningSummaryLabel
+		// Keep summary/effort high-priority so they remain visible in narrow widths.
+		segments = append(segments, reasoningSummaryLabel, reasoningEffortLabel)
 	}
+	segments = append(segments, profileLabel)
 	if strings.TrimSpace(m.teamID) != "" {
 		teamLabel := kit.RenderTag(kit.TagOptions{
 			Key:   "team",
@@ -4143,7 +4167,7 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 				ValueStyle: tagValueStyle,
 			},
 		})
-		statusLeft = statusLeft + "  " + teamLabel
+		segments = append(segments, teamLabel)
 		if mc := m.teamModelChange; mc != nil && strings.EqualFold(strings.TrimSpace(mc.Status), "pending") {
 			targetModel := strings.TrimSpace(mc.RequestedModel)
 			if targetModel != "" {
@@ -4155,11 +4179,48 @@ func (m *monitorModel) renderComposer(spec layoutmgr.PanelSpec) string {
 						ValueStyle: tagValueStyle,
 					},
 				})
-				statusLeft = statusLeft + "  " + modelChangeLabel
+				segments = append(segments, modelChangeLabel)
 			}
 		}
 	}
-	statusLeft = kit.TruncateRight(statusLeft, contentW)
+	statusLeft := ""
+	for _, seg := range segments {
+		if seg == "" {
+			continue
+		}
+		candidate := seg
+		if statusLeft != "" {
+			candidate = statusLeft + "  " + seg
+		}
+		if lipgloss.Width(candidate) > contentW {
+			break
+		}
+		statusLeft = candidate
+	}
+
+	// Wrap cleanly to additional lines instead of hard truncating tags.
+	wrappedStatusLines := make([]string, 0, 2)
+	currentLine := ""
+	for _, seg := range segments {
+		if seg == "" {
+			continue
+		}
+		if currentLine == "" {
+			currentLine = seg
+			continue
+		}
+		candidate := currentLine + "  " + seg
+		if lipgloss.Width(candidate) <= contentW {
+			currentLine = candidate
+			continue
+		}
+		wrappedStatusLines = append(wrappedStatusLines, currentLine)
+		currentLine = seg
+	}
+	if currentLine != "" {
+		wrappedStatusLines = append(wrappedStatusLines, currentLine)
+	}
+	statusLeft = strings.Join(wrappedStatusLines, "\n")
 
 	status := lipgloss.NewStyle().Width(contentW).Render(statusLeft)
 

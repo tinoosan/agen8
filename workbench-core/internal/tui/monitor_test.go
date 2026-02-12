@@ -1550,10 +1550,10 @@ func TestRenderComposer_ShowsReasoningTagsForReasoningModel(t *testing.T) {
 	}
 	spec := layoutmgr.PanelSpec{Width: 100, Height: 8, ContentWidth: 96, ContentHeight: 6}
 	out := m.renderComposer(spec)
-	if !strings.Contains(out, "effort") || !strings.Contains(out, "medium") {
+	if !strings.Contains(out, "reasoning-effort") || !strings.Contains(out, "medium") {
 		t.Fatalf("expected effort tag in composer output: %q", out)
 	}
-	if !strings.Contains(out, "summary") || !strings.Contains(out, "auto") {
+	if !strings.Contains(out, "reasoning-summary") || !strings.Contains(out, "auto") {
 		t.Fatalf("expected summary tag in composer output: %q", out)
 	}
 }
@@ -1570,7 +1570,99 @@ func TestRenderComposer_HidesReasoningTagsForNonReasoningModel(t *testing.T) {
 	}
 	spec := layoutmgr.PanelSpec{Width: 100, Height: 8, ContentWidth: 96, ContentHeight: 6}
 	out := m.renderComposer(spec)
-	if strings.Contains(out, "effort") || strings.Contains(out, "summary") {
+	if strings.Contains(out, "reasoning-effort") || strings.Contains(out, "reasoning-summary") {
 		t.Fatalf("did not expect reasoning tags in composer output: %q", out)
+	}
+}
+
+func TestRenderComposer_PrioritizesReasoningSummaryInNarrowWidth(t *testing.T) {
+	m := &monitorModel{
+		model:            "openai/gpt-5-nano",
+		profile:          "very_long_profile_name_that_will_not_fit",
+		reasoningEffort:  "medium",
+		reasoningSummary: "auto",
+		styles:           defaultMonitorStyles(),
+		input:            textarea.New(),
+		focusedPanel:     panelComposer,
+	}
+	spec := layoutmgr.PanelSpec{Width: 52, Height: 8, ContentWidth: 48, ContentHeight: 6}
+	out := m.renderComposer(spec)
+	if !strings.Contains(out, "reasoning-summary") || !strings.Contains(out, "auto") {
+		t.Fatalf("expected summary tag in narrow composer output: %q", out)
+	}
+}
+
+func TestNormalizeThinkingSummary_SplitsGluedReasoningSections(t *testing.T) {
+	in := "I should mention constraints in planning.Listing capabilities and process. I can do tasks.Understanding task creation"
+	got := normalizeThinkingSummary(in)
+	if !strings.Contains(got, "planning.\n\nListing capabilities") {
+		t.Fatalf("expected first split, got: %q", got)
+	}
+	if !strings.Contains(got, "tasks.\n\nUnderstanding task creation") {
+		t.Fatalf("expected second split, got: %q", got)
+	}
+}
+
+func TestNormalizeThinkingSummary_SplitsMarkdownHeadingBoundary(t *testing.T) {
+	in := "I can generate reports.**Detailing interaction methods** and workflows."
+	got := normalizeThinkingSummary(in)
+	if !strings.Contains(got, "reports.\n\n**Detailing interaction methods**") {
+		t.Fatalf("expected markdown heading split, got: %q", got)
+	}
+}
+
+func TestAppendThinkingEntry_NormalizesBeforeStore(t *testing.T) {
+	m := &monitorModel{}
+	m.appendThinkingEntry("run-1", "", "A.Beta section")
+	if len(m.thinkingEntries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(m.thinkingEntries))
+	}
+	if !strings.Contains(m.thinkingEntries[0].Summary, "A.\n\nBeta section") {
+		t.Fatalf("normalized summary = %q", m.thinkingEntries[0].Summary)
+	}
+}
+
+func TestObserveEvent_DoesNotOverwriteReasoningSummaryFromTaskSummary(t *testing.T) {
+	m := &monitorModel{
+		reasoningSummary: "auto",
+	}
+	m.observeEvent(types.EventRecord{
+		Type: "task.done",
+		Data: map[string]string{
+			"summary": "this is a task result summary, not reasoning settings",
+		},
+	})
+	if got := strings.TrimSpace(m.reasoningSummary); got != "auto" {
+		t.Fatalf("reasoningSummary overwritten = %q, want %q", got, "auto")
+	}
+	m.observeEvent(types.EventRecord{
+		Type: "control.success",
+		Data: map[string]string{
+			"command": "set_reasoning",
+			"summary": "detailed",
+		},
+	})
+	if got := strings.TrimSpace(m.reasoningSummary); got != "detailed" {
+		t.Fatalf("reasoningSummary = %q, want %q", got, "detailed")
+	}
+}
+
+func TestRenderComposer_WrapsStatusTagsWithoutHardTruncation(t *testing.T) {
+	m := &monitorModel{
+		model:            "openai/gpt-5-nano",
+		profile:          "market_researcher",
+		reasoningEffort:  "medium",
+		reasoningSummary: "auto",
+		styles:           defaultMonitorStyles(),
+		input:            textarea.New(),
+		focusedPanel:     panelComposer,
+	}
+	spec := layoutmgr.PanelSpec{Width: 56, Height: 8, ContentWidth: 52, ContentHeight: 6}
+	out := m.renderComposer(spec)
+	if !strings.Contains(out, "profile") {
+		t.Fatalf("expected profile tag in output: %q", out)
+	}
+	if strings.Contains(out, "pr…") {
+		t.Fatalf("unexpected hard-truncated profile tag: %q", out)
 	}
 }
