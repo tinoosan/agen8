@@ -118,3 +118,169 @@ func TestEventMiddleware_EmailReqDataIncludesToAndSubject(t *testing.T) {
 		t.Fatalf("expected reqData.body to be omitted")
 	}
 }
+
+func TestEventMiddleware_FSReadMaxBytesFromOperation(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+	})
+
+	var gotReq events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:       types.HostOpFSRead,
+		Path:     "/workspace/file.txt",
+		MaxBytes: 123,
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if got := gotReq.Data["maxBytes"]; got != "123" {
+		t.Fatalf("expected reqData.maxBytes=123, got %q", got)
+	}
+
+	resp = exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSRead,
+		Path: "/workspace/file.txt",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if _, ok := gotReq.Data["maxBytes"]; ok {
+		t.Fatalf("expected reqData.maxBytes to be omitted when zero")
+	}
+}
+
+func TestEventMiddleware_HTTPFetchRequestEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+	})
+
+	var gotReq events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:     types.HostOpHTTPFetch,
+		URL:    "https://example.com",
+		Method: "post",
+		Body:   strings.Repeat("x", maxHTTPBodyPreviewBytes+100),
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if got := gotReq.Data["method"]; got != "POST" {
+		t.Fatalf("expected method normalization to POST, got %q", got)
+	}
+	if got := gotReq.StoreData["method"]; got != "POST" {
+		t.Fatalf("expected store method normalization to POST, got %q", got)
+	}
+	if got := gotReq.Data["bodyTruncated"]; got != "true" {
+		t.Fatalf("expected bodyTruncated=true, got %q", got)
+	}
+
+	resp = exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpHTTPFetch,
+		URL:  "https://example.com",
+		Body: "Authorization: Bearer sk-SECRET",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if got := gotReq.Data["method"]; got != "GET" {
+		t.Fatalf("expected empty method default GET, got %q", got)
+	}
+	if got := gotReq.Data["body"]; got != "<omitted>" {
+		t.Fatalf("expected redacted request body, got %q", got)
+	}
+	if got := gotReq.StoreData["body"]; got != "<omitted>" {
+		t.Fatalf("expected redacted stored request body, got %q", got)
+	}
+}
+
+func TestEventMiddleware_HTTPFetchResponseEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{
+			Op:       req.Op,
+			Ok:       true,
+			Status:   201,
+			FinalURL: "https://example.com/final",
+			Body:     strings.Repeat("z", 1200),
+		}
+	})
+
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:  types.HostOpHTTPFetch,
+		URL: "https://example.com",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if got := gotResp.Data["status"]; got != "201" {
+		t.Fatalf("expected status=201, got %q", got)
+	}
+	if got := gotResp.Data["finalUrl"]; got != "https://example.com/final" {
+		t.Fatalf("expected finalUrl to be set, got %q", got)
+	}
+	if got := gotResp.Data["bodyTruncated"]; got != "true" {
+		t.Fatalf("expected bodyTruncated=true, got %q", got)
+	}
+	if got := gotResp.StoreData["status"]; got != "201" {
+		t.Fatalf("expected store status=201, got %q", got)
+	}
+}
+
+func TestDispatchMiddleware_UnregisteredOpFallsBackToBase(t *testing.T) {
+	called := false
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		called = true
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+	})
+
+	exec := ChainExecutor(base, &dispatchMiddleware{
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSSearch,
+		Path: "/workspace",
+	})
+	if !called {
+		t.Fatalf("expected base executor to run for unregistered op")
+	}
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+}

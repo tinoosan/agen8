@@ -35,6 +35,7 @@ type ExecutorOptions struct {
 	Guard           func(req types.HostOpRequest) *types.HostOpResponse
 	Observers       []HostOpObserver
 	ArtifactObserve func(path string)
+	Operations      []HostOperation
 }
 
 // ChainExecutor composes middleware around a base executor.
@@ -62,24 +63,28 @@ func ChainExecutor(base agent.HostExecutor, middleware ...HostOpMiddleware) agen
 func NewExecutor(base *agent.HostOpExecutor, opts ExecutorOptions) agent.HostExecutor {
 	var seq uint64
 	metaKey := opContextKey{}
+	ops := newHostOperationRegistry(opts.Operations)
+	dispatchMW := &dispatchMiddleware{operations: ops}
 	eventMW := &eventMiddleware{
-		emit:      opts.Emit,
-		model:     opts.Model,
-		runID:     opts.RunID,
-		sessionID: opts.SessionID,
-		seq:       &seq,
-		metaKey:   metaKey,
+		emit:       opts.Emit,
+		model:      opts.Model,
+		runID:      opts.RunID,
+		sessionID:  opts.SessionID,
+		seq:        &seq,
+		metaKey:    metaKey,
+		operations: ops,
 	}
 	diffMW := &diffMiddleware{
-		fs:      opts.FS,
-		metaKey: metaKey,
+		fs:         opts.FS,
+		metaKey:    metaKey,
+		operations: ops,
 	}
 	observerMW := &observerMiddleware{
 		observers:       opts.Observers,
 		artifactObserve: opts.ArtifactObserve,
 	}
 	guardMW := &guardMiddleware{guard: opts.Guard}
-	return ChainExecutor(base, eventMW, diffMW, observerMW, guardMW)
+	return ChainExecutor(base, dispatchMW, eventMW, diffMW, observerMW, guardMW)
 }
 
 type opContextKey struct{}
@@ -98,12 +103,13 @@ type opContext struct {
 }
 
 type eventMiddleware struct {
-	emit      func(ctx context.Context, ev events.Event)
-	model     string
-	runID     string
-	sessionID string
-	seq       *uint64
-	metaKey   opContextKey
+	emit       func(ctx context.Context, ev events.Event)
+	model      string
+	runID      string
+	sessionID  string
+	seq        *uint64
+	metaKey    opContextKey
+	operations *hostOperationRegistry
 }
 
 func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
@@ -144,9 +150,6 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	storeReq["op"] = req.Op
 	storeReq["path"] = req.Path
 
-	if req.Op == types.HostOpFSRead && req.MaxBytes != 0 {
-		reqData["maxBytes"] = strconv.Itoa(req.MaxBytes)
-	}
 	if req.Op == types.HostOpFSSearch {
 		if strings.TrimSpace(req.Query) != "" {
 			reqData["query"] = strings.TrimSpace(req.Query)
@@ -157,10 +160,17 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 			storeReq["limit"] = strconv.Itoa(req.Limit)
 		}
 	}
-	if fields := shellStoreFieldsFromInput(req); len(fields) != 0 {
-		for k, v := range fields {
-			storeReq[k] = v
-			reqData[k] = v
+	if op := m.operations.Get(req.Op); op != nil {
+		if fieldsProvider, ok := op.(HostOpRequestStoreFields); ok {
+			if fields := fieldsProvider.RequestStoreFields(req); len(fields) != 0 {
+				for k, v := range fields {
+					storeReq[k] = v
+					reqData[k] = v
+				}
+			}
+		}
+		if enricher, ok := op.(HostOpRequestEventEnricher); ok {
+			enricher.EnrichRequestEvent(req, reqData, storeReq)
 		}
 	}
 	if req.Op == types.HostOpTrace {
@@ -341,33 +351,6 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 			storeReq["text"] = "<omitted>"
 		}
 	}
-	if req.Op == types.HostOpHTTPFetch {
-		reqData["url"] = req.URL
-		method := strings.TrimSpace(req.Method)
-		if method == "" {
-			method = "GET"
-		} else {
-			method = strings.ToUpper(method)
-		}
-		reqData["method"] = method
-		storeReq["url"] = req.URL
-		storeReq["method"] = method
-		if body := strings.TrimSpace(req.Body); body != "" {
-			if looksSensitiveText(body) {
-				reqData["body"] = "<omitted>"
-				storeReq["body"] = "<omitted>"
-			} else {
-				if preview, truncated := capBytes(body, maxHTTPBodyPreviewBytes); preview != "" {
-					reqData["body"] = preview
-					storeReq["body"] = preview
-					if truncated {
-						reqData["bodyTruncated"] = "true"
-						storeReq["bodyTruncated"] = "true"
-					}
-				}
-			}
-		}
-	}
 	if req.Op == types.HostOpEmail && len(req.Input) > 0 {
 		var emailReq struct {
 			To      string `json:"to"`
@@ -488,10 +471,17 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 				meta.RespData["stderrTruncated"] = "true"
 			}
 		}
-		if fields := shellStoreFieldsFromResponse(resp); len(fields) != 0 {
-			for k, v := range fields {
-				meta.StoreResp[k] = v
+	}
+	if op := m.operations.Get(resp.Op); op != nil {
+		if fieldsProvider, ok := op.(HostOpResponseStoreFields); ok {
+			if fields := fieldsProvider.ResponseStoreFields(resp); len(fields) != 0 {
+				for k, v := range fields {
+					meta.StoreResp[k] = v
+				}
 			}
+		}
+		if enricher, ok := op.(HostOpResponseEventEnricher); ok {
+			enricher.EnrichResponseEvent(req, resp, meta.RespData, meta.StoreResp)
 		}
 	}
 	if resp.Op == types.HostOpTrace {
@@ -501,23 +491,6 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 			if tr {
 				meta.RespData["outputTruncated"] = "true"
 			}
-		}
-	}
-	if resp.Op == types.HostOpHTTPFetch {
-		meta.RespData["status"] = strconv.Itoa(resp.Status)
-		if resp.FinalURL != "" {
-			meta.RespData["finalUrl"] = resp.FinalURL
-		}
-		if resp.Body != "" {
-			s, tr := capBytes(resp.Body, 1000)
-			meta.RespData["body"] = s
-			if tr {
-				meta.RespData["bodyTruncated"] = "true"
-			}
-		}
-		meta.StoreResp["status"] = strconv.Itoa(resp.Status)
-		if resp.FinalURL != "" {
-			meta.StoreResp["finalUrl"] = resp.FinalURL
 		}
 	}
 	if resp.Op == types.HostOpFSSearch {
@@ -589,8 +562,9 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 }
 
 type diffMiddleware struct {
-	fs      *vfs.FS
-	metaKey opContextKey
+	fs         *vfs.FS
+	metaKey    opContextKey
+	operations *hostOperationRegistry
 }
 
 func (m *diffMiddleware) Handle(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
@@ -612,21 +586,16 @@ func (m *diffMiddleware) Handle(ctx context.Context, req types.HostOpRequest, ne
 	if !resp.Ok || strings.TrimSpace(req.Path) == "" {
 		return resp
 	}
-	if req.Op != types.HostOpFSWrite && req.Op != types.HostOpFSAppend && req.Op != types.HostOpFSEdit {
+	op := m.operations.Get(req.Op)
+	resolver, ok := op.(HostOpDiffAfterResolver)
+	if !ok {
 		return resp
 	}
 
 	before := string(meta.BeforeBytes)
-	after := ""
-	switch req.Op {
-	case types.HostOpFSWrite:
-		after = req.Text
-	case types.HostOpFSAppend:
-		after = before + req.Text
-	case types.HostOpFSEdit:
-		if b, err := m.fs.Read(req.Path); err == nil {
-			after = string(b)
-		}
+	after, ok := resolver.ResolveAfter(req, before, m.fs)
+	if !ok {
+		return resp
 	}
 
 	if after == "" && !meta.HadBefore {
@@ -681,6 +650,21 @@ type guardMiddleware struct {
 	guard func(req types.HostOpRequest) *types.HostOpResponse
 }
 
+type dispatchMiddleware struct {
+	operations *hostOperationRegistry
+}
+
+func (m *dispatchMiddleware) Handle(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
+	if m == nil || m.operations == nil {
+		return next(ctx, req)
+	}
+	op := m.operations.Get(req.Op)
+	if op == nil {
+		return next(ctx, req)
+	}
+	return op.Execute(ctx, req, next)
+}
+
 func (m *guardMiddleware) Handle(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
 	if m == nil || m.guard == nil {
 		return next(ctx, req)
@@ -689,15 +673,6 @@ func (m *guardMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 		return *resp
 	}
 	return next(ctx, req)
-}
-
-func shellStoreFieldsFromInput(req types.HostOpRequest) map[string]string {
-	switch req.Op {
-	case types.HostOpShellExec:
-		return shellArgsToFields(req.Argv, req.Cwd)
-	default:
-		return nil
-	}
 }
 
 func shellArgsToFields(argv []string, cwd string) map[string]string {
@@ -725,18 +700,6 @@ func shellArgsToFields(argv []string, cwd string) map[string]string {
 		return nil
 	}
 	return out
-}
-
-func shellStoreFieldsFromResponse(resp types.HostOpResponse) map[string]string {
-	switch resp.Op {
-	case types.HostOpShellExec:
-		fields := map[string]string{
-			"exitCode": strconv.Itoa(resp.ExitCode),
-		}
-		return fields
-	default:
-		return nil
-	}
 }
 
 func fmtBool(b bool) string {
