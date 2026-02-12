@@ -8,49 +8,6 @@ import (
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
 )
 
-// Hardcoded list of available slash commands for the monitor command palette.
-var monitorAvailableCommands = []string{
-	"/new",
-	"/reconnect",
-	"/artifact",
-	"/team",
-	"/sessions",
-	"/agents",
-	"/rename-session",
-	"/pause",
-	"/resume",
-	"/stop",
-	"/model",
-	"/reasoning-effort",
-	"/reasoning-summary",
-	"/memory search",
-	"/editor",
-	"/help",
-	"/quit",
-}
-
-func isExactMonitorCommand(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return false
-	}
-	for _, cmd := range monitorAvailableCommands {
-		if s == cmd {
-			return true
-		}
-	}
-	return false
-}
-
-func monitorCommandInvokesWithoutArgs(cmd string) bool {
-	switch strings.TrimSpace(cmd) {
-	case "/new", "/reconnect", "/artifact", "/team", "/sessions", "/agents", "/pause", "/resume", "/stop", "/model", "/reasoning-effort", "/reasoning-summary", "/editor", "/help", "/quit":
-		return true
-	default:
-		return false
-	}
-}
-
 // updateCommandPalette updates the command palette state based on the current input value.
 // It detects if the input starts with "/" and filters commands accordingly.
 func (m *monitorModel) updateCommandPalette() {
@@ -219,7 +176,7 @@ func (m *monitorModel) renderCommandPalette(contentW int) string {
 
 	items := make([]kit.Item, len(m.commandPaletteMatches))
 	for i, cmd := range m.commandPaletteMatches {
-		items[i] = monitorCommandPaletteItem(cmd)
+		items[i] = monitorCommandPaletteItem{command: cmd}
 	}
 
 	selected := m.commandPaletteSelected
@@ -259,8 +216,22 @@ func (m *monitorModel) renderCommandPalette(contentW int) string {
 }
 
 // monitorCommandPaletteItem implements kit.Item for the command palette.
-type monitorCommandPaletteItem string
+type monitorCommandPaletteItem struct {
+	command string
+}
 
-func (c monitorCommandPaletteItem) Title() string       { return string(c) }
-func (c monitorCommandPaletteItem) Description() string { return "" }
-func (c monitorCommandPaletteItem) FilterValue() string { return string(c) }
+func (c monitorCommandPaletteItem) Title() string {
+	return c.command
+}
+
+func (c monitorCommandPaletteItem) Description() string {
+	return monitorCommandDescription(c.command)
+}
+
+func (c monitorCommandPaletteItem) FilterValue() string {
+	desc := strings.TrimSpace(c.Description())
+	if desc == "" {
+		return c.command
+	}
+	return c.command + " " + desc
+}
