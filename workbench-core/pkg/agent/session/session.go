@@ -765,7 +765,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		if g := truncateText(task.Goal, 100); g != "" {
 			data["goal"] = g
 		}
-		if sum := truncateText(tr.Summary, 900); sum != "" {
+		if sum := strings.TrimSpace(tr.Summary); sum != "" {
 			data["summary"] = sum
 		}
 		if tr.Error != "" {
