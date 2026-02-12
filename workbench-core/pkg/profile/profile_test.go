@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoad_ValidDir(t *testing.T) {
@@ -24,6 +25,23 @@ func TestLoad_ValidDir(t *testing.T) {
 	}
 	if len(p.Heartbeat) != 1 || p.Heartbeat[0].Name != "ping" {
 		t.Fatalf("unexpected heartbeat: %+v", p.Heartbeat)
+	}
+}
+
+func TestLoad_HeartbeatHourInterval(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte("id: test\ndescription: x\nprompts:\n  system_prompt_path: prompt.md\nheartbeat:\n  - name: ping\n    interval: 1h\n    goal: hello\n"), 0o644); err != nil {
+		t.Fatalf("write profile.yaml: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := p.Heartbeat[0].Interval, time.Hour; got != want {
+		t.Fatalf("heartbeat interval = %v want %v", got, want)
 	}
 }
 

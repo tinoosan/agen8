@@ -286,6 +286,18 @@ func formatTaskEventLines(ev types.EventRecord) []string {
 		if goal != "" {
 			header += " goal=" + strconv.Quote(goal)
 		}
+		if kind := strings.TrimSpace(ev.Data["taskKind"]); kind != "" {
+			header += " kind=" + kind
+		}
+		if source := strings.TrimSpace(ev.Data["source"]); source != "" {
+			header += " source=" + source
+		}
+		if job := strings.TrimSpace(ev.Data["job"]); job != "" {
+			header += " job=" + strconv.Quote(job)
+		}
+		if interval := strings.TrimSpace(ev.Data["interval"]); interval != "" {
+			header += " interval=" + interval
+		}
 		lines := []string{header}
 
 		if summary := strings.TrimSpace(ev.Data["summary"]); summary != "" {
@@ -366,6 +378,18 @@ func formatEventLine(e types.EventRecord) string {
 	}
 	if v := strings.TrimSpace(e.Data["goal"]); v != "" {
 		line += " goal=" + truncateText(v, 40)
+	}
+	if v := strings.TrimSpace(e.Data["taskKind"]); v != "" {
+		line += " kind=" + v
+	}
+	if v := strings.TrimSpace(e.Data["source"]); v != "" {
+		line += " source=" + v
+	}
+	if v := strings.TrimSpace(e.Data["job"]); v != "" {
+		line += " job=" + truncateText(v, 40)
+	}
+	if v := strings.TrimSpace(e.Data["interval"]); v != "" {
+		line += " interval=" + v
 	}
 	if v := strings.TrimSpace(e.Data["status"]); v != "" {
 		line += " status=" + v

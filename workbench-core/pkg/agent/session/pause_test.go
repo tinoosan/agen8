@@ -9,6 +9,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/profile"
@@ -119,6 +120,32 @@ func (b *blockingAgent) CloneWithConfig(cfg agent.AgentConfig) (agent.Agent, err
 	return b, nil
 }
 
+type captureEventEmitter struct {
+	mu     sync.Mutex
+	events []events.Event
+}
+
+func (c *captureEventEmitter) Emit(_ context.Context, ev events.Event) error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, ev)
+	return nil
+}
+
+func (c *captureEventEmitter) firstByType(kind string) (events.Event, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, ev := range c.events {
+		if ev.Type == kind {
+			return ev, true
+		}
+	}
+	return events.Event{}, false
+}
+
 func TestSessionPausedSkipsPendingUntilResumed(t *testing.T) {
 	t.Parallel()
 
@@ -185,6 +212,87 @@ func TestSessionPausedSkipsPendingUntilResumed(t *testing.T) {
 
 	cancel()
 	<-done
+}
+
+func TestHeartbeatEventsIncludeIntervalAndSource(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Config{DataDir: t.TempDir()}
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+
+	em := &captureEventEmitter{}
+	runID := "run-heartbeat-events"
+	sessionID := "sess-heartbeat-events"
+	sess, err := New(Config{
+		Agent:        newFakeAgent(),
+		Profile:      &profile.Profile{ID: "general"},
+		TaskStore:    ts,
+		SessionID:    sessionID,
+		RunID:        runID,
+		InstanceID:   runID,
+		PollInterval: 20 * time.Millisecond,
+		Events:       em,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	job := profile.HeartbeatJob{Name: "pulse", Goal: "heartbeat", Interval: time.Hour}
+	sess.handleHeartbeat(context.Background(), job)
+
+	pending, err := ts.ListTasks(context.Background(), state.TaskFilter{
+		RunID:    runID,
+		Status:   []types.TaskStatus{types.TaskStatusPending},
+		TaskKind: state.TaskKindHeartbeat,
+		Limit:    10,
+		SortBy:   "created_at",
+		SortDesc: true,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending heartbeat tasks = %d want 1", len(pending))
+	}
+	if err := sess.runTask(context.Background(), pending[0].TaskID, pending[0]); err != nil {
+		t.Fatalf("runTask: %v", err)
+	}
+
+	hbQueued, ok := em.firstByType("task.heartbeat.enqueued")
+	if !ok {
+		t.Fatalf("expected task.heartbeat.enqueued event")
+	}
+	if got := hbQueued.Data["interval"]; got != "1h0m0s" {
+		t.Fatalf("heartbeat interval=%q want %q", got, "1h0m0s")
+	}
+
+	start, ok := em.firstByType("task.start")
+	if !ok {
+		t.Fatalf("expected task.start event")
+	}
+	if got := start.Data["source"]; got != "heartbeat" {
+		t.Fatalf("task.start source=%q want heartbeat", got)
+	}
+	if got := start.Data["taskKind"]; got != state.TaskKindHeartbeat {
+		t.Fatalf("task.start kind=%q want %q", got, state.TaskKindHeartbeat)
+	}
+
+	done, ok := em.firstByType("task.done")
+	if !ok {
+		t.Fatalf("expected task.done event")
+	}
+	if got := done.Data["source"]; got != "heartbeat" {
+		t.Fatalf("task.done source=%q want heartbeat", got)
+	}
+	if got := done.Data["taskKind"]; got != state.TaskKindHeartbeat {
+		t.Fatalf("task.done kind=%q want %q", got, state.TaskKindHeartbeat)
+	}
+	if _, ok := em.firstByType("task.heartbeat.done"); !ok {
+		t.Fatalf("expected task.heartbeat.done event")
+	}
 }
 
 func TestSessionPausedSkipsHeartbeatEnqueue(t *testing.T) {

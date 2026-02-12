@@ -313,6 +313,17 @@ func (s *Session) startHeartbeats(ctx context.Context) {
 		if j.Interval <= 0 {
 			continue
 		}
+		s.emitBestEffort(ctx, events.Event{
+			Type:    "task.heartbeat.configured",
+			Message: "Heartbeat job configured",
+			Data: map[string]string{
+				"profile":         s.activeProfile.ID,
+				"job":             strings.TrimSpace(j.Name),
+				"goal":            truncateText(strings.TrimSpace(j.Goal), 200),
+				"interval":        j.Interval.String(),
+				"intervalSeconds": fmt.Sprintf("%d", int64(j.Interval/time.Second)),
+			},
+		})
 		go func(out chan<- profile.HeartbeatJob) {
 			t := time.NewTicker(j.Interval)
 			defer t.Stop()
@@ -412,10 +423,12 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 		Status:         types.TaskStatusPending,
 		CreatedAt:      &now,
 		Metadata: map[string]any{
-			"source":  "heartbeat",
-			"profile": s.activeProfile.ID,
-			"job":     strings.TrimSpace(job.Name),
-			"window":  window,
+			"source":          "heartbeat",
+			"profile":         s.activeProfile.ID,
+			"job":             strings.TrimSpace(job.Name),
+			"window":          window,
+			"interval":        job.Interval.String(),
+			"intervalSeconds": int64(job.Interval / time.Second),
 		},
 	}
 	if strings.TrimSpace(task.TeamID) != "" {
@@ -430,7 +443,14 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 	s.emitBestEffort(ctx, events.Event{
 		Type:    "task.heartbeat.enqueued",
 		Message: "Heartbeat task enqueued",
-		Data:    map[string]string{"taskId": taskID, "profile": s.activeProfile.ID, "job": job.Name, "goal": truncateText(task.Goal, 200)},
+		Data: map[string]string{
+			"taskId":          taskID,
+			"profile":         s.activeProfile.ID,
+			"job":             strings.TrimSpace(job.Name),
+			"goal":            truncateText(task.Goal, 200),
+			"interval":        job.Interval.String(),
+			"intervalSeconds": fmt.Sprintf("%d", int64(job.Interval/time.Second)),
+		},
 	})
 	// Also emit the generic queued event so the monitor queue panel can display it.
 }
@@ -586,11 +606,54 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	task.ClaimedByAgentID = strings.TrimSpace(s.cfg.RunID)
 	_ = s.cfg.TaskStore.UpdateTask(ctx, task)
 
+	taskKind := strings.TrimSpace(task.TaskKind)
+	if taskKind == "" {
+		switch {
+		case strings.HasPrefix(strings.TrimSpace(task.TaskID), "heartbeat-"):
+			taskKind = state.TaskKindHeartbeat
+		case strings.HasPrefix(strings.TrimSpace(task.TaskID), "callback-"):
+			taskKind = state.TaskKindCallback
+		case strings.HasPrefix(strings.TrimSpace(task.TaskID), "task-"):
+			taskKind = state.TaskKindTask
+		}
+	}
+	taskSource := ""
+	taskHeartbeatJob := ""
+	taskHeartbeatInterval := ""
+	if task.Metadata != nil {
+		if raw, ok := task.Metadata["source"]; ok {
+			taskSource = strings.TrimSpace(fmt.Sprint(raw))
+		}
+		if raw, ok := task.Metadata["job"]; ok {
+			taskHeartbeatJob = strings.TrimSpace(fmt.Sprint(raw))
+		}
+		if raw, ok := task.Metadata["interval"]; ok {
+			taskHeartbeatInterval = strings.TrimSpace(fmt.Sprint(raw))
+		}
+	}
+	if taskSource == "" && strings.EqualFold(taskKind, state.TaskKindHeartbeat) {
+		taskSource = "heartbeat"
+	}
 	if s.cfg.Events != nil {
+		data := map[string]string{
+			"taskId":   taskID,
+			"profile":  s.activeProfile.ID,
+			"goal":     truncateText(task.Goal, 100),
+			"taskKind": taskKind,
+		}
+		if taskSource != "" {
+			data["source"] = taskSource
+		}
+		if taskHeartbeatJob != "" {
+			data["job"] = taskHeartbeatJob
+		}
+		if taskHeartbeatInterval != "" {
+			data["interval"] = taskHeartbeatInterval
+		}
 		s.emitBestEffort(ctx, events.Event{
 			Type:    "task.start",
 			Message: "Task started",
-			Data:    map[string]string{"taskId": taskID, "profile": s.activeProfile.ID, "goal": truncateText(task.Goal, 100)},
+			Data:    data,
 		})
 	}
 
@@ -766,7 +829,21 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 
 	// Emit completion events before updating task state (ordering).
 	if s.cfg.Events != nil {
-		data := map[string]string{"taskId": taskID, "status": string(tr.Status), "profile": s.activeProfile.ID}
+		data := map[string]string{
+			"taskId":   taskID,
+			"status":   string(tr.Status),
+			"profile":  s.activeProfile.ID,
+			"taskKind": taskKind,
+		}
+		if taskSource != "" {
+			data["source"] = taskSource
+		}
+		if taskHeartbeatJob != "" {
+			data["job"] = taskHeartbeatJob
+		}
+		if taskHeartbeatInterval != "" {
+			data["interval"] = taskHeartbeatInterval
+		}
 		if g := truncateText(task.Goal, 100); g != "" {
 			data["goal"] = g
 		}
@@ -790,6 +867,13 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			data["artifact0"] = tr.Artifacts[0]
 		}
 		s.emitBestEffort(ctx, events.Event{Type: "task.done", Message: "Task finished", Data: data})
+		if strings.EqualFold(taskSource, "heartbeat") {
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "task.heartbeat.done",
+				Message: "Heartbeat task finished",
+				Data:    data,
+			})
+		}
 		if len(tr.Artifacts) != 0 {
 			s.emitBestEffort(ctx, events.Event{Type: "task.delivered", Message: "Task outputs recorded", Data: map[string]string{"taskId": taskID, "count": fmt.Sprintf("%d", len(tr.Artifacts)), "summaryPath": tr.Artifacts[0]}})
 		}
