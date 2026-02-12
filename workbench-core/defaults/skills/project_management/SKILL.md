@@ -63,6 +63,7 @@ Use this skill when you are a coordinator responsible for driving outcomes throu
 - When multiple roles could handle a task, assign it to the most specialized one.
 - Escalate to the user only when you lack authority or information to unblock the team.
 - Keep task descriptions specific — vague delegation produces vague results.
+- Match delegation granularity to complexity — don't micro-manage simple tasks or under-specify complex ones.
 
 ## Quality checks
 
@@ -74,6 +75,131 @@ Use this skill when you are a coordinator responsible for driving outcomes throu
 - [ ] Blockers are identified and addressed promptly.
 - [ ] Final output synthesizes all role contributions into a coherent deliverable.
 
+## Templates
+
+### Delegation Brief
+```markdown
+## Task: <Clear, specific title>
+
+**Assigned to**: <role-name>
+**Priority**: High/Medium/Low
+**Depends on**: <other task or "none">
+
+### Goal
+<What needs to be accomplished and why it matters to the overall objective>
+
+### Acceptance Criteria
+- [ ] <Specific, testable criterion>
+- [ ] <Specific, testable criterion>
+- [ ] <Specific, testable criterion>
+
+### Context
+<Background info the role needs to do this well>
+
+### Constraints
+- <Time, scope, format, or source constraints>
+
+### Expected Output
+<What the deliverable should look like>
+```
+
+### Milestone Tracker
+```markdown
+# Project: <Name>
+
+## Milestone 1: <Name>
+**Status**: Complete / In Progress / Not Started
+**Target**: <Date or condition>
+
+| Task | Owner | Status | Notes |
+|------|-------|--------|-------|
+| <task> | <role> | Done/WIP/Blocked | <context> |
+
+## Milestone 2: <Name>
+...
+
+## Blockers
+| Blocker | Impact | Owner | Resolution |
+|---------|--------|-------|------------|
+| <what> | <which tasks affected> | <who can fix> | <plan> |
+```
+
+### Status Update
+```markdown
+# Status: <Project Name> — <Date>
+
+## Progress
+- **Completed**: <what's done since last update>
+- **In Progress**: <what's being worked on>
+- **Blocked**: <what's stuck and why>
+
+## Key Decisions
+- <Decision made and rationale>
+
+## Next Steps
+- <What happens next, assigned to whom>
+
+## Risk Watch
+- <Emerging risks or concerns>
+```
+
+## Example
+
+**Goal**: "Research and recommend a pricing strategy for our new product"
+
+**Decomposition**:
+```
+Milestone 1: Research (parallel)
+├── Task 1: Competitive pricing analysis → market-researcher
+├── Task 2: Cost structure breakdown → data-analyst
+└── Task 3: Customer willingness-to-pay research → market-researcher
+
+Milestone 2: Analysis (after M1)
+├── Task 4: Model 3 pricing scenarios → strategy-analyst
+└── Task 5: Sensitivity analysis on key variables → data-analyst
+
+Milestone 3: Deliverable (after M2)
+└── Task 6: Pricing recommendation memo → deliverable-writer
+```
+
+**Delegation**: Tasks 1-3 run in parallel. Tasks 4-5 depend on M1 completion. Task 6 depends on M2. Total: 3 phases, 6 tasks, 3 roles.
+
+## Advanced Techniques
+
+### Dependency management
+Map task dependencies to find the critical path:
+```
+Task A (2 days) → Task C (1 day) → Task E (2 days) = 5 days
+Task B (3 days) → Task D (1 day) ─────────────────→ = 4 days
+Critical path: A → C → E (5 days minimum)
+Task B and D can run in parallel without affecting timeline.
+```
+
+### Progressive delegation
+For uncertain work, delegate in waves:
+1. **Wave 1**: Research and scoping tasks (low commitment)
+2. **Review**: Assess findings, adjust plan if needed
+3. **Wave 2**: Execution tasks based on Wave 1 results
+4. **Review**: Quality check against acceptance criteria
+5. **Wave 3**: Polish and synthesis
+
+This prevents wasted work when early findings change the direction.
+
+### Callback quality assessment
+When reviewing specialist callbacks, check:
+- **Completeness**: Does it address all acceptance criteria?
+- **Evidence**: Are claims supported with data or sources?
+- **Actionability**: Can the output be used directly or does it need refinement?
+- **Consistency**: Does it align with outputs from other roles?
+
+If quality is insufficient, create a focused follow-up specifying exactly what's missing — not a vague "do better."
+
+### Resource balancing
+When one role is overloaded:
+- Resequence: Move non-urgent tasks to later waves
+- Redistribute: Assign tasks to roles with capacity (if capable)
+- Decompose: Break large tasks into smaller pieces that multiple roles can work on
+
 ## Anti-patterns to avoid
 
 - **Doing the work yourself** — Coordinators who execute specialist tasks create bottlenecks and underuse their team.
@@ -82,6 +208,7 @@ Use this skill when you are a coordinator responsible for driving outcomes throu
 - **Vague delegation** — "Look into X" produces inconsistent results. Be specific about what you need.
 - **Serial execution bias** — Running everything sequentially when tasks could be parallelized wastes time.
 - **Ignoring quality** — Accepting the first callback without reviewing against acceptance criteria leads to weak final output.
+- **Scope creep via delegation** — Adding "while you're at it" tasks to every delegation slowly expands scope beyond the original goal.
 
 ## When NOT to use this skill
 
