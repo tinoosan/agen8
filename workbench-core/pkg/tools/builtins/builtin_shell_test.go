@@ -342,6 +342,32 @@ func TestBuiltinShellInvoker_BlocksUnknownAbsolutePathInBashCommand(t *testing.T
 	}
 }
 
+func TestBuiltinShellInvoker_AllowsAbsoluteExecutableInBashCommand(t *testing.T) {
+	projectDir := t.TempDir()
+	workspaceDir := t.TempDir()
+	inv := NewBuiltinShellInvoker(projectDir, nil, "project")
+	inv.MountRoots["workspace"] = workspaceDir
+
+	req := toolReq(t, shellExecInput{
+		Argv: []string{"bash", "-c", "cd /workspace && /bin/bash -lc 'pwd'"},
+		Cwd:  ".",
+	})
+	res, err := inv.Invoke(context.Background(), req)
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	var out shellExecOutput
+	if err := json.Unmarshal(res.Output, &out); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if out.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stderr=%q", out.ExitCode, out.Stderr)
+	}
+	if !strings.Contains(out.Stdout, "/workspace") {
+		t.Fatalf("expected workspace in output, got %q", out.Stdout)
+	}
+}
+
 func toolReq(t *testing.T, in shellExecInput) pkgtools.ToolRequest {
 	t.Helper()
 	raw, err := json.Marshal(in)
