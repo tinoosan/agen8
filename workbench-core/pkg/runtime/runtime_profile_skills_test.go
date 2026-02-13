@@ -16,7 +16,7 @@ func TestResolveProfileSkills_FromProfileConfig(t *testing.T) {
 			Skills: []string{"coding", "planning"},
 			Team: &profile.TeamConfig{
 				Roles: []profile.RoleConfig{
-					{Name: "backend", Skills: []string{"coding", "data_engineering"}},
+					{Name: "backend", Skills: []string{"coding", "data-engineering"}},
 					{Name: "qa", Skills: []string{"automation", "coding"}},
 				},
 			},
@@ -24,7 +24,7 @@ func TestResolveProfileSkills_FromProfileConfig(t *testing.T) {
 	}
 
 	got := resolveProfileSkills(cfg)
-	want := []string{"coding", "planning", "data_engineering", "automation"}
+	want := []string{"coding", "planning", "data-engineering", "automation"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("skills mismatch: got %v want %v", got, want)
 	}

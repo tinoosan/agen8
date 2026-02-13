@@ -14,7 +14,7 @@ import (
 func TestBuiltinShellInvoker_AllowsSkillsMountCwd(t *testing.T) {
 	projectDir := t.TempDir()
 	skillsDir := t.TempDir()
-	scriptDir := filepath.Join(skillsDir, "data_engineering", "scripts")
+	scriptDir := filepath.Join(skillsDir, "data-engineering", "scripts")
 	if err := writeExecutable(scriptDir, "echo_json.sh", "#!/usr/bin/env bash\necho '{\"ok\":true}'\n"); err != nil {
 		t.Fatalf("write script: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestBuiltinShellInvoker_AllowsSkillsMountCwd(t *testing.T) {
 
 	req := toolReq(t, shellExecInput{
 		Argv: []string{"bash", "-c", "./echo_json.sh"},
-		Cwd:  "/skills/data_engineering/scripts",
+		Cwd:  "/skills/data-engineering/scripts",
 	})
 	res, err := inv.Invoke(context.Background(), req)
 	if err != nil {
@@ -74,7 +74,7 @@ func TestBuiltinShellInvoker_AllowsWorkspaceMountCwd(t *testing.T) {
 func TestBuiltinShellInvoker_NormalizesDuplicateScriptsPrefix(t *testing.T) {
 	projectDir := t.TempDir()
 	skillsDir := t.TempDir()
-	scriptDir := filepath.Join(skillsDir, "data_engineering", "scripts")
+	scriptDir := filepath.Join(skillsDir, "data-engineering", "scripts")
 	if err := writeExecutable(scriptDir, "hello.py", "#!/usr/bin/env python3\nprint('ok')\n"); err != nil {
 		t.Fatalf("write script: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestBuiltinShellInvoker_NormalizesDuplicateScriptsPrefix(t *testing.T) {
 
 	req := toolReq(t, shellExecInput{
 		Argv: []string{"bash", "-c", "python3 scripts/hello.py"},
-		Cwd:  "/skills/data_engineering/scripts",
+		Cwd:  "/skills/data-engineering/scripts",
 	})
 	res, err := inv.Invoke(context.Background(), req)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestBuiltinShellInvoker_NormalizesDuplicateScriptsPrefix(t *testing.T) {
 func TestBuiltinShellInvoker_NormalizesAbsoluteSkillsScriptPath(t *testing.T) {
 	projectDir := t.TempDir()
 	skillsDir := t.TempDir()
-	scriptDir := filepath.Join(skillsDir, "data_engineering", "scripts")
+	scriptDir := filepath.Join(skillsDir, "data-engineering", "scripts")
 	if err := writeExecutable(scriptDir, "hello.py", "#!/usr/bin/env python3\nprint('ok')\n"); err != nil {
 		t.Fatalf("write script: %v", err)
 	}
@@ -118,8 +118,8 @@ func TestBuiltinShellInvoker_NormalizesAbsoluteSkillsScriptPath(t *testing.T) {
 	inv.MountRoots["skills"] = skillsDir
 
 	req := toolReq(t, shellExecInput{
-		Argv: []string{"bash", "-c", "python3 /skills/data_engineering/scripts/hello.py"},
-		Cwd:  "/skills/data_engineering/scripts",
+		Argv: []string{"bash", "-c", "python3 /skills/data-engineering/scripts/hello.py"},
+		Cwd:  "/skills/data-engineering/scripts",
 	})
 	res, err := inv.Invoke(context.Background(), req)
 	if err != nil {
@@ -144,7 +144,7 @@ func TestBuiltinShellInvoker_NormalizesAbsoluteSkillsScriptPath(t *testing.T) {
 func TestBuiltinShellInvoker_ProvidesScriptHintOnFailure(t *testing.T) {
 	projectDir := t.TempDir()
 	skillsDir := t.TempDir()
-	scriptDir := filepath.Join(skillsDir, "data_engineering", "scripts")
+	scriptDir := filepath.Join(skillsDir, "data-engineering", "scripts")
 	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
 		t.Fatalf("mkdir script dir: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestBuiltinShellInvoker_ProvidesScriptHintOnFailure(t *testing.T) {
 
 	req := toolReq(t, shellExecInput{
 		Argv: []string{"bash", "-c", "python3 scripts/missing.py"},
-		Cwd:  "/skills/data_engineering/scripts",
+		Cwd:  "/skills/data-engineering/scripts",
 	})
 	res, err := inv.Invoke(context.Background(), req)
 	if err != nil {
@@ -177,7 +177,7 @@ func TestBuiltinShellInvoker_ProvidesScriptHintOnFailure(t *testing.T) {
 func TestBuiltinShellInvoker_RetriesOnceAfterFailureNormalization(t *testing.T) {
 	projectDir := t.TempDir()
 	skillsDir := t.TempDir()
-	scriptDir := filepath.Join(skillsDir, "data_engineering", "scripts")
+	scriptDir := filepath.Join(skillsDir, "data-engineering", "scripts")
 	if err := writeExecutable(scriptDir, "hello.py", "#!/usr/bin/env python3\nprint('ok')\n"); err != nil {
 		t.Fatalf("write script: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestBuiltinShellInvoker_RetriesOnceAfterFailureNormalization(t *testing.T) 
 	// Intentionally wrong skill path in command; retry should normalize from failure diagnostics.
 	req := toolReq(t, shellExecInput{
 		Argv: []string{"bash", "-c", "python3 /skills/other/scripts/hello.py"},
-		Cwd:  "/skills/data_engineering/scripts",
+		Cwd:  "/skills/data-engineering/scripts",
 	})
 	res, err := inv.Invoke(context.Background(), req)
 	if err != nil {

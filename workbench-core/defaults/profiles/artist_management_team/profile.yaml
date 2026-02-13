@@ -9,7 +9,7 @@ team:
       prompts:
         system_prompt_path: artist-manager-prompt.md
       skills:
-        - project_management
+        - project-management
         - reporting
       heartbeat:
         - name: coordinator-check-in
@@ -25,7 +25,7 @@ team:
         system_prompt_path: marketing-strategist-prompt.md
       skills:
         - planning
-        - hybrid_web
+        - hybrid-web
         - reporting
         - automation
 
@@ -43,7 +43,7 @@ team:
       prompts:
         system_prompt_path: business-manager-prompt.md
       skills:
-        - financial_analysis
+        - financial-analysis
         - planning
         - reporting
 
@@ -53,7 +53,7 @@ team:
         system_prompt_path: creative-director-prompt.md
       skills:
         - planning
-        - hybrid_web
+        - hybrid-web
         - reporting
 
     - name: touring-events-manager
@@ -63,4 +63,4 @@ team:
       skills:
         - planning
         - automation
-        - financial_analysis
+        - financial-analysis

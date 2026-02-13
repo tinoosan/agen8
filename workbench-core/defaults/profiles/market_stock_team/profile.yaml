@@ -9,7 +9,7 @@ team:
       prompts:
         system_prompt_path: head-analyst-prompt.md
       skills:
-        - project_management
+        - project-management
         - reporting
       heartbeat:
         - name: coordinator-check-in
@@ -25,8 +25,8 @@ team:
         system_prompt_path: market-researcher-prompt.md
       skills:
         - planning
-        - market_monitoring
-        - hybrid_web
+        - market-monitoring
+        - hybrid-web
 
     - name: stock-researcher
       description: Analyzes company fundamentals, catalysts, and valuation signals.
@@ -34,8 +34,8 @@ team:
         system_prompt_path: stock-researcher-prompt.md
       skills:
         - planning
-        - financial_analysis
-        - market_monitoring
+        - financial-analysis
+        - market-monitoring
 
     - name: report-writer
       description: Produces concise final reports and executive-ready summaries.
@@ -50,7 +50,7 @@ team:
       prompts:
         system_prompt_path: risk-analyst-prompt.md
       skills:
-        - financial_analysis
+        - financial-analysis
         - planning
         - reporting
 
@@ -59,6 +59,6 @@ team:
       prompts:
         system_prompt_path: quant-researcher-prompt.md
       skills:
-        - data_engineering
+        - data-engineering
         - planning
         - automation

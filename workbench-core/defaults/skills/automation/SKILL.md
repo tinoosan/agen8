@@ -257,7 +257,7 @@ Only act when something actually changed:
 
 ## Scripts
 
-This skill includes utility scripts in the `scripts/` directory and examples in `examples/`.
+This skill includes utility scripts in the `scripts/` directory and templates in `assets/`.
 
 ### Utilities
 
@@ -271,7 +271,7 @@ This skill includes utility scripts in the `scripts/` directory and examples in 
 
 | Example | Purpose |
 |---------|---------|
-| `examples/daily_report.sh` | Template for a daily automated report workflow |
+| `assets/daily_report.sh` | Template for a daily automated report workflow |
 
 **Health check modes**: HTTP endpoint, TCP port, PID file, arbitrary command, or JSON config for batch checks.
 

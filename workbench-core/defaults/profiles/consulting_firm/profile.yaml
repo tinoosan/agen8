@@ -9,7 +9,7 @@ team:
       prompts:
         system_prompt_path: managing-partner-prompt.md
       skills:
-        - project_management
+        - project-management
         - reporting
       heartbeat:
         - name: coordinator-check-in
@@ -25,7 +25,7 @@ team:
         system_prompt_path: strategy-analyst-prompt.md
       skills:
         - planning
-        - financial_analysis
+        - financial-analysis
         - reporting
 
     - name: market-researcher
@@ -33,8 +33,8 @@ team:
       prompts:
         system_prompt_path: market-researcher-prompt.md
       skills:
-        - hybrid_web
-        - market_monitoring
+        - hybrid-web
+        - market-monitoring
         - planning
 
     - name: data-analyst
@@ -42,7 +42,7 @@ team:
       prompts:
         system_prompt_path: data-analyst-prompt.md
       skills:
-        - data_engineering
+        - data-engineering
         - planning
         - automation
 
@@ -59,6 +59,6 @@ team:
       prompts:
         system_prompt_path: industry-specialist-prompt.md
       skills:
-        - hybrid_web
+        - hybrid-web
         - planning
         - reporting

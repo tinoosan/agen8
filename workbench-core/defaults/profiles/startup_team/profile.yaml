@@ -9,7 +9,7 @@ team:
       prompts:
         system_prompt_path: ceo-prompt.md
       skills:
-        - project_management
+        - project-management
         - reporting
       heartbeat:
         - name: coordinator-check-in
@@ -34,8 +34,8 @@ team:
         system_prompt_path: growth-lead-prompt.md
       skills:
         - planning
-        - hybrid_web
-        - market_monitoring
+        - hybrid-web
+        - market-monitoring
         - automation
 
     - name: finance-ops
@@ -43,7 +43,7 @@ team:
       prompts:
         system_prompt_path: finance-ops-prompt.md
       skills:
-        - financial_analysis
+        - financial-analysis
         - planning
         - reporting
 
@@ -53,7 +53,7 @@ team:
         system_prompt_path: designer-prompt.md
       skills:
         - planning
-        - hybrid_web
+        - hybrid-web
         - reporting
 
     - name: operations-lead

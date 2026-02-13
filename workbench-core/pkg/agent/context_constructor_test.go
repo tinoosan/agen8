@@ -100,11 +100,11 @@ func TestPromptBuilder_IncludesSkillScriptsManifest(t *testing.T) {
 		}
 	}
 
-	writeSkill("market_monitoring")
-	writeSkill("data_engineering")
-	writeScript("market_monitoring", "price_check.sh")
-	writeScript("data_engineering", "csv_validate.py")
-	writeScript("data_engineering", "db_connect.py")
+	writeSkill("market-monitoring")
+	writeSkill("data-engineering")
+	writeScript("market-monitoring", "price_check.sh")
+	writeScript("data-engineering", "csv_validate.py")
+	writeScript("data-engineering", "db_connect.py")
 
 	mgr := skills.NewManager([]string{skillsDir})
 	if err := mgr.Scan(); err != nil {
@@ -123,11 +123,11 @@ func TestPromptBuilder_IncludesSkillScriptsManifest(t *testing.T) {
 	if !strings.Contains(out, "<skill_scripts>") {
 		t.Fatalf("expected skill_scripts block, got: %q", out)
 	}
-	if !strings.Contains(out, "data_engineering: csv_validate.py, db_connect.py") {
-		t.Fatalf("expected data_engineering scripts, got: %q", out)
+	if !strings.Contains(out, "data-engineering: csv_validate.py, db_connect.py") {
+		t.Fatalf("expected data-engineering scripts, got: %q", out)
 	}
-	if !strings.Contains(out, "market_monitoring: price_check.sh") {
-		t.Fatalf("expected market_monitoring scripts, got: %q", out)
+	if !strings.Contains(out, "market-monitoring: price_check.sh") {
+		t.Fatalf("expected market-monitoring scripts, got: %q", out)
 	}
 }
 

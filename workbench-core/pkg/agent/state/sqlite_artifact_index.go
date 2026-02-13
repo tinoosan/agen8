@@ -86,16 +86,7 @@ func standaloneIndexedArtifactVPath(vpath string) bool {
 		return false
 	}
 	rel := strings.TrimSpace(strings.TrimPrefix(vpath, "/workspace/"))
-	if rel == "" {
-		return false
-	}
-	if strings.HasPrefix(rel, "tasks/") || strings.HasPrefix(rel, "deliverables/") {
-		base := strings.TrimSpace(filepath.Base(rel))
-		if strings.EqualFold(base, "SUMMARY.md") {
-			return false
-		}
-	}
-	return true
+	return rel != ""
 }
 
 func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, task types.Task, result types.TaskResult) error {
@@ -491,7 +482,6 @@ func (s *SQLiteTaskStore) backfillArtifactIndex(ctx context.Context, db *sql.DB)
 		FROM tasks
 		WHERE COALESCE(artifacts_json, '[]') != '[]'
 		  AND status IN ('succeeded', 'failed', 'canceled')
-		  AND NOT EXISTS (SELECT 1 FROM artifacts a WHERE a.task_id = tasks.task_id)
 	`)
 	if err != nil {
 		return err
@@ -549,6 +539,31 @@ func (s *SQLiteTaskStore) backfillArtifactIndex(ctx context.Context, db *sql.DB)
 		`, taskKind, role, now, row.taskID); err != nil {
 			return err
 		}
+		existingRows, err := tx.QueryContext(ctx, `
+			SELECT LOWER(COALESCE(vpath, ''))
+			FROM artifacts
+			WHERE task_id = ?
+		`, row.taskID)
+		if err != nil {
+			return err
+		}
+		existing := map[string]struct{}{}
+		for existingRows.Next() {
+			var v string
+			if err := existingRows.Scan(&v); err != nil {
+				_ = existingRows.Close()
+				return err
+			}
+			v = strings.TrimSpace(v)
+			if v != "" {
+				existing[v] = struct{}{}
+			}
+		}
+		if err := existingRows.Err(); err != nil {
+			_ = existingRows.Close()
+			return err
+		}
+		_ = existingRows.Close()
 		var artifacts []string
 		_ = json.Unmarshal([]byte(row.artifactsRaw), &artifacts)
 		finished := parseTime(row.finishedRaw)
@@ -563,10 +578,16 @@ func (s *SQLiteTaskStore) backfillArtifactIndex(ctx context.Context, db *sql.DB)
 			if vpath == "" {
 				continue
 			}
+			if row.teamID == "" && !standaloneIndexedArtifactVPath(vpath) {
+				continue
+			}
 			if _, ok := seen[strings.ToLower(vpath)]; ok {
 				continue
 			}
 			seen[strings.ToLower(vpath)] = struct{}{}
+			if _, ok := existing[strings.ToLower(vpath)]; ok {
+				continue
+			}
 			name := filepath.Base(vpath)
 			if name == "" || name == "." || name == "/" {
 				name = vpath

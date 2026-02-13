@@ -530,9 +530,29 @@ func firstDisallowedAbsPathInShell(cmd string, mountRoots map[string]string) str
 		if isAllowedAbsolutePathArg(candidate, mountRoots) {
 			continue
 		}
+		if isAllowedSystemAbsolutePath(candidate) {
+			continue
+		}
 		return candidate
 	}
 	return ""
+}
+
+func isAllowedSystemAbsolutePath(path string) bool {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "" || !strings.HasPrefix(path, "/") {
+		return false
+	}
+	// Allow common device paths used in redirects.
+	if path == "/dev/null" || strings.HasPrefix(path, "/dev/fd/") || path == "/dev/stdin" || path == "/dev/stdout" || path == "/dev/stderr" {
+		return true
+	}
+	// Allow absolute executable invocations (e.g. /bin/bash, /usr/bin/env).
+	st, err := os.Stat(path)
+	if err != nil || st.IsDir() {
+		return false
+	}
+	return st.Mode().Perm()&0o111 != 0
 }
 
 func runShellCommand(ctx context.Context, cmdName string, args []string, absDir, stdin string) (stdout string, stderr string, exitCode int, err error) {

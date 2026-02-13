@@ -5,7 +5,7 @@ skills:
   - reporting
   - acting
   - planning
-  - data_engineering
+  - data-engineering
 prompts:
   system_prompt_path: prompt.md
 heartbeat:

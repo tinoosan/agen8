@@ -1,5 +1,5 @@
 ---
-name: Market Monitoring
+name: market-monitoring
 description: Track markets, industries, competitors, and trends systematically — surfacing signals, changes, and actionable updates.
 ---
 
@@ -214,8 +214,8 @@ Match monitoring cadence to signal velocity:
 
 ## When NOT to use
 
-- One-time research (use hybrid_web or planning)
-- Deep financial analysis on a single entity (use financial_analysis)
+- One-time research (use hybrid-web or planning)
+- Deep financial analysis on a single entity (use financial-analysis)
 - Writing up findings for stakeholders (use reporting)
 - Building a strategy from scratch (use planning)
 

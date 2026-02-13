@@ -9,7 +9,7 @@ team:
       prompts:
         system_prompt_path: editor-in-chief-prompt.md
       skills:
-        - project_management
+        - project-management
         - reporting
       heartbeat:
         - name: coordinator-check-in
@@ -33,8 +33,8 @@ team:
         system_prompt_path: researcher-prompt.md
       skills:
         - planning
-        - hybrid_web
-        - market_monitoring
+        - hybrid-web
+        - market-monitoring
 
     - name: distribution-strategist
       description: Plans and executes content distribution across channels for maximum reach.
@@ -43,7 +43,7 @@ team:
       skills:
         - planning
         - automation
-        - market_monitoring
+        - market-monitoring
 
     - name: seo-specialist
       description: Optimizes content for search engines — keyword research, on-page SEO, and performance tracking.
@@ -51,7 +51,7 @@ team:
         system_prompt_path: seo-specialist-prompt.md
       skills:
         - planning
-        - hybrid_web
+        - hybrid-web
         - automation
 
     - name: social-media-manager

@@ -1,5 +1,5 @@
 ---
-name: Project Management
+name: project-management
 description: Orchestrate multi-role teams by decomposing goals, delegating work, tracking progress, and resolving blockers.
 ---
 

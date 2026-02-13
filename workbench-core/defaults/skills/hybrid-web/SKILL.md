@@ -1,5 +1,5 @@
 ---
-name: Hybrid Web Research
+name: hybrid-web
 description: Coordinate http_fetch and browser sessions to research, gather data, and interact with web experiences efficiently.
 ---
 

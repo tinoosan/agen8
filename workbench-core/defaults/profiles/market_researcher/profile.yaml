@@ -1,9 +1,9 @@
 id: market_researcher
 description: Focused profile for macro and sector market research.
 skills:
-  - market_monitoring
+  - market-monitoring
   - reporting
-  - hybrid_web
+  - hybrid-web
 prompts:
   system_prompt_path: prompt.md
 heartbeat:

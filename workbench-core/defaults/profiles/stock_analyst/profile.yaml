@@ -1,8 +1,8 @@
 id: stock_analyst
 description: Research-focused profile for public markets analysis and monitoring.
 skills:
-  - financial_analysis
-  - market_monitoring
+  - financial-analysis
+  - market-monitoring
   - reporting
 prompts:
   system_prompt_path: prompt.md

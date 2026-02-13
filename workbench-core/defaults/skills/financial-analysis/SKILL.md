@@ -1,5 +1,5 @@
 ---
-name: Financial Analysis
+name: financial-analysis
 description: Evaluate financial performance, model economics, assess deals, and support decisions with data-driven financial frameworks.
 ---
 
@@ -238,7 +238,7 @@ When direct data is unavailable, use comparables:
 
 - Quick back-of-envelope math (just do it)
 - Purely qualitative assessments (use planning or reporting)
-- Non-financial research (use hybrid_web or market_monitoring)
+- Non-financial research (use hybrid-web or market-monitoring)
 
 ## Scripts
 

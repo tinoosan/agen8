@@ -1,8 +1,8 @@
 id: stock_researcher
 description: Focused profile for equity and company-level stock research.
 skills:
-  - financial_analysis
-  - market_monitoring
+  - financial-analysis
+  - market-monitoring
   - reporting
 prompts:
   system_prompt_path: prompt.md
