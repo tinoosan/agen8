@@ -4,9 +4,12 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	implstore "github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -133,5 +136,68 @@ func TestRuntimeSupervisor_StopSession_StopsOnlySessionRuns(t *testing.T) {
 	}
 	if loadedB.Status != types.RunStatusRunning {
 		t.Fatalf("runB status=%q want %q", loadedB.Status, types.RunStatusRunning)
+	}
+}
+
+func TestRuntimeSupervisor_PauseRun_CancelsWorkerAndActiveTasks(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	_, run, err := implstore.CreateSession(cfg, "pause run", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := ts.CreateTask(context.Background(), types.Task{
+		TaskID:         "task-active",
+		SessionID:      run.SessionID,
+		RunID:          run.RunID,
+		AssignedToType: "agent",
+		AssignedTo:     run.RunID,
+		Goal:           "work",
+		Status:         types.TaskStatusActive,
+		CreatedAt:      &now,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	var mu sync.Mutex
+	cancelCalled := false
+	done := make(chan struct{})
+	supervisor := &runtimeSupervisor{
+		cfg:       cfg,
+		taskStore: ts,
+		workers: map[string]*managedRuntime{
+			run.RunID: {
+				runID:     run.RunID,
+				sessionID: run.SessionID,
+				cancel: func() {
+					mu.Lock()
+					cancelCalled = true
+					mu.Unlock()
+					close(done)
+				},
+				done: done,
+			},
+		},
+	}
+
+	if err := supervisor.PauseRun(run.RunID); err != nil {
+		t.Fatalf("PauseRun: %v", err)
+	}
+	mu.Lock()
+	gotCancel := cancelCalled
+	mu.Unlock()
+	if !gotCancel {
+		t.Fatalf("expected worker cancel to be called")
+	}
+	loadedTask, err := ts.GetTask(context.Background(), "task-active")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if loadedTask.Status != types.TaskStatusCanceled {
+		t.Fatalf("task status=%q want %q", loadedTask.Status, types.TaskStatusCanceled)
 	}
 }

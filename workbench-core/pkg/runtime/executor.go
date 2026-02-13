@@ -457,6 +457,20 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	}
 	if resp.Op == types.HostOpShellExec {
 		meta.RespData["exitCode"] = strconv.Itoa(resp.ExitCode)
+		meta.RespData["vfsPathTranslated"] = fmtBool(resp.VFSPathTranslated)
+		meta.StoreResp["vfsPathTranslated"] = fmtBool(resp.VFSPathTranslated)
+		if mounts := strings.TrimSpace(resp.VFSPathMounts); mounts != "" {
+			meta.RespData["vfsPathMounts"] = mounts
+			meta.StoreResp["vfsPathMounts"] = mounts
+		}
+		meta.RespData["scriptPathNormalized"] = fmtBool(resp.ScriptPathNormalized)
+		anti := strings.TrimSpace(resp.ScriptAntiPattern)
+		if anti == "" {
+			anti = "none"
+		}
+		meta.RespData["scriptAntiPattern"] = anti
+		meta.StoreResp["scriptPathNormalized"] = fmtBool(resp.ScriptPathNormalized)
+		meta.StoreResp["scriptAntiPattern"] = anti
 		if resp.Stdout != "" {
 			s, tr := capBytes(resp.Stdout, 1000)
 			meta.RespData["stdout"] = s
@@ -469,6 +483,14 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 			meta.RespData["stderr"] = s
 			if tr {
 				meta.RespData["stderrTruncated"] = "true"
+			}
+		}
+		if strings.TrimSpace(resp.Warning) != "" {
+			if s, tr := capBytes(resp.Warning, 300); s != "" {
+				meta.RespData["warning"] = s
+				if tr {
+					meta.RespData["warningTruncated"] = "true"
+				}
 			}
 		}
 	}

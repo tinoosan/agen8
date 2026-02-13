@@ -3,18 +3,21 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/events"
+	"github.com/tinoosan/workbench-core/pkg/skills"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
 )
 
 // PromptBuilder assembles a minimal prompt context for autonomous runs.
-// It intentionally avoids session history, trace summaries, and skill metadata.
+// It intentionally avoids session history and trace summaries.
 type PromptBuilder struct {
-	FS *vfs.FS
+	FS     *vfs.FS
+	Skills *skills.Manager
 
 	MaxMemoryBytes int
 
@@ -42,6 +45,9 @@ func (c *PromptBuilder) SystemPrompt(ctx context.Context, basePrompt string, ste
 	mem := strings.TrimSpace(c.readCap(memPath, maxMem))
 	if mem != "" && maxMem != 0 {
 		sections = append(sections, "## Memory\n\n"+mem)
+	}
+	if scripts := strings.TrimSpace(c.skillScriptsManifest()); scripts != "" {
+		sections = append(sections, scripts)
 	}
 
 	out := strings.TrimSpace(strings.Join(nonEmpty(sections), "\n\n")) + "\n"
@@ -83,4 +89,38 @@ func nonEmpty(parts []string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+func (c *PromptBuilder) skillScriptsManifest() string {
+	if c == nil || c.Skills == nil {
+		return ""
+	}
+	manifest := c.Skills.ScriptsManifest()
+	if len(manifest) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(manifest))
+	for _, item := range manifest {
+		if strings.TrimSpace(item.Skill) == "" || len(item.Scripts) == 0 {
+			continue
+		}
+		scriptNames := make([]string, 0, len(item.Scripts))
+		for _, script := range item.Scripts {
+			name := strings.TrimSpace(script.Name)
+			if name == "" {
+				continue
+			}
+			scriptNames = append(scriptNames, name)
+		}
+		if len(scriptNames) == 0 {
+			continue
+		}
+		sort.Strings(scriptNames)
+		lines = append(lines, fmt.Sprintf("%s: %s", item.Skill, strings.Join(scriptNames, ", ")))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	sort.Strings(lines)
+	return "<skill_scripts>\n" + strings.Join(lines, "\n") + "\n</skill_scripts>"
 }

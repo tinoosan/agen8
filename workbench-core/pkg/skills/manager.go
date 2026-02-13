@@ -21,9 +21,10 @@ type SkillEntry struct {
 }
 
 type Manager struct {
-	roots       []string
-	WritableRoot string
-	entries     map[string]*Skill
+	roots         []string
+	WritableRoot  string
+	entries       map[string]*Skill
+	AllowedSkills []string // when non-empty, only these skill names are visible
 }
 
 func NewManager(roots []string) *Manager {
@@ -96,8 +97,14 @@ func (m *Manager) Entries() []SkillEntry {
 	if len(m.entries) == 0 {
 		return nil
 	}
+	allowed := m.allowedSet()
 	dirs := make([]string, 0, len(m.entries))
 	for dir := range m.entries {
+		if len(allowed) > 0 {
+			if _, ok := allowed[dir]; !ok {
+				continue
+			}
+		}
 		dirs = append(dirs, dir)
 	}
 	sort.Strings(dirs)
@@ -112,8 +119,89 @@ func (m *Manager) Entries() []SkillEntry {
 }
 
 func (m *Manager) Get(dir string) (*Skill, bool) {
+	if !m.isAllowed(dir) {
+		return nil, false
+	}
 	skill, ok := m.entries[dir]
 	return skill, ok
+}
+
+func (m *Manager) ScriptsManifest() []SkillScripts {
+	entries := m.Entries()
+	if len(entries) == 0 {
+		return nil
+	}
+
+	out := make([]SkillScripts, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Skill == nil || strings.TrimSpace(entry.Skill.Dir) == "" {
+			continue
+		}
+		scriptsDir := filepath.Join(entry.Skill.Dir, "scripts")
+		des, err := os.ReadDir(scriptsDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			continue
+		}
+
+		scripts := make([]ScriptEntry, 0, len(des))
+		for _, de := range des {
+			if de.IsDir() {
+				continue
+			}
+			name := strings.TrimSpace(de.Name())
+			if name == "" || strings.HasPrefix(name, ".") {
+				continue
+			}
+			info, err := de.Info()
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			scripts = append(scripts, ScriptEntry{
+				Name: name,
+				Rel:  filepath.ToSlash(filepath.Join("scripts", name)),
+			})
+		}
+		if len(scripts) == 0 {
+			continue
+		}
+		sort.Slice(scripts, func(i, j int) bool { return scripts[i].Name < scripts[j].Name })
+		out = append(out, SkillScripts{
+			Skill:   entry.Dir,
+			Scripts: scripts,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Skill < out[j].Skill })
+	return out
+}
+
+func (m *Manager) allowedSet() map[string]struct{} {
+	if len(m.AllowedSkills) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(m.AllowedSkills))
+	for _, name := range m.AllowedSkills {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		allowed[name] = struct{}{}
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	return allowed
+}
+
+func (m *Manager) isAllowed(dir string) bool {
+	allowed := m.allowedSet()
+	if len(allowed) == 0 {
+		return true
+	}
+	_, ok := allowed[dir]
+	return ok
 }
 
 func (m *Manager) loadSkillFile(skillName, skillDir, skillFilePath string) (*Skill, error) {

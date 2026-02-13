@@ -489,6 +489,7 @@ func DefaultSystemPrompt() string {
       <op name="trace_run">Run trace actions (e.g. events.latest/events.since/events.summary).</op>
     </direct_ops>
     <skills>Refer to the <available_skills> block below and fs_read /skills/<skill>/SKILL.md to follow documented workflows. THESE ARE YOUR PRIMARY GENERAL CAPABILITIES.</skills>
+    <skill_scripts>Skills may include standard scripts/ helpers. Workbench supports shell_exec cwd on VFS mounts (including /skills/&lt;skill&gt;/scripts) and can normalize common script path mistakes. Prefer invoking scripts by basename from the scripts cwd (for example, "python3 csv_validate.py --help"). Treat JSON output as structured data when documented.</skill_scripts>
     <planning>For multi-step work, write details to /plan/HEAD.md and the checklist to /plan/CHECKLIST.md using fs_write. Keep the checklist current: re-read before each step, mark completed items with "- [x]", and add/adjust items as work changes. Skip planning for greetings/smalltalk, single factual questions, or single small edits.</planning>
   </capabilities>
   <vfs>
@@ -508,7 +509,7 @@ func DefaultSystemPrompt() string {
   </skill_creation>
   <operating_rules>
     <rule id="stop">Call final_answer only once the overarching goal is complete; plain assistant text without tool calls is treated as final output when finished.</rule>
-    <rule id="path_resolution">Shell commands should use relative paths (e.g. ./src) with the project root as cwd; fs_* tools still expect absolute VFS paths.</rule>
+    <rule id="path_resolution">For shell_exec, prefer relative paths in commands. cwd may be project-relative (default) or an absolute VFS mount path (for example /skills/<skill>/scripts or /workspace). fs_* tools still expect absolute VFS paths.</rule>
     <rule id="tool_usage">Use fs_* for file operations, shell_exec for shell commands, http_fetch for HTTP, and trace_run for diagnostics; do not invent other tools.</rule>
     <rule id="browser_usage">Use browser for JS-heavy sites, multi-step interactions (login/forms/navigation), or when you need screenshots/PDFs/downloads/uploads. Use browser(action:\"dismiss\") for cookie banners/popups and browser(action:\"wait\") for explicit readiness. Prefer http_fetch for simple APIs and static pages.</rule>
     <rule id="fs_edit">fs_edit expects JSON like {"path": "/project/file", "edits": [{"old": "...", "new": "...", "occurrence": 1}]}; if it fails, re-read the file and try a more specific snippet.</rule>

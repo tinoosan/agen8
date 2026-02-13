@@ -200,6 +200,57 @@ func TestSQLiteStore_ListTasks_FilterByTeamAndRole(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_CancelActiveTasksByRun(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewSQLiteTaskStore(filepath.Join(dir, "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	tasks := []types.Task{
+		{TaskID: "active-a", SessionID: "sess-1", RunID: "run-a", Goal: "a", Status: types.TaskStatusActive, CreatedAt: &now},
+		{TaskID: "active-b", SessionID: "sess-1", RunID: "run-a", Goal: "b", Status: types.TaskStatusActive, CreatedAt: &now},
+		{TaskID: "pending-c", SessionID: "sess-1", RunID: "run-a", Goal: "c", Status: types.TaskStatusPending, CreatedAt: &now},
+		{TaskID: "active-d", SessionID: "sess-1", RunID: "run-b", Goal: "d", Status: types.TaskStatusActive, CreatedAt: &now},
+	}
+	for _, task := range tasks {
+		if err := s.CreateTask(ctx, task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", task.TaskID, err)
+		}
+	}
+
+	count, err := s.CancelActiveTasksByRun(ctx, "run-a", "run paused")
+	if err != nil {
+		t.Fatalf("CancelActiveTasksByRun: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("canceled count=%d want 2", count)
+	}
+
+	activeA, err := s.GetTask(ctx, "active-a")
+	if err != nil {
+		t.Fatalf("GetTask(active-a): %v", err)
+	}
+	if activeA.Status != types.TaskStatusCanceled {
+		t.Fatalf("active-a status=%q want %q", activeA.Status, types.TaskStatusCanceled)
+	}
+	pendingC, err := s.GetTask(ctx, "pending-c")
+	if err != nil {
+		t.Fatalf("GetTask(pending-c): %v", err)
+	}
+	if pendingC.Status != types.TaskStatusPending {
+		t.Fatalf("pending-c status=%q want %q", pendingC.Status, types.TaskStatusPending)
+	}
+	activeD, err := s.GetTask(ctx, "active-d")
+	if err != nil {
+		t.Fatalf("GetTask(active-d): %v", err)
+	}
+	if activeD.Status != types.TaskStatusActive {
+		t.Fatalf("active-d status=%q want %q", activeD.Status, types.TaskStatusActive)
+	}
+}
+
 func ptrTime(t time.Time) *time.Time {
 	return &t
 }

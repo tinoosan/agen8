@@ -1046,3 +1046,43 @@ func (s *SQLiteTaskStore) RecoverExpiredLeases(ctx context.Context) error {
 	`, string(types.TaskStatusFailed), now, string(types.TaskStatusActive), now)
 	return err
 }
+
+// CancelActiveTasksByRun marks all currently-active tasks for a run as canceled.
+// This is used when a run is paused/stopped so in-flight tasks do not remain active.
+func (s *SQLiteTaskStore) CancelActiveTasksByRun(ctx context.Context, runID string, reason string) (int, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return 0, fmt.Errorf("runID is required")
+	}
+	db, err := s.dbConn()
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "run paused"
+	}
+	res, err := db.ExecContext(ctx, `
+		UPDATE tasks
+		SET status = ?,
+		    finished_at = ?,
+		    completed_at = ?,
+		    error = CASE
+		      WHEN COALESCE(TRIM(error), '') = '' THEN ?
+		      ELSE TRIM(error) || '; ' || ?
+		    END,
+		    lease_until = NULL,
+		    updated_at = ?
+		WHERE run_id = ?
+		  AND status = ?
+	`, string(types.TaskStatusCanceled), now, now, reason, reason, now, runID, string(types.TaskStatusActive))
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	return int(n), nil
+}

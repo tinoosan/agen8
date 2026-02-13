@@ -701,7 +701,7 @@ func (s *RPCServer) agentPauseHandler(ctx context.Context, p protocol.AgentPause
 		}
 		return protocol.AgentPauseResult{RunID: runID, Status: types.RunStatusPaused}, nil
 	}
-	if err := s.setRunPausedState(threadID, runID, true); err != nil {
+	if err := s.setRunPausedState(ctx, threadID, runID, true); err != nil {
 		return protocol.AgentPauseResult{}, err
 	}
 	return protocol.AgentPauseResult{RunID: runID, Status: types.RunStatusPaused}, nil
@@ -722,7 +722,7 @@ func (s *RPCServer) agentResumeHandler(ctx context.Context, p protocol.AgentResu
 		}
 		return protocol.AgentResumeResult{RunID: runID, Status: types.RunStatusRunning}, nil
 	}
-	if err := s.setRunPausedState(threadID, runID, false); err != nil {
+	if err := s.setRunPausedState(ctx, threadID, runID, false); err != nil {
 		return protocol.AgentResumeResult{}, err
 	}
 	return protocol.AgentResumeResult{RunID: runID, Status: types.RunStatusRunning}, nil
@@ -820,7 +820,7 @@ func (s *RPCServer) setSessionPausedState(ctx context.Context, threadID, session
 	runIDs := collectSessionRunIDs(sess)
 	affected := make([]string, 0, len(runIDs))
 	for _, runID := range runIDs {
-		if err := s.setRunPausedState(threadID, runID, paused); err != nil {
+		if err := s.setRunPausedState(ctx, threadID, runID, paused); err != nil {
 			return affected, err
 		}
 		affected = append(affected, runID)
@@ -828,7 +828,7 @@ func (s *RPCServer) setSessionPausedState(ctx context.Context, threadID, session
 	return affected, nil
 }
 
-func (s *RPCServer) setRunPausedState(threadID, runID string, paused bool) error {
+func (s *RPCServer) setRunPausedState(ctx context.Context, threadID, runID string, paused bool) error {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
@@ -854,7 +854,13 @@ func (s *RPCServer) setRunPausedState(threadID, runID string, paused bool) error
 	}
 	run.FinishedAt = nil
 	run.Error = nil
-	return implstore.SaveRun(s.cfg, run)
+	if err := implstore.SaveRun(s.cfg, run); err != nil {
+		return err
+	}
+	if paused {
+		return cancelActiveTasksForRun(ctx, s.taskStore, runID, "run paused")
+	}
+	return nil
 }
 
 func normalizeAssignedToType(s string) string {

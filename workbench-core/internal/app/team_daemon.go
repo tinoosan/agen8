@@ -316,6 +316,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			Cfg:                cfg,
 			Run:                run,
 			Profile:            strings.TrimSpace(prof.ID),
+			ProfileConfig:      prof,
 			WorkdirAbs:         workdirAbs,
 			SharedWorkspaceDir: teamWorkspaceDir,
 			Model:              teamModel,
@@ -806,6 +807,9 @@ func buildTeamRPCServerConfig(
 				return err
 			}
 			runtimes[i].sess.SetPaused(true)
+			if err := cancelActiveTasksForRun(context.Background(), taskStore, runID, "run paused"); err != nil {
+				return err
+			}
 			return nil
 		}
 		return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
@@ -871,6 +875,12 @@ func buildTeamRPCServerConfig(
 					return
 				}
 				runtime.sess.SetPaused(true)
+				if cerr := cancelActiveTasksForRun(context.Background(), taskStore, rid, "run paused"); cerr != nil {
+					mu.Lock()
+					errs = append(errs, rid+": "+cerr.Error())
+					mu.Unlock()
+					return
+				}
 				mu.Lock()
 				affected = append(affected, rid)
 				mu.Unlock()
@@ -968,6 +978,12 @@ func buildTeamRPCServerConfig(
 					if cancel != nil {
 						cancel()
 					}
+				}
+				if serr := cancelActiveTasksForRun(context.Background(), taskStore, rid, "run stopped"); serr != nil {
+					mu.Lock()
+					errs = append(errs, rid+": "+serr.Error())
+					mu.Unlock()
+					return
 				}
 				mu.Lock()
 				affected = append(affected, rid)

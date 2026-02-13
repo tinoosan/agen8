@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
@@ -38,6 +39,270 @@ type artifactScope struct {
 	sessionID string
 	teamID    string
 	runID     string
+}
+
+func standaloneVisibleArtifactVPath(vpath string) bool {
+	vpath = strings.TrimSpace(vpath)
+	if !strings.HasPrefix(vpath, "/workspace/") {
+		return false
+	}
+	rel := strings.TrimSpace(strings.TrimPrefix(vpath, "/workspace/"))
+	if rel == "" {
+		return false
+	}
+	if strings.HasPrefix(rel, "tasks/") || strings.HasPrefix(rel, "deliverables/") {
+		base := strings.TrimSpace(filepath.Base(rel))
+		if strings.EqualFold(base, "SUMMARY.md") {
+			return false
+		}
+	}
+	return true
+}
+
+func filterStandaloneArtifactGroups(groups []state.ArtifactGroup) []state.ArtifactGroup {
+	if len(groups) == 0 {
+		return groups
+	}
+	out := make([]state.ArtifactGroup, 0, len(groups))
+	for _, g := range groups {
+		filtered := make([]state.ArtifactRecord, 0, len(g.Files))
+		for _, f := range g.Files {
+			if standaloneVisibleArtifactVPath(f.VPath) {
+				filtered = append(filtered, f)
+			}
+		}
+		if len(filtered) == 0 {
+			continue
+		}
+		g.Files = filtered
+		out = append(out, g)
+	}
+	return out
+}
+
+func filterStandaloneArtifactRecords(records []state.ArtifactRecord) []state.ArtifactRecord {
+	if len(records) == 0 {
+		return records
+	}
+	out := make([]state.ArtifactRecord, 0, len(records))
+	for _, r := range records {
+		if standaloneVisibleArtifactVPath(r.VPath) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func (s *RPCServer) sessionRunIDs(ctx context.Context, sessionID string, fallbackRunID string) []string {
+	sessionID = strings.TrimSpace(sessionID)
+	fallbackRunID = strings.TrimSpace(fallbackRunID)
+	out := []string{}
+	seen := map[string]struct{}{}
+	add := func(runID string) {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			return
+		}
+		if _, ok := seen[runID]; ok {
+			return
+		}
+		seen[runID] = struct{}{}
+		out = append(out, runID)
+	}
+	if sessionID == "" || s == nil || s.taskStore == nil {
+		add(fallbackRunID)
+		return out
+	}
+	if sess, err := s.loadSessionForID(ctx, sessionID); err == nil {
+		add(sess.CurrentRunID)
+		for _, runID := range sess.Runs {
+			add(runID)
+		}
+	}
+	const pageSize = 500
+	for offset := 0; ; offset += pageSize {
+		tasks, err := s.taskStore.ListTasks(ctx, state.TaskFilter{
+			SessionID: sessionID,
+			SortBy:    "created_at",
+			SortDesc:  true,
+			Limit:     pageSize,
+			Offset:    offset,
+		})
+		if err != nil || len(tasks) == 0 {
+			break
+		}
+		for _, t := range tasks {
+			add(t.RunID)
+		}
+		if len(tasks) < pageSize {
+			break
+		}
+	}
+	add(fallbackRunID)
+	sort.Strings(out)
+	return out
+}
+
+func mergeArtifactGroups(groups []state.ArtifactGroup) []state.ArtifactGroup {
+	if len(groups) <= 1 {
+		return groups
+	}
+	mergedByTask := make(map[string]state.ArtifactGroup, len(groups))
+	order := make([]string, 0, len(groups))
+	for _, g := range groups {
+		taskID := strings.TrimSpace(g.TaskID)
+		if taskID == "" {
+			continue
+		}
+		existing, ok := mergedByTask[taskID]
+		if !ok {
+			cp := g
+			cp.Files = append([]state.ArtifactRecord(nil), g.Files...)
+			mergedByTask[taskID] = cp
+			order = append(order, taskID)
+			continue
+		}
+		seenArtifact := map[string]struct{}{}
+		for _, f := range existing.Files {
+			key := strings.TrimSpace(f.ArtifactID)
+			if key == "" {
+				key = strings.TrimSpace(f.VPath)
+			}
+			seenArtifact[key] = struct{}{}
+		}
+		for _, f := range g.Files {
+			key := strings.TrimSpace(f.ArtifactID)
+			if key == "" {
+				key = strings.TrimSpace(f.VPath)
+			}
+			if _, exists := seenArtifact[key]; exists {
+				continue
+			}
+			seenArtifact[key] = struct{}{}
+			existing.Files = append(existing.Files, f)
+		}
+		if g.ProducedAt.After(existing.ProducedAt) {
+			existing.ProducedAt = g.ProducedAt
+		}
+		mergedByTask[taskID] = existing
+	}
+	out := make([]state.ArtifactGroup, 0, len(order))
+	for _, taskID := range order {
+		if g, ok := mergedByTask[taskID]; ok {
+			sort.SliceStable(g.Files, func(i, j int) bool {
+				if g.Files[i].IsSummary != g.Files[j].IsSummary {
+					return g.Files[i].IsSummary
+				}
+				return strings.TrimSpace(g.Files[i].DisplayName) < strings.TrimSpace(g.Files[j].DisplayName)
+			})
+			out = append(out, g)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].DayBucket != out[j].DayBucket {
+			return out[i].DayBucket > out[j].DayBucket
+		}
+		if out[i].Role != out[j].Role {
+			return out[i].Role < out[j].Role
+		}
+		if !out[i].ProducedAt.Equal(out[j].ProducedAt) {
+			return out[i].ProducedAt.After(out[j].ProducedAt)
+		}
+		return out[i].TaskID < out[j].TaskID
+	})
+	return out
+}
+
+func mergeArtifactRecords(records []state.ArtifactRecord) []state.ArtifactRecord {
+	if len(records) <= 1 {
+		return records
+	}
+	out := make([]state.ArtifactRecord, 0, len(records))
+	seen := map[string]struct{}{}
+	for _, r := range records {
+		key := strings.TrimSpace(r.ArtifactID)
+		if key == "" {
+			key = strings.TrimSpace(r.VPath)
+		}
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, r)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].ProducedAt.Equal(out[j].ProducedAt) {
+			return out[i].ProducedAt.After(out[j].ProducedAt)
+		}
+		if out[i].TaskID != out[j].TaskID {
+			return out[i].TaskID < out[j].TaskID
+		}
+		return strings.TrimSpace(out[i].DisplayName) < strings.TrimSpace(out[j].DisplayName)
+	})
+	return out
+}
+
+func (s *RPCServer) listArtifactGroupsForScope(ctx context.Context, indexer state.ArtifactIndexer, scope artifactScope, filter state.ArtifactFilter) ([]state.ArtifactGroup, error) {
+	if strings.TrimSpace(scope.teamID) != "" {
+		filter.TeamID = strings.TrimSpace(scope.teamID)
+		filter.RunID = ""
+		return indexer.ListArtifactGroups(ctx, filter)
+	}
+	runIDs := s.sessionRunIDs(ctx, scope.sessionID, scope.runID)
+	if len(runIDs) <= 1 {
+		filter.TeamID = ""
+		filter.RunID = strings.TrimSpace(scope.runID)
+		groups, err := indexer.ListArtifactGroups(ctx, filter)
+		if err != nil {
+			return nil, err
+		}
+		return filterStandaloneArtifactGroups(groups), nil
+	}
+	all := make([]state.ArtifactGroup, 0, len(runIDs)*8)
+	for _, runID := range runIDs {
+		runFilter := filter
+		runFilter.TeamID = ""
+		runFilter.RunID = runID
+		groups, err := indexer.ListArtifactGroups(ctx, runFilter)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, groups...)
+	}
+	return filterStandaloneArtifactGroups(mergeArtifactGroups(all)), nil
+}
+
+func (s *RPCServer) searchArtifactsForScope(ctx context.Context, indexer state.ArtifactIndexer, scope artifactScope, filter state.ArtifactSearchFilter) ([]state.ArtifactRecord, error) {
+	if strings.TrimSpace(scope.teamID) != "" {
+		filter.TeamID = strings.TrimSpace(scope.teamID)
+		filter.RunID = ""
+		return indexer.SearchArtifacts(ctx, filter)
+	}
+	runIDs := s.sessionRunIDs(ctx, scope.sessionID, scope.runID)
+	if len(runIDs) <= 1 {
+		filter.TeamID = ""
+		filter.RunID = strings.TrimSpace(scope.runID)
+		rows, err := indexer.SearchArtifacts(ctx, filter)
+		if err != nil {
+			return nil, err
+		}
+		return filterStandaloneArtifactRecords(rows), nil
+	}
+	all := make([]state.ArtifactRecord, 0, len(runIDs)*8)
+	for _, runID := range runIDs {
+		runFilter := filter
+		runFilter.TeamID = ""
+		runFilter.RunID = runID
+		rows, err := indexer.SearchArtifacts(ctx, runFilter)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, rows...)
+	}
+	return filterStandaloneArtifactRecords(mergeArtifactRecords(all)), nil
 }
 
 func (s *RPCServer) resolveArtifactScope(ctx context.Context, threadID protocol.ThreadID, teamIDOverride string) (artifactScope, error) {
@@ -96,9 +361,7 @@ func (s *RPCServer) artifactList(ctx context.Context, p protocol.ArtifactListPar
 	if err != nil {
 		return protocol.ArtifactListResult{}, err
 	}
-	groups, err := indexer.ListArtifactGroups(ctx, state.ArtifactFilter{
-		TeamID:    scope.teamID,
-		RunID:     scope.runID,
+	groups, err := s.listArtifactGroupsForScope(ctx, indexer, scope, state.ArtifactFilter{
 		DayBucket: strings.TrimSpace(p.DayBucket),
 		Role:      strings.TrimSpace(p.Role),
 		TaskKind:  strings.TrimSpace(p.TaskKind),
@@ -168,8 +431,8 @@ func (s *RPCServer) artifactSearch(ctx context.Context, p protocol.ArtifactSearc
 		return protocol.ArtifactSearchResult{}, err
 	}
 	filter := state.ArtifactFilter{
-		TeamID:    scope.teamID,
-		RunID:     scope.runID,
+		TeamID:    strings.TrimSpace(scope.teamID),
+		RunID:     strings.TrimSpace(scope.runID),
 		DayBucket: strings.TrimSpace(p.DayBucket),
 		Role:      strings.TrimSpace(p.Role),
 		TaskKind:  strings.TrimSpace(p.TaskKind),
@@ -177,7 +440,7 @@ func (s *RPCServer) artifactSearch(ctx context.Context, p protocol.ArtifactSearc
 		Limit:     clampLimit(p.Limit, artifactSearchDefault, artifactSearchMax),
 	}
 	applyScopeKey(&filter, p.ScopeKey)
-	matches, err := indexer.SearchArtifacts(ctx, state.ArtifactSearchFilter{
+	matches, err := s.searchArtifactsForScope(ctx, indexer, scope, state.ArtifactSearchFilter{
 		ArtifactFilter: filter,
 		Query:          query,
 	})
@@ -187,9 +450,7 @@ func (s *RPCServer) artifactSearch(ctx context.Context, p protocol.ArtifactSearc
 	if len(matches) == 0 {
 		return protocol.ArtifactSearchResult{Nodes: nil, MatchCount: 0}, nil
 	}
-	groups, err := indexer.ListArtifactGroups(ctx, state.ArtifactFilter{
-		TeamID:    filter.TeamID,
-		RunID:     filter.RunID,
+	groups, err := s.listArtifactGroupsForScope(ctx, indexer, scope, state.ArtifactFilter{
 		DayBucket: filter.DayBucket,
 		Role:      filter.Role,
 		TaskKind:  filter.TaskKind,
@@ -250,6 +511,34 @@ func resolveArtifactDiskPath(dataDir, teamID, runID, vpath string) string {
 	return candidate
 }
 
+func (s *RPCServer) resolveArtifactDiskPathForScope(ctx context.Context, scope artifactScope, preferredTeamID, preferredRunID, vpath string) string {
+	vpath = strings.TrimSpace(vpath)
+	if vpath == "" {
+		return ""
+	}
+	if teamID := strings.TrimSpace(preferredTeamID); teamID != "" {
+		return resolveArtifactDiskPath(s.cfg.DataDir, teamID, "", vpath)
+	}
+	if teamID := strings.TrimSpace(scope.teamID); teamID != "" {
+		return resolveArtifactDiskPath(s.cfg.DataDir, teamID, "", vpath)
+	}
+	if runID := strings.TrimSpace(preferredRunID); runID != "" {
+		if p := resolveArtifactDiskPath(s.cfg.DataDir, "", runID, vpath); p != "" {
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	}
+	for _, runID := range s.sessionRunIDs(ctx, scope.sessionID, scope.runID) {
+		if p := resolveArtifactDiskPath(s.cfg.DataDir, "", runID, vpath); p != "" {
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	}
+	return ""
+}
+
 func (s *RPCServer) artifactGet(ctx context.Context, p protocol.ArtifactGetParams) (protocol.ArtifactGetResult, error) {
 	scope, err := s.resolveArtifactScope(ctx, p.ThreadID, p.TeamID)
 	if err != nil {
@@ -257,6 +546,9 @@ func (s *RPCServer) artifactGet(ctx context.Context, p protocol.ArtifactGetParam
 	}
 	artifactID := strings.TrimSpace(p.ArtifactID)
 	vpath := strings.TrimSpace(p.VPath)
+	if vpath == "" && strings.HasPrefix(artifactID, "file:/workspace/") {
+		vpath = strings.TrimPrefix(artifactID, "file:")
+	}
 	if artifactID == "" && vpath == "" {
 		return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "artifactId or vpath is required"}
 	}
@@ -265,10 +557,8 @@ func (s *RPCServer) artifactGet(ctx context.Context, p protocol.ArtifactGetParam
 	if err != nil {
 		return protocol.ArtifactGetResult{}, err
 	}
-	groups, err := indexer.ListArtifactGroups(ctx, state.ArtifactFilter{
-		TeamID: scope.teamID,
-		RunID:  scope.runID,
-		Limit:  artifactListMaxLimit,
+	groups, err := s.listArtifactGroupsForScope(ctx, indexer, scope, state.ArtifactFilter{
+		Limit: artifactListMaxLimit,
 	})
 	if err != nil {
 		return protocol.ArtifactGetResult{}, err
@@ -292,14 +582,52 @@ func (s *RPCServer) artifactGet(ctx context.Context, p protocol.ArtifactGetParam
 			break
 		}
 	}
+	maxBytes := clampLimit(p.MaxBytes, artifactGetDefaultBytes, artifactGetMaxBytes)
+	if !found && strings.TrimSpace(vpath) != "" {
+		diskPath := s.resolveArtifactDiskPathForScope(ctx, scope, "", "", vpath)
+		if strings.TrimSpace(diskPath) == "" {
+			return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "artifact not found"}
+		}
+		f, err := os.Open(diskPath)
+		if err != nil {
+			return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "artifact file not found"}
+		}
+		defer f.Close()
+		buf, err := io.ReadAll(io.LimitReader(f, int64(maxBytes)+1))
+		if err != nil {
+			return protocol.ArtifactGetResult{}, err
+		}
+		truncated := len(buf) > maxBytes
+		if truncated {
+			buf = buf[:maxBytes]
+		}
+		fileLabel := filepath.Base(strings.TrimSpace(vpath))
+		if fileLabel == "" || fileLabel == "." || fileLabel == "/" {
+			fileLabel = strings.TrimSpace(vpath)
+		}
+		node := protocol.ArtifactNode{
+			NodeKey:     "file:" + strings.TrimSpace(vpath),
+			Kind:        "file",
+			Label:       fileLabel,
+			ArtifactID:  strings.TrimSpace(artifactID),
+			DisplayName: fileLabel,
+			VPath:       strings.TrimSpace(vpath),
+			DiskPath:    diskPath,
+		}
+		return protocol.ArtifactGetResult{
+			Artifact:  node,
+			Content:   string(buf),
+			Truncated: truncated,
+			BytesRead: len(buf),
+		}, nil
+	}
 	if !found {
 		return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "artifact not found"}
 	}
 
-	maxBytes := clampLimit(p.MaxBytes, artifactGetDefaultBytes, artifactGetMaxBytes)
 	diskPath := strings.TrimSpace(sel.DiskPath)
-	if diskPath == "" {
-		diskPath = resolveArtifactDiskPath(s.cfg.DataDir, scope.teamID, scope.runID, sel.VPath)
+	if diskPath == "" || func() bool { _, err := os.Stat(diskPath); return err != nil }() {
+		diskPath = s.resolveArtifactDiskPathForScope(ctx, scope, sel.TeamID, sel.RunID, sel.VPath)
 	}
 	if strings.TrimSpace(diskPath) == "" {
 		return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "artifact file path unavailable"}

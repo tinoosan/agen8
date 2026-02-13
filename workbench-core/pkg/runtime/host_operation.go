@@ -132,9 +132,18 @@ func (shellExecOperation) RequestStoreFields(req types.HostOpRequest) map[string
 	return shellArgsToFields(req.Argv, req.Cwd)
 }
 func (shellExecOperation) ResponseStoreFields(resp types.HostOpResponse) map[string]string {
-	return map[string]string{
+	fields := map[string]string{
 		"exitCode": strconv.Itoa(resp.ExitCode),
 	}
+	fields["vfsPathTranslated"] = fmtBool(resp.VFSPathTranslated)
+	fields["vfsPathMounts"] = strings.TrimSpace(resp.VFSPathMounts)
+	fields["scriptPathNormalized"] = fmtBool(resp.ScriptPathNormalized)
+	anti := strings.TrimSpace(resp.ScriptAntiPattern)
+	if anti == "" {
+		anti = "none"
+	}
+	fields["scriptAntiPattern"] = anti
+	return fields
 }
 
 type httpFetchOperation struct{}

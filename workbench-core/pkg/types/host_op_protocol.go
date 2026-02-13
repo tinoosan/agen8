@@ -260,6 +260,11 @@ type HostOpResponse struct {
 	Body          string              `json:"body,omitempty"`
 	BodyTruncated bool                `json:"bodyTruncated,omitempty"`
 	Warning       string              `json:"warning,omitempty"`
+	VFSPathTranslated bool            `json:"vfsPathTranslated,omitempty"`
+	VFSPathMounts     string          `json:"vfsPathMounts,omitempty"`
+	// Shell script mitigation telemetry
+	ScriptPathNormalized bool   `json:"scriptPathNormalized,omitempty"`
+	ScriptAntiPattern    string `json:"scriptAntiPattern,omitempty"`
 	// Trace output
 	TraceKeys  []string `json:"traceKeys,omitempty"`
 	TraceValue string   `json:"value,omitempty"`

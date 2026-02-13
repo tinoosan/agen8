@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tinoosan/workbench-core/internal/opmeta"
 	"github.com/tinoosan/workbench-core/pkg/events"
 )
 
@@ -240,56 +241,8 @@ func classifyEvent(ev events.Event) RenderResult {
 
 func renderOpRequest(d map[string]string) string {
 	op := strings.TrimSpace(d["op"])
-	path := strings.TrimSpace(d["path"])
 
 	switch op {
-	case "fs_list":
-		return "List " + path
-	case "fs_read":
-		return "Read " + path
-	case "fs_search":
-		q := strings.TrimSpace(d["query"])
-		if path != "" && q != "" {
-			return fmt.Sprintf("Search %s for %q", path, q)
-		}
-		if path != "" {
-			return "Search " + path
-		}
-		return "Search"
-	case "fs_write":
-		return "Write " + path
-	case "fs_append":
-		return "Append " + path
-	case "fs_edit":
-		return "Edit " + path
-	case "fs_patch":
-		return "Patch " + path
-	case "shell_exec":
-		if cmd := strings.TrimSpace(d["argvPreview"]); cmd != "" {
-			return cmd
-		}
-		if argv0 := strings.TrimSpace(d["argv0"]); argv0 != "" {
-			return argv0
-		}
-		return "shell_exec"
-	case "http_fetch":
-		u := strings.TrimSpace(d["url"])
-		if u != "" {
-			m := strings.ToUpper(strings.TrimSpace(d["method"]))
-			if m == "" {
-				m = "GET"
-			}
-			desc := m + " " + u
-			if body := strings.TrimSpace(d["body"]); body != "" {
-				bodyText := "body: " + singleLinePreview(body, 120)
-				if strings.TrimSpace(d["bodyTruncated"]) == "true" {
-					bodyText += " truncated"
-				}
-				desc = desc + " " + bodyText
-			}
-			return desc
-		}
-		return "http_fetch"
 	case "browser":
 		action := strings.TrimSpace(d["action"])
 		if action == "" {
@@ -327,18 +280,20 @@ func renderOpRequest(d map[string]string) string {
 			return "Email " + to
 		}
 		return "Email"
-	case "trace_run":
-		action := strings.TrimSpace(d["traceAction"])
-		key := strings.TrimSpace(d["traceKey"])
-		if action != "" {
-			if key != "" {
-				return fmt.Sprintf("trace.%s %s", action, key)
-			}
-			return "trace." + action
-		}
-		return "trace_run"
 	default:
+		if isSharedOpRequestTitleOp(op) {
+			return opmeta.FormatRequestTitle(d)
+		}
 		return compactKV(d, []string{"op", "path"})
+	}
+}
+
+func isSharedOpRequestTitleOp(op string) bool {
+	switch strings.TrimSpace(op) {
+	case "fs_list", "fs_read", "fs_search", "fs_write", "fs_append", "fs_edit", "fs_patch", "shell_exec", "http_fetch", "trace_run":
+		return true
+	default:
+		return false
 	}
 }
 

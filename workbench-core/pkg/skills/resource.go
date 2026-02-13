@@ -95,6 +95,9 @@ func (r *SkillsResource) Write(path string, data []byte) error {
 		return fmt.Errorf("skills write: path must be /skills/<skill>/<file>")
 	}
 	skillName := strings.TrimSpace(parts[0])
+	if !r.manager.isAllowed(skillName) {
+		return fmt.Errorf("skills: not found %q", skillName)
+	}
 	sub := filepath.ToSlash(filepath.Join(parts[1:]...))
 	full, err := r.manager.resolveWritableFile(skillName, sub)
 	if err != nil {
@@ -124,6 +127,9 @@ func (r *SkillsResource) Append(path string, data []byte) error {
 		return fmt.Errorf("skills append: path must be /skills/<skill>/<file>")
 	}
 	skillName := strings.TrimSpace(parts[0])
+	if !r.manager.isAllowed(skillName) {
+		return fmt.Errorf("skills: not found %q", skillName)
+	}
 	sub := filepath.ToSlash(filepath.Join(parts[1:]...))
 	full, err := r.manager.resolveWritableFile(skillName, sub)
 	if err != nil {

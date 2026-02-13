@@ -238,9 +238,14 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 		}
 		var out struct {
-			ExitCode int    `json:"exitCode"`
-			Stdout   string `json:"stdout"`
-			Stderr   string `json:"stderr"`
+			ExitCode             int    `json:"exitCode"`
+			Stdout               string `json:"stdout"`
+			Stderr               string `json:"stderr"`
+			Warning              string `json:"warning"`
+			VFSPathTranslated    bool   `json:"vfsPathTranslated"`
+			VFSPathMounts        string `json:"vfsPathMounts"`
+			ScriptPathNormalized bool   `json:"scriptPathNormalized"`
+			ScriptAntiPattern    string `json:"scriptAntiPattern"`
 		}
 		if err := json.Unmarshal(result.Output, &out); err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
@@ -254,12 +259,17 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 			}
 		}
 		return types.HostOpResponse{
-			Op:       req.Op,
-			Ok:       ok,
-			Error:    errMsg,
-			ExitCode: out.ExitCode,
-			Stdout:   out.Stdout,
-			Stderr:   out.Stderr,
+			Op:                   req.Op,
+			Ok:                   ok,
+			Error:                errMsg,
+			ExitCode:             out.ExitCode,
+			Stdout:               out.Stdout,
+			Stderr:               out.Stderr,
+			Warning:              out.Warning,
+			VFSPathTranslated:    out.VFSPathTranslated,
+			VFSPathMounts:        strings.TrimSpace(out.VFSPathMounts),
+			ScriptPathNormalized: out.ScriptPathNormalized,
+			ScriptAntiPattern:    strings.TrimSpace(out.ScriptAntiPattern),
 		}
 
 	case types.HostOpHTTPFetch:

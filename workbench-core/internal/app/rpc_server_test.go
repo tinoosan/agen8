@@ -292,7 +292,7 @@ func TestRPCServer_ArtifactList_RunScope(t *testing.T) {
 		Status:      types.TaskStatusSucceeded,
 		Summary:     "ok",
 		CompletedAt: &done,
-		Artifacts:   []string{"/workspace/deliverables/2026-02-08/task-run-1/SUMMARY.md"},
+		Artifacts:   []string{"/workspace/run-report.md"},
 	}); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
@@ -316,13 +316,170 @@ func TestRPCServer_ArtifactList_RunScope(t *testing.T) {
 	}
 	foundFile := false
 	for _, n := range res.Nodes {
-		if n.Kind == "file" && strings.Contains(n.VPath, "task-run-1") {
+		if n.Kind == "file" && strings.EqualFold(strings.TrimSpace(n.VPath), "/workspace/run-report.md") {
 			foundFile = true
 			break
 		}
 	}
 	if !foundFile {
 		t.Fatalf("expected run-scoped file node, got %+v", res.Nodes)
+	}
+}
+
+func TestRPCServer_ArtifactList_StandaloneSessionIncludesAllRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	runA := types.NewRun("goal", 8*1024, sess.SessionID)
+	runB := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = runA.RunID
+	sess.Runs = []string{runA.RunID, runB.RunID}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	now := time.Now().UTC()
+	tasks := []types.Task{
+		{
+			TaskID:    "task-run-a",
+			SessionID: sess.SessionID,
+			RunID:     runA.RunID,
+			Goal:      "run a artifact",
+			Status:    types.TaskStatusPending,
+			CreatedAt: &now,
+			Inputs:    map[string]any{},
+			Metadata:  map[string]any{},
+			CreatedBy: "user",
+			TaskKind:  "task",
+		},
+		{
+			TaskID:    "task-run-b",
+			SessionID: sess.SessionID,
+			RunID:     runB.RunID,
+			Goal:      "run b artifact",
+			Status:    types.TaskStatusPending,
+			CreatedAt: &now,
+			Inputs:    map[string]any{},
+			Metadata:  map[string]any{},
+			CreatedBy: "user",
+			TaskKind:  "task",
+		},
+	}
+	for _, task := range tasks {
+		if err := ts.CreateTask(context.Background(), task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", task.TaskID, err)
+		}
+		done := now.Add(1 * time.Second)
+		if err := ts.CompleteTask(context.Background(), task.TaskID, types.TaskResult{
+			TaskID:      task.TaskID,
+			Status:      types.TaskStatusSucceeded,
+			Summary:     "ok",
+			CompletedAt: &done,
+			Artifacts:   []string{"/workspace/" + task.TaskID + ".md"},
+		}); err != nil {
+			t.Fatalf("CompleteTask(%s): %v", task.TaskID, err)
+		}
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: runA, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodArtifactList, protocol.ArtifactListParams{
+		ThreadID: protocol.ThreadID(sess.SessionID),
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+	var res protocol.ArtifactListResult
+	if err := json.Unmarshal(resp.Result, &res); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	foundRunB := false
+	for _, n := range res.Nodes {
+		if n.Kind == "file" && strings.EqualFold(strings.TrimSpace(n.VPath), "/workspace/task-run-b.md") {
+			foundRunB = true
+			break
+		}
+	}
+	if !foundRunB {
+		t.Fatalf("expected artifact from secondary run, got %+v", res.Nodes)
+	}
+}
+
+func TestRPCServer_ArtifactGet_StandaloneUnreportedByVPath(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	p := filepath.Join(fsutil.GetWorkspaceDir(cfg.DataDir, run.RunID), "context_constructor_manifest.json")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(p, []byte("{\"ok\":true}"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodArtifactGet, protocol.ArtifactGetParams{
+		ThreadID: protocol.ThreadID(sess.SessionID),
+		VPath:    "/workspace/context_constructor_manifest.json",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("artifact.get error: %+v", resp.Error)
+	}
+	var out protocol.ArtifactGetResult
+	if err := json.Unmarshal(resp.Result, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if strings.TrimSpace(out.Content) != "{\"ok\":true}" {
+		t.Fatalf("unexpected content: %q", out.Content)
+	}
+}
+
+func TestRPCServer_ArtifactGet_StandaloneUnreportedAcrossSessionRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	runA := types.NewRun("goal", 8*1024, sess.SessionID)
+	runB := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = runA.RunID
+	sess.Runs = []string{runA.RunID, runB.RunID}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	p := filepath.Join(fsutil.GetWorkspaceDir(cfg.DataDir, runB.RunID), "sample_report.md")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(p, []byte("hello from run-b"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: runA, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodArtifactGet, protocol.ArtifactGetParams{
+		ThreadID: protocol.ThreadID(sess.SessionID),
+		VPath:    "/workspace/sample_report.md",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("artifact.get error: %+v", resp.Error)
+	}
+	var out protocol.ArtifactGetResult
+	if err := json.Unmarshal(resp.Result, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if strings.TrimSpace(out.Content) != "hello from run-b" {
+		t.Fatalf("unexpected content: %q", out.Content)
 	}
 }
 
@@ -1696,6 +1853,19 @@ func TestRPCServer_AgentPauseResume(t *testing.T) {
 		t.Fatalf("NewSQLiteSessionStore: %v", err)
 	}
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	now := time.Now().UTC()
+	if err := ts.CreateTask(context.Background(), types.Task{
+		TaskID:         "task-active",
+		SessionID:      run.SessionID,
+		RunID:          run.RunID,
+		AssignedToType: "agent",
+		AssignedTo:     run.RunID,
+		Goal:           "active work",
+		Status:         types.TaskStatusActive,
+		CreatedAt:      &now,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
 	srv := NewRPCServer(RPCServerConfig{
 		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
 	})
@@ -1714,6 +1884,13 @@ func TestRPCServer_AgentPauseResume(t *testing.T) {
 	}
 	if loaded.Status != types.RunStatusPaused {
 		t.Fatalf("status after pause=%q want %q", loaded.Status, types.RunStatusPaused)
+	}
+	pausedTask, err := ts.GetTask(context.Background(), "task-active")
+	if err != nil {
+		t.Fatalf("GetTask pause: %v", err)
+	}
+	if pausedTask.Status != types.TaskStatusCanceled {
+		t.Fatalf("task status after pause=%q want %q", pausedTask.Status, types.TaskStatusCanceled)
 	}
 
 	reqResume, _ := protocol.NewRequest("2", protocol.MethodAgentResume, protocol.AgentResumeParams{

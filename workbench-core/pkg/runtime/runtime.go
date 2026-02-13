@@ -13,6 +13,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/resources"
 	"github.com/tinoosan/workbench-core/pkg/skills"
 	"github.com/tinoosan/workbench-core/pkg/store"
@@ -39,6 +40,7 @@ type BuildConfig struct {
 	Cfg                   config.Config
 	Run                   types.Run
 	Profile               string
+	ProfileConfig         *profile.Profile
 	WorkdirAbs            string
 	SharedWorkspaceDir    string
 	Model                 string
@@ -222,6 +224,19 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 	skillMgr := skills.NewManager([]string{skillDir})
 	skillMgr.WritableRoot = skillDir
+	if profileSkills := resolveProfileSkills(cfg); len(profileSkills) > 0 {
+		skillMgr.AllowedSkills = profileSkills
+		if cfg.Emit != nil {
+			cfg.Emit(context.Background(), events.Event{
+				Type:    "runtime.info",
+				Message: "Applied profile-scoped skills visibility",
+				Data: map[string]string{
+					"profile":      strings.TrimSpace(cfg.Profile),
+					"allowedCount": strconv.Itoa(len(profileSkills)),
+				},
+			})
+		}
+	}
 	if err := skillMgr.Scan(); err != nil {
 		return nil, fmt.Errorf("scan skills: %w", err)
 	}
@@ -268,6 +283,16 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		FS:    fs,
 	}
 	shellInvoker := builtins.NewBuiltinShellInvoker(absWorkdirRoot, nil, vfs.MountProject)
+	shellInvoker.MountRoots[vfs.MountWorkspace] = wsRes.BaseDir
+	shellInvoker.MountRoots[vfs.MountSkills] = skillDir
+	shellInvoker.MountRoots[vfs.MountPlan] = planDir
+	shellInvoker.MountRoots[vfs.MountMemory] = memRes.BaseDir
+	if raw := strings.TrimSpace(os.Getenv("WORKBENCH_SHELL_VFS_TRANSLATION")); raw != "" {
+		switch strings.ToLower(raw) {
+		case "0", "false", "off", "no":
+			shellInvoker.EnableVFSPathTranslation = false
+		}
+	}
 
 	httpInvoker := builtins.NewBuiltinHTTPInvoker()
 	traceInvoker := builtins.BuiltinTraceInvoker{Store: traceStore}
@@ -362,6 +387,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 
 	constructor := &agent.PromptBuilder{
 		FS:             fs,
+		Skills:         skillMgr,
 		MaxMemoryBytes: cfg.MaxMemoryBytes,
 		Emit:           cfg.Emit,
 	}
@@ -407,6 +433,69 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func resolveProfileSkills(cfg BuildConfig) []string {
+	if cfg.ProfileConfig != nil {
+		return uniqueProfileSkills(cfg.ProfileConfig)
+	}
+
+	ref := strings.TrimSpace(cfg.Profile)
+	if ref == "" {
+		return nil
+	}
+
+	p, err := loadProfileByRef(cfg.Cfg, ref)
+	if err != nil || p == nil {
+		return nil
+	}
+	return uniqueProfileSkills(p)
+}
+
+func loadProfileByRef(cfg config.Config, ref string) (*profile.Profile, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, nil
+	}
+	if st, err := os.Stat(ref); err == nil {
+		if st.IsDir() {
+			return profile.Load(ref)
+		}
+		return profile.Load(ref)
+	}
+	return profile.Load(filepath.Join(fsutil.GetProfilesDir(cfg.DataDir), ref))
+}
+
+func uniqueProfileSkills(p *profile.Profile) []string {
+	if p == nil {
+		return nil
+	}
+	out := make([]string, 0, len(p.Skills))
+	seen := map[string]struct{}{}
+	add := func(skills []string) {
+		for _, s := range skills {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			if _, ok := seen[s]; ok {
+				continue
+			}
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+
+	add(p.Skills)
+	if p.Team != nil {
+		for _, role := range p.Team.Roles {
+			add(role.Skills)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
 
 func loadDotEnv(root string) map[string]string {
 	if strings.TrimSpace(root) == "" {

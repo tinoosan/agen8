@@ -408,6 +408,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		Cfg:                   s.cfg,
 		Run:                   run,
 		Profile:               strings.TrimSpace(prof.ID),
+		ProfileConfig:         prof,
 		WorkdirAbs:            s.workdirAbs,
 		SharedWorkspaceDir:    sharedWorkspaceDir,
 		Model:                 model,
@@ -681,7 +682,16 @@ func (s *runtimeSupervisor) PauseRun(runID string) error {
 		if worker != nil && worker.session != nil {
 			worker.session.SetPaused(true)
 		}
-		return nil
+		if worker != nil && worker.cancel != nil {
+			worker.cancel()
+		}
+		if worker != nil && worker.done != nil {
+			<-worker.done
+		}
+		s.mu.Lock()
+		delete(s.workers, runID)
+		s.mu.Unlock()
+		return cancelActiveTasksForRun(context.Background(), s.taskStore, runID, "run paused")
 	}
 	run.Status = types.RunStatusPaused
 	run.FinishedAt = nil
@@ -696,7 +706,16 @@ func (s *runtimeSupervisor) PauseRun(runID string) error {
 	if worker != nil && worker.session != nil {
 		worker.session.SetPaused(true)
 	}
-	return nil
+	if worker != nil && worker.cancel != nil {
+		worker.cancel()
+	}
+	if worker != nil && worker.done != nil {
+		<-worker.done
+	}
+	s.mu.Lock()
+	delete(s.workers, runID)
+	s.mu.Unlock()
+	return cancelActiveTasksForRun(context.Background(), s.taskStore, runID, "run paused")
 }
 
 func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
@@ -770,7 +789,7 @@ func (s *runtimeSupervisor) StopRun(runID string) error {
 	s.mu.Lock()
 	delete(s.workers, runID)
 	s.mu.Unlock()
-	return nil
+	return cancelActiveTasksForRun(context.Background(), s.taskStore, runID, "run stopped")
 }
 
 func (s *runtimeSupervisor) PauseSession(ctx context.Context, sessionID string) ([]string, error) {

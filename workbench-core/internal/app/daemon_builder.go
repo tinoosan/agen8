@@ -281,6 +281,7 @@ func (b *DaemonBuilder) buildStoresAndRuntime() error {
 		Cfg:                   b.cfg,
 		Run:                   b.run,
 		Profile:               strings.TrimSpace(b.prof.ID),
+		ProfileConfig:         b.prof,
 		WorkdirAbs:            b.workdirAbs,
 		Model:                 b.effectiveModel,
 		ReasoningEffort:       b.initialReasoningEffort,
@@ -601,6 +602,15 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 					return err
 				}
 				b.sess.SetPaused(true)
+				b.runLoopMu.Lock()
+				cancel := b.runLoopCancel
+				b.runLoopMu.Unlock()
+				if cancel != nil {
+					cancel()
+				}
+				if err := cancelActiveTasksForRun(context.Background(), b.taskStore, runID, "run paused"); err != nil {
+					return err
+				}
 				return nil
 			}
 			return b.supervisor.PauseRun(runID)
@@ -691,6 +701,18 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 							return
 						}
 						b.sess.SetPaused(true)
+						b.runLoopMu.Lock()
+						cancel := b.runLoopCancel
+						b.runLoopMu.Unlock()
+						if cancel != nil {
+							cancel()
+						}
+						if cerr := cancelActiveTasksForRun(context.Background(), b.taskStore, runID, "run paused"); cerr != nil {
+							mu.Lock()
+							errs = append(errs, runID+": "+cerr.Error())
+							mu.Unlock()
+							return
+						}
 					} else if perr := b.supervisor.PauseRun(runID); perr != nil {
 						mu.Lock()
 						errs = append(errs, runID+": "+perr.Error())
@@ -824,6 +846,12 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 						b.runLoopMu.Unlock()
 						if cancel != nil {
 							cancel()
+						}
+						if serr := cancelActiveTasksForRun(context.Background(), b.taskStore, runID, "run stopped"); serr != nil {
+							mu.Lock()
+							errs = append(errs, runID+": "+serr.Error())
+							mu.Unlock()
+							return
 						}
 					} else if serr := b.supervisor.StopRun(runID); serr != nil {
 						mu.Lock()

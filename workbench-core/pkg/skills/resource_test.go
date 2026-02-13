@@ -3,6 +3,7 @@ package skills
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -79,5 +80,54 @@ func TestSkillsResource_Append(t *testing.T) {
 
 	if _, ok := mgr.Get("append-skill"); !ok {
 		t.Fatalf("expected manager to discover appended skill")
+	}
+}
+
+func TestSkillsResource_ListFilteredByProfile(t *testing.T) {
+	tmp := t.TempDir()
+	mustWriteSkill(t, tmp, "allowed")
+	mustWriteSkill(t, tmp, "blocked")
+
+	mgr := NewManager([]string{tmp})
+	mgr.WritableRoot = tmp
+	mgr.AllowedSkills = []string{"allowed"}
+	if err := mgr.Scan(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	res := NewResource(mgr)
+
+	entries, err := res.List("")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	got := make([]string, 0, len(entries))
+	for _, e := range entries {
+		got = append(got, e.Path)
+	}
+	if !reflect.DeepEqual(got, []string{"allowed"}) {
+		t.Fatalf("unexpected list paths: %v", got)
+	}
+
+	if _, err := res.Read("blocked/SKILL.md"); err == nil {
+		t.Fatalf("expected blocked skill read to fail")
+	}
+}
+
+func TestSkillsResource_WriteBlockedWhenDisallowed(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := NewManager([]string{tmp})
+	mgr.WritableRoot = tmp
+	mgr.AllowedSkills = []string{"allowed"}
+	if err := mgr.Scan(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	res := NewResource(mgr)
+
+	content := []byte("---\nname: blocked\n---\n# Instructions\n")
+	if err := res.Write("blocked/SKILL.md", content); err == nil {
+		t.Fatalf("expected write to blocked skill to fail")
+	}
+	if err := res.Append("blocked/SKILL.md", []byte("x")); err == nil {
+		t.Fatalf("expected append to blocked skill to fail")
 	}
 }

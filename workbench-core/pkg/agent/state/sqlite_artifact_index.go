@@ -80,6 +80,24 @@ func resolveIndexedDiskPath(dataDir, teamID, runID, vpath string) string {
 	return ""
 }
 
+func standaloneIndexedArtifactVPath(vpath string) bool {
+	vpath = strings.TrimSpace(vpath)
+	if !strings.HasPrefix(vpath, "/workspace/") {
+		return false
+	}
+	rel := strings.TrimSpace(strings.TrimPrefix(vpath, "/workspace/"))
+	if rel == "" {
+		return false
+	}
+	if strings.HasPrefix(rel, "tasks/") || strings.HasPrefix(rel, "deliverables/") {
+		base := strings.TrimSpace(filepath.Base(rel))
+		if strings.EqualFold(base, "SUMMARY.md") {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, task types.Task, result types.TaskResult) error {
 	taskKind := normalizeTaskKind(task.TaskKind)
 	if taskKind == TaskKindOther {
@@ -118,6 +136,9 @@ func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, tas
 	for _, raw := range result.Artifacts {
 		vpath := strings.TrimSpace(raw)
 		if vpath == "" {
+			continue
+		}
+		if teamID == "" && !standaloneIndexedArtifactVPath(vpath) {
 			continue
 		}
 		key := strings.ToLower(vpath)
@@ -188,6 +209,9 @@ func (s *SQLiteTaskStore) ReplaceTaskArtifacts(ctx context.Context, taskID strin
 	}
 	for _, rec := range records {
 		if strings.TrimSpace(rec.VPath) == "" {
+			continue
+		}
+		if strings.TrimSpace(rec.TeamID) == "" && !standaloneIndexedArtifactVPath(rec.VPath) {
 			continue
 		}
 		producedAt := time.Now().UTC()
@@ -326,9 +350,9 @@ func (s *SQLiteTaskStore) ListArtifactGroups(ctx context.Context, filter Artifac
 	idxByTask := map[string]int{}
 	for rows.Next() {
 		var (
-			taskID, day, role, kind, goal, status, finishedRaw string
+			taskID, day, role, kind, goal, status, finishedRaw                   string
 			artifactID, displayName, vpath, diskPath, producedRaw, teamID, runID string
-			isSummary int
+			isSummary                                                            int
 		)
 		if err := rows.Scan(
 			&taskID, &day, &role, &kind, &goal, &status, &finishedRaw,
