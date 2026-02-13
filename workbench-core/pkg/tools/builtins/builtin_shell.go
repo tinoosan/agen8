@@ -177,6 +177,12 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req pkgtools.ToolReque
 			return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: msg}
 		}
 	}
+	if len(argv) >= 3 && argv[0] == "bash" && argv[1] == "-c" {
+		if bad := firstDisallowedAbsPathInShell(argv[2], s.mountRoots()); bad != "" {
+			msg := fmt.Sprintf("absolute path %q is not allowed in command; use known VFS mounts (/project, /workspace, /skills, /plan, /memory)", bad)
+			return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: msg}
+		}
+	}
 
 	stdoutText, stderrText, exitCode, runErr := runShellCommand(ctx, cmdName, argv[1:], absDir, in.Stdin)
 	if runErr != nil {
@@ -510,6 +516,25 @@ func isAllowedAbsolutePathArg(arg string, mountRoots map[string]string) bool {
 	return false
 }
 
+func firstDisallowedAbsPathInShell(cmd string, mountRoots map[string]string) string {
+	re := regexp.MustCompile(`(^|[\s"'` + "`" + `=|&;()<>])(/[^ \t\r\n"'` + "`" + `|&;()<>]+)`)
+	matches := re.FindAllStringSubmatch(cmd, -1)
+	for _, m := range matches {
+		if len(m) < 3 {
+			continue
+		}
+		candidate := strings.TrimSpace(m[2])
+		if candidate == "" || !strings.HasPrefix(candidate, "/") {
+			continue
+		}
+		if isAllowedAbsolutePathArg(candidate, mountRoots) {
+			continue
+		}
+		return candidate
+	}
+	return ""
+}
+
 func runShellCommand(ctx context.Context, cmdName string, args []string, absDir, stdin string) (stdout string, stderr string, exitCode int, err error) {
 	cmd := exec.CommandContext(ctx, cmdName, args...)
 	cmd.Dir = absDir
@@ -648,13 +673,13 @@ func normalizeFromFailure(argv []string, logicalCwd, stderr string) ([]string, b
 	if len(argv) < 3 || argv[0] != "bash" || argv[1] != "-c" {
 		return argv, false, "", ""
 	}
-	re := regexp.MustCompile(`/skills/[^/\s]+/scripts/([^\s"'` + "`" + `]+)`)
+	re := regexp.MustCompile(`(/[^\s"'` + "`" + `]+/scripts/([^\s"'` + "`" + `]+))`)
 	m := re.FindStringSubmatch(stderr)
-	if len(m) != 2 {
+	if len(m) != 3 {
 		return argv, false, "", ""
 	}
-	needle := strings.TrimSpace(m[0])
-	base := strings.TrimSpace(m[1])
+	needle := strings.TrimSpace(m[1])
+	base := strings.TrimSpace(m[2])
 	if needle == "" || base == "" {
 		return argv, false, "", ""
 	}

@@ -133,11 +133,11 @@ func TestBuiltinShellInvoker_NormalizesAbsoluteSkillsScriptPath(t *testing.T) {
 	if out.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d stderr=%q", out.ExitCode, out.Stderr)
 	}
-	if !out.ScriptPathNormalized {
-		t.Fatalf("expected normalization to be true")
+	if !out.VFSPathTranslated {
+		t.Fatalf("expected vfs path translation to be true")
 	}
-	if out.ScriptAntiPattern != "absolute_skills_path" {
-		t.Fatalf("unexpected anti pattern: %q", out.ScriptAntiPattern)
+	if !strings.Contains(out.VFSPathMounts, "skills") {
+		t.Fatalf("expected skills mount in translated mounts, got %q", out.VFSPathMounts)
 	}
 }
 
@@ -205,6 +205,140 @@ func TestBuiltinShellInvoker_RetriesOnceAfterFailureNormalization(t *testing.T) 
 	}
 	if !out.ScriptPathNormalized || out.ScriptAntiPattern != "absolute_skills_path" {
 		t.Fatalf("expected retry normalization metadata, got normalized=%t anti=%q", out.ScriptPathNormalized, out.ScriptAntiPattern)
+	}
+}
+
+func TestBuiltinShellInvoker_TranslatesVFSPathsInTokenArgs(t *testing.T) {
+	projectDir := t.TempDir()
+	workspaceDir := t.TempDir()
+	skillsDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(workspaceDir, "a.md"), []byte("# hello\n"), 0o644); err != nil {
+		t.Fatalf("write workspace input: %v", err)
+	}
+	scriptDir := filepath.Join(skillsDir, "reporting", "scripts")
+	script := "#!/usr/bin/env bash\nin=\"$1\"\nout=\"$3\"\ncp \"$in\" \"$out\"\necho \"OUT=$out\"\n"
+	if err := writeExecutable(scriptDir, "md_to_pdf.sh", script); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	inv := NewBuiltinShellInvoker(projectDir, nil, "project")
+	inv.MountRoots["workspace"] = workspaceDir
+	inv.MountRoots["skills"] = skillsDir
+
+	req := toolReq(t, shellExecInput{
+		Argv: []string{"bash", "/skills/reporting/scripts/md_to_pdf.sh", "/workspace/a.md", "--output", "/workspace/a.pdf"},
+		Cwd:  ".",
+	})
+	res, err := inv.Invoke(context.Background(), req)
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	var out shellExecOutput
+	if err := json.Unmarshal(res.Output, &out); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if out.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stderr=%q", out.ExitCode, out.Stderr)
+	}
+	if !out.VFSPathTranslated {
+		t.Fatalf("expected vfs path translation")
+	}
+	if !strings.Contains(out.VFSPathMounts, "skills") || !strings.Contains(out.VFSPathMounts, "workspace") {
+		t.Fatalf("unexpected translated mounts: %q", out.VFSPathMounts)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceDir, "a.pdf")); err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+}
+
+func TestBuiltinShellInvoker_TranslatesVFSPathsInBashCommandString(t *testing.T) {
+	projectDir := t.TempDir()
+	workspaceDir := t.TempDir()
+	skillsDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(workspaceDir, "x.md"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("write workspace file: %v", err)
+	}
+	scriptDir := filepath.Join(skillsDir, "reporting", "scripts")
+	if err := writeExecutable(scriptDir, "echo_path.sh", "#!/usr/bin/env bash\necho \"$1\"\n"); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	inv := NewBuiltinShellInvoker(projectDir, nil, "project")
+	inv.MountRoots["workspace"] = workspaceDir
+	inv.MountRoots["skills"] = skillsDir
+
+	req := toolReq(t, shellExecInput{
+		Argv: []string{"bash", "-c", "ls -la /workspace && /skills/reporting/scripts/echo_path.sh /workspace/x.md"},
+		Cwd:  ".",
+	})
+	res, err := inv.Invoke(context.Background(), req)
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	var out shellExecOutput
+	if err := json.Unmarshal(res.Output, &out); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if out.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stderr=%q", out.ExitCode, out.Stderr)
+	}
+	if !out.VFSPathTranslated {
+		t.Fatalf("expected vfs path translation")
+	}
+	if !strings.Contains(out.Stdout, "/workspace/x.md") {
+		t.Fatalf("expected translated-back vfs path in stdout, got %q", out.Stdout)
+	}
+}
+
+func TestBuiltinShellInvoker_TranslatesFlagValueVFSPath(t *testing.T) {
+	projectDir := t.TempDir()
+	workspaceDir := t.TempDir()
+	skillsDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(workspaceDir, "a.md"), []byte("a\n"), 0o644); err != nil {
+		t.Fatalf("write workspace input: %v", err)
+	}
+	scriptDir := filepath.Join(skillsDir, "reporting", "scripts")
+	script := "#!/usr/bin/env bash\nin=\"$1\"\nout=\"${2#--output=}\"\ncp \"$in\" \"$out\"\n"
+	if err := writeExecutable(scriptDir, "md_to_pdf.sh", script); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	inv := NewBuiltinShellInvoker(projectDir, nil, "project")
+	inv.MountRoots["workspace"] = workspaceDir
+	inv.MountRoots["skills"] = skillsDir
+
+	req := toolReq(t, shellExecInput{
+		Argv: []string{"bash", "/skills/reporting/scripts/md_to_pdf.sh", "/workspace/a.md", "--output=/workspace/a.pdf"},
+		Cwd:  ".",
+	})
+	res, err := inv.Invoke(context.Background(), req)
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	var out shellExecOutput
+	if err := json.Unmarshal(res.Output, &out); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if out.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stderr=%q", out.ExitCode, out.Stderr)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceDir, "a.pdf")); err != nil {
+		t.Fatalf("expected output file: %v", err)
+	}
+}
+
+func TestBuiltinShellInvoker_BlocksUnknownAbsolutePathInBashCommand(t *testing.T) {
+	projectDir := t.TempDir()
+	inv := NewBuiltinShellInvoker(projectDir, nil, "project")
+	req := toolReq(t, shellExecInput{
+		Argv: []string{"bash", "-c", "ls -la /etc >/dev/null"},
+		Cwd:  ".",
+	})
+	if _, err := inv.Invoke(context.Background(), req); err == nil {
+		t.Fatalf("expected unknown absolute path to be rejected")
 	}
 }
 

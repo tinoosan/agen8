@@ -252,16 +252,16 @@ type HostOpResponse struct {
 	Stdout   string `json:"stdout,omitempty"`
 	Stderr   string `json:"stderr,omitempty"`
 	// HTTP response
-	FinalURL      string              `json:"finalUrl,omitempty"`
-	Status        int                 `json:"status,omitempty"`
-	Headers       map[string][]string `json:"headers,omitempty"`
-	ContentType   string              `json:"contentType,omitempty"`
-	BytesRead     int                 `json:"bytesRead,omitempty"`
-	Body          string              `json:"body,omitempty"`
-	BodyTruncated bool                `json:"bodyTruncated,omitempty"`
-	Warning       string              `json:"warning,omitempty"`
-	VFSPathTranslated bool            `json:"vfsPathTranslated,omitempty"`
-	VFSPathMounts     string          `json:"vfsPathMounts,omitempty"`
+	FinalURL          string              `json:"finalUrl,omitempty"`
+	Status            int                 `json:"status,omitempty"`
+	Headers           map[string][]string `json:"headers,omitempty"`
+	ContentType       string              `json:"contentType,omitempty"`
+	BytesRead         int                 `json:"bytesRead,omitempty"`
+	Body              string              `json:"body,omitempty"`
+	BodyTruncated     bool                `json:"bodyTruncated,omitempty"`
+	Warning           string              `json:"warning,omitempty"`
+	VFSPathTranslated bool                `json:"vfsPathTranslated,omitempty"`
+	VFSPathMounts     string              `json:"vfsPathMounts,omitempty"`
 	// Shell script mitigation telemetry
 	ScriptPathNormalized bool   `json:"scriptPathNormalized,omitempty"`
 	ScriptAntiPattern    string `json:"scriptAntiPattern,omitempty"`
