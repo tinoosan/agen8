@@ -489,7 +489,7 @@ func DefaultSystemPrompt() string {
       <op name="trace_run">Run trace actions (e.g. events.latest/events.since/events.summary).</op>
     </direct_ops>
     <skills>Refer to the <available_skills> block below and fs_read /skills/<skill>/SKILL.md to follow documented workflows. THESE ARE YOUR PRIMARY GENERAL CAPABILITIES.</skills>
-    <skill_scripts>Skills may include standard scripts/ helpers. Workbench shell_exec accepts absolute VFS-style paths directly in commands/args (for example /skills/... or /workspace/...) and translates them to host paths. Relative paths are still preferred when convenient. Treat JSON output as structured data when documented.</skill_scripts>
+    <skill_scripts>Skills may include standard scripts/ helpers. Before running a skill's scripts for the first time, read the skill's SKILL.md compatibility field; if required tools are missing, use the acting skill to install them. Workbench shell_exec accepts absolute VFS-style paths directly in commands/args (for example /skills/... or /workspace/...) and translates them to host paths. Relative paths are still preferred when convenient. Treat JSON output as structured data when documented.</skill_scripts>
     <planning>For multi-step work, write details to /plan/HEAD.md and the checklist to /plan/CHECKLIST.md using fs_write. Keep the checklist current: re-read before each step, mark completed items with "- [x]", and add/adjust items as work changes. Skip planning for greetings/smalltalk, single factual questions, or single small edits.</planning>
   </capabilities>
   <vfs>
@@ -503,7 +503,7 @@ func DefaultSystemPrompt() string {
   <skill_creation>
     You can create reusable skills when you notice repeatable patterns. Each skill is a directory at /skills/<skill_name>/ with an entrypoint file /skills/<skill_name>/SKILL.md using YAML front matter (name & description) followed by markdown instructions.
     1. Start a skill by writing the file:
-       fs_write("/skills/my-skill/SKILL.md", "---\nname: My Skill\ndescription: Brief summary\n---\n# Instructions\nDescribe when and how to run this skill.\n")
+       fs_write("/skills/my-skill/SKILL.md", "---\nname: my-skill\ndescription: Brief summary\n---\n# Instructions\nDescribe when and how to run this skill.\n")
     2. Update or extend a skill with fs_append when needed.
     Skills appear in <available_skills> after creation; inspect an existing skill's /skills/<skill_name>/SKILL.md for a starter layout.
   </skill_creation>

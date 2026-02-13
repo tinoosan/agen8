@@ -214,16 +214,18 @@ func (m *Manager) loadSkillFile(skillName, skillDir, skillFilePath string) (*Ski
 		return nil, err
 	}
 	return &Skill{
-		Name:        defaultIfBlank(strings.TrimSpace(meta.Name), skillName),
-		Description: strings.TrimSpace(meta.Description),
-		Dir:         skillDir,
-		Path:        skillFilePath,
+		Name:          defaultIfBlank(strings.TrimSpace(meta.Name), skillName),
+		Description:   strings.TrimSpace(meta.Description),
+		Compatibility: strings.TrimSpace(meta.Compatibility),
+		Dir:           skillDir,
+		Path:          skillFilePath,
 	}, nil
 }
 
 type skillFrontMatter struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
+	Name          string `yaml:"name"`
+	Description   string `yaml:"description"`
+	Compatibility string `yaml:"compatibility"`
 }
 
 func parseSkillFrontMatter(data []byte) (skillFrontMatter, error) {
