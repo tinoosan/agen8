@@ -1,6 +1,7 @@
 ---
-name: Reporting
+name: reporting
 description: Produce concise, structured writeups and status updates suitable for handoff.
+compatibility: Requires pandoc for format conversion. Optional: python3, matplotlib for chart generation.
 ---
 
 # Instructions

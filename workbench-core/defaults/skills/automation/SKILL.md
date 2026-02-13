@@ -1,6 +1,7 @@
 ---
-name: Automation
+name: automation
 description: Design, build, and maintain automated workflows that save time, reduce errors, and run reliably without manual intervention.
+compatibility: Requires bash, curl. Supports macOS (launchd) and Linux (cron) for scheduling.
 ---
 
 # Instructions

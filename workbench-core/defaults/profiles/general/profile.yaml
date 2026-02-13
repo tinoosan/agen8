@@ -6,6 +6,7 @@ skills:
   - acting
   - planning
   - data-engineering
+  - automation
 prompts:
   system_prompt_path: prompt.md
 heartbeat:
