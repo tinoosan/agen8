@@ -198,3 +198,26 @@ When something looks wrong in the report, lineage lets you trace back to the sou
 - Exploratory data analysis (analyze first, pipeline later)
 - Simple file operations (use automation)
 - Real-time event processing (different architecture — use coding skill for application-level event handling)
+
+## Scripts
+
+This skill includes helper scripts in the `scripts/` directory for common data operations.
+
+| Script | Purpose | Example |
+|--------|---------|---------|
+| `csv_validate.py` | Validate CSV against schema or auto-detect issues | `python3 scripts/csv_validate.py data.csv --schema schema.json` |
+| `convert_format.py` | Convert between JSON ↔ CSV (with nested JSON flattening) | `python3 scripts/convert_format.py data.json --to csv --flatten` |
+| `db_connect.py` | Test database connectivity and inspect schemas | `python3 scripts/db_connect.py sqlite:///data.db --tables` |
+| `data_profile.py` | Profile a dataset: types, stats, quality flags | `python3 scripts/data_profile.py data.csv --output profile.json` |
+
+**Validation schema format** (JSON):
+```json
+{
+  "columns": {
+    "id": {"type": "int", "required": true, "unique": true},
+    "email": {"type": "str", "pattern": ".*@.*"}
+  }
+}
+```
+
+**DB support**: SQLite (stdlib), PostgreSQL (`psycopg2`), MySQL (`mysql-connector-python`)

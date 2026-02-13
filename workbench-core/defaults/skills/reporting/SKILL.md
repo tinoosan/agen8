@@ -244,3 +244,25 @@ Use visual indicators:
 - Personal notes/scratch work (use memory instead)
 - Code documentation (belongs in code comments/README)
 - Real-time collaboration (use chat/whiteboard instead)
+
+## Scripts
+
+This skill includes helper scripts in the `scripts/` directory for converting reports to deliverable formats.
+
+| Script | Purpose | Example |
+|--------|---------|---------|
+| `md_to_pdf.sh` | Convert Markdown to PDF | `./scripts/md_to_pdf.sh report.md --style github` |
+| `md_to_docx.sh` | Convert Markdown to Word | `./scripts/md_to_docx.sh report.md --toc` |
+| `md_to_html.sh` | Convert Markdown to styled HTML | `./scripts/md_to_html.sh report.md --style dark --title "Q2 Report"` |
+| `chart_gen.py` | Generate charts from CSV/JSON data | `python3 scripts/chart_gen.py data.csv --type bar --x month --y revenue` |
+
+**Workflow**: Write the report as Markdown, then use scripts to convert to the target format.
+
+**Styles available** for HTML/PDF: `default`, `github`, `dark`, `minimal`
+
+**Chart types**: `bar`, `hbar`, `line`, `area`, `scatter`, `pie` — add `--dark` for dark mode.
+
+**Dependencies** (auto-detected with fallbacks):
+- PDF: `pandoc` + LaTeX, or `weasyprint`, or `markdown` (HTML fallback)
+- DOCX: `pandoc`, or `python-docx`
+- Charts: `matplotlib`

@@ -239,3 +239,21 @@ When direct data is unavailable, use comparables:
 - Quick back-of-envelope math (just do it)
 - Purely qualitative assessments (use planning or reporting)
 - Non-financial research (use hybrid_web or market_monitoring)
+
+## Scripts
+
+This skill includes helper scripts in the `scripts/` directory. Use `shell_exec` to run them.
+
+| Script | Purpose | Example |
+|--------|---------|---------|
+| `fetch_stock_data.py` | Fetch stock quotes and price history | `python3 scripts/fetch_stock_data.py AAPL --history 30` |
+| `fetch_edgar_filing.py` | Download SEC EDGAR filings (10-K, 10-Q) | `python3 scripts/fetch_edgar_filing.py AAPL --type 10-K` |
+| `calculate_dcf.py` | DCF valuation with sensitivity analysis | `python3 scripts/calculate_dcf.py --cash-flows 100 110 121 --discount-rate 0.10 --terminal-growth 0.02` |
+| `currency_convert.sh` | Real-time currency conversion | `./scripts/currency_convert.sh 1000 USD GBP` |
+
+**Environment variables** (optional, enables richer data sources):
+- `ALPHA_VANTAGE_API_KEY` – Alpha Vantage market data
+- `FINNHUB_API_KEY` – Finnhub real-time quotes
+- `POLYGON_API_KEY` – Polygon.io historical data
+- `EXCHANGE_RATE_API_KEY` – Exchange rate API
+- `SEC_USER_AGENT` – SEC EDGAR identity (format: `"Name email@example.com"`)

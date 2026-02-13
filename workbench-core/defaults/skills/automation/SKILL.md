@@ -254,3 +254,25 @@ Only act when something actually changed:
 - Tasks requiring human judgment at every step (automate the routine parts, not the decisions)
 - Exploratory work where the process isn't yet defined (figure out the process first)
 - Tasks that change shape frequently (the automation will constantly break)
+
+## Scripts
+
+This skill includes utility scripts in the `scripts/` directory and examples in `examples/`.
+
+### Utilities
+
+| Script | Purpose | Example |
+|--------|---------|---------|
+| `retry.sh` | Retry any command with backoff | `./scripts/retry.sh 3 --backoff exponential curl -sf https://api.example.com` |
+| `health_check.sh` | Check HTTP, TCP, file, or command health | `./scripts/health_check.sh https://api.example.com/health` |
+| `cron_setup.sh` | Manage cron jobs (add/list/remove) | `./scripts/cron_setup.sh --add "0 9 * * 1-5" "./run.sh" --name daily-job` |
+
+### Examples
+
+| Example | Purpose |
+|---------|---------|
+| `examples/daily_report.sh` | Template for a daily automated report workflow |
+
+**Health check modes**: HTTP endpoint, TCP port, PID file, arbitrary command, or JSON config for batch checks.
+
+**Cron setup**: On macOS, add `--launchd` to create a launchd plist instead of a cron entry.

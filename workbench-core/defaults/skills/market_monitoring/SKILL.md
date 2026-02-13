@@ -218,3 +218,21 @@ Match monitoring cadence to signal velocity:
 - Deep financial analysis on a single entity (use financial_analysis)
 - Writing up findings for stakeholders (use reporting)
 - Building a strategy from scratch (use planning)
+
+## Scripts
+
+This skill includes helper scripts in the `scripts/` directory for automated data gathering.
+
+| Script | Purpose | Example |
+|--------|---------|---------|
+| `fetch_news.py` | Fetch news headlines (NewsAPI → GNews → Google RSS) | `python3 scripts/fetch_news.py "AI startups" --limit 20` |
+| `rss_poll.py` | Monitor RSS/Atom feeds with state tracking | `python3 scripts/rss_poll.py --feeds feeds.txt --state state.json` |
+| `price_check.sh` | Quick stock/crypto price check | `./scripts/price_check.sh AAPL MSFT BTC-USD` |
+| `diff_webpage.py` | Detect changes on a webpage over time | `python3 scripts/diff_webpage.py https://example.com/pricing` |
+
+**Environment variables** (optional):
+- `NEWS_API_KEY` – NewsAPI.org for richer news search
+- `GNEWS_API_KEY` – GNews.io fallback
+- `FINNHUB_API_KEY` – Finnhub for real-time stock quotes
+
+**Monitoring workflow**: Use `rss_poll.py` with `--state` to track which entries have been seen. Re-running only returns new entries. Combine with `diff_webpage.py` to track competitor page changes.
