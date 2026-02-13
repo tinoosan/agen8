@@ -47,16 +47,7 @@ func standaloneVisibleArtifactVPath(vpath string) bool {
 		return false
 	}
 	rel := strings.TrimSpace(strings.TrimPrefix(vpath, "/workspace/"))
-	if rel == "" {
-		return false
-	}
-	if strings.HasPrefix(rel, "tasks/") || strings.HasPrefix(rel, "deliverables/") {
-		base := strings.TrimSpace(filepath.Base(rel))
-		if strings.EqualFold(base, "SUMMARY.md") {
-			return false
-		}
-	}
-	return true
+	return rel != ""
 }
 
 func filterStandaloneArtifactGroups(groups []state.ArtifactGroup) []state.ArtifactGroup {

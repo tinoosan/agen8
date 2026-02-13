@@ -126,3 +126,78 @@ func TestSearchArtifacts_GlobalAndScoped(t *testing.T) {
 		t.Fatalf("expected 1 scoped match, got %d", len(scoped))
 	}
 }
+
+func TestBackfillArtifactIndex_ReconcilesMissingSummaryRows(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewSQLiteTaskStore(filepath.Join(dir, "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	taskID := "task-standalone-1"
+	if err := s.CreateTask(ctx, types.Task{
+		TaskID:    taskID,
+		SessionID: "sess-1",
+		RunID:     "run-1",
+		Goal:      "reconcile artifacts",
+		Status:    types.TaskStatusPending,
+		CreatedAt: &now,
+		Inputs:    map[string]any{},
+		Metadata:  map[string]any{},
+		CreatedBy: "user",
+		TaskKind:  TaskKindTask,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	done := now.Add(2 * time.Second)
+	summaryVPath := "/workspace/tasks/2026-02-08/" + taskID + "/SUMMARY.md"
+	reportVPath := "/workspace/tasks/2026-02-08/" + taskID + "/report.md"
+	if err := s.CompleteTask(ctx, taskID, types.TaskResult{
+		TaskID:      taskID,
+		Status:      types.TaskStatusSucceeded,
+		Summary:     "ok",
+		CompletedAt: &done,
+		Artifacts:   []string{summaryVPath, reportVPath},
+	}); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+
+	db, err := s.dbConn()
+	if err != nil {
+		t.Fatalf("dbConn: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM artifacts WHERE task_id = ? AND vpath = ?`, taskID, summaryVPath); err != nil {
+		t.Fatalf("delete summary row: %v", err)
+	}
+
+	before, err := s.ListArtifactsByTask(ctx, ArtifactFilter{TaskID: taskID})
+	if err != nil {
+		t.Fatalf("ListArtifactsByTask(before): %v", err)
+	}
+	if len(before) != 1 {
+		t.Fatalf("expected 1 artifact before reconcile, got %d", len(before))
+	}
+
+	if err := s.backfillArtifactIndex(ctx, db); err != nil {
+		t.Fatalf("backfillArtifactIndex: %v", err)
+	}
+
+	after, err := s.ListArtifactsByTask(ctx, ArtifactFilter{TaskID: taskID})
+	if err != nil {
+		t.Fatalf("ListArtifactsByTask(after): %v", err)
+	}
+	if len(after) != 2 {
+		t.Fatalf("expected 2 artifacts after reconcile, got %d", len(after))
+	}
+	foundSummary := false
+	for _, row := range after {
+		if strings.EqualFold(strings.TrimSpace(row.VPath), summaryVPath) && row.IsSummary {
+			foundSummary = true
+			break
+		}
+	}
+	if !foundSummary {
+		t.Fatalf("expected summary artifact row after reconcile, got %+v", after)
+	}
+}

@@ -326,6 +326,71 @@ func TestRPCServer_ArtifactList_RunScope(t *testing.T) {
 	}
 }
 
+func TestRPCServer_ArtifactList_StandaloneIncludesSummaryNode(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	now := time.Now().UTC()
+	taskID := "task-summary-1"
+	task := types.Task{
+		TaskID:    taskID,
+		SessionID: run.SessionID,
+		RunID:     run.RunID,
+		Goal:      "summary only artifact",
+		Status:    types.TaskStatusPending,
+		CreatedAt: &now,
+		Inputs:    map[string]any{},
+		Metadata:  map[string]any{},
+		CreatedBy: "user",
+		TaskKind:  "task",
+	}
+	if err := ts.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	done := now.Add(1 * time.Second)
+	summaryVPath := "/workspace/tasks/2026-02-08/" + taskID + "/SUMMARY.md"
+	if err := ts.CompleteTask(context.Background(), task.TaskID, types.TaskResult{
+		TaskID:      task.TaskID,
+		Status:      types.TaskStatusSucceeded,
+		Summary:     "ok",
+		CompletedAt: &done,
+		Artifacts:   []string{summaryVPath},
+	}); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskStore: ts, Session: sessStore, Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodArtifactList, protocol.ArtifactListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+	var res protocol.ArtifactListResult
+	if err := json.Unmarshal(resp.Result, &res); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	foundSummary := false
+	for _, n := range res.Nodes {
+		if n.Kind == "file" && strings.EqualFold(strings.TrimSpace(n.VPath), summaryVPath) && n.IsSummary {
+			foundSummary = true
+			break
+		}
+	}
+	if !foundSummary {
+		t.Fatalf("expected summary file node in standalone artifact list, got %+v", res.Nodes)
+	}
+}
+
 func TestRPCServer_ArtifactList_StandaloneSessionIncludesAllRuns(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")
