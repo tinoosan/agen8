@@ -211,6 +211,77 @@ func cursorDebugLog(hypothesisId, location, message string, data map[string]any)
 	// #endregion
 }
 
+type responsesInputBuildStats struct {
+	toolMsgN           int
+	assistantToolCallN int
+	functionCallIDs    []string
+	functionOutputIDs  []string
+}
+
+func buildResponsesInputItems(
+	messages []types.LLMMessage,
+	canonicalRoleFn func(string) (CanonicalRole, error),
+) ([]responses.ResponseInputItemUnionParam, responsesInputBuildStats, error) {
+	items := make([]responses.ResponseInputItemUnionParam, 0, len(messages))
+	stats := responsesInputBuildStats{}
+	for _, m := range messages {
+		role, err := canonicalRoleFn(m.Role)
+		if err != nil {
+			return nil, responsesInputBuildStats{}, err
+		}
+		if role == RoleTool {
+			stats.toolMsgN++
+			callID := strings.TrimSpace(m.ToolCallID)
+			if callID == "" {
+				return nil, responsesInputBuildStats{}, fmt.Errorf("tool message requires toolCallID")
+			}
+			stats.functionOutputIDs = append(stats.functionOutputIDs, callID)
+			items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(callID, m.Content))
+			continue
+		}
+
+		switch role {
+		case RoleCompaction:
+			enc := strings.TrimSpace(m.Content)
+			if enc == "" {
+				return nil, responsesInputBuildStats{}, fmt.Errorf("compaction message requires encrypted content")
+			}
+			items = append(items, responses.ResponseInputItemParamOfCompaction(enc))
+			continue
+		case RoleSystem, RoleDeveloper, RoleAssistant, RoleUser:
+			rrole := responses.EasyInputMessageRoleUser
+			if role == RoleSystem {
+				rrole = responses.EasyInputMessageRoleSystem
+			} else if role == RoleDeveloper {
+				rrole = responses.EasyInputMessageRoleDeveloper
+			} else if role == RoleAssistant {
+				rrole = responses.EasyInputMessageRoleAssistant
+			}
+			items = append(items, responses.ResponseInputItemParamOfMessage(m.Content, rrole))
+		default:
+			return nil, responsesInputBuildStats{}, fmt.Errorf("unsupported message role %q", m.Role)
+		}
+
+		// If the assistant message carried tool calls, include them as function_call items.
+		for _, tc := range m.ToolCalls {
+			if strings.TrimSpace(strings.ToLower(tc.Type)) != "function" {
+				continue
+			}
+			stats.assistantToolCallN++
+			callID := strings.TrimSpace(tc.ID)
+			name := strings.TrimSpace(tc.Function.Name)
+			args := tc.Function.Arguments
+			if callID == "" || name == "" {
+				continue
+			}
+			stats.functionCallIDs = append(stats.functionCallIDs, callID)
+			items = append(items, responses.ResponseInputItemParamOfFunctionCall(args, callID, name))
+		}
+	}
+
+	return items, stats, nil
+}
+
 func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewParams, error) {
 	if c == nil || c.client == nil {
 		return openai.ChatCompletionNewParams{}, fmt.Errorf("llm client is nil")
@@ -547,62 +618,9 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	// #endregion
 
 	// Build input items. For tool calling, we encode tool results as function_call_output items.
-	items := make(responses.ResponseInputParam, 0, len(msgs))
-	toolMsgN := 0
-	assistantToolCallN := 0
-	var functionCallIDs []string
-	var functionCallOutputIDs []string
-	for _, m := range msgs {
-		role, err := c.canonicalRole(m.Role)
-		if err != nil {
-			return responses.ResponseNewParams{}, err
-		}
-		if role == RoleTool {
-			toolMsgN++
-			callID := strings.TrimSpace(m.ToolCallID)
-			if callID == "" {
-				return responses.ResponseNewParams{}, fmt.Errorf("tool message requires toolCallID")
-			}
-			functionCallOutputIDs = append(functionCallOutputIDs, callID)
-			items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(callID, m.Content))
-			continue
-		}
-		rrole := responses.EasyInputMessageRoleUser
-		switch role {
-		case RoleSystem:
-			rrole = responses.EasyInputMessageRoleSystem
-		case RoleDeveloper:
-			rrole = responses.EasyInputMessageRoleDeveloper
-		case RoleAssistant:
-			rrole = responses.EasyInputMessageRoleAssistant
-		case RoleCompaction:
-			enc := strings.TrimSpace(m.Content)
-			if enc == "" {
-				return responses.ResponseNewParams{}, fmt.Errorf("compaction message requires encrypted content")
-			}
-			items = append(items, responses.ResponseInputItemParamOfCompaction(enc))
-			continue
-		case RoleUser:
-			rrole = responses.EasyInputMessageRoleUser
-		default:
-			return responses.ResponseNewParams{}, fmt.Errorf("unsupported message role %q", m.Role)
-		}
-		items = append(items, responses.ResponseInputItemParamOfMessage(m.Content, rrole))
-		// If the assistant message carried tool calls, include them as function_call items.
-		for _, tc := range m.ToolCalls {
-			if strings.TrimSpace(strings.ToLower(tc.Type)) != "function" {
-				continue
-			}
-			assistantToolCallN++
-			callID := strings.TrimSpace(tc.ID)
-			name := strings.TrimSpace(tc.Function.Name)
-			args := tc.Function.Arguments
-			if callID == "" || name == "" {
-				continue
-			}
-			functionCallIDs = append(functionCallIDs, callID)
-			items = append(items, responses.ResponseInputItemParamOfFunctionCall(args, callID, name))
-		}
+	items, stats, err := buildResponsesInputItems(msgs, c.canonicalRole)
+	if err != nil {
+		return responses.ResponseNewParams{}, err
 	}
 
 	// #region agent log
@@ -613,21 +631,21 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 		"previousResponseID": strings.TrimSpace(req.PreviousResponseID) != "",
 		"prevIDUsed":         previousResponseID != "",
 		"msgsLenSent":        len(msgs),
-		"toolMsgN":           toolMsgN,
-		"assistantToolCallN": assistantToolCallN,
+		"toolMsgN":           stats.toolMsgN,
+		"assistantToolCallN": stats.assistantToolCallN,
 		"toolsLen":           len(req.Tools),
 		"toolChoice":         strings.TrimSpace(req.ToolChoice),
 	})
 	debuglog.Log("toolcalling", "H7", "openai_client.go:buildResponseParams", "responses_input_call_ids", map[string]any{
-		"functionCallN":       len(functionCallIDs),
-		"functionCallOutputN": len(functionCallOutputIDs),
+		"functionCallN":       len(stats.functionCallIDs),
+		"functionCallOutputN": len(stats.functionOutputIDs),
 	})
 	// #endregion
 
 	params := responses.ResponseNewParams{
 		Model: shared.ResponsesModel(req.Model),
 		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: items,
+			OfInputItemList: responses.ResponseInputParam(items),
 		},
 	}
 	if previousResponseID != "" {
@@ -1024,52 +1042,9 @@ func (c *Client) CompactConversation(ctx context.Context, req types.LLMCompactio
 	if strings.TrimSpace(req.Model) == "" {
 		return types.LLMCompactionResponse{}, fmt.Errorf("model is required")
 	}
-	input := make([]responses.ResponseInputItemUnionParam, 0, len(req.Messages))
-	for _, m := range req.Messages {
-		role, err := c.canonicalRole(m.Role)
-		if err != nil {
-			return types.LLMCompactionResponse{}, err
-		}
-		if role == RoleTool {
-			callID := strings.TrimSpace(m.ToolCallID)
-			if callID == "" {
-				return types.LLMCompactionResponse{}, fmt.Errorf("tool message requires toolCallID")
-			}
-			input = append(input, responses.ResponseInputItemParamOfFunctionCallOutput(callID, m.Content))
-			continue
-		}
-		switch role {
-		case RoleCompaction:
-			enc := strings.TrimSpace(m.Content)
-			if enc == "" {
-				return types.LLMCompactionResponse{}, fmt.Errorf("compaction message requires encrypted content")
-			}
-			input = append(input, responses.ResponseInputItemParamOfCompaction(enc))
-		case RoleSystem, RoleDeveloper, RoleAssistant, RoleUser:
-			r := responses.EasyInputMessageRoleUser
-			if role == RoleSystem {
-				r = responses.EasyInputMessageRoleSystem
-			} else if role == RoleDeveloper {
-				r = responses.EasyInputMessageRoleDeveloper
-			} else if role == RoleAssistant {
-				r = responses.EasyInputMessageRoleAssistant
-			}
-			input = append(input, responses.ResponseInputItemParamOfMessage(m.Content, r))
-			for _, tc := range m.ToolCalls {
-				if strings.TrimSpace(strings.ToLower(tc.Type)) != "function" {
-					continue
-				}
-				callID := strings.TrimSpace(tc.ID)
-				name := strings.TrimSpace(tc.Function.Name)
-				args := tc.Function.Arguments
-				if callID == "" || name == "" {
-					continue
-				}
-				input = append(input, responses.ResponseInputItemParamOfFunctionCall(args, callID, name))
-			}
-		default:
-			return types.LLMCompactionResponse{}, fmt.Errorf("unsupported message role %q", m.Role)
-		}
+	input, _, err := buildResponsesInputItems(req.Messages, c.canonicalRole)
+	if err != nil {
+		return types.LLMCompactionResponse{}, err
 	}
 
 	params := responses.ResponseCompactParams{
