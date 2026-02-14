@@ -1,7 +1,7 @@
 ---
 name: financial-analysis
 description: Evaluate financial performance, model economics, assess deals, and support decisions with data-driven financial frameworks.
-compatibility: Requires python3, requests, curl. Optional: numpy for DCF sensitivity analysis.
+compatibility: "Requires python3, requests, curl. Optional numpy for DCF sensitivity analysis."
 ---
 
 # Instructions

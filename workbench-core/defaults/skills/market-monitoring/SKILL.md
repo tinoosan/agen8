@@ -1,7 +1,7 @@
 ---
 name: market-monitoring
 description: Track markets, industries, competitors, and trends systematically — surfacing signals, changes, and actionable updates.
-compatibility: Requires python3, requests, curl, jq. Optional: feedparser for RSS polling.
+compatibility: "Requires python3, requests, curl, jq. Optional feedparser for RSS polling."
 ---
 
 # Instructions
