@@ -3,6 +3,7 @@ package resources
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
@@ -21,6 +22,19 @@ func NewWorkspace(cfg config.Config, runID string) (*DirResource, error) {
 	}
 
 	baseDir := fsutil.GetWorkspaceDir(cfg.DataDir, runID)
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return nil, fmt.Errorf("error creating workspace directory %s: %w", baseDir, err)
+	}
+	return NewDirResource(baseDir, vfs.MountWorkspace)
+}
+
+// NewWorkspaceFromRunDir creates a workspace resource under the given run root directory.
+// Use this when the run dir is already computed (e.g. via fsutil.GetRunDir for child runs).
+func NewWorkspaceFromRunDir(runDir string) (*DirResource, error) {
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		return nil, fmt.Errorf("error creating run directory %s: %w", runDir, err)
+	}
+	baseDir := filepath.Join(runDir, "workspace")
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("error creating workspace directory %s: %w", baseDir, err)
 	}

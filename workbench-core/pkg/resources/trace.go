@@ -53,6 +53,28 @@ func NewTraceResource(cfg config.Config, runID string) (*TraceResource, error) {
 	}, nil
 }
 
+// NewTraceResourceFromRunDir creates a trace resource with log dir under the given run root.
+// Use when the run dir is already computed (e.g. via fsutil.GetRunDir for child runs).
+func NewTraceResourceFromRunDir(cfg config.Config, runDir, runID string) (*TraceResource, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validate.NonEmpty("runID", runID); err != nil {
+		return nil, err
+	}
+	baseDir := fsutil.GetLogDirFromRunDir(runDir)
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return nil, fmt.Errorf("error creating trace directory %s: %w", baseDir, err)
+	}
+	return &TraceResource{
+		ReadOnlyResource: vfs.ReadOnlyResource{Name: "trace"},
+		Cfg:              cfg,
+		BaseDir:          baseDir,
+		Mount:            vfs.MountLog,
+		RunID:            runID,
+	}, nil
+}
+
 func (tr *TraceResource) SupportsNestedList() bool {
 	return false
 }

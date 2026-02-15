@@ -241,6 +241,11 @@ func classifyEvent(ev events.Event) RenderResult {
 
 func renderOpRequest(d map[string]string) string {
 	op := strings.TrimSpace(d["op"])
+	tag := strings.TrimSpace(d["tag"])
+
+	if tag == "task_create" || op == "task_create" {
+		return "Create task" // Simple description for the request
+	}
 
 	switch op {
 	case "browser":
@@ -315,12 +320,23 @@ func listPreview(items []string, maxItems int) string {
 
 func renderOpResponse(d map[string]string) string {
 	op := strings.TrimSpace(d["op"])
+	tag := strings.TrimSpace(d["tag"])
 	ok := strings.TrimSpace(d["ok"])
 	errStr := strings.TrimSpace(d["err"])
 
 	prefix := "✓"
 	if ok != "true" {
 		prefix = "✗"
+	}
+
+	if tag == "task_create" {
+		if ok == "true" {
+			return prefix + " " + strings.TrimSpace(d["text"])
+		}
+		if errStr != "" {
+			return prefix + " " + errStr
+		}
+		return prefix + " task creation failed"
 	}
 
 	switch op {
@@ -484,6 +500,9 @@ func actionStatusIcon(d map[string]string) (string, bool) {
 
 func actionCategory(op string) string {
 	trimmed := strings.TrimSpace(op)
+	// We can't easily access the tag here without changing the signature, but for now
+	// task_create uses 'noop' op, so it will fall through to 'Action'.
+	// Ideally we'd pass the whole event data map.
 	if strings.HasPrefix(trimmed, "browser.") {
 		return "Browsed"
 	}

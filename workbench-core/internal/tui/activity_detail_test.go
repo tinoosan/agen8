@@ -133,3 +133,29 @@ func TestRenderActivityDetailMarkdown_AgentSpawnArgumentsAndOutput(t *testing.T)
 		}
 	}
 }
+
+func TestRenderActivityDetailMarkdown_TaskCreate(t *testing.T) {
+	a := Activity{
+		Kind:   "task_create",
+		Status: ActivityOK,
+		Ok:     "true",
+		Data: map[string]string{
+			"goal":       "Implement the login flow",
+			"taskId":     "task-20250101T120000Z-abc",
+			"childRunId": "run-child-1",
+			"output":     "Task task-20250101T120000Z-abc created and worker agent spawned",
+		},
+	}
+
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- goal: `Implement the login flow`",
+		"- taskId: `task-20250101T120000Z-abc`",
+		"- childRunId: `run-child-1`",
+		"Task task-20250101T120000Z-abc created and worker agent spawned",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in task_create markdown, got:\n%s", want, md)
+		}
+	}
+}

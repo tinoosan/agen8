@@ -2,23 +2,30 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
+	"github.com/tinoosan/workbench-core/pkg/protocol"
+	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
+	"github.com/tinoosan/workbench-core/pkg/timeutil"
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 type newSessionWizardItem struct {
-	mode  string
-	title string
-	desc  string
+	mode      string
+	title     string
+	desc      string
+	sessionID string
+	runID     string
 }
 
 func (i newSessionWizardItem) Title() string       { return i.title }
 func (i newSessionWizardItem) Description() string { return i.desc }
 func (i newSessionWizardItem) FilterValue() string {
-	return strings.TrimSpace(i.mode + " " + i.title + " " + i.desc)
+	return strings.TrimSpace(i.mode + " " + i.title + " " + i.desc + " " + i.sessionID)
 }
 
 func (m *monitorModel) openNewSessionWizard() tea.Cmd {
@@ -48,10 +55,33 @@ func (m *monitorModel) openNewSessionWizard() tea.Cmd {
 		m.closeFilePicker()
 	}
 
-	items := []list.Item{
-		newSessionWizardItem{mode: "standalone", title: "Standalone Session", desc: "single agent; choose profile and start"},
-		newSessionWizardItem{mode: "team", title: "Team Session", desc: "multi-role team; profile is immutable"},
+	var items []list.Item
+	if m.session != nil {
+		if sessions, err := m.session.ListSessionsPaginated(m.ctx, pkgstore.SessionFilter{
+			Limit:    5,
+			SortBy:   "updated_at",
+			SortDesc: true,
+		}); err == nil {
+			for _, s := range sessions {
+				title := strings.TrimSpace(s.Title)
+				if title == "" {
+					title = "Untitled Session"
+				}
+				items = append(items, newSessionWizardItem{
+					mode:      "resume",
+					title:     "Resume: " + truncateText(title, 40),
+					desc:      "Last active: " + timeutil.Since(timeutil.OrNow(s.UpdatedAt)).Round(time.Second).String(),
+					sessionID: s.SessionID,
+				})
+			}
+		}
 	}
+
+	items = append(items,
+		newSessionWizardItem{mode: "standalone", title: "New Standalone Session", desc: "single agent; choose profile and start"},
+		newSessionWizardItem{mode: "team", title: "New Team Session", desc: "multi-role team; profile is immutable"},
+	)
+
 	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "New Session Wizard"
 	l.SetShowHelp(false)
@@ -82,6 +112,66 @@ func (m *monitorModel) updateNewSessionWizard(msg tea.KeyMsg) (tea.Model, tea.Cm
 			return m, nil
 		}
 		m.closeNewSessionWizard()
+
+		if strings.EqualFold(strings.TrimSpace(item.mode), "resume") {
+			targetSessionID := strings.TrimSpace(item.sessionID)
+			if targetSessionID == "" {
+				return m, nil
+			}
+			// Use the session picker logic to find the best run to resume
+			// We can trigger the picker logic manually or replicate it.
+			// Replicating for now to keep wizard self-contained.
+			return m, func() tea.Msg {
+				sess, err := m.session.LoadSession(m.ctx, targetSessionID)
+				if err != nil {
+					return commandLinesMsg{lines: []string{"[error] failed to load session: " + err.Error()}}
+				}
+				if strings.TrimSpace(sess.TeamID) != "" {
+					return monitorSwitchTeamMsg{TeamID: strings.TrimSpace(sess.TeamID)}
+				}
+
+				// Find best run
+				var agents protocol.AgentListResult
+				if err := m.rpcRoundTrip(protocol.MethodAgentList, protocol.AgentListParams{
+					ThreadID:  protocol.ThreadID(targetSessionID),
+					SessionID: targetSessionID,
+				}, &agents); err != nil {
+					return commandLinesMsg{lines: []string{"[error] failed to list agents: " + err.Error()}}
+				}
+
+				var bestRunID string
+				var bestScore int
+
+				for _, ag := range agents.Agents {
+					candidate := strings.TrimSpace(ag.RunID)
+					if candidate == "" {
+						continue
+					}
+					isTopLevel := strings.TrimSpace(ag.ParentRunID) == ""
+					isRunning := strings.EqualFold(strings.TrimSpace(ag.Status), types.RunStatusRunning)
+
+					score := 0
+					if isTopLevel && isRunning {
+						score = 3
+					} else if isTopLevel {
+						score = 2
+					} else if isRunning {
+						score = 1
+					}
+
+					if bestRunID == "" || score > bestScore {
+						bestRunID = candidate
+						bestScore = score
+					}
+				}
+
+				if bestRunID != "" {
+					return monitorSwitchRunMsg{RunID: bestRunID}
+				}
+				return commandLinesMsg{lines: []string{"[error] no valid runs definitions found in session"}}
+			}
+		}
+
 		if strings.EqualFold(strings.TrimSpace(item.mode), "team") {
 			return m, m.openProfilePickerFor("new-team", true)
 		}

@@ -182,9 +182,16 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	if payload.SpawnWorker {
 		msg = fmt.Sprintf("Task %s created and worker agent spawned", taskID)
 	}
+	inputForEvent := map[string]string{"goal": goal, "taskId": taskID}
+	if payload.SpawnWorker && task.AssignedToType == "agent" {
+		inputForEvent["childRunId"] = task.AssignedTo
+	}
+	inputJSON, _ := json.Marshal(inputForEvent)
 	return types.HostOpRequest{
-		Op:   types.HostOpNoop,
-		Text: msg,
+		Op:    types.HostOpNoop,
+		Tag:   "task_create",
+		Text:  msg,
+		Input: inputJSON,
 	}, nil
 }
 

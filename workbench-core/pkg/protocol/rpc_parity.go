@@ -70,15 +70,16 @@ type AgentListParams struct {
 }
 
 type AgentListItem struct {
-	RunID      string `json:"runId"`
-	SessionID  string `json:"sessionId"`
-	Profile    string `json:"profile,omitempty"`
-	Status     string `json:"status,omitempty"`
-	Goal       string `json:"goal,omitempty"`
-	TeamID     string `json:"teamId,omitempty"`
-	Role       string `json:"role,omitempty"`
-	StartedAt  string `json:"startedAt,omitempty"`
-	FinishedAt string `json:"finishedAt,omitempty"`
+	RunID       string `json:"runId"`
+	SessionID   string `json:"sessionId"`
+	Profile     string `json:"profile,omitempty"`
+	Status      string `json:"status,omitempty"`
+	Goal        string `json:"goal,omitempty"`
+	TeamID      string `json:"teamId,omitempty"`
+	Role        string `json:"role,omitempty"`
+	StartedAt   string `json:"startedAt,omitempty"`
+	FinishedAt  string `json:"finishedAt,omitempty"`
+	ParentRunID string `json:"parentRunId,omitempty"`
 }
 
 type AgentListResult struct {

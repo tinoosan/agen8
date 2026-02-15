@@ -215,6 +215,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		reasoningUsageByStep:        map[string]int{},
 		thinkingVP:                  viewport.New(0, 0),
 		thinkingAutoScroll:          true,
+		subagentsVP:                 viewport.New(0, 0),
 		artifactContentVP:           viewport.New(0, 0),
 		taskStore:                   taskStore,
 		stats:                       stats,
@@ -368,6 +369,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 		reasoningUsageByStep:        map[string]int{},
 		thinkingVP:                  viewport.New(0, 0),
 		thinkingAutoScroll:          true,
+		subagentsVP:                 viewport.New(0, 0),
 		artifactContentVP:           viewport.New(0, 0),
 		taskStore:                   taskStore,
 		stats:                       monitorStats{started: time.Now()},
@@ -390,6 +392,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 	m.outboxVP.MouseWheelEnabled = false
 	m.memoryVP.MouseWheelEnabled = false
 	m.thinkingVP.MouseWheelEnabled = false
+	m.subagentsVP.MouseWheelEnabled = false
 	m.artifactContentVP.MouseWheelEnabled = false
 	if manifest, err := loadTeamManifestFromDisk(cfg, teamID); err == nil && manifest != nil {
 		if profileID := strings.TrimSpace(manifest.ProfileID); profileID != "" {
@@ -521,6 +524,7 @@ func newDetachedMonitorModel(ctx context.Context, cfg config.Config, result *Mon
 		reasoningUsageByStep:        map[string]int{},
 		thinkingVP:                  viewport.New(0, 0),
 		thinkingAutoScroll:          true,
+		subagentsVP:                 viewport.New(0, 0),
 		artifactContentVP:           viewport.New(0, 0),
 		taskStore:                   taskStore,
 		stats:                       monitorStats{started: time.Now()},
@@ -541,6 +545,7 @@ func newDetachedMonitorModel(ctx context.Context, cfg config.Config, result *Mon
 	m.outboxVP.MouseWheelEnabled = false
 	m.memoryVP.MouseWheelEnabled = false
 	m.thinkingVP.MouseWheelEnabled = false
+	m.subagentsVP.MouseWheelEnabled = false
 	m.artifactContentVP.MouseWheelEnabled = false
 	m.appendAgentOutput("[system] No active context. Use /new, /sessions, or /agents.")
 	m.refreshViewports()

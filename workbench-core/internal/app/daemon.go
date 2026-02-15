@@ -219,7 +219,7 @@ func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run
 
 		// Best-effort archive of the inbound payload for external integrations/debugging.
 		{
-			runDir := fsutil.GetAgentDir(cfg.DataDir, run.RunID)
+			runDir := fsutil.GetRunDir(cfg.DataDir, run)
 			archiveDir := filepath.Join(runDir, "inbox", "archive")
 			_ = os.MkdirAll(archiveDir, 0o755)
 			if b, err := json.MarshalIndent(task, "", "  "); err == nil {

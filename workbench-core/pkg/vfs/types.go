@@ -43,6 +43,10 @@ const (
 	// Note: a future multi-agent system will likely introduce a shared, global
 	// history mount for immutable provenance across runs/agents (distinct from /memory).
 	MountMemory = "memory"
+
+	// MountSubagents exposes the parent run's subagent run directories under /subagents.
+	// Only present for top-level runs; child runs live under parent's subagents dir on disk.
+	MountSubagents = "subagents"
 )
 
 // Resource is the minimal contract a “mounted thing” must implement to behave like a filesystem.

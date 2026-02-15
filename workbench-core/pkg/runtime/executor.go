@@ -149,6 +149,10 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	storeReq["opId"] = opID
 	storeReq["op"] = req.Op
 	storeReq["path"] = req.Path
+	if req.Tag != "" {
+		reqData["tag"] = req.Tag
+		storeReq["tag"] = req.Tag
+	}
 
 	if req.Op == types.HostOpFSSearch {
 		if strings.TrimSpace(req.Query) != "" {

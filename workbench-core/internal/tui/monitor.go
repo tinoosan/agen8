@@ -203,6 +203,7 @@ type monitorModel struct {
 	thinkingVP                   viewport.Model
 	thinkingAutoScroll           bool
 	childRuns                    []types.Run
+	subagentsVP                  viewport.Model
 	planMarkdown                 string
 	planDetails                  string
 	planLoadErr                  string
@@ -465,6 +466,7 @@ const (
 	panelMemory
 	panelComposer
 	panelThinking
+	panelSubagents
 )
 
 const (
@@ -490,9 +492,9 @@ const (
 func (m *monitorModel) Init() tea.Cmd {
 	if m.isDetached() {
 		m.rpcChecking = true
-		return tea.Batch(m.tick(), m.checkRPCHealthCmd(false))
+		return tea.Batch(m.tick(), m.checkRPCHealthCmd(false), m.openNewSessionWizard())
 	}
-	cmds := []tea.Cmd{m.listenEvent(), m.listenErr(), m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage()}
+	cmds := []tea.Cmd{m.listenEvent(), m.listenErr(), m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage(), m.loadChildRuns()}
 	if strings.TrimSpace(m.teamID) != "" {
 		cmds = append(cmds, m.loadTeamStatus(), m.loadTeamEvents(), m.loadPlanFilesCmd(), m.loadTeamManifestCmd())
 	}

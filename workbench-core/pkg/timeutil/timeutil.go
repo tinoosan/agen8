@@ -48,3 +48,8 @@ func FirstNonZero(times ...*time.Time) time.Time {
 	}
 	return time.Time{}
 }
+
+// Since returns the time elapsed since t.
+func Since(t time.Time) time.Duration {
+	return time.Since(t)
+}

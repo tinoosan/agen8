@@ -781,3 +781,32 @@ func (m *monitorModel) loadPlanFilesCmd() tea.Cmd {
 		}
 	}
 }
+func (m *monitorModel) loadChildRuns() tea.Cmd {
+	if m == nil || m.cfg.DataDir == "" || strings.TrimSpace(m.runID) == "" {
+		return nil
+	}
+	cfg := m.cfg
+	runID := strings.TrimSpace(m.runID)
+	// If in team mode and focused on a run, show children of that run
+	if strings.TrimSpace(m.teamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
+		runID = strings.TrimSpace(m.focusedRunID)
+	}
+
+	return func() tea.Msg {
+		runs, err := store.ListChildRuns(cfg, runID)
+		if err != nil {
+			return childRunsLoadedMsg{err: err}
+		}
+		// Sort by created time
+		sort.Slice(runs, func(i, j int) bool {
+			if runs[i].StartedAt == nil {
+				return true
+			}
+			if runs[j].StartedAt == nil {
+				return false
+			}
+			return runs[i].StartedAt.Before(*runs[j].StartedAt)
+		})
+		return childRunsLoadedMsg{runs: runs}
+	}
+}

@@ -205,11 +205,43 @@ func (noopOperation) Execute(ctx context.Context, req types.HostOpRequest, next 
 }
 func (noopOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
 	action := strings.TrimSpace(req.Action)
-	if action == "" {
+	tag := strings.TrimSpace(req.Tag)
+	if action != "" {
+		reqData["noopAction"] = action
+		storeReq["noopAction"] = action
+	}
+	if tag == "task_create" {
+		reqData["op"] = "task_create"
+		storeReq["op"] = "task_create"
+		if len(req.Input) > 0 {
+			var payload struct {
+				Goal       string `json:"goal"`
+				TaskID     string `json:"taskId"`
+				ChildRunID string `json:"childRunId"`
+			}
+			if err := json.Unmarshal(req.Input, &payload); err == nil {
+				if g := strings.TrimSpace(payload.Goal); g != "" {
+					if p, tr := capBytes(singleLine(g), 240); p != "" {
+						reqData["goal"] = p
+						storeReq["goal"] = p
+						if tr {
+							reqData["goalTruncated"] = "true"
+							storeReq["goalTruncated"] = "true"
+						}
+					}
+				}
+				if id := strings.TrimSpace(payload.TaskID); id != "" {
+					reqData["taskId"] = id
+					storeReq["taskId"] = id
+				}
+				if cid := strings.TrimSpace(payload.ChildRunID); cid != "" {
+					reqData["childRunId"] = cid
+					storeReq["childRunId"] = cid
+				}
+			}
+		}
 		return
 	}
-	reqData["noopAction"] = action
-	storeReq["noopAction"] = action
 	if action != "agent_spawn" {
 		return
 	}
@@ -276,8 +308,10 @@ func (noopOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[str
 }
 func (noopOperation) EnrichResponseEvent(req types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
 	action := strings.TrimSpace(req.Action)
-	if action == "" {
-		return
+	tag := strings.TrimSpace(req.Tag)
+	if tag == "task_create" {
+		respData["op"] = "task_create"
+		storeResp["op"] = "task_create"
 	}
 	if action == "agent_spawn" {
 		respData["op"] = "agent_spawn"

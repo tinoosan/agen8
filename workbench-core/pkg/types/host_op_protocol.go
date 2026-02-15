@@ -54,6 +54,7 @@ type HostOpRequest struct {
 	TimeoutMs int             `json:"timeoutMs,omitempty"`
 	MaxBytes  int             `json:"maxBytes,omitempty"`
 	Text      string          `json:"text,omitempty"`
+	Tag       string          `json:"tag,omitempty"`
 	// Shell execution parameters
 	Argv  []string `json:"argv,omitempty"`
 	Cwd   string   `json:"cwd,omitempty"`

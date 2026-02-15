@@ -60,6 +60,13 @@ var dashboardSideTabs = []dashboardSideTabDef{
 		FocusCycle: []panelID{panelComposer, panelOutput, panelThinking},
 		Render:     renderDashboardThoughtsTab,
 	},
+	{
+		Name:       "Subagents",
+		Panels:     []panelID{panelSubagents},
+		FocusPanel: panelSubagents,
+		FocusCycle: []panelID{panelComposer, panelOutput, panelSubagents},
+		Render:     renderDashboardSubagentsTab,
+	},
 }
 
 // renderCompact builds the view for compact mode: header + tab bar + main content + composer.
@@ -305,4 +312,73 @@ func (m *monitorModel) renderActivitySideContent(grid layoutmgr.GridLayout) stri
 		Height(grid.ActivityDetail.InnerHeight()).
 		Render(m.styles.sectionTitle.Render("Activity Details") + "\n" + m.activityDetail.View())
 	return lipgloss.JoinVertical(lipgloss.Left, feed, detail)
+}
+
+func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) string {
+	if m == nil {
+		return ""
+	}
+	var lines []string
+	if len(m.childRuns) == 0 {
+		lines = []string{kit.StyleDim.Render("No subagents spawned yet.")}
+	} else {
+		for i, run := range m.childRuns {
+			idx := i + 1
+			if run.SpawnIndex > 0 {
+				idx = run.SpawnIndex
+			}
+			statusStyle := kit.StyleStatusValue
+			status := strings.ToLower(run.Status)
+			switch status {
+			case "succeeded":
+				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950"))
+			case "failed", "canceled":
+				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))
+			case "running":
+				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6bbcff"))
+			}
+
+			dur := ""
+			if run.StartedAt != nil {
+				end := time.Now()
+				if run.FinishedAt != nil {
+					end = *run.FinishedAt
+				}
+				dur = end.Sub(*run.StartedAt).Round(time.Second).String()
+			}
+
+			costStr := ""
+			if run.CostUSD > 0 {
+				costStr = fmt.Sprintf(" ($%.4f)", run.CostUSD)
+			}
+
+			// Format: "1. [running] Goal... (2m30s) ($0.12)"
+			line := fmt.Sprintf("%d. [%s] %s (%s)%s",
+				idx,
+				statusStyle.Render(status),
+				truncateText(strings.TrimSpace(run.Goal), 60),
+				dur,
+				costStr,
+			)
+			lines = append(lines, line)
+		}
+	}
+
+	content := strings.Join(lines, "\n")
+	m.subagentsVP.SetContent(content)
+	m.subagentsVP.Width = grid.Plan.InnerWidth()
+	m.subagentsVP.Height = grid.Plan.InnerHeight()
+
+	// Ensure cursor stays within bounds if content shrinks
+	if m.subagentsVP.YOffset > 0 {
+		maxOffset := max(0, len(lines)-m.subagentsVP.Height)
+		if m.subagentsVP.YOffset > maxOffset {
+			m.subagentsVP.YOffset = maxOffset
+		}
+	}
+
+	return m.panelStyle(panelSubagents).
+		Width(grid.Plan.InnerWidth()).
+		Height(grid.Plan.InnerHeight()).
+		Render(m.styles.sectionTitle.Render("Subagents") + "\n" + m.subagentsVP.View())
 }

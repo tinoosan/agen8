@@ -165,7 +165,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountProject, err)
 	}
 
-	runDir := fsutil.GetAgentDir(cfg.Cfg.DataDir, cfg.Run.RunID)
+	runDir := fsutil.GetRunDir(cfg.Cfg.DataDir, cfg.Run)
 	var wsRes *resources.DirResource
 	sharedWorkspaceDir := strings.TrimSpace(cfg.SharedWorkspaceDir)
 	if sharedWorkspaceDir != "" {
@@ -177,7 +177,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			return nil, fmt.Errorf("create shared workspace resource: %w", err)
 		}
 	} else {
-		wsRes, err = resources.NewWorkspace(cfg.Cfg, cfg.Run.RunID)
+		wsRes, err = resources.NewWorkspaceFromRunDir(runDir)
 		if err != nil {
 			return nil, fmt.Errorf("create workspace resource: %w", err)
 		}
@@ -257,17 +257,36 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountMemory, err)
 	}
 
+	var subagentsDir string
+	if strings.TrimSpace(cfg.Run.ParentRunID) == "" {
+		subagentsDir = fsutil.GetSubagentsDir(cfg.Cfg.DataDir, cfg.Run.RunID)
+		if err := os.MkdirAll(subagentsDir, 0755); err != nil {
+			return nil, fmt.Errorf("prepare subagents dir: %w", err)
+		}
+		subagentsRes, err := resources.NewDirResource(subagentsDir, vfs.MountSubagents)
+		if err != nil {
+			return nil, fmt.Errorf("create subagents resource: %w", err)
+		}
+		if err := fs.Mount(vfs.MountSubagents, subagentsRes); err != nil {
+			return nil, fmt.Errorf("mount %s: %w", vfs.MountSubagents, err)
+		}
+	}
+
 	if cfg.Emit != nil {
+		mountedData := map[string]string{
+			"/project":   workdirRes.BaseDir,
+			"/workspace": wsRes.BaseDir,
+			"/plan":      planDir,
+			"/skills":    "(virtual)",
+			"/memory":    "(virtual)",
+		}
+		if subagentsDir != "" {
+			mountedData["/subagents"] = subagentsDir
+		}
 		cfg.Emit(context.Background(), events.Event{
 			Type:    "host.mounted",
 			Message: "Mounted VFS resources",
-			Data: map[string]string{
-				"/project":   workdirRes.BaseDir,
-				"/workspace": wsRes.BaseDir,
-				"/plan":      planDir,
-				"/skills":    "(virtual)",
-				"/memory":    "(virtual)",
-			},
+			Data:    mountedData,
 			Console: boolPtr(false),
 		})
 	}
@@ -287,6 +306,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	shellInvoker.MountRoots[vfs.MountSkills] = skillDir
 	shellInvoker.MountRoots[vfs.MountPlan] = planDir
 	shellInvoker.MountRoots[vfs.MountMemory] = memRes.BaseDir
+	if subagentsDir != "" {
+		shellInvoker.MountRoots[vfs.MountSubagents] = subagentsDir
+	}
 	if raw := strings.TrimSpace(os.Getenv("WORKBENCH_SHELL_VFS_TRANSLATION")); raw != "" {
 		switch strings.ToLower(raw) {
 		case "0", "false", "off", "no":

@@ -3,6 +3,8 @@ package fsutil
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 func TestGetAgentsSkillsDir(t *testing.T) {
@@ -45,5 +47,44 @@ func TestGetTeamPaths(t *testing.T) {
 	}
 	if got, want := GetTeamLogPath(dataDir, teamID), filepath.Join(dataDir, "teams", teamID, "daemon.log"); got != want {
 		t.Fatalf("GetTeamLogPath = %q, want %q", got, want)
+	}
+}
+
+func TestGetSubagentsDirAndRunDir(t *testing.T) {
+	dataDir := "/var/data/workbench"
+	parentRunID := "run-parent-1"
+	childRunID := "run-child-1"
+
+	subagentsDir := GetSubagentsDir(dataDir, parentRunID)
+	wantSubagents := filepath.Join(dataDir, "agents", parentRunID, "subagents")
+	if subagentsDir != wantSubagents {
+		t.Fatalf("GetSubagentsDir = %q, want %q", subagentsDir, wantSubagents)
+	}
+
+	childRunDir := GetSubagentRunDir(dataDir, parentRunID, childRunID)
+	wantChild := filepath.Join(wantSubagents, childRunID)
+	if childRunDir != wantChild {
+		t.Fatalf("GetSubagentRunDir = %q, want %q", childRunDir, wantChild)
+	}
+
+	if got := GetLogDirFromRunDir(childRunDir); got != filepath.Join(childRunDir, "log") {
+		t.Fatalf("GetLogDirFromRunDir = %q", got)
+	}
+}
+
+func TestGetRunDir(t *testing.T) {
+	dataDir := "/var/data/workbench"
+
+	// Top-level run: no ParentRunID
+	run := types.Run{RunID: "run-1", ParentRunID: ""}
+	if got, want := GetRunDir(dataDir, run), GetAgentDir(dataDir, "run-1"); got != want {
+		t.Fatalf("GetRunDir(top-level) = %q, want %q", got, want)
+	}
+
+	// Child run: has ParentRunID
+	run.ParentRunID = "run-parent"
+	run.RunID = "run-child"
+	if got, want := GetRunDir(dataDir, run), GetSubagentRunDir(dataDir, "run-parent", "run-child"); got != want {
+		t.Fatalf("GetRunDir(child) = %q, want %q", got, want)
 	}
 }

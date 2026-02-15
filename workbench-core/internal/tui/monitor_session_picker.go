@@ -172,6 +172,15 @@ func (m *monitorModel) selectSessionFromPicker() tea.Cmd {
 	}
 	runID := ""
 	teamID := ""
+
+	// Candidate selection priorities:
+	// 1. Top-level run (ParentRunID=="") that is Running.
+	// 2. Top-level run (ParentRunID=="") of any status.
+	// 3. Any running run.
+	// 4. Any run.
+	var bestRunID string
+	var bestScore int // 3=TopRunning, 2=Top, 1=Running, 0=Any
+
 	for _, ag := range agents.Agents {
 		candidate := strings.TrimSpace(ag.RunID)
 		if candidate == "" {
@@ -180,12 +189,25 @@ func (m *monitorModel) selectSessionFromPicker() tea.Cmd {
 		if teamID == "" {
 			teamID = strings.TrimSpace(ag.TeamID)
 		}
-		runID = candidate
-		if strings.EqualFold(strings.TrimSpace(ag.Status), types.RunStatusRunning) {
-			runID = candidate
-			break
+
+		isTopLevel := strings.TrimSpace(ag.ParentRunID) == ""
+		isRunning := strings.EqualFold(strings.TrimSpace(ag.Status), types.RunStatusRunning)
+
+		score := 0
+		if isTopLevel && isRunning {
+			score = 3
+		} else if isTopLevel {
+			score = 2
+		} else if isRunning {
+			score = 1
+		}
+
+		if bestRunID == "" || score > bestScore {
+			bestRunID = candidate
+			bestScore = score
 		}
 	}
+	runID = bestRunID
 	if strings.TrimSpace(teamID) != "" {
 		m.closeSessionPicker()
 		targetTeamID := strings.TrimSpace(teamID)

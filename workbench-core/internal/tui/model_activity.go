@@ -911,6 +911,31 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 					b.WriteString("`\n")
 				}
 			}
+		} else if a.Kind == "task_create" {
+			if v := strings.TrimSpace(a.Data["goal"]); v != "" {
+				b.WriteString("- goal: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["taskId"]); v != "" {
+				b.WriteString("- taskId: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["childRunId"]); v != "" {
+				b.WriteString("- childRunId: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["output"]); v != "" {
+				b.WriteString("- output: ")
+				b.WriteString(v)
+				b.WriteString("\n")
+			} else if v := strings.TrimSpace(a.Data["outputPreview"]); v != "" {
+				b.WriteString("- output: ")
+				b.WriteString(v)
+				b.WriteString("\n")
+			}
 		}
 	}
 

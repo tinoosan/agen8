@@ -187,6 +187,9 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		// Best-effort: clear any active task view; outbox panel is loaded via pagination.
 		m.currentTask = nil
 		m.setStatusExpiring("⚠ Quarantined", 8*time.Second)
+		// Reload session stats and child runs on task completion/quarantine
+		m.sessionTotalsReloadScheduled = true
+		m.sessionTotalsReloadDebounce = 200 * time.Millisecond
 	}
 }
 
@@ -256,8 +259,15 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 			if entry.index >= 0 && entry.index < len(m.agentOutput) {
 				m.agentOutput[entry.index] = line
 				// The updated line may re-wrap, so invalidate cached layout metadata.
-				m.agentOutputLayoutWidth = 0
 				m.dirtyAgentOutput = true
+
+				op := strings.TrimSpace(ev.Data["op"])
+				tag := strings.TrimSpace(ev.Data["tag"])
+				if op == "agent_spawn" || op == "task_create" || tag == "task_create" {
+					// Reload child runs when a subagent spawns/finishes or task_create with spawn
+					m.sessionTotalsReloadScheduled = true
+					m.sessionTotalsReloadDebounce = 500 * time.Millisecond
+				}
 				return
 			}
 		}

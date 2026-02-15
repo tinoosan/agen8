@@ -119,6 +119,15 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 					}
 				}
 			}
+			if msg.ev.Event.Type == "agent.op.response" {
+				op := strings.TrimSpace(msg.ev.Event.Data["op"])
+				tag := strings.TrimSpace(msg.ev.Event.Data["tag"])
+				if op == "agent_spawn" || op == "task_create" || tag == "task_create" {
+					cmds = append(cmds, m.loadChildRuns())
+				}
+			}
+		case "subagent.spawned":
+			cmds = append(cmds, m.loadChildRuns())
 		}
 		cmds = append(cmds, m.scheduleUIRefresh())
 		return m, tea.Batch(cmds...)
@@ -180,6 +189,15 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 
 func (m *monitorModel) handleLoadedDataMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case childRunsLoadedMsg:
+		if msg.err != nil {
+			// Fail silently for now, just don't update
+			return m, nil
+		}
+		m.childRuns = msg.runs
+		m.dirtyInbox = true // Re-render dashboard
+		return m, m.scheduleUIRefresh()
+
 	case inboxLoadedMsg:
 		m.inboxList = msg.tasks
 		m.inboxTotalCount = msg.totalCount

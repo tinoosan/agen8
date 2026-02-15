@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 func GetSQLitePath(dataDir string) string {
@@ -57,6 +59,29 @@ func GetWorkspaceDir(dataDir, runID string) string {
 
 func GetLogDir(dataDir, runID string) string {
 	return filepath.Join(GetAgentDir(dataDir, runID), "log")
+}
+
+// GetSubagentsDir returns the directory under a parent run where child run dirs live.
+func GetSubagentsDir(dataDir, parentRunID string) string {
+	return filepath.Join(GetAgentDir(dataDir, parentRunID), "subagents")
+}
+
+// GetSubagentRunDir returns the root directory for a child run (under the parent's subagents dir).
+func GetSubagentRunDir(dataDir, parentRunID, childRunID string) string {
+	return filepath.Join(GetSubagentsDir(dataDir, parentRunID), childRunID)
+}
+
+// GetRunDir returns the root directory for a run. Child runs (with ParentRunID set) live under the parent's subagents dir.
+func GetRunDir(dataDir string, run types.Run) string {
+	if strings.TrimSpace(run.ParentRunID) != "" {
+		return GetSubagentRunDir(dataDir, run.ParentRunID, run.RunID)
+	}
+	return GetAgentDir(dataDir, run.RunID)
+}
+
+// GetLogDirFromRunDir returns the log directory given a run's root dir.
+func GetLogDirFromRunDir(runDir string) string {
+	return filepath.Join(runDir, "log")
 }
 
 func GetSkillsDir(dataDir string) string {

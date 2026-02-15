@@ -538,10 +538,11 @@ func (s *RPCServer) agentList(ctx context.Context, p protocol.AgentListParams) (
 			continue
 		}
 		item := protocol.AgentListItem{
-			RunID:     runID,
-			SessionID: strings.TrimSpace(run.SessionID),
-			Status:    strings.TrimSpace(run.Status),
-			Goal:      strings.TrimSpace(run.Goal),
+			RunID:       runID,
+			SessionID:   strings.TrimSpace(run.SessionID),
+			Status:      strings.TrimSpace(run.Status),
+			Goal:        strings.TrimSpace(run.Goal),
+			ParentRunID: strings.TrimSpace(run.ParentRunID),
 		}
 		if run.Runtime != nil {
 			item.Profile = strings.TrimSpace(run.Runtime.Profile)
