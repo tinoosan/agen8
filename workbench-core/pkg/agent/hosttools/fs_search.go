@@ -12,24 +12,16 @@ import (
 type FSSearchTool struct{}
 
 func (t *FSSearchTool) Definition() llmtypes.Tool {
-	return llmtypes.Tool{
-		Type: "function",
-		Function: llmtypes.ToolFunction{
-			Name:        "fs_search",
-			Description: "[DIRECT] Search files under a VFS path using keyword/regex text search. Prefer this over reading whole memory files.",
-			Strict:      true,
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"path":  map[string]any{"type": "string", "description": "VFS path to search (e.g. /memory)"},
-					"query": map[string]any{"type": "string", "description": "Search query (keyword or regex)"},
-					"limit": map[string]any{"type": "integer", "description": "Max results (default 5)"},
-				},
-				"required":             []any{"path", "query", "limit"},
-				"additionalProperties": false,
-			},
+	return fsTool(
+		"fs_search",
+		"[DIRECT] Search files under a VFS path using keyword/regex text search. Prefer this over reading whole memory files.",
+		map[string]any{
+			"path":  map[string]any{"type": "string", "description": "VFS path to search (e.g. /memory)"},
+			"query": map[string]any{"type": "string", "description": "Search query (keyword or regex)"},
+			"limit": map[string]any{"type": "integer", "description": "Max results (default 5)"},
 		},
-	}
+		[]any{"path", "query", "limit"},
+	)
 }
 
 func (t *FSSearchTool) Execute(_ context.Context, args json.RawMessage) (types.HostOpRequest, error) {

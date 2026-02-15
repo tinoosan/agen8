@@ -12,36 +12,28 @@ import (
 type FSEditTool struct{}
 
 func (t *FSEditTool) Definition() llmtypes.Tool {
-	return llmtypes.Tool{
-		Type: "function",
-		Function: llmtypes.ToolFunction{
-			Name:        "fs_edit",
-			Description: "[DIRECT - no discovery needed] Apply find-replace edits to a file. Each edit has old (exact match), new (replacement), occurrence (1-based).",
-			Strict:      true,
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"path": map[string]any{"type": "string", "description": "VFS path to edit"},
-					"edits": map[string]any{
-						"type":        "array",
-						"description": "Edits to apply, in order.",
-						"items": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"old":        map[string]any{"type": "string"},
-								"new":        map[string]any{"type": "string"},
-								"occurrence": map[string]any{"type": "integer"},
-							},
-							"required":             []any{"old", "new", "occurrence"},
-							"additionalProperties": false,
-						},
+	return fsTool(
+		"fs_edit",
+		"[DIRECT - no discovery needed] Apply find-replace edits to a file. Each edit has old (exact match), new (replacement), occurrence (1-based).",
+		map[string]any{
+			"path": map[string]any{"type": "string", "description": "VFS path to edit"},
+			"edits": map[string]any{
+				"type":        "array",
+				"description": "Edits to apply, in order.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"old":        map[string]any{"type": "string"},
+						"new":        map[string]any{"type": "string"},
+						"occurrence": map[string]any{"type": "integer"},
 					},
+					"required":             []any{"old", "new", "occurrence"},
+					"additionalProperties": false,
 				},
-				"required":             []any{"path", "edits"},
-				"additionalProperties": false,
 			},
 		},
-	}
+		[]any{"path", "edits"},
+	)
 }
 
 func (t *FSEditTool) Execute(_ context.Context, args json.RawMessage) (types.HostOpRequest, error) {

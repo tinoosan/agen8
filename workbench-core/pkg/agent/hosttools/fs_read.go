@@ -12,23 +12,15 @@ import (
 type FSReadTool struct{}
 
 func (t *FSReadTool) Definition() llmtypes.Tool {
-	return llmtypes.Tool{
-		Type: "function",
-		Function: llmtypes.ToolFunction{
-			Name:        "fs_read",
-			Description: "[DIRECT - no discovery needed] Read file contents from a VFS path (skills live under /skills/<skill_name>/SKILL.md).",
-			Strict:      true,
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"path":     map[string]any{"type": "string", "description": "VFS path to read (e.g. /project/README.md)"},
-					"maxBytes": map[string]any{"type": intOrNull, "description": "Max bytes to read (or null for default)"},
-				},
-				"required":             []any{"path", "maxBytes"},
-				"additionalProperties": false,
-			},
+	return fsTool(
+		"fs_read",
+		"[DIRECT - no discovery needed] Read file contents from a VFS path (skills live under /skills/<skill_name>/SKILL.md).",
+		map[string]any{
+			"path":     map[string]any{"type": "string", "description": "VFS path to read (e.g. /project/README.md)"},
+			"maxBytes": map[string]any{"type": intOrNull, "description": "Max bytes to read (or null for default)"},
 		},
-	}
+		[]any{"path", "maxBytes"},
+	)
 }
 
 func (t *FSReadTool) Execute(_ context.Context, args json.RawMessage) (types.HostOpRequest, error) {
