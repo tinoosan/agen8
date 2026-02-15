@@ -2197,17 +2197,27 @@ func TestObserveEvent_AgentStatusLine(t *testing.T) {
 		inbox: map[string]taskState{},
 	}
 
-	// agent.step sets "⏳ Thinking…"
+	// task.start → "⏳ Thinking…" (agent immediately calls LLM)
+	m.observeTaskEvent(types.EventRecord{
+		Type:      "task.start",
+		Timestamp: time.Now(),
+		Data:      map[string]string{"taskId": "task-1", "goal": "test"},
+	})
+	if m.agentStatusLine != "⏳ Thinking…" {
+		t.Fatalf("after task.start: status=%q, want %q", m.agentStatusLine, "⏳ Thinking…")
+	}
+
+	// agent.step → "⏳ Processing…" (thinking just finished, about to run tools)
 	m.observeEvent(types.EventRecord{
 		Type:      "agent.step",
 		Timestamp: time.Now(),
 		Data:      map[string]string{"step": "1"},
 	})
-	if m.agentStatusLine != "⏳ Thinking…" {
-		t.Fatalf("after agent.step: status=%q, want %q", m.agentStatusLine, "⏳ Thinking…")
+	if m.agentStatusLine != "⏳ Processing…" {
+		t.Fatalf("after agent.step: status=%q, want %q", m.agentStatusLine, "⏳ Processing…")
 	}
 
-	// agent.op.request shows tool name
+	// agent.op.request → shows tool name
 	m.observeEvent(types.EventRecord{
 		Type:      "agent.op.request",
 		Timestamp: time.Now(),
@@ -2217,27 +2227,17 @@ func TestObserveEvent_AgentStatusLine(t *testing.T) {
 		t.Fatalf("after agent.op.request: status=%q, want to contain %q", m.agentStatusLine, "shell_exec")
 	}
 
-	// agent.op.response clears status
+	// agent.op.response → "⏳ Thinking…" (agent will call LLM again)
 	m.observeEvent(types.EventRecord{
 		Type:      "agent.op.response",
 		Timestamp: time.Now(),
 		Data:      map[string]string{"op": "shell_exec", "ok": "true"},
 	})
-	if m.agentStatusLine != "" {
-		t.Fatalf("after agent.op.response: status=%q, want empty", m.agentStatusLine)
+	if m.agentStatusLine != "⏳ Thinking…" {
+		t.Fatalf("after agent.op.response: status=%q, want %q", m.agentStatusLine, "⏳ Thinking…")
 	}
 
-	// task.start sets "⏳ Working…"
-	m.observeTaskEvent(types.EventRecord{
-		Type:      "task.start",
-		Timestamp: time.Now(),
-		Data:      map[string]string{"taskId": "task-1", "goal": "test"},
-	})
-	if m.agentStatusLine != "⏳ Working…" {
-		t.Fatalf("after task.start: status=%q, want %q", m.agentStatusLine, "⏳ Working…")
-	}
-
-	// task.done sets "✓ Done"
+	// task.done → "✓ Done"
 	m.observeTaskEvent(types.EventRecord{
 		Type:      "task.done",
 		Timestamp: time.Now(),
@@ -2245,5 +2245,15 @@ func TestObserveEvent_AgentStatusLine(t *testing.T) {
 	})
 	if m.agentStatusLine != "✓ Done" {
 		t.Fatalf("after task.done: status=%q, want %q", m.agentStatusLine, "✓ Done")
+	}
+
+	// agent.turn.complete → clears status
+	m.observeEvent(types.EventRecord{
+		Type:      "agent.turn.complete",
+		Timestamp: time.Now(),
+		Data:      map[string]string{},
+	})
+	if m.agentStatusLine != "" {
+		t.Fatalf("after agent.turn.complete: status=%q, want empty", m.agentStatusLine)
 	}
 }

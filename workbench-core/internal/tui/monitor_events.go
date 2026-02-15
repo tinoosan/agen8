@@ -86,7 +86,7 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 				fmt.Sprintf("Reasoning used (%d tokens); provider did not return a reasoning summary.", n))
 			delete(m.reasoningUsageByStep, key)
 		}
-		m.agentStatusLine = "⏳ Thinking…"
+		m.agentStatusLine = "⏳ Processing…"
 		m.stats.lastLLMErrorSet = false
 		m.stats.lastLLMErrorClass = ""
 	case "llm.usage.total":
@@ -110,9 +110,13 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 		}
 		m.stats.pricingKnown = known
 	case "llm.error":
+		m.agentStatusLine = ""
 		m.stats.lastLLMErrorClass = fallback(strings.TrimSpace(ev.Data["class"]), "unknown")
 		m.stats.lastLLMErrorRetryable = parseBool(ev.Data["retryable"])
 		m.stats.lastLLMErrorSet = true
+	}
+	if ev.Type == "agent.turn.complete" {
+		m.agentStatusLine = ""
 	}
 }
 
@@ -150,7 +154,7 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		ts.StartedAt = ev.Timestamp
 		m.inbox[taskID] = ts
 		m.currentTask = &ts
-		m.agentStatusLine = "⏳ Working…"
+		m.agentStatusLine = "⏳ Thinking…"
 	case "task.done":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
@@ -226,7 +230,8 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 			}
 		}
 	case "agent.op.response":
-		m.agentStatusLine = ""
+		// After a tool finishes the agent will call the LLM again (thinking).
+		m.agentStatusLine = "⏳ Thinking…"
 		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
 			return
 		}
