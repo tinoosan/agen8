@@ -284,3 +284,60 @@ func TestDispatchMiddleware_UnregisteredOpFallsBackToBase(t *testing.T) {
 		t.Fatalf("expected ok response, got %+v", resp)
 	}
 }
+
+func TestEventMiddleware_AgentSpawnNoopIsReclassifiedAndEnriched(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{Op: req.Op, Ok: true, Text: "child done"}
+	})
+
+	var gotReq events.Event
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	input, err := json.Marshal(map[string]any{
+		"goal":            "Compute 40+2",
+		"model":           "gpt-5-mini",
+		"maxTokens":       128,
+		"backgroundCount": 2,
+		"currentDepth":    0,
+		"maxDepth":        3,
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:     types.HostOpNoop,
+		Action: "agent_spawn",
+		Input:  input,
+		Text:   "child done",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if got := strings.TrimSpace(gotReq.Data["op"]); got != "agent_spawn" {
+		t.Fatalf("expected request op to be reclassified as agent_spawn, got %q", got)
+	}
+	if got := strings.TrimSpace(gotReq.Data["goal"]); got != "Compute 40+2" {
+		t.Fatalf("expected request goal to be set, got %q", got)
+	}
+	if got := strings.TrimSpace(gotResp.Data["op"]); got != "agent_spawn" {
+		t.Fatalf("expected response op to be reclassified as agent_spawn, got %q", got)
+	}
+	if got := strings.TrimSpace(gotResp.Data["outputPreview"]); got != "child done" {
+		t.Fatalf("expected response outputPreview to be set, got %q", got)
+	}
+}

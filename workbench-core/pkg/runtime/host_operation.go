@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -71,6 +72,7 @@ func defaultHostOperations() []HostOperation {
 		fsEditOperation{},
 		shellExecOperation{},
 		httpFetchOperation{},
+		noopOperation{},
 	}
 }
 
@@ -193,4 +195,101 @@ func (httpFetchOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.
 		}
 	}
 	storeResp["status"] = strconv.Itoa(resp.Status)
+}
+
+type noopOperation struct{}
+
+func (noopOperation) Op() string { return types.HostOpNoop }
+func (noopOperation) Execute(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
+	return next(ctx, req)
+}
+func (noopOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
+	action := strings.TrimSpace(req.Action)
+	if action == "" {
+		return
+	}
+	reqData["noopAction"] = action
+	storeReq["noopAction"] = action
+	if action != "agent_spawn" {
+		return
+	}
+
+	// Reclassify noop -> agent_spawn for UI and activity indexing.
+	reqData["op"] = "agent_spawn"
+	storeReq["op"] = "agent_spawn"
+
+	if len(req.Input) == 0 {
+		return
+	}
+	var payload struct {
+		Goal               string   `json:"goal"`
+		Model              string   `json:"model"`
+		RequestedMaxTokens int      `json:"requestedMaxTokens"`
+		MaxTokens          int      `json:"maxTokens"`
+		BackgroundCount    int      `json:"backgroundCount"`
+		BackgroundPreview  []string `json:"backgroundPreview"`
+		CurrentDepth       int      `json:"currentDepth"`
+		MaxDepth           int      `json:"maxDepth"`
+	}
+	if err := json.Unmarshal(req.Input, &payload); err != nil {
+		return
+	}
+	if goal := strings.TrimSpace(payload.Goal); goal != "" {
+		if p, tr := capBytes(singleLine(goal), 240); p != "" {
+			reqData["goal"] = p
+			storeReq["goal"] = p
+			if tr {
+				reqData["goalTruncated"] = "true"
+				storeReq["goalTruncated"] = "true"
+			}
+		}
+	}
+	if model := strings.TrimSpace(payload.Model); model != "" {
+		reqData["model"] = model
+		storeReq["model"] = model
+	}
+	if payload.RequestedMaxTokens > 0 {
+		v := strconv.Itoa(payload.RequestedMaxTokens)
+		reqData["requestedMaxTokens"] = v
+		storeReq["requestedMaxTokens"] = v
+	}
+	if payload.MaxTokens > 0 {
+		v := strconv.Itoa(payload.MaxTokens)
+		reqData["maxTokens"] = v
+		storeReq["maxTokens"] = v
+	}
+	if payload.BackgroundCount > 0 {
+		v := strconv.Itoa(payload.BackgroundCount)
+		reqData["backgroundCount"] = v
+		storeReq["backgroundCount"] = v
+	}
+	if len(payload.BackgroundPreview) > 0 {
+		if b, err := json.Marshal(payload.BackgroundPreview); err == nil {
+			reqData["backgroundPreview"] = string(b)
+			storeReq["backgroundPreview"] = string(b)
+		}
+	}
+	reqData["currentDepth"] = strconv.Itoa(payload.CurrentDepth)
+	storeReq["currentDepth"] = strconv.Itoa(payload.CurrentDepth)
+	reqData["maxDepth"] = strconv.Itoa(payload.MaxDepth)
+	storeReq["maxDepth"] = strconv.Itoa(payload.MaxDepth)
+}
+func (noopOperation) EnrichResponseEvent(req types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	action := strings.TrimSpace(req.Action)
+	if action == "" {
+		return
+	}
+	if action == "agent_spawn" {
+		respData["op"] = "agent_spawn"
+		storeResp["op"] = "agent_spawn"
+	}
+	if out := strings.TrimSpace(resp.Text); out != "" {
+		if p, tr := capBytes(out, 1200); p != "" {
+			respData["output"] = p
+			respData["outputPreview"] = p
+			if tr {
+				respData["outputTruncated"] = "true"
+			}
+		}
+	}
 }

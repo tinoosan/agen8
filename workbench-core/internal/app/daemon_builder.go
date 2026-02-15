@@ -415,6 +415,9 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 	}); err != nil {
 		return fmt.Errorf("register task_create tool: %w", err)
 	}
+	if err := registerAgentSpawnTool(registry, agentCfg.MaxTokens); err != nil {
+		return fmt.Errorf("register agent_spawn tool: %w", err)
+	}
 	agentCfg.HostToolRegistry = registry
 	b.agentCfg = agentCfg
 
@@ -422,6 +425,7 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 	if err != nil {
 		return fmt.Errorf("create agent: %w", err)
 	}
+	wireAgentSpawnParent(a)
 	sess, err := session.New(session.Config{
 		Agent:      a,
 		Profile:    b.prof,

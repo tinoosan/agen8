@@ -205,6 +205,11 @@ func upsertActivityResponseTx(tx *sql.Tx, runID string, _ int64, ev types.EventR
 	act.Error = strings.TrimSpace(ev.Data["err"])
 	act.BytesLen = strings.TrimSpace(ev.Data["bytesLen"])
 	act.Truncated = parseBool(ev.Data["truncated"])
+	if v := strings.TrimSpace(ev.Data["outputPreview"]); v != "" {
+		act.OutputPreview = v
+	} else if v := strings.TrimSpace(ev.Data["output"]); v != "" {
+		act.OutputPreview = v
+	}
 	act.FinishedAt = &fin
 	if !act.StartedAt.IsZero() {
 		act.Duration = fin.Sub(act.StartedAt)

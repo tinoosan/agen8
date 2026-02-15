@@ -92,6 +92,9 @@ func TestTaskCreateTool_CoordinatorCanAssignAnyRole(t *testing.T) {
 	if req.Op == types.HostOpFSWrite {
 		t.Fatalf("task_create should not write inbox files")
 	}
+	if req.Op != types.HostOpNoop {
+		t.Fatalf("req.Op=%q, want %q", req.Op, types.HostOpNoop)
+	}
 	task := store.tasks["task-coord-1"]
 	if task.AssignedRole != "researcher" {
 		t.Fatalf("expected assignedRole researcher, got %q", task.AssignedRole)
@@ -148,6 +151,9 @@ func TestTaskCreateTool_WorkerCanEscalateToCoordinator(t *testing.T) {
 	}
 	if req.Op == types.HostOpFSWrite {
 		t.Fatalf("task_create should not write inbox files")
+	}
+	if req.Op != types.HostOpNoop {
+		t.Fatalf("req.Op=%q, want %q", req.Op, types.HostOpNoop)
 	}
 	task := store.tasks["task-worker-2"]
 	if task.AssignedRole != "head-analyst" {

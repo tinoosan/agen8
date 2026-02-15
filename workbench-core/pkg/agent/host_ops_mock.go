@@ -117,6 +117,9 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 	}
 
 	switch req.Op {
+	case types.HostOpNoop:
+		return types.HostOpResponse{Op: req.Op, Ok: true, Text: req.Text}
+
 	case types.HostOpFSList:
 		entries, err := x.FS.List(req.Path)
 		if err != nil {

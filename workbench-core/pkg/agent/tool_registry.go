@@ -55,6 +55,34 @@ func (r *HostToolRegistry) Register(tool HostTool) error {
 	return nil
 }
 
+// Get returns a registered HostTool by name.
+func (r *HostToolRegistry) Get(name string) (HostTool, bool) {
+	if r == nil {
+		return nil, false
+	}
+	tool, ok := r.tools[strings.TrimSpace(name)]
+	return tool, ok
+}
+
+// Remove deletes a HostTool by name.
+func (r *HostToolRegistry) Remove(name string) {
+	if r == nil {
+		return
+	}
+	delete(r.tools, strings.TrimSpace(name))
+}
+
+// Replace overwrites (or inserts) a HostTool by name.
+func (r *HostToolRegistry) Replace(name string, tool HostTool) {
+	if r == nil {
+		return
+	}
+	if r.tools == nil {
+		r.tools = make(map[string]HostTool)
+	}
+	r.tools[strings.TrimSpace(name)] = tool
+}
+
 // Definitions returns all registered tool definitions.
 func (r *HostToolRegistry) Definitions() []llmtypes.Tool {
 	if r == nil {

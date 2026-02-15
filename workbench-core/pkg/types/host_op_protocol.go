@@ -35,6 +35,8 @@ const (
 	HostOpTrace = "trace_run"
 	// HostOpEmail sends an email notification.
 	HostOpEmail = "email"
+	// HostOpNoop returns a host response without side effects.
+	HostOpNoop = "noop"
 	// HostOpFinal ends the agent loop for a user turn.
 	HostOpFinal = "agent_final"
 
@@ -72,12 +74,15 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = strings.ToLower(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpFinal:
+	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpNoop, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
 
 	switch r.Op {
+	case HostOpNoop:
+		return nil
+
 	case HostOpFinal:
 		if err := validate.NonEmpty("final.text", r.Text); err != nil {
 			return err

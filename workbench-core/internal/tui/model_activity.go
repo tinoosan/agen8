@@ -287,6 +287,11 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		act.Error = strings.TrimSpace(ev.Data["err"])
 		act.BytesLen = strings.TrimSpace(ev.Data["bytesLen"])
 		act.Truncated = strings.TrimSpace(ev.Data["truncated"]) == "true"
+		if v := strings.TrimSpace(ev.Data["outputPreview"]); v != "" {
+			act.OutputPreview = v
+		} else if v := strings.TrimSpace(ev.Data["output"]); v != "" {
+			act.OutputPreview = v
+		}
 
 		fin := now
 		act.FinishedAt = &fin
@@ -860,6 +865,51 @@ func renderActivityArgumentsMarkdown(a Activity, telemetry bool) string {
 				b.WriteString("- limit: `")
 				b.WriteString(v)
 				b.WriteString("`\n")
+			}
+		} else if a.Kind == "agent_spawn" {
+			if v := strings.TrimSpace(a.Data["goal"]); v != "" {
+				b.WriteString("- goal: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["model"]); v != "" {
+				b.WriteString("- model: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["requestedMaxTokens"]); v != "" {
+				b.WriteString("- requestedMaxTokens: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["maxTokens"]); v != "" {
+				b.WriteString("- maxTokens: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["backgroundCount"]); v != "" {
+				b.WriteString("- backgroundCount: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["backgroundPreview"]); v != "" {
+				b.WriteString("- backgroundPreview: `")
+				b.WriteString(v)
+				b.WriteString("`\n")
+			}
+			if v := strings.TrimSpace(a.Data["currentDepth"]); v != "" {
+				maxDepth := strings.TrimSpace(a.Data["maxDepth"])
+				if maxDepth != "" {
+					b.WriteString("- depth: `")
+					b.WriteString(v)
+					b.WriteString("/")
+					b.WriteString(maxDepth)
+					b.WriteString("`\n")
+				} else {
+					b.WriteString("- currentDepth: `")
+					b.WriteString(v)
+					b.WriteString("`\n")
+				}
 			}
 		}
 	}

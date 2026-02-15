@@ -280,6 +280,8 @@ func renderOpRequest(d map[string]string) string {
 			return "Email " + to
 		}
 		return "Email"
+	case "agent_spawn":
+		return opmeta.FormatRequestTitle(d)
 	default:
 		if isSharedOpRequestTitleOp(op) {
 			return opmeta.FormatRequestTitle(d)
@@ -290,7 +292,7 @@ func renderOpRequest(d map[string]string) string {
 
 func isSharedOpRequestTitleOp(op string) bool {
 	switch strings.TrimSpace(op) {
-	case "fs_list", "fs_read", "fs_search", "fs_write", "fs_append", "fs_edit", "fs_patch", "shell_exec", "http_fetch", "trace_run":
+	case "fs_list", "fs_read", "fs_search", "fs_write", "fs_append", "fs_edit", "fs_patch", "shell_exec", "http_fetch", "trace_run", "agent_spawn":
 		return true
 	default:
 		return false
@@ -387,6 +389,14 @@ func renderOpResponse(d map[string]string) string {
 			return prefix + " " + errStr
 		}
 		return prefix + " failed"
+	case "agent_spawn":
+		if ok == "true" {
+			return prefix + " child completed"
+		}
+		if errStr != "" {
+			return prefix + " " + errStr
+		}
+		return prefix + " child failed"
 
 	default:
 		if strings.HasPrefix(op, "browser.") || op == "browser" {
@@ -492,6 +502,8 @@ func actionCategory(op string) string {
 		return "Sent"
 	case "trace_run":
 		return "Traced"
+	case "agent_spawn":
+		return "Delegated"
 	default:
 		return "Action"
 	}

@@ -29,6 +29,17 @@ func TestFormatRequestTitle_SharedOps(t *testing.T) {
 			want: "trace.set alpha",
 		},
 		{
+			name: "agent spawn with model and depth",
+			data: map[string]string{
+				"op":           "agent_spawn",
+				"goal":         "Review this module and summarize risks",
+				"model":        "gpt-5-mini",
+				"currentDepth": "1",
+				"maxDepth":     "3",
+			},
+			want: "Spawn child agent: Review this module and summarize risks (model=gpt-5-mini, depth=1/3)",
+		},
+		{
 			name: "default op+path",
 			data: map[string]string{"op": "custom", "path": "/tmp/file"},
 			want: "custom /tmp/file",

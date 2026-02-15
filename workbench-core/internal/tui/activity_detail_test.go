@@ -97,3 +97,39 @@ func TestRenderActivityDetailMarkdown_EmailAndFSSearch(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderActivityDetailMarkdown_AgentSpawnArgumentsAndOutput(t *testing.T) {
+	a := Activity{
+		Kind:          "agent_spawn",
+		Status:        ActivityOK,
+		Ok:            "true",
+		OutputPreview: "Child finished: 42",
+		Data: map[string]string{
+			"goal":               "Compute 40 + 2",
+			"model":              "gpt-5-mini",
+			"requestedMaxTokens": "128",
+			"maxTokens":          "128",
+			"backgroundCount":    "2",
+			"backgroundPreview":  `["prior=40","add two"]`,
+			"currentDepth":       "0",
+			"maxDepth":           "3",
+		},
+	}
+
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- goal: `Compute 40 + 2`",
+		"- model: `gpt-5-mini`",
+		"- requestedMaxTokens: `128`",
+		"- maxTokens: `128`",
+		"- backgroundCount: `2`",
+		"- backgroundPreview: `[\"prior=40\",\"add two\"]`",
+		"- depth: `0/3`",
+		"Tool output preview",
+		"Child finished: 42",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in agent_spawn markdown, got:\n%s", want, md)
+		}
+	}
+}

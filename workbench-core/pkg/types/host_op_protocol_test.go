@@ -60,3 +60,10 @@ func TestHostOpRequest_EmailValidation_AllowsInput(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 }
+
+func TestHostOpRequest_NoopValidation_AllowsEmpty(t *testing.T) {
+	req := HostOpRequest{Op: HostOpNoop}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}

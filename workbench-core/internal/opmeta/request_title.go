@@ -81,6 +81,26 @@ func FormatRequestTitle(d map[string]string) string {
 			return "trace." + action
 		}
 		return "trace_run"
+	case "agent_spawn":
+		goal := strings.TrimSpace(d["goal"])
+		model := strings.TrimSpace(d["model"])
+		depth := strings.TrimSpace(d["currentDepth"])
+		maxDepth := strings.TrimSpace(d["maxDepth"])
+		desc := "Spawn child agent"
+		if goal != "" {
+			desc += ": " + singleLinePreview(goal, 96)
+		}
+		details := make([]string, 0, 2)
+		if model != "" {
+			details = append(details, "model="+model)
+		}
+		if depth != "" && maxDepth != "" {
+			details = append(details, "depth="+depth+"/"+maxDepth)
+		}
+		if len(details) == 0 {
+			return desc
+		}
+		return desc + " (" + strings.Join(details, ", ") + ")"
 	default:
 		if op != "" && path != "" {
 			return op + " " + path

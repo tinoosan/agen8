@@ -71,6 +71,17 @@ func TestRenderOpRequest_BrowserAndEmail(t *testing.T) {
 	if email != "Email team@example.com: Daily report" {
 		t.Fatalf("unexpected email request rendering: %q", email)
 	}
+
+	spawn := renderOpRequest(map[string]string{
+		"op":           "agent_spawn",
+		"goal":         "compute checksum for all files",
+		"model":        "gpt-5-mini",
+		"currentDepth": "0",
+		"maxDepth":     "3",
+	})
+	if spawn != "Spawn child agent: compute checksum for all files (model=gpt-5-mini, depth=0/3)" {
+		t.Fatalf("unexpected agent_spawn request rendering: %q", spawn)
+	}
 }
 
 func TestRenderOpResponse_ToolSpecific(t *testing.T) {
@@ -132,6 +143,7 @@ func TestRenderOpRequest_SharedOpParityWithOpMeta(t *testing.T) {
 		{"op": "http_fetch", "method": "POST", "url": "https://example.com", "body": "{\n\"x\":1\n}"},
 		{"op": "http_fetch", "url": "https://example.com"},
 		{"op": "trace_run", "traceAction": "set", "traceKey": "alpha"},
+		{"op": "agent_spawn", "goal": "subtask", "currentDepth": "0", "maxDepth": "3"},
 	}
 	for _, tc := range tests {
 		got := renderOpRequest(tc)

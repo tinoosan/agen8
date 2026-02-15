@@ -509,6 +509,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		_ = rt.Shutdown(context.Background())
 		return nil, err
 	}
+	if err := registerAgentSpawnTool(registry, agentCfg.MaxTokens); err != nil {
+		orderedEmitter.Close()
+		_ = rt.Shutdown(context.Background())
+		return nil, err
+	}
 	agentCfg.HostToolRegistry = registry
 
 	runLLMClient := withRetryDiagnostics(s.llmClient, emitEvent)
@@ -518,6 +523,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		_ = rt.Shutdown(context.Background())
 		return nil, err
 	}
+	wireAgentSpawnParent(a)
 
 	workerSession, err := agentsession.New(agentsession.Config{
 		Agent:      a,

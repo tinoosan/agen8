@@ -153,8 +153,8 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		}
 	}
 	return types.HostOpRequest{
-		Op:   types.HostOpFSList,
-		Path: "/workspace",
+		Op:   types.HostOpNoop,
+		Text: fmt.Sprintf("Task %s created successfully", taskID),
 	}, nil
 }
 
