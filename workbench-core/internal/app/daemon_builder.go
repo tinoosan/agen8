@@ -568,27 +568,9 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is disabled; use /new"}
 		},
 		AgentPause: func(ctx context.Context, threadID, runID string) error {
-			threadID = strings.TrimSpace(threadID)
-			if threadID == "" {
-				return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
-			}
-			loadedSession, err := b.sessionStore.LoadSession(ctx, threadID)
-			if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
-				return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
 			runID = strings.TrimSpace(runID)
-			if runID == "" {
-				return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
-			}
-			allowed := false
-			for _, rid := range collectSessionRunIDs(loadedSession) {
-				if strings.TrimSpace(rid) == runID {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+			if _, err := b.validateAgentScope(ctx, threadID, runID); err != nil {
+				return err
 			}
 			if runID == strings.TrimSpace(b.run.RunID) && threadID == strings.TrimSpace(b.run.SessionID) {
 				loaded, err := implstore.LoadRun(b.cfg, runID)
@@ -616,27 +598,9 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			return b.supervisor.PauseRun(runID)
 		},
 		AgentResume: func(ctx context.Context, threadID, runID string) error {
-			threadID = strings.TrimSpace(threadID)
-			if threadID == "" {
-				return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
-			}
-			loadedSession, err := b.sessionStore.LoadSession(ctx, threadID)
-			if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
-				return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
 			runID = strings.TrimSpace(runID)
-			if runID == "" {
-				return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
-			}
-			allowed := false
-			for _, rid := range collectSessionRunIDs(loadedSession) {
-				if strings.TrimSpace(rid) == runID {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+			if _, err := b.validateAgentScope(ctx, threadID, runID); err != nil {
+				return err
 			}
 			if runID == strings.TrimSpace(b.run.RunID) && threadID == strings.TrimSpace(b.run.SessionID) {
 				loaded, err := implstore.LoadRun(b.cfg, runID)
@@ -655,25 +619,10 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			return b.supervisor.ResumeRun(ctx, runID)
 		},
 		SessionPause: func(ctx context.Context, threadID, sessionID string) ([]string, error) {
-			threadID = strings.TrimSpace(threadID)
-			if threadID == "" {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
-			}
-			if _, err := b.sessionStore.LoadSession(ctx, threadID); err != nil {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			sessionID = strings.TrimSpace(sessionID)
-			if sessionID == "" {
-				sessionID = threadID
-			}
-			if sessionID != threadID {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			loadedSession, err := b.sessionStore.LoadSession(ctx, sessionID)
+			_, runIDs, err := b.validateSessionScope(ctx, threadID, sessionID)
 			if err != nil {
 				return nil, err
 			}
-			runIDs := collectSessionRunIDs(loadedSession)
 			affected := make([]string, 0, len(runIDs))
 			var mu sync.Mutex
 			var wg sync.WaitGroup
@@ -731,25 +680,10 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			return affected, nil
 		},
 		SessionResume: func(ctx context.Context, threadID, sessionID string) ([]string, error) {
-			threadID = strings.TrimSpace(threadID)
-			if threadID == "" {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
-			}
-			if _, err := b.sessionStore.LoadSession(ctx, threadID); err != nil {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			sessionID = strings.TrimSpace(sessionID)
-			if sessionID == "" {
-				sessionID = threadID
-			}
-			if sessionID != threadID {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			loadedSession, err := b.sessionStore.LoadSession(ctx, sessionID)
+			_, runIDs, err := b.validateSessionScope(ctx, threadID, sessionID)
 			if err != nil {
 				return nil, err
 			}
-			runIDs := collectSessionRunIDs(loadedSession)
 			affected := make([]string, 0, len(runIDs))
 			var mu sync.Mutex
 			var wg sync.WaitGroup
@@ -795,25 +729,10 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			return affected, nil
 		},
 		SessionStop: func(ctx context.Context, threadID, sessionID string) ([]string, error) {
-			threadID = strings.TrimSpace(threadID)
-			if threadID == "" {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
-			}
-			if _, err := b.sessionStore.LoadSession(ctx, threadID); err != nil {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			sessionID = strings.TrimSpace(sessionID)
-			if sessionID == "" {
-				sessionID = threadID
-			}
-			if sessionID != threadID {
-				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-			}
-			loadedSession, err := b.sessionStore.LoadSession(ctx, sessionID)
+			_, runIDs, err := b.validateSessionScope(ctx, threadID, sessionID)
 			if err != nil {
 				return nil, err
 			}
-			runIDs := collectSessionRunIDs(loadedSession)
 			affected := make([]string, 0, len(runIDs))
 			var mu sync.Mutex
 			var wg sync.WaitGroup
@@ -871,6 +790,50 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			return affected, nil
 		},
 	}
+}
+
+func (b *DaemonBuilder) validateAgentScope(ctx context.Context, threadID, runID string) (types.Session, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return types.Session{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
+	}
+	loadedSession, err := b.sessionStore.LoadSession(ctx, threadID)
+	if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
+		return types.Session{}, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return types.Session{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
+	}
+	for _, rid := range collectSessionRunIDs(loadedSession) {
+		if strings.TrimSpace(rid) == runID {
+			return loadedSession, nil
+		}
+	}
+	return types.Session{}, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+}
+
+func (b *DaemonBuilder) validateSessionScope(ctx context.Context, threadID, sessionID string) (types.Session, []string, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return types.Session{}, nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
+	}
+	if _, err := b.sessionStore.LoadSession(ctx, threadID); err != nil {
+		return types.Session{}, nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = threadID
+	}
+	if sessionID != threadID {
+		return types.Session{}, nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+	}
+	loadedSession, err := b.sessionStore.LoadSession(ctx, sessionID)
+	if err != nil {
+		return types.Session{}, nil, err
+	}
+	runIDs := collectSessionRunIDs(loadedSession)
+	return loadedSession, runIDs, nil
 }
 
 func (b *DaemonBuilder) startBackgroundServices() error {

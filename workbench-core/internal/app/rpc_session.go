@@ -20,70 +20,71 @@ import (
 )
 
 func registerSessionHandlers(s *RPCServer, reg methodRegistry) error {
-	if err := addBoundHandler[protocol.ThreadGetParams, protocol.ThreadGetResult](reg, protocol.MethodThreadGet, false, s.threadGet); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.ThreadCreateParams, protocol.ThreadCreateResult](reg, protocol.MethodThreadCreate, true, s.threadCreate); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.TurnCreateParams, protocol.TurnCreateResult](reg, protocol.MethodTurnCreate, false, s.turnCreate); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.TurnCancelParams, protocol.TurnCancelResult](reg, protocol.MethodTurnCancel, false, s.turnCancel); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.ItemListParams, protocol.ItemListResult](reg, protocol.MethodItemList, false, s.itemList); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.TaskListParams, protocol.TaskListResult](reg, protocol.MethodTaskList, false, s.taskList); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.TaskCreateParams, protocol.TaskCreateResult](reg, protocol.MethodTaskCreate, false, s.taskCreate); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.TaskClaimParams, protocol.TaskClaimResult](reg, protocol.MethodTaskClaim, false, s.taskClaim); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.TaskCompleteParams, protocol.TaskCompleteResult](reg, protocol.MethodTaskComplete, false, s.taskComplete); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.SessionStartParams, protocol.SessionStartResult](reg, protocol.MethodSessionStart, false, s.sessionStart); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.SessionListParams, protocol.SessionListResult](reg, protocol.MethodSessionList, false, s.sessionList); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.SessionRenameParams, protocol.SessionRenameResult](reg, protocol.MethodSessionRename, false, s.sessionRename); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.AgentListParams, protocol.AgentListResult](reg, protocol.MethodAgentList, false, s.agentList); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.AgentStartParams, protocol.AgentStartResult](reg, protocol.MethodAgentStart, false, s.agentStart); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.AgentPauseParams, protocol.AgentPauseResult](reg, protocol.MethodAgentPause, false, s.agentPauseHandler); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.AgentResumeParams, protocol.AgentResumeResult](reg, protocol.MethodAgentResume, false, s.agentResumeHandler); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.SessionPauseParams, protocol.SessionPauseResult](reg, protocol.MethodSessionPause, false, s.sessionPauseHandler); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.SessionResumeParams, protocol.SessionResumeResult](reg, protocol.MethodSessionResume, false, s.sessionResumeHandler); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.SessionStopParams, protocol.SessionStopResult](reg, protocol.MethodSessionStop, false, s.sessionStopHandler); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.SessionGetTotalsParams, protocol.SessionGetTotalsResult](reg, protocol.MethodSessionGetTotals, false, s.sessionGetTotals); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.ActivityListParams, protocol.ActivityListResult](reg, protocol.MethodActivityList, false, s.activityList); err != nil {
-		return err
-	}
-	return nil
+	return registerHandlers(
+		func() error {
+			return addBoundHandler[protocol.ThreadGetParams, protocol.ThreadGetResult](reg, protocol.MethodThreadGet, false, s.threadGet)
+		},
+		func() error {
+			return addBoundHandler[protocol.ThreadCreateParams, protocol.ThreadCreateResult](reg, protocol.MethodThreadCreate, true, s.threadCreate)
+		},
+		func() error {
+			return addBoundHandler[protocol.TurnCreateParams, protocol.TurnCreateResult](reg, protocol.MethodTurnCreate, false, s.turnCreate)
+		},
+		func() error {
+			return addBoundHandler[protocol.TurnCancelParams, protocol.TurnCancelResult](reg, protocol.MethodTurnCancel, false, s.turnCancel)
+		},
+		func() error {
+			return addBoundHandler[protocol.ItemListParams, protocol.ItemListResult](reg, protocol.MethodItemList, false, s.itemList)
+		},
+		func() error {
+			return addBoundHandler[protocol.TaskListParams, protocol.TaskListResult](reg, protocol.MethodTaskList, false, s.taskList)
+		},
+		func() error {
+			return addBoundHandler[protocol.TaskCreateParams, protocol.TaskCreateResult](reg, protocol.MethodTaskCreate, false, s.taskCreate)
+		},
+		func() error {
+			return addBoundHandler[protocol.TaskClaimParams, protocol.TaskClaimResult](reg, protocol.MethodTaskClaim, false, s.taskClaim)
+		},
+		func() error {
+			return addBoundHandler[protocol.TaskCompleteParams, protocol.TaskCompleteResult](reg, protocol.MethodTaskComplete, false, s.taskComplete)
+		},
+		func() error {
+			return addBoundHandler[protocol.SessionStartParams, protocol.SessionStartResult](reg, protocol.MethodSessionStart, false, s.sessionStart)
+		},
+		func() error {
+			return addBoundHandler[protocol.SessionListParams, protocol.SessionListResult](reg, protocol.MethodSessionList, false, s.sessionList)
+		},
+		func() error {
+			return addBoundHandler[protocol.SessionRenameParams, protocol.SessionRenameResult](reg, protocol.MethodSessionRename, false, s.sessionRename)
+		},
+		func() error {
+			return addBoundHandler[protocol.AgentListParams, protocol.AgentListResult](reg, protocol.MethodAgentList, false, s.agentList)
+		},
+		func() error {
+			return addBoundHandler[protocol.AgentStartParams, protocol.AgentStartResult](reg, protocol.MethodAgentStart, false, s.agentStart)
+		},
+		func() error {
+			return addBoundHandler[protocol.AgentPauseParams, protocol.AgentPauseResult](reg, protocol.MethodAgentPause, false, s.agentPauseHandler)
+		},
+		func() error {
+			return addBoundHandler[protocol.AgentResumeParams, protocol.AgentResumeResult](reg, protocol.MethodAgentResume, false, s.agentResumeHandler)
+		},
+		func() error {
+			return addBoundHandler[protocol.SessionPauseParams, protocol.SessionPauseResult](reg, protocol.MethodSessionPause, false, s.sessionPauseHandler)
+		},
+		func() error {
+			return addBoundHandler[protocol.SessionResumeParams, protocol.SessionResumeResult](reg, protocol.MethodSessionResume, false, s.sessionResumeHandler)
+		},
+		func() error {
+			return addBoundHandler[protocol.SessionStopParams, protocol.SessionStopResult](reg, protocol.MethodSessionStop, false, s.sessionStopHandler)
+		},
+		func() error {
+			return addBoundHandler[protocol.SessionGetTotalsParams, protocol.SessionGetTotalsResult](reg, protocol.MethodSessionGetTotals, false, s.sessionGetTotals)
+		},
+		func() error {
+			return addBoundHandler[protocol.ActivityListParams, protocol.ActivityListResult](reg, protocol.MethodActivityList, false, s.activityList)
+		},
+	)
 }
 
 func defaultRunIDForSession(sess types.Session) string {

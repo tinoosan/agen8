@@ -23,16 +23,17 @@ const (
 )
 
 func registerArtifactHandlers(s *RPCServer, reg methodRegistry) error {
-	if err := addBoundHandler[protocol.ArtifactListParams, protocol.ArtifactListResult](reg, protocol.MethodArtifactList, false, s.artifactList); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.ArtifactSearchParams, protocol.ArtifactSearchResult](reg, protocol.MethodArtifactSearch, false, s.artifactSearch); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.ArtifactGetParams, protocol.ArtifactGetResult](reg, protocol.MethodArtifactGet, false, s.artifactGet); err != nil {
-		return err
-	}
-	return nil
+	return registerHandlers(
+		func() error {
+			return addBoundHandler[protocol.ArtifactListParams, protocol.ArtifactListResult](reg, protocol.MethodArtifactList, false, s.artifactList)
+		},
+		func() error {
+			return addBoundHandler[protocol.ArtifactSearchParams, protocol.ArtifactSearchResult](reg, protocol.MethodArtifactSearch, false, s.artifactSearch)
+		},
+		func() error {
+			return addBoundHandler[protocol.ArtifactGetParams, protocol.ArtifactGetResult](reg, protocol.MethodArtifactGet, false, s.artifactGet)
+		},
+	)
 }
 
 type artifactScope struct {

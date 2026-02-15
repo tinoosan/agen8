@@ -18,19 +18,20 @@ import (
 )
 
 func registerTeamHandlers(s *RPCServer, reg methodRegistry) error {
-	if err := addBoundHandler[protocol.TeamGetStatusParams, protocol.TeamGetStatusResult](reg, protocol.MethodTeamGetStatus, false, s.teamGetStatus); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.TeamGetManifestParams, protocol.TeamGetManifestResult](reg, protocol.MethodTeamGetManifest, false, s.teamGetManifest); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.PlanGetParams, protocol.PlanGetResult](reg, protocol.MethodPlanGet, false, s.planGet); err != nil {
-		return err
-	}
-	if err := addBoundHandler[protocol.ModelListParams, protocol.ModelListResult](reg, protocol.MethodModelList, false, s.modelList); err != nil {
-		return err
-	}
-	return nil
+	return registerHandlers(
+		func() error {
+			return addBoundHandler[protocol.TeamGetStatusParams, protocol.TeamGetStatusResult](reg, protocol.MethodTeamGetStatus, false, s.teamGetStatus)
+		},
+		func() error {
+			return addBoundHandler[protocol.TeamGetManifestParams, protocol.TeamGetManifestResult](reg, protocol.MethodTeamGetManifest, false, s.teamGetManifest)
+		},
+		func() error {
+			return addBoundHandler[protocol.PlanGetParams, protocol.PlanGetResult](reg, protocol.MethodPlanGet, false, s.planGet)
+		},
+		func() error {
+			return addBoundHandler[protocol.ModelListParams, protocol.ModelListResult](reg, protocol.MethodModelList, false, s.modelList)
+		},
+	)
 }
 
 func pricingKnownForRun(cfg config.Config, runID string) bool {
