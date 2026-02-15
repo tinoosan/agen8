@@ -176,6 +176,13 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		if err != nil {
 			return nil, fmt.Errorf("create shared workspace resource: %w", err)
 		}
+	} else if strings.TrimSpace(cfg.Run.ParentRunID) != "" {
+		// Subagent: mount workspace under parent's workspace so artifacts are stored in the parent's workspace.
+		workspaceDir := fsutil.GetWorkspaceDirForRun(cfg.Cfg.DataDir, cfg.Run)
+		wsRes, err = resources.NewWorkspaceFromPath(workspaceDir)
+		if err != nil {
+			return nil, fmt.Errorf("create workspace resource: %w", err)
+		}
 	} else {
 		wsRes, err = resources.NewWorkspaceFromRunDir(runDir)
 		if err != nil {

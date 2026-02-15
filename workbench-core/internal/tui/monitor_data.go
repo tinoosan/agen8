@@ -781,11 +781,34 @@ func (m *monitorModel) loadPlanFilesCmd() tea.Cmd {
 		}
 	}
 }
+
+// agentListItemToRun maps a protocol.AgentListItem to a types.Run for Subagents tab display.
+func agentListItemToRun(it protocol.AgentListItem, spawnIndex int) types.Run {
+	r := types.Run{
+		RunID:       strings.TrimSpace(it.RunID),
+		SessionID:   strings.TrimSpace(it.SessionID),
+		Goal:        strings.TrimSpace(it.Goal),
+		Status:      strings.TrimSpace(it.Status),
+		ParentRunID: strings.TrimSpace(it.ParentRunID),
+		SpawnIndex:  spawnIndex,
+	}
+	if s := strings.TrimSpace(it.StartedAt); s != "" {
+		if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			r.StartedAt = &t
+		}
+	}
+	if s := strings.TrimSpace(it.FinishedAt); s != "" {
+		if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			r.FinishedAt = &t
+		}
+	}
+	return r
+}
+
 func (m *monitorModel) loadChildRuns() tea.Cmd {
-	if m == nil || m.cfg.DataDir == "" || strings.TrimSpace(m.runID) == "" {
+	if m == nil || strings.TrimSpace(m.runID) == "" {
 		return nil
 	}
-	cfg := m.cfg
 	runID := strings.TrimSpace(m.runID)
 	// If in team mode and focused on a run, show children of that run
 	if strings.TrimSpace(m.teamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
@@ -793,26 +816,13 @@ func (m *monitorModel) loadChildRuns() tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		if m.rpcReachable {
-			var res protocol.RunListChildrenResult
-			if err := m.rpcRoundTrip(protocol.MethodRunListChildren, protocol.RunListChildrenParams{ParentRunID: runID}, &res); err == nil {
-				runs := res.Runs
-				sort.Slice(runs, func(i, j int) bool {
-					if runs[i].StartedAt == nil {
-						return true
-					}
-					if runs[j].StartedAt == nil {
-						return false
-					}
-					return runs[i].StartedAt.Before(*runs[j].StartedAt)
-				})
-				return childRunsLoadedMsg{runs: runs}
-			}
-		}
-		runs, err := store.ListChildRuns(cfg, runID)
-		if err != nil {
+		// Use run.listChildren only: ask the daemon for children of this run by parent_run_id.
+		// This does not depend on session ID, so we avoid mismatches (e.g. TUI session vs daemon session).
+		var childRes protocol.RunListChildrenResult
+		if err := m.rpcRoundTrip(protocol.MethodRunListChildren, protocol.RunListChildrenParams{ParentRunID: runID}, &childRes); err != nil {
 			return childRunsLoadedMsg{err: err}
 		}
+		runs := childRes.Runs
 		sort.Slice(runs, func(i, j int) bool {
 			if runs[i].StartedAt == nil {
 				return true

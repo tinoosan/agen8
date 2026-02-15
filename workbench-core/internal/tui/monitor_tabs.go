@@ -325,7 +325,9 @@ func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) str
 		currentRunID = strings.TrimSpace(m.focusedRunID)
 	}
 	if len(m.childRuns) == 0 {
-		if currentRunID != "" {
+		if strings.TrimSpace(m.childRunsLoadErr) != "" {
+			lines = []string{kit.StyleDim.Render("Could not load subagents: " + strings.TrimSpace(m.childRunsLoadErr))}
+		} else if currentRunID != "" {
 			if run, err := store.LoadRun(m.cfg, currentRunID); err == nil && strings.TrimSpace(run.ParentRunID) != "" {
 				lines = []string{kit.StyleDim.Render("You are viewing a subagent. Switch to the parent run to see all subagents.")}
 			} else {

@@ -992,9 +992,15 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 	var callback types.Task
 	if isSubagentWorker {
 		// Standalone subagent: create callback assigned to parent run.
-		callbackGoal := fmt.Sprintf("SUBAGENT RESULT: Review %s result from spawned worker for task %s. The worker has completed its task. Review the result and decide on next steps.", string(tr.Status), truncateText(taskID, 24))
+		// task is the task the subagent just completed; taskID and task.Goal refer to that work.
+		sourceGoal := strings.TrimSpace(task.Goal)
+		if sourceGoal == "" {
+			sourceGoal = "(no goal text)"
+		}
+		callbackGoal := fmt.Sprintf("SUBAGENT RESULT: Review %s result from spawned worker for task %s. The worker completed: %s. Review the result and decide on next steps.", string(tr.Status), truncateText(taskID, 24), truncateText(sourceGoal, 120))
 		inputs := map[string]any{
 			"sourceTaskId": taskID,
+			"sourceGoal":   sourceGoal,
 			"sourceRunId":  strings.TrimSpace(s.cfg.RunID),
 			"sourceStatus": string(tr.Status),
 			"summary":      strings.TrimSpace(tr.Summary),

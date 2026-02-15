@@ -17,7 +17,7 @@ func (m *monitorModel) dispatchUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleWindowAndTick(msg)
 	case tailedEventMsg, tailErrMsg, commandLinesMsg, monitorEditorDoneMsg, taskQueuedLocallyMsg, monitorSwitchRunMsg, monitorSwitchTeamMsg, monitorReloadedMsg:
 		return m.handleTailAndStreamMessages(msg)
-	case inboxLoadedMsg, outboxLoadedMsg, teamStatusLoadedMsg, teamManifestLoadedMsg, teamEventsLoadedMsg, activityLoadedMsg, sessionsListMsg, agentsListMsg, planFilesLoadedMsg, sessionTotalsLoadedMsg, artifactTreeLoadedMsg, artifactContentLoadedMsg, monitorFilePickerPathsMsg:
+	case inboxLoadedMsg, outboxLoadedMsg, teamStatusLoadedMsg, teamManifestLoadedMsg, teamEventsLoadedMsg, activityLoadedMsg, sessionsListMsg, agentsListMsg, planFilesLoadedMsg, sessionTotalsLoadedMsg, artifactTreeLoadedMsg, artifactContentLoadedMsg, monitorFilePickerPathsMsg, childRunsLoadedMsg:
 		return m.handleLoadedDataMessages(msg)
 	case uiRefreshMsg, planReloadMsg, sessionTotalsReloadMsg:
 		return m.handleMaintenanceMessages(msg)
@@ -191,9 +191,11 @@ func (m *monitorModel) handleLoadedDataMessages(msg tea.Msg) (tea.Model, tea.Cmd
 	switch msg := msg.(type) {
 	case childRunsLoadedMsg:
 		if msg.err != nil {
-			// Fail silently for now, just don't update
-			return m, nil
+			m.childRunsLoadErr = msg.err.Error()
+			m.dirtyInbox = true
+			return m, m.scheduleUIRefresh()
 		}
+		m.childRunsLoadErr = ""
 		m.childRuns = msg.runs
 		m.dirtyInbox = true // Re-render dashboard
 		return m, m.scheduleUIRefresh()

@@ -40,3 +40,12 @@ func NewWorkspaceFromRunDir(runDir string) (*DirResource, error) {
 	}
 	return NewDirResource(baseDir, vfs.MountWorkspace)
 }
+
+// NewWorkspaceFromPath creates a workspace resource at the given path (the workspace root).
+// Use this when the workspace path is already computed (e.g. fsutil.GetWorkspaceDirForRun for subagents).
+func NewWorkspaceFromPath(workspaceDir string) (*DirResource, error) {
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		return nil, fmt.Errorf("error creating workspace directory %s: %w", workspaceDir, err)
+	}
+	return NewDirResource(workspaceDir, vfs.MountWorkspace)
+}
