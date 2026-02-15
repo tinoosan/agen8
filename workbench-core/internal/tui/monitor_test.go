@@ -2142,3 +2142,108 @@ func TestMonitorDispatch_DashboardTabNavigationParity(t *testing.T) {
 		t.Fatalf("focusedPanel=%v want %v", updated.focusedPanel, updated.dashboardSideTabToPanel())
 	}
 }
+
+func TestHandleCommand_InstantEchoBeforeEnqueue(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	runID := "test-run-echo"
+	startMonitorTestRPCServer(t, cfg, runID)
+
+	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+
+	// Before submitting, agent output buffer should be empty.
+	if len(m.agentOutput) != 0 {
+		t.Fatalf("agentOutput len=%d, want 0", len(m.agentOutput))
+	}
+
+	// handleCommand returns a tea.Cmd (async RPC); the echo should be in the
+	// buffer *before* executing the returned command.
+	cmd := m.handleCommand("fix the login bug")
+	if cmd == nil {
+		t.Fatalf("expected non-nil enqueue cmd")
+	}
+
+	// The instant echo must already be in the buffer, synchronously.
+	found := false
+	for _, line := range m.agentOutput {
+		if strings.Contains(line, "▸") && strings.Contains(line, "fix the login bug") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected instant echo line in agentOutput, got %v", m.agentOutput)
+	}
+
+	// Slash commands should NOT produce an echo.
+	before := len(m.agentOutput)
+	_ = m.handleCommand("/help")
+	after := len(m.agentOutput)
+	for _, line := range m.agentOutput[before:after] {
+		if strings.Contains(line, "▸") {
+			t.Fatalf("slash command should not produce echo: %q", line)
+		}
+	}
+}
+
+func TestObserveEvent_AgentStatusLine(t *testing.T) {
+	t.Parallel()
+
+	m := &monitorModel{
+		inbox: map[string]taskState{},
+	}
+
+	// agent.step sets "⏳ Thinking…"
+	m.observeEvent(types.EventRecord{
+		Type:      "agent.step",
+		Timestamp: time.Now(),
+		Data:      map[string]string{"step": "1"},
+	})
+	if m.agentStatusLine != "⏳ Thinking…" {
+		t.Fatalf("after agent.step: status=%q, want %q", m.agentStatusLine, "⏳ Thinking…")
+	}
+
+	// agent.op.request shows tool name
+	m.observeEvent(types.EventRecord{
+		Type:      "agent.op.request",
+		Timestamp: time.Now(),
+		Data:      map[string]string{"op": "shell_exec", "path": "/tmp/foo"},
+	})
+	if !strings.Contains(m.agentStatusLine, "shell_exec") {
+		t.Fatalf("after agent.op.request: status=%q, want to contain %q", m.agentStatusLine, "shell_exec")
+	}
+
+	// agent.op.response clears status
+	m.observeEvent(types.EventRecord{
+		Type:      "agent.op.response",
+		Timestamp: time.Now(),
+		Data:      map[string]string{"op": "shell_exec", "ok": "true"},
+	})
+	if m.agentStatusLine != "" {
+		t.Fatalf("after agent.op.response: status=%q, want empty", m.agentStatusLine)
+	}
+
+	// task.start sets "⏳ Working…"
+	m.observeTaskEvent(types.EventRecord{
+		Type:      "task.start",
+		Timestamp: time.Now(),
+		Data:      map[string]string{"taskId": "task-1", "goal": "test"},
+	})
+	if m.agentStatusLine != "⏳ Working…" {
+		t.Fatalf("after task.start: status=%q, want %q", m.agentStatusLine, "⏳ Working…")
+	}
+
+	// task.done sets "✓ Done"
+	m.observeTaskEvent(types.EventRecord{
+		Type:      "task.done",
+		Timestamp: time.Now(),
+		Data:      map[string]string{"taskId": "task-1", "status": "succeeded"},
+	})
+	if m.agentStatusLine != "✓ Done" {
+		t.Fatalf("after task.done: status=%q, want %q", m.agentStatusLine, "✓ Done")
+	}
+}

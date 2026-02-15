@@ -86,6 +86,7 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 				fmt.Sprintf("Reasoning used (%d tokens); provider did not return a reasoning summary.", n))
 			delete(m.reasoningUsageByStep, key)
 		}
+		m.agentStatusLine = "⏳ Thinking…"
 		m.stats.lastLLMErrorSet = false
 		m.stats.lastLLMErrorClass = ""
 	case "llm.usage.total":
@@ -149,12 +150,14 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		ts.StartedAt = ev.Timestamp
 		m.inbox[taskID] = ts
 		m.currentTask = &ts
+		m.agentStatusLine = "⏳ Working…"
 	case "task.done":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
 			return
 		}
 		m.currentTask = nil
+		m.agentStatusLine = "✓ Done"
 		m.stats.tasksDone++
 		if v := getCostUSD(ev.Data); v != "" {
 			m.stats.lastTurnCostUSD = v
@@ -166,6 +169,7 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		}
 		// Best-effort: clear any active task view; outbox panel is loaded via pagination.
 		m.currentTask = nil
+		m.agentStatusLine = ""
 	}
 }
 
@@ -190,6 +194,7 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 	case "agent.error", "agent.turn.complete":
 		m.appendAgentOutputForRun(formatEventLine(ev), runID)
 	case "agent.op.request":
+		m.agentStatusLine = "🔧 " + truncateText(strings.TrimSpace(ev.Data["op"]), 40)
 		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
 			return
 		}
@@ -221,6 +226,7 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 			}
 		}
 	case "agent.op.response":
+		m.agentStatusLine = ""
 		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
 			return
 		}

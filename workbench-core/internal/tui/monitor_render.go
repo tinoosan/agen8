@@ -241,6 +241,18 @@ func (m *monitorModel) composerStatusSegments() []string {
 	})
 
 	segments := []string{modelLabel}
+	// Show live agent status when available.
+	if status := strings.TrimSpace(m.agentStatusLine); status != "" {
+		statusLabel := kit.RenderTag(kit.TagOptions{
+			Key:   "status",
+			Value: status,
+			Styles: kit.TagStyles{
+				KeyStyle:   tagKeyStyle,
+				ValueStyle: tagValueStyle,
+			},
+		})
+		segments = append(segments, statusLabel)
+	}
 	if cost.SupportsReasoningSummary(modelID) {
 		effort := strings.TrimSpace(m.reasoningEffort)
 		if effort == "" {

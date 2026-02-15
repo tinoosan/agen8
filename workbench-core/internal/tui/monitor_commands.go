@@ -108,6 +108,9 @@ func (m *monitorModel) handleCommand(raw string) tea.Cmd {
 	cmd, rest := splitMonitorCommand(raw)
 
 	if cmd == "" || !strings.HasPrefix(cmd, "/") {
+		// Instant user-echo: show the submitted goal immediately so the user
+		// doesn't feel like nothing happened while the RPC round-trip runs.
+		m.appendAgentOutput("▸ " + truncateText(strings.TrimSpace(raw), 120))
 		return m.enqueueTask(strings.TrimSpace(raw), 0)
 	}
 	handler, ok := monitorCommands[cmd]

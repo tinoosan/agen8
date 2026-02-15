@@ -210,6 +210,7 @@ type monitorModel struct {
 	profile                      string
 	reasoningEffort              string
 	reasoningSummary             string
+	agentStatusLine              string // transient: e.g. "⏳ Thinking…", "🔧 shell_exec …"
 	focusedPanel                 panelID
 	compactTab                   int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
 	dashboardSideTab             int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
