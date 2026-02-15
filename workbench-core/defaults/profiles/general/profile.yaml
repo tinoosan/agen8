@@ -1,7 +1,7 @@
 id: general
 description: General-purpose autonomous agent profile for broad problem solving and coordination.
 model: moonshotai/kimi-k2.5
-subagent_model: moonshotai/kimi-k2.5
+subagent_model: openai/gpt-5-nano
 skills:
   - coding
   - reporting
