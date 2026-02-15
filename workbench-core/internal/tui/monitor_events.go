@@ -86,7 +86,7 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 				fmt.Sprintf("Reasoning used (%d tokens); provider did not return a reasoning summary.", n))
 			delete(m.reasoningUsageByStep, key)
 		}
-		m.agentStatusLine = "Processing…"
+		m.setStatus("Processing…")
 		m.stats.lastLLMErrorSet = false
 		m.stats.lastLLMErrorClass = ""
 	case "llm.usage.total":
@@ -110,13 +110,26 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 		}
 		m.stats.pricingKnown = known
 	case "llm.error":
-		m.agentStatusLine = ""
+		m.setStatusExpiring("⚠ LLM Error", 10*time.Second)
 		m.stats.lastLLMErrorClass = fallback(strings.TrimSpace(ev.Data["class"]), "unknown")
 		m.stats.lastLLMErrorRetryable = parseBool(ev.Data["retryable"])
 		m.stats.lastLLMErrorSet = true
 	}
-	if ev.Type == "agent.turn.complete" {
-		m.agentStatusLine = ""
+
+	// Lifecycle events that update the status indicator regardless of the main switch.
+	switch ev.Type {
+	case "agent.turn.complete":
+		m.setStatus("Idle")
+	case "agent.error":
+		m.setStatusExpiring("⚠ Error", 10*time.Second)
+	case "llm.retry":
+		m.setStatus("Retrying…")
+	case "daemon.stop":
+		m.setStatus("Stopped")
+	case "daemon.start":
+		m.setStatusExpiring("Starting…", 5*time.Second)
+	case "daemon.error", "daemon.runner.error":
+		m.setStatusExpiring("⚠ Daemon Error", 10*time.Second)
 	}
 }
 
@@ -154,14 +167,14 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		ts.StartedAt = ev.Timestamp
 		m.inbox[taskID] = ts
 		m.currentTask = &ts
-		m.agentStatusLine = "Thinking…"
+		m.setStatus("Thinking…")
 	case "task.done":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
 			return
 		}
 		m.currentTask = nil
-		m.agentStatusLine = "✓ Done"
+		m.setStatusExpiring("✓ Done", 5*time.Second)
 		m.stats.tasksDone++
 		if v := getCostUSD(ev.Data); v != "" {
 			m.stats.lastTurnCostUSD = v
@@ -173,7 +186,7 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		}
 		// Best-effort: clear any active task view; outbox panel is loaded via pagination.
 		m.currentTask = nil
-		m.agentStatusLine = ""
+		m.setStatusExpiring("⚠ Quarantined", 8*time.Second)
 	}
 }
 
@@ -198,7 +211,7 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 	case "agent.error", "agent.turn.complete":
 		m.appendAgentOutputForRun(formatEventLine(ev), runID)
 	case "agent.op.request":
-		m.agentStatusLine = "🔧 " + truncateText(strings.TrimSpace(ev.Data["op"]), 40)
+		m.setStatus("🔧 " + truncateText(strings.TrimSpace(ev.Data["op"]), 40))
 		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
 			return
 		}
@@ -231,7 +244,7 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 		}
 	case "agent.op.response":
 		// After a tool finishes the agent will call the LLM again (thinking).
-		m.agentStatusLine = "Thinking…"
+		m.setStatus("Thinking…")
 		if shouldHideInboxOp(ev.Data["op"], ev.Data["path"]) {
 			return
 		}

@@ -244,8 +244,12 @@ func (m *monitorModel) composerStatusSegments() []string {
 	// Show live agent status when available, with an animated spinner for active states.
 	if status := strings.TrimSpace(m.agentStatusLine); status != "" {
 		display := status
-		// Active statuses get a cycling braille spinner; terminal states (✓ Done) stay static.
-		if !strings.HasPrefix(status, "✓") {
+		// Animate active statuses; keep terminal/warning statuses static.
+		isStatic := strings.HasPrefix(status, "✓") ||
+			strings.HasPrefix(status, "⚠") ||
+			status == "Idle" ||
+			status == "Stopped"
+		if !isStatic {
 			frames := []rune(statusSpinnerFrames)
 			if len(frames) > 0 {
 				frame := frames[m.statusAnimFrame%len(frames)]

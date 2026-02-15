@@ -210,8 +210,9 @@ type monitorModel struct {
 	profile                      string
 	reasoningEffort              string
 	reasoningSummary             string
-	agentStatusLine              string // transient: e.g. "Thinking…", "🔧 shell_exec …"
-	statusAnimFrame              int    // cycles through spinnerFrames on each tick
+	agentStatusLine              string    // transient: e.g. "Thinking…", "🔧 shell_exec …"
+	statusExpiresAt              time.Time // when non-zero, status auto-clears to "Idle" after this time
+	statusAnimFrame              int       // cycles through spinnerFrames on each tick
 	focusedPanel                 panelID
 	compactTab                   int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
 	dashboardSideTab             int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
@@ -494,6 +495,29 @@ func (m *monitorModel) Init() tea.Cmd {
 
 func (m *monitorModel) isDetached() bool {
 	return m != nil && m.detached
+}
+
+// setStatus sets the agent status without an expiry (persists until replaced).
+func (m *monitorModel) setStatus(s string) {
+	m.agentStatusLine = s
+	m.statusExpiresAt = time.Time{}
+}
+
+// setStatusExpiring sets the agent status that auto-clears to "Idle" after d.
+func (m *monitorModel) setStatusExpiring(s string, d time.Duration) {
+	m.agentStatusLine = s
+	m.statusExpiresAt = time.Now().Add(d)
+}
+
+// expireStatus should be called on each tick; clears transient statuses.
+func (m *monitorModel) expireStatus() {
+	if m.statusExpiresAt.IsZero() {
+		return
+	}
+	if time.Now().After(m.statusExpiresAt) {
+		m.agentStatusLine = "Idle"
+		m.statusExpiresAt = time.Time{}
+	}
 }
 
 func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

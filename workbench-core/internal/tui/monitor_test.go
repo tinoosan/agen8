@@ -2247,13 +2247,63 @@ func TestObserveEvent_AgentStatusLine(t *testing.T) {
 		t.Fatalf("after task.done: status=%q, want %q", m.agentStatusLine, "✓ Done")
 	}
 
-	// agent.turn.complete → clears status
+	// agent.turn.complete → "Idle"
 	m.observeEvent(types.EventRecord{
 		Type:      "agent.turn.complete",
 		Timestamp: time.Now(),
 		Data:      map[string]string{},
 	})
-	if m.agentStatusLine != "" {
-		t.Fatalf("after agent.turn.complete: status=%q, want empty", m.agentStatusLine)
+	if m.agentStatusLine != "Idle" {
+		t.Fatalf("after agent.turn.complete: status=%q, want %q", m.agentStatusLine, "Idle")
+	}
+
+	// llm.retry → "Retrying…"
+	m.observeEvent(types.EventRecord{
+		Type:      "llm.retry",
+		Timestamp: time.Now(),
+		Data:      map[string]string{},
+	})
+	if m.agentStatusLine != "Retrying…" {
+		t.Fatalf("after llm.retry: status=%q, want %q", m.agentStatusLine, "Retrying…")
+	}
+
+	// daemon.stop → "Stopped"
+	m.observeEvent(types.EventRecord{
+		Type:      "daemon.stop",
+		Timestamp: time.Now(),
+		Data:      map[string]string{},
+	})
+	if m.agentStatusLine != "Stopped" {
+		t.Fatalf("after daemon.stop: status=%q, want %q", m.agentStatusLine, "Stopped")
+	}
+
+	// daemon.start → "Starting…"
+	m.observeEvent(types.EventRecord{
+		Type:      "daemon.start",
+		Timestamp: time.Now(),
+		Data:      map[string]string{},
+	})
+	if m.agentStatusLine != "Starting…" {
+		t.Fatalf("after daemon.start: status=%q, want %q", m.agentStatusLine, "Starting…")
+	}
+
+	// daemon.error → "⚠ Daemon Error"
+	m.observeEvent(types.EventRecord{
+		Type:      "daemon.error",
+		Timestamp: time.Now(),
+		Data:      map[string]string{},
+	})
+	if m.agentStatusLine != "⚠ Daemon Error" {
+		t.Fatalf("after daemon.error: status=%q, want %q", m.agentStatusLine, "⚠ Daemon Error")
+	}
+
+	// agent.error → "⚠ Error"
+	m.observeEvent(types.EventRecord{
+		Type:      "agent.error",
+		Timestamp: time.Now(),
+		Data:      map[string]string{},
+	})
+	if m.agentStatusLine != "⚠ Error" {
+		t.Fatalf("after agent.error: status=%q, want %q", m.agentStatusLine, "⚠ Error")
 	}
 }
