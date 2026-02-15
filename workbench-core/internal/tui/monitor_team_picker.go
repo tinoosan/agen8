@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"io"
 	"sort"
 	"strings"
 
@@ -44,72 +42,21 @@ func (t teamPickerItem) Description() string {
 	return "run: " + shortID(runID)
 }
 
-type teamPickerDelegate struct {
-	styleRow lipgloss.Style
-	styleSel lipgloss.Style
-	styleDim lipgloss.Style
-}
-
-func newTeamPickerDelegate() teamPickerDelegate {
-	return teamPickerDelegate{
-		styleRow: lipgloss.NewStyle().Foreground(lipgloss.Color("#b0b0b0")),
-		styleSel: lipgloss.NewStyle().Foreground(lipgloss.Color("#eaeaea")).Bold(true),
-		styleDim: lipgloss.NewStyle().Foreground(lipgloss.Color("#707070")),
-	}
-}
-
-func (d teamPickerDelegate) Height() int  { return 1 }
-func (d teamPickerDelegate) Spacing() int { return 0 }
-func (d teamPickerDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd {
-	return nil
-}
-
-func (d teamPickerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+func renderTeamPickerLine(item list.Item, maxWidth int) string {
 	it, ok := item.(teamPickerItem)
 	if !ok {
-		return
+		return kit.TruncateRight(strings.TrimSpace(item.FilterValue()), maxWidth)
 	}
-
-	isSel := index == m.Index()
-	prefix := "  "
-	style := d.styleRow
-	if isSel {
-		prefix = "› "
-		style = d.styleSel
-	}
-
-	line := it.Title()
+	line := strings.TrimSpace(it.Title())
 	if desc := strings.TrimSpace(it.Description()); desc != "" {
 		line += " — " + desc
 	}
-	maxW := max(1, m.Width()-lipgloss.Width(prefix))
-	line = kit.TruncateRight(line, maxW)
-	if it.isClear && !isSel {
-		line = d.styleDim.Render(line)
-	}
-	_, _ = fmt.Fprint(w, style.Render(prefix+line))
+	return kit.TruncateRight(line, maxWidth)
 }
 
 func (m *monitorModel) openTeamPicker() tea.Cmd {
 	m.closeHelpModal()
-	if m.sessionPickerOpen {
-		m.closeSessionPicker()
-	}
-	if m.profilePickerOpen {
-		m.closeProfilePicker()
-	}
-	if m.modelPickerOpen {
-		m.closeModelPicker()
-	}
-	if m.reasoningEffortPickerOpen {
-		m.closeReasoningEffortPicker()
-	}
-	if m.reasoningSummaryPickerOpen {
-		m.closeReasoningSummaryPicker()
-	}
-	if m.filePickerOpen {
-		m.closeFilePicker()
-	}
+	m.closeAllPickers()
 
 	items := []teamPickerItem{{isClear: true}}
 	seen := map[string]struct{}{}
@@ -151,7 +98,7 @@ func (m *monitorModel) openTeamPicker() tea.Cmd {
 		}
 	}
 
-	l := list.New(listItems, newTeamPickerDelegate(), 0, 0)
+	l := list.New(listItems, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderTeamPickerLine), 0, 0)
 	l.Title = "Focus Team Run"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
@@ -223,38 +170,11 @@ func (m *monitorModel) selectFromTeamPicker() tea.Cmd {
 }
 
 func (m *monitorModel) renderTeamPicker(base string) string {
-	maxModalW := max(1, m.width-8)
-	modalWidth := min(64, maxModalW)
-	minModalW := min(42, maxModalW)
-	if modalWidth < minModalW {
-		modalWidth = minModalW
-	}
+	dims := kit.ComputeModalDims(m.width, m.height, 64, 18, 42, 10, 8, 4)
+	m.teamPickerList.SetWidth(dims.ModalWidth - 4)
+	m.teamPickerList.SetHeight(dims.ListHeight)
 
-	maxModalH := max(1, m.height-8)
-	modalHeight := min(18, maxModalH)
-	minModalH := min(10, maxModalH)
-	if modalHeight < minModalH {
-		modalHeight = minModalH
-	}
-
-	listHeight := modalHeight - 4
-	if listHeight < 4 {
-		listHeight = 4
-	}
-	m.teamPickerList.SetWidth(modalWidth - 4)
-	m.teamPickerList.SetHeight(listHeight)
-
-	opts := kit.ModalOptions{
-		Content:      m.teamPickerList.View(),
-		ScreenWidth:  m.width,
-		ScreenHeight: m.height,
-		Width:        modalWidth,
-		Height:       modalHeight,
-		Padding:      [2]int{1, 2},
-		BorderStyle:  lipgloss.RoundedBorder(),
-		BorderColor:  lipgloss.Color("#6bbcff"),
-		Foreground:   lipgloss.Color("#eaeaea"),
-	}
+	opts := kit.DefaultPickerModalOpts(m.teamPickerList.View(), m.width, m.height, dims.ModalWidth, dims.ModalHeight)
 
 	_ = base
 	return kit.RenderOverlay(opts)

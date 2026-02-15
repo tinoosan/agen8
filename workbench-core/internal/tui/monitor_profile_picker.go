@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -49,52 +47,16 @@ func (p monitorProfilePickerItem) Description() string {
 	return desc
 }
 
-type monitorProfilePickerDelegate struct {
-	styleRow lipgloss.Style
-	styleSel lipgloss.Style
-	styleDim lipgloss.Style
-}
-
-func newMonitorProfilePickerDelegate() monitorProfilePickerDelegate {
-	return monitorProfilePickerDelegate{
-		styleRow: lipgloss.NewStyle().Foreground(lipgloss.Color("#b0b0b0")),
-		styleSel: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#eaeaea")).
-			Bold(true),
-		styleDim: lipgloss.NewStyle().Foreground(lipgloss.Color("#707070")),
-	}
-}
-
-func (d monitorProfilePickerDelegate) Height() int  { return 1 }
-func (d monitorProfilePickerDelegate) Spacing() int { return 0 }
-func (d monitorProfilePickerDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd {
-	return nil
-}
-
-func (d monitorProfilePickerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+func renderMonitorProfilePickerLine(item list.Item, maxWidth int) string {
 	it, ok := item.(monitorProfilePickerItem)
 	if !ok {
-		return
+		return kit.TruncateRight(strings.TrimSpace(item.FilterValue()), maxWidth)
 	}
-
-	isSel := index == m.Index()
-	prefix := "  "
-	style := d.styleRow
-	if isSel {
-		prefix = "› "
-		style = d.styleSel
+	line := strings.TrimSpace(it.Title())
+	if desc := strings.TrimSpace(it.Description()); desc != "" {
+		line += " — " + desc
 	}
-
-	title := it.Title()
-	desc := strings.TrimSpace(it.Description())
-	line := title
-	if desc != "" {
-		line = title + " — " + desc
-	}
-
-	maxW := max(1, m.Width()-lipgloss.Width(prefix))
-	line = kit.TruncateRight(line, maxW)
-	_, _ = fmt.Fprint(w, style.Render(prefix+line))
+	return kit.TruncateRight(line, maxWidth)
 }
 
 func (m *monitorModel) openProfilePicker() tea.Cmd {
@@ -104,17 +66,14 @@ func (m *monitorModel) openProfilePicker() tea.Cmd {
 func (m *monitorModel) openProfilePickerFor(mode string, teamOnly bool) tea.Cmd {
 	// Close other modals/pickers; only one should be open at a time.
 	m.closeHelpModal()
-	m.closeModelPicker()
-	m.closeReasoningEffortPicker()
-	m.closeReasoningSummaryPicker()
-	m.closeFilePicker()
+	m.closeAllPickers()
 
 	m.profilePickerOpen = true
 	m.profilePickerMode = strings.TrimSpace(mode)
 	m.profilePickerTeamOnly = teamOnly
 
 	items, titleSuffix := m.monitorProfilePickerItems(teamOnly)
-	l := list.New(items, newMonitorProfilePickerDelegate(), 0, 0)
+	l := list.New(items, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderMonitorProfilePickerLine), 0, 0)
 	l.Title = "Select Profile"
 	if teamOnly {
 		l.Title = "Select Team Profile"
@@ -273,40 +232,13 @@ func (m *monitorModel) selectProfileFromPicker() tea.Cmd {
 }
 
 func (m *monitorModel) renderProfilePicker(base string) string {
-	maxModalW := max(1, m.width-8)
-	modalWidth := min(70, maxModalW)
-	minModalW := min(40, maxModalW)
-	if modalWidth < minModalW {
-		modalWidth = minModalW
-	}
-
-	maxModalH := max(1, m.height-8)
-	modalHeight := min(20, maxModalH)
-	minModalH := min(10, maxModalH)
-	if modalHeight < minModalH {
-		modalHeight = minModalH
-	}
-
-	listHeight := modalHeight - 3 // Account for filter input and borders
-	if listHeight < 4 {
-		listHeight = 4
-	}
-	m.profilePickerList.SetWidth(modalWidth - 4)
-	m.profilePickerList.SetHeight(listHeight)
+	dims := kit.ComputeModalDims(m.width, m.height, 70, 20, 40, 10, 8, 3)
+	m.profilePickerList.SetWidth(dims.ModalWidth - 4)
+	m.profilePickerList.SetHeight(dims.ListHeight)
 
 	content := m.profilePickerList.View()
 
-	opts := kit.ModalOptions{
-		Content:      content,
-		ScreenWidth:  m.width,
-		ScreenHeight: m.height,
-		Width:        modalWidth,
-		Height:       modalHeight,
-		Padding:      [2]int{1, 2},
-		BorderStyle:  lipgloss.RoundedBorder(),
-		BorderColor:  lipgloss.Color("#6bbcff"),
-		Foreground:   lipgloss.Color("#eaeaea"),
-	}
+	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
 
 	_ = base
 	return kit.RenderOverlay(opts)

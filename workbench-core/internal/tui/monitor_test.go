@@ -825,7 +825,7 @@ func TestMonitorHandleCommand_RenameSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newMonitorModel: %v", err)
 	}
-	cmd := m.handleCommand("/rename-session after rename")
+	cmd := m.handleCommand("/rename after rename")
 	if cmd == nil {
 		t.Fatalf("expected command")
 	}

@@ -13,6 +13,8 @@ var monitorReasoningSummaryOptions = []string{"off", "auto", "concise", "detaile
 
 // openReasoningEffortPicker opens the reasoning effort picker.
 func (m *monitorModel) openReasoningEffortPicker() {
+	m.closeHelpModal()
+	m.closeAllPickers()
 	m.reasoningEffortPickerOpen = true
 	sel := 3 // default to medium
 	cur := strings.ToLower(strings.TrimSpace(m.reasoningEffort))
@@ -70,6 +72,8 @@ func (m *monitorModel) renderReasoningEffortPicker(base string) string {
 
 // openReasoningSummaryPicker opens the reasoning summary picker.
 func (m *monitorModel) openReasoningSummaryPicker() {
+	m.closeHelpModal()
+	m.closeAllPickers()
 	m.reasoningSummaryPickerOpen = true
 	sel := 1 // default to auto
 	cur := strings.ToLower(strings.TrimSpace(m.reasoningSummary))
@@ -127,37 +131,7 @@ func (m *monitorModel) renderReasoningSummaryPicker(base string) string {
 
 // renderOptionsPicker renders a simple options picker modal.
 func (m *monitorModel) renderOptionsPicker(base, title string, options []string, selected int) string {
-	maxModalW := m.width - 8
-	if maxModalW < 1 {
-		maxModalW = 1
-	}
-	modalWidth := 40
-	if modalWidth > maxModalW {
-		modalWidth = maxModalW
-	}
-	minModalW := 30
-	if minModalW > maxModalW {
-		minModalW = maxModalW
-	}
-	if modalWidth < minModalW {
-		modalWidth = minModalW
-	}
-
-	maxModalH := m.height - 6
-	if maxModalH < 1 {
-		maxModalH = 1
-	}
-	modalHeight := len(options) + 6
-	if modalHeight > maxModalH {
-		modalHeight = maxModalH
-	}
-	minModalH := 8
-	if minModalH > maxModalH {
-		minModalH = maxModalH
-	}
-	if modalHeight < minModalH {
-		modalHeight = minModalH
-	}
+	dims := kit.ComputeModalDims(m.width, m.height, 40, len(options)+6, 30, 8, 6, 0)
 
 	styleTitle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#707070")).
@@ -184,17 +158,7 @@ func (m *monitorModel) renderOptionsPicker(base, title string, options []string,
 
 	content := strings.Join(lines, "\n")
 
-	opts := kit.ModalOptions{
-		Content:      content,
-		ScreenWidth:  m.width,
-		ScreenHeight: m.height,
-		Width:        modalWidth,
-		Height:       modalHeight,
-		Padding:      [2]int{1, 2},
-		BorderStyle:  lipgloss.RoundedBorder(),
-		BorderColor:  lipgloss.Color("#6bbcff"),
-		Foreground:   lipgloss.Color("#eaeaea"),
-	}
+	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
 
 	_ = base
 	return kit.RenderOverlay(opts)

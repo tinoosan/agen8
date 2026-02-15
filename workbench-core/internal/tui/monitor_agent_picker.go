@@ -30,6 +30,18 @@ func (a agentPickerItem) Title() string {
 }
 func (a agentPickerItem) Description() string { return strings.TrimSpace(a.status + " " + a.summary) }
 
+func renderAgentPickerLine(item list.Item, maxWidth int) string {
+	it, ok := item.(agentPickerItem)
+	if !ok {
+		return kit.TruncateRight(strings.TrimSpace(item.FilterValue()), maxWidth)
+	}
+	line := strings.TrimSpace(it.Title())
+	if desc := strings.TrimSpace(it.Description()); desc != "" {
+		line += " — " + desc
+	}
+	return kit.TruncateRight(line, maxWidth)
+}
+
 func agentsToPickerItems(agents []protocol.AgentListItem) []list.Item {
 	out := make([]list.Item, 0, len(agents))
 	for _, a := range agents {
@@ -79,31 +91,11 @@ func (m *monitorModel) openAgentPicker() tea.Cmd {
 		}
 	}
 	m.helpModalOpen = false
-	if m.sessionPickerOpen {
-		m.closeSessionPicker()
-	}
-	if m.profilePickerOpen {
-		m.closeProfilePicker()
-	}
-	if m.teamPickerOpen {
-		m.closeTeamPicker()
-	}
-	if m.modelPickerOpen {
-		m.closeModelPicker()
-	}
-	if m.reasoningEffortPickerOpen {
-		m.closeReasoningEffortPicker()
-	}
-	if m.reasoningSummaryPickerOpen {
-		m.closeReasoningSummaryPicker()
-	}
-	if m.filePickerOpen {
-		m.closeFilePicker()
-	}
+	m.closeAllPickers()
 
 	m.agentPickerOpen = true
 	m.agentPickerErr = ""
-	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
+	l := list.New(nil, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderAgentPickerLine), 0, 0)
 	l.Title = "Select Agent/Run"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
@@ -185,26 +177,9 @@ func (m *monitorModel) selectAgentFromPicker() tea.Cmd {
 }
 
 func (m *monitorModel) renderAgentPicker(base string) string {
-	maxModalW := max(1, m.width-8)
-	modalWidth := min(90, maxModalW)
-	minModalW := min(56, maxModalW)
-	if modalWidth < minModalW {
-		modalWidth = minModalW
-	}
-
-	maxModalH := max(1, m.height-8)
-	modalHeight := min(22, maxModalH)
-	minModalH := min(12, maxModalH)
-	if modalHeight < minModalH {
-		modalHeight = minModalH
-	}
-
-	listHeight := modalHeight - 4
-	if listHeight < 4 {
-		listHeight = 4
-	}
-	m.agentPickerList.SetWidth(modalWidth - 4)
-	m.agentPickerList.SetHeight(listHeight)
+	dims := kit.ComputeModalDims(m.width, m.height, 90, 22, 56, 12, 8, 4)
+	m.agentPickerList.SetWidth(dims.ModalWidth - 4)
+	m.agentPickerList.SetHeight(dims.ListHeight)
 
 	content := m.agentPickerList.View()
 	if strings.TrimSpace(m.agentPickerErr) != "" {
@@ -213,17 +188,7 @@ func (m *monitorModel) renderAgentPicker(base string) string {
 	}
 	content += "\n" + kit.StyleDim.Render("Enter: switch run • Esc: close")
 
-	opts := kit.ModalOptions{
-		Content:      content,
-		ScreenWidth:  m.width,
-		ScreenHeight: m.height,
-		Width:        modalWidth,
-		Height:       modalHeight,
-		Padding:      [2]int{1, 2},
-		BorderStyle:  lipgloss.RoundedBorder(),
-		BorderColor:  lipgloss.Color("#6bbcff"),
-		Foreground:   lipgloss.Color("#eaeaea"),
-	}
+	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
 
 	_ = base
 	return kit.RenderOverlay(opts)

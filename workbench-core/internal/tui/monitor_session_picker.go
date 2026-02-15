@@ -15,21 +15,7 @@ import (
 func (m *monitorModel) openSessionPicker() tea.Cmd {
 	// Enforce single-modal semantics.
 	m.helpModalOpen = false
-	if m.profilePickerOpen {
-		m.closeProfilePicker()
-	}
-	if m.modelPickerOpen {
-		m.closeModelPicker()
-	}
-	if m.reasoningEffortPickerOpen {
-		m.closeReasoningEffortPicker()
-	}
-	if m.reasoningSummaryPickerOpen {
-		m.closeReasoningSummaryPicker()
-	}
-	if m.filePickerOpen {
-		m.closeFilePicker()
-	}
+	m.closeAllPickers()
 
 	m.sessionPickerOpen = true
 	m.sessionPickerErr = ""
@@ -40,7 +26,7 @@ func (m *monitorModel) openSessionPicker() tea.Cmd {
 	m.sessionPickerTotal = 0
 	m.sessionPickerFilter = ""
 
-	l := list.New(nil, newSessionPickerDelegate(), 0, 0)
+	l := list.New(nil, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderSessionPickerLine), 0, 0)
 	l.Title = "Select Session"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
@@ -215,26 +201,9 @@ func (m *monitorModel) selectSessionFromPicker() tea.Cmd {
 }
 
 func (m *monitorModel) renderSessionPicker(base string) string {
-	maxModalW := max(1, m.width-8)
-	modalWidth := min(80, maxModalW)
-	minModalW := min(48, maxModalW)
-	if modalWidth < minModalW {
-		modalWidth = minModalW
-	}
-
-	maxModalH := max(1, m.height-8)
-	modalHeight := min(22, maxModalH)
-	minModalH := min(12, maxModalH)
-	if modalHeight < minModalH {
-		modalHeight = minModalH
-	}
-
-	listHeight := modalHeight - 4
-	if listHeight < 4 {
-		listHeight = 4
-	}
-	m.sessionPickerList.SetWidth(modalWidth - 4)
-	m.sessionPickerList.SetHeight(listHeight)
+	dims := kit.ComputeModalDims(m.width, m.height, 80, 22, 48, 12, 8, 4)
+	m.sessionPickerList.SetWidth(dims.ModalWidth - 4)
+	m.sessionPickerList.SetHeight(dims.ListHeight)
 
 	content := m.sessionPickerList.View()
 	if strings.TrimSpace(m.sessionPickerErr) != "" {
@@ -243,17 +212,7 @@ func (m *monitorModel) renderSessionPicker(base string) string {
 	}
 	content += "\n" + m.renderSessionPickerFooter()
 
-	opts := kit.ModalOptions{
-		Content:      content,
-		ScreenWidth:  m.width,
-		ScreenHeight: m.height,
-		Width:        modalWidth,
-		Height:       modalHeight,
-		Padding:      [2]int{1, 2},
-		BorderStyle:  lipgloss.RoundedBorder(),
-		BorderColor:  lipgloss.Color("#6bbcff"),
-		Foreground:   lipgloss.Color("#eaeaea"),
-	}
+	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
 
 	_ = base
 	return kit.RenderOverlay(opts)

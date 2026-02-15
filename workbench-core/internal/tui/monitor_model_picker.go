@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -39,54 +38,16 @@ func (m monitorModelPickerItem) Title() string {
 
 func (m monitorModelPickerItem) Description() string { return "" }
 
-type monitorModelPickerDelegate struct {
-	styleRow lipgloss.Style
-	styleSel lipgloss.Style
-}
-
-func newMonitorModelPickerDelegate() monitorModelPickerDelegate {
-	return monitorModelPickerDelegate{
-		styleRow: lipgloss.NewStyle().Foreground(lipgloss.Color("#b0b0b0")),
-		styleSel: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#eaeaea")).
-			Bold(true),
-	}
-}
-
-func (d monitorModelPickerDelegate) Height() int  { return 1 }
-func (d monitorModelPickerDelegate) Spacing() int { return 0 }
-func (d monitorModelPickerDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd {
-	return nil
-}
-
-func (d monitorModelPickerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	it, ok := item.(monitorModelPickerItem)
-	if !ok {
-		return
-	}
-
-	isSel := index == m.Index()
-	prefix := "  "
-	style := d.styleRow
-	if isSel {
-		prefix = "› "
-		style = d.styleSel
-	}
-
-	line := it.Title()
-	maxW := max(1, m.Width()-lipgloss.Width(prefix))
-	line = kit.TruncateRight(line, maxW)
-	_, _ = fmt.Fprint(w, style.Render(prefix+line))
-}
-
 // openModelPicker initializes and opens the provider-first model picker modal.
 func (m *monitorModel) openModelPicker() tea.Cmd {
+	m.helpModalOpen = false
+	m.closeAllPickers()
 	m.modelPickerOpen = true
 	m.modelPickerProvider = ""
 	m.modelPickerQuery = ""
 	m.modelPickerProviderView = true
 
-	l := list.New([]list.Item{}, newMonitorModelPickerDelegate(), 0, 0)
+	l := list.New([]list.Item{}, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), nil), 0, 0)
 	l.Title = "Select Provider"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
@@ -231,26 +192,9 @@ func (m *monitorModel) selectModelFromPicker() tea.Cmd {
 }
 
 func (m *monitorModel) renderModelPicker(base string) string {
-	maxModalW := max(1, m.width-8)
-	modalWidth := min(70, maxModalW)
-	minModalW := min(46, maxModalW)
-	if modalWidth < minModalW {
-		modalWidth = minModalW
-	}
-
-	maxModalH := max(1, m.height-8)
-	modalHeight := min(22, maxModalH)
-	minModalH := min(10, maxModalH)
-	if modalHeight < minModalH {
-		modalHeight = minModalH
-	}
-
-	listHeight := modalHeight - 6
-	if listHeight < 4 {
-		listHeight = 4
-	}
-	m.modelPickerList.SetWidth(modalWidth - 4)
-	m.modelPickerList.SetHeight(listHeight)
+	dims := kit.ComputeModalDims(m.width, m.height, 70, 22, 46, 10, 8, 6)
+	m.modelPickerList.SetWidth(dims.ModalWidth - 4)
+	m.modelPickerList.SetHeight(dims.ListHeight)
 
 	scope := "Global"
 	if !m.modelPickerProviderView {
@@ -260,17 +204,7 @@ func (m *monitorModel) renderModelPicker(base string) string {
 	helpLine := kit.StyleDim.Render("Enter select · Esc back/close · type to search")
 	content := scope + "\n" + searchLine + "\n\n" + m.modelPickerList.View() + "\n" + helpLine
 
-	opts := kit.ModalOptions{
-		Content:      content,
-		ScreenWidth:  m.width,
-		ScreenHeight: m.height,
-		Width:        modalWidth,
-		Height:       modalHeight,
-		Padding:      [2]int{1, 2},
-		BorderStyle:  lipgloss.RoundedBorder(),
-		BorderColor:  lipgloss.Color("#6bbcff"),
-		Foreground:   lipgloss.Color("#eaeaea"),
-	}
+	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
 
 	_ = base
 	return kit.RenderOverlay(opts)

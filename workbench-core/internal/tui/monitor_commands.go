@@ -164,7 +164,7 @@ func cmdNewSession(m *monitorModel, rest string) tea.Cmd {
 func cmdRenameSession(m *monitorModel, rest string) tea.Cmd {
 	title := strings.TrimSpace(rest)
 	if title == "" {
-		return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /rename-session <title>"}} }
+		return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /rename <title>"}} }
 	}
 	return func() tea.Msg {
 		var res protocol.SessionRenameResult

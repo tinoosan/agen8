@@ -25,7 +25,7 @@ Type a message and press Ctrl+Enter to queue a task, or use a command (below):
   /team                   Focus a single team run (or clear focus)
   /sessions               Switch session (reattach to its current run)
   /agents                 Switch agent/run in the active session
-  /rename-session <title> Rename current session
+  /rename <title> Rename current session
   /pause                 Pause run(s) in current session
   /resume                Resume paused run(s) in current session
   /stop                  Hard-stop run(s) and leave them paused
