@@ -239,33 +239,37 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	if sessionReasoningSummary != "" {
 		m.reasoningSummary = sessionReasoningSummary
 	}
+	// Consolidate model/profile initialization:
+	// 1. Profile: Run's runtime profile (primary)
+	// 2. Model: Session's ActiveModel (primary) > Run's Runtime Model > Profile default
 	if runProfile != "" {
 		m.profile = runProfile
 	}
-	// Disable mouse handling so terminals don't enter mouse-reporting mode.
-	m.activityDetail.MouseWheelEnabled = false
-	m.planViewport.MouseWheelEnabled = false
-	m.agentOutputVP.MouseWheelEnabled = false
-	m.inboxVP.MouseWheelEnabled = false
-	m.outboxVP.MouseWheelEnabled = false
-	m.memoryVP.MouseWheelEnabled = false
-	m.thinkingVP.MouseWheelEnabled = false
-	m.artifactContentVP.MouseWheelEnabled = false
 
+	// Replay events to build up state (e.g. inbox, activity)
 	for _, e := range evs {
 		m.observeEvent(e)
 	}
+
+	// Enforce session state as the source of truth for the model, overriding any
+	// transient state from event replay.
 	if sessionActiveModel != "" {
 		m.model = sessionActiveModel
+	} else if m.model == "" {
+		// Fallback order if session didn't have an active model (unlikely for active sessions):
+		// 1. Runtime model (from run record)
+		// 2. "default" (will display as default)
+		if r, err := store.LoadRun(cfg, runID); err == nil && r.Runtime != nil {
+			if m.model == "" {
+				m.model = strings.TrimSpace(r.Runtime.Model)
+			}
+		}
 	}
-	if sessionReasoningEffort != "" {
-		m.reasoningEffort = sessionReasoningEffort
+	if m.profile == "" {
+		m.profile = "default"
 	}
-	if sessionReasoningSummary != "" {
-		m.reasoningSummary = sessionReasoningSummary
-	}
-	if runProfile != "" {
-		m.profile = runProfile
+	if m.model == "" {
+		m.model = "default"
 	}
 	// Activity feed is loaded from SQLite (paginated) via loadActivityPage.
 	m.loadPlanFiles()
@@ -429,6 +433,10 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 			}
 			if v := strings.TrimSpace(sess.ReasoningSummary); v != "" {
 				m.reasoningSummary = v
+			}
+			// Enforce session state as the source of truth for the model, overriding manifest
+			if v := strings.TrimSpace(sess.ActiveModel); v != "" {
+				m.model = v
 			}
 		}
 	}

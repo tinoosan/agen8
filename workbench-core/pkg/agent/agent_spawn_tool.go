@@ -101,6 +101,7 @@ func (t *AgentSpawnTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	cleanBackground := sanitizeSpawnBackground(payload.BackgroundContext)
 
 	cfg := t.ParentAgent.Config()
+	cfg.SystemPrompt = DefaultSubAgentSystemPrompt() // Child agents get dedicated sub-agent prompt
 	if override := strings.TrimSpace(t.ModelOverride); override != "" {
 		cfg.Model = override
 	}

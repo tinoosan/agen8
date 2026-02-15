@@ -461,7 +461,7 @@ func (m *monitorModel) startNewStandaloneSession(profileRef, goal string) tea.Cm
 			Mode:     "standalone",
 			Profile:  strings.TrimSpace(profileRef),
 			Goal:     strings.TrimSpace(goal),
-			Model:    strings.TrimSpace(m.model),
+			Model:    "", // Do not inherit current session's model; let profile resolve it.
 		}, &res); err != nil {
 			return commandLinesMsg{lines: []string{"[session] error: " + err.Error()}}
 		}
@@ -481,7 +481,7 @@ func (m *monitorModel) startNewTeamSession(profileRef, goal string) tea.Cmd {
 			Mode:     "team",
 			Profile:  strings.TrimSpace(profileRef),
 			Goal:     strings.TrimSpace(goal),
-			Model:    strings.TrimSpace(m.model),
+			Model:    "", // Do not inherit current session's model; let profile resolve it.
 		}, &res); err != nil {
 			return commandLinesMsg{lines: []string{"[session] error: " + err.Error()}}
 		}

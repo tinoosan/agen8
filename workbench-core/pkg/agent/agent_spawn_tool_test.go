@@ -145,6 +145,17 @@ func TestAgentSpawnTool_ExecuteReturnsNoopWithChildResult(t *testing.T) {
 	if requests[0].MaxTokens != 512 {
 		t.Fatalf("child MaxTokens=%d, want %d", requests[0].MaxTokens, 512)
 	}
+	// Verify child agent receives the sub-agent system prompt
+	systemPrompt := requests[0].System
+	if !strings.Contains(systemPrompt, "<sub_agent_mode>") {
+		t.Fatal("expected child system prompt to contain <sub_agent_mode>")
+	}
+	if !strings.Contains(systemPrompt, "You are a spawned child agent") {
+		t.Fatal("expected child system prompt to contain 'You are a spawned child agent'")
+	}
+	if strings.Contains(systemPrompt, "Send the completion email") {
+		t.Fatal("child system prompt should NOT contain email requirement")
+	}
 }
 
 func TestAgentSpawnTool_RejectsDepthLimit(t *testing.T) {
