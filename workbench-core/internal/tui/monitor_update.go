@@ -255,6 +255,16 @@ func (m *monitorModel) handleLoadedDataMessages(msg tea.Msg) (tea.Model, tea.Cmd
 		} else if teamModel := strings.TrimSpace(manifest.TeamModel); teamModel != "" {
 			m.model = teamModel
 		}
+
+		// Re-enforce session ActiveModel if available, as it is the source of truth for the *current*
+		// runtime state, whereas manifest reflects configuration/requested state.
+		if m.session != nil && strings.TrimSpace(m.sessionID) != "" {
+			if sess, err := m.session.LoadSession(m.ctx, strings.TrimSpace(m.sessionID)); err == nil {
+				if active := strings.TrimSpace(sess.ActiveModel); active != "" {
+					m.model = active
+				}
+			}
+		}
 		m.teamModelChange = manifest.ModelChange
 		m.teamCoordinatorRole = strings.TrimSpace(manifest.CoordinatorRole)
 		m.teamCoordinatorRunID = strings.TrimSpace(manifest.CoordinatorRun)
