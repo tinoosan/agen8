@@ -23,7 +23,7 @@ var (
 	sqliteMigrated = map[string]bool{}
 )
 
-const currentSchemaVersion = 5
+const currentSchemaVersion = 6
 
 var sqliteMigrations = []string{
 	`CREATE TABLE IF NOT EXISTS sessions (
@@ -248,6 +248,10 @@ func migrateSQLite(db *sql.DB) error {
 			_ = tx.Rollback()
 			return err
 		}
+		if err := ensureRunsParentRunIDColumn(tx); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
 		if _, err := tx.Exec(
 			`INSERT INTO schema_version (version, applied_at) VALUES (?, ?)`,
 			currentSchemaVersion,
@@ -269,6 +273,42 @@ func currentSchema(tx *sql.Tx) (int, error) {
 		return 0, fmt.Errorf("sqlite: read schema version: %w", err)
 	}
 	return version, nil
+}
+
+func ensureRunsParentRunIDColumn(tx *sql.Tx) error {
+	rows, err := tx.Query(`PRAGMA table_info(runs)`)
+	if err != nil {
+		return fmt.Errorf("sqlite: runs table info: %w", err)
+	}
+	defer rows.Close()
+
+	hasParentRunID := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("sqlite: scan runs column: %w", err)
+		}
+		if name == "parent_run_id" {
+			hasParentRunID = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("sqlite: read runs columns: %w", err)
+	}
+	if hasParentRunID {
+		return nil
+	}
+	if _, err := tx.Exec(`ALTER TABLE runs ADD COLUMN parent_run_id TEXT DEFAULT ''`); err != nil {
+		return fmt.Errorf("sqlite: add parent_run_id column: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_parent_run_id ON runs(parent_run_id)`); err != nil {
+		return fmt.Errorf("sqlite: create parent_run_id index: %w", err)
+	}
+	return nil
 }
 
 func ensureTasksFinishedColumn(tx *sql.Tx) error {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -447,7 +448,12 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	agentCfg.ReasoningSummary = resolvedSummary
 	agentCfg.ApprovalsMode = strings.TrimSpace(s.resolved.ApprovalsMode)
 	agentCfg.EnableWebSearch = s.resolved.WebSearchEnabled
-	agentCfg.SystemPrompt = agent.DefaultAutonomousSystemPrompt()
+	isChildRun := strings.TrimSpace(run.ParentRunID) != ""
+	if isChildRun {
+		agentCfg.SystemPrompt = agent.DefaultSubAgentSystemPrompt()
+	} else {
+		agentCfg.SystemPrompt = agent.DefaultAutonomousSystemPrompt()
+	}
 	promptSource := agent.PromptSource(rt.Constructor)
 	if rt.Updater != nil {
 		promptSource = rt.Updater
@@ -503,18 +509,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		tool.IsCoordinator = isCoordinator
 		tool.CoordinatorRole = coordinatorRole
 		tool.ValidRoles = teamRoles
+	} else if run.ParentRunID == "" {
+		// Standalone mode (non-team, non-child): enable spawn_worker.
+		tool.SpawnWorker = s.makeSpawnWorkerFunc(run, model, emitEvent)
 	}
 	if err := registry.Register(tool); err != nil {
-		orderedEmitter.Close()
-		_ = rt.Shutdown(context.Background())
-		return nil, err
-	}
-	// Resolve subagent model: env var > profile-level > empty (inherit parent).
-	supervisorSubagentModel := strings.TrimSpace(s.resolved.SubagentModel)
-	if supervisorSubagentModel == "" && s.defaultProfile != nil {
-		supervisorSubagentModel = strings.TrimSpace(s.defaultProfile.SubagentModel)
-	}
-	if err := registerAgentSpawnTool(registry, agentCfg.MaxTokens, supervisorSubagentModel); err != nil {
 		orderedEmitter.Close()
 		_ = rt.Shutdown(context.Background())
 		return nil, err
@@ -528,8 +527,6 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		_ = rt.Shutdown(context.Background())
 		return nil, err
 	}
-	wireAgentSpawnParent(a)
-
 	workerSession, err := agentsession.New(agentsession.Config{
 		Agent:      a,
 		Profile:    activeProfile,
@@ -555,6 +552,8 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		CoordinatorRole:      coordinatorRole,
 		TeamRoles:            teamRoles,
 		TeamRoleDescriptions: teamRoleDescriptions,
+		ParentRunID:          strings.TrimSpace(run.ParentRunID),
+		SingleTask:           isChildRun,
 		InstanceID:           run.RunID,
 		Logf: func(format string, args ...any) {
 			log.Printf("daemon [%s]: "+format, append([]any{run.RunID}, args...)...)
@@ -641,6 +640,15 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 					stopRunLoop()
 					ticker.Stop()
 					if workerCtx.Err() != nil {
+						return
+					}
+					if errors.Is(err, agentsession.ErrSingleTaskComplete) {
+						emitEvent(workerCtx, events.Event{
+							Type:    "subagent.finished",
+							Message: "Spawned worker completed its task",
+							Data:    map[string]string{"runId": run.RunID},
+						})
+						_, _ = implstore.StopRun(s.cfg, run.RunID, types.RunStatusSucceeded, "")
 						return
 					}
 					errMsg := "unknown error"
@@ -1018,4 +1026,67 @@ func (s *runtimeSupervisor) ApplySessionModel(ctx context.Context, sessionID, ta
 		applied = append(applied, runID)
 	}
 	return applied, nil
+}
+
+// makeSpawnWorkerFunc returns a SpawnWorkerFunc that creates a child Run and
+// adds it to the session. The supervisor discovers the new run via syncOnce.
+func (s *runtimeSupervisor) makeSpawnWorkerFunc(
+	parentRun types.Run,
+	parentModel string,
+	parentEmit events.EmitFunc,
+) hosttools.SpawnWorkerFunc {
+	return func(ctx context.Context, goal, sessionID, parentRunID string) (string, error) {
+		// Count existing children to determine spawn index.
+		children, _ := implstore.ListChildRuns(s.cfg, parentRunID)
+		spawnIndex := len(children) + 1
+
+		childRun := types.NewChildRun(parentRunID, goal, sessionID, spawnIndex)
+
+		// Resolve subagent model: env var > profile-level > parent model.
+		subagentModel := strings.TrimSpace(s.resolved.SubagentModel)
+		if subagentModel == "" && s.defaultProfile != nil {
+			subagentModel = strings.TrimSpace(s.defaultProfile.SubagentModel)
+		}
+		if subagentModel == "" {
+			subagentModel = parentModel
+		}
+
+		childRun.Runtime = &types.RunRuntimeConfig{
+			DataDir: s.cfg.DataDir,
+			Model:   subagentModel,
+		}
+		if parentRun.Runtime != nil {
+			childRun.Runtime.Profile = parentRun.Runtime.Profile
+		}
+
+		if err := implstore.SaveRun(s.cfg, childRun); err != nil {
+			return "", fmt.Errorf("save child run: %w", err)
+		}
+
+		// Add child run to session's run list so the supervisor discovers it.
+		sess, err := s.sessionStore.LoadSession(ctx, sessionID)
+		if err != nil {
+			return "", fmt.Errorf("load session for spawn: %w", err)
+		}
+		sess.Runs = append(sess.Runs, childRun.RunID)
+		if err := s.sessionStore.SaveSession(ctx, sess); err != nil {
+			return "", fmt.Errorf("save session for spawn: %w", err)
+		}
+
+		if parentEmit != nil {
+			parentEmit(ctx, events.Event{
+				Type:    "subagent.spawned",
+				Message: fmt.Sprintf("Spawned worker agent #%d: %s", spawnIndex, goal),
+				Data: map[string]string{
+					"childRunId":  childRun.RunID,
+					"parentRunId": parentRunID,
+					"spawnIndex":  strconv.Itoa(spawnIndex),
+					"goal":        goal,
+					"model":       subagentModel,
+				},
+			})
+		}
+
+		return childRun.RunID, nil
+	}
 }

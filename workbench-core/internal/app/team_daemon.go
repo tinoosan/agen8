@@ -454,19 +454,6 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("register task_create for role %s: %w", role.Name, err)
 		}
-		// Resolve subagent model: env var > role-level > profile-level > empty (inherit parent).
-		roleSubagentModel := strings.TrimSpace(resolved.SubagentModel)
-		if roleSubagentModel == "" {
-			roleSubagentModel = strings.TrimSpace(role.SubagentModel)
-		}
-		if roleSubagentModel == "" && prof != nil {
-			roleSubagentModel = strings.TrimSpace(prof.SubagentModel)
-		}
-		if err := registerAgentSpawnTool(registry, agentCfg.MaxTokens, roleSubagentModel); err != nil {
-			orderedEmitter.Close()
-			_ = rt.Shutdown(context.Background())
-			return fmt.Errorf("register agent_spawn for role %s: %w", role.Name, err)
-		}
 		agentCfg.HostToolRegistry = registry
 
 		a, err := agent.NewAgent(runLLMClient, rt.Executor, agentCfg)
@@ -475,8 +462,6 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("create agent for role %s: %w", role.Name, err)
 		}
-		wireAgentSpawnParent(a)
-
 		roleProfile := &profile.Profile{
 			ID:          role.Name,
 			Description: role.Description,

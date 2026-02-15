@@ -57,6 +57,11 @@ type agentsListMsg struct {
 	err    error
 }
 
+type childRunsLoadedMsg struct {
+	runs []types.Run
+	err  error
+}
+
 type tickMsg struct {
 	now time.Time
 }
@@ -197,6 +202,7 @@ type monitorModel struct {
 	reasoningUsageByStep         map[string]int
 	thinkingVP                   viewport.Model
 	thinkingAutoScroll           bool
+	childRuns                    []types.Run
 	planMarkdown                 string
 	planDetails                  string
 	planLoadErr                  string

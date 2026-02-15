@@ -25,6 +25,10 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
+// ErrSingleTaskComplete is returned by Run when SingleTask mode is enabled
+// and the session has completed its assigned task.
+var ErrSingleTaskComplete = errors.New("single task completed")
+
 type ResolveProfileFunc func(ref string) (*profile.Profile, string, error)
 
 type Config struct {
@@ -62,6 +66,12 @@ type Config struct {
 	CoordinatorRole      string
 	TeamRoles            []string // all role names, for prompt injection
 	TeamRoleDescriptions map[string]string
+
+	// ParentRunID links this session's run to its parent when spawned as a worker.
+	// Used to trigger coordinator callbacks in standalone mode.
+	ParentRunID string
+	// SingleTask causes the session to exit after completing one task.
+	SingleTask bool
 
 	InstanceID string
 	Logf       func(format string, args ...any)
@@ -908,6 +918,9 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			s.emitBestEffort(completeCtx, events.Event{Type: "task.notify.error", Message: "Task notification failed", Data: map[string]string{"taskId": taskID, "error": err.Error()}})
 		}
 	}
+	if s.cfg.SingleTask {
+		return ErrSingleTaskComplete
+	}
 	return nil
 }
 
@@ -960,61 +973,108 @@ func (s *Session) emitTaskQueuedOnce(ctx context.Context, taskID, goal, source s
 }
 
 func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types.Task, tr types.TaskResult) {
-	if strings.TrimSpace(s.cfg.TeamID) == "" || s.cfg.IsCoordinator {
+	parentRunID := strings.TrimSpace(s.cfg.ParentRunID)
+	isTeamWorker := strings.TrimSpace(s.cfg.TeamID) != "" && !s.cfg.IsCoordinator
+	isSubagentWorker := parentRunID != ""
+
+	if !isTeamWorker && !isSubagentWorker {
 		return
 	}
-	coordinatorRole := strings.TrimSpace(s.cfg.CoordinatorRole)
-	if coordinatorRole == "" || strings.EqualFold(coordinatorRole, s.cfg.RoleName) {
-		return
-	}
+
 	taskID := strings.TrimSpace(task.TaskID)
 	if taskID == "" {
 		return
 	}
+
 	callbackTaskID := "callback-" + taskID
 	now := time.Now().UTC()
-	callbackGoal := fmt.Sprintf("COORDINATOR REVIEW ONLY: Review %s result from role %q for task %s. Do not do specialist work yourself. Either delegate any needed follow-up to the appropriate role or mark the work complete and update overall team progress.", string(tr.Status), strings.TrimSpace(s.cfg.RoleName), truncateText(taskID, 24))
-	inputs := map[string]any{
-		"sourceTaskId": taskID,
-		"sourceRole":   strings.TrimSpace(s.cfg.RoleName),
-		"sourceStatus": string(tr.Status),
-		"summary":      strings.TrimSpace(tr.Summary),
-		"error":        strings.TrimSpace(tr.Error),
-		"artifacts":    append([]string(nil), tr.Artifacts...),
+
+	var callback types.Task
+	if isSubagentWorker {
+		// Standalone subagent: create callback assigned to parent run.
+		callbackGoal := fmt.Sprintf("SUBAGENT RESULT: Review %s result from spawned worker for task %s. The worker has completed its task. Review the result and decide on next steps.", string(tr.Status), truncateText(taskID, 24))
+		inputs := map[string]any{
+			"sourceTaskId": taskID,
+			"sourceRunId":  strings.TrimSpace(s.cfg.RunID),
+			"sourceStatus": string(tr.Status),
+			"summary":      strings.TrimSpace(tr.Summary),
+			"error":        strings.TrimSpace(tr.Error),
+			"artifacts":    append([]string(nil), tr.Artifacts...),
+		}
+		callback = types.Task{
+			TaskID:         callbackTaskID,
+			SessionID:      strings.TrimSpace(s.cfg.SessionID),
+			RunID:          parentRunID,
+			AssignedToType: "agent",
+			AssignedTo:     parentRunID,
+			CreatedBy:      strings.TrimSpace(s.cfg.RunID),
+			TaskKind:       state.TaskKindCallback,
+			Goal:           callbackGoal,
+			Inputs:         inputs,
+			Priority:       1,
+			Status:         types.TaskStatusPending,
+			CreatedAt:      &now,
+			Metadata: map[string]any{
+				"source":            "subagent.callback",
+				"callbackForTaskId": taskID,
+				"sourceRunId":       strings.TrimSpace(s.cfg.RunID),
+				"sourceTaskStatus":  string(tr.Status),
+			},
+		}
+	} else {
+		// Team mode: create callback assigned to coordinator role.
+		coordinatorRole := strings.TrimSpace(s.cfg.CoordinatorRole)
+		if coordinatorRole == "" || strings.EqualFold(coordinatorRole, s.cfg.RoleName) {
+			return
+		}
+		callbackGoal := fmt.Sprintf("COORDINATOR REVIEW ONLY: Review %s result from role %q for task %s. Do not do specialist work yourself. Either delegate any needed follow-up to the appropriate role or mark the work complete and update overall team progress.", string(tr.Status), strings.TrimSpace(s.cfg.RoleName), truncateText(taskID, 24))
+		inputs := map[string]any{
+			"sourceTaskId": taskID,
+			"sourceRole":   strings.TrimSpace(s.cfg.RoleName),
+			"sourceStatus": string(tr.Status),
+			"summary":      strings.TrimSpace(tr.Summary),
+			"error":        strings.TrimSpace(tr.Error),
+			"artifacts":    append([]string(nil), tr.Artifacts...),
+		}
+		callback = types.Task{
+			TaskID:         callbackTaskID,
+			SessionID:      "team-" + strings.TrimSpace(s.cfg.TeamID),
+			RunID:          "team-" + strings.TrimSpace(s.cfg.TeamID) + "-callback",
+			TeamID:         strings.TrimSpace(s.cfg.TeamID),
+			AssignedRole:   coordinatorRole,
+			AssignedToType: "role",
+			AssignedTo:     coordinatorRole,
+			CreatedBy:      strings.TrimSpace(s.cfg.RoleName),
+			TaskKind:       state.TaskKindCallback,
+			Goal:           callbackGoal,
+			Inputs:         inputs,
+			Priority:       1,
+			Status:         types.TaskStatusPending,
+			CreatedAt:      &now,
+			Metadata: map[string]any{
+				"source":            "team.callback",
+				"callbackForTaskId": taskID,
+				"sourceRole":        strings.TrimSpace(s.cfg.RoleName),
+				"sourceTaskStatus":  string(tr.Status),
+			},
+		}
 	}
-	callback := types.Task{
-		TaskID:         callbackTaskID,
-		SessionID:      "team-" + strings.TrimSpace(s.cfg.TeamID),
-		RunID:          "team-" + strings.TrimSpace(s.cfg.TeamID) + "-callback",
-		TeamID:         strings.TrimSpace(s.cfg.TeamID),
-		AssignedRole:   coordinatorRole,
-		AssignedToType: "role",
-		AssignedTo:     coordinatorRole,
-		CreatedBy:      strings.TrimSpace(s.cfg.RoleName),
-		TaskKind:       state.TaskKindCallback,
-		Goal:           callbackGoal,
-		Inputs:         inputs,
-		Priority:       1,
-		Status:         types.TaskStatusPending,
-		CreatedAt:      &now,
-		Metadata: map[string]any{
-			"source":            "team.callback",
-			"callbackForTaskId": taskID,
-			"sourceRole":        strings.TrimSpace(s.cfg.RoleName),
-			"sourceTaskStatus":  string(tr.Status),
-		},
-	}
+
 	if err := s.cfg.TaskStore.CreateTask(ctx, callback); err != nil {
 		return // idempotent via deterministic callback task id.
 	}
-	s.emitTaskQueuedOnce(ctx, callbackTaskID, callbackGoal, "team.callback")
+
+	eventSource := "team.callback"
+	if isSubagentWorker {
+		eventSource = "subagent.callback"
+	}
+	s.emitTaskQueuedOnce(ctx, callbackTaskID, callback.Goal, eventSource)
 	s.emitBestEffort(ctx, events.Event{
-		Type:    "team.callback.queued",
-		Message: "Worker completion callback queued for coordinator",
+		Type:    eventSource + ".queued",
+		Message: "Worker completion callback queued",
 		Data: map[string]string{
 			"taskId":            callbackTaskID,
 			"callbackForTaskId": taskID,
-			"assignedRole":      coordinatorRole,
 		},
 	})
 }

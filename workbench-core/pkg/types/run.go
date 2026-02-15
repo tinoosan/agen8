@@ -45,6 +45,13 @@ type Run struct {
 	// CostUSD is the cumulative estimated cost for this run.
 	CostUSD float64 `json:"costUSD,omitempty"`
 
+	// ParentRunID links this run to its parent when spawned as a subagent worker.
+	// Empty for top-level runs.
+	ParentRunID string `json:"parentRunId,omitempty"`
+	// SpawnIndex is the ordinal position among sibling subagent runs (1-based).
+	// Only meaningful when ParentRunID is set.
+	SpawnIndex int `json:"spawnIndex,omitempty"`
+
 	// Runtime captures host/runtime configuration used when executing this run.
 	//
 	// This is primarily for reproducibility and debugging ("why did the agent behave that way?").
@@ -109,5 +116,13 @@ func NewRun(goal string, maxBytesForContext int, sessionID string) Run {
 		MaxBytesForContext: maxBytesForContext,
 		Error:              nil,
 	}
+}
 
+// NewChildRun creates a new Run that is a child of parentRunID.
+// It inherits the session and sets ParentRunID and SpawnIndex.
+func NewChildRun(parentRunID, goal, sessionID string, spawnIndex int) Run {
+	run := NewRun(goal, 0, sessionID)
+	run.ParentRunID = parentRunID
+	run.SpawnIndex = spawnIndex
+	return run
 }

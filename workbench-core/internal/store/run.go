@@ -77,8 +77,8 @@ func SaveRun(cfg config.Config, run types.Run) error {
 		createdAt = now
 	}
 	_, err = tx.Exec(
-		`INSERT INTO runs (run_id, session_id, status, goal, run_json, started_at, finished_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO runs (run_id, session_id, status, goal, run_json, started_at, finished_at, created_at, updated_at, parent_run_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(run_id) DO UPDATE SET
 		   session_id=excluded.session_id,
 		   status=excluded.status,
@@ -87,7 +87,8 @@ func SaveRun(cfg config.Config, run types.Run) error {
 		   started_at=excluded.started_at,
 		   finished_at=excluded.finished_at,
 		   created_at=COALESCE(runs.created_at, excluded.created_at),
-		   updated_at=excluded.updated_at`,
+		   updated_at=excluded.updated_at,
+		   parent_run_id=excluded.parent_run_id`,
 		run.RunID,
 		run.SessionID,
 		run.Status,
@@ -97,6 +98,7 @@ func SaveRun(cfg config.Config, run types.Run) error {
 		nullIfEmpty(finishedAt),
 		createdAt,
 		now,
+		strings.TrimSpace(run.ParentRunID),
 	)
 	if err != nil {
 		return fmt.Errorf("error saving run: %w", err)
@@ -203,6 +205,42 @@ func LatestRunningRun(cfg config.Config) (types.Run, error) {
 		return types.Run{}, ErrInvalid
 	}
 	return run, nil
+}
+
+// ListChildRuns returns all runs whose parent_run_id matches the given parentRunID.
+func ListChildRuns(cfg config.Config, parentRunID string) ([]types.Run, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	parentRunID = strings.TrimSpace(parentRunID)
+	if parentRunID == "" {
+		return nil, fmt.Errorf("parentRunID cannot be blank")
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`SELECT run_json FROM runs WHERE parent_run_id = ? ORDER BY created_at`, parentRunID)
+	if err != nil {
+		return nil, fmt.Errorf("error listing child runs: %w", err)
+	}
+	defer rows.Close()
+
+	var out []types.Run
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var run types.Run
+		if err := json.Unmarshal([]byte(raw), &run); err != nil {
+			continue
+		}
+		if run.RunID != "" {
+			out = append(out, run)
+		}
+	}
+	return out, rows.Err()
 }
 
 // LatestRun returns the most recently created run (any status).

@@ -13,6 +13,10 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
+// SpawnWorkerFunc creates a child run for a spawned worker and returns the child RunID.
+// The daemon wires this callback to create Run records and add them to the session.
+type SpawnWorkerFunc func(ctx context.Context, goal, sessionID, parentRunID string) (childRunID string, err error)
+
 // TaskCreateTool creates a DB-backed task.
 type TaskCreateTool struct {
 	Store           state.TaskStore
@@ -23,6 +27,9 @@ type TaskCreateTool struct {
 	IsCoordinator   bool
 	CoordinatorRole string
 	ValidRoles      []string
+	// SpawnWorker is called when spawn_worker=true to create a child run.
+	// If nil, spawn_worker=true will return an error.
+	SpawnWorker SpawnWorkerFunc
 }
 
 func (t *TaskCreateTool) Definition() llmtypes.Tool {
@@ -64,6 +71,10 @@ func (t *TaskCreateTool) Definition() llmtypes.Tool {
 						"type":        "string",
 						"description": "Optional role assignment in team mode. Omit to assign to your own role.",
 					},
+					"spawnWorker": map[string]any{
+						"type":        "boolean",
+						"description": "If true, spawn a dedicated worker agent for this task. The worker runs asynchronously and you receive a callback with the result.",
+					},
 				},
 				"required":             []any{"goal"},
 				"additionalProperties": false,
@@ -84,6 +95,7 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		Inputs       map[string]any `json:"inputs"`
 		Metadata     map[string]any `json:"metadata"`
 		AssignedRole string         `json:"assignedRole"`
+		SpawnWorker  bool           `json:"spawnWorker"`
 	}
 	if err := json.Unmarshal(args, &payload); err != nil {
 		return types.HostOpRequest{}, err
@@ -146,15 +158,33 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		task.CreatedBy = roleName
 	}
 
+	if payload.SpawnWorker {
+		if t.SpawnWorker == nil {
+			return types.HostOpRequest{}, fmt.Errorf("task_create: spawn_worker is not available in this context")
+		}
+		childRunID, err := t.SpawnWorker(ctx, goal, t.SessionID, t.RunID)
+		if err != nil {
+			return types.HostOpRequest{}, fmt.Errorf("task_create: spawn worker: %w", err)
+		}
+		task.AssignedToType = "agent"
+		task.AssignedTo = childRunID
+		task.Metadata["source"] = "spawn_worker"
+		task.Metadata["parentRunId"] = strings.TrimSpace(t.RunID)
+	}
+
 	if err := t.Store.CreateTask(ctx, task); err != nil {
 		// Treat "already exists" as success for idempotency.
 		if _, gerr := t.Store.GetTask(ctx, taskID); gerr != nil {
 			return types.HostOpRequest{}, err
 		}
 	}
+	msg := fmt.Sprintf("Task %s created successfully", taskID)
+	if payload.SpawnWorker {
+		msg = fmt.Sprintf("Task %s created and worker agent spawned", taskID)
+	}
 	return types.HostOpRequest{
 		Op:   types.HostOpNoop,
-		Text: fmt.Sprintf("Task %s created successfully", taskID),
+		Text: msg,
 	}, nil
 }
 
