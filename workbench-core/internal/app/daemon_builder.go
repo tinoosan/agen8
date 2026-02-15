@@ -256,9 +256,14 @@ func (b *DaemonBuilder) buildStoresAndRuntime() error {
 	b.sessionStore = ss
 
 	b.effectiveModel = strings.TrimSpace(b.resolved.Model)
+	// Profile model takes priority over env var for standalone profiles.
+	if b.prof != nil && b.prof.Model != "" {
+		b.effectiveModel = b.prof.Model
+	}
 	loadedSession := types.Session{}
 	if loaded, lerr := b.sessionStore.LoadSession(b.ctx, b.run.SessionID); lerr == nil {
 		loadedSession = loaded
+		// Session active model (runtime switch) takes highest priority.
 		if active := strings.TrimSpace(loaded.ActiveModel); active != "" {
 			b.effectiveModel = active
 		}
@@ -415,7 +420,12 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 	}); err != nil {
 		return fmt.Errorf("register task_create tool: %w", err)
 	}
-	if err := registerAgentSpawnTool(registry, agentCfg.MaxTokens); err != nil {
+	// Resolve subagent model: env var > profile-level > empty (inherit parent).
+	subagentModel := strings.TrimSpace(b.resolved.SubagentModel)
+	if subagentModel == "" && b.prof != nil {
+		subagentModel = strings.TrimSpace(b.prof.SubagentModel)
+	}
+	if err := registerAgentSpawnTool(registry, agentCfg.MaxTokens, subagentModel); err != nil {
 		return fmt.Errorf("register agent_spawn tool: %w", err)
 	}
 	agentCfg.HostToolRegistry = registry

@@ -185,6 +185,89 @@ func TestAgentSpawnTool_ChildErrorReturnsNoopText(t *testing.T) {
 	}
 }
 
+func TestAgentSpawnTool_ModelOverrideUsedByChild(t *testing.T) {
+	llm := &spawnTestLLM{respText: "overridden"}
+	parent := newSpawnParentAgent(t, llm)
+	tool := &AgentSpawnTool{
+		ParentAgent:   parent,
+		MaxDepth:      3,
+		CurrentDepth:  0,
+		MaxTokens:     512,
+		ModelOverride: "custom/child-model",
+	}
+
+	args, _ := json.Marshal(map[string]any{
+		"goal":               "Use override model",
+		"background_context": nil,
+		"max_tokens":         nil,
+	})
+	req, err := tool.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if req.Op != types.HostOpNoop {
+		t.Fatalf("req.Op=%q, want %q", req.Op, types.HostOpNoop)
+	}
+
+	var meta spawnOpMetadata
+	if err := json.Unmarshal(req.Input, &meta); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if meta.Model != "custom/child-model" {
+		t.Fatalf("meta.Model=%q, want %q", meta.Model, "custom/child-model")
+	}
+
+	requests := llm.recorded()
+	if len(requests) != 1 {
+		t.Fatalf("len(requests)=%d, want 1", len(requests))
+	}
+	if requests[0].Model != "custom/child-model" {
+		t.Fatalf("child request model=%q, want %q", requests[0].Model, "custom/child-model")
+	}
+}
+
+func TestAgentSpawnTool_EmptyModelOverrideInheritsParent(t *testing.T) {
+	llm := &spawnTestLLM{respText: "inherited"}
+	parent := newSpawnParentAgent(t, llm)
+	tool := &AgentSpawnTool{
+		ParentAgent:   parent,
+		MaxDepth:      3,
+		CurrentDepth:  0,
+		MaxTokens:     512,
+		ModelOverride: "",
+	}
+
+	args, _ := json.Marshal(map[string]any{
+		"goal":               "Inherit parent model",
+		"background_context": nil,
+		"max_tokens":         nil,
+	})
+	req, err := tool.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if req.Op != types.HostOpNoop {
+		t.Fatalf("req.Op=%q, want %q", req.Op, types.HostOpNoop)
+	}
+
+	var meta spawnOpMetadata
+	if err := json.Unmarshal(req.Input, &meta); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	// Parent model is "gpt-5" (set in newSpawnParentAgent).
+	if meta.Model != "gpt-5" {
+		t.Fatalf("meta.Model=%q, want %q", meta.Model, "gpt-5")
+	}
+
+	requests := llm.recorded()
+	if len(requests) != 1 {
+		t.Fatalf("len(requests)=%d, want 1", len(requests))
+	}
+	if requests[0].Model != "gpt-5" {
+		t.Fatalf("child request model=%q, want %q", requests[0].Model, "gpt-5")
+	}
+}
+
 func TestAgentSpawnTool_ContextCancellationPropagatesToChild(t *testing.T) {
 	parent := newSpawnParentAgent(t, &cancelAwareSpawnLLM{})
 	tool := &AgentSpawnTool{

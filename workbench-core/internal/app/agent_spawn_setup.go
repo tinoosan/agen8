@@ -6,7 +6,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 
-func registerAgentSpawnTool(registry *agent.HostToolRegistry, parentMaxTokens int) error {
+func registerAgentSpawnTool(registry *agent.HostToolRegistry, parentMaxTokens int, subagentModel string) error {
 	if registry == nil {
 		return fmt.Errorf("host tool registry is nil")
 	}
@@ -15,9 +15,10 @@ func registerAgentSpawnTool(registry *agent.HostToolRegistry, parentMaxTokens in
 		maxTokens = parentMaxTokens / 2
 	}
 	return registry.Register(&agent.AgentSpawnTool{
-		MaxDepth:     3,
-		CurrentDepth: 0,
-		MaxTokens:    maxTokens,
+		MaxDepth:      3,
+		CurrentDepth:  0,
+		MaxTokens:     maxTokens,
+		ModelOverride: subagentModel,
 	})
 }
 

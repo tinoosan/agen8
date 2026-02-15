@@ -18,10 +18,11 @@ const (
 )
 
 type AgentSpawnTool struct {
-	ParentAgent  Agent
-	MaxDepth     int
-	CurrentDepth int
-	MaxTokens    int
+	ParentAgent   Agent
+	MaxDepth      int
+	CurrentDepth  int
+	MaxTokens     int
+	ModelOverride string
 }
 
 type spawnOpMetadata struct {
@@ -56,16 +57,12 @@ func (t *AgentSpawnTool) Definition() llmtypes.Tool {
 							"type": "string",
 						},
 					},
-					"model": map[string]any{
-						"type":        []string{"string", "null"},
-						"description": "Optional model override for the child.",
-					},
 					"max_tokens": map[string]any{
 						"type":        []string{"integer", "null"},
 						"description": "Optional max output tokens for the child.",
 					},
 				},
-				"required":             []any{"goal", "background_context", "model", "max_tokens"},
+				"required":             []any{"goal", "background_context", "max_tokens"},
 				"additionalProperties": false,
 			},
 		},
@@ -91,7 +88,6 @@ func (t *AgentSpawnTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	var payload struct {
 		Goal              string   `json:"goal"`
 		BackgroundContext []string `json:"background_context"`
-		Model             *string  `json:"model"`
 		MaxTokens         *int     `json:"max_tokens"`
 	}
 	if err := json.Unmarshal(args, &payload); err != nil {
@@ -105,10 +101,8 @@ func (t *AgentSpawnTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	cleanBackground := sanitizeSpawnBackground(payload.BackgroundContext)
 
 	cfg := t.ParentAgent.Config()
-	if payload.Model != nil {
-		if model := strings.TrimSpace(*payload.Model); model != "" {
-			cfg.Model = model
-		}
+	if override := strings.TrimSpace(t.ModelOverride); override != "" {
+		cfg.Model = override
 	}
 
 	childMaxTokens := t.MaxTokens
@@ -196,10 +190,11 @@ func (t *AgentSpawnTool) configureChildSpawnTool(child Agent, maxDepth, childMax
 		nextMaxTokens = nextMaxTokens / 2
 	}
 	reg.Replace(agentSpawnToolName, &AgentSpawnTool{
-		ParentAgent:  child,
-		MaxDepth:     maxDepth,
-		CurrentDepth: nextDepth,
-		MaxTokens:    nextMaxTokens,
+		ParentAgent:   child,
+		MaxDepth:      maxDepth,
+		CurrentDepth:  nextDepth,
+		MaxTokens:     nextMaxTokens,
+		ModelOverride: t.ModelOverride,
 	})
 }
 

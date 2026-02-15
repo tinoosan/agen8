@@ -509,7 +509,12 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		_ = rt.Shutdown(context.Background())
 		return nil, err
 	}
-	if err := registerAgentSpawnTool(registry, agentCfg.MaxTokens); err != nil {
+	// Resolve subagent model: env var > profile-level > empty (inherit parent).
+	supervisorSubagentModel := strings.TrimSpace(s.resolved.SubagentModel)
+	if supervisorSubagentModel == "" && s.defaultProfile != nil {
+		supervisorSubagentModel = strings.TrimSpace(s.defaultProfile.SubagentModel)
+	}
+	if err := registerAgentSpawnTool(registry, agentCfg.MaxTokens, supervisorSubagentModel); err != nil {
 		orderedEmitter.Close()
 		_ = rt.Shutdown(context.Background())
 		return nil, err

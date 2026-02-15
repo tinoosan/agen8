@@ -525,7 +525,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *monitorModel) tick() tea.Cmd {
-	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg { return tickMsg{now: t} })
+	return tea.Tick(time.Millisecond*300, func(t time.Time) tea.Msg { return tickMsg{now: t} })
 }
 
 func (m *monitorModel) scheduleUIRefresh() tea.Cmd {

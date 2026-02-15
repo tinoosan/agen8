@@ -11,12 +11,14 @@ import (
 )
 
 type Profile struct {
-	ID          string         `yaml:"id"`
-	Description string         `yaml:"description"`
-	Prompts     PromptConfig   `yaml:"prompts,omitempty"`
-	Skills      []string       `yaml:"skills,omitempty"`
-	Heartbeat   []HeartbeatJob `yaml:"heartbeat,omitempty"`
-	Team        *TeamConfig    `yaml:"team,omitempty"`
+	ID            string         `yaml:"id"`
+	Description   string         `yaml:"description"`
+	Model         string         `yaml:"model,omitempty"`
+	SubagentModel string         `yaml:"subagent_model,omitempty"`
+	Prompts       PromptConfig   `yaml:"prompts,omitempty"`
+	Skills        []string       `yaml:"skills,omitempty"`
+	Heartbeat     []HeartbeatJob `yaml:"heartbeat,omitempty"`
+	Team          *TeamConfig    `yaml:"team,omitempty"`
 }
 
 type PromptConfig struct {
@@ -36,13 +38,14 @@ type TeamConfig struct {
 }
 
 type RoleConfig struct {
-	Name        string         `yaml:"name"`
-	Description string         `yaml:"description"`
-	Prompts     PromptConfig   `yaml:"prompts,omitempty"`
-	Skills      []string       `yaml:"skills,omitempty"`
-	Model       string         `yaml:"model,omitempty"`
-	Coordinator bool           `yaml:"coordinator,omitempty"`
-	Heartbeat   []HeartbeatJob `yaml:"heartbeat,omitempty"`
+	Name          string         `yaml:"name"`
+	Description   string         `yaml:"description"`
+	Prompts       PromptConfig   `yaml:"prompts,omitempty"`
+	Skills        []string       `yaml:"skills,omitempty"`
+	Model         string         `yaml:"model,omitempty"`
+	SubagentModel string         `yaml:"subagent_model,omitempty"`
+	Coordinator   bool           `yaml:"coordinator,omitempty"`
+	Heartbeat     []HeartbeatJob `yaml:"heartbeat,omitempty"`
 }
 
 // Load reads one profile from a profile directory (containing profile.yaml).
@@ -93,6 +96,8 @@ func Load(path string) (*Profile, error) {
 func (p Profile) Normalize(profileDir string) (Profile, error) {
 	p.ID = strings.TrimSpace(p.ID)
 	p.Description = strings.TrimSpace(p.Description)
+	p.Model = strings.TrimSpace(p.Model)
+	p.SubagentModel = strings.TrimSpace(p.SubagentModel)
 	p.Prompts.SystemPrompt = strings.TrimSpace(p.Prompts.SystemPrompt)
 	p.Prompts.SystemPromptPath = strings.TrimSpace(p.Prompts.SystemPromptPath)
 
@@ -126,6 +131,7 @@ func (p Profile) Normalize(profileDir string) (Profile, error) {
 			r.Prompts.SystemPrompt = strings.TrimSpace(r.Prompts.SystemPrompt)
 			r.Prompts.SystemPromptPath = strings.TrimSpace(r.Prompts.SystemPromptPath)
 			r.Model = strings.TrimSpace(r.Model)
+			r.SubagentModel = strings.TrimSpace(r.SubagentModel)
 			uniqRoleSkills := make([]string, 0, len(r.Skills))
 			seenRoleSkills := map[string]struct{}{}
 			for _, s := range r.Skills {
