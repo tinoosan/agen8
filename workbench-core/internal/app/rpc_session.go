@@ -237,6 +237,13 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	if activeModel == "" && run.Runtime != nil {
 		activeModel = strings.TrimSpace(run.Runtime.Model)
 	}
+	if activeModel == "" && strings.TrimSpace(p.Profile) != "" {
+		if prof, _, err := resolveProfileRef(s.cfg, strings.TrimSpace(p.Profile)); err == nil && prof != nil {
+			if m := strings.TrimSpace(prof.Model); m != "" {
+				activeModel = m
+			}
+		}
+	}
 	if activeModel != "" {
 		sess.ActiveModel = activeModel
 	}
