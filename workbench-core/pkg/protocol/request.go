@@ -33,6 +33,7 @@ const (
 	MethodArtifactList        = "artifact.list"
 	MethodArtifactSearch      = "artifact.search"
 	MethodArtifactGet         = "artifact.get"
+	MethodRunListChildren     = "run.listChildren"
 )
 
 // ThreadCreateParams are the params for thread.create.

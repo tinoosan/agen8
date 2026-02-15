@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
 )
@@ -319,8 +320,20 @@ func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) str
 		return ""
 	}
 	var lines []string
+	currentRunID := strings.TrimSpace(m.runID)
+	if strings.TrimSpace(m.teamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
+		currentRunID = strings.TrimSpace(m.focusedRunID)
+	}
 	if len(m.childRuns) == 0 {
-		lines = []string{kit.StyleDim.Render("No subagents spawned yet.")}
+		if currentRunID != "" {
+			if run, err := store.LoadRun(m.cfg, currentRunID); err == nil && strings.TrimSpace(run.ParentRunID) != "" {
+				lines = []string{kit.StyleDim.Render("You are viewing a subagent. Switch to the parent run to see all subagents.")}
+			} else {
+				lines = []string{kit.StyleDim.Render("No subagents spawned yet.")}
+			}
+		} else {
+			lines = []string{kit.StyleDim.Render("No subagents spawned yet.")}
+		}
 	} else {
 		for i, run := range m.childRuns {
 			idx := i + 1

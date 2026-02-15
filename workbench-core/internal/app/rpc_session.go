@@ -84,6 +84,9 @@ func registerSessionHandlers(s *RPCServer, reg methodRegistry) error {
 		func() error {
 			return addBoundHandler[protocol.ActivityListParams, protocol.ActivityListResult](reg, protocol.MethodActivityList, false, s.activityList)
 		},
+		func() error {
+			return addBoundHandler[protocol.RunListChildrenParams, protocol.RunListChildrenResult](reg, protocol.MethodRunListChildren, false, s.runListChildren)
+		},
 	)
 }
 
@@ -568,6 +571,18 @@ func (s *RPCServer) agentList(ctx context.Context, p protocol.AgentListParams) (
 		return a > b
 	})
 	return protocol.AgentListResult{Agents: out}, nil
+}
+
+func (s *RPCServer) runListChildren(ctx context.Context, p protocol.RunListChildrenParams) (protocol.RunListChildrenResult, error) {
+	parentRunID := strings.TrimSpace(p.ParentRunID)
+	if parentRunID == "" {
+		return protocol.RunListChildrenResult{Runs: nil}, nil
+	}
+	runs, err := implstore.ListChildRuns(s.cfg, parentRunID)
+	if err != nil {
+		return protocol.RunListChildrenResult{}, err
+	}
+	return protocol.RunListChildrenResult{Runs: runs}, nil
 }
 
 func (s *RPCServer) inferRunRoleAndTeam(ctx context.Context, runID string) (role string, teamID string) {

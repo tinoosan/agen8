@@ -166,6 +166,7 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		if err != nil {
 			return types.HostOpRequest{}, fmt.Errorf("task_create: spawn worker: %w", err)
 		}
+		task.RunID = childRunID
 		task.AssignedToType = "agent"
 		task.AssignedTo = childRunID
 		task.Metadata["source"] = "spawn_worker"

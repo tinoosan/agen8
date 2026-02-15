@@ -793,11 +793,26 @@ func (m *monitorModel) loadChildRuns() tea.Cmd {
 	}
 
 	return func() tea.Msg {
+		if m.rpcReachable {
+			var res protocol.RunListChildrenResult
+			if err := m.rpcRoundTrip(protocol.MethodRunListChildren, protocol.RunListChildrenParams{ParentRunID: runID}, &res); err == nil {
+				runs := res.Runs
+				sort.Slice(runs, func(i, j int) bool {
+					if runs[i].StartedAt == nil {
+						return true
+					}
+					if runs[j].StartedAt == nil {
+						return false
+					}
+					return runs[i].StartedAt.Before(*runs[j].StartedAt)
+				})
+				return childRunsLoadedMsg{runs: runs}
+			}
+		}
 		runs, err := store.ListChildRuns(cfg, runID)
 		if err != nil {
 			return childRunsLoadedMsg{err: err}
 		}
-		// Sort by created time
 		sort.Slice(runs, func(i, j int) bool {
 			if runs[i].StartedAt == nil {
 				return true

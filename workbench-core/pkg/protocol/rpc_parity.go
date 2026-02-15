@@ -86,6 +86,16 @@ type AgentListResult struct {
 	Agents []AgentListItem `json:"agents"`
 }
 
+// RunListChildrenParams are the params for run.listChildren.
+type RunListChildrenParams struct {
+	ParentRunID string `json:"parentRunId"`
+}
+
+// RunListChildrenResult is the result of run.listChildren (child runs of the given parent).
+type RunListChildrenResult struct {
+	Runs []types.Run `json:"runs"`
+}
+
 type AgentStartParams struct {
 	ThreadID  ThreadID `json:"threadId"`
 	SessionID string   `json:"sessionId,omitempty"`

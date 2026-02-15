@@ -668,14 +668,22 @@ func (m *monitorModel) routeGlobalShortcutKey(msg tea.KeyMsg) (bool, tea.Model, 
 		m.syncDashboardSideTabFromFocus()
 		m.updateFocus()
 		m.refreshViewports()
-		return true, m, nil
+		cmd := tea.Cmd(nil)
+		if m.dashboardSideTab < len(dashboardSideTabs) && dashboardSideTabs[m.dashboardSideTab].Name == "Subagents" {
+			cmd = m.loadChildRuns()
+		}
+		return true, m, cmd
 	case "ctrl+]":
 		if !m.isCompactMode() {
 			m.dashboardSideTab = (m.dashboardSideTab + 1) % len(dashboardSideTabs)
 			m.focusedPanel = m.dashboardSideTabToPanel()
 			m.updateFocus()
 			m.refreshViewports()
-			return true, m, nil
+			cmd := tea.Cmd(nil)
+			if m.dashboardSideTab < len(dashboardSideTabs) && dashboardSideTabs[m.dashboardSideTab].Name == "Subagents" {
+				cmd = m.loadChildRuns()
+			}
+			return true, m, cmd
 		}
 	case "ctrl+[":
 		if !m.isCompactMode() {
@@ -683,7 +691,11 @@ func (m *monitorModel) routeGlobalShortcutKey(msg tea.KeyMsg) (bool, tea.Model, 
 			m.focusedPanel = m.dashboardSideTabToPanel()
 			m.updateFocus()
 			m.refreshViewports()
-			return true, m, nil
+			cmd := tea.Cmd(nil)
+			if m.dashboardSideTab < len(dashboardSideTabs) && dashboardSideTabs[m.dashboardSideTab].Name == "Subagents" {
+				cmd = m.loadChildRuns()
+			}
+			return true, m, cmd
 		}
 	}
 	return false, m, nil
