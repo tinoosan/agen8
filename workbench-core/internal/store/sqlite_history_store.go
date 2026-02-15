@@ -134,14 +134,7 @@ func (s *SQLiteHistoryStore) LinesSince(_ context.Context, cursor pkgstore.Histo
 		return pkgstore.HistoryBatch{CursorAfter: cursor}, err
 	}
 
-	maxBytes := opts.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = 16 * 1024
-	}
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 200
-	}
+	maxBytes, limit := normalizeHistoryLimits(opts.MaxBytes, opts.Limit)
 
 	offset, err := pkgstore.HistoryCursorToInt64(cursor)
 	if err != nil {
@@ -210,14 +203,7 @@ func (s *SQLiteHistoryStore) LinesLatest(_ context.Context, opts pkgstore.Histor
 		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, err
 	}
 
-	maxBytes := opts.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = 16 * 1024
-	}
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 200
-	}
+	maxBytes, limit := normalizeHistoryLimits(opts.MaxBytes, opts.Limit)
 
 	rows, err := s.DB.Query(
 		`SELECT seq, line_json FROM history WHERE session_id = ? ORDER BY seq DESC LIMIT ?`,

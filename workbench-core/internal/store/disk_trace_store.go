@@ -4,18 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/bytesutil"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
-	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
@@ -59,14 +56,7 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor pkgstore.TraceCurs
 		return pkgstore.TraceBatch{}, fmt.Errorf("disk trace store: invalid cursor: %w", ErrInvalid)
 	}
 
-	maxBytes := opts.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = defaultTraceSinceMaxBytes
-	}
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = defaultTraceSinceLimit
-	}
+	maxBytes, limit := normalizeTraceLimits(opts.MaxBytes, opts.Limit, defaultTraceSinceMaxBytes, defaultTraceSinceLimit)
 
 	p := filepath.Join(s.Dir, "events.jsonl")
 	f, err := os.Open(p)
@@ -129,17 +119,12 @@ func (s DiskTraceStore) EventsSince(_ context.Context, cursor pkgstore.TraceCurs
 			continue
 		}
 
-		var ev types.EventRecord
-		if err := json.Unmarshal([]byte(text), &ev); err != nil {
+		event, ok := parseTraceEvent(text)
+		if !ok {
 			parseErrors++
 		} else {
 			parsed++
-			events = append(events, pkgstore.TraceEvent{
-				Timestamp: ev.Timestamp.UTC().Format(time.RFC3339Nano),
-				Type:      ev.Type,
-				Message:   ev.Message,
-				Data:      ev.Data,
-			})
+			events = append(events, event)
 		}
 
 		if errors.Is(readErr, io.EOF) {
@@ -171,14 +156,7 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts pkgstore.TraceLates
 		return pkgstore.TraceBatch{}, err
 	}
 
-	maxBytes := opts.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = defaultTraceLatestMaxBytes
-	}
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = defaultTraceLatestLimit
-	}
+	maxBytes, limit := normalizeTraceLimits(opts.MaxBytes, opts.Limit, defaultTraceLatestMaxBytes, defaultTraceLatestLimit)
 
 	p := filepath.Join(s.Dir, "events.jsonl")
 	f, err := os.Open(p)
@@ -226,18 +204,13 @@ func (s DiskTraceStore) EventsLatest(_ context.Context, opts pkgstore.TraceLates
 			continue
 		}
 		linesTotal++
-		var ev types.EventRecord
-		if err := json.Unmarshal([]byte(ln), &ev); err != nil {
+		event, ok := parseTraceEvent(ln)
+		if !ok {
 			parseErrors++
 			continue
 		}
 		parsed++
-		parsedEvents = append(parsedEvents, pkgstore.TraceEvent{
-			Timestamp: ev.Timestamp.UTC().Format(time.RFC3339Nano),
-			Type:      ev.Type,
-			Message:   ev.Message,
-			Data:      ev.Data,
-		})
+		parsedEvents = append(parsedEvents, event)
 	}
 
 	// Keep only last N, preserving chronological order.

@@ -2,14 +2,11 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
-	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
 
@@ -39,14 +36,7 @@ func (s SQLiteTraceStore) EventsSince(ctx context.Context, cursor pkgstore.Trace
 		offset = 0
 	}
 
-	maxBytes := opts.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = defaultTraceSinceMaxBytes
-	}
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = defaultTraceSinceLimit
-	}
+	maxBytes, limit := normalizeTraceLimits(opts.MaxBytes, opts.Limit, defaultTraceSinceMaxBytes, defaultTraceSinceLimit)
 
 	db, err := getSQLiteDB(s.Cfg)
 	if err != nil {
@@ -88,18 +78,15 @@ func (s SQLiteTraceStore) EventsSince(ctx context.Context, cursor pkgstore.Trace
 		bytesConsumed += lineBytes
 		lastSeq = seq
 
-		var ev types.EventRecord
-		if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		event, ok := parseTraceEvent(raw)
+		if !ok {
 			parseErrors++
 			continue
 		}
 		parsed++
-		events = append(events, pkgstore.TraceEvent{
-			Timestamp: ev.Timestamp.UTC().Format(time.RFC3339Nano),
-			Type:      strings.TrimSpace(ev.Type),
-			Message:   strings.TrimSpace(ev.Message),
-			Data:      ev.Data,
-		})
+		event.Type = strings.TrimSpace(event.Type)
+		event.Message = strings.TrimSpace(event.Message)
+		events = append(events, event)
 		if len(events) >= limit {
 			break
 		}
@@ -132,14 +119,7 @@ func (s SQLiteTraceStore) EventsLatest(ctx context.Context, opts pkgstore.TraceL
 		return pkgstore.TraceBatch{}, err
 	}
 
-	maxBytes := opts.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = defaultTraceLatestMaxBytes
-	}
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = defaultTraceLatestLimit
-	}
+	maxBytes, limit := normalizeTraceLimits(opts.MaxBytes, opts.Limit, defaultTraceLatestMaxBytes, defaultTraceLatestLimit)
 
 	db, err := getSQLiteDB(s.Cfg)
 	if err != nil {
@@ -194,18 +174,15 @@ func (s SQLiteTraceStore) EventsLatest(ctx context.Context, opts pkgstore.TraceL
 		linesTotal++
 		bytesConsumed += lineBytes
 
-		var ev types.EventRecord
-		if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		event, ok := parseTraceEvent(raw)
+		if !ok {
 			parseErrors++
 			continue
 		}
 		parsed++
-		eventsNewest = append(eventsNewest, pkgstore.TraceEvent{
-			Timestamp: ev.Timestamp.UTC().Format(time.RFC3339Nano),
-			Type:      strings.TrimSpace(ev.Type),
-			Message:   strings.TrimSpace(ev.Message),
-			Data:      ev.Data,
-		})
+		event.Type = strings.TrimSpace(event.Type)
+		event.Message = strings.TrimSpace(event.Message)
+		eventsNewest = append(eventsNewest, event)
 	}
 	if err := rows.Err(); err != nil {
 		return pkgstore.TraceBatch{}, err

@@ -102,14 +102,7 @@ func (s *DiskHistoryStore) LinesSince(_ context.Context, cursor pkgstore.History
 		return pkgstore.HistoryBatch{CursorAfter: cursor}, err
 	}
 
-	maxBytes := opts.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = 16 * 1024
-	}
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 200
-	}
+	maxBytes, limit := normalizeHistoryLimits(opts.MaxBytes, opts.Limit)
 
 	offset, err := pkgstore.HistoryCursorToInt64(cursor)
 	if err != nil {
@@ -190,14 +183,7 @@ func (s *DiskHistoryStore) LinesLatest(_ context.Context, opts pkgstore.HistoryL
 		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, err
 	}
 
-	maxBytes := opts.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = 16 * 1024
-	}
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 200
-	}
+	maxBytes, limit := normalizeHistoryLimits(opts.MaxBytes, opts.Limit)
 
 	f, err := os.Open(s.Path)
 	if err != nil {
