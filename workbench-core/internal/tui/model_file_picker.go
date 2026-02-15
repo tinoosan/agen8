@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"io"
 	"io/fs"
 	"path/filepath"
 	"sort"
@@ -24,47 +22,6 @@ type filePickerItem struct {
 func (f filePickerItem) FilterValue() string { return f.rel }
 func (f filePickerItem) Title() string       { return f.rel }
 func (f filePickerItem) Description() string { return "" }
-
-type filePickerDelegate struct {
-	styleRow lipgloss.Style
-	styleSel lipgloss.Style
-}
-
-func newFilePickerDelegate() filePickerDelegate {
-	return filePickerDelegate{
-		styleRow: lipgloss.NewStyle().Foreground(lipgloss.Color("#b0b0b0")),
-		// Avoid background/underline styling (can look like text selection).
-		styleSel: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#eaeaea")).
-			Bold(true),
-	}
-}
-
-func (d filePickerDelegate) Height() int  { return 1 }
-func (d filePickerDelegate) Spacing() int { return 0 }
-func (d filePickerDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd {
-	return nil
-}
-
-func (d filePickerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	it, ok := item.(filePickerItem)
-	if !ok {
-		return
-	}
-
-	isSel := index == m.Index()
-	prefix := "  "
-	style := d.styleRow
-	if isSel {
-		prefix = "› "
-		style = d.styleSel
-	}
-
-	// Keep line within list width.
-	maxW := max(1, m.Width()-lipgloss.Width(prefix))
-	line := kit.TruncateRight(it.rel, maxW)
-	_, _ = fmt.Fprint(w, style.Render(prefix+line))
-}
 
 func scanWorkdirFiles(baseDir string, maxVisited int) ([]string, error) {
 	baseDir = strings.TrimSpace(baseDir)
@@ -156,7 +113,7 @@ func (m *Model) scanFilePickerPaths(workdir string) ([]string, error) {
 func (m *Model) openFilePicker(initialQuery string) tea.Cmd {
 	m.filePickerOpen = true
 
-	l := list.New([]list.Item{}, newFilePickerDelegate(), 0, 0)
+	l := list.New([]list.Item{}, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), nil), 0, 0)
 	l.Title = "Select File"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
@@ -307,43 +264,14 @@ func (m *Model) selectFileFromPicker() tea.Cmd {
 }
 
 func (m Model) renderFilePicker(base string) string {
-	// Calculate modal dimensions.
-	maxModalW := max(1, m.width-8)
-	modalWidth := min(80, maxModalW)
-	minModalW := min(40, maxModalW)
-	if modalWidth < minModalW {
-		modalWidth = minModalW
-	}
-
-	maxModalH := max(1, m.height-8)
-	modalHeight := min(22, maxModalH)
-	minModalH := min(10, maxModalH)
-	if modalHeight < minModalH {
-		modalHeight = minModalH
-	}
-
-	// Size the list to fit within the modal.
-	listHeight := modalHeight - 2 // no filter input, just title/pagination
-	if listHeight < 4 {
-		listHeight = 4
-	}
-	m.filePickerList.SetWidth(modalWidth - 4) // Account for padding/borders
-	m.filePickerList.SetHeight(listHeight)
+	dims := kit.ComputeModalDims(m.width, m.height, 80, 22, 40, 10, 8, 2)
+	m.filePickerList.SetWidth(dims.ModalWidth - 4)
+	m.filePickerList.SetHeight(dims.ListHeight)
 
 	// Build modal content.
 	content := m.filePickerList.View()
 
-	opts := kit.ModalOptions{
-		Content:      content,
-		ScreenWidth:  m.width,
-		ScreenHeight: m.height,
-		Width:        modalWidth,
-		Height:       modalHeight,
-		Padding:      [2]int{1, 2},
-		BorderStyle:  lipgloss.RoundedBorder(),
-		BorderColor:  lipgloss.Color("#6bbcff"),
-		Foreground:   lipgloss.Color("#eaeaea"),
-	}
+	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
 
 	_ = base
 	return kit.RenderOverlay(opts)

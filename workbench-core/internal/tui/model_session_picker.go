@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -37,55 +36,14 @@ func (s sessionPickerItem) FilterValue() string {
 }
 func (s sessionPickerItem) Title() string       { return s.id }
 func (s sessionPickerItem) Description() string { return "" }
-
-type sessionPickerDelegate struct {
-	styleRow     lipgloss.Style
-	styleSel     lipgloss.Style
-	styleMetaDim lipgloss.Style
-}
-
-func newSessionPickerDelegate() sessionPickerDelegate {
-	return sessionPickerDelegate{
-		styleRow: lipgloss.NewStyle().Foreground(lipgloss.Color("#b0b0b0")),
-		styleSel: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#eaeaea")).
-			Bold(true),
-		styleMetaDim: lipgloss.NewStyle().Foreground(lipgloss.Color("#7a7a7a")),
-	}
-}
-
-func (d sessionPickerDelegate) Height() int  { return 1 }
-func (d sessionPickerDelegate) Spacing() int { return 0 }
-func (d sessionPickerDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd {
-	return nil
-}
-
-func (d sessionPickerDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+func renderSessionPickerLine(item list.Item, maxWidth int) string {
 	it, ok := item.(sessionPickerItem)
 	if !ok {
-		isSel := index == m.Index()
-		prefix := "  "
-		style := d.styleRow
-		if isSel {
-			prefix = "› "
-			style = d.styleSel
-		}
 		line := strings.TrimSpace(item.FilterValue())
 		if line == "" {
 			line = "(unknown session)"
 		}
-		maxW := max(1, m.Width()-lipgloss.Width(prefix))
-		line = kit.TruncateRight(line, maxW)
-		_, _ = fmt.Fprint(w, style.Render(prefix+line))
-		return
-	}
-
-	isSel := index == m.Index()
-	prefix := "  "
-	style := d.styleRow
-	if isSel {
-		prefix = "› "
-		style = d.styleSel
+		return kit.TruncateRight(line, maxWidth)
 	}
 
 	title := strings.TrimSpace(it.title)
@@ -123,23 +81,11 @@ func (d sessionPickerDelegate) Render(w io.Writer, m list.Model, index int, item
 		line += " • " + meta
 	}
 
-	maxW := max(1, m.Width()-lipgloss.Width(prefix))
-	line = kit.TruncateRight(line, maxW)
+	return kit.TruncateRight(line, maxWidth)
+}
 
-	if isSel {
-		_, _ = fmt.Fprint(w, style.Render(prefix+line))
-		return
-	}
-
-	// Dim the metadata suffix when not selected.
-	metaIdx := strings.LastIndex(line, " • ")
-	if metaIdx <= 0 {
-		_, _ = fmt.Fprint(w, style.Render(prefix+line))
-		return
-	}
-	main := line[:metaIdx]
-	metaPart := line[metaIdx:]
-	_, _ = fmt.Fprint(w, style.Render(prefix+main)+d.styleMetaDim.Render(metaPart))
+func newSessionPickerDelegate() list.ItemDelegate {
+	return kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderSessionPickerLine)
 }
 
 func (m *Model) openSessionPicker() tea.Cmd {
@@ -155,7 +101,7 @@ func (m *Model) openSessionPicker() tea.Cmd {
 	m.sessionPickerTotal = 0
 	m.sessionPickerFilter = ""
 
-	l := list.New(nil, newSessionPickerDelegate(), 0, 0)
+	l := list.New(nil, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderSessionPickerLine), 0, 0)
 	l.Title = "Select Session"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
@@ -228,26 +174,9 @@ func (m *Model) selectSessionFromPicker() tea.Cmd {
 }
 
 func (m Model) renderSessionPicker(base string) string {
-	maxModalW := max(1, m.width-8)
-	modalWidth := min(80, maxModalW)
-	minModalW := min(48, maxModalW)
-	if modalWidth < minModalW {
-		modalWidth = minModalW
-	}
-
-	maxModalH := max(1, m.height-8)
-	modalHeight := min(22, maxModalH)
-	minModalH := min(12, maxModalH)
-	if modalHeight < minModalH {
-		modalHeight = minModalH
-	}
-
-	listHeight := modalHeight - 4
-	if listHeight < 4 {
-		listHeight = 4
-	}
-	m.sessionPickerList.SetWidth(modalWidth - 4)
-	m.sessionPickerList.SetHeight(listHeight)
+	dims := kit.ComputeModalDims(m.width, m.height, 80, 22, 48, 12, 8, 4)
+	m.sessionPickerList.SetWidth(dims.ModalWidth - 4)
+	m.sessionPickerList.SetHeight(dims.ListHeight)
 
 	content := m.sessionPickerList.View()
 	if strings.TrimSpace(m.sessionPickerErr) != "" {
@@ -256,17 +185,7 @@ func (m Model) renderSessionPicker(base string) string {
 	}
 	content += "\n" + m.renderSessionPickerFooter()
 
-	opts := kit.ModalOptions{
-		Content:      content,
-		ScreenWidth:  m.width,
-		ScreenHeight: m.height,
-		Width:        modalWidth,
-		Height:       modalHeight,
-		Padding:      [2]int{1, 2},
-		BorderStyle:  lipgloss.RoundedBorder(),
-		BorderColor:  lipgloss.Color("#6bbcff"),
-		Foreground:   lipgloss.Color("#eaeaea"),
-	}
+	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
 
 	_ = base
 	return kit.RenderOverlay(opts)
