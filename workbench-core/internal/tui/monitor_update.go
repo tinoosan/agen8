@@ -44,6 +44,7 @@ func (m *monitorModel) handleWindowAndTick(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		// Re-render time-based UI (uptime, elapsed timers) even when no new events arrive.
 		// The View() computes elapsed durations on demand; no need to rebuild viewports.
+		m.statusAnimFrame++
 		if m.isDetached() {
 			cmds := []tea.Cmd{m.tick()}
 			if !m.rpcChecking {

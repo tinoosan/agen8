@@ -2197,24 +2197,24 @@ func TestObserveEvent_AgentStatusLine(t *testing.T) {
 		inbox: map[string]taskState{},
 	}
 
-	// task.start → "⏳ Thinking…" (agent immediately calls LLM)
+	// task.start → "Thinking…" (agent immediately calls LLM)
 	m.observeTaskEvent(types.EventRecord{
 		Type:      "task.start",
 		Timestamp: time.Now(),
 		Data:      map[string]string{"taskId": "task-1", "goal": "test"},
 	})
-	if m.agentStatusLine != "⏳ Thinking…" {
-		t.Fatalf("after task.start: status=%q, want %q", m.agentStatusLine, "⏳ Thinking…")
+	if m.agentStatusLine != "Thinking…" {
+		t.Fatalf("after task.start: status=%q, want %q", m.agentStatusLine, "Thinking…")
 	}
 
-	// agent.step → "⏳ Processing…" (thinking just finished, about to run tools)
+	// agent.step → "Processing…" (thinking just finished, about to run tools)
 	m.observeEvent(types.EventRecord{
 		Type:      "agent.step",
 		Timestamp: time.Now(),
 		Data:      map[string]string{"step": "1"},
 	})
-	if m.agentStatusLine != "⏳ Processing…" {
-		t.Fatalf("after agent.step: status=%q, want %q", m.agentStatusLine, "⏳ Processing…")
+	if m.agentStatusLine != "Processing…" {
+		t.Fatalf("after agent.step: status=%q, want %q", m.agentStatusLine, "Processing…")
 	}
 
 	// agent.op.request → shows tool name
@@ -2227,14 +2227,14 @@ func TestObserveEvent_AgentStatusLine(t *testing.T) {
 		t.Fatalf("after agent.op.request: status=%q, want to contain %q", m.agentStatusLine, "shell_exec")
 	}
 
-	// agent.op.response → "⏳ Thinking…" (agent will call LLM again)
+	// agent.op.response → "Thinking…" (agent will call LLM again)
 	m.observeEvent(types.EventRecord{
 		Type:      "agent.op.response",
 		Timestamp: time.Now(),
 		Data:      map[string]string{"op": "shell_exec", "ok": "true"},
 	})
-	if m.agentStatusLine != "⏳ Thinking…" {
-		t.Fatalf("after agent.op.response: status=%q, want %q", m.agentStatusLine, "⏳ Thinking…")
+	if m.agentStatusLine != "Thinking…" {
+		t.Fatalf("after agent.op.response: status=%q, want %q", m.agentStatusLine, "Thinking…")
 	}
 
 	// task.done → "✓ Done"

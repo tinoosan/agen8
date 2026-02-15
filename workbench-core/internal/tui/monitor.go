@@ -210,7 +210,8 @@ type monitorModel struct {
 	profile                      string
 	reasoningEffort              string
 	reasoningSummary             string
-	agentStatusLine              string // transient: e.g. "⏳ Thinking…", "🔧 shell_exec …"
+	agentStatusLine              string // transient: e.g. "Thinking…", "🔧 shell_exec …"
+	statusAnimFrame              int    // cycles through spinnerFrames on each tick
 	focusedPanel                 panelID
 	compactTab                   int // 0=Output, 1=Activity, 2=Plan, 3=Outbox; used when isCompactMode()
 	dashboardSideTab             int // 0=Activity, 1=Plan, 2=Tasks, 3=Thoughts; used when dashboard mode
@@ -468,6 +469,9 @@ const (
 
 	// Keep a small, bounded thoughts history to avoid unbounded RAM growth.
 	maxThinkingEntries = 50
+
+	// Spinner frames for the animated status indicator (braille dots).
+	statusSpinnerFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 )
 
 // Breakpoints for responsive layout: below these use compact mode (tabs/single column).
@@ -497,7 +501,7 @@ func (m *monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *monitorModel) tick() tea.Cmd {
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg{now: t} })
+	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg { return tickMsg{now: t} })
 }
 
 func (m *monitorModel) scheduleUIRefresh() tea.Cmd {

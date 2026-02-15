@@ -241,11 +241,20 @@ func (m *monitorModel) composerStatusSegments() []string {
 	})
 
 	segments := []string{modelLabel}
-	// Show live agent status when available.
+	// Show live agent status when available, with an animated spinner for active states.
 	if status := strings.TrimSpace(m.agentStatusLine); status != "" {
+		display := status
+		// Active statuses get a cycling braille spinner; terminal states (✓ Done) stay static.
+		if !strings.HasPrefix(status, "✓") {
+			frames := []rune(statusSpinnerFrames)
+			if len(frames) > 0 {
+				frame := frames[m.statusAnimFrame%len(frames)]
+				display = string(frame) + " " + status
+			}
+		}
 		statusLabel := kit.RenderTag(kit.TagOptions{
 			Key:   "status",
-			Value: status,
+			Value: display,
 			Styles: kit.TagStyles{
 				KeyStyle:   tagKeyStyle,
 				ValueStyle: tagValueStyle,
