@@ -596,21 +596,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 
 	trimmedGoal := strings.TrimSpace(goal)
 	if trimmedGoal != "" && !strings.EqualFold(trimmedGoal, "autonomous agent") {
-		initialTask := types.Task{
-			TaskID:       "task-" + uuid.NewString(),
-			SessionID:    coordinatorRun.SessionID,
-			RunID:        coordinatorRun.RunID,
-			TeamID:       teamID,
-			AssignedRole: coordinatorRole,
-			CreatedBy:    "user",
-			Goal:         trimmedGoal,
-			Priority:     0,
-			Status:       types.TaskStatusPending,
-			CreatedAt:    ptrNowUTC(),
-			Inputs:       map[string]any{},
-			Metadata:     map[string]any{"source": "team.goal"},
-		}
-		if err := taskService.CreateTask(runCtx, initialTask); err != nil {
+		if err := team.SeedCoordinatorTask(runCtx, taskService, coordinatorRun.SessionID, coordinatorRun.RunID, teamID, coordinatorRole, trimmedGoal); err != nil {
 			return fmt.Errorf("seed coordinator task: %w", err)
 		}
 	}
@@ -1300,15 +1286,5 @@ func (s *teamRuntimeSupervisor) EscalateTask(ctx context.Context, callbackTaskID
 	if s == nil || s.taskCreator == nil {
 		return fmt.Errorf("task service not configured for escalation")
 	}
-	if err := s.taskCreator.CreateEscalationTask(ctx, callbackTaskID, data); err != nil {
-		return err
-	}
-	childRunID := strings.TrimSpace(data.SourceRunID)
-	if childRunID != "" {
-		_ = s.StopRun(childRunID)
-		if s.sessionService != nil {
-			_, _ = s.sessionService.StopRun(ctx, childRunID, types.RunStatusFailed, "escalated")
-		}
-	}
-	return nil
+	return team.EscalateToCoordinator(ctx, s.taskCreator, s.sessionService, s, callbackTaskID, data)
 }
