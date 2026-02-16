@@ -562,16 +562,6 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("register task_create for role %s: %w", role.Name, err)
 		}
-		if err := registry.Register(&hosttools.TaskReviewTool{
-			Store:      taskService,
-			SessionID:  run.SessionID,
-			RunID:      run.RunID,
-			Supervisor: teamSupervisor,
-		}); err != nil {
-			orderedEmitter.Close()
-			_ = rt.Shutdown(context.Background())
-			return fmt.Errorf("register task_review for role %s: %w", role.Name, err)
-		}
 		agentCfg.HostToolRegistry = registry
 
 		a, err := agent.NewAgent(runLLMClient, rt.Executor, agentCfg)
