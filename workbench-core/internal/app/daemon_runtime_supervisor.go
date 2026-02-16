@@ -69,6 +69,30 @@ type managedRuntime struct {
 	done      <-chan struct{}
 }
 
+// subagentCleanupNotifier stops and finalizes the subagent run when the parent
+// completes a subagent callback task successfully (ephemeral subagent cleanup).
+type subagentCleanupNotifier struct {
+	supervisor *runtimeSupervisor
+	next       agent.Notifier
+}
+
+func (n *subagentCleanupNotifier) Notify(ctx context.Context, task types.Task, tr types.TaskResult) error {
+	if n != nil && n.supervisor != nil {
+		if source, _ := task.Metadata["source"].(string); source == "subagent.callback" &&
+			tr.Status == types.TaskStatusSucceeded {
+			if runID, ok := task.Metadata["sourceRunId"].(string); ok && strings.TrimSpace(runID) != "" {
+				runID = strings.TrimSpace(runID)
+				_ = n.supervisor.StopRun(runID)
+				_, _ = implstore.StopRun(n.supervisor.cfg, runID, types.RunStatusSucceeded, "")
+			}
+		}
+	}
+	if n != nil && n.next != nil {
+		return n.next.Notify(ctx, task, tr)
+	}
+	return nil
+}
+
 func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 	poll := cfg.PollInterval
 	if poll <= 0 {
@@ -538,7 +562,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		Events:               orderedEmitter,
 		Memory:               &textMemoryAdapter{store: s.memoryStore},
 		MemorySearchLimit:    3,
-		Notifier:             s.notifier,
+		Notifier:             &subagentCleanupNotifier{supervisor: s, next: s.notifier},
 		PollInterval:         s.pollInterval,
 		MaxReadBytes:         256 * 1024,
 		LeaseTTL:             2 * time.Minute,
@@ -649,6 +673,9 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 							Data:    map[string]string{"runId": run.RunID},
 						})
 						_, _ = implstore.StopRun(s.cfg, run.RunID, types.RunStatusSucceeded, "")
+						s.mu.Lock()
+						delete(s.workers, run.RunID)
+						s.mu.Unlock()
 						return
 					}
 					errMsg := "unknown error"

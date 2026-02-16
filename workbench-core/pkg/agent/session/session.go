@@ -997,15 +997,32 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 		if sourceGoal == "" {
 			sourceGoal = "(no goal text)"
 		}
+		subagentRunID := strings.TrimSpace(s.cfg.RunID)
+		// Path in parent's workspace where this subagent's outputs live (parent sees /workspace/subagents/<runID>/).
+		subagentArtifactsDir := path.Join("/workspace", "subagents", subagentRunID)
+		// Rewrite artifact paths from subagent's /workspace to parent's /workspace/subagents/<runID>/ so the main agent can read them.
+		artifactsForParent := make([]string, 0, len(tr.Artifacts))
+		for _, art := range tr.Artifacts {
+			art = strings.TrimSpace(art)
+			if art == "" {
+				continue
+			}
+			if strings.HasPrefix(art, "/workspace/") {
+				artifactsForParent = append(artifactsForParent, path.Join(subagentArtifactsDir, strings.TrimPrefix(art, "/workspace/")))
+			} else {
+				artifactsForParent = append(artifactsForParent, path.Join(subagentArtifactsDir, art))
+			}
+		}
 		callbackGoal := fmt.Sprintf("SUBAGENT RESULT: Review %s result from spawned worker for task %s. The worker completed: %s. Review the result and decide on next steps.", string(tr.Status), truncateText(taskID, 24), truncateText(sourceGoal, 120))
 		inputs := map[string]any{
-			"sourceTaskId": taskID,
-			"sourceGoal":   sourceGoal,
-			"sourceRunId":  strings.TrimSpace(s.cfg.RunID),
-			"sourceStatus": string(tr.Status),
-			"summary":      strings.TrimSpace(tr.Summary),
-			"error":        strings.TrimSpace(tr.Error),
-			"artifacts":    append([]string(nil), tr.Artifacts...),
+			"sourceTaskId":         taskID,
+			"sourceGoal":           sourceGoal,
+			"sourceRunId":          subagentRunID,
+			"sourceStatus":         string(tr.Status),
+			"summary":              strings.TrimSpace(tr.Summary),
+			"error":                strings.TrimSpace(tr.Error),
+			"artifacts":            artifactsForParent,
+			"subagentArtifactsDir": subagentArtifactsDir,
 		}
 		callback = types.Task{
 			TaskID:         callbackTaskID,
