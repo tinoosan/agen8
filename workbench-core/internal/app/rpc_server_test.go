@@ -662,8 +662,8 @@ func TestRPCServer_ArtifactList_TeamScopeAndGetTruncated(t *testing.T) {
 		}
 	}
 
-	// Materialize file for artifact.get under team workspace.
-	p := filepath.Join(cfg.DataDir, "teams", "team-1", "workspace", "deliverables", "2026-02-08", t1.TaskID, "SUMMARY.md")
+	// Materialize file for artifact.get under per-role team workspace (ceo role, t1 task).
+	p := filepath.Join(fsutil.GetTeamRoleWorkspaceDir(cfg.DataDir, "team-1", t1.AssignedRole), "deliverables", "2026-02-08", t1.TaskID, "SUMMARY.md")
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

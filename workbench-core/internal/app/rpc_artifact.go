@@ -471,7 +471,7 @@ func (s *RPCServer) artifactSearch(ctx context.Context, p protocol.ArtifactSearc
 	}, nil
 }
 
-func resolveArtifactDiskPath(dataDir, teamID, runID, vpath string) string {
+func resolveArtifactDiskPath(dataDir, teamID, runID, role, vpath string) string {
 	vpath = strings.TrimSpace(vpath)
 	if vpath == "" {
 		return ""
@@ -480,7 +480,7 @@ func resolveArtifactDiskPath(dataDir, teamID, runID, vpath string) string {
 		rel := strings.TrimPrefix(vpath, "/tasks/")
 		rel = strings.TrimPrefix(rel, "/")
 		if strings.TrimSpace(teamID) != "" {
-			base := fsutil.GetTeamWorkspaceDir(dataDir, teamID)
+			base := fsutil.GetTeamRoleWorkspaceDir(dataDir, teamID, role)
 			candidate := filepath.Join(base, "tasks", rel)
 			if _, err := os.Stat(candidate); err == nil {
 				return candidate
@@ -513,8 +513,8 @@ func resolveArtifactDiskPath(dataDir, teamID, runID, vpath string) string {
 		rel := strings.TrimPrefix(vpath, "/deliverables/")
 		rel = strings.TrimPrefix(rel, "/")
 		if strings.TrimSpace(teamID) != "" {
-			base := fsutil.GetTeamWorkspaceDir(dataDir, teamID)
-			candidate := filepath.Join(base, "deliverables", rel)
+			base := fsutil.GetTeamRoleWorkspaceDir(dataDir, teamID, role)
+			candidate := filepath.Join(base, "deliverables", runID, rel)
 			if _, err := os.Stat(candidate); err == nil {
 				return candidate
 			}
@@ -555,7 +555,7 @@ func resolveArtifactDiskPath(dataDir, teamID, runID, vpath string) string {
 		return ""
 	}
 	if strings.TrimSpace(teamID) != "" {
-		base := fsutil.GetTeamWorkspaceDir(dataDir, teamID)
+		base := fsutil.GetTeamRoleWorkspaceDir(dataDir, teamID, role)
 		candidate := filepath.Join(base, rel)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
@@ -580,26 +580,30 @@ func resolveArtifactDiskPath(dataDir, teamID, runID, vpath string) string {
 	return candidate
 }
 
-func (s *RPCServer) resolveArtifactDiskPathForScope(ctx context.Context, scope artifactScope, preferredTeamID, preferredRunID, vpath string) string {
+func (s *RPCServer) resolveArtifactDiskPathForScope(ctx context.Context, scope artifactScope, preferredTeamID, preferredRunID, preferredRole, vpath string) string {
 	vpath = strings.TrimSpace(vpath)
 	if vpath == "" {
 		return ""
 	}
+	teamRole := strings.TrimSpace(preferredRole)
+	if teamRole == "" {
+		teamRole = "default"
+	}
 	if teamID := strings.TrimSpace(preferredTeamID); teamID != "" {
-		return resolveArtifactDiskPath(s.cfg.DataDir, teamID, "", vpath)
+		return resolveArtifactDiskPath(s.cfg.DataDir, teamID, preferredRunID, teamRole, vpath)
 	}
 	if teamID := strings.TrimSpace(scope.teamID); teamID != "" {
-		return resolveArtifactDiskPath(s.cfg.DataDir, teamID, "", vpath)
+		return resolveArtifactDiskPath(s.cfg.DataDir, teamID, scope.runID, teamRole, vpath)
 	}
 	if runID := strings.TrimSpace(preferredRunID); runID != "" {
-		if p := resolveArtifactDiskPath(s.cfg.DataDir, "", runID, vpath); p != "" {
+		if p := resolveArtifactDiskPath(s.cfg.DataDir, "", runID, "", vpath); p != "" {
 			if _, err := os.Stat(p); err == nil {
 				return p
 			}
 		}
 	}
 	for _, runID := range s.sessionRunIDs(ctx, scope.sessionID, scope.runID) {
-		if p := resolveArtifactDiskPath(s.cfg.DataDir, "", runID, vpath); p != "" {
+		if p := resolveArtifactDiskPath(s.cfg.DataDir, "", runID, "", vpath); p != "" {
 			if _, err := os.Stat(p); err == nil {
 				return p
 			}
@@ -653,7 +657,7 @@ func (s *RPCServer) artifactGet(ctx context.Context, p protocol.ArtifactGetParam
 	}
 	maxBytes := clampLimit(p.MaxBytes, artifactGetDefaultBytes, artifactGetMaxBytes)
 	if !found && strings.TrimSpace(vpath) != "" {
-		diskPath := s.resolveArtifactDiskPathForScope(ctx, scope, "", "", vpath)
+		diskPath := s.resolveArtifactDiskPathForScope(ctx, scope, "", "", "", vpath)
 		if strings.TrimSpace(diskPath) == "" {
 			return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "artifact not found"}
 		}
@@ -696,7 +700,11 @@ func (s *RPCServer) artifactGet(ctx context.Context, p protocol.ArtifactGetParam
 
 	diskPath := strings.TrimSpace(sel.DiskPath)
 	if diskPath == "" || func() bool { _, err := os.Stat(diskPath); return err != nil }() {
-		diskPath = s.resolveArtifactDiskPathForScope(ctx, scope, sel.TeamID, sel.RunID, sel.VPath)
+		preferredRole := strings.TrimSpace(parent.Role)
+		if preferredRole == "" {
+			preferredRole = strings.TrimSpace(sel.Role)
+		}
+		diskPath = s.resolveArtifactDiskPathForScope(ctx, scope, sel.TeamID, sel.RunID, preferredRole, sel.VPath)
 	}
 	if strings.TrimSpace(diskPath) == "" {
 		return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "artifact file path unavailable"}
