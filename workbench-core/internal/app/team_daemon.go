@@ -51,8 +51,10 @@ type teamRoleRunControllerAdapter struct {
 	rt *teamRoleRuntime
 }
 
-func (a *teamRoleRunControllerAdapter) RunID() string   { return strings.TrimSpace(a.rt.run.RunID) }
-func (a *teamRoleRunControllerAdapter) SessionID() string { return strings.TrimSpace(a.rt.run.SessionID) }
+func (a *teamRoleRunControllerAdapter) RunID() string { return strings.TrimSpace(a.rt.run.RunID) }
+func (a *teamRoleRunControllerAdapter) SessionID() string {
+	return strings.TrimSpace(a.rt.run.SessionID)
+}
 func (a *teamRoleRunControllerAdapter) SetPaused(paused bool) { a.rt.sess.SetPaused(paused) }
 func (a *teamRoleRunControllerAdapter) SetModel(ctx context.Context, model string) error {
 	return a.rt.sess.SetModel(ctx, model)
