@@ -49,6 +49,31 @@ func GetTeamWorkspaceDir(dataDir, teamID string) string {
 	return filepath.Join(GetTeamDir(dataDir, teamID), "workspace")
 }
 
+// sanitizeRoleForPath returns a safe path segment for a role name (no path separators, no "..").
+// Allows alphanumeric and "-_"; empty or invalid becomes "default".
+func sanitizeRoleForPath(role string) string {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return "default"
+	}
+	var b strings.Builder
+	for _, r := range role {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	s := b.String()
+	if s == "" {
+		return "default"
+	}
+	return s
+}
+
+// GetTeamRoleWorkspaceDir returns the per-role workspace dir under the team: dataDir/teams/teamID/workspace/<role>.
+func GetTeamRoleWorkspaceDir(dataDir, teamID, role string) string {
+	return filepath.Join(GetTeamWorkspaceDir(dataDir, teamID), sanitizeRoleForPath(role))
+}
+
 func GetTeamLogPath(dataDir, teamID string) string {
 	return filepath.Join(GetTeamDir(dataDir, teamID), "daemon.log")
 }
