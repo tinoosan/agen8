@@ -9,11 +9,12 @@ import (
 type TaskStatus string
 
 const (
-	TaskStatusPending   TaskStatus = "pending"
-	TaskStatusActive    TaskStatus = "active"
-	TaskStatusSucceeded TaskStatus = "succeeded"
-	TaskStatusFailed    TaskStatus = "failed"
-	TaskStatusCanceled  TaskStatus = "canceled"
+	TaskStatusPending       TaskStatus = "pending"
+	TaskStatusActive        TaskStatus = "active"
+	TaskStatusReviewPending TaskStatus = "review_pending"
+	TaskStatusSucceeded     TaskStatus = "succeeded"
+	TaskStatusFailed        TaskStatus = "failed"
+	TaskStatusCanceled      TaskStatus = "canceled"
 )
 
 // Task is the canonical DB-backed unit of work for autonomous agents.

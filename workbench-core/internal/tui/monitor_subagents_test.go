@@ -44,14 +44,14 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 			},
 		},
 		{
-			name: "Multiple Runs Mixed Status",
+			name: "Multiple Runs Mixed Status - only active shown",
 			childRuns: []types.Run{
 				{
 					RunID:      "run-1",
 					Status:     types.RunStatusSucceeded,
 					Goal:       "Fetch data",
 					StartedAt:  &now,
-					FinishedAt: &later, // 5m duration
+					FinishedAt: &later,
 					SpawnIndex: 1,
 					CostUSD:    0.05,
 				},
@@ -60,14 +60,12 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 					Status:     types.RunStatusFailed,
 					Goal:       "Process data with strict failure handling which is long...",
 					StartedAt:  &now,
-					FinishedAt: &later, // 5m duration
+					FinishedAt: &later,
 					SpawnIndex: 2,
 				},
 			},
-			wantLines: []string{
-				"1. [succeeded] Fetch data (5m0s) ($0.0500)",
-				"2. [failed] Process data with strict failure handling which is long... (5m0s)",
-			},
+			// Tab shows only running subagents; completed ones are summarized.
+			wantLines: []string{"No active subagents.", "2 completed"},
 		},
 	}
 
@@ -96,11 +94,7 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 
 			for _, want := range tt.wantLines {
 				if !strings.Contains(got, want) {
-					// Try to find it without brackets or status to be generous?
-					// No, let's just check raw text if possible.
-					// Lipgloss might break lines, but "1. [running] Goal..." should be roughly intact.
-					// Actually, [running] will be colored.
-					// Let's strip ANSI codes or just check goal text.
+					t.Errorf("Output missing expected substring %q", want)
 				}
 			}
 
@@ -117,10 +111,12 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 				t.Errorf("renderDashboardSubagentsTab() returned empty string")
 			}
 
-			// Check that goal text is present in the output (ignoring styles)
+			// Check that goal text is present for runs that are shown (active only)
 			for _, run := range tt.childRuns {
-				if !strings.Contains(got, run.Goal) && len(run.Goal) < 60 {
-					t.Errorf("Output missing goal: %q", run.Goal)
+				if strings.EqualFold(strings.TrimSpace(run.Status), types.RunStatusRunning) {
+					if !strings.Contains(got, run.Goal) && len(run.Goal) < 60 {
+						t.Errorf("Output missing goal for active run: %q", run.Goal)
+					}
 				}
 			}
 		})

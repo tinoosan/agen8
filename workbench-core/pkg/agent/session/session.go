@@ -919,6 +919,19 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		}
 	}
 	if s.cfg.SingleTask {
+		// Sub-agents spawned via spawn_worker or retry should not exit immediately;
+		// they enter a review-wait state so the parent can approve or retry.
+		if taskSource := ""; task.Metadata != nil {
+			taskSource, _ = task.Metadata["source"].(string)
+			if taskSource == "spawn_worker" || taskSource == "retry" {
+				s.emitBestEffort(ctx, events.Event{
+					Type:    "subagent.awaiting_review",
+					Message: "Sub-agent completed; awaiting parent review",
+					Data:    map[string]string{"runId": s.cfg.RunID, "taskId": taskID},
+				})
+				return nil // continue polling loop; parent may approve (cleanup) or retry (new task)
+			}
+		}
 		return ErrSingleTaskComplete
 	}
 	return nil
@@ -1013,7 +1026,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				artifactsForParent = append(artifactsForParent, path.Join(subagentArtifactsDir, art))
 			}
 		}
-		callbackGoal := fmt.Sprintf("SUBAGENT RESULT: Review %s result from spawned worker for task %s. The worker completed: %s. Review the result and decide on next steps.", string(tr.Status), truncateText(taskID, 24), truncateText(sourceGoal, 120))
+		callbackGoal := fmt.Sprintf("SUBAGENT RESULT: Review %s result from spawned worker for task %s. The worker completed: %s. Use the task_review tool to approve, retry (with feedback), or escalate this work.", string(tr.Status), truncateText(taskID, 24), truncateText(sourceGoal, 120))
 		inputs := map[string]any{
 			"sourceTaskId":         taskID,
 			"sourceGoal":           sourceGoal,
@@ -1031,7 +1044,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			AssignedToType: "agent",
 			AssignedTo:     parentRunID,
 			CreatedBy:      strings.TrimSpace(s.cfg.RunID),
-			TaskKind:       state.TaskKindCallback,
+			TaskKind:       state.TaskKindReview,
 			Goal:           callbackGoal,
 			Inputs:         inputs,
 			Priority:       1,
@@ -1042,6 +1055,10 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				"callbackForTaskId": taskID,
 				"sourceRunId":       strings.TrimSpace(s.cfg.RunID),
 				"sourceTaskStatus":  string(tr.Status),
+				"reviewGate":        true,
+				"reviewActions":     []string{"approve", "retry", "escalate"},
+				"retryBudget":       float64(3),
+				"retryCount":        float64(0),
 			},
 		}
 	} else {
@@ -1200,6 +1217,26 @@ func (s *Session) quarantineTask(ctx context.Context, task types.Task) error {
 		Message: "Task quarantined",
 		Data:    map[string]string{"taskId": taskID, "poisonPath": poisonPath, "error": fallback(strings.TrimSpace(task.Error), "max retries exceeded")},
 	})
+
+	// When a spawn_worker or retry task is quarantined, emit an auto-escalation
+	// event so the TUI/user can be notified of the intervention needed.
+	if task.Metadata != nil {
+		taskSource, _ := task.Metadata["source"].(string)
+		if taskSource == "spawn_worker" || taskSource == "retry" {
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "task.escalation.auto",
+				Message: "Sub-agent task quarantined; escalation required",
+				Data: map[string]string{
+					"taskId":   taskID,
+					"runId":    s.cfg.RunID,
+					"parentId": s.cfg.ParentRunID,
+					"goal":     truncateText(task.Goal, 200),
+					"error":    fallback(strings.TrimSpace(task.Error), "max retries exceeded"),
+					"source":   taskSource,
+				},
+			})
+		}
+	}
 	return nil
 }
 

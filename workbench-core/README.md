@@ -42,20 +42,25 @@ Workbench Core is a local agentic runtime that exposes an interactive CLI for la
 Workbench is designed as a **declarative runtime for autonomous agents**. Just as Kubernetes manages container lifecycles through declarative YAML manifests, Workbench manages agent lifecycles through **Profiles** and **Skills**.
 
 It shifts the paradigm from "building a chain" to "configuring a workstation":
-- **Declarative Identity**: define what an agent *is* (roles, goals, models) in simple YAML.
-- **Portable Capabilities**: define what an agent *can do* in standard Markdown (`SKILL.md`).
+
+- **Declarative Identity**: define what an agent _is_ (roles, goals, models) in simple YAML.
+- **Portable Capabilities**: define what an agent _can do_ in standard Markdown (`SKILL.md`).
 - **Autonomous Lifecycles**: specify how often an agent should "wake up" to process its inbox or clean its workspace via `heartbeats`.
 
 ## Core concepts
 
 ### Agent-as-Config
+
 Workbench treats agents as configuration rather than imperative code. By isolating behavior into profiles and skills, you gain:
+
 - **Portability**: Move an agent profile from your laptop to a server without changing code.
 - **Auditability**: Every instruction and capability is version-controllable in plain text.
 - **Interoperability**: Skills follow an open standard, allowing them to be shared across different agent instances.
 
 ### Agentic File System (AFS)
+
 Workbench exposes a virtual filesystem inside each run. Key mounts include:
+
 - `/project` – your host workspace (defaults to the current working directory; overridable via `--workdir`).
 - `/workspace` – agent-local workspace mapped to `dataDir/agents/<agentId>/workspace`.
 - `/log` – run event stream and trace excerpts.
@@ -76,32 +81,32 @@ You can resume an existing session with `workbench resume <sessionId>` to contin
 
 Most entrypoints live under `cmd/workbench/cmd` and use Cobra. Important workflows include:
 
-| Command                              | Description                                                                                                                                                                  |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workbench`                          | Start a new session + run with default context (daemon).                                                                                                                     |
+| Command                              | Description                                                                                                                                                                        |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workbench`                          | Start a new session + run with default context (daemon).                                                                                                                           |
 | `workbench monitor`                  | Open the monitoring TUI. Start the daemon first, then run monitor so it attaches to the active agent; use `--agent-id <id>` with the agent ID printed at daemon startup if needed. |
-| `workbench resume <sessionId>`       | Continue the last run in a session (use `--new-run` to start fresh).                                                                                                         |
-| `workbench list sessions`            | List stored session IDs + metadata.                                                                                                                                          |
-| `workbench list runs <sessionId>`    | Show run history for a session (statuses, timestamps).                                                                                                                       |
-| `workbench show session <sessionId>` | Dump session metadata.                                                                                                                                                       |
-| `workbench show run <runId>`         | Dump run metadata.                                                                                                                                                           |
-| `workbench show history <sessionId>` | Print the operation log as JSONL.                                                                                                                                            |
-| `workbench --help`                   | Get command + flag help (Cobra-generated).                                                                                                                                   |
+| `workbench resume <sessionId>`       | Continue the last run in a session (use `--new-run` to start fresh).                                                                                                               |
+| `workbench list sessions`            | List stored session IDs + metadata.                                                                                                                                                |
+| `workbench list runs <sessionId>`    | Show run history for a session (statuses, timestamps).                                                                                                                             |
+| `workbench show session <sessionId>` | Dump session metadata.                                                                                                                                                             |
+| `workbench show run <runId>`         | Dump run metadata.                                                                                                                                                                 |
+| `workbench show history <sessionId>` | Print the operation log as JSONL.                                                                                                                                                  |
+| `workbench --help`                   | Get command + flag help (Cobra-generated).                                                                                                                                         |
 
 ## Configuration
 
 Runtime configuration resolves in this order: CLI flags → environment variables → defaults.
 
-| Flag                    | Env                             | Description                                                                                                                               |
-| ----------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Flag                    | Env                             | Description                                                                                                                                     |
+| ----------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--data-dir`            | `WORKBENCH_DATA_DIR`            | Base directory containing `workbench.db`, `sessions`, `agents`, and shared `memory`. Defaults to `~/.workbench` or `$XDG_STATE_HOME/workbench`. |
-| `--workdir`             | `WORKBENCH_WORKDIR`             | Host directory mounted under `/project`. Defaults to the current working directory.                                                       |
-| `--context-bytes`       | —                               | How many bytes of context to persist (`run.maxBytesForContext`; default `8*1024`). Must be > 0.                                           |
-| `--model`               | `OPENROUTER_MODEL`              | Default model ID for LLM calls (overrides session defaults).                                                                              |
-| `--trace-bytes`         | —                               | Byte budget for the PromptUpdater trace (default `8*1024`).                                                                               |
-| `--memory-bytes`        | —                               | Memory injection budget per step (default `8*1024`).                                                                                      |
-| `--history-pairs`       | —                               | Number of recent (user, agent) pairs included from `/history` (default `8`).                                                              |
-| `--include-history-ops` | `WORKBENCH_INCLUDE_HISTORY_OPS` | Whether to include environment/host operations from `/history` (default: enabled).                                                        |
+| `--workdir`             | `WORKBENCH_WORKDIR`             | Host directory mounted under `/project`. Defaults to the current working directory.                                                             |
+| `--context-bytes`       | —                               | How many bytes of context to persist (`run.maxBytesForContext`; default `8*1024`). Must be > 0.                                                 |
+| `--model`               | `OPENROUTER_MODEL`              | Default model ID for LLM calls (overrides session defaults).                                                                                    |
+| `--trace-bytes`         | —                               | Byte budget for the PromptUpdater trace (default `8*1024`).                                                                                     |
+| `--memory-bytes`        | —                               | Memory injection budget per step (default `8*1024`).                                                                                            |
+| `--history-pairs`       | —                               | Number of recent (user, agent) pairs included from `/history` (default `8`).                                                                    |
+| `--include-history-ops` | `WORKBENCH_INCLUDE_HISTORY_OPS` | Whether to include environment/host operations from `/history` (default: enabled).                                                              |
 
 Helpers in `internal/config/effectiveConfig()` resolve the final configuration before each command runs. See [docs/cli-usage.md](docs/cli-usage.md) for deeper context on flag interactions, environment variables, and examples.
 
@@ -158,6 +163,7 @@ Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sa
 
 - Inspect `internal/app` for session runtime wiring and `internal/store` for persistence logic.
 - The [Developer guide](docs/developer-guide.md) explains how configuration, session/run lifecycles, and telemetry hooks fit together.
+- The [Execution model](docs/execution-model.md) (PRD) defines sub-agents, teams, hierarchy, review gate, retry/escalation, and daemon responsibilities; it is the authoritative spec for orchestration behaviour.
 - Inspect `pkg/agent/hosttools` for the built-in host tool surface and `pkg/tools/builtins` for host-side implementations.
 
 Contributions are welcome—submit documentation fixes or enhancements alongside code changes to keep the docs aligned with evolving runtime behavior.

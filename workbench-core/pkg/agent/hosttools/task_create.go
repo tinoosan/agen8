@@ -27,6 +27,8 @@ type TaskCreateTool struct {
 	IsCoordinator   bool
 	CoordinatorRole string
 	ValidRoles      []string
+	// IsChildRun indicates this tool is running in a sub-agent context.
+	IsChildRun bool
 	// SpawnWorker is called when spawn_worker=true to create a child run.
 	// If nil, spawn_worker=true will return an error.
 	SpawnWorker SpawnWorkerFunc
@@ -160,7 +162,14 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 
 	if payload.SpawnWorker {
 		if t.SpawnWorker == nil {
-			return types.HostOpRequest{}, fmt.Errorf("task_create: spawn_worker is not available in this context")
+			switch {
+			case t.IsCoordinator:
+				return types.HostOpRequest{}, fmt.Errorf("task_create: spawn_worker is not permitted for coordinators; delegate tasks to co-agents instead")
+			case t.IsChildRun:
+				return types.HostOpRequest{}, fmt.Errorf("task_create: spawn_worker is not permitted for sub-agents; only parent agents can spawn workers")
+			default:
+				return types.HostOpRequest{}, fmt.Errorf("task_create: spawn_worker is not available in this context")
+			}
 		}
 		childRunID, err := t.SpawnWorker(ctx, goal, t.SessionID, t.RunID)
 		if err != nil {

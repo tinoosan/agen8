@@ -8,6 +8,7 @@ import (
 const (
 	TaskKindTask        = "task"
 	TaskKindCallback    = "callback"
+	TaskKindReview      = "review"
 	TaskKindHeartbeat   = "heartbeat"
 	TaskKindCoordinator = "coordinator"
 	TaskKindOther       = "other"

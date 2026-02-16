@@ -9,6 +9,7 @@ import (
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 type compactTabDef struct {
@@ -324,6 +325,15 @@ func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) str
 	if strings.TrimSpace(m.teamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
 		currentRunID = strings.TrimSpace(m.focusedRunID)
 	}
+	// Only show active (running) subagents; completed ones are cleaned up and no longer need to be in the list.
+	activeChildRuns := make([]types.Run, 0, len(m.childRuns))
+	for _, r := range m.childRuns {
+		if strings.EqualFold(strings.TrimSpace(r.Status), types.RunStatusRunning) {
+			activeChildRuns = append(activeChildRuns, r)
+		}
+	}
+	completedCount := len(m.childRuns) - len(activeChildRuns)
+
 	if len(m.childRuns) == 0 {
 		if strings.TrimSpace(m.childRunsLoadErr) != "" {
 			lines = []string{kit.StyleDim.Render("Could not load subagents: " + strings.TrimSpace(m.childRunsLoadErr))}
@@ -336,8 +346,14 @@ func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) str
 		} else {
 			lines = []string{kit.StyleDim.Render("No subagents spawned yet.")}
 		}
+	} else if len(activeChildRuns) == 0 {
+		msg := "No active subagents."
+		if completedCount > 0 {
+			msg = fmt.Sprintf("No active subagents. (%d completed.)", completedCount)
+		}
+		lines = []string{kit.StyleDim.Render(msg)}
 	} else {
-		for i, run := range m.childRuns {
+		for i, run := range activeChildRuns {
 			idx := i + 1
 			if run.SpawnIndex > 0 {
 				idx = run.SpawnIndex

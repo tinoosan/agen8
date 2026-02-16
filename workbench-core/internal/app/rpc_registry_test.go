@@ -127,6 +127,7 @@ func TestRPCServer_MethodRegistry_CoversAllProtocolMethods(t *testing.T) {
 		protocol.MethodSessionStop,
 		protocol.MethodSessionGetTotals,
 		protocol.MethodActivityList,
+		protocol.MethodRunListChildren,
 		protocol.MethodTeamGetStatus,
 		protocol.MethodTeamGetManifest,
 		protocol.MethodPlanGet,

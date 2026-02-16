@@ -41,6 +41,15 @@ Workbench exposes an Agentic File System (AFS) inside each run:
 - Inbox/Outbox are logical task views backed by SQLite (`task.list(view="inbox"|"outbox")`), not filesystem transport paths.
 - `/memory` – shared agent memory (`MEMORY.MD`, plus daily `YYYY-MM-DD-memory.md` files).
 
+### Sub-agent workspace
+
+Under the [execution model](execution-model.md), sub-agents are execution workers with a single parent. Their outputs must return to the parent and not fragment the browsing experience (§9 Shared Workspace & Attribution).
+
+- **Top-level run** workspace: `<dataDir>/agents/<runId>/workspace` (exposed as `/workspace` inside that run).
+- **Sub-agent (child) run** workspace: `<dataDir>/agents/<parentRunId>/workspace/subagents/<childRunId>`. The sub-agent’s `/workspace` mount points here, so all artifacts are stored under the **parent’s** workspace directory. The parent agent sees those files at `/workspace/subagents/<childRunId>/...` in its own sandbox.
+
+Paths are resolved via `fsutil.GetWorkspaceDirForRun(dataDir, run)`; see `pkg/fsutil/paths.go`. Callback tasks passed to the parent include `subagentArtifactsDir` and rewritten `artifacts` paths so the main agent can open sub-agent outputs. See [Subagent verification](subagent-verification.md).
+
 Understanding this layout makes it easier to inspect sessions/runs manually (e.g., querying `workbench.db`
 and inspecting `<dataDir>/agents/<id>/log/events.jsonl`). All paths are derived via helpers in
 `internal/fsutil` and validated through `internal/store`.
@@ -61,12 +70,12 @@ and inspecting `<dataDir>/agents/<id>/log/events.jsonl`). All paths are derived 
 
 ## Mounting summary
 
-| Mount        | Host path                          | Description                                                        |
-| ------------ | ---------------------------------- | ------------------------------------------------------------------ |
-| `/project`   | `<workdir>`                        | Host workspace mounted read/write (configurable with `--workdir`). |
-| `/workspace` | `<dataDir>/agents/<agentId>/workspace` | Agent-local workspace for ephemeral files.                           |
-| `/log`       | `<dataDir>/agents/<agentId>/log`       | Logs authored by built-in tools and internal agents.                 |
-| `/plan`      | `<dataDir>/agents/<agentId>/plan`      | Planning workspace (`HEAD.md` + `CHECKLIST.md`).                    |
-| `/memory`    | `<dataDir>/memory`                 | Shared memory (`MEMORY.MD`, plus daily `YYYY-MM-DD-memory.md`). |
+| Mount        | Host path                              | Description                                                                                |
+| ------------ | -------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `/project`   | `<workdir>`                            | Host workspace mounted read/write (configurable with `--workdir`).                         |
+| `/workspace` | `<dataDir>/agents/<agentId>/workspace` | Agent-local workspace. For sub-agents, this is `<parentWorkspace>/subagents/<childRunId>`. |
+| `/log`       | `<dataDir>/agents/<agentId>/log`       | Logs authored by built-in tools and internal agents.                                       |
+| `/plan`      | `<dataDir>/agents/<agentId>/plan`      | Planning workspace (`HEAD.md` + `CHECKLIST.md`).                                           |
+| `/memory`    | `<dataDir>/memory`                     | Shared memory (`MEMORY.MD`, plus daily `YYYY-MM-DD-memory.md`).                            |
 
 Keeping this mapping in mind helps when debugging via the CLI or via `ls`/`cat` on the host filesystem.
