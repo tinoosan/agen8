@@ -207,6 +207,48 @@ func LatestRunningRun(cfg config.Config) (types.Run, error) {
 	return run, nil
 }
 
+// ListRunsByStatus returns all runs whose status is in the given list (e.g. running, paused).
+// Used by the daemon supervisor to discover active runs without scanning sessions.
+func ListRunsByStatus(cfg config.Config, statuses []string) ([]types.Run, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	if len(statuses) == 0 {
+		return nil, nil
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return nil, err
+	}
+	placeholders := make([]string, len(statuses))
+	args := make([]any, len(statuses))
+	for i, s := range statuses {
+		placeholders[i] = "?"
+		args[i] = strings.TrimSpace(s)
+	}
+	query := `SELECT run_json FROM runs WHERE status IN (` + strings.Join(placeholders, ",") + `) ORDER BY created_at`
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list runs by status: %w", err)
+	}
+	defer rows.Close()
+	var out []types.Run
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var run types.Run
+		if err := json.Unmarshal([]byte(raw), &run); err != nil {
+			continue
+		}
+		if run.RunID != "" {
+			out = append(out, run)
+		}
+	}
+	return out, rows.Err()
+}
+
 // ListChildRuns returns all runs whose parent_run_id matches the given parentRunID.
 func ListChildRuns(cfg config.Config, parentRunID string) ([]types.Run, error) {
 	if err := cfg.Validate(); err != nil {

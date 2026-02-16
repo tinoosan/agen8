@@ -248,3 +248,56 @@ func TestStopRun(t *testing.T) {
 		}
 	})
 }
+
+func TestListRunsByStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.Config{DataDir: tmpDir}
+
+	t.Run("Empty", func(t *testing.T) {
+		runs, err := ListRunsByStatus(cfg, []string{types.RunStatusRunning, types.RunStatusPaused})
+		if err != nil {
+			t.Fatalf("ListRunsByStatus: %v", err)
+		}
+		if len(runs) != 0 {
+			t.Fatalf("expected 0 runs, got %d", len(runs))
+		}
+	})
+
+	t.Run("ByStatus", func(t *testing.T) {
+		r1 := mustCreateSessionRun(t, cfg, "running one", 100)
+		_, r2, _ := CreateSession(cfg, "running two", 200)
+		_ = SaveRun(cfg, r2)
+		_, r3, _ := CreateSession(cfg, "paused run", 200)
+		r3.Status = types.RunStatusPaused
+		_ = SaveRun(cfg, r3)
+		_, r4, _ := CreateSession(cfg, "succeeded run", 200)
+		r4.Status = types.RunStatusSucceeded
+		_ = SaveRun(cfg, r4)
+
+		running, err := ListRunsByStatus(cfg, []string{types.RunStatusRunning})
+		if err != nil {
+			t.Fatalf("ListRunsByStatus(running): %v", err)
+		}
+		if len(running) != 2 {
+			t.Fatalf("expected 2 running runs, got %d", len(running))
+		}
+		seen := map[string]bool{}
+		for _, r := range running {
+			seen[r.RunID] = true
+			if r.Status != types.RunStatusRunning {
+				t.Errorf("run %s has status %q", r.RunID, r.Status)
+			}
+		}
+		if !seen[r1.RunID] || !seen[r2.RunID] {
+			t.Errorf("expected r1 and r2 in running list, got %v", seen)
+		}
+
+		active, err := ListRunsByStatus(cfg, []string{types.RunStatusRunning, types.RunStatusPaused})
+		if err != nil {
+			t.Fatalf("ListRunsByStatus(running,paused): %v", err)
+		}
+		if len(active) != 3 {
+			t.Fatalf("expected 3 active runs, got %d", len(active))
+		}
+	})
+}

@@ -63,6 +63,11 @@ func (p *ProtocolInitializer) Initialize(ctx context.Context) {
 	p.index = protocol.NewIndex(10_000, 2_000)
 	p.notifyCh = make(chan protocol.Message, 1000)
 
+	// No run to warm up when daemon has no bootstrap run (clean server model).
+	if strings.TrimSpace(p.run.RunID) == "" {
+		return
+	}
+
 	replaySink := protocol.NewEventSink(
 		emit.SinkFunc[protocol.Notification](func(_ context.Context, msg emit.Message[protocol.Notification]) error {
 			p.index.Apply(msg.Payload.Method, msg.Payload.Params)

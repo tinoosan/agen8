@@ -166,44 +166,22 @@ func (s *runtimeSupervisor) stopAll() {
 }
 
 func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
-	if s == nil {
+	if s == nil || s.sessionStore == nil {
 		return nil
 	}
-	if s.sessionStore == nil {
-		return nil
+	runs, err := implstore.ListRunsByStatus(s.cfg, []string{types.RunStatusRunning, types.RunStatusPaused})
+	if err != nil {
+		return err
 	}
-	query, ok := s.sessionStore.(pkgstore.SessionQuery)
-	if !ok {
-		return nil
-	}
-	filter := pkgstore.SessionFilter{
-		IncludeSystem: false,
-		Limit:         200,
-		Offset:        0,
-		SortBy:        "updated_at",
-		SortDesc:      true,
-	}
-
-	for {
-		sessions, err := query.ListSessionsPaginated(ctx, filter)
-		if err != nil {
-			return err
+	for _, run := range runs {
+		sess, lerr := s.sessionStore.LoadSession(ctx, run.SessionID)
+		if lerr != nil {
+			log.Printf("daemon: load session for run %s: %v", run.RunID, lerr)
+			continue
 		}
-		if len(sessions) == 0 {
-			break
+		if err := s.ensureRun(ctx, sess, run.RunID); err != nil {
+			log.Printf("daemon: managed run start failed for %s: %v", run.RunID, err)
 		}
-		for _, sess := range sessions {
-			runIDs := collectSessionRunIDs(sess)
-			for _, runID := range runIDs {
-				if err := s.ensureRun(ctx, sess, runID); err != nil {
-					log.Printf("daemon: managed run start failed for %s: %v", runID, err)
-				}
-			}
-		}
-		if len(sessions) < filter.Limit {
-			break
-		}
-		filter.Offset += len(sessions)
 	}
 	return nil
 }
@@ -252,9 +230,6 @@ func (s *runtimeSupervisor) ensureRun(ctx context.Context, sess types.Session, r
 		return nil
 	}
 	s.mu.Unlock()
-	if paused {
-		return nil
-	}
 
 	startFn := s.spawnOverride
 	if startFn == nil {
@@ -301,6 +276,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	if err != nil {
 		return nil, err
 	}
+	paused := strings.EqualFold(strings.TrimSpace(run.Status), types.RunStatusPaused)
 	if run.Runtime == nil {
 		run.Runtime = &types.RunRuntimeConfig{}
 	}
@@ -622,6 +598,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		_ = rt.Shutdown(context.Background())
 		return nil, err
 	}
+	workerSession.SetPaused(paused)
 
 	workerCtx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})

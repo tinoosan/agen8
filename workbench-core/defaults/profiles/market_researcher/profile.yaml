@@ -1,9 +1,15 @@
 id: market_researcher
 description: Focused profile for macro and sector market research.
+model: moonshotai/kimi-k2.5
+subagent_model: openai/gpt-5-nano
 skills:
   - market-monitoring
   - reporting
+  - planning
+  - data-engineering
   - hybrid-web
+  - financial-analysis
+  - project-management
 prompts:
   system_prompt_path: prompt.md
 heartbeat:

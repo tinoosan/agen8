@@ -15,7 +15,6 @@ import (
 
 	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent"
-	hosttools "github.com/tinoosan/workbench-core/pkg/agent/hosttools"
 	"github.com/tinoosan/workbench-core/pkg/agent/session"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
@@ -114,9 +113,6 @@ func (b *DaemonBuilder) Run() error {
 	if err := b.buildStoresAndRuntime(); err != nil {
 		return err
 	}
-	if b.rt != nil {
-		defer func() { _ = b.rt.Shutdown(context.Background()) }()
-	}
 
 	if err := b.buildAgentAndSupervisor(); err != nil {
 		return err
@@ -132,17 +128,14 @@ func (b *DaemonBuilder) Run() error {
 		defer b.supervisor.stopAll()
 	}
 
-	err := b.runMainLoop()
-	if b.runCtx == nil {
-		b.runCtx = b.ctx
-	}
-	b.mustEmit(b.runCtx, events.Event{
+	<-b.runCtx.Done()
+	b.mustEmit(b.ctx, events.Event{
 		Type:    "daemon.stop",
-		Message: "Autonomous agent stopped",
-		Data:    map[string]string{"runId": b.run.RunID, "sessionId": b.run.SessionID, "profile": b.prof.ID},
+		Message: "Daemon stopped",
+		Data:    map[string]string{},
 	})
 	b.serverWG.Wait()
-	return err
+	return nil
 }
 
 func (b *DaemonBuilder) prepareBootstrap() error {
@@ -153,58 +146,20 @@ func (b *DaemonBuilder) prepareBootstrap() error {
 		b.maxContextB = 8 * 1024
 	}
 	if b.poll <= 0 {
-		b.poll = 1 * time.Second // Faster inbox poll so callbacks and new tasks are picked up sooner
+		b.poll = 1 * time.Second
 	}
 	b.goal = strings.TrimSpace(b.goal)
 	if b.goal == "" {
 		b.goal = "autonomous agent"
 	}
 
-	// Reuse an existing daemon (system + standalone) session and its current run when present,
-	// so restarts use the same run folder instead of creating a new one every time.
-	profileID := strings.TrimSpace(b.prof.ID)
-	if sessions, listErr := implstore.ListSessionsPaginated(b.cfg, store.SessionFilter{IncludeSystem: true, Limit: 20}); listErr == nil {
-		for _, s := range sessions {
-			if s.System && s.Mode == "standalone" && strings.TrimSpace(s.Profile) == profileID && strings.TrimSpace(s.CurrentRunID) != "" {
-				if run, loadErr := implstore.LoadRun(b.cfg, s.CurrentRunID); loadErr == nil {
-					now := time.Now().UTC()
-					run.Status = types.RunStatusRunning
-					run.StartedAt = &now
-					run.FinishedAt = nil
-					if saveErr := implstore.SaveRun(b.cfg, run); saveErr != nil {
-						log.Printf("daemon: failed to persist reused run state: %v", saveErr)
-					}
-					b.bootstrapSession = s
-					b.run = run
-					break
-				}
-				// LoadRun failed (e.g. missing row); fall through to create new session and run
-				break
-			}
-		}
-	}
-
-	if b.run.RunID == "" {
-		// No reusable daemon session/run found; create new session and run.
-		bootstrapSession, run, err := implstore.CreateSession(b.cfg, b.goal, b.maxContextB)
-		if err != nil {
-			return fmt.Errorf("create session: %w", err)
-		}
-		bootstrapSession.System = true
-		bootstrapSession.Mode = "standalone"
-		bootstrapSession.TeamID = ""
-		bootstrapSession.Profile = profileID
-		_ = implstore.SaveSession(b.cfg, bootstrapSession)
-		b.bootstrapSession = bootstrapSession
-		b.run = run
-	}
-
-	b.protocolInit = newProtocolInitializer(b.cfg, b.run, b.protocolEnabled)
+	// No session or run created by daemon; all creation happens via RPC.
+	b.protocolInit = newProtocolInitializer(b.cfg, types.Run{}, b.protocolEnabled)
 	b.protocolInit.Initialize(context.Background())
 	b.protocolSink = b.protocolInit.NewProtocolSink()
 
 	emitter := &events.Emitter{
-		RunID: b.run.RunID,
+		RunID: "",
 		Sink: events.MultiSink{
 			events.StoreSink{Store: daemonEventAppender{cfg: b.cfg}},
 			b.protocolSink,
@@ -262,13 +217,6 @@ func (b *DaemonBuilder) buildStoresAndRuntime() error {
 		return fmt.Errorf("create memory store: %w", err)
 	}
 	b.memStore = ms
-	b.traceStore = implstore.SQLiteTraceStore{Cfg: b.cfg, RunID: b.run.RunID}
-
-	hs, err := implstore.NewSQLiteHistoryStore(b.cfg, b.run.SessionID)
-	if err != nil {
-		return fmt.Errorf("create history store: %w", err)
-	}
-	b.historyStore = hs
 
 	cs, err := implstore.NewSQLiteConstructorStore(b.cfg)
 	if err != nil {
@@ -281,71 +229,6 @@ func (b *DaemonBuilder) buildStoresAndRuntime() error {
 		return fmt.Errorf("create session store: %w", err)
 	}
 	b.sessionStore = ss
-
-	b.effectiveModel = strings.TrimSpace(b.resolved.Model)
-	// Profile model takes priority over env var for standalone profiles.
-	if b.prof != nil && b.prof.Model != "" {
-		b.effectiveModel = b.prof.Model
-	}
-	loadedSession := types.Session{}
-	if loaded, lerr := b.sessionStore.LoadSession(b.ctx, b.run.SessionID); lerr == nil {
-		loadedSession = loaded
-		// Session active model (runtime switch) takes highest priority.
-		if active := strings.TrimSpace(loaded.ActiveModel); active != "" {
-			b.effectiveModel = active
-		}
-	}
-	if b.effectiveModel == "" {
-		return fmt.Errorf("effective model is required")
-	}
-	ensureSessionReasoningForModel(&loadedSession, b.effectiveModel, strings.TrimSpace(b.resolved.ReasoningEffort), strings.TrimSpace(b.resolved.ReasoningSummary))
-	if strings.TrimSpace(loadedSession.SessionID) != "" {
-		loadedSession.ActiveModel = b.effectiveModel
-		_ = b.sessionStore.SaveSession(b.ctx, loadedSession)
-	}
-	b.loadedSession = loadedSession
-	b.initialReasoningEffort = loadedSession.ReasoningEffort
-	b.initialReasoningSummary = loadedSession.ReasoningSummary
-
-	b.memoryProvider = &textMemoryAdapter{store: b.memStore}
-
-	rt, err := runtime.Build(runtime.BuildConfig{
-		Cfg:                   b.cfg,
-		Run:                   b.run,
-		Profile:               strings.TrimSpace(b.prof.ID),
-		ProfileConfig:         b.prof,
-		WorkdirAbs:            b.workdirAbs,
-		Model:                 b.effectiveModel,
-		ReasoningEffort:       b.initialReasoningEffort,
-		ReasoningSummary:      b.initialReasoningSummary,
-		ApprovalsMode:         strings.TrimSpace(b.resolved.ApprovalsMode),
-		HistoryStore:          b.historyStore,
-		MemoryStore:           b.memStore,
-		TraceStore:            b.traceStore,
-		ConstructorStore:      b.constructorStore,
-		Emit:                  b.mustEmit,
-		IncludeHistoryOps:     derefBool(b.resolved.IncludeHistoryOps, true),
-		RecentHistoryPairs:    b.resolved.RecentHistoryPairs,
-		MaxMemoryBytes:        b.resolved.MaxMemoryBytes,
-		MaxTraceBytes:         b.resolved.MaxTraceBytes,
-		PriceInPerMTokensUSD:  b.resolved.PriceInPerMTokensUSD,
-		PriceOutPerMTokensUSD: b.resolved.PriceOutPerMTokensUSD,
-		Guard:                 nil,
-		ArtifactObserve:       b.artifactIndex.ObserveWrite,
-		PersistRun: func(r types.Run) error {
-			return implstore.SaveRun(b.cfg, r)
-		},
-		LoadSession: func(sessionID string) (types.Session, error) {
-			return b.sessionStore.LoadSession(context.Background(), sessionID)
-		},
-		SaveSession: func(session types.Session) error {
-			return b.sessionStore.SaveSession(context.Background(), session)
-		},
-	})
-	if err != nil {
-		return err
-	}
-	b.rt = rt
 	return nil
 }
 
@@ -360,59 +243,6 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 		MaxDelay:     4 * time.Second,
 		Multiplier:   2.0,
 	})
-	llmClient := withRetryDiagnostics(b.baseLLMClient, b.mustEmit)
-
-	b.currentModel = strings.TrimSpace(b.effectiveModel)
-
-	agentCfg := agent.DefaultConfig()
-	agentCfg.Model = b.effectiveModel
-	agentCfg.ReasoningEffort = b.initialReasoningEffort
-	agentCfg.ReasoningSummary = b.initialReasoningSummary
-	agentCfg.ApprovalsMode = strings.TrimSpace(b.resolved.ApprovalsMode)
-	agentCfg.EnableWebSearch = b.resolved.WebSearchEnabled
-	agentCfg.SystemPrompt = agent.DefaultAutonomousSystemPrompt()
-	var promptSource agent.PromptSource = b.rt.Constructor
-	if b.rt.Updater != nil {
-		promptSource = b.rt.Updater
-	}
-	agentCfg.PromptSource = promptSource
-	agentCfg.Hooks = agent.Hooks{
-		OnLLMUsage: newCostUsageHook(
-			b.cfg,
-			b.run,
-			b.effectiveModel,
-			b.resolved.PriceInPerMTokensUSD,
-			b.resolved.PriceOutPerMTokensUSD,
-			b.sessionStore,
-			func() string {
-				b.currentModelMu.Lock()
-				model := b.currentModel
-				b.currentModelMu.Unlock()
-				return model
-			},
-			b.mustEmit,
-		),
-		OnStep: func(step int, model, effectiveModel, summary string) {
-			model = strings.TrimSpace(model)
-			effectiveModel = strings.TrimSpace(effectiveModel)
-			summary = strings.TrimSpace(summary)
-			data := map[string]string{
-				"step":  strconv.Itoa(step),
-				"model": model,
-			}
-			if effectiveModel != "" {
-				data["effectiveModel"] = effectiveModel
-			}
-			if summary != "" {
-				data["reasoningSummary"] = summary
-			}
-			b.mustEmit(b.ctx, events.Event{
-				Type:    "agent.step",
-				Message: fmt.Sprintf("Step %d completed", step),
-				Data:    data,
-			})
-		},
-	}
 
 	taskStore, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(b.cfg.DataDir))
 	if err != nil {
@@ -430,67 +260,18 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 		LLMClient:        b.baseLLMClient,
 		Notifier:         b.notifier,
 		WorkdirAbs:       b.workdirAbs,
-		BootstrapRunID:   strings.TrimSpace(b.run.RunID),
+		BootstrapRunID:   "",
 		DefaultProfile:   b.prof,
 	})
-
 	b.wakeCh = make(chan struct{}, 1)
-
-	registry, err := agent.DefaultHostToolRegistry()
-	if err != nil {
-		return fmt.Errorf("create host tool registry: %w", err)
-	}
-	if err := registry.Register(&hosttools.TaskCreateTool{
-		Store:       b.taskStore,
-		SessionID:   b.run.SessionID,
-		RunID:       b.run.RunID,
-		SpawnWorker: b.spawnWorkerRun,
-	}); err != nil {
-		return fmt.Errorf("register task_create tool: %w", err)
-	}
-	agentCfg.HostToolRegistry = registry
-	b.agentCfg = agentCfg
-
-	a, err := agent.NewAgent(llmClient, b.rt.Executor, b.agentCfg)
-	if err != nil {
-		return fmt.Errorf("create agent: %w", err)
-	}
-	sess, err := session.New(session.Config{
-		Agent:      a,
-		Profile:    b.prof,
-		ProfileDir: b.profDir,
-		ResolveProfile: func(ref string) (*profile.Profile, string, error) {
-			return resolveProfileRef(b.cfg, strings.TrimSpace(ref))
-		},
-		TaskStore:         b.taskStore,
-		Events:            b.orderedEmitter,
-		Memory:            b.memoryProvider,
-		MemorySearchLimit: 3,
-		Notifier:          b.notifier,
-		PollInterval:      b.poll,
-		WakeCh:            b.wakeCh,
-		MaxReadBytes:      256 * 1024,
-		LeaseTTL:          2 * time.Minute,
-		MaxRetries:        3,
-		MaxPending:        50,
-		SessionID:         b.run.SessionID,
-		RunID:             b.run.RunID,
-		InstanceID:        b.run.RunID,
-		Logf: func(format string, args ...any) {
-			log.Printf("daemon: "+format, args...)
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("create session: %w", err)
-	}
-	b.sess = sess
 	return nil
 }
 
 func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
+	defaultRun := types.Run{MaxBytesForContext: b.maxContextB}
 	return RPCServerConfig{
 		Cfg:            b.cfg,
-		Run:            b.run,
+		Run:            defaultRun,
 		AllowAnyThread: true,
 		TaskStore:      b.taskStore,
 		Session:        b.sessionStore,
@@ -536,17 +317,8 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			if teamID := strings.TrimSpace(loadedSession.TeamID); teamID != "" {
 				_ = persistTeamManifestModel(b.cfg, teamID, strings.TrimSpace(model), "rpc.control.setModel")
 			}
-			if threadID == strings.TrimSpace(b.run.SessionID) {
-				if err := b.sess.SetModel(ctx, model); err == nil {
-					b.currentModelMu.Lock()
-					b.currentModel = strings.TrimSpace(model)
-					b.currentModelMu.Unlock()
-				}
-				_ = b.sess.SetReasoning(ctx, loadedSession.ReasoningEffort, loadedSession.ReasoningSummary)
-			} else {
-				if _, err := b.supervisor.ApplySessionModel(ctx, threadID, targetRunID, model); err != nil {
-					return nil, err
-				}
+			if _, err := b.supervisor.ApplySessionModel(ctx, threadID, targetRunID, model); err != nil {
+				return nil, err
 			}
 			return applied, nil
 		},
@@ -582,12 +354,6 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			if err := b.sessionStore.SaveSession(ctx, loadedSession); err != nil {
 				return nil, err
 			}
-			if threadID == strings.TrimSpace(b.run.SessionID) {
-				if err := b.sess.SetReasoning(ctx, effort, summary); err != nil {
-					return nil, err
-				}
-				return applied, nil
-			}
 			if _, err := b.supervisor.ApplySessionReasoning(ctx, threadID, targetRunID, effort, summary); err != nil {
 				return nil, err
 			}
@@ -605,49 +371,12 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			if _, err := b.validateAgentScope(ctx, threadID, runID); err != nil {
 				return err
 			}
-			if runID == strings.TrimSpace(b.run.RunID) && threadID == strings.TrimSpace(b.run.SessionID) {
-				loaded, err := implstore.LoadRun(b.cfg, runID)
-				if err != nil {
-					return err
-				}
-				loaded.Status = types.RunStatusPaused
-				loaded.FinishedAt = nil
-				loaded.Error = nil
-				if err := implstore.SaveRun(b.cfg, loaded); err != nil {
-					return err
-				}
-				b.sess.SetPaused(true)
-				b.runLoopMu.Lock()
-				cancel := b.runLoopCancel
-				b.runLoopMu.Unlock()
-				if cancel != nil {
-					cancel()
-				}
-				if err := cancelActiveTasksForRun(context.Background(), b.taskStore, runID, "run paused"); err != nil {
-					return err
-				}
-				return nil
-			}
 			return b.supervisor.PauseRun(runID)
 		},
 		AgentResume: func(ctx context.Context, threadID, runID string) error {
 			runID = strings.TrimSpace(runID)
 			if _, err := b.validateAgentScope(ctx, threadID, runID); err != nil {
 				return err
-			}
-			if runID == strings.TrimSpace(b.run.RunID) && threadID == strings.TrimSpace(b.run.SessionID) {
-				loaded, err := implstore.LoadRun(b.cfg, runID)
-				if err != nil {
-					return err
-				}
-				loaded.Status = types.RunStatusRunning
-				loaded.FinishedAt = nil
-				loaded.Error = nil
-				if err := implstore.SaveRun(b.cfg, loaded); err != nil {
-					return err
-				}
-				b.sess.SetPaused(false)
-				return nil
 			}
 			return b.supervisor.ResumeRun(ctx, runID)
 		},
@@ -668,34 +397,7 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 				wg.Add(1)
 				go func(runID string) {
 					defer wg.Done()
-					if runID == strings.TrimSpace(b.run.RunID) {
-						loaded, lerr := implstore.LoadRun(b.cfg, runID)
-						if lerr == nil {
-							loaded.Status = types.RunStatusPaused
-							loaded.FinishedAt = nil
-							loaded.Error = nil
-							lerr = implstore.SaveRun(b.cfg, loaded)
-						}
-						if lerr != nil {
-							mu.Lock()
-							errs = append(errs, runID+": "+lerr.Error())
-							mu.Unlock()
-							return
-						}
-						b.sess.SetPaused(true)
-						b.runLoopMu.Lock()
-						cancel := b.runLoopCancel
-						b.runLoopMu.Unlock()
-						if cancel != nil {
-							cancel()
-						}
-						if cerr := cancelActiveTasksForRun(context.Background(), b.taskStore, runID, "run paused"); cerr != nil {
-							mu.Lock()
-							errs = append(errs, runID+": "+cerr.Error())
-							mu.Unlock()
-							return
-						}
-					} else if perr := b.supervisor.PauseRun(runID); perr != nil {
+					if perr := b.supervisor.PauseRun(runID); perr != nil {
 						mu.Lock()
 						errs = append(errs, runID+": "+perr.Error())
 						mu.Unlock()
@@ -729,22 +431,7 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 				wg.Add(1)
 				go func(runID string) {
 					defer wg.Done()
-					if runID == strings.TrimSpace(b.run.RunID) {
-						loaded, lerr := implstore.LoadRun(b.cfg, runID)
-						if lerr == nil {
-							loaded.Status = types.RunStatusRunning
-							loaded.FinishedAt = nil
-							loaded.Error = nil
-							lerr = implstore.SaveRun(b.cfg, loaded)
-						}
-						if lerr != nil {
-							mu.Lock()
-							errs = append(errs, runID+": "+lerr.Error())
-							mu.Unlock()
-							return
-						}
-						b.sess.SetPaused(false)
-					} else if rerr := b.supervisor.ResumeRun(ctx, runID); rerr != nil {
+					if rerr := b.supervisor.ResumeRun(ctx, runID); rerr != nil {
 						mu.Lock()
 						errs = append(errs, runID+": "+rerr.Error())
 						mu.Unlock()
@@ -778,34 +465,7 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 				wg.Add(1)
 				go func(runID string) {
 					defer wg.Done()
-					if runID == strings.TrimSpace(b.run.RunID) {
-						loaded, lerr := implstore.LoadRun(b.cfg, runID)
-						if lerr == nil {
-							loaded.Status = types.RunStatusPaused
-							loaded.FinishedAt = nil
-							loaded.Error = nil
-							lerr = implstore.SaveRun(b.cfg, loaded)
-						}
-						if lerr != nil {
-							mu.Lock()
-							errs = append(errs, runID+": "+lerr.Error())
-							mu.Unlock()
-							return
-						}
-						b.sess.SetPaused(true)
-						b.runLoopMu.Lock()
-						cancel := b.runLoopCancel
-						b.runLoopMu.Unlock()
-						if cancel != nil {
-							cancel()
-						}
-						if serr := cancelActiveTasksForRun(context.Background(), b.taskStore, runID, "run stopped"); serr != nil {
-							mu.Lock()
-							errs = append(errs, runID+": "+serr.Error())
-							mu.Unlock()
-							return
-						}
-					} else if serr := b.supervisor.StopRun(runID); serr != nil {
+					if serr := b.supervisor.StopRun(runID); serr != nil {
 						mu.Lock()
 						errs = append(errs, runID+": "+serr.Error())
 						mu.Unlock()
@@ -883,49 +543,6 @@ func (b *DaemonBuilder) startBackgroundServices() error {
 		}
 	}
 
-	go func() {
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-b.runCtx.Done():
-				return
-			case <-ticker.C:
-				if loadedRun, rerr := implstore.LoadRun(b.cfg, b.run.RunID); rerr == nil {
-					b.sess.SetPaused(strings.EqualFold(strings.TrimSpace(loadedRun.Status), types.RunStatusPaused))
-				}
-				loaded, lerr := b.sessionStore.LoadSession(b.runCtx, b.run.SessionID)
-				if lerr != nil {
-					continue
-				}
-				targetModel := strings.TrimSpace(loaded.ActiveModel)
-				if targetModel == "" {
-					continue
-				}
-				b.currentModelMu.Lock()
-				same := strings.EqualFold(targetModel, b.currentModel)
-				b.currentModelMu.Unlock()
-				if same {
-					continue
-				}
-				if err := b.sess.SetModel(b.runCtx, targetModel); err != nil {
-					continue
-				}
-				b.currentModelMu.Lock()
-				b.currentModel = targetModel
-				b.currentModelMu.Unlock()
-				b.mustEmit(b.runCtx, events.Event{
-					Type:    "control.success",
-					Message: "Model synchronized from session state",
-					Data: map[string]string{
-						"command": "set_model",
-						"model":   targetModel,
-					},
-				})
-			}
-		}
-	}()
-
 	{
 		const (
 			sessionRetention = 30 * 24 * time.Hour
@@ -989,7 +606,7 @@ func (b *DaemonBuilder) startBackgroundServices() error {
 
 	webhookAddr := strings.TrimSpace(b.resolved.WebhookAddr)
 	if webhookAddr != "" {
-		startWebhookServer(b.runCtx, webhookAddr, b.cfg, b.run, b.taskStore, b.mustEmit, &b.serverWG)
+		startWebhookServer(b.runCtx, webhookAddr, b.cfg, types.Run{}, b.taskStore, b.mustEmit, &b.serverWG)
 	}
 	healthAddr := strings.TrimSpace(b.resolved.HealthAddr)
 	if healthAddr != "" && healthAddr != webhookAddr {
@@ -998,93 +615,13 @@ func (b *DaemonBuilder) startBackgroundServices() error {
 
 	b.mustEmit(b.runCtx, events.Event{
 		Type:    "daemon.start",
-		Message: "Autonomous agent started",
-		Data:    map[string]string{"runId": b.run.RunID, "sessionId": b.run.SessionID, "profile": b.prof.ID},
+		Message: "Daemon started",
+		Data:    map[string]string{},
 	})
 	if b.protocolEnabled {
 		log.Printf("daemon: protocol control-plane ready at %s — attach with: workbench", strings.TrimSpace(b.resolved.RPCListen))
 	} else {
-		log.Printf("daemon: agent id %s — attach with: workbench --agent-id %s", b.run.RunID, b.run.RunID)
+		log.Printf("daemon: ready — attach with: workbench")
 	}
 	return nil
-}
-
-func (b *DaemonBuilder) runMainLoop() error {
-	for {
-		runLoopCtx, cancelRunLoop := context.WithCancel(b.runCtx)
-		b.runLoopMu.Lock()
-		b.runLoopCancel = cancelRunLoop
-		b.runLoopMu.Unlock()
-		err := b.sess.Run(runLoopCtx)
-		cancelRunLoop()
-		b.runLoopMu.Lock()
-		b.runLoopCancel = nil
-		b.runLoopMu.Unlock()
-		if b.runCtx.Err() != nil {
-			return nil
-		}
-		errMsg := "unknown error"
-		if err != nil {
-			errMsg = err.Error()
-		}
-		b.mustEmit(b.runCtx, events.Event{
-			Type:    "daemon.runner.error",
-			Message: "Runner exited unexpectedly; restarting",
-			Data:    map[string]string{"error": errMsg},
-		})
-		time.Sleep(2 * time.Second)
-	}
-}
-
-// spawnWorkerRun creates a child Run for a spawned worker and adds it to the session.
-// The supervisor discovers the new run and starts a managed runtime for it.
-func (b *DaemonBuilder) spawnWorkerRun(ctx context.Context, goal, sessionID, parentRunID string) (string, error) {
-	// Count existing children to determine spawn index.
-	children, _ := implstore.ListChildRuns(b.cfg, parentRunID)
-	spawnIndex := len(children) + 1
-
-	childRun := types.NewChildRun(parentRunID, goal, sessionID, spawnIndex)
-
-	// Resolve subagent model: env var > profile-level > parent model.
-	subagentModel := strings.TrimSpace(b.resolved.SubagentModel)
-	if subagentModel == "" && b.prof != nil {
-		subagentModel = strings.TrimSpace(b.prof.SubagentModel)
-	}
-	if subagentModel == "" {
-		subagentModel = b.effectiveModel
-	}
-
-	childRun.Runtime = &types.RunRuntimeConfig{
-		DataDir: b.cfg.DataDir,
-		Profile: strings.TrimSpace(b.prof.ID),
-		Model:   subagentModel,
-	}
-
-	if err := implstore.SaveRun(b.cfg, childRun); err != nil {
-		return "", fmt.Errorf("save child run: %w", err)
-	}
-
-	// Add child run to session's run list so the supervisor discovers it.
-	sess, err := b.sessionStore.LoadSession(ctx, sessionID)
-	if err != nil {
-		return "", fmt.Errorf("load session for spawn: %w", err)
-	}
-	sess.Runs = append(sess.Runs, childRun.RunID)
-	if err := b.sessionStore.SaveSession(ctx, sess); err != nil {
-		return "", fmt.Errorf("save session for spawn: %w", err)
-	}
-
-	b.mustEmit(ctx, events.Event{
-		Type:    "subagent.spawned",
-		Message: fmt.Sprintf("Spawned worker agent #%d: %s", spawnIndex, goal),
-		Data: map[string]string{
-			"childRunId":  childRun.RunID,
-			"parentRunId": parentRunID,
-			"spawnIndex":  strconv.Itoa(spawnIndex),
-			"goal":        goal,
-			"model":       subagentModel,
-		},
-	})
-
-	return childRun.RunID, nil
 }

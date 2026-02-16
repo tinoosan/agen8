@@ -53,14 +53,12 @@ func (e *Emitter) Emit(ctx context.Context, event types.EventRecord) error {
 	if e == nil {
 		return fmt.Errorf("events emitter is nil")
 	}
-	if strings.TrimSpace(e.RunID) == "" {
-		return fmt.Errorf("events emitter runID is required")
-	}
 	if e.Sink == nil {
 		return fmt.Errorf("events emitter sink is required")
 	}
 	if err := validateEvent(event); err != nil {
 		return err
 	}
+	// RunID may be empty for daemon-level events (e.g. daemon.start when no bootstrap run).
 	return e.Sink.Emit(ctx, Message{RunID: e.RunID, Payload: event})
 }

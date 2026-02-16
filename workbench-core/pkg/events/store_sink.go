@@ -27,6 +27,10 @@ func (s StoreSink) Emit(ctx context.Context, msg Message) error {
 	if s.Store == nil {
 		return nil
 	}
+	// Daemon-level events (e.g. daemon.start when no bootstrap run) have no runID; skip persisting.
+	if strings.TrimSpace(runID) == "" {
+		return nil
+	}
 	ev := event
 	if strings.TrimSpace(ev.RunID) == "" {
 		ev.RunID = runID
