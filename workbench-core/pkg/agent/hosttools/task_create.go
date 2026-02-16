@@ -17,28 +17,6 @@ import (
 // The daemon wires this callback to create Run records and add them to the session.
 type SpawnWorkerFunc func(ctx context.Context, goal, sessionID, parentRunID string) (childRunID string, err error)
 
-type spawnSignalKey struct{}
-
-// WithSpawnSignal stores a callback in context that is fired each time a worker is successfully spawned.
-// The session uses this to detect when delegation has occurred.
-func WithSpawnSignal(ctx context.Context, fn func()) context.Context {
-	return context.WithValue(ctx, spawnSignalKey{}, fn)
-}
-
-type finalizationRunKey struct{}
-
-// WithFinalizationRun marks the run as a finalization run (resumed from delegated).
-// When set, task_create must not allow spawn_worker so the parent does not create new subagents.
-func WithFinalizationRun(ctx context.Context) context.Context {
-	return context.WithValue(ctx, finalizationRunKey{}, true)
-}
-
-// IsFinalizationRun returns true when the context is for a finalization run.
-func IsFinalizationRun(ctx context.Context) bool {
-	v, _ := ctx.Value(finalizationRunKey{}).(bool)
-	return v
-}
-
 // TaskCreateTool creates a DB-backed task.
 type TaskCreateTool struct {
 	Store           state.TaskStore
@@ -61,7 +39,7 @@ func (t *TaskCreateTool) Definition() llmtypes.Tool {
 		Type: "function",
 		Function: llmtypes.ToolFunction{
 			Name:        "task_create",
-			Description: "[TASKS] Create a new pending task in SQLite. You may set spawnWorker=true when you decide to delegate work to a worker agent, or when the user or task goal asks you to use subagents; when the goal requests subagents you MUST set spawnWorker=true and do not do the work yourself. spawnWorker creates an outstanding dependency; do not call final_answer on your coordination task until it is resolved (worker result reviewed via task_review). Do not use sleep or wait—process tasks as they come; the system schedules work. This is DB-routed (no /inbox file writes).",
+			Description: "[TASKS] Create a new pending task in SQLite. You may set spawnWorker=true when you decide to delegate work to a worker agent, or when the user or task goal asks you to use subagents; when the goal requests subagents you MUST set spawnWorker=true and do not do the work yourself. When workers finish, callback tasks are created for you to process with task_review; you may call final_answer on your coordination task when you have summarized. Do not use sleep or wait—process tasks as they come; the system schedules work. This is DB-routed (no /inbox file writes).",
 			// Keep this tool non-strict: strict mode requires (1) additionalProperties=false
 			// for each object and (2) every property to be required, which doesn't fit
 			// optional inputs/metadata maps.
@@ -97,7 +75,7 @@ func (t *TaskCreateTool) Definition() llmtypes.Tool {
 					},
 					"spawnWorker": map[string]any{
 						"type":        "boolean",
-						"description": "Set to true when you decide to delegate to a worker agent, or when the user or goal requests subagents (required when the goal requests subagents). Creates an outstanding dependency; do not call final_answer until it is resolved (worker result reviewed via task_review). Do not sleep or wait.",
+						"description": "Set to true when you decide to delegate to a worker agent, or when the user or goal requests subagents (required when the goal requests subagents). Callbacks will be created when workers finish; you may complete your coordination task when you have summarized. Do not sleep or wait.",
 					},
 				},
 				"required":             []any{"goal"},
@@ -183,9 +161,6 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	}
 
 	if payload.SpawnWorker {
-		if IsFinalizationRun(ctx) {
-			return types.HostOpRequest{}, fmt.Errorf("task_create: re-delegation is not allowed in finalization run; synthesize results from existing subagent outputs and call final_answer instead of spawning more workers")
-		}
 		if t.SpawnWorker == nil {
 			switch {
 			case t.IsCoordinator:
@@ -205,11 +180,6 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		task.AssignedTo = childRunID
 		task.Metadata["source"] = "spawn_worker"
 		task.Metadata["parentRunId"] = strings.TrimSpace(t.RunID)
-		// Fire spawn signal so the session's delegation detector knows a worker was spawned.
-		fn, hasSignal := ctx.Value(spawnSignalKey{}).(func())
-		if hasSignal && fn != nil {
-			fn()
-		}
 	}
 
 	if err := t.Store.CreateTask(ctx, task); err != nil {

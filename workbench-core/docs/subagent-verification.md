@@ -1,6 +1,6 @@
 # Subagent feature verification
 
-How to check that subagent **review gate**, **cleanup**, and **artifact paths** work as expected. This aligns with the [Execution model (PRD)](execution-model.md): sub-agent work is not complete until the parent approves; cleanup happens after approval (or final failure / escalation resolution) and must preserve audit history and indexed artifacts. The execution model uses state-based coordination: delegation creates dependencies, callbacks resolve them, completion requires zero unresolved dependencies; the system schedules tasks and agents never block.
+How to check that subagent **review gate**, **cleanup**, and **artifact paths** work as expected. This aligns with the [Execution model (PRD)](execution-model.md): sub-agent work is not complete until the parent approves; cleanup happens after approval (or final failure / escalation resolution) and must preserve audit history and indexed artifacts. Callbacks are the continuity mechanism: when workers finish, callback tasks are created and the parent processes them with task_review; the parent may complete its coordination task when it chooses (e.g. after delegating and summarizing). The system schedules tasks and agents never block.
 
 ## What to verify
 

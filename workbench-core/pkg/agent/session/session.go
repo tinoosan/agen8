@@ -11,11 +11,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/agent"
-	"github.com/tinoosan/workbench-core/pkg/agent/hosttools"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/emit"
@@ -532,79 +530,6 @@ func getTaskSource(t types.Task) string {
 	return ""
 }
 
-func (s *Session) hasPendingCallbacks(ctx context.Context) bool {
-	pending, err := s.listPendingTasks(ctx)
-	if err != nil {
-		return false
-	}
-	for _, t := range pending {
-		if getTaskSource(t) == "subagent.callback" {
-			return true
-		}
-	}
-	return false
-}
-
-// maybeResumeDelegatedTask checks whether all callbacks for this run have been processed.
-// If no pending callbacks remain, it finds any delegated tasks for this run and transitions
-// them back to pending so the parent agent can finalize.
-func (s *Session) maybeResumeDelegatedTask(ctx context.Context) {
-	if strings.TrimSpace(s.cfg.TeamID) != "" {
-		return
-	}
-	// Check if any callbacks are still pending.
-	pending, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
-		RunID:          s.cfg.RunID,
-		AssignedToType: "agent",
-		AssignedTo:     s.cfg.RunID,
-		Status:         []types.TaskStatus{types.TaskStatusPending},
-		SortBy:         "priority",
-		Limit:          s.cfg.MaxPending,
-	})
-	if err != nil {
-		return
-	}
-	for _, t := range pending {
-		if getTaskSource(t) == "subagent.callback" {
-			return // still have callbacks; do not resume
-		}
-	}
-	// Find delegated tasks for this run and resume them.
-	delegated, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
-		RunID:          s.cfg.RunID,
-		AssignedToType: "agent",
-		AssignedTo:     s.cfg.RunID,
-		Status:         []types.TaskStatus{types.TaskStatusDelegated},
-		Limit:          s.cfg.MaxPending,
-	})
-	if err != nil {
-		return
-	}
-	for _, t := range delegated {
-		taskID := strings.TrimSpace(t.TaskID)
-		if taskID == "" {
-			continue
-		}
-		if err := s.cfg.TaskStore.ResumeTask(ctx, taskID); err != nil {
-			s.logf("resume delegated task %s: %v", taskID, err)
-			continue
-		}
-		// Mark task so we can block re-delegation in the finalization run (parent must not spawn again).
-		if current, err := s.cfg.TaskStore.GetTask(ctx, taskID); err == nil {
-			if current.Metadata == nil {
-				current.Metadata = make(map[string]any)
-			}
-			current.Metadata["resumed_for_finalization"] = true
-			_ = s.cfg.TaskStore.UpdateTask(ctx, current)
-		}
-		s.emitBestEffort(ctx, events.Event{
-			Type:    "task.resumed",
-			Message: "Delegated task resumed for finalization",
-			Data:    map[string]string{"taskId": taskID},
-		})
-	}
-}
-
 func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 	if strings.TrimSpace(s.cfg.TeamID) == "" {
 		tasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
@@ -701,10 +626,6 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 }
 
 func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) error {
-	resumedAtEntry := false
-	if task.Metadata != nil {
-		resumedAtEntry, _ = task.Metadata["resumed_for_finalization"].(bool)
-	}
 	now := time.Now()
 	task.Status = types.TaskStatusActive
 	task.StartedAt = &now
@@ -862,89 +783,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		}
 	}
 
-	runCtx := ctx
-	if getTaskSource(task) != "subagent.callback" {
-		var spawned int32
-		spawnSignal := func() { atomic.AddInt32(&spawned, 1) }
-		runCtx = hosttools.WithSpawnSignal(runCtx, spawnSignal)
-		runCtx = agent.WithDelegationDetector(runCtx, func() bool {
-			return atomic.LoadInt32(&spawned) > 0
-		})
-		runCtx = agent.WithPendingCallbacksCheck(runCtx, func() bool {
-			return s.hasPendingCallbacks(ctx)
-		})
-		if resumedAtEntry {
-			runCtx = hosttools.WithFinalizationRun(runCtx)
-		}
-	}
-	runRes, err := runAgent.Run(runCtx, strings.TrimSpace(task.Goal))
-	if err == nil && runRes.Delegated {
-		resumedFlag := false
-		if task.Metadata != nil {
-			resumedFlag, _ = task.Metadata["resumed_for_finalization"].(bool)
-		}
-		// Finalization run: task was resumed from delegated; it must not re-delegate (spawn again).
-		// Complete as Succeeded with agent output (or synthesized summary) so the task ends cleanly.
-		if resumedFlag {
-			doneAt := time.Now()
-			summary := strings.TrimSpace(runRes.Text)
-			if summary == "" {
-				summary = "Finalization run; re-delegation blocked; subagent results already consolidated."
-			}
-			tr := types.TaskResult{
-				TaskID:       taskID,
-				Status:       types.TaskStatusSucceeded,
-				Summary:      summary,
-				CompletedAt:  &doneAt,
-				InputTokens:  cumulativeInputTokens,
-				OutputTokens: cumulativeOutputTokens,
-				TotalTokens:  cumulativeInputTokens + cumulativeOutputTokens,
-			}
-			if s.cfg.Events != nil {
-				data := map[string]string{
-					"taskId":  taskID,
-					"status":  string(types.TaskStatusSucceeded),
-					"profile": s.activeProfile.ID,
-				}
-				if g := truncateText(task.Goal, 100); g != "" {
-					data["goal"] = g
-				}
-				if summary != "" {
-					data["summary"] = summary
-				}
-				if tr.TotalTokens > 0 {
-					data["inputTokens"] = fmt.Sprintf("%d", tr.InputTokens)
-					data["outputTokens"] = fmt.Sprintf("%d", tr.OutputTokens)
-					data["totalTokens"] = fmt.Sprintf("%d", tr.TotalTokens)
-				}
-				s.emitBestEffort(ctx, events.Event{Type: "task.done", Message: "Task finished", Data: data})
-			}
-			if err := s.cfg.TaskStore.CompleteTask(ctx, taskID, tr); err != nil {
-				s.logf("complete task (re-delegate guard): %v", err)
-			}
-			task.Status = tr.Status
-			task.CompletedAt = tr.CompletedAt
-			task.Summary = tr.Summary
-			task.InputTokens = tr.InputTokens
-			task.OutputTokens = tr.OutputTokens
-			task.TotalTokens = tr.TotalTokens
-			_ = s.cfg.TaskStore.UpdateTask(ctx, task)
-			if s.cfg.Notifier != nil {
-				_ = s.cfg.Notifier.Notify(ctx, task, tr)
-			}
-			return nil
-		}
-		delErr := s.cfg.TaskStore.DelegateTask(ctx, taskID)
-		if delErr != nil {
-			s.logf("delegate task: %v", delErr)
-		}
-		s.emitBestEffort(ctx, events.Event{
-			Type:    "task.delegated",
-			Message: "Task delegated to workers",
-			Data:    map[string]string{"taskId": taskID},
-		})
-		return nil
-	}
+	runRes, err := runAgent.Run(ctx, strings.TrimSpace(task.Goal))
 	doneAt := time.Now()
 	totalTokens := cumulativeInputTokens + cumulativeOutputTokens
 	costUSD := 0.0
@@ -1111,11 +950,6 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		if err := s.cfg.Notifier.Notify(completeCtx, task, tr); err != nil {
 			s.emitBestEffort(completeCtx, events.Event{Type: "task.notify.error", Message: "Task notification failed", Data: map[string]string{"taskId": taskID, "error": err.Error()}})
 		}
-	}
-	// When the last callback for this run is completed, resume any delegated coordination
-	// tasks so the parent can finalize.
-	if getTaskSource(task) == "subagent.callback" {
-		s.maybeResumeDelegatedTask(completeCtx)
 	}
 	if s.cfg.SingleTask {
 		// Sub-agents spawned via spawn_worker or retry should not exit immediately;
@@ -1344,6 +1178,7 @@ func (s *Session) maybeEmitCoordinatorPolicyWarn(ctx context.Context, task types
 		return
 	}
 	// Soft guardrail: for user-originated coordinator tasks, emit warning when no delegation evidence exists.
+	// Delegation evidence = created tasks for another role, or spawn_worker tasks (callbacks will follow).
 	tasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
 		TeamID:   s.cfg.TeamID,
 		SortBy:   "created_at",
@@ -1369,9 +1204,6 @@ func (s *Session) maybeEmitCoordinatorPolicyWarn(ctx context.Context, task types
 		if strings.TrimSpace(candidate.TeamID) != s.cfg.TeamID {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(candidate.AssignedRole), s.cfg.RoleName) {
-			continue
-		}
 		if !strings.EqualFold(strings.TrimSpace(candidate.CreatedBy), s.cfg.RoleName) {
 			continue
 		}
@@ -1385,15 +1217,22 @@ func (s *Session) maybeEmitCoordinatorPolicyWarn(ctx context.Context, task types
 		if createdAt.After(end.Add(2 * time.Second)) {
 			continue
 		}
-		delegated = true
-		break
+		// Count as delegation: assigned to another role, or spawn_worker (callbacks created when workers finish).
+		if getTaskSource(candidate) == "spawn_worker" {
+			delegated = true
+			break
+		}
+		if !strings.EqualFold(strings.TrimSpace(candidate.AssignedRole), s.cfg.RoleName) {
+			delegated = true
+			break
+		}
 	}
 	if delegated {
 		return
 	}
 	s.emitBestEffort(ctx, events.Event{
 		Type:    "team.coordinator.policy.warn",
-		Message: "Coordinator completed a user task without delegation evidence",
+		Message: "Coordinator completed a user task without delegating to another role or spawning workers",
 		Data: map[string]string{
 			"taskId": task.TaskID,
 			"role":   s.cfg.RoleName,

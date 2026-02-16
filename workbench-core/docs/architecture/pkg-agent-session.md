@@ -1,9 +1,11 @@
 # Package: pkg/agent/session
 
 ## Purpose
-The `session` package is the orchestrator for task execution and lifecycle management. It manages an "inbox" of tasks, handling their progression from discovery to completion. It bridges the gap between the stateless `agent` loop and the persistent `store`, ensuring that subagent delegations are correctly tracked and resumed through heartbeats and callback processing.
+
+The `session` package is the orchestrator for task execution and lifecycle management. It manages an "inbox" of tasks, handling their progression from discovery to completion. It bridges the gap between the stateless `agent` loop and the persistent `store`, ensuring tasks are run to completion: when the parent spawns, the coordination task is completed (Succeeded) with the agent’s summary, and callbacks are created when subagents finish—no delegation state or resume.
 
 ## Exported Types/Functions
+
 - `Session`: The main coordinator struct for task execution.
 - `New(cfg Config)`: Initializes a new session with agent, store, and profile configuration.
 - `Session.Run(ctx context.Context)`: The entry point for processing the session's task inbox.
@@ -11,6 +13,7 @@ The `session` package is the orchestrator for task execution and lifecycle manag
 - `Config`: Configuration struct for session behavior, including delegation roles.
 
 ## Package Dependencies
+
 ```mermaid
 graph TD
     pkg_session["pkg/agent/session"] --> pkg_agent["pkg/agent"]
@@ -21,19 +24,21 @@ graph TD
 ```
 
 ## Task State Machine
+
 ```mermaid
 stateDiagram-v2
     [*] --> Pending: Task discovered in inbox
     Pending --> Active: runTask begins
-    Active --> Succeeded: final_answer received
+    Active --> Succeeded: final_answer or spawn (task completed)
     Active --> Failed: Error or run timeout
-    Active --> Delegated: Subagent spawned (agent_spawn)
-    Delegated --> Pending: All callbacks processed
     Succeeded --> [*]
     Failed --> [*]
 ```
 
-## Runtime Flow: Subagent Delegation
+Callback tasks are separate tasks (Pending → Active → Succeeded/Failed). Coordination tasks are not transitioned to a "Delegated" state.
+
+## Runtime Flow: Subagent Spawn and Callbacks
+
 ```mermaid
 sequenceDiagram
     participant Session as session.Session
@@ -42,20 +47,19 @@ sequenceDiagram
     participant SubAgent as Subagent Session
 
     Session->>Agent: Run(task)
-    Agent->>Store: task_create (Child Task)
-    Agent-->>Session: Return (Delegated=true)
-    Session->>Session: Mark task as Delegated
-    
-    Note over SubAgent: Subagent executes Child Task
-    SubAgent->>Store: Create Callback
-    
-    Session->>Session: Heartbeat detects Callback
-    Session->>Session: maybeResumeDelegatedTask
-    Session->>Session: Transition Parent to Pending
-    Session->>Agent: Run(task) with Resume Context
+    Agent->>Store: task_create (spawn_worker)
+    Agent-->>Session: Return (success, summary)
+    Session->>Store: CompleteTask (Succeeded)
+
+    Note over SubAgent: Subagent executes child task
+    SubAgent->>Store: Create Callback when done
+
+    Note over Session: Parent later picks up callback as normal task
+    Session->>Agent: Run(callback task)
 ```
 
 ## Invariants
-- A task in the `Delegated` state must not be processed by the parent agent until all its child callbacks are resolved.
-- Session heartbeats are the primary mechanism for detecting changes in the external task store (e.g., child completions).
-- The session must ensure that the VFS state and LLM history are correctly persisted to allow for task resumption.
+
+- When the parent spawns, its coordination task is completed (Succeeded); callbacks are normal tasks that the parent processes when they appear.
+- Session heartbeats are the primary mechanism for detecting changes in the external task store (e.g., new callback tasks).
+- The session must ensure that the VFS state and LLM history are correctly persisted where needed for task execution.

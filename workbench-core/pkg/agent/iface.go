@@ -68,9 +68,8 @@ type Agent interface {
 
 // RunResult is the finalized output of one agent execution.
 type RunResult struct {
-	Text             string
-	Artifacts        []string
-	Status           types.TaskStatus
-	Error            string
-	Delegated bool // When true, the parent delegated to workers; session should transition task to delegated state.
+	Text      string
+	Artifacts []string
+	Status    types.TaskStatus
+	Error     string
 }

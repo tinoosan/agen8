@@ -143,21 +143,19 @@ The parent must respond with one of:
 
 Parent coordination follows a **state-based model**. The agent reasons about goal state and dependencies, not about scheduling mechanics.
 
-- **Delegation creates dependencies.** When the parent delegates with `task_create(spawn_worker=true)`, that work is unresolved until the parent reviews it via task_review.
-- **Callbacks resolve dependencies.** Worker completion produces a callback task; the parent processes it with task_review (approve, retry, or escalate). Callbacks are normal tasks, not wait states.
-- **Completion requires zero unresolved dependencies.** The parent may call final_answer on its coordination task only when all delegated work has been resolved and reviewed and the goal is satisfied.
-- **The system schedules tasks; agents never block.** The parent must never use sleep, shell_exec sleep, or browser wait to wait for workers. If the parent burns tokens while "waiting", the scheduler is wrong, not the prompt: the coordination task must only be re-scheduled when dependency state changes (e.g. a callback arrived or a callback was completed), not when the run is merely idle (event-driven, not polling).
+- **The parent may call final_answer whenever it considers its coordination task done** (e.g. after delegating and summarizing). There is no requirement to wait for all callbacks before completing.
+- **Callbacks are the sole continuity mechanism.** When the parent spawns with `task_create(spawn_worker=true)`, the coordination task is completed as Succeeded with the agent’s summary. When workers finish, the system creates callback tasks; the parent processes them as normal tasks with task_review (approve, retry, or escalate). There is no "delegated" state that blocks completion or that gets "resumed."
+- **The system schedules tasks; agents never block.** The parent must never use sleep, shell_exec sleep, or browser wait to wait for workers. Process tasks as they come; callbacks appear when workers finish.
 
 ### 4.5 Task status invariants (store)
 
 To prevent coordination tasks from being re-queued after completion, the store enforces:
 
 - **Terminal never → pending.** A task in a terminal state (succeeded, failed, canceled) must never transition back to pending.
-- **CompleteTask** may only run when the task is active, pending, or delegated; it must not overwrite an already terminal task.
-- **ResumeTask** may only run when the task is delegated; it is idempotent when the task is already resumed or not delegated.
+- **CompleteTask** may only run when the task is active or pending; it must not overwrite an already terminal task.
 - **ReleaseLease** may only run when the task is active and must not move terminal tasks to pending.
 
-These invariants ensure exactly-once finalization: once a coordination task is completed, it cannot be re-claimed.
+Coordination tasks are completed (Succeeded) when the parent calls final_answer; they are not transitioned to a "delegated" state then resumed.
 
 ---
 
