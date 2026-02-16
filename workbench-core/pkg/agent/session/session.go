@@ -1141,6 +1141,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				"source":            "team.callback",
 				"callbackForTaskId": taskID,
 				"sourceRole":        strings.TrimSpace(s.cfg.RoleName),
+				"sourceRunID":       strings.TrimSpace(s.cfg.RunID),
 				"sourceTaskStatus":  string(tr.Status),
 			},
 		}
