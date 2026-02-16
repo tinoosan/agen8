@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/reflow/wordwrap"
-	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
@@ -22,8 +21,14 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
+// tailedEvent is one event from the events tail stream (RPC polling or store tail).
+type tailedEvent struct {
+	Event      types.EventRecord
+	NextOffset int64
+}
+
 type tailedEventMsg struct {
-	ev store.TailedEvent
+	ev tailedEvent
 }
 
 type tailErrMsg struct {
@@ -239,7 +244,7 @@ type monitorModel struct {
 	width                        int
 	height                       int
 	styles                       *monitorStyles
-	tailCh                       <-chan store.TailedEvent
+	tailCh                       <-chan tailedEvent
 	errCh                        <-chan error
 	cancel                       context.CancelFunc
 

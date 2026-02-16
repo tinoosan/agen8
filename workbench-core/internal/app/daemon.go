@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/cost"
@@ -137,15 +136,6 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 		return func(int, llmtypes.LLMUsage) {}
 	}
 	return tracker.Track
-}
-
-// daemonEventAppender adapts internal store.AppendEvent to events.StoreSink (daemon context).
-type daemonEventAppender struct {
-	cfg config.Config
-}
-
-func (s daemonEventAppender) AppendEvent(ctx context.Context, event types.EventRecord) error {
-	return implstore.AppendEvent(ctx, s.cfg, event)
 }
 
 func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run types.Run, taskStore state.TaskStore, emit func(context.Context, events.Event), wg *sync.WaitGroup) {

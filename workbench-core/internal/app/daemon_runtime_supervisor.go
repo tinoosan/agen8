@@ -15,14 +15,15 @@ import (
 	hosttools "github.com/tinoosan/workbench-core/pkg/agent/hosttools"
 	agentsession "github.com/tinoosan/workbench-core/pkg/agent/session"
 	"github.com/tinoosan/workbench-core/pkg/config"
-	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
-	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/emit"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
+	eventsvc "github.com/tinoosan/workbench-core/pkg/services/events"
+	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
+	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -33,6 +34,7 @@ type runtimeSupervisorConfig struct {
 	PollInterval     time.Duration
 	TaskService      pkgtask.TaskServiceForSupervisor
 	SessionService   pkgsession.Service
+	EventsStore      events.StoreAppender
 	MemoryStore      pkgstore.DailyMemoryStore
 	ConstructorStore pkgstore.ConstructorStateStore
 	LLMClient        llmtypes.LLMClient
@@ -48,6 +50,7 @@ type runtimeSupervisor struct {
 	pollInterval     time.Duration
 	taskService      pkgtask.TaskServiceForSupervisor
 	sessionService   pkgsession.Service
+	eventsStore      events.StoreAppender
 	memoryStore      pkgstore.DailyMemoryStore
 	constructorStore pkgstore.ConstructorStateStore
 	llmClient        llmtypes.LLMClient
@@ -112,6 +115,7 @@ func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 		pollInterval:     poll,
 		taskService:      cfg.TaskService,
 		sessionService:   cfg.SessionService,
+		eventsStore:      cfg.EventsStore,
 		memoryStore:      cfg.MemoryStore,
 		constructorStore: cfg.ConstructorStore,
 		llmClient:        cfg.LLMClient,
@@ -395,10 +399,14 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		return nil, err
 	}
 
+	store := s.eventsStore
+	if store == nil {
+		store = eventsvc.NewService(s.cfg)
+	}
 	emitter := &events.Emitter{
 		RunID: run.RunID,
 		Sink: events.StoreSink{
-			Store: daemonEventAppender{cfg: s.cfg},
+			Store: store,
 		},
 	}
 	orderedEmitter := emit.NewOrderedEmitter[events.Event](emitter)

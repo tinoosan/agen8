@@ -17,6 +17,7 @@ import (
 	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -78,6 +79,72 @@ func RunTeamMonitor(ctx context.Context, cfg config.Config, teamID string) error
 	return err
 }
 
+// eventsRPCListPaginated calls events.listPaginated via RPC (for use before model exists).
+func eventsRPCListPaginated(ctx context.Context, endpoint string, runID string, limit int, sortDesc bool, afterSeq int64) ([]types.EventRecord, int64, error) {
+	cli := protocol.TCPClient{Endpoint: strings.TrimSpace(endpoint), Timeout: 10 * time.Second}
+	params := protocol.EventsListPaginatedParams{
+		RunID:    runID,
+		Limit:    limit,
+		SortDesc: sortDesc,
+		AfterSeq: afterSeq,
+	}
+	var res protocol.EventsListPaginatedResult
+	if err := cli.Call(ctx, protocol.MethodEventsListPaginated, params, &res); err != nil {
+		return nil, 0, err
+	}
+	return res.Events, res.Next, nil
+}
+
+// eventsRPCLatestSeq calls events.latestSeq via RPC.
+func eventsRPCLatestSeq(ctx context.Context, endpoint string, runID string) (int64, error) {
+	cli := protocol.TCPClient{Endpoint: strings.TrimSpace(endpoint), Timeout: 5 * time.Second}
+	params := protocol.EventsLatestSeqParams{RunID: runID}
+	var res protocol.EventsLatestSeqResult
+	if err := cli.Call(ctx, protocol.MethodEventsLatestSeq, params, &res); err != nil {
+		return 0, err
+	}
+	return res.Seq, nil
+}
+
+// startEventsTailPoller runs a goroutine that polls events.listPaginated with AfterSeq and sends new events to the returned channel.
+func startEventsTailPoller(ctx context.Context, endpoint string, runID string, fromSeq int64) (<-chan tailedEvent, <-chan error) {
+	evCh := make(chan tailedEvent, 32)
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(evCh)
+		defer close(errCh)
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		lastSeq := fromSeq
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				evs, next, err := eventsRPCListPaginated(ctx, endpoint, runID, 100, false, lastSeq)
+				if err != nil {
+					select {
+					case errCh <- err:
+					default:
+					}
+					continue
+				}
+				for _, e := range evs {
+					select {
+					case <-ctx.Done():
+						return
+					case evCh <- tailedEvent{Event: e, NextOffset: next}:
+					}
+				}
+				if next > lastSeq {
+					lastSeq = next
+				}
+			}
+		}
+	}()
+	return evCh, errCh
+}
+
 func newMonitorModel(ctx context.Context, cfg config.Config, runID string, result *MonitorResult) (*monitorModel, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -119,26 +186,19 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	activityList.SetShowPagination(false)
 
 	tctx, cancel := context.WithCancel(ctx)
-	// Best-effort: load a small recent window for initial display without scanning the full log.
+	endpoint := monitorRPCEndpoint()
+	// Best-effort: load a small recent window via RPC.
 	var evs []types.EventRecord
-	{
-		filter := store.EventFilter{
-			RunID:    runID,
-			Limit:    200,
-			SortDesc: true, // newest first
-		}
-		if recent, _, err := store.ListEventsPaginated(cfg, filter); err == nil {
-			// Observe in chronological order (oldest -> newest) to preserve ordering semantics.
-			slices.Reverse(recent)
-			evs = recent
-		}
+	if recent, _, err := eventsRPCListPaginated(ctx, endpoint, runID, 200, true, 0); err == nil {
+		slices.Reverse(recent)
+		evs = recent
 	}
 
 	off := int64(0)
-	if latest, err := store.GetLatestEventSeq(cfg, runID); err == nil {
-		off = latest
+	if seq, err := eventsRPCLatestSeq(ctx, endpoint, runID); err == nil {
+		off = seq
 	}
-	tailCh, errCh := store.TailEvents(cfg, tctx, runID, off)
+	tailCh, errCh := startEventsTailPoller(tctx, endpoint, runID, off)
 
 	runStatus := types.RunStatusSucceeded
 	runSessionID := ""
@@ -318,17 +378,6 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 	teamCoordinatorRunID := ""
 	teamCoordinatorRole := ""
 	teamEventCursor := map[string]int64{}
-	for _, runID := range teamRunIDs {
-		if latest, err := store.GetLatestEventSeq(cfg, runID); err == nil {
-			start := latest - 150
-			if start < 0 {
-				start = 0
-			}
-			teamEventCursor[runID] = start
-		} else {
-			teamEventCursor[runID] = 0
-		}
-	}
 
 	m := &monitorModel{
 		ctx:                         ctx,

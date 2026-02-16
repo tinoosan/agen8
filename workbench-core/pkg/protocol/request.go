@@ -35,6 +35,10 @@ const (
 	MethodArtifactSearch      = "artifact.search"
 	MethodArtifactGet         = "artifact.get"
 	MethodRunListChildren     = "run.listChildren"
+
+	MethodEventsListPaginated = "events.listPaginated"
+	MethodEventsLatestSeq     = "events.latestSeq"
+	MethodEventsCount         = "events.count"
 )
 
 // ThreadCreateParams are the params for thread.create.

@@ -32,6 +32,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
+	eventsvc "github.com/tinoosan/workbench-core/pkg/services/events"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -376,7 +377,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			return fmt.Errorf("create history store for role %s: %w", role.Name, err)
 		}
 
-		orderedEmitter, err := newTeamOrderedEmitter(cfg, run.RunID, teamID, role.Name)
+		orderedEmitter, err := newTeamOrderedEmitter(eventsvc.NewService(cfg), run.RunID, teamID, role.Name)
 		if err != nil {
 			return fmt.Errorf("create emitter for role %s: %w", role.Name, err)
 		}
@@ -1056,11 +1057,11 @@ func ptrNowUTC() *time.Time {
 	return &now
 }
 
-func newTeamOrderedEmitter(cfg config.Config, runID, teamID, roleName string) (*emit.OrderedEmitter[events.Event], error) {
+func newTeamOrderedEmitter(store events.StoreAppender, runID, teamID, roleName string) (*emit.OrderedEmitter[events.Event], error) {
 	emitter := &events.Emitter{
 		RunID: runID,
 		Sink: events.StoreSink{
-			Store: daemonEventAppender{cfg: cfg},
+			Store: store,
 		},
 	}
 	ordered := emit.NewOrderedEmitter[events.Event](emitter)

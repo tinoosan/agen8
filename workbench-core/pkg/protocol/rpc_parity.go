@@ -288,3 +288,41 @@ type ModelListResult struct {
 	Providers []ModelProvider `json:"providers"`
 	Models    []ModelEntry    `json:"models"`
 }
+
+// EventsListPaginatedParams are the params for events.listPaginated.
+type EventsListPaginatedParams struct {
+	RunID     string   `json:"runId"`
+	Limit     int      `json:"limit,omitempty"`
+	Offset    int      `json:"offset,omitempty"`
+	AfterSeq  int64    `json:"afterSeq,omitempty"`
+	BeforeSeq int64    `json:"beforeSeq,omitempty"`
+	Types     []string `json:"types,omitempty"`
+	SortDesc  bool     `json:"sortDesc,omitempty"`
+}
+
+// EventsListPaginatedResult is the result of events.listPaginated.
+type EventsListPaginatedResult struct {
+	Events []types.EventRecord `json:"events"`
+	Next   int64               `json:"next,omitempty"`
+}
+
+// EventsLatestSeqParams are the params for events.latestSeq.
+type EventsLatestSeqParams struct {
+	RunID string `json:"runId"`
+}
+
+// EventsLatestSeqResult is the result of events.latestSeq.
+type EventsLatestSeqResult struct {
+	Seq int64 `json:"seq"`
+}
+
+// EventsCountParams are the params for events.count.
+type EventsCountParams struct {
+	RunID string   `json:"runId"`
+	Types []string `json:"types,omitempty"`
+}
+
+// EventsCountResult is the result of events.count.
+type EventsCountResult struct {
+	Count int `json:"count"`
+}

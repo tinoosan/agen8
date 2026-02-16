@@ -27,6 +27,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
+	eventsvc "github.com/tinoosan/workbench-core/pkg/services/events"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/store"
@@ -81,11 +82,12 @@ type DaemonBuilder struct {
 	currentModel   string
 	currentModelMu sync.Mutex
 
-	supervisor   *runtimeSupervisor
-	agentManager *pkgagent.Manager
-	wakeCh       chan struct{}
-	agentCfg     agent.AgentConfig
-	sess         *session.Session
+	eventsService *eventsvc.Service
+	supervisor    *runtimeSupervisor
+	agentManager  *pkgagent.Manager
+	wakeCh        chan struct{}
+	agentCfg      agent.AgentConfig
+	sess          *session.Session
 
 	runCtx      context.Context
 	stopSignals context.CancelFunc
@@ -161,14 +163,15 @@ func (b *DaemonBuilder) prepareBootstrap() error {
 	}
 
 	// No session or run created by daemon; all creation happens via RPC.
-	b.protocolInit = newProtocolInitializer(b.cfg, types.Run{}, b.protocolEnabled)
+	b.eventsService = eventsvc.NewService(b.cfg)
+	b.protocolInit = newProtocolInitializer(b.cfg, types.Run{}, b.protocolEnabled, b.eventsService)
 	b.protocolInit.Initialize(context.Background())
 	b.protocolSink = b.protocolInit.NewProtocolSink()
 
 	emitter := &events.Emitter{
 		RunID: "",
 		Sink: events.MultiSink{
-			events.StoreSink{Store: daemonEventAppender{cfg: b.cfg}},
+			events.StoreSink{Store: b.eventsService},
 			b.protocolSink,
 		},
 	}
@@ -264,6 +267,7 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 		Resolved:         b.resolved,
 		PollInterval:     b.poll,
 		TaskService:      b.taskService,
+		EventsStore:      b.eventsService,
 		MemoryStore:      b.memStore,
 		ConstructorStore: b.constructorStore,
 		LLMClient:        b.baseLLMClient,
@@ -288,6 +292,7 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 		AllowAnyThread: true,
 		TaskService:    b.taskManager,
 		Session:        b.sessionService,
+		EventsService:  b.eventsService,
 		NotifyCh:       b.protocolInit.NotifyCh(),
 		Index:          b.protocolInit.Index(),
 		Wake: func() {

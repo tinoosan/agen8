@@ -6,10 +6,10 @@ import (
 	"os"
 	"strings"
 
-	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/emit"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	eventsvc "github.com/tinoosan/workbench-core/pkg/services/events"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -20,12 +20,13 @@ type ProtocolInitializer struct {
 	run     types.Run
 	enabled bool
 
-	index    *protocol.Index
-	notifyCh chan protocol.Message
+	eventsLister *eventsvc.Service // optional; used for warmup when run has RunID
+	index        *protocol.Index
+	notifyCh     chan protocol.Message
 }
 
-func newProtocolInitializer(cfg config.Config, run types.Run, enabled bool) *ProtocolInitializer {
-	return &ProtocolInitializer{cfg: cfg, run: run, enabled: enabled}
+func newProtocolInitializer(cfg config.Config, run types.Run, enabled bool, eventsLister *eventsvc.Service) *ProtocolInitializer {
+	return &ProtocolInitializer{cfg: cfg, run: run, enabled: enabled, eventsLister: eventsLister}
 }
 
 func shouldEnableProtocolStdio(explicit bool, inTTY, outTTY bool) bool {
@@ -76,9 +77,12 @@ func (p *ProtocolInitializer) Initialize(ctx context.Context) {
 		protocol.WithThreadID(protocol.ThreadID(p.run.SessionID)),
 	)
 
+	if p.eventsLister == nil {
+		return
+	}
 	var after int64
 	for {
-		batch, next, err := implstore.ListEventsPaginated(p.cfg, implstore.EventFilter{
+		batch, next, err := p.eventsLister.ListPaginated(ctx, eventsvc.Filter{
 			RunID:    p.run.RunID,
 			Limit:    1000,
 			AfterSeq: after,

@@ -13,6 +13,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
+	eventsvc "github.com/tinoosan/workbench-core/pkg/services/events"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
@@ -27,10 +28,11 @@ type RPCServer struct {
 	run            types.Run
 	allowAnyThread bool
 
-	taskService  pkgtask.TaskServiceForRPC
-	session      pkgsession.Service
-	agentService pkgagent.ServiceForRPC
-	initErr      error
+	taskService   pkgtask.TaskServiceForRPC
+	session       pkgsession.Service
+	agentService  pkgagent.ServiceForRPC
+	eventsService EventsLister
+	initErr       error
 
 	notifyCh <-chan protocol.Message
 	index    *protocol.Index
@@ -60,10 +62,18 @@ type RPCServerConfig struct {
 	ControlSetReasoning func(ctx context.Context, threadID, target, effort, summary string) ([]string, error)
 	ControlSetProfile   func(ctx context.Context, threadID, target, profile string) ([]string, error)
 	AgentService        pkgagent.ServiceForRPC
+	EventsService       EventsLister // optional; for events.listPaginated, events.latestSeq, events.count
 	SessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error)
 	// Session logic
 	SessionResume func(ctx context.Context, threadID, sessionID string) ([]string, error)
 	SessionStop   func(ctx context.Context, threadID, sessionID string) ([]string, error)
+}
+
+// EventsLister is the subset of the events service used by RPC handlers.
+type EventsLister interface {
+	ListPaginated(ctx context.Context, filter eventsvc.Filter) ([]types.EventRecord, int64, error)
+	LatestSeq(ctx context.Context, runID string) (int64, error)
+	Count(ctx context.Context, filter eventsvc.Filter) (int, error)
 }
 
 type MethodHandler interface {
@@ -145,6 +155,7 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		taskService:         cfg.TaskService,
 		session:             sess,
 		agentService:        cfg.AgentService,
+		eventsService:       cfg.EventsService,
 		initErr:             initErr,
 		notifyCh:            cfg.NotifyCh,
 		index:               cfg.Index,
@@ -163,6 +174,7 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		registerControlHandlers,
 		registerTeamHandlers,
 		registerArtifactHandlers,
+		registerEventsHandlers,
 	)
 	if err != nil {
 		srv.initErr = errors.Join(srv.initErr, err)

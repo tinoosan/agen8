@@ -506,21 +506,22 @@ func (m *monitorModel) loadTeamEvents() tea.Cmd {
 	for runID, cursor := range m.teamEventCursor {
 		cursors[runID] = cursor
 	}
-	cfg := m.cfg
 	return func() tea.Msg {
 		all := make([]types.EventRecord, 0, 256)
 		next := map[string]int64{}
 		for _, runID := range runIDs {
 			after := cursors[runID]
-			batch, cursor, err := store.ListEventsPaginated(cfg, store.EventFilter{
+			var res protocol.EventsListPaginatedResult
+			if err := m.rpcRoundTrip(protocol.MethodEventsListPaginated, protocol.EventsListPaginatedParams{
 				RunID:    runID,
 				AfterSeq: after,
 				Limit:    200,
 				SortDesc: false,
-			})
-			if err != nil {
+			}, &res); err != nil {
 				continue
 			}
+			batch := res.Events
+			cursor := res.Next
 			if cursor > 0 {
 				next[runID] = cursor
 			} else {
