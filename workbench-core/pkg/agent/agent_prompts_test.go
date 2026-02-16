@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
+	"github.com/tinoosan/workbench-core/pkg/prompts"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -42,7 +43,7 @@ func TestSystemPromptSuppression(t *testing.T) {
 	t.Run("ExplicitCombination_IncludesBoth", func(t *testing.T) {
 		contextData := "<context>Session Data</context>"
 		// mimicking the fix in chat_setup.go/chat_tui.go
-		fullPrompt := DefaultSystemPrompt() + "\n\n" + contextData
+		fullPrompt := prompts.DefaultSystemPrompt() + "\n\n" + contextData
 
 		a, err := NewAgent(MockClient{}, MockExecutor{}, AgentConfig{Model: "test-model", SystemPrompt: fullPrompt})
 		if err != nil {

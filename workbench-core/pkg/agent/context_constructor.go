@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/events"
+	"github.com/tinoosan/workbench-core/pkg/prompts"
 	"github.com/tinoosan/workbench-core/pkg/skills"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/vfs"
@@ -27,7 +28,7 @@ type PromptBuilder struct {
 // SystemPrompt renders a compact prompt: base + memory.
 func (c *PromptBuilder) SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error) {
 	if strings.TrimSpace(basePrompt) == "" {
-		basePrompt = DefaultSystemPrompt()
+		basePrompt = prompts.DefaultSystemPrompt()
 	}
 
 	sections := []string{strings.TrimSpace(basePrompt)}

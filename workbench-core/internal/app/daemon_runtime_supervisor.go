@@ -21,6 +21,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/profile"
+	"github.com/tinoosan/workbench-core/pkg/prompts"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	eventsvc "github.com/tinoosan/workbench-core/pkg/services/events"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
@@ -485,9 +486,9 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	agentCfg.EnableWebSearch = s.resolved.WebSearchEnabled
 	isChildRun := strings.TrimSpace(run.ParentRunID) != ""
 	if isChildRun {
-		agentCfg.SystemPrompt = agent.DefaultSubAgentSystemPrompt()
+		agentCfg.SystemPrompt = prompts.DefaultSubAgentSystemPrompt()
 	} else {
-		agentCfg.SystemPrompt = agent.DefaultAutonomousSystemPrompt()
+		agentCfg.SystemPrompt = prompts.DefaultAutonomousSystemPrompt()
 	}
 	promptSource := agent.PromptSource(rt.Constructor)
 	if rt.Updater != nil {

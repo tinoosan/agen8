@@ -6,11 +6,12 @@ import (
 
 	hosttools "github.com/tinoosan/workbench-core/pkg/agent/hosttools"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
+	"github.com/tinoosan/workbench-core/pkg/prompts"
 )
 
 // DefaultConfig returns the default agent configuration.
 func DefaultConfig() AgentConfig {
-	return AgentConfig{SystemPrompt: DefaultSystemPrompt()}
+	return AgentConfig{SystemPrompt: prompts.DefaultSystemPrompt()}
 }
 
 // NewAgent constructs an agent from explicit dependencies and configuration.
@@ -22,7 +23,7 @@ func NewAgent(llmClient llmtypes.LLMClient, exec HostExecutor, cfg AgentConfig) 
 		return nil, errMissingExec()
 	}
 	if strings.TrimSpace(cfg.SystemPrompt) == "" {
-		cfg.SystemPrompt = DefaultSystemPrompt()
+		cfg.SystemPrompt = prompts.DefaultSystemPrompt()
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -62,7 +63,7 @@ func NewDefaultAgent(opts ...Option) (Agent, error) {
 		}
 	}
 	if strings.TrimSpace(cfg.SystemPrompt) == "" {
-		cfg.SystemPrompt = DefaultSystemPrompt()
+		cfg.SystemPrompt = prompts.DefaultSystemPrompt()
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err

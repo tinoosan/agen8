@@ -29,6 +29,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	"github.com/tinoosan/workbench-core/pkg/profile"
+	"github.com/tinoosan/workbench-core/pkg/prompts"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
@@ -471,7 +472,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		agentCfg.ReasoningSummary = roleReasoningSummary
 		agentCfg.ApprovalsMode = strings.TrimSpace(resolved.ApprovalsMode)
 		agentCfg.EnableWebSearch = resolved.WebSearchEnabled
-		agentCfg.SystemPrompt = agent.DefaultAutonomousSystemPrompt()
+		agentCfg.SystemPrompt = prompts.DefaultTeamModeSystemPrompt()
 		var promptSource agent.PromptSource = rt.Constructor
 		if rt.Updater != nil {
 			promptSource = rt.Updater
