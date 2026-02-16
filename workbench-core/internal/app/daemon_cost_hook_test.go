@@ -16,6 +16,7 @@ import (
 type memorySessionStore struct {
 	mu       sync.Mutex
 	sessions map[string]types.Session
+	runs     map[string]types.Run
 }
 
 func (m *memorySessionStore) LoadSession(_ context.Context, sessionID string) (types.Session, error) {
@@ -34,6 +35,16 @@ func (m *memorySessionStore) SaveSession(_ context.Context, s types.Session) err
 		m.sessions = map[string]types.Session{}
 	}
 	m.sessions[s.SessionID] = s
+	return nil
+}
+
+func (m *memorySessionStore) SaveRun(_ context.Context, run types.Run) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.runs == nil {
+		m.runs = map[string]types.Run{}
+	}
+	m.runs[run.RunID] = run
 	return nil
 }
 

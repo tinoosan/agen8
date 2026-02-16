@@ -264,7 +264,6 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 		Resolved:         b.resolved,
 		PollInterval:     b.poll,
 		TaskService:      b.taskService,
-		SessionStore:     b.sessionStore,
 		MemoryStore:      b.memStore,
 		ConstructorStore: b.constructorStore,
 		LLMClient:        b.baseLLMClient,
@@ -275,6 +274,7 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 	})
 	b.wakeCh = make(chan struct{}, 1)
 	b.sessionService = pkgsession.NewManager(b.cfg, b.sessionStore, b.supervisor)
+	b.supervisor.sessionService = b.sessionService
 	b.taskManager.SetRunLoader(b.sessionService)
 	b.agentManager = pkgagent.NewManager(b.sessionService, b.taskManager, b.taskManager)
 	b.agentManager.SetRuntimeController(b.supervisor)

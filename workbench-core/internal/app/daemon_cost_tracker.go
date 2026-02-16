@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
@@ -24,6 +23,7 @@ type CostTracker interface {
 type SessionLoadSaver interface {
 	LoadSession(ctx context.Context, sessionID string) (types.Session, error)
 	SaveSession(ctx context.Context, s types.Session) error
+	SaveRun(ctx context.Context, run types.Run) error
 }
 
 type defaultCostTracker struct {
@@ -136,7 +136,7 @@ func (t *defaultCostTracker) Track(step int, usage llmtypes.LLMUsage) {
 	if pricingKnown {
 		t.run.CostUSD += costUSD
 	}
-	if err := implstore.SaveRun(t.cfg, t.run); err != nil {
+	if err := t.sessionStore.SaveRun(context.Background(), t.run); err != nil {
 		log.Printf("daemon: warning: failed to save run: %v", err)
 		if t.emit != nil {
 			t.emit(context.Background(), events.Event{

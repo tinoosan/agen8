@@ -10,9 +10,20 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
+
+// newSupervisorTestSessionService creates a session service backed by SQLite for supervisor tests.
+func newSupervisorTestSessionService(t *testing.T, cfg config.Config) pkgsession.Service {
+	t.Helper()
+	sessionStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	return newTestSessionService(cfg, sessionStore)
+}
 
 func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
@@ -25,13 +36,15 @@ func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
 	}
 	taskSvc := pkgtask.NewManager(ts, nil)
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
 
 	var mu sync.Mutex
 	cancelCalled := false
 	done := make(chan struct{})
 	supervisor := &runtimeSupervisor{
-		cfg:          cfg,
-		taskService:  taskSvc,
+		cfg:            cfg,
+		taskService:    taskSvc,
+		sessionService: sessionSvc,
 		workers: map[string]*managedRuntime{
 			run.RunID: {
 				runID:     run.RunID,
@@ -58,7 +71,7 @@ func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 		t.Fatalf("expected worker cancel to be called")
 	}
 
-	loaded, err := implstore.LoadRun(cfg, run.RunID)
+	loaded, err := sessionSvc.LoadRun(context.Background(), run.RunID)
 	if err != nil {
 		t.Fatalf("LoadRun: %v", err)
 	}
@@ -91,11 +104,8 @@ func TestRuntimeSupervisor_StopSession_StopsOnlySessionRuns(t *testing.T) {
 		t.Fatalf("CreateSession B: %v", err)
 	}
 
-	sessionStore, err := implstore.NewSQLiteSessionStore(cfg)
-	if err != nil {
-		t.Fatalf("NewSQLiteSessionStore: %v", err)
-	}
-	if err := sessionStore.SaveSession(context.Background(), sessA); err != nil {
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	if err := sessionSvc.SaveSession(context.Background(), sessA); err != nil {
 		t.Fatalf("SaveSession A: %v", err)
 	}
 
@@ -107,9 +117,9 @@ func TestRuntimeSupervisor_StopSession_StopsOnlySessionRuns(t *testing.T) {
 
 	done := make(chan struct{})
 	supervisor := &runtimeSupervisor{
-		cfg:          cfg,
-		taskService:  taskSvc,
-		sessionStore: sessionStore,
+		cfg:            cfg,
+		taskService:    taskSvc,
+		sessionService: sessionSvc,
 		workers: map[string]*managedRuntime{
 			runA.RunID: {
 				runID:     runA.RunID,
@@ -128,7 +138,7 @@ func TestRuntimeSupervisor_StopSession_StopsOnlySessionRuns(t *testing.T) {
 		t.Fatalf("expected >=2 affected runs, got %v", affected)
 	}
 
-	loadedA, err := implstore.LoadRun(cfg, runA.RunID)
+	loadedA, err := sessionSvc.LoadRun(context.Background(), runA.RunID)
 	if err != nil {
 		t.Fatalf("LoadRun A: %v", err)
 	}
@@ -136,7 +146,7 @@ func TestRuntimeSupervisor_StopSession_StopsOnlySessionRuns(t *testing.T) {
 		t.Fatalf("runA status=%q want %q", loadedA.Status, types.RunStatusPaused)
 	}
 
-	loadedA2, err := implstore.LoadRun(cfg, runA2.RunID)
+	loadedA2, err := sessionSvc.LoadRun(context.Background(), runA2.RunID)
 	if err != nil {
 		t.Fatalf("LoadRun A2: %v", err)
 	}
@@ -144,7 +154,7 @@ func TestRuntimeSupervisor_StopSession_StopsOnlySessionRuns(t *testing.T) {
 		t.Fatalf("runA2 status=%q want %q", loadedA2.Status, types.RunStatusPaused)
 	}
 
-	loadedB, err := implstore.LoadRun(cfg, runB.RunID)
+	loadedB, err := sessionSvc.LoadRun(context.Background(), runB.RunID)
 	if err != nil {
 		t.Fatalf("LoadRun B: %v", err)
 	}
@@ -164,6 +174,7 @@ func TestRuntimeSupervisor_PauseRun_CancelsWorkerAndActiveTasks(t *testing.T) {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
 	}
 	taskSvc := pkgtask.NewManager(ts, nil)
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
 	now := time.Now().UTC()
 	if err := ts.CreateTask(context.Background(), types.Task{
 		TaskID:         "task-active",
@@ -182,8 +193,9 @@ func TestRuntimeSupervisor_PauseRun_CancelsWorkerAndActiveTasks(t *testing.T) {
 	cancelCalled := false
 	done := make(chan struct{})
 	supervisor := &runtimeSupervisor{
-		cfg:          cfg,
-		taskService:  taskSvc,
+		cfg:            cfg,
+		taskService:    taskSvc,
+		sessionService: sessionSvc,
 		workers: map[string]*managedRuntime{
 			run.RunID: {
 				runID:     run.RunID,
@@ -231,11 +243,9 @@ func TestApplySessionModel_SkipsChildRuns(t *testing.T) {
 		t.Fatalf("SaveRun child: %v", err)
 	}
 	sess.Runs = append(sess.Runs, childRun.RunID)
-	sessionStore, err := implstore.NewSQLiteSessionStore(cfg)
-	if err != nil {
-		t.Fatalf("NewSQLiteSessionStore: %v", err)
-	}
-	if err := sessionStore.SaveSession(context.Background(), sess); err != nil {
+
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
 
@@ -247,9 +257,9 @@ func TestApplySessionModel_SkipsChildRuns(t *testing.T) {
 
 	done := make(chan struct{})
 	supervisor := &runtimeSupervisor{
-		cfg:          cfg,
-		taskService:  taskSvc,
-		sessionStore: sessionStore,
+		cfg:            cfg,
+		taskService:    taskSvc,
+		sessionService: sessionSvc,
 		workers: map[string]*managedRuntime{
 			parentRun.RunID: {runID: parentRun.RunID, sessionID: sess.SessionID, cancel: func() {}, done: done},
 			childRun.RunID:  {runID: childRun.RunID, sessionID: sess.SessionID, cancel: func() {}, done: done},

@@ -39,7 +39,7 @@ func (t *TaskCreateTool) Definition() llmtypes.Tool {
 		Type: "function",
 		Function: llmtypes.ToolFunction{
 			Name:        "task_create",
-			Description: "[TASKS] Create a new pending task in SQLite. You may set spawnWorker=true when you decide to delegate work to a worker agent, or when the user or task goal asks you to use subagents; when the goal requests subagents you MUST set spawnWorker=true and do not do the work yourself. When workers finish, callback tasks are created for you to process with task_review; you may call final_answer on your coordination task when you have summarized. Do not use sleep or wait—process tasks as they come; the system schedules work. This is DB-routed (no /inbox file writes).",
+			Description: "[TASKS] Create a new pending task in SQLite. Use spawnWorker=true when breaking down a large task into smaller tasks (one task per distinct subtask), when you decide to delegate work to a worker, or when the user or goal asks for subagents; when the goal requests subagents you MUST set spawnWorker=true and do not do the work yourself. Examples: research tasks (e.g. research topic X and summarize), comparative analysis (compare A vs B), multi-step investigations (audit then document), parallelizable work (gather from doc X, doc Y). When workers finish, callbacks are created for you to process with task_review. After spawning, do not keep checking for work; callbacks will be provided when workers finish. Do not use sleep or wait—process tasks as they come. This is DB-routed (no /inbox file writes).",
 			// Keep this tool non-strict: strict mode requires (1) additionalProperties=false
 			// for each object and (2) every property to be required, which doesn't fit
 			// optional inputs/metadata maps.
@@ -75,7 +75,7 @@ func (t *TaskCreateTool) Definition() llmtypes.Tool {
 					},
 					"spawnWorker": map[string]any{
 						"type":        "boolean",
-						"description": "Set to true when you decide to delegate to a worker agent, or when the user or goal requests subagents (required when the goal requests subagents). In the goal, ask the worker to put deliverables in /deliverables (the system mounts that path for the worker; they should not create it). Callbacks will be created when workers finish; you may complete your coordination task when you have summarized. Do not sleep or wait.",
+						"description": "Set to true when breaking down a large task into smaller tasks (one per subtask), e.g. research, comparative analysis, audits, parallelizable work, or when the user or goal requests subagents (required when the goal requests subagents). In the goal, ask the worker to put deliverables in /deliverables. After spawning, do not poll or repeatedly check; callbacks will be provided when workers finish. Do not sleep or wait.",
 					},
 				},
 				"required":             []any{"goal"},

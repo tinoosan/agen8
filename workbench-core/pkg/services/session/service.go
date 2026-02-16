@@ -33,7 +33,9 @@ type Service interface {
 	// Runs
 	LoadRun(ctx context.Context, runID string) (types.Run, error)
 	SaveRun(ctx context.Context, run types.Run) error
+	StopRun(ctx context.Context, runID string, status string, errorMsg string) (types.Run, error)
 	ListRunsBySession(ctx context.Context, sessionID string) ([]types.Run, error)
+	ListRunsByStatus(ctx context.Context, statuses []string) ([]types.Run, error)
 	ListChildRuns(ctx context.Context, parentRunID string) ([]types.Run, error)
 	AddRunToSession(ctx context.Context, sessionID, runID string) (types.Session, error)
 

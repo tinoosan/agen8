@@ -56,6 +56,14 @@ func (s *SQLiteSessionStore) SaveRun(_ context.Context, run types.Run) error {
 	return SaveRun(s.Cfg, run)
 }
 
+func (s *SQLiteSessionStore) StopRun(_ context.Context, runID, status, errorMsg string) (types.Run, error) {
+	return StopRun(s.Cfg, runID, status, errorMsg)
+}
+
+func (s *SQLiteSessionStore) ListRunsByStatus(_ context.Context, statuses []string) ([]types.Run, error) {
+	return ListRunsByStatus(s.Cfg, statuses)
+}
+
 func (s *SQLiteSessionStore) ListChildRuns(_ context.Context, parentRunID string) ([]types.Run, error) {
 	return ListChildRuns(s.Cfg, parentRunID)
 }

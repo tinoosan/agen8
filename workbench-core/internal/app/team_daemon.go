@@ -310,6 +310,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		runLoopCancel:   runtimeLoopCancel,
 	}
 	sessionService := pkgsession.NewManager(cfg, sessionStore, teamSupervisor)
+	teamSupervisor.sessionService = sessionService
 	taskService := pkgtask.NewManager(taskStore, sessionService)
 	teamSupervisor.taskCreator = taskService
 	var memoryProvider agent.MemoryRecallProvider = &textMemoryAdapter{store: memStore}
@@ -1344,6 +1345,7 @@ func runTeamControlLoop(ctx context.Context, taskStore state.TaskStore, runtimes
 // and implements hosttools.ReviewSupervisor so team roles can retry and escalate via task_review.
 type teamRuntimeSupervisor struct {
 	cfg             config.Config
+	sessionService  pkgsession.Service
 	taskCreator     pkgtask.RetryEscalationCreator
 	runLoopCancelMu *sync.Mutex
 	runLoopCancel   map[string]context.CancelFunc
@@ -1381,7 +1383,9 @@ func (s *teamRuntimeSupervisor) EscalateTask(ctx context.Context, callbackTaskID
 	childRunID := strings.TrimSpace(data.SourceRunID)
 	if childRunID != "" {
 		_ = s.StopRun(childRunID)
-		_, _ = implstore.StopRun(s.cfg, childRunID, types.RunStatusFailed, "escalated")
+		if s.sessionService != nil {
+			_, _ = s.sessionService.StopRun(ctx, childRunID, types.RunStatusFailed, "escalated")
+		}
 	}
 	return nil
 }

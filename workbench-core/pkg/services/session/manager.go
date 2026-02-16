@@ -21,7 +21,9 @@ type Store interface {
 	pkgstore.SessionStore
 	LoadRun(ctx context.Context, runID string) (types.Run, error)
 	SaveRun(ctx context.Context, run types.Run) error
+	StopRun(ctx context.Context, runID string, status string, errorMsg string) (types.Run, error)
 	ListRunsBySession(ctx context.Context, sessionID string) ([]types.Run, error)
+	ListRunsByStatus(ctx context.Context, statuses []string) ([]types.Run, error)
 	ListChildRuns(ctx context.Context, parentRunID string) ([]types.Run, error)
 	AddRunToSession(ctx context.Context, sessionID, runID string) (types.Session, error)
 	ListActivities(ctx context.Context, runID string, limit, offset int) ([]types.Activity, error)
@@ -125,6 +127,16 @@ func (m *Manager) LoadRun(ctx context.Context, runID string) (types.Run, error) 
 // SaveRun delegates to the store.
 func (m *Manager) SaveRun(ctx context.Context, run types.Run) error {
 	return m.store.SaveRun(ctx, run)
+}
+
+// StopRun delegates to the store.
+func (m *Manager) StopRun(ctx context.Context, runID, status, errorMsg string) (types.Run, error) {
+	return m.store.StopRun(ctx, runID, status, errorMsg)
+}
+
+// ListRunsByStatus delegates to the store.
+func (m *Manager) ListRunsByStatus(ctx context.Context, statuses []string) ([]types.Run, error) {
+	return m.store.ListRunsByStatus(ctx, statuses)
 }
 
 // ListRunsBySession delegates to the store.

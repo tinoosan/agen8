@@ -55,6 +55,12 @@ func (m *mockStore) SaveRun(ctx context.Context, run types.Run) error {
 	m.runs[run.RunID] = run
 	return nil
 }
+func (m *mockStore) StopRun(ctx context.Context, runID, status, errorMsg string) (types.Run, error) {
+	return types.Run{}, nil
+}
+func (m *mockStore) ListRunsByStatus(ctx context.Context, statuses []string) ([]types.Run, error) {
+	return nil, nil
+}
 func (m *mockStore) ListChildRuns(ctx context.Context, parentRunID string) ([]types.Run, error) {
 	return nil, nil
 }

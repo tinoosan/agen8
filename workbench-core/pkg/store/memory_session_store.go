@@ -309,6 +309,68 @@ func (s *MemorySessionStore) ListRunsBySession(_ context.Context, sessionID stri
 	return out, nil
 }
 
+func (s *MemorySessionStore) StopRun(_ context.Context, runID, status, errorMsg string) (types.Run, error) {
+	if s == nil {
+		return types.Run{}, fmt.Errorf("session store not configured")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return types.Run{}, fmt.Errorf("runID is required")
+	}
+	if status != "succeeded" && status != "failed" && status != "canceled" {
+		return types.Run{}, fmt.Errorf("invalid status %q for StopRun", status)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.runs[runID]
+	if !ok {
+		return types.Run{}, fmt.Errorf("run %s not found: %w", runID, ErrNotFound)
+	}
+	if run.Status == "succeeded" || run.Status == "failed" || run.Status == "canceled" {
+		return types.Run{}, fmt.Errorf("run %s cannot be stopped due to invalid state %s", run.RunID, run.Status)
+	}
+	now := time.Now()
+	run.Status = status
+	run.FinishedAt = &now
+	if status == "failed" {
+		if errorMsg == "" {
+			return types.Run{}, fmt.Errorf("error message is required for failed runs")
+		}
+		run.Error = &errorMsg
+	} else if status == "canceled" {
+		if strings.TrimSpace(errorMsg) == "" {
+			errorMsg = "canceled"
+		}
+		run.Error = &errorMsg
+	} else {
+		run.Error = nil
+	}
+	s.runs[runID] = run
+	return run, nil
+}
+
+func (s *MemorySessionStore) ListRunsByStatus(_ context.Context, statuses []string) ([]types.Run, error) {
+	if s == nil {
+		return nil, fmt.Errorf("session store not configured")
+	}
+	if len(statuses) == 0 {
+		return nil, nil
+	}
+	statusSet := make(map[string]struct{}, len(statuses))
+	for _, st := range statuses {
+		statusSet[strings.TrimSpace(st)] = struct{}{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []types.Run
+	for _, run := range s.runs {
+		if _, ok := statusSet[strings.TrimSpace(run.Status)]; ok {
+			out = append(out, run)
+		}
+	}
+	return out, nil
+}
+
 func (s *MemorySessionStore) ListChildRuns(_ context.Context, parentRunID string) ([]types.Run, error) {
 	if s == nil {
 		return nil, fmt.Errorf("session store not configured")

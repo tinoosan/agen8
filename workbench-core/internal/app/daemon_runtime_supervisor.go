@@ -14,8 +14,9 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	hosttools "github.com/tinoosan/workbench-core/pkg/agent/hosttools"
 	agentsession "github.com/tinoosan/workbench-core/pkg/agent/session"
-	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/config"
+	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
+	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/emit"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
@@ -31,7 +32,7 @@ type runtimeSupervisorConfig struct {
 	Resolved         RunChatOptions
 	PollInterval     time.Duration
 	TaskService      pkgtask.TaskServiceForSupervisor
-	SessionStore     pkgstore.SessionReaderWriter
+	SessionService   pkgsession.Service
 	MemoryStore      pkgstore.DailyMemoryStore
 	ConstructorStore pkgstore.ConstructorStateStore
 	LLMClient        llmtypes.LLMClient
@@ -46,7 +47,7 @@ type runtimeSupervisor struct {
 	resolved         RunChatOptions
 	pollInterval     time.Duration
 	taskService      pkgtask.TaskServiceForSupervisor
-	sessionStore     pkgstore.SessionReaderWriter
+	sessionService   pkgsession.Service
 	memoryStore      pkgstore.DailyMemoryStore
 	constructorStore pkgstore.ConstructorStateStore
 	llmClient        llmtypes.LLMClient
@@ -87,7 +88,9 @@ func (n *subagentCleanupNotifier) Notify(ctx context.Context, task types.Task, t
 				if runID, ok := task.Metadata["sourceRunId"].(string); ok && strings.TrimSpace(runID) != "" {
 					runID = strings.TrimSpace(runID)
 					_ = n.supervisor.StopRun(runID)
-					_, _ = implstore.StopRun(n.supervisor.cfg, runID, types.RunStatusSucceeded, "")
+					if n.supervisor.sessionService != nil {
+						_, _ = n.supervisor.sessionService.StopRun(context.Background(), runID, types.RunStatusSucceeded, "")
+					}
 				}
 			}
 		}
@@ -108,7 +111,7 @@ func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 		resolved:         cfg.Resolved,
 		pollInterval:     poll,
 		taskService:      cfg.TaskService,
-		sessionStore:     cfg.SessionStore,
+		sessionService:   cfg.SessionService,
 		memoryStore:      cfg.MemoryStore,
 		constructorStore: cfg.ConstructorStore,
 		llmClient:        cfg.LLMClient,
@@ -165,15 +168,15 @@ func (s *runtimeSupervisor) stopAll() {
 }
 
 func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
-	if s == nil || s.sessionStore == nil {
+	if s == nil || s.sessionService == nil {
 		return nil
 	}
-	runs, err := implstore.ListRunsByStatus(s.cfg, []string{types.RunStatusRunning, types.RunStatusPaused})
+	runs, err := s.sessionService.ListRunsByStatus(ctx, []string{types.RunStatusRunning, types.RunStatusPaused})
 	if err != nil {
 		return err
 	}
 	for _, run := range runs {
-		sess, lerr := s.sessionStore.LoadSession(ctx, run.SessionID)
+		sess, lerr := s.sessionService.LoadSession(ctx, run.SessionID)
 		if lerr != nil {
 			log.Printf("daemon: load session for run %s: %v", run.RunID, lerr)
 			continue
@@ -214,7 +217,7 @@ func (s *runtimeSupervisor) ensureRun(ctx context.Context, sess types.Session, r
 	if runID == s.bootstrapRunID {
 		return nil
 	}
-	run, err := implstore.LoadRun(s.cfg, runID)
+	run, err := s.sessionService.LoadRun(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -271,7 +274,7 @@ func (s *runtimeSupervisor) ensureRun(ctx context.Context, sess types.Session, r
 }
 
 func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.Session, runID string) (*managedRuntime, error) {
-	run, err := implstore.LoadRun(s.cfg, runID)
+	run, err := s.sessionService.LoadRun(parent, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +387,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		strings.TrimSpace(s.resolved.ReasoningSummary),
 	)
 	run.Runtime.Model = model
-	_ = implstore.SaveRun(s.cfg, run)
+	_ = s.sessionService.SaveRun(parent, run)
 
 	traceStore := implstore.SQLiteTraceStore{Cfg: s.cfg, RunID: run.RunID}
 	historyStore, err := implstore.NewSQLiteHistoryStore(s.cfg, run.SessionID)
@@ -442,13 +445,13 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		PriceInPerMTokensUSD:  s.resolved.PriceInPerMTokensUSD,
 		PriceOutPerMTokensUSD: s.resolved.PriceOutPerMTokensUSD,
 		PersistRun: func(r types.Run) error {
-			return implstore.SaveRun(s.cfg, r)
+			return s.sessionService.SaveRun(context.Background(), r)
 		},
 		LoadSession: func(sessionID string) (types.Session, error) {
-			return s.sessionStore.LoadSession(context.Background(), sessionID)
+			return s.sessionService.LoadSession(context.Background(), sessionID)
 		},
 		SaveSession: func(session types.Session) error {
-			return s.sessionStore.SaveSession(context.Background(), session)
+			return s.sessionService.SaveSession(context.Background(), session)
 		},
 	})
 	if err != nil {
@@ -483,7 +486,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			model,
 			s.resolved.PriceInPerMTokensUSD,
 			s.resolved.PriceOutPerMTokensUSD,
-			s.sessionStore,
+			s.sessionService,
 			func() string {
 				currentModelMu.Lock()
 				defer currentModelMu.Unlock()
@@ -619,7 +622,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		})
 
 		syncRuntimeControls := func() {
-			loaded, err := s.sessionStore.LoadSession(workerCtx, strings.TrimSpace(run.SessionID))
+			loaded, err := s.sessionService.LoadSession(workerCtx, strings.TrimSpace(run.SessionID))
 			if err != nil {
 				return
 			}
@@ -691,7 +694,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 							Message: "Spawned worker completed its task",
 							Data:    map[string]string{"runId": run.RunID},
 						})
-						_, _ = implstore.StopRun(s.cfg, run.RunID, types.RunStatusSucceeded, "")
+						_, _ = s.sessionService.StopRun(context.Background(), run.RunID, types.RunStatusSucceeded, "")
 						s.mu.Lock()
 						delete(s.workers, run.RunID)
 						s.mu.Unlock()
@@ -736,7 +739,7 @@ func (s *runtimeSupervisor) PauseRun(runID string) error {
 	if runID == "" {
 		return fmt.Errorf("run id is required")
 	}
-	run, err := implstore.LoadRun(s.cfg, runID)
+	run, err := s.sessionService.LoadRun(context.Background(), runID)
 	if err != nil {
 		return err
 	}
@@ -762,7 +765,7 @@ func (s *runtimeSupervisor) PauseRun(runID string) error {
 	run.Status = types.RunStatusPaused
 	run.FinishedAt = nil
 	run.Error = nil
-	if err := implstore.SaveRun(s.cfg, run); err != nil {
+	if err := s.sessionService.SaveRun(context.Background(), run); err != nil {
 		return err
 	}
 
@@ -793,14 +796,14 @@ func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
 	if runID == "" {
 		return fmt.Errorf("run id is required")
 	}
-	run, err := implstore.LoadRun(s.cfg, runID)
+	run, err := s.sessionService.LoadRun(ctx, runID)
 	if err != nil {
 		return err
 	}
 	run.Status = types.RunStatusRunning
 	run.FinishedAt = nil
 	run.Error = nil
-	if err := implstore.SaveRun(s.cfg, run); err != nil {
+	if err := s.sessionService.SaveRun(ctx, run); err != nil {
 		return err
 	}
 
@@ -811,10 +814,10 @@ func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
 		worker.session.SetPaused(false)
 		return nil
 	}
-	if s.sessionStore == nil {
+	if s.sessionService == nil {
 		return nil
 	}
-	sess, err := s.sessionStore.LoadSession(ctx, strings.TrimSpace(run.SessionID))
+	sess, err := s.sessionService.LoadSession(ctx, strings.TrimSpace(run.SessionID))
 	if err != nil {
 		return err
 	}
@@ -829,14 +832,14 @@ func (s *runtimeSupervisor) StopRun(runID string) error {
 	if runID == "" {
 		return fmt.Errorf("run id is required")
 	}
-	run, err := implstore.LoadRun(s.cfg, runID)
+	run, err := s.sessionService.LoadRun(context.Background(), runID)
 	if err != nil {
 		return err
 	}
 	run.Status = types.RunStatusPaused
 	run.FinishedAt = nil
 	run.Error = nil
-	if err := implstore.SaveRun(s.cfg, run); err != nil {
+	if err := s.sessionService.SaveRun(context.Background(), run); err != nil {
 		return err
 	}
 
@@ -868,10 +871,10 @@ func (s *runtimeSupervisor) PauseSession(ctx context.Context, sessionID string) 
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
-	if s.sessionStore == nil {
+	if s.sessionService == nil {
 		return nil, fmt.Errorf("session store not configured")
 	}
-	sess, err := s.sessionStore.LoadSession(ctx, sessionID)
+	sess, err := s.sessionService.LoadSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -914,10 +917,10 @@ func (s *runtimeSupervisor) ResumeSession(ctx context.Context, sessionID string)
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
-	if s.sessionStore == nil {
+	if s.sessionService == nil {
 		return nil, fmt.Errorf("session store not configured")
 	}
-	sess, err := s.sessionStore.LoadSession(ctx, sessionID)
+	sess, err := s.sessionService.LoadSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -960,10 +963,10 @@ func (s *runtimeSupervisor) StopSession(ctx context.Context, sessionID string) (
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
-	if s.sessionStore == nil {
+	if s.sessionService == nil {
 		return nil, fmt.Errorf("session store not configured")
 	}
-	sess, err := s.sessionStore.LoadSession(ctx, sessionID)
+	sess, err := s.sessionService.LoadSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1070,7 +1073,7 @@ func (s *runtimeSupervisor) ApplySessionModel(ctx context.Context, sessionID, ta
 			continue
 		}
 		// Do not apply session model to child runs (sub-agents); they keep the model set at spawn.
-		wr, err := implstore.LoadRun(s.cfg, runID)
+		wr, err := s.sessionService.LoadRun(ctx, runID)
 		if err != nil {
 			continue
 		}
@@ -1094,7 +1097,7 @@ func (s *runtimeSupervisor) makeSpawnWorkerFunc(
 ) hosttools.SpawnWorkerFunc {
 	return func(ctx context.Context, goal, sessionID, parentRunID string) (string, error) {
 		// Count existing children to determine spawn index.
-		children, _ := implstore.ListChildRuns(s.cfg, parentRunID)
+		children, _ := s.sessionService.ListChildRuns(ctx, parentRunID)
 		spawnIndex := len(children) + 1
 
 		childRun := types.NewChildRun(parentRunID, goal, sessionID, spawnIndex)
@@ -1116,17 +1119,17 @@ func (s *runtimeSupervisor) makeSpawnWorkerFunc(
 			childRun.Runtime.Profile = parentRun.Runtime.Profile
 		}
 
-		if err := implstore.SaveRun(s.cfg, childRun); err != nil {
+		if err := s.sessionService.SaveRun(ctx, childRun); err != nil {
 			return "", fmt.Errorf("save child run: %w", err)
 		}
 
 		// Add child run to session's run list so the supervisor discovers it.
-		sess, err := s.sessionStore.LoadSession(ctx, sessionID)
+		sess, err := s.sessionService.LoadSession(ctx, sessionID)
 		if err != nil {
 			return "", fmt.Errorf("load session for spawn: %w", err)
 		}
 		sess.Runs = append(sess.Runs, childRun.RunID)
-		if err := s.sessionStore.SaveSession(ctx, sess); err != nil {
+		if err := s.sessionService.SaveSession(ctx, sess); err != nil {
 			return "", fmt.Errorf("save session for spawn: %w", err)
 		}
 
@@ -1165,7 +1168,9 @@ func (s *runtimeSupervisor) EscalateTask(ctx context.Context, callbackTaskID str
 	childRunID := strings.TrimSpace(data.SourceRunID)
 	if childRunID != "" {
 		_ = s.StopRun(childRunID)
-		_, _ = implstore.StopRun(s.cfg, childRunID, types.RunStatusFailed, "escalated")
+		if s.sessionService != nil {
+			_, _ = s.sessionService.StopRun(ctx, childRunID, types.RunStatusFailed, "escalated")
+		}
 	}
 	return nil
 }
