@@ -136,6 +136,45 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 	}
 }
 
+// updateInboxTaskStatus updates both m.inbox[taskID] and the matching entry in
+// m.inboxList (if present), then sets m.dirtyInbox so the inbox view re-renders.
+// Empty status/goal and zero startedAt are ignored.
+func (m *monitorModel) updateInboxTaskStatus(taskID, status, goal string, startedAt time.Time) {
+	if taskID == "" {
+		return
+	}
+	if m.inbox == nil {
+		m.inbox = make(map[string]taskState)
+	}
+	ts := m.inbox[taskID]
+	ts.TaskID = taskID
+	if status != "" {
+		ts.Status = status
+	}
+	if goal != "" {
+		ts.Goal = goal
+	}
+	if !startedAt.IsZero() {
+		ts.StartedAt = startedAt
+	}
+	m.inbox[taskID] = ts
+	for i := range m.inboxList {
+		if m.inboxList[i].TaskID == taskID {
+			if status != "" {
+				m.inboxList[i].Status = status
+			}
+			if goal != "" {
+				m.inboxList[i].Goal = goal
+			}
+			if !startedAt.IsZero() {
+				m.inboxList[i].StartedAt = startedAt
+			}
+			break
+		}
+	}
+	m.dirtyInbox = true
+}
+
 func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 	switch ev.Type {
 	case "task.queued":
@@ -143,39 +182,41 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		if taskID == "" {
 			return
 		}
-		m.inbox[taskID] = taskState{
-			TaskID: taskID,
-			Goal:   strings.TrimSpace(ev.Data["goal"]),
-			Status: string(types.TaskStatusPending),
-		}
+		m.updateInboxTaskStatus(taskID, string(types.TaskStatusPending), strings.TrimSpace(ev.Data["goal"]), time.Time{})
 	case "webhook.task.queued":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
 			return
 		}
-		m.inbox[taskID] = taskState{
-			TaskID: taskID,
-			Goal:   strings.TrimSpace(ev.Data["goal"]),
-			Status: string(types.TaskStatusPending),
-		}
+		m.updateInboxTaskStatus(taskID, string(types.TaskStatusPending), strings.TrimSpace(ev.Data["goal"]), time.Time{})
 	case "task.start":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
 			return
 		}
+		m.updateInboxTaskStatus(taskID, "active", strings.TrimSpace(ev.Data["goal"]), ev.Timestamp)
 		ts := m.inbox[taskID]
-		ts.TaskID = taskID
-		ts.Goal = strings.TrimSpace(ev.Data["goal"])
-		ts.Status = "active"
-		ts.StartedAt = ev.Timestamp
-		m.inbox[taskID] = ts
 		m.currentTask = &ts
 		m.setStatus("Thinking…")
+	case "task.delegated":
+		taskID := strings.TrimSpace(ev.Data["taskId"])
+		if taskID == "" {
+			return
+		}
+		m.updateInboxTaskStatus(taskID, "delegated", "", time.Time{})
+		if m.currentTask != nil && m.currentTask.TaskID == taskID {
+			m.currentTask = nil
+		}
 	case "task.done":
 		taskID := strings.TrimSpace(ev.Data["taskId"])
 		if taskID == "" {
 			return
 		}
+		status := strings.TrimSpace(ev.Data["status"])
+		if status == "" {
+			status = "succeeded"
+		}
+		m.updateInboxTaskStatus(taskID, status, "", time.Time{})
 		m.currentTask = nil
 		m.setStatusExpiring("✓ Done", 5*time.Second)
 		m.stats.tasksDone++
@@ -187,10 +228,9 @@ func (m *monitorModel) observeTaskEvent(ev types.EventRecord) {
 		if taskID == "" {
 			return
 		}
-		// Best-effort: clear any active task view; outbox panel is loaded via pagination.
+		m.updateInboxTaskStatus(taskID, "quarantined", "", time.Time{})
 		m.currentTask = nil
 		m.setStatusExpiring("⚠ Quarantined", 8*time.Second)
-		// Reload session stats and child runs on task completion/quarantine
 		m.sessionTotalsReloadScheduled = true
 		m.sessionTotalsReloadDebounce = 200 * time.Millisecond
 	}
@@ -221,7 +261,7 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 		item.Content = formatEventLine(ev)
 		m.appendAgentOutputItem(item)
 
-	case "task.queued", "task.start", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped":
+	case "task.queued", "webhook.task.queued", "task.start", "task.delegated", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped":
 		item.Type = "info"
 		for _, line := range formatTaskEventLines(ev) {
 			it := item

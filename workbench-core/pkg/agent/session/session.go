@@ -589,6 +589,14 @@ func (s *Session) maybeResumeDelegatedTask(ctx context.Context) {
 			s.logf("resume delegated task %s: %v", taskID, err)
 			continue
 		}
+		// Mark task so we can block re-delegation in the finalization run (parent must not spawn again).
+		if current, err := s.cfg.TaskStore.GetTask(ctx, taskID); err == nil {
+			if current.Metadata == nil {
+				current.Metadata = make(map[string]any)
+			}
+			current.Metadata["resumed_for_finalization"] = true
+			_ = s.cfg.TaskStore.UpdateTask(ctx, current)
+		}
 		s.emitBestEffort(ctx, events.Event{
 			Type:    "task.resumed",
 			Message: "Delegated task resumed for finalization",
@@ -693,6 +701,10 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 }
 
 func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) error {
+	resumedAtEntry := false
+	if task.Metadata != nil {
+		resumedAtEntry, _ = task.Metadata["resumed_for_finalization"].(bool)
+	}
 	now := time.Now()
 	task.Status = types.TaskStatusActive
 	task.StartedAt = &now
@@ -861,10 +873,69 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		runCtx = agent.WithPendingCallbacksCheck(runCtx, func() bool {
 			return s.hasPendingCallbacks(ctx)
 		})
+		if resumedAtEntry {
+			runCtx = hosttools.WithFinalizationRun(runCtx)
+		}
 	}
 	runRes, err := runAgent.Run(runCtx, strings.TrimSpace(task.Goal))
 	if err == nil && runRes.Delegated {
-		if delErr := s.cfg.TaskStore.DelegateTask(ctx, taskID); delErr != nil {
+		resumedFlag := false
+		if task.Metadata != nil {
+			resumedFlag, _ = task.Metadata["resumed_for_finalization"].(bool)
+		}
+		// Finalization run: task was resumed from delegated; it must not re-delegate (spawn again).
+		// Complete as Succeeded with agent output (or synthesized summary) so the task ends cleanly.
+		if resumedFlag {
+			doneAt := time.Now()
+			summary := strings.TrimSpace(runRes.Text)
+			if summary == "" {
+				summary = "Finalization run; re-delegation blocked; subagent results already consolidated."
+			}
+			tr := types.TaskResult{
+				TaskID:       taskID,
+				Status:       types.TaskStatusSucceeded,
+				Summary:      summary,
+				CompletedAt:  &doneAt,
+				InputTokens:  cumulativeInputTokens,
+				OutputTokens: cumulativeOutputTokens,
+				TotalTokens:  cumulativeInputTokens + cumulativeOutputTokens,
+			}
+			if s.cfg.Events != nil {
+				data := map[string]string{
+					"taskId":  taskID,
+					"status":  string(types.TaskStatusSucceeded),
+					"profile": s.activeProfile.ID,
+				}
+				if g := truncateText(task.Goal, 100); g != "" {
+					data["goal"] = g
+				}
+				if summary != "" {
+					data["summary"] = summary
+				}
+				if tr.TotalTokens > 0 {
+					data["inputTokens"] = fmt.Sprintf("%d", tr.InputTokens)
+					data["outputTokens"] = fmt.Sprintf("%d", tr.OutputTokens)
+					data["totalTokens"] = fmt.Sprintf("%d", tr.TotalTokens)
+				}
+				s.emitBestEffort(ctx, events.Event{Type: "task.done", Message: "Task finished", Data: data})
+			}
+			if err := s.cfg.TaskStore.CompleteTask(ctx, taskID, tr); err != nil {
+				s.logf("complete task (re-delegate guard): %v", err)
+			}
+			task.Status = tr.Status
+			task.CompletedAt = tr.CompletedAt
+			task.Summary = tr.Summary
+			task.InputTokens = tr.InputTokens
+			task.OutputTokens = tr.OutputTokens
+			task.TotalTokens = tr.TotalTokens
+			_ = s.cfg.TaskStore.UpdateTask(ctx, task)
+			if s.cfg.Notifier != nil {
+				_ = s.cfg.Notifier.Notify(ctx, task, tr)
+			}
+			return nil
+		}
+		delErr := s.cfg.TaskStore.DelegateTask(ctx, taskID)
+		if delErr != nil {
 			s.logf("delegate task: %v", delErr)
 		}
 		s.emitBestEffort(ctx, events.Event{

@@ -25,6 +25,20 @@ func WithSpawnSignal(ctx context.Context, fn func()) context.Context {
 	return context.WithValue(ctx, spawnSignalKey{}, fn)
 }
 
+type finalizationRunKey struct{}
+
+// WithFinalizationRun marks the run as a finalization run (resumed from delegated).
+// When set, task_create must not allow spawn_worker so the parent does not create new subagents.
+func WithFinalizationRun(ctx context.Context) context.Context {
+	return context.WithValue(ctx, finalizationRunKey{}, true)
+}
+
+// IsFinalizationRun returns true when the context is for a finalization run.
+func IsFinalizationRun(ctx context.Context) bool {
+	v, _ := ctx.Value(finalizationRunKey{}).(bool)
+	return v
+}
+
 // TaskCreateTool creates a DB-backed task.
 type TaskCreateTool struct {
 	Store           state.TaskStore
@@ -169,6 +183,9 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	}
 
 	if payload.SpawnWorker {
+		if IsFinalizationRun(ctx) {
+			return types.HostOpRequest{}, fmt.Errorf("task_create: re-delegation is not allowed in finalization run; synthesize results from existing subagent outputs and call final_answer instead of spawning more workers")
+		}
 		if t.SpawnWorker == nil {
 			switch {
 			case t.IsCoordinator:
@@ -189,7 +206,8 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		task.Metadata["source"] = "spawn_worker"
 		task.Metadata["parentRunId"] = strings.TrimSpace(t.RunID)
 		// Fire spawn signal so the session's delegation detector knows a worker was spawned.
-		if fn, ok := ctx.Value(spawnSignalKey{}).(func()); ok && fn != nil {
+		fn, hasSignal := ctx.Value(spawnSignalKey{}).(func())
+		if hasSignal && fn != nil {
 			fn()
 		}
 	}
