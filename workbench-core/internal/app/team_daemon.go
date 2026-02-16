@@ -37,7 +37,6 @@ import (
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/services/team"
 	"github.com/tinoosan/workbench-core/pkg/types"
-	"golang.org/x/sync/errgroup"
 )
 
 type teamRoleRuntime struct {
@@ -45,6 +44,63 @@ type teamRoleRuntime struct {
 	run     types.Run
 	sess    *session.Session
 	cleanup func()
+}
+
+// teamRoleRunControllerAdapter adapts *teamRoleRuntime to team.RoleRunController.
+type teamRoleRunControllerAdapter struct {
+	rt *teamRoleRuntime
+}
+
+func (a *teamRoleRunControllerAdapter) RunID() string   { return strings.TrimSpace(a.rt.run.RunID) }
+func (a *teamRoleRunControllerAdapter) SessionID() string { return strings.TrimSpace(a.rt.run.SessionID) }
+func (a *teamRoleRunControllerAdapter) SetPaused(paused bool) { a.rt.sess.SetPaused(paused) }
+func (a *teamRoleRunControllerAdapter) SetModel(ctx context.Context, model string) error {
+	return a.rt.sess.SetModel(ctx, model)
+}
+func (a *teamRoleRunControllerAdapter) SetReasoning(ctx context.Context, effort, summary string) error {
+	return a.rt.sess.SetReasoning(ctx, effort, summary)
+}
+
+// teamModelApplier applies model changes to team runtimes (implements team.ModelApplier).
+type teamModelApplier struct {
+	runtimes []teamRoleRuntime
+}
+
+func (a *teamModelApplier) ApplyModel(ctx context.Context, model, target string) ([]string, error) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil, fmt.Errorf("model is required")
+	}
+	target = strings.TrimSpace(target)
+	applied := make([]string, 0, len(a.runtimes))
+	for _, rt := range a.runtimes {
+		runID := strings.TrimSpace(rt.run.RunID)
+		role := strings.TrimSpace(rt.role.Name)
+		if target != "" && target != runID && target != role && target != "run:"+runID && target != "role:"+role {
+			continue
+		}
+		if err := rt.sess.SetModel(ctx, model); err != nil {
+			return nil, fmt.Errorf("set model for role %s: %w", rt.role.Name, err)
+		}
+		applied = append(applied, runID)
+	}
+	if target != "" && len(applied) == 0 {
+		return nil, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "target does not match any team role/run"}
+	}
+	return applied, nil
+}
+
+// teamRoleRunnerAdapter adapts a run func + cleanup to team.RoleRunner.
+type teamRoleRunnerAdapter struct {
+	run     func(context.Context) error
+	cleanup func()
+}
+
+func (a *teamRoleRunnerAdapter) Run(ctx context.Context) error {
+	if a.cleanup != nil {
+		defer a.cleanup()
+	}
+	return a.run(ctx)
 }
 
 // teamRuntimeController implements pkgagent.RuntimeController for team daemon pause/resume.
@@ -601,6 +657,27 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		}
 	}
 
+	runIDs := make([]string, len(runtimes))
+	for i := range runtimes {
+		runIDs[i] = strings.TrimSpace(runtimes[i].run.RunID)
+	}
+	controllers := make([]team.RoleRunController, len(runtimes))
+	for i := range runtimes {
+		controllers[i] = &teamRoleRunControllerAdapter{rt: &runtimes[i]}
+	}
+	applier := &teamModelApplier{runtimes: runtimes}
+	teamCtrl := team.NewController(team.ControllerConfig{
+		SessionService:          sessionService,
+		TaskStore:               taskService,
+		TaskCanceler:            taskService,
+		StateMgr:                stateMgr,
+		Runtimes:                controllers,
+		Applier:                 applier,
+		RunStopper:              teamSupervisor,
+		DefaultReasoningEffort:  strings.TrimSpace(resolved.ReasoningEffort),
+		DefaultReasoningSummary: strings.TrimSpace(resolved.ReasoningSummary),
+	})
+
 	var serverWG sync.WaitGroup
 	webhookAddr := strings.TrimSpace(resolved.WebhookAddr)
 	if webhookAddr != "" {
@@ -625,9 +702,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			taskService,
 			sessionService,
 			runtimes,
-			stateMgr,
-			&runtimeLoopCancelMu,
-			runtimeLoopCancel,
+			teamCtrl,
 		)
 		srv := NewRPCServer(srvCfg)
 		go func() {
@@ -642,7 +717,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		}
 	}
 
-	go runTeamControlLoop(runCtx, taskStore, runtimes, stateMgr)
+	go team.RunModelChangeLoop(runCtx, taskService, stateMgr, applier)
 	setupComplete = true
 
 	log.Printf("daemon: protocol control-plane ready at %s — attach with: workbench", strings.TrimSpace(resolved.RPCListen))
@@ -667,49 +742,37 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		}()
 	}
 
-	g, gctx := errgroup.WithContext(runCtx)
-	for _, rt := range runtimes {
-		rt := rt
-		g.Go(func() error {
-			defer func() {
-				if rt.cleanup != nil {
-					rt.cleanup()
-				}
-			}()
-			backoff := 2 * time.Second
-			for {
-				runLoopCtx, cancelRunLoop := context.WithCancel(gctx)
-				runtimeLoopCancelMu.Lock()
-				runtimeLoopCancel[strings.TrimSpace(rt.run.RunID)] = cancelRunLoop
-				runtimeLoopCancelMu.Unlock()
-				err := rt.sess.Run(runLoopCtx)
-				cancelRunLoop()
-				runtimeLoopCancelMu.Lock()
-				delete(runtimeLoopCancel, strings.TrimSpace(rt.run.RunID))
-				runtimeLoopCancelMu.Unlock()
-				if gctx.Err() != nil {
-					return nil
-				}
-				errMsg := "unknown error"
-				if err != nil {
-					errMsg = err.Error()
-				}
-				log.Printf("daemon [%s]: runner exited unexpectedly; restarting in %s: %s", rt.role.Name, backoff, errMsg)
-				time.Sleep(backoff)
-				if backoff < 60*time.Second {
-					backoff *= 2
-					if backoff > 60*time.Second {
-						backoff = 60 * time.Second
-					}
-				}
-			}
-		})
+	runners := make([]team.RoleRunner, len(runtimes))
+	for i := range runtimes {
+		rt := &runtimes[i]
+		runners[i] = &teamRoleRunnerAdapter{
+			run:     rt.sess.Run,
+			cleanup: rt.cleanup,
+		}
 	}
-	err = g.Wait()
+	registerCancel := func(runID string, cancel context.CancelFunc) {
+		runtimeLoopCancelMu.Lock()
+		runtimeLoopCancel[runID] = cancel
+		runtimeLoopCancelMu.Unlock()
+	}
+	err = team.RunRoleLoops(runCtx, runners, runIDs, registerCancel)
 	if runCtx.Err() != nil {
 		err = nil
 	}
 	serverWG.Wait()
+	return err
+}
+
+func mapTeamErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, team.ErrThreadNotFound) {
+		return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+	}
+	if errors.Is(err, team.ErrRunNotFound) {
+		return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
+	}
 	return err
 }
 
@@ -721,113 +784,17 @@ func buildTeamRPCServerConfig(
 	taskService pkgtask.TaskServiceForRPC,
 	sessionService pkgsession.Service,
 	runtimes []teamRoleRuntime,
-	stateMgr *team.StateManager,
-	runtimeLoopCancelMu *sync.Mutex,
-	runtimeLoopCancel map[string]context.CancelFunc,
+	teamCtrl *team.Controller,
 ) RPCServerConfig {
 	base.Session = sessionService
 
-	validThreadIDs := map[string]struct{}{}
-	if sessionID := strings.TrimSpace(coordinatorRun.SessionID); sessionID != "" {
-		validThreadIDs[sessionID] = struct{}{}
-	}
-	for _, rt := range runtimes {
-		if sessionID := strings.TrimSpace(rt.run.SessionID); sessionID != "" {
-			validThreadIDs[sessionID] = struct{}{}
-		}
-	}
-	isValidTeamThread := func(threadID string) bool {
-		threadID = strings.TrimSpace(threadID)
-		if threadID == "" {
-			return false
-		}
-		_, ok := validThreadIDs[threadID]
-		return ok
-	}
-	normalizeSessionScope := func(threadID, sessionID string) (string, error) {
-		threadID = strings.TrimSpace(threadID)
-		sessionID = strings.TrimSpace(sessionID)
-		if sessionID == "" {
-			sessionID = threadID
-		}
-		if !isValidTeamThread(sessionID) {
-			return "", &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-		}
-		return sessionID, nil
-	}
 	base.ControlSetModel = func(ctx context.Context, threadID, target, model string) ([]string, error) {
-		if !isValidTeamThread(threadID) {
-			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-		}
-		loadedSession, err := sessionService.LoadSession(ctx, strings.TrimSpace(threadID))
-		if err != nil || strings.TrimSpace(loadedSession.SessionID) != strings.TrimSpace(threadID) {
-			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-		}
-		loadedSession.ActiveModel = strings.TrimSpace(model)
-		ensureSessionReasoningForModel(&loadedSession, loadedSession.ActiveModel, strings.TrimSpace(resolved.ReasoningEffort), strings.TrimSpace(resolved.ReasoningSummary))
-		if err := sessionService.SaveSession(ctx, loadedSession); err != nil {
-			return nil, err
-		}
-		applied, err := requestTeamModelChange(ctx, taskService, runtimes, stateMgr, model, target, "rpc.control.setModel")
-		if err != nil {
-			return nil, err
-		}
-		for i := range runtimes {
-			runID := strings.TrimSpace(runtimes[i].run.RunID)
-			if runID == "" {
-				continue
-			}
-			if len(applied) != 0 {
-				match := false
-				for _, id := range applied {
-					if strings.TrimSpace(id) == runID {
-						match = true
-						break
-					}
-				}
-				if !match {
-					continue
-				}
-			}
-			_ = runtimes[i].sess.SetReasoning(ctx, loadedSession.ReasoningEffort, loadedSession.ReasoningSummary)
-		}
-		return applied, nil
+		applied, err := teamCtrl.SetModel(ctx, threadID, target, model)
+		return applied, mapTeamErr(err)
 	}
 	base.ControlSetReasoning = func(ctx context.Context, threadID, target, effort, summary string) ([]string, error) {
-		threadID = strings.TrimSpace(threadID)
-		if !isValidTeamThread(threadID) {
-			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-		}
-		loadedSession, err := sessionService.LoadSession(ctx, threadID)
-		if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
-			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-		}
-		effort = strings.ToLower(strings.TrimSpace(effort))
-		summary = normalizeReasoningSummaryValue(summary)
-		storeSessionReasoningPreference(&loadedSession, strings.TrimSpace(loadedSession.ActiveModel), effort, summary)
-		if err := sessionService.SaveSession(ctx, loadedSession); err != nil {
-			return nil, err
-		}
-
-		target = strings.TrimSpace(target)
-		applied := make([]string, 0, len(runtimes))
-		for i := range runtimes {
-			runID := strings.TrimSpace(runtimes[i].run.RunID)
-			if runID == "" {
-				continue
-			}
-			if target != "" && target != threadID && target != runID {
-				continue
-			}
-			if err := runtimes[i].sess.SetReasoning(ctx, effort, summary); err != nil {
-				return applied, err
-			}
-			applied = append(applied, runID)
-		}
-		if target != "" && target != threadID && len(applied) == 0 {
-			return nil, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
-		}
-		return applied, nil
+		applied, err := teamCtrl.SetReasoning(ctx, threadID, target, effort, summary)
+		return applied, mapTeamErr(err)
 	}
 	base.ControlSetProfile = func(_ context.Context, _ string, _, _ string) ([]string, error) {
 		return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is unavailable in team mode"}
@@ -840,160 +807,17 @@ func buildTeamRPCServerConfig(
 	teamAgentManager := pkgagent.NewManager(sessionService, taskService, taskService)
 	teamAgentManager.SetRuntimeController(teamController)
 	base.AgentService = teamAgentManager
-	base.SessionPause = func(_ context.Context, threadID, sessionID string) ([]string, error) {
-		if !isValidTeamThread(threadID) {
-			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-		}
-		if _, err := normalizeSessionScope(threadID, sessionID); err != nil {
-			return nil, err
-		}
-		affected := make([]string, 0, len(runtimes))
-		var mu sync.Mutex
-		var wg sync.WaitGroup
-		errs := make([]string, 0, len(runtimes))
-		for i := range runtimes {
-			rt := runtimes[i]
-			runID := strings.TrimSpace(rt.run.RunID)
-			if runID == "" {
-				continue
-			}
-			wg.Add(1)
-			go func(runtime teamRoleRuntime, rid string) {
-				defer wg.Done()
-				loaded, err := sessionService.LoadRun(context.Background(), rid)
-				if err == nil {
-					loaded.Status = types.RunStatusPaused
-					loaded.FinishedAt = nil
-					loaded.Error = nil
-					err = sessionService.SaveRun(context.Background(), loaded)
-				}
-				if err != nil {
-					mu.Lock()
-					errs = append(errs, rid+": "+err.Error())
-					mu.Unlock()
-					return
-				}
-				runtime.sess.SetPaused(true)
-				if cerr := cancelActiveTasksForRun(context.Background(), taskService, rid, "run paused"); cerr != nil {
-					mu.Lock()
-					errs = append(errs, rid+": "+cerr.Error())
-					mu.Unlock()
-					return
-				}
-				mu.Lock()
-				affected = append(affected, rid)
-				mu.Unlock()
-			}(rt, runID)
-		}
-		wg.Wait()
-		if len(errs) != 0 {
-			return affected, fmt.Errorf("pause session partial failure: %s", strings.Join(errs, "; "))
-		}
-		return affected, nil
+	base.SessionPause = func(ctx context.Context, threadID, sessionID string) ([]string, error) {
+		affected, err := teamCtrl.PauseRuns(ctx, threadID, sessionID)
+		return affected, mapTeamErr(err)
 	}
-	base.SessionResume = func(_ context.Context, threadID, sessionID string) ([]string, error) {
-		if !isValidTeamThread(threadID) {
-			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-		}
-		if _, err := normalizeSessionScope(threadID, sessionID); err != nil {
-			return nil, err
-		}
-		affected := make([]string, 0, len(runtimes))
-		var mu sync.Mutex
-		var wg sync.WaitGroup
-		errs := make([]string, 0, len(runtimes))
-		for i := range runtimes {
-			rt := runtimes[i]
-			runID := strings.TrimSpace(rt.run.RunID)
-			if runID == "" {
-				continue
-			}
-			wg.Add(1)
-			go func(runtime teamRoleRuntime, rid string) {
-				defer wg.Done()
-				loaded, err := sessionService.LoadRun(context.Background(), rid)
-				if err == nil {
-					loaded.Status = types.RunStatusRunning
-					loaded.FinishedAt = nil
-					loaded.Error = nil
-					err = sessionService.SaveRun(context.Background(), loaded)
-				}
-				if err != nil {
-					mu.Lock()
-					errs = append(errs, rid+": "+err.Error())
-					mu.Unlock()
-					return
-				}
-				runtime.sess.SetPaused(false)
-				mu.Lock()
-				affected = append(affected, rid)
-				mu.Unlock()
-			}(rt, runID)
-		}
-		wg.Wait()
-		if len(errs) != 0 {
-			return affected, fmt.Errorf("resume session partial failure: %s", strings.Join(errs, "; "))
-		}
-		return affected, nil
+	base.SessionResume = func(ctx context.Context, threadID, sessionID string) ([]string, error) {
+		affected, err := teamCtrl.ResumeRuns(ctx, threadID, sessionID)
+		return affected, mapTeamErr(err)
 	}
-	base.SessionStop = func(_ context.Context, threadID, sessionID string) ([]string, error) {
-		if !isValidTeamThread(threadID) {
-			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-		}
-		if _, err := normalizeSessionScope(threadID, sessionID); err != nil {
-			return nil, err
-		}
-		affected := make([]string, 0, len(runtimes))
-		var mu sync.Mutex
-		var wg sync.WaitGroup
-		errs := make([]string, 0, len(runtimes))
-		for i := range runtimes {
-			rt := runtimes[i]
-			runID := strings.TrimSpace(rt.run.RunID)
-			if runID == "" {
-				continue
-			}
-			wg.Add(1)
-			go func(runtime teamRoleRuntime, rid string) {
-				defer wg.Done()
-				loaded, err := sessionService.LoadRun(context.Background(), rid)
-				if err == nil {
-					loaded.Status = types.RunStatusPaused
-					loaded.FinishedAt = nil
-					loaded.Error = nil
-					err = sessionService.SaveRun(context.Background(), loaded)
-				}
-				if err != nil {
-					mu.Lock()
-					errs = append(errs, rid+": "+err.Error())
-					mu.Unlock()
-					return
-				}
-				runtime.sess.SetPaused(true)
-				if runtimeLoopCancelMu != nil {
-					runtimeLoopCancelMu.Lock()
-					cancel := runtimeLoopCancel[rid]
-					runtimeLoopCancelMu.Unlock()
-					if cancel != nil {
-						cancel()
-					}
-				}
-				if serr := cancelActiveTasksForRun(context.Background(), taskService, rid, "run stopped"); serr != nil {
-					mu.Lock()
-					errs = append(errs, rid+": "+serr.Error())
-					mu.Unlock()
-					return
-				}
-				mu.Lock()
-				affected = append(affected, rid)
-				mu.Unlock()
-			}(rt, runID)
-		}
-		wg.Wait()
-		if len(errs) != 0 {
-			return affected, fmt.Errorf("stop session partial failure: %s", strings.Join(errs, "; "))
-		}
-		return affected, nil
+	base.SessionStop = func(ctx context.Context, threadID, sessionID string) ([]string, error) {
+		affected, err := teamCtrl.StopRuns(ctx, threadID, sessionID)
+		return affected, mapTeamErr(err)
 	}
 	return base
 }
@@ -1163,91 +987,6 @@ func resolveTeamModel(existing *team.Manifest, teamCfg *profile.TeamConfig, reso
 		}
 	}
 	return strings.TrimSpace(resolved.Model)
-}
-
-func applyTeamModel(ctx context.Context, runtimes []teamRoleRuntime, model string, target string) ([]string, error) {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return nil, fmt.Errorf("model is required")
-	}
-	target = strings.TrimSpace(target)
-	applied := make([]string, 0, len(runtimes))
-	for _, rt := range runtimes {
-		runID := strings.TrimSpace(rt.run.RunID)
-		role := strings.TrimSpace(rt.role.Name)
-		if target != "" && target != runID && target != role && target != "run:"+runID && target != "role:"+role {
-			continue
-		}
-		if err := rt.sess.SetModel(ctx, model); err != nil {
-			return nil, fmt.Errorf("set model for role %s: %w", rt.role.Name, err)
-		}
-		applied = append(applied, runID)
-	}
-	if target != "" && len(applied) == 0 {
-		return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "target does not match any team role/run"}
-	}
-	return applied, nil
-}
-
-func requestTeamModelChange(ctx context.Context, taskStore state.TaskStore, runtimes []teamRoleRuntime, stateMgr *team.StateManager, model string, target string, reason string) ([]string, error) {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return nil, fmt.Errorf("model is required")
-	}
-	target = strings.TrimSpace(target)
-	if target != "" {
-		appliedTo, err := applyTeamModel(ctx, runtimes, model, target)
-		if err != nil {
-			_ = stateMgr.MarkModelFailed(model, err)
-			return nil, err
-		}
-		return appliedTo, stateMgr.MarkModelApplied(model)
-	}
-	teamID := stateMgr.ManifestSnapshot().TeamID
-	if team.IsTeamIdle(ctx, taskStore, teamID) {
-		appliedTo, err := applyTeamModel(ctx, runtimes, model, "")
-		if err != nil {
-			_ = stateMgr.MarkModelFailed(model, err)
-			return nil, err
-		}
-		return appliedTo, stateMgr.MarkModelApplied(model)
-	}
-	if err := stateMgr.QueueModelChange(model, reason); err != nil {
-		return nil, err
-	}
-	return []string{}, nil
-}
-
-func runTeamControlLoop(ctx context.Context, taskStore state.TaskStore, runtimes []teamRoleRuntime, stateMgr *team.StateManager) {
-	if stateMgr == nil {
-		return
-	}
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			manifest := stateMgr.ManifestSnapshot()
-			if manifest.ModelChange != nil &&
-				strings.EqualFold(strings.TrimSpace(manifest.ModelChange.Status), "pending") &&
-				team.IsTeamIdle(ctx, taskStore, manifest.TeamID) {
-				model := strings.TrimSpace(manifest.ModelChange.RequestedModel)
-				if model == "" {
-					continue
-				}
-				if _, err := applyTeamModel(ctx, runtimes, model, ""); err != nil {
-					_ = stateMgr.MarkModelFailed(model, err)
-					log.Printf("daemon: apply queued team model failed: %v", err)
-					continue
-				}
-				_ = stateMgr.MarkModelApplied(model)
-				log.Printf("daemon: applied queued team model: %s", model)
-			}
-		}
-	}
 }
 
 // teamRuntimeSupervisor adapts the team daemon's runtime management to the service interface

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -77,6 +76,17 @@ func TestBuildTeamRPCServerConfig_AcceptsRoleSessionThread(t *testing.T) {
 	_ = memStore.SaveSession(context.Background(), types.Session{SessionID: "coord-sess"})
 	_ = memStore.SaveSession(context.Background(), types.Session{SessionID: "worker-sess"})
 	sessionSvc := newTestSessionService(cfg, memStore)
+	runtimes := []teamRoleRuntime{
+		{run: types.Run{SessionID: "worker-sess", RunID: "worker-run"}},
+	}
+	controllers := make([]team.RoleRunController, len(runtimes))
+	for i := range runtimes {
+		controllers[i] = &teamRoleRunControllerAdapter{rt: &runtimes[i]}
+	}
+	teamCtrl := team.NewController(team.ControllerConfig{
+		SessionService: sessionSvc,
+		Runtimes:       controllers,
+	})
 	srvCfg := buildTeamRPCServerConfig(
 		RPCServerConfig{},
 		cfg,
@@ -84,12 +94,8 @@ func TestBuildTeamRPCServerConfig_AcceptsRoleSessionThread(t *testing.T) {
 		types.Run{SessionID: "coord-sess", RunID: "coord-run"},
 		nil,
 		sessionSvc,
-		[]teamRoleRuntime{
-			{run: types.Run{SessionID: "worker-sess", RunID: "worker-run"}},
-		},
-		nil,
-		&sync.Mutex{},
-		map[string]context.CancelFunc{},
+		runtimes,
+		teamCtrl,
 	)
 
 	if srvCfg.AgentService == nil {
@@ -118,6 +124,10 @@ func TestBuildTeamRPCServerConfig_RejectsUnknownThread(t *testing.T) {
 	memStore := store.NewMemorySessionStore()
 	_ = memStore.SaveSession(context.Background(), types.Session{SessionID: "coord-sess"})
 	sessionSvc := newTestSessionService(cfg, memStore)
+	teamCtrl := team.NewController(team.ControllerConfig{
+		SessionService: sessionSvc,
+		Runtimes:       nil,
+	})
 	srvCfg := buildTeamRPCServerConfig(
 		RPCServerConfig{},
 		cfg,
@@ -126,9 +136,7 @@ func TestBuildTeamRPCServerConfig_RejectsUnknownThread(t *testing.T) {
 		nil,
 		sessionSvc,
 		nil,
-		nil,
-		&sync.Mutex{},
-		map[string]context.CancelFunc{},
+		teamCtrl,
 	)
 
 	_, err := srvCfg.ControlSetModel(context.Background(), "missing-thread", "", "openai/gpt-5-mini")
