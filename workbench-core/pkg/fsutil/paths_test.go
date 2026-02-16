@@ -118,3 +118,24 @@ func TestGetSubagentDeliverablesDir(t *testing.T) {
 		t.Fatalf("GetSubagentDeliverablesDir = %q, want %q", got, want)
 	}
 }
+
+func TestGetTasksDir(t *testing.T) {
+	dataDir := "/var/data/workbench"
+	runID := "run-1"
+	got := GetTasksDir(dataDir, runID)
+	want := filepath.Join(GetAgentDir(dataDir, runID), "tasks")
+	if got != want {
+		t.Fatalf("GetTasksDir = %q, want %q", got, want)
+	}
+}
+
+func TestGetSubagentTasksDir(t *testing.T) {
+	dataDir := "/var/data/workbench"
+	parentRunID := "run-parent"
+	childRunID := "run-child"
+	got := GetSubagentTasksDir(dataDir, parentRunID, childRunID)
+	want := filepath.Join(GetTasksDir(dataDir, parentRunID), "subagents", childRunID)
+	if got != want {
+		t.Fatalf("GetSubagentTasksDir = %q, want %q", got, want)
+	}
+}

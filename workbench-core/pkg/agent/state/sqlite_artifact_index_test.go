@@ -151,8 +151,8 @@ func TestBackfillArtifactIndex_ReconcilesMissingSummaryRows(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 	done := now.Add(2 * time.Second)
-	summaryVPath := "/workspace/tasks/2026-02-08/" + taskID + "/SUMMARY.md"
-	reportVPath := "/workspace/tasks/2026-02-08/" + taskID + "/report.md"
+	summaryVPath := "/tasks/2026-02-08/" + taskID + "/SUMMARY.md"
+	reportVPath := "/tasks/2026-02-08/" + taskID + "/report.md"
 	if err := s.CompleteTask(ctx, taskID, types.TaskResult{
 		TaskID:      taskID,
 		Status:      types.TaskStatusSucceeded,

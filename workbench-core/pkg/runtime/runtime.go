@@ -264,6 +264,23 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountMemory, err)
 	}
 
+	var tasksDir string
+	if strings.TrimSpace(cfg.Run.ParentRunID) != "" {
+		tasksDir = fsutil.GetSubagentTasksDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.RunID)
+	} else {
+		tasksDir = fsutil.GetTasksDir(cfg.Cfg.DataDir, cfg.Run.RunID)
+	}
+	if err := os.MkdirAll(tasksDir, 0755); err != nil {
+		return nil, fmt.Errorf("prepare tasks dir: %w", err)
+	}
+	tasksRes, err := resources.NewDirResource(tasksDir, vfs.MountTasks)
+	if err != nil {
+		return nil, fmt.Errorf("create tasks resource: %w", err)
+	}
+	if err := fs.Mount(vfs.MountTasks, tasksRes); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountTasks, err)
+	}
+
 	var subagentsDir string
 	var deliverablesDir string
 	if strings.TrimSpace(cfg.Run.ParentRunID) == "" {
@@ -298,6 +315,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			"/project":   workdirRes.BaseDir,
 			"/workspace": wsRes.BaseDir,
 			"/plan":      planDir,
+			"/tasks":     tasksDir,
 			"/skills":    "(virtual)",
 			"/memory":    "(virtual)",
 		}
@@ -329,6 +347,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	shellInvoker.MountRoots[vfs.MountWorkspace] = wsRes.BaseDir
 	shellInvoker.MountRoots[vfs.MountSkills] = skillDir
 	shellInvoker.MountRoots[vfs.MountPlan] = planDir
+	shellInvoker.MountRoots[vfs.MountTasks] = tasksDir
 	shellInvoker.MountRoots[vfs.MountMemory] = memRes.BaseDir
 	if subagentsDir != "" {
 		shellInvoker.MountRoots[vfs.MountSubagents] = subagentsDir

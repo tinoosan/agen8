@@ -378,7 +378,7 @@ func TestRPCServer_ArtifactList_StandaloneIncludesSummaryNode(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 	done := now.Add(1 * time.Second)
-	summaryVPath := "/workspace/tasks/2026-02-08/" + taskID + "/SUMMARY.md"
+	summaryVPath := "/tasks/2026-02-08/" + taskID + "/SUMMARY.md"
 	if err := ts.CompleteTask(context.Background(), task.TaskID, types.TaskResult{
 		TaskID:      task.TaskID,
 		Status:      types.TaskStatusSucceeded,

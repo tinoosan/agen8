@@ -147,7 +147,7 @@ func dedupeArtifactPaths(paths []string) []string {
 	out := make([]string, 0, len(paths))
 	for _, p := range paths {
 		p = strings.TrimSpace(p)
-		if !strings.HasPrefix(p, "/workspace/") {
+		if !strings.HasPrefix(p, "/workspace/") && !strings.HasPrefix(p, "/tasks/") {
 			continue
 		}
 		if _, ok := seen[p]; ok {
@@ -558,7 +558,7 @@ func (m *monitorModel) buildArtifactTreeFromGroups(nodes []protocol.ArtifactNode
 			if strings.EqualFold(name, "SUMMARY.md") {
 				continue
 			}
-			if strings.HasPrefix(strings.TrimPrefix(vpath, "/workspace/"), "plan/") {
+			if strings.HasPrefix(vpath, "/workspace/") && strings.HasPrefix(strings.TrimPrefix(vpath, "/workspace/"), "plan/") {
 				continue
 			}
 			role := strings.TrimSpace(ws.role)
@@ -864,6 +864,28 @@ func (m *monitorModel) loadArtifactContent(vpath, diskPath, runID string) tea.Cm
 
 func resolveArtifactDisk(dataDir, teamID, runID, vpath string) string {
 	vpath = strings.TrimSpace(vpath)
+	if vpath == "" {
+		return ""
+	}
+	if strings.HasPrefix(vpath, "/tasks/") {
+		rel := strings.TrimPrefix(vpath, "/tasks/")
+		rel = strings.TrimPrefix(rel, "/")
+		if strings.TrimSpace(teamID) != "" {
+			return filepath.Join(fsutil.GetTeamWorkspaceDir(dataDir, teamID), "tasks", rel)
+		}
+		const subagentsPrefix = "subagents/"
+		if strings.HasPrefix(rel, subagentsPrefix) {
+			rest := strings.TrimPrefix(rel, subagentsPrefix)
+			parts := strings.SplitN(rest, string(filepath.Separator), 2)
+			if len(parts) >= 2 && parts[0] != "" {
+				childRunID := parts[0]
+				restPath := parts[1]
+				base := fsutil.GetSubagentTasksDir(dataDir, runID, childRunID)
+				return filepath.Join(base, restPath)
+			}
+		}
+		return filepath.Join(fsutil.GetTasksDir(dataDir, runID), rel)
+	}
 	if !strings.HasPrefix(vpath, "/workspace/") {
 		return ""
 	}

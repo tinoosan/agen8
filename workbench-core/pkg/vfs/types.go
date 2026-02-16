@@ -52,6 +52,9 @@ const (
 	// Only present for child runs; points to parentRun/workspace/subagent_deliverables/<childRunID>.
 	// The child writes outputs here; the parent sees them at /workspace/subagent_deliverables/<childRunID>/.
 	MountDeliverables = "deliverables"
+
+	// MountTasks is the mount name for the run-level task output root (summaries, etc.), not under workspace.
+	MountTasks = "tasks"
 )
 
 // Resource is the minimal contract a “mounted thing” must implement to behave like a filesystem.

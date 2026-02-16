@@ -97,6 +97,16 @@ func GetSubagentDeliverablesDir(dataDir, parentRunID, childRunID string) string 
 	return filepath.Join(parentWorkspace, "subagent_deliverables", childRunID)
 }
 
+// GetTasksDir returns the run-level task output directory (summaries, etc.), not under workspace.
+func GetTasksDir(dataDir, runID string) string {
+	return filepath.Join(GetAgentDir(dataDir, runID), "tasks")
+}
+
+// GetSubagentTasksDir returns the task output directory for a child run (under the parent's tasks tree).
+func GetSubagentTasksDir(dataDir, parentRunID, childRunID string) string {
+	return filepath.Join(GetTasksDir(dataDir, parentRunID), "subagents", childRunID)
+}
+
 // GetLogDirFromRunDir returns the log directory given a run's root dir.
 func GetLogDirFromRunDir(runDir string) string {
 	return filepath.Join(runDir, "log")

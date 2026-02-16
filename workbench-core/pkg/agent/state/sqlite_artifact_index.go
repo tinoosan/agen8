@@ -67,6 +67,26 @@ func dataDirFromSQLitePath(dbPath string) string {
 
 func resolveIndexedDiskPath(dataDir, teamID, runID, vpath string) string {
 	vpath = strings.TrimSpace(vpath)
+	if strings.HasPrefix(vpath, "/tasks/") {
+		rel := strings.TrimPrefix(vpath, "/tasks/")
+		rel = strings.TrimPrefix(rel, "/")
+		if strings.TrimSpace(teamID) != "" {
+			return filepath.Join(fsutil.GetTeamWorkspaceDir(dataDir, teamID), "tasks", rel)
+		}
+		const subagentsPrefix = "subagents/"
+		if strings.HasPrefix(rel, subagentsPrefix) {
+			rest := strings.TrimPrefix(rel, subagentsPrefix)
+			parts := strings.SplitN(rest, string(filepath.Separator), 2)
+			if len(parts) >= 2 && parts[0] != "" {
+				childRunID := parts[0]
+				restPath := parts[1]
+				base := fsutil.GetSubagentTasksDir(dataDir, runID, childRunID)
+				return filepath.Join(base, restPath)
+			}
+		}
+		base := fsutil.GetTasksDir(dataDir, runID)
+		return filepath.Join(base, rel)
+	}
 	if strings.HasPrefix(vpath, "/workspace/") {
 		rel := strings.TrimPrefix(vpath, "/workspace/")
 		if strings.TrimSpace(teamID) != "" {
@@ -82,6 +102,10 @@ func resolveIndexedDiskPath(dataDir, teamID, runID, vpath string) string {
 
 func standaloneIndexedArtifactVPath(vpath string) bool {
 	vpath = strings.TrimSpace(vpath)
+	if strings.HasPrefix(vpath, "/tasks/") {
+		rel := strings.TrimSpace(strings.TrimPrefix(vpath, "/tasks/"))
+		return rel != ""
+	}
 	if !strings.HasPrefix(vpath, "/workspace/") {
 		return false
 	}
@@ -123,6 +147,12 @@ func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, tas
 		return err
 	}
 
+	parentRunID := ""
+	if task.Metadata != nil {
+		if p, _ := task.Metadata["parentRunId"].(string); p != "" {
+			parentRunID = strings.TrimSpace(p)
+		}
+	}
 	seen := map[string]struct{}{}
 	for _, raw := range result.Artifacts {
 		vpath := strings.TrimSpace(raw)
@@ -132,7 +162,17 @@ func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, tas
 		if teamID == "" && !standaloneIndexedArtifactVPath(vpath) {
 			continue
 		}
-		key := strings.ToLower(vpath)
+		indexVpath := vpath
+		artifactRunID := runID
+		if parentRunID != "" && strings.HasPrefix(vpath, "/tasks/") {
+			rel := strings.TrimPrefix(vpath, "/tasks/")
+			rel = strings.TrimPrefix(rel, "/")
+			if rel != "" {
+				indexVpath = "/tasks/subagents/" + runID + "/" + rel
+				artifactRunID = parentRunID
+			}
+		}
+		key := strings.ToLower(indexVpath)
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -147,8 +187,8 @@ func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, tas
 				task_id, team_id, run_id, role, task_kind, is_summary,
 				display_name, vpath, disk_path, produced_at, day_bucket
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, strings.TrimSpace(task.TaskID), teamID, runID, role, taskKind, boolToInt(isSummary),
-			displayName, vpath, resolveIndexedDiskPath(dataDir, teamID, runID, vpath), producedAt, dayBucket); err != nil {
+		`, strings.TrimSpace(task.TaskID), teamID, artifactRunID, role, taskKind, boolToInt(isSummary),
+			displayName, indexVpath, resolveIndexedDiskPath(dataDir, teamID, artifactRunID, indexVpath), producedAt, dayBucket); err != nil {
 			return err
 		}
 	}
