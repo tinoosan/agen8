@@ -114,13 +114,28 @@ func (t *TaskReviewTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		return types.HostOpRequest{}, fmt.Errorf("task_review: get task: %w", err)
 	}
 
-	// Verify this is a callback task with a review gate.
+	// Verify this is a callback task with a review gate, or resolve delegated task to callback.
 	if task.Metadata == nil {
 		task.Metadata = map[string]any{}
 	}
 	source, _ := task.Metadata["source"].(string)
-	if source != "subagent.callback" && source != "team.callback" {
-		return types.HostOpRequest{}, fmt.Errorf("task_review: task %s is not a reviewable callback (source=%q)", taskID, source)
+	if source == "spawn_worker" {
+		// Agent passed the delegated task ID; resolve to the callback task for review.
+		callbackTaskID := "callback-" + taskID
+		callbackTask, err := t.Store.GetTask(ctx, callbackTaskID)
+		if err != nil {
+			return types.HostOpRequest{}, fmt.Errorf("task_review: no callback task found for %s (looked for %s): %w", taskID, callbackTaskID, err)
+		}
+		if callbackTask.Metadata == nil {
+			callbackTask.Metadata = map[string]any{}
+		}
+		cbSource, _ := callbackTask.Metadata["source"].(string)
+		if cbSource != "subagent.callback" {
+			return types.HostOpRequest{}, fmt.Errorf("task_review: task %s is a delegated task but callback %s is not a subagent callback (source=%q). Pass the callback task ID (callback-<taskId>) or the delegated task ID.", taskID, callbackTaskID, cbSource)
+		}
+		task = callbackTask
+	} else if source != "subagent.callback" && source != "team.callback" {
+		return types.HostOpRequest{}, fmt.Errorf("task_review: task %s is not a reviewable callback (source=%q). Pass the callback task ID (e.g. callback-<taskId>) or the delegated task ID for the sub-agent work you want to review.", taskID, source)
 	}
 
 	switch decision {

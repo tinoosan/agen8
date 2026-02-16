@@ -102,7 +102,7 @@ func (n *subagentCleanupNotifier) Notify(ctx context.Context, task types.Task, t
 func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 	poll := cfg.PollInterval
 	if poll <= 0 {
-		poll = 2 * time.Second
+		poll = 1 * time.Second // Faster inbox poll so callbacks and new tasks are picked up sooner
 	}
 	return &runtimeSupervisor{
 		cfg:              cfg.Cfg,
@@ -647,27 +647,33 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			if err != nil {
 				return
 			}
-			targetModel := strings.TrimSpace(loaded.ActiveModel)
-			if targetModel != "" {
-				currentModelMu.Lock()
-				same := strings.EqualFold(targetModel, currentModel)
-				currentModelMu.Unlock()
-				if !same {
-					if err := workerSession.SetModel(workerCtx, targetModel); err == nil {
-						currentModelMu.Lock()
-						currentModel = targetModel
-						currentModelMu.Unlock()
-						emitEvent(workerCtx, events.Event{
-							Type:    "control.success",
-							Message: "Model synchronized from session state",
-							Data: map[string]string{
-								"command": "set_model",
-								"model":   targetModel,
-							},
-						})
+			// Only sync model from session for top-level runs. Child runs (sub-agents) keep the
+			// model set at spawn (profile/env); session ActiveModel reflects the parent's choice.
+			isChildRun := strings.TrimSpace(run.ParentRunID) != ""
+			if !isChildRun {
+				targetModel := strings.TrimSpace(loaded.ActiveModel)
+				if targetModel != "" {
+					currentModelMu.Lock()
+					same := strings.EqualFold(targetModel, currentModel)
+					currentModelMu.Unlock()
+					if !same {
+						if err := workerSession.SetModel(workerCtx, targetModel); err == nil {
+							currentModelMu.Lock()
+							currentModel = targetModel
+							currentModelMu.Unlock()
+							emitEvent(workerCtx, events.Event{
+								Type:    "control.success",
+								Message: "Model synchronized from session state",
+								Data: map[string]string{
+									"command": "set_model",
+									"model":   targetModel,
+								},
+							})
+						}
 					}
 				}
 			}
+			targetModel := strings.TrimSpace(loaded.ActiveModel)
 			targetEffort, targetSummary := sessionReasoningForModel(
 				loaded,
 				targetModel,
@@ -1079,6 +1085,14 @@ func (s *runtimeSupervisor) ApplySessionModel(ctx context.Context, sessionID, ta
 		}
 		runID := strings.TrimSpace(worker.runID)
 		if targetRunID != "" && targetRunID != runID {
+			continue
+		}
+		// Do not apply session model to child runs (sub-agents); they keep the model set at spawn.
+		wr, err := implstore.LoadRun(s.cfg, runID)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(wr.ParentRunID) != "" {
 			continue
 		}
 		if err := worker.session.SetModel(ctx, model); err != nil {

@@ -205,6 +205,7 @@ type monitorModel struct {
 	childRuns                    []types.Run
 	childRunsLoadErr             string // last error from loadChildRuns (e.g. RPC failed)
 	subagentsVP                  viewport.Model
+	subagentsList                list.Model
 	planMarkdown                 string
 	planDetails                  string
 	planLoadErr                  string

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -44,7 +45,7 @@ func renderAgentPickerLine(item list.Item, maxWidth int) string {
 
 func agentsToPickerItems(agents []protocol.AgentListItem) []list.Item {
 	out := make([]list.Item, 0, len(agents))
-	for _, a := range agents {
+	for i, a := range agents {
 		runID := strings.TrimSpace(a.RunID)
 		if runID == "" {
 			continue
@@ -56,7 +57,18 @@ func agentsToPickerItems(agents []protocol.AgentListItem) []list.Item {
 		label := shortID(runID)
 		profile := strings.TrimSpace(a.Profile)
 		role := strings.TrimSpace(a.Role)
-		if role != "" {
+		parentRunID := strings.TrimSpace(a.ParentRunID)
+		if parentRunID != "" {
+			n := a.SpawnIndex
+			if n <= 0 {
+				n = i + 1
+			}
+			goal := strings.TrimSpace(a.Goal)
+			if goal == "" {
+				goal = "(no goal)"
+			}
+			label = fmt.Sprintf("Sub-agent %d · %s", n, truncateText(goal, 50))
+		} else if role != "" {
 			if profile != "" {
 				label = role + " · " + profile + " · " + shortID(runID)
 			} else {

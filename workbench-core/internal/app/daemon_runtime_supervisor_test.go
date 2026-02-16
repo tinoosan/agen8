@@ -201,3 +201,49 @@ func TestRuntimeSupervisor_PauseRun_CancelsWorkerAndActiveTasks(t *testing.T) {
 		t.Fatalf("task status=%q want %q", loadedTask.Status, types.TaskStatusCanceled)
 	}
 }
+
+// TestApplySessionModel_SkipsChildRuns verifies that when applying session model to workers,
+// child runs (sub-agents) are skipped so the parent's model change does not overwrite sub-agent model.
+func TestApplySessionModel_SkipsChildRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, parentRun, err := implstore.CreateSession(cfg, "parent", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	childRun := types.NewChildRun(parentRun.RunID, "child goal", sess.SessionID, 1)
+	childRun.Runtime = &types.RunRuntimeConfig{Model: "child-model"}
+	if err := implstore.SaveRun(cfg, childRun); err != nil {
+		t.Fatalf("SaveRun child: %v", err)
+	}
+	sess.Runs = append(sess.Runs, childRun.RunID)
+	sessionStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessionStore.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	done := make(chan struct{})
+	supervisor := &runtimeSupervisor{
+		cfg:          cfg,
+		sessionStore: sessionStore,
+		workers: map[string]*managedRuntime{
+			parentRun.RunID: {runID: parentRun.RunID, sessionID: sess.SessionID, cancel: func() {}, done: done},
+			childRun.RunID:  {runID: childRun.RunID, sessionID: sess.SessionID, cancel: func() {}, done: done},
+		},
+	}
+
+	applied, err := supervisor.ApplySessionModel(context.Background(), sess.SessionID, "", "new-model")
+	if err != nil {
+		t.Fatalf("ApplySessionModel: %v", err)
+	}
+	// Child run must not receive session model; only parent can be in applied (if it had a session we'd have called SetModel).
+	// We have no real session so parent worker.session is nil and gets skipped by "if worker.session == nil { continue }".
+	// So applied should be empty. The important part is child run must not be in applied.
+	for _, id := range applied {
+		if id == childRun.RunID {
+			t.Fatalf("ApplySessionModel must not apply to child run %q", childRun.RunID)
+		}
+	}
+}

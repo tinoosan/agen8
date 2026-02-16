@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/workbench-core/internal/store"
 )
 
 type monitorPanel struct {
@@ -43,6 +46,57 @@ func init() {
 	registerPanel(monitorPanel{id: panelMemory, name: "Memory", handleKey: handleMemoryPanelKey})
 	registerPanel(monitorPanel{id: panelComposer, name: "Composer", handleKey: handleComposerPanelKey})
 	registerPanel(monitorPanel{id: panelThinking, name: "Thoughts", handleKey: handleThinkingPanelKey})
+	registerPanel(monitorPanel{id: panelSubagents, name: "Subagents", handleKey: handleSubagentsPanelKey})
+}
+
+// backToParentRunID is the sentinel RunID for the "Back to parent" list item in the Subagents tab.
+const backToParentRunID = "__back_to_parent__"
+
+func handleSubagentsPanelKey(m *monitorModel, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter", " ":
+		items := m.subagentsList.Items()
+		if len(items) == 0 {
+			return m, nil
+		}
+		idx := m.subagentsList.Index()
+		if idx < 0 || idx >= len(items) {
+			return m, nil
+		}
+		it, ok := items[idx].(subagentListItem)
+		if !ok {
+			return m, nil
+		}
+		runID := strings.TrimSpace(it.RunID)
+		if runID == "" {
+			return m, nil
+		}
+		if runID == backToParentRunID {
+			currentRunID := strings.TrimSpace(m.runID)
+			if strings.TrimSpace(m.teamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
+				currentRunID = strings.TrimSpace(m.focusedRunID)
+			}
+			run, err := store.LoadRun(m.cfg, currentRunID)
+			if err != nil || strings.TrimSpace(run.ParentRunID) == "" {
+				return m, nil
+			}
+			parentID := strings.TrimSpace(run.ParentRunID)
+			if strings.TrimSpace(m.teamID) != "" {
+				m.focusedRunID = parentID
+				return m, m.applyFocusLens()
+			}
+			return m, func() tea.Msg { return monitorSwitchRunMsg{RunID: parentID} }
+		}
+		if strings.TrimSpace(m.teamID) != "" {
+			m.focusedRunID = runID
+			return m, m.applyFocusLens()
+		}
+		return m, func() tea.Msg { return monitorSwitchRunMsg{RunID: runID} }
+	default:
+		var cmd tea.Cmd
+		m.subagentsList, cmd = m.subagentsList.Update(msg)
+		return m, cmd
+	}
 }
 
 func handleActivityPanelKey(m *monitorModel, msg tea.KeyMsg) (tea.Model, tea.Cmd) {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -546,6 +547,7 @@ func (s *RPCServer) agentList(ctx context.Context, p protocol.AgentListParams) (
 			Status:      strings.TrimSpace(run.Status),
 			Goal:        strings.TrimSpace(run.Goal),
 			ParentRunID: strings.TrimSpace(run.ParentRunID),
+			SpawnIndex:  run.SpawnIndex,
 		}
 		if run.Runtime != nil {
 			item.Profile = strings.TrimSpace(run.Runtime.Profile)
@@ -1185,16 +1187,66 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 	}
 
 	if strings.TrimSpace(scope.teamID) == "" {
-		acts, err := implstore.ListActivities(ctx, s.cfg, strings.TrimSpace(scope.runID), limit, offset)
-		if err != nil {
-			return protocol.ActivityListResult{}, err
+		runID := strings.TrimSpace(scope.runID)
+		if !p.IncludeChildRuns || runID == "" {
+			acts, err := implstore.ListActivities(ctx, s.cfg, runID, limit, offset)
+			if err != nil {
+				return protocol.ActivityListResult{}, err
+			}
+			total, _ := implstore.CountActivities(ctx, s.cfg, runID)
+			next := 0
+			if offset+len(acts) < total {
+				next = offset + len(acts)
+			}
+			return protocol.ActivityListResult{Activities: acts, TotalCount: total, NextOffset: next}, nil
 		}
-		total, _ := implstore.CountActivities(ctx, s.cfg, strings.TrimSpace(scope.runID))
+		// Include activities from child runs (sub-agents) and prefix with "[Sub-agent N]".
+		merged := make([]types.Activity, 0, 256)
+		parentActs, err := implstore.ListActivities(ctx, s.cfg, runID, 500, 0)
+		if err == nil {
+			merged = append(merged, parentActs...)
+		}
+		children, err := implstore.ListChildRuns(s.cfg, runID)
+		if err == nil {
+			for _, child := range children {
+				n := child.SpawnIndex
+				if n <= 0 {
+					n = 1
+				}
+				prefix := fmt.Sprintf("[Sub-agent %d] ", n)
+				childActs, err := implstore.ListActivities(ctx, s.cfg, child.RunID, 300, 0)
+				if err != nil {
+					continue
+				}
+				for i := range childActs {
+					childActs[i].Title = prefix + strings.TrimSpace(childActs[i].Title)
+					merged = append(merged, childActs[i])
+				}
+			}
+		}
+		sort.SliceStable(merged, func(i, j int) bool {
+			if p.SortDesc {
+				return merged[i].StartedAt.After(merged[j].StartedAt)
+			}
+			return merged[i].StartedAt.Before(merged[j].StartedAt)
+		})
+		total := len(merged)
+		if offset > total {
+			offset = total
+		}
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		out := []types.Activity{}
+		if offset < end {
+			out = append(out, merged[offset:end]...)
+		}
 		next := 0
-		if offset+len(acts) < total {
-			next = offset + len(acts)
+		if end < total {
+			next = end
 		}
-		return protocol.ActivityListResult{Activities: acts, TotalCount: total, NextOffset: next}, nil
+		return protocol.ActivityListResult{Activities: out, TotalCount: total, NextOffset: next}, nil
 	}
 
 	runRole := map[string]string{}

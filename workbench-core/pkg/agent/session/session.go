@@ -1026,7 +1026,21 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				artifactsForParent = append(artifactsForParent, path.Join(subagentArtifactsDir, art))
 			}
 		}
-		callbackGoal := fmt.Sprintf("SUBAGENT RESULT: Review %s result from spawned worker for task %s. The worker completed: %s. Use the task_review tool to approve, retry (with feedback), or escalate this work.", string(tr.Status), truncateText(taskID, 24), truncateText(sourceGoal, 120))
+		callbackGoal := fmt.Sprintf("SUBAGENT RESULT: Review %s result from spawned worker for task %s. The worker completed: %s. Use the task_review tool to approve, retry (with feedback), or escalate this work. Your overarching task (that led to spawning this worker) is only complete after you have reviewed this result and decided on next steps.", string(tr.Status), truncateText(taskID, 24), truncateText(sourceGoal, 120))
+		// Embed deliverable location in the goal so the parent (which only receives task.Goal) can locate and review artifacts.
+		callbackGoal += "\n\nDeliverables are under subagentArtifactsDir: " + subagentArtifactsDir + ". Open and review the artifact paths below (e.g. with fs_read) before calling task_review."
+		if len(artifactsForParent) > 0 {
+			const maxPathsInGoal = 10
+			pathsToShow := artifactsForParent
+			if len(pathsToShow) > maxPathsInGoal {
+				pathsToShow = pathsToShow[:maxPathsInGoal]
+			}
+			callbackGoal += "\nArtifacts to review: " + strings.Join(pathsToShow, ", ")
+			if len(artifactsForParent) > maxPathsInGoal {
+				callbackGoal += fmt.Sprintf(" (and %d more)", len(artifactsForParent)-maxPathsInGoal)
+			}
+			callbackGoal += "."
+		}
 		inputs := map[string]any{
 			"sourceTaskId":         taskID,
 			"sourceGoal":           sourceGoal,

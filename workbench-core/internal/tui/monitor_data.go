@@ -678,6 +678,7 @@ func (m *monitorModel) loadActivityPage() tea.Cmd {
 				}
 			} else {
 				params.RunID = strings.TrimSpace(m.runID)
+				params.IncludeChildRuns = true // Show tasks from sub-agents in the same activity list
 			}
 			var res protocol.ActivityListResult
 			if err := m.rpcRoundTrip(protocol.MethodActivityList, params, &res); err != nil {

@@ -6,7 +6,7 @@ How to check that subagent **review gate**, **cleanup**, and **artifact paths** 
 
 1. **Review gate** – When a subagent completes a task, the parent gets a callback task to review the result (approve / retry / escalate). The callback refers to the subagent’s task and includes artifact paths the parent can read.
 2. **Cleanup** – After the subagent finishes its task and after the parent **approves** the review (completes the callback successfully), the subagent run is stopped and removed from the active workers list; run status is set to Succeeded. Run records and artifacts are **preserved** (only execution context is removed).
-3. **Artifact paths** – The callback task includes `subagentArtifactsDir` (`/workspace/subagents/<runId>`) and an `artifacts` list with paths under that dir so the main agent can open the subagent’s outputs (shared workspace & attribution per PRD §9).
+3. **Artifact paths** – The callback task includes `subagentArtifactsDir` (`/workspace/subagents/<runId>`) and an `artifacts` list with paths under that dir so the main agent can open the subagent’s outputs (shared workspace & attribution per PRD §9). The parent locates deliverables using the **callback task goal** (which explicitly includes the deliverable directory and artifact paths to review); the same paths are available in the task's `Inputs` for tooling.
 4. **Subagents list** – The Subagents tab shows only **active** (running) subagents; completed ones are summarized as “No active subagents. (N completed.)” and are not deleted from the store (audit history kept per PRD §7).
 
 ## Manual verification steps

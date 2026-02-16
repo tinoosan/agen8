@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
+	implstore "github.com/tinoosan/workbench-core/internal/store"
 	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -40,7 +41,8 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 				},
 			},
 			wantLines: []string{
-				"1. [running] Research agent memory (0s)",
+				"Sub-agent 1",
+				"Research agent memory",
 			},
 		},
 		{
@@ -67,16 +69,36 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 			// Tab shows only running subagents; completed ones are summarized.
 			wantLines: []string{"No active subagents.", "2 completed"},
 		},
+		{
+			name:      "Viewing child run shows Back to parent",
+			childRuns: []types.Run{},
+			wantLines: []string{"Back to parent"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Config{DataDir: t.TempDir()}
+			runID := ""
+			if tt.name == "Viewing child run shows Back to parent" {
+				_, parentRun, err := implstore.CreateSession(cfg, "parent", 8*1024)
+				if err != nil {
+					t.Fatalf("CreateSession: %v", err)
+				}
+				childRun := types.NewChildRun(parentRun.RunID, "child goal", parentRun.SessionID, 1)
+				if err := implstore.SaveRun(cfg, childRun); err != nil {
+					t.Fatalf("SaveRun child: %v", err)
+				}
+				runID = childRun.RunID
+			}
 			m := &monitorModel{
-				ctx:         context.Background(),
-				cfg:         config.Config{},
-				childRuns:   tt.childRuns,
-				subagentsVP: viewport.New(0, 0),
-				styles:      defaultMonitorStyles(),
+				ctx:           context.Background(),
+				cfg:           cfg,
+				runID:         runID,
+				childRuns:     tt.childRuns,
+				subagentsVP:   viewport.New(0, 0),
+				subagentsList: newSubagentsList(),
+				styles:        defaultMonitorStyles(),
 			}
 			grid := layoutmgr.GridLayout{
 				Plan: layoutmgr.PanelSpec{

@@ -153,24 +153,51 @@ func (b *DaemonBuilder) prepareBootstrap() error {
 		b.maxContextB = 8 * 1024
 	}
 	if b.poll <= 0 {
-		b.poll = 2 * time.Second
+		b.poll = 1 * time.Second // Faster inbox poll so callbacks and new tasks are picked up sooner
 	}
 	b.goal = strings.TrimSpace(b.goal)
 	if b.goal == "" {
 		b.goal = "autonomous agent"
 	}
 
-	bootstrapSession, run, err := implstore.CreateSession(b.cfg, b.goal, b.maxContextB)
-	if err != nil {
-		return fmt.Errorf("create session: %w", err)
+	// Reuse an existing daemon (system + standalone) session and its current run when present,
+	// so restarts use the same run folder instead of creating a new one every time.
+	profileID := strings.TrimSpace(b.prof.ID)
+	if sessions, listErr := implstore.ListSessionsPaginated(b.cfg, store.SessionFilter{IncludeSystem: true, Limit: 20}); listErr == nil {
+		for _, s := range sessions {
+			if s.System && s.Mode == "standalone" && strings.TrimSpace(s.Profile) == profileID && strings.TrimSpace(s.CurrentRunID) != "" {
+				if run, loadErr := implstore.LoadRun(b.cfg, s.CurrentRunID); loadErr == nil {
+					now := time.Now().UTC()
+					run.Status = types.RunStatusRunning
+					run.StartedAt = &now
+					run.FinishedAt = nil
+					if saveErr := implstore.SaveRun(b.cfg, run); saveErr != nil {
+						log.Printf("daemon: failed to persist reused run state: %v", saveErr)
+					}
+					b.bootstrapSession = s
+					b.run = run
+					break
+				}
+				// LoadRun failed (e.g. missing row); fall through to create new session and run
+				break
+			}
+		}
 	}
-	bootstrapSession.System = true
-	bootstrapSession.Mode = "standalone"
-	bootstrapSession.TeamID = ""
-	bootstrapSession.Profile = strings.TrimSpace(b.prof.ID)
-	_ = implstore.SaveSession(b.cfg, bootstrapSession)
-	b.bootstrapSession = bootstrapSession
-	b.run = run
+
+	if b.run.RunID == "" {
+		// No reusable daemon session/run found; create new session and run.
+		bootstrapSession, run, err := implstore.CreateSession(b.cfg, b.goal, b.maxContextB)
+		if err != nil {
+			return fmt.Errorf("create session: %w", err)
+		}
+		bootstrapSession.System = true
+		bootstrapSession.Mode = "standalone"
+		bootstrapSession.TeamID = ""
+		bootstrapSession.Profile = profileID
+		_ = implstore.SaveSession(b.cfg, bootstrapSession)
+		b.bootstrapSession = bootstrapSession
+		b.run = run
+	}
 
 	b.protocolInit = newProtocolInitializer(b.cfg, b.run, b.protocolEnabled)
 	b.protocolInit.Initialize(context.Background())

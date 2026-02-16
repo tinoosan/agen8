@@ -80,6 +80,8 @@ type AgentListItem struct {
 	StartedAt   string `json:"startedAt,omitempty"`
 	FinishedAt  string `json:"finishedAt,omitempty"`
 	ParentRunID string `json:"parentRunId,omitempty"`
+	// SpawnIndex is the ordinal among sibling sub-agent runs (1-based). Only set when ParentRunID is set.
+	SpawnIndex int `json:"spawnIndex,omitempty"`
 }
 
 type AgentListResult struct {
@@ -175,13 +177,14 @@ type SessionGetTotalsResult struct {
 }
 
 type ActivityListParams struct {
-	ThreadID ThreadID `json:"threadId"`
-	TeamID   string   `json:"teamId,omitempty"`
-	RunID    string   `json:"runId,omitempty"`
-	Role     string   `json:"role,omitempty"`
-	Limit    int      `json:"limit,omitempty"`
-	Offset   int      `json:"offset,omitempty"`
-	SortDesc bool     `json:"sortDesc,omitempty"`
+	ThreadID         ThreadID `json:"threadId"`
+	TeamID           string   `json:"teamId,omitempty"`
+	RunID            string   `json:"runId,omitempty"`
+	Role             string   `json:"role,omitempty"`
+	Limit            int      `json:"limit,omitempty"`
+	Offset           int      `json:"offset,omitempty"`
+	SortDesc         bool     `json:"sortDesc,omitempty"`
+	IncludeChildRuns bool     `json:"includeChildRuns,omitempty"` // When true (standalone), merge activities from child runs and prefix with "[Sub-agent N]"
 }
 
 type ActivityListResult struct {

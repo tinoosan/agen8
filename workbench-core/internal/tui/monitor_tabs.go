@@ -5,12 +5,39 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
+
+// subagentListItem is a list item for the Subagents tab (run to switch to, or "Back to parent").
+type subagentListItem struct {
+	RunID string
+	Label string
+}
+
+func (s subagentListItem) FilterValue() string { return strings.TrimSpace(s.RunID + " " + s.Label) }
+func (s subagentListItem) Title() string       { return strings.TrimSpace(s.Label) }
+
+func renderSubagentLine(item list.Item, maxWidth int) string {
+	it, ok := item.(subagentListItem)
+	if !ok {
+		return kit.TruncateRight(strings.TrimSpace(item.FilterValue()), maxWidth)
+	}
+	return kit.TruncateRight(strings.TrimSpace(it.Label), maxWidth)
+}
+
+func newSubagentsList() list.Model {
+	l := list.New(nil, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderSubagentLine), 0, 0)
+	l.SetShowHelp(false)
+	l.SetShowStatusBar(false)
+	l.SetShowPagination(false)
+	l.SetFilteringEnabled(false)
+	return l
+}
 
 type compactTabDef struct {
 	Name   string
@@ -320,12 +347,20 @@ func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) str
 	if m == nil {
 		return ""
 	}
-	var lines []string
 	currentRunID := strings.TrimSpace(m.runID)
 	if strings.TrimSpace(m.teamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
 		currentRunID = strings.TrimSpace(m.focusedRunID)
 	}
-	// Only show active (running) subagents; completed ones are cleaned up and no longer need to be in the list.
+	// Build list items: "Back to parent" when viewing a child run, then active subagents.
+	var items []list.Item
+	isViewingChild := false
+	if currentRunID != "" {
+		if run, err := store.LoadRun(m.cfg, currentRunID); err == nil && strings.TrimSpace(run.ParentRunID) != "" {
+			isViewingChild = true
+			items = append(items, subagentListItem{RunID: backToParentRunID, Label: "← Back to parent"})
+		}
+	}
+
 	activeChildRuns := make([]types.Run, 0, len(m.childRuns))
 	for _, r := range m.childRuns {
 		if strings.EqualFold(strings.TrimSpace(r.Status), types.RunStatusRunning) {
@@ -336,39 +371,26 @@ func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) str
 
 	if len(m.childRuns) == 0 {
 		if strings.TrimSpace(m.childRunsLoadErr) != "" {
-			lines = []string{kit.StyleDim.Render("Could not load subagents: " + strings.TrimSpace(m.childRunsLoadErr))}
-		} else if currentRunID != "" {
-			if run, err := store.LoadRun(m.cfg, currentRunID); err == nil && strings.TrimSpace(run.ParentRunID) != "" {
-				lines = []string{kit.StyleDim.Render("You are viewing a subagent. Switch to the parent run to see all subagents.")}
-			} else {
-				lines = []string{kit.StyleDim.Render("No subagents spawned yet.")}
-			}
-		} else {
-			lines = []string{kit.StyleDim.Render("No subagents spawned yet.")}
+			items = append(items, subagentListItem{Label: "Could not load subagents: " + strings.TrimSpace(m.childRunsLoadErr)})
+		} else if !isViewingChild {
+			items = append(items, subagentListItem{Label: "No subagents spawned yet."})
 		}
-	} else if len(activeChildRuns) == 0 {
+	} else if len(activeChildRuns) == 0 && !isViewingChild {
 		msg := "No active subagents."
 		if completedCount > 0 {
 			msg = fmt.Sprintf("No active subagents. (%d completed.)", completedCount)
 		}
-		lines = []string{kit.StyleDim.Render(msg)}
+		items = append(items, subagentListItem{Label: msg})
 	} else {
-		for i, run := range activeChildRuns {
-			idx := i + 1
-			if run.SpawnIndex > 0 {
-				idx = run.SpawnIndex
+		for _, run := range activeChildRuns {
+			idx := run.SpawnIndex
+			if idx <= 0 {
+				idx = 1
 			}
-			statusStyle := kit.StyleStatusValue
-			status := strings.ToLower(run.Status)
-			switch status {
-			case "succeeded":
-				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950"))
-			case "failed", "canceled":
-				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))
-			case "running":
-				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6bbcff"))
+			goal := strings.TrimSpace(run.Goal)
+			if goal == "" {
+				goal = "(no goal)"
 			}
-
 			dur := ""
 			if run.StartedAt != nil {
 				end := time.Now()
@@ -377,39 +399,21 @@ func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) str
 				}
 				dur = end.Sub(*run.StartedAt).Round(time.Second).String()
 			}
-
-			costStr := ""
-			if run.CostUSD > 0 {
-				costStr = fmt.Sprintf(" ($%.4f)", run.CostUSD)
-			}
-
-			// Format: "1. [running] Goal... (2m30s) ($0.12)"
-			line := fmt.Sprintf("%d. [%s] %s (%s)%s",
-				idx,
-				statusStyle.Render(status),
-				truncateText(strings.TrimSpace(run.Goal), 60),
-				dur,
-				costStr,
-			)
-			lines = append(lines, line)
+			label := fmt.Sprintf("Sub-agent %d · %s (%s)", idx, truncateText(goal, 45), dur)
+			items = append(items, subagentListItem{RunID: run.RunID, Label: label})
 		}
 	}
 
-	content := strings.Join(lines, "\n")
-	m.subagentsVP.SetContent(content)
-	m.subagentsVP.Width = grid.Plan.InnerWidth()
-	m.subagentsVP.Height = grid.Plan.InnerHeight()
-
-	// Ensure cursor stays within bounds if content shrinks
-	if m.subagentsVP.YOffset > 0 {
-		maxOffset := max(0, len(lines)-m.subagentsVP.Height)
-		if m.subagentsVP.YOffset > maxOffset {
-			m.subagentsVP.YOffset = maxOffset
-		}
+	if len(items) == 0 {
+		items = append(items, subagentListItem{Label: "No subagents spawned yet."})
 	}
+
+	m.subagentsList.SetItems(items)
+	m.subagentsList.SetWidth(grid.Plan.InnerWidth())
+	m.subagentsList.SetHeight(grid.Plan.InnerHeight())
 
 	return m.panelStyle(panelSubagents).
 		Width(grid.Plan.InnerWidth()).
 		Height(grid.Plan.InnerHeight()).
-		Render(m.styles.sectionTitle.Render("Subagents") + "\n" + m.subagentsVP.View())
+		Render(m.styles.sectionTitle.Render("Subagents") + "\nEnter: switch run · " + m.subagentsList.View())
 }
