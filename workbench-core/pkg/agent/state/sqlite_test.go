@@ -251,6 +251,106 @@ func TestSQLiteStore_CancelActiveTasksByRun(t *testing.T) {
 	}
 }
 
+// TestSQLiteStore_ResumeTask_Idempotent verifies that ResumeTask returns nil (no error) when the task
+// is not in delegated state (e.g. already succeeded or active), and does not change the task status.
+// This prevents coordination task re-claim loops.
+func TestSQLiteStore_ResumeTask_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewSQLiteTaskStore(filepath.Join(dir, "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now()
+
+	// Task that is succeeded: ResumeTask should return nil and leave status succeeded.
+	task := types.Task{
+		TaskID: "t1", SessionID: "sess-1", RunID: "run-1", Goal: "test",
+		Status: types.TaskStatusPending, CreatedAt: &now, Inputs: map[string]any{},
+	}
+	if err := s.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := s.ClaimTask(ctx, "t1", time.Minute); err != nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	doneAt := time.Now()
+	if err := s.CompleteTask(ctx, "t1", types.TaskResult{TaskID: "t1", Status: types.TaskStatusSucceeded, Summary: "ok", CompletedAt: &doneAt}); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+	if err := s.ResumeTask(ctx, "t1"); err != nil {
+		t.Fatalf("ResumeTask on succeeded task should be idempotent (return nil), got: %v", err)
+	}
+	got, err := s.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.Status != types.TaskStatusSucceeded {
+		t.Fatalf("after idempotent ResumeTask, status=%q want succeeded", got.Status)
+	}
+
+	// Task that is active: ResumeTask should return nil and leave status active.
+	task2 := types.Task{
+		TaskID: "t2", SessionID: "sess-1", RunID: "run-1", Goal: "test2",
+		Status: types.TaskStatusPending, CreatedAt: &now, Inputs: map[string]any{},
+	}
+	if err := s.CreateTask(ctx, task2); err != nil {
+		t.Fatalf("CreateTask t2: %v", err)
+	}
+	if err := s.ClaimTask(ctx, "t2", time.Minute); err != nil {
+		t.Fatalf("ClaimTask t2: %v", err)
+	}
+	if err := s.ResumeTask(ctx, "t2"); err != nil {
+		t.Fatalf("ResumeTask on active task should be idempotent (return nil), got: %v", err)
+	}
+	got2, err := s.GetTask(ctx, "t2")
+	if err != nil {
+		t.Fatalf("GetTask t2: %v", err)
+	}
+	if got2.Status != types.TaskStatusActive {
+		t.Fatalf("after idempotent ResumeTask on active, status=%q want active", got2.Status)
+	}
+}
+
+// TestSQLiteStore_CompleteTask_IdempotentWhenTerminal verifies that CompleteTask returns nil and
+// does not overwrite an already terminal task (succeeded/failed/canceled). This enforces the
+// invariant that terminal must never be overwritten.
+func TestSQLiteStore_CompleteTask_IdempotentWhenTerminal(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewSQLiteTaskStore(filepath.Join(dir, "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now()
+	task := types.Task{
+		TaskID: "t1", SessionID: "sess-1", RunID: "run-1", Goal: "test",
+		Status: types.TaskStatusPending, CreatedAt: &now, Inputs: map[string]any{},
+	}
+	if err := s.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := s.ClaimTask(ctx, "t1", time.Minute); err != nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	doneAt := time.Now()
+	res := types.TaskResult{TaskID: "t1", Status: types.TaskStatusSucceeded, Summary: "done", CompletedAt: &doneAt}
+	if err := s.CompleteTask(ctx, "t1", res); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+	// Second CompleteTask on same task (already succeeded) should be idempotent: return nil, status unchanged.
+	if err := s.CompleteTask(ctx, "t1", res); err != nil {
+		t.Fatalf("CompleteTask on already succeeded task should be idempotent (return nil), got: %v", err)
+	}
+	got, err := s.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.Status != types.TaskStatusSucceeded {
+		t.Fatalf("after idempotent CompleteTask, status=%q want succeeded", got.Status)
+	}
+}
+
 func ptrTime(t time.Time) *time.Time {
 	return &t
 }

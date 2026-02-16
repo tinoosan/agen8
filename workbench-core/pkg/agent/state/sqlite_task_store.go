@@ -965,6 +965,14 @@ func (s *SQLiteTaskStore) ReleaseLease(ctx context.Context, taskID string) error
 	if err != nil {
 		return err
 	}
+	// Extra safety: do not release lease on terminal tasks (invariant: terminal never → pending).
+	var statusRaw string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM tasks WHERE task_id = ?`, taskID).Scan(&statusRaw); err == nil {
+		if isTerminalStatus(types.TaskStatus(strings.TrimSpace(statusRaw))) {
+			return nil // Idempotent: already terminal.
+		}
+	}
+	// Fall through: update only active (WHERE status = ? already enforces non-terminal).
 	now := time.Now().UTC()
 	res, err := db.ExecContext(ctx, `
 		UPDATE tasks
@@ -1026,7 +1034,8 @@ func (s *SQLiteTaskStore) ResumeTask(ctx context.Context, taskID string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("resume: task %s is not in delegated state", taskID)
+		// Idempotent: task already resumed or not in delegated state; treat as success.
+		return nil
 	}
 	return nil
 }
@@ -1063,17 +1072,25 @@ func (s *SQLiteTaskStore) CompleteTask(ctx context.Context, taskID string, resul
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `
+	// Only transition from non-terminal states; never overwrite succeeded/failed/canceled.
+	res, err := tx.ExecContext(ctx, `
 		UPDATE tasks
 		SET status = ?, finished_at = ?, completed_at = ?, summary = ?, artifacts_json = ?, error = ?,
 		    input_tokens = ?, output_tokens = ?, total_tokens = ?, cost_usd = ?,
 		    lease_until = NULL, updated_at = ?
-		WHERE task_id = ?
+		WHERE task_id = ? AND status IN (?, ?, ?)
 `, string(status), finishedAt.Format(time.RFC3339Nano), finishedAt.Format(time.RFC3339Nano),
 		strings.TrimSpace(result.Summary), string(artifactsJSON), strings.TrimSpace(result.Error),
 		result.InputTokens, result.OutputTokens, total, result.CostUSD,
-		now.Format(time.RFC3339Nano), taskID); err != nil {
+		now.Format(time.RFC3339Nano), taskID,
+		string(types.TaskStatusActive), string(types.TaskStatusPending), string(types.TaskStatusDelegated))
+	if err != nil {
 		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		// Task already terminal or not found; idempotent success.
+		return nil
 	}
 
 	var task types.Task

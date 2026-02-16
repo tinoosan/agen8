@@ -27,6 +27,12 @@ import (
 //   - ExtendLease should be idempotent for the current lease holder and should not revive terminal tasks.
 //   - RecoverExpiredLeases should mark tasks failed when their lease has elapsed without completion.
 //
+// State machine invariants (coordination / re-claim prevention)
+//   - Terminal (succeeded, failed, canceled) must never transition back to pending.
+//   - CompleteTask: only allowed when current status is active, pending, or delegated; never overwrite terminal.
+//   - ResumeTask: only allowed when status is delegated; idempotent when already resumed or not delegated.
+//   - ReleaseLease: only allowed when status is active; must not move terminal tasks to pending.
+//
 // Filtering/pagination
 //   - ListTasks should honor Limit/Offset for pagination and SortBy/SortDesc for ordering.
 //   - Invalid filters/sort keys should return ErrInvalidFilter.
