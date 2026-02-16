@@ -89,12 +89,17 @@ func GetWorkspaceDirForRun(dataDir string, run types.Run) string {
 	return GetWorkspaceDir(dataDir, run.RunID)
 }
 
-// GetSubagentDeliverablesDir returns the on-disk path in the parent's workspace where a child
-// run's deliverables are stored. The child writes to /deliverables (mounted here); the parent
-// sees them at /workspace/subagent_deliverables/<childRunID>/.
+// GetDeliverablesDir returns the run-level deliverables directory (same structure as tasks),
+// not under workspace. Parent sees own deliverables at /deliverables and subagent at /deliverables/subagents/<childRunID>/.
+func GetDeliverablesDir(dataDir, runID string) string {
+	return filepath.Join(GetAgentDir(dataDir, runID), "deliverables")
+}
+
+// GetSubagentDeliverablesDir returns the on-disk path under the parent's run-level deliverables
+// tree where a child run's deliverables are stored. The child writes to /deliverables (mounted here);
+// the parent sees them at /deliverables/subagents/<childRunID>/.
 func GetSubagentDeliverablesDir(dataDir, parentRunID, childRunID string) string {
-	parentWorkspace := GetWorkspaceDir(dataDir, parentRunID)
-	return filepath.Join(parentWorkspace, "subagent_deliverables", childRunID)
+	return filepath.Join(GetDeliverablesDir(dataDir, parentRunID), "subagents", childRunID)
 }
 
 // GetTasksDir returns the run-level task output directory (summaries, etc.), not under workspace.

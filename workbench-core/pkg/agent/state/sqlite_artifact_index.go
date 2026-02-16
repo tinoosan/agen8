@@ -87,6 +87,26 @@ func resolveIndexedDiskPath(dataDir, teamID, runID, vpath string) string {
 		base := fsutil.GetTasksDir(dataDir, runID)
 		return filepath.Join(base, rel)
 	}
+	if strings.HasPrefix(vpath, "/deliverables/") {
+		rel := strings.TrimPrefix(vpath, "/deliverables/")
+		rel = strings.TrimPrefix(rel, "/")
+		if strings.TrimSpace(teamID) != "" {
+			return filepath.Join(fsutil.GetTeamWorkspaceDir(dataDir, teamID), "deliverables", rel)
+		}
+		const subagentsPrefix = "subagents/"
+		if strings.HasPrefix(rel, subagentsPrefix) {
+			rest := strings.TrimPrefix(rel, subagentsPrefix)
+			parts := strings.SplitN(rest, string(filepath.Separator), 2)
+			if len(parts) >= 2 && parts[0] != "" {
+				childRunID := parts[0]
+				restPath := parts[1]
+				base := fsutil.GetSubagentDeliverablesDir(dataDir, runID, childRunID)
+				return filepath.Join(base, restPath)
+			}
+		}
+		base := fsutil.GetDeliverablesDir(dataDir, runID)
+		return filepath.Join(base, rel)
+	}
 	if strings.HasPrefix(vpath, "/workspace/") {
 		rel := strings.TrimPrefix(vpath, "/workspace/")
 		if strings.TrimSpace(teamID) != "" {
@@ -104,6 +124,10 @@ func standaloneIndexedArtifactVPath(vpath string) bool {
 	vpath = strings.TrimSpace(vpath)
 	if strings.HasPrefix(vpath, "/tasks/") {
 		rel := strings.TrimSpace(strings.TrimPrefix(vpath, "/tasks/"))
+		return rel != ""
+	}
+	if strings.HasPrefix(vpath, "/deliverables/") {
+		rel := strings.TrimSpace(strings.TrimPrefix(vpath, "/deliverables/"))
 		return rel != ""
 	}
 	if !strings.HasPrefix(vpath, "/workspace/") {
@@ -169,6 +193,14 @@ func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, tas
 			rel = strings.TrimPrefix(rel, "/")
 			if rel != "" {
 				indexVpath = "/tasks/subagents/" + runID + "/" + rel
+				artifactRunID = parentRunID
+			}
+		}
+		if parentRunID != "" && strings.HasPrefix(vpath, "/deliverables/") {
+			rel := strings.TrimPrefix(vpath, "/deliverables/")
+			rel = strings.TrimPrefix(rel, "/")
+			if rel != "" {
+				indexVpath = "/deliverables/subagents/" + runID + "/" + rel
 				artifactRunID = parentRunID
 			}
 		}

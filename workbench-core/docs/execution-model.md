@@ -121,7 +121,7 @@ Sub-agents:
 - **Must not** spawn additional agents
 - **Must not** communicate laterally
 
-All outputs must return to the parent. The subagent’s workspace is under the child run dir (`parentRun/subagents/<childID>/workspace`). The subagent writes deliverables to `/deliverables`; they appear in the parent’s workspace at `workspace/subagent_deliverables/<childRunID>/`, and the callback reports that location.
+All outputs must return to the parent. The subagent’s workspace is under the child run dir (`parentRun/subagents/<childID>/workspace`). The subagent writes deliverables to `/deliverables`; the system has already mounted that path (the subagent must not create it). Deliverables live in the run-level **deliverables** tree (same structure as tasks): parent sees own at `/deliverables` and subagent at `/deliverables/subagents/<childRunID>/`. Task outputs (e.g. SUMMARY.md) live under the run’s **tasks** directory, exposed as `/tasks` in the VFS. For subagents, the child’s `/tasks` and `/deliverables` mounts point at the parent’s `tasks/subagents/<childRunID>/` and `deliverables/subagents/<childRunID>/`, so the parent sees subagent summaries at `/tasks/subagents/<childRunID>/` and deliverables at `/deliverables/subagents/<childRunID>/`.
 
 ### 4.3 Review Gate
 

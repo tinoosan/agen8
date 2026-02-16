@@ -1044,8 +1044,8 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			sourceGoal = "(no goal text)"
 		}
 		subagentRunID := strings.TrimSpace(s.cfg.RunID)
-		// Path in parent's workspace where this subagent's deliverables live (child writes to /deliverables; parent sees /workspace/subagent_deliverables/<runID>/).
-		subagentArtifactsDir := path.Join("/workspace", "subagent_deliverables", subagentRunID)
+		// Path in parent's run-level deliverables tree where this subagent's deliverables live (child writes to /deliverables; parent sees /deliverables/subagents/<runID>/).
+		subagentArtifactsDir := path.Join("/deliverables", "subagents", subagentRunID)
 		// Only pass through artifact paths under /deliverables/ (parent-visible); skip others (e.g. /tasks/... in child's view).
 		artifactsForParent := make([]string, 0, len(tr.Artifacts))
 		for _, art := range tr.Artifacts {
@@ -1059,7 +1059,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 		}
 		subagentSummariesDir := path.Join("/tasks", "subagents", subagentRunID)
 		callbackGoal := fmt.Sprintf("SUBAGENT RESULT: Review %s result from spawned worker for task %s. The worker completed: %s. Use the task_review tool to approve, retry (with feedback), or escalate this work. Your overarching task (that led to spawning this worker) is only complete after you have reviewed this result and decided on next steps.", string(tr.Status), truncateText(taskID, 24), truncateText(sourceGoal, 120))
-		callbackGoal += "\n\nSubagent task summaries are under " + subagentSummariesDir + " (e.g. <date>/<taskID>/SUMMARY.md). Deliverables are under subagentArtifactsDir: " + subagentArtifactsDir + ". Open and review the artifact paths below (e.g. with fs_read) before calling task_review."
+		callbackGoal += "\n\nSubagent task summaries are under " + subagentSummariesDir + " (e.g. <date>/<taskID>/SUMMARY.md). Deliverables are under " + subagentArtifactsDir + ". Open and review the artifact paths below (e.g. with fs_read) before calling task_review."
 		if len(artifactsForParent) > 0 {
 			const maxPathsInGoal = 10
 			pathsToShow := artifactsForParent

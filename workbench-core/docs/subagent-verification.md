@@ -6,7 +6,7 @@ How to check that subagent **review gate**, **cleanup**, and **artifact paths** 
 
 1. **Review gate** – When a subagent completes a task, the parent gets a callback task to review the result (approve / retry / escalate). The callback refers to the subagent’s task and includes artifact paths the parent can read.
 2. **Cleanup** – After the subagent finishes its task and after the parent **approves** the review (completes the callback successfully), the subagent run is stopped and removed from the active workers list; run status is set to Succeeded. Run records and artifacts are **preserved** (only execution context is removed).
-3. **Artifact paths** – The child’s workspace is under `parentRun/subagents/<childRunID>/workspace`. The child writes deliverables to `/deliverables` (mounted at `parentRun/workspace/subagent_deliverables/<childRunID>/`). The callback task reports `subagentArtifactsDir` (`/workspace/subagent_deliverables/<runId>`) and an `artifacts` list with paths under that dir so the main agent can open the subagent’s outputs. The parent locates deliverables using the **callback task goal** (which explicitly includes the deliverable directory and artifact paths to review); the same paths are available in the task's `Inputs` for tooling.
+3. **Artifact paths** – The child’s workspace is under `parentRun/subagents/<childRunID>/workspace`. The child writes deliverables to `/deliverables` (mounted at `parentRun/workspace/subagent_deliverables/<childRunID>/`). Subagent **task summaries** (e.g. SUMMARY.md) are under `/tasks/subagents/<childRunID>/` (e.g. `<date>/<taskID>/SUMMARY.md`). Deliverables remain under `/workspace/subagent_deliverables/<childRunID>/`. The callback task reports `subagentSummariesDir` (`/tasks/subagents/<runId>`) and `subagentArtifactsDir` (`/workspace/subagent_deliverables/<runId>`) and an `artifacts` list with paths under the deliverables dir so the main agent can open the subagent’s outputs. The parent locates summaries and deliverables using the **callback task goal** and **Inputs**; the same paths are available for tooling.
 4. **Subagents list** – The Subagents tab shows only **active** (running) subagents; completed ones are summarized as “No active subagents. (N completed.)” and are not deleted from the store (audit history kept per PRD §7).
 
 ## Manual verification steps
@@ -23,7 +23,7 @@ How to check that subagent **review gate**, **cleanup**, and **artifact paths** 
 4. **Review callback**
    - In the parent run, a new task should appear (callback for the subagent’s task). Open that task and confirm:
      - Goal/text refers to the subagent’s work (e.g. “Review … result from spawned worker for task …”).
-     - Inputs include `subagentArtifactsDir` (e.g. `/workspace/subagent_deliverables/<childRunId>`) and `artifacts` with paths under that dir.
+     - Inputs include `subagentSummariesDir` (e.g. `/tasks/subagents/<childRunId>`) and `subagentArtifactsDir` (e.g. `/deliverables/subagents/<childRunId>`) and `artifacts` with paths under the deliverables dir.
 
 5. **Complete the review**
    - Let the main agent complete the callback task successfully (e.g. mark the result as accepted). After that:
@@ -31,7 +31,7 @@ How to check that subagent **review gate**, **cleanup**, and **artifact paths** 
      - The Subagents tab should still show only active subagents (or “No active subagents. (N completed.)” if none are running).
 
 6. **Artifacts on disk**
-   - Under the parent run’s workspace dir, check `workspace/subagent_deliverables/<childRunId>/` and confirm the subagent’s deliverables (written by the child to `/deliverables`) are there and match the paths in the callback’s `artifacts`.
+   - Under the parent run’s dir, check `tasks/subagents/<childRunId>/` for subagent task summaries (e.g. `<date>/<taskID>/SUMMARY.md`) and `deliverables/subagents/<childRunId>/` for deliverables (written by the child to `/deliverables`). Confirm they match the paths in the callback’s goal/inputs.
 
 ## Run records: keep vs delete
 

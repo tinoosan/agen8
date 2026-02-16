@@ -48,9 +48,10 @@ const (
 	// Only present for top-level runs; child runs live under parent's subagents dir on disk.
 	MountSubagents = "subagents"
 
-	// MountDeliverables is the mount name for a subagent's deliverables directory.
-	// Only present for child runs; points to parentRun/workspace/subagent_deliverables/<childRunID>.
-	// The child writes outputs here; the parent sees them at /workspace/subagent_deliverables/<childRunID>/.
+	// MountDeliverables is the run-level deliverables root (same structure as tasks).
+	// Top-level run: points to dataDir/agents/<runID>/deliverables (parent sees own and /deliverables/subagents/<childRunID>/).
+	// Child run: points to parentRun/deliverables/subagents/<childRunID>/ so child writes land where the parent can see them.
+	// The subagent does not see the redirect; the system has already mounted /deliverables.
 	MountDeliverables = "deliverables"
 
 	// MountTasks is the mount name for the run-level task output root (summaries, etc.), not under workspace.

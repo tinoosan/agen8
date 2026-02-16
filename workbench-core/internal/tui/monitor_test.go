@@ -23,6 +23,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -30,7 +31,7 @@ import (
 
 type noopSessionSupervisor struct{}
 
-func (noopSessionSupervisor) StopRun(string) error { return nil }
+func (noopSessionSupervisor) StopRun(string) error                    { return nil }
 func (noopSessionSupervisor) ResumeRun(context.Context, string) error { return nil }
 
 func startMonitorTestRPCServer(t *testing.T, cfg config.Config, runID string) string {
@@ -62,12 +63,14 @@ func startMonitorTestRPCServer(t *testing.T, cfg config.Config, runID string) st
 	}
 	sessionSvc := pkgsession.NewManager(cfg, sessionStore, noopSessionSupervisor{})
 	taskSvc := pkgtask.NewManager(taskStore, sessionSvc)
+	agentMgr := pkgagent.NewManager(sessionSvc, taskSvc, taskSvc)
 	srv := app.NewRPCServer(app.RPCServerConfig{
 		Cfg:            cfg,
 		Run:            run,
 		AllowAnyThread: true,
 		TaskService:    taskSvc,
 		Session:        sessionSvc,
+		AgentService:   agentMgr,
 	})
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

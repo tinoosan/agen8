@@ -48,6 +48,10 @@ func standaloneVisibleArtifactVPath(vpath string) bool {
 		rel := strings.TrimSpace(strings.TrimPrefix(vpath, "/tasks/"))
 		return rel != ""
 	}
+	if strings.HasPrefix(vpath, "/deliverables/") {
+		rel := strings.TrimSpace(strings.TrimPrefix(vpath, "/deliverables/"))
+		return rel != ""
+	}
 	if !strings.HasPrefix(vpath, "/workspace/") {
 		return false
 	}
@@ -505,6 +509,39 @@ func resolveArtifactDiskPath(dataDir, teamID, runID, vpath string) string {
 		}
 		return candidate
 	}
+	if strings.HasPrefix(vpath, "/deliverables/") {
+		rel := strings.TrimPrefix(vpath, "/deliverables/")
+		rel = strings.TrimPrefix(rel, "/")
+		if strings.TrimSpace(teamID) != "" {
+			base := fsutil.GetTeamWorkspaceDir(dataDir, teamID)
+			candidate := filepath.Join(base, "deliverables", rel)
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+			return candidate
+		}
+		const subagentsPrefix = "subagents/"
+		if strings.HasPrefix(rel, subagentsPrefix) {
+			rest := strings.TrimPrefix(rel, subagentsPrefix)
+			parts := strings.SplitN(rest, string(filepath.Separator), 2)
+			if len(parts) >= 2 && parts[0] != "" {
+				childRunID := parts[0]
+				restPath := parts[1]
+				base := fsutil.GetSubagentDeliverablesDir(dataDir, runID, childRunID)
+				candidate := filepath.Join(base, restPath)
+				if _, err := os.Stat(candidate); err == nil {
+					return candidate
+				}
+				return candidate
+			}
+		}
+		base := fsutil.GetDeliverablesDir(dataDir, runID)
+		candidate := filepath.Join(base, rel)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		return candidate
+	}
 	if !strings.HasPrefix(vpath, "/workspace/") {
 		return ""
 	}
@@ -578,7 +615,7 @@ func (s *RPCServer) artifactGet(ctx context.Context, p protocol.ArtifactGetParam
 	}
 	artifactID := strings.TrimSpace(p.ArtifactID)
 	vpath := strings.TrimSpace(p.VPath)
-	if vpath == "" && (strings.HasPrefix(artifactID, "file:/workspace/") || strings.HasPrefix(artifactID, "file:/tasks/")) {
+	if vpath == "" && (strings.HasPrefix(artifactID, "file:/workspace/") || strings.HasPrefix(artifactID, "file:/tasks/") || strings.HasPrefix(artifactID, "file:/deliverables/")) {
 		vpath = strings.TrimPrefix(artifactID, "file:")
 	}
 	if artifactID == "" && vpath == "" {

@@ -49,6 +49,24 @@ func TestResolveArtifactDisk_TasksSubagentMode(t *testing.T) {
 	}
 }
 
+func TestResolveArtifactDisk_DeliverablesRunMode(t *testing.T) {
+	dataDir := "/tmp/wb"
+	got := resolveArtifactDisk(dataDir, "", "run-1", "/deliverables/2026-02-16/task-1/report.md")
+	want := filepath.Join(dataDir, "agents", "run-1", "deliverables", "2026-02-16", "task-1", "report.md")
+	if got != want {
+		t.Fatalf("expected run deliverables path %q, got %q", want, got)
+	}
+}
+
+func TestResolveArtifactDisk_DeliverablesSubagentMode(t *testing.T) {
+	dataDir := "/tmp/wb"
+	got := resolveArtifactDisk(dataDir, "", "parent-run", "/deliverables/subagents/child-run/2026-02-16/task-1/report.md")
+	want := filepath.Join(dataDir, "agents", "parent-run", "deliverables", "subagents", "child-run", "2026-02-16", "task-1", "report.md")
+	if got != want {
+		t.Fatalf("expected subagent deliverables path %q, got %q", want, got)
+	}
+}
+
 func TestBuildArtifactTreeFromGroups_TwoSections(t *testing.T) {
 	m := &monitorModel{artifactWorkspaceExpand: map[string]bool{}}
 	groups := []protocol.ArtifactNode{

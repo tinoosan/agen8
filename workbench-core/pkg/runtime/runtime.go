@@ -295,8 +295,19 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		if err := fs.Mount(vfs.MountSubagents, subagentsRes); err != nil {
 			return nil, fmt.Errorf("mount %s: %w", vfs.MountSubagents, err)
 		}
+		deliverablesDir = fsutil.GetDeliverablesDir(cfg.Cfg.DataDir, cfg.Run.RunID)
+		if err := os.MkdirAll(deliverablesDir, 0755); err != nil {
+			return nil, fmt.Errorf("prepare deliverables dir: %w", err)
+		}
+		deliverablesRes, err := resources.NewDirResource(deliverablesDir, vfs.MountDeliverables)
+		if err != nil {
+			return nil, fmt.Errorf("create deliverables resource: %w", err)
+		}
+		if err := fs.Mount(vfs.MountDeliverables, deliverablesRes); err != nil {
+			return nil, fmt.Errorf("mount %s: %w", vfs.MountDeliverables, err)
+		}
 	} else {
-		// Subagent: mount /deliverables so child can write outputs into parent's workspace.
+		// Subagent: mount /deliverables so child can write outputs into parent's run-level deliverables tree.
 		deliverablesDir = fsutil.GetSubagentDeliverablesDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.RunID)
 		if err := os.MkdirAll(deliverablesDir, 0755); err != nil {
 			return nil, fmt.Errorf("prepare deliverables dir: %w", err)
