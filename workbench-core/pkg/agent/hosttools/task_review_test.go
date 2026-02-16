@@ -24,8 +24,8 @@ func TestTaskReview_Execute_AcceptsCallbackTaskID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if req.Op != types.HostOpNoop || req.Tag != "task_review" {
-		t.Errorf("expected noop task_review, got op=%q tag=%q", req.Op, req.Tag)
+	if req.Op != types.HostOpToolResult || req.Tag != "task_review" {
+		t.Errorf("expected tool_result task_review, got op=%q tag=%q", req.Op, req.Tag)
 	}
 }
 
@@ -42,8 +42,8 @@ func TestTaskReview_Execute_AcceptsDelegatedTaskID_ResolvesToCallback(t *testing
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if req.Op != types.HostOpNoop || req.Tag != "task_review" {
-		t.Errorf("expected noop task_review, got op=%q tag=%q", req.Op, req.Tag)
+	if req.Op != types.HostOpToolResult || req.Tag != "task_review" {
+		t.Errorf("expected tool_result task_review, got op=%q tag=%q", req.Op, req.Tag)
 	}
 }
 

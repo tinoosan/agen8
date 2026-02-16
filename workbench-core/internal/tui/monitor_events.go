@@ -129,6 +129,8 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 		m.setStatus("Stopped")
 	case "daemon.start":
 		m.setStatusExpiring("Starting…", 5*time.Second)
+	case "run.start":
+		// Per-run agent started (distinct from daemon process start)
 	case "daemon.error", "daemon.runner.error":
 		m.setStatusExpiring("⚠ Daemon Error", 10*time.Second)
 	}
@@ -209,7 +211,7 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 	}
 
 	switch ev.Type {
-	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning", "daemon.error", "daemon.runner.error":
+	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning", "daemon.error", "daemon.runner.error", "run.start":
 		item.Type = "system"
 		item.Content = formatEventLine(ev)
 		m.appendAgentOutputItem(item)

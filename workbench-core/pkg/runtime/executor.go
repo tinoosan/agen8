@@ -177,6 +177,38 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 			enricher.EnrichRequestEvent(req, reqData, storeReq)
 		}
 	}
+	// Normalize tool_result+tag task_create to op task_create so protocol, activity, and TUI show it like other host ops.
+	if req.Op == types.HostOpToolResult && strings.TrimSpace(req.Tag) == "task_create" {
+		reqData["op"] = "task_create"
+		storeReq["op"] = "task_create"
+		if len(req.Input) > 0 {
+			var payload struct {
+				Goal       string `json:"goal"`
+				TaskID     string `json:"taskId"`
+				ChildRunID string `json:"childRunId"`
+			}
+			if err := json.Unmarshal(req.Input, &payload); err == nil {
+				if g := strings.TrimSpace(payload.Goal); g != "" {
+					if p, tr := capBytes(singleLine(g), 240); p != "" {
+						reqData["goal"] = p
+						storeReq["goal"] = p
+						if tr {
+							reqData["goalTruncated"] = "true"
+							storeReq["goalTruncated"] = "true"
+						}
+					}
+				}
+				if id := strings.TrimSpace(payload.TaskID); id != "" {
+					reqData["taskId"] = id
+					storeReq["taskId"] = id
+				}
+				if cid := strings.TrimSpace(payload.ChildRunID); cid != "" {
+					reqData["childRunId"] = cid
+					storeReq["childRunId"] = cid
+				}
+			}
+		}
+	}
 	if req.Op == types.HostOpTrace {
 		reqData["traceAction"] = req.Action
 		if len(req.Input) > 0 {
@@ -437,6 +469,10 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 		"op":   resp.Op,
 		"ok":   fmtBool(resp.Ok),
 		"err":  resp.Error,
+	}
+	if req.Op == types.HostOpToolResult && strings.TrimSpace(req.Tag) == "task_create" {
+		meta.RespData["op"] = "task_create"
+		meta.StoreResp["op"] = "task_create"
 	}
 
 	if meta.PatchPreview != "" {

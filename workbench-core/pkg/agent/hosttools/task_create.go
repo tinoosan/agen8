@@ -17,6 +17,14 @@ import (
 // The daemon wires this callback to create Run records and add them to the session.
 type SpawnWorkerFunc func(ctx context.Context, goal, sessionID, parentRunID string) (childRunID string, err error)
 
+type spawnSignalKey struct{}
+
+// WithSpawnSignal stores a callback in context that is fired each time a worker is successfully spawned.
+// The session uses this to detect when delegation has occurred.
+func WithSpawnSignal(ctx context.Context, fn func()) context.Context {
+	return context.WithValue(ctx, spawnSignalKey{}, fn)
+}
+
 // TaskCreateTool creates a DB-backed task.
 type TaskCreateTool struct {
 	Store           state.TaskStore
@@ -39,7 +47,7 @@ func (t *TaskCreateTool) Definition() llmtypes.Tool {
 		Type: "function",
 		Function: llmtypes.ToolFunction{
 			Name:        "task_create",
-			Description: "[TASKS] Create a new pending task in SQLite. This is DB-routed (no /inbox file writes).",
+			Description: "[TASKS] Create a new pending task in SQLite. You may set spawnWorker=true when you decide to delegate work to a worker agent, or when the user or task goal asks you to use subagents; when the goal requests subagents you MUST set spawnWorker=true and do not do the work yourself. spawnWorker creates an outstanding dependency; do not call final_answer on your coordination task until it is resolved (worker result reviewed via task_review). Do not use sleep or wait—process tasks as they come; the system schedules work. This is DB-routed (no /inbox file writes).",
 			// Keep this tool non-strict: strict mode requires (1) additionalProperties=false
 			// for each object and (2) every property to be required, which doesn't fit
 			// optional inputs/metadata maps.
@@ -75,7 +83,7 @@ func (t *TaskCreateTool) Definition() llmtypes.Tool {
 					},
 					"spawnWorker": map[string]any{
 						"type":        "boolean",
-						"description": "If true, spawn a dedicated worker agent for this task. The worker runs asynchronously and you receive a callback with the result.",
+						"description": "Set to true when you decide to delegate to a worker agent, or when the user or goal requests subagents (required when the goal requests subagents). Creates an outstanding dependency; do not call final_answer until it is resolved (worker result reviewed via task_review). Do not sleep or wait.",
 					},
 				},
 				"required":             []any{"goal"},
@@ -180,6 +188,10 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		task.AssignedTo = childRunID
 		task.Metadata["source"] = "spawn_worker"
 		task.Metadata["parentRunId"] = strings.TrimSpace(t.RunID)
+		// Fire spawn signal so the session's delegation detector knows a worker was spawned.
+		if fn, ok := ctx.Value(spawnSignalKey{}).(func()); ok && fn != nil {
+			fn()
+		}
 	}
 
 	if err := t.Store.CreateTask(ctx, task); err != nil {
@@ -188,17 +200,20 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 			return types.HostOpRequest{}, err
 		}
 	}
-	msg := fmt.Sprintf("Task %s created successfully", taskID)
+	msg := fmt.Sprintf("Task %s created successfully.", taskID)
 	if payload.SpawnWorker {
-		msg = fmt.Sprintf("Task %s created and worker agent spawned", taskID)
+		msg = fmt.Sprintf("Task %s created and worker agent spawned. You delegated this to a subagent; do not do the same work yourself. When the callback task (callback-%s) appears in your inbox, process it with task_review to verify the work is complete.", taskID, taskID)
+		inputForEvent := map[string]string{"goal": goal, "taskId": taskID}
+		if task.AssignedToType == "agent" {
+			inputForEvent["childRunId"] = task.AssignedTo
+		}
+		inputJSON, _ := json.Marshal(inputForEvent)
+		return types.HostOpRequest{Op: types.HostOpToolResult, Tag: "task_create", Text: msg, Input: inputJSON}, nil
 	}
 	inputForEvent := map[string]string{"goal": goal, "taskId": taskID}
-	if payload.SpawnWorker && task.AssignedToType == "agent" {
-		inputForEvent["childRunId"] = task.AssignedTo
-	}
 	inputJSON, _ := json.Marshal(inputForEvent)
 	return types.HostOpRequest{
-		Op:    types.HostOpNoop,
+		Op:    types.HostOpToolResult,
 		Tag:   "task_create",
 		Text:  msg,
 		Input: inputJSON,

@@ -117,7 +117,7 @@ func (x *HostOpExecutor) Exec(ctx context.Context, req types.HostOpRequest) type
 	}
 
 	switch req.Op {
-	case types.HostOpNoop:
+	case types.HostOpNoop, types.HostOpToolResult:
 		return types.HostOpResponse{Op: req.Op, Ok: true, Text: req.Text}
 
 	case types.HostOpFSList:

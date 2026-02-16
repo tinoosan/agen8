@@ -11,9 +11,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/agent"
+	"github.com/tinoosan/workbench-core/pkg/agent/hosttools"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/emit"
@@ -520,9 +522,84 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 	return hadWork, errs
 }
 
+func getTaskSource(t types.Task) string {
+	if t.Metadata == nil {
+		return ""
+	}
+	if raw, ok := t.Metadata["source"]; ok {
+		return strings.TrimSpace(fmt.Sprint(raw))
+	}
+	return ""
+}
+
+func (s *Session) hasPendingCallbacks(ctx context.Context) bool {
+	pending, err := s.listPendingTasks(ctx)
+	if err != nil {
+		return false
+	}
+	for _, t := range pending {
+		if getTaskSource(t) == "subagent.callback" {
+			return true
+		}
+	}
+	return false
+}
+
+// maybeResumeDelegatedTask checks whether all callbacks for this run have been processed.
+// If no pending callbacks remain, it finds any delegated tasks for this run and transitions
+// them back to pending so the parent agent can finalize.
+func (s *Session) maybeResumeDelegatedTask(ctx context.Context) {
+	if strings.TrimSpace(s.cfg.TeamID) != "" {
+		return
+	}
+	// Check if any callbacks are still pending.
+	pending, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+		RunID:          s.cfg.RunID,
+		AssignedToType: "agent",
+		AssignedTo:     s.cfg.RunID,
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "priority",
+		Limit:          s.cfg.MaxPending,
+	})
+	if err != nil {
+		return
+	}
+	for _, t := range pending {
+		if getTaskSource(t) == "subagent.callback" {
+			return // still have callbacks; do not resume
+		}
+	}
+	// Find delegated tasks for this run and resume them.
+	delegated, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+		RunID:          s.cfg.RunID,
+		AssignedToType: "agent",
+		AssignedTo:     s.cfg.RunID,
+		Status:         []types.TaskStatus{types.TaskStatusDelegated},
+		Limit:          s.cfg.MaxPending,
+	})
+	if err != nil {
+		return
+	}
+	for _, t := range delegated {
+		taskID := strings.TrimSpace(t.TaskID)
+		if taskID == "" {
+			continue
+		}
+		if err := s.cfg.TaskStore.ResumeTask(ctx, taskID); err != nil {
+			s.logf("resume delegated task %s: %v", taskID, err)
+			continue
+		}
+		s.emitBestEffort(ctx, events.Event{
+			Type:    "task.resumed",
+			Message: "Delegated task resumed for finalization",
+			Data:    map[string]string{"taskId": taskID},
+		})
+	}
+}
+
 func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 	if strings.TrimSpace(s.cfg.TeamID) == "" {
-		return s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+		tasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
 			RunID:          s.cfg.RunID,
 			AssignedToType: "agent",
 			AssignedTo:     s.cfg.RunID,
@@ -530,6 +607,29 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 			SortBy:         "priority",
 			Limit:          s.cfg.MaxPending,
 		})
+		if err != nil {
+			return nil, err
+		}
+		// Prioritize subagent callbacks so the parent processes them before the overarching task.
+		sort.SliceStable(tasks, func(i, j int) bool {
+			si := getTaskSource(tasks[i]) == "subagent.callback"
+			sj := getTaskSource(tasks[j]) == "subagent.callback"
+			if si && !sj {
+				return true
+			}
+			if !si && sj {
+				return false
+			}
+			if si && sj {
+				return tasks[i].SortTime().Before(tasks[j].SortTime())
+			}
+			// Both non-callback: keep priority then sort time
+			if tasks[i].Priority != tasks[j].Priority {
+				return tasks[i].Priority < tasks[j].Priority
+			}
+			return tasks[i].SortTime().Before(tasks[j].SortTime())
+		})
+		return tasks, nil
 	}
 
 	limit := s.cfg.MaxPending
@@ -750,7 +850,30 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		}
 	}
 
-	runRes, err := runAgent.Run(ctx, strings.TrimSpace(task.Goal))
+	runCtx := ctx
+	if getTaskSource(task) != "subagent.callback" {
+		var spawned int32
+		spawnSignal := func() { atomic.AddInt32(&spawned, 1) }
+		runCtx = hosttools.WithSpawnSignal(runCtx, spawnSignal)
+		runCtx = agent.WithDelegationDetector(runCtx, func() bool {
+			return atomic.LoadInt32(&spawned) > 0
+		})
+		runCtx = agent.WithPendingCallbacksCheck(runCtx, func() bool {
+			return s.hasPendingCallbacks(ctx)
+		})
+	}
+	runRes, err := runAgent.Run(runCtx, strings.TrimSpace(task.Goal))
+	if err == nil && runRes.Delegated {
+		if delErr := s.cfg.TaskStore.DelegateTask(ctx, taskID); delErr != nil {
+			s.logf("delegate task: %v", delErr)
+		}
+		s.emitBestEffort(ctx, events.Event{
+			Type:    "task.delegated",
+			Message: "Task delegated to workers",
+			Data:    map[string]string{"taskId": taskID},
+		})
+		return nil
+	}
 	doneAt := time.Now()
 	totalTokens := cumulativeInputTokens + cumulativeOutputTokens
 	costUSD := 0.0
@@ -917,6 +1040,11 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		if err := s.cfg.Notifier.Notify(completeCtx, task, tr); err != nil {
 			s.emitBestEffort(completeCtx, events.Event{Type: "task.notify.error", Message: "Task notification failed", Data: map[string]string{"taskId": taskID, "error": err.Error()}})
 		}
+	}
+	// When the last callback for this run is completed, resume any delegated coordination
+	// tasks so the parent can finalize.
+	if getTaskSource(task) == "subagent.callback" {
+		s.maybeResumeDelegatedTask(completeCtx)
 	}
 	if s.cfg.SingleTask {
 		// Sub-agents spawned via spawn_worker or retry should not exit immediately;

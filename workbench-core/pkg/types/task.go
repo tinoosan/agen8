@@ -15,6 +15,8 @@ const (
 	TaskStatusSucceeded     TaskStatus = "succeeded"
 	TaskStatusFailed        TaskStatus = "failed"
 	TaskStatusCanceled      TaskStatus = "canceled"
+	TaskStatusDelegated     TaskStatus = "delegated"  // Workers spawned, parent execution ended
+	TaskStatusResumed       TaskStatus = "resumed"    // All callbacks processed, ready for finalization
 )
 
 // Task is the canonical DB-backed unit of work for autonomous agents.

@@ -119,7 +119,8 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		}
 	}
 
-	if cfg.LoadSession != nil {
+	// Do not update the shared session from child run config; session reflects the parent's choices.
+	if cfg.LoadSession != nil && strings.TrimSpace(cfg.Run.ParentRunID) == "" {
 		if sess, err := cfg.LoadSession(run.SessionID); err == nil {
 			changed := false
 			if strings.TrimSpace(sess.ActiveModel) != strings.TrimSpace(cfg.Model) {

@@ -297,7 +297,7 @@ func renderOpRequest(d map[string]string) string {
 
 func isSharedOpRequestTitleOp(op string) bool {
 	switch strings.TrimSpace(op) {
-	case "fs_list", "fs_read", "fs_search", "fs_write", "fs_append", "fs_edit", "fs_patch", "shell_exec", "http_fetch", "trace_run", "agent_spawn":
+	case "fs_list", "fs_read", "fs_search", "fs_write", "fs_append", "fs_edit", "fs_patch", "shell_exec", "http_fetch", "trace_run", "agent_spawn", "task_create":
 		return true
 	default:
 		return false
@@ -500,9 +500,6 @@ func actionStatusIcon(d map[string]string) (string, bool) {
 
 func actionCategory(op string) string {
 	trimmed := strings.TrimSpace(op)
-	// We can't easily access the tag here without changing the signature, but for now
-	// task_create uses 'noop' op, so it will fall through to 'Action'.
-	// Ideally we'd pass the whole event data map.
 	if strings.HasPrefix(trimmed, "browser.") {
 		return "Browsed"
 	}
@@ -523,6 +520,8 @@ func actionCategory(op string) string {
 		return "Traced"
 	case "agent_spawn":
 		return "Delegated"
+	case "task_create":
+		return "Created"
 	default:
 		return "Action"
 	}

@@ -33,6 +33,47 @@ type DefaultAgent struct {
 // Compile-time check: DefaultAgent implements Agent.
 var _ Agent = (*DefaultAgent)(nil)
 
+type delegationDetectorKey struct{}
+
+// WithDelegationDetector stores a function in context that the agent loop calls after each tool batch
+// to detect whether workers have been spawned (hard delegation). When it returns true, the loop exits
+// immediately with Delegated=true.
+func WithDelegationDetector(ctx context.Context, fn func() bool) context.Context {
+	return context.WithValue(ctx, delegationDetectorKey{}, fn)
+}
+
+func shouldDelegate(ctx context.Context) bool {
+	v := ctx.Value(delegationDetectorKey{})
+	if v == nil {
+		return false
+	}
+	f, ok := v.(func() bool)
+	if !ok {
+		return false
+	}
+	return f()
+}
+
+type pendingCallbacksCheckKey struct{}
+
+// WithPendingCallbacksCheck stores a function in context that the agent loop uses to block
+// final_answer when subagent callbacks are still pending.
+func WithPendingCallbacksCheck(ctx context.Context, fn func() bool) context.Context {
+	return context.WithValue(ctx, pendingCallbacksCheckKey{}, fn)
+}
+
+func hasPendingCallbacksFromCtx(ctx context.Context) bool {
+	v := ctx.Value(pendingCallbacksCheckKey{})
+	if v == nil {
+		return false
+	}
+	f, ok := v.(func() bool)
+	if !ok {
+		return false
+	}
+	return f()
+}
+
 // RunConversation executes the agent loop for an existing conversation.
 func (a *DefaultAgent) RunConversation(ctx context.Context, msgs []llmtypes.LLMMessage) (final RunResult, updated []llmtypes.LLMMessage, steps int, err error) {
 	return a.runConversation(ctx, msgs, 1)
@@ -136,6 +177,13 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			which := strings.TrimSpace(tc.Function.Name)
 
 			if which == "final_answer" {
+				// Guardrail: block final_answer when subagent callbacks are pending.
+				if hasPendingCallbacksFromCtx(ctx) {
+					hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: "Cannot complete: pending subagent callbacks must be reviewed first. Use task_review to process each callback before calling final_answer."}
+					hostRespJSON, _ := types.MarshalPretty(hostResp)
+					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+					continue
+				}
 				args, err := parseFinalAnswerArgs(tc.Function.Arguments)
 				if err != nil {
 					hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: err.Error()}
@@ -172,12 +220,22 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			pending = append(pending, pendingHostOp{req: op, callID: strings.TrimSpace(tc.ID)})
 		}
 
+		var lastToolText string
 		for _, item := range pending {
 			hostResp := a.Exec.Exec(ctx, item.req)
+			if hostResp.Text != "" {
+				lastToolText = hostResp.Text
+			}
 			hostRespJSON, _ := types.MarshalPretty(hostResp)
 			msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: item.callID, Content: string(hostRespJSON)})
 		}
-
+		if shouldDelegate(ctx) {
+			return RunResult{
+				Text:      strings.TrimSpace(lastToolText),
+				Status:    types.TaskStatusSucceeded,
+				Delegated: true,
+			}, msgs, step, nil
+		}
 	}
 }
 
@@ -585,11 +643,17 @@ func DefaultAutonomousSystemPrompt() string {
 	return strings.TrimSpace(DefaultSystemPrompt()) + "\n\n" + strings.TrimSpace(`
 	<autonomous_mode>
 	  <rule id="not_chat">You are running as an autonomous task runner. You are NOT in a chat. Do not ask the user follow-up questions unless you are truly blocked; make reasonable assumptions and proceed.</rule>
-	  <rule id="scope">Each task has a single goal string. Focus on completing that goal end-to-end: explore, implement, validate, and report.</rule>
+	  <rule id="coordination_principle">Your coordination task is complete only when all delegated work has been resolved and reviewed. No sleeping, blocking, or waiting—only task processing. The system schedules tasks; you only process tasks.</rule>
+	  <rule id="subagents">Subagents are up to you to use when you decide to delegate work; the user or task goal may also request you to use subagents. When the task goal asks you to use subagents, utilise subagents, or delegate to subagents, you MUST call task_create with spawn_worker=true for that work and do NOT perform the work yourself (no fs_read, shell_exec, or other tools to do the same job). When you choose to delegate via spawn_worker, the same applies: delegation creates an outstanding dependency; you must not call final_answer until that dependency is resolved (worker result reviewed via task_review). You may continue other coordination work; you must eventually review every worker result. Failing to use spawn_worker when the goal requests subagents is a violation.</rule>
+	  <rule id="scope">Each task has a single goal string. Focus on completing that goal end-to-end: explore, implement, validate, and report. When the goal asks for subagents or when you delegate to subagents, completion means all delegated work resolved and reviewed, not doing the work yourself.</rule>
 	  <rule id="honest_reporting">Honest reporting is mandatory. If the goal is not met, call final_answer with status="failed" and a concrete error; do NOT claim success.</rule>
 	  <rule id="recursive_tasks">If you are blocked on a subproblem (missing info, flaky dependency, time-based wait), create a follow-up task via task_create to resolve it, then report current task status accurately.</rule>
 	  <rule id="recursive_delegation">For complex, bounded subtasks, delegate to agent_spawn and include only the minimal background context needed.</rule>
-	  <rule id="spawn_review">When you create tasks with spawn_worker, your overarching task is NOT complete until you have reviewed each worker's result (via the callback task), used task_review to approve/retry/escalate, and synthesized a final summary or next steps. Do not mark your task complete until all spawned workers' callbacks have been resolved.</rule>
+	  <rule id="spawn_review">When you create tasks with spawn_worker, your coordination task is NOT complete until you have reviewed each worker's result with task_review (approve, retry, or escalate) and synthesized a final summary or next steps. Call final_answer only when there are no outstanding delegated tasks, all callbacks have been reviewed, and the goal is satisfied. If delegated work is still unresolved, your coordination task is incomplete.</rule>
+	  <rule id="no_duplicate_delegated">Do not duplicate delegated work. Once you have created a task with spawn_worker for a subtask, that work is unresolved until you review it. Do not perform that subtask yourself. Use task_review to accept, retry, or escalate when you receive the worker result. Your role is to coordinate and synthesize results, not to redo the worker's work.</rule>
+	  <rule id="no_sleep">Never use sleep, shell_exec sleep, or browser wait to wait for workers. The system schedules tasks; you only process tasks.</rule>
+	  <rule id="callback_rule">When you receive a callback (worker result), process it with task_review (approve, retry, or escalate). Callbacks are normal tasks; they are not wait states.</rule>
+	  <rule id="final_report_and_plan">Before calling final_answer on a task that involved subagent callbacks, you MUST: (1) produce a short final report (what was done, where deliverables are, next steps if relevant), and (2) update your plan (tick off or update CHECKLIST.md or HEAD.md) if the task had plan items. Do not call final_answer until the report and plan update are done.</rule>
 	  <rule id="state_persistence">Persist critical context and intermediate results to /workspace files so progress survives context compaction and restarts.</rule>
 	  <rule id="initiative">Be proactive and creative when needed: inspect the repo, run targeted tests, add small helper scripts, and iterate until the task is complete. Prefer simple, reliable solutions.</rule>
 	  <rule id="reporting">

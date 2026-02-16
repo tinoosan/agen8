@@ -76,6 +76,15 @@ type TaskLeaser interface {
 	// ExtendLease extends the lease for a long-running task.
 	ExtendLease(ctx context.Context, taskID string, ttl time.Duration) error
 
+	// ReleaseLease releases the lease on an active task so it goes back to Pending (e.g. for yield-for-callback).
+	ReleaseLease(ctx context.Context, taskID string) error
+
+	// DelegateTask transitions a task from active to delegated (workers spawned, parent execution ended).
+	DelegateTask(ctx context.Context, taskID string) error
+
+	// ResumeTask transitions a task from delegated to pending (all callbacks processed, ready for finalization).
+	ResumeTask(ctx context.Context, taskID string) error
+
 	// RecoverExpiredLeases finds tasks with expired leases and marks them failed.
 	RecoverExpiredLeases(ctx context.Context) error
 }

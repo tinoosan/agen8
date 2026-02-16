@@ -252,7 +252,7 @@ func outputLineStyle(line string) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#d29922"))
 	case "agent.turn.complete":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950"))
-	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning":
+	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning", "run.start":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#a371f7"))
 	case "task.quarantined":
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))

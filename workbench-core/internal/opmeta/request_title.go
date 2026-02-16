@@ -101,6 +101,16 @@ func FormatRequestTitle(d map[string]string) string {
 			return desc
 		}
 		return desc + " (" + strings.Join(details, ", ") + ")"
+	case "task_create":
+		goal := strings.TrimSpace(d["goal"])
+		taskId := strings.TrimSpace(d["taskId"])
+		if goal != "" {
+			return "Create task: " + singleLinePreview(goal, 96)
+		}
+		if taskId != "" {
+			return "Create task " + taskId
+		}
+		return "Create task"
 	default:
 		if op != "" && path != "" {
 			return op + " " + path

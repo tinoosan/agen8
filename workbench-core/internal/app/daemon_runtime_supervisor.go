@@ -610,8 +610,8 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		defer cancel()
 
 		emitEvent(workerCtx, events.Event{
-			Type:    "daemon.start",
-			Message: "Autonomous agent started",
+			Type:    "run.start",
+			Message: "Agent started",
 			Data: map[string]string{
 				"runId":     run.RunID,
 				"sessionId": run.SessionID,
@@ -650,14 +650,17 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 					}
 				}
 			}
-			targetModel := strings.TrimSpace(loaded.ActiveModel)
-			targetEffort, targetSummary := sessionReasoningForModel(
-				loaded,
-				targetModel,
-				strings.TrimSpace(s.resolved.ReasoningEffort),
-				strings.TrimSpace(s.resolved.ReasoningSummary),
-			)
-			_ = workerSession.SetReasoning(workerCtx, targetEffort, targetSummary)
+			// Only sync reasoning from session for top-level runs; subagents keep profile/env settings from spawn.
+			if !isChildRun {
+				targetModel := strings.TrimSpace(loaded.ActiveModel)
+				targetEffort, targetSummary := sessionReasoningForModel(
+					loaded,
+					targetModel,
+					strings.TrimSpace(s.resolved.ReasoningEffort),
+					strings.TrimSpace(s.resolved.ReasoningSummary),
+				)
+				_ = workerSession.SetReasoning(workerCtx, targetEffort, targetSummary)
+			}
 		}
 
 		backoff := 2 * time.Second

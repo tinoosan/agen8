@@ -155,7 +155,7 @@ func (t *TaskReviewTool) handleApprove(ctx context.Context, task types.Task) (ty
 	_ = t.Store.UpdateTask(ctx, task)
 
 	return types.HostOpRequest{
-		Op:   types.HostOpNoop,
+		Op:   types.HostOpToolResult,
 		Tag:  "task_review",
 		Text: fmt.Sprintf("Task %s approved. Sub-agent work accepted and child run will be cleaned up.", task.TaskID),
 	}, nil
@@ -252,7 +252,7 @@ func (t *TaskReviewTool) handleEscalate(ctx context.Context, task types.Task, fe
 	_ = t.Store.UpdateTask(ctx, task)
 
 	return types.HostOpRequest{
-		Op:   types.HostOpNoop,
+		Op:   types.HostOpToolResult,
 		Tag:  "task_review",
 		Text: fmt.Sprintf("Task %s escalated. Reason: %s", task.TaskID, feedback),
 	}, nil

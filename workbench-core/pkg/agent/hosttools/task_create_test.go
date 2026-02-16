@@ -63,6 +63,18 @@ func (f *fakeTaskStore) ExtendLease(context.Context, string, time.Duration) erro
 	return nil
 }
 
+func (f *fakeTaskStore) ReleaseLease(context.Context, string) error {
+	return nil
+}
+
+func (f *fakeTaskStore) DelegateTask(context.Context, string) error {
+	return nil
+}
+
+func (f *fakeTaskStore) ResumeTask(context.Context, string) error {
+	return nil
+}
+
 func (f *fakeTaskStore) RecoverExpiredLeases(context.Context) error {
 	return nil
 }
@@ -92,8 +104,8 @@ func TestTaskCreateTool_CoordinatorCanAssignAnyRole(t *testing.T) {
 	if req.Op == types.HostOpFSWrite {
 		t.Fatalf("task_create should not write inbox files")
 	}
-	if req.Op != types.HostOpNoop {
-		t.Fatalf("req.Op=%q, want %q", req.Op, types.HostOpNoop)
+	if req.Op != types.HostOpToolResult {
+		t.Fatalf("req.Op=%q, want %q", req.Op, types.HostOpToolResult)
 	}
 	task := store.tasks["task-coord-1"]
 	if task.AssignedRole != "researcher" {
@@ -152,8 +164,8 @@ func TestTaskCreateTool_WorkerCanEscalateToCoordinator(t *testing.T) {
 	if req.Op == types.HostOpFSWrite {
 		t.Fatalf("task_create should not write inbox files")
 	}
-	if req.Op != types.HostOpNoop {
-		t.Fatalf("req.Op=%q, want %q", req.Op, types.HostOpNoop)
+	if req.Op != types.HostOpToolResult {
+		t.Fatalf("req.Op=%q, want %q", req.Op, types.HostOpToolResult)
 	}
 	task := store.tasks["task-worker-2"]
 	if task.AssignedRole != "head-analyst" {

@@ -956,6 +956,81 @@ func (s *SQLiteTaskStore) ExtendLease(ctx context.Context, taskID string, ttl ti
 	return err
 }
 
+func (s *SQLiteTaskStore) ReleaseLease(ctx context.Context, taskID string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("taskID is required")
+	}
+	db, err := s.dbConn()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	res, err := db.ExecContext(ctx, `
+		UPDATE tasks
+		SET status = ?, lease_until = NULL, claimed_by = '', updated_at = ?
+		WHERE task_id = ? AND status = ?
+	`, string(types.TaskStatusPending), now.Format(time.RFC3339Nano), taskID, string(types.TaskStatusActive))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return nil // Task not active or not found; idempotent
+	}
+	return nil
+}
+
+func (s *SQLiteTaskStore) DelegateTask(ctx context.Context, taskID string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("taskID is required")
+	}
+	db, err := s.dbConn()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := db.ExecContext(ctx, `
+		UPDATE tasks
+		SET status = ?, lease_until = NULL, updated_at = ?
+		WHERE task_id = ? AND status = ?
+	`, string(types.TaskStatusDelegated), now, taskID, string(types.TaskStatusActive))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("delegate: task %s is not in active state", taskID)
+	}
+	return nil
+}
+
+func (s *SQLiteTaskStore) ResumeTask(ctx context.Context, taskID string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("taskID is required")
+	}
+	db, err := s.dbConn()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := db.ExecContext(ctx, `
+		UPDATE tasks
+		SET status = ?, lease_until = NULL, claimed_by = '', updated_at = ?
+		WHERE task_id = ? AND status = ?
+	`, string(types.TaskStatusPending), now, taskID, string(types.TaskStatusDelegated))
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("resume: task %s is not in delegated state", taskID)
+	}
+	return nil
+}
+
 func (s *SQLiteTaskStore) CompleteTask(ctx context.Context, taskID string, result types.TaskResult) error {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {

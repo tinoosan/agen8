@@ -197,8 +197,8 @@ func (s *RPCServer) teamGetManifest(ctx context.Context, p protocol.TeamGetManif
 	}, nil
 }
 
-func readPlanFilesForRun(dataDir, runID string) (checklist string, checklistErr string, details string, detailsErr string) {
-	runDir := fsutil.GetAgentDir(dataDir, runID)
+func readPlanFilesForRun(dataDir string, run types.Run) (checklist string, checklistErr string, details string, detailsErr string) {
+	runDir := fsutil.GetRunDir(dataDir, run)
 	planDir := filepath.Join(runDir, "plan")
 	load := func(name string) (string, string) {
 		b, err := os.ReadFile(filepath.Join(planDir, name))
@@ -261,15 +261,25 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 		return protocol.PlanGetResult{}, err
 	}
 	if strings.TrimSpace(scope.teamID) == "" {
-		checklist, checklistErr, details, detailsErr := readPlanFilesForRun(s.cfg.DataDir, strings.TrimSpace(scope.runID))
+		runID := strings.TrimSpace(scope.runID)
+		run, _ := implstore.LoadRun(s.cfg, runID)
+		if run.RunID == "" {
+			run = types.Run{RunID: runID}
+		}
+		checklist, checklistErr, details, detailsErr := readPlanFilesForRun(s.cfg.DataDir, run)
 		return protocol.PlanGetResult{
-			Checklist: checklist, ChecklistErr: checklistErr, Details: details, DetailsErr: detailsErr, SourceRuns: []string{strings.TrimSpace(scope.runID)},
+			Checklist: checklist, ChecklistErr: checklistErr, Details: details, DetailsErr: detailsErr, SourceRuns: []string{runID},
 		}, nil
 	}
 	if strings.TrimSpace(scope.runID) != "" {
-		checklist, checklistErr, details, detailsErr := readPlanFilesForRun(s.cfg.DataDir, strings.TrimSpace(scope.runID))
+		runID := strings.TrimSpace(scope.runID)
+		run, _ := implstore.LoadRun(s.cfg, runID)
+		if run.RunID == "" {
+			run = types.Run{RunID: runID}
+		}
+		checklist, checklistErr, details, detailsErr := readPlanFilesForRun(s.cfg.DataDir, run)
 		return protocol.PlanGetResult{
-			Checklist: checklist, ChecklistErr: checklistErr, Details: details, DetailsErr: detailsErr, SourceRuns: []string{strings.TrimSpace(scope.runID)},
+			Checklist: checklist, ChecklistErr: checklistErr, Details: details, DetailsErr: detailsErr, SourceRuns: []string{runID},
 		}, nil
 	}
 	aggregate := p.AggregateTeam
@@ -321,7 +331,11 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 		if role == "" {
 			role = runID
 		}
-		check, checkErr, det, detErr := readPlanFilesForRun(s.cfg.DataDir, runID)
+		run, _ := implstore.LoadRun(s.cfg, runID)
+		if run.RunID == "" {
+			run = types.Run{RunID: runID}
+		}
+		check, checkErr, det, detErr := readPlanFilesForRun(s.cfg.DataDir, run)
 		if checkErr != "" {
 			errParts = append(errParts, "["+role+"] checklist: "+checkErr)
 		}
