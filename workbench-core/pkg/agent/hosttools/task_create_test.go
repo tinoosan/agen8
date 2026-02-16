@@ -3,6 +3,7 @@ package hosttools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -136,6 +137,59 @@ func TestTaskCreateTool_WorkerCannotAssignOtherWorker(t *testing.T) {
 	raw, _ := json.Marshal(args)
 	if _, err := tool.Execute(context.Background(), raw); err == nil {
 		t.Fatalf("expected permission error")
+	}
+}
+
+func TestTaskCreateTool_Definition_TeamOnly_NoSpawnWorker(t *testing.T) {
+	tool := &TaskCreateTool{
+		Store:     newFakeTaskStore(),
+		SessionID: "s",
+		RunID:     "r",
+		// SpawnWorker is nil (team mode)
+	}
+	def := tool.Definition()
+	if def.Type != "function" || def.Function.Name != "task_create" {
+		t.Fatalf("unexpected tool: type=%q name=%q", def.Type, def.Function.Name)
+	}
+	params, _ := def.Function.Parameters.(map[string]any)
+	if params == nil {
+		t.Fatal("parameters is nil")
+	}
+	props, _ := params["properties"].(map[string]any)
+	if props == nil {
+		t.Fatal("properties is nil")
+	}
+	if _, has := props["spawnWorker"]; has {
+		t.Error("Definition() when SpawnWorker is nil must not include spawnWorker in parameters")
+	}
+	// Team-only description should mention assignedRole, not spawn_worker/task_review
+	desc := def.Function.Description
+	if len(desc) == 0 {
+		t.Error("description should be non-empty")
+	}
+	if strings.Contains(desc, "spawn_worker") || strings.Contains(desc, "task_review") || strings.Contains(desc, "subagent") {
+		t.Errorf("team-only description must not mention spawn_worker/task_review/subagent: %q", desc)
+	}
+}
+
+func TestTaskCreateTool_Definition_WithSpawnWorker_IncludesSpawnWorker(t *testing.T) {
+	tool := &TaskCreateTool{
+		Store:       newFakeTaskStore(),
+		SessionID:   "s",
+		RunID:       "r",
+		SpawnWorker: func(context.Context, string, string, string) (string, error) { return "child", nil },
+	}
+	def := tool.Definition()
+	params, _ := def.Function.Parameters.(map[string]any)
+	if params == nil {
+		t.Fatal("parameters is nil")
+	}
+	props, _ := params["properties"].(map[string]any)
+	if props == nil {
+		t.Fatal("properties is nil")
+	}
+	if _, has := props["spawnWorker"]; !has {
+		t.Error("Definition() when SpawnWorker is set must include spawnWorker in parameters")
 	}
 }
 

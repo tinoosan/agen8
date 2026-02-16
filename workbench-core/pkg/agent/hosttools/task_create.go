@@ -35,15 +35,65 @@ type TaskCreateTool struct {
 }
 
 func (t *TaskCreateTool) Definition() llmtypes.Tool {
+	if t.SpawnWorker == nil {
+		return t.definitionTeamOnly()
+	}
+	return t.definitionWithSpawnWorker()
+}
+
+// definitionTeamOnly returns the tool definition for team mode (no spawnWorker).
+func (t *TaskCreateTool) definitionTeamOnly() llmtypes.Tool {
+	return llmtypes.Tool{
+		Type: "function",
+		Function: llmtypes.ToolFunction{
+			Name:        "task_create",
+			Description: "[TASKS] Create a new pending task in SQLite. In team mode, delegate work by creating tasks and assigning them to roles via assignedRole. Omit assignedRole to assign to your own role. This is DB-routed (no /inbox file writes).",
+			Strict:      false,
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"goal": map[string]any{
+						"type":        "string",
+						"description": "Task goal/instructions",
+					},
+					"priority": map[string]any{
+						"type":        "integer",
+						"description": "Priority (0=highest). Default: 5",
+					},
+					"taskId": map[string]any{
+						"type":        "string",
+						"description": "Optional explicit task id (for idempotency/deduping).",
+					},
+					"inputs": map[string]any{
+						"type":                 "object",
+						"description":          "Optional structured inputs for the task.",
+						"additionalProperties": true,
+					},
+					"metadata": map[string]any{
+						"type":                 "object",
+						"description":          "Optional metadata for the task.",
+						"additionalProperties": true,
+					},
+					"assignedRole": map[string]any{
+						"type":        "string",
+						"description": "Optional role assignment in team mode. Omit to assign to your own role.",
+					},
+				},
+				"required":             []any{"goal"},
+				"additionalProperties": false,
+			},
+		},
+	}
+}
+
+// definitionWithSpawnWorker returns the full tool definition including spawnWorker (standalone daemon).
+func (t *TaskCreateTool) definitionWithSpawnWorker() llmtypes.Tool {
 	return llmtypes.Tool{
 		Type: "function",
 		Function: llmtypes.ToolFunction{
 			Name:        "task_create",
 			Description: "[TASKS] Create a new pending task in SQLite. Use spawnWorker=true when breaking down a large task into smaller tasks (one task per distinct subtask), when you decide to delegate work to a worker, or when the user or goal asks for subagents; when the goal requests subagents you MUST set spawnWorker=true and do not do the work yourself. Examples: research tasks (e.g. research topic X and summarize), comparative analysis (compare A vs B), multi-step investigations (audit then document), parallelizable work (gather from doc X, doc Y). When workers finish, callbacks are created for you to process with task_review. After spawning, do not keep checking for work; callbacks will be provided when workers finish. Do not use sleep or wait—process tasks as they come. This is DB-routed (no /inbox file writes).",
-			// Keep this tool non-strict: strict mode requires (1) additionalProperties=false
-			// for each object and (2) every property to be required, which doesn't fit
-			// optional inputs/metadata maps.
-			Strict: false,
+			Strict:      false,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
