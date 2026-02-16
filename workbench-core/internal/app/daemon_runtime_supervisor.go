@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -428,7 +429,15 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 
 	sharedWorkspaceDir := ""
 	if teamID != "" {
-		sharedWorkspaceDir = fsutil.GetTeamWorkspaceDir(s.cfg.DataDir, teamID)
+		role := strings.TrimSpace(run.Runtime.Role)
+		if role == "" {
+			role = "default"
+		}
+		sharedWorkspaceDir = fsutil.GetTeamRoleWorkspaceDir(s.cfg.DataDir, teamID, role)
+		if err := os.MkdirAll(sharedWorkspaceDir, 0o755); err != nil {
+			orderedEmitter.Close()
+			return nil, fmt.Errorf("prepare team role workspace: %w", err)
+		}
 	}
 
 	rt, err := runtime.Build(runtime.BuildConfig{
