@@ -32,6 +32,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
+	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"golang.org/x/sync/errgroup"
 )
@@ -247,10 +248,13 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	var runtimeLoopCancelMu sync.Mutex
 	runtimeLoopCancel := map[string]context.CancelFunc{}
 	teamSupervisor := &teamRuntimeSupervisor{
+		cfg:             cfg,
 		runLoopCancelMu: &runtimeLoopCancelMu,
 		runLoopCancel:   runtimeLoopCancel,
 	}
 	sessionService := pkgsession.NewManager(cfg, sessionStore, teamSupervisor)
+	taskService := pkgtask.NewManager(taskStore, sessionService)
+	teamSupervisor.taskCreator = taskService
 	var memoryProvider agent.MemoryRecallProvider = &textMemoryAdapter{store: memStore}
 
 	var notifier agent.Notifier
@@ -448,7 +452,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			return fmt.Errorf("create host tool registry for role %s: %w", role.Name, err)
 		}
 		if err := registry.Register(&hosttools.TaskCreateTool{
-			Store:           taskStore,
+			Store:           taskService,
 			SessionID:       run.SessionID,
 			RunID:           run.RunID,
 			TeamID:          teamID,
@@ -460,6 +464,16 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			orderedEmitter.Close()
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("register task_create for role %s: %w", role.Name, err)
+		}
+		if err := registry.Register(&hosttools.TaskReviewTool{
+			Store:      taskService,
+			SessionID:  run.SessionID,
+			RunID:      run.RunID,
+			Supervisor: teamSupervisor,
+		}); err != nil {
+			orderedEmitter.Close()
+			_ = rt.Shutdown(context.Background())
+			return fmt.Errorf("register task_review for role %s: %w", role.Name, err)
 		}
 		agentCfg.HostToolRegistry = registry
 
@@ -483,7 +497,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			ResolveProfile: func(ref string) (*profile.Profile, string, error) {
 				return resolveProfileRef(cfg, strings.TrimSpace(ref))
 			},
-			TaskStore:            taskStore,
+			TaskStore:            taskService,
 			Events:               orderedEmitter,
 			Memory:               memoryProvider,
 			MemorySearchLimit:    3,
@@ -553,7 +567,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			Inputs:       map[string]any{},
 			Metadata:     map[string]any{"source": "team.goal"},
 		}
-		if err := taskStore.CreateTask(runCtx, initialTask); err != nil {
+		if err := taskService.CreateTask(runCtx, initialTask); err != nil {
 			return fmt.Errorf("seed coordinator task: %w", err)
 		}
 	}
@@ -561,7 +575,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	var serverWG sync.WaitGroup
 	webhookAddr := strings.TrimSpace(resolved.WebhookAddr)
 	if webhookAddr != "" {
-		startTeamWebhookServer(runCtx, webhookAddr, cfg, taskStore, teamID, coordinatorRole, coordinatorRun, roleNames, &serverWG)
+		startTeamWebhookServer(runCtx, webhookAddr, cfg, taskService, teamID, coordinatorRole, coordinatorRun, roleNames, &serverWG)
 	}
 	healthAddr := strings.TrimSpace(resolved.HealthAddr)
 	if healthAddr != "" && healthAddr != webhookAddr {
@@ -572,14 +586,14 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			Cfg:            cfg,
 			Run:            coordinatorRun,
 			AllowAnyThread: true,
-			TaskStore:      taskStore,
+			TaskService:    taskService,
 		}
 		srvCfg = buildTeamRPCServerConfig(
 			srvCfg,
 			cfg,
 			resolved,
 			coordinatorRun,
-			taskStore,
+			taskService,
 			sessionService,
 			runtimes,
 			stateMgr,
@@ -675,7 +689,7 @@ func buildTeamRPCServerConfig(
 	cfg config.Config,
 	resolved RunChatOptions,
 	coordinatorRun types.Run,
-	taskStore state.TaskStore,
+	taskService pkgtask.TaskServiceForRPC,
 	sessionService pkgsession.Service,
 	runtimes []teamRoleRuntime,
 	stateMgr *teamStateManager,
@@ -725,7 +739,7 @@ func buildTeamRPCServerConfig(
 		if err := sessionService.SaveSession(ctx, loadedSession); err != nil {
 			return nil, err
 		}
-		applied, err := requestTeamModelChange(ctx, taskStore, runtimes, stateMgr, model, target, "rpc.control.setModel")
+		applied, err := requestTeamModelChange(ctx, taskService, runtimes, stateMgr, model, target, "rpc.control.setModel")
 		if err != nil {
 			return nil, err
 		}
@@ -812,7 +826,7 @@ func buildTeamRPCServerConfig(
 				return err
 			}
 			runtimes[i].sess.SetPaused(true)
-			if err := cancelActiveTasksForRun(context.Background(), taskStore, runID, "run paused"); err != nil {
+			if err := cancelActiveTasksForRun(context.Background(), taskService, runID, "run paused"); err != nil {
 				return err
 			}
 			return nil
@@ -880,7 +894,7 @@ func buildTeamRPCServerConfig(
 					return
 				}
 				runtime.sess.SetPaused(true)
-				if cerr := cancelActiveTasksForRun(context.Background(), taskStore, rid, "run paused"); cerr != nil {
+				if cerr := cancelActiveTasksForRun(context.Background(), taskService, rid, "run paused"); cerr != nil {
 					mu.Lock()
 					errs = append(errs, rid+": "+cerr.Error())
 					mu.Unlock()
@@ -984,7 +998,7 @@ func buildTeamRPCServerConfig(
 						cancel()
 					}
 				}
-				if serr := cancelActiveTasksForRun(context.Background(), taskStore, rid, "run stopped"); serr != nil {
+				if serr := cancelActiveTasksForRun(context.Background(), taskService, rid, "run stopped"); serr != nil {
 					mu.Lock()
 					errs = append(errs, rid+": "+serr.Error())
 					mu.Unlock()
@@ -1318,8 +1332,11 @@ func runTeamControlLoop(ctx context.Context, taskStore state.TaskStore, runtimes
 	}
 }
 
-// teamRuntimeSupervisor adapts the team daemon's runtime management to the service interface.
+// teamRuntimeSupervisor adapts the team daemon's runtime management to the service interface
+// and implements hosttools.ReviewSupervisor so team roles can retry and escalate via task_review.
 type teamRuntimeSupervisor struct {
+	cfg             config.Config
+	taskCreator     pkgtask.RetryEscalationCreator
 	runLoopCancelMu *sync.Mutex
 	runLoopCancel   map[string]context.CancelFunc
 }
@@ -1336,5 +1353,27 @@ func (s *teamRuntimeSupervisor) StopRun(runID string) error {
 func (s *teamRuntimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
 	// Team daemon main loop handles resumption based on DB status.
 	// We rely on the services to have updated the DB status before calling this.
+	return nil
+}
+
+func (s *teamRuntimeSupervisor) RetrySubagent(ctx context.Context, childRunID, feedback string) error {
+	if s == nil || s.taskCreator == nil {
+		return fmt.Errorf("task service not configured for retry")
+	}
+	return s.taskCreator.CreateRetryTask(ctx, childRunID, feedback)
+}
+
+func (s *teamRuntimeSupervisor) EscalateTask(ctx context.Context, callbackTaskID string, data hosttools.EscalationData) error {
+	if s == nil || s.taskCreator == nil {
+		return fmt.Errorf("task service not configured for escalation")
+	}
+	if err := s.taskCreator.CreateEscalationTask(ctx, callbackTaskID, data); err != nil {
+		return err
+	}
+	childRunID := strings.TrimSpace(data.SourceRunID)
+	if childRunID != "" {
+		_ = s.StopRun(childRunID)
+		_, _ = implstore.StopRun(s.cfg, childRunID, types.RunStatusFailed, "escalated")
+	}
 	return nil
 }

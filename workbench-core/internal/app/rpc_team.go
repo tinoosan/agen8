@@ -62,16 +62,16 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 		return protocol.TeamGetStatusResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "team scope is required"}
 	}
 	teamID := strings.TrimSpace(scope.teamID)
-	pending, _ := s.taskStore.CountTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusPending}})
-	active, _ := s.taskStore.CountTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusActive}})
-	done, _ := s.taskStore.CountTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled}})
+	pending, _ := s.taskService.CountTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusPending}})
+	active, _ := s.taskService.CountTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusActive}})
+	done, _ := s.taskService.CountTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled}})
 
 	roleInfo := map[string]string{}
 	roleByRunID := map[string]string{}
 	runIDSet := map[string]struct{}{}
-	pendingTasks, _ := s.taskStore.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusPending}, SortBy: "created_at", SortDesc: false, Limit: 200})
-	activeTasks, _ := s.taskStore.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusActive}, SortBy: "updated_at", SortDesc: true, Limit: 200})
-	completedTasks, _ := s.taskStore.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled}, SortBy: "finished_at", SortDesc: true, Limit: 500})
+	pendingTasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusPending}, SortBy: "created_at", SortDesc: false, Limit: 200})
+	activeTasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusActive}, SortBy: "updated_at", SortDesc: true, Limit: 200})
+	completedTasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled}, SortBy: "finished_at", SortDesc: true, Limit: 500})
 
 	for _, task := range pendingTasks {
 		role := strings.TrimSpace(task.AssignedRole)
@@ -131,7 +131,7 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 	totalCostUSD := 0.0
 	pricingKnown := true
 	for _, runID := range runIDs {
-		stats, err := s.taskStore.GetRunStats(ctx, runID)
+		stats, err := s.taskService.GetRunStats(ctx, runID)
 		if err != nil {
 			continue
 		}
@@ -302,7 +302,7 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 		runIDs = append(runIDs, runID)
 		seenRuns[runID] = struct{}{}
 	}
-	tasks, _ := s.taskStore.ListTasks(ctx, state.TaskFilter{TeamID: strings.TrimSpace(scope.teamID), Limit: 1000, SortBy: "created_at", SortDesc: true})
+	tasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{TeamID: strings.TrimSpace(scope.teamID), Limit: 1000, SortBy: "created_at", SortDesc: true})
 	for _, t := range tasks {
 		runID := strings.TrimSpace(t.RunID)
 		if runID == "" {

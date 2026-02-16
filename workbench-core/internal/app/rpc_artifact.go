@@ -101,7 +101,7 @@ func (s *RPCServer) sessionRunIDs(ctx context.Context, sessionID string, fallbac
 		seen[runID] = struct{}{}
 		out = append(out, runID)
 	}
-	if sessionID == "" || s == nil || s.taskStore == nil {
+	if sessionID == "" || s == nil || s.taskService == nil {
 		add(fallbackRunID)
 		return out
 	}
@@ -113,7 +113,7 @@ func (s *RPCServer) sessionRunIDs(ctx context.Context, sessionID string, fallbac
 	}
 	const pageSize = 500
 	for offset := 0; ; offset += pageSize {
-		tasks, err := s.taskStore.ListTasks(ctx, state.TaskFilter{
+		tasks, err := s.taskService.ListTasks(ctx, state.TaskFilter{
 			SessionID: sessionID,
 			SortBy:    "created_at",
 			SortDesc:  true,
@@ -312,8 +312,8 @@ func (s *RPCServer) resolveArtifactScope(ctx context.Context, threadID protocol.
 			teamID = strings.TrimSpace(sess.TeamID)
 		}
 	}
-	if teamID == "" && s.taskStore != nil && strings.TrimSpace(scope.runID) != "" {
-		tasks, err := s.taskStore.ListTasks(ctx, state.TaskFilter{
+	if teamID == "" && s.taskService != nil && strings.TrimSpace(scope.runID) != "" {
+		tasks, err := s.taskService.ListTasks(ctx, state.TaskFilter{
 			RunID:    strings.TrimSpace(scope.runID),
 			SortBy:   "created_at",
 			SortDesc: true,
@@ -334,10 +334,10 @@ func (s *RPCServer) resolveArtifactScope(ctx context.Context, threadID protocol.
 }
 
 func (s *RPCServer) artifactIndexer() (state.ArtifactIndexer, error) {
-	if s == nil || s.taskStore == nil {
+	if s == nil || s.taskService == nil {
 		return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "task store not configured"}
 	}
-	indexer, ok := s.taskStore.(state.ArtifactIndexer)
+	indexer, ok := s.taskService.ArtifactIndexer()
 	if !ok {
 		return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "artifact index is unavailable"}
 	}

@@ -26,6 +26,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
+	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -62,6 +63,8 @@ type DaemonBuilder struct {
 	sessionStore     pkgsession.Store
 	sessionService   pkgsession.Service
 	taskStore        state.TaskStore
+	taskManager      *pkgtask.Manager
+	taskService      pkgtask.TaskServiceForSupervisor
 
 	effectiveModel          string
 	loadedSession           types.Session
@@ -252,11 +255,13 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 		return fmt.Errorf("create task store: %w", err)
 	}
 	b.taskStore = taskStore
+	b.taskManager = pkgtask.NewManager(b.taskStore, nil)
+	b.taskService = b.taskManager
 	b.supervisor = newRuntimeSupervisor(runtimeSupervisorConfig{
 		Cfg:              b.cfg,
 		Resolved:         b.resolved,
 		PollInterval:     b.poll,
-		TaskStore:        b.taskStore,
+		TaskService:      b.taskService,
 		SessionStore:     b.sessionStore,
 		MemoryStore:      b.memStore,
 		ConstructorStore: b.constructorStore,
@@ -268,6 +273,7 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 	})
 	b.wakeCh = make(chan struct{}, 1)
 	b.sessionService = pkgsession.NewManager(b.cfg, b.sessionStore, b.supervisor)
+	b.taskManager.SetRunLoader(b.sessionService)
 	return nil
 }
 
@@ -276,7 +282,7 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 		Cfg:            b.cfg,
 		Run:            b.run,
 		AllowAnyThread: true,
-		TaskStore:      b.taskStore,
+		TaskService:    b.taskManager,
 		Session:        b.sessionService,
 		NotifyCh:       b.protocolInit.NotifyCh(),
 		Index:          b.protocolInit.Index(),
@@ -609,7 +615,7 @@ func (b *DaemonBuilder) startBackgroundServices() error {
 
 	webhookAddr := strings.TrimSpace(b.resolved.WebhookAddr)
 	if webhookAddr != "" {
-		startWebhookServer(b.runCtx, webhookAddr, b.cfg, types.Run{}, b.taskStore, b.mustEmit, &b.serverWG)
+		startWebhookServer(b.runCtx, webhookAddr, b.cfg, types.Run{}, b.taskService, b.mustEmit, &b.serverWG)
 	}
 	healthAddr := strings.TrimSpace(b.resolved.HealthAddr)
 	if healthAddr != "" && healthAddr != webhookAddr {

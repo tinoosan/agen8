@@ -65,6 +65,10 @@ sequenceDiagram
     RPC-->>UI: ChatResponse(result)
 ```
 
+## Task service and escalation
+
+Task lifecycle (retry, escalation, cancel-by-run) is centralized in **pkg/services/task**. The daemon and team daemon both use the same task Manager: the standalone daemon’s runtime supervisor and the team daemon’s team runtime supervisor implement the review interface (retry/escalate) by calling the task service. **Escalation is a team feature**: in team mode, escalation tasks are assigned to the coordinator role so the coordinator can resolve them; in standalone mode they are assigned to the parent run.
+
 ## Invariants
 
 - The `RuntimeSupervisor` is the single source of truth for all active runtimes; it must prevent resource leaks by ensuring proper shutdown of unused environments.

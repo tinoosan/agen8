@@ -10,10 +10,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
+	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -26,8 +26,8 @@ type RPCServer struct {
 	run            types.Run
 	allowAnyThread bool
 
-	taskStore state.TaskStore
-	session   pkgsession.Service
+	taskService pkgtask.TaskServiceForRPC
+	session     pkgsession.Service
 	initErr   error
 
 	notifyCh <-chan protocol.Message
@@ -51,7 +51,7 @@ type RPCServerConfig struct {
 	Cfg                 config.Config
 	Run                 types.Run
 	AllowAnyThread      bool
-	TaskStore           state.TaskStore
+	TaskService         pkgtask.TaskServiceForRPC
 	Session             pkgsession.Service
 	NotifyCh            <-chan protocol.Message
 	Index               *protocol.Index
@@ -143,7 +143,7 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		cfg:                 cfg.Cfg,
 		run:                 cfg.Run,
 		allowAnyThread:      cfg.AllowAnyThread,
-		taskStore:           cfg.TaskStore,
+		taskService:         cfg.TaskService,
 		session:             sess,
 		initErr:             initErr,
 		notifyCh:            cfg.NotifyCh,

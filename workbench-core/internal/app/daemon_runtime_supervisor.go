@@ -10,12 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent"
 	hosttools "github.com/tinoosan/workbench-core/pkg/agent/hosttools"
 	agentsession "github.com/tinoosan/workbench-core/pkg/agent/session"
-	"github.com/tinoosan/workbench-core/pkg/agent/state"
+	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/emit"
 	"github.com/tinoosan/workbench-core/pkg/events"
@@ -31,7 +30,7 @@ type runtimeSupervisorConfig struct {
 	Cfg              config.Config
 	Resolved         RunChatOptions
 	PollInterval     time.Duration
-	TaskStore        state.TaskStore
+	TaskService      pkgtask.TaskServiceForSupervisor
 	SessionStore     pkgstore.SessionReaderWriter
 	MemoryStore      pkgstore.DailyMemoryStore
 	ConstructorStore pkgstore.ConstructorStateStore
@@ -46,7 +45,7 @@ type runtimeSupervisor struct {
 	cfg              config.Config
 	resolved         RunChatOptions
 	pollInterval     time.Duration
-	taskStore        state.TaskStore
+	taskService      pkgtask.TaskServiceForSupervisor
 	sessionStore     pkgstore.SessionReaderWriter
 	memoryStore      pkgstore.DailyMemoryStore
 	constructorStore pkgstore.ConstructorStateStore
@@ -108,7 +107,7 @@ func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 		cfg:              cfg.Cfg,
 		resolved:         cfg.Resolved,
 		pollInterval:     poll,
-		taskStore:        cfg.TaskStore,
+		taskService:      cfg.TaskService,
 		sessionStore:     cfg.SessionStore,
 		memoryStore:      cfg.MemoryStore,
 		constructorStore: cfg.ConstructorStore,
@@ -514,7 +513,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		return nil, err
 	}
 	tool := &hosttools.TaskCreateTool{
-		Store:      s.taskStore,
+		Store:      s.taskService,
 		SessionID:  run.SessionID,
 		RunID:      run.RunID,
 		IsChildRun: isChildRun,
@@ -541,7 +540,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	// Register task_review tool for agents that can receive callbacks (non-child runs).
 	if !isChildRun {
 		reviewTool := &hosttools.TaskReviewTool{
-			Store:      s.taskStore,
+			Store:      s.taskService,
 			SessionID:  run.SessionID,
 			RunID:      run.RunID,
 			Supervisor: s,
@@ -568,7 +567,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		ResolveProfile: func(ref string) (*profile.Profile, string, error) {
 			return resolveProfileRef(s.cfg, strings.TrimSpace(ref))
 		},
-		TaskStore:            s.taskStore,
+		TaskStore:            s.taskService,
 		Events:               orderedEmitter,
 		Memory:               &textMemoryAdapter{store: s.memoryStore},
 		MemorySearchLimit:    3,
@@ -757,7 +756,8 @@ func (s *runtimeSupervisor) PauseRun(runID string) error {
 		s.mu.Lock()
 		delete(s.workers, runID)
 		s.mu.Unlock()
-		return cancelActiveTasksForRun(context.Background(), s.taskStore, runID, "run paused")
+		_, err := s.taskService.CancelActiveTasksByRun(context.Background(), runID, "run paused")
+		return err
 	}
 	run.Status = types.RunStatusPaused
 	run.FinishedAt = nil
@@ -781,7 +781,8 @@ func (s *runtimeSupervisor) PauseRun(runID string) error {
 	s.mu.Lock()
 	delete(s.workers, runID)
 	s.mu.Unlock()
-	return cancelActiveTasksForRun(context.Background(), s.taskStore, runID, "run paused")
+	_, err = s.taskService.CancelActiveTasksByRun(context.Background(), runID, "run paused")
+	return err
 }
 
 func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
@@ -855,7 +856,8 @@ func (s *runtimeSupervisor) StopRun(runID string) error {
 	s.mu.Lock()
 	delete(s.workers, runID)
 	s.mu.Unlock()
-	return cancelActiveTasksForRun(context.Background(), s.taskStore, runID, "run stopped")
+	_, err = s.taskService.CancelActiveTasksByRun(context.Background(), runID, "run stopped")
+	return err
 }
 
 func (s *runtimeSupervisor) PauseSession(ctx context.Context, sessionID string) ([]string, error) {
@@ -1149,117 +1151,21 @@ func (s *runtimeSupervisor) makeSpawnWorkerFunc(
 // RetrySubagent creates a new retry task for an existing child run so the
 // sub-agent can re-attempt its work with the parent's feedback.
 func (s *runtimeSupervisor) RetrySubagent(ctx context.Context, childRunID, feedback string) error {
-	childRunID = strings.TrimSpace(childRunID)
-	if childRunID == "" {
-		return fmt.Errorf("childRunID is required")
-	}
-	run, err := implstore.LoadRun(s.cfg, childRunID)
-	if err != nil {
-		return fmt.Errorf("load child run: %w", err)
-	}
-
-	retryTask := types.Task{
-		TaskID:         fmt.Sprintf("retry-%s-%s", childRunID, uuid.NewString()[:8]),
-		SessionID:      run.SessionID,
-		RunID:          childRunID,
-		AssignedToType: "agent",
-		AssignedTo:     childRunID,
-		TaskKind:       "task",
-		Goal:           fmt.Sprintf("RETRY with feedback:\n%s\n\nOriginal goal: %s", feedback, strings.TrimSpace(run.Goal)),
-		Priority:       1,
-		Status:         types.TaskStatusPending,
-		Metadata: map[string]any{
-			"source":        "retry",
-			"parentRunId":   strings.TrimSpace(run.ParentRunID),
-			"retryFeedback": feedback,
-		},
-	}
-	return s.taskStore.CreateTask(ctx, retryTask)
+	return s.taskService.CreateRetryTask(ctx, childRunID, feedback)
 }
 
 // EscalateTask creates an escalation task with structured metadata. In team mode
 // it routes to the coordinator; in standalone mode it routes to the parent run
 // and emits a user-facing event.
 func (s *runtimeSupervisor) EscalateTask(ctx context.Context, callbackTaskID string, data hosttools.EscalationData) error {
-	callbackTaskID = strings.TrimSpace(callbackTaskID)
-	if callbackTaskID == "" {
-		return fmt.Errorf("callbackTaskID is required")
+	if err := s.taskService.CreateEscalationTask(ctx, callbackTaskID, data); err != nil {
+		return err
 	}
-
-	// Load the callback task to determine routing context.
-	task, err := s.taskStore.GetTask(ctx, callbackTaskID)
-	if err != nil {
-		return fmt.Errorf("load callback task: %w", err)
-	}
-
-	now := time.Now().UTC()
-	escalationTaskID := fmt.Sprintf("escalation-%s-%s", callbackTaskID, uuid.NewString()[:8])
-
-	escMeta := map[string]any{
-		"source":         "escalation",
-		"reason":         data.Reason,
-		"attemptSummary": data.AttemptSummary,
-		"recommendation": data.Recommendation,
-		"originalGoal":   data.OriginalGoal,
-		"retryCount":     data.RetryCount,
-		"sourceRunId":    data.SourceRunID,
-		"sourceTaskId":   data.SourceTaskID,
-	}
-	if len(data.Artifacts) > 0 {
-		escMeta["artifacts"] = data.Artifacts
-	}
-
-	escalationGoal := fmt.Sprintf("ESCALATION: %s\n\nOriginal goal: %s\nAttempts: %d\nRecommendation: %s",
-		data.Reason,
-		data.OriginalGoal,
-		data.RetryCount,
-		data.Recommendation,
-	)
-
-	escalationTask := types.Task{
-		TaskID:    escalationTaskID,
-		SessionID: task.SessionID,
-		TaskKind:  "task",
-		Goal:      escalationGoal,
-		Priority:  0, // highest priority
-		Status:    types.TaskStatusPending,
-		CreatedAt: &now,
-		Metadata:  escMeta,
-	}
-
-	teamID := strings.TrimSpace(task.TeamID)
-	if teamID != "" {
-		// Team mode: assign to coordinator role.
-		coordinatorRole := ""
-		if cr, ok := task.Metadata["coordinatorRole"].(string); ok {
-			coordinatorRole = strings.TrimSpace(cr)
-		}
-		if coordinatorRole == "" {
-			// Fall back to the task's assigned role (the callback was sent to the coordinator).
-			coordinatorRole = strings.TrimSpace(task.AssignedRole)
-		}
-		escalationTask.TeamID = teamID
-		escalationTask.AssignedRole = coordinatorRole
-		escalationTask.AssignedToType = "role"
-		escalationTask.AssignedTo = coordinatorRole
-	} else {
-		// Standalone mode: assign to the parent run.
-		parentRunID := strings.TrimSpace(task.RunID)
-		escalationTask.RunID = parentRunID
-		escalationTask.AssignedToType = "agent"
-		escalationTask.AssignedTo = parentRunID
-	}
-
-	if err := s.taskStore.CreateTask(ctx, escalationTask); err != nil {
-		return fmt.Errorf("create escalation task: %w", err)
-	}
-
 	// Stop the child run after escalation.
 	childRunID := strings.TrimSpace(data.SourceRunID)
 	if childRunID != "" {
 		_ = s.StopRun(childRunID)
 		_, _ = implstore.StopRun(s.cfg, childRunID, types.RunStatusFailed, "escalated")
 	}
-
 	return nil
 }

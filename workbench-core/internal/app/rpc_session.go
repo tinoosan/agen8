@@ -191,11 +191,11 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 		filter.AssignedTo = av
 		filter.AssignedToType = at
 	}
-	tasks, err := s.taskStore.ListTasks(ctx, filter)
+	tasks, err := s.taskService.ListTasks(ctx, filter)
 	if err != nil {
 		return protocol.TaskListResult{}, err
 	}
-	total, err := s.taskStore.CountTasks(ctx, filter)
+	total, err := s.taskService.CountTasks(ctx, filter)
 	if err != nil {
 		return protocol.TaskListResult{}, err
 	}
@@ -598,10 +598,10 @@ func (s *RPCServer) inferRunRoleAndTeam(ctx context.Context, runID string) (role
 			return role, teamID
 		}
 	}
-	if s.taskStore == nil {
+	if s.taskService == nil {
 		return strings.TrimSpace(role), strings.TrimSpace(teamID)
 	}
-	tasks, err := s.taskStore.ListTasks(ctx, state.TaskFilter{
+	tasks, err := s.taskService.ListTasks(ctx, state.TaskFilter{
 		RunID:    runID,
 		SortBy:   "created_at",
 		SortDesc: true,
@@ -898,7 +898,8 @@ func (s *RPCServer) setRunPausedState(ctx context.Context, threadID, runID strin
 		return err
 	}
 	if paused {
-		return cancelActiveTasksForRun(ctx, s.taskStore, runID, "run paused")
+		_, err := s.taskService.CancelActiveTasksByRun(ctx, runID, "run paused")
+		return err
 	}
 	return nil
 }
@@ -985,13 +986,13 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 	if task.Priority == 0 {
 		task.Priority = 5
 	}
-	if err := s.taskStore.CreateTask(ctx, task); err != nil {
+	if err := s.taskService.CreateTask(ctx, task); err != nil {
 		return protocol.TaskCreateResult{}, err
 	}
 	if s.wake != nil {
 		s.wake()
 	}
-	got, err := s.taskStore.GetTask(ctx, taskID)
+	got, err := s.taskService.GetTask(ctx, taskID)
 	if err != nil {
 		return protocol.TaskCreateResult{}, err
 	}
@@ -1007,7 +1008,7 @@ func (s *RPCServer) taskClaim(ctx context.Context, p protocol.TaskClaimParams) (
 	if taskID == "" {
 		return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "taskId is required"}
 	}
-	if err := s.taskStore.ClaimTask(ctx, taskID, 2*time.Minute); err != nil {
+	if err := s.taskService.ClaimTask(ctx, taskID, 2*time.Minute); err != nil {
 		if errors.Is(err, state.ErrTaskClaimed) {
 			return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "task already claimed"}
 		}
@@ -1016,7 +1017,7 @@ func (s *RPCServer) taskClaim(ctx context.Context, p protocol.TaskClaimParams) (
 		}
 		return protocol.TaskClaimResult{}, err
 	}
-	task, err := s.taskStore.GetTask(ctx, taskID)
+	task, err := s.taskService.GetTask(ctx, taskID)
 	if err != nil {
 		return protocol.TaskClaimResult{}, err
 	}
@@ -1039,8 +1040,8 @@ func (s *RPCServer) taskClaim(ctx context.Context, p protocol.TaskClaimParams) (
 	if strings.TrimSpace(task.RoleSnapshot) == "" {
 		task.RoleSnapshot = strings.TrimSpace(task.AssignedRole)
 	}
-	_ = s.taskStore.UpdateTask(ctx, task)
-	task, _ = s.taskStore.GetTask(ctx, taskID)
+	_ = s.taskService.UpdateTask(ctx, task)
+	task, _ = s.taskService.GetTask(ctx, taskID)
 	return protocol.TaskClaimResult{Task: protocolTaskFromTypesTask(task)}, nil
 }
 
@@ -1053,7 +1054,7 @@ func (s *RPCServer) taskComplete(ctx context.Context, p protocol.TaskCompletePar
 	if taskID == "" {
 		return protocol.TaskCompleteResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "taskId is required"}
 	}
-	task, err := s.taskStore.GetTask(ctx, taskID)
+	task, err := s.taskService.GetTask(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, state.ErrTaskNotFound) {
 			return protocol.TaskCompleteResult{}, &protocol.ProtocolError{Code: protocol.CodeTurnNotFound, Message: "task not found"}
@@ -1084,10 +1085,10 @@ func (s *RPCServer) taskComplete(ctx context.Context, p protocol.TaskCompletePar
 		Error:       strings.TrimSpace(p.Error),
 		CompletedAt: &done,
 	}
-	if err := s.taskStore.CompleteTask(ctx, taskID, res); err != nil {
+	if err := s.taskService.CompleteTask(ctx, taskID, res); err != nil {
 		return protocol.TaskCompleteResult{}, err
 	}
-	updated, err := s.taskStore.GetTask(ctx, taskID)
+	updated, err := s.taskService.GetTask(ctx, taskID)
 	if err != nil {
 		return protocol.TaskCompleteResult{}, err
 	}
@@ -1105,8 +1106,8 @@ func (s *RPCServer) resolveTeamOrRunScope(ctx context.Context, threadID protocol
 			teamID:    strings.TrimSpace(teamIDOverride),
 			runID:     strings.TrimSpace(runIDOverride),
 		}
-		if scope.teamID == "" && s.taskStore != nil {
-			tasks, err := s.taskStore.ListTasks(ctx, state.TaskFilter{
+		if scope.teamID == "" && s.taskService != nil {
+			tasks, err := s.taskService.ListTasks(ctx, state.TaskFilter{
 				RunID:    scope.runID,
 				SortBy:   "created_at",
 				SortDesc: true,
@@ -1130,7 +1131,7 @@ func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetT
 	if err != nil {
 		return protocol.SessionGetTotalsResult{}, err
 	}
-	if s.taskStore == nil {
+	if s.taskService == nil {
 		return protocol.SessionGetTotalsResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "task store not configured"}
 	}
 
@@ -1147,7 +1148,7 @@ func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetT
 				out.PricingKnown = sess.TotalTokens == 0 || sess.CostUSD > 0 || pricingKnownForRun(ctx, s.session, strings.TrimSpace(scope.runID))
 			}
 		}
-		stats, err := s.taskStore.GetRunStats(ctx, strings.TrimSpace(scope.runID))
+		stats, err := s.taskService.GetRunStats(ctx, strings.TrimSpace(scope.runID))
 		if err == nil {
 			out.TasksDone = stats.Succeeded + stats.Failed
 		}
@@ -1155,7 +1156,7 @@ func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetT
 	}
 
 	runIDSet := map[string]struct{}{}
-	tasks, err := s.taskStore.ListTasks(ctx, state.TaskFilter{
+	tasks, err := s.taskService.ListTasks(ctx, state.TaskFilter{
 		TeamID:   strings.TrimSpace(scope.teamID),
 		Limit:    500,
 		SortBy:   "created_at",
@@ -1173,7 +1174,7 @@ func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetT
 		}
 	}
 	for runID := range runIDSet {
-		rs, err := s.taskStore.GetRunStats(ctx, runID)
+		rs, err := s.taskService.GetRunStats(ctx, runID)
 		if err != nil {
 			continue
 		}
@@ -1265,7 +1266,7 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 
 	runRole := map[string]string{}
 	runSet := map[string]struct{}{}
-	tasks, err := s.taskStore.ListTasks(ctx, state.TaskFilter{
+	tasks, err := s.taskService.ListTasks(ctx, state.TaskFilter{
 		TeamID:   strings.TrimSpace(scope.teamID),
 		Limit:    1000,
 		SortBy:   "created_at",
@@ -1388,7 +1389,7 @@ func (s *RPCServer) turnCreate(ctx context.Context, p protocol.TurnCreateParams)
 	if p.Input == nil || strings.TrimSpace(p.Input.Text) == "" {
 		return protocol.TurnCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "input.text is required"}
 	}
-	if s.taskStore == nil {
+	if s.taskService == nil {
 		return protocol.TurnCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: "task store not configured"}
 	}
 	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, "", "")
@@ -1412,7 +1413,7 @@ func (s *RPCServer) turnCreate(ctx context.Context, p protocol.TurnCreateParams)
 		Status:         types.TaskStatusPending,
 		CreatedAt:      &now,
 	}
-	if err := s.taskStore.CreateTask(ctx, task); err != nil {
+	if err := s.taskService.CreateTask(ctx, task); err != nil {
 		return protocol.TurnCreateResult{}, err
 	}
 	if s.wake != nil {
@@ -1434,10 +1435,10 @@ func (s *RPCServer) turnCancel(ctx context.Context, p protocol.TurnCancelParams)
 	if turnID == "" {
 		return protocol.TurnCancelResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "turnId is required"}
 	}
-	if s.taskStore == nil {
+	if s.taskService == nil {
 		return protocol.TurnCancelResult{}, &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: "task store not configured"}
 	}
-	task, err := s.taskStore.GetTask(ctx, turnID)
+	task, err := s.taskService.GetTask(ctx, turnID)
 	if err != nil {
 		if errors.Is(err, state.ErrTaskNotFound) {
 			return protocol.TurnCancelResult{}, &protocol.ProtocolError{Code: protocol.CodeTurnNotFound, Message: "turn not found"}
@@ -1453,7 +1454,7 @@ func (s *RPCServer) turnCancel(ctx context.Context, p protocol.TurnCancelParams)
 			Error:       "canceled",
 			CompletedAt: &doneAt,
 		}
-		if err := s.taskStore.CompleteTask(ctx, task.TaskID, tr); err != nil {
+		if err := s.taskService.CompleteTask(ctx, task.TaskID, tr); err != nil {
 			return protocol.TurnCancelResult{}, err
 		}
 		return protocol.TurnCancelResult{Turn: protocol.Turn{

@@ -1044,17 +1044,22 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			sourceGoal = "(no goal text)"
 		}
 		subagentRunID := strings.TrimSpace(s.cfg.RunID)
-		// Path in parent's workspace where this subagent's outputs live (parent sees /workspace/subagents/<runID>/).
-		subagentArtifactsDir := path.Join("/workspace", "subagents", subagentRunID)
-		// Rewrite artifact paths from subagent's /workspace to parent's /workspace/subagents/<runID>/ so the main agent can read them.
+		// Path in parent's workspace where this subagent's deliverables live (child writes to /deliverables; parent sees /workspace/subagent_deliverables/<runID>/).
+		subagentArtifactsDir := path.Join("/workspace", "subagent_deliverables", subagentRunID)
+		// Rewrite artifact paths from child's /deliverables/... to parent's /workspace/subagent_deliverables/<runID>/...
 		artifactsForParent := make([]string, 0, len(tr.Artifacts))
 		for _, art := range tr.Artifacts {
 			art = strings.TrimSpace(art)
 			if art == "" {
 				continue
 			}
-			if strings.HasPrefix(art, "/workspace/") {
-				artifactsForParent = append(artifactsForParent, path.Join(subagentArtifactsDir, strings.TrimPrefix(art, "/workspace/")))
+			if strings.HasPrefix(art, "/deliverables/") {
+				artifactsForParent = append(artifactsForParent, path.Join(subagentArtifactsDir, strings.TrimPrefix(art, "/deliverables/")))
+			} else if strings.HasPrefix(art, "/deliverables") && (len(art) == 12 || (len(art) > 12 && art[12] == '/')) {
+				// "/deliverables" or "/deliverables/"
+				rest := strings.TrimPrefix(art, "/deliverables")
+				rest = strings.TrimPrefix(rest, "/")
+				artifactsForParent = append(artifactsForParent, path.Join(subagentArtifactsDir, rest))
 			} else {
 				artifactsForParent = append(artifactsForParent, path.Join(subagentArtifactsDir, art))
 			}

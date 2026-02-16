@@ -24,6 +24,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
+	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -60,11 +61,12 @@ func startMonitorTestRPCServer(t *testing.T, cfg config.Config, runID string) st
 		t.Fatalf("save run: %v", err)
 	}
 	sessionSvc := pkgsession.NewManager(cfg, sessionStore, noopSessionSupervisor{})
+	taskSvc := pkgtask.NewManager(taskStore, sessionSvc)
 	srv := app.NewRPCServer(app.RPCServerConfig{
 		Cfg:            cfg,
 		Run:            run,
 		AllowAnyThread: true,
-		TaskStore:      taskStore,
+		TaskService:    taskSvc,
 		Session:        sessionSvc,
 	})
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
