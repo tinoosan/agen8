@@ -26,8 +26,9 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
-	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
+	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
+	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -80,10 +81,11 @@ type DaemonBuilder struct {
 	currentModel   string
 	currentModelMu sync.Mutex
 
-	supervisor *runtimeSupervisor
-	wakeCh     chan struct{}
-	agentCfg   agent.AgentConfig
-	sess       *session.Session
+	supervisor   *runtimeSupervisor
+	agentManager *pkgagent.Manager
+	wakeCh       chan struct{}
+	agentCfg     agent.AgentConfig
+	sess         *session.Session
 
 	runCtx      context.Context
 	stopSignals context.CancelFunc
@@ -274,6 +276,8 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 	b.wakeCh = make(chan struct{}, 1)
 	b.sessionService = pkgsession.NewManager(b.cfg, b.sessionStore, b.supervisor)
 	b.taskManager.SetRunLoader(b.sessionService)
+	b.agentManager = pkgagent.NewManager(b.sessionService, b.taskManager, b.taskManager)
+	b.agentManager.SetRuntimeController(b.supervisor)
 	return nil
 }
 
@@ -375,20 +379,7 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			_ = profileRef
 			return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is disabled; use /new"}
 		},
-		AgentPause: func(ctx context.Context, threadID, runID string) error {
-			runID = strings.TrimSpace(runID)
-			if _, err := b.validateAgentScope(ctx, threadID, runID); err != nil {
-				return err
-			}
-			return b.supervisor.PauseRun(runID)
-		},
-		AgentResume: func(ctx context.Context, threadID, runID string) error {
-			runID = strings.TrimSpace(runID)
-			if _, err := b.validateAgentScope(ctx, threadID, runID); err != nil {
-				return err
-			}
-			return b.supervisor.ResumeRun(ctx, runID)
-		},
+		AgentService: b.agentManager,
 		SessionPause: func(ctx context.Context, threadID, sessionID string) ([]string, error) {
 			_, runIDs, err := b.validateSessionScope(ctx, threadID, sessionID)
 			if err != nil {
@@ -492,27 +483,6 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			return affected, nil
 		},
 	}
-}
-
-func (b *DaemonBuilder) validateAgentScope(ctx context.Context, threadID, runID string) (types.Session, error) {
-	threadID = strings.TrimSpace(threadID)
-	if threadID == "" {
-		return types.Session{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
-	}
-	loadedSession, err := b.sessionService.LoadSession(ctx, threadID)
-	if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
-		return types.Session{}, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return types.Session{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
-	}
-	for _, rid := range collectSessionRunIDs(loadedSession) {
-		if strings.TrimSpace(rid) == runID {
-			return loadedSession, nil
-		}
-	}
-	return types.Session{}, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 }
 
 func (b *DaemonBuilder) validateSessionScope(ctx context.Context, threadID, sessionID string) (types.Session, []string, error) {

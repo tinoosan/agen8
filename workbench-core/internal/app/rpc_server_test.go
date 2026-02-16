@@ -17,6 +17,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/store"
@@ -26,7 +27,7 @@ import (
 // noopSessionSupervisor is a test double for RuntimeSupervisor (StopRun/ResumeRun no-op).
 type noopSessionSupervisor struct{}
 
-func (noopSessionSupervisor) StopRun(runID string) error   { return nil }
+func (noopSessionSupervisor) StopRun(runID string) error                        { return nil }
 func (noopSessionSupervisor) ResumeRun(ctx context.Context, runID string) error { return nil }
 
 // newTestSessionService returns a Session service (Manager) backed by the given store for tests.
@@ -79,13 +80,13 @@ func TestRPCServer_ThreadGet_ReturnsActiveRunID(t *testing.T) {
 	}
 
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg:       cfg,
-		Run:       run,
+		Cfg:         cfg,
+		Run:         run,
 		TaskService: pkgtask.NewManager(ts, nil),
-		Session:   newTestSessionService(cfg, sessStore),
-		NotifyCh:  nil,
-		Index:     protocol.NewIndex(0, 0),
-		Wake:      nil,
+		Session:     newTestSessionService(cfg, sessStore),
+		NotifyCh:    nil,
+		Index:       protocol.NewIndex(0, 0),
+		Wake:        nil,
 	})
 
 	pr, pw := io.Pipe()
@@ -146,12 +147,12 @@ func TestRPCServer_TurnCreate_CreatesTaskAndWakes(t *testing.T) {
 
 	woke := make(chan struct{}, 1)
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg:       cfg,
-		Run:       run,
+		Cfg:         cfg,
+		Run:         run,
 		TaskService: pkgtask.NewManager(ts, nil),
-		Session:   newTestSessionService(cfg, sessStore),
-		NotifyCh:  nil,
-		Index:     protocol.NewIndex(0, 0),
+		Session:     newTestSessionService(cfg, sessStore),
+		NotifyCh:    nil,
+		Index:       protocol.NewIndex(0, 0),
 		Wake: func() {
 			select {
 			case woke <- struct{}{}:
@@ -232,13 +233,13 @@ func TestRPCServer_ForwardsNotifications(t *testing.T) {
 
 	idx := protocol.NewIndex(0, 0)
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg:       cfg,
-		Run:       run,
+		Cfg:         cfg,
+		Run:         run,
 		TaskService: pkgtask.NewManager(ts, nil),
-		Session:   newTestSessionService(cfg, sessStore),
-		NotifyCh:  notifyCh,
-		Index:     idx,
-		Wake:      nil,
+		Session:     newTestSessionService(cfg, sessStore),
+		NotifyCh:    notifyCh,
+		Index:       idx,
+		Wake:        nil,
 	})
 
 	pr, pw := io.Pipe()
@@ -964,8 +965,11 @@ func TestRPCServer_AgentList_DefaultSessionFromThread_NonBootstrap(t *testing.T)
 	_ = sessStore.SaveSession(context.Background(), bootstrapSess)
 	_ = sessStore.SaveSession(context.Background(), targetSess)
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	sessionSvc := newTestSessionService(cfg, sessStore)
+	taskMgr := pkgtask.NewManager(ts, sessionSvc)
+	agentMgr := pkgagent.NewManager(sessionSvc, taskMgr, taskMgr)
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: taskMgr, Session: sessionSvc, AgentService: agentMgr, Index: protocol.NewIndex(0, 0),
 	})
 
 	req, _ := protocol.NewRequest("1", protocol.MethodAgentList, protocol.AgentListParams{
@@ -1004,8 +1008,11 @@ func TestRPCServer_AgentStart_DefaultSessionFromThread_NonBootstrap(t *testing.T
 	_ = sessStore.SaveSession(context.Background(), bootstrapSess)
 	_ = sessStore.SaveSession(context.Background(), targetSess)
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	sessionSvc := newTestSessionService(cfg, sessStore)
+	taskMgr := pkgtask.NewManager(ts, sessionSvc)
+	agentMgr := pkgagent.NewManager(sessionSvc, taskMgr, taskMgr)
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: taskMgr, Session: sessionSvc, AgentService: agentMgr, Index: protocol.NewIndex(0, 0),
 	})
 
 	req, _ := protocol.NewRequest("1", protocol.MethodAgentStart, protocol.AgentStartParams{
@@ -1052,8 +1059,11 @@ func TestRPCServer_SessionPauseResume_DefaultSessionFromThread_NonBootstrap(t *t
 	_ = sessStore.SaveSession(context.Background(), bootstrapSess)
 	_ = sessStore.SaveSession(context.Background(), targetSess)
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	sessionSvc := newTestSessionService(cfg, sessStore)
+	taskMgr := pkgtask.NewManager(ts, sessionSvc)
+	agentMgr := pkgagent.NewManager(sessionSvc, taskMgr, taskMgr)
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: taskMgr, Session: sessionSvc, AgentService: agentMgr, Index: protocol.NewIndex(0, 0),
 	})
 
 	pauseReq, _ := protocol.NewRequest("1", protocol.MethodSessionPause, protocol.SessionPauseParams{
@@ -1872,8 +1882,11 @@ func TestRPCServer_SessionList_And_AgentList(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
+	sessionSvc := newTestSessionService(cfg, sessStore)
+	taskMgr := pkgtask.NewManager(ts, sessionSvc)
+	agentMgr := pkgagent.NewManager(sessionSvc, taskMgr, taskMgr)
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg: cfg, Run: runA, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+		Cfg: cfg, Run: runA, TaskService: taskMgr, Session: sessionSvc, AgentService: agentMgr, Index: protocol.NewIndex(0, 0),
 	})
 
 	reqList, _ := protocol.NewRequest("1", protocol.MethodSessionList, protocol.SessionListParams{
@@ -1974,8 +1987,11 @@ func TestRPCServer_AgentPauseResume(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
+	sessionSvc := newTestSessionService(cfg, sessStore)
+	taskMgr := pkgtask.NewManager(ts, sessionSvc)
+	agentMgr := pkgagent.NewManager(sessionSvc, taskMgr, taskMgr)
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+		Cfg: cfg, Run: run, TaskService: taskMgr, Session: sessionSvc, AgentService: agentMgr, Index: protocol.NewIndex(0, 0),
 	})
 
 	reqPause, _ := protocol.NewRequest("1", protocol.MethodAgentPause, protocol.AgentPauseParams{
@@ -2039,8 +2055,11 @@ func TestRPCServer_SessionPauseResume_AffectsAllRuns(t *testing.T) {
 		t.Fatalf("SaveSession: %v", err)
 	}
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	sessionSvc := newTestSessionService(cfg, sessStore)
+	taskMgr := pkgtask.NewManager(ts, sessionSvc)
+	agentMgr := pkgagent.NewManager(sessionSvc, taskMgr, taskMgr)
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg: cfg, Run: runA, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+		Cfg: cfg, Run: runA, TaskService: taskMgr, Session: sessionSvc, AgentService: agentMgr, Index: protocol.NewIndex(0, 0),
 	})
 
 	reqPause, _ := protocol.NewRequest("1", protocol.MethodSessionPause, protocol.SessionPauseParams{
@@ -2108,8 +2127,11 @@ func TestRPCServer_SessionStop_DefaultSessionFromThread(t *testing.T) {
 		t.Fatalf("SaveSession: %v", err)
 	}
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	sessionSvc := newTestSessionService(cfg, sessStore)
+	taskMgr := pkgtask.NewManager(ts, sessionSvc)
+	agentMgr := pkgagent.NewManager(sessionSvc, taskMgr, taskMgr)
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg: cfg, Run: runA, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+		Cfg: cfg, Run: runA, TaskService: taskMgr, Session: sessionSvc, AgentService: agentMgr, Index: protocol.NewIndex(0, 0),
 	})
 
 	reqStop, _ := protocol.NewRequest("1", protocol.MethodSessionStop, protocol.SessionStopParams{
@@ -2152,8 +2174,11 @@ func TestRPCServer_SessionStop_ThreadMismatch(t *testing.T) {
 		t.Fatalf("NewSQLiteSessionStore: %v", err)
 	}
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	sessionSvc := newTestSessionService(cfg, sessStore)
+	taskMgr := pkgtask.NewManager(ts, sessionSvc)
+	agentMgr := pkgagent.NewManager(sessionSvc, taskMgr, taskMgr)
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg: cfg, Run: runA, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+		Cfg: cfg, Run: runA, TaskService: taskMgr, Session: sessionSvc, AgentService: agentMgr, Index: protocol.NewIndex(0, 0),
 	})
 
 	reqStop, _ := protocol.NewRequest("1", protocol.MethodSessionStop, protocol.SessionStopParams{
@@ -2307,8 +2332,11 @@ func TestRPCServer_AgentStart(t *testing.T) {
 		t.Fatalf("SaveSession: %v", err)
 	}
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	sessionSvc := newTestSessionService(cfg, sessStore)
+	taskMgr := pkgtask.NewManager(ts, sessionSvc)
+	agentMgr := pkgagent.NewManager(sessionSvc, taskMgr, taskMgr)
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+		Cfg: cfg, Run: run, TaskService: taskMgr, Session: sessionSvc, AgentService: agentMgr, Index: protocol.NewIndex(0, 0),
 	})
 
 	req, _ := protocol.NewRequest("1", protocol.MethodAgentStart, protocol.AgentStartParams{

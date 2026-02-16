@@ -14,6 +14,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
@@ -439,8 +440,10 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 					teamID = strings.TrimSpace(run.Runtime.TeamID)
 				}
 			}
-			if _, inferredTeamID := s.inferRunRoleAndTeam(ctx, runID); teamID == "" && inferredTeamID != "" {
-				teamID = strings.TrimSpace(inferredTeamID)
+			if s.agentService != nil {
+				if _, inferredTeamID := s.agentService.InferRunRoleAndTeam(ctx, runID); teamID == "" && inferredTeamID != "" {
+					teamID = strings.TrimSpace(inferredTeamID)
+				}
 			}
 		}
 		if mode == "" {
@@ -518,6 +521,9 @@ func (s *RPCServer) sessionRename(ctx context.Context, p protocol.SessionRenameP
 }
 
 func (s *RPCServer) agentList(ctx context.Context, p protocol.AgentListParams) (protocol.AgentListResult, error) {
+	if s.agentService == nil {
+		return protocol.AgentListResult{}, &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: "agent service not configured"}
+	}
 	threadID, err := s.resolveThreadID(p.ThreadID)
 	if err != nil {
 		return protocol.AgentListResult{}, err
@@ -526,52 +532,42 @@ func (s *RPCServer) agentList(ctx context.Context, p protocol.AgentListParams) (
 	if sessionID == "" {
 		sessionID = threadID
 	}
-	sess, err := s.session.LoadSession(ctx, sessionID)
+	list, err := s.agentService.List(ctx, sessionID)
 	if err != nil {
-		return protocol.AgentListResult{}, err
+		return protocol.AgentListResult{}, asProtocolError(err)
 	}
-	out := make([]protocol.AgentListItem, 0, len(sess.Runs))
-	for _, runID := range sess.Runs {
-		runID = strings.TrimSpace(runID)
-		if runID == "" {
-			continue
-		}
-		run, err := s.session.LoadRun(ctx, runID)
-		if err != nil {
-			continue
-		}
-		item := protocol.AgentListItem{
-			RunID:       runID,
-			SessionID:   strings.TrimSpace(run.SessionID),
-			Status:      strings.TrimSpace(run.Status),
-			Goal:        strings.TrimSpace(run.Goal),
-			ParentRunID: strings.TrimSpace(run.ParentRunID),
-			SpawnIndex:  run.SpawnIndex,
-		}
-		if run.Runtime != nil {
-			item.Profile = strings.TrimSpace(run.Runtime.Profile)
-		}
-		if role, teamID := s.inferRunRoleAndTeam(ctx, runID); role != "" || teamID != "" {
-			item.Role = role
-			item.TeamID = teamID
-		}
-		if run.StartedAt != nil && !run.StartedAt.IsZero() {
-			item.StartedAt = run.StartedAt.UTC().Format(time.RFC3339Nano)
-		}
-		if run.FinishedAt != nil && !run.FinishedAt.IsZero() {
-			item.FinishedAt = run.FinishedAt.UTC().Format(time.RFC3339Nano)
-		}
-		out = append(out, item)
+	out := make([]protocol.AgentListItem, 0, len(list))
+	for _, info := range list {
+		out = append(out, protocol.AgentListItem{
+			RunID:       info.RunID,
+			SessionID:   info.SessionID,
+			Status:      info.Status,
+			Goal:        info.Goal,
+			ParentRunID: info.ParentRunID,
+			SpawnIndex:  info.SpawnIndex,
+			Profile:     info.Profile,
+			Role:        info.Role,
+			TeamID:      info.TeamID,
+			StartedAt:   info.StartedAt,
+			FinishedAt:  info.FinishedAt,
+		})
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		a := out[i].StartedAt
-		b := out[j].StartedAt
-		if a == b {
-			return out[i].RunID > out[j].RunID
-		}
-		return a > b
-	})
 	return protocol.AgentListResult{Agents: out}, nil
+}
+
+func asProtocolError(err error) *protocol.ProtocolError {
+	if err == nil {
+		return nil
+	}
+	var pe *protocol.ProtocolError
+	if errors.As(err, &pe) {
+		return pe
+	}
+	var se *pkgagent.ServiceError
+	if errors.As(err, &se) {
+		return &protocol.ProtocolError{Code: se.Code, Message: se.Message}
+	}
+	return &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: err.Error()}
 }
 
 func (s *RPCServer) runListChildren(ctx context.Context, p protocol.RunListChildrenParams) (protocol.RunListChildrenResult, error) {
@@ -586,51 +582,10 @@ func (s *RPCServer) runListChildren(ctx context.Context, p protocol.RunListChild
 	return protocol.RunListChildrenResult{Runs: runs}, nil
 }
 
-func (s *RPCServer) inferRunRoleAndTeam(ctx context.Context, runID string) (role string, teamID string) {
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return "", ""
-	}
-	if run, err := s.session.LoadRun(ctx, runID); err == nil && run.Runtime != nil {
-		role = strings.TrimSpace(run.Runtime.Role)
-		teamID = strings.TrimSpace(run.Runtime.TeamID)
-		if role != "" && teamID != "" {
-			return role, teamID
-		}
-	}
-	if s.taskService == nil {
-		return strings.TrimSpace(role), strings.TrimSpace(teamID)
-	}
-	tasks, err := s.taskService.ListTasks(ctx, state.TaskFilter{
-		RunID:    runID,
-		SortBy:   "created_at",
-		SortDesc: true,
-		Limit:    50,
-	})
-	if err != nil || len(tasks) == 0 {
-		return strings.TrimSpace(role), strings.TrimSpace(teamID)
-	}
-	for _, t := range tasks {
-		if strings.TrimSpace(teamID) == "" {
-			teamID = strings.TrimSpace(t.TeamID)
-		}
-		if strings.TrimSpace(role) == "" {
-			role = strings.TrimSpace(t.RoleSnapshot)
-		}
-		if strings.TrimSpace(role) == "" {
-			role = strings.TrimSpace(t.AssignedRole)
-		}
-		if strings.TrimSpace(role) == "" && strings.EqualFold(strings.TrimSpace(t.AssignedToType), "role") {
-			role = strings.TrimSpace(t.AssignedTo)
-		}
-		if role != "" && teamID != "" {
-			break
-		}
-	}
-	return strings.TrimSpace(role), strings.TrimSpace(teamID)
-}
-
 func (s *RPCServer) agentStart(ctx context.Context, p protocol.AgentStartParams) (protocol.AgentStartResult, error) {
+	if s.agentService == nil {
+		return protocol.AgentStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: "agent service not configured"}
+	}
 	threadID, err := s.resolveThreadID(p.ThreadID)
 	if err != nil {
 		return protocol.AgentStartResult{}, err
@@ -639,79 +594,41 @@ func (s *RPCServer) agentStart(ctx context.Context, p protocol.AgentStartParams)
 	if sessionID == "" {
 		sessionID = threadID
 	}
-	sess, err := s.session.LoadSession(ctx, sessionID)
-	if err != nil {
-		return protocol.AgentStartResult{}, err
-	}
 	maxContext := s.run.MaxBytesForContext
 	if maxContext <= 0 {
 		maxContext = 8 * 1024
 	}
-	goal := strings.TrimSpace(p.Goal)
-	if goal == "" {
-		goal = strings.TrimSpace(sess.CurrentGoal)
+	opts := pkgagent.StartOptions{
+		SessionID:          sessionID,
+		Goal:               strings.TrimSpace(p.Goal),
+		Profile:            strings.TrimSpace(p.Profile),
+		Model:              strings.TrimSpace(p.Model),
+		MaxBytesForContext: maxContext,
 	}
-	if goal == "" {
-		goal = "autonomous agent"
+	res, err := s.agentService.Start(ctx, opts)
+	if err != nil {
+		return protocol.AgentStartResult{}, asProtocolError(err)
 	}
-	run := types.NewRun(goal, maxContext, sessionID)
-	if run.Runtime == nil {
-		run.Runtime = &types.RunRuntimeConfig{}
-	}
-	run.Runtime.TeamID = strings.TrimSpace(sess.TeamID)
-	run.Runtime.Role = ""
-	if profileRef := strings.TrimSpace(p.Profile); profileRef != "" {
-		run.Runtime.Profile = profileRef
-		sess.Profile = profileRef
-	}
-	if err := s.session.SaveRun(ctx, run); err != nil {
+	sess, err := s.session.LoadSession(ctx, res.SessionID)
+	if err != nil {
 		return protocol.AgentStartResult{}, err
-	}
-	runID := strings.TrimSpace(run.RunID)
-	exists := false
-	for _, id := range sess.Runs {
-		if strings.TrimSpace(id) == runID {
-			exists = true
-			break
-		}
-	}
-	if !exists {
-		sess.Runs = append(sess.Runs, runID)
-	}
-	sess.CurrentRunID = runID
-	if strings.TrimSpace(sess.Mode) == "" {
-		if strings.TrimSpace(sess.TeamID) != "" {
-			sess.Mode = "team"
-		} else {
-			sess.Mode = "standalone"
-		}
-	}
-
-	model := strings.TrimSpace(p.Model)
-	if model == "" {
-		model = strings.TrimSpace(sess.ActiveModel)
-	}
-	if model != "" {
-		if run.Runtime == nil {
-			run.Runtime = &types.RunRuntimeConfig{}
-		}
-		run.Runtime.Model = model
-		_ = s.session.SaveRun(ctx, run)
-		sess.ActiveModel = model
 	}
 	ensureSessionReasoningForModel(&sess, sess.ActiveModel, "", "")
 	if err := s.session.SaveSession(ctx, sess); err != nil {
 		return protocol.AgentStartResult{}, err
 	}
 	return protocol.AgentStartResult{
-		RunID:     runID,
-		SessionID: sessionID,
-		Profile:   strings.TrimSpace(p.Profile),
-		Model:     model,
+		RunID:     res.RunID,
+		SessionID: res.SessionID,
+		Profile:   res.Profile,
+		Model:     res.Model,
 	}, nil
 }
 
 func (s *RPCServer) agentPauseHandler(ctx context.Context, p protocol.AgentPauseParams) (protocol.AgentPauseResult, error) {
+	if s.agentService == nil {
+		return protocol.AgentPauseResult{}, &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: "agent service not configured"}
+	}
 	threadID, err := s.resolveThreadID(p.ThreadID)
 	if err != nil {
 		return protocol.AgentPauseResult{}, err
@@ -720,19 +637,16 @@ func (s *RPCServer) agentPauseHandler(ctx context.Context, p protocol.AgentPause
 	if runID == "" {
 		return protocol.AgentPauseResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
 	}
-	if s.agentPause != nil {
-		if err := s.agentPause(ctx, threadID, runID); err != nil {
-			return protocol.AgentPauseResult{}, err
-		}
-		return protocol.AgentPauseResult{RunID: runID, Status: types.RunStatusPaused}, nil
-	}
-	if err := s.setRunPausedState(ctx, threadID, runID, true); err != nil {
-		return protocol.AgentPauseResult{}, err
+	if err := s.agentService.Pause(ctx, runID, threadID); err != nil {
+		return protocol.AgentPauseResult{}, asProtocolError(err)
 	}
 	return protocol.AgentPauseResult{RunID: runID, Status: types.RunStatusPaused}, nil
 }
 
 func (s *RPCServer) agentResumeHandler(ctx context.Context, p protocol.AgentResumeParams) (protocol.AgentResumeResult, error) {
+	if s.agentService == nil {
+		return protocol.AgentResumeResult{}, &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: "agent service not configured"}
+	}
 	threadID, err := s.resolveThreadID(p.ThreadID)
 	if err != nil {
 		return protocol.AgentResumeResult{}, err
@@ -741,14 +655,8 @@ func (s *RPCServer) agentResumeHandler(ctx context.Context, p protocol.AgentResu
 	if runID == "" {
 		return protocol.AgentResumeResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
 	}
-	if s.agentResume != nil {
-		if err := s.agentResume(ctx, threadID, runID); err != nil {
-			return protocol.AgentResumeResult{}, err
-		}
-		return protocol.AgentResumeResult{RunID: runID, Status: types.RunStatusRunning}, nil
-	}
-	if err := s.setRunPausedState(ctx, threadID, runID, false); err != nil {
-		return protocol.AgentResumeResult{}, err
+	if err := s.agentService.Resume(ctx, runID, threadID); err != nil {
+		return protocol.AgentResumeResult{}, asProtocolError(err)
 	}
 	return protocol.AgentResumeResult{RunID: runID, Status: types.RunStatusRunning}, nil
 }
@@ -847,6 +755,9 @@ func (s *RPCServer) sessionDelete(ctx context.Context, p protocol.SessionDeleteP
 }
 
 func (s *RPCServer) setSessionPausedState(ctx context.Context, threadID, sessionID string, paused bool) ([]string, error) {
+	if s.agentService == nil {
+		return nil, &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: "agent service not configured"}
+	}
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "sessionId is required"}
 	}
@@ -860,48 +771,22 @@ func (s *RPCServer) setSessionPausedState(ctx context.Context, threadID, session
 	runIDs := collectSessionRunIDs(sess)
 	affected := make([]string, 0, len(runIDs))
 	for _, runID := range runIDs {
-		if err := s.setRunPausedState(ctx, threadID, runID, paused); err != nil {
-			return affected, err
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		if paused {
+			if err := s.agentService.Pause(ctx, runID, sessionID); err != nil {
+				return affected, asProtocolError(err)
+			}
+		} else {
+			if err := s.agentService.Resume(ctx, runID, sessionID); err != nil {
+				return affected, asProtocolError(err)
+			}
 		}
 		affected = append(affected, runID)
 	}
 	return affected, nil
-}
-
-func (s *RPCServer) setRunPausedState(ctx context.Context, threadID, runID string, paused bool) error {
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
-	}
-	run, err := s.session.LoadRun(ctx, runID)
-	if err != nil {
-		return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
-	}
-	if strings.TrimSpace(run.SessionID) != strings.TrimSpace(threadID) {
-		return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-	}
-	status := strings.ToLower(strings.TrimSpace(run.Status))
-	switch status {
-	case strings.ToLower(types.RunStatusRunning), strings.ToLower(types.RunStatusPaused):
-		// supported
-	default:
-		return &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "run is not pauseable"}
-	}
-	if paused {
-		run.Status = types.RunStatusPaused
-	} else {
-		run.Status = types.RunStatusRunning
-	}
-	run.FinishedAt = nil
-	run.Error = nil
-	if err := s.session.SaveRun(ctx, run); err != nil {
-		return err
-	}
-	if paused {
-		_, err := s.taskService.CancelActiveTasksByRun(ctx, runID, "run paused")
-		return err
-	}
-	return nil
 }
 
 func normalizeAssignedToType(s string) string {

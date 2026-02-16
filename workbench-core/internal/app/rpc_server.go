@@ -12,6 +12,7 @@ import (
 
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
@@ -26,9 +27,10 @@ type RPCServer struct {
 	run            types.Run
 	allowAnyThread bool
 
-	taskService pkgtask.TaskServiceForRPC
-	session     pkgsession.Service
-	initErr   error
+	taskService  pkgtask.TaskServiceForRPC
+	session      pkgsession.Service
+	agentService pkgagent.ServiceForRPC
+	initErr      error
 
 	notifyCh <-chan protocol.Message
 	index    *protocol.Index
@@ -40,8 +42,6 @@ type RPCServer struct {
 	controlSetModel     func(ctx context.Context, threadID, target, model string) ([]string, error)
 	controlSetReasoning func(ctx context.Context, threadID, target, effort, summary string) ([]string, error)
 	controlSetProfile   func(ctx context.Context, threadID, target, profile string) ([]string, error)
-	agentPause          func(ctx context.Context, threadID, runID string) error
-	agentResume         func(ctx context.Context, threadID, runID string) error
 	sessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error) // Session logic
 	sessionResume       func(ctx context.Context, threadID, sessionID string) ([]string, error)
 	sessionStop         func(ctx context.Context, threadID, sessionID string) ([]string, error)
@@ -59,8 +59,7 @@ type RPCServerConfig struct {
 	ControlSetModel     func(ctx context.Context, threadID, target, model string) ([]string, error)
 	ControlSetReasoning func(ctx context.Context, threadID, target, effort, summary string) ([]string, error)
 	ControlSetProfile   func(ctx context.Context, threadID, target, profile string) ([]string, error)
-	AgentPause          func(ctx context.Context, threadID, runID string) error
-	AgentResume         func(ctx context.Context, threadID, runID string) error
+	AgentService        pkgagent.ServiceForRPC
 	SessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error)
 	// Session logic
 	SessionResume func(ctx context.Context, threadID, sessionID string) ([]string, error)
@@ -145,6 +144,7 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		allowAnyThread:      cfg.AllowAnyThread,
 		taskService:         cfg.TaskService,
 		session:             sess,
+		agentService:        cfg.AgentService,
 		initErr:             initErr,
 		notifyCh:            cfg.NotifyCh,
 		index:               cfg.Index,
@@ -152,8 +152,6 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		controlSetModel:     cfg.ControlSetModel,
 		controlSetReasoning: cfg.ControlSetReasoning,
 		controlSetProfile:   cfg.ControlSetProfile,
-		agentPause:          cfg.AgentPause,
-		agentResume:         cfg.AgentResume,
 		sessionPause:        cfg.SessionPause,
 		sessionResume:       cfg.SessionResume,
 		sessionStop:         cfg.SessionStop,

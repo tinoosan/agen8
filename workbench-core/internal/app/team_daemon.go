@@ -31,6 +31,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
+	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -42,6 +43,62 @@ type teamRoleRuntime struct {
 	run     types.Run
 	sess    *session.Session
 	cleanup func()
+}
+
+// teamRuntimeController implements pkgagent.RuntimeController for team daemon pause/resume.
+type teamRuntimeController struct {
+	runtimes       []teamRoleRuntime
+	sessionService pkgsession.Service
+	taskService    pkgtask.ActiveTaskCanceler
+}
+
+func (c *teamRuntimeController) PauseRun(runID string) error {
+	runID = strings.TrimSpace(runID)
+	for i := range c.runtimes {
+		if strings.TrimSpace(c.runtimes[i].run.RunID) != runID {
+			continue
+		}
+		loaded, err := c.sessionService.LoadRun(context.Background(), runID)
+		if err != nil {
+			return err
+		}
+		loaded.Status = types.RunStatusPaused
+		loaded.FinishedAt = nil
+		loaded.Error = nil
+		if err := c.sessionService.SaveRun(context.Background(), loaded); err != nil {
+			return err
+		}
+		c.runtimes[i].sess.SetPaused(true)
+		return cancelActiveTasksForRun(context.Background(), c.taskService, runID, "run paused")
+	}
+	return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
+}
+
+func (c *teamRuntimeController) ResumeRun(ctx context.Context, runID string) error {
+	runID = strings.TrimSpace(runID)
+	for i := range c.runtimes {
+		if strings.TrimSpace(c.runtimes[i].run.RunID) != runID {
+			continue
+		}
+		loaded, err := c.sessionService.LoadRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		loaded.Status = types.RunStatusRunning
+		loaded.FinishedAt = nil
+		loaded.Error = nil
+		if err := c.sessionService.SaveRun(ctx, loaded); err != nil {
+			return err
+		}
+		c.runtimes[i].sess.SetPaused(false)
+		return nil
+	}
+	return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
+}
+
+func (c *teamRuntimeController) StopRun(runID string) error {
+	// Team daemon does not use StopRun from agent service; session stop uses custom logic.
+	return nil
 }
 
 type teamManifest struct {
@@ -803,63 +860,14 @@ func buildTeamRPCServerConfig(
 	base.ControlSetProfile = func(_ context.Context, _ string, _, _ string) ([]string, error) {
 		return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is unavailable in team mode"}
 	}
-	base.AgentPause = func(_ context.Context, threadID, runID string) error {
-		if !isValidTeamThread(threadID) {
-			return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-		}
-		runID = strings.TrimSpace(runID)
-		if runID == "" {
-			return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
-		}
-		for i := range runtimes {
-			if strings.TrimSpace(runtimes[i].run.RunID) != runID {
-				continue
-			}
-			loaded, err := sessionService.LoadRun(context.Background(), runID)
-			if err != nil {
-				return err
-			}
-			loaded.Status = types.RunStatusPaused
-			loaded.FinishedAt = nil
-			loaded.Error = nil
-			if err := sessionService.SaveRun(context.Background(), loaded); err != nil {
-				return err
-			}
-			runtimes[i].sess.SetPaused(true)
-			if err := cancelActiveTasksForRun(context.Background(), taskService, runID, "run paused"); err != nil {
-				return err
-			}
-			return nil
-		}
-		return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
+	teamController := &teamRuntimeController{
+		runtimes:       runtimes,
+		sessionService: sessionService,
+		taskService:    taskService,
 	}
-	base.AgentResume = func(_ context.Context, threadID, runID string) error {
-		if !isValidTeamThread(threadID) {
-			return &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
-		}
-		runID = strings.TrimSpace(runID)
-		if runID == "" {
-			return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
-		}
-		for i := range runtimes {
-			if strings.TrimSpace(runtimes[i].run.RunID) != runID {
-				continue
-			}
-			loaded, err := sessionService.LoadRun(context.Background(), runID)
-			if err != nil {
-				return err
-			}
-			loaded.Status = types.RunStatusRunning
-			loaded.FinishedAt = nil
-			loaded.Error = nil
-			if err := sessionService.SaveRun(context.Background(), loaded); err != nil {
-				return err
-			}
-			runtimes[i].sess.SetPaused(false)
-			return nil
-		}
-		return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
-	}
+	teamAgentManager := pkgagent.NewManager(sessionService, taskService, taskService)
+	teamAgentManager.SetRuntimeController(teamController)
+	base.AgentService = teamAgentManager
 	base.SessionPause = func(_ context.Context, threadID, sessionID string) ([]string, error) {
 		if !isValidTeamThread(threadID) {
 			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}

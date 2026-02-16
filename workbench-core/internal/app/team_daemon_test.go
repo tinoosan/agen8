@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -89,14 +91,25 @@ func TestBuildTeamRPCServerConfig_AcceptsRoleSessionThread(t *testing.T) {
 		map[string]context.CancelFunc{},
 	)
 
-	err := srvCfg.AgentPause(context.Background(), "worker-sess", "")
+	if srvCfg.AgentService == nil {
+		t.Fatal("AgentService not set")
+	}
+	err := srvCfg.AgentService.Pause(context.Background(), "", "worker-sess")
+	if err == nil {
+		t.Fatal("expected error for empty runID")
+	}
+	var se *pkgagent.ServiceError
+	if errors.As(err, &se) {
+		if se.Code != protocol.CodeInvalidParams {
+			t.Fatalf("service error code=%d want=%d", se.Code, protocol.CodeInvalidParams)
+		}
+		return
+	}
 	pErr, ok := err.(*protocol.ProtocolError)
-	if !ok {
-		t.Fatalf("expected protocol error, got %T", err)
+	if ok && pErr.Code == protocol.CodeInvalidParams {
+		return
 	}
-	if pErr.Code != protocol.CodeInvalidParams {
-		t.Fatalf("protocol code=%d want=%d", pErr.Code, protocol.CodeInvalidParams)
-	}
+	t.Fatalf("expected InvalidParams error, got %T: %v", err, err)
 }
 
 func TestBuildTeamRPCServerConfig_RejectsUnknownThread(t *testing.T) {
