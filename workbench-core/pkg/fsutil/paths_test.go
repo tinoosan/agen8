@@ -98,11 +98,23 @@ func TestGetWorkspaceDirForRun(t *testing.T) {
 		t.Fatalf("GetWorkspaceDirForRun(top-level) = %q, want %q", got, want)
 	}
 
-	// Child run: workspace is under parent's workspace/subagents/<childRunID>
+	// Child run: workspace is under child run dir (parentRun/subagents/childID/workspace)
 	run.ParentRunID = "run-parent"
 	run.RunID = "run-child"
-	want := filepath.Join(GetWorkspaceDir(dataDir, "run-parent"), "subagents", "run-child")
+	want := filepath.Join(GetSubagentRunDir(dataDir, "run-parent", "run-child"), "workspace")
 	if got := GetWorkspaceDirForRun(dataDir, run); got != want {
 		t.Fatalf("GetWorkspaceDirForRun(child) = %q, want %q", got, want)
+	}
+}
+
+func TestGetSubagentDeliverablesDir(t *testing.T) {
+	dataDir := "/var/data/workbench"
+	parentRunID := "run-parent"
+	childRunID := "run-child"
+	got := GetSubagentDeliverablesDir(dataDir, parentRunID, childRunID)
+	parentWorkspace := GetWorkspaceDir(dataDir, parentRunID)
+	want := filepath.Join(parentWorkspace, "subagent_deliverables", childRunID)
+	if got != want {
+		t.Fatalf("GetSubagentDeliverablesDir = %q, want %q", got, want)
 	}
 }

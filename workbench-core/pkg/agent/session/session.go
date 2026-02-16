@@ -1055,11 +1055,6 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			}
 			if strings.HasPrefix(art, "/deliverables/") {
 				artifactsForParent = append(artifactsForParent, path.Join(subagentArtifactsDir, strings.TrimPrefix(art, "/deliverables/")))
-			} else if strings.HasPrefix(art, "/deliverables") && (len(art) == 12 || (len(art) > 12 && art[12] == '/')) {
-				// "/deliverables" or "/deliverables/"
-				rest := strings.TrimPrefix(art, "/deliverables")
-				rest = strings.TrimPrefix(rest, "/")
-				artifactsForParent = append(artifactsForParent, path.Join(subagentArtifactsDir, rest))
 			} else {
 				artifactsForParent = append(artifactsForParent, path.Join(subagentArtifactsDir, art))
 			}

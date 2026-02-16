@@ -121,7 +121,7 @@ Sub-agents:
 - **Must not** spawn additional agents
 - **Must not** communicate laterally
 
-All outputs must return to the parent.
+All outputs must return to the parent. The subagent’s workspace is under the child run dir (`parentRun/subagents/<childID>/workspace`). The subagent writes deliverables to `/deliverables`; they appear in the parent’s workspace at `workspace/subagent_deliverables/<childRunID>/`, and the callback reports that location.
 
 ### 4.3 Review Gate
 

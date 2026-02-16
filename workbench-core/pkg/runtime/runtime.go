@@ -178,9 +178,8 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			return nil, fmt.Errorf("create shared workspace resource: %w", err)
 		}
 	} else if strings.TrimSpace(cfg.Run.ParentRunID) != "" {
-		// Subagent: mount workspace under parent's workspace so artifacts are stored in the parent's workspace.
-		workspaceDir := fsutil.GetWorkspaceDirForRun(cfg.Cfg.DataDir, cfg.Run)
-		wsRes, err = resources.NewWorkspaceFromPath(workspaceDir)
+		// Subagent: workspace under child run dir (parentRun/subagents/childID/workspace).
+		wsRes, err = resources.NewWorkspaceFromRunDir(runDir)
 		if err != nil {
 			return nil, fmt.Errorf("create workspace resource: %w", err)
 		}
@@ -266,6 +265,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 
 	var subagentsDir string
+	var deliverablesDir string
 	if strings.TrimSpace(cfg.Run.ParentRunID) == "" {
 		subagentsDir = fsutil.GetSubagentsDir(cfg.Cfg.DataDir, cfg.Run.RunID)
 		if err := os.MkdirAll(subagentsDir, 0755); err != nil {
@@ -277,6 +277,19 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		}
 		if err := fs.Mount(vfs.MountSubagents, subagentsRes); err != nil {
 			return nil, fmt.Errorf("mount %s: %w", vfs.MountSubagents, err)
+		}
+	} else {
+		// Subagent: mount /deliverables so child can write outputs into parent's workspace.
+		deliverablesDir = fsutil.GetSubagentDeliverablesDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.RunID)
+		if err := os.MkdirAll(deliverablesDir, 0755); err != nil {
+			return nil, fmt.Errorf("prepare deliverables dir: %w", err)
+		}
+		deliverablesRes, err := resources.NewDirResource(deliverablesDir, vfs.MountDeliverables)
+		if err != nil {
+			return nil, fmt.Errorf("create deliverables resource: %w", err)
+		}
+		if err := fs.Mount(vfs.MountDeliverables, deliverablesRes); err != nil {
+			return nil, fmt.Errorf("mount %s: %w", vfs.MountDeliverables, err)
 		}
 	}
 
@@ -290,6 +303,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		}
 		if subagentsDir != "" {
 			mountedData["/subagents"] = subagentsDir
+		}
+		if deliverablesDir != "" {
+			mountedData["/deliverables"] = deliverablesDir
 		}
 		cfg.Emit(context.Background(), events.Event{
 			Type:    "host.mounted",
@@ -316,6 +332,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	shellInvoker.MountRoots[vfs.MountMemory] = memRes.BaseDir
 	if subagentsDir != "" {
 		shellInvoker.MountRoots[vfs.MountSubagents] = subagentsDir
+	}
+	if deliverablesDir != "" {
+		shellInvoker.MountRoots[vfs.MountDeliverables] = deliverablesDir
 	}
 	if raw := strings.TrimSpace(os.Getenv("WORKBENCH_SHELL_VFS_TRANSLATION")); raw != "" {
 		switch strings.ToLower(raw) {

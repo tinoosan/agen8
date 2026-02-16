@@ -47,6 +47,11 @@ const (
 	// MountSubagents exposes the parent run's subagent run directories under /subagents.
 	// Only present for top-level runs; child runs live under parent's subagents dir on disk.
 	MountSubagents = "subagents"
+
+	// MountDeliverables is the mount name for a subagent's deliverables directory.
+	// Only present for child runs; points to parentRun/workspace/subagent_deliverables/<childRunID>.
+	// The child writes outputs here; the parent sees them at /workspace/subagent_deliverables/<childRunID>/.
+	MountDeliverables = "deliverables"
 )
 
 // Resource is the minimal contract a “mounted thing” must implement to behave like a filesystem.

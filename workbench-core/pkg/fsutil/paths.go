@@ -80,13 +80,21 @@ func GetRunDir(dataDir string, run types.Run) string {
 }
 
 // GetWorkspaceDirForRun returns the workspace directory for a run. Subagents (with ParentRunID set)
-// use a subdirectory under the parent's workspace so artifacts are stored in the parent's workspace.
+// use a workspace under the child run dir: parentRun/subagents/childID/workspace.
 func GetWorkspaceDirForRun(dataDir string, run types.Run) string {
 	if strings.TrimSpace(run.ParentRunID) != "" {
-		parentWorkspace := GetWorkspaceDir(dataDir, run.ParentRunID)
-		return filepath.Join(parentWorkspace, "subagents", run.RunID)
+		runDir := GetSubagentRunDir(dataDir, run.ParentRunID, run.RunID)
+		return filepath.Join(runDir, "workspace")
 	}
 	return GetWorkspaceDir(dataDir, run.RunID)
+}
+
+// GetSubagentDeliverablesDir returns the on-disk path in the parent's workspace where a child
+// run's deliverables are stored. The child writes to /deliverables (mounted here); the parent
+// sees them at /workspace/subagent_deliverables/<childRunID>/.
+func GetSubagentDeliverablesDir(dataDir, parentRunID, childRunID string) string {
+	parentWorkspace := GetWorkspaceDir(dataDir, parentRunID)
+	return filepath.Join(parentWorkspace, "subagent_deliverables", childRunID)
 }
 
 // GetLogDirFromRunDir returns the log directory given a run's root dir.

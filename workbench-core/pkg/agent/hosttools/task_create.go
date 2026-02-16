@@ -75,7 +75,7 @@ func (t *TaskCreateTool) Definition() llmtypes.Tool {
 					},
 					"spawnWorker": map[string]any{
 						"type":        "boolean",
-						"description": "Set to true when you decide to delegate to a worker agent, or when the user or goal requests subagents (required when the goal requests subagents). Callbacks will be created when workers finish; you may complete your coordination task when you have summarized. Do not sleep or wait.",
+						"description": "Set to true when you decide to delegate to a worker agent, or when the user or goal requests subagents (required when the goal requests subagents). In the goal, ask the worker to put deliverables in /deliverables so you can review them in the callback. Callbacks will be created when workers finish; you may complete your coordination task when you have summarized. Do not sleep or wait.",
 					},
 				},
 				"required":             []any{"goal"},
@@ -190,7 +190,7 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	}
 	msg := fmt.Sprintf("Task %s created successfully.", taskID)
 	if payload.SpawnWorker {
-		msg = fmt.Sprintf("Task %s created and worker agent spawned. You delegated this to a subagent; do not do the same work yourself. When the callback task (callback-%s) appears in your inbox, process it with task_review to verify the work is complete.", taskID, taskID)
+		msg = fmt.Sprintf("Task %s created and worker agent spawned. You delegated this to a subagent; do not do the same work yourself. The worker was asked to put deliverables in /deliverables so you can see them when the callback arrives. When the callback task (callback-%s) appears in your inbox, process it with task_review to verify the work is complete.", taskID, taskID)
 		inputForEvent := map[string]string{"goal": goal, "taskId": taskID}
 		if task.AssignedToType == "agent" {
 			inputForEvent["childRunId"] = task.AssignedTo
