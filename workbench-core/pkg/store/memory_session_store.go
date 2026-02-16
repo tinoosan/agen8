@@ -23,17 +23,25 @@ type memorySessionEntry struct {
 }
 
 // MemorySessionStore is an in-memory implementation of SessionStore intended for tests.
+// It also implements the session service Store interface (runs, activities) so
+// tests can use pkgsession.NewManager(cfg, store, supervisor) and pass the Manager as Session.
 //
 // It maintains separate created/updated timestamps (like the SQLite columns) so
 // sorting/filtering matches the SQL-backed behavior even when Session JSON fields
 // omit UpdatedAt.
 type MemorySessionStore struct {
-	mu       sync.RWMutex
-	sessions map[string]memorySessionEntry
+	mu         sync.RWMutex
+	sessions   map[string]memorySessionEntry
+	runs       map[string]types.Run
+	activities map[string][]types.Activity // runID -> activities
 }
 
 func NewMemorySessionStore() *MemorySessionStore {
-	return &MemorySessionStore{sessions: make(map[string]memorySessionEntry)}
+	return &MemorySessionStore{
+		sessions:   make(map[string]memorySessionEntry),
+		runs:       make(map[string]types.Run),
+		activities: make(map[string][]types.Activity),
+	}
 }
 
 func (s *MemorySessionStore) LoadSession(_ context.Context, sessionID string) (types.Session, error) {
@@ -235,6 +243,156 @@ func (s *MemorySessionStore) CountSessions(_ context.Context, filter SessionFilt
 		}
 	}
 	return count, nil
+}
+
+func (s *MemorySessionStore) DeleteSession(_ context.Context, sessionID string) error {
+	if s == nil {
+		return fmt.Errorf("session store not configured")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("sessionId is required: %w", ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, sessionID)
+	return nil
+}
+
+func (s *MemorySessionStore) LoadRun(_ context.Context, runID string) (types.Run, error) {
+	if s == nil {
+		return types.Run{}, fmt.Errorf("session store not configured")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return types.Run{}, fmt.Errorf("runID is required")
+	}
+	s.mu.RLock()
+	run, ok := s.runs[runID]
+	s.mu.RUnlock()
+	if !ok {
+		return types.Run{}, fmt.Errorf("run %s not found: %w", runID, ErrNotFound)
+	}
+	return run, nil
+}
+
+func (s *MemorySessionStore) SaveRun(_ context.Context, run types.Run) error {
+	if s == nil {
+		return fmt.Errorf("session store not configured")
+	}
+	runID := strings.TrimSpace(run.RunID)
+	if runID == "" {
+		return fmt.Errorf("runID is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runs == nil {
+		s.runs = make(map[string]types.Run)
+	}
+	s.runs[runID] = run
+	return nil
+}
+
+func (s *MemorySessionStore) ListRunsBySession(_ context.Context, sessionID string) ([]types.Run, error) {
+	if s == nil {
+		return nil, fmt.Errorf("session store not configured")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []types.Run
+	for _, run := range s.runs {
+		if strings.TrimSpace(run.SessionID) == sessionID {
+			out = append(out, run)
+		}
+	}
+	return out, nil
+}
+
+func (s *MemorySessionStore) ListChildRuns(_ context.Context, parentRunID string) ([]types.Run, error) {
+	if s == nil {
+		return nil, fmt.Errorf("session store not configured")
+	}
+	parentRunID = strings.TrimSpace(parentRunID)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []types.Run
+	for _, run := range s.runs {
+		if strings.TrimSpace(run.ParentRunID) == parentRunID {
+			out = append(out, run)
+		}
+	}
+	return out, nil
+}
+
+func (s *MemorySessionStore) AddRunToSession(_ context.Context, sessionID, runID string) (types.Session, error) {
+	if s == nil {
+		return types.Session{}, fmt.Errorf("session store not configured")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	runID = strings.TrimSpace(runID)
+	if sessionID == "" || runID == "" {
+		return types.Session{}, fmt.Errorf("sessionID and runID are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ent, ok := s.sessions[sessionID]
+	if !ok {
+		return types.Session{}, fmt.Errorf("session %s not found", sessionID)
+	}
+	seen := make(map[string]struct{})
+	for _, id := range ent.session.Runs {
+		seen[strings.TrimSpace(id)] = struct{}{}
+	}
+	if _, exists := seen[runID]; !exists {
+		ent.session.Runs = append(ent.session.Runs, runID)
+	}
+	if strings.TrimSpace(ent.session.CurrentRunID) == "" {
+		ent.session.CurrentRunID = runID
+	}
+	s.sessions[sessionID] = ent
+	return cloneSession(ent.session), nil
+}
+
+func (s *MemorySessionStore) ListActivities(_ context.Context, runID string, limit, offset int) ([]types.Activity, error) {
+	if s == nil {
+		return nil, fmt.Errorf("session store not configured")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, fmt.Errorf("runID is required")
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	s.mu.RLock()
+	acts := s.activities[runID]
+	s.mu.RUnlock()
+	if len(acts) <= offset {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(acts) {
+		end = len(acts)
+	}
+	return acts[offset:end], nil
+}
+
+func (s *MemorySessionStore) CountActivities(_ context.Context, runID string) (int, error) {
+	if s == nil {
+		return 0, fmt.Errorf("session store not configured")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return 0, fmt.Errorf("runID is required")
+	}
+	s.mu.RLock()
+	n := len(s.activities[runID])
+	s.mu.RUnlock()
+	return n, nil
 }
 
 func normalizeSessionSortColumn(col string) (string, bool) {

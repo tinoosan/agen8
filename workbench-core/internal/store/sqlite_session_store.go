@@ -52,6 +52,26 @@ func (s *SQLiteSessionStore) ListRunsBySession(_ context.Context, sessionID stri
 	return ListRunsBySession(s.Cfg, sessionID)
 }
 
+func (s *SQLiteSessionStore) SaveRun(_ context.Context, run types.Run) error {
+	return SaveRun(s.Cfg, run)
+}
+
+func (s *SQLiteSessionStore) ListChildRuns(_ context.Context, parentRunID string) ([]types.Run, error) {
+	return ListChildRuns(s.Cfg, parentRunID)
+}
+
+func (s *SQLiteSessionStore) AddRunToSession(_ context.Context, sessionID, runID string) (types.Session, error) {
+	return AddRunToSession(s.Cfg, sessionID, runID)
+}
+
+func (s *SQLiteSessionStore) ListActivities(ctx context.Context, runID string, limit, offset int) ([]types.Activity, error) {
+	return ListActivities(ctx, s.Cfg, runID, limit, offset)
+}
+
+func (s *SQLiteSessionStore) CountActivities(ctx context.Context, runID string) (int, error) {
+	return CountActivities(ctx, s.Cfg, runID)
+}
+
 func (s *SQLiteSessionStore) DeleteSession(_ context.Context, sessionID string) error {
 	return DeleteSession(s.Cfg, sessionID)
 }

@@ -23,8 +23,14 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
+
+type noopSessionSupervisor struct{}
+
+func (noopSessionSupervisor) StopRun(string) error { return nil }
+func (noopSessionSupervisor) ResumeRun(context.Context, string) error { return nil }
 
 func startMonitorTestRPCServer(t *testing.T, cfg config.Config, runID string) string {
 	t.Helper()
@@ -50,12 +56,16 @@ func startMonitorTestRPCServer(t *testing.T, cfg config.Config, runID string) st
 	if err := sessionStore.SaveSession(context.Background(), sess); err != nil {
 		t.Fatalf("save session: %v", err)
 	}
+	if err := sessionStore.SaveRun(context.Background(), run); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	sessionSvc := pkgsession.NewManager(cfg, sessionStore, noopSessionSupervisor{})
 	srv := app.NewRPCServer(app.RPCServerConfig{
 		Cfg:            cfg,
 		Run:            run,
 		AllowAnyThread: true,
 		TaskStore:      taskStore,
-		Session:        sessionStore,
+		Session:        sessionSvc,
 	})
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1141,8 +1151,18 @@ func TestMonitorHandleCommand_ReconnectUpdatesHealthState(t *testing.T) {
 	if !updated.rpcHealthKnown || updated.rpcReachable {
 		t.Fatalf("expected disconnected health state, known=%v reachable=%v", updated.rpcHealthKnown, updated.rpcReachable)
 	}
-	if len(updated.agentOutput) == 0 || !strings.Contains(strings.Join(updated.agentOutput, "\n"), "Daemon RPC disconnected") {
+	if len(updated.agentOutput) == 0 {
 		t.Fatalf("expected reconnect feedback in agent output")
+	}
+	joined := ""
+	for _, it := range updated.agentOutput {
+		if joined != "" {
+			joined += "\n"
+		}
+		joined += it.Content
+	}
+	if !strings.Contains(joined, "Daemon RPC disconnected") {
+		t.Fatalf("expected reconnect feedback in agent output: %q", joined)
 	}
 }
 
@@ -1586,7 +1606,7 @@ func TestAgentOutputFocusFilter_ShowsGlobalAndFocusedRunOnly(t *testing.T) {
 	m := &monitorModel{
 		teamID:           "team-a",
 		focusedRunID:     "run-a",
-		agentOutput:      []string{"unscoped line", "focused line", "other line"},
+		agentOutput:      []AgentOutputItem{{Content: "unscoped line"}, {Content: "focused line", RunID: "run-a"}, {Content: "other line", RunID: "run-b"}},
 		agentOutputRunID: []string{"", "run-a", "run-b"},
 		agentOutputVP:    viewport.New(0, 0),
 	}
@@ -1633,9 +1653,9 @@ func TestFormatTaskEventLines_UsesSummaryMarker(t *testing.T) {
 func TestRefreshAgentOutputViewport_RendersSummaryMarkdownWithoutSummaryLabel(t *testing.T) {
 	m := &monitorModel{
 		renderer: newContentRenderer(),
-		agentOutput: []string{
-			"[12:00:00] task.done: task-1 succeeded",
-			agentOutputSummaryMarker + "## Result\n- first\n- second",
+		agentOutput: []AgentOutputItem{
+			{Content: "[12:00:00] task.done: task-1 succeeded"},
+			{Content: agentOutputSummaryMarker + "## Result\n- first\n- second"},
 		},
 		agentOutputRunID: []string{"", ""},
 		agentOutputVP:    viewport.New(0, 0),
@@ -1655,12 +1675,12 @@ func TestRefreshAgentOutputViewport_RendersSummaryMarkdownWithoutSummaryLabel(t 
 func TestTrimAgentOutputBuffer_KeepsRunIDSliceInSync(t *testing.T) {
 	size := agentOutputMaxLines + 15
 	m := &monitorModel{
-		agentOutput:              make([]string, size),
+		agentOutput:              make([]AgentOutputItem, size),
 		agentOutputRunID:         make([]string, size),
-		agentOutputFilteredCache: []string{"cached"},
+		agentOutputFilteredCache: []AgentOutputItem{{Content: "cached"}},
 	}
 	for i := 0; i < size; i++ {
-		m.agentOutput[i] = "line"
+		m.agentOutput[i] = AgentOutputItem{Content: "line", RunID: "run-a"}
 		m.agentOutputRunID[i] = "run-a"
 	}
 	m.trimAgentOutputBuffer()
@@ -2170,7 +2190,7 @@ func TestHandleCommand_InstantEchoBeforeEnqueue(t *testing.T) {
 	// The instant echo must already be in the buffer, synchronously.
 	found := false
 	for _, line := range m.agentOutput {
-		if strings.Contains(line, "▸") && strings.Contains(line, "fix the login bug") {
+		if strings.Contains(line.Content, "▸") && strings.Contains(line.Content, "fix the login bug") {
 			found = true
 			break
 		}
@@ -2184,8 +2204,8 @@ func TestHandleCommand_InstantEchoBeforeEnqueue(t *testing.T) {
 	_ = m.handleCommand("/help")
 	after := len(m.agentOutput)
 	for _, line := range m.agentOutput[before:after] {
-		if strings.Contains(line, "▸") {
-			t.Fatalf("slash command should not produce echo: %q", line)
+		if strings.Contains(line.Content, "▸") {
+			t.Fatalf("slash command should not produce echo: %q", line.Content)
 		}
 	}
 }

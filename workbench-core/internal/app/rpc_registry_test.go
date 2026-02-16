@@ -15,7 +15,7 @@ import (
 func TestRPCServer_Dispatch_UnknownMethod(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sessStore := store.NewMemorySessionStore()
-	srv := NewRPCServer(RPCServerConfig{Cfg: cfg, Session: sessStore})
+	srv := NewRPCServer(RPCServerConfig{Cfg: cfg, Session: newTestSessionService(cfg, sessStore)})
 
 	id := "1"
 	req := protocol.Message{
@@ -40,7 +40,10 @@ func TestRPCServer_Dispatch_MalformedParams(t *testing.T) {
 	if err := sessStore.SaveSession(context.Background(), sess); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
-	srv := NewRPCServer(RPCServerConfig{Cfg: cfg, Run: run, Session: sessStore})
+	if err := sessStore.SaveRun(context.Background(), run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	srv := NewRPCServer(RPCServerConfig{Cfg: cfg, Run: run, Session: newTestSessionService(cfg, sessStore)})
 
 	id := "1"
 	req := protocol.Message{
@@ -65,7 +68,10 @@ func TestRPCServer_ThreadCreate_EmptyParamsAllowed(t *testing.T) {
 	if err := sessStore.SaveSession(context.Background(), sess); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
-	srv := NewRPCServer(RPCServerConfig{Cfg: cfg, Run: run, Session: sessStore})
+	if err := sessStore.SaveRun(context.Background(), run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	srv := NewRPCServer(RPCServerConfig{Cfg: cfg, Run: run, Session: newTestSessionService(cfg, sessStore)})
 
 	id := "1"
 	req := protocol.Message{
@@ -100,7 +106,7 @@ func TestBuildMethodRegistry_DuplicateRegistrationFails(t *testing.T) {
 func TestRPCServer_MethodRegistry_CoversAllProtocolMethods(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sessStore := store.NewMemorySessionStore()
-	srv := NewRPCServer(RPCServerConfig{Cfg: cfg, Session: sessStore})
+	srv := NewRPCServer(RPCServerConfig{Cfg: cfg, Session: newTestSessionService(cfg, sessStore)})
 	if srv.initErr != nil {
 		t.Fatalf("unexpected init error: %v", srv.initErr)
 	}
@@ -125,6 +131,7 @@ func TestRPCServer_MethodRegistry_CoversAllProtocolMethods(t *testing.T) {
 		protocol.MethodSessionPause,
 		protocol.MethodSessionResume,
 		protocol.MethodSessionStop,
+		protocol.MethodSessionDelete,
 		protocol.MethodSessionGetTotals,
 		protocol.MethodActivityList,
 		protocol.MethodRunListChildren,

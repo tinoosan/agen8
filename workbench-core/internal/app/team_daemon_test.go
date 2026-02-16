@@ -10,6 +10,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -68,19 +69,18 @@ func TestTeamIsIdle_BlocksOnNonHeartbeatTasks(t *testing.T) {
 }
 
 func TestBuildTeamRPCServerConfig_AcceptsRoleSessionThread(t *testing.T) {
-	sessionStore := &memorySessionStore{
-		sessions: map[string]types.Session{
-			"coord-sess":  {SessionID: "coord-sess"},
-			"worker-sess": {SessionID: "worker-sess"},
-		},
-	}
+	cfg := config.Config{DataDir: t.TempDir()}
+	memStore := store.NewMemorySessionStore()
+	_ = memStore.SaveSession(context.Background(), types.Session{SessionID: "coord-sess"})
+	_ = memStore.SaveSession(context.Background(), types.Session{SessionID: "worker-sess"})
+	sessionSvc := newTestSessionService(cfg, memStore)
 	srvCfg := buildTeamRPCServerConfig(
 		RPCServerConfig{},
-		config.Config{},
+		cfg,
 		RunChatOptions{},
 		types.Run{SessionID: "coord-sess", RunID: "coord-run"},
 		nil,
-		sessionStore,
+		sessionSvc,
 		[]teamRoleRuntime{
 			{run: types.Run{SessionID: "worker-sess", RunID: "worker-run"}},
 		},
@@ -100,18 +100,17 @@ func TestBuildTeamRPCServerConfig_AcceptsRoleSessionThread(t *testing.T) {
 }
 
 func TestBuildTeamRPCServerConfig_RejectsUnknownThread(t *testing.T) {
-	sessionStore := &memorySessionStore{
-		sessions: map[string]types.Session{
-			"coord-sess": {SessionID: "coord-sess"},
-		},
-	}
+	cfg := config.Config{DataDir: t.TempDir()}
+	memStore := store.NewMemorySessionStore()
+	_ = memStore.SaveSession(context.Background(), types.Session{SessionID: "coord-sess"})
+	sessionSvc := newTestSessionService(cfg, memStore)
 	srvCfg := buildTeamRPCServerConfig(
 		RPCServerConfig{},
-		config.Config{},
+		cfg,
 		RunChatOptions{},
 		types.Run{SessionID: "coord-sess", RunID: "coord-run"},
 		nil,
-		sessionStore,
+		sessionSvc,
 		nil,
 		nil,
 		&sync.Mutex{},

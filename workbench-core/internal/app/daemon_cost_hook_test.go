@@ -10,7 +10,6 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
-	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -37,8 +36,6 @@ func (m *memorySessionStore) SaveSession(_ context.Context, s types.Session) err
 	m.sessions[s.SessionID] = s
 	return nil
 }
-
-var _ store.SessionReaderWriter = (*memorySessionStore)(nil)
 
 func TestNewCostUsageHook_UsesCurrentModelPricing(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}

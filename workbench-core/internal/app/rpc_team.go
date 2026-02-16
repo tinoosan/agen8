@@ -8,9 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
-	"github.com/tinoosan/workbench-core/pkg/config"
+	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
@@ -34,12 +33,12 @@ func registerTeamHandlers(s *RPCServer, reg methodRegistry) error {
 	)
 }
 
-func pricingKnownForRun(cfg config.Config, runID string) bool {
+func pricingKnownForRun(ctx context.Context, session pkgsession.Service, runID string) bool {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return false
 	}
-	run, err := implstore.LoadRun(cfg, runID)
+	run, err := session.LoadRun(ctx, runID)
 	if err != nil || run.Runtime == nil {
 		return false
 	}
@@ -138,7 +137,7 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 		}
 		totalTokens += stats.TotalTokens
 		totalCostUSD += stats.TotalCost
-		if stats.TotalTokens > 0 && stats.TotalCost <= 0 && !pricingKnownForRun(s.cfg, runID) {
+		if stats.TotalTokens > 0 && stats.TotalCost <= 0 && !pricingKnownForRun(ctx, s.session, runID) {
 			pricingKnown = false
 		}
 	}
@@ -262,7 +261,7 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 	}
 	if strings.TrimSpace(scope.teamID) == "" {
 		runID := strings.TrimSpace(scope.runID)
-		run, _ := implstore.LoadRun(s.cfg, runID)
+		run, _ := s.session.LoadRun(ctx, runID)
 		if run.RunID == "" {
 			run = types.Run{RunID: runID}
 		}
@@ -273,7 +272,7 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 	}
 	if strings.TrimSpace(scope.runID) != "" {
 		runID := strings.TrimSpace(scope.runID)
-		run, _ := implstore.LoadRun(s.cfg, runID)
+		run, _ := s.session.LoadRun(ctx, runID)
 		if run.RunID == "" {
 			run = types.Run{RunID: runID}
 		}
@@ -331,7 +330,7 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 		if role == "" {
 			role = runID
 		}
-		run, _ := implstore.LoadRun(s.cfg, runID)
+		run, _ := s.session.LoadRun(ctx, runID)
 		if run.RunID == "" {
 			run = types.Run{RunID: runID}
 		}

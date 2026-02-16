@@ -22,7 +22,6 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/profile"
-	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"golang.org/x/term"
 )
@@ -132,7 +131,7 @@ func withRetryDiagnostics(client llmtypes.LLMClient, emit func(context.Context, 
 	return llm.NewRetryClient(retryClient.Wrapped, cfg)
 }
 
-func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, sessionStore store.SessionReaderWriter, currentModel func() string, emit func(context.Context, events.Event)) func(step int, usage llmtypes.LLMUsage) {
+func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn, priceOut float64, sessionStore SessionLoadSaver, currentModel func() string, emit func(context.Context, events.Event)) func(step int, usage llmtypes.LLMUsage) {
 	tracker := newDefaultCostTracker(cfg, run, modelID, priceIn, priceOut, sessionStore, currentModel, emit)
 	if tracker == nil {
 		return func(int, llmtypes.LLMUsage) {}

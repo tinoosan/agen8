@@ -11,7 +11,6 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/events"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
-	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -20,13 +19,20 @@ type CostTracker interface {
 	Track(step int, usage llmtypes.LLMUsage)
 }
 
+// SessionLoadSaver is the minimal session access needed by the cost tracker.
+// Both store.SessionReaderWriter and pkgsession.Service satisfy it.
+type SessionLoadSaver interface {
+	LoadSession(ctx context.Context, sessionID string) (types.Session, error)
+	SaveSession(ctx context.Context, s types.Session) error
+}
+
 type defaultCostTracker struct {
 	cfg          config.Config
 	run          types.Run
 	modelID      string
 	priceIn      float64
 	priceOut     float64
-	sessionStore store.SessionReaderWriter
+	sessionStore SessionLoadSaver
 	currentModel func() string
 	emit         func(context.Context, events.Event)
 
@@ -41,7 +47,7 @@ func newDefaultCostTracker(
 	modelID string,
 	priceIn float64,
 	priceOut float64,
-	sessionStore store.SessionReaderWriter,
+	sessionStore SessionLoadSaver,
 	currentModel func() string,
 	emit func(context.Context, events.Event),
 ) CostTracker {

@@ -7,7 +7,8 @@ This guide explains how the CLI, configuration, and internal services collaborat
 - `cmd/workbench/cmd` contains Cobra commands that parse CLI flags, resolve configuration, and invoke `app.RunDaemon` / `tui.RunMonitor`.
 - `internal/config` exposes `effectiveConfig()` which merges CLI flags, environment variables, and defaults. Components call this helper before starting new sessions/runs.
 - `internal/app` orchestrates the autonomous daemon session and wires agents into the runtime. The daemon enforces the [execution model](execution-model.md): tree-based hierarchy, single-parent sub-agents, review gate, cleanup, and RPC-level coordination so that TUI and future Web UI share the same semantics.
-- `internal/store` persists sessions, agents, history, and artifacts under the configured `dataDir`.
+- **Session service** (`pkg/services/session`): the daemon and RPC access session and run data only through this service (load/save session, start/delete session, runs, activities). See [Session Service (architecture)](architecture/pkg-services-session.md).
+- `internal/store` persists sessions, agents, history, and artifacts under the configured `dataDir`; only the session service Manager and the runtime supervisor use it for session/run data.
 - `pkg/fsutil` provides helper functions to resolve deterministic paths (`GetAgentDir`, `GetWorkspaceDirForRun`, etc.).
 
 ## Session/run lifecycle

@@ -18,12 +18,13 @@ graph TB
     end
 
     subgraph CoreLayer [Core Logic Layer]
-        Session["session.Session (Manager)"]
+        SessionSvc["pkg/services/session (Service)"]
         Agent["agent.DefaultAgent (Loop)"]
         Runtime["runtime.Runtime (Factory)"]
     end
 
     subgraph PersistenceLayer [Persistence Layer]
+        SessionStore["Session Store (SQLite/Memory)"]
         Store["pkg/store (DailyMemoryStore)"]
         TaskStore["pkg/agent/state (TaskStore)"]
     end
@@ -32,12 +33,17 @@ graph TB
     RPC --> Daemon
     Daemon --> Supervisor
     Supervisor --> Runtime
-    Daemon --> Session
-    Session --> Agent
+    Daemon --> SessionSvc
+    RPC --> SessionSvc
+    SessionSvc --> SessionStore
+    SessionSvc --> Supervisor
+    SessionSvc --> Agent
     Agent --> Runtime
-    Session --> TaskStore
+    SessionSvc --> TaskStore
     Agent --> Store
 ```
+
+**Session Service** (`pkg/services/session`): The daemon and RPC access all session and run data only through this service. It is implemented by the **Manager**, which uses a Store (SQLite or in-memory) and the RuntimeSupervisor for stop/delete. See [pkg-services-session](pkg-services-session.md) for the full API and diagrams.
 
 ## Global Task State Machine
 

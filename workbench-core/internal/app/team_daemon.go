@@ -32,7 +32,6 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
-	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"golang.org/x/sync/errgroup"
 )
@@ -245,6 +244,13 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	if err != nil {
 		return fmt.Errorf("create session store: %w", err)
 	}
+	var runtimeLoopCancelMu sync.Mutex
+	runtimeLoopCancel := map[string]context.CancelFunc{}
+	teamSupervisor := &teamRuntimeSupervisor{
+		runLoopCancelMu: &runtimeLoopCancelMu,
+		runLoopCancel:   runtimeLoopCancel,
+	}
+	sessionService := pkgsession.NewManager(cfg, sessionStore, teamSupervisor)
 	var memoryProvider agent.MemoryRecallProvider = &textMemoryAdapter{store: memStore}
 
 	var notifier agent.Notifier
@@ -278,7 +284,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		if roleGoal == "" {
 			roleGoal = "team role worker"
 		}
-		metaSession, run, err := implstore.CreateSession(cfg, roleGoal, maxContextB)
+		metaSession, run, err := sessionService.Start(ctx, pkgsession.StartOptions{Goal: roleGoal, MaxBytesForContext: maxContextB})
 		if err != nil {
 			return fmt.Errorf("create session for role %s: %w", role.Name, err)
 		}
@@ -290,7 +296,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			metaSession.ActiveModel = strings.TrimSpace(teamModel)
 		}
 		ensureSessionReasoningForModel(&metaSession, metaSession.ActiveModel, strings.TrimSpace(resolved.ReasoningEffort), strings.TrimSpace(resolved.ReasoningSummary))
-		_ = implstore.SaveSession(cfg, metaSession)
+		_ = sessionService.SaveSession(ctx, metaSession)
 		if run.Runtime == nil {
 			run.Runtime = &types.RunRuntimeConfig{}
 		}
@@ -298,7 +304,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		run.Runtime.Model = strings.TrimSpace(teamModel)
 		run.Runtime.TeamID = teamID
 		run.Runtime.Role = strings.TrimSpace(role.Name)
-		_ = implstore.SaveRun(cfg, run)
+		_ = sessionService.SaveRun(ctx, run)
 		roleReasoningEffort := strings.TrimSpace(metaSession.ReasoningEffort)
 		roleReasoningSummary := strings.TrimSpace(metaSession.ReasoningSummary)
 
@@ -345,13 +351,13 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			PriceInPerMTokensUSD:  resolved.PriceInPerMTokensUSD,
 			PriceOutPerMTokensUSD: resolved.PriceOutPerMTokensUSD,
 			PersistRun: func(r types.Run) error {
-				return implstore.SaveRun(cfg, r)
+				return sessionService.SaveRun(context.Background(), r)
 			},
 			LoadSession: func(sessionID string) (types.Session, error) {
-				return sessionStore.LoadSession(context.Background(), sessionID)
+				return sessionService.LoadSession(context.Background(), sessionID)
 			},
 			SaveSession: func(session types.Session) error {
-				return sessionStore.SaveSession(context.Background(), session)
+				return sessionService.SaveSession(context.Background(), session)
 			},
 		})
 		if err != nil {
@@ -378,12 +384,12 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 				teamModel,
 				resolved.PriceInPerMTokensUSD,
 				resolved.PriceOutPerMTokensUSD,
-				sessionStore,
+				sessionService,
 				func() string {
-					if sessionStore == nil {
+					if sessionService == nil {
 						return strings.TrimSpace(teamModel)
 					}
-					sess, err := sessionStore.LoadSession(context.Background(), strings.TrimSpace(run.SessionID))
+					sess, err := sessionService.LoadSession(context.Background(), strings.TrimSpace(run.SessionID))
 					if err != nil {
 						return strings.TrimSpace(teamModel)
 					}
@@ -553,8 +559,6 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	}
 
 	var serverWG sync.WaitGroup
-	var runtimeLoopCancelMu sync.Mutex
-	runtimeLoopCancel := map[string]context.CancelFunc{}
 	webhookAddr := strings.TrimSpace(resolved.WebhookAddr)
 	if webhookAddr != "" {
 		startTeamWebhookServer(runCtx, webhookAddr, cfg, taskStore, teamID, coordinatorRole, coordinatorRun, roleNames, &serverWG)
@@ -576,7 +580,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			resolved,
 			coordinatorRun,
 			taskStore,
-			sessionStore,
+			sessionService,
 			runtimes,
 			stateMgr,
 			&runtimeLoopCancelMu,
@@ -610,7 +614,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 				case <-runCtx.Done():
 					return
 				case <-ticker.C:
-					loadedRun, err := implstore.LoadRun(cfg, rt.run.RunID)
+					loadedRun, err := sessionService.LoadRun(runCtx, rt.run.RunID)
 					if err != nil {
 						continue
 					}
@@ -672,30 +676,13 @@ func buildTeamRPCServerConfig(
 	resolved RunChatOptions,
 	coordinatorRun types.Run,
 	taskStore state.TaskStore,
-	sessionStore pkgstore.SessionReaderWriter,
+	sessionService pkgsession.Service,
 	runtimes []teamRoleRuntime,
 	stateMgr *teamStateManager,
 	runtimeLoopCancelMu *sync.Mutex,
 	runtimeLoopCancel map[string]context.CancelFunc,
 ) RPCServerConfig {
-	// Create Session Manager for Team Mode
-	// We need to cast the store to the full interface required by the manager.
-	// NewSQLiteSessionStore returns *SQLiteSessionStore which implements it.
-	store, ok := sessionStore.(pkgsession.Store)
-	if !ok {
-		// This should not happen given initialization in runAsTeamInternal
-		log.Printf("daemon: warning: session store does not implement full interface; session management may be limited")
-	}
-
-	supervisor := &teamRuntimeSupervisor{
-		runLoopCancelMu: runtimeLoopCancelMu,
-		runLoopCancel:   runtimeLoopCancel,
-	}
-
-	sessionManager := pkgsession.NewManager(cfg, store, supervisor)
-
-	// Update base config with the manager
-	base.Session = sessionManager
+	base.Session = sessionService
 
 	validThreadIDs := map[string]struct{}{}
 	if sessionID := strings.TrimSpace(coordinatorRun.SessionID); sessionID != "" {
@@ -729,13 +716,13 @@ func buildTeamRPCServerConfig(
 		if !isValidTeamThread(threadID) {
 			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 		}
-		loadedSession, err := sessionStore.LoadSession(ctx, strings.TrimSpace(threadID))
+		loadedSession, err := sessionService.LoadSession(ctx, strings.TrimSpace(threadID))
 		if err != nil || strings.TrimSpace(loadedSession.SessionID) != strings.TrimSpace(threadID) {
 			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 		}
 		loadedSession.ActiveModel = strings.TrimSpace(model)
 		ensureSessionReasoningForModel(&loadedSession, loadedSession.ActiveModel, strings.TrimSpace(resolved.ReasoningEffort), strings.TrimSpace(resolved.ReasoningSummary))
-		if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
+		if err := sessionService.SaveSession(ctx, loadedSession); err != nil {
 			return nil, err
 		}
 		applied, err := requestTeamModelChange(ctx, taskStore, runtimes, stateMgr, model, target, "rpc.control.setModel")
@@ -768,14 +755,14 @@ func buildTeamRPCServerConfig(
 		if !isValidTeamThread(threadID) {
 			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 		}
-		loadedSession, err := sessionStore.LoadSession(ctx, threadID)
+		loadedSession, err := sessionService.LoadSession(ctx, threadID)
 		if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
 			return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 		}
 		effort = strings.ToLower(strings.TrimSpace(effort))
 		summary = normalizeReasoningSummaryValue(summary)
 		storeSessionReasoningPreference(&loadedSession, strings.TrimSpace(loadedSession.ActiveModel), effort, summary)
-		if err := sessionStore.SaveSession(ctx, loadedSession); err != nil {
+		if err := sessionService.SaveSession(ctx, loadedSession); err != nil {
 			return nil, err
 		}
 
@@ -814,14 +801,14 @@ func buildTeamRPCServerConfig(
 			if strings.TrimSpace(runtimes[i].run.RunID) != runID {
 				continue
 			}
-			loaded, err := implstore.LoadRun(cfg, runID)
+			loaded, err := sessionService.LoadRun(context.Background(), runID)
 			if err != nil {
 				return err
 			}
 			loaded.Status = types.RunStatusPaused
 			loaded.FinishedAt = nil
 			loaded.Error = nil
-			if err := implstore.SaveRun(cfg, loaded); err != nil {
+			if err := sessionService.SaveRun(context.Background(), loaded); err != nil {
 				return err
 			}
 			runtimes[i].sess.SetPaused(true)
@@ -844,14 +831,14 @@ func buildTeamRPCServerConfig(
 			if strings.TrimSpace(runtimes[i].run.RunID) != runID {
 				continue
 			}
-			loaded, err := implstore.LoadRun(cfg, runID)
+			loaded, err := sessionService.LoadRun(context.Background(), runID)
 			if err != nil {
 				return err
 			}
 			loaded.Status = types.RunStatusRunning
 			loaded.FinishedAt = nil
 			loaded.Error = nil
-			if err := implstore.SaveRun(cfg, loaded); err != nil {
+			if err := sessionService.SaveRun(context.Background(), loaded); err != nil {
 				return err
 			}
 			runtimes[i].sess.SetPaused(false)
@@ -879,12 +866,12 @@ func buildTeamRPCServerConfig(
 			wg.Add(1)
 			go func(runtime teamRoleRuntime, rid string) {
 				defer wg.Done()
-				loaded, err := implstore.LoadRun(cfg, rid)
+				loaded, err := sessionService.LoadRun(context.Background(), rid)
 				if err == nil {
 					loaded.Status = types.RunStatusPaused
 					loaded.FinishedAt = nil
 					loaded.Error = nil
-					err = implstore.SaveRun(cfg, loaded)
+					err = sessionService.SaveRun(context.Background(), loaded)
 				}
 				if err != nil {
 					mu.Lock()
@@ -930,12 +917,12 @@ func buildTeamRPCServerConfig(
 			wg.Add(1)
 			go func(runtime teamRoleRuntime, rid string) {
 				defer wg.Done()
-				loaded, err := implstore.LoadRun(cfg, rid)
+				loaded, err := sessionService.LoadRun(context.Background(), rid)
 				if err == nil {
 					loaded.Status = types.RunStatusRunning
 					loaded.FinishedAt = nil
 					loaded.Error = nil
-					err = implstore.SaveRun(cfg, loaded)
+					err = sessionService.SaveRun(context.Background(), loaded)
 				}
 				if err != nil {
 					mu.Lock()
@@ -975,12 +962,12 @@ func buildTeamRPCServerConfig(
 			wg.Add(1)
 			go func(runtime teamRoleRuntime, rid string) {
 				defer wg.Done()
-				loaded, err := implstore.LoadRun(cfg, rid)
+				loaded, err := sessionService.LoadRun(context.Background(), rid)
 				if err == nil {
 					loaded.Status = types.RunStatusPaused
 					loaded.FinishedAt = nil
 					loaded.Error = nil
-					err = implstore.SaveRun(cfg, loaded)
+					err = sessionService.SaveRun(context.Background(), loaded)
 				}
 				if err != nil {
 					mu.Lock()

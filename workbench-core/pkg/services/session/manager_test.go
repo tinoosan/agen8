@@ -48,6 +48,28 @@ func (m *mockStore) ListSessionsPaginated(ctx context.Context, filter pkgstore.S
 func (m *mockStore) CountSessions(ctx context.Context, filter pkgstore.SessionFilter) (int, error) {
 	return 0, nil
 }
+func (m *mockStore) SaveRun(ctx context.Context, run types.Run) error {
+	if m.runs == nil {
+		m.runs = make(map[string]types.Run)
+	}
+	m.runs[run.RunID] = run
+	return nil
+}
+func (m *mockStore) ListChildRuns(ctx context.Context, parentRunID string) ([]types.Run, error) {
+	return nil, nil
+}
+func (m *mockStore) AddRunToSession(ctx context.Context, sessionID, runID string) (types.Session, error) {
+	return types.Session{SessionID: sessionID, Runs: []string{runID}}, nil
+}
+func (m *mockStore) ListActivities(ctx context.Context, runID string, limit, offset int) ([]types.Activity, error) {
+	return nil, nil
+}
+func (m *mockStore) CountActivities(ctx context.Context, runID string) (int, error) {
+	return 0, nil
+}
+func (m *mockStore) ListSessionIDs(ctx context.Context) ([]string, error) {
+	return nil, nil
+}
 
 type mockSupervisor struct {
 	stoppedRuns []string

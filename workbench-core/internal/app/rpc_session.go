@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -232,7 +232,7 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	if maxContext <= 0 {
 		maxContext = 8 * 1024
 	}
-	sess, run, err := implstore.CreateSession(s.cfg, goal, maxContext)
+	sess, run, err := s.session.Start(ctx, pkgsession.StartOptions{Goal: goal, MaxBytesForContext: maxContext})
 	if err != nil {
 		return protocol.SessionStartResult{}, err
 	}
@@ -259,7 +259,7 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 		return protocol.SessionStartResult{}, err
 	}
 	if strings.TrimSpace(p.Profile) != "" || activeModel != "" {
-		if created, err := implstore.LoadRun(s.cfg, strings.TrimSpace(run.RunID)); err == nil {
+		if created, err := s.session.LoadRun(ctx, strings.TrimSpace(run.RunID)); err == nil {
 			if created.Runtime == nil {
 				created.Runtime = &types.RunRuntimeConfig{}
 			}
@@ -269,7 +269,7 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 			if activeModel != "" {
 				created.Runtime.Model = activeModel
 			}
-			_ = implstore.SaveRun(s.cfg, created)
+			_ = s.session.SaveRun(ctx, created)
 		}
 	}
 
@@ -346,7 +346,7 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 			TeamID:  strings.TrimSpace(teamID),
 			Role:    roleName,
 		}
-		if err := implstore.SaveRun(s.cfg, run); err != nil {
+		if err := s.session.SaveRun(ctx, run); err != nil {
 			return protocol.SessionStartResult{}, err
 		}
 		runID := strings.TrimSpace(run.RunID)
@@ -406,10 +406,6 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 	if _, err := s.resolveThreadID(p.ThreadID); err != nil {
 		return protocol.SessionListResult{}, err
 	}
-	query, ok := s.session.(pkgstore.SessionQuery)
-	if !ok {
-		return protocol.SessionListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "session.list is unavailable"}
-	}
 	filter := pkgstore.SessionFilter{
 		TitleContains: strings.TrimSpace(p.TitleContains),
 		Limit:         clampLimit(p.Limit, 50, 500),
@@ -417,11 +413,11 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 		SortBy:        "updated_at",
 		SortDesc:      true,
 	}
-	total, err := query.CountSessions(ctx, filter)
+	total, err := s.session.CountSessions(ctx, filter)
 	if err != nil {
 		return protocol.SessionListResult{}, err
 	}
-	sessions, err := query.ListSessionsPaginated(ctx, filter)
+	sessions, err := s.session.ListSessionsPaginated(ctx, filter)
 	if err != nil {
 		return protocol.SessionListResult{}, err
 	}
@@ -435,7 +431,7 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 			runID = strings.TrimSpace(sess.Runs[0])
 		}
 		if runID != "" {
-			if run, rerr := implstore.LoadRun(s.cfg, runID); rerr == nil && run.Runtime != nil {
+			if run, rerr := s.session.LoadRun(ctx, runID); rerr == nil && run.Runtime != nil {
 				if profileID == "" {
 					profileID = strings.TrimSpace(run.Runtime.Profile)
 				}
@@ -463,7 +459,7 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 				continue
 			}
 			totalAgents++
-			run, rerr := implstore.LoadRun(s.cfg, listedRunID)
+			run, rerr := s.session.LoadRun(ctx, listedRunID)
 			if rerr != nil {
 				continue
 			}
@@ -540,7 +536,7 @@ func (s *RPCServer) agentList(ctx context.Context, p protocol.AgentListParams) (
 		if runID == "" {
 			continue
 		}
-		run, err := implstore.LoadRun(s.cfg, runID)
+		run, err := s.session.LoadRun(ctx, runID)
 		if err != nil {
 			continue
 		}
@@ -583,7 +579,7 @@ func (s *RPCServer) runListChildren(ctx context.Context, p protocol.RunListChild
 	if parentRunID == "" {
 		return protocol.RunListChildrenResult{Runs: nil}, nil
 	}
-	runs, err := implstore.ListChildRuns(s.cfg, parentRunID)
+	runs, err := s.session.ListChildRuns(ctx, parentRunID)
 	if err != nil {
 		return protocol.RunListChildrenResult{}, err
 	}
@@ -595,7 +591,7 @@ func (s *RPCServer) inferRunRoleAndTeam(ctx context.Context, runID string) (role
 	if runID == "" {
 		return "", ""
 	}
-	if run, err := implstore.LoadRun(s.cfg, runID); err == nil && run.Runtime != nil {
+	if run, err := s.session.LoadRun(ctx, runID); err == nil && run.Runtime != nil {
 		role = strings.TrimSpace(run.Runtime.Role)
 		teamID = strings.TrimSpace(run.Runtime.TeamID)
 		if role != "" && teamID != "" {
@@ -668,7 +664,7 @@ func (s *RPCServer) agentStart(ctx context.Context, p protocol.AgentStartParams)
 		run.Runtime.Profile = profileRef
 		sess.Profile = profileRef
 	}
-	if err := implstore.SaveRun(s.cfg, run); err != nil {
+	if err := s.session.SaveRun(ctx, run); err != nil {
 		return protocol.AgentStartResult{}, err
 	}
 	runID := strings.TrimSpace(run.RunID)
@@ -700,7 +696,7 @@ func (s *RPCServer) agentStart(ctx context.Context, p protocol.AgentStartParams)
 			run.Runtime = &types.RunRuntimeConfig{}
 		}
 		run.Runtime.Model = model
-		_ = implstore.SaveRun(s.cfg, run)
+		_ = s.session.SaveRun(ctx, run)
 		sess.ActiveModel = model
 	}
 	ensureSessionReasoningForModel(&sess, sess.ActiveModel, "", "")
@@ -877,7 +873,7 @@ func (s *RPCServer) setRunPausedState(ctx context.Context, threadID, runID strin
 	if runID == "" {
 		return &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "runId is required"}
 	}
-	run, err := implstore.LoadRun(s.cfg, runID)
+	run, err := s.session.LoadRun(ctx, runID)
 	if err != nil {
 		return &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "run not found"}
 	}
@@ -898,7 +894,7 @@ func (s *RPCServer) setRunPausedState(ctx context.Context, threadID, runID strin
 	}
 	run.FinishedAt = nil
 	run.Error = nil
-	if err := implstore.SaveRun(s.cfg, run); err != nil {
+	if err := s.session.SaveRun(ctx, run); err != nil {
 		return err
 	}
 	if paused {
@@ -1148,7 +1144,7 @@ func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetT
 				out.TotalTokensOut = sess.OutputTokens
 				out.TotalTokens = sess.TotalTokens
 				out.TotalCostUSD = sess.CostUSD
-				out.PricingKnown = sess.TotalTokens == 0 || sess.CostUSD > 0 || pricingKnownForRun(s.cfg, strings.TrimSpace(scope.runID))
+				out.PricingKnown = sess.TotalTokens == 0 || sess.CostUSD > 0 || pricingKnownForRun(ctx, s.session, strings.TrimSpace(scope.runID))
 			}
 		}
 		stats, err := s.taskStore.GetRunStats(ctx, strings.TrimSpace(scope.runID))
@@ -1183,7 +1179,7 @@ func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetT
 		}
 		out.TotalTokens += rs.TotalTokens
 		out.TotalCostUSD += rs.TotalCost
-		if rs.TotalTokens > 0 && rs.TotalCost <= 0 && !pricingKnownForRun(s.cfg, runID) {
+		if rs.TotalTokens > 0 && rs.TotalCost <= 0 && !pricingKnownForRun(ctx, s.session, runID) {
 			out.PricingKnown = false
 		}
 	}
@@ -1207,11 +1203,11 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 	if strings.TrimSpace(scope.teamID) == "" {
 		runID := strings.TrimSpace(scope.runID)
 		if !p.IncludeChildRuns || runID == "" {
-			acts, err := implstore.ListActivities(ctx, s.cfg, runID, limit, offset)
+			acts, err := s.session.ListActivities(ctx, runID, limit, offset)
 			if err != nil {
 				return protocol.ActivityListResult{}, err
 			}
-			total, _ := implstore.CountActivities(ctx, s.cfg, runID)
+			total, _ := s.session.CountActivities(ctx, runID)
 			next := 0
 			if offset+len(acts) < total {
 				next = offset + len(acts)
@@ -1220,11 +1216,11 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 		}
 		// Include activities from child runs (sub-agents) and prefix with "[Sub-agent N]".
 		merged := make([]types.Activity, 0, 256)
-		parentActs, err := implstore.ListActivities(ctx, s.cfg, runID, 500, 0)
+		parentActs, err := s.session.ListActivities(ctx, runID, 500, 0)
 		if err == nil {
 			merged = append(merged, parentActs...)
 		}
-		children, err := implstore.ListChildRuns(s.cfg, runID)
+		children, err := s.session.ListChildRuns(ctx, runID)
 		if err == nil {
 			for _, child := range children {
 				n := child.SpawnIndex
@@ -1232,7 +1228,7 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 					n = 1
 				}
 				prefix := fmt.Sprintf("[Sub-agent %d] ", n)
-				childActs, err := implstore.ListActivities(ctx, s.cfg, child.RunID, 300, 0)
+				childActs, err := s.session.ListActivities(ctx, child.RunID, 300, 0)
 				if err != nil {
 					continue
 				}
@@ -1297,7 +1293,7 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 	}
 	merged := make([]types.Activity, 0, 512)
 	for runID := range runSet {
-		acts, err := implstore.ListActivities(ctx, s.cfg, runID, 300, 0)
+		acts, err := s.session.ListActivities(ctx, runID, 300, 0)
 		if err != nil {
 			continue
 		}

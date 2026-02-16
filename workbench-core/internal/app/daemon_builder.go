@@ -60,6 +60,7 @@ type DaemonBuilder struct {
 	historyStore     store.HistoryStore
 	constructorStore store.ConstructorStateStore
 	sessionStore     pkgsession.Store
+	sessionService   pkgsession.Service
 	taskStore        state.TaskStore
 
 	effectiveModel          string
@@ -266,19 +267,17 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 		DefaultProfile:   b.prof,
 	})
 	b.wakeCh = make(chan struct{}, 1)
+	b.sessionService = pkgsession.NewManager(b.cfg, b.sessionStore, b.supervisor)
 	return nil
 }
 
 func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
-	// Create Session Manager wrapping the store and supervisor
-	sessionManager := pkgsession.NewManager(b.cfg, b.sessionStore, b.supervisor)
-
 	return RPCServerConfig{
 		Cfg:            b.cfg,
 		Run:            b.run,
 		AllowAnyThread: true,
 		TaskStore:      b.taskStore,
-		Session:        sessionManager,
+		Session:        b.sessionService,
 		NotifyCh:       b.protocolInit.NotifyCh(),
 		Index:          b.protocolInit.Index(),
 		Wake: func() {
@@ -292,7 +291,7 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			if threadID == "" {
 				return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
 			}
-			loadedSession, err := b.sessionStore.LoadSession(ctx, threadID)
+			loadedSession, err := b.sessionService.LoadSession(ctx, threadID)
 			if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
 				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 			}
@@ -315,7 +314,7 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			}
 			loadedSession.ActiveModel = strings.TrimSpace(model)
 			ensureSessionReasoningForModel(&loadedSession, loadedSession.ActiveModel, strings.TrimSpace(b.resolved.ReasoningEffort), strings.TrimSpace(b.resolved.ReasoningSummary))
-			if err := b.sessionStore.SaveSession(ctx, loadedSession); err != nil {
+			if err := b.sessionService.SaveSession(ctx, loadedSession); err != nil {
 				return nil, err
 			}
 			if teamID := strings.TrimSpace(loadedSession.TeamID); teamID != "" {
@@ -331,7 +330,7 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			if threadID == "" {
 				return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
 			}
-			loadedSession, err := b.sessionStore.LoadSession(ctx, threadID)
+			loadedSession, err := b.sessionService.LoadSession(ctx, threadID)
 			if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
 				return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 			}
@@ -355,7 +354,7 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			effort = strings.ToLower(strings.TrimSpace(effort))
 			summary = normalizeReasoningSummaryValue(summary)
 			storeSessionReasoningPreference(&loadedSession, strings.TrimSpace(loadedSession.ActiveModel), effort, summary)
-			if err := b.sessionStore.SaveSession(ctx, loadedSession); err != nil {
+			if err := b.sessionService.SaveSession(ctx, loadedSession); err != nil {
 				return nil, err
 			}
 			if _, err := b.supervisor.ApplySessionReasoning(ctx, threadID, targetRunID, effort, summary); err != nil {
@@ -494,7 +493,7 @@ func (b *DaemonBuilder) validateAgentScope(ctx context.Context, threadID, runID 
 	if threadID == "" {
 		return types.Session{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
 	}
-	loadedSession, err := b.sessionStore.LoadSession(ctx, threadID)
+	loadedSession, err := b.sessionService.LoadSession(ctx, threadID)
 	if err != nil || strings.TrimSpace(loadedSession.SessionID) != threadID {
 		return types.Session{}, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 	}
@@ -515,7 +514,7 @@ func (b *DaemonBuilder) validateSessionScope(ctx context.Context, threadID, sess
 	if threadID == "" {
 		return types.Session{}, nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
 	}
-	if _, err := b.sessionStore.LoadSession(ctx, threadID); err != nil {
+	if _, err := b.sessionService.LoadSession(ctx, threadID); err != nil {
 		return types.Session{}, nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 	}
 	sessionID = strings.TrimSpace(sessionID)
@@ -525,7 +524,7 @@ func (b *DaemonBuilder) validateSessionScope(ctx context.Context, threadID, sess
 	if sessionID != threadID {
 		return types.Session{}, nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
 	}
-	loadedSession, err := b.sessionStore.LoadSession(ctx, sessionID)
+	loadedSession, err := b.sessionService.LoadSession(ctx, sessionID)
 	if err != nil {
 		return types.Session{}, nil, err
 	}
