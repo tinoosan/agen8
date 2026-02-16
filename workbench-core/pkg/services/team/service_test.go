@@ -283,7 +283,9 @@ func (m *mockRetryEscalationCreator) CreateEscalationTask(ctx context.Context, c
 }
 
 type mockSessionService struct {
-	stopRun func(ctx context.Context, runID, status, msg string) (types.Run, error)
+	stopRun     func(ctx context.Context, runID, status, msg string) (types.Run, error)
+	loadSession func(ctx context.Context, sessionID string) (types.Session, error)
+	saveSession func(ctx context.Context, s types.Session) error
 }
 
 func (m *mockSessionService) StopRun(ctx context.Context, runID, status, msg string) (types.Run, error) {
@@ -294,9 +296,17 @@ func (m *mockSessionService) StopRun(ctx context.Context, runID, status, msg str
 }
 
 func (m *mockSessionService) LoadSession(ctx context.Context, sessionID string) (types.Session, error) {
+	if m.loadSession != nil {
+		return m.loadSession(ctx, sessionID)
+	}
 	return types.Session{}, nil
 }
-func (m *mockSessionService) SaveSession(ctx context.Context, s types.Session) error { return nil }
+func (m *mockSessionService) SaveSession(ctx context.Context, s types.Session) error {
+	if m.saveSession != nil {
+		return m.saveSession(ctx, s)
+	}
+	return nil
+}
 func (m *mockSessionService) Start(ctx context.Context, opts session.StartOptions) (types.Session, types.Run, error) {
 	return types.Session{}, types.Run{}, nil
 }
