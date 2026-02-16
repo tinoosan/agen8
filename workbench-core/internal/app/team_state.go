@@ -1,170 +1,47 @@
 package app
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
+	"context"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
-	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/services/team"
 )
 
-type teamStateManager struct {
-	cfg        config.Config
-	teamID     string
-	manifestMu sync.Mutex
-	manifest   teamManifest
+// loadExistingTeamManifest loads the team manifest from disk via the team package.
+// Returns (nil, nil) if the manifest file does not exist.
+func loadExistingTeamManifest(cfg config.Config, teamID string) (*team.Manifest, error) {
+	return team.NewFileManifestStore(cfg).Load(context.Background(), teamID)
 }
 
-func newTeamStateManager(cfg config.Config, manifest teamManifest) *teamStateManager {
-	return &teamStateManager{
-		cfg:      cfg,
-		teamID:   strings.TrimSpace(manifest.TeamID),
-		manifest: manifest,
-	}
+// writeTeamManifestFile writes the team manifest to disk via the team package.
+func writeTeamManifestFile(cfg config.Config, manifest team.Manifest) error {
+	return team.NewFileManifestStore(cfg).Save(context.Background(), manifest)
 }
 
-func (m *teamStateManager) teamDir() string {
-	return fsutil.GetTeamDir(m.cfg.DataDir, m.teamID)
-}
-
-func (m *teamStateManager) currentModel() string {
-	m.manifestMu.Lock()
-	defer m.manifestMu.Unlock()
-	return strings.TrimSpace(m.manifest.TeamModel)
-}
-
-func (m *teamStateManager) manifestSnapshot() teamManifest {
-	m.manifestMu.Lock()
-	defer m.manifestMu.Unlock()
-	return m.manifest
-}
-
-func (m *teamStateManager) saveManifest() error {
-	m.manifestMu.Lock()
-	manifest := m.manifest
-	m.manifestMu.Unlock()
-	return writeTeamManifestFile(m.cfg, manifest)
-}
-
-func (m *teamStateManager) updateManifest(mutator func(*teamManifest)) error {
-	m.manifestMu.Lock()
-	mutator(&m.manifest)
-	manifest := m.manifest
-	m.manifestMu.Unlock()
-	return writeTeamManifestFile(m.cfg, manifest)
-}
-
-func (m *teamStateManager) queueModelChange(model, reason string) error {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return fmt.Errorf("model is required")
-	}
-	return m.updateManifest(func(manifest *teamManifest) {
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		manifest.ModelChange = &teamModelChange{
-			RequestedModel: model,
-			Status:         "pending",
-			RequestedAt:    now,
-			Reason:         strings.TrimSpace(reason),
-		}
-	})
-}
-
-func (m *teamStateManager) markModelApplied(model string) error {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return fmt.Errorf("model is required")
-	}
-	return m.updateManifest(func(manifest *teamManifest) {
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		manifest.TeamModel = model
-		manifest.ModelChange = &teamModelChange{
-			RequestedModel: model,
-			Status:         "applied",
-			RequestedAt:    now,
-			AppliedAt:      now,
-		}
-	})
-}
-
-func (m *teamStateManager) markModelFailed(model string, err error) error {
-	errMsg := "unknown error"
-	if err != nil {
-		errMsg = err.Error()
-	}
-	return m.updateManifest(func(manifest *teamManifest) {
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		manifest.ModelChange = &teamModelChange{
-			RequestedModel: strings.TrimSpace(model),
-			Status:         "failed",
-			RequestedAt:    now,
-			AppliedAt:      now,
-			Error:          errMsg,
-		}
-	})
-}
-
-func loadExistingTeamManifest(cfg config.Config, teamID string) (*teamManifest, error) {
-	teamID = strings.TrimSpace(teamID)
-	if teamID == "" {
-		return nil, fmt.Errorf("teamID is required")
-	}
-	path := filepath.Join(fsutil.GetTeamDir(cfg.DataDir, teamID), "team.json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var manifest teamManifest
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return nil, err
-	}
-	return &manifest, nil
-}
-
-func writeTeamManifestFile(cfg config.Config, manifest teamManifest) error {
-	if strings.TrimSpace(manifest.TeamID) == "" {
-		return fmt.Errorf("teamID is required")
-	}
-	b, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return err
-	}
-	teamDir := fsutil.GetTeamDir(cfg.DataDir, manifest.TeamID)
-	if err := os.MkdirAll(teamDir, 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(teamDir, "team.json"), b, 0o644)
-}
-
+// persistTeamManifestModel updates an existing team manifest's model and modelChange, then saves.
+// Used by standalone daemon RPC when updating session model for a team. No-op if teamID/model empty or manifest missing.
 func persistTeamManifestModel(cfg config.Config, teamID, model, reason string) error {
 	teamID = strings.TrimSpace(teamID)
 	model = strings.TrimSpace(model)
 	if teamID == "" || model == "" {
 		return nil
 	}
-	manifest, err := loadExistingTeamManifest(cfg, teamID)
-	if err != nil {
+	store := team.NewFileManifestStore(cfg)
+	ctx := context.Background()
+	manifest, err := store.Load(ctx, teamID)
+	if err != nil || manifest == nil {
 		return err
-	}
-	if manifest == nil {
-		return nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	manifest.TeamModel = model
-	manifest.ModelChange = &teamModelChange{
+	manifest.ModelChange = &team.ModelChange{
 		RequestedModel: model,
 		Status:         "applied",
 		RequestedAt:    now,
 		AppliedAt:      now,
 		Reason:         strings.TrimSpace(reason),
 	}
-	return writeTeamManifestFile(cfg, *manifest)
+	return store.Save(ctx, *manifest)
 }

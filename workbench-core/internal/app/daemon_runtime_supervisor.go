@@ -24,6 +24,7 @@ import (
 	eventsvc "github.com/tinoosan/workbench-core/pkg/services/events"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
+	"github.com/tinoosan/workbench-core/pkg/services/team"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -324,7 +325,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		if prof.Team == nil {
 			return nil, fmt.Errorf("team run %s requires a team profile", runID)
 		}
-		roles, coord, err := collectTeamRoles(prof.Team.Roles)
+		roles, coord, err := team.ValidateTeamRoles(prof.Team.Roles)
 		if err != nil {
 			return nil, err
 		}

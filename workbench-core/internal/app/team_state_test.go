@@ -5,17 +5,18 @@ import (
 	"testing"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/services/team"
 )
 
 func TestPersistTeamManifestModel_UpdatesExistingManifest(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
-	manifest := teamManifest{
+	manifest := team.Manifest{
 		TeamID:          "team-1",
 		ProfileID:       "startup_team",
 		TeamModel:       "openai/gpt-5",
 		CoordinatorRole: "ceo",
 		CoordinatorRun:  "run-1",
-		Roles: []teamRoleRecord{
+		Roles: []team.RoleRecord{
 			{RoleName: "ceo", RunID: "run-1", SessionID: "sess-1"},
 		},
 		CreatedAt: "2026-01-01T00:00:00Z",

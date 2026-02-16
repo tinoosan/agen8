@@ -12,6 +12,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
+	"github.com/tinoosan/workbench-core/pkg/services/team"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -38,7 +39,7 @@ func TestTeamIsIdle_IgnoresHeartbeatTasks(t *testing.T) {
 		t.Fatalf("create heartbeat task: %v", err)
 	}
 
-	if !teamIsIdle(ctx, store, "team-1") {
+	if !team.IsTeamIdle(ctx, store, "team-1") {
 		t.Fatalf("expected team to be idle with only heartbeat tasks")
 	}
 }
@@ -65,7 +66,7 @@ func TestTeamIsIdle_BlocksOnNonHeartbeatTasks(t *testing.T) {
 		t.Fatalf("create non-heartbeat task: %v", err)
 	}
 
-	if teamIsIdle(ctx, store, "team-1") {
+	if team.IsTeamIdle(ctx, store, "team-1") {
 		t.Fatalf("expected team to be non-idle with regular pending tasks")
 	}
 }

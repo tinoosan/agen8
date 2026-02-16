@@ -35,6 +35,7 @@ import (
 	eventsvc "github.com/tinoosan/workbench-core/pkg/services/events"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
+	"github.com/tinoosan/workbench-core/pkg/services/team"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"golang.org/x/sync/errgroup"
 )
@@ -100,32 +101,6 @@ func (c *teamRuntimeController) ResumeRun(ctx context.Context, runID string) err
 func (c *teamRuntimeController) StopRun(runID string) error {
 	// Team daemon does not use StopRun from agent service; session stop uses custom logic.
 	return nil
-}
-
-type teamManifest struct {
-	TeamID          string           `json:"teamId"`
-	ProfileID       string           `json:"profileId"`
-	TeamModel       string           `json:"teamModel,omitempty"`
-	ModelChange     *teamModelChange `json:"modelChange,omitempty"`
-	CoordinatorRole string           `json:"coordinatorRole"`
-	CoordinatorRun  string           `json:"coordinatorRunId"`
-	Roles           []teamRoleRecord `json:"roles"`
-	CreatedAt       string           `json:"createdAt"`
-}
-
-type teamModelChange struct {
-	RequestedModel string `json:"requestedModel,omitempty"`
-	Status         string `json:"status,omitempty"` // pending|applied|failed
-	RequestedAt    string `json:"requestedAt,omitempty"`
-	AppliedAt      string `json:"appliedAt,omitempty"`
-	Reason         string `json:"reason,omitempty"`
-	Error          string `json:"error,omitempty"`
-}
-
-type teamRoleRecord struct {
-	RoleName  string `json:"roleName"`
-	RunID     string `json:"runId"`
-	SessionID string `json:"sessionId"`
 }
 
 type teamRunRequest struct {
@@ -241,7 +216,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	}
 	teamID := "team-" + uuid.NewString()
 
-	roleNames, coordinatorRole, err := collectTeamRoles(prof.Team.Roles)
+	roleNames, coordinatorRole, err := team.ValidateTeamRoles(prof.Team.Roles)
 	if err != nil {
 		return err
 	}
@@ -601,11 +576,20 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		}
 		log.Printf("daemon: [%s] %s -> %s", kind, role.Name, run.RunID)
 	}
-	manifest := buildTeamManifest(teamID, prof.ID, coordinatorRole, coordinatorRun.RunID, teamModel, runtimes)
-	if err := writeTeamManifestFile(cfg, manifest); err != nil {
+	roles := make([]team.RoleRecord, 0, len(runtimes))
+	for _, rt := range runtimes {
+		roles = append(roles, team.RoleRecord{
+			RoleName:  strings.TrimSpace(rt.role.Name),
+			RunID:     strings.TrimSpace(rt.run.RunID),
+			SessionID: strings.TrimSpace(rt.run.SessionID),
+		})
+	}
+	manifest := team.BuildManifest(teamID, prof.ID, coordinatorRole, coordinatorRun.RunID, teamModel, roles, time.Now().UTC().Format(time.RFC3339Nano))
+	manifestStore := team.NewFileManifestStore(cfg)
+	if err := manifestStore.Save(ctx, manifest); err != nil {
 		return fmt.Errorf("write team manifest: %w", err)
 	}
-	stateMgr := newTeamStateManager(cfg, manifest)
+	stateMgr := team.NewStateManager(manifestStore, manifest)
 
 	runCtx, stopSignals := signalNotifyContext(ctx)
 	defer stopSignals()
@@ -751,7 +735,7 @@ func buildTeamRPCServerConfig(
 	taskService pkgtask.TaskServiceForRPC,
 	sessionService pkgsession.Service,
 	runtimes []teamRoleRuntime,
-	stateMgr *teamStateManager,
+	stateMgr *team.StateManager,
 	runtimeLoopCancelMu *sync.Mutex,
 	runtimeLoopCancel map[string]context.CancelFunc,
 ) RPCServerConfig {
@@ -1028,30 +1012,6 @@ func buildTeamRPCServerConfig(
 	return base
 }
 
-func collectTeamRoles(roles []profile.RoleConfig) ([]string, string, error) {
-	out := make([]string, 0, len(roles))
-	seen := map[string]struct{}{}
-	coordinatorRole := ""
-	for _, role := range roles {
-		name := strings.TrimSpace(role.Name)
-		if name == "" {
-			return nil, "", fmt.Errorf("team role name is required")
-		}
-		if _, ok := seen[name]; ok {
-			return nil, "", fmt.Errorf("duplicate team role name %q", name)
-		}
-		seen[name] = struct{}{}
-		out = append(out, name)
-		if role.Coordinator {
-			coordinatorRole = name
-		}
-	}
-	if coordinatorRole == "" {
-		return nil, "", fmt.Errorf("team profile must define one coordinator role")
-	}
-	return out, coordinatorRole, nil
-}
-
 func ptrNowUTC() *time.Time {
 	now := time.Now().UTC()
 	return &now
@@ -1205,27 +1165,7 @@ func errorsIsDropped(err error) bool {
 	return errors.Is(err, events.ErrDropped)
 }
 
-func buildTeamManifest(teamID, profileID, coordinatorRole, coordinatorRunID, teamModel string, runtimes []teamRoleRuntime) teamManifest {
-	records := make([]teamRoleRecord, 0, len(runtimes))
-	for _, rt := range runtimes {
-		records = append(records, teamRoleRecord{
-			RoleName:  strings.TrimSpace(rt.role.Name),
-			RunID:     strings.TrimSpace(rt.run.RunID),
-			SessionID: strings.TrimSpace(rt.run.SessionID),
-		})
-	}
-	return teamManifest{
-		TeamID:          strings.TrimSpace(teamID),
-		ProfileID:       strings.TrimSpace(profileID),
-		TeamModel:       strings.TrimSpace(teamModel),
-		CoordinatorRole: strings.TrimSpace(coordinatorRole),
-		CoordinatorRun:  strings.TrimSpace(coordinatorRunID),
-		Roles:           records,
-		CreatedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-	}
-}
-
-func resolveTeamModel(existing *teamManifest, teamCfg *profile.TeamConfig, resolved RunChatOptions) string {
+func resolveTeamModel(existing *team.Manifest, teamCfg *profile.TeamConfig, resolved RunChatOptions) string {
 	if existing != nil {
 		if model := strings.TrimSpace(existing.TeamModel); model != "" {
 			return model
@@ -1237,25 +1177,6 @@ func resolveTeamModel(existing *teamManifest, teamCfg *profile.TeamConfig, resol
 		}
 	}
 	return strings.TrimSpace(resolved.Model)
-}
-
-func teamIsIdle(ctx context.Context, store state.TaskStore, teamID string) bool {
-	active, err := store.CountTasks(ctx, state.TaskFilter{
-		TeamID: strings.TrimSpace(teamID),
-		Status: []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive},
-	})
-	if err != nil {
-		return false
-	}
-	heartbeat, err := store.CountTasks(ctx, state.TaskFilter{
-		TeamID:   strings.TrimSpace(teamID),
-		TaskKind: state.TaskKindHeartbeat,
-		Status:   []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive},
-	})
-	if err != nil {
-		return false
-	}
-	return active-heartbeat <= 0
 }
 
 func applyTeamModel(ctx context.Context, runtimes []teamRoleRuntime, model string, target string) ([]string, error) {
@@ -1282,7 +1203,7 @@ func applyTeamModel(ctx context.Context, runtimes []teamRoleRuntime, model strin
 	return applied, nil
 }
 
-func requestTeamModelChange(ctx context.Context, taskStore state.TaskStore, runtimes []teamRoleRuntime, stateMgr *teamStateManager, model string, target string, reason string) ([]string, error) {
+func requestTeamModelChange(ctx context.Context, taskStore state.TaskStore, runtimes []teamRoleRuntime, stateMgr *team.StateManager, model string, target string, reason string) ([]string, error) {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return nil, fmt.Errorf("model is required")
@@ -1291,26 +1212,27 @@ func requestTeamModelChange(ctx context.Context, taskStore state.TaskStore, runt
 	if target != "" {
 		appliedTo, err := applyTeamModel(ctx, runtimes, model, target)
 		if err != nil {
-			_ = stateMgr.markModelFailed(model, err)
+			_ = stateMgr.MarkModelFailed(model, err)
 			return nil, err
 		}
-		return appliedTo, stateMgr.markModelApplied(model)
+		return appliedTo, stateMgr.MarkModelApplied(model)
 	}
-	if teamIsIdle(ctx, taskStore, stateMgr.teamID) {
+	teamID := stateMgr.ManifestSnapshot().TeamID
+	if team.IsTeamIdle(ctx, taskStore, teamID) {
 		appliedTo, err := applyTeamModel(ctx, runtimes, model, "")
 		if err != nil {
-			_ = stateMgr.markModelFailed(model, err)
+			_ = stateMgr.MarkModelFailed(model, err)
 			return nil, err
 		}
-		return appliedTo, stateMgr.markModelApplied(model)
+		return appliedTo, stateMgr.MarkModelApplied(model)
 	}
-	if err := stateMgr.queueModelChange(model, reason); err != nil {
+	if err := stateMgr.QueueModelChange(model, reason); err != nil {
 		return nil, err
 	}
 	return []string{}, nil
 }
 
-func runTeamControlLoop(ctx context.Context, taskStore state.TaskStore, runtimes []teamRoleRuntime, stateMgr *teamStateManager) {
+func runTeamControlLoop(ctx context.Context, taskStore state.TaskStore, runtimes []teamRoleRuntime, stateMgr *team.StateManager) {
 	if stateMgr == nil {
 		return
 	}
@@ -1322,20 +1244,20 @@ func runTeamControlLoop(ctx context.Context, taskStore state.TaskStore, runtimes
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			manifest := stateMgr.manifestSnapshot()
+			manifest := stateMgr.ManifestSnapshot()
 			if manifest.ModelChange != nil &&
 				strings.EqualFold(strings.TrimSpace(manifest.ModelChange.Status), "pending") &&
-				teamIsIdle(ctx, taskStore, manifest.TeamID) {
+				team.IsTeamIdle(ctx, taskStore, manifest.TeamID) {
 				model := strings.TrimSpace(manifest.ModelChange.RequestedModel)
 				if model == "" {
 					continue
 				}
 				if _, err := applyTeamModel(ctx, runtimes, model, ""); err != nil {
-					_ = stateMgr.markModelFailed(model, err)
+					_ = stateMgr.MarkModelFailed(model, err)
 					log.Printf("daemon: apply queued team model failed: %v", err)
 					continue
 				}
-				_ = stateMgr.markModelApplied(model)
+				_ = stateMgr.MarkModelApplied(model)
 				log.Printf("daemon: applied queued team model: %s", model)
 			}
 		}

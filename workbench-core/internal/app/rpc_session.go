@@ -17,6 +17,7 @@ import (
 	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
+	"github.com/tinoosan/workbench-core/pkg/services/team"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -296,7 +297,7 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 	if prof == nil || prof.Team == nil {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "profile is not a team profile"}
 	}
-	_, coordinatorRole, err := collectTeamRoles(prof.Team.Roles)
+	_, coordinatorRole, err := team.ValidateTeamRoles(prof.Team.Roles)
 	if err != nil {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
@@ -387,7 +388,15 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 	if err := os.MkdirAll(fsutil.GetTeamWorkspaceDir(s.cfg.DataDir, teamID), 0o755); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
-	manifest := buildTeamManifest(teamID, strings.TrimSpace(prof.ID), coordinatorRole, primaryRunID, teamModel, runtimes)
+	roles := make([]team.RoleRecord, 0, len(runtimes))
+	for _, rt := range runtimes {
+		roles = append(roles, team.RoleRecord{
+			RoleName:  strings.TrimSpace(rt.role.Name),
+			RunID:     strings.TrimSpace(rt.run.RunID),
+			SessionID: strings.TrimSpace(rt.run.SessionID),
+		})
+	}
+	manifest := team.BuildManifest(teamID, strings.TrimSpace(prof.ID), coordinatorRole, primaryRunID, teamModel, roles, time.Now().UTC().Format(time.RFC3339Nano))
 	if err := writeTeamManifestFile(s.cfg, manifest); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
