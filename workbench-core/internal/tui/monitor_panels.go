@@ -139,6 +139,14 @@ func handleOutputPanelKey(m *monitorModel, msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		m.agentOutputFollow = m.agentOutputAtBottom()
 		return m, nil
 	}
+	switch msg.String() {
+	case "t", "h":
+		m.showThoughts = !m.showThoughts
+		// Invalidate layout because filtered items changed
+		m.agentOutputLayoutWidth = 0
+		m.refreshAgentOutputViewport()
+		return m, nil
+	}
 	// Non-scroll keys: nothing to do (viewport is read-only).
 	return m, nil
 }

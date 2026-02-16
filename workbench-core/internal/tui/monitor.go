@@ -62,6 +62,16 @@ type childRunsLoadedMsg struct {
 	err  error
 }
 
+// AgentOutputItem represents a single logical entry in the agent output stream.
+type AgentOutputItem struct {
+	Timestamp time.Time
+	Type      string            // "user", "thought", "tool_call", "tool_result", "error", "info", "system"
+	Content   string            // Primary text or summary
+	RunID     string            // Originating run
+	Role      string            // Originating role
+	Metadata  map[string]string // Key-value pairs (taskId, op, goal, etc)
+}
+
 type tickMsg struct {
 	now time.Time
 }
@@ -168,11 +178,12 @@ type monitorModel struct {
 	planViewport               viewport.Model
 	planFollowingTop           bool
 	renderer                   *ContentRenderer
-	agentOutput                []string
-	agentOutputRunID           []string
-	agentOutputFilteredCache   []string
+	agentOutput                []AgentOutputItem
+	agentOutputRunID           []string // still kept for legacy filtering if needed, but primary is item.RunID
+	agentOutputFilteredCache   []AgentOutputItem
 	agentOutputVP              viewport.Model
 	agentOutputFollow          bool
+	showThoughts               bool // toggle visibility of "thought" items
 	agentOutputPending         map[string]agentOutputPendingEntry
 	agentOutputPendingFallback *agentOutputPendingEntry
 	agentOutputLogicalYOffset  int

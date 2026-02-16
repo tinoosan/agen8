@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wordwrap"
@@ -9,22 +11,32 @@ import (
 )
 
 func (m *monitorModel) appendAgentOutput(line string) {
-	m.appendAgentOutputForRun(line, "")
+	m.appendAgentOutputItem(AgentOutputItem{
+		Timestamp: time.Now(),
+		Type:      "info",
+		Content:   line,
+	})
 }
 
 func (m *monitorModel) appendAgentOutputForRun(line, runID string) {
-	_ = m.appendAgentOutputLine(line, runID)
+	m.appendAgentOutputItem(AgentOutputItem{
+		Timestamp: time.Now(),
+		Type:      "info",
+		Content:   line,
+		RunID:     runID,
+	})
 }
 
-func (m *monitorModel) appendAgentOutputLine(line, runID string) int {
-	line = strings.TrimSpace(line)
-	if line == "" {
+func (m *monitorModel) appendAgentOutputItem(item AgentOutputItem) int {
+	item.Content = strings.TrimSpace(item.Content)
+	if item.Content == "" {
 		return -1
 	}
-	m.agentOutput = append(m.agentOutput, line)
-	m.agentOutputRunID = append(m.agentOutputRunID, strings.TrimSpace(runID))
+	m.agentOutput = append(m.agentOutput, item)
+	m.agentOutputRunID = append(m.agentOutputRunID, strings.TrimSpace(item.RunID))
 	m.trimAgentOutputBuffer()
 	m.dirtyAgentOutput = true
+
 	// Incrementally maintain layout metadata when possible (for virtualization).
 	w := m.agentOutputVP.Width
 	if w <= 0 {
@@ -36,7 +48,7 @@ func (m *monitorModel) appendAgentOutputLine(line, runID string) int {
 		return len(m.agentOutput) - 1
 	}
 	start := m.agentOutputTotalLines
-	h := len(m.renderAgentOutputLogicalLines(line, w))
+	h := len(m.renderAgentOutputItemLogicalLines(item, w))
 	if h < 1 {
 		h = 1
 	}
@@ -44,6 +56,15 @@ func (m *monitorModel) appendAgentOutputLine(line, runID string) int {
 	m.agentOutputLineHeights = append(m.agentOutputLineHeights, h)
 	m.agentOutputTotalLines += h
 	return len(m.agentOutput) - 1
+}
+
+func (m *monitorModel) appendAgentOutputLine(line, runID string) int {
+	return m.appendAgentOutputItem(AgentOutputItem{
+		Timestamp: time.Now(),
+		Type:      "info",
+		Content:   line,
+		RunID:     runID,
+	})
 }
 
 func (m *monitorModel) appendThinkingEntry(runID, role string, summary string) {
@@ -127,7 +148,7 @@ func (m *monitorModel) trimAgentOutputBuffer() {
 	}
 
 	// Re-slice into a fresh backing array so we don't retain references to the dropped prefix.
-	kept := append([]string(nil), m.agentOutput[drop:]...)
+	kept := append([]AgentOutputItem(nil), m.agentOutput[drop:]...)
 	m.agentOutput = kept
 	if drop >= len(m.agentOutputRunID) {
 		m.agentOutputRunID = nil
@@ -240,40 +261,42 @@ func outputLineStyle(line string) lipgloss.Style {
 	}
 }
 
-func (m *monitorModel) currentAgentOutputLines() []string {
+func (m *monitorModel) currentAgentOutputItems() []AgentOutputItem {
 	if m == nil {
 		return nil
 	}
-	if strings.TrimSpace(m.teamID) == "" || strings.TrimSpace(m.focusedRunID) == "" {
-		return m.agentOutput
-	}
 	targetRunID := strings.TrimSpace(m.focusedRunID)
-	out := make([]string, 0, len(m.agentOutput))
-	for i, line := range m.agentOutput {
-		if i >= len(m.agentOutputRunID) {
-			break
+	out := make([]AgentOutputItem, 0, len(m.agentOutput))
+	for _, item := range m.agentOutput {
+		if targetRunID != "" {
+			itemRunID := strings.TrimSpace(item.RunID)
+			if itemRunID != "" && itemRunID != targetRunID {
+				continue
+			}
 		}
-		entryRunID := strings.TrimSpace(m.agentOutputRunID[i])
-		if entryRunID != "" && entryRunID != targetRunID {
+		if !m.showThoughts && item.Type == "thought" {
 			continue
 		}
-		out = append(out, line)
+		out = append(out, item)
 	}
 	m.agentOutputFilteredCache = out
 	return m.agentOutputFilteredCache
 }
 
-func (m *monitorModel) renderAgentOutputLogicalLines(rawLine string, width int) []string {
-	rawLine = strings.TrimSpace(rawLine)
-	if rawLine == "" {
+func (m *monitorModel) renderAgentOutputItemLogicalLines(item AgentOutputItem, width int) []string {
+	content := strings.TrimSpace(item.Content)
+	if content == "" {
 		return []string{""}
 	}
-	if summary, ok := parseAgentOutputSummaryLine(rawLine); ok {
+
+	// For now, reuse the existing logic but wrap the item data.
+	// In the next step, we'll implement richer rendering based on item.Type.
+
+	if summary, ok := parseAgentOutputSummaryLine(content); ok {
 		rendered := summary
 		if m.renderer != nil {
 			rendered = m.renderer.RenderAgentMarkdown(summary, width)
 		}
-		// Guard rail for narrow terminals: ensure markdown output never exceeds viewport width.
 		rendered = wrapViewportText(rendered, max(10, width))
 		rendered = strings.TrimRight(rendered, "\n")
 		if rendered == "" {
@@ -281,8 +304,86 @@ func (m *monitorModel) renderAgentOutputLogicalLines(rawLine string, width int) 
 		}
 		return strings.Split(rendered, "\n")
 	}
-	style := outputLineStyle(rawLine)
-	wrapped := wordwrap.String(rawLine, width)
+
+	style := outputLineStyle(content)
+	prefix := ""
+	if item.Type == "thought" {
+		// Use the specialized markdown renderer for thoughts
+		content = m.renderer.RenderThinkingMarkdown(content, width-4) // -4 for margin/prefix
+
+		// The markdown renderer handles wrapping, so we might not need wordwrap.String here
+		// IF we pass the correct width. However, RenderThinkingMarkdown returns a string
+		// that might contain ANSI codes and newlines.
+		// We need to split it into lines.
+		// The loop below handles splitting by newline, so we just need to ensure 'content'
+		// is the fully rendered markdown.
+
+		// Add timestamp prefix to the first line if needed, but for markdown blocks
+		// it might be better to visually separate the timestamp or put it in a header.
+		// For now, let's keep the timestamp logic simple:
+		// We'll prepend the timestamp to the *first line* of the rendered markdown?
+		// Or maybe render it separately?
+		// Let's stick to the prefix approach for consistency, but apply it carefully.
+
+		ts := fmt.Sprintf("[%s] ", item.Timestamp.Local().Format("15:04:05"))
+		// We can't easily prepend to ANSI-styled markdown without breaking layout sometimes.
+		// A safer bet: rendered markdown is a block. We can put the timestamp above it
+		// or try to hack it in.
+		// Given the user wants "just the thoughts", a subtle timestamp above or to the left is good.
+		// Let's prepend it to the raw content before rendering? No, that messes up markdown parsing.
+
+		// Let's render the markdown first.
+		rendered := m.renderer.RenderThinkingMarkdown(item.Content, width-len(ts))
+
+		// Now we have a block of text. We want the first line to have the timestamp.
+		// But 'rendered' has ANSI codes.
+		// Let's simply output the timestamp as a separate logical line (or just part of the first line).
+		// Actually, let's just use the rendered content. The user wants "thoughts or nothing".
+		// We can put the timestamp in the metadata or just style it simply.
+
+		// Let's prepend the timestamp to the raw text inside a blockquote or bold?
+		// No, let's stick to the rendered output.
+		content = rendered
+
+		// We previously added a prefix. Let's re-add it but we need to be careful.
+		// If we just set style/prefix, the logic below does:
+		// if prefix != "" { content = prefix + content }
+		// wrapped := wordwrap.String(content, width)
+
+		// We DO NOT want to wrap already-rendered markdown (glamour does wrapping).
+		// So for "thought", we should bypass the wordwrap logic below.
+
+		out := make([]string, 0, 1+strings.Count(content, "\n"))
+		lines := strings.Split(content, "\n")
+		for i, line := range lines {
+			// Trim right to avoid trailing spaces from glamour's padding
+			line = strings.TrimRight(line, " ")
+			if i == 0 {
+				line = kit.StyleDim.Italic(true).Render(ts) + line
+			} else {
+				// indention to align with timestamp?
+				line = strings.Repeat(" ", len(ts)) + line
+			}
+			out = append(out, line)
+		}
+		return out
+
+	} else if item.Type == "error" {
+		style = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))
+	} else if item.Type == "user" {
+		style = kit.StyleBold.Foreground(lipgloss.Color("#6bbcff"))
+		prefix = fmt.Sprintf("[%s] ", item.Timestamp.Local().Format("15:04:05"))
+	} else if item.Type == "tool_call" || item.Type == "tool_result" {
+		prefix = fmt.Sprintf("[%s] ", item.Timestamp.Local().Format("15:04:05"))
+	}
+
+	// For thought/user/tool items, we want the timestamp to be part of the first line
+	// but styled consistently (or dim). Let's just prefix it to the content for wrapping.
+	if prefix != "" {
+		content = prefix + content
+	}
+
+	wrapped := wordwrap.String(content, width)
 	out := make([]string, 0, 1+strings.Count(wrapped, "\n"))
 	for _, sub := range strings.Split(wrapped, "\n") {
 		sub = strings.TrimRight(sub, " ")

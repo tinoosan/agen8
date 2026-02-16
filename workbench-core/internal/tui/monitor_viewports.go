@@ -277,7 +277,7 @@ func (m *monitorModel) refreshAgentOutputViewport() {
 	if h <= 0 {
 		h = 1
 	}
-	source := m.currentAgentOutputLines()
+	source := m.currentAgentOutputItems()
 
 	m.ensureAgentOutputLayout(w)
 	maxY := m.agentOutputMaxYOffset(h)
@@ -316,7 +316,7 @@ func (m *monitorModel) refreshAgentOutputViewport() {
 
 	lines := make([]string, 0, (lastRender-firstRender+1)*2)
 	for i := firstRender; i <= lastRender; i++ {
-		lines = append(lines, m.renderAgentOutputLogicalLines(source[i], w)...)
+		lines = append(lines, m.renderAgentOutputItemLogicalLines(source[i], w)...)
 	}
 	m.agentOutputVP.SetContent(strings.Join(lines, "\n"))
 	rel := m.agentOutputLogicalYOffset - windowStartLine
@@ -349,7 +349,7 @@ func (m *monitorModel) ensureAgentOutputLayout(width int) {
 	if width <= 0 {
 		width = 80
 	}
-	source := m.currentAgentOutputLines()
+	source := m.currentAgentOutputItems()
 	if m.agentOutputLayoutWidth == width && len(m.agentOutputLineStarts) == len(source) && len(m.agentOutputLineHeights) == len(source) {
 		return
 	}
@@ -360,7 +360,7 @@ func (m *monitorModel) ensureAgentOutputLayout(width int) {
 	lineNo := 0
 	for i, rawLine := range source {
 		m.agentOutputLineStarts[i] = lineNo
-		h := len(m.renderAgentOutputLogicalLines(rawLine, width))
+		h := len(m.renderAgentOutputItemLogicalLines(rawLine, width))
 		if h < 1 {
 			h = 1
 		}
