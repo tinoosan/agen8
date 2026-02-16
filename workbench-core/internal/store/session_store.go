@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -367,6 +368,13 @@ func CountSessions(cfg config.Config, filter SessionFilter) (int, error) {
 
 	query := `SELECT COUNT(*) FROM sessions WHERE 1=1`
 	args := []any{}
+
+	// Filtering logic to match ListSessionsPaginated
+	type sessionJSON struct {
+		System bool `json:"system"`
+	}
+
+	// Simple filter translation
 	if !filter.IncludeSystem {
 		query += ` AND COALESCE(json_extract(session_json, '$.system'), 0) = 0`
 	}
@@ -380,7 +388,47 @@ func CountSessions(cfg config.Config, filter SessionFilter) (int, error) {
 
 	var count int
 	if err := db.QueryRow(query, args...).Scan(&count); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("count sessions: %w", err)
 	}
 	return count, nil
+}
+
+// DeleteSession removes the session from the database and deletes its directory.
+func DeleteSession(cfg config.Config, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return errors.New("session id required")
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return err
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete from DB
+	if _, err := tx.Exec("DELETE FROM sessions WHERE session_id = ?", sessionID); err != nil {
+		return fmt.Errorf("delete session record: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete: %w", err)
+	}
+
+	// Delete directory
+	sessDir := fsutil.GetSessionDir(cfg.DataDir, sessionID)
+	if err := os.RemoveAll(sessDir); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove session dir: %w", err)
+	}
+
+	return nil
 }

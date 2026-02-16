@@ -31,6 +31,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
+	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"golang.org/x/sync/errgroup"
@@ -568,7 +569,6 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			Run:            coordinatorRun,
 			AllowAnyThread: true,
 			TaskStore:      taskStore,
-			Session:        sessionStore,
 		}
 		srvCfg = buildTeamRPCServerConfig(
 			srvCfg,
@@ -678,6 +678,25 @@ func buildTeamRPCServerConfig(
 	runtimeLoopCancelMu *sync.Mutex,
 	runtimeLoopCancel map[string]context.CancelFunc,
 ) RPCServerConfig {
+	// Create Session Manager for Team Mode
+	// We need to cast the store to the full interface required by the manager.
+	// NewSQLiteSessionStore returns *SQLiteSessionStore which implements it.
+	store, ok := sessionStore.(pkgsession.Store)
+	if !ok {
+		// This should not happen given initialization in runAsTeamInternal
+		log.Printf("daemon: warning: session store does not implement full interface; session management may be limited")
+	}
+
+	supervisor := &teamRuntimeSupervisor{
+		runLoopCancelMu: runtimeLoopCancelMu,
+		runLoopCancel:   runtimeLoopCancel,
+	}
+
+	sessionManager := pkgsession.NewManager(cfg, store, supervisor)
+
+	// Update base config with the manager
+	base.Session = sessionManager
+
 	validThreadIDs := map[string]struct{}{}
 	if sessionID := strings.TrimSpace(coordinatorRun.SessionID); sessionID != "" {
 		validThreadIDs[sessionID] = struct{}{}
@@ -1310,4 +1329,25 @@ func runTeamControlLoop(ctx context.Context, taskStore state.TaskStore, runtimes
 			}
 		}
 	}
+}
+
+// teamRuntimeSupervisor adapts the team daemon's runtime management to the service interface.
+type teamRuntimeSupervisor struct {
+	runLoopCancelMu *sync.Mutex
+	runLoopCancel   map[string]context.CancelFunc
+}
+
+func (s *teamRuntimeSupervisor) StopRun(runID string) error {
+	s.runLoopCancelMu.Lock()
+	defer s.runLoopCancelMu.Unlock()
+	if cancel, ok := s.runLoopCancel[runID]; ok {
+		cancel()
+	}
+	return nil
+}
+
+func (s *teamRuntimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
+	// Team daemon main loop handles resumption based on DB status.
+	// We rely on the services to have updated the DB status before calling this.
+	return nil
 }

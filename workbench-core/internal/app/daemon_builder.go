@@ -26,6 +26,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	"github.com/tinoosan/workbench-core/pkg/runtime"
+	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -58,7 +59,7 @@ type DaemonBuilder struct {
 	traceStore       store.TraceStore
 	historyStore     store.HistoryStore
 	constructorStore store.ConstructorStateStore
-	sessionStore     store.SessionReaderWriter
+	sessionStore     pkgsession.Store
 	taskStore        state.TaskStore
 
 	effectiveModel          string
@@ -228,6 +229,7 @@ func (b *DaemonBuilder) buildStoresAndRuntime() error {
 	if err != nil {
 		return fmt.Errorf("create session store: %w", err)
 	}
+	// Implements pkgsession.Store
 	b.sessionStore = ss
 	return nil
 }
@@ -268,13 +270,15 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 }
 
 func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
-	defaultRun := types.Run{MaxBytesForContext: b.maxContextB}
+	// Create Session Manager wrapping the store and supervisor
+	sessionManager := pkgsession.NewManager(b.cfg, b.sessionStore, b.supervisor)
+
 	return RPCServerConfig{
 		Cfg:            b.cfg,
-		Run:            defaultRun,
+		Run:            b.run,
 		AllowAnyThread: true,
 		TaskStore:      b.taskStore,
-		Session:        b.sessionStore,
+		Session:        sessionManager,
 		NotifyCh:       b.protocolInit.NotifyCh(),
 		Index:          b.protocolInit.Index(),
 		Wake: func() {

@@ -80,6 +80,9 @@ func registerSessionHandlers(s *RPCServer, reg methodRegistry) error {
 			return addBoundHandler[protocol.SessionStopParams, protocol.SessionStopResult](reg, protocol.MethodSessionStop, false, s.sessionStopHandler)
 		},
 		func() error {
+			return addBoundHandler[protocol.SessionDeleteParams, protocol.SessionDeleteResult](reg, protocol.MethodSessionDelete, false, s.sessionDelete)
+		},
+		func() error {
 			return addBoundHandler[protocol.SessionGetTotalsParams, protocol.SessionGetTotalsResult](reg, protocol.MethodSessionGetTotals, false, s.sessionGetTotals)
 		},
 		func() error {
@@ -830,6 +833,21 @@ func (s *RPCServer) sessionStopHandler(ctx context.Context, p protocol.SessionSt
 		return protocol.SessionStopResult{}, err
 	}
 	return protocol.SessionStopResult{SessionID: sessionID, AffectedRunIDs: affected}, nil
+}
+
+func (s *RPCServer) sessionDelete(ctx context.Context, p protocol.SessionDeleteParams) (protocol.SessionDeleteResult, error) {
+	if s.session == nil {
+		return protocol.SessionDeleteResult{}, &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: "session service not initialized"}
+	}
+	sessionID := strings.TrimSpace(p.SessionID)
+	if sessionID == "" {
+		return protocol.SessionDeleteResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "sessionId is required"}
+	}
+	// We call Delete on the service, which handles stopping runs and cleaning up storage.
+	if err := s.session.Delete(ctx, sessionID); err != nil {
+		return protocol.SessionDeleteResult{}, err
+	}
+	return protocol.SessionDeleteResult{}, nil
 }
 
 func (s *RPCServer) setSessionPausedState(ctx context.Context, threadID, sessionID string, paused bool) ([]string, error) {

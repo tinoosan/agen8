@@ -312,3 +312,39 @@ func LatestRun(cfg config.Config) (types.Run, error) {
 	}
 	return run, nil
 }
+
+// ListRunsBySession returns all runs associated with the given sessionID.
+func ListRunsBySession(cfg config.Config, sessionID string) ([]types.Run, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("sessionID cannot be blank")
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`SELECT run_json FROM runs WHERE session_id = ? ORDER BY created_at`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("error listing session runs: %w", err)
+	}
+	defer rows.Close()
+
+	var out []types.Run
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var run types.Run
+		if err := json.Unmarshal([]byte(raw), &run); err != nil {
+			continue
+		}
+		if run.RunID != "" {
+			out = append(out, run)
+		}
+	}
+	return out, rows.Err()
+}

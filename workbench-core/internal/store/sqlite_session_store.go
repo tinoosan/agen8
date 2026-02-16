@@ -43,3 +43,15 @@ func (s *SQLiteSessionStore) ListSessionIDs(_ context.Context) ([]string, error)
 func (s *SQLiteSessionStore) ListSessions(_ context.Context) ([]types.Session, error) {
 	return ListSessions(s.Cfg)
 }
+
+func (s *SQLiteSessionStore) LoadRun(_ context.Context, runID string) (types.Run, error) {
+	return LoadRun(s.Cfg, runID)
+}
+
+func (s *SQLiteSessionStore) ListRunsBySession(_ context.Context, sessionID string) ([]types.Run, error) {
+	return ListRunsBySession(s.Cfg, sessionID)
+}
+
+func (s *SQLiteSessionStore) DeleteSession(_ context.Context, sessionID string) error {
+	return DeleteSession(s.Cfg, sessionID)
+}

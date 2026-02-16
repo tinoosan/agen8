@@ -21,6 +21,7 @@ const (
 	MethodSessionPause        = "session.pause"
 	MethodSessionResume       = "session.resume"
 	MethodSessionStop         = "session.stop"
+	MethodSessionDelete       = "session.delete"
 	MethodSessionGetTotals    = "session.getTotals"
 	MethodActivityList        = "activity.list"
 	MethodTeamGetStatus       = "team.getStatus"
@@ -107,4 +108,9 @@ type ArtifactGetParams struct {
 	ArtifactID string   `json:"artifactId,omitempty"`
 	VPath      string   `json:"vpath,omitempty"`
 	MaxBytes   int      `json:"maxBytes,omitempty"`
+}
+
+// SessionDeleteParams are the params for session.delete.
+type SessionDeleteParams struct {
+	SessionID string `json:"sessionId"`
 }

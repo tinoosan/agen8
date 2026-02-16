@@ -29,6 +29,7 @@ type SessionReader interface {
 // SessionWriter persists sessions.
 type SessionWriter interface {
 	SaveSession(ctx context.Context, s types.Session) error
+	DeleteSession(ctx context.Context, sessionID string) error
 }
 
 // SessionPager supports paginated session listing and counting.

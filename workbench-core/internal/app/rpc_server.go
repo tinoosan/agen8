@@ -10,11 +10,10 @@ import (
 	"strings"
 	"sync"
 
-	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
-	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
+	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
@@ -28,7 +27,7 @@ type RPCServer struct {
 	allowAnyThread bool
 
 	taskStore state.TaskStore
-	session   pkgstore.SessionReaderWriter
+	session   pkgsession.Service
 	initErr   error
 
 	notifyCh <-chan protocol.Message
@@ -43,7 +42,7 @@ type RPCServer struct {
 	controlSetProfile   func(ctx context.Context, threadID, target, profile string) ([]string, error)
 	agentPause          func(ctx context.Context, threadID, runID string) error
 	agentResume         func(ctx context.Context, threadID, runID string) error
-	sessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error)
+	sessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error) // Session logic
 	sessionResume       func(ctx context.Context, threadID, sessionID string) ([]string, error)
 	sessionStop         func(ctx context.Context, threadID, sessionID string) ([]string, error)
 }
@@ -53,7 +52,7 @@ type RPCServerConfig struct {
 	Run                 types.Run
 	AllowAnyThread      bool
 	TaskStore           state.TaskStore
-	Session             pkgstore.SessionReaderWriter
+	Session             pkgsession.Service
 	NotifyCh            <-chan protocol.Message
 	Index               *protocol.Index
 	Wake                func()
@@ -63,8 +62,9 @@ type RPCServerConfig struct {
 	AgentPause          func(ctx context.Context, threadID, runID string) error
 	AgentResume         func(ctx context.Context, threadID, runID string) error
 	SessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error)
-	SessionResume       func(ctx context.Context, threadID, sessionID string) ([]string, error)
-	SessionStop         func(ctx context.Context, threadID, sessionID string) ([]string, error)
+	// Session logic
+	SessionResume func(ctx context.Context, threadID, sessionID string) ([]string, error)
+	SessionStop   func(ctx context.Context, threadID, sessionID string) ([]string, error)
 }
 
 type MethodHandler interface {
@@ -127,17 +127,16 @@ func addBoundHandler[Params any, Result any](reg methodRegistry, method string, 
 }
 
 func NewRPCServer(cfg RPCServerConfig) *RPCServer {
-	var sess pkgstore.SessionReaderWriter
+	var sess pkgsession.Service
 	var initErr error
 	if cfg.Session != nil {
 		sess = cfg.Session
 	} else {
-		st, err := implstore.NewSQLiteSessionStore(cfg.Cfg)
-		if err != nil {
-			initErr = err
-		} else {
-			sess = st
-		}
+		// Initialize default manager?
+		// For now we assume the caller provides it because it has dependencies (runtime supervisor)
+		// which are not easily available here without circular deps or more config.
+		// If nil, we set an error to fail fast on requests.
+		initErr = errors.New("session service not configured")
 	}
 
 	srv := &RPCServer{
