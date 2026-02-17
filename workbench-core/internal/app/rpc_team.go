@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
-	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
+	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -153,33 +153,51 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 		runIDs = append(runIDs, runID)
 	}
 	sort.Strings(runIDs)
-	totalTokens := 0
+	totalTokensIn := 0
+	totalTokensOut := 0
+	statsTotalTokens := 0
 	totalCostUSD := 0.0
 	pricingKnown := true
 	for _, runID := range runIDs {
+		if s.session != nil {
+			if run, err := s.session.LoadRun(ctx, runID); err == nil {
+				if sessionID := strings.TrimSpace(run.SessionID); sessionID != "" {
+					if sess, serr := s.session.LoadSession(ctx, sessionID); serr == nil {
+						totalTokensIn += sess.InputTokens
+						totalTokensOut += sess.OutputTokens
+					}
+				}
+			}
+		}
 		stats, err := s.taskService.GetRunStats(ctx, runID)
 		if err != nil {
 			continue
 		}
-		totalTokens += stats.TotalTokens
+		statsTotalTokens += stats.TotalTokens
 		totalCostUSD += stats.TotalCost
 		if stats.TotalTokens > 0 && stats.TotalCost <= 0 && !pricingKnownForRun(ctx, s.session, runID) {
 			pricingKnown = false
 		}
 	}
+	totalTokens := totalTokensIn + totalTokensOut
+	if totalTokens == 0 {
+		totalTokens = statsTotalTokens
+	}
 	if totalTokens == 0 {
 		pricingKnown = true
 	}
 	return protocol.TeamGetStatusResult{
-		Pending:      pending,
-		Active:       active,
-		Done:         done,
-		Roles:        roles,
-		RunIDs:       runIDs,
-		RoleByRunID:  roleByRunID,
-		TotalTokens:  totalTokens,
-		TotalCostUSD: totalCostUSD,
-		PricingKnown: pricingKnown,
+		Pending:        pending,
+		Active:         active,
+		Done:           done,
+		Roles:          roles,
+		RunIDs:         runIDs,
+		RoleByRunID:    roleByRunID,
+		TotalTokensIn:  totalTokensIn,
+		TotalTokensOut: totalTokensOut,
+		TotalTokens:    totalTokens,
+		TotalCostUSD:   totalCostUSD,
+		PricingKnown:   pricingKnown,
 	}, nil
 }
 

@@ -208,15 +208,17 @@ type TeamRoleStatus struct {
 }
 
 type TeamGetStatusResult struct {
-	Pending      int               `json:"pending"`
-	Active       int               `json:"active"`
-	Done         int               `json:"done"`
-	Roles        []TeamRoleStatus  `json:"roles"`
-	RunIDs       []string          `json:"runIds"`
-	RoleByRunID  map[string]string `json:"roleByRunId"`
-	TotalTokens  int               `json:"totalTokens"`
-	TotalCostUSD float64           `json:"totalCostUSD"`
-	PricingKnown bool              `json:"pricingKnown"`
+	Pending        int               `json:"pending"`
+	Active         int               `json:"active"`
+	Done           int               `json:"done"`
+	Roles          []TeamRoleStatus  `json:"roles"`
+	RunIDs         []string          `json:"runIds"`
+	RoleByRunID    map[string]string `json:"roleByRunId"`
+	TotalTokensIn  int               `json:"totalTokensIn"`
+	TotalTokensOut int               `json:"totalTokensOut"`
+	TotalTokens    int               `json:"totalTokens"`
+	TotalCostUSD   float64           `json:"totalCostUSD"`
+	PricingKnown   bool              `json:"pricingKnown"`
 }
 
 type TeamGetManifestParams struct {

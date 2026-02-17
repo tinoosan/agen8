@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1679,7 +1680,7 @@ func TestRPCServer_SessionGetTotals_AndActivityList(t *testing.T) {
 	}
 	var totals protocol.SessionGetTotalsResult
 	_ = json.Unmarshal(respTotals.Result, &totals)
-	if totals.TotalTokens != 30 || totals.TotalCostUSD != 1.5 {
+	if totals.TotalTokensIn != 10 || totals.TotalTokensOut != 20 || totals.TotalTokens != 30 || totals.TotalCostUSD != 1.5 {
 		t.Fatalf("unexpected totals: %+v", totals)
 	}
 
@@ -1691,6 +1692,84 @@ func TestRPCServer_SessionGetTotals_AndActivityList(t *testing.T) {
 	respActs := rpcRoundTrip(t, srv, reqActs)
 	if respActs.Error != nil {
 		t.Fatalf("activity.list error: %+v", respActs.Error)
+	}
+}
+
+func TestRPCServer_SessionGetTotals_TeamScopeIncludesTokenBreakdown(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	bootstrapSess, bootstrapRun, err := implstore.CreateSession(cfg, "bootstrap", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession bootstrap: %v", err)
+	}
+	sessA, runA, err := implstore.CreateSession(cfg, "team-a", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession team-a: %v", err)
+	}
+	sessB, runB, err := implstore.CreateSession(cfg, "team-b", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession team-b: %v", err)
+	}
+	sessA.InputTokens, sessA.OutputTokens, sessA.TotalTokens, sessA.CostUSD = 11, 7, 18, 0.03
+	sessB.InputTokens, sessB.OutputTokens, sessB.TotalTokens, sessB.CostUSD = 13, 5, 18, 0.02
+
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), bootstrapSess); err != nil {
+		t.Fatalf("SaveSession bootstrap: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), sessA); err != nil {
+		t.Fatalf("SaveSession A: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), sessB); err != nil {
+		t.Fatalf("SaveSession B: %v", err)
+	}
+
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	now := time.Now().UTC()
+	teamID := "team-1"
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-a", SessionID: runA.SessionID, RunID: runA.RunID, TeamID: teamID, AssignedRole: "role-a",
+		Goal: "A", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-b", SessionID: runB.SessionID, RunID: runB.RunID, TeamID: teamID, AssignedRole: "role-b",
+		Goal: "B", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CompleteTask(context.Background(), "task-a", types.TaskResult{
+		TaskID:      "task-a",
+		Status:      types.TaskStatusSucceeded,
+		TotalTokens: 18,
+		CostUSD:     0.03,
+		CompletedAt: &now,
+	})
+	_ = ts.CompleteTask(context.Background(), "task-b", types.TaskResult{
+		TaskID:      "task-b",
+		Status:      types.TaskStatusSucceeded,
+		TotalTokens: 18,
+		CostUSD:     0.02,
+		CompletedAt: &now,
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionGetTotals, protocol.SessionGetTotalsParams{
+		ThreadID: protocol.ThreadID(bootstrapRun.SessionID),
+		TeamID:   teamID,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.getTotals(team) error: %+v", resp.Error)
+	}
+	var out protocol.SessionGetTotalsResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if out.TotalTokensIn != 24 || out.TotalTokensOut != 12 || out.TotalTokens != 36 {
+		t.Fatalf("unexpected team totals token breakdown: %+v", out)
+	}
+	if math.Abs(out.TotalCostUSD-0.05) > 1e-9 {
+		t.Fatalf("unexpected team totals cost: %+v", out)
 	}
 }
 
@@ -2710,6 +2789,226 @@ func TestRPCServer_TeamGetStatus_ManifestRosterIgnoresStaleTaskRuns(t *testing.T
 	}
 	if _, ok := out.RoleByRunID["run-legacy"]; ok {
 		t.Fatalf("stale run should not appear in role map: %+v", out.RoleByRunID)
+	}
+}
+
+func TestRPCServer_TeamGetStatus_IncludesTokenBreakdown(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	bootstrapSess, bootstrapRun, err := implstore.CreateSession(cfg, "bootstrap", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession bootstrap: %v", err)
+	}
+	sessA, runA, err := implstore.CreateSession(cfg, "team-a", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession team-a: %v", err)
+	}
+	sessB, runB, err := implstore.CreateSession(cfg, "team-b", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession team-b: %v", err)
+	}
+	sessA.InputTokens, sessA.OutputTokens, sessA.TotalTokens, sessA.CostUSD = 100, 40, 140, 0.20
+	sessB.InputTokens, sessB.OutputTokens, sessB.TotalTokens, sessB.CostUSD = 80, 20, 100, 0.15
+
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), bootstrapSess); err != nil {
+		t.Fatalf("SaveSession bootstrap: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), sessA); err != nil {
+		t.Fatalf("SaveSession A: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), sessB); err != nil {
+		t.Fatalf("SaveSession B: %v", err)
+	}
+
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	now := time.Now().UTC()
+	teamID := "team-1"
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-a", SessionID: runA.SessionID, RunID: runA.RunID, TeamID: teamID, AssignedRole: "research",
+		Goal: "A", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-b", SessionID: runB.SessionID, RunID: runB.RunID, TeamID: teamID, AssignedRole: "ops",
+		Goal: "B", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CompleteTask(context.Background(), "task-a", types.TaskResult{
+		TaskID:      "task-a",
+		Status:      types.TaskStatusSucceeded,
+		TotalTokens: 140,
+		CostUSD:     0.20,
+		CompletedAt: &now,
+	})
+	_ = ts.CompleteTask(context.Background(), "task-b", types.TaskResult{
+		TaskID:      "task-b",
+		Status:      types.TaskStatusSucceeded,
+		TotalTokens: 100,
+		CostUSD:     0.15,
+		CompletedAt: &now,
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodTeamGetStatus, protocol.TeamGetStatusParams{
+		ThreadID: protocol.ThreadID(bootstrapRun.SessionID),
+		TeamID:   teamID,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("team.getStatus error: %+v", resp.Error)
+	}
+	var out protocol.TeamGetStatusResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if out.TotalTokensIn != 180 || out.TotalTokensOut != 60 || out.TotalTokens != 240 {
+		t.Fatalf("unexpected team status token breakdown: %+v", out)
+	}
+	if math.Abs(out.TotalCostUSD-0.35) > 1e-9 {
+		t.Fatalf("unexpected team status cost: %+v", out)
+	}
+}
+
+func TestRPCServer_SessionGetTotals_TeamScope_UsesManifestRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	bootstrapSess, bootstrapRun, err := implstore.CreateSession(cfg, "bootstrap", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession bootstrap: %v", err)
+	}
+	sessManifest, runManifest, err := implstore.CreateSession(cfg, "manifest", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession manifest: %v", err)
+	}
+	sessStale, runStale, err := implstore.CreateSession(cfg, "stale", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession stale: %v", err)
+	}
+	sessManifest.InputTokens, sessManifest.OutputTokens, sessManifest.TotalTokens = 50, 25, 75
+	sessStale.InputTokens, sessStale.OutputTokens, sessStale.TotalTokens = 9999, 9999, 19998
+
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), bootstrapSess); err != nil {
+		t.Fatalf("SaveSession bootstrap: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), sessManifest); err != nil {
+		t.Fatalf("SaveSession manifest: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), sessStale); err != nil {
+		t.Fatalf("SaveSession stale: %v", err)
+	}
+
+	teamID := "team-1"
+	teamDir := fsutil.GetTeamDir(cfg.DataDir, teamID)
+	if err := os.MkdirAll(teamDir, 0o755); err != nil {
+		t.Fatalf("mkdir team dir: %v", err)
+	}
+	manifest := fmt.Sprintf(`{"teamId":"%s","profileId":"startup","teamModel":"openai/gpt-5-mini","coordinatorRole":"pm","coordinatorRunId":"%s","roles":[{"roleName":"pm","runId":"%s","sessionId":"%s"}],"createdAt":"2026-01-01T00:00:00Z"}`, teamID, runManifest.RunID, runManifest.RunID, runManifest.SessionID)
+	if err := os.WriteFile(filepath.Join(teamDir, "team.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-manifest", SessionID: runManifest.SessionID, RunID: runManifest.RunID, TeamID: teamID, AssignedRole: "pm",
+		Goal: "manifest", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CompleteTask(context.Background(), "task-manifest", types.TaskResult{
+		TaskID:      "task-manifest",
+		Status:      types.TaskStatusSucceeded,
+		TotalTokens: 75,
+		CompletedAt: &now,
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-stale", SessionID: runStale.SessionID, RunID: runStale.RunID, TeamID: teamID, AssignedRole: "legacy",
+		Goal: "stale", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CompleteTask(context.Background(), "task-stale", types.TaskResult{
+		TaskID:      "task-stale",
+		Status:      types.TaskStatusSucceeded,
+		TotalTokens: 19998,
+		CompletedAt: &now,
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionGetTotals, protocol.SessionGetTotalsParams{
+		ThreadID: protocol.ThreadID(bootstrapRun.SessionID),
+		TeamID:   teamID,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.getTotals(team) error: %+v", resp.Error)
+	}
+	var out protocol.SessionGetTotalsResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if out.TotalTokensIn != 50 || out.TotalTokensOut != 25 || out.TotalTokens != 75 {
+		t.Fatalf("expected manifest-only totals, got %+v", out)
+	}
+}
+
+func TestRPCServer_TeamGetStatus_TotalTokensMatchesInOutWhenTheyDifferFromRunStats(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	bootstrapSess, bootstrapRun, err := implstore.CreateSession(cfg, "bootstrap", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession bootstrap: %v", err)
+	}
+	sessA, runA, err := implstore.CreateSession(cfg, "team-a", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession team-a: %v", err)
+	}
+	sessA.InputTokens, sessA.OutputTokens = 1000, 250
+	sessA.TotalTokens = 1250
+
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), bootstrapSess); err != nil {
+		t.Fatalf("SaveSession bootstrap: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), sessA); err != nil {
+		t.Fatalf("SaveSession team-a: %v", err)
+	}
+
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	now := time.Now().UTC()
+	teamID := "team-1"
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-a", SessionID: runA.SessionID, RunID: runA.RunID, TeamID: teamID, AssignedRole: "research",
+		Goal: "A", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	// Deliberately low run stats to ensure total token display uses in/out totals.
+	_ = ts.CompleteTask(context.Background(), "task-a", types.TaskResult{
+		TaskID:      "task-a",
+		Status:      types.TaskStatusSucceeded,
+		TotalTokens: 10,
+		CompletedAt: &now,
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodTeamGetStatus, protocol.TeamGetStatusParams{
+		ThreadID: protocol.ThreadID(bootstrapRun.SessionID),
+		TeamID:   teamID,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("team.getStatus error: %+v", resp.Error)
+	}
+	var out protocol.TeamGetStatusResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if out.TotalTokensIn != 1000 || out.TotalTokensOut != 250 {
+		t.Fatalf("unexpected token in/out: %+v", out)
+	}
+	if out.TotalTokens != 1250 {
+		t.Fatalf("expected total tokens to match in+out, got %+v", out)
 	}
 }
 

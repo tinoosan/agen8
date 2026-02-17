@@ -1053,9 +1053,33 @@ func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetT
 	}
 
 	runIDSet := map[string]struct{}{}
+	manifestRunIDs, _ := loadTeamManifestRunRoles(s.cfg.DataDir, strings.TrimSpace(scope.teamID))
+	for _, runID := range manifestRunIDs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		runIDSet[runID] = struct{}{}
+	}
+	if len(runIDSet) == 0 {
+		tasks, err := s.taskService.ListTasks(ctx, state.TaskFilter{
+			TeamID:   strings.TrimSpace(scope.teamID),
+			Limit:    1000,
+			SortBy:   "created_at",
+			SortDesc: true,
+		})
+		if err != nil {
+			return protocol.SessionGetTotalsResult{}, err
+		}
+		for _, t := range tasks {
+			if r := strings.TrimSpace(t.RunID); r != "" {
+				runIDSet[r] = struct{}{}
+			}
+		}
+	}
 	tasks, err := s.taskService.ListTasks(ctx, state.TaskFilter{
 		TeamID:   strings.TrimSpace(scope.teamID),
-		Limit:    500,
+		Limit:    2000,
 		SortBy:   "created_at",
 		SortDesc: true,
 	})
@@ -1063,23 +1087,41 @@ func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetT
 		return protocol.SessionGetTotalsResult{}, err
 	}
 	for _, t := range tasks {
-		if r := strings.TrimSpace(t.RunID); r != "" {
-			runIDSet[r] = struct{}{}
-		}
 		if t.Status == types.TaskStatusSucceeded || t.Status == types.TaskStatusFailed || t.Status == types.TaskStatusCanceled {
-			out.TasksDone++
+			if len(runIDSet) == 0 {
+				out.TasksDone++
+				continue
+			}
+			if _, ok := runIDSet[strings.TrimSpace(t.RunID)]; ok {
+				out.TasksDone++
+			}
 		}
 	}
+	statsTotalTokens := 0
 	for runID := range runIDSet {
+		if s.session != nil {
+			if run, err := s.session.LoadRun(ctx, runID); err == nil {
+				if sessionID := strings.TrimSpace(run.SessionID); sessionID != "" {
+					if sess, serr := s.session.LoadSession(ctx, sessionID); serr == nil {
+						out.TotalTokensIn += sess.InputTokens
+						out.TotalTokensOut += sess.OutputTokens
+					}
+				}
+			}
+		}
 		rs, err := s.taskService.GetRunStats(ctx, runID)
 		if err != nil {
 			continue
 		}
-		out.TotalTokens += rs.TotalTokens
+		statsTotalTokens += rs.TotalTokens
 		out.TotalCostUSD += rs.TotalCost
 		if rs.TotalTokens > 0 && rs.TotalCost <= 0 && !pricingKnownForRun(ctx, s.session, runID) {
 			out.PricingKnown = false
 		}
+	}
+	out.TotalTokens = out.TotalTokensIn + out.TotalTokensOut
+	if out.TotalTokens == 0 {
+		out.TotalTokens = statsTotalTokens
 	}
 	if out.TotalTokens == 0 {
 		out.PricingKnown = true

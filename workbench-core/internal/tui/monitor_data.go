@@ -237,9 +237,6 @@ func (m *monitorModel) loadSessionTotalsCmd() tea.Cmd {
 		}
 		if strings.TrimSpace(m.teamID) != "" {
 			params.TeamID = strings.TrimSpace(m.teamID)
-			if strings.TrimSpace(m.focusedRunID) != "" {
-				params.RunID = strings.TrimSpace(m.focusedRunID)
-			}
 		} else {
 			params.RunID = strings.TrimSpace(m.runID)
 		}
@@ -477,15 +474,17 @@ func (m *monitorModel) loadTeamStatus() tea.Cmd {
 			roles = append(roles, teamRoleState{Role: strings.TrimSpace(r.Role), Info: strings.TrimSpace(r.Info)})
 		}
 		return teamStatusLoadedMsg{
-			pending:      res.Pending,
-			active:       res.Active,
-			done:         res.Done,
-			roles:        roles,
-			runIDs:       append([]string(nil), res.RunIDs...),
-			roleByRunID:  res.RoleByRunID,
-			totalTokens:  res.TotalTokens,
-			totalCostUSD: res.TotalCostUSD,
-			pricingKnown: res.PricingKnown,
+			pending:        res.Pending,
+			active:         res.Active,
+			done:           res.Done,
+			roles:          roles,
+			runIDs:         append([]string(nil), res.RunIDs...),
+			roleByRunID:    res.RoleByRunID,
+			totalTokensIn:  res.TotalTokensIn,
+			totalTokensOut: res.TotalTokensOut,
+			totalTokens:    res.TotalTokens,
+			totalCostUSD:   res.TotalCostUSD,
+			pricingKnown:   res.PricingKnown,
 		}
 	}
 }
