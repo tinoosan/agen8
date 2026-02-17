@@ -187,6 +187,7 @@ func TestMaybeCreateCoordinatorCallback_SubagentWorkerCompletion_Unchanged(t *te
 		SessionID:   "session-child",
 		RunID:       "run-child",
 		ParentRunID: "run-parent",
+		SpawnIndex:  1,
 	}}
 	task := types.Task{
 		TaskID:    "task-subagent-1",
@@ -197,7 +198,7 @@ func TestMaybeCreateCoordinatorCallback_SubagentWorkerCompletion_Unchanged(t *te
 		TaskID:    task.TaskID,
 		Status:    types.TaskStatusSucceeded,
 		Summary:   "child done",
-		Artifacts: []string{"/deliverables/output.md", "/tasks/2026-02-17/task-subagent-1/SUMMARY.md"},
+		Artifacts: []string{"/workspace/output.md", "/tasks/2026-02-17/task-subagent-1/SUMMARY.md"},
 	})
 	callback, err := store.GetTask(context.Background(), "callback-"+task.TaskID)
 	if err != nil {
@@ -208,5 +209,38 @@ func TestMaybeCreateCoordinatorCallback_SubagentWorkerCompletion_Unchanged(t *te
 	}
 	if callback.Metadata["source"] != "subagent.callback" {
 		t.Fatalf("subagent callback source=%v, want subagent.callback", callback.Metadata["source"])
+	}
+	rawArtifacts, _ := callback.Inputs["artifacts"].([]any)
+	artifacts := make([]string, 0, len(rawArtifacts))
+	for _, a := range rawArtifacts {
+		if s, ok := a.(string); ok {
+			artifacts = append(artifacts, s)
+		}
+	}
+	if len(artifacts) != 2 {
+		t.Fatalf("expected 2 artifacts, got %d (%v)", len(artifacts), artifacts)
+	}
+	if artifacts[0] != "/workspace/subagent-1/output.md" {
+		t.Fatalf("unexpected workspace artifact %q", artifacts[0])
+	}
+	if artifacts[1] != "/tasks/subagent-1/2026-02-17/task-subagent-1/SUMMARY.md" {
+		t.Fatalf("unexpected summary artifact %q", artifacts[1])
+	}
+}
+
+func TestNormalizeStandaloneSubagentCallbackArtifactPath(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{in: "/workspace/report.md", want: "/workspace/subagent-2/report.md"},
+		{in: "/workspace/subagent-2/report.md", want: "/workspace/subagent-2/report.md"},
+		{in: "/tasks/2026-02-17/task-1/SUMMARY.md", want: "/tasks/subagent-2/2026-02-17/task-1/SUMMARY.md"},
+		{in: "/tasks/subagent-2/2026-02-17/task-1/SUMMARY.md", want: "/tasks/subagent-2/2026-02-17/task-1/SUMMARY.md"},
+	}
+	for _, tc := range cases {
+		if got := normalizeStandaloneSubagentCallbackArtifactPath(2, tc.in); got != tc.want {
+			t.Fatalf("normalizeStandaloneSubagentCallbackArtifactPath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

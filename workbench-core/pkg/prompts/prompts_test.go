@@ -45,3 +45,26 @@ func TestDefaultSystemPrompt_IsDelegationAgnostic(t *testing.T) {
 		t.Error("DefaultSystemPrompt() should contain base content")
 	}
 }
+
+func TestDefaultAutonomousSystemPrompt_UsesStandaloneSubagentCanonicalPaths(t *testing.T) {
+	s := DefaultAutonomousSystemPrompt()
+	if strings.Contains(s, "/deliverables/subagents") {
+		t.Fatalf("autonomous prompt should not reference legacy deliverables subagent paths")
+	}
+	if !strings.Contains(s, "/workspace/subagent-&lt;N&gt;/") {
+		t.Fatalf("autonomous prompt should include canonical subagent workspace path")
+	}
+	if !strings.Contains(s, "/tasks/subagent-&lt;N&gt;/&lt;date&gt;/&lt;taskID&gt;/SUMMARY.md") {
+		t.Fatalf("autonomous prompt should include canonical subagent summary path")
+	}
+}
+
+func TestDefaultSubAgentSystemPrompt_WritesToWorkspace(t *testing.T) {
+	s := DefaultSubAgentSystemPrompt()
+	if strings.Contains(s, "/deliverables") {
+		t.Fatalf("subagent prompt should not instruct /deliverables")
+	}
+	if !strings.Contains(s, "under /workspace") {
+		t.Fatalf("subagent prompt should instruct writing under /workspace")
+	}
+}

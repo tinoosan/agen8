@@ -641,6 +641,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		TeamRoles:            teamRoles,
 		TeamRoleDescriptions: teamRoleDescriptions,
 		ParentRunID:          strings.TrimSpace(run.ParentRunID),
+		SpawnIndex:           run.SpawnIndex,
 		SingleTask:           isChildRun,
 		InstanceID:           run.RunID,
 		Logf: func(format string, args ...any) {

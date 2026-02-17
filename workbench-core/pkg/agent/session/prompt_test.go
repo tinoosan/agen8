@@ -79,7 +79,7 @@ func TestBuildSystemPrompt_IncludesRoleDescriptions(t *testing.T) {
 
 func TestBuildTeamBlock_CoordinatorRestrictionsAndMemoryPolicy(t *testing.T) {
 	block := buildTeamBlock("team-1", "head-analyst", "head-analyst", []string{"head-analyst", "researcher"}, nil)
-	if !strings.Contains(block, "MUST NOT perform specialist research, analysis, or report writing") {
+	if !strings.Contains(block, "MUST NOT perform specialist work unless it is a job for your role") {
 		t.Fatalf("expected strict coordinator restriction, got: %s", block)
 	}
 	if !strings.Contains(block, "NEVER use web_search, file tools, or shell tools for specialist work") {

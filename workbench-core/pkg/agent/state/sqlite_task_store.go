@@ -1095,18 +1095,23 @@ func (s *SQLiteTaskStore) CompleteTask(ctx context.Context, taskID string, resul
 
 	var task types.Task
 	var finishedRaw string
+	var metadataRaw string
 	if err := tx.QueryRowContext(ctx, `
 		SELECT task_id, COALESCE(team_id, ''), COALESCE(run_id, ''), COALESCE(assigned_role, ''),
-		       COALESCE(role_snapshot, ''), COALESCE(task_kind, ''), COALESCE(created_by, ''), COALESCE(goal, ''), COALESCE(status, ''), COALESCE(finished_at, '')
+		       COALESCE(role_snapshot, ''), COALESCE(task_kind, ''), COALESCE(created_by, ''), COALESCE(goal, ''), COALESCE(status, ''), COALESCE(finished_at, ''),
+		       COALESCE(metadata_json, '{}')
 		FROM tasks
 		WHERE task_id = ?
 	`, taskID).Scan(
-		&task.TaskID, &task.TeamID, &task.RunID, &task.AssignedRole, &task.RoleSnapshot, &task.TaskKind, &task.CreatedBy, &task.Goal, &task.Status, &finishedRaw,
+		&task.TaskID, &task.TeamID, &task.RunID, &task.AssignedRole, &task.RoleSnapshot, &task.TaskKind, &task.CreatedBy, &task.Goal, &task.Status, &finishedRaw, &metadataRaw,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrTaskNotFound
 		}
 		return err
+	}
+	if strings.TrimSpace(metadataRaw) != "" {
+		_ = json.Unmarshal([]byte(metadataRaw), &task.Metadata)
 	}
 	if tt := parseTime(finishedRaw); !tt.IsZero() {
 		task.CompletedAt = &tt

@@ -191,6 +191,17 @@ func TestTaskCreateTool_Definition_WithSpawnWorker_IncludesSpawnWorker(t *testin
 	if _, has := props["spawnWorker"]; !has {
 		t.Error("Definition() when SpawnWorker is set must include spawnWorker in parameters")
 	}
+	rawSpawn, ok := props["spawnWorker"].(map[string]any)
+	if !ok {
+		t.Fatalf("spawnWorker schema should be an object")
+	}
+	desc, _ := rawSpawn["description"].(string)
+	if strings.Contains(desc, "/deliverables") {
+		t.Fatalf("spawnWorker description must not reference /deliverables: %q", desc)
+	}
+	if !strings.Contains(desc, "/workspace") {
+		t.Fatalf("spawnWorker description should reference /workspace: %q", desc)
+	}
 }
 
 func TestTaskCreateTool_WorkerCanEscalateToCoordinator(t *testing.T) {
@@ -224,5 +235,35 @@ func TestTaskCreateTool_WorkerCanEscalateToCoordinator(t *testing.T) {
 	task := store.tasks["task-worker-2"]
 	if task.AssignedRole != "head-analyst" {
 		t.Fatalf("expected assignedRole head-analyst, got %q", task.AssignedRole)
+	}
+}
+
+func TestTaskCreateTool_SpawnWorkerMessage_UsesCanonicalSubagentPaths(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:     store,
+		SessionID: "s",
+		RunID:     "parent-run",
+		SpawnWorker: func(context.Context, string, string, string) (string, error) {
+			return "child-run", nil
+		},
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"goal":        "create a hello file",
+		"taskId":      "task-1",
+		"spawnWorker": true,
+	})
+	req, err := tool.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(req.Text, "/deliverables") {
+		t.Fatalf("spawn_worker result message should not reference /deliverables: %q", req.Text)
+	}
+	if !strings.Contains(req.Text, "/workspace/subagent-<N>/") {
+		t.Fatalf("spawn_worker result message should reference /workspace/subagent-<N>/: %q", req.Text)
+	}
+	if !strings.Contains(req.Text, "/tasks/subagent-<N>/<date>/<taskID>/SUMMARY.md") {
+		t.Fatalf("spawn_worker result message should reference canonical task summary path: %q", req.Text)
 	}
 }

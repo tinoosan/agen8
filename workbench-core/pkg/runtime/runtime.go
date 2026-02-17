@@ -186,10 +186,22 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			return nil, fmt.Errorf("create shared workspace resource: %w", err)
 		}
 	} else if strings.TrimSpace(cfg.Run.ParentRunID) != "" {
-		// Subagent: workspace under child run dir (parentRun/subagents/childID/workspace).
-		wsRes, err = resources.NewWorkspaceFromRunDir(runDir)
-		if err != nil {
-			return nil, fmt.Errorf("create workspace resource: %w", err)
+		if teamID == "" {
+			// Standalone subagent: workspace is parent-visible under /workspace/subagent-N.
+			wsDir := fsutil.GetStandaloneSubagentWorkspaceDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.SpawnIndex)
+			if err := os.MkdirAll(wsDir, 0o755); err != nil {
+				return nil, fmt.Errorf("prepare standalone subagent workspace dir: %w", err)
+			}
+			wsRes, err = resources.NewDirResource(wsDir, vfs.MountWorkspace)
+			if err != nil {
+				return nil, fmt.Errorf("create standalone subagent workspace resource: %w", err)
+			}
+		} else {
+			// Child team run fallback.
+			wsRes, err = resources.NewWorkspaceFromRunDir(runDir)
+			if err != nil {
+				return nil, fmt.Errorf("create workspace resource: %w", err)
+			}
 		}
 	} else {
 		wsRes, err = resources.NewWorkspaceFromRunDir(runDir)
@@ -202,6 +214,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 
 	planDir := filepath.Join(runDir, "plan")
+	if strings.TrimSpace(cfg.Run.ParentRunID) != "" && teamID == "" {
+		planDir = fsutil.GetStandaloneSubagentPlanDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.SpawnIndex)
+	}
 	if err := os.MkdirAll(planDir, 0755); err != nil {
 		return nil, fmt.Errorf("prepare plan dir: %w", err)
 	}
@@ -274,7 +289,11 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 
 	var tasksDir string
 	if strings.TrimSpace(cfg.Run.ParentRunID) != "" {
-		tasksDir = fsutil.GetSubagentTasksDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.RunID)
+		if teamID == "" {
+			tasksDir = fsutil.GetStandaloneSubagentTasksDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.SpawnIndex)
+		} else {
+			tasksDir = fsutil.GetSubagentTasksDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.RunID)
+		}
 	} else if teamID != "" {
 		tasksDir = fsutil.GetTeamTasksDir(cfg.Cfg.DataDir, teamID)
 	} else {
@@ -294,18 +313,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	var subagentsDir string
 	var deliverablesDir string
 	if strings.TrimSpace(cfg.Run.ParentRunID) != "" {
-		// Subagent: mount /deliverables so child can write outputs into parent's run-level deliverables tree.
-		deliverablesDir = fsutil.GetSubagentDeliverablesDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.RunID)
-		if err := os.MkdirAll(deliverablesDir, 0755); err != nil {
-			return nil, fmt.Errorf("prepare deliverables dir: %w", err)
-		}
-		deliverablesRes, err := resources.NewDirResource(deliverablesDir, vfs.MountDeliverables)
-		if err != nil {
-			return nil, fmt.Errorf("create deliverables resource: %w", err)
-		}
-		if err := fs.Mount(vfs.MountDeliverables, deliverablesRes); err != nil {
-			return nil, fmt.Errorf("mount %s: %w", vfs.MountDeliverables, err)
-		}
+		// Standalone subagents and team worker runs do not mount /deliverables.
 	} else if sharedWorkspaceDir != "" {
 		// Team mode: do not auto-create a /deliverables tree under shared workspace.
 	} else {
@@ -321,17 +329,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		if err := fs.Mount(vfs.MountSubagents, subagentsRes); err != nil {
 			return nil, fmt.Errorf("mount %s: %w", vfs.MountSubagents, err)
 		}
-		deliverablesDir = fsutil.GetDeliverablesDir(cfg.Cfg.DataDir, cfg.Run.RunID)
-		if err := os.MkdirAll(deliverablesDir, 0755); err != nil {
-			return nil, fmt.Errorf("prepare deliverables dir: %w", err)
-		}
-		deliverablesRes, err := resources.NewDirResource(deliverablesDir, vfs.MountDeliverables)
-		if err != nil {
-			return nil, fmt.Errorf("create deliverables resource: %w", err)
-		}
-		if err := fs.Mount(vfs.MountDeliverables, deliverablesRes); err != nil {
-			return nil, fmt.Errorf("mount %s: %w", vfs.MountDeliverables, err)
-		}
+		// Standalone top-level runs no longer mount /deliverables.
 	}
 
 	if cfg.Emit != nil {

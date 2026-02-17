@@ -73,34 +73,12 @@ func resolveIndexedDiskPath(dataDir, teamID, runID, vpath string) string {
 		if strings.TrimSpace(teamID) != "" {
 			return filepath.Join(fsutil.GetTeamTasksDir(dataDir, teamID), rel)
 		}
-		const subagentsPrefix = "subagents/"
-		if strings.HasPrefix(rel, subagentsPrefix) {
-			rest := strings.TrimPrefix(rel, subagentsPrefix)
-			parts := strings.SplitN(rest, string(filepath.Separator), 2)
-			if len(parts) >= 2 && parts[0] != "" {
-				childRunID := parts[0]
-				restPath := parts[1]
-				base := fsutil.GetSubagentTasksDir(dataDir, runID, childRunID)
-				return filepath.Join(base, restPath)
-			}
-		}
 		base := fsutil.GetTasksDir(dataDir, runID)
 		return filepath.Join(base, rel)
 	}
 	if strings.HasPrefix(vpath, "/deliverables/") {
 		rel := strings.TrimPrefix(vpath, "/deliverables/")
 		rel = strings.TrimPrefix(rel, "/")
-		const subagentsPrefix = "subagents/"
-		if strings.HasPrefix(rel, subagentsPrefix) {
-			rest := strings.TrimPrefix(rel, subagentsPrefix)
-			parts := strings.SplitN(rest, string(filepath.Separator), 2)
-			if len(parts) >= 2 && parts[0] != "" {
-				childRunID := parts[0]
-				restPath := parts[1]
-				base := fsutil.GetSubagentDeliverablesDir(dataDir, runID, childRunID)
-				return filepath.Join(base, restPath)
-			}
-		}
 		base := fsutil.GetDeliverablesDir(dataDir, runID)
 		return filepath.Join(base, rel)
 	}
@@ -175,6 +153,10 @@ func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, tas
 		}
 	}
 	seen := map[string]struct{}{}
+	subagentLabel := fsutil.GetSubagentLabel(0)
+	if parentRunID != "" {
+		subagentLabel = standaloneSubagentLabelForRunTx(ctx, tx, runID)
+	}
 	for _, raw := range result.Artifacts {
 		vpath := strings.TrimSpace(raw)
 		if vpath == "" {
@@ -189,15 +171,31 @@ func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, tas
 			rel := strings.TrimPrefix(vpath, "/tasks/")
 			rel = strings.TrimPrefix(rel, "/")
 			if rel != "" {
-				indexVpath = "/tasks/subagents/" + runID + "/" + rel
+				first := rel
+				if cut, _, ok := strings.Cut(rel, "/"); ok {
+					first = cut
+				}
+				if first == subagentLabel {
+					indexVpath = "/tasks/" + rel
+				} else {
+					indexVpath = "/tasks/" + subagentLabel + "/" + rel
+				}
 				artifactRunID = parentRunID
 			}
 		}
-		if parentRunID != "" && strings.HasPrefix(vpath, "/deliverables/") {
-			rel := strings.TrimPrefix(vpath, "/deliverables/")
+		if parentRunID != "" && strings.HasPrefix(vpath, "/workspace/") {
+			rel := strings.TrimPrefix(vpath, "/workspace/")
 			rel = strings.TrimPrefix(rel, "/")
 			if rel != "" {
-				indexVpath = "/deliverables/subagents/" + runID + "/" + rel
+				first := rel
+				if cut, _, ok := strings.Cut(rel, "/"); ok {
+					first = cut
+				}
+				if first == subagentLabel {
+					indexVpath = "/workspace/" + rel
+				} else {
+					indexVpath = "/workspace/" + subagentLabel + "/" + rel
+				}
 				artifactRunID = parentRunID
 			}
 		}
@@ -222,6 +220,23 @@ func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, tas
 		}
 	}
 	return nil
+}
+
+func standaloneSubagentLabelForRunTx(ctx context.Context, tx *sql.Tx, runID string) string {
+	label := fsutil.GetSubagentLabel(0)
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return label
+	}
+	var raw string
+	if err := tx.QueryRowContext(ctx, `SELECT run_json FROM runs WHERE run_id = ?`, runID).Scan(&raw); err != nil {
+		return label
+	}
+	var run types.Run
+	if err := json.Unmarshal([]byte(raw), &run); err != nil {
+		return label
+	}
+	return fsutil.GetSubagentLabel(run.SpawnIndex)
 }
 
 func boolToInt(v bool) int {

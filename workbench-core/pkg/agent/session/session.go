@@ -18,6 +18,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/emit"
 	"github.com/tinoosan/workbench-core/pkg/events"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/llm"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/profile"
@@ -70,6 +71,8 @@ type Config struct {
 	// ParentRunID links this session's run to its parent when spawned as a worker.
 	// Used to trigger coordinator callbacks in standalone mode.
 	ParentRunID string
+	// SpawnIndex is the 1-based standalone subagent ordinal under a parent run.
+	SpawnIndex int
 	// SingleTask causes the session to exit after completing one task.
 	SingleTask bool
 
@@ -1044,22 +1047,25 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			sourceGoal = "(no goal text)"
 		}
 		subagentRunID := strings.TrimSpace(s.cfg.RunID)
-		// Path in parent's run-level deliverables tree where this subagent's deliverables live (child writes to /deliverables; parent sees /deliverables/subagents/<runID>/).
-		subagentArtifactsDir := path.Join("/deliverables", "subagents", subagentRunID)
-		// Only pass through artifact paths under /deliverables/ (parent-visible); skip others (e.g. /tasks/... in child's view).
+		subagentLabel := fsutil.GetSubagentLabel(s.cfg.SpawnIndex)
+		subagentWorkspaceDir := path.Join("/workspace", subagentLabel)
+		subagentSummariesDir := path.Join("/tasks", subagentLabel)
 		artifactsForParent := make([]string, 0, len(tr.Artifacts))
+		seenArtifacts := map[string]struct{}{}
 		for _, art := range tr.Artifacts {
-			art = strings.TrimSpace(art)
-			if art == "" {
+			normalized := normalizeStandaloneSubagentCallbackArtifactPath(s.cfg.SpawnIndex, art)
+			normalized = strings.TrimSpace(normalized)
+			if normalized == "" {
 				continue
 			}
-			if strings.HasPrefix(art, "/deliverables/") {
-				artifactsForParent = append(artifactsForParent, path.Join(subagentArtifactsDir, strings.TrimPrefix(art, "/deliverables/")))
+			if _, ok := seenArtifacts[normalized]; ok {
+				continue
 			}
+			seenArtifacts[normalized] = struct{}{}
+			artifactsForParent = append(artifactsForParent, normalized)
 		}
-		subagentSummariesDir := path.Join("/tasks", "subagents", subagentRunID)
 		callbackGoal := fmt.Sprintf("SUBAGENT RESULT: Review %s result from spawned worker for task %s. The worker completed: %s. Use the task_review tool to approve, retry (with feedback), or escalate this work. Your overarching task (that led to spawning this worker) is only complete after you have reviewed this result and decided on next steps.", string(tr.Status), truncateText(taskID, 24), truncateText(sourceGoal, 120))
-		callbackGoal += "\n\nSubagent task summaries are under " + subagentSummariesDir + " (e.g. <date>/<taskID>/SUMMARY.md). Deliverables are under " + subagentArtifactsDir + ". Open and review the artifact paths below (e.g. with fs_read) before calling task_review."
+		callbackGoal += "\n\nSubagent task summaries are under " + subagentSummariesDir + " (e.g. <date>/<taskID>/SUMMARY.md). Subagent outputs are under " + subagentWorkspaceDir + ". Open and review the artifact paths below (e.g. with fs_read) before calling task_review."
 		if len(artifactsForParent) > 0 {
 			const maxPathsInGoal = 10
 			pathsToShow := artifactsForParent
@@ -1076,11 +1082,12 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			"sourceTaskId":         taskID,
 			"sourceGoal":           sourceGoal,
 			"sourceRunId":          subagentRunID,
+			"sourceSpawnIndex":     s.cfg.SpawnIndex,
 			"sourceStatus":         string(tr.Status),
 			"summary":              strings.TrimSpace(tr.Summary),
 			"error":                strings.TrimSpace(tr.Error),
 			"artifacts":            artifactsForParent,
-			"subagentArtifactsDir": subagentArtifactsDir,
+			"subagentWorkspaceDir": subagentWorkspaceDir,
 			"subagentSummariesDir": subagentSummariesDir,
 		}
 		callback = types.Task{
@@ -1415,6 +1422,47 @@ func normalizeTeamCallbackArtifactPath(role string, teamRoles []string, artifact
 		return path.Join("/tasks", roleSeg, rel)
 	case strings.HasPrefix(artifactPath, "/deliverables/"):
 		return artifactPath
+	default:
+		return artifactPath
+	}
+}
+
+func normalizeStandaloneSubagentCallbackArtifactPath(spawnIndex int, artifactPath string) string {
+	label := fsutil.GetSubagentLabel(spawnIndex)
+	artifactPath = strings.TrimSpace(artifactPath)
+	if artifactPath == "" {
+		return ""
+	}
+
+	switch {
+	case strings.HasPrefix(artifactPath, "/workspace/"):
+		rel := strings.TrimPrefix(artifactPath, "/workspace/")
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			return path.Join("/workspace", label)
+		}
+		first := rel
+		if cut, _, ok := strings.Cut(rel, "/"); ok {
+			first = cut
+		}
+		if first == label {
+			return path.Join("/workspace", rel)
+		}
+		return path.Join("/workspace", label, rel)
+	case strings.HasPrefix(artifactPath, "/tasks/"):
+		rel := strings.TrimPrefix(artifactPath, "/tasks/")
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			return path.Join("/tasks", label)
+		}
+		first := rel
+		if cut, _, ok := strings.Cut(rel, "/"); ok {
+			first = cut
+		}
+		if first == label {
+			return path.Join("/tasks", rel)
+		}
+		return path.Join("/tasks", label, rel)
 	default:
 		return artifactPath
 	}

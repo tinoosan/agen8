@@ -158,3 +158,25 @@ func TestGetSubagentTasksDir(t *testing.T) {
 		t.Fatalf("GetSubagentTasksDir = %q, want %q", got, want)
 	}
 }
+
+func TestStandaloneSubagentIndexPaths(t *testing.T) {
+	dataDir := "/var/data/workbench"
+	parentRunID := "run-parent"
+	spawnIndex := 2
+
+	if got, want := GetSubagentLabel(spawnIndex), "subagent-2"; got != want {
+		t.Fatalf("GetSubagentLabel = %q, want %q", got, want)
+	}
+	if got, want := GetSubagentLabel(0), "subagent-unknown"; got != want {
+		t.Fatalf("GetSubagentLabel(invalid) = %q, want %q", got, want)
+	}
+	if got, want := GetStandaloneSubagentWorkspaceDir(dataDir, parentRunID, spawnIndex), filepath.Join(dataDir, "agents", parentRunID, "workspace", "subagent-2"); got != want {
+		t.Fatalf("GetStandaloneSubagentWorkspaceDir = %q, want %q", got, want)
+	}
+	if got, want := GetStandaloneSubagentTasksDir(dataDir, parentRunID, spawnIndex), filepath.Join(dataDir, "agents", parentRunID, "tasks", "subagent-2"); got != want {
+		t.Fatalf("GetStandaloneSubagentTasksDir = %q, want %q", got, want)
+	}
+	if got, want := GetStandaloneSubagentPlanDir(dataDir, parentRunID, spawnIndex), filepath.Join(dataDir, "agents", parentRunID, "plan", "subagent-2"); got != want {
+		t.Fatalf("GetStandaloneSubagentPlanDir = %q, want %q", got, want)
+	}
+}

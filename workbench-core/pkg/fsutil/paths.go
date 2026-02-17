@@ -104,6 +104,33 @@ func GetSubagentRunDir(dataDir, parentRunID, childRunID string) string {
 	return filepath.Join(GetSubagentsDir(dataDir, parentRunID), childRunID)
 }
 
+// GetSubagentLabel returns a stable human-readable standalone subagent label.
+// Spawn indexes are 1-based; invalid indexes return "subagent-unknown".
+func GetSubagentLabel(spawnIndex int) string {
+	if spawnIndex <= 0 {
+		return "subagent-unknown"
+	}
+	return fmt.Sprintf("subagent-%d", spawnIndex)
+}
+
+// GetStandaloneSubagentWorkspaceDir returns the parent-visible workspace directory
+// for a standalone child run.
+func GetStandaloneSubagentWorkspaceDir(dataDir, parentRunID string, spawnIndex int) string {
+	return filepath.Join(GetWorkspaceDir(dataDir, parentRunID), GetSubagentLabel(spawnIndex))
+}
+
+// GetStandaloneSubagentTasksDir returns the parent-visible tasks directory
+// for a standalone child run.
+func GetStandaloneSubagentTasksDir(dataDir, parentRunID string, spawnIndex int) string {
+	return filepath.Join(GetTasksDir(dataDir, parentRunID), GetSubagentLabel(spawnIndex))
+}
+
+// GetStandaloneSubagentPlanDir returns the parent-visible plan directory
+// for a standalone child run.
+func GetStandaloneSubagentPlanDir(dataDir, parentRunID string, spawnIndex int) string {
+	return filepath.Join(GetAgentDir(dataDir, parentRunID), "plan", GetSubagentLabel(spawnIndex))
+}
+
 // GetRunDir returns the root directory for a run. Child runs (with ParentRunID set) live under the parent's subagents dir.
 func GetRunDir(dataDir string, run types.Run) string {
 	if strings.TrimSpace(run.ParentRunID) != "" {

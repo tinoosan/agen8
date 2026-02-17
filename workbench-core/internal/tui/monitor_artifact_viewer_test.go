@@ -51,8 +51,8 @@ func TestResolveArtifactDisk_TasksTeamMode(t *testing.T) {
 
 func TestResolveArtifactDisk_TasksSubagentMode(t *testing.T) {
 	dataDir := "/tmp/wb"
-	got := resolveArtifactDisk(dataDir, "", "parent-run", "/tasks/subagents/child-run/2026-02-16/task-1/SUMMARY.md")
-	want := filepath.Join(dataDir, "agents", "parent-run", "tasks", "subagents", "child-run", "2026-02-16", "task-1", "SUMMARY.md")
+	got := resolveArtifactDisk(dataDir, "", "parent-run", "/tasks/subagent-2/2026-02-16/task-1/SUMMARY.md")
+	want := filepath.Join(dataDir, "agents", "parent-run", "tasks", "subagent-2", "2026-02-16", "task-1", "SUMMARY.md")
 	if got != want {
 		t.Fatalf("expected subagent tasks path %q, got %q", want, got)
 	}

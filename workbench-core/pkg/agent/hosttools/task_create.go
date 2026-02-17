@@ -125,7 +125,7 @@ func (t *TaskCreateTool) definitionWithSpawnWorker() llmtypes.Tool {
 					},
 					"spawnWorker": map[string]any{
 						"type":        "boolean",
-						"description": "Set to true when breaking down a large task into smaller tasks (one per subtask), e.g. research, comparative analysis, audits, parallelizable work, or when the user or goal requests subagents (required when the goal requests subagents). In the goal, ask the worker to put deliverables in /deliverables. After spawning, do not poll or repeatedly check; callbacks will be provided when workers finish. Do not sleep or wait.",
+						"description": "Set to true when breaking down a large task into smaller tasks (one per subtask), e.g. research, comparative analysis, audits, parallelizable work, or when the user or goal requests subagents (required when the goal requests subagents). In the goal, ask the worker to write outputs under /workspace. After spawning, do not poll or repeatedly check; callbacks will be provided when workers finish. Do not sleep or wait.",
 					},
 				},
 				"required":             []any{"goal"},
@@ -240,7 +240,7 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	}
 	msg := fmt.Sprintf("Task %s created successfully.", taskID)
 	if payload.SpawnWorker {
-		msg = fmt.Sprintf("Task %s created and worker agent spawned. You delegated this to a subagent; do not do the same work yourself. The worker was asked to put deliverables in /deliverables (the system has already mounted that path for them). When the callback task (callback-%s) appears in your inbox, process it with task_review and look for outputs under /deliverables/subagents/<childRunID>/.", taskID, taskID)
+		msg = fmt.Sprintf("Task %s created and worker agent spawned. You delegated this to a subagent; do not do the same work yourself. The worker was asked to write outputs under /workspace. When the callback task (callback-%s) appears in your inbox, process it with task_review and inspect worker files under /workspace/subagent-<N>/ and summaries under /tasks/subagent-<N>/<date>/<taskID>/SUMMARY.md.", taskID, taskID)
 		inputForEvent := map[string]string{"goal": goal, "taskId": taskID}
 		if task.AssignedToType == "agent" {
 			inputForEvent["childRunId"] = task.AssignedTo

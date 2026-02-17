@@ -487,21 +487,6 @@ func resolveArtifactDiskPath(dataDir, teamID, runID, vpath string) string {
 			}
 			return candidate
 		}
-		const subagentsPrefix = "subagents/"
-		if strings.HasPrefix(rel, subagentsPrefix) {
-			rest := strings.TrimPrefix(rel, subagentsPrefix)
-			parts := strings.SplitN(rest, string(filepath.Separator), 2)
-			if len(parts) >= 2 && parts[0] != "" {
-				childRunID := parts[0]
-				restPath := parts[1]
-				base := fsutil.GetSubagentTasksDir(dataDir, runID, childRunID)
-				candidate := filepath.Join(base, restPath)
-				if _, err := os.Stat(candidate); err == nil {
-					return candidate
-				}
-				return candidate
-			}
-		}
 		base := fsutil.GetTasksDir(dataDir, runID)
 		candidate := filepath.Join(base, rel)
 		if _, err := os.Stat(candidate); err == nil {
@@ -512,21 +497,6 @@ func resolveArtifactDiskPath(dataDir, teamID, runID, vpath string) string {
 	if strings.HasPrefix(vpath, "/deliverables/") {
 		rel := strings.TrimPrefix(vpath, "/deliverables/")
 		rel = strings.TrimPrefix(rel, "/")
-		const subagentsPrefix = "subagents/"
-		if strings.HasPrefix(rel, subagentsPrefix) {
-			rest := strings.TrimPrefix(rel, subagentsPrefix)
-			parts := strings.SplitN(rest, string(filepath.Separator), 2)
-			if len(parts) >= 2 && parts[0] != "" {
-				childRunID := parts[0]
-				restPath := parts[1]
-				base := fsutil.GetSubagentDeliverablesDir(dataDir, runID, childRunID)
-				candidate := filepath.Join(base, restPath)
-				if _, err := os.Stat(candidate); err == nil {
-					return candidate
-				}
-				return candidate
-			}
-		}
 		base := fsutil.GetDeliverablesDir(dataDir, runID)
 		candidate := filepath.Join(base, rel)
 		if _, err := os.Stat(candidate); err == nil {

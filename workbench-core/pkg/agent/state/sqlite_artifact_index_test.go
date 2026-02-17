@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -221,5 +222,82 @@ func TestBackfillArtifactIndex_ReconcilesMissingSummaryRows(t *testing.T) {
 	}
 	if !foundSummary {
 		t.Fatalf("expected summary artifact row after reconcile, got %+v", after)
+	}
+}
+
+func TestCompleteTask_StandaloneSubagentArtifactsIndexedUnderParentCanonicalPaths(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewSQLiteTaskStore(filepath.Join(dir, "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	db, err := s.dbConn()
+	if err != nil {
+		t.Fatalf("dbConn: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS runs (run_id TEXT PRIMARY KEY, run_json TEXT)`); err != nil {
+		t.Fatalf("create runs table: %v", err)
+	}
+	childRun := types.Run{RunID: "run-child-1", ParentRunID: "run-parent-1", SpawnIndex: 3}
+	rawRun, _ := json.Marshal(childRun)
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, run_json) VALUES (?, ?)`, childRun.RunID, string(rawRun)); err != nil {
+		t.Fatalf("insert child run: %v", err)
+	}
+
+	taskID := "task-child-1"
+	if err := s.CreateTask(ctx, types.Task{
+		TaskID:    taskID,
+		SessionID: "sess-1",
+		RunID:     childRun.RunID,
+		Goal:      "child work",
+		Status:    types.TaskStatusPending,
+		CreatedAt: &now,
+		Inputs:    map[string]any{},
+		Metadata:  map[string]any{"parentRunId": "run-parent-1"},
+		CreatedBy: "run-parent-1",
+		TaskKind:  TaskKindTask,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	done := now.Add(2 * time.Second)
+	if err := s.CompleteTask(ctx, taskID, types.TaskResult{
+		TaskID:      taskID,
+		Status:      types.TaskStatusSucceeded,
+		CompletedAt: &done,
+		Artifacts: []string{
+			"/workspace/hello.txt",
+			"/tasks/2026-02-17/task-child-1/SUMMARY.md",
+		},
+	}); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+
+	rows, err := s.ListArtifactsByTask(ctx, ArtifactFilter{TaskID: taskID})
+	if err != nil {
+		t.Fatalf("ListArtifactsByTask: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 artifacts, got %d", len(rows))
+	}
+	wantPaths := map[string]bool{
+		"/workspace/subagent-3/hello.txt":                            false,
+		"/tasks/subagent-3/2026-02-17/task-child-1/SUMMARY.md": false,
+	}
+	for _, row := range rows {
+		if _, ok := wantPaths[row.VPath]; !ok {
+			t.Fatalf("unexpected vpath %q", row.VPath)
+		}
+		wantPaths[row.VPath] = true
+		if row.RunID != "run-parent-1" {
+			t.Fatalf("expected parent run id, got %q", row.RunID)
+		}
+	}
+	for vpath, seen := range wantPaths {
+		if !seen {
+			t.Fatalf("missing vpath %q in indexed artifacts", vpath)
+		}
 	}
 }
