@@ -1,6 +1,10 @@
 package opformat
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tinoosan/workbench-core/internal/opmeta"
+)
 
 func TestFormatRequestText(t *testing.T) {
 	tests := []struct {
@@ -49,5 +53,33 @@ func TestFormatResponseText(t *testing.T) {
 				t.Fatalf("FormatResponseText() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestFormatRequestText_SharedTitleOpsParityWithOpmeta(t *testing.T) {
+	tests := []map[string]string{
+		{"op": "fs_search", "path": "/workspace", "query": "needle"},
+		{"op": "shell_exec", "argvPreview": "rg -n todo"},
+		{"op": "http_fetch", "method": "POST", "url": "https://example.com", "body": "{\n\"x\":1\n}"},
+		{"op": "http_fetch", "url": "https://example.com"},
+		{"op": "trace_run", "traceAction": "set", "traceKey": "alpha"},
+		{"op": "agent_spawn", "goal": "subtask", "currentDepth": "0", "maxDepth": "3"},
+	}
+	for _, tc := range tests {
+		got := FormatRequestText(tc)
+		want := opmeta.FormatRequestTitle(tc)
+		if got != want {
+			t.Fatalf("FormatRequestText(%v)=%q want %q", tc, got, want)
+		}
+	}
+}
+
+func TestFormatRequestText_UnknownFallbackUnchanged(t *testing.T) {
+	got := FormatRequestText(map[string]string{
+		"op":   "video_record",
+		"path": "/tmp/a.mp4",
+	})
+	if got != "op=video_record path=/tmp/a.mp4" {
+		t.Fatalf("FormatRequestText unknown fallback = %q", got)
 	}
 }

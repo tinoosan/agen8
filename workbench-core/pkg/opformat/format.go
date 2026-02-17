@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/tinoosan/workbench-core/internal/opmeta"
+	"github.com/tinoosan/workbench-core/pkg/opcatalog"
 )
 
 func FormatRequestText(d map[string]string) string {
@@ -57,7 +58,7 @@ func FormatRequestText(d map[string]string) string {
 	case "agent_spawn":
 		return opmeta.FormatRequestTitle(d)
 	default:
-		if isSharedOpRequestTitleOp(op) {
+		if opcatalog.UsesSharedRequestTitle(op) {
 			return opmeta.FormatRequestTitle(d)
 		}
 		return compactKV(d, []string{"op", "path"})
@@ -202,15 +203,6 @@ func FormatResponseText(d map[string]string) string {
 			return prefix + " " + errStr
 		}
 		return prefix + " ok"
-	}
-}
-
-func isSharedOpRequestTitleOp(op string) bool {
-	switch strings.TrimSpace(op) {
-	case "fs_list", "fs_read", "fs_search", "fs_write", "fs_append", "fs_edit", "fs_patch", "shell_exec", "http_fetch", "trace_run", "agent_spawn", "task_create":
-		return true
-	default:
-		return false
 	}
 }
 

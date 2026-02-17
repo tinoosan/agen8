@@ -128,12 +128,28 @@ func TestRenderOpResponse_ToolSpecific(t *testing.T) {
 	}
 }
 
-func TestActionCategory_BrowserAndEmail(t *testing.T) {
-	if got := actionCategory("browser"); got != "Browsed" {
-		t.Fatalf("actionCategory(browser) = %q, want %q", got, "Browsed")
+func TestActionCategory_RepresentativeOps(t *testing.T) {
+	tests := []struct {
+		op   string
+		want string
+	}{
+		{op: "browser", want: "Browsed"},
+		{op: "browser.navigate", want: "Browsed"},
+		{op: "email", want: "Sent"},
+		{op: "fs_read", want: "Explored"},
+		{op: "fs_write", want: "Updated"},
+		{op: "shell_exec", want: "Ran"},
+		{op: "http_fetch", want: "Called"},
+		{op: "trace_run", want: "Traced"},
+		{op: "agent_spawn", want: "Delegated"},
+		{op: "task_create", want: "Created"},
+		{op: "video_record", want: "Action"},
 	}
-	if got := actionCategory("email"); got != "Sent" {
-		t.Fatalf("actionCategory(email) = %q, want %q", got, "Sent")
+
+	for _, tc := range tests {
+		if got := actionCategory(tc.op); got != tc.want {
+			t.Fatalf("actionCategory(%s) = %q, want %q", tc.op, got, tc.want)
+		}
 	}
 }
 
@@ -271,10 +287,13 @@ func TestClassifyEvent_HiddenInboxOpIgnored(t *testing.T) {
 	}
 }
 
-func TestEventTextMapKeysAreClassified(t *testing.T) {
-	for k := range eventTextMap {
-		if _, ok := eventClassMap[k]; !ok {
-			t.Fatalf("eventTextMap key %q missing from eventClassMap", k)
+func TestEventRenderersWithFormattersHaveValidClass(t *testing.T) {
+	for k, renderer := range registeredEventRenderers() {
+		if renderer.formatter == nil {
+			continue
+		}
+		if renderer.class < RenderIgnore || renderer.class > RenderOutcome {
+			t.Fatalf("event %q has formatter but invalid class %v", k, renderer.class)
 		}
 	}
 }

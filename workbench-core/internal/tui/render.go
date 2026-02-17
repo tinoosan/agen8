@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/tinoosan/workbench-core/pkg/events"
+	"github.com/tinoosan/workbench-core/pkg/opcatalog"
 	"github.com/tinoosan/workbench-core/pkg/opformat"
 )
 
@@ -49,56 +51,70 @@ func rawEventJSON(ev events.Event) string {
 	return string(b)
 }
 
-var eventClassMap = map[string]RenderClass{
-	"host.mounted":         RenderIgnore,
-	"run.started":          RenderIgnore,
-	"run.completed":        RenderIgnore,
-	"agent.loop.start":     RenderIgnore,
-	"llm.usage":            RenderIgnore,
-	"user.message":         RenderIgnore,
-	"workdir.pwd":          RenderIgnore,
-	"agent.op.request":     RenderAction,
-	"agent.op.response":    RenderAction,
-	"run.warning":          RenderAction,
-	"refs.attached":        RenderAction,
-	"refs.ambiguous":       RenderAction,
-	"refs.unresolved":      RenderAction,
-	"artifact.published":   RenderAction,
-	"ui.editor.open":       RenderAction,
-	"ui.editor.error":      RenderAction,
-	"ui.open.ok":           RenderAction,
-	"ui.open.error":        RenderAction,
-	"workdir.changed":      RenderAction,
-	"workdir.error":        RenderAction,
-	"context.update":       RenderTelemetry,
-	"context.constructor":  RenderTelemetry,
-	"llm.usage.total":      RenderTelemetry,
-	"llm.cost.total":       RenderTelemetry,
-	"memory.evaluate":      RenderOutcome,
-	"memory.commit":        RenderOutcome,
-	"memory.audit.append":  RenderOutcome,
-	"profile.evaluate":     RenderOutcome,
-	"profile.commit":       RenderOutcome,
-	"profile.audit.append": RenderOutcome,
-	"agent.turn.complete":  RenderOutcome,
-	"agent.error":          RenderOutcome,
+type eventRenderer struct {
+	class     RenderClass
+	formatter func(events.Event) string
 }
 
-var eventTextMap = map[string]func(events.Event) string{
-	"agent.op.request":   formatAgentOpRequestEventText,
-	"agent.op.response":  formatAgentOpResponseEventText,
-	"run.warning":        formatRunWarningEventText,
-	"refs.attached":      formatRefsAttachedEventText,
-	"refs.ambiguous":     formatRefsAmbiguousEventText,
-	"refs.unresolved":    formatRefsUnresolvedEventText,
-	"artifact.published": formatArtifactPublishedEventText,
-	"ui.editor.open":     formatUIEditorOpenEventText,
-	"ui.editor.error":    formatUIEditorErrorEventText,
-	"ui.open.ok":         formatUIOpenOKEventText,
-	"ui.open.error":      formatUIOpenErrorEventText,
-	"workdir.changed":    formatWorkdirChangedEventText,
-	"workdir.pwd":        formatWorkdirPWDEventText,
-	"workdir.error":      formatWorkdirErrorEventText,
+var eventRenderers = map[string]eventRenderer{}
+var eventRenderersMu sync.RWMutex
+
+func RegisterEventRenderer(eventType string, class RenderClass, formatter func(events.Event) string) {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return
+	}
+	eventRenderersMu.Lock()
+	defer eventRenderersMu.Unlock()
+	eventRenderers[eventType] = eventRenderer{
+		class:     class,
+		formatter: formatter,
+	}
+}
+
+func registeredEventRenderers() map[string]eventRenderer {
+	eventRenderersMu.RLock()
+	defer eventRenderersMu.RUnlock()
+	out := make(map[string]eventRenderer, len(eventRenderers))
+	for k, v := range eventRenderers {
+		out[k] = v
+	}
+	return out
+}
+
+func init() {
+	RegisterEventRenderer("host.mounted", RenderIgnore, nil)
+	RegisterEventRenderer("run.started", RenderIgnore, nil)
+	RegisterEventRenderer("run.completed", RenderIgnore, nil)
+	RegisterEventRenderer("agent.loop.start", RenderIgnore, nil)
+	RegisterEventRenderer("llm.usage", RenderIgnore, nil)
+	RegisterEventRenderer("user.message", RenderIgnore, nil)
+	RegisterEventRenderer("workdir.pwd", RenderIgnore, formatWorkdirPWDEventText)
+	RegisterEventRenderer("agent.op.request", RenderAction, formatAgentOpRequestEventText)
+	RegisterEventRenderer("agent.op.response", RenderAction, formatAgentOpResponseEventText)
+	RegisterEventRenderer("run.warning", RenderAction, formatRunWarningEventText)
+	RegisterEventRenderer("refs.attached", RenderAction, formatRefsAttachedEventText)
+	RegisterEventRenderer("refs.ambiguous", RenderAction, formatRefsAmbiguousEventText)
+	RegisterEventRenderer("refs.unresolved", RenderAction, formatRefsUnresolvedEventText)
+	RegisterEventRenderer("artifact.published", RenderAction, formatArtifactPublishedEventText)
+	RegisterEventRenderer("ui.editor.open", RenderAction, formatUIEditorOpenEventText)
+	RegisterEventRenderer("ui.editor.error", RenderAction, formatUIEditorErrorEventText)
+	RegisterEventRenderer("ui.open.ok", RenderAction, formatUIOpenOKEventText)
+	RegisterEventRenderer("ui.open.error", RenderAction, formatUIOpenErrorEventText)
+	RegisterEventRenderer("workdir.changed", RenderAction, formatWorkdirChangedEventText)
+	RegisterEventRenderer("workdir.error", RenderAction, formatWorkdirErrorEventText)
+	RegisterEventRenderer("context.update", RenderTelemetry, nil)
+	RegisterEventRenderer("context.constructor", RenderTelemetry, nil)
+	RegisterEventRenderer("llm.usage.total", RenderTelemetry, nil)
+	RegisterEventRenderer("llm.cost.total", RenderTelemetry, nil)
+	RegisterEventRenderer("memory.evaluate", RenderOutcome, nil)
+	RegisterEventRenderer("memory.commit", RenderOutcome, nil)
+	RegisterEventRenderer("memory.audit.append", RenderOutcome, nil)
+	RegisterEventRenderer("profile.evaluate", RenderOutcome, nil)
+	RegisterEventRenderer("profile.commit", RenderOutcome, nil)
+	RegisterEventRenderer("profile.audit.append", RenderOutcome, nil)
+	RegisterEventRenderer("agent.turn.complete", RenderOutcome, nil)
+	RegisterEventRenderer("agent.error", RenderOutcome, nil)
 }
 
 // classifyEvent converts a Workbench event into one of the chat-first presentation primitives.
@@ -113,15 +129,17 @@ func classifyEvent(ev events.Event) RenderResult {
 		return res
 	}
 
-	class, ok := eventClassMap[ev.Type]
+	eventRenderersMu.RLock()
+	renderer, ok := eventRenderers[ev.Type]
+	eventRenderersMu.RUnlock()
 	if !ok {
 		res.Class = RenderIgnore
 		return res
 	}
-	res.Class = class
+	res.Class = renderer.class
 
-	if f, ok := eventTextMap[ev.Type]; ok {
-		res.Text = f(ev)
+	if renderer.formatter != nil {
+		res.Text = renderer.formatter(ev)
 	}
 	return res
 }
@@ -284,28 +302,10 @@ func actionCategory(op string) string {
 	if strings.HasPrefix(trimmed, "browser.") {
 		return "Browsed"
 	}
-	switch trimmed {
-	case "fs_list", "fs_read", "fs_search":
-		return "Explored"
-	case "fs_write", "fs_edit", "fs_patch", "fs_append":
-		return "Updated"
-	case "shell_exec":
-		return "Ran"
-	case "http_fetch":
-		return "Called"
-	case "browser":
-		return "Browsed"
-	case "email":
-		return "Sent"
-	case "trace_run":
-		return "Traced"
-	case "agent_spawn":
-		return "Delegated"
-	case "task_create":
-		return "Created"
-	default:
-		return "Action"
+	if category, ok := opcatalog.Category(trimmed); ok {
+		return category
 	}
+	return "Action"
 }
 
 func parseInt(s string) int {
