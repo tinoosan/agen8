@@ -120,15 +120,17 @@ type outboxLoadedMsg struct {
 }
 
 type teamStatusLoadedMsg struct {
-	pending      int
-	active       int
-	done         int
-	roles        []teamRoleState
-	runIDs       []string
-	roleByRunID  map[string]string
-	totalTokens  int
-	totalCostUSD float64
-	pricingKnown bool
+	pending        int
+	active         int
+	done           int
+	roles          []teamRoleState
+	runIDs         []string
+	roleByRunID    map[string]string
+	totalTokensIn  int
+	totalTokensOut int
+	totalTokens    int
+	totalCostUSD   float64
+	pricingKnown   bool
 }
 
 type teamManifestLoadedMsg struct {

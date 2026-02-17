@@ -159,3 +159,152 @@ func TestRenderActivityDetailMarkdown_TaskCreate(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderActivityDetailMarkdown_UnknownKind_DefaultFallback(t *testing.T) {
+	a := Activity{
+		Kind:          "mcp_call",
+		Status:        ActivityOK,
+		Path:          "/workspace/notes.md",
+		Ok:            "true",
+		OutputPreview: "done",
+		Data: map[string]string{
+			"any": "value",
+		},
+	}
+
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"**Fields**",
+		"**Arguments**",
+		"**Output**",
+		"- path: `/workspace/notes.md`",
+		"Tool output preview",
+		"done",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in unknown-kind markdown, got:\n%s", want, md)
+		}
+	}
+}
+
+func TestRenderActivityDetailMarkdown_Dispatch_ShellExecSpecificOutput(t *testing.T) {
+	a := Activity{
+		Kind:   "shell_exec",
+		Status: ActivityOK,
+		Ok:     "true",
+		Data: map[string]string{
+			"argvPreview": "echo hello",
+			"cwd":         "/workspace",
+			"exitCode":    "0",
+			"stdout":      "hello",
+		},
+	}
+
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- command:",
+		"```bash",
+		"echo hello",
+		"- cwd: `/workspace`",
+		"- exitCode: `0`",
+		"**stdout**",
+		"hello",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in shell_exec markdown, got:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "**Body**") {
+		t.Fatalf("did not expect http_fetch body section in shell_exec markdown, got:\n%s", md)
+	}
+}
+
+func TestRenderActivityDetailMarkdown_Dispatch_HTTPFetchSpecificOutput(t *testing.T) {
+	a := Activity{
+		Kind:   "http_fetch",
+		Status: ActivityOK,
+		Ok:     "true",
+		Data: map[string]string{
+			"url":    "https://example.com",
+			"method": "GET",
+			"status": "200",
+			"body":   "<html>ok</html>",
+		},
+	}
+
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- url: `https://example.com`",
+		"- method: `GET`",
+		"- status: `200`",
+		"**Body**",
+		"<html>ok</html>",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in http_fetch markdown, got:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "**stdout**") {
+		t.Fatalf("did not expect shell stdout section in http_fetch markdown, got:\n%s", md)
+	}
+}
+
+func TestRenderActivityDetailMarkdown_Dispatch_WorkdirChangedArguments(t *testing.T) {
+	a := Activity{
+		Kind:   "workdir.changed",
+		Status: ActivityOK,
+		From:   "/workspace/old",
+		To:     "/workspace/new",
+	}
+
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- from: `/workspace/old`",
+		"- to: `/workspace/new`",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in workdir.changed markdown, got:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "- path:") {
+		t.Fatalf("did not expect path argument for workdir.changed, got:\n%s", md)
+	}
+}
+
+func TestRenderActivityDetailMarkdown_TelemetryParity(t *testing.T) {
+	fsRead := Activity{
+		Kind:     "fs_read",
+		Status:   ActivityOK,
+		Ok:       "true",
+		MaxBytes: "4096",
+		BytesLen: "512",
+	}
+	withTelemetry := renderActivityDetailMarkdown(fsRead, true, false)
+	if !strings.Contains(withTelemetry, "**Telemetry**") || !strings.Contains(withTelemetry, "- maxBytes: 4096") || !strings.Contains(withTelemetry, "- bytesLen: 512") {
+		t.Fatalf("expected fs_read telemetry details, got:\n%s", withTelemetry)
+	}
+	withoutTelemetry := renderActivityDetailMarkdown(fsRead, false, false)
+	if strings.Contains(withoutTelemetry, "**Telemetry**") || strings.Contains(withoutTelemetry, "maxBytes") {
+		t.Fatalf("did not expect telemetry section when disabled, got:\n%s", withoutTelemetry)
+	}
+
+	fsWrite := Activity{
+		Kind:      "fs_write",
+		Status:    ActivityOK,
+		Ok:        "true",
+		TextBytes: "123",
+		BytesLen:  "123",
+		Truncated: true,
+	}
+	writeTelemetry := renderActivityDetailMarkdown(fsWrite, true, false)
+	for _, want := range []string{
+		"**Telemetry**",
+		"- textBytes: 123",
+		"- bytesLen: 123",
+		"- truncated: true",
+	} {
+		if !strings.Contains(writeTelemetry, want) {
+			t.Fatalf("expected %q in fs_write telemetry markdown, got:\n%s", want, writeTelemetry)
+		}
+	}
+}

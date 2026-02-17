@@ -251,6 +251,8 @@ func (m *monitorModel) handleLoadedDataMessages(msg tea.Msg) (tea.Model, tea.Cmd
 				m.teamRoleByRunID[runID] = role
 			}
 		}
+		m.stats.totalTokensIn = msg.totalTokensIn
+		m.stats.totalTokensOut = msg.totalTokensOut
 		m.stats.totalTokens = msg.totalTokens
 		m.stats.totalCostUSD = msg.totalCostUSD
 		m.stats.pricingKnown = msg.pricingKnown

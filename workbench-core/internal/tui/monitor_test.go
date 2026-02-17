@@ -2010,6 +2010,27 @@ func TestRenderRightFooterPanel_ShowsSessionStats(t *testing.T) {
 	}
 }
 
+func TestHandleDataLoadMessages_TeamStatusUpdatesTokenBreakdown(t *testing.T) {
+	m := &monitorModel{}
+	model, _ := m.dispatchUpdate(teamStatusLoadedMsg{
+		totalTokensIn:  321,
+		totalTokensOut: 123,
+		totalTokens:    444,
+		totalCostUSD:   0.09,
+		pricingKnown:   true,
+	})
+	updated, ok := model.(*monitorModel)
+	if !ok {
+		t.Fatalf("expected *monitorModel, got %T", model)
+	}
+	if updated.stats.totalTokensIn != 321 || updated.stats.totalTokensOut != 123 || updated.stats.totalTokens != 444 {
+		t.Fatalf("unexpected team token stats: %+v", updated.stats)
+	}
+	if updated.stats.totalCostUSD != 0.09 || !updated.stats.pricingKnown {
+		t.Fatalf("unexpected team cost/pricing stats: %+v", updated.stats)
+	}
+}
+
 func TestComposerStatusText_NarrowWidthSingleLine(t *testing.T) {
 	m := &monitorModel{
 		model:            "openai/gpt-5-nano",
