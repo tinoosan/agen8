@@ -238,7 +238,8 @@ func (m *monitorModel) loadSessionTotalsCmd() tea.Cmd {
 		if strings.TrimSpace(m.teamID) != "" {
 			params.TeamID = strings.TrimSpace(m.teamID)
 		} else {
-			params.RunID = strings.TrimSpace(m.runID)
+			// Session Stats should always come from session totals, not a run override.
+			params.RunID = ""
 		}
 		var res protocol.SessionGetTotalsResult
 		if err := m.rpcRoundTrip(protocol.MethodSessionGetTotals, params, &res); err != nil {

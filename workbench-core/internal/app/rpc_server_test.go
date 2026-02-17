@@ -1653,7 +1653,7 @@ func TestRPCServer_SessionGetTotals_AndActivityList(t *testing.T) {
 	sess := types.NewSession("goal")
 	sess.InputTokens = 10
 	sess.OutputTokens = 20
-	sess.TotalTokens = 30
+	sess.TotalTokens = 999 // intentionally inconsistent; RPC should normalize to in+out
 	sess.CostUSD = 1.5
 	run := types.NewRun("goal", 8*1024, sess.SessionID)
 	sessStore := store.NewMemorySessionStore()

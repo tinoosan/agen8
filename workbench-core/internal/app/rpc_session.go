@@ -1040,7 +1040,10 @@ func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetT
 			if sess, err := s.session.LoadSession(ctx, strings.TrimSpace(scope.sessionID)); err == nil {
 				out.TotalTokensIn = sess.InputTokens
 				out.TotalTokensOut = sess.OutputTokens
-				out.TotalTokens = sess.TotalTokens
+				out.TotalTokens = out.TotalTokensIn + out.TotalTokensOut
+				if out.TotalTokens == 0 {
+					out.TotalTokens = sess.TotalTokens
+				}
 				out.TotalCostUSD = sess.CostUSD
 				out.PricingKnown = sess.TotalTokens == 0 || sess.CostUSD > 0 || pricingKnownForRun(ctx, s.session, strings.TrimSpace(scope.runID))
 			}
