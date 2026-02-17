@@ -84,17 +84,20 @@ func TestListPendingTasks_TeamRouting(t *testing.T) {
 
 func TestNormalizeTeamCallbackArtifactPath(t *testing.T) {
 	role := "frontend-engineer"
+	teamRoles := []string{"frontend-engineer", "qa-engineer"}
 	cases := []struct {
 		in   string
 		want string
 	}{
 		{in: "/workspace/report.md", want: "/workspace/frontend-engineer/report.md"},
 		{in: "/workspace/frontend-engineer/report.md", want: "/workspace/frontend-engineer/report.md"},
-		{in: "/tasks/2026-02-17/task-1/SUMMARY.md", want: "/workspace/frontend-engineer/tasks/2026-02-17/task-1/SUMMARY.md"},
-		{in: "/deliverables/r1/output.md", want: "/workspace/frontend-engineer/deliverables/r1/output.md"},
+		{in: "/workspace/qa-engineer/report.md", want: "/workspace/qa-engineer/report.md"},
+		{in: "/tasks/2026-02-17/task-1/SUMMARY.md", want: "/tasks/frontend-engineer/2026-02-17/task-1/SUMMARY.md"},
+		{in: "/tasks/qa-engineer/2026-02-17/task-1/SUMMARY.md", want: "/tasks/qa-engineer/2026-02-17/task-1/SUMMARY.md"},
+		{in: "/deliverables/r1/output.md", want: "/deliverables/r1/output.md"},
 	}
 	for _, tc := range cases {
-		if got := normalizeTeamCallbackArtifactPath(role, tc.in); got != tc.want {
+		if got := normalizeTeamCallbackArtifactPath(role, teamRoles, tc.in); got != tc.want {
 			t.Fatalf("normalizeTeamCallbackArtifactPath(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}

@@ -862,7 +862,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		s.lastTaskOutcome = truncateText(outcome, 150)
 	}
 
-	base := tasksBase(doneAt, taskID)
+	base := tasksBase(strings.TrimSpace(s.cfg.TeamID), strings.TrimSpace(s.cfg.RoleName), doneAt, taskID)
 	artifacts := sanitizeArtifactPaths(dedupeArtifactPaths(runRes.Artifacts))
 	if summaryPath := s.writeTaskSummary(ctx, base, taskID, task.Goal, tr, artifacts); summaryPath != "" {
 		tr.Artifacts = append([]string{summaryPath}, artifacts...)
@@ -1116,7 +1116,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 		artifactsForCoordinator := make([]string, 0, len(tr.Artifacts))
 		seenArtifacts := map[string]struct{}{}
 		for _, art := range tr.Artifacts {
-			normalized := normalizeTeamCallbackArtifactPath(strings.TrimSpace(s.cfg.RoleName), art)
+			normalized := normalizeTeamCallbackArtifactPath(strings.TrimSpace(s.cfg.RoleName), s.cfg.TeamRoles, art)
 			normalized = strings.TrimSpace(normalized)
 			if normalized == "" {
 				continue
@@ -1339,11 +1339,21 @@ func sanitizeArtifactPaths(artifacts []string) []string {
 	return out
 }
 
-func normalizeTeamCallbackArtifactPath(role, artifactPath string) string {
+func normalizeTeamCallbackArtifactPath(role string, teamRoles []string, artifactPath string) string {
 	roleSeg := sanitizeRoleForWorkspacePath(role)
 	artifactPath = strings.TrimSpace(artifactPath)
 	if artifactPath == "" {
 		return ""
+	}
+	knownRoles := map[string]struct{}{
+		roleSeg: {},
+	}
+	for _, teamRole := range teamRoles {
+		seg := sanitizeRoleForWorkspacePath(teamRole)
+		if seg == "" {
+			continue
+		}
+		knownRoles[seg] = struct{}{}
 	}
 	switch {
 	case strings.HasPrefix(artifactPath, "/workspace/"):
@@ -1352,7 +1362,11 @@ func normalizeTeamCallbackArtifactPath(role, artifactPath string) string {
 		if rel == "" {
 			return path.Join("/workspace", roleSeg)
 		}
-		if rel == roleSeg || strings.HasPrefix(rel, roleSeg+"/") {
+		first := rel
+		if cut, _, ok := strings.Cut(rel, "/"); ok {
+			first = cut
+		}
+		if _, ok := knownRoles[first]; ok {
 			return path.Join("/workspace", rel)
 		}
 		return path.Join("/workspace", roleSeg, rel)
@@ -1360,16 +1374,18 @@ func normalizeTeamCallbackArtifactPath(role, artifactPath string) string {
 		rel := strings.TrimPrefix(artifactPath, "/tasks/")
 		rel = strings.TrimPrefix(rel, "/")
 		if rel == "" {
-			return path.Join("/workspace", roleSeg, "tasks")
+			return path.Join("/tasks", roleSeg)
 		}
-		return path.Join("/workspace", roleSeg, "tasks", rel)
+		first := rel
+		if cut, _, ok := strings.Cut(rel, "/"); ok {
+			first = cut
+		}
+		if _, ok := knownRoles[first]; ok {
+			return path.Join("/tasks", rel)
+		}
+		return path.Join("/tasks", roleSeg, rel)
 	case strings.HasPrefix(artifactPath, "/deliverables/"):
-		rel := strings.TrimPrefix(artifactPath, "/deliverables/")
-		rel = strings.TrimPrefix(rel, "/")
-		if rel == "" {
-			return path.Join("/workspace", roleSeg, "deliverables")
-		}
-		return path.Join("/workspace", roleSeg, "deliverables", rel)
+		return artifactPath
 	default:
 		return artifactPath
 	}
@@ -1393,8 +1409,11 @@ func sanitizeRoleForWorkspacePath(role string) string {
 	return s
 }
 
-func tasksBase(when time.Time, taskID string) string {
+func tasksBase(teamID, role string, when time.Time, taskID string) string {
 	date := when.UTC().Format("2006-01-02")
+	if strings.TrimSpace(teamID) != "" {
+		return path.Join("/tasks", sanitizeRoleForWorkspacePath(role), date, taskID)
+	}
 	return path.Join("/tasks", date, taskID)
 }
 

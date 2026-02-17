@@ -65,13 +65,13 @@ func dataDirFromSQLitePath(dbPath string) string {
 	return filepath.Dir(p)
 }
 
-func resolveIndexedDiskPath(dataDir, teamID, runID, role, vpath string) string {
+func resolveIndexedDiskPath(dataDir, teamID, runID, vpath string) string {
 	vpath = strings.TrimSpace(vpath)
 	if strings.HasPrefix(vpath, "/tasks/") {
 		rel := strings.TrimPrefix(vpath, "/tasks/")
 		rel = strings.TrimPrefix(rel, "/")
 		if strings.TrimSpace(teamID) != "" {
-			return filepath.Join(fsutil.GetTeamRoleWorkspaceDir(dataDir, teamID, role), "tasks", rel)
+			return filepath.Join(fsutil.GetTeamTasksDir(dataDir, teamID), rel)
 		}
 		const subagentsPrefix = "subagents/"
 		if strings.HasPrefix(rel, subagentsPrefix) {
@@ -90,9 +90,6 @@ func resolveIndexedDiskPath(dataDir, teamID, runID, role, vpath string) string {
 	if strings.HasPrefix(vpath, "/deliverables/") {
 		rel := strings.TrimPrefix(vpath, "/deliverables/")
 		rel = strings.TrimPrefix(rel, "/")
-		if strings.TrimSpace(teamID) != "" {
-			return filepath.Join(fsutil.GetTeamRoleWorkspaceDir(dataDir, teamID, role), "deliverables", runID, rel)
-		}
 		const subagentsPrefix = "subagents/"
 		if strings.HasPrefix(rel, subagentsPrefix) {
 			rest := strings.TrimPrefix(rel, subagentsPrefix)
@@ -110,16 +107,7 @@ func resolveIndexedDiskPath(dataDir, teamID, runID, role, vpath string) string {
 	if strings.HasPrefix(vpath, "/workspace/") {
 		rel := strings.TrimPrefix(vpath, "/workspace/")
 		if strings.TrimSpace(teamID) != "" {
-			roleDir := strings.TrimSpace(role)
-			if roleDir != "" {
-				prefixed := roleDir + string(filepath.Separator)
-				if rel == roleDir {
-					rel = ""
-				} else if strings.HasPrefix(rel, prefixed) {
-					rel = strings.TrimPrefix(rel, prefixed)
-				}
-			}
-			return filepath.Join(fsutil.GetTeamRoleWorkspaceDir(dataDir, teamID, role), rel)
+			return filepath.Join(fsutil.GetTeamWorkspaceDir(dataDir, teamID), rel)
 		}
 		return filepath.Join(fsutil.GetWorkspaceDir(dataDir, runID), rel)
 	}
@@ -229,7 +217,7 @@ func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, tas
 				display_name, vpath, disk_path, produced_at, day_bucket
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, strings.TrimSpace(task.TaskID), teamID, artifactRunID, role, taskKind, boolToInt(isSummary),
-			displayName, indexVpath, resolveIndexedDiskPath(dataDir, teamID, artifactRunID, role, indexVpath), producedAt, dayBucket); err != nil {
+			displayName, indexVpath, resolveIndexedDiskPath(dataDir, teamID, artifactRunID, indexVpath), producedAt, dayBucket); err != nil {
 			return err
 		}
 	}
@@ -679,7 +667,7 @@ func (s *SQLiteTaskStore) backfillArtifactIndex(ctx context.Context, db *sql.DB)
 					display_name, vpath, disk_path, produced_at, day_bucket
 				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`, row.taskID, row.teamID, row.runID, role, taskKind, boolToInt(strings.EqualFold(name, "SUMMARY.md")),
-				name, vpath, resolveIndexedDiskPath(dataDir, row.teamID, row.runID, role, vpath), producedAt, dayBucket); err != nil {
+				name, vpath, resolveIndexedDiskPath(dataDir, row.teamID, row.runID, vpath), producedAt, dayBucket); err != nil {
 				return err
 			}
 		}

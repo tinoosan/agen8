@@ -509,11 +509,11 @@ func TestRPCServer_ArtifactGet_StandaloneUnreportedByVPath(t *testing.T) {
 	_ = sessStore.SaveRun(context.Background(), run)
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
 
-	p := filepath.Join(fsutil.GetWorkspaceDir(cfg.DataDir, run.RunID), "context_constructor_manifest.json")
+	p := filepath.Join(fsutil.GetWorkspaceDir(cfg.DataDir, run.RunID), "sample_report.md")
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(p, []byte("{\"ok\":true}"), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte("hello workspace"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -522,7 +522,7 @@ func TestRPCServer_ArtifactGet_StandaloneUnreportedByVPath(t *testing.T) {
 	})
 	req, _ := protocol.NewRequest("1", protocol.MethodArtifactGet, protocol.ArtifactGetParams{
 		ThreadID: protocol.ThreadID(sess.SessionID),
-		VPath:    "/workspace/context_constructor_manifest.json",
+		VPath:    "/workspace/sample_report.md",
 	})
 	resp := rpcRoundTrip(t, srv, req)
 	if resp.Error != nil {
@@ -532,7 +532,7 @@ func TestRPCServer_ArtifactGet_StandaloneUnreportedByVPath(t *testing.T) {
 	if err := json.Unmarshal(resp.Result, &out); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if strings.TrimSpace(out.Content) != "{\"ok\":true}" {
+	if strings.TrimSpace(out.Content) != "hello workspace" {
 		t.Fatalf("unexpected content: %q", out.Content)
 	}
 }
@@ -656,14 +656,14 @@ func TestRPCServer_ArtifactList_TeamScopeAndGetTruncated(t *testing.T) {
 			Status:      types.TaskStatusSucceeded,
 			Summary:     "ok",
 			CompletedAt: &done,
-			Artifacts:   []string{"/workspace/" + tk.AssignedRole + "/deliverables/2026-02-08/" + tk.TaskID + "/SUMMARY.md"},
+			Artifacts:   []string{"/tasks/" + tk.AssignedRole + "/2026-02-08/" + tk.TaskID + "/SUMMARY.md"},
 		}); err != nil {
 			t.Fatalf("CompleteTask(%s): %v", tk.TaskID, err)
 		}
 	}
 
-	// Materialize file for artifact.get under per-role team workspace (ceo role, t1 task).
-	p := filepath.Join(fsutil.GetTeamRoleWorkspaceDir(cfg.DataDir, "team-1", t1.AssignedRole), "deliverables", "2026-02-08", t1.TaskID, "SUMMARY.md")
+	// Materialize file for artifact.get under shared team tasks root.
+	p := filepath.Join(fsutil.GetTeamTasksDir(cfg.DataDir, "team-1"), t1.AssignedRole, "2026-02-08", t1.TaskID, "SUMMARY.md")
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -697,7 +697,7 @@ func TestRPCServer_ArtifactList_TeamScopeAndGetTruncated(t *testing.T) {
 
 	getReq, _ := protocol.NewRequest("2", protocol.MethodArtifactGet, protocol.ArtifactGetParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
-		VPath:    "/workspace/" + t1.AssignedRole + "/deliverables/2026-02-08/" + t1.TaskID + "/SUMMARY.md",
+		VPath:    "/tasks/" + t1.AssignedRole + "/2026-02-08/" + t1.TaskID + "/SUMMARY.md",
 		MaxBytes: 5,
 	})
 	getResp := rpcRoundTrip(t, srv, getReq)

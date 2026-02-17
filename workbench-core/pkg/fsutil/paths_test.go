@@ -38,12 +38,22 @@ func TestGetAgentsHomeDir_EmptyHome(t *testing.T) {
 func TestGetTeamPaths(t *testing.T) {
 	dataDir := "/tmp/workbench-data"
 	teamID := "team-abc"
+	role := "backend-engineer"
 
 	if got, want := GetTeamDir(dataDir, teamID), filepath.Join(dataDir, "teams", teamID); got != want {
 		t.Fatalf("GetTeamDir = %q, want %q", got, want)
 	}
 	if got, want := GetTeamWorkspaceDir(dataDir, teamID), filepath.Join(dataDir, "teams", teamID, "workspace"); got != want {
 		t.Fatalf("GetTeamWorkspaceDir = %q, want %q", got, want)
+	}
+	if got, want := GetTeamRoleWorkspaceDir(dataDir, teamID, role), filepath.Join(dataDir, "teams", teamID, "workspace", role); got != want {
+		t.Fatalf("GetTeamRoleWorkspaceDir = %q, want %q", got, want)
+	}
+	if got, want := GetTeamTasksDir(dataDir, teamID), filepath.Join(dataDir, "teams", teamID, "tasks"); got != want {
+		t.Fatalf("GetTeamTasksDir = %q, want %q", got, want)
+	}
+	if got, want := GetTeamRoleTasksDir(dataDir, teamID, role), filepath.Join(dataDir, "teams", teamID, "tasks", role); got != want {
+		t.Fatalf("GetTeamRoleTasksDir = %q, want %q", got, want)
 	}
 	if got, want := GetTeamLogPath(dataDir, teamID), filepath.Join(dataDir, "teams", teamID, "daemon.log"); got != want {
 		t.Fatalf("GetTeamLogPath = %q, want %q", got, want)

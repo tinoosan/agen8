@@ -40,6 +40,7 @@ func TestCompleteTask_IndexesArtifactsWithTeamDiskPath(t *testing.T) {
 		Summary:     "ok",
 		CompletedAt: &done,
 		Artifacts: []string{
+			"/tasks/ceo/2026-02-08/callback-task-ceo-1/SUMMARY.md",
 			"/workspace/ceo/deliverables/2026-02-08/callback-task-ceo-1/SUMMARY.md",
 			"/workspace/ceo/deliverables/2026-02-08/callback-task-ceo-1/report.md",
 		},
@@ -51,15 +52,36 @@ func TestCompleteTask_IndexesArtifactsWithTeamDiskPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListArtifactsByTask: %v", err)
 	}
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 artifacts, got %d", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 artifacts, got %d", len(rows))
 	}
 	if rows[0].TaskKind != TaskKindCallback {
 		t.Fatalf("expected callback task kind, got %q", rows[0].TaskKind)
 	}
-	wantPrefix := filepath.Join(dir, "teams", "team-1", "workspace")
-	if rows[0].DiskPath == "" || !strings.HasPrefix(rows[0].DiskPath, wantPrefix) {
-		t.Fatalf("expected team disk path under %q, got %q", wantPrefix, rows[0].DiskPath)
+	var foundTeamTasks bool
+	var foundTeamWorkspace bool
+	for _, row := range rows {
+		if strings.HasPrefix(row.VPath, "/tasks/") {
+			wantPrefix := filepath.Join(dir, "teams", "team-1", "tasks")
+			if row.DiskPath == "" || !strings.HasPrefix(row.DiskPath, wantPrefix) {
+				t.Fatalf("expected team task disk path under %q, got %q", wantPrefix, row.DiskPath)
+			}
+			foundTeamTasks = true
+			continue
+		}
+		if strings.HasPrefix(row.VPath, "/workspace/") {
+			wantPrefix := filepath.Join(dir, "teams", "team-1", "workspace")
+			if row.DiskPath == "" || !strings.HasPrefix(row.DiskPath, wantPrefix) {
+				t.Fatalf("expected team workspace disk path under %q, got %q", wantPrefix, row.DiskPath)
+			}
+			foundTeamWorkspace = true
+		}
+	}
+	if !foundTeamTasks {
+		t.Fatalf("expected a team /tasks artifact row, got %+v", rows)
+	}
+	if !foundTeamWorkspace {
+		t.Fatalf("expected team /workspace artifact rows, got %+v", rows)
 	}
 }
 

@@ -185,16 +185,17 @@ func buildTeamBlock(teamID string, roleName string, coordinatorRole string, team
 	b.WriteString("\".\n")
 	if roleName != coordinatorRole {
 		b.WriteString("- You cannot assign tasks to other non-coordinator roles.\n")
-		b.WriteString("- Your /workspace is already scoped to your role. Write deliverables to /workspace/<file> (e.g. /workspace/report.pdf).\n")
-		b.WriteString("- Do NOT prefix paths with your role (for example, avoid /workspace/")
+		b.WriteString("- Team workspace is shared. Write your deliverables under /workspace/<your-role>/... (for example, /workspace/")
 		b.WriteString(roleName)
-		b.WriteString("/...).\n")
+		b.WriteString("/report.pdf).\n")
+		b.WriteString("- Team tasks are shared. Your task summaries are recorded under /tasks/<your-role>/<date>/<taskID>/SUMMARY.md.\n")
 	} else {
 		b.WriteString("- As coordinator, you may assign tasks to any valid role.\n")
 		b.WriteString("- As coordinator, you MUST NOT perform specialist research, analysis, or report writing.\n")
 		b.WriteString("- As coordinator, your only responsibilities are: break down goals, delegate tasks, review callbacks, and track completion.\n")
 		b.WriteString("- As coordinator, NEVER use web_search, file tools, or shell tools for specialist work.\n")
-		b.WriteString("- Your /workspace is the team root. Review role outputs under /workspace/<role>/... (e.g. /workspace/researcher/report.pdf).\n")
+		b.WriteString("- Team workspace is shared at /workspace. Delegate and review outputs using /workspace/<target-role>/... (e.g. /workspace/researcher/report.pdf).\n")
+		b.WriteString("- Review role task summaries under /tasks/<role>/<date>/<taskID>/SUMMARY.md.\n")
 	}
 	b.WriteString("- Use WriteMemory and AppendMemory tools for memory updates; do not write memory files directly in the workspace.\n")
 	b.WriteString("</team>")

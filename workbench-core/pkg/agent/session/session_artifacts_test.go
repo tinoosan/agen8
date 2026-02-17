@@ -7,8 +7,17 @@ import (
 
 func TestTasksBase_WritesToRunLevelTasks(t *testing.T) {
 	when := time.Date(2026, 2, 12, 12, 0, 0, 0, time.UTC)
-	got := tasksBase(when, "task-1")
+	got := tasksBase("", "", when, "task-1")
 	want := "/tasks/2026-02-12/task-1"
+	if got != want {
+		t.Fatalf("tasksBase() = %q, want %q", got, want)
+	}
+}
+
+func TestTasksBase_WritesToTeamRoleTasks(t *testing.T) {
+	when := time.Date(2026, 2, 12, 12, 0, 0, 0, time.UTC)
+	got := tasksBase("team-1", "backend-engineer", when, "task-1")
+	want := "/tasks/backend-engineer/2026-02-12/task-1"
 	if got != want {
 		t.Fatalf("tasksBase() = %q, want %q", got, want)
 	}

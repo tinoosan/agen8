@@ -470,15 +470,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 
 	sharedWorkspaceDir := ""
 	if teamID != "" {
-		role := strings.TrimSpace(run.Runtime.Role)
-		if role == "" {
-			role = "default"
-		}
-		if isCoordinator {
-			sharedWorkspaceDir = fsutil.GetTeamWorkspaceDir(s.cfg.DataDir, teamID)
-		} else {
-			sharedWorkspaceDir = fsutil.GetTeamRoleWorkspaceDir(s.cfg.DataDir, teamID, role)
-		}
+		sharedWorkspaceDir = fsutil.GetTeamWorkspaceDir(s.cfg.DataDir, teamID)
 		if err := os.MkdirAll(sharedWorkspaceDir, 0o755); err != nil {
 			orderedEmitter.Close()
 			return nil, fmt.Errorf("prepare team workspace mount: %w", err)
@@ -492,8 +484,6 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		ProfileConfig:         prof,
 		WorkdirAbs:            s.workdirAbs,
 		SharedWorkspaceDir:    sharedWorkspaceDir,
-		TeamRoleName:          roleName,
-		TeamIsCoordinator:     isCoordinator,
 		Model:                 model,
 		ReasoningEffort:       resolvedEffort,
 		ReasoningSummary:      resolvedSummary,

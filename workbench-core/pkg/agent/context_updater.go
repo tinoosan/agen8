@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +51,10 @@ type PromptUpdater struct {
 	// ManifestPath is the VFS path where the updater writes its last manifest.
 	// If empty, no manifest is written.
 	ManifestPath string
+	// ManifestDiskPath is an optional direct disk path where the updater writes
+	// its last manifest. This bypasses VFS mounts and is useful for team mode
+	// to avoid workspace noise.
+	ManifestDiskPath string
 
 	// Emit is an optional hook for recording updater actions (events/telemetry).
 	Emit events.EmitFunc
@@ -216,10 +222,16 @@ func (u *PromptUpdater) BuildSystemPrompt(ctx context.Context, basePrompt string
 	}
 	system = strings.TrimSpace(system)
 
-	if u.ManifestPath != "" {
+	if u.ManifestPath != "" || strings.TrimSpace(u.ManifestDiskPath) != "" {
 		b, err := types.MarshalPretty(manifest)
 		if err == nil {
-			_ = u.FS.Write(u.ManifestPath, b)
+			if u.ManifestPath != "" {
+				_ = u.FS.Write(u.ManifestPath, b)
+			}
+			if p := strings.TrimSpace(u.ManifestDiskPath); p != "" {
+				_ = os.MkdirAll(filepath.Dir(p), 0o755)
+				_ = os.WriteFile(p, b, 0o644)
+			}
 		}
 	}
 

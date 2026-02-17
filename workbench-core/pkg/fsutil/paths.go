@@ -49,6 +49,10 @@ func GetTeamWorkspaceDir(dataDir, teamID string) string {
 	return filepath.Join(GetTeamDir(dataDir, teamID), "workspace")
 }
 
+func GetTeamTasksDir(dataDir, teamID string) string {
+	return filepath.Join(GetTeamDir(dataDir, teamID), "tasks")
+}
+
 // sanitizeRoleForPath returns a safe path segment for a role name (no path separators, no "..").
 // Allows alphanumeric and "-_"; empty or invalid becomes "default".
 func sanitizeRoleForPath(role string) string {
@@ -72,6 +76,10 @@ func sanitizeRoleForPath(role string) string {
 // GetTeamRoleWorkspaceDir returns the per-role workspace dir under the team: dataDir/teams/teamID/workspace/<role>.
 func GetTeamRoleWorkspaceDir(dataDir, teamID, role string) string {
 	return filepath.Join(GetTeamWorkspaceDir(dataDir, teamID), sanitizeRoleForPath(role))
+}
+
+func GetTeamRoleTasksDir(dataDir, teamID, role string) string {
+	return filepath.Join(GetTeamTasksDir(dataDir, teamID), sanitizeRoleForPath(role))
 }
 
 func GetTeamLogPath(dataDir, teamID string) string {

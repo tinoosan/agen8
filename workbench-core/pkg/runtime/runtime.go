@@ -43,8 +43,6 @@ type BuildConfig struct {
 	ProfileConfig         *profile.Profile
 	WorkdirAbs            string
 	SharedWorkspaceDir    string
-	TeamRoleName          string
-	TeamIsCoordinator     bool
 	Model                 string
 	ReasoningEffort       string
 	ReasoningSummary      string
@@ -96,10 +94,18 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 
 	run := cfg.Run
+	teamID := ""
+	teamRole := ""
+	if cfg.Run.Runtime != nil {
+		teamID = strings.TrimSpace(cfg.Run.Runtime.TeamID)
+		teamRole = strings.TrimSpace(cfg.Run.Runtime.Role)
+	}
 	run.Runtime = &types.RunRuntimeConfig{
 		DataDir:          cfg.Cfg.DataDir,
 		Profile:          strings.TrimSpace(cfg.Profile),
 		Model:            cfg.Model,
+		TeamID:           teamID,
+		Role:             teamRole,
 		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
 		ApprovalsMode:    strings.TrimSpace(cfg.ApprovalsMode),
@@ -269,6 +275,8 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	var tasksDir string
 	if strings.TrimSpace(cfg.Run.ParentRunID) != "" {
 		tasksDir = fsutil.GetSubagentTasksDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.RunID)
+	} else if teamID != "" {
+		tasksDir = fsutil.GetTeamTasksDir(cfg.Cfg.DataDir, teamID)
 	} else {
 		tasksDir = fsutil.GetTasksDir(cfg.Cfg.DataDir, cfg.Run.RunID)
 	}
@@ -299,18 +307,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			return nil, fmt.Errorf("mount %s: %w", vfs.MountDeliverables, err)
 		}
 	} else if sharedWorkspaceDir != "" {
-		// Team co-agent: deliverables under (role) shared workspace, namespaced by runID.
-		deliverablesDir = filepath.Join(sharedWorkspaceDir, "deliverables", cfg.Run.RunID)
-		if err := os.MkdirAll(deliverablesDir, 0755); err != nil {
-			return nil, fmt.Errorf("prepare team deliverables dir: %w", err)
-		}
-		deliverablesRes, err := resources.NewDirResource(deliverablesDir, vfs.MountDeliverables)
-		if err != nil {
-			return nil, fmt.Errorf("create deliverables resource: %w", err)
-		}
-		if err := fs.Mount(vfs.MountDeliverables, deliverablesRes); err != nil {
-			return nil, fmt.Errorf("mount %s: %w", vfs.MountDeliverables, err)
-		}
+		// Team mode: do not auto-create a /deliverables tree under shared workspace.
 	} else {
 		// Standalone top-level run.
 		subagentsDir = fsutil.GetSubagentsDir(cfg.Cfg.DataDir, cfg.Run.RunID)
@@ -488,32 +485,15 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 
 	updater := &agent.PromptUpdater{
-		FS:             fs,
-		Trace:          traceMiddleware,
-		MaxMemoryBytes: cfg.MaxMemoryBytes,
-		MaxTraceBytes:  cfg.MaxTraceBytes,
-		Emit:           cfg.Emit,
-		ManifestPath:   "/workspace/context_constructor_manifest.json",
+		FS:               fs,
+		Trace:            traceMiddleware,
+		MaxMemoryBytes:   cfg.MaxMemoryBytes,
+		MaxTraceBytes:    cfg.MaxTraceBytes,
+		Emit:             cfg.Emit,
+		ManifestDiskPath: filepath.Join(runDir, "context_constructor.json"),
 	}
 
 	auditObs := newAuditObserver(cfg.Run.RunID, cfg.Emit, cfg.AuditReads)
-
-	guard := cfg.Guard
-	if strings.TrimSpace(run.Runtime.TeamID) != "" && !cfg.TeamIsCoordinator {
-		teamWriteGuard := makeTeamWorkerWriteGuard(strings.TrimSpace(cfg.TeamRoleName))
-		prev := guard
-		guard = func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse {
-			if teamWriteGuard != nil {
-				if blocked := teamWriteGuard(fs, req); blocked != nil {
-					return blocked
-				}
-			}
-			if prev != nil {
-				return prev(fs, req)
-			}
-			return nil
-		}
-	}
 
 	exec := NewExecutor(executor, ExecutorOptions{
 		Emit:      cfg.Emit,
@@ -522,10 +502,10 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		SessionID: cfg.Run.SessionID,
 		FS:        fs,
 		Guard: func(req types.HostOpRequest) *types.HostOpResponse {
-			if guard == nil {
+			if cfg.Guard == nil {
 				return nil
 			}
-			return guard(fs, req)
+			return cfg.Guard(fs, req)
 		},
 		Observers:       []HostOpObserver{constructor, updater, auditObs},
 		ArtifactObserve: cfg.ArtifactObserve,
@@ -545,49 +525,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 }
 
 func boolPtr(v bool) *bool { return &v }
-
-func makeTeamWorkerWriteGuard(role string) func(*vfs.FS, types.HostOpRequest) *types.HostOpResponse {
-	roleSeg := sanitizeRoleSegment(role)
-	if roleSeg == "" {
-		return nil
-	}
-	badPrefix := "/workspace/" + roleSeg
-	badPrefixDir := badPrefix + "/"
-	return func(_ *vfs.FS, req types.HostOpRequest) *types.HostOpResponse {
-		switch req.Op {
-		case types.HostOpFSWrite, types.HostOpFSAppend, types.HostOpFSEdit, types.HostOpFSPatch:
-		default:
-			return nil
-		}
-		p := strings.TrimSpace(req.Path)
-		if p != badPrefix && !strings.HasPrefix(p, badPrefixDir) {
-			return nil
-		}
-		return &types.HostOpResponse{
-			Op:    req.Op,
-			Ok:    false,
-			Error: fmt.Sprintf("In team mode, write to /workspace/... (role root), not /workspace/%s/...", roleSeg),
-		}
-	}
-}
-
-func sanitizeRoleSegment(role string) string {
-	role = strings.TrimSpace(role)
-	if role == "" {
-		return "default"
-	}
-	var b strings.Builder
-	for _, r := range role {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			b.WriteRune(r)
-		}
-	}
-	s := b.String()
-	if s == "" {
-		return "default"
-	}
-	return s
-}
 
 func resolveProfileSkills(cfg BuildConfig) []string {
 	if cfg.ProfileConfig != nil {

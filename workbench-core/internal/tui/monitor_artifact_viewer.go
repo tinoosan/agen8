@@ -871,7 +871,7 @@ func resolveArtifactDisk(dataDir, teamID, runID, vpath string) string {
 		rel := strings.TrimPrefix(vpath, "/tasks/")
 		rel = strings.TrimPrefix(rel, "/")
 		if strings.TrimSpace(teamID) != "" {
-			return filepath.Join(fsutil.GetTeamWorkspaceDir(dataDir, teamID), "tasks", rel)
+			return filepath.Join(fsutil.GetTeamTasksDir(dataDir, teamID), rel)
 		}
 		const subagentsPrefix = "subagents/"
 		if strings.HasPrefix(rel, subagentsPrefix) {
