@@ -88,8 +88,9 @@ func TestEventMiddleware_EmailReqDataIncludesToAndSubject(t *testing.T) {
 				gotReq = ev
 			}
 		},
-		seq:     &seq,
-		metaKey: opContextKey{},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
 	})
 
 	input, err := json.Marshal(map[string]string{
@@ -274,7 +275,7 @@ func TestDispatchMiddleware_UnregisteredOpFallsBackToBase(t *testing.T) {
 	})
 
 	resp := exec.Exec(context.Background(), types.HostOpRequest{
-		Op:   types.HostOpFSSearch,
+		Op:   "custom_op",
 		Path: "/workspace",
 	})
 	if !called {
@@ -476,5 +477,134 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 				t.Fatalf("responseText = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestEventMiddleware_RequestEnrichmentMovedToOperations(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+	})
+
+	var gotReq events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:    types.HostOpFSSearch,
+		Path:  "/workspace",
+		Query: "needle",
+		Limit: 25,
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if gotReq.Data["query"] != "needle" || gotReq.Data["limit"] != "25" {
+		t.Fatalf("expected fs_search query/limit enrichment, got data=%v", gotReq.Data)
+	}
+
+	resp = exec.Exec(context.Background(), types.HostOpRequest{
+		Op:     types.HostOpTrace,
+		Action: "events.latest",
+		Input:  json.RawMessage(`{"limit":5}`),
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if gotReq.Data["traceAction"] != "events.latest" || gotReq.Data["traceInput"] != `{"limit":5}` {
+		t.Fatalf("expected trace request enrichment, got data=%v", gotReq.Data)
+	}
+
+	resp = exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSWrite,
+		Path: "/workspace/data.json",
+		Text: `{"x":1}`,
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if gotReq.Data["textPreview"] == "" || gotReq.Data["textIsJSON"] != "true" {
+		t.Fatalf("expected fs_write preview enrichment, got data=%v", gotReq.Data)
+	}
+
+	resp = exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSPatch,
+		Path: "/workspace/a.txt",
+		Text: "@@ -1 +1 @@\n-old\n+new\n",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if gotReq.Data["patchPreview"] == "" {
+		t.Fatalf("expected fs_patch preview enrichment, got data=%v", gotReq.Data)
+	}
+}
+
+func TestEventMiddleware_BrowserRequestAndResponseEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		if req.Op == types.HostOpBrowser {
+			return types.HostOpResponse{
+				Op:   "browser.navigate",
+				Ok:   true,
+				Text: `{"sessionId":"sess-1","pageId":"p-1","title":"Example Domain","url":"https://example.com","count":2}`,
+			}
+		}
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+	})
+
+	var gotReq events.Event
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	reqInput := json.RawMessage(`{"action":"navigate","sessionId":"sess-1","url":"https://example.com","selector":"#main","values":["a","b"],"filename":"shot.png"}`)
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:    types.HostOpBrowser,
+		Input: reqInput,
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if gotReq.Data["action"] != "navigate" || gotReq.Data["url"] != "https://example.com" || gotReq.Data["valuesCount"] != "2" {
+		t.Fatalf("expected browser request enrichment, got data=%v", gotReq.Data)
+	}
+	if gotResp.Data["browserOp"] != "browser.navigate" || gotResp.Data["title"] == "" || gotResp.Data["count"] != "2" {
+		t.Fatalf("expected browser response enrichment, got data=%v", gotResp.Data)
+	}
+}
+
+func TestResolveOperationForResponse_Aliases(t *testing.T) {
+	reg := newHostOperationRegistry(nil)
+
+	if op := resolveOperationForResponse(reg, types.HostOpRequest{Op: types.HostOpBrowser}, types.HostOpResponse{Op: "browser.navigate"}); op == nil || op.Op() != types.HostOpBrowser {
+		t.Fatalf("expected browser alias to resolve to browser operation, got %+v", op)
+	}
+
+	if op := resolveOperationForResponse(reg, types.HostOpRequest{Op: types.HostOpToolResult, Tag: "task_create"}, types.HostOpResponse{Op: "task_create"}); op == nil || op.Op() != types.HostOpToolResult {
+		t.Fatalf("expected task_create alias to resolve to tool_result operation, got %+v", op)
+	}
+
+	if op := resolveOperationForResponse(reg, types.HostOpRequest{Op: types.HostOpShellExec}, types.HostOpResponse{Op: "unknown.op"}); op == nil || op.Op() != types.HostOpShellExec {
+		t.Fatalf("expected fallback to request op, got %+v", op)
 	}
 }

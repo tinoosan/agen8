@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -147,18 +146,9 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 		storeReq["tag"] = req.Tag
 	}
 
-	if req.Op == types.HostOpFSSearch {
-		if strings.TrimSpace(req.Query) != "" {
-			reqData["query"] = strings.TrimSpace(req.Query)
-			storeReq["query"] = strings.TrimSpace(req.Query)
-		}
-		if req.Limit != 0 {
-			reqData["limit"] = strconv.Itoa(req.Limit)
-			storeReq["limit"] = strconv.Itoa(req.Limit)
-		}
-	}
-	if op := m.operations.Get(req.Op); op != nil {
-		if fieldsProvider, ok := op.(HostOpRequestStoreFields); ok {
+	reqOp := m.operations.Get(req.Op)
+	if reqOp != nil {
+		if fieldsProvider, ok := reqOp.(HostOpRequestStoreFields); ok {
 			if fields := fieldsProvider.RequestStoreFields(req); len(fields) != 0 {
 				for k, v := range fields {
 					storeReq[k] = v
@@ -166,283 +156,10 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 				}
 			}
 		}
-		if enricher, ok := op.(HostOpRequestEventEnricher); ok {
+		if enricher, ok := reqOp.(HostOpRequestEventEnricher); ok {
 			enricher.EnrichRequestEvent(req, reqData, storeReq)
 		}
-	}
-	// Normalize tool_result+tag task_create to op task_create so protocol, activity, and TUI show it like other host ops.
-	if req.Op == types.HostOpToolResult && strings.TrimSpace(req.Tag) == "task_create" {
-		reqData["op"] = "task_create"
-		storeReq["op"] = "task_create"
-		if len(req.Input) > 0 {
-			var payload struct {
-				Goal       string `json:"goal"`
-				TaskID     string `json:"taskId"`
-				ChildRunID string `json:"childRunId"`
-			}
-			if err := json.Unmarshal(req.Input, &payload); err == nil {
-				if g := strings.TrimSpace(payload.Goal); g != "" {
-					if p, tr := capBytes(singleLine(g), 240); p != "" {
-						reqData["goal"] = p
-						storeReq["goal"] = p
-						if tr {
-							reqData["goalTruncated"] = "true"
-							storeReq["goalTruncated"] = "true"
-						}
-					}
-				}
-				if id := strings.TrimSpace(payload.TaskID); id != "" {
-					reqData["taskId"] = id
-					storeReq["taskId"] = id
-				}
-				if cid := strings.TrimSpace(payload.ChildRunID); cid != "" {
-					reqData["childRunId"] = cid
-					storeReq["childRunId"] = cid
-				}
-			}
-		}
-	}
-	if req.Op == types.HostOpTrace {
-		reqData["traceAction"] = req.Action
-		if len(req.Input) > 0 {
-			reqData["traceInput"] = string(req.Input)
-		}
-	}
-	if req.Op == types.HostOpBrowser && len(req.Input) > 0 {
-		var bReq struct {
-			Action      string   `json:"action"`
-			SessionID   string   `json:"sessionId"`
-			URL         string   `json:"url"`
-			WaitType    string   `json:"waitType"`
-			State       string   `json:"state"`
-			SleepMs     *int     `json:"sleepMs"`
-			Selector    string   `json:"selector"`
-			WaitFor     string   `json:"waitFor"`
-			Attribute   string   `json:"attribute"`
-			Kind        string   `json:"kind"`
-			Mode        string   `json:"mode"`
-			MaxClicks   *int     `json:"maxClicks"`
-			AutoDismiss *bool    `json:"autoDismiss"`
-			TimeoutMs   *int     `json:"timeoutMs"`
-			Headless    *bool    `json:"headless"`
-			FullPage    *bool    `json:"fullPage"`
-			UserAgent   string   `json:"userAgent"`
-			ViewportW   *int     `json:"viewportWidth"`
-			ViewportH   *int     `json:"viewportHeight"`
-			ExpectPopup *bool    `json:"expectPopup"`
-			SetActive   *bool    `json:"setActive"`
-			PageID      string   `json:"pageId"`
-			Key         string   `json:"key"`
-			DX          *int     `json:"dx"`
-			DY          *int     `json:"dy"`
-			Value       string   `json:"value"`
-			Values      []string `json:"values"`
-			FilePath    string   `json:"filePath"`
-			Filename    string   `json:"filename"`
-			// NOTE: We intentionally do not log "text" to avoid leaking secrets.
-		}
-		if err := json.Unmarshal(req.Input, &bReq); err == nil {
-			if a := strings.TrimSpace(bReq.Action); a != "" {
-				reqData["action"] = a
-				storeReq["action"] = a
-			}
-			if sid := strings.TrimSpace(bReq.SessionID); sid != "" {
-				reqData["sessionId"] = sid
-				storeReq["sessionId"] = sid
-			}
-			if u := strings.TrimSpace(bReq.URL); u != "" {
-				reqData["url"] = u
-				storeReq["url"] = u
-			}
-			if sel := strings.TrimSpace(bReq.Selector); sel != "" {
-				if p, tr := capBytes(singleLine(sel), 200); p != "" {
-					reqData["selector"] = p
-					storeReq["selector"] = p
-					if tr {
-						reqData["selectorTruncated"] = "true"
-						storeReq["selectorTruncated"] = "true"
-					}
-				}
-			}
-			if wf := strings.TrimSpace(bReq.WaitFor); wf != "" {
-				if p, tr := capBytes(singleLine(wf), 200); p != "" {
-					reqData["waitFor"] = p
-					storeReq["waitFor"] = p
-					if tr {
-						reqData["waitForTruncated"] = "true"
-						storeReq["waitForTruncated"] = "true"
-					}
-				}
-			}
-			if attr := strings.TrimSpace(bReq.Attribute); attr != "" {
-				reqData["attribute"] = attr
-				storeReq["attribute"] = attr
-			}
-			if k := strings.TrimSpace(bReq.Kind); k != "" {
-				reqData["kind"] = k
-				storeReq["kind"] = k
-			}
-			if mo := strings.TrimSpace(bReq.Mode); mo != "" {
-				reqData["mode"] = mo
-				storeReq["mode"] = mo
-			}
-			if bReq.MaxClicks != nil {
-				reqData["maxClicks"] = strconv.Itoa(*bReq.MaxClicks)
-				storeReq["maxClicks"] = strconv.Itoa(*bReq.MaxClicks)
-			}
-			if strings.TrimSpace(bReq.WaitType) != "" {
-				reqData["waitType"] = strings.TrimSpace(bReq.WaitType)
-				storeReq["waitType"] = strings.TrimSpace(bReq.WaitType)
-			}
-			if strings.TrimSpace(bReq.State) != "" {
-				reqData["state"] = strings.TrimSpace(bReq.State)
-				storeReq["state"] = strings.TrimSpace(bReq.State)
-			}
-			if bReq.SleepMs != nil {
-				reqData["sleepMs"] = strconv.Itoa(*bReq.SleepMs)
-				storeReq["sleepMs"] = strconv.Itoa(*bReq.SleepMs)
-			}
-			if bReq.TimeoutMs != nil {
-				reqData["timeoutMs"] = strconv.Itoa(*bReq.TimeoutMs)
-				storeReq["timeoutMs"] = strconv.Itoa(*bReq.TimeoutMs)
-			}
-			if bReq.AutoDismiss != nil {
-				reqData["autoDismiss"] = fmtBool(*bReq.AutoDismiss)
-				storeReq["autoDismiss"] = fmtBool(*bReq.AutoDismiss)
-			}
-			if bReq.Headless != nil {
-				reqData["headless"] = fmtBool(*bReq.Headless)
-				storeReq["headless"] = fmtBool(*bReq.Headless)
-			}
-			if bReq.FullPage != nil {
-				reqData["fullPage"] = fmtBool(*bReq.FullPage)
-				storeReq["fullPage"] = fmtBool(*bReq.FullPage)
-			}
-			if strings.TrimSpace(bReq.UserAgent) != "" {
-				if p, tr := capBytes(singleLine(bReq.UserAgent), 160); p != "" {
-					reqData["userAgent"] = p
-					storeReq["userAgent"] = p
-					if tr {
-						reqData["userAgentTruncated"] = "true"
-						storeReq["userAgentTruncated"] = "true"
-					}
-				}
-			}
-			if bReq.ViewportW != nil {
-				reqData["viewportWidth"] = strconv.Itoa(*bReq.ViewportW)
-				storeReq["viewportWidth"] = strconv.Itoa(*bReq.ViewportW)
-			}
-			if bReq.ViewportH != nil {
-				reqData["viewportHeight"] = strconv.Itoa(*bReq.ViewportH)
-				storeReq["viewportHeight"] = strconv.Itoa(*bReq.ViewportH)
-			}
-			if bReq.ExpectPopup != nil {
-				reqData["expectPopup"] = fmtBool(*bReq.ExpectPopup)
-				storeReq["expectPopup"] = fmtBool(*bReq.ExpectPopup)
-			}
-			if bReq.SetActive != nil {
-				reqData["setActive"] = fmtBool(*bReq.SetActive)
-				storeReq["setActive"] = fmtBool(*bReq.SetActive)
-			}
-			if strings.TrimSpace(bReq.PageID) != "" {
-				reqData["pageId"] = strings.TrimSpace(bReq.PageID)
-				storeReq["pageId"] = strings.TrimSpace(bReq.PageID)
-			}
-			if strings.TrimSpace(bReq.Key) != "" {
-				reqData["key"] = strings.TrimSpace(bReq.Key)
-				storeReq["key"] = strings.TrimSpace(bReq.Key)
-			}
-			if bReq.DX != nil {
-				reqData["dx"] = strconv.Itoa(*bReq.DX)
-				storeReq["dx"] = strconv.Itoa(*bReq.DX)
-			}
-			if bReq.DY != nil {
-				reqData["dy"] = strconv.Itoa(*bReq.DY)
-				storeReq["dy"] = strconv.Itoa(*bReq.DY)
-			}
-			if strings.TrimSpace(bReq.Value) != "" {
-				reqData["value"] = strings.TrimSpace(bReq.Value)
-				storeReq["value"] = strings.TrimSpace(bReq.Value)
-			}
-			if len(bReq.Values) != 0 {
-				reqData["valuesCount"] = strconv.Itoa(len(bReq.Values))
-				storeReq["valuesCount"] = strconv.Itoa(len(bReq.Values))
-			}
-			if strings.TrimSpace(bReq.FilePath) != "" {
-				reqData["filePath"] = "<omitted>"
-				storeReq["filePath"] = "<omitted>"
-			}
-			if strings.TrimSpace(bReq.Filename) != "" {
-				reqData["filename"] = strings.TrimSpace(bReq.Filename)
-				storeReq["filename"] = strings.TrimSpace(bReq.Filename)
-			}
-			reqData["text"] = "<omitted>"
-			storeReq["text"] = "<omitted>"
-		}
-	}
-	if req.Op == types.HostOpEmail && len(req.Input) > 0 {
-		var emailReq struct {
-			To      string `json:"to"`
-			Subject string `json:"subject"`
-		}
-		if err := json.Unmarshal(req.Input, &emailReq); err == nil {
-			if to := strings.TrimSpace(emailReq.To); to != "" {
-				if p, tr := capBytes(singleLine(to), 200); p != "" {
-					reqData["to"] = p
-					storeReq["to"] = p
-					if tr {
-						reqData["toTruncated"] = "true"
-						storeReq["toTruncated"] = "true"
-					}
-				}
-			}
-			if subject := strings.TrimSpace(emailReq.Subject); subject != "" {
-				if p, tr := capBytes(singleLine(subject), 200); p != "" {
-					reqData["subject"] = p
-					storeReq["subject"] = p
-					if tr {
-						reqData["subjectTruncated"] = "true"
-						storeReq["subjectTruncated"] = "true"
-					}
-				}
-			}
-		}
-	}
-	if (req.Op == types.HostOpFSWrite || req.Op == types.HostOpFSAppend) && strings.TrimSpace(req.Text) != "" {
-		p, tr, red, n, isJSON := fsWriteTextPreviewForEvent(req.Path, req.Text)
-		if p != "" {
-			reqData["textPreview"] = p
-		}
-		if tr {
-			reqData["textTruncated"] = "true"
-		}
-		if red {
-			reqData["textRedacted"] = "true"
-		}
-		if n != 0 {
-			reqData["textBytes"] = strconv.Itoa(n)
-		}
-		if isJSON {
-			reqData["textIsJSON"] = "true"
-		}
-	}
-	if req.Op == types.HostOpFSPatch && strings.TrimSpace(req.Text) != "" {
-		p, tr, red, n, _ := fsWriteTextPreviewForEvent(req.Path, req.Text)
-		if p != "" {
-			reqData["patchPreview"] = p
-		}
-		if tr {
-			reqData["patchTruncated"] = "true"
-		}
-		if red {
-			reqData["patchRedacted"] = "true"
-		}
-		if n != 0 {
-			reqData["patchBytes"] = strconv.Itoa(n)
-		}
-	}
-	if op := m.operations.Get(req.Op); op != nil {
-		if txt := strings.TrimSpace(op.FormatRequestText(req, reqData)); txt != "" {
+		if txt := strings.TrimSpace(reqOp.FormatRequestText(req, reqData)); txt != "" {
 			reqData["requestText"] = txt
 		}
 	}
@@ -468,10 +185,6 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 		"ok":   fmtBool(resp.Ok),
 		"err":  resp.Error,
 	}
-	if req.Op == types.HostOpToolResult && strings.TrimSpace(req.Tag) == "task_create" {
-		meta.RespData["op"] = "task_create"
-		meta.StoreResp["op"] = "task_create"
-	}
 
 	if meta.PatchPreview != "" {
 		meta.RespData["patchPreview"] = meta.PatchPreview
@@ -493,126 +206,19 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	if resp.Truncated {
 		meta.RespData["truncated"] = "true"
 	}
-	if resp.Op == types.HostOpShellExec {
-		meta.RespData["exitCode"] = strconv.Itoa(resp.ExitCode)
-		meta.RespData["vfsPathTranslated"] = fmtBool(resp.VFSPathTranslated)
-		meta.StoreResp["vfsPathTranslated"] = fmtBool(resp.VFSPathTranslated)
-		if mounts := strings.TrimSpace(resp.VFSPathMounts); mounts != "" {
-			meta.RespData["vfsPathMounts"] = mounts
-			meta.StoreResp["vfsPathMounts"] = mounts
-		}
-		meta.RespData["scriptPathNormalized"] = fmtBool(resp.ScriptPathNormalized)
-		anti := strings.TrimSpace(resp.ScriptAntiPattern)
-		if anti == "" {
-			anti = "none"
-		}
-		meta.RespData["scriptAntiPattern"] = anti
-		meta.StoreResp["scriptPathNormalized"] = fmtBool(resp.ScriptPathNormalized)
-		meta.StoreResp["scriptAntiPattern"] = anti
-		if resp.Stdout != "" {
-			s, tr := capBytes(resp.Stdout, 1000)
-			meta.RespData["stdout"] = s
-			if tr {
-				meta.RespData["stdoutTruncated"] = "true"
-			}
-		}
-		if resp.Stderr != "" {
-			s, tr := capBytes(resp.Stderr, 1000)
-			meta.RespData["stderr"] = s
-			if tr {
-				meta.RespData["stderrTruncated"] = "true"
-			}
-		}
-		if strings.TrimSpace(resp.Warning) != "" {
-			if s, tr := capBytes(resp.Warning, 300); s != "" {
-				meta.RespData["warning"] = s
-				if tr {
-					meta.RespData["warningTruncated"] = "true"
-				}
-			}
-		}
-	}
-	if op := m.operations.Get(resp.Op); op != nil {
-		if fieldsProvider, ok := op.(HostOpResponseStoreFields); ok {
+	respOp := resolveOperationForResponse(m.operations, req, resp)
+	if respOp != nil {
+		if fieldsProvider, ok := respOp.(HostOpResponseStoreFields); ok {
 			if fields := fieldsProvider.ResponseStoreFields(resp); len(fields) != 0 {
 				for k, v := range fields {
 					meta.StoreResp[k] = v
 				}
 			}
 		}
-		if enricher, ok := op.(HostOpResponseEventEnricher); ok {
+		if enricher, ok := respOp.(HostOpResponseEventEnricher); ok {
 			enricher.EnrichResponseEvent(req, resp, meta.RespData, meta.StoreResp)
 		}
-	}
-	if resp.Op == types.HostOpTrace {
-		if resp.Text != "" {
-			s, tr := capBytes(resp.Text, 1000)
-			meta.RespData["output"] = s
-			if tr {
-				meta.RespData["outputTruncated"] = "true"
-			}
-		}
-	}
-	if resp.Op == types.HostOpFSSearch {
-		meta.RespData["results"] = strconv.Itoa(len(resp.Results))
-	}
-	if strings.HasPrefix(resp.Op, "browser.") {
-		meta.RespData["browserOp"] = resp.Op
-		if strings.TrimSpace(resp.Text) != "" {
-			var mOut map[string]any
-			if err := json.Unmarshal([]byte(resp.Text), &mOut); err == nil {
-				if v, ok := mOut["sessionId"].(string); ok && strings.TrimSpace(v) != "" {
-					meta.RespData["sessionId"] = strings.TrimSpace(v)
-					meta.StoreResp["sessionId"] = strings.TrimSpace(v)
-				}
-				if v, ok := mOut["pageId"].(string); ok && strings.TrimSpace(v) != "" {
-					meta.RespData["pageId"] = strings.TrimSpace(v)
-					meta.StoreResp["pageId"] = strings.TrimSpace(v)
-				}
-				if v, ok := mOut["title"].(string); ok && strings.TrimSpace(v) != "" {
-					if p, tr := capBytes(singleLine(v), 200); p != "" {
-						meta.RespData["title"] = p
-						if tr {
-							meta.RespData["titleTruncated"] = "true"
-						}
-					}
-				}
-				if v, ok := mOut["url"].(string); ok && strings.TrimSpace(v) != "" {
-					meta.RespData["url"] = strings.TrimSpace(v)
-					meta.StoreResp["url"] = strings.TrimSpace(v)
-				}
-				if v, ok := mOut["path"].(string); ok && strings.TrimSpace(v) != "" {
-					meta.RespData["path"] = strings.TrimSpace(v)
-					meta.StoreResp["path"] = strings.TrimSpace(v)
-				}
-				if v, ok := mOut["count"].(float64); ok {
-					meta.RespData["count"] = strconv.Itoa(int(v))
-					meta.StoreResp["count"] = strconv.Itoa(int(v))
-				}
-				if v, ok := mOut["dismissCount"].(float64); ok {
-					meta.RespData["dismissCount"] = strconv.Itoa(int(v))
-					meta.StoreResp["dismissCount"] = strconv.Itoa(int(v))
-				}
-				if v, ok := mOut["suggestedFilename"].(string); ok && strings.TrimSpace(v) != "" {
-					meta.RespData["suggestedFilename"] = strings.TrimSpace(v)
-					meta.StoreResp["suggestedFilename"] = strings.TrimSpace(v)
-				}
-			} else if resp.Op == "browser.extract" || resp.Op == "browser.extract_links" || resp.Op == "browser.tab_list" {
-				meta.RespData["bytes"] = strconv.Itoa(len(resp.Text))
-				meta.StoreResp["bytes"] = strconv.Itoa(len(resp.Text))
-			}
-
-			if resp.Op == "browser.extract" || resp.Op == "browser.extract_links" {
-				var arr []any
-				if err := json.Unmarshal([]byte(resp.Text), &arr); err == nil {
-					meta.RespData["items"] = strconv.Itoa(len(arr))
-					meta.StoreResp["items"] = strconv.Itoa(len(arr))
-				}
-			}
-		}
-	}
-	if op := m.operations.Get(req.Op); op != nil {
-		if txt := strings.TrimSpace(op.FormatResponseText(req, resp, reqData, meta.RespData)); txt != "" {
+		if txt := strings.TrimSpace(respOp.FormatResponseText(req, resp, reqData, meta.RespData)); txt != "" {
 			meta.RespData["responseText"] = txt
 		}
 	}
