@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -100,5 +101,112 @@ func TestNormalizeTeamCallbackArtifactPath(t *testing.T) {
 		if got := normalizeTeamCallbackArtifactPath(role, teamRoles, tc.in); got != tc.want {
 			t.Fatalf("normalizeTeamCallbackArtifactPath(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestMaybeCreateCoordinatorCallback_TeamCoordinatorSelfTask_NoCallback(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:       store,
+		TeamID:          "team-1",
+		RoleName:        "ceo",
+		CoordinatorRole: "ceo",
+		IsCoordinator:   true,
+		TeamRoles:       []string{"ceo", "backend-engineer"},
+		SessionID:       "team-team-1",
+		RunID:           "run-ceo",
+	}}
+	task := types.Task{
+		TaskID:       "task-ceo-capabilities",
+		TeamID:       "team-1",
+		AssignedRole: "ceo",
+		CreatedBy:    "user",
+		Goal:         "Create CEO capabilities doc",
+	}
+	s.maybeCreateCoordinatorCallback(context.Background(), task, types.TaskResult{
+		TaskID:    task.TaskID,
+		Status:    types.TaskStatusSucceeded,
+		Summary:   "done",
+		Artifacts: []string{"/workspace/ceo/capabilities.md"},
+	})
+	_, err = store.GetTask(context.Background(), "callback-"+task.TaskID)
+	if !errors.Is(err, state.ErrTaskNotFound) {
+		t.Fatalf("expected no callback task for coordinator self-task, got err=%v", err)
+	}
+}
+
+func TestMaybeCreateCoordinatorCallback_TeamWorkerCompletion_CreatesCallback(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:       store,
+		TeamID:          "team-1",
+		RoleName:        "backend-engineer",
+		CoordinatorRole: "ceo",
+		TeamRoles:       []string{"ceo", "backend-engineer"},
+		SessionID:       "team-team-1",
+		RunID:           "run-backend",
+	}}
+	task := types.Task{
+		TaskID:       "task-backend-capabilities",
+		TeamID:       "team-1",
+		AssignedRole: "backend-engineer",
+		CreatedBy:    "ceo",
+		Goal:         "Create backend capabilities doc",
+	}
+	s.maybeCreateCoordinatorCallback(context.Background(), task, types.TaskResult{
+		TaskID:    task.TaskID,
+		Status:    types.TaskStatusSucceeded,
+		Summary:   "done",
+		Artifacts: []string{"/workspace/backend-engineer/capabilities.md"},
+	})
+	callback, err := store.GetTask(context.Background(), "callback-"+task.TaskID)
+	if err != nil {
+		t.Fatalf("expected callback task, got err=%v", err)
+	}
+	if callback.AssignedRole != "ceo" {
+		t.Fatalf("callback assignedRole=%q, want ceo", callback.AssignedRole)
+	}
+	if callback.TaskKind != state.TaskKindCallback {
+		t.Fatalf("callback taskKind=%q, want %q", callback.TaskKind, state.TaskKindCallback)
+	}
+}
+
+func TestMaybeCreateCoordinatorCallback_SubagentWorkerCompletion_Unchanged(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:   store,
+		SessionID:   "session-child",
+		RunID:       "run-child",
+		ParentRunID: "run-parent",
+	}}
+	task := types.Task{
+		TaskID:    "task-subagent-1",
+		CreatedBy: "run-parent",
+		Goal:      "do child work",
+	}
+	s.maybeCreateCoordinatorCallback(context.Background(), task, types.TaskResult{
+		TaskID:    task.TaskID,
+		Status:    types.TaskStatusSucceeded,
+		Summary:   "child done",
+		Artifacts: []string{"/deliverables/output.md", "/tasks/2026-02-17/task-subagent-1/SUMMARY.md"},
+	})
+	callback, err := store.GetTask(context.Background(), "callback-"+task.TaskID)
+	if err != nil {
+		t.Fatalf("expected subagent callback task, got err=%v", err)
+	}
+	if callback.AssignedTo != "run-parent" {
+		t.Fatalf("subagent callback assignedTo=%q, want run-parent", callback.AssignedTo)
+	}
+	if callback.Metadata["source"] != "subagent.callback" {
+		t.Fatalf("subagent callback source=%v, want subagent.callback", callback.Metadata["source"])
 	}
 }

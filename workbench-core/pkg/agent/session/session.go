@@ -1020,10 +1020,10 @@ func (s *Session) emitTaskQueuedOnce(ctx context.Context, taskID, goal, source s
 
 func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types.Task, tr types.TaskResult) {
 	parentRunID := strings.TrimSpace(s.cfg.ParentRunID)
-	isTeamWorker := strings.TrimSpace(s.cfg.TeamID) != "" && !s.cfg.IsCoordinator
 	isSubagentWorker := parentRunID != ""
+	isTeamCallbackEligible := s.isTeamCallbackEligible(task)
 
-	if !isTeamWorker && !isSubagentWorker {
+	if !isTeamCallbackEligible && !isSubagentWorker {
 		return
 	}
 
@@ -1110,9 +1110,6 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 	} else {
 		// Team mode: create callback assigned to coordinator role.
 		coordinatorRole := strings.TrimSpace(s.cfg.CoordinatorRole)
-		if coordinatorRole == "" || strings.EqualFold(coordinatorRole, s.cfg.RoleName) {
-			return
-		}
 		artifactsForCoordinator := make([]string, 0, len(tr.Artifacts))
 		seenArtifacts := map[string]struct{}{}
 		for _, art := range tr.Artifacts {
@@ -1178,6 +1175,38 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			"callbackForTaskId": taskID,
 		},
 	})
+}
+
+func (s *Session) isTeamCallbackEligible(task types.Task) bool {
+	if strings.TrimSpace(s.cfg.TeamID) == "" {
+		return false
+	}
+	coordinatorRole := strings.TrimSpace(s.cfg.CoordinatorRole)
+	if coordinatorRole == "" {
+		return false
+	}
+	return !isCoordinatorSelfTask(task, coordinatorRole, strings.TrimSpace(s.cfg.RoleName))
+}
+
+func isCoordinatorSelfTask(task types.Task, coordinatorRole, defaultRole string) bool {
+	coordinatorRole = strings.TrimSpace(coordinatorRole)
+	if coordinatorRole == "" {
+		return false
+	}
+
+	assignedRole := strings.TrimSpace(task.AssignedRole)
+	if assignedRole == "" {
+		assignedRole = strings.TrimSpace(defaultRole)
+	}
+	if !strings.EqualFold(assignedRole, coordinatorRole) {
+		return false
+	}
+
+	createdBy := strings.ToLower(strings.TrimSpace(task.CreatedBy))
+	if createdBy == strings.ToLower(coordinatorRole) {
+		return true
+	}
+	return createdBy == "user" || createdBy == "webhook" || createdBy == "monitor"
 }
 
 func (s *Session) maybeEmitCoordinatorPolicyWarn(ctx context.Context, task types.Task, tr types.TaskResult) {

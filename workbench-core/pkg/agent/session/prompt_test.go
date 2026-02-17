@@ -94,4 +94,27 @@ func TestBuildTeamBlock_CoordinatorRestrictionsAndMemoryPolicy(t *testing.T) {
 	if !strings.Contains(block, "/tasks/<role>/<date>/<taskID>/SUMMARY.md") {
 		t.Fatalf("expected coordinator task summary review guidance, got: %s", block)
 	}
+	if !strings.Contains(block, "do not create or expect coordinator review callbacks") {
+		t.Fatalf("expected explicit coordinator self-task callback guidance, got: %s", block)
+	}
+}
+
+func TestBuildWorkerTeamRules_ExcludesCoordinatorOnlyRestrictions(t *testing.T) {
+	rules := buildWorkerTeamRules("researcher")
+	if strings.Contains(rules, "MUST NOT perform specialist research, analysis, or report writing") {
+		t.Fatalf("worker rules should not include coordinator-only specialist restriction: %s", rules)
+	}
+	if !strings.Contains(rules, "/workspace/<your-role>/...") {
+		t.Fatalf("expected worker workspace guidance, got: %s", rules)
+	}
+}
+
+func TestBuildCoordinatorTeamRules_IncludesNoSelfReviewGuidance(t *testing.T) {
+	rules := buildCoordinatorTeamRules()
+	if !strings.Contains(rules, "do not create or expect coordinator review callbacks") {
+		t.Fatalf("expected no-self-review guidance in coordinator rules, got: %s", rules)
+	}
+	if !strings.Contains(rules, "/workspace/<target-role>/...") {
+		t.Fatalf("expected coordinator workspace guidance, got: %s", rules)
+	}
 }

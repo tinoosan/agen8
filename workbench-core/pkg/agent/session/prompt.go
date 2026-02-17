@@ -184,20 +184,33 @@ func buildTeamBlock(teamID string, roleName string, coordinatorRole string, team
 	b.WriteString(coordinatorRole)
 	b.WriteString("\".\n")
 	if roleName != coordinatorRole {
-		b.WriteString("- You cannot assign tasks to other non-coordinator roles.\n")
-		b.WriteString("- Team workspace is shared. Write your deliverables under /workspace/<your-role>/... (for example, /workspace/")
-		b.WriteString(roleName)
-		b.WriteString("/report.pdf).\n")
-		b.WriteString("- Team tasks are shared. Your task summaries are recorded under /tasks/<your-role>/<date>/<taskID>/SUMMARY.md.\n")
+		b.WriteString(buildWorkerTeamRules(roleName))
 	} else {
-		b.WriteString("- As coordinator, you may assign tasks to any valid role.\n")
-		b.WriteString("- As coordinator, you MUST NOT perform specialist research, analysis, or report writing.\n")
-		b.WriteString("- As coordinator, your only responsibilities are: break down goals, delegate tasks, review callbacks, and track completion.\n")
-		b.WriteString("- As coordinator, NEVER use web_search, file tools, or shell tools for specialist work.\n")
-		b.WriteString("- Team workspace is shared at /workspace. Delegate and review outputs using /workspace/<target-role>/... (e.g. /workspace/researcher/report.pdf).\n")
-		b.WriteString("- Review role task summaries under /tasks/<role>/<date>/<taskID>/SUMMARY.md.\n")
+		b.WriteString(buildCoordinatorTeamRules())
 	}
 	b.WriteString("- Use WriteMemory and AppendMemory tools for memory updates; do not write memory files directly in the workspace.\n")
 	b.WriteString("</team>")
 	return strings.TrimSpace(b.String())
+}
+
+func buildWorkerTeamRules(roleName string) string {
+	var b strings.Builder
+	b.WriteString("- You cannot assign tasks to other non-coordinator roles.\n")
+	b.WriteString("- Team workspace is shared. Write your deliverables under /workspace/<your-role>/... (for example, /workspace/")
+	b.WriteString(roleName)
+	b.WriteString("/report.pdf).\n")
+	b.WriteString("- Team tasks are shared. Your task summaries are recorded under /tasks/<your-role>/<date>/<taskID>/SUMMARY.md.\n")
+	return b.String()
+}
+
+func buildCoordinatorTeamRules() string {
+	var b strings.Builder
+	b.WriteString("- As coordinator, you may assign tasks to any valid role.\n")
+	b.WriteString("- As coordinator, you MUST NOT perform specialist work unless it is a job for your role.\n")
+	b.WriteString("- As coordinator, your only responsibilities are: break down goals, delegate tasks, review callbacks, and track completion.\n")
+	b.WriteString("- As coordinator, NEVER use web_search, file tools, or shell tools for specialist work.\n")
+	b.WriteString("- If you create and complete a coordinator-assigned task yourself, do not create or expect coordinator review callbacks.\n")
+	b.WriteString("- Team workspace is shared at /workspace. Delegate and review outputs using /workspace/<target-role>/... (e.g. /workspace/researcher/report.pdf).\n")
+	b.WriteString("- Review role task summaries under /tasks/<role>/<date>/<taskID>/SUMMARY.md.\n")
+	return b.String()
 }
