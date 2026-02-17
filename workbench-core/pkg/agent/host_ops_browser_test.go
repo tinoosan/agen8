@@ -283,3 +283,44 @@ func TestHostOpExecutor_Browser_Navigate_AutoDismissesCookiesByDefault(t *testin
 		t.Fatalf("expected cookies/accept, got %q/%q", stub.dismissKind, stub.dismissMode)
 	}
 }
+
+func TestHostOpExecutor_Browser_ActionValidation(t *testing.T) {
+	exec := &HostOpExecutor{
+		FS:              vfs.NewFS(),
+		Browser:         &stubBrowserManager{},
+		WorkspaceDir:    t.TempDir(),
+		DefaultMaxBytes: 4096,
+	}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:    types.HostOpBrowser,
+		Input: json.RawMessage(`{"action":"   "}`),
+	})
+	if resp.Ok || resp.Error != "action is required" {
+		t.Fatalf("expected action-required error, got %#v", resp)
+	}
+
+	resp = exec.Exec(context.Background(), types.HostOpRequest{
+		Op:    types.HostOpBrowser,
+		Input: json.RawMessage(`{"action":"does_not_exist"}`),
+	})
+	if resp.Ok || resp.Error != "unknown browser action: does_not_exist" {
+		t.Fatalf("expected unknown-action error, got %#v", resp)
+	}
+}
+
+func TestHostOpExecutor_Browser_StorageLoadRequiresFilename(t *testing.T) {
+	exec := &HostOpExecutor{
+		FS:              vfs.NewFS(),
+		Browser:         &stubBrowserManager{},
+		WorkspaceDir:    t.TempDir(),
+		DefaultMaxBytes: 4096,
+	}
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:    types.HostOpBrowser,
+		Input: json.RawMessage(`{"action":"storage_load","sessionId":"sess-1"}`),
+	})
+	if resp.Ok || resp.Error != "filename is required" {
+		t.Fatalf("expected filename required error, got %#v", resp)
+	}
+}
