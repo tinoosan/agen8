@@ -74,6 +74,26 @@ type managedRuntime struct {
 	session   *agentsession.Session
 	cancel    context.CancelFunc
 	done      <-chan struct{}
+	modelMu   sync.Mutex
+	model     string
+}
+
+func (m *managedRuntime) CurrentModel() string {
+	if m == nil {
+		return ""
+	}
+	m.modelMu.Lock()
+	defer m.modelMu.Unlock()
+	return strings.TrimSpace(m.model)
+}
+
+func (m *managedRuntime) SetCurrentModel(model string) {
+	if m == nil {
+		return
+	}
+	m.modelMu.Lock()
+	m.model = strings.TrimSpace(model)
+	m.modelMu.Unlock()
 }
 
 // subagentCleanupNotifier stops and finalizes the subagent run when the parent
@@ -187,6 +207,22 @@ func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
 		if lerr != nil {
 			log.Printf("daemon: load session for run %s: %v", run.RunID, lerr)
 			continue
+		}
+		teamID := strings.TrimSpace(sess.TeamID)
+		if teamID != "" && strings.TrimSpace(run.ParentRunID) != "" {
+			// Team mode does not support spawned child runs; stop legacy runs.
+			log.Printf("daemon: stopping legacy team child run %s (team %s)", run.RunID, teamID)
+			_ = s.StopRun(run.RunID)
+			_, _ = s.sessionService.StopRun(ctx, run.RunID, types.RunStatusCanceled, "legacy team child run cleaned up")
+			continue
+		}
+		if teamID != "" && run.Runtime != nil && strings.TrimSpace(run.Runtime.Role) == "" {
+			if _, roleByRun := loadTeamManifestRunRoles(s.cfg.DataDir, teamID); len(roleByRun) != 0 {
+				if role := strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)]); role != "" {
+					run.Runtime.Role = role
+					_ = s.sessionService.SaveRun(ctx, run)
+				}
+			}
 		}
 		if err := s.ensureRun(ctx, sess, run.RunID); err != nil {
 			log.Printf("daemon: managed run start failed for %s: %v", run.RunID, err)
@@ -334,7 +370,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		teamRoles = roles
 		coordinatorRole = coord
 		if roleName == "" {
-			roleName = coordinatorRole
+			_, roleByRun := loadTeamManifestRunRoles(s.cfg.DataDir, teamID)
+			roleName = strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)])
+		}
+		if roleName == "" {
+			return nil, fmt.Errorf("team run %s has no role mapping", runID)
 		}
 		var roleCfg *profile.RoleConfig
 		for i := range prof.Team.Roles {
@@ -434,10 +474,14 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		if role == "" {
 			role = "default"
 		}
-		sharedWorkspaceDir = fsutil.GetTeamRoleWorkspaceDir(s.cfg.DataDir, teamID, role)
+		if isCoordinator {
+			sharedWorkspaceDir = fsutil.GetTeamWorkspaceDir(s.cfg.DataDir, teamID)
+		} else {
+			sharedWorkspaceDir = fsutil.GetTeamRoleWorkspaceDir(s.cfg.DataDir, teamID, role)
+		}
 		if err := os.MkdirAll(sharedWorkspaceDir, 0o755); err != nil {
 			orderedEmitter.Close()
-			return nil, fmt.Errorf("prepare team role workspace: %w", err)
+			return nil, fmt.Errorf("prepare team workspace mount: %w", err)
 		}
 	}
 
@@ -448,6 +492,8 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		ProfileConfig:         prof,
 		WorkdirAbs:            s.workdirAbs,
 		SharedWorkspaceDir:    sharedWorkspaceDir,
+		TeamRoleName:          roleName,
+		TeamIsCoordinator:     isCoordinator,
 		Model:                 model,
 		ReasoningEffort:       resolvedEffort,
 		ReasoningSummary:      resolvedSummary,
@@ -496,8 +542,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	}
 	agentCfg.PromptSource = promptSource
 
-	currentModel := strings.TrimSpace(model)
-	var currentModelMu sync.Mutex
+	managed := &managedRuntime{
+		runID:     strings.TrimSpace(run.RunID),
+		sessionID: strings.TrimSpace(run.SessionID),
+		model:     strings.TrimSpace(model),
+	}
 	agentCfg.Hooks = agent.Hooks{
 		OnLLMUsage: newCostUsageHook(
 			s.cfg,
@@ -507,9 +556,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			s.resolved.PriceOutPerMTokensUSD,
 			s.sessionService,
 			func() string {
-				currentModelMu.Lock()
-				defer currentModelMu.Unlock()
-				return currentModel
+				return managed.CurrentModel()
 			},
 			emitEvent,
 		),
@@ -546,10 +593,6 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		tool.IsCoordinator = isCoordinator
 		tool.CoordinatorRole = coordinatorRole
 		tool.ValidRoles = teamRoles
-		// Co-agents (non-coordinator) may spawn sub-agents.
-		if !isCoordinator {
-			tool.SpawnWorker = s.makeSpawnWorkerFunc(run, model, emitEvent)
-		}
 	} else if run.ParentRunID == "" {
 		// Standalone mode (non-team, non-child): enable spawn_worker.
 		tool.SpawnWorker = s.makeSpawnWorkerFunc(run, model, emitEvent)
@@ -651,14 +694,10 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			if !isChildRun {
 				targetModel := strings.TrimSpace(loaded.ActiveModel)
 				if targetModel != "" {
-					currentModelMu.Lock()
-					same := strings.EqualFold(targetModel, currentModel)
-					currentModelMu.Unlock()
+					same := strings.EqualFold(targetModel, managed.CurrentModel())
 					if !same {
 						if err := workerSession.SetModel(workerCtx, targetModel); err == nil {
-							currentModelMu.Lock()
-							currentModel = targetModel
-							currentModelMu.Unlock()
+							managed.SetCurrentModel(targetModel)
 							emitEvent(workerCtx, events.Event{
 								Type:    "control.success",
 								Message: "Model synchronized from session state",
@@ -741,13 +780,10 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		}
 	}()
 
-	return &managedRuntime{
-		runID:     strings.TrimSpace(run.RunID),
-		sessionID: strings.TrimSpace(run.SessionID),
-		session:   workerSession,
-		cancel:    cancel,
-		done:      done,
-	}, nil
+	managed.session = workerSession
+	managed.cancel = cancel
+	managed.done = done
+	return managed, nil
 }
 
 func (s *runtimeSupervisor) PauseRun(runID string) error {
@@ -1099,9 +1135,13 @@ func (s *runtimeSupervisor) ApplySessionModel(ctx context.Context, sessionID, ta
 		if strings.TrimSpace(wr.ParentRunID) != "" {
 			continue
 		}
+		if strings.EqualFold(strings.TrimSpace(worker.CurrentModel()), model) {
+			continue
+		}
 		if err := worker.session.SetModel(ctx, model); err != nil {
 			return applied, err
 		}
+		worker.SetCurrentModel(model)
 		applied = append(applied, runID)
 	}
 	return applied, nil
@@ -1115,6 +1155,13 @@ func (s *runtimeSupervisor) makeSpawnWorkerFunc(
 	parentEmit events.EmitFunc,
 ) hosttools.SpawnWorkerFunc {
 	return func(ctx context.Context, goal, sessionID, parentRunID string) (string, error) {
+		if s.sessionService != nil {
+			if sess, err := s.sessionService.LoadSession(ctx, sessionID); err == nil {
+				if strings.TrimSpace(sess.TeamID) != "" {
+					return "", fmt.Errorf("spawn_worker unavailable in team mode")
+				}
+			}
+		}
 		// Count existing children to determine spawn index.
 		children, _ := s.sessionService.ListChildRuns(ctx, parentRunID)
 		spawnIndex := len(children) + 1

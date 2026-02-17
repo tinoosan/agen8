@@ -43,6 +43,8 @@ type BuildConfig struct {
 	ProfileConfig         *profile.Profile
 	WorkdirAbs            string
 	SharedWorkspaceDir    string
+	TeamRoleName          string
+	TeamIsCoordinator     bool
 	Model                 string
 	ReasoningEffort       string
 	ReasoningSummary      string
@@ -496,6 +498,23 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 
 	auditObs := newAuditObserver(cfg.Run.RunID, cfg.Emit, cfg.AuditReads)
 
+	guard := cfg.Guard
+	if strings.TrimSpace(run.Runtime.TeamID) != "" && !cfg.TeamIsCoordinator {
+		teamWriteGuard := makeTeamWorkerWriteGuard(strings.TrimSpace(cfg.TeamRoleName))
+		prev := guard
+		guard = func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse {
+			if teamWriteGuard != nil {
+				if blocked := teamWriteGuard(fs, req); blocked != nil {
+					return blocked
+				}
+			}
+			if prev != nil {
+				return prev(fs, req)
+			}
+			return nil
+		}
+	}
+
 	exec := NewExecutor(executor, ExecutorOptions{
 		Emit:      cfg.Emit,
 		Model:     cfg.Model,
@@ -503,10 +522,10 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		SessionID: cfg.Run.SessionID,
 		FS:        fs,
 		Guard: func(req types.HostOpRequest) *types.HostOpResponse {
-			if cfg.Guard == nil {
+			if guard == nil {
 				return nil
 			}
-			return cfg.Guard(fs, req)
+			return guard(fs, req)
 		},
 		Observers:       []HostOpObserver{constructor, updater, auditObs},
 		ArtifactObserve: cfg.ArtifactObserve,
@@ -526,6 +545,49 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func makeTeamWorkerWriteGuard(role string) func(*vfs.FS, types.HostOpRequest) *types.HostOpResponse {
+	roleSeg := sanitizeRoleSegment(role)
+	if roleSeg == "" {
+		return nil
+	}
+	badPrefix := "/workspace/" + roleSeg
+	badPrefixDir := badPrefix + "/"
+	return func(_ *vfs.FS, req types.HostOpRequest) *types.HostOpResponse {
+		switch req.Op {
+		case types.HostOpFSWrite, types.HostOpFSAppend, types.HostOpFSEdit, types.HostOpFSPatch:
+		default:
+			return nil
+		}
+		p := strings.TrimSpace(req.Path)
+		if p != badPrefix && !strings.HasPrefix(p, badPrefixDir) {
+			return nil
+		}
+		return &types.HostOpResponse{
+			Op:    req.Op,
+			Ok:    false,
+			Error: fmt.Sprintf("In team mode, write to /workspace/... (role root), not /workspace/%s/...", roleSeg),
+		}
+	}
+}
+
+func sanitizeRoleSegment(role string) string {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return "default"
+	}
+	var b strings.Builder
+	for _, r := range role {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	s := b.String()
+	if s == "" {
+		return "default"
+	}
+	return s
+}
 
 func resolveProfileSkills(cfg BuildConfig) []string {
 	if cfg.ProfileConfig != nil {

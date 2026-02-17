@@ -145,6 +145,27 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 	}
 }
 
+func TestActiveDashboardSideTabs_HidesSubagentsInTeamMode(t *testing.T) {
+	standalone := (&monitorModel{}).activeDashboardSideTabs()
+	foundSubagentsStandalone := false
+	for _, tab := range standalone {
+		if strings.EqualFold(strings.TrimSpace(tab.Name), "Subagents") {
+			foundSubagentsStandalone = true
+			break
+		}
+	}
+	if !foundSubagentsStandalone {
+		t.Fatalf("expected Subagents tab in standalone mode")
+	}
+
+	team := (&monitorModel{teamID: "team-1"}).activeDashboardSideTabs()
+	for _, tab := range team {
+		if strings.EqualFold(strings.TrimSpace(tab.Name), "Subagents") {
+			t.Fatalf("Subagents tab must be absent in team mode; tabs=%+v", team)
+		}
+	}
+}
+
 func TestRenderOpRequest_TaskCreate(t *testing.T) {
 	tests := []struct {
 		name string

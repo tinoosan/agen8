@@ -67,8 +67,16 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 	done, _ := s.taskService.CountTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled}})
 
 	roleInfo := map[string]string{}
-	roleByRunID := map[string]string{}
+	manifestRunIDs, roleByRunID := loadTeamManifestRunRoles(s.cfg.DataDir, teamID)
 	runIDSet := map[string]struct{}{}
+	for _, runID := range manifestRunIDs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		runIDSet[runID] = struct{}{}
+	}
+	manifestRoster := len(runIDSet) > 0
 	pendingTasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusPending}, SortBy: "created_at", SortDesc: false, Limit: 200})
 	activeTasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusActive}, SortBy: "updated_at", SortDesc: true, Limit: 200})
 	completedTasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled}, SortBy: "finished_at", SortDesc: true, Limit: 500})
@@ -79,10 +87,16 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 			role = "(coordinator)"
 		}
 		if runID := strings.TrimSpace(task.RunID); runID != "" {
-			if _, ok := roleByRunID[runID]; !ok {
-				roleByRunID[runID] = role
+			if !manifestRoster {
+				if _, ok := roleByRunID[runID]; !ok {
+					roleByRunID[runID] = role
+				}
+				runIDSet[runID] = struct{}{}
+			} else if _, ok := runIDSet[runID]; ok {
+				if _, seenRole := roleByRunID[runID]; !seenRole {
+					roleByRunID[runID] = role
+				}
 			}
-			runIDSet[runID] = struct{}{}
 		}
 		if _, exists := roleInfo[role]; !exists {
 			roleInfo[role] = "pending: " + truncateText(strings.TrimSpace(task.Goal), 52)
@@ -94,10 +108,16 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 			role = "(coordinator)"
 		}
 		if runID := strings.TrimSpace(task.RunID); runID != "" {
-			if _, ok := roleByRunID[runID]; !ok {
-				roleByRunID[runID] = role
+			if !manifestRoster {
+				if _, ok := roleByRunID[runID]; !ok {
+					roleByRunID[runID] = role
+				}
+				runIDSet[runID] = struct{}{}
+			} else if _, ok := runIDSet[runID]; ok {
+				if _, seenRole := roleByRunID[runID]; !seenRole {
+					roleByRunID[runID] = role
+				}
 			}
-			runIDSet[runID] = struct{}{}
 		}
 		roleInfo[role] = "active: " + truncateText(strings.TrimSpace(task.Goal), 52)
 	}
@@ -107,10 +127,16 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 			role = "(coordinator)"
 		}
 		if runID := strings.TrimSpace(task.RunID); runID != "" {
-			if _, ok := roleByRunID[runID]; !ok {
-				roleByRunID[runID] = role
+			if !manifestRoster {
+				if _, ok := roleByRunID[runID]; !ok {
+					roleByRunID[runID] = role
+				}
+				runIDSet[runID] = struct{}{}
+			} else if _, ok := runIDSet[runID]; ok {
+				if _, seenRole := roleByRunID[runID]; !seenRole {
+					roleByRunID[runID] = role
+				}
 			}
-			runIDSet[runID] = struct{}{}
 		}
 	}
 	roleKeys := make([]string, 0, len(roleInfo))
@@ -302,18 +328,20 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 		runIDs = append(runIDs, runID)
 		seenRuns[runID] = struct{}{}
 	}
-	tasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{TeamID: strings.TrimSpace(scope.teamID), Limit: 1000, SortBy: "created_at", SortDesc: true})
-	for _, t := range tasks {
-		runID := strings.TrimSpace(t.RunID)
-		if runID == "" {
-			continue
-		}
-		if _, ok := seenRuns[runID]; !ok {
-			runIDs = append(runIDs, runID)
-			seenRuns[runID] = struct{}{}
-		}
-		if _, ok := roleByRun[runID]; !ok {
-			roleByRun[runID] = strings.TrimSpace(t.AssignedRole)
+	if len(runIDs) == 0 {
+		tasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{TeamID: strings.TrimSpace(scope.teamID), Limit: 1000, SortBy: "created_at", SortDesc: true})
+		for _, t := range tasks {
+			runID := strings.TrimSpace(t.RunID)
+			if runID == "" {
+				continue
+			}
+			if _, ok := seenRuns[runID]; !ok {
+				runIDs = append(runIDs, runID)
+				seenRuns[runID] = struct{}{}
+			}
+			if _, ok := roleByRun[runID]; !ok {
+				roleByRun[runID] = strings.TrimSpace(t.AssignedRole)
+			}
 		}
 	}
 	if len(runIDs) == 0 {

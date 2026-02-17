@@ -81,3 +81,21 @@ func TestListPendingTasks_TeamRouting(t *testing.T) {
 		t.Fatalf("expected coordinator to receive assigned+unassigned tasks, got %d", len(coordTasks))
 	}
 }
+
+func TestNormalizeTeamCallbackArtifactPath(t *testing.T) {
+	role := "frontend-engineer"
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{in: "/workspace/report.md", want: "/workspace/frontend-engineer/report.md"},
+		{in: "/workspace/frontend-engineer/report.md", want: "/workspace/frontend-engineer/report.md"},
+		{in: "/tasks/2026-02-17/task-1/SUMMARY.md", want: "/workspace/frontend-engineer/tasks/2026-02-17/task-1/SUMMARY.md"},
+		{in: "/deliverables/r1/output.md", want: "/workspace/frontend-engineer/deliverables/r1/output.md"},
+	}
+	for _, tc := range cases {
+		if got := normalizeTeamCallbackArtifactPath(role, tc.in); got != tc.want {
+			t.Fatalf("normalizeTeamCallbackArtifactPath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

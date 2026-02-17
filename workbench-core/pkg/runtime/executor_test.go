@@ -34,6 +34,42 @@ func TestGuardMiddleware_ShortCircuits(t *testing.T) {
 	}
 }
 
+func TestMakeTeamWorkerWriteGuard_RejectsRolePrefixedWorkspaceWrites(t *testing.T) {
+	guard := makeTeamWorkerWriteGuard("frontend-engineer")
+	if guard == nil {
+		t.Fatalf("expected guard")
+	}
+	resp := guard(nil, types.HostOpRequest{Op: types.HostOpFSWrite, Path: "/workspace/frontend-engineer/report.md", Text: "x"})
+	if resp == nil || resp.Ok {
+		t.Fatalf("expected write rejection, got %+v", resp)
+	}
+	resp = guard(nil, types.HostOpRequest{Op: types.HostOpFSAppend, Path: "/workspace/frontend-engineer/notes.md", Text: "x"})
+	if resp == nil || resp.Ok {
+		t.Fatalf("expected append rejection, got %+v", resp)
+	}
+	resp = guard(nil, types.HostOpRequest{Op: types.HostOpFSEdit, Path: "/workspace/frontend-engineer/notes.md"})
+	if resp == nil || resp.Ok {
+		t.Fatalf("expected edit rejection, got %+v", resp)
+	}
+	resp = guard(nil, types.HostOpRequest{Op: types.HostOpFSPatch, Path: "/workspace/frontend-engineer/notes.md", Text: "---"})
+	if resp == nil || resp.Ok {
+		t.Fatalf("expected patch rejection, got %+v", resp)
+	}
+}
+
+func TestMakeTeamWorkerWriteGuard_AllowsCanonicalWorkspacePaths(t *testing.T) {
+	guard := makeTeamWorkerWriteGuard("frontend-engineer")
+	if guard == nil {
+		t.Fatalf("expected guard")
+	}
+	if resp := guard(nil, types.HostOpRequest{Op: types.HostOpFSWrite, Path: "/workspace/report.md", Text: "x"}); resp != nil {
+		t.Fatalf("expected canonical workspace write allowed, got %+v", resp)
+	}
+	if resp := guard(nil, types.HostOpRequest{Op: types.HostOpFSWrite, Path: "/workspace/docs/report.md", Text: "x"}); resp != nil {
+		t.Fatalf("expected nested non-role path allowed, got %+v", resp)
+	}
+}
+
 func TestDiffMiddleware_EmitsPatchPreview(t *testing.T) {
 	dir := t.TempDir()
 	res, err := resources.NewWorkdirResource(dir)

@@ -110,6 +110,15 @@ func resolveIndexedDiskPath(dataDir, teamID, runID, role, vpath string) string {
 	if strings.HasPrefix(vpath, "/workspace/") {
 		rel := strings.TrimPrefix(vpath, "/workspace/")
 		if strings.TrimSpace(teamID) != "" {
+			roleDir := strings.TrimSpace(role)
+			if roleDir != "" {
+				prefixed := roleDir + string(filepath.Separator)
+				if rel == roleDir {
+					rel = ""
+				} else if strings.HasPrefix(rel, prefixed) {
+					rel = strings.TrimPrefix(rel, prefixed)
+				}
+			}
 			return filepath.Join(fsutil.GetTeamRoleWorkspaceDir(dataDir, teamID, role), rel)
 		}
 		return filepath.Join(fsutil.GetWorkspaceDir(dataDir, runID), rel)

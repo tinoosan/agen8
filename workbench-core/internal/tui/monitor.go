@@ -512,7 +512,10 @@ func (m *monitorModel) Init() tea.Cmd {
 		m.rpcChecking = true
 		return tea.Batch(m.tick(), m.checkRPCHealthCmd(false), m.openNewSessionWizard())
 	}
-	cmds := []tea.Cmd{m.listenEvent(), m.listenErr(), m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage(), m.loadChildRuns()}
+	cmds := []tea.Cmd{m.listenEvent(), m.listenErr(), m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage()}
+	if strings.TrimSpace(m.teamID) == "" {
+		cmds = append(cmds, m.loadChildRuns())
+	}
 	if strings.TrimSpace(m.teamID) != "" {
 		cmds = append(cmds, m.loadTeamStatus(), m.loadTeamEvents(), m.loadPlanFilesCmd(), m.loadTeamManifestCmd())
 	}

@@ -2332,3 +2332,61 @@ func TestObserveEvent_AgentStatusLine(t *testing.T) {
 		t.Fatalf("after agent.error: status=%q, want %q", m.agentStatusLine, "⚠ Error")
 	}
 }
+
+func TestMonitorRefreshViewports_ReservesPaginationFooterRow(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	m, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+	m.width = 120
+	m.height = 45
+	m.refreshViewports()
+	baseOutboxH := m.outboxVP.Height
+	baseInboxH := m.inboxVP.Height
+	baseActivityH := m.activityList.Height()
+
+	m.outboxPageSize = 5
+	m.outboxTotalCount = 12
+	m.inboxPageSize = 5
+	m.inboxTotalCount = 11
+	m.activityPageSize = 10
+	m.activityTotalCount = 50
+	m.refreshViewports()
+
+	if m.outboxVP.Height != baseOutboxH-1 {
+		t.Fatalf("outbox viewport height=%d want %d with footer row reserved", m.outboxVP.Height, baseOutboxH-1)
+	}
+	if m.inboxVP.Height != baseInboxH-1 {
+		t.Fatalf("inbox viewport height=%d want %d with footer row reserved", m.inboxVP.Height, baseInboxH-1)
+	}
+	if m.activityList.Height() != baseActivityH-1 {
+		t.Fatalf("activity viewport height=%d want %d with footer row reserved", m.activityList.Height(), baseActivityH-1)
+	}
+}
+
+func TestAgentOutputScroll_GAndShiftG(t *testing.T) {
+	m := &monitorModel{
+		agentOutputVP:             viewport.New(80, 5),
+		agentOutputTotalLines:     30,
+		agentOutputLogicalYOffset: 10,
+	}
+
+	m.applyAgentOutputScroll(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	if m.agentOutputLogicalYOffset != 0 {
+		t.Fatalf("expected g to jump to top, got yOffset=%d", m.agentOutputLogicalYOffset)
+	}
+	if !isScrollKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}}) {
+		t.Fatalf("expected g to be recognized as scroll key")
+	}
+
+	m.applyAgentOutputScroll(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+	if m.agentOutputLogicalYOffset != 25 {
+		t.Fatalf("expected G to jump to bottom yOffset=25, got %d", m.agentOutputLogicalYOffset)
+	}
+	if !isScrollKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}}) {
+		t.Fatalf("expected G to be recognized as scroll key")
+	}
+}

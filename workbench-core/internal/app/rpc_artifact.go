@@ -546,24 +546,20 @@ func resolveArtifactDiskPath(dataDir, teamID, runID, role, vpath string) string 
 		return ""
 	}
 	rel := strings.TrimPrefix(vpath, "/workspace/")
-	resolveLegacy := func(base string) string {
-		legacyRel := strings.TrimPrefix(rel, "tasks/")
-		candidate := filepath.Join(base, "deliverables", legacyRel)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-		return ""
-	}
 	if strings.TrimSpace(teamID) != "" {
 		base := fsutil.GetTeamRoleWorkspaceDir(dataDir, teamID, role)
+		roleDir := strings.TrimSpace(role)
+		if roleDir != "" {
+			prefixed := roleDir + string(filepath.Separator)
+			if rel == roleDir {
+				rel = ""
+			} else if strings.HasPrefix(rel, prefixed) {
+				rel = strings.TrimPrefix(rel, prefixed)
+			}
+		}
 		candidate := filepath.Join(base, rel)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
-		}
-		if strings.HasPrefix(rel, "tasks/") {
-			if legacy := resolveLegacy(base); legacy != "" {
-				return legacy
-			}
 		}
 		return candidate
 	}
@@ -571,11 +567,6 @@ func resolveArtifactDiskPath(dataDir, teamID, runID, role, vpath string) string 
 	candidate := filepath.Join(base, rel)
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate
-	}
-	if strings.HasPrefix(rel, "tasks/") {
-		if legacy := resolveLegacy(base); legacy != "" {
-			return legacy
-		}
 	}
 	return candidate
 }

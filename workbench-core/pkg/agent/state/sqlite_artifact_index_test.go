@@ -40,8 +40,8 @@ func TestCompleteTask_IndexesArtifactsWithTeamDiskPath(t *testing.T) {
 		Summary:     "ok",
 		CompletedAt: &done,
 		Artifacts: []string{
-			"/workspace/deliverables/2026-02-08/callback-task-ceo-1/SUMMARY.md",
-			"/workspace/deliverables/2026-02-08/callback-task-ceo-1/report.md",
+			"/workspace/ceo/deliverables/2026-02-08/callback-task-ceo-1/SUMMARY.md",
+			"/workspace/ceo/deliverables/2026-02-08/callback-task-ceo-1/report.md",
 		},
 	}
 	if err := s.CompleteTask(ctx, "callback-task-ceo-1", res); err != nil {
@@ -81,8 +81,8 @@ func TestListArtifactGroups_GroupedAndOrdered(t *testing.T) {
 		}
 	}
 	done := now.Add(2 * time.Second)
-	_ = s.CompleteTask(ctx, "task-1", types.TaskResult{TaskID: "task-1", Status: types.TaskStatusSucceeded, Summary: "ok", CompletedAt: &done, Artifacts: []string{"/workspace/deliverables/2026-02-08/task-1/SUMMARY.md"}})
-	_ = s.CompleteTask(ctx, "heartbeat-ceo-run-1", types.TaskResult{TaskID: "heartbeat-ceo-run-1", Status: types.TaskStatusSucceeded, Summary: "ok", CompletedAt: &done, Artifacts: []string{"/workspace/deliverables/2026-02-08/heartbeat-ceo-run-1/SUMMARY.md"}})
+	_ = s.CompleteTask(ctx, "task-1", types.TaskResult{TaskID: "task-1", Status: types.TaskStatusSucceeded, Summary: "ok", CompletedAt: &done, Artifacts: []string{"/workspace/ceo/deliverables/2026-02-08/task-1/SUMMARY.md"}})
+	_ = s.CompleteTask(ctx, "heartbeat-ceo-run-1", types.TaskResult{TaskID: "heartbeat-ceo-run-1", Status: types.TaskStatusSucceeded, Summary: "ok", CompletedAt: &done, Artifacts: []string{"/workspace/ceo/deliverables/2026-02-08/heartbeat-ceo-run-1/SUMMARY.md"}})
 
 	groups, err := s.ListArtifactGroups(ctx, ArtifactFilter{TeamID: "team-1"})
 	if err != nil {
@@ -108,7 +108,7 @@ func TestSearchArtifacts_GlobalAndScoped(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 	done := now.Add(2 * time.Second)
-	if err := s.CompleteTask(ctx, "task-1", types.TaskResult{TaskID: "task-1", Status: types.TaskStatusSucceeded, Summary: "ok", CompletedAt: &done, Artifacts: []string{"/workspace/deliverables/2026-02-08/task-1/findings.json"}}); err != nil {
+	if err := s.CompleteTask(ctx, "task-1", types.TaskResult{TaskID: "task-1", Status: types.TaskStatusSucceeded, Summary: "ok", CompletedAt: &done, Artifacts: []string{"/workspace/ceo/deliverables/2026-02-08/task-1/findings.json"}}); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 	global, err := s.SearchArtifacts(ctx, ArtifactSearchFilter{ArtifactFilter: ArtifactFilter{TeamID: "team-1"}, Query: "findings"})

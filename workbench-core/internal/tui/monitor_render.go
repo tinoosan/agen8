@@ -199,8 +199,12 @@ func (m *monitorModel) renderHeader() string {
 }
 
 func (m *monitorModel) renderOutbox(spec layoutmgr.PanelSpec) string {
+	body := m.outboxVP.View()
+	if footer := m.renderPaginationFooter(m.outboxPage, m.outboxPageSize, m.outboxTotalCount); footer != "" {
+		body = strings.TrimRight(body, "\n") + "\n" + footer
+	}
 	return m.panelStyle(panelOutbox).Width(spec.InnerWidth()).Height(spec.InnerHeight()).Render(
-		m.styles.sectionTitle.Render("Outbox") + "\n" + m.outboxVP.View(),
+		m.styles.sectionTitle.Render("Outbox") + "\n" + body,
 	)
 }
 
@@ -450,22 +454,20 @@ func (m *monitorModel) renderPaginationFooter(page, pageSize, totalCount int) st
 	))
 }
 
-func (m *monitorModel) inboxViewportContent(width int) string {
-	body := renderInbox(m.inboxList)
-	footer := m.renderPaginationFooter(m.inboxPage, m.inboxPageSize, m.inboxTotalCount)
-	if footer != "" {
-		body = strings.TrimRight(body, "\n") + "\n" + footer
+func hasPaginationFooter(pageSize, totalCount int) bool {
+	if totalCount <= 0 || pageSize <= 0 {
+		return false
 	}
-	return body
+	totalPages := (totalCount + pageSize - 1) / pageSize
+	return totalPages > 1
+}
+
+func (m *monitorModel) inboxViewportContent(width int) string {
+	return renderInbox(m.inboxList)
 }
 
 func (m *monitorModel) outboxViewportContent(width int) string {
-	body := renderOutboxLines(m.outboxResults, m.renderer, width)
-	footer := m.renderPaginationFooter(m.outboxPage, m.outboxPageSize, m.outboxTotalCount)
-	if footer != "" {
-		body = strings.TrimRight(body, "\n") + "\n" + footer
-	}
-	return body
+	return renderOutboxLines(m.outboxResults, m.renderer, width)
 }
 
 func renderInbox(tasks []taskState) string {

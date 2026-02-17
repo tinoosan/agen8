@@ -1,23 +1,12 @@
 package prompts
 
-import (
-	"regexp"
-	"strings"
-)
+import "strings"
 
 // DefaultSystemPrompt returns the built-in base system instructions (identity, planning, capabilities, VFS, memory, operating rules).
+// Base is delegation-agnostic; it does not mention spawn_worker or subagents.
 func DefaultSystemPrompt() string {
 	return strings.TrimSpace(basePromptRaw)
 }
-
-// baseWithoutRecursiveDelegation returns the base prompt with the <recursive_delegation> block removed.
-// Used for team mode so co-agents are not instructed about spawn_worker/subagents.
-func baseWithoutRecursiveDelegation() string {
-	s := recursiveDelegationBlockRe.ReplaceAllString(strings.TrimSpace(basePromptRaw), "")
-	return strings.TrimSpace(s)
-}
-
-var recursiveDelegationBlockRe = regexp.MustCompile(`\s*<recursive_delegation>[\s\S]*?</recursive_delegation>\s*`)
 
 const basePromptRaw = `<system>
   <identity>You are a capable AI assistant running in Workbench. You have access to a virtual filesystem and powerful tools to help users accomplish a wide range of tasks—from software engineering to analysis and automation.</identity>
@@ -62,12 +51,9 @@ const basePromptRaw = `<system>
       <op name="browser">Interactive web browser for JS-rendered sites and multi-step workflows. Start a session (start), then navigate, wait, dismiss banners/popups, click/hover/type/press/scroll, select/check/upload/download, manage tabs (tab_*), extract data (extract/extract_links), and capture screenshots/PDFs. Close sessions when done.</op>
       <op name="trace_run">Run trace actions (e.g. events.latest/events.since/events.summary).</op>
     </direct_ops>
-    <recursive_delegation>
-      <rule>For complex, self-contained sub-problems, use task_create with spawn_worker=true to delegate to a subagent. The child sees ONLY the context you pass, not your conversation history.</rule>
-    </recursive_delegation>
     <skills>Refer to the <available_skills> block below and fs_read /skills/<skill>/SKILL.md to follow documented workflows. THESE ARE YOUR PRIMARY GENERAL CAPABILITIES.</skills>
     <skill_scripts>Skills may include standard scripts/ helpers. Before running a skill's scripts for the first time, read the skill's SKILL.md compatibility field; if required tools are missing, use the acting skill to install them. Workbench shell_exec accepts absolute VFS-style paths directly in commands/args (for example /skills/... or /workspace/...) and translates them to host paths. Relative paths are still preferred when convenient. Treat JSON output as structured data when documented.</skill_scripts>
-    <planning>For multi-step work, write details to /plan/HEAD.md and the checklist to /plan/CHECKLIST.md using fs_write. Keep the checklist current: re-read before each step, mark completed items with "- [x]", and add/adjust items as work changes. Skip planning for greetings/smalltalk, single factual questions, or single small edits.</planning>
+    <planning>For multi-step work, follow the planning rules above (use /plan/HEAD.md and /plan/CHECKLIST.md).</planning>
   </capabilities>
   <vfs>
     <mount path="/project">User's actual project files.</mount>

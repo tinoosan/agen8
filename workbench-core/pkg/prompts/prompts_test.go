@@ -33,15 +33,15 @@ func TestDefaultTeamModeSystemPrompt_ExcludesSubagentWording(t *testing.T) {
 	}
 }
 
-func TestBaseWithoutRecursiveDelegation_RemovesRecursiveDelegationBlock(t *testing.T) {
-	without := baseWithoutRecursiveDelegation()
-	if strings.Contains(without, "recursive_delegation") {
-		t.Error("baseWithoutRecursiveDelegation() should not contain recursive_delegation block")
+func TestDefaultSystemPrompt_IsDelegationAgnostic(t *testing.T) {
+	base := DefaultSystemPrompt()
+	if strings.Contains(base, "recursive_delegation") {
+		t.Error("DefaultSystemPrompt() (base) should not contain recursive_delegation block")
 	}
-	if strings.Contains(without, "spawn_worker=true") {
-		t.Error("baseWithoutRecursiveDelegation() should not contain spawn_worker reference")
+	if strings.Contains(base, "spawn_worker") {
+		t.Error("DefaultSystemPrompt() (base) should not contain spawn_worker reference")
 	}
-	if !strings.Contains(without, "fs_list") {
-		t.Error("baseWithoutRecursiveDelegation() should still contain base content")
+	if !strings.Contains(base, "fs_list") {
+		t.Error("DefaultSystemPrompt() should contain base content")
 	}
 }

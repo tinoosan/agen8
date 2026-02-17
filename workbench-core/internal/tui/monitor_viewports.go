@@ -195,7 +195,11 @@ func (m *monitorModel) refreshViewports() {
 	if resizeVP(&m.agentOutputVP, imax(10, grid.AgentOutput.ContentWidth), imax(1, grid.AgentOutput.ContentHeight)) {
 		m.dirtyAgentOutput = true
 	}
-	if resizeVP(&m.outboxVP, imax(10, grid.Outbox.ContentWidth), imax(1, grid.Outbox.ContentHeight)) {
+	outboxHeight := imax(1, grid.Outbox.ContentHeight)
+	if hasPaginationFooter(m.outboxPageSize, m.outboxTotalCount) {
+		outboxHeight = imax(1, outboxHeight-1)
+	}
+	if resizeVP(&m.outboxVP, imax(10, grid.Outbox.ContentWidth), outboxHeight) {
 		m.dirtyOutbox = true
 	}
 	if resizeVP(&m.activityDetail, imax(10, grid.ActivityDetail.ContentWidth), imax(1, grid.ActivityDetail.ContentHeight)) {
@@ -208,7 +212,11 @@ func (m *monitorModel) refreshViewports() {
 	if resizeVP(&m.thinkingVP, m.planViewport.Width, m.planViewport.Height) {
 		m.dirtyThinking = true
 	}
-	if resizeVP(&m.inboxVP, imax(10, grid.Inbox.ContentWidth), imax(1, grid.Inbox.ContentHeight)) {
+	inboxHeight := imax(1, grid.Inbox.ContentHeight)
+	if hasPaginationFooter(m.inboxPageSize, m.inboxTotalCount) {
+		inboxHeight = imax(1, inboxHeight-1)
+	}
+	if resizeVP(&m.inboxVP, imax(10, grid.Inbox.ContentWidth), inboxHeight) {
 		m.dirtyInbox = true
 	}
 	if resizeVP(&m.memoryVP, imax(10, grid.Memory.ContentWidth), imax(1, grid.Memory.ContentHeight)) {
@@ -217,6 +225,9 @@ func (m *monitorModel) refreshViewports() {
 
 	feedW := imax(10, grid.ActivityFeed.ContentWidth)
 	feedH := imax(1, grid.ActivityFeed.ContentHeight)
+	if hasPaginationFooter(m.activityPageSize, m.activityTotalCount) {
+		feedH = imax(1, feedH-1)
+	}
 	m.activityList.SetSize(feedW, feedH)
 
 	m.input.SetWidth(imax(10, grid.Composer.ContentWidth))
@@ -438,6 +449,12 @@ func (m *monitorModel) applyAgentOutputScroll(msg tea.KeyMsg) {
 			delta = -1
 		case "j", "J":
 			delta = 1
+		case "g":
+			abs = true
+			absVal = 0
+		case "G":
+			abs = true
+			absVal = maxY
 		}
 	}
 
@@ -462,7 +479,7 @@ func isScrollKey(msg tea.KeyMsg) bool {
 		return true
 	case tea.KeyRunes:
 		switch strings.TrimSpace(msg.String()) {
-		case "j", "k", "J", "K":
+		case "j", "k", "J", "K", "g", "G":
 			return true
 		}
 	}

@@ -18,8 +18,11 @@ func TestBuildTeamBlock(t *testing.T) {
 	if !strings.Contains(block, `assignedRole="head-analyst"`) {
 		t.Fatalf("expected escalation target in team block, got: %s", block)
 	}
-	if !strings.Contains(block, `/workspace/researcher/`) {
-		t.Fatalf("expected role-scoped workspace guidance in team block, got: %s", block)
+	if !strings.Contains(block, `/workspace/<file>`) {
+		t.Fatalf("expected worker workspace guidance in team block, got: %s", block)
+	}
+	if !strings.Contains(block, `avoid /workspace/researcher/...`) {
+		t.Fatalf("expected explicit worker role-prefix prohibition, got: %s", block)
 	}
 	if !strings.Contains(block, "Planning notes (plans/checklists) are internal working notes") {
 		t.Fatalf("expected internal notes guidance in team block, got: %s", block)
@@ -81,5 +84,8 @@ func TestBuildTeamBlock_CoordinatorRestrictionsAndMemoryPolicy(t *testing.T) {
 	}
 	if !strings.Contains(block, "Use WriteMemory and AppendMemory tools for memory updates") {
 		t.Fatalf("expected memory tool guidance, got: %s", block)
+	}
+	if !strings.Contains(block, "/workspace/<role>/...") {
+		t.Fatalf("expected coordinator team-root review guidance, got: %s", block)
 	}
 }

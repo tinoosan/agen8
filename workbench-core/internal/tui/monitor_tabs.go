@@ -98,6 +98,20 @@ var dashboardSideTabs = []dashboardSideTabDef{
 	},
 }
 
+func (m *monitorModel) activeDashboardSideTabs() []dashboardSideTabDef {
+	if m != nil && strings.TrimSpace(m.teamID) != "" {
+		out := make([]dashboardSideTabDef, 0, len(dashboardSideTabs))
+		for _, tab := range dashboardSideTabs {
+			if strings.EqualFold(strings.TrimSpace(tab.Name), "Subagents") {
+				continue
+			}
+			out = append(out, tab)
+		}
+		return out
+	}
+	return dashboardSideTabs
+}
+
 // renderCompact builds the view for compact mode: header + tab bar + main content + composer.
 func (m *monitorModel) renderCompact(grid layoutmgr.GridLayout, headerLine string) string {
 	tabBar := m.renderCompactTabBar()
@@ -149,17 +163,19 @@ func (m *monitorModel) compactTabToPanel() panelID {
 }
 
 func (m *monitorModel) dashboardSideTabToPanel() panelID {
-	if m.dashboardSideTab >= 0 && m.dashboardSideTab < len(dashboardSideTabs) {
-		return dashboardSideTabs[m.dashboardSideTab].FocusPanel
+	tabs := m.activeDashboardSideTabs()
+	if m.dashboardSideTab >= 0 && m.dashboardSideTab < len(tabs) {
+		return tabs[m.dashboardSideTab].FocusPanel
 	}
-	if len(dashboardSideTabs) == 0 {
+	if len(tabs) == 0 {
 		return panelActivity
 	}
-	return dashboardSideTabs[0].FocusPanel
+	return tabs[0].FocusPanel
 }
 
 func (m *monitorModel) syncDashboardSideTabFromFocus() {
-	for i, tab := range dashboardSideTabs {
+	tabs := m.activeDashboardSideTabs()
+	for i, tab := range tabs {
 		for _, panel := range tab.Panels {
 			if panel == m.focusedPanel {
 				m.dashboardSideTab = i
@@ -170,13 +186,14 @@ func (m *monitorModel) syncDashboardSideTabFromFocus() {
 }
 
 func (m *monitorModel) dashboardTabFocusCycle() []panelID {
-	if m.dashboardSideTab >= 0 && m.dashboardSideTab < len(dashboardSideTabs) {
-		return dashboardSideTabs[m.dashboardSideTab].FocusCycle
+	tabs := m.activeDashboardSideTabs()
+	if m.dashboardSideTab >= 0 && m.dashboardSideTab < len(tabs) {
+		return tabs[m.dashboardSideTab].FocusCycle
 	}
-	if len(dashboardSideTabs) == 0 {
+	if len(tabs) == 0 {
 		return []panelID{panelComposer}
 	}
-	return dashboardSideTabs[0].FocusCycle
+	return tabs[0].FocusCycle
 }
 
 func (m *monitorModel) renderCompactTabBar() string {
@@ -208,8 +225,9 @@ func (m *monitorModel) renderCompactTabContent(grid layoutmgr.GridLayout) string
 }
 
 func (m *monitorModel) renderDashboardSidePanelTabBar(grid layoutmgr.GridLayout) string {
-	parts := make([]string, len(dashboardSideTabs))
-	for i, tab := range dashboardSideTabs {
+	tabs := m.activeDashboardSideTabs()
+	parts := make([]string, len(tabs))
+	for i, tab := range tabs {
 		if i == m.dashboardSideTab {
 			parts[i] = m.styles.sectionTitle.Render(tab.Name)
 		} else {
@@ -228,15 +246,16 @@ func (m *monitorModel) renderDashboardSidePanelTabBar(grid layoutmgr.GridLayout)
 }
 
 func (m *monitorModel) renderDashboardSidePanels(grid layoutmgr.GridLayout) string {
-	if m.dashboardSideTab >= 0 && m.dashboardSideTab < len(dashboardSideTabs) {
-		if render := dashboardSideTabs[m.dashboardSideTab].Render; render != nil {
+	tabs := m.activeDashboardSideTabs()
+	if m.dashboardSideTab >= 0 && m.dashboardSideTab < len(tabs) {
+		if render := tabs[m.dashboardSideTab].Render; render != nil {
 			return render(m, grid)
 		}
 	}
-	if len(dashboardSideTabs) == 0 || dashboardSideTabs[0].Render == nil {
+	if len(tabs) == 0 || tabs[0].Render == nil {
 		return ""
 	}
-	return dashboardSideTabs[0].Render(m, grid)
+	return tabs[0].Render(m, grid)
 }
 
 func renderCompactOutputTab(m *monitorModel, grid layoutmgr.GridLayout) string {
@@ -258,10 +277,14 @@ func renderCompactPlanTab(m *monitorModel, grid layoutmgr.GridLayout) string {
 }
 
 func renderCompactOutboxTab(m *monitorModel, grid layoutmgr.GridLayout) string {
+	body := m.outboxVP.View()
+	if footer := m.renderPaginationFooter(m.outboxPage, m.outboxPageSize, m.outboxTotalCount); footer != "" {
+		body = strings.TrimRight(body, "\n") + "\n" + footer
+	}
 	return m.panelStyle(panelOutbox).
 		Width(grid.Outbox.InnerWidth()).
 		Height(grid.Outbox.InnerHeight()).
-		Render(m.styles.sectionTitle.Render("Outbox") + "\n" + m.outboxVP.View())
+		Render(m.styles.sectionTitle.Render("Outbox") + "\n" + body)
 }
 
 func renderDashboardActivityTab(m *monitorModel, grid layoutmgr.GridLayout) string {
@@ -307,10 +330,14 @@ func renderDashboardTasksTab(m *monitorModel, grid layoutmgr.GridLayout) string 
 		Render(m.styles.sectionTitle.Render(sectionTitle) + "\n" + currentTaskBody)
 	parts := []string{current}
 	if grid.Inbox.Height > 0 {
+		inboxBody := m.inboxVP.View()
+		if footer := m.renderPaginationFooter(m.inboxPage, m.inboxPageSize, m.inboxTotalCount); footer != "" {
+			inboxBody = strings.TrimRight(inboxBody, "\n") + "\n" + footer
+		}
 		inbox := m.panelStyle(panelInbox).
 			Width(grid.Inbox.InnerWidth()).
 			Height(grid.Inbox.InnerHeight()).
-			Render(m.styles.sectionTitle.Render("Inbox") + "\n" + m.inboxVP.View())
+			Render(m.styles.sectionTitle.Render("Inbox") + "\n" + inboxBody)
 		parts = append(parts, inbox)
 	}
 	if grid.Outbox.Height > 0 {

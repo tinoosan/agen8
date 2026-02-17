@@ -179,6 +179,9 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 		Limit:    clampLimit(p.Limit, 200, 2000),
 		Offset:   max(0, p.Offset),
 	}
+	if strings.TrimSpace(scope.teamID) != "" && strings.TrimSpace(p.RunID) == "" {
+		filter.RunID = ""
+	}
 	switch view {
 	case "inbox":
 		filter.Status = []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive}
@@ -1158,25 +1161,34 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 		return protocol.ActivityListResult{Activities: out, TotalCount: total, NextOffset: next}, nil
 	}
 
-	runRole := map[string]string{}
+	manifestRunIDs, runRole := loadTeamManifestRunRoles(s.cfg.DataDir, strings.TrimSpace(scope.teamID))
 	runSet := map[string]struct{}{}
-	tasks, err := s.taskService.ListTasks(ctx, state.TaskFilter{
-		TeamID:   strings.TrimSpace(scope.teamID),
-		Limit:    1000,
-		SortBy:   "created_at",
-		SortDesc: true,
-	})
-	if err != nil {
-		return protocol.ActivityListResult{}, err
-	}
-	for _, t := range tasks {
-		runID := strings.TrimSpace(t.RunID)
+	for _, runID := range manifestRunIDs {
+		runID = strings.TrimSpace(runID)
 		if runID == "" {
 			continue
 		}
 		runSet[runID] = struct{}{}
-		if _, ok := runRole[runID]; !ok {
-			runRole[runID] = strings.TrimSpace(t.AssignedRole)
+	}
+	if len(runSet) == 0 {
+		tasks, err := s.taskService.ListTasks(ctx, state.TaskFilter{
+			TeamID:   strings.TrimSpace(scope.teamID),
+			Limit:    1000,
+			SortBy:   "created_at",
+			SortDesc: true,
+		})
+		if err != nil {
+			return protocol.ActivityListResult{}, err
+		}
+		for _, t := range tasks {
+			runID := strings.TrimSpace(t.RunID)
+			if runID == "" {
+				continue
+			}
+			runSet[runID] = struct{}{}
+			if _, ok := runRole[runID]; !ok {
+				runRole[runID] = strings.TrimSpace(t.AssignedRole)
+			}
 		}
 	}
 	if targetRunID := strings.TrimSpace(p.RunID); targetRunID != "" {

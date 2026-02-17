@@ -1113,6 +1113,20 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 		if coordinatorRole == "" || strings.EqualFold(coordinatorRole, s.cfg.RoleName) {
 			return
 		}
+		artifactsForCoordinator := make([]string, 0, len(tr.Artifacts))
+		seenArtifacts := map[string]struct{}{}
+		for _, art := range tr.Artifacts {
+			normalized := normalizeTeamCallbackArtifactPath(strings.TrimSpace(s.cfg.RoleName), art)
+			normalized = strings.TrimSpace(normalized)
+			if normalized == "" {
+				continue
+			}
+			if _, ok := seenArtifacts[normalized]; ok {
+				continue
+			}
+			seenArtifacts[normalized] = struct{}{}
+			artifactsForCoordinator = append(artifactsForCoordinator, normalized)
+		}
 		callbackGoal := fmt.Sprintf("COORDINATOR REVIEW ONLY: Review %s result from role %q for task %s. Do not do specialist work yourself. Either delegate any needed follow-up to the appropriate role or mark the work complete and update overall team progress.", string(tr.Status), strings.TrimSpace(s.cfg.RoleName), truncateText(taskID, 24))
 		inputs := map[string]any{
 			"sourceTaskId": taskID,
@@ -1120,7 +1134,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			"sourceStatus": string(tr.Status),
 			"summary":      strings.TrimSpace(tr.Summary),
 			"error":        strings.TrimSpace(tr.Error),
-			"artifacts":    append([]string(nil), tr.Artifacts...),
+			"artifacts":    artifactsForCoordinator,
 		}
 		callback = types.Task{
 			TaskID:         callbackTaskID,
@@ -1323,6 +1337,60 @@ func sanitizeArtifactPaths(artifacts []string) []string {
 		out = append(out, p)
 	}
 	return out
+}
+
+func normalizeTeamCallbackArtifactPath(role, artifactPath string) string {
+	roleSeg := sanitizeRoleForWorkspacePath(role)
+	artifactPath = strings.TrimSpace(artifactPath)
+	if artifactPath == "" {
+		return ""
+	}
+	switch {
+	case strings.HasPrefix(artifactPath, "/workspace/"):
+		rel := strings.TrimPrefix(artifactPath, "/workspace/")
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			return path.Join("/workspace", roleSeg)
+		}
+		if rel == roleSeg || strings.HasPrefix(rel, roleSeg+"/") {
+			return path.Join("/workspace", rel)
+		}
+		return path.Join("/workspace", roleSeg, rel)
+	case strings.HasPrefix(artifactPath, "/tasks/"):
+		rel := strings.TrimPrefix(artifactPath, "/tasks/")
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			return path.Join("/workspace", roleSeg, "tasks")
+		}
+		return path.Join("/workspace", roleSeg, "tasks", rel)
+	case strings.HasPrefix(artifactPath, "/deliverables/"):
+		rel := strings.TrimPrefix(artifactPath, "/deliverables/")
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			return path.Join("/workspace", roleSeg, "deliverables")
+		}
+		return path.Join("/workspace", roleSeg, "deliverables", rel)
+	default:
+		return artifactPath
+	}
+}
+
+func sanitizeRoleForWorkspacePath(role string) string {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return "default"
+	}
+	var b strings.Builder
+	for _, r := range role {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	s := b.String()
+	if s == "" {
+		return "default"
+	}
+	return s
 }
 
 func tasksBase(when time.Time, taskID string) string {

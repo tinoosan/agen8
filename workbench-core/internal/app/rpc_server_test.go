@@ -656,7 +656,7 @@ func TestRPCServer_ArtifactList_TeamScopeAndGetTruncated(t *testing.T) {
 			Status:      types.TaskStatusSucceeded,
 			Summary:     "ok",
 			CompletedAt: &done,
-			Artifacts:   []string{"/workspace/deliverables/2026-02-08/" + tk.TaskID + "/SUMMARY.md"},
+			Artifacts:   []string{"/workspace/" + tk.AssignedRole + "/deliverables/2026-02-08/" + tk.TaskID + "/SUMMARY.md"},
 		}); err != nil {
 			t.Fatalf("CompleteTask(%s): %v", tk.TaskID, err)
 		}
@@ -697,7 +697,7 @@ func TestRPCServer_ArtifactList_TeamScopeAndGetTruncated(t *testing.T) {
 
 	getReq, _ := protocol.NewRequest("2", protocol.MethodArtifactGet, protocol.ArtifactGetParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
-		VPath:    "/workspace/deliverables/2026-02-08/" + t1.TaskID + "/SUMMARY.md",
+		VPath:    "/workspace/" + t1.AssignedRole + "/deliverables/2026-02-08/" + t1.TaskID + "/SUMMARY.md",
 		MaxBytes: 5,
 	})
 	getResp := rpcRoundTrip(t, srv, getReq)
@@ -2574,6 +2574,10 @@ func TestRPCServer_PlanGet_AggregateTeamUsesManifestRuns(t *testing.T) {
 		TaskID: "task-1", SessionID: run.SessionID, RunID: "run-1", TeamID: teamID, AssignedRole: "ceo",
 		Goal: "G", Status: types.TaskStatusPending, CreatedAt: &now,
 	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-legacy", SessionID: run.SessionID, RunID: "run-legacy", TeamID: teamID, AssignedRole: "legacy",
+		Goal: "legacy", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
 
 	srv := NewRPCServer(RPCServerConfig{
 		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
@@ -2594,5 +2598,198 @@ func TestRPCServer_PlanGet_AggregateTeamUsesManifestRuns(t *testing.T) {
 	}
 	if len(out.SourceRuns) < 2 || strings.TrimSpace(out.SourceRuns[1]) != "run-2" {
 		t.Fatalf("expected source runs to include manifest run-2 in order, got %+v", out.SourceRuns)
+	}
+	for _, runID := range out.SourceRuns {
+		if strings.TrimSpace(runID) == "run-legacy" {
+			t.Fatalf("stale task-history run should not be included in aggregate source runs: %+v", out.SourceRuns)
+		}
+	}
+}
+
+func TestRPCServer_TaskList_TeamScopeNoRunIDReturnsAllRoleRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	teamID := "team-1"
+	sess.TeamID = teamID
+	runA := types.NewRun("goal-a", 8*1024, sess.SessionID)
+	runB := types.NewRun("goal-b", 8*1024, sess.SessionID)
+	sess.CurrentRunID = runA.RunID
+	sess.Runs = []string{runA.RunID, runB.RunID}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), runA)
+	_ = sessStore.SaveRun(context.Background(), runB)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-a", SessionID: sess.SessionID, RunID: runA.RunID, TeamID: teamID, AssignedRole: "pm",
+		Goal: "task a", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-b", SessionID: sess.SessionID, RunID: runB.RunID, TeamID: teamID, AssignedRole: "ux",
+		Goal: "task b", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: runA, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodTaskList, protocol.TaskListParams{
+		ThreadID: protocol.ThreadID(sess.SessionID),
+		TeamID:   teamID,
+		View:     "inbox",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("task.list team error: %+v", resp.Error)
+	}
+	var out protocol.TaskListResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if len(out.Tasks) != 2 {
+		t.Fatalf("expected 2 team inbox tasks across role runs, got %d", len(out.Tasks))
+	}
+	seen := map[string]bool{}
+	for _, tk := range out.Tasks {
+		seen[strings.TrimSpace(tk.ID)] = true
+	}
+	if !seen["task-a"] || !seen["task-b"] {
+		t.Fatalf("expected team-wide tasks from run-a and run-b, got %+v", out.Tasks)
+	}
+}
+
+func TestRPCServer_TeamGetStatus_ManifestRosterIgnoresStaleTaskRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	teamID := "team-1"
+	sess.TeamID = teamID
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	teamDir := fsutil.GetTeamDir(cfg.DataDir, teamID)
+	if err := os.MkdirAll(teamDir, 0o755); err != nil {
+		t.Fatalf("mkdir team dir: %v", err)
+	}
+	manifest := `{"teamId":"team-1","profileId":"startup","teamModel":"openai/gpt-5-mini","coordinatorRole":"product-manager","coordinatorRunId":"run-pm","roles":[{"roleName":"product-manager","runId":"run-pm","sessionId":"sess-pm"},{"roleName":"ux-researcher","runId":"run-ux","sessionId":"sess-ux"}],"createdAt":"2026-01-01T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(teamDir, "team.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-pm", SessionID: sess.SessionID, RunID: "run-pm", TeamID: teamID, AssignedRole: "product-manager",
+		Goal: "pm", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-stale", SessionID: sess.SessionID, RunID: "run-legacy", TeamID: teamID, AssignedRole: "legacy",
+		Goal: "stale", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodTeamGetStatus, protocol.TeamGetStatusParams{
+		ThreadID: protocol.ThreadID(sess.SessionID),
+		TeamID:   teamID,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("team.getStatus error: %+v", resp.Error)
+	}
+	var out protocol.TeamGetStatusResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if len(out.RunIDs) != 2 || strings.TrimSpace(out.RunIDs[0]) != "run-pm" || strings.TrimSpace(out.RunIDs[1]) != "run-ux" {
+		t.Fatalf("run roster must match manifest and exclude stale history, got %+v", out.RunIDs)
+	}
+	if got := strings.TrimSpace(out.RoleByRunID["run-pm"]); got != "product-manager" {
+		t.Fatalf("roleByRunID[run-pm]=%q want product-manager", got)
+	}
+	if got := strings.TrimSpace(out.RoleByRunID["run-ux"]); got != "ux-researcher" {
+		t.Fatalf("roleByRunID[run-ux]=%q want ux-researcher", got)
+	}
+	if _, ok := out.RoleByRunID["run-legacy"]; ok {
+		t.Fatalf("stale run should not appear in role map: %+v", out.RoleByRunID)
+	}
+}
+
+func TestRPCServer_ActivityList_TeamUsesManifestRunsOnlyByDefault(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	teamID := "team-1"
+	sess.TeamID = teamID
+	rootRun := types.NewRun("goal", 8*1024, sess.SessionID)
+	manifestRun := types.NewRun("manifest-run", 8*1024, sess.SessionID)
+	manifestRun.RunID = "run-manifest"
+	staleRun := types.NewRun("stale-run", 8*1024, sess.SessionID)
+	staleRun.RunID = "run-legacy"
+	sess.CurrentRunID = rootRun.RunID
+	sess.Runs = []string{rootRun.RunID, manifestRun.RunID, staleRun.RunID}
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), rootRun)
+	_ = sessStore.SaveRun(context.Background(), manifestRun)
+	_ = sessStore.SaveRun(context.Background(), staleRun)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	teamDir := fsutil.GetTeamDir(cfg.DataDir, teamID)
+	if err := os.MkdirAll(teamDir, 0o755); err != nil {
+		t.Fatalf("mkdir team dir: %v", err)
+	}
+	manifest := `{"teamId":"team-1","profileId":"startup","teamModel":"openai/gpt-5-mini","coordinatorRole":"product-manager","coordinatorRunId":"run-manifest","roles":[{"roleName":"product-manager","runId":"run-manifest","sessionId":"sess-pm"}],"createdAt":"2026-01-01T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(teamDir, "team.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-manifest", SessionID: sess.SessionID, RunID: manifestRun.RunID, TeamID: teamID, AssignedRole: "product-manager",
+		Goal: "manifest", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-stale", SessionID: sess.SessionID, RunID: staleRun.RunID, TeamID: teamID, AssignedRole: "legacy",
+		Goal: "stale", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	if err := implstore.AppendEvent(context.Background(), cfg, types.EventRecord{
+		RunID:     manifestRun.RunID,
+		Timestamp: now,
+		Type:      "agent.op.request",
+		Message:   "manifest op",
+		Data:      map[string]string{"opId": "m1", "op": "fs_read", "path": "/workspace/m.txt"},
+	}); err != nil {
+		t.Fatalf("append event manifest run: %v", err)
+	}
+	if err := implstore.AppendEvent(context.Background(), cfg, types.EventRecord{
+		RunID:     staleRun.RunID,
+		Timestamp: now.Add(time.Second),
+		Type:      "agent.op.request",
+		Message:   "stale op",
+		Data:      map[string]string{"opId": "s1", "op": "fs_read", "path": "/workspace/s.txt"},
+	}); err != nil {
+		t.Fatalf("append event stale run: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: rootRun, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodActivityList, protocol.ActivityListParams{
+		ThreadID: protocol.ThreadID(sess.SessionID),
+		TeamID:   teamID,
+		Limit:    50,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("activity.list error: %+v", resp.Error)
+	}
+	var out protocol.ActivityListResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if len(out.Activities) != 1 {
+		t.Fatalf("expected only manifest-run activity, got %d entries: %+v", len(out.Activities), out.Activities)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(out.Activities[0].ID), manifestRun.RunID+":") {
+		t.Fatalf("expected manifest run activity only, got id=%q", out.Activities[0].ID)
 	}
 }

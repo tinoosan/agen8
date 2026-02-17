@@ -416,9 +416,12 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			return fmt.Errorf("create emitter for role %s: %w", role.Name, err)
 		}
 
-		roleWorkspaceDir := fsutil.GetTeamRoleWorkspaceDir(cfg.DataDir, teamID, role.Name)
-		if err := os.MkdirAll(roleWorkspaceDir, 0o755); err != nil {
-			return fmt.Errorf("prepare role workspace for %s: %w", role.Name, err)
+		mountedWorkspaceDir := fsutil.GetTeamRoleWorkspaceDir(cfg.DataDir, teamID, role.Name)
+		if role.Coordinator {
+			mountedWorkspaceDir = fsutil.GetTeamWorkspaceDir(cfg.DataDir, teamID)
+		}
+		if err := os.MkdirAll(mountedWorkspaceDir, 0o755); err != nil {
+			return fmt.Errorf("prepare mounted workspace for %s: %w", role.Name, err)
 		}
 		rt, err := runtime.Build(runtime.BuildConfig{
 			Cfg:                cfg,
@@ -426,7 +429,9 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			Profile:            strings.TrimSpace(prof.ID),
 			ProfileConfig:      prof,
 			WorkdirAbs:         workdirAbs,
-			SharedWorkspaceDir: roleWorkspaceDir,
+			SharedWorkspaceDir: mountedWorkspaceDir,
+			TeamRoleName:       role.Name,
+			TeamIsCoordinator:  role.Coordinator,
 			Model:              teamModel,
 			ReasoningEffort:    roleReasoningEffort,
 			ReasoningSummary:   roleReasoningSummary,

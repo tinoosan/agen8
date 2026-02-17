@@ -7,9 +7,13 @@ import (
 	"time"
 
 	implstore "github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
+	agentsession "github.com/tinoosan/workbench-core/pkg/agent/session"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
+	"github.com/tinoosan/workbench-core/pkg/profile"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -277,5 +281,213 @@ func TestApplySessionModel_SkipsChildRuns(t *testing.T) {
 		if id == childRun.RunID {
 			t.Fatalf("ApplySessionModel must not apply to child run %q", childRun.RunID)
 		}
+	}
+}
+
+type countingAgent struct {
+	cfg      agent.AgentConfig
+	mu       sync.Mutex
+	setModel int
+}
+
+func newCountingAgent(model string) *countingAgent {
+	return &countingAgent{
+		cfg: agent.AgentConfig{
+			Model: model,
+			Hooks: agent.Hooks{},
+		},
+	}
+}
+
+func (a *countingAgent) Run(_ context.Context, _ string) (agent.RunResult, error) {
+	return agent.RunResult{Text: "ok", Status: types.TaskStatusSucceeded}, nil
+}
+
+func (a *countingAgent) RunConversation(_ context.Context, _ []llmtypes.LLMMessage) (agent.RunResult, []llmtypes.LLMMessage, int, error) {
+	return agent.RunResult{Text: "ok", Status: types.TaskStatusSucceeded}, nil, 0, nil
+}
+
+func (a *countingAgent) ExecHostOp(_ context.Context, _ types.HostOpRequest) types.HostOpResponse {
+	return types.HostOpResponse{Ok: true}
+}
+
+func (a *countingAgent) GetModel() string { return a.cfg.Model }
+func (a *countingAgent) SetModel(v string) {
+	a.mu.Lock()
+	a.cfg.Model = v
+	a.setModel++
+	a.mu.Unlock()
+}
+func (a *countingAgent) modelSetCalls() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.setModel
+}
+func (a *countingAgent) WebSearchEnabled() bool                      { return a.cfg.EnableWebSearch }
+func (a *countingAgent) SetEnableWebSearch(v bool)                   { a.cfg.EnableWebSearch = v }
+func (a *countingAgent) GetApprovalsMode() string                    { return a.cfg.ApprovalsMode }
+func (a *countingAgent) SetApprovalsMode(v string)                   { a.cfg.ApprovalsMode = v }
+func (a *countingAgent) GetReasoningEffort() string                  { return a.cfg.ReasoningEffort }
+func (a *countingAgent) SetReasoningEffort(v string)                 { a.cfg.ReasoningEffort = v }
+func (a *countingAgent) GetReasoningSummary() string                 { return a.cfg.ReasoningSummary }
+func (a *countingAgent) SetReasoningSummary(v string)                { a.cfg.ReasoningSummary = v }
+func (a *countingAgent) GetSystemPrompt() string                     { return a.cfg.SystemPrompt }
+func (a *countingAgent) SetSystemPrompt(v string)                    { a.cfg.SystemPrompt = v }
+func (a *countingAgent) GetHooks() *agent.Hooks                      { return &a.cfg.Hooks }
+func (a *countingAgent) SetHooks(v agent.Hooks)                      { a.cfg.Hooks = v }
+func (a *countingAgent) GetToolRegistry() agent.ToolRegistryProvider { return nil }
+func (a *countingAgent) SetToolRegistry(agent.ToolRegistryProvider)  {}
+func (a *countingAgent) GetExtraTools() []llmtypes.Tool              { return a.cfg.ExtraTools }
+func (a *countingAgent) SetExtraTools(v []llmtypes.Tool)             { a.cfg.ExtraTools = v }
+func (a *countingAgent) Clone() agent.Agent                          { return a }
+func (a *countingAgent) Config() agent.AgentConfig                   { return a.cfg }
+func (a *countingAgent) CloneWithConfig(cfg agent.AgentConfig) (agent.Agent, error) {
+	a.cfg = cfg
+	return a, nil
+}
+
+func TestRuntimeSupervisor_SyncOnce_CleansLegacyTeamChildRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, parentRun, err := implstore.CreateSession(cfg, "team parent", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess.TeamID = "team-1"
+	parentRun.Status = types.RunStatusSucceeded
+	if err := implstore.SaveRun(cfg, parentRun); err != nil {
+		t.Fatalf("SaveRun parent: %v", err)
+	}
+	childRun := types.NewChildRun(parentRun.RunID, "legacy child", sess.SessionID, 1)
+	childRun.Status = types.RunStatusRunning
+	if err := implstore.SaveRun(cfg, childRun); err != nil {
+		t.Fatalf("SaveRun child: %v", err)
+	}
+	sess.Runs = append(sess.Runs, childRun.RunID)
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	taskSvc := pkgtask.NewManager(ts, nil)
+	now := time.Now().UTC()
+	if err := ts.CreateTask(context.Background(), types.Task{
+		TaskID:         "task-active",
+		SessionID:      sess.SessionID,
+		RunID:          childRun.RunID,
+		TeamID:         sess.TeamID,
+		AssignedToType: "agent",
+		AssignedTo:     childRun.RunID,
+		Goal:           "legacy child work",
+		Status:         types.TaskStatusActive,
+		CreatedAt:      &now,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	supervisor := &runtimeSupervisor{
+		cfg:            cfg,
+		taskService:    taskSvc,
+		sessionService: sessionSvc,
+		workers:        map[string]*managedRuntime{},
+	}
+	if err := supervisor.syncOnce(context.Background()); err != nil {
+		t.Fatalf("syncOnce: %v", err)
+	}
+
+	loadedChild, err := sessionSvc.LoadRun(context.Background(), childRun.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun child: %v", err)
+	}
+	if loadedChild.Status != types.RunStatusCanceled {
+		t.Fatalf("legacy child status=%q want %q", loadedChild.Status, types.RunStatusCanceled)
+	}
+	task, err := ts.GetTask(context.Background(), "task-active")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.Status != types.TaskStatusCanceled {
+		t.Fatalf("active child task status=%q want %q", task.Status, types.TaskStatusCanceled)
+	}
+}
+
+func TestRuntimeSupervisor_MakeSpawnWorkerFunc_BlocksTeamMode(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, parentRun, err := implstore.CreateSession(cfg, "team session", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess.TeamID = "team-1"
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	supervisor := &runtimeSupervisor{
+		cfg:            cfg,
+		sessionService: sessionSvc,
+	}
+	spawn := supervisor.makeSpawnWorkerFunc(parentRun, "openai/gpt-5-mini", nil)
+	childRunID, err := spawn(context.Background(), "do work", sess.SessionID, parentRun.RunID)
+	if err == nil {
+		t.Fatalf("expected team-mode spawn guard error, got child run %q", childRunID)
+	}
+	if got := err.Error(); got != "spawn_worker unavailable in team mode" {
+		t.Fatalf("unexpected spawn guard error: %v", err)
+	}
+}
+
+func TestApplySessionModel_SkipsWhenAlreadyOnModel(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, run, err := implstore.CreateSession(cfg, "same model", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	agentImpl := newCountingAgent("openai/gpt-5-mini")
+	rtSession, err := agentsession.New(agentsession.Config{
+		Agent:     agentImpl,
+		Profile:   &profile.Profile{ID: "general"},
+		TaskStore: ts,
+		SessionID: sess.SessionID,
+		RunID:     run.RunID,
+	})
+	if err != nil {
+		t.Fatalf("agentsession.New: %v", err)
+	}
+	supervisor := &runtimeSupervisor{
+		cfg:            cfg,
+		taskService:    pkgtask.NewManager(ts, nil),
+		sessionService: sessionSvc,
+		workers: map[string]*managedRuntime{
+			run.RunID: {
+				runID:     run.RunID,
+				sessionID: sess.SessionID,
+				session:   rtSession,
+				model:     "openai/gpt-5-mini",
+			},
+		},
+	}
+
+	applied, err := supervisor.ApplySessionModel(context.Background(), sess.SessionID, "", "openai/gpt-5-mini")
+	if err != nil {
+		t.Fatalf("ApplySessionModel: %v", err)
+	}
+	if len(applied) != 0 {
+		t.Fatalf("expected no model applications when unchanged, got %+v", applied)
+	}
+	if calls := agentImpl.modelSetCalls(); calls != 0 {
+		t.Fatalf("expected SetModel not to be called when model unchanged, got %d calls", calls)
 	}
 }
