@@ -243,6 +243,9 @@ func formatWorkdirErrorEventText(ev events.Event) string {
 }
 
 func renderOpRequest(d map[string]string) string {
+	if v := strings.TrimSpace(d["requestText"]); v != "" {
+		return v
+	}
 	op := strings.TrimSpace(d["op"])
 	tag := strings.TrimSpace(d["tag"])
 
@@ -308,6 +311,9 @@ func isSharedOpRequestTitleOp(op string) bool {
 }
 
 func renderOpResponse(d map[string]string) string {
+	if v := strings.TrimSpace(d["responseText"]); v != "" {
+		return v
+	}
 	op := strings.TrimSpace(d["op"])
 	tag := strings.TrimSpace(d["tag"])
 	ok := strings.TrimSpace(d["ok"])

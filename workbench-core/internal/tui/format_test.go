@@ -155,6 +155,30 @@ func TestRenderOpRequest_SharedOpParityWithOpMeta(t *testing.T) {
 	}
 }
 
+func TestRenderOpRequest_PrefersRequestTextField(t *testing.T) {
+	got := renderOpRequest(map[string]string{
+		"requestText": "custom request text",
+		"op":          "browser",
+		"action":      "navigate",
+		"url":         "https://example.com",
+	})
+	if got != "custom request text" {
+		t.Fatalf("renderOpRequest should prefer requestText field, got %q", got)
+	}
+}
+
+func TestRenderOpResponse_PrefersResponseTextField(t *testing.T) {
+	got := renderOpResponse(map[string]string{
+		"responseText": "custom response text",
+		"op":           "shell_exec",
+		"ok":           "true",
+		"exitCode":     "0",
+	})
+	if got != "custom response text" {
+		t.Fatalf("renderOpResponse should prefer responseText field, got %q", got)
+	}
+}
+
 func TestClassifyEvent_ClassMapping(t *testing.T) {
 	tests := []struct {
 		name string

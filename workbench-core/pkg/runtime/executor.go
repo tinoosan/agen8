@@ -441,6 +441,11 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 			reqData["patchBytes"] = strconv.Itoa(n)
 		}
 	}
+	if op := m.operations.Get(req.Op); op != nil {
+		if txt := strings.TrimSpace(op.FormatRequestText(req, reqData)); txt != "" {
+			reqData["requestText"] = txt
+		}
+	}
 
 	m.emit(ctx, events.Event{
 		Type:      "agent.op.request",
@@ -604,6 +609,11 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 					meta.StoreResp["items"] = strconv.Itoa(len(arr))
 				}
 			}
+		}
+	}
+	if op := m.operations.Get(req.Op); op != nil {
+		if txt := strings.TrimSpace(op.FormatResponseText(req, resp, reqData, meta.RespData)); txt != "" {
+			meta.RespData["responseText"] = txt
 		}
 	}
 

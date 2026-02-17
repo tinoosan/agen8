@@ -341,3 +341,140 @@ func TestEventMiddleware_AgentSpawnNoopIsReclassifiedAndEnriched(t *testing.T) {
 		t.Fatalf("expected response outputPreview to be set, got %q", got)
 	}
 }
+
+func TestEventMiddleware_EmitsRequestTextForRepresentativeOps(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+	})
+
+	var gotReq events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	emailInput, err := json.Marshal(map[string]string{
+		"to":      "team@example.com",
+		"subject": "Daily report",
+		"body":    "done",
+	})
+	if err != nil {
+		t.Fatalf("marshal email input: %v", err)
+	}
+
+	taskCreateInput, err := json.Marshal(map[string]any{
+		"goal":       "Write integration tests",
+		"taskId":     "task-1",
+		"childRunId": "run-1",
+	})
+	if err != nil {
+		t.Fatalf("marshal task_create input: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		req  types.HostOpRequest
+		want string
+	}{
+		{
+			name: "shell_exec",
+			req:  types.HostOpRequest{Op: types.HostOpShellExec, Argv: []string{"rg", "-n", "todo"}},
+			want: "rg -n todo",
+		},
+		{
+			name: "http_fetch",
+			req:  types.HostOpRequest{Op: types.HostOpHTTPFetch, URL: "https://example.com", Method: "GET"},
+			want: "GET https://example.com",
+		},
+		{
+			name: "browser",
+			req:  types.HostOpRequest{Op: types.HostOpBrowser, Input: json.RawMessage(`{"action":"navigate","url":"https://example.com"}`)},
+			want: "browse.navigate https://example.com",
+		},
+		{
+			name: "email",
+			req:  types.HostOpRequest{Op: types.HostOpEmail, Input: emailInput},
+			want: "Email team@example.com: Daily report",
+		},
+		{
+			name: "task_create",
+			req:  types.HostOpRequest{Op: types.HostOpToolResult, Tag: "task_create", Input: taskCreateInput},
+			want: "Create task",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := exec.Exec(context.Background(), tc.req)
+			if !resp.Ok {
+				t.Fatalf("expected ok response, got %+v", resp)
+			}
+			if got := strings.TrimSpace(gotReq.Data["requestText"]); got != tc.want {
+				t.Fatalf("requestText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		switch req.Op {
+		case types.HostOpFSRead:
+			return types.HostOpResponse{Op: req.Op, Ok: true, Truncated: true}
+		case types.HostOpShellExec:
+			return types.HostOpResponse{Op: req.Op, Ok: true, ExitCode: 0}
+		case types.HostOpHTTPFetch:
+			return types.HostOpResponse{Op: req.Op, Ok: true, Status: 200}
+		case types.HostOpBrowser:
+			return types.HostOpResponse{Op: "browser.navigate", Ok: true, Text: `{"title":"Example Domain"}`}
+		case types.HostOpEmail:
+			return types.HostOpResponse{Op: req.Op, Ok: true}
+		default:
+			return types.HostOpResponse{Op: req.Op, Ok: true}
+		}
+	})
+
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	tests := []struct {
+		name string
+		req  types.HostOpRequest
+		want string
+	}{
+		{name: "fs_read", req: types.HostOpRequest{Op: types.HostOpFSRead, Path: "/workspace/a.txt"}, want: "✓ truncated"},
+		{name: "shell_exec", req: types.HostOpRequest{Op: types.HostOpShellExec, Argv: []string{"echo", "ok"}}, want: "✓ exit 0"},
+		{name: "http_fetch", req: types.HostOpRequest{Op: types.HostOpHTTPFetch, URL: "https://example.com"}, want: "✓ 200"},
+		{name: "browser.navigate", req: types.HostOpRequest{Op: types.HostOpBrowser, Input: json.RawMessage(`{"action":"navigate","url":"https://example.com"}`)}, want: `✓ navigated "Example Domain"`},
+		{name: "email", req: types.HostOpRequest{Op: types.HostOpEmail, Input: json.RawMessage(`{"to":"team@example.com","subject":"Daily report","body":"done"}`)}, want: "✓ sent"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := exec.Exec(context.Background(), tc.req)
+			if !resp.Ok {
+				t.Fatalf("expected ok response, got %+v", resp)
+			}
+			if got := strings.TrimSpace(gotResp.Data["responseText"]); got != tc.want {
+				t.Fatalf("responseText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
