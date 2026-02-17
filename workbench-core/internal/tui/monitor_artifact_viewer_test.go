@@ -380,6 +380,36 @@ func TestBuildArtifactTreeFromGroups_AddsFallbackUnreportedDeliverables(t *testi
 	}
 }
 
+func TestBuildArtifactTreeFromGroups_StandaloneUsesProfileNameInsteadOfUnassigned(t *testing.T) {
+	m := &monitorModel{
+		profile:                 "dev_profile",
+		artifactWorkspaceExpand: map[string]bool{},
+	}
+	groups := []protocol.ArtifactNode{
+		{NodeKey: "day:2026-02-17", Kind: "day", Label: "2026-02-17", DayBucket: "2026-02-17"},
+		{NodeKey: "role:2026-02-17:unassigned", Kind: "role", Label: "unassigned", DayBucket: "2026-02-17", Role: "unassigned"},
+		{NodeKey: "task:task-standalone-1", Kind: "task", Label: "Do thing", DayBucket: "2026-02-17", Role: "unassigned", TaskKind: "task", TaskID: "task-standalone-1", Status: "succeeded"},
+		{NodeKey: "file:/tasks/subagent-1/2026-02-17/task-standalone-1/SUMMARY.md", Kind: "file", Label: "SUMMARY.md", VPath: "/tasks/subagent-1/2026-02-17/task-standalone-1/SUMMARY.md", Role: "unassigned", TaskID: "task-standalone-1", IsSummary: true},
+	}
+
+	tree := m.buildArtifactTreeFromGroups(groups)
+	foundTasksRole := false
+	for _, n := range tree {
+		if n.isRoleHeader && strings.HasPrefix(n.key, "tasks:role:") {
+			foundTasksRole = true
+			if n.name != "dev_profile" {
+				t.Fatalf("expected profile role label, got %q", n.name)
+			}
+			if strings.Contains(strings.ToLower(n.name), "unassigned") {
+				t.Fatalf("unexpected unassigned label in standalone role header: %+v", n)
+			}
+		}
+	}
+	if !foundTasksRole {
+		t.Fatalf("expected tasks role header in tree: %+v", tree)
+	}
+}
+
 func TestInferWorkspaceRole_FromRoleDirectoryAndFallback(t *testing.T) {
 	knownRoles := map[string]struct{}{
 		"researcher": {},

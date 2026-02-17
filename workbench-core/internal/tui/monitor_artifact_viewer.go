@@ -376,6 +376,23 @@ func roleForTask(task types.Task, roleByRunID map[string]string) string {
 	return "unassigned"
 }
 
+func (m *monitorModel) artifactStandaloneRoleLabel(role string) string {
+	role = strings.TrimSpace(role)
+	if strings.TrimSpace(m.teamID) != "" {
+		if role == "" {
+			return "unassigned"
+		}
+		return role
+	}
+	if role == "" || strings.EqualFold(role, "unassigned") {
+		if p := strings.TrimSpace(m.profile); p != "" {
+			return p
+		}
+		return "standalone"
+	}
+	return role
+}
+
 func taskKindLabel(kind string) string {
 	switch strings.TrimSpace(kind) {
 	case "callback":
@@ -445,9 +462,7 @@ func (m *monitorModel) buildArtifactTreeFromGroups(nodes []protocol.ArtifactNode
 		if role == "" {
 			role = strings.TrimSpace(currentRole)
 		}
-		if role == "" {
-			role = "unassigned"
-		}
+		role = m.artifactStandaloneRoleLabel(role)
 		switch kind {
 		case "task":
 			taskID := strings.TrimSpace(n.TaskID)
@@ -562,9 +577,7 @@ func (m *monitorModel) buildArtifactTreeFromGroups(nodes []protocol.ArtifactNode
 				continue
 			}
 			role := strings.TrimSpace(ws.role)
-			if role == "" {
-				role = "unassigned"
-			}
+			role = m.artifactStandaloneRoleLabel(role)
 			if _, ok := seenDeliverableRoles[role]; !ok {
 				seenDeliverableRoles[role] = struct{}{}
 				deliverableRoles = append(deliverableRoles, role)

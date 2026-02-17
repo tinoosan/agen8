@@ -301,3 +301,88 @@ func TestCompleteTask_StandaloneSubagentArtifactsIndexedUnderParentCanonicalPath
 		}
 	}
 }
+
+func TestBackfillArtifactIndex_RewritesLegacyStandaloneSubagentSummaryPath(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewSQLiteTaskStore(filepath.Join(dir, "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	db, err := s.dbConn()
+	if err != nil {
+		t.Fatalf("dbConn: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS runs (run_id TEXT PRIMARY KEY, session_id TEXT, status TEXT, goal TEXT, run_json TEXT, created_at TEXT, updated_at TEXT, parent_run_id TEXT)`); err != nil {
+		t.Fatalf("create runs table: %v", err)
+	}
+	childRun := types.Run{RunID: "run-child-9", ParentRunID: "run-parent-9", SpawnIndex: 1}
+	rawRun, _ := json.Marshal(childRun)
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, session_id, status, goal, run_json, created_at, updated_at, parent_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		childRun.RunID, "sess-1", "running", "child", string(rawRun), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), childRun.ParentRunID); err != nil {
+		t.Fatalf("insert child run: %v", err)
+	}
+
+	taskID := "task-child-backfill-1"
+	task := types.Task{
+		TaskID:    taskID,
+		SessionID: "sess-1",
+		RunID:     childRun.RunID,
+		Goal:      "child summary",
+		Status:    types.TaskStatusPending,
+		CreatedAt: &now,
+		Inputs:    map[string]any{},
+		Metadata:  map[string]any{"parentRunId": childRun.ParentRunID},
+		CreatedBy: childRun.ParentRunID,
+		TaskKind:  TaskKindTask,
+	}
+	if err := s.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	done := now.Add(2 * time.Second)
+	legacyVPath := "/tasks/2026-02-17/" + taskID + "/SUMMARY.md"
+	if err := s.CompleteTask(ctx, taskID, types.TaskResult{
+		TaskID:      taskID,
+		Status:      types.TaskStatusSucceeded,
+		CompletedAt: &done,
+		Artifacts:   []string{legacyVPath},
+	}); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+
+	// Seed an intentionally stale row as if produced by old indexing behavior.
+	if _, err := db.ExecContext(ctx, `DELETE FROM artifacts WHERE task_id = ?`, taskID); err != nil {
+		t.Fatalf("delete artifacts: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO artifacts (task_id, team_id, run_id, role, task_kind, is_summary, display_name, vpath, disk_path, produced_at, day_bucket)
+		VALUES (?, '', ?, 'unassigned', 'task', 1, 'SUMMARY.md', ?, ?, ?, ?)
+	`, taskID, childRun.RunID, legacyVPath, filepath.Join(dir, "agents", childRun.RunID, "tasks", "2026-02-17", taskID, "SUMMARY.md"), done.Format(time.RFC3339Nano), "2026-02-17"); err != nil {
+		t.Fatalf("insert stale artifact: %v", err)
+	}
+
+	if err := s.backfillArtifactIndex(ctx, db); err != nil {
+		t.Fatalf("backfillArtifactIndex: %v", err)
+	}
+
+	rows, err := s.ListArtifactsByTask(ctx, ArtifactFilter{TaskID: taskID})
+	if err != nil {
+		t.Fatalf("ListArtifactsByTask: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected exactly 1 canonical row after backfill, got %d", len(rows))
+	}
+	wantVPath := "/tasks/subagent-1/2026-02-17/" + taskID + "/SUMMARY.md"
+	if got := rows[0].VPath; got != wantVPath {
+		t.Fatalf("vpath = %q, want %q", got, wantVPath)
+	}
+	wantDisk := filepath.Join(dir, "agents", childRun.ParentRunID, "tasks", "subagent-1", "2026-02-17", taskID, "SUMMARY.md")
+	if got := rows[0].DiskPath; got != wantDisk {
+		t.Fatalf("disk path = %q, want %q", got, wantDisk)
+	}
+	if got := rows[0].RunID; got != childRun.ParentRunID {
+		t.Fatalf("run_id = %q, want parent run %q", got, childRun.ParentRunID)
+	}
+}

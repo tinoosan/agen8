@@ -112,6 +112,58 @@ func standaloneIndexedArtifactVPath(vpath string) bool {
 	return rel != ""
 }
 
+func canonicalizeStandaloneChildArtifactVPath(vpath, subagentLabel string) string {
+	vpath = strings.TrimSpace(vpath)
+	subagentLabel = strings.TrimSpace(subagentLabel)
+	if vpath == "" || subagentLabel == "" {
+		return vpath
+	}
+	switch {
+	case strings.HasPrefix(vpath, "/tasks/"):
+		rel := strings.TrimPrefix(vpath, "/tasks/")
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			return pathJoin("/tasks", subagentLabel)
+		}
+		first := rel
+		if cut, _, ok := strings.Cut(rel, "/"); ok {
+			first = cut
+		}
+		if first == subagentLabel {
+			return "/tasks/" + rel
+		}
+		return "/tasks/" + subagentLabel + "/" + rel
+	case strings.HasPrefix(vpath, "/workspace/"):
+		rel := strings.TrimPrefix(vpath, "/workspace/")
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			return pathJoin("/workspace", subagentLabel)
+		}
+		first := rel
+		if cut, _, ok := strings.Cut(rel, "/"); ok {
+			first = cut
+		}
+		if first == subagentLabel {
+			return "/workspace/" + rel
+		}
+		return "/workspace/" + subagentLabel + "/" + rel
+	default:
+		return vpath
+	}
+}
+
+func pathJoin(base, leaf string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	leaf = strings.Trim(strings.TrimSpace(leaf), "/")
+	if base == "" {
+		return "/" + leaf
+	}
+	if leaf == "" {
+		return base
+	}
+	return base + "/" + leaf
+}
+
 func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, task types.Task, result types.TaskResult) error {
 	taskKind := normalizeTaskKind(task.TaskKind)
 	if taskKind == TaskKindOther {
@@ -167,35 +219,9 @@ func (s *SQLiteTaskStore) upsertArtifactsTx(ctx context.Context, tx *sql.Tx, tas
 		}
 		indexVpath := vpath
 		artifactRunID := runID
-		if parentRunID != "" && strings.HasPrefix(vpath, "/tasks/") {
-			rel := strings.TrimPrefix(vpath, "/tasks/")
-			rel = strings.TrimPrefix(rel, "/")
-			if rel != "" {
-				first := rel
-				if cut, _, ok := strings.Cut(rel, "/"); ok {
-					first = cut
-				}
-				if first == subagentLabel {
-					indexVpath = "/tasks/" + rel
-				} else {
-					indexVpath = "/tasks/" + subagentLabel + "/" + rel
-				}
-				artifactRunID = parentRunID
-			}
-		}
-		if parentRunID != "" && strings.HasPrefix(vpath, "/workspace/") {
-			rel := strings.TrimPrefix(vpath, "/workspace/")
-			rel = strings.TrimPrefix(rel, "/")
-			if rel != "" {
-				first := rel
-				if cut, _, ok := strings.Cut(rel, "/"); ok {
-					first = cut
-				}
-				if first == subagentLabel {
-					indexVpath = "/workspace/" + rel
-				} else {
-					indexVpath = "/workspace/" + subagentLabel + "/" + rel
-				}
+		if parentRunID != "" {
+			indexVpath = canonicalizeStandaloneChildArtifactVPath(vpath, subagentLabel)
+			if strings.HasPrefix(indexVpath, "/tasks/") || strings.HasPrefix(indexVpath, "/workspace/") {
 				artifactRunID = parentRunID
 			}
 		}
@@ -562,7 +588,8 @@ func (s *SQLiteTaskStore) backfillArtifactIndex(ctx context.Context, db *sql.DB)
 	rows, err := db.QueryContext(ctx, `
 		SELECT
 			task_id, COALESCE(team_id, ''), COALESCE(run_id, ''), COALESCE(assigned_role, ''), COALESCE(created_by, ''),
-			COALESCE(task_kind, ''), COALESCE(role_snapshot, ''), COALESCE(artifacts_json, '[]'), COALESCE(finished_at, ''), status
+			COALESCE(task_kind, ''), COALESCE(role_snapshot, ''), COALESCE(artifacts_json, '[]'), COALESCE(finished_at, ''), status,
+			COALESCE(metadata_json, '{}')
 		FROM tasks
 		WHERE COALESCE(artifacts_json, '[]') != '[]'
 		  AND status IN ('succeeded', 'failed', 'canceled')
@@ -583,13 +610,14 @@ func (s *SQLiteTaskStore) backfillArtifactIndex(ctx context.Context, db *sql.DB)
 		artifactsRaw string
 		finishedRaw  string
 		status       string
+		metadataRaw  string
 	}
 	backfill := make([]backfillRow, 0, 64)
 	for rows.Next() {
 		var r backfillRow
 		if err := rows.Scan(
 			&r.taskID, &r.teamID, &r.runID, &r.assignedRole, &r.createdBy,
-			&r.taskKind, &r.roleSnapshot, &r.artifactsRaw, &r.finishedRaw, &r.status,
+			&r.taskKind, &r.roleSnapshot, &r.artifactsRaw, &r.finishedRaw, &r.status, &r.metadataRaw,
 		); err != nil {
 			return err
 		}
@@ -623,33 +651,23 @@ func (s *SQLiteTaskStore) backfillArtifactIndex(ctx context.Context, db *sql.DB)
 		`, taskKind, role, now, row.taskID); err != nil {
 			return err
 		}
-		existingRows, err := tx.QueryContext(ctx, `
-			SELECT LOWER(COALESCE(vpath, ''))
-			FROM artifacts
-			WHERE task_id = ?
-		`, row.taskID)
-		if err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM artifacts WHERE task_id = ?`, row.taskID); err != nil {
 			return err
 		}
-		existing := map[string]struct{}{}
-		for existingRows.Next() {
-			var v string
-			if err := existingRows.Scan(&v); err != nil {
-				_ = existingRows.Close()
-				return err
-			}
-			v = strings.TrimSpace(v)
-			if v != "" {
-				existing[v] = struct{}{}
-			}
-		}
-		if err := existingRows.Err(); err != nil {
-			_ = existingRows.Close()
-			return err
-		}
-		_ = existingRows.Close()
 		var artifacts []string
 		_ = json.Unmarshal([]byte(row.artifactsRaw), &artifacts)
+		metadata := map[string]any{}
+		if strings.TrimSpace(row.metadataRaw) != "" {
+			_ = json.Unmarshal([]byte(row.metadataRaw), &metadata)
+		}
+		parentRunID := ""
+		if p, _ := metadata["parentRunId"].(string); strings.TrimSpace(p) != "" {
+			parentRunID = strings.TrimSpace(p)
+		}
+		subagentLabel := fsutil.GetSubagentLabel(0)
+		if row.teamID == "" && parentRunID != "" {
+			subagentLabel = standaloneSubagentLabelForRunTx(ctx, tx, row.runID)
+		}
 		finished := parseTime(row.finishedRaw)
 		if finished.IsZero() {
 			finished = time.Now().UTC()
@@ -665,24 +683,29 @@ func (s *SQLiteTaskStore) backfillArtifactIndex(ctx context.Context, db *sql.DB)
 			if row.teamID == "" && !standaloneIndexedArtifactVPath(vpath) {
 				continue
 			}
-			if _, ok := seen[strings.ToLower(vpath)]; ok {
+			indexVpath := vpath
+			artifactRunID := row.runID
+			if row.teamID == "" && parentRunID != "" {
+				indexVpath = canonicalizeStandaloneChildArtifactVPath(vpath, subagentLabel)
+				if strings.HasPrefix(indexVpath, "/tasks/") || strings.HasPrefix(indexVpath, "/workspace/") {
+					artifactRunID = parentRunID
+				}
+			}
+			if _, ok := seen[strings.ToLower(indexVpath)]; ok {
 				continue
 			}
-			seen[strings.ToLower(vpath)] = struct{}{}
-			if _, ok := existing[strings.ToLower(vpath)]; ok {
-				continue
-			}
-			name := filepath.Base(vpath)
+			seen[strings.ToLower(indexVpath)] = struct{}{}
+			name := filepath.Base(indexVpath)
 			if name == "" || name == "." || name == "/" {
-				name = vpath
+				name = indexVpath
 			}
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO artifacts (
 					task_id, team_id, run_id, role, task_kind, is_summary,
 					display_name, vpath, disk_path, produced_at, day_bucket
 				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`, row.taskID, row.teamID, row.runID, role, taskKind, boolToInt(strings.EqualFold(name, "SUMMARY.md")),
-				name, vpath, resolveIndexedDiskPath(dataDir, row.teamID, row.runID, vpath), producedAt, dayBucket); err != nil {
+			`, row.taskID, row.teamID, artifactRunID, role, taskKind, boolToInt(strings.EqualFold(name, "SUMMARY.md")),
+				name, indexVpath, resolveIndexedDiskPath(dataDir, row.teamID, artifactRunID, indexVpath), producedAt, dayBucket); err != nil {
 				return err
 			}
 		}

@@ -580,6 +580,46 @@ func TestRPCServer_ArtifactGet_StandaloneUnreportedAcrossSessionRuns(t *testing.
 	}
 }
 
+func TestRPCServer_ArtifactGet_StandaloneCanonicalSubagentSummaryPath(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	parent := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = parent.RunID
+	sess.Runs = []string{parent.RunID}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), parent)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	summaryVPath := "/tasks/subagent-1/2026-02-17/task-child-1/SUMMARY.md"
+	summaryDisk := filepath.Join(fsutil.GetTasksDir(cfg.DataDir, parent.RunID), "subagent-1", "2026-02-17", "task-child-1", "SUMMARY.md")
+	if err := os.MkdirAll(filepath.Dir(summaryDisk), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(summaryDisk, []byte("child summary content"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: parent, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodArtifactGet, protocol.ArtifactGetParams{
+		ThreadID: protocol.ThreadID(sess.SessionID),
+		VPath:    summaryVPath,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("artifact.get error: %+v", resp.Error)
+	}
+	var out protocol.ArtifactGetResult
+	if err := json.Unmarshal(resp.Result, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if strings.TrimSpace(out.Content) != "child summary content" {
+		t.Fatalf("unexpected content: %q", out.Content)
+	}
+}
+
 func TestRPCServer_ArtifactSearch_ThreadMismatchAndQueryValidation(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")
