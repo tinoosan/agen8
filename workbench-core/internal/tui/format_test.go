@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -150,6 +151,106 @@ func TestRenderOpRequest_SharedOpParityWithOpMeta(t *testing.T) {
 		want := opmeta.FormatRequestTitle(tc)
 		if got != want {
 			t.Fatalf("renderOpRequest(%v)=%q want %q", tc, got, want)
+		}
+	}
+}
+
+func TestClassifyEvent_ClassMapping(t *testing.T) {
+	tests := []struct {
+		name string
+		ev   events.Event
+		want RenderClass
+	}{
+		{name: "ignore host mounted", ev: events.Event{Type: "host.mounted"}, want: RenderIgnore},
+		{name: "ignore workdir pwd", ev: events.Event{Type: "workdir.pwd", Data: map[string]string{"workdir": "/workspace"}}, want: RenderIgnore},
+		{name: "action run warning", ev: events.Event{Type: "run.warning", Data: map[string]string{"text": "disk low"}}, want: RenderAction},
+		{name: "action ui editor open", ev: events.Event{Type: "ui.editor.open", Data: map[string]string{"path": "/workspace/a.go"}}, want: RenderAction},
+		{name: "action workdir changed", ev: events.Event{Type: "workdir.changed", Data: map[string]string{"to": "/workspace"}}, want: RenderAction},
+		{name: "telemetry usage total", ev: events.Event{Type: "llm.usage.total"}, want: RenderTelemetry},
+		{name: "outcome agent error", ev: events.Event{Type: "agent.error"}, want: RenderOutcome},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := classifyEvent(tc.ev)
+			if rr.Class != tc.want {
+				t.Fatalf("classifyEvent(%s).Class = %v, want %v", tc.ev.Type, rr.Class, tc.want)
+			}
+		})
+	}
+}
+
+func TestClassifyEvent_TextFormattingFallbacks(t *testing.T) {
+	tests := []struct {
+		name string
+		ev   events.Event
+		want string
+	}{
+		{name: "run warning default text", ev: events.Event{Type: "run.warning", Data: map[string]string{}}, want: "Warning"},
+		{name: "refs attached default text", ev: events.Event{Type: "refs.attached", Data: map[string]string{}}, want: "Attached referenced files"},
+		{name: "ui open error path and err", ev: events.Event{Type: "ui.open.error", Data: map[string]string{"path": "/tmp/a.txt", "err": "permission denied"}}, want: "Open failed: /tmp/a.txt (permission denied)"},
+		{name: "ui open error err only", ev: events.Event{Type: "ui.open.error", Data: map[string]string{"err": "permission denied"}}, want: "Open failed: permission denied"},
+		{name: "ui open error default", ev: events.Event{Type: "ui.open.error", Data: map[string]string{}}, want: "Open failed"},
+		{name: "workdir changed from to", ev: events.Event{Type: "workdir.changed", Data: map[string]string{"from": "/a", "to": "/b"}}, want: "Workdir changed: /a → /b"},
+		{name: "workdir changed to only", ev: events.Event{Type: "workdir.changed", Data: map[string]string{"to": "/b"}}, want: "Workdir: /b"},
+		{name: "workdir changed default", ev: events.Event{Type: "workdir.changed", Data: map[string]string{}}, want: "Workdir changed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := classifyEvent(tc.ev)
+			if rr.Text != tc.want {
+				t.Fatalf("classifyEvent(%s).Text = %q, want %q", tc.ev.Type, rr.Text, tc.want)
+			}
+		})
+	}
+}
+
+func TestClassifyEvent_UnknownTypeIgnoredAndRawPreserved(t *testing.T) {
+	ev := events.Event{
+		Type:    "tool.custom",
+		Message: "custom event",
+		Data: map[string]string{
+			"k": "v",
+		},
+	}
+	rr := classifyEvent(ev)
+	if rr.Class != RenderIgnore {
+		t.Fatalf("expected RenderIgnore for unknown type, got %v", rr.Class)
+	}
+	if rr.Text != "" {
+		t.Fatalf("expected empty text for unknown type, got %q", rr.Text)
+	}
+
+	var raw struct {
+		Type    string            `json:"type"`
+		Message string            `json:"message"`
+		Data    map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(rr.Raw), &raw); err != nil {
+		t.Fatalf("expected valid raw JSON, got err=%v raw=%q", err, rr.Raw)
+	}
+	if raw.Type != ev.Type || raw.Message != ev.Message || raw.Data["k"] != "v" {
+		t.Fatalf("unexpected raw payload: %+v", raw)
+	}
+}
+
+func TestClassifyEvent_HiddenInboxOpIgnored(t *testing.T) {
+	ev := events.Event{
+		Type: "agent.op.request",
+		Data: map[string]string{
+			"op":   "fs_read",
+			"path": "/inbox/checklist.md",
+		},
+	}
+	rr := classifyEvent(ev)
+	if rr.Class != RenderIgnore {
+		t.Fatalf("expected hidden inbox op to be ignored, got %v", rr.Class)
+	}
+}
+
+func TestEventTextMapKeysAreClassified(t *testing.T) {
+	for k := range eventTextMap {
+		if _, ok := eventClassMap[k]; !ok {
+			t.Fatalf("eventTextMap key %q missing from eventClassMap", k)
 		}
 	}
 }

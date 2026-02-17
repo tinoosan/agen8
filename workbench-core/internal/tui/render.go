@@ -51,6 +51,58 @@ func rawEventJSON(ev events.Event) string {
 	return string(b)
 }
 
+var eventClassMap = map[string]RenderClass{
+	"host.mounted":         RenderIgnore,
+	"run.started":          RenderIgnore,
+	"run.completed":        RenderIgnore,
+	"agent.loop.start":     RenderIgnore,
+	"llm.usage":            RenderIgnore,
+	"user.message":         RenderIgnore,
+	"workdir.pwd":          RenderIgnore,
+	"agent.op.request":     RenderAction,
+	"agent.op.response":    RenderAction,
+	"run.warning":          RenderAction,
+	"refs.attached":        RenderAction,
+	"refs.ambiguous":       RenderAction,
+	"refs.unresolved":      RenderAction,
+	"artifact.published":   RenderAction,
+	"ui.editor.open":       RenderAction,
+	"ui.editor.error":      RenderAction,
+	"ui.open.ok":           RenderAction,
+	"ui.open.error":        RenderAction,
+	"workdir.changed":      RenderAction,
+	"workdir.error":        RenderAction,
+	"context.update":       RenderTelemetry,
+	"context.constructor":  RenderTelemetry,
+	"llm.usage.total":      RenderTelemetry,
+	"llm.cost.total":       RenderTelemetry,
+	"memory.evaluate":      RenderOutcome,
+	"memory.commit":        RenderOutcome,
+	"memory.audit.append":  RenderOutcome,
+	"profile.evaluate":     RenderOutcome,
+	"profile.commit":       RenderOutcome,
+	"profile.audit.append": RenderOutcome,
+	"agent.turn.complete":  RenderOutcome,
+	"agent.error":          RenderOutcome,
+}
+
+var eventTextMap = map[string]func(events.Event) string{
+	"agent.op.request":   formatAgentOpRequestEventText,
+	"agent.op.response":  formatAgentOpResponseEventText,
+	"run.warning":        formatRunWarningEventText,
+	"refs.attached":      formatRefsAttachedEventText,
+	"refs.ambiguous":     formatRefsAmbiguousEventText,
+	"refs.unresolved":    formatRefsUnresolvedEventText,
+	"artifact.published": formatArtifactPublishedEventText,
+	"ui.editor.open":     formatUIEditorOpenEventText,
+	"ui.editor.error":    formatUIEditorErrorEventText,
+	"ui.open.ok":         formatUIOpenOKEventText,
+	"ui.open.error":      formatUIOpenErrorEventText,
+	"workdir.changed":    formatWorkdirChangedEventText,
+	"workdir.pwd":        formatWorkdirPWDEventText,
+	"workdir.error":      formatWorkdirErrorEventText,
+}
+
 // classifyEvent converts a Workbench event into one of the chat-first presentation primitives.
 //
 // IMPORTANT: This does not expose any chain-of-thought. It only reflects observable activity.
@@ -63,180 +115,131 @@ func classifyEvent(ev events.Event) RenderResult {
 		return res
 	}
 
-	switch ev.Type {
-	// Noisy or non-user-facing events (still visible in details).
-	case "host.mounted", "run.started", "run.completed", "agent.loop.start":
+	class, ok := eventClassMap[ev.Type]
+	if !ok {
 		res.Class = RenderIgnore
-		return res
-	case "llm.usage":
-		res.Class = RenderIgnore
-		return res
-	case "user.message":
-		res.Class = RenderIgnore
-		return res
-
-	// Actions: these are the main "what is the agent doing" bullets.
-	case "agent.op.request":
-		res.Class = RenderAction
-		res.Text = renderOpRequest(ev.Data)
-		return res
-	case "agent.op.response":
-		res.Class = RenderAction
-		res.Text = renderOpResponse(ev.Data)
-		return res
-
-	// Host-side helpers (user-facing, compact).
-	case "run.warning":
-		res.Class = RenderAction
-		if txt := strings.TrimSpace(ev.Data["text"]); txt != "" {
-			res.Text = "Warning: " + txt
-		} else {
-			res.Text = "Warning"
-		}
-		return res
-	case "refs.attached":
-		res.Class = RenderAction
-		files := strings.TrimSpace(ev.Data["files"])
-		if files == "" {
-			res.Text = "Attached referenced files"
-		} else {
-			res.Text = "Attached " + files
-		}
-		return res
-	case "refs.ambiguous":
-		res.Class = RenderAction
-		tok := strings.TrimSpace(ev.Data["token"])
-		cands := strings.TrimSpace(ev.Data["candidates"])
-		if tok != "" && cands != "" {
-			res.Text = "Ambiguous @" + tok + " (candidates: " + cands + ")"
-		} else {
-			res.Text = "Ambiguous @reference"
-		}
-		return res
-	case "refs.unresolved":
-		res.Class = RenderAction
-		toks := strings.TrimSpace(ev.Data["tokens"])
-		if toks != "" {
-			res.Text = "Unresolved @references: " + toks
-		} else {
-			res.Text = "Unresolved @references"
-		}
-		return res
-	case "artifact.published":
-		res.Class = RenderAction
-		src := strings.TrimSpace(ev.Data["source"])
-		dst := strings.TrimSpace(ev.Data["dest"])
-		if src != "" && dst != "" {
-			res.Text = "Published " + src + " → " + dst
-		} else {
-			res.Text = "Published artifact to workdir"
-		}
-		return res
-
-	case "ui.editor.open":
-		res.Class = RenderAction
-		p := strings.TrimSpace(ev.Data["path"])
-		if p == "" {
-			p = strings.TrimSpace(ev.Data["vpath"])
-		}
-		if p != "" {
-			res.Text = "Edit " + p
-		} else {
-			res.Text = "Open editor"
-		}
-		return res
-	case "ui.editor.error":
-		res.Class = RenderAction
-		if e := strings.TrimSpace(ev.Data["err"]); e != "" {
-			res.Text = "Editor error: " + e
-		} else {
-			res.Text = "Editor error"
-		}
-		return res
-	case "ui.open.ok":
-		res.Class = RenderAction
-		p := strings.TrimSpace(ev.Data["path"])
-		if p != "" {
-			res.Text = "Opened " + p
-		} else {
-			res.Text = "Opened file"
-		}
-		return res
-	case "ui.open.error":
-		res.Class = RenderAction
-		p := strings.TrimSpace(ev.Data["path"])
-		e := strings.TrimSpace(ev.Data["err"])
-		if p != "" && e != "" {
-			res.Text = "Open failed: " + p + " (" + e + ")"
-		} else if e != "" {
-			res.Text = "Open failed: " + e
-		} else {
-			res.Text = "Open failed"
-		}
-		return res
-
-	case "workdir.changed":
-		res.Class = RenderAction
-		from := strings.TrimSpace(ev.Data["from"])
-		to := strings.TrimSpace(ev.Data["to"])
-		if from != "" && to != "" {
-			res.Text = "Workdir changed: " + from + " → " + to
-		} else if to != "" {
-			res.Text = "Workdir: " + to
-		} else {
-			res.Text = "Workdir changed"
-		}
-		return res
-	case "workdir.pwd":
-		// Do not render workdir into the transcript. Workdir is displayed in the header,
-		// and /pwd is often invoked automatically during pre-init.
-		res.Class = RenderIgnore
-		wd := strings.TrimSpace(ev.Data["workdir"])
-		if wd == "" {
-			res.Text = "Workdir"
-		} else {
-			res.Text = "Workdir: " + wd
-		}
-		return res
-	case "workdir.error":
-		res.Class = RenderAction
-		if e := strings.TrimSpace(ev.Data["err"]); e != "" {
-			res.Text = "Workdir change failed: " + e
-		} else {
-			res.Text = "Workdir change failed"
-		}
-		return res
-
-	// Telemetry/Outcome are never rendered into the chat transcript.
-	// The inspector/details view still receives the raw JSON lines.
-	case "context.update", "context.constructor":
-		res.Class = RenderTelemetry
-		return res
-	case "llm.usage.total":
-		res.Class = RenderTelemetry
-		return res
-	case "llm.cost.total":
-		res.Class = RenderTelemetry
-		return res
-
-	// Outcomes: commit/eval/audit summaries.
-	case "memory.evaluate", "memory.commit", "memory.audit.append":
-		res.Class = RenderOutcome
-		return res
-	case "profile.evaluate", "profile.commit", "profile.audit.append":
-		res.Class = RenderOutcome
-		return res
-	case "agent.turn.complete":
-		res.Class = RenderOutcome
-		return res
-	case "agent.error":
-		res.Class = RenderOutcome
 		return res
 	}
+	res.Class = class
 
-	// Default: show only in details.
-	res.Class = RenderIgnore
+	if f, ok := eventTextMap[ev.Type]; ok {
+		res.Text = f(ev)
+	}
 	return res
+}
+
+func formatAgentOpRequestEventText(ev events.Event) string {
+	return renderOpRequest(ev.Data)
+}
+
+func formatAgentOpResponseEventText(ev events.Event) string {
+	return renderOpResponse(ev.Data)
+}
+
+func formatRunWarningEventText(ev events.Event) string {
+	if txt := strings.TrimSpace(ev.Data["text"]); txt != "" {
+		return "Warning: " + txt
+	}
+	return "Warning"
+}
+
+func formatRefsAttachedEventText(ev events.Event) string {
+	files := strings.TrimSpace(ev.Data["files"])
+	if files == "" {
+		return "Attached referenced files"
+	}
+	return "Attached " + files
+}
+
+func formatRefsAmbiguousEventText(ev events.Event) string {
+	tok := strings.TrimSpace(ev.Data["token"])
+	cands := strings.TrimSpace(ev.Data["candidates"])
+	if tok != "" && cands != "" {
+		return "Ambiguous @" + tok + " (candidates: " + cands + ")"
+	}
+	return "Ambiguous @reference"
+}
+
+func formatRefsUnresolvedEventText(ev events.Event) string {
+	toks := strings.TrimSpace(ev.Data["tokens"])
+	if toks != "" {
+		return "Unresolved @references: " + toks
+	}
+	return "Unresolved @references"
+}
+
+func formatArtifactPublishedEventText(ev events.Event) string {
+	src := strings.TrimSpace(ev.Data["source"])
+	dst := strings.TrimSpace(ev.Data["dest"])
+	if src != "" && dst != "" {
+		return "Published " + src + " → " + dst
+	}
+	return "Published artifact to workdir"
+}
+
+func formatUIEditorOpenEventText(ev events.Event) string {
+	p := strings.TrimSpace(ev.Data["path"])
+	if p == "" {
+		p = strings.TrimSpace(ev.Data["vpath"])
+	}
+	if p != "" {
+		return "Edit " + p
+	}
+	return "Open editor"
+}
+
+func formatUIEditorErrorEventText(ev events.Event) string {
+	if e := strings.TrimSpace(ev.Data["err"]); e != "" {
+		return "Editor error: " + e
+	}
+	return "Editor error"
+}
+
+func formatUIOpenOKEventText(ev events.Event) string {
+	p := strings.TrimSpace(ev.Data["path"])
+	if p != "" {
+		return "Opened " + p
+	}
+	return "Opened file"
+}
+
+func formatUIOpenErrorEventText(ev events.Event) string {
+	p := strings.TrimSpace(ev.Data["path"])
+	e := strings.TrimSpace(ev.Data["err"])
+	if p != "" && e != "" {
+		return "Open failed: " + p + " (" + e + ")"
+	}
+	if e != "" {
+		return "Open failed: " + e
+	}
+	return "Open failed"
+}
+
+func formatWorkdirChangedEventText(ev events.Event) string {
+	from := strings.TrimSpace(ev.Data["from"])
+	to := strings.TrimSpace(ev.Data["to"])
+	if from != "" && to != "" {
+		return "Workdir changed: " + from + " → " + to
+	}
+	if to != "" {
+		return "Workdir: " + to
+	}
+	return "Workdir changed"
+}
+
+func formatWorkdirPWDEventText(ev events.Event) string {
+	wd := strings.TrimSpace(ev.Data["workdir"])
+	if wd == "" {
+		return "Workdir"
+	}
+	return "Workdir: " + wd
+}
+
+func formatWorkdirErrorEventText(ev events.Event) string {
+	if e := strings.TrimSpace(ev.Data["err"]); e != "" {
+		return "Workdir change failed: " + e
+	}
+	return "Workdir change failed"
 }
 
 func renderOpRequest(d map[string]string) string {
@@ -302,20 +305,6 @@ func isSharedOpRequestTitleOp(op string) bool {
 	default:
 		return false
 	}
-}
-
-func listPreview(items []string, maxItems int) string {
-	if len(items) == 0 {
-		return "[]"
-	}
-	if maxItems <= 0 || len(items) <= maxItems {
-		b, _ := json.Marshal(items)
-		return string(b)
-	}
-	trim := append([]string{}, items[:maxItems]...)
-	trim = append(trim, "…")
-	b, _ := json.Marshal(trim)
-	return string(b)
 }
 
 func renderOpResponse(d map[string]string) string {
@@ -524,53 +513,6 @@ func actionCategory(op string) string {
 		return "Created"
 	default:
 		return "Action"
-	}
-}
-
-func renderTurnComplete(d map[string]string) string {
-	turn := strings.TrimSpace(d["turn"])
-	steps := strings.TrimSpace(d["steps"])
-	duration := strings.TrimSpace(d["duration"])
-	if duration == "" {
-		duration = strings.TrimSpace(d["durationMs"]) + "ms"
-	}
-	out := []string{}
-	if turn != "" {
-		out = append(out, "Turn "+turn)
-	}
-	if steps != "" {
-		out = append(out, steps+" steps")
-	}
-	if duration != "" && duration != "ms" {
-		out = append(out, duration)
-	}
-	if len(out) == 0 {
-		return "Done"
-	}
-	return "Outcome: " + strings.Join(out, " • ")
-}
-
-func renderMemoryOutcome(label string, d map[string]string) string {
-	accepted := strings.TrimSpace(d["accepted"])
-	reason := strings.TrimSpace(d["reason"])
-	b := strings.TrimSpace(d["bytes"])
-
-	switch accepted {
-	case "true":
-		if b != "" {
-			return fmt.Sprintf("%s: accepted (%sB)", label, b)
-		}
-		return label + ": accepted"
-	case "false":
-		if reason == "" {
-			reason = "rejected"
-		}
-		if b != "" && b != "0" {
-			return fmt.Sprintf("%s: %s (%sB)", label, reason, b)
-		}
-		return fmt.Sprintf("%s: %s", label, reason)
-	default:
-		return label + ": " + compactKV(d, nil)
 	}
 }
 
