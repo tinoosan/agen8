@@ -16,7 +16,7 @@ func (m *monitorModel) dispatchUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg, tickMsg, rpcHealthMsg:
 		return m.handleWindowAndTick(msg)
-	case tailedEventMsg, tailErrMsg, commandLinesMsg, monitorEditorDoneMsg, taskQueuedLocallyMsg, monitorSwitchRunMsg, monitorSwitchTeamMsg, monitorReloadedMsg:
+	case tailedEventMsg, tailErrMsg, commandLinesMsg, monitorEditorDoneMsg, taskQueuedLocallyMsg, monitorSwitchRunMsg, monitorSwitchTeamMsg, monitorReloadedMsg, clipboardDoneMsg:
 		return m.handleTailAndStreamMessages(msg)
 	case inboxLoadedMsg, outboxLoadedMsg, teamStatusLoadedMsg, teamManifestLoadedMsg, teamEventsLoadedMsg, activityLoadedMsg, sessionsListMsg, agentsListMsg, planFilesLoadedMsg, sessionTotalsLoadedMsg, artifactTreeLoadedMsg, artifactContentLoadedMsg, monitorFilePickerPathsMsg, childRunsLoadedMsg:
 		return m.handleLoadedDataMessages(msg)
@@ -200,6 +200,14 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 			return m, m.scheduleUIRefresh()
 		}
 		return msg.model, tea.Batch(msg.model.Init(), msg.model.scheduleUIRefresh())
+
+	case clipboardDoneMsg:
+		if msg.err != nil {
+			m.appendAgentOutput("[copy] failed: " + strings.TrimSpace(msg.err.Error()))
+		} else {
+			m.appendAgentOutput("[copy] agent output copied to clipboard")
+		}
+		return m, m.scheduleUIRefresh()
 	}
 	return m, nil
 }

@@ -152,6 +152,25 @@ func FormatResponseText(d map[string]string) string {
 			return prefix + " " + errStr
 		}
 		return prefix + " failed"
+	case "code_exec":
+		if ok != "true" {
+			if errStr != "" {
+				return prefix + " " + errStr
+			}
+			return prefix + " failed"
+		}
+		tc := strings.TrimSpace(d["toolCallCount"])
+		runtimeMs := strings.TrimSpace(d["runtimeMs"])
+		if tc != "" && runtimeMs != "" {
+			return prefix + " " + tc + " tool calls, " + runtimeMs + "ms"
+		}
+		if tc != "" {
+			return prefix + " " + tc + " tool calls"
+		}
+		if runtimeMs != "" {
+			return prefix + " " + runtimeMs + "ms"
+		}
+		return prefix + " ok"
 	case "agent_spawn":
 		if ok == "true" {
 			return prefix + " child completed"

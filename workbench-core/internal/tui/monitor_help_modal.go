@@ -31,6 +31,7 @@ Type a message and press Ctrl+Enter to queue a task, or use a command (below):
   /stop                  Hard-stop run(s) and leave them paused
   /model                 Open model picker
   /model <id>            Set model directly
+  /copy                  Copy Agent Output transcript
   /editor                Open $EDITOR to compose (loads back into composer)
   /reasoning-effort      Set reasoning effort level
   /reasoning-summary     Set reasoning summary mode

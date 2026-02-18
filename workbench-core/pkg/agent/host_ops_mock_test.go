@@ -140,6 +140,40 @@ func TestHostOpExecutor_HTTPFetch_ResponseMapping(t *testing.T) {
 	}
 }
 
+func TestHostOpExecutor_CodeExec_ResponseMapping(t *testing.T) {
+	inv := &stubToolInvoker{
+		result: pkgtools.ToolCallResult{Output: json.RawMessage(`{"ok":true,"stdout":"hi","stderr":"","toolCallCount":2,"runtimeMs":11,"exitCode":0}`)},
+	}
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t), CodeExecInvoker: inv}
+	req := types.HostOpRequest{
+		Op:        types.HostOpCodeExec,
+		Language:  "python",
+		Code:      "print('hi')",
+		Cwd:       "/workspace",
+		TimeoutMs: 2000,
+		MaxBytes:  8192,
+		Input:     json.RawMessage(`{"maxToolCalls":5}`),
+	}
+	resp := exec.Exec(context.Background(), req)
+	if !resp.Ok {
+		t.Fatalf("expected success, got %#v", resp)
+	}
+	if resp.Stdout != "hi" || resp.ExitCode != 0 {
+		t.Fatalf("unexpected code_exec response mapping %#v", resp)
+	}
+
+	var sent map[string]any
+	if err := json.Unmarshal(inv.req.Input, &sent); err != nil {
+		t.Fatalf("unmarshal forwarded payload: %v", err)
+	}
+	if sent["language"] != "python" {
+		t.Fatalf("expected forwarded language python, got %#v", sent["language"])
+	}
+	if sent["maxToolCalls"] != float64(5) {
+		t.Fatalf("expected forwarded maxToolCalls=5, got %#v", sent["maxToolCalls"])
+	}
+}
+
 func TestHostOpExecutor_Email_MissingAndSuccess(t *testing.T) {
 	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
 	req := types.HostOpRequest{Op: types.HostOpEmail, Input: json.RawMessage(`{"to":"a@example.com","subject":"s","body":"b"}`)}

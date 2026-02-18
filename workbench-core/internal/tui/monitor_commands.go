@@ -43,6 +43,7 @@ var monitorCommandSpecs = []monitorCommandSpec{
 	{name: "/effort", desc: "Set reasoning effort", fn: cmdReasoningEffort, invokeWithoutArgs: true},
 	{name: "/reasoning-summary", desc: "Set reasoning summary", fn: cmdReasoningSummary, invokeWithoutArgs: true},
 	{name: "/memory", desc: "Search memory", fn: cmdMemorySearch},
+	{name: "/copy", desc: "Copy agent output transcript", fn: cmdCopy, invokeWithoutArgs: true},
 	{name: "/editor", desc: "Open external editor", fn: cmdEditor, invokeWithoutArgs: true},
 	{name: "/help", desc: "Show help", fn: cmdHelp, invokeWithoutArgs: true},
 	{name: "/quit", desc: "Exit monitor", fn: cmdQuit, invokeWithoutArgs: true},
@@ -142,6 +143,17 @@ func cmdReconnect(m *monitorModel, _ string) tea.Cmd {
 
 func cmdEditor(m *monitorModel, _ string) tea.Cmd {
 	return m.openComposeEditor("")
+}
+
+func cmdCopy(m *monitorModel, rest string) tea.Cmd {
+	if strings.TrimSpace(rest) != "" {
+		return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /copy"}} }
+	}
+	text := strings.TrimSpace(m.agentOutputForClipboard())
+	if text == "" {
+		return func() tea.Msg { return commandLinesMsg{lines: []string{"[copy] nothing to copy"}} }
+	}
+	return copyToClipboardCmd(text)
 }
 
 func cmdNewSession(m *monitorModel, rest string) tea.Cmd {

@@ -24,6 +24,11 @@ func TestFormatRequestTitle_SharedOps(t *testing.T) {
 			want: "POST https://example.com body: { \"x\":1 }",
 		},
 		{
+			name: "code exec",
+			data: map[string]string{"op": "code_exec", "language": "python"},
+			want: "Run python code",
+		},
+		{
 			name: "trace action and key",
 			data: map[string]string{"op": "trace_run", "traceAction": "set", "traceKey": "alpha"},
 			want: "trace.set alpha",

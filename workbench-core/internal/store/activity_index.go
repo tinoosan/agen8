@@ -207,6 +207,8 @@ func upsertActivityResponseTx(tx *sql.Tx, runID string, _ int64, ev types.EventR
 	act.Truncated = parseBool(ev.Data["truncated"])
 	if v := strings.TrimSpace(ev.Data["outputPreview"]); v != "" {
 		act.OutputPreview = v
+	} else if v := strings.TrimSpace(ev.Data["result"]); v != "" {
+		act.OutputPreview = v
 	} else if v := strings.TrimSpace(ev.Data["output"]); v != "" {
 		act.OutputPreview = v
 	}

@@ -12,6 +12,7 @@ var defaultActivityRenderer ActivityRenderer = baseRenderer{}
 var activityRenderers = map[string]ActivityRenderer{
 	"agent_spawn":     agentSpawnRenderer{},
 	"browser":         browserRenderer{},
+	"code_exec":       codeExecRenderer{},
 	"email":           emailRenderer{},
 	"fs_append":       fsWriteAppendRenderer{},
 	"fs_search":       fsSearchRenderer{},
@@ -83,6 +84,75 @@ func (shellExecRenderer) RenderArguments(a Activity, telemetry bool, b *strings.
 		b.WriteString("- cwd: `")
 		b.WriteString(v)
 		b.WriteString("`\n")
+	}
+}
+
+type codeExecRenderer struct{ baseRenderer }
+
+func (codeExecRenderer) RenderDetail(a Activity, expanded bool, telemetry bool, b *strings.Builder) {
+	if v := strings.TrimSpace(a.Data["result"]); v != "" {
+		b.WriteString("\n**result**\n\n")
+		b.WriteString(FormatCode("json", v))
+		b.WriteString("\n")
+		if strings.TrimSpace(a.Data["resultPreviewTruncated"]) == "true" {
+			b.WriteString("_result preview truncated_\n")
+		}
+	}
+	if v := strings.TrimSpace(a.Data["stdout"]); v != "" {
+		b.WriteString("\n**stdout**\n\n")
+		b.WriteString(FormatCode("text", v))
+		b.WriteString("\n")
+	}
+	if v := strings.TrimSpace(a.Data["stderr"]); v != "" {
+		b.WriteString("\n**stderr**\n\n")
+		b.WriteString(FormatCode("text", v))
+		b.WriteString("\n")
+	}
+	if v := strings.TrimSpace(a.Data["toolCallCount"]); v != "" {
+		b.WriteString("- toolCallCount: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["runtimeMs"]); v != "" {
+		b.WriteString("- runtimeMs: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	renderCommonOutputPreview(a, expanded, b)
+	renderTelemetryBlock(a, telemetry, false, false, b)
+}
+
+func (codeExecRenderer) RenderArguments(a Activity, telemetry bool, b *strings.Builder) {
+	renderDefaultArgumentsPrefix(a, telemetry, b)
+	if v := strings.TrimSpace(a.Data["language"]); v != "" {
+		b.WriteString("- language: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["cwd"]); v != "" {
+		b.WriteString("- cwd: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["timeoutMs"]); v != "" {
+		b.WriteString("- timeoutMs: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["maxBytes"]); v != "" {
+		b.WriteString("- maxOutputBytes: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["maxToolCalls"]); v != "" {
+		b.WriteString("- maxToolCalls: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["code"]); v != "" {
+		b.WriteString("- code:\n\n")
+		b.WriteString(FormatCode("python", v))
+		b.WriteString("\n")
 	}
 }
 

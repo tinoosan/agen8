@@ -52,3 +52,19 @@ func TestPromptToolSpecFromSources_IncludesFinalAnswerDedupesAndSorts(t *testing
 		}
 	}
 }
+
+func TestSortedToolNamesFromRegistry_SortsAndDedupes(t *testing.T) {
+	reg := NewHostToolRegistry()
+	if err := reg.Register(&promptTestTool{name: "z_tool", desc: "Z"}); err != nil {
+		t.Fatalf("register z_tool: %v", err)
+	}
+	if err := reg.Register(&promptTestTool{name: "a_tool", desc: "A"}); err != nil {
+		t.Fatalf("register a_tool: %v", err)
+	}
+
+	got := SortedToolNamesFromRegistry(reg)
+	want := []string{"a_tool", "z_tool"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("unexpected sorted names: got %v want %v", got, want)
+	}
+}

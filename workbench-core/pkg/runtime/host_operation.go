@@ -101,6 +101,7 @@ func defaultHostOperations() []HostOperation {
 		fsEditOperation{},
 		fsPatchOperation{},
 		shellExecOperation{},
+		codeExecOperation{},
 		httpFetchOperation{},
 		browserOperation{},
 		traceRunOperation{},
@@ -359,6 +360,165 @@ func (shellExecOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.
 			respData["warning"] = s
 			if tr {
 				respData["warningTruncated"] = "true"
+			}
+		}
+	}
+}
+
+type codeExecOperation struct{}
+
+func (codeExecOperation) Op() string { return types.HostOpCodeExec }
+func (codeExecOperation) Execute(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
+	return next(ctx, req)
+}
+func (codeExecOperation) FormatRequestText(_ types.HostOpRequest, reqData map[string]string) string {
+	return opformat.FormatRequestText(reqData)
+}
+func (codeExecOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpResponse, _ map[string]string, respData map[string]string) string {
+	return opformat.FormatResponseText(respData)
+}
+func (codeExecOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
+	if lang := strings.TrimSpace(req.Language); lang != "" {
+		reqData["language"] = lang
+		storeReq["language"] = lang
+	}
+	if cwd := strings.TrimSpace(req.Cwd); cwd != "" {
+		reqData["cwd"] = cwd
+		storeReq["cwd"] = cwd
+	}
+	if req.TimeoutMs > 0 {
+		reqData["timeoutMs"] = strconv.Itoa(req.TimeoutMs)
+		storeReq["timeoutMs"] = strconv.Itoa(req.TimeoutMs)
+	}
+	if req.MaxBytes > 0 {
+		reqData["maxBytes"] = strconv.Itoa(req.MaxBytes)
+		storeReq["maxBytes"] = strconv.Itoa(req.MaxBytes)
+	}
+	if len(req.Input) > 0 {
+		var ext struct {
+			MaxToolCalls *int `json:"maxToolCalls"`
+		}
+		if err := json.Unmarshal(req.Input, &ext); err == nil && ext.MaxToolCalls != nil {
+			reqData["maxToolCalls"] = strconv.Itoa(*ext.MaxToolCalls)
+			storeReq["maxToolCalls"] = strconv.Itoa(*ext.MaxToolCalls)
+		}
+	}
+	if req.Code != "" {
+		reqData["code"] = req.Code
+		storeReq["code"] = req.Code
+		reqData["codeBytes"] = strconv.Itoa(len(req.Code))
+		storeReq["codeBytes"] = strconv.Itoa(len(req.Code))
+	}
+}
+func (codeExecOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	if resp.ExitCode != 0 {
+		respData["exitCode"] = strconv.Itoa(resp.ExitCode)
+		storeResp["exitCode"] = strconv.Itoa(resp.ExitCode)
+	}
+	if strings.TrimSpace(resp.Stdout) != "" {
+		if p, tr := capBytes(resp.Stdout, 1000); p != "" {
+			respData["stdout"] = p
+			storeResp["stdout"] = p
+			if tr {
+				respData["stdoutTruncated"] = "true"
+				storeResp["stdoutTruncated"] = "true"
+			}
+		}
+	}
+	if strings.TrimSpace(resp.Stderr) != "" {
+		if p, tr := capBytes(resp.Stderr, 1000); p != "" {
+			respData["stderr"] = p
+			storeResp["stderr"] = p
+			if tr {
+				respData["stderrTruncated"] = "true"
+				storeResp["stderrTruncated"] = "true"
+			}
+		}
+	}
+	outputPreview := ""
+	if len(resp.Text) == 0 {
+		if v := strings.TrimSpace(resp.Stdout); v != "" {
+			if p, _ := capBytes(v, 300); p != "" {
+				respData["outputPreview"] = p
+				storeResp["outputPreview"] = p
+			}
+		} else if v := strings.TrimSpace(resp.Stderr); v != "" {
+			if p, _ := capBytes(v, 300); p != "" {
+				respData["outputPreview"] = p
+				storeResp["outputPreview"] = p
+			}
+		}
+		return
+	}
+	var payload struct {
+		Result          json.RawMessage `json:"result"`
+		ToolCallCount   int             `json:"toolCallCount"`
+		RuntimeMs       int64           `json:"runtimeMs"`
+		ResultTruncated bool            `json:"resultTruncated"`
+		StdoutTruncated bool            `json:"stdoutTruncated"`
+		StderrTruncated bool            `json:"stderrTruncated"`
+	}
+	if err := json.Unmarshal([]byte(resp.Text), &payload); err != nil {
+		return
+	}
+	respData["toolCallCount"] = strconv.Itoa(payload.ToolCallCount)
+	storeResp["toolCallCount"] = strconv.Itoa(payload.ToolCallCount)
+	respData["runtimeMs"] = strconv.FormatInt(payload.RuntimeMs, 10)
+	storeResp["runtimeMs"] = strconv.FormatInt(payload.RuntimeMs, 10)
+
+	if len(payload.Result) > 0 && string(payload.Result) != "null" {
+		resultStr := strings.TrimSpace(string(payload.Result))
+		var decoded any
+		if err := json.Unmarshal(payload.Result, &decoded); err == nil {
+			switch v := decoded.(type) {
+			case string:
+				resultStr = v
+			default:
+				if b, err := json.MarshalIndent(v, "", "  "); err == nil {
+					resultStr = string(b)
+				}
+			}
+		}
+		if p, tr := capBytes(resultStr, 2000); p != "" {
+			respData["result"] = p
+			storeResp["result"] = p
+			outputPreview = p
+			if tr {
+				respData["resultPreviewTruncated"] = "true"
+				storeResp["resultPreviewTruncated"] = "true"
+			}
+		}
+	}
+	if payload.ResultTruncated {
+		respData["resultTruncated"] = "true"
+		storeResp["resultTruncated"] = "true"
+	}
+	if payload.StdoutTruncated {
+		respData["stdoutTruncated"] = "true"
+		storeResp["stdoutTruncated"] = "true"
+	}
+	if payload.StderrTruncated {
+		respData["stderrTruncated"] = "true"
+		storeResp["stderrTruncated"] = "true"
+	}
+	if payload.ResultTruncated || payload.StdoutTruncated || payload.StderrTruncated {
+		respData["truncated"] = "true"
+		storeResp["truncated"] = "true"
+	}
+	if strings.TrimSpace(outputPreview) == "" {
+		if v := strings.TrimSpace(respData["stdout"]); v != "" {
+			outputPreview = v
+		} else if v := strings.TrimSpace(respData["stderr"]); v != "" {
+			outputPreview = v
+		}
+	}
+	if strings.TrimSpace(outputPreview) != "" {
+		if p, tr := capBytes(outputPreview, 300); p != "" {
+			respData["outputPreview"] = p
+			storeResp["outputPreview"] = p
+			if tr {
+				respData["outputPreviewTruncated"] = "true"
+				storeResp["outputPreviewTruncated"] = "true"
 			}
 		}
 	}

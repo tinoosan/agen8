@@ -35,6 +35,8 @@ const (
 	HostOpTrace = "trace_run"
 	// HostOpEmail sends an email notification.
 	HostOpEmail = "email"
+	// HostOpCodeExec executes model-provided code in a guarded runtime.
+	HostOpCodeExec = "code_exec"
 	// HostOpNoop returns a host response without side effects (internal use).
 	HostOpNoop = "noop"
 	// HostOpToolResult is a successful tool completion with a user-visible message; all tool calls should return a result the user can see.
@@ -57,6 +59,9 @@ type HostOpRequest struct {
 	MaxBytes  int             `json:"maxBytes,omitempty"`
 	Text      string          `json:"text,omitempty"`
 	Tag       string          `json:"tag,omitempty"`
+	// Code execution parameters
+	Language string `json:"language,omitempty"`
+	Code     string `json:"code,omitempty"`
 	// Shell execution parameters
 	Argv  []string `json:"argv,omitempty"`
 	Cwd   string   `json:"cwd,omitempty"`
@@ -77,7 +82,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = strings.ToLower(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpNoop, HostOpToolResult, HostOpFinal:
+	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpCodeExec, HostOpNoop, HostOpToolResult, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -207,8 +212,55 @@ func (r HostOpRequest) Validate() error {
 			return fmt.Errorf("email.input is required")
 		}
 		return nil
+
+	case HostOpCodeExec:
+		lang := strings.ToLower(strings.TrimSpace(r.Language))
+		if lang == "" {
+			return fmt.Errorf("code_exec.language is required")
+		}
+		if lang != "python" {
+			return fmt.Errorf("code_exec.language must be \"python\"")
+		}
+		if err := validate.NonEmpty("code_exec.code", r.Code); err != nil {
+			return err
+		}
+		if r.TimeoutMs < 0 {
+			return fmt.Errorf("timeoutMs must be >= 0")
+		}
+		if r.MaxBytes < 0 {
+			return fmt.Errorf("maxBytes must be >= 0")
+		}
+		if err := validateToolCwd(r.Cwd); err != nil {
+			return fmt.Errorf("code_exec.cwd invalid: %w", err)
+		}
+		return nil
 	}
 
+	return nil
+}
+
+func validateToolCwd(cwd string) error {
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		return nil
+	}
+	if strings.Contains(cwd, "\x00") {
+		return fmt.Errorf("contains invalid null byte")
+	}
+	cleaned := filepath.Clean(cwd)
+	if strings.HasPrefix(cwd, "/") {
+		trimmed := strings.TrimPrefix(cleaned, "/")
+		if trimmed == "" {
+			return fmt.Errorf("must target a VFS mount path")
+		}
+		if strings.HasPrefix(trimmed, "..") {
+			return fmt.Errorf("must not escape mount root")
+		}
+		return nil
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("must not escape project root")
+	}
 	return nil
 }
 

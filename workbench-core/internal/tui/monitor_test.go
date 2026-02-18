@@ -203,6 +203,38 @@ func TestMonitorHandleCommand_EnqueuesPlainTextAndRejectsUnknownSlashCommand(t *
 	}
 }
 
+func TestMonitorCommandRegistry_IncludesCopy(t *testing.T) {
+	found := false
+	for _, name := range monitorAvailableCommands {
+		if name == "/copy" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected /copy in monitor commands")
+	}
+}
+
+func TestMonitorAgentOutputForClipboard(t *testing.T) {
+	now := time.Date(2026, 2, 18, 14, 30, 0, 0, time.UTC)
+	m := &monitorModel{
+		agentOutput: []AgentOutputItem{
+			{Timestamp: now, Type: "tool_call", Content: "Run python code"},
+			{Timestamp: now.Add(2 * time.Second), Type: "tool_result", Content: "Run python code — ok"},
+		},
+		showThoughts: true,
+	}
+
+	txt := m.agentOutputForClipboard()
+	if !strings.Contains(txt, "[14:30:00] Run python code") {
+		t.Fatalf("expected first line in clipboard export, got:\n%s", txt)
+	}
+	if !strings.Contains(txt, "[14:30:02] Run python code — ok") {
+		t.Fatalf("expected second line in clipboard export, got:\n%s", txt)
+	}
+}
+
 func TestMonitorWriteControl_SetReasoning_UsesRPCMethod(t *testing.T) {
 	m := &monitorModel{
 		runID:       "run-test",

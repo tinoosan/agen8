@@ -395,6 +395,11 @@ func TestEventMiddleware_EmitsRequestTextForRepresentativeOps(t *testing.T) {
 			want: "GET https://example.com",
 		},
 		{
+			name: "code_exec",
+			req:  types.HostOpRequest{Op: types.HostOpCodeExec, Language: "python", Code: "print('ok')"},
+			want: "Run python code",
+		},
+		{
 			name: "browser",
 			req:  types.HostOpRequest{Op: types.HostOpBrowser, Input: json.RawMessage(`{"action":"navigate","url":"https://example.com"}`)},
 			want: "browse.navigate https://example.com",
@@ -433,6 +438,8 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 			return types.HostOpResponse{Op: req.Op, Ok: true, ExitCode: 0}
 		case types.HostOpHTTPFetch:
 			return types.HostOpResponse{Op: req.Op, Ok: true, Status: 200}
+		case types.HostOpCodeExec:
+			return types.HostOpResponse{Op: req.Op, Ok: true, ExitCode: 0}
 		case types.HostOpBrowser:
 			return types.HostOpResponse{Op: "browser.navigate", Ok: true, Text: `{"title":"Example Domain"}`}
 		case types.HostOpEmail:
@@ -463,6 +470,7 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 		{name: "fs_read", req: types.HostOpRequest{Op: types.HostOpFSRead, Path: "/workspace/a.txt"}, want: "✓ truncated"},
 		{name: "shell_exec", req: types.HostOpRequest{Op: types.HostOpShellExec, Argv: []string{"echo", "ok"}}, want: "✓ exit 0"},
 		{name: "http_fetch", req: types.HostOpRequest{Op: types.HostOpHTTPFetch, URL: "https://example.com"}, want: "✓ 200"},
+		{name: "code_exec", req: types.HostOpRequest{Op: types.HostOpCodeExec, Language: "python", Code: "print('ok')"}, want: "✓ ok"},
 		{name: "browser.navigate", req: types.HostOpRequest{Op: types.HostOpBrowser, Input: json.RawMessage(`{"action":"navigate","url":"https://example.com"}`)}, want: `✓ navigated "Example Domain"`},
 		{name: "email", req: types.HostOpRequest{Op: types.HostOpEmail, Input: json.RawMessage(`{"to":"team@example.com","subject":"Daily report","body":"done"}`)}, want: "✓ sent"},
 	}
@@ -606,5 +614,59 @@ func TestResolveOperationForResponse_Aliases(t *testing.T) {
 
 	if op := resolveOperationForResponse(reg, types.HostOpRequest{Op: types.HostOpShellExec}, types.HostOpResponse{Op: "unknown.op"}); op == nil || op.Op() != types.HostOpShellExec {
 		t.Fatalf("expected fallback to request op, got %+v", op)
+	}
+}
+
+func TestEventMiddleware_CodeExecEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		if req.Op != types.HostOpCodeExec {
+			return types.HostOpResponse{Op: req.Op, Ok: true}
+		}
+		return types.HostOpResponse{
+			Op:       req.Op,
+			Ok:       true,
+			ExitCode: 0,
+			Stdout:   "ran",
+			Text:     `{"ok":true,"result":{"status":"ok"},"stdout":"ran","stderr":"","toolCallCount":2,"runtimeMs":17}`,
+		}
+	})
+
+	var gotReq events.Event
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:       types.HostOpCodeExec,
+		Language: "python",
+		Cwd:      "/workspace",
+		Code:     "result = {'status': 'ok'}",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if gotReq.Data["code"] != "result = {'status': 'ok'}" {
+		t.Fatalf("expected full code in request event, got %q", gotReq.Data["code"])
+	}
+	if gotReq.Data["codeBytes"] == "" {
+		t.Fatalf("expected codeBytes in request event")
+	}
+	if gotResp.Data["result"] == "" || gotResp.Data["outputPreview"] == "" {
+		t.Fatalf("expected result/outputPreview in response event, got data=%v", gotResp.Data)
+	}
+	if gotResp.Data["toolCallCount"] != "2" || gotResp.Data["runtimeMs"] != "17" {
+		t.Fatalf("expected toolCallCount/runtimeMs enrichment, got data=%v", gotResp.Data)
 	}
 }

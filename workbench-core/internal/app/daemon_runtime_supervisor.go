@@ -636,6 +636,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			return nil, err
 		}
 	}
+	configureCodeExecRuntime(parent, rt, registry, emitEvent)
 	promptToolSpec := agent.PromptToolSpecFromSources(registry, nil)
 	if isChildRun {
 		agentCfg.SystemPrompt = prompts.DefaultSubAgentSystemPromptWithTools(promptToolSpec)

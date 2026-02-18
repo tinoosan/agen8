@@ -69,11 +69,12 @@ type HostOpExecutor struct {
 	FS *vfs.FS
 
 	// Core invokers for direct host operations.
-	ShellInvoker pkgtools.ToolInvoker
-	HTTPInvoker  pkgtools.ToolInvoker
-	TraceInvoker pkgtools.ToolInvoker // For all trace actions via BuiltinTraceInvoker
-	Browser      BrowserManager
-	EmailClient  builtins.EmailSender
+	ShellInvoker    pkgtools.ToolInvoker
+	HTTPInvoker     pkgtools.ToolInvoker
+	CodeExecInvoker pkgtools.ToolInvoker
+	TraceInvoker    pkgtools.ToolInvoker // For all trace actions via BuiltinTraceInvoker
+	Browser         BrowserManager
+	EmailClient     builtins.EmailSender
 
 	// WorkspaceDir is the host filesystem path backing the /workspace VFS mount.
 	// It is used for browser screenshots and PDFs.
@@ -143,6 +144,7 @@ var (
 
 		types.HostOpShellExec: shellExecMockOp{},
 		types.HostOpHTTPFetch: httpFetchMockOp{},
+		types.HostOpCodeExec:  codeExecMockOp{},
 		types.HostOpTrace:     traceMockOp{},
 		types.HostOpEmail:     emailMockOp{},
 		types.HostOpBrowser:   browserMockOp{},
@@ -403,6 +405,82 @@ func (httpFetchMockOp) Exec(ctx context.Context, req types.HostOpRequest, x *Hos
 		BodyTruncated: out.BodyTruncated,
 		Warning:       out.Warning,
 	}
+}
+
+type codeExecMockOp struct{}
+
+func (codeExecMockOp) Exec(ctx context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
+	if x.CodeExecInvoker == nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: "code_exec invoker not configured"}
+	}
+
+	payload := map[string]any{
+		"language": req.Language,
+		"code":     req.Code,
+	}
+	if strings.TrimSpace(req.Cwd) != "" {
+		payload["cwd"] = strings.TrimSpace(req.Cwd)
+	}
+	if req.TimeoutMs != 0 {
+		payload["timeoutMs"] = req.TimeoutMs
+	}
+	if req.MaxBytes != 0 {
+		payload["maxOutputBytes"] = req.MaxBytes
+	}
+	if len(req.Input) > 0 {
+		var ext struct {
+			MaxToolCalls *int `json:"maxToolCalls"`
+		}
+		if err := json.Unmarshal(req.Input, &ext); err == nil && ext.MaxToolCalls != nil {
+			payload["maxToolCalls"] = *ext.MaxToolCalls
+		}
+	}
+
+	inp, err := json.Marshal(payload)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+	toolReq := pkgtools.ToolRequest{
+		Version:   "v1",
+		CallID:    "code_exec",
+		ToolID:    pkgtools.ToolID("builtin.code_exec"),
+		ActionID:  "run",
+		Input:     inp,
+		TimeoutMs: req.TimeoutMs,
+	}
+	result, err := x.CodeExecInvoker.Invoke(ctx, toolReq)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+
+	var out struct {
+		OK              bool   `json:"ok"`
+		Error           string `json:"error"`
+		Stdout          string `json:"stdout"`
+		Stderr          string `json:"stderr"`
+		StdoutTruncated bool   `json:"stdoutTruncated"`
+		StderrTruncated bool   `json:"stderrTruncated"`
+		ResultTruncated bool   `json:"resultTruncated"`
+		ExitCode        int    `json:"exitCode"`
+	}
+	if err := json.Unmarshal(result.Output, &out); err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+
+	resp := types.HostOpResponse{
+		Op:        req.Op,
+		Ok:        out.OK,
+		Error:     strings.TrimSpace(out.Error),
+		Text:      string(result.Output),
+		Stdout:    out.Stdout,
+		Stderr:    out.Stderr,
+		ExitCode:  out.ExitCode,
+		Truncated: out.StdoutTruncated || out.StderrTruncated || out.ResultTruncated,
+	}
+	if !resp.Ok && resp.Error == "" {
+		resp.Error = "code_exec failed"
+	}
+	return resp
 }
 
 type traceMockOp struct{}

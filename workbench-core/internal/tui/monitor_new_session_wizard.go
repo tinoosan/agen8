@@ -68,11 +68,11 @@ func (m *monitorModel) openNewSessionWizard() tea.Cmd {
 					title = "Untitled Session"
 				}
 				lastActive := "unknown"
-				if !s.UpdatedAt.IsZero() {
+				if s.UpdatedAt != nil && !s.UpdatedAt.IsZero() {
 					lastActive = timeutil.Since(timeutil.OrNow(s.UpdatedAt)).Round(time.Second).String()
 				}
 				activeFor := "unknown"
-				if !s.CreatedAt.IsZero() {
+				if s.CreatedAt != nil && !s.CreatedAt.IsZero() {
 					activeFor = timeutil.Since(timeutil.OrNow(s.CreatedAt)).Round(time.Second).String()
 				}
 				items = append(items, newSessionWizardItem{

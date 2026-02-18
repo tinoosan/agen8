@@ -53,6 +53,12 @@ func FormatRequestTitle(d map[string]string) string {
 			return argv0
 		}
 		return "shell_exec"
+	case "code_exec":
+		lang := strings.TrimSpace(d["language"])
+		if lang == "" {
+			lang = "python"
+		}
+		return "Run " + strings.ToLower(lang) + " code"
 	case "http_fetch":
 		u := strings.TrimSpace(d["url"])
 		if u != "" {

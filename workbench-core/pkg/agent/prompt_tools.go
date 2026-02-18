@@ -49,3 +49,24 @@ func PromptToolSpecFromSources(registry ToolRegistryProvider, extra []llmtypes.T
 	}
 	return prompts.PromptToolSpec{Tools: tools}
 }
+
+// SortedToolNamesFromRegistry returns deduplicated tool function names in lexical order.
+func SortedToolNamesFromRegistry(registry ToolRegistryProvider) []string {
+	if registry == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, def := range registry.Definitions() {
+		name := strings.TrimSpace(def.Function.Name)
+		if name == "" {
+			continue
+		}
+		seen[name] = struct{}{}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}

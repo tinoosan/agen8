@@ -289,6 +289,8 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		act.Truncated = strings.TrimSpace(ev.Data["truncated"]) == "true"
 		if v := strings.TrimSpace(ev.Data["outputPreview"]); v != "" {
 			act.OutputPreview = v
+		} else if v := strings.TrimSpace(ev.Data["result"]); v != "" {
+			act.OutputPreview = v
 		} else if v := strings.TrimSpace(ev.Data["output"]); v != "" {
 			act.OutputPreview = v
 		}

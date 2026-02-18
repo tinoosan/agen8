@@ -67,3 +67,38 @@ func TestHostOpRequest_NoopValidation_AllowsEmpty(t *testing.T) {
 		t.Fatalf("Validate: %v", err)
 	}
 }
+
+func TestHostOpRequest_CodeExecValidation_RequiresPythonAndCode(t *testing.T) {
+	req := HostOpRequest{Op: HostOpCodeExec}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for missing language/code")
+	}
+
+	req = HostOpRequest{
+		Op:       HostOpCodeExec,
+		Language: "javascript",
+		Code:     "console.log('x')",
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for non-python language")
+	}
+
+	req = HostOpRequest{
+		Op:       HostOpCodeExec,
+		Language: "python",
+		Code:     "print('ok')",
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	req = HostOpRequest{
+		Op:       HostOpCodeExec,
+		Language: "python",
+		Code:     "print('ok')",
+		Cwd:      "..",
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for cwd escaping root")
+	}
+}

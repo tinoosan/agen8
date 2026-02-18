@@ -596,6 +596,9 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("apply allowed tools for role %s: %w", role.Name, err)
 		}
+		configureCodeExecRuntime(ctx, rt, registry, func(ctx context.Context, ev events.Event) {
+			_ = orderedEmitter.Emit(ctx, ev)
+		})
 		agentCfg.SystemPrompt = prompts.DefaultTeamModeSystemPromptWithTools(agent.PromptToolSpecFromSources(registry, nil))
 		agentCfg.HostToolRegistry = registry
 

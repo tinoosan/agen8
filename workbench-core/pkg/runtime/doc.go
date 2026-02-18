@@ -10,7 +10,7 @@
 //   - VFS Setup: `Build` creates a `vfs.FS`, mounts `/project`, `/workspace`, `/plan`,
 //     `/skills`, `/log`, `/history`, and any other resources the
 //     runtime needs.
-//   - Tool + Skill Wiring: Runtime configures built-in host tools (fs.*, shell, http, browser, trace).
+//   - Tool + Skill Wiring: Runtime configures built-in host tools (fs.*, shell, code_exec, http, browser, trace).
 //     Skills are discovered from `~/.agents/skills` and mounted under `/skills` so the agent
 //     can read their instructions via the VFS.
 //   - Context + Hook Integration: The runtime holds `agent.PromptBuilder` and

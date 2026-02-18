@@ -271,6 +271,44 @@ func TestRenderActivityDetailMarkdown_Dispatch_WorkdirChangedArguments(t *testin
 	}
 }
 
+func TestRenderActivityDetailMarkdown_CodeExecDetailedSections(t *testing.T) {
+	a := Activity{
+		Kind:   "code_exec",
+		Status: ActivityOK,
+		Ok:     "true",
+		Data: map[string]string{
+			"language":      "python",
+			"cwd":           "/workspace",
+			"timeoutMs":     "120000",
+			"maxBytes":      "65536",
+			"maxToolCalls":  "50",
+			"code":          "result = tools.fs_list(path='/project')",
+			"result":        "{\"entries\":[]}",
+			"stdout":        "done",
+			"toolCallCount": "1",
+			"runtimeMs":     "42",
+		},
+	}
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- language: `python`",
+		"- cwd: `/workspace`",
+		"- timeoutMs: `120000`",
+		"- maxOutputBytes: `65536`",
+		"- maxToolCalls: `50`",
+		"```python",
+		"result = tools.fs_list(path='/project')",
+		"**result**",
+		"**stdout**",
+		"- toolCallCount: `1`",
+		"- runtimeMs: `42`",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in code_exec markdown, got:\n%s", want, md)
+		}
+	}
+}
+
 func TestRenderActivityDetailMarkdown_TelemetryParity(t *testing.T) {
 	fsRead := Activity{
 		Kind:     "fs_read",

@@ -31,7 +31,8 @@ type Runtime struct {
 	WorkdirBase     string
 	MemStore        store.DailyMemoryStore
 
-	Browser agent.BrowserManager
+	Browser  agent.BrowserManager
+	CodeExec *builtins.BuiltinCodeExecInvoker
 
 	browserCleanupCancel context.CancelFunc
 }
@@ -400,6 +401,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 
 	httpInvoker := builtins.NewBuiltinHTTPInvoker()
 	traceInvoker := builtins.BuiltinTraceInvoker{Store: traceStore}
+	codeExecInvoker := builtins.NewBuiltinCodeExecInvoker(absWorkdirRoot, shellInvoker.MountRoots)
 
 	browserMgr, err := builtins.NewBrowserSessionManager(30 * time.Minute)
 	if err != nil {
@@ -465,6 +467,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		FS:              fs,
 		ShellInvoker:    shellInvoker,
 		HTTPInvoker:     httpInvoker,
+		CodeExecInvoker: codeExecInvoker,
 		TraceInvoker:    traceInvoker,
 		EmailClient:     emailClient,
 		Browser:         browserMgr,
@@ -522,6 +525,11 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		Observers:       []HostOpObserver{constructor, updater, auditObs},
 		ArtifactObserve: cfg.ArtifactObserve,
 	})
+	if codeExecInvoker != nil {
+		codeExecInvoker.SetBridge(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+			return exec.Exec(ctx, req)
+		})
+	}
 
 	return &Runtime{
 		FS:                   fs,
@@ -532,6 +540,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		WorkdirBase:          workdirRes.BaseDir,
 		MemStore:             memStore,
 		Browser:              browserMgr,
+		CodeExec:             codeExecInvoker,
 		browserCleanupCancel: cleanupCancel,
 	}, nil
 }
