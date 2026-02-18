@@ -94,20 +94,21 @@ func ensureThreadID(threadID ThreadID, runID string) ThreadID {
 }
 
 func turnStatusFromTaskStatus(taskStatus string) (TurnStatus, bool) {
-	switch strings.ToLower(strings.TrimSpace(taskStatus)) {
-	case "pending":
-		return TurnStatusPending, true
-	case "active":
-		return TurnStatusInProgress, true
-	case "succeeded", "success", "completed":
-		return TurnStatusCompleted, true
-	case "failed", "failure", "error":
-		return TurnStatusFailed, true
-	case "canceled", "cancelled":
-		return TurnStatusCanceled, true
-	default:
-		return "", false
-	}
+	turnStatus, ok := taskStatusToTurnStatus[strings.ToLower(strings.TrimSpace(taskStatus))]
+	return turnStatus, ok
+}
+
+var taskStatusToTurnStatus = map[string]TurnStatus{
+	"pending":   TurnStatusPending,
+	"active":    TurnStatusInProgress,
+	"succeeded": TurnStatusCompleted,
+	"success":   TurnStatusCompleted,
+	"completed": TurnStatusCompleted,
+	"failed":    TurnStatusFailed,
+	"failure":   TurnStatusFailed,
+	"error":     TurnStatusFailed,
+	"canceled":  TurnStatusCanceled,
+	"cancelled": TurnStatusCanceled,
 }
 
 func itemIDForTurn(turnID TurnID, suffix string) ItemID {

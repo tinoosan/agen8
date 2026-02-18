@@ -99,41 +99,55 @@ func redactValue(key string, v any) any {
 }
 
 func isSensitiveKey(k string) bool {
-	switch k {
-	case "text", "stdin", "authorization", "token", "apikey", "api_key", "secret", "password":
-		return true
-	default:
-		return false
-	}
+	_, ok := sensitiveEventKeys[k]
+	return ok
 }
 
 func isMessageLikeKey(k string) bool {
-	switch k {
-	case "message", "body", "patch":
-		return true
-	default:
-		return false
+	_, ok := messageLikeEventKeys[k]
+	return ok
+}
+
+var sensitiveEventKeys = map[string]struct{}{
+	"text":          {},
+	"stdin":         {},
+	"authorization": {},
+	"token":         {},
+	"apikey":        {},
+	"api_key":       {},
+	"secret":        {},
+	"password":      {},
+}
+
+var messageLikeEventKeys = map[string]struct{}{
+	"message": {},
+	"body":    {},
+	"patch":   {},
+}
+
+var sensitiveTextMarkers = []string{
+	"authorization: bearer ",
+	"api_key",
+	"apikey",
+	"secret",
+	"password",
+}
+
+func containsAny(s string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if strings.Contains(s, pattern) {
+			return true
+		}
 	}
+	return false
 }
 
 func looksSensitiveText(s string) bool {
 	low := strings.ToLower(s)
-	switch {
-	case strings.Contains(low, "authorization: bearer "):
+	if containsAny(low, sensitiveTextMarkers) {
 		return true
-	case strings.Contains(low, "api_key"):
-		return true
-	case strings.Contains(low, "apikey"):
-		return true
-	case strings.Contains(low, "secret"):
-		return true
-	case strings.Contains(low, "password"):
-		return true
-	case strings.Contains(s, "sk-"):
-		return true
-	default:
-		return false
 	}
+	return strings.Contains(s, "sk-")
 }
 
 func singleLine(s string) string {

@@ -1633,28 +1633,22 @@ func fallback(v string, def string) string {
 }
 
 func llmErrorMessage(info llm.ErrorInfo) string {
-	switch strings.TrimSpace(info.Class) {
-	case "quota":
-		return "LLM quota/credits exhausted"
-	case "rate_limit":
-		return "LLM rate limit reached"
-	case "network":
-		return "LLM network error"
-	case "timeout":
-		return "LLM request timed out"
-	case "auth":
-		return "LLM authentication failed"
-	case "permission":
-		return "LLM permission denied"
-	case "policy":
-		return "LLM request blocked by provider data policy (check OpenRouter privacy settings for free models)"
-	case "server":
-		return "LLM provider server error"
-	case "invalid_request":
-		return "LLM request rejected"
-	default:
-		return "LLM request failed"
+	if msg, ok := llmErrorClassMessages[strings.TrimSpace(info.Class)]; ok {
+		return msg
 	}
+	return "LLM request failed"
+}
+
+var llmErrorClassMessages = map[string]string{
+	"quota":           "LLM quota/credits exhausted",
+	"rate_limit":      "LLM rate limit reached",
+	"network":         "LLM network error",
+	"timeout":         "LLM request timed out",
+	"auth":            "LLM authentication failed",
+	"permission":      "LLM permission denied",
+	"policy":          "LLM request blocked by provider data policy (check OpenRouter privacy settings for free models)",
+	"server":          "LLM provider server error",
+	"invalid_request": "LLM request rejected",
 }
 
 func isSQLiteBusyErr(err error) bool {
