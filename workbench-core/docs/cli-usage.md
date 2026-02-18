@@ -70,6 +70,8 @@ Use `effectiveConfig()` in `internal/config` to trace how each runtime flag/env 
 
 The CLI constructs `RunChatOptions` from resolved configuration and passes them into `app.RunNewChatTUI`, which manages sessions/runs via `internal/store`. When flags or env vars change, rerun the CLI to refresh the active configuration.
 
+For daemon runtime `config.toml`, API key onboarding/keychain behavior, and headless server setup, see [docs/config-toml.md](docs/config-toml.md).
+
 ## Troubleshooting tips
 
 - Ensure `$WORKBENCH_DATA_DIR` is writable; otherwise, sessions/runs fail to persist.

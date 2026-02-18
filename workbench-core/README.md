@@ -110,6 +110,8 @@ Runtime configuration resolves in this order: CLI flags → environment variable
 
 Helpers in `internal/config/effectiveConfig()` resolve the final configuration before each command runs. See [docs/cli-usage.md](docs/cli-usage.md) for deeper context on flag interactions, environment variables, and examples.
 
+For runtime `config.toml`, onboarding behavior (TTY vs headless), keychain-backed API key loading, and server setup patterns, see [docs/config-toml.md](docs/config-toml.md).
+
 ## Email notifications (Gmail OAuth2)
 
 Workbench can send **plain-text** email notifications through Gmail using OAuth2 (XOAUTH2 over SMTP).
