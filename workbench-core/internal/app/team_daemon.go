@@ -591,16 +591,26 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 				log.Printf("events: emit failed: %v", err)
 			}
 		}
-		if err := applyAllowedTools(registry, roleAllowedTools); err != nil {
+		codeExecOnly := resolveCodeExecOnly(prof.CodeExecOnly, role.CodeExecOnly)
+		modelRegistry, bridgeRegistry, err := resolveToolRegistries(registry, roleAllowedTools, codeExecOnly)
+		if err != nil {
 			orderedEmitter.Close()
 			_ = rt.Shutdown(context.Background())
-			return fmt.Errorf("apply allowed tools for role %s: %w", role.Name, err)
+			return fmt.Errorf("resolve tool registries for role %s: %w", role.Name, err)
 		}
-		configureCodeExecRuntime(ctx, rt, registry, func(ctx context.Context, ev events.Event) {
+		if err := configureCodeExecRuntime(ctx, rt, modelRegistry, bridgeRegistry, codeExecOnly, func(ctx context.Context, ev events.Event) {
 			_ = orderedEmitter.Emit(ctx, ev)
-		})
-		agentCfg.SystemPrompt = prompts.DefaultTeamModeSystemPromptWithTools(agent.PromptToolSpecFromSources(registry, nil))
-		agentCfg.HostToolRegistry = registry
+		}); err != nil {
+			orderedEmitter.Close()
+			_ = rt.Shutdown(context.Background())
+			return fmt.Errorf("configure code_exec runtime for role %s: %w", role.Name, err)
+		}
+		promptToolSpec := agent.PromptToolSpecFromSources(modelRegistry, nil)
+		if codeExecOnly {
+			promptToolSpec = agent.PromptToolSpecForCodeExecOnly(modelRegistry, bridgeRegistry, nil)
+		}
+		agentCfg.SystemPrompt = prompts.DefaultTeamModeSystemPromptWithTools(promptToolSpec)
+		agentCfg.HostToolRegistry = modelRegistry
 
 		a, err := agent.NewAgent(runLLMClient, rt.Executor, agentCfg)
 		if err != nil {
@@ -609,6 +619,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			return fmt.Errorf("create agent for role %s: %w", role.Name, err)
 		}
 		roleProfile := buildRoleRuntimeProfile(role)
+		roleProfile.CodeExecOnly = codeExecOnly
 		roleSession, err := session.New(session.Config{
 			Agent:      a,
 			Profile:    roleProfile,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -153,6 +155,10 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	if t == nil || t.Store == nil {
 		return types.HostOpRequest{}, fmt.Errorf("task_create: store is not configured")
 	}
+	normalizedArgs, err := normalizeTaskCreateArgs(args)
+	if err != nil {
+		return types.HostOpRequest{}, err
+	}
 
 	var payload struct {
 		Goal         string         `json:"goal"`
@@ -163,7 +169,7 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		AssignedRole string         `json:"assignedRole"`
 		SpawnWorker  bool           `json:"spawnWorker"`
 	}
-	if err := json.Unmarshal(args, &payload); err != nil {
+	if err := json.Unmarshal(normalizedArgs, &payload); err != nil {
 		return types.HostOpRequest{}, err
 	}
 
@@ -294,6 +300,99 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		Text:  msg,
 		Input: inputJSON,
 	}, nil
+}
+
+var taskCreateCanonicalKeys = []string{
+	"assignedRole",
+	"goal",
+	"inputs",
+	"metadata",
+	"priority",
+	"spawnWorker",
+	"taskId",
+}
+
+var taskCreateAliasToCanonical = map[string]string{
+	"assigned_role": "assignedRole",
+	"spawn_worker":  "spawnWorker",
+	"task_id":       "taskId",
+}
+
+func normalizeTaskCreateArgs(args json.RawMessage) (json.RawMessage, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(args, &raw); err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 {
+		return args, nil
+	}
+
+	allowed := map[string]struct{}{}
+	for _, key := range taskCreateCanonicalKeys {
+		allowed[key] = struct{}{}
+	}
+	for alias := range taskCreateAliasToCanonical {
+		allowed[alias] = struct{}{}
+	}
+
+	unknown := make([]string, 0)
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			unknown = append(unknown, key)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return nil, fmt.Errorf(
+			"task_create: unknown field(s): %s; supported fields: %s",
+			strings.Join(unknown, ", "),
+			strings.Join(taskCreateCanonicalKeys, ", "),
+		)
+	}
+
+	out := make(map[string]json.RawMessage, len(raw))
+	for key, value := range raw {
+		canonical := key
+		if mapped, ok := taskCreateAliasToCanonical[key]; ok {
+			canonical = mapped
+		}
+		if existing, ok := out[canonical]; ok && !rawJSONEqual(existing, value) {
+			return nil, fmt.Errorf(
+				"task_create: conflicting values for %q via aliases; provide exactly one of %q or %q",
+				canonical,
+				canonical,
+				aliasForCanonical(canonical),
+			)
+		}
+		out[canonical] = value
+	}
+
+	normalized, err := json.Marshal(out)
+	if err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
+func aliasForCanonical(canonical string) string {
+	for alias, mapped := range taskCreateAliasToCanonical {
+		if mapped == canonical {
+			return alias
+		}
+	}
+	return canonical
+}
+
+func rawJSONEqual(a, b json.RawMessage) bool {
+	var left any
+	var right any
+	if err := json.Unmarshal(a, &left); err != nil {
+		return false
+	}
+	if err := json.Unmarshal(b, &right); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(left, right)
 }
 
 func (t *TaskCreateTool) validateAssignedRole(assignedRole string) error {

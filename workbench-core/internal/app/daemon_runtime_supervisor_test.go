@@ -285,10 +285,12 @@ func TestApplySessionModel_SkipsChildRuns(t *testing.T) {
 }
 
 func TestBuildRoleRuntimeProfile_CopiesRoleSkillsForSupervisor(t *testing.T) {
+	enabled := true
 	role := profile.RoleConfig{
 		Name:         "qa",
 		Description:  "QA role",
 		Skills:       []string{"automation"},
+		CodeExecOnly: &enabled,
 		AllowedTools: []string{"task_review"},
 	}
 	got := buildRoleRuntimeProfile(role)
@@ -303,6 +305,9 @@ func TestBuildRoleRuntimeProfile_CopiesRoleSkillsForSupervisor(t *testing.T) {
 	}
 	if len(got.AllowedTools) != 1 || got.AllowedTools[0] != "task_review" {
 		t.Fatalf("unexpected allowed tools: %v", got.AllowedTools)
+	}
+	if !got.CodeExecOnly {
+		t.Fatalf("expected code_exec_only copied from role override")
 	}
 }
 
@@ -506,10 +511,125 @@ func TestApplySessionModel_SkipsWhenAlreadyOnModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplySessionModel: %v", err)
 	}
-	if len(applied) != 0 {
-		t.Fatalf("expected no model applications when unchanged, got %+v", applied)
+	if len(applied) != 1 || applied[0] != run.RunID {
+		t.Fatalf("expected runtime model persistence application, got %+v", applied)
 	}
 	if calls := agentImpl.modelSetCalls(); calls != 0 {
 		t.Fatalf("expected SetModel not to be called when model unchanged, got %d calls", calls)
+	}
+	loadedRun, err := sessionSvc.LoadRun(context.Background(), run.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+	if loadedRun.Runtime == nil || loadedRun.Runtime.Model != "openai/gpt-5-mini" {
+		t.Fatalf("expected runtime model persisted, got %+v", loadedRun.Runtime)
+	}
+}
+
+func TestResolveRunModel_PrefersRoleModelInTeamMode(t *testing.T) {
+	sess := types.Session{SessionID: "sess-1", TeamID: "team-1", ActiveModel: "session-model"}
+	run := types.Run{
+		RunID: "run-1",
+		Runtime: &types.RunRuntimeConfig{
+			TeamID: "team-1",
+			Model:  "role-model",
+		},
+	}
+	got := resolveRunModel(sess, run, "fallback-model")
+	if got != "role-model" {
+		t.Fatalf("resolveRunModel(team)=%q want %q", got, "role-model")
+	}
+}
+
+func TestResolveRunModel_PrefersSessionModelInStandalone(t *testing.T) {
+	sess := types.Session{SessionID: "sess-1", ActiveModel: "session-model"}
+	run := types.Run{
+		RunID: "run-1",
+		Runtime: &types.RunRuntimeConfig{
+			Model: "run-model",
+		},
+	}
+	got := resolveRunModel(sess, run, "fallback-model")
+	if got != "session-model" {
+		t.Fatalf("resolveRunModel(standalone)=%q want %q", got, "session-model")
+	}
+}
+
+func TestShouldSyncModelFromSession_SkipsTeamAndChildRuns(t *testing.T) {
+	teamRun := types.Run{RunID: "r1"}
+	teamSess := types.Session{SessionID: "s1", TeamID: "team-1"}
+	if shouldSyncModelFromSession(teamRun, teamSess) {
+		t.Fatalf("expected team run sync to be disabled")
+	}
+	childRun := types.Run{RunID: "r2", ParentRunID: "parent"}
+	standaloneSess := types.Session{SessionID: "s2"}
+	if shouldSyncModelFromSession(childRun, standaloneSess) {
+		t.Fatalf("expected child run sync to be disabled")
+	}
+	if !shouldSyncModelFromSession(types.Run{RunID: "r3"}, standaloneSess) {
+		t.Fatalf("expected standalone top-level sync to remain enabled")
+	}
+}
+
+func TestApplySessionModel_PersistsRuntimeModelEvenWhenAgentAlreadyOnTarget(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, run, err := implstore.CreateSession(cfg, "persist model", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	run.Runtime = &types.RunRuntimeConfig{Model: "openai/gpt-4.1-mini"}
+	if err := implstore.SaveRun(cfg, run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	agentImpl := newCountingAgent("openai/gpt-5-mini")
+	rtSession, err := agentsession.New(agentsession.Config{
+		Agent:     agentImpl,
+		Profile:   &profile.Profile{ID: "general"},
+		TaskStore: ts,
+		SessionID: sess.SessionID,
+		RunID:     run.RunID,
+	})
+	if err != nil {
+		t.Fatalf("agentsession.New: %v", err)
+	}
+	supervisor := &runtimeSupervisor{
+		cfg:            cfg,
+		taskService:    pkgtask.NewManager(ts, nil),
+		sessionService: sessionSvc,
+		workers: map[string]*managedRuntime{
+			run.RunID: {
+				runID:     run.RunID,
+				sessionID: sess.SessionID,
+				session:   rtSession,
+				model:     "openai/gpt-5-mini",
+			},
+		},
+	}
+
+	applied, err := supervisor.ApplySessionModel(context.Background(), sess.SessionID, "", "openai/gpt-5-mini")
+	if err != nil {
+		t.Fatalf("ApplySessionModel: %v", err)
+	}
+	if len(applied) != 1 || applied[0] != run.RunID {
+		t.Fatalf("expected runtime model persistence to be recorded, got %+v", applied)
+	}
+	if calls := agentImpl.modelSetCalls(); calls != 0 {
+		t.Fatalf("expected SetModel not to be called when model unchanged, got %d calls", calls)
+	}
+	loadedRun, err := sessionSvc.LoadRun(context.Background(), run.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+	if loadedRun.Runtime == nil || loadedRun.Runtime.Model != "openai/gpt-5-mini" {
+		t.Fatalf("expected runtime model to persist new value, got %+v", loadedRun.Runtime)
 	}
 }

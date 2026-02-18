@@ -82,3 +82,37 @@ func applyAllowedTools(registry *agent.HostToolRegistry, allowed []string) error
 	}
 	return nil
 }
+
+func resolveCodeExecOnly(profileDefault bool, roleOverride *bool) bool {
+	if roleOverride != nil {
+		return *roleOverride
+	}
+	return profileDefault
+}
+
+func resolveToolRegistries(base *agent.HostToolRegistry, allowed []string, codeExecOnly bool) (modelRegistry, bridgeRegistry *agent.HostToolRegistry, err error) {
+	if base == nil {
+		return nil, nil, fmt.Errorf("base tool registry is nil")
+	}
+
+	bridgeRegistry = base.Clone()
+	if bridgeRegistry == nil {
+		bridgeRegistry = agent.NewHostToolRegistry()
+	}
+	if err := applyAllowedTools(bridgeRegistry, allowed); err != nil {
+		return nil, nil, err
+	}
+	if !codeExecOnly {
+		return bridgeRegistry.Clone(), bridgeRegistry, nil
+	}
+
+	modelRegistry = agent.NewHostToolRegistry()
+	codeExecTool, ok := base.Get("code_exec")
+	if !ok {
+		return nil, nil, fmt.Errorf("code_exec_only enabled but code_exec is not registered")
+	}
+	if err := modelRegistry.Register(codeExecTool); err != nil {
+		return nil, nil, fmt.Errorf("register code_exec for model tool registry: %w", err)
+	}
+	return modelRegistry, bridgeRegistry, nil
+}

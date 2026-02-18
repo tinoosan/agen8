@@ -3,6 +3,8 @@ package builtins
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -282,6 +284,117 @@ func TestRunPython_InvalidPositionalArgsReturnToolError(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(out.Error), "invalid call signature") {
 		t.Fatalf("expected invalid call signature error, got %q", out.Error)
+	}
+}
+
+func TestRunPython_AcceptsJSONStyleLiteralsViaCompatibilityAliases(t *testing.T) {
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:         `result = {"ok": true, "retry": false, "value": null}`,
+		Allowlist:    []string{},
+		MaxToolCalls: 2,
+		TimeoutMs:    4_000,
+		MaxOutput:    8 * 1024,
+		Dispatch: func(_ context.Context, _ string, _ json.RawMessage) (types.HostOpRequest, error) {
+			t.Fatalf("dispatch should not be called")
+			return types.HostOpRequest{}, nil
+		},
+		Bridge: func(_ context.Context, _ types.HostOpRequest) types.HostOpResponse {
+			t.Fatalf("bridge should not be called")
+			return types.HostOpResponse{}
+		},
+		EnvAllowlist: inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("expected success with compatibility aliases, got %+v", out)
+	}
+	got, ok := out.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", out.Result)
+	}
+	if v, ok := got["ok"].(bool); !ok || !v {
+		t.Fatalf("expected ok=true, got %#v", got["ok"])
+	}
+	if v, ok := got["retry"].(bool); !ok || v {
+		t.Fatalf("expected retry=false, got %#v", got["retry"])
+	}
+	if v, exists := got["value"]; !exists || v != nil {
+		t.Fatalf("expected value=null, got %#v", got["value"])
+	}
+}
+
+func TestRunPython_BlocksDirectFilesystemWrites(t *testing.T) {
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:         `open("/workspace/a.txt", "w").write("x")`,
+		Allowlist:    []string{"fs_write"},
+		MaxToolCalls: 2,
+		TimeoutMs:    4_000,
+		MaxOutput:    8 * 1024,
+		Dispatch: func(_ context.Context, _ string, _ json.RawMessage) (types.HostOpRequest, error) {
+			t.Fatalf("dispatch should not be called for blocked direct write")
+			return types.HostOpRequest{}, nil
+		},
+		Bridge: func(_ context.Context, _ types.HostOpRequest) types.HostOpResponse {
+			t.Fatalf("bridge should not be called for blocked direct write")
+			return types.HostOpResponse{}
+		},
+		EnvAllowlist: inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if out.OK {
+		t.Fatalf("expected blocked direct write to fail, got %+v", out)
+	}
+	if out.ViolationType != codeExecPolicyDirectFSWrite || !out.PolicyViolation {
+		t.Fatalf("expected direct_fs_write policy violation, got %+v", out)
+	}
+	if !strings.Contains(strings.ToLower(out.Error), "use tools.fs_write") {
+		t.Fatalf("expected remediation guidance in error, got %q", out.Error)
+	}
+}
+
+func TestRunPython_AllowsReadOnlyOpen(t *testing.T) {
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "a.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:         `result = open("a.txt", "r").read()`,
+		Allowlist:    []string{"fs_read"},
+		MaxToolCalls: 2,
+		TimeoutMs:    4_000,
+		MaxOutput:    8 * 1024,
+		Dispatch: func(_ context.Context, _ string, _ json.RawMessage) (types.HostOpRequest, error) {
+			t.Fatalf("dispatch should not be called for local read")
+			return types.HostOpRequest{}, nil
+		},
+		Bridge: func(_ context.Context, _ types.HostOpRequest) types.HostOpResponse {
+			t.Fatalf("bridge should not be called for local read")
+			return types.HostOpResponse{}
+		},
+		EnvAllowlist: inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("expected read-only open to succeed, got %+v", out)
+	}
+	if got := strings.TrimSpace(fmt.Sprintf("%v", out.Result)); got != "hello" {
+		t.Fatalf("result=%q want hello", got)
 	}
 }
 

@@ -68,3 +68,32 @@ func TestSortedToolNamesFromRegistry_SortsAndDedupes(t *testing.T) {
 		t.Fatalf("unexpected sorted names: got %v want %v", got, want)
 	}
 }
+
+func TestPromptToolSpecForCodeExecOnly_UsesBridgeToolsForGuidance(t *testing.T) {
+	modelReg := NewHostToolRegistry()
+	if err := modelReg.Register(&promptTestTool{name: "code_exec", desc: "Run Python."}); err != nil {
+		t.Fatalf("register code_exec: %v", err)
+	}
+	bridgeReg := NewHostToolRegistry()
+	if err := bridgeReg.Register(&promptTestTool{name: "fs_read", desc: "Read files."}); err != nil {
+		t.Fatalf("register fs_read: %v", err)
+	}
+	if err := bridgeReg.Register(&promptTestTool{name: "http_fetch", desc: "Fetch HTTP."}); err != nil {
+		t.Fatalf("register http_fetch: %v", err)
+	}
+	// Should be filtered out from bridge guidance.
+	if err := bridgeReg.Register(&promptTestTool{name: "code_exec", desc: "Run Python."}); err != nil {
+		t.Fatalf("register code_exec bridge: %v", err)
+	}
+
+	spec := PromptToolSpecForCodeExecOnly(modelReg, bridgeReg, nil)
+	if !spec.CodeExecOnly {
+		t.Fatalf("expected code_exec_only guidance enabled")
+	}
+	if len(spec.CodeExecBridgeTools) != 2 {
+		t.Fatalf("expected 2 bridge guidance tools, got %d", len(spec.CodeExecBridgeTools))
+	}
+	if spec.CodeExecBridgeTools[0].Name != "fs_read" || spec.CodeExecBridgeTools[1].Name != "http_fetch" {
+		t.Fatalf("unexpected bridge tool order: %+v", spec.CodeExecBridgeTools)
+	}
+}

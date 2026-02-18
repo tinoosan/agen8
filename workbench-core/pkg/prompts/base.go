@@ -16,7 +16,9 @@ type PromptTool struct {
 
 // PromptToolSpec is the rendered tool set for prompt sections.
 type PromptToolSpec struct {
-	Tools []PromptTool
+	Tools               []PromptTool
+	CodeExecOnly        bool
+	CodeExecBridgeTools []PromptTool
 }
 
 var basePromptTemplate = template.Must(template.New("base_prompt").Parse(basePromptRaw))
@@ -60,11 +62,13 @@ func DefaultPromptToolSpec() PromptToolSpec {
 func renderBasePrompt(spec PromptToolSpec) (string, error) {
 	tools := normalizePromptTools(spec.Tools)
 	data := struct {
-		DirectOpsXML  string
-		ToolUsageRule string
+		DirectOpsXML          string
+		ToolUsageRule         string
+		CodeExecGuidanceRules string
 	}{
-		DirectOpsXML:  renderDirectOpsXML(tools),
-		ToolUsageRule: renderToolUsageRule(tools),
+		DirectOpsXML:          renderDirectOpsXML(tools),
+		ToolUsageRule:         renderToolUsageRule(tools),
+		CodeExecGuidanceRules: renderCodeExecGuidanceRules(spec),
 	}
 	var out bytes.Buffer
 	if err := basePromptTemplate.Execute(&out, data); err != nil {
@@ -130,6 +134,50 @@ func renderToolUsageRule(tools []PromptTool) string {
 	return "Use the available tools (" + strings.Join(names, ", ") + "); do not invent other tools."
 }
 
+func renderCodeExecGuidanceRules(spec PromptToolSpec) string {
+	if !spec.CodeExecOnly {
+		return ""
+	}
+	bridgeTools := normalizePromptTools(spec.CodeExecBridgeTools)
+	if len(bridgeTools) == 0 {
+		return `    <rule id="code_exec_orchestration">In code_exec_only mode, use code_exec for all non-final work. In Python, call tools via tools.&lt;name&gt;(key=value) (preferred) or tools.&lt;name&gt;({"key": value}) (compatible), and only import the ` + "`tools`" + ` module (do not use imports like ` + "`import tasks`" + `). Use Python literals ` + "`True`" + `/` + "`False`" + `/` + "`None`" + ` (not JSON ` + "`true`" + `/` + "`false`" + `/` + "`null`" + `). For standalone subagent delegation, call ` + "`tools.task_create(goal=\"...\", spawnWorker=True)`" + ` (compat alias: ` + "`spawn_worker`" + `). For team delegation, call ` + "`tools.task_create(goal=\"...\", assignedRole=\"role\")`" + `. Set result = ... for structured return, handle ToolError for failures, and do not write files directly from Python (use tools.fs_write/fs_edit/fs_append/fs_patch).</rule>
+    <rule id="code_exec_efficiency">code_exec is your programmatic orchestration layer: batch multiple tool calls in one invocation, pipe data between calls, and use control flow (loops/conditionals/error handling) to complete related work in one round-trip. Avoid single-tool code_exec invocations with no surrounding logic; those waste round-trips. GOOD: one code_exec reads 3 files, extracts fields, and writes one summary. BAD: three separate code_exec calls for reads, then a fourth for the write.</rule>`
+	}
+	var hints strings.Builder
+	for i, tool := range bridgeTools {
+		if i > 0 {
+			hints.WriteString("; ")
+		}
+		hints.WriteString("tools.")
+		hints.WriteString(html.EscapeString(tool.Name))
+		hints.WriteString("(...) e.g. `result = tools.")
+		hints.WriteString(html.EscapeString(tool.Name))
+		hints.WriteString("(...)`")
+		desc := compactPromptToolDescription(tool.Description)
+		if desc != "" {
+			hints.WriteString(" — ")
+			hints.WriteString(html.EscapeString(desc))
+		}
+	}
+	return `    <rule id="code_exec_orchestration">In code_exec_only mode, use code_exec for all non-final work. In Python, call tools via tools.&lt;name&gt;(key=value) (preferred) or tools.&lt;name&gt;({"key": value}) (compatible), and only import the ` + "`tools`" + ` module (do not use imports like ` + "`import tasks`" + `). Use Python literals ` + "`True`" + `/` + "`False`" + `/` + "`None`" + ` (not JSON ` + "`true`" + `/` + "`false`" + `/` + "`null`" + `). For standalone subagent delegation, call ` + "`tools.task_create(goal=\"...\", spawnWorker=True)`" + ` (compat alias: ` + "`spawn_worker`" + `). For team delegation, call ` + "`tools.task_create(goal=\"...\", assignedRole=\"role\")`" + `. Set result = ... for structured return, handle ToolError for failures, and do not write files directly from Python (use tools.fs_write/fs_edit/fs_append/fs_patch).</rule>
+    <rule id="code_exec_efficiency">code_exec is your programmatic orchestration layer: batch multiple tool calls in one invocation, pipe data between calls, and use control flow (loops/conditionals/error handling) to complete related work in one round-trip. Avoid single-tool code_exec invocations with no surrounding logic; those waste round-trips. GOOD: one code_exec reads 3 files, extracts fields, and writes one summary. BAD: three separate code_exec calls for reads, then a fourth for the write.</rule>
+    <rule id="code_exec_bridge_hints">Bridge tools available inside code_exec: ` + hints.String() + `.</rule>`
+}
+
+func compactPromptToolDescription(desc string) string {
+	desc = strings.TrimSpace(desc)
+	if desc == "" {
+		return ""
+	}
+	if idx := strings.Index(desc, "."); idx >= 0 {
+		desc = strings.TrimSpace(desc[:idx+1])
+	}
+	if len(desc) > 100 {
+		desc = strings.TrimSpace(desc[:100]) + "..."
+	}
+	return desc
+}
+
 const basePromptRaw = `<system>
   <identity>You are a capable AI assistant running in Workbench. You have access to a virtual filesystem and powerful tools to help users accomplish a wide range of tasks—from software engineering to analysis and automation.</identity>
   <general_assistance>
@@ -183,6 +231,7 @@ const basePromptRaw = `<system>
     <rule id="stop">Call final_answer only once the overarching goal is complete; plain assistant text without tool calls is treated as final output when finished.</rule>
     <rule id="path_resolution">For shell_exec, you can use relative paths or absolute VFS mount paths (/project, /workspace, /skills, /plan, /memory) in cwd and command args. fs_* tools still expect absolute VFS paths.</rule>
     <rule id="tool_usage">{{.ToolUsageRule}}</rule>
+{{.CodeExecGuidanceRules}}
     <rule id="browser_usage">Use browser for JS-heavy sites, multi-step interactions (login/forms/navigation), or when you need screenshots/PDFs/downloads/uploads. Use browser(action:\"dismiss\") for cookie banners/popups and browser(action:\"wait\") for explicit readiness. Prefer http_fetch for simple APIs and static pages.</rule>
     <rule id="fs_edit">fs_edit expects JSON like {"path": "/project/file", "edits": [{"old": "...", "new": "...", "occurrence": 1}]}; if it fails, re-read the file and try a more specific snippet.</rule>
     <rule id="fs_patch">fs_patch needs a unified diff with hunk headers (e.g., @@ -1,3 +1,3 @@) or adjust until the patch applies cleanly.</rule>

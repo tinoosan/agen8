@@ -19,10 +19,21 @@ func activityTitleFromRequest(d map[string]string) string {
 	return opmeta.FormatRequestTitle(d)
 }
 
-func activityIDFromEvent(ev types.EventRecord) string {
+func activityOpID(runID, opID string) string {
+	runID = strings.TrimSpace(runID)
+	opID = strings.TrimSpace(opID)
+	if runID == "" || opID == "" {
+		return ""
+	}
+	return runID + "|" + opID
+}
+
+func activityIDFromEvent(runID string, ev types.EventRecord) string {
 	if ev.Data != nil {
 		if opID := strings.TrimSpace(ev.Data["opId"]); opID != "" {
-			return opID
+			if keyed := activityOpID(runID, opID); keyed != "" {
+				return keyed
+			}
 		}
 	}
 	if strings.TrimSpace(ev.EventID) != "" {
@@ -66,7 +77,7 @@ func upsertActivityRequestTx(tx *sql.Tx, runID string, eventSeq int64, ev types.
 		return nil
 	}
 
-	actID := activityIDFromEvent(ev)
+	actID := activityIDFromEvent(runID, ev)
 	if actID == "" {
 		return nil
 	}
@@ -122,7 +133,7 @@ func upsertActivityRequestTx(tx *sql.Tx, runID string, eventSeq int64, ev types.
 	return nil
 }
 
-func upsertActivityResponseTx(tx *sql.Tx, runID string, _ int64, ev types.EventRecord) error {
+func upsertActivityResponseTx(tx *sql.Tx, runID string, eventSeq int64, ev types.EventRecord) error {
 	op := ""
 	if ev.Data != nil {
 		op = strings.TrimSpace(ev.Data["op"])
@@ -148,7 +159,7 @@ func upsertActivityResponseTx(tx *sql.Tx, runID string, _ int64, ev types.EventR
 
 	targetID := ""
 	if ev.Data != nil {
-		targetID = strings.TrimSpace(ev.Data["opId"])
+		targetID = activityOpID(runID, strings.TrimSpace(ev.Data["opId"]))
 	}
 	if targetID == "" {
 		// Back-compat: if there's no opId, update the last pending activity for this run.
@@ -239,6 +250,44 @@ func upsertActivityResponseTx(tx *sql.Tx, runID string, _ int64, ev types.EventR
 	if n > 0 {
 		return nil
 	}
-	// No matching request indexed; skip rather than inventing an activity.
+	// No matching request indexed; insert a response-only row so activity isn't lost.
+	if strings.TrimSpace(targetID) == "" {
+		targetID = activityIDFromEvent(runID, ev)
+	}
+	if strings.TrimSpace(targetID) == "" {
+		return nil
+	}
+	if act.Data == nil {
+		act.Data = map[string]string{}
+	}
+	act.Data["responseOnly"] = "true"
+	meta, err = json.Marshal(act)
+	if err != nil {
+		return fmt.Errorf("marshal fallback activity meta: %w", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO activities (run_id, activity_id, seq, kind, title, status, started_at, finished_at, meta_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(activity_id) DO UPDATE SET
+		   run_id=excluded.run_id,
+		   seq=excluded.seq,
+		   kind=excluded.kind,
+		   title=excluded.title,
+		   status=excluded.status,
+		   started_at=excluded.started_at,
+		   finished_at=excluded.finished_at,
+		   meta_json=excluded.meta_json`,
+		runID,
+		targetID,
+		eventSeq,
+		act.Kind,
+		act.Title,
+		string(newStatus),
+		act.StartedAt.UTC().Format(time.RFC3339Nano),
+		fin.UTC().Format(time.RFC3339Nano),
+		string(meta),
+	); err != nil {
+		return fmt.Errorf("insert fallback activity: %w", err)
+	}
 	return nil
 }

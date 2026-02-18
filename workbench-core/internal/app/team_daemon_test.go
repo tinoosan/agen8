@@ -169,10 +169,12 @@ func TestResolveRoleModel_UsesRoleOverride(t *testing.T) {
 }
 
 func TestBuildRoleRuntimeProfile_UsesRoleScopedSkillsOnly(t *testing.T) {
+	enabled := true
 	role := profile.RoleConfig{
 		Name:         "backend",
 		Description:  "Backend role",
 		Skills:       []string{"coding", "data-engineering"},
+		CodeExecOnly: &enabled,
 		AllowedTools: []string{"task_create"},
 	}
 	got := buildRoleRuntimeProfile(role)
@@ -187,5 +189,8 @@ func TestBuildRoleRuntimeProfile_UsesRoleScopedSkillsOnly(t *testing.T) {
 	}
 	if len(got.AllowedTools) != 1 || got.AllowedTools[0] != "task_create" {
 		t.Fatalf("unexpected allowed tools: %v", got.AllowedTools)
+	}
+	if !got.CodeExecOnly {
+		t.Fatalf("expected code_exec_only copied from role override")
 	}
 }

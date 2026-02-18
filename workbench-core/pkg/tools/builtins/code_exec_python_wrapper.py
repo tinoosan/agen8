@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 import io
 import json
+import os
+import pathlib
 import re
 import sys
 import time
 import types
 import traceback
+import builtins as py_builtins
 from contextlib import redirect_stderr, redirect_stdout
 
 FRAME_PREFIX = "__WBX_CODE_EXEC__"
@@ -17,6 +20,13 @@ class ToolError(Exception):
     def __init__(self, message, response=None):
         super().__init__(message)
         self.response = response
+
+
+DIRECT_FS_WRITE_POLICY = (
+    "Direct filesystem writes are disabled in code_exec; "
+    "use tools.fs_write/fs_edit/fs_append/fs_patch via tools.*."
+)
+DIRECT_FS_WRITE_MARKER = "policy_violation:direct_fs_write"
 
 
 def _emit(frame):
@@ -89,6 +99,37 @@ class _ToolsProxy:
         return _invoke
 
 
+def _direct_write_error():
+    raise ToolError(f"{DIRECT_FS_WRITE_MARKER}: {DIRECT_FS_WRITE_POLICY}")
+
+
+def _is_write_mode(mode):
+    mode = str(mode or "r")
+    return any(flag in mode for flag in ("w", "a", "x", "+"))
+
+
+def _install_fs_write_policy():
+    _orig_open = py_builtins.open
+
+    def _guarded_open(file, mode="r", *args, **kwargs):
+        if _is_write_mode(mode):
+            _direct_write_error()
+        return _orig_open(file, mode, *args, **kwargs)
+
+    py_builtins.open = _guarded_open
+
+    def _blocked(*args, **kwargs):
+        _direct_write_error()
+
+    # Block common os/pathlib write-side effects.
+    for name in ("remove", "unlink", "rename", "replace", "rmdir", "mkdir", "makedirs"):
+        if hasattr(os, name):
+            setattr(os, name, _blocked)
+    for name in ("write_text", "write_bytes", "touch", "mkdir", "rename", "replace", "unlink", "rmdir"):
+        if hasattr(pathlib.Path, name):
+            setattr(pathlib.Path, name, _blocked)
+
+
 def main():
     init = _read_frame()
     if init.get("type") != "init":
@@ -104,6 +145,7 @@ def main():
 
     bridge = _ToolBridge(allowed_tools)
     tools = _ToolsProxy(bridge)
+    _install_fs_write_policy()
     # Import-compatibility shim for model-generated code using `import tools`.
     tools_module = types.ModuleType("tools")
     tools_module.__getattr__ = lambda name: getattr(tools, name)
@@ -117,6 +159,10 @@ def main():
         "ToolError": ToolError,
         "json": json,
         "re": re,
+        # Compatibility aliases for model-generated JSON-style literals in Python code.
+        "true": True,
+        "false": False,
+        "null": None,
     }
 
     started = time.time()

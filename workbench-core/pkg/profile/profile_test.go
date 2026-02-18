@@ -188,3 +188,71 @@ allowed_tools: [fs_read, " fs_read ", shell_exec]
 		t.Fatalf("unexpected allowed_tools order/content: %v", p.AllowedTools)
 	}
 }
+
+func TestLoad_ParsesCodeExecOnly(t *testing.T) {
+	dir := t.TempDir()
+	raw := `
+id: code-exec-only
+description: Code exec profile
+code_exec_only: true
+prompts:
+  system_prompt: hi
+allowed_tools: [fs_list, fs_read]
+`
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !p.CodeExecOnly {
+		t.Fatalf("expected code_exec_only to be true")
+	}
+}
+
+func TestLoad_TeamRoleCodeExecOnlyOverride(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "coord.md"), []byte("coord"), 0o644); err != nil {
+		t.Fatalf("write coord prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "worker.md"), []byte("worker"), 0o644); err != nil {
+		t.Fatalf("write worker prompt: %v", err)
+	}
+	raw := `
+id: team-code-exec
+description: Team profile
+code_exec_only: true
+team:
+  roles:
+    - name: lead
+      coordinator: true
+      description: Team lead
+      prompts:
+        system_prompt_path: coord.md
+    - name: worker
+      description: Team worker
+      code_exec_only: false
+      prompts:
+        system_prompt_path: worker.md
+`
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !p.CodeExecOnly {
+		t.Fatalf("expected profile code_exec_only true")
+	}
+	if p.Team == nil || len(p.Team.Roles) != 2 {
+		t.Fatalf("unexpected roles: %+v", p.Team)
+	}
+	if p.Team.Roles[0].CodeExecOnly != nil {
+		t.Fatalf("expected nil override for first role")
+	}
+	if p.Team.Roles[1].CodeExecOnly == nil || *p.Team.Roles[1].CodeExecOnly {
+		t.Fatalf("expected worker override false")
+	}
+}

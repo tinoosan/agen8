@@ -394,15 +394,6 @@ func (codeExecOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map
 		reqData["maxBytes"] = strconv.Itoa(req.MaxBytes)
 		storeReq["maxBytes"] = strconv.Itoa(req.MaxBytes)
 	}
-	if len(req.Input) > 0 {
-		var ext struct {
-			MaxToolCalls *int `json:"maxToolCalls"`
-		}
-		if err := json.Unmarshal(req.Input, &ext); err == nil && ext.MaxToolCalls != nil {
-			reqData["maxToolCalls"] = strconv.Itoa(*ext.MaxToolCalls)
-			storeReq["maxToolCalls"] = strconv.Itoa(*ext.MaxToolCalls)
-		}
-	}
 	if req.Code != "" {
 		reqData["code"] = req.Code
 		storeReq["code"] = req.Code
@@ -451,12 +442,15 @@ func (codeExecOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.H
 		return
 	}
 	var payload struct {
+		Error           string          `json:"error"`
 		Result          json.RawMessage `json:"result"`
 		ToolCallCount   int             `json:"toolCallCount"`
 		RuntimeMs       int64           `json:"runtimeMs"`
 		ResultTruncated bool            `json:"resultTruncated"`
 		StdoutTruncated bool            `json:"stdoutTruncated"`
 		StderrTruncated bool            `json:"stderrTruncated"`
+		PolicyViolation bool            `json:"policyViolation"`
+		ViolationType   string          `json:"violationType"`
 	}
 	if err := json.Unmarshal([]byte(resp.Text), &payload); err != nil {
 		return
@@ -504,6 +498,18 @@ func (codeExecOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.H
 	if payload.ResultTruncated || payload.StdoutTruncated || payload.StderrTruncated {
 		respData["truncated"] = "true"
 		storeResp["truncated"] = "true"
+	}
+	if payload.PolicyViolation {
+		respData["policyViolation"] = "true"
+		storeResp["policyViolation"] = "true"
+	}
+	if v := strings.TrimSpace(payload.ViolationType); v != "" {
+		respData["violationType"] = v
+		storeResp["violationType"] = v
+	}
+	if resp.Ok == false && strings.TrimSpace(payload.Error) != "" {
+		respData["error"] = strings.TrimSpace(payload.Error)
+		storeResp["error"] = strings.TrimSpace(payload.Error)
 	}
 	if strings.TrimSpace(outputPreview) == "" {
 		if v := strings.TrimSpace(respData["stdout"]); v != "" {

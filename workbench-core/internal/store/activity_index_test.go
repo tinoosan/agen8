@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tinoosan/workbench-core/internal/opmeta"
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 func TestActivityTitleFromRequest_ParityWithOpMeta(t *testing.T) {
@@ -39,5 +40,27 @@ func TestShouldHideRoutingNoiseOp_ParityWithOpMeta(t *testing.T) {
 		if got != want {
 			t.Fatalf("shouldHideRoutingNoiseOp(%q,%q)=%v want %v", tc.op, tc.path, got, want)
 		}
+	}
+}
+
+func TestActivityOpID_RunScoped(t *testing.T) {
+	if got := activityOpID("run-a", "op-1"); got != "run-a|op-1" {
+		t.Fatalf("activityOpID = %q, want run-a|op-1", got)
+	}
+	if got := activityOpID("run-b", "op-1"); got != "run-b|op-1" {
+		t.Fatalf("activityOpID = %q, want run-b|op-1", got)
+	}
+	if got := activityOpID("", "op-1"); got != "" {
+		t.Fatalf("activityOpID empty run should be blank, got %q", got)
+	}
+}
+
+func TestActivityIDFromEvent_UsesRunScopedOpID(t *testing.T) {
+	ev := types.EventRecord{
+		EventID: "event-1",
+		Data:    map[string]string{"opId": "op-7"},
+	}
+	if got := activityIDFromEvent("run-x", ev); got != "run-x|op-7" {
+		t.Fatalf("activityIDFromEvent = %q, want run-x|op-7", got)
 	}
 }

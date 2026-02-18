@@ -11,6 +11,15 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/events"
 )
 
+func activityOpKey(runID, opID string) string {
+	runID = strings.TrimSpace(runID)
+	opID = strings.TrimSpace(opID)
+	if runID == "" || opID == "" {
+		return ""
+	}
+	return runID + "|" + opID
+}
+
 func (m *Model) observeActivityEvent(ev events.Event) {
 	switch ev.Type {
 	case "ui.editor.open":
@@ -220,7 +229,7 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		if op == "" {
 			return
 		}
-		opID := strings.TrimSpace(ev.Data["opId"])
+		opID := activityOpKey(ev.RunID, ev.Data["opId"])
 		m.activitySeq++
 		id := fmt.Sprintf("act-%d", m.activitySeq)
 		now := time.Now()
@@ -267,7 +276,7 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 		if strings.TrimSpace(ev.Data["op"]) == "" {
 			return
 		}
-		opID := strings.TrimSpace(ev.Data["opId"])
+		opID := activityOpKey(ev.RunID, ev.Data["opId"])
 		idx := -1
 		ok := false
 		if opID != "" && m.activityIndexByOpID != nil {
@@ -278,6 +287,40 @@ func (m *Model) observeActivityEvent(ev events.Event) {
 			idx, ok = m.activityIndexByID[m.pendingActivityID]
 		}
 		if !ok || idx < 0 || idx >= len(m.activities) {
+			// Don't drop unmatched responses; append a response-only entry.
+			m.activitySeq++
+			id := fmt.Sprintf("act-%d", m.activitySeq)
+			now := time.Now()
+			fin := now
+			respOnly := Activity{
+				ID:         id,
+				Kind:       strings.TrimSpace(ev.Data["op"]),
+				Title:      renderOpRequest(ev.Data),
+				Status:     ActivityError,
+				StartedAt:  now,
+				FinishedAt: &fin,
+				Duration:   0,
+				Ok:         strings.TrimSpace(ev.Data["ok"]),
+				Error:      strings.TrimSpace(ev.Data["err"]),
+				Data:       ev.Data,
+			}
+			if respOnly.Ok == "true" {
+				respOnly.Status = ActivityOK
+			}
+			if respOnly.Title == "" {
+				respOnly.Title = strings.TrimSpace(ev.Data["op"])
+			}
+			if v := strings.TrimSpace(ev.Data["outputPreview"]); v != "" {
+				respOnly.OutputPreview = v
+			} else if v := strings.TrimSpace(ev.Data["result"]); v != "" {
+				respOnly.OutputPreview = v
+			} else if v := strings.TrimSpace(ev.Data["output"]); v != "" {
+				respOnly.OutputPreview = v
+			}
+			m.activities = append(m.activities, respOnly)
+			m.activityIndexByID[id] = len(m.activities) - 1
+			m.refreshActivityList()
+			m.refreshActivityDetail()
 			return
 		}
 		act := m.activities[idx]

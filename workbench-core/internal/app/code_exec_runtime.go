@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/tinoosan/workbench-core/pkg/agent"
@@ -11,16 +12,26 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
-func configureCodeExecRuntime(ctx context.Context, rt *runtime.Runtime, registry *agent.HostToolRegistry, emit func(context.Context, events.Event)) {
-	if rt == nil || registry == nil {
-		return
+func configureCodeExecRuntime(
+	ctx context.Context,
+	rt *runtime.Runtime,
+	modelRegistry *agent.HostToolRegistry,
+	bridgeRegistry *agent.HostToolRegistry,
+	required bool,
+	emit func(context.Context, events.Event),
+) error {
+	if rt == nil || modelRegistry == nil || bridgeRegistry == nil {
+		return nil
 	}
 	if rt.CodeExec == nil {
-		registry.Remove("code_exec")
-		return
+		modelRegistry.Remove("code_exec")
+		if required {
+			return fmt.Errorf("code_exec is required but runtime invoker is not configured")
+		}
+		return nil
 	}
 	if err := rt.CodeExec.EnsureReady(ctx); err != nil {
-		registry.Remove("code_exec")
+		modelRegistry.Remove("code_exec")
 		if emit != nil {
 			emit(context.Background(), events.Event{
 				Type:    "daemon.warning",
@@ -31,10 +42,14 @@ func configureCodeExecRuntime(ctx context.Context, rt *runtime.Runtime, registry
 				},
 			})
 		}
-		return
+		if required {
+			return fmt.Errorf("code_exec is required but preflight failed: %w", err)
+		}
+		return nil
 	}
 	rt.CodeExec.SetDispatcher(func(ctx context.Context, toolName string, args json.RawMessage) (types.HostOpRequest, error) {
-		return registry.Dispatch(ctx, toolName, args)
+		return bridgeRegistry.Dispatch(ctx, toolName, args)
 	})
-	rt.CodeExec.SetToolAllowlist(agent.SortedToolNamesFromRegistry(registry))
+	rt.CodeExec.SetToolAllowlist(agent.SortedToolNamesFromRegistry(bridgeRegistry))
+	return nil
 }

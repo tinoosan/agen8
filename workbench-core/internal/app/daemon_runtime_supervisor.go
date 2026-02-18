@@ -78,6 +78,52 @@ type managedRuntime struct {
 	model     string
 }
 
+func resolveRunModel(sess types.Session, run types.Run, fallbackModel string) string {
+	isChildRun := strings.TrimSpace(run.ParentRunID) != ""
+	runTeamID := ""
+	if run.Runtime != nil {
+		runTeamID = strings.TrimSpace(run.Runtime.TeamID)
+	}
+	isTeamRun := runTeamID != "" || strings.TrimSpace(sess.TeamID) != ""
+	runModel := ""
+	if run.Runtime != nil {
+		runModel = strings.TrimSpace(run.Runtime.Model)
+	}
+	sessionModel := strings.TrimSpace(sess.ActiveModel)
+	if isChildRun {
+		if runModel != "" {
+			return runModel
+		}
+	}
+	if isTeamRun {
+		if runModel != "" {
+			return runModel
+		}
+		if sessionModel != "" {
+			return sessionModel
+		}
+	} else {
+		if sessionModel != "" {
+			return sessionModel
+		}
+		if runModel != "" {
+			return runModel
+		}
+	}
+	return strings.TrimSpace(fallbackModel)
+}
+
+func shouldSyncModelFromSession(run types.Run, loaded types.Session) bool {
+	if strings.TrimSpace(run.ParentRunID) != "" {
+		return false
+	}
+	// Team runs should only change model via explicit control.setModel.
+	if strings.TrimSpace(loaded.TeamID) != "" {
+		return false
+	}
+	return true
+}
+
 func (m *managedRuntime) CurrentModel() string {
 	if m == nil {
 		return ""
@@ -381,6 +427,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	teamRoles := []string{}
 	teamRoleDescriptions := map[string]string{}
 	isCoordinator := false
+	var roleCodeExecOnlyOverride *bool
 	if isTeam {
 		if prof.Team == nil {
 			return nil, fmt.Errorf("team run %s requires a team profile", runID)
@@ -414,6 +461,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			return nil, fmt.Errorf("role %q not found in team profile %q", roleName, prof.ID)
 		}
 		isCoordinator = strings.EqualFold(strings.TrimSpace(roleCfg.Name), coordinatorRole)
+		roleCodeExecOnlyOverride = roleCfg.CodeExecOnly
 		activeProfile = buildRoleRuntimeProfile(*roleCfg)
 	}
 
@@ -424,22 +472,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	run.Runtime.TeamID = teamID
 	run.Runtime.Role = roleName
 
-	// For child runs, the run's explicit model (set at spawn time from subagent_model
-	// config) takes precedence over the session's active model, which reflects the
-	// parent's model choice.
-	var model string
-	if strings.TrimSpace(run.ParentRunID) != "" {
-		model = strings.TrimSpace(run.Runtime.Model)
-	}
-	if model == "" {
-		model = strings.TrimSpace(sess.ActiveModel)
-	}
-	if model == "" {
-		model = strings.TrimSpace(run.Runtime.Model)
-	}
-	if model == "" {
-		model = strings.TrimSpace(s.resolved.Model)
-	}
+	model := resolveRunModel(sess, run, strings.TrimSpace(s.resolved.Model))
 	if model == "" {
 		return nil, fmt.Errorf("run %s has no configured model", runID)
 	}
@@ -617,6 +650,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			return nil, err
 		}
 	}
+	var allowedToolsForRun []string
 	if !isChildRun {
 		roleAllowedTools, removedTools := sanitizeAllowedToolsForRole(activeProfile.AllowedTools, teamID, isCoordinator)
 		if len(removedTools) > 0 {
@@ -630,20 +664,38 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 				},
 			})
 		}
-		if err := applyAllowedTools(registry, roleAllowedTools); err != nil {
-			orderedEmitter.Close()
-			_ = rt.Shutdown(context.Background())
-			return nil, err
-		}
+		allowedToolsForRun = roleAllowedTools
 	}
-	configureCodeExecRuntime(parent, rt, registry, emitEvent)
-	promptToolSpec := agent.PromptToolSpecFromSources(registry, nil)
+	codeExecDefault := activeProfile.CodeExecOnly
+	if isTeam {
+		codeExecDefault = prof.CodeExecOnly
+	}
+	codeExecOnly := resolveCodeExecOnly(codeExecDefault, roleCodeExecOnlyOverride)
+	activeProfile.CodeExecOnly = codeExecOnly
+
+	modelRegistry, bridgeRegistry, err := resolveToolRegistries(registry, allowedToolsForRun, codeExecOnly)
+	if err != nil {
+		orderedEmitter.Close()
+		_ = rt.Shutdown(context.Background())
+		return nil, err
+	}
+
+	if err := configureCodeExecRuntime(parent, rt, modelRegistry, bridgeRegistry, codeExecOnly, emitEvent); err != nil {
+		orderedEmitter.Close()
+		_ = rt.Shutdown(context.Background())
+		return nil, err
+	}
+
+	promptToolSpec := agent.PromptToolSpecFromSources(modelRegistry, nil)
+	if codeExecOnly {
+		promptToolSpec = agent.PromptToolSpecForCodeExecOnly(modelRegistry, bridgeRegistry, nil)
+	}
 	if isChildRun {
 		agentCfg.SystemPrompt = prompts.DefaultSubAgentSystemPromptWithTools(promptToolSpec)
 	} else {
 		agentCfg.SystemPrompt = prompts.DefaultAutonomousSystemPromptWithTools(promptToolSpec)
 	}
-	agentCfg.HostToolRegistry = registry
+	agentCfg.HostToolRegistry = modelRegistry
 
 	runLLMClient := withRetryDiagnostics(s.llmClient, emitEvent)
 	a, err := agent.NewAgent(runLLMClient, rt.Executor, agentCfg)
@@ -716,10 +768,9 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			if err != nil {
 				return
 			}
-			// Only sync model from session for top-level runs. Child runs (sub-agents) keep the
-			// model set at spawn (profile/env); session ActiveModel reflects the parent's choice.
-			isChildRun := strings.TrimSpace(run.ParentRunID) != ""
-			if !isChildRun {
+			// Only sync model for standalone top-level runs. Team runs must only update
+			// model via explicit control.setModel to avoid unexpected resets.
+			if shouldSyncModelFromSession(run, loaded) {
 				targetModel := strings.TrimSpace(loaded.ActiveModel)
 				if targetModel != "" {
 					same := strings.EqualFold(targetModel, managed.CurrentModel())
@@ -739,6 +790,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 				}
 			}
 			// Only sync reasoning from session for top-level runs; subagents keep profile/env settings from spawn.
+			isChildRun := strings.TrimSpace(run.ParentRunID) != ""
 			if !isChildRun {
 				targetModel := strings.TrimSpace(loaded.ActiveModel)
 				targetEffort, targetSummary := sessionReasoningForModel(
@@ -1163,13 +1215,30 @@ func (s *runtimeSupervisor) ApplySessionModel(ctx context.Context, sessionID, ta
 		if strings.TrimSpace(wr.ParentRunID) != "" {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(worker.CurrentModel()), model) {
+		runtimeModel := ""
+		if wr.Runtime != nil {
+			runtimeModel = strings.TrimSpace(wr.Runtime.Model)
+		}
+		currentModelMatches := strings.EqualFold(strings.TrimSpace(worker.CurrentModel()), model)
+		runtimeModelMatches := strings.EqualFold(runtimeModel, model)
+		if currentModelMatches && runtimeModelMatches {
 			continue
 		}
-		if err := worker.session.SetModel(ctx, model); err != nil {
-			return applied, err
+		if !currentModelMatches {
+			if err := worker.session.SetModel(ctx, model); err != nil {
+				return applied, err
+			}
+			worker.SetCurrentModel(model)
 		}
-		worker.SetCurrentModel(model)
+		if !runtimeModelMatches {
+			if wr.Runtime == nil {
+				wr.Runtime = &types.RunRuntimeConfig{}
+			}
+			wr.Runtime.Model = model
+			if err := s.sessionService.SaveRun(ctx, wr); err != nil {
+				return applied, err
+			}
+		}
 		applied = append(applied, runID)
 	}
 	return applied, nil

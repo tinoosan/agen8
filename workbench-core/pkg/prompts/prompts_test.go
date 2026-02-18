@@ -68,6 +68,72 @@ func TestDefaultSystemPromptWithTools_EmptyToolsetFallback(t *testing.T) {
 	}
 }
 
+func TestDefaultSystemPromptWithTools_CodeExecGuidanceInjected(t *testing.T) {
+	s := DefaultSystemPromptWithTools(PromptToolSpec{
+		Tools:        []PromptTool{{Name: "code_exec", Description: "Run python code."}},
+		CodeExecOnly: true,
+		CodeExecBridgeTools: []PromptTool{
+			{Name: "fs_read", Description: "Read files."},
+			{Name: "http_fetch", Description: "Fetch over HTTP."},
+		},
+	})
+	if !strings.Contains(s, `id="code_exec_orchestration"`) {
+		t.Fatalf("expected code_exec orchestration rule, got: %s", s)
+	}
+	if !strings.Contains(s, `id="code_exec_efficiency"`) {
+		t.Fatalf("expected code_exec efficiency rule, got: %s", s)
+	}
+	if !strings.Contains(s, `id="code_exec_bridge_hints"`) {
+		t.Fatalf("expected bridge hints rule, got: %s", s)
+	}
+	if !strings.Contains(s, "tools.fs_read(...)") || !strings.Contains(s, "tools.http_fetch(...)") {
+		t.Fatalf("expected bridge tool hints, got: %s", s)
+	}
+	if !strings.Contains(s, "tools.task_create(goal=") {
+		t.Fatalf("expected task_create delegation guidance, got: %s", s)
+	}
+	if !strings.Contains(s, "spawnWorker=True") {
+		t.Fatalf("expected canonical spawnWorker guidance, got: %s", s)
+	}
+	if !strings.Contains(s, "GOOD: one code_exec reads 3 files") {
+		t.Fatalf("expected efficiency good/bad example guidance, got: %s", s)
+	}
+	if !strings.Contains(s, "True`/`False`/`None") {
+		t.Fatalf("expected python literal guidance, got: %s", s)
+	}
+	if !strings.Contains(s, "import tasks") {
+		t.Fatalf("expected explicit invalid import anti-pattern guidance, got: %s", s)
+	}
+	if strings.Index(s, "tools.fs_read(...)") > strings.Index(s, "tools.http_fetch(...)") {
+		t.Fatalf("expected deterministic lexical order for bridge hints")
+	}
+}
+
+func TestDefaultSystemPromptWithTools_CodeExecGuidanceInjected_NoBridgeTools(t *testing.T) {
+	s := DefaultSystemPromptWithTools(PromptToolSpec{
+		Tools:        []PromptTool{{Name: "code_exec", Description: "Run python code."}},
+		CodeExecOnly: true,
+	})
+	if !strings.Contains(s, `id="code_exec_orchestration"`) {
+		t.Fatalf("expected code_exec orchestration rule, got: %s", s)
+	}
+	if !strings.Contains(s, `id="code_exec_efficiency"`) {
+		t.Fatalf("expected code_exec efficiency rule, got: %s", s)
+	}
+	if strings.Contains(s, `id="code_exec_bridge_hints"`) {
+		t.Fatalf("did not expect bridge hints without bridge tools, got: %s", s)
+	}
+}
+
+func TestDefaultSystemPromptWithTools_CodeExecGuidanceOmittedWhenOff(t *testing.T) {
+	s := DefaultSystemPromptWithTools(PromptToolSpec{
+		Tools: []PromptTool{{Name: "code_exec", Description: "Run python code."}},
+	})
+	if strings.Contains(s, `id="code_exec_orchestration"`) || strings.Contains(s, `id="code_exec_bridge_hints"`) {
+		t.Fatalf("did not expect code_exec guidance when code_exec_only is off")
+	}
+}
+
 func TestDefaultTeamModeSystemPrompt_ExcludesSubagentWording(t *testing.T) {
 	s := DefaultTeamModeSystemPrompt()
 	// Team co-agents must not be instructed about subagents, spawn_worker, task_review, or callbacks.
@@ -106,6 +172,9 @@ func TestDefaultAutonomousSystemPrompt_UsesStandaloneSubagentCanonicalPaths(t *t
 	}
 	if !strings.Contains(s, "/tasks/subagent-&lt;N&gt;/&lt;date&gt;/&lt;taskID&gt;/SUMMARY.md") {
 		t.Fatalf("autonomous prompt should include canonical subagent summary path")
+	}
+	if !strings.Contains(s, "spawnWorker=true") {
+		t.Fatalf("autonomous prompt should use canonical spawnWorker=true wording")
 	}
 }
 

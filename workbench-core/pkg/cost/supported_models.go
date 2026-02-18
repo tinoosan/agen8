@@ -36,7 +36,8 @@ var modelInfos = []ModelInfo{
 	{"anthropic/claude-3-haiku", "anthropic", 0.25, 1.25, false},
 	{"anthropic/claude-4.5-opus", "anthropic", 5.0, 25.0, true},
 	{"anthropic/claude-opus-4.6", "anthropic", 5.0, 25.0, true},
-	{"anthropic/claude-4.5-sonnet", "anthropic", 1.0, 15.0, true},
+	{"anthropic/claude-4.5-sonnet", "anthropic", 3.0, 15.0, true},
+	{"anthropic/claude-4.6-sonnet", "anthropic", 3.0, 15.0, true},
 	{"z-ai/glm-4.5-air:free", "z-ai", 0, 0, false},
 	{"z-ai/glm-4.7", "z-ai", 0.4, 1.5, true},
 	{"z-ai/glm-4.7-flash", "z-ai", 0.06, 0.40, true},
@@ -46,6 +47,7 @@ var modelInfos = []ModelInfo{
 	{"openrouter/free", "openrouter", 0, 0, true},
 	{"moonshotai/kimi-k2-thinking", "moonshotai", 0.4, 1.75, true},
 	{"moonshotai/kimi-k2.5", "moonshotai", 0.45, 2.50, false},
+	{"minimax/minimax-m2.5", "minimax", 0.30, 1.10, true},
 }
 
 func SupportedModels() []string {

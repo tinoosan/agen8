@@ -18,7 +18,7 @@ func (t *CodeExecTool) Definition() llmtypes.Tool {
 		Type: "function",
 		Function: llmtypes.ToolFunction{
 			Name:        "code_exec",
-			Description: "[CORE] Execute Python code with a direct tools SDK bridge. In Python, call tools as `tools.<tool>(key=value)` (preferred), `tools.<tool>({\"key\": value})` (compatibility), or `import tools` then call `tools.<tool>(...)`. Example: `import tools; result = tools.fs_list(path=\"/project\")`. Set `result = ...` for structured return. Tool failures raise ToolError in Python.",
+			Description: "[CORE] Execute Python with bridged host tools. Batch multiple tool calls in one invocation to minimize round-trips; avoid single-tool code_exec calls when no logic surrounds them. Call tools as `tools.<tool>(key=value)` (preferred), `tools.<tool>({\"key\": value})` (compat), or `import tools` then `tools.<tool>(...)`. Use Python literals `True`/`False`/`None` (not JSON `true`/`false`/`null`). In code_exec-only workflows, use code_exec to orchestrate all tool operations, including standalone delegation via `tools.task_create(goal=\"...\", spawnWorker=True)` (compat alias: `spawn_worker`) and team delegation via `tools.task_create(goal=\"...\", assignedRole=\"cto\")`. Do not import tool namespaces as Python modules (invalid: `import tasks`; only `import tools` is supported). For side effects, do NOT write files directly from Python; use `tools.fs_write/fs_edit/fs_append/fs_patch` (invalid: `open(\"/workspace/x.txt\", \"w\")`). Set `result = ...` for structured return. Tool failures raise ToolError.",
 			Strict:      true,
 			Parameters: map[string]any{
 				"type": "object",
@@ -43,12 +43,8 @@ func (t *CodeExecTool) Definition() llmtypes.Tool {
 						"type":        intOrNull,
 						"description": "Maximum combined output bytes for returned logs/result payload (integer or null). Use null for default.",
 					},
-					"maxToolCalls": map[string]any{
-						"type":        intOrNull,
-						"description": "Maximum number of in-code tools.* calls allowed in this execution (integer or null). Use null for default.",
-					},
 				},
-				"required":             []any{"language", "code", "cwd", "timeoutMs", "maxOutputBytes", "maxToolCalls"},
+				"required":             []any{"language", "code", "cwd", "timeoutMs", "maxOutputBytes"},
 				"additionalProperties": false,
 			},
 		},
@@ -62,7 +58,6 @@ func (t *CodeExecTool) Execute(_ context.Context, args json.RawMessage) (types.H
 		Cwd            *string `json:"cwd"`
 		TimeoutMs      *int    `json:"timeoutMs"`
 		MaxOutputBytes *int    `json:"maxOutputBytes"`
-		MaxToolCalls   *int    `json:"maxToolCalls"`
 	}
 	if err := json.Unmarshal(args, &payload); err != nil {
 		return types.HostOpRequest{}, err
@@ -91,13 +86,6 @@ func (t *CodeExecTool) Execute(_ context.Context, args json.RawMessage) (types.H
 	}
 	if payload.MaxOutputBytes != nil {
 		req.MaxBytes = *payload.MaxOutputBytes
-	}
-	if payload.MaxToolCalls != nil {
-		inp, err := json.Marshal(map[string]any{"maxToolCalls": *payload.MaxToolCalls})
-		if err != nil {
-			return types.HostOpRequest{}, err
-		}
-		req.Input = inp
 	}
 	return req, nil
 }

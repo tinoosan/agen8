@@ -112,18 +112,8 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 			if m.activityFollowingTail {
 				// If a new page is created, overshoot so loadActivityPage clamps to the new last page.
 				m.activityPage = max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize))
-				cmds = append(cmds, m.loadActivityPage())
-			} else if msg.ev.Event.Type == "agent.op.response" {
-				opID := strings.TrimSpace(msg.ev.Event.Data["opId"])
-				if opID != "" {
-					for _, a := range m.activityPageItems {
-						if strings.TrimSpace(a.ID) == opID {
-							cmds = append(cmds, m.loadActivityPage())
-							break
-						}
-					}
-				}
 			}
+			cmds = append(cmds, m.loadActivityPage())
 			if msg.ev.Event.Type == "agent.op.response" {
 				op := strings.TrimSpace(msg.ev.Event.Data["op"])
 				tag := strings.TrimSpace(msg.ev.Event.Data["tag"])

@@ -62,3 +62,64 @@ func TestSanitizeAllowedToolsForRole_KeepsTaskCreateForCoordinator(t *testing.T)
 		t.Fatalf("sanitized=%v", sanitized)
 	}
 }
+
+func TestResolveCodeExecOnly(t *testing.T) {
+	profileDefault := true
+	if got := resolveCodeExecOnly(profileDefault, nil); !got {
+		t.Fatalf("resolveCodeExecOnly(nil) = %v, want true", got)
+	}
+	override := false
+	if got := resolveCodeExecOnly(profileDefault, &override); got {
+		t.Fatalf("resolveCodeExecOnly(false override) = %v, want false", got)
+	}
+}
+
+func TestResolveToolRegistries_CodeExecOnly(t *testing.T) {
+	base, err := agent.DefaultHostToolRegistry()
+	if err != nil {
+		t.Fatalf("DefaultHostToolRegistry: %v", err)
+	}
+	modelReg, bridgeReg, err := resolveToolRegistries(base, []string{"fs_read"}, true)
+	if err != nil {
+		t.Fatalf("resolveToolRegistries: %v", err)
+	}
+
+	if _, ok := modelReg.Get("code_exec"); !ok {
+		t.Fatalf("expected code_exec in model registry")
+	}
+	if _, ok := modelReg.Get("fs_read"); ok {
+		t.Fatalf("expected fs_read hidden from model registry")
+	}
+
+	if _, ok := bridgeReg.Get("fs_read"); !ok {
+		t.Fatalf("expected fs_read in bridge registry")
+	}
+	if _, ok := bridgeReg.Get("http_fetch"); ok {
+		t.Fatalf("expected http_fetch removed from bridge registry")
+	}
+}
+
+func TestResolveToolRegistries_Hybrid(t *testing.T) {
+	base, err := agent.DefaultHostToolRegistry()
+	if err != nil {
+		t.Fatalf("DefaultHostToolRegistry: %v", err)
+	}
+	modelReg, bridgeReg, err := resolveToolRegistries(base, []string{"fs_read", "shell_exec"}, false)
+	if err != nil {
+		t.Fatalf("resolveToolRegistries: %v", err)
+	}
+
+	if _, ok := modelReg.Get("fs_read"); !ok {
+		t.Fatalf("expected fs_read in model registry")
+	}
+	if _, ok := modelReg.Get("shell_exec"); !ok {
+		t.Fatalf("expected shell_exec in model registry")
+	}
+	if _, ok := modelReg.Get("http_fetch"); ok {
+		t.Fatalf("expected http_fetch removed from model registry")
+	}
+
+	if _, ok := bridgeReg.Get("fs_read"); !ok {
+		t.Fatalf("expected fs_read in bridge registry")
+	}
+}

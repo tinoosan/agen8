@@ -514,28 +514,41 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 		if goal == "" {
 			return commandLinesMsg{lines: []string{"[queued] error: goal is empty"}}
 		}
+		targetRunID, err := m.resolveEnqueueTargetRunID()
+		if err != nil {
+			if strings.TrimSpace(m.teamID) != "" {
+				return commandLinesMsg{lines: []string{"[queued] error: cannot queue: coordinator run unavailable (refresh team manifest or pick an agent)"}}
+			}
+			return commandLinesMsg{lines: []string{"[queued] error: cannot queue: " + err.Error()}}
+		}
+		autoResumed, err := m.ensureTargetRunRunning(targetRunID)
+		if err != nil {
+			return commandLinesMsg{lines: []string{"[queued] error: " + err.Error()}}
+		}
+		controlSessionID := strings.TrimSpace(m.resolveSessionIDForRun(targetRunID))
+		if controlSessionID == "" {
+			controlSessionID = strings.TrimSpace(m.rpcRun().SessionID)
+		}
 		params := protocol.TaskCreateParams{
-			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
-			Goal:     goal,
-			Priority: priority,
+			ThreadID:       protocol.ThreadID(controlSessionID),
+			Goal:           goal,
+			Priority:       priority,
+			RunID:          targetRunID,
+			AssignedToType: "agent",
+			AssignedTo:     targetRunID,
+			AssignedRole:   "",
 		}
 		if strings.TrimSpace(m.teamID) != "" {
 			params.TeamID = strings.TrimSpace(m.teamID)
-			if strings.TrimSpace(m.focusedRunID) != "" {
-				params.RunID = strings.TrimSpace(m.focusedRunID)
-				params.AssignedToType = "agent"
-				params.AssignedTo = strings.TrimSpace(m.focusedRunID)
-				if strings.TrimSpace(m.focusedRunRole) != "" {
-					params.AssignedRole = strings.TrimSpace(m.focusedRunRole)
-				}
-			} else {
-				params.AssignedToType = "team"
-				params.AssignedTo = strings.TrimSpace(m.teamID)
+			targetRole := strings.TrimSpace(m.resolveRoleForRun(targetRunID))
+			if targetRole == "" {
+				return commandLinesMsg{lines: []string{
+					fmt.Sprintf("[queued] error: cannot queue: target role unavailable for run %s; refresh team manifest or pick a valid agent", shortID(targetRunID)),
+				}}
 			}
-		} else {
-			params.RunID = strings.TrimSpace(m.runID)
-			params.AssignedToType = "agent"
-			params.AssignedTo = strings.TrimSpace(m.runID)
+			params.AssignedRole = targetRole
+			params.AssignedToType = "role"
+			params.AssignedTo = targetRole
 		}
 		var res protocol.TaskCreateResult
 		if err := m.rpcRoundTrip(protocol.MethodTaskCreate, params, &res); err != nil {
@@ -545,15 +558,20 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 		if id == "" {
 			id = "task-" + uuid.NewString()
 		}
-		suffix := "run " + m.runID
+		suffix := "run " + targetRunID
 		extra := []tea.Cmd{}
 		if strings.TrimSpace(m.teamID) != "" {
-			suffix = "team " + m.teamID
+			suffix = "run " + targetRunID + " (team " + m.teamID + ")"
 			extra = append(extra, m.loadTeamStatus())
 		}
+		lines := make([]string, 0, 2)
+		if autoResumed {
+			lines = append(lines, "[resume] auto-resumed run: "+shortID(targetRunID))
+		}
+		lines = append(lines, "[queued] "+id+" "+goal+" — task queued to "+suffix)
 		cmds := []tea.Cmd{
 			func() tea.Msg {
-				return commandLinesMsg{lines: []string{"[queued] " + id + " " + goal + " — task queued to " + suffix}}
+				return commandLinesMsg{lines: lines}
 			},
 			func() tea.Msg { return taskQueuedLocallyMsg{TaskID: id, Goal: goal} },
 		}
@@ -562,6 +580,42 @@ func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {
 			cmds...,
 		)
 	}
+}
+
+func (m *monitorModel) ensureTargetRunRunning(targetRunID string) (bool, error) {
+	targetRunID = strings.TrimSpace(targetRunID)
+	if targetRunID == "" {
+		return false, fmt.Errorf("target run is required")
+	}
+	sessionID := strings.TrimSpace(m.resolveSessionIDForRun(targetRunID))
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(m.rpcRun().SessionID)
+	}
+	var list protocol.AgentListResult
+	if err := m.rpcRoundTrip(protocol.MethodAgentList, protocol.AgentListParams{
+		ThreadID:  protocol.ThreadID(sessionID),
+		SessionID: sessionID,
+	}, &list); err != nil {
+		return false, fmt.Errorf("resolve run status before queue: %w", err)
+	}
+	status := ""
+	for _, item := range list.Agents {
+		if strings.TrimSpace(item.RunID) == targetRunID {
+			status = strings.ToLower(strings.TrimSpace(item.Status))
+			break
+		}
+	}
+	if status != "paused" {
+		return false, nil
+	}
+	var resumed protocol.AgentResumeResult
+	if err := m.rpcRoundTrip(protocol.MethodAgentResume, protocol.AgentResumeParams{
+		ThreadID: protocol.ThreadID(sessionID),
+		RunID:    targetRunID,
+	}, &resumed); err != nil {
+		return false, fmt.Errorf("auto-resume before queue failed: %w", err)
+	}
+	return true, nil
 }
 
 func (m *monitorModel) writeControl(command string, args map[string]any) tea.Cmd {

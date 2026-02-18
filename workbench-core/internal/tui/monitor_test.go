@@ -216,6 +216,171 @@ func TestMonitorCommandRegistry_IncludesCopy(t *testing.T) {
 	}
 }
 
+func TestEnqueueTask_AutoResumesPausedStandaloneRun(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	runID := "run-auto-resume"
+	startMonitorTestRPCServer(t, cfg, runID)
+
+	run, err := implstore.LoadRun(cfg, runID)
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+	run.Status = types.RunStatusPaused
+	if err := implstore.SaveRun(cfg, run); err != nil {
+		t.Fatalf("SaveRun(paused): %v", err)
+	}
+
+	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	cmd := m.enqueueTask("auto resume test", 5)
+	if cmd == nil {
+		t.Fatalf("expected enqueue cmd")
+	}
+	_ = cmd()
+
+	loaded, err := implstore.LoadRun(cfg, runID)
+	if err != nil {
+		t.Fatalf("LoadRun(after): %v", err)
+	}
+	if loaded.Status != types.RunStatusRunning {
+		t.Fatalf("run status=%q want %q", loaded.Status, types.RunStatusRunning)
+	}
+
+	tasks, err := m.taskStore.ListTasks(ctx, agentstate.TaskFilter{
+		RunID:          runID,
+		AssignedToType: "agent",
+		AssignedTo:     runID,
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "created_at",
+		SortDesc:       true,
+		Limit:          1,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(tasks) == 0 {
+		t.Fatalf("expected pending queued task")
+	}
+}
+
+func TestEnqueueTask_TeamDefaultsToCoordinatorRun(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	runID := "run-coordinator"
+	startMonitorTestRPCServer(t, cfg, runID)
+
+	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	m.teamID = "team-1"
+	m.teamCoordinatorRunID = runID
+	m.teamRoleByRunID = map[string]string{runID: "coordinator"}
+	cmd := m.enqueueTask("team queue test", 5)
+	if cmd == nil {
+		t.Fatalf("expected enqueue cmd")
+	}
+	_ = cmd()
+
+	tasks, err := m.taskStore.ListTasks(ctx, agentstate.TaskFilter{
+		TeamID:         "team-1",
+		RunID:          runID,
+		AssignedToType: "role",
+		AssignedTo:     "coordinator",
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "created_at",
+		SortDesc:       true,
+		Limit:          1,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(tasks) == 0 {
+		t.Fatalf("expected team task assigned to coordinator run")
+	}
+	if got := strings.TrimSpace(tasks[0].AssignedRole); got != "coordinator" {
+		t.Fatalf("assignedRole=%q want %q", got, "coordinator")
+	}
+}
+
+func TestEnqueueTask_TeamRoleMissingReturnsError(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	runID := "run-role-missing"
+	startMonitorTestRPCServer(t, cfg, runID)
+
+	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	m.teamID = "team-1"
+	m.teamCoordinatorRunID = runID
+	m.teamRoleByRunID = map[string]string{}
+	cmd := m.enqueueTask("should fail", 5)
+	if cmd == nil {
+		t.Fatalf("expected enqueue cmd")
+	}
+	msg := cmd()
+	lines, ok := msg.(commandLinesMsg)
+	if !ok || len(lines.lines) == 0 {
+		t.Fatalf("expected commandLinesMsg, got %#v", msg)
+	}
+	if !strings.Contains(strings.ToLower(lines.lines[0]), "target role unavailable") {
+		t.Fatalf("unexpected error line: %q", lines.lines[0])
+	}
+}
+
+func TestEnqueueTask_TeamFocusedRunUsesFocusedRole(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	runID := "run-focused"
+	startMonitorTestRPCServer(t, cfg, runID)
+
+	m, err := newMonitorModel(ctx, cfg, runID, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	m.teamID = "team-1"
+	m.teamCoordinatorRunID = "run-coordinator"
+	m.focusedRunID = runID
+	m.teamRoleByRunID = map[string]string{
+		runID:             "cto",
+		"run-coordinator": "ceo",
+	}
+	cmd := m.enqueueTask("focused team queue test", 5)
+	if cmd == nil {
+		t.Fatalf("expected enqueue cmd")
+	}
+	_ = cmd()
+
+	tasks, err := m.taskStore.ListTasks(ctx, agentstate.TaskFilter{
+		TeamID:         "team-1",
+		RunID:          runID,
+		AssignedToType: "role",
+		AssignedTo:     "cto",
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "created_at",
+		SortDesc:       true,
+		Limit:          1,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	if len(tasks) == 0 {
+		t.Fatalf("expected focused role-assigned team task")
+	}
+	if got := strings.TrimSpace(tasks[0].AssignedRole); got != "cto" {
+		t.Fatalf("assignedRole=%q want %q", got, "cto")
+	}
+}
+
 func TestMonitorAgentOutputForClipboard(t *testing.T) {
 	now := time.Date(2026, 2, 18, 14, 30, 0, 0, time.UTC)
 	m := &monitorModel{

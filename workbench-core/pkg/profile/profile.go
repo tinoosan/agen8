@@ -15,6 +15,7 @@ type Profile struct {
 	Description   string         `yaml:"description"`
 	Model         string         `yaml:"model,omitempty"`
 	SubagentModel string         `yaml:"subagent_model,omitempty"`
+	CodeExecOnly  bool           `yaml:"code_exec_only,omitempty"`
 	AllowedTools  []string       `yaml:"allowed_tools,omitempty"`
 	Prompts       PromptConfig   `yaml:"prompts,omitempty"`
 	Skills        []string       `yaml:"skills,omitempty"`
@@ -43,6 +44,7 @@ type RoleConfig struct {
 	Description   string         `yaml:"description"`
 	Prompts       PromptConfig   `yaml:"prompts,omitempty"`
 	Skills        []string       `yaml:"skills,omitempty"`
+	CodeExecOnly  *bool          `yaml:"code_exec_only,omitempty"`
 	AllowedTools  []string       `yaml:"allowed_tools,omitempty"`
 	Model         string         `yaml:"model,omitempty"`
 	SubagentModel string         `yaml:"subagent_model,omitempty"`

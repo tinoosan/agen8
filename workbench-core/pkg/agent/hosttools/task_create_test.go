@@ -381,3 +381,92 @@ func TestTaskCreateTool_SpawnWorkerMessage_UsesCanonicalSubagentPaths(t *testing
 		t.Fatalf("spawn_worker result message should reference canonical task summary path: %q", req.Text)
 	}
 }
+
+func TestTaskCreateTool_AliasSpawnWorkerAndTaskID_SpawnsWorker(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:     store,
+		SessionID: "s",
+		RunID:     "parent-run",
+		SpawnWorker: func(context.Context, string, string, string) (string, error) {
+			return "child-run", nil
+		},
+	}
+	raw := json.RawMessage(`{"goal":"create hello","task_id":"task-alias-1","spawn_worker":true}`)
+	if _, err := tool.Execute(context.Background(), raw); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	task, ok := store.tasks["task-alias-1"]
+	if !ok {
+		t.Fatalf("expected task created with task_id alias")
+	}
+	if strings.TrimSpace(task.RunID) != "child-run" {
+		t.Fatalf("expected spawned child run assignment, got %q", task.RunID)
+	}
+	if strings.TrimSpace(metadataString(task.Metadata, "source")) != "spawn_worker" {
+		t.Fatalf("expected source=spawn_worker, got %v", task.Metadata["source"])
+	}
+}
+
+func TestTaskCreateTool_AliasAssignedRole_TeamMode(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-1",
+		RunID:           "run-1",
+		TeamID:          "team-1",
+		RoleName:        "head-analyst",
+		IsCoordinator:   true,
+		CoordinatorRole: "head-analyst",
+		ValidRoles:      []string{"head-analyst", "researcher"},
+	}
+	raw := json.RawMessage(`{"goal":"delegate task","task_id":"task-role-alias","assigned_role":"researcher"}`)
+	if _, err := tool.Execute(context.Background(), raw); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	task, ok := store.tasks["task-role-alias"]
+	if !ok {
+		t.Fatalf("expected task created with task_id alias")
+	}
+	if task.AssignedRole != "researcher" {
+		t.Fatalf("expected assignedRole researcher, got %q", task.AssignedRole)
+	}
+}
+
+func TestTaskCreateTool_ConflictingAliasValues_ReturnsError(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:     store,
+		SessionID: "s",
+		RunID:     "r",
+		SpawnWorker: func(context.Context, string, string, string) (string, error) {
+			return "child-run", nil
+		},
+	}
+	raw := json.RawMessage(`{"goal":"x","spawnWorker":true,"spawn_worker":false}`)
+	if _, err := tool.Execute(context.Background(), raw); err == nil {
+		t.Fatalf("expected conflict error")
+	} else if !strings.Contains(err.Error(), `conflicting values for "spawnWorker"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestTaskCreateTool_UnknownField_ReturnsError(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:     store,
+		SessionID: "s",
+		RunID:     "r",
+	}
+	raw := json.RawMessage(`{"goal":"x","nope":123}`)
+	if _, err := tool.Execute(context.Background(), raw); err == nil {
+		t.Fatalf("expected unknown-field error")
+	} else {
+		if !strings.Contains(err.Error(), "unknown field(s): nope") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(err.Error(), "supported fields:") {
+			t.Fatalf("expected supported-fields guidance, got: %v", err)
+		}
+	}
+}

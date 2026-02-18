@@ -36,6 +36,7 @@ const (
 	maxCodeExecMaxToolCalls     = 300
 	defaultCodeExecCwd          = "/workspace"
 	codeExecFramePrefix         = "__WBX_CODE_EXEC__"
+	codeExecPolicyDirectFSWrite = "direct_fs_write"
 )
 
 // BuiltinCodeExecInvoker runs Python code with an in-process tools bridge.
@@ -303,6 +304,8 @@ type codeExecRunConfig struct {
 type codeExecOutput struct {
 	OK              bool   `json:"ok"`
 	Error           string `json:"error,omitempty"`
+	PolicyViolation bool   `json:"policyViolation,omitempty"`
+	ViolationType   string `json:"violationType,omitempty"`
 	Result          any    `json:"result,omitempty"`
 	ResultTruncated bool   `json:"resultTruncated,omitempty"`
 
@@ -498,6 +501,11 @@ func (i *BuiltinCodeExecInvoker) runPython(parent context.Context, pythonBin, cw
 			out.Error = "code_exec failed"
 		}
 	}
+	if violationType, cleaned := parseCodeExecPolicyViolation(out.Error); violationType != "" {
+		out.PolicyViolation = true
+		out.ViolationType = violationType
+		out.Error = cleaned
+	}
 
 	half := cfg.MaxOutput / 2
 	if half <= 0 {
@@ -524,6 +532,33 @@ func (i *BuiltinCodeExecInvoker) runPython(parent context.Context, pythonBin, cw
 		}
 	}
 	return out, nil
+}
+
+func parseCodeExecPolicyViolation(errMsg string) (violationType, cleanedError string) {
+	msg := strings.TrimSpace(errMsg)
+	if msg == "" {
+		return "", ""
+	}
+	const prefix = "policy_violation:"
+	if !strings.HasPrefix(msg, prefix) {
+		return "", msg
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(msg, prefix))
+	if rest == "" {
+		return "", msg
+	}
+	parts := strings.SplitN(rest, ":", 2)
+	violationType = strings.TrimSpace(parts[0])
+	if violationType == "" {
+		return "", msg
+	}
+	cleanedError = msg
+	if len(parts) == 2 {
+		if text := strings.TrimSpace(parts[1]); text != "" {
+			cleanedError = text
+		}
+	}
+	return violationType, cleanedError
 }
 
 func handleCodeExecToolCall(

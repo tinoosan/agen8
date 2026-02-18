@@ -16,11 +16,15 @@ import (
 )
 
 func TestConfigureCodeExecRuntime_DisablesToolWhenPreflightFails(t *testing.T) {
-	registry, err := agent.DefaultHostToolRegistry()
+	modelRegistry, err := agent.DefaultHostToolRegistry()
 	if err != nil {
 		t.Fatalf("default registry: %v", err)
 	}
-	if _, ok := registry.Get("code_exec"); !ok {
+	bridgeRegistry, err := agent.DefaultHostToolRegistry()
+	if err != nil {
+		t.Fatalf("default bridge registry: %v", err)
+	}
+	if _, ok := modelRegistry.Get("code_exec"); !ok {
 		t.Fatalf("expected code_exec in default registry")
 	}
 
@@ -29,11 +33,14 @@ func TestConfigureCodeExecRuntime_DisablesToolWhenPreflightFails(t *testing.T) {
 	rt := &runtime.Runtime{CodeExec: inv}
 
 	emitted := make([]events.Event, 0, 1)
-	configureCodeExecRuntime(context.Background(), rt, registry, func(_ context.Context, ev events.Event) {
+	err = configureCodeExecRuntime(context.Background(), rt, modelRegistry, bridgeRegistry, false, func(_ context.Context, ev events.Event) {
 		emitted = append(emitted, ev)
 	})
+	if err != nil {
+		t.Fatalf("configureCodeExecRuntime: %v", err)
+	}
 
-	if _, ok := registry.Get("code_exec"); ok {
+	if _, ok := modelRegistry.Get("code_exec"); ok {
 		t.Fatalf("expected code_exec to be removed when preflight fails")
 	}
 	if len(emitted) == 0 {
@@ -44,16 +51,50 @@ func TestConfigureCodeExecRuntime_DisablesToolWhenPreflightFails(t *testing.T) {
 	}
 }
 
+func TestConfigureCodeExecRuntime_RequiredModeFailsWhenPreflightFails(t *testing.T) {
+	modelRegistry, err := agent.DefaultHostToolRegistry()
+	if err != nil {
+		t.Fatalf("default registry: %v", err)
+	}
+	bridgeRegistry, err := agent.DefaultHostToolRegistry()
+	if err != nil {
+		t.Fatalf("default bridge registry: %v", err)
+	}
+
+	inv := builtins.NewBuiltinCodeExecInvoker(t.TempDir(), map[string]string{"workspace": t.TempDir()})
+	inv.PythonBin = "missing-python-for-code-exec-preflight-tests"
+	rt := &runtime.Runtime{CodeExec: inv}
+
+	err = configureCodeExecRuntime(context.Background(), rt, modelRegistry, bridgeRegistry, true, nil)
+	if err == nil {
+		t.Fatalf("expected error when required code_exec preflight fails")
+	}
+}
+
 func TestConfigureCodeExecRuntime_ConfiguresDispatcherAndAllowlist(t *testing.T) {
 	pythonBin, err := exec.LookPath("python3")
 	if err != nil {
 		t.Skip("python3 not available")
 	}
 
-	registry, err := agent.DefaultHostToolRegistry()
+	baseRegistry, err := agent.DefaultHostToolRegistry()
 	if err != nil {
 		t.Fatalf("default registry: %v", err)
 	}
+	modelRegistry, bridgeRegistry, err := resolveToolRegistries(baseRegistry, []string{"fs_list"}, true)
+	if err != nil {
+		t.Fatalf("resolveToolRegistries: %v", err)
+	}
+	if _, ok := modelRegistry.Get("fs_list"); ok {
+		t.Fatalf("expected fs_list hidden from model registry in code_exec_only mode")
+	}
+	if _, ok := bridgeRegistry.Get("fs_list"); !ok {
+		t.Fatalf("expected fs_list present in bridge registry")
+	}
+	if _, ok := modelRegistry.Get("code_exec"); !ok {
+		t.Fatalf("expected code_exec present in model registry")
+	}
+
 	inv := builtins.NewBuiltinCodeExecInvoker(t.TempDir(), map[string]string{
 		"workspace": t.TempDir(),
 		"project":   t.TempDir(),
@@ -61,8 +102,11 @@ func TestConfigureCodeExecRuntime_ConfiguresDispatcherAndAllowlist(t *testing.T)
 	inv.PythonBin = pythonBin
 	rt := &runtime.Runtime{CodeExec: inv}
 
-	configureCodeExecRuntime(context.Background(), rt, registry, nil)
-	if _, ok := registry.Get("code_exec"); !ok {
+	err = configureCodeExecRuntime(context.Background(), rt, modelRegistry, bridgeRegistry, true, nil)
+	if err != nil {
+		t.Fatalf("configureCodeExecRuntime: %v", err)
+	}
+	if _, ok := modelRegistry.Get("code_exec"); !ok {
 		t.Fatalf("expected code_exec to remain registered after successful preflight")
 	}
 	inv.SetBridge(func(_ context.Context, req types.HostOpRequest) types.HostOpResponse {

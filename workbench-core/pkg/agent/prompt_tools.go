@@ -50,6 +50,45 @@ func PromptToolSpecFromSources(registry ToolRegistryProvider, extra []llmtypes.T
 	return prompts.PromptToolSpec{Tools: tools}
 }
 
+// PromptToolSpecForCodeExecOnly builds prompt tool spec for code_exec_only mode.
+// Model-visible tools come from modelRegistry; bridge guidance comes from bridgeRegistry.
+func PromptToolSpecForCodeExecOnly(modelRegistry, bridgeRegistry ToolRegistryProvider, extra []llmtypes.Tool) prompts.PromptToolSpec {
+	spec := PromptToolSpecFromSources(modelRegistry, extra)
+	spec.CodeExecOnly = true
+	spec.CodeExecBridgeTools = promptToolsFromRegistry(bridgeRegistry)
+	return spec
+}
+
+func promptToolsFromRegistry(registry ToolRegistryProvider) []prompts.PromptTool {
+	if registry == nil {
+		return nil
+	}
+	byName := make(map[string]prompts.PromptTool)
+	for _, def := range registry.Definitions() {
+		name := strings.TrimSpace(def.Function.Name)
+		if name == "" || strings.EqualFold(name, "final_answer") || strings.EqualFold(name, "code_exec") {
+			continue
+		}
+		if _, ok := byName[name]; ok {
+			continue
+		}
+		byName[name] = prompts.PromptTool{
+			Name:        name,
+			Description: strings.TrimSpace(def.Function.Description),
+		}
+	}
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]prompts.PromptTool, 0, len(names))
+	for _, name := range names {
+		out = append(out, byName[name])
+	}
+	return out
+}
+
 // SortedToolNamesFromRegistry returns deduplicated tool function names in lexical order.
 func SortedToolNamesFromRegistry(registry ToolRegistryProvider) []string {
 	if registry == nil {

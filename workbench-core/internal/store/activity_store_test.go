@@ -67,8 +67,9 @@ func TestActivities_UpsertFromAgentOpEvents(t *testing.T) {
 		t.Fatalf("len(acts)=%d want 1", len(acts))
 	}
 	a := acts[0]
-	if a.ID != "op-1" {
-		t.Fatalf("id=%q want %q", a.ID, "op-1")
+	wantID := activityOpID(run.RunID, "op-1")
+	if a.ID != wantID {
+		t.Fatalf("id=%q want %q", a.ID, wantID)
 	}
 	if a.Kind != "fs_read" {
 		t.Fatalf("kind=%q want %q", a.Kind, "fs_read")

@@ -109,6 +109,97 @@ func (m *monitorModel) resolveTeamControlSessionID() string {
 	return strings.TrimSpace(sessionID)
 }
 
+func (m *monitorModel) resolveEnqueueTargetRunID() (string, error) {
+	if m == nil {
+		return "", fmt.Errorf("monitor is nil")
+	}
+	if strings.TrimSpace(m.teamID) == "" {
+		runID := strings.TrimSpace(m.runID)
+		if runID == "" {
+			return "", fmt.Errorf("active run is unavailable")
+		}
+		return runID, nil
+	}
+	if runID := strings.TrimSpace(m.focusedRunID); runID != "" {
+		return runID, nil
+	}
+	if runID := strings.TrimSpace(m.teamCoordinatorRunID); runID != "" {
+		return runID, nil
+	}
+	manifest, err := loadTeamManifestFromDisk(m.cfg, strings.TrimSpace(m.teamID))
+	if err != nil || manifest == nil {
+		return "", fmt.Errorf("coordinator run unavailable")
+	}
+	m.teamCoordinatorRunID = strings.TrimSpace(manifest.CoordinatorRun)
+	m.teamCoordinatorRole = strings.TrimSpace(manifest.CoordinatorRole)
+	if m.teamRoleByRunID == nil {
+		m.teamRoleByRunID = map[string]string{}
+	}
+	for _, role := range manifest.Roles {
+		runID := strings.TrimSpace(role.RunID)
+		if runID == "" {
+			continue
+		}
+		m.teamRoleByRunID[runID] = strings.TrimSpace(role.RoleName)
+	}
+	if sessionID := strings.TrimSpace(resolveTeamControlSessionID(manifest, m.sessionID)); sessionID != "" {
+		m.sessionID = sessionID
+	}
+	if strings.TrimSpace(m.teamCoordinatorRunID) == "" {
+		return "", fmt.Errorf("coordinator run unavailable")
+	}
+	return strings.TrimSpace(m.teamCoordinatorRunID), nil
+}
+
+func (m *monitorModel) resolveSessionIDForRun(runID string) string {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return strings.TrimSpace(m.rpcRun().SessionID)
+	}
+	if strings.TrimSpace(m.teamID) == "" {
+		return strings.TrimSpace(m.rpcRun().SessionID)
+	}
+	if manifest, err := loadTeamManifestFromDisk(m.cfg, strings.TrimSpace(m.teamID)); err == nil && manifest != nil {
+		for _, role := range manifest.Roles {
+			if strings.TrimSpace(role.RunID) == runID {
+				sessionID := strings.TrimSpace(role.SessionID)
+				if sessionID != "" {
+					return sessionID
+				}
+			}
+		}
+	}
+	return strings.TrimSpace(m.rpcRun().SessionID)
+}
+
+func (m *monitorModel) resolveRoleForRun(runID string) string {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return ""
+	}
+	if role := strings.TrimSpace(m.teamRoleByRunID[runID]); role != "" {
+		return role
+	}
+	if strings.TrimSpace(m.teamID) == "" {
+		return ""
+	}
+	manifest, err := loadTeamManifestFromDisk(m.cfg, strings.TrimSpace(m.teamID))
+	if err != nil || manifest == nil {
+		return ""
+	}
+	if m.teamRoleByRunID == nil {
+		m.teamRoleByRunID = map[string]string{}
+	}
+	for _, entry := range manifest.Roles {
+		rid := strings.TrimSpace(entry.RunID)
+		if rid == "" {
+			continue
+		}
+		m.teamRoleByRunID[rid] = strings.TrimSpace(entry.RoleName)
+	}
+	return strings.TrimSpace(m.teamRoleByRunID[runID])
+}
+
 func (m *monitorModel) rpcRoundTrip(method string, params any, out any) error {
 	if m == nil {
 		return fmt.Errorf("monitor is nil")
