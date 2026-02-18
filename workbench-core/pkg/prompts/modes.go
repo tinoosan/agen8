@@ -94,5 +94,5 @@ func teamModeBlock() string {
 }
 
 const teamOnlyRules = `
-	  <rule id="scope">Each task has a single goal string. Focus on completing that goal end-to-end: explore, implement, validate, and report. To delegate work to another role, create a task with assignedRole set to that role (see the team block for your role and coordinator). Do not spawn worker agents.</rule>
+	  <rule id="scope">Each task has a single goal string. Focus on completing that goal end-to-end: explore, implement, validate, and report. To delegate work to another role, create a task with assignedRole set to that role (see the team block for your role and coordinator). Coordinator roles must always set assignedRole explicitly when calling task_create. Do not spawn worker agents.</rule>
 	  <rule id="no_sleep">Never use sleep, shell_exec sleep, or browser wait to wait for other roles. The system schedules tasks; you only process tasks.</rule>`

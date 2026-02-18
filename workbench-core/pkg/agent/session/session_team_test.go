@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tinoosan/workbench-core/pkg/agent"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
+	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
+	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
@@ -539,5 +542,103 @@ func TestSynthesizeBatchSummary_FillsEmptySummary(t *testing.T) {
 	}
 	if !strings.Contains(got, "approved=1") || !strings.Contains(got, "retry=1") {
 		t.Fatalf("unexpected synthesized summary: %q", got)
+	}
+}
+
+type errorAgent struct {
+	err error
+	cfg agent.AgentConfig
+}
+
+func (e *errorAgent) Run(context.Context, string) (agent.RunResult, error) {
+	return agent.RunResult{}, e.err
+}
+func (e *errorAgent) RunConversation(context.Context, []llmtypes.LLMMessage) (agent.RunResult, []llmtypes.LLMMessage, int, error) {
+	return agent.RunResult{}, nil, 0, e.err
+}
+func (e *errorAgent) ExecHostOp(context.Context, types.HostOpRequest) types.HostOpResponse {
+	return types.HostOpResponse{Ok: true}
+}
+func (e *errorAgent) GetModel() string                            { return e.cfg.Model }
+func (e *errorAgent) SetModel(v string)                           { e.cfg.Model = v }
+func (e *errorAgent) WebSearchEnabled() bool                      { return e.cfg.EnableWebSearch }
+func (e *errorAgent) SetEnableWebSearch(v bool)                   { e.cfg.EnableWebSearch = v }
+func (e *errorAgent) GetApprovalsMode() string                    { return e.cfg.ApprovalsMode }
+func (e *errorAgent) SetApprovalsMode(v string)                   { e.cfg.ApprovalsMode = v }
+func (e *errorAgent) GetReasoningEffort() string                  { return e.cfg.ReasoningEffort }
+func (e *errorAgent) SetReasoningEffort(v string)                 { e.cfg.ReasoningEffort = v }
+func (e *errorAgent) GetReasoningSummary() string                 { return e.cfg.ReasoningSummary }
+func (e *errorAgent) SetReasoningSummary(v string)                { e.cfg.ReasoningSummary = v }
+func (e *errorAgent) GetSystemPrompt() string                     { return e.cfg.SystemPrompt }
+func (e *errorAgent) SetSystemPrompt(v string)                    { e.cfg.SystemPrompt = v }
+func (e *errorAgent) GetHooks() *agent.Hooks                      { return &e.cfg.Hooks }
+func (e *errorAgent) SetHooks(v agent.Hooks)                      { e.cfg.Hooks = v }
+func (e *errorAgent) GetToolRegistry() agent.ToolRegistryProvider { return nil }
+func (e *errorAgent) SetToolRegistry(agent.ToolRegistryProvider)  {}
+func (e *errorAgent) GetExtraTools() []llmtypes.Tool              { return e.cfg.ExtraTools }
+func (e *errorAgent) SetExtraTools(v []llmtypes.Tool)             { e.cfg.ExtraTools = v }
+func (e *errorAgent) Clone() agent.Agent                          { return e }
+func (e *errorAgent) Config() agent.AgentConfig                   { return e.cfg }
+func (e *errorAgent) CloneWithConfig(cfg agent.AgentConfig) (agent.Agent, error) {
+	e.cfg = cfg
+	return e, nil
+}
+
+func TestRunTask_EmitsInvalidRepeatedEvent(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	emitter := &captureEventEmitter{}
+	ag := &errorAgent{
+		err: &agent.RepeatedInvalidToolCallError{
+			ToolName:    "task_create",
+			Count:       6,
+			LastError:   "task_create.assignedRole is required for coordinators in team mode",
+			Elapsed:     5 * time.Second,
+			Coordinator: true,
+		},
+		cfg: agent.AgentConfig{Model: "fake-model", Hooks: agent.Hooks{}},
+	}
+	sess, err := New(Config{
+		Agent:      ag,
+		Profile:    &profile.Profile{ID: "startup_team"},
+		TaskStore:  store,
+		Events:     emitter,
+		SessionID:  "session-1",
+		RunID:      "run-1",
+		TeamID:     "team-1",
+		RoleName:   "ceo",
+		MaxPending: 10,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	now := time.Now().UTC()
+	task := types.Task{
+		TaskID:         "task-invalid-1",
+		SessionID:      "session-1",
+		RunID:          "run-1",
+		TeamID:         "team-1",
+		AssignedRole:   "ceo",
+		AssignedToType: "role",
+		AssignedTo:     "ceo",
+		Goal:           "delegate task",
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+	}
+	if err := store.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := sess.runTask(context.Background(), task.TaskID, task); err != nil {
+		t.Fatalf("runTask: %v", err)
+	}
+	ev, ok := emitter.firstByType("task.tool.invalid_repeated")
+	if !ok {
+		t.Fatalf("expected task.tool.invalid_repeated event")
+	}
+	if ev.Data["consecutiveInvalid"] != "6" {
+		t.Fatalf("consecutiveInvalid=%q, want 6", ev.Data["consecutiveInvalid"])
 	}
 }

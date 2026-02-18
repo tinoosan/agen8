@@ -1686,6 +1686,24 @@ func TestFormatTaskEventLines_BatchEventsIncludeWaveID(t *testing.T) {
 	}
 }
 
+func TestFormatTaskEventLines_InvalidRepeated(t *testing.T) {
+	now := time.Now()
+	invalid := formatTaskEventLines(types.EventRecord{
+		Type:      "task.tool.invalid_repeated",
+		Timestamp: now,
+		Data: map[string]string{
+			"taskId":             "task-coord-1",
+			"tool":               "task_create",
+			"elapsedSeconds":     "5",
+			"consecutiveInvalid": "6",
+			"reason":             "task_create.assignedRole is required for coordinators in team mode",
+		},
+	})
+	if len(invalid) == 0 || !strings.Contains(invalid[0], "task.tool.invalid_repeated") || !strings.Contains(invalid[0], "consecutiveInvalid=6") {
+		t.Fatalf("expected task.tool.invalid_repeated line with count, got %#v", invalid)
+	}
+}
+
 func TestRefreshAgentOutputViewport_RendersSummaryMarkdownWithoutSummaryLabel(t *testing.T) {
 	m := &monitorModel{
 		renderer: newContentRenderer(),

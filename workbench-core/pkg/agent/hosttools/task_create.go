@@ -41,13 +41,27 @@ func (t *TaskCreateTool) Definition() llmtypes.Tool {
 	return t.definitionWithSpawnWorker()
 }
 
+func (t *TaskCreateTool) assignedRoleDescription() string {
+	if t != nil && t.IsCoordinator {
+		return "Required in team mode for coordinators. Must be an explicit team role."
+	}
+	return "Optional role assignment in team mode. Omit to assign to your own role."
+}
+
+func (t *TaskCreateTool) teamModeDescription() string {
+	if t != nil && t.IsCoordinator {
+		return "[TASKS] Create a new pending task in SQLite. In team mode, coordinators must delegate by creating tasks with an explicit assignedRole for each task. This is DB-routed (no /inbox file writes)."
+	}
+	return "[TASKS] Create a new pending task in SQLite. In team mode, delegate work by creating tasks and assigning them to roles via assignedRole. Omit assignedRole to assign to your own role. This is DB-routed (no /inbox file writes)."
+}
+
 // definitionTeamOnly returns the tool definition for team mode (no spawnWorker).
 func (t *TaskCreateTool) definitionTeamOnly() llmtypes.Tool {
 	return llmtypes.Tool{
 		Type: "function",
 		Function: llmtypes.ToolFunction{
 			Name:        "task_create",
-			Description: "[TASKS] Create a new pending task in SQLite. In team mode, delegate work by creating tasks and assigning them to roles via assignedRole. Omit assignedRole to assign to your own role. This is DB-routed (no /inbox file writes).",
+			Description: t.teamModeDescription(),
 			Strict:      false,
 			Parameters: map[string]any{
 				"type": "object",
@@ -76,7 +90,7 @@ func (t *TaskCreateTool) definitionTeamOnly() llmtypes.Tool {
 					},
 					"assignedRole": map[string]any{
 						"type":        "string",
-						"description": "Optional role assignment in team mode. Omit to assign to your own role.",
+						"description": t.assignedRoleDescription(),
 					},
 				},
 				"required":             []any{"goal"},
@@ -121,7 +135,7 @@ func (t *TaskCreateTool) definitionWithSpawnWorker() llmtypes.Tool {
 					},
 					"assignedRole": map[string]any{
 						"type":        "string",
-						"description": "Optional role assignment in team mode. Omit to assign to your own role.",
+						"description": t.assignedRoleDescription(),
 					},
 					"spawnWorker": map[string]any{
 						"type":        "boolean",

@@ -815,6 +815,21 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		} else {
 			tr.Status = types.TaskStatusFailed
 			tr.Error = err.Error()
+			var repeatedInvalidErr *agent.RepeatedInvalidToolCallError
+			if errors.As(err, &repeatedInvalidErr) {
+				payload := map[string]string{
+					"taskId":             taskID,
+					"tool":               strings.TrimSpace(repeatedInvalidErr.ToolName),
+					"reason":             strings.TrimSpace(repeatedInvalidErr.LastError),
+					"consecutiveInvalid": fmt.Sprintf("%d", repeatedInvalidErr.Count),
+					"elapsedSeconds":     fmt.Sprintf("%d", int(repeatedInvalidErr.Elapsed.Round(time.Second).Seconds())),
+				}
+				s.emitBestEffort(ctx, events.Event{
+					Type:    "task.tool.invalid_repeated",
+					Message: "Task failed due to repeated invalid tool calls",
+					Data:    payload,
+				})
+			}
 			if s.cfg.Events != nil {
 				errInfo := llm.ClassifyError(err)
 				payload := map[string]string{

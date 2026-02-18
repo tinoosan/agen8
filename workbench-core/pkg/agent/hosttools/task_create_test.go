@@ -194,6 +194,30 @@ func TestTaskCreateTool_Definition_TeamOnly_NoSpawnWorker(t *testing.T) {
 	}
 }
 
+func TestTaskCreateTool_Definition_CoordinatorRequiresAssignedRoleInDescription(t *testing.T) {
+	tool := &TaskCreateTool{
+		Store:           newFakeTaskStore(),
+		SessionID:       "s",
+		RunID:           "r",
+		TeamID:          "team-1",
+		RoleName:        "ceo",
+		IsCoordinator:   true,
+		CoordinatorRole: "ceo",
+		ValidRoles:      []string{"ceo", "cto"},
+	}
+	def := tool.Definition()
+	if !strings.Contains(def.Function.Description, "must delegate by creating tasks with an explicit assignedRole") {
+		t.Fatalf("expected coordinator description to require assignedRole, got: %q", def.Function.Description)
+	}
+	params, _ := def.Function.Parameters.(map[string]any)
+	props, _ := params["properties"].(map[string]any)
+	assigned, _ := props["assignedRole"].(map[string]any)
+	desc, _ := assigned["description"].(string)
+	if !strings.Contains(desc, "Required in team mode for coordinators") {
+		t.Fatalf("expected coordinator assignedRole description, got: %q", desc)
+	}
+}
+
 func TestTaskCreateTool_Definition_WithSpawnWorker_IncludesSpawnWorker(t *testing.T) {
 	tool := &TaskCreateTool{
 		Store:       newFakeTaskStore(),

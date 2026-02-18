@@ -303,7 +303,7 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 		item.Content = formatEventLine(ev)
 		m.appendAgentOutputItem(item)
 
-	case "task.queued", "webhook.task.queued", "task.start", "task.delegated", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped", "callback.batch.progress", "callback.batch.queued", "callback.batch.item.reviewed":
+	case "task.queued", "webhook.task.queued", "task.start", "task.delegated", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped", "callback.batch.progress", "callback.batch.queued", "callback.batch.item.reviewed", "task.tool.invalid_repeated":
 		item.Type = "info"
 		for _, line := range formatTaskEventLines(ev) {
 			it := item
@@ -537,6 +537,20 @@ func formatTaskEventLines(ev types.EventRecord) []string {
 		retried := strings.TrimSpace(ev.Data["retry"])
 		escalated := strings.TrimSpace(ev.Data["escalate"])
 		line := fmt.Sprintf("[%s] callback.batch.item.reviewed: %s approved=%s retry=%s escalate=%s", ts, parent, fallback(approved, "0"), fallback(retried, "0"), fallback(escalated, "0"))
+		return []string{line}
+	case "task.tool.invalid_repeated":
+		taskID := shortID(strings.TrimSpace(ev.Data["taskId"]))
+		tool := fallback(strings.TrimSpace(ev.Data["tool"]), "unknown")
+		reason := strings.TrimSpace(ev.Data["reason"])
+		elapsed := strings.TrimSpace(ev.Data["elapsedSeconds"])
+		consecutive := fallback(strings.TrimSpace(ev.Data["consecutiveInvalid"]), "0")
+		line := fmt.Sprintf("[%s] task.tool.invalid_repeated: %s tool=%s consecutiveInvalid=%s", ts, taskID, tool, consecutive)
+		if elapsed != "" {
+			line += " elapsed=" + elapsed + "s"
+		}
+		if reason != "" {
+			line += " reason=" + truncateText(reason, 120)
+		}
 		return []string{line}
 	default:
 		return []string{formatEventLine(ev)}

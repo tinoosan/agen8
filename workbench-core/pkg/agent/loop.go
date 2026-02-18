@@ -2,16 +2,43 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
 	"github.com/tinoosan/workbench-core/pkg/prompts"
 	"github.com/tinoosan/workbench-core/pkg/types"
 	"github.com/tinoosan/workbench-core/pkg/validate"
 )
+
+var (
+	// repeatedInvalidToolCallThreshold bounds repeated invalid tool-call arg loops.
+	repeatedInvalidToolCallThreshold = 6
+)
+
+var ErrRepeatedInvalidToolCall = errors.New("agent repeated invalid tool call")
+
+type RepeatedInvalidToolCallError struct {
+	ToolName    string
+	Count       int
+	LastError   string
+	Elapsed     time.Duration
+	Coordinator bool
+}
+
+func (e *RepeatedInvalidToolCallError) Error() string {
+	msg := fmt.Sprintf("agent repeated invalid tool call: tool=%s count=%d reason=%s", fallbackLabel(e.ToolName), e.Count, strings.TrimSpace(e.LastError))
+	if e.Coordinator {
+		msg += " hint=coordinator task_create calls must include assignedRole"
+	}
+	return msg
+}
+
+func (e *RepeatedInvalidToolCallError) Unwrap() error { return ErrRepeatedInvalidToolCall }
 
 // DefaultAgent is the minimalist streaming loop: stream the model response, execute its tool calls, and return the final text.
 type DefaultAgent struct {
@@ -71,8 +98,12 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 		hostOpTools = append(hostOpTools, a.ExtraTools...)
 	}
 
-	for step := startStep; ; step++ {
+	loopStart := time.Now()
+	lastFailedTool := ""
+	lastFailureReason := ""
+	consecutiveInvalid := 0
 
+	for step := startStep; ; step++ {
 		system := baseSystem
 		if a.PromptSource != nil {
 			updatedSystem, err := a.PromptSource.SystemPrompt(ctx, baseSystem, step)
@@ -139,6 +170,8 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			if which == "final_answer" {
 				args, err := parseFinalAnswerArgs(tc.Function.Arguments)
 				if err != nil {
+					lastFailedTool = "final_answer"
+					lastFailureReason = err.Error()
 					hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: err.Error()}
 					hostRespJSON, _ := types.MarshalPretty(hostResp)
 					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
@@ -158,6 +191,8 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			}
 
 			if a.ToolRegistry == nil {
+				lastFailedTool = which
+				lastFailureReason = "tool registry is not configured"
 				hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: "tool registry is not configured"}
 				hostRespJSON, _ := types.MarshalPretty(hostResp)
 				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
@@ -165,11 +200,29 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			}
 			op, err := a.ToolRegistry.Dispatch(ctx, which, []byte(tc.Function.Arguments))
 			if err != nil {
-				hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: "invalid tool call args: " + err.Error()}
+				dispatchErr := "invalid tool call args: " + err.Error()
+				hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: dispatchErr}
 				hostRespJSON, _ := types.MarshalPretty(hostResp)
 				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+				if strings.EqualFold(strings.TrimSpace(lastFailedTool), which) {
+					consecutiveInvalid++
+				} else {
+					consecutiveInvalid = 1
+				}
+				lastFailedTool = which
+				lastFailureReason = strings.TrimSpace(err.Error())
+				if repeatedInvalidToolCallThreshold > 0 && consecutiveInvalid >= repeatedInvalidToolCallThreshold {
+					return RunResult{}, nil, 0, &RepeatedInvalidToolCallError{
+						ToolName:    which,
+						Count:       consecutiveInvalid,
+						LastError:   fallbackReason(lastFailureReason, dispatchErr),
+						Elapsed:     time.Since(loopStart),
+						Coordinator: shouldEmitCoordinatorHint(which, lastFailureReason),
+					}
+				}
 				continue
 			}
+			consecutiveInvalid = 0
 			pending = append(pending, pendingHostOp{req: op, callID: strings.TrimSpace(tc.ID)})
 		}
 
@@ -177,8 +230,35 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			hostResp := a.Exec.Exec(ctx, item.req)
 			hostRespJSON, _ := types.MarshalPretty(hostResp)
 			msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: item.callID, Content: string(hostRespJSON)})
+			if !hostResp.Ok {
+				lastFailureReason = strings.TrimSpace(hostResp.Error)
+			}
 		}
 	}
+}
+
+func shouldEmitCoordinatorHint(toolName, detail string) bool {
+	if !strings.EqualFold(strings.TrimSpace(toolName), "task_create") {
+		return false
+	}
+	detail = strings.ToLower(strings.TrimSpace(detail))
+	return strings.Contains(detail, "assignedrole") && strings.Contains(detail, "coordinator")
+}
+
+func fallbackReason(current, fallback string) string {
+	current = strings.TrimSpace(current)
+	if current != "" {
+		return current
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func fallbackLabel(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "unknown"
+	}
+	return v
 }
 
 func (a *DefaultAgent) compactConversationForBudget(ctx context.Context, msgs []llmtypes.LLMMessage, system string, budgetBytes int) []llmtypes.LLMMessage {
