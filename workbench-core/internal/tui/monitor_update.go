@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -144,7 +145,19 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 
 	case commandLinesMsg:
 		if len(msg.lines) != 0 {
+			suppressLegacyTaskDoneBody := false
 			for _, line := range msg.lines {
+				if shouldSuppressLegacyTaskDoneLine(m, line) {
+					suppressLegacyTaskDoneBody = true
+					continue
+				}
+				if suppressLegacyTaskDoneBody {
+					if isTimestampedLogLine(line) {
+						suppressLegacyTaskDoneBody = false
+					} else {
+						continue
+					}
+				}
 				m.appendAgentOutput(line)
 			}
 			if strings.HasPrefix(strings.TrimSpace(msg.lines[0]), "[memory] search:") {
@@ -191,6 +204,33 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 	return m, nil
 }
 
+var (
+	legacyTaskDoneCommandLineRE = regexp.MustCompile(`^\[\d{2}:\d{2}:\d{2}\]\s+\[[^\]]+\]\s+task\.done\s+task-[^\s]+\s+`)
+	legacySummaryWriteLineRE    = regexp.MustCompile(`^\[\d{2}:\d{2}:\d{2}\]\s+Write\s+/tasks/.*/SUMMARY(?:\.md)?\s*$`)
+	timestampedLogLineRE        = regexp.MustCompile(`^\[\d{2}:\d{2}:\d{2}\]\s+`)
+)
+
+func shouldSuppressLegacyTaskDoneLine(m *monitorModel, line string) bool {
+	if m == nil || strings.TrimSpace(m.teamID) == "" {
+		return false
+	}
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return false
+	}
+	if legacyTaskDoneCommandLineRE.MatchString(trimmed) {
+		return true
+	}
+	if legacySummaryWriteLineRE.MatchString(trimmed) {
+		return true
+	}
+	return false
+}
+
+func isTimestampedLogLine(line string) bool {
+	return timestampedLogLineRE.MatchString(strings.TrimSpace(line))
+}
+
 func (m *monitorModel) handleLoadedDataMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case childRunsLoadedMsg:
@@ -215,27 +255,6 @@ func (m *monitorModel) handleLoadedDataMessages(msg tea.Msg) (tea.Model, tea.Cmd
 		m.outboxResults = msg.entries
 		m.outboxTotalCount = msg.totalCount
 		m.outboxPage = msg.page
-		if strings.TrimSpace(m.teamID) != "" {
-			for _, entry := range msg.entries {
-				if strings.TrimSpace(entry.TaskID) == "" {
-					continue
-				}
-				if _, ok := m.seenOutboxByTask[entry.TaskID]; ok {
-					continue
-				}
-				m.seenOutboxByTask[entry.TaskID] = struct{}{}
-				rolePrefix := strings.TrimSpace(entry.AssignedRole)
-				if rolePrefix == "" {
-					rolePrefix = "team"
-				}
-				ts := entry.Timestamp.Local().Format("15:04:05")
-				line := fmt.Sprintf("[%s] [%s] task.done %s %s", ts, rolePrefix, shortID(entry.TaskID), strings.TrimSpace(entry.Status))
-				if summary := strings.TrimSpace(entry.Summary); summary != "" {
-					line += " - " + truncateText(summary, 120)
-				}
-				m.appendAgentOutputForRun(line, strings.TrimSpace(entry.RunID))
-			}
-		}
 		m.dirtyOutbox = true
 		return m, m.scheduleUIRefresh()
 

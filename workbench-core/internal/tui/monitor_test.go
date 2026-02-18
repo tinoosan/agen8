@@ -1677,6 +1677,26 @@ func TestRefreshAgentOutputViewport_RendersSummaryMarkdownWithoutSummaryLabel(t 
 	}
 }
 
+func TestHandleTailAndStreamMessages_FiltersLegacyTaskDoneCommandLinesInTeamMode(t *testing.T) {
+	m := &monitorModel{
+		teamID: "team-1",
+	}
+	_, _ = m.handleTailAndStreamMessages(commandLinesMsg{
+		lines: []string{
+			"[10:49:45] [marketing-strategist] task.done task-202 succeeded - As the marketing strategist...",
+			"[10:49:45] Write /tasks/marketing-strategist/2026-02-18/task-202/SUMMARY",
+			"As the marketing strategist, I develop data-driven plans...",
+			"[10:49:45] [marketing-strategist] task.done: task-202 succeeded goal=\"Provide a concise summary\"",
+		},
+	})
+	if len(m.agentOutput) != 1 {
+		t.Fatalf("expected only structured task.done line, got %d items: %#v", len(m.agentOutput), m.agentOutput)
+	}
+	if got := m.agentOutput[0].Content; !strings.Contains(got, "task.done: task-202 succeeded") {
+		t.Fatalf("unexpected preserved line: %q", got)
+	}
+}
+
 func TestTrimAgentOutputBuffer_KeepsRunIDSliceInSync(t *testing.T) {
 	size := agentOutputMaxLines + 15
 	m := &monitorModel{
