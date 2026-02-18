@@ -11,14 +11,24 @@ const recursionBlock = `<recursive_delegation>
 // DefaultAutonomousSystemPrompt returns the built-in system instructions for standalone daemon/task-runner mode.
 // Includes subagent rules (spawn_worker, task_review, callbacks) for single-run delegation.
 func DefaultAutonomousSystemPrompt() string {
-	base := strings.TrimSpace(DefaultSystemPrompt())
+	return DefaultAutonomousSystemPromptWithTools(DefaultPromptToolSpec())
+}
+
+// DefaultAutonomousSystemPromptWithTools returns standalone mode instructions on top of a tool-aware base prompt.
+func DefaultAutonomousSystemPromptWithTools(spec PromptToolSpec) string {
+	base := strings.TrimSpace(DefaultSystemPromptWithTools(spec))
 	mode := strings.TrimSpace(autonomousModeBlock())
 	return base + "\n\n" + recursionBlock + "\n\n" + mode
 }
 
 // DefaultSubAgentSystemPrompt returns the built-in system instructions for spawned child agents.
 func DefaultSubAgentSystemPrompt() string {
-	base := strings.TrimSpace(DefaultSystemPrompt())
+	return DefaultSubAgentSystemPromptWithTools(DefaultPromptToolSpec())
+}
+
+// DefaultSubAgentSystemPromptWithTools returns child-agent instructions on top of a tool-aware base prompt.
+func DefaultSubAgentSystemPromptWithTools(spec PromptToolSpec) string {
+	base := strings.TrimSpace(DefaultSystemPromptWithTools(spec))
 	mode := strings.TrimSpace(subAgentModeBlock())
 	return base + "\n\n" + mode
 }
@@ -26,7 +36,12 @@ func DefaultSubAgentSystemPrompt() string {
 // DefaultTeamModeSystemPrompt returns the built-in system instructions for team co-agents.
 // Uses same base as other modes (no delegation); mode block has no subagent/spawn_worker/task_review wording.
 func DefaultTeamModeSystemPrompt() string {
-	base := strings.TrimSpace(DefaultSystemPrompt())
+	return DefaultTeamModeSystemPromptWithTools(DefaultPromptToolSpec())
+}
+
+// DefaultTeamModeSystemPromptWithTools returns team mode instructions on top of a tool-aware base prompt.
+func DefaultTeamModeSystemPromptWithTools(spec PromptToolSpec) string {
+	base := strings.TrimSpace(DefaultSystemPromptWithTools(spec))
 	mode := strings.TrimSpace(teamModeBlock())
 	return base + "\n\n" + mode
 }

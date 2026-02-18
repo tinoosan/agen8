@@ -55,7 +55,7 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 
 	baseSystem := strings.TrimSpace(a.SystemPrompt)
 	if baseSystem == "" {
-		baseSystem = prompts.DefaultSystemPrompt()
+		baseSystem = prompts.DefaultSystemPromptWithTools(PromptToolSpecFromSources(a.ToolRegistry, a.ExtraTools))
 	}
 
 	msgs = append([]llmtypes.LLMMessage(nil), msgs...)

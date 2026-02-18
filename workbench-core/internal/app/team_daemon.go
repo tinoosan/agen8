@@ -472,7 +472,6 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		agentCfg.ReasoningSummary = roleReasoningSummary
 		agentCfg.ApprovalsMode = strings.TrimSpace(resolved.ApprovalsMode)
 		agentCfg.EnableWebSearch = resolved.WebSearchEnabled
-		agentCfg.SystemPrompt = prompts.DefaultTeamModeSystemPrompt()
 		var promptSource agent.PromptSource = rt.Constructor
 		if rt.Updater != nil {
 			promptSource = rt.Updater
@@ -562,6 +561,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("register task_create for role %s: %w", role.Name, err)
 		}
+		agentCfg.SystemPrompt = prompts.DefaultTeamModeSystemPromptWithTools(agent.PromptToolSpecFromSources(registry, nil))
 		agentCfg.HostToolRegistry = registry
 
 		a, err := agent.NewAgent(runLLMClient, rt.Executor, agentCfg)

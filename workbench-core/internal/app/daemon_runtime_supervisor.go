@@ -521,11 +521,6 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	agentCfg.ApprovalsMode = strings.TrimSpace(s.resolved.ApprovalsMode)
 	agentCfg.EnableWebSearch = s.resolved.WebSearchEnabled
 	isChildRun := strings.TrimSpace(run.ParentRunID) != ""
-	if isChildRun {
-		agentCfg.SystemPrompt = prompts.DefaultSubAgentSystemPrompt()
-	} else {
-		agentCfg.SystemPrompt = prompts.DefaultAutonomousSystemPrompt()
-	}
 	promptSource := agent.PromptSource(rt.Constructor)
 	if rt.Updater != nil {
 		promptSource = rt.Updater
@@ -605,6 +600,12 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			_ = rt.Shutdown(context.Background())
 			return nil, err
 		}
+	}
+	promptToolSpec := agent.PromptToolSpecFromSources(registry, nil)
+	if isChildRun {
+		agentCfg.SystemPrompt = prompts.DefaultSubAgentSystemPromptWithTools(promptToolSpec)
+	} else {
+		agentCfg.SystemPrompt = prompts.DefaultAutonomousSystemPromptWithTools(promptToolSpec)
 	}
 	agentCfg.HostToolRegistry = registry
 

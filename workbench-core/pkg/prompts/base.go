@@ -1,11 +1,133 @@
 package prompts
 
-import "strings"
+import (
+	"bytes"
+	"html"
+	"sort"
+	"strings"
+	"text/template"
+)
+
+// PromptTool describes one callable tool for prompt rendering.
+type PromptTool struct {
+	Name        string
+	Description string
+}
+
+// PromptToolSpec is the rendered tool set for prompt sections.
+type PromptToolSpec struct {
+	Tools []PromptTool
+}
+
+var basePromptTemplate = template.Must(template.New("base_prompt").Parse(basePromptRaw))
 
 // DefaultSystemPrompt returns the built-in base system instructions (identity, planning, capabilities, VFS, memory, operating rules).
 // Base is delegation-agnostic; it does not mention spawn_worker or subagents.
 func DefaultSystemPrompt() string {
-	return strings.TrimSpace(basePromptRaw)
+	return DefaultSystemPromptWithTools(DefaultPromptToolSpec())
+}
+
+// DefaultSystemPromptWithTools renders the base prompt with injected tool sections.
+func DefaultSystemPromptWithTools(spec PromptToolSpec) string {
+	rendered, err := renderBasePrompt(spec)
+	if err != nil {
+		panic("render base system prompt: " + err.Error())
+	}
+	return strings.TrimSpace(rendered)
+}
+
+// DefaultPromptToolSpec returns the fallback tool set used by zero-arg wrappers.
+func DefaultPromptToolSpec() PromptToolSpec {
+	return PromptToolSpec{
+		Tools: []PromptTool{
+			{Name: "browser", Description: "Interactive web browser for JS-rendered sites and multi-step workflows. Start a session (start), then navigate, wait, dismiss banners/popups, click/hover/type/press/scroll, select/check/upload/download, manage tabs (tab_*), extract data (extract/extract_links), and capture screenshots/PDFs. Close sessions when done."},
+			{Name: "email", Description: "Send email notifications (plain text)."},
+			{Name: "final_answer", Description: "Emit the final response once the user's goal is complete."},
+			{Name: "fs_append", Description: "Append to files."},
+			{Name: "fs_edit", Description: "Make precise edits via JSON diffs."},
+			{Name: "fs_list", Description: "List VFS paths."},
+			{Name: "fs_patch", Description: "Apply unified-diff patches."},
+			{Name: "fs_read", Description: "Read file contents."},
+			{Name: "fs_search", Description: "Search files under a VFS path using keyword/regex text search (e.g. /memory, /project)."},
+			{Name: "fs_write", Description: "Write new files."},
+			{Name: "http_fetch", Description: "Make HTTP requests."},
+			{Name: "shell_exec", Description: "Run shell commands (pipes, redirects, etc.)."},
+			{Name: "trace_run", Description: "Run trace actions (e.g. events.latest/events.since/events.summary)."},
+		},
+	}
+}
+
+func renderBasePrompt(spec PromptToolSpec) (string, error) {
+	tools := normalizePromptTools(spec.Tools)
+	data := struct {
+		DirectOpsXML  string
+		ToolUsageRule string
+	}{
+		DirectOpsXML:  renderDirectOpsXML(tools),
+		ToolUsageRule: renderToolUsageRule(tools),
+	}
+	var out bytes.Buffer
+	if err := basePromptTemplate.Execute(&out, data); err != nil {
+		return "", err
+	}
+	return out.String(), nil
+}
+
+func normalizePromptTools(in []PromptTool) []PromptTool {
+	out := make([]PromptTool, 0, len(in))
+	seen := make(map[string]int, len(in))
+	for _, t := range in {
+		name := strings.TrimSpace(t.Name)
+		if name == "" {
+			continue
+		}
+		desc := strings.TrimSpace(t.Description)
+		if idx, ok := seen[name]; ok {
+			if out[idx].Description == "" && desc != "" {
+				out[idx].Description = desc
+			}
+			continue
+		}
+		seen[name] = len(out)
+		out = append(out, PromptTool{Name: name, Description: desc})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+func renderDirectOpsXML(tools []PromptTool) string {
+	if len(tools) == 0 {
+		return "      <op name=\"final_answer\">Emit the final response once the user's goal is complete.</op>"
+	}
+	var b strings.Builder
+	for i, tool := range tools {
+		desc := strings.TrimSpace(tool.Description)
+		if desc == "" {
+			desc = "Use this tool when appropriate."
+		}
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("      <op name=\"")
+		b.WriteString(html.EscapeString(tool.Name))
+		b.WriteString("\">")
+		b.WriteString(html.EscapeString(desc))
+		b.WriteString("</op>")
+	}
+	return b.String()
+}
+
+func renderToolUsageRule(tools []PromptTool) string {
+	if len(tools) == 0 {
+		return "Use the available tools for operations and diagnostics; do not invent other tools."
+	}
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+	}
+	return "Use the available tools (" + strings.Join(names, ", ") + "); do not invent other tools."
 }
 
 const basePromptRaw = `<system>
@@ -37,19 +159,7 @@ const basePromptRaw = `<system>
   </critical_rules>
   <capabilities>
     <direct_ops>
-      <op name="fs_list">List VFS paths.</op>
-      <op name="fs_read">Read file contents.</op>
-      <op name="fs_search">Search files under a VFS path using keyword/regex text search (e.g. /memory, /project).</op>
-      <op name="fs_write">Write new files.</op>
-      <op name="fs_append">Append to files.</op>
-      <op name="fs_edit">Make precise edits via JSON diffs.</op>
-      <op name="fs_patch">Apply unified-diff patches.</op>
-      <op name="final_answer">Emit the final response once the user's goal is complete.</op>
-      <op name="shell_exec">Run shell commands (pipes, redirects, etc.).</op>
-      <op name="http_fetch">Make HTTP requests.</op>
-      <op name="email">Send email notifications (plain text).</op>
-      <op name="browser">Interactive web browser for JS-rendered sites and multi-step workflows. Start a session (start), then navigate, wait, dismiss banners/popups, click/hover/type/press/scroll, select/check/upload/download, manage tabs (tab_*), extract data (extract/extract_links), and capture screenshots/PDFs. Close sessions when done.</op>
-      <op name="trace_run">Run trace actions (e.g. events.latest/events.since/events.summary).</op>
+{{.DirectOpsXML}}
     </direct_ops>
     <skills>Refer to the <available_skills> block below and fs_read /skills/<skill>/SKILL.md to follow documented workflows. THESE ARE YOUR PRIMARY GENERAL CAPABILITIES.</skills>
     <skill_scripts>Skills may include standard scripts/ helpers. Before running a skill's scripts for the first time, read the skill's SKILL.md compatibility field; if required tools are missing, use the acting skill to install them. Workbench shell_exec accepts absolute VFS-style paths directly in commands/args (for example /skills/... or /workspace/...) and translates them to host paths. Relative paths are still preferred when convenient. Treat JSON output as structured data when documented.</skill_scripts>
@@ -72,7 +182,7 @@ const basePromptRaw = `<system>
   <operating_rules>
     <rule id="stop">Call final_answer only once the overarching goal is complete; plain assistant text without tool calls is treated as final output when finished.</rule>
     <rule id="path_resolution">For shell_exec, you can use relative paths or absolute VFS mount paths (/project, /workspace, /skills, /plan, /memory) in cwd and command args. fs_* tools still expect absolute VFS paths.</rule>
-    <rule id="tool_usage">Use fs_* for file operations, shell_exec for shell commands, http_fetch for HTTP, and trace_run for diagnostics; do not invent other tools.</rule>
+    <rule id="tool_usage">{{.ToolUsageRule}}</rule>
     <rule id="browser_usage">Use browser for JS-heavy sites, multi-step interactions (login/forms/navigation), or when you need screenshots/PDFs/downloads/uploads. Use browser(action:\"dismiss\") for cookie banners/popups and browser(action:\"wait\") for explicit readiness. Prefer http_fetch for simple APIs and static pages.</rule>
     <rule id="fs_edit">fs_edit expects JSON like {"path": "/project/file", "edits": [{"old": "...", "new": "...", "occurrence": 1}]}; if it fails, re-read the file and try a more specific snippet.</rule>
     <rule id="fs_patch">fs_patch needs a unified diff with hunk headers (e.g., @@ -1,3 +1,3 @@) or adjust until the patch applies cleanly.</rule>

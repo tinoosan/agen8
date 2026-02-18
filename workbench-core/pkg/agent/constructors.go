@@ -22,15 +22,16 @@ func NewAgent(llmClient llmtypes.LLMClient, exec HostExecutor, cfg AgentConfig) 
 	if exec == nil {
 		return nil, errMissingExec()
 	}
-	if strings.TrimSpace(cfg.SystemPrompt) == "" {
-		cfg.SystemPrompt = prompts.DefaultSystemPrompt()
-	}
+	useDefaultPrompt := strings.TrimSpace(cfg.SystemPrompt) == ""
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 	registry, extraTools, err := registryFromConfig(cfg)
 	if err != nil {
 		return nil, err
+	}
+	if useDefaultPrompt {
+		cfg.SystemPrompt = prompts.DefaultSystemPromptWithTools(PromptToolSpecFromSources(registry, extraTools))
 	}
 	return &DefaultAgent{
 		LLM:              llmClient,
@@ -61,9 +62,6 @@ func NewDefaultAgent(opts ...Option) (Agent, error) {
 		if err := opt(cfg); err != nil {
 			return nil, err
 		}
-	}
-	if strings.TrimSpace(cfg.SystemPrompt) == "" {
-		cfg.SystemPrompt = prompts.DefaultSystemPrompt()
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err

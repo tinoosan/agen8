@@ -18,6 +18,56 @@ func TestDefaultSystemPrompt_ContainsCoreContent(t *testing.T) {
 	}
 }
 
+func TestDefaultSystemPromptWithTools_RendersInjectedTools(t *testing.T) {
+	s := DefaultSystemPromptWithTools(PromptToolSpec{
+		Tools: []PromptTool{
+			{Name: "zeta_tool", Description: "Zeta action."},
+			{Name: "alpha_tool", Description: "Alpha action."},
+		},
+	})
+	if !strings.Contains(s, `<op name="alpha_tool">Alpha action.</op>`) {
+		t.Fatalf("expected injected alpha_tool op, got: %s", s)
+	}
+	if !strings.Contains(s, `<op name="zeta_tool">Zeta action.</op>`) {
+		t.Fatalf("expected injected zeta_tool op, got: %s", s)
+	}
+	if !strings.Contains(s, "Use the available tools (alpha_tool, zeta_tool); do not invent other tools.") {
+		t.Fatalf("expected injected tool usage rule, got: %s", s)
+	}
+	if strings.Index(s, "alpha_tool") > strings.Index(s, "zeta_tool") {
+		t.Fatalf("expected deterministic lexical order in prompt")
+	}
+}
+
+func TestDefaultSystemPromptWithTools_DeduplicatesAndEscapes(t *testing.T) {
+	s := DefaultSystemPromptWithTools(PromptToolSpec{
+		Tools: []PromptTool{
+			{Name: "dup_tool", Description: "First <desc>"},
+			{Name: "dup_tool", Description: "Second desc should not replace"},
+			{Name: "tool<&>", Description: "Unsafe <xml>"},
+		},
+	})
+	if strings.Count(s, `name="dup_tool"`) != 1 {
+		t.Fatalf("expected deduped dup_tool entry, got: %s", s)
+	}
+	if !strings.Contains(s, `name="tool&lt;&amp;&gt;"`) {
+		t.Fatalf("expected escaped tool name, got: %s", s)
+	}
+	if !strings.Contains(s, "First &lt;desc&gt;") {
+		t.Fatalf("expected escaped description with first description retained, got: %s", s)
+	}
+}
+
+func TestDefaultSystemPromptWithTools_EmptyToolsetFallback(t *testing.T) {
+	s := DefaultSystemPromptWithTools(PromptToolSpec{})
+	if !strings.Contains(s, `<op name="final_answer">`) {
+		t.Fatalf("expected final_answer fallback op, got: %s", s)
+	}
+	if !strings.Contains(s, "Use the available tools for operations and diagnostics; do not invent other tools.") {
+		t.Fatalf("expected generic fallback tool usage rule, got: %s", s)
+	}
+}
+
 func TestDefaultTeamModeSystemPrompt_ExcludesSubagentWording(t *testing.T) {
 	s := DefaultTeamModeSystemPrompt()
 	// Team co-agents must not be instructed about subagents, spawn_worker, task_review, or callbacks.

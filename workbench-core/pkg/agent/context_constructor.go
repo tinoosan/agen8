@@ -28,7 +28,7 @@ type PromptBuilder struct {
 // SystemPrompt renders a compact prompt: base + memory.
 func (c *PromptBuilder) SystemPrompt(ctx context.Context, basePrompt string, step int) (string, error) {
 	if strings.TrimSpace(basePrompt) == "" {
-		basePrompt = prompts.DefaultSystemPrompt()
+		basePrompt = prompts.DefaultSystemPromptWithTools(prompts.PromptToolSpec{})
 	}
 
 	sections := []string{strings.TrimSpace(basePrompt)}
