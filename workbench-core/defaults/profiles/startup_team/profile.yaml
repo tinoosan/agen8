@@ -6,6 +6,7 @@ team:
     - name: ceo
       coordinator: true
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -33,6 +34,7 @@ team:
 
     - name: cto
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -55,6 +57,7 @@ team:
 
     - name: growth-lead
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -75,6 +78,7 @@ team:
 
     - name: finance-ops
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -94,6 +98,7 @@ team:
 
     - name: designer
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -113,6 +118,7 @@ team:
 
     - name: operations-lead
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
