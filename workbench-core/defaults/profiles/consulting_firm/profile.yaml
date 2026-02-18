@@ -6,6 +6,7 @@ team:
     - name: managing-partner
       coordinator: true
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -33,6 +34,7 @@ team:
 
     - name: strategy-analyst
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -52,6 +54,7 @@ team:
 
     - name: market-researcher
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -71,6 +74,7 @@ team:
 
     - name: data-analyst
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -92,6 +96,7 @@ team:
 
     - name: deliverable-writer
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -109,6 +114,7 @@ team:
 
     - name: industry-specialist
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read

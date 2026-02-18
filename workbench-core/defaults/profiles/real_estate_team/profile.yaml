@@ -6,6 +6,7 @@ team:
     - name: portfolio-manager
       coordinator: true
       model: openai/gpt-5.1-codex-mini
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -33,6 +34,7 @@ team:
 
     - name: market-analyst
       model: openai/gpt-5.1-codex-mini
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -52,6 +54,7 @@ team:
 
     - name: deal-underwriter
       model: openai/gpt-5.1-codex-mini
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -71,6 +74,7 @@ team:
 
     - name: property-researcher
       model: openai/gpt-5.1-codex-mini
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -90,6 +94,7 @@ team:
 
     - name: financial-modeler
       model: openai/gpt-5.1-codex-mini
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -111,6 +116,7 @@ team:
 
     - name: legal-researcher
       model: openai/gpt-5.1-codex-mini
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read

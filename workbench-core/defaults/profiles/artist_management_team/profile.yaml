@@ -6,6 +6,7 @@ team:
     - name: artist-manager
       coordinator: true
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -33,6 +34,7 @@ team:
 
     - name: marketing-strategist
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -53,6 +55,7 @@ team:
 
     - name: release-coordinator
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -72,6 +75,7 @@ team:
 
     - name: business-manager
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -91,6 +95,7 @@ team:
 
     - name: creative-director
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read
@@ -110,6 +115,7 @@ team:
 
     - name: touring-events-manager
       model: moonshotai/kimi-k2.5
+      code_exec_only: true
       allowed_tools:
         - fs_list
         - fs_read

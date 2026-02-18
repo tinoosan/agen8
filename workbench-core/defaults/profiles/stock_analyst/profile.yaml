@@ -2,6 +2,7 @@ id: stock_analyst
 description: Research-focused profile for public markets analysis and monitoring.
 model: openai/gpt-5-mini
 subagent_model: openai/gpt-5-nano
+code_exec_only: true
 allowed_tools:
   - fs_list
   - fs_read
