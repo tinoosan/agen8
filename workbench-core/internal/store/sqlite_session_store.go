@@ -83,3 +83,11 @@ func (s *SQLiteSessionStore) CountActivities(ctx context.Context, runID string) 
 func (s *SQLiteSessionStore) DeleteSession(_ context.Context, sessionID string) error {
 	return DeleteSession(s.Cfg, sessionID)
 }
+
+func (s *SQLiteSessionStore) ClearHistoryForSession(_ context.Context, sessionID string) (HistoryClearResult, error) {
+	return ClearHistoryForSession(s.Cfg, sessionID)
+}
+
+func (s *SQLiteSessionStore) ClearHistoryForRunIDs(_ context.Context, runIDs []string) (HistoryClearResult, error) {
+	return ClearHistoryForRunIDs(s.Cfg, runIDs)
+}

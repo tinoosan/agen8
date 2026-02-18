@@ -2351,6 +2351,172 @@ func TestRPCServer_SessionStop_ThreadMismatch(t *testing.T) {
 	}
 }
 
+func TestRPCServer_SessionClearHistory_StandaloneSession(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, runA, err := implstore.CreateSession(cfg, "session clear", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	runB := types.NewRun("secondary", 8*1024, sess.SessionID)
+	if err := implstore.SaveRun(cfg, runB); err != nil {
+		t.Fatalf("SaveRun runB: %v", err)
+	}
+	if _, err := implstore.AddRunToSession(cfg, sess.SessionID, runB.RunID); err != nil {
+		t.Fatalf("AddRunToSession runB: %v", err)
+	}
+	historyStore, err := implstore.NewSQLiteHistoryStore(cfg, sess.SessionID)
+	if err != nil {
+		t.Fatalf("NewSQLiteHistoryStore: %v", err)
+	}
+	for _, runID := range []string{runA.RunID, runB.RunID} {
+		if err := implstore.AppendEvent(context.Background(), cfg, types.EventRecord{
+			RunID:   runID,
+			Type:    "agent.op.request",
+			Message: "msg",
+			Data:    map[string]string{"id": "x"},
+		}); err != nil {
+			t.Fatalf("append events: %v", err)
+		}
+		line := fmt.Sprintf(`{"id":"hist-%s","ts":"%s","runId":"%s","origin":"agent","kind":"assistant","message":"hello"}`,
+			runID, time.Now().UTC().Format(time.RFC3339Nano), runID)
+		if err := historyStore.AppendLine(context.Background(), []byte(line)); err != nil {
+			t.Fatalf("append history: %v", err)
+		}
+	}
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	sessionSvc := newTestSessionService(cfg, sessStore)
+	taskMgr := pkgtask.NewManager(ts, sessionSvc)
+	agentMgr := pkgagent.NewManager(sessionSvc, taskMgr, taskMgr)
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: runA, TaskService: taskMgr, Session: sessionSvc, AgentService: agentMgr, Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionClearHistory, protocol.SessionClearHistoryParams{
+		ThreadID:  protocol.ThreadID(runA.SessionID),
+		SessionID: sess.SessionID,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.clearHistory error: %+v", resp.Error)
+	}
+	var out protocol.SessionClearHistoryResult
+	if err := json.Unmarshal(resp.Result, &out); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if got := strings.TrimSpace(out.SessionID); got != sess.SessionID {
+		t.Fatalf("sessionId=%q want %q", got, sess.SessionID)
+	}
+	if len(out.SourceRuns) != 2 {
+		t.Fatalf("expected 2 source runs, got %d", len(out.SourceRuns))
+	}
+	if out.EventsDeleted == 0 || out.HistoryDeleted == 0 {
+		t.Fatalf("expected deleted counts, got %+v", out)
+	}
+}
+
+func TestRPCServer_SessionClearHistory_TeamUsesManifestRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	coordinatorSession, coordinatorRun, err := implstore.CreateSession(cfg, "team coordinator", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession coordinator: %v", err)
+	}
+	roleSession, roleRun, err := implstore.CreateSession(cfg, "team role", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession role: %v", err)
+	}
+	teamID := "team-test"
+	coordinatorSession.Mode = "team"
+	coordinatorSession.TeamID = teamID
+	coordinatorSession.Profile = "team-profile"
+	coordinatorSession.Runs = []string{coordinatorRun.RunID}
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), coordinatorSession); err != nil {
+		t.Fatalf("SaveSession coordinator: %v", err)
+	}
+	roleSessLoaded, err := sessStore.LoadSession(context.Background(), roleSession.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSession role: %v", err)
+	}
+	roleSessLoaded.Mode = "team"
+	roleSessLoaded.TeamID = teamID
+	if err := sessStore.SaveSession(context.Background(), roleSessLoaded); err != nil {
+		t.Fatalf("SaveSession role: %v", err)
+	}
+	teamDir := fsutil.GetTeamDir(cfg.DataDir, teamID)
+	if err := os.MkdirAll(teamDir, 0o755); err != nil {
+		t.Fatalf("mkdir team dir: %v", err)
+	}
+	manifest := fmt.Sprintf(`{"teamId":"%s","profileId":"p1","coordinatorRole":"ceo","coordinatorRunId":"%s","roles":[{"roleName":"ceo","runId":"%s","sessionId":"%s"},{"roleName":"cto","runId":"%s","sessionId":"%s"}],"createdAt":"2026-01-01T00:00:00Z"}`,
+		teamID, coordinatorRun.RunID, coordinatorRun.RunID, coordinatorSession.SessionID, roleRun.RunID, roleSession.SessionID)
+	if err := os.WriteFile(filepath.Join(teamDir, "team.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write team manifest: %v", err)
+	}
+	historyBySession := map[string]*implstore.SQLiteHistoryStore{}
+	for _, runID := range []string{coordinatorRun.RunID, roleRun.RunID} {
+		sessionID := coordinatorSession.SessionID
+		if runID == roleRun.RunID {
+			sessionID = roleSession.SessionID
+		}
+		if err := implstore.AppendEvent(context.Background(), cfg, types.EventRecord{
+			RunID:   runID,
+			Type:    "agent.op.request",
+			Message: "msg",
+			Data:    map[string]string{"id": "x"},
+		}); err != nil {
+			t.Fatalf("append events: %v", err)
+		}
+		hs := historyBySession[sessionID]
+		if hs == nil {
+			created, herr := implstore.NewSQLiteHistoryStore(cfg, sessionID)
+			if herr != nil {
+				t.Fatalf("NewSQLiteHistoryStore: %v", herr)
+			}
+			hs = created
+			historyBySession[sessionID] = hs
+		}
+		line := fmt.Sprintf(`{"id":"hist-%s","ts":"%s","runId":"%s","origin":"agent","kind":"assistant","message":"hello"}`,
+			runID, time.Now().UTC().Format(time.RFC3339Nano), runID)
+		if err := hs.AppendLine(context.Background(), []byte(line)); err != nil {
+			t.Fatalf("append history: %v", err)
+		}
+	}
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	sessionSvc := newTestSessionService(cfg, sessStore)
+	taskMgr := pkgtask.NewManager(ts, sessionSvc)
+	agentMgr := pkgagent.NewManager(sessionSvc, taskMgr, taskMgr)
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: coordinatorRun, TaskService: taskMgr, Session: sessionSvc, AgentService: agentMgr, Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionClearHistory, protocol.SessionClearHistoryParams{
+		ThreadID: protocol.ThreadID(coordinatorSession.SessionID),
+		TeamID:   teamID,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.clearHistory(team) error: %+v", resp.Error)
+	}
+	var out protocol.SessionClearHistoryResult
+	if err := json.Unmarshal(resp.Result, &out); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if got := strings.TrimSpace(out.TeamID); got != teamID {
+		t.Fatalf("teamId=%q want %q", got, teamID)
+	}
+	if len(out.SourceRuns) != 2 {
+		t.Fatalf("expected 2 source runs, got %d", len(out.SourceRuns))
+	}
+	if out.EventsDeleted == 0 || out.HistoryDeleted == 0 {
+		t.Fatalf("expected deleted counts, got %+v", out)
+	}
+}
+
 func TestRPCServer_SessionList_IncludesPausedCounts(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess, runA, err := implstore.CreateSession(cfg, "counts", 8*1024)

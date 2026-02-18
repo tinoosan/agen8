@@ -29,6 +29,7 @@ Type a message and press Ctrl+Enter to queue a task, or use a command (below):
   /pause                 Pause run(s) in current session
   /resume                Resume paused run(s) in current session
   /stop                  Hard-stop run(s) and leave them paused
+  /clear                 Clear persisted history/events for current context
   /model                 Open model picker
   /model <id>            Set model directly
   /copy                  Copy Agent Output transcript
@@ -45,6 +46,7 @@ Modal Controls:
   Escape                 Close any open modal
   Enter                  Confirm selection
   ↑/↓ or j/k             Navigate list items
+  d                      Delete selected session (session picker)
   Ctrl+N/P or PgDn/PgUp   Next/prev page (session picker)
   Type to filter         Filter list items
 

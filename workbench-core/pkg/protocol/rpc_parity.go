@@ -163,6 +163,23 @@ type SessionStopResult struct {
 	AffectedRunIDs []string `json:"affectedRunIds,omitempty"`
 }
 
+type SessionClearHistoryParams struct {
+	ThreadID  ThreadID `json:"threadId"`
+	SessionID string   `json:"sessionId,omitempty"`
+	TeamID    string   `json:"teamId,omitempty"`
+}
+
+type SessionClearHistoryResult struct {
+	SessionID           string   `json:"sessionId,omitempty"`
+	TeamID              string   `json:"teamId,omitempty"`
+	SourceRuns          []string `json:"sourceRuns,omitempty"`
+	EventsDeleted       int64    `json:"eventsDeleted"`
+	HistoryDeleted      int64    `json:"historyDeleted"`
+	ActivitiesDeleted   int64    `json:"activitiesDeleted"`
+	ConstructorState    int64    `json:"constructorStateDeleted"`
+	ConstructorManifest int64    `json:"constructorManifestDeleted"`
+}
+
 type SessionDeleteResult struct {
 	SessionID string `json:"sessionId"`
 }

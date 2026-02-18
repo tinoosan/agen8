@@ -21,6 +21,7 @@ const (
 	MethodSessionPause        = "session.pause"
 	MethodSessionResume       = "session.resume"
 	MethodSessionStop         = "session.stop"
+	MethodSessionClearHistory = "session.clearHistory"
 	MethodSessionDelete       = "session.delete"
 	MethodSessionGetTotals    = "session.getTotals"
 	MethodActivityList        = "activity.list"

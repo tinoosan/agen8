@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	"github.com/tinoosan/workbench-core/pkg/profile"
@@ -80,6 +81,9 @@ func registerSessionHandlers(s *RPCServer, reg methodRegistry) error {
 		},
 		func() error {
 			return addBoundHandler[protocol.SessionStopParams, protocol.SessionStopResult](reg, protocol.MethodSessionStop, false, s.sessionStopHandler)
+		},
+		func() error {
+			return addBoundHandler[protocol.SessionClearHistoryParams, protocol.SessionClearHistoryResult](reg, protocol.MethodSessionClearHistory, false, s.sessionClearHistory)
 		},
 		func() error {
 			return addBoundHandler[protocol.SessionDeleteParams, protocol.SessionDeleteResult](reg, protocol.MethodSessionDelete, false, s.sessionDelete)
@@ -776,7 +780,85 @@ func (s *RPCServer) sessionDelete(ctx context.Context, p protocol.SessionDeleteP
 	if err := s.session.Delete(ctx, sessionID); err != nil {
 		return protocol.SessionDeleteResult{}, err
 	}
-	return protocol.SessionDeleteResult{}, nil
+	return protocol.SessionDeleteResult{SessionID: sessionID}, nil
+}
+
+func (s *RPCServer) sessionClearHistory(ctx context.Context, p protocol.SessionClearHistoryParams) (protocol.SessionClearHistoryResult, error) {
+	if s.session == nil {
+		return protocol.SessionClearHistoryResult{}, &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: "session service not initialized"}
+	}
+	threadID, err := s.resolveThreadID(p.ThreadID)
+	if err != nil {
+		return protocol.SessionClearHistoryResult{}, err
+	}
+	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, p.TeamID, "")
+	if err != nil {
+		return protocol.SessionClearHistoryResult{}, err
+	}
+	if teamID := strings.TrimSpace(scope.teamID); teamID != "" {
+		runIDs, _ := loadTeamManifestRunRoles(s.cfg.DataDir, teamID)
+		if len(runIDs) == 0 && s.taskService != nil {
+			tasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{
+				TeamID:   teamID,
+				Limit:    1000,
+				SortBy:   "created_at",
+				SortDesc: true,
+			})
+			seen := map[string]struct{}{}
+			for _, t := range tasks {
+				runID := strings.TrimSpace(t.RunID)
+				if runID == "" {
+					continue
+				}
+				if _, ok := seen[runID]; ok {
+					continue
+				}
+				seen[runID] = struct{}{}
+				runIDs = append(runIDs, runID)
+			}
+		}
+		cleared, err := implstore.ClearHistoryForRunIDs(s.cfg, runIDs)
+		if err != nil {
+			return protocol.SessionClearHistoryResult{}, err
+		}
+		return protocol.SessionClearHistoryResult{
+			TeamID:              teamID,
+			SourceRuns:          append([]string(nil), cleared.SourceRuns...),
+			EventsDeleted:       cleared.EventsDeleted,
+			HistoryDeleted:      cleared.HistoryDeleted,
+			ActivitiesDeleted:   cleared.ActivitiesDeleted,
+			ConstructorState:    cleared.ConstructorState,
+			ConstructorManifest: cleared.ConstructorManifest,
+		}, nil
+	}
+
+	sessionID := strings.TrimSpace(p.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(threadID)
+	}
+	if sessionID == "" {
+		return protocol.SessionClearHistoryResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "sessionId is required"}
+	}
+	sess, err := s.session.LoadSession(ctx, sessionID)
+	if err != nil {
+		return protocol.SessionClearHistoryResult{}, err
+	}
+	if strings.TrimSpace(sess.SessionID) != strings.TrimSpace(threadID) {
+		return protocol.SessionClearHistoryResult{}, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+	}
+	cleared, err := implstore.ClearHistoryForSession(s.cfg, sessionID)
+	if err != nil {
+		return protocol.SessionClearHistoryResult{}, err
+	}
+	return protocol.SessionClearHistoryResult{
+		SessionID:           sessionID,
+		SourceRuns:          append([]string(nil), cleared.SourceRuns...),
+		EventsDeleted:       cleared.EventsDeleted,
+		HistoryDeleted:      cleared.HistoryDeleted,
+		ActivitiesDeleted:   cleared.ActivitiesDeleted,
+		ConstructorState:    cleared.ConstructorState,
+		ConstructorManifest: cleared.ConstructorManifest,
+	}, nil
 }
 
 func (s *RPCServer) setSessionPausedState(ctx context.Context, threadID, sessionID string, paused bool) ([]string, error) {

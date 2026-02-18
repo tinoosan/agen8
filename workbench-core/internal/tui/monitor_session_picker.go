@@ -127,6 +127,24 @@ func (m *monitorModel) updateSessionPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	case tea.KeyDown:
 		m.sessionPickerList.CursorDown()
 		return m, nil
+	case tea.KeyRunes:
+		if m.sessionPickerList.FilterState() != list.Filtering && strings.EqualFold(strings.TrimSpace(msg.String()), "d") {
+			selected := m.sessionPickerList.SelectedItem()
+			item, ok := selected.(sessionPickerItem)
+			if ok && strings.TrimSpace(item.id) != "" {
+				return m, m.openSessionDeleteConfirm(strings.TrimSpace(item.id))
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.sessionPickerList, cmd = m.sessionPickerList.Update(msg)
+		newFilter := strings.TrimSpace(m.sessionPickerList.FilterInput.Value())
+		if newFilter != m.sessionPickerFilter {
+			m.sessionPickerFilter = newFilter
+			m.sessionPickerPage = 0
+			return m, tea.Batch(cmd, m.fetchSessionsPage())
+		}
+		return m, cmd
 	default:
 		var cmd tea.Cmd
 		m.sessionPickerList, cmd = m.sessionPickerList.Update(msg)

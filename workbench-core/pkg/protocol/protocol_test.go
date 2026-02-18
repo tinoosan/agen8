@@ -240,6 +240,35 @@ func TestSessionListRequest_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSessionClearHistoryRequest_JSONRoundTrip(t *testing.T) {
+	msg, err := NewRequest("sch1", MethodSessionClearHistory, SessionClearHistoryParams{
+		ThreadID:  "thread-1",
+		SessionID: "sess-1",
+		TeamID:    "team-1",
+	})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	b, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var decoded Message
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if decoded.Method != MethodSessionClearHistory {
+		t.Fatalf("Method = %q, want %q", decoded.Method, MethodSessionClearHistory)
+	}
+	var params SessionClearHistoryParams
+	if err := json.Unmarshal(decoded.Params, &params); err != nil {
+		t.Fatalf("unmarshal params: %v", err)
+	}
+	if params.ThreadID != "thread-1" || params.SessionID != "sess-1" || params.TeamID != "team-1" {
+		t.Fatalf("unexpected params: %+v", params)
+	}
+}
+
 func TestSessionRenameRequest_JSONRoundTrip(t *testing.T) {
 	msg, err := NewRequest("sr1", MethodSessionRename, SessionRenameParams{
 		ThreadID:  "thread-1",

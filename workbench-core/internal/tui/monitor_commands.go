@@ -39,6 +39,7 @@ var monitorCommandSpecs = []monitorCommandSpec{
 	{name: "/pause", desc: "Pause run(s)", fn: cmdPause, invokeWithoutArgs: true},
 	{name: "/resume", desc: "Resume run(s)", fn: cmdResume, invokeWithoutArgs: true},
 	{name: "/stop", desc: "Hard-stop run(s)", fn: cmdStop, invokeWithoutArgs: true},
+	{name: "/clear", desc: "Clear persisted run history", fn: cmdClear, invokeWithoutArgs: true},
 	{name: "/model", desc: "Set or pick model", fn: cmdModel, invokeWithoutArgs: true},
 	{name: "/effort", desc: "Set reasoning effort", fn: cmdReasoningEffort, invokeWithoutArgs: true},
 	{name: "/reasoning-summary", desc: "Set reasoning summary", fn: cmdReasoningSummary, invokeWithoutArgs: true},
@@ -368,6 +369,18 @@ func cmdStop(m *monitorModel, rest string) tea.Cmd {
 		}
 		return commandLinesMsg{lines: []string{fmt.Sprintf("[stop] session stopped (%d runs)", len(res.AffectedRunIDs))}}
 	}
+}
+
+func cmdClear(m *monitorModel, rest string) tea.Cmd {
+	if strings.TrimSpace(rest) != "" {
+		return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /clear"}} }
+	}
+	if m.isDetached() {
+		return func() tea.Msg {
+			return commandLinesMsg{lines: []string{"[command] no active context; use /new or /sessions first"}}
+		}
+	}
+	return m.openHistoryClearConfirm()
 }
 
 func cmdModel(m *monitorModel, rest string) tea.Cmd {

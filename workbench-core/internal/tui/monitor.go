@@ -39,6 +39,17 @@ type commandLinesMsg struct {
 	lines []string
 }
 
+type historyClearedMsg struct {
+	result protocol.SessionClearHistoryResult
+	err    error
+}
+
+type sessionDeletedMsg struct {
+	sessionID      string
+	deletedCurrent bool
+	err            error
+}
+
 type taskQueuedLocallyMsg struct {
 	TaskID string
 	Goal   string
@@ -92,6 +103,13 @@ type rpcHealthMsg struct {
 	err       error
 	manual    bool
 }
+
+type monitorConfirmAction string
+
+const (
+	confirmActionClearHistory  monitorConfirmAction = "clear_history"
+	confirmActionDeleteSession monitorConfirmAction = "delete_session"
+)
 
 type planFilesLoadedMsg struct {
 	checklist    string
@@ -251,7 +269,13 @@ type monitorModel struct {
 	cancel                       context.CancelFunc
 
 	// Modal overlay state (only one modal open at a time)
-	helpModalOpen bool
+	helpModalOpen     bool
+	confirmModalOpen  bool
+	confirmModalTitle string
+	confirmModalBody  string
+	confirmModalHint  string
+	confirmAction     monitorConfirmAction
+	confirmSessionID  string
 
 	// Session picker
 	sessionPickerOpen     bool
@@ -639,6 +663,22 @@ func (m *monitorModel) reloadAsTeam(teamID string) tea.Cmd {
 			m.cancel()
 		}
 		nm, err := newTeamMonitorModel(m.ctx, m.cfg, teamID, m.result)
+		if err != nil {
+			return monitorReloadedMsg{err: err}
+		}
+		nm.width = m.width
+		nm.height = m.height
+		nm.refreshViewports()
+		return monitorReloadedMsg{model: nm}
+	}
+}
+
+func (m *monitorModel) reloadAsDetached() tea.Cmd {
+	return func() tea.Msg {
+		if m.cancel != nil {
+			m.cancel()
+		}
+		nm, err := newDetachedMonitorModel(m.ctx, m.cfg, m.result)
 		if err != nil {
 			return monitorReloadedMsg{err: err}
 		}

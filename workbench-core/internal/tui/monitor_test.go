@@ -18,6 +18,7 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/tinoosan/workbench-core/internal/app"
 	implstore "github.com/tinoosan/workbench-core/internal/store"
+	"github.com/tinoosan/workbench-core/internal/tui/kit"
 	layoutmgr "github.com/tinoosan/workbench-core/internal/tui/layout"
 	agentstate "github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
@@ -1484,6 +1485,7 @@ func TestMonitorDetached_EnqueueTaskRequiresContext(t *testing.T) {
 
 func TestMonitorCommandPalette_ProfileRemoved(t *testing.T) {
 	foundStop := false
+	foundClear := false
 	for _, cmd := range monitorAvailableCommands {
 		if cmd == "/profile" {
 			t.Fatalf("/profile should not be present in command palette")
@@ -1491,15 +1493,71 @@ func TestMonitorCommandPalette_ProfileRemoved(t *testing.T) {
 		if cmd == "/stop" {
 			foundStop = true
 		}
+		if cmd == "/clear" {
+			foundClear = true
+		}
 	}
 	if !foundStop {
 		t.Fatalf("/stop should be present in command palette")
+	}
+	if !foundClear {
+		t.Fatalf("/clear should be present in command palette")
 	}
 	if monitorCommandInvokesWithoutArgs("/profile") {
 		t.Fatalf("/profile should not be invokable")
 	}
 	if !monitorCommandInvokesWithoutArgs("/stop") {
 		t.Fatalf("/stop should be invokable without args")
+	}
+	if !monitorCommandInvokesWithoutArgs("/clear") {
+		t.Fatalf("/clear should be invokable without args")
+	}
+}
+
+func TestHandleCommand_ClearOpensConfirmModal(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	startMonitorTestRPCServer(t, cfg, "run-clear-open-modal")
+	_, run, err := implstore.CreateSession(cfg, "clear confirm", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	m, err := newMonitorModel(ctx, cfg, run.RunID, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newMonitorModel: %v", err)
+	}
+	if cmd := m.handleCommand("/clear"); cmd != nil {
+		_ = cmd()
+	}
+	if !m.confirmModalOpen {
+		t.Fatalf("expected confirm modal to open")
+	}
+	if m.confirmAction != confirmActionClearHistory {
+		t.Fatalf("expected clear history confirm action, got %q", m.confirmAction)
+	}
+}
+
+func TestSessionPicker_KeyDOpensDeleteConfirm(t *testing.T) {
+	m := &monitorModel{}
+	l := list.New([]list.Item{
+		sessionPickerItem{id: "sess-1", title: "one"},
+	}, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderSessionPickerLine), 0, 0)
+	m.sessionPickerOpen = true
+	m.sessionPickerList = l
+	model, _ := m.updateSessionPicker(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated, ok := model.(*monitorModel)
+	if !ok {
+		t.Fatalf("expected *monitorModel, got %T", model)
+	}
+	if !updated.confirmModalOpen {
+		t.Fatalf("expected confirm modal to open")
+	}
+	if updated.confirmAction != confirmActionDeleteSession {
+		t.Fatalf("expected delete session action, got %q", updated.confirmAction)
+	}
+	if strings.TrimSpace(updated.confirmSessionID) != "sess-1" {
+		t.Fatalf("confirmSessionID=%q want sess-1", updated.confirmSessionID)
 	}
 }
 

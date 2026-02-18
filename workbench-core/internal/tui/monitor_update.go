@@ -16,7 +16,7 @@ func (m *monitorModel) dispatchUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg, tickMsg, rpcHealthMsg:
 		return m.handleWindowAndTick(msg)
-	case tailedEventMsg, tailErrMsg, commandLinesMsg, monitorEditorDoneMsg, taskQueuedLocallyMsg, monitorSwitchRunMsg, monitorSwitchTeamMsg, monitorReloadedMsg, clipboardDoneMsg:
+	case tailedEventMsg, tailErrMsg, commandLinesMsg, historyClearedMsg, sessionDeletedMsg, monitorEditorDoneMsg, taskQueuedLocallyMsg, monitorSwitchRunMsg, monitorSwitchTeamMsg, monitorReloadedMsg, clipboardDoneMsg:
 		return m.handleTailAndStreamMessages(msg)
 	case inboxLoadedMsg, outboxLoadedMsg, teamStatusLoadedMsg, teamManifestLoadedMsg, teamEventsLoadedMsg, activityLoadedMsg, sessionsListMsg, agentsListMsg, planFilesLoadedMsg, sessionTotalsLoadedMsg, artifactTreeLoadedMsg, artifactContentLoadedMsg, monitorFilePickerPathsMsg, childRunsLoadedMsg:
 		return m.handleLoadedDataMessages(msg)
@@ -156,6 +156,48 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 			}
 		}
 		return m, m.scheduleUIRefresh()
+
+	case historyClearedMsg:
+		if msg.err != nil {
+			m.appendAgentOutput("[clear] error: " + msg.err.Error())
+			return m, m.scheduleUIRefresh()
+		}
+		m.clearHistoryBuffers()
+		m.appendAgentOutput(fmt.Sprintf(
+			"[clear] cleared events=%d history=%d activities=%d constructor_state=%d constructor_manifest=%d",
+			msg.result.EventsDeleted,
+			msg.result.HistoryDeleted,
+			msg.result.ActivitiesDeleted,
+			msg.result.ConstructorState,
+			msg.result.ConstructorManifest,
+		))
+		cmds := []tea.Cmd{
+			m.loadActivityPage(),
+			m.loadSessionTotalsCmd(),
+			m.scheduleUIRefresh(),
+		}
+		if strings.TrimSpace(m.teamID) != "" {
+			cmds = append(cmds, m.loadTeamEvents())
+		} else {
+			cmds = append(cmds, m.loadChildRuns())
+		}
+		return m, tea.Batch(cmds...)
+
+	case sessionDeletedMsg:
+		if msg.err != nil {
+			m.appendAgentOutput("[session] delete error: " + msg.err.Error())
+			return m, m.scheduleUIRefresh()
+		}
+		if msg.deletedCurrent {
+			m.appendAgentOutput("[session] deleted active session; switching to detached mode")
+			return m, m.reloadAsDetached()
+		}
+		m.appendAgentOutput("[session] deleted: " + shortID(strings.TrimSpace(msg.sessionID)))
+		cmds := []tea.Cmd{m.scheduleUIRefresh()}
+		if m.sessionPickerOpen {
+			cmds = append(cmds, m.fetchSessionsPage())
+		}
+		return m, tea.Batch(cmds...)
 
 	case monitorEditorDoneMsg:
 		m.handleEditorDone(msg)
@@ -504,6 +546,10 @@ func (m *monitorModel) routeModalKey(msg tea.KeyMsg) (bool, tea.Model, tea.Cmd) 
 			return true, m, nil
 		}
 		return true, m, nil // Consume all other keys when help is open.
+	}
+	if m.confirmModalOpen {
+		model, cmd := m.updateConfirmModal(msg)
+		return true, model, cmd
 	}
 	if m.sessionPickerOpen {
 		model, cmd := m.updateSessionPicker(msg)

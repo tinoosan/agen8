@@ -30,6 +30,9 @@ func (m *monitorModel) View() string {
 	if m.helpModalOpen {
 		return m.renderHelpModal(base)
 	}
+	if m.confirmModalOpen {
+		return m.renderConfirmModal(base)
+	}
 	if m.sessionPickerOpen {
 		return m.renderSessionPicker(base)
 	}

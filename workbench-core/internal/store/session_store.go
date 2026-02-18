@@ -393,6 +393,110 @@ func CountSessions(cfg config.Config, filter SessionFilter) (int, error) {
 	return count, nil
 }
 
+type HistoryClearResult struct {
+	SourceRuns          []string
+	EventsDeleted       int64
+	HistoryDeleted      int64
+	ActivitiesDeleted   int64
+	ConstructorState    int64
+	ConstructorManifest int64
+}
+
+// ClearHistoryForSession removes persisted run history artifacts for all runs in a session.
+func ClearHistoryForSession(cfg config.Config, sessionID string) (HistoryClearResult, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return HistoryClearResult{}, errors.New("session id required")
+	}
+	if err := cfg.Validate(); err != nil {
+		return HistoryClearResult{}, err
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return HistoryClearResult{}, err
+	}
+	rows, err := db.Query(`SELECT run_id FROM runs WHERE session_id = ? ORDER BY created_at`, sessionID)
+	if err != nil {
+		return HistoryClearResult{}, fmt.Errorf("query session runs: %w", err)
+	}
+	defer rows.Close()
+	runIDs := make([]string, 0, 8)
+	for rows.Next() {
+		var runID string
+		if err := rows.Scan(&runID); err != nil {
+			return HistoryClearResult{}, fmt.Errorf("scan session runs: %w", err)
+		}
+		runID = strings.TrimSpace(runID)
+		if runID != "" {
+			runIDs = append(runIDs, runID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return HistoryClearResult{}, fmt.Errorf("read session runs: %w", err)
+	}
+	return ClearHistoryForRunIDs(cfg, runIDs)
+}
+
+// ClearHistoryForRunIDs removes persisted run history artifacts for the given run IDs.
+func ClearHistoryForRunIDs(cfg config.Config, runIDs []string) (HistoryClearResult, error) {
+	if err := cfg.Validate(); err != nil {
+		return HistoryClearResult{}, err
+	}
+	ordered := make([]string, 0, len(runIDs))
+	seen := make(map[string]struct{}, len(runIDs))
+	for _, runID := range runIDs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		if _, ok := seen[runID]; ok {
+			continue
+		}
+		seen[runID] = struct{}{}
+		ordered = append(ordered, runID)
+	}
+	result := HistoryClearResult{SourceRuns: append([]string(nil), ordered...)}
+	if len(ordered) == 0 {
+		return result, nil
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return HistoryClearResult{}, err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return HistoryClearResult{}, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	runArgs := make([]any, 0, len(ordered))
+	placeholders := make([]string, 0, len(ordered))
+	for _, runID := range ordered {
+		placeholders = append(placeholders, "?")
+		runArgs = append(runArgs, runID)
+	}
+	inClause := "(" + strings.Join(placeholders, ",") + ")"
+	if result.EventsDeleted, err = execRowsAffectedTx(tx, "DELETE FROM events WHERE run_id IN "+inClause, runArgs...); err != nil {
+		return HistoryClearResult{}, err
+	}
+	if result.ActivitiesDeleted, err = execRowsAffectedTx(tx, "DELETE FROM activities WHERE run_id IN "+inClause, runArgs...); err != nil {
+		return HistoryClearResult{}, err
+	}
+	if result.ConstructorState, err = execRowsAffectedTx(tx, "DELETE FROM constructor_state WHERE run_id IN "+inClause, runArgs...); err != nil {
+		return HistoryClearResult{}, err
+	}
+	if result.ConstructorManifest, err = execRowsAffectedTx(tx, "DELETE FROM constructor_manifest WHERE run_id IN "+inClause, runArgs...); err != nil {
+		return HistoryClearResult{}, err
+	}
+	if result.HistoryDeleted, err = execRowsAffectedTx(tx, "DELETE FROM history WHERE run_id IN "+inClause, runArgs...); err != nil {
+		return HistoryClearResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return HistoryClearResult{}, fmt.Errorf("commit clear history: %w", err)
+	}
+	return result, nil
+}
+
 // DeleteSession removes the session from the database and deletes its directory.
 func DeleteSession(cfg config.Config, sessionID string) error {
 	sessionID = strings.TrimSpace(sessionID)
@@ -403,6 +507,8 @@ func DeleteSession(cfg config.Config, sessionID string) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+
+	sess, sessErr := LoadSession(cfg, sessionID)
 
 	db, err := getSQLiteDB(cfg)
 	if err != nil {
@@ -415,13 +521,88 @@ func DeleteSession(cfg config.Config, sessionID string) error {
 	}
 	defer tx.Rollback()
 
-	// Delete from DB
+	rows, err := tx.Query(`SELECT run_id FROM runs WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return fmt.Errorf("query session runs: %w", err)
+	}
+	runIDs := make([]string, 0, 8)
+	for rows.Next() {
+		var runID string
+		if err := rows.Scan(&runID); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan session runs: %w", err)
+		}
+		runID = strings.TrimSpace(runID)
+		if runID != "" {
+			runIDs = append(runIDs, runID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("read session runs: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close session runs: %w", err)
+	}
+
+	if len(runIDs) > 0 {
+		runArgs := make([]any, 0, len(runIDs))
+		placeholders := make([]string, 0, len(runIDs))
+		for _, runID := range runIDs {
+			placeholders = append(placeholders, "?")
+			runArgs = append(runArgs, runID)
+		}
+		inClause := "(" + strings.Join(placeholders, ",") + ")"
+		if _, err := tx.Exec("DELETE FROM events WHERE run_id IN "+inClause, runArgs...); err != nil {
+			return fmt.Errorf("delete run events: %w", err)
+		}
+		if _, err := tx.Exec("DELETE FROM history WHERE run_id IN "+inClause, runArgs...); err != nil {
+			return fmt.Errorf("delete run history: %w", err)
+		}
+		if _, err := tx.Exec("DELETE FROM activities WHERE run_id IN "+inClause, runArgs...); err != nil {
+			return fmt.Errorf("delete run activities: %w", err)
+		}
+		if _, err := tx.Exec("DELETE FROM constructor_state WHERE run_id IN "+inClause, runArgs...); err != nil {
+			return fmt.Errorf("delete run constructor state: %w", err)
+		}
+		if _, err := tx.Exec("DELETE FROM constructor_manifest WHERE run_id IN "+inClause, runArgs...); err != nil {
+			return fmt.Errorf("delete run constructor manifest: %w", err)
+		}
+		if _, err := tx.Exec("DELETE FROM runs WHERE run_id IN "+inClause, runArgs...); err != nil {
+			return fmt.Errorf("delete runs: %w", err)
+		}
+	}
+
+	// Also delete any remaining session-scoped history rows.
+	if _, err := tx.Exec("DELETE FROM history WHERE session_id = ?", sessionID); err != nil {
+		return fmt.Errorf("delete session history: %w", err)
+	}
+
 	if _, err := tx.Exec("DELETE FROM sessions WHERE session_id = ?", sessionID); err != nil {
 		return fmt.Errorf("delete session record: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delete: %w", err)
+	}
+
+	// Delete run directories under /agents/<runID>.
+	for _, runID := range runIDs {
+		runDir := fsutil.GetAgentDir(cfg.DataDir, runID)
+		if err := os.RemoveAll(runDir); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove run dir %s: %w", runDir, err)
+		}
+	}
+
+	// If this was a team session, remove the team directory as well.
+	if sessErr == nil {
+		teamID := strings.TrimSpace(sess.TeamID)
+		if teamID != "" {
+			teamDir := fsutil.GetTeamDir(cfg.DataDir, teamID)
+			if err := os.RemoveAll(teamDir); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove team dir: %w", err)
+			}
+		}
 	}
 
 	// Delete directory
@@ -431,4 +612,19 @@ func DeleteSession(cfg config.Config, sessionID string) error {
 	}
 
 	return nil
+}
+
+func execRowsAffectedTx(tx *sql.Tx, query string, args ...any) (int64, error) {
+	if tx == nil {
+		return 0, fmt.Errorf("transaction is nil")
+	}
+	res, err := tx.Exec(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("exec: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	return n, nil
 }

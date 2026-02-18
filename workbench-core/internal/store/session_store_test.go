@@ -4,10 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/config"
+	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/types"
 )
 
 func TestCreateSessionAndAddRun(t *testing.T) {
@@ -317,5 +320,232 @@ func TestListSessionsPaginated_FallbackSessionIDFromRow(t *testing.T) {
 	}
 	if rows[0].SessionID == "" {
 		t.Fatalf("expected session id fallback from row key")
+	}
+}
+
+func TestClearHistoryForSession_ClearsPersistedRunArtifacts(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, runA, err := CreateSession(cfg, "clear-history", 64)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	runB := types.NewRun("child", 64, sess.SessionID)
+	if err := SaveRun(cfg, runB); err != nil {
+		t.Fatalf("SaveRun runB: %v", err)
+	}
+	if _, err := AddRunToSession(cfg, sess.SessionID, runB.RunID); err != nil {
+		t.Fatalf("AddRunToSession runB: %v", err)
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		t.Fatalf("getSQLiteDB: %v", err)
+	}
+	for _, runID := range []string{runA.RunID, runB.RunID} {
+		if _, err := db.Exec(`INSERT INTO events (event_id, run_id, ts, type, message, data_json, event_json) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			"ev-"+runID, runID, time.Now().UTC().Format(time.RFC3339Nano), "agent.op.request", "msg", "{}", `{"id":"x"}`); err != nil {
+			t.Fatalf("insert events: %v", err)
+		}
+		if _, err := db.Exec(`INSERT INTO history (id, session_id, run_id, ts, origin, kind, message, model, data_json, line_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			"hist-"+runID, sess.SessionID, runID, time.Now().UTC().Format(time.RFC3339Nano), "agent", "assistant", "hello", "", "{}", `{"id":"x","runId":"`+runID+`"}`); err != nil {
+			t.Fatalf("insert history: %v", err)
+		}
+		if _, err := db.Exec(`INSERT INTO activities (run_id, activity_id, seq, kind, title, status, started_at, finished_at, meta_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			runID, "act-"+runID, 1, "tool", "activity", "completed", time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano), "{}"); err != nil {
+			t.Fatalf("insert activities: %v", err)
+		}
+		if _, err := db.Exec(`INSERT INTO constructor_state (run_id, updated_at, state_json) VALUES (?, ?, ?)`,
+			runID, time.Now().UTC().Format(time.RFC3339Nano), `{"ok":true}`); err != nil {
+			t.Fatalf("insert constructor_state: %v", err)
+		}
+		if _, err := db.Exec(`INSERT INTO constructor_manifest (run_id, updated_at, manifest_json) VALUES (?, ?, ?)`,
+			runID, time.Now().UTC().Format(time.RFC3339Nano), `{"ok":true}`); err != nil {
+			t.Fatalf("insert constructor_manifest: %v", err)
+		}
+	}
+
+	out, err := ClearHistoryForSession(cfg, sess.SessionID)
+	if err != nil {
+		t.Fatalf("ClearHistoryForSession: %v", err)
+	}
+	if len(out.SourceRuns) != 2 {
+		t.Fatalf("expected 2 source runs, got %d", len(out.SourceRuns))
+	}
+	if out.EventsDeleted == 0 || out.HistoryDeleted == 0 || out.ActivitiesDeleted == 0 {
+		t.Fatalf("expected non-zero deletes, got %+v", out)
+	}
+
+	assertCount := func(query string, args ...any) {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(query, args...).Scan(&n); err != nil {
+			t.Fatalf("count query failed: %v", err)
+		}
+		if n != 0 {
+			t.Fatalf("expected 0 rows for query %q, got %d", query, n)
+		}
+	}
+	assertCount(`SELECT COUNT(*) FROM events WHERE run_id IN (?, ?)`, runA.RunID, runB.RunID)
+	assertCount(`SELECT COUNT(*) FROM history WHERE run_id IN (?, ?)`, runA.RunID, runB.RunID)
+	assertCount(`SELECT COUNT(*) FROM activities WHERE run_id IN (?, ?)`, runA.RunID, runB.RunID)
+	assertCount(`SELECT COUNT(*) FROM constructor_state WHERE run_id IN (?, ?)`, runA.RunID, runB.RunID)
+	assertCount(`SELECT COUNT(*) FROM constructor_manifest WHERE run_id IN (?, ?)`, runA.RunID, runB.RunID)
+}
+
+func TestClearHistoryForRunIDs_OnlyTargetRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sessA, runA, err := CreateSession(cfg, "A", 64)
+	if err != nil {
+		t.Fatalf("CreateSession A: %v", err)
+	}
+	_, runB, err := CreateSession(cfg, "B", 64)
+	if err != nil {
+		t.Fatalf("CreateSession B: %v", err)
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		t.Fatalf("getSQLiteDB: %v", err)
+	}
+	for _, runID := range []string{runA.RunID, runB.RunID} {
+		sessionID := sessA.SessionID
+		if runID == runB.RunID {
+			sessionID = runB.SessionID
+		}
+		if _, err := db.Exec(`INSERT INTO events (event_id, run_id, ts, type, message, data_json, event_json) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			"ev-"+runID, runID, time.Now().UTC().Format(time.RFC3339Nano), "agent.op.request", "msg", "{}", `{"id":"x"}`); err != nil {
+			t.Fatalf("insert events: %v", err)
+		}
+		if _, err := db.Exec(`INSERT INTO history (id, session_id, run_id, ts, origin, kind, message, model, data_json, line_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			"hist-"+runID, sessionID, runID, time.Now().UTC().Format(time.RFC3339Nano), "agent", "assistant", "hello", "", "{}", `{"id":"x","runId":"`+runID+`"}`); err != nil {
+			t.Fatalf("insert history: %v", err)
+		}
+	}
+
+	out, err := ClearHistoryForRunIDs(cfg, []string{runA.RunID, runA.RunID})
+	if err != nil {
+		t.Fatalf("ClearHistoryForRunIDs: %v", err)
+	}
+	if len(out.SourceRuns) != 1 || out.SourceRuns[0] != runA.RunID {
+		t.Fatalf("unexpected source runs: %+v", out.SourceRuns)
+	}
+	var remainA, remainB int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id = ?`, runA.RunID).Scan(&remainA); err != nil {
+		t.Fatalf("count runA: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id = ?`, runB.RunID).Scan(&remainB); err != nil {
+		t.Fatalf("count runB: %v", err)
+	}
+	if remainA != 0 {
+		t.Fatalf("expected runA rows cleared, got %d", remainA)
+	}
+	if remainB == 0 {
+		t.Fatalf("expected runB rows to remain")
+	}
+}
+
+func TestDeleteSession_CascadesRunRows(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sessA, runA, err := CreateSession(cfg, "A", 64)
+	if err != nil {
+		t.Fatalf("CreateSession A: %v", err)
+	}
+	runA2 := types.NewRun("A2", 64, sessA.SessionID)
+	if err := SaveRun(cfg, runA2); err != nil {
+		t.Fatalf("SaveRun A2: %v", err)
+	}
+	if _, err := AddRunToSession(cfg, sessA.SessionID, runA2.RunID); err != nil {
+		t.Fatalf("AddRunToSession A2: %v", err)
+	}
+	_, runB, err := CreateSession(cfg, "B", 64)
+	if err != nil {
+		t.Fatalf("CreateSession B: %v", err)
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		t.Fatalf("getSQLiteDB: %v", err)
+	}
+	for _, runID := range []string{runA.RunID, runA2.RunID, runB.RunID} {
+		if err := os.MkdirAll(fsutil.GetAgentDir(cfg.DataDir, runID), 0o755); err != nil {
+			t.Fatalf("mkdir run dir %s: %v", runID, err)
+		}
+	}
+	for _, runID := range []string{runA.RunID, runA2.RunID, runB.RunID} {
+		sessionID := sessA.SessionID
+		if runID == runB.RunID {
+			sessionID = runB.SessionID
+		}
+		if _, err := db.Exec(`INSERT INTO events (event_id, run_id, ts, type, message, data_json, event_json) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			"ev-"+runID, runID, time.Now().UTC().Format(time.RFC3339Nano), "agent.op.request", "msg", "{}", `{"id":"x"}`); err != nil {
+			t.Fatalf("insert events: %v", err)
+		}
+		if _, err := db.Exec(`INSERT INTO history (id, session_id, run_id, ts, origin, kind, message, model, data_json, line_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			"hist-"+runID, sessionID, runID, time.Now().UTC().Format(time.RFC3339Nano), "agent", "assistant", "hello", "", "{}", `{"id":"x","runId":"`+runID+`"}`); err != nil {
+			t.Fatalf("insert history: %v", err)
+		}
+	}
+
+	if err := DeleteSession(cfg, sessA.SessionID); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	var sessionRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE session_id = ?`, sessA.SessionID).Scan(&sessionRows); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if sessionRows != 0 {
+		t.Fatalf("expected deleted session row")
+	}
+	var runsA int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE session_id = ?`, sessA.SessionID).Scan(&runsA); err != nil {
+		t.Fatalf("count runsA: %v", err)
+	}
+	if runsA != 0 {
+		t.Fatalf("expected deleted session runs")
+	}
+	var runsB int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE session_id = ?`, runB.SessionID).Scan(&runsB); err != nil {
+		t.Fatalf("count runsB: %v", err)
+	}
+	if runsB == 0 {
+		t.Fatalf("expected non-target session runs to remain")
+	}
+
+	for _, runID := range []string{runA.RunID, runA2.RunID} {
+		if _, err := os.Stat(fsutil.GetAgentDir(cfg.DataDir, runID)); !os.IsNotExist(err) {
+			t.Fatalf("expected run dir deleted for %s, err=%v", runID, err)
+		}
+	}
+	if _, err := os.Stat(fsutil.GetAgentDir(cfg.DataDir, runB.RunID)); err != nil {
+		t.Fatalf("expected non-target run dir to remain, err=%v", err)
+	}
+}
+
+func TestDeleteSession_RemovesTeamDirectory(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, run, err := CreateSession(cfg, "team session", 64)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess.Mode = "team"
+	sess.TeamID = "team-delete-test"
+	if err := SaveSession(cfg, sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	teamDir := fsutil.GetTeamDir(cfg.DataDir, sess.TeamID)
+	if err := os.MkdirAll(teamDir, 0o755); err != nil {
+		t.Fatalf("mkdir team dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(teamDir, "team.json"), []byte(`{"teamId":"team-delete-test"}`), 0o644); err != nil {
+		t.Fatalf("write team manifest: %v", err)
+	}
+	if err := os.MkdirAll(fsutil.GetAgentDir(cfg.DataDir, run.RunID), 0o755); err != nil {
+		t.Fatalf("mkdir run dir: %v", err)
+	}
+
+	if err := DeleteSession(cfg, sess.SessionID); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	if _, err := os.Stat(teamDir); !os.IsNotExist(err) {
+		t.Fatalf("expected team dir deleted, err=%v", err)
 	}
 }
