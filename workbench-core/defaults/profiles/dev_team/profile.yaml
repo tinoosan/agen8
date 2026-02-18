@@ -44,7 +44,6 @@ team:
         - shell_exec
         - http_fetch
         - browser
-        - task_create
         - trace_run
       description: Designs APIs, data models, and server-side logic.
       prompts:
@@ -67,7 +66,6 @@ team:
         - shell_exec
         - http_fetch
         - browser
-        - task_create
         - trace_run
       description: Builds user interfaces, client-side logic, and user-facing features.
       prompts:
@@ -89,7 +87,6 @@ team:
         - shell_exec
         - http_fetch
         - browser
-        - task_create
         - trace_run
       description: Writes tests, finds bugs, validates features against acceptance criteria.
       prompts:
@@ -112,7 +109,6 @@ team:
         - shell_exec
         - http_fetch
         - browser
-        - task_create
         - trace_run
       description: Manages infrastructure, CI/CD pipelines, deployments, and monitoring.
       prompts:
@@ -133,7 +129,6 @@ team:
         - fs_edit
         - http_fetch
         - browser
-        - task_create
       description: Researches user needs, evaluates usability, and informs product decisions with evidence.
       prompts:
         system_prompt_path: ux-researcher-prompt.md

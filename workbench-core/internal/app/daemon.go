@@ -31,11 +31,19 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	stdinTTY := term.IsTerminal(int(os.Stdin.Fd()))
+	stdoutTTY := term.IsTerminal(int(os.Stdout.Fd()))
+	if _, err := ensureRuntimeConfigTemplate(cfg.DataDir); err != nil {
+		return err
+	}
 	runtimeCfg, err := loadRuntimeConfig(cfg.DataDir)
 	if err != nil {
 		return err
 	}
 	applyRuntimeConfigEnvDefaults(runtimeCfg)
+	if err := ensureRuntimeCredentials(cfg.DataDir, stdinTTY && stdoutTTY, os.Stdin, os.Stdout); err != nil {
+		return err
+	}
 
 	resolved, err := resolveRunChatOptions(opts...)
 	if err != nil {
@@ -56,8 +64,8 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	}
 	protocolEnabled := shouldEnableProtocolStdio(
 		resolved.ProtocolStdio,
-		term.IsTerminal(int(os.Stdin.Fd())),
-		term.IsTerminal(int(os.Stdout.Fd())),
+		stdinTTY,
+		stdoutTTY,
 	)
 	prof, profDir, err := resolveProfileRef(cfg, strings.TrimSpace(resolved.Profile))
 	if err != nil {

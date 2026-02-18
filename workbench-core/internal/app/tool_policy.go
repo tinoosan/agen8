@@ -7,6 +7,40 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/agent"
 )
 
+type teamToolRule struct {
+	tool                string
+	disallowForNonCoord bool
+}
+
+var defaultTeamToolRules = []teamToolRule{
+	{tool: "task_create", disallowForNonCoord: true},
+}
+
+func sanitizeAllowedToolsForRole(allowed []string, teamID string, isCoordinator bool) (sanitized []string, removed []string) {
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" || isCoordinator {
+		return append([]string(nil), allowed...), nil
+	}
+	restricted := map[string]struct{}{}
+	for _, rule := range defaultTeamToolRules {
+		tool := strings.TrimSpace(rule.tool)
+		if tool == "" || !rule.disallowForNonCoord {
+			continue
+		}
+		restricted[strings.ToLower(tool)] = struct{}{}
+	}
+	sanitized = make([]string, 0, len(allowed))
+	for _, name := range allowed {
+		trimmed := strings.TrimSpace(name)
+		if _, ok := restricted[strings.ToLower(trimmed)]; ok {
+			removed = append(removed, trimmed)
+			continue
+		}
+		sanitized = append(sanitized, name)
+	}
+	return sanitized, removed
+}
+
 func applyAllowedTools(registry *agent.HostToolRegistry, allowed []string) error {
 	if registry == nil || len(allowed) == 0 {
 		return nil

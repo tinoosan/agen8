@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -89,5 +90,53 @@ func TestApplyRuntimeConfigEnvDefaults_DoesNotOverrideExisting(t *testing.T) {
 	}
 	if got := os.Getenv(envSkillsSeedConflict); got != "keep" {
 		t.Fatalf("%s=%q", envSkillsSeedConflict, got)
+	}
+}
+
+func TestEnsureRuntimeConfigTemplate_CreatesDefaultTemplate(t *testing.T) {
+	dataDir := t.TempDir()
+	path, err := ensureRuntimeConfigTemplate(dataDir)
+	if err != nil {
+		t.Fatalf("ensureRuntimeConfigTemplate: %v", err)
+	}
+	if strings.TrimSpace(path) == "" {
+		t.Fatalf("expected config path")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `model = "`+runtimeDefaultModel+`"`) {
+		t.Fatalf("expected default model in template, got:\n%s", text)
+	}
+	if strings.Contains(strings.ToUpper(text), "API_KEY") {
+		t.Fatalf("template should not include secrets")
+	}
+}
+
+func TestEnsureRuntimeConfigTemplate_Idempotent(t *testing.T) {
+	dataDir := t.TempDir()
+	path, err := ensureRuntimeConfigTemplate(dataDir)
+	if err != nil {
+		t.Fatalf("ensureRuntimeConfigTemplate: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("[defaults]\nmodel = \"custom/model\"\n"), 0o644); err != nil {
+		t.Fatalf("write custom config: %v", err)
+	}
+	path2, err := ensureRuntimeConfigTemplate(dataDir)
+	if err != nil {
+		t.Fatalf("ensureRuntimeConfigTemplate second call: %v", err)
+	}
+	if path2 != path {
+		t.Fatalf("path mismatch: %q vs %q", path2, path)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.TrimSpace(string(raw)) != `[defaults]
+model = "custom/model"` {
+		t.Fatalf("existing config should remain untouched; got:\n%s", string(raw))
 	}
 }

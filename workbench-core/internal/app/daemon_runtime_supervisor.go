@@ -618,7 +618,19 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		}
 	}
 	if !isChildRun {
-		if err := applyAllowedTools(registry, activeProfile.AllowedTools); err != nil {
+		roleAllowedTools, removedTools := sanitizeAllowedToolsForRole(activeProfile.AllowedTools, teamID, isCoordinator)
+		if len(removedTools) > 0 {
+			emitEvent(context.Background(), events.Event{
+				Type:    "daemon.warning",
+				Message: "Removed disallowed tool(s) for non-coordinator role",
+				Data: map[string]string{
+					"teamId": teamID,
+					"role":   roleName,
+					"tools":  strings.Join(removedTools, ","),
+				},
+			})
+		}
+		if err := applyAllowedTools(registry, roleAllowedTools); err != nil {
 			orderedEmitter.Close()
 			_ = rt.Shutdown(context.Background())
 			return nil, err

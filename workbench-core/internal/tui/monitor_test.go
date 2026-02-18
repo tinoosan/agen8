@@ -554,6 +554,9 @@ func TestMonitorProfilePicker_FilterAndSelectStartsNewStandaloneSession(t *testi
 	if err := os.MkdirAll(filepath.Join(profilesDir, "stock_analyst"), 0o755); err != nil {
 		t.Fatalf("mkdir profiles/stock_analyst: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(profilesDir, "startup_team"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles/startup_team: %v", err)
+	}
 	writeProfile := func(dir, id, desc string) {
 		t.Helper()
 		raw := "id: " + id + "\ndescription: " + desc + "\nprompts:\n  system_prompt: hello\n"
@@ -564,6 +567,13 @@ func TestMonitorProfilePicker_FilterAndSelectStartsNewStandaloneSession(t *testi
 	writeProfile(filepath.Join(profilesDir, "general"), "general", "General profile")
 	writeProfile(filepath.Join(profilesDir, "software_dev"), "software_dev", "Software development")
 	writeProfile(filepath.Join(profilesDir, "stock_analyst"), "stock_analyst", "Stocks and markets")
+	if err := os.WriteFile(
+		filepath.Join(profilesDir, "startup_team", "profile.yaml"),
+		[]byte("id: startup_team\ndescription: Team\nteam:\n  model: test\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write team profile.yaml: %v", err)
+	}
 
 	_, run, err := implstore.CreateSession(cfg, "profile filter test", 8*1024)
 	if err != nil {
@@ -583,6 +593,15 @@ func TestMonitorProfilePicker_FilterAndSelectStartsNewStandaloneSession(t *testi
 	}
 	if len(m.profilePickerList.Items()) == 0 {
 		t.Fatalf("expected profile picker items")
+	}
+	for _, it := range m.profilePickerList.Items() {
+		pi, ok := it.(monitorProfilePickerItem)
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(pi.id), "startup_team") {
+			t.Fatalf("standalone picker should not include team profiles")
+		}
 	}
 
 	// Filter for "software".

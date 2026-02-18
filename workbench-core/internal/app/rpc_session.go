@@ -228,6 +228,15 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	if mode == "team" {
 		return s.sessionStartTeam(ctx, p)
 	}
+	if profileRef := strings.TrimSpace(p.Profile); profileRef != "" {
+		prof, _, err := resolveProfileRef(s.cfg, profileRef)
+		if err != nil {
+			prof = nil
+		}
+		if prof != nil && prof.Team != nil {
+			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "standalone mode requires a non-team profile"}
+		}
+	}
 
 	goal := strings.TrimSpace(p.Goal)
 	if goal == "" {

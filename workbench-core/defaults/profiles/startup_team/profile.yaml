@@ -44,7 +44,6 @@ team:
         - shell_exec
         - http_fetch
         - browser
-        - task_create
         - trace_run
       description: Owns technical architecture, builds the product, and ships working software.
       prompts:
@@ -65,7 +64,6 @@ team:
         - fs_edit
         - http_fetch
         - browser
-        - task_create
       description: Researches markets, acquires users, and runs marketing and outreach campaigns.
       prompts:
         system_prompt_path: growth-lead-prompt.md
@@ -86,7 +84,6 @@ team:
         - fs_edit
         - http_fetch
         - browser
-        - task_create
       description: Manages business model, budgets, revenue tracking, and operational finances.
       prompts:
         system_prompt_path: finance-ops-prompt.md
@@ -106,7 +103,6 @@ team:
         - fs_edit
         - http_fetch
         - browser
-        - task_create
       description: Owns product design, branding, landing pages, and visual identity.
       prompts:
         system_prompt_path: designer-prompt.md
@@ -126,7 +122,6 @@ team:
         - fs_edit
         - http_fetch
         - browser
-        - task_create
       description: Manages day-to-day operations, vendor relationships, processes, and logistics.
       prompts:
         system_prompt_path: operations-lead-prompt.md

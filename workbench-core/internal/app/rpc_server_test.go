@@ -1952,6 +1952,43 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 	}
 }
 
+func TestRPCServer_SessionStart_StandaloneRejectsTeamProfile(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "startup_team"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "startup_team", "profile.yaml"), []byte(
+		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Mode:     "standalone",
+		Profile:  "startup_team",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error == nil {
+		t.Fatalf("expected standalone rejection for team profile")
+	}
+	if resp.Error.Code != protocol.CodeInvalidParams {
+		t.Fatalf("code = %d want %d", resp.Error.Code, protocol.CodeInvalidParams)
+	}
+	if !strings.Contains(strings.ToLower(resp.Error.Message), "non-team profile") {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+}
+
 func TestRPCServer_SessionList_And_AgentList(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sessA, runA, err := implstore.CreateSession(cfg, "alpha goal", 8*1024)

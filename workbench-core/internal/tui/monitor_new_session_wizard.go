@@ -67,10 +67,18 @@ func (m *monitorModel) openNewSessionWizard() tea.Cmd {
 				if title == "" {
 					title = "Untitled Session"
 				}
+				lastActive := "unknown"
+				if !s.UpdatedAt.IsZero() {
+					lastActive = timeutil.Since(timeutil.OrNow(s.UpdatedAt)).Round(time.Second).String()
+				}
+				activeFor := "unknown"
+				if !s.CreatedAt.IsZero() {
+					activeFor = timeutil.Since(timeutil.OrNow(s.CreatedAt)).Round(time.Second).String()
+				}
 				items = append(items, newSessionWizardItem{
 					mode:      "resume",
 					title:     "Resume: " + truncateText(title, 40),
-					desc:      "Last active: " + timeutil.Since(timeutil.OrNow(s.UpdatedAt)).Round(time.Second).String(),
+					desc:      "Last active: " + lastActive + " · Active for: " + activeFor,
 					sessionID: s.SessionID,
 				})
 			}

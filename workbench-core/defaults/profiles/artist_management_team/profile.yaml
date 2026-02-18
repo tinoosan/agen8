@@ -42,7 +42,6 @@ team:
         - fs_edit
         - http_fetch
         - browser
-        - task_create
       description: Develops marketing plans, audience research, and campaign strategies.
       prompts:
         system_prompt_path: marketing-strategist-prompt.md
@@ -63,7 +62,6 @@ team:
         - fs_edit
         - http_fetch
         - browser
-        - task_create
       description: Manages release schedules, distribution research, and playlist or PR outreach.
       prompts:
         system_prompt_path: release-coordinator-prompt.md
@@ -83,7 +81,6 @@ team:
         - fs_edit
         - http_fetch
         - browser
-        - task_create
       description: Handles royalty analysis, deal evaluation, and budget planning.
       prompts:
         system_prompt_path: business-manager-prompt.md
@@ -103,7 +100,6 @@ team:
         - fs_edit
         - http_fetch
         - browser
-        - task_create
       description: Owns visual identity, content creation direction, artwork, and brand consistency.
       prompts:
         system_prompt_path: creative-director-prompt.md
@@ -123,7 +119,6 @@ team:
         - fs_edit
         - http_fetch
         - browser
-        - task_create
       description: Plans live shows, tours, fan events, and manages event logistics and budgets.
       prompts:
         system_prompt_path: touring-events-manager-prompt.md

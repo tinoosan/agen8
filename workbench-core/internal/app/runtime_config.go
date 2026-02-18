@@ -11,6 +11,7 @@ import (
 )
 
 const envWorkbenchConfig = "WORKBENCH_CONFIG"
+const runtimeDefaultModel = "z-ai/GLM-5"
 
 type runtimeConfig struct {
 	Defaults runtimeConfigDefaults
@@ -91,6 +92,42 @@ func loadRuntimeConfig(dataDir string) (runtimeConfig, error) {
 		return runtimeConfig{Env: map[string]string{}}, nil
 	}
 	return out, nil
+}
+
+func ensureRuntimeConfigTemplate(dataDir string) (string, error) {
+	dataDir = strings.TrimSpace(dataDir)
+	if dataDir == "" {
+		return "", nil
+	}
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir data dir: %w", err)
+	}
+	path := filepath.Join(dataDir, "config.toml")
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("stat %s: %w", path, err)
+	}
+
+	body := strings.TrimSpace(`
+# Workbench runtime defaults (non-secret values only).
+# Secrets such as API keys are stored in your OS keychain.
+
+[defaults]
+model = "`+runtimeDefaultModel+`"
+# subagent_model = ""
+# profile = "general"
+
+[env]
+# OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+[skills]
+# conflict = "keep"
+`) + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", path, err)
+	}
+	return path, nil
 }
 
 func decodeRuntimeConfigFile(path string) (runtimeConfig, bool, error) {

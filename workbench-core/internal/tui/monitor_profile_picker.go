@@ -72,7 +72,8 @@ func (m *monitorModel) openProfilePickerFor(mode string, teamOnly bool) tea.Cmd 
 	m.profilePickerMode = strings.TrimSpace(mode)
 	m.profilePickerTeamOnly = teamOnly
 
-	items, titleSuffix := m.monitorProfilePickerItems(teamOnly)
+	standaloneOnly := strings.EqualFold(strings.TrimSpace(mode), "new-standalone")
+	items, titleSuffix := m.monitorProfilePickerItems(teamOnly, standaloneOnly)
 	l := list.New(items, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderMonitorProfilePickerLine), 0, 0)
 	l.Title = "Select Profile"
 	if teamOnly {
@@ -100,7 +101,7 @@ func (m *monitorModel) openProfilePickerFor(mode string, teamOnly bool) tea.Cmd 
 	return nil
 }
 
-func (m *monitorModel) monitorProfilePickerItems(teamOnly bool) ([]list.Item, string) {
+func (m *monitorModel) monitorProfilePickerItems(teamOnly, standaloneOnly bool) ([]list.Item, string) {
 	profilesDir := fsutil.GetProfilesDir(m.cfg.DataDir)
 	ents, err := os.ReadDir(profilesDir)
 	if err != nil {
@@ -129,6 +130,9 @@ func (m *monitorModel) monitorProfilePickerItems(teamOnly bool) ([]list.Item, st
 			continue
 		}
 		if teamOnly && p.Team == nil {
+			continue
+		}
+		if standaloneOnly && p.Team != nil {
 			continue
 		}
 		items = append(items, monitorProfilePickerItem{

@@ -575,7 +575,23 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("register task_review for role %s: %w", role.Name, err)
 		}
-		if err := applyAllowedTools(registry, role.AllowedTools); err != nil {
+		roleAllowedTools, removedTools := sanitizeAllowedToolsForRole(role.AllowedTools, teamID, role.Coordinator)
+		if len(removedTools) > 0 {
+			msg := "Removed disallowed tool(s) for non-coordinator role"
+			log.Printf("daemon: [%s] %s: %s: %s", role.Name, teamID, msg, strings.Join(removedTools, ","))
+			if err := orderedEmitter.Emit(context.Background(), events.Event{
+				Type:    "daemon.warning",
+				Message: msg,
+				Data: map[string]string{
+					"teamId": teamID,
+					"role":   role.Name,
+					"tools":  strings.Join(removedTools, ","),
+				},
+			}); err != nil && !errorsIsDropped(err) {
+				log.Printf("events: emit failed: %v", err)
+			}
+		}
+		if err := applyAllowedTools(registry, roleAllowedTools); err != nil {
 			orderedEmitter.Close()
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("apply allowed tools for role %s: %w", role.Name, err)
