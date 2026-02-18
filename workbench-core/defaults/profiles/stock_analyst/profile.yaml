@@ -1,5 +1,18 @@
 id: stock_analyst
 description: Research-focused profile for public markets analysis and monitoring.
+model: openai/gpt-5-mini
+subagent_model: openai/gpt-5-nano
+allowed_tools:
+  - fs_list
+  - fs_read
+  - fs_search
+  - fs_write
+  - fs_append
+  - fs_edit
+  - http_fetch
+  - browser
+  - task_create
+  - task_review
 skills:
   - financial-analysis
   - market-monitoring
@@ -13,4 +26,3 @@ heartbeat:
   - name: keep_assumptions_explicit
     interval: 6h
     goal: "Keep analyses explicit about facts vs estimates vs assumptions; record sources when used."
-

@@ -5,6 +5,18 @@ team:
   roles:
     - name: artist-manager
       coordinator: true
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
+        - task_review
       description: Central career management hub that delegates to specialists and tracks delivery.
       prompts:
         system_prompt_path: artist-manager-prompt.md
@@ -20,6 +32,17 @@ team:
           goal: "Produce a consolidated activity brief from completed role outputs."
 
     - name: marketing-strategist
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Develops marketing plans, audience research, and campaign strategies.
       prompts:
         system_prompt_path: marketing-strategist-prompt.md
@@ -30,6 +53,17 @@ team:
         - automation
 
     - name: release-coordinator
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Manages release schedules, distribution research, and playlist or PR outreach.
       prompts:
         system_prompt_path: release-coordinator-prompt.md
@@ -39,6 +73,17 @@ team:
         - reporting
 
     - name: business-manager
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Handles royalty analysis, deal evaluation, and budget planning.
       prompts:
         system_prompt_path: business-manager-prompt.md
@@ -48,6 +93,17 @@ team:
         - reporting
 
     - name: creative-director
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Owns visual identity, content creation direction, artwork, and brand consistency.
       prompts:
         system_prompt_path: creative-director-prompt.md
@@ -57,6 +113,17 @@ team:
         - reporting
 
     - name: touring-events-manager
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Plans live shows, tours, fan events, and manages event logistics and budgets.
       prompts:
         system_prompt_path: touring-events-manager-prompt.md

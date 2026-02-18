@@ -8,8 +8,8 @@ import (
 
 	implstore "github.com/tinoosan/workbench-core/internal/store"
 	"github.com/tinoosan/workbench-core/pkg/agent"
-	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	agentsession "github.com/tinoosan/workbench-core/pkg/agent/session"
+	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
 	llmtypes "github.com/tinoosan/workbench-core/pkg/llm/types"
@@ -281,6 +281,28 @@ func TestApplySessionModel_SkipsChildRuns(t *testing.T) {
 		if id == childRun.RunID {
 			t.Fatalf("ApplySessionModel must not apply to child run %q", childRun.RunID)
 		}
+	}
+}
+
+func TestBuildRoleRuntimeProfile_CopiesRoleSkillsForSupervisor(t *testing.T) {
+	role := profile.RoleConfig{
+		Name:         "qa",
+		Description:  "QA role",
+		Skills:       []string{"automation"},
+		AllowedTools: []string{"task_review"},
+	}
+	got := buildRoleRuntimeProfile(role)
+	if got == nil {
+		t.Fatalf("expected profile")
+	}
+	if got.ID != "qa" {
+		t.Fatalf("id=%q", got.ID)
+	}
+	if len(got.Skills) != 1 || got.Skills[0] != "automation" {
+		t.Fatalf("unexpected skills: %v", got.Skills)
+	}
+	if len(got.AllowedTools) != 1 || got.AllowedTools[0] != "task_review" {
+		t.Fatalf("unexpected allowed tools: %v", got.AllowedTools)
 	}
 }
 

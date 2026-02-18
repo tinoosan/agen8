@@ -414,14 +414,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			return nil, fmt.Errorf("role %q not found in team profile %q", roleName, prof.ID)
 		}
 		isCoordinator = strings.EqualFold(strings.TrimSpace(roleCfg.Name), coordinatorRole)
-		activeProfile = &profile.Profile{
-			ID:           strings.TrimSpace(roleCfg.Name),
-			Description:  strings.TrimSpace(roleCfg.Description),
-			Prompts:      roleCfg.Prompts,
-			Skills:       append([]string(nil), roleCfg.Skills...),
-			AllowedTools: append([]string(nil), roleCfg.AllowedTools...),
-			Heartbeat:    append([]profile.HeartbeatJob(nil), roleCfg.Heartbeat...),
-		}
+		activeProfile = buildRoleRuntimeProfile(*roleCfg)
 	}
 
 	if run.Runtime == nil {

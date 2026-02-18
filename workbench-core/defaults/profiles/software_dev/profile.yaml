@@ -1,5 +1,21 @@
 id: software_dev
 description: Software engineering profile focused on building, debugging, testing, and documentation.
+model: openai/gpt-5.1-codex-mini
+subagent_model: openai/gpt-5-nano
+allowed_tools:
+  - fs_list
+  - fs_read
+  - fs_search
+  - fs_write
+  - fs_append
+  - fs_edit
+  - fs_patch
+  - shell_exec
+  - http_fetch
+  - browser
+  - task_create
+  - task_review
+  - trace_run
 skills:
   - coding
   - reporting
@@ -12,4 +28,3 @@ heartbeat:
   - name: keep_changes_minimal
     interval: 6h
     goal: "Keep changes scoped to the request, with clear reasoning and validation."
-

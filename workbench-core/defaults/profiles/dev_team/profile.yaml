@@ -5,6 +5,18 @@ team:
   roles:
     - name: product-manager
       coordinator: true
+      model: openai/gpt-5.1-codex-mini
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
+        - task_review
       description: Owns the product roadmap, scopes features, delegates engineering work, and drives releases.
       prompts:
         system_prompt_path: product-manager-prompt.md
@@ -20,6 +32,20 @@ team:
           goal: "Produce a consolidated sprint progress brief from completed role outputs."
 
     - name: backend-engineer
+      model: openai/gpt-5.1-codex-mini
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - fs_patch
+        - shell_exec
+        - http_fetch
+        - browser
+        - task_create
+        - trace_run
       description: Designs APIs, data models, and server-side logic.
       prompts:
         system_prompt_path: backend-engineer-prompt.md
@@ -29,6 +55,20 @@ team:
         - data-engineering
 
     - name: frontend-engineer
+      model: openai/gpt-5.1-codex-mini
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - fs_patch
+        - shell_exec
+        - http_fetch
+        - browser
+        - task_create
+        - trace_run
       description: Builds user interfaces, client-side logic, and user-facing features.
       prompts:
         system_prompt_path: frontend-engineer-prompt.md
@@ -37,6 +77,20 @@ team:
         - planning
 
     - name: qa-engineer
+      model: openai/gpt-5.1-codex-mini
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - fs_patch
+        - shell_exec
+        - http_fetch
+        - browser
+        - task_create
+        - trace_run
       description: Writes tests, finds bugs, validates features against acceptance criteria.
       prompts:
         system_prompt_path: qa-engineer-prompt.md
@@ -46,6 +100,20 @@ team:
         - automation
 
     - name: devops-engineer
+      model: openai/gpt-5.1-codex-mini
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - fs_patch
+        - shell_exec
+        - http_fetch
+        - browser
+        - task_create
+        - trace_run
       description: Manages infrastructure, CI/CD pipelines, deployments, and monitoring.
       prompts:
         system_prompt_path: devops-engineer-prompt.md
@@ -55,6 +123,17 @@ team:
         - planning
 
     - name: ux-researcher
+      model: openai/gpt-5.1-codex-mini
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Researches user needs, evaluates usability, and informs product decisions with evidence.
       prompts:
         system_prompt_path: ux-researcher-prompt.md

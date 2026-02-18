@@ -254,18 +254,32 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 	skillMgr := skills.NewManager([]string{skillDir})
 	skillMgr.WritableRoot = skillDir
-	if profileSkills := resolveProfileSkills(cfg); len(profileSkills) > 0 {
-		skillMgr.AllowedSkills = profileSkills
-		if cfg.Emit != nil {
-			cfg.Emit(context.Background(), events.Event{
-				Type:    "runtime.info",
-				Message: "Applied profile-scoped skills visibility",
-				Data: map[string]string{
-					"profile":      strings.TrimSpace(cfg.Profile),
-					"allowedCount": strconv.Itoa(len(profileSkills)),
-				},
-			})
+	scope := resolveProfileSkillScope(cfg)
+	skillMgr.AllowedSkills = scope.AllowedSkills
+	skillMgr.EnforceAllowlist = scope.EnforceAllowlist
+	if cfg.Emit != nil && scope.EnforceAllowlist {
+		eventType := "runtime.info"
+		message := "Applied profile-scoped skills visibility"
+		if scope.FailClosedReason != "" {
+			eventType = "runtime.warning"
+			message = "Applied fail-closed profile-scoped skills visibility"
 		}
+		data := map[string]string{
+			"profile":      strings.TrimSpace(scope.ProfileID),
+			"allowedCount": strconv.Itoa(len(scope.AllowedSkills)),
+			"scope":        strings.TrimSpace(scope.Scope),
+		}
+		if role := strings.TrimSpace(scope.Role); role != "" {
+			data["role"] = role
+		}
+		if reason := strings.TrimSpace(scope.FailClosedReason); reason != "" {
+			data["reason"] = reason
+		}
+		cfg.Emit(context.Background(), events.Event{
+			Type:    eventType,
+			Message: message,
+			Data:    data,
+		})
 	}
 	if err := skillMgr.Scan(); err != nil {
 		return nil, fmt.Errorf("scan skills: %w", err)
@@ -524,21 +538,63 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 
 func boolPtr(v bool) *bool { return &v }
 
-func resolveProfileSkills(cfg BuildConfig) []string {
-	if cfg.ProfileConfig != nil {
-		return uniqueProfileSkills(cfg.ProfileConfig)
+type profileSkillScope struct {
+	AllowedSkills    []string
+	EnforceAllowlist bool
+	Scope            string
+	Role             string
+	ProfileID        string
+	FailClosedReason string
+}
+
+func resolveProfileSkillScope(cfg BuildConfig) profileSkillScope {
+	p := cfg.ProfileConfig
+	if p == nil {
+		ref := strings.TrimSpace(cfg.Profile)
+		if ref == "" {
+			return profileSkillScope{}
+		}
+		loaded, err := loadProfileByRef(cfg.Cfg, ref)
+		if err != nil || loaded == nil {
+			return profileSkillScope{}
+		}
+		p = loaded
+	}
+	out := profileSkillScope{
+		EnforceAllowlist: true,
+		ProfileID:        strings.TrimSpace(p.ID),
+	}
+	teamID := ""
+	role := ""
+	if cfg.Run.Runtime != nil {
+		teamID = strings.TrimSpace(cfg.Run.Runtime.TeamID)
+		role = strings.TrimSpace(cfg.Run.Runtime.Role)
+	}
+	if teamID != "" {
+		out.Scope = "team-role"
+		out.Role = role
+		if p.Team == nil {
+			out.FailClosedReason = "team_profile_missing"
+			return out
+		}
+		if role == "" {
+			out.FailClosedReason = "team_role_missing"
+			return out
+		}
+		for _, rc := range p.Team.Roles {
+			if !strings.EqualFold(strings.TrimSpace(rc.Name), role) {
+				continue
+			}
+			out.AllowedSkills = normalizeSkillList(rc.Skills)
+			return out
+		}
+		out.FailClosedReason = "team_role_unmapped"
+		return out
 	}
 
-	ref := strings.TrimSpace(cfg.Profile)
-	if ref == "" {
-		return nil
-	}
-
-	p, err := loadProfileByRef(cfg.Cfg, ref)
-	if err != nil || p == nil {
-		return nil
-	}
-	return uniqueProfileSkills(p)
+	out.Scope = "standalone"
+	out.AllowedSkills = normalizeSkillList(p.Skills)
+	return out
 }
 
 func loadProfileByRef(cfg config.Config, ref string) (*profile.Profile, error) {
@@ -555,31 +611,22 @@ func loadProfileByRef(cfg config.Config, ref string) (*profile.Profile, error) {
 	return profile.Load(filepath.Join(fsutil.GetProfilesDir(cfg.DataDir), ref))
 }
 
-func uniqueProfileSkills(p *profile.Profile) []string {
-	if p == nil {
+func normalizeSkillList(skills []string) []string {
+	if len(skills) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(p.Skills))
+	out := make([]string, 0, len(skills))
 	seen := map[string]struct{}{}
-	add := func(skills []string) {
-		for _, s := range skills {
-			s = strings.TrimSpace(s)
-			if s == "" {
-				continue
-			}
-			if _, ok := seen[s]; ok {
-				continue
-			}
-			seen[s] = struct{}{}
-			out = append(out, s)
+	for _, s := range skills {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
 		}
-	}
-
-	add(p.Skills)
-	if p.Team != nil {
-		for _, role := range p.Team.Roles {
-			add(role.Skills)
+		if _, ok := seen[s]; ok {
+			continue
 		}
+		seen[s] = struct{}{}
+		out = append(out, s)
 	}
 	if len(out) == 0 {
 		return nil

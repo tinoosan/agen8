@@ -5,6 +5,18 @@ team:
   roles:
     - name: head-analyst
       coordinator: true
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
+        - task_review
       description: Coordinates tasks, synthesizes findings, and delivers final conclusions.
       prompts:
         system_prompt_path: head-analyst-prompt.md
@@ -20,6 +32,17 @@ team:
           goal: "Produce a consolidated market and stock brief from completed role outputs."
 
     - name: market-researcher
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Investigates macro themes, sector rotation, and broad market conditions.
       prompts:
         system_prompt_path: market-researcher-prompt.md
@@ -29,6 +52,17 @@ team:
         - hybrid-web
 
     - name: stock-researcher
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Analyzes company fundamentals, catalysts, and valuation signals.
       prompts:
         system_prompt_path: stock-researcher-prompt.md
@@ -38,6 +72,16 @@ team:
         - market-monitoring
 
     - name: report-writer
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - task_create
       description: Produces concise final reports and executive-ready summaries.
       prompts:
         system_prompt_path: report-writer-prompt.md
@@ -46,6 +90,17 @@ team:
         - reporting
 
     - name: risk-analyst
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Assesses portfolio risk, correlation exposure, and downside scenarios across positions.
       prompts:
         system_prompt_path: risk-analyst-prompt.md
@@ -55,6 +110,19 @@ team:
         - reporting
 
     - name: quant-researcher
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - fs_patch
+        - shell_exec
+        - http_fetch
+        - browser
+        - task_create
       description: Builds data-driven models, screens for signals, and backtests quantitative strategies.
       prompts:
         system_prompt_path: quant-researcher-prompt.md

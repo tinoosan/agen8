@@ -25,6 +25,9 @@ type Manager struct {
 	WritableRoot  string
 	entries       map[string]*Skill
 	AllowedSkills []string // when non-empty, only these skill names are visible
+	// EnforceAllowlist turns AllowedSkills into a strict allowlist.
+	// When true and AllowedSkills is empty, no skills are visible.
+	EnforceAllowlist bool
 }
 
 func NewManager(roots []string) *Manager {
@@ -97,10 +100,10 @@ func (m *Manager) Entries() []SkillEntry {
 	if len(m.entries) == 0 {
 		return nil
 	}
-	allowed := m.allowedSet()
+	allowed, restricted := m.allowedSet()
 	dirs := make([]string, 0, len(m.entries))
 	for dir := range m.entries {
-		if len(allowed) > 0 {
+		if restricted {
 			if _, ok := allowed[dir]; !ok {
 				continue
 			}
@@ -177,9 +180,12 @@ func (m *Manager) ScriptsManifest() []SkillScripts {
 	return out
 }
 
-func (m *Manager) allowedSet() map[string]struct{} {
+func (m *Manager) allowedSet() (map[string]struct{}, bool) {
 	if len(m.AllowedSkills) == 0 {
-		return nil
+		if m != nil && m.EnforceAllowlist {
+			return map[string]struct{}{}, true
+		}
+		return nil, false
 	}
 	allowed := make(map[string]struct{}, len(m.AllowedSkills))
 	for _, name := range m.AllowedSkills {
@@ -190,14 +196,17 @@ func (m *Manager) allowedSet() map[string]struct{} {
 		allowed[name] = struct{}{}
 	}
 	if len(allowed) == 0 {
-		return nil
+		if m != nil && m.EnforceAllowlist {
+			return map[string]struct{}{}, true
+		}
+		return nil, false
 	}
-	return allowed
+	return allowed, true
 }
 
 func (m *Manager) isAllowed(dir string) bool {
-	allowed := m.allowedSet()
-	if len(allowed) == 0 {
+	allowed, restricted := m.allowedSet()
+	if !restricted {
 		return true
 	}
 	_, ok := allowed[dir]

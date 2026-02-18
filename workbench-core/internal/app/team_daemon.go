@@ -589,14 +589,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("create agent for role %s: %w", role.Name, err)
 		}
-		roleProfile := &profile.Profile{
-			ID:           role.Name,
-			Description:  role.Description,
-			Prompts:      role.Prompts,
-			Skills:       append([]string(nil), role.Skills...),
-			AllowedTools: append([]string(nil), role.AllowedTools...),
-			Heartbeat:    append([]profile.HeartbeatJob(nil), role.Heartbeat...),
-		}
+		roleProfile := buildRoleRuntimeProfile(role)
 		roleSession, err := session.New(session.Config{
 			Agent:      a,
 			Profile:    roleProfile,

@@ -5,6 +5,18 @@ team:
   roles:
     - name: portfolio-manager
       coordinator: true
+      model: openai/gpt-5.1-codex-mini
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
+        - task_review
       description: Sets investment thesis, delegates research and analysis, and makes portfolio-level decisions.
       prompts:
         system_prompt_path: portfolio-manager-prompt.md
@@ -20,6 +32,17 @@ team:
           goal: "Produce a consolidated investment pipeline brief from completed role outputs."
 
     - name: market-analyst
+      model: openai/gpt-5.1-codex-mini
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Tracks real estate market trends, demographics, and economic indicators by region.
       prompts:
         system_prompt_path: market-analyst-prompt.md
@@ -29,6 +52,17 @@ team:
         - planning
 
     - name: deal-underwriter
+      model: openai/gpt-5.1-codex-mini
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Evaluates individual property deals — financials, risk, and return projections.
       prompts:
         system_prompt_path: deal-underwriter-prompt.md
@@ -38,6 +72,17 @@ team:
         - reporting
 
     - name: property-researcher
+      model: openai/gpt-5.1-codex-mini
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Sources properties, gathers comparable data, and produces property-level research briefs.
       prompts:
         system_prompt_path: property-researcher-prompt.md
@@ -47,6 +92,19 @@ team:
         - reporting
 
     - name: financial-modeler
+      model: openai/gpt-5.1-codex-mini
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - fs_patch
+        - shell_exec
+        - http_fetch
+        - browser
+        - task_create
       description: Builds financial models, cash flow projections, and scenario analyses for investments.
       prompts:
         system_prompt_path: financial-modeler-prompt.md
@@ -56,6 +114,17 @@ team:
         - planning
 
     - name: legal-researcher
+      model: openai/gpt-5.1-codex-mini
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Researches zoning, regulations, tax implications, and legal structures for real estate deals.
       prompts:
         system_prompt_path: legal-researcher-prompt.md

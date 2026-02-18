@@ -131,3 +131,28 @@ func TestSkillsResource_WriteBlockedWhenDisallowed(t *testing.T) {
 		t.Fatalf("expected append to blocked skill to fail")
 	}
 }
+
+func TestSkillsResource_EnforceAllowlistWithEmptyList_HidesAllSkills(t *testing.T) {
+	tmp := t.TempDir()
+	mustWriteSkill(t, tmp, "allowed")
+
+	mgr := NewManager([]string{tmp})
+	mgr.WritableRoot = tmp
+	mgr.EnforceAllowlist = true
+	if err := mgr.Scan(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	res := NewResource(mgr)
+
+	entries, err := res.List("")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no visible skills, got %d", len(entries))
+	}
+
+	if _, err := res.Read("allowed/SKILL.md"); err == nil {
+		t.Fatalf("expected read to fail when strict allowlist is empty")
+	}
+}

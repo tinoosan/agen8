@@ -37,6 +37,28 @@ func TestManager_AllowedSkills(t *testing.T) {
 	}
 }
 
+func TestManager_EnforceAllowlistWithEmptyList_HidesAllSkills(t *testing.T) {
+	tmp := t.TempDir()
+	mustWriteSkill(t, tmp, "A")
+	mustWriteSkill(t, tmp, "B")
+
+	mgr := NewManager([]string{tmp})
+	mgr.EnforceAllowlist = true
+	if err := mgr.Scan(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	if entries := mgr.Entries(); len(entries) != 0 {
+		t.Fatalf("expected no visible entries, got %d", len(entries))
+	}
+	if _, ok := mgr.Get("A"); ok {
+		t.Fatalf("expected A to be hidden")
+	}
+	if manifest := mgr.ScriptsManifest(); len(manifest) != 0 {
+		t.Fatalf("expected empty scripts manifest, got %d items", len(manifest))
+	}
+}
+
 func TestManager_ScriptsManifest(t *testing.T) {
 	tmp := t.TempDir()
 	mustWriteSkill(t, tmp, "alpha")

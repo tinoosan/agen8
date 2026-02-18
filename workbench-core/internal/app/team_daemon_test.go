@@ -167,3 +167,25 @@ func TestResolveRoleModel_UsesRoleOverride(t *testing.T) {
 		t.Fatalf("model=%q", model)
 	}
 }
+
+func TestBuildRoleRuntimeProfile_UsesRoleScopedSkillsOnly(t *testing.T) {
+	role := profile.RoleConfig{
+		Name:         "backend",
+		Description:  "Backend role",
+		Skills:       []string{"coding", "data-engineering"},
+		AllowedTools: []string{"task_create"},
+	}
+	got := buildRoleRuntimeProfile(role)
+	if got == nil {
+		t.Fatalf("expected profile")
+	}
+	if got.ID != "backend" {
+		t.Fatalf("id=%q", got.ID)
+	}
+	if len(got.Skills) != 2 || got.Skills[0] != "coding" || got.Skills[1] != "data-engineering" {
+		t.Fatalf("unexpected skills: %v", got.Skills)
+	}
+	if len(got.AllowedTools) != 1 || got.AllowedTools[0] != "task_create" {
+		t.Fatalf("unexpected allowed tools: %v", got.AllowedTools)
+	}
+}

@@ -5,6 +5,18 @@ team:
   roles:
     - name: ceo
       coordinator: true
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
+        - task_review
       description: Sets vision and strategy, delegates execution to the team, and drives the business toward revenue.
       prompts:
         system_prompt_path: ceo-prompt.md
@@ -20,6 +32,20 @@ team:
           goal: "Produce a consolidated business progress brief from completed role outputs."
 
     - name: cto
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - fs_patch
+        - shell_exec
+        - http_fetch
+        - browser
+        - task_create
+        - trace_run
       description: Owns technical architecture, builds the product, and ships working software.
       prompts:
         system_prompt_path: cto-prompt.md
@@ -29,6 +55,17 @@ team:
         - automation
 
     - name: growth-lead
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Researches markets, acquires users, and runs marketing and outreach campaigns.
       prompts:
         system_prompt_path: growth-lead-prompt.md
@@ -39,6 +76,17 @@ team:
         - automation
 
     - name: finance-ops
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Manages business model, budgets, revenue tracking, and operational finances.
       prompts:
         system_prompt_path: finance-ops-prompt.md
@@ -48,6 +96,17 @@ team:
         - reporting
 
     - name: designer
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Owns product design, branding, landing pages, and visual identity.
       prompts:
         system_prompt_path: designer-prompt.md
@@ -57,6 +116,17 @@ team:
         - reporting
 
     - name: operations-lead
+      model: moonshotai/kimi-k2.5
+      allowed_tools:
+        - fs_list
+        - fs_read
+        - fs_search
+        - fs_write
+        - fs_append
+        - fs_edit
+        - http_fetch
+        - browser
+        - task_create
       description: Manages day-to-day operations, vendor relationships, processes, and logistics.
       prompts:
         system_prompt_path: operations-lead-prompt.md

@@ -1,5 +1,18 @@
 id: stock_researcher
 description: Focused profile for equity and company-level stock research.
+model: openai/gpt-5-mini
+subagent_model: openai/gpt-5-nano
+allowed_tools:
+  - fs_list
+  - fs_read
+  - fs_search
+  - fs_write
+  - fs_append
+  - fs_edit
+  - http_fetch
+  - browser
+  - task_create
+  - task_review
 skills:
   - financial-analysis
   - market-monitoring
