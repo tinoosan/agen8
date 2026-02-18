@@ -25,6 +25,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/runtime"
 	eventsvc "github.com/tinoosan/workbench-core/pkg/services/events"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
+	pkgsoul "github.com/tinoosan/workbench-core/pkg/services/soul"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/services/team"
 	pkgstore "github.com/tinoosan/workbench-core/pkg/store"
@@ -45,6 +46,7 @@ type runtimeSupervisorConfig struct {
 	WorkdirAbs       string
 	BootstrapRunID   string
 	DefaultProfile   *profile.Profile
+	SoulService      pkgsoul.Service
 }
 
 type runtimeSupervisor struct {
@@ -61,6 +63,7 @@ type runtimeSupervisor struct {
 	workdirAbs       string
 	bootstrapRunID   string
 	defaultProfile   *profile.Profile
+	soulService      pkgsoul.Service
 
 	mu      sync.Mutex
 	workers map[string]*managedRuntime
@@ -214,6 +217,7 @@ func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 		workdirAbs:       cfg.WorkdirAbs,
 		bootstrapRunID:   strings.TrimSpace(cfg.BootstrapRunID),
 		defaultProfile:   cfg.DefaultProfile,
+		soulService:      cfg.SoulService,
 		workers:          map[string]*managedRuntime{},
 	}
 }
@@ -465,12 +469,28 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		activeProfile = buildRoleRuntimeProfile(*roleCfg)
 	}
 
+	soulContent := ""
+	soulVersion := 0
+	if s.soulService != nil {
+		if doc, err := s.soulService.Get(parent); err == nil {
+			soulContent = strings.TrimSpace(doc.Content)
+			soulVersion = doc.Version
+		}
+	}
+	if soulVersion > 0 {
+		if sess.SoulVersionSeen != soulVersion {
+			sess.SoulVersionSeen = soulVersion
+			_ = s.sessionService.SaveSession(parent, sess)
+		}
+	}
+
 	if run.Runtime == nil {
 		run.Runtime = &types.RunRuntimeConfig{}
 	}
 	run.Runtime.Profile = strings.TrimSpace(prof.ID)
 	run.Runtime.TeamID = teamID
 	run.Runtime.Role = roleName
+	run.Runtime.SoulVersionSeen = soulVersion
 
 	model := resolveRunModel(sess, run, strings.TrimSpace(s.resolved.Model))
 	if model == "" {
@@ -548,6 +568,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		MaxTraceBytes:         s.resolved.MaxTraceBytes,
 		PriceInPerMTokensUSD:  s.resolved.PriceInPerMTokensUSD,
 		PriceOutPerMTokensUSD: s.resolved.PriceOutPerMTokensUSD,
+		SoulVersionSeen:       soulVersion,
 		PersistRun: func(r types.Run) error {
 			return s.sessionService.SaveRun(context.Background(), r)
 		},
@@ -650,6 +671,13 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			return nil, err
 		}
 	}
+	if s.soulService != nil {
+		if err := registry.Register(&hosttools.SoulUpdateTool{Updater: s.soulService, Actor: pkgsoul.ActorAgent}); err != nil {
+			orderedEmitter.Close()
+			_ = rt.Shutdown(context.Background())
+			return nil, err
+		}
+	}
 	var allowedToolsForRun []string
 	if !isChildRun {
 		roleAllowedTools, removedTools := sanitizeAllowedToolsForRole(activeProfile.AllowedTools, teamID, isCoordinator)
@@ -716,6 +744,8 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		Memory:               &textMemoryAdapter{store: s.memoryStore},
 		MemorySearchLimit:    3,
 		Notifier:             &subagentCleanupNotifier{supervisor: s, store: s.taskService, next: s.notifier},
+		SoulContent:          soulContent,
+		SoulVersion:          soulVersion,
 		PollInterval:         s.pollInterval,
 		MaxReadBytes:         256 * 1024,
 		LeaseTTL:             2 * time.Minute,

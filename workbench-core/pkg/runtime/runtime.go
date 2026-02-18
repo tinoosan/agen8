@@ -59,6 +59,7 @@ type BuildConfig struct {
 	MaxTraceBytes         int
 	PriceInPerMTokensUSD  float64
 	PriceOutPerMTokensUSD float64
+	SoulVersionSeen       int
 	AuditReads            bool
 	Guard                 func(fs *vfs.FS, req types.HostOpRequest) *types.HostOpResponse
 	ArtifactObserve       func(path string)
@@ -110,6 +111,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
 		ApprovalsMode:    strings.TrimSpace(cfg.ApprovalsMode),
+		SoulVersionSeen:  cfg.SoulVersionSeen,
 
 		MaxTraceBytes:         cfg.MaxTraceBytes,
 		MaxMemoryBytes:        cfg.MaxMemoryBytes,

@@ -97,6 +97,7 @@ func TestBuildTeamRPCServerConfig_AcceptsRoleSessionThread(t *testing.T) {
 		sessionSvc,
 		runtimes,
 		teamCtrl,
+		nil,
 	)
 
 	if srvCfg.AgentService == nil {
@@ -138,6 +139,7 @@ func TestBuildTeamRPCServerConfig_RejectsUnknownThread(t *testing.T) {
 		sessionSvc,
 		nil,
 		teamCtrl,
+		nil,
 	)
 
 	_, err := srvCfg.ControlSetModel(context.Background(), "missing-thread", "", "openai/gpt-5-mini")

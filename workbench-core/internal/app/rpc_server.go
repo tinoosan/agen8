@@ -15,6 +15,7 @@ import (
 	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
 	eventsvc "github.com/tinoosan/workbench-core/pkg/services/events"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
+	pkgsoul "github.com/tinoosan/workbench-core/pkg/services/soul"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/timeutil"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -32,6 +33,7 @@ type RPCServer struct {
 	session       pkgsession.Service
 	agentService  pkgagent.ServiceForRPC
 	eventsService EventsLister
+	soulService   pkgsoul.Service
 	initErr       error
 
 	notifyCh <-chan protocol.Message
@@ -63,6 +65,7 @@ type RPCServerConfig struct {
 	ControlSetProfile   func(ctx context.Context, threadID, target, profile string) ([]string, error)
 	AgentService        pkgagent.ServiceForRPC
 	EventsService       EventsLister // optional; for events.listPaginated, events.latestSeq, events.count
+	SoulService         pkgsoul.Service
 	SessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error)
 	// Session logic
 	SessionResume func(ctx context.Context, threadID, sessionID string) ([]string, error)
@@ -156,6 +159,7 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		session:             sess,
 		agentService:        cfg.AgentService,
 		eventsService:       cfg.EventsService,
+		soulService:         cfg.SoulService,
 		initErr:             initErr,
 		notifyCh:            cfg.NotifyCh,
 		index:               cfg.Index,
@@ -172,6 +176,7 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		srv,
 		registerSessionHandlers,
 		registerControlHandlers,
+		registerSoulHandlers,
 		registerTeamHandlers,
 		registerArtifactHandlers,
 		registerEventsHandlers,

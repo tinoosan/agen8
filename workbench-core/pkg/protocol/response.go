@@ -25,3 +25,37 @@ type ItemListResult struct {
 	Items      []Item `json:"items"`
 	NextCursor string `json:"nextCursor,omitempty"`
 }
+
+type SoulDoc struct {
+	Content   string `json:"content"`
+	Version   int    `json:"version"`
+	Checksum  string `json:"checksum"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+	UpdatedBy string `json:"updatedBy,omitempty"`
+	Locked    bool   `json:"locked,omitempty"`
+}
+
+type SoulGetResult struct {
+	Soul SoulDoc `json:"soul"`
+}
+
+type SoulUpdateResult struct {
+	Soul SoulDoc `json:"soul"`
+}
+
+type SoulAuditEvent struct {
+	ID             string `json:"id"`
+	Timestamp      string `json:"timestamp,omitempty"`
+	ActorLayer     string `json:"actorLayer"`
+	Action         string `json:"action"`
+	Reason         string `json:"reason,omitempty"`
+	VersionBefore  int    `json:"versionBefore"`
+	VersionAfter   int    `json:"versionAfter"`
+	ChecksumBefore string `json:"checksumBefore,omitempty"`
+	ChecksumAfter  string `json:"checksumAfter,omitempty"`
+}
+
+type SoulHistoryResult struct {
+	Events     []SoulAuditEvent `json:"events"`
+	NextCursor string           `json:"nextCursor,omitempty"`
+}

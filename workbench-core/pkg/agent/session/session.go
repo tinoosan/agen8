@@ -47,6 +47,9 @@ type Config struct {
 	MemorySearchLimit int
 	Notifier          agent.Notifier
 
+	SoulContent string
+	SoulVersion int
+
 	PollInterval time.Duration
 	// WakeCh, when signaled, nudges the session loop to drain the inbox immediately.
 	// This is used by the app server to provide low-latency turn.create.
@@ -732,6 +735,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		}
 		aug := buildSystemPrompt(
 			runAgent.GetSystemPrompt(),
+			s.cfg.SoulContent,
 			*s.activeProfile,
 			s.activePromptText,
 			memSnips,

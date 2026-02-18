@@ -37,7 +37,7 @@ func TestBuildSystemPrompt_IncludesTeamBlock(t *testing.T) {
 		ID:          "team-profile",
 		Description: "desc",
 	}
-	out := buildSystemPrompt("base prompt", p, "profile prompt", nil, "", "team-1", "head-analyst", "head-analyst", []string{"head-analyst", "researcher"}, nil)
+	out := buildSystemPrompt("base prompt", "", p, "profile prompt", nil, "", "team-1", "head-analyst", "head-analyst", []string{"head-analyst", "researcher"}, nil)
 	if !strings.Contains(out, "<team>") {
 		t.Fatalf("expected team block in system prompt")
 	}
@@ -56,6 +56,7 @@ func TestBuildSystemPrompt_IncludesRoleDescriptions(t *testing.T) {
 	}
 	out := buildSystemPrompt(
 		"base prompt",
+		"",
 		p,
 		"profile prompt",
 		nil,
@@ -74,6 +75,16 @@ func TestBuildSystemPrompt_IncludesRoleDescriptions(t *testing.T) {
 	}
 	if !strings.Contains(out, "- researcher: collects evidence") {
 		t.Fatalf("expected researcher role description, got: %s", out)
+	}
+}
+
+func TestBuildSystemPrompt_IncludesSoulBeforeProfile(t *testing.T) {
+	p := profile.Profile{ID: "general", Description: "desc"}
+	out := buildSystemPrompt("base", "# SOUL\n\n## Constitutional Core\nx\n\n## Long-Horizon Intent\ny\n\n## Operating Constraints\nz\n\n## Change Policy\np", p, "profile prompt", nil, "", "", "", "", nil, nil)
+	soulIdx := strings.Index(out, "<soul>")
+	profileIdx := strings.Index(out, "<profile>")
+	if soulIdx < 0 || profileIdx < 0 || soulIdx > profileIdx {
+		t.Fatalf("expected soul block before profile, got: %s", out)
 	}
 }
 

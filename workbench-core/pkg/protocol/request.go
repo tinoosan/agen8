@@ -32,6 +32,9 @@ const (
 	MethodControlSetModel     = "control.setModel"
 	MethodControlSetReasoning = "control.setReasoning"
 	MethodControlSetProfile   = "control.setProfile"
+	MethodSoulGet             = "soul.get"
+	MethodSoulUpdate          = "soul.update"
+	MethodSoulHistory         = "soul.history"
 	MethodArtifactList        = "artifact.list"
 	MethodArtifactSearch      = "artifact.search"
 	MethodArtifactGet         = "artifact.get"
@@ -118,4 +121,19 @@ type ArtifactGetParams struct {
 // SessionDeleteParams are the params for session.delete.
 type SessionDeleteParams struct {
 	SessionID string `json:"sessionId"`
+}
+
+type SoulGetParams struct{}
+
+type SoulUpdateParams struct {
+	Content         string `json:"content"`
+	Reason          string `json:"reason"`
+	ExpectedVersion int    `json:"expectedVersion,omitempty"`
+	OverrideLock    bool   `json:"overrideLock,omitempty"`
+	AllowImmutable  bool   `json:"allowImmutable,omitempty"`
+}
+
+type SoulHistoryParams struct {
+	Limit  int    `json:"limit,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
 }

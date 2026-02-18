@@ -98,6 +98,9 @@ type Session struct {
 	// System marks daemon bootstrap/internal sessions that should be hidden from
 	// user-facing pickers/lists by default.
 	System bool `json:"system,omitempty"`
+
+	// SoulVersionSeen records the canonical SOUL version this session last observed.
+	SoulVersionSeen int `json:"soulVersionSeen,omitempty"`
 }
 
 type SessionReasoningConfig struct {

@@ -8,7 +8,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/profile"
 )
 
-func buildSystemPrompt(base string, p profile.Profile, profilePrompt string, memories []agent.MemorySnippet, previousOutcome string, teamID string, roleName string, coordinatorRole string, teamRoles []string, teamRoleDescriptions map[string]string) string {
+func buildSystemPrompt(base string, soul string, p profile.Profile, profilePrompt string, memories []agent.MemorySnippet, previousOutcome string, teamID string, roleName string, coordinatorRole string, teamRoles []string, teamRoleDescriptions map[string]string) string {
 	base = strings.TrimSpace(base)
 	var b strings.Builder
 	if base != "" {
@@ -23,6 +23,11 @@ func buildSystemPrompt(base string, p profile.Profile, profilePrompt string, mem
 	b.WriteString(time.Now().UTC().Format("2006-01-02 15:04:05 MST"))
 	b.WriteString("\n")
 	b.WriteString("</context>\n\n")
+	if strings.TrimSpace(soul) != "" {
+		b.WriteString("<soul>\n")
+		b.WriteString(strings.TrimSpace(soul))
+		b.WriteString("\n</soul>\n\n")
+	}
 	b.WriteString("<profile>\n")
 	b.WriteString("ID: ")
 	b.WriteString(strings.TrimSpace(p.ID))

@@ -180,3 +180,16 @@ func TestStandaloneSubagentIndexPaths(t *testing.T) {
 		t.Fatalf("GetStandaloneSubagentPlanDir = %q, want %q", got, want)
 	}
 }
+
+func TestSoulPaths(t *testing.T) {
+	dataDir := "/var/data/workbench"
+	if got, want := GetSoulDir(dataDir), filepath.Join(dataDir, "soul"); got != want {
+		t.Fatalf("GetSoulDir = %q, want %q", got, want)
+	}
+	if got, want := GetSoulPath(dataDir), filepath.Join(dataDir, "soul", "SOUL.md"); got != want {
+		t.Fatalf("GetSoulPath = %q, want %q", got, want)
+	}
+	if got, want := GetSoulAuditPath(dataDir), filepath.Join(dataDir, "soul", "audit.jsonl"); got != want {
+		t.Fatalf("GetSoulAuditPath = %q, want %q", got, want)
+	}
+}

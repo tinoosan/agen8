@@ -100,6 +100,9 @@ type RunRuntimeConfig struct {
 
 	// ApprovalsMode records whether the agent required approvals during this run.
 	ApprovalsMode string `json:"approvalsMode,omitempty"`
+
+	// SoulVersionSeen records the canonical SOUL version this run last observed.
+	SoulVersionSeen int `json:"soulVersionSeen,omitempty"`
 }
 
 // NewRun initializes a new Run instance with a unique ID and the given parameters.

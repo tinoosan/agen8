@@ -29,6 +29,7 @@ import (
 	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
 	eventsvc "github.com/tinoosan/workbench-core/pkg/services/events"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
+	pkgsoul "github.com/tinoosan/workbench-core/pkg/services/soul"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/store"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -67,6 +68,7 @@ type DaemonBuilder struct {
 	taskStore        state.TaskStore
 	taskManager      *pkgtask.Manager
 	taskService      pkgtask.TaskServiceForSupervisor
+	soulService      pkgsoul.Service
 
 	effectiveModel          string
 	loadedSession           types.Session
@@ -240,6 +242,16 @@ func (b *DaemonBuilder) buildStoresAndRuntime() error {
 	}
 	// Implements pkgsession.Store
 	b.sessionStore = ss
+	b.soulService = pkgsoul.NewService(b.cfg.DataDir)
+	doc, err := b.soulService.Get(context.Background())
+	if err != nil {
+		return fmt.Errorf("initialize soul service: %w", err)
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("WORKBENCH_SOUL_LOCKED")), "true") && !doc.Locked {
+		if _, err := b.soulService.SetLock(context.Background(), true, pkgsoul.ActorDaemon, "env WORKBENCH_SOUL_LOCKED=true"); err != nil {
+			return fmt.Errorf("apply soul lock: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -275,6 +287,7 @@ func (b *DaemonBuilder) buildAgentAndSupervisor() error {
 		WorkdirAbs:       b.workdirAbs,
 		BootstrapRunID:   "",
 		DefaultProfile:   b.prof,
+		SoulService:      b.soulService,
 	})
 	b.wakeCh = make(chan struct{}, 1)
 	b.sessionService = pkgsession.NewManager(b.cfg, b.sessionStore, b.supervisor)
@@ -487,6 +500,7 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			}
 			return affected, nil
 		},
+		SoulService: b.soulService,
 	}
 }
 

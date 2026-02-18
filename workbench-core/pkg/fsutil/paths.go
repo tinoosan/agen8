@@ -208,3 +208,15 @@ func GetProfilesDir(dataDir string) string {
 func GetMemoryDir(dataDir string) string {
 	return filepath.Join(dataDir, "memory")
 }
+
+func GetSoulDir(dataDir string) string {
+	return filepath.Join(dataDir, "soul")
+}
+
+func GetSoulPath(dataDir string) string {
+	return filepath.Join(GetSoulDir(dataDir), "SOUL.md")
+}
+
+func GetSoulAuditPath(dataDir string) string {
+	return filepath.Join(GetSoulDir(dataDir), "audit.jsonl")
+}

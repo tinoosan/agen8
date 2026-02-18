@@ -35,6 +35,7 @@ import (
 	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
 	eventsvc "github.com/tinoosan/workbench-core/pkg/services/events"
 	pkgsession "github.com/tinoosan/workbench-core/pkg/services/session"
+	pkgsoul "github.com/tinoosan/workbench-core/pkg/services/soul"
 	pkgtask "github.com/tinoosan/workbench-core/pkg/services/task"
 	"github.com/tinoosan/workbench-core/pkg/services/team"
 	"github.com/tinoosan/workbench-core/pkg/types"
@@ -354,6 +355,17 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	if strings.TrimSpace(resolved.ResultWebhookURL) != "" {
 		notifier = WebhookNotifier{URL: strings.TrimSpace(resolved.ResultWebhookURL)}
 	}
+	soulService := pkgsoul.NewService(cfg.DataDir)
+	soulDoc, soulErr := soulService.Get(ctx)
+	if soulErr == nil && strings.EqualFold(strings.TrimSpace(os.Getenv("WORKBENCH_SOUL_LOCKED")), "true") && !soulDoc.Locked {
+		_, _ = soulService.SetLock(ctx, true, pkgsoul.ActorDaemon, "env WORKBENCH_SOUL_LOCKED=true")
+	}
+	soulContent := ""
+	soulVersion := 0
+	if soulErr == nil {
+		soulContent = strings.TrimSpace(soulDoc.Content)
+		soulVersion = soulDoc.Version
+	}
 
 	runtimes := make([]teamRoleRuntime, 0, len(prof.Team.Roles))
 	setupComplete := false
@@ -393,6 +405,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		metaSession.Mode = "team"
 		metaSession.TeamID = teamID
 		metaSession.Profile = strings.TrimSpace(prof.ID)
+		metaSession.SoulVersionSeen = soulVersion
 		if strings.TrimSpace(roleModel) != "" {
 			metaSession.ActiveModel = strings.TrimSpace(roleModel)
 		}
@@ -405,6 +418,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		run.Runtime.Model = strings.TrimSpace(roleModel)
 		run.Runtime.TeamID = teamID
 		run.Runtime.Role = strings.TrimSpace(role.Name)
+		run.Runtime.SoulVersionSeen = soulVersion
 		_ = sessionService.SaveRun(ctx, run)
 		roleReasoningEffort := strings.TrimSpace(metaSession.ReasoningEffort)
 		roleReasoningSummary := strings.TrimSpace(metaSession.ReasoningSummary)
@@ -455,6 +469,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			MaxTraceBytes:         resolved.MaxTraceBytes,
 			PriceInPerMTokensUSD:  resolved.PriceInPerMTokensUSD,
 			PriceOutPerMTokensUSD: resolved.PriceOutPerMTokensUSD,
+			SoulVersionSeen:       soulVersion,
 			PersistRun: func(r types.Run) error {
 				return sessionService.SaveRun(context.Background(), r)
 			},
@@ -575,6 +590,11 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("register task_review for role %s: %w", role.Name, err)
 		}
+		if err := registry.Register(&hosttools.SoulUpdateTool{Updater: soulService, Actor: pkgsoul.ActorAgent}); err != nil {
+			orderedEmitter.Close()
+			_ = rt.Shutdown(context.Background())
+			return fmt.Errorf("register soul_update for role %s: %w", role.Name, err)
+		}
 		roleAllowedTools, removedTools := sanitizeAllowedToolsForRole(role.AllowedTools, teamID, role.Coordinator)
 		if len(removedTools) > 0 {
 			msg := "Removed disallowed tool(s) for non-coordinator role"
@@ -632,6 +652,8 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			Memory:               memoryProvider,
 			MemorySearchLimit:    3,
 			Notifier:             notifier,
+			SoulContent:          soulContent,
+			SoulVersion:          soulVersion,
 			PollInterval:         poll,
 			MaxReadBytes:         256 * 1024,
 			LeaseTTL:             2 * time.Minute,
@@ -743,6 +765,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			sessionService,
 			runtimes,
 			teamCtrl,
+			soulService,
 		)
 		srv := NewRPCServer(srvCfg)
 		go func() {
@@ -825,8 +848,10 @@ func buildTeamRPCServerConfig(
 	sessionService pkgsession.Service,
 	runtimes []teamRoleRuntime,
 	teamCtrl *team.Controller,
+	soulService pkgsoul.Service,
 ) RPCServerConfig {
 	base.Session = sessionService
+	base.SoulService = soulService
 
 	base.ControlSetModel = func(ctx context.Context, threadID, target, model string) ([]string, error) {
 		applied, err := teamCtrl.SetModel(ctx, threadID, target, model)
