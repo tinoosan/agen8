@@ -28,32 +28,21 @@ func (i newSessionWizardItem) FilterValue() string {
 	return strings.TrimSpace(i.mode + " " + i.title + " " + i.desc + " " + i.sessionID)
 }
 
+func renderNewSessionWizardLine(item list.Item, maxWidth int) string {
+	it, ok := item.(newSessionWizardItem)
+	if !ok {
+		return kit.TruncateRight(strings.TrimSpace(item.FilterValue()), maxWidth)
+	}
+	line := strings.TrimSpace(it.Title())
+	if desc := strings.TrimSpace(it.Description()); desc != "" {
+		line += " · " + desc
+	}
+	return kit.TruncateRight(line, maxWidth)
+}
+
 func (m *monitorModel) openNewSessionWizard() tea.Cmd {
 	m.helpModalOpen = false
-	if m.sessionPickerOpen {
-		m.closeSessionPicker()
-	}
-	if m.agentPickerOpen {
-		m.closeAgentPicker()
-	}
-	if m.profilePickerOpen {
-		m.closeProfilePicker()
-	}
-	if m.teamPickerOpen {
-		m.closeTeamPicker()
-	}
-	if m.modelPickerOpen {
-		m.closeModelPicker()
-	}
-	if m.reasoningEffortPickerOpen {
-		m.closeReasoningEffortPicker()
-	}
-	if m.reasoningSummaryPickerOpen {
-		m.closeReasoningSummaryPicker()
-	}
-	if m.filePickerOpen {
-		m.closeFilePicker()
-	}
+	m.closeAllPickers()
 
 	var items []list.Item
 	if m.session != nil {
@@ -67,18 +56,35 @@ func (m *monitorModel) openNewSessionWizard() tea.Cmd {
 				if title == "" {
 					title = "Untitled Session"
 				}
-				lastActive := "unknown"
+
+				// Build rich description with metadata.
+				var parts []string
+
+				mode := strings.TrimSpace(s.Mode)
+				if mode != "" {
+					parts = append(parts, mode)
+				}
+
+				prof := strings.TrimSpace(s.Profile)
+				if prof != "" {
+					parts = append(parts, prof)
+				}
+
+				model := strings.TrimSpace(s.ActiveModel)
+				if model != "" {
+					parts = append(parts, model)
+				}
+
 				if s.UpdatedAt != nil && !s.UpdatedAt.IsZero() {
-					lastActive = timeutil.Since(timeutil.OrNow(s.UpdatedAt)).Round(time.Second).String()
+					parts = append(parts, timeutil.Since(timeutil.OrNow(s.UpdatedAt)).Round(time.Second).String()+" ago")
 				}
-				activeFor := "unknown"
-				if s.CreatedAt != nil && !s.CreatedAt.IsZero() {
-					activeFor = timeutil.Since(timeutil.OrNow(s.CreatedAt)).Round(time.Second).String()
-				}
+
+				desc := strings.Join(parts, " · ")
+
 				items = append(items, newSessionWizardItem{
 					mode:      "resume",
 					title:     "Resume: " + truncateText(title, 40),
-					desc:      "Last active: " + lastActive + " · Active for: " + activeFor,
+					desc:      desc,
 					sessionID: s.SessionID,
 				})
 			}
@@ -90,7 +96,7 @@ func (m *monitorModel) openNewSessionWizard() tea.Cmd {
 		newSessionWizardItem{mode: "team", title: "New Team Session", desc: "multi-role team; profile is immutable"},
 	)
 
-	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	l := list.New(items, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderNewSessionWizardLine), 0, 0)
 	l.Title = "New Session Wizard"
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
@@ -99,17 +105,58 @@ func (m *monitorModel) openNewSessionWizard() tea.Cmd {
 	l.SetShowFilter(false)
 	l.Styles.Title = lipgloss.NewStyle().Foreground(lipgloss.Color("#707070")).Bold(true)
 	l.Select(0)
+
 	m.newSessionWizardList = l
 	m.newSessionWizardOpen = true
+	m.newSessionWizardStep = 0
+	m.newSessionWizardMode = ""
+	m.newSessionWizardProfileList = list.Model{}
 	return nil
 }
 
 func (m *monitorModel) closeNewSessionWizard() {
 	m.newSessionWizardOpen = false
+	m.newSessionWizardStep = 0
 	m.newSessionWizardList = list.Model{}
+	m.newSessionWizardMode = ""
+	m.newSessionWizardProfileList = list.Model{}
+}
+
+func (m *monitorModel) initWizardProfileStep() {
+	standaloneOnly := strings.EqualFold(m.newSessionWizardMode, "standalone")
+	teamOnly := strings.EqualFold(m.newSessionWizardMode, "team")
+	items, _ := m.monitorProfilePickerItems(teamOnly, standaloneOnly)
+
+	l := list.New(items, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderMonitorProfilePickerLine), 0, 0)
+	title := "Select Profile"
+	if teamOnly {
+		title = "Select Team Profile"
+	}
+	l.Title = title
+	l.SetShowHelp(false)
+	l.SetShowStatusBar(false)
+	l.SetShowPagination(true)
+	l.SetFilteringEnabled(true)
+	l.SetShowFilter(true)
+	l.SetFilterText("")
+	l.SetFilterState(list.Unfiltered)
+	l.Styles.Title = lipgloss.NewStyle().Foreground(lipgloss.Color("#707070")).Bold(true)
+	if len(items) > 0 {
+		l.Select(0)
+	}
+
+	m.newSessionWizardProfileList = l
+	m.newSessionWizardStep = 1
 }
 
 func (m *monitorModel) updateNewSessionWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.newSessionWizardStep == 1 {
+		return m.updateNewSessionWizardProfileStep(msg)
+	}
+	return m.updateNewSessionWizardModeStep(msg)
+}
+
+func (m *monitorModel) updateNewSessionWizardModeStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.closeNewSessionWizard()
@@ -119,16 +166,13 @@ func (m *monitorModel) updateNewSessionWizard(msg tea.KeyMsg) (tea.Model, tea.Cm
 		if !ok {
 			return m, nil
 		}
-		m.closeNewSessionWizard()
 
 		if strings.EqualFold(strings.TrimSpace(item.mode), "resume") {
 			targetSessionID := strings.TrimSpace(item.sessionID)
 			if targetSessionID == "" {
 				return m, nil
 			}
-			// Use the session picker logic to find the best run to resume
-			// We can trigger the picker logic manually or replicate it.
-			// Replicating for now to keep wizard self-contained.
+			m.closeNewSessionWizard()
 			return m, func() tea.Msg {
 				sess, err := m.session.LoadSession(m.ctx, targetSessionID)
 				if err != nil {
@@ -138,7 +182,6 @@ func (m *monitorModel) updateNewSessionWizard(msg tea.KeyMsg) (tea.Model, tea.Cm
 					return monitorSwitchTeamMsg{TeamID: strings.TrimSpace(sess.TeamID)}
 				}
 
-				// Find best run
 				var agents protocol.AgentListResult
 				if err := m.rpcRoundTrip(protocol.MethodAgentList, protocol.AgentListParams{
 					ThreadID:  protocol.ThreadID(targetSessionID),
@@ -180,10 +223,10 @@ func (m *monitorModel) updateNewSessionWizard(msg tea.KeyMsg) (tea.Model, tea.Cm
 			}
 		}
 
-		if strings.EqualFold(strings.TrimSpace(item.mode), "team") {
-			return m, m.openProfilePickerFor("new-team", true)
-		}
-		return m, m.openProfilePickerFor("new-standalone", false)
+		// Standalone or Team → transition to profile step.
+		m.newSessionWizardMode = strings.ToLower(strings.TrimSpace(item.mode))
+		m.initWizardProfileStep()
+		return m, nil
 	default:
 		var cmd tea.Cmd
 		m.newSessionWizardList, cmd = m.newSessionWizardList.Update(msg)
@@ -191,38 +234,87 @@ func (m *monitorModel) updateNewSessionWizard(msg tea.KeyMsg) (tea.Model, tea.Cm
 	}
 }
 
-func (m *monitorModel) renderNewSessionWizard(base string) string {
-	maxModalW := max(1, m.width-8)
-	modalWidth := min(84, maxModalW)
-	minModalW := min(56, maxModalW)
-	if modalWidth < minModalW {
-		modalWidth = minModalW
+func (m *monitorModel) updateNewSessionWizardProfileStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		m.newSessionWizardProfileList.CursorUp()
+		return m, nil
+	case tea.KeyDown:
+		m.newSessionWizardProfileList.CursorDown()
+		return m, nil
+	case tea.KeyEsc:
+		// Back to step 0.
+		m.newSessionWizardStep = 0
+		m.newSessionWizardMode = ""
+		m.newSessionWizardProfileList = list.Model{}
+		return m, nil
+	case tea.KeyEnter:
+		return m, m.selectProfileFromWizard()
 	}
-	maxModalH := max(1, m.height-8)
-	modalHeight := min(18, maxModalH)
-	minModalH := min(10, maxModalH)
-	if modalHeight < minModalH {
-		modalHeight = minModalH
-	}
-	listHeight := modalHeight - 4
-	if listHeight < 4 {
-		listHeight = 4
-	}
-	m.newSessionWizardList.SetWidth(modalWidth - 4)
-	m.newSessionWizardList.SetHeight(listHeight)
 
-	content := m.newSessionWizardList.View() + "\n" + kit.StyleDim.Render("Enter: next • Esc: close")
-	opts := kit.ModalOptions{
-		Content:      content,
-		ScreenWidth:  m.width,
-		ScreenHeight: m.height,
-		Width:        modalWidth,
-		Height:       modalHeight,
-		Padding:      [2]int{1, 2},
-		BorderStyle:  lipgloss.RoundedBorder(),
-		BorderColor:  lipgloss.Color("#6bbcff"),
-		Foreground:   lipgloss.Color("#eaeaea"),
+	if msg.Type == tea.KeyRunes || msg.Type == tea.KeyBackspace || msg.Type == tea.KeyDelete {
+		if m.newSessionWizardProfileList.FilteringEnabled() {
+			m.newSessionWizardProfileList.SetFilterState(list.Filtering)
+		}
 	}
+
+	var cmd tea.Cmd
+	m.newSessionWizardProfileList, cmd = m.newSessionWizardProfileList.Update(msg)
+	if m.newSessionWizardProfileList.FilteringEnabled() && m.newSessionWizardProfileList.FilterState() == list.Filtering {
+		m.newSessionWizardProfileList.SetFilterText(m.newSessionWizardProfileList.FilterInput.Value())
+	}
+	return m, cmd
+}
+
+func (m *monitorModel) selectProfileFromWizard() tea.Cmd {
+	if len(m.newSessionWizardProfileList.Items()) == 0 {
+		return nil
+	}
+	selectedItem := m.newSessionWizardProfileList.SelectedItem()
+	if selectedItem == nil {
+		return nil
+	}
+	item, ok := selectedItem.(monitorProfilePickerItem)
+	if !ok {
+		return nil
+	}
+
+	ref := strings.TrimSpace(item.ref)
+	id := strings.TrimSpace(item.id)
+	if ref == "" {
+		return nil
+	}
+
+	if id != "" {
+		m.profile = id
+	} else {
+		m.profile = ref
+	}
+
+	mode := m.newSessionWizardMode
+	m.closeNewSessionWizard()
+
+	if strings.EqualFold(mode, "team") {
+		return m.startNewTeamSession(ref, "")
+	}
+	return m.startNewStandaloneSession(ref, "")
+}
+
+func (m *monitorModel) renderNewSessionWizard(base string) string {
+	dims := kit.ComputeModalDims(m.width, m.height, 84, 18, 56, 10, 8, 4)
+
+	var content string
+	if m.newSessionWizardStep == 1 {
+		m.newSessionWizardProfileList.SetWidth(dims.ModalWidth - 4)
+		m.newSessionWizardProfileList.SetHeight(dims.ListHeight)
+		content = m.newSessionWizardProfileList.View() + "\n" + kit.StyleDim.Render("Step 2 of 2 · Enter: select · Esc: back")
+	} else {
+		m.newSessionWizardList.SetWidth(dims.ModalWidth - 4)
+		m.newSessionWizardList.SetHeight(dims.ListHeight)
+		content = m.newSessionWizardList.View() + "\n" + kit.StyleDim.Render("Step 1 of 2 · Enter: select · Esc: close")
+	}
+
+	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
 	_ = base
 	return kit.RenderOverlay(opts)
 }

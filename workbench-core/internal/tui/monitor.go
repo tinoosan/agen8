@@ -308,9 +308,12 @@ type monitorModel struct {
 	teamPickerOpen bool
 	teamPickerList list.Model
 
-	// New-session wizard
-	newSessionWizardOpen bool
-	newSessionWizardList list.Model
+	// New-session wizard (multi-step)
+	newSessionWizardOpen        bool
+	newSessionWizardStep        int        // 0 = choose mode, 1 = choose profile
+	newSessionWizardList        list.Model // step 0 list
+	newSessionWizardMode        string     // "standalone" or "team" (set after step 0)
+	newSessionWizardProfileList list.Model // step 1 list
 
 	// Command palette (inline autocomplete above composer)
 	commandPaletteOpen     bool

@@ -25,4 +25,7 @@ func (m *monitorModel) closeAllPickers() {
 	if m.filePickerOpen {
 		m.closeFilePicker()
 	}
+	if m.newSessionWizardOpen {
+		m.closeNewSessionWizard()
+	}
 }
