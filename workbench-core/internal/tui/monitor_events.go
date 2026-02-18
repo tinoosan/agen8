@@ -493,6 +493,7 @@ func formatTaskEventLines(ev types.EventRecord) []string {
 		return lines
 	case "callback.batch.progress":
 		parent := shortID(strings.TrimSpace(ev.Data["parentTaskId"]))
+		wave := shortID(strings.TrimSpace(ev.Data["batchWaveId"]))
 		done := strings.TrimSpace(ev.Data["batchCompletedCount"])
 		total := strings.TrimSpace(ev.Data["batchExpectedCount"])
 		if done == "" {
@@ -503,12 +504,16 @@ func formatTaskEventLines(ev types.EventRecord) []string {
 		}
 		reviewer := strings.TrimSpace(ev.Data["batchReviewer"])
 		line := fmt.Sprintf("[%s] callback.batch.progress: %s %s/%s staged", ts, parent, done, total)
+		if wave != "" {
+			line += " wave=" + wave
+		}
 		if reviewer != "" {
 			line += " reviewer=" + reviewer
 		}
 		return []string{line}
 	case "callback.batch.queued":
 		parent := shortID(strings.TrimSpace(ev.Data["parentTaskId"]))
+		wave := shortID(strings.TrimSpace(ev.Data["batchWaveId"]))
 		items := strings.TrimSpace(ev.Data["items"])
 		if items == "" {
 			items = "0"
@@ -519,6 +524,9 @@ func formatTaskEventLines(ev types.EventRecord) []string {
 		}
 		partial := strings.TrimSpace(ev.Data["batchPartial"])
 		line := fmt.Sprintf("[%s] callback.batch.queued: %s items=%s reason=%s", ts, parent, items, reason)
+		if wave != "" {
+			line += " wave=" + wave
+		}
 		if strings.EqualFold(partial, "true") {
 			line += " partial=true"
 		}

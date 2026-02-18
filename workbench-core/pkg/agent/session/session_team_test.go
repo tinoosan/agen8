@@ -425,3 +425,119 @@ func TestMaybeCreateCoordinatorCallback_TeamBatchFlushesWhenComplete(t *testing.
 		t.Fatalf("expected one synthetic team batch callback")
 	}
 }
+
+func TestMaybeCreateCoordinatorCallback_SyntheticBatchDoesNotRequeueCallback(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:       store,
+		TeamID:          "team-1",
+		RoleName:        "ceo",
+		CoordinatorRole: "ceo",
+		IsCoordinator:   true,
+		TeamRoles:       []string{"ceo", "backend-engineer"},
+		SessionID:       "team-team-1",
+		RunID:           "run-ceo",
+	}}
+	task := types.Task{
+		TaskID:       "callback-batch-parent-1",
+		TeamID:       "team-1",
+		AssignedRole: "ceo",
+		CreatedBy:    "backend-engineer",
+		Goal:         "batch review",
+		Metadata: map[string]any{
+			"source":            "team.batch.callback",
+			"batchMode":         true,
+			"batchParentTaskId": "task-parent-1",
+			"batchWaveId":       "wave-parent-1",
+		},
+	}
+	s.maybeCreateCoordinatorCallback(context.Background(), task, types.TaskResult{
+		TaskID:  task.TaskID,
+		Status:  types.TaskStatusSucceeded,
+		Summary: "reviewed",
+	})
+	_, err = store.GetTask(context.Background(), "callback-"+task.TaskID)
+	if !errors.Is(err, state.ErrTaskNotFound) {
+		t.Fatalf("expected no callback recursion, got err=%v", err)
+	}
+}
+
+func TestListBatchExpectedTasks_ExcludesSyntheticAndMatchesWave(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:       store,
+		TeamID:          "team-1",
+		RoleName:        "backend-engineer",
+		CoordinatorRole: "ceo",
+		SessionID:       "team-team-1",
+		RunID:           "run-backend",
+	}}
+	now := time.Now().UTC()
+	mk := func(task types.Task) {
+		t.Helper()
+		if err := store.CreateTask(context.Background(), task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", task.TaskID, err)
+		}
+	}
+	mk(types.Task{
+		TaskID: "task-work-1", SessionID: "team-team-1", RunID: "run-backend", TeamID: "team-1", Goal: "work", Status: types.TaskStatusPending, CreatedAt: &now,
+		Metadata: map[string]any{"source": "task_create", "batchMode": true, "batchParentTaskId": "task-parent-1", "batchWaveId": "wave-a"},
+	})
+	mk(types.Task{
+		TaskID: "task-work-2", SessionID: "team-team-1", RunID: "run-backend", TeamID: "team-1", Goal: "work", Status: types.TaskStatusPending, CreatedAt: &now,
+		Metadata: map[string]any{"source": "task_create", "batchMode": true, "batchParentTaskId": "task-parent-1", "batchWaveId": "wave-a"},
+	})
+	mk(types.Task{
+		TaskID: "task-synthetic", SessionID: "team-team-1", RunID: "team-team-1-callback", TeamID: "team-1", Goal: "batch", Status: types.TaskStatusPending, CreatedAt: &now,
+		Metadata: map[string]any{"source": "team.batch.callback", "batchMode": true, "batchSynthetic": true, "batchParentTaskId": "task-parent-1", "batchWaveId": "wave-a"},
+	})
+	mk(types.Task{
+		TaskID: "task-other-wave", SessionID: "team-team-1", RunID: "run-backend", TeamID: "team-1", Goal: "work", Status: types.TaskStatusPending, CreatedAt: &now,
+		Metadata: map[string]any{"source": "task_create", "batchMode": true, "batchParentTaskId": "task-parent-1", "batchWaveId": "wave-b"},
+	})
+
+	got := s.listBatchExpectedTasks(context.Background(), batchGroupScope{
+		mode:         "team",
+		parentTaskID: "task-parent-1",
+		waveID:       "wave-a",
+		reviewerID:   "ceo",
+	})
+	if len(got) != 2 {
+		ids := make([]string, 0, len(got))
+		for _, task := range got {
+			ids = append(ids, task.TaskID)
+		}
+		t.Fatalf("expected 2 expected tasks in wave-a, got %d (%v)", len(got), ids)
+	}
+}
+
+func TestSynthesizeBatchSummary_FillsEmptySummary(t *testing.T) {
+	task := types.Task{
+		Metadata: map[string]any{
+			"source": "team.batch.callback",
+			"batchItemDecisions": map[string]any{
+				"callback-task-1": "approve",
+				"callback-task-2": "retry",
+			},
+		},
+		Inputs: map[string]any{
+			"items": []any{
+				map[string]any{"callbackTaskId": "callback-task-1", "sourceRole": "designer", "decision": "approve"},
+				map[string]any{"callbackTaskId": "callback-task-2", "sourceRole": "finance-ops", "decision": "retry"},
+			},
+		},
+	}
+	got := synthesizeBatchSummary(task, types.TaskResult{Summary: ""})
+	if strings.TrimSpace(got) == "" {
+		t.Fatalf("expected synthesized summary")
+	}
+	if !strings.Contains(got, "approved=1") || !strings.Contains(got, "retry=1") {
+		t.Fatalf("unexpected synthesized summary: %q", got)
+	}
+}

@@ -1655,6 +1655,37 @@ func TestFormatTaskEventLines_UsesSummaryMarker(t *testing.T) {
 	}
 }
 
+func TestFormatTaskEventLines_BatchEventsIncludeWaveID(t *testing.T) {
+	now := time.Now()
+	progress := formatTaskEventLines(types.EventRecord{
+		Type:      "callback.batch.progress",
+		Timestamp: now,
+		Data: map[string]string{
+			"parentTaskId":        "task-parent-1",
+			"batchWaveId":         "wave-parent-1",
+			"batchCompletedCount": "3",
+			"batchExpectedCount":  "5",
+		},
+	})
+	if len(progress) == 0 || !strings.Contains(progress[0], "wave=") {
+		t.Fatalf("expected wave marker in progress line: %#v", progress)
+	}
+
+	queued := formatTaskEventLines(types.EventRecord{
+		Type:      "callback.batch.queued",
+		Timestamp: now,
+		Data: map[string]string{
+			"parentTaskId":     "task-parent-1",
+			"batchWaveId":      "wave-parent-1",
+			"items":            "5",
+			"batchFlushReason": "all_complete",
+		},
+	})
+	if len(queued) == 0 || !strings.Contains(queued[0], "wave=") {
+		t.Fatalf("expected wave marker in queued line: %#v", queued)
+	}
+}
+
 func TestRefreshAgentOutputViewport_RendersSummaryMarkdownWithoutSummaryLabel(t *testing.T) {
 	m := &monitorModel{
 		renderer: newContentRenderer(),

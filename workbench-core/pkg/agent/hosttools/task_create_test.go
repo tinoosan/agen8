@@ -278,7 +278,7 @@ func TestTaskCreateTool_TagsBatchMetadataFromContext(t *testing.T) {
 		"assignedRole": "researcher",
 	}
 	raw, _ := json.Marshal(args)
-	ctx := WithParentTaskID(context.Background(), "task-parent-1")
+	ctx := WithBatchWaveState(WithParentTaskID(context.Background(), "task-parent-1"))
 	_, err := tool.Execute(ctx, raw)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -289,6 +289,42 @@ func TestTaskCreateTool_TagsBatchMetadataFromContext(t *testing.T) {
 	}
 	if strings.TrimSpace(task.Metadata["batchParentTaskId"].(string)) != "task-parent-1" {
 		t.Fatalf("unexpected batchParentTaskId: %v", task.Metadata["batchParentTaskId"])
+	}
+	if strings.TrimSpace(task.Metadata["batchWaveId"].(string)) == "" {
+		t.Fatalf("expected batchWaveId to be set")
+	}
+}
+
+func TestTaskCreateTool_ReusesBatchWaveIDWithinContext(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-3",
+		RunID:           "run-3",
+		TeamID:          "team-1",
+		RoleName:        "head-analyst",
+		IsCoordinator:   true,
+		CoordinatorRole: "head-analyst",
+		ValidRoles:      []string{"head-analyst", "researcher"},
+	}
+	ctx := WithBatchWaveState(WithParentTaskID(context.Background(), "task-parent-1"))
+	for _, id := range []string{"task-batch-a", "task-batch-b"} {
+		raw, _ := json.Marshal(map[string]any{
+			"goal":         "research task",
+			"taskId":       id,
+			"assignedRole": "researcher",
+		})
+		if _, err := tool.Execute(ctx, raw); err != nil {
+			t.Fatalf("Execute(%s): %v", id, err)
+		}
+	}
+	waveA := strings.TrimSpace(store.tasks["task-batch-a"].Metadata["batchWaveId"].(string))
+	waveB := strings.TrimSpace(store.tasks["task-batch-b"].Metadata["batchWaveId"].(string))
+	if waveA == "" || waveB == "" {
+		t.Fatalf("expected wave IDs, got a=%q b=%q", waveA, waveB)
+	}
+	if waveA != waveB {
+		t.Fatalf("expected stable wave ID in shared context, got %q vs %q", waveA, waveB)
 	}
 }
 

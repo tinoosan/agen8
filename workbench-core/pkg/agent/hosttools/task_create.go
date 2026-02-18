@@ -215,6 +215,7 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		if parentTaskID != "" && assignedRole != roleName {
 			task.Metadata["batchMode"] = true
 			task.Metadata["batchParentTaskId"] = parentTaskID
+			task.Metadata["batchWaveId"] = EnsureBatchWaveIDFromContext(ctx, parentTaskID, strings.TrimSpace(t.RunID))
 		}
 	}
 
@@ -241,6 +242,7 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		if parentTaskID != "" {
 			task.Metadata["batchMode"] = true
 			task.Metadata["batchParentTaskId"] = parentTaskID
+			task.Metadata["batchWaveId"] = EnsureBatchWaveIDFromContext(ctx, parentTaskID, strings.TrimSpace(t.RunID))
 		}
 	}
 
@@ -257,6 +259,7 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		if metadataBool(task.Metadata, "batchMode") {
 			inputForEvent["batchMode"] = "true"
 			inputForEvent["batchParentTaskId"] = metadataString(task.Metadata, "batchParentTaskId")
+			inputForEvent["batchWaveId"] = metadataString(task.Metadata, "batchWaveId")
 		}
 		if task.AssignedToType == "agent" {
 			inputForEvent["childRunId"] = task.AssignedTo
@@ -268,6 +271,7 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	if metadataBool(task.Metadata, "batchMode") {
 		inputForEvent["batchMode"] = "true"
 		inputForEvent["batchParentTaskId"] = metadataString(task.Metadata, "batchParentTaskId")
+		inputForEvent["batchWaveId"] = metadataString(task.Metadata, "batchWaveId")
 	}
 	inputJSON, _ := json.Marshal(inputForEvent)
 	return types.HostOpRequest{
