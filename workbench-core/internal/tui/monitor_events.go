@@ -42,6 +42,9 @@ func (m *monitorModel) listenErr() tea.Cmd {
 }
 
 func (m *monitorModel) observeEvent(ev types.EventRecord) {
+	if !m.markEventSeen(ev) {
+		return
+	}
 	if ev.Type == "control.success" || ev.Type == "control.check" || ev.Type == "control.error" {
 		if strings.EqualFold(strings.TrimSpace(ev.Data["command"]), "set_reasoning") {
 			if v := strings.TrimSpace(ev.Data["effort"]); v != "" {
@@ -134,6 +137,45 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 	case "daemon.error", "daemon.runner.error":
 		m.setStatusExpiring("⚠ Daemon Error", 10*time.Second)
 	}
+}
+
+func (m *monitorModel) markEventSeen(ev types.EventRecord) bool {
+	if m == nil {
+		return true
+	}
+	if m.seenEventIDs == nil {
+		m.seenEventIDs = map[string]time.Time{}
+	}
+	key := strings.TrimSpace(ev.EventID)
+	if key == "" {
+		key = strings.TrimSpace(ev.RunID) + "|" + ev.Timestamp.UTC().Format(time.RFC3339Nano) + "|" + strings.TrimSpace(ev.Type) + "|" + strings.TrimSpace(ev.Message)
+		if role := strings.TrimSpace(ev.Data["role"]); role != "" {
+			key += "|" + role
+		}
+	}
+	if key == "" {
+		return true
+	}
+	if _, ok := m.seenEventIDs[key]; ok {
+		return false
+	}
+	now := time.Now().UTC()
+	m.seenEventIDs[key] = now
+
+	// Prune occasionally to keep memory bounded for long-lived sessions.
+	if len(m.seenEventIDs) > 10000 {
+		cutoff := now.Add(-30 * time.Minute)
+		for id, seenAt := range m.seenEventIDs {
+			if seenAt.Before(cutoff) {
+				delete(m.seenEventIDs, id)
+			}
+		}
+		if len(m.seenEventIDs) > 10000 {
+			// Fallback: hard reset when still too large.
+			m.seenEventIDs = map[string]time.Time{key: now}
+		}
+	}
+	return true
 }
 
 // updateInboxTaskStatus updates both m.inbox[taskID] and the matching entry in
@@ -261,7 +303,7 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 		item.Content = formatEventLine(ev)
 		m.appendAgentOutputItem(item)
 
-	case "task.queued", "webhook.task.queued", "task.start", "task.delegated", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped":
+	case "task.queued", "webhook.task.queued", "task.start", "task.delegated", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped", "callback.batch.progress", "callback.batch.queued", "callback.batch.item.reviewed":
 		item.Type = "info"
 		for _, line := range formatTaskEventLines(ev) {
 			it := item
@@ -449,6 +491,45 @@ func formatTaskEventLines(ev types.EventRecord) []string {
 			lines = append(lines, "  poison: "+p)
 		}
 		return lines
+	case "callback.batch.progress":
+		parent := shortID(strings.TrimSpace(ev.Data["parentTaskId"]))
+		done := strings.TrimSpace(ev.Data["batchCompletedCount"])
+		total := strings.TrimSpace(ev.Data["batchExpectedCount"])
+		if done == "" {
+			done = "0"
+		}
+		if total == "" {
+			total = "?"
+		}
+		reviewer := strings.TrimSpace(ev.Data["batchReviewer"])
+		line := fmt.Sprintf("[%s] callback.batch.progress: %s %s/%s staged", ts, parent, done, total)
+		if reviewer != "" {
+			line += " reviewer=" + reviewer
+		}
+		return []string{line}
+	case "callback.batch.queued":
+		parent := shortID(strings.TrimSpace(ev.Data["parentTaskId"]))
+		items := strings.TrimSpace(ev.Data["items"])
+		if items == "" {
+			items = "0"
+		}
+		reason := strings.TrimSpace(ev.Data["batchFlushReason"])
+		if reason == "" {
+			reason = "unknown"
+		}
+		partial := strings.TrimSpace(ev.Data["batchPartial"])
+		line := fmt.Sprintf("[%s] callback.batch.queued: %s items=%s reason=%s", ts, parent, items, reason)
+		if strings.EqualFold(partial, "true") {
+			line += " partial=true"
+		}
+		return []string{line}
+	case "callback.batch.item.reviewed":
+		parent := shortID(strings.TrimSpace(ev.Data["parentTaskId"]))
+		approved := strings.TrimSpace(ev.Data["approved"])
+		retried := strings.TrimSpace(ev.Data["retry"])
+		escalated := strings.TrimSpace(ev.Data["escalate"])
+		line := fmt.Sprintf("[%s] callback.batch.item.reviewed: %s approved=%s retry=%s escalate=%s", ts, parent, fallback(approved, "0"), fallback(retried, "0"), fallback(escalated, "0"))
+		return []string{line}
 	default:
 		return []string{formatEventLine(ev)}
 	}

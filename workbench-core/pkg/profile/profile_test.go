@@ -164,3 +164,27 @@ team:
 		t.Fatalf("expected duplicate role validation error")
 	}
 }
+
+func TestLoad_NormalizesAllowedTools(t *testing.T) {
+	dir := t.TempDir()
+	raw := `
+id: tools-test
+description: Tools profile
+prompts:
+  system_prompt: hi
+allowed_tools: [fs_read, " fs_read ", shell_exec]
+`
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := len(p.AllowedTools), 2; got != want {
+		t.Fatalf("allowed_tools len=%d want=%d (%v)", got, want, p.AllowedTools)
+	}
+	if p.AllowedTools[0] != "fs_read" || p.AllowedTools[1] != "shell_exec" {
+		t.Fatalf("unexpected allowed_tools order/content: %v", p.AllowedTools)
+	}
+}

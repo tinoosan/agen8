@@ -18,6 +18,7 @@ import (
 
 const (
 	envDisableDefaultsSeed    = "WORKBENCH_NO_DEFAULTS_SEED"
+	envSkillsSeedConflict     = "WORKBENCH_SKILLS_CONFLICT"
 	skillsMigrationMarkerFile = ".workbench-skills-migrated-v1"
 )
 
@@ -260,6 +261,7 @@ func newSeedConflictResolver(interactive bool, in io.Reader, out io.Writer) *see
 	r := &seedConflictResolver{
 		interactive: interactive,
 		writer:      out,
+		strategy:    conflictStrategyFromEnv(),
 	}
 	if in == nil {
 		in = os.Stdin
@@ -269,6 +271,19 @@ func newSeedConflictResolver(interactive bool, in io.Reader, out io.Writer) *see
 	}
 	r.reader = bufio.NewReader(in)
 	return r
+}
+
+func conflictStrategyFromEnv() seedConflictStrategy {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envSkillsSeedConflict))) {
+	case "overwrite", "o":
+		return seedConflictOverwrite
+	case "keep", "k", "skip":
+		return seedConflictKeep
+	case "abort", "a":
+		return seedConflictAbort
+	default:
+		return seedConflictUnset
+	}
 }
 
 func (r *seedConflictResolver) resolveConflict(path string) (bool, error) {

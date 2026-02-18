@@ -62,6 +62,10 @@ func (t *TaskReviewTool) Definition() llmtypes.Tool {
 						"type":        "string",
 						"description": "Reason for retry or escalation. Required for retry and escalate decisions.",
 					},
+					"batchItemTaskId": map[string]any{
+						"type":        "string",
+						"description": "Optional child callback task ID when reviewing a synthetic batch callback.",
+					},
 					"escalationData": map[string]any{
 						"type":        "object",
 						"description": "Structured escalation payload (for escalate decision).",
@@ -87,10 +91,11 @@ func (t *TaskReviewTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	}
 
 	var payload struct {
-		TaskID         string          `json:"taskId"`
-		Decision       string          `json:"decision"`
-		Feedback       string          `json:"feedback"`
-		EscalationData json.RawMessage `json:"escalationData"`
+		TaskID          string          `json:"taskId"`
+		Decision        string          `json:"decision"`
+		Feedback        string          `json:"feedback"`
+		BatchItemTaskID string          `json:"batchItemTaskId"`
+		EscalationData  json.RawMessage `json:"escalationData"`
 	}
 	if err := json.Unmarshal(args, &payload); err != nil {
 		return types.HostOpRequest{}, fmt.Errorf("task_review: %w", err)
@@ -134,20 +139,114 @@ func (t *TaskReviewTool) Execute(ctx context.Context, args json.RawMessage) (typ
 			return types.HostOpRequest{}, fmt.Errorf("task_review: task %s is a delegated task but callback %s is not a subagent callback (source=%q). Pass the callback task ID (callback-<taskId>) or the delegated task ID.", taskID, callbackTaskID, cbSource)
 		}
 		task = callbackTask
-	} else if source != "subagent.callback" && source != "team.callback" {
+	} else if source != "subagent.callback" && source != "team.callback" && source != "subagent.batch.callback" && source != "team.batch.callback" {
 		return types.HostOpRequest{}, fmt.Errorf("task_review: task %s is not a reviewable callback (source=%q). Pass the callback task ID (e.g. callback-<taskId>) or the delegated task ID for the sub-agent work you want to review.", taskID, source)
 	}
 
+	source = strings.TrimSpace(source)
+	if source == "subagent.batch.callback" || source == "team.batch.callback" {
+		return t.handleBatchDecision(ctx, task, strings.TrimSpace(payload.BatchItemTaskID), decision, feedback, payload.EscalationData)
+	}
+	return t.handleDecision(ctx, task, decision, feedback, payload.EscalationData)
+}
+
+func (t *TaskReviewTool) handleDecision(ctx context.Context, task types.Task, decision, feedback string, rawEscData json.RawMessage) (types.HostOpRequest, error) {
 	switch decision {
 	case "approve":
 		return t.handleApprove(ctx, task)
 	case "retry":
 		return t.handleRetry(ctx, task, feedback)
 	case "escalate":
-		return t.handleEscalate(ctx, task, feedback, payload.EscalationData)
+		return t.handleEscalate(ctx, task, feedback, rawEscData)
 	default:
 		return types.HostOpRequest{}, fmt.Errorf("task_review: unknown decision %q", decision)
 	}
+}
+
+func (t *TaskReviewTool) handleBatchDecision(ctx context.Context, batchTask types.Task, batchItemTaskID, decision, feedback string, rawEscData json.RawMessage) (types.HostOpRequest, error) {
+	if batchItemTaskID == "" {
+		return types.HostOpRequest{}, fmt.Errorf("task_review: batchItemTaskId is required when reviewing a batch callback")
+	}
+	if batchTask.Inputs == nil {
+		return types.HostOpRequest{}, fmt.Errorf("task_review: batch callback %s has no items", batchTask.TaskID)
+	}
+	itemsRaw, ok := batchTask.Inputs["items"].([]any)
+	if !ok || len(itemsRaw) == 0 {
+		return types.HostOpRequest{}, fmt.Errorf("task_review: batch callback %s has no items", batchTask.TaskID)
+	}
+	itemIdx := -1
+	for i, raw := range itemsRaw {
+		item, _ := raw.(map[string]any)
+		if strings.TrimSpace(fmt.Sprint(item["callbackTaskId"])) == batchItemTaskID {
+			itemIdx = i
+			break
+		}
+	}
+	if itemIdx < 0 {
+		return types.HostOpRequest{}, fmt.Errorf("task_review: batch item %s is not part of callback %s", batchItemTaskID, batchTask.TaskID)
+	}
+
+	childTask, err := t.Store.GetTask(ctx, batchItemTaskID)
+	if err != nil {
+		return types.HostOpRequest{}, fmt.Errorf("task_review: get batch item callback: %w", err)
+	}
+	if childTask.Metadata == nil {
+		childTask.Metadata = map[string]any{}
+	}
+	childSource := strings.TrimSpace(fmt.Sprint(childTask.Metadata["source"]))
+	if childSource != "subagent.callback" && childSource != "team.callback" {
+		return types.HostOpRequest{}, fmt.Errorf("task_review: batch item %s is not a callback task (source=%q)", batchItemTaskID, childSource)
+	}
+	if _, err := t.handleDecision(ctx, childTask, decision, feedback, rawEscData); err != nil {
+		return types.HostOpRequest{}, err
+	}
+
+	if batchTask.Metadata == nil {
+		batchTask.Metadata = map[string]any{}
+	}
+	decisions, _ := batchTask.Metadata["batchItemDecisions"].(map[string]any)
+	if decisions == nil {
+		decisions = map[string]any{}
+	}
+	decisions[batchItemTaskID] = decision
+	batchTask.Metadata["batchItemDecisions"] = decisions
+
+	itemsRaw[itemIdx] = mergeBatchItemDecision(itemsRaw[itemIdx], decision)
+	batchTask.Inputs["items"] = itemsRaw
+	batchTask.Metadata["batchReviewedCount"] = float64(len(decisions))
+	batchTask.Metadata["batchTotalItems"] = float64(len(itemsRaw))
+	batchTask.Metadata["batchReviewComplete"] = len(decisions) >= len(itemsRaw)
+	_ = t.Store.UpdateTask(ctx, batchTask)
+
+	approved, retried, escalated := countBatchDecisions(decisions)
+	return types.HostOpRequest{
+		Op:   types.HostOpToolResult,
+		Tag:  "task_review",
+		Text: fmt.Sprintf("Batch callback %s: item %s set to %s (approved=%d retry=%d escalate=%d).", batchTask.TaskID, batchItemTaskID, decision, approved, retried, escalated),
+	}, nil
+}
+
+func mergeBatchItemDecision(raw any, decision string) map[string]any {
+	item, _ := raw.(map[string]any)
+	if item == nil {
+		item = map[string]any{}
+	}
+	item["decision"] = strings.TrimSpace(decision)
+	return item
+}
+
+func countBatchDecisions(decisions map[string]any) (approved, retried, escalated int) {
+	for _, raw := range decisions {
+		switch strings.ToLower(strings.TrimSpace(fmt.Sprint(raw))) {
+		case "approve":
+			approved++
+		case "retry":
+			retried++
+		case "escalate":
+			escalated++
+		}
+	}
+	return approved, retried, escalated
 }
 
 func (t *TaskReviewTool) handleApprove(ctx context.Context, task types.Task) (types.HostOpRequest, error) {

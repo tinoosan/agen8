@@ -31,6 +31,12 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	runtimeCfg, err := loadRuntimeConfig(cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	applyRuntimeConfigEnvDefaults(runtimeCfg)
+
 	resolved, err := resolveRunChatOptions(opts...)
 	if err != nil {
 		return err

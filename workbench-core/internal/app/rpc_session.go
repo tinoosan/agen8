@@ -321,8 +321,8 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 	sess.TeamID = teamID
 
 	teamModel := strings.TrimSpace(p.Model)
-	if teamModel == "" && prof.Team != nil {
-		teamModel = strings.TrimSpace(prof.Team.Model)
+	if teamModel == "" {
+		teamModel = resolveTeamModel(nil, prof.Team, RunChatOptions{})
 	}
 	if teamModel != "" {
 		sess.ActiveModel = teamModel
@@ -345,9 +345,13 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 			roleGoal = goal
 		}
 		run := types.NewRun(roleGoal, maxContext, strings.TrimSpace(sess.SessionID))
+		roleModel := resolveRoleModel(role, teamModel)
+		if roleModel == "" {
+			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "no model resolved for role " + roleName}
+		}
 		run.Runtime = &types.RunRuntimeConfig{
 			Profile: strings.TrimSpace(prof.ID),
-			Model:   strings.TrimSpace(teamModel),
+			Model:   roleModel,
 			TeamID:  strings.TrimSpace(teamID),
 			Role:    roleName,
 		}

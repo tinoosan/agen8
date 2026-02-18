@@ -15,6 +15,7 @@ type Profile struct {
 	Description   string         `yaml:"description"`
 	Model         string         `yaml:"model,omitempty"`
 	SubagentModel string         `yaml:"subagent_model,omitempty"`
+	AllowedTools  []string       `yaml:"allowed_tools,omitempty"`
 	Prompts       PromptConfig   `yaml:"prompts,omitempty"`
 	Skills        []string       `yaml:"skills,omitempty"`
 	Heartbeat     []HeartbeatJob `yaml:"heartbeat,omitempty"`
@@ -42,6 +43,7 @@ type RoleConfig struct {
 	Description   string         `yaml:"description"`
 	Prompts       PromptConfig   `yaml:"prompts,omitempty"`
 	Skills        []string       `yaml:"skills,omitempty"`
+	AllowedTools  []string       `yaml:"allowed_tools,omitempty"`
 	Model         string         `yaml:"model,omitempty"`
 	SubagentModel string         `yaml:"subagent_model,omitempty"`
 	Coordinator   bool           `yaml:"coordinator,omitempty"`
@@ -98,25 +100,10 @@ func (p Profile) Normalize(profileDir string) (Profile, error) {
 	p.Description = strings.TrimSpace(p.Description)
 	p.Model = strings.TrimSpace(p.Model)
 	p.SubagentModel = strings.TrimSpace(p.SubagentModel)
+	p.AllowedTools = normalizeStringList(p.AllowedTools)
 	p.Prompts.SystemPrompt = strings.TrimSpace(p.Prompts.SystemPrompt)
 	p.Prompts.SystemPromptPath = strings.TrimSpace(p.Prompts.SystemPromptPath)
-
-	// De-duplicate skills, keep order.
-	uniq := make([]string, 0, len(p.Skills))
-	seen := map[string]struct{}{}
-	for _, s := range p.Skills {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		key := strings.ToLower(s)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		uniq = append(uniq, s)
-	}
-	p.Skills = uniq
+	p.Skills = normalizeStringList(p.Skills)
 
 	for i := range p.Heartbeat {
 		p.Heartbeat[i].Name = strings.TrimSpace(p.Heartbeat[i].Name)
@@ -132,21 +119,8 @@ func (p Profile) Normalize(profileDir string) (Profile, error) {
 			r.Prompts.SystemPromptPath = strings.TrimSpace(r.Prompts.SystemPromptPath)
 			r.Model = strings.TrimSpace(r.Model)
 			r.SubagentModel = strings.TrimSpace(r.SubagentModel)
-			uniqRoleSkills := make([]string, 0, len(r.Skills))
-			seenRoleSkills := map[string]struct{}{}
-			for _, s := range r.Skills {
-				s = strings.TrimSpace(s)
-				if s == "" {
-					continue
-				}
-				key := strings.ToLower(s)
-				if _, ok := seenRoleSkills[key]; ok {
-					continue
-				}
-				seenRoleSkills[key] = struct{}{}
-				uniqRoleSkills = append(uniqRoleSkills, s)
-			}
-			r.Skills = uniqRoleSkills
+			r.AllowedTools = normalizeStringList(r.AllowedTools)
+			r.Skills = normalizeStringList(r.Skills)
 			for j := range r.Heartbeat {
 				r.Heartbeat[j].Name = strings.TrimSpace(r.Heartbeat[j].Name)
 				r.Heartbeat[j].Goal = strings.TrimSpace(r.Heartbeat[j].Goal)
@@ -249,4 +223,22 @@ func validatePromptPath(profileDir, promptPath, scope string) error {
 		}
 	}
 	return nil
+}
+
+func normalizeStringList(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := map[string]struct{}{}
+	for _, item := range in {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		key := strings.ToLower(item)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	return out
 }

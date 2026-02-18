@@ -117,6 +117,28 @@ func TestTaskCreateTool_CoordinatorCanAssignAnyRole(t *testing.T) {
 	}
 }
 
+func TestTaskCreateTool_CoordinatorMustSpecifyAssignedRole(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-1",
+		RunID:           "run-1",
+		TeamID:          "team-1",
+		RoleName:        "head-analyst",
+		IsCoordinator:   true,
+		CoordinatorRole: "head-analyst",
+		ValidRoles:      []string{"head-analyst", "researcher", "report-writer"},
+	}
+	args := map[string]any{
+		"goal":   "Research semiconductors",
+		"taskId": "task-coord-no-role",
+	}
+	raw, _ := json.Marshal(args)
+	if _, err := tool.Execute(context.Background(), raw); err == nil {
+		t.Fatalf("expected error when coordinator omits assignedRole")
+	}
+}
+
 func TestTaskCreateTool_WorkerCannotAssignOtherWorker(t *testing.T) {
 	store := newFakeTaskStore()
 	tool := &TaskCreateTool{
@@ -235,6 +257,38 @@ func TestTaskCreateTool_WorkerCanEscalateToCoordinator(t *testing.T) {
 	task := store.tasks["task-worker-2"]
 	if task.AssignedRole != "head-analyst" {
 		t.Fatalf("expected assignedRole head-analyst, got %q", task.AssignedRole)
+	}
+}
+
+func TestTaskCreateTool_TagsBatchMetadataFromContext(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-3",
+		RunID:           "run-3",
+		TeamID:          "team-1",
+		RoleName:        "head-analyst",
+		IsCoordinator:   true,
+		CoordinatorRole: "head-analyst",
+		ValidRoles:      []string{"head-analyst", "researcher"},
+	}
+	args := map[string]any{
+		"goal":         "research task",
+		"taskId":       "task-batch-1",
+		"assignedRole": "researcher",
+	}
+	raw, _ := json.Marshal(args)
+	ctx := WithParentTaskID(context.Background(), "task-parent-1")
+	_, err := tool.Execute(ctx, raw)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	task := store.tasks["task-batch-1"]
+	if task.Metadata["batchMode"] != true {
+		t.Fatalf("expected batchMode=true, got %v", task.Metadata["batchMode"])
+	}
+	if strings.TrimSpace(task.Metadata["batchParentTaskId"].(string)) != "task-parent-1" {
+		t.Fatalf("unexpected batchParentTaskId: %v", task.Metadata["batchParentTaskId"])
 	}
 }
 

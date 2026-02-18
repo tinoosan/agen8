@@ -489,6 +489,12 @@ func renderInbox(tasks []taskState) string {
 		if strings.TrimSpace(task.Status) != "" && strings.TrimSpace(task.Status) != string(types.TaskStatusPending) {
 			line += " " + kit.StyleDim.Render("["+strings.TrimSpace(task.Status)+"]")
 		}
+		if strings.Contains(strings.ToLower(task.Goal), "batch review only") {
+			line += " " + kit.StyleDim.Render("[batch]")
+			if strings.Contains(strings.ToLower(task.Goal), "[partial]") {
+				line += " " + kit.StyleDim.Render("[partial]")
+			}
+		}
 		if goal != "" {
 			line += " — " + goal
 		}
@@ -531,6 +537,9 @@ func renderOutboxLines(results []outboxEntry, renderer *ContentRenderer, width i
 		meta := ""
 		if len(metaParts) != 0 {
 			meta = " " + kit.StyleDim.Render("("+strings.Join(metaParts, " • ")+")")
+		}
+		if strings.Contains(strings.ToLower(r.Goal), "batch review only") {
+			meta += " " + kit.StyleDim.Render("[batch]")
 		}
 		header := "• " + kit.StyleBold.Render(shortID(r.TaskID)) + " " +
 			kit.StyleDim.Render("\""+goal+"\"") + " → " + statusStr + meta

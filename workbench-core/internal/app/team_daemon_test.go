@@ -9,6 +9,7 @@ import (
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/config"
 	"github.com/tinoosan/workbench-core/pkg/fsutil"
+	"github.com/tinoosan/workbench-core/pkg/profile"
 	"github.com/tinoosan/workbench-core/pkg/protocol"
 	pkgagent "github.com/tinoosan/workbench-core/pkg/services/agent"
 	"github.com/tinoosan/workbench-core/pkg/services/team"
@@ -146,5 +147,23 @@ func TestBuildTeamRPCServerConfig_RejectsUnknownThread(t *testing.T) {
 	}
 	if pErr.Code != protocol.CodeThreadNotFound {
 		t.Fatalf("protocol code=%d want=%d", pErr.Code, protocol.CodeThreadNotFound)
+	}
+}
+
+func TestResolveTeamModel_FallsBackToRoleModel(t *testing.T) {
+	model := resolveTeamModel(nil, &profile.TeamConfig{
+		Roles: []profile.RoleConfig{
+			{Name: "pm", Model: "openai/gpt-5-mini"},
+		},
+	}, RunChatOptions{})
+	if model != "openai/gpt-5-mini" {
+		t.Fatalf("model=%q", model)
+	}
+}
+
+func TestResolveRoleModel_UsesRoleOverride(t *testing.T) {
+	model := resolveRoleModel(profile.RoleConfig{Model: "openai/gpt-5-nano"}, "openai/gpt-5")
+	if model != "openai/gpt-5-nano" {
+		t.Fatalf("model=%q", model)
 	}
 }

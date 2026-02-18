@@ -353,6 +353,7 @@ type monitorModel struct {
 	teamCoordinatorRunID string
 	teamCoordinatorRole  string
 	teamEventCursor      map[string]int64
+	seenEventIDs         map[string]time.Time
 	teamModelChange      *teamModelChangeFile
 }
 

@@ -3,7 +3,9 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,5 +244,184 @@ func TestNormalizeStandaloneSubagentCallbackArtifactPath(t *testing.T) {
 		if got := normalizeStandaloneSubagentCallbackArtifactPath(2, tc.in); got != tc.want {
 			t.Fatalf("normalizeStandaloneSubagentCallbackArtifactPath(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestMaybeCreateCoordinatorCallback_SubagentBatchFlushesWhenComplete(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:   store,
+		SessionID:   "session-parent",
+		RunID:       "run-child-1",
+		ParentRunID: "run-parent",
+		SpawnIndex:  1,
+	}}
+	now := time.Now().UTC()
+	for i := 1; i <= 3; i++ {
+		taskID := fmt.Sprintf("task-subagent-%d", i)
+		task := types.Task{
+			TaskID:    taskID,
+			SessionID: "session-parent",
+			RunID:     "child-run",
+			Goal:      "work",
+			Status:    types.TaskStatusPending,
+			CreatedAt: &now,
+			Metadata: map[string]any{
+				"source":            "spawn_worker",
+				"batchMode":         true,
+				"batchParentTaskId": "task-parent-1",
+				"parentRunId":       "run-parent",
+			},
+		}
+		if err := store.CreateTask(context.Background(), task); err != nil {
+			t.Fatalf("CreateTask expected[%d]: %v", i, err)
+		}
+	}
+	for i := 1; i <= 3; i++ {
+		taskID := fmt.Sprintf("task-subagent-%d", i)
+		task := types.Task{
+			TaskID:    taskID,
+			SessionID: "session-parent",
+			RunID:     "child-run",
+			Goal:      "work",
+			Status:    types.TaskStatusPending,
+			CreatedAt: &now,
+			Metadata: map[string]any{
+				"source":            "spawn_worker",
+				"batchMode":         true,
+				"batchParentTaskId": "task-parent-1",
+				"parentRunId":       "run-parent",
+			},
+		}
+		s.maybeCreateCoordinatorCallback(context.Background(), task, types.TaskResult{
+			TaskID:    task.TaskID,
+			Status:    types.TaskStatusSucceeded,
+			Summary:   "done",
+			Artifacts: []string{"/workspace/output.md"},
+		})
+	}
+
+	callbacks, err := store.ListTasks(context.Background(), state.TaskFilter{
+		SessionID: "session-parent",
+		Status:    []types.TaskStatus{types.TaskStatusReviewPending},
+		SortBy:    "created_at",
+		Limit:     50,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks staged callbacks: %v", err)
+	}
+	if len(callbacks) < 3 {
+		t.Fatalf("expected staged callbacks, got %d", len(callbacks))
+	}
+	batchCallbacks, err := store.ListTasks(context.Background(), state.TaskFilter{
+		SessionID:      "session-parent",
+		AssignedTo:     "run-parent",
+		AssignedToType: "agent",
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "created_at",
+		Limit:          50,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks pending: %v", err)
+	}
+	found := false
+	for _, task := range batchCallbacks {
+		loaded, _ := store.GetTask(context.Background(), task.TaskID)
+		if strings.TrimSpace(fmt.Sprint(loaded.Metadata["source"])) == "subagent.batch.callback" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected one synthetic subagent batch callback")
+	}
+}
+
+func TestMaybeCreateCoordinatorCallback_TeamBatchFlushesWhenComplete(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "workbench.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:       store,
+		TeamID:          "team-1",
+		RoleName:        "backend-engineer",
+		CoordinatorRole: "ceo",
+		TeamRoles:       []string{"ceo", "backend-engineer", "qa"},
+		SessionID:       "team-team-1",
+		RunID:           "run-backend",
+	}}
+	now := time.Now().UTC()
+	for i := 1; i <= 2; i++ {
+		taskID := fmt.Sprintf("task-team-%d", i)
+		task := types.Task{
+			TaskID:       taskID,
+			SessionID:    "team-team-1",
+			RunID:        "run-backend",
+			TeamID:       "team-1",
+			AssignedRole: "backend-engineer",
+			CreatedBy:    "ceo",
+			Goal:         "work",
+			Status:       types.TaskStatusPending,
+			CreatedAt:    &now,
+			Metadata: map[string]any{
+				"source":            "task_create",
+				"batchMode":         true,
+				"batchParentTaskId": "task-parent-team-1",
+			},
+		}
+		if err := store.CreateTask(context.Background(), task); err != nil {
+			t.Fatalf("CreateTask expected[%d]: %v", i, err)
+		}
+	}
+	for i := 1; i <= 2; i++ {
+		taskID := fmt.Sprintf("task-team-%d", i)
+		task := types.Task{
+			TaskID:       taskID,
+			SessionID:    "team-team-1",
+			RunID:        "run-backend",
+			TeamID:       "team-1",
+			AssignedRole: "backend-engineer",
+			CreatedBy:    "ceo",
+			Goal:         "work",
+			Status:       types.TaskStatusPending,
+			CreatedAt:    &now,
+			Metadata: map[string]any{
+				"source":            "task_create",
+				"batchMode":         true,
+				"batchParentTaskId": "task-parent-team-1",
+			},
+		}
+		s.maybeCreateCoordinatorCallback(context.Background(), task, types.TaskResult{
+			TaskID:    task.TaskID,
+			Status:    types.TaskStatusSucceeded,
+			Summary:   "done",
+			Artifacts: []string{"/workspace/backend-engineer/capabilities.md"},
+		})
+	}
+	pending, err := store.ListTasks(context.Background(), state.TaskFilter{
+		TeamID:         "team-1",
+		AssignedRole:   "ceo",
+		AssignedToType: "role",
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "created_at",
+		Limit:          50,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks pending: %v", err)
+	}
+	found := false
+	for _, task := range pending {
+		loaded, _ := store.GetTask(context.Background(), task.TaskID)
+		if strings.TrimSpace(fmt.Sprint(loaded.Metadata["source"])) == "team.batch.callback" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected one synthetic team batch callback")
 	}
 }

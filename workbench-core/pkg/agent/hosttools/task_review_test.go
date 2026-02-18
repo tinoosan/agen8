@@ -3,6 +3,7 @@ package hosttools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,32 @@ func TestTaskReview_Execute_RejectsNonReviewableTask(t *testing.T) {
 	}
 }
 
+func TestTaskReview_Execute_BatchItemApprove(t *testing.T) {
+	cfg := setupTaskReviewStore(t)
+	tool := &TaskReviewTool{Store: cfg.store, SessionID: "sess", RunID: "parent"}
+
+	args, _ := json.Marshal(map[string]string{
+		"taskId":          "callback-batch-parent-1",
+		"batchItemTaskId": "callback-task-1",
+		"decision":        "approve",
+	})
+	req, err := tool.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if req.Op != types.HostOpToolResult || req.Tag != "task_review" {
+		t.Fatalf("unexpected response: %+v", req)
+	}
+	updatedBatch, err := cfg.store.GetTask(context.Background(), "callback-batch-parent-1")
+	if err != nil {
+		t.Fatalf("GetTask batch: %v", err)
+	}
+	decisions, _ := updatedBatch.Metadata["batchItemDecisions"].(map[string]any)
+	if strings.TrimSpace(fmt.Sprint(decisions["callback-task-1"])) != "approve" {
+		t.Fatalf("expected batch decision to be recorded, got %v", decisions)
+	}
+}
+
 type taskReviewTestCfg struct {
 	store state.TaskStore
 }
@@ -99,6 +126,27 @@ func setupTaskReviewStore(t *testing.T) taskReviewTestCfg {
 	}
 	if err := store.CreateTask(ctx, callback); err != nil {
 		t.Fatalf("CreateTask callback: %v", err)
+	}
+	batch := types.Task{
+		TaskID: "callback-batch-parent-1", SessionID: "sess", RunID: "parent",
+		Goal: "Batch callback", Status: types.TaskStatusPending,
+		CreatedAt: &now,
+		Inputs: map[string]any{
+			"items": []any{
+				map[string]any{
+					"callbackTaskId": "callback-task-1",
+					"decision":       "",
+				},
+			},
+		},
+		Metadata: map[string]any{
+			"source":             "subagent.batch.callback",
+			"batchParentTaskId":  "task-parent-1",
+			"batchItemDecisions": map[string]any{},
+		},
+	}
+	if err := store.CreateTask(ctx, batch); err != nil {
+		t.Fatalf("CreateTask batch: %v", err)
 	}
 
 	// Another task that is not reviewable.

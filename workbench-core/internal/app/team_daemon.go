@@ -374,6 +374,10 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	var coordinatorRun types.Run
 	for _, role := range prof.Team.Roles {
 		role := role
+		roleModel := resolveRoleModel(role, teamModel)
+		if roleModel == "" {
+			return fmt.Errorf("resolve model for role %s: empty model", strings.TrimSpace(role.Name))
+		}
 		roleGoal := strings.TrimSpace(goal)
 		if roleGoal == "" {
 			roleGoal = strings.TrimSpace(role.Description)
@@ -389,8 +393,8 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		metaSession.Mode = "team"
 		metaSession.TeamID = teamID
 		metaSession.Profile = strings.TrimSpace(prof.ID)
-		if strings.TrimSpace(teamModel) != "" {
-			metaSession.ActiveModel = strings.TrimSpace(teamModel)
+		if strings.TrimSpace(roleModel) != "" {
+			metaSession.ActiveModel = strings.TrimSpace(roleModel)
 		}
 		ensureSessionReasoningForModel(&metaSession, metaSession.ActiveModel, strings.TrimSpace(resolved.ReasoningEffort), strings.TrimSpace(resolved.ReasoningSummary))
 		_ = sessionService.SaveSession(ctx, metaSession)
@@ -398,7 +402,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			run.Runtime = &types.RunRuntimeConfig{}
 		}
 		run.Runtime.Profile = strings.TrimSpace(prof.ID)
-		run.Runtime.Model = strings.TrimSpace(teamModel)
+		run.Runtime.Model = strings.TrimSpace(roleModel)
 		run.Runtime.TeamID = teamID
 		run.Runtime.Role = strings.TrimSpace(role.Name)
 		_ = sessionService.SaveRun(ctx, run)
@@ -427,7 +431,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			ProfileConfig:      prof,
 			WorkdirAbs:         workdirAbs,
 			SharedWorkspaceDir: mountedWorkspaceDir,
-			Model:              teamModel,
+			Model:              roleModel,
 			ReasoningEffort:    roleReasoningEffort,
 			ReasoningSummary:   roleReasoningSummary,
 			ApprovalsMode:      strings.TrimSpace(resolved.ApprovalsMode),
@@ -467,7 +471,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		}
 
 		agentCfg := agent.DefaultConfig()
-		agentCfg.Model = teamModel
+		agentCfg.Model = roleModel
 		agentCfg.ReasoningEffort = roleReasoningEffort
 		agentCfg.ReasoningSummary = roleReasoningSummary
 		agentCfg.ApprovalsMode = strings.TrimSpace(resolved.ApprovalsMode)
@@ -481,22 +485,22 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			OnLLMUsage: newCostUsageHook(
 				cfg,
 				run,
-				teamModel,
+				roleModel,
 				resolved.PriceInPerMTokensUSD,
 				resolved.PriceOutPerMTokensUSD,
 				sessionService,
 				func() string {
 					if sessionService == nil {
-						return strings.TrimSpace(teamModel)
+						return strings.TrimSpace(roleModel)
 					}
 					sess, err := sessionService.LoadSession(context.Background(), strings.TrimSpace(run.SessionID))
 					if err != nil {
-						return strings.TrimSpace(teamModel)
+						return strings.TrimSpace(roleModel)
 					}
 					if active := strings.TrimSpace(sess.ActiveModel); active != "" {
 						return active
 					}
-					return strings.TrimSpace(teamModel)
+					return strings.TrimSpace(roleModel)
 				},
 				func(ctx context.Context, ev events.Event) {
 					if ev.Data == nil {
@@ -561,6 +565,21 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("register task_create for role %s: %w", role.Name, err)
 		}
+		if err := registry.Register(&hosttools.TaskReviewTool{
+			Store:      taskService,
+			SessionID:  run.SessionID,
+			RunID:      run.RunID,
+			Supervisor: teamSupervisor,
+		}); err != nil {
+			orderedEmitter.Close()
+			_ = rt.Shutdown(context.Background())
+			return fmt.Errorf("register task_review for role %s: %w", role.Name, err)
+		}
+		if err := applyAllowedTools(registry, role.AllowedTools); err != nil {
+			orderedEmitter.Close()
+			_ = rt.Shutdown(context.Background())
+			return fmt.Errorf("apply allowed tools for role %s: %w", role.Name, err)
+		}
 		agentCfg.SystemPrompt = prompts.DefaultTeamModeSystemPromptWithTools(agent.PromptToolSpecFromSources(registry, nil))
 		agentCfg.HostToolRegistry = registry
 
@@ -571,11 +590,12 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			return fmt.Errorf("create agent for role %s: %w", role.Name, err)
 		}
 		roleProfile := &profile.Profile{
-			ID:          role.Name,
-			Description: role.Description,
-			Prompts:     role.Prompts,
-			Skills:      append([]string(nil), role.Skills...),
-			Heartbeat:   append([]profile.HeartbeatJob(nil), role.Heartbeat...),
+			ID:           role.Name,
+			Description:  role.Description,
+			Prompts:      role.Prompts,
+			Skills:       append([]string(nil), role.Skills...),
+			AllowedTools: append([]string(nil), role.AllowedTools...),
+			Heartbeat:    append([]profile.HeartbeatJob(nil), role.Heartbeat...),
 		}
 		roleSession, err := session.New(session.Config{
 			Agent:      a,
@@ -982,8 +1002,20 @@ func resolveTeamModel(existing *team.Manifest, teamCfg *profile.TeamConfig, reso
 		if model := strings.TrimSpace(teamCfg.Model); model != "" {
 			return model
 		}
+		for _, role := range teamCfg.Roles {
+			if model := strings.TrimSpace(role.Model); model != "" {
+				return model
+			}
+		}
 	}
 	return strings.TrimSpace(resolved.Model)
+}
+
+func resolveRoleModel(role profile.RoleConfig, teamModel string) string {
+	if model := strings.TrimSpace(role.Model); model != "" {
+		return model
+	}
+	return strings.TrimSpace(teamModel)
 }
 
 // teamRuntimeSupervisor adapts the team daemon's runtime management to the service interface

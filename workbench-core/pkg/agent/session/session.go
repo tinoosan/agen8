@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/workbench-core/pkg/agent"
+	hosttools "github.com/tinoosan/workbench-core/pkg/agent/hosttools"
 	"github.com/tinoosan/workbench-core/pkg/agent/state"
 	"github.com/tinoosan/workbench-core/pkg/cost"
 	"github.com/tinoosan/workbench-core/pkg/emit"
@@ -29,6 +30,8 @@ import (
 // ErrSingleTaskComplete is returned by Run when SingleTask mode is enabled
 // and the session has completed its assigned task.
 var ErrSingleTaskComplete = errors.New("single task completed")
+
+const callbackBatchFlushTimeout = 15 * time.Second
 
 type ResolveProfileFunc func(ref string) (*profile.Profile, string, error)
 
@@ -472,6 +475,7 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 	// Execute pending tasks from SQLite only (DB-routed protocol v2).
 	var errs error
 	hadWork := false
+	s.maybeFlushStagedBatchCallbacks(ctx, true)
 	pending, err := s.listPendingTasks(ctx)
 	if err != nil {
 		errs = errors.Join(errs, err)
@@ -548,8 +552,10 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 		}
 		// Prioritize subagent callbacks so the parent processes them before the overarching task.
 		sort.SliceStable(tasks, func(i, j int) bool {
-			si := getTaskSource(tasks[i]) == "subagent.callback"
-			sj := getTaskSource(tasks[j]) == "subagent.callback"
+			sourceI := getTaskSource(tasks[i])
+			sourceJ := getTaskSource(tasks[j])
+			si := sourceI == "subagent.callback" || sourceI == "subagent.batch.callback"
+			sj := sourceJ == "subagent.callback" || sourceJ == "subagent.batch.callback"
 			if si && !sj {
 				return true
 			}
@@ -786,7 +792,8 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		}
 	}
 
-	runRes, err := runAgent.Run(ctx, strings.TrimSpace(task.Goal))
+	taskCtx := hosttools.WithParentTaskID(ctx, taskID)
+	runRes, err := runAgent.Run(taskCtx, strings.TrimSpace(task.Goal))
 	doneAt := time.Now()
 	totalTokens := cumulativeInputTokens + cumulativeOutputTokens
 	costUSD := 0.0
@@ -850,6 +857,28 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			// Unknown status: treat as a failure so tasks don't appear "green" accidentally.
 			tr.Status = types.TaskStatusFailed
 			tr.Error = fmt.Sprintf("invalid agent status %q", resStatus)
+		}
+	}
+	if source := metadataString(task.Metadata, "source"); source == "subagent.batch.callback" || source == "team.batch.callback" {
+		decisions, _ := task.Metadata["batchItemDecisions"].(map[string]any)
+		approved, retried, escalated := countDecisionMap(decisions)
+		if len(decisions) != 0 {
+			summarySuffix := fmt.Sprintf("(approved=%d retry=%d escalate=%d)", approved, retried, escalated)
+			if strings.TrimSpace(tr.Summary) == "" {
+				tr.Summary = "Batch review decisions applied " + summarySuffix
+			} else if !strings.Contains(tr.Summary, "approved=") {
+				tr.Summary = strings.TrimSpace(tr.Summary) + " " + summarySuffix
+			}
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "callback.batch.item.reviewed",
+				Message: "Batch review decisions updated",
+				Data: map[string]string{
+					"parentTaskId": metadataString(task.Metadata, "batchParentTaskId"),
+					"approved":     fmt.Sprintf("%d", approved),
+					"retry":        fmt.Sprintf("%d", retried),
+					"escalate":     fmt.Sprintf("%d", escalated),
+				},
+			})
 		}
 	}
 
@@ -1021,6 +1050,12 @@ func (s *Session) emitTaskQueuedOnce(ctx context.Context, taskID, goal, source s
 	s.emitBestEffort(ctx, events.Event{Type: "task.queued", Message: "Task queued", Data: payload})
 }
 
+type batchGroupScope struct {
+	mode         string
+	parentTaskID string
+	reviewerID   string
+}
+
 func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types.Task, tr types.TaskResult) {
 	parentRunID := strings.TrimSpace(s.cfg.ParentRunID)
 	isSubagentWorker := parentRunID != ""
@@ -1037,11 +1072,15 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 
 	callbackTaskID := "callback-" + taskID
 	now := time.Now().UTC()
+	batchMode := metadataBool(task.Metadata, "batchMode")
+	batchParentTaskID := metadataString(task.Metadata, "batchParentTaskId")
+	if batchParentTaskID == "" {
+		batchMode = false
+	}
 
 	var callback types.Task
+	var group batchGroupScope
 	if isSubagentWorker {
-		// Standalone subagent: create callback assigned to parent run.
-		// task is the task the subagent just completed; taskID and task.Goal refer to that work.
 		sourceGoal := strings.TrimSpace(task.Goal)
 		if sourceGoal == "" {
 			sourceGoal = "(no goal text)"
@@ -1114,8 +1153,8 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				"retryCount":        float64(0),
 			},
 		}
+		group = batchGroupScope{mode: "standalone", parentTaskID: batchParentTaskID, reviewerID: parentRunID}
 	} else {
-		// Team mode: create callback assigned to coordinator role.
 		coordinatorRole := strings.TrimSpace(s.cfg.CoordinatorRole)
 		artifactsForCoordinator := make([]string, 0, len(tr.Artifacts))
 		seenArtifacts := map[string]struct{}{}
@@ -1163,25 +1202,495 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				"sourceTaskStatus":  string(tr.Status),
 			},
 		}
+		group = batchGroupScope{mode: "team", parentTaskID: batchParentTaskID, reviewerID: coordinatorRole}
+	}
+	if callback.Metadata == nil {
+		callback.Metadata = map[string]any{}
+	}
+	if batchMode {
+		callback.Status = types.TaskStatusReviewPending
+		callback.Metadata["batchMode"] = true
+		callback.Metadata["batchParentTaskId"] = batchParentTaskID
+		callback.Metadata["batchDelivered"] = false
 	}
 
 	if err := s.cfg.TaskStore.CreateTask(ctx, callback); err != nil {
 		return // idempotent via deterministic callback task id.
 	}
 
-	eventSource := "team.callback"
-	if isSubagentWorker {
-		eventSource = "subagent.callback"
+	if !batchMode {
+		eventSource := "team.callback"
+		if isSubagentWorker {
+			eventSource = "subagent.callback"
+		}
+		s.emitTaskQueuedOnce(ctx, callbackTaskID, callback.Goal, eventSource)
+		s.emitBestEffort(ctx, events.Event{
+			Type:    eventSource + ".queued",
+			Message: "Worker completion callback queued",
+			Data: map[string]string{
+				"taskId":            callbackTaskID,
+				"callbackForTaskId": taskID,
+			},
+		})
+		return
 	}
-	s.emitTaskQueuedOnce(ctx, callbackTaskID, callback.Goal, eventSource)
+
+	s.emitBatchProgress(ctx, group)
+	s.maybeFlushBatchGroup(ctx, group, false)
+}
+
+func (s *Session) maybeFlushStagedBatchCallbacks(ctx context.Context, allowTimeout bool) {
+	groups := s.collectStagedBatchGroups(ctx)
+	for _, group := range groups {
+		s.maybeFlushBatchGroup(ctx, group, allowTimeout)
+	}
+}
+
+func (s *Session) collectStagedBatchGroups(ctx context.Context) []batchGroupScope {
+	filter := state.TaskFilter{
+		Status: []types.TaskStatus{types.TaskStatusReviewPending},
+		SortBy: "created_at",
+		Limit:  500,
+	}
+	if strings.TrimSpace(s.cfg.TeamID) != "" {
+		filter.TeamID = strings.TrimSpace(s.cfg.TeamID)
+	} else if strings.TrimSpace(s.cfg.ParentRunID) != "" {
+		filter.SessionID = strings.TrimSpace(s.cfg.SessionID)
+	} else {
+		return nil
+	}
+	tasks, err := s.cfg.TaskStore.ListTasks(ctx, filter)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]batchGroupScope, 0, 8)
+	for _, task := range tasks {
+		task = s.loadTaskDetails(ctx, task)
+		if !metadataBool(task.Metadata, "batchMode") || metadataBool(task.Metadata, "batchDelivered") {
+			continue
+		}
+		parentTaskID := metadataString(task.Metadata, "batchParentTaskId")
+		if parentTaskID == "" {
+			continue
+		}
+		source := metadataString(task.Metadata, "source")
+		group := batchGroupScope{parentTaskID: parentTaskID}
+		switch source {
+		case "subagent.callback":
+			group.mode = "standalone"
+			group.reviewerID = strings.TrimSpace(task.AssignedTo)
+		case "team.callback":
+			group.mode = "team"
+			group.reviewerID = strings.TrimSpace(task.AssignedRole)
+		default:
+			continue
+		}
+		if group.reviewerID == "" {
+			continue
+		}
+		key := group.mode + "|" + group.parentTaskID + "|" + group.reviewerID
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, group)
+	}
+	return out
+}
+
+func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScope, allowTimeout bool) {
+	group.parentTaskID = strings.TrimSpace(group.parentTaskID)
+	group.reviewerID = strings.TrimSpace(group.reviewerID)
+	if group.parentTaskID == "" || group.reviewerID == "" {
+		return
+	}
+
+	expected := s.listBatchExpectedTasks(ctx, group)
+	expectedCount := len(expected)
+	if expectedCount == 0 {
+		return
+	}
+
+	callbacks := s.listBatchCallbacks(ctx, group)
+	if len(callbacks) == 0 {
+		return
+	}
+	completedCount := len(callbacks)
+	undelivered := make([]types.Task, 0, len(callbacks))
+	for _, cb := range callbacks {
+		if metadataBool(cb.Metadata, "batchDelivered") {
+			continue
+		}
+		undelivered = append(undelivered, cb)
+	}
+	if len(undelivered) == 0 {
+		return
+	}
+
+	oldest := time.Now().UTC()
+	for _, cb := range undelivered {
+		if timeutil.IsSet(cb.CreatedAt) && cb.CreatedAt.Before(oldest) {
+			oldest = cb.CreatedAt.UTC()
+		}
+	}
+	allComplete := completedCount >= expectedCount
+	timeoutDue := !oldest.IsZero() && time.Since(oldest) >= callbackBatchFlushTimeout
+	if !allComplete && (!allowTimeout || !timeoutDue) {
+		return
+	}
+	if s.hasOpenSyntheticBatchCallback(ctx, group) {
+		return
+	}
+
+	now := time.Now().UTC()
+	flushReason := "all_complete"
+	if !allComplete {
+		flushReason = "timeout"
+	}
+	isPartial := !allComplete
+	batchTaskID := fmt.Sprintf("callback-batch-%s-%d", group.parentTaskID, now.UnixNano())
+	source := "subagent.batch.callback"
+	taskKind := state.TaskKindReview
+	assignedToType := "agent"
+	sessionID := strings.TrimSpace(s.cfg.SessionID)
+	runID := group.reviewerID
+	teamID := ""
+	assignedRole := ""
+	createdBy := strings.TrimSpace(s.cfg.RunID)
+	if group.mode == "team" {
+		source = "team.batch.callback"
+		taskKind = state.TaskKindCallback
+		assignedToType = "role"
+		sessionID = "team-" + strings.TrimSpace(s.cfg.TeamID)
+		runID = "team-" + strings.TrimSpace(s.cfg.TeamID) + "-callback"
+		teamID = strings.TrimSpace(s.cfg.TeamID)
+		assignedRole = group.reviewerID
+		createdBy = strings.TrimSpace(s.cfg.RoleName)
+	}
+
+	items := make([]any, 0, len(undelivered))
+	for _, cb := range undelivered {
+		item := map[string]any{
+			"callbackTaskId": strings.TrimSpace(cb.TaskID),
+			"sourceTaskId":   metadataString(cb.Metadata, "callbackForTaskId"),
+			"sourceStatus":   metadataString(cb.Metadata, "sourceTaskStatus"),
+			"sourceRunId":    metadataString(cb.Metadata, "sourceRunId"),
+			"sourceRole":     metadataString(cb.Metadata, "sourceRole"),
+			"summary":        inputString(cb.Inputs, "summary"),
+			"error":          inputString(cb.Inputs, "error"),
+			"artifacts":      inputStringSlice(cb.Inputs, "artifacts"),
+			"decision":       "",
+		}
+		items = append(items, item)
+	}
+
+	goal := fmt.Sprintf("BATCH REVIEW ONLY: [batch %d items] Review delegated results for parent task %s. Decide per child item using task_review (approve/retry/escalate).", len(undelivered), truncateText(group.parentTaskID, 32))
+	if isPartial {
+		goal += " [partial]"
+	}
+
+	batch := types.Task{
+		TaskID:         batchTaskID,
+		SessionID:      sessionID,
+		RunID:          runID,
+		TeamID:         teamID,
+		AssignedRole:   assignedRole,
+		AssignedToType: assignedToType,
+		AssignedTo:     group.reviewerID,
+		CreatedBy:      createdBy,
+		TaskKind:       taskKind,
+		Goal:           goal,
+		Inputs: map[string]any{
+			"batchParentTaskId": group.parentTaskID,
+			"items":             items,
+		},
+		Priority:  1,
+		Status:    types.TaskStatusPending,
+		CreatedAt: &now,
+		Metadata: map[string]any{
+			"source":              source,
+			"batchMode":           true,
+			"batchSynthetic":      true,
+			"batchParentTaskId":   group.parentTaskID,
+			"batchExpectedCount":  expectedCount,
+			"batchCompletedCount": completedCount,
+			"batchPartial":        isPartial,
+			"batchFlushReason":    flushReason,
+			"batchItemDecisions":  map[string]any{},
+			"reviewGate":          true,
+			"reviewActions":       []string{"approve", "retry", "escalate"},
+		},
+	}
+	if err := s.cfg.TaskStore.CreateTask(ctx, batch); err != nil {
+		return
+	}
+	for _, cb := range undelivered {
+		if cb.Metadata == nil {
+			cb.Metadata = map[string]any{}
+		}
+		cb.Metadata["batchDelivered"] = true
+		cb.Metadata["batchIncludedIn"] = batchTaskID
+		_ = s.cfg.TaskStore.UpdateTask(ctx, cb)
+	}
+	s.emitTaskQueuedOnce(ctx, batchTaskID, batch.Goal, source)
 	s.emitBestEffort(ctx, events.Event{
-		Type:    eventSource + ".queued",
-		Message: "Worker completion callback queued",
+		Type:    "callback.batch.queued",
+		Message: "Batched callback queued",
 		Data: map[string]string{
-			"taskId":            callbackTaskID,
-			"callbackForTaskId": taskID,
+			"taskId":               batchTaskID,
+			"parentTaskId":         group.parentTaskID,
+			"items":                fmt.Sprintf("%d", len(undelivered)),
+			"batchExpectedCount":   fmt.Sprintf("%d", expectedCount),
+			"batchCompletedCount":  fmt.Sprintf("%d", completedCount),
+			"batchFlushReason":     flushReason,
+			"batchPartial":         fmt.Sprintf("%t", isPartial),
+			"batchReviewer":        group.reviewerID,
+			"batchReviewerMode":    group.mode,
+			"batchSyntheticSource": source,
 		},
 	})
+	s.emitBatchProgress(ctx, group)
+}
+
+func (s *Session) emitBatchProgress(ctx context.Context, group batchGroupScope) {
+	expectedCount := len(s.listBatchExpectedTasks(ctx, group))
+	completedCount := len(s.listBatchCallbacks(ctx, group))
+	if expectedCount == 0 {
+		return
+	}
+	s.emitBestEffort(ctx, events.Event{
+		Type:    "callback.batch.progress",
+		Message: "Batch callback progress updated",
+		Data: map[string]string{
+			"parentTaskId":        group.parentTaskID,
+			"batchExpectedCount":  fmt.Sprintf("%d", expectedCount),
+			"batchCompletedCount": fmt.Sprintf("%d", completedCount),
+			"batchReviewer":       group.reviewerID,
+			"batchReviewerMode":   group.mode,
+		},
+	})
+}
+
+func (s *Session) listBatchExpectedTasks(ctx context.Context, group batchGroupScope) []types.Task {
+	filter := state.TaskFilter{SortBy: "created_at", Limit: 500}
+	if group.mode == "team" {
+		filter.TeamID = strings.TrimSpace(s.cfg.TeamID)
+	} else {
+		filter.SessionID = strings.TrimSpace(s.cfg.SessionID)
+	}
+	tasks, err := s.cfg.TaskStore.ListTasks(ctx, filter)
+	if err != nil {
+		return nil
+	}
+	out := make([]types.Task, 0, len(tasks))
+	for _, task := range tasks {
+		task = s.loadTaskDetails(ctx, task)
+		if !metadataBool(task.Metadata, "batchMode") {
+			continue
+		}
+		if metadataString(task.Metadata, "batchParentTaskId") != group.parentTaskID {
+			continue
+		}
+		if metadataString(task.Metadata, "source") == "subagent.callback" || metadataString(task.Metadata, "source") == "team.callback" {
+			continue
+		}
+		if group.mode == "standalone" {
+			if metadataString(task.Metadata, "source") != "spawn_worker" {
+				continue
+			}
+			if metadataString(task.Metadata, "parentRunId") != group.reviewerID {
+				continue
+			}
+		}
+		out = append(out, task)
+	}
+	return out
+}
+
+func (s *Session) listBatchCallbacks(ctx context.Context, group batchGroupScope) []types.Task {
+	filter := state.TaskFilter{
+		Status: []types.TaskStatus{types.TaskStatusReviewPending},
+		SortBy: "created_at",
+		Limit:  500,
+	}
+	if group.mode == "team" {
+		filter.TeamID = strings.TrimSpace(s.cfg.TeamID)
+	} else {
+		filter.SessionID = strings.TrimSpace(s.cfg.SessionID)
+	}
+	tasks, err := s.cfg.TaskStore.ListTasks(ctx, filter)
+	if err != nil {
+		return nil
+	}
+	out := make([]types.Task, 0, len(tasks))
+	for _, task := range tasks {
+		task = s.loadTaskDetails(ctx, task)
+		if !metadataBool(task.Metadata, "batchMode") {
+			continue
+		}
+		if metadataString(task.Metadata, "batchParentTaskId") != group.parentTaskID {
+			continue
+		}
+		source := metadataString(task.Metadata, "source")
+		if group.mode == "standalone" && source != "subagent.callback" {
+			continue
+		}
+		if group.mode == "team" && source != "team.callback" {
+			continue
+		}
+		if group.mode == "standalone" && strings.TrimSpace(task.AssignedTo) != group.reviewerID {
+			continue
+		}
+		if group.mode == "team" && strings.TrimSpace(task.AssignedRole) != group.reviewerID {
+			continue
+		}
+		out = append(out, task)
+	}
+	return out
+}
+
+func (s *Session) hasOpenSyntheticBatchCallback(ctx context.Context, group batchGroupScope) bool {
+	filter := state.TaskFilter{
+		Status: []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive},
+		SortBy: "created_at",
+		Limit:  200,
+	}
+	if group.mode == "team" {
+		filter.TeamID = strings.TrimSpace(s.cfg.TeamID)
+	} else {
+		filter.SessionID = strings.TrimSpace(s.cfg.SessionID)
+	}
+	tasks, err := s.cfg.TaskStore.ListTasks(ctx, filter)
+	if err != nil {
+		return false
+	}
+	wantSource := "subagent.batch.callback"
+	if group.mode == "team" {
+		wantSource = "team.batch.callback"
+	}
+	for _, task := range tasks {
+		task = s.loadTaskDetails(ctx, task)
+		if !metadataBool(task.Metadata, "batchSynthetic") {
+			continue
+		}
+		if metadataString(task.Metadata, "source") != wantSource {
+			continue
+		}
+		if metadataString(task.Metadata, "batchParentTaskId") != group.parentTaskID {
+			continue
+		}
+		if group.mode == "standalone" && strings.TrimSpace(task.AssignedTo) != group.reviewerID {
+			continue
+		}
+		if group.mode == "team" && strings.TrimSpace(task.AssignedRole) != group.reviewerID {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func metadataString(m map[string]any, key string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(raw))
+}
+
+func metadataBool(m map[string]any, key string) bool {
+	if len(m) == 0 {
+		return false
+	}
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return false
+	}
+	switch v := raw.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	case float64:
+		return v != 0
+	case int:
+		return v != 0
+	default:
+		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(v)), "true")
+	}
+}
+
+func inputString(inputs map[string]any, key string) string {
+	if len(inputs) == 0 {
+		return ""
+	}
+	raw, ok := inputs[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(raw))
+}
+
+func inputStringSlice(inputs map[string]any, key string) []string {
+	if len(inputs) == 0 {
+		return nil
+	}
+	raw, ok := inputs[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []string:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			item = strings.TrimSpace(item)
+			if item != "" {
+				out = append(out, item)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			s := strings.TrimSpace(fmt.Sprint(item))
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func countDecisionMap(decisions map[string]any) (approved, retried, escalated int) {
+	for _, raw := range decisions {
+		switch strings.ToLower(strings.TrimSpace(fmt.Sprint(raw))) {
+		case "approve":
+			approved++
+		case "retry":
+			retried++
+		case "escalate":
+			escalated++
+		}
+	}
+	return approved, retried, escalated
+}
+
+func (s *Session) loadTaskDetails(ctx context.Context, task types.Task) types.Task {
+	taskID := strings.TrimSpace(task.TaskID)
+	if taskID == "" {
+		return task
+	}
+	loaded, err := s.cfg.TaskStore.GetTask(ctx, taskID)
+	if err != nil {
+		return task
+	}
+	return loaded
 }
 
 func (s *Session) isTeamCallbackEligible(task types.Task) bool {

@@ -192,11 +192,15 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	if _, ok := task.Metadata["source"]; !ok {
 		task.Metadata["source"] = "task_create"
 	}
+	parentTaskID := ParentTaskIDFromContext(ctx)
 
 	assignedRole := strings.TrimSpace(payload.AssignedRole)
 	teamID := strings.TrimSpace(t.TeamID)
 	if teamID != "" {
 		roleName := strings.TrimSpace(t.RoleName)
+		if assignedRole == "" && t.IsCoordinator {
+			return types.HostOpRequest{}, fmt.Errorf("task_create.assignedRole is required for coordinators in team mode")
+		}
 		if assignedRole == "" {
 			assignedRole = roleName
 		}
@@ -208,6 +212,10 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		task.AssignedToType = "role"
 		task.AssignedTo = assignedRole
 		task.CreatedBy = roleName
+		if parentTaskID != "" && assignedRole != roleName {
+			task.Metadata["batchMode"] = true
+			task.Metadata["batchParentTaskId"] = parentTaskID
+		}
 	}
 
 	if payload.SpawnWorker {
@@ -230,6 +238,10 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		task.AssignedTo = childRunID
 		task.Metadata["source"] = "spawn_worker"
 		task.Metadata["parentRunId"] = strings.TrimSpace(t.RunID)
+		if parentTaskID != "" {
+			task.Metadata["batchMode"] = true
+			task.Metadata["batchParentTaskId"] = parentTaskID
+		}
 	}
 
 	if err := t.Store.CreateTask(ctx, task); err != nil {
@@ -242,6 +254,10 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	if payload.SpawnWorker {
 		msg = fmt.Sprintf("Task %s created and worker agent spawned. You delegated this to a subagent; do not do the same work yourself. The worker was asked to write outputs under /workspace. When the callback task (callback-%s) appears in your inbox, process it with task_review and inspect worker files under /workspace/subagent-<N>/ and summaries under /tasks/subagent-<N>/<date>/<taskID>/SUMMARY.md.", taskID, taskID)
 		inputForEvent := map[string]string{"goal": goal, "taskId": taskID}
+		if metadataBool(task.Metadata, "batchMode") {
+			inputForEvent["batchMode"] = "true"
+			inputForEvent["batchParentTaskId"] = metadataString(task.Metadata, "batchParentTaskId")
+		}
 		if task.AssignedToType == "agent" {
 			inputForEvent["childRunId"] = task.AssignedTo
 		}
@@ -249,6 +265,10 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		return types.HostOpRequest{Op: types.HostOpToolResult, Tag: "task_create", Text: msg, Input: inputJSON}, nil
 	}
 	inputForEvent := map[string]string{"goal": goal, "taskId": taskID}
+	if metadataBool(task.Metadata, "batchMode") {
+		inputForEvent["batchMode"] = "true"
+		inputForEvent["batchParentTaskId"] = metadataString(task.Metadata, "batchParentTaskId")
+	}
 	inputJSON, _ := json.Marshal(inputForEvent)
 	return types.HostOpRequest{
 		Op:    types.HostOpToolResult,
@@ -287,4 +307,37 @@ func (t *TaskCreateTool) validateAssignedRole(assignedRole string) error {
 		return nil
 	}
 	return fmt.Errorf("task_create.assignedRole %q is not permitted for role %q", assignedRole, roleName)
+}
+
+func metadataString(m map[string]any, key string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(raw))
+}
+
+func metadataBool(m map[string]any, key string) bool {
+	if len(m) == 0 {
+		return false
+	}
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return false
+	}
+	switch v := raw.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	case float64:
+		return v != 0
+	case int:
+		return v != 0
+	default:
+		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(v)), "true")
+	}
 }

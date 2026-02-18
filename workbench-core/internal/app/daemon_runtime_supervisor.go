@@ -100,13 +100,14 @@ func (m *managedRuntime) SetCurrentModel(model string) {
 // completes a subagent callback task successfully (ephemeral subagent cleanup).
 type subagentCleanupNotifier struct {
 	supervisor *runtimeSupervisor
+	store      pkgtask.TaskServiceForSupervisor
 	next       agent.Notifier
 }
 
 func (n *subagentCleanupNotifier) Notify(ctx context.Context, task types.Task, tr types.TaskResult) error {
 	if n != nil && n.supervisor != nil {
-		if source, _ := task.Metadata["source"].(string); source == "subagent.callback" &&
-			tr.Status == types.TaskStatusSucceeded {
+		source, _ := task.Metadata["source"].(string)
+		if source == "subagent.callback" && tr.Status == types.TaskStatusSucceeded {
 			// Only cleanup on explicit approval or legacy no-review-gate callbacks.
 			// "retry" keeps the child alive; "escalate" defers cleanup to escalation resolution.
 			reviewDecision, _ := task.Metadata["reviewDecision"].(string)
@@ -117,6 +118,27 @@ func (n *subagentCleanupNotifier) Notify(ctx context.Context, task types.Task, t
 					if n.supervisor.sessionService != nil {
 						_, _ = n.supervisor.sessionService.StopRun(context.Background(), runID, types.RunStatusSucceeded, "")
 					}
+				}
+			}
+		}
+		if source == "subagent.batch.callback" && tr.Status == types.TaskStatusSucceeded && n.store != nil {
+			decisions, _ := task.Metadata["batchItemDecisions"].(map[string]any)
+			for callbackTaskID, rawDecision := range decisions {
+				if !strings.EqualFold(strings.TrimSpace(fmt.Sprint(rawDecision)), "approve") {
+					continue
+				}
+				callbackTask, err := n.store.GetTask(ctx, strings.TrimSpace(callbackTaskID))
+				if err != nil {
+					continue
+				}
+				runID, _ := callbackTask.Metadata["sourceRunId"].(string)
+				runID = strings.TrimSpace(runID)
+				if runID == "" {
+					continue
+				}
+				_ = n.supervisor.StopRun(runID)
+				if n.supervisor.sessionService != nil {
+					_, _ = n.supervisor.sessionService.StopRun(context.Background(), runID, types.RunStatusSucceeded, "")
 				}
 			}
 		}
@@ -393,11 +415,12 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		}
 		isCoordinator = strings.EqualFold(strings.TrimSpace(roleCfg.Name), coordinatorRole)
 		activeProfile = &profile.Profile{
-			ID:          strings.TrimSpace(roleCfg.Name),
-			Description: strings.TrimSpace(roleCfg.Description),
-			Prompts:     roleCfg.Prompts,
-			Skills:      append([]string(nil), roleCfg.Skills...),
-			Heartbeat:   append([]profile.HeartbeatJob(nil), roleCfg.Heartbeat...),
+			ID:           strings.TrimSpace(roleCfg.Name),
+			Description:  strings.TrimSpace(roleCfg.Description),
+			Prompts:      roleCfg.Prompts,
+			Skills:       append([]string(nil), roleCfg.Skills...),
+			AllowedTools: append([]string(nil), roleCfg.AllowedTools...),
+			Heartbeat:    append([]profile.HeartbeatJob(nil), roleCfg.Heartbeat...),
 		}
 	}
 
@@ -601,6 +624,13 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			return nil, err
 		}
 	}
+	if !isChildRun {
+		if err := applyAllowedTools(registry, activeProfile.AllowedTools); err != nil {
+			orderedEmitter.Close()
+			_ = rt.Shutdown(context.Background())
+			return nil, err
+		}
+	}
 	promptToolSpec := agent.PromptToolSpecFromSources(registry, nil)
 	if isChildRun {
 		agentCfg.SystemPrompt = prompts.DefaultSubAgentSystemPromptWithTools(promptToolSpec)
@@ -627,7 +657,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		Events:               orderedEmitter,
 		Memory:               &textMemoryAdapter{store: s.memoryStore},
 		MemorySearchLimit:    3,
-		Notifier:             &subagentCleanupNotifier{supervisor: s, next: s.notifier},
+		Notifier:             &subagentCleanupNotifier{supervisor: s, store: s.taskService, next: s.notifier},
 		PollInterval:         s.pollInterval,
 		MaxReadBytes:         256 * 1024,
 		LeaseTTL:             2 * time.Minute,

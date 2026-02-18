@@ -148,6 +148,25 @@ func TestCopyDirWithConflictStrategy_Overwrite(t *testing.T) {
 	}
 }
 
+func TestConflictStrategyFromEnv(t *testing.T) {
+	t.Setenv(envSkillsSeedConflict, "overwrite")
+	if got := conflictStrategyFromEnv(); got != seedConflictOverwrite {
+		t.Fatalf("strategy=%v want=%v", got, seedConflictOverwrite)
+	}
+	t.Setenv(envSkillsSeedConflict, "keep")
+	if got := conflictStrategyFromEnv(); got != seedConflictKeep {
+		t.Fatalf("strategy=%v want=%v", got, seedConflictKeep)
+	}
+	t.Setenv(envSkillsSeedConflict, "abort")
+	if got := conflictStrategyFromEnv(); got != seedConflictAbort {
+		t.Fatalf("strategy=%v want=%v", got, seedConflictAbort)
+	}
+	t.Setenv(envSkillsSeedConflict, "nope")
+	if got := conflictStrategyFromEnv(); got != seedConflictUnset {
+		t.Fatalf("strategy=%v want=%v", got, seedConflictUnset)
+	}
+}
+
 func withTestRepoDefaults(t *testing.T, root string) {
 	t.Helper()
 	prev, err := os.Getwd()

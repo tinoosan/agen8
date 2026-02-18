@@ -355,6 +355,14 @@ func (taskCreateRenderer) RenderArguments(a Activity, telemetry bool, b *strings
 		b.WriteString(v)
 		b.WriteString("`\n")
 	}
+	if v := strings.TrimSpace(a.Data["batchMode"]); strings.EqualFold(v, "true") {
+		b.WriteString("- batchMode: `true`\n")
+	}
+	if v := strings.TrimSpace(a.Data["batchParentTaskId"]); v != "" {
+		b.WriteString("- batchParentTaskId: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
 	if v := strings.TrimSpace(a.Data["output"]); v != "" {
 		b.WriteString("- output: ")
 		b.WriteString(v)
