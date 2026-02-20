@@ -19,6 +19,15 @@ const (
 	openRouterProvider      = "openrouter"
 	openRouterAPIKeyEnv     = "OPENROUTER_API_KEY"
 	openRouterModelEnv      = "OPENROUTER_MODEL"
+
+	onboardingBanner = `
+============================================
+  Welcome to Agen8 — autonomous agent runtime
+============================================
+
+This guided setup will configure the daemon for its first run.
+You will need an API key from your LLM provider (default: OpenRouter).
+`
 )
 
 var (
@@ -64,7 +73,7 @@ func runInteractiveRuntimeOnboarding(dataDir string, in *os.File, out io.Writer)
 	}
 	reader := bufio.NewReader(in)
 
-	if _, err := fmt.Fprintln(out, "Agen8 first-run setup"); err != nil {
+	if _, err := fmt.Fprint(out, onboardingBanner); err != nil {
 		return err
 	}
 	provider, err := onboardingPrompt(reader, out, "Provider", openRouterProvider)
@@ -96,10 +105,34 @@ func runInteractiveRuntimeOnboarding(dataDir string, in *os.File, out io.Writer)
 	if err := upsertRuntimeConfigDefaultsModel(dataDir, model); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(out, "Saved API key to OS keychain and updated runtime defaults."); err != nil {
-		return err
-	}
+	printOnboardingSummary(out, provider, model, dataDir)
 	return nil
+}
+
+func printOnboardingSummary(out io.Writer, provider, model, dataDir string) {
+	cfgPath := filepath.Join(strings.TrimSpace(dataDir), "config.toml")
+	fmt.Fprintf(out, `
+--- Setup complete ---
+
+  Provider:   %s
+  Model:      %s
+  API key:    saved to OS keychain
+  Config:     %s
+
+--- Next steps ---
+
+  Start the daemon:
+    agen8 daemon
+
+  Monitor with the TUI:
+    agen8 monitor
+
+  Attach in control mode:
+    agen8
+
+  Edit runtime config:
+    %s
+`, provider, model, cfgPath, cfgPath)
 }
 
 func keyringAccountName(provider string) string {

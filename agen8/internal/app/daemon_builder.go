@@ -618,10 +618,20 @@ func (b *DaemonBuilder) startBackgroundServices() error {
 		Message: "Daemon started",
 		Data:    map[string]string{},
 	})
-	if b.protocolEnabled {
-		log.Printf("daemon: protocol control-plane ready at %s — attach with: agen8", strings.TrimSpace(b.resolved.RPCListen))
-	} else {
-		log.Printf("daemon: ready — attach with: agen8")
+	profileName := "default"
+	if b.prof != nil && strings.TrimSpace(b.prof.ID) != "" {
+		profileName = b.prof.ID
 	}
+	log.Printf("daemon: ready (model=%s, profile=%s)", b.effectiveModel, profileName)
+	if b.protocolEnabled {
+		log.Printf("daemon:   rpc: %s", strings.TrimSpace(b.resolved.RPCListen))
+	}
+	if webhookAddr != "" {
+		log.Printf("daemon:   webhook: %s", webhookAddr)
+	}
+	if healthAddr != "" {
+		log.Printf("daemon:   health: %s", healthAddr)
+	}
+	log.Printf("daemon:   attach with: agen8")
 	return nil
 }

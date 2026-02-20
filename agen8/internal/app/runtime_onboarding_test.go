@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -82,8 +83,15 @@ func TestRunInteractiveRuntimeOnboarding_PersistsKeyAndModel(t *testing.T) {
 		return "interactive-key", nil
 	}
 
-	if err := runInteractiveRuntimeOnboarding(dataDir, nil, nil); err != nil {
+	var out bytes.Buffer
+	if err := runInteractiveRuntimeOnboarding(dataDir, nil, &out); err != nil {
 		t.Fatalf("runInteractiveRuntimeOnboarding: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{"Welcome to Agen8", "Setup complete", "openrouter", "z-ai/GLM-5", "agen8 daemon"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing %q\ngot:\n%s", want, output)
+		}
 	}
 	if storedService != agen8KeyringService || storedAccount != "openrouter.api_key" || storedKey != "interactive-key" {
 		t.Fatalf("unexpected keyring write: %q %q %q", storedService, storedAccount, storedKey)
@@ -97,5 +105,25 @@ func TestRunInteractiveRuntimeOnboarding_PersistsKeyAndModel(t *testing.T) {
 	}
 	if !strings.Contains(string(cfgRaw), `model = "z-ai/GLM-5"`) {
 		t.Fatalf("expected model persisted, got:\n%s", string(cfgRaw))
+	}
+}
+
+func TestPrintOnboardingSummary(t *testing.T) {
+	var buf bytes.Buffer
+	printOnboardingSummary(&buf, "openrouter", "z-ai/GLM-5", "/tmp/agen8-test")
+	output := buf.String()
+	for _, want := range []string{
+		"Setup complete",
+		"Provider:   openrouter",
+		"Model:      z-ai/GLM-5",
+		"saved to OS keychain",
+		"/tmp/agen8-test/config.toml",
+		"agen8 daemon",
+		"agen8 monitor",
+		"Next steps",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing %q\ngot:\n%s", want, output)
+		}
 	}
 }
