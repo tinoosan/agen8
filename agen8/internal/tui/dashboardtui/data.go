@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
@@ -41,6 +42,7 @@ type dataLoadedMsg struct {
 	sessionMode string
 	teamID      string
 	runID       string
+	preserve    bool
 	connected   bool
 	err         error
 }
@@ -69,15 +71,23 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			return dataLoadedMsg{err: fmt.Errorf("session id is required")}
 		}
 
+		scopeClient := rpcscope.NewClient(endpoint, sid).WithTimeout(5 * time.Second)
+		scope, err := scopeClient.RefreshScope(ctx)
+		if err != nil {
+			if rpcscope.IsScopeUnavailable(err) {
+				return dataLoadedMsg{preserve: true, connected: true, err: err}
+			}
+			return dataLoadedMsg{err: err}
+		}
+		mode := fallback(strings.TrimSpace(scope.Mode), "standalone")
+		teamID := strings.TrimSpace(scope.TeamID)
+		runID := strings.TrimSpace(scope.RunID)
+		threadID := protocol.ThreadID(scope.ThreadID)
+
 		session, err := fetchSessionItem(call, sid)
 		if err != nil {
 			return dataLoadedMsg{err: err}
 		}
-
-		mode := fallback(strings.TrimSpace(session.Mode), "standalone")
-		teamID := strings.TrimSpace(session.TeamID)
-		runID := strings.TrimSpace(session.CurrentRunID)
-		threadID := protocol.ThreadID(sid)
 
 		var agentsRes protocol.AgentListResult
 		if err := call(protocol.MethodAgentList, protocol.AgentListParams{
@@ -127,14 +137,22 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 				seenTask := map[string]bool{}
 				views := []string{"inbox", "outbox"}
 				for _, view := range views {
+					if teamID == "" && runID == "" {
+						continue
+					}
 					var taskRes protocol.TaskListResult
-					if err := call(protocol.MethodTaskList, protocol.TaskListParams{
+					params := protocol.TaskListParams{
 						ThreadID: threadID,
 						TeamID:   teamID,
+						RunID:    runID,
 						View:     view,
 						Limit:    1000,
 						Offset:   0,
-					}, &taskRes); err != nil {
+					}
+					if err := scopeClient.Call(ctx, protocol.MethodTaskList, params, &taskRes); err != nil {
+						if rpcscope.IsScopeUnavailable(err) {
+							return dataLoadedMsg{preserve: true, connected: true, err: err}
+						}
 						continue
 					}
 					for _, t := range taskRes.Tasks {

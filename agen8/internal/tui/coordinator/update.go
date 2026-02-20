@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -41,6 +42,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionMode = msg.sessionMode
 		m.teamID = msg.teamID
 		m.runID = msg.runID
+		m.threadID = msg.threadID
 		m.coordinatorRole = msg.coordinatorRole
 		return m, nil
 
@@ -61,11 +63,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFeedback(msg.err.Error(), feedbackErr)
 			return m, nil
 		}
+		m.applyRecoveredScope(msg.scope)
 		m.feed = append(m.feed, feedEntry{
 			kind:      feedUser,
 			timestamp: time.Now(),
 			text:      msg.goal,
 		})
+		m.appendReconnectNotice(msg.recovered)
 		m.setFeedback("queued", feedbackOK)
 		m.pinFeedToBottom()
 		return m, nil
@@ -75,6 +79,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFeedback(msg.err.Error(), feedbackErr)
 			return m, nil
 		}
+		m.applyRecoveredScope(msg.scope)
 		text := "Session " + msg.action + "d"
 		if msg.action == "stop" {
 			text = "Session stopped"
@@ -84,6 +89,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			timestamp: time.Now(),
 			text:      text,
 		})
+		m.appendReconnectNotice(msg.recovered)
 		m.setFeedback(text, feedbackOK)
 		m.pinFeedToBottom()
 		return m, nil
@@ -141,11 +147,11 @@ func (m *Model) handleSlash(line string) tea.Cmd {
 	cmd := strings.ToLower(strings.TrimSpace(line))
 	switch cmd {
 	case "/pause":
-		return sessionActionCmd(m.endpoint, m.sessionID, m.runID, "pause")
+		return sessionActionCmd(m.endpoint, m.sessionID, "pause")
 	case "/resume":
-		return sessionActionCmd(m.endpoint, m.sessionID, m.runID, "resume")
+		return sessionActionCmd(m.endpoint, m.sessionID, "resume")
 	case "/stop":
-		return sessionActionCmd(m.endpoint, m.sessionID, m.runID, "stop")
+		return sessionActionCmd(m.endpoint, m.sessionID, "stop")
 	case "/help":
 		m.setFeedback("commands: /pause /resume /stop /help /quit", feedbackInfo)
 		return nil
@@ -186,6 +192,36 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 func (m *Model) pinFeedToBottom() {
 	m.liveFollow = true
 	m.feedScroll = maxInt(0, m.totalFeedLines()-m.feedHeight())
+}
+
+func (m *Model) applyRecoveredScope(scope rpcscope.ScopeState) {
+	if strings.TrimSpace(scope.TeamID) != "" {
+		m.teamID = strings.TrimSpace(scope.TeamID)
+	}
+	if strings.TrimSpace(scope.RunID) != "" {
+		m.runID = strings.TrimSpace(scope.RunID)
+	}
+	if strings.TrimSpace(scope.ThreadID) != "" {
+		m.threadID = strings.TrimSpace(scope.ThreadID)
+	}
+	if strings.TrimSpace(scope.CoordinatorRole) != "" {
+		m.coordinatorRole = strings.TrimSpace(scope.CoordinatorRole)
+	}
+}
+
+func (m *Model) appendReconnectNotice(recovered bool) {
+	if !recovered {
+		return
+	}
+	if time.Since(m.lastReconnectAt) < 5*time.Second {
+		return
+	}
+	m.lastReconnectAt = time.Now()
+	m.feed = append(m.feed, feedEntry{
+		kind:      feedSystem,
+		timestamp: m.lastReconnectAt,
+		text:      "reconnected context",
+	})
 }
 
 func (m *Model) feedHeight() int {

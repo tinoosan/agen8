@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
@@ -126,37 +128,31 @@ func handleCoordinatorCommand(cmd *cobra.Command, state coordinatorSessionState,
 }
 
 func rpcSessionActionWithRecovery(cmd *cobra.Command, state coordinatorSessionState, method string) error {
-	call := func() error {
-		switch method {
-		case protocol.MethodSessionPause:
-			return rpcCall(cmd.Context(), method, protocol.SessionPauseParams{
-				ThreadID:  protocol.ThreadID(state.sessionID),
-				SessionID: state.sessionID,
-			}, &protocol.SessionPauseResult{})
-		case protocol.MethodSessionResume:
-			return rpcCall(cmd.Context(), method, protocol.SessionResumeParams{
-				ThreadID:  protocol.ThreadID(state.sessionID),
-				SessionID: state.sessionID,
-			}, &protocol.SessionResumeResult{})
-		case protocol.MethodSessionStop:
-			return rpcCall(cmd.Context(), method, protocol.SessionStopParams{
-				ThreadID:  protocol.ThreadID(state.sessionID),
-				SessionID: state.sessionID,
-			}, &protocol.SessionStopResult{})
-		default:
-			return fmt.Errorf("unsupported session method %s", method)
-		}
-	}
-	err := call()
-	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "thread not found") {
+	client := rpcscope.NewClient(resolvedRPCEndpoint(), state.sessionID).WithTimeout(5 * time.Second)
+	ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+	defer cancel()
+	switch method {
+	case protocol.MethodSessionPause:
+		var out protocol.SessionPauseResult
+		_, _, err := client.CallWithRecovery(ctx, method, func(scope rpcscope.ScopeState) (any, error) {
+			return protocol.SessionPauseParams{ThreadID: protocol.ThreadID(scope.ThreadID), SessionID: scope.SessionID}, nil
+		}, &out)
 		return err
-	}
-	resolved, rerr := rpcResolveThread(cmd.Context(), state.sessionID, state.runID)
-	if rerr != nil {
+	case protocol.MethodSessionResume:
+		var out protocol.SessionResumeResult
+		_, _, err := client.CallWithRecovery(ctx, method, func(scope rpcscope.ScopeState) (any, error) {
+			return protocol.SessionResumeParams{ThreadID: protocol.ThreadID(scope.ThreadID), SessionID: scope.SessionID}, nil
+		}, &out)
 		return err
+	case protocol.MethodSessionStop:
+		var out protocol.SessionStopResult
+		_, _, err := client.CallWithRecovery(ctx, method, func(scope rpcscope.ScopeState) (any, error) {
+			return protocol.SessionStopParams{ThreadID: protocol.ThreadID(scope.ThreadID), SessionID: scope.SessionID}, nil
+		}, &out)
+		return err
+	default:
+		return fmt.Errorf("unsupported session method %s", method)
 	}
-	_ = updateProjectActiveSession(resolved.SessionID, resolved.TeamID, resolved.RunID, "reconnect")
-	return call()
 }
 
 func submitCoordinatorGoal(cmd *cobra.Command, state coordinatorSessionState, goal string) error {
@@ -164,26 +160,28 @@ func submitCoordinatorGoal(cmd *cobra.Command, state coordinatorSessionState, go
 	if goal == "" {
 		return fmt.Errorf("goal is required")
 	}
-	retries := 0
-	for {
-		var out protocol.TaskCreateResult
-		err := rpcCall(cmd.Context(), protocol.MethodTaskCreate, protocol.TaskCreateParams{
-			ThreadID:     protocol.ThreadID(state.sessionID),
-			TeamID:       state.teamID,
-			RunID:        state.runID,
+	client := rpcscope.NewClient(resolvedRPCEndpoint(), state.sessionID).WithTimeout(5 * time.Second)
+	client.SetState(rpcscope.ScopeState{
+		SessionID:       strings.TrimSpace(state.sessionID),
+		ThreadID:        strings.TrimSpace(state.sessionID),
+		TeamID:          strings.TrimSpace(state.teamID),
+		RunID:           strings.TrimSpace(state.runID),
+		CoordinatorRole: strings.TrimSpace(state.coordinatorRole),
+	})
+	ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+	defer cancel()
+	var out protocol.TaskCreateResult
+	_, _, err := client.CallWithRecovery(ctx, protocol.MethodTaskCreate, func(scope rpcscope.ScopeState) (any, error) {
+		return protocol.TaskCreateParams{
+			ThreadID:     protocol.ThreadID(scope.ThreadID),
+			TeamID:       strings.TrimSpace(scope.TeamID),
+			RunID:        strings.TrimSpace(scope.RunID),
 			Goal:         goal,
 			TaskKind:     "user_message",
-			AssignedRole: state.coordinatorRole,
-		}, &out)
-		if err == nil {
-			return nil
-		}
-		if !isRetryableLiveError(err) || retries >= 5 {
-			return err
-		}
-		time.Sleep(time.Duration(300*(1<<retries)) * time.Millisecond)
-		retries++
-	}
+			AssignedRole: strings.TrimSpace(scope.CoordinatorRole),
+		}, nil
+	}, &out)
+	return err
 }
 
 func resolveCoordinatorState(cmd *cobra.Command, sessionID, runID, teamID string) (coordinatorSessionState, error) {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tinoosan/agen8/internal/store"
+	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 	agentstate "github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/fsutil"
 	"github.com/tinoosan/agen8/pkg/protocol"
@@ -199,9 +201,18 @@ var mailWatchCmd = &cobra.Command{
 }
 
 func renderMailWatchOnce(cmd *cobra.Command, sessionID string, view string) error {
+	client := rpcscope.NewClient(resolvedRPCEndpoint(), sessionID).WithTimeout(5 * time.Second)
+	ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+	defer cancel()
+	scope, err := client.RefreshScope(ctx)
+	if err != nil {
+		return err
+	}
 	var out protocol.TaskListResult
-	if err := rpcCall(cmd.Context(), protocol.MethodTaskList, protocol.TaskListParams{
-		ThreadID: protocol.ThreadID(sessionID),
+	if err := client.Call(ctx, protocol.MethodTaskList, protocol.TaskListParams{
+		ThreadID: protocol.ThreadID(scope.ThreadID),
+		TeamID:   strings.TrimSpace(scope.TeamID),
+		RunID:    strings.TrimSpace(scope.RunID),
 		View:     view,
 		Limit:    200,
 		Offset:   0,

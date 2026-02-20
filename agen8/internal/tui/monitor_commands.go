@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
+	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 	"github.com/tinoosan/agen8/pkg/fsutil"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	"github.com/tinoosan/agen8/pkg/resources"
@@ -253,22 +255,18 @@ func cmdPause(m *monitorModel, rest string) tea.Cmd {
 			if controlSessionID == "" {
 				controlSessionID = strings.TrimSpace(m.rpcRun().SessionID)
 			}
+			client := rpcscope.NewClient(strings.TrimSpace(m.rpcEndpoint), controlSessionID).WithTimeout(2 * time.Second)
 			var res protocol.SessionPauseResult
-			if err := m.rpcRoundTrip(protocol.MethodSessionPause, protocol.SessionPauseParams{
-				ThreadID:  protocol.ThreadID(controlSessionID),
-				SessionID: controlSessionID,
-			}, &res); err != nil {
-				if strings.Contains(strings.ToLower(err.Error()), "thread not found") {
-					if refreshed := strings.TrimSpace(m.resolveTeamControlSessionID()); refreshed != "" && refreshed != controlSessionID {
-						if rerr := m.rpcRoundTrip(protocol.MethodSessionPause, protocol.SessionPauseParams{
-							ThreadID:  protocol.ThreadID(refreshed),
-							SessionID: refreshed,
-						}, &res); rerr == nil {
-							return commandLinesMsg{lines: []string{fmt.Sprintf("[pause] team paused (%d runs)", len(res.AffectedRunIDs))}}
-						}
-					}
-				}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			scope, recovered, err := client.CallWithRecovery(ctx, protocol.MethodSessionPause, func(scope rpcscope.ScopeState) (any, error) {
+				return protocol.SessionPauseParams{ThreadID: protocol.ThreadID(scope.ThreadID), SessionID: scope.SessionID}, nil
+			}, &res)
+			if err != nil {
 				return commandLinesMsg{lines: []string{"[pause] error: " + err.Error()}}
+			}
+			if recovered {
+				m.sessionID = strings.TrimSpace(scope.SessionID)
 			}
 			return commandLinesMsg{lines: []string{fmt.Sprintf("[pause] team paused (%d runs)", len(res.AffectedRunIDs))}}
 		}
@@ -299,22 +297,18 @@ func cmdResume(m *monitorModel, rest string) tea.Cmd {
 			if controlSessionID == "" {
 				controlSessionID = strings.TrimSpace(m.rpcRun().SessionID)
 			}
+			client := rpcscope.NewClient(strings.TrimSpace(m.rpcEndpoint), controlSessionID).WithTimeout(2 * time.Second)
 			var res protocol.SessionResumeResult
-			if err := m.rpcRoundTrip(protocol.MethodSessionResume, protocol.SessionResumeParams{
-				ThreadID:  protocol.ThreadID(controlSessionID),
-				SessionID: controlSessionID,
-			}, &res); err != nil {
-				if strings.Contains(strings.ToLower(err.Error()), "thread not found") {
-					if refreshed := strings.TrimSpace(m.resolveTeamControlSessionID()); refreshed != "" && refreshed != controlSessionID {
-						if rerr := m.rpcRoundTrip(protocol.MethodSessionResume, protocol.SessionResumeParams{
-							ThreadID:  protocol.ThreadID(refreshed),
-							SessionID: refreshed,
-						}, &res); rerr == nil {
-							return commandLinesMsg{lines: []string{fmt.Sprintf("[resume] team resumed (%d runs)", len(res.AffectedRunIDs))}}
-						}
-					}
-				}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			scope, recovered, err := client.CallWithRecovery(ctx, protocol.MethodSessionResume, func(scope rpcscope.ScopeState) (any, error) {
+				return protocol.SessionResumeParams{ThreadID: protocol.ThreadID(scope.ThreadID), SessionID: scope.SessionID}, nil
+			}, &res)
+			if err != nil {
 				return commandLinesMsg{lines: []string{"[resume] error: " + err.Error()}}
+			}
+			if recovered {
+				m.sessionID = strings.TrimSpace(scope.SessionID)
 			}
 			return commandLinesMsg{lines: []string{fmt.Sprintf("[resume] team resumed (%d runs)", len(res.AffectedRunIDs))}}
 		}
@@ -347,22 +341,18 @@ func cmdStop(m *monitorModel, rest string) tea.Cmd {
 				controlSessionID = strings.TrimSpace(m.rpcRun().SessionID)
 			}
 		}
+		client := rpcscope.NewClient(strings.TrimSpace(m.rpcEndpoint), controlSessionID).WithTimeout(2 * time.Second)
 		var res protocol.SessionStopResult
-		if err := m.rpcRoundTrip(protocol.MethodSessionStop, protocol.SessionStopParams{
-			ThreadID:  protocol.ThreadID(controlSessionID),
-			SessionID: controlSessionID,
-		}, &res); err != nil {
-			if strings.TrimSpace(m.teamID) != "" && strings.Contains(strings.ToLower(err.Error()), "thread not found") {
-				if refreshed := strings.TrimSpace(m.resolveTeamControlSessionID()); refreshed != "" && refreshed != controlSessionID {
-					if rerr := m.rpcRoundTrip(protocol.MethodSessionStop, protocol.SessionStopParams{
-						ThreadID:  protocol.ThreadID(refreshed),
-						SessionID: refreshed,
-					}, &res); rerr == nil {
-						return commandLinesMsg{lines: []string{fmt.Sprintf("[stop] team stopped (%d runs)", len(res.AffectedRunIDs))}}
-					}
-				}
-			}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		scope, recovered, err := client.CallWithRecovery(ctx, protocol.MethodSessionStop, func(scope rpcscope.ScopeState) (any, error) {
+			return protocol.SessionStopParams{ThreadID: protocol.ThreadID(scope.ThreadID), SessionID: scope.SessionID}, nil
+		}, &res)
+		if err != nil {
 			return commandLinesMsg{lines: []string{"[stop] error: " + err.Error()}}
+		}
+		if recovered {
+			m.sessionID = strings.TrimSpace(scope.SessionID)
 		}
 		if strings.TrimSpace(m.teamID) != "" {
 			return commandLinesMsg{lines: []string{fmt.Sprintf("[stop] team stopped (%d runs)", len(res.AffectedRunIDs))}}

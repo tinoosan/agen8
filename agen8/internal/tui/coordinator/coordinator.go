@@ -51,15 +51,17 @@ type Model struct {
 	sessionMode     string
 	teamID          string
 	runID           string
+	threadID        string
 	coordinatorRole string
 
 	input         textinput.Model
 	spinFrame     int
 	scrollPercent float64
 
-	feedback     string
-	feedbackKind int
-	feedbackAt   time.Time
+	feedback        string
+	feedbackKind    int
+	feedbackAt      time.Time
+	lastReconnectAt time.Time
 }
 
 // Run launches the full-screen coordinator TUI.

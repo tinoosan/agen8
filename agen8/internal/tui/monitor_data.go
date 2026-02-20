@@ -12,6 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/store"
+	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 	agentstate "github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/cost"
@@ -366,22 +367,29 @@ func (m *monitorModel) loadInboxPage() tea.Cmd {
 
 	return func() tea.Msg {
 		fetch := func(targetPage int) (protocol.TaskListResult, error) {
-			params := protocol.TaskListParams{
-				ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
-				View:     "inbox",
-				Limit:    pageSize,
-				Offset:   targetPage * pageSize,
-			}
-			if strings.TrimSpace(m.teamID) != "" {
-				params.TeamID = strings.TrimSpace(m.teamID)
-				if strings.TrimSpace(m.focusedRunID) != "" {
+			var res protocol.TaskListResult
+			client := rpcscope.NewClient(strings.TrimSpace(m.rpcEndpoint), strings.TrimSpace(m.rpcRun().SessionID)).WithTimeout(2 * time.Second)
+			client.SetState(rpcscope.ScopeState{
+				SessionID: strings.TrimSpace(m.rpcRun().SessionID),
+				ThreadID:  strings.TrimSpace(m.rpcRun().SessionID),
+				TeamID:    strings.TrimSpace(m.teamID),
+				RunID:     strings.TrimSpace(m.runID),
+			})
+			_, _, err := client.CallWithRecovery(m.ctx, protocol.MethodTaskList, func(scope rpcscope.ScopeState) (any, error) {
+				params := protocol.TaskListParams{
+					ThreadID: protocol.ThreadID(scope.ThreadID),
+					TeamID:   strings.TrimSpace(scope.TeamID),
+					RunID:    strings.TrimSpace(scope.RunID),
+					View:     "inbox",
+					Limit:    pageSize,
+					Offset:   targetPage * pageSize,
+				}
+				if strings.TrimSpace(scope.TeamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
 					params.RunID = strings.TrimSpace(m.focusedRunID)
 				}
-			} else {
-				params.RunID = strings.TrimSpace(m.runID)
-			}
-			var res protocol.TaskListResult
-			if err := m.rpcRoundTrip(protocol.MethodTaskList, params, &res); err != nil {
+				return params, nil
+			}, &res)
+			if err != nil {
 				return protocol.TaskListResult{}, err
 			}
 			return res, nil
@@ -457,22 +465,29 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 
 	return func() tea.Msg {
 		fetch := func(targetPage int) (protocol.TaskListResult, error) {
-			params := protocol.TaskListParams{
-				ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
-				View:     "outbox",
-				Limit:    pageSize,
-				Offset:   targetPage * pageSize,
-			}
-			if strings.TrimSpace(m.teamID) != "" {
-				params.TeamID = strings.TrimSpace(m.teamID)
-				if strings.TrimSpace(m.focusedRunID) != "" {
+			var res protocol.TaskListResult
+			client := rpcscope.NewClient(strings.TrimSpace(m.rpcEndpoint), strings.TrimSpace(m.rpcRun().SessionID)).WithTimeout(2 * time.Second)
+			client.SetState(rpcscope.ScopeState{
+				SessionID: strings.TrimSpace(m.rpcRun().SessionID),
+				ThreadID:  strings.TrimSpace(m.rpcRun().SessionID),
+				TeamID:    strings.TrimSpace(m.teamID),
+				RunID:     strings.TrimSpace(m.runID),
+			})
+			_, _, err := client.CallWithRecovery(m.ctx, protocol.MethodTaskList, func(scope rpcscope.ScopeState) (any, error) {
+				params := protocol.TaskListParams{
+					ThreadID: protocol.ThreadID(scope.ThreadID),
+					TeamID:   strings.TrimSpace(scope.TeamID),
+					RunID:    strings.TrimSpace(scope.RunID),
+					View:     "outbox",
+					Limit:    pageSize,
+					Offset:   targetPage * pageSize,
+				}
+				if strings.TrimSpace(scope.TeamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
 					params.RunID = strings.TrimSpace(m.focusedRunID)
 				}
-			} else {
-				params.RunID = strings.TrimSpace(m.runID)
-			}
-			var res protocol.TaskListResult
-			if err := m.rpcRoundTrip(protocol.MethodTaskList, params, &res); err != nil {
+				return params, nil
+			}, &res)
+			if err != nil {
 				return protocol.TaskListResult{}, err
 			}
 			return res, nil
@@ -597,10 +612,27 @@ func (m *monitorModel) loadTeamEvents() tea.Cmd {
 	for runID, cursor := range m.teamEventCursor {
 		cursors[runID] = cursor
 	}
+	failCounts := map[string]int{}
+	for runID, count := range m.teamEventFailCount {
+		failCounts[runID] = count
+	}
+	retryAfter := map[string]time.Time{}
+	for runID, at := range m.teamEventRetryAfter {
+		retryAfter[runID] = at
+	}
 	return func() tea.Msg {
 		all := make([]types.EventRecord, 0, 256)
 		next := map[string]int64{}
+		nextFail := map[string]int{}
+		nextRetry := map[string]time.Time{}
+		now := time.Now()
 		for _, runID := range runIDs {
+			if at := retryAfter[runID]; !at.IsZero() && now.Before(at) {
+				nextFail[runID] = failCounts[runID]
+				nextRetry[runID] = at
+				next[runID] = cursors[runID]
+				continue
+			}
 			after := cursors[runID]
 			var res protocol.EventsListPaginatedResult
 			if err := m.rpcRoundTrip(protocol.MethodEventsListPaginated, protocol.EventsListPaginatedParams{
@@ -609,8 +641,21 @@ func (m *monitorModel) loadTeamEvents() tea.Cmd {
 				Limit:    200,
 				SortDesc: false,
 			}, &res); err != nil {
+				fail := failCounts[runID] + 1
+				nextFail[runID] = fail
+				backoff := 500 * time.Millisecond
+				for i := 1; i < fail; i++ {
+					backoff *= 2
+					if backoff >= 8*time.Second {
+						backoff = 8 * time.Second
+						break
+					}
+				}
+				nextRetry[runID] = now.Add(backoff)
+				next[runID] = after
 				continue
 			}
+			nextFail[runID] = 0
 			batch := res.Events
 			cursor := res.Next
 			if cursor > 0 {
@@ -638,6 +683,8 @@ func (m *monitorModel) loadTeamEvents() tea.Cmd {
 		return teamEventsLoadedMsg{
 			events:  all,
 			cursors: next,
+			failed:  nextFail,
+			retryAt: nextRetry,
 		}
 	}
 }

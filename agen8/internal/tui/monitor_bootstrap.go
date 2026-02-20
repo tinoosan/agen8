@@ -116,6 +116,7 @@ func startEventsTailPoller(ctx context.Context, endpoint string, runID string, f
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 		lastSeq := fromSeq
+		failures := 0
 		for {
 			select {
 			case <-ctx.Done():
@@ -123,12 +124,24 @@ func startEventsTailPoller(ctx context.Context, endpoint string, runID string, f
 			case <-ticker.C:
 				evs, next, err := eventsRPCListPaginated(ctx, endpoint, runID, 100, false, lastSeq)
 				if err != nil {
+					failures++
+					backoff := 500 * time.Millisecond
+					for i := 1; i < failures; i++ {
+						backoff *= 2
+						if backoff >= 8*time.Second {
+							backoff = 8 * time.Second
+							break
+						}
+					}
+					ticker.Reset(backoff)
 					select {
 					case errCh <- err:
 					default:
 					}
 					continue
 				}
+				failures = 0
+				ticker.Reset(500 * time.Millisecond)
 				for _, e := range evs {
 					select {
 					case <-ctx.Done():
@@ -293,6 +306,8 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		seenEventIDs:                map[string]time.Time{},
 		teamRoleByRunID:             map[string]string{},
 		teamEventCursor:             map[string]int64{},
+		teamEventFailCount:          map[string]int{},
+		teamEventRetryAfter:         map[string]time.Time{},
 	}
 	if sessionActiveModel != "" {
 		m.model = sessionActiveModel
@@ -439,6 +454,8 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 		teamCoordinatorRunID:        teamCoordinatorRunID,
 		teamCoordinatorRole:         teamCoordinatorRole,
 		teamEventCursor:             teamEventCursor,
+		teamEventFailCount:          map[string]int{},
+		teamEventRetryAfter:         map[string]time.Time{},
 	}
 	m.activityDetail.MouseWheelEnabled = false
 	m.planViewport.MouseWheelEnabled = false
@@ -594,6 +611,8 @@ func newDetachedMonitorModel(ctx context.Context, cfg config.Config, result *Mon
 		seenEventIDs:                map[string]time.Time{},
 		teamRoleByRunID:             map[string]string{},
 		teamEventCursor:             map[string]int64{},
+		teamEventFailCount:          map[string]int{},
+		teamEventRetryAfter:         map[string]time.Time{},
 		detached:                    true,
 	}
 	m.activityDetail.MouseWheelEnabled = false

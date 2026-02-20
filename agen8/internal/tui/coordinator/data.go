@@ -8,11 +8,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	"github.com/tinoosan/agen8/pkg/types"
 )
-
-const detachedThreadID = protocol.ThreadID("detached-control")
 
 type feedKind int
 
@@ -36,6 +35,7 @@ type sessionLoadedMsg struct {
 	sessionMode     string
 	teamID          string
 	runID           string
+	threadID        string
 	coordinatorRole string
 	connected       bool
 	err             error
@@ -48,13 +48,17 @@ type activityLoadedMsg struct {
 }
 
 type goalSubmittedMsg struct {
-	goal string
-	err  error
+	goal      string
+	scope     rpcscope.ScopeState
+	recovered bool
+	err       error
 }
 
 type sessionActionMsg struct {
-	action string
-	err    error
+	action    string
+	scope     rpcscope.ScopeState
+	recovered bool
+	err       error
 }
 
 type tickMsg struct{}
@@ -63,61 +67,26 @@ func fetchSessionCmd(endpoint, sessionID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		cli := protocol.TCPClient{Endpoint: endpoint, Timeout: 5 * time.Second}
-
-		call := func(method string, params, out any) error {
-			if err := cli.Call(ctx, method, params, out); err != nil {
-				return fmt.Errorf("rpc %s: %w", method, err)
-			}
-			return nil
-		}
 
 		sid := strings.TrimSpace(sessionID)
 		if sid == "" {
 			return sessionLoadedMsg{err: fmt.Errorf("session id is required")}
 		}
 
-		var out protocol.SessionListResult
-		if err := call(protocol.MethodSessionList, protocol.SessionListParams{
-			ThreadID: detachedThreadID,
-			Limit:    500,
-			Offset:   0,
-		}, &out); err != nil {
+		client := rpcscope.NewClient(endpoint, sid).WithTimeout(5 * time.Second)
+		scope, err := client.RefreshScope(ctx)
+		if err != nil {
 			return sessionLoadedMsg{err: err}
 		}
 
-		var item *protocol.SessionListItem
-		for i := range out.Sessions {
-			if strings.TrimSpace(out.Sessions[i].SessionID) == sid {
-				item = &out.Sessions[i]
-				break
-			}
+		return sessionLoadedMsg{
+			sessionMode:     scope.Mode,
+			teamID:          scope.TeamID,
+			runID:           scope.RunID,
+			threadID:        scope.ThreadID,
+			coordinatorRole: scope.CoordinatorRole,
+			connected:       true,
 		}
-		if item == nil {
-			return sessionLoadedMsg{err: fmt.Errorf("session %q not found", sid)}
-		}
-
-		msg := sessionLoadedMsg{
-			sessionMode: fallback(strings.TrimSpace(item.Mode), "standalone"),
-			teamID:      strings.TrimSpace(item.TeamID),
-			runID:       strings.TrimSpace(item.CurrentRunID),
-			connected:   true,
-		}
-
-		if msg.teamID != "" {
-			var manifest protocol.TeamGetManifestResult
-			if err := call(protocol.MethodTeamGetManifest, protocol.TeamGetManifestParams{
-				ThreadID: protocol.ThreadID(sid),
-				TeamID:   msg.teamID,
-			}, &manifest); err == nil {
-				if strings.TrimSpace(manifest.CoordinatorRun) != "" {
-					msg.runID = strings.TrimSpace(manifest.CoordinatorRun)
-				}
-				msg.coordinatorRole = strings.TrimSpace(manifest.CoordinatorRole)
-			}
-		}
-
-		return msg
 	}
 }
 
@@ -172,99 +141,84 @@ func submitGoalCmd(endpoint, sessionID, teamID, runID, coordinatorRole, goal str
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		cli := protocol.TCPClient{Endpoint: endpoint, Timeout: 5 * time.Second}
 
 		goal = strings.TrimSpace(goal)
 		if goal == "" {
 			return goalSubmittedMsg{goal: goal, err: fmt.Errorf("goal is required")}
 		}
 
+		client := rpcscope.NewClient(endpoint, sessionID).WithTimeout(5 * time.Second)
+		client.SetState(rpcscope.ScopeState{
+			SessionID:       strings.TrimSpace(sessionID),
+			ThreadID:        strings.TrimSpace(sessionID),
+			TeamID:          strings.TrimSpace(teamID),
+			RunID:           strings.TrimSpace(runID),
+			CoordinatorRole: strings.TrimSpace(coordinatorRole),
+		})
+
 		var out protocol.TaskCreateResult
-		err := callWithThreadRecovery(ctx, cli, sessionID, runID, func(threadID protocol.ThreadID) error {
-			return cli.Call(ctx, protocol.MethodTaskCreate, protocol.TaskCreateParams{
-				ThreadID:     threadID,
-				TeamID:       strings.TrimSpace(teamID),
-				RunID:        strings.TrimSpace(runID),
+		scope, recovered, err := client.CallWithRecovery(ctx, protocol.MethodTaskCreate, func(scope rpcscope.ScopeState) (any, error) {
+			effectiveRole := strings.TrimSpace(scope.CoordinatorRole)
+			if effectiveRole == "" {
+				effectiveRole = strings.TrimSpace(coordinatorRole)
+			}
+			return protocol.TaskCreateParams{
+				ThreadID:     protocol.ThreadID(scope.ThreadID),
+				TeamID:       strings.TrimSpace(scope.TeamID),
+				RunID:        strings.TrimSpace(scope.RunID),
 				Goal:         goal,
 				TaskKind:     "user_message",
-				AssignedRole: strings.TrimSpace(coordinatorRole),
-			}, &out)
-		})
+				AssignedRole: effectiveRole,
+			}, nil
+		}, &out)
 		if err != nil {
-			return goalSubmittedMsg{goal: goal, err: fmt.Errorf("rpc task.create: %w", err)}
+			return goalSubmittedMsg{goal: goal, scope: scope, recovered: recovered, err: err}
 		}
-		return goalSubmittedMsg{goal: goal}
+		return goalSubmittedMsg{goal: goal, scope: scope, recovered: recovered}
 	}
 }
 
-func sessionActionCmd(endpoint, sessionID, runID string, action string) tea.Cmd {
+func sessionActionCmd(endpoint, sessionID string, action string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		cli := protocol.TCPClient{Endpoint: endpoint, Timeout: 5 * time.Second}
 
 		sid := strings.TrimSpace(sessionID)
 		action = strings.ToLower(strings.TrimSpace(action))
+		client := rpcscope.NewClient(endpoint, sid).WithTimeout(5 * time.Second)
 
 		switch action {
 		case "pause":
 			var out protocol.SessionPauseResult
-			err := callWithThreadRecovery(ctx, cli, sessionID, runID, func(threadID protocol.ThreadID) error {
-				return cli.Call(ctx, protocol.MethodSessionPause, protocol.SessionPauseParams{ThreadID: threadID, SessionID: sid}, &out)
-			})
+			scope, recovered, err := client.CallWithRecovery(ctx, protocol.MethodSessionPause, func(scope rpcscope.ScopeState) (any, error) {
+				return protocol.SessionPauseParams{ThreadID: protocol.ThreadID(scope.ThreadID), SessionID: scope.SessionID}, nil
+			}, &out)
 			if err != nil {
-				return sessionActionMsg{action: action, err: fmt.Errorf("rpc session.pause: %w", err)}
+				return sessionActionMsg{action: action, scope: scope, recovered: recovered, err: err}
 			}
+			return sessionActionMsg{action: action, scope: scope, recovered: recovered}
 		case "resume":
 			var out protocol.SessionResumeResult
-			err := callWithThreadRecovery(ctx, cli, sessionID, runID, func(threadID protocol.ThreadID) error {
-				return cli.Call(ctx, protocol.MethodSessionResume, protocol.SessionResumeParams{ThreadID: threadID, SessionID: sid}, &out)
-			})
+			scope, recovered, err := client.CallWithRecovery(ctx, protocol.MethodSessionResume, func(scope rpcscope.ScopeState) (any, error) {
+				return protocol.SessionResumeParams{ThreadID: protocol.ThreadID(scope.ThreadID), SessionID: scope.SessionID}, nil
+			}, &out)
 			if err != nil {
-				return sessionActionMsg{action: action, err: fmt.Errorf("rpc session.resume: %w", err)}
+				return sessionActionMsg{action: action, scope: scope, recovered: recovered, err: err}
 			}
+			return sessionActionMsg{action: action, scope: scope, recovered: recovered}
 		case "stop":
 			var out protocol.SessionStopResult
-			err := callWithThreadRecovery(ctx, cli, sessionID, runID, func(threadID protocol.ThreadID) error {
-				return cli.Call(ctx, protocol.MethodSessionStop, protocol.SessionStopParams{ThreadID: threadID, SessionID: sid}, &out)
-			})
+			scope, recovered, err := client.CallWithRecovery(ctx, protocol.MethodSessionStop, func(scope rpcscope.ScopeState) (any, error) {
+				return protocol.SessionStopParams{ThreadID: protocol.ThreadID(scope.ThreadID), SessionID: scope.SessionID}, nil
+			}, &out)
 			if err != nil {
-				return sessionActionMsg{action: action, err: fmt.Errorf("rpc session.stop: %w", err)}
+				return sessionActionMsg{action: action, scope: scope, recovered: recovered, err: err}
 			}
+			return sessionActionMsg{action: action, scope: scope, recovered: recovered}
 		default:
 			return sessionActionMsg{action: action, err: fmt.Errorf("unknown action %q", action)}
 		}
-
-		return sessionActionMsg{action: action}
 	}
-}
-
-func callWithThreadRecovery(ctx context.Context, cli protocol.TCPClient, sessionID, runID string, fn func(threadID protocol.ThreadID) error) error {
-	sid := strings.TrimSpace(sessionID)
-	threadID := protocol.ThreadID(sid)
-	err := fn(threadID)
-	if err == nil || !isThreadNotFound(err) {
-		return err
-	}
-
-	var resolved protocol.SessionResolveThreadResult
-	if rerr := cli.Call(ctx, protocol.MethodSessionResolveThread, protocol.SessionResolveThreadParams{
-		SessionID: sid,
-		RunID:     strings.TrimSpace(runID),
-	}, &resolved); rerr != nil {
-		return err
-	}
-	if strings.TrimSpace(resolved.ThreadID) == "" {
-		return err
-	}
-	return fn(protocol.ThreadID(strings.TrimSpace(resolved.ThreadID)))
-}
-
-func isThreadNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(strings.TrimSpace(err.Error())), "thread not found")
 }
 
 func tickCmd() tea.Cmd {

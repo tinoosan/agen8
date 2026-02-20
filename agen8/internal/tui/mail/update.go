@@ -14,6 +14,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dataLoadedMsg:
 		if msg.err != nil {
+			if msg.preserve {
+				m.connected = true
+				m.lastErr = msg.err.Error()
+				return m, nil
+			}
 			m.connected = false
 			m.lastErr = msg.err.Error()
 			return m, nil

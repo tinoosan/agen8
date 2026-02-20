@@ -159,6 +159,8 @@ type teamManifestLoadedMsg struct {
 type teamEventsLoadedMsg struct {
 	events  []types.EventRecord
 	cursors map[string]int64
+	failed  map[string]int
+	retryAt map[string]time.Time
 }
 
 type activityLoadedMsg struct {
@@ -380,6 +382,8 @@ type monitorModel struct {
 	teamCoordinatorRunID string
 	teamCoordinatorRole  string
 	teamEventCursor      map[string]int64
+	teamEventFailCount   map[string]int
+	teamEventRetryAfter  map[string]time.Time
 	seenEventIDs         map[string]time.Time
 	teamModelChange      *teamModelChangeFile
 }

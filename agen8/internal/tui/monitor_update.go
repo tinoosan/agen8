@@ -381,6 +381,26 @@ func (m *monitorModel) handleLoadedDataMessages(msg tea.Msg) (tea.Model, tea.Cmd
 				m.teamEventCursor[runID] = cursor
 			}
 		}
+		if len(msg.failed) != 0 {
+			if m.teamEventFailCount == nil {
+				m.teamEventFailCount = map[string]int{}
+			}
+			for runID, count := range msg.failed {
+				m.teamEventFailCount[runID] = count
+			}
+		}
+		if len(msg.retryAt) != 0 {
+			if m.teamEventRetryAfter == nil {
+				m.teamEventRetryAfter = map[string]time.Time{}
+			}
+			for runID, at := range msg.retryAt {
+				if at.IsZero() {
+					delete(m.teamEventRetryAfter, runID)
+					continue
+				}
+				m.teamEventRetryAfter[runID] = at
+			}
+		}
 		if len(msg.events) != 0 {
 			reloadPlan := false
 			for _, ev := range msg.events {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	"github.com/tinoosan/agen8/pkg/types"
 )
@@ -15,6 +16,7 @@ type dataLoadedMsg struct {
 	inbox     []taskEntry
 	outbox    []taskEntry
 	current   *taskEntry
+	preserve  bool
 	connected bool
 	err       error
 }
@@ -43,39 +45,47 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		cli := protocol.TCPClient{
-			Endpoint: endpoint,
-			Timeout:  5 * time.Second,
-		}
-
-		call := func(method string, params, out any) error {
-			if err := cli.Call(ctx, method, params, out); err != nil {
-				return fmt.Errorf("rpc %s: %w", method, err)
+		client := rpcscope.NewClient(endpoint, sessionID).WithTimeout(5 * time.Second)
+		scope, err := client.RefreshScope(ctx)
+		if err != nil {
+			if rpcscope.IsScopeUnavailable(err) {
+				return dataLoadedMsg{preserve: true, connected: true, err: err}
 			}
-			return nil
+			return dataLoadedMsg{err: err}
 		}
-
-		threadID := protocol.ThreadID(strings.TrimSpace(sessionID))
+		if strings.TrimSpace(scope.TeamID) == "" && strings.TrimSpace(scope.RunID) == "" {
+			return dataLoadedMsg{preserve: true, connected: true, err: fmt.Errorf("%w: missing run/team scope", rpcscope.ErrScopeUnavailable)}
+		}
 
 		// Fetch inbox
 		var inboxRes protocol.TaskListResult
-		if err := call(protocol.MethodTaskList, protocol.TaskListParams{
-			ThreadID: threadID,
+		if err := client.Call(ctx, protocol.MethodTaskList, protocol.TaskListParams{
+			ThreadID: protocol.ThreadID(scope.ThreadID),
+			TeamID:   strings.TrimSpace(scope.TeamID),
+			RunID:    strings.TrimSpace(scope.RunID),
 			View:     "inbox",
 			Limit:    200,
 			Offset:   0,
 		}, &inboxRes); err != nil {
+			if rpcscope.IsScopeUnavailable(err) {
+				return dataLoadedMsg{preserve: true, connected: true, err: err}
+			}
 			return dataLoadedMsg{err: err}
 		}
 
 		// Fetch outbox
 		var outboxRes protocol.TaskListResult
-		if err := call(protocol.MethodTaskList, protocol.TaskListParams{
-			ThreadID: threadID,
+		if err := client.Call(ctx, protocol.MethodTaskList, protocol.TaskListParams{
+			ThreadID: protocol.ThreadID(scope.ThreadID),
+			TeamID:   strings.TrimSpace(scope.TeamID),
+			RunID:    strings.TrimSpace(scope.RunID),
 			View:     "outbox",
 			Limit:    200,
 			Offset:   0,
 		}, &outboxRes); err != nil {
+			if rpcscope.IsScopeUnavailable(err) {
+				return dataLoadedMsg{preserve: true, connected: true, err: err}
+			}
 			return dataLoadedMsg{err: err}
 		}
 
