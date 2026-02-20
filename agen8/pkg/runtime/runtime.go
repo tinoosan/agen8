@@ -13,6 +13,7 @@ import (
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/events"
 	"github.com/tinoosan/agen8/pkg/fsutil"
+	pkgobsidian "github.com/tinoosan/agen8/pkg/obsidian"
 	"github.com/tinoosan/agen8/pkg/profile"
 	"github.com/tinoosan/agen8/pkg/resources"
 	"github.com/tinoosan/agen8/pkg/skills"
@@ -175,6 +176,21 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 	if err := fs.Mount(vfs.MountProject, workdirRes); err != nil {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountProject, err)
+	}
+	projectVaultPath := pkgobsidian.ResolveProjectVaultPath(cfg.WorkdirAbs)
+	resolvedVault, err := pkgobsidian.ResolveDefaultVaultPath(cfg.WorkdirAbs, projectVaultPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve obsidian vault path: %w", err)
+	}
+	if err := os.MkdirAll(resolvedVault.Host, 0o755); err != nil {
+		return nil, fmt.Errorf("prepare knowledge dir: %w", err)
+	}
+	knowledgeRes, err := resources.NewDirResource(resolvedVault.Host, vfs.MountKnowledge)
+	if err != nil {
+		return nil, fmt.Errorf("create knowledge resource: %w", err)
+	}
+	if err := fs.Mount(vfs.MountKnowledge, knowledgeRes); err != nil {
+		return nil, fmt.Errorf("mount %s: %w", vfs.MountKnowledge, err)
 	}
 
 	runDir := fsutil.GetRunDir(cfg.Cfg.DataDir, cfg.Run)
@@ -357,6 +373,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			"/tasks":     tasksDir,
 			"/skills":    "(virtual)",
 			"/memory":    "(virtual)",
+			"/knowledge": resolvedVault.Host,
 		}
 		if subagentsDir != "" {
 			mountedData["/subagents"] = subagentsDir
@@ -388,6 +405,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	shellInvoker.MountRoots[vfs.MountPlan] = planDir
 	shellInvoker.MountRoots[vfs.MountTasks] = tasksDir
 	shellInvoker.MountRoots[vfs.MountMemory] = memRes.BaseDir
+	shellInvoker.MountRoots[vfs.MountKnowledge] = resolvedVault.Host
 	if subagentsDir != "" {
 		shellInvoker.MountRoots[vfs.MountSubagents] = subagentsDir
 	}

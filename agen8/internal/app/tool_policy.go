@@ -16,6 +16,10 @@ var defaultTeamToolRules = []teamToolRule{
 	{tool: "task_create", disallowForNonCoord: true},
 }
 
+var requiredToolsAlwaysEnabled = map[string]struct{}{
+	"obsidian": {},
+}
+
 func sanitizeAllowedToolsForRole(allowed []string, teamID string, isCoordinator bool) (sanitized []string, removed []string) {
 	teamID = strings.TrimSpace(teamID)
 	if teamID == "" || isCoordinator {
@@ -75,6 +79,9 @@ func applyAllowedTools(registry *agent.HostToolRegistry, allowed []string) error
 		}
 	}
 	for name := range availableSet {
+		if _, required := requiredToolsAlwaysEnabled[strings.ToLower(name)]; required {
+			continue
+		}
 		if _, ok := allowedSet[name]; ok {
 			continue
 		}

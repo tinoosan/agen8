@@ -353,6 +353,8 @@ type ProjectConfig struct {
 	DefaultTeamProfile string `json:"defaultTeamProfile,omitempty"`
 	RPCEndpoint        string `json:"rpcEndpoint,omitempty"`
 	DataDirOverride    string `json:"dataDirOverride,omitempty"`
+	ObsidianVaultPath  string `json:"obsidianVaultPath,omitempty"`
+	ObsidianEnabled    bool   `json:"obsidianEnabled,omitempty"`
 	CreatedAt          string `json:"createdAt,omitempty"`
 	Version            int    `json:"version,omitempty"`
 }

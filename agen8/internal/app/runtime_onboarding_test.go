@@ -50,6 +50,7 @@ func TestRunInteractiveRuntimeOnboarding_PersistsKeyAndModel(t *testing.T) {
 	t.Setenv(openRouterAPIKeyEnv, "")
 	t.Setenv(openRouterModelEnv, "")
 	dataDir := t.TempDir()
+	t.Chdir(t.TempDir())
 
 	origGet := keyringGet
 	origSet := keyringSet
@@ -110,13 +111,15 @@ func TestRunInteractiveRuntimeOnboarding_PersistsKeyAndModel(t *testing.T) {
 
 func TestPrintOnboardingSummary(t *testing.T) {
 	var buf bytes.Buffer
-	printOnboardingSummary(&buf, "openrouter", "z-ai/GLM-5", "/tmp/agen8-test")
+	printOnboardingSummary(&buf, "openrouter", "z-ai/GLM-5", "/tmp/agen8-test", true, "/knowledge")
 	output := buf.String()
 	for _, want := range []string{
 		"Setup complete",
 		"Provider:   openrouter",
 		"Model:      z-ai/GLM-5",
 		"saved to OS keychain",
+		"Obsidian:   detected",
+		"Vault:      /knowledge",
 		"/tmp/agen8-test/config.toml",
 		"agen8 daemon",
 		"agen8 monitor",

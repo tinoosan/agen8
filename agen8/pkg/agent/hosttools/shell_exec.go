@@ -24,7 +24,7 @@ func (t *ShellExecTool) Definition() llmtypes.Tool {
 				"type": "object",
 				"properties": map[string]any{
 					"command": map[string]any{"type": "string", "description": "Shell command to execute (e.g., \"ls -la | grep foo\")."},
-					"cwd":     map[string]any{"type": stringOrNull, "description": "Working directory. Use a project-relative path (e.g., \"internal/tools\") or absolute VFS mount paths (e.g., \"/project\", \"/workspace\", \"/skills/<skill>/scripts\"). Default: \".\". shell_exec also accepts VFS-style absolute paths directly in command args and translates them on host."},
+					"cwd":     map[string]any{"type": stringOrNull, "description": "Working directory. Use a project-relative path (e.g., \"internal/tools\") or absolute VFS mount paths (e.g., \"/project\", \"/workspace\", \"/knowledge\", \"/skills/<skill>/scripts\"). Default: \".\". shell_exec also accepts VFS-style absolute paths directly in command args and translates them on host."},
 					"stdin":   map[string]any{"type": stringOrNull, "description": "Standard input to pipe to the command."},
 				},
 				"required":             []any{"command", "cwd", "stdin"},

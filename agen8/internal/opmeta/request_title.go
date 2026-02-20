@@ -117,6 +117,12 @@ func FormatRequestTitle(d map[string]string) string {
 			return "Create task " + taskId
 		}
 		return "Create task"
+	case "obsidian":
+		cmd := strings.TrimSpace(d["command"])
+		if cmd != "" {
+			return "Obsidian " + cmd
+		}
+		return "Obsidian"
 	default:
 		if op != "" && path != "" {
 			return op + " " + path

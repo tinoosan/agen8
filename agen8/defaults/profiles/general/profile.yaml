@@ -23,7 +23,6 @@ skills:
   - planning
   - data-engineering
   - automation
-  - obsidian-cli
 prompts:
   system_prompt_path: prompt.md
 heartbeat:

@@ -167,7 +167,7 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req pkgtools.ToolReque
 			if isAllowedAbsolutePathArg(argv[i], s.mountRoots()) {
 				continue
 			}
-			msg := fmt.Sprintf("absolute paths are not allowed in argv (got %q); use relative paths or known VFS mounts (/project, /workspace, /skills, /plan, /memory)", argv[i])
+			msg := fmt.Sprintf("absolute paths are not allowed in argv (got %q); use relative paths or known VFS mounts (/project, /workspace, /skills, /plan, /memory, /knowledge)", argv[i])
 			if hint, anti := scriptPathHint(logicalCwd, argv, msg); hint != "" {
 				msg += "\n" + hint
 				if antiPattern == "none" && anti != "" {
@@ -179,7 +179,7 @@ func (s *BuiltinShellInvoker) Invoke(ctx context.Context, req pkgtools.ToolReque
 	}
 	if len(argv) >= 3 && argv[0] == "bash" && argv[1] == "-c" {
 		if bad := firstDisallowedAbsPathInShell(argv[2], s.mountRoots()); bad != "" {
-			msg := fmt.Sprintf("absolute path %q is not allowed in command; use known VFS mounts (/project, /workspace, /skills, /plan, /memory)", bad)
+			msg := fmt.Sprintf("absolute path %q is not allowed in command; use known VFS mounts (/project, /workspace, /skills, /plan, /memory, /knowledge)", bad)
 			return pkgtools.ToolCallResult{}, &pkgtools.InvokeError{Code: "invalid_input", Message: msg}
 		}
 	}

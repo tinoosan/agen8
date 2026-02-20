@@ -22,7 +22,6 @@ skills:
   - hybrid-web
   - financial-analysis
   - project-management
-  - obsidian-cli
 prompts:
   system_prompt_path: prompt.md
 heartbeat:

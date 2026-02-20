@@ -85,3 +85,25 @@ func TestSetActiveSessionUpdatesState(t *testing.T) {
 		t.Fatalf("expected LastAttachedAt")
 	}
 }
+
+func TestSaveProjectConfig_PersistsObsidianFields(t *testing.T) {
+	base := t.TempDir()
+	if _, err := InitProject(base, ProjectConfig{}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+	ctx, err := SaveProjectConfig(base, ProjectConfig{
+		ProjectID:         "p1",
+		DefaultMode:       "standalone",
+		ObsidianVaultPath: "/project/obsidian-vault",
+		ObsidianEnabled:   true,
+	})
+	if err != nil {
+		t.Fatalf("SaveProjectConfig: %v", err)
+	}
+	if got := ctx.Config.ObsidianVaultPath; got != "/project/obsidian-vault" {
+		t.Fatalf("obsidian vault path=%q", got)
+	}
+	if !ctx.Config.ObsidianEnabled {
+		t.Fatalf("expected obsidian enabled")
+	}
+}

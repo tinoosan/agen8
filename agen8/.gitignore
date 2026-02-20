@@ -43,3 +43,11 @@ yarn-error.log*
 # Cursor
 .cursor/
 /plan/
+
+
+# Obsidian
+obsidian-vault/
+
+# Agent8
+.agent8/
+.agen8/

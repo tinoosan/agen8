@@ -33,7 +33,7 @@ func (t *CodeExecTool) Definition() llmtypes.Tool {
 					},
 					"cwd": map[string]any{
 						"type":        stringOrNull,
-						"description": "Working directory (string or null). Use VFS paths like /workspace (default), /project, /skills, /plan, /tasks, /memory. Use null to accept default.",
+						"description": "Working directory (string or null). Use VFS paths like /workspace (default), /project, /knowledge, /skills, /plan, /tasks, /memory. Use null to accept default.",
 					},
 					"timeoutMs": map[string]any{
 						"type":        intOrNull,

@@ -44,6 +44,9 @@ const (
 	// history mount for immutable provenance across runs/agents (distinct from /memory).
 	MountMemory = "memory"
 
+	// MountKnowledge is the mount name for durable knowledge storage (for example Obsidian vault data).
+	MountKnowledge = "knowledge"
+
 	// MountSubagents exposes the parent run's subagent run directories under /subagents.
 	// Only present for top-level runs; child runs live under parent's subagents dir on disk.
 	MountSubagents = "subagents"

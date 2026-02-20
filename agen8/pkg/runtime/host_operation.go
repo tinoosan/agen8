@@ -1054,7 +1054,26 @@ func (toolResultOperation) FormatResponseText(_ types.HostOpRequest, _ types.Hos
 	return opformat.FormatResponseText(respData)
 }
 func (toolResultOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
-	if strings.TrimSpace(req.Tag) != "task_create" {
+	tag := strings.TrimSpace(req.Tag)
+	if tag == "obsidian" {
+		reqData["op"] = "obsidian"
+		storeReq["op"] = "obsidian"
+		if len(req.Input) == 0 {
+			return
+		}
+		var payload struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal(req.Input, &payload); err != nil {
+			return
+		}
+		if cmd := strings.TrimSpace(payload.Command); cmd != "" {
+			reqData["command"] = cmd
+			storeReq["command"] = cmd
+		}
+		return
+	}
+	if tag != "task_create" {
 		return
 	}
 	reqData["op"] = "task_create"
@@ -1090,7 +1109,26 @@ func (toolResultOperation) EnrichRequestEvent(req types.HostOpRequest, reqData m
 	}
 }
 func (toolResultOperation) EnrichResponseEvent(req types.HostOpRequest, _ types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
-	if strings.TrimSpace(req.Tag) != "task_create" {
+	tag := strings.TrimSpace(req.Tag)
+	if tag == "obsidian" {
+		respData["op"] = "obsidian"
+		storeResp["op"] = "obsidian"
+		if len(req.Input) == 0 {
+			return
+		}
+		var payload struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal(req.Input, &payload); err != nil {
+			return
+		}
+		if cmd := strings.TrimSpace(payload.Command); cmd != "" {
+			respData["command"] = cmd
+			storeResp["command"] = cmd
+		}
+		return
+	}
+	if tag != "task_create" {
 		return
 	}
 	respData["op"] = "task_create"

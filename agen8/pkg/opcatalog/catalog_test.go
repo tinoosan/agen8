@@ -21,6 +21,7 @@ func TestCategory(t *testing.T) {
 		{op: "trace_run", want: "Traced", wantSeen: true},
 		{op: "agent_spawn", want: "Delegated", wantSeen: true},
 		{op: "task_create", want: "Created", wantSeen: true},
+		{op: "obsidian", want: "Knowledge", wantSeen: true},
 		{op: "unknown_op", want: "", wantSeen: false},
 	}
 
@@ -47,6 +48,7 @@ func TestUsesSharedRequestTitle(t *testing.T) {
 		{op: "trace_run", want: true},
 		{op: "agent_spawn", want: true},
 		{op: "task_create", want: true},
+		{op: "obsidian", want: true},
 		{op: "email", want: false},
 		{op: "browser", want: false},
 		{op: "unknown_op", want: false},
@@ -73,6 +75,7 @@ func TestKnownOpsSorted(t *testing.T) {
 		"fs_search",
 		"fs_write",
 		"http_fetch",
+		"obsidian",
 		"shell_exec",
 		"task_create",
 		"trace_run",

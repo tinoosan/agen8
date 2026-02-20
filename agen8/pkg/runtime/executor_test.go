@@ -670,3 +670,52 @@ func TestEventMiddleware_CodeExecEnrichment(t *testing.T) {
 		t.Fatalf("expected toolCallCount/runtimeMs enrichment, got data=%v", gotResp.Data)
 	}
 }
+
+func TestEventMiddleware_ToolResultObsidianEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{Op: req.Op, Ok: true, Text: req.Text}
+	})
+
+	var gotReq events.Event
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	input, err := json.Marshal(map[string]any{
+		"command": "graph",
+		"data": map[string]any{
+			"status": "ok",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:    types.HostOpToolResult,
+		Tag:   "obsidian",
+		Text:  string(input),
+		Input: input,
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if gotReq.Data["op"] != "obsidian" || gotReq.Data["command"] != "graph" {
+		t.Fatalf("expected obsidian request enrichment, got data=%v", gotReq.Data)
+	}
+	if gotResp.Data["op"] != "obsidian" || gotResp.Data["command"] != "graph" {
+		t.Fatalf("expected obsidian response enrichment, got data=%v", gotResp.Data)
+	}
+}

@@ -16,6 +16,13 @@ func FormatRequestText(d map[string]string) string {
 	if tag == "task_create" || op == "task_create" {
 		return "Create task"
 	}
+	if tag == "obsidian" || op == "obsidian" {
+		cmd := strings.TrimSpace(d["command"])
+		if cmd != "" {
+			return "Obsidian " + cmd
+		}
+		return "Obsidian"
+	}
 
 	switch op {
 	case "browser":
@@ -84,6 +91,22 @@ func FormatResponseText(d map[string]string) string {
 			return prefix + " " + errStr
 		}
 		return prefix + " task creation failed"
+	}
+	if tag == "obsidian" || op == "obsidian" {
+		cmd := strings.TrimSpace(d["command"])
+		if ok != "true" {
+			if errStr != "" {
+				return prefix + " " + errStr
+			}
+			if cmd != "" {
+				return prefix + " obsidian " + cmd + " failed"
+			}
+			return prefix + " obsidian failed"
+		}
+		if cmd != "" {
+			return prefix + " obsidian " + cmd
+		}
+		return prefix + " obsidian ok"
 	}
 
 	switch op {

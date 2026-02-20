@@ -27,6 +27,8 @@ type ProjectConfig struct {
 	DefaultTeamProfile string
 	RPCEndpoint        string
 	DataDirOverride    string
+	ObsidianVaultPath  string
+	ObsidianEnabled    bool
 	CreatedAt          string
 	Version            int
 }
@@ -78,9 +80,13 @@ func normalizeProjectConfig(cfg ProjectConfig, baseDir string) ProjectConfig {
 	out.DefaultTeamProfile = strings.TrimSpace(out.DefaultTeamProfile)
 	out.RPCEndpoint = strings.TrimSpace(out.RPCEndpoint)
 	out.DataDirOverride = strings.TrimSpace(out.DataDirOverride)
+	out.ObsidianVaultPath = strings.TrimSpace(out.ObsidianVaultPath)
 	out.CreatedAt = strings.TrimSpace(out.CreatedAt)
 	if out.CreatedAt == "" {
 		out.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	if !out.ObsidianEnabled && out.ObsidianVaultPath != "" {
+		out.ObsidianEnabled = true
 	}
 	mode := strings.ToLower(strings.TrimSpace(out.DefaultMode))
 	switch mode {
@@ -269,6 +275,10 @@ func readProjectConfig(path string, root string) (ProjectConfig, error) {
 			cfg.DataDirOverride = strings.TrimSpace(value)
 		case "created_at":
 			cfg.CreatedAt = strings.TrimSpace(value)
+		case "obsidian_vault_path":
+			cfg.ObsidianVaultPath = strings.TrimSpace(value)
+		case "obsidian_enabled":
+			cfg.ObsidianEnabled = strings.EqualFold(strings.TrimSpace(value), "true")
 		case "version":
 			if n, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
 				cfg.Version = n
@@ -288,10 +298,31 @@ func writeProjectConfig(path string, cfg ProjectConfig) error {
 		"default_team_profile = " + strconv.Quote(cfg.DefaultTeamProfile),
 		"rpc_endpoint = " + strconv.Quote(cfg.RPCEndpoint),
 		"data_dir_override = " + strconv.Quote(cfg.DataDirOverride),
+		"obsidian_vault_path = " + strconv.Quote(cfg.ObsidianVaultPath),
+		"obsidian_enabled = " + strconv.FormatBool(cfg.ObsidianEnabled),
 		"created_at = " + strconv.Quote(cfg.CreatedAt),
 		"version = " + strconv.Itoa(cfg.Version),
 	}
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+}
+
+func SaveProjectConfig(start string, cfg ProjectConfig) (ProjectContext, error) {
+	ctx, err := LoadProjectContext(start)
+	if err != nil {
+		return ProjectContext{}, err
+	}
+	if !ctx.Exists {
+		initCtx, ierr := InitProject(start, cfg)
+		if ierr != nil {
+			return ProjectContext{}, ierr
+		}
+		return initCtx, nil
+	}
+	norm := normalizeProjectConfig(cfg, ctx.RootDir)
+	if err := writeProjectConfig(ctx.ConfigPath, norm); err != nil {
+		return ProjectContext{}, err
+	}
+	return LoadProjectContext(ctx.RootDir)
 }
 
 func readProjectState(path string) (ProjectState, error) {

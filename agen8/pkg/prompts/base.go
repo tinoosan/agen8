@@ -216,6 +216,7 @@ const basePromptRaw = `<system>
   <vfs>
     <mount path="/project">User's durable working files. Prefer this mount for persistent outputs. In remote mode, this may map to the attached client filesystem.</mount>
     <mount path="/workspace">Run-scoped, writable scratch space. Use for ephemeral run artifacts and temporary outputs, not long-term storage.</mount>
+    <mount path="/knowledge">External durable knowledge base (Obsidian-compatible vault). Use this for long-lived notes and graph-linked knowledge. This mount is not run-scoped. If no explicit Obsidian path is configured, it defaults to /project/obsidian-vault.</mount>
     <mount path="/skills">These are YOUR skills. Check /skills/<skill_name>/SKILL.md for documented workflows.</mount>
     <mount path="/plan">Planning workspace for complex tasks. /plan/HEAD.md is details; /plan/CHECKLIST.md is the checklist.</mount>
     <mount path="/memory">Shared long-term memory (daily files: read all; write today's file only).</mount>
@@ -229,7 +230,7 @@ const basePromptRaw = `<system>
   </skill_creation>
   <operating_rules>
     <rule id="stop">Call final_answer only once the overarching goal is complete; plain assistant text without tool calls is treated as final output when finished.</rule>
-    <rule id="path_resolution">For shell_exec, you can use relative paths or absolute VFS mount paths (/project, /workspace, /skills, /plan, /memory) in cwd and command args. fs_* tools still expect absolute VFS paths.</rule>
+    <rule id="path_resolution">For shell_exec, you can use relative paths or absolute VFS mount paths (/project, /workspace, /knowledge, /skills, /plan, /memory) in cwd and command args. fs_* tools still expect absolute VFS paths.</rule>
     <rule id="tool_usage">{{.ToolUsageRule}}</rule>
 {{.CodeExecGuidanceRules}}
     <rule id="browser_usage">Use browser for JS-heavy sites, multi-step interactions (login/forms/navigation), or when you need screenshots/PDFs/downloads/uploads. Use browser(action:\"dismiss\") for cookie banners/popups and browser(action:\"wait\") for explicit readiness. Prefer http_fetch for simple APIs and static pages.</rule>

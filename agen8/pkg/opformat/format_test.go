@@ -13,6 +13,7 @@ func TestFormatRequestText(t *testing.T) {
 		want string
 	}{
 		{name: "task create tag", data: map[string]string{"tag": "task_create"}, want: "Create task"},
+		{name: "obsidian tag", data: map[string]string{"tag": "obsidian", "command": "search"}, want: "Obsidian search"},
 		{name: "browser navigate", data: map[string]string{"op": "browser", "action": "navigate", "url": "https://example.com"}, want: "browse.navigate https://example.com"},
 		{name: "browser click selector", data: map[string]string{"op": "browser", "action": "click", "selector": "#submit"}, want: "browse.click #submit"},
 		{name: "email", data: map[string]string{"op": "email", "to": "team@example.com", "subject": "Daily report"}, want: "Email team@example.com: Daily report"},
@@ -36,6 +37,7 @@ func TestFormatResponseText(t *testing.T) {
 		want string
 	}{
 		{name: "task create ok", data: map[string]string{"tag": "task_create", "ok": "true", "text": "Task created"}, want: "✓ Task created"},
+		{name: "obsidian ok", data: map[string]string{"tag": "obsidian", "ok": "true", "command": "graph"}, want: "✓ obsidian graph"},
 		{name: "fs_read truncated", data: map[string]string{"op": "fs_read", "ok": "true", "truncated": "true"}, want: "✓ truncated"},
 		{name: "shell exec exit", data: map[string]string{"op": "shell_exec", "ok": "true", "exitCode": "0"}, want: "✓ exit 0"},
 		{name: "shell exec fail", data: map[string]string{"op": "shell_exec", "ok": "false", "exitCode": "1", "err": "boom"}, want: "✗ exit 1: boom"},
@@ -64,6 +66,7 @@ func TestFormatRequestText_SharedTitleOpsParityWithOpmeta(t *testing.T) {
 		{"op": "http_fetch", "url": "https://example.com"},
 		{"op": "trace_run", "traceAction": "set", "traceKey": "alpha"},
 		{"op": "agent_spawn", "goal": "subtask", "currentDepth": "0", "maxDepth": "3"},
+		{"op": "obsidian", "command": "search"},
 	}
 	for _, tc := range tests {
 		got := FormatRequestText(tc)

@@ -20,6 +20,7 @@ type runtimeConfig struct {
 	Env      map[string]string
 	Skills   runtimeConfigSkills
 	CodeExec runtimeConfigCodeExec
+	Obsidian runtimeConfigObsidian
 }
 
 type runtimeConfigDefaults struct {
@@ -37,11 +38,16 @@ type runtimeConfigCodeExec struct {
 	RequiredPackages []string
 }
 
+type runtimeConfigObsidian struct {
+	VaultPath string
+}
+
 type runtimeConfigFile struct {
 	Defaults runtimeConfigDefaultsFile `toml:"defaults"`
 	Env      map[string]string         `toml:"env"`
 	Skills   runtimeConfigSkillsFile   `toml:"skills"`
 	CodeExec runtimeConfigCodeExecFile `toml:"code_exec"`
+	Obsidian runtimeConfigObsidianFile `toml:"obsidian"`
 }
 
 type runtimeConfigDefaultsFile struct {
@@ -57,6 +63,10 @@ type runtimeConfigSkillsFile struct {
 type runtimeConfigCodeExecFile struct {
 	VenvPath         string   `toml:"venv_path"`
 	RequiredPackages []string `toml:"required_packages"`
+}
+
+type runtimeConfigObsidianFile struct {
+	VaultPath string `toml:"vault_path"`
 }
 
 func loadRuntimeConfig(dataDir string) (runtimeConfig, error) {
@@ -130,6 +140,9 @@ model = "`+runtimeDefaultModel+`"
 [code_exec]
 # venv_path = ""
 # required_packages = []
+
+[obsidian]
+# vault_path = ""
 `) + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
@@ -166,6 +179,9 @@ func decodeRuntimeConfigFile(path string) (runtimeConfig, bool, error) {
 		CodeExec: runtimeConfigCodeExec{
 			VenvPath:         strings.TrimSpace(raw.CodeExec.VenvPath),
 			RequiredPackages: normalizeStringList(raw.CodeExec.RequiredPackages),
+		},
+		Obsidian: runtimeConfigObsidian{
+			VaultPath: strings.TrimSpace(raw.Obsidian.VaultPath),
 		},
 	}
 	for k, v := range raw.Env {
@@ -233,6 +249,9 @@ func mergeRuntimeConfig(base, override runtimeConfig) runtimeConfig {
 		sort.Strings(merged)
 		out.CodeExec.RequiredPackages = merged
 	}
+	if vaultPath := strings.TrimSpace(override.Obsidian.VaultPath); vaultPath != "" {
+		out.Obsidian.VaultPath = vaultPath
+	}
 	return out
 }
 
@@ -256,6 +275,7 @@ func applyRuntimeConfigEnvDefaults(cfg runtimeConfig) {
 	setEnvIfUnset("OPENROUTER_MODEL", cfg.Defaults.Model)
 	setEnvIfUnset("AGEN8_SUBAGENT_MODEL", cfg.Defaults.SubagentModel)
 	setEnvIfUnset("AGEN8_PROFILE", cfg.Defaults.Profile)
+	setEnvIfUnset("OBSIDIAN_VAULT_PATH", cfg.Obsidian.VaultPath)
 	setEnvIfUnset(envSkillsSeedConflict, normalizeSkillsConflict(cfg.Skills.Conflict))
 }
 

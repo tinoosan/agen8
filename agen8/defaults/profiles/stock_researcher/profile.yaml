@@ -18,7 +18,6 @@ skills:
   - financial-analysis
   - market-monitoring
   - reporting
-  - obsidian-cli
 prompts:
   system_prompt_path: prompt.md
 heartbeat:

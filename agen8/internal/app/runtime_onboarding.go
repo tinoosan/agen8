@@ -10,15 +10,16 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	pkgobsidian "github.com/tinoosan/agen8/pkg/obsidian"
 	"github.com/zalando/go-keyring"
 	"golang.org/x/term"
 )
 
 const (
 	agen8KeyringService = "agen8"
-	openRouterProvider      = "openrouter"
-	openRouterAPIKeyEnv     = "OPENROUTER_API_KEY"
-	openRouterModelEnv      = "OPENROUTER_MODEL"
+	openRouterProvider  = "openrouter"
+	openRouterAPIKeyEnv = "OPENROUTER_API_KEY"
+	openRouterModelEnv  = "OPENROUTER_MODEL"
 
 	onboardingBanner = `
 ============================================
@@ -90,6 +91,11 @@ func runInteractiveRuntimeOnboarding(dataDir string, in *os.File, out io.Writer)
 	if model == "" {
 		model = runtimeDefaultModel
 	}
+	obsidianStatus := pkgobsidian.DetectInstall()
+	obsidianVaultPath, err := configureObsidianOnboarding(reader, out)
+	if err != nil {
+		return err
+	}
 	key, err := onboardingSecret(in, out, "API key")
 	if err != nil {
 		return err
@@ -105,18 +111,24 @@ func runInteractiveRuntimeOnboarding(dataDir string, in *os.File, out io.Writer)
 	if err := upsertRuntimeConfigDefaultsModel(dataDir, model); err != nil {
 		return err
 	}
-	printOnboardingSummary(out, provider, model, dataDir)
+	printOnboardingSummary(out, provider, model, dataDir, obsidianStatus.Installed, obsidianVaultPath)
 	return nil
 }
 
-func printOnboardingSummary(out io.Writer, provider, model, dataDir string) {
+func printOnboardingSummary(out io.Writer, provider, model, dataDir string, obsidianInstalled bool, obsidianVaultPath string) {
 	cfgPath := filepath.Join(strings.TrimSpace(dataDir), "config.toml")
+	obsidianLine := "not detected (you can still use Agen8; obsidian tool calls will fail until installed)"
+	if obsidianInstalled {
+		obsidianLine = "detected"
+	}
 	fmt.Fprintf(out, `
 --- Setup complete ---
 
   Provider:   %s
   Model:      %s
   API key:    saved to OS keychain
+  Obsidian:   %s
+  Vault:      %s
   Config:     %s
 
 --- Next steps ---
@@ -132,7 +144,7 @@ func printOnboardingSummary(out io.Writer, provider, model, dataDir string) {
 
   Edit runtime config:
     %s
-`, provider, model, cfgPath, cfgPath)
+`, provider, model, obsidianLine, strings.TrimSpace(obsidianVaultPath), cfgPath, cfgPath)
 }
 
 func keyringAccountName(provider string) string {
@@ -200,4 +212,65 @@ func upsertRuntimeConfigDefaultsModel(dataDir, model string) error {
 		return fmt.Errorf("encode %s: %w", path, err)
 	}
 	return nil
+}
+
+func configureObsidianOnboarding(reader *bufio.Reader, out io.Writer) (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	projectCtx, err := LoadProjectContext(cwd)
+	if err != nil {
+		return "", err
+	}
+	if !projectCtx.Exists {
+		if _, err := InitProject(cwd, ProjectConfig{}); err != nil {
+			return "", err
+		}
+		projectCtx, err = LoadProjectContext(cwd)
+		if err != nil {
+			return "", err
+		}
+	}
+	defaultPath := strings.TrimSpace(projectCtx.Config.ObsidianVaultPath)
+	if defaultPath == "" {
+		defaultPath = "/project/obsidian-vault"
+	}
+	def, err := pkgobsidian.ResolveDefaultVaultPath(cwd, strings.TrimSpace(projectCtx.Config.ObsidianVaultPath))
+	if err != nil {
+		return "", err
+	}
+	vaultPath, err := onboardingPrompt(reader, out, "Obsidian vault path", defaultPath)
+	if err != nil {
+		return "", err
+	}
+	vaultPath = strings.TrimSpace(vaultPath)
+	if vaultPath == "" {
+		vaultPath = defaultPath
+	}
+	if pkgobsidian.IsWorkspacePath(vaultPath) {
+		return "", fmt.Errorf("INVALID_VAULT_PATH: refusing run-scoped /workspace path: %s", vaultPath)
+	}
+	resolved, err := pkgobsidian.ResolveVaultPath(pkgobsidian.ResolveOptions{
+		ExplicitPath:      vaultPath,
+		ProjectRoot:       cwd,
+		ProjectVaultPath:  strings.TrimSpace(projectCtx.Config.ObsidianVaultPath),
+		KnowledgeRootHost: def.Host,
+	})
+	if err != nil {
+		return "", err
+	}
+	cfg := projectCtx.Config
+	cfg.ObsidianVaultPath = resolved.Logical
+	cfg.ObsidianEnabled = true
+	if _, err := SaveProjectConfig(projectCtx.RootDir, cfg); err != nil {
+		return "", err
+	}
+	status := pkgobsidian.DetectInstall()
+	if !status.Installed {
+		if _, err := fmt.Fprintln(out, "Warning: Obsidian was not detected. Obsidian tool calls will fail until Obsidian is installed."); err != nil {
+			return "", err
+		}
+	}
+	return resolved.Logical, nil
 }

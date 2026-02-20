@@ -64,7 +64,7 @@ func categoryFromTitle(title string) (agent.MemoryCategory, error) {
 		return "", fmt.Errorf("memory category %q belongs in SOUL.md (goals/intent), not /memory", title)
 	}
 	if isKnowledgeLike(n) {
-		return "", fmt.Errorf("memory category %q belongs in /knowledge (future mount), not /memory", title)
+		return "", fmt.Errorf("memory category %q belongs in /knowledge, not /memory", title)
 	}
 	switch n {
 	case string(agent.MemoryCategoryPreference):

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tinoosan/agen8/pkg/agent"
+	hosttools "github.com/tinoosan/agen8/pkg/agent/hosttools"
 )
 
 func TestApplyAllowedTools(t *testing.T) {
@@ -121,5 +122,21 @@ func TestResolveToolRegistries_Hybrid(t *testing.T) {
 
 	if _, ok := bridgeReg.Get("fs_read"); !ok {
 		t.Fatalf("expected fs_read in bridge registry")
+	}
+}
+
+func TestApplyAllowedTools_AlwaysKeepsObsidian(t *testing.T) {
+	reg, err := agent.DefaultHostToolRegistry()
+	if err != nil {
+		t.Fatalf("DefaultHostToolRegistry: %v", err)
+	}
+	if err := reg.Register(&hosttools.ObsidianTool{}); err != nil {
+		t.Fatalf("register obsidian: %v", err)
+	}
+	if err := applyAllowedTools(reg, []string{"fs_read"}); err != nil {
+		t.Fatalf("applyAllowedTools: %v", err)
+	}
+	if _, ok := reg.Get("obsidian"); !ok {
+		t.Fatalf("expected obsidian to remain")
 	}
 }

@@ -20,7 +20,6 @@ allowed_tools:
 skills:
   - coding
   - reporting
-  - obsidian-cli
 prompts:
   system_prompt_path: prompt.md
 heartbeat:

@@ -613,6 +613,11 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("register soul_update for role %s: %w", role.Name, err)
 		}
+		if err := registry.Register(&hosttools.ObsidianTool{ProjectRoot: workdirAbs}); err != nil {
+			orderedEmitter.Close()
+			_ = rt.Shutdown(context.Background())
+			return fmt.Errorf("register obsidian for role %s: %w", role.Name, err)
+		}
 		roleAllowedTools, removedTools := sanitizeAllowedToolsForRole(role.AllowedTools, teamID, role.Coordinator)
 		if len(removedTools) > 0 {
 			msg := "Removed disallowed tool(s) for non-coordinator role"

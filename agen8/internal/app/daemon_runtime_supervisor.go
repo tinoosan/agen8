@@ -678,6 +678,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			return nil, err
 		}
 	}
+	if err := registry.Register(&hosttools.ObsidianTool{ProjectRoot: s.workdirAbs}); err != nil {
+		orderedEmitter.Close()
+		_ = rt.Shutdown(context.Background())
+		return nil, err
+	}
 	var allowedToolsForRun []string
 	if !isChildRun {
 		roleAllowedTools, removedTools := sanitizeAllowedToolsForRole(activeProfile.AllowedTools, teamID, isCoordinator)

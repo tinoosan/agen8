@@ -40,6 +40,8 @@ func toProtocolProjectContext(ctx ProjectContext) protocol.ProjectContext {
 			DefaultTeamProfile: strings.TrimSpace(ctx.Config.DefaultTeamProfile),
 			RPCEndpoint:        strings.TrimSpace(ctx.Config.RPCEndpoint),
 			DataDirOverride:    strings.TrimSpace(ctx.Config.DataDirOverride),
+			ObsidianVaultPath:  strings.TrimSpace(ctx.Config.ObsidianVaultPath),
+			ObsidianEnabled:    ctx.Config.ObsidianEnabled,
 			CreatedAt:          strings.TrimSpace(ctx.Config.CreatedAt),
 			Version:            ctx.Config.Version,
 		},

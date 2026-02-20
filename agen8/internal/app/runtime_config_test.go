@@ -25,6 +25,8 @@ OPENROUTER_API_KEY = "from-data-dir"
 [code_exec]
 venv_path = "exec/.venv"
 required_packages = ["pandas"]
+[obsidian]
+vault_path = "/project/custom-vault"
 `), 0o644); err != nil {
 		t.Fatalf("write dataDir config: %v", err)
 	}
@@ -76,6 +78,9 @@ required_packages = ["requests"]
 	if got := strings.Join(cfg.CodeExec.RequiredPackages, ","); got != "pandas" {
 		t.Fatalf("required_packages=%q", got)
 	}
+	if got := cfg.Obsidian.VaultPath; got != "/project/custom-vault" {
+		t.Fatalf("obsidian.vault_path=%q", got)
+	}
 }
 
 func TestApplyRuntimeConfigEnvDefaults_DoesNotOverrideExisting(t *testing.T) {
@@ -90,6 +95,9 @@ func TestApplyRuntimeConfigEnvDefaults_DoesNotOverrideExisting(t *testing.T) {
 			"OPENROUTER_API_KEY": "key-1",
 		},
 		Skills: runtimeConfigSkills{Conflict: "keep"},
+		Obsidian: runtimeConfigObsidian{
+			VaultPath: "/knowledge",
+		},
 	}
 	applyRuntimeConfigEnvDefaults(cfg)
 	if got := os.Getenv("OPENROUTER_MODEL"); got != "existing-model" {
@@ -103,6 +111,9 @@ func TestApplyRuntimeConfigEnvDefaults_DoesNotOverrideExisting(t *testing.T) {
 	}
 	if got := os.Getenv(envSkillsSeedConflict); got != "keep" {
 		t.Fatalf("%s=%q", envSkillsSeedConflict, got)
+	}
+	if got := os.Getenv("OBSIDIAN_VAULT_PATH"); got != "/knowledge" {
+		t.Fatalf("OBSIDIAN_VAULT_PATH=%q", got)
 	}
 }
 
@@ -128,6 +139,9 @@ func TestEnsureRuntimeConfigTemplate_CreatesDefaultTemplate(t *testing.T) {
 	}
 	if !strings.Contains(text, "[code_exec]") {
 		t.Fatalf("expected code_exec section in template, got:\n%s", text)
+	}
+	if !strings.Contains(text, "[obsidian]") {
+		t.Fatalf("expected obsidian section in template, got:\n%s", text)
 	}
 }
 
