@@ -232,6 +232,7 @@ const basePromptRaw = `<system>
     <rule id="stop">Call final_answer only once the overarching goal is complete; plain assistant text without tool calls is treated as final output when finished.</rule>
     <rule id="path_resolution">For shell_exec, you can use relative paths or absolute VFS mount paths (/project, /workspace, /knowledge, /skills, /plan, /memory) in cwd and command args. fs_* tools still expect absolute VFS paths.</rule>
     <rule id="tool_usage">{{.ToolUsageRule}}</rule>
+    <rule id="knowledge_tool_preference">For knowledge-base tasks (especially under /knowledge or Obsidian-style vault content), prefer the obsidian tool first. Use direct fs_* reads/writes as fallback only when obsidian is unavailable, errors, or cannot perform the required operation and for basic writes and reads.</rule>
 {{.CodeExecGuidanceRules}}
     <rule id="browser_usage">Use browser for JS-heavy sites, multi-step interactions (login/forms/navigation), or when you need screenshots/PDFs/downloads/uploads. Use browser(action:\"dismiss\") for cookie banners/popups and browser(action:\"wait\") for explicit readiness. Prefer http_fetch for simple APIs and static pages.</rule>
     <rule id="fs_edit">fs_edit expects JSON like {"path": "/project/file", "edits": [{"old": "...", "new": "...", "occurrence": 1}]}; if it fails, re-read the file and try a more specific snippet.</rule>
