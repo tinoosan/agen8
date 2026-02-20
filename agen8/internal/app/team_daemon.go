@@ -776,12 +776,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		startHealthServer(runCtx, healthAddr, nil, &serverWG)
 	}
 	if protocolEnabled {
-		srvCfg := RPCServerConfig{
-			Cfg:            cfg,
-			Run:            coordinatorRun,
-			AllowAnyThread: true,
-			TaskService:    taskService,
-		}
+		srvCfg := newTeamRPCServerBaseConfig(cfg, coordinatorRun, taskService)
 		srvCfg = buildTeamRPCServerConfig(
 			srvCfg,
 			cfg,
@@ -850,6 +845,16 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	}
 	serverWG.Wait()
 	return err
+}
+
+func newTeamRPCServerBaseConfig(cfg config.Config, coordinatorRun types.Run, taskService pkgtask.TaskServiceForRPC) RPCServerConfig {
+	return RPCServerConfig{
+		Cfg:            cfg,
+		Run:            coordinatorRun,
+		AllowAnyThread: true,
+		TaskService:    taskService,
+		EventsService:  eventsvc.NewService(cfg),
+	}
 }
 
 func mapTeamErr(err error) error {

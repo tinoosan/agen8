@@ -147,10 +147,18 @@ func submitGoalCmd(endpoint, sessionID, teamID, runID, coordinatorRole, goal str
 			return goalSubmittedMsg{goal: goal, err: fmt.Errorf("goal is required")}
 		}
 
-		client := rpcscope.NewClient(endpoint, sessionID).WithTimeout(5 * time.Second)
+		resolvedSessionID := strings.TrimSpace(sessionID)
+		if strings.TrimSpace(teamID) != "" {
+			sid, err := rpcscope.ResolveControlSessionID(ctx, endpoint, resolvedSessionID, strings.TrimSpace(teamID))
+			if err == nil {
+				resolvedSessionID = sid
+			}
+		}
+
+		client := rpcscope.NewClient(endpoint, resolvedSessionID).WithTimeout(5 * time.Second)
 		client.SetState(rpcscope.ScopeState{
-			SessionID:       strings.TrimSpace(sessionID),
-			ThreadID:        strings.TrimSpace(sessionID),
+			SessionID:       strings.TrimSpace(resolvedSessionID),
+			ThreadID:        strings.TrimSpace(resolvedSessionID),
 			TeamID:          strings.TrimSpace(teamID),
 			RunID:           strings.TrimSpace(runID),
 			CoordinatorRole: strings.TrimSpace(coordinatorRole),
@@ -178,13 +186,23 @@ func submitGoalCmd(endpoint, sessionID, teamID, runID, coordinatorRole, goal str
 	}
 }
 
-func sessionActionCmd(endpoint, sessionID string, action string) tea.Cmd {
+func sessionActionCmd(endpoint, sessionID, teamID string, action string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		sid := strings.TrimSpace(sessionID)
 		action = strings.ToLower(strings.TrimSpace(action))
+		if strings.TrimSpace(teamID) != "" {
+			resolved, err := rpcscope.ResolveControlSessionID(ctx, endpoint, sid, strings.TrimSpace(teamID))
+			if err != nil {
+				return sessionActionMsg{action: action, err: fmt.Errorf("team control session unavailable; refresh manifest or reconnect")}
+			}
+			sid = strings.TrimSpace(resolved)
+		}
+		if sid == "" {
+			return sessionActionMsg{action: action, err: fmt.Errorf("session id is required")}
+		}
 		client := rpcscope.NewClient(endpoint, sid).WithTimeout(5 * time.Second)
 
 		switch action {

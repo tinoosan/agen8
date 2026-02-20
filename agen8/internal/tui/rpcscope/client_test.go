@@ -47,3 +47,33 @@ func TestIsScopeUnavailableMatchesThreadErrors(t *testing.T) {
 		t.Fatalf("expected true for thread-not-found message")
 	}
 }
+
+func TestPickControlSessionID_PrefersMatchingPreferred(t *testing.T) {
+	got := pickControlSessionID([]protocol.SessionListItem{
+		{SessionID: "sess-other", TeamID: "team-a"},
+		{SessionID: "sess-preferred", TeamID: "team-a"},
+	}, "sess-preferred", "team-a")
+	if got != "sess-preferred" {
+		t.Fatalf("session=%q want sess-preferred", got)
+	}
+}
+
+func TestPickControlSessionID_FallsBackToTeamMatch(t *testing.T) {
+	got := pickControlSessionID([]protocol.SessionListItem{
+		{SessionID: "sess-x", TeamID: "team-x"},
+		{SessionID: "sess-team", TeamID: "team-a"},
+	}, "stale-session", "team-a")
+	if got != "sess-team" {
+		t.Fatalf("session=%q want sess-team", got)
+	}
+}
+
+func TestPickControlSessionID_RejectsPreferredWrongTeam(t *testing.T) {
+	got := pickControlSessionID([]protocol.SessionListItem{
+		{SessionID: "sess-wrong", TeamID: "team-x"},
+		{SessionID: "sess-right", TeamID: "team-a"},
+	}, "sess-wrong", "team-a")
+	if got != "sess-right" {
+		t.Fatalf("session=%q want sess-right", got)
+	}
+}

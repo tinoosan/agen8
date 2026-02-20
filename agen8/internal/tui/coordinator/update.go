@@ -147,11 +147,11 @@ func (m *Model) handleSlash(line string) tea.Cmd {
 	cmd := strings.ToLower(strings.TrimSpace(line))
 	switch cmd {
 	case "/pause":
-		return sessionActionCmd(m.endpoint, m.sessionID, "pause")
+		return sessionActionCmd(m.endpoint, m.sessionID, m.teamID, "pause")
 	case "/resume":
-		return sessionActionCmd(m.endpoint, m.sessionID, "resume")
+		return sessionActionCmd(m.endpoint, m.sessionID, m.teamID, "resume")
 	case "/stop":
-		return sessionActionCmd(m.endpoint, m.sessionID, "stop")
+		return sessionActionCmd(m.endpoint, m.sessionID, m.teamID, "stop")
 	case "/help":
 		m.setFeedback("commands: /pause /resume /stop /help /quit", feedbackInfo)
 		return nil
@@ -195,6 +195,9 @@ func (m *Model) pinFeedToBottom() {
 }
 
 func (m *Model) applyRecoveredScope(scope rpcscope.ScopeState) {
+	if strings.TrimSpace(scope.SessionID) != "" {
+		m.sessionID = strings.TrimSpace(scope.SessionID)
+	}
 	if strings.TrimSpace(scope.TeamID) != "" {
 		m.teamID = strings.TrimSpace(scope.TeamID)
 	}

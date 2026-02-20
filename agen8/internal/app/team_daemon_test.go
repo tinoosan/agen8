@@ -121,6 +121,14 @@ func TestBuildTeamRPCServerConfig_AcceptsRoleSessionThread(t *testing.T) {
 	t.Fatalf("expected InvalidParams error, got %T: %v", err, err)
 }
 
+func TestNewTeamRPCServerBaseConfig_ConfiguresEventsService(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	srvCfg := newTeamRPCServerBaseConfig(cfg, types.Run{RunID: "run-1", SessionID: "sess-1"}, nil)
+	if srvCfg.EventsService == nil {
+		t.Fatal("EventsService should be configured in team RPC server config")
+	}
+}
+
 func TestBuildTeamRPCServerConfig_RejectsUnknownThread(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	memStore := store.NewMemorySessionStore()

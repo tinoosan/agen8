@@ -82,6 +82,36 @@ func (c *Client) call(ctx context.Context, method string, params, out any) error
 	return nil
 }
 
+// ResolveControlSessionID resolves the freshest usable control session ID.
+// When teamID is provided, the selected session must belong to that team.
+func ResolveControlSessionID(ctx context.Context, endpoint, preferredSessionID, teamID string) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		endpoint = protocol.DefaultRPCEndpoint
+	}
+	preferredSessionID = strings.TrimSpace(preferredSessionID)
+	teamID = strings.TrimSpace(teamID)
+
+	cli := protocol.TCPClient{Endpoint: endpoint, Timeout: 5 * time.Second}
+	var sessions protocol.SessionListResult
+	if err := cli.Call(ctx, protocol.MethodSessionList, protocol.SessionListParams{
+		ThreadID: detachedThreadID,
+		Limit:    500,
+		Offset:   0,
+	}, &sessions); err != nil {
+		return "", fmt.Errorf("rpc %s: %w", protocol.MethodSessionList, err)
+	}
+
+	selected := pickControlSessionID(sessions.Sessions, preferredSessionID, teamID)
+	if selected != "" {
+		return selected, nil
+	}
+	if teamID != "" {
+		return "", fmt.Errorf("%w: team control session unavailable", ErrScopeUnavailable)
+	}
+	return "", fmt.Errorf("%w: control session unavailable", ErrScopeUnavailable)
+}
+
 func (c *Client) RefreshScope(ctx context.Context) (ScopeState, error) {
 	sid := strings.TrimSpace(c.sessionID)
 	if sid == "" {
@@ -320,4 +350,33 @@ func fallback(v, d string) string {
 		return d
 	}
 	return strings.TrimSpace(v)
+}
+
+func pickControlSessionID(sessions []protocol.SessionListItem, preferredSessionID, teamID string) string {
+	preferredSessionID = strings.TrimSpace(preferredSessionID)
+	teamID = strings.TrimSpace(teamID)
+
+	if preferredSessionID != "" {
+		for _, item := range sessions {
+			sid := strings.TrimSpace(item.SessionID)
+			if sid == "" || sid != preferredSessionID {
+				continue
+			}
+			if teamID == "" || strings.TrimSpace(item.TeamID) == teamID {
+				return sid
+			}
+		}
+	}
+
+	for _, item := range sessions {
+		sid := strings.TrimSpace(item.SessionID)
+		if sid == "" {
+			continue
+		}
+		if teamID != "" && strings.TrimSpace(item.TeamID) != teamID {
+			continue
+		}
+		return sid
+	}
+	return ""
 }

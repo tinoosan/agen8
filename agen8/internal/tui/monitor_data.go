@@ -93,21 +93,46 @@ func (m *monitorModel) resolveTeamControlSessionID() string {
 	if m == nil {
 		return ""
 	}
-	sessionID := strings.TrimSpace(m.sessionID)
-	if sessionID != "" {
-		return sessionID
-	}
 	teamID := strings.TrimSpace(m.teamID)
 	if teamID == "" {
-		return ""
+		return strings.TrimSpace(m.sessionID)
 	}
+	sessionID := ""
 	if manifest, err := loadTeamManifestFromDisk(m.cfg, teamID); err == nil && manifest != nil {
 		sessionID = resolveTeamControlSessionID(manifest, "")
 		if sessionID != "" {
 			m.sessionID = sessionID
 		}
 	}
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(m.sessionID)
+	}
 	return strings.TrimSpace(sessionID)
+}
+
+func (m *monitorModel) resolveFreshTeamControlSessionID(ctx context.Context) (string, error) {
+	if m == nil {
+		return "", fmt.Errorf("%w: monitor is nil", rpcscope.ErrScopeUnavailable)
+	}
+	teamID := strings.TrimSpace(m.teamID)
+	preferred := strings.TrimSpace(m.resolveTeamControlSessionID())
+	if preferred == "" {
+		preferred = strings.TrimSpace(m.sessionID)
+	}
+	endpoint := strings.TrimSpace(m.rpcEndpoint)
+	if endpoint == "" {
+		endpoint = monitorRPCEndpoint()
+	}
+
+	sessionID, err := rpcscope.ResolveControlSessionID(ctx, endpoint, preferred, teamID)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return "", fmt.Errorf("%w: team control session unavailable", rpcscope.ErrScopeUnavailable)
+	}
+	m.sessionID = strings.TrimSpace(sessionID)
+	return strings.TrimSpace(sessionID), nil
 }
 
 func (m *monitorModel) resolveEnqueueTargetRunID() (string, error) {

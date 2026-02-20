@@ -240,6 +240,23 @@ func cmdAgents(m *monitorModel, rest string) tea.Cmd {
 	return m.openAgentPicker()
 }
 
+const teamControlSessionUnavailableMessage = "team control session unavailable; refresh manifest or reconnect"
+
+func formatTeamControlActionError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if rpcscope.IsScopeUnavailable(err) {
+		return teamControlSessionUnavailableMessage
+	}
+	msg := strings.TrimSpace(err.Error())
+	lower := strings.ToLower(msg)
+	if strings.Contains(lower, "thread not found") || strings.Contains(lower, "run scope is unavailable for thread") {
+		return teamControlSessionUnavailableMessage
+	}
+	return msg
+}
+
 func cmdPause(m *monitorModel, rest string) tea.Cmd {
 	if strings.TrimSpace(rest) != "" {
 		return func() tea.Msg { return commandLinesMsg{lines: []string{"[command] usage: /pause"}} }
@@ -251,21 +268,26 @@ func cmdPause(m *monitorModel, rest string) tea.Cmd {
 	}
 	return func() tea.Msg {
 		if strings.TrimSpace(m.teamID) != "" {
-			controlSessionID := strings.TrimSpace(m.resolveTeamControlSessionID())
-			if controlSessionID == "" {
-				controlSessionID = strings.TrimSpace(m.rpcRun().SessionID)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			controlSessionID, err := m.resolveFreshTeamControlSessionID(ctx)
+			if err != nil {
+				return commandLinesMsg{lines: []string{"[pause] error: " + formatTeamControlActionError(err)}}
 			}
 			client := rpcscope.NewClient(strings.TrimSpace(m.rpcEndpoint), controlSessionID).WithTimeout(2 * time.Second)
 			var res protocol.SessionPauseResult
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
 			scope, recovered, err := client.CallWithRecovery(ctx, protocol.MethodSessionPause, func(scope rpcscope.ScopeState) (any, error) {
-				return protocol.SessionPauseParams{ThreadID: protocol.ThreadID(scope.ThreadID), SessionID: scope.SessionID}, nil
+				sessionID := strings.TrimSpace(scope.SessionID)
+				if sessionID == "" {
+					return nil, fmt.Errorf("%w: team control session unavailable", rpcscope.ErrScopeUnavailable)
+				}
+				return protocol.SessionPauseParams{ThreadID: protocol.ThreadID(sessionID), SessionID: sessionID}, nil
 			}, &res)
 			if err != nil {
-				return commandLinesMsg{lines: []string{"[pause] error: " + err.Error()}}
+				return commandLinesMsg{lines: []string{"[pause] error: " + formatTeamControlActionError(err)}}
 			}
-			if recovered {
+			if recovered || strings.TrimSpace(scope.SessionID) != "" {
 				m.sessionID = strings.TrimSpace(scope.SessionID)
 			}
 			return commandLinesMsg{lines: []string{fmt.Sprintf("[pause] team paused (%d runs)", len(res.AffectedRunIDs))}}
@@ -293,21 +315,26 @@ func cmdResume(m *monitorModel, rest string) tea.Cmd {
 	}
 	return func() tea.Msg {
 		if strings.TrimSpace(m.teamID) != "" {
-			controlSessionID := strings.TrimSpace(m.resolveTeamControlSessionID())
-			if controlSessionID == "" {
-				controlSessionID = strings.TrimSpace(m.rpcRun().SessionID)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			controlSessionID, err := m.resolveFreshTeamControlSessionID(ctx)
+			if err != nil {
+				return commandLinesMsg{lines: []string{"[resume] error: " + formatTeamControlActionError(err)}}
 			}
 			client := rpcscope.NewClient(strings.TrimSpace(m.rpcEndpoint), controlSessionID).WithTimeout(2 * time.Second)
 			var res protocol.SessionResumeResult
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
 			scope, recovered, err := client.CallWithRecovery(ctx, protocol.MethodSessionResume, func(scope rpcscope.ScopeState) (any, error) {
-				return protocol.SessionResumeParams{ThreadID: protocol.ThreadID(scope.ThreadID), SessionID: scope.SessionID}, nil
+				sessionID := strings.TrimSpace(scope.SessionID)
+				if sessionID == "" {
+					return nil, fmt.Errorf("%w: team control session unavailable", rpcscope.ErrScopeUnavailable)
+				}
+				return protocol.SessionResumeParams{ThreadID: protocol.ThreadID(sessionID), SessionID: sessionID}, nil
 			}, &res)
 			if err != nil {
-				return commandLinesMsg{lines: []string{"[resume] error: " + err.Error()}}
+				return commandLinesMsg{lines: []string{"[resume] error: " + formatTeamControlActionError(err)}}
 			}
-			if recovered {
+			if recovered || strings.TrimSpace(scope.SessionID) != "" {
 				m.sessionID = strings.TrimSpace(scope.SessionID)
 			}
 			return commandLinesMsg{lines: []string{fmt.Sprintf("[resume] team resumed (%d runs)", len(res.AffectedRunIDs))}}
@@ -334,24 +361,33 @@ func cmdStop(m *monitorModel, rest string) tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
 		controlSessionID := strings.TrimSpace(m.rpcRun().SessionID)
 		if strings.TrimSpace(m.teamID) != "" {
-			controlSessionID = strings.TrimSpace(m.resolveTeamControlSessionID())
-			if controlSessionID == "" {
-				controlSessionID = strings.TrimSpace(m.rpcRun().SessionID)
+			var err error
+			controlSessionID, err = m.resolveFreshTeamControlSessionID(ctx)
+			if err != nil {
+				return commandLinesMsg{lines: []string{"[stop] error: " + formatTeamControlActionError(err)}}
 			}
 		}
 		client := rpcscope.NewClient(strings.TrimSpace(m.rpcEndpoint), controlSessionID).WithTimeout(2 * time.Second)
 		var res protocol.SessionStopResult
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
 		scope, recovered, err := client.CallWithRecovery(ctx, protocol.MethodSessionStop, func(scope rpcscope.ScopeState) (any, error) {
-			return protocol.SessionStopParams{ThreadID: protocol.ThreadID(scope.ThreadID), SessionID: scope.SessionID}, nil
+			sessionID := strings.TrimSpace(scope.SessionID)
+			if sessionID == "" {
+				return nil, fmt.Errorf("%w: control session unavailable", rpcscope.ErrScopeUnavailable)
+			}
+			return protocol.SessionStopParams{ThreadID: protocol.ThreadID(sessionID), SessionID: sessionID}, nil
 		}, &res)
 		if err != nil {
+			if strings.TrimSpace(m.teamID) != "" {
+				return commandLinesMsg{lines: []string{"[stop] error: " + formatTeamControlActionError(err)}}
+			}
 			return commandLinesMsg{lines: []string{"[stop] error: " + err.Error()}}
 		}
-		if recovered {
+		if recovered || strings.TrimSpace(scope.SessionID) != "" {
 			m.sessionID = strings.TrimSpace(scope.SessionID)
 		}
 		if strings.TrimSpace(m.teamID) != "" {
