@@ -69,6 +69,48 @@ func TestValidateTeamRoles(t *testing.T) {
 	})
 }
 
+func TestEnsureReviewerRole(t *testing.T) {
+	t.Run("uses explicit reviewer", func(t *testing.T) {
+		roles := []profile.RoleConfig{
+			{Name: "ceo", Coordinator: true},
+			{Name: "qa", Reviewer: true},
+		}
+		out, reviewer, injected, err := EnsureReviewerRole(roles, "ceo")
+		if err != nil {
+			t.Fatalf("EnsureReviewerRole: %v", err)
+		}
+		if injected {
+			t.Fatalf("expected no injection")
+		}
+		if reviewer != "qa" {
+			t.Fatalf("reviewer=%q", reviewer)
+		}
+		if len(out) != 2 {
+			t.Fatalf("roles len=%d", len(out))
+		}
+	})
+
+	t.Run("injects virtual reviewer when missing", func(t *testing.T) {
+		roles := []profile.RoleConfig{
+			{Name: "ceo", Coordinator: true},
+			{Name: "builder"},
+		}
+		out, reviewer, injected, err := EnsureReviewerRole(roles, "ceo")
+		if err != nil {
+			t.Fatalf("EnsureReviewerRole: %v", err)
+		}
+		if !injected {
+			t.Fatalf("expected injection")
+		}
+		if reviewer != VirtualReviewerRoleName {
+			t.Fatalf("reviewer=%q", reviewer)
+		}
+		if len(out) != 3 {
+			t.Fatalf("roles len=%d", len(out))
+		}
+	})
+}
+
 func TestBuildManifest(t *testing.T) {
 	roles := []RoleRecord{
 		{RoleName: "ceo", RunID: "run-1", SessionID: "sess-1"},
@@ -217,10 +259,10 @@ func TestRequestModelChange(t *testing.T) {
 // Mocks
 
 type mockTaskStore struct {
-	createTask  func(ctx context.Context, task types.Task) error
-	countTasks  func(ctx context.Context, filter state.TaskFilter) (int, error)
-	listTasks   func(ctx context.Context, filter state.TaskFilter) ([]types.Task, error)
-	getTask     func(ctx context.Context, taskID string) (types.Task, error)
+	createTask   func(ctx context.Context, task types.Task) error
+	countTasks   func(ctx context.Context, filter state.TaskFilter) (int, error)
+	listTasks    func(ctx context.Context, filter state.TaskFilter) ([]types.Task, error)
+	getTask      func(ctx context.Context, taskID string) (types.Task, error)
 	completeTask func(ctx context.Context, taskID string, result types.TaskResult) error
 }
 
@@ -259,14 +301,16 @@ func (m *mockTaskStore) CompleteTask(ctx context.Context, taskID string, result 
 	}
 	return nil
 }
-func (m *mockTaskStore) ClaimTask(ctx context.Context, taskID string, ttl time.Duration) error { return nil }
+func (m *mockTaskStore) ClaimTask(ctx context.Context, taskID string, ttl time.Duration) error {
+	return nil
+}
 func (m *mockTaskStore) ExtendLease(ctx context.Context, taskID string, ttl time.Duration) error {
 	return nil
 }
 func (m *mockTaskStore) ReleaseLease(ctx context.Context, taskID string) error { return nil }
 func (m *mockTaskStore) DelegateTask(ctx context.Context, taskID string) error { return nil }
 func (m *mockTaskStore) ResumeTask(ctx context.Context, taskID string) error   { return nil }
-func (m *mockTaskStore) RecoverExpiredLeases(ctx context.Context) error       { return nil }
+func (m *mockTaskStore) RecoverExpiredLeases(ctx context.Context) error        { return nil }
 
 type mockRetryEscalationCreator struct {
 	createEscalation func(ctx context.Context, callbackTaskID string, data hosttools.EscalationData) error

@@ -345,3 +345,82 @@ type EventsCountParams struct {
 type EventsCountResult struct {
 	Count int `json:"count"`
 }
+
+type ProjectConfig struct {
+	ProjectID          string `json:"projectId,omitempty"`
+	DefaultProfile     string `json:"defaultProfile,omitempty"`
+	DefaultMode        string `json:"defaultMode,omitempty"`
+	DefaultTeamProfile string `json:"defaultTeamProfile,omitempty"`
+	RPCEndpoint        string `json:"rpcEndpoint,omitempty"`
+	DataDirOverride    string `json:"dataDirOverride,omitempty"`
+	CreatedAt          string `json:"createdAt,omitempty"`
+	Version            int    `json:"version,omitempty"`
+}
+
+type ProjectState struct {
+	ActiveSessionID string `json:"activeSessionId,omitempty"`
+	ActiveTeamID    string `json:"activeTeamId,omitempty"`
+	ActiveRunID     string `json:"activeRunId,omitempty"`
+	LastAttachedAt  string `json:"lastAttachedAt,omitempty"`
+	LastCommand     string `json:"lastCommand,omitempty"`
+}
+
+type ProjectContext struct {
+	Cwd        string        `json:"cwd,omitempty"`
+	RootDir    string        `json:"rootDir,omitempty"`
+	ProjectDir string        `json:"projectDir,omitempty"`
+	ConfigPath string        `json:"configPath,omitempty"`
+	StatePath  string        `json:"statePath,omitempty"`
+	Exists     bool          `json:"exists"`
+	Config     ProjectConfig `json:"config"`
+	State      ProjectState  `json:"state"`
+}
+
+type ProjectGetContextParams struct {
+	Cwd string `json:"cwd,omitempty"`
+}
+
+type ProjectGetContextResult struct {
+	Context ProjectContext `json:"context"`
+}
+
+type ProjectSetActiveSessionParams struct {
+	Cwd             string `json:"cwd,omitempty"`
+	ActiveSessionID string `json:"activeSessionId"`
+	ActiveTeamID    string `json:"activeTeamId,omitempty"`
+	ActiveRunID     string `json:"activeRunId,omitempty"`
+	LastCommand     string `json:"lastCommand,omitempty"`
+}
+
+type ProjectSetActiveSessionResult struct {
+	Context ProjectContext `json:"context"`
+}
+
+type LogsQueryParams struct {
+	RunID     string   `json:"runId,omitempty"`
+	SessionID string   `json:"sessionId,omitempty"`
+	AgentID   string   `json:"agentId,omitempty"`
+	Types     []string `json:"types,omitempty"`
+	Limit     int      `json:"limit,omitempty"`
+	Offset    int      `json:"offset,omitempty"`
+	AfterSeq  int64    `json:"afterSeq,omitempty"`
+	SortDesc  bool     `json:"sortDesc,omitempty"`
+}
+
+type LogsQueryResult struct {
+	Events []types.EventRecord `json:"events"`
+	Next   int64               `json:"next,omitempty"`
+}
+
+type ActivityStreamParams struct {
+	RunID    string   `json:"runId,omitempty"`
+	AfterSeq int64    `json:"afterSeq,omitempty"`
+	Limit    int      `json:"limit,omitempty"`
+	Types    []string `json:"types,omitempty"`
+}
+
+type ActivityStreamResult struct {
+	Events    []types.EventRecord `json:"events"`
+	Next      int64               `json:"next,omitempty"`
+	LatestSeq int64               `json:"latestSeq,omitempty"`
+}

@@ -733,6 +733,13 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		_ = rt.Shutdown(context.Background())
 		return nil, err
 	}
+	reviewerRole := strings.TrimSpace(coordinatorRole)
+	for _, role := range teamRoles {
+		if strings.EqualFold(strings.TrimSpace(role), "reviewer") {
+			reviewerRole = strings.TrimSpace(role)
+			break
+		}
+	}
 	workerSession, err := agentsession.New(agentsession.Config{
 		Agent:      a,
 		Profile:    activeProfile,
@@ -761,6 +768,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		RoleName:             roleName,
 		IsCoordinator:        isCoordinator,
 		CoordinatorRole:      coordinatorRole,
+		ReviewerRole:         reviewerRole,
 		TeamRoles:            teamRoles,
 		TeamRoleDescriptions: teamRoleDescriptions,
 		ParentRunID:          strings.TrimSpace(run.ParentRunID),

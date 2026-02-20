@@ -39,6 +39,10 @@ const (
 	MethodArtifactSearch      = "artifact.search"
 	MethodArtifactGet         = "artifact.get"
 	MethodRunListChildren     = "run.listChildren"
+	MethodProjectGetContext   = "project.getContext"
+	MethodProjectSetActive    = "project.setActiveSession"
+	MethodLogsQuery           = "logs.query"
+	MethodActivityStream      = "activity.stream"
 
 	MethodEventsListPaginated = "events.listPaginated"
 	MethodEventsLatestSeq     = "events.latestSeq"

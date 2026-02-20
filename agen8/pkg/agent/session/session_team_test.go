@@ -182,6 +182,81 @@ func TestMaybeCreateCoordinatorCallback_TeamWorkerCompletion_CreatesCallback(t *
 	}
 }
 
+func TestMaybeCreateCoordinatorCallback_TeamWorkerCompletion_AssignsReviewer(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:       store,
+		TeamID:          "team-1",
+		RoleName:        "backend-engineer",
+		CoordinatorRole: "ceo",
+		ReviewerRole:    "reviewer",
+		TeamRoles:       []string{"ceo", "backend-engineer", "reviewer"},
+		SessionID:       "team-team-1",
+		RunID:           "run-backend",
+	}}
+	task := types.Task{
+		TaskID:       "task-reviewer-route",
+		TeamID:       "team-1",
+		AssignedRole: "backend-engineer",
+		CreatedBy:    "ceo",
+		Goal:         "ship backend feature",
+	}
+	s.maybeCreateCoordinatorCallback(context.Background(), task, types.TaskResult{
+		TaskID:  task.TaskID,
+		Status:  types.TaskStatusSucceeded,
+		Summary: "done",
+	})
+	callback, err := store.GetTask(context.Background(), "callback-"+task.TaskID)
+	if err != nil {
+		t.Fatalf("expected callback task, got err=%v", err)
+	}
+	if callback.AssignedRole != "reviewer" {
+		t.Fatalf("callback assignedRole=%q, want reviewer", callback.AssignedRole)
+	}
+}
+
+func TestMaybeCreateCoordinatorCallback_ReviewerFallbackToCoordinator(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:       store,
+		TeamID:          "team-1",
+		RoleName:        "backend-engineer",
+		CoordinatorRole: "ceo",
+		ReviewerRole:    "reviewer",
+		TeamRoles:       []string{"ceo", "backend-engineer"},
+		SessionID:       "team-team-1",
+		RunID:           "run-backend",
+	}}
+	task := types.Task{
+		TaskID:       "task-reviewer-fallback",
+		TeamID:       "team-1",
+		AssignedRole: "backend-engineer",
+		CreatedBy:    "ceo",
+		Goal:         "ship backend feature",
+	}
+	s.maybeCreateCoordinatorCallback(context.Background(), task, types.TaskResult{
+		TaskID:  task.TaskID,
+		Status:  types.TaskStatusSucceeded,
+		Summary: "done",
+	})
+	callback, err := store.GetTask(context.Background(), "callback-"+task.TaskID)
+	if err != nil {
+		t.Fatalf("expected callback task, got err=%v", err)
+	}
+	if callback.AssignedRole != "ceo" {
+		t.Fatalf("callback assignedRole=%q, want ceo", callback.AssignedRole)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(callback.Metadata["reviewerFallback"])); got != "coordinator" {
+		t.Fatalf("reviewerFallback=%q", got)
+	}
+}
+
 func TestMaybeCreateCoordinatorCallback_SubagentWorkerCompletion_Unchanged(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
 	if err != nil {

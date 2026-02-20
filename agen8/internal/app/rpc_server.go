@@ -179,6 +179,7 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		registerSoulHandlers,
 		registerTeamHandlers,
 		registerArtifactHandlers,
+		registerProjectHandlers,
 		registerEventsHandlers,
 	)
 	if err != nil {

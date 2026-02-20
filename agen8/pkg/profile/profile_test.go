@@ -165,6 +165,36 @@ team:
 	}
 }
 
+func TestLoad_TeamProfile_RejectsMultipleReviewers(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("prompt"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	raw := `
+id: team-test
+description: Team profile
+team:
+  roles:
+    - name: lead
+      coordinator: true
+      reviewer: true
+      description: Lead
+      prompts:
+        system_prompt_path: prompt.md
+    - name: qa
+      reviewer: true
+      description: QA
+      prompts:
+        system_prompt_path: prompt.md
+`
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	if _, err := Load(dir); err == nil {
+		t.Fatalf("expected multiple reviewer validation error")
+	}
+}
+
 func TestLoad_NormalizesAllowedTools(t *testing.T) {
 	dir := t.TempDir()
 	raw := `

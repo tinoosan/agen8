@@ -51,6 +51,7 @@ type RoleConfig struct {
 	Model                   string         `yaml:"model,omitempty"`
 	SubagentModel           string         `yaml:"subagent_model,omitempty"`
 	Coordinator             bool           `yaml:"coordinator,omitempty"`
+	Reviewer                bool           `yaml:"reviewer,omitempty"`
 	Heartbeat               []HeartbeatJob `yaml:"heartbeat,omitempty"`
 }
 
@@ -170,6 +171,7 @@ func (p Profile) Validate(profileDir string) error {
 		}
 		seenRoles := map[string]struct{}{}
 		coordinators := 0
+		reviewers := 0
 		for i, role := range p.Team.Roles {
 			ref := fmt.Sprintf("profile %s role[%d]", p.ID, i)
 			if role.Name == "" {
@@ -203,9 +205,15 @@ func (p Profile) Validate(profileDir string) error {
 			if role.Coordinator {
 				coordinators++
 			}
+			if role.Reviewer {
+				reviewers++
+			}
 		}
 		if coordinators != 1 {
 			return fmt.Errorf("profile %s: exactly one team role must set coordinator: true", p.ID)
+		}
+		if reviewers > 1 {
+			return fmt.Errorf("profile %s: at most one team role may set reviewer: true", p.ID)
 		}
 	}
 	return nil

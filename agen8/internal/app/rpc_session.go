@@ -317,6 +317,14 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 	if err != nil {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
+	teamRoles, _, _, err := team.EnsureReviewerRole(prof.Team.Roles, coordinatorRole)
+	if err != nil {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
+	}
+	_, coordinatorRole, err = team.ValidateTeamRoles(teamRoles)
+	if err != nil {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
+	}
 
 	goal := strings.TrimSpace(p.Goal)
 	if goal == "" {
@@ -345,10 +353,10 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 		return protocol.SessionStartResult{}, err
 	}
 
-	runtimes := make([]teamRoleRuntime, 0, len(prof.Team.Roles))
-	runIDs := make([]string, 0, len(prof.Team.Roles))
+	runtimes := make([]teamRoleRuntime, 0, len(teamRoles))
+	runIDs := make([]string, 0, len(teamRoles))
 	primaryRunID := ""
-	for _, role := range prof.Team.Roles {
+	for _, role := range teamRoles {
 		roleName := strings.TrimSpace(role.Name)
 		if roleName == "" {
 			continue
@@ -386,6 +394,7 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 			role: profile.RoleConfig{
 				Name:        roleName,
 				Description: strings.TrimSpace(role.Description),
+				Reviewer:    role.Reviewer,
 			},
 			run: run,
 		})
@@ -420,7 +429,6 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 	if err := writeTeamManifestFile(s.cfg, manifest); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
-
 	return protocol.SessionStartResult{
 		SessionID:    strings.TrimSpace(sess.SessionID),
 		PrimaryRunID: primaryRunID,

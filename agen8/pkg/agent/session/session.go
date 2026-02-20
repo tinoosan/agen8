@@ -69,6 +69,7 @@ type Config struct {
 	RoleName             string
 	IsCoordinator        bool
 	CoordinatorRole      string
+	ReviewerRole         string
 	TeamRoles            []string // all role names, for prompt injection
 	TeamRoleDescriptions map[string]string
 
@@ -151,11 +152,15 @@ func New(cfg Config) (*Session, error) {
 		cfg.TeamID = strings.TrimSpace(cfg.TeamID)
 		cfg.RoleName = strings.TrimSpace(cfg.RoleName)
 		cfg.CoordinatorRole = strings.TrimSpace(cfg.CoordinatorRole)
+		cfg.ReviewerRole = strings.TrimSpace(cfg.ReviewerRole)
 		if cfg.RoleName == "" {
 			return nil, fmt.Errorf("roleName is required in team mode")
 		}
 		if cfg.CoordinatorRole == "" {
 			cfg.CoordinatorRole = cfg.RoleName
+		}
+		if cfg.ReviewerRole == "" {
+			cfg.ReviewerRole = cfg.CoordinatorRole
 		}
 		roles := make([]string, 0, len(cfg.TeamRoles))
 		seen := map[string]struct{}{}
@@ -1183,6 +1188,15 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 		group = batchGroupScope{mode: "standalone", parentTaskID: batchParentTaskID, waveID: batchWaveID, reviewerID: parentRunID}
 	} else {
 		coordinatorRole := strings.TrimSpace(s.cfg.CoordinatorRole)
+		reviewerRole := strings.TrimSpace(s.cfg.ReviewerRole)
+		if reviewerRole == "" {
+			reviewerRole = coordinatorRole
+		}
+		fallbackToCoordinator := false
+		if reviewerRole != "" && !strings.EqualFold(reviewerRole, coordinatorRole) && !containsRoleCI(s.cfg.TeamRoles, reviewerRole) {
+			reviewerRole = coordinatorRole
+			fallbackToCoordinator = true
+		}
 		artifactsForCoordinator := make([]string, 0, len(tr.Artifacts))
 		seenArtifacts := map[string]struct{}{}
 		for _, art := range tr.Artifacts {
@@ -1211,9 +1225,9 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			SessionID:      "team-" + strings.TrimSpace(s.cfg.TeamID),
 			RunID:          "team-" + strings.TrimSpace(s.cfg.TeamID) + "-callback",
 			TeamID:         strings.TrimSpace(s.cfg.TeamID),
-			AssignedRole:   coordinatorRole,
+			AssignedRole:   reviewerRole,
 			AssignedToType: "role",
-			AssignedTo:     coordinatorRole,
+			AssignedTo:     reviewerRole,
 			CreatedBy:      strings.TrimSpace(s.cfg.RoleName),
 			TaskKind:       state.TaskKindCallback,
 			Goal:           callbackGoal,
@@ -1227,9 +1241,13 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				"sourceRole":        strings.TrimSpace(s.cfg.RoleName),
 				"sourceRunID":       strings.TrimSpace(s.cfg.RunID),
 				"sourceTaskStatus":  string(tr.Status),
+				"reviewerRole":      reviewerRole,
 			},
 		}
-		group = batchGroupScope{mode: "team", parentTaskID: batchParentTaskID, waveID: batchWaveID, reviewerID: coordinatorRole}
+		if fallbackToCoordinator {
+			callback.Metadata["reviewerFallback"] = "coordinator"
+		}
+		group = batchGroupScope{mode: "team", parentTaskID: batchParentTaskID, waveID: batchWaveID, reviewerID: reviewerRole}
 	}
 	if callback.Metadata == nil {
 		callback.Metadata = map[string]any{}
@@ -1260,11 +1278,37 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				"callbackForTaskId": taskID,
 			},
 		})
+		if eventSource == "team.callback" {
+			if fallback, _ := callback.Metadata["reviewerFallback"].(string); strings.TrimSpace(fallback) != "" {
+				s.emitBestEffort(ctx, events.Event{
+					Type:    "team.callback.reviewer_fallback",
+					Message: "Reviewer unavailable; callback reassigned",
+					Data: map[string]string{
+						"taskId":          callbackTaskID,
+						"callbackForTask": taskID,
+						"assignedRole":    strings.TrimSpace(callback.AssignedRole),
+					},
+				})
+			}
+		}
 		return
 	}
 
 	s.emitBatchProgress(ctx, group)
 	s.maybeFlushBatchGroup(ctx, group)
+}
+
+func containsRoleCI(roles []string, want string) bool {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return false
+	}
+	for _, role := range roles {
+		if strings.EqualFold(strings.TrimSpace(role), want) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Session) maybeFlushStagedBatchCallbacks(ctx context.Context, _ bool) {

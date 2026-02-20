@@ -152,6 +152,10 @@ func TestRPCServer_MethodRegistry_CoversAllProtocolMethods(t *testing.T) {
 		protocol.MethodEventsListPaginated,
 		protocol.MethodEventsLatestSeq,
 		protocol.MethodEventsCount,
+		protocol.MethodProjectGetContext,
+		protocol.MethodProjectSetActive,
+		protocol.MethodLogsQuery,
+		protocol.MethodActivityStream,
 	}
 
 	if got, want := len(srv.methodHandlers), len(expected); got != want {

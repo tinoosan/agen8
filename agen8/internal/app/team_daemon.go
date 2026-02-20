@@ -280,6 +280,14 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	if err != nil {
 		return err
 	}
+	workingRoles, reviewerRole, _, err := team.EnsureReviewerRole(prof.Team.Roles, coordinatorRole)
+	if err != nil {
+		return err
+	}
+	roleNames, coordinatorRole, err = team.ValidateTeamRoles(workingRoles)
+	if err != nil {
+		return err
+	}
 	prevManifest, err := loadExistingTeamManifest(cfg, teamID)
 	if err != nil {
 		return fmt.Errorf("load existing team manifest: %w", err)
@@ -288,7 +296,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	if teamModel == "" {
 		return fmt.Errorf("resolve team model: empty model")
 	}
-	log.Printf("daemon: TEAMS MODE - profile %q with %d roles", prof.ID, len(prof.Team.Roles))
+	log.Printf("daemon: TEAMS MODE - profile %q with %d roles", prof.ID, len(workingRoles))
 
 	teamWorkspaceDir := fsutil.GetTeamWorkspaceDir(cfg.DataDir, teamID)
 	if err := os.MkdirAll(teamWorkspaceDir, 0o755); err != nil {
@@ -370,7 +378,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		soulVersion = soulDoc.Version
 	}
 
-	runtimes := make([]teamRoleRuntime, 0, len(prof.Team.Roles))
+	runtimes := make([]teamRoleRuntime, 0, len(workingRoles))
 	setupComplete := false
 	defer func() {
 		if setupComplete || err == nil {
@@ -383,7 +391,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		}
 	}()
 	roleDescriptions := make(map[string]string, len(prof.Team.Roles))
-	for _, role := range prof.Team.Roles {
+	for _, role := range workingRoles {
 		roleDescriptions[strings.TrimSpace(role.Name)] = strings.TrimSpace(role.Description)
 	}
 	var coordinatorRun types.Run
@@ -676,6 +684,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			RoleName:             role.Name,
 			IsCoordinator:        role.Coordinator,
 			CoordinatorRole:      coordinatorRole,
+			ReviewerRole:         reviewerRole,
 			TeamRoles:            roleNames,
 			TeamRoleDescriptions: roleDescriptions,
 			InstanceID:           run.RunID,

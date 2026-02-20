@@ -34,12 +34,12 @@ var logsCmd = &cobra.Command{
 		}
 		typesFilter := normalizeTypeFilter(logsTypes)
 		if !logsFollow {
-			_, err := printEventBatch(cmd, runID, typesFilter, int64(0), logsLimit)
+			_, err := printLogsBatch(cmd, runID, typesFilter, int64(0), logsLimit)
 			return err
 		}
 		var cursor int64
 		for {
-			next, err := printEventBatch(cmd, runID, typesFilter, cursor, logsLimit)
+			next, err := printLogsBatch(cmd, runID, typesFilter, cursor, logsLimit)
 			if err != nil {
 				return err
 			}
@@ -69,12 +69,12 @@ var activityCmd = &cobra.Command{
 			limit = 50
 		}
 		if !activityFollow {
-			_, err := printEventBatch(cmd, runID, nil, int64(0), limit)
+			_, err := printActivityBatch(cmd, runID, int64(0), limit)
 			return err
 		}
 		var cursor int64
 		for {
-			next, err := printEventBatch(cmd, runID, nil, cursor, limit)
+			next, err := printActivityBatch(cmd, runID, cursor, limit)
 			if err != nil {
 				return err
 			}
@@ -91,17 +91,38 @@ var activityCmd = &cobra.Command{
 	},
 }
 
-func printEventBatch(cmd *cobra.Command, runID string, typesFilter []string, afterSeq int64, limit int) (int64, error) {
+func printLogsBatch(cmd *cobra.Command, runID string, typesFilter []string, afterSeq int64, limit int) (int64, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	var out protocol.EventsListPaginatedResult
-	if err := rpcCall(cmd.Context(), protocol.MethodEventsListPaginated, protocol.EventsListPaginatedParams{
+	var out protocol.LogsQueryResult
+	if err := rpcCall(cmd.Context(), protocol.MethodLogsQuery, protocol.LogsQueryParams{
 		RunID:    runID,
 		AfterSeq: afterSeq,
 		Limit:    limit,
 		Types:    typesFilter,
 		SortDesc: false,
+	}, &out); err != nil {
+		return afterSeq, err
+	}
+	for _, ev := range out.Events {
+		fmt.Fprintln(cmd.OutOrStdout(), formatEventLine(ev))
+	}
+	if out.Next > 0 {
+		return out.Next, nil
+	}
+	return afterSeq, nil
+}
+
+func printActivityBatch(cmd *cobra.Command, runID string, afterSeq int64, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var out protocol.ActivityStreamResult
+	if err := rpcCall(cmd.Context(), protocol.MethodActivityStream, protocol.ActivityStreamParams{
+		RunID:    runID,
+		AfterSeq: afterSeq,
+		Limit:    limit,
 	}, &out); err != nil {
 		return afterSeq, err
 	}

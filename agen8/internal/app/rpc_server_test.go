@@ -1918,8 +1918,8 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 	if strings.TrimSpace(out.TeamID) == "" {
 		t.Fatalf("expected team id, got %+v", out)
 	}
-	if len(out.RunIDs) != 2 {
-		t.Fatalf("expected 2 role runs, got %d", len(out.RunIDs))
+	if len(out.RunIDs) != 3 {
+		t.Fatalf("expected 3 role runs (including injected reviewer), got %d", len(out.RunIDs))
 	}
 	if _, err := os.Stat(filepath.Join(fsutil.GetTeamDir(cfg.DataDir, out.TeamID), "team.json")); err != nil {
 		t.Fatalf("expected team manifest: %v", err)
