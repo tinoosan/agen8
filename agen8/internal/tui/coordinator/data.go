@@ -29,6 +29,7 @@ type feedEntry struct {
 	status    string
 	opKind    string
 	sourceID  string
+	isText    bool
 }
 
 type sessionLoadedMsg struct {
@@ -126,6 +127,7 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 				status:    string(act.Status),
 				opKind:    strings.TrimSpace(act.Kind),
 				sourceID:  strings.TrimSpace(act.ID),
+				isText:    isActivityText(act),
 			})
 		}
 
@@ -270,4 +272,17 @@ func activityText(act types.Activity) string {
 		return kind + " " + path
 	}
 	return kind
+}
+
+func isActivityText(act types.Activity) bool {
+	kind := strings.TrimSpace(act.Kind)
+	// If it's explicitly a message kind, it's text.
+	if strings.HasSuffix(kind, "_message") {
+		return true
+	}
+	// If it lacks a specific developer op prefix but has a title, treat as text summary.
+	if strings.TrimSpace(act.Title) != "" && !strings.HasPrefix(kind, "fs_") && !strings.HasPrefix(kind, "shell_") && kind != "agent_spawn" && kind != "tool_call" {
+		return true
+	}
+	return false
 }

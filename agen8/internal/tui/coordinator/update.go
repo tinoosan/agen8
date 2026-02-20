@@ -101,14 +101,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.input.SetValue("")
 			return m, nil
-		case "pgup":
+		case "up":
+			if strings.TrimSpace(m.input.Value()) == "" {
+				m.liveFollow = false
+				m.feedScroll--
+				if m.feedScroll < 0 {
+					m.feedScroll = 0
+				}
+				return m, nil
+			}
+		case "down":
+			if strings.TrimSpace(m.input.Value()) == "" {
+				m.feedScroll++
+				maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+				if m.feedScroll >= maxScroll {
+					m.liveFollow = true
+					m.feedScroll = maxScroll
+				}
+				return m, nil
+			}
+		case "pgup", "shift+up", "ctrl+u":
 			m.liveFollow = false
 			m.feedScroll -= maxInt(1, m.feedHeight()/2)
 			if m.feedScroll < 0 {
 				m.feedScroll = 0
 			}
 			return m, nil
-		case "pgdown":
+		case "pgdown", "shift+down", "ctrl+d":
 			m.feedScroll += maxInt(1, m.feedHeight()/2)
 			maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
 			if m.feedScroll >= maxScroll {
@@ -137,6 +156,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
+	case tea.MouseMsg:
+		if msg.Type == tea.MouseWheelUp {
+			m.liveFollow = false
+			m.feedScroll -= 3
+			if m.feedScroll < 0 {
+				m.feedScroll = 0
+			}
+			return m, nil
+		} else if msg.Type == tea.MouseWheelDown {
+			m.feedScroll += 3
+			maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+			if m.feedScroll >= maxScroll {
+				m.liveFollow = true
+				m.feedScroll = maxScroll
+			}
+			return m, nil
+		}
+
 	}
 
 	m.input, cmd = m.input.Update(msg)

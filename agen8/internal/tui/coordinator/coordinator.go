@@ -30,8 +30,9 @@ type conversationTurn struct {
 	kind      turnKind
 	role      string      // label for the block ("You", agent role, "system")
 	timestamp time.Time   // most recent timestamp in the group
-	text      string      // for user/system turns
+	text      string      // for user/system turns or agent markdown text
 	entries   []feedEntry // for agent turns — grouped ops
+	isText    bool        // true if this turn represents a final text/markdown block
 }
 
 // Model is the Bubble Tea model for the coordinator chat UI.
@@ -70,7 +71,7 @@ func Run(endpoint, sessionID string) error {
 		endpoint = protocol.DefaultRPCEndpoint
 	}
 	in := textinput.New()
-	in.Prompt = "> "
+	in.Prompt = styleAccent.Render("❯ ")
 	in.Placeholder = "type a goal or /command..."
 	in.Focus()
 	in.CharLimit = 0
@@ -84,7 +85,7 @@ func Run(endpoint, sessionID string) error {
 		input:       in,
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }

@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/charmbracelet/glamour"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
@@ -24,6 +27,10 @@ var (
 	stylePending = lipgloss.NewStyle().Foreground(colorPending)
 	styleAccent  = lipgloss.NewStyle().Foreground(colorAccent)
 	styleHeader  = lipgloss.NewStyle().Bold(true)
+
+	mdMu       sync.Mutex
+	mdByWidth  = map[int]*glamour.TermRenderer{}
+	mdFallback = lipgloss.NewStyle()
 )
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -162,20 +169,32 @@ func (m *Model) buildTurns() []conversationTurn {
 			})
 		case feedAgent:
 			role := fallback(e.role, "agent")
-			if curAgent != nil && curAgent.role != role {
-				flushAgent()
+
+			// Flush if role changes, or if we are switching between text and ops records.
+			// Also flush if both are text (to keep distinct text blocks separate).
+			if curAgent != nil {
+				if curAgent.role != role || curAgent.isText != e.isText || curAgent.isText {
+					flushAgent()
+				}
 			}
+
 			if curAgent == nil {
 				curAgent = &conversationTurn{
 					kind:      turnAgent,
 					role:      role,
 					timestamp: e.timestamp,
+					isText:    e.isText,
+				}
+				if e.isText {
+					curAgent.text = e.text
 				}
 			}
 			if e.timestamp.After(curAgent.timestamp) {
 				curAgent.timestamp = e.timestamp
 			}
-			curAgent.entries = append(curAgent.entries, e)
+			if !e.isText {
+				curAgent.entries = append(curAgent.entries, e)
+			}
 		}
 	}
 	flushAgent()
@@ -218,8 +237,7 @@ func (m *Model) feedLines(width int) []string {
 		return nil
 	}
 
-	inner := maxInt(12, width-2)
-	dimRule := kit.StyleDim.Render(strings.Repeat("─", inner))
+	inner := maxInt(12, width-4)
 	lines := make([]string, 0, len(turns)*4)
 
 	for i, t := range turns {
@@ -231,9 +249,9 @@ func (m *Model) feedLines(width int) []string {
 		case turnSystem:
 			lines = append(lines, m.renderSystemBlock(t, inner)...)
 		}
-		// Separator between blocks
+		// Separator between blocks is just an empty line
 		if i < len(turns)-1 {
-			lines = append(lines, "  "+dimRule)
+			lines = append(lines, "")
 		}
 	}
 	return lines
@@ -247,7 +265,7 @@ func (m *Model) feedLines(width int) []string {
 
 func (m *Model) renderUserBlock(t conversationTurn, inner int) []string {
 	age := relativeAge(t.timestamp.Format(time.RFC3339))
-	label := styleAccent.Render("❯") + " " + styleAccent.Bold(true).Render("You")
+	label := styleAccent.Bold(true).Render("You")
 	ageStr := kit.StyleDim.Render(age)
 
 	labelW := runewidth.StringWidth(stripANSI(label))
@@ -255,10 +273,12 @@ func (m *Model) renderUserBlock(t conversationTurn, inner int) []string {
 	gap := maxInt(1, inner-labelW-ageW)
 	headerLine := "  " + label + strings.Repeat(" ", gap) + ageStr
 
-	msgLine := "  " + truncate(t.text, maxInt(8, inner-2))
-	statusLine := "  " + styleOK.Render("✓ queued")
-
-	return []string{headerLine, msgLine, statusLine, ""}
+	msg := renderMarkdown(t.text, inner-2)
+	outLines := []string{headerLine}
+	for _, l := range strings.Split(msg, "\n") {
+		outLines = append(outLines, "  "+l)
+	}
+	return outLines
 }
 
 // ── Agent block ────────────────────────────────────────────────────────
@@ -268,34 +288,47 @@ func (m *Model) renderUserBlock(t conversationTurn, inner int) []string {
 //   ⚡ ⠹ shell_exec  go test ./...
 
 func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
-	age := relativeAge(t.timestamp.Format(time.RFC3339))
-	role := truncate(t.role, maxInt(4, 14))
-	if m.isNarrow() {
-		role = truncate(role, 6)
+	if t.isText {
+		msg := renderMarkdown(t.text, inner-2)
+		outLines := []string{}
+		for i, l := range strings.Split(msg, "\n") {
+			if i == 0 {
+				outLines = append(outLines, kit.StyleDim.Render("● ")+l)
+			} else {
+				outLines = append(outLines, "  "+l)
+			}
+		}
+		return outLines
 	}
 
-	label := styleAccent.Render("■") + " " + styleAccent.Bold(true).Render(role)
+	// Tool operations block
+	age := relativeAge(t.timestamp.Format(time.RFC3339))
+	role := truncate(t.role, maxInt(4, 14))
+	label := kit.StyleDim.Render("● ") + styleAccent.Bold(true).Render(role+" operations")
 	ageStr := kit.StyleDim.Render(age)
 
 	labelW := runewidth.StringWidth(stripANSI(label))
 	ageW := runewidth.StringWidth(stripANSI(ageStr))
 	gap := maxInt(1, inner-labelW-ageW)
-	headerLine := "  " + label + strings.Repeat(" ", gap) + ageStr
+	headerLine := label + strings.Repeat(" ", gap) + ageStr
 
 	lines := []string{headerLine}
 	for _, e := range t.entries {
-		icon := kit.KindIcon(e.opKind)
-		status := m.statusIcon(e.status)
-		kind := truncate(fallback(e.opKind, "op"), 20)
-		text := truncate(e.text, maxInt(8, inner-len(kind)-8))
+		kind := truncate(fallback(e.opKind, "op"), 15)
+		text := truncate(e.text, maxInt(8, inner-len(kind)-15))
 
-		line := "  " + icon + " " + status + " " + kit.StyleDim.Render(kind)
-		if text != "" && text != kind {
-			line += "  " + text
+		// Primary operation line
+		lines = append(lines, "  "+kind+" "+text)
+
+		// Status line
+		statusText := "└ " + e.status
+		if e.status == "running" || e.status == "pending" {
+			statusText = "└ " + e.status + " " + m.spinner()
+		} else if e.status == "done" || e.status == "completed" {
+			statusText = "└ Done"
 		}
-		lines = append(lines, line)
+		lines = append(lines, "  "+kit.StyleDim.Render(statusText))
 	}
-	lines = append(lines, "")
 	return lines
 }
 
@@ -306,7 +339,7 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 
 func (m *Model) renderSystemBlock(t conversationTurn, inner int) []string {
 	age := relativeAge(t.timestamp.Format(time.RFC3339))
-	label := stylePending.Render("◆") + " " + stylePending.Bold(true).Render("system")
+	label := stylePending.Bold(true).Render("system")
 	ageStr := kit.StyleDim.Render(age)
 
 	labelW := runewidth.StringWidth(stripANSI(label))
@@ -314,8 +347,12 @@ func (m *Model) renderSystemBlock(t conversationTurn, inner int) []string {
 	gap := maxInt(1, inner-labelW-ageW)
 	headerLine := "  " + label + strings.Repeat(" ", gap) + ageStr
 
-	msgLine := "  " + truncate(t.text, maxInt(8, inner-2))
-	return []string{headerLine, msgLine, ""}
+	msg := renderMarkdown(t.text, inner-2)
+	outLines := []string{headerLine}
+	for _, l := range strings.Split(msg, "\n") {
+		outLines = append(outLines, "  "+kit.StyleDim.Render(l))
+	}
+	return outLines
 }
 
 // ── Input bar ──────────────────────────────────────────────────────────
@@ -346,15 +383,11 @@ func (m *Model) renderInputBar() string {
 		line = left + strings.Repeat(" ", gap) + feedbackStyled
 	}
 
-	// Rounded top border to separate from feed
-	border := lipgloss.RoundedBorder()
+	// Render clean without bounds
 	return lipgloss.NewStyle().
 		Width(m.width).MaxWidth(m.width).
-		BorderTop(true).
-		BorderStyle(border).
-		BorderForeground(kit.BorderColorDefault).
 		MaxHeight(2).
-		Padding(0, 1).
+		Padding(0, 1). // Minimal indent
 		Render(line)
 }
 
@@ -401,8 +434,12 @@ func (m *Model) statusIcon(status string) string {
 	case "pending":
 		return stylePending.Render("…")
 	default:
-		return stylePending.Render(spinnerFrames[m.spinFrame%len(spinnerFrames)])
+		return stylePending.Render(m.spinner())
 	}
+}
+
+func (m *Model) spinner() string {
+	return spinnerFrames[m.spinFrame%len(spinnerFrames)]
 }
 
 func (m *Model) totalFeedLines() int {
@@ -522,4 +559,46 @@ func relativeAge(raw string) string {
 		return fmt.Sprintf("%dm ago", int(d.Minutes()))
 	}
 	return fmt.Sprintf("%dh ago", int(d.Hours()))
+}
+
+// ── Markdown ───────────────────────────────────────────────────────────
+
+func renderMarkdown(md string, width int) string {
+	md = strings.TrimSpace(md)
+	if md == "" {
+		return ""
+	}
+	if width <= 0 {
+		width = 40
+	}
+
+	r, err := markdownRenderer(width)
+	if err != nil {
+		return mdFallback.Render(md)
+	}
+	out, err := r.Render(md)
+	if err != nil {
+		return mdFallback.Render(md)
+	}
+	return strings.TrimRight(out, "\n")
+}
+
+func markdownRenderer(width int) (*glamour.TermRenderer, error) {
+	mdMu.Lock()
+	defer mdMu.Unlock()
+
+	if r, ok := mdByWidth[width]; ok {
+		return r, nil
+	}
+
+	r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(width),
+		glamour.WithPreservedNewLines(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	mdByWidth[width] = r
+	return r, nil
 }
