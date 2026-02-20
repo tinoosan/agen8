@@ -197,12 +197,7 @@ func (m *Model) renderListPanel(width, height int) string {
 		}
 		content = viewportSlice(content, height, anchor)
 	} else {
-		// If not live-following, center on selection.
-		// Each item takes 2 lines, so m.sel * 2 gives the start line of the selected item.
-		// We want to scroll such that the selected item is visible, ideally centered.
-		// A simple approach is to scroll to the start of the selected item.
-		// If the selected item is near the end, ensure the viewport shows the end.
-		startLine := m.sel * 2
+		startLine := m.sel
 		if startLine+height > len(lines) {
 			startLine = maxInt(0, len(lines)-height)
 		}
@@ -216,45 +211,52 @@ func (m *Model) buildListLines(width int) []string {
 		return []string{styleDim.Render("  No activities.")}
 	}
 
-	lines := make([]string, 0, len(m.activities)*2)
+	lines := make([]string, 0, len(m.activities))
 	for i, act := range m.activities {
 		isSel := i == m.sel
 
-		// ── Line 1: marker + status + kind + title ──
+		// Build: marker status timestamp [role] emoji tool_name activity
 		marker := "  "
 		if isSel {
 			marker = styleAccent.Render("› ")
 		}
 
 		statusIcon := m.statusIcon(act)
+
+		// Timestamp
+		ts := ""
+		if !act.StartedAt.IsZero() {
+			ts = styleDim.Render(act.StartedAt.Format("15:04:05")) + " "
+		}
+
+		// Role (from Data map if present)
+		role := ""
+		if r := strings.TrimSpace(act.Data["role"]); r != "" {
+			role = styleDim.Render("[") + styleMeta.Render(r) + styleDim.Render("] ")
+		}
+
+		// Emoji + tool name
 		icon := kindIcon(act.Kind)
 		kind := strings.TrimSpace(act.Kind)
 		if kind == "" {
 			kind = "op"
 		}
+
+		// Activity title
 		title := actTitle(act)
-		availW := maxInt(10, width-len(kind)-12)
+		// Calculate remaining width for title truncation
+		fixedW := 2 + 2 + 9 + len(kind) + 4 // marker + status + timestamp + kind + spacing
+		availW := maxInt(10, width-fixedW)
 		title = truncate(title, availW)
 
-		// Kind first, then title
-		var line1 string
-		kindStr := icon + " " + kind
+		var line string
 		if isSel {
-			line1 = marker + statusIcon + " " + styleAccent.Render(kindStr) + styleDim.Render(" · ") + styleSelRow.Render(title)
+			line = marker + statusIcon + " " + ts + role + icon + " " + styleAccent.Render(kind) + " " + styleSelRow.Render(title)
 		} else {
-			line1 = marker + statusIcon + " " + styleMeta.Render(kindStr) + styleDim.Render(" · ") + styleUnselRow.Render(title)
+			line = marker + statusIcon + " " + ts + role + icon + " " + styleMeta.Render(kind) + " " + styleUnselRow.Render(title)
 		}
 
-		// ── Line 2: timestamp · duration ──
-		meta := m.buildMetaLine(act, width)
-		var line2 string
-		if isSel {
-			line2 = styleSelRow.Render("    " + meta)
-		} else {
-			line2 = styleDim.Render("    " + meta)
-		}
-
-		lines = append(lines, line1, line2)
+		lines = append(lines, line)
 	}
 	return lines
 }
@@ -269,21 +271,6 @@ func (m *Model) statusIcon(act types.Activity) string {
 		frame := spinnerFrames[m.spinFrame%len(spinnerFrames)]
 		return stylePending.Render(frame)
 	}
-}
-
-func (m *Model) buildMetaLine(act types.Activity, width int) string {
-	parts := make([]string, 0, 3)
-
-	// Timestamp
-	if !act.StartedAt.IsZero() {
-		parts = append(parts, act.StartedAt.Format("15:04:05"))
-	}
-	if act.Duration > 0 {
-		parts = append(parts, act.Duration.Truncate(time.Millisecond).String())
-	}
-
-	line := strings.Join(parts, " · ")
-	return truncate(line, maxInt(10, width-6))
 }
 
 // ── Detail panel ───────────────────────────────────────────────────────
