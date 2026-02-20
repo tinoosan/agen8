@@ -2,6 +2,7 @@ package activitytui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -318,9 +319,7 @@ func (m *Model) renderDetailView(width, height int) string {
 func renderActivityDetailMD(a types.Activity) string {
 	var b strings.Builder
 
-	b.WriteString("### Activity Detail\n\n")
-
-	// Fields
+	// ── Metadata ──
 	if strings.TrimSpace(a.Kind) != "" {
 		b.WriteString("- **Operation:** `")
 		b.WriteString(a.Kind)
@@ -346,8 +345,6 @@ func renderActivityDetailMD(a types.Activity) string {
 		b.WriteString(a.To)
 		b.WriteString("`\n")
 	}
-
-	// Status + duration
 	b.WriteString("- **Status:** ")
 	b.WriteString(string(a.Status))
 	b.WriteString(" ")
@@ -357,69 +354,91 @@ func renderActivityDetailMD(a types.Activity) string {
 		b.WriteString(a.Duration.Truncate(time.Millisecond).String())
 	}
 	b.WriteString("\n")
-
 	if !a.StartedAt.IsZero() {
 		b.WriteString("- **Started:** ")
 		b.WriteString(a.StartedAt.Format("15:04:05"))
 		b.WriteString("\n")
 	}
 
-	// Error
+	// ── Error ──
 	if strings.TrimSpace(a.Error) != "" {
-		b.WriteString("\n**Error**\n\n")
-		b.WriteString("```\n")
+		b.WriteString("\n---\n\n**Error**\n\n```\n")
 		b.WriteString(a.Error)
 		b.WriteString("\n```\n")
 	}
 
-	// Data map (arguments)
+	// ── Arguments (sorted, full values) ──
 	if len(a.Data) > 0 {
-		b.WriteString("\n**Arguments**\n\n")
-		for k, v := range a.Data {
-			v = strings.TrimSpace(v)
-			if v == "" {
-				continue
-			}
-			// Skip meta keys already shown above
+		// Collect and sort keys for stable ordering
+		keys := make([]string, 0, len(a.Data))
+		for k := range a.Data {
 			switch k {
 			case "op", "ok", "err", "opId":
 				continue
 			}
-			if len(v) > 200 {
-				v = v[:197] + "…"
+			if strings.TrimSpace(a.Data[k]) == "" {
+				continue
 			}
-			b.WriteString("- `")
-			b.WriteString(k)
-			b.WriteString("`: ")
-			b.WriteString(v)
-			b.WriteString("\n")
+			keys = append(keys, k)
+		}
+		sortStrings(keys)
+
+		if len(keys) > 0 {
+			b.WriteString("\n---\n\n**Arguments**\n\n")
+			for _, k := range keys {
+				v := strings.TrimSpace(a.Data[k])
+				// For long values, show them in a code block
+				if len(v) > 120 || strings.Contains(v, "\n") {
+					b.WriteString("**")
+					b.WriteString(k)
+					b.WriteString("**\n\n```\n")
+					if len(v) > 2000 {
+						v = v[:1997] + "…"
+					}
+					b.WriteString(v)
+					b.WriteString("\n```\n\n")
+				} else {
+					b.WriteString("- `")
+					b.WriteString(k)
+					b.WriteString("`: ")
+					b.WriteString(v)
+					b.WriteString("\n")
+				}
+			}
 		}
 	}
 
-	// Output preview
+	// ── Output ──
 	if strings.TrimSpace(a.OutputPreview) != "" {
-		b.WriteString("\n**Output Preview**\n\n")
 		preview := a.OutputPreview
-		if len(preview) > 800 {
-			preview = preview[:797] + "…"
+		if len(preview) > 4000 {
+			preview = preview[:3997] + "…"
 		}
-		b.WriteString("```\n")
+		b.WriteString("\n---\n\n**Output**\n\n```\n")
 		b.WriteString(preview)
 		b.WriteString("\n```\n")
 	}
 
-	// Written content preview (fs_write / fs_append)
+	// ── Written content (fs_write / fs_append) ──
 	if strings.TrimSpace(a.TextPreview) != "" && !a.TextRedacted {
-		b.WriteString("\n**Written Content**")
+		b.WriteString("\n---\n\n**Written Content**")
 		if a.TextTruncated {
 			b.WriteString(" _(truncated)_")
 		}
 		b.WriteString("\n\n```\n")
-		b.WriteString(a.TextPreview)
+		preview := a.TextPreview
+		if len(preview) > 4000 {
+			preview = preview[:3997] + "…"
+		}
+		b.WriteString(preview)
 		b.WriteString("\n```\n")
 	}
 
 	return b.String()
+}
+
+func sortStrings(s []string) {
+	sort.Strings(s)
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
