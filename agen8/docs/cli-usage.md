@@ -7,7 +7,7 @@ The `agen8` binary exposes a Cobra-powered CLI that orchestrates sessions, runs,
 ### Modular workflow (recommended)
 
 ```sh
-./agen8 init                            # initialize .agent8 in this project
+./agen8 init                            # initialize .agen8 in this project
 ./agen8 new --mode team --profile startup_team
 ./agen8 coordinator                     # focused coordinator chat/attach
 ./agen8 dashboard                       # high-level observability
@@ -48,7 +48,7 @@ Pair these commands with `ls`/`cat` inside the `dataDir` to debug agent behavior
 | Command                              | Description                                                          |
 | ------------------------------------ | -------------------------------------------------------------------- |
 | `agen8`                          | Start a fresh session + run (default).                               |
-| `agen8 init`                     | Initialize a project-local `.agent8` workspace.                      |
+| `agen8 init`                     | Initialize a project-local `.agen8` workspace.                      |
 | `agen8 new`                      | Create a new session and optionally auto-attach.                     |
 | `agen8 coordinator`              | Attach to the coordinator-focused session view.                      |
 | `agen8 attach <session-id>`      | Attach to a specific existing session.                               |
