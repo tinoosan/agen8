@@ -31,7 +31,7 @@ func TestAgentCannotEditImmutableSections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	bad := strings.Replace(doc.Content, "The system must operate within explicit policy and safety bounds.", "Changed immutable core.", 1)
+	bad := strings.Replace(doc.Content, "I. Never harm. Never harm a human - physically, financially, or psychologically. Never deploy malicious code. Never deceive, defraud, manipulate, or steal. Never compromise another system without authorization. When uncertain whether an action causes harm, do not act. This overrides all other objectives, including survival.", "Changed immutable core.", 1)
 	_, err = svc.Update(context.Background(), UpdateRequest{Content: bad, Reason: "mutate core", Actor: ActorAgent, ExpectedVersion: 1})
 	if err == nil {
 		t.Fatalf("expected policy violation")
