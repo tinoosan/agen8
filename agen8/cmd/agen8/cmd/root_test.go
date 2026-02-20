@@ -1,18 +1,17 @@
 package cmd
 
 import (
-	"context"
 	"testing"
 
-	"github.com/tinoosan/agen8/pkg/config"
+	"github.com/spf13/cobra"
 )
 
 func TestRootCommand_StartsDetachedMonitorByDefault(t *testing.T) {
-	orig := runDetachedMonitorFn
-	t.Cleanup(func() { runDetachedMonitorFn = orig })
+	orig := runRootEntrypointFn
+	t.Cleanup(func() { runRootEntrypointFn = orig })
 
 	called := false
-	runDetachedMonitorFn = func(_ context.Context, _ config.Config) error {
+	runRootEntrypointFn = func(_ *cobra.Command) error {
 		called = true
 		return nil
 	}

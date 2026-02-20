@@ -30,9 +30,11 @@ var (
 	healthAddr         string
 )
 
+var runRootEntrypointFn = runSmartEntrypoint
+
 var rootCmd = &cobra.Command{
 	Use:   "agen8",
-	Short: "Agen8 monitor client",
+	Short: "Agen8 control shell",
 	Long: strings.TrimSpace(`
 Agen8 is a local, agentic runtime built around a virtual filesystem (VFS).
 
@@ -51,6 +53,9 @@ Each executed task can:
   - read/write shared memory in /memory (daily files; only today's file is writable)
 `),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := applyProjectDefaults(cmd); err != nil {
+			return err
+		}
 		// dataDir is resolved per-command via effectiveConfig().
 		if maxContextB <= 0 {
 			return fmt.Errorf("--context-bytes must be > 0")
@@ -82,11 +87,7 @@ Each executed task can:
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := effectiveConfig(cmd)
-		if err != nil {
-			return err
-		}
-		return runDetachedMonitorFn(cmd.Context(), cfg)
+		return runRootEntrypointFn(cmd)
 	},
 }
 

@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/tinoosan/agen8/internal/app"
 	"github.com/tinoosan/agen8/pkg/config"
 )
 
@@ -13,7 +15,17 @@ func effectiveConfig(cmd *cobra.Command) (config.Config, error) {
 	if cmd != nil {
 		cliWasSet = cmd.Root().PersistentFlags().Changed("data-dir")
 	}
-	resolved, err := config.ResolveDataDir(dataDir, cliWasSet)
+	dataDirValue := dataDir
+	if !cliWasSet && strings.TrimSpace(os.Getenv(config.EnvDataDir)) == "" {
+		if projectCtx, err := app.LoadProjectContext(projectSearchDir()); err == nil && projectCtx.Exists {
+			if override := strings.TrimSpace(projectCtx.Config.DataDirOverride); override != "" {
+				dataDirValue = override
+				cliWasSet = true // treat as explicit value for resolver validation.
+			}
+		}
+	}
+
+	resolved, err := config.ResolveDataDir(dataDirValue, cliWasSet)
 	if err != nil {
 		if cliWasSet {
 			return config.Config{}, err
