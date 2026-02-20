@@ -21,7 +21,8 @@ const (
 // Precedence:
 //  1. CLI flag (only if explicitly set)
 //  2. env var AGEN8_DATA_DIR
-//  3. default: ~/.agen8 (or $XDG_STATE_HOME/agen8 when XDG_STATE_HOME is set)
+//  4. default: ~/.agen8 (or $XDG_STATE_HOME/agen8 when XDG_STATE_HOME is set)
+//     If the new default does not exist but the legacy default exists, use the legacy path.
 //
 // It also ensures the directory exists and is writable.
 func ResolveDataDir(cliValue string, cliWasSet bool) (string, error) {
@@ -56,7 +57,7 @@ func ResolveDataDir(cliValue string, cliWasSet bool) (string, error) {
 
 func defaultDataDir() (string, error) {
 	if xdg := strings.TrimSpace(os.Getenv(EnvXDGStateHome)); xdg != "" {
-		return filepath.Join(xdg, "agen8"), nil
+		return preferExistingLegacy(filepath.Join(xdg, "agen8"), filepath.Join(xdg, "workbench")), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -66,7 +67,20 @@ func defaultDataDir() (string, error) {
 	if home == "" {
 		return "", fmt.Errorf("resolve default data dir: home directory is empty")
 	}
-	return filepath.Join(home, ".agen8"), nil
+	return preferExistingLegacy(filepath.Join(home, ".agen8"), filepath.Join(home, ".workbench")), nil
+}
+
+func preferExistingLegacy(preferred, legacy string) string {
+	if preferred == "" || legacy == "" {
+		return preferred
+	}
+	if _, err := os.Stat(preferred); err == nil {
+		return preferred
+	}
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return preferred
 }
 
 // expandTilde expands "~" and "~/" prefixes using the current user's home directory.
