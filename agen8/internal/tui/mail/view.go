@@ -3,8 +3,10 @@ package mail
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/reflow/wordwrap"
@@ -23,6 +25,10 @@ var (
 	styleAccent  = lipgloss.NewStyle().Foreground(kit.BorderColorAccent)
 	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#eaeaea"))
 	styleSection = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#9ad0ff"))
+
+	detailMDMu       sync.Mutex
+	detailMDByWidth  = map[int]*glamour.TermRenderer{}
+	detailMDFallback = lipgloss.NewStyle()
 )
 
 const (
@@ -422,7 +428,7 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		lines = append(lines, kit.StyleStatusKey.Render("Goal:     ")+wrapText(task.Goal, contentW-10))
 	}
 	if task.Summary != "" {
-		lines = append(lines, kit.StyleStatusKey.Render("Summary:  ")+wrapText(task.Summary, contentW-10))
+		lines = append(lines, kit.StyleStatusKey.Render("Summary:  ")+renderDetailMarkdown(task.Summary, contentW-10))
 	}
 	if task.Error != "" {
 		lines = append(lines, kit.StyleStatusKey.Render("Error:    ")+styleRed.Render(wrapText(task.Error, contentW-10)))
@@ -504,6 +510,46 @@ func wrapText(s string, width int) string {
 		width = 40
 	}
 	return wordwrap.String(strings.TrimSpace(s), width)
+}
+
+func renderDetailMarkdown(md string, width int) string {
+	md = strings.TrimSpace(md)
+	if md == "" {
+		return ""
+	}
+	if width <= 0 {
+		width = 40
+	}
+
+	r, err := detailMarkdownRenderer(width)
+	if err != nil {
+		return detailMDFallback.Render(wrapText(md, width))
+	}
+	out, err := r.Render(md)
+	if err != nil {
+		return detailMDFallback.Render(wrapText(md, width))
+	}
+	return strings.TrimRight(out, "\n")
+}
+
+func detailMarkdownRenderer(width int) (*glamour.TermRenderer, error) {
+	detailMDMu.Lock()
+	defer detailMDMu.Unlock()
+
+	if r, ok := detailMDByWidth[width]; ok {
+		return r, nil
+	}
+
+	r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(width),
+		glamour.WithPreservedNewLines(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	detailMDByWidth[width] = r
+	return r, nil
 }
 
 func maxInt(a, b int) int {
