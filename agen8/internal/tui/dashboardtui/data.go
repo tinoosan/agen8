@@ -17,6 +17,8 @@ type agentRow struct {
 	RunID           string
 	Status          string
 	Profile         string
+	AssignedTasks   int
+	CompletedTasks  int
 	WorkerPresent   bool
 	LastHeartbeatAt string
 	StartedAt       string
@@ -101,15 +103,17 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			return dataLoadedMsg{err: err}
 		}
 
-			stats := sessionStats{
-				TotalTokens:  totals.TotalTokens,
-				TotalCostUSD: totals.TotalCostUSD,
-				Assigned:     totals.TasksDone,
-				Completed:    totals.TasksDone,
-				Done:         totals.TasksDone,
-				RunningCount: session.RunningAgents,
-			}
+		stats := sessionStats{
+			TotalTokens:  totals.TotalTokens,
+			TotalCostUSD: totals.TotalCostUSD,
+			Assigned:     totals.TasksDone,
+			Completed:    totals.TasksDone,
+			Done:         totals.TasksDone,
+			RunningCount: session.RunningAgents,
+		}
 
+		assignedByRole := map[string]int{}
+		completedByRole := map[string]int{}
 		if teamID != "" {
 			var teamStatus protocol.TeamGetStatusResult
 			if err := call(protocol.MethodTeamGetStatus, protocol.TeamGetStatusParams{
@@ -118,13 +122,53 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			}, &teamStatus); err != nil {
 				return dataLoadedMsg{err: err}
 			}
-				stats.Pending = teamStatus.Pending
-				stats.Active = teamStatus.Active
-				stats.Assigned = teamStatus.Pending + teamStatus.Active + teamStatus.Done
-				stats.Completed = teamStatus.Done
-				stats.Done = teamStatus.Done
-				if stats.TotalTokens == 0 {
-					stats.TotalTokens = teamStatus.TotalTokens
+
+			if teamID != "" {
+				seenTask := map[string]bool{}
+				views := []string{"inbox", "outbox"}
+				for _, view := range views {
+					var taskRes protocol.TaskListResult
+					if err := call(protocol.MethodTaskList, protocol.TaskListParams{
+						ThreadID: threadID,
+						TeamID:   teamID,
+						View:     view,
+						Limit:    1000,
+						Offset:   0,
+					}, &taskRes); err != nil {
+						continue
+					}
+					for _, t := range taskRes.Tasks {
+						taskID := strings.TrimSpace(t.ID)
+						if taskID != "" && seenTask[taskID] {
+							continue
+						}
+						if taskID != "" {
+							seenTask[taskID] = true
+						}
+						role := strings.ToLower(strings.TrimSpace(t.AssignedRole))
+						if role == "" {
+							role = strings.ToLower(strings.TrimSpace(t.RoleSnapshot))
+						}
+						if role == "" && strings.EqualFold(strings.TrimSpace(t.AssignedToType), "role") {
+							role = strings.ToLower(strings.TrimSpace(t.AssignedTo))
+						}
+						if role == "" {
+							continue
+						}
+						assignedByRole[role]++
+						if isCompletedTaskStatus(t.Status) {
+							completedByRole[role]++
+						}
+					}
+				}
+			}
+			stats.Pending = teamStatus.Pending
+			stats.Active = teamStatus.Active
+			stats.Assigned = teamStatus.Pending + teamStatus.Active + teamStatus.Done
+			stats.Completed = teamStatus.Done
+			stats.Done = teamStatus.Done
+			if stats.TotalTokens == 0 {
+				stats.TotalTokens = teamStatus.TotalTokens
 			}
 			if stats.TotalCostUSD == 0 {
 				stats.TotalCostUSD = teamStatus.TotalCostUSD
@@ -169,17 +213,19 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 				RunID:           rid,
 				Status:          fallback(status, "idle"),
 				Profile:         strings.TrimSpace(agent.Profile),
+				AssignedTasks:   assignedByRole[strings.ToLower(strings.TrimSpace(role))],
+				CompletedTasks:  completedByRole[strings.ToLower(strings.TrimSpace(role))],
 				WorkerPresent:   worker,
 				LastHeartbeatAt: heartbeat,
 				StartedAt:       strings.TrimSpace(agent.StartedAt),
 			})
 		}
-			if stats.RunningCount <= 0 {
-				stats.RunningCount = runningFromRows
-			}
-			if stats.Assigned < stats.Completed {
-				stats.Assigned = stats.Completed
-			}
+		if stats.RunningCount <= 0 {
+			stats.RunningCount = runningFromRows
+		}
+		if stats.Assigned < stats.Completed {
+			stats.Assigned = stats.Completed
+		}
 
 		return dataLoadedMsg{
 			agents:      agents,
@@ -189,6 +235,15 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			runID:       runID,
 			connected:   true,
 		}
+	}
+}
+
+func isCompletedTaskStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "succeeded", "failed", "canceled", "cancelled":
+		return true
+	default:
+		return false
 	}
 }
 
