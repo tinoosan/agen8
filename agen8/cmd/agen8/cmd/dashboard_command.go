@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/tinoosan/agen8/internal/tui/dashboardtui"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
@@ -37,28 +38,10 @@ func runDashboardFlow(cmd *cobra.Command) error {
 		return fmt.Errorf("session id is required (use --session-id or initialize project and attach a session)")
 	}
 
-	interval := dashboardInterval
-	if interval <= 0 {
-		interval = 2 * time.Second
+	if dashboardOnce || !isInteractiveTerminal() {
+		return renderDashboardOnce(cmd, sessionID)
 	}
-	retries := 0
-	for {
-		if err := renderDashboardOnce(cmd, sessionID); err != nil {
-			if !isRetryableLiveError(err) {
-				return err
-			}
-			retries++
-			backoff := time.Duration(minInt(8, retries)) * 300 * time.Millisecond
-			fmt.Fprintf(cmd.ErrOrStderr(), "dashboard: reconnecting after error (%v)\n", err)
-			time.Sleep(backoff)
-			continue
-		}
-		retries = 0
-		if dashboardOnce || !isInteractiveTerminal() {
-			return nil
-		}
-		time.Sleep(interval)
-	}
+	return dashboardtui.Run(resolvedRPCEndpoint(), sessionID)
 }
 
 func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {
