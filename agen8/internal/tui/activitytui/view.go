@@ -31,11 +31,8 @@ var (
 	styleMeta   = lipgloss.NewStyle().Foreground(lipgloss.Color("#9da3b4"))
 
 	styleSelRow = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1e2a3a")).
 			Foreground(lipgloss.Color("#c8d3f5"))
 	styleUnselRow = lipgloss.NewStyle().Foreground(lipgloss.Color("#9da3b4"))
-
-	headerBg = lipgloss.Color("#1a1a2e")
 
 	mdMu       sync.Mutex
 	mdByWidth  = map[int]*glamour.TermRenderer{}
@@ -98,7 +95,6 @@ func (m *Model) renderHeader() string {
 		}
 		return lipgloss.NewStyle().
 			Width(m.width).MaxWidth(m.width).MaxHeight(1).
-			Background(headerBg).
 			Foreground(lipgloss.Color("#eaeaea")).
 			Padding(0, 1).
 			Render(left)
@@ -119,7 +115,6 @@ func (m *Model) renderHeader() string {
 
 	return lipgloss.NewStyle().
 		Width(m.width).MaxWidth(m.width).MaxHeight(1).
-		Background(headerBg).
 		Foreground(lipgloss.Color("#eaeaea")).
 		Padding(0, 1).
 		Render(left)
@@ -138,7 +133,6 @@ func (m *Model) renderFooter() string {
 			styleDim.Render("q")
 		return lipgloss.NewStyle().
 			Width(m.width).MaxWidth(m.width).MaxHeight(1).
-			Background(headerBg).
 			Padding(0, 1).
 			Render(hints)
 	}
@@ -154,7 +148,6 @@ func (m *Model) renderFooter() string {
 
 	return lipgloss.NewStyle().
 		Width(m.width).MaxWidth(m.width).MaxHeight(1).
-		Background(headerBg).
 		Padding(0, 1).
 		Render(hints)
 }
@@ -280,7 +273,6 @@ func (m *Model) renderDetailHeader() string {
 
 	return lipgloss.NewStyle().
 		Width(m.width).MaxWidth(m.width).MaxHeight(1).
-		Background(headerBg).
 		Foreground(lipgloss.Color("#eaeaea")).
 		Padding(0, 1).
 		Render(left)
@@ -294,7 +286,6 @@ func (m *Model) renderDetailFooter() string {
 
 	return lipgloss.NewStyle().
 		Width(m.width).MaxWidth(m.width).MaxHeight(1).
-		Background(headerBg).
 		Padding(0, 1).
 		Render(hints)
 }

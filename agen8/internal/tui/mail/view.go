@@ -80,7 +80,6 @@ func (m *Model) renderHeader() string {
 			Width(m.width).
 			MaxWidth(m.width).
 			MaxHeight(1).
-			Background(lipgloss.Color("#1a1a2e")).
 			Foreground(lipgloss.Color("#eaeaea")).
 			Padding(0, 1).
 			Render(left)
@@ -111,7 +110,6 @@ func (m *Model) renderHeader() string {
 		Width(m.width).
 		MaxWidth(m.width).
 		MaxHeight(1).
-		Background(lipgloss.Color("#1a1a2e")).
 		Foreground(lipgloss.Color("#eaeaea")).
 		Padding(0, 1).
 		Render(left)
@@ -130,7 +128,6 @@ func (m *Model) renderFooter() string {
 			Width(m.width).
 			MaxWidth(m.width).
 			MaxHeight(1).
-			Background(lipgloss.Color("#1a1a2e")).
 			Padding(0, 1).
 			Render(hints)
 	}
@@ -146,7 +143,6 @@ func (m *Model) renderFooter() string {
 		Width(m.width).
 		MaxWidth(m.width).
 		MaxHeight(1).
-		Background(lipgloss.Color("#1a1a2e")).
 		Padding(0, 1).
 		Render(hints)
 }

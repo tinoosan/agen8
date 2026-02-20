@@ -25,6 +25,8 @@ type agentRow struct {
 type sessionStats struct {
 	TotalTokens  int
 	TotalCostUSD float64
+	Assigned     int
+	Completed    int
 	Pending      int
 	Active       int
 	Done         int
@@ -99,12 +101,14 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			return dataLoadedMsg{err: err}
 		}
 
-		stats := sessionStats{
-			TotalTokens:  totals.TotalTokens,
-			TotalCostUSD: totals.TotalCostUSD,
-			Done:         totals.TasksDone,
-			RunningCount: session.RunningAgents,
-		}
+			stats := sessionStats{
+				TotalTokens:  totals.TotalTokens,
+				TotalCostUSD: totals.TotalCostUSD,
+				Assigned:     totals.TasksDone,
+				Completed:    totals.TasksDone,
+				Done:         totals.TasksDone,
+				RunningCount: session.RunningAgents,
+			}
 
 		if teamID != "" {
 			var teamStatus protocol.TeamGetStatusResult
@@ -114,11 +118,13 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			}, &teamStatus); err != nil {
 				return dataLoadedMsg{err: err}
 			}
-			stats.Pending = teamStatus.Pending
-			stats.Active = teamStatus.Active
-			stats.Done = teamStatus.Done
-			if stats.TotalTokens == 0 {
-				stats.TotalTokens = teamStatus.TotalTokens
+				stats.Pending = teamStatus.Pending
+				stats.Active = teamStatus.Active
+				stats.Assigned = teamStatus.Pending + teamStatus.Active + teamStatus.Done
+				stats.Completed = teamStatus.Done
+				stats.Done = teamStatus.Done
+				if stats.TotalTokens == 0 {
+					stats.TotalTokens = teamStatus.TotalTokens
 			}
 			if stats.TotalCostUSD == 0 {
 				stats.TotalCostUSD = teamStatus.TotalCostUSD
@@ -168,9 +174,12 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 				StartedAt:       strings.TrimSpace(agent.StartedAt),
 			})
 		}
-		if stats.RunningCount <= 0 {
-			stats.RunningCount = runningFromRows
-		}
+			if stats.RunningCount <= 0 {
+				stats.RunningCount = runningFromRows
+			}
+			if stats.Assigned < stats.Completed {
+				stats.Assigned = stats.Completed
+			}
 
 		return dataLoadedMsg{
 			agents:      agents,

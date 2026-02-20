@@ -17,14 +17,13 @@ var (
 	colorAccent  = lipgloss.Color("#7aa2f7")
 	colorPaused  = lipgloss.Color("#bb9af7")
 
-	styleOK      = lipgloss.NewStyle().Foreground(colorOK)
-	styleErr     = lipgloss.NewStyle().Foreground(colorErr)
-	stylePending = lipgloss.NewStyle().Foreground(colorPending)
-	styleAccent  = lipgloss.NewStyle().Foreground(colorAccent)
-	stylePaused  = lipgloss.NewStyle().Foreground(colorPaused)
+	styleOK      = lipgloss.NewStyle().Foreground(colorOK).Bold(true)
+	styleErr     = lipgloss.NewStyle().Foreground(colorErr).Bold(true)
+	stylePending = lipgloss.NewStyle().Foreground(colorPending).Bold(true)
+	styleAccent  = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	stylePaused  = lipgloss.NewStyle().Foreground(colorPaused).Bold(true)
 
-	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#eaeaea"))
-	headerBg    = lipgloss.Color("#1a1a2e")
+	styleHeader = lipgloss.NewStyle().Bold(true)
 )
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -120,7 +119,6 @@ func (m *Model) renderHeader() string {
 		Width(m.width).
 		MaxWidth(m.width).
 		MaxHeight(1).
-		Background(headerBg).
 		Padding(0, 1).
 		Render(line)
 }
@@ -149,7 +147,6 @@ func (m *Model) renderSummaryBar() string {
 		Width(m.width).
 		MaxWidth(m.width).
 		MaxHeight(1).
-		Background(lipgloss.Color("#111827")).
 		Padding(0, 1).
 		Render(line)
 }
@@ -173,7 +170,6 @@ func (m *Model) renderFooter() string {
 		Width(m.width).
 		MaxWidth(m.width).
 		MaxHeight(1).
-		Background(headerBg).
 		Padding(0, 1).
 		Render(hints)
 }
@@ -208,14 +204,19 @@ func (m *Model) renderAgentTable(width, height int) string {
 }
 
 func (m *Model) renderAgentTableHeader(width int) string {
-	inner := maxInt(12, width-2)
+	const markerW = 2
+	inner := maxInt(12, width-2-markerW)
 	if m.isNarrow() {
-		line := padRight("ROLE", maxInt(6, inner-16)) + " " + padRight("STATUS", 14)
+		line := strings.Repeat(" ", markerW) +
+			padRight("ROLE", maxInt(6, inner-16)) + " " +
+			padRight("STATUS", 14)
 		return lipgloss.NewStyle().Padding(0, 1).Width(width).Render(kit.StyleDim.Render(line))
 	}
 	if m.isCompact() {
 		roleW := maxInt(10, inner-18)
-		line := padRight("ROLE", roleW) + " " + padRight("STATUS", 16)
+		line := strings.Repeat(" ", markerW) +
+			padRight("ROLE", roleW) + " " +
+			padRight("STATUS", 16)
 		return lipgloss.NewStyle().Padding(0, 1).Width(width).Render(kit.StyleDim.Render(line))
 	}
 
@@ -226,7 +227,8 @@ func (m *Model) renderAgentTableHeader(width int) string {
 	startW := 5
 	runW := maxInt(8, inner-(roleW+statusW+workerW+hbW+startW+5))
 
-	line := padRight("ROLE", roleW) + " " +
+	line := strings.Repeat(" ", markerW) +
+		padRight("ROLE", roleW) + " " +
 		padRight("STATUS", statusW) + " " +
 		padRight("WORKER", workerW) + " " +
 		padRight("HEARTBT", hbW) + " " +
@@ -237,7 +239,8 @@ func (m *Model) renderAgentTableHeader(width int) string {
 
 func (m *Model) buildAgentRows(width int) []string {
 	rows := make([]string, 0, len(m.agents))
-	inner := maxInt(12, width-2)
+	const markerW = 2
+	inner := maxInt(12, width-2-markerW)
 
 	for i, row := range m.agents {
 		isSel := i == m.sel
@@ -342,7 +345,6 @@ func (m *Model) renderDetailHeader() string {
 		Width(m.width).
 		MaxWidth(m.width).
 		MaxHeight(1).
-		Background(headerBg).
 		Padding(0, 1).
 		Render(line)
 }
@@ -356,7 +358,6 @@ func (m *Model) renderDetailFooter() string {
 		Width(m.width).
 		MaxWidth(m.width).
 		MaxHeight(1).
-		Background(headerBg).
 		Padding(0, 1).
 		Render(hints)
 }
