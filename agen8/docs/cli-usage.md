@@ -4,6 +4,18 @@ The `agen8` binary exposes a Cobra-powered CLI that orchestrates sessions, runs,
 
 ## Common workflows
 
+### Modular workflow (recommended)
+
+```sh
+./agen8 init                            # initialize .agent8 in this project
+./agen8 new --mode team --profile startup_team
+./agen8 coordinator                     # focused coordinator chat/attach
+./agen8 dashboard                       # high-level observability
+./agen8 logs --follow                   # structured event stream
+./agen8 activity --follow               # live activity stream
+./agen8 sessions list                   # session lifecycle visibility
+```
+
 ### 1. Start a new responsive session
 
 ```sh
@@ -36,6 +48,14 @@ Pair these commands with `ls`/`cat` inside the `dataDir` to debug agent behavior
 | Command                              | Description                                                          |
 | ------------------------------------ | -------------------------------------------------------------------- |
 | `agen8`                          | Start a fresh session + run (default).                               |
+| `agen8 init`                     | Initialize a project-local `.agent8` workspace.                      |
+| `agen8 new`                      | Create a new session and optionally auto-attach.                     |
+| `agen8 coordinator`              | Attach to the coordinator-focused session view.                      |
+| `agen8 attach <session-id>`      | Attach to a specific existing session.                               |
+| `agen8 dashboard`                | Show read-only overview of sessions/runs/tasks/cost.                 |
+| `agen8 logs`                     | Query structured logs/events with filters.                           |
+| `agen8 activity`                 | Tail live activity stream.                                           |
+| `agen8 sessions`                 | List/manage sessions (`list|attach|pause|resume|stop|delete`).       |
 | `agen8 resume <sessionId>`       | Continue the last run in a session (use `--new-run` to start fresh). |
 | `agen8 list sessions`            | List session IDs along with metadata stored in SQLite.               |
 | `agen8 list runs <sessionId>`    | Show runs tied to a session, including statuses and timestamps.      |
@@ -44,6 +64,11 @@ Pair these commands with `ls`/`cat` inside the `dataDir` to debug agent behavior
 | `agen8 show history <sessionId>` | Display the session-scoped operation history as JSONL.               |
 
 Run `agen8 <command> --help` to get per-command flag details (Cobra auto-generates these descriptions).
+
+## Migration note
+
+- Existing `agen8 monitor` behavior is retained for compatibility.
+- New modular commands are built on the same daemon/RPC control plane, so observability remains available while enabling tmux-friendly workflows.
 
 ## Global flags & environment variables
 

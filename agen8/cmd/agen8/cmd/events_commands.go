@@ -14,6 +14,7 @@ import (
 var (
 	logsRunID     string
 	logsSessionID string
+	logsAgentID   string
 	logsTypes     []string
 	logsFollow    bool
 	logsLimit     int
@@ -31,6 +32,9 @@ var logsCmd = &cobra.Command{
 		runID, err := resolveTargetRunID(cmd.Context(), strings.TrimSpace(logsRunID), strings.TrimSpace(logsSessionID))
 		if err != nil {
 			return err
+		}
+		if aid := strings.TrimSpace(logsAgentID); aid != "" {
+			runID = aid
 		}
 		typesFilter := normalizeTypeFilter(logsTypes)
 		if !logsFollow {
@@ -204,6 +208,7 @@ func resolveTargetRunID(ctx context.Context, runID string, sessionID string) (st
 func init() {
 	logsCmd.Flags().StringVar(&logsRunID, "run-id", "", "run id to query")
 	logsCmd.Flags().StringVar(&logsSessionID, "session-id", "", "resolve run id from session")
+	logsCmd.Flags().StringVar(&logsAgentID, "agent", "", "agent/run id alias for filtering")
 	logsCmd.Flags().StringSliceVar(&logsTypes, "type", nil, "event type filter (repeat or comma-separated)")
 	logsCmd.Flags().BoolVar(&logsFollow, "follow", false, "follow log updates")
 	logsCmd.Flags().IntVar(&logsLimit, "limit", 200, "max events per poll")
