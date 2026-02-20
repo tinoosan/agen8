@@ -124,6 +124,7 @@ func (m *Model) renderFooter() string {
 			styleDim.Render("↵") + " " +
 			styleDim.Render("esc") + " " +
 			styleDim.Render("g/G") + " " +
+			styleDim.Render("t") + " " +
 			styleDim.Render("r") + " " +
 			styleDim.Render("q")
 		return lipgloss.NewStyle().
@@ -137,6 +138,7 @@ func (m *Model) renderFooter() string {
 		styleDim.Render("enter") + " detail  " +
 		styleDim.Render("esc") + " close  " +
 		styleDim.Render("g/G") + " top/bottom  " +
+		styleDim.Render("t") + " timestamps  " +
 		styleDim.Render("pgup/pgdn") + " page  " +
 		styleDim.Render("r") + " refresh  " +
 		styleDim.Render("q") + " quit"
@@ -223,9 +225,9 @@ func (m *Model) buildListLines(width int) []string {
 
 		statusIcon := m.statusIcon(act)
 
-		// Timestamp
+		// Timestamp (toggled with 't')
 		ts := ""
-		if !act.StartedAt.IsZero() {
+		if m.showTimestamps && !act.StartedAt.IsZero() {
 			ts = styleDim.Render(act.StartedAt.Format("15:04:05")) + " "
 		}
 

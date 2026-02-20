@@ -111,6 +111,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "r":
 		return m, fetchDataCmd(m.endpoint, m.sessionID)
+
+	case "t":
+		m.showTimestamps = !m.showTimestamps
+		return m, nil
 	}
 	return m, nil
 }

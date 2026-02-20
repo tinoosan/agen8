@@ -31,6 +31,9 @@ type Model struct {
 	// liveFollow means auto-scroll to the bottom when new items arrive.
 	// Disabled when user manually scrolls up.
 	liveFollow bool
+
+	// showTimestamps toggles timestamp display in the list view.
+	showTimestamps bool
 }
 
 // Run launches the full-screen activity TUI.
