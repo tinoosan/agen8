@@ -24,6 +24,7 @@ team:
       skills:
         - project-management
         - reporting
+        - obsidian-cli
       heartbeat:
         - name: coordinator-check-in
           interval: 10m
@@ -51,6 +52,7 @@ team:
         - planning
         - market-monitoring
         - hybrid-web
+        - obsidian-cli
 
     - name: stock-researcher
       model: moonshotai/kimi-k2.5
@@ -71,6 +73,7 @@ team:
         - planning
         - financial-analysis
         - market-monitoring
+        - obsidian-cli
 
     - name: report-writer
       model: moonshotai/kimi-k2.5
@@ -89,6 +92,7 @@ team:
       skills:
         - planning
         - reporting
+        - obsidian-cli
 
     - name: risk-analyst
       model: moonshotai/kimi-k2.5
@@ -109,6 +113,7 @@ team:
         - financial-analysis
         - planning
         - reporting
+        - obsidian-cli
 
     - name: quant-researcher
       model: moonshotai/kimi-k2.5
@@ -131,3 +136,4 @@ team:
         - data-engineering
         - planning
         - automation
+        - obsidian-cli

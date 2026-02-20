@@ -24,6 +24,7 @@ team:
       skills:
         - project-management
         - reporting
+        - obsidian-cli
       heartbeat:
         - name: coordinator-check-in
           interval: 10m
@@ -49,6 +50,7 @@ team:
       skills:
         - planning
         - reporting
+        - obsidian-cli
 
     - name: researcher
       model: openai/gpt-5.1-codex-mini
@@ -69,6 +71,7 @@ team:
         - planning
         - hybrid-web
         - market-monitoring
+        - obsidian-cli
 
     - name: distribution-strategist
       model: openai/gpt-5.1-codex-mini
@@ -89,6 +92,7 @@ team:
         - planning
         - automation
         - market-monitoring
+        - obsidian-cli
 
     - name: seo-specialist
       model: openai/gpt-5.1-codex-mini
@@ -109,6 +113,7 @@ team:
         - planning
         - hybrid-web
         - automation
+        - obsidian-cli
 
     - name: social-media-manager
       model: openai/gpt-5.1-codex-mini
@@ -129,3 +134,4 @@ team:
         - planning
         - automation
         - reporting
+        - obsidian-cli
