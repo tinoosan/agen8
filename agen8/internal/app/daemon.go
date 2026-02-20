@@ -63,9 +63,6 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		poll = 2 * time.Second
 	}
 	goal = strings.TrimSpace(goal)
-	if goal == "" {
-		goal = "autonomous agent"
-	}
 	protocolEnabled := shouldEnableProtocolStdio(
 		resolved.ProtocolStdio,
 		stdinTTY,

@@ -19,7 +19,6 @@ var (
 
 	newMode    string
 	newProfile string
-	newGoal    string
 	newModel   string
 	newAttach  bool
 
@@ -157,7 +156,6 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 		ThreadID: detachedThreadID,
 		Mode:     mode,
 		Profile:  profile,
-		Goal:     strings.TrimSpace(newGoal),
 		Model:    strings.TrimSpace(newModel),
 	}, &out); err != nil {
 		return err
@@ -187,7 +185,6 @@ func init() {
 
 	newCmd.Flags().StringVar(&newMode, "mode", "", "session mode (standalone|team)")
 	newCmd.Flags().StringVar(&newProfile, "profile", "", "profile id/path")
-	newCmd.Flags().StringVar(&newGoal, "goal", "", "initial goal")
 	newCmd.Flags().StringVar(&newModel, "model", "", "model override")
 	newCmd.Flags().BoolVar(&newAttach, "attach", true, "attach coordinator after creating session")
 

@@ -37,17 +37,13 @@ func TestResolveSessionDeleteTarget_UsesProjectActiveSession(t *testing.T) {
 	}
 }
 
-func TestMailCommand_KeepsTasksAlias(t *testing.T) {
+func TestMailCommand_RemovesTasksAlias(t *testing.T) {
 	if mail := tasksCmd.Use; mail != "mail" {
 		t.Fatalf("use=%q want mail", mail)
 	}
-	found := false
 	for _, alias := range tasksCmd.Aliases {
 		if alias == "tasks" {
-			found = true
+			t.Fatalf("unexpected tasks alias on mail command")
 		}
-	}
-	if !found {
-		t.Fatalf("expected tasks alias on mail command")
 	}
 }

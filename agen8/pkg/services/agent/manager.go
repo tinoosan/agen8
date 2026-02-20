@@ -103,9 +103,6 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (StartResult, er
 	if goal == "" {
 		goal = strings.TrimSpace(sess.CurrentGoal)
 	}
-	if goal == "" {
-		goal = "autonomous agent"
-	}
 	run := types.NewRun(goal, maxContext, sessionID)
 	if run.Runtime == nil {
 		run.Runtime = &types.RunRuntimeConfig{}

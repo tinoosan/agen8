@@ -8,13 +8,12 @@ import (
 )
 
 var (
-	daemonGoal string
 	daemonPoll time.Duration
 )
 
 var daemonCmd = &cobra.Command{
 	Use:   "daemon",
-	Short: "Run the autonomous agent loop headlessly",
+	Short: "Run the agent runtime headlessly",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := effectiveConfig(cmd)
 		if err != nil {
@@ -40,11 +39,10 @@ var daemonCmd = &cobra.Command{
 			app.WithRecentHistoryPairs(recentHistoryPairs),
 			app.WithIncludeHistoryOps(includeHistoryOps),
 		}
-		return app.RunDaemon(cmd.Context(), cfg, daemonGoal, maxContextB, daemonPoll, opts...)
+		return app.RunDaemon(cmd.Context(), cfg, "", maxContextB, daemonPoll, opts...)
 	},
 }
 
 func init() {
-	daemonCmd.Flags().StringVar(&daemonGoal, "goal", "autonomous agent", "default goal/intent for the daemon run")
 	daemonCmd.Flags().DurationVar(&daemonPoll, "poll-interval", 2*time.Second, "inbox polling interval")
 }
