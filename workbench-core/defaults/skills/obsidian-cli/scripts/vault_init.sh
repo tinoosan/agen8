@@ -11,11 +11,14 @@ Path resolution order:
 1) --path <dir>
 2) OBSIDIAN_VAULT_PATH
 3) ~/.agents/vault.conf (first non-empty non-comment line)
-4) ~/.agents/vault
+4) /project/obsidian-vault
+
+By default, run-scoped /workspace paths are rejected for durable vault storage.
+Set OBSIDIAN_ALLOW_WORKSPACE_PATH=1 to force an override.
 USAGE
 }
 
-resolve_vault_path() {
+resolve_vault_candidate() {
   local explicit="${1:-}"
   if [ -n "$explicit" ]; then
     printf '%s\n' "$explicit"
@@ -40,7 +43,52 @@ resolve_vault_path() {
     done < "$conf"
   fi
 
-  printf '%s\n' "$HOME/.agents/vault"
+  printf '%s\n' "/project/obsidian-vault"
+}
+
+to_host_path() {
+  local path_in="$1"
+  if [ -z "$path_in" ]; then
+    printf '%s\n' "$path_in"
+    return
+  fi
+  case "$path_in" in
+    /project)
+      printf '%s\n' "$PWD"
+      return
+      ;;
+    /project/*)
+      if [ -d "/project" ]; then
+        printf '%s\n' "$path_in"
+      else
+        printf '%s/%s\n' "$PWD" "${path_in#/project/}"
+      fi
+      return
+      ;;
+  esac
+  printf '%s\n' "$path_in"
+}
+
+reject_workspace_path() {
+  local logical="$1"
+  local resolved="$2"
+  if [ "${OBSIDIAN_ALLOW_WORKSPACE_PATH:-0}" = "1" ]; then
+    return 0
+  fi
+  case "$logical" in
+    /workspace|/workspace/*)
+      echo "ERROR: refusing run-scoped /workspace path for vault storage: $logical" >&2
+      echo "Set OBSIDIAN_ALLOW_WORKSPACE_PATH=1 to force this override." >&2
+      exit 1
+      ;;
+  esac
+  case "$resolved" in
+    /workspace|/workspace/*)
+      echo "ERROR: refusing run-scoped /workspace path for vault storage: $resolved" >&2
+      echo "Set OBSIDIAN_ALLOW_WORKSPACE_PATH=1 to force this override." >&2
+      exit 1
+      ;;
+  esac
 }
 
 VAULT_PATH=""
@@ -63,7 +111,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-VAULT_PATH="$(resolve_vault_path "$VAULT_PATH")"
+VAULT_PATH_LOGICAL="$(resolve_vault_candidate "$VAULT_PATH")"
+VAULT_PATH="$(to_host_path "$VAULT_PATH_LOGICAL")"
+reject_workspace_path "$VAULT_PATH_LOGICAL" "$VAULT_PATH"
 mkdir -p "$VAULT_PATH"
 
 created_dirs=()

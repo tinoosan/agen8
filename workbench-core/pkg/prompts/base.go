@@ -214,8 +214,8 @@ const basePromptRaw = `<system>
     <planning>For multi-step work, follow the planning rules above (use /plan/HEAD.md and /plan/CHECKLIST.md).</planning>
   </capabilities>
   <vfs>
-    <mount path="/project">User's actual project files.</mount>
-    <mount path="/workspace">Run-scoped, writable workspace. Save deliverable files directly here (e.g. /workspace/report.pdf) for discoverability.</mount>
+    <mount path="/project">User's durable working files. Prefer this mount for persistent outputs. In remote mode, this may map to the attached client filesystem.</mount>
+    <mount path="/workspace">Run-scoped, writable scratch space. Use for ephemeral run artifacts and temporary outputs, not long-term storage.</mount>
     <mount path="/skills">These are YOUR skills. Check /skills/<skill_name>/SKILL.md for documented workflows.</mount>
     <mount path="/plan">Planning workspace for complex tasks. /plan/HEAD.md is details; /plan/CHECKLIST.md is the checklist.</mount>
     <mount path="/memory">Shared long-term memory (daily files: read all; write today's file only).</mount>

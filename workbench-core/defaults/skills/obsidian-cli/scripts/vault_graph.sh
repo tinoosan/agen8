@@ -5,13 +5,14 @@ import argparse
 import json
 import os
 import re
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 
 
-def resolve_vault_path(explicit: str | None) -> Path:
+def resolve_vault_candidate(explicit: str | None) -> Path:
     if explicit:
         return Path(explicit).expanduser().resolve()
 
@@ -27,7 +28,34 @@ def resolve_vault_path(explicit: str | None) -> Path:
                 continue
             return Path(clean).expanduser().resolve()
 
-    return (Path.home() / ".agents" / "vault").resolve()
+    return Path("/project/obsidian-vault")
+
+
+def to_host_path(path: Path) -> Path:
+    path_str = str(path)
+    if path_str == "/project":
+        return Path.cwd().resolve()
+    if path_str.startswith("/project/") and not Path("/project").exists():
+        rel = path_str.removeprefix("/project/")
+        return (Path.cwd() / rel).resolve()
+    return path.resolve()
+
+
+def reject_workspace_path(logical: Path, resolved: Path) -> None:
+    if os.environ.get("OBSIDIAN_ALLOW_WORKSPACE_PATH", "0").strip() == "1":
+        return
+    logical_str = str(logical)
+    resolved_str = str(resolved)
+    if logical_str == "/workspace" or logical_str.startswith("/workspace/"):
+        raise ValueError(
+            f"refusing run-scoped /workspace path for vault storage: {logical_str}. "
+            "Set OBSIDIAN_ALLOW_WORKSPACE_PATH=1 to force this override."
+        )
+    if resolved_str == "/workspace" or resolved_str.startswith("/workspace/"):
+        raise ValueError(
+            f"refusing run-scoped /workspace path for vault storage: {resolved_str}. "
+            "Set OBSIDIAN_ALLOW_WORKSPACE_PATH=1 to force this override."
+        )
 
 
 def parse_frontmatter(text: str) -> tuple[str, str, bool]:
@@ -59,13 +87,24 @@ def normalize_link(raw: str) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Audit markdown knowledge graph for an Obsidian vault.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Audit markdown knowledge graph for an Obsidian vault. "
+            "Default path resolution: --path -> OBSIDIAN_VAULT_PATH -> ~/.agents/vault.conf -> /project/obsidian-vault."
+        )
+    )
     parser.add_argument("--path", help="Vault path override")
     parser.add_argument("--top", type=int, default=10, help="Top N hub notes to return (default: 10)")
     parser.add_argument("--json-pretty", action="store_true", help="Pretty-print JSON output")
     args = parser.parse_args()
 
-    vault = resolve_vault_path(args.path)
+    try:
+        logical_vault = resolve_vault_candidate(args.path)
+        vault = to_host_path(logical_vault)
+        reject_workspace_path(logical_vault, vault)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1)
     if not vault.exists() or not vault.is_dir():
         out = {
             "vault_path": str(vault),

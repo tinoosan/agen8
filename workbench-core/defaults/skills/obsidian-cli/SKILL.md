@@ -19,9 +19,18 @@ Use this skill to persist durable knowledge in an Obsidian-style vault (plain ma
 
 Resolve vault path in this order:
 
-1. `$OBSIDIAN_VAULT_PATH`
-2. `~/.agents/vault.conf` (first non-empty non-comment line)
-3. default `~/.agents/vault/`
+1. explicit `--path`
+2. `$OBSIDIAN_VAULT_PATH`
+3. `~/.agents/vault.conf` (first non-empty non-comment line)
+4. default `/project/obsidian-vault`
+
+## Path policy
+
+- Durable vault data belongs under `/project/...` in v1.
+- Never store a durable vault under `/workspace/...` because `/workspace` is run-scoped and ephemeral.
+- In remote mode, when `/project` is semantically mapped to an attached client filesystem, `/project/obsidian-vault` is client-local.
+- In local mode, `/project/obsidian-vault` maps to daemon-local project storage.
+- If you must force `/workspace` for a special case, set `OBSIDIAN_ALLOW_WORKSPACE_PATH=1` explicitly.
 
 ## Vault structure
 
@@ -205,6 +214,14 @@ tags: [journal]
 - Over-tagging without meaningful link structure.
 - Writing giant multi-concept notes instead of atomic notes.
 - Letting MOCs go stale while notes proliferate.
+
+## Deferred roadmap (v2)
+
+When semantic `/home` mount support is introduced, move default fallback from `/project/obsidian-vault` to app-data paths under `/home`:
+
+- macOS: `/home/Library/Application Support/<ApplicationName>/obsidian-vault`
+- Linux: `/home/.local/share/<applicationname>/obsidian-vault`
+- Windows: `/home/AppData/Roaming/<ApplicationName>/obsidian-vault`
 
 ## Scripts
 
