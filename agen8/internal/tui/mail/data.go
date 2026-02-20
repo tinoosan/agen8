@@ -1,0 +1,139 @@
+package mail
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/pkg/protocol"
+	"github.com/tinoosan/agen8/pkg/types"
+)
+
+type dataLoadedMsg struct {
+	inbox     []taskEntry
+	outbox    []taskEntry
+	current   *taskEntry
+	connected bool
+	err       error
+}
+
+type tickMsg struct{}
+
+type taskEntry struct {
+	ID           string
+	RunID        string
+	Role         string
+	Goal         string
+	Status       string
+	Summary      string
+	Error        string
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
+	CostUSD      float64
+	Artifacts    int
+	CreatedAt    time.Time
+	CompletedAt  time.Time
+}
+
+func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		cli := protocol.TCPClient{
+			Endpoint: endpoint,
+			Timeout:  5 * time.Second,
+		}
+
+		call := func(method string, params, out any) error {
+			if err := cli.Call(ctx, method, params, out); err != nil {
+				return fmt.Errorf("rpc %s: %w", method, err)
+			}
+			return nil
+		}
+
+		threadID := protocol.ThreadID(strings.TrimSpace(sessionID))
+
+		// Fetch inbox
+		var inboxRes protocol.TaskListResult
+		if err := call(protocol.MethodTaskList, protocol.TaskListParams{
+			ThreadID: threadID,
+			View:     "inbox",
+			Limit:    200,
+			Offset:   0,
+		}, &inboxRes); err != nil {
+			return dataLoadedMsg{err: err}
+		}
+
+		// Fetch outbox
+		var outboxRes protocol.TaskListResult
+		if err := call(protocol.MethodTaskList, protocol.TaskListParams{
+			ThreadID: threadID,
+			View:     "outbox",
+			Limit:    200,
+			Offset:   0,
+		}, &outboxRes); err != nil {
+			return dataLoadedMsg{err: err}
+		}
+
+		inbox := filterTasks(inboxRes.Tasks, true)
+		outbox := filterTasks(outboxRes.Tasks, false)
+
+		var current *taskEntry
+		for i := range inbox {
+			if inbox[i].Status == string(types.TaskStatusActive) {
+				current = &inbox[i]
+				break
+			}
+		}
+
+		return dataLoadedMsg{
+			inbox:     inbox,
+			outbox:    outbox,
+			current:   current,
+			connected: true,
+		}
+	}
+}
+
+func filterTasks(tasks []protocol.Task, isInbox bool) []taskEntry {
+	out := make([]taskEntry, 0, len(tasks))
+	for _, t := range tasks {
+		status := strings.TrimSpace(t.Status)
+		if isInbox {
+			if status != string(types.TaskStatusPending) && status != string(types.TaskStatusActive) {
+				continue
+			}
+		}
+		id := strings.TrimSpace(t.ID)
+		if id == "" {
+			continue
+		}
+		out = append(out, taskEntry{
+			ID:           id,
+			RunID:        strings.TrimSpace(string(t.RunID)),
+			Role:         strings.TrimSpace(t.AssignedRole),
+			Goal:         strings.TrimSpace(t.Goal),
+			Status:       status,
+			Summary:      strings.TrimSpace(t.Summary),
+			Error:        strings.TrimSpace(t.Error),
+			InputTokens:  t.InputTokens,
+			OutputTokens: t.OutputTokens,
+			TotalTokens:  t.TotalTokens,
+			CostUSD:      t.CostUSD,
+			Artifacts:    len(t.Artifacts),
+			CreatedAt:    t.CreatedAt,
+			CompletedAt:  t.CompletedAt,
+		})
+	}
+	return out
+}
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return tickMsg{}
+	})
+}
