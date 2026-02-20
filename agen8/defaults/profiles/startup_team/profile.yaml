@@ -118,6 +118,7 @@ team:
 
     - name: operations-lead
       model: moonshotai/kimi-k2.5
+      reviewer: true
       code_exec_only: true
       allowed_tools:
         - fs_list
@@ -128,7 +129,9 @@ team:
         - fs_edit
         - http_fetch
         - browser
-      description: Manages day-to-day operations, vendor relationships, processes, and logistics.
+        - task_review
+        - task_create
+      description: Manages day-to-day operations, vendor relationships, processes, and logistics. Reviews delegated work and provides quality feedback.
       prompts:
         system_prompt_path: operations-lead-prompt.md
       skills:

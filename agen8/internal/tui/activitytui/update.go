@@ -56,6 +56,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "j", "down":
+		if m.detailOpen {
+			m.detailScroll++
+			return m, nil
+		}
 		m.moveSelection(1)
 		// If we're at the bottom, re-enable live follow
 		if m.sel >= len(m.activities)-1 {
@@ -64,6 +68,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "k", "up":
+		if m.detailOpen {
+			m.detailScroll--
+			if m.detailScroll < 0 {
+				m.detailScroll = 0
+			}
+			return m, nil
+		}
 		m.liveFollow = false
 		m.moveSelection(-1)
 		return m, nil

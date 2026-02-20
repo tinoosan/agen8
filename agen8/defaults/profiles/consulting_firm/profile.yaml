@@ -96,6 +96,7 @@ team:
 
     - name: deliverable-writer
       model: moonshotai/kimi-k2.5
+      reviewer: true
       code_exec_only: true
       allowed_tools:
         - fs_list
@@ -105,7 +106,9 @@ team:
         - fs_append
         - fs_edit
         - http_fetch
-      description: Produces polished strategy decks, memos, and executive presentations.
+        - task_review
+        - task_create
+      description: Produces polished strategy decks, memos, and executive presentations. Reviews delegated work and provides quality feedback.
       prompts:
         system_prompt_path: deliverable-writer-prompt.md
       skills:

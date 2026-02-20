@@ -54,6 +54,7 @@ team:
 
     - name: deal-underwriter
       model: openai/gpt-5.1-codex-mini
+      reviewer: true
       code_exec_only: true
       allowed_tools:
         - fs_list
@@ -64,7 +65,9 @@ team:
         - fs_edit
         - http_fetch
         - browser
-      description: Evaluates individual property deals — financials, risk, and return projections.
+        - task_review
+        - task_create
+      description: Evaluates individual property deals — financials, risk, and return projections. Reviews delegated work and provides quality feedback.
       prompts:
         system_prompt_path: deal-underwriter-prompt.md
       skills:

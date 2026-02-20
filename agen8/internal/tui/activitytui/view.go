@@ -58,17 +58,25 @@ func (m *Model) View() string {
 		return ""
 	}
 
-	header := m.renderHeader()
-	footer := m.renderFooter()
+	var header, footer, body string
 
-	bodyHeight := m.height - 2 // header + footer
-	if bodyHeight < 1 {
-		out := header + "\n" + footer
-		return lipgloss.NewStyle().MaxHeight(m.height).MaxWidth(m.width).Render(out)
+	if m.detailOpen && m.sel >= 0 && m.sel < len(m.activities) {
+		header = m.renderDetailHeader()
+		footer = m.renderDetailFooter()
+		bodyHeight := m.height - 2
+		if bodyHeight < 1 {
+			bodyHeight = 1
+		}
+		body = m.renderDetailView(m.width, bodyHeight)
+	} else {
+		header = m.renderHeader()
+		footer = m.renderFooter()
+		bodyHeight := m.height - 2
+		if bodyHeight < 1 {
+			bodyHeight = 1
+		}
+		body = m.renderBody(bodyHeight)
 	}
-
-	body := m.renderBody(bodyHeight)
-	body = lipgloss.NewStyle().MaxHeight(bodyHeight).Render(body)
 
 	out := header + "\n" + body + "\n" + footer
 	return lipgloss.NewStyle().MaxHeight(m.height).MaxWidth(m.width).Render(out)
@@ -159,26 +167,6 @@ func (m *Model) renderBody(height int) string {
 			empty = styleErr.Render("  " + m.lastErr)
 		}
 		return lipgloss.NewStyle().Width(m.width).Height(height).Render(empty)
-	}
-
-	if m.detailOpen && m.sel >= 0 && m.sel < len(m.activities) {
-		if m.isShort() {
-			// Tiny: only detail
-			return m.renderDetailPanel(m.width, height)
-		}
-		// Split: list on top, detail on bottom
-		listH := height / 3
-		if listH < 4 {
-			listH = 4
-		}
-		detailH := height - listH
-		if detailH < 3 {
-			detailH = 3
-			listH = height - detailH
-		}
-		list := m.renderListPanel(m.width, listH)
-		detail := m.renderDetailPanel(m.width, detailH)
-		return lipgloss.JoinVertical(lipgloss.Left, list, detail)
 	}
 
 	return m.renderListPanel(m.width, height)
@@ -275,24 +263,55 @@ func (m *Model) statusIcon(act types.Activity) string {
 	}
 }
 
-// ── Detail panel ───────────────────────────────────────────────────────
+// ── Detail view (full screen) ──────────────────────────────────────────
 
-func (m *Model) renderDetailPanel(width, height int) string {
+func (m *Model) renderDetailHeader() string {
 	act := m.activities[m.sel]
-	innerW := maxInt(10, width-4)
+	icon := kindIcon(act.Kind)
+	kind := strings.TrimSpace(act.Kind)
+	if kind == "" {
+		kind = "op"
+	}
+	title := actTitle(act)
+	title = truncate(title, maxInt(10, m.width-len(kind)-10))
+
+	left := styleAccent.Render(icon+" "+kind) + styleDim.Render(" · ") + styleHeader.Render(title)
+
+	return lipgloss.NewStyle().
+		Width(m.width).MaxWidth(m.width).MaxHeight(1).
+		Background(headerBg).
+		Foreground(lipgloss.Color("#eaeaea")).
+		Padding(0, 1).
+		Render(left)
+}
+
+func (m *Model) renderDetailFooter() string {
+	hints := styleDim.Render("esc") + " back  " +
+		styleDim.Render("j/k") + " scroll  " +
+		styleDim.Render("pgup/pgdn") + " page  " +
+		styleDim.Render("q") + " quit"
+
+	return lipgloss.NewStyle().
+		Width(m.width).MaxWidth(m.width).MaxHeight(1).
+		Background(headerBg).
+		Padding(0, 1).
+		Render(hints)
+}
+
+func (m *Model) renderDetailView(width, height int) string {
+	act := m.activities[m.sel]
+	innerW := maxInt(10, width-2)
 
 	md := renderActivityDetailMD(act)
 	rendered := renderMarkdown(md, innerW)
 
 	// Apply viewport scroll
-	rendered = viewportSlice(rendered, height-2, m.detailScroll)
+	rendered = viewportSlice(rendered, height, m.detailScroll)
 
-	borderColor := colorAccent
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Width(width - 2). // account for border
-		Height(height - 2).
+		Width(width).
+		Height(height).
+		Padding(0, 1).
 		Render(rendered)
 }
 

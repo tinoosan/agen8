@@ -92,6 +92,7 @@ team:
 
     - name: risk-analyst
       model: moonshotai/kimi-k2.5
+      reviewer: true
       code_exec_only: true
       allowed_tools:
         - fs_list
@@ -102,7 +103,9 @@ team:
         - fs_edit
         - http_fetch
         - browser
-      description: Assesses portfolio risk, correlation exposure, and downside scenarios across positions.
+        - task_review
+        - task_create
+      description: Assesses portfolio risk, correlation exposure, and downside scenarios across positions. Reviews delegated work and provides quality feedback.
       prompts:
         system_prompt_path: risk-analyst-prompt.md
       skills:

@@ -92,6 +92,7 @@ team:
 
     - name: seo-specialist
       model: openai/gpt-5.1-codex-mini
+      reviewer: true
       code_exec_only: true
       allowed_tools:
         - fs_list
@@ -102,7 +103,9 @@ team:
         - fs_edit
         - http_fetch
         - browser
-      description: Optimizes content for search engines — keyword research, on-page SEO, and performance tracking.
+        - task_review
+        - task_create
+      description: Optimizes content for search engines — keyword research, on-page SEO, and performance tracking. Reviews delegated work and provides quality feedback.
       prompts:
         system_prompt_path: seo-specialist-prompt.md
       skills:

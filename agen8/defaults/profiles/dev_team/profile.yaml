@@ -79,6 +79,7 @@ team:
 
     - name: qa-engineer
       model: openai/gpt-5.1-codex-mini
+      reviewer: true
       code_exec_only: true
       allowed_tools:
         - fs_list
@@ -92,7 +93,9 @@ team:
         - http_fetch
         - browser
         - trace_run
-      description: Writes tests, finds bugs, validates features against acceptance criteria.
+        - task_review
+        - task_create
+      description: Writes tests, finds bugs, validates features against acceptance criteria. Reviews delegated work and provides quality feedback.
       prompts:
         system_prompt_path: qa-engineer-prompt.md
       skills:

@@ -95,6 +95,7 @@ team:
 
     - name: creative-director
       model: moonshotai/kimi-k2.5
+      reviewer: true
       code_exec_only: true
       allowed_tools:
         - fs_list
@@ -105,7 +106,9 @@ team:
         - fs_edit
         - http_fetch
         - browser
-      description: Owns visual identity, content creation direction, artwork, and brand consistency.
+        - task_review
+        - task_create
+      description: Owns visual identity, content creation direction, artwork, and brand consistency. Reviews delegated work and provides quality feedback.
       prompts:
         system_prompt_path: creative-director-prompt.md
       skills:
