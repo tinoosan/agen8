@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -408,9 +409,23 @@ func TestEnsureReady_MissingPythonBinary(t *testing.T) {
 
 func TestEnsureReady_MissingRequiredImport(t *testing.T) {
 	python := mustFindPython(t)
-	t.Setenv("WORKBENCH_CODE_EXEC_REQUIRED_IMPORTS", "module_that_should_not_exist_code_exec")
 	inv := NewBuiltinCodeExecInvoker(t.TempDir(), map[string]string{"workspace": t.TempDir()})
 	inv.PythonBin = python
+	inv.SetRequiredImports([]string{"module_that_should_not_exist_code_exec"})
+	err := inv.EnsureReady(context.Background())
+	if err == nil {
+		t.Fatalf("expected missing import error")
+	}
+	if !strings.Contains(err.Error(), "missing python module") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestEnsureReady_MissingRequiredImportFromSetter(t *testing.T) {
+	python := mustFindPython(t)
+	inv := NewBuiltinCodeExecInvoker(t.TempDir(), map[string]string{"workspace": t.TempDir()})
+	inv.PythonBin = python
+	inv.SetRequiredImports([]string{"module_that_should_not_exist_code_exec_setter"})
 	err := inv.EnsureReady(context.Background())
 	if err == nil {
 		t.Fatalf("expected missing import error")
@@ -427,6 +442,30 @@ func TestEnsureReady_Smoke(t *testing.T) {
 	if err := inv.EnsureReady(context.Background()); err != nil {
 		t.Fatalf("EnsureReady: %v", err)
 	}
+}
+
+func TestRequiredCodeExecImports_MergesRuntimeDeterministically(t *testing.T) {
+	got := requiredCodeExecImports([]string{"pandas", "a_mod", "requests"})
+	expectedContains := []string{"a_mod", "contextlib", "io", "json", "pandas", "re", "requests"}
+	for _, mod := range expectedContains {
+		if !containsString(got, mod) {
+			t.Fatalf("expected merged imports to include %q, got %v", mod, got)
+		}
+	}
+	sorted := append([]string(nil), got...)
+	sort.Strings(sorted)
+	if strings.Join(sorted, ",") != strings.Join(got, ",") {
+		t.Fatalf("expected deterministic lexical ordering, got %v", got)
+	}
+}
+
+func containsString(items []string, needle string) bool {
+	for _, item := range items {
+		if item == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func mustFindPython(t *testing.T) string {

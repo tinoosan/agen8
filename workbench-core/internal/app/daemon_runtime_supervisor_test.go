@@ -287,11 +287,12 @@ func TestApplySessionModel_SkipsChildRuns(t *testing.T) {
 func TestBuildRoleRuntimeProfile_CopiesRoleSkillsForSupervisor(t *testing.T) {
 	enabled := true
 	role := profile.RoleConfig{
-		Name:         "qa",
-		Description:  "QA role",
-		Skills:       []string{"automation"},
-		CodeExecOnly: &enabled,
-		AllowedTools: []string{"task_review"},
+		Name:                    "qa",
+		Description:             "QA role",
+		Skills:                  []string{"automation"},
+		CodeExecOnly:            &enabled,
+		CodeExecRequiredImports: []string{"requests"},
+		AllowedTools:            []string{"task_review"},
 	}
 	got := buildRoleRuntimeProfile(role)
 	if got == nil {
@@ -308,6 +309,9 @@ func TestBuildRoleRuntimeProfile_CopiesRoleSkillsForSupervisor(t *testing.T) {
 	}
 	if !got.CodeExecOnly {
 		t.Fatalf("expected code_exec_only copied from role override")
+	}
+	if len(got.CodeExecRequiredImports) != 1 || got.CodeExecRequiredImports[0] != "requests" {
+		t.Fatalf("unexpected code_exec required imports: %v", got.CodeExecRequiredImports)
 	}
 }
 

@@ -5,9 +5,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tinoosan/workbench-core/pkg/config"
 )
 
-func TestLoadRuntimeConfig_DataDirAndCWDMerge(t *testing.T) {
+func TestLoadRuntimeConfig_DataDirOnly(t *testing.T) {
 	tmp := t.TempDir()
 	dataDir := filepath.Join(tmp, "data")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
@@ -20,6 +22,9 @@ model = "openai/gpt-5-mini"
 conflict = "keep"
 [env]
 OPENROUTER_API_KEY = "from-data-dir"
+[code_exec]
+venv_path = "exec/.venv"
+required_packages = ["pandas"]
 `), 0o644); err != nil {
 		t.Fatalf("write dataDir config: %v", err)
 	}
@@ -43,6 +48,8 @@ subagent_model = "openai/gpt-5-nano"
 conflict = "overwrite"
 [env]
 OPENROUTER_API_KEY = "from-cwd"
+[code_exec]
+required_packages = ["requests"]
 `), 0o644); err != nil {
 		t.Fatalf("write cwd config: %v", err)
 	}
@@ -54,14 +61,20 @@ OPENROUTER_API_KEY = "from-cwd"
 	if cfg.Defaults.Model != "openai/gpt-5-mini" {
 		t.Fatalf("model=%q", cfg.Defaults.Model)
 	}
-	if cfg.Defaults.SubagentModel != "openai/gpt-5-nano" {
+	if cfg.Defaults.SubagentModel != "" {
 		t.Fatalf("subagent_model=%q", cfg.Defaults.SubagentModel)
 	}
-	if cfg.Skills.Conflict != "overwrite" {
+	if cfg.Skills.Conflict != "keep" {
 		t.Fatalf("skills.conflict=%q", cfg.Skills.Conflict)
 	}
-	if got := cfg.Env["OPENROUTER_API_KEY"]; got != "from-cwd" {
+	if got := cfg.Env["OPENROUTER_API_KEY"]; got != "from-data-dir" {
 		t.Fatalf("OPENROUTER_API_KEY=%q", got)
+	}
+	if got := cfg.CodeExec.VenvPath; got != "exec/.venv" {
+		t.Fatalf("venv_path=%q", got)
+	}
+	if got := strings.Join(cfg.CodeExec.RequiredPackages, ","); got != "pandas" {
+		t.Fatalf("required_packages=%q", got)
 	}
 }
 
@@ -113,6 +126,9 @@ func TestEnsureRuntimeConfigTemplate_CreatesDefaultTemplate(t *testing.T) {
 	if strings.Contains(strings.ToUpper(text), "API_KEY") {
 		t.Fatalf("template should not include secrets")
 	}
+	if !strings.Contains(text, "[code_exec]") {
+		t.Fatalf("expected code_exec section in template, got:\n%s", text)
+	}
 }
 
 func TestEnsureRuntimeConfigTemplate_Idempotent(t *testing.T) {
@@ -138,5 +154,21 @@ func TestEnsureRuntimeConfigTemplate_Idempotent(t *testing.T) {
 	if strings.TrimSpace(string(raw)) != `[defaults]
 model = "custom/model"` {
 		t.Fatalf("existing config should remain untouched; got:\n%s", string(raw))
+	}
+}
+
+func TestApplyRuntimeConfigHostDefaults_CodeExec(t *testing.T) {
+	base := config.Config{DataDir: "db"}
+	out := applyRuntimeConfigHostDefaults(base, runtimeConfig{
+		CodeExec: runtimeConfigCodeExec{
+			VenvPath:         "exec/.venv",
+			RequiredPackages: []string{"pandas", "requests"},
+		},
+	})
+	if out.CodeExec.VenvPath != "exec/.venv" {
+		t.Fatalf("venv_path=%q", out.CodeExec.VenvPath)
+	}
+	if got := strings.Join(out.CodeExec.RequiredPackages, ","); got != "pandas,requests" {
+		t.Fatalf("required_packages=%q", got)
 	}
 }

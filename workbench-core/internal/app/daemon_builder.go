@@ -183,6 +183,7 @@ func (b *DaemonBuilder) prepareBootstrap() error {
 			log.Printf("events: emit failed: %v", err)
 		}
 	}
+	emitCodeExecProvisioningSecurityWarning(b.ctx, b.cfg, b.mustEmit)
 
 	b.artifactIndex = newArtifactIndex()
 	workdirAbs, err := resolveWorkDir(b.resolved.WorkDir)
@@ -531,6 +532,7 @@ func (b *DaemonBuilder) startBackgroundServices() error {
 	runCtx, stopSignals := signal.NotifyContext(b.ctx, os.Interrupt, syscall.SIGTERM)
 	b.runCtx = runCtx
 	b.stopSignals = stopSignals
+	startCodeExecConfigReloader(b.runCtx, b.cfg, b.mustEmit)
 
 	go b.supervisor.Run(b.runCtx)
 

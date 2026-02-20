@@ -15,11 +15,26 @@ type Config struct {
 	// Note: the CLI resolves the default using ResolveDataDir (home/XDG by
 	// default, with overrides via --data-dir / WORKBENCH_DATA_DIR).
 	DataDir string
+
+	// CodeExec controls runtime policy for code_exec Python environment setup.
+	CodeExec CodeExecConfig
+}
+
+// CodeExecConfig controls code_exec Python runtime dependency policy.
+type CodeExecConfig struct {
+	VenvPath         string
+	RequiredPackages []string
 }
 
 // Default returns the default host configuration.
 func Default() Config {
-	return Config{DataDir: "db"}
+	return Config{
+		DataDir: "db",
+		CodeExec: CodeExecConfig{
+			VenvPath:         "",
+			RequiredPackages: nil,
+		},
+	}
 }
 
 func (c Config) Validate() error {

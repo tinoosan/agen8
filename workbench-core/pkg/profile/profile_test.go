@@ -211,6 +211,30 @@ allowed_tools: [fs_list, fs_read]
 	}
 }
 
+func TestLoad_NormalizesCodeExecRequiredImports(t *testing.T) {
+	dir := t.TempDir()
+	raw := `
+id: code-exec-imports
+description: Code exec imports
+prompts:
+  system_prompt: hi
+code_exec_required_imports: [requests, " requests ", pandas]
+`
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := len(p.CodeExecRequiredImports), 2; got != want {
+		t.Fatalf("code_exec_required_imports len=%d want=%d (%v)", got, want, p.CodeExecRequiredImports)
+	}
+	if p.CodeExecRequiredImports[0] != "requests" || p.CodeExecRequiredImports[1] != "pandas" {
+		t.Fatalf("unexpected code_exec_required_imports order/content: %v", p.CodeExecRequiredImports)
+	}
+}
+
 func TestLoad_TeamRoleCodeExecOnlyOverride(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "coord.md"), []byte("coord"), 0o644); err != nil {
@@ -254,5 +278,51 @@ team:
 	}
 	if p.Team.Roles[1].CodeExecOnly == nil || *p.Team.Roles[1].CodeExecOnly {
 		t.Fatalf("expected worker override false")
+	}
+}
+
+func TestLoad_TeamRoleCodeExecRequiredImports(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "coord.md"), []byte("coord"), 0o644); err != nil {
+		t.Fatalf("write coord prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "worker.md"), []byte("worker"), 0o644); err != nil {
+		t.Fatalf("write worker prompt: %v", err)
+	}
+	raw := `
+id: team-code-exec-imports
+description: Team profile
+code_exec_required_imports: [requests, " requests "]
+team:
+  roles:
+    - name: lead
+      coordinator: true
+      description: Team lead
+      prompts:
+        system_prompt_path: coord.md
+    - name: worker
+      description: Team worker
+      code_exec_required_imports: [pandas, " pandas "]
+      prompts:
+        system_prompt_path: worker.md
+`
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := len(p.CodeExecRequiredImports), 1; got != want {
+		t.Fatalf("profile code_exec_required_imports len=%d want=%d (%v)", got, want, p.CodeExecRequiredImports)
+	}
+	if p.CodeExecRequiredImports[0] != "requests" {
+		t.Fatalf("unexpected profile code_exec_required_imports: %v", p.CodeExecRequiredImports)
+	}
+	if p.Team == nil || len(p.Team.Roles) != 2 {
+		t.Fatalf("unexpected roles: %+v", p.Team)
+	}
+	if len(p.Team.Roles[1].CodeExecRequiredImports) != 1 || p.Team.Roles[1].CodeExecRequiredImports[0] != "pandas" {
+		t.Fatalf("unexpected role code_exec_required_imports: %v", p.Team.Roles[1].CodeExecRequiredImports)
 	}
 }

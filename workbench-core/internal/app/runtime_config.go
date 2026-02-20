@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/tinoosan/workbench-core/pkg/config"
 )
 
 const envWorkbenchConfig = "WORKBENCH_CONFIG"
@@ -17,6 +19,7 @@ type runtimeConfig struct {
 	Defaults runtimeConfigDefaults
 	Env      map[string]string
 	Skills   runtimeConfigSkills
+	CodeExec runtimeConfigCodeExec
 }
 
 type runtimeConfigDefaults struct {
@@ -29,10 +32,16 @@ type runtimeConfigSkills struct {
 	Conflict string
 }
 
+type runtimeConfigCodeExec struct {
+	VenvPath         string
+	RequiredPackages []string
+}
+
 type runtimeConfigFile struct {
 	Defaults runtimeConfigDefaultsFile `toml:"defaults"`
 	Env      map[string]string         `toml:"env"`
 	Skills   runtimeConfigSkillsFile   `toml:"skills"`
+	CodeExec runtimeConfigCodeExecFile `toml:"code_exec"`
 }
 
 type runtimeConfigDefaultsFile struct {
@@ -43,6 +52,11 @@ type runtimeConfigDefaultsFile struct {
 
 type runtimeConfigSkillsFile struct {
 	Conflict string `toml:"conflict"`
+}
+
+type runtimeConfigCodeExecFile struct {
+	VenvPath         string   `toml:"venv_path"`
+	RequiredPackages []string `toml:"required_packages"`
 }
 
 func loadRuntimeConfig(dataDir string) (runtimeConfig, error) {
@@ -77,17 +91,6 @@ func loadRuntimeConfig(dataDir string) (runtimeConfig, error) {
 			out = mergeRuntimeConfig(out, cfg)
 		}
 	}
-	if cwd, err := os.Getwd(); err == nil {
-		cfg, ok, derr := decodeRuntimeConfigFile(filepath.Join(cwd, "config.toml"))
-		if derr != nil {
-			return runtimeConfig{}, derr
-		}
-		if ok {
-			loaded = true
-			out = mergeRuntimeConfig(out, cfg)
-		}
-	}
-
 	if !loaded {
 		return runtimeConfig{Env: map[string]string{}}, nil
 	}
@@ -123,6 +126,10 @@ model = "`+runtimeDefaultModel+`"
 
 [skills]
 # conflict = "keep"
+
+[code_exec]
+# venv_path = ""
+# required_packages = []
 `) + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
@@ -155,6 +162,10 @@ func decodeRuntimeConfigFile(path string) (runtimeConfig, bool, error) {
 		Env: map[string]string{},
 		Skills: runtimeConfigSkills{
 			Conflict: strings.ToLower(strings.TrimSpace(raw.Skills.Conflict)),
+		},
+		CodeExec: runtimeConfigCodeExec{
+			VenvPath:         strings.TrimSpace(raw.CodeExec.VenvPath),
+			RequiredPackages: normalizeStringList(raw.CodeExec.RequiredPackages),
 		},
 	}
 	for k, v := range raw.Env {
@@ -191,6 +202,44 @@ func mergeRuntimeConfig(base, override runtimeConfig) runtimeConfig {
 	if c := normalizeSkillsConflict(override.Skills.Conflict); c != "" {
 		out.Skills.Conflict = c
 	}
+	if vp := strings.TrimSpace(override.CodeExec.VenvPath); vp != "" {
+		out.CodeExec.VenvPath = vp
+	}
+	if len(override.CodeExec.RequiredPackages) > 0 {
+		set := map[string]struct{}{}
+		merged := make([]string, 0, len(out.CodeExec.RequiredPackages)+len(override.CodeExec.RequiredPackages))
+		for _, item := range out.CodeExec.RequiredPackages {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, ok := set[item]; ok {
+				continue
+			}
+			set[item] = struct{}{}
+			merged = append(merged, item)
+		}
+		for _, item := range override.CodeExec.RequiredPackages {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, ok := set[item]; ok {
+				continue
+			}
+			set[item] = struct{}{}
+			merged = append(merged, item)
+		}
+		sort.Strings(merged)
+		out.CodeExec.RequiredPackages = merged
+	}
+	return out
+}
+
+func applyRuntimeConfigHostDefaults(host config.Config, cfg runtimeConfig) config.Config {
+	out := host
+	out.CodeExec.VenvPath = strings.TrimSpace(cfg.CodeExec.VenvPath)
+	out.CodeExec.RequiredPackages = normalizeStringList(cfg.CodeExec.RequiredPackages)
 	return out
 }
 
@@ -229,4 +278,28 @@ func normalizeSkillsConflict(v string) string {
 	default:
 		return ""
 	}
+}
+
+func normalizeStringList(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	seen := map[string]struct{}{}
+	for _, item := range in {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
 }

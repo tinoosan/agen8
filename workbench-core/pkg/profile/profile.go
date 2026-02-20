@@ -11,16 +11,17 @@ import (
 )
 
 type Profile struct {
-	ID            string         `yaml:"id"`
-	Description   string         `yaml:"description"`
-	Model         string         `yaml:"model,omitempty"`
-	SubagentModel string         `yaml:"subagent_model,omitempty"`
-	CodeExecOnly  bool           `yaml:"code_exec_only,omitempty"`
-	AllowedTools  []string       `yaml:"allowed_tools,omitempty"`
-	Prompts       PromptConfig   `yaml:"prompts,omitempty"`
-	Skills        []string       `yaml:"skills,omitempty"`
-	Heartbeat     []HeartbeatJob `yaml:"heartbeat,omitempty"`
-	Team          *TeamConfig    `yaml:"team,omitempty"`
+	ID                      string         `yaml:"id"`
+	Description             string         `yaml:"description"`
+	Model                   string         `yaml:"model,omitempty"`
+	SubagentModel           string         `yaml:"subagent_model,omitempty"`
+	CodeExecOnly            bool           `yaml:"code_exec_only,omitempty"`
+	CodeExecRequiredImports []string       `yaml:"code_exec_required_imports,omitempty"`
+	AllowedTools            []string       `yaml:"allowed_tools,omitempty"`
+	Prompts                 PromptConfig   `yaml:"prompts,omitempty"`
+	Skills                  []string       `yaml:"skills,omitempty"`
+	Heartbeat               []HeartbeatJob `yaml:"heartbeat,omitempty"`
+	Team                    *TeamConfig    `yaml:"team,omitempty"`
 }
 
 type PromptConfig struct {
@@ -40,16 +41,17 @@ type TeamConfig struct {
 }
 
 type RoleConfig struct {
-	Name          string         `yaml:"name"`
-	Description   string         `yaml:"description"`
-	Prompts       PromptConfig   `yaml:"prompts,omitempty"`
-	Skills        []string       `yaml:"skills,omitempty"`
-	CodeExecOnly  *bool          `yaml:"code_exec_only,omitempty"`
-	AllowedTools  []string       `yaml:"allowed_tools,omitempty"`
-	Model         string         `yaml:"model,omitempty"`
-	SubagentModel string         `yaml:"subagent_model,omitempty"`
-	Coordinator   bool           `yaml:"coordinator,omitempty"`
-	Heartbeat     []HeartbeatJob `yaml:"heartbeat,omitempty"`
+	Name                    string         `yaml:"name"`
+	Description             string         `yaml:"description"`
+	Prompts                 PromptConfig   `yaml:"prompts,omitempty"`
+	Skills                  []string       `yaml:"skills,omitempty"`
+	CodeExecOnly            *bool          `yaml:"code_exec_only,omitempty"`
+	CodeExecRequiredImports []string       `yaml:"code_exec_required_imports,omitempty"`
+	AllowedTools            []string       `yaml:"allowed_tools,omitempty"`
+	Model                   string         `yaml:"model,omitempty"`
+	SubagentModel           string         `yaml:"subagent_model,omitempty"`
+	Coordinator             bool           `yaml:"coordinator,omitempty"`
+	Heartbeat               []HeartbeatJob `yaml:"heartbeat,omitempty"`
 }
 
 // Load reads one profile from a profile directory (containing profile.yaml).
@@ -102,6 +104,7 @@ func (p Profile) Normalize(profileDir string) (Profile, error) {
 	p.Description = strings.TrimSpace(p.Description)
 	p.Model = strings.TrimSpace(p.Model)
 	p.SubagentModel = strings.TrimSpace(p.SubagentModel)
+	p.CodeExecRequiredImports = normalizeStringList(p.CodeExecRequiredImports)
 	p.AllowedTools = normalizeStringList(p.AllowedTools)
 	p.Prompts.SystemPrompt = strings.TrimSpace(p.Prompts.SystemPrompt)
 	p.Prompts.SystemPromptPath = strings.TrimSpace(p.Prompts.SystemPromptPath)
@@ -121,6 +124,7 @@ func (p Profile) Normalize(profileDir string) (Profile, error) {
 			r.Prompts.SystemPromptPath = strings.TrimSpace(r.Prompts.SystemPromptPath)
 			r.Model = strings.TrimSpace(r.Model)
 			r.SubagentModel = strings.TrimSpace(r.SubagentModel)
+			r.CodeExecRequiredImports = normalizeStringList(r.CodeExecRequiredImports)
 			r.AllowedTools = normalizeStringList(r.AllowedTools)
 			r.Skills = normalizeStringList(r.Skills)
 			for j := range r.Heartbeat {

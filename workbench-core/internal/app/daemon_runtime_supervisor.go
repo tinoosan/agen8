@@ -700,6 +700,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	}
 	codeExecOnly := resolveCodeExecOnly(codeExecDefault, roleCodeExecOnlyOverride)
 	activeProfile.CodeExecOnly = codeExecOnly
+	resolvedCodeExecRequiredImports := resolveCodeExecRequiredImports(s.cfg.CodeExec.RequiredPackages)
 
 	modelRegistry, bridgeRegistry, err := resolveToolRegistries(registry, allowedToolsForRun, codeExecOnly)
 	if err != nil {
@@ -708,7 +709,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		return nil, err
 	}
 
-	if err := configureCodeExecRuntime(parent, rt, modelRegistry, bridgeRegistry, codeExecOnly, emitEvent); err != nil {
+	if err := configureCodeExecRuntime(parent, rt, s.cfg, modelRegistry, bridgeRegistry, resolvedCodeExecRequiredImports, codeExecOnly, emitEvent); err != nil {
 		orderedEmitter.Close()
 		_ = rt.Shutdown(context.Background())
 		return nil, err

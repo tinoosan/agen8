@@ -40,6 +40,10 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err != nil {
 		return err
 	}
+	cfg = applyRuntimeConfigHostDefaults(cfg, runtimeCfg)
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	applyRuntimeConfigEnvDefaults(runtimeCfg)
 	if err := ensureRuntimeCredentials(cfg.DataDir, stdinTTY && stdoutTTY, os.Stdin, os.Stdout); err != nil {
 		return err

@@ -26,12 +26,36 @@ model = "z-ai/GLM-5"
 
 [skills]
 # conflict = "keep"
+
+[code_exec]
+# venv_path = ""
+# required_packages = []
 ```
 
 Notes:
 
 - Do not store API keys in `config.toml`.
 - API keys are loaded from environment variables or OS keychain.
+- For a full copy-paste template, see [docs/config.toml.example](config.toml.example).
+
+## `code_exec` configuration
+
+`code_exec` uses a daemon-managed Python virtual environment and reconciles packages from `config.toml`.
+The daemon watches `${WORKBENCH_DATA_DIR}/config.toml` and installs missing packages on save.
+
+Fields:
+
+- `code_exec.venv_path` (string, optional; default `<WORKBENCH_DATA_DIR>/exec/.venv`)
+- `code_exec.required_packages` ([]string of pip package names)
+
+Example:
+
+```toml
+[code_exec]
+required_packages = ["pandas", "requests", "beautifulsoup4"]
+```
+
+If an agent run fails due to a missing module, add the package to `required_packages`; the daemon picks it up and reconciles automatically.
 
 ## Resolution order
 

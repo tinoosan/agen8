@@ -387,6 +387,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		roleDescriptions[strings.TrimSpace(role.Name)] = strings.TrimSpace(role.Description)
 	}
 	var coordinatorRun types.Run
+	codeExecSecurityWarned := false
 	for _, role := range prof.Team.Roles {
 		role := role
 		roleModel := resolveRoleModel(role, teamModel)
@@ -435,6 +436,12 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		orderedEmitter, err := newTeamOrderedEmitter(eventsvc.NewService(cfg), run.RunID, teamID, role.Name)
 		if err != nil {
 			return fmt.Errorf("create emitter for role %s: %w", role.Name, err)
+		}
+		if !codeExecSecurityWarned {
+			emitCodeExecProvisioningSecurityWarning(ctx, cfg, func(ctx context.Context, ev events.Event) {
+				_ = orderedEmitter.Emit(ctx, ev)
+			})
+			codeExecSecurityWarned = true
 		}
 
 		mountedWorkspaceDir := fsutil.GetTeamWorkspaceDir(cfg.DataDir, teamID)
@@ -615,13 +622,14 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			}
 		}
 		codeExecOnly := resolveCodeExecOnly(prof.CodeExecOnly, role.CodeExecOnly)
+		resolvedCodeExecRequiredImports := resolveCodeExecRequiredImports(cfg.CodeExec.RequiredPackages)
 		modelRegistry, bridgeRegistry, err := resolveToolRegistries(registry, roleAllowedTools, codeExecOnly)
 		if err != nil {
 			orderedEmitter.Close()
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("resolve tool registries for role %s: %w", role.Name, err)
 		}
-		if err := configureCodeExecRuntime(ctx, rt, modelRegistry, bridgeRegistry, codeExecOnly, func(ctx context.Context, ev events.Event) {
+		if err := configureCodeExecRuntime(ctx, rt, cfg, modelRegistry, bridgeRegistry, resolvedCodeExecRequiredImports, codeExecOnly, func(ctx context.Context, ev events.Event) {
 			_ = orderedEmitter.Emit(ctx, ev)
 		}); err != nil {
 			orderedEmitter.Close()
@@ -714,6 +722,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 
 	runCtx, stopSignals := signalNotifyContext(ctx)
 	defer stopSignals()
+	startCodeExecConfigReloader(runCtx, cfg, nil)
 
 	trimmedGoal := strings.TrimSpace(goal)
 	if trimmedGoal != "" && !strings.EqualFold(trimmedGoal, "autonomous agent") {

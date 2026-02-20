@@ -52,7 +52,8 @@ type BuiltinCodeExecInvoker struct {
 	DefaultMaxToolCall int
 	MaxToolCalls       int
 
-	EnvAllowlist []string
+	EnvAllowlist    []string
+	RequiredImports []string
 
 	mu       sync.RWMutex
 	bridge   CodeExecBridge
@@ -118,6 +119,15 @@ func (i *BuiltinCodeExecInvoker) SetToolAllowlist(names []string) {
 	i.mu.Unlock()
 }
 
+func (i *BuiltinCodeExecInvoker) SetRequiredImports(imports []string) {
+	if i == nil {
+		return
+	}
+	i.mu.Lock()
+	i.RequiredImports = normalizeCodeExecImports(imports)
+	i.mu.Unlock()
+}
+
 // EnsureReady validates Python/runtime prerequisites for code_exec.
 func (i *BuiltinCodeExecInvoker) EnsureReady(ctx context.Context) error {
 	if i == nil {
@@ -126,6 +136,7 @@ func (i *BuiltinCodeExecInvoker) EnsureReady(ctx context.Context) error {
 	i.mu.RLock()
 	pythonBin := strings.TrimSpace(i.PythonBin)
 	envAllow := append([]string(nil), i.EnvAllowlist...)
+	requiredImports := append([]string(nil), i.RequiredImports...)
 	i.mu.RUnlock()
 
 	if pythonBin == "" {
@@ -135,7 +146,7 @@ func (i *BuiltinCodeExecInvoker) EnsureReady(ctx context.Context) error {
 		return fmt.Errorf("code_exec preflight: python binary %q not found: %w", pythonBin, err)
 	}
 
-	requiredImports := requiredCodeExecImports()
+	requiredImports = requiredCodeExecImports(requiredImports)
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	snippet := "import importlib.util,sys; missing=[m for m in sys.argv[1:] if importlib.util.find_spec(m) is None]; print(','.join(missing)); raise SystemExit(0 if not missing else 2)"
@@ -513,6 +524,7 @@ func (i *BuiltinCodeExecInvoker) runPython(parent context.Context, pythonBin, cw
 	}
 	out.Stdout, out.StdoutTruncated = capBytes(final.Stdout, half)
 	out.Stderr, out.StderrTruncated = capBytes(final.Stderr, half)
+	out.Error = appendCodeExecMissingModuleHint(out.Error, out.Stderr)
 
 	if len(final.Result) != 0 && string(final.Result) != "null" {
 		var decoded any
@@ -532,6 +544,23 @@ func (i *BuiltinCodeExecInvoker) runPython(parent context.Context, pythonBin, cw
 		}
 	}
 	return out, nil
+}
+
+func appendCodeExecMissingModuleHint(errMsg, stderr string) string {
+	msg := strings.TrimSpace(errMsg)
+	stderr = strings.TrimSpace(stderr)
+	combined := strings.ToLower(msg + "\n" + stderr)
+	if !strings.Contains(combined, "modulenotfounderror") && !strings.Contains(combined, "no module named") {
+		return msg
+	}
+	hint := "Missing Python module. Add package to [code_exec].required_packages in config.toml; daemon auto-reconciles on save."
+	if msg == "" {
+		return hint
+	}
+	if strings.Contains(strings.ToLower(msg), strings.ToLower(hint)) {
+		return msg
+	}
+	return msg + " " + hint
 }
 
 func parseCodeExecPolicyViolation(errMsg string) (violationType, cleanedError string) {
@@ -746,7 +775,7 @@ func codeExecFramePayload(line string) ([]byte, bool) {
 	return []byte(payload), true
 }
 
-func requiredCodeExecImports() []string {
+func requiredCodeExecImports(extraImports []string) []string {
 	base := []string{"json", "re", "io", "contextlib"}
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(base))
@@ -761,20 +790,42 @@ func requiredCodeExecImports() []string {
 		seen[mod] = struct{}{}
 		out = append(out, mod)
 	}
-	if extra := strings.TrimSpace(os.Getenv("WORKBENCH_CODE_EXEC_REQUIRED_IMPORTS")); extra != "" {
-		for _, mod := range strings.Split(extra, ",") {
-			mod = strings.TrimSpace(mod)
-			if mod == "" {
-				continue
-			}
-			if _, ok := seen[mod]; ok {
-				continue
-			}
-			seen[mod] = struct{}{}
-			out = append(out, mod)
+	for _, mod := range extraImports {
+		mod = strings.TrimSpace(mod)
+		if mod == "" {
+			continue
 		}
+		if _, ok := seen[mod]; ok {
+			continue
+		}
+		seen[mod] = struct{}{}
+		out = append(out, mod)
 	}
 	sort.Strings(out)
+	return out
+}
+
+func normalizeCodeExecImports(imports []string) []string {
+	if len(imports) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(imports))
+	for _, mod := range imports {
+		mod = strings.TrimSpace(mod)
+		if mod == "" {
+			continue
+		}
+		if _, ok := seen[mod]; ok {
+			continue
+		}
+		seen[mod] = struct{}{}
+		out = append(out, mod)
+	}
+	sort.Strings(out)
+	if len(out) == 0 {
+		return nil
+	}
 	return out
 }
 
