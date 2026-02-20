@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tinoosan/agen8/internal/app"
+	"github.com/tinoosan/agen8/internal/tui/coordinator"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
@@ -174,7 +175,9 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 
 func init() {
 	runCoordinatorFn = runCoordinatorForSession
-	runCoordinatorShellFn = runCoordinatorShell
+	runCoordinatorShellFn = func(cmd *cobra.Command, sessionID string, runID string, teamID string) error {
+		return coordinator.Run(resolvedRPCEndpoint(), sessionID)
+	}
 
 	initCmd.Flags().StringVar(&initProjectID, "project-id", "", "override project identifier")
 	initCmd.Flags().StringVar(&initDefaultProfile, "profile", "", "default standalone profile for this project")

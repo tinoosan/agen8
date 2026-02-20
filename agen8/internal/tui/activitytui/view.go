@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+	"github.com/tinoosan/agen8/internal/tui/kit"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
@@ -220,7 +221,7 @@ func (m *Model) buildListLines(width int) []string {
 		}
 
 		// Emoji + tool name
-		icon := kindIcon(act.Kind)
+		icon := kit.KindIcon(act.Kind)
 		kind := strings.TrimSpace(act.Kind)
 		if kind == "" {
 			kind = "op"
@@ -261,7 +262,7 @@ func (m *Model) statusIcon(act types.Activity) string {
 
 func (m *Model) renderDetailHeader() string {
 	act := m.activities[m.sel]
-	icon := kindIcon(act.Kind)
+	icon := kit.KindIcon(act.Kind)
 	kind := strings.TrimSpace(act.Kind)
 	if kind == "" {
 		kind = "op"
@@ -449,37 +450,6 @@ func actTitle(a types.Activity) string {
 		return kind + " " + path
 	}
 	return kind
-}
-
-func kindIcon(kind string) string {
-	switch {
-	case strings.HasPrefix(kind, "fs_"):
-		return "📄"
-	case kind == "shell_exec":
-		return "⚡"
-	case kind == "http_fetch":
-		return "🌐"
-	case kind == "browser" || strings.HasPrefix(kind, "browser."):
-		return "🖥"
-	case kind == "agent_spawn":
-		return "🤖"
-	case kind == "code_exec":
-		return "🐍"
-	case kind == "email":
-		return "📧"
-	case kind == "task_create":
-		return "📋"
-	case kind == "trace_run":
-		return "🔍"
-	case strings.HasPrefix(kind, "ui."):
-		return "🖼"
-	case strings.HasPrefix(kind, "workdir"):
-		return "📂"
-	case strings.HasPrefix(kind, "llm."):
-		return "🔗"
-	default:
-		return "⚙"
-	}
 }
 
 func truncate(s string, max int) string {
