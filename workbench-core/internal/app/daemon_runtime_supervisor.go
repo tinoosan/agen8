@@ -739,9 +739,12 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		ResolveProfile: func(ref string) (*profile.Profile, string, error) {
 			return resolveProfileRef(s.cfg, strings.TrimSpace(ref))
 		},
-		TaskStore:            s.taskService,
-		Events:               orderedEmitter,
-		Memory:               &textMemoryAdapter{store: s.memoryStore},
+		TaskStore: s.taskService,
+		Events:    orderedEmitter,
+		Memory: &validatingMemoryProvider{
+			inner: &textMemoryAdapter{store: s.memoryStore},
+			store: s.memoryStore,
+		},
 		MemorySearchLimit:    3,
 		Notifier:             &subagentCleanupNotifier{supervisor: s, store: s.taskService, next: s.notifier},
 		SoulContent:          soulContent,

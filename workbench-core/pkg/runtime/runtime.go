@@ -300,7 +300,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create memory resource: %w", err)
 	}
-	if err := fs.Mount(vfs.MountMemory, memRes); err != nil {
+	if err := fs.Mount(vfs.MountMemory, resources.NewValidatingMemoryResource(memRes)); err != nil {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountMemory, err)
 	}
 

@@ -349,7 +349,10 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	teamSupervisor.sessionService = sessionService
 	taskService := pkgtask.NewManager(taskStore, sessionService)
 	teamSupervisor.taskCreator = taskService
-	var memoryProvider agent.MemoryRecallProvider = &textMemoryAdapter{store: memStore}
+	var memoryProvider agent.MemoryRecallProvider = &validatingMemoryProvider{
+		inner: &textMemoryAdapter{store: memStore},
+		store: memStore,
+	}
 
 	var notifier agent.Notifier
 	if strings.TrimSpace(resolved.ResultWebhookURL) != "" {
