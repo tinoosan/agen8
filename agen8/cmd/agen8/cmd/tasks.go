@@ -11,6 +11,7 @@ import (
 	"github.com/tinoosan/agen8/internal/store"
 	agentstate "github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/fsutil"
+	"github.com/tinoosan/agen8/pkg/protocol"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
@@ -23,6 +24,10 @@ var (
 	tasksOffset int
 	tasksSortBy string
 	tasksDesc   bool
+
+	mailWatchSessionID string
+	mailWatchView      string
+	mailWatchInterval  time.Duration
 )
 
 var tasksCmd = &cobra.Command{
@@ -149,6 +154,91 @@ var tasksStatsCmd = &cobra.Command{
 	},
 }
 
+var mailWatchCmd = &cobra.Command{
+	Use:   "watch",
+	Short: "Live inbox/outbox stream with reconnect",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		sessionID := strings.TrimSpace(mailWatchSessionID)
+		if sessionID == "" {
+			projectCtx, err := loadProjectContext()
+			if err == nil && projectCtx.Exists {
+				sessionID = strings.TrimSpace(projectCtx.State.ActiveSessionID)
+			}
+		}
+		if sessionID == "" {
+			return fmt.Errorf("session id is required (use --session-id or initialize project and attach a session)")
+		}
+		view := strings.ToLower(strings.TrimSpace(mailWatchView))
+		if view == "" {
+			view = "inbox"
+		}
+		if view != "inbox" && view != "outbox" {
+			return fmt.Errorf("--view must be inbox or outbox")
+		}
+		interval := mailWatchInterval
+		if interval <= 0 {
+			interval = 2 * time.Second
+		}
+		retries := 0
+		for {
+			if err := renderMailWatchOnce(cmd, sessionID, view); err != nil {
+				if !isRetryableLiveError(err) {
+					return err
+				}
+				retries++
+				backoff := time.Duration(minInt(8, retries)) * 300 * time.Millisecond
+				fmt.Fprintf(cmd.ErrOrStderr(), "mail: reconnecting (%v)\n", err)
+				time.Sleep(backoff)
+				continue
+			}
+			retries = 0
+			if !isInteractiveTerminal() {
+				return nil
+			}
+			time.Sleep(interval)
+		}
+	},
+}
+
+func renderMailWatchOnce(cmd *cobra.Command, sessionID string, view string) error {
+	var out protocol.TaskListResult
+	if err := rpcCall(cmd.Context(), protocol.MethodTaskList, protocol.TaskListParams{
+		ThreadID: protocol.ThreadID(sessionID),
+		View:     view,
+		Limit:    200,
+		Offset:   0,
+	}, &out); err != nil {
+		return err
+	}
+	if isInteractiveTerminal() {
+		fmt.Fprint(cmd.OutOrStdout(), "\033[H\033[2J")
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Mail %s for session %s (count=%d)\n", view, sessionID, out.TotalCount)
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tSTATUS\tASSIGNEE\tRUN\tGOAL")
+	for _, task := range out.Tasks {
+		goal := strings.TrimSpace(task.Goal)
+		if len(goal) > 80 {
+			goal = goal[:79] + "…"
+		}
+		assignee := strings.TrimSpace(task.AssignedRole)
+		if assignee == "" {
+			assignee = strings.TrimSpace(task.AssignedTo)
+		}
+		fmt.Fprintf(
+			w,
+			"%s\t%s\t%s\t%s\t%s\n",
+			blankDash(task.ID),
+			blankDash(task.Status),
+			blankDash(assignee),
+			blankDash(string(task.RunID)),
+			blankDash(goal),
+		)
+	}
+	_ = w.Flush()
+	return nil
+}
+
 func init() {
 	tasksListCmd.Flags().StringVar(&tasksRunID, "run-id", "", "filter by run id (default: latest running run)")
 	tasksListCmd.Flags().StringVar(&tasksSession, "session-id", "", "filter by session id (default: inferred from run)")
@@ -161,5 +251,9 @@ func init() {
 	tasksCmd.AddCommand(tasksListCmd)
 	tasksStatsCmd.Flags().StringVar(&tasksRunID, "run-id", "", "filter by run id (default: latest running run)")
 	tasksCmd.AddCommand(tasksStatsCmd)
+	mailWatchCmd.Flags().StringVar(&mailWatchSessionID, "session-id", "", "session id to stream (default: active project session)")
+	mailWatchCmd.Flags().StringVar(&mailWatchView, "view", "inbox", "task view (inbox|outbox)")
+	mailWatchCmd.Flags().DurationVar(&mailWatchInterval, "interval", 2*time.Second, "refresh interval")
+	tasksCmd.AddCommand(mailWatchCmd)
 	rootCmd.AddCommand(tasksCmd)
 }
