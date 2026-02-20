@@ -1,0 +1,19 @@
+[defaults]
+model = "z-ai/GLM-5"
+# subagent_model = "openai/gpt-5-mini"
+# profile = "general"
+
+[env]
+# OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+[skills]
+# conflict = "keep"
+
+# code_exec runtime policy.
+# SECURITY: enabling auto_provision allows Agen8 to prepare/use a Python venv
+# and (optionally) install third-party packages.
+[code_exec]
+# Optional absolute path. If empty, defaults to <AGEN8_DATA_DIR>/exec/.venv
+venv_path = ""
+# Pip package names to keep installed in code_exec's managed venv.
+required_packages = ["pandas", "requests"]

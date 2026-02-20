@@ -4,7 +4,7 @@ This note captures how we can implement the core ideas from:
 
 - **Sovereign Agents paper**: [arXiv 2602.14951](https://arxiv.org/abs/2602.14951)
 
-without moving our platform to Conway infrastructure or rewriting `workbench-core`.
+without moving our platform to Conway infrastructure or rewriting `agen8`.
 
 Status: **Parked** (design-ready; not scheduled).
 
@@ -52,7 +52,7 @@ Observed in `automaton/src` and directly portable:
 
 ---
 
-## 4. Proposed Architecture in `workbench-core`
+## 4. Proposed Architecture in `agen8`
 
 ### 4.1 Identity + Prompt Layer
 
