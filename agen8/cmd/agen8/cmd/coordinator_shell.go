@@ -33,7 +33,7 @@ func runCoordinatorShell(cmd *cobra.Command, sessionID string, runID string, tea
 	fmt.Fprintf(cmd.OutOrStdout(), "Coordinator session %s (mode=%s, run=%s)\n", state.sessionID, state.mode, state.runID)
 	fmt.Fprintln(cmd.OutOrStdout(), "Commands: /new /attach <session-id> /pause /resume /stop /reviewer /reconnect /help /quit")
 	for {
-		if next, err := printActivityBatch(cmd, state.runID, activityCursor, 20); err == nil && next > 0 {
+		if next, err := printLogsBatch(cmd, state.runID, nil, activityCursor, 20); err == nil && next > 0 {
 			activityCursor = next
 		}
 		if latest, err := rpcLatestSeq(cmd, state.runID); err == nil {

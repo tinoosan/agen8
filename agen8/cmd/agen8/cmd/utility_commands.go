@@ -132,9 +132,8 @@ var whoamiCmd = &cobra.Command{
 
 var watchCmd = &cobra.Command{
 	Use:   "watch",
-	Short: "Shortcut for activity --follow",
+	Short: "Shortcut for activity TUI",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		activityFollow = true
 		return activityCmd.RunE(cmd, args)
 	},
 }

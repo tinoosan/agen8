@@ -19,16 +19,6 @@ var (
 	logsTypes     []string
 	logsFollow    bool
 	logsLimit     int
-
-	activityRunID     string
-	activitySessionID string
-	activityAgentID   string
-	activityRole      string
-	activityFollow    bool
-	activityLimit     int
-	activityVerbose   bool
-	activityMaxArgChars int
-	activityNoTruncate bool
 )
 
 var logsCmd = &cobra.Command{
@@ -42,27 +32,6 @@ var logsCmd = &cobra.Command{
 		typesFilter := normalizeTypeFilter(logsTypes)
 		return followEventRuns(cmd, runIDs, logsFollow, logsLimit, func(cmd *cobra.Command, runID string, afterSeq int64, limit int) (int64, error) {
 			return printLogsBatch(cmd, runID, typesFilter, afterSeq, limit)
-		})
-	},
-}
-
-var activityCmd = &cobra.Command{
-	Use:   "activity",
-	Short: "Live agent activity stream (tool calls, delegation, callbacks)",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		runIDs, err := resolveTargetRunIDs(cmd.Context(), strings.TrimSpace(activityRunID), strings.TrimSpace(activitySessionID), strings.TrimSpace(activityAgentID))
-		if err != nil {
-			return err
-		}
-		if role := strings.TrimSpace(activityRole); role != "" {
-			filtered, ferr := filterRunIDsByRole(cmd.Context(), runIDs, strings.TrimSpace(activitySessionID), role)
-			if ferr != nil {
-				return ferr
-			}
-			runIDs = filtered
-		}
-		return followEventRuns(cmd, runIDs, activityFollow, activityLimit, func(cmd *cobra.Command, runID string, afterSeq int64, limit int) (int64, error) {
-			return printActivityBatch(cmd, runID, afterSeq, limit)
 		})
 	},
 }
@@ -124,28 +93,6 @@ func printLogsBatch(cmd *cobra.Command, runID string, typesFilter []string, afte
 	return afterSeq, nil
 }
 
-func printActivityBatch(cmd *cobra.Command, runID string, afterSeq int64, limit int) (int64, error) {
-	var out protocol.LogsQueryResult
-	if err := rpcCall(cmd.Context(), protocol.MethodLogsQuery, protocol.LogsQueryParams{
-		RunID:    runID,
-		AfterSeq: afterSeq,
-		Limit:    limit,
-		SortDesc: false,
-	}, &out); err != nil {
-		return afterSeq, err
-	}
-	for _, ev := range out.Events {
-		if !isActivityEvent(ev) {
-			continue
-		}
-		fmt.Fprintln(cmd.OutOrStdout(), formatActivityLine(ev))
-	}
-	if out.Next > 0 {
-		return out.Next, nil
-	}
-	return afterSeq, nil
-}
-
 func formatEventLine(ev types.EventRecord) string {
 	ts := ev.Timestamp.UTC().Format(time.RFC3339)
 	msg := strings.TrimSpace(ev.Message)
@@ -153,82 +100,6 @@ func formatEventLine(ev types.EventRecord) string {
 		msg = "-"
 	}
 	return fmt.Sprintf("%s  %s  %s  %s", ts, strings.TrimSpace(ev.RunID), strings.TrimSpace(ev.Type), msg)
-}
-
-func formatActivityLine(ev types.EventRecord) string {
-	ts := ev.Timestamp.UTC().Format(time.RFC3339)
-	op := strings.TrimSpace(ev.Data["op"])
-	if op == "" {
-		op = strings.TrimSpace(ev.Data["tool"])
-	}
-	if op == "" {
-		op = strings.TrimSpace(ev.Type)
-	}
-	msg := strings.TrimSpace(ev.Message)
-	if msg == "" {
-		msg = strings.TrimSpace(ev.Data["summary"])
-	}
-	args := renderActivityArgs(ev.Data, activityVerbose, activityMaxArgChars, activityNoTruncate)
-	if args == "" {
-		return fmt.Sprintf("%s  %s  %s  %s", ts, strings.TrimSpace(ev.RunID), op, fallback(msg, "-"))
-	}
-	return fmt.Sprintf("%s  %s  %s  %s | args: %s", ts, strings.TrimSpace(ev.RunID), op, fallback(msg, "-"), args)
-}
-
-func renderActivityArgs(data map[string]string, verbose bool, maxChars int, noTruncate bool) string {
-	if len(data) == 0 {
-		return ""
-	}
-	keys := []string{"op", "path", "url", "method", "argvPreview", "cwd", "body", "code", "traceInput", "query", "to"}
-	if verbose {
-		keys = make([]string, 0, len(data))
-		for k := range data {
-			keys = append(keys, k)
-		}
-		slices.Sort(keys)
-	}
-	parts := make([]string, 0, len(keys))
-	for _, key := range keys {
-		val := strings.TrimSpace(data[key])
-		if val == "" {
-			continue
-		}
-		if !noTruncate {
-			limit := maxChars
-			if limit <= 0 {
-				limit = 120
-			}
-			runes := []rune(val)
-			if len(runes) > limit {
-				val = string(runes[:limit]) + "…"
-			}
-		}
-		parts = append(parts, fmt.Sprintf("%s=%q", key, val))
-		if !verbose && len(parts) >= 4 {
-			break
-		}
-	}
-	return strings.Join(parts, " ")
-}
-
-func isActivityEvent(ev types.EventRecord) bool {
-	evType := strings.ToLower(strings.TrimSpace(ev.Type))
-	if evType == "" {
-		return false
-	}
-	if strings.Contains(evType, "host.op.request") || strings.Contains(evType, "host.op.response") {
-		return true
-	}
-	if strings.Contains(evType, "task.create") || strings.Contains(evType, "task.claim") || strings.Contains(evType, "task.complete") {
-		return true
-	}
-	if strings.Contains(evType, "callback") || strings.Contains(evType, "review") || strings.Contains(evType, "delegate") {
-		return true
-	}
-	if strings.TrimSpace(ev.Data["op"]) != "" || strings.TrimSpace(ev.Data["tool"]) != "" {
-		return true
-	}
-	return false
 }
 
 func normalizeTypeFilter(in []string) []string {
@@ -348,16 +219,5 @@ func init() {
 	logsCmd.Flags().BoolVar(&logsFollow, "follow", true, "follow log updates")
 	logsCmd.Flags().IntVar(&logsLimit, "limit", 200, "max events per poll per run")
 
-	activityCmd.Flags().StringVar(&activityRunID, "run-id", "", "run id to tail")
-	activityCmd.Flags().StringVar(&activitySessionID, "session-id", "", "session id scope (defaults to active project session)")
-	activityCmd.Flags().StringVar(&activityAgentID, "agent", "", "agent/run id filter")
-	activityCmd.Flags().StringVar(&activityRole, "role", "", "role filter for session activity")
-	activityCmd.Flags().BoolVar(&activityFollow, "follow", true, "follow activity stream")
-	activityCmd.Flags().IntVar(&activityLimit, "limit", 100, "max events per poll per run")
-	activityCmd.Flags().BoolVar(&activityVerbose, "verbose", false, "include full activity argument payload")
-	activityCmd.Flags().IntVar(&activityMaxArgChars, "max-arg-chars", 120, "max characters per rendered argument value")
-	activityCmd.Flags().BoolVar(&activityNoTruncate, "no-truncate", false, "disable argument value truncation")
-
 	rootCmd.AddCommand(logsCmd)
-	rootCmd.AddCommand(activityCmd)
 }
