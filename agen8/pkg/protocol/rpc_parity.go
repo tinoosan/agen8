@@ -363,6 +363,7 @@ type ProjectState struct {
 	ActiveSessionID string `json:"activeSessionId,omitempty"`
 	ActiveTeamID    string `json:"activeTeamId,omitempty"`
 	ActiveRunID     string `json:"activeRunId,omitempty"`
+	ActiveThreadID  string `json:"activeThreadId,omitempty"`
 	LastAttachedAt  string `json:"lastAttachedAt,omitempty"`
 	LastCommand     string `json:"lastCommand,omitempty"`
 }
@@ -391,6 +392,7 @@ type ProjectSetActiveSessionParams struct {
 	ActiveSessionID string `json:"activeSessionId"`
 	ActiveTeamID    string `json:"activeTeamId,omitempty"`
 	ActiveRunID     string `json:"activeRunId,omitempty"`
+	ActiveThreadID  string `json:"activeThreadId,omitempty"`
 	LastCommand     string `json:"lastCommand,omitempty"`
 }
 

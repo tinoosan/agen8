@@ -49,6 +49,7 @@ func toProtocolProjectContext(ctx ProjectContext) protocol.ProjectContext {
 			ActiveSessionID: strings.TrimSpace(ctx.State.ActiveSessionID),
 			ActiveTeamID:    strings.TrimSpace(ctx.State.ActiveTeamID),
 			ActiveRunID:     strings.TrimSpace(ctx.State.ActiveRunID),
+			ActiveThreadID:  strings.TrimSpace(ctx.State.ActiveThreadID),
 			LastAttachedAt:  strings.TrimSpace(ctx.State.LastAttachedAt),
 			LastCommand:     strings.TrimSpace(ctx.State.LastCommand),
 		},
@@ -68,6 +69,7 @@ func (s *RPCServer) projectSetActiveSession(_ context.Context, p protocol.Projec
 		ActiveSessionID: strings.TrimSpace(p.ActiveSessionID),
 		ActiveTeamID:    strings.TrimSpace(p.ActiveTeamID),
 		ActiveRunID:     strings.TrimSpace(p.ActiveRunID),
+		ActiveThreadID:  strings.TrimSpace(p.ActiveThreadID),
 		LastCommand:     strings.TrimSpace(p.LastCommand),
 	})
 	if err != nil {

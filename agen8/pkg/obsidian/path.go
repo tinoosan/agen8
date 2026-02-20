@@ -11,7 +11,8 @@ import (
 
 const (
 	defaultVaultLogicalPath = "/project/obsidian-vault"
-	projectConfigDirName    = ".agent8"
+	projectConfigDirName    = ".agen8"
+	legacyProjectConfigDir  = ".agent8"
 	projectConfigName       = "config.toml"
 	vaultConfigName         = "vault.conf"
 )
@@ -52,12 +53,24 @@ func ResolveProjectVaultPath(projectRoot string) string {
 	path := filepath.Join(projectRoot, projectConfigDirName, projectConfigName)
 	b, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			legacyPath := filepath.Join(projectRoot, legacyProjectConfigDir, projectConfigName)
+			b, err = os.ReadFile(legacyPath)
+		}
+	}
+	if err != nil {
 		return ""
 	}
 	lines := strings.Split(string(b), "\n")
+	inProjectSection := false
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section := strings.ToLower(strings.TrimSpace(strings.Trim(line, "[]")))
+			inProjectSection = section == "project"
 			continue
 		}
 		if i := strings.Index(line, "#"); i >= 0 {
@@ -68,7 +81,16 @@ func ResolveProjectVaultPath(projectRoot string) string {
 			continue
 		}
 		key := strings.TrimSpace(parts[0])
+		if strings.HasPrefix(key, "project.") {
+			key = strings.TrimSpace(strings.TrimPrefix(key, "project."))
+		}
 		if key != "obsidian_vault_path" {
+			continue
+		}
+		if !inProjectSection && key == "obsidian_vault_path" {
+			// legacy flat format is allowed as fallback.
+		}
+		if !inProjectSection && strings.Contains(strings.TrimSpace(parts[0]), ".") {
 			continue
 		}
 		raw := strings.TrimSpace(parts[1])

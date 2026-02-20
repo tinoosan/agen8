@@ -49,11 +49,11 @@ func TestResolveVaultPath_RejectsWorkspace(t *testing.T) {
 
 func TestResolveProjectVaultPath_ReadsConfig(t *testing.T) {
 	project := t.TempDir()
-	cfgDir := filepath.Join(project, ".agent8")
+	cfgDir := filepath.Join(project, ".agen8")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	content := "obsidian_vault_path = \"/project/team-vault\"\n"
+	content := "[project]\nobsidian_vault_path = \"/project/team-vault\"\n"
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,9 @@ func TestInitProjectAndLoadContext(t *testing.T) {
 	}
 	if got := ctx.Config.RPCEndpoint; got != "127.0.0.1:7777" {
 		t.Fatalf("rpc endpoint=%q", got)
+	}
+	if !strings.Contains(ctx.ProjectDir, ".agen8") {
+		t.Fatalf("project dir=%q; expected .agen8", ctx.ProjectDir)
 	}
 }
 
@@ -105,5 +109,41 @@ func TestSaveProjectConfig_PersistsObsidianFields(t *testing.T) {
 	}
 	if !ctx.Config.ObsidianEnabled {
 		t.Fatalf("expected obsidian enabled")
+	}
+}
+
+func TestInitProject_MigratesLegacyDotAgent8(t *testing.T) {
+	base := t.TempDir()
+	legacy := filepath.Join(base, ".agent8")
+	if err := os.MkdirAll(filepath.Join(legacy, "profiles"), 0o755); err != nil {
+		t.Fatalf("mkdir legacy: %v", err)
+	}
+	legacyCfg := strings.Join([]string{
+		`project_id = "legacy-project"`,
+		`default_mode = "team"`,
+		`rpc_endpoint = "127.0.0.1:7999"`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(legacy, "config.toml"), []byte(legacyCfg), 0o644); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "state.json"), []byte(`{"active_session_id":"sess-legacy"}`), 0o644); err != nil {
+		t.Fatalf("write legacy state: %v", err)
+	}
+
+	ctx, err := InitProject(base, ProjectConfig{})
+	if err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+	if !ctx.Exists {
+		t.Fatalf("expected initialized context")
+	}
+	if got := strings.TrimSpace(ctx.Config.ProjectID); got != "legacy-project" {
+		t.Fatalf("project id=%q", got)
+	}
+	if got := strings.TrimSpace(ctx.State.ActiveSessionID); got != "sess-legacy" {
+		t.Fatalf("active session=%q", got)
+	}
+	if _, err := os.Stat(filepath.Join(base, ".agen8", "MIGRATED_FROM_AGENT8")); err != nil {
+		t.Fatalf("expected migration marker: %v", err)
 	}
 }
