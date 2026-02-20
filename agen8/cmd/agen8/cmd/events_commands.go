@@ -26,6 +26,9 @@ var (
 	activityRole      string
 	activityFollow    bool
 	activityLimit     int
+	activityVerbose   bool
+	activityMaxArgChars int
+	activityNoTruncate bool
 )
 
 var logsCmd = &cobra.Command{
@@ -165,7 +168,47 @@ func formatActivityLine(ev types.EventRecord) string {
 	if msg == "" {
 		msg = strings.TrimSpace(ev.Data["summary"])
 	}
-	return fmt.Sprintf("%s  %s  %s  %s", ts, strings.TrimSpace(ev.RunID), op, fallback(msg, "-"))
+	args := renderActivityArgs(ev.Data, activityVerbose, activityMaxArgChars, activityNoTruncate)
+	if args == "" {
+		return fmt.Sprintf("%s  %s  %s  %s", ts, strings.TrimSpace(ev.RunID), op, fallback(msg, "-"))
+	}
+	return fmt.Sprintf("%s  %s  %s  %s | args: %s", ts, strings.TrimSpace(ev.RunID), op, fallback(msg, "-"), args)
+}
+
+func renderActivityArgs(data map[string]string, verbose bool, maxChars int, noTruncate bool) string {
+	if len(data) == 0 {
+		return ""
+	}
+	keys := []string{"op", "path", "url", "method", "argvPreview", "cwd", "body", "code", "traceInput", "query", "to"}
+	if verbose {
+		keys = make([]string, 0, len(data))
+		for k := range data {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+	}
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		val := strings.TrimSpace(data[key])
+		if val == "" {
+			continue
+		}
+		if !noTruncate {
+			limit := maxChars
+			if limit <= 0 {
+				limit = 120
+			}
+			runes := []rune(val)
+			if len(runes) > limit {
+				val = string(runes[:limit]) + "…"
+			}
+		}
+		parts = append(parts, fmt.Sprintf("%s=%q", key, val))
+		if !verbose && len(parts) >= 4 {
+			break
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func isActivityEvent(ev types.EventRecord) bool {
@@ -311,6 +354,9 @@ func init() {
 	activityCmd.Flags().StringVar(&activityRole, "role", "", "role filter for session activity")
 	activityCmd.Flags().BoolVar(&activityFollow, "follow", true, "follow activity stream")
 	activityCmd.Flags().IntVar(&activityLimit, "limit", 100, "max events per poll per run")
+	activityCmd.Flags().BoolVar(&activityVerbose, "verbose", false, "include full activity argument payload")
+	activityCmd.Flags().IntVar(&activityMaxArgChars, "max-arg-chars", 120, "max characters per rendered argument value")
+	activityCmd.Flags().BoolVar(&activityNoTruncate, "no-truncate", false, "disable argument value truncation")
 
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(activityCmd)

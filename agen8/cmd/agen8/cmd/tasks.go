@@ -31,10 +31,12 @@ var (
 )
 
 var tasksCmd = &cobra.Command{
-	Use:     "mail",
-	Aliases: []string{"tasks"},
-	Short:   "Query and manage task inbox/outbox",
-	Long:    "Mail is the task inbox/outbox surface. `tasks` is retained as a compatibility alias.",
+	Use:   "mail",
+	Short: "Query and manage task inbox/outbox",
+	Long:  "Mail is the task inbox/outbox surface.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runMailTUI(cmd)
+	},
 }
 
 var tasksListCmd = &cobra.Command{
@@ -96,15 +98,11 @@ var tasksListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tSTATUS\tCOST\tTOKENS\tGOAL")
+		fmt.Fprintln(w, "ID\tSTATUS\tCOST\tTOKENS")
 		for _, t := range tasks {
-			goal := strings.TrimSpace(t.Goal)
-			if len(goal) > 80 {
-				goal = goal[:79] + "…"
-			}
 			cost := fmt.Sprintf("$%.4f", t.CostUSD)
 			tokens := fmt.Sprintf("%d", t.TotalTokens)
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", t.TaskID, t.Status, cost, tokens, goal)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", t.TaskID, t.Status, cost, tokens)
 		}
 		_ = w.Flush()
 		return nil
@@ -215,24 +213,19 @@ func renderMailWatchOnce(cmd *cobra.Command, sessionID string, view string) erro
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Mail %s for session %s (count=%d)\n", view, sessionID, out.TotalCount)
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tSTATUS\tASSIGNEE\tRUN\tGOAL")
+	fmt.Fprintln(w, "ID\tSTATUS\tASSIGNEE\tRUN")
 	for _, task := range out.Tasks {
-		goal := strings.TrimSpace(task.Goal)
-		if len(goal) > 80 {
-			goal = goal[:79] + "…"
-		}
 		assignee := strings.TrimSpace(task.AssignedRole)
 		if assignee == "" {
 			assignee = strings.TrimSpace(task.AssignedTo)
 		}
 		fmt.Fprintf(
 			w,
-			"%s\t%s\t%s\t%s\t%s\n",
+			"%s\t%s\t%s\t%s\n",
 			blankDash(task.ID),
 			blankDash(task.Status),
 			blankDash(assignee),
 			blankDash(string(task.RunID)),
-			blankDash(goal),
 		)
 	}
 	_ = w.Flush()
