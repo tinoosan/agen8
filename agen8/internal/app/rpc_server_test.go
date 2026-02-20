@@ -2310,8 +2310,8 @@ func TestRPCServer_SessionStop_DefaultSessionFromThread(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadRun stop (%s): %v", runID, err)
 		}
-		if loaded.Status != types.RunStatusPaused {
-			t.Fatalf("status after session stop for %s = %q want %q", runID, loaded.Status, types.RunStatusPaused)
+		if loaded.Status != types.RunStatusCanceled {
+			t.Fatalf("status after session stop for %s = %q want %q", runID, loaded.Status, types.RunStatusCanceled)
 		}
 	}
 }

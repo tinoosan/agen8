@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/services/session"
@@ -227,6 +228,10 @@ func (c *Controller) ResumeRuns(ctx context.Context, threadID, sessionID string)
 		if err != nil {
 			return err
 		}
+		switch strings.ToLower(strings.TrimSpace(loaded.Status)) {
+		case types.RunStatusCanceled, types.RunStatusSucceeded, types.RunStatusFailed:
+			return fmt.Errorf("run %s is terminal (%s)", runID, loaded.Status)
+		}
 		loaded.Status = types.RunStatusRunning
 		loaded.FinishedAt = nil
 		loaded.Error = nil
@@ -255,8 +260,9 @@ func (c *Controller) StopRuns(ctx context.Context, threadID, sessionID string) (
 		if err != nil {
 			return err
 		}
-		loaded.Status = types.RunStatusPaused
-		loaded.FinishedAt = nil
+		loaded.Status = types.RunStatusCanceled
+		now := time.Now().UTC()
+		loaded.FinishedAt = &now
 		loaded.Error = nil
 		if err := c.sessionService.SaveRun(ctx, loaded); err != nil {
 			return err

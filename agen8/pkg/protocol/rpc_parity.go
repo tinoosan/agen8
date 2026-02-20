@@ -442,3 +442,31 @@ type ActivityStreamResult struct {
 	Next      int64               `json:"next,omitempty"`
 	LatestSeq int64               `json:"latestSeq,omitempty"`
 }
+
+type RuntimeGetRunStateParams struct {
+	SessionID string `json:"sessionId"`
+	RunID     string `json:"runId"`
+}
+
+type RuntimeGetSessionStateParams struct {
+	SessionID string `json:"sessionId"`
+}
+
+type RuntimeRunState struct {
+	SessionID       string `json:"sessionId"`
+	RunID           string `json:"runId"`
+	PersistedStatus string `json:"persistedStatus,omitempty"`
+	WorkerPresent   bool   `json:"workerPresent"`
+	PausedFlag      bool   `json:"pausedFlag"`
+	LastHeartbeatAt string `json:"lastHeartbeatAt,omitempty"`
+	EffectiveStatus string `json:"effectiveStatus,omitempty"`
+}
+
+type RuntimeGetRunStateResult struct {
+	State RuntimeRunState `json:"state"`
+}
+
+type RuntimeGetSessionStateResult struct {
+	SessionID string            `json:"sessionId"`
+	Runs      []RuntimeRunState `json:"runs"`
+}

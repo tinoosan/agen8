@@ -268,9 +268,6 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	}
 
 	goal := strings.TrimSpace(p.Goal)
-	if goal == "" {
-		goal = "autonomous agent"
-	}
 	maxContext := s.run.MaxBytesForContext
 	if maxContext <= 0 {
 		maxContext = 8 * 1024
@@ -352,9 +349,6 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 	}
 
 	goal := strings.TrimSpace(p.Goal)
-	if goal == "" {
-		goal = "team session (" + strings.TrimSpace(prof.ID) + ")"
-	}
 	maxContext := s.run.MaxBytesForContext
 	if maxContext <= 0 {
 		maxContext = 8 * 1024
@@ -794,7 +788,7 @@ func (s *RPCServer) sessionStopHandler(ctx context.Context, p protocol.SessionSt
 		}
 		return protocol.SessionStopResult{SessionID: sessionID, AffectedRunIDs: affected}, nil
 	}
-	affected, err := s.setSessionPausedState(ctx, threadID, sessionID, true)
+	affected, err := s.setSessionStoppedState(ctx, threadID, sessionID)
 	if err != nil {
 		return protocol.SessionStopResult{}, err
 	}
@@ -923,6 +917,46 @@ func (s *RPCServer) setSessionPausedState(ctx context.Context, threadID, session
 			if err := s.agentService.Resume(ctx, runID, sessionID); err != nil {
 				return affected, asProtocolError(err)
 			}
+		}
+		affected = append(affected, runID)
+	}
+	return affected, nil
+}
+
+func (s *RPCServer) setSessionStoppedState(ctx context.Context, threadID, sessionID string) ([]string, error) {
+	if s.agentService == nil {
+		return nil, &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: "agent service not configured"}
+	}
+	if strings.TrimSpace(threadID) == "" {
+		return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "sessionId is required"}
+	}
+	sess, err := s.session.LoadSession(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(sess.SessionID) != strings.TrimSpace(threadID) {
+		return nil, &protocol.ProtocolError{Code: protocol.CodeThreadNotFound, Message: "thread not found"}
+	}
+	runIDs := collectSessionRunIDs(sess)
+	affected := make([]string, 0, len(runIDs))
+	for _, runID := range runIDs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		if err := s.agentService.Pause(ctx, runID, sessionID); err != nil {
+			return affected, asProtocolError(err)
+		}
+		loaded, lerr := s.session.LoadRun(ctx, runID)
+		if lerr == nil {
+			loaded.Status = types.RunStatusCanceled
+			now := time.Now().UTC()
+			loaded.FinishedAt = &now
+			loaded.Error = nil
+			_ = s.session.SaveRun(ctx, loaded)
 		}
 		affected = append(affected, runID)
 	}

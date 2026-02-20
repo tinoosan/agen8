@@ -44,6 +44,8 @@ const (
 	MethodProjectSetActive    = "project.setActiveSession"
 	MethodLogsQuery           = "logs.query"
 	MethodActivityStream      = "activity.stream"
+	MethodRuntimeGetRunState  = "runtime.getRunState"
+	MethodRuntimeGetSessionState = "runtime.getSessionState"
 
 	MethodEventsListPaginated = "events.listPaginated"
 	MethodEventsLatestSeq     = "events.latestSeq"

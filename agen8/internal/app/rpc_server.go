@@ -34,6 +34,7 @@ type RPCServer struct {
 	agentService  pkgagent.ServiceForRPC
 	eventsService EventsLister
 	soulService   pkgsoul.Service
+	runtimeState  RuntimeStateProvider
 	initErr       error
 
 	notifyCh <-chan protocol.Message
@@ -66,6 +67,7 @@ type RPCServerConfig struct {
 	AgentService        pkgagent.ServiceForRPC
 	EventsService       EventsLister // optional; for events.listPaginated, events.latestSeq, events.count
 	SoulService         pkgsoul.Service
+	RuntimeState        RuntimeStateProvider
 	SessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error)
 	// Session logic
 	SessionResume func(ctx context.Context, threadID, sessionID string) ([]string, error)
@@ -77,6 +79,12 @@ type EventsLister interface {
 	ListPaginated(ctx context.Context, filter eventsvc.Filter) ([]types.EventRecord, int64, error)
 	LatestSeq(ctx context.Context, runID string) (int64, error)
 	Count(ctx context.Context, filter eventsvc.Filter) (int, error)
+}
+
+// RuntimeStateProvider returns effective runtime state for runs/sessions.
+type RuntimeStateProvider interface {
+	GetRunState(ctx context.Context, sessionID, runID string) (protocol.RuntimeRunState, error)
+	GetSessionState(ctx context.Context, sessionID string) ([]protocol.RuntimeRunState, error)
 }
 
 type MethodHandler interface {
@@ -160,6 +168,7 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		agentService:        cfg.AgentService,
 		eventsService:       cfg.EventsService,
 		soulService:         cfg.SoulService,
+		runtimeState:        cfg.RuntimeState,
 		initErr:             initErr,
 		notifyCh:            cfg.NotifyCh,
 		index:               cfg.Index,
@@ -181,6 +190,7 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		registerArtifactHandlers,
 		registerProjectHandlers,
 		registerEventsHandlers,
+		registerRuntimeHandlers,
 	)
 	if err != nil {
 		srv.initErr = errors.Join(srv.initErr, err)

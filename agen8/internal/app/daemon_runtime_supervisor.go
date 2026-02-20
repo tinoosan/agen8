@@ -21,6 +21,7 @@ import (
 	"github.com/tinoosan/agen8/pkg/fsutil"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/profile"
+	"github.com/tinoosan/agen8/pkg/protocol"
 	"github.com/tinoosan/agen8/pkg/prompts"
 	"github.com/tinoosan/agen8/pkg/runtime"
 	eventsvc "github.com/tinoosan/agen8/pkg/services/events"
@@ -79,9 +80,11 @@ type managedRuntime struct {
 	done      <-chan struct{}
 	modelMu   sync.Mutex
 	model     string
+	heartbeatMu     sync.Mutex
+	lastHeartbeatAt time.Time
 }
 
-func resolveRunModel(sess types.Session, run types.Run, fallbackModel string) string {
+func resolveRunModel(sess types.Session, run types.Run, fallbackModel string) (string, string) {
 	isChildRun := strings.TrimSpace(run.ParentRunID) != ""
 	runTeamID := ""
 	if run.Runtime != nil {
@@ -95,25 +98,25 @@ func resolveRunModel(sess types.Session, run types.Run, fallbackModel string) st
 	sessionModel := strings.TrimSpace(sess.ActiveModel)
 	if isChildRun {
 		if runModel != "" {
-			return runModel
+			return runModel, "run"
 		}
 	}
 	if isTeamRun {
 		if runModel != "" {
-			return runModel
+			return runModel, "run"
 		}
 		if sessionModel != "" {
-			return sessionModel
+			return sessionModel, "session"
 		}
 	} else {
 		if sessionModel != "" {
-			return sessionModel
+			return sessionModel, "session"
 		}
 		if runModel != "" {
-			return runModel
+			return runModel, "run"
 		}
 	}
-	return strings.TrimSpace(fallbackModel)
+	return strings.TrimSpace(fallbackModel), "profile"
 }
 
 func shouldSyncModelFromSession(run types.Run, loaded types.Session) bool {
@@ -143,6 +146,24 @@ func (m *managedRuntime) SetCurrentModel(model string) {
 	m.modelMu.Lock()
 	m.model = strings.TrimSpace(model)
 	m.modelMu.Unlock()
+}
+
+func (m *managedRuntime) TouchHeartbeat() {
+	if m == nil {
+		return
+	}
+	m.heartbeatMu.Lock()
+	m.lastHeartbeatAt = time.Now().UTC()
+	m.heartbeatMu.Unlock()
+}
+
+func (m *managedRuntime) LastHeartbeatAt() time.Time {
+	if m == nil {
+		return time.Time{}
+	}
+	m.heartbeatMu.Lock()
+	defer m.heartbeatMu.Unlock()
+	return m.lastHeartbeatAt
 }
 
 // subagentCleanupNotifier stops and finalizes the subagent run when the parent
@@ -492,7 +513,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	run.Runtime.Role = roleName
 	run.Runtime.SoulVersionSeen = soulVersion
 
-	model := resolveRunModel(sess, run, strings.TrimSpace(s.resolved.Model))
+	model, modelSource := resolveRunModel(sess, run, strings.TrimSpace(s.resolved.Model))
 	if model == "" {
 		return nil, fmt.Errorf("run %s has no configured model", runID)
 	}
@@ -790,6 +811,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		return nil, err
 	}
 	workerSession.SetPaused(paused)
+	managed.TouchHeartbeat()
 
 	workerCtx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
@@ -807,6 +829,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 				"runId":     run.RunID,
 				"sessionId": run.SessionID,
 				"profile":   strings.TrimSpace(activeProfile.ID),
+				"model.source": modelSource,
 			},
 		})
 
@@ -830,6 +853,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 								Data: map[string]string{
 									"command": "set_model",
 									"model":   targetModel,
+									"source":  "session",
 								},
 							})
 						}
@@ -866,6 +890,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 					ticker.Stop()
 					return
 				case <-ticker.C:
+					managed.TouchHeartbeat()
 					syncRuntimeControls()
 				case err := <-errCh:
 					stopRunLoop()
@@ -982,6 +1007,10 @@ func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
+	status := strings.ToLower(strings.TrimSpace(run.Status))
+	if status == types.RunStatusCanceled || status == types.RunStatusSucceeded || status == types.RunStatusFailed {
+		return fmt.Errorf("run %s is terminal (%s)", runID, run.Status)
+	}
 	run.Status = types.RunStatusRunning
 	run.FinishedAt = nil
 	run.Error = nil
@@ -1018,8 +1047,9 @@ func (s *runtimeSupervisor) StopRun(runID string) error {
 	if err != nil {
 		return err
 	}
-	run.Status = types.RunStatusPaused
-	run.FinishedAt = nil
+	run.Status = types.RunStatusCanceled
+	now := time.Now().UTC()
+	run.FinishedAt = &now
 	run.Error = nil
 	if err := s.sessionService.SaveRun(context.Background(), run); err != nil {
 		return err
@@ -1359,6 +1389,62 @@ func (s *runtimeSupervisor) makeSpawnWorkerFunc(
 
 		return childRun.RunID, nil
 	}
+}
+
+func (s *runtimeSupervisor) GetRunState(ctx context.Context, sessionID, runID string) (protocol.RuntimeRunState, error) {
+	runID = strings.TrimSpace(runID)
+	sessionID = strings.TrimSpace(sessionID)
+	if runID == "" || sessionID == "" {
+		return protocol.RuntimeRunState{}, fmt.Errorf("sessionID and runID are required")
+	}
+	run, err := s.sessionService.LoadRun(ctx, runID)
+	if err != nil {
+		return protocol.RuntimeRunState{}, err
+	}
+	state := protocol.RuntimeRunState{
+		SessionID:       sessionID,
+		RunID:           runID,
+		PersistedStatus: strings.TrimSpace(run.Status),
+		EffectiveStatus: strings.TrimSpace(run.Status),
+	}
+	s.mu.Lock()
+	worker := s.workers[runID]
+	s.mu.Unlock()
+	if worker != nil {
+		state.WorkerPresent = true
+		lastBeat := worker.LastHeartbeatAt()
+		if !lastBeat.IsZero() {
+			state.LastHeartbeatAt = lastBeat.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	if state.WorkerPresent && strings.EqualFold(state.PersistedStatus, types.RunStatusPaused) {
+		state.EffectiveStatus = types.RunStatusRunning
+	}
+	if state.WorkerPresent && strings.EqualFold(state.PersistedStatus, types.RunStatusRunning) {
+		state.EffectiveStatus = types.RunStatusRunning
+	}
+	state.PausedFlag = strings.EqualFold(state.PersistedStatus, types.RunStatusPaused)
+	return state, nil
+}
+
+func (s *runtimeSupervisor) GetSessionState(ctx context.Context, sessionID string) ([]protocol.RuntimeRunState, error) {
+	sess, err := s.sessionService.LoadSession(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]protocol.RuntimeRunState, 0, len(sess.Runs))
+	for _, rid := range sess.Runs {
+		rid = strings.TrimSpace(rid)
+		if rid == "" {
+			continue
+		}
+		st, err := s.GetRunState(ctx, strings.TrimSpace(sessionID), rid)
+		if err != nil {
+			continue
+		}
+		out = append(out, st)
+	}
+	return out, nil
 }
 
 // RetrySubagent creates a new retry task for an existing child run so the

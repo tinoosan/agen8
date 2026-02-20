@@ -79,8 +79,8 @@ func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRun: %v", err)
 	}
-	if loaded.Status != types.RunStatusPaused {
-		t.Fatalf("run status=%q want %q", loaded.Status, types.RunStatusPaused)
+	if loaded.Status != types.RunStatusCanceled {
+		t.Fatalf("run status=%q want %q", loaded.Status, types.RunStatusCanceled)
 	}
 
 	supervisor.mu.Lock()
@@ -146,16 +146,16 @@ func TestRuntimeSupervisor_StopSession_StopsOnlySessionRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRun A: %v", err)
 	}
-	if loadedA.Status != types.RunStatusPaused {
-		t.Fatalf("runA status=%q want %q", loadedA.Status, types.RunStatusPaused)
+	if loadedA.Status != types.RunStatusCanceled {
+		t.Fatalf("runA status=%q want %q", loadedA.Status, types.RunStatusCanceled)
 	}
 
 	loadedA2, err := sessionSvc.LoadRun(context.Background(), runA2.RunID)
 	if err != nil {
 		t.Fatalf("LoadRun A2: %v", err)
 	}
-	if loadedA2.Status != types.RunStatusPaused {
-		t.Fatalf("runA2 status=%q want %q", loadedA2.Status, types.RunStatusPaused)
+	if loadedA2.Status != types.RunStatusCanceled {
+		t.Fatalf("runA2 status=%q want %q", loadedA2.Status, types.RunStatusCanceled)
 	}
 
 	loadedB, err := sessionSvc.LoadRun(context.Background(), runB.RunID)
@@ -539,9 +539,12 @@ func TestResolveRunModel_PrefersRoleModelInTeamMode(t *testing.T) {
 			Model:  "role-model",
 		},
 	}
-	got := resolveRunModel(sess, run, "fallback-model")
+	got, source := resolveRunModel(sess, run, "fallback-model")
 	if got != "role-model" {
 		t.Fatalf("resolveRunModel(team)=%q want %q", got, "role-model")
+	}
+	if source != "run" {
+		t.Fatalf("resolveRunModel(team) source=%q want %q", source, "run")
 	}
 }
 
@@ -553,9 +556,12 @@ func TestResolveRunModel_PrefersSessionModelInStandalone(t *testing.T) {
 			Model: "run-model",
 		},
 	}
-	got := resolveRunModel(sess, run, "fallback-model")
+	got, source := resolveRunModel(sess, run, "fallback-model")
 	if got != "session-model" {
 		t.Fatalf("resolveRunModel(standalone)=%q want %q", got, "session-model")
+	}
+	if source != "session" {
+		t.Fatalf("resolveRunModel(standalone) source=%q want %q", source, "session")
 	}
 }
 

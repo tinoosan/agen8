@@ -502,6 +502,7 @@ func (b *DaemonBuilder) buildRPCServerConfig() RPCServerConfig {
 			return affected, nil
 		},
 		SoulService: b.soulService,
+		RuntimeState: b.supervisor,
 	}
 }
 

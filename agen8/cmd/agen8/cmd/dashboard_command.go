@@ -108,21 +108,52 @@ func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "Session %s (%s)\n", strings.TrimSpace(item.SessionID), fallback(item.Mode, "standalone"))
 	fmt.Fprintf(cmd.OutOrStdout(), "Run %s  Team %s\n", blankDash(strings.TrimSpace(item.CurrentRunID)), blankDash(strings.TrimSpace(item.TeamID)))
 
+	effectiveByRun := map[string]protocol.RuntimeRunState{}
+	var runtimeState protocol.RuntimeGetSessionStateResult
+	if err := rpcCall(cmd.Context(), protocol.MethodRuntimeGetSessionState, protocol.RuntimeGetSessionStateParams{
+		SessionID: sessionID,
+	}, &runtimeState); err == nil {
+		for _, rs := range runtimeState.Runs {
+			rid := strings.TrimSpace(rs.RunID)
+			if rid == "" {
+				continue
+			}
+			effectiveByRun[rid] = rs
+		}
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "ROLE\tRUN\tSTATUS\tPROFILE\tGOAL\tSTARTED")
+	fmt.Fprintln(w, "ROLE\tRUN\tSTATUS\tPROFILE\tWORKER\tHEARTBEAT\tSTARTED")
 	for _, agent := range agents.Agents {
-		goal := strings.TrimSpace(agent.Goal)
-		if len(goal) > 64 {
-			goal = goal[:63] + "…"
+		role := strings.TrimSpace(agent.Role)
+		if strings.EqualFold(strings.TrimSpace(item.Mode), "standalone") {
+			role = "-"
+		}
+		effective := strings.TrimSpace(agent.Status)
+		worker := "-"
+		heartbeat := "-"
+		if rs, ok := effectiveByRun[strings.TrimSpace(agent.RunID)]; ok {
+			if v := strings.TrimSpace(rs.EffectiveStatus); v != "" {
+				effective = v
+			}
+			if rs.WorkerPresent {
+				worker = "yes"
+			} else {
+				worker = "no"
+			}
+			if hb := strings.TrimSpace(rs.LastHeartbeatAt); hb != "" {
+				heartbeat = hb
+			}
 		}
 		fmt.Fprintf(
 			w,
-			"%s\t%s\t%s\t%s\t%s\t%s\n",
-			blankDash(strings.TrimSpace(agent.Role)),
+			"%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			blankDash(role),
 			blankDash(strings.TrimSpace(agent.RunID)),
-			blankDash(strings.TrimSpace(agent.Status)),
+			blankDash(effective),
 			blankDash(strings.TrimSpace(agent.Profile)),
-			blankDash(goal),
+			worker,
+			heartbeat,
 			blankDash(strings.TrimSpace(agent.StartedAt)),
 		)
 	}
