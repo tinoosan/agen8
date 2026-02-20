@@ -134,6 +134,7 @@ func TestRPCServer_MethodRegistry_CoversAllProtocolMethods(t *testing.T) {
 		protocol.MethodSessionClearHistory,
 		protocol.MethodSessionDelete,
 		protocol.MethodSessionGetTotals,
+		protocol.MethodSessionResolveThread,
 		protocol.MethodActivityList,
 		protocol.MethodRunListChildren,
 		protocol.MethodTeamGetStatus,

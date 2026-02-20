@@ -111,3 +111,18 @@ func rpcResolveCoordinatorRun(ctx context.Context, sessionID string) (runID stri
 	}
 	return "", "", fmt.Errorf("session %q has no active runs", sessionID)
 }
+
+func rpcResolveThread(ctx context.Context, sessionID string, runID string) (protocol.SessionResolveThreadResult, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return protocol.SessionResolveThreadResult{}, fmt.Errorf("session id is required")
+	}
+	var out protocol.SessionResolveThreadResult
+	if err := rpcCall(ctx, protocol.MethodSessionResolveThread, protocol.SessionResolveThreadParams{
+		SessionID: sessionID,
+		RunID:     strings.TrimSpace(runID),
+	}, &out); err != nil {
+		return protocol.SessionResolveThreadResult{}, err
+	}
+	return out, nil
+}

@@ -28,11 +28,12 @@ var (
 	attachSessionID string
 )
 
-var runCoordinatorFn = runCoordinatorForSession
+var runCoordinatorFn func(cmd *cobra.Command, sessionID string) error
+var runCoordinatorShellFn func(cmd *cobra.Command, sessionID string, runID string, teamID string) error
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Initialize a project-local .agent8 workspace",
+	Short: "Initialize a project-local .agen8 workspace",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, err := app.InitProject(projectSearchDir(), app.ProjectConfig{
 			ProjectID:          strings.TrimSpace(initProjectID),
@@ -86,12 +87,6 @@ var attachCmd = &cobra.Command{
 			sessionID = strings.TrimSpace(args[0])
 		}
 		if sessionID == "" {
-			projectCtx, err := loadProjectContext()
-			if err == nil && projectCtx.Exists {
-				sessionID = strings.TrimSpace(projectCtx.State.ActiveSessionID)
-			}
-		}
-		if sessionID == "" {
 			return fmt.Errorf("session id is required")
 		}
 		return runCoordinatorFn(cmd, sessionID)
@@ -109,7 +104,16 @@ func runCoordinatorForSession(cmd *cobra.Command, sessionID string) error {
 	}
 	runID, teamID, err := rpcResolveCoordinatorRun(cmd.Context(), sessionID)
 	if err != nil {
-		return err
+		if strings.Contains(strings.ToLower(err.Error()), "thread not found") {
+			if resolved, rerr := rpcResolveThread(cmd.Context(), sessionID, ""); rerr == nil && resolved.Exists {
+				runID = strings.TrimSpace(resolved.RunID)
+				teamID = strings.TrimSpace(resolved.TeamID)
+			} else {
+				return err
+			}
+		} else {
+			return err
+		}
 	}
 	if runID == "" {
 		return fmt.Errorf("no run found for session %s", sessionID)
@@ -117,7 +121,8 @@ func runCoordinatorForSession(cmd *cobra.Command, sessionID string) error {
 	if err := updateProjectActiveSession(sessionID, teamID, runID, "coordinator"); err != nil {
 		return err
 	}
-	return runMonitorFn(cmd.Context(), cfg, runID)
+	_ = cfg
+	return runCoordinatorShellFn(cmd, sessionID, runID, teamID)
 }
 
 func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
@@ -170,6 +175,9 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 }
 
 func init() {
+	runCoordinatorFn = runCoordinatorForSession
+	runCoordinatorShellFn = runCoordinatorShell
+
 	initCmd.Flags().StringVar(&initProjectID, "project-id", "", "override project identifier")
 	initCmd.Flags().StringVar(&initDefaultProfile, "profile", "", "default standalone profile for this project")
 	initCmd.Flags().StringVar(&initDefaultMode, "mode", "standalone", "default mode (standalone|team)")

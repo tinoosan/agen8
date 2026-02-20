@@ -22,7 +22,12 @@ func runSmartEntrypoint(cmd *cobra.Command) error {
 
 	daemonReachable := rpcPing(cmd.Context()) == nil
 	if daemonReachable && projectCtx.Exists && strings.TrimSpace(projectCtx.State.ActiveSessionID) != "" {
-		return runCoordinatorFn(cmd, strings.TrimSpace(projectCtx.State.ActiveSessionID))
+		sessionID := strings.TrimSpace(projectCtx.State.ActiveSessionID)
+		if err := runCoordinatorFn(cmd, sessionID); err == nil {
+			return nil
+		} else if !isRetryableLiveError(err) {
+			return err
+		}
 	}
 
 	if !daemonReachable {

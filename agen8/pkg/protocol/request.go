@@ -24,6 +24,7 @@ const (
 	MethodSessionClearHistory = "session.clearHistory"
 	MethodSessionDelete       = "session.delete"
 	MethodSessionGetTotals    = "session.getTotals"
+	MethodSessionResolveThread = "session.resolveThread"
 	MethodActivityList        = "activity.list"
 	MethodTeamGetStatus       = "team.getStatus"
 	MethodTeamGetManifest     = "team.getManifest"

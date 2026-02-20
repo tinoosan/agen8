@@ -26,8 +26,10 @@ var (
 )
 
 var tasksCmd = &cobra.Command{
-	Use:   "tasks",
-	Short: "Query and manage tasks",
+	Use:     "mail",
+	Aliases: []string{"tasks"},
+	Short:   "Query and manage task inbox/outbox",
+	Long:    "Mail is the task inbox/outbox surface. `tasks` is retained as a compatibility alias.",
 }
 
 var tasksListCmd = &cobra.Command{

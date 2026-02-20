@@ -92,12 +92,37 @@ func registerSessionHandlers(s *RPCServer, reg methodRegistry) error {
 			return addBoundHandler[protocol.SessionGetTotalsParams, protocol.SessionGetTotalsResult](reg, protocol.MethodSessionGetTotals, false, s.sessionGetTotals)
 		},
 		func() error {
+			return addBoundHandler[protocol.SessionResolveThreadParams, protocol.SessionResolveThreadResult](reg, protocol.MethodSessionResolveThread, false, s.sessionResolveThread)
+		},
+		func() error {
 			return addBoundHandler[protocol.ActivityListParams, protocol.ActivityListResult](reg, protocol.MethodActivityList, false, s.activityList)
 		},
 		func() error {
 			return addBoundHandler[protocol.RunListChildrenParams, protocol.RunListChildrenResult](reg, protocol.MethodRunListChildren, false, s.runListChildren)
 		},
 	)
+}
+
+func (s *RPCServer) sessionResolveThread(ctx context.Context, p protocol.SessionResolveThreadParams) (protocol.SessionResolveThreadResult, error) {
+	sessionID := strings.TrimSpace(p.SessionID)
+	if sessionID == "" {
+		return protocol.SessionResolveThreadResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "sessionId is required"}
+	}
+	sess, err := s.session.LoadSession(ctx, sessionID)
+	if err != nil {
+		return protocol.SessionResolveThreadResult{}, err
+	}
+	runID := strings.TrimSpace(p.RunID)
+	if runID == "" {
+		runID = defaultRunIDForSession(sess)
+	}
+	return protocol.SessionResolveThreadResult{
+		SessionID: strings.TrimSpace(sess.SessionID),
+		ThreadID:  strings.TrimSpace(sess.SessionID),
+		RunID:     strings.TrimSpace(runID),
+		TeamID:    strings.TrimSpace(sess.TeamID),
+		Exists:    true,
+	}, nil
 }
 
 func defaultRunIDForSession(sess types.Session) string {

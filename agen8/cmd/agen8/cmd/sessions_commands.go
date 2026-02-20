@@ -120,11 +120,14 @@ var sessionsStopCmd = &cobra.Command{
 }
 
 var sessionsDeleteCmd = &cobra.Command{
-	Use:   "delete <session-id>",
+	Use:   "delete [session-id]",
 	Short: "Delete a session and its persisted history",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		sessionID := strings.TrimSpace(args[0])
+		sessionID := resolveSessionDeleteTarget(args)
+		if sessionID == "" {
+			return fmt.Errorf("session id is required (or initialize project and set active session)")
+		}
 		var out protocol.SessionDeleteResult
 		if err := rpcCall(cmd.Context(), protocol.MethodSessionDelete, protocol.SessionDeleteParams{
 			SessionID: sessionID,
@@ -138,6 +141,21 @@ var sessionsDeleteCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "Deleted session %s\n", sessionID)
 		return nil
 	},
+}
+
+func resolveSessionDeleteTarget(args []string) string {
+	sessionID := ""
+	if len(args) > 0 {
+		sessionID = strings.TrimSpace(args[0])
+	}
+	if sessionID != "" {
+		return sessionID
+	}
+	projectCtx, err := loadProjectContext()
+	if err != nil || !projectCtx.Exists {
+		return ""
+	}
+	return strings.TrimSpace(projectCtx.State.ActiveSessionID)
 }
 
 func blankDash(v string) string {

@@ -197,6 +197,20 @@ type SessionGetTotalsResult struct {
 	TasksDone         int     `json:"tasksDone"`
 }
 
+type SessionResolveThreadParams struct {
+	SessionID string `json:"sessionId"`
+	RunID     string `json:"runId,omitempty"`
+	ThreadID  string `json:"threadId,omitempty"`
+}
+
+type SessionResolveThreadResult struct {
+	SessionID string `json:"sessionId"`
+	ThreadID  string `json:"threadId"`
+	RunID     string `json:"runId,omitempty"`
+	TeamID    string `json:"teamId,omitempty"`
+	Exists    bool   `json:"exists"`
+}
+
 type ActivityListParams struct {
 	ThreadID         ThreadID `json:"threadId"`
 	TeamID           string   `json:"teamId,omitempty"`
