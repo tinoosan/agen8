@@ -38,6 +38,7 @@ var (
 	stylePillDim   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#707070")).Reverse(true).Padding(0, 1)
 	stylePillWhite = lipgloss.NewStyle().Bold(true).Reverse(true).Padding(0, 1)
 	styleVerbBold  = lipgloss.NewStyle().Bold(true)
+	styleArgItalic = lipgloss.NewStyle().Italic(true)
 
 	mdMu       sync.Mutex
 	mdByWidth  = map[int]*glamour.TermRenderer{}
@@ -307,10 +308,23 @@ func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
 			}
 
 			if isBridge && lastCodeExecIdx >= 0 {
-				filtered[lastCodeExecIdx].childCount++
+				parent := &filtered[lastCodeExecIdx]
+				parent.childCount++
+				if parent.childCount == 1 {
+					parent.bridgeSingleOpKind = e.opKind
+					parent.bridgeSingleData = e.data
+					parent.bridgeSingleText = e.text
+					parent.bridgeSinglePath = e.path
+				} else if parent.childCount == 2 {
+					// More than one bridge: show "Ran N tools" instead of single verb+args.
+					parent.bridgeSingleOpKind = ""
+					parent.bridgeSingleData = nil
+					parent.bridgeSingleText = ""
+					parent.bridgeSinglePath = ""
+				}
 				// Promote plan items from collapsed bridge entries to the parent code_exec.
 				if len(e.planItems) > 0 {
-					filtered[lastCodeExecIdx].planItems = e.planItems
+					parent.planItems = e.planItems
 				}
 				continue
 			}
@@ -453,9 +467,15 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		}
 
 		var argPreview string
+		var argItalic bool // http_fetch: show URL in italic, no brackets
 		opLower := strings.ToLower(strings.TrimSpace(e.opKind))
 		if opLower == "code_exec" {
 			// Show just the verb — no arg preview for code_exec.
+		} else if opLower == "http_fetch" && e.data != nil {
+			if u := strings.TrimSpace(e.data["url"]); u != "" {
+				argPreview = truncate(u, maxInt(8, inner-len(verb)-8))
+				argItalic = true
+			}
 		} else if e.path != "" && isPathBasedOp(e.opKind) {
 			argPreview = truncate(e.path, maxInt(8, inner-len(verb)-8))
 		} else {
@@ -465,8 +485,11 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		// Primary operation line: colored dot + bold verb + arg preview
 		opLine := "  " + dot + " " + styleVerbBold.Render(verb)
 		if argPreview != "" {
-			//normal text
-			opLine += " " + argPreview
+			if argItalic {
+				opLine += " " + styleArgItalic.Render(argPreview)
+			} else {
+				opLine += " " + argPreview
+			}
 		}
 		lines = append(lines, opLine)
 
@@ -474,7 +497,38 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		var subItems []string
 
 		if e.childCount > 0 {
-			subItems = append(subItems, "Ran "+styleVerbBold.Render(fmt.Sprintf("%d", e.childCount))+" tools")
+			if e.childCount == 1 && e.bridgeSingleOpKind != "" {
+				// Single bridge call: show Verb + Args under the parent instead of "Ran 1 tools".
+				bridgeVerb := kindToVerb(e.bridgeSingleOpKind, e.bridgeSingleData)
+				var bridgeArg string
+				var bridgeArgItalic bool
+				bridgeOpLower := strings.ToLower(strings.TrimSpace(e.bridgeSingleOpKind))
+				if bridgeOpLower == "http_fetch" && e.bridgeSingleData != nil {
+					if u := strings.TrimSpace(e.bridgeSingleData["url"]); u != "" {
+						bridgeArg = truncate(u, maxInt(8, inner-len(bridgeVerb)-8))
+						bridgeArgItalic = true
+					}
+				} else if e.bridgeSinglePath != "" && isPathBasedOp(e.bridgeSingleOpKind) {
+					bridgeArg = truncate(e.bridgeSinglePath, maxInt(8, inner-len(bridgeVerb)-8))
+				} else {
+					bridgeArg = truncate(stripLeadingVerb(e.bridgeSingleText, bridgeVerb), maxInt(8, inner-len(bridgeVerb)-8))
+				}
+				line := styleVerbBold.Render(bridgeVerb)
+				if bridgeArg != "" {
+					if bridgeArgItalic {
+						line += " " + styleArgItalic.Render(bridgeArg)
+					} else {
+						line += " " + bridgeArg
+					}
+				}
+				subItems = append(subItems, line)
+			} else {
+				noun := "tools"
+				if e.childCount == 1 {
+					noun = "tool"
+				}
+				subItems = append(subItems, "Ran "+styleVerbBold.Render(fmt.Sprintf("%d", e.childCount))+" "+noun)
+			}
 		}
 
 		var statusText string

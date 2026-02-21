@@ -38,6 +38,11 @@ type feedEntry struct {
 	data           map[string]string // raw activity Data for verb resolution
 	planItems      []string          // parsed checklist items for plan writes
 	childCount     int               // number of grouped bridge tool calls (for code_exec parents)
+	// When childCount == 1, store the single bridge call so we can show "Verb + Args" instead of "Ran 1 tools".
+	bridgeSingleOpKind string
+	bridgeSingleData   map[string]string
+	bridgeSingleText   string
+	bridgeSinglePath   string
 
 	// Thinking-specific fields
 	live             bool          // true while model is still thinking (no .end yet)
