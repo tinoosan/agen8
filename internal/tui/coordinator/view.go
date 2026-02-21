@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/ansi"
+	"github.com/charmbracelet/glamour/styles"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
@@ -757,7 +759,7 @@ func markdownRenderer(width int) (*glamour.TermRenderer, error) {
 	}
 
 	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		glamour.WithStyles(coordinatorMarkdownStyle()),
 		glamour.WithWordWrap(width),
 		glamour.WithPreservedNewLines(),
 	)
@@ -766,4 +768,41 @@ func markdownRenderer(width int) (*glamour.TermRenderer, error) {
 	}
 	mdByWidth[width] = r
 	return r, nil
+}
+
+func boolPtr(b bool) *bool       { return &b }
+func uintPtr(u uint) *uint       { return &u }
+func stringPtr(s string) *string { return &s }
+
+func coordinatorMarkdownStyle() ansi.StyleConfig {
+	style := styles.DarkStyleConfig
+
+	// Render markdown as markdown (hide raw markers like "###" and "**").
+	style.H1.StylePrimitive.Prefix = ""
+	style.H2.StylePrimitive.Prefix = ""
+	style.H3.StylePrimitive.Prefix = ""
+	style.H4.StylePrimitive.Prefix = ""
+	style.H5.StylePrimitive.Prefix = ""
+	style.H6.StylePrimitive.Prefix = ""
+
+	style.Strong.BlockPrefix = ""
+	style.Strong.BlockSuffix = ""
+	style.Strong.Bold = boolPtr(true)
+
+	style.Emph.BlockPrefix = ""
+	style.Emph.BlockSuffix = ""
+	style.Emph.Italic = boolPtr(true)
+
+	style.Strikethrough.BlockPrefix = ""
+	style.Strikethrough.BlockSuffix = ""
+
+	style.Code.StylePrimitive.BlockPrefix = ""
+	style.Code.StylePrimitive.BlockSuffix = ""
+
+	style.CodeBlock.Margin = uintPtr(0)
+	style.CodeBlock.Indent = uintPtr(0)
+	style.CodeBlock.StylePrimitive.BlockPrefix = ""
+	style.CodeBlock.StylePrimitive.BlockSuffix = "\n"
+
+	return style
 }
