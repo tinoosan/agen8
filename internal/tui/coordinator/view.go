@@ -542,7 +542,7 @@ func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
 		return []string{line}
 	}
 
-	// Expanded: ▾ Thought for Ns + tree branches
+	// Expanded: ▾ Thought for Ns + tree branches; one chunk per summary, markdown-rendered, separated by blank lines.
 	triangle := styleThinking.Render("▾")
 	headerLine := "  " + triangle + " " + styleThinking.Italic(true).Render(label)
 	result := []string{headerLine}
@@ -556,38 +556,61 @@ func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
 		}
 	}
 
-	// Each entry is a complete summary line from the daemon.
-	// Trim and filter empty entries.
-	var flat []string
+	// Each entry is a complete summary chunk from the daemon. Trim and filter empty.
+	var chunks []string
 	for _, l := range rawLines {
 		l = strings.TrimSpace(l)
 		if l != "" {
-			flat = append(flat, l)
+			chunks = append(chunks, l)
 		}
 	}
-	if len(flat) == 0 {
-		flat = rawLines
+	if len(chunks) == 0 {
+		chunks = rawLines
 	}
 
-	// Word-wrap to fit available width.
+	// Render each chunk as markdown and collect all content lines, with a blank line between chunks.
 	// Prefix per line: "  " (2) + branch (4) + " " (1) = 7 visible chars.
-	wrapWidth := maxInt(20, inner-7)
-	var wrapped []string
-	for _, l := range flat {
-		wrapped = append(wrapped, wrapText(l, wrapWidth)...)
+	mdWidth := maxInt(20, inner-7)
+	var contentLines []string
+	for i, chunk := range chunks {
+		rendered := strings.TrimSpace(renderMarkdown(chunk, mdWidth))
+		if rendered != "" {
+			for _, line := range strings.Split(rendered, "\n") {
+				contentLines = append(contentLines, line)
+			}
+		}
+		if i < len(chunks)-1 {
+			contentLines = append(contentLines, "") // blank line between chunks
+		}
 	}
-	if len(wrapped) == 0 {
-		wrapped = flat
+	if len(contentLines) == 0 {
+		contentLines = append(contentLines, "(no summary available)")
 	}
 
-	for i, l := range wrapped {
+	// Last non-blank line gets └─; all others get │.
+	lastNonBlank := -1
+	for i := len(contentLines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(contentLines[i]) != "" {
+			lastNonBlank = i
+			break
+		}
+	}
+	if lastNonBlank < 0 {
+		lastNonBlank = len(contentLines) - 1
+	}
+
+	for i, l := range contentLines {
 		var branch string
-		if i == len(wrapped)-1 {
+		if i == lastNonBlank {
 			branch = styleThinking.Render("  └─")
 		} else {
 			branch = styleThinking.Render("  │ ")
 		}
-		result = append(result, "  "+branch+" "+kit.StyleDim.Italic(true).Render(l))
+		if strings.TrimSpace(l) == "" {
+			result = append(result, "  "+branch)
+		} else {
+			result = append(result, "  "+branch+" "+l)
+		}
 	}
 	return result
 }
