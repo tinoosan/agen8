@@ -439,7 +439,8 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		// Primary operation line: colored dot + bold verb + arg preview
 		opLine := "  " + dot + " " + styleVerbBold.Render(verb)
 		if argPreview != "" {
-			opLine += " " + kit.StyleDim.Render(argPreview)
+			//normal text
+			opLine += " " + argPreview
 		}
 		lines = append(lines, opLine)
 
