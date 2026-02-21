@@ -604,17 +604,13 @@ func renderPlanChecklist(items []string) []string {
 // ── Thinking line ──────────────────────────────────────────────────────
 
 // renderThinkingBlock renders a thinking feedEntry as collapsed or expanded.
-// Collapsed (default):  ▸ Thought for 2s ◐            ctrl+o
-// Expanded (ctrl+o):    ▾ Thought for 2s
-//
-//	│  line one...
-//	└─ last line
+// While live:  ▸ Thinking ◐ (spinner)        ctrl+o
+// After end:  ▸ Thought for 2s              ctrl+o
+// Expanded:   ▾ Thinking / ▾ Thought for 2s + tree branches.
 func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
-	// Format duration label.
+	// Format duration label (only after thinking has ended).
 	var durStr string
-	if e.live {
-		durStr = "…"
-	} else if e.thinkingDuration > 0 {
+	if !e.live && e.thinkingDuration > 0 {
 		if e.thinkingDuration < time.Second {
 			durStr = fmt.Sprintf("%dms", e.thinkingDuration.Milliseconds())
 		} else {
@@ -622,13 +618,17 @@ func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
 		}
 	}
 
-	label := "Thought"
-	if durStr != "" {
+	var label string
+	if e.live {
+		label = "Thinking"
+	} else if durStr != "" {
 		label = "Thought for " + durStr
+	} else {
+		label = "Thought"
 	}
 
 	if !m.thinkingExpanded {
-		// Collapsed: ▸ Thought for Ns ◐         ctrl+o
+		// Collapsed: ▸ Thinking ◐ (spinner) or ▸ Thought for Ns    ctrl+o
 		hint := kit.StyleDim.Render("ctrl+o")
 		var spinner string
 		if e.live {
