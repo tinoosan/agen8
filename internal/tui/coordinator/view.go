@@ -22,16 +22,16 @@ var (
 	colorPending = lipgloss.Color("#e5c07b")
 	colorAccent  = lipgloss.Color("#7aa2f7")
 
-	styleOK      = lipgloss.NewStyle().Foreground(colorOK)
-	styleErr     = lipgloss.NewStyle().Foreground(colorErr)
-	stylePending = lipgloss.NewStyle().Foreground(colorPending)
-	styleAccent  = lipgloss.NewStyle().Foreground(colorAccent)
-	styleHeader  = lipgloss.NewStyle().Bold(true)
+	styleOK        = lipgloss.NewStyle().Foreground(colorOK)
+	styleErr       = lipgloss.NewStyle().Foreground(colorErr)
+	stylePending   = lipgloss.NewStyle().Foreground(colorPending)
+	styleAccent    = lipgloss.NewStyle().Foreground(colorAccent)
+	styleHeader    = lipgloss.NewStyle().Bold(true)
 	stylePillOK    = lipgloss.NewStyle().Bold(true).Foreground(colorOK).Reverse(true).Padding(0, 1)
 	stylePillErr   = lipgloss.NewStyle().Bold(true).Foreground(colorErr).Reverse(true).Padding(0, 1)
 	stylePillDim   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#707070")).Reverse(true).Padding(0, 1)
-	stylePillWhite = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Reverse(true).Padding(0, 1)
-	styleVerbBold  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff"))
+	stylePillWhite = lipgloss.NewStyle().Bold(true).Reverse(true).Padding(0, 1)
+	styleVerbBold  = lipgloss.NewStyle().Bold(true)
 
 	mdMu       sync.Mutex
 	mdByWidth  = map[int]*glamour.TermRenderer{}
@@ -107,7 +107,7 @@ func (m *Model) renderHeader() string {
 		case strings.Contains(m.agentStatus, "Done"):
 			statusPill = stylePillOK.Render(m.agentStatus)
 		default:
-			statusPill = stylePillDim.Render(m.agentStatus + " " + m.spinner())
+			statusPill = stylePillWhite.Render(m.agentStatus + " " + m.spinner())
 		}
 		tags = append(tags, statusPill)
 	}
@@ -447,7 +447,7 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		var subItems []string
 
 		if e.childCount > 0 {
-			subItems = append(subItems, styleVerbBold.Render("Ran")+fmt.Sprintf(" %d tools", e.childCount))
+			subItems = append(subItems, "Ran "+styleVerbBold.Render(fmt.Sprintf("%d", e.childCount))+" tools")
 		}
 
 		var statusText string
@@ -466,9 +466,6 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		subItems = append(subItems, statusText)
 
 		// Add vertical connector when there are multiple sub-items (extends branch ~25%).
-		if len(subItems) > 1 {
-			lines = append(lines, "  "+styleVerbBold.Render("│"))
-		}
 
 		// Render sub-items with proper tree branches and extra horizontal space.
 		for i, item := range subItems {
@@ -576,10 +573,7 @@ func (m *Model) renderFooter() string {
 	if m.isNarrow() {
 		hints = kit.StyleDim.Render("↵ /p /r /s pgup/dn g/G ^c")
 	} else {
-		hints = kit.StyleDim.Render("enter") + " send  " +
-			kit.StyleDim.Render("/pause /resume /stop /help") + "  " +
-			kit.StyleDim.Render("pgup/pgdn") + " scroll  " +
-			kit.StyleDim.Render("home/end") + " jump  " +
+		hints = kit.StyleDim.Render("/help") + "  " +
 			kit.StyleDim.Render("ctrl+c") + " quit"
 	}
 
@@ -589,22 +583,6 @@ func (m *Model) renderFooter() string {
 
 	line := scrollLabel + strings.Repeat(" ", gap) + hints
 	return lipgloss.NewStyle().Width(m.width).MaxWidth(m.width).MaxHeight(1).Padding(0, 1).Render(line)
-}
-
-// ── Status icon ────────────────────────────────────────────────────────
-
-func (m *Model) statusIcon(status string) string {
-	s := strings.ToLower(strings.TrimSpace(status))
-	switch s {
-	case "ok", "succeeded", "done", "completed":
-		return styleOK.Render("✓")
-	case "error", "failed", "canceled", "cancelled":
-		return styleErr.Render("✗")
-	case "pending":
-		return stylePending.Render("…")
-	default:
-		return stylePending.Render(m.spinner())
-	}
 }
 
 func (m *Model) spinner() string {
@@ -683,17 +661,6 @@ func isPathBasedOp(kind string) bool {
 		return false
 	}
 	return false
-}
-
-func padRight(s string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	w := runewidth.StringWidth(s)
-	if w >= width {
-		return runewidth.Truncate(s, width, "")
-	}
-	return s + strings.Repeat(" ", width-w)
 }
 
 func viewportSlice(content string, visibleLines, targetIdx int) string {
