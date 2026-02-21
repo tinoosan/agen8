@@ -176,6 +176,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pinFeedToBottom()
 				return m, nil
 			}
+		case "ctrl+o":
+			// Toggle all thinking blocks expanded / collapsed globally.
+			m.thinkingExpanded = !m.thinkingExpanded
+			return m, nil
 		case "enter":
 			line := strings.TrimSpace(m.input.Value())
 			if line == "" {

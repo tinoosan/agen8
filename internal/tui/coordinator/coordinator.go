@@ -73,7 +73,8 @@ type Model struct {
 	agentStatus     string    // "Thinking…", "Processing…", "Idle", etc.
 	statusExpiresAt time.Time // auto-clear time for expiring statuses
 
-	lastEventSeq int64 // cursor for incremental thinking event polling
+	lastEventSeq     int64 // cursor for incremental thinking event polling
+	thinkingExpanded bool  // ctrl+o toggles all thinking blocks globally
 
 	pickerOpen    bool
 	pickerLoading bool

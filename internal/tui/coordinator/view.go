@@ -19,15 +19,17 @@ import (
 // ── Color palette ──────────────────────────────────────────────────────
 
 var (
-	colorOK      = lipgloss.Color("#98c379")
-	colorErr     = lipgloss.Color("#e06c75")
-	colorPending = lipgloss.Color("#e5c07b")
-	colorAccent  = lipgloss.Color("#7aa2f7")
+	colorOK       = lipgloss.Color("#98c379")
+	colorErr      = lipgloss.Color("#e06c75")
+	colorPending  = lipgloss.Color("#e5c07b")
+	colorAccent   = lipgloss.Color("#7aa2f7")
+	colorThinking = lipgloss.Color("#9d7fdb") // muted purple for thinking
 
 	styleOK        = lipgloss.NewStyle().Foreground(colorOK)
 	styleErr       = lipgloss.NewStyle().Foreground(colorErr)
 	stylePending   = lipgloss.NewStyle().Foreground(colorPending)
 	styleAccent    = lipgloss.NewStyle().Foreground(colorAccent)
+	styleThinking  = lipgloss.NewStyle().Foreground(colorThinking)
 	styleHeader    = lipgloss.NewStyle().Bold(true)
 	stylePillOK    = lipgloss.NewStyle().Bold(true).Foreground(colorOK).Reverse(true).Padding(0, 1)
 	stylePillErr   = lipgloss.NewStyle().Bold(true).Foreground(colorErr).Reverse(true).Padding(0, 1)
@@ -202,6 +204,7 @@ func (m *Model) buildTurns() []conversationTurn {
 					kind:      turnThinking,
 					timestamp: e.timestamp,
 					text:      e.text,
+					entries:   []feedEntry{e},
 				})
 			}
 		case feedAgent:
@@ -341,7 +344,9 @@ func (m *Model) feedLines(width int) []string {
 		case turnSystem:
 			lines = append(lines, m.renderSystemBlock(t, inner)...)
 		case turnThinking:
-			lines = append(lines, m.renderThinkingLine(t))
+			if len(t.entries) > 0 {
+				lines = append(lines, m.renderThinkingBlock(t.entries[0], inner)...)
+			}
 		}
 		// Separator between blocks is just an empty line
 		if i < len(turns)-1 {
@@ -406,9 +411,9 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 
 	lines := []string{headerLine}
 	for _, e := range t.entries {
-		// Thinking entries render as a dim inline indicator.
+		// Thinking entries render as a collapsed/expanded block.
 		if e.kind == feedThinking {
-			lines = append(lines, "  "+kit.StyleDim.Render(m.spinner()+" Thinking..."))
+			lines = append(lines, m.renderThinkingBlock(e, inner)...)
 			continue
 		}
 
@@ -497,8 +502,84 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 
 // ── Thinking line ──────────────────────────────────────────────────────
 
-func (m *Model) renderThinkingLine(t conversationTurn) string {
-	return "  " + kit.StyleDim.Render(m.spinner()+" Thinking...")
+// renderThinkingBlock renders a thinking feedEntry as collapsed or expanded.
+// Collapsed (default):  ▸ Thought for 2s ◐            ctrl+o
+// Expanded (ctrl+o):    ▾ Thought for 2s
+//
+//	│  line one...
+//	└─ last line
+func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
+	// Format duration label.
+	var durStr string
+	if e.live {
+		durStr = "…"
+	} else if e.thinkingDuration > 0 {
+		if e.thinkingDuration < time.Second {
+			durStr = fmt.Sprintf("%dms", e.thinkingDuration.Milliseconds())
+		} else {
+			durStr = fmt.Sprintf("%.0fs", e.thinkingDuration.Seconds())
+		}
+	}
+
+	label := "Thought"
+	if durStr != "" {
+		label = "Thought for " + durStr
+	}
+
+	if !m.thinkingExpanded {
+		// Collapsed: ▸ Thought for Ns ◐         ctrl+o
+		hint := kit.StyleDim.Render("ctrl+o")
+		var spinner string
+		if e.live {
+			spinner = " " + styleThinking.Render(m.spinner())
+		}
+		triangle := styleThinking.Render("▸")
+		labelStr := styleThinking.Italic(true).Render(label) + spinner
+		labelW := runewidth.StringWidth(stripANSI("▸ " + label + spinner))
+		hintW := runewidth.StringWidth(stripANSI("ctrl+o"))
+		gap := maxInt(1, inner-2-labelW-hintW)
+		line := "  " + triangle + " " + labelStr + strings.Repeat(" ", gap) + hint
+		return []string{line}
+	}
+
+	// Expanded: ▾ Thought for Ns + tree branches
+	triangle := styleThinking.Render("▾")
+	headerLine := "  " + triangle + " " + styleThinking.Italic(true).Render(label)
+	result := []string{headerLine}
+
+	lines := e.thinkingLines
+	if len(lines) == 0 {
+		if e.live {
+			lines = []string{m.spinner() + " thinking…"}
+		} else {
+			lines = []string{"(no summary available)"}
+		}
+	}
+
+	// Flatten any lines that contain embedded newlines.
+	var flat []string
+	for _, l := range lines {
+		for _, sub := range strings.Split(l, "\n") {
+			sub = strings.TrimRight(sub, " \t")
+			if sub != "" {
+				flat = append(flat, sub)
+			}
+		}
+	}
+	if len(flat) == 0 {
+		flat = lines
+	}
+
+	for i, l := range flat {
+		var branch string
+		if i == len(flat)-1 {
+			branch = styleThinking.Render("  └─")
+		} else {
+			branch = styleThinking.Render("  │ ")
+		}
+		result = append(result, "  "+branch+" "+kit.StyleDim.Italic(true).Render(l))
+	}
+	return result
 }
 
 // ── System block ───────────────────────────────────────────────────────

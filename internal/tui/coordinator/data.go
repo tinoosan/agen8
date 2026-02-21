@@ -38,6 +38,11 @@ type feedEntry struct {
 	data           map[string]string // raw activity Data for verb resolution
 	planItems      []string          // parsed checklist items for plan writes
 	childCount     int               // number of grouped bridge tool calls (for code_exec parents)
+
+	// Thinking-specific fields
+	live             bool          // true while model is still thinking (no .end yet)
+	thinkingDuration time.Duration // elapsed duration once .end arrives
+	thinkingLines    []string      // accumulated summary lines from model.thinking.summary
 }
 
 type sessionLoadedMsg struct {
@@ -205,22 +210,47 @@ func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 			RunID:    strings.TrimSpace(runID),
 			AfterSeq: afterSeq,
 			Limit:    100,
-			Types:    []string{"model.thinking.start", "model.thinking.end", "task.done"},
+			Types:    []string{"model.thinking.start", "model.thinking.end", "model.thinking.summary", "task.done"},
 		}, &res); err != nil {
 			return thinkingEventsMsg{err: err}
 		}
 
 		var entries []feedEntry
 		var maxSeq int64
+		// thinkingByIdx stores the entries-slice index of each thinking.start entry
+		// keyed by "step". Using indices (not pointers) avoids aliasing bugs when
+		// append reallocates the backing array.
+		thinkingByIdx := map[string]int{}
 		for _, ev := range res.Events {
-			if ev.Type == "model.thinking.start" {
+			switch ev.Type {
+			case "model.thinking.start":
+				step := strings.TrimSpace(ev.Data["step"])
+				thinkingByIdx[step] = len(entries)
 				entries = append(entries, feedEntry{
 					kind:      feedThinking,
 					timestamp: ev.Timestamp,
 					text:      "Thinking",
 					sourceID:  ev.EventID,
+					live:      true,
 				})
-			} else if ev.Type == "task.done" {
+			case "model.thinking.summary":
+				step := strings.TrimSpace(ev.Data["step"])
+				txt := strings.TrimSpace(ev.Data["text"])
+				if txt != "" {
+					if idx, ok := thinkingByIdx[step]; ok {
+						entries[idx].thinkingLines = append(entries[idx].thinkingLines, txt)
+					}
+				}
+			case "model.thinking.end":
+				step := strings.TrimSpace(ev.Data["step"])
+				if idx, ok := thinkingByIdx[step]; ok {
+					entries[idx].live = false
+					start := entries[idx].timestamp
+					if !start.IsZero() && ev.Timestamp.After(start) {
+						entries[idx].thinkingDuration = ev.Timestamp.Sub(start)
+					}
+				}
+			case "task.done":
 				summary := strings.TrimSpace(ev.Data["summary"])
 				if summary == "" {
 					summary = "(Task completed.)"
