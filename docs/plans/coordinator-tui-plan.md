@@ -12,17 +12,17 @@ The coordinator TUI is a **standalone, full-screen Bubble Tea chat-style interfa
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   You                                              2m ago                   │
-│   Please implement the authentication module                                 │
-│   ✓ queued                                                                   │
+│   Please implement the authentication module                                │
+│   ✓ queued                                                                  │
 │                                                                             │
 │   ● architect operations                                      30s ago       │
-│     fs_read  src/auth/handler.go                                              │
-│     └ Done                                                                   │
-│     shell_exec  go test ./...                                                 │
-│     └ running ⠹                                                              │
+│     Read  src/auth/handler.go                                            │
+│     └ Done                                                                  │
+│     Bash  go test ./...                                               │
+│     └ running ⠹                                                             │
 │                                                                             │
 │   ◆ system                                                    1m ago        │
-│   Session paused                                                             │
+│   Session paused                                                            │
 │                                                                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ ❯ type a goal or /command...                                    [feedback]  │  ← Input bar
@@ -366,6 +366,7 @@ When `code_exec` runs, it executes Python that can call multiple bridge tools (f
 
 5. **Summary-only (no child list)**  
    Show only the Python block with `toolCallCount` and `runtimeMs`:
+
    ```
    │     Python  Run python code                                    │
    │     └ Done  3 tools, 120ms                                     │

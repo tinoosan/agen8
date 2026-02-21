@@ -1312,6 +1312,19 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 			if err != nil {
 				return protocol.ActivityListResult{}, err
 			}
+			// Populate Data["role"] with the profile name for standalone parent runs.
+			parentRole := "agent"
+			if s.run.Runtime != nil && strings.TrimSpace(s.run.Runtime.Profile) != "" {
+				parentRole = strings.TrimSpace(s.run.Runtime.Profile)
+			}
+			for i := range acts {
+				if acts[i].Data == nil {
+					acts[i].Data = map[string]string{}
+				}
+				if strings.TrimSpace(acts[i].Data["role"]) == "" {
+					acts[i].Data["role"] = parentRole
+				}
+			}
 			total, _ := s.session.CountActivities(ctx, runID)
 			next := 0
 			if offset+len(acts) < total {
@@ -1319,10 +1332,23 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 			}
 			return protocol.ActivityListResult{Activities: acts, TotalCount: total, NextOffset: next}, nil
 		}
-		// Include activities from child runs (sub-agents) and prefix with "[Sub-agent N]".
+		// Include activities from child runs (sub-agents) with Data["role"] set.
 		merged := make([]types.Activity, 0, 256)
 		parentActs, err := s.session.ListActivities(ctx, runID, 500, 0)
 		if err == nil {
+			// Populate Data["role"] with the profile name for standalone parent runs.
+			parentRole := "agent"
+			if s.run.Runtime != nil && strings.TrimSpace(s.run.Runtime.Profile) != "" {
+				parentRole = strings.TrimSpace(s.run.Runtime.Profile)
+			}
+			for i := range parentActs {
+				if parentActs[i].Data == nil {
+					parentActs[i].Data = map[string]string{}
+				}
+				if strings.TrimSpace(parentActs[i].Data["role"]) == "" {
+					parentActs[i].Data["role"] = parentRole
+				}
+			}
 			merged = append(merged, parentActs...)
 		}
 		children, err := s.session.ListChildRuns(ctx, runID)
@@ -1332,13 +1358,16 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 				if n <= 0 {
 					n = 1
 				}
-				prefix := fmt.Sprintf("[Sub-agent %d] ", n)
+				childRole := fmt.Sprintf("Sub-agent %d", n)
 				childActs, err := s.session.ListActivities(ctx, child.RunID, 300, 0)
 				if err != nil {
 					continue
 				}
 				for i := range childActs {
-					childActs[i].Title = prefix + strings.TrimSpace(childActs[i].Title)
+					if childActs[i].Data == nil {
+						childActs[i].Data = map[string]string{}
+					}
+					childActs[i].Data["role"] = childRole
 					merged = append(merged, childActs[i])
 				}
 			}
@@ -1417,7 +1446,10 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 		}
 		for i := range acts {
 			if role != "" {
-				acts[i].Title = "[" + role + "] " + strings.TrimSpace(acts[i].Title)
+				if acts[i].Data == nil {
+					acts[i].Data = map[string]string{}
+				}
+				acts[i].Data["role"] = role
 			}
 			acts[i].ID = runID + ":" + acts[i].ID
 			merged = append(merged, acts[i])

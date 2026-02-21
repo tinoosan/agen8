@@ -331,7 +331,7 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 	lines := []string{headerLine}
 	for _, e := range t.entries {
 		verb := kindToVerb(e.opKind, e.data)
-		argPreview := truncate(e.text, maxInt(8, inner-len(verb)-8))
+		argPreview := truncate(stripLeadingVerb(e.text, verb), maxInt(8, inner-len(verb)-8))
 
 		// Primary operation line: verb in accent color + arg preview
 		opLine := "  " + styleAccent.Render(verb)
@@ -525,6 +525,20 @@ func fallback(v, def string) string {
 		return def
 	}
 	return v
+}
+
+// stripLeadingVerb removes a leading verb word from text to avoid duplication
+// when the verb is rendered separately (e.g. "Write /path" with verb "Write" → "/path").
+func stripLeadingVerb(text, verb string) string {
+	if verb == "" || text == "" {
+		return text
+	}
+	if len(text) >= len(verb) &&
+		strings.EqualFold(text[:len(verb)], verb) &&
+		(len(text) == len(verb) || text[len(verb)] == ' ') {
+		return strings.TrimSpace(text[len(verb):])
+	}
+	return text
 }
 
 func padRight(s string, width int) string {
