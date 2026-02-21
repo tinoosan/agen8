@@ -181,6 +181,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
 	case tea.MouseMsg:
+		now := time.Now()
+		if time.Since(m.lastWheelEvent) < 60*time.Millisecond {
+			return m, nil
+		}
+		m.lastWheelEvent = now
+
 		if msg.Type == tea.MouseWheelUp {
 			m.liveFollow = false
 			m.feedScroll -= 3
@@ -234,9 +240,11 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 	if len(entries) == 0 {
 		return
 	}
+	oldLines := m.totalFeedLines()
+
 	others := make([]feedEntry, 0, len(m.feed))
 	for _, e := range m.feed {
-		if e.kind != feedAgent || (e.kind == feedAgent && e.isText) {
+		if e.kind != feedAgent || (e.kind == feedAgent && e.isTaskResponse) {
 			others = append(others, e)
 		}
 	}
@@ -245,19 +253,31 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 		return merged[i].timestamp.Before(merged[j].timestamp)
 	})
 	m.feed = merged
+
 	if m.liveFollow {
 		m.pinFeedToBottom()
+	} else {
+		newLines := m.totalFeedLines()
+		if newLines > oldLines {
+			m.feedScroll += (newLines - oldLines)
+		}
+		maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+		if m.feedScroll > maxScroll {
+			m.feedScroll = maxScroll
+		}
 	}
 }
 
 func (m *Model) mergeThinkingEntries(entries []feedEntry) {
+	oldLines := m.totalFeedLines()
+
 	// Deduplicate by sourceID against existing thinking or agent text entries.
 	existing := make(map[string]bool)
 	for _, e := range m.feed {
 		if e.sourceID != "" {
 			if e.kind == feedThinking {
 				existing["thinking_"+e.sourceID] = true
-			} else if e.kind == feedAgent && e.isText {
+			} else if e.kind == feedAgent && e.isTaskResponse {
 				existing["task_"+e.sourceID] = true
 			}
 		}
@@ -267,7 +287,7 @@ func (m *Model) mergeThinkingEntries(entries []feedEntry) {
 		if e.sourceID != "" {
 			if e.kind == feedThinking {
 				key = "thinking_" + e.sourceID
-			} else if e.kind == feedAgent && e.isText {
+			} else if e.kind == feedAgent && e.isTaskResponse {
 				key = "task_" + e.sourceID
 			}
 		}
@@ -279,8 +299,18 @@ func (m *Model) mergeThinkingEntries(entries []feedEntry) {
 	sort.SliceStable(m.feed, func(i, j int) bool {
 		return m.feed[i].timestamp.Before(m.feed[j].timestamp)
 	})
+
 	if m.liveFollow {
 		m.pinFeedToBottom()
+	} else {
+		newLines := m.totalFeedLines()
+		if newLines > oldLines {
+			m.feedScroll += (newLines - oldLines)
+		}
+		maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+		if m.feedScroll > maxScroll {
+			m.feedScroll = maxScroll
+		}
 	}
 }
 

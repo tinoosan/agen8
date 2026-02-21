@@ -11,7 +11,7 @@ func TestMergeThinkingEntries(t *testing.T) {
 
 	entries1 := []feedEntry{
 		{kind: feedThinking, sourceID: "evt_1", timestamp: ts},
-		{kind: feedAgent, isText: true, sourceID: "task_1", timestamp: ts.Add(time.Second)},
+		{kind: feedAgent, isTaskResponse: true, sourceID: "task_1", timestamp: ts.Add(time.Second)},
 	}
 
 	m.mergeThinkingEntries(entries1)
@@ -22,7 +22,7 @@ func TestMergeThinkingEntries(t *testing.T) {
 	// Add same again plus one new
 	entries2 := []feedEntry{
 		{kind: feedThinking, sourceID: "evt_1", timestamp: ts},
-		{kind: feedAgent, isText: true, sourceID: "task_1", timestamp: ts.Add(time.Second)},
+		{kind: feedAgent, isTaskResponse: true, sourceID: "task_1", timestamp: ts.Add(time.Second)},
 		{kind: feedThinking, sourceID: "evt_2", timestamp: ts.Add(time.Second * 2)},
 	}
 
@@ -41,7 +41,7 @@ func TestMergeActivityEntries(t *testing.T) {
 		{kind: feedUser, text: "do it", timestamp: ts},
 		{kind: feedThinking, sourceID: "evt_1", timestamp: ts.Add(time.Second)},
 		{kind: feedAgent, isText: false, sourceID: "op_1", timestamp: ts.Add(2 * time.Second)},
-		{kind: feedAgent, isText: true, sourceID: "task_1", timestamp: ts.Add(3 * time.Second)}, // This is response block
+		{kind: feedAgent, isTaskResponse: true, sourceID: "task_1", timestamp: ts.Add(3 * time.Second)}, // This is response block
 	}
 
 	activityEntries := []feedEntry{
@@ -59,7 +59,7 @@ func TestMergeActivityEntries(t *testing.T) {
 	// Verify the text entry is retained
 	foundText := false
 	for _, e := range m.feed {
-		if e.kind == feedAgent && e.isText && e.sourceID == "task_1" {
+		if e.kind == feedAgent && e.isTaskResponse && e.sourceID == "task_1" {
 			foundText = true
 		}
 	}

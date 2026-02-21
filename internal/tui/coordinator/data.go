@@ -24,19 +24,20 @@ const (
 )
 
 type feedEntry struct {
-	kind       feedKind
-	timestamp  time.Time
-	finishedAt time.Time // zero if not yet finished
-	role       string
-	text       string
-	path       string
-	status     string
-	opKind     string
-	sourceID   string
-	isText     bool
-	data       map[string]string // raw activity Data for verb resolution
-	planItems  []string          // parsed checklist items for plan writes
-	childCount int               // number of grouped bridge tool calls (for code_exec parents)
+	kind           feedKind
+	timestamp      time.Time
+	finishedAt     time.Time // zero if not yet finished
+	role           string
+	text           string
+	path           string
+	status         string
+	opKind         string
+	sourceID       string
+	isText         bool
+	isTaskResponse bool              // true if this text response came from the top-level task (prevents activity merge dupe)
+	data           map[string]string // raw activity Data for verb resolution
+	planItems      []string          // parsed checklist items for plan writes
+	childCount     int               // number of grouped bridge tool calls (for code_exec parents)
 }
 
 type sessionLoadedMsg struct {
@@ -214,12 +215,13 @@ func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 				}
 				taskId := strings.TrimSpace(ev.Data["taskId"])
 				entries = append(entries, feedEntry{
-					kind:      feedAgent,
-					isText:    true,
-					text:      summary,
-					role:      "agent",
-					timestamp: ev.Timestamp,
-					sourceID:  taskId,
+					kind:           feedAgent,
+					isText:         true,
+					isTaskResponse: true,
+					text:           summary,
+					role:           "agent",
+					timestamp:      ev.Timestamp,
+					sourceID:       taskId,
 				})
 			}
 			seq := res.Next

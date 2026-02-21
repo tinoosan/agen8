@@ -81,6 +81,8 @@ type Model struct {
 	pickerKind    string
 	pickerItems   []pickerItem
 	pickerSel     int
+
+	lastWheelEvent time.Time // Used to throttle mouse wheel events
 }
 
 // Run launches the full-screen coordinator TUI.
