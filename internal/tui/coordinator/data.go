@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -30,6 +31,8 @@ type feedEntry struct {
 	opKind    string
 	sourceID  string
 	isText    bool
+	data      map[string]string // raw activity Data for verb resolution
+	planItems []string          // parsed checklist items for plan writes
 }
 
 type sessionLoadedMsg struct {
@@ -128,12 +131,31 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 				opKind:    strings.TrimSpace(act.Kind),
 				sourceID:  strings.TrimSpace(act.ID),
 				isText:    isActivityText(act),
+				data:      act.Data,
 			})
 		}
 
 		sort.SliceStable(entries, func(i, j int) bool {
 			return entries[i].timestamp.Before(entries[j].timestamp)
 		})
+
+		// If any activity is a plan write, fetch the current plan checklist.
+		hasPlanWrite := false
+		lastPlanIdx := -1
+		for i, e := range entries {
+			if isActivityPlanWrite(e.opKind, e.text) {
+				hasPlanWrite = true
+				lastPlanIdx = i
+			}
+		}
+		if hasPlanWrite && lastPlanIdx >= 0 {
+			var planRes protocol.PlanGetResult
+			if err := cli.Call(ctx, protocol.MethodPlanGet, protocol.PlanGetParams{
+				ThreadID: protocol.ThreadID(sid),
+			}, &planRes); err == nil && planRes.Checklist != "" {
+				entries[lastPlanIdx].planItems = parseChecklistItems(planRes.Checklist)
+			}
+		}
 
 		return activityLoadedMsg{entries: entries, connected: true}
 	}
@@ -263,15 +285,11 @@ func activityText(act types.Activity) string {
 	if title != "" {
 		return title
 	}
-	kind := strings.TrimSpace(act.Kind)
-	if kind == "" {
-		kind = "op"
-	}
 	path := strings.TrimSpace(act.Path)
 	if path != "" {
-		return kind + " " + path
+		return path
 	}
-	return kind
+	return ""
 }
 
 func isActivityText(act types.Activity) bool {
@@ -285,4 +303,93 @@ func isActivityText(act types.Activity) bool {
 		return true
 	}
 	return false
+}
+
+// kindToVerb maps activity kinds to human-friendly verbs.
+func kindToVerb(kind string, data map[string]string) string {
+	k := strings.TrimSpace(strings.ToLower(kind))
+	switch k {
+	case "fs_read":
+		return "Read"
+	case "fs_list":
+		return "List"
+	case "fs_write":
+		return "Write"
+	case "fs_append":
+		return "Append"
+	case "fs_edit":
+		return "Edit"
+	case "fs_patch":
+		return "Patch"
+	case "fs_search":
+		return "Search"
+	case "shell_exec":
+		return "Bash"
+	case "http_fetch":
+		return "Fetch"
+	case "browser":
+		return "Browse"
+	case "code_exec":
+		return "Python"
+	case "email":
+		return "Email"
+	case "agent_spawn":
+		return "Spawn"
+	case "task_create":
+		return "Dispatch task"
+	case "task_review":
+		return "Review task"
+	case "trace_run":
+		return "Trace"
+	case "workdir.changed":
+		return "Workdir"
+	case "llm.web.search":
+		return "Web search"
+	}
+	// Fallback: use Data["tool"] if available, otherwise raw kind.
+	if data != nil {
+		if tool := strings.TrimSpace(data["tool"]); tool != "" {
+			return tool
+		}
+	}
+	if k != "" {
+		return kind
+	}
+	return "op"
+}
+
+// isActivityPlanWrite returns true if the activity represents a plan file write.
+func isActivityPlanWrite(kind string, text string) bool {
+	k := strings.TrimSpace(strings.ToLower(kind))
+	if k != "fs_write" && k != "fs_edit" && k != "fs_patch" && k != "fs_append" {
+		return false
+	}
+	p := strings.TrimSpace(text)
+	if p == "" {
+		return false
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return strings.EqualFold(p, "/plan/HEAD.md") || strings.EqualFold(p, "/plan/CHECKLIST.md")
+}
+
+// checklistRe matches markdown checklist lines like "- [x] item" or "* [ ] item".
+var checklistRe = regexp.MustCompile(`^[\s]*[-*]\s*\[([ xX])\]\s*(.+)$`)
+
+// parseChecklistItems extracts checklist items from markdown content.
+func parseChecklistItems(md string) []string {
+	var items []string
+	for _, line := range strings.Split(md, "\n") {
+		if m := checklistRe.FindStringSubmatch(line); m != nil {
+			check := strings.ToLower(m[1])
+			text := strings.TrimSpace(m[2])
+			if check == "x" {
+				items = append(items, "[x] "+text)
+			} else {
+				items = append(items, "[ ] "+text)
+			}
+		}
+	}
+	return items
 }

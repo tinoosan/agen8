@@ -93,6 +93,20 @@ func (m *Model) renderHeader() string {
 		tags = append(tags, styleErr.Render("● disconnected"))
 	}
 
+	// Agent status pill
+	if m.agentStatus != "" && m.agentStatus != "Idle" {
+		var statusPill string
+		switch {
+		case strings.Contains(m.agentStatus, "Error"):
+			statusPill = styleErr.Render(m.agentStatus)
+		case strings.Contains(m.agentStatus, "Done"):
+			statusPill = styleOK.Render(m.agentStatus)
+		default:
+			statusPill = stylePending.Render(m.spinner() + " " + m.agentStatus)
+		}
+		tags = append(tags, statusPill)
+	}
+
 	// Mode tag
 	mode := fallback(m.sessionMode, "standalone")
 	tags = append(tags, kit.RenderTag(kit.TagOptions{
@@ -283,9 +297,11 @@ func (m *Model) renderUserBlock(t conversationTurn, inner int) []string {
 
 // ── Agent block ────────────────────────────────────────────────────────
 //
-//   ■ architect                                        30s ago
-//   📄 ✓ fs_read  src/auth/handler.go
-//   ⚡ ⠹ shell_exec  go test ./...
+//   ● architect                                        30s ago
+//     Read  src/auth/handler.go
+//     └ Done
+//     Bash  go test ./...
+//     └ running ⠹
 
 func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 	if t.isText {
@@ -304,7 +320,7 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 	// Tool operations block
 	age := relativeAge(t.timestamp.Format(time.RFC3339))
 	role := truncate(t.role, maxInt(4, 14))
-	label := kit.StyleDim.Render("● ") + styleAccent.Bold(true).Render(role+" operations")
+	label := kit.StyleDim.Render("● ") + styleAccent.Bold(true).Render(role)
 	ageStr := kit.StyleDim.Render(age)
 
 	labelW := runewidth.StringWidth(stripANSI(label))
@@ -314,20 +330,43 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 
 	lines := []string{headerLine}
 	for _, e := range t.entries {
-		kind := truncate(fallback(e.opKind, "op"), 15)
-		text := truncate(e.text, maxInt(8, inner-len(kind)-15))
+		verb := kindToVerb(e.opKind, e.data)
+		argPreview := truncate(e.text, maxInt(8, inner-len(verb)-8))
 
-		// Primary operation line
-		lines = append(lines, "  "+kind+" "+text)
+		// Primary operation line: verb in accent color + arg preview
+		opLine := "  " + styleAccent.Render(verb)
+		if argPreview != "" {
+			opLine += "  " + argPreview
+		}
+		lines = append(lines, opLine)
 
 		// Status line
-		statusText := "└ " + e.status
-		if e.status == "running" || e.status == "pending" {
-			statusText = "└ " + e.status + " " + m.spinner()
-		} else if e.status == "done" || e.status == "completed" {
-			statusText = "└ Done"
+		s := strings.ToLower(strings.TrimSpace(e.status))
+		var statusLine string
+		switch {
+		case s == "running":
+			statusLine = "  " + kit.StyleDim.Render("└ running "+m.spinner())
+		case s == "pending":
+			statusLine = "  " + kit.StyleDim.Render("└ pending ...")
+		case s == "done" || s == "completed" || s == "ok" || s == "succeeded":
+			statusLine = "  " + styleOK.Render("└ Done")
+		case s == "error" || s == "failed" || s == "canceled" || s == "cancelled":
+			statusLine = "  " + styleErr.Render("└ Failed")
+		default:
+			statusLine = "  " + kit.StyleDim.Render("└ "+e.status)
 		}
-		lines = append(lines, "  "+kit.StyleDim.Render(statusText))
+		lines = append(lines, statusLine)
+
+		// Plan items (if present)
+		if len(e.planItems) > 0 {
+			for _, item := range e.planItems {
+				if strings.HasPrefix(item, "[x]") {
+					lines = append(lines, "    "+styleOK.Render("- "+item))
+				} else {
+					lines = append(lines, "    "+kit.StyleDim.Render("- "+item))
+				}
+			}
+		}
 	}
 	return lines
 }

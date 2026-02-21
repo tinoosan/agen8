@@ -24,6 +24,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.feedback != "" && time.Since(m.feedbackAt) > 3*time.Second {
 			m.feedback = ""
 		}
+		m.expireAgentStatus()
 		return m, tea.Batch(
 			fetchSessionCmd(m.endpoint, m.sessionID),
 			fetchActivityCmd(m.endpoint, m.sessionID),
@@ -56,6 +57,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.connected = true
 		m.lastErr = ""
 		m.mergeActivityEntries(msg.entries)
+		m.deriveAgentStatus()
 		return m, nil
 
 	case goalSubmittedMsg:
@@ -270,4 +272,55 @@ func (m *Model) feedHeight() int {
 		return 1
 	}
 	return h
+}
+
+// ── Agent status derivation ────────────────────────────────────────────
+
+func (m *Model) setAgentStatus(s string) {
+	m.agentStatus = s
+	m.statusExpiresAt = time.Time{}
+}
+
+func (m *Model) setAgentStatusExpiring(s string, d time.Duration) {
+	m.agentStatus = s
+	m.statusExpiresAt = time.Now().Add(d)
+}
+
+func (m *Model) expireAgentStatus() {
+	if !m.statusExpiresAt.IsZero() && time.Now().After(m.statusExpiresAt) {
+		m.agentStatus = "Idle"
+		m.statusExpiresAt = time.Time{}
+	}
+}
+
+func (m *Model) deriveAgentStatus() {
+	// Find the last agent entry.
+	var last *feedEntry
+	for i := len(m.feed) - 1; i >= 0; i-- {
+		if m.feed[i].kind == feedAgent && !m.feed[i].isText {
+			last = &m.feed[i]
+			break
+		}
+	}
+	if last == nil {
+		m.setAgentStatus("Idle")
+		return
+	}
+
+	s := strings.ToLower(strings.TrimSpace(last.status))
+	switch {
+	case s == "pending" || s == "running":
+		verb := kindToVerb(last.opKind, last.data)
+		m.setAgentStatus("Processing " + verb + "...")
+	case s == "error" || s == "failed":
+		m.setAgentStatusExpiring("Error", 10*time.Second)
+	case s == "done" || s == "completed" || s == "ok" || s == "succeeded":
+		if last.timestamp.After(time.Now().Add(-5 * time.Second)) {
+			m.setAgentStatusExpiring("Done", 5*time.Second)
+		} else {
+			m.setAgentStatus("Idle")
+		}
+	default:
+		m.setAgentStatus("Idle")
+	}
 }

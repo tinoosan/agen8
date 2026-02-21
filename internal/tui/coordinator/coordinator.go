@@ -63,6 +63,9 @@ type Model struct {
 	feedbackKind    int
 	feedbackAt      time.Time
 	lastReconnectAt time.Time
+
+	agentStatus     string    // "Thinking…", "Processing…", "Idle", etc.
+	statusExpiresAt time.Time // auto-clear time for expiring statuses
 }
 
 // Run launches the full-screen coordinator TUI.
