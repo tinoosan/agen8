@@ -192,7 +192,7 @@ func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 			RunID:    strings.TrimSpace(runID),
 			AfterSeq: afterSeq,
 			Limit:    100,
-			Types:    []string{"model.thinking.start", "model.thinking.end"},
+			Types:    []string{"model.thinking.start", "model.thinking.end", "task.done"},
 		}, &res); err != nil {
 			return thinkingEventsMsg{err: err}
 		}
@@ -206,6 +206,20 @@ func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 					timestamp: ev.Timestamp,
 					text:      "Thinking",
 					sourceID:  ev.EventID,
+				})
+			} else if ev.Type == "task.done" {
+				summary := strings.TrimSpace(ev.Data["summary"])
+				if summary == "" {
+					summary = "(Task completed.)"
+				}
+				taskId := strings.TrimSpace(ev.Data["taskId"])
+				entries = append(entries, feedEntry{
+					kind:      feedAgent,
+					isText:    true,
+					text:      summary,
+					role:      "agent",
+					timestamp: ev.Timestamp,
+					sourceID:  taskId,
 				})
 			}
 			seq := res.Next

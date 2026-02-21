@@ -236,7 +236,7 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 	}
 	others := make([]feedEntry, 0, len(m.feed))
 	for _, e := range m.feed {
-		if e.kind != feedAgent {
+		if e.kind != feedAgent || (e.kind == feedAgent && e.isText) {
 			others = append(others, e)
 		}
 	}
@@ -251,15 +251,27 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 }
 
 func (m *Model) mergeThinkingEntries(entries []feedEntry) {
-	// Deduplicate by sourceID against existing thinking entries.
+	// Deduplicate by sourceID against existing thinking or agent text entries.
 	existing := make(map[string]bool)
 	for _, e := range m.feed {
-		if e.kind == feedThinking && e.sourceID != "" {
-			existing[e.sourceID] = true
+		if e.sourceID != "" {
+			if e.kind == feedThinking {
+				existing["thinking_"+e.sourceID] = true
+			} else if e.kind == feedAgent && e.isText {
+				existing["task_"+e.sourceID] = true
+			}
 		}
 	}
 	for _, e := range entries {
-		if e.sourceID != "" && existing[e.sourceID] {
+		key := ""
+		if e.sourceID != "" {
+			if e.kind == feedThinking {
+				key = "thinking_" + e.sourceID
+			} else if e.kind == feedAgent && e.isText {
+				key = "task_" + e.sourceID
+			}
+		}
+		if key != "" && existing[key] {
 			continue
 		}
 		m.feed = append(m.feed, e)
