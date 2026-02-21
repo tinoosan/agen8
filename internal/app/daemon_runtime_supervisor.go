@@ -632,18 +632,18 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	var thinkingBuf strings.Builder
 
 	// flushThinkingLines emits complete lines from thinkingBuf.
-	// If final is true, also emits any remaining partial line.
+	// Lines are split on newlines and also on sentence boundaries (". ") when
+	// the buffer exceeds a soft limit, so that models which emit reasoning as
+	// a single continuous block still produce separate, readable summary chunks.
+	// If final is true, also emits any remaining partial text.
 	// Must be called with thinkingMu held.
+	const sentenceLimit = 120 // soft char limit before splitting on sentence boundary
 	flushThinkingLines := func(final bool) {
 		text := thinkingBuf.String()
 		stepStr := strconv.Itoa(thinkingStep)
-		for {
-			idx := strings.IndexByte(text, '\n')
-			if idx < 0 {
-				break
-			}
-			line := strings.TrimRight(text[:idx], " \t\r")
-			text = text[idx+1:]
+
+		emitLine := func(line string) {
+			line = strings.TrimRight(line, " \t\r")
 			if line != "" {
 				emitEvent(context.Background(), events.Event{
 					Type:    "model.thinking.summary",
@@ -652,12 +652,30 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 				})
 			}
 		}
+
+		for {
+			// Prefer splitting on newlines first.
+			idx := strings.IndexByte(text, '\n')
+			if idx >= 0 {
+				emitLine(text[:idx])
+				text = text[idx+1:]
+				continue
+			}
+			// If the buffer is long enough, try splitting on a sentence boundary.
+			if len(text) >= sentenceLimit {
+				// Look for ". " after the soft limit to find a natural break.
+				si := strings.Index(text[sentenceLimit:], ". ")
+				if si >= 0 {
+					cut := sentenceLimit + si + 1 // include the period
+					emitLine(text[:cut])
+					text = strings.TrimLeft(text[cut:], " ")
+					continue
+				}
+			}
+			break
+		}
 		if final && strings.TrimSpace(text) != "" {
-			emitEvent(context.Background(), events.Event{
-				Type:    "model.thinking.summary",
-				Message: "Thinking",
-				Data:    map[string]string{"step": stepStr, "text": strings.TrimRight(text, " \t\r")},
-			})
+			emitLine(text)
 			text = ""
 		}
 		thinkingBuf.Reset()

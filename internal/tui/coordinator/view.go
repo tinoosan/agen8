@@ -556,14 +556,13 @@ func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
 		}
 	}
 
-	// Join all chunks into one text block (handles both old per-token fragments
-	// and new complete lines), then split on newlines for display.
-	combined := strings.Join(rawLines, "\n")
+	// Each entry is a complete summary line from the daemon.
+	// Trim and filter empty entries.
 	var flat []string
-	for _, sub := range strings.Split(combined, "\n") {
-		sub = strings.TrimRight(sub, " \t")
-		if sub != "" {
-			flat = append(flat, sub)
+	for _, l := range rawLines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			flat = append(flat, l)
 		}
 	}
 	if len(flat) == 0 {
