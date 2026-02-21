@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/tui/rpcscope"
+	"github.com/tinoosan/agen8/pkg/types"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -71,8 +72,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case thinkingEventsMsg:
-		if msg.err == nil && len(msg.entries) > 0 {
-			m.mergeThinkingEntries(msg.entries)
+		if msg.err == nil {
+			m.processThinkingEvents(msg.events)
+			if len(msg.entries) > 0 {
+				m.mergeThinkingEntries(msg.entries)
+			}
 		}
 		if msg.lastSeq > m.lastEventSeq {
 			m.lastEventSeq = msg.lastSeq
@@ -266,6 +270,92 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 		return merged[i].timestamp.Before(merged[j].timestamp)
 	})
 	m.feed = merged
+
+	if m.liveFollow {
+		m.pinFeedToBottom()
+	} else {
+		newLines := m.totalFeedLines()
+		if newLines > oldLines {
+			m.feedScroll += (newLines - oldLines)
+		}
+		maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+		if m.feedScroll > maxScroll {
+			m.feedScroll = maxScroll
+		}
+	}
+}
+
+// processThinkingEvents applies raw model.thinking.* events to the feed.
+// It finds existing thinking entries by thinkingStep for cross-batch correlation.
+func (m *Model) processThinkingEvents(events []types.EventRecord) {
+	if len(events) == 0 {
+		return
+	}
+
+	// findThinking returns the index of the thinking feedEntry for the given step, or -1.
+	findThinking := func(step string) int {
+		for i := range m.feed {
+			if m.feed[i].kind == feedThinking && m.feed[i].thinkingStep == step {
+				return i
+			}
+		}
+		return -1
+	}
+
+	oldLines := m.totalFeedLines()
+	changed := false
+
+	for _, ev := range events {
+		step := strings.TrimSpace(ev.Data["step"])
+		switch ev.Type {
+		case "model.thinking.start":
+			if findThinking(step) >= 0 {
+				continue // already tracking this step
+			}
+			m.feed = append(m.feed, feedEntry{
+				kind:         feedThinking,
+				timestamp:    ev.Timestamp,
+				text:         "Thinking",
+				sourceID:     ev.EventID,
+				live:         true,
+				thinkingStep: step,
+			})
+			changed = true
+
+		case "model.thinking.summary":
+			idx := findThinking(step)
+			if idx < 0 {
+				continue
+			}
+			txt := strings.TrimSpace(ev.Data["text"])
+			if txt != "" {
+				m.feed[idx].thinkingLines = append(m.feed[idx].thinkingLines, txt)
+				changed = true
+			}
+
+		case "model.thinking.end":
+			idx := findThinking(step)
+			if idx < 0 {
+				continue
+			}
+			if !m.feed[idx].live {
+				continue // already closed
+			}
+			m.feed[idx].live = false
+			start := m.feed[idx].timestamp
+			if !start.IsZero() && ev.Timestamp.After(start) {
+				m.feed[idx].thinkingDuration = ev.Timestamp.Sub(start)
+			}
+			changed = true
+		}
+	}
+
+	if !changed {
+		return
+	}
+	sort.SliceStable(m.feed, func(i, j int) bool {
+		return m.feed[i].timestamp.Before(m.feed[j].timestamp)
+	})
 
 	if m.liveFollow {
 		m.pinFeedToBottom()

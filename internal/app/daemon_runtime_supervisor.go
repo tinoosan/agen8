@@ -623,6 +623,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		sessionID: strings.TrimSpace(run.SessionID),
 		model:     strings.TrimSpace(model),
 	}
+	// Thinking-event state tracked across stream chunks.
+	var thinkingMu sync.Mutex
+	thinkingActive := false
+	thinkingStep := 0
+
 	agentCfg.Hooks = agent.Hooks{
 		OnLLMUsage: newCostUsageHook(
 			s.cfg,
@@ -636,7 +641,50 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			},
 			emitEvent,
 		),
+		OnStreamChunk: func(step int, chunk llmtypes.LLMStreamChunk) {
+			thinkingMu.Lock()
+			defer thinkingMu.Unlock()
+
+			stepStr := strconv.Itoa(step)
+			if chunk.IsReasoning {
+				if !thinkingActive {
+					thinkingActive = true
+					thinkingStep = step
+					emitEvent(context.Background(), events.Event{
+						Type:    "model.thinking.start",
+						Message: "Thinking started",
+						Data:    map[string]string{"step": stepStr},
+					})
+				}
+				if chunk.Text != "" {
+					emitEvent(context.Background(), events.Event{
+						Type:    "model.thinking.summary",
+						Message: "Thinking",
+						Data:    map[string]string{"step": stepStr, "text": chunk.Text},
+					})
+				}
+			} else if thinkingActive {
+				thinkingActive = false
+				emitEvent(context.Background(), events.Event{
+					Type:    "model.thinking.end",
+					Message: "Thinking ended",
+					Data:    map[string]string{"step": strconv.Itoa(thinkingStep)},
+				})
+			}
+		},
 		OnStep: func(step int, model, effectiveModel, summary string) {
+			// Close any open thinking block when the step ends.
+			thinkingMu.Lock()
+			if thinkingActive {
+				thinkingActive = false
+				emitEvent(context.Background(), events.Event{
+					Type:    "model.thinking.end",
+					Message: "Thinking ended",
+					Data:    map[string]string{"step": strconv.Itoa(thinkingStep)},
+				})
+			}
+			thinkingMu.Unlock()
+
 			data := map[string]string{
 				"step":  strconv.Itoa(step),
 				"model": strings.TrimSpace(model),

@@ -43,6 +43,7 @@ type feedEntry struct {
 	live             bool          // true while model is still thinking (no .end yet)
 	thinkingDuration time.Duration // elapsed duration once .end arrives
 	thinkingLines    []string      // accumulated summary lines from model.thinking.summary
+	thinkingStep     string        // agent loop step number (for cross-batch event correlation)
 }
 
 type sessionLoadedMsg struct {
@@ -76,7 +77,8 @@ type sessionActionMsg struct {
 }
 
 type thinkingEventsMsg struct {
-	entries []feedEntry
+	events  []types.EventRecord
+	entries []feedEntry // task.done entries processed in fetch
 	lastSeq int64
 	err     error
 }
@@ -215,41 +217,15 @@ func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 			return thinkingEventsMsg{err: err}
 		}
 
+		// Separate thinking events (processed in model with persistent state)
+		// from task.done events (self-contained, processed here).
+		var thinkingEvents []types.EventRecord
 		var entries []feedEntry
 		var maxSeq int64
-		// thinkingByIdx stores the entries-slice index of each thinking.start entry
-		// keyed by "step". Using indices (not pointers) avoids aliasing bugs when
-		// append reallocates the backing array.
-		thinkingByIdx := map[string]int{}
 		for _, ev := range res.Events {
 			switch ev.Type {
-			case "model.thinking.start":
-				step := strings.TrimSpace(ev.Data["step"])
-				thinkingByIdx[step] = len(entries)
-				entries = append(entries, feedEntry{
-					kind:      feedThinking,
-					timestamp: ev.Timestamp,
-					text:      "Thinking",
-					sourceID:  ev.EventID,
-					live:      true,
-				})
-			case "model.thinking.summary":
-				step := strings.TrimSpace(ev.Data["step"])
-				txt := strings.TrimSpace(ev.Data["text"])
-				if txt != "" {
-					if idx, ok := thinkingByIdx[step]; ok {
-						entries[idx].thinkingLines = append(entries[idx].thinkingLines, txt)
-					}
-				}
-			case "model.thinking.end":
-				step := strings.TrimSpace(ev.Data["step"])
-				if idx, ok := thinkingByIdx[step]; ok {
-					entries[idx].live = false
-					start := entries[idx].timestamp
-					if !start.IsZero() && ev.Timestamp.After(start) {
-						entries[idx].thinkingDuration = ev.Timestamp.Sub(start)
-					}
-				}
+			case "model.thinking.start", "model.thinking.summary", "model.thinking.end":
+				thinkingEvents = append(thinkingEvents, ev)
 			case "task.done":
 				summary := strings.TrimSpace(ev.Data["summary"])
 				if summary == "" {
@@ -284,7 +260,7 @@ func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 			}
 		}
 
-		return thinkingEventsMsg{entries: entries, lastSeq: maxSeq}
+		return thinkingEventsMsg{events: thinkingEvents, entries: entries, lastSeq: maxSeq}
 	}
 }
 

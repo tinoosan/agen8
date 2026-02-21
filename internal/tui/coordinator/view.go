@@ -547,32 +547,43 @@ func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
 	headerLine := "  " + triangle + " " + styleThinking.Italic(true).Render(label)
 	result := []string{headerLine}
 
-	lines := e.thinkingLines
-	if len(lines) == 0 {
+	rawLines := e.thinkingLines
+	if len(rawLines) == 0 {
 		if e.live {
-			lines = []string{m.spinner() + " thinking…"}
+			rawLines = []string{m.spinner() + " thinking…"}
 		} else {
-			lines = []string{"(no summary available)"}
+			rawLines = []string{"(no summary available)"}
 		}
 	}
 
-	// Flatten any lines that contain embedded newlines.
+	// Concatenate all chunks into a single text, then split by newlines.
+	// Summary events arrive as small streaming chunks that should be joined.
+	combined := strings.Join(rawLines, "")
 	var flat []string
-	for _, l := range lines {
-		for _, sub := range strings.Split(l, "\n") {
-			sub = strings.TrimRight(sub, " \t")
-			if sub != "" {
-				flat = append(flat, sub)
-			}
+	for _, sub := range strings.Split(combined, "\n") {
+		sub = strings.TrimRight(sub, " \t")
+		if sub != "" {
+			flat = append(flat, sub)
 		}
 	}
 	if len(flat) == 0 {
-		flat = lines
+		flat = []string{combined}
 	}
 
-	for i, l := range flat {
+	// Word-wrap thinking lines to use nearly the full terminal width.
+	// Only subtract the left indent: "  " (2) + branch (4) + " " (1) = 7 chars.
+	wrapWidth := maxInt(20, m.width-7)
+	var wrapped []string
+	for _, l := range flat {
+		wrapped = append(wrapped, wrapText(l, wrapWidth)...)
+	}
+	if len(wrapped) == 0 {
+		wrapped = flat
+	}
+
+	for i, l := range wrapped {
 		var branch string
-		if i == len(flat)-1 {
+		if i == len(wrapped)-1 {
 			branch = styleThinking.Render("  └─")
 		} else {
 			branch = styleThinking.Render("  │ ")
@@ -768,6 +779,36 @@ func viewportSlice(content string, visibleLines, targetIdx int) string {
 		start = maxInt(0, end-visibleLines)
 	}
 	return strings.Join(lines[start:end], "\n")
+}
+
+// wrapText breaks a single line into multiple lines at word boundaries,
+// each no wider than width characters.
+func wrapText(s string, width int) []string {
+	if width <= 0 {
+		return []string{s}
+	}
+	if runewidth.StringWidth(s) <= width {
+		return []string{s}
+	}
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return []string{s}
+	}
+	var lines []string
+	cur := words[0]
+	for _, w := range words[1:] {
+		test := cur + " " + w
+		if runewidth.StringWidth(test) > width {
+			lines = append(lines, cur)
+			cur = w
+		} else {
+			cur = test
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return lines
 }
 
 func maxInt(a, b int) int {
