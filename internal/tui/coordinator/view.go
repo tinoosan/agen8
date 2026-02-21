@@ -443,29 +443,43 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		}
 		lines = append(lines, opLine)
 
-		// Grouped bridge tool summary line.
+		// Collect sub-items (bridge summary + status) to render with tree branches.
+		var subItems []string
+
 		if e.childCount > 0 {
-			lines = append(lines, "  "+styleVerbBold.Render("└")+
-				" "+styleVerbBold.Render("Ran")+
-				fmt.Sprintf(" %d tools", e.childCount))
+			subItems = append(subItems, styleVerbBold.Render("Ran")+fmt.Sprintf(" %d tools", e.childCount))
 		}
 
-		// Status line
-		branch := styleVerbBold.Render("└")
-		var statusLine string
+		var statusText string
 		switch {
 		case s == "running":
-			statusLine = "  " + branch + " " + kit.StyleDim.Render("running "+m.spinner())
+			statusText = kit.StyleDim.Render("running " + m.spinner())
 		case s == "pending":
-			statusLine = "  " + branch + " " + kit.StyleDim.Render("pending ...")
+			statusText = kit.StyleDim.Render("pending ...")
 		case s == "done" || s == "completed" || s == "ok" || s == "succeeded":
-			statusLine = "  " + branch + " " + kit.StyleDim.Render("ok")
+			statusText = kit.StyleDim.Render("ok")
 		case s == "error" || s == "failed" || s == "canceled" || s == "cancelled":
-			statusLine = "  " + branch + " " + kit.StyleDim.Render("failed")
+			statusText = kit.StyleDim.Render("failed")
 		default:
-			statusLine = "  " + branch + " " + kit.StyleDim.Render(e.status)
+			statusText = kit.StyleDim.Render(e.status)
 		}
-		lines = append(lines, statusLine)
+		subItems = append(subItems, statusText)
+
+		// Add vertical connector when there are multiple sub-items (extends branch ~25%).
+		if len(subItems) > 1 {
+			lines = append(lines, "  "+styleVerbBold.Render("│"))
+		}
+
+		// Render sub-items with proper tree branches and extra horizontal space.
+		for i, item := range subItems {
+			var branch string
+			if i < len(subItems)-1 {
+				branch = styleVerbBold.Render("├")
+			} else {
+				branch = styleVerbBold.Render("└")
+			}
+			lines = append(lines, "  "+branch+"  "+item)
+		}
 
 		// Plan items (if present)
 		if len(e.planItems) > 0 {
