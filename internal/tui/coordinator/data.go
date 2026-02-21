@@ -452,7 +452,7 @@ func kindToVerb(kind string, data map[string]string) string {
 	case "shell_exec":
 		return "Bash"
 	case "http_fetch":
-		return "Fetch"
+		return "Fetched"
 	case "browser":
 		return "Browse"
 	case "code_exec":
