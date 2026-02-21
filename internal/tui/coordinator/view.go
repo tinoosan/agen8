@@ -24,12 +24,14 @@ var (
 	colorPending  = lipgloss.Color("#e5c07b")
 	colorAccent   = lipgloss.Color("#7aa2f7")
 	colorThinking = lipgloss.Color("#9d7fdb") // muted purple for thinking
+	colorPlan     = lipgloss.Color("#56b6c2") // teal for plan updates
 
 	styleOK        = lipgloss.NewStyle().Foreground(colorOK)
 	styleErr       = lipgloss.NewStyle().Foreground(colorErr)
 	stylePending   = lipgloss.NewStyle().Foreground(colorPending)
 	styleAccent    = lipgloss.NewStyle().Foreground(colorAccent)
 	styleThinking  = lipgloss.NewStyle().Foreground(colorThinking)
+	stylePlan      = lipgloss.NewStyle().Foreground(colorPlan)
 	styleHeader    = lipgloss.NewStyle().Bold(true)
 	stylePillOK    = lipgloss.NewStyle().Bold(true).Foreground(colorOK).Reverse(true).Padding(0, 1)
 	stylePillErr   = lipgloss.NewStyle().Bold(true).Foreground(colorErr).Reverse(true).Padding(0, 1)
@@ -306,6 +308,10 @@ func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
 
 			if isBridge && lastCodeExecIdx >= 0 {
 				filtered[lastCodeExecIdx].childCount++
+				// Promote plan items from collapsed bridge entries to the parent code_exec.
+				if len(e.planItems) > 0 {
+					filtered[lastCodeExecIdx].planItems = e.planItems
+				}
 				continue
 			}
 
@@ -417,6 +423,30 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 			continue
 		}
 
+		// ── Plan checklist rendering ──────────────────────────────
+		// When a plan write carries checklist items, render as a
+		// dedicated "Updated plan" block with tree branches.
+		if len(e.planItems) > 0 {
+			lines = append(lines, "  "+stylePlan.Render("●")+" "+stylePlan.Bold(true).Render("Updated plan"))
+			for i, item := range e.planItems {
+				isLast := i == len(e.planItems)-1
+				var branch string
+				if isLast {
+					branch = stylePlan.Render("  └─")
+				} else {
+					branch = stylePlan.Render("  ├─")
+				}
+				if strings.HasPrefix(item, "[x]") {
+					text := strings.TrimPrefix(item, "[x] ")
+					lines = append(lines, branch+" "+styleOK.Render("✓")+" "+styleOK.Render(text))
+				} else {
+					text := strings.TrimPrefix(item, "[ ] ")
+					lines = append(lines, branch+" "+kit.StyleDim.Render("○")+" "+kit.StyleDim.Render(text))
+				}
+			}
+			continue
+		}
+
 		verb := kindToVerb(e.opKind, e.data)
 		s := strings.ToLower(strings.TrimSpace(e.status))
 
@@ -484,17 +514,6 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 				branch = styleVerbBold.Render("└")
 			}
 			lines = append(lines, "  "+branch+"  "+item)
-		}
-
-		// Plan items (if present)
-		if len(e.planItems) > 0 {
-			for _, item := range e.planItems {
-				if strings.HasPrefix(item, "[x]") {
-					lines = append(lines, "    "+styleOK.Render("- "+item))
-				} else {
-					lines = append(lines, "    "+kit.StyleDim.Render("- "+item))
-				}
-			}
 		}
 	}
 	return lines
