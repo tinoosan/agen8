@@ -491,19 +491,39 @@ func (m *Model) expireAgentStatus() {
 }
 
 func (m *Model) deriveAgentStatus() {
-	// Find the last agent op entry and the last thinking entry.
+	// Find the last agent op, last agent text (response), and last thinking entry.
 	var lastOp *feedEntry
+	var lastAgentText *feedEntry
 	var lastThinking *feedEntry
 	for i := len(m.feed) - 1; i >= 0; i-- {
-		if lastOp == nil && m.feed[i].kind == feedAgent && !m.feed[i].isText {
-			lastOp = &m.feed[i]
+		e := &m.feed[i]
+		if lastOp == nil && e.kind == feedAgent && !e.isText {
+			lastOp = e
 		}
-		if lastThinking == nil && m.feed[i].kind == feedThinking {
-			lastThinking = &m.feed[i]
+		if lastAgentText == nil && e.kind == feedAgent && e.isText {
+			lastAgentText = e
 		}
-		if lastOp != nil && lastThinking != nil {
+		if lastThinking == nil && e.kind == feedThinking {
+			lastThinking = e
+		}
+		if lastOp != nil && lastAgentText != nil && lastThinking != nil {
 			break
 		}
+	}
+
+	// If the most recent agent activity is a text response after thinking, agent has responded -> Idle.
+	if lastAgentText != nil && lastThinking != nil && lastAgentText.timestamp.After(lastThinking.timestamp) {
+		if lastAgentText.timestamp.After(time.Now().Add(-5 * time.Second)) {
+			m.setAgentStatusExpiring("Done", 5*time.Second)
+		} else {
+			m.setAgentStatus("Idle")
+		}
+		return
+	}
+	if lastAgentText != nil && lastThinking == nil && lastOp == nil {
+		// Feed is only agent text (no ops yet).
+		m.setAgentStatus("Idle")
+		return
 	}
 
 	if lastOp == nil {
@@ -518,10 +538,17 @@ func (m *Model) deriveAgentStatus() {
 	case s == "error" || s == "failed":
 		m.setAgentStatusExpiring("Error", 10*time.Second)
 	case s == "done" || s == "completed" || s == "ok" || s == "succeeded":
-		// If we have a thinking event that's more recent than the last op, keep Processing
-		// (thinking is already visible in the feed as a dedicated block).
-		if lastThinking != nil && lastThinking.timestamp.After(lastOp.timestamp) {
+		// If thinking is more recent than the last op and still live, show Processing.
+		// If thinking has ended and there's no agent text after it, don't stay on Processing.
+		if lastThinking != nil && lastThinking.timestamp.After(lastOp.timestamp) && lastThinking.live {
 			m.setAgentStatus("Processing")
+		} else if lastThinking != nil && lastThinking.timestamp.After(lastOp.timestamp) && !lastThinking.live {
+			// Thinking ended; no agent text after it in feed order, but we already returned above if there was.
+			if lastOp.timestamp.After(time.Now().Add(-5 * time.Second)) {
+				m.setAgentStatusExpiring("Done", 5*time.Second)
+			} else {
+				m.setAgentStatus("Idle")
+			}
 		} else if lastOp.timestamp.After(time.Now().Add(-5 * time.Second)) {
 			m.setAgentStatusExpiring("Done", 5*time.Second)
 		} else {
