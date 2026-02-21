@@ -387,7 +387,7 @@ func kindToVerb(kind string, data map[string]string) string {
 	case "browser":
 		return "Browse"
 	case "code_exec":
-		return "Executing code"
+		return "Python"
 	case "email":
 		return "Email"
 	case "agent_spawn":

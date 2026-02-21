@@ -416,7 +416,10 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		verb := kindToVerb(e.opKind, e.data)
 
 		var argPreview string
-		if e.path != "" && isPathBasedOp(e.opKind) {
+		opLower := strings.ToLower(strings.TrimSpace(e.opKind))
+		if opLower == "code_exec" {
+			// Show just the verb — no arg preview for code_exec.
+		} else if e.path != "" && isPathBasedOp(e.opKind) {
 			argPreview = truncate(e.path, maxInt(8, inner-len(verb)-8))
 		} else {
 			argPreview = truncate(stripLeadingVerb(e.text, verb), maxInt(8, inner-len(verb)-8))
@@ -432,7 +435,8 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		// Grouped bridge tool summary line (above status).
 		if e.childCount > 0 {
 			lines = append(lines, "  "+styleVerbBold.Render("└")+
-				" "+styleVerbBold.Render(fmt.Sprintf("Ran %d tools", e.childCount)))
+				" "+styleVerbBold.Render("Ran")+
+				fmt.Sprintf(" %d tools", e.childCount))
 		}
 
 		// Status line
@@ -445,9 +449,9 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		case s == "pending":
 			statusLine = "  " + branch + " " + kit.StyleDim.Render("pending ...")
 		case s == "done" || s == "completed" || s == "ok" || s == "succeeded":
-			statusLine = "  " + branch + " " + styleOK.Render("Done")
+			statusLine = "  " + branch + " " + kit.StyleDim.Render("ok")
 		case s == "error" || s == "failed" || s == "canceled" || s == "cancelled":
-			statusLine = "  " + branch + " " + styleErr.Render("Failed")
+			statusLine = "  " + branch + " " + kit.StyleDim.Render("failed")
 		default:
 			statusLine = "  " + branch + " " + kit.StyleDim.Render(e.status)
 		}
