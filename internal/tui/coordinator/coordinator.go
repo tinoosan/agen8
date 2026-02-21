@@ -116,6 +116,7 @@ func (m *Model) Init() tea.Cmd {
 		fetchSessionCmd(m.endpoint, m.sessionID),
 		fetchActivityCmd(m.endpoint, m.sessionID),
 		tickCmd(),
+		animTickCmd(),
 		textinput.Blink,
 	)
 }

@@ -84,6 +84,7 @@ type thinkingEventsMsg struct {
 }
 
 type tickMsg struct{}
+type animTickMsg struct{}
 
 func fetchSessionCmd(endpoint, sessionID string) tea.Cmd {
 	return func() tea.Msg {
@@ -369,6 +370,12 @@ func sessionActionCmd(endpoint, sessionID, teamID string, action string) tea.Cmd
 func tickCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 		return tickMsg{}
+	})
+}
+
+func animTickCmd() tea.Cmd {
+	return tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
+		return animTickMsg{}
 	})
 }
 

@@ -20,8 +20,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.Width = maxInt(12, m.width-30)
 		return m, nil
 
-	case tickMsg:
+	case animTickMsg:
 		m.spinFrame = (m.spinFrame + 1) % len(spinnerFrames)
+		return m, animTickCmd()
+
+	case tickMsg:
 		if m.feedback != "" && time.Since(m.feedbackAt) > 3*time.Second {
 			m.feedback = ""
 		}
@@ -515,9 +518,10 @@ func (m *Model) deriveAgentStatus() {
 	case s == "error" || s == "failed":
 		m.setAgentStatusExpiring("Error", 10*time.Second)
 	case s == "done" || s == "completed" || s == "ok" || s == "succeeded":
-		// If we have a thinking event that's more recent than the last op, show Thinking.
+		// If we have a thinking event that's more recent than the last op, keep Processing
+		// (thinking is already visible in the feed as a dedicated block).
 		if lastThinking != nil && lastThinking.timestamp.After(lastOp.timestamp) {
-			m.setAgentStatus("Thinking")
+			m.setAgentStatus("Processing")
 		} else if lastOp.timestamp.After(time.Now().Add(-5 * time.Second)) {
 			m.setAgentStatusExpiring("Done", 5*time.Second)
 		} else {

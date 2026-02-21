@@ -435,15 +435,19 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		verb := kindToVerb(e.opKind, e.data)
 		s := strings.ToLower(strings.TrimSpace(e.status))
 
-		// Pick dot color based on status.
+		// Pick dot color based on status; running dots pulse between white and pending.
 		var dot string
 		switch {
 		case s == "done" || s == "completed" || s == "ok" || s == "succeeded":
 			dot = styleOK.Render("●")
 		case s == "error" || s == "failed" || s == "canceled" || s == "cancelled":
 			dot = styleErr.Render("●")
-		case s == "running":
-			dot = stylePending.Render("●")
+		case s == "running" || s == "pending":
+			if m.spinFrame%2 == 0 {
+				dot = stylePending.Render("●")
+			} else {
+				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")).Render("●")
+			}
 		default:
 			dot = kit.StyleDim.Render("●")
 		}
