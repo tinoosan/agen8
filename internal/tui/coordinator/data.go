@@ -179,7 +179,7 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 		hasPlanWrite := false
 		lastPlanIdx := -1
 		for i, e := range entries {
-			if isActivityPlanWrite(e.opKind, e.text) {
+			if isActivityPlanWrite(e.opKind, e.path) {
 				hasPlanWrite = true
 				lastPlanIdx = i
 			}

@@ -423,27 +423,12 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 			continue
 		}
 
-		// ── Plan checklist rendering ──────────────────────────────
-		// When a plan write carries checklist items, render as a
-		// dedicated "Updated plan" block with tree branches.
-		if len(e.planItems) > 0 {
-			lines = append(lines, "  "+stylePlan.Render("●")+" "+stylePlan.Bold(true).Render("Updated plan"))
-			for i, item := range e.planItems {
-				isLast := i == len(e.planItems)-1
-				var branch string
-				if isLast {
-					branch = stylePlan.Render("  └─")
-				} else {
-					branch = stylePlan.Render("  ├─")
-				}
-				if strings.HasPrefix(item, "[x]") {
-					text := strings.TrimPrefix(item, "[x] ")
-					lines = append(lines, branch+" "+styleOK.Render("✓")+" "+styleOK.Render(text))
-				} else {
-					text := strings.TrimPrefix(item, "[ ] ")
-					lines = append(lines, branch+" "+kit.StyleDim.Render("○")+" "+kit.StyleDim.Render(text))
-				}
-			}
+		// ── Standalone plan write ─────────────────────────────────
+		// When the entry itself is a plan write with checklist items,
+		// render as a dedicated "Updated plan" block and skip the
+		// normal verb rendering entirely.
+		if len(e.planItems) > 0 && isActivityPlanWrite(e.opKind, e.path) {
+			lines = append(lines, renderPlanChecklist(e.planItems)...)
 			continue
 		}
 
@@ -514,6 +499,45 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 				branch = styleVerbBold.Render("└")
 			}
 			lines = append(lines, "  "+branch+"  "+item)
+		}
+
+		// ── Promoted plan checklist (from bridge tool calls) ──────
+		// When a code_exec parent has plan items promoted from a
+		// collapsed bridge child, render the checklist below the
+		// normal operation sub-items.
+		if len(e.planItems) > 0 {
+			lines = append(lines, renderPlanChecklist(e.planItems)...)
+		}
+	}
+	return lines
+}
+
+// ── Plan checklist ────────────────────────────────────────────────────
+
+// renderPlanChecklist renders an "Updated plan" block with tree branches
+// connecting each checklist item. Completed items show a green ✓, pending
+// items show a dimmed ○.
+//
+//	● Updated plan
+//	├─ ✓ Set up project structure
+//	├─ ○ Add unit tests
+//	└─ ○ Deploy to staging
+func renderPlanChecklist(items []string) []string {
+	lines := []string{"  " + stylePlan.Render("●") + " " + stylePlan.Bold(true).Render("Updated plan")}
+	for i, item := range items {
+		isLast := i == len(items)-1
+		var branch string
+		if isLast {
+			branch = stylePlan.Render("  └─")
+		} else {
+			branch = stylePlan.Render("  ├─")
+		}
+		if strings.HasPrefix(item, "[x]") {
+			text := strings.TrimPrefix(item, "[x] ")
+			lines = append(lines, branch+" "+styleOK.Render("✓")+" "+text)
+		} else {
+			text := strings.TrimPrefix(item, "[ ] ")
+			lines = append(lines, branch+" "+kit.StyleDim.Render("○")+" "+text)
 		}
 	}
 	return lines
