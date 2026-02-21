@@ -534,7 +534,7 @@ func renderPlanChecklist(items []string) []string {
 		}
 		if strings.HasPrefix(item, "[x]") {
 			text := strings.TrimPrefix(item, "[x] ")
-			lines = append(lines, branch+" "+styleOK.Render("✓")+" "+text)
+			lines = append(lines, branch+" "+styleOK.Render("✓")+" "+kit.StyleDim.Strikethrough(true).Render(text))
 		} else {
 			text := strings.TrimPrefix(item, "[ ] ")
 			lines = append(lines, branch+" "+kit.StyleDim.Render("○")+" "+text)
