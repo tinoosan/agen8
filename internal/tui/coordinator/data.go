@@ -56,6 +56,11 @@ type activityLoadedMsg struct {
 	err       error
 }
 
+type userTasksLoadedMsg struct {
+	entries []feedEntry
+	err     error
+}
+
 type goalSubmittedMsg struct {
 	goal      string
 	scope     rpcscope.ScopeState
@@ -129,6 +134,13 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 
 		entries := make([]feedEntry, 0, len(res.Activities))
 		for _, act := range res.Activities {
+			// Suppress tool operation writes to SUMMARY.md since we natively display the task.done response block.
+			if isActivityPlanWrite(act.Kind, act.Path) || isActivitySummaryWrite(act.Kind, act.Path) {
+				if isActivitySummaryWrite(act.Kind, act.Path) {
+					continue
+				}
+			}
+
 			ts := act.StartedAt
 			if ts.IsZero() {
 				ts = time.Now()
@@ -137,8 +149,13 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 			if act.FinishedAt != nil {
 				fin = *act.FinishedAt
 			}
+			var kind feedKind = feedAgent
+			if strings.TrimSpace(strings.ToLower(act.Kind)) == "user_message" {
+				kind = feedUser
+			}
+
 			entries = append(entries, feedEntry{
-				kind:       feedAgent,
+				kind:       kind,
 				timestamp:  ts,
 				finishedAt: fin,
 				role:       activityRole(act),
@@ -178,6 +195,63 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 	}
 }
 
+func fetchUserTasksCmd(endpoint, threadID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		cli := protocol.TCPClient{Endpoint: endpoint, Timeout: 5 * time.Second}
+
+		tid := strings.TrimSpace(threadID)
+		if tid == "" {
+			return userTasksLoadedMsg{err: fmt.Errorf("thread id is required")}
+		}
+
+		var res protocol.TaskListResult
+		if err := cli.Call(ctx, protocol.MethodTaskList, protocol.TaskListParams{
+			ThreadID: protocol.ThreadID(tid),
+			Limit:    100, // typically few user messages per session
+		}, &res); err != nil {
+			return userTasksLoadedMsg{err: fmt.Errorf("rpc task.list: %w", err)}
+		}
+
+		var entries []feedEntry
+		for _, task := range res.Tasks {
+			if strings.TrimSpace(strings.ToLower(task.TaskKind)) != "user_message" {
+				continue
+			}
+
+			ts := task.CreatedAt
+			if ts.IsZero() {
+				ts = time.Now()
+			}
+			var fin time.Time
+			if !task.CompletedAt.IsZero() {
+				fin = task.CompletedAt
+			}
+
+			text := strings.TrimSpace(task.Goal)
+
+			entries = append(entries, feedEntry{
+				kind:       feedUser,
+				timestamp:  ts,
+				finishedAt: fin,
+				role:       "You",
+				text:       text,
+				status:     string(task.Status),
+				opKind:     task.TaskKind,
+				sourceID:   string(task.ID),
+				isText:     true,
+			})
+		}
+
+		sort.SliceStable(entries, func(i, j int) bool {
+			return entries[i].timestamp.Before(entries[j].timestamp)
+		})
+
+		return userTasksLoadedMsg{entries: entries}
+	}
+}
+
 func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 	return func() tea.Msg {
 		if strings.TrimSpace(runID) == "" {
@@ -214,12 +288,24 @@ func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 					summary = "(Task completed.)"
 				}
 				taskId := strings.TrimSpace(ev.Data["taskId"])
+
+				role := strings.TrimSpace(ev.Data["agent"])
+				if role == "" {
+					role = strings.TrimSpace(ev.Data["role"])
+				}
+				if role == "" {
+					role = strings.TrimSpace(ev.Data["agent_role"])
+				}
+				if role == "" {
+					role = "agent"
+				}
+
 				entries = append(entries, feedEntry{
 					kind:           feedAgent,
 					isText:         true,
 					isTaskResponse: true,
 					text:           summary,
-					role:           "agent",
+					role:           role,
 					timestamp:      ev.Timestamp,
 					sourceID:       taskId,
 				})
@@ -445,6 +531,16 @@ func isActivityPlanWrite(kind string, text string) bool {
 		p = "/" + p
 	}
 	return strings.EqualFold(p, "/plan/HEAD.md") || strings.EqualFold(p, "/plan/CHECKLIST.md")
+}
+
+// isActivitySummaryWrite returns true if the activity represents a task summary write.
+func isActivitySummaryWrite(kind string, text string) bool {
+	k := strings.TrimSpace(strings.ToLower(kind))
+	if k != "fs_write" && k != "fs_edit" && k != "fs_patch" && k != "fs_append" {
+		return false
+	}
+	p := strings.TrimSpace(text)
+	return strings.HasSuffix(strings.ToLower(p), "summary.md")
 }
 
 // checklistRe matches markdown checklist lines like "- [x] item" or "* [ ] item".

@@ -29,6 +29,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fetchSessionCmd(m.endpoint, m.sessionID),
 			fetchActivityCmd(m.endpoint, m.sessionID),
 			fetchThinkingEventsCmd(m.endpoint, m.runID, m.lastEventSeq),
+			fetchUserTasksCmd(m.endpoint, m.threadID),
 			tickCmd(),
 		)
 
@@ -59,6 +60,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastErr = ""
 		m.mergeActivityEntries(msg.entries)
 		m.deriveAgentStatus()
+		return m, nil
+
+	case userTasksLoadedMsg:
+		if msg.err != nil {
+			m.lastErr = msg.err.Error()
+			return m, nil
+		}
+		m.mergeUserMessageEntries(msg.entries)
 		return m, nil
 
 	case thinkingEventsMsg:
@@ -417,5 +426,35 @@ func (m *Model) deriveAgentStatus() {
 		}
 	default:
 		m.setAgentStatus("Idle")
+	}
+}
+
+func (m *Model) mergeUserMessageEntries(entries []feedEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	oldLines := m.totalFeedLines()
+
+	others := make([]feedEntry, 0, len(m.feed))
+	for _, e := range m.feed {
+		if e.kind != feedUser {
+			others = append(others, e)
+		}
+	}
+	merged := append(others, entries...)
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].timestamp.Before(merged[j].timestamp)
+	})
+	m.feed = merged
+
+	if !m.liveFollow {
+		newLines := m.totalFeedLines()
+		if newLines > oldLines {
+			m.feedScroll += (newLines - oldLines)
+		}
+		maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+		if m.feedScroll > maxScroll {
+			m.feedScroll = maxScroll
+		}
 	}
 }
