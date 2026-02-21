@@ -375,8 +375,8 @@ func (m *Model) renderUserBlock(t conversationTurn, inner int) []string {
 
 // ── Agent block ────────────────────────────────────────────────────────
 //
-//   ● architect                                        30s ago
-//     Read  src/auth/handler.go
+//  architect                                        30s ago
+//   ● Read  src/auth/handler.go
 //     └ Done
 //     Bash  go test ./...
 //     └ running ⠹
