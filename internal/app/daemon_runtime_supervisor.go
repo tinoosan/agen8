@@ -21,8 +21,8 @@ import (
 	"github.com/tinoosan/agen8/pkg/fsutil"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/profile"
-	"github.com/tinoosan/agen8/pkg/protocol"
 	"github.com/tinoosan/agen8/pkg/prompts"
+	"github.com/tinoosan/agen8/pkg/protocol"
 	"github.com/tinoosan/agen8/pkg/runtime"
 	eventsvc "github.com/tinoosan/agen8/pkg/services/events"
 	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
@@ -73,13 +73,13 @@ type runtimeSupervisor struct {
 }
 
 type managedRuntime struct {
-	runID     string
-	sessionID string
-	session   *agentsession.Session
-	cancel    context.CancelFunc
-	done      <-chan struct{}
-	modelMu   sync.Mutex
-	model     string
+	runID           string
+	sessionID       string
+	session         *agentsession.Session
+	cancel          context.CancelFunc
+	done            <-chan struct{}
+	modelMu         sync.Mutex
+	model           string
 	heartbeatMu     sync.Mutex
 	lastHeartbeatAt time.Time
 }
@@ -635,6 +635,9 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	// Lines are split on newlines and also on sentence boundaries (". ") when
 	// the buffer exceeds a soft limit, so that models which emit reasoning as
 	// a single continuous block still produce separate, readable summary chunks.
+	// We prefer splitting at ". **" so that markdown bold headings start a
+	// new chunk (title-at-start), keeping TUI chunk boundaries aligned with
+	// section titles in a model-agnostic way.
 	// If final is true, also emits any remaining partial text.
 	// Must be called with thinkingMu held.
 	const sentenceLimit = 120 // soft char limit before splitting on sentence boundary
@@ -663,10 +666,17 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			}
 			// If the buffer is long enough, try splitting on a sentence boundary.
 			if len(text) >= sentenceLimit {
-				// Look for ". " after the soft limit to find a natural break.
-				si := strings.Index(text[sentenceLimit:], ". ")
-				if si >= 0 {
-					cut := sentenceLimit + si + 1 // include the period
+				search := text[sentenceLimit:]
+				// Prefer ". **" so bold headings start a new chunk (title-at-start).
+				if si := strings.Index(search, ". **"); si >= 0 {
+					cut := sentenceLimit + si + 2 // include ". " so next chunk starts with "**"
+					emitLine(text[:cut])
+					text = strings.TrimLeft(text[cut:], " ")
+					continue
+				}
+				// Fallback: any ". " after the soft limit.
+				if si := strings.Index(search, ". "); si >= 0 {
+					cut := sentenceLimit + si + 2
 					emitLine(text[:cut])
 					text = strings.TrimLeft(text[cut:], " ")
 					continue
@@ -928,9 +938,9 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			Type:    "run.start",
 			Message: "Agent started",
 			Data: map[string]string{
-				"runId":     run.RunID,
-				"sessionId": run.SessionID,
-				"profile":   strings.TrimSpace(activeProfile.ID),
+				"runId":        run.RunID,
+				"sessionId":    run.SessionID,
+				"profile":      strings.TrimSpace(activeProfile.ID),
 				"model.source": modelSource,
 			},
 		})
