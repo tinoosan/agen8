@@ -455,6 +455,9 @@ type RuntimeGetSessionStateParams struct {
 type RuntimeRunState struct {
 	SessionID       string `json:"sessionId"`
 	RunID           string `json:"runId"`
+	Model           string `json:"model,omitempty"`
+	RunTotalTokens  int    `json:"runTotalTokens,omitempty"`
+	RunTotalCostUSD float64 `json:"runTotalCostUSD,omitempty"`
 	PersistedStatus string `json:"persistedStatus,omitempty"`
 	WorkerPresent   bool   `json:"workerPresent"`
 	PausedFlag      bool   `json:"pausedFlag"`

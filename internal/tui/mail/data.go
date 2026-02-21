@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/tui/rpcscope"
+	"github.com/tinoosan/agen8/internal/tui/sessionsync"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	"github.com/tinoosan/agen8/pkg/types"
 )
@@ -22,6 +23,12 @@ type dataLoadedMsg struct {
 }
 
 type tickMsg struct{}
+
+type sessionSyncedMsg struct {
+	sessionID string
+	changed   bool
+	err       error
+}
 
 type taskEntry struct {
 	ID           string
@@ -146,4 +153,19 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 		return tickMsg{}
 	})
+}
+
+func syncSessionCmd(projectRoot, currentSessionID string) tea.Cmd {
+	return func() tea.Msg {
+		nextID, err := sessionsync.ResolveActiveSessionID(projectRoot)
+		if err != nil {
+			return sessionSyncedMsg{sessionID: strings.TrimSpace(currentSessionID), err: err}
+		}
+		nextID = strings.TrimSpace(nextID)
+		currentSessionID = strings.TrimSpace(currentSessionID)
+		return sessionSyncedMsg{
+			sessionID: nextID,
+			changed:   nextID != "" && nextID != currentSessionID,
+		}
+	}
 }

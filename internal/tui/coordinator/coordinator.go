@@ -35,6 +35,11 @@ type conversationTurn struct {
 	isText    bool        // true if this turn represents a final text/markdown block
 }
 
+type pickerItem struct {
+	Label string
+	Value string
+}
+
 // Model is the Bubble Tea model for the coordinator chat UI.
 type Model struct {
 	endpoint  string
@@ -66,6 +71,13 @@ type Model struct {
 
 	agentStatus     string    // "Thinking…", "Processing…", "Idle", etc.
 	statusExpiresAt time.Time // auto-clear time for expiring statuses
+
+	pickerOpen    bool
+	pickerLoading bool
+	pickerTitle   string
+	pickerKind    string
+	pickerItems   []pickerItem
+	pickerSel     int
 }
 
 // Run launches the full-screen coordinator TUI.

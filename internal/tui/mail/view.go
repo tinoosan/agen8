@@ -75,6 +75,9 @@ func (m *Model) renderHeader() string {
 		if m.lastErr != "" {
 			left += kit.StyleDim.Render(" · ") + styleRed.Render("err: "+truncate(m.lastErr, 20))
 		}
+		if m.notice != "" {
+			left += kit.StyleDim.Render(" · ") + styleAmber.Render(truncate(m.notice, 18))
+		}
 
 		return lipgloss.NewStyle().
 			Width(m.width).
@@ -104,6 +107,9 @@ func (m *Model) renderHeader() string {
 
 	if m.lastErr != "" {
 		left += kit.StyleDim.Render("  ·  ") + styleRed.Render("err: "+truncate(m.lastErr, 40))
+	}
+	if m.notice != "" {
+		left += kit.StyleDim.Render("  ·  ") + styleAmber.Render(truncate(m.notice, 28))
 	}
 
 	return lipgloss.NewStyle().

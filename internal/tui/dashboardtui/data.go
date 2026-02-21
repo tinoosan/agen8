@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/tui/rpcscope"
+	"github.com/tinoosan/agen8/internal/tui/sessionsync"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
@@ -18,6 +19,9 @@ type agentRow struct {
 	RunID           string
 	Status          string
 	Profile         string
+	Model           string
+	RunTotalTokens  int
+	RunTotalCostUSD float64
 	AssignedTasks   int
 	CompletedTasks  int
 	WorkerPresent   bool
@@ -48,6 +52,12 @@ type dataLoadedMsg struct {
 }
 
 type tickMsg struct{}
+
+type sessionSyncedMsg struct {
+	sessionID string
+	changed   bool
+	err       error
+}
 
 func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 	return func() tea.Msg {
@@ -122,6 +132,8 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			RunningCount: session.RunningAgents,
 		}
 
+		assignedByRun := map[string]int{}
+		completedByRun := map[string]int{}
 		assignedByRole := map[string]int{}
 		completedByRole := map[string]int{}
 		if teamID != "" {
@@ -133,50 +145,43 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 				return dataLoadedMsg{err: err}
 			}
 
-			if teamID != "" {
-				seenTask := map[string]bool{}
-				views := []string{"inbox", "outbox"}
-				for _, view := range views {
-					if teamID == "" && runID == "" {
+			seenTask := map[string]bool{}
+			for _, view := range []string{"inbox", "outbox"} {
+				tasks, err := listTasksByView(ctx, scopeClient, protocol.TaskListParams{
+					ThreadID: threadID,
+					TeamID:   teamID,
+					RunID:    "",
+					View:     view,
+				})
+				if err != nil {
+					if rpcscope.IsScopeUnavailable(err) {
+						return dataLoadedMsg{preserve: true, connected: true, err: err}
+					}
+					continue
+				}
+				for _, t := range tasks {
+					taskID := strings.TrimSpace(t.ID)
+					if taskID != "" && seenTask[taskID] {
 						continue
 					}
-					var taskRes protocol.TaskListResult
-					params := protocol.TaskListParams{
-						ThreadID: threadID,
-						TeamID:   teamID,
-						RunID:    runID,
-						View:     view,
-						Limit:    1000,
-						Offset:   0,
+					if taskID != "" {
+						seenTask[taskID] = true
 					}
-					if err := scopeClient.Call(ctx, protocol.MethodTaskList, params, &taskRes); err != nil {
-						if rpcscope.IsScopeUnavailable(err) {
-							return dataLoadedMsg{preserve: true, connected: true, err: err}
-						}
-						continue
-					}
-					for _, t := range taskRes.Tasks {
-						taskID := strings.TrimSpace(t.ID)
-						if taskID != "" && seenTask[taskID] {
-							continue
-						}
-						if taskID != "" {
-							seenTask[taskID] = true
-						}
-						role := strings.ToLower(strings.TrimSpace(t.AssignedRole))
-						if role == "" {
-							role = strings.ToLower(strings.TrimSpace(t.RoleSnapshot))
-						}
-						if role == "" && strings.EqualFold(strings.TrimSpace(t.AssignedToType), "role") {
-							role = strings.ToLower(strings.TrimSpace(t.AssignedTo))
-						}
-						if role == "" {
-							continue
-						}
-						assignedByRole[role]++
+					assignedRunID := strings.TrimSpace(string(t.RunID))
+					if assignedRunID != "" {
+						assignedByRun[assignedRunID]++
 						if isCompletedTaskStatus(t.Status) {
-							completedByRole[role]++
+							completedByRun[assignedRunID]++
 						}
+						continue
+					}
+					role := taskAssignedRole(t)
+					if role == "" {
+						continue
+					}
+					assignedByRole[role]++
+					if isCompletedTaskStatus(t.Status) {
+						completedByRole[role]++
 					}
 				}
 			}
@@ -214,16 +219,30 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			status := strings.TrimSpace(agent.Status)
 			worker := false
 			heartbeat := ""
+			model := ""
+			runTotalTokens := 0
+			runTotalCostUSD := 0.0
 			if rs, ok := runtimeByRun[rid]; ok {
 				if effective := strings.TrimSpace(rs.EffectiveStatus); effective != "" {
 					status = effective
 				}
 				worker = rs.WorkerPresent
 				heartbeat = strings.TrimSpace(rs.LastHeartbeatAt)
+				model = strings.TrimSpace(rs.Model)
+				runTotalTokens = rs.RunTotalTokens
+				runTotalCostUSD = rs.RunTotalCostUSD
 			}
 
 			if isRunningStatus(status) {
 				runningFromRows++
+			}
+
+			assignedTasks := assignedByRun[rid]
+			completedTasks := completedByRun[rid]
+			if rid == "" {
+				roleKey := strings.ToLower(strings.TrimSpace(role))
+				assignedTasks = assignedByRole[roleKey]
+				completedTasks = completedByRole[roleKey]
 			}
 
 			agents = append(agents, agentRow{
@@ -231,8 +250,11 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 				RunID:           rid,
 				Status:          fallback(status, "idle"),
 				Profile:         strings.TrimSpace(agent.Profile),
-				AssignedTasks:   assignedByRole[strings.ToLower(strings.TrimSpace(role))],
-				CompletedTasks:  completedByRole[strings.ToLower(strings.TrimSpace(role))],
+				Model:           fallback(model, "-"),
+				RunTotalTokens:  runTotalTokens,
+				RunTotalCostUSD: runTotalCostUSD,
+				AssignedTasks:   assignedTasks,
+				CompletedTasks:  completedTasks,
 				WorkerPresent:   worker,
 				LastHeartbeatAt: heartbeat,
 				StartedAt:       strings.TrimSpace(agent.StartedAt),
@@ -254,6 +276,53 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			connected:   true,
 		}
 	}
+}
+
+func syncSessionCmd(projectRoot, currentSessionID string) tea.Cmd {
+	return func() tea.Msg {
+		nextID, err := sessionsync.ResolveActiveSessionID(projectRoot)
+		if err != nil {
+			return sessionSyncedMsg{sessionID: strings.TrimSpace(currentSessionID), err: err}
+		}
+		nextID = strings.TrimSpace(nextID)
+		currentSessionID = strings.TrimSpace(currentSessionID)
+		return sessionSyncedMsg{
+			sessionID: nextID,
+			changed:   nextID != "" && nextID != currentSessionID,
+		}
+	}
+}
+
+func taskAssignedRole(t protocol.Task) string {
+	role := strings.ToLower(strings.TrimSpace(t.AssignedRole))
+	if role == "" {
+		role = strings.ToLower(strings.TrimSpace(t.RoleSnapshot))
+	}
+	if role == "" && strings.EqualFold(strings.TrimSpace(t.AssignedToType), "role") {
+		role = strings.ToLower(strings.TrimSpace(t.AssignedTo))
+	}
+	return role
+}
+
+func listTasksByView(ctx context.Context, client *rpcscope.Client, base protocol.TaskListParams) ([]protocol.Task, error) {
+	const pageSize = 2000
+	out := make([]protocol.Task, 0, pageSize)
+	offset := 0
+	for {
+		var page protocol.TaskListResult
+		params := base
+		params.Limit = pageSize
+		params.Offset = offset
+		if err := client.Call(ctx, protocol.MethodTaskList, params, &page); err != nil {
+			return nil, err
+		}
+		out = append(out, page.Tasks...)
+		if len(page.Tasks) < pageSize {
+			break
+		}
+		offset += len(page.Tasks)
+	}
+	return out, nil
 }
 
 func isCompletedTaskStatus(status string) bool {

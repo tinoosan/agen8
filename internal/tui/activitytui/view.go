@@ -94,6 +94,9 @@ func (m *Model) renderHeader() string {
 		if m.lastErr != "" {
 			left += styleDim.Render(" · ") + styleErr.Render("err: "+truncate(m.lastErr, 20))
 		}
+		if m.notice != "" {
+			left += styleDim.Render(" · ") + stylePending.Render(truncate(m.notice, 18))
+		}
 		return lipgloss.NewStyle().
 			Width(m.width).MaxWidth(m.width).MaxHeight(1).
 			Foreground(lipgloss.Color("#eaeaea")).
@@ -106,12 +109,23 @@ func (m *Model) renderHeader() string {
 		count = fmt.Sprintf("%d/%d ops", len(m.activities), m.totalCount)
 	}
 
+	sid := strings.TrimSpace(m.sessionID)
+	if len(sid) > 12 {
+		sid = sid[:12]
+	}
+	if sid == "" {
+		sid = "-"
+	}
 	left := styleHeader.Render("agen8 activity") +
+		styleDim.Render("  ·  session: ") + styleAccent.Render(sid) +
 		styleDim.Render("  ·  ") + status +
 		styleDim.Render("  ·  ") + styleMeta.Render(count)
 
 	if m.lastErr != "" {
 		left += styleDim.Render("  ·  ") + styleErr.Render("err: "+truncate(m.lastErr, 40))
+	}
+	if m.notice != "" {
+		left += styleDim.Render("  ·  ") + stylePending.Render(truncate(m.notice, 28))
 	}
 
 	return lipgloss.NewStyle().

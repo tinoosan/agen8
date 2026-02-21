@@ -1,6 +1,12 @@
 package dashboardtui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -11,13 +17,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.spinFrame = (m.spinFrame + 1) % len(spinnerFrames)
+		if m.notice != "" && time.Since(m.noticeAt) > 4*time.Second {
+			m.notice = ""
+		}
+		if m.followProjectState {
+			return m, tea.Batch(syncSessionCmd(m.projectRoot, m.sessionID), tickCmd())
+		}
 		return m, tea.Batch(fetchDataCmd(m.endpoint, m.sessionID), tickCmd())
+
+	case sessionSyncedMsg:
+		if msg.err != nil {
+			m.lastErr = msg.err.Error()
+			return m, fetchDataCmd(m.endpoint, m.sessionID)
+		}
+		if msg.changed {
+			m.sessionID = strings.TrimSpace(msg.sessionID)
+			m.sel = 0
+			m.detailOpen = false
+			m.detailScroll = 0
+			now := time.Now()
+			if time.Since(m.noticeAt) > 3*time.Second {
+				m.notice = fmt.Sprintf("switched to %s", strings.TrimSpace(msg.sessionID))
+				m.noticeAt = now
+			}
+		}
+		return m, fetchDataCmd(m.endpoint, m.sessionID)
 
 	case dataLoadedMsg:
 		if msg.err != nil {
 			if msg.preserve {
 				m.connected = true
-				m.lastErr = msg.err.Error()
+				if !m.followProjectState {
+					m.lastErr = msg.err.Error()
+				}
 				return m, nil
 			}
 			m.connected = false

@@ -22,17 +22,23 @@ var activityCmd = &cobra.Command{
 }
 
 func runActivityTUI(cmd *cobra.Command) error {
+	followProjectState := strings.TrimSpace(activityTUISessionID) == ""
+	projectRoot := projectSearchDir()
 	sessionID := strings.TrimSpace(activityTUISessionID)
 	if sessionID == "" {
 		projectCtx, err := loadProjectContext()
 		if err == nil && projectCtx.Exists {
+			projectRoot = strings.TrimSpace(projectCtx.RootDir)
 			sessionID = strings.TrimSpace(projectCtx.State.ActiveSessionID)
 		}
 	}
 	if sessionID == "" {
 		return fmt.Errorf("session id is required (use --session-id or initialize project and attach a session)")
 	}
-	return activitytui.Run(resolvedRPCEndpoint(), sessionID)
+	return activitytui.Run(resolvedRPCEndpoint(), sessionID, activitytui.Options{
+		ProjectRoot:        projectRoot,
+		FollowProjectState: followProjectState,
+	})
 }
 
 func init() {

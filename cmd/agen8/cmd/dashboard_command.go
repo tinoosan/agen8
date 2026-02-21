@@ -27,10 +27,13 @@ var dashboardCmd = &cobra.Command{
 }
 
 func runDashboardFlow(cmd *cobra.Command) error {
+	followProjectState := strings.TrimSpace(dashboardSessionID) == ""
+	projectRoot := projectSearchDir()
 	sessionID := strings.TrimSpace(dashboardSessionID)
 	if sessionID == "" {
 		projectCtx, err := loadProjectContext()
 		if err == nil && projectCtx.Exists {
+			projectRoot = strings.TrimSpace(projectCtx.RootDir)
 			sessionID = strings.TrimSpace(projectCtx.State.ActiveSessionID)
 		}
 	}
@@ -41,7 +44,10 @@ func runDashboardFlow(cmd *cobra.Command) error {
 	if dashboardOnce || !isInteractiveTerminal() {
 		return renderDashboardOnce(cmd, sessionID)
 	}
-	return dashboardtui.Run(resolvedRPCEndpoint(), sessionID)
+	return dashboardtui.Run(resolvedRPCEndpoint(), sessionID, dashboardtui.Options{
+		ProjectRoot:        projectRoot,
+		FollowProjectState: followProjectState,
+	})
 }
 
 func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {

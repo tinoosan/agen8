@@ -1,6 +1,8 @@
 package mail
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
@@ -12,15 +14,24 @@ const (
 	panelOutbox
 )
 
+type Options struct {
+	ProjectRoot        string
+	FollowProjectState bool
+}
+
 // Model is the Bubble Tea model for the full-screen mail TUI.
 type Model struct {
 	endpoint  string
 	sessionID string
 	width     int
 	height    int
+	projectRoot        string
+	followProjectState bool
 
 	connected   bool
 	lastErr     string
+	notice      string
+	noticeAt    time.Time
 	currentTask *taskEntry
 	inbox       []taskEntry
 	outbox      []taskEntry
@@ -33,15 +44,17 @@ type Model struct {
 }
 
 // Run launches the full-screen mail TUI.
-func Run(endpoint, sessionID string) error {
+func Run(endpoint, sessionID string, opts Options) error {
 	if endpoint == "" {
 		endpoint = protocol.DefaultRPCEndpoint
 	}
 	m := &Model{
-		endpoint:  endpoint,
-		sessionID: sessionID,
-		connected: true,
-		focus:     panelInbox,
+		endpoint:          endpoint,
+		sessionID:         sessionID,
+		projectRoot:       opts.ProjectRoot,
+		followProjectState: opts.FollowProjectState,
+		connected:         true,
+		focus:             panelInbox,
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()

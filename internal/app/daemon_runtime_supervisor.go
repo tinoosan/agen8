@@ -1404,14 +1404,25 @@ func (s *runtimeSupervisor) GetRunState(ctx context.Context, sessionID, runID st
 	state := protocol.RuntimeRunState{
 		SessionID:       sessionID,
 		RunID:           runID,
+		Model:           "",
 		PersistedStatus: strings.TrimSpace(run.Status),
 		EffectiveStatus: strings.TrimSpace(run.Status),
+	}
+	if run.Runtime != nil {
+		state.Model = strings.TrimSpace(run.Runtime.Model)
+	}
+	if stats, statsErr := s.taskService.GetRunStats(ctx, runID); statsErr == nil {
+		state.RunTotalTokens = stats.TotalTokens
+		state.RunTotalCostUSD = stats.TotalCost
 	}
 	s.mu.Lock()
 	worker := s.workers[runID]
 	s.mu.Unlock()
 	if worker != nil {
 		state.WorkerPresent = true
+		if strings.TrimSpace(state.Model) == "" {
+			state.Model = strings.TrimSpace(worker.CurrentModel())
+		}
 		lastBeat := worker.LastHeartbeatAt()
 		if !lastBeat.IsZero() {
 			state.LastHeartbeatAt = lastBeat.UTC().Format(time.RFC3339Nano)

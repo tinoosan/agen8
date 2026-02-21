@@ -114,6 +114,9 @@ func (m *Model) renderHeader() string {
 	if m.lastErr != "" {
 		line += kit.StyleDim.Render("  ·  ") + styleErr.Render("err: "+truncate(m.lastErr, 40))
 	}
+	if m.notice != "" {
+		line += kit.StyleDim.Render("  ·  ") + stylePending.Render(truncate(m.notice, 28))
+	}
 
 	return lipgloss.NewStyle().
 		Width(m.width).
@@ -219,25 +222,34 @@ func (m *Model) renderAgentTableHeader(width int) string {
 		return lipgloss.NewStyle().Padding(0, 1).Width(width).Render(kit.StyleDim.Render(line))
 	}
 	if m.isCompact() {
-		roleW := maxInt(10, inner-18)
+		statusW := 12
+		modelW := 14
+		costW := 9
+		roleW := maxInt(8, inner-(statusW+modelW+costW+3))
 		line := strings.Repeat(" ", markerW) +
 			padRight("ROLE", roleW) + " " +
-			padRight("STATUS", 16)
+			padRight("STATUS", statusW) + " " +
+			padRight("MODEL", modelW) + " " +
+			padRight("COST", costW)
 		return lipgloss.NewStyle().Padding(0, 1).Width(width).Render(kit.StyleDim.Render(line))
 	}
 
 	roleW := 16
-	statusW := 14
+	statusW := 12
+	modelW := 18
+	costW := 9
 	workerW := 8
-	hbW := 8
+	hbW := 7
 	asgnW := 4
 	doneW := 4
 	startW := 5
-	runW := maxInt(8, inner-(roleW+statusW+workerW+hbW+asgnW+doneW+startW+7))
+	runW := maxInt(8, inner-(roleW+statusW+modelW+costW+workerW+hbW+asgnW+doneW+startW+9))
 
 	line := strings.Repeat(" ", markerW) +
 		padRight("ROLE", roleW) + " " +
 		padRight("STATUS", statusW) + " " +
+		padRight("MODEL", modelW) + " " +
+		padRight("COST", costW) + " " +
 		padRight("WORKER", workerW) + " " +
 		padRight("HEARTBT", hbW) + " " +
 		padRight("ASGN", asgnW) + " " +
@@ -272,22 +284,29 @@ func (m *Model) buildAgentRows(width int) []string {
 		}
 
 		if m.isCompact() {
-			roleW := maxInt(10, inner-18)
+			statusW := 12
+			modelW := 14
+			costW := 9
+			roleW := maxInt(8, inner-(statusW+modelW+costW+3))
 			line := marker +
 				kit.StyleStatusValue.Render(padRight(kit.TruncateRight(role, roleW), roleW)) + " " +
-				renderStatusCell(status, 16, m.spinFrame)
+				renderStatusCell(status, statusW, m.spinFrame) + " " +
+				kit.StyleDim.Render(padRight(kit.TruncateRight(fallback(row.Model, "-"), modelW), modelW)) + " " +
+				kit.StyleStatusValue.Render(padRight(fmt.Sprintf("$%.4f", row.RunTotalCostUSD), costW))
 			rows = append(rows, line)
 			continue
 		}
 
 		roleW := 16
-		statusW := 14
+		statusW := 12
+		modelW := 18
+		costW := 9
 		workerW := 8
-		hbW := 8
+		hbW := 7
 		asgnW := 4
 		doneW := 4
 		startW := 5
-		runW := maxInt(8, inner-(roleW+statusW+workerW+hbW+asgnW+doneW+startW+7))
+		runW := maxInt(8, inner-(roleW+statusW+modelW+costW+workerW+hbW+asgnW+doneW+startW+9))
 
 		worker := "✗"
 		if row.WorkerPresent {
@@ -300,6 +319,8 @@ func (m *Model) buildAgentRows(width int) []string {
 		line := marker +
 			kit.StyleStatusValue.Render(padRight(kit.TruncateRight(role, roleW), roleW)) + " " +
 			renderStatusCell(status, statusW, m.spinFrame) + " " +
+			kit.StyleDim.Render(padRight(kit.TruncateRight(fallback(row.Model, "-"), modelW), modelW)) + " " +
+			kit.StyleStatusValue.Render(padRight(fmt.Sprintf("$%.4f", row.RunTotalCostUSD), costW)) + " " +
 			renderWorkerCell(row.WorkerPresent, worker, workerW) + " " +
 			kit.StyleDim.Render(padRight(hb, hbW)) + " " +
 			kit.StyleStatusValue.Render(padRight(fmt.Sprintf("%d", row.AssignedTasks), asgnW)) + " " +
@@ -393,6 +414,9 @@ func (m *Model) renderDetailBody(width, height int) string {
 		kit.StyleStatusKey.Render("Status:    ") + renderStatusCell(agent.Status, 18, m.spinFrame),
 		kit.StyleStatusKey.Render("Run:       ") + kit.StyleStatusValue.Render(fallback(agent.RunID, "-")),
 		kit.StyleStatusKey.Render("Profile:   ") + kit.StyleStatusValue.Render(fallback(agent.Profile, "-")),
+		kit.StyleStatusKey.Render("Model:     ") + kit.StyleStatusValue.Render(fallback(agent.Model, "-")),
+		kit.StyleStatusKey.Render("RunCost:   ") + kit.StyleStatusValue.Render(fmt.Sprintf("$%.4f", agent.RunTotalCostUSD)),
+		kit.StyleStatusKey.Render("RunTokens: ") + kit.StyleStatusValue.Render(fmt.Sprintf("%d", agent.RunTotalTokens)),
 		kit.StyleStatusKey.Render("Assigned:  ") + kit.StyleStatusValue.Render(fmt.Sprintf("%d", agent.AssignedTasks)),
 		kit.StyleStatusKey.Render("Completed: ") + kit.StyleStatusValue.Render(fmt.Sprintf("%d", agent.CompletedTasks)),
 		kit.StyleStatusKey.Render("Worker:    ") + kit.StyleStatusValue.Render(worker),
