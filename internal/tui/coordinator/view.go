@@ -556,18 +556,18 @@ func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
 		}
 	}
 
-	// Concatenate all chunks into a single text, then split by newlines.
-	// Summary events arrive as small streaming chunks that should be joined.
-	combined := strings.Join(rawLines, "")
+	// Split accumulated text by newlines and trim trailing whitespace per line.
 	var flat []string
-	for _, sub := range strings.Split(combined, "\n") {
-		sub = strings.TrimRight(sub, " \t")
-		if sub != "" {
-			flat = append(flat, sub)
+	for _, chunk := range rawLines {
+		for _, sub := range strings.Split(chunk, "\n") {
+			sub = strings.TrimRight(sub, " \t")
+			if sub != "" {
+				flat = append(flat, strings.TrimSpace(sub))
+			}
 		}
 	}
 	if len(flat) == 0 {
-		flat = []string{combined}
+		flat = rawLines
 	}
 
 	// Word-wrap thinking lines to use nearly the full terminal width.

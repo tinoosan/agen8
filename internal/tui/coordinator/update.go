@@ -327,9 +327,15 @@ func (m *Model) processThinkingEvents(events []types.EventRecord) {
 			if idx < 0 {
 				continue
 			}
-			txt := strings.TrimSpace(ev.Data["text"])
+			txt := ev.Data["text"]
 			if txt != "" {
-				m.feed[idx].thinkingLines = append(m.feed[idx].thinkingLines, txt)
+				// Accumulate chunks into a single entry, preserving natural token spacing.
+				lines := m.feed[idx].thinkingLines
+				if len(lines) == 0 {
+					m.feed[idx].thinkingLines = []string{txt}
+				} else {
+					m.feed[idx].thinkingLines[len(lines)-1] += txt
+				}
 				changed = true
 			}
 
