@@ -547,27 +547,13 @@ func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
 	headerLine := "  " + triangle + " " + styleThinking.Italic(true).Render(label)
 	result := []string{headerLine}
 
-	rawLines := e.thinkingLines
-	if len(rawLines) == 0 {
-		if e.live {
-			rawLines = []string{m.spinner() + " thinking…"}
-		} else {
-			rawLines = []string{"(no summary available)"}
-		}
-	}
-
-	// Split accumulated text by newlines and trim trailing whitespace per line.
-	var flat []string
-	for _, chunk := range rawLines {
-		for _, sub := range strings.Split(chunk, "\n") {
-			sub = strings.TrimRight(sub, " \t")
-			if sub != "" {
-				flat = append(flat, strings.TrimSpace(sub))
-			}
-		}
-	}
+	flat := e.thinkingLines
 	if len(flat) == 0 {
-		flat = rawLines
+		if e.live {
+			flat = []string{m.spinner() + " thinking…"}
+		} else {
+			flat = []string{"(no summary available)"}
+		}
 	}
 
 	// Word-wrap thinking lines to use nearly the full terminal width.

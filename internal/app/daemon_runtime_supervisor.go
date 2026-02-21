@@ -624,9 +624,45 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		model:     strings.TrimSpace(model),
 	}
 	// Thinking-event state tracked across stream chunks.
+	// Text is line-buffered: we accumulate tokens and emit one summary event
+	// per newline-delimited line, drastically reducing event count.
 	var thinkingMu sync.Mutex
 	thinkingActive := false
 	thinkingStep := 0
+	var thinkingBuf strings.Builder
+
+	// flushThinkingLines emits complete lines from thinkingBuf.
+	// If final is true, also emits any remaining partial line.
+	// Must be called with thinkingMu held.
+	flushThinkingLines := func(final bool) {
+		text := thinkingBuf.String()
+		stepStr := strconv.Itoa(thinkingStep)
+		for {
+			idx := strings.IndexByte(text, '\n')
+			if idx < 0 {
+				break
+			}
+			line := strings.TrimRight(text[:idx], " \t\r")
+			text = text[idx+1:]
+			if line != "" {
+				emitEvent(context.Background(), events.Event{
+					Type:    "model.thinking.summary",
+					Message: "Thinking",
+					Data:    map[string]string{"step": stepStr, "text": line},
+				})
+			}
+		}
+		if final && strings.TrimSpace(text) != "" {
+			emitEvent(context.Background(), events.Event{
+				Type:    "model.thinking.summary",
+				Message: "Thinking",
+				Data:    map[string]string{"step": stepStr, "text": strings.TrimRight(text, " \t\r")},
+			})
+			text = ""
+		}
+		thinkingBuf.Reset()
+		thinkingBuf.WriteString(text)
+	}
 
 	agentCfg.Hooks = agent.Hooks{
 		OnLLMUsage: newCostUsageHook(
@@ -650,6 +686,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 				if !thinkingActive {
 					thinkingActive = true
 					thinkingStep = step
+					thinkingBuf.Reset()
 					emitEvent(context.Background(), events.Event{
 						Type:    "model.thinking.start",
 						Message: "Thinking started",
@@ -657,13 +694,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 					})
 				}
 				if chunk.Text != "" {
-					emitEvent(context.Background(), events.Event{
-						Type:    "model.thinking.summary",
-						Message: "Thinking",
-						Data:    map[string]string{"step": stepStr, "text": chunk.Text},
-					})
+					thinkingBuf.WriteString(chunk.Text)
+					flushThinkingLines(false)
 				}
 			} else if thinkingActive {
+				flushThinkingLines(true)
 				thinkingActive = false
 				emitEvent(context.Background(), events.Event{
 					Type:    "model.thinking.end",
@@ -676,6 +711,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			// Close any open thinking block when the step ends.
 			thinkingMu.Lock()
 			if thinkingActive {
+				flushThinkingLines(true)
 				thinkingActive = false
 				emitEvent(context.Background(), events.Event{
 					Type:    "model.thinking.end",
