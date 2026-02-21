@@ -13,7 +13,6 @@ allowed_tools:
   - fs_patch
   - shell_exec
   - http_fetch
-  - browser
   - task_create
   - task_review
 skills:

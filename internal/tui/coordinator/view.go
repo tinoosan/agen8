@@ -494,11 +494,11 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		for i, item := range subItems {
 			var branch string
 			if i < len(subItems)-1 {
-				branch = styleVerbBold.Render("├")
+				branch = styleVerbBold.Render("├─")
 			} else {
-				branch = styleVerbBold.Render("└")
+				branch = styleVerbBold.Render("└─")
 			}
-			lines = append(lines, "  "+branch+"  "+item)
+			lines = append(lines, "  "+branch+" "+item)
 		}
 
 		// ── Promoted plan checklist (from bridge tool calls) ──────
