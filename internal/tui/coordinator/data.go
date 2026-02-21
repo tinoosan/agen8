@@ -27,6 +27,7 @@ type feedEntry struct {
 	timestamp time.Time
 	role      string
 	text      string
+	path      string
 	status    string
 	opKind    string
 	sourceID  string
@@ -127,6 +128,7 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 				timestamp: ts,
 				role:      activityRole(act),
 				text:      activityText(act),
+				path:      strings.TrimSpace(act.Path),
 				status:    string(act.Status),
 				opKind:    strings.TrimSpace(act.Kind),
 				sourceID:  strings.TrimSpace(act.ID),
@@ -299,7 +301,7 @@ func isActivityText(act types.Activity) bool {
 		return true
 	}
 	// If it lacks a specific developer op prefix but has a title, treat as text summary.
-	if strings.TrimSpace(act.Title) != "" && !strings.HasPrefix(kind, "fs_") && !strings.HasPrefix(kind, "shell_") && kind != "agent_spawn" && kind != "tool_call" {
+	if strings.TrimSpace(act.Title) != "" && !strings.HasPrefix(kind, "fs_") && !strings.HasPrefix(kind, "shell_") && kind != "agent_spawn" && kind != "tool_call" && kind != "code_exec" {
 		return true
 	}
 	return false

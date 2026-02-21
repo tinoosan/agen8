@@ -331,7 +331,13 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 	lines := []string{headerLine}
 	for _, e := range t.entries {
 		verb := kindToVerb(e.opKind, e.data)
-		argPreview := truncate(stripLeadingVerb(e.text, verb), maxInt(8, inner-len(verb)-8))
+
+		var argPreview string
+		if e.path != "" && isPathBasedOp(e.opKind) {
+			argPreview = truncate(e.path, maxInt(8, inner-len(verb)-8))
+		} else {
+			argPreview = truncate(stripLeadingVerb(e.text, verb), maxInt(8, inner-len(verb)-8))
+		}
 
 		// Primary operation line: verb in accent color + arg preview
 		opLine := "  " + styleAccent.Render(verb)
@@ -539,6 +545,20 @@ func stripLeadingVerb(text, verb string) string {
 		return strings.TrimSpace(text[len(verb):])
 	}
 	return text
+}
+
+// isPathBasedOp returns true for filesystem and related developer operations
+// where the Path field should be prioritized for the argument preview.
+func isPathBasedOp(kind string) bool {
+	k := strings.ToLower(strings.TrimSpace(kind))
+	if strings.HasPrefix(k, "fs_") {
+		return true
+	}
+	switch k {
+	case "browser", "shell_exec", "code_exec":
+		return false
+	}
+	return false
 }
 
 func padRight(s string, width int) string {
