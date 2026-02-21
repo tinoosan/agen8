@@ -29,7 +29,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fetchSessionCmd(m.endpoint, m.sessionID),
 			fetchActivityCmd(m.endpoint, m.sessionID),
 			fetchThinkingEventsCmd(m.endpoint, m.runID, m.lastEventSeq),
-			fetchUserTasksCmd(m.endpoint, m.threadID),
 			tickCmd(),
 		)
 
@@ -42,11 +41,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.connected = true
 		m.lastErr = ""
+
+		// Check if this is the very first connection initialization
+		initialConnect := m.runID == "" && m.threadID == ""
+
 		m.sessionMode = msg.sessionMode
 		m.teamID = msg.teamID
 		m.runID = msg.runID
 		m.threadID = msg.threadID
 		m.coordinatorRole = msg.coordinatorRole
+
+		if initialConnect && m.runID != "" && m.threadID != "" {
+			// Trigger immediate loads to bypass the 1s tick delay on startup
+			return m, fetchThinkingEventsCmd(m.endpoint, m.runID, m.lastEventSeq)
+		}
 		return m, nil
 
 	case activityLoadedMsg:
@@ -60,14 +68,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastErr = ""
 		m.mergeActivityEntries(msg.entries)
 		m.deriveAgentStatus()
-		return m, nil
-
-	case userTasksLoadedMsg:
-		if msg.err != nil {
-			m.lastErr = msg.err.Error()
-			return m, nil
-		}
-		m.mergeUserMessageEntries(msg.entries)
 		return m, nil
 
 	case thinkingEventsMsg:
@@ -253,7 +253,7 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 
 	others := make([]feedEntry, 0, len(m.feed))
 	for _, e := range m.feed {
-		if e.kind != feedAgent || (e.kind == feedAgent && e.isTaskResponse) {
+		if e.kind == feedThinking || (e.kind == feedAgent && e.isText) {
 			others = append(others, e)
 		}
 	}
@@ -426,35 +426,5 @@ func (m *Model) deriveAgentStatus() {
 		}
 	default:
 		m.setAgentStatus("Idle")
-	}
-}
-
-func (m *Model) mergeUserMessageEntries(entries []feedEntry) {
-	if len(entries) == 0 {
-		return
-	}
-	oldLines := m.totalFeedLines()
-
-	others := make([]feedEntry, 0, len(m.feed))
-	for _, e := range m.feed {
-		if e.kind != feedUser {
-			others = append(others, e)
-		}
-	}
-	merged := append(others, entries...)
-	sort.SliceStable(merged, func(i, j int) bool {
-		return merged[i].timestamp.Before(merged[j].timestamp)
-	})
-	m.feed = merged
-
-	if !m.liveFollow {
-		newLines := m.totalFeedLines()
-		if newLines > oldLines {
-			m.feedScroll += (newLines - oldLines)
-		}
-		maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
-		if m.feedScroll > maxScroll {
-			m.feedScroll = maxScroll
-		}
 	}
 }

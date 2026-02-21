@@ -56,11 +56,6 @@ type activityLoadedMsg struct {
 	err       error
 }
 
-type userTasksLoadedMsg struct {
-	entries []feedEntry
-	err     error
-}
-
 type goalSubmittedMsg struct {
 	goal      string
 	scope     rpcscope.ScopeState
@@ -192,63 +187,6 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 		}
 
 		return activityLoadedMsg{entries: entries, connected: true}
-	}
-}
-
-func fetchUserTasksCmd(endpoint, threadID string) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		cli := protocol.TCPClient{Endpoint: endpoint, Timeout: 5 * time.Second}
-
-		tid := strings.TrimSpace(threadID)
-		if tid == "" {
-			return userTasksLoadedMsg{err: fmt.Errorf("thread id is required")}
-		}
-
-		var res protocol.TaskListResult
-		if err := cli.Call(ctx, protocol.MethodTaskList, protocol.TaskListParams{
-			ThreadID: protocol.ThreadID(tid),
-			Limit:    100, // typically few user messages per session
-		}, &res); err != nil {
-			return userTasksLoadedMsg{err: fmt.Errorf("rpc task.list: %w", err)}
-		}
-
-		var entries []feedEntry
-		for _, task := range res.Tasks {
-			if strings.TrimSpace(strings.ToLower(task.TaskKind)) != "user_message" {
-				continue
-			}
-
-			ts := task.CreatedAt
-			if ts.IsZero() {
-				ts = time.Now()
-			}
-			var fin time.Time
-			if !task.CompletedAt.IsZero() {
-				fin = task.CompletedAt
-			}
-
-			text := strings.TrimSpace(task.Goal)
-
-			entries = append(entries, feedEntry{
-				kind:       feedUser,
-				timestamp:  ts,
-				finishedAt: fin,
-				role:       "You",
-				text:       text,
-				status:     string(task.Status),
-				opKind:     task.TaskKind,
-				sourceID:   string(task.ID),
-				isText:     true,
-			})
-		}
-
-		sort.SliceStable(entries, func(i, j int) bool {
-			return entries[i].timestamp.Before(entries[j].timestamp)
-		})
-
-		return userTasksLoadedMsg{entries: entries}
 	}
 }
 
@@ -429,6 +367,9 @@ func tickCmd() tea.Cmd {
 }
 
 func activityRole(act types.Activity) string {
+	if strings.TrimSpace(strings.ToLower(act.Kind)) == "user_message" {
+		return "You"
+	}
 	role := strings.TrimSpace(act.Data["role"])
 	if role == "" {
 		role = strings.TrimSpace(act.Data["agent_role"])
@@ -440,6 +381,16 @@ func activityRole(act types.Activity) string {
 }
 
 func activityText(act types.Activity) string {
+	if strings.TrimSpace(strings.ToLower(act.Kind)) == "user_message" {
+		if v := strings.TrimSpace(act.TextPreview); v != "" {
+			return v
+		}
+	}
+	if act.Kind == "task.done" || act.Kind == "agent_speak" {
+		if v := strings.TrimSpace(act.OutputPreview); v != "" {
+			return v
+		}
+	}
 	title := strings.TrimSpace(act.Title)
 	if title != "" {
 		return title
@@ -452,7 +403,10 @@ func activityText(act types.Activity) string {
 }
 
 func isActivityText(act types.Activity) bool {
-	kind := strings.TrimSpace(act.Kind)
+	kind := strings.TrimSpace(strings.ToLower(act.Kind))
+	if kind == "user_message" || kind == "task.done" || kind == "task.create" || kind == "agent_speak" || kind == "model_response" {
+		return true
+	}
 	// If it's explicitly a message kind, it's text.
 	if strings.HasSuffix(kind, "_message") {
 		return true

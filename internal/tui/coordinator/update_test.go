@@ -47,14 +47,15 @@ func TestMergeActivityEntries(t *testing.T) {
 	activityEntries := []feedEntry{
 		{kind: feedUser, text: "do it", timestamp: ts},
 		{kind: feedAgent, isText: false, sourceID: "op_1", timestamp: ts.Add(2 * time.Second)},
+		{kind: feedAgent, isTaskResponse: true, sourceID: "task_1", timestamp: ts.Add(3 * time.Second)},
 		{kind: feedAgent, isText: false, sourceID: "op_2", timestamp: ts.Add(4 * time.Second)},
 	}
 
 	m.mergeActivityEntries(activityEntries)
 
-	// We expect: user (retained from local), thinking (retained), agent text (retained), user (from network), and both agent ops from new list = 6 total entries
-	if len(m.feed) != 6 {
-		t.Fatalf("expected 6 entries, got %d", len(m.feed))
+	// We expect: thinking (retained), user, text response, and both agent ops from new list
+	if len(m.feed) != 5 {
+		t.Fatalf("expected 5 entries, got %d", len(m.feed))
 	}
 
 	// Verify the text entry is retained

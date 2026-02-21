@@ -32,7 +32,7 @@ type RPCServer struct {
 	taskService   pkgtask.TaskServiceForRPC
 	session       pkgsession.Service
 	agentService  pkgagent.ServiceForRPC
-	eventsService EventsLister
+	eventsService EventsAppender
 	soulService   pkgsoul.Service
 	runtimeState  RuntimeStateProvider
 	initErr       error
@@ -65,7 +65,7 @@ type RPCServerConfig struct {
 	ControlSetReasoning func(ctx context.Context, threadID, target, effort, summary string) ([]string, error)
 	ControlSetProfile   func(ctx context.Context, threadID, target, profile string) ([]string, error)
 	AgentService        pkgagent.ServiceForRPC
-	EventsService       EventsLister // optional; for events.listPaginated, events.latestSeq, events.count
+	EventsService       EventsAppender // optional; for appends, listPaginated, latestSeq, count
 	SoulService         pkgsoul.Service
 	RuntimeState        RuntimeStateProvider
 	SessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error)
@@ -74,8 +74,9 @@ type RPCServerConfig struct {
 	SessionStop   func(ctx context.Context, threadID, sessionID string) ([]string, error)
 }
 
-// EventsLister is the subset of the events service used by RPC handlers.
-type EventsLister interface {
+// EventsAppender is the subset of the events service used by RPC handlers.
+type EventsAppender interface {
+	Append(ctx context.Context, event types.EventRecord) error
 	ListPaginated(ctx context.Context, filter eventsvc.Filter) ([]types.EventRecord, int64, error)
 	LatestSeq(ctx context.Context, runID string) (int64, error)
 	Count(ctx context.Context, filter eventsvc.Filter) (int, error)

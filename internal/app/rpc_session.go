@@ -1048,6 +1048,49 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 	if err := s.taskService.CreateTask(ctx, task); err != nil {
 		return protocol.TaskCreateResult{}, err
 	}
+
+	if s.eventsService != nil && strings.TrimSpace(strings.ToLower(task.TaskKind)) == "user_message" {
+		opID := "user-msg-" + uuid.NewString()
+		goal := strings.TrimSpace(task.Goal)
+		if goal == "" {
+			goal = "user message"
+		}
+
+		_ = s.eventsService.Append(ctx, types.EventRecord{
+			EventID:   uuid.NewString(),
+			Type:      "agent.op.request",
+			RunID:     task.RunID,
+			Message:   goal,
+			Timestamp: time.Now(),
+			Data: map[string]string{
+				"opId":          opID,
+				"op":            "user_message",
+				"path":          "coordinator",
+				"textPreview":   goal,
+				"textTruncated": "false",
+				"textRedacted":  "false",
+				"textIsJSON":    "false",
+				"textBytes":     goal,
+			},
+		})
+
+		_ = s.eventsService.Append(ctx, types.EventRecord{
+			EventID:   uuid.NewString(),
+			Type:      "agent.op.response",
+			RunID:     task.RunID,
+			Message:   goal,
+			Timestamp: time.Now(),
+			Data: map[string]string{
+				"opId":          opID,
+				"op":            "user_message",
+				"path":          "coordinator",
+				"ok":            "true",
+				"outputPreview": goal,
+				"responseOnly":  "true",
+			},
+		})
+	}
+
 	if s.wake != nil {
 		s.wake()
 	}
