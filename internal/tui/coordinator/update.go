@@ -182,20 +182,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tea.MouseMsg:
 		now := time.Now()
-		if time.Since(m.lastWheelEvent) < 60*time.Millisecond {
+		if time.Since(m.lastWheelEvent) < 15*time.Millisecond {
 			return m, nil
 		}
 		m.lastWheelEvent = now
 
 		if msg.Type == tea.MouseWheelUp {
 			m.liveFollow = false
-			m.feedScroll -= 3
+			m.feedScroll -= 1
 			if m.feedScroll < 0 {
 				m.feedScroll = 0
 			}
 			return m, nil
 		} else if msg.Type == tea.MouseWheelDown {
-			m.feedScroll += 3
+			m.feedScroll += 1
 			maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
 			if m.feedScroll >= maxScroll {
 				m.liveFollow = true
