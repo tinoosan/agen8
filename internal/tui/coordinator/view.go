@@ -27,10 +27,11 @@ var (
 	stylePending = lipgloss.NewStyle().Foreground(colorPending)
 	styleAccent  = lipgloss.NewStyle().Foreground(colorAccent)
 	styleHeader  = lipgloss.NewStyle().Bold(true)
-	stylePillOK  = lipgloss.NewStyle().Bold(true).Foreground(colorOK).Reverse(true).Padding(0, 1)
-	stylePillErr = lipgloss.NewStyle().Bold(true).Foreground(colorErr).Reverse(true).Padding(0, 1)
-	stylePillDim = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#707070")).Reverse(true).Padding(0, 1)
-	styleVerbBold = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff"))
+	stylePillOK    = lipgloss.NewStyle().Bold(true).Foreground(colorOK).Reverse(true).Padding(0, 1)
+	stylePillErr   = lipgloss.NewStyle().Bold(true).Foreground(colorErr).Reverse(true).Padding(0, 1)
+	stylePillDim   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#707070")).Reverse(true).Padding(0, 1)
+	stylePillWhite = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff")).Reverse(true).Padding(0, 1)
+	styleVerbBold  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff"))
 
 	mdMu       sync.Mutex
 	mdByWidth  = map[int]*glamour.TermRenderer{}
@@ -382,14 +383,10 @@ func (m *Model) renderUserBlock(t conversationTurn, inner int) []string {
 
 func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 	if t.isText {
-		msg := strings.TrimSpace(renderMarkdown(t.text, inner-2))
-		outLines := []string{}
-		for i, l := range strings.Split(msg, "\n") {
-			if i == 0 {
-				outLines = append(outLines, kit.StyleDim.Render("● ")+l)
-			} else {
-				outLines = append(outLines, "  "+l)
-			}
+		msg := strings.TrimSpace(renderMarkdown(t.text, inner-4))
+		outLines := []string{"  " + styleVerbBold.Render("●") + " " + styleVerbBold.Render(fallback(t.role, "agent"))}
+		for _, l := range strings.Split(msg, "\n") {
+			outLines = append(outLines, "    "+l)
 		}
 		return outLines
 	}
@@ -414,6 +411,20 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		}
 
 		verb := kindToVerb(e.opKind, e.data)
+		s := strings.ToLower(strings.TrimSpace(e.status))
+
+		// Pick dot color based on status.
+		var dot string
+		switch {
+		case s == "done" || s == "completed" || s == "ok" || s == "succeeded":
+			dot = styleOK.Render("●")
+		case s == "error" || s == "failed" || s == "canceled" || s == "cancelled":
+			dot = styleErr.Render("●")
+		case s == "running":
+			dot = stylePending.Render("●")
+		default:
+			dot = kit.StyleDim.Render("●")
+		}
 
 		var argPreview string
 		opLower := strings.ToLower(strings.TrimSpace(e.opKind))
@@ -425,14 +436,14 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 			argPreview = truncate(stripLeadingVerb(e.text, verb), maxInt(8, inner-len(verb)-8))
 		}
 
-		// Primary operation line: verb in bold white + arg preview
-		opLine := "  " + styleVerbBold.Render(verb)
+		// Primary operation line: colored dot + bold verb + arg preview
+		opLine := "  " + dot + " " + styleVerbBold.Render(verb)
 		if argPreview != "" {
-			opLine += "  " + argPreview
+			opLine += " " + kit.StyleDim.Render(argPreview)
 		}
 		lines = append(lines, opLine)
 
-		// Grouped bridge tool summary line (above status).
+		// Grouped bridge tool summary line.
 		if e.childCount > 0 {
 			lines = append(lines, "  "+styleVerbBold.Render("└")+
 				" "+styleVerbBold.Render("Ran")+
@@ -441,7 +452,6 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 
 		// Status line
 		branch := styleVerbBold.Render("└")
-		s := strings.ToLower(strings.TrimSpace(e.status))
 		var statusLine string
 		switch {
 		case s == "running":
