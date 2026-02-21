@@ -436,9 +436,52 @@ func isActivityText(act types.Activity) bool {
 	return false
 }
 
-// kindToVerb maps activity kinds to human-friendly verbs.
-func kindToVerb(kind string, data map[string]string) string {
+// normPath returns a path with a leading slash for consistent prefix checks.
+func normPath(path string) string {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return ""
+	}
+	if !strings.HasPrefix(p, "/") {
+		return "/" + p
+	}
+	return p
+}
+
+// skillNameFromPath returns the first path segment after /skills/ for display (e.g. "Learning <skill>").
+// Example: /skills/notion-meeting-intelligence/SKILL.md -> "notion-meeting-intelligence".
+func skillNameFromPath(path string) string {
+	p := normPath(path)
+	if p == "" || !strings.HasPrefix(p, "/skills/") {
+		return ""
+	}
+	rest := strings.TrimPrefix(p, "/skills/")
+	if rest == "" {
+		return ""
+	}
+	if idx := strings.Index(rest, "/"); idx >= 0 {
+		return rest[:idx]
+	}
+	return rest
+}
+
+// kindToVerb maps activity kinds to human-friendly verbs. Path is used for /memory and /skills display overrides.
+func kindToVerb(kind string, path string, data map[string]string) string {
 	k := strings.TrimSpace(strings.ToLower(kind))
+	p := normPath(path)
+	// /memory: Append or Write -> "Updated memory"; Read or Search -> "Remembering"
+	if strings.HasPrefix(p, "/memory/") {
+		if k == "fs_write" || k == "fs_append" {
+			return "Updated memory"
+		}
+		if k == "fs_read" || k == "fs_search" {
+			return "Remembering"
+		}
+	}
+	// /skills: Read -> "Learning <skill>" (verb is "Learning", arg is skill name)
+	if strings.HasPrefix(p, "/skills/") && k == "fs_read" {
+		return "Learning"
+	}
 	switch k {
 	case "fs_read":
 		return "Read"

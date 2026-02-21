@@ -446,7 +446,7 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 			continue
 		}
 
-		verb := kindToVerb(e.opKind, e.data)
+		verb := kindToVerb(e.opKind, e.path, e.data)
 		s := strings.ToLower(strings.TrimSpace(e.status))
 
 		// Pick dot color based on status; running dots pulse between white and pending.
@@ -471,6 +471,13 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		opLower := strings.ToLower(strings.TrimSpace(e.opKind))
 		if opLower == "code_exec" {
 			// Show just the verb — no arg preview for code_exec.
+		} else if verb == "Updated memory" || verb == "Remembering" {
+			// /memory: no path in display.
+		} else if verb == "Learning" {
+			argPreview = skillNameFromPath(e.path)
+			if argPreview != "" {
+				argPreview = truncate(argPreview, maxInt(8, inner-len(verb)-8))
+			}
 		} else if opLower == "http_fetch" && e.data != nil {
 			if u := strings.TrimSpace(e.data["url"]); u != "" {
 				argPreview = truncate(u, maxInt(8, inner-len(verb)-8))
@@ -499,11 +506,18 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		if e.childCount > 0 {
 			if e.childCount == 1 && e.bridgeSingleOpKind != "" {
 				// Single bridge call: show Verb + Args under the parent instead of "Ran 1 tools".
-				bridgeVerb := kindToVerb(e.bridgeSingleOpKind, e.bridgeSingleData)
+				bridgeVerb := kindToVerb(e.bridgeSingleOpKind, e.bridgeSinglePath, e.bridgeSingleData)
 				var bridgeArg string
 				var bridgeArgItalic bool
 				bridgeOpLower := strings.ToLower(strings.TrimSpace(e.bridgeSingleOpKind))
-				if bridgeOpLower == "http_fetch" && e.bridgeSingleData != nil {
+				if bridgeVerb == "Updated memory" || bridgeVerb == "Remembering" {
+					// no arg
+				} else if bridgeVerb == "Learning" {
+					bridgeArg = skillNameFromPath(e.bridgeSinglePath)
+					if bridgeArg != "" {
+						bridgeArg = truncate(bridgeArg, maxInt(8, inner-len(bridgeVerb)-8))
+					}
+				} else if bridgeOpLower == "http_fetch" && e.bridgeSingleData != nil {
 					if u := strings.TrimSpace(e.bridgeSingleData["url"]); u != "" {
 						bridgeArg = truncate(u, maxInt(8, inner-len(bridgeVerb)-8))
 						bridgeArgItalic = true
