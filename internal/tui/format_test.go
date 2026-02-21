@@ -139,7 +139,7 @@ func TestActionCategory_RepresentativeOps(t *testing.T) {
 		{op: "fs_read", want: "Explored"},
 		{op: "fs_write", want: "Updated"},
 		{op: "shell_exec", want: "Ran"},
-		{op: "http_fetch", want: "Called"},
+		{op: "http_fetch", want: "Fetched"},
 		{op: "trace_run", want: "Traced"},
 		{op: "agent_spawn", want: "Delegated"},
 		{op: "task_create", want: "Created"},

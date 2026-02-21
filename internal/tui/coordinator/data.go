@@ -425,7 +425,7 @@ func isActivityText(act types.Activity) bool {
 		return true
 	}
 	// If it lacks a specific developer op prefix but has a title, treat as text summary.
-	if strings.TrimSpace(act.Title) != "" && !strings.HasPrefix(kind, "fs_") && !strings.HasPrefix(kind, "shell_") && kind != "agent_spawn" && kind != "tool_call" && kind != "code_exec" {
+	if strings.TrimSpace(act.Title) != "" && !strings.HasPrefix(kind, "fs_") && !strings.HasPrefix(kind, "shell_") && kind != "agent_spawn" && kind != "tool_call" && kind != "code_exec" && kind != "http_fetch" {
 		return true
 	}
 	return false

@@ -48,7 +48,7 @@ var catalog = map[string]metadata{
 		useSharedRequestTitle: true,
 	},
 	"http_fetch": {
-		category:              "Called",
+		category:              "Fetched",
 		useSharedRequestTitle: true,
 	},
 	"browser": {

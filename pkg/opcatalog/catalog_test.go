@@ -15,7 +15,7 @@ func TestCategory(t *testing.T) {
 		{op: "fs_write", want: "Updated", wantSeen: true},
 		{op: "shell_exec", want: "Ran", wantSeen: true},
 		{op: "code_exec", want: "Ran", wantSeen: true},
-		{op: "http_fetch", want: "Called", wantSeen: true},
+		{op: "http_fetch", want: "Fetched", wantSeen: true},
 		{op: "browser", want: "Browsed", wantSeen: true},
 		{op: "email", want: "Sent", wantSeen: true},
 		{op: "trace_run", want: "Traced", wantSeen: true},
