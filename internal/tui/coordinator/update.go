@@ -81,6 +81,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.lastSeq > m.lastEventSeq {
 			m.lastEventSeq = msg.lastSeq
 		}
+		// If we got a full page, fetch the next page immediately to drain
+		// historical events on re-entry instead of waiting for the next tick.
+		if len(msg.events)+len(msg.entries) >= 500 {
+			return m, fetchThinkingEventsCmd(m.endpoint, m.runID, m.lastEventSeq)
+		}
 		return m, nil
 
 	case goalSubmittedMsg:

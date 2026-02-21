@@ -211,7 +211,7 @@ func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 		if err := cli.Call(ctx, protocol.MethodEventsListPaginated, protocol.EventsListPaginatedParams{
 			RunID:    strings.TrimSpace(runID),
 			AfterSeq: afterSeq,
-			Limit:    100,
+			Limit:    500,
 			Types:    []string{"model.thinking.start", "model.thinking.end", "model.thinking.summary", "task.done"},
 		}, &res); err != nil {
 			return thinkingEventsMsg{err: err}

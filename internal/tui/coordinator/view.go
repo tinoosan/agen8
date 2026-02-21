@@ -547,18 +547,32 @@ func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
 	headerLine := "  " + triangle + " " + styleThinking.Italic(true).Render(label)
 	result := []string{headerLine}
 
-	flat := e.thinkingLines
-	if len(flat) == 0 {
+	rawLines := e.thinkingLines
+	if len(rawLines) == 0 {
 		if e.live {
-			flat = []string{m.spinner() + " thinking…"}
+			rawLines = []string{m.spinner() + " thinking…"}
 		} else {
-			flat = []string{"(no summary available)"}
+			rawLines = []string{"(no summary available)"}
 		}
 	}
 
-	// Word-wrap thinking lines to use nearly the full terminal width.
-	// Only subtract the left indent: "  " (2) + branch (4) + " " (1) = 7 chars.
-	wrapWidth := maxInt(20, m.width-7)
+	// Join all chunks into one text block (handles both old per-token fragments
+	// and new complete lines), then split on newlines for display.
+	combined := strings.Join(rawLines, "\n")
+	var flat []string
+	for _, sub := range strings.Split(combined, "\n") {
+		sub = strings.TrimRight(sub, " \t")
+		if sub != "" {
+			flat = append(flat, sub)
+		}
+	}
+	if len(flat) == 0 {
+		flat = rawLines
+	}
+
+	// Word-wrap to fit available width.
+	// Prefix per line: "  " (2) + branch (4) + " " (1) = 7 visible chars.
+	wrapWidth := maxInt(20, inner-7)
 	var wrapped []string
 	for _, l := range flat {
 		wrapped = append(wrapped, wrapText(l, wrapWidth)...)
@@ -885,6 +899,8 @@ func stringPtr(s string) *string { return &s }
 func coordinatorMarkdownStyle() ansi.StyleConfig {
 	style := styles.DarkStyleConfig
 
+	// Reset document margins so the given wrap width is fully utilized
+	style.Document.Margin = uintPtr(0)
 	// Render markdown as markdown (hide raw markers like "###" and "**").
 	style.H1.StylePrimitive.Prefix = ""
 	style.H2.StylePrimitive.Prefix = ""
