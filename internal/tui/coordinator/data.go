@@ -20,20 +20,23 @@ const (
 	feedUser feedKind = iota
 	feedAgent
 	feedSystem
+	feedThinking
 )
 
 type feedEntry struct {
-	kind      feedKind
-	timestamp time.Time
-	role      string
-	text      string
-	path      string
-	status    string
-	opKind    string
-	sourceID  string
-	isText    bool
-	data      map[string]string // raw activity Data for verb resolution
-	planItems []string          // parsed checklist items for plan writes
+	kind       feedKind
+	timestamp  time.Time
+	finishedAt time.Time // zero if not yet finished
+	role       string
+	text       string
+	path       string
+	status     string
+	opKind     string
+	sourceID   string
+	isText     bool
+	data       map[string]string // raw activity Data for verb resolution
+	planItems  []string          // parsed checklist items for plan writes
+	childCount int               // number of grouped bridge tool calls (for code_exec parents)
 }
 
 type sessionLoadedMsg struct {
@@ -64,6 +67,12 @@ type sessionActionMsg struct {
 	scope     rpcscope.ScopeState
 	recovered bool
 	err       error
+}
+
+type thinkingEventsMsg struct {
+	entries []feedEntry
+	lastSeq int64
+	err     error
 }
 
 type tickMsg struct{}
@@ -123,17 +132,22 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 			if ts.IsZero() {
 				ts = time.Now()
 			}
+			var fin time.Time
+			if act.FinishedAt != nil {
+				fin = *act.FinishedAt
+			}
 			entries = append(entries, feedEntry{
-				kind:      feedAgent,
-				timestamp: ts,
-				role:      activityRole(act),
-				text:      activityText(act),
-				path:      strings.TrimSpace(act.Path),
-				status:    string(act.Status),
-				opKind:    strings.TrimSpace(act.Kind),
-				sourceID:  strings.TrimSpace(act.ID),
-				isText:    isActivityText(act),
-				data:      act.Data,
+				kind:       feedAgent,
+				timestamp:  ts,
+				finishedAt: fin,
+				role:       activityRole(act),
+				text:       activityText(act),
+				path:       strings.TrimSpace(act.Path),
+				status:     string(act.Status),
+				opKind:     strings.TrimSpace(act.Kind),
+				sourceID:   strings.TrimSpace(act.ID),
+				isText:     isActivityText(act),
+				data:       act.Data,
 			})
 		}
 
@@ -160,6 +174,47 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 		}
 
 		return activityLoadedMsg{entries: entries, connected: true}
+	}
+}
+
+func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
+	return func() tea.Msg {
+		if strings.TrimSpace(runID) == "" {
+			return thinkingEventsMsg{}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		cli := protocol.TCPClient{Endpoint: endpoint, Timeout: 5 * time.Second}
+
+		var res protocol.EventsListPaginatedResult
+		if err := cli.Call(ctx, protocol.MethodEventsListPaginated, protocol.EventsListPaginatedParams{
+			RunID:    strings.TrimSpace(runID),
+			AfterSeq: afterSeq,
+			Limit:    100,
+			Types:    []string{"model.thinking.start", "model.thinking.end"},
+		}, &res); err != nil {
+			return thinkingEventsMsg{err: err}
+		}
+
+		var entries []feedEntry
+		var maxSeq int64
+		for _, ev := range res.Events {
+			if ev.Type == "model.thinking.start" {
+				entries = append(entries, feedEntry{
+					kind:      feedThinking,
+					timestamp: ev.Timestamp,
+					text:      "Thinking",
+					sourceID:  ev.EventID,
+				})
+			}
+			seq := res.Next
+			if seq > maxSeq {
+				maxSeq = seq
+			}
+		}
+
+		return thinkingEventsMsg{entries: entries, lastSeq: maxSeq}
 	}
 }
 
@@ -332,7 +387,7 @@ func kindToVerb(kind string, data map[string]string) string {
 	case "browser":
 		return "Browse"
 	case "code_exec":
-		return "Python"
+		return "Executing code"
 	case "email":
 		return "Email"
 	case "agent_spawn":

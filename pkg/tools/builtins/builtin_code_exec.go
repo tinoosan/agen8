@@ -623,6 +623,7 @@ func handleCodeExecToolCall(
 	if strings.TrimSpace(opReq.Op) == types.HostOpCodeExec {
 		return codeExecToolResultFrame{Type: "tool_result", ID: call.ID, OK: false, Error: "nested code_exec is not allowed"}
 	}
+	opReq.Tag = "code_exec_bridge"
 	resp := bridge(ctx, opReq)
 	if !resp.Ok {
 		return codeExecToolResultFrame{

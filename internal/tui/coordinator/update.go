@@ -28,6 +28,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(
 			fetchSessionCmd(m.endpoint, m.sessionID),
 			fetchActivityCmd(m.endpoint, m.sessionID),
+			fetchThinkingEventsCmd(m.endpoint, m.runID, m.lastEventSeq),
 			tickCmd(),
 		)
 
@@ -58,6 +59,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastErr = ""
 		m.mergeActivityEntries(msg.entries)
 		m.deriveAgentStatus()
+		return m, nil
+
+	case thinkingEventsMsg:
+		if msg.err == nil && len(msg.entries) > 0 {
+			m.mergeThinkingEntries(msg.entries)
+		}
+		if msg.lastSeq > m.lastEventSeq {
+			m.lastEventSeq = msg.lastSeq
+		}
 		return m, nil
 
 	case goalSubmittedMsg:
@@ -137,14 +147,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.feedScroll = maxScroll
 			}
 			return m, nil
-		case "home", "g":
+		case "home":
 			m.liveFollow = false
 			m.feedScroll = 0
 			return m, nil
-		case "end", "G":
+		case "g":
+			if strings.TrimSpace(m.input.Value()) == "" {
+				m.liveFollow = false
+				m.feedScroll = 0
+				return m, nil
+			}
+		case "end":
 			m.liveFollow = true
 			m.pinFeedToBottom()
 			return m, nil
+		case "G":
+			if strings.TrimSpace(m.input.Value()) == "" {
+				m.liveFollow = true
+				m.pinFeedToBottom()
+				return m, nil
+			}
 		case "enter":
 			line := strings.TrimSpace(m.input.Value())
 			if line == "" {
@@ -228,6 +250,28 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 	}
 }
 
+func (m *Model) mergeThinkingEntries(entries []feedEntry) {
+	// Deduplicate by sourceID against existing thinking entries.
+	existing := make(map[string]bool)
+	for _, e := range m.feed {
+		if e.kind == feedThinking && e.sourceID != "" {
+			existing[e.sourceID] = true
+		}
+	}
+	for _, e := range entries {
+		if e.sourceID != "" && existing[e.sourceID] {
+			continue
+		}
+		m.feed = append(m.feed, e)
+	}
+	sort.SliceStable(m.feed, func(i, j int) bool {
+		return m.feed[i].timestamp.Before(m.feed[j].timestamp)
+	})
+	if m.liveFollow {
+		m.pinFeedToBottom()
+	}
+}
+
 func (m *Model) pinFeedToBottom() {
 	m.liveFollow = true
 	m.feedScroll = maxInt(0, m.totalFeedLines()-m.feedHeight())
@@ -294,28 +338,37 @@ func (m *Model) expireAgentStatus() {
 }
 
 func (m *Model) deriveAgentStatus() {
-	// Find the last agent entry.
-	var last *feedEntry
+	// Find the last agent op entry and the last thinking entry.
+	var lastOp *feedEntry
+	var lastThinking *feedEntry
 	for i := len(m.feed) - 1; i >= 0; i-- {
-		if m.feed[i].kind == feedAgent && !m.feed[i].isText {
-			last = &m.feed[i]
+		if lastOp == nil && m.feed[i].kind == feedAgent && !m.feed[i].isText {
+			lastOp = &m.feed[i]
+		}
+		if lastThinking == nil && m.feed[i].kind == feedThinking {
+			lastThinking = &m.feed[i]
+		}
+		if lastOp != nil && lastThinking != nil {
 			break
 		}
 	}
-	if last == nil {
+
+	if lastOp == nil {
 		m.setAgentStatus("Idle")
 		return
 	}
 
-	s := strings.ToLower(strings.TrimSpace(last.status))
+	s := strings.ToLower(strings.TrimSpace(lastOp.status))
 	switch {
 	case s == "pending" || s == "running":
-		verb := kindToVerb(last.opKind, last.data)
-		m.setAgentStatus("Processing " + verb + "...")
+		m.setAgentStatus("Processing")
 	case s == "error" || s == "failed":
 		m.setAgentStatusExpiring("Error", 10*time.Second)
 	case s == "done" || s == "completed" || s == "ok" || s == "succeeded":
-		if last.timestamp.After(time.Now().Add(-5 * time.Second)) {
+		// If we have a thinking event that's more recent than the last op, show Thinking.
+		if lastThinking != nil && lastThinking.timestamp.After(lastOp.timestamp) {
+			m.setAgentStatus("Thinking")
+		} else if lastOp.timestamp.After(time.Now().Add(-5 * time.Second)) {
 			m.setAgentStatusExpiring("Done", 5*time.Second)
 		} else {
 			m.setAgentStatus("Idle")

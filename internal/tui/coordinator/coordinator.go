@@ -23,6 +23,7 @@ const (
 	turnUser turnKind = iota
 	turnAgent
 	turnSystem
+	turnThinking
 )
 
 // conversationTurn groups consecutive feed entries into a visual block.
@@ -71,6 +72,8 @@ type Model struct {
 
 	agentStatus     string    // "Thinking…", "Processing…", "Idle", etc.
 	statusExpiresAt time.Time // auto-clear time for expiring statuses
+
+	lastEventSeq int64 // cursor for incremental thinking event polling
 
 	pickerOpen    bool
 	pickerLoading bool

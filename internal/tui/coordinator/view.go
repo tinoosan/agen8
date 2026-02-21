@@ -27,6 +27,10 @@ var (
 	stylePending = lipgloss.NewStyle().Foreground(colorPending)
 	styleAccent  = lipgloss.NewStyle().Foreground(colorAccent)
 	styleHeader  = lipgloss.NewStyle().Bold(true)
+	stylePillOK  = lipgloss.NewStyle().Bold(true).Foreground(colorOK).Reverse(true).Padding(0, 1)
+	stylePillErr = lipgloss.NewStyle().Bold(true).Foreground(colorErr).Reverse(true).Padding(0, 1)
+	stylePillDim = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#707070")).Reverse(true).Padding(0, 1)
+	styleVerbBold = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#ffffff"))
 
 	mdMu       sync.Mutex
 	mdByWidth  = map[int]*glamour.TermRenderer{}
@@ -98,11 +102,11 @@ func (m *Model) renderHeader() string {
 		var statusPill string
 		switch {
 		case strings.Contains(m.agentStatus, "Error"):
-			statusPill = styleErr.Render(m.agentStatus)
+			statusPill = stylePillErr.Render(m.agentStatus)
 		case strings.Contains(m.agentStatus, "Done"):
-			statusPill = styleOK.Render(m.agentStatus)
+			statusPill = stylePillOK.Render(m.agentStatus)
 		default:
-			statusPill = stylePending.Render(m.spinner() + " " + m.agentStatus)
+			statusPill = stylePillDim.Render(m.agentStatus + " " + m.spinner())
 		}
 		tags = append(tags, statusPill)
 	}
@@ -181,6 +185,22 @@ func (m *Model) buildTurns() []conversationTurn {
 				timestamp: e.timestamp,
 				text:      e.text,
 			})
+		case feedThinking:
+			// Thinking entries are injected inline into the current agent turn,
+			// or rendered as a standalone dim line if no agent turn is active.
+			if curAgent != nil {
+				curAgent.entries = append(curAgent.entries, e)
+				if e.timestamp.After(curAgent.timestamp) {
+					curAgent.timestamp = e.timestamp
+				}
+			} else {
+				flushAgent()
+				turns = append(turns, conversationTurn{
+					kind:      turnThinking,
+					timestamp: e.timestamp,
+					text:      e.text,
+				})
+			}
 		case feedAgent:
 			role := fallback(e.role, "agent")
 
@@ -245,8 +265,63 @@ func (m *Model) renderFeed(height int) string {
 	return lipgloss.NewStyle().Width(m.width).Height(height).Render(content)
 }
 
+// groupBridgeToolCalls collapses code_exec bridge tool calls within each turn.
+// A bridge call is identified by either:
+//   - data["tag"] == "code_exec_bridge" (new activities), or
+//   - temporal overlap: the entry started while a code_exec was still running
+//     (entry.timestamp >= code_exec.timestamp && entry.timestamp <= code_exec.finishedAt)
+func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
+	for ti := range turns {
+		t := &turns[ti]
+		if t.kind != turnAgent || t.isText || len(t.entries) == 0 {
+			continue
+		}
+
+		var filtered []feedEntry
+		var lastCodeExecIdx int = -1 // index in filtered slice
+
+		for _, e := range t.entries {
+			isBridge := false
+
+			// Check tag first (works for new activities).
+			if e.data != nil && strings.TrimSpace(e.data["tag"]) == "code_exec_bridge" {
+				isBridge = true
+			}
+
+			// Temporal fallback: entry started during code_exec execution window.
+			if !isBridge && lastCodeExecIdx >= 0 {
+				ce := filtered[lastCodeExecIdx]
+				if !ce.finishedAt.IsZero() &&
+					!e.timestamp.Before(ce.timestamp) &&
+					!e.timestamp.After(ce.finishedAt) {
+					isBridge = true
+				}
+			}
+
+			if isBridge && lastCodeExecIdx >= 0 {
+				filtered[lastCodeExecIdx].childCount++
+				continue
+			}
+
+			if strings.ToLower(strings.TrimSpace(e.opKind)) == "code_exec" {
+				lastCodeExecIdx = len(filtered)
+			} else if lastCodeExecIdx >= 0 {
+				// If this non-bridge entry started after code_exec finished,
+				// clear the code_exec anchor so later entries aren't grouped.
+				ce := filtered[lastCodeExecIdx]
+				if !ce.finishedAt.IsZero() && e.timestamp.After(ce.finishedAt) {
+					lastCodeExecIdx = -1
+				}
+			}
+			filtered = append(filtered, e)
+		}
+		t.entries = filtered
+	}
+	return turns
+}
+
 func (m *Model) feedLines(width int) []string {
-	turns := m.buildTurns()
+	turns := groupBridgeToolCalls(m.buildTurns())
 	if len(turns) == 0 {
 		return nil
 	}
@@ -262,6 +337,8 @@ func (m *Model) feedLines(width int) []string {
 			lines = append(lines, m.renderAgentBlock(t, inner)...)
 		case turnSystem:
 			lines = append(lines, m.renderSystemBlock(t, inner)...)
+		case turnThinking:
+			lines = append(lines, m.renderThinkingLine(t))
 		}
 		// Separator between blocks is just an empty line
 		if i < len(turns)-1 {
@@ -287,7 +364,7 @@ func (m *Model) renderUserBlock(t conversationTurn, inner int) []string {
 	gap := maxInt(1, inner-labelW-ageW)
 	headerLine := "  " + label + strings.Repeat(" ", gap) + ageStr
 
-	msg := renderMarkdown(t.text, inner-2)
+	msg := strings.TrimSpace(renderMarkdown(t.text, inner-2))
 	outLines := []string{headerLine}
 	for _, l := range strings.Split(msg, "\n") {
 		outLines = append(outLines, "  "+l)
@@ -305,7 +382,7 @@ func (m *Model) renderUserBlock(t conversationTurn, inner int) []string {
 
 func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 	if t.isText {
-		msg := renderMarkdown(t.text, inner-2)
+		msg := strings.TrimSpace(renderMarkdown(t.text, inner-2))
 		outLines := []string{}
 		for i, l := range strings.Split(msg, "\n") {
 			if i == 0 {
@@ -330,6 +407,12 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 
 	lines := []string{headerLine}
 	for _, e := range t.entries {
+		// Thinking entries render as a dim inline indicator.
+		if e.kind == feedThinking {
+			lines = append(lines, "  "+kit.StyleDim.Render(m.spinner()+" Thinking..."))
+			continue
+		}
+
 		verb := kindToVerb(e.opKind, e.data)
 
 		var argPreview string
@@ -339,27 +422,34 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 			argPreview = truncate(stripLeadingVerb(e.text, verb), maxInt(8, inner-len(verb)-8))
 		}
 
-		// Primary operation line: verb in accent color + arg preview
-		opLine := "  " + styleAccent.Render(verb)
+		// Primary operation line: verb in bold white + arg preview
+		opLine := "  " + styleVerbBold.Render(verb)
 		if argPreview != "" {
 			opLine += "  " + argPreview
 		}
 		lines = append(lines, opLine)
 
+		// Grouped bridge tool summary line (above status).
+		if e.childCount > 0 {
+			lines = append(lines, "  "+styleVerbBold.Render("└")+
+				" "+styleVerbBold.Render(fmt.Sprintf("Ran %d tools", e.childCount)))
+		}
+
 		// Status line
+		branch := styleVerbBold.Render("└")
 		s := strings.ToLower(strings.TrimSpace(e.status))
 		var statusLine string
 		switch {
 		case s == "running":
-			statusLine = "  " + kit.StyleDim.Render("└ running "+m.spinner())
+			statusLine = "  " + branch + " " + kit.StyleDim.Render("running "+m.spinner())
 		case s == "pending":
-			statusLine = "  " + kit.StyleDim.Render("└ pending ...")
+			statusLine = "  " + branch + " " + kit.StyleDim.Render("pending ...")
 		case s == "done" || s == "completed" || s == "ok" || s == "succeeded":
-			statusLine = "  " + styleOK.Render("└ Done")
+			statusLine = "  " + branch + " " + styleOK.Render("Done")
 		case s == "error" || s == "failed" || s == "canceled" || s == "cancelled":
-			statusLine = "  " + styleErr.Render("└ Failed")
+			statusLine = "  " + branch + " " + styleErr.Render("Failed")
 		default:
-			statusLine = "  " + kit.StyleDim.Render("└ "+e.status)
+			statusLine = "  " + branch + " " + kit.StyleDim.Render(e.status)
 		}
 		lines = append(lines, statusLine)
 
@@ -377,6 +467,12 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 	return lines
 }
 
+// ── Thinking line ──────────────────────────────────────────────────────
+
+func (m *Model) renderThinkingLine(t conversationTurn) string {
+	return "  " + kit.StyleDim.Render(m.spinner()+" Thinking...")
+}
+
 // ── System block ───────────────────────────────────────────────────────
 //
 //   ◆ system                                           1m ago
@@ -392,7 +488,7 @@ func (m *Model) renderSystemBlock(t conversationTurn, inner int) []string {
 	gap := maxInt(1, inner-labelW-ageW)
 	headerLine := "  " + label + strings.Repeat(" ", gap) + ageStr
 
-	msg := renderMarkdown(t.text, inner-2)
+	msg := strings.TrimSpace(renderMarkdown(t.text, inner-2))
 	outLines := []string{headerLine}
 	for _, l := range strings.Split(msg, "\n") {
 		outLines = append(outLines, "  "+kit.StyleDim.Render(l))
