@@ -17,6 +17,8 @@ model = "z-ai/GLM-5"
 venv_path = ""
 # Pip package names to keep installed in code_exec's managed venv.
 required_packages = ["pandas", "requests"]
-# Absolute host dirs the agent may access outside VFS (read-only). Paths are
-# resolved to canonical form; non-existent entries are skipped.
-# host_path_allowlist = ["/home/user/shared", "/var/cache/build"]
+
+# Paths outside VFS the agent may access (on the filesystem where config lives).
+[path_access]
+# allowlist = ["/home/user/shared", "/var/cache/build"]
+# read_only = true   # If true, only reads; if false, reads and writes

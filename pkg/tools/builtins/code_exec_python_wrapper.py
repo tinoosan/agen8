@@ -162,7 +162,7 @@ def _install_fs_write_policy():
 
 def _blocked_path_error(operation, path):
     return ToolError(
-        f"code_exec file access must use VFS paths (/workspace, /project, etc.) or host_path_allowlist; "
+        f"code_exec file access must use VFS paths (/workspace, /project, etc.) or [path_access].allowlist; "
         f"{operation}({path!r}) is not allowed. Use tools.fs_read/fs_list with VFS paths."
     )
 
@@ -187,13 +187,16 @@ def _path_under_allowlist(path, allowlist):
     return False
 
 
-def _install_vfs_compat_shim(tools, host_path_allowlist=None):
+def _install_vfs_compat_shim(tools, path_access_allowlist=None, path_access_read_only=True, real_open=None):
     """
     Route open() and os.listdir() through the bridge when given VFS paths.
-    Non-VFS paths are allowed only if under host_path_allowlist (from config).
+    Non-VFS paths are allowed only if under path_access_allowlist (from config).
+    When read_only is True, only reads allowed on allowlisted paths; else reads and writes.
+    real_open is the true builtins.open (captured before policy); used for allowlisted fall-through.
     """
-    allowlist = list(host_path_allowlist) if host_path_allowlist else []
-    _orig_open = py_builtins.open
+    allowlist = list(path_access_allowlist) if path_access_allowlist else []
+    read_only = path_access_read_only
+    _orig_open = real_open if real_open is not None else py_builtins.open
 
     def _vfs_aware_open(file, mode="r", *args, **kwargs):
         path = str(file) if not isinstance(file, (str, bytes)) else file
@@ -220,6 +223,11 @@ def _install_vfs_compat_shim(tools, host_path_allowlist=None):
                 return io.BytesIO(content)
             return io.StringIO(text or "")
         if _path_under_allowlist(path, allowlist):
+            if _is_write_mode(mode) and read_only:
+                raise ToolError(
+                    "path_access.read_only is true; writes to allowlisted paths are not allowed. "
+                    "Set read_only = false in [path_access] to allow writes."
+                )
             return _orig_open(file, mode, *args, **kwargs)
         raise _blocked_path_error("open", path)
 
@@ -265,9 +273,11 @@ def main():
 
     bridge = _ToolBridge(allowed_tools)
     tools = _ToolsProxy(bridge)
+    _real_open = py_builtins.open  # Capture before any policy replaces it
     _install_fs_write_policy()
-    host_path_allowlist = init.get("host_path_allowlist") or []
-    _install_vfs_compat_shim(tools, host_path_allowlist)
+    path_access_allowlist = init.get("path_access_allowlist") or []
+    path_access_read_only = init.get("path_access_read_only", True)
+    _install_vfs_compat_shim(tools, path_access_allowlist, path_access_read_only, _real_open)
     # Import-compatibility shim for model-generated code using `import tools`.
     tools_module = types.ModuleType("tools")
     tools_module.__getattr__ = lambda name: getattr(tools, name)

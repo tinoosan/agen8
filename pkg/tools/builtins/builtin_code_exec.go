@@ -55,9 +55,10 @@ type BuiltinCodeExecInvoker struct {
 	EnvAllowlist    []string
 	RequiredImports []string
 
-	// HostPathAllowlist: canonical absolute dir paths the agent may access outside VFS (read-only).
-	// Paths are resolved at set time; non-existent entries are skipped.
-	HostPathAllowlist []string
+	// PathAccessAllowlist: canonical absolute dir paths the agent may access outside VFS.
+	PathAccessAllowlist []string
+	// PathAccessReadOnly: if true, only reads allowed on allowlisted paths; if false, reads and writes.
+	PathAccessReadOnly bool
 
 	mu       sync.RWMutex
 	bridge   CodeExecBridge
@@ -132,9 +133,9 @@ func (i *BuiltinCodeExecInvoker) SetRequiredImports(imports []string) {
 	i.mu.Unlock()
 }
 
-// SetHostPathAllowlist sets canonical absolute directory paths the agent may access outside VFS.
-// Non-existent paths are skipped. Paths are resolved to canonical form (absolute, symlinks followed).
-func (i *BuiltinCodeExecInvoker) SetHostPathAllowlist(paths []string) {
+// SetPathAccess sets the path allowlist and read-only mode for code_exec.
+// Paths are canonicalized (absolute, symlinks followed); non-existent entries are skipped.
+func (i *BuiltinCodeExecInvoker) SetPathAccess(paths []string, readOnly bool) {
 	if i == nil {
 		return
 	}
@@ -158,7 +159,8 @@ func (i *BuiltinCodeExecInvoker) SetHostPathAllowlist(paths []string) {
 		canonical = append(canonical, filepath.Clean(resolved))
 	}
 	i.mu.Lock()
-	i.HostPathAllowlist = canonical
+	i.PathAccessAllowlist = canonical
+	i.PathAccessReadOnly = readOnly
 	i.mu.Unlock()
 }
 
@@ -257,7 +259,8 @@ func (i *BuiltinCodeExecInvoker) Invoke(ctx context.Context, req pkgtools.ToolRe
 		allow = append(allow, name)
 	}
 	envAllow := append([]string(nil), i.EnvAllowlist...)
-	hostPathAllowlist := append([]string(nil), i.HostPathAllowlist...)
+	pathAccessAllowlist := append([]string(nil), i.PathAccessAllowlist...)
+	pathAccessReadOnly := i.PathAccessReadOnly
 	i.mu.RUnlock()
 
 	if bridge == nil {
@@ -320,8 +323,9 @@ func (i *BuiltinCodeExecInvoker) Invoke(ctx context.Context, req pkgtools.ToolRe
 		MaxOutput:          maxOutput,
 		Dispatch:           dispatch,
 		Bridge:             bridge,
-		EnvAllowlist:       envAllow,
-		HostPathAllowlist:  hostPathAllowlist,
+		EnvAllowlist:        envAllow,
+		PathAccessAllowlist: pathAccessAllowlist,
+		PathAccessReadOnly:  pathAccessReadOnly,
 	})
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -338,15 +342,16 @@ func (i *BuiltinCodeExecInvoker) Invoke(ctx context.Context, req pkgtools.ToolRe
 }
 
 type codeExecRunConfig struct {
-	Code               string
-	Allowlist          []string
-	MaxToolCalls       int
-	TimeoutMs          int
-	MaxOutput          int
-	Dispatch           CodeExecDispatch
-	Bridge             CodeExecBridge
-	EnvAllowlist       []string
-	HostPathAllowlist  []string
+	Code                string
+	Allowlist           []string
+	MaxToolCalls        int
+	TimeoutMs           int
+	MaxOutput           int
+	Dispatch            CodeExecDispatch
+	Bridge              CodeExecBridge
+	EnvAllowlist        []string
+	PathAccessAllowlist []string
+	PathAccessReadOnly  bool
 }
 
 type codeExecOutput struct {
@@ -446,8 +451,9 @@ func (i *BuiltinCodeExecInvoker) runPython(parent context.Context, pythonBin, cw
 		"allowed_tools":  cfg.Allowlist,
 		"max_tool_calls": cfg.MaxToolCalls,
 	}
-	if len(cfg.HostPathAllowlist) > 0 {
-		initFrame["host_path_allowlist"] = cfg.HostPathAllowlist
+	if len(cfg.PathAccessAllowlist) > 0 {
+		initFrame["path_access_allowlist"] = cfg.PathAccessAllowlist
+		initFrame["path_access_read_only"] = cfg.PathAccessReadOnly
 	}
 	if err := enc.Encode(initFrame); err != nil {
 		_ = stdinPipe.Close()

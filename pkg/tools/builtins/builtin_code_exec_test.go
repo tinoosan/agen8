@@ -450,8 +450,8 @@ func TestRunPython_VFSCompatShim_BlocksNonVFSPaths(t *testing.T) {
 	}
 }
 
-func TestRunPython_HostPathAllowlist_AllowsAccess(t *testing.T) {
-	// host_path_allowlist permits access to dirs outside VFS.
+func TestRunPython_PathAccessAllowlist_AllowsAccess(t *testing.T) {
+	// path_access.allowlist permits access to dirs outside VFS.
 	python := mustFindPython(t)
 	workspace := t.TempDir()
 	sharedDir := t.TempDir()
@@ -459,21 +459,22 @@ func TestRunPython_HostPathAllowlist_AllowsAccess(t *testing.T) {
 		t.Fatalf("write fixture: %v", err)
 	}
 	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
-	inv.SetHostPathAllowlist([]string{sharedDir})
+	inv.SetPathAccess([]string{sharedDir}, true)
 
 	filePath := filepath.Join(sharedDir, "data.txt")
 	// Use forward slashes for Python string (works on all platforms)
 	filePathPy := strings.ReplaceAll(filePath, "\\", "/")
 	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
-		Code:              `result = open("` + filePathPy + `", "r").read()`,
-		Allowlist:         []string{},
-		MaxToolCalls:      0,
-		TimeoutMs:         4_000,
-		MaxOutput:         8 * 1024,
-		HostPathAllowlist: []string{sharedDir},
-		Dispatch:          nil,
-		Bridge:            nil,
-		EnvAllowlist:      inv.EnvAllowlist,
+		Code:                `result = open("` + filePathPy + `", "r").read()`,
+		Allowlist:           []string{},
+		MaxToolCalls:        0,
+		TimeoutMs:           4_000,
+		MaxOutput:           8 * 1024,
+		PathAccessAllowlist: []string{sharedDir},
+		PathAccessReadOnly:  true,
+		Dispatch:            nil,
+		Bridge:              nil,
+		EnvAllowlist:        inv.EnvAllowlist,
 	})
 	if err != nil {
 		t.Fatalf("runPython error: %v", err)
@@ -486,13 +487,13 @@ func TestRunPython_HostPathAllowlist_AllowsAccess(t *testing.T) {
 	}
 }
 
-func TestRunPython_HostPathAllowlist_BlocksPathsOutside(t *testing.T) {
+func TestRunPython_PathAccessAllowlist_BlocksPathsOutside(t *testing.T) {
 	// With allowlist set, paths outside allowlist are still blocked.
 	python := mustFindPython(t)
 	workspace := t.TempDir()
 	sharedDir := t.TempDir()
 	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
-	inv.SetHostPathAllowlist([]string{sharedDir})
+	inv.SetPathAccess([]string{sharedDir}, true)
 
 	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
 		Code:              `open("/etc/passwd", "r")`,
@@ -500,10 +501,11 @@ func TestRunPython_HostPathAllowlist_BlocksPathsOutside(t *testing.T) {
 		MaxToolCalls:      0,
 		TimeoutMs:         4_000,
 		MaxOutput:         8 * 1024,
-		HostPathAllowlist: []string{sharedDir},
-		Dispatch:          nil,
-		Bridge:            nil,
-		EnvAllowlist:      inv.EnvAllowlist,
+		PathAccessAllowlist: []string{sharedDir},
+		PathAccessReadOnly:  true,
+		Dispatch:            nil,
+		Bridge:              nil,
+		EnvAllowlist:        inv.EnvAllowlist,
 	})
 	if err != nil {
 		t.Fatalf("runPython error: %v", err)
@@ -513,6 +515,72 @@ func TestRunPython_HostPathAllowlist_BlocksPathsOutside(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(out.Error), "vfs") && !strings.Contains(strings.ToLower(out.Error), "allowlist") {
 		t.Fatalf("expected VFS/allowlist error, got %q", out.Error)
+	}
+}
+
+func TestRunPython_PathAccessAllowlist_ReadOnly_BlocksWrites(t *testing.T) {
+	// When read_only=true, writes to allowlisted paths are blocked.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	sharedDir := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+	inv.SetPathAccess([]string{sharedDir}, true)
+
+	filePath := filepath.Join(sharedDir, "out.txt")
+	filePathPy := strings.ReplaceAll(filePath, "\\", "/")
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:                `open("` + filePathPy + `", "w").write("x")`,
+		Allowlist:           []string{},
+		MaxToolCalls:        0,
+		TimeoutMs:           4_000,
+		MaxOutput:           8 * 1024,
+		PathAccessAllowlist: []string{sharedDir},
+		PathAccessReadOnly:  true,
+		Dispatch:            nil,
+		Bridge:              nil,
+		EnvAllowlist:        inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if out.OK {
+		t.Fatalf("expected write to allowlisted path to fail when read_only, got %+v", out)
+	}
+	if !strings.Contains(strings.ToLower(out.Error), "read_only") {
+		t.Fatalf("expected read_only error, got %q", out.Error)
+	}
+}
+
+func TestRunPython_PathAccessAllowlist_ReadWrite_AllowsWrites(t *testing.T) {
+	// When read_only=false, writes to allowlisted paths are allowed.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	sharedDir := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+	inv.SetPathAccess([]string{sharedDir}, false)
+
+	filePath := filepath.Join(sharedDir, "out.txt")
+	filePathPy := strings.ReplaceAll(filePath, "\\", "/")
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:                `open("` + filePathPy + `", "w").write("written"); result = open("` + filePathPy + `", "r").read()`,
+		Allowlist:           []string{},
+		MaxToolCalls:        0,
+		TimeoutMs:           4_000,
+		MaxOutput:           8 * 1024,
+		PathAccessAllowlist: []string{sharedDir},
+		PathAccessReadOnly:  false,
+		Dispatch:            nil,
+		Bridge:              nil,
+		EnvAllowlist:        inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("expected write to allowlisted path to succeed when read_only=false, got %+v", out)
+	}
+	if got := strings.TrimSpace(fmt.Sprintf("%v", out.Result)); got != "written" {
+		t.Fatalf("result=%q want written", got)
 	}
 }
 
