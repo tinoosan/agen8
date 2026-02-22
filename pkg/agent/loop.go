@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinoosan/agen8/pkg/cost"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/prompts"
 	"github.com/tinoosan/agen8/pkg/types"
@@ -115,7 +116,7 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 
 		// Keep context bounded for long-running tool loops.
 		// Prefer provider-side compaction when available, then fall back to local compaction.
-		msgs = a.compactConversationForBudget(ctx, step, msgs, system, compactBudgetBytesFromEnv())
+		msgs = a.compactConversationForBudget(ctx, step, msgs, system, compactBudgetBytes(ctx, a.Model))
 
 		req := llmtypes.LLMRequest{
 			Model:            a.Model,
@@ -145,9 +146,12 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			a.Hooks.OnWebSearch(step, resp.Citations)
 		}
 		if a.Hooks.OnContextSize != nil {
-			budget := compactBudgetBytesFromEnv()
-			current := estimateConversationBytes(system, msgs)
-			a.Hooks.OnContextSize(step, estimateTokens(current), estimateTokens(budget))
+			budgetTokens := cost.ContextBudgetTokens(ctx, a.Model)
+			currentTokens := estimateTokens(estimateConversationBytes(system, msgs))
+			if resp.Usage != nil {
+				currentTokens = resp.Usage.InputTokens
+			}
+			a.Hooks.OnContextSize(step, currentTokens, budgetTokens)
 		}
 
 		if len(resp.ToolCalls) == 0 {
@@ -400,16 +404,13 @@ func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req ll
 	return resp, reasoningBuf.String(), err
 }
 
-func compactBudgetBytesFromEnv() int {
-	// Default budget aims to keep requests well under typical 128k-token windows without tokenization.
-	// (Roughly: 4 bytes/char, 4 chars/token => ~16 bytes/token => 1.5MB ~= ~96k tokens.)
-	const def = 1536 * 1024
+func compactBudgetBytes(ctx context.Context, modelID string) int {
 	if v := strings.TrimSpace(os.Getenv("AGEN8_CONTEXT_BUDGET_BYTES")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
 	}
-	return def
+	return cost.ContextBudgetTokens(ctx, modelID) * 4
 }
 
 func compactConversationForBudget(msgs []llmtypes.LLMMessage, system string, budgetBytes int) []llmtypes.LLMMessage {
