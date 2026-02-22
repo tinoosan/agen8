@@ -399,6 +399,84 @@ func TestRunPython_AllowsReadOnlyOpen(t *testing.T) {
 	}
 }
 
+func TestRunPython_VFSCompatShim_OpenAndListdir(t *testing.T) {
+	// Models that use os/open instead of tools.fs_read/fs_list should still work.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{
+		"project":   workspace,
+		"workspace": workspace,
+	})
+
+	fsReadCalls := 0
+	fsListCalls := 0
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code: `import os
+# Model uses os.listdir (wrong pattern) - should route through bridge
+entries = os.listdir("/workspace")
+# Model uses open() (wrong pattern) - should route through bridge
+content = open("/workspace/hello.txt", "r").read()
+result = {"entries": entries, "content": content}`,
+		Allowlist:    []string{"fs_read", "fs_list"},
+		MaxToolCalls: 5,
+		TimeoutMs:    4_000,
+		MaxOutput:    8 * 1024,
+		Dispatch: func(_ context.Context, toolName string, args json.RawMessage) (types.HostOpRequest, error) {
+			toolName = strings.TrimSpace(toolName)
+			var m struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(args, &m); err != nil {
+				return types.HostOpRequest{}, err
+			}
+			path := m.Path
+			if toolName == "fs_list" {
+				return types.HostOpRequest{Op: types.HostOpFSList, Path: path}, nil
+			}
+			if toolName == "fs_read" {
+				return types.HostOpRequest{Op: types.HostOpFSRead, Path: path}, nil
+			}
+			return types.HostOpRequest{}, fmt.Errorf("unknown tool %q", toolName)
+		},
+		Bridge: func(_ context.Context, req types.HostOpRequest) types.HostOpResponse {
+			if req.Op == types.HostOpFSList {
+				fsListCalls++
+				return types.HostOpResponse{Op: req.Op, Ok: true, Entries: []string{"hello.txt", "other.txt"}}
+			}
+			if req.Op == types.HostOpFSRead {
+				fsReadCalls++
+				return types.HostOpResponse{Op: req.Op, Ok: true, Text: "hello from vfs"}
+			}
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "unknown op"}
+		},
+		EnvAllowlist: inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("expected VFS compat shim to succeed, got %+v", out)
+	}
+	if fsReadCalls != 1 {
+		t.Fatalf("expected 1 fs_read bridge call, got %d", fsReadCalls)
+	}
+	if fsListCalls != 1 {
+		t.Fatalf("expected 1 fs_list bridge call, got %d", fsListCalls)
+	}
+	got, ok := out.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map", out.Result)
+	}
+	content, _ := got["content"].(string)
+	if content != "hello from vfs" {
+		t.Fatalf("content=%q want hello from vfs", content)
+	}
+	entries, _ := got["entries"].([]any)
+	if len(entries) != 2 {
+		t.Fatalf("entries len=%d want 2, got %v", len(entries), entries)
+	}
+}
+
 func TestEnsureReady_MissingPythonBinary(t *testing.T) {
 	inv := NewBuiltinCodeExecInvoker(t.TempDir(), map[string]string{"workspace": t.TempDir()})
 	inv.PythonBin = "missing-python-binary-for-code-exec-tests"
