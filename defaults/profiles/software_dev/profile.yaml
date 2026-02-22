@@ -1,7 +1,7 @@
 id: software_dev
 description: Software engineering profile focused on building, debugging, testing, and documentation.
 model: openai/gpt-5.1-codex-mini
-subagent_model: openai/gpt-5-nano
+subagent_model: openai/gpt-5.1-codex-mini
 code_exec_only: true
 allowed_tools:
   - shell_exec
