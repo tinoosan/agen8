@@ -18,10 +18,12 @@ type openRouterModelsResponse struct {
 }
 
 var (
-	orModelCache   map[string]int
-	orCacheModTime time.Time
-	orCacheMu      sync.RWMutex
-	orCacheTTL     = 1 * time.Hour
+	orModelCache    map[string]int
+	orCacheModTime  time.Time
+	orCacheFailTime time.Time
+	orCacheMu       sync.RWMutex
+	orCacheTTL      = 1 * time.Hour
+	orFailBackoff   = 2 * time.Minute
 )
 
 // ContextLengthFromOpenRouter fetches the context length for a given model from OpenRouter.
@@ -51,12 +53,17 @@ func ContextLengthFromOpenRouter(ctx context.Context, modelID string) (int, bool
 
 	if !cacheValid {
 		orCacheMu.Lock()
-		// Double check
-		if orModelCache == nil || time.Since(orCacheModTime) >= orCacheTTL {
+		// Double check both cache staleness and failure backoff
+		needsFetch := orModelCache == nil || time.Since(orCacheModTime) >= orCacheTTL
+		inBackoff := !orCacheFailTime.IsZero() && time.Since(orCacheFailTime) < orFailBackoff
+		if needsFetch && !inBackoff {
 			newCache := fetchOpenRouterModels(ctx, apiKey)
 			if newCache != nil {
 				orModelCache = newCache
 				orCacheModTime = time.Now()
+				orCacheFailTime = time.Time{}
+			} else {
+				orCacheFailTime = time.Now()
 			}
 		}
 		if orModelCache != nil {
