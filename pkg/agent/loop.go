@@ -115,7 +115,7 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 
 		// Keep context bounded for long-running tool loops.
 		// Prefer provider-side compaction when available, then fall back to local compaction.
-		msgs = a.compactConversationForBudget(ctx, msgs, system, compactBudgetBytesFromEnv())
+		msgs = a.compactConversationForBudget(ctx, step, msgs, system, compactBudgetBytesFromEnv())
 
 		req := llmtypes.LLMRequest{
 			Model:            a.Model,
@@ -143,6 +143,11 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 		}
 		if a.Hooks.OnWebSearch != nil && len(resp.Citations) != 0 {
 			a.Hooks.OnWebSearch(step, resp.Citations)
+		}
+		if a.Hooks.OnContextSize != nil {
+			budget := compactBudgetBytesFromEnv()
+			current := estimateConversationBytes(system, msgs)
+			a.Hooks.OnContextSize(step, estimateTokens(current), estimateTokens(budget))
 		}
 
 		if len(resp.ToolCalls) == 0 {
@@ -261,11 +266,12 @@ func fallbackLabel(v string) string {
 	return v
 }
 
-func (a *DefaultAgent) compactConversationForBudget(ctx context.Context, msgs []llmtypes.LLMMessage, system string, budgetBytes int) []llmtypes.LLMMessage {
+func (a *DefaultAgent) compactConversationForBudget(ctx context.Context, step int, msgs []llmtypes.LLMMessage, system string, budgetBytes int) []llmtypes.LLMMessage {
 	if budgetBytes <= 0 || len(msgs) == 0 {
 		return msgs
 	}
-	if estimateConversationBytes(system, msgs) <= budgetBytes {
+	beforeBytes := estimateConversationBytes(system, msgs)
+	if beforeBytes <= budgetBytes {
 		return msgs
 	}
 
@@ -276,11 +282,30 @@ func (a *DefaultAgent) compactConversationForBudget(ctx context.Context, msgs []
 			Messages: msgs,
 		})
 		if err == nil && len(compacted.Messages) != 0 {
-			return compacted.Messages
+			// Prepend developer notice so the agent knows context was compacted server-side.
+			notice := llmtypes.LLMMessage{
+				Role: "developer",
+				Content: strings.TrimSpace(strings.Join([]string{
+					"Context was compacted automatically (server-side) to stay within a safe budget for long-running tasks.",
+					"Older tool outputs and earlier conversation turns may be truncated/omitted.",
+					"Re-open required details via tools (e.g., fs_read) rather than relying on long scrollback.",
+				}, " ")),
+			}
+			result := append([]llmtypes.LLMMessage{notice}, compacted.Messages...)
+			if a.Hooks.OnCompaction != nil {
+				afterBytes := estimateConversationBytes(system, result)
+				a.Hooks.OnCompaction(step, estimateTokens(beforeBytes), estimateTokens(afterBytes), true)
+			}
+			return result
 		}
 	}
 
-	return compactConversationForBudget(msgs, system, budgetBytes)
+	result := compactConversationForBudget(msgs, system, budgetBytes)
+	if a.Hooks.OnCompaction != nil {
+		afterBytes := estimateConversationBytes(system, result)
+		a.Hooks.OnCompaction(step, estimateTokens(beforeBytes), estimateTokens(afterBytes), false)
+	}
+	return result
 }
 
 func (a *DefaultAgent) streamToAccumulator(ctx context.Context, step int, req llmtypes.LLMRequest) (llmtypes.LLMResponse, string, error) {
@@ -471,6 +496,8 @@ func compactConversationForBudget(msgs []llmtypes.LLMMessage, system string, bud
 
 	return compacted
 }
+
+func estimateTokens(bytes int) int { return bytes / 16 }
 
 func estimateConversationBytes(system string, msgs []llmtypes.LLMMessage) int {
 	total := len(system)

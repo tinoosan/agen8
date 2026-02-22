@@ -23,6 +23,7 @@ import (
 	"github.com/tinoosan/agen8/pkg/llm"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/profile"
+	"github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/timeutil"
 	"github.com/tinoosan/agen8/pkg/types"
 )
@@ -42,6 +43,8 @@ type Config struct {
 
 	TaskStore state.TaskStore
 	Events    emit.Emitter[events.Event]
+
+	RunConversationStore store.RunConversationStore
 
 	Memory            agent.MemoryRecallProvider
 	MemorySearchLimit int
@@ -800,7 +803,30 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	}
 
 	taskCtx := hosttools.WithBatchWaveState(hosttools.WithParentTaskID(ctx, taskID))
-	runRes, err := runAgent.Run(taskCtx, strings.TrimSpace(task.Goal))
+	var runRes agent.RunResult
+	var err error
+
+	if s.cfg.RunConversationStore != nil && taskKind == state.TaskKindTask {
+		var msgs []llmtypes.LLMMessage
+		msgs, err = s.cfg.RunConversationStore.LoadMessages(taskCtx, s.cfg.RunID)
+		if err != nil {
+			msgs = nil
+		}
+		msgs = append(msgs, llmtypes.LLMMessage{
+			Role:    "user",
+			Content: strings.TrimSpace(task.Goal),
+		})
+
+		var updatedMsgs []llmtypes.LLMMessage
+		// ignore steps for now as it's not strictly needed here
+		runRes, updatedMsgs, _, err = runAgent.RunConversation(taskCtx, msgs)
+		if err == nil {
+			_ = s.cfg.RunConversationStore.SaveMessages(taskCtx, s.cfg.RunID, updatedMsgs)
+		}
+	} else {
+		runRes, err = runAgent.Run(taskCtx, strings.TrimSpace(task.Goal))
+	}
+
 	doneAt := time.Now()
 	totalTokens := cumulativeInputTokens + cumulativeOutputTokens
 	costUSD := 0.0

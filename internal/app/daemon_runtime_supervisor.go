@@ -761,6 +761,29 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			}
 			emitEvent(context.Background(), events.Event{Type: "agent.step", Message: fmt.Sprintf("Step %d completed", step), Data: data})
 		},
+		OnCompaction: func(step int, beforeTokens, afterTokens int, serverSide bool) {
+			emitEvent(context.Background(), events.Event{
+				Type:    "context.compacted",
+				Message: fmt.Sprintf("Context compacted (%dk → %dk tokens)", beforeTokens/1000, afterTokens/1000),
+				Data: map[string]string{
+					"step":         strconv.Itoa(step),
+					"beforeTokens": strconv.Itoa(beforeTokens),
+					"afterTokens":  strconv.Itoa(afterTokens),
+					"serverSide":   strconv.FormatBool(serverSide),
+				},
+			})
+		},
+		OnContextSize: func(step int, currentTokens, budgetTokens int) {
+			emitEvent(context.Background(), events.Event{
+				Type:    "context.size",
+				Message: fmt.Sprintf("Context: %dk/%dk tokens", currentTokens/1000, budgetTokens/1000),
+				Data: map[string]string{
+					"step":          strconv.Itoa(step),
+					"currentTokens": strconv.Itoa(currentTokens),
+					"budgetTokens":  strconv.Itoa(budgetTokens),
+				},
+			})
+		},
 	}
 
 	registry, err := agent.DefaultHostToolRegistry()
@@ -878,6 +901,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			break
 		}
 	}
+	runConvStore, err := implstore.NewSQLiteRunConversationStoreFromConfig(s.cfg)
+	if err != nil {
+		log.Printf("daemon: failed to create run conversation store for run %s: %v", run.RunID, err)
+	}
+
 	workerSession, err := agentsession.New(agentsession.Config{
 		Agent:      a,
 		Profile:    activeProfile,
@@ -885,8 +913,9 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		ResolveProfile: func(ref string) (*profile.Profile, string, error) {
 			return resolveProfileRef(s.cfg, strings.TrimSpace(ref))
 		},
-		TaskStore: s.taskService,
-		Events:    orderedEmitter,
+		TaskStore:            s.taskService,
+		Events:               orderedEmitter,
+		RunConversationStore: runConvStore,
 		Memory: &validatingMemoryProvider{
 			inner: &textMemoryAdapter{store: s.memoryStore},
 			store: s.memoryStore,

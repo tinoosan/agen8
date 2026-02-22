@@ -316,6 +316,18 @@ func (m *Model) processThinkingEvents(events []types.EventRecord) {
 	for _, ev := range events {
 		step := strings.TrimSpace(ev.Data["step"])
 		switch ev.Type {
+		case "context.size":
+			m.contextTokens = parseIntStr(ev.Data["currentTokens"])
+			m.contextBudgetTokens = parseIntStr(ev.Data["budgetTokens"])
+			continue
+		case "context.compacted":
+			m.feed = append(m.feed, feedEntry{
+				kind:      feedSystem,
+				timestamp: ev.Timestamp,
+				text:      strings.TrimSpace(ev.Message),
+			})
+			changed = true
+			continue
 		case "model.thinking.start":
 			if findThinking(step) >= 0 {
 				continue // already tracking this step

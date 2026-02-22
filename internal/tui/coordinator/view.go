@@ -3,6 +3,7 @@ package coordinator
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -114,6 +115,15 @@ func (m *Model) renderHeader() string {
 			statusPill = stylePillWhite.Render(m.agentStatus + " " + m.spinner())
 		}
 		tags = append(tags, statusPill)
+	}
+
+	// Context fill pill
+	if m.contextBudgetTokens > 0 {
+		pct := m.contextTokens * 100 / m.contextBudgetTokens
+		tags = append(tags, kit.RenderTag(kit.TagOptions{
+			Key:   "ctx",
+			Value: fmt.Sprintf("%dk/%dk (%d%%)", m.contextTokens/1000, m.contextBudgetTokens/1000, pct),
+		}))
 	}
 
 	// Mode tag
@@ -920,6 +930,15 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func parseIntStr(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	n, _ := strconv.Atoi(s)
+	return n
 }
 
 func parseTime(raw string) (time.Time, bool) {
