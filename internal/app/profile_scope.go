@@ -20,5 +20,6 @@ func buildRoleRuntimeProfile(role profile.RoleConfig) *profile.Profile {
 		Skills:                  append([]string(nil), role.Skills...),
 		AllowedTools:            append([]string(nil), role.AllowedTools...),
 		Heartbeat:               append([]profile.HeartbeatJob(nil), role.Heartbeat...),
+		HeartbeatEnabled:        role.HeartbeatEnabled,
 	}
 }

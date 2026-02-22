@@ -21,6 +21,7 @@ type Profile struct {
 	Prompts                 PromptConfig   `yaml:"prompts,omitempty"`
 	Skills                  []string       `yaml:"skills,omitempty"`
 	Heartbeat               []HeartbeatJob `yaml:"heartbeat,omitempty"`
+	HeartbeatEnabled        *bool          `yaml:"heartbeat_enabled,omitempty"` // If false, heartbeats disabled but entries kept
 	Team                    *TeamConfig    `yaml:"team,omitempty"`
 }
 
@@ -33,6 +34,18 @@ type HeartbeatJob struct {
 	Name     string        `yaml:"name"`
 	Interval time.Duration `yaml:"interval"`
 	Goal     string        `yaml:"goal"`
+}
+
+// EffectiveHeartbeats returns the heartbeat jobs to run. When heartbeat_enabled is false,
+// returns nil so heartbeats are disabled without removing the entries from the profile.
+func (p *Profile) EffectiveHeartbeats() []HeartbeatJob {
+	if p == nil {
+		return nil
+	}
+	if p.HeartbeatEnabled != nil && !*p.HeartbeatEnabled {
+		return nil
+	}
+	return p.Heartbeat
 }
 
 type TeamConfig struct {
@@ -53,6 +66,7 @@ type RoleConfig struct {
 	Coordinator             bool           `yaml:"coordinator,omitempty"`
 	Reviewer                bool           `yaml:"reviewer,omitempty"`
 	Heartbeat               []HeartbeatJob `yaml:"heartbeat,omitempty"`
+	HeartbeatEnabled        *bool          `yaml:"heartbeat_enabled,omitempty"` // If false, heartbeats disabled but entries kept
 }
 
 // Load reads one profile from a profile directory (containing profile.yaml).

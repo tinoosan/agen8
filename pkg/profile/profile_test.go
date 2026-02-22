@@ -311,6 +311,69 @@ team:
 	}
 }
 
+func TestEffectiveHeartbeats_Disabled(t *testing.T) {
+	disabled := false
+	p := &Profile{
+		Heartbeat:        []HeartbeatJob{{Name: "ping", Interval: time.Minute, Goal: "hi"}},
+		HeartbeatEnabled: &disabled,
+	}
+	if got := p.EffectiveHeartbeats(); len(got) != 0 {
+		t.Fatalf("heartbeat_enabled=false: expected no heartbeats, got %d", len(got))
+	}
+}
+
+func TestEffectiveHeartbeats_Enabled(t *testing.T) {
+	enabled := true
+	p := &Profile{
+		Heartbeat:        []HeartbeatJob{{Name: "ping", Interval: time.Minute, Goal: "hi"}},
+		HeartbeatEnabled: &enabled,
+	}
+	if got := p.EffectiveHeartbeats(); len(got) != 1 {
+		t.Fatalf("heartbeat_enabled=true: expected 1 heartbeat, got %d", len(got))
+	}
+}
+
+func TestEffectiveHeartbeats_UnsetDefaultsToEnabled(t *testing.T) {
+	p := &Profile{
+		Heartbeat: []HeartbeatJob{{Name: "ping", Interval: time.Minute, Goal: "hi"}},
+		// HeartbeatEnabled nil = default enabled
+	}
+	if got := p.EffectiveHeartbeats(); len(got) != 1 {
+		t.Fatalf("heartbeat_enabled unset: expected 1 heartbeat (default on), got %d", len(got))
+	}
+}
+
+func TestLoad_HeartbeatEnabledFalse(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	raw := `
+id: test
+description: x
+prompts:
+  system_prompt_path: prompt.md
+heartbeat_enabled: false
+heartbeat:
+  - name: ping
+    interval: 1m
+    goal: hello
+`
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(p.Heartbeat) != 1 {
+		t.Fatalf("expected heartbeat entries preserved: %+v", p.Heartbeat)
+	}
+	if got := p.EffectiveHeartbeats(); len(got) != 0 {
+		t.Fatalf("heartbeat_enabled=false: expected EffectiveHeartbeats empty, got %d", len(got))
+	}
+}
+
 func TestLoad_TeamRoleCodeExecRequiredImports(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "coord.md"), []byte("coord"), 0o644); err != nil {

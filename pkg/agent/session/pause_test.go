@@ -347,6 +347,59 @@ func TestSessionPausedSkipsHeartbeatEnqueue(t *testing.T) {
 	}
 }
 
+func TestSessionHeartbeatDisabled_NoEnqueue(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Config{DataDir: t.TempDir()}
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+
+	ag := newFakeAgent()
+	runID := "run-heartbeat-disabled"
+	sessionID := "sess-heartbeat-disabled"
+	disabled := false
+	sess, err := New(Config{
+		Agent: ag,
+		Profile: &profile.Profile{
+			ID:              "general",
+			HeartbeatEnabled: &disabled,
+			Heartbeat: []profile.HeartbeatJob{{
+				Name:     "pulse",
+				Goal:     "heartbeat",
+				Interval: 30 * time.Millisecond,
+			}},
+		},
+		TaskStore:    ts,
+		SessionID:    sessionID,
+		RunID:        runID,
+		InstanceID:   runID,
+		PollInterval: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- sess.Run(ctx) }()
+	time.Sleep(150 * time.Millisecond)
+	cancel()
+	<-done
+
+	count, err := ts.CountTasks(context.Background(), state.TaskFilter{
+		RunID:  runID,
+		Status: []types.TaskStatus{types.TaskStatusPending},
+	})
+	if err != nil {
+		t.Fatalf("CountTasks: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("heartbeat_enabled=false: expected no heartbeat tasks, got %d", count)
+	}
+}
+
 func TestSessionContextCanceled_RecordsTaskCanceled(t *testing.T) {
 	t.Parallel()
 

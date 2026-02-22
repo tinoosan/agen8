@@ -330,7 +330,7 @@ func (s *Session) startHeartbeats(ctx context.Context) {
 	s.hbStop = cancel
 
 	// One ticker per job; fan-in into hbCh.
-	for _, job := range s.activeProfile.Heartbeat {
+	for _, job := range s.activeProfile.EffectiveHeartbeats() {
 		j := job
 		if j.Interval <= 0 {
 			continue
