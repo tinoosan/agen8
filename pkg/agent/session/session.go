@@ -820,8 +820,20 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			})
 		}
 		var msgs []llmtypes.LLMMessage
+		var loadFailed bool
 		msgs, err = s.cfg.RunConversationStore.LoadMessages(taskCtx, s.cfg.RunID)
 		if err != nil {
+			loadFailed = true
+			if s.cfg.Events != nil {
+				s.emitBestEffort(ctx, events.Event{
+					Type:    "run.conversation.load_failed",
+					Message: "Run conversation load failed",
+					Data: map[string]string{
+						"runId": s.cfg.RunID,
+						"error": err.Error(),
+					},
+				})
+			}
 			msgs = nil
 		}
 		loadedCount := len(msgs)
@@ -842,7 +854,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 
 		var updatedMsgs []llmtypes.LLMMessage
 		runRes, updatedMsgs, _, err = runAgent.RunConversation(taskCtx, msgs)
-		if err == nil {
+		if err == nil && !loadFailed {
 			if saveErr := s.cfg.RunConversationStore.SaveMessages(taskCtx, s.cfg.RunID, updatedMsgs); saveErr != nil {
 				if s.cfg.Events != nil {
 					s.emitBestEffort(ctx, events.Event{
@@ -861,6 +873,16 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 					Data: map[string]string{
 						"runId":             s.cfg.RunID,
 						"savedMessageCount": fmt.Sprintf("%d", len(updatedMsgs)),
+					},
+				})
+			}
+		} else if err == nil && loadFailed {
+			if s.cfg.Events != nil {
+				s.emitBestEffort(ctx, events.Event{
+					Type:    "run.conversation.save_skipped",
+					Message: "Run conversation save skipped due to prior load failure",
+					Data: map[string]string{
+						"runId": s.cfg.RunID,
 					},
 				})
 			}
