@@ -918,36 +918,6 @@ func viewportSlice(content string, visibleLines, targetIdx int) string {
 	return strings.Join(lines[start:end], "\n")
 }
 
-// wrapText breaks a single line into multiple lines at word boundaries,
-// each no wider than width characters.
-func wrapText(s string, width int) []string {
-	if width <= 0 {
-		return []string{s}
-	}
-	if runewidth.StringWidth(s) <= width {
-		return []string{s}
-	}
-	words := strings.Fields(s)
-	if len(words) == 0 {
-		return []string{s}
-	}
-	var lines []string
-	cur := words[0]
-	for _, w := range words[1:] {
-		test := cur + " " + w
-		if runewidth.StringWidth(test) > width {
-			lines = append(lines, cur)
-			cur = w
-		} else {
-			cur = test
-		}
-	}
-	if cur != "" {
-		lines = append(lines, cur)
-	}
-	return lines
-}
-
 func maxInt(a, b int) int {
 	if a > b {
 		return a
@@ -1029,9 +999,8 @@ func markdownRenderer(width int) (*glamour.TermRenderer, error) {
 	return r, nil
 }
 
-func boolPtr(b bool) *bool       { return &b }
-func uintPtr(u uint) *uint       { return &u }
-func stringPtr(s string) *string { return &s }
+func boolPtr(b bool) *bool { return &b }
+func uintPtr(u uint) *uint { return &u }
 
 func coordinatorMarkdownStyle() ansi.StyleConfig {
 	style := styles.DarkStyleConfig
