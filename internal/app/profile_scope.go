@@ -11,6 +11,11 @@ func buildRoleRuntimeProfile(role profile.RoleConfig) *profile.Profile {
 	if role.CodeExecOnly != nil {
 		codeExecOnly = *role.CodeExecOnly
 	}
+	var heartbeatEnabled *bool
+	if role.Heartbeat.Enabled != nil {
+		v := *role.Heartbeat.Enabled
+		heartbeatEnabled = &v
+	}
 	return &profile.Profile{
 		ID:                      strings.TrimSpace(role.Name),
 		Description:             strings.TrimSpace(role.Description),
@@ -20,7 +25,7 @@ func buildRoleRuntimeProfile(role profile.RoleConfig) *profile.Profile {
 		Skills:                  append([]string(nil), role.Skills...),
 		AllowedTools:            append([]string(nil), role.AllowedTools...),
 		Heartbeat: profile.HeartbeatConfig{
-			Enabled: role.Heartbeat.Enabled,
+			Enabled: heartbeatEnabled,
 			Jobs:    append([]profile.HeartbeatJob(nil), role.Heartbeat.Jobs...),
 		},
 	}

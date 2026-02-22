@@ -180,6 +180,24 @@ model = "custom/model"` {
 	}
 }
 
+func TestLoadRuntimeConfig_PathAccessReadOnlyDefaultsTrue(t *testing.T) {
+	tmp := t.TempDir()
+	// Provide allowlist but omit read_only — should default to true.
+	if err := os.WriteFile(filepath.Join(tmp, "config.toml"), []byte(`
+[path_access]
+allowlist = ["/shared"]
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := loadRuntimeConfig(tmp)
+	if err != nil {
+		t.Fatalf("loadRuntimeConfig: %v", err)
+	}
+	if !cfg.PathAccess.ReadOnly {
+		t.Fatalf("path_access.read_only=%v, want true (default when omitted)", cfg.PathAccess.ReadOnly)
+	}
+}
+
 func TestApplyRuntimeConfigHostDefaults_CodeExec(t *testing.T) {
 	base := config.Config{DataDir: "db"}
 	out := applyRuntimeConfigHostDefaults(base, runtimeConfig{

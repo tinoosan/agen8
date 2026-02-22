@@ -12,17 +12,20 @@ func TestApplyAllowedTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefaultHostToolRegistry: %v", err)
 	}
-	if err := applyAllowedTools(reg, []string{"fs_read", "shell_exec"}); err != nil {
+	if err := applyAllowedTools(reg, []string{"shell_exec"}); err != nil {
 		t.Fatalf("applyAllowedTools: %v", err)
-	}
-	if _, ok := reg.Get("fs_read"); !ok {
-		t.Fatalf("expected fs_read to remain")
 	}
 	if _, ok := reg.Get("shell_exec"); !ok {
 		t.Fatalf("expected shell_exec to remain")
 	}
 	if _, ok := reg.Get("http_fetch"); ok {
 		t.Fatalf("expected http_fetch to be removed")
+	}
+	// fs tools stay even though not in allowed list
+	for _, name := range []string{"fs_list", "fs_read", "fs_search", "fs_write", "fs_append", "fs_edit", "fs_patch"} {
+		if _, ok := reg.Get(name); !ok {
+			t.Fatalf("expected always-enabled fs tool %q to remain", name)
+		}
 	}
 }
 
@@ -80,7 +83,7 @@ func TestResolveToolRegistries_CodeExecOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefaultHostToolRegistry: %v", err)
 	}
-	modelReg, bridgeReg, err := resolveToolRegistries(base, []string{"fs_read"}, true)
+	modelReg, bridgeReg, err := resolveToolRegistries(base, []string{"shell_exec"}, true)
 	if err != nil {
 		t.Fatalf("resolveToolRegistries: %v", err)
 	}
@@ -88,12 +91,12 @@ func TestResolveToolRegistries_CodeExecOnly(t *testing.T) {
 	if _, ok := modelReg.Get("code_exec"); !ok {
 		t.Fatalf("expected code_exec in model registry")
 	}
-	if _, ok := modelReg.Get("fs_read"); ok {
-		t.Fatalf("expected fs_read hidden from model registry")
+	if _, ok := modelReg.Get("shell_exec"); ok {
+		t.Fatalf("expected shell_exec hidden from model registry")
 	}
 
-	if _, ok := bridgeReg.Get("fs_read"); !ok {
-		t.Fatalf("expected fs_read in bridge registry")
+	if _, ok := bridgeReg.Get("shell_exec"); !ok {
+		t.Fatalf("expected shell_exec in bridge registry")
 	}
 	if _, ok := bridgeReg.Get("http_fetch"); ok {
 		t.Fatalf("expected http_fetch removed from bridge registry")
@@ -122,6 +125,25 @@ func TestResolveToolRegistries_Hybrid(t *testing.T) {
 
 	if _, ok := bridgeReg.Get("fs_read"); !ok {
 		t.Fatalf("expected fs_read in bridge registry")
+	}
+}
+
+func TestApplyAllowedTools_AlwaysKeepsFsTools(t *testing.T) {
+	reg, err := agent.DefaultHostToolRegistry()
+	if err != nil {
+		t.Fatalf("DefaultHostToolRegistry: %v", err)
+	}
+	// Only allow http_fetch — fs tools should still survive.
+	if err := applyAllowedTools(reg, []string{"http_fetch"}); err != nil {
+		t.Fatalf("applyAllowedTools: %v", err)
+	}
+	for _, name := range []string{"fs_list", "fs_read", "fs_search", "fs_write", "fs_append", "fs_edit", "fs_patch"} {
+		if _, ok := reg.Get(name); !ok {
+			t.Fatalf("expected always-enabled fs tool %q to survive, but it was removed", name)
+		}
+	}
+	if _, ok := reg.Get("shell_exec"); ok {
+		t.Fatalf("expected shell_exec to be removed since it was not in allowed list")
 	}
 }
 

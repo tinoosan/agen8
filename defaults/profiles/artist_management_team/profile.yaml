@@ -8,12 +8,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - task_create
@@ -38,12 +32,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - obsidian
@@ -61,12 +49,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - obsidian
@@ -83,12 +65,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - obsidian
@@ -106,12 +82,6 @@ team:
       reviewer: true
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - task_review
@@ -130,12 +100,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - obsidian

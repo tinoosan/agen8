@@ -168,21 +168,24 @@ def _blocked_path_error(operation, path):
 
 
 def _path_under_allowlist(path, allowlist):
-    """Return True if path is under any allowlisted root. Paths are resolved to canonical form."""
+    """Return True if path is under any allowlisted root. Paths are resolved to canonical form (symlinks followed)."""
     if not allowlist:
         return False
     try:
-        resolved = os.path.abspath(os.path.normpath(path))
+        resolved = os.path.realpath(path)
     except Exception:
         return False
     for root in allowlist:
         if not root:
             continue
-        root_norm = os.path.normpath(root)
-        if resolved == root_norm:
+        try:
+            root_resolved = os.path.realpath(root)
+        except Exception:
+            continue
+        if resolved == root_resolved:
             return True
         sep = os.sep
-        if resolved.startswith(root_norm + sep):
+        if resolved.startswith(root_resolved + sep):
             return True
     return False
 
@@ -221,6 +224,8 @@ def _install_vfs_compat_shim(tools, path_access_allowlist=None, path_access_read
             if b64:
                 content = base64.b64decode(b64)
                 return io.BytesIO(content)
+            if "b" in str(mode):
+                return io.BytesIO((text or "").encode("utf-8"))
             return io.StringIO(text or "")
         if _path_under_allowlist(path, allowlist):
             if _is_write_mode(mode) and read_only:
@@ -251,6 +256,8 @@ def _install_vfs_compat_shim(tools, path_access_allowlist=None, path_access_read
                 raise ToolError(resp.get("error", "fs_list failed"), resp)
             entries = resp.get("entries", [])
             return list(entries) if isinstance(entries, (list, tuple)) else []
+        if not os.path.isabs(p):
+            return _orig_listdir(path)
         if _path_under_allowlist(p, allowlist):
             return _orig_listdir(path)
         raise _blocked_path_error("os.listdir", p)

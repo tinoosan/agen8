@@ -17,7 +17,14 @@ var defaultTeamToolRules = []teamToolRule{
 }
 
 var requiredToolsAlwaysEnabled = map[string]struct{}{
-	"obsidian": {},
+	"obsidian":  {},
+	"fs_list":   {},
+	"fs_read":   {},
+	"fs_search": {},
+	"fs_write":  {},
+	"fs_append": {},
+	"fs_edit":   {},
+	"fs_patch":  {},
 }
 
 func sanitizeAllowedToolsForRole(allowed []string, teamID string, isCoordinator bool) (sanitized []string, removed []string) {

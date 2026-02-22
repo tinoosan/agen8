@@ -74,7 +74,7 @@ type runtimeConfigCodeExecFile struct {
 
 type runtimeConfigPathAccessFile struct {
 	Allowlist []string `toml:"allowlist"`
-	ReadOnly  bool     `toml:"read_only"`
+	ReadOnly  *bool    `toml:"read_only"`
 }
 
 type runtimeConfigObsidianFile struct {
@@ -198,7 +198,7 @@ func decodeRuntimeConfigFile(path string) (runtimeConfig, bool, error) {
 		},
 		PathAccess: runtimeConfigPathAccess{
 			Allowlist: normalizeStringList(raw.PathAccess.Allowlist),
-			ReadOnly:  raw.PathAccess.ReadOnly,
+			ReadOnly:  raw.PathAccess.ReadOnly == nil || *raw.PathAccess.ReadOnly,
 		},
 		Obsidian: runtimeConfigObsidian{
 			VaultPath: strings.TrimSpace(raw.Obsidian.VaultPath),
@@ -296,6 +296,8 @@ func mergeRuntimeConfig(base, override runtimeConfig) runtimeConfig {
 		}
 		sort.Strings(merged)
 		out.PathAccess.Allowlist = merged
+	}
+	if len(override.PathAccess.Allowlist) > 0 || override.PathAccess.ReadOnly != base.PathAccess.ReadOnly {
 		out.PathAccess.ReadOnly = override.PathAccess.ReadOnly
 	}
 	if vaultPath := strings.TrimSpace(override.Obsidian.VaultPath); vaultPath != "" {

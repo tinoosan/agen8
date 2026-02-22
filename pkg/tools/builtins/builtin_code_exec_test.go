@@ -662,6 +662,122 @@ result = {"entries": entries, "content": content}`,
 	}
 }
 
+func TestRunPython_VFSCompatShim_SymlinkAllowlistBypass(t *testing.T) {
+	// A symlink inside an allowlisted dir pointing outside must be blocked.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	allowedDir := t.TempDir()
+	outsideDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outsideDir, "secret.txt"), []byte("secret-data"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	// Create symlink: allowedDir/escape -> outsideDir
+	symlink := filepath.Join(allowedDir, "escape")
+	if err := os.Symlink(outsideDir, symlink); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+
+	escapePath := filepath.Join(allowedDir, "escape", "secret.txt")
+	escapePathPy := strings.ReplaceAll(escapePath, "\\", "/")
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:                `result = open("` + escapePathPy + `", "r").read()`,
+		Allowlist:           []string{},
+		MaxToolCalls:        0,
+		TimeoutMs:           4_000,
+		MaxOutput:           8 * 1024,
+		PathAccessAllowlist: []string{allowedDir},
+		PathAccessReadOnly:  true,
+		Dispatch:            nil,
+		Bridge:              nil,
+		EnvAllowlist:        inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if out.OK {
+		t.Fatalf("expected symlink escape to be blocked, got result=%v", out.Result)
+	}
+}
+
+func TestRunPython_VFSCompatShim_ListdirCWD(t *testing.T) {
+	// os.listdir() and os.listdir(".") should succeed (relative path fallthrough).
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "file.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+
+	for _, code := range []string{
+		`import os; result = os.listdir(".")`,
+		`import os; result = os.listdir()`,
+	} {
+		t.Run(code, func(t *testing.T) {
+			out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+				Code:         code,
+				Allowlist:    []string{},
+				MaxToolCalls: 0,
+				TimeoutMs:    4_000,
+				MaxOutput:    8 * 1024,
+				Dispatch:     nil,
+				Bridge:       nil,
+				EnvAllowlist: inv.EnvAllowlist,
+			})
+			if err != nil {
+				t.Fatalf("runPython error: %v", err)
+			}
+			if !out.OK {
+				t.Fatalf("expected os.listdir with relative path to succeed, got error=%q", out.Error)
+			}
+		})
+	}
+}
+
+func TestRunPython_VFSCompatShim_OpenBinaryMode(t *testing.T) {
+	// open(path, "rb") on VFS paths should return bytes, not str.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:         `data = open("/workspace/f.bin", "rb").read(); result = {"type": type(data).__name__, "value": data.decode("utf-8")}`,
+		Allowlist:    []string{"fs_read"},
+		MaxToolCalls: 2,
+		TimeoutMs:    4_000,
+		MaxOutput:    8 * 1024,
+		Dispatch: func(_ context.Context, toolName string, args json.RawMessage) (types.HostOpRequest, error) {
+			var m struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(args, &m); err != nil {
+				return types.HostOpRequest{}, err
+			}
+			return types.HostOpRequest{Op: types.HostOpFSRead, Path: m.Path}, nil
+		},
+		Bridge: func(_ context.Context, req types.HostOpRequest) types.HostOpResponse {
+			return types.HostOpResponse{Op: req.Op, Ok: true, Text: "binary-content"}
+		},
+		EnvAllowlist: inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("expected binary open to succeed, got %+v", out)
+	}
+	got, ok := out.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map", out.Result)
+	}
+	if got["type"] != "bytes" {
+		t.Fatalf("expected bytes type, got %q", got["type"])
+	}
+	if got["value"] != "binary-content" {
+		t.Fatalf("expected binary-content, got %q", got["value"])
+	}
+}
+
 func TestEnsureReady_MissingPythonBinary(t *testing.T) {
 	inv := NewBuiltinCodeExecInvoker(t.TempDir(), map[string]string{"workspace": t.TempDir()})
 	inv.PythonBin = "missing-python-binary-for-code-exec-tests"
