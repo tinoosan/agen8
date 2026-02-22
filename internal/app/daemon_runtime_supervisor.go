@@ -452,6 +452,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	teamRoles := []string{}
 	teamRoleDescriptions := map[string]string{}
 	isCoordinator := false
+	allowSubagents := true // standalone: allow by default (current behavior)
 	var roleCodeExecOnlyOverride *bool
 	if isTeam {
 		if prof.Team == nil {
@@ -486,6 +487,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			return nil, fmt.Errorf("role %q not found in team profile %q", roleName, prof.ID)
 		}
 		isCoordinator = strings.EqualFold(strings.TrimSpace(roleCfg.Name), coordinatorRole)
+		allowSubagents = roleCfg.AllowSubagents
 		roleCodeExecOnlyOverride = roleCfg.CodeExecOnly
 		activeProfile = buildRoleRuntimeProfile(*roleCfg)
 	}
@@ -804,8 +806,8 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		tool.IsCoordinator = isCoordinator
 		tool.CoordinatorRole = coordinatorRole
 		tool.ValidRoles = teamRoles
-	} else if run.ParentRunID == "" {
-		// Standalone mode (non-team, non-child): enable spawn_worker.
+	}
+	if !isChildRun && allowSubagents {
 		tool.SpawnWorker = s.makeSpawnWorkerFunc(run, model, emitEvent)
 	}
 	if err := registry.Register(tool); err != nil {
@@ -1478,13 +1480,7 @@ func (s *runtimeSupervisor) makeSpawnWorkerFunc(
 	parentEmit events.EmitFunc,
 ) hosttools.SpawnWorkerFunc {
 	return func(ctx context.Context, goal, sessionID, parentRunID string) (string, error) {
-		if s.sessionService != nil {
-			if sess, err := s.sessionService.LoadSession(ctx, sessionID); err == nil {
-				if strings.TrimSpace(sess.TeamID) != "" {
-					return "", fmt.Errorf("spawn_worker unavailable in team mode")
-				}
-			}
-		}
+		// Caller gates spawn via allowSubagents; we only get here when spawn is allowed.
 		// Count existing children to determine spawn index.
 		children, _ := s.sessionService.ListChildRuns(ctx, parentRunID)
 		spawnIndex := len(children) + 1

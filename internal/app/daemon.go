@@ -97,6 +97,34 @@ func resolveProfileRef(cfg config.Config, requested string) (*profile.Profile, s
 	return p, dir, err
 }
 
+// ResolveRoleAllowSubagents returns whether the current run's role allows spawning sub-agents.
+// Used by TUI to show/hide the Subagents tab.
+// For standalone (profile without team), returns true. For team profiles, returns the role's AllowSubagents.
+func ResolveRoleAllowSubagents(cfg config.Config, profileID, roleName string) bool {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return false
+	}
+	prof, _, err := resolveProfileRef(cfg, profileID)
+	if err != nil || prof == nil {
+		return false
+	}
+	if prof.Team == nil {
+		return true // standalone profile: allow spawn (current behavior)
+	}
+	roleName = strings.TrimSpace(roleName)
+	if roleName == "" {
+		return false
+	}
+	for i := range prof.Team.Roles {
+		r := &prof.Team.Roles[i]
+		if strings.EqualFold(strings.TrimSpace(r.Name), roleName) {
+			return r.AllowSubagents
+		}
+	}
+	return false
+}
+
 func resolvePricing(modelID string, overrideIn, overrideOut float64) (inPerM float64, outPerM float64, known bool) {
 	modelID = strings.TrimSpace(modelID)
 	if modelID != "" {

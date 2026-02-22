@@ -96,6 +96,7 @@ type RoleConfig struct {
 	SubagentModel           string           `yaml:"subagent_model,omitempty"`
 	Coordinator             bool             `yaml:"coordinator,omitempty"`
 	Reviewer                bool             `yaml:"reviewer,omitempty"`
+	AllowSubagents          bool             `yaml:"allow_subagents,omitempty"`
 	Heartbeat               HeartbeatConfig  `yaml:"heartbeat,omitempty"`
 }
 

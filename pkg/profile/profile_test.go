@@ -110,6 +110,44 @@ team:
 	}
 }
 
+func TestLoad_TeamProfile_AllowSubagents(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("prompt"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	raw := `
+id: team-allow
+description: Team with allow_subagents
+team:
+  roles:
+    - name: lead
+      coordinator: true
+      description: Lead
+      prompts:
+        system_prompt_path: prompt.md
+      allow_subagents: true
+    - name: worker
+      description: Worker
+      prompts:
+        system_prompt_path: prompt.md
+`
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	lead := p.Team.Roles[0]
+	if !lead.AllowSubagents {
+		t.Fatalf("lead.AllowSubagents = false, want true")
+	}
+	worker := p.Team.Roles[1]
+	if worker.AllowSubagents {
+		t.Fatalf("worker.AllowSubagents = true, want false (default)")
+	}
+}
+
 func TestLoad_TeamProfile_MissingCoordinator(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("prompt"), 0o644); err != nil {

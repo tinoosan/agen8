@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/agen8/internal/app"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	layoutmgr "github.com/tinoosan/agen8/internal/tui/layout"
 	"github.com/tinoosan/agen8/pkg/types"
@@ -98,15 +99,29 @@ var dashboardSideTabs = []dashboardSideTabDef{
 }
 
 func (m *monitorModel) activeDashboardSideTabs() []dashboardSideTabDef {
-	if m != nil && strings.TrimSpace(m.teamID) != "" {
-		out := make([]dashboardSideTabDef, 0, len(dashboardSideTabs))
-		for _, tab := range dashboardSideTabs {
-			if strings.EqualFold(strings.TrimSpace(tab.Name), "Subagents") {
-				continue
-			}
-			out = append(out, tab)
+	if m == nil {
+		return dashboardSideTabs
+	}
+	// Show Subagents tab when allow_subagents is true for the current run's role.
+	if strings.TrimSpace(m.teamID) != "" {
+		runID := strings.TrimSpace(m.runID)
+		if strings.TrimSpace(m.focusedRunID) != "" {
+			runID = strings.TrimSpace(m.focusedRunID)
 		}
-		return out
+		roleName := ""
+		if m.teamRoleByRunID != nil && runID != "" {
+			roleName = strings.TrimSpace(m.teamRoleByRunID[runID])
+		}
+		if !app.ResolveRoleAllowSubagents(m.cfg, strings.TrimSpace(m.profile), roleName) {
+			out := make([]dashboardSideTabDef, 0, len(dashboardSideTabs))
+			for _, tab := range dashboardSideTabs {
+				if strings.EqualFold(strings.TrimSpace(tab.Name), "Subagents") {
+					continue
+				}
+				out = append(out, tab)
+			}
+			return out
+		}
 	}
 	return dashboardSideTabs
 }

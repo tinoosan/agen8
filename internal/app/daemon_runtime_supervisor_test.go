@@ -445,7 +445,7 @@ func TestRuntimeSupervisor_SyncOnce_CleansLegacyTeamChildRuns(t *testing.T) {
 	}
 }
 
-func TestRuntimeSupervisor_MakeSpawnWorkerFunc_BlocksTeamMode(t *testing.T) {
+func TestRuntimeSupervisor_MakeSpawnWorkerFunc_AllowsTeamModeWhenAllowed(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess, parentRun, err := implstore.CreateSession(cfg, "team session", 8*1024)
 	if err != nil {
@@ -463,11 +463,18 @@ func TestRuntimeSupervisor_MakeSpawnWorkerFunc_BlocksTeamMode(t *testing.T) {
 	}
 	spawn := supervisor.makeSpawnWorkerFunc(parentRun, "openai/gpt-5-mini", nil)
 	childRunID, err := spawn(context.Background(), "do work", sess.SessionID, parentRun.RunID)
-	if err == nil {
-		t.Fatalf("expected team-mode spawn guard error, got child run %q", childRunID)
+	if err != nil {
+		t.Fatalf("spawn in team mode: %v", err)
 	}
-	if got := err.Error(); got != "spawn_worker unavailable in team mode" {
-		t.Fatalf("unexpected spawn guard error: %v", err)
+	if childRunID == "" {
+		t.Fatalf("expected non-empty child run ID")
+	}
+	child, err := sessionSvc.LoadRun(context.Background(), childRunID)
+	if err != nil {
+		t.Fatalf("LoadRun child: %v", err)
+	}
+	if child.ParentRunID != parentRun.RunID {
+		t.Fatalf("child ParentRunID=%q want %q", child.ParentRunID, parentRun.RunID)
 	}
 }
 
