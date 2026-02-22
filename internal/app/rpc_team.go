@@ -247,7 +247,8 @@ func (s *RPCServer) teamGetManifest(ctx context.Context, p protocol.TeamGetManif
 }
 
 func (s *RPCServer) readPlanFilesForRun(ctx context.Context, run types.Run) (checklist string, checklistErr string, details string, detailsErr string) {
-	return s.planReader.ReadPlan(ctx, run)
+	checklist, details, checklistErr, detailsErr = s.planReader.ReadPlan(ctx, run)
+	return checklist, checklistErr, details, detailsErr
 }
 
 func (s *RPCServer) loadTeamManifestRunRoles(ctx context.Context, teamID string) ([]string, map[string]string) {

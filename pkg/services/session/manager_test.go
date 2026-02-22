@@ -77,6 +77,14 @@ func (m *mockStore) ListSessionIDs(ctx context.Context) ([]string, error) {
 	return nil, nil
 }
 
+func (m *mockStore) LatestRun(ctx context.Context) (types.Run, error) {
+	return types.Run{}, nil
+}
+
+func (m *mockStore) LatestRunningRun(ctx context.Context) (types.Run, error) {
+	return types.Run{}, nil
+}
+
 type mockSupervisor struct {
 	stoppedRuns []string
 }

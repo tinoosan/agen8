@@ -66,7 +66,7 @@ func FormatRequestTitle(d map[string]string) string {
 			if m == "" {
 				m = "GET"
 			}
-			desc := m + " [" + u + "]"
+			desc := m + " " + u
 			if body := strings.TrimSpace(d["body"]); body != "" {
 				bodyText := "body: " + singleLinePreview(body, 120)
 				if strings.TrimSpace(d["bodyTruncated"]) == "true" {

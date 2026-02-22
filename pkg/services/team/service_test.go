@@ -384,6 +384,14 @@ func (m *mockSessionService) CountActivities(ctx context.Context, runID string) 
 	return 0, nil
 }
 
+func (m *mockSessionService) LatestRun(ctx context.Context) (types.Run, error) {
+	return types.Run{}, nil
+}
+
+func (m *mockSessionService) LatestRunningRun(ctx context.Context) (types.Run, error) {
+	return types.Run{}, nil
+}
+
 type mockRunStopper struct {
 	stopRun func(runID string) error
 }
