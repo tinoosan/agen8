@@ -373,18 +373,28 @@ func TestRunPython_AllowsReadOnlyOpen(t *testing.T) {
 	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
 
 	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
-		Code:         `result = open("a.txt", "r").read()`,
+		Code:         `result = open("/workspace/a.txt", "r").read()`,
 		Allowlist:    []string{"fs_read"},
 		MaxToolCalls: 2,
 		TimeoutMs:    4_000,
 		MaxOutput:    8 * 1024,
-		Dispatch: func(_ context.Context, _ string, _ json.RawMessage) (types.HostOpRequest, error) {
-			t.Fatalf("dispatch should not be called for local read")
-			return types.HostOpRequest{}, nil
+		Dispatch: func(_ context.Context, toolName string, args json.RawMessage) (types.HostOpRequest, error) {
+			if toolName != "fs_read" {
+				t.Fatalf("dispatch tool = %q, want fs_read", toolName)
+			}
+			var m struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(args, &m); err != nil {
+				return types.HostOpRequest{}, err
+			}
+			return types.HostOpRequest{Op: types.HostOpFSRead, Path: m.Path}, nil
 		},
-		Bridge: func(_ context.Context, _ types.HostOpRequest) types.HostOpResponse {
-			t.Fatalf("bridge should not be called for local read")
-			return types.HostOpResponse{}
+		Bridge: func(_ context.Context, req types.HostOpRequest) types.HostOpResponse {
+			if req.Op != types.HostOpFSRead || req.Path != "/workspace/a.txt" {
+				t.Fatalf("bridge req = %+v", req)
+			}
+			return types.HostOpResponse{Op: req.Op, Ok: true, Text: "hello"}
 		},
 		EnvAllowlist: inv.EnvAllowlist,
 	})
@@ -396,6 +406,47 @@ func TestRunPython_AllowsReadOnlyOpen(t *testing.T) {
 	}
 	if got := strings.TrimSpace(fmt.Sprintf("%v", out.Result)); got != "hello" {
 		t.Fatalf("result=%q want hello", got)
+	}
+}
+
+func TestRunPython_VFSCompatShim_BlocksNonVFSPaths(t *testing.T) {
+	// Non-VFS paths must not fall through to host; prevents sandbox escape.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+
+	for _, code := range []string{
+		`open("/etc/passwd", "r")`,
+		`import os; os.listdir("/")`,
+		`open("relative.txt", "r")`,
+	} {
+		t.Run(code, func(t *testing.T) {
+			out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+				Code:         code,
+				Allowlist:    []string{"fs_read", "fs_list"},
+				MaxToolCalls: 2,
+				TimeoutMs:    4_000,
+				MaxOutput:    8 * 1024,
+				Dispatch: func(_ context.Context, _ string, _ json.RawMessage) (types.HostOpRequest, error) {
+					t.Fatalf("dispatch should not be called for blocked path")
+					return types.HostOpRequest{}, nil
+				},
+				Bridge: func(_ context.Context, _ types.HostOpRequest) types.HostOpResponse {
+					t.Fatalf("bridge should not be called for blocked path")
+					return types.HostOpResponse{}
+				},
+				EnvAllowlist: inv.EnvAllowlist,
+			})
+			if err != nil {
+				t.Fatalf("runPython error: %v", err)
+			}
+			if out.OK {
+				t.Fatalf("expected blocked path to fail, got %+v", out)
+			}
+			if !strings.Contains(strings.ToLower(out.Error), "vfs") {
+				t.Fatalf("expected VFS-related error, got %q", out.Error)
+			}
+		})
 	}
 }
 
