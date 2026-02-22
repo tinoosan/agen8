@@ -1816,6 +1816,17 @@ func TestRPCServer_SessionGetTotals_TeamScopeIncludesTokenBreakdown(t *testing.T
 
 func TestRPCServer_SessionStart_Standalone(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "general"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
 	sess := types.NewSession("goal")
 	run := types.NewRun("goal", 8*1024, sess.SessionID)
 	sessStore := store.NewMemorySessionStore()
@@ -1845,13 +1856,13 @@ func TestRPCServer_SessionStart_Standalone(t *testing.T) {
 	if out.Mode != "standalone" {
 		t.Fatalf("mode = %q, want standalone", out.Mode)
 	}
-	if strings.TrimSpace(out.Model) != "" {
-		t.Fatalf("model = %q, want empty when no explicit model provided", out.Model)
+	if strings.TrimSpace(out.TeamID) == "" {
+		t.Fatalf("expected team id (unified flow), got %+v", out)
 	}
 	if got, err := sessStore.LoadSession(context.Background(), out.SessionID); err != nil {
 		t.Fatalf("load created session: %v", err)
-	} else if strings.TrimSpace(got.ActiveModel) != "" {
-		t.Fatalf("created session active model = %q, want empty", got.ActiveModel)
+	} else if strings.TrimSpace(got.TeamID) != strings.TrimSpace(out.TeamID) {
+		t.Fatalf("session teamID=%q want %q", got.TeamID, out.TeamID)
 	}
 }
 
@@ -1952,13 +1963,13 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 	}
 }
 
-func TestRPCServer_SessionStart_StandaloneRejectsTeamProfile(t *testing.T) {
+func TestRPCServer_SessionStart_StandaloneRejectsMultiRoleTeamProfile(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
-	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "startup_team"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "multi_team"), 0o755); err != nil {
 		t.Fatalf("mkdir profiles: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "startup_team", "profile.yaml"), []byte(
-		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n",
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "multi_team", "profile.yaml"), []byte(
+		"id: multi_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        system_prompt: build\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -1975,16 +1986,16 @@ func TestRPCServer_SessionStart_StandaloneRejectsTeamProfile(t *testing.T) {
 	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
 		Mode:     "standalone",
-		Profile:  "startup_team",
+		Profile:  "multi_team",
 	})
 	resp := rpcRoundTrip(t, srv, req)
 	if resp.Error == nil {
-		t.Fatalf("expected standalone rejection for team profile")
+		t.Fatalf("expected standalone rejection for multi-role team profile")
 	}
 	if resp.Error.Code != protocol.CodeInvalidParams {
 		t.Fatalf("code = %d want %d", resp.Error.Code, protocol.CodeInvalidParams)
 	}
-	if !strings.Contains(strings.ToLower(resp.Error.Message), "non-team profile") {
+	if !strings.Contains(strings.ToLower(resp.Error.Message), "single-role") {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 }

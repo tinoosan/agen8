@@ -163,10 +163,11 @@ Before changing code, ensure the following are in place so we can execute safely
    - Wire into runtime supervisor; gate `spawn_worker` by role config instead of `teamID == ""`
    - Update TUI: Subagents tab visibility from profile, not `teamID`
 
-2. **Unify session start**
-   - Normalize standalone profile to single-role team at load
-   - Merge `sessionStart` and `sessionStartTeam` into one flow
-   - Always create teamID, manifest, workspace
+2. **Unify session start** ✅ (Phase 2 done)
+   - Profile.RolesForSession() normalizes standalone → single role "agent"
+   - Profile.TeamModelForSession() for model resolution
+   - Single sessionStart flow; always create teamID, manifest, workspace
+   - Mode = "standalone" when 1 role, "team" when 2+
 
 3. **Unify daemon**
    - Single `runAsTeam` path; standalone = team with one role

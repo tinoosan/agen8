@@ -455,10 +455,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	allowSubagents := true // standalone: allow by default (current behavior)
 	var roleCodeExecOnlyOverride *bool
 	if isTeam {
-		if prof.Team == nil {
-			return nil, fmt.Errorf("team run %s requires a team profile", runID)
+		sessionRoles, err := prof.RolesForSession()
+		if err != nil {
+			return nil, fmt.Errorf("roles for session: %w", err)
 		}
-		roles, coord, err := team.ValidateTeamRoles(prof.Team.Roles)
+		roles, coord, err := team.ValidateTeamRoles(sessionRoles)
 		if err != nil {
 			return nil, err
 		}
@@ -472,8 +473,8 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			return nil, fmt.Errorf("team run %s has no role mapping", runID)
 		}
 		var roleCfg *profile.RoleConfig
-		for i := range prof.Team.Roles {
-			r := prof.Team.Roles[i]
+		for i := range sessionRoles {
+			r := sessionRoles[i]
 			name := strings.TrimSpace(r.Name)
 			if name != "" {
 				teamRoleDescriptions[name] = strings.TrimSpace(r.Description)
@@ -484,7 +485,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			}
 		}
 		if roleCfg == nil {
-			return nil, fmt.Errorf("role %q not found in team profile %q", roleName, prof.ID)
+			return nil, fmt.Errorf("role %q not found in profile %q", roleName, prof.ID)
 		}
 		isCoordinator = strings.EqualFold(strings.TrimSpace(roleCfg.Name), coordinatorRole)
 		allowSubagents = roleCfg.AllowSubagents

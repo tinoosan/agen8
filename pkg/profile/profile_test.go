@@ -148,6 +148,35 @@ team:
 	}
 }
 
+func TestProfile_RolesForSession(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("prompt"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(
+		"id: solo\ndescription: Solo\nmodel: gpt-5\nprompts:\n  system_prompt_path: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	roles, err := p.RolesForSession()
+	if err != nil {
+		t.Fatalf("RolesForSession: %v", err)
+	}
+	if len(roles) != 1 {
+		t.Fatalf("standalone: expected 1 role, got %d", len(roles))
+	}
+	if roles[0].Name != "agent" || !roles[0].Coordinator || !roles[0].AllowSubagents {
+		t.Fatalf("synthetic role: %+v", roles[0])
+	}
+	if roles[0].Model != "gpt-5" {
+		t.Fatalf("role model = %q want gpt-5", roles[0].Model)
+	}
+}
+
 func TestLoad_TeamProfile_MissingCoordinator(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("prompt"), 0o644); err != nil {

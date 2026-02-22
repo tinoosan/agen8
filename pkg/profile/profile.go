@@ -67,6 +67,52 @@ type HeartbeatJob struct {
 	Goal     string        `yaml:"goal"`
 }
 
+// RolesForSession returns the roles to use when starting a session.
+// For team profiles, returns Team.Roles. For standalone profiles (no team block),
+// returns a synthetic single role "agent" with coordinator=true and allow_subagents=true.
+func (p *Profile) RolesForSession() ([]RoleConfig, error) {
+	if p == nil {
+		return nil, fmt.Errorf("profile is nil")
+	}
+	if p.Team != nil && len(p.Team.Roles) > 0 {
+		return p.Team.Roles, nil
+	}
+	// Standalone: synthetic single role
+	codeExec := p.CodeExecOnly
+	r := RoleConfig{
+		Name:           "agent",
+		Description:    strings.TrimSpace(p.Description),
+		Prompts:        p.Prompts,
+		Skills:         append([]string(nil), p.Skills...),
+		CodeExecOnly:   &codeExec,
+		AllowedTools:   append([]string(nil), p.AllowedTools...),
+		Model:          strings.TrimSpace(p.Model),
+		SubagentModel:  strings.TrimSpace(p.SubagentModel),
+		Coordinator:    true,
+		AllowSubagents: true,
+	}
+	return []RoleConfig{r}, nil
+}
+
+// TeamModelForSession returns the model to use for the session (team or standalone).
+// For team profiles, returns Team.Model or first role model. For standalone, returns Model.
+func (p *Profile) TeamModelForSession() string {
+	if p == nil {
+		return ""
+	}
+	if p.Team != nil {
+		if m := strings.TrimSpace(p.Team.Model); m != "" {
+			return m
+		}
+		for _, r := range p.Team.Roles {
+			if m := strings.TrimSpace(r.Model); m != "" {
+				return m
+			}
+		}
+	}
+	return strings.TrimSpace(p.Model)
+}
+
 // EffectiveHeartbeats returns the heartbeat jobs to run. When heartbeat.enabled is false,
 // returns nil so heartbeats are disabled without removing the entries from the profile.
 func (p *Profile) EffectiveHeartbeats() []HeartbeatJob {
