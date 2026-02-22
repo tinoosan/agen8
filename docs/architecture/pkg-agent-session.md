@@ -63,3 +63,18 @@ sequenceDiagram
 - When the parent spawns, its coordination task is completed (Succeeded); callbacks are normal tasks that the parent processes when they appear.
 - Session heartbeats are the primary mechanism for detecting changes in the external task store (e.g., new callback tasks).
 - The session must ensure that the VFS state and LLM history are correctly persisted where needed for task execution.
+
+## Heartbeats
+
+Heartbeats are configured in `profile.yaml` under `heartbeat`. Use the object form with `enabled` and `jobs`:
+
+```yaml
+heartbeat:
+  enabled: false   # Set to false to disable without removing entries
+  jobs:
+    - name: review_your_knowledge
+      interval: 10m
+      goal: "..."
+```
+
+Legacy list format is still supported: `heartbeat: [{name: x, interval: 1m, goal: y}]`.

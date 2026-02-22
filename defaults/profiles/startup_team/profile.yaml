@@ -8,12 +8,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - task_create
@@ -36,13 +30,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
-        - fs_patch
         - shell_exec
         - http_fetch
         - browser
@@ -59,12 +46,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
       description: Researches markets, acquires users, and runs marketing and outreach campaigns.
@@ -80,12 +61,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
       description: Manages business model, budgets, revenue tracking, and operational finances.
@@ -100,12 +75,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
       description: Owns product design, branding, landing pages, and visual identity.
@@ -121,12 +90,6 @@ team:
       reviewer: true
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - task_review

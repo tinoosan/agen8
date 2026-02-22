@@ -48,6 +48,11 @@ Fields:
 - `code_exec.venv_path` (string, optional; default `<AGEN8_DATA_DIR>/exec/.venv`)
 - `code_exec.required_packages` ([]string of pip package names)
 
+`[path_access]` – Paths outside VFS the agent may access (on the filesystem where the config lives):
+
+- `path_access.allowlist` ([]string of absolute dir paths; optional)
+- `path_access.read_only` (bool; default true) – If true, only reads allowed; if false, reads and writes
+
 Example:
 
 ```toml

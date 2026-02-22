@@ -8,12 +8,6 @@ team:
       model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - task_create
@@ -36,13 +30,6 @@ team:
       model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
-        - fs_patch
         - shell_exec
         - http_fetch
         - browser
@@ -59,13 +46,6 @@ team:
       model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
-        - fs_patch
         - shell_exec
         - http_fetch
         - browser
@@ -82,13 +62,6 @@ team:
       reviewer: true
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
-        - fs_patch
         - shell_exec
         - http_fetch
         - browser
@@ -107,13 +80,6 @@ team:
       model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
-        - fs_patch
         - shell_exec
         - http_fetch
         - browser
@@ -130,12 +96,6 @@ team:
       model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
       description: Researches user needs, evaluates usability, and informs product decisions with evidence.

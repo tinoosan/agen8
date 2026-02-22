@@ -8,12 +8,6 @@ team:
       model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - task_create
@@ -36,12 +30,6 @@ team:
       model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
       description: Produces long-form articles, blog posts, newsletters, and copy.
       prompts:
@@ -54,12 +42,6 @@ team:
       model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
       description: Investigates topics, gathers data, and produces fact-checked source briefs for writers.
@@ -74,12 +56,6 @@ team:
       model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
       description: Plans and executes content distribution across channels for maximum reach.
@@ -95,12 +71,6 @@ team:
       reviewer: true
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - task_review
@@ -117,12 +87,6 @@ team:
       model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
       description: Creates social content, plans posting schedules, and tracks engagement metrics.

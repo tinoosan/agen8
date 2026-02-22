@@ -8,12 +8,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - task_create
@@ -36,12 +30,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
       description: Performs strategic analysis — competitive positioning, market sizing, and business case evaluation.
@@ -56,12 +44,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
       description: Conducts primary and secondary market research to inform strategic recommendations.
@@ -76,13 +58,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
-        - fs_patch
         - shell_exec
         - http_fetch
         - browser
@@ -99,12 +74,6 @@ team:
       reviewer: true
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - task_review
         - task_create
@@ -119,12 +88,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
       description: Provides deep domain expertise on specific industries, trends, and regulatory environments.

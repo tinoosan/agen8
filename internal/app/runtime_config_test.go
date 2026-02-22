@@ -25,6 +25,9 @@ OPENROUTER_API_KEY = "from-data-dir"
 [code_exec]
 venv_path = "exec/.venv"
 required_packages = ["pandas"]
+[path_access]
+allowlist = ["/home/user/shared", "/var/cache/build"]
+read_only = true
 [obsidian]
 vault_path = "/project/custom-vault"
 `), 0o644); err != nil {
@@ -77,6 +80,12 @@ required_packages = ["requests"]
 	}
 	if got := strings.Join(cfg.CodeExec.RequiredPackages, ","); got != "pandas" {
 		t.Fatalf("required_packages=%q", got)
+	}
+	if got := strings.Join(cfg.PathAccess.Allowlist, ","); got != "/home/user/shared,/var/cache/build" {
+		t.Fatalf("path_access.allowlist=%q", got)
+	}
+	if !cfg.PathAccess.ReadOnly {
+		t.Fatalf("path_access.read_only=%v, want true", cfg.PathAccess.ReadOnly)
 	}
 	if got := cfg.Obsidian.VaultPath; got != "/project/custom-vault" {
 		t.Fatalf("obsidian.vault_path=%q", got)
@@ -171,6 +180,24 @@ model = "custom/model"` {
 	}
 }
 
+func TestLoadRuntimeConfig_PathAccessReadOnlyDefaultsTrue(t *testing.T) {
+	tmp := t.TempDir()
+	// Provide allowlist but omit read_only — should default to true.
+	if err := os.WriteFile(filepath.Join(tmp, "config.toml"), []byte(`
+[path_access]
+allowlist = ["/shared"]
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := loadRuntimeConfig(tmp)
+	if err != nil {
+		t.Fatalf("loadRuntimeConfig: %v", err)
+	}
+	if !cfg.PathAccess.ReadOnly {
+		t.Fatalf("path_access.read_only=%v, want true (default when omitted)", cfg.PathAccess.ReadOnly)
+	}
+}
+
 func TestApplyRuntimeConfigHostDefaults_CodeExec(t *testing.T) {
 	base := config.Config{DataDir: "db"}
 	out := applyRuntimeConfigHostDefaults(base, runtimeConfig{
@@ -178,11 +205,21 @@ func TestApplyRuntimeConfigHostDefaults_CodeExec(t *testing.T) {
 			VenvPath:         "exec/.venv",
 			RequiredPackages: []string{"pandas", "requests"},
 		},
+		PathAccess: runtimeConfigPathAccess{
+			Allowlist: []string{"/shared"},
+			ReadOnly:  true,
+		},
 	})
 	if out.CodeExec.VenvPath != "exec/.venv" {
 		t.Fatalf("venv_path=%q", out.CodeExec.VenvPath)
 	}
 	if got := strings.Join(out.CodeExec.RequiredPackages, ","); got != "pandas,requests" {
 		t.Fatalf("required_packages=%q", got)
+	}
+	if got := strings.Join(out.PathAccess.Allowlist, ","); got != "/shared" {
+		t.Fatalf("path_access.allowlist=%q", got)
+	}
+	if !out.PathAccess.ReadOnly {
+		t.Fatalf("path_access.read_only=%v, want true", out.PathAccess.ReadOnly)
 	}
 }

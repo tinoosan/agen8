@@ -16,11 +16,12 @@ const envAgen8Config = "AGEN8_CONFIG"
 const runtimeDefaultModel = "z-ai/GLM-5"
 
 type runtimeConfig struct {
-	Defaults runtimeConfigDefaults
-	Env      map[string]string
-	Skills   runtimeConfigSkills
-	CodeExec runtimeConfigCodeExec
-	Obsidian runtimeConfigObsidian
+	Defaults   runtimeConfigDefaults
+	Env        map[string]string
+	Skills     runtimeConfigSkills
+	CodeExec   runtimeConfigCodeExec
+	PathAccess runtimeConfigPathAccess
+	Obsidian   runtimeConfigObsidian
 }
 
 type runtimeConfigDefaults struct {
@@ -38,16 +39,22 @@ type runtimeConfigCodeExec struct {
 	RequiredPackages []string
 }
 
+type runtimeConfigPathAccess struct {
+	Allowlist []string
+	ReadOnly  bool
+}
+
 type runtimeConfigObsidian struct {
 	VaultPath string
 }
 
 type runtimeConfigFile struct {
-	Defaults runtimeConfigDefaultsFile `toml:"defaults"`
-	Env      map[string]string         `toml:"env"`
-	Skills   runtimeConfigSkillsFile   `toml:"skills"`
-	CodeExec runtimeConfigCodeExecFile `toml:"code_exec"`
-	Obsidian runtimeConfigObsidianFile `toml:"obsidian"`
+	Defaults   runtimeConfigDefaultsFile   `toml:"defaults"`
+	Env        map[string]string           `toml:"env"`
+	Skills     runtimeConfigSkillsFile     `toml:"skills"`
+	CodeExec   runtimeConfigCodeExecFile   `toml:"code_exec"`
+	PathAccess runtimeConfigPathAccessFile `toml:"path_access"`
+	Obsidian   runtimeConfigObsidianFile   `toml:"obsidian"`
 }
 
 type runtimeConfigDefaultsFile struct {
@@ -63,6 +70,11 @@ type runtimeConfigSkillsFile struct {
 type runtimeConfigCodeExecFile struct {
 	VenvPath         string   `toml:"venv_path"`
 	RequiredPackages []string `toml:"required_packages"`
+}
+
+type runtimeConfigPathAccessFile struct {
+	Allowlist []string `toml:"allowlist"`
+	ReadOnly  *bool    `toml:"read_only"`
 }
 
 type runtimeConfigObsidianFile struct {
@@ -141,6 +153,10 @@ model = "`+runtimeDefaultModel+`"
 # venv_path = ""
 # required_packages = []
 
+[path_access]
+# allowlist = []   # Absolute dirs agent may access outside VFS
+# read_only = true  # If true, only reads; if false, reads and writes
+
 [obsidian]
 # vault_path = ""
 `) + "\n"
@@ -179,6 +195,10 @@ func decodeRuntimeConfigFile(path string) (runtimeConfig, bool, error) {
 		CodeExec: runtimeConfigCodeExec{
 			VenvPath:         strings.TrimSpace(raw.CodeExec.VenvPath),
 			RequiredPackages: normalizeStringList(raw.CodeExec.RequiredPackages),
+		},
+		PathAccess: runtimeConfigPathAccess{
+			Allowlist: normalizeStringList(raw.PathAccess.Allowlist),
+			ReadOnly:  raw.PathAccess.ReadOnly == nil || *raw.PathAccess.ReadOnly,
 		},
 		Obsidian: runtimeConfigObsidian{
 			VaultPath: strings.TrimSpace(raw.Obsidian.VaultPath),
@@ -249,6 +269,37 @@ func mergeRuntimeConfig(base, override runtimeConfig) runtimeConfig {
 		sort.Strings(merged)
 		out.CodeExec.RequiredPackages = merged
 	}
+	if len(override.PathAccess.Allowlist) > 0 {
+		set := map[string]struct{}{}
+		merged := make([]string, 0, len(out.PathAccess.Allowlist)+len(override.PathAccess.Allowlist))
+		for _, item := range out.PathAccess.Allowlist {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, ok := set[item]; ok {
+				continue
+			}
+			set[item] = struct{}{}
+			merged = append(merged, item)
+		}
+		for _, item := range override.PathAccess.Allowlist {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, ok := set[item]; ok {
+				continue
+			}
+			set[item] = struct{}{}
+			merged = append(merged, item)
+		}
+		sort.Strings(merged)
+		out.PathAccess.Allowlist = merged
+	}
+	if len(override.PathAccess.Allowlist) > 0 || override.PathAccess.ReadOnly != base.PathAccess.ReadOnly {
+		out.PathAccess.ReadOnly = override.PathAccess.ReadOnly
+	}
 	if vaultPath := strings.TrimSpace(override.Obsidian.VaultPath); vaultPath != "" {
 		out.Obsidian.VaultPath = vaultPath
 	}
@@ -259,6 +310,10 @@ func applyRuntimeConfigHostDefaults(host config.Config, cfg runtimeConfig) confi
 	out := host
 	out.CodeExec.VenvPath = strings.TrimSpace(cfg.CodeExec.VenvPath)
 	out.CodeExec.RequiredPackages = normalizeStringList(cfg.CodeExec.RequiredPackages)
+	if len(cfg.PathAccess.Allowlist) > 0 {
+		out.PathAccess.Allowlist = normalizeStringList(cfg.PathAccess.Allowlist)
+		out.PathAccess.ReadOnly = cfg.PathAccess.ReadOnly
+	}
 	return out
 }
 

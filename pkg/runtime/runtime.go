@@ -422,6 +422,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	httpInvoker := builtins.NewBuiltinHTTPInvoker()
 	traceInvoker := builtins.BuiltinTraceInvoker{Store: traceStore}
 	codeExecInvoker := builtins.NewBuiltinCodeExecInvoker(absWorkdirRoot, shellInvoker.MountRoots)
+	if len(cfg.Cfg.PathAccess.Allowlist) > 0 {
+		codeExecInvoker.SetPathAccess(cfg.Cfg.PathAccess.Allowlist, cfg.Cfg.PathAccess.ReadOnly)
+	}
 
 	browserMgr, err := builtins.NewBrowserSessionManager(30 * time.Minute)
 	if err != nil {

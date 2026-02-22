@@ -23,7 +23,7 @@ func TestLoad_ValidDir(t *testing.T) {
 	if p.ID != "test" {
 		t.Fatalf("unexpected id: %q", p.ID)
 	}
-	if len(p.Heartbeat) != 1 || p.Heartbeat[0].Name != "ping" {
+	if len(p.Heartbeat.Jobs) != 1 || p.Heartbeat.Jobs[0].Name != "ping" {
 		t.Fatalf("unexpected heartbeat: %+v", p.Heartbeat)
 	}
 }
@@ -40,7 +40,7 @@ func TestLoad_HeartbeatHourInterval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got, want := p.Heartbeat[0].Interval, time.Hour; got != want {
+	if got, want := p.Heartbeat.Jobs[0].Interval, time.Hour; got != want {
 		t.Fatalf("heartbeat interval = %v want %v", got, want)
 	}
 }
@@ -308,6 +308,75 @@ team:
 	}
 	if p.Team.Roles[1].CodeExecOnly == nil || *p.Team.Roles[1].CodeExecOnly {
 		t.Fatalf("expected worker override false")
+	}
+}
+
+func TestEffectiveHeartbeats_Disabled(t *testing.T) {
+	disabled := false
+	p := &Profile{
+		Heartbeat: HeartbeatConfig{
+			Enabled: &disabled,
+			Jobs:    []HeartbeatJob{{Name: "ping", Interval: time.Minute, Goal: "hi"}},
+		},
+	}
+	if got := p.EffectiveHeartbeats(); len(got) != 0 {
+		t.Fatalf("heartbeat_enabled=false: expected no heartbeats, got %d", len(got))
+	}
+}
+
+func TestEffectiveHeartbeats_Enabled(t *testing.T) {
+	enabled := true
+	p := &Profile{
+		Heartbeat: HeartbeatConfig{
+			Enabled: &enabled,
+			Jobs:    []HeartbeatJob{{Name: "ping", Interval: time.Minute, Goal: "hi"}},
+		},
+	}
+	if got := p.EffectiveHeartbeats(); len(got) != 1 {
+		t.Fatalf("heartbeat_enabled=true: expected 1 heartbeat, got %d", len(got))
+	}
+}
+
+func TestEffectiveHeartbeats_UnsetDefaultsToEnabled(t *testing.T) {
+	p := &Profile{
+		Heartbeat: HeartbeatConfig{
+			Jobs: []HeartbeatJob{{Name: "ping", Interval: time.Minute, Goal: "hi"}},
+		},
+	}
+	if got := p.EffectiveHeartbeats(); len(got) != 1 {
+		t.Fatalf("heartbeat_enabled unset: expected 1 heartbeat (default on), got %d", len(got))
+	}
+}
+
+func TestLoad_HeartbeatEnabledFalse(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	raw := `
+id: test
+description: x
+prompts:
+  system_prompt_path: prompt.md
+heartbeat:
+  enabled: false
+  jobs:
+    - name: ping
+      interval: 1m
+      goal: hello
+`
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(p.Heartbeat.Jobs) != 1 {
+		t.Fatalf("expected heartbeat entries preserved: %+v", p.Heartbeat)
+	}
+	if got := p.EffectiveHeartbeats(); len(got) != 0 {
+		t.Fatalf("heartbeat_enabled=false: expected EffectiveHeartbeats empty, got %d", len(got))
 	}
 }
 

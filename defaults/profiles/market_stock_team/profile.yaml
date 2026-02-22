@@ -8,12 +8,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - task_create
@@ -36,12 +30,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
       description: Investigates macro themes, sector rotation, and broad market conditions.
@@ -56,12 +44,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
       description: Analyzes company fundamentals, catalysts, and valuation signals.
@@ -76,12 +58,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
       description: Produces concise final reports and executive-ready summaries.
       prompts:
@@ -95,12 +71,6 @@ team:
       reviewer: true
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
         - http_fetch
         - browser
         - task_review
@@ -117,13 +87,6 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
-        - fs_list
-        - fs_read
-        - fs_search
-        - fs_write
-        - fs_append
-        - fs_edit
-        - fs_patch
         - shell_exec
         - http_fetch
         - browser

@@ -373,18 +373,28 @@ func TestRunPython_AllowsReadOnlyOpen(t *testing.T) {
 	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
 
 	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
-		Code:         `result = open("a.txt", "r").read()`,
+		Code:         `result = open("/workspace/a.txt", "r").read()`,
 		Allowlist:    []string{"fs_read"},
 		MaxToolCalls: 2,
 		TimeoutMs:    4_000,
 		MaxOutput:    8 * 1024,
-		Dispatch: func(_ context.Context, _ string, _ json.RawMessage) (types.HostOpRequest, error) {
-			t.Fatalf("dispatch should not be called for local read")
-			return types.HostOpRequest{}, nil
+		Dispatch: func(_ context.Context, toolName string, args json.RawMessage) (types.HostOpRequest, error) {
+			if toolName != "fs_read" {
+				t.Fatalf("dispatch tool = %q, want fs_read", toolName)
+			}
+			var m struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(args, &m); err != nil {
+				return types.HostOpRequest{}, err
+			}
+			return types.HostOpRequest{Op: types.HostOpFSRead, Path: m.Path}, nil
 		},
-		Bridge: func(_ context.Context, _ types.HostOpRequest) types.HostOpResponse {
-			t.Fatalf("bridge should not be called for local read")
-			return types.HostOpResponse{}
+		Bridge: func(_ context.Context, req types.HostOpRequest) types.HostOpResponse {
+			if req.Op != types.HostOpFSRead || req.Path != "/workspace/a.txt" {
+				t.Fatalf("bridge req = %+v", req)
+			}
+			return types.HostOpResponse{Op: req.Op, Ok: true, Text: "hello"}
 		},
 		EnvAllowlist: inv.EnvAllowlist,
 	})
@@ -396,6 +406,408 @@ func TestRunPython_AllowsReadOnlyOpen(t *testing.T) {
 	}
 	if got := strings.TrimSpace(fmt.Sprintf("%v", out.Result)); got != "hello" {
 		t.Fatalf("result=%q want hello", got)
+	}
+}
+
+func TestRunPython_VFSCompatShim_BlocksNonVFSPaths(t *testing.T) {
+	// Non-VFS paths must not fall through to host; prevents sandbox escape.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+
+	for _, code := range []string{
+		`open("/etc/passwd", "r")`,
+		`import os; os.listdir("/")`,
+		`open("relative.txt", "r")`,
+	} {
+		t.Run(code, func(t *testing.T) {
+			out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+				Code:         code,
+				Allowlist:    []string{"fs_read", "fs_list"},
+				MaxToolCalls: 2,
+				TimeoutMs:    4_000,
+				MaxOutput:    8 * 1024,
+				Dispatch: func(_ context.Context, _ string, _ json.RawMessage) (types.HostOpRequest, error) {
+					t.Fatalf("dispatch should not be called for blocked path")
+					return types.HostOpRequest{}, nil
+				},
+				Bridge: func(_ context.Context, _ types.HostOpRequest) types.HostOpResponse {
+					t.Fatalf("bridge should not be called for blocked path")
+					return types.HostOpResponse{}
+				},
+				EnvAllowlist: inv.EnvAllowlist,
+			})
+			if err != nil {
+				t.Fatalf("runPython error: %v", err)
+			}
+			if out.OK {
+				t.Fatalf("expected blocked path to fail, got %+v", out)
+			}
+			if !strings.Contains(strings.ToLower(out.Error), "vfs") {
+				t.Fatalf("expected VFS-related error, got %q", out.Error)
+			}
+		})
+	}
+}
+
+func TestRunPython_PathAccessAllowlist_AllowsAccess(t *testing.T) {
+	// path_access.allowlist permits access to dirs outside VFS.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	sharedDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedDir, "data.txt"), []byte("from allowlist"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+	inv.SetPathAccess([]string{sharedDir}, true)
+
+	filePath := filepath.Join(sharedDir, "data.txt")
+	// Use forward slashes for Python string (works on all platforms)
+	filePathPy := strings.ReplaceAll(filePath, "\\", "/")
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:                `result = open("` + filePathPy + `", "r").read()`,
+		Allowlist:           []string{},
+		MaxToolCalls:        0,
+		TimeoutMs:           4_000,
+		MaxOutput:           8 * 1024,
+		PathAccessAllowlist: []string{sharedDir},
+		PathAccessReadOnly:  true,
+		Dispatch:            nil,
+		Bridge:              nil,
+		EnvAllowlist:        inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("expected allowlisted path to succeed, got %+v", out)
+	}
+	if got := strings.TrimSpace(fmt.Sprintf("%v", out.Result)); got != "from allowlist" {
+		t.Fatalf("result=%q want from allowlist", got)
+	}
+}
+
+func TestRunPython_PathAccessAllowlist_BlocksPathsOutside(t *testing.T) {
+	// With allowlist set, paths outside allowlist are still blocked.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	sharedDir := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+	inv.SetPathAccess([]string{sharedDir}, true)
+
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:              `open("/etc/passwd", "r")`,
+		Allowlist:         []string{},
+		MaxToolCalls:      0,
+		TimeoutMs:         4_000,
+		MaxOutput:         8 * 1024,
+		PathAccessAllowlist: []string{sharedDir},
+		PathAccessReadOnly:  true,
+		Dispatch:            nil,
+		Bridge:              nil,
+		EnvAllowlist:        inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if out.OK {
+		t.Fatalf("expected path outside allowlist to fail, got %+v", out)
+	}
+	if !strings.Contains(strings.ToLower(out.Error), "vfs") && !strings.Contains(strings.ToLower(out.Error), "allowlist") {
+		t.Fatalf("expected VFS/allowlist error, got %q", out.Error)
+	}
+}
+
+func TestRunPython_PathAccessAllowlist_ReadOnly_BlocksWrites(t *testing.T) {
+	// When read_only=true, writes to allowlisted paths are blocked.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	sharedDir := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+	inv.SetPathAccess([]string{sharedDir}, true)
+
+	filePath := filepath.Join(sharedDir, "out.txt")
+	filePathPy := strings.ReplaceAll(filePath, "\\", "/")
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:                `open("` + filePathPy + `", "w").write("x")`,
+		Allowlist:           []string{},
+		MaxToolCalls:        0,
+		TimeoutMs:           4_000,
+		MaxOutput:           8 * 1024,
+		PathAccessAllowlist: []string{sharedDir},
+		PathAccessReadOnly:  true,
+		Dispatch:            nil,
+		Bridge:              nil,
+		EnvAllowlist:        inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if out.OK {
+		t.Fatalf("expected write to allowlisted path to fail when read_only, got %+v", out)
+	}
+	if !strings.Contains(strings.ToLower(out.Error), "read_only") {
+		t.Fatalf("expected read_only error, got %q", out.Error)
+	}
+}
+
+func TestRunPython_PathAccessAllowlist_ReadWrite_AllowsWrites(t *testing.T) {
+	// When read_only=false, writes to allowlisted paths are allowed.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	sharedDir := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+	inv.SetPathAccess([]string{sharedDir}, false)
+
+	filePath := filepath.Join(sharedDir, "out.txt")
+	filePathPy := strings.ReplaceAll(filePath, "\\", "/")
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:                `open("` + filePathPy + `", "w").write("written"); result = open("` + filePathPy + `", "r").read()`,
+		Allowlist:           []string{},
+		MaxToolCalls:        0,
+		TimeoutMs:           4_000,
+		MaxOutput:           8 * 1024,
+		PathAccessAllowlist: []string{sharedDir},
+		PathAccessReadOnly:  false,
+		Dispatch:            nil,
+		Bridge:              nil,
+		EnvAllowlist:        inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("expected write to allowlisted path to succeed when read_only=false, got %+v", out)
+	}
+	if got := strings.TrimSpace(fmt.Sprintf("%v", out.Result)); got != "written" {
+		t.Fatalf("result=%q want written", got)
+	}
+}
+
+func TestRunPython_VFSCompatShim_OpenAndListdir(t *testing.T) {
+	// Models that use os/open instead of tools.fs_read/fs_list should still work.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{
+		"project":   workspace,
+		"workspace": workspace,
+	})
+
+	fsReadCalls := 0
+	fsListCalls := 0
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code: `import os
+# Model uses os.listdir (wrong pattern) - should route through bridge
+entries = os.listdir("/workspace")
+# Model uses open() (wrong pattern) - should route through bridge
+content = open("/workspace/hello.txt", "r").read()
+result = {"entries": entries, "content": content}`,
+		Allowlist:    []string{"fs_read", "fs_list"},
+		MaxToolCalls: 5,
+		TimeoutMs:    4_000,
+		MaxOutput:    8 * 1024,
+		Dispatch: func(_ context.Context, toolName string, args json.RawMessage) (types.HostOpRequest, error) {
+			toolName = strings.TrimSpace(toolName)
+			var m struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(args, &m); err != nil {
+				return types.HostOpRequest{}, err
+			}
+			path := m.Path
+			if toolName == "fs_list" {
+				return types.HostOpRequest{Op: types.HostOpFSList, Path: path}, nil
+			}
+			if toolName == "fs_read" {
+				return types.HostOpRequest{Op: types.HostOpFSRead, Path: path}, nil
+			}
+			return types.HostOpRequest{}, fmt.Errorf("unknown tool %q", toolName)
+		},
+		Bridge: func(_ context.Context, req types.HostOpRequest) types.HostOpResponse {
+			if req.Op == types.HostOpFSList {
+				fsListCalls++
+				return types.HostOpResponse{Op: req.Op, Ok: true, Entries: []string{"hello.txt", "other.txt"}}
+			}
+			if req.Op == types.HostOpFSRead {
+				fsReadCalls++
+				return types.HostOpResponse{Op: req.Op, Ok: true, Text: "hello from vfs"}
+			}
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: "unknown op"}
+		},
+		EnvAllowlist: inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("expected VFS compat shim to succeed, got %+v", out)
+	}
+	if fsReadCalls != 1 {
+		t.Fatalf("expected 1 fs_read bridge call, got %d", fsReadCalls)
+	}
+	if fsListCalls != 1 {
+		t.Fatalf("expected 1 fs_list bridge call, got %d", fsListCalls)
+	}
+	got, ok := out.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map", out.Result)
+	}
+	content, _ := got["content"].(string)
+	if content != "hello from vfs" {
+		t.Fatalf("content=%q want hello from vfs", content)
+	}
+	entries, _ := got["entries"].([]any)
+	if len(entries) != 2 {
+		t.Fatalf("entries len=%d want 2, got %v", len(entries), entries)
+	}
+}
+
+func TestRunPython_VFSCompatShim_SymlinkAllowlistBypass(t *testing.T) {
+	// A symlink inside an allowlisted dir pointing outside must be blocked.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	allowedDir := t.TempDir()
+	outsideDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outsideDir, "secret.txt"), []byte("secret-data"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	// Create symlink: allowedDir/escape -> outsideDir
+	symlink := filepath.Join(allowedDir, "escape")
+	if err := os.Symlink(outsideDir, symlink); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+
+	escapePath := filepath.Join(allowedDir, "escape", "secret.txt")
+	escapePathPy := strings.ReplaceAll(escapePath, "\\", "/")
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:                `result = open("` + escapePathPy + `", "r").read()`,
+		Allowlist:           []string{},
+		MaxToolCalls:        0,
+		TimeoutMs:           4_000,
+		MaxOutput:           8 * 1024,
+		PathAccessAllowlist: []string{allowedDir},
+		PathAccessReadOnly:  true,
+		Dispatch:            nil,
+		Bridge:              nil,
+		EnvAllowlist:        inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if out.OK {
+		t.Fatalf("expected symlink escape to be blocked, got result=%v", out.Result)
+	}
+}
+
+func TestRunPython_VFSCompatShim_ListdirCWD(t *testing.T) {
+	// os.listdir() and os.listdir(".") should succeed when CWD is on the allowlist.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "file.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+
+	for _, code := range []string{
+		`import os; result = os.listdir(".")`,
+		`import os; result = os.listdir()`,
+	} {
+		t.Run(code, func(t *testing.T) {
+			out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+				Code:                code,
+				Allowlist:           []string{},
+				MaxToolCalls:        0,
+				TimeoutMs:           4_000,
+				MaxOutput:           8 * 1024,
+				Dispatch:            nil,
+				Bridge:              nil,
+				EnvAllowlist:        inv.EnvAllowlist,
+				PathAccessAllowlist: []string{workspace},
+			})
+			if err != nil {
+				t.Fatalf("runPython error: %v", err)
+			}
+			if !out.OK {
+				t.Fatalf("expected os.listdir with relative path to succeed, got error=%q", out.Error)
+			}
+		})
+	}
+}
+
+func TestRunPython_VFSCompatShim_ListdirRelativeBlocked(t *testing.T) {
+	// os.listdir("..") should be blocked when the parent dir is not on the allowlist.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+
+	for _, code := range []string{
+		`import os; result = os.listdir("..")`,
+		`import os; os.chdir("/"); result = os.listdir("etc")`,
+	} {
+		t.Run(code, func(t *testing.T) {
+			out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+				Code:                code,
+				Allowlist:           []string{},
+				MaxToolCalls:        0,
+				TimeoutMs:           4_000,
+				MaxOutput:           8 * 1024,
+				Dispatch:            nil,
+				Bridge:              nil,
+				EnvAllowlist:        inv.EnvAllowlist,
+				PathAccessAllowlist: []string{workspace},
+			})
+			if err != nil {
+				t.Fatalf("runPython error: %v", err)
+			}
+			if out.OK {
+				t.Fatalf("expected os.listdir with relative path outside allowlist to be blocked, got result=%v", out.Result)
+			}
+		})
+	}
+}
+
+func TestRunPython_VFSCompatShim_OpenBinaryMode(t *testing.T) {
+	// open(path, "rb") on VFS paths should return bytes, not str.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:         `data = open("/workspace/f.bin", "rb").read(); result = {"type": type(data).__name__, "value": data.decode("utf-8")}`,
+		Allowlist:    []string{"fs_read"},
+		MaxToolCalls: 2,
+		TimeoutMs:    4_000,
+		MaxOutput:    8 * 1024,
+		Dispatch: func(_ context.Context, toolName string, args json.RawMessage) (types.HostOpRequest, error) {
+			var m struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(args, &m); err != nil {
+				return types.HostOpRequest{}, err
+			}
+			return types.HostOpRequest{Op: types.HostOpFSRead, Path: m.Path}, nil
+		},
+		Bridge: func(_ context.Context, req types.HostOpRequest) types.HostOpResponse {
+			return types.HostOpResponse{Op: req.Op, Ok: true, Text: "binary-content"}
+		},
+		EnvAllowlist: inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("expected binary open to succeed, got %+v", out)
+	}
+	got, ok := out.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map", out.Result)
+	}
+	if got["type"] != "bytes" {
+		t.Fatalf("expected bytes type, got %q", got["type"])
+	}
+	if got["value"] != "binary-content" {
+		t.Fatalf("expected binary-content, got %q", got["value"])
 	}
 }
 

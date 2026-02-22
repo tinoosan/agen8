@@ -18,12 +18,22 @@ type Config struct {
 
 	// CodeExec controls runtime policy for code_exec Python environment setup.
 	CodeExec CodeExecConfig
+
+	// PathAccess controls which paths outside VFS the agent may access.
+	PathAccess PathAccessConfig
 }
 
 // CodeExecConfig controls code_exec Python runtime dependency policy.
 type CodeExecConfig struct {
 	VenvPath         string
 	RequiredPackages []string
+}
+
+// PathAccessConfig controls path allowlist for code_exec (dirs outside VFS).
+// Paths are on the filesystem where the config lives (client in project mode, daemon host in data-dir mode).
+type PathAccessConfig struct {
+	Allowlist []string // Absolute dir paths the agent may access outside VFS
+	ReadOnly  bool     // If true, only reads allowed; if false, reads and writes
 }
 
 // Default returns the default host configuration.
@@ -33,6 +43,10 @@ func Default() Config {
 		CodeExec: CodeExecConfig{
 			VenvPath:         "",
 			RequiredPackages: nil,
+		},
+		PathAccess: PathAccessConfig{
+			Allowlist: nil,
+			ReadOnly:  true,
 		},
 	}
 }
