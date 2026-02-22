@@ -66,4 +66,15 @@ sequenceDiagram
 
 ## Heartbeats
 
-Heartbeats are configured in `profile.yaml` under `heartbeat`. Set `heartbeat_enabled: false` to disable heartbeats without removing the entries (useful for toggling without editing the job definitions).
+Heartbeats are configured in `profile.yaml` under `heartbeat`. Use the object form with `enabled` and `jobs`:
+
+```yaml
+heartbeat:
+  enabled: false   # Set to false to disable without removing entries
+  jobs:
+    - name: review_your_knowledge
+      interval: 10m
+      goal: "..."
+```
+
+Legacy list format is still supported: `heartbeat: [{name: x, interval: 1m, goal: y}]`.

@@ -19,7 +19,9 @@ func buildRoleRuntimeProfile(role profile.RoleConfig) *profile.Profile {
 		Prompts:                 role.Prompts,
 		Skills:                  append([]string(nil), role.Skills...),
 		AllowedTools:            append([]string(nil), role.AllowedTools...),
-		Heartbeat:               append([]profile.HeartbeatJob(nil), role.Heartbeat...),
-		HeartbeatEnabled:        role.HeartbeatEnabled,
+		Heartbeat: profile.HeartbeatConfig{
+			Enabled: role.Heartbeat.Enabled,
+			Jobs:    append([]profile.HeartbeatJob(nil), role.Heartbeat.Jobs...),
+		},
 	}
 }

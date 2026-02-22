@@ -23,7 +23,7 @@ func TestLoad_ValidDir(t *testing.T) {
 	if p.ID != "test" {
 		t.Fatalf("unexpected id: %q", p.ID)
 	}
-	if len(p.Heartbeat) != 1 || p.Heartbeat[0].Name != "ping" {
+	if len(p.Heartbeat.Jobs) != 1 || p.Heartbeat.Jobs[0].Name != "ping" {
 		t.Fatalf("unexpected heartbeat: %+v", p.Heartbeat)
 	}
 }
@@ -40,7 +40,7 @@ func TestLoad_HeartbeatHourInterval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got, want := p.Heartbeat[0].Interval, time.Hour; got != want {
+	if got, want := p.Heartbeat.Jobs[0].Interval, time.Hour; got != want {
 		t.Fatalf("heartbeat interval = %v want %v", got, want)
 	}
 }
@@ -314,8 +314,10 @@ team:
 func TestEffectiveHeartbeats_Disabled(t *testing.T) {
 	disabled := false
 	p := &Profile{
-		Heartbeat:        []HeartbeatJob{{Name: "ping", Interval: time.Minute, Goal: "hi"}},
-		HeartbeatEnabled: &disabled,
+		Heartbeat: HeartbeatConfig{
+			Enabled: &disabled,
+			Jobs:    []HeartbeatJob{{Name: "ping", Interval: time.Minute, Goal: "hi"}},
+		},
 	}
 	if got := p.EffectiveHeartbeats(); len(got) != 0 {
 		t.Fatalf("heartbeat_enabled=false: expected no heartbeats, got %d", len(got))
@@ -325,8 +327,10 @@ func TestEffectiveHeartbeats_Disabled(t *testing.T) {
 func TestEffectiveHeartbeats_Enabled(t *testing.T) {
 	enabled := true
 	p := &Profile{
-		Heartbeat:        []HeartbeatJob{{Name: "ping", Interval: time.Minute, Goal: "hi"}},
-		HeartbeatEnabled: &enabled,
+		Heartbeat: HeartbeatConfig{
+			Enabled: &enabled,
+			Jobs:    []HeartbeatJob{{Name: "ping", Interval: time.Minute, Goal: "hi"}},
+		},
 	}
 	if got := p.EffectiveHeartbeats(); len(got) != 1 {
 		t.Fatalf("heartbeat_enabled=true: expected 1 heartbeat, got %d", len(got))
@@ -335,8 +339,9 @@ func TestEffectiveHeartbeats_Enabled(t *testing.T) {
 
 func TestEffectiveHeartbeats_UnsetDefaultsToEnabled(t *testing.T) {
 	p := &Profile{
-		Heartbeat: []HeartbeatJob{{Name: "ping", Interval: time.Minute, Goal: "hi"}},
-		// HeartbeatEnabled nil = default enabled
+		Heartbeat: HeartbeatConfig{
+			Jobs: []HeartbeatJob{{Name: "ping", Interval: time.Minute, Goal: "hi"}},
+		},
 	}
 	if got := p.EffectiveHeartbeats(); len(got) != 1 {
 		t.Fatalf("heartbeat_enabled unset: expected 1 heartbeat (default on), got %d", len(got))
@@ -353,11 +358,12 @@ id: test
 description: x
 prompts:
   system_prompt_path: prompt.md
-heartbeat_enabled: false
 heartbeat:
-  - name: ping
-    interval: 1m
-    goal: hello
+  enabled: false
+  jobs:
+    - name: ping
+      interval: 1m
+      goal: hello
 `
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
@@ -366,7 +372,7 @@ heartbeat:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(p.Heartbeat) != 1 {
+	if len(p.Heartbeat.Jobs) != 1 {
 		t.Fatalf("expected heartbeat entries preserved: %+v", p.Heartbeat)
 	}
 	if got := p.EffectiveHeartbeats(); len(got) != 0 {

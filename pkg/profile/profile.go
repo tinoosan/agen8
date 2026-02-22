@@ -20,9 +20,40 @@ type Profile struct {
 	AllowedTools            []string       `yaml:"allowed_tools,omitempty"`
 	Prompts                 PromptConfig   `yaml:"prompts,omitempty"`
 	Skills                  []string       `yaml:"skills,omitempty"`
-	Heartbeat               []HeartbeatJob `yaml:"heartbeat,omitempty"`
-	HeartbeatEnabled        *bool          `yaml:"heartbeat_enabled,omitempty"` // If false, heartbeats disabled but entries kept
+	Heartbeat               HeartbeatConfig `yaml:"heartbeat,omitempty"`
 	Team                    *TeamConfig    `yaml:"team,omitempty"`
+}
+
+// HeartbeatConfig holds heartbeat jobs and an optional enabled flag.
+// YAML: heartbeat.enabled and heartbeat.jobs (or legacy: heartbeat as a list).
+type HeartbeatConfig struct {
+	Enabled *bool          `yaml:"enabled,omitempty"`
+	Jobs    []HeartbeatJob `yaml:"jobs,omitempty"`
+}
+
+// UnmarshalYAML supports both formats:
+//   - legacy: heartbeat: [{name: x, interval: 1m, goal: y}]
+//   - new: heartbeat: {enabled: false, jobs: [{name: x, ...}]}
+func (c *HeartbeatConfig) UnmarshalYAML(n *yaml.Node) error {
+	if n == nil || n.Kind == 0 {
+		return nil
+	}
+	if n.Kind == yaml.SequenceNode {
+		var jobs []HeartbeatJob
+		if err := n.Decode(&jobs); err != nil {
+			return err
+		}
+		c.Jobs = jobs
+		return nil
+	}
+	type raw HeartbeatConfig
+	var tmp raw
+	if err := n.Decode(&tmp); err != nil {
+		return err
+	}
+	c.Enabled = tmp.Enabled
+	c.Jobs = tmp.Jobs
+	return nil
 }
 
 type PromptConfig struct {
@@ -36,16 +67,16 @@ type HeartbeatJob struct {
 	Goal     string        `yaml:"goal"`
 }
 
-// EffectiveHeartbeats returns the heartbeat jobs to run. When heartbeat_enabled is false,
+// EffectiveHeartbeats returns the heartbeat jobs to run. When heartbeat.enabled is false,
 // returns nil so heartbeats are disabled without removing the entries from the profile.
 func (p *Profile) EffectiveHeartbeats() []HeartbeatJob {
 	if p == nil {
 		return nil
 	}
-	if p.HeartbeatEnabled != nil && !*p.HeartbeatEnabled {
+	if p.Heartbeat.Enabled != nil && !*p.Heartbeat.Enabled {
 		return nil
 	}
-	return p.Heartbeat
+	return p.Heartbeat.Jobs
 }
 
 type TeamConfig struct {
@@ -54,19 +85,18 @@ type TeamConfig struct {
 }
 
 type RoleConfig struct {
-	Name                    string         `yaml:"name"`
-	Description             string         `yaml:"description"`
-	Prompts                 PromptConfig   `yaml:"prompts,omitempty"`
-	Skills                  []string       `yaml:"skills,omitempty"`
-	CodeExecOnly            *bool          `yaml:"code_exec_only,omitempty"`
-	CodeExecRequiredImports []string       `yaml:"code_exec_required_imports,omitempty"`
-	AllowedTools            []string       `yaml:"allowed_tools,omitempty"`
-	Model                   string         `yaml:"model,omitempty"`
-	SubagentModel           string         `yaml:"subagent_model,omitempty"`
-	Coordinator             bool           `yaml:"coordinator,omitempty"`
-	Reviewer                bool           `yaml:"reviewer,omitempty"`
-	Heartbeat               []HeartbeatJob `yaml:"heartbeat,omitempty"`
-	HeartbeatEnabled        *bool          `yaml:"heartbeat_enabled,omitempty"` // If false, heartbeats disabled but entries kept
+	Name                    string           `yaml:"name"`
+	Description             string           `yaml:"description"`
+	Prompts                 PromptConfig     `yaml:"prompts,omitempty"`
+	Skills                  []string         `yaml:"skills,omitempty"`
+	CodeExecOnly            *bool            `yaml:"code_exec_only,omitempty"`
+	CodeExecRequiredImports []string         `yaml:"code_exec_required_imports,omitempty"`
+	AllowedTools            []string         `yaml:"allowed_tools,omitempty"`
+	Model                   string           `yaml:"model,omitempty"`
+	SubagentModel           string           `yaml:"subagent_model,omitempty"`
+	Coordinator             bool             `yaml:"coordinator,omitempty"`
+	Reviewer                bool             `yaml:"reviewer,omitempty"`
+	Heartbeat               HeartbeatConfig  `yaml:"heartbeat,omitempty"`
 }
 
 // Load reads one profile from a profile directory (containing profile.yaml).
@@ -125,9 +155,9 @@ func (p Profile) Normalize(profileDir string) (Profile, error) {
 	p.Prompts.SystemPromptPath = strings.TrimSpace(p.Prompts.SystemPromptPath)
 	p.Skills = normalizeStringList(p.Skills)
 
-	for i := range p.Heartbeat {
-		p.Heartbeat[i].Name = strings.TrimSpace(p.Heartbeat[i].Name)
-		p.Heartbeat[i].Goal = strings.TrimSpace(p.Heartbeat[i].Goal)
+	for i := range p.Heartbeat.Jobs {
+		p.Heartbeat.Jobs[i].Name = strings.TrimSpace(p.Heartbeat.Jobs[i].Name)
+		p.Heartbeat.Jobs[i].Goal = strings.TrimSpace(p.Heartbeat.Jobs[i].Goal)
 	}
 	if p.Team != nil {
 		p.Team.Model = strings.TrimSpace(p.Team.Model)
@@ -142,9 +172,9 @@ func (p Profile) Normalize(profileDir string) (Profile, error) {
 			r.CodeExecRequiredImports = normalizeStringList(r.CodeExecRequiredImports)
 			r.AllowedTools = normalizeStringList(r.AllowedTools)
 			r.Skills = normalizeStringList(r.Skills)
-			for j := range r.Heartbeat {
-				r.Heartbeat[j].Name = strings.TrimSpace(r.Heartbeat[j].Name)
-				r.Heartbeat[j].Goal = strings.TrimSpace(r.Heartbeat[j].Goal)
+			for j := range r.Heartbeat.Jobs {
+				r.Heartbeat.Jobs[j].Name = strings.TrimSpace(r.Heartbeat.Jobs[j].Name)
+				r.Heartbeat.Jobs[j].Goal = strings.TrimSpace(r.Heartbeat.Jobs[j].Goal)
 			}
 		}
 	}
@@ -168,7 +198,7 @@ func (p Profile) Validate(profileDir string) error {
 	if err := validatePromptPath(profileDir, p.Prompts.SystemPromptPath, fmt.Sprintf("profile %s", p.ID)); err != nil {
 		return err
 	}
-	for _, hb := range p.Heartbeat {
+	for _, hb := range p.Heartbeat.Jobs {
 		if strings.TrimSpace(hb.Name) == "" {
 			return fmt.Errorf("profile %s: heartbeat job name is required", p.ID)
 		}
@@ -200,7 +230,7 @@ func (p Profile) Validate(profileDir string) error {
 			if err := validatePromptPath(profileDir, role.Prompts.SystemPromptPath, fmt.Sprintf("%s (%s)", ref, role.Name)); err != nil {
 				return err
 			}
-			for _, hb := range role.Heartbeat {
+			for _, hb := range role.Heartbeat.Jobs {
 				if strings.TrimSpace(hb.Name) == "" {
 					return fmt.Errorf("%s (%s): heartbeat job name is required", ref, role.Name)
 				}

@@ -311,11 +311,13 @@ func TestSessionPausedSkipsHeartbeatEnqueue(t *testing.T) {
 		Agent: ag,
 		Profile: &profile.Profile{
 			ID: "general",
-			Heartbeat: []profile.HeartbeatJob{{
-				Name:     "pulse",
-				Goal:     "heartbeat",
-				Interval: 30 * time.Millisecond,
-			}},
+			Heartbeat: profile.HeartbeatConfig{
+				Jobs: []profile.HeartbeatJob{{
+					Name:     "pulse",
+					Goal:     "heartbeat",
+					Interval: 30 * time.Millisecond,
+				}},
+			},
 		},
 		TaskStore:    ts,
 		SessionID:    sessionID,
@@ -363,13 +365,15 @@ func TestSessionHeartbeatDisabled_NoEnqueue(t *testing.T) {
 	sess, err := New(Config{
 		Agent: ag,
 		Profile: &profile.Profile{
-			ID:              "general",
-			HeartbeatEnabled: &disabled,
-			Heartbeat: []profile.HeartbeatJob{{
-				Name:     "pulse",
-				Goal:     "heartbeat",
-				Interval: 30 * time.Millisecond,
-			}},
+			ID: "general",
+			Heartbeat: profile.HeartbeatConfig{
+				Enabled: &disabled,
+				Jobs: []profile.HeartbeatJob{{
+					Name:     "pulse",
+					Goal:     "heartbeat",
+					Interval: 30 * time.Millisecond,
+				}},
+			},
 		},
 		TaskStore:    ts,
 		SessionID:    sessionID,
