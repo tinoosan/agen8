@@ -903,7 +903,9 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	}
 	runConvStore, err := implstore.NewSQLiteRunConversationStoreFromConfig(s.cfg)
 	if err != nil {
-		log.Printf("daemon: failed to create run conversation store for run %s: %v", run.RunID, err)
+		orderedEmitter.Close()
+		_ = rt.Shutdown(context.Background())
+		return nil, fmt.Errorf("run conversation store: %w", err)
 	}
 
 	workerSession, err := agentsession.New(agentsession.Config{
@@ -953,6 +955,12 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	}
 	workerSession.SetPaused(paused)
 	managed.TouchHeartbeat()
+
+	emitEvent(parent, events.Event{
+		Type:    "run.conversation.enabled",
+		Message: "Run conversation persistence enabled",
+		Data:    map[string]string{"runId": run.RunID},
+	})
 
 	workerCtx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})

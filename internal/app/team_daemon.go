@@ -700,7 +700,9 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 
 		runConvStore, errConv := implstore.NewSQLiteRunConversationStoreFromConfig(cfg)
 		if errConv != nil {
-			log.Printf("daemon: failed to create run conversation store for role %s: %v", role.Name, errConv)
+			orderedEmitter.Close()
+			_ = rt.Shutdown(context.Background())
+			return fmt.Errorf("run conversation store for role %s: %w", role.Name, errConv)
 		}
 
 		roleSession, err := session.New(session.Config{
@@ -742,6 +744,12 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("create session for role %s: %w", role.Name, err)
 		}
+
+		_ = orderedEmitter.Emit(context.Background(), events.Event{
+			Type:    "run.conversation.enabled",
+			Message: "Run conversation persistence enabled",
+			Data:    map[string]string{"runId": run.RunID},
+		})
 
 		runtimes = append(runtimes, teamRoleRuntime{
 			role: role,
