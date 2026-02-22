@@ -17,20 +17,23 @@ import (
 type monitorProfilePickerItem struct {
 	ref         string
 	id          string
+	name        string // Display name (from profile.name for standalone)
 	description string
 }
 
 func (p monitorProfilePickerItem) FilterValue() string {
-	// Allow filtering by either ID or description (and directory ref).
-	return strings.TrimSpace(p.ref + " " + p.id + " " + p.description)
+	// Allow filtering by name, ID, description, or directory ref.
+	return strings.TrimSpace(p.ref + " " + p.id + " " + p.name + " " + p.description)
 }
 
 func (p monitorProfilePickerItem) Title() string {
-	title := strings.TrimSpace(p.id)
-	if title == "" {
-		title = strings.TrimSpace(p.ref)
+	if t := strings.TrimSpace(p.name); t != "" {
+		return t
 	}
-	return title
+	if t := strings.TrimSpace(p.id); t != "" {
+		return t
+	}
+	return strings.TrimSpace(p.ref)
 }
 
 func (p monitorProfilePickerItem) Description() string {
@@ -138,6 +141,7 @@ func (m *monitorModel) monitorProfilePickerItems(teamOnly, standaloneOnly bool) 
 		items = append(items, monitorProfilePickerItem{
 			ref:         ref,
 			id:          strings.TrimSpace(p.ID),
+			name:        strings.TrimSpace(p.Name),
 			description: strings.TrimSpace(p.Description),
 		})
 	}

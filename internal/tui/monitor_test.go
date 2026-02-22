@@ -757,7 +757,7 @@ func TestMonitorProfilePicker_FilterAndSelectStartsNewStandaloneSession(t *testi
 	}
 	writeProfile := func(dir, id, desc string) {
 		t.Helper()
-		raw := "id: " + id + "\ndescription: " + desc + "\nprompts:\n  system_prompt: hello\n"
+		raw := "id: " + id + "\ndescription: " + desc + "\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt: hello\n"
 		if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(raw), 0o644); err != nil {
 			t.Fatalf("write profile.yaml: %v", err)
 		}
@@ -893,7 +893,7 @@ func TestMonitorProfilePicker_ArrowKeysMoveSelection(t *testing.T) {
 	}
 	writeProfile := func(dir, id, desc string) {
 		t.Helper()
-		raw := "id: " + id + "\ndescription: " + desc + "\nprompts:\n  system_prompt: hello\n"
+		raw := "id: " + id + "\ndescription: " + desc + "\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt: hello\n"
 		if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(raw), 0o644); err != nil {
 			t.Fatalf("write profile.yaml: %v", err)
 		}

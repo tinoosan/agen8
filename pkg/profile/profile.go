@@ -12,6 +12,7 @@ import (
 
 type Profile struct {
 	ID                      string         `yaml:"id"`
+	Name                    string         `yaml:"name,omitempty"` // Display name for standalone profiles; used as synthetic role name when set
 	Description             string         `yaml:"description"`
 	Model                   string         `yaml:"model,omitempty"`
 	SubagentModel           string         `yaml:"subagent_model,omitempty"`
@@ -78,9 +79,13 @@ func (p *Profile) RolesForSession() ([]RoleConfig, error) {
 		return p.Team.Roles, nil
 	}
 	// Standalone: synthetic single role
+	roleName := "agent"
+	if n := strings.TrimSpace(p.Name); n != "" {
+		roleName = n
+	}
 	codeExec := p.CodeExecOnly
 	r := RoleConfig{
-		Name:           "agent",
+		Name:           roleName,
 		Description:    strings.TrimSpace(p.Description),
 		Prompts:        p.Prompts,
 		Skills:         append([]string(nil), p.Skills...),
@@ -193,6 +198,7 @@ func Load(path string) (*Profile, error) {
 
 func (p Profile) Normalize(profileDir string) (Profile, error) {
 	p.ID = strings.TrimSpace(p.ID)
+	p.Name = strings.TrimSpace(p.Name)
 	p.Description = strings.TrimSpace(p.Description)
 	p.Model = strings.TrimSpace(p.Model)
 	p.SubagentModel = strings.TrimSpace(p.SubagentModel)

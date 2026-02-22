@@ -85,6 +85,22 @@ team:
 - No team-level default; each role is independent.
 - **Standalone profile normalization**: When converting a non-team profile to a single-role team, the synthetic role may default `allow_subagents: true` to preserve current standalone spawn behavior (or false if we accept that as a breaking change).
 
+### Standalone profile `name` field
+
+Standalone profiles support an optional `name` field for display and as the synthetic role name:
+
+```yaml
+id: general
+name: General Agent
+description: General-purpose autonomous agent...
+model: openai/gpt-5-mini
+prompts:
+  system_prompt_path: prompt.md
+```
+
+- When `name` is set, it is used as the synthetic role name in `RolesForSession()` (otherwise "agent").
+- The profile picker displays `name` when present (fallback: id, then ref).
+
 ### Implementation points
 
 1. **Profile struct** (`pkg/profile/profile.go`):
@@ -173,10 +189,10 @@ Before changing code, ensure the following are in place so we can execute safely
    - Single `runAsTeam` path; standalone = team with one role
    - Remove `RunDaemon` vs `runAsTeam` branching at top level
 
-4. **TUI simplification**
-   - Remove `teamID == ""` branches where possible
-   - Mode = derived from role count
-   - Wizard: one flow, mode from profile
+4. **TUI simplification** ✅ (Phase 4 done)
+   - Wizard: one "New Session" flow; mode inferred from profile (single-role = standalone, multi = team)
+   - Profile picker shows `name` when set for standalone profiles
+   - `teamID == ""` branches retained for legacy session compatibility where needed
 
 ---
 

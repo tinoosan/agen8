@@ -3,12 +3,16 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/pkg/config"
+	"github.com/tinoosan/agen8/pkg/fsutil"
 	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
 	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/types"
@@ -106,8 +110,8 @@ func TestOpenNewSessionWizard_StartsAtStep0(t *testing.T) {
 	if m.newSessionWizardStep != 0 {
 		t.Fatalf("expected wizard step 0, got %d", m.newSessionWizardStep)
 	}
-	if len(m.newSessionWizardList.Items()) < 3 {
-		t.Fatalf("expected resume + two creation items, got %d", len(m.newSessionWizardList.Items()))
+	if len(m.newSessionWizardList.Items()) < 2 {
+		t.Fatalf("expected resume + New Session item, got %d", len(m.newSessionWizardList.Items()))
 	}
 
 	first, ok := m.newSessionWizardList.Items()[0].(newSessionWizardItem)
@@ -162,7 +166,7 @@ func TestWizard_ResumeItemsContainRichMetadata(t *testing.T) {
 	}
 }
 
-func TestWizard_StandaloneTransitionsToProfileStep(t *testing.T) {
+func TestWizard_NewSessionTransitionsToProfileStep(t *testing.T) {
 	m := &monitorModel{
 		ctx:     context.Background(),
 		session: wizardSessionQueryStub{},
@@ -170,45 +174,20 @@ func TestWizard_StandaloneTransitionsToProfileStep(t *testing.T) {
 
 	m.openNewSessionWizard()
 
-	// Select "New Standalone Session" — it's the first item when there are no sessions.
+	// "New Session" is the first item when there are no sessions.
 	first, ok := m.newSessionWizardList.Items()[0].(newSessionWizardItem)
-	if !ok || first.mode != "standalone" {
-		t.Fatalf("expected standalone item first when no sessions, got %+v", first)
+	if !ok || first.mode != "new" {
+		t.Fatalf("expected New Session item first when no sessions, got %+v", first)
 	}
 
 	m.newSessionWizardList.Select(0)
 	m.updateNewSessionWizardModeStep(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if m.newSessionWizardStep != 1 {
-		t.Fatalf("expected step 1 after selecting standalone, got %d", m.newSessionWizardStep)
+		t.Fatalf("expected step 1 after selecting New Session, got %d", m.newSessionWizardStep)
 	}
-	if m.newSessionWizardMode != "standalone" {
-		t.Fatalf("expected mode 'standalone', got %q", m.newSessionWizardMode)
-	}
-}
-
-func TestWizard_TeamTransitionsToProfileStep(t *testing.T) {
-	m := &monitorModel{
-		ctx:     context.Background(),
-		session: wizardSessionQueryStub{},
-	}
-
-	m.openNewSessionWizard()
-
-	// "New Team Session" is the second item when there are no sessions.
-	m.newSessionWizardList.Select(1)
-	item, ok := m.newSessionWizardList.SelectedItem().(newSessionWizardItem)
-	if !ok || item.mode != "team" {
-		t.Fatalf("expected team item at index 1 when no sessions, got %+v", item)
-	}
-
-	m.updateNewSessionWizardModeStep(tea.KeyMsg{Type: tea.KeyEnter})
-
-	if m.newSessionWizardStep != 1 {
-		t.Fatalf("expected step 1 after selecting team, got %d", m.newSessionWizardStep)
-	}
-	if m.newSessionWizardMode != "team" {
-		t.Fatalf("expected mode 'team', got %q", m.newSessionWizardMode)
+	if m.newSessionWizardMode != "new" {
+		t.Fatalf("expected mode 'new', got %q", m.newSessionWizardMode)
 	}
 }
 
@@ -259,18 +238,29 @@ func TestWizard_EscOnStep0ClosesWizard(t *testing.T) {
 }
 
 func TestWizard_SelectProfileFromWizard(t *testing.T) {
+	dir := t.TempDir()
+	profilesDir := filepath.Join(fsutil.GetProfilesDir(dir), "general")
+	if err := os.MkdirAll(profilesDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profilesDir, "profile.yaml"), []byte(
+		"id: general\nname: General Agent\ndescription: General purpose\nmodel: gpt-5\nprompts:\n  system_prompt: hi\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
 	m := &monitorModel{
 		ctx:     context.Background(),
+		cfg:     config.Config{DataDir: dir},
 		session: wizardSessionQueryStub{},
 	}
 
 	m.openNewSessionWizard()
-	m.newSessionWizardMode = "standalone"
+	m.newSessionWizardMode = "new"
 	m.newSessionWizardStep = 1
 
 	// Manually inject a profile item into the profile list.
 	listItems := []list.Item{
-		monitorProfilePickerItem{ref: "general", id: "general", description: "General purpose"},
+		monitorProfilePickerItem{ref: "general", id: "general", name: "General Agent", description: "General purpose"},
 	}
 	m.newSessionWizardProfileList = list.New(listItems, list.NewDefaultDelegate(), 80, 20)
 	m.newSessionWizardProfileList.Select(0)
