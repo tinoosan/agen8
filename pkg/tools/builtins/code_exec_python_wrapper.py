@@ -60,7 +60,8 @@ DIRECT_FS_WRITE_MARKER = "policy_violation:direct_fs_write"
 
 
 def _emit(frame):
-    CONTROL_STDOUT.write(FRAME_PREFIX + json.dumps(frame, separators=(",", ":")) + "\n")
+    CONTROL_STDOUT.write(FRAME_PREFIX + json.dumps(frame,
+                         separators=(",", ":")) + "\n")
     CONTROL_STDOUT.flush()
 
 
@@ -103,10 +104,12 @@ class _ToolBridge:
         if frame.get("type") != "tool_result" or int(frame.get("id", -1)) != call_id:
             raise RuntimeError(f"invalid tool_result frame for call {call_id}")
         if not frame.get("ok", False):
-            raise ToolError(frame.get("error", "tool call failed"), frame.get("response"))
+            raise ToolError(
+                frame.get("error", "tool call failed"), frame.get("response"))
         response = frame.get("response")
         if isinstance(response, dict) and response.get("ok", True) is False:
-            raise ToolError(response.get("error", "tool call failed"), response)
+            raise ToolError(response.get(
+                "error", "tool call failed"), response)
         return response
 
 
@@ -123,7 +126,8 @@ class _ToolsProxy:
             if len(args) == 1 and not kwargs and isinstance(args[0], dict):
                 kwargs = args[0]
             elif len(args) != 0:
-                raise ToolError(f"invalid call signature for {tool_name}: use kwargs or one dict argument")
+                raise ToolError(
+                    f"invalid call signature for {tool_name}: use kwargs or one dict argument")
             return self._bridge.call(tool_name, kwargs)
 
         return _invoke
@@ -185,7 +189,10 @@ def _path_under_allowlist(path, allowlist):
         if resolved == root_resolved:
             return True
         sep = os.sep
-        if resolved.startswith(root_resolved + sep):
+        # Avoid root_resolved + sep becoming "//" when root is "/", which would deny all descendants
+        prefix = root_resolved if root_resolved.endswith(
+            sep) else root_resolved + sep
+        if resolved.startswith(prefix):
             return True
     return False
 
@@ -257,7 +264,7 @@ def _install_vfs_compat_shim(tools, path_access_allowlist=None, path_access_read
             entries = resp.get("entries", [])
             return list(entries) if isinstance(entries, (list, tuple)) else []
         if not os.path.isabs(p):
-            return _orig_listdir(path)
+            p = os.path.realpath(p)
         if _path_under_allowlist(p, allowlist):
             return _orig_listdir(path)
         raise _blocked_path_error("os.listdir", p)
@@ -284,7 +291,8 @@ def main():
     _install_fs_write_policy()
     path_access_allowlist = init.get("path_access_allowlist") or []
     path_access_read_only = init.get("path_access_read_only", True)
-    _install_vfs_compat_shim(tools, path_access_allowlist, path_access_read_only, _real_open)
+    _install_vfs_compat_shim(tools, path_access_allowlist,
+                             path_access_read_only, _real_open)
     # Import-compatibility shim for model-generated code using `import tools`.
     tools_module = types.ModuleType("tools")
     tools_module.__getattr__ = lambda name: getattr(tools, name)

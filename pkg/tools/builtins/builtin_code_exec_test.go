@@ -701,7 +701,7 @@ func TestRunPython_VFSCompatShim_SymlinkAllowlistBypass(t *testing.T) {
 }
 
 func TestRunPython_VFSCompatShim_ListdirCWD(t *testing.T) {
-	// os.listdir() and os.listdir(".") should succeed (relative path fallthrough).
+	// os.listdir() and os.listdir(".") should succeed when CWD is on the allowlist.
 	python := mustFindPython(t)
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "file.txt"), []byte("x"), 0o644); err != nil {
@@ -715,20 +715,53 @@ func TestRunPython_VFSCompatShim_ListdirCWD(t *testing.T) {
 	} {
 		t.Run(code, func(t *testing.T) {
 			out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
-				Code:         code,
-				Allowlist:    []string{},
-				MaxToolCalls: 0,
-				TimeoutMs:    4_000,
-				MaxOutput:    8 * 1024,
-				Dispatch:     nil,
-				Bridge:       nil,
-				EnvAllowlist: inv.EnvAllowlist,
+				Code:                code,
+				Allowlist:           []string{},
+				MaxToolCalls:        0,
+				TimeoutMs:           4_000,
+				MaxOutput:           8 * 1024,
+				Dispatch:            nil,
+				Bridge:              nil,
+				EnvAllowlist:        inv.EnvAllowlist,
+				PathAccessAllowlist: []string{workspace},
 			})
 			if err != nil {
 				t.Fatalf("runPython error: %v", err)
 			}
 			if !out.OK {
 				t.Fatalf("expected os.listdir with relative path to succeed, got error=%q", out.Error)
+			}
+		})
+	}
+}
+
+func TestRunPython_VFSCompatShim_ListdirRelativeBlocked(t *testing.T) {
+	// os.listdir("..") should be blocked when the parent dir is not on the allowlist.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+
+	for _, code := range []string{
+		`import os; result = os.listdir("..")`,
+		`import os; os.chdir("/"); result = os.listdir("etc")`,
+	} {
+		t.Run(code, func(t *testing.T) {
+			out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+				Code:                code,
+				Allowlist:           []string{},
+				MaxToolCalls:        0,
+				TimeoutMs:           4_000,
+				MaxOutput:           8 * 1024,
+				Dispatch:            nil,
+				Bridge:              nil,
+				EnvAllowlist:        inv.EnvAllowlist,
+				PathAccessAllowlist: []string{workspace},
+			})
+			if err != nil {
+				t.Fatalf("runPython error: %v", err)
+			}
+			if out.OK {
+				t.Fatalf("expected os.listdir with relative path outside allowlist to be blocked, got result=%v", out.Result)
 			}
 		})
 	}
