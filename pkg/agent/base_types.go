@@ -31,5 +31,7 @@ type Hooks struct {
 	OnToken       func(step int, text string)
 	OnStreamChunk func(step int, chunk llmtypes.LLMStreamChunk)
 	OnStep        func(step int, model string, effectiveModel string, reasoningSummary string)
+	OnCompaction  func(step int, beforeTokens, afterTokens int, serverSide bool)
+	OnContextSize func(step int, currentTokens, budgetTokens int)
 	Logf          func(format string, args ...any)
 }

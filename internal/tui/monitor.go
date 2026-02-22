@@ -257,6 +257,8 @@ type monitorModel struct {
 	profile                      string
 	reasoningEffort              string
 	reasoningSummary             string
+	contextTokens                int
+	contextBudgetTokens          int
 	agentStatusLine              string    // transient: e.g. "Thinking…", "🔧 shell_exec …"
 	statusExpiresAt              time.Time // when non-zero, status auto-clears to "Idle" after this time
 	statusAnimFrame              int       // cycles through spinnerFrames on each tick

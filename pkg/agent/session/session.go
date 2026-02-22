@@ -23,6 +23,7 @@ import (
 	"github.com/tinoosan/agen8/pkg/llm"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/profile"
+	"github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/timeutil"
 	"github.com/tinoosan/agen8/pkg/types"
 )
@@ -42,6 +43,8 @@ type Config struct {
 
 	TaskStore state.TaskStore
 	Events    emit.Emitter[events.Event]
+
+	RunConversationStore store.RunConversationStore
 
 	Memory            agent.MemoryRecallProvider
 	MemorySearchLimit int
@@ -665,7 +668,8 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	_ = s.cfg.TaskStore.UpdateTask(ctx, task)
 
 	taskKind := strings.TrimSpace(task.TaskKind)
-	if taskKind == "" {
+	// Infer from task ID when kind is missing or stored as "other" (e.g. tasks created without TaskKind).
+	if taskKind == "" || strings.EqualFold(taskKind, state.TaskKindOther) {
 		switch {
 		case strings.HasPrefix(strings.TrimSpace(task.TaskID), "heartbeat-"):
 			taskKind = state.TaskKindHeartbeat
@@ -673,6 +677,10 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			taskKind = state.TaskKindCallback
 		case strings.HasPrefix(strings.TrimSpace(task.TaskID), "task-"):
 			taskKind = state.TaskKindTask
+		default:
+			if taskKind == "" {
+				taskKind = state.TaskKindOther
+			}
 		}
 	}
 	taskSource := ""
@@ -800,7 +808,100 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	}
 
 	taskCtx := hosttools.WithBatchWaveState(hosttools.WithParentTaskID(ctx, taskID))
-	runRes, err := runAgent.Run(taskCtx, strings.TrimSpace(task.Goal))
+	var runRes agent.RunResult
+	var err error
+
+	if s.cfg.RunConversationStore != nil && taskKind == state.TaskKindTask {
+		if s.cfg.Events != nil {
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "run.conversation.active",
+				Message: "Run conversation branch active",
+				Data:    map[string]string{"runId": s.cfg.RunID},
+			})
+		}
+		var msgs []llmtypes.LLMMessage
+		var loadFailed bool
+		msgs, err = s.cfg.RunConversationStore.LoadMessages(taskCtx, s.cfg.RunID)
+		if err != nil {
+			loadFailed = true
+			if s.cfg.Events != nil {
+				s.emitBestEffort(ctx, events.Event{
+					Type:    "run.conversation.load_failed",
+					Message: "Run conversation load failed",
+					Data: map[string]string{
+						"runId": s.cfg.RunID,
+						"error": err.Error(),
+					},
+				})
+			}
+			msgs = nil
+		}
+		loadedCount := len(msgs)
+		if s.cfg.Events != nil {
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "run.conversation.loaded",
+				Message: "Run conversation loaded",
+				Data: map[string]string{
+					"runId":              s.cfg.RunID,
+					"loadedMessageCount": fmt.Sprintf("%d", loadedCount),
+				},
+			})
+		}
+		msgs = append(msgs, llmtypes.LLMMessage{
+			Role:    "user",
+			Content: strings.TrimSpace(task.Goal),
+		})
+
+		var updatedMsgs []llmtypes.LLMMessage
+		runRes, updatedMsgs, _, err = runAgent.RunConversation(taskCtx, msgs)
+		if err == nil && !loadFailed {
+			if saveErr := s.cfg.RunConversationStore.SaveMessages(taskCtx, s.cfg.RunID, updatedMsgs); saveErr != nil {
+				if s.cfg.Events != nil {
+					s.emitBestEffort(ctx, events.Event{
+						Type:    "run.conversation.save_failed",
+						Message: "Run conversation save failed",
+						Data: map[string]string{
+							"runId": s.cfg.RunID,
+							"error": saveErr.Error(),
+						},
+					})
+				}
+			} else if s.cfg.Events != nil {
+				s.emitBestEffort(ctx, events.Event{
+					Type:    "run.conversation.saved",
+					Message: "Run conversation saved",
+					Data: map[string]string{
+						"runId":             s.cfg.RunID,
+						"savedMessageCount": fmt.Sprintf("%d", len(updatedMsgs)),
+					},
+				})
+			}
+		} else if err == nil && loadFailed {
+			if s.cfg.Events != nil {
+				s.emitBestEffort(ctx, events.Event{
+					Type:    "run.conversation.save_skipped",
+					Message: "Run conversation save skipped due to prior load failure",
+					Data: map[string]string{
+						"runId": s.cfg.RunID,
+					},
+				})
+			}
+		}
+	} else {
+		if s.cfg.Events != nil {
+			reason := "store_nil"
+			if s.cfg.RunConversationStore != nil {
+				reason = "task_kind"
+			}
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "run.conversation.skipped",
+				Message: "Run conversation branch skipped",
+				Data:    map[string]string{"runId": s.cfg.RunID, "reason": reason, "taskKind": taskKind},
+			})
+		}
+		runRes, err = runAgent.Run(taskCtx, strings.TrimSpace(task.Goal))
+	}
+
 	doneAt := time.Now()
 	totalTokens := cumulativeInputTokens + cumulativeOutputTokens
 	costUSD := 0.0

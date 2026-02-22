@@ -300,6 +300,18 @@ func (m *monitorModel) composerStatusSegments() []string {
 		})
 		segments = append(segments, reasoningSummaryLabel, reasoningEffortLabel)
 	}
+	if m.contextBudgetTokens > 0 {
+		pct := m.contextTokens * 100 / m.contextBudgetTokens
+		contextLabel := kit.RenderTag(kit.TagOptions{
+			Key:   "context",
+			Value: fmt.Sprintf("%dk/%dk (%d%%)", m.contextTokens/1000, m.contextBudgetTokens/1000, pct),
+			Styles: kit.TagStyles{
+				KeyStyle:   tagKeyStyle,
+				ValueStyle: tagValueStyle,
+			},
+		})
+		segments = append(segments, contextLabel)
+	}
 	segments = append(segments, profileLabel)
 	if mc := m.teamModelChange; mc != nil && strings.EqualFold(strings.TrimSpace(mc.Status), "pending") {
 		targetModel := strings.TrimSpace(mc.RequestedModel)

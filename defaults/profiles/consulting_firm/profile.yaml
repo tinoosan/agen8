@@ -1,11 +1,11 @@
 id: consulting_firm
 description: Strategy consulting team that researches problems, builds analyses, and delivers actionable client recommendations.
 team:
-  model: moonshotai/kimi-k2.5
+  model: openai/gpt-5.1-codex-mini
   roles:
     - name: managing-partner
       coordinator: true
-      model: moonshotai/kimi-k2.5
+      model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -27,7 +27,7 @@ team:
           goal: "Produce a consolidated engagement progress brief from completed role outputs."
 
     - name: strategy-analyst
-      model: moonshotai/kimi-k2.5
+      model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -41,7 +41,7 @@ team:
         - reporting
 
     - name: market-researcher
-      model: moonshotai/kimi-k2.5
+      model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -55,7 +55,7 @@ team:
         - planning
 
     - name: data-analyst
-      model: moonshotai/kimi-k2.5
+      model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
         - shell_exec
@@ -70,7 +70,7 @@ team:
         - automation
 
     - name: deliverable-writer
-      model: moonshotai/kimi-k2.5
+      model: openai/gpt-5.1-codex-mini
       reviewer: true
       code_exec_only: true
       allowed_tools:
@@ -85,7 +85,7 @@ team:
         - planning
 
     - name: industry-specialist
-      model: moonshotai/kimi-k2.5
+      model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
         - http_fetch

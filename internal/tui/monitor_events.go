@@ -113,6 +113,22 @@ func (m *monitorModel) observeEvent(ev types.EventRecord) {
 			m.stats.lastTurnCostUSD = "?"
 		}
 		m.stats.pricingKnown = known
+	case "context.size":
+		m.contextTokens = parseInt(ev.Data["currentTokens"])
+		m.contextBudgetTokens = parseInt(ev.Data["budgetTokens"])
+	case "context.compacted":
+		item := AgentOutputItem{
+			Timestamp: ev.Timestamp,
+			Type:      "system",
+			Content:   formatEventLine(ev),
+			RunID:     strings.TrimSpace(ev.RunID),
+			Role:      strings.TrimSpace(ev.Data["role"]),
+			Metadata:  make(map[string]string),
+		}
+		for k, v := range ev.Data {
+			item.Metadata[k] = v
+		}
+		m.appendAgentOutputItem(item)
 	case "llm.error":
 		m.setStatusExpiring("⚠ LLM Error", 10*time.Second)
 		m.stats.lastLLMErrorClass = fallback(strings.TrimSpace(ev.Data["class"]), "unknown")

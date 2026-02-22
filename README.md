@@ -4,38 +4,47 @@ Agen8 Core is a local agentic runtime that exposes an interactive CLI for launch
 
 ## Table of Contents
 
-- [Quick start](#quick-start)
+- [Getting started](#getting-started)
 - [Core concepts](#core-concepts)
 - [Commands & workflows](#commands--workflows)
 - [Configuration](#configuration)
+- [Email notifications (Gmail OAuth2)](#email-notifications-gmail-oauth2)
 - [Inspecting runtime state](#inspecting-runtime-state)
 - [Troubleshooting](#troubleshooting)
+- [Key documentation](#key-documentation)
 - [Developer resources](#developer-resources)
 
-## Quick start
+## Getting started
 
-1. **Build** the CLI (Go toolchain required):
+### Prerequisites
 
-   ```sh
-   go build ./cmd/agen8
-   ```
+- Go 1.24+ toolchain (used to build the CLI binary in `cmd/agen8`).
+- A writable data directory for `$AGEN8_DATA_DIR` (defaults to `~/.agen8`).
+- Optional Gmail credentials when you plan to send completion emails or notifications.
 
-2. **Start a fresh interactive session**:
+### Build and launch
 
-   ```sh
-   ./agen8
-   ```
+1. Build the CLI: `go build ./cmd/agen8`.
+2. Start an interactive session: `./agen8`
 
-   The Bubble Tea-powered UI treats each user message as an agent turn. The embedded system prompt lists built-in capabilities (shell, HTTP, trace, etc.).
+The Bubble Tea-powered UI treats every user message as an agent turn. Built-in capabilities (shell, HTTP, trace, etc.) appear in the embedded system prompt.
 
-3. **Resume work or inspect state** after exiting the TUI:
+### Resume or inspect a run
 
-   ```sh
-   ./agen8 list sessions             # show session IDs + metadata
-   ./agen8 resume <sessionId>        # continue the last run in an existing session
-   ./agen8 show run <runId>          # view run metadata (JSON)
-   ./agen8 show history <sessionId>  # print the JSONL operation log
-   ```
+```sh
+./agen8 list sessions             # show session IDs + metadata
+./agen8 resume <sessionId>        # continue the most recent run for that session
+./agen8 show run <runId>          # inspect run metadata
+./agen8 show history <sessionId>  # print the JSONL operation log
+```
+
+Sessions share a workspace under `dataDir/agents/<agentId>` and persist history + artifacts in SQLite-backed directories. Use `--new-run` to start a fresh run in the same session and isolate context.
+
+### Rapid reference
+
+- `./agen8 monitor` attaches a minimalist observer to a running agent (start the daemon first).
+- Tail structured logs with `./agen8 logs --follow` and tool activity with `./agen8 activity --follow`.
+- When you need flag help, run `./agen8 --help` or read [docs/cli-usage.md](docs/cli-usage.md).
 
 ## The Vision: Kubernetes for Agents
 
@@ -64,53 +73,59 @@ Agen8 exposes a virtual filesystem inside each run. Key mounts include:
 - `/project` – your host workspace (defaults to the current working directory; overridable via `--workdir`).
 - `/workspace` – agent-local workspace mapped to `dataDir/agents/<agentId>/workspace`.
 - `/log` – run event stream and trace excerpts.
-- `/skills` – user-defined skills (read `/skills/<skill_name>/SKILL.md`).
+- `/skills` – user-defined skills (`/skills/<skill_name>/SKILL.md`).
 - `/plan` – planning workspace (`HEAD.md` + `CHECKLIST.md`).
 - `/memory` – shared agent memory (`MEMORY.MD` + daily `YYYY-MM-DD-memory.md` files).
 
-Every command that manipulates project files must operate through this explicit surface, which keeps tooling auditable and reproducible.
-
 ### Sessions vs. runs
 
-- **Sessions** (data stored under `dataDir/sessions/<sessionId>`) hold stable context/goal and track the latest run index.
-- **Agents** (stored under `dataDir/agents/<agentId>`) represent a single autonomous runtime instance with its workspace (`/workspace`), logs, artifacts, and metadata.
-
-You can resume an existing session with `agen8 resume <sessionId>` to continue the last run (use `--new-run` to force a fresh run) and inspect artifacts using the CLI or by exploring the data directory (see [docs/data-layout.md](docs/data-layout.md)).
+- **Sessions** group runs and define the goal/context for an agent group (standalone or team).
+- **Runs** are the individual executions inside a session. Multiple runs may share artifacts and history as long as they remain under the same session.
 
 ## Commands & workflows
 
-Most entrypoints live under `cmd/agen8/cmd` and use Cobra. Important workflows include:
+Agen8 ships a Cobra CLI that covers the full agent lifecycle. Use the tables below to pick the right command for creating, observing, and inspecting agents.
 
-| Command                              | Description                                                                                                                                                                        |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agen8`                          | Start a new session + run with default context (daemon).                                                                                                                           |
-| `agen8 monitor`                  | Open the monitoring TUI. Start the daemon first, then run monitor so it attaches to the active agent; use `--agent-id <id>` with the agent ID printed at daemon startup if needed. |
-| `agen8 resume <sessionId>`       | Continue the last run in a session (use `--new-run` to start fresh).                                                                                                               |
-| `agen8 list sessions`            | List stored session IDs + metadata.                                                                                                                                                |
-| `agen8 list runs <sessionId>`    | Show run history for a session (statuses, timestamps).                                                                                                                             |
-| `agen8 show session <sessionId>` | Dump session metadata.                                                                                                                                                             |
-| `agen8 show run <runId>`         | Dump run metadata.                                                                                                                                                                 |
-| `agen8 show history <sessionId>` | Print the operation log as JSONL.                                                                                                                                                  |
-| `agen8 --help`                   | Get command + flag help (Cobra-generated).                                                                                                                                         |
+### Session lifecycle commands
+
+| Command | Purpose |
+| ------- | ------- |
+| `agen8 init` | Initialize `.agen8` and local defaults. |
+| `agen8 new --mode <mode>` | Start a new session (team or standalone) with the selected profile. |
+| `agen8` | Launch a fresh session/run with default context. |
+| `agen8 resume <sessionId>` | Continue the most recent run for a session; add `--new-run` for a clean workspace. |
+| `agen8 list sessions` | List stored session IDs, modes, timestamps, and statuses. |
+| `agen8 list runs <sessionId>` | Show run history with statuses, durations, and parent agent metadata. |
+
+### Observability & coordination commands
+
+| Command | Purpose |
+| ------- | ------- |
+| `agen8 coordinator` | Attach to the coordinator-focused chat view. |
+| `agen8 monitor` | Observe a running agent in a minimalist UI (start the daemon first). |
+| `agen8 dashboard` | Read-only overview of sessions/runs/tasks/cost. |
+| `agen8 logs` | Query structured events (`--follow`, `--agent-id`, `--level`). |
+| `agen8 activity` | Tail the live activity stream for proposals and tool calls. |
+| `agen8 show session/run/history` | Dump metadata or the JSONL operation log for diagnostics. |
+
+### Support commands
+
+- `agen8 attach <sessionId>` – Attach to an existing session even after the daemon shuts down gracefully.
+- `agen8 stop <sessionId>` – Stop a session gracefully while preserving artifacts.
+- `agen8 --help` – List commands and flag documentation generated by Cobra.
 
 ## Configuration
 
-Runtime configuration resolves in this order: CLI flags → environment variables → defaults.
+Runtime configuration resolves in this order: CLI flags → environment variables → `${AGEN8_DATA_DIR}/config.toml` → built-in defaults. See [docs/config-toml.md](docs/config-toml.md) for onboarding behavior, `code_exec` settings, and allowed path access.
 
-| Flag                    | Env                             | Description                                                                                                                                     |
-| ----------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--data-dir`            | `AGEN8_DATA_DIR`            | Base directory containing `agen8.db`, `sessions`, `agents`, and shared `memory`. Defaults to `~/.agen8` or `$XDG_STATE_HOME/agen8`. |
-| `--workdir`             | `AGEN8_WORKDIR`             | Host directory mounted under `/project`. Defaults to the current working directory.                                                             |
-| `--context-bytes`       | —                               | How many bytes of context to persist (`run.maxBytesForContext`; default `8*1024`). Must be > 0.                                                 |
-| `--model`               | `OPENROUTER_MODEL`              | Default model ID for LLM calls (overrides session defaults).                                                                                    |
-| `--trace-bytes`         | —                               | Byte budget for the PromptUpdater trace (default `8*1024`).                                                                                     |
-| `--memory-bytes`        | —                               | Memory injection budget per step (default `8*1024`).                                                                                            |
-| `--history-pairs`       | —                               | Number of recent (user, agent) pairs included from `/history` (default `8`).                                                                    |
-| `--include-history-ops` | `AGEN8_INCLUDE_HISTORY_OPS` | Whether to include environment/host operations from `/history` (default: enabled).                                                              |
+| Flag | Env | Description |
+|------|-----|-------------|
+| `--data-dir` | `AGEN8_DATA_DIR` | Base directory for `agen8.db`, sessions, agents, and shared memory. |
+| `--workdir` | `AGEN8_WORKDIR` | Host path mounted as `/project`. |
+| `--context-bytes` | `AGEN8_CONTEXT_BYTES` | Max bytes of history included in prompts. |
+| `--include-history-ops` | `AGEN8_INCLUDE_HISTORY_OPS` | Include host operations from `/history` (default: enabled). |
 
-Helpers in `internal/config/effectiveConfig()` resolve the final configuration before each command runs. See [docs/cli-usage.md](docs/cli-usage.md) for deeper context on flag interactions, environment variables, and examples.
-
-For runtime `config.toml`, onboarding behavior (TTY vs headless), keychain-backed API key loading, and server setup patterns, see [docs/config-toml.md](docs/config-toml.md).
+Helpers in `internal/config/effectiveConfig()` resolve the final configuration before each command runs. Additional flag and env var guidance resides in [docs/cli-usage.md](docs/cli-usage.md).
 
 ## Email notifications (Gmail OAuth2)
 
@@ -118,9 +133,7 @@ Agen8 can send **plain-text** email notifications through Gmail using OAuth2 (XO
 
 ### Setup
 
-Agen8 loads variables from the real environment first; if missing, it falls back to a `.env` file in your session/workdir root.
-
-Set these environment variables (or put them in `.env`):
+Agen8 prefers real environment variables, but falls back to a `.env` file in your session/workdir root if values are missing.
 
 ```sh
 export GMAIL_USER="you@gmail.com"
@@ -130,42 +143,48 @@ export GOOGLE_OAUTH_CLIENT_ID="..."
 export GOOGLE_OAUTH_CLIENT_SECRET="..."
 export GOOGLE_OAUTH_REFRESH_TOKEN="..."
 
-# Optional (debug only): use an access token directly instead of refreshing.
+# Optional (debug only): use an access token instead of refreshing.
 export GOOGLE_OAUTH_ACCESS_TOKEN="..."
 ```
 
 Notes:
 
-- You must create an OAuth client in Google Cloud, enable Gmail access, and generate a refresh token for the `https://mail.google.com/` scope.
+- You must create an OAuth client in Google Cloud, enable Gmail access, and mint a refresh token for the `https://mail.google.com/` scope.
 - Agen8 uses STARTTLS on port 587; implicit TLS on port 465 is not supported.
 
 ### Agent usage
 
-The built-in tool name is `email(to, subject, body)`. You can explicitly ask the agent to send an email, or configure autonomous mode to send completion summaries.
-
-If SMTP is not configured, email requests fail with a clear error and the agent continues normally.
+The built-in tool name is `email(to, subject, body)`. Ask the agent explicitly or configure autonomous mode to send completion summaries. If SMTP is not configured, email requests fail gracefully and the agent continues normally.
 
 ## Inspecting runtime state
 
 The CLI stores persistent state under the configured `dataDir`:
 
 - `dataDir/agen8.db` (sessions, runs, events, history).
-- `dataDir/agents/<agentId>/` (containing `workspace`, `artifacts`, `log`, `inbox`, `outbox`).
-- `dataDir/memory/` (shared memory across runs: `MEMORY.MD`, plus daily `YYYY-MM-DD-memory.md` files).
+- `dataDir/agents/<agentId>/` (workspace, artifacts, log, inbox, outbox).
+- `dataDir/memory/` (shared memory: `MEMORY.MD` + daily `YYYY-MM-DD-memory.md`).
 
-Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sample commands, and tips on manually inspecting sessions, runs, and agent mounts.
+Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sample commands, and tips on inspecting artifacts manually.
 
 ## Troubleshooting
 
 - Logs live under `dataDir/agents/<agentId>/log` (JSON/trace artifacts). Use `./agen8 show run <agentId>` to understand failure reasons.
-- Re-run `./agen8 resume <sessionId>` with `--context-bytes`/`--trace-bytes` overrides to debug context issues.
-- The [Troubleshooting guide](docs/troubleshooting.md) covers common problems (build issues, stuck runs, missing artifacts) and quick remediations.
+- Re-run `./agen8 resume <sessionId>` with `--context-bytes`/`--trace-bytes` overrides to debug context truncation.
+- The [Troubleshooting guide](docs/troubleshooting.md) covers stuck agents, missing artifacts, and configuration problems with quick remediations.
+
+## Key documentation
+
+- **[docs/cli-usage.md](docs/cli-usage.md)** – Step-by-step workflows, flag guidance, and session lifecycle examples for the CLI.
+- **[docs/config-toml.md](docs/config-toml.md)** – Onboarding, config hierarchy, `code_exec`, and path access settings.
+- **[docs/developer-guide.md](docs/developer-guide.md)** – Internal architecture, session/run lifecycle, and execution hierarchy reference.
+- **[docs/troubleshooting.md](docs/troubleshooting.md)** – Quick triage for build issues, stuck connections, and retries.
+- **[docs/data-layout.md](docs/data-layout.md)** – Map directories, sub-agent workspaces, and inspect artifacts/logs manually.
 
 ## Developer resources
 
 - Inspect `internal/app` for session runtime wiring and `internal/store` for persistence logic.
-- The [Developer guide](docs/developer-guide.md) explains how configuration, session/run lifecycles, and telemetry hooks fit together.
-- The [Execution model](docs/execution-model.md) (PRD) defines sub-agents, teams, hierarchy, review gate, retry/escalation, and daemon responsibilities; it is the authoritative spec for orchestration behaviour.
+- The [Developer guide](docs/developer-guide.md) explains how configuration, session lifecycle, and telemetry hooks fit together.
+- The [Execution model](docs/execution-model.md) (PRD) defines sub-agents, teams, hierarchy, review gate, retry/escalation, and daemon responsibilities; it is the authoritative spec for orchestration behavior.
 - Inspect `pkg/agent/hosttools` for the built-in host tool surface and `pkg/tools/builtins` for host-side implementations.
 
 Contributions are welcome—submit documentation fixes or enhancements alongside code changes to keep the docs aligned with evolving runtime behavior.

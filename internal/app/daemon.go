@@ -211,6 +211,9 @@ func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run
 			Inputs:    payload.Inputs,
 			Metadata:  payload.Metadata,
 		}
+		if strings.HasPrefix(taskID, "task-") {
+			task.TaskKind = state.TaskKindTask
+		}
 
 		if taskStore == nil {
 			http.Error(w, "task store not configured", http.StatusInternalServerError)

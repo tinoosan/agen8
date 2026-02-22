@@ -70,6 +70,9 @@ type Model struct {
 	feedbackAt      time.Time
 	lastReconnectAt time.Time
 
+	contextTokens      int
+	contextBudgetTokens int
+
 	agentStatus     string    // "Thinking…", "Processing…", "Idle", etc.
 	statusExpiresAt time.Time // auto-clear time for expiring statuses
 

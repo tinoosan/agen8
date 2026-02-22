@@ -566,6 +566,39 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 					log.Printf("events: emit failed: %v", err)
 				}
 			},
+			OnCompaction: func(step int, beforeTokens, afterTokens int, serverSide bool) {
+				ev := events.Event{
+					Type:    "context.compacted",
+					Message: fmt.Sprintf("Context compacted (%dk → %dk tokens)", beforeTokens/1000, afterTokens/1000),
+					Data: map[string]string{
+						"step":         strconv.Itoa(step),
+						"beforeTokens": strconv.Itoa(beforeTokens),
+						"afterTokens":  strconv.Itoa(afterTokens),
+						"serverSide":   strconv.FormatBool(serverSide),
+						"teamId":       teamID,
+						"role":         role.Name,
+					},
+				}
+				if err := orderedEmitter.Emit(context.Background(), ev); err != nil && !errorsIsDropped(err) {
+					log.Printf("events: emit failed: %v", err)
+				}
+			},
+			OnContextSize: func(step int, currentTokens, budgetTokens int) {
+				ev := events.Event{
+					Type:    "context.size",
+					Message: fmt.Sprintf("Context: %dk/%dk tokens", currentTokens/1000, budgetTokens/1000),
+					Data: map[string]string{
+						"step":          strconv.Itoa(step),
+						"currentTokens": strconv.Itoa(currentTokens),
+						"budgetTokens":  strconv.Itoa(budgetTokens),
+						"teamId":        teamID,
+						"role":          role.Name,
+					},
+				}
+				if err := orderedEmitter.Emit(context.Background(), ev); err != nil && !errorsIsDropped(err) {
+					log.Printf("events: emit failed: %v", err)
+				}
+			},
 		}
 		runLLMClient := withRetryDiagnostics(llmClient, func(ctx context.Context, ev events.Event) {
 			if ev.Data == nil {
@@ -664,6 +697,14 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		}
 		roleProfile := buildRoleRuntimeProfile(role)
 		roleProfile.CodeExecOnly = codeExecOnly
+
+		runConvStore, errConv := implstore.NewSQLiteRunConversationStoreFromConfig(cfg)
+		if errConv != nil {
+			orderedEmitter.Close()
+			_ = rt.Shutdown(context.Background())
+			return fmt.Errorf("run conversation store for role %s: %w", role.Name, errConv)
+		}
+
 		roleSession, err := session.New(session.Config{
 			Agent:      a,
 			Profile:    roleProfile,
@@ -673,6 +714,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			},
 			TaskStore:            taskService,
 			Events:               orderedEmitter,
+			RunConversationStore: runConvStore,
 			Memory:               memoryProvider,
 			MemorySearchLimit:    3,
 			Notifier:             notifier,
@@ -702,6 +744,12 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			_ = rt.Shutdown(context.Background())
 			return fmt.Errorf("create session for role %s: %w", role.Name, err)
 		}
+
+		_ = orderedEmitter.Emit(context.Background(), events.Event{
+			Type:    "run.conversation.enabled",
+			Message: "Run conversation persistence enabled",
+			Data:    map[string]string{"runId": run.RunID},
+		})
 
 		runtimes = append(runtimes, teamRoleRuntime{
 			role: role,
