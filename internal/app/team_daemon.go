@@ -2,12 +2,10 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -19,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	implstore "github.com/tinoosan/agen8/internal/store"
+	"github.com/tinoosan/agen8/internal/webhook"
 	"github.com/tinoosan/agen8/pkg/agent"
 	hosttools "github.com/tinoosan/agen8/pkg/agent/hosttools"
 	"github.com/tinoosan/agen8/pkg/agent/session"
@@ -817,7 +816,24 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	var serverWG sync.WaitGroup
 	webhookAddr := strings.TrimSpace(resolved.WebhookAddr)
 	if webhookAddr != "" {
-		startTeamWebhookServer(runCtx, webhookAddr, cfg, taskService, teamID, coordinatorRole, coordinatorRun, roleNames, &serverWG)
+		archiveDir := filepath.Join(fsutil.GetTeamDir(cfg.DataDir, teamID), "inbox", "archive")
+		roleSet := make(map[string]struct{})
+		for _, r := range roleNames {
+			if s := strings.TrimSpace(r); s != "" {
+				roleSet[s] = struct{}{}
+			}
+		}
+		ingester := webhook.NewWebhookTaskIngester(taskService, webhook.NewDiskTaskArchiveWriter(archiveDir), nil)
+		buildTask := func(ctx context.Context, payload []byte) (types.Task, error) {
+			return webhook.BuildTeamTask(payload, teamID, coordinatorRole, coordinatorRun, roleSet)
+		}
+		srv := webhook.NewServer(webhook.ServerConfig{
+			Addr:      webhookAddr,
+			Ingester:  ingester,
+			BuildTask: buildTask,
+			Emit:      nil,
+		})
+		srv.Run(runCtx, &serverWG)
 	}
 	healthAddr := strings.TrimSpace(resolved.HealthAddr)
 	if healthAddr != "" && healthAddr != webhookAddr {
@@ -992,123 +1008,6 @@ func newTeamOrderedEmitter(store events.StoreAppender, runID, teamID, roleName s
 		return nil, err
 	}
 	return ordered, nil
-}
-
-func startTeamWebhookServer(ctx context.Context, addr string, cfg config.Config, taskStore state.TaskStore, teamID, coordinatorRole string, coordinatorRun types.Run, validRoles []string, wg *sync.WaitGroup) {
-	roleSet := map[string]struct{}{}
-	for _, role := range validRoles {
-		role = strings.TrimSpace(role)
-		if role == "" {
-			continue
-		}
-		roleSet[role] = struct{}{}
-	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
-	mux.HandleFunc("/task", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		defer r.Body.Close()
-		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-		if err != nil {
-			http.Error(w, "read error: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		var payload struct {
-			TaskID       string         `json:"taskId"`
-			AssignedRole string         `json:"assignedRole,omitempty"`
-			Goal         string         `json:"goal"`
-			Priority     int            `json:"priority,omitempty"`
-			Inputs       map[string]any `json:"inputs,omitempty"`
-			Metadata     map[string]any `json:"metadata,omitempty"`
-		}
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		goal := strings.TrimSpace(payload.Goal)
-		if goal == "" {
-			http.Error(w, "goal is required", http.StatusBadRequest)
-			return
-		}
-		taskID := strings.TrimSpace(payload.TaskID)
-		if taskID == "" {
-			taskID = "task-" + uuid.NewString()
-		} else if normalized, _ := types.NormalizeTaskID(taskID); strings.TrimSpace(normalized) != "" {
-			taskID = normalized
-		}
-		assignedRole := strings.TrimSpace(payload.AssignedRole)
-		if assignedRole == "" {
-			assignedRole = coordinatorRole
-		}
-		if len(roleSet) != 0 {
-			if _, ok := roleSet[assignedRole]; !ok {
-				http.Error(w, "assignedRole is not a valid team role", http.StatusBadRequest)
-				return
-			}
-		}
-		now := time.Now().UTC()
-		task := types.Task{
-			TaskID:       taskID,
-			SessionID:    coordinatorRun.SessionID,
-			RunID:        coordinatorRun.RunID,
-			TeamID:       teamID,
-			AssignedRole: assignedRole,
-			CreatedBy:    "webhook",
-			Goal:         goal,
-			Priority:     payload.Priority,
-			Status:       types.TaskStatusPending,
-			CreatedAt:    &now,
-			Inputs:       payload.Inputs,
-			Metadata:     payload.Metadata,
-		}
-		if task.Inputs == nil {
-			task.Inputs = map[string]any{}
-		}
-		if task.Metadata == nil {
-			task.Metadata = map[string]any{}
-		}
-		task.Metadata["source"] = "webhook"
-
-		if err := taskStore.CreateTask(ctx, task); err != nil {
-			http.Error(w, "create task error: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		archiveDir := filepath.Join(fsutil.GetTeamDir(cfg.DataDir, teamID), "inbox", "archive")
-		_ = os.MkdirAll(archiveDir, 0o755)
-		if b, err := json.MarshalIndent(task, "", "  "); err == nil {
-			_ = os.WriteFile(filepath.Join(archiveDir, taskID+".json"), b, 0o644)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"taskId": taskID, "status": "queued"})
-	})
-
-	srv := &http.Server{Addr: addr, Handler: mux}
-	if wg != nil {
-		wg.Add(2)
-	}
-	go func() {
-		if wg != nil {
-			defer wg.Done()
-		}
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
-	}()
-	go func() {
-		if wg != nil {
-			defer wg.Done()
-		}
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("daemon: team webhook server error: %v", err)
-		}
-	}()
 }
 
 func signalNotifyContext(ctx context.Context) (context.Context, context.CancelFunc) {

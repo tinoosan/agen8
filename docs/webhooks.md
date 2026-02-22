@@ -100,5 +100,7 @@ The notifier treats any 2xx response as success.
 
 ## Related files
 
-- `internal/app/daemon.go` (incoming server)
+- `internal/webhook` – Task archive abstraction (`TaskArchiveWriter`), task ingester (`TaskIngester`), and HTTP server (`Server`). The daemon and team daemon wire via `webhook.NewServer` and `webhook.NewWebhookTaskIngester`.
+- `internal/app/daemon_builder.go` – Standalone daemon webhook wiring
+- `internal/app/team_daemon.go` – Team daemon webhook wiring
 - `internal/app/notifier.go` (outgoing notifier)

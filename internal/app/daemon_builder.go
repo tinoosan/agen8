@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +34,7 @@ import (
 	pkgtask "github.com/tinoosan/agen8/pkg/services/task"
 	"github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/types"
+	"github.com/tinoosan/agen8/internal/webhook"
 )
 
 type DaemonBuilder struct {
@@ -607,7 +609,19 @@ func (b *DaemonBuilder) startBackgroundServices() error {
 
 	webhookAddr := strings.TrimSpace(b.resolved.WebhookAddr)
 	if webhookAddr != "" {
-		startWebhookServer(b.runCtx, webhookAddr, b.cfg, types.Run{}, b.taskService, b.mustEmit, &b.serverWG)
+		run := types.Run{}
+		archiveDir := filepath.Join(fsutil.GetRunDir(b.cfg.DataDir, run), "inbox", "archive")
+		ingester := webhook.NewWebhookTaskIngester(b.taskService, webhook.NewDiskTaskArchiveWriter(archiveDir), b.mustEmit)
+		buildTask := func(ctx context.Context, payload []byte) (types.Task, error) {
+			return webhook.BuildStandaloneTask(payload, run)
+		}
+		srv := webhook.NewServer(webhook.ServerConfig{
+			Addr:     webhookAddr,
+			Ingester: ingester,
+			BuildTask: buildTask,
+			Emit:     b.mustEmit,
+		})
+		srv.Run(b.runCtx, &b.serverWG)
 	}
 	healthAddr := strings.TrimSpace(b.resolved.HealthAddr)
 	if healthAddr != "" && healthAddr != webhookAddr {
