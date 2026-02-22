@@ -2,17 +2,14 @@ package app
 
 import (
 	"context"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/cost"
-	"github.com/tinoosan/agen8/pkg/fsutil"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
+	"github.com/tinoosan/agen8/pkg/services/team"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
@@ -67,7 +64,7 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 	done, _ := s.taskService.CountTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled}})
 
 	roleInfo := map[string]string{}
-	manifestRunIDs, roleByRunID := loadTeamManifestRunRoles(s.cfg.DataDir, teamID)
+	manifestRunIDs, roleByRunID := s.loadTeamManifestRunRoles(ctx, teamID)
 	runIDSet := map[string]struct{}{}
 	for _, runID := range manifestRunIDs {
 		runID = strings.TrimSpace(runID)
@@ -210,79 +207,72 @@ func (s *RPCServer) teamGetManifest(ctx context.Context, p protocol.TeamGetManif
 	if teamID == "" {
 		return protocol.TeamGetManifestResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "team scope is required"}
 	}
-	path := filepath.Join(fsutil.GetTeamDir(s.cfg.DataDir, teamID), "team.json")
-	raw, err := os.ReadFile(path)
+	manifest, err := s.manifestStore.Load(ctx, teamID)
 	if err != nil {
 		return protocol.TeamGetManifestResult{}, err
 	}
-	var mf struct {
-		TeamID          string                            `json:"teamId"`
-		ProfileID       string                            `json:"profileId"`
-		TeamModel       string                            `json:"teamModel,omitempty"`
-		ModelChange     *protocol.TeamManifestModelChange `json:"modelChange,omitempty"`
-		CoordinatorRole string                            `json:"coordinatorRole"`
-		CoordinatorRun  string                            `json:"coordinatorRunId"`
-		Roles           []protocol.TeamManifestRole       `json:"roles"`
-		CreatedAt       string                            `json:"createdAt"`
+	if manifest == nil {
+		return protocol.TeamGetManifestResult{}, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "team manifest not found"}
 	}
-	if err := json.Unmarshal(raw, &mf); err != nil {
-		return protocol.TeamGetManifestResult{}, err
+	roles := make([]protocol.TeamManifestRole, len(manifest.Roles))
+	for i, r := range manifest.Roles {
+		roles[i] = protocol.TeamManifestRole{
+			RoleName:  strings.TrimSpace(r.RoleName),
+			RunID:     strings.TrimSpace(r.RunID),
+			SessionID: strings.TrimSpace(r.SessionID),
+		}
+	}
+	var modelChange *protocol.TeamManifestModelChange
+	if manifest.ModelChange != nil {
+		mc := manifest.ModelChange
+		modelChange = &protocol.TeamManifestModelChange{
+			RequestedModel: strings.TrimSpace(mc.RequestedModel),
+			Status:         strings.TrimSpace(mc.Status),
+			RequestedAt:    strings.TrimSpace(mc.RequestedAt),
+			AppliedAt:      strings.TrimSpace(mc.AppliedAt),
+			Reason:         strings.TrimSpace(mc.Reason),
+			Error:          strings.TrimSpace(mc.Error),
+		}
 	}
 	return protocol.TeamGetManifestResult{
-		TeamID:          strings.TrimSpace(mf.TeamID),
-		ProfileID:       strings.TrimSpace(mf.ProfileID),
-		TeamModel:       strings.TrimSpace(mf.TeamModel),
-		ModelChange:     mf.ModelChange,
-		CoordinatorRole: strings.TrimSpace(mf.CoordinatorRole),
-		CoordinatorRun:  strings.TrimSpace(mf.CoordinatorRun),
-		Roles:           mf.Roles,
-		CreatedAt:       strings.TrimSpace(mf.CreatedAt),
+		TeamID:          strings.TrimSpace(manifest.TeamID),
+		ProfileID:       strings.TrimSpace(manifest.ProfileID),
+		TeamModel:       strings.TrimSpace(manifest.TeamModel),
+		ModelChange:     modelChange,
+		CoordinatorRole: strings.TrimSpace(manifest.CoordinatorRole),
+		CoordinatorRun:  strings.TrimSpace(manifest.CoordinatorRun),
+		Roles:           roles,
+		CreatedAt:       strings.TrimSpace(manifest.CreatedAt),
 	}, nil
 }
 
-func readPlanFilesForRun(dataDir string, run types.Run) (checklist string, checklistErr string, details string, detailsErr string) {
-	runDir := fsutil.GetRunDir(dataDir, run)
-	planDir := filepath.Join(runDir, "plan")
-	load := func(name string) (string, string) {
-		b, err := os.ReadFile(filepath.Join(planDir, name))
-		if err != nil {
-			if os.IsNotExist(err) {
-				return "", ""
-			}
-			return "", err.Error()
-		}
-		return string(b), ""
-	}
-	details, detailsErr = load("HEAD.md")
-	checklist, checklistErr = load("CHECKLIST.md")
-	return checklist, checklistErr, details, detailsErr
+func (s *RPCServer) readPlanFilesForRun(ctx context.Context, run types.Run) (checklist string, checklistErr string, details string, detailsErr string) {
+	return s.planReader.ReadPlan(ctx, run)
 }
 
-func loadTeamManifestRunRoles(dataDir, teamID string) ([]string, map[string]string) {
+func (s *RPCServer) loadTeamManifestRunRoles(ctx context.Context, teamID string) ([]string, map[string]string) {
+	return loadTeamManifestRunRolesFromStore(ctx, s.manifestStore, teamID)
+}
+
+// loadTeamManifestRunRolesFromStore returns run IDs and role-by-run from a manifest store.
+// Used by RPC and daemon when a ManifestStore is available.
+func loadTeamManifestRunRolesFromStore(ctx context.Context, store team.ManifestStore, teamID string) ([]string, map[string]string) {
 	teamID = strings.TrimSpace(teamID)
 	if teamID == "" {
 		return nil, map[string]string{}
 	}
-	path := filepath.Join(fsutil.GetTeamDir(dataDir, teamID), "team.json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
+	manifest, err := store.Load(ctx, teamID)
+	if err != nil || manifest == nil {
 		return nil, map[string]string{}
 	}
-	var mf struct {
-		CoordinatorRun string                      `json:"coordinatorRunId"`
-		Roles          []protocol.TeamManifestRole `json:"roles"`
-	}
-	if err := json.Unmarshal(raw, &mf); err != nil {
-		return nil, map[string]string{}
-	}
-	runIDs := make([]string, 0, len(mf.Roles)+1)
-	roleByRun := make(map[string]string, len(mf.Roles)+1)
+	runIDs := make([]string, 0, len(manifest.Roles)+1)
+	roleByRun := make(map[string]string, len(manifest.Roles)+1)
 	seen := map[string]struct{}{}
-	if runID := strings.TrimSpace(mf.CoordinatorRun); runID != "" {
+	if runID := strings.TrimSpace(manifest.CoordinatorRun); runID != "" {
 		runIDs = append(runIDs, runID)
 		seen[runID] = struct{}{}
 	}
-	for _, role := range mf.Roles {
+	for _, role := range manifest.Roles {
 		runID := strings.TrimSpace(role.RunID)
 		if runID == "" {
 			continue
@@ -309,7 +299,7 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 		if run.RunID == "" {
 			run = types.Run{RunID: runID}
 		}
-		checklist, checklistErr, details, detailsErr := readPlanFilesForRun(s.cfg.DataDir, run)
+		checklist, checklistErr, details, detailsErr := s.readPlanFilesForRun(ctx, run)
 		return protocol.PlanGetResult{
 			Checklist: checklist, ChecklistErr: checklistErr, Details: details, DetailsErr: detailsErr, SourceRuns: []string{runID},
 		}, nil
@@ -320,7 +310,7 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 		if run.RunID == "" {
 			run = types.Run{RunID: runID}
 		}
-		checklist, checklistErr, details, detailsErr := readPlanFilesForRun(s.cfg.DataDir, run)
+		checklist, checklistErr, details, detailsErr := s.readPlanFilesForRun(ctx, run)
 		return protocol.PlanGetResult{
 			Checklist: checklist, ChecklistErr: checklistErr, Details: details, DetailsErr: detailsErr, SourceRuns: []string{runID},
 		}, nil
@@ -329,7 +319,7 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 	if !aggregate {
 		return protocol.PlanGetResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "aggregateTeam must be true when runId is omitted in team mode"}
 	}
-	manifestRunIDs, roleByRun := loadTeamManifestRunRoles(s.cfg.DataDir, strings.TrimSpace(scope.teamID))
+	manifestRunIDs, roleByRun := s.loadTeamManifestRunRoles(ctx, strings.TrimSpace(scope.teamID))
 	if roleByRun == nil {
 		roleByRun = map[string]string{}
 	}
@@ -380,7 +370,7 @@ func (s *RPCServer) planGet(ctx context.Context, p protocol.PlanGetParams) (prot
 		if run.RunID == "" {
 			run = types.Run{RunID: runID}
 		}
-		check, checkErr, det, detErr := readPlanFilesForRun(s.cfg.DataDir, run)
+		check, checkErr, det, detErr := s.readPlanFilesForRun(ctx, run)
 		if checkErr != "" {
 			errParts = append(errParts, "["+role+"] checklist: "+checkErr)
 		}

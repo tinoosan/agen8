@@ -310,7 +310,7 @@ func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
 			continue
 		}
 		if teamID != "" && run.Runtime != nil && strings.TrimSpace(run.Runtime.Role) == "" {
-			if _, roleByRun := loadTeamManifestRunRoles(s.cfg.DataDir, teamID); len(roleByRun) != 0 {
+			if _, roleByRun := loadTeamManifestRunRolesFromStore(ctx, team.NewFileManifestStore(s.cfg), teamID); len(roleByRun) != 0 {
 				if role := strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)]); role != "" {
 					run.Runtime.Role = role
 					_ = s.sessionService.SaveRun(ctx, run)
@@ -464,7 +464,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		teamRoles = roles
 		coordinatorRole = coord
 		if roleName == "" {
-			_, roleByRun := loadTeamManifestRunRoles(s.cfg.DataDir, teamID)
+			_, roleByRun := loadTeamManifestRunRolesFromStore(parent, team.NewFileManifestStore(s.cfg), teamID)
 			roleName = strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)])
 		}
 		if roleName == "" {

@@ -21,12 +21,13 @@ graph TD
     internal_app --> pkg_store["pkg/store"]
     internal_app --> pkg_services_session["pkg/services/session"]
     internal_app --> internal_store["internal/store"]
+    internal_app --> internal_storage["internal/storage"]
     internal_app --> pkg_protocol["pkg/protocol"]
 
     pkg_services_session --> pkg_store
 ```
 
-Session and run persistence is accessed only via **pkg/services/session.Service** (the session service). The daemon holds the Manager; it does not pass the raw session store to RPC or callbacks. See [pkg-services-session](pkg-services-session.md).
+Session and run persistence is accessed only via **pkg/services/session.Service** (the session service). RPC handlers use **storage abstractions** (`internal/storage` and `pkg/services/team.ManifestStore`) instead of direct file I/O: `PlanReaderForRPC`, `FileReaderForRPC`, `WorkspacePreparerForRPC`, and `team.ManifestStore`. The daemon holds the Manager; it does not pass the raw session store to RPC or callbacks. See [pkg-services-session](pkg-services-session.md).
 
 ## Daemon Bootstrapping Sequence
 

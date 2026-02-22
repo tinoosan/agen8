@@ -17,8 +17,10 @@ import (
 	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
 	pkgsoul "github.com/tinoosan/agen8/pkg/services/soul"
 	pkgtask "github.com/tinoosan/agen8/pkg/services/task"
+	"github.com/tinoosan/agen8/pkg/services/team"
 	"github.com/tinoosan/agen8/pkg/timeutil"
 	"github.com/tinoosan/agen8/pkg/types"
+	"github.com/tinoosan/agen8/internal/storage"
 )
 
 // RPCServer serves the Agen8 protocol over JSON-RPC 2.0.
@@ -50,6 +52,11 @@ type RPCServer struct {
 	sessionPause        func(ctx context.Context, threadID, sessionID string) ([]string, error) // Session logic
 	sessionResume       func(ctx context.Context, threadID, sessionID string) ([]string, error)
 	sessionStop         func(ctx context.Context, threadID, sessionID string) ([]string, error)
+
+	manifestStore     team.ManifestStore
+	planReader        PlanReaderForRPC
+	fileReader        FileReaderForRPC
+	workspacePreparer WorkspacePreparerForRPC
 }
 
 type RPCServerConfig struct {
@@ -72,6 +79,27 @@ type RPCServerConfig struct {
 	// Session logic
 	SessionResume func(ctx context.Context, threadID, sessionID string) ([]string, error)
 	SessionStop   func(ctx context.Context, threadID, sessionID string) ([]string, error)
+
+	// Storage abstractions (optional; when nil, defaults use Cfg)
+	ManifestStore     team.ManifestStore
+	PlanReader        PlanReaderForRPC
+	FileReader        FileReaderForRPC
+	WorkspacePreparer WorkspacePreparerForRPC
+}
+
+// PlanReaderForRPC reads plan files for a run.
+type PlanReaderForRPC interface {
+	ReadPlan(ctx context.Context, run types.Run) (checklist, details string, checklistErr, detailsErr string)
+}
+
+// FileReaderForRPC reads file content with a byte limit.
+type FileReaderForRPC interface {
+	Read(ctx context.Context, path string, maxBytes int) (content []byte, truncated bool, err error)
+}
+
+// WorkspacePreparerForRPC prepares team workspace directories.
+type WorkspacePreparerForRPC interface {
+	PrepareTeamWorkspace(ctx context.Context, teamID string) error
 }
 
 // EventsAppender is the subset of the events service used by RPC handlers.
@@ -180,6 +208,26 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		sessionPause:        cfg.SessionPause,
 		sessionResume:       cfg.SessionResume,
 		sessionStop:         cfg.SessionStop,
+	}
+	if cfg.ManifestStore != nil {
+		srv.manifestStore = cfg.ManifestStore
+	} else {
+		srv.manifestStore = team.NewFileManifestStore(cfg.Cfg)
+	}
+	if cfg.PlanReader != nil {
+		srv.planReader = cfg.PlanReader
+	} else {
+		srv.planReader = storage.NewDiskPlanReader(cfg.Cfg.DataDir)
+	}
+	if cfg.FileReader != nil {
+		srv.fileReader = cfg.FileReader
+	} else {
+		srv.fileReader = storage.NewDiskFileReader()
+	}
+	if cfg.WorkspacePreparer != nil {
+		srv.workspacePreparer = cfg.WorkspacePreparer
+	} else {
+		srv.workspacePreparer = storage.NewDiskWorkspacePreparer(cfg.Cfg.DataDir)
 	}
 
 	handlers, err := buildMethodRegistry(

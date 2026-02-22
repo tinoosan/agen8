@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	implstore "github.com/tinoosan/agen8/internal/store"
 	"github.com/tinoosan/agen8/pkg/agent/state"
-	"github.com/tinoosan/agen8/pkg/fsutil"
 	"github.com/tinoosan/agen8/pkg/profile"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	pkgagent "github.com/tinoosan/agen8/pkg/services/agent"
@@ -433,7 +431,7 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 		return protocol.SessionStartResult{}, err
 	}
 
-	if err := os.MkdirAll(fsutil.GetTeamWorkspaceDir(s.cfg.DataDir, teamID), 0o755); err != nil {
+	if err := s.workspacePreparer.PrepareTeamWorkspace(ctx, teamID); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
 	roles := make([]team.RoleRecord, 0, len(runtimes))
@@ -445,7 +443,7 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 		})
 	}
 	manifest := team.BuildManifest(teamID, strings.TrimSpace(prof.ID), coordinatorRole, primaryRunID, teamModel, roles, time.Now().UTC().Format(time.RFC3339Nano))
-	if err := writeTeamManifestFile(s.cfg, manifest); err != nil {
+	if err := s.manifestStore.Save(ctx, manifest); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
 	return protocol.SessionStartResult{
@@ -823,7 +821,7 @@ func (s *RPCServer) sessionClearHistory(ctx context.Context, p protocol.SessionC
 		return protocol.SessionClearHistoryResult{}, err
 	}
 	if teamID := strings.TrimSpace(scope.teamID); teamID != "" {
-		runIDs, _ := loadTeamManifestRunRoles(s.cfg.DataDir, teamID)
+		runIDs, _ := s.loadTeamManifestRunRoles(ctx, teamID)
 		if len(runIDs) == 0 && s.taskService != nil {
 			tasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{
 				TeamID:   teamID,
@@ -1261,7 +1259,7 @@ func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetT
 	}
 
 	runIDSet := map[string]struct{}{}
-	manifestRunIDs, _ := loadTeamManifestRunRoles(s.cfg.DataDir, strings.TrimSpace(scope.teamID))
+	manifestRunIDs, _ := s.loadTeamManifestRunRoles(ctx, strings.TrimSpace(scope.teamID))
 	for _, runID := range manifestRunIDs {
 		runID = strings.TrimSpace(runID)
 		if runID == "" {
@@ -1440,7 +1438,7 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 		return protocol.ActivityListResult{Activities: out, TotalCount: total, NextOffset: next}, nil
 	}
 
-	manifestRunIDs, runRole := loadTeamManifestRunRoles(s.cfg.DataDir, strings.TrimSpace(scope.teamID))
+	manifestRunIDs, runRole := s.loadTeamManifestRunRoles(ctx, strings.TrimSpace(scope.teamID))
 	runSet := map[string]struct{}{}
 	for _, runID := range manifestRunIDs {
 		runID = strings.TrimSpace(runID)
