@@ -35,7 +35,6 @@ var (
 	styleHeader    = lipgloss.NewStyle().Bold(true)
 	stylePillOK    = lipgloss.NewStyle().Bold(true).Foreground(colorOK).Reverse(true).Padding(0, 1)
 	stylePillErr   = lipgloss.NewStyle().Bold(true).Foreground(colorErr).Reverse(true).Padding(0, 1)
-	stylePillDim   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#707070")).Reverse(true).Padding(0, 1)
 	stylePillWhite = lipgloss.NewStyle().Bold(true).Reverse(true).Padding(0, 1)
 	styleVerbBold  = lipgloss.NewStyle().Bold(true)
 	styleArgItalic = lipgloss.NewStyle().Italic(true)
@@ -49,11 +48,9 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 
 const (
 	compactWidth = 60
-	smallHeight  = 14
 )
 
 func (m *Model) isNarrow() bool { return m.width < compactWidth }
-func (m *Model) isShort() bool  { return m.height < smallHeight }
 
 // ── View ───────────────────────────────────────────────────────────────
 
