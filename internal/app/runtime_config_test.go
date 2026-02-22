@@ -25,6 +25,7 @@ OPENROUTER_API_KEY = "from-data-dir"
 [code_exec]
 venv_path = "exec/.venv"
 required_packages = ["pandas"]
+host_path_allowlist = ["/home/user/shared", "/var/cache/build"]
 [obsidian]
 vault_path = "/project/custom-vault"
 `), 0o644); err != nil {
@@ -77,6 +78,9 @@ required_packages = ["requests"]
 	}
 	if got := strings.Join(cfg.CodeExec.RequiredPackages, ","); got != "pandas" {
 		t.Fatalf("required_packages=%q", got)
+	}
+	if got := strings.Join(cfg.CodeExec.HostPathAllowlist, ","); got != "/home/user/shared,/var/cache/build" {
+		t.Fatalf("host_path_allowlist=%q", got)
 	}
 	if got := cfg.Obsidian.VaultPath; got != "/project/custom-vault" {
 		t.Fatalf("obsidian.vault_path=%q", got)
@@ -175,8 +179,9 @@ func TestApplyRuntimeConfigHostDefaults_CodeExec(t *testing.T) {
 	base := config.Config{DataDir: "db"}
 	out := applyRuntimeConfigHostDefaults(base, runtimeConfig{
 		CodeExec: runtimeConfigCodeExec{
-			VenvPath:         "exec/.venv",
-			RequiredPackages: []string{"pandas", "requests"},
+			VenvPath:          "exec/.venv",
+			RequiredPackages:  []string{"pandas", "requests"},
+			HostPathAllowlist: []string{"/shared"},
 		},
 	})
 	if out.CodeExec.VenvPath != "exec/.venv" {
@@ -184,5 +189,8 @@ func TestApplyRuntimeConfigHostDefaults_CodeExec(t *testing.T) {
 	}
 	if got := strings.Join(out.CodeExec.RequiredPackages, ","); got != "pandas,requests" {
 		t.Fatalf("required_packages=%q", got)
+	}
+	if got := strings.Join(out.CodeExec.HostPathAllowlist, ","); got != "/shared" {
+		t.Fatalf("host_path_allowlist=%q", got)
 	}
 }

@@ -162,44 +162,66 @@ def _install_fs_write_policy():
 
 def _blocked_path_error(operation, path):
     return ToolError(
-        f"code_exec file access must use VFS paths (/workspace, /project, etc.); "
+        f"code_exec file access must use VFS paths (/workspace, /project, etc.) or host_path_allowlist; "
         f"{operation}({path!r}) is not allowed. Use tools.fs_read/fs_list with VFS paths."
     )
 
 
-def _install_vfs_compat_shim(tools):
+def _path_under_allowlist(path, allowlist):
+    """Return True if path is under any allowlisted root. Paths are resolved to canonical form."""
+    if not allowlist:
+        return False
+    try:
+        resolved = os.path.abspath(os.path.normpath(path))
+    except Exception:
+        return False
+    for root in allowlist:
+        if not root:
+            continue
+        root_norm = os.path.normpath(root)
+        if resolved == root_norm:
+            return True
+        sep = os.sep
+        if resolved.startswith(root_norm + sep):
+            return True
+    return False
+
+
+def _install_vfs_compat_shim(tools, host_path_allowlist=None):
     """
     Route open() and os.listdir() through the bridge when given VFS paths.
-    All file access is sandboxed to the VFS; non-VFS paths are blocked to prevent escape.
+    Non-VFS paths are allowed only if under host_path_allowlist (from config).
     """
+    allowlist = list(host_path_allowlist) if host_path_allowlist else []
     _orig_open = py_builtins.open
 
     def _vfs_aware_open(file, mode="r", *args, **kwargs):
         path = str(file) if not isinstance(file, (str, bytes)) else file
         if isinstance(path, bytes):
             path = path.decode("utf-8", errors="replace")
-        if not _is_vfs_path(path):
-            raise _blocked_path_error("open", path)
-        if _is_write_mode(mode):
-            _direct_write_error()
-        # Route read through bridge (only path; VFS enforces sandbox)
-        try:
-            resp = tools.fs_read(path=path)
-        except AttributeError:
-            raise ToolError(
-                "VFS path used with open() but fs_read not available; "
-                "use tools.fs_read(path=...) or add fs_read to code_exec bridge allowlist."
-            )
-        if not isinstance(resp, dict):
-            raise ToolError("fs_read returned unexpected type")
-        if resp.get("ok", True) is False:
-            raise ToolError(resp.get("error", "fs_read failed"), resp)
-        text = resp.get("text", "")
-        b64 = resp.get("bytesB64", "")
-        if b64:
-            content = base64.b64decode(b64)
-            return io.BytesIO(content)
-        return io.StringIO(text or "")
+        if _is_vfs_path(path):
+            if _is_write_mode(mode):
+                _direct_write_error()
+            try:
+                resp = tools.fs_read(path=path)
+            except AttributeError:
+                raise ToolError(
+                    "VFS path used with open() but fs_read not available; "
+                    "use tools.fs_read(path=...) or add fs_read to code_exec bridge allowlist."
+                )
+            if not isinstance(resp, dict):
+                raise ToolError("fs_read returned unexpected type")
+            if resp.get("ok", True) is False:
+                raise ToolError(resp.get("error", "fs_read failed"), resp)
+            text = resp.get("text", "")
+            b64 = resp.get("bytesB64", "")
+            if b64:
+                content = base64.b64decode(b64)
+                return io.BytesIO(content)
+            return io.StringIO(text or "")
+        if _path_under_allowlist(path, allowlist):
+            return _orig_open(file, mode, *args, **kwargs)
+        raise _blocked_path_error("open", path)
 
     py_builtins.open = _vfs_aware_open
 
@@ -207,21 +229,23 @@ def _install_vfs_compat_shim(tools):
 
     def _vfs_aware_listdir(path="."):
         p = str(path) if path else "."
-        if not _is_vfs_path(p):
-            raise _blocked_path_error("os.listdir", p)
-        try:
-            resp = tools.fs_list(path=p)
-        except AttributeError:
-            raise ToolError(
-                "VFS path used with os.listdir() but fs_list not available; "
-                "use tools.fs_list(path=...) or add fs_list to code_exec bridge allowlist."
-            )
-        if not isinstance(resp, dict):
-            raise ToolError("fs_list returned unexpected type")
-        if resp.get("ok", True) is False:
-            raise ToolError(resp.get("error", "fs_list failed"), resp)
-        entries = resp.get("entries", [])
-        return list(entries) if isinstance(entries, (list, tuple)) else []
+        if _is_vfs_path(p):
+            try:
+                resp = tools.fs_list(path=p)
+            except AttributeError:
+                raise ToolError(
+                    "VFS path used with os.listdir() but fs_list not available; "
+                    "use tools.fs_list(path=...) or add fs_list to code_exec bridge allowlist."
+                )
+            if not isinstance(resp, dict):
+                raise ToolError("fs_list returned unexpected type")
+            if resp.get("ok", True) is False:
+                raise ToolError(resp.get("error", "fs_list failed"), resp)
+            entries = resp.get("entries", [])
+            return list(entries) if isinstance(entries, (list, tuple)) else []
+        if _path_under_allowlist(p, allowlist):
+            return _orig_listdir(path)
+        raise _blocked_path_error("os.listdir", p)
 
     os.listdir = _vfs_aware_listdir
 
@@ -242,7 +266,8 @@ def main():
     bridge = _ToolBridge(allowed_tools)
     tools = _ToolsProxy(bridge)
     _install_fs_write_policy()
-    _install_vfs_compat_shim(tools)
+    host_path_allowlist = init.get("host_path_allowlist") or []
+    _install_vfs_compat_shim(tools, host_path_allowlist)
     # Import-compatibility shim for model-generated code using `import tools`.
     tools_module = types.ModuleType("tools")
     tools_module.__getattr__ = lambda name: getattr(tools, name)

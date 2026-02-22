@@ -55,6 +55,10 @@ type BuiltinCodeExecInvoker struct {
 	EnvAllowlist    []string
 	RequiredImports []string
 
+	// HostPathAllowlist: canonical absolute dir paths the agent may access outside VFS (read-only).
+	// Paths are resolved at set time; non-existent entries are skipped.
+	HostPathAllowlist []string
+
 	mu       sync.RWMutex
 	bridge   CodeExecBridge
 	dispatch CodeExecDispatch
@@ -125,6 +129,36 @@ func (i *BuiltinCodeExecInvoker) SetRequiredImports(imports []string) {
 	}
 	i.mu.Lock()
 	i.RequiredImports = normalizeCodeExecImports(imports)
+	i.mu.Unlock()
+}
+
+// SetHostPathAllowlist sets canonical absolute directory paths the agent may access outside VFS.
+// Non-existent paths are skipped. Paths are resolved to canonical form (absolute, symlinks followed).
+func (i *BuiltinCodeExecInvoker) SetHostPathAllowlist(paths []string) {
+	if i == nil {
+		return
+	}
+	canonical := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		resolved, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			continue
+		}
+		if st, err := os.Stat(resolved); err != nil || !st.IsDir() {
+			continue
+		}
+		canonical = append(canonical, filepath.Clean(resolved))
+	}
+	i.mu.Lock()
+	i.HostPathAllowlist = canonical
 	i.mu.Unlock()
 }
 
@@ -223,6 +257,7 @@ func (i *BuiltinCodeExecInvoker) Invoke(ctx context.Context, req pkgtools.ToolRe
 		allow = append(allow, name)
 	}
 	envAllow := append([]string(nil), i.EnvAllowlist...)
+	hostPathAllowlist := append([]string(nil), i.HostPathAllowlist...)
 	i.mu.RUnlock()
 
 	if bridge == nil {
@@ -278,14 +313,15 @@ func (i *BuiltinCodeExecInvoker) Invoke(ctx context.Context, req pkgtools.ToolRe
 	}
 
 	out, err := i.runPython(ctx, pythonBin, cwd, codeExecRunConfig{
-		Code:         code,
-		Allowlist:    allow,
-		MaxToolCalls: maxToolCalls,
-		TimeoutMs:    timeoutMs,
-		MaxOutput:    maxOutput,
-		Dispatch:     dispatch,
-		Bridge:       bridge,
-		EnvAllowlist: envAllow,
+		Code:               code,
+		Allowlist:          allow,
+		MaxToolCalls:       maxToolCalls,
+		TimeoutMs:          timeoutMs,
+		MaxOutput:          maxOutput,
+		Dispatch:           dispatch,
+		Bridge:             bridge,
+		EnvAllowlist:       envAllow,
+		HostPathAllowlist:  hostPathAllowlist,
 	})
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -302,14 +338,15 @@ func (i *BuiltinCodeExecInvoker) Invoke(ctx context.Context, req pkgtools.ToolRe
 }
 
 type codeExecRunConfig struct {
-	Code         string
-	Allowlist    []string
-	MaxToolCalls int
-	TimeoutMs    int
-	MaxOutput    int
-	Dispatch     CodeExecDispatch
-	Bridge       CodeExecBridge
-	EnvAllowlist []string
+	Code               string
+	Allowlist          []string
+	MaxToolCalls       int
+	TimeoutMs          int
+	MaxOutput          int
+	Dispatch           CodeExecDispatch
+	Bridge             CodeExecBridge
+	EnvAllowlist       []string
+	HostPathAllowlist  []string
 }
 
 type codeExecOutput struct {
@@ -403,12 +440,16 @@ func (i *BuiltinCodeExecInvoker) runPython(parent context.Context, pythonBin, cw
 
 	enc := json.NewEncoder(stdinPipe)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(map[string]any{
+	initFrame := map[string]any{
 		"type":           "init",
 		"code":           cfg.Code,
 		"allowed_tools":  cfg.Allowlist,
 		"max_tool_calls": cfg.MaxToolCalls,
-	}); err != nil {
+	}
+	if len(cfg.HostPathAllowlist) > 0 {
+		initFrame["host_path_allowlist"] = cfg.HostPathAllowlist
+	}
+	if err := enc.Encode(initFrame); err != nil {
 		_ = stdinPipe.Close()
 		_ = cmd.Wait()
 		stderrWG.Wait()

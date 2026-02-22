@@ -22,8 +22,9 @@ type Config struct {
 
 // CodeExecConfig controls code_exec Python runtime dependency policy.
 type CodeExecConfig struct {
-	VenvPath         string
-	RequiredPackages []string
+	VenvPath            string
+	RequiredPackages    []string
+	HostPathAllowlist   []string // Absolute host dirs the agent may access outside VFS (read-only)
 }
 
 // Default returns the default host configuration.

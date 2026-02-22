@@ -47,6 +47,7 @@ Fields:
 
 - `code_exec.venv_path` (string, optional; default `<AGEN8_DATA_DIR>/exec/.venv`)
 - `code_exec.required_packages` ([]string of pip package names)
+- `code_exec.host_path_allowlist` ([]string of absolute host dir paths; optional) – Dirs the agent may access outside VFS (read-only). Paths are canonicalized; non-existent entries are skipped. Interpreted on the filesystem where the config lives (data dir or project).
 
 Example:
 

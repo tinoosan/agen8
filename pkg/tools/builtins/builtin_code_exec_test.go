@@ -450,6 +450,72 @@ func TestRunPython_VFSCompatShim_BlocksNonVFSPaths(t *testing.T) {
 	}
 }
 
+func TestRunPython_HostPathAllowlist_AllowsAccess(t *testing.T) {
+	// host_path_allowlist permits access to dirs outside VFS.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	sharedDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedDir, "data.txt"), []byte("from allowlist"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+	inv.SetHostPathAllowlist([]string{sharedDir})
+
+	filePath := filepath.Join(sharedDir, "data.txt")
+	// Use forward slashes for Python string (works on all platforms)
+	filePathPy := strings.ReplaceAll(filePath, "\\", "/")
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:              `result = open("` + filePathPy + `", "r").read()`,
+		Allowlist:         []string{},
+		MaxToolCalls:      0,
+		TimeoutMs:         4_000,
+		MaxOutput:         8 * 1024,
+		HostPathAllowlist: []string{sharedDir},
+		Dispatch:          nil,
+		Bridge:            nil,
+		EnvAllowlist:      inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("expected allowlisted path to succeed, got %+v", out)
+	}
+	if got := strings.TrimSpace(fmt.Sprintf("%v", out.Result)); got != "from allowlist" {
+		t.Fatalf("result=%q want from allowlist", got)
+	}
+}
+
+func TestRunPython_HostPathAllowlist_BlocksPathsOutside(t *testing.T) {
+	// With allowlist set, paths outside allowlist are still blocked.
+	python := mustFindPython(t)
+	workspace := t.TempDir()
+	sharedDir := t.TempDir()
+	inv := NewBuiltinCodeExecInvoker(workspace, map[string]string{"workspace": workspace})
+	inv.SetHostPathAllowlist([]string{sharedDir})
+
+	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
+		Code:              `open("/etc/passwd", "r")`,
+		Allowlist:         []string{},
+		MaxToolCalls:      0,
+		TimeoutMs:         4_000,
+		MaxOutput:         8 * 1024,
+		HostPathAllowlist: []string{sharedDir},
+		Dispatch:          nil,
+		Bridge:            nil,
+		EnvAllowlist:      inv.EnvAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("runPython error: %v", err)
+	}
+	if out.OK {
+		t.Fatalf("expected path outside allowlist to fail, got %+v", out)
+	}
+	if !strings.Contains(strings.ToLower(out.Error), "vfs") && !strings.Contains(strings.ToLower(out.Error), "allowlist") {
+		t.Fatalf("expected VFS/allowlist error, got %q", out.Error)
+	}
+}
+
 func TestRunPython_VFSCompatShim_OpenAndListdir(t *testing.T) {
 	// Models that use os/open instead of tools.fs_read/fs_list should still work.
 	python := mustFindPython(t)

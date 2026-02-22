@@ -34,8 +34,9 @@ type runtimeConfigSkills struct {
 }
 
 type runtimeConfigCodeExec struct {
-	VenvPath         string
-	RequiredPackages []string
+	VenvPath          string
+	RequiredPackages  []string
+	HostPathAllowlist []string
 }
 
 type runtimeConfigObsidian struct {
@@ -61,8 +62,9 @@ type runtimeConfigSkillsFile struct {
 }
 
 type runtimeConfigCodeExecFile struct {
-	VenvPath         string   `toml:"venv_path"`
-	RequiredPackages []string `toml:"required_packages"`
+	VenvPath          string   `toml:"venv_path"`
+	RequiredPackages  []string `toml:"required_packages"`
+	HostPathAllowlist []string `toml:"host_path_allowlist"`
 }
 
 type runtimeConfigObsidianFile struct {
@@ -140,6 +142,7 @@ model = "`+runtimeDefaultModel+`"
 [code_exec]
 # venv_path = ""
 # required_packages = []
+# host_path_allowlist = []  # Absolute dirs agent may access outside VFS (read-only)
 
 [obsidian]
 # vault_path = ""
@@ -177,8 +180,9 @@ func decodeRuntimeConfigFile(path string) (runtimeConfig, bool, error) {
 			Conflict: strings.ToLower(strings.TrimSpace(raw.Skills.Conflict)),
 		},
 		CodeExec: runtimeConfigCodeExec{
-			VenvPath:         strings.TrimSpace(raw.CodeExec.VenvPath),
-			RequiredPackages: normalizeStringList(raw.CodeExec.RequiredPackages),
+			VenvPath:          strings.TrimSpace(raw.CodeExec.VenvPath),
+			RequiredPackages:  normalizeStringList(raw.CodeExec.RequiredPackages),
+			HostPathAllowlist: normalizeStringList(raw.CodeExec.HostPathAllowlist),
 		},
 		Obsidian: runtimeConfigObsidian{
 			VaultPath: strings.TrimSpace(raw.Obsidian.VaultPath),
@@ -249,6 +253,34 @@ func mergeRuntimeConfig(base, override runtimeConfig) runtimeConfig {
 		sort.Strings(merged)
 		out.CodeExec.RequiredPackages = merged
 	}
+	if len(override.CodeExec.HostPathAllowlist) > 0 {
+		set := map[string]struct{}{}
+		merged := make([]string, 0, len(out.CodeExec.HostPathAllowlist)+len(override.CodeExec.HostPathAllowlist))
+		for _, item := range out.CodeExec.HostPathAllowlist {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, ok := set[item]; ok {
+				continue
+			}
+			set[item] = struct{}{}
+			merged = append(merged, item)
+		}
+		for _, item := range override.CodeExec.HostPathAllowlist {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, ok := set[item]; ok {
+				continue
+			}
+			set[item] = struct{}{}
+			merged = append(merged, item)
+		}
+		sort.Strings(merged)
+		out.CodeExec.HostPathAllowlist = merged
+	}
 	if vaultPath := strings.TrimSpace(override.Obsidian.VaultPath); vaultPath != "" {
 		out.Obsidian.VaultPath = vaultPath
 	}
@@ -259,6 +291,7 @@ func applyRuntimeConfigHostDefaults(host config.Config, cfg runtimeConfig) confi
 	out := host
 	out.CodeExec.VenvPath = strings.TrimSpace(cfg.CodeExec.VenvPath)
 	out.CodeExec.RequiredPackages = normalizeStringList(cfg.CodeExec.RequiredPackages)
+	out.CodeExec.HostPathAllowlist = normalizeStringList(cfg.CodeExec.HostPathAllowlist)
 	return out
 }
 
