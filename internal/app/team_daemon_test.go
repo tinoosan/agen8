@@ -178,6 +178,33 @@ func TestResolveRoleModel_UsesRoleOverride(t *testing.T) {
 	}
 }
 
+func TestStoreBuilder_Validate_AcceptsStandaloneProfile(t *testing.T) {
+	prof := &profile.Profile{
+		ID:          "general",
+		Description: "Standalone",
+		Model:       "openai/gpt-5-mini",
+		Prompts:     profile.PromptConfig{SystemPrompt: "You are helpful."},
+		Team:        nil,
+	}
+	b := StoreBuilder{req: &teamRunRequest{prof: prof}}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate with standalone profile: %v", err)
+	}
+}
+
+func TestResolveTeamModelFromProfile_Standalone(t *testing.T) {
+	prof := &profile.Profile{
+		ID:          "general",
+		Description: "Standalone",
+		Model:       "openai/gpt-5-mini",
+		Team:        nil,
+	}
+	model := resolveTeamModelFromProfile(nil, prof, RunChatOptions{})
+	if model != "openai/gpt-5-mini" {
+		t.Fatalf("model=%q want openai/gpt-5-mini", model)
+	}
+}
+
 func TestBuildRoleRuntimeProfile_UsesRoleScopedSkillsOnly(t *testing.T) {
 	enabled := true
 	role := profile.RoleConfig{

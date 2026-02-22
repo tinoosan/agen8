@@ -68,11 +68,8 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err != nil {
 		return err
 	}
-	if prof.Team != nil {
-		return runAsTeam(ctx, cfg, prof, profDir, goal, maxContextB, poll, resolved, protocolEnabled)
-	}
-	builder := newDaemonBuilder(ctx, cfg, goal, maxContextB, poll, resolved, prof, profDir, protocolEnabled)
-	return builder.Run()
+	// Single path: standalone = team with one role.
+	return runAsTeam(ctx, cfg, prof, profDir, goal, maxContextB, poll, resolved, protocolEnabled)
 }
 
 func resolveProfileRef(cfg config.Config, requested string) (*profile.Profile, string, error) {

@@ -233,8 +233,8 @@ func (b *StoreBuilder) Validate() error {
 	if b == nil || b.req == nil {
 		return fmt.Errorf("team store builder is not configured")
 	}
-	if b.req.prof == nil || b.req.prof.Team == nil {
-		return fmt.Errorf("team profile is required")
+	if b.req.prof == nil {
+		return fmt.Errorf("profile is required")
 	}
 	return nil
 }
@@ -264,8 +264,8 @@ func (c *ControlLoop) Run() error {
 }
 
 func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Profile, profDir string, goal string, maxContextB int, poll time.Duration, resolved RunChatOptions, protocolEnabled bool) (err error) {
-	if prof == nil || prof.Team == nil {
-		return fmt.Errorf("team profile is required")
+	if prof == nil {
+		return fmt.Errorf("profile is required")
 	}
 	if maxContextB <= 0 {
 		maxContextB = 8 * 1024
@@ -275,11 +275,15 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	}
 	teamID := "team-" + uuid.NewString()
 
-	roleNames, coordinatorRole, err := team.ValidateTeamRoles(prof.Team.Roles)
+	roles, err := prof.RolesForSession()
+	if err != nil {
+		return fmt.Errorf("roles for session: %w", err)
+	}
+	roleNames, coordinatorRole, err := team.ValidateTeamRoles(roles)
 	if err != nil {
 		return err
 	}
-	workingRoles, reviewerRole, _, err := team.EnsureReviewerRole(prof.Team.Roles, coordinatorRole)
+	workingRoles, reviewerRole, _, err := team.EnsureReviewerRole(roles, coordinatorRole)
 	if err != nil {
 		return err
 	}
@@ -291,11 +295,15 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	if err != nil {
 		return fmt.Errorf("load existing team manifest: %w", err)
 	}
-	teamModel := resolveTeamModel(prevManifest, prof.Team, resolved)
+	teamModel := resolveTeamModelFromProfile(prevManifest, prof, resolved)
 	if teamModel == "" {
 		return fmt.Errorf("resolve team model: empty model")
 	}
-	log.Printf("daemon: TEAMS MODE - profile %q with %d roles", prof.ID, len(workingRoles))
+	modeLabel := "TEAMS"
+	if len(roles) == 1 {
+		modeLabel = "STANDALONE"
+	}
+	log.Printf("daemon: %s MODE - profile %q with %d role(s)", modeLabel, prof.ID, len(roles))
 
 	teamWorkspaceDir := fsutil.GetTeamWorkspaceDir(cfg.DataDir, teamID)
 	if err := os.MkdirAll(teamWorkspaceDir, 0o755); err != nil {
@@ -389,13 +397,13 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			}
 		}
 	}()
-	roleDescriptions := make(map[string]string, len(prof.Team.Roles))
+	roleDescriptions := make(map[string]string, len(roles))
 	for _, role := range workingRoles {
 		roleDescriptions[strings.TrimSpace(role.Name)] = strings.TrimSpace(role.Description)
 	}
 	var coordinatorRun types.Run
 	codeExecSecurityWarned := false
-	for _, role := range prof.Team.Roles {
+	for _, role := range roles {
 		role := role
 		roleModel := resolveRoleModel(role, teamModel)
 		if roleModel == "" {
@@ -413,7 +421,11 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			return fmt.Errorf("create session for role %s: %w", role.Name, err)
 		}
 		metaSession.System = true
-		metaSession.Mode = "team"
+		if len(roles) == 1 {
+			metaSession.Mode = "standalone"
+		} else {
+			metaSession.Mode = "team"
+		}
 		metaSession.TeamID = teamID
 		metaSession.Profile = strings.TrimSpace(prof.ID)
 		metaSession.SoulVersionSeen = soulVersion
@@ -766,15 +778,15 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		}
 		log.Printf("daemon: [%s] %s -> %s", kind, role.Name, run.RunID)
 	}
-	roles := make([]team.RoleRecord, 0, len(runtimes))
+	roleRecords := make([]team.RoleRecord, 0, len(runtimes))
 	for _, rt := range runtimes {
-		roles = append(roles, team.RoleRecord{
+		roleRecords = append(roleRecords, team.RoleRecord{
 			RoleName:  strings.TrimSpace(rt.role.Name),
 			RunID:     strings.TrimSpace(rt.run.RunID),
 			SessionID: strings.TrimSpace(rt.run.SessionID),
 		})
 	}
-	manifest := team.BuildManifest(teamID, prof.ID, coordinatorRole, coordinatorRun.RunID, teamModel, roles, time.Now().UTC().Format(time.RFC3339Nano))
+	manifest := team.BuildManifest(teamID, prof.ID, coordinatorRole, coordinatorRun.RunID, teamModel, roleRecords, time.Now().UTC().Format(time.RFC3339Nano))
 	manifestStore := team.NewFileManifestStore(cfg)
 	if err := manifestStore.Save(ctx, manifest); err != nil {
 		return fmt.Errorf("write team manifest: %w", err)
@@ -1033,6 +1045,20 @@ func resolveTeamModel(existing *team.Manifest, teamCfg *profile.TeamConfig, reso
 				return model
 			}
 		}
+	}
+	return strings.TrimSpace(resolved.Model)
+}
+
+// resolveTeamModelFromProfile resolves the team model from manifest, profile, or resolved options.
+// Supports both team (prof.Team != nil) and standalone (prof.Team == nil) profiles.
+func resolveTeamModelFromProfile(existing *team.Manifest, prof *profile.Profile, resolved RunChatOptions) string {
+	if existing != nil {
+		if model := strings.TrimSpace(existing.TeamModel); model != "" {
+			return model
+		}
+	}
+	if m := prof.TeamModelForSession(); m != "" {
+		return m
 	}
 	return strings.TrimSpace(resolved.Model)
 }

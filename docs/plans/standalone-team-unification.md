@@ -119,7 +119,7 @@ Before changing code, ensure the following are in place so we can execute safely
 | Layer | Files / areas | What changes |
 |-------|---------------|--------------|
 | **Profile** | `pkg/profile/profile.go` | Add `RoleConfig.AllowSubagents`; optional: normalize standalone → single-role at load |
-| **Daemon** | `internal/app/daemon.go`, `daemon_builder.go`, `team_daemon.go` | Collapse to single path; `RunDaemon` → `runAsTeam` with profile |
+| **Daemon** | `internal/app/daemon.go`, `team_daemon.go` | Collapse to single path; `RunDaemon` → `runAsTeam` with profile |
 | **Runtime supervisor** | `internal/app/daemon_runtime_supervisor.go` | Gate spawn by `role.AllowSubagents`; remove `teamID != ""` spawn block |
 | **Team runtime** | `internal/app/team_daemon.go`, `team_state.go` | May absorb standalone; or standalone uses team supervisor with N=1 |
 | **RPC session** | `internal/app/rpc_session.go` | Merge `sessionStart` + `sessionStartTeam`; always create team |
@@ -169,7 +169,7 @@ Before changing code, ensure the following are in place so we can execute safely
    - Single sessionStart flow; always create teamID, manifest, workspace
    - Mode = "standalone" when 1 role, "team" when 2+
 
-3. **Unify daemon**
+3. **Unify daemon** ✅ (Phase 3 done)
    - Single `runAsTeam` path; standalone = team with one role
    - Remove `RunDaemon` vs `runAsTeam` branching at top level
 
