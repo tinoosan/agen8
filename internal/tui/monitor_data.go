@@ -2,31 +2,29 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tinoosan/agen8/internal/store"
 	"github.com/tinoosan/agen8/internal/tui/rpcscope"
+	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
+	"github.com/tinoosan/agen8/pkg/services/team"
 	agentstate "github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/cost"
-	"github.com/tinoosan/agen8/pkg/fsutil"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
-func pricingKnownForRunID(cfg config.Config, runID string) bool {
+func pricingKnownForRunID(ctx context.Context, session pkgsession.Service, runID string) bool {
 	runID = strings.TrimSpace(runID)
-	if runID == "" {
+	if runID == "" || session == nil {
 		return false
 	}
-	run, err := store.LoadRun(cfg, runID)
+	run, err := session.LoadRun(ctx, runID)
 	if err != nil {
 		return false
 	}
@@ -44,17 +42,48 @@ func pricingKnownForRunID(cfg config.Config, runID string) bool {
 	return ok
 }
 
-func loadTeamManifestFromDisk(cfg config.Config, teamID string) (*teamManifestFile, error) {
-	path := filepath.Join(fsutil.GetTeamDir(cfg.DataDir, strings.TrimSpace(teamID)), "team.json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
+func loadTeamManifest(ctx context.Context, cfg config.Config, teamID string) (*teamManifestFile, error) {
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		return nil, nil
+	}
+	store := team.NewFileManifestStore(cfg)
+	m, err := store.Load(ctx, teamID)
+	if err != nil || m == nil {
 		return nil, err
 	}
-	var manifest teamManifestFile
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return nil, err
+	return manifestToFile(m), nil
+}
+
+func manifestToFile(m *team.Manifest) *teamManifestFile {
+	if m == nil {
+		return nil
 	}
-	return &manifest, nil
+	roles := make([]teamManifestRole, len(m.Roles))
+	for i, r := range m.Roles {
+		roles[i] = teamManifestRole{RoleName: r.RoleName, RunID: r.RunID, SessionID: r.SessionID}
+	}
+	var modelChange *teamModelChangeFile
+	if m.ModelChange != nil {
+		modelChange = &teamModelChangeFile{
+			RequestedModel: m.ModelChange.RequestedModel,
+			Status:         m.ModelChange.Status,
+			RequestedAt:    m.ModelChange.RequestedAt,
+			AppliedAt:      m.ModelChange.AppliedAt,
+			Reason:         m.ModelChange.Reason,
+			Error:          m.ModelChange.Error,
+		}
+	}
+	return &teamManifestFile{
+		TeamID:          m.TeamID,
+		ProfileID:       m.ProfileID,
+		TeamModel:       m.TeamModel,
+		ModelChange:     modelChange,
+		CoordinatorRole: m.CoordinatorRole,
+		CoordinatorRun:  m.CoordinatorRun,
+		Roles:           roles,
+		CreatedAt:       m.CreatedAt,
+	}
 }
 
 func (m *monitorModel) rpcRun() types.Run {
@@ -72,7 +101,7 @@ func (m *monitorModel) rpcRun() types.Run {
 	}
 	sessionID := strings.TrimSpace(m.sessionID)
 	if sessionID == "" && strings.TrimSpace(m.teamID) != "" {
-		if manifest, err := loadTeamManifestFromDisk(m.cfg, m.teamID); err == nil && manifest != nil {
+		if manifest, err := loadTeamManifest(m.ctx, m.cfg, m.teamID); err == nil && manifest != nil {
 			sessionID = resolveTeamControlSessionID(manifest, sessionID)
 			if sessionID != "" {
 				m.sessionID = sessionID
@@ -98,7 +127,7 @@ func (m *monitorModel) resolveTeamControlSessionID() string {
 		return strings.TrimSpace(m.sessionID)
 	}
 	sessionID := ""
-	if manifest, err := loadTeamManifestFromDisk(m.cfg, teamID); err == nil && manifest != nil {
+	if manifest, err := loadTeamManifest(m.ctx, m.cfg, teamID); err == nil && manifest != nil {
 		sessionID = resolveTeamControlSessionID(manifest, "")
 		if sessionID != "" {
 			m.sessionID = sessionID
@@ -152,7 +181,7 @@ func (m *monitorModel) resolveEnqueueTargetRunID() (string, error) {
 	if runID := strings.TrimSpace(m.teamCoordinatorRunID); runID != "" {
 		return runID, nil
 	}
-	manifest, err := loadTeamManifestFromDisk(m.cfg, strings.TrimSpace(m.teamID))
+	manifest, err := loadTeamManifest(m.ctx, m.cfg, strings.TrimSpace(m.teamID))
 	if err != nil || manifest == nil {
 		return "", fmt.Errorf("coordinator run unavailable")
 	}
@@ -185,7 +214,7 @@ func (m *monitorModel) resolveSessionIDForRun(runID string) string {
 	if strings.TrimSpace(m.teamID) == "" {
 		return strings.TrimSpace(m.rpcRun().SessionID)
 	}
-	if manifest, err := loadTeamManifestFromDisk(m.cfg, strings.TrimSpace(m.teamID)); err == nil && manifest != nil {
+	if manifest, err := loadTeamManifest(m.ctx, m.cfg, strings.TrimSpace(m.teamID)); err == nil && manifest != nil {
 		for _, role := range manifest.Roles {
 			if strings.TrimSpace(role.RunID) == runID {
 				sessionID := strings.TrimSpace(role.SessionID)
@@ -209,7 +238,7 @@ func (m *monitorModel) resolveRoleForRun(runID string) string {
 	if strings.TrimSpace(m.teamID) == "" {
 		return ""
 	}
-	manifest, err := loadTeamManifestFromDisk(m.cfg, strings.TrimSpace(m.teamID))
+	manifest, err := loadTeamManifest(m.ctx, m.cfg, strings.TrimSpace(m.teamID))
 	if err != nil || manifest == nil {
 		return ""
 	}
@@ -312,14 +341,10 @@ func (m *monitorModel) rpcControlSetModel(ctx context.Context, threadID, target,
 	if target != "" && target != runID && target != strings.TrimSpace(m.sessionID) {
 		return nil, fmt.Errorf("target does not match active run")
 	}
-	ss, err := store.NewSQLiteSessionStore(m.cfg)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(m.sessionID) != "" {
-		if sess, serr := ss.LoadSession(ctx, strings.TrimSpace(m.sessionID)); serr == nil {
+	if m.session != nil && strings.TrimSpace(m.sessionID) != "" {
+		if sess, serr := m.session.LoadSession(ctx, strings.TrimSpace(m.sessionID)); serr == nil {
 			sess.ActiveModel = model
-			_ = ss.SaveSession(ctx, sess)
+			_ = m.session.SaveSession(ctx, sess)
 		}
 	}
 	return []string{runID}, nil
@@ -725,7 +750,7 @@ func (m *monitorModel) loadTeamManifestCmd() tea.Cmd {
 			TeamID:   strings.TrimSpace(m.teamID),
 		}, &res)
 		if err != nil {
-			if manifest, ferr := loadTeamManifestFromDisk(m.cfg, m.teamID); ferr == nil && manifest != nil {
+			if manifest, ferr := loadTeamManifest(m.ctx, m.cfg, m.teamID); ferr == nil && manifest != nil {
 				return teamManifestLoadedMsg{manifest: manifest, err: nil}
 			}
 			return teamManifestLoadedMsg{manifest: nil, err: err}

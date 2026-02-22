@@ -457,6 +457,58 @@ func (s *MemorySessionStore) CountActivities(_ context.Context, runID string) (i
 	return n, nil
 }
 
+func (s *MemorySessionStore) LatestRun(_ context.Context) (types.Run, error) {
+	if s == nil {
+		return types.Run{}, fmt.Errorf("session store not configured")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var latest types.Run
+	var latestAt time.Time
+	for _, r := range s.runs {
+		t := runSortTime(r)
+		if t.After(latestAt) {
+			latestAt = t
+			latest = r
+		}
+	}
+	if latest.RunID == "" {
+		return types.Run{}, ErrNotFound
+	}
+	return latest, nil
+}
+
+func (s *MemorySessionStore) LatestRunningRun(_ context.Context) (types.Run, error) {
+	if s == nil {
+		return types.Run{}, fmt.Errorf("session store not configured")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var latest types.Run
+	var latestAt time.Time
+	for _, r := range s.runs {
+		if strings.EqualFold(strings.TrimSpace(string(r.Status)), types.RunStatusRunning) {
+			t := runSortTime(r)
+			if t.After(latestAt) {
+				latestAt = t
+				latest = r
+			}
+		}
+	}
+	if latest.RunID == "" {
+		return types.Run{}, ErrNotFound
+	}
+	return latest, nil
+}
+
+// runSortTime returns the time used for ordering runs (StartedAt if set, else zero time).
+func runSortTime(r types.Run) time.Time {
+	if r.StartedAt != nil {
+		return r.StartedAt.UTC()
+	}
+	return time.Time{}
+}
+
 func normalizeSessionSortColumn(col string) (string, bool) {
 	switch strings.TrimSpace(strings.ToLower(col)) {
 	case "", "updated_at":

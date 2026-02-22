@@ -2,16 +2,20 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
 	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
+// wizardSessionQueryStub implements pkgsession.Service for wizard tests.
+// Only ListSessionsPaginated, CountSessions, and LoadSession are used; others return stub values.
 type wizardSessionQueryStub struct {
 	sessions []types.Session
 }
@@ -25,12 +29,62 @@ func (s wizardSessionQueryStub) LoadSession(_ context.Context, sessionID string)
 	return types.Session{}, nil
 }
 
+func (s wizardSessionQueryStub) SaveSession(_ context.Context, _ types.Session) error { return nil }
+
+func (s wizardSessionQueryStub) Start(_ context.Context, _ pkgsession.StartOptions) (types.Session, types.Run, error) {
+	return types.Session{}, types.Run{}, errors.New("stub: Start not implemented")
+}
+
+func (s wizardSessionQueryStub) Delete(_ context.Context, _ string) error { return nil }
+
 func (s wizardSessionQueryStub) ListSessionsPaginated(_ context.Context, _ pkgstore.SessionFilter) ([]types.Session, error) {
 	return append([]types.Session(nil), s.sessions...), nil
 }
 
 func (s wizardSessionQueryStub) CountSessions(_ context.Context, _ pkgstore.SessionFilter) (int, error) {
 	return len(s.sessions), nil
+}
+
+func (s wizardSessionQueryStub) LoadRun(_ context.Context, _ string) (types.Run, error) {
+	return types.Run{}, errors.New("stub: LoadRun not implemented")
+}
+
+func (s wizardSessionQueryStub) SaveRun(_ context.Context, _ types.Run) error { return nil }
+
+func (s wizardSessionQueryStub) StopRun(_ context.Context, _, _, _ string) (types.Run, error) {
+	return types.Run{}, errors.New("stub: StopRun not implemented")
+}
+
+func (s wizardSessionQueryStub) ListRunsBySession(_ context.Context, _ string) ([]types.Run, error) {
+	return nil, nil
+}
+
+func (s wizardSessionQueryStub) ListRunsByStatus(_ context.Context, _ []string) ([]types.Run, error) {
+	return nil, nil
+}
+
+func (s wizardSessionQueryStub) ListChildRuns(_ context.Context, _ string) ([]types.Run, error) {
+	return nil, nil
+}
+
+func (s wizardSessionQueryStub) AddRunToSession(_ context.Context, sessionID, runID string) (types.Session, error) {
+	return types.Session{}, nil
+}
+
+func (s wizardSessionQueryStub) ListActivities(_ context.Context, _ string, _, _ int) ([]types.Activity, error) {
+	return nil, nil
+}
+
+func (s wizardSessionQueryStub) CountActivities(_ context.Context, _ string) (int, error) {
+	return 0, nil
+}
+
+func (s wizardSessionQueryStub) LatestRun(_ context.Context) (types.Run, error) {
+	return types.Run{}, errors.New("stub: LatestRun not implemented")
+}
+
+func (s wizardSessionQueryStub) LatestRunningRun(_ context.Context) (types.Run, error) {
+	return types.Run{}, errors.New("stub: LatestRunningRun not implemented")
 }
 
 func TestOpenNewSessionWizard_StartsAtStep0(t *testing.T) {

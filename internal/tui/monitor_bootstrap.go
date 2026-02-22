@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/agen8/internal/store"
+	"github.com/tinoosan/agen8/internal/app"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	agentstate "github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/config"
@@ -219,7 +219,13 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	sessionReasoningEffort := ""
 	sessionReasoningSummary := ""
 	runProfile := ""
-	if r, err := store.LoadRun(cfg, runID); err == nil {
+	sessionService, err := app.NewSessionServiceForCLI(cfg)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	if r, err := sessionService.LoadRun(ctx, runID); err == nil {
 		runStatus = r.Status
 		runSessionID = strings.TrimSpace(r.SessionID)
 		if r.Runtime != nil {
@@ -227,19 +233,13 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		}
 	}
 
-	sessionStore, err := store.NewSQLiteSessionStore(cfg)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-
 	if runSessionID != "" {
-		if sess, err := sessionStore.LoadSession(ctx, runSessionID); err == nil {
+		if sess, err := sessionService.LoadSession(ctx, runSessionID); err == nil {
 			stats.totalTokensIn = sess.InputTokens
 			stats.totalTokensOut = sess.OutputTokens
 			stats.totalTokens = sess.TotalTokens
 			stats.totalCostUSD = sess.CostUSD
-			stats.pricingKnown = sess.TotalTokens == 0 || sess.CostUSD > 0 || pricingKnownForRunID(cfg, runID)
+			stats.pricingKnown = sess.TotalTokens == 0 || sess.CostUSD > 0 || pricingKnownForRunID(ctx, sessionService, runID)
 			if active := strings.TrimSpace(sess.ActiveModel); active != "" {
 				sessionActiveModel = active
 			}
@@ -255,7 +255,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		rpcEndpoint:                 monitorRPCEndpoint(),
 		runStatus:                   runStatus,
 		result:                      result,
-		session:                     sessionStore,
+		session:                     sessionService,
 		sessionID:                   runSessionID,
 		offset:                      off,
 		input:                       in,
@@ -338,7 +338,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		// Fallback order if session didn't have an active model (unlikely for active sessions):
 		// 1. Runtime model (from run record)
 		// 2. "default" (will display as default)
-		if r, err := store.LoadRun(cfg, runID); err == nil && r.Runtime != nil {
+		if r, err := sessionService.LoadRun(ctx, runID); err == nil && r.Runtime != nil {
 			if m.model == "" {
 				m.model = strings.TrimSpace(r.Runtime.Model)
 			}
@@ -369,7 +369,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 	if err != nil {
 		return nil, err
 	}
-	sessionStore, _ := store.NewSQLiteSessionStore(cfg)
+	sessionService, _ := app.NewSessionServiceForCLI(cfg)
 	in := textarea.New()
 	in.SetHeight(2)
 	in.CharLimit = 0
@@ -403,7 +403,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 		rpcEndpoint:                 monitorRPCEndpoint(),
 		runStatus:                   types.RunStatusRunning,
 		result:                      result,
-		session:                     sessionStore,
+		session:                     sessionService,
 		sessionID:                   "",
 		offset:                      0,
 		input:                       in,
@@ -466,7 +466,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 	m.thinkingVP.MouseWheelEnabled = false
 	m.subagentsVP.MouseWheelEnabled = false
 	m.artifactContentVP.MouseWheelEnabled = false
-	if manifest, err := loadTeamManifestFromDisk(cfg, teamID); err == nil && manifest != nil {
+	if manifest, err := loadTeamManifest(ctx, cfg, teamID); err == nil && manifest != nil {
 		if profileID := strings.TrimSpace(manifest.ProfileID); profileID != "" {
 			m.profile = profileID
 		}
@@ -553,7 +553,7 @@ func newDetachedMonitorModel(ctx context.Context, cfg config.Config, result *Mon
 	activityList.SetShowHelp(false)
 	activityList.SetShowPagination(false)
 
-	sessionStore, err := store.NewSQLiteSessionStore(cfg)
+	sessionService, err := app.NewSessionServiceForCLI(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -564,7 +564,7 @@ func newDetachedMonitorModel(ctx context.Context, cfg config.Config, result *Mon
 		rpcEndpoint:                 monitorRPCEndpoint(),
 		runStatus:                   types.RunStatusRunning,
 		result:                      result,
-		session:                     sessionStore,
+		session:                     sessionService,
 		sessionID:                   "",
 		input:                       in,
 		activityPageItems:           []Activity{},
