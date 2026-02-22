@@ -91,3 +91,11 @@ func (s *SQLiteSessionStore) ClearHistoryForSession(_ context.Context, sessionID
 func (s *SQLiteSessionStore) ClearHistoryForRunIDs(_ context.Context, runIDs []string) (HistoryClearResult, error) {
 	return ClearHistoryForRunIDs(s.Cfg, runIDs)
 }
+
+func (s *SQLiteSessionStore) LatestRun(_ context.Context) (types.Run, error) {
+	return LatestRun(s.Cfg)
+}
+
+func (s *SQLiteSessionStore) LatestRunningRun(_ context.Context) (types.Run, error) {
+	return LatestRunningRun(s.Cfg)
+}

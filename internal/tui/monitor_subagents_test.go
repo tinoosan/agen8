@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/tinoosan/agen8/internal/app"
 	implstore "github.com/tinoosan/agen8/internal/store"
 	layoutmgr "github.com/tinoosan/agen8/internal/tui/layout"
 	"github.com/tinoosan/agen8/pkg/config"
+	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
@@ -80,6 +82,7 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := config.Config{DataDir: t.TempDir()}
 			runID := ""
+			var sessionSvc pkgsession.Service
 			if tt.name == "Viewing child run shows Back to parent" {
 				_, parentRun, err := implstore.CreateSession(cfg, "parent", 8*1024)
 				if err != nil {
@@ -90,11 +93,13 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 					t.Fatalf("SaveRun child: %v", err)
 				}
 				runID = childRun.RunID
+				sessionSvc, _ = app.NewSessionServiceForCLI(cfg)
 			}
 			m := &monitorModel{
 				ctx:           context.Background(),
 				cfg:           cfg,
 				runID:         runID,
+				session:       sessionSvc,
 				childRuns:     tt.childRuns,
 				subagentsVP:   viewport.New(0, 0),
 				subagentsList: newSubagentsList(),

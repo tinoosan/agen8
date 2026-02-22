@@ -17,7 +17,7 @@ import (
 	agentstate "github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/protocol"
-	pkgstore "github.com/tinoosan/agen8/pkg/store"
+	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
@@ -187,7 +187,7 @@ type monitorModel struct {
 	rpcLastErr     string
 	rpcChecking    bool
 	result         *MonitorResult
-	session        pkgstore.SessionQuery
+	session        pkgsession.Service
 	sessionID      string
 
 	offset int64

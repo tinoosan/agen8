@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/agen8/internal/store"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	layoutmgr "github.com/tinoosan/agen8/internal/tui/layout"
 	"github.com/tinoosan/agen8/pkg/types"
@@ -381,8 +380,8 @@ func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) str
 	// Build list items: "Back to parent" when viewing a child run, then active subagents.
 	var items []list.Item
 	isViewingChild := false
-	if currentRunID != "" {
-		if run, err := store.LoadRun(m.cfg, currentRunID); err == nil && strings.TrimSpace(run.ParentRunID) != "" {
+	if currentRunID != "" && m.session != nil && m.ctx != nil {
+		if run, err := m.session.LoadRun(m.ctx, currentRunID); err == nil && strings.TrimSpace(run.ParentRunID) != "" {
 			isViewingChild = true
 			items = append(items, subagentListItem{RunID: backToParentRunID, Label: "← Back to parent"})
 		}

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/tinoosan/agen8/internal/store"
+	"github.com/tinoosan/agen8/internal/app"
 	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 	agentstate "github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/fsutil"
@@ -50,11 +50,17 @@ var tasksListCmd = &cobra.Command{
 			return err
 		}
 
+		sessionSvc, err := app.NewSessionServiceForCLI(cfg)
+		if err != nil {
+			return err
+		}
+		ctx := cmd.Context()
+
 		runID := strings.TrimSpace(tasksRunID)
 		if runID == "" {
-			if r, err := store.LatestRunningRun(cfg); err == nil {
+			if r, err := sessionSvc.LatestRunningRun(ctx); err == nil {
 				runID = r.RunID
-			} else if r, err := store.LatestRun(cfg); err == nil {
+			} else if r, err := sessionSvc.LatestRun(ctx); err == nil {
 				runID = r.RunID
 			} else {
 				return fmt.Errorf("no runs found")
@@ -63,7 +69,7 @@ var tasksListCmd = &cobra.Command{
 
 		sessionID := strings.TrimSpace(tasksSession)
 		if sessionID == "" {
-			if r, err := store.LoadRun(cfg, runID); err == nil {
+			if r, err := sessionSvc.LoadRun(ctx, runID); err == nil {
 				sessionID = r.SessionID
 			}
 		}
@@ -120,11 +126,17 @@ var tasksStatsCmd = &cobra.Command{
 			return err
 		}
 
+		sessionSvc, err := app.NewSessionServiceForCLI(cfg)
+		if err != nil {
+			return err
+		}
+		ctx := cmd.Context()
+
 		runID := strings.TrimSpace(tasksRunID)
 		if runID == "" {
-			if r, err := store.LatestRunningRun(cfg); err == nil {
+			if r, err := sessionSvc.LatestRunningRun(ctx); err == nil {
 				runID = r.RunID
-			} else if r, err := store.LatestRun(cfg); err == nil {
+			} else if r, err := sessionSvc.LatestRun(ctx); err == nil {
 				runID = r.RunID
 			} else {
 				return fmt.Errorf("no runs found")

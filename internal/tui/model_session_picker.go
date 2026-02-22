@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/agen8/internal/store"
+	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	"github.com/tinoosan/agen8/pkg/timeutil"
 	"github.com/tinoosan/agen8/pkg/types"
@@ -131,7 +131,7 @@ func (m *Model) closeSessionPicker() {
 
 func (m *Model) fetchSessionsPage() tea.Cmd {
 	return func() tea.Msg {
-		filter := store.SessionFilter{
+		filter := pkgstore.SessionFilter{
 			TitleContains: m.sessionPickerFilter,
 			Limit:         m.sessionPickerPageSize,
 			Offset:        m.sessionPickerPage * m.sessionPickerPageSize,

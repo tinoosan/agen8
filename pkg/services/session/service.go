@@ -42,4 +42,8 @@ type Service interface {
 	// Activities
 	ListActivities(ctx context.Context, runID string, limit, offset int) ([]types.Activity, error)
 	CountActivities(ctx context.Context, runID string) (int, error)
+
+	// Latest run helpers (for CLI/TUI when no run ID is specified)
+	LatestRun(ctx context.Context) (types.Run, error)
+	LatestRunningRun(ctx context.Context) (types.Run, error)
 }

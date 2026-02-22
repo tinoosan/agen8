@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/agen8/internal/store"
+	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/events"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/types"
@@ -35,8 +35,8 @@ type TurnRunner interface {
 	ResumeTurn(ctx context.Context, toolOutputs []llmtypes.LLMMessage) (string, error)
 	ListSessions(ctx context.Context) ([]types.Session, error)
 
-	ListSessionsPaginated(ctx context.Context, filter store.SessionFilter) ([]types.Session, error)
-	CountSessions(ctx context.Context, filter store.SessionFilter) (int, error)
+	ListSessionsPaginated(ctx context.Context, filter pkgstore.SessionFilter) ([]types.Session, error)
+	CountSessions(ctx context.Context, filter pkgstore.SessionFilter) (int, error)
 }
 
 // vfsAccessor is an optional extension interface implemented by the app TurnRunner.

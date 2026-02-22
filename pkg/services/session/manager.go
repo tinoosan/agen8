@@ -28,6 +28,8 @@ type Store interface {
 	AddRunToSession(ctx context.Context, sessionID, runID string) (types.Session, error)
 	ListActivities(ctx context.Context, runID string, limit, offset int) ([]types.Activity, error)
 	CountActivities(ctx context.Context, runID string) (int, error)
+	LatestRun(ctx context.Context) (types.Run, error)
+	LatestRunningRun(ctx context.Context) (types.Run, error)
 }
 
 // Manager implements the Service interface.
@@ -162,4 +164,14 @@ func (m *Manager) ListActivities(ctx context.Context, runID string, limit, offse
 // CountActivities delegates to the store.
 func (m *Manager) CountActivities(ctx context.Context, runID string) (int, error) {
 	return m.store.CountActivities(ctx, runID)
+}
+
+// LatestRun delegates to the store.
+func (m *Manager) LatestRun(ctx context.Context) (types.Run, error) {
+	return m.store.LatestRun(ctx)
+}
+
+// LatestRunningRun delegates to the store.
+func (m *Manager) LatestRunningRun(ctx context.Context) (types.Run, error) {
+	return m.store.LatestRunningRun(ctx)
 }

@@ -9,7 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/agen8/internal/store"
+	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/events"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/types"
@@ -47,13 +47,13 @@ func (s stubRunner) ListSessions(ctx context.Context) ([]types.Session, error) {
 	return nil, nil
 }
 
-func (s stubRunner) ListSessionsPaginated(ctx context.Context, filter store.SessionFilter) ([]types.Session, error) {
+func (s stubRunner) ListSessionsPaginated(ctx context.Context, filter pkgstore.SessionFilter) ([]types.Session, error) {
 	_ = ctx
 	_ = filter
 	return nil, nil
 }
 
-func (s stubRunner) CountSessions(ctx context.Context, filter store.SessionFilter) (int, error) {
+func (s stubRunner) CountSessions(ctx context.Context, filter pkgstore.SessionFilter) (int, error) {
 	_ = ctx
 	_ = filter
 	return 0, nil
@@ -152,13 +152,13 @@ func (r blockingRunner) ListSessions(ctx context.Context) ([]types.Session, erro
 	return nil, nil
 }
 
-func (r blockingRunner) ListSessionsPaginated(ctx context.Context, filter store.SessionFilter) ([]types.Session, error) {
+func (r blockingRunner) ListSessionsPaginated(ctx context.Context, filter pkgstore.SessionFilter) ([]types.Session, error) {
 	_ = ctx
 	_ = filter
 	return nil, nil
 }
 
-func (r blockingRunner) CountSessions(ctx context.Context, filter store.SessionFilter) (int, error) {
+func (r blockingRunner) CountSessions(ctx context.Context, filter pkgstore.SessionFilter) (int, error) {
 	_ = ctx
 	_ = filter
 	return 0, nil
