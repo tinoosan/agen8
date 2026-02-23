@@ -24,7 +24,7 @@ const (
 type ProjectConfig struct {
 	ProjectID          string
 	DefaultProfile     string
-	DefaultMode        string // standalone|team
+	DefaultMode        string // single-agent|multi-agent
 	DefaultTeamProfile string
 	RPCEndpoint        string
 	DataDirOverride    string
@@ -63,7 +63,7 @@ func defaultProjectConfig(baseDir string) ProjectConfig {
 	}
 	return ProjectConfig{
 		ProjectID:   projectID,
-		DefaultMode: "standalone",
+		DefaultMode: "single-agent",
 		CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
 		Version:     ProjectConfigVersion,
 	}
@@ -92,10 +92,12 @@ func normalizeProjectConfig(cfg ProjectConfig, baseDir string) ProjectConfig {
 	}
 	mode := strings.ToLower(strings.TrimSpace(out.DefaultMode))
 	switch mode {
-	case "team", "standalone":
-		out.DefaultMode = mode
+	case "team", "multi-agent":
+		out.DefaultMode = "multi-agent"
+	case "standalone", "single-agent":
+		out.DefaultMode = "single-agent"
 	default:
-		out.DefaultMode = "standalone"
+		out.DefaultMode = "single-agent"
 	}
 	return out
 }

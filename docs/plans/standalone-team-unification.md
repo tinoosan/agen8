@@ -13,7 +13,7 @@
 | Area | Current | Recommendation |
 |------|---------|-----------------|
 | **Daemon vs Team daemon** | Two entry points: `RunDaemon` (standalone) vs `runAsTeam` (team). Different bootstrap, different runtime supervisors. | Unification (below) collapses this. |
-| **Profile resolution** | `resolveProfileRef` in app; profile loading scattered. | Consider `pkg/profile` as single loader; app only resolves by ref. |
+| **Profile resolution** | `resolveProfileRef` in app; profile loading scattered. | ✅ Added `profile.ResolveByRef(profilesDir, ref)`; app and TUI use it. |
 | **Task store** | `pkg/agent/state` (TaskStore) used directly by daemon, RPC, session. | Task service exists (`pkg/services/task`); ensure all task access goes through it. |
 | **Event emission** | Events emitted from many layers (daemon, agent, RPC). | Events service centralizes; verify no direct event bus usage outside it. |
 | **Config / runtime config** | `config.Config`, runtime config files, env. | Already centralized; ensure no ad-hoc config parsing. |
@@ -209,5 +209,27 @@ Before changing code, ensure the following are in place so we can execute safely
 
 ## 7. Open Questions
 
-1. **Naming**: Keep "standalone" and "team" as display concepts, or rename to "single-agent" / "multi-agent"?
+1. **Naming**: ✅ Renamed to "single-agent" / "multi-agent" (was "standalone" / "team").
 2. **Single-role team workspace**: Same layout as current standalone (no `teams/<id>/`?) or always use team workspace layout for consistency?
+
+---
+
+## 8. Full Redesign: No Standalone Mode (Phase 5)
+
+**Principle**: Everything is a team. No backward compatibility. Remove all code that treats "standalone" as a special case.
+
+- **Monitor**: See `docs/plans/monitor-team-alignment.md` – run-focused monitor always loads team context; remove `/team` block; remove `teamID == ""` branches for active sessions.
+- **Codebase audit**: Remove `teamID == ""` branches, standalone-specific paths, legacy fallbacks. Detached is the only valid "no team" state.
+- **Mode**: Keep "single-agent" / "multi-agent" for display only; no logic branches on it.
+
+---
+
+## 9. Session-Scoped Project Binding (Phase 6)
+
+**Principle**: Project becomes a first-class attribute of sessions. Enables project-scoped filtering and routing.
+
+- **Session.ProjectRoot**: When created via `agen8 new` in project mode, session stores project root.
+- **session.start**: Accepts optional `projectRoot` param; persists on session.
+- **session.list**: Accepts optional `projectRoot` filter; returns ProjectRoot in each item.
+- **sessions list --project**: Filter to sessions for current project.
+- **Project config**: Default mode "single-agent"; normalize "standalone"/"team" to "single-agent"/"multi-agent".

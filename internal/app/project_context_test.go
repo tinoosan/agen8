@@ -24,8 +24,8 @@ func TestInitProjectAndLoadContext(t *testing.T) {
 	if got := ctx.Config.DefaultProfile; got != "software_dev" {
 		t.Fatalf("default profile=%q", got)
 	}
-	if got := ctx.Config.DefaultMode; got != "team" {
-		t.Fatalf("default mode=%q", got)
+	if got := ctx.Config.DefaultMode; got != "multi-agent" {
+		t.Fatalf("default mode=%q (team normalizes to multi-agent)", got)
 	}
 	if got := ctx.Config.DefaultTeamProfile; got != "startup_team" {
 		t.Fatalf("default team profile=%q", got)

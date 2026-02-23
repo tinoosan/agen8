@@ -11,7 +11,8 @@ import (
 )
 
 var (
-	sessionsLimit int
+	sessionsLimit   int
+	sessionsProject bool
 )
 
 var sessionsCmd = &cobra.Command{
@@ -29,24 +30,32 @@ var sessionsListCmd = &cobra.Command{
 		if sessionsLimit <= 0 {
 			sessionsLimit = 100
 		}
-		var out protocol.SessionListResult
-		if err := rpcCall(cmd.Context(), protocol.MethodSessionList, protocol.SessionListParams{
+		params := protocol.SessionListParams{
 			ThreadID: detachedThreadID,
 			Limit:    sessionsLimit,
 			Offset:   0,
-		}, &out); err != nil {
+		}
+		if sessionsProject {
+			projectCtx, err := loadProjectContext()
+			if err == nil && projectCtx.Exists {
+				params.ProjectRoot = strings.TrimSpace(projectCtx.RootDir)
+			}
+		}
+		var out protocol.SessionListResult
+		if err := rpcCall(cmd.Context(), protocol.MethodSessionList, params, &out); err != nil {
 			return err
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(w, "SESSION\tMODE\tTEAM\tRUN\tRUNNING\tPAUSED\tUPDATED")
+		fmt.Fprintln(w, "SESSION\tMODE\tTEAM\tRUN\tPROJECT\tRUNNING\tPAUSED\tUPDATED")
 		for _, s := range out.Sessions {
 			fmt.Fprintf(
 				w,
-				"%s\t%s\t%s\t%s\t%d\t%d\t%s\n",
+				"%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\n",
 				strings.TrimSpace(s.SessionID),
-				fallback(strings.TrimSpace(s.Mode), "standalone"),
+				fallback(strings.TrimSpace(s.Mode), "single-agent"),
 				blankDash(strings.TrimSpace(s.TeamID)),
 				blankDash(strings.TrimSpace(s.CurrentRunID)),
+				blankDash(strings.TrimSpace(s.ProjectRoot)),
 				s.RunningAgents,
 				s.PausedAgents,
 				blankDash(strings.TrimSpace(s.UpdatedAt)),
@@ -175,6 +184,7 @@ func fallback(v, def string) string {
 
 func init() {
 	sessionsListCmd.Flags().IntVar(&sessionsLimit, "limit", 100, "maximum sessions to show")
+	sessionsListCmd.Flags().BoolVar(&sessionsProject, "project", false, "filter to sessions for current project")
 
 	sessionsCmd.AddCommand(sessionsListCmd)
 	sessionsCmd.AddCommand(sessionsAttachCmd)

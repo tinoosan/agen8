@@ -9,11 +9,12 @@ type SessionGetTotalsParams struct {
 }
 
 type SessionStartParams struct {
-	ThreadID ThreadID `json:"threadId"`
-	Mode     string   `json:"mode,omitempty"` // standalone|team
-	Profile  string   `json:"profile,omitempty"`
-	Goal     string   `json:"goal,omitempty"`
-	Model    string   `json:"model,omitempty"`
+	ThreadID    ThreadID `json:"threadId"`
+	Mode        string   `json:"mode,omitempty"` // single-agent|multi-agent
+	Profile     string   `json:"profile,omitempty"`
+	Goal        string   `json:"goal,omitempty"`
+	Model       string   `json:"model,omitempty"`
+	ProjectRoot string   `json:"projectRoot,omitempty"` // project dir when created via agen8 new
 }
 
 type SessionStartResult struct {
@@ -29,6 +30,7 @@ type SessionStartResult struct {
 type SessionListParams struct {
 	ThreadID      ThreadID `json:"threadId"`
 	TitleContains string   `json:"titleContains,omitempty"`
+	ProjectRoot   string   `json:"projectRoot,omitempty"` // filter sessions by project
 	Limit         int      `json:"limit,omitempty"`
 	Offset        int      `json:"offset,omitempty"`
 }
@@ -41,6 +43,7 @@ type SessionListItem struct {
 	Mode          string `json:"mode,omitempty"`
 	TeamID        string `json:"teamId,omitempty"`
 	Profile       string `json:"profile,omitempty"`
+	ProjectRoot   string `json:"projectRoot,omitempty"`
 	RunningAgents int    `json:"runningAgents,omitempty"`
 	PausedAgents  int    `json:"pausedAgents,omitempty"`
 	TotalAgents   int    `json:"totalAgents,omitempty"`

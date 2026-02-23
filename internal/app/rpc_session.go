@@ -242,17 +242,17 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	}
 	mode := strings.ToLower(strings.TrimSpace(p.Mode))
 	if mode == "" {
-		mode = "standalone"
+		mode = "single-agent"
 	}
-	if mode != "standalone" && mode != "team" {
+	if mode != "single-agent" && mode != "multi-agent" {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{
 			Code:    protocol.CodeInvalidParams,
-			Message: "mode must be standalone or team",
+			Message: "mode must be single-agent or multi-agent",
 		}
 	}
 	profileRef := strings.TrimSpace(p.Profile)
 	if profileRef == "" {
-		if mode == "team" {
+		if mode == "multi-agent" {
 			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "team profile is required"}
 		}
 		profileRef = "general"
@@ -264,8 +264,8 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	if prof == nil {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "profile not found"}
 	}
-	if mode == "standalone" && prof.Team != nil && len(prof.Team.Roles) > 1 {
-		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "standalone mode requires a single-role or non-team profile"}
+	if mode == "single-agent" && prof.Team != nil && len(prof.Team.Roles) > 1 {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "single-agent mode requires a single-role or non-team profile"}
 	}
 
 	roles, err := prof.RolesForSession()
@@ -293,12 +293,13 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	sess := types.NewSession(goal)
 	sess.CurrentGoal = goal
 	sess.Profile = strings.TrimSpace(prof.ID)
+	sess.ProjectRoot = strings.TrimSpace(p.ProjectRoot)
 	teamID := "team-" + uuid.NewString()
 	sess.TeamID = teamID
 	if len(roles) == 1 {
-		sess.Mode = "standalone"
+		sess.Mode = "single-agent"
 	} else {
-		sess.Mode = "team"
+		sess.Mode = "multi-agent"
 	}
 
 	teamModel := strings.TrimSpace(p.Model)
@@ -405,6 +406,7 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 	}
 	filter := pkgstore.SessionFilter{
 		TitleContains: strings.TrimSpace(p.TitleContains),
+		ProjectRoot:   strings.TrimSpace(p.ProjectRoot),
 		Limit:         clampLimit(p.Limit, 50, 500),
 		Offset:        max(0, p.Offset),
 		SortBy:        "updated_at",
@@ -444,9 +446,9 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 		}
 		if mode == "" {
 			if teamID != "" {
-				mode = "team"
+				mode = "multi-agent"
 			} else {
-				mode = "standalone"
+				mode = "single-agent"
 			}
 		}
 		totalAgents := 0
@@ -477,6 +479,7 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 			Mode:          mode,
 			TeamID:        teamID,
 			Profile:       profileID,
+			ProjectRoot:   strings.TrimSpace(sess.ProjectRoot),
 			RunningAgents: runningAgents,
 			PausedAgents:  pausedAgents,
 			TotalAgents:   totalAgents,

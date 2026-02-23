@@ -25,11 +25,15 @@ type Session struct {
 	ActiveModel string `json:"activeModel,omitempty"`
 
 	// Mode records the session execution mode.
-	// Valid values: "standalone", "team".
+	// Valid values: "single-agent", "multi-agent".
 	Mode string `json:"mode,omitempty"`
 
-	// TeamID is set for team sessions and empty for standalone sessions.
+	// TeamID is set for all sessions (every session is a team).
 	TeamID string `json:"teamId,omitempty"`
+
+	// ProjectRoot is the project directory when the session was created via project mode (agen8 new).
+	// Enables project-scoped filtering and routing.
+	ProjectRoot string `json:"projectRoot,omitempty"`
 
 	// Profile is the profile used to create this session.
 	Profile string `json:"profile,omitempty"`
