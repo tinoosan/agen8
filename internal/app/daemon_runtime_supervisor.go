@@ -45,7 +45,6 @@ type runtimeSupervisorConfig struct {
 	LLMClient        llmtypes.LLMClient
 	Notifier         agent.Notifier
 	WorkdirAbs       string
-	BootstrapRunID   string
 	DefaultProfile   *profile.Profile
 	SoulService      pkgsoul.Service
 }
@@ -62,7 +61,6 @@ type runtimeSupervisor struct {
 	llmClient        llmtypes.LLMClient
 	notifier         agent.Notifier
 	workdirAbs       string
-	bootstrapRunID   string
 	defaultProfile   *profile.Profile
 	soulService      pkgsoul.Service
 
@@ -236,7 +234,6 @@ func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 		llmClient:        cfg.LLMClient,
 		notifier:         cfg.Notifier,
 		workdirAbs:       cfg.WorkdirAbs,
-		bootstrapRunID:   strings.TrimSpace(cfg.BootstrapRunID),
 		defaultProfile:   cfg.DefaultProfile,
 		soulService:      cfg.SoulService,
 		workers:          map[string]*managedRuntime{},
@@ -348,9 +345,6 @@ func collectSessionRunIDs(sess types.Session) []string {
 func (s *runtimeSupervisor) ensureRun(ctx context.Context, sess types.Session, runID string) error {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		return nil
-	}
-	if runID == s.bootstrapRunID {
 		return nil
 	}
 	run, err := s.sessionService.LoadRun(ctx, runID)

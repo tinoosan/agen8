@@ -389,6 +389,11 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	if err := s.manifestStore.Save(ctx, manifest); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
+	if goal != "" {
+		if err := team.SeedCoordinatorTask(ctx, s.taskService, sessionID, primaryRunID, teamID, coordinatorRole, goal); err != nil {
+			return protocol.SessionStartResult{}, err
+		}
+	}
 	return protocol.SessionStartResult{
 		SessionID:    strings.TrimSpace(sess.SessionID),
 		PrimaryRunID: primaryRunID,

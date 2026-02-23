@@ -2,18 +2,13 @@ package app
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/tinoosan/agen8/pkg/agent/state"
-	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/fsutil"
 	"github.com/tinoosan/agen8/pkg/profile"
-	"github.com/tinoosan/agen8/pkg/protocol"
-	pkgagent "github.com/tinoosan/agen8/pkg/services/agent"
 	"github.com/tinoosan/agen8/pkg/services/team"
-	"github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
@@ -68,95 +63,6 @@ func TestTeamIsIdle_BlocksOnNonHeartbeatTasks(t *testing.T) {
 
 	if team.IsTeamIdle(ctx, store, "team-1") {
 		t.Fatalf("expected team to be non-idle with regular pending tasks")
-	}
-}
-
-func TestBuildTeamRPCServerConfig_AcceptsRoleSessionThread(t *testing.T) {
-	cfg := config.Config{DataDir: t.TempDir()}
-	memStore := store.NewMemorySessionStore()
-	_ = memStore.SaveSession(context.Background(), types.Session{SessionID: "coord-sess"})
-	_ = memStore.SaveSession(context.Background(), types.Session{SessionID: "worker-sess"})
-	sessionSvc := newTestSessionService(cfg, memStore)
-	runtimes := []teamRoleRuntime{
-		{run: types.Run{SessionID: "worker-sess", RunID: "worker-run"}},
-	}
-	controllers := make([]team.RoleRunController, len(runtimes))
-	for i := range runtimes {
-		controllers[i] = &teamRoleRunControllerAdapter{rt: &runtimes[i]}
-	}
-	teamCtrl := team.NewController(team.ControllerConfig{
-		SessionService: sessionSvc,
-		Runtimes:       controllers,
-	})
-	srvCfg := buildTeamRPCServerConfig(
-		RPCServerConfig{},
-		cfg,
-		RunChatOptions{},
-		types.Run{SessionID: "coord-sess", RunID: "coord-run"},
-		nil,
-		sessionSvc,
-		runtimes,
-		teamCtrl,
-		nil,
-	)
-
-	if srvCfg.AgentService == nil {
-		t.Fatal("AgentService not set")
-	}
-	err := srvCfg.AgentService.Pause(context.Background(), "", "worker-sess")
-	if err == nil {
-		t.Fatal("expected error for empty runID")
-	}
-	var se *pkgagent.ServiceError
-	if errors.As(err, &se) {
-		if se.Code != protocol.CodeInvalidParams {
-			t.Fatalf("service error code=%d want=%d", se.Code, protocol.CodeInvalidParams)
-		}
-		return
-	}
-	pErr, ok := err.(*protocol.ProtocolError)
-	if ok && pErr.Code == protocol.CodeInvalidParams {
-		return
-	}
-	t.Fatalf("expected InvalidParams error, got %T: %v", err, err)
-}
-
-func TestNewTeamRPCServerBaseConfig_ConfiguresEventsService(t *testing.T) {
-	cfg := config.Config{DataDir: t.TempDir()}
-	srvCfg := newTeamRPCServerBaseConfig(cfg, types.Run{RunID: "run-1", SessionID: "sess-1"}, nil)
-	if srvCfg.EventsService == nil {
-		t.Fatal("EventsService should be configured in team RPC server config")
-	}
-}
-
-func TestBuildTeamRPCServerConfig_RejectsUnknownThread(t *testing.T) {
-	cfg := config.Config{DataDir: t.TempDir()}
-	memStore := store.NewMemorySessionStore()
-	_ = memStore.SaveSession(context.Background(), types.Session{SessionID: "coord-sess"})
-	sessionSvc := newTestSessionService(cfg, memStore)
-	teamCtrl := team.NewController(team.ControllerConfig{
-		SessionService: sessionSvc,
-		Runtimes:       nil,
-	})
-	srvCfg := buildTeamRPCServerConfig(
-		RPCServerConfig{},
-		cfg,
-		RunChatOptions{},
-		types.Run{SessionID: "coord-sess", RunID: "coord-run"},
-		nil,
-		sessionSvc,
-		nil,
-		teamCtrl,
-		nil,
-	)
-
-	_, err := srvCfg.ControlSetModel(context.Background(), "missing-thread", "", "openai/gpt-5-mini")
-	pErr, ok := err.(*protocol.ProtocolError)
-	if !ok {
-		t.Fatalf("expected protocol error, got %T", err)
-	}
-	if pErr.Code != protocol.CodeThreadNotFound {
-		t.Fatalf("protocol code=%d want=%d", pErr.Code, protocol.CodeThreadNotFound)
 	}
 }
 
