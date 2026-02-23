@@ -1840,7 +1840,7 @@ func TestRPCServer_SessionStart_Standalone(t *testing.T) {
 
 	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
-		Mode:     "standalone",
+		Mode:     "single-agent",
 		Goal:     "fresh start",
 		Profile:  "general",
 	})
@@ -1853,8 +1853,8 @@ func TestRPCServer_SessionStart_Standalone(t *testing.T) {
 	if strings.TrimSpace(out.SessionID) == "" || strings.TrimSpace(out.PrimaryRunID) == "" {
 		t.Fatalf("missing ids: %+v", out)
 	}
-	if out.Mode != "standalone" {
-		t.Fatalf("mode = %q, want standalone", out.Mode)
+	if out.Mode != "single-agent" {
+		t.Fatalf("mode = %q, want single-agent", out.Mode)
 	}
 	if strings.TrimSpace(out.TeamID) == "" {
 		t.Fatalf("expected team id (unified flow), got %+v", out)
@@ -1863,6 +1863,97 @@ func TestRPCServer_SessionStart_Standalone(t *testing.T) {
 		t.Fatalf("load created session: %v", err)
 	} else if strings.TrimSpace(got.TeamID) != strings.TrimSpace(out.TeamID) {
 		t.Fatalf("session teamID=%q want %q", got.TeamID, out.TeamID)
+	}
+}
+
+func TestRPCServer_SessionStart_PersistsProjectRoot(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "general"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	projectRoot := "/abs/path/to/project"
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID:    protocol.ThreadID(run.SessionID),
+		Mode:        "single-agent",
+		Goal:        "project task",
+		Profile:     "general",
+		ProjectRoot: projectRoot,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.start error: %+v", resp.Error)
+	}
+	var out protocol.SessionStartResult
+	_ = json.Unmarshal(resp.Result, &out)
+	created, err := sessStore.LoadSession(context.Background(), out.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := strings.TrimSpace(created.ProjectRoot); got != projectRoot {
+		t.Fatalf("session ProjectRoot=%q want %q", got, projectRoot)
+	}
+}
+
+func TestRPCServer_SessionStart_EmptyProjectRootOmitted(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "general"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Mode:     "single-agent",
+		Profile:  "general",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.start error: %+v", resp.Error)
+	}
+	var out protocol.SessionStartResult
+	_ = json.Unmarshal(resp.Result, &out)
+	created, err := sessStore.LoadSession(context.Background(), out.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if strings.TrimSpace(created.ProjectRoot) != "" {
+		t.Fatalf("session ProjectRoot=%q want empty when not provided", created.ProjectRoot)
 	}
 }
 
@@ -1914,7 +2005,7 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 
 	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
-		Mode:     "team",
+		Mode:     "multi-agent",
 		Profile:  "startup_team",
 	})
 	resp := rpcRoundTrip(t, srv, req)
@@ -1923,8 +2014,8 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 	}
 	var out protocol.SessionStartResult
 	_ = json.Unmarshal(resp.Result, &out)
-	if out.Mode != "team" {
-		t.Fatalf("mode=%q want team", out.Mode)
+	if out.Mode != "multi-agent" {
+		t.Fatalf("mode=%q want multi-agent", out.Mode)
 	}
 	if strings.TrimSpace(out.TeamID) == "" {
 		t.Fatalf("expected team id, got %+v", out)
@@ -1939,8 +2030,8 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession(team): %v", err)
 	}
-	if got := strings.TrimSpace(createdSess.Mode); got != "team" {
-		t.Fatalf("session mode=%q want team", got)
+	if got := strings.TrimSpace(createdSess.Mode); got != "multi-agent" {
+		t.Fatalf("session mode=%q want multi-agent", got)
 	}
 	if got := strings.TrimSpace(createdSess.TeamID); got != strings.TrimSpace(out.TeamID) {
 		t.Fatalf("session teamID=%q want %q", got, out.TeamID)
@@ -1985,7 +2076,7 @@ func TestRPCServer_SessionStart_StandaloneRejectsMultiRoleTeamProfile(t *testing
 
 	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
-		Mode:     "standalone",
+		Mode:     "single-agent",
 		Profile:  "multi_team",
 	})
 	resp := rpcRoundTrip(t, srv, req)
@@ -2090,8 +2181,8 @@ func TestRPCServer_SessionList_And_AgentList(t *testing.T) {
 			continue
 		}
 		foundSessB = true
-		if got := strings.TrimSpace(s.Mode); got != "team" {
-			t.Fatalf("session %s mode=%q want team", s.SessionID, got)
+		if got := strings.TrimSpace(s.Mode); got != "multi-agent" {
+			t.Fatalf("session %s mode=%q want multi-agent", s.SessionID, got)
 		}
 		if got := strings.TrimSpace(s.TeamID); got != "team-1" {
 			t.Fatalf("session %s teamID=%q want team-1", s.SessionID, got)
@@ -2129,6 +2220,118 @@ func TestRPCServer_SessionList_And_AgentList(t *testing.T) {
 	}
 
 	_ = sessA // keep lint happy for created baseline session
+}
+
+func TestRPCServer_SessionList_FiltersByProjectRoot(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "general"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	// Create session A with project /proj/a
+	reqA, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID:    protocol.ThreadID(run.SessionID),
+		Mode:        "single-agent",
+		Goal:        "proj a",
+		Profile:     "general",
+		ProjectRoot: "/proj/a",
+	})
+	respA := rpcRoundTrip(t, srv, reqA)
+	if respA.Error != nil {
+		t.Fatalf("session.start A: %+v", respA.Error)
+	}
+	var outA protocol.SessionStartResult
+	_ = json.Unmarshal(respA.Result, &outA)
+
+	// Create session B with project /proj/b
+	reqB, _ := protocol.NewRequest("2", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID:    protocol.ThreadID(run.SessionID),
+		Mode:        "single-agent",
+		Goal:        "proj b",
+		Profile:     "general",
+		ProjectRoot: "/proj/b",
+	})
+	respB := rpcRoundTrip(t, srv, reqB)
+	if respB.Error != nil {
+		t.Fatalf("session.start B: %+v", respB.Error)
+	}
+	var outB protocol.SessionStartResult
+	_ = json.Unmarshal(respB.Result, &outB)
+
+	// Create session C with no project
+	reqC, _ := protocol.NewRequest("3", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Mode:     "single-agent",
+		Goal:     "no proj",
+		Profile:  "general",
+	})
+	respC := rpcRoundTrip(t, srv, reqC)
+	if respC.Error != nil {
+		t.Fatalf("session.start C: %+v", respC.Error)
+	}
+
+	// List with ProjectRoot /proj/a - should return only session A
+	reqList, _ := protocol.NewRequest("4", protocol.MethodSessionList, protocol.SessionListParams{
+		ThreadID:    protocol.ThreadID(run.SessionID),
+		ProjectRoot: "/proj/a",
+		Limit:       10,
+	})
+	respList := rpcRoundTrip(t, srv, reqList)
+	if respList.Error != nil {
+		t.Fatalf("session.list: %+v", respList.Error)
+	}
+	var listed protocol.SessionListResult
+	_ = json.Unmarshal(respList.Result, &listed)
+	if listed.TotalCount != 1 {
+		t.Fatalf("ProjectRoot filter: totalCount=%d want 1", listed.TotalCount)
+	}
+	if len(listed.Sessions) != 1 {
+		t.Fatalf("ProjectRoot filter: len(sessions)=%d want 1", len(listed.Sessions))
+	}
+	if strings.TrimSpace(listed.Sessions[0].SessionID) != strings.TrimSpace(outA.SessionID) {
+		t.Fatalf("ProjectRoot filter: got session %q want %q", listed.Sessions[0].SessionID, outA.SessionID)
+	}
+	if got := strings.TrimSpace(listed.Sessions[0].ProjectRoot); got != "/proj/a" {
+		t.Fatalf("ProjectRoot in item=%q want /proj/a", got)
+	}
+
+	// List with ProjectRoot /proj/b - should return only session B
+	reqListB, _ := protocol.NewRequest("5", protocol.MethodSessionList, protocol.SessionListParams{
+		ThreadID:    protocol.ThreadID(run.SessionID),
+		ProjectRoot: "/proj/b",
+		Limit:       10,
+	})
+	respListB := rpcRoundTrip(t, srv, reqListB)
+	if respListB.Error != nil {
+		t.Fatalf("session.list B: %+v", respListB.Error)
+	}
+	var listedB protocol.SessionListResult
+	_ = json.Unmarshal(respListB.Result, &listedB)
+	if listedB.TotalCount != 1 || len(listedB.Sessions) != 1 {
+		t.Fatalf("ProjectRoot /proj/b: totalCount=%d len=%d want 1", listedB.TotalCount, len(listedB.Sessions))
+	}
+	if strings.TrimSpace(listedB.Sessions[0].SessionID) != strings.TrimSpace(outB.SessionID) {
+		t.Fatalf("ProjectRoot /proj/b: got %q want %q", listedB.Sessions[0].SessionID, outB.SessionID)
+	}
 }
 
 func TestRPCServer_AgentPauseResume(t *testing.T) {
@@ -2440,7 +2643,7 @@ func TestRPCServer_SessionClearHistory_TeamUsesManifestRuns(t *testing.T) {
 		t.Fatalf("CreateSession role: %v", err)
 	}
 	teamID := "team-test"
-	coordinatorSession.Mode = "team"
+	coordinatorSession.Mode = "multi-agent"
 	coordinatorSession.TeamID = teamID
 	coordinatorSession.Profile = "team-profile"
 	coordinatorSession.Runs = []string{coordinatorRun.RunID}
@@ -2455,7 +2658,7 @@ func TestRPCServer_SessionClearHistory_TeamUsesManifestRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession role: %v", err)
 	}
-	roleSessLoaded.Mode = "team"
+	roleSessLoaded.Mode = "multi-agent"
 	roleSessLoaded.TeamID = teamID
 	if err := sessStore.SaveSession(context.Background(), roleSessLoaded); err != nil {
 		t.Fatalf("SaveSession role: %v", err)

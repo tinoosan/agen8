@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,5 +142,53 @@ func TestMemorySessionStore_ListSessionsPaginated_InvalidSortBy(t *testing.T) {
 	_, err := st.ListSessionsPaginated(context.Background(), SessionFilter{SortBy: "invalid_column"})
 	if err == nil {
 		t.Fatalf("expected error")
+	}
+}
+
+func TestMemorySessionStore_ListSessionsPaginated_ProjectRootFilter(t *testing.T) {
+	st := NewMemorySessionStore()
+	ctx := context.Background()
+
+	a := types.NewSession("proj a")
+	a.ProjectRoot = "/proj/a"
+	b := types.NewSession("proj b")
+	b.ProjectRoot = "/proj/b"
+	c := types.NewSession("no proj")
+	if err := st.SaveSession(ctx, a); err != nil {
+		t.Fatalf("SaveSession(a): %v", err)
+	}
+	if err := st.SaveSession(ctx, b); err != nil {
+		t.Fatalf("SaveSession(b): %v", err)
+	}
+	if err := st.SaveSession(ctx, c); err != nil {
+		t.Fatalf("SaveSession(c): %v", err)
+	}
+
+	filter := SessionFilter{ProjectRoot: "/proj/a", Limit: 10}
+	out, err := st.ListSessionsPaginated(ctx, filter)
+	if err != nil {
+		t.Fatalf("ListSessionsPaginated: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("ProjectRoot /proj/a: len=%d want 1", len(out))
+	}
+	if strings.TrimSpace(out[0].SessionID) != strings.TrimSpace(a.SessionID) {
+		t.Fatalf("ProjectRoot /proj/a: got %q want %q", out[0].SessionID, a.SessionID)
+	}
+
+	count, err := st.CountSessions(ctx, SessionFilter{ProjectRoot: "/proj/b"})
+	if err != nil {
+		t.Fatalf("CountSessions: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("CountSessions ProjectRoot /proj/b: got %d want 1", count)
+	}
+
+	empty, err := st.ListSessionsPaginated(ctx, SessionFilter{ProjectRoot: "/nonexistent", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListSessionsPaginated: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("ProjectRoot /nonexistent: len=%d want 0", len(empty))
 	}
 }

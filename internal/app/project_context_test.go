@@ -112,6 +112,28 @@ func TestSaveProjectConfig_PersistsObsidianFields(t *testing.T) {
 	}
 }
 
+func TestNormalizeProjectConfig_ModeValues(t *testing.T) {
+	base := t.TempDir()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"team", "multi-agent"},
+		{"multi-agent", "multi-agent"},
+		{"standalone", "single-agent"},
+		{"single-agent", "single-agent"},
+		{"", "single-agent"},
+		{"invalid", "single-agent"},
+	}
+	for _, tc := range tests {
+		cfg := ProjectConfig{DefaultMode: tc.input}
+		norm := normalizeProjectConfig(cfg, base)
+		if got := norm.DefaultMode; got != tc.want {
+			t.Errorf("normalizeProjectConfig(DefaultMode=%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
 func TestInitProject_MigratesLegacyDotAgent8(t *testing.T) {
 	base := t.TempDir()
 	legacy := filepath.Join(base, ".agent8")
