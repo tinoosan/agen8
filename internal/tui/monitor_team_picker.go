@@ -64,6 +64,12 @@ func (m *monitorModel) openTeamPicker() tea.Cmd {
 	for runID := range m.teamRoleByRunID {
 		runIDs = append(runIDs, runID)
 	}
+	// When team has one agent, ensure current run is in the list.
+	if len(runIDs) == 0 {
+		if r := strings.TrimSpace(m.runID); r != "" && !strings.HasPrefix(r, "team:") {
+			runIDs = append(runIDs, r)
+		}
+	}
 	for _, runID := range runIDs {
 		runID = strings.TrimSpace(runID)
 		if runID == "" {

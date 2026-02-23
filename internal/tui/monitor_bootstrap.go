@@ -225,11 +225,34 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		return nil, err
 	}
 
+	teamID := ""
+	teamRunIDs := []string{}
+	teamRoleByRunID := map[string]string{}
+	teamCoordinatorRunID := ""
+	teamCoordinatorRole := ""
 	if r, err := sessionService.LoadRun(ctx, runID); err == nil {
 		runStatus = r.Status
 		runSessionID = strings.TrimSpace(r.SessionID)
 		if r.Runtime != nil {
 			runProfile = strings.TrimSpace(r.Runtime.Profile)
+			if tid := strings.TrimSpace(r.Runtime.TeamID); tid != "" {
+				if manifest, err := loadTeamManifest(ctx, cfg, tid); err == nil && manifest != nil {
+					teamID = tid
+					teamCoordinatorRunID = strings.TrimSpace(manifest.CoordinatorRun)
+					teamCoordinatorRole = strings.TrimSpace(manifest.CoordinatorRole)
+					for _, role := range manifest.Roles {
+						rid := strings.TrimSpace(role.RunID)
+						if rid == "" {
+							continue
+						}
+						teamRunIDs = append(teamRunIDs, rid)
+						teamRoleByRunID[rid] = strings.TrimSpace(role.RoleName)
+					}
+					if profileID := strings.TrimSpace(manifest.ProfileID); profileID != "" && runProfile == "" {
+						runProfile = profileID
+					}
+				}
+			}
 		}
 	}
 
@@ -252,6 +275,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		ctx:                         ctx,
 		cfg:                         cfg,
 		runID:                       runID,
+		teamID:                      teamID,
 		rpcEndpoint:                 monitorRPCEndpoint(),
 		runStatus:                   runStatus,
 		result:                      result,
@@ -304,7 +328,10 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		sessionTotalsReloadDebounce: 150 * time.Millisecond,
 		seenOutboxByTask:            map[string]struct{}{},
 		seenEventIDs:                map[string]time.Time{},
-		teamRoleByRunID:             map[string]string{},
+		teamRunIDs:                  teamRunIDs,
+		teamRoleByRunID:             teamRoleByRunID,
+		teamCoordinatorRunID:        teamCoordinatorRunID,
+		teamCoordinatorRole:         teamCoordinatorRole,
 		teamEventCursor:             map[string]int64{},
 		teamEventFailCount:          map[string]int{},
 		teamEventRetryAfter:         map[string]time.Time{},

@@ -316,7 +316,7 @@ type monitorModel struct {
 	newSessionWizardOpen        bool
 	newSessionWizardStep        int        // 0 = choose mode, 1 = choose profile
 	newSessionWizardList        list.Model // step 0 list
-	newSessionWizardMode        string     // "standalone" or "team" (set after step 0)
+	newSessionWizardMode        string     // "single-agent" or "multi-agent" (set after step 0)
 	newSessionWizardProfileList list.Model // step 1 list
 
 	// Command palette (inline autocomplete above composer)
@@ -548,14 +548,20 @@ func (m *monitorModel) Init() tea.Cmd {
 		m.rpcChecking = true
 		return tea.Batch(m.tick(), m.checkRPCHealthCmd(false), m.openNewSessionWizard())
 	}
-	cmds := []tea.Cmd{m.listenEvent(), m.listenErr(), m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage()}
-	if strings.TrimSpace(m.teamID) == "" {
-		cmds = append(cmds, m.loadChildRuns())
-	}
-	if strings.TrimSpace(m.teamID) != "" {
-		cmds = append(cmds, m.loadTeamStatus(), m.loadTeamEvents(), m.loadPlanFilesCmd(), m.loadTeamManifestCmd())
-	}
-	return tea.Batch(cmds...)
+	// Attached = always has team. Load team context and child runs (subagents).
+	return tea.Batch(
+		m.listenEvent(),
+		m.listenErr(),
+		m.tick(),
+		m.loadInboxPage(),
+		m.loadOutboxPage(),
+		m.loadActivityPage(),
+		m.loadChildRuns(),
+		m.loadTeamStatus(),
+		m.loadTeamEvents(),
+		m.loadPlanFilesCmd(),
+		m.loadTeamManifestCmd(),
+	)
 }
 
 func (m *monitorModel) isDetached() bool {

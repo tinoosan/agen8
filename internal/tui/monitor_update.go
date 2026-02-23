@@ -55,10 +55,8 @@ func (m *monitorModel) handleWindowAndTick(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(cmds...)
 		}
-		if strings.TrimSpace(m.teamID) != "" {
-			return m, tea.Batch(m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage(), m.loadTeamStatus(), m.loadTeamEvents(), m.loadPlanFilesCmd(), m.loadTeamManifestCmd())
-		}
-		return m, m.tick()
+		// Attached = always has team.
+		return m, tea.Batch(m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage(), m.loadTeamStatus(), m.loadTeamEvents(), m.loadPlanFilesCmd(), m.loadTeamManifestCmd())
 
 	case rpcHealthMsg:
 		m.rpcChecking = false
@@ -174,12 +172,9 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 		cmds := []tea.Cmd{
 			m.loadActivityPage(),
 			m.loadSessionTotalsCmd(),
+			m.loadTeamEvents(),
+			m.loadChildRuns(),
 			m.scheduleUIRefresh(),
-		}
-		if strings.TrimSpace(m.teamID) != "" {
-			cmds = append(cmds, m.loadTeamEvents())
-		} else {
-			cmds = append(cmds, m.loadChildRuns())
 		}
 		return m, tea.Batch(cmds...)
 

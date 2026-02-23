@@ -1621,26 +1621,35 @@ func TestMonitorView_NoClipping_100x30_Compact(t *testing.T) {
 	}
 }
 
-func TestMonitorHandleCommand_TeamCommandOnlyInTeamMode(t *testing.T) {
+func TestMonitorHandleCommand_TeamOpensPickerWhenAttached(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
 
+	// Detached: /team returns error.
+	detached, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+	cmd := detached.handleCommand("/team")
+	if cmd == nil {
+		t.Fatalf("expected command output for /team when detached")
+	}
+	msg := cmd()
+	if linesMsg, ok := msg.(commandLinesMsg); ok && len(linesMsg.lines) > 0 {
+		if !strings.Contains(linesMsg.lines[0], "no active context") {
+			t.Fatalf("expected 'no active context' for /team when detached, got %q", linesMsg.lines[0])
+		}
+	}
+
+	// Run-focused: /team opens picker (every session is a team; may have empty teamRunIDs if run has no team).
 	m, err := newMonitorModel(ctx, cfg, "run-non-team", &MonitorResult{})
 	if err != nil {
 		t.Fatalf("newMonitorModel: %v", err)
 	}
-	cmd := m.handleCommand("/team")
-	if cmd == nil {
-		t.Fatalf("expected command output for /team in non-team mode")
-	}
-	msg := cmd()
-	linesMsg, ok := msg.(commandLinesMsg)
-	if !ok || len(linesMsg.lines) == 0 {
-		t.Fatalf("expected commandLinesMsg with error text, got %#v", msg)
-	}
-	if !strings.Contains(linesMsg.lines[0], "only available in multi-agent monitor") {
-		t.Fatalf("unexpected command response: %q", linesMsg.lines[0])
+	_ = m.handleCommand("/team")
+	if !m.teamPickerOpen {
+		t.Fatalf("expected team picker to open for /team when attached")
 	}
 
 	tm, err := newTeamMonitorModel(ctx, cfg, "team-a", &MonitorResult{})

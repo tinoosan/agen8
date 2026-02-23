@@ -210,9 +210,9 @@ func cmdArtifact(m *monitorModel, rest string) tea.Cmd {
 }
 
 func cmdTeam(m *monitorModel, rest string) tea.Cmd {
-	if strings.TrimSpace(m.teamID) == "" {
+	if m.isDetached() {
 		return func() tea.Msg {
-			return commandLinesMsg{lines: []string{"[command] /team is only available in multi-agent monitor"}}
+			return commandLinesMsg{lines: []string{"[command] no active context; use /new or /sessions first"}}
 		}
 	}
 	if strings.TrimSpace(rest) != "" {
