@@ -203,6 +203,49 @@ func TestProfile_RolesForSession_WithName(t *testing.T) {
 	}
 }
 
+func TestResolveByRef(t *testing.T) {
+	profilesDir := t.TempDir()
+	generalDir := filepath.Join(profilesDir, "general")
+	if err := os.MkdirAll(generalDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(generalDir, "profile.yaml"), []byte(
+		"id: general\ndescription: General\nmodel: gpt-5\nprompts:\n  system_prompt: hi\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	// By name under profilesDir
+	p, dir, err := ResolveByRef(profilesDir, "general")
+	if err != nil {
+		t.Fatalf("ResolveByRef(general): %v", err)
+	}
+	if p == nil || p.ID != "general" {
+		t.Fatalf("profile = %+v", p)
+	}
+	if dir != generalDir {
+		t.Fatalf("dir = %q want %q", dir, generalDir)
+	}
+
+	// Empty defaults to general
+	p2, _, err := ResolveByRef(profilesDir, "")
+	if err != nil {
+		t.Fatalf("ResolveByRef(empty): %v", err)
+	}
+	if p2 == nil || p2.ID != "general" {
+		t.Fatalf("profile = %+v", p2)
+	}
+
+	// Direct path
+	p3, dir3, err := ResolveByRef(profilesDir, generalDir)
+	if err != nil {
+		t.Fatalf("ResolveByRef(path): %v", err)
+	}
+	if p3 == nil || dir3 != generalDir {
+		t.Fatalf("profile=%+v dir=%q", p3, dir3)
+	}
+}
+
 func TestLoad_TeamProfile_MissingCoordinator(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("prompt"), 0o644); err != nil {

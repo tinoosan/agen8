@@ -151,6 +151,28 @@ type RoleConfig struct {
 	Heartbeat               HeartbeatConfig  `yaml:"heartbeat,omitempty"`
 }
 
+// ResolveByRef resolves a profile reference to a loaded profile and its directory.
+// requested may be: empty (defaults to "general"), a profile name (looked up under profilesDir), or a direct path.
+// profilesDir is the base profiles directory (e.g. dataDir/profiles).
+func ResolveByRef(profilesDir, requested string) (*Profile, string, error) {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		requested = "general"
+	}
+	if st, err := os.Stat(requested); err == nil {
+		if st.IsDir() {
+			p, err := Load(requested)
+			return p, requested, err
+		}
+		dir := filepath.Dir(requested)
+		p, err := Load(requested)
+		return p, dir, err
+	}
+	dir := filepath.Join(strings.TrimSpace(profilesDir), requested)
+	p, err := Load(dir)
+	return p, dir, err
+}
+
 // Load reads one profile from a profile directory (containing profile.yaml).
 // path may be a directory or a direct path to profile.yaml.
 func Load(path string) (*Profile, error) {
