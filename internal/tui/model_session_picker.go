@@ -57,10 +57,10 @@ func renderSessionPickerLine(item list.Item, maxWidth int) string {
 	line := title
 	mode := strings.ToLower(strings.TrimSpace(it.mode))
 	switch mode {
-	case "team":
-		line += " · team"
-	case "standalone":
-		line += " · standalone"
+	case "multi-agent", "team":
+		line += " · multi-agent"
+	case "single-agent", "standalone":
+		line += " · single-agent"
 	}
 	if p := strings.TrimSpace(it.profile); p != "" {
 		line += " · " + p

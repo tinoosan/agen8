@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -95,7 +94,7 @@ func (m *monitorModel) openNewSessionWizard() tea.Cmd {
 	}
 
 	items = append(items,
-		newSessionWizardItem{mode: "new", title: "New Session", desc: "choose profile; mode inferred (standalone or team)"},
+		newSessionWizardItem{mode: "new", title: "New Session", desc: "choose profile; mode inferred (single-agent or multi-agent)"},
 	)
 
 	l := list.New(items, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderNewSessionWizardLine), 0, 0)
@@ -291,8 +290,8 @@ func (m *monitorModel) selectProfileFromWizard() tea.Cmd {
 
 		m.closeNewSessionWizard()
 
-	// Infer mode from profile: single-role = standalone, multi-role = team
-	prof, err := profile.Load(filepath.Join(fsutil.GetProfilesDir(m.cfg.DataDir), ref))
+	// Infer mode from profile: single-role = single-agent, multi-role = multi-agent
+	prof, _, err := profile.ResolveByRef(fsutil.GetProfilesDir(m.cfg.DataDir), ref)
 	if err != nil || prof == nil {
 		return m.startNewStandaloneSession(ref, "")
 	}
