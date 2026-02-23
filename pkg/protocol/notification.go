@@ -10,6 +10,9 @@ const (
 	NotifyItemStarted   = "item.started"
 	NotifyItemDelta     = "item.delta"
 	NotifyItemCompleted = "item.completed"
+
+	// NotifyEventAppend is sent when the daemon appends an event to the store (real-time push).
+	NotifyEventAppend = "event.append"
 )
 
 // TurnNotificationParams are the params for turn.* notifications.

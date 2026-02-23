@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/adapter"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
@@ -70,7 +71,7 @@ type Model struct {
 	feedbackAt      time.Time
 	lastReconnectAt time.Time
 
-	contextTokens      int
+	contextTokens       int
 	contextBudgetTokens int
 
 	agentStatus     string    // "Thinking…", "Processing…", "Idle", etc.
@@ -118,6 +119,7 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		fetchSessionCmd(m.endpoint, m.sessionID),
 		fetchActivityCmd(m.endpoint, m.sessionID),
+		adapter.StartNotificationListenerCmd(m.endpoint),
 		tickCmd(),
 		animTickCmd(),
 		textinput.Blink,

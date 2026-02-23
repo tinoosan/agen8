@@ -7,39 +7,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/pkg/types"
 )
-
-func (m *monitorModel) listenEvent() tea.Cmd {
-	return func() tea.Msg {
-		if m.tailCh == nil {
-			time.Sleep(250 * time.Millisecond)
-			return tailedEventMsg{}
-		}
-		ev, ok := <-m.tailCh
-		if !ok {
-			time.Sleep(250 * time.Millisecond)
-			return tailedEventMsg{}
-		}
-		return tailedEventMsg{ev: ev}
-	}
-}
-
-func (m *monitorModel) listenErr() tea.Cmd {
-	return func() tea.Msg {
-		if m.errCh == nil {
-			time.Sleep(250 * time.Millisecond)
-			return tailErrMsg{}
-		}
-		err, ok := <-m.errCh
-		if !ok {
-			time.Sleep(250 * time.Millisecond)
-			return tailErrMsg{}
-		}
-		return tailErrMsg{err: err}
-	}
-}
 
 func (m *monitorModel) observeEvent(ev types.EventRecord) {
 	if !m.markEventSeen(ev) {

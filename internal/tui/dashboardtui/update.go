@@ -6,7 +6,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/adapter"
 )
+
+type dashboardtuiReconnectNotificationMsg struct{}
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -23,7 +26,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.followProjectState {
 			return m, tea.Batch(syncSessionCmd(m.projectRoot, m.sessionID), tickCmd())
 		}
-		return m, tea.Batch(fetchDataCmd(m.endpoint, m.sessionID), tickCmd())
+		return m, tickCmd()
+
+	case adapter.NotificationConnErrorMsg:
+		return m, tea.Sequence(
+			tea.Tick(2*time.Second, func(time.Time) tea.Msg { return dashboardtuiReconnectNotificationMsg{} }),
+		)
+
+	case dashboardtuiReconnectNotificationMsg:
+		return m, tea.Batch(
+			fetchDataCmd(m.endpoint, m.sessionID),
+			adapter.StartNotificationListenerCmd(m.endpoint),
+		)
+
+	case adapter.EventPushedMsg:
+		return m, tea.Batch(
+			fetchDataCmd(m.endpoint, m.sessionID),
+			adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh),
+		)
 
 	case sessionSyncedMsg:
 		if msg.err != nil {

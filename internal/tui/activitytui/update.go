@@ -6,7 +6,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/adapter"
 )
+
+type activitytuiReconnectNotificationMsg struct{}
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -23,7 +26,40 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.followProjectState {
 			return m, tea.Batch(syncSessionCmd(m.projectRoot, m.sessionID), tickCmd())
 		}
-		return m, tea.Batch(fetchDataCmd(m.endpoint, m.sessionID), tickCmd())
+		return m, tickCmd()
+
+	case adapter.NotificationConnErrorMsg:
+		return m, tea.Sequence(
+			tea.Tick(2*time.Second, func(time.Time) tea.Msg { return activitytuiReconnectNotificationMsg{} }),
+		)
+
+	case activitytuiReconnectNotificationMsg:
+		return m, tea.Batch(
+			fetchDataCmd(m.endpoint, m.sessionID),
+			adapter.StartNotificationListenerCmd(m.endpoint),
+		)
+
+	case adapter.EventPushedMsg:
+		act, ok := adapter.EventRecordToActivity(msg.Record)
+		if !ok {
+			return m, tea.Batch(
+				fetchDataCmd(m.endpoint, m.sessionID),
+				adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh),
+			)
+		}
+
+		prevLen := len(m.activities)
+		m.activities = append(m.activities, act)
+		m.totalCount++
+
+		if m.liveFollow && len(m.activities) > prevLen {
+			m.sel = len(m.activities) - 1
+		}
+		if m.sel >= len(m.activities) {
+			m.sel = maxInt(0, len(m.activities)-1)
+		}
+
+		return m, adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh)
 
 	case sessionSyncedMsg:
 		if msg.err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/reflow/wordwrap"
+	"github.com/tinoosan/agen8/internal/tui/adapter"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	agentstate "github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/config"
@@ -22,18 +23,6 @@ import (
 )
 
 // tailedEvent is one event from the events tail stream (RPC polling or store tail).
-type tailedEvent struct {
-	Event      types.EventRecord
-	NextOffset int64
-}
-
-type tailedEventMsg struct {
-	ev tailedEvent
-}
-
-type tailErrMsg struct {
-	err error
-}
 
 type commandLinesMsg struct {
 	lines []string
@@ -268,8 +257,6 @@ type monitorModel struct {
 	width                        int
 	height                       int
 	styles                       *monitorStyles
-	tailCh                       <-chan tailedEvent
-	errCh                        <-chan error
 	cancel                       context.CancelFunc
 
 	// Modal overlay state (only one modal open at a time)
@@ -546,12 +533,10 @@ const (
 func (m *monitorModel) Init() tea.Cmd {
 	if m.isDetached() {
 		m.rpcChecking = true
-		return tea.Batch(m.tick(), m.checkRPCHealthCmd(false), m.openNewSessionWizard())
+		return tea.Batch(m.tick(), m.checkRPCHealthCmd(false), m.openNewSessionWizard(), adapter.StartNotificationListenerCmd(m.rpcEndpoint))
 	}
 	// Attached = always has team. Load team context and child runs (subagents).
 	return tea.Batch(
-		m.listenEvent(),
-		m.listenErr(),
 		m.tick(),
 		m.loadInboxPage(),
 		m.loadOutboxPage(),
@@ -561,6 +546,7 @@ func (m *monitorModel) Init() tea.Cmd {
 		m.loadTeamEvents(),
 		m.loadPlanFilesCmd(),
 		m.loadTeamManifestCmd(),
+		adapter.StartNotificationListenerCmd(m.rpcEndpoint),
 	)
 }
 

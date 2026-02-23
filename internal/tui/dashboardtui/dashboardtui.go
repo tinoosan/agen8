@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/adapter"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
@@ -17,10 +18,10 @@ type Options struct {
 
 // Model is the Bubble Tea model for the full-screen dashboard TUI.
 type Model struct {
-	endpoint  string
-	sessionID string
-	width     int
-	height    int
+	endpoint           string
+	sessionID          string
+	width              int
+	height             int
 	projectRoot        string
 	followProjectState bool
 
@@ -47,12 +48,12 @@ func Run(endpoint, sessionID string, opts Options) error {
 		endpoint = protocol.DefaultRPCEndpoint
 	}
 	m := &Model{
-		endpoint:          endpoint,
-		sessionID:         sessionID,
-		projectRoot:       opts.ProjectRoot,
+		endpoint:           endpoint,
+		sessionID:          sessionID,
+		projectRoot:        opts.ProjectRoot,
 		followProjectState: opts.FollowProjectState,
-		connected:         true,
-		sessionMode:       "standalone",
+		connected:          true,
+		sessionMode:        "standalone",
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
@@ -63,6 +64,7 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		fetchDataCmd(m.endpoint, m.sessionID),
 		tickCmd(),
+		adapter.StartNotificationListenerCmd(m.endpoint),
 	)
 }
 

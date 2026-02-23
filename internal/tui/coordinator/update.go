@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/adapter"
 	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 	"github.com/tinoosan/agen8/pkg/types"
 )
@@ -31,10 +32,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.expireAgentStatus()
 		return m, tea.Batch(
 			fetchSessionCmd(m.endpoint, m.sessionID),
-			fetchActivityCmd(m.endpoint, m.sessionID),
 			fetchThinkingEventsCmd(m.endpoint, m.runID, m.lastEventSeq),
 			tickCmd(),
 		)
+
+	case adapter.NotificationConnErrorMsg:
+		return m, tea.Sequence(
+			tea.Tick(2*time.Second, func(time.Time) tea.Msg { return reconnectNotificationMsg{} }),
+		)
+
+	case reconnectNotificationMsg:
+		return m, tea.Batch(
+			fetchActivityCmd(m.endpoint, m.sessionID),
+			adapter.StartNotificationListenerCmd(m.endpoint),
+		)
+
+	case adapter.EventPushedMsg:
+		act, ok := adapter.EventRecordToActivity(msg.Record)
+		if !ok {
+			return m, tea.Batch(
+				fetchActivityCmd(m.endpoint, m.sessionID),
+				adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh),
+			)
+		}
+
+		if entry := activityToFeedEntry(act); entry != nil {
+			m.mergeActivityEntries([]feedEntry{*entry})
+			m.deriveAgentStatus()
+		}
+		return m, adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh)
 
 	case sessionLoadedMsg:
 		if msg.err != nil {

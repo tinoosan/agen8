@@ -193,13 +193,17 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		return fmt.Errorf("create session store: %w", err)
 	}
 
+	realEventsStore := eventsvc.NewService(cfg)
+	eventBroadcaster, eventBroadcastCh := NewEventBroadcaster()
+	eventsWithBroadcast := NewBroadcastingEventsAppender(realEventsStore, eventBroadcastCh)
+
 	supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
 		Cfg:              cfg,
 		Resolved:         resolved,
 		PollInterval:     poll,
 		TaskService:      nil, // set after taskService is created
 		SessionService:   nil, // set after sessionService is created
-		EventsStore:      eventsvc.NewService(cfg),
+		EventsStore:      eventsWithBroadcast,
 		MemoryStore:      memStore,
 		ConstructorStore: constructorStore,
 		LLMClient:        llmClient,
@@ -230,6 +234,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	startCodeExecConfigReloader(runCtx, cfg, nil)
 
 	go supervisor.Run(runCtx)
+	go eventBroadcaster.Run(runCtx)
 
 	agentManager := pkgagent.NewManager(sessionService, taskService, taskService)
 	agentManager.SetRuntimeController(supervisor)
@@ -240,7 +245,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		startHealthServer(runCtx, healthAddr, nil, &serverWG)
 	}
 	if protocolEnabled {
-		srvCfg := RPCServerConfig{
+		baseCfg := RPCServerConfig{
 			Cfg:            cfg,
 			Run:            types.Run{},
 			AllowAnyThread: true,
@@ -249,7 +254,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 			AgentService:   agentManager,
 			RuntimeState:   supervisor,
 			SoulService:    soulService,
-			EventsService:  eventsvc.NewService(cfg),
+			EventsService:  eventsWithBroadcast,
 			SessionPause: func(ctx context.Context, _, sessionID string) ([]string, error) {
 				return supervisor.PauseSession(ctx, sessionID)
 			},
@@ -269,15 +274,17 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 				return nil, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "control.setProfile is unavailable in team mode"}
 			},
 		}
-		srv := NewRPCServer(srvCfg)
+		srv := NewRPCServer(baseCfg)
 		go func() {
 			if err := srv.Serve(runCtx, os.Stdin, os.Stdout); err != nil && runCtx.Err() == nil {
 				log.Printf("daemon: team protocol server stopped: %v", err)
 			}
 		}()
-		tcpCfg := srvCfg
-		tcpSrv := NewRPCServer(tcpCfg)
-		if err := serveRPCOverTCP(runCtx, strings.TrimSpace(resolved.RPCListen), tcpSrv); err != nil {
+		if err := serveRPCOverTCPWithBroadcaster(runCtx, strings.TrimSpace(resolved.RPCListen), eventBroadcaster, func(notifyCh <-chan protocol.Message) RPCServerConfig {
+			c := baseCfg
+			c.NotifyCh = notifyCh
+			return c
+		}); err != nil {
 			return err
 		}
 	}

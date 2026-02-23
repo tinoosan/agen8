@@ -106,58 +106,6 @@ func eventsRPCLatestSeq(ctx context.Context, endpoint string, runID string) (int
 	return res.Seq, nil
 }
 
-// startEventsTailPoller runs a goroutine that polls events.listPaginated with AfterSeq and sends new events to the returned channel.
-func startEventsTailPoller(ctx context.Context, endpoint string, runID string, fromSeq int64) (<-chan tailedEvent, <-chan error) {
-	evCh := make(chan tailedEvent, 32)
-	errCh := make(chan error, 1)
-	go func() {
-		defer close(evCh)
-		defer close(errCh)
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-		lastSeq := fromSeq
-		failures := 0
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				evs, next, err := eventsRPCListPaginated(ctx, endpoint, runID, 100, false, lastSeq)
-				if err != nil {
-					failures++
-					backoff := 500 * time.Millisecond
-					for i := 1; i < failures; i++ {
-						backoff *= 2
-						if backoff >= 8*time.Second {
-							backoff = 8 * time.Second
-							break
-						}
-					}
-					ticker.Reset(backoff)
-					select {
-					case errCh <- err:
-					default:
-					}
-					continue
-				}
-				failures = 0
-				ticker.Reset(500 * time.Millisecond)
-				for _, e := range evs {
-					select {
-					case <-ctx.Done():
-						return
-					case evCh <- tailedEvent{Event: e, NextOffset: next}:
-					}
-				}
-				if next > lastSeq {
-					lastSeq = next
-				}
-			}
-		}
-	}()
-	return evCh, errCh
-}
-
 func newMonitorModel(ctx context.Context, cfg config.Config, runID string, result *MonitorResult) (*monitorModel, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -198,7 +146,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	activityList.SetShowHelp(false)
 	activityList.SetShowPagination(false)
 
-	tctx, cancel := context.WithCancel(ctx)
+	_, cancel := context.WithCancel(ctx)
 	endpoint := monitorRPCEndpoint()
 	// Best-effort: load a small recent window via RPC.
 	var evs []types.EventRecord
@@ -211,7 +159,6 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	if seq, err := eventsRPCLatestSeq(ctx, endpoint, runID); err == nil {
 		off = seq
 	}
-	tailCh, errCh := startEventsTailPoller(tctx, endpoint, runID, off)
 
 	runStatus := types.RunStatusSucceeded
 	runSessionID := ""
@@ -320,8 +267,6 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		stats:                       stats,
 		styles:                      defaultMonitorStyles(),
 		focusedPanel:                panelComposer,
-		tailCh:                      tailCh,
-		errCh:                       errCh,
 		cancel:                      cancel,
 		uiRefreshDebounce:           33 * time.Millisecond,
 		planReloadDebounce:          100 * time.Millisecond,

@@ -67,6 +67,8 @@ type activityLoadedMsg struct {
 	err       error
 }
 
+type reconnectNotificationMsg struct{}
+
 type goalSubmittedMsg struct {
 	goal      string
 	scope     rpcscope.ScopeState
@@ -90,6 +92,41 @@ type thinkingEventsMsg struct {
 
 type tickMsg struct{}
 type animTickMsg struct{}
+
+func activityToFeedEntry(act types.Activity) *feedEntry {
+	if isActivityPlanWrite(act.Kind, act.Path) || isActivitySummaryWrite(act.Kind, act.Path) {
+		if isActivitySummaryWrite(act.Kind, act.Path) {
+			return nil
+		}
+	}
+
+	ts := act.StartedAt
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	var fin time.Time
+	if act.FinishedAt != nil {
+		fin = *act.FinishedAt
+	}
+	var kind feedKind = feedAgent
+	if strings.TrimSpace(strings.ToLower(act.Kind)) == "user_message" {
+		kind = feedUser
+	}
+
+	return &feedEntry{
+		kind:       kind,
+		timestamp:  ts,
+		finishedAt: fin,
+		role:       activityRole(act),
+		text:       activityText(act),
+		path:       strings.TrimSpace(act.Path),
+		status:     string(act.Status),
+		opKind:     strings.TrimSpace(act.Kind),
+		sourceID:   strings.TrimSpace(act.ID),
+		isText:     isActivityText(act),
+		data:       act.Data,
+	}
+}
 
 func fetchSessionCmd(endpoint, sessionID string) tea.Cmd {
 	return func() tea.Msg {
@@ -142,39 +179,9 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 
 		entries := make([]feedEntry, 0, len(res.Activities))
 		for _, act := range res.Activities {
-			// Suppress tool operation writes to SUMMARY.md since we natively display the task.done response block.
-			if isActivityPlanWrite(act.Kind, act.Path) || isActivitySummaryWrite(act.Kind, act.Path) {
-				if isActivitySummaryWrite(act.Kind, act.Path) {
-					continue
-				}
+			if entry := activityToFeedEntry(act); entry != nil {
+				entries = append(entries, *entry)
 			}
-
-			ts := act.StartedAt
-			if ts.IsZero() {
-				ts = time.Now()
-			}
-			var fin time.Time
-			if act.FinishedAt != nil {
-				fin = *act.FinishedAt
-			}
-			var kind feedKind = feedAgent
-			if strings.TrimSpace(strings.ToLower(act.Kind)) == "user_message" {
-				kind = feedUser
-			}
-
-			entries = append(entries, feedEntry{
-				kind:       kind,
-				timestamp:  ts,
-				finishedAt: fin,
-				role:       activityRole(act),
-				text:       activityText(act),
-				path:       strings.TrimSpace(act.Path),
-				status:     string(act.Status),
-				opKind:     strings.TrimSpace(act.Kind),
-				sourceID:   strings.TrimSpace(act.ID),
-				isText:     isActivityText(act),
-				data:       act.Data,
-			})
 		}
 
 		sort.SliceStable(entries, func(i, j int) bool {
