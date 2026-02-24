@@ -1988,7 +1988,7 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 		t.Fatalf("mkdir profiles: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "startup_team", "profile.yaml"), []byte(
-		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        system_prompt: build\n",
+		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  reviewer:\n    enabled: true\n    name: reviewer\n    description: Reviewer\n    prompts:\n      system_prompt: review\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        system_prompt: build\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -2021,7 +2021,7 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 		t.Fatalf("expected team id, got %+v", out)
 	}
 	if len(out.RunIDs) != 3 {
-		t.Fatalf("expected 3 role runs (including injected reviewer), got %d", len(out.RunIDs))
+		t.Fatalf("expected 3 runs (2 roles + configured reviewer), got %d", len(out.RunIDs))
 	}
 	if _, err := os.Stat(filepath.Join(fsutil.GetTeamDir(cfg.DataDir, out.TeamID), "team.json")); err != nil {
 		t.Fatalf("expected team manifest: %v", err)
@@ -2089,7 +2089,7 @@ func TestRPCServer_SessionStart_SingleRoleTeamProfile_DoesNotInjectReviewer(t *t
 		t.Fatalf("mode=%q want single-agent", out.Mode)
 	}
 	if len(out.RunIDs) != 1 {
-		t.Fatalf("expected 1 role run (no injected reviewer), got %d", len(out.RunIDs))
+		t.Fatalf("expected 1 role run (no reviewer configured), got %d", len(out.RunIDs))
 	}
 	createdRun, err := sessStore.LoadRun(context.Background(), out.RunIDs[0])
 	if err != nil {
@@ -3058,6 +3058,12 @@ func TestRPCServer_TeamGetManifest_ReviewerFromProfileYAML(t *testing.T) {
 	profileYAML := `id: reviewer_team
 description: Team profile with explicit reviewer
 team:
+  reviewer:
+    enabled: true
+    name: qa
+    description: Reviewer
+    prompts:
+      system_prompt: review
   model: openai/gpt-5-mini
   roles:
     - name: coordinator
@@ -3065,8 +3071,7 @@ team:
       description: Lead
       prompts:
         system_prompt: lead
-    - name: qa
-      reviewer: true
+    - name: analyst
       description: Reviewer
       prompts:
         system_prompt: review

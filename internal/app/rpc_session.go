@@ -200,6 +200,7 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 	filter := state.TaskFilter{
 		TeamID:   scope.teamID,
 		RunID:    scope.runID,
+		View:     view,
 		SortBy:   "created_at",
 		SortDesc: true,
 		Limit:    clampLimit(p.Limit, 200, 2000),
@@ -236,27 +237,6 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 	total, err := s.taskService.CountTasks(ctx, filter)
 	if err != nil {
 		return protocol.TaskListResult{}, err
-	}
-	if view == "inbox" {
-		visible := make([]types.Task, 0, len(tasks))
-		for _, task := range tasks {
-			if task.Status != types.TaskStatusReviewPending {
-				visible = append(visible, task)
-				continue
-			}
-			full, gerr := s.taskService.GetTask(ctx, strings.TrimSpace(task.TaskID))
-			if gerr != nil {
-				visible = append(visible, task)
-				continue
-			}
-			source := strings.TrimSpace(fmt.Sprint(full.Metadata["source"]))
-			if source == "team.callback" || source == "subagent.callback" {
-				continue
-			}
-			visible = append(visible, task)
-		}
-		tasks = visible
-		total = len(tasks)
 	}
 	out := make([]protocol.Task, 0, len(tasks))
 	for _, t := range tasks {
@@ -296,19 +276,9 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
 	teamRoles := append([]profile.RoleConfig(nil), roles...)
-	// Single-role profiles stay single-agent; for multi-role teams we ensure a reviewer role exists.
-	if len(roles) > 1 {
-		teamRoles, _, _, err = team.EnsureReviewerRole(roles, coordinatorRole)
-		if err != nil {
-			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
-		}
-	}
-	_, coordinatorRole, err = team.ValidateTeamRoles(teamRoles)
-	if err != nil {
-		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
-	}
+	reviewerCfg, reviewerEnabled := prof.ReviewerForSession()
 	mode := "single-agent"
-	if len(teamRoles) > 1 {
+	if len(teamRoles) > 1 || reviewerEnabled {
 		mode = "multi-agent"
 	}
 	if requestedMode != "" && requestedMode != mode {
@@ -347,6 +317,7 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	}
 
 	runIDs := make([]string, 0, len(teamRoles))
+	manifestRoles := make([]team.RoleRecord, 0, len(teamRoles)+1)
 	primaryRunID := ""
 	for _, role := range teamRoles {
 		roleName := strings.TrimSpace(role.Name)
@@ -383,9 +354,46 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 			sess.Runs = append(sess.Runs, runID)
 		}
 		runIDs = append(runIDs, runID)
+		manifestRoles = append(manifestRoles, team.RoleRecord{
+			RoleName:  roleName,
+			RunID:     runID,
+			SessionID: strings.TrimSpace(sess.SessionID),
+		})
 		if strings.EqualFold(roleName, coordinatorRole) && primaryRunID == "" {
 			primaryRunID = runID
 		}
+	}
+	if reviewerEnabled && reviewerCfg != nil {
+		reviewerGoal := strings.TrimSpace(reviewerCfg.Description)
+		if reviewerGoal == "" {
+			reviewerGoal = goal
+		}
+		reviewerRun := types.NewRun(reviewerGoal, maxContext, strings.TrimSpace(sess.SessionID))
+		reviewerModel := strings.TrimSpace(reviewerCfg.Model)
+		if reviewerModel == "" {
+			reviewerModel = teamModel
+		}
+		if reviewerModel == "" {
+			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "no model resolved for reviewer"}
+		}
+		reviewerName := strings.TrimSpace(reviewerCfg.EffectiveName())
+		reviewerRun.Runtime = &types.RunRuntimeConfig{
+			Profile: strings.TrimSpace(prof.ID),
+			Model:   reviewerModel,
+			TeamID:  strings.TrimSpace(teamID),
+			Role:    reviewerName,
+		}
+		if err := s.session.SaveRun(ctx, reviewerRun); err != nil {
+			return protocol.SessionStartResult{}, err
+		}
+		reviewerRunID := strings.TrimSpace(reviewerRun.RunID)
+		sess.Runs = append(sess.Runs, reviewerRunID)
+		runIDs = append(runIDs, reviewerRunID)
+		manifestRoles = append(manifestRoles, team.RoleRecord{
+			RoleName:  reviewerName,
+			RunID:     reviewerRunID,
+			SessionID: strings.TrimSpace(sess.SessionID),
+		})
 	}
 	if primaryRunID == "" && len(runIDs) > 0 {
 		primaryRunID = runIDs[0]
@@ -401,25 +409,12 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	if err := s.workspacePreparer.PrepareTeamWorkspace(ctx, teamID); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
-	manifestRoles := make([]team.RoleRecord, 0, len(runIDs))
-	sessionID := strings.TrimSpace(sess.SessionID)
-	for i, role := range teamRoles {
-		roleName := strings.TrimSpace(role.Name)
-		if roleName == "" || i >= len(runIDs) {
-			continue
-		}
-		manifestRoles = append(manifestRoles, team.RoleRecord{
-			RoleName:  roleName,
-			RunID:     strings.TrimSpace(runIDs[i]),
-			SessionID: sessionID,
-		})
-	}
 	manifest := team.BuildManifest(teamID, strings.TrimSpace(prof.ID), coordinatorRole, primaryRunID, teamModel, manifestRoles, time.Now().UTC().Format(time.RFC3339Nano))
 	if err := s.manifestStore.Save(ctx, manifest); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
 	if goal != "" {
-		if err := team.SeedCoordinatorTask(ctx, s.taskService, sessionID, primaryRunID, teamID, coordinatorRole, goal); err != nil {
+		if err := team.SeedCoordinatorTask(ctx, s.taskService, strings.TrimSpace(sess.SessionID), primaryRunID, teamID, coordinatorRole, goal); err != nil {
 			return protocol.SessionStartResult{}, err
 		}
 	}

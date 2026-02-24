@@ -454,7 +454,7 @@ func TestMaybeCreateCoordinatorCallback_TeamWorkerCompletion_AssignsReviewer(t *
 	}
 }
 
-func TestMaybeCreateCoordinatorCallback_ReviewerFallbackToCoordinator(t *testing.T) {
+func TestMaybeCreateCoordinatorCallback_ReviewerRoleCanBeOutsideTeamRoles(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
 	if err != nil {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
@@ -485,11 +485,8 @@ func TestMaybeCreateCoordinatorCallback_ReviewerFallbackToCoordinator(t *testing
 	if err != nil {
 		t.Fatalf("expected callback task, got err=%v", err)
 	}
-	if callback.AssignedRole != "ceo" {
-		t.Fatalf("callback assignedRole=%q, want ceo", callback.AssignedRole)
-	}
-	if got := strings.TrimSpace(fmt.Sprint(callback.Metadata["reviewerFallback"])); got != "coordinator" {
-		t.Fatalf("reviewerFallback=%q", got)
+	if callback.AssignedRole != "reviewer" {
+		t.Fatalf("callback assignedRole=%q, want reviewer", callback.AssignedRole)
 	}
 }
 

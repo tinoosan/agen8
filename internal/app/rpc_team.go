@@ -253,19 +253,16 @@ func (s *RPCServer) resolveManifestReviewerRole(profileID, coordinatorRole strin
 	if err != nil || prof == nil {
 		return coordinatorRole
 	}
-	roles, err := prof.RolesForSession()
-	if err != nil || len(roles) == 0 {
-		return coordinatorRole
-	}
-	_, profileCoordinatorRole, err := team.ValidateTeamRoles(roles)
-	if err == nil {
+	roles, _ := prof.RolesForSession()
+	if _, profileCoordinatorRole, verr := team.ValidateTeamRoles(roles); verr == nil {
 		coordinatorRole = strings.TrimSpace(profileCoordinatorRole)
 	}
-	reviewerRole := strings.TrimSpace(team.ResolveReviewerRole(roles, coordinatorRole))
-	if reviewerRole == "" {
-		return coordinatorRole
+	if reviewerCfg, ok := prof.ReviewerForSession(); ok && reviewerCfg != nil {
+		if reviewerName := strings.TrimSpace(reviewerCfg.EffectiveName()); reviewerName != "" {
+			return reviewerName
+		}
 	}
-	return reviewerRole
+	return coordinatorRole
 }
 
 func (s *RPCServer) readPlanFilesForRun(ctx context.Context, run types.Run) (checklist string, checklistErr string, details string, detailsErr string) {

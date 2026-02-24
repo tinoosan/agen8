@@ -29,6 +29,8 @@ type TaskCreateTool struct {
 	RoleName        string
 	IsCoordinator   bool
 	CoordinatorRole string
+	ReviewerRole    string
+	ReviewerOnly    bool
 	ValidRoles      []string
 	// IsChildRun indicates this tool is running in a sub-agent context.
 	IsChildRun bool
@@ -419,9 +421,15 @@ func (t *TaskCreateTool) validateAssignedRole(assignedRole string) error {
 		}
 	}
 	if t.IsCoordinator {
+		if t.ReviewerOnly && strings.EqualFold(strings.TrimSpace(t.ReviewerRole), assignedRole) {
+			return fmt.Errorf("task_create.assignedRole %q is reserved for review-only workflow", assignedRole)
+		}
 		return nil
 	}
 	if assignedRole == roleName {
+		if t.ReviewerOnly && strings.EqualFold(strings.TrimSpace(t.ReviewerRole), assignedRole) {
+			return fmt.Errorf("task_create.assignedRole %q is reserved for review-only workflow", assignedRole)
+		}
 		return nil
 	}
 	if assignedRole == strings.TrimSpace(t.CoordinatorRole) {

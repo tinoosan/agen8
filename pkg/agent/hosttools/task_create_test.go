@@ -117,6 +117,30 @@ func TestTaskCreateTool_CoordinatorCanAssignAnyRole(t *testing.T) {
 	}
 }
 
+func TestTaskCreateTool_CoordinatorCannotAssignDedicatedReviewer(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-1",
+		RunID:           "run-1",
+		TeamID:          "team-1",
+		RoleName:        "ceo",
+		IsCoordinator:   true,
+		CoordinatorRole: "ceo",
+		ReviewerRole:    "reviewer",
+		ReviewerOnly:    true,
+		ValidRoles:      []string{"ceo", "cto", "reviewer"},
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"goal":         "delegate build work",
+		"taskId":       "task-coord-reviewer-blocked",
+		"assignedRole": "reviewer",
+	})
+	if _, err := tool.Execute(context.Background(), raw); err == nil {
+		t.Fatalf("expected reviewer-only assignment error")
+	}
+}
+
 func TestTaskCreateTool_CoordinatorMustSpecifyAssignedRole(t *testing.T) {
 	store := newFakeTaskStore()
 	tool := &TaskCreateTool{
@@ -283,6 +307,29 @@ func TestTaskCreateTool_WorkerCanEscalateToCoordinator(t *testing.T) {
 	task := store.tasks["task-worker-2"]
 	if task.AssignedRole != "head-analyst" {
 		t.Fatalf("expected assignedRole head-analyst, got %q", task.AssignedRole)
+	}
+}
+
+func TestTaskCreateTool_ReviewerCannotCreateSelfAssignedNormalTask(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-3",
+		RunID:           "run-reviewer",
+		TeamID:          "team-1",
+		RoleName:        "reviewer",
+		IsCoordinator:   false,
+		CoordinatorRole: "ceo",
+		ReviewerRole:    "reviewer",
+		ReviewerOnly:    true,
+		ValidRoles:      []string{"ceo", "cto", "reviewer"},
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"goal":   "do implementation work",
+		"taskId": "task-reviewer-self",
+	})
+	if _, err := tool.Execute(context.Background(), raw); err == nil {
+		t.Fatalf("expected reviewer-only assignment error")
 	}
 }
 

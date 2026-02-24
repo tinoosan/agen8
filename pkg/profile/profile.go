@@ -11,18 +11,18 @@ import (
 )
 
 type Profile struct {
-	ID                      string         `yaml:"id"`
-	Name                    string         `yaml:"name,omitempty"` // Display name for standalone profiles; used as synthetic role name when set
-	Description             string         `yaml:"description"`
-	Model                   string         `yaml:"model,omitempty"`
-	SubagentModel           string         `yaml:"subagent_model,omitempty"`
-	CodeExecOnly            bool           `yaml:"code_exec_only,omitempty"`
-	CodeExecRequiredImports []string       `yaml:"code_exec_required_imports,omitempty"`
-	AllowedTools            []string       `yaml:"allowed_tools,omitempty"`
-	Prompts                 PromptConfig   `yaml:"prompts,omitempty"`
-	Skills                  []string       `yaml:"skills,omitempty"`
+	ID                      string          `yaml:"id"`
+	Name                    string          `yaml:"name,omitempty"` // Display name for standalone profiles; used as synthetic role name when set
+	Description             string          `yaml:"description"`
+	Model                   string          `yaml:"model,omitempty"`
+	SubagentModel           string          `yaml:"subagent_model,omitempty"`
+	CodeExecOnly            bool            `yaml:"code_exec_only,omitempty"`
+	CodeExecRequiredImports []string        `yaml:"code_exec_required_imports,omitempty"`
+	AllowedTools            []string        `yaml:"allowed_tools,omitempty"`
+	Prompts                 PromptConfig    `yaml:"prompts,omitempty"`
+	Skills                  []string        `yaml:"skills,omitempty"`
 	Heartbeat               HeartbeatConfig `yaml:"heartbeat,omitempty"`
-	Team                    *TeamConfig    `yaml:"team,omitempty"`
+	Team                    *TeamConfig     `yaml:"team,omitempty"`
 }
 
 // HeartbeatConfig holds heartbeat jobs and an optional enabled flag.
@@ -131,24 +131,54 @@ func (p *Profile) EffectiveHeartbeats() []HeartbeatJob {
 }
 
 type TeamConfig struct {
-	Model string       `yaml:"model,omitempty"`
-	Roles []RoleConfig `yaml:"roles"`
+	Model    string          `yaml:"model,omitempty"`
+	Reviewer *ReviewerConfig `yaml:"reviewer,omitempty"`
+	Roles    []RoleConfig    `yaml:"roles"`
+}
+
+type ReviewerConfig struct {
+	Enabled                 bool            `yaml:"enabled,omitempty"`
+	Name                    string          `yaml:"name,omitempty"`
+	Description             string          `yaml:"description,omitempty"`
+	Prompts                 PromptConfig    `yaml:"prompts,omitempty"`
+	Skills                  []string        `yaml:"skills,omitempty"`
+	CodeExecOnly            *bool           `yaml:"code_exec_only,omitempty"`
+	CodeExecRequiredImports []string        `yaml:"code_exec_required_imports,omitempty"`
+	AllowedTools            []string        `yaml:"allowed_tools,omitempty"`
+	Model                   string          `yaml:"model,omitempty"`
+	Heartbeat               HeartbeatConfig `yaml:"heartbeat,omitempty"`
 }
 
 type RoleConfig struct {
-	Name                    string           `yaml:"name"`
-	Description             string           `yaml:"description"`
-	Prompts                 PromptConfig     `yaml:"prompts,omitempty"`
-	Skills                  []string         `yaml:"skills,omitempty"`
-	CodeExecOnly            *bool            `yaml:"code_exec_only,omitempty"`
-	CodeExecRequiredImports []string         `yaml:"code_exec_required_imports,omitempty"`
-	AllowedTools            []string         `yaml:"allowed_tools,omitempty"`
-	Model                   string           `yaml:"model,omitempty"`
-	SubagentModel           string           `yaml:"subagent_model,omitempty"`
-	Coordinator             bool             `yaml:"coordinator,omitempty"`
-	Reviewer                bool             `yaml:"reviewer,omitempty"`
-	AllowSubagents          bool             `yaml:"allow_subagents,omitempty"`
-	Heartbeat               HeartbeatConfig  `yaml:"heartbeat,omitempty"`
+	Name                    string          `yaml:"name"`
+	Description             string          `yaml:"description"`
+	Prompts                 PromptConfig    `yaml:"prompts,omitempty"`
+	Skills                  []string        `yaml:"skills,omitempty"`
+	CodeExecOnly            *bool           `yaml:"code_exec_only,omitempty"`
+	CodeExecRequiredImports []string        `yaml:"code_exec_required_imports,omitempty"`
+	AllowedTools            []string        `yaml:"allowed_tools,omitempty"`
+	Model                   string          `yaml:"model,omitempty"`
+	SubagentModel           string          `yaml:"subagent_model,omitempty"`
+	Coordinator             bool            `yaml:"coordinator,omitempty"`
+	AllowSubagents          bool            `yaml:"allow_subagents,omitempty"`
+	Heartbeat               HeartbeatConfig `yaml:"heartbeat,omitempty"`
+}
+
+func (r ReviewerConfig) EffectiveName() string {
+	name := strings.TrimSpace(r.Name)
+	if name == "" {
+		return "reviewer"
+	}
+	return name
+}
+
+func (p *Profile) ReviewerForSession() (*ReviewerConfig, bool) {
+	if p == nil || p.Team == nil || p.Team.Reviewer == nil || !p.Team.Reviewer.Enabled {
+		return nil, false
+	}
+	reviewer := *p.Team.Reviewer
+	reviewer.Name = reviewer.EffectiveName()
+	return &reviewer, true
 }
 
 // ResolveByRef resolves a profile reference to a loaded profile and its directory.
@@ -236,6 +266,21 @@ func (p Profile) Normalize(profileDir string) (Profile, error) {
 	}
 	if p.Team != nil {
 		p.Team.Model = strings.TrimSpace(p.Team.Model)
+		if p.Team.Reviewer != nil {
+			r := p.Team.Reviewer
+			r.Name = strings.TrimSpace(r.Name)
+			r.Description = strings.TrimSpace(r.Description)
+			r.Prompts.SystemPrompt = strings.TrimSpace(r.Prompts.SystemPrompt)
+			r.Prompts.SystemPromptPath = strings.TrimSpace(r.Prompts.SystemPromptPath)
+			r.Model = strings.TrimSpace(r.Model)
+			r.CodeExecRequiredImports = normalizeStringList(r.CodeExecRequiredImports)
+			r.AllowedTools = normalizeStringList(r.AllowedTools)
+			r.Skills = normalizeStringList(r.Skills)
+			for j := range r.Heartbeat.Jobs {
+				r.Heartbeat.Jobs[j].Name = strings.TrimSpace(r.Heartbeat.Jobs[j].Name)
+				r.Heartbeat.Jobs[j].Goal = strings.TrimSpace(r.Heartbeat.Jobs[j].Goal)
+			}
+		}
 		for i := range p.Team.Roles {
 			r := &p.Team.Roles[i]
 			r.Name = strings.TrimSpace(r.Name)
@@ -290,7 +335,6 @@ func (p Profile) Validate(profileDir string) error {
 		}
 		seenRoles := map[string]struct{}{}
 		coordinators := 0
-		reviewers := 0
 		for i, role := range p.Team.Roles {
 			ref := fmt.Sprintf("profile %s role[%d]", p.ID, i)
 			if role.Name == "" {
@@ -324,15 +368,24 @@ func (p Profile) Validate(profileDir string) error {
 			if role.Coordinator {
 				coordinators++
 			}
-			if role.Reviewer {
-				reviewers++
-			}
 		}
 		if coordinators != 1 {
 			return fmt.Errorf("profile %s: exactly one team role must set coordinator: true", p.ID)
 		}
-		if reviewers > 1 {
-			return fmt.Errorf("profile %s: at most one team role may set reviewer: true", p.ID)
+		if p.Team.Reviewer != nil && p.Team.Reviewer.Enabled {
+			reviewerName := p.Team.Reviewer.EffectiveName()
+			if _, ok := seenRoles[strings.ToLower(reviewerName)]; ok {
+				return fmt.Errorf("profile %s: team.reviewer.name %q collides with team role name", p.ID, reviewerName)
+			}
+			if strings.TrimSpace(p.Team.Reviewer.Description) == "" {
+				return fmt.Errorf("profile %s: team.reviewer.description is required when reviewer is enabled", p.ID)
+			}
+			if strings.TrimSpace(p.Team.Reviewer.Prompts.SystemPrompt) == "" && strings.TrimSpace(p.Team.Reviewer.Prompts.SystemPromptPath) == "" {
+				return fmt.Errorf("profile %s: team.reviewer.prompts.system_prompt or system_prompt_path is required when reviewer is enabled", p.ID)
+			}
+			if err := validatePromptPath(profileDir, p.Team.Reviewer.Prompts.SystemPromptPath, fmt.Sprintf("profile %s reviewer", p.ID)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

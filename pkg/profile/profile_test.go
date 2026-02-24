@@ -301,7 +301,7 @@ team:
 	}
 }
 
-func TestLoad_TeamProfile_RejectsMultipleReviewers(t *testing.T) {
+func TestLoad_TeamProfile_RejectsReviewerNameCollision(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("prompt"), 0o644); err != nil {
 		t.Fatalf("write prompt: %v", err)
@@ -310,16 +310,16 @@ func TestLoad_TeamProfile_RejectsMultipleReviewers(t *testing.T) {
 id: team-test
 description: Team profile
 team:
+  reviewer:
+    enabled: true
+    name: lead
+    description: Reviewer
+    prompts:
+      system_prompt_path: prompt.md
   roles:
     - name: lead
       coordinator: true
-      reviewer: true
       description: Lead
-      prompts:
-        system_prompt_path: prompt.md
-    - name: qa
-      reviewer: true
-      description: QA
       prompts:
         system_prompt_path: prompt.md
 `
@@ -327,7 +327,7 @@ team:
 		t.Fatalf("write profile: %v", err)
 	}
 	if _, err := Load(dir); err == nil {
-		t.Fatalf("expected multiple reviewer validation error")
+		t.Fatalf("expected reviewer name collision validation error")
 	}
 }
 

@@ -1376,7 +1376,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				"retryCount":        float64(0),
 			},
 		}
-		group = batchGroupScope{mode: "standalone", parentTaskID: batchParentTaskID, waveID: batchWaveID, reviewerID: parentRunID}
+		group = batchGroupScope{mode: "agent", parentTaskID: batchParentTaskID, waveID: batchWaveID, reviewerID: parentRunID}
 	} else {
 		coordinatorRole := strings.TrimSpace(s.cfg.CoordinatorRole)
 		reviewerRole := strings.TrimSpace(s.cfg.ReviewerRole)
@@ -1384,7 +1384,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			reviewerRole = coordinatorRole
 		}
 		fallbackToCoordinator := false
-		if reviewerRole != "" && !strings.EqualFold(reviewerRole, coordinatorRole) && !containsRoleCI(s.cfg.TeamRoles, reviewerRole) {
+		if reviewerRole == "" {
 			reviewerRole = coordinatorRole
 			fallbackToCoordinator = true
 		}
@@ -1512,7 +1512,7 @@ func (s *Session) collectStagedBatchGroups(ctx context.Context) []batchGroupScop
 		}
 		switch source {
 		case "subagent.callback":
-			group.mode = "standalone"
+			group.mode = "agent"
 			group.reviewerID = strings.TrimSpace(task.AssignedTo)
 		case "team.callback":
 			group.mode = "team"
@@ -1734,7 +1734,7 @@ func (s *Session) listBatchExpectedTasks(ctx context.Context, group batchGroupSc
 		if isCallbackSource(metadataString(task.Metadata, "source")) {
 			continue
 		}
-		if group.mode == "standalone" {
+		if group.mode == "agent" {
 			if metadataString(task.Metadata, "source") != "spawn_worker" {
 				continue
 			}
@@ -1775,13 +1775,13 @@ func (s *Session) listBatchCallbacks(ctx context.Context, group batchGroupScope)
 			continue
 		}
 		source := metadataString(task.Metadata, "source")
-		if group.mode == "standalone" && source != "subagent.callback" {
+		if group.mode == "agent" && source != "subagent.callback" {
 			continue
 		}
 		if group.mode == "team" && source != "team.callback" {
 			continue
 		}
-		if group.mode == "standalone" && strings.TrimSpace(task.AssignedTo) != group.reviewerID {
+		if group.mode == "agent" && strings.TrimSpace(task.AssignedTo) != group.reviewerID {
 			continue
 		}
 		if group.mode == "team" && strings.TrimSpace(task.AssignedRole) != group.reviewerID {
@@ -1825,7 +1825,7 @@ func (s *Session) hasOpenSyntheticBatchCallback(ctx context.Context, group batch
 		if !waveMatches(group.parentTaskID, group.waveID, metadataString(task.Metadata, "batchWaveId")) {
 			continue
 		}
-		if group.mode == "standalone" && strings.TrimSpace(task.AssignedTo) != group.reviewerID {
+		if group.mode == "agent" && strings.TrimSpace(task.AssignedTo) != group.reviewerID {
 			continue
 		}
 		if group.mode == "team" && strings.TrimSpace(task.AssignedRole) != group.reviewerID {

@@ -69,46 +69,21 @@ func TestValidateTeamRoles(t *testing.T) {
 	})
 }
 
-func TestEnsureReviewerRole(t *testing.T) {
-	t.Run("uses explicit reviewer", func(t *testing.T) {
-		roles := []profile.RoleConfig{
-			{Name: "ceo", Coordinator: true},
-			{Name: "qa", Reviewer: true},
-		}
-		out, reviewer, injected, err := EnsureReviewerRole(roles, "ceo")
-		if err != nil {
-			t.Fatalf("EnsureReviewerRole: %v", err)
-		}
-		if injected {
-			t.Fatalf("expected no injection")
-		}
-		if reviewer != "qa" {
-			t.Fatalf("reviewer=%q", reviewer)
-		}
-		if len(out) != 2 {
-			t.Fatalf("roles len=%d", len(out))
-		}
-	})
-
-	t.Run("injects virtual reviewer when missing", func(t *testing.T) {
-		roles := []profile.RoleConfig{
-			{Name: "ceo", Coordinator: true},
-			{Name: "builder"},
-		}
-		out, reviewer, injected, err := EnsureReviewerRole(roles, "ceo")
-		if err != nil {
-			t.Fatalf("EnsureReviewerRole: %v", err)
-		}
-		if !injected {
-			t.Fatalf("expected injection")
-		}
-		if reviewer != VirtualReviewerRoleName {
-			t.Fatalf("reviewer=%q", reviewer)
-		}
-		if len(out) != 3 {
-			t.Fatalf("roles len=%d", len(out))
-		}
-	})
+func TestResolveReviewerRole(t *testing.T) {
+	p := &profile.Profile{
+		Team: &profile.TeamConfig{
+			Reviewer: &profile.ReviewerConfig{
+				Enabled: true,
+				Name:    "quality-reviewer",
+			},
+		},
+	}
+	if got := ResolveReviewerRole(p, "ceo"); got != "quality-reviewer" {
+		t.Fatalf("ResolveReviewerRole() = %q", got)
+	}
+	if got := ResolveReviewerRole(&profile.Profile{}, "ceo"); got != "ceo" {
+		t.Fatalf("fallback reviewer = %q", got)
+	}
 }
 
 func TestBuildManifest(t *testing.T) {

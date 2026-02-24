@@ -25,7 +25,6 @@ type agentRow struct {
 	AssignedTasks   int
 	CompletedTasks  int
 	WorkerPresent   bool
-	LastHeartbeatAt string
 	StartedAt       string
 }
 
@@ -236,7 +235,6 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 
 			status := strings.TrimSpace(agent.Status)
 			worker := false
-			heartbeat := ""
 			model := ""
 			runTotalTokens := 0
 			runTotalCostUSD := 0.0
@@ -245,7 +243,6 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 					status = effective
 				}
 				worker = rs.WorkerPresent
-				heartbeat = strings.TrimSpace(rs.LastHeartbeatAt)
 				model = strings.TrimSpace(rs.Model)
 				runTotalTokens = rs.RunTotalTokens
 				runTotalCostUSD = rs.RunTotalCostUSD
@@ -274,7 +271,6 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 				AssignedTasks:   assignedTasks,
 				CompletedTasks:  completedTasks,
 				WorkerPresent:   worker,
-				LastHeartbeatAt: heartbeat,
 				StartedAt:       strings.TrimSpace(agent.StartedAt),
 			})
 		}

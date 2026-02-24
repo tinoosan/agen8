@@ -300,14 +300,21 @@ func batchItemStatusFromDecision(decision string) string {
 	}
 }
 
+type taskReviewInput struct {
+	TaskID   string `json:"taskId"`
+	Decision string `json:"decision"`
+}
+
 func (t *TaskReviewTool) handleApprove(ctx context.Context, task types.Task) (types.HostOpRequest, error) {
 	task.Metadata["reviewDecision"] = "approve"
 	_ = t.Store.UpdateTask(ctx, task)
 
+	input, _ := json.Marshal(taskReviewInput{TaskID: task.TaskID, Decision: "approve"})
 	return types.HostOpRequest{
-		Op:   types.HostOpToolResult,
-		Tag:  "task_review",
-		Text: fmt.Sprintf("Task %s approved. Sub-agent work accepted and child run will be cleaned up.", task.TaskID),
+		Op:    types.HostOpToolResult,
+		Tag:   "task_review",
+		Text:  fmt.Sprintf("Task %s approved. Sub-agent work accepted and child run will be cleaned up.", task.TaskID),
+		Input: input,
 	}, nil
 }
 
@@ -343,10 +350,12 @@ func (t *TaskReviewTool) handleRetry(ctx context.Context, task types.Task, feedb
 	task.Metadata["reviewDecision"] = "retry"
 	_ = t.Store.UpdateTask(ctx, task)
 
+	input, _ := json.Marshal(taskReviewInput{TaskID: task.TaskID, Decision: "retry"})
 	return types.HostOpRequest{
-		Op:   types.HostOpNoop,
-		Tag:  "task_review",
-		Text: fmt.Sprintf("Task %s retry initiated (attempt %d/%d). Feedback sent to sub-agent.", task.TaskID, retryCount+1, retryBudget),
+		Op:    types.HostOpToolResult,
+		Tag:   "task_review",
+		Text:  fmt.Sprintf("Task %s retry initiated (attempt %d/%d). Feedback sent to sub-agent.", task.TaskID, retryCount+1, retryBudget),
+		Input: input,
 	}, nil
 }
 
@@ -401,9 +410,11 @@ func (t *TaskReviewTool) handleEscalate(ctx context.Context, task types.Task, fe
 	task.Metadata["reviewDecision"] = "escalate"
 	_ = t.Store.UpdateTask(ctx, task)
 
+	input, _ := json.Marshal(taskReviewInput{TaskID: task.TaskID, Decision: "escalate"})
 	return types.HostOpRequest{
-		Op:   types.HostOpToolResult,
-		Tag:  "task_review",
-		Text: fmt.Sprintf("Task %s escalated. Reason: %s", task.TaskID, feedback),
+		Op:    types.HostOpToolResult,
+		Tag:   "task_review",
+		Text:  fmt.Sprintf("Task %s escalated. Reason: %s", task.TaskID, feedback),
+		Input: input,
 	}, nil
 }

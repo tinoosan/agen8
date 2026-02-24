@@ -21,8 +21,6 @@ var (
 	ErrMissingCoordinator = errors.New("team profile must define one coordinator role")
 )
 
-const VirtualReviewerRoleName = "reviewer"
-
 // RunStopper cancels a run's loop. Used by EscalateToCoordinator so the team service
 // can trigger "cancel this run" without depending on app's cancel map.
 type RunStopper interface {
@@ -109,85 +107,17 @@ func ValidateTeamRoles(roles []profile.RoleConfig) (roleNames []string, coordina
 	return out, coordinatorRole, nil
 }
 
-func ResolveReviewerRole(roles []profile.RoleConfig, coordinatorRole string) string {
+func ResolveReviewerRole(prof *profile.Profile, coordinatorRole string) string {
 	coordinatorRole = strings.TrimSpace(coordinatorRole)
-	explicitReviewer := ""
-	for _, role := range roles {
-		name := strings.TrimSpace(role.Name)
-		if name == "" {
-			continue
-		}
-		if role.Reviewer {
-			explicitReviewer = name
-			break
-		}
+	if prof == nil {
+		return coordinatorRole
 	}
-	if explicitReviewer != "" {
-		return explicitReviewer
-	}
-	for _, role := range roles {
-		name := strings.TrimSpace(role.Name)
-		if strings.EqualFold(name, VirtualReviewerRoleName) {
-			return name
+	if reviewerCfg, ok := prof.ReviewerForSession(); ok && reviewerCfg != nil {
+		if reviewer := strings.TrimSpace(reviewerCfg.EffectiveName()); reviewer != "" {
+			return reviewer
 		}
 	}
 	return coordinatorRole
-}
-
-func EnsureReviewerRole(roles []profile.RoleConfig, coordinatorRole string) (updated []profile.RoleConfig, reviewerRole string, injected bool, err error) {
-	coordinatorRole = strings.TrimSpace(coordinatorRole)
-	if coordinatorRole == "" {
-		return nil, "", false, fmt.Errorf("coordinator role is required")
-	}
-
-	explicitCount := 0
-	reviewerRole = ""
-	hasNamedReviewer := false
-	for _, role := range roles {
-		name := strings.TrimSpace(role.Name)
-		if name == "" {
-			continue
-		}
-		if strings.EqualFold(name, VirtualReviewerRoleName) {
-			hasNamedReviewer = true
-		}
-		if role.Reviewer {
-			explicitCount++
-			if reviewerRole == "" {
-				reviewerRole = name
-			}
-		}
-	}
-	if explicitCount > 1 {
-		return nil, "", false, fmt.Errorf("at most one reviewer role is allowed")
-	}
-	if reviewerRole != "" {
-		return append([]profile.RoleConfig(nil), roles...), reviewerRole, false, nil
-	}
-	if hasNamedReviewer {
-		return append([]profile.RoleConfig(nil), roles...), VirtualReviewerRoleName, false, nil
-	}
-
-	injectedRoles := append([]profile.RoleConfig(nil), roles...)
-	injectedRoles = append(injectedRoles, profile.RoleConfig{
-		Name:        VirtualReviewerRoleName,
-		Description: "Default reviewer role that performs quality checks and callback reviews.",
-		Reviewer:    true,
-		Prompts: profile.PromptConfig{
-			SystemPrompt: strings.TrimSpace(`
-You are the reviewer for this team.
-
-Primary responsibilities:
-- Review callback tasks and decide approve/retry/escalate.
-- Verify quality, completeness, and acceptance criteria.
-- If quality is insufficient, request retries with concrete feedback.
-- If work is fundamentally blocked, escalate with a concise reason and recommendation.
-- Keep reviews concise, specific, and actionable.
-`),
-		},
-		AllowedTools: []string{"task_review", "task_create", "fs_list", "fs_read", "fs_search"},
-	})
-	return injectedRoles, VirtualReviewerRoleName, true, nil
 }
 
 // BuildManifest builds a Manifest from role records and metadata.

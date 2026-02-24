@@ -2,6 +2,26 @@ id: dev_team
 description: Software development team that ships products end-to-end — scoping, design, engineering, testing, and deployment.
 team:
   model: moonshotai/kimi-k2.5
+  reviewer:
+    enabled: true
+    name: reviewer
+    description: Dedicated review runtime for team-level batch callback reviews.
+    prompts:
+      system_prompt: |
+        You are the dedicated reviewer for this team.
+
+        Review synthetic batch callback tasks only.
+        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
+        After finishing a batch review, hand off to the coordinator via the system handoff task.
+    code_exec_only: true
+    allowed_tools:
+      - task_review
+      - task_create
+      - fs_list
+      - fs_read
+      - fs_search
+    skills:
+      - reviewing
   roles:
     - name: product-manager
       coordinator: true
@@ -60,7 +80,6 @@ team:
 
     - name: qa-engineer
       model: moonshotai/kimi-k2.5
-      reviewer: true
       code_exec_only: true
       allowed_tools:
         - shell_exec

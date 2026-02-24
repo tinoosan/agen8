@@ -123,6 +123,16 @@ func FormatRequestTitle(d map[string]string) string {
 			return "Obsidian " + cmd
 		}
 		return "Obsidian"
+	case "task_review":
+		taskID := strings.TrimSpace(d["taskId"])
+		decision := strings.TrimSpace(d["decision"])
+		if taskID != "" && decision != "" {
+			return fmt.Sprintf("Review task %s (%s)", taskID, decision)
+		}
+		if taskID != "" {
+			return "Review task " + taskID
+		}
+		return "Review task"
 	default:
 		if op != "" && path != "" {
 			return op + " " + path

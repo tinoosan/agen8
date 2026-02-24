@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -458,6 +459,14 @@ func (m *Manager) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewe
 	if reviewerIdentity == "" {
 		reviewerIdentity = "reviewer"
 	}
+	preBatch, preErr := m.store.GetTask(ctx, batchTaskID)
+	if preErr == nil && metadataBool(preBatch.Metadata, "batchClosed") {
+		handoffTaskID := strings.TrimSpace(metadataString(preBatch.Metadata, "batchHandoffTaskId"))
+		if handoffTaskID == "" {
+			handoffTaskID = "review-handoff-" + batchTaskID
+		}
+		return handoffTaskID, nil
+	}
 	closer, ok := m.store.(batchCloseStore)
 	if !ok {
 		return "", fmt.Errorf("task store does not support atomic batch close")
@@ -469,8 +478,10 @@ func (m *Manager) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewe
 	if strings.TrimSpace(handoffTaskID) == "" {
 		return "", fmt.Errorf("atomic batch close did not return handoff task id")
 	}
+	closedBatch, batchErr := m.store.GetTask(ctx, batchTaskID)
 	if m.events != nil {
 		now := time.Now().UTC()
+		decisionIDs := batchDecisionTaskIDs(closedBatch.Metadata)
 		_ = m.events.Append(ctx, types.EventRecord{
 			EventID:   uuid.NewString(),
 			Type:      "callback.batch.closed",
@@ -487,12 +498,88 @@ func (m *Manager) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewe
 				"closeTimestamp": now.Format(time.RFC3339Nano),
 			},
 		})
+		receiptData := map[string]string{
+			"taskId":            batchTaskID,
+			"batchTaskId":       batchTaskID,
+			"batchWaveId":       metadataString(closedBatch.Metadata, "batchWaveId"),
+			"handoffTaskId":     strings.TrimSpace(handoffTaskID),
+			"approved":          fmt.Sprintf("%d", approved),
+			"retry":             fmt.Sprintf("%d", retried),
+			"escalate":          fmt.Sprintf("%d", escalated),
+			"reviewedBy":        reviewerIdentity,
+			"batchCloseTxnId":   metadataString(closedBatch.Metadata, "batchCloseTxnId"),
+			"reviewedItemCount": fmt.Sprintf("%d", len(decisionIDs)),
+			"reviewedItemIds":   strings.Join(decisionIDs, ","),
+			"receiptTimestamp":  now.Format(time.RFC3339Nano),
+		}
+		_ = m.events.Append(ctx, types.EventRecord{
+			EventID:   uuid.NewString(),
+			Type:      "review.closure.receipt",
+			Message:   "Batch review closure receipt recorded",
+			Timestamp: now,
+			Data:      receiptData,
+		})
 	}
 	if handoffTask, err := m.store.GetTask(ctx, strings.TrimSpace(handoffTaskID)); err == nil {
 		m.notifyWake(handoffTask)
 	}
-	if batchTask, err := m.store.GetTask(ctx, batchTaskID); err == nil {
+	if batchErr == nil {
+		m.notifyWake(closedBatch)
+	} else if batchTask, err := m.store.GetTask(ctx, batchTaskID); err == nil {
 		m.notifyWake(batchTask)
 	}
 	return handoffTaskID, nil
+}
+
+func metadataString(meta map[string]any, key string) string {
+	if len(meta) == 0 {
+		return ""
+	}
+	raw, ok := meta[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(raw))
+}
+
+func metadataBool(meta map[string]any, key string) bool {
+	if len(meta) == 0 {
+		return false
+	}
+	raw, ok := meta[key]
+	if !ok || raw == nil {
+		return false
+	}
+	switch v := raw.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	default:
+		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(v)), "true")
+	}
+}
+
+func batchDecisionTaskIDs(meta map[string]any) []string {
+	if len(meta) == 0 {
+		return nil
+	}
+	raw, ok := meta["batchItemDecisions"]
+	if !ok || raw == nil {
+		return nil
+	}
+	decisions, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(decisions))
+	for taskID := range decisions {
+		taskID = strings.TrimSpace(taskID)
+		if taskID == "" {
+			continue
+		}
+		out = append(out, taskID)
+	}
+	sort.Strings(out)
+	return out
 }

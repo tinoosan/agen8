@@ -520,27 +520,33 @@ func (s *SQLiteTaskStore) CloseBatchAndHandoffAtomic(ctx context.Context, batchT
 	if len(artifacts) > 0 {
 		reviewSummaryPath = strings.TrimSpace(artifacts[0])
 	}
+	reviewArtifactPaths := extractReviewArtifactPaths(items)
+	if reviewSummaryPath == "" && len(reviewArtifactPaths) > 0 {
+		reviewSummaryPath = strings.TrimSpace(reviewArtifactPaths[0])
+	}
 	handoffMetadata := map[string]any{
-		"source":            "review.handoff",
-		"batchTaskId":       batchTaskID,
-		"batchParentTaskId": metadataString(metadata, "batchParentTaskId"),
-		"batchWaveId":       metadataString(metadata, "batchWaveId"),
-		"reviewerRole":      reviewerIdentity,
-		"reviewSummaryPath": reviewSummaryPath,
-		"approvedCount":     approved,
-		"retryCount":        retried,
-		"escalateCount":     escalated,
+		"source":              "review.handoff",
+		"batchTaskId":         batchTaskID,
+		"batchParentTaskId":   metadataString(metadata, "batchParentTaskId"),
+		"batchWaveId":         metadataString(metadata, "batchWaveId"),
+		"reviewerRole":        reviewerIdentity,
+		"reviewSummaryPath":   reviewSummaryPath,
+		"reviewArtifactPaths": reviewArtifactPaths,
+		"approvedCount":       approved,
+		"retryCount":          retried,
+		"escalateCount":       escalated,
 	}
 	handoffMetadataJSON, _ := json.Marshal(handoffMetadata)
 	handoffInputs := map[string]any{
-		"batchTaskId":       batchTaskID,
-		"batchParentTaskId": metadataString(metadata, "batchParentTaskId"),
-		"batchWaveId":       metadataString(metadata, "batchWaveId"),
-		"reviewSummary":     strings.TrimSpace(reviewSummary),
-		"reviewSummaryPath": reviewSummaryPath,
-		"approvedCount":     approved,
-		"retryCount":        retried,
-		"escalateCount":     escalated,
+		"batchTaskId":         batchTaskID,
+		"batchParentTaskId":   metadataString(metadata, "batchParentTaskId"),
+		"batchWaveId":         metadataString(metadata, "batchWaveId"),
+		"reviewSummary":       strings.TrimSpace(reviewSummary),
+		"reviewSummaryPath":   reviewSummaryPath,
+		"reviewArtifactPaths": reviewArtifactPaths,
+		"approvedCount":       approved,
+		"retryCount":          retried,
+		"escalateCount":       escalated,
 	}
 	handoffInputsJSON, _ := json.Marshal(handoffInputs)
 	handoffGoal := "REVIEW HANDOFF: Batch review completed. Review report is ready; coordinator can resume orchestration and next-step delegation."
@@ -555,6 +561,12 @@ func (s *SQLiteTaskStore) CloseBatchAndHandoffAtomic(ctx context.Context, batchT
 		handoffAssignedType = "role"
 		handoffAssignedRole = coordinatorRole
 		handoffAssignedTo = coordinatorRole
+		if coordinatorRunID, coordinatorSessionID := resolveCoordinatorRunForTeamTx(ctx, tx, strings.TrimSpace(teamID), coordinatorRole); coordinatorRunID != "" {
+			runID = coordinatorRunID
+			if strings.TrimSpace(coordinatorSessionID) != "" {
+				sessionID = coordinatorSessionID
+			}
+		}
 	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT OR IGNORE INTO tasks (
@@ -587,6 +599,55 @@ func (s *SQLiteTaskStore) CloseBatchAndHandoffAtomic(ctx context.Context, batchT
 		return "", 0, 0, 0, err
 	}
 	return handoffTaskID, approved, retried, escalated, nil
+}
+
+func extractReviewArtifactPaths(items []any) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 8)
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		if item == nil {
+			continue
+		}
+		arts, _ := item["artifacts"].([]any)
+		for _, av := range arts {
+			p := strings.TrimSpace(fmt.Sprint(av))
+			if p == "" {
+				continue
+			}
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			seen[p] = struct{}{}
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func resolveCoordinatorRunForTeamTx(ctx context.Context, tx *sql.Tx, teamID, coordinatorRole string) (runID, sessionID string) {
+	teamID = strings.TrimSpace(teamID)
+	coordinatorRole = strings.TrimSpace(coordinatorRole)
+	if teamID == "" || coordinatorRole == "" {
+		return "", ""
+	}
+	var resolvedRunID, resolvedSessionID string
+	err := tx.QueryRowContext(ctx, `
+		SELECT run_id, COALESCE(session_id, '')
+		FROM runs
+		WHERE COALESCE(json_extract(run_json, '$.runtime.teamId'), '') = ?
+		  AND LOWER(COALESCE(json_extract(run_json, '$.runtime.role'), '')) = LOWER(?)
+		  AND COALESCE(parent_run_id, '') = ''
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, teamID, coordinatorRole).Scan(&resolvedRunID, &resolvedSessionID)
+	if err != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(resolvedRunID), strings.TrimSpace(resolvedSessionID)
 }
 
 func parseTime(raw string) time.Time {
@@ -890,11 +951,16 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 	}
 	switch strings.ToLower(strings.TrimSpace(filter.View)) {
 	case "inbox":
-		q += " AND status = ?"
-		args = append(args, string(types.TaskStatusPending))
+		if len(filter.Status) == 0 {
+			q += " AND status IN (?, ?, ?)"
+			args = append(args, string(types.TaskStatusPending), string(types.TaskStatusActive), string(types.TaskStatusReviewPending))
+		}
+		q += " AND COALESCE(json_extract(metadata_json, '$.source'), '') NOT IN ('team.callback', 'subagent.callback')"
 	case "outbox":
-		q += " AND status IN (?, ?, ?)"
-		args = append(args, string(types.TaskStatusSucceeded), string(types.TaskStatusFailed), string(types.TaskStatusCanceled))
+		if len(filter.Status) == 0 {
+			q += " AND status IN (?, ?, ?)"
+			args = append(args, string(types.TaskStatusSucceeded), string(types.TaskStatusFailed), string(types.TaskStatusCanceled))
+		}
 	}
 	if len(filter.Status) != 0 {
 		ph := make([]string, 0, len(filter.Status))
@@ -1027,11 +1093,16 @@ func (s *SQLiteTaskStore) CountTasks(ctx context.Context, filter TaskFilter) (in
 	}
 	switch strings.ToLower(strings.TrimSpace(filter.View)) {
 	case "inbox":
-		q += " AND status = ?"
-		args = append(args, string(types.TaskStatusPending))
+		if len(filter.Status) == 0 {
+			q += " AND status IN (?, ?, ?)"
+			args = append(args, string(types.TaskStatusPending), string(types.TaskStatusActive), string(types.TaskStatusReviewPending))
+		}
+		q += " AND COALESCE(json_extract(metadata_json, '$.source'), '') NOT IN ('team.callback', 'subagent.callback')"
 	case "outbox":
-		q += " AND status IN (?, ?, ?)"
-		args = append(args, string(types.TaskStatusSucceeded), string(types.TaskStatusFailed), string(types.TaskStatusCanceled))
+		if len(filter.Status) == 0 {
+			q += " AND status IN (?, ?, ?)"
+			args = append(args, string(types.TaskStatusSucceeded), string(types.TaskStatusFailed), string(types.TaskStatusCanceled))
+		}
 	}
 	if len(filter.Status) != 0 {
 		ph := make([]string, 0, len(filter.Status))

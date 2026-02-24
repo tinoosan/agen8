@@ -490,6 +490,18 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 				argPreview = truncate(u, maxInt(8, inner-len(verb)-8))
 				argItalic = true
 			}
+		} else if opLower == "obsidian" && e.data != nil {
+			if cmd := strings.TrimSpace(e.data["command"]); cmd != "" {
+				argPreview = truncate(cmd, maxInt(8, inner-len(verb)-8))
+			}
+		} else if opLower == "task_create" && e.data != nil {
+			if goal := strings.TrimSpace(e.data["goal"]); goal != "" {
+				argPreview = truncate(goal, maxInt(8, inner-len(verb)-8))
+			}
+		} else if opLower == "task_review" && e.data != nil {
+			if id := strings.TrimSpace(e.data["taskId"]); id != "" {
+				argPreview = truncate(id, maxInt(8, inner-len(verb)-8))
+			}
 		} else if e.path != "" && isPathBasedOp(e.opKind) {
 			argPreview = truncate(e.path, maxInt(8, inner-len(verb)-8))
 		} else {
@@ -528,6 +540,18 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 					if u := strings.TrimSpace(e.bridgeSingleData["url"]); u != "" {
 						bridgeArg = truncate(u, maxInt(8, inner-len(bridgeVerb)-8))
 						bridgeArgItalic = true
+					}
+				} else if bridgeOpLower == "obsidian" && e.bridgeSingleData != nil {
+					if cmd := strings.TrimSpace(e.bridgeSingleData["command"]); cmd != "" {
+						bridgeArg = truncate(cmd, maxInt(8, inner-len(bridgeVerb)-8))
+					}
+				} else if bridgeOpLower == "task_create" && e.bridgeSingleData != nil {
+					if goal := strings.TrimSpace(e.bridgeSingleData["goal"]); goal != "" {
+						bridgeArg = truncate(goal, maxInt(8, inner-len(bridgeVerb)-8))
+					}
+				} else if bridgeOpLower == "task_review" && e.bridgeSingleData != nil {
+					if id := strings.TrimSpace(e.bridgeSingleData["taskId"]); id != "" {
+						bridgeArg = truncate(id, maxInt(8, inner-len(bridgeVerb)-8))
 					}
 				} else if e.bridgeSinglePath != "" && isPathBasedOp(e.bridgeSingleOpKind) {
 					bridgeArg = truncate(e.bridgeSinglePath, maxInt(8, inner-len(bridgeVerb)-8))

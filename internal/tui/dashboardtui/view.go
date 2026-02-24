@@ -110,9 +110,6 @@ func (m *Model) renderHeader() string {
 
 	if strings.TrimSpace(m.teamID) != "" && !m.isNarrow() {
 		line += kit.StyleDim.Render("  ·  team: ") + styleAccent.Render(kit.TruncateRight(m.teamID, 12))
-		if reviewer := strings.TrimSpace(m.reviewerRole); reviewer != "" {
-			line += kit.StyleDim.Render("  ·  reviewer: ") + styleAccent.Render(kit.TruncateRight(reviewer, 14))
-		}
 	}
 	if m.lastErr != "" {
 		line += kit.StyleDim.Render("  ·  ") + styleErr.Render("err: "+truncate(m.lastErr, 40))
@@ -424,7 +421,6 @@ func (m *Model) renderDetailBody(width, height int) string {
 		kit.StyleStatusKey.Render("Session:   ") + kit.StyleStatusValue.Render(fallback(m.sessionID, "-")),
 		kit.StyleStatusKey.Render("Mode:      ") + kit.StyleStatusValue.Render(fallback(m.sessionMode, "standalone")),
 		kit.StyleStatusKey.Render("Team:      ") + kit.StyleStatusValue.Render(fallback(m.teamID, "-")),
-		kit.StyleStatusKey.Render("Reviewer:  ") + kit.StyleStatusValue.Render(fallback(m.reviewerRole, "-")),
 		kit.StyleStatusKey.Render("Run:       ") + kit.StyleStatusValue.Render(fallback(m.runID, "-")),
 		"",
 		kit.StyleStatusKey.Render("Totals:    ") +

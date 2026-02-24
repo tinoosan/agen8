@@ -78,6 +78,7 @@ func TestKnownOpsSorted(t *testing.T) {
 		"obsidian",
 		"shell_exec",
 		"task_create",
+		"task_review",
 		"trace_run",
 	}
 	if got := KnownOps(); !reflect.DeepEqual(got, want) {

@@ -523,6 +523,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	allowSubagents := true // standalone: allow by default (current behavior)
 	var roleCodeExecOnlyOverride *bool
 	var reviewerRole string
+	var reviewerCfg *profile.ReviewerConfig
 	if isTeam {
 		sessionRoles, err := prof.RolesForSession()
 		if err != nil {
@@ -534,7 +535,15 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		}
 		teamRoles = roles
 		coordinatorRole = coord
-		reviewerRole = team.ResolveReviewerRole(sessionRoles, coordinatorRole)
+		if cfg, ok := prof.ReviewerForSession(); ok && cfg != nil {
+			reviewerCfg = cfg
+			reviewerRole = strings.TrimSpace(cfg.EffectiveName())
+			if desc := strings.TrimSpace(cfg.Description); desc != "" {
+				teamRoleDescriptions[reviewerRole] = desc
+			}
+		} else {
+			reviewerRole = coordinatorRole
+		}
 		if roleName == "" {
 			_, roleByRun := loadTeamManifestRunRolesFromStore(parent, team.NewFileManifestStore(s.cfg), teamID)
 			roleName = strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)])
@@ -552,6 +561,13 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			teamRoleDescriptions[roleName] = "Spawned worker"
 		} else {
 			var roleCfg *profile.RoleConfig
+			if reviewerCfg != nil && strings.EqualFold(strings.TrimSpace(roleName), strings.TrimSpace(reviewerRole)) {
+				isCoordinator = false
+				allowSubagents = false
+				roleCodeExecOnlyOverride = reviewerCfg.CodeExecOnly
+				activeProfile = buildReviewerRuntimeProfile(*reviewerCfg)
+				goto resolvedTeamRole
+			}
 			for i := range sessionRoles {
 				r := sessionRoles[i]
 				name := strings.TrimSpace(r.Name)
@@ -571,6 +587,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			roleCodeExecOnlyOverride = roleCfg.CodeExecOnly
 			activeProfile = buildRoleRuntimeProfile(*roleCfg)
 		}
+	resolvedTeamRole:
 	}
 
 	soulContent := ""
@@ -886,6 +903,8 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		tool.RoleName = roleName
 		tool.IsCoordinator = isCoordinator
 		tool.CoordinatorRole = coordinatorRole
+		tool.ReviewerRole = reviewerRole
+		tool.ReviewerOnly = reviewerCfg != nil
 		tool.ValidRoles = teamRoles
 	}
 	allowSpawnWorker := !isChildRun && allowSubagents

@@ -1073,6 +1073,27 @@ func (toolResultOperation) EnrichRequestEvent(req types.HostOpRequest, reqData m
 		}
 		return
 	}
+	if tag == "task_review" {
+		reqData["op"] = "task_review"
+		storeReq["op"] = "task_review"
+		if len(req.Input) > 0 {
+			var p struct {
+				TaskID   string `json:"taskId"`
+				Decision string `json:"decision"`
+			}
+			if err := json.Unmarshal(req.Input, &p); err == nil {
+				if id := strings.TrimSpace(p.TaskID); id != "" {
+					reqData["taskId"] = id
+					storeReq["taskId"] = id
+				}
+				if d := strings.TrimSpace(p.Decision); d != "" {
+					reqData["decision"] = d
+					storeReq["decision"] = d
+				}
+			}
+		}
+		return
+	}
 	if tag != "task_create" {
 		return
 	}
@@ -1126,6 +1147,11 @@ func (toolResultOperation) EnrichResponseEvent(req types.HostOpRequest, _ types.
 			respData["command"] = cmd
 			storeResp["command"] = cmd
 		}
+		return
+	}
+	if tag == "task_review" {
+		respData["op"] = "task_review"
+		storeResp["op"] = "task_review"
 		return
 	}
 	if tag != "task_create" {
