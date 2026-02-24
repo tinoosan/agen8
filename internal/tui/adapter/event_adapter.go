@@ -61,7 +61,38 @@ func EventRecordToActivity(ev types.EventRecord) (types.Activity, bool) {
 		}
 		return act, true
 
-	case "user_message", "task.done", "agent_speak", "model_response", "task.create":
+	case "task.done":
+		summary := ""
+		taskID := ""
+		if ev.Data != nil {
+			summary = strings.TrimSpace(ev.Data["summary"])
+			taskID = strings.TrimSpace(ev.Data["taskId"])
+		}
+		ts := ev.Timestamp
+		if ts.IsZero() {
+			ts = time.Now()
+		}
+		actID := taskID
+		if actID == "" {
+			actID = ev.EventID
+		}
+		act := types.Activity{
+			ID:        actID,
+			Kind:      typ,
+			Status:    types.ActivityOK,
+			StartedAt: ts,
+			Data:      ev.Data,
+		}
+		if summary != "" {
+			act.Title = summary
+			act.OutputPreview = summary
+		}
+		if fin := ts; !fin.IsZero() {
+			act.FinishedAt = &fin
+		}
+		return act, true
+
+	case "user_message", "agent_speak", "model_response", "task.create":
 		ts := ev.Timestamp
 		if ts.IsZero() {
 			ts = time.Now()

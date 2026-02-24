@@ -48,6 +48,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case adapter.EventPushedMsg:
+		if !m.isRunInScope(msg.Record.RunID) {
+			return m, adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh)
+		}
 		act, ok := adapter.EventRecordToActivity(msg.Record)
 		if !ok {
 			return m, tea.Batch(
@@ -57,8 +60,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if entry := activityToFeedEntry(act); entry != nil {
-			m.mergeActivityEntries([]feedEntry{*entry})
-			m.deriveAgentStatus()
+			// Avoid showing the same summary twice: one task-response per sourceID (taskId).
+			if !entry.isTaskResponse || !m.feedAlreadyHasTaskResponse(entry.sourceID) {
+				m.mergeActivityEntries([]feedEntry{*entry})
+				m.deriveAgentStatus()
+			}
 		}
 		return m, adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh)
 
@@ -287,6 +293,26 @@ func (m *Model) setFeedback(msg string, kind int) {
 	m.feedbackAt = time.Now()
 }
 
+func taskResponseKeyFromEntry(e feedEntry) string {
+	if !e.isTaskResponse {
+		return ""
+	}
+	return strings.TrimSpace(e.sourceID)
+}
+
+func (m *Model) feedAlreadyHasTaskResponse(sourceID string) bool {
+	target := strings.TrimSpace(sourceID)
+	if target == "" {
+		return false
+	}
+	for _, e := range m.feed {
+		if taskResponseKeyFromEntry(e) == target {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) mergeActivityEntries(entries []feedEntry) {
 	if len(entries) == 0 {
 		return
@@ -295,11 +321,29 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 
 	others := make([]feedEntry, 0, len(m.feed))
 	for _, e := range m.feed {
-		if e.kind == feedThinking || (e.kind == feedAgent && e.isText) {
+		if e.kind == feedThinking || (e.kind == feedAgent && (e.isText || e.isTaskResponse)) {
 			others = append(others, e)
 		}
 	}
-	merged := append(others, entries...)
+	// Dedupe task-response (summary) entries: only one per sourceID so the summary is not shown twice.
+	filtered := make([]feedEntry, 0, len(entries))
+	seenTaskResponse := make(map[string]bool)
+	for _, e := range entries {
+		if e.isTaskResponse {
+			sid := strings.TrimSpace(e.sourceID)
+			if sid != "" && (m.feedAlreadyHasTaskResponse(sid) || seenTaskResponse[sid]) {
+				continue
+			}
+			if sid != "" {
+				seenTaskResponse[sid] = true
+			}
+		}
+		filtered = append(filtered, e)
+	}
+	if len(filtered) == 0 {
+		return
+	}
+	merged := append(others, filtered...)
 	sort.SliceStable(merged, func(i, j int) bool {
 		return merged[i].timestamp.Before(merged[j].timestamp)
 	})
@@ -426,8 +470,8 @@ func (m *Model) mergeThinkingEntries(entries []feedEntry) {
 		if e.sourceID != "" {
 			if e.kind == feedThinking {
 				existing["thinking_"+e.sourceID] = true
-			} else if e.kind == feedAgent && e.isTaskResponse {
-				existing["task_"+e.sourceID] = true
+			} else if key := taskResponseKeyFromEntry(e); key != "" {
+				existing["task_"+key] = true
 			}
 		}
 	}
@@ -436,12 +480,15 @@ func (m *Model) mergeThinkingEntries(entries []feedEntry) {
 		if e.sourceID != "" {
 			if e.kind == feedThinking {
 				key = "thinking_" + e.sourceID
-			} else if e.kind == feedAgent && e.isTaskResponse {
-				key = "task_" + e.sourceID
+			} else if taskKey := taskResponseKeyFromEntry(e); taskKey != "" {
+				key = "task_" + taskKey
 			}
 		}
 		if key != "" && existing[key] {
 			continue
+		}
+		if key != "" {
+			existing[key] = true
 		}
 		m.feed = append(m.feed, e)
 	}
@@ -595,4 +642,16 @@ func (m *Model) deriveAgentStatus() {
 	default:
 		m.setAgentStatus("Idle")
 	}
+}
+
+func (m *Model) isRunInScope(runID string) bool {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return true
+	}
+	current := strings.TrimSpace(m.runID)
+	if current == "" {
+		return true
+	}
+	return runID == current
 }

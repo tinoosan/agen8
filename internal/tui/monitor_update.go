@@ -96,6 +96,9 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 		)
 
 	case adapter.EventPushedMsg:
+		if !m.isEventRunInScope(msg.Record.RunID) {
+			return m, adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh)
+		}
 		if msg.Record.EventID != "" {
 			m.observeEvent(msg.Record)
 		}
@@ -269,6 +272,23 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 		return m, m.scheduleUIRefresh()
 	}
 	return m, nil
+}
+
+func (m *monitorModel) isEventRunInScope(runID string) bool {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return true
+	}
+	current := strings.TrimSpace(m.runID)
+	if current != "" && runID == current {
+		return true
+	}
+	for _, child := range m.childRuns {
+		if strings.TrimSpace(child.RunID) == runID {
+			return true
+		}
+	}
+	return false
 }
 
 var (
