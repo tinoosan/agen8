@@ -1,11 +1,12 @@
 id: dev_team
 description: Software development team that ships products end-to-end — scoping, design, engineering, testing, and deployment.
 team:
-  model: openai/gpt-5.1-codex-mini
+  model: moonshotai/kimi-k2.5
   roles:
     - name: product-manager
       coordinator: true
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
+      subagent_model: gpt-5-nano
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -27,7 +28,7 @@ team:
           goal: "Produce a consolidated sprint progress brief from completed role outputs."
 
     - name: backend-engineer
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - shell_exec
@@ -43,7 +44,7 @@ team:
         - data-engineering
 
     - name: frontend-engineer
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - shell_exec
@@ -58,7 +59,7 @@ team:
         - planning
 
     - name: qa-engineer
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       reviewer: true
       code_exec_only: true
       allowed_tools:
@@ -77,7 +78,7 @@ team:
         - automation
 
     - name: devops-engineer
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - shell_exec
@@ -93,7 +94,7 @@ team:
         - planning
 
     - name: ux-researcher
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch

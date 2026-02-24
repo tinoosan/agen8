@@ -1,11 +1,12 @@
 id: real_estate_team
 description: Real estate investment team that analyzes markets, underwrites deals, and builds portfolio strategies.
 team:
-  model: openai/gpt-5.1-codex-mini
+  model: moonshotai/kimi-k2.5
   roles:
     - name: portfolio-manager
       coordinator: true
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
+      subagent_model: gpt-5-nano
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -27,7 +28,7 @@ team:
           goal: "Produce a consolidated investment pipeline brief from completed role outputs."
 
     - name: market-analyst
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -41,7 +42,7 @@ team:
         - planning
 
     - name: deal-underwriter
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       reviewer: true
       code_exec_only: true
       allowed_tools:
@@ -58,7 +59,7 @@ team:
         - reporting
 
     - name: property-researcher
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -72,7 +73,7 @@ team:
         - reporting
 
     - name: financial-modeler
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - shell_exec
@@ -87,7 +88,7 @@ team:
         - planning
 
     - name: legal-researcher
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch

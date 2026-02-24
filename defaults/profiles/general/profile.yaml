@@ -1,13 +1,13 @@
 id: general
 description: General-purpose autonomous agent profile for broad problem solving and coordination.
 team:
-  model: openai/gpt-5.1-codex-mini
+  model: moonshotai/kimi-k2.5
   roles:
     - name: General Agent
       coordinator: true
       allow_subagents: true
-      model: openai/gpt-5.1-codex-mini
-      subagent_model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
+      subagent_model: gpt-5-nano
       code_exec_only: true
       allowed_tools:
         - shell_exec

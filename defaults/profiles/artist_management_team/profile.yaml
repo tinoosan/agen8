@@ -1,11 +1,12 @@
 id: artist_management_team
 description: Multi-role artist management team for career planning, marketing, releases, and finances.
 team:
-  model: openai/gpt-5.1-codex-mini
+  model: moonshotai/kimi-k2.5
   roles:
     - name: artist-manager
       coordinator: true
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
+      subagent_model: gpt-5-nano
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -29,7 +30,7 @@ team:
           goal: "Produce a consolidated activity brief from completed role outputs."
 
     - name: marketing-strategist
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -46,7 +47,7 @@ team:
         - automation
 
     - name: release-coordinator
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -62,7 +63,7 @@ team:
         - reporting
 
     - name: business-manager
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -78,7 +79,7 @@ team:
         - reporting
 
     - name: creative-director
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       reviewer: true
       code_exec_only: true
       allowed_tools:
@@ -97,7 +98,7 @@ team:
         - reporting
 
     - name: touring-events-manager
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch
