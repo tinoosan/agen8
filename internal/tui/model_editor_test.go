@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tinoosan/agen8/internal/store"
+	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/types"
 )
@@ -45,13 +45,13 @@ func (r *fakeVFSRunner) ListSessions(ctx context.Context) ([]types.Session, erro
 	return nil, nil
 }
 
-func (r *fakeVFSRunner) ListSessionsPaginated(ctx context.Context, filter store.SessionFilter) ([]types.Session, error) {
+func (r *fakeVFSRunner) ListSessionsPaginated(ctx context.Context, filter pkgstore.SessionFilter) ([]types.Session, error) {
 	_ = ctx
 	_ = filter
 	return nil, nil
 }
 
-func (r *fakeVFSRunner) CountSessions(ctx context.Context, filter store.SessionFilter) (int, error) {
+func (r *fakeVFSRunner) CountSessions(ctx context.Context, filter pkgstore.SessionFilter) (int, error) {
 	_ = ctx
 	_ = filter
 	return 0, nil

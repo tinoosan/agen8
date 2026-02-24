@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,6 +202,75 @@ func TestListSessionsPaginated_TitleFilter(t *testing.T) {
 	}
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 session matching 'gamma', got %d", len(sessions))
+	}
+}
+
+func TestListSessionsPaginated_ProjectRootFilter(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+
+	s1, _, err := CreateSession(cfg, "proj a goal", 64)
+	if err != nil {
+		t.Fatalf("CreateSession 1: %v", err)
+	}
+	s1.ProjectRoot = "/proj/a"
+	if err := SaveSession(cfg, s1); err != nil {
+		t.Fatalf("SaveSession 1: %v", err)
+	}
+
+	s2, _, err := CreateSession(cfg, "proj b goal", 64)
+	if err != nil {
+		t.Fatalf("CreateSession 2: %v", err)
+	}
+	s2.ProjectRoot = "/proj/b"
+	if err := SaveSession(cfg, s2); err != nil {
+		t.Fatalf("SaveSession 2: %v", err)
+	}
+
+	_, _, err = CreateSession(cfg, "no proj goal", 64)
+	if err != nil {
+		t.Fatalf("CreateSession 3: %v", err)
+	}
+	// session 3 has no ProjectRoot
+
+	filter := SessionFilter{ProjectRoot: "/proj/a", Limit: 10}
+	sessions, err := ListSessionsPaginated(cfg, filter)
+	if err != nil {
+		t.Fatalf("ListSessionsPaginated: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session for /proj/a, got %d", len(sessions))
+	}
+	if strings.TrimSpace(sessions[0].SessionID) != strings.TrimSpace(s1.SessionID) {
+		t.Fatalf("expected session %s, got %s", s1.SessionID, sessions[0].SessionID)
+	}
+
+	filter.ProjectRoot = "/proj/b"
+	sessions, err = ListSessionsPaginated(cfg, filter)
+	if err != nil {
+		t.Fatalf("ListSessionsPaginated: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session for /proj/b, got %d", len(sessions))
+	}
+	if strings.TrimSpace(sessions[0].SessionID) != strings.TrimSpace(s2.SessionID) {
+		t.Fatalf("expected session %s, got %s", s2.SessionID, sessions[0].SessionID)
+	}
+
+	filter.ProjectRoot = "/nonexistent"
+	sessions, err = ListSessionsPaginated(cfg, filter)
+	if err != nil {
+		t.Fatalf("ListSessionsPaginated: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("expected 0 sessions for /nonexistent, got %d", len(sessions))
+	}
+
+	count, err := CountSessions(cfg, SessionFilter{ProjectRoot: "/proj/a"})
+	if err != nil {
+		t.Fatalf("CountSessions: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("CountSessions project /proj/a: got %d want 1", count)
 	}
 }
 

@@ -125,6 +125,98 @@ func TestResolveProfileSkillScope_TeamRoleUnmappedFailsClosed(t *testing.T) {
 	}
 }
 
+func TestResolveProfileSkillScope_TeamRoleUnmappedWithFallbackUsesProfileSkills(t *testing.T) {
+	cfg := BuildConfig{
+		Cfg: config.Config{
+			DataDir:                             t.TempDir(),
+			SkillsUnmappedRoleFallbackToProfile: true,
+		},
+		ProfileConfig: &profile.Profile{
+			ID:     "dev_team",
+			Skills: []string{"global-coding", "planning"},
+			Team: &profile.TeamConfig{
+				Roles: []profile.RoleConfig{
+					{Name: "backend", Skills: []string{"coding"}},
+				},
+			},
+		},
+		Run: types.Run{Runtime: &types.RunRuntimeConfig{
+			TeamID: "team-1",
+			Role:   "qa",
+		}},
+	}
+	got := resolveProfileSkillScope(cfg)
+	want := []string{"global-coding", "planning"}
+	if !reflect.DeepEqual(got.AllowedSkills, want) {
+		t.Fatalf("skills mismatch: got %v want %v", got.AllowedSkills, want)
+	}
+	if got.Scope != "team-role-fallback" {
+		t.Fatalf("scope=%q", got.Scope)
+	}
+	if got.FailClosedReason != "" {
+		t.Fatalf("unexpected fail closed reason: %q", got.FailClosedReason)
+	}
+}
+
+func TestResolveProfileSkillScope_TeamRoleCaseInsensitiveMatch(t *testing.T) {
+	cfg := BuildConfig{
+		Cfg: config.Config{DataDir: t.TempDir()},
+		ProfileConfig: &profile.Profile{
+			ID:     "dev_team",
+			Skills: []string{"global"},
+			Team: &profile.TeamConfig{
+				Roles: []profile.RoleConfig{
+					{Name: "backend", Skills: []string{"coding", "data-engineering"}},
+					{Name: "qa", Skills: []string{"automation"}},
+				},
+			},
+		},
+		Run: types.Run{Runtime: &types.RunRuntimeConfig{
+			TeamID: "team-1",
+			Role:   "BACKEND",
+		}},
+	}
+	got := resolveProfileSkillScope(cfg)
+	want := []string{"coding", "data-engineering"}
+	if !reflect.DeepEqual(got.AllowedSkills, want) {
+		t.Fatalf("skills mismatch: got %v want %v", got.AllowedSkills, want)
+	}
+	if got.Scope != "team-role" {
+		t.Fatalf("scope=%q", got.Scope)
+	}
+	if got.Role != "BACKEND" {
+		t.Fatalf("role=%q", got.Role)
+	}
+}
+
+func TestResolveProfileSkillScope_TeamIDWithStandaloneProfile_UsesSyntheticRoleSkills(t *testing.T) {
+	cfg := BuildConfig{
+		Cfg: config.Config{DataDir: t.TempDir()},
+		ProfileConfig: &profile.Profile{
+			ID:          "general",
+			Name:        "General Agent",
+			Description: "standalone profile",
+			Skills:      []string{"coding", "planning"},
+		},
+		Run: types.Run{Runtime: &types.RunRuntimeConfig{
+			TeamID: "team-1",
+			Role:   "General Agent",
+		}},
+	}
+
+	got := resolveProfileSkillScope(cfg)
+	want := []string{"coding", "planning"}
+	if !reflect.DeepEqual(got.AllowedSkills, want) {
+		t.Fatalf("skills mismatch: got %v want %v", got.AllowedSkills, want)
+	}
+	if got.Scope != "team-role" {
+		t.Fatalf("scope=%q", got.Scope)
+	}
+	if got.FailClosedReason != "" {
+		t.Fatalf("unexpected fail closed reason: %q", got.FailClosedReason)
+	}
+}
+
 func TestNormalizeSkillList_DedupesExactNames(t *testing.T) {
 	got := normalizeSkillList([]string{"coding", "coding", "planning", " ", "planning"})
 	want := []string{"coding", "planning"}

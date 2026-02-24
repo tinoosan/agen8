@@ -21,7 +21,7 @@ func TestFormatRequestTitle_SharedOps(t *testing.T) {
 		{
 			name: "http with body preview",
 			data: map[string]string{"op": "http_fetch", "method": "post", "url": "https://example.com", "body": "{\n\"x\":1\n}"},
-			want: "POST [https://example.com] body: { \"x\":1 }",
+			want: "POST https://example.com body: { \"x\":1 }",
 		},
 		{
 			name: "code exec",

@@ -601,6 +601,37 @@ func TestEventMiddleware_BrowserRequestAndResponseEnrichment(t *testing.T) {
 	}
 }
 
+func TestEventMiddleware_RequestActionPropagation(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{Op: req.Op, Ok: true}
+	})
+
+	var gotReq events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:     types.HostOpFSRead,
+		Path:   "/workspace/a.txt",
+		Action: "code_exec_bridge",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if gotReq.Data["action"] != "code_exec_bridge" {
+		t.Fatalf("expected action propagation, got data=%v", gotReq.Data)
+	}
+}
+
 func TestResolveOperationForResponse_Aliases(t *testing.T) {
 	reg := newHostOperationRegistry(nil)
 
@@ -717,5 +748,46 @@ func TestEventMiddleware_ToolResultObsidianEnrichment(t *testing.T) {
 	}
 	if gotResp.Data["op"] != "obsidian" || gotResp.Data["command"] != "graph" {
 		t.Fatalf("expected obsidian response enrichment, got data=%v", gotResp.Data)
+	}
+}
+
+func TestEventMiddleware_ToolResultTaskCreateAssignedRoleEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{Op: req.Op, Ok: true, Text: req.Text}
+	})
+
+	var gotReq events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	input, err := json.Marshal(map[string]any{
+		"goal":         "Add regression test",
+		"taskId":       "task-42",
+		"assignedRole": "reviewer",
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:    types.HostOpToolResult,
+		Tag:   "task_create",
+		Text:  "Task created",
+		Input: input,
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if gotReq.Data["op"] != "task_create" || gotReq.Data["assignedRole"] != "reviewer" {
+		t.Fatalf("expected task_create assignedRole enrichment, got data=%v", gotReq.Data)
 	}
 }

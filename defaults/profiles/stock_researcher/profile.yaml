@@ -1,20 +1,47 @@
 id: stock_researcher
 description: Focused profile for equity and company-level stock research.
-model: openai/gpt-5.1-codex-mini
-subagent_model: openai/gpt-5.1-codex-mini
-code_exec_only: true
-allowed_tools:
-  - http_fetch
-  - browser
-  - task_create
-  - task_review
-skills:
-  - financial-analysis
-  - market-monitoring
-  - reporting
-prompts:
-  system_prompt_path: prompt.md
-heartbeat:
-  - name: refresh-watchlist
-    interval: 8h
-    goal: "Refresh watchlist names with notable price, estimate, or catalyst changes."
+team:
+  model: moonshotai/kimi-k2.5
+  reviewer:
+    enabled: true
+    name: reviewer
+    description: Dedicated review runtime for team-level batch callback reviews.
+    prompts:
+      system_prompt: |
+        You are the dedicated reviewer for this team.
+
+        Review synthetic batch callback tasks only.
+        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
+        After finishing a batch review, hand off to the coordinator via the system handoff task.
+    code_exec_only: true
+    allowed_tools:
+      - task_review
+      - task_create
+      - fs_list
+      - fs_read
+      - fs_search
+    skills:
+      - reviewing
+  roles:
+    - name: Stock Researcher
+      coordinator: true
+      allow_subagents: true
+      model: moonshotai/kimi-k2.5
+      subagent_model: gpt-5-nano
+      code_exec_only: true
+      allowed_tools:
+        - http_fetch
+        - browser
+        - task_create
+        - task_review
+      description: Focused profile for equity and company-level stock research.
+      prompts:
+        system_prompt_path: prompt.md
+      skills:
+        - financial-analysis
+        - market-monitoring
+        - reporting
+      heartbeat:
+        - name: refresh-watchlist
+          interval: 8h
+          goal: "Refresh watchlist names with notable price, estimate, or catalyst changes."

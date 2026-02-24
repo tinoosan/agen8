@@ -1,11 +1,32 @@
 id: startup_team
 description: Virtual startup team that ideates, validates, builds, and operates a business to generate revenue.
 team:
-  model: openai/gpt-5.1-codex-mini
+  model: moonshotai/kimi-k2.5
+  reviewer:
+    enabled: true
+    name: reviewer
+    description: Dedicated review runtime for team-level batch callback reviews.
+    prompts:
+      system_prompt: |
+        You are the dedicated reviewer for this team.
+
+        Review synthetic batch callback tasks only.
+        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
+        After finishing a batch review, hand off to the coordinator via the system handoff task.
+    code_exec_only: true
+    allowed_tools:
+      - task_review
+      - task_create
+      - fs_list
+      - fs_read
+      - fs_search
+    skills:
+      - reviewing
   roles:
     - name: ceo
       coordinator: true
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
+      subagent_model: gpt-5-nano
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -19,15 +40,16 @@ team:
         - project-management
         - reporting
       heartbeat:
-        - name: coordinator-check-in
-          interval: 10m
-          goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
-        - name: coordinator-daily-brief
-          interval: 24h
-          goal: "Produce a consolidated business progress brief from completed role outputs."
-
+        enabled: false
+        jobs:
+          - name: coordinator-check-in
+            interval: 10m
+            goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
+          - name: coordinator-daily-brief
+            interval: 24h
+            goal: "Produce a consolidated business progress brief from completed role outputs."
     - name: cto
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - shell_exec
@@ -43,7 +65,7 @@ team:
         - automation
 
     - name: growth-lead
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -58,7 +80,7 @@ team:
         - automation
 
     - name: finance-ops
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -72,7 +94,7 @@ team:
         - reporting
 
     - name: designer
-      model: openai/gpt-5.1-codex-mini
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -86,8 +108,7 @@ team:
         - reporting
 
     - name: operations-lead
-      model: openai/gpt-5.1-codex-mini
-      reviewer: true
+      model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
         - http_fetch

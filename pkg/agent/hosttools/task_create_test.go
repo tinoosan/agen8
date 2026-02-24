@@ -117,6 +117,30 @@ func TestTaskCreateTool_CoordinatorCanAssignAnyRole(t *testing.T) {
 	}
 }
 
+func TestTaskCreateTool_CoordinatorCannotAssignDedicatedReviewer(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-1",
+		RunID:           "run-1",
+		TeamID:          "team-1",
+		RoleName:        "ceo",
+		IsCoordinator:   true,
+		CoordinatorRole: "ceo",
+		ReviewerRole:    "reviewer",
+		ReviewerOnly:    true,
+		ValidRoles:      []string{"ceo", "cto", "reviewer"},
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"goal":         "delegate build work",
+		"taskId":       "task-coord-reviewer-blocked",
+		"assignedRole": "reviewer",
+	})
+	if _, err := tool.Execute(context.Background(), raw); err == nil {
+		t.Fatalf("expected reviewer-only assignment error")
+	}
+}
+
 func TestTaskCreateTool_CoordinatorMustSpecifyAssignedRole(t *testing.T) {
 	store := newFakeTaskStore()
 	tool := &TaskCreateTool{
@@ -220,10 +244,12 @@ func TestTaskCreateTool_Definition_CoordinatorRequiresAssignedRoleInDescription(
 
 func TestTaskCreateTool_Definition_WithSpawnWorker_IncludesSpawnWorker(t *testing.T) {
 	tool := &TaskCreateTool{
-		Store:       newFakeTaskStore(),
-		SessionID:   "s",
-		RunID:       "r",
-		SpawnWorker: func(context.Context, string, string, string) (string, error) { return "child", nil },
+		Store:     newFakeTaskStore(),
+		SessionID: "s",
+		RunID:     "r",
+		SpawnWorker: func(context.Context, string, string, string) (string, string, error) {
+			return "child", "Subagent-1", nil
+		},
 	}
 	def := tool.Definition()
 	params, _ := def.Function.Parameters.(map[string]any)
@@ -281,6 +307,29 @@ func TestTaskCreateTool_WorkerCanEscalateToCoordinator(t *testing.T) {
 	task := store.tasks["task-worker-2"]
 	if task.AssignedRole != "head-analyst" {
 		t.Fatalf("expected assignedRole head-analyst, got %q", task.AssignedRole)
+	}
+}
+
+func TestTaskCreateTool_ReviewerCannotCreateSelfAssignedNormalTask(t *testing.T) {
+	store := newFakeTaskStore()
+	tool := &TaskCreateTool{
+		Store:           store,
+		SessionID:       "session-3",
+		RunID:           "run-reviewer",
+		TeamID:          "team-1",
+		RoleName:        "reviewer",
+		IsCoordinator:   false,
+		CoordinatorRole: "ceo",
+		ReviewerRole:    "reviewer",
+		ReviewerOnly:    true,
+		ValidRoles:      []string{"ceo", "cto", "reviewer"},
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"goal":   "do implementation work",
+		"taskId": "task-reviewer-self",
+	})
+	if _, err := tool.Execute(context.Background(), raw); err == nil {
+		t.Fatalf("expected reviewer-only assignment error")
 	}
 }
 
@@ -358,8 +407,8 @@ func TestTaskCreateTool_SpawnWorkerMessage_UsesCanonicalSubagentPaths(t *testing
 		Store:     store,
 		SessionID: "s",
 		RunID:     "parent-run",
-		SpawnWorker: func(context.Context, string, string, string) (string, error) {
-			return "child-run", nil
+		SpawnWorker: func(context.Context, string, string, string) (string, string, error) {
+			return "child-run", "Subagent-1", nil
 		},
 	}
 	raw, _ := json.Marshal(map[string]any{
@@ -388,8 +437,8 @@ func TestTaskCreateTool_AliasSpawnWorkerAndTaskID_SpawnsWorker(t *testing.T) {
 		Store:     store,
 		SessionID: "s",
 		RunID:     "parent-run",
-		SpawnWorker: func(context.Context, string, string, string) (string, error) {
-			return "child-run", nil
+		SpawnWorker: func(context.Context, string, string, string) (string, string, error) {
+			return "child-run", "Subagent-1", nil
 		},
 	}
 	raw := json.RawMessage(`{"goal":"create hello","task_id":"task-alias-1","spawn_worker":true}`)
@@ -402,6 +451,9 @@ func TestTaskCreateTool_AliasSpawnWorkerAndTaskID_SpawnsWorker(t *testing.T) {
 	}
 	if strings.TrimSpace(task.RunID) != "child-run" {
 		t.Fatalf("expected spawned child run assignment, got %q", task.RunID)
+	}
+	if strings.TrimSpace(task.AssignedRole) != "Subagent-1" {
+		t.Fatalf("expected assignedRole Subagent-1 for spawned worker task, got %q", task.AssignedRole)
 	}
 	if strings.TrimSpace(metadataString(task.Metadata, "source")) != "spawn_worker" {
 		t.Fatalf("expected source=spawn_worker, got %v", task.Metadata["source"])
@@ -439,8 +491,8 @@ func TestTaskCreateTool_ConflictingAliasValues_ReturnsError(t *testing.T) {
 		Store:     store,
 		SessionID: "s",
 		RunID:     "r",
-		SpawnWorker: func(context.Context, string, string, string) (string, error) {
-			return "child-run", nil
+		SpawnWorker: func(context.Context, string, string, string) (string, string, error) {
+			return "child-run", "Subagent-1", nil
 		},
 	}
 	raw := json.RawMessage(`{"goal":"x","spawnWorker":true,"spawn_worker":false}`)

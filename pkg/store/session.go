@@ -10,6 +10,7 @@ import (
 type SessionFilter struct {
 	// Filtering
 	TitleContains string // case-insensitive substring match against title/current goal
+	ProjectRoot   string // exact match on session project_root (project-scoped sessions)
 	IncludeSystem bool   // include daemon/system sessions in results
 
 	// Pagination

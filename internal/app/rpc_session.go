@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -12,11 +11,9 @@ import (
 	"github.com/google/uuid"
 	implstore "github.com/tinoosan/agen8/internal/store"
 	"github.com/tinoosan/agen8/pkg/agent/state"
-	"github.com/tinoosan/agen8/pkg/fsutil"
 	"github.com/tinoosan/agen8/pkg/profile"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	pkgagent "github.com/tinoosan/agen8/pkg/services/agent"
-	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
 	"github.com/tinoosan/agen8/pkg/services/team"
 	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/timeutil"
@@ -203,17 +200,25 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 	filter := state.TaskFilter{
 		TeamID:   scope.teamID,
 		RunID:    scope.runID,
+		View:     view,
 		SortBy:   "created_at",
 		SortDesc: true,
 		Limit:    clampLimit(p.Limit, 200, 2000),
 		Offset:   max(0, p.Offset),
 	}
-	if strings.TrimSpace(scope.teamID) != "" && strings.TrimSpace(p.RunID) == "" {
+	scopeMode := strings.ToLower(strings.TrimSpace(p.Scope))
+	if scopeMode != "" && scopeMode != "team" && scopeMode != "run" {
+		return protocol.TaskListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "scope must be team or run"}
+	}
+	if scopeMode == "team" || (strings.TrimSpace(scope.teamID) != "" && strings.TrimSpace(p.RunID) == "") {
 		filter.RunID = ""
+	}
+	if scopeMode == "run" && strings.TrimSpace(scope.runID) == "" {
+		return protocol.TaskListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "run scope requires runId"}
 	}
 	switch view {
 	case "inbox":
-		filter.Status = []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive}
+		filter.Status = []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive, types.TaskStatusReviewPending}
 		filter.SortBy = "created_at"
 		filter.SortDesc = false
 	case "outbox":
@@ -244,108 +249,43 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	if _, err := s.resolveThreadID(p.ThreadID); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
-	mode := strings.ToLower(strings.TrimSpace(p.Mode))
-	if mode == "" {
-		mode = "standalone"
-	}
-	if mode != "standalone" && mode != "team" {
+	requestedMode := strings.ToLower(strings.TrimSpace(p.Mode))
+	if requestedMode != "" && requestedMode != "single-agent" && requestedMode != "multi-agent" {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{
 			Code:    protocol.CodeInvalidParams,
-			Message: "mode must be standalone or team",
+			Message: "mode must be single-agent or multi-agent",
 		}
 	}
-	if mode == "team" {
-		return s.sessionStartTeam(ctx, p)
-	}
-	if profileRef := strings.TrimSpace(p.Profile); profileRef != "" {
-		prof, _, err := resolveProfileRef(s.cfg, profileRef)
-		if err != nil {
-			prof = nil
-		}
-		if prof != nil && prof.Team != nil {
-			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "standalone mode requires a non-team profile"}
-		}
-	}
-
-	goal := strings.TrimSpace(p.Goal)
-	maxContext := s.run.MaxBytesForContext
-	if maxContext <= 0 {
-		maxContext = 8 * 1024
-	}
-	sess, run, err := s.session.Start(ctx, pkgsession.StartOptions{Goal: goal, MaxBytesForContext: maxContext})
-	if err != nil {
-		return protocol.SessionStartResult{}, err
-	}
-	sess.Mode = "standalone"
-	sess.TeamID = ""
-	sess.Profile = strings.TrimSpace(p.Profile)
-
-	activeModel := strings.TrimSpace(p.Model)
-	if activeModel == "" && run.Runtime != nil {
-		activeModel = strings.TrimSpace(run.Runtime.Model)
-	}
-	if activeModel == "" && strings.TrimSpace(p.Profile) != "" {
-		if prof, _, err := resolveProfileRef(s.cfg, strings.TrimSpace(p.Profile)); err == nil && prof != nil {
-			if m := strings.TrimSpace(prof.Model); m != "" {
-				activeModel = m
-			}
-		}
-	}
-	if activeModel != "" {
-		sess.ActiveModel = activeModel
-	}
-	ensureSessionReasoningForModel(&sess, sess.ActiveModel, "", "")
-	if err := s.session.SaveSession(ctx, sess); err != nil {
-		return protocol.SessionStartResult{}, err
-	}
-	if strings.TrimSpace(p.Profile) != "" || activeModel != "" {
-		if created, err := s.session.LoadRun(ctx, strings.TrimSpace(run.RunID)); err == nil {
-			if created.Runtime == nil {
-				created.Runtime = &types.RunRuntimeConfig{}
-			}
-			if profileRef := strings.TrimSpace(p.Profile); profileRef != "" {
-				created.Runtime.Profile = profileRef
-			}
-			if activeModel != "" {
-				created.Runtime.Model = activeModel
-			}
-			_ = s.session.SaveRun(ctx, created)
-		}
-	}
-
-	return protocol.SessionStartResult{
-		SessionID:    strings.TrimSpace(sess.SessionID),
-		PrimaryRunID: strings.TrimSpace(run.RunID),
-		Mode:         "standalone",
-		Profile:      strings.TrimSpace(p.Profile),
-		Model:        activeModel,
-		RunIDs:       []string{strings.TrimSpace(run.RunID)},
-	}, nil
-}
-
-func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStartParams) (protocol.SessionStartResult, error) {
 	profileRef := strings.TrimSpace(p.Profile)
 	if profileRef == "" {
-		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "team profile is required"}
+		profileRef = "general"
 	}
 	prof, _, err := resolveProfileRef(s.cfg, profileRef)
 	if err != nil {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "load profile: " + err.Error()}
 	}
-	if prof == nil || prof.Team == nil {
-		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "profile is not a team profile"}
+	if prof == nil {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "profile not found"}
 	}
-	_, coordinatorRole, err := team.ValidateTeamRoles(prof.Team.Roles)
+	roles, err := prof.RolesForSession()
 	if err != nil {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
-	teamRoles, _, _, err := team.EnsureReviewerRole(prof.Team.Roles, coordinatorRole)
+	_, coordinatorRole, err := team.ValidateTeamRoles(roles)
 	if err != nil {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
-	_, coordinatorRole, err = team.ValidateTeamRoles(teamRoles)
-	if err != nil {
-		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
+	teamRoles := append([]profile.RoleConfig(nil), roles...)
+	reviewerCfg, reviewerEnabled := prof.ReviewerForSession()
+	mode := "single-agent"
+	if len(teamRoles) > 1 || reviewerEnabled {
+		mode = "multi-agent"
+	}
+	if requestedMode != "" && requestedMode != mode {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{
+			Code:    protocol.CodeInvalidParams,
+			Message: fmt.Sprintf("mode %q does not match profile role count (%s)", requestedMode, mode),
+		}
 	}
 
 	goal := strings.TrimSpace(p.Goal)
@@ -355,14 +295,18 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 	}
 	sess := types.NewSession(goal)
 	sess.CurrentGoal = goal
-	sess.Mode = "team"
 	sess.Profile = strings.TrimSpace(prof.ID)
+	sess.ProjectRoot = strings.TrimSpace(p.ProjectRoot)
 	teamID := "team-" + uuid.NewString()
 	sess.TeamID = teamID
+	sess.Mode = mode
 
 	teamModel := strings.TrimSpace(p.Model)
 	if teamModel == "" {
-		teamModel = resolveTeamModel(nil, prof.Team, RunChatOptions{})
+		teamModel = prof.TeamModelForSession()
+	}
+	if teamModel == "" {
+		teamModel = strings.TrimSpace(prof.Model)
 	}
 	if teamModel != "" {
 		sess.ActiveModel = teamModel
@@ -372,8 +316,8 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 		return protocol.SessionStartResult{}, err
 	}
 
-	runtimes := make([]teamRoleRuntime, 0, len(teamRoles))
 	runIDs := make([]string, 0, len(teamRoles))
+	manifestRoles := make([]team.RoleRecord, 0, len(teamRoles)+1)
 	primaryRunID := ""
 	for _, role := range teamRoles {
 		roleName := strings.TrimSpace(role.Name)
@@ -409,49 +353,75 @@ func (s *RPCServer) sessionStartTeam(ctx context.Context, p protocol.SessionStar
 		if !exists {
 			sess.Runs = append(sess.Runs, runID)
 		}
-		runtimes = append(runtimes, teamRoleRuntime{
-			role: profile.RoleConfig{
-				Name:        roleName,
-				Description: strings.TrimSpace(role.Description),
-				Reviewer:    role.Reviewer,
-			},
-			run: run,
-		})
 		runIDs = append(runIDs, runID)
+		manifestRoles = append(manifestRoles, team.RoleRecord{
+			RoleName:  roleName,
+			RunID:     runID,
+			SessionID: strings.TrimSpace(sess.SessionID),
+		})
 		if strings.EqualFold(roleName, coordinatorRole) && primaryRunID == "" {
 			primaryRunID = runID
 		}
+	}
+	if reviewerEnabled && reviewerCfg != nil {
+		reviewerGoal := strings.TrimSpace(reviewerCfg.Description)
+		if reviewerGoal == "" {
+			reviewerGoal = goal
+		}
+		reviewerRun := types.NewRun(reviewerGoal, maxContext, strings.TrimSpace(sess.SessionID))
+		reviewerModel := strings.TrimSpace(reviewerCfg.Model)
+		if reviewerModel == "" {
+			reviewerModel = teamModel
+		}
+		if reviewerModel == "" {
+			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "no model resolved for reviewer"}
+		}
+		reviewerName := strings.TrimSpace(reviewerCfg.EffectiveName())
+		reviewerRun.Runtime = &types.RunRuntimeConfig{
+			Profile: strings.TrimSpace(prof.ID),
+			Model:   reviewerModel,
+			TeamID:  strings.TrimSpace(teamID),
+			Role:    reviewerName,
+		}
+		if err := s.session.SaveRun(ctx, reviewerRun); err != nil {
+			return protocol.SessionStartResult{}, err
+		}
+		reviewerRunID := strings.TrimSpace(reviewerRun.RunID)
+		sess.Runs = append(sess.Runs, reviewerRunID)
+		runIDs = append(runIDs, reviewerRunID)
+		manifestRoles = append(manifestRoles, team.RoleRecord{
+			RoleName:  reviewerName,
+			RunID:     reviewerRunID,
+			SessionID: strings.TrimSpace(sess.SessionID),
+		})
 	}
 	if primaryRunID == "" && len(runIDs) > 0 {
 		primaryRunID = runIDs[0]
 	}
 	if primaryRunID == "" {
-		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "team profile produced no runs"}
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "profile produced no runs"}
 	}
 	sess.CurrentRunID = primaryRunID
 	if err := s.session.SaveSession(ctx, sess); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
 
-	if err := os.MkdirAll(fsutil.GetTeamWorkspaceDir(s.cfg.DataDir, teamID), 0o755); err != nil {
+	if err := s.workspacePreparer.PrepareTeamWorkspace(ctx, teamID); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
-	roles := make([]team.RoleRecord, 0, len(runtimes))
-	for _, rt := range runtimes {
-		roles = append(roles, team.RoleRecord{
-			RoleName:  strings.TrimSpace(rt.role.Name),
-			RunID:     strings.TrimSpace(rt.run.RunID),
-			SessionID: strings.TrimSpace(rt.run.SessionID),
-		})
-	}
-	manifest := team.BuildManifest(teamID, strings.TrimSpace(prof.ID), coordinatorRole, primaryRunID, teamModel, roles, time.Now().UTC().Format(time.RFC3339Nano))
-	if err := writeTeamManifestFile(s.cfg, manifest); err != nil {
+	manifest := team.BuildManifest(teamID, strings.TrimSpace(prof.ID), coordinatorRole, primaryRunID, teamModel, manifestRoles, time.Now().UTC().Format(time.RFC3339Nano))
+	if err := s.manifestStore.Save(ctx, manifest); err != nil {
 		return protocol.SessionStartResult{}, err
+	}
+	if goal != "" {
+		if err := team.SeedCoordinatorTask(ctx, s.taskService, strings.TrimSpace(sess.SessionID), primaryRunID, teamID, coordinatorRole, goal); err != nil {
+			return protocol.SessionStartResult{}, err
+		}
 	}
 	return protocol.SessionStartResult{
 		SessionID:    strings.TrimSpace(sess.SessionID),
 		PrimaryRunID: primaryRunID,
-		Mode:         "team",
+		Mode:         sess.Mode,
 		Profile:      strings.TrimSpace(prof.ID),
 		Model:        teamModel,
 		TeamID:       teamID,
@@ -465,6 +435,7 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 	}
 	filter := pkgstore.SessionFilter{
 		TitleContains: strings.TrimSpace(p.TitleContains),
+		ProjectRoot:   strings.TrimSpace(p.ProjectRoot),
 		Limit:         clampLimit(p.Limit, 50, 500),
 		Offset:        max(0, p.Offset),
 		SortBy:        "updated_at",
@@ -504,9 +475,9 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 		}
 		if mode == "" {
 			if teamID != "" {
-				mode = "team"
+				mode = "multi-agent"
 			} else {
-				mode = "standalone"
+				mode = "single-agent"
 			}
 		}
 		totalAgents := 0
@@ -537,6 +508,7 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 			Mode:          mode,
 			TeamID:        teamID,
 			Profile:       profileID,
+			ProjectRoot:   strings.TrimSpace(sess.ProjectRoot),
 			RunningAgents: runningAgents,
 			PausedAgents:  pausedAgents,
 			TotalAgents:   totalAgents,
@@ -823,7 +795,7 @@ func (s *RPCServer) sessionClearHistory(ctx context.Context, p protocol.SessionC
 		return protocol.SessionClearHistoryResult{}, err
 	}
 	if teamID := strings.TrimSpace(scope.teamID); teamID != "" {
-		runIDs, _ := loadTeamManifestRunRoles(s.cfg.DataDir, teamID)
+		runIDs, _ := s.loadTeamManifestRunRoles(ctx, teamID)
 		if len(runIDs) == 0 && s.taskService != nil {
 			tasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{
 				TeamID:   teamID,
@@ -1261,7 +1233,7 @@ func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetT
 	}
 
 	runIDSet := map[string]struct{}{}
-	manifestRunIDs, _ := loadTeamManifestRunRoles(s.cfg.DataDir, strings.TrimSpace(scope.teamID))
+	manifestRunIDs, _ := s.loadTeamManifestRunRoles(ctx, strings.TrimSpace(scope.teamID))
 	for _, runID := range manifestRunIDs {
 		runID = strings.TrimSpace(runID)
 		if runID == "" {
@@ -1440,7 +1412,7 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 		return protocol.ActivityListResult{Activities: out, TotalCount: total, NextOffset: next}, nil
 	}
 
-	manifestRunIDs, runRole := loadTeamManifestRunRoles(s.cfg.DataDir, strings.TrimSpace(scope.teamID))
+	manifestRunIDs, runRole := s.loadTeamManifestRunRoles(ctx, strings.TrimSpace(scope.teamID))
 	runSet := map[string]struct{}{}
 	for _, runID := range manifestRunIDs {
 		runID = strings.TrimSpace(runID)

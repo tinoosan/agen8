@@ -311,6 +311,12 @@ func ListSessionsPaginated(cfg config.Config, filter SessionFilter) ([]types.Ses
 		args = append(args, pattern, pattern)
 	}
 
+	projectRoot := strings.TrimSpace(filter.ProjectRoot)
+	if projectRoot != "" {
+		query += ` AND json_extract(session_json, '$.projectRoot') = ?`
+		args = append(args, projectRoot)
+	}
+
 	// Ensure a stable ordering across pages.
 	query += fmt.Sprintf(` ORDER BY %s %s, session_id ASC`, sortCol, sortDir)
 
@@ -384,6 +390,12 @@ func CountSessions(cfg config.Config, filter SessionFilter) (int, error) {
 		query += ` AND (title LIKE ? COLLATE NOCASE OR current_goal LIKE ? COLLATE NOCASE)`
 		pattern := "%" + titleContains + "%"
 		args = append(args, pattern, pattern)
+	}
+
+	projectRoot := strings.TrimSpace(filter.ProjectRoot)
+	if projectRoot != "" {
+		query += ` AND json_extract(session_json, '$.projectRoot') = ?`
+		args = append(args, projectRoot)
 	}
 
 	var count int

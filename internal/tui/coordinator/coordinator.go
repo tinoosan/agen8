@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/adapter"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
@@ -70,7 +71,7 @@ type Model struct {
 	feedbackAt      time.Time
 	lastReconnectAt time.Time
 
-	contextTokens      int
+	contextTokens       int
 	contextBudgetTokens int
 
 	agentStatus     string    // "Thinking…", "Processing…", "Idle", etc.
@@ -78,6 +79,11 @@ type Model struct {
 
 	lastEventSeq     int64 // cursor for incremental thinking event polling
 	thinkingExpanded bool  // ctrl+o toggles all thinking blocks globally
+
+	feedGen       int      // incremented on every feed mutation; used to invalidate lineCache
+	lineCache     []string // cached output of feedLines(); valid when lineCacheGen == feedGen && lineCacheWidth == width
+	lineCacheGen  int
+	lineCacheWidth int
 
 	pickerOpen    bool
 	pickerLoading bool
@@ -118,6 +124,7 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		fetchSessionCmd(m.endpoint, m.sessionID),
 		fetchActivityCmd(m.endpoint, m.sessionID),
+		adapter.StartNotificationListenerCmd(m.endpoint),
 		tickCmd(),
 		animTickCmd(),
 		textinput.Blink,

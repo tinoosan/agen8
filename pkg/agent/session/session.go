@@ -406,11 +406,22 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 	// Backpressure: if inbox is already large, skip emitting more tasks.
 	filter := state.TaskFilter{RunID: s.cfg.RunID, Status: []types.TaskStatus{types.TaskStatusPending}}
 	if strings.TrimSpace(s.cfg.TeamID) != "" {
-		filter = state.TaskFilter{
-			TeamID:         s.cfg.TeamID,
-			AssignedToType: "role",
-			AssignedTo:     s.cfg.RoleName,
-			Status:         []types.TaskStatus{types.TaskStatusPending},
+		isChildRun := strings.TrimSpace(s.cfg.ParentRunID) != ""
+		if isChildRun {
+			filter = state.TaskFilter{
+				TeamID:         s.cfg.TeamID,
+				RunID:          s.cfg.RunID,
+				AssignedToType: "agent",
+				AssignedTo:     s.cfg.RunID,
+				Status:         []types.TaskStatus{types.TaskStatusPending},
+			}
+		} else {
+			filter = state.TaskFilter{
+				TeamID:         s.cfg.TeamID,
+				AssignedToType: "role",
+				AssignedTo:     s.cfg.RoleName,
+				Status:         []types.TaskStatus{types.TaskStatusPending},
+			}
 		}
 	}
 	if count, err := s.cfg.TaskStore.CountTasks(ctx, filter); err == nil && count > s.cfg.MaxPending {
@@ -546,25 +557,64 @@ func getTaskSource(t types.Task) string {
 	return ""
 }
 
+func pollableTaskStatuses() []types.TaskStatus {
+	return []types.TaskStatus{
+		types.TaskStatusPending,
+		types.TaskStatusReviewPending,
+	}
+}
+
+func isPollableTask(task types.Task) bool {
+	if task.Status != types.TaskStatusReviewPending {
+		return true
+	}
+	// Team-only review pipeline: only synthetic batch callbacks are reviewable.
+	source := getTaskSource(task)
+	return source == "subagent.batch.callback" || source == "team.batch.callback"
+}
+
+func filterPollableTasks(ctx context.Context, store state.TaskStore, tasks []types.Task) []types.Task {
+	out := make([]types.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if len(task.Metadata) == 0 && store != nil {
+			taskID := strings.TrimSpace(task.TaskID)
+			if taskID != "" {
+				if loaded, err := store.GetTask(ctx, taskID); err == nil {
+					task = loaded
+				}
+			}
+		}
+		if !isPollableTask(task) {
+			continue
+		}
+		out = append(out, task)
+	}
+	return out
+}
+
 func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
-	if strings.TrimSpace(s.cfg.TeamID) == "" {
+	isTeam := strings.TrimSpace(s.cfg.TeamID) != ""
+	isChildRun := strings.TrimSpace(s.cfg.ParentRunID) != ""
+	if !isTeam || isChildRun {
 		tasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+			TeamID:         strings.TrimSpace(s.cfg.TeamID),
 			RunID:          s.cfg.RunID,
 			AssignedToType: "agent",
 			AssignedTo:     s.cfg.RunID,
-			Status:         []types.TaskStatus{types.TaskStatusPending},
+			Status:         pollableTaskStatuses(),
 			SortBy:         "priority",
 			Limit:          s.cfg.MaxPending,
 		})
 		if err != nil {
 			return nil, err
 		}
+		tasks = filterPollableTasks(ctx, s.cfg.TaskStore, tasks)
 		// Prioritize subagent callbacks so the parent processes them before the overarching task.
 		sort.SliceStable(tasks, func(i, j int) bool {
 			sourceI := getTaskSource(tasks[i])
 			sourceJ := getTaskSource(tasks[j])
-			si := sourceI == "subagent.callback" || sourceI == "subagent.batch.callback"
-			sj := sourceJ == "subagent.callback" || sourceJ == "subagent.batch.callback"
+			si := isCallbackSource(sourceI)
+			sj := isCallbackSource(sourceJ)
 			if si && !sj {
 				return true
 			}
@@ -587,16 +637,56 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	tasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+	roleTasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
 		TeamID:         s.cfg.TeamID,
 		AssignedToType: "role",
 		AssignedTo:     s.cfg.RoleName,
-		Status:         []types.TaskStatus{types.TaskStatusPending},
+		Status:         pollableTaskStatuses(),
 		SortBy:         "priority",
 		Limit:          limit,
 	})
 	if err != nil {
 		return nil, err
+	}
+	roleTasks = filterPollableTasks(ctx, s.cfg.TaskStore, roleTasks)
+	// Team roles can also receive agent-addressed callback tasks (e.g. subagent callbacks
+	// routed back to the spawning run). Include those so callbacks are not missed.
+	agentTasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+		TeamID:         s.cfg.TeamID,
+		RunID:          s.cfg.RunID,
+		AssignedToType: "agent",
+		AssignedTo:     s.cfg.RunID,
+		Status:         pollableTaskStatuses(),
+		SortBy:         "priority",
+		Limit:          limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	agentTasks = filterPollableTasks(ctx, s.cfg.TaskStore, agentTasks)
+	tasks := make([]types.Task, 0, len(roleTasks)+len(agentTasks))
+	seen := map[string]struct{}{}
+	for _, task := range roleTasks {
+		id := strings.TrimSpace(task.TaskID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		tasks = append(tasks, task)
+	}
+	for _, task := range agentTasks {
+		id := strings.TrimSpace(task.TaskID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		tasks = append(tasks, task)
 	}
 	if !s.cfg.IsCoordinator {
 		return tasks, nil
@@ -605,15 +695,16 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 		TeamID:         s.cfg.TeamID,
 		AssignedToType: "team",
 		AssignedTo:     s.cfg.TeamID,
-		Status:         []types.TaskStatus{types.TaskStatusPending},
+		Status:         pollableTaskStatuses(),
 		SortBy:         "priority",
 		Limit:          limit,
 	})
 	if err != nil {
 		return nil, err
 	}
+	unassigned = filterPollableTasks(ctx, s.cfg.TaskStore, unassigned)
 	out := make([]types.Task, 0, len(tasks)+len(unassigned))
-	seen := map[string]struct{}{}
+	seen = map[string]struct{}{}
 	for _, task := range tasks {
 		if strings.TrimSpace(task.TaskID) == "" {
 			continue
@@ -1085,7 +1176,6 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	if err := s.cfg.TaskStore.CompleteTask(completeCtx, taskID, tr); err != nil {
 		return err
 	}
-	s.maybeEmitCoordinatorPolicyWarn(ctx, task, tr)
 	s.maybeCreateCoordinatorCallback(ctx, task, tr)
 
 	task.Status = tr.Status
@@ -1181,8 +1271,23 @@ type batchGroupScope struct {
 	reviewerID   string
 }
 
+type batchCloseAndHandoffStore interface {
+	CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (string, error)
+}
+
+type atomicBatchCloseAndHandoffStore interface {
+	CloseBatchAndHandoffAtomic(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (handoffTaskID string, approved, retried, escalated int, err error)
+}
+
 func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types.Task, tr types.TaskResult) {
-	if isCallbackSource(metadataString(task.Metadata, "source")) {
+	source := metadataString(task.Metadata, "source")
+	if source == "review.handoff" {
+		return
+	}
+	if source == "team.batch.callback" && tr.Status == types.TaskStatusSucceeded {
+		s.maybeCreateReviewerToCoordinatorHandoff(ctx, task, tr)
+	}
+	if isCallbackSource(source) {
 		return
 	}
 	parentRunID := strings.TrimSpace(s.cfg.ParentRunID)
@@ -1200,17 +1305,15 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 
 	callbackTaskID := "callback-" + taskID
 	now := time.Now().UTC()
-	batchMode := metadataBool(task.Metadata, "batchMode")
 	batchParentTaskID := metadataString(task.Metadata, "batchParentTaskId")
 	batchWaveID := metadataString(task.Metadata, "batchWaveId")
 	if batchParentTaskID == "" {
-		batchMode = false
+		batchParentTaskID = taskID
 	}
-	if batchMode && batchWaveID == "" {
-		// Legacy fallback: treat missing wave IDs as one implicit wave per parent task.
-		batchWaveID = "legacy-" + batchParentTaskID
+	if batchWaveID == "" {
+		// Always place callbacks in a deterministic wave so review delivery is batch-only.
+		batchWaveID = normalizeWaveID(batchParentTaskID, "")
 	}
-
 	var callback types.Task
 	var group batchGroupScope
 	if isSubagentWorker {
@@ -1266,6 +1369,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			TaskID:         callbackTaskID,
 			SessionID:      strings.TrimSpace(s.cfg.SessionID),
 			RunID:          parentRunID,
+			TeamID:         strings.TrimSpace(s.cfg.TeamID),
 			AssignedToType: "agent",
 			AssignedTo:     parentRunID,
 			CreatedBy:      strings.TrimSpace(s.cfg.RunID),
@@ -1279,6 +1383,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				"source":            "subagent.callback",
 				"callbackForTaskId": taskID,
 				"sourceRunId":       strings.TrimSpace(s.cfg.RunID),
+				"sourceTeamId":      strings.TrimSpace(s.cfg.TeamID),
 				"sourceTaskStatus":  string(tr.Status),
 				"reviewGate":        true,
 				"reviewActions":     []string{"approve", "retry", "escalate"},
@@ -1286,7 +1391,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				"retryCount":        float64(0),
 			},
 		}
-		group = batchGroupScope{mode: "standalone", parentTaskID: batchParentTaskID, waveID: batchWaveID, reviewerID: parentRunID}
+		group = batchGroupScope{mode: "agent", parentTaskID: batchParentTaskID, waveID: batchWaveID, reviewerID: parentRunID}
 	} else {
 		coordinatorRole := strings.TrimSpace(s.cfg.CoordinatorRole)
 		reviewerRole := strings.TrimSpace(s.cfg.ReviewerRole)
@@ -1294,7 +1399,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			reviewerRole = coordinatorRole
 		}
 		fallbackToCoordinator := false
-		if reviewerRole != "" && !strings.EqualFold(reviewerRole, coordinatorRole) && !containsRoleCI(s.cfg.TeamRoles, reviewerRole) {
+		if reviewerRole == "" {
 			reviewerRole = coordinatorRole
 			fallbackToCoordinator = true
 		}
@@ -1353,50 +1458,74 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 	if callback.Metadata == nil {
 		callback.Metadata = map[string]any{}
 	}
-	if batchMode {
-		callback.Status = types.TaskStatusReviewPending
-		callback.Metadata["batchMode"] = true
-		callback.Metadata["batchParentTaskId"] = batchParentTaskID
-		callback.Metadata["batchWaveId"] = batchWaveID
-		callback.Metadata["batchDelivered"] = false
-	}
+	callback.Status = types.TaskStatusReviewPending
+	callback.Metadata["batchMode"] = true
+	callback.Metadata["batchParentTaskId"] = batchParentTaskID
+	callback.Metadata["batchWaveId"] = batchWaveID
+	callback.Metadata["batchDelivered"] = false
 
 	if err := s.cfg.TaskStore.CreateTask(ctx, callback); err != nil {
 		return // idempotent via deterministic callback task id.
 	}
 
-	if !batchMode {
-		eventSource := "team.callback"
-		if isSubagentWorker {
-			eventSource = "subagent.callback"
-		}
-		s.emitTaskQueuedOnce(ctx, callbackTaskID, callback.Goal, eventSource)
-		s.emitBestEffort(ctx, events.Event{
-			Type:    eventSource + ".queued",
-			Message: "Worker completion callback queued",
-			Data: map[string]string{
-				"taskId":            callbackTaskID,
-				"callbackForTaskId": taskID,
-			},
-		})
-		if eventSource == "team.callback" {
-			if fallback, _ := callback.Metadata["reviewerFallback"].(string); strings.TrimSpace(fallback) != "" {
-				s.emitBestEffort(ctx, events.Event{
-					Type:    "team.callback.reviewer_fallback",
-					Message: "Reviewer unavailable; callback reassigned",
-					Data: map[string]string{
-						"taskId":          callbackTaskID,
-						"callbackForTask": taskID,
-						"assignedRole":    strings.TrimSpace(callback.AssignedRole),
-					},
-				})
-			}
+	s.emitBatchProgress(ctx, group)
+	s.maybeFlushBatchGroup(ctx, group)
+}
+
+func (s *Session) maybeCreateReviewerToCoordinatorHandoff(ctx context.Context, task types.Task, tr types.TaskResult) {
+	if s == nil || s.cfg.TaskStore == nil {
+		return
+	}
+	batchTaskID := strings.TrimSpace(task.TaskID)
+	if batchTaskID == "" {
+		return
+	}
+	reviewerIdentity := strings.TrimSpace(task.AssignedRole)
+	if reviewerIdentity == "" {
+		reviewerIdentity = strings.TrimSpace(s.cfg.RoleName)
+	}
+	if reviewerIdentity == "" {
+		reviewerIdentity = strings.TrimSpace(task.AssignedTo)
+	}
+	if reviewerIdentity == "" {
+		reviewerIdentity = "reviewer"
+	}
+	summary := strings.TrimSpace(tr.Summary)
+	if summary == "" {
+		summary = "Batch review completed."
+	}
+
+	if closer, ok := s.cfg.TaskStore.(batchCloseAndHandoffStore); ok {
+		if _, err := closer.CloseBatchAndHandoff(ctx, batchTaskID, reviewerIdentity, summary); err != nil {
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "callback.batch.close.error",
+				Message: "Failed to create reviewer->coordinator handoff",
+				Data: map[string]string{
+					"taskId":        batchTaskID,
+					"reviewedBy":    reviewerIdentity,
+					"closeError":    err.Error(),
+					"source":        "team.batch.callback",
+					"ensureHandoff": "true",
+				},
+			})
 		}
 		return
 	}
-
-	s.emitBatchProgress(ctx, group)
-	s.maybeFlushBatchGroup(ctx, group)
+	if atomicCloser, ok := s.cfg.TaskStore.(atomicBatchCloseAndHandoffStore); ok {
+		if _, _, _, _, err := atomicCloser.CloseBatchAndHandoffAtomic(ctx, batchTaskID, reviewerIdentity, summary); err != nil {
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "callback.batch.close.error",
+				Message: "Failed to create reviewer->coordinator handoff",
+				Data: map[string]string{
+					"taskId":        batchTaskID,
+					"reviewedBy":    reviewerIdentity,
+					"closeError":    err.Error(),
+					"source":        "team.batch.callback",
+					"ensureHandoff": "true",
+				},
+			})
+		}
+	}
 }
 
 func containsRoleCI(roles []string, want string) bool {
@@ -1454,7 +1583,7 @@ func (s *Session) collectStagedBatchGroups(ctx context.Context) []batchGroupScop
 		}
 		switch source {
 		case "subagent.callback":
-			group.mode = "standalone"
+			group.mode = "agent"
 			group.reviewerID = strings.TrimSpace(task.AssignedTo)
 		case "team.callback":
 			group.mode = "team"
@@ -1486,15 +1615,16 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 
 	expected := s.listBatchExpectedTasks(ctx, group)
 	expectedCount := len(expected)
-	if expectedCount == 0 {
-		return
-	}
 
 	callbacks := s.listBatchCallbacks(ctx, group)
 	if len(callbacks) == 0 {
 		return
 	}
 	completedCount := len(callbacks)
+	if expectedCount == 0 {
+		// Hard cutover: support singleton/non-staged sources as implicit batch-of-1.
+		expectedCount = completedCount
+	}
 	undelivered := make([]types.Task, 0, len(callbacks))
 	for _, cb := range callbacks {
 		if metadataBool(cb.Metadata, "batchDelivered") {
@@ -1535,6 +1665,8 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 		teamID = strings.TrimSpace(s.cfg.TeamID)
 		assignedRole = group.reviewerID
 		createdBy = strings.TrimSpace(s.cfg.RoleName)
+	} else if strings.TrimSpace(s.cfg.TeamID) != "" {
+		teamID = strings.TrimSpace(s.cfg.TeamID)
 	}
 
 	items := make([]any, 0, len(undelivered))
@@ -1583,6 +1715,7 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 			"batchSynthetic":      true,
 			"batchParentTaskId":   group.parentTaskID,
 			"batchWaveId":         group.waveID,
+			"coordinatorRole":     strings.TrimSpace(s.cfg.CoordinatorRole),
 			"batchExpectedCount":  expectedCount,
 			"batchCompletedCount": completedCount,
 			"batchWaveExpected":   expectedCount,
@@ -1672,7 +1805,7 @@ func (s *Session) listBatchExpectedTasks(ctx context.Context, group batchGroupSc
 		if isCallbackSource(metadataString(task.Metadata, "source")) {
 			continue
 		}
-		if group.mode == "standalone" {
+		if group.mode == "agent" {
 			if metadataString(task.Metadata, "source") != "spawn_worker" {
 				continue
 			}
@@ -1713,13 +1846,13 @@ func (s *Session) listBatchCallbacks(ctx context.Context, group batchGroupScope)
 			continue
 		}
 		source := metadataString(task.Metadata, "source")
-		if group.mode == "standalone" && source != "subagent.callback" {
+		if group.mode == "agent" && source != "subagent.callback" {
 			continue
 		}
 		if group.mode == "team" && source != "team.callback" {
 			continue
 		}
-		if group.mode == "standalone" && strings.TrimSpace(task.AssignedTo) != group.reviewerID {
+		if group.mode == "agent" && strings.TrimSpace(task.AssignedTo) != group.reviewerID {
 			continue
 		}
 		if group.mode == "team" && strings.TrimSpace(task.AssignedRole) != group.reviewerID {
@@ -1763,7 +1896,7 @@ func (s *Session) hasOpenSyntheticBatchCallback(ctx context.Context, group batch
 		if !waveMatches(group.parentTaskID, group.waveID, metadataString(task.Metadata, "batchWaveId")) {
 			continue
 		}
-		if group.mode == "standalone" && strings.TrimSpace(task.AssignedTo) != group.reviewerID {
+		if group.mode == "agent" && strings.TrimSpace(task.AssignedTo) != group.reviewerID {
 			continue
 		}
 		if group.mode == "team" && strings.TrimSpace(task.AssignedRole) != group.reviewerID {
@@ -1866,7 +1999,7 @@ func countDecisionMap(decisions map[string]any) (approved, retried, escalated in
 
 func isCallbackSource(source string) bool {
 	switch strings.TrimSpace(source) {
-	case "subagent.callback", "team.callback", "subagent.batch.callback", "team.batch.callback":
+	case "subagent.callback", "team.callback", "subagent.batch.callback", "team.batch.callback", "review.handoff":
 		return true
 	default:
 		return false

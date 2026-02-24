@@ -24,8 +24,8 @@ func TestInitProjectAndLoadContext(t *testing.T) {
 	if got := ctx.Config.DefaultProfile; got != "software_dev" {
 		t.Fatalf("default profile=%q", got)
 	}
-	if got := ctx.Config.DefaultMode; got != "team" {
-		t.Fatalf("default mode=%q", got)
+	if got := ctx.Config.DefaultMode; got != "multi-agent" {
+		t.Fatalf("default mode=%q (team normalizes to multi-agent)", got)
 	}
 	if got := ctx.Config.DefaultTeamProfile; got != "startup_team" {
 		t.Fatalf("default team profile=%q", got)
@@ -109,6 +109,28 @@ func TestSaveProjectConfig_PersistsObsidianFields(t *testing.T) {
 	}
 	if !ctx.Config.ObsidianEnabled {
 		t.Fatalf("expected obsidian enabled")
+	}
+}
+
+func TestNormalizeProjectConfig_ModeValues(t *testing.T) {
+	base := t.TempDir()
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"team", "multi-agent"},
+		{"multi-agent", "multi-agent"},
+		{"standalone", "single-agent"},
+		{"single-agent", "single-agent"},
+		{"", "single-agent"},
+		{"invalid", "single-agent"},
+	}
+	for _, tc := range tests {
+		cfg := ProjectConfig{DefaultMode: tc.input}
+		norm := normalizeProjectConfig(cfg, base)
+		if got := norm.DefaultMode; got != tc.want {
+			t.Errorf("normalizeProjectConfig(DefaultMode=%q) = %q, want %q", tc.input, got, tc.want)
+		}
 	}
 }
 

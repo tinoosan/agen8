@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/agen8/internal/store"
+	"github.com/tinoosan/agen8/pkg/types"
 )
 
 type monitorPanel struct {
@@ -76,7 +76,11 @@ func handleSubagentsPanelKey(m *monitorModel, msg tea.KeyMsg) (tea.Model, tea.Cm
 			if strings.TrimSpace(m.teamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
 				currentRunID = strings.TrimSpace(m.focusedRunID)
 			}
-			run, err := store.LoadRun(m.cfg, currentRunID)
+			var run types.Run
+			var err error
+			if m.session != nil && m.ctx != nil {
+				run, err = m.session.LoadRun(m.ctx, currentRunID)
+			}
 			if err != nil || strings.TrimSpace(run.ParentRunID) == "" {
 				return m, nil
 			}

@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/agen8/internal/store"
+	"github.com/tinoosan/agen8/internal/app"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	layoutmgr "github.com/tinoosan/agen8/internal/tui/layout"
 	"github.com/tinoosan/agen8/pkg/types"
@@ -99,15 +99,29 @@ var dashboardSideTabs = []dashboardSideTabDef{
 }
 
 func (m *monitorModel) activeDashboardSideTabs() []dashboardSideTabDef {
-	if m != nil && strings.TrimSpace(m.teamID) != "" {
-		out := make([]dashboardSideTabDef, 0, len(dashboardSideTabs))
-		for _, tab := range dashboardSideTabs {
-			if strings.EqualFold(strings.TrimSpace(tab.Name), "Subagents") {
-				continue
-			}
-			out = append(out, tab)
+	if m == nil {
+		return dashboardSideTabs
+	}
+	// Show Subagents tab when allow_subagents is true for the current run's role.
+	if strings.TrimSpace(m.teamID) != "" {
+		runID := strings.TrimSpace(m.runID)
+		if strings.TrimSpace(m.focusedRunID) != "" {
+			runID = strings.TrimSpace(m.focusedRunID)
 		}
-		return out
+		roleName := ""
+		if m.teamRoleByRunID != nil && runID != "" {
+			roleName = strings.TrimSpace(m.teamRoleByRunID[runID])
+		}
+		if !app.ResolveRoleAllowSubagents(m.cfg, strings.TrimSpace(m.profile), roleName) {
+			out := make([]dashboardSideTabDef, 0, len(dashboardSideTabs))
+			for _, tab := range dashboardSideTabs {
+				if strings.EqualFold(strings.TrimSpace(tab.Name), "Subagents") {
+					continue
+				}
+				out = append(out, tab)
+			}
+			return out
+		}
 	}
 	return dashboardSideTabs
 }
@@ -381,8 +395,8 @@ func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) str
 	// Build list items: "Back to parent" when viewing a child run, then active subagents.
 	var items []list.Item
 	isViewingChild := false
-	if currentRunID != "" {
-		if run, err := store.LoadRun(m.cfg, currentRunID); err == nil && strings.TrimSpace(run.ParentRunID) != "" {
+	if currentRunID != "" && m.session != nil && m.ctx != nil {
+		if run, err := m.session.LoadRun(m.ctx, currentRunID); err == nil && strings.TrimSpace(run.ParentRunID) != "" {
 			isViewingChild = true
 			items = append(items, subagentListItem{RunID: backToParentRunID, Label: "← Back to parent"})
 		}
@@ -426,7 +440,41 @@ func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) str
 				}
 				dur = end.Sub(*run.StartedAt).Round(time.Second).String()
 			}
-			label := fmt.Sprintf("Sub-agent %d · %s (%s)", idx, truncateText(goal, 45), dur)
+			runID := strings.TrimSpace(run.RunID)
+			assigned := 0
+			completed := 0
+			active := 0
+			if m.childRunAssignedByRunID != nil {
+				assigned = m.childRunAssignedByRunID[runID]
+			}
+			if m.childRunCompletedByRunID != nil {
+				completed = m.childRunCompletedByRunID[runID]
+			}
+			if m.childRunActiveByRunID != nil {
+				active = m.childRunActiveByRunID[runID]
+			}
+			workState := "idle"
+			workGlyph := "·"
+			if active > 0 {
+				workState = "working"
+				workGlyph = "●"
+			} else if assigned > completed {
+				workState = "queued"
+				if completed > 0 {
+					workState = "awaiting_review"
+				}
+				workGlyph = "○"
+			}
+			label := fmt.Sprintf(
+				"%s Subagent-%d · %s (%s) · tasks %d/%d · %s",
+				workGlyph,
+				idx,
+				truncateText(goal, 45),
+				dur,
+				completed,
+				assigned,
+				workState,
+			)
 			items = append(items, subagentListItem{RunID: run.RunID, Label: label})
 		}
 	}

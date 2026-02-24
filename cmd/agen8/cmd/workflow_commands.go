@@ -138,8 +138,15 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 	if mode == "" {
 		mode = projectModeDefault(projectCtx)
 	}
-	if mode != "team" && mode != "standalone" {
-		return fmt.Errorf("--mode must be standalone or team")
+	if mode != "team" && mode != "standalone" && mode != "single-agent" && mode != "multi-agent" {
+		return fmt.Errorf("--mode must be single-agent or multi-agent")
+	}
+	// Normalize for RPC
+	if mode == "standalone" {
+		mode = "single-agent"
+	}
+	if mode == "team" {
+		mode = "multi-agent"
 	}
 	profile := strings.TrimSpace(newProfile)
 	if profile == "" {
@@ -148,16 +155,22 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 	if profile == "" {
 		profile = strings.TrimSpace(profileRef)
 	}
-	if mode == "team" && profile == "" {
-		return fmt.Errorf("team mode requires --profile or project default_team_profile")
+	if mode == "multi-agent" && profile == "" {
+		return fmt.Errorf("multi-agent mode requires --profile or project default_team_profile")
+	}
+
+	projectRoot := ""
+	if projectCtx.Exists {
+		projectRoot = strings.TrimSpace(projectCtx.RootDir)
 	}
 
 	var out protocol.SessionStartResult
 	if err := rpcCall(cmd.Context(), protocol.MethodSessionStart, protocol.SessionStartParams{
-		ThreadID: detachedThreadID,
-		Mode:     mode,
-		Profile:  profile,
-		Model:    strings.TrimSpace(newModel),
+		ThreadID:    detachedThreadID,
+		Mode:        mode,
+		Profile:     profile,
+		Model:       strings.TrimSpace(newModel),
+		ProjectRoot: projectRoot,
 	}, &out); err != nil {
 		return err
 	}
@@ -180,13 +193,13 @@ func init() {
 	}
 
 	initCmd.Flags().StringVar(&initProjectID, "project-id", "", "override project identifier")
-	initCmd.Flags().StringVar(&initDefaultProfile, "profile", "", "default standalone profile for this project")
-	initCmd.Flags().StringVar(&initDefaultMode, "mode", "standalone", "default mode (standalone|team)")
-	initCmd.Flags().StringVar(&initDefaultTeamProfile, "team-profile", "", "default team profile for this project")
+	initCmd.Flags().StringVar(&initDefaultProfile, "profile", "", "default profile for single-agent mode")
+	initCmd.Flags().StringVar(&initDefaultMode, "mode", "single-agent", "default mode (single-agent|multi-agent)")
+	initCmd.Flags().StringVar(&initDefaultTeamProfile, "team-profile", "", "default profile for multi-agent mode")
 	initCmd.Flags().StringVar(&initRPCEndpoint, "rpc-endpoint", "", "default RPC endpoint for this project")
 	initCmd.Flags().StringVar(&initDataDirOverride, "data-dir", "", "project-level data-dir override")
 
-	newCmd.Flags().StringVar(&newMode, "mode", "", "session mode (standalone|team)")
+	newCmd.Flags().StringVar(&newMode, "mode", "", "session mode (single-agent|multi-agent)")
 	newCmd.Flags().StringVar(&newProfile, "profile", "", "profile id/path")
 	newCmd.Flags().StringVar(&newModel, "model", "", "model override")
 	newCmd.Flags().BoolVar(&newAttach, "attach", true, "attach coordinator after creating session")

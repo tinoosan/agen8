@@ -2,20 +2,26 @@ package app
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/tinoosan/agen8/pkg/agent/state"
-	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/fsutil"
 	"github.com/tinoosan/agen8/pkg/profile"
-	"github.com/tinoosan/agen8/pkg/protocol"
-	pkgagent "github.com/tinoosan/agen8/pkg/services/agent"
 	"github.com/tinoosan/agen8/pkg/services/team"
-	"github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/types"
 )
+
+type sessionLoaderStub struct {
+	sessions map[string]types.Session
+}
+
+func (s sessionLoaderStub) LoadSession(_ context.Context, sessionID string) (types.Session, error) {
+	if sess, ok := s.sessions[sessionID]; ok {
+		return sess, nil
+	}
+	return types.Session{}, context.Canceled
+}
 
 func TestTeamIsIdle_IgnoresHeartbeatTasks(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(t.TempDir()))
@@ -71,95 +77,6 @@ func TestTeamIsIdle_BlocksOnNonHeartbeatTasks(t *testing.T) {
 	}
 }
 
-func TestBuildTeamRPCServerConfig_AcceptsRoleSessionThread(t *testing.T) {
-	cfg := config.Config{DataDir: t.TempDir()}
-	memStore := store.NewMemorySessionStore()
-	_ = memStore.SaveSession(context.Background(), types.Session{SessionID: "coord-sess"})
-	_ = memStore.SaveSession(context.Background(), types.Session{SessionID: "worker-sess"})
-	sessionSvc := newTestSessionService(cfg, memStore)
-	runtimes := []teamRoleRuntime{
-		{run: types.Run{SessionID: "worker-sess", RunID: "worker-run"}},
-	}
-	controllers := make([]team.RoleRunController, len(runtimes))
-	for i := range runtimes {
-		controllers[i] = &teamRoleRunControllerAdapter{rt: &runtimes[i]}
-	}
-	teamCtrl := team.NewController(team.ControllerConfig{
-		SessionService: sessionSvc,
-		Runtimes:       controllers,
-	})
-	srvCfg := buildTeamRPCServerConfig(
-		RPCServerConfig{},
-		cfg,
-		RunChatOptions{},
-		types.Run{SessionID: "coord-sess", RunID: "coord-run"},
-		nil,
-		sessionSvc,
-		runtimes,
-		teamCtrl,
-		nil,
-	)
-
-	if srvCfg.AgentService == nil {
-		t.Fatal("AgentService not set")
-	}
-	err := srvCfg.AgentService.Pause(context.Background(), "", "worker-sess")
-	if err == nil {
-		t.Fatal("expected error for empty runID")
-	}
-	var se *pkgagent.ServiceError
-	if errors.As(err, &se) {
-		if se.Code != protocol.CodeInvalidParams {
-			t.Fatalf("service error code=%d want=%d", se.Code, protocol.CodeInvalidParams)
-		}
-		return
-	}
-	pErr, ok := err.(*protocol.ProtocolError)
-	if ok && pErr.Code == protocol.CodeInvalidParams {
-		return
-	}
-	t.Fatalf("expected InvalidParams error, got %T: %v", err, err)
-}
-
-func TestNewTeamRPCServerBaseConfig_ConfiguresEventsService(t *testing.T) {
-	cfg := config.Config{DataDir: t.TempDir()}
-	srvCfg := newTeamRPCServerBaseConfig(cfg, types.Run{RunID: "run-1", SessionID: "sess-1"}, nil)
-	if srvCfg.EventsService == nil {
-		t.Fatal("EventsService should be configured in team RPC server config")
-	}
-}
-
-func TestBuildTeamRPCServerConfig_RejectsUnknownThread(t *testing.T) {
-	cfg := config.Config{DataDir: t.TempDir()}
-	memStore := store.NewMemorySessionStore()
-	_ = memStore.SaveSession(context.Background(), types.Session{SessionID: "coord-sess"})
-	sessionSvc := newTestSessionService(cfg, memStore)
-	teamCtrl := team.NewController(team.ControllerConfig{
-		SessionService: sessionSvc,
-		Runtimes:       nil,
-	})
-	srvCfg := buildTeamRPCServerConfig(
-		RPCServerConfig{},
-		cfg,
-		RunChatOptions{},
-		types.Run{SessionID: "coord-sess", RunID: "coord-run"},
-		nil,
-		sessionSvc,
-		nil,
-		teamCtrl,
-		nil,
-	)
-
-	_, err := srvCfg.ControlSetModel(context.Background(), "missing-thread", "", "openai/gpt-5-mini")
-	pErr, ok := err.(*protocol.ProtocolError)
-	if !ok {
-		t.Fatalf("expected protocol error, got %T", err)
-	}
-	if pErr.Code != protocol.CodeThreadNotFound {
-		t.Fatalf("protocol code=%d want=%d", pErr.Code, protocol.CodeThreadNotFound)
-	}
-}
-
 func TestResolveTeamModel_FallsBackToRoleModel(t *testing.T) {
 	model := resolveTeamModel(nil, &profile.TeamConfig{
 		Roles: []profile.RoleConfig{
@@ -175,6 +92,33 @@ func TestResolveRoleModel_UsesRoleOverride(t *testing.T) {
 	model := resolveRoleModel(profile.RoleConfig{Model: "openai/gpt-5-nano"}, "openai/gpt-5")
 	if model != "openai/gpt-5-nano" {
 		t.Fatalf("model=%q", model)
+	}
+}
+
+func TestStoreBuilder_Validate_AcceptsStandaloneProfile(t *testing.T) {
+	prof := &profile.Profile{
+		ID:          "general",
+		Description: "Standalone",
+		Model:       "openai/gpt-5-mini",
+		Prompts:     profile.PromptConfig{SystemPrompt: "You are helpful."},
+		Team:        nil,
+	}
+	b := StoreBuilder{req: &teamRunRequest{prof: prof}}
+	if err := b.Validate(); err != nil {
+		t.Fatalf("Validate with standalone profile: %v", err)
+	}
+}
+
+func TestResolveTeamModelFromProfile_Standalone(t *testing.T) {
+	prof := &profile.Profile{
+		ID:          "general",
+		Description: "Standalone",
+		Model:       "openai/gpt-5-mini",
+		Team:        nil,
+	}
+	model := resolveTeamModelFromProfile(nil, prof, RunChatOptions{})
+	if model != "openai/gpt-5-mini" {
+		t.Fatalf("model=%q want openai/gpt-5-mini", model)
 	}
 }
 
@@ -206,5 +150,96 @@ func TestBuildRoleRuntimeProfile_UsesRoleScopedSkillsOnly(t *testing.T) {
 	}
 	if len(got.CodeExecRequiredImports) != 1 || got.CodeExecRequiredImports[0] != "pandas" {
 		t.Fatalf("unexpected code_exec required imports: %v", got.CodeExecRequiredImports)
+	}
+}
+
+func TestResolveWebhookRoutingContextFromRuns_PrefersCoordinatorTeamRun(t *testing.T) {
+	now := time.Now().UTC()
+	older := now.Add(-1 * time.Hour)
+	runs := []types.Run{
+		{
+			RunID:       "run-standalone",
+			SessionID:   "sess-standalone",
+			ParentRunID: "",
+			StartedAt:   &older,
+			Runtime:     &types.RunRuntimeConfig{},
+		},
+		{
+			RunID:       "run-ceo",
+			SessionID:   "sess-team",
+			ParentRunID: "",
+			StartedAt:   &now,
+			Runtime: &types.RunRuntimeConfig{
+				TeamID: "team-1",
+				Role:   "ceo",
+			},
+		},
+	}
+	roleSet := map[string]struct{}{"ceo": {}, "cto": {}}
+	ctx, err := resolveWebhookRoutingContextFromRuns(context.Background(), runs, roleSet, "ceo", sessionLoaderStub{})
+	if err != nil {
+		t.Fatalf("resolve webhook route: %v", err)
+	}
+	if ctx.run.RunID != "run-ceo" {
+		t.Fatalf("selected run=%q want run-ceo", ctx.run.RunID)
+	}
+	if ctx.teamID != "team-1" {
+		t.Fatalf("teamID=%q want team-1", ctx.teamID)
+	}
+	if ctx.coordinatorRole != "ceo" {
+		t.Fatalf("coordinatorRole=%q want ceo", ctx.coordinatorRole)
+	}
+	if _, ok := ctx.validRoles["cto"]; !ok {
+		t.Fatalf("validRoles missing cto: %#v", ctx.validRoles)
+	}
+}
+
+func TestResolveWebhookRoutingContextFromRuns_UsesSessionTeamIDFallback(t *testing.T) {
+	now := time.Now().UTC()
+	runs := []types.Run{
+		{
+			RunID:       "run-coordinator",
+			SessionID:   "sess-1",
+			ParentRunID: "",
+			StartedAt:   &now,
+			Runtime: &types.RunRuntimeConfig{
+				Role: "ceo",
+			},
+		},
+	}
+	loader := sessionLoaderStub{
+		sessions: map[string]types.Session{
+			"sess-1": {SessionID: "sess-1", TeamID: "team-from-session"},
+		},
+	}
+	ctx, err := resolveWebhookRoutingContextFromRuns(context.Background(), runs, map[string]struct{}{"ceo": {}}, "ceo", loader)
+	if err != nil {
+		t.Fatalf("resolve webhook route: %v", err)
+	}
+	if ctx.teamID != "team-from-session" {
+		t.Fatalf("teamID=%q want team-from-session", ctx.teamID)
+	}
+	if ctx.coordinatorRole != "ceo" {
+		t.Fatalf("coordinatorRole=%q want ceo", ctx.coordinatorRole)
+	}
+}
+
+func TestResolveWebhookRoutingContextFromRuns_NoRootRunErrors(t *testing.T) {
+	now := time.Now().UTC()
+	runs := []types.Run{
+		{
+			RunID:       "run-child",
+			SessionID:   "sess-1",
+			ParentRunID: "run-parent",
+			StartedAt:   &now,
+			Runtime: &types.RunRuntimeConfig{
+				TeamID: "team-1",
+				Role:   "ceo",
+			},
+		},
+	}
+	_, err := resolveWebhookRoutingContextFromRuns(context.Background(), runs, nil, "", sessionLoaderStub{})
+	if err == nil {
+		t.Fatalf("expected error when no root run is available")
 	}
 }

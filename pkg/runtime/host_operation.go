@@ -928,9 +928,10 @@ func (noopOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[str
 		storeReq["op"] = "task_create"
 		if len(req.Input) > 0 {
 			var payload struct {
-				Goal       string `json:"goal"`
-				TaskID     string `json:"taskId"`
-				ChildRunID string `json:"childRunId"`
+				Goal         string `json:"goal"`
+				TaskID       string `json:"taskId"`
+				ChildRunID   string `json:"childRunId"`
+				AssignedRole string `json:"assignedRole"`
 			}
 			if err := json.Unmarshal(req.Input, &payload); err == nil {
 				if g := strings.TrimSpace(payload.Goal); g != "" {
@@ -950,6 +951,10 @@ func (noopOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[str
 				if cid := strings.TrimSpace(payload.ChildRunID); cid != "" {
 					reqData["childRunId"] = cid
 					storeReq["childRunId"] = cid
+				}
+				if role := strings.TrimSpace(payload.AssignedRole); role != "" {
+					reqData["assignedRole"] = role
+					storeReq["assignedRole"] = role
 				}
 			}
 		}
@@ -1073,6 +1078,43 @@ func (toolResultOperation) EnrichRequestEvent(req types.HostOpRequest, reqData m
 		}
 		return
 	}
+	if tag == "task_review" {
+		reqData["op"] = "task_review"
+		storeReq["op"] = "task_review"
+		if len(req.Input) > 0 {
+			var p struct {
+				TaskID   string `json:"taskId"`
+				Decision string `json:"decision"`
+			}
+			if err := json.Unmarshal(req.Input, &p); err == nil {
+				if id := strings.TrimSpace(p.TaskID); id != "" {
+					reqData["taskId"] = id
+					storeReq["taskId"] = id
+				}
+				if d := strings.TrimSpace(p.Decision); d != "" {
+					reqData["decision"] = d
+					storeReq["decision"] = d
+				}
+			}
+		}
+		return
+	}
+	if tag == "soul_update" {
+		reqData["op"] = "soul_update"
+		storeReq["op"] = "soul_update"
+		if len(req.Input) > 0 {
+			var p struct {
+				Reason string `json:"reason"`
+			}
+			if err := json.Unmarshal(req.Input, &p); err == nil {
+				if r := strings.TrimSpace(p.Reason); r != "" {
+					reqData["reason"] = r
+					storeReq["reason"] = r
+				}
+			}
+		}
+		return
+	}
 	if tag != "task_create" {
 		return
 	}
@@ -1082,9 +1124,10 @@ func (toolResultOperation) EnrichRequestEvent(req types.HostOpRequest, reqData m
 		return
 	}
 	var payload struct {
-		Goal       string `json:"goal"`
-		TaskID     string `json:"taskId"`
-		ChildRunID string `json:"childRunId"`
+		Goal         string `json:"goal"`
+		TaskID       string `json:"taskId"`
+		ChildRunID   string `json:"childRunId"`
+		AssignedRole string `json:"assignedRole"`
 	}
 	if err := json.Unmarshal(req.Input, &payload); err != nil {
 		return
@@ -1107,6 +1150,10 @@ func (toolResultOperation) EnrichRequestEvent(req types.HostOpRequest, reqData m
 		reqData["childRunId"] = cid
 		storeReq["childRunId"] = cid
 	}
+	if role := strings.TrimSpace(payload.AssignedRole); role != "" {
+		reqData["assignedRole"] = role
+		storeReq["assignedRole"] = role
+	}
 }
 func (toolResultOperation) EnrichResponseEvent(req types.HostOpRequest, _ types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
 	tag := strings.TrimSpace(req.Tag)
@@ -1126,6 +1173,16 @@ func (toolResultOperation) EnrichResponseEvent(req types.HostOpRequest, _ types.
 			respData["command"] = cmd
 			storeResp["command"] = cmd
 		}
+		return
+	}
+	if tag == "task_review" {
+		respData["op"] = "task_review"
+		storeResp["op"] = "task_review"
+		return
+	}
+	if tag == "soul_update" {
+		respData["op"] = "soul_update"
+		storeResp["op"] = "soul_update"
 		return
 	}
 	if tag != "task_create" {

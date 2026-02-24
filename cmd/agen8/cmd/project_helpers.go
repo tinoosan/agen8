@@ -26,13 +26,14 @@ func loadProjectContext() (app.ProjectContext, error) {
 
 func projectModeDefault(ctx app.ProjectContext) string {
 	if !ctx.Exists {
-		return "standalone"
+		return "single-agent"
 	}
 	mode := strings.ToLower(strings.TrimSpace(ctx.Config.DefaultMode))
-	if mode == "team" {
-		return "team"
+	if mode == "team" || mode == "multi-agent" {
+		return "multi-agent"
 	}
-	return "standalone"
+	// standalone, single-agent, or unknown → single-agent
+	return "single-agent"
 }
 
 func projectProfileDefault(ctx app.ProjectContext, mode string) string {
@@ -40,7 +41,7 @@ func projectProfileDefault(ctx app.ProjectContext, mode string) string {
 		return ""
 	}
 	mode = strings.ToLower(strings.TrimSpace(mode))
-	if mode == "team" {
+	if mode == "team" || mode == "multi-agent" {
 		if p := strings.TrimSpace(ctx.Config.DefaultTeamProfile); p != "" {
 			return p
 		}

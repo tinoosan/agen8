@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -88,6 +90,101 @@ func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 	supervisor.mu.Unlock()
 	if exists {
 		t.Fatalf("expected worker to be removed after stop")
+	}
+}
+
+func TestRuntimeSupervisor_SubagentAwaitingReviewTimeout_DefaultAndEnv(t *testing.T) {
+	t.Setenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT", "")
+	s := &runtimeSupervisor{}
+	if got := s.subagentAwaitingReviewTimeout(); got != defaultSubagentAwaitingReviewTimeout {
+		t.Fatalf("default timeout=%v want %v", got, defaultSubagentAwaitingReviewTimeout)
+	}
+
+	t.Setenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT", "45s")
+	if got := s.subagentAwaitingReviewTimeout(); got != 45*time.Second {
+		t.Fatalf("env timeout=%v want 45s", got)
+	}
+
+	t.Setenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT", "invalid")
+	if got := s.subagentAwaitingReviewTimeout(); got != defaultSubagentAwaitingReviewTimeout {
+		t.Fatalf("invalid env timeout=%v want %v", got, defaultSubagentAwaitingReviewTimeout)
+	}
+
+	t.Setenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT", "-1s")
+	if got := s.subagentAwaitingReviewTimeout(); got != defaultSubagentAwaitingReviewTimeout {
+		t.Fatalf("negative env timeout=%v want %v", got, defaultSubagentAwaitingReviewTimeout)
+	}
+
+	// Sanity: environment restoration not required due to t.Setenv, but ensure no panic path.
+	_ = os.Getenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT")
+}
+
+func TestRuntimeSupervisor_WorkerShutdownTimeout_DefaultAndEnv(t *testing.T) {
+	t.Setenv("AGEN8_WORKER_SHUTDOWN_TIMEOUT", "")
+	s := &runtimeSupervisor{}
+	if got := s.workerShutdownTimeout(); got != defaultWorkerShutdownTimeout {
+		t.Fatalf("default timeout=%v want %v", got, defaultWorkerShutdownTimeout)
+	}
+
+	t.Setenv("AGEN8_WORKER_SHUTDOWN_TIMEOUT", "3s")
+	if got := s.workerShutdownTimeout(); got != 3*time.Second {
+		t.Fatalf("env timeout=%v want 3s", got)
+	}
+
+	t.Setenv("AGEN8_WORKER_SHUTDOWN_TIMEOUT", "invalid")
+	if got := s.workerShutdownTimeout(); got != defaultWorkerShutdownTimeout {
+		t.Fatalf("invalid env timeout=%v want %v", got, defaultWorkerShutdownTimeout)
+	}
+}
+
+func TestRuntimeSupervisor_DeactivateAndArchiveSubagent_DoesNotHangOnStuckWorker(t *testing.T) {
+	t.Setenv("AGEN8_WORKER_SHUTDOWN_TIMEOUT", "20ms")
+	cfg := config.Config{DataDir: t.TempDir()}
+	_, run, err := implstore.CreateSession(cfg, "cleanup run", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	run.Runtime = &types.RunRuntimeConfig{LifecycleState: "active"}
+	if err := implstore.SaveRun(cfg, run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+
+	cancelCalled := false
+	supervisor := &runtimeSupervisor{
+		cfg:            cfg,
+		sessionService: sessionSvc,
+		workers: map[string]*managedRuntime{
+			run.RunID: {
+				runID: run.RunID,
+				cancel: func() {
+					cancelCalled = true
+				},
+				done: make(chan struct{}), // never closes: simulates stuck worker
+			},
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		supervisor.deactivateAndArchiveSubagent(context.Background(), run.RunID)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatalf("deactivateAndArchiveSubagent blocked on stuck worker")
+	}
+	if !cancelCalled {
+		t.Fatalf("expected worker cancel to be called")
+	}
+	loaded, err := sessionSvc.LoadRun(context.Background(), run.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+	if loaded.Status != types.RunStatusSucceeded {
+		t.Fatalf("run status=%q want %q", loaded.Status, types.RunStatusSucceeded)
 	}
 }
 
@@ -377,7 +474,10 @@ func (a *countingAgent) CloneWithConfig(cfg agent.AgentConfig) (agent.Agent, err
 	return a, nil
 }
 
-func TestRuntimeSupervisor_SyncOnce_CleansLegacyTeamChildRuns(t *testing.T) {
+// TestRuntimeSupervisor_SyncOnce_DoesNotCancelTeamChildRuns ensures we no longer cancel
+// team child runs in syncOnce. Spawned subagents in team mode are allowed to run;
+// only lifecycle-driven paths (e.g. approval) deactivate them.
+func TestRuntimeSupervisor_SyncOnce_DoesNotCancelTeamChildRuns(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess, parentRun, err := implstore.CreateSession(cfg, "team parent", 8*1024)
 	if err != nil {
@@ -390,6 +490,10 @@ func TestRuntimeSupervisor_SyncOnce_CleansLegacyTeamChildRuns(t *testing.T) {
 	}
 	childRun := types.NewChildRun(parentRun.RunID, "legacy child", sess.SessionID, 1)
 	childRun.Status = types.RunStatusRunning
+	if childRun.Runtime == nil {
+		childRun.Runtime = &types.RunRuntimeConfig{}
+	}
+	childRun.Runtime.Role = "Subagent-1"
 	if err := implstore.SaveRun(cfg, childRun); err != nil {
 		t.Fatalf("SaveRun child: %v", err)
 	}
@@ -433,19 +537,14 @@ func TestRuntimeSupervisor_SyncOnce_CleansLegacyTeamChildRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRun child: %v", err)
 	}
-	if loadedChild.Status != types.RunStatusCanceled {
-		t.Fatalf("legacy child status=%q want %q", loadedChild.Status, types.RunStatusCanceled)
+	// We no longer cancel team child runs; they are allowed to run (subagent role class).
+	if loadedChild.Status == types.RunStatusCanceled {
+		t.Fatalf("child run should not be canceled; got status=%q", loadedChild.Status)
 	}
-	task, err := ts.GetTask(context.Background(), "task-active")
-	if err != nil {
-		t.Fatalf("GetTask: %v", err)
-	}
-	if task.Status != types.TaskStatusCanceled {
-		t.Fatalf("active child task status=%q want %q", task.Status, types.TaskStatusCanceled)
-	}
+	_ = taskSvc // used by supervisor
 }
 
-func TestRuntimeSupervisor_MakeSpawnWorkerFunc_BlocksTeamMode(t *testing.T) {
+func TestRuntimeSupervisor_MakeSpawnWorkerFunc_AllowsTeamModeWhenAllowed(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess, parentRun, err := implstore.CreateSession(cfg, "team session", 8*1024)
 	if err != nil {
@@ -462,12 +561,72 @@ func TestRuntimeSupervisor_MakeSpawnWorkerFunc_BlocksTeamMode(t *testing.T) {
 		sessionService: sessionSvc,
 	}
 	spawn := supervisor.makeSpawnWorkerFunc(parentRun, "openai/gpt-5-mini", nil)
-	childRunID, err := spawn(context.Background(), "do work", sess.SessionID, parentRun.RunID)
-	if err == nil {
-		t.Fatalf("expected team-mode spawn guard error, got child run %q", childRunID)
+	childRunID, childRole, err := spawn(context.Background(), "do work", sess.SessionID, parentRun.RunID)
+	if err != nil {
+		t.Fatalf("spawn in team mode: %v", err)
 	}
-	if got := err.Error(); got != "spawn_worker unavailable in team mode" {
-		t.Fatalf("unexpected spawn guard error: %v", err)
+	if childRunID == "" {
+		t.Fatalf("expected non-empty child run ID")
+	}
+	if strings.TrimSpace(childRole) == "" {
+		t.Fatalf("expected canonical child role from spawn callback")
+	}
+	child, err := sessionSvc.LoadRun(context.Background(), childRunID)
+	if err != nil {
+		t.Fatalf("LoadRun child: %v", err)
+	}
+	if child.ParentRunID != parentRun.RunID {
+		t.Fatalf("child ParentRunID=%q want %q", child.ParentRunID, parentRun.RunID)
+	}
+}
+
+func TestRuntimeSupervisor_MakeSpawnWorkerFunc_PrefersRoleSubagentModel(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, parentRun, err := implstore.CreateSession(cfg, "team session", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess.TeamID = "team-1"
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	parentRun.Runtime = &types.RunRuntimeConfig{
+		Profile: "startup_team",
+		Role:    "coordinator",
+		TeamID:  "team-1",
+		Model:   "moonshotai/kimi-k2.5",
+	}
+	if err := sessionSvc.SaveRun(context.Background(), parentRun); err != nil {
+		t.Fatalf("SaveRun parent: %v", err)
+	}
+
+	supervisor := &runtimeSupervisor{
+		cfg:            cfg,
+		sessionService: sessionSvc,
+		defaultProfile: &profile.Profile{
+			ID: "startup_team",
+			Team: &profile.TeamConfig{
+				Roles: []profile.RoleConfig{
+					{Name: "coordinator", Coordinator: true, SubagentModel: "openai/gpt-5-nano"},
+				},
+			},
+		},
+	}
+	spawn := supervisor.makeSpawnWorkerFunc(parentRun, "moonshotai/kimi-k2.5", nil)
+	childRunID, _, err := spawn(context.Background(), "do work", sess.SessionID, parentRun.RunID)
+	if err != nil {
+		t.Fatalf("spawn in team mode: %v", err)
+	}
+	child, err := sessionSvc.LoadRun(context.Background(), childRunID)
+	if err != nil {
+		t.Fatalf("LoadRun child: %v", err)
+	}
+	if child.Runtime == nil {
+		t.Fatalf("child runtime should be set")
+	}
+	if got := strings.TrimSpace(child.Runtime.Model); got != "openai/gpt-5-nano" {
+		t.Fatalf("child runtime model=%q want openai/gpt-5-nano", got)
 	}
 }
 

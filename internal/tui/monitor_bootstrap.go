@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tinoosan/agen8/internal/store"
+	"github.com/tinoosan/agen8/internal/app"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	agentstate "github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/config"
@@ -106,58 +106,6 @@ func eventsRPCLatestSeq(ctx context.Context, endpoint string, runID string) (int
 	return res.Seq, nil
 }
 
-// startEventsTailPoller runs a goroutine that polls events.listPaginated with AfterSeq and sends new events to the returned channel.
-func startEventsTailPoller(ctx context.Context, endpoint string, runID string, fromSeq int64) (<-chan tailedEvent, <-chan error) {
-	evCh := make(chan tailedEvent, 32)
-	errCh := make(chan error, 1)
-	go func() {
-		defer close(evCh)
-		defer close(errCh)
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-		lastSeq := fromSeq
-		failures := 0
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				evs, next, err := eventsRPCListPaginated(ctx, endpoint, runID, 100, false, lastSeq)
-				if err != nil {
-					failures++
-					backoff := 500 * time.Millisecond
-					for i := 1; i < failures; i++ {
-						backoff *= 2
-						if backoff >= 8*time.Second {
-							backoff = 8 * time.Second
-							break
-						}
-					}
-					ticker.Reset(backoff)
-					select {
-					case errCh <- err:
-					default:
-					}
-					continue
-				}
-				failures = 0
-				ticker.Reset(500 * time.Millisecond)
-				for _, e := range evs {
-					select {
-					case <-ctx.Done():
-						return
-					case evCh <- tailedEvent{Event: e, NextOffset: next}:
-					}
-				}
-				if next > lastSeq {
-					lastSeq = next
-				}
-			}
-		}
-	}()
-	return evCh, errCh
-}
-
 func newMonitorModel(ctx context.Context, cfg config.Config, runID string, result *MonitorResult) (*monitorModel, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -198,7 +146,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	activityList.SetShowHelp(false)
 	activityList.SetShowPagination(false)
 
-	tctx, cancel := context.WithCancel(ctx)
+	_, cancel := context.WithCancel(ctx)
 	endpoint := monitorRPCEndpoint()
 	// Best-effort: load a small recent window via RPC.
 	var evs []types.EventRecord
@@ -211,7 +159,6 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	if seq, err := eventsRPCLatestSeq(ctx, endpoint, runID); err == nil {
 		off = seq
 	}
-	tailCh, errCh := startEventsTailPoller(tctx, endpoint, runID, off)
 
 	runStatus := types.RunStatusSucceeded
 	runSessionID := ""
@@ -219,27 +166,50 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 	sessionReasoningEffort := ""
 	sessionReasoningSummary := ""
 	runProfile := ""
-	if r, err := store.LoadRun(cfg, runID); err == nil {
-		runStatus = r.Status
-		runSessionID = strings.TrimSpace(r.SessionID)
-		if r.Runtime != nil {
-			runProfile = strings.TrimSpace(r.Runtime.Profile)
-		}
-	}
-
-	sessionStore, err := store.NewSQLiteSessionStore(cfg)
+	sessionService, err := app.NewSessionServiceForCLI(cfg)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
 
+	teamID := ""
+	teamRunIDs := []string{}
+	teamRoleByRunID := map[string]string{}
+	teamCoordinatorRunID := ""
+	teamCoordinatorRole := ""
+	if r, err := sessionService.LoadRun(ctx, runID); err == nil {
+		runStatus = r.Status
+		runSessionID = strings.TrimSpace(r.SessionID)
+		if r.Runtime != nil {
+			runProfile = strings.TrimSpace(r.Runtime.Profile)
+			if tid := strings.TrimSpace(r.Runtime.TeamID); tid != "" {
+				if manifest, err := loadTeamManifest(ctx, cfg, tid); err == nil && manifest != nil {
+					teamID = tid
+					teamCoordinatorRunID = strings.TrimSpace(manifest.CoordinatorRun)
+					teamCoordinatorRole = strings.TrimSpace(manifest.CoordinatorRole)
+					for _, role := range manifest.Roles {
+						rid := strings.TrimSpace(role.RunID)
+						if rid == "" {
+							continue
+						}
+						teamRunIDs = append(teamRunIDs, rid)
+						teamRoleByRunID[rid] = strings.TrimSpace(role.RoleName)
+					}
+					if profileID := strings.TrimSpace(manifest.ProfileID); profileID != "" && runProfile == "" {
+						runProfile = profileID
+					}
+				}
+			}
+		}
+	}
+
 	if runSessionID != "" {
-		if sess, err := sessionStore.LoadSession(ctx, runSessionID); err == nil {
+		if sess, err := sessionService.LoadSession(ctx, runSessionID); err == nil {
 			stats.totalTokensIn = sess.InputTokens
 			stats.totalTokensOut = sess.OutputTokens
 			stats.totalTokens = sess.TotalTokens
 			stats.totalCostUSD = sess.CostUSD
-			stats.pricingKnown = sess.TotalTokens == 0 || sess.CostUSD > 0 || pricingKnownForRunID(cfg, runID)
+			stats.pricingKnown = sess.TotalTokens == 0 || sess.CostUSD > 0 || pricingKnownForRunID(ctx, sessionService, runID)
 			if active := strings.TrimSpace(sess.ActiveModel); active != "" {
 				sessionActiveModel = active
 			}
@@ -252,10 +222,11 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		ctx:                         ctx,
 		cfg:                         cfg,
 		runID:                       runID,
+		teamID:                      teamID,
 		rpcEndpoint:                 monitorRPCEndpoint(),
 		runStatus:                   runStatus,
 		result:                      result,
-		session:                     sessionStore,
+		session:                     sessionService,
 		sessionID:                   runSessionID,
 		offset:                      off,
 		input:                       in,
@@ -296,15 +267,16 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		stats:                       stats,
 		styles:                      defaultMonitorStyles(),
 		focusedPanel:                panelComposer,
-		tailCh:                      tailCh,
-		errCh:                       errCh,
 		cancel:                      cancel,
 		uiRefreshDebounce:           33 * time.Millisecond,
 		planReloadDebounce:          100 * time.Millisecond,
 		sessionTotalsReloadDebounce: 150 * time.Millisecond,
 		seenOutboxByTask:            map[string]struct{}{},
 		seenEventIDs:                map[string]time.Time{},
-		teamRoleByRunID:             map[string]string{},
+		teamRunIDs:                  teamRunIDs,
+		teamRoleByRunID:             teamRoleByRunID,
+		teamCoordinatorRunID:        teamCoordinatorRunID,
+		teamCoordinatorRole:         teamCoordinatorRole,
 		teamEventCursor:             map[string]int64{},
 		teamEventFailCount:          map[string]int{},
 		teamEventRetryAfter:         map[string]time.Time{},
@@ -338,7 +310,7 @@ func newMonitorModel(ctx context.Context, cfg config.Config, runID string, resul
 		// Fallback order if session didn't have an active model (unlikely for active sessions):
 		// 1. Runtime model (from run record)
 		// 2. "default" (will display as default)
-		if r, err := store.LoadRun(cfg, runID); err == nil && r.Runtime != nil {
+		if r, err := sessionService.LoadRun(ctx, runID); err == nil && r.Runtime != nil {
 			if m.model == "" {
 				m.model = strings.TrimSpace(r.Runtime.Model)
 			}
@@ -369,7 +341,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 	if err != nil {
 		return nil, err
 	}
-	sessionStore, _ := store.NewSQLiteSessionStore(cfg)
+	sessionService, _ := app.NewSessionServiceForCLI(cfg)
 	in := textarea.New()
 	in.SetHeight(2)
 	in.CharLimit = 0
@@ -403,7 +375,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 		rpcEndpoint:                 monitorRPCEndpoint(),
 		runStatus:                   types.RunStatusRunning,
 		result:                      result,
-		session:                     sessionStore,
+		session:                     sessionService,
 		sessionID:                   "",
 		offset:                      0,
 		input:                       in,
@@ -466,7 +438,7 @@ func newTeamMonitorModel(ctx context.Context, cfg config.Config, teamID string, 
 	m.thinkingVP.MouseWheelEnabled = false
 	m.subagentsVP.MouseWheelEnabled = false
 	m.artifactContentVP.MouseWheelEnabled = false
-	if manifest, err := loadTeamManifestFromDisk(cfg, teamID); err == nil && manifest != nil {
+	if manifest, err := loadTeamManifest(ctx, cfg, teamID); err == nil && manifest != nil {
 		if profileID := strings.TrimSpace(manifest.ProfileID); profileID != "" {
 			m.profile = profileID
 		}
@@ -553,7 +525,7 @@ func newDetachedMonitorModel(ctx context.Context, cfg config.Config, result *Mon
 	activityList.SetShowHelp(false)
 	activityList.SetShowPagination(false)
 
-	sessionStore, err := store.NewSQLiteSessionStore(cfg)
+	sessionService, err := app.NewSessionServiceForCLI(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -564,7 +536,7 @@ func newDetachedMonitorModel(ctx context.Context, cfg config.Config, result *Mon
 		rpcEndpoint:                 monitorRPCEndpoint(),
 		runStatus:                   types.RunStatusRunning,
 		result:                      result,
-		session:                     sessionStore,
+		session:                     sessionService,
 		sessionID:                   "",
 		input:                       in,
 		activityPageItems:           []Activity{},

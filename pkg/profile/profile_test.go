@@ -110,6 +110,142 @@ team:
 	}
 }
 
+func TestLoad_TeamProfile_AllowSubagents(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("prompt"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	raw := `
+id: team-allow
+description: Team with allow_subagents
+team:
+  roles:
+    - name: lead
+      coordinator: true
+      description: Lead
+      prompts:
+        system_prompt_path: prompt.md
+      allow_subagents: true
+    - name: worker
+      description: Worker
+      prompts:
+        system_prompt_path: prompt.md
+`
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	lead := p.Team.Roles[0]
+	if !lead.AllowSubagents {
+		t.Fatalf("lead.AllowSubagents = false, want true")
+	}
+	worker := p.Team.Roles[1]
+	if worker.AllowSubagents {
+		t.Fatalf("worker.AllowSubagents = true, want false (default)")
+	}
+}
+
+func TestProfile_RolesForSession(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("prompt"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(
+		"id: solo\ndescription: Solo\nmodel: gpt-5\nprompts:\n  system_prompt_path: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	roles, err := p.RolesForSession()
+	if err != nil {
+		t.Fatalf("RolesForSession: %v", err)
+	}
+	if len(roles) != 1 {
+		t.Fatalf("standalone: expected 1 role, got %d", len(roles))
+	}
+	if roles[0].Name != "agent" || !roles[0].Coordinator || !roles[0].AllowSubagents {
+		t.Fatalf("synthetic role: %+v", roles[0])
+	}
+	if roles[0].Model != "gpt-5" {
+		t.Fatalf("role model = %q want gpt-5", roles[0].Model)
+	}
+}
+
+func TestProfile_RolesForSession_WithName(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("prompt"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(
+		"id: researcher\nname: Stock Researcher\ndescription: Research\nmodel: gpt-5\nprompts:\n  system_prompt_path: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	roles, err := p.RolesForSession()
+	if err != nil {
+		t.Fatalf("RolesForSession: %v", err)
+	}
+	if len(roles) != 1 {
+		t.Fatalf("standalone: expected 1 role, got %d", len(roles))
+	}
+	if roles[0].Name != "Stock Researcher" {
+		t.Fatalf("synthetic role name = %q want Stock Researcher", roles[0].Name)
+	}
+}
+
+func TestResolveByRef(t *testing.T) {
+	profilesDir := t.TempDir()
+	generalDir := filepath.Join(profilesDir, "general")
+	if err := os.MkdirAll(generalDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(generalDir, "profile.yaml"), []byte(
+		"id: general\ndescription: General\nmodel: gpt-5\nprompts:\n  system_prompt: hi\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	// By name under profilesDir
+	p, dir, err := ResolveByRef(profilesDir, "general")
+	if err != nil {
+		t.Fatalf("ResolveByRef(general): %v", err)
+	}
+	if p == nil || p.ID != "general" {
+		t.Fatalf("profile = %+v", p)
+	}
+	if dir != generalDir {
+		t.Fatalf("dir = %q want %q", dir, generalDir)
+	}
+
+	// Empty defaults to general
+	p2, _, err := ResolveByRef(profilesDir, "")
+	if err != nil {
+		t.Fatalf("ResolveByRef(empty): %v", err)
+	}
+	if p2 == nil || p2.ID != "general" {
+		t.Fatalf("profile = %+v", p2)
+	}
+
+	// Direct path
+	p3, dir3, err := ResolveByRef(profilesDir, generalDir)
+	if err != nil {
+		t.Fatalf("ResolveByRef(path): %v", err)
+	}
+	if p3 == nil || dir3 != generalDir {
+		t.Fatalf("profile=%+v dir=%q", p3, dir3)
+	}
+}
+
 func TestLoad_TeamProfile_MissingCoordinator(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("prompt"), 0o644); err != nil {
@@ -165,7 +301,7 @@ team:
 	}
 }
 
-func TestLoad_TeamProfile_RejectsMultipleReviewers(t *testing.T) {
+func TestLoad_TeamProfile_RejectsReviewerNameCollision(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("prompt"), 0o644); err != nil {
 		t.Fatalf("write prompt: %v", err)
@@ -174,16 +310,16 @@ func TestLoad_TeamProfile_RejectsMultipleReviewers(t *testing.T) {
 id: team-test
 description: Team profile
 team:
+  reviewer:
+    enabled: true
+    name: lead
+    description: Reviewer
+    prompts:
+      system_prompt_path: prompt.md
   roles:
     - name: lead
       coordinator: true
-      reviewer: true
       description: Lead
-      prompts:
-        system_prompt_path: prompt.md
-    - name: qa
-      reviewer: true
-      description: QA
       prompts:
         system_prompt_path: prompt.md
 `
@@ -191,7 +327,7 @@ team:
 		t.Fatalf("write profile: %v", err)
 	}
 	if _, err := Load(dir); err == nil {
-		t.Fatalf("expected multiple reviewer validation error")
+		t.Fatalf("expected reviewer name collision validation error")
 	}
 }
 

@@ -363,3 +363,39 @@ func TestInferRunRoleAndTeam_FromTasks(t *testing.T) {
 		t.Errorf("got role=%q teamID=%q", role, teamID)
 	}
 }
+
+func TestInferRunRoleAndTeam_PreservesSubagentRole(t *testing.T) {
+	// Subagents have a canonical role like "Subagent-1" even when teamID is empty.
+	// The role should be preserved and not overridden by task inference.
+	runs := map[string]types.Run{
+		"run-subagent-1": {
+			RunID:       "run-subagent-1",
+			SessionID:   "sess-1",
+			ParentRunID: "run-parent",
+			SpawnIndex:  1,
+			Runtime: &types.RunRuntimeConfig{
+				Role:    "Subagent-1",
+				TeamID:  "", // Empty teamID should not cause role to be overridden
+				Profile: "general",
+			},
+		},
+	}
+	// Even with tasks that might suggest a different role, subagent role should be preserved
+	tasks := &mockTaskLister{
+		tasks: []types.Task{
+			{TaskID: "t1", RunID: "run-subagent-1", TeamID: "team-1", AssignedRole: "researcher", RoleSnapshot: "researcher"},
+		},
+	}
+	prov := &mockSessionProvider{runs: runs}
+	mgr := NewManager(prov, tasks, nil)
+	ctx := context.Background()
+	role, teamID := mgr.InferRunRoleAndTeam(ctx, "run-subagent-1")
+	// Role should be preserved as "Subagent-1", not overridden to "researcher" from tasks
+	if role != "Subagent-1" {
+		t.Errorf("expected role='Subagent-1' to be preserved, got role=%q", role)
+	}
+	// TeamID can be inferred from tasks since it was empty
+	if teamID != "team-1" {
+		t.Errorf("expected teamID='team-1' from tasks, got teamID=%q", teamID)
+	}
+}

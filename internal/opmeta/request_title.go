@@ -66,7 +66,7 @@ func FormatRequestTitle(d map[string]string) string {
 			if m == "" {
 				m = "GET"
 			}
-			desc := m + " [" + u + "]"
+			desc := m + " " + u
 			if body := strings.TrimSpace(d["body"]); body != "" {
 				bodyText := "body: " + singleLinePreview(body, 120)
 				if strings.TrimSpace(d["bodyTruncated"]) == "true" {
@@ -123,6 +123,21 @@ func FormatRequestTitle(d map[string]string) string {
 			return "Obsidian " + cmd
 		}
 		return "Obsidian"
+	case "task_review":
+		taskID := strings.TrimSpace(d["taskId"])
+		decision := strings.TrimSpace(d["decision"])
+		if taskID != "" && decision != "" {
+			return fmt.Sprintf("Review task %s (%s)", taskID, decision)
+		}
+		if taskID != "" {
+			return "Review task " + taskID
+		}
+		return "Review task"
+	case "soul_update":
+		if reason := strings.TrimSpace(d["reason"]); reason != "" {
+			return "Update soul: " + singleLinePreview(reason, 80)
+		}
+		return "Update soul"
 	default:
 		if op != "" && path != "" {
 			return op + " " + path

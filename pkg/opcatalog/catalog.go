@@ -73,6 +73,14 @@ var catalog = map[string]metadata{
 		category:              "Knowledge",
 		useSharedRequestTitle: true,
 	},
+	"task_review": {
+		category:              "Reviewed",
+		useSharedRequestTitle: true,
+	},
+	"soul_update": {
+		category:              "Updated",
+		useSharedRequestTitle: true,
+	},
 }
 
 func Category(op string) (string, bool) {

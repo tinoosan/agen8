@@ -8,6 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/agen8/internal/tui/kit"
+	"github.com/tinoosan/agen8/pkg/fsutil"
+	"github.com/tinoosan/agen8/pkg/profile"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/timeutil"
@@ -92,8 +94,7 @@ func (m *monitorModel) openNewSessionWizard() tea.Cmd {
 	}
 
 	items = append(items,
-		newSessionWizardItem{mode: "standalone", title: "New Standalone Session", desc: "single agent; choose profile and start"},
-		newSessionWizardItem{mode: "team", title: "New Team Session", desc: "multi-role team; profile is immutable"},
+		newSessionWizardItem{mode: "new", title: "New Session", desc: "choose profile; mode inferred (single-agent or multi-agent)"},
 	)
 
 	l := list.New(items, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderNewSessionWizardLine), 0, 0)
@@ -123,15 +124,11 @@ func (m *monitorModel) closeNewSessionWizard() {
 }
 
 func (m *monitorModel) initWizardProfileStep() {
-	standaloneOnly := strings.EqualFold(m.newSessionWizardMode, "standalone")
-	teamOnly := strings.EqualFold(m.newSessionWizardMode, "team")
-	items, _ := m.monitorProfilePickerItems(teamOnly, standaloneOnly)
+	// Unified flow: show all profiles; mode inferred from profile at start
+	items, _ := m.monitorProfilePickerItems(false, false)
 
 	l := list.New(items, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderMonitorProfilePickerLine), 0, 0)
 	title := "Select Profile"
-	if teamOnly {
-		title = "Select Team Profile"
-	}
 	l.Title = title
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
@@ -291,13 +288,18 @@ func (m *monitorModel) selectProfileFromWizard() tea.Cmd {
 		m.profile = ref
 	}
 
-	mode := m.newSessionWizardMode
-	m.closeNewSessionWizard()
+		m.closeNewSessionWizard()
 
-	if strings.EqualFold(mode, "team") {
-		return m.startNewTeamSession(ref, "")
+	// Infer mode from profile: single-role = single-agent, multi-role = multi-agent
+	prof, _, err := profile.ResolveByRef(fsutil.GetProfilesDir(m.cfg.DataDir), ref)
+	if err != nil || prof == nil {
+		return m.startNewStandaloneSession(ref, "")
 	}
-	return m.startNewStandaloneSession(ref, "")
+	roles, err := prof.RolesForSession()
+	if err != nil || len(roles) <= 1 {
+		return m.startNewStandaloneSession(ref, "")
+	}
+	return m.startNewTeamSession(ref, "")
 }
 
 func (m *monitorModel) renderNewSessionWizard(base string) string {

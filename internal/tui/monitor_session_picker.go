@@ -174,7 +174,7 @@ func (m *monitorModel) selectSessionFromPicker() tea.Cmd {
 	if sessID == "" {
 		return nil
 	}
-	if strings.EqualFold(strings.TrimSpace(item.mode), "team") && strings.TrimSpace(item.teamID) != "" {
+	if (strings.EqualFold(strings.TrimSpace(item.mode), "team") || strings.EqualFold(strings.TrimSpace(item.mode), "multi-agent")) && strings.TrimSpace(item.teamID) != "" {
 		teamID := strings.TrimSpace(item.teamID)
 		m.closeSessionPicker()
 		return func() tea.Msg { return monitorSwitchTeamMsg{TeamID: teamID} }

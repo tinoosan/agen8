@@ -753,6 +753,75 @@ func TestRPCServer_ArtifactList_TeamScopeAndGetTruncated(t *testing.T) {
 	}
 }
 
+func TestRPCServer_ArtifactGet_StatPermissionErrorReturnsInternalError(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	now := time.Now().UTC()
+	task := types.Task{
+		TaskID:       "task-perm-001",
+		SessionID:    run.SessionID,
+		RunID:        run.RunID,
+		TeamID:       "team-1",
+		AssignedRole: "ceo",
+		CreatedBy:    "coordinator",
+		Goal:         "perm task",
+		Status:       types.TaskStatusPending,
+		CreatedAt:    &now,
+		Inputs:       map[string]any{},
+		Metadata:     map[string]any{},
+	}
+	if err := ts.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask(%s): %v", task.TaskID, err)
+	}
+	done := now.Add(1 * time.Second)
+	artifactVPath := "/tasks/ceo/2026-02-08/" + task.TaskID + "/SUMMARY.md"
+	if err := ts.CompleteTask(context.Background(), task.TaskID, types.TaskResult{
+		TaskID:      task.TaskID,
+		Status:      types.TaskStatusSucceeded,
+		Summary:     "ok",
+		CompletedAt: &done,
+		Artifacts:   []string{artifactVPath},
+	}); err != nil {
+		t.Fatalf("CompleteTask(%s): %v", task.TaskID, err)
+	}
+
+	p := filepath.Join(fsutil.GetTeamTasksDir(cfg.DataDir, "team-1"), "ceo", "2026-02-08", task.TaskID, "SUMMARY.md")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(p, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	parentDir := filepath.Dir(p)
+	if err := os.Chmod(parentDir, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	defer func() { _ = os.Chmod(parentDir, 0o755) }()
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodArtifactGet, protocol.ArtifactGetParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		VPath:    artifactVPath,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error == nil {
+		t.Fatalf("expected artifact.get error for stat permission failure")
+	}
+	if resp.Error.Code != protocol.CodeInternalError {
+		t.Fatalf("expected internal error code, got %+v", resp.Error)
+	}
+}
+
 func TestRPCServer_TaskFlow_CreateListClaimComplete(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")
@@ -1816,6 +1885,17 @@ func TestRPCServer_SessionGetTotals_TeamScopeIncludesTokenBreakdown(t *testing.T
 
 func TestRPCServer_SessionStart_Standalone(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "general"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
 	sess := types.NewSession("goal")
 	run := types.NewRun("goal", 8*1024, sess.SessionID)
 	sessStore := store.NewMemorySessionStore()
@@ -1829,7 +1909,7 @@ func TestRPCServer_SessionStart_Standalone(t *testing.T) {
 
 	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
-		Mode:     "standalone",
+		Mode:     "single-agent",
 		Goal:     "fresh start",
 		Profile:  "general",
 	})
@@ -1842,16 +1922,107 @@ func TestRPCServer_SessionStart_Standalone(t *testing.T) {
 	if strings.TrimSpace(out.SessionID) == "" || strings.TrimSpace(out.PrimaryRunID) == "" {
 		t.Fatalf("missing ids: %+v", out)
 	}
-	if out.Mode != "standalone" {
-		t.Fatalf("mode = %q, want standalone", out.Mode)
+	if out.Mode != "single-agent" {
+		t.Fatalf("mode = %q, want single-agent", out.Mode)
 	}
-	if strings.TrimSpace(out.Model) != "" {
-		t.Fatalf("model = %q, want empty when no explicit model provided", out.Model)
+	if strings.TrimSpace(out.TeamID) == "" {
+		t.Fatalf("expected team id (unified flow), got %+v", out)
 	}
 	if got, err := sessStore.LoadSession(context.Background(), out.SessionID); err != nil {
 		t.Fatalf("load created session: %v", err)
-	} else if strings.TrimSpace(got.ActiveModel) != "" {
-		t.Fatalf("created session active model = %q, want empty", got.ActiveModel)
+	} else if strings.TrimSpace(got.TeamID) != strings.TrimSpace(out.TeamID) {
+		t.Fatalf("session teamID=%q want %q", got.TeamID, out.TeamID)
+	}
+}
+
+func TestRPCServer_SessionStart_PersistsProjectRoot(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "general"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	projectRoot := "/abs/path/to/project"
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID:    protocol.ThreadID(run.SessionID),
+		Mode:        "single-agent",
+		Goal:        "project task",
+		Profile:     "general",
+		ProjectRoot: projectRoot,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.start error: %+v", resp.Error)
+	}
+	var out protocol.SessionStartResult
+	_ = json.Unmarshal(resp.Result, &out)
+	created, err := sessStore.LoadSession(context.Background(), out.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := strings.TrimSpace(created.ProjectRoot); got != projectRoot {
+		t.Fatalf("session ProjectRoot=%q want %q", got, projectRoot)
+	}
+}
+
+func TestRPCServer_SessionStart_EmptyProjectRootOmitted(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "general"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Mode:     "single-agent",
+		Profile:  "general",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.start error: %+v", resp.Error)
+	}
+	var out protocol.SessionStartResult
+	_ = json.Unmarshal(resp.Result, &out)
+	created, err := sessStore.LoadSession(context.Background(), out.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if strings.TrimSpace(created.ProjectRoot) != "" {
+		t.Fatalf("session ProjectRoot=%q want empty when not provided", created.ProjectRoot)
 	}
 }
 
@@ -1886,7 +2057,7 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 		t.Fatalf("mkdir profiles: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "startup_team", "profile.yaml"), []byte(
-		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        system_prompt: build\n",
+		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  reviewer:\n    enabled: true\n    name: reviewer\n    description: Reviewer\n    prompts:\n      system_prompt: review\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        system_prompt: build\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -1903,7 +2074,7 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 
 	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
-		Mode:     "team",
+		Mode:     "multi-agent",
 		Profile:  "startup_team",
 	})
 	resp := rpcRoundTrip(t, srv, req)
@@ -1912,14 +2083,14 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 	}
 	var out protocol.SessionStartResult
 	_ = json.Unmarshal(resp.Result, &out)
-	if out.Mode != "team" {
-		t.Fatalf("mode=%q want team", out.Mode)
+	if out.Mode != "multi-agent" {
+		t.Fatalf("mode=%q want multi-agent", out.Mode)
 	}
 	if strings.TrimSpace(out.TeamID) == "" {
 		t.Fatalf("expected team id, got %+v", out)
 	}
 	if len(out.RunIDs) != 3 {
-		t.Fatalf("expected 3 role runs (including injected reviewer), got %d", len(out.RunIDs))
+		t.Fatalf("expected 3 runs (2 roles + configured reviewer), got %d", len(out.RunIDs))
 	}
 	if _, err := os.Stat(filepath.Join(fsutil.GetTeamDir(cfg.DataDir, out.TeamID), "team.json")); err != nil {
 		t.Fatalf("expected team manifest: %v", err)
@@ -1928,8 +2099,8 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession(team): %v", err)
 	}
-	if got := strings.TrimSpace(createdSess.Mode); got != "team" {
-		t.Fatalf("session mode=%q want team", got)
+	if got := strings.TrimSpace(createdSess.Mode); got != "multi-agent" {
+		t.Fatalf("session mode=%q want multi-agent", got)
 	}
 	if got := strings.TrimSpace(createdSess.TeamID); got != strings.TrimSpace(out.TeamID) {
 		t.Fatalf("session teamID=%q want %q", got, out.TeamID)
@@ -1952,13 +2123,59 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 	}
 }
 
-func TestRPCServer_SessionStart_StandaloneRejectsTeamProfile(t *testing.T) {
+func TestRPCServer_SessionStart_SingleRoleTeamProfile_DoesNotInjectReviewer(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
-	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "startup_team"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "single_team"), 0o755); err != nil {
 		t.Fatalf("mkdir profiles: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "startup_team", "profile.yaml"), []byte(
-		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n",
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "single_team", "profile.yaml"), []byte(
+		"id: single_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: solo\n      coordinator: true\n      description: Solo\n      prompts:\n        system_prompt: lead\n      skills:\n        - coding\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Profile:  "single_team",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.start(single_team) error: %+v", resp.Error)
+	}
+	var out protocol.SessionStartResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if out.Mode != "single-agent" {
+		t.Fatalf("mode=%q want single-agent", out.Mode)
+	}
+	if len(out.RunIDs) != 1 {
+		t.Fatalf("expected 1 role run (no reviewer configured), got %d", len(out.RunIDs))
+	}
+	createdRun, err := sessStore.LoadRun(context.Background(), out.RunIDs[0])
+	if err != nil {
+		t.Fatalf("LoadRun(single_team): %v", err)
+	}
+	if createdRun.Runtime == nil || !strings.EqualFold(strings.TrimSpace(createdRun.Runtime.Role), "solo") {
+		t.Fatalf("expected run role solo, got runtime=%+v", createdRun.Runtime)
+	}
+}
+
+func TestRPCServer_SessionStart_StandaloneRejectsMultiRoleTeamProfile(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "multi_team"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "multi_team", "profile.yaml"), []byte(
+		"id: multi_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        system_prompt: build\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -1974,17 +2191,17 @@ func TestRPCServer_SessionStart_StandaloneRejectsTeamProfile(t *testing.T) {
 
 	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
-		Mode:     "standalone",
-		Profile:  "startup_team",
+		Mode:     "single-agent",
+		Profile:  "multi_team",
 	})
 	resp := rpcRoundTrip(t, srv, req)
 	if resp.Error == nil {
-		t.Fatalf("expected standalone rejection for team profile")
+		t.Fatalf("expected standalone rejection for multi-role team profile")
 	}
 	if resp.Error.Code != protocol.CodeInvalidParams {
 		t.Fatalf("code = %d want %d", resp.Error.Code, protocol.CodeInvalidParams)
 	}
-	if !strings.Contains(strings.ToLower(resp.Error.Message), "non-team profile") {
+	if !strings.Contains(strings.ToLower(resp.Error.Message), "role count") {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 }
@@ -2079,8 +2296,8 @@ func TestRPCServer_SessionList_And_AgentList(t *testing.T) {
 			continue
 		}
 		foundSessB = true
-		if got := strings.TrimSpace(s.Mode); got != "team" {
-			t.Fatalf("session %s mode=%q want team", s.SessionID, got)
+		if got := strings.TrimSpace(s.Mode); got != "multi-agent" {
+			t.Fatalf("session %s mode=%q want multi-agent", s.SessionID, got)
 		}
 		if got := strings.TrimSpace(s.TeamID); got != "team-1" {
 			t.Fatalf("session %s teamID=%q want team-1", s.SessionID, got)
@@ -2118,6 +2335,118 @@ func TestRPCServer_SessionList_And_AgentList(t *testing.T) {
 	}
 
 	_ = sessA // keep lint happy for created baseline session
+}
+
+func TestRPCServer_SessionList_FiltersByProjectRoot(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "general"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	// Create session A with project /proj/a
+	reqA, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID:    protocol.ThreadID(run.SessionID),
+		Mode:        "single-agent",
+		Goal:        "proj a",
+		Profile:     "general",
+		ProjectRoot: "/proj/a",
+	})
+	respA := rpcRoundTrip(t, srv, reqA)
+	if respA.Error != nil {
+		t.Fatalf("session.start A: %+v", respA.Error)
+	}
+	var outA protocol.SessionStartResult
+	_ = json.Unmarshal(respA.Result, &outA)
+
+	// Create session B with project /proj/b
+	reqB, _ := protocol.NewRequest("2", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID:    protocol.ThreadID(run.SessionID),
+		Mode:        "single-agent",
+		Goal:        "proj b",
+		Profile:     "general",
+		ProjectRoot: "/proj/b",
+	})
+	respB := rpcRoundTrip(t, srv, reqB)
+	if respB.Error != nil {
+		t.Fatalf("session.start B: %+v", respB.Error)
+	}
+	var outB protocol.SessionStartResult
+	_ = json.Unmarshal(respB.Result, &outB)
+
+	// Create session C with no project
+	reqC, _ := protocol.NewRequest("3", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Mode:     "single-agent",
+		Goal:     "no proj",
+		Profile:  "general",
+	})
+	respC := rpcRoundTrip(t, srv, reqC)
+	if respC.Error != nil {
+		t.Fatalf("session.start C: %+v", respC.Error)
+	}
+
+	// List with ProjectRoot /proj/a - should return only session A
+	reqList, _ := protocol.NewRequest("4", protocol.MethodSessionList, protocol.SessionListParams{
+		ThreadID:    protocol.ThreadID(run.SessionID),
+		ProjectRoot: "/proj/a",
+		Limit:       10,
+	})
+	respList := rpcRoundTrip(t, srv, reqList)
+	if respList.Error != nil {
+		t.Fatalf("session.list: %+v", respList.Error)
+	}
+	var listed protocol.SessionListResult
+	_ = json.Unmarshal(respList.Result, &listed)
+	if listed.TotalCount != 1 {
+		t.Fatalf("ProjectRoot filter: totalCount=%d want 1", listed.TotalCount)
+	}
+	if len(listed.Sessions) != 1 {
+		t.Fatalf("ProjectRoot filter: len(sessions)=%d want 1", len(listed.Sessions))
+	}
+	if strings.TrimSpace(listed.Sessions[0].SessionID) != strings.TrimSpace(outA.SessionID) {
+		t.Fatalf("ProjectRoot filter: got session %q want %q", listed.Sessions[0].SessionID, outA.SessionID)
+	}
+	if got := strings.TrimSpace(listed.Sessions[0].ProjectRoot); got != "/proj/a" {
+		t.Fatalf("ProjectRoot in item=%q want /proj/a", got)
+	}
+
+	// List with ProjectRoot /proj/b - should return only session B
+	reqListB, _ := protocol.NewRequest("5", protocol.MethodSessionList, protocol.SessionListParams{
+		ThreadID:    protocol.ThreadID(run.SessionID),
+		ProjectRoot: "/proj/b",
+		Limit:       10,
+	})
+	respListB := rpcRoundTrip(t, srv, reqListB)
+	if respListB.Error != nil {
+		t.Fatalf("session.list B: %+v", respListB.Error)
+	}
+	var listedB protocol.SessionListResult
+	_ = json.Unmarshal(respListB.Result, &listedB)
+	if listedB.TotalCount != 1 || len(listedB.Sessions) != 1 {
+		t.Fatalf("ProjectRoot /proj/b: totalCount=%d len=%d want 1", listedB.TotalCount, len(listedB.Sessions))
+	}
+	if strings.TrimSpace(listedB.Sessions[0].SessionID) != strings.TrimSpace(outB.SessionID) {
+		t.Fatalf("ProjectRoot /proj/b: got %q want %q", listedB.Sessions[0].SessionID, outB.SessionID)
+	}
 }
 
 func TestRPCServer_AgentPauseResume(t *testing.T) {
@@ -2429,7 +2758,7 @@ func TestRPCServer_SessionClearHistory_TeamUsesManifestRuns(t *testing.T) {
 		t.Fatalf("CreateSession role: %v", err)
 	}
 	teamID := "team-test"
-	coordinatorSession.Mode = "team"
+	coordinatorSession.Mode = "multi-agent"
 	coordinatorSession.TeamID = teamID
 	coordinatorSession.Profile = "team-profile"
 	coordinatorSession.Runs = []string{coordinatorRun.RunID}
@@ -2444,7 +2773,7 @@ func TestRPCServer_SessionClearHistory_TeamUsesManifestRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession role: %v", err)
 	}
-	roleSessLoaded.Mode = "team"
+	roleSessLoaded.Mode = "multi-agent"
 	roleSessLoaded.TeamID = teamID
 	if err := sessStore.SaveSession(context.Background(), roleSessLoaded); err != nil {
 		t.Fatalf("SaveSession role: %v", err)
@@ -2749,6 +3078,11 @@ func TestRPCServer_TeamManifestPlanModelEndpoints(t *testing.T) {
 	if respManifest.Error != nil {
 		t.Fatalf("team.getManifest error: %+v", respManifest.Error)
 	}
+	var manifestRes protocol.TeamGetManifestResult
+	_ = json.Unmarshal(respManifest.Result, &manifestRes)
+	if strings.TrimSpace(manifestRes.ReviewerRole) != "ceo" {
+		t.Fatalf("reviewerRole=%q want ceo", manifestRes.ReviewerRole)
+	}
 
 	reqPlan, _ := protocol.NewRequest("3", protocol.MethodPlanGet, protocol.PlanGetParams{
 		ThreadID: protocol.ThreadID(run.SessionID), RunID: run.RunID,
@@ -2774,6 +3108,71 @@ func TestRPCServer_TeamManifestPlanModelEndpoints(t *testing.T) {
 	_ = json.Unmarshal(respModels.Result, &models)
 	if len(models.Models) == 0 {
 		t.Fatalf("expected model.list results")
+	}
+}
+
+func TestRPCServer_TeamGetManifest_ReviewerFromProfileYAML(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	profileDir := filepath.Join(cfg.DataDir, "profiles", "reviewer_team")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	profileYAML := `id: reviewer_team
+description: Team profile with explicit reviewer
+team:
+  reviewer:
+    enabled: true
+    name: qa
+    description: Reviewer
+    prompts:
+      system_prompt: review
+  model: openai/gpt-5-mini
+  roles:
+    - name: coordinator
+      coordinator: true
+      description: Lead
+      prompts:
+        system_prompt: lead
+    - name: analyst
+      description: Reviewer
+      prompts:
+        system_prompt: review
+`
+	if err := os.WriteFile(filepath.Join(profileDir, "profile.yaml"), []byte(profileYAML), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	teamID := "team-r"
+	teamDir := fsutil.GetTeamDir(cfg.DataDir, teamID)
+	if err := os.MkdirAll(teamDir, 0o755); err != nil {
+		t.Fatalf("mkdir team dir: %v", err)
+	}
+	manifest := `{"teamId":"team-r","profileId":"reviewer_team","teamModel":"openai/gpt-5-mini","coordinatorRole":"coordinator","coordinatorRunId":"run-1","roles":[{"roleName":"coordinator","runId":"run-1","sessionId":"sess-1"},{"roleName":"qa","runId":"run-2","sessionId":"sess-2"}],"createdAt":"2026-01-01T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(teamDir, "team.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	reqManifest, _ := protocol.NewRequest("2", protocol.MethodTeamGetManifest, protocol.TeamGetManifestParams{
+		ThreadID: protocol.ThreadID(run.SessionID), TeamID: teamID,
+	})
+	respManifest := rpcRoundTrip(t, srv, reqManifest)
+	if respManifest.Error != nil {
+		t.Fatalf("team.getManifest error: %+v", respManifest.Error)
+	}
+	var manifestRes protocol.TeamGetManifestResult
+	_ = json.Unmarshal(respManifest.Result, &manifestRes)
+	if strings.TrimSpace(manifestRes.ReviewerRole) != "qa" {
+		t.Fatalf("reviewerRole=%q want qa", manifestRes.ReviewerRole)
 	}
 }
 
@@ -2976,6 +3375,56 @@ func TestRPCServer_TaskList_TeamScopeNoRunIDReturnsAllRoleRuns(t *testing.T) {
 	}
 	if !seen["task-a"] || !seen["task-b"] {
 		t.Fatalf("expected team-wide tasks from run-a and run-b, got %+v", out.Tasks)
+	}
+}
+
+func TestRPCServer_TaskList_InboxHidesStagedSingleCallbacks(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	teamID := "team-1"
+	sess.TeamID = teamID
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "callback-single-team", SessionID: sess.SessionID, RunID: run.RunID, TeamID: teamID, AssignedRole: "reviewer", AssignedToType: "role", AssignedTo: "reviewer",
+		Goal: "single team callback", Status: types.TaskStatusReviewPending, CreatedAt: &now, Metadata: map[string]any{"source": "team.callback"},
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "callback-single-sub", SessionID: sess.SessionID, RunID: run.RunID, TeamID: teamID, AssignedRole: "reviewer", AssignedToType: "role", AssignedTo: "reviewer",
+		Goal: "single sub callback", Status: types.TaskStatusReviewPending, CreatedAt: &now, Metadata: map[string]any{"source": "subagent.callback"},
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "callback-batch", SessionID: sess.SessionID, RunID: run.RunID, TeamID: teamID, AssignedRole: "reviewer", AssignedToType: "role", AssignedTo: "reviewer",
+		Goal: "batch callback", Status: types.TaskStatusReviewPending, CreatedAt: &now, Metadata: map[string]any{"source": "team.batch.callback"},
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodTaskList, protocol.TaskListParams{
+		ThreadID: protocol.ThreadID(sess.SessionID),
+		TeamID:   teamID,
+		Scope:    "team",
+		View:     "inbox",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("task.list inbox error: %+v", resp.Error)
+	}
+	var out protocol.TaskListResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if len(out.Tasks) != 1 {
+		t.Fatalf("expected only synthetic batch callback in inbox, got %d", len(out.Tasks))
+	}
+	if got := strings.TrimSpace(out.Tasks[0].ID); got != "callback-batch" {
+		t.Fatalf("unexpected inbox task %q", got)
 	}
 }
 

@@ -96,6 +96,31 @@ func TestHandleCodeExecToolCall_DispatchAndBridge(t *testing.T) {
 	}
 }
 
+func TestHandleCodeExecToolCall_PreservesSemanticTagAndSetsBridgeAction(t *testing.T) {
+	frame := handleCodeExecToolCall(
+		context.Background(),
+		codeExecToolCallFrame{Type: "tool_call", ID: 9, Tool: "task_create", Args: json.RawMessage(`{"goal":"x"}`)},
+		1,
+		5,
+		[]string{"task_create"},
+		func(_ context.Context, _ string, _ json.RawMessage) (types.HostOpRequest, error) {
+			return types.HostOpRequest{Op: types.HostOpToolResult, Tag: "task_create"}, nil
+		},
+		func(_ context.Context, req types.HostOpRequest) types.HostOpResponse {
+			if req.Tag != "task_create" {
+				t.Fatalf("bridge tag=%q want task_create", req.Tag)
+			}
+			if req.Action != "code_exec_bridge" {
+				t.Fatalf("bridge action=%q want code_exec_bridge", req.Action)
+			}
+			return types.HostOpResponse{Op: req.Op, Ok: true}
+		},
+	)
+	if !frame.OK {
+		t.Fatalf("expected bridge success, got %+v", frame)
+	}
+}
+
 func TestResolveCodeExecCwd(t *testing.T) {
 	project := t.TempDir()
 	workspace := t.TempDir()
@@ -496,11 +521,11 @@ func TestRunPython_PathAccessAllowlist_BlocksPathsOutside(t *testing.T) {
 	inv.SetPathAccess([]string{sharedDir}, true)
 
 	out, err := inv.runPython(context.Background(), python, workspace, codeExecRunConfig{
-		Code:              `open("/etc/passwd", "r")`,
-		Allowlist:         []string{},
-		MaxToolCalls:      0,
-		TimeoutMs:         4_000,
-		MaxOutput:         8 * 1024,
+		Code:                `open("/etc/passwd", "r")`,
+		Allowlist:           []string{},
+		MaxToolCalls:        0,
+		TimeoutMs:           4_000,
+		MaxOutput:           8 * 1024,
 		PathAccessAllowlist: []string{sharedDir},
 		PathAccessReadOnly:  true,
 		Dispatch:            nil,

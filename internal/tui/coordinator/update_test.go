@@ -1,8 +1,11 @@
 package coordinator
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/tinoosan/agen8/pkg/types"
 )
 
 func TestMergeThinkingEntries(t *testing.T) {
@@ -67,5 +70,137 @@ func TestMergeActivityEntries(t *testing.T) {
 	}
 	if !foundText {
 		t.Fatalf("agent text entry was missing")
+	}
+}
+
+func TestActivityToFeedEntry_TaskDoneUsesTaskIDAndIsTaskResponse(t *testing.T) {
+	act := types.Activity{
+		ID:        "event-123",
+		Kind:      "task.done",
+		Title:     "Final summary",
+		StartedAt: time.Now(),
+		Data: map[string]string{
+			"taskId": "task-abc",
+		},
+	}
+	entry := activityToFeedEntry(act)
+	if entry == nil {
+		t.Fatalf("expected entry, got nil")
+	}
+	if !entry.isTaskResponse {
+		t.Fatalf("expected task.done to be marked isTaskResponse")
+	}
+	if entry.sourceID != "task-abc" {
+		t.Fatalf("expected sourceID task-abc, got %q", entry.sourceID)
+	}
+}
+
+func TestSingleWriter_TaskDoneAndPollSameTaskIDRendersOnce(t *testing.T) {
+	m := &Model{}
+	ts := time.Now()
+
+	pushAct := types.Activity{
+		ID:        "event-1",
+		Kind:      "task.done",
+		Title:     "Ship it",
+		StartedAt: ts,
+		Data: map[string]string{
+			"taskId": "task-1",
+		},
+	}
+	pushEntry := activityToFeedEntry(pushAct)
+	if pushEntry == nil {
+		t.Fatalf("expected push entry")
+	}
+
+	m.mergeActivityEntries([]feedEntry{*pushEntry})
+	m.mergeThinkingEntries([]feedEntry{
+		{
+			kind:           feedAgent,
+			isText:         true,
+			isTaskResponse: true,
+			sourceID:       "task-1",
+			text:           "Ship it",
+			timestamp:      ts.Add(time.Second),
+		},
+	})
+
+	taskResponses := 0
+	for _, e := range m.feed {
+		if e.isTaskResponse && e.sourceID == "task-1" {
+			taskResponses++
+		}
+	}
+	if taskResponses != 1 {
+		t.Fatalf("expected exactly one task response for task-1, got %d", taskResponses)
+	}
+}
+
+func TestAgentSpeakIsNotTerminalTaskResponse(t *testing.T) {
+	act := types.Activity{
+		ID:        "event-2",
+		Kind:      "agent_speak",
+		Title:     "Some assistant text",
+		StartedAt: time.Now(),
+		Data: map[string]string{
+			"taskId": "task-2",
+		},
+	}
+	entry := activityToFeedEntry(act)
+	if entry == nil {
+		t.Fatalf("expected entry, got nil")
+	}
+	if entry.isTaskResponse {
+		t.Fatalf("agent_speak should not be marked as terminal task response")
+	}
+}
+
+func TestIsActivityText_ToolResultIsOperation(t *testing.T) {
+	act := types.Activity{
+		ID:    "run-1|op-1",
+		Kind:  "tool_result",
+		Title: "tool_result",
+		Data: map[string]string{
+			"opId": "op-1",
+		},
+	}
+	if isActivityText(act) {
+		t.Fatalf("tool_result must be treated as operation, not text")
+	}
+}
+
+func TestMergeActivityEntries_DedupesByIdentity(t *testing.T) {
+	m := &Model{}
+	ts := time.Now()
+
+	entry := feedEntry{
+		kind:      feedAgent,
+		timestamp: ts,
+		role:      "reviewer",
+		text:      "Create task",
+		status:    "ok",
+		opKind:    "task_create",
+		sourceID:  "run-a|op-1",
+		data: map[string]string{
+			"opId": "op-1",
+			"op":   "task_create",
+			"goal": "one",
+		},
+	}
+	entry = *normalizeFeedEntry(&entry)
+
+	entries := []feedEntry{entry}
+	for i := 0; i < 10; i++ {
+		m.mergeActivityEntries(entries)
+	}
+
+	count := 0
+	for _, e := range m.feed {
+		if strings.TrimSpace(e.identityKey) == "op:run-a|op-1" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected one normalized op entry after replay, got %d", count)
 	}
 }

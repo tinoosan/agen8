@@ -13,27 +13,16 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/reflow/wordwrap"
+	"github.com/tinoosan/agen8/internal/tui/adapter"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	agentstate "github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/protocol"
-	pkgstore "github.com/tinoosan/agen8/pkg/store"
+	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
 // tailedEvent is one event from the events tail stream (RPC polling or store tail).
-type tailedEvent struct {
-	Event      types.EventRecord
-	NextOffset int64
-}
-
-type tailedEventMsg struct {
-	ev tailedEvent
-}
-
-type tailErrMsg struct {
-	err error
-}
 
 type commandLinesMsg struct {
 	lines []string
@@ -74,8 +63,11 @@ type agentsListMsg struct {
 }
 
 type childRunsLoadedMsg struct {
-	runs []types.Run
-	err  error
+	runs             []types.Run
+	assignedByRunID  map[string]int
+	completedByRunID map[string]int
+	activeByRunID    map[string]int
+	err              error
 }
 
 // AgentOutputItem represents a single logical entry in the agent output stream.
@@ -187,7 +179,7 @@ type monitorModel struct {
 	rpcLastErr     string
 	rpcChecking    bool
 	result         *MonitorResult
-	session        pkgstore.SessionQuery
+	session        pkgsession.Service
 	sessionID      string
 
 	offset int64
@@ -241,6 +233,9 @@ type monitorModel struct {
 	thinkingVP                   viewport.Model
 	thinkingAutoScroll           bool
 	childRuns                    []types.Run
+	childRunAssignedByRunID      map[string]int
+	childRunCompletedByRunID     map[string]int
+	childRunActiveByRunID        map[string]int
 	childRunsLoadErr             string // last error from loadChildRuns (e.g. RPC failed)
 	subagentsVP                  viewport.Model
 	subagentsList                list.Model
@@ -268,8 +263,6 @@ type monitorModel struct {
 	width                        int
 	height                       int
 	styles                       *monitorStyles
-	tailCh                       <-chan tailedEvent
-	errCh                        <-chan error
 	cancel                       context.CancelFunc
 
 	// Modal overlay state (only one modal open at a time)
@@ -316,7 +309,7 @@ type monitorModel struct {
 	newSessionWizardOpen        bool
 	newSessionWizardStep        int        // 0 = choose mode, 1 = choose profile
 	newSessionWizardList        list.Model // step 0 list
-	newSessionWizardMode        string     // "standalone" or "team" (set after step 0)
+	newSessionWizardMode        string     // "single-agent" or "multi-agent" (set after step 0)
 	newSessionWizardProfileList list.Model // step 1 list
 
 	// Command palette (inline autocomplete above composer)
@@ -546,16 +539,21 @@ const (
 func (m *monitorModel) Init() tea.Cmd {
 	if m.isDetached() {
 		m.rpcChecking = true
-		return tea.Batch(m.tick(), m.checkRPCHealthCmd(false), m.openNewSessionWizard())
+		return tea.Batch(m.tick(), m.checkRPCHealthCmd(false), m.openNewSessionWizard(), adapter.StartNotificationListenerCmd(m.rpcEndpoint))
 	}
-	cmds := []tea.Cmd{m.listenEvent(), m.listenErr(), m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage()}
-	if strings.TrimSpace(m.teamID) == "" {
-		cmds = append(cmds, m.loadChildRuns())
-	}
-	if strings.TrimSpace(m.teamID) != "" {
-		cmds = append(cmds, m.loadTeamStatus(), m.loadTeamEvents(), m.loadPlanFilesCmd(), m.loadTeamManifestCmd())
-	}
-	return tea.Batch(cmds...)
+	// Attached = always has team. Load team context and child runs (subagents).
+	return tea.Batch(
+		m.tick(),
+		m.loadInboxPage(),
+		m.loadOutboxPage(),
+		m.loadActivityPage(),
+		m.loadChildRuns(),
+		m.loadTeamStatus(),
+		m.loadTeamEvents(),
+		m.loadPlanFilesCmd(),
+		m.loadTeamManifestCmd(),
+		adapter.StartNotificationListenerCmd(m.rpcEndpoint),
+	)
 }
 
 func (m *monitorModel) isDetached() bool {

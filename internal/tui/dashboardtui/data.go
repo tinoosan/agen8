@@ -25,7 +25,6 @@ type agentRow struct {
 	AssignedTasks   int
 	CompletedTasks  int
 	WorkerPresent   bool
-	LastHeartbeatAt string
 	StartedAt       string
 }
 
@@ -41,14 +40,15 @@ type sessionStats struct {
 }
 
 type dataLoadedMsg struct {
-	agents      []agentRow
-	stats       sessionStats
-	sessionMode string
-	teamID      string
-	runID       string
-	preserve    bool
-	connected   bool
-	err         error
+	agents       []agentRow
+	stats        sessionStats
+	sessionMode  string
+	teamID       string
+	runID        string
+	reviewerRole string
+	preserve     bool
+	connected    bool
+	err          error
 }
 
 type tickMsg struct{}
@@ -92,6 +92,7 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 		mode := fallback(strings.TrimSpace(scope.Mode), "standalone")
 		teamID := strings.TrimSpace(scope.TeamID)
 		runID := strings.TrimSpace(scope.RunID)
+		reviewerRole := ""
 		threadID := protocol.ThreadID(scope.ThreadID)
 
 		session, err := fetchSessionItem(call, sid)
@@ -137,6 +138,13 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 		assignedByRole := map[string]int{}
 		completedByRole := map[string]int{}
 		if teamID != "" {
+			var manifest protocol.TeamGetManifestResult
+			if err := call(protocol.MethodTeamGetManifest, protocol.TeamGetManifestParams{
+				ThreadID: threadID,
+				TeamID:   teamID,
+			}, &manifest); err == nil {
+				reviewerRole = strings.TrimSpace(manifest.ReviewerRole)
+			}
 			var teamStatus protocol.TeamGetStatusResult
 			if err := call(protocol.MethodTeamGetStatus, protocol.TeamGetStatusParams{
 				ThreadID: threadID,
@@ -149,6 +157,7 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			for _, view := range []string{"inbox", "outbox"} {
 				tasks, err := listTasksByView(ctx, scopeClient, protocol.TaskListParams{
 					ThreadID: threadID,
+					Scope:    "team",
 					TeamID:   teamID,
 					RunID:    "",
 					View:     view,
@@ -212,13 +221,20 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 		for _, agent := range agentsRes.Agents {
 			rid := strings.TrimSpace(agent.RunID)
 			role := strings.TrimSpace(agent.Role)
+			// For subagents, use canonical "Subagent-N" identity
+			if strings.TrimSpace(agent.ParentRunID) != "" {
+				spawnIndex := agent.SpawnIndex
+				if spawnIndex <= 0 {
+					spawnIndex = 1
+				}
+				role = fmt.Sprintf("Subagent-%d", spawnIndex)
+			}
 			if strings.EqualFold(mode, "standalone") && role == "" {
 				role = "-"
 			}
 
 			status := strings.TrimSpace(agent.Status)
 			worker := false
-			heartbeat := ""
 			model := ""
 			runTotalTokens := 0
 			runTotalCostUSD := 0.0
@@ -227,7 +243,6 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 					status = effective
 				}
 				worker = rs.WorkerPresent
-				heartbeat = strings.TrimSpace(rs.LastHeartbeatAt)
 				model = strings.TrimSpace(rs.Model)
 				runTotalTokens = rs.RunTotalTokens
 				runTotalCostUSD = rs.RunTotalCostUSD
@@ -256,7 +271,6 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 				AssignedTasks:   assignedTasks,
 				CompletedTasks:  completedTasks,
 				WorkerPresent:   worker,
-				LastHeartbeatAt: heartbeat,
 				StartedAt:       strings.TrimSpace(agent.StartedAt),
 			})
 		}
@@ -268,12 +282,13 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 		}
 
 		return dataLoadedMsg{
-			agents:      agents,
-			stats:       stats,
-			sessionMode: mode,
-			teamID:      teamID,
-			runID:       runID,
-			connected:   true,
+			agents:       agents,
+			stats:        stats,
+			sessionMode:  mode,
+			teamID:       teamID,
+			runID:        runID,
+			reviewerRole: reviewerRole,
+			connected:    true,
 		}
 	}
 }

@@ -64,5 +64,5 @@ var monitorCmd = &cobra.Command{
 
 func init() {
 	monitorCmd.Flags().StringVar(&monitorAgentID, "agent-id", "", "agent ID to attach to")
-	monitorCmd.Flags().StringVar(&monitorTeamID, "team-id", "", "team ID to attach to in teams mode")
+	monitorCmd.Flags().StringVar(&monitorTeamID, "team-id", "", "team ID to attach to in multi-agent mode")
 }

@@ -16,6 +16,55 @@ func TestAttachCommand_RequiresSessionID(t *testing.T) {
 	}
 }
 
+func TestProjectModeDefault(t *testing.T) {
+	tests := []struct {
+		configMode string
+		want      string
+	}{
+		{"team", "multi-agent"},
+		{"multi-agent", "multi-agent"},
+		{"standalone", "single-agent"},
+		{"single-agent", "single-agent"},
+		{"", "single-agent"},
+	}
+	for _, tc := range tests {
+		ctx := app.ProjectContext{
+			Exists: true,
+			Config: app.ProjectConfig{DefaultMode: tc.configMode},
+		}
+		if got := projectModeDefault(ctx); got != tc.want {
+			t.Errorf("projectModeDefault(DefaultMode=%q)=%q want %q", tc.configMode, got, tc.want)
+		}
+	}
+	// No project
+	if got := projectModeDefault(app.ProjectContext{}); got != "single-agent" {
+		t.Errorf("projectModeDefault(no project)=%q want single-agent", got)
+	}
+}
+
+func TestProjectProfileDefault(t *testing.T) {
+	ctx := app.ProjectContext{
+		Exists: true,
+		Config: app.ProjectConfig{
+			DefaultProfile:     "general",
+			DefaultTeamProfile: "startup_team",
+		},
+	}
+	if got := projectProfileDefault(ctx, "single-agent"); got != "general" {
+		t.Errorf("projectProfileDefault(single-agent)=%q want general", got)
+	}
+	if got := projectProfileDefault(ctx, "multi-agent"); got != "startup_team" {
+		t.Errorf("projectProfileDefault(multi-agent)=%q want startup_team", got)
+	}
+	if got := projectProfileDefault(ctx, "team"); got != "startup_team" {
+		t.Errorf("projectProfileDefault(team)=%q want startup_team", got)
+	}
+	ctx.Config.DefaultTeamProfile = ""
+	if got := projectProfileDefault(ctx, "multi-agent"); got != "general" {
+		t.Errorf("projectProfileDefault(multi-agent, no team profile)=%q want general", got)
+	}
+}
+
 func TestResolveSessionDeleteTarget_UsesProjectActiveSession(t *testing.T) {
 	base := t.TempDir()
 	prevWD := workDir

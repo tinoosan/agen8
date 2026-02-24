@@ -9,14 +9,17 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/adapter"
 	"github.com/tinoosan/agen8/pkg/types"
 )
+
+type monitorReconnectNotificationMsg struct{}
 
 func (m *monitorModel) dispatchUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg, tickMsg, rpcHealthMsg:
 		return m.handleWindowAndTick(msg)
-	case tailedEventMsg, tailErrMsg, commandLinesMsg, historyClearedMsg, sessionDeletedMsg, monitorEditorDoneMsg, taskQueuedLocallyMsg, monitorSwitchRunMsg, monitorSwitchTeamMsg, monitorReloadedMsg, clipboardDoneMsg:
+	case commandLinesMsg, historyClearedMsg, sessionDeletedMsg, monitorEditorDoneMsg, taskQueuedLocallyMsg, monitorSwitchRunMsg, monitorSwitchTeamMsg, monitorReloadedMsg, clipboardDoneMsg, adapter.EventPushedMsg, adapter.NotificationConnErrorMsg, monitorReconnectNotificationMsg:
 		return m.handleTailAndStreamMessages(msg)
 	case inboxLoadedMsg, outboxLoadedMsg, teamStatusLoadedMsg, teamManifestLoadedMsg, teamEventsLoadedMsg, activityLoadedMsg, sessionsListMsg, agentsListMsg, planFilesLoadedMsg, sessionTotalsLoadedMsg, artifactTreeLoadedMsg, artifactContentLoadedMsg, monitorFilePickerPathsMsg, childRunsLoadedMsg:
 		return m.handleLoadedDataMessages(msg)
@@ -55,10 +58,8 @@ func (m *monitorModel) handleWindowAndTick(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(cmds...)
 		}
-		if strings.TrimSpace(m.teamID) != "" {
-			return m, tea.Batch(m.tick(), m.loadInboxPage(), m.loadOutboxPage(), m.loadActivityPage(), m.loadTeamStatus(), m.loadTeamEvents(), m.loadPlanFilesCmd(), m.loadTeamManifestCmd())
-		}
-		return m, m.tick()
+		// Attached = always has team.
+		return m, tea.Batch(m.tick(), m.loadOutboxPage(), m.loadTeamStatus(), m.loadTeamEvents(), m.loadPlanFilesCmd(), m.loadTeamManifestCmd())
 
 	case rpcHealthMsg:
 		m.rpcChecking = false
@@ -83,21 +84,35 @@ func (m *monitorModel) handleWindowAndTick(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tailedEventMsg:
-		if msg.ev.Event.EventID != "" {
-			m.offset = msg.ev.NextOffset
-			m.observeEvent(msg.ev.Event)
+	case adapter.NotificationConnErrorMsg:
+		return m, tea.Sequence(
+			tea.Tick(2*time.Second, func(time.Time) tea.Msg { return monitorReconnectNotificationMsg{} }),
+		)
+
+	case monitorReconnectNotificationMsg:
+		return m, tea.Batch(
+			m.loadActivityPage(),
+			adapter.StartNotificationListenerCmd(m.rpcEndpoint),
+		)
+
+	case adapter.EventPushedMsg:
+		if !m.isEventInScope(msg.Record) {
+			return m, adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh)
 		}
-		cmds := []tea.Cmd{m.listenEvent()}
-		if shouldReloadPlanOnEvent(msg.ev.Event) {
+		if msg.Record.EventID != "" {
+			m.observeEvent(msg.Record)
+		}
+
+		cmds := []tea.Cmd{adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh)}
+		if shouldReloadPlanOnEvent(msg.Record) {
 			cmds = append(cmds, m.schedulePlanReload())
 		}
-		switch msg.ev.Event.Type {
+		switch msg.Record.Type {
 		case "llm.cost.total", "llm.usage.total":
 			cmds = append(cmds, m.scheduleSessionTotalsReload())
 		}
-		// Keep paginated lists in sync without loading everything into memory.
-		switch msg.ev.Event.Type {
+
+		switch msg.Record.Type {
 		case "task.queued", "webhook.task.queued", "task.start":
 			cmds = append(cmds, m.loadInboxPage())
 		case "task.done", "task.quarantined":
@@ -106,32 +121,54 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 			cmds = append(cmds, m.loadInboxPage())
 		case "callback.batch.item.reviewed":
 			cmds = append(cmds, m.loadOutboxPage())
+		case "callback.batch.closed":
+			cmds = append(cmds, m.loadInboxPage(), m.loadOutboxPage())
+		case "review.closure.receipt":
+			cmds = append(cmds, m.loadInboxPage(), m.loadOutboxPage())
 		case "task.delivered":
 			cmds = append(cmds, m.loadOutboxPage())
 		case "agent.op.request", "agent.op.response":
-			if m.activityFollowingTail {
-				// If a new page is created, overshoot so loadActivityPage clamps to the new last page.
-				m.activityPage = max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize))
+			act, ok := adapter.EventRecordToActivity(msg.Record)
+			if !ok {
+				cmds = append(cmds, m.loadActivityPage())
+			} else {
+				if m.activityFollowingTail {
+					m.activityPageItems = append(m.activityPageItems, act)
+					m.activityTotalCount++
+					m.activityPage = max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize))
+					m.dirtyActivity = true
+				} else {
+					m.activityTotalCount++
+				}
 			}
-			cmds = append(cmds, m.loadActivityPage())
-			if msg.ev.Event.Type == "agent.op.response" {
-				op := strings.TrimSpace(msg.ev.Event.Data["op"])
-				tag := strings.TrimSpace(msg.ev.Event.Data["tag"])
+
+			if msg.Record.Type == "agent.op.response" {
+				op := strings.TrimSpace(msg.Record.Data["op"])
+				tag := strings.TrimSpace(msg.Record.Data["tag"])
 				if op == "agent_spawn" || op == "task_create" || tag == "task_create" {
 					cmds = append(cmds, m.loadChildRuns())
 				}
 			}
 		case "subagent.spawned":
 			cmds = append(cmds, m.loadChildRuns())
+		default:
+			act, ok := adapter.EventRecordToActivity(msg.Record)
+			if !ok {
+				cmds = append(cmds, m.loadActivityPage())
+			} else {
+				if m.activityFollowingTail {
+					m.activityPageItems = append(m.activityPageItems, act)
+					m.activityTotalCount++
+					m.activityPage = max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize))
+					m.dirtyActivity = true
+				} else {
+					m.activityTotalCount++
+				}
+			}
 		}
+
 		cmds = append(cmds, m.scheduleUIRefresh())
 		return m, tea.Batch(cmds...)
-
-	case tailErrMsg:
-		if msg.err != nil {
-			m.appendAgentOutput("[error] " + msg.err.Error())
-		}
-		return m, tea.Batch(m.listenErr(), m.scheduleUIRefresh())
 
 	case commandLinesMsg:
 		if len(msg.lines) != 0 {
@@ -174,12 +211,9 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 		cmds := []tea.Cmd{
 			m.loadActivityPage(),
 			m.loadSessionTotalsCmd(),
+			m.loadTeamEvents(),
+			m.loadChildRuns(),
 			m.scheduleUIRefresh(),
-		}
-		if strings.TrimSpace(m.teamID) != "" {
-			cmds = append(cmds, m.loadTeamEvents())
-		} else {
-			cmds = append(cmds, m.loadChildRuns())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -244,6 +278,32 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 	return m, nil
 }
 
+func (m *monitorModel) isEventInScope(ev types.EventRecord) bool {
+	runID := strings.TrimSpace(ev.RunID)
+	if runID == "" {
+		return true
+	}
+	teamID := strings.TrimSpace(m.teamID)
+	if teamID != "" {
+		if evTeam := strings.TrimSpace(ev.Data["teamId"]); evTeam != "" && evTeam == teamID {
+			return true
+		}
+		if strings.HasPrefix(runID, "team-"+teamID) {
+			return true
+		}
+	}
+	current := strings.TrimSpace(m.runID)
+	if current != "" && runID == current {
+		return true
+	}
+	for _, child := range m.childRuns {
+		if strings.TrimSpace(child.RunID) == runID {
+			return true
+		}
+	}
+	return false
+}
+
 var (
 	legacyTaskDoneCommandLineRE = regexp.MustCompile(`^\[\d{2}:\d{2}:\d{2}\]\s+\[[^\]]+\]\s+task\.done\s+task-[^\s]+\s+`)
 	legacySummaryWriteLineRE    = regexp.MustCompile(`^\[\d{2}:\d{2}:\d{2}\]\s+Write\s+/tasks/.*/SUMMARY(?:\.md)?\s*$`)
@@ -281,6 +341,9 @@ func (m *monitorModel) handleLoadedDataMessages(msg tea.Msg) (tea.Model, tea.Cmd
 		}
 		m.childRunsLoadErr = ""
 		m.childRuns = msg.runs
+		m.childRunAssignedByRunID = msg.assignedByRunID
+		m.childRunCompletedByRunID = msg.completedByRunID
+		m.childRunActiveByRunID = msg.activeByRunID
 		m.dirtyInbox = true // Re-render dashboard
 		return m, m.scheduleUIRefresh()
 

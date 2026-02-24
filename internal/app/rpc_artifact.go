@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -40,6 +39,17 @@ type artifactScope struct {
 	sessionID string
 	teamID    string
 	runID     string
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
 }
 
 func standaloneVisibleArtifactVPath(vpath string) bool {
@@ -601,18 +611,9 @@ func (s *RPCServer) artifactGet(ctx context.Context, p protocol.ArtifactGetParam
 		if strings.TrimSpace(diskPath) == "" {
 			return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "artifact not found"}
 		}
-		f, err := os.Open(diskPath)
+		buf, truncated, err := s.fileReader.Read(ctx, diskPath, maxBytes)
 		if err != nil {
 			return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "artifact file not found"}
-		}
-		defer f.Close()
-		buf, err := io.ReadAll(io.LimitReader(f, int64(maxBytes)+1))
-		if err != nil {
-			return protocol.ArtifactGetResult{}, err
-		}
-		truncated := len(buf) > maxBytes
-		if truncated {
-			buf = buf[:maxBytes]
 		}
 		fileLabel := filepath.Base(strings.TrimSpace(vpath))
 		if fileLabel == "" || fileLabel == "." || fileLabel == "/" {
@@ -639,24 +640,23 @@ func (s *RPCServer) artifactGet(ctx context.Context, p protocol.ArtifactGetParam
 	}
 
 	diskPath := strings.TrimSpace(sel.DiskPath)
-	if diskPath == "" || func() bool { _, err := os.Stat(diskPath); return err != nil }() {
+	if diskPath != "" {
+		exists, statErr := pathExists(diskPath)
+		if statErr != nil {
+			return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: "artifact file stat failed"}
+		}
+		if !exists {
+			diskPath = s.resolveArtifactDiskPathForScope(ctx, scope, sel.TeamID, sel.RunID, sel.VPath)
+		}
+	} else {
 		diskPath = s.resolveArtifactDiskPathForScope(ctx, scope, sel.TeamID, sel.RunID, sel.VPath)
 	}
 	if strings.TrimSpace(diskPath) == "" {
 		return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "artifact file path unavailable"}
 	}
-	f, err := os.Open(diskPath)
+	buf, truncated, err := s.fileReader.Read(ctx, diskPath, maxBytes)
 	if err != nil {
 		return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: "artifact file not found"}
-	}
-	defer f.Close()
-	buf, err := io.ReadAll(io.LimitReader(f, int64(maxBytes)+1))
-	if err != nil {
-		return protocol.ArtifactGetResult{}, err
-	}
-	truncated := len(buf) > maxBytes
-	if truncated {
-		buf = buf[:maxBytes]
 	}
 	node := protocol.ArtifactNode{
 		NodeKey:     "file:" + strings.TrimSpace(sel.VPath),

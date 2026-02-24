@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/tinoosan/agen8/internal/app"
 	implstore "github.com/tinoosan/agen8/internal/store"
 	layoutmgr "github.com/tinoosan/agen8/internal/tui/layout"
 	"github.com/tinoosan/agen8/pkg/config"
+	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
@@ -20,6 +22,9 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 	tests := []struct {
 		name      string
 		childRuns []types.Run
+		assigned  map[string]int
+		completed map[string]int
+		active    map[string]int
 		wantLines []string
 		wantEmpty bool
 	}{
@@ -41,8 +46,29 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 				},
 			},
 			wantLines: []string{
-				"Sub-agent 1",
+				"Subagent-1",
 				"Research agent memory",
+				"tasks 0/0",
+			},
+		},
+		{
+			name: "Awaiting Review Is Not Idle",
+			childRuns: []types.Run{
+				{
+					RunID:      "run-awaiting-review",
+					Status:     types.RunStatusRunning,
+					Goal:       "Build worker output",
+					StartedAt:  &now,
+					SpawnIndex: 1,
+				},
+			},
+			assigned:  map[string]int{"run-awaiting-review": 2},
+			completed: map[string]int{"run-awaiting-review": 1},
+			active:    map[string]int{"run-awaiting-review": 0},
+			wantLines: []string{
+				"Subagent-1",
+				"tasks 1/2",
+				"awaiting_review",
 			},
 		},
 		{
@@ -80,6 +106,7 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := config.Config{DataDir: t.TempDir()}
 			runID := ""
+			var sessionSvc pkgsession.Service
 			if tt.name == "Viewing child run shows Back to parent" {
 				_, parentRun, err := implstore.CreateSession(cfg, "parent", 8*1024)
 				if err != nil {
@@ -90,15 +117,20 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 					t.Fatalf("SaveRun child: %v", err)
 				}
 				runID = childRun.RunID
+				sessionSvc, _ = app.NewSessionServiceForCLI(cfg)
 			}
 			m := &monitorModel{
-				ctx:           context.Background(),
-				cfg:           cfg,
-				runID:         runID,
-				childRuns:     tt.childRuns,
-				subagentsVP:   viewport.New(0, 0),
-				subagentsList: newSubagentsList(),
-				styles:        defaultMonitorStyles(),
+				ctx:                      context.Background(),
+				cfg:                      cfg,
+				runID:                    runID,
+				session:                  sessionSvc,
+				childRuns:                tt.childRuns,
+				childRunAssignedByRunID:  tt.assigned,
+				childRunCompletedByRunID: tt.completed,
+				childRunActiveByRunID:    tt.active,
+				subagentsVP:              viewport.New(0, 0),
+				subagentsList:            newSubagentsList(),
+				styles:                   defaultMonitorStyles(),
 			}
 			grid := layoutmgr.GridLayout{
 				Plan: layoutmgr.PanelSpec{

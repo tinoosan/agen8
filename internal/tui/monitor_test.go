@@ -757,7 +757,7 @@ func TestMonitorProfilePicker_FilterAndSelectStartsNewStandaloneSession(t *testi
 	}
 	writeProfile := func(dir, id, desc string) {
 		t.Helper()
-		raw := "id: " + id + "\ndescription: " + desc + "\nprompts:\n  system_prompt: hello\n"
+		raw := "id: " + id + "\ndescription: " + desc + "\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt: hello\n"
 		if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(raw), 0o644); err != nil {
 			t.Fatalf("write profile.yaml: %v", err)
 		}
@@ -893,7 +893,7 @@ func TestMonitorProfilePicker_ArrowKeysMoveSelection(t *testing.T) {
 	}
 	writeProfile := func(dir, id, desc string) {
 		t.Helper()
-		raw := "id: " + id + "\ndescription: " + desc + "\nprompts:\n  system_prompt: hello\n"
+		raw := "id: " + id + "\ndescription: " + desc + "\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt: hello\n"
 		if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(raw), 0o644); err != nil {
 			t.Fatalf("write profile.yaml: %v", err)
 		}
@@ -981,11 +981,11 @@ func TestParseNewSessionRequest(t *testing.T) {
 		wantProfile string
 		wantGoal    string
 	}{
-		{"", "general", "standalone", "general", ""},
-		{"ship feature", "general", "standalone", "general", "ship feature"},
-		{"standalone software_dev implement parser", "general", "standalone", "software_dev", "implement parser"},
-		{"team startup_team launch", "general", "team", "startup_team", "launch"},
-		{"team", "general", "team", "", ""},
+		{"", "general", "single-agent", "general", ""},
+		{"ship feature", "general", "single-agent", "general", "ship feature"},
+		{"standalone software_dev implement parser", "general", "single-agent", "software_dev", "implement parser"},
+		{"team startup_team launch", "general", "multi-agent", "startup_team", "launch"},
+		{"team", "general", "multi-agent", "", ""},
 	}
 	for _, tc := range cases {
 		got := parseNewSessionRequest(tc.in, tc.defaultProf)
@@ -1036,8 +1036,8 @@ func TestMonitorHandleCommand_NewTeamOpensTeamProfileWizard(t *testing.T) {
 	if !m.profilePickerTeamOnly {
 		t.Fatalf("expected team-only profile picker")
 	}
-	if got := strings.TrimSpace(m.profilePickerMode); got != "new-team" {
-		t.Fatalf("profilePickerMode=%q want new-team", got)
+	if got := strings.TrimSpace(m.profilePickerMode); got != "new-multi-agent" {
+		t.Fatalf("profilePickerMode=%q want new-multi-agent", got)
 	}
 	if len(m.profilePickerList.Items()) != 1 {
 		t.Fatalf("expected only team profiles in picker, got %d", len(m.profilePickerList.Items()))
@@ -1621,26 +1621,35 @@ func TestMonitorView_NoClipping_100x30_Compact(t *testing.T) {
 	}
 }
 
-func TestMonitorHandleCommand_TeamCommandOnlyInTeamMode(t *testing.T) {
+func TestMonitorHandleCommand_TeamOpensPickerWhenAttached(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
 
+	// Detached: /team returns error.
+	detached, err := newDetachedMonitorModel(ctx, cfg, &MonitorResult{})
+	if err != nil {
+		t.Fatalf("newDetachedMonitorModel: %v", err)
+	}
+	cmd := detached.handleCommand("/team")
+	if cmd == nil {
+		t.Fatalf("expected command output for /team when detached")
+	}
+	msg := cmd()
+	if linesMsg, ok := msg.(commandLinesMsg); ok && len(linesMsg.lines) > 0 {
+		if !strings.Contains(linesMsg.lines[0], "no active context") {
+			t.Fatalf("expected 'no active context' for /team when detached, got %q", linesMsg.lines[0])
+		}
+	}
+
+	// Run-focused: /team opens picker (every session is a team; may have empty teamRunIDs if run has no team).
 	m, err := newMonitorModel(ctx, cfg, "run-non-team", &MonitorResult{})
 	if err != nil {
 		t.Fatalf("newMonitorModel: %v", err)
 	}
-	cmd := m.handleCommand("/team")
-	if cmd == nil {
-		t.Fatalf("expected command output for /team in non-team mode")
-	}
-	msg := cmd()
-	linesMsg, ok := msg.(commandLinesMsg)
-	if !ok || len(linesMsg.lines) == 0 {
-		t.Fatalf("expected commandLinesMsg with error text, got %#v", msg)
-	}
-	if !strings.Contains(linesMsg.lines[0], "only available in team monitor") {
-		t.Fatalf("unexpected command response: %q", linesMsg.lines[0])
+	_ = m.handleCommand("/team")
+	if !m.teamPickerOpen {
+		t.Fatalf("expected team picker to open for /team when attached")
 	}
 
 	tm, err := newTeamMonitorModel(ctx, cfg, "team-a", &MonitorResult{})

@@ -2,9 +2,7 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/cost"
 	"github.com/tinoosan/agen8/pkg/events"
@@ -72,11 +68,8 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 	if err != nil {
 		return err
 	}
-	if prof.Team != nil {
-		return runAsTeam(ctx, cfg, prof, profDir, goal, maxContextB, poll, resolved, protocolEnabled)
-	}
-	builder := newDaemonBuilder(ctx, cfg, goal, maxContextB, poll, resolved, prof, profDir, protocolEnabled)
-	return builder.Run()
+	// Single path: standalone = team with one role.
+	return runAsTeam(ctx, cfg, prof, profDir, goal, maxContextB, poll, resolved, protocolEnabled)
 }
 
 func resolveProfileRef(cfg config.Config, requested string) (*profile.Profile, string, error) {
@@ -99,6 +92,34 @@ func resolveProfileRef(cfg config.Config, requested string) (*profile.Profile, s
 	dir := filepath.Join(fsutil.GetProfilesDir(cfg.DataDir), requested)
 	p, err := profile.Load(dir)
 	return p, dir, err
+}
+
+// ResolveRoleAllowSubagents returns whether the current run's role allows spawning sub-agents.
+// Used by TUI to show/hide the Subagents tab.
+// For standalone (profile without team), returns true. For team profiles, returns the role's AllowSubagents.
+func ResolveRoleAllowSubagents(cfg config.Config, profileID, roleName string) bool {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return false
+	}
+	prof, _, err := resolveProfileRef(cfg, profileID)
+	if err != nil || prof == nil {
+		return false
+	}
+	if prof.Team == nil {
+		return true // standalone profile: allow spawn (current behavior)
+	}
+	roleName = strings.TrimSpace(roleName)
+	if roleName == "" {
+		return false
+	}
+	for i := range prof.Team.Roles {
+		r := &prof.Team.Roles[i]
+		if strings.EqualFold(strings.TrimSpace(r.Name), roleName) {
+			return r.AllowSubagents
+		}
+	}
+	return false
 }
 
 func resolvePricing(modelID string, overrideIn, overrideOut float64) (inPerM float64, outPerM float64, known bool) {
@@ -151,127 +172,6 @@ func newCostUsageHook(cfg config.Config, run types.Run, modelID string, priceIn,
 		return func(int, llmtypes.LLMUsage) {}
 	}
 	return tracker.Track
-}
-
-func startWebhookServer(ctx context.Context, addr string, cfg config.Config, run types.Run, taskStore state.TaskStore, emit func(context.Context, events.Event), wg *sync.WaitGroup) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
-	mux.HandleFunc("/task", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		defer r.Body.Close()
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "read error: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		var payload struct {
-			TaskID   string         `json:"taskId"`
-			Goal     string         `json:"goal"`
-			Priority int            `json:"priority,omitempty"`
-			Inputs   map[string]any `json:"inputs,omitempty"`
-			Metadata map[string]any `json:"metadata,omitempty"`
-		}
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		goal := strings.TrimSpace(payload.Goal)
-		if goal == "" {
-			http.Error(w, "goal is required", http.StatusBadRequest)
-			return
-		}
-		origTaskID := strings.TrimSpace(payload.TaskID)
-		taskID := origTaskID
-		if taskID == "" {
-			taskID = "task-" + uuid.NewString()
-		} else if norm, changed := types.NormalizeTaskID(taskID); changed {
-			taskID = norm
-			if payload.Metadata == nil {
-				payload.Metadata = map[string]any{}
-			}
-			payload.Metadata["originalTaskId"] = origTaskID
-		} else {
-			taskID = norm
-		}
-		now := time.Now()
-		task := types.Task{
-			TaskID:    taskID,
-			SessionID: run.SessionID,
-			RunID:     run.RunID,
-			Goal:      goal,
-			Priority:  payload.Priority,
-			Status:    types.TaskStatusPending,
-			CreatedAt: &now,
-			Inputs:    payload.Inputs,
-			Metadata:  payload.Metadata,
-		}
-		if strings.HasPrefix(taskID, "task-") {
-			task.TaskKind = state.TaskKindTask
-		}
-
-		if taskStore == nil {
-			http.Error(w, "task store not configured", http.StatusInternalServerError)
-			return
-		}
-		if err := taskStore.CreateTask(ctx, task); err != nil {
-			http.Error(w, "create task error: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Best-effort archive of the inbound payload for external integrations/debugging.
-		{
-			runDir := fsutil.GetRunDir(cfg.DataDir, run)
-			archiveDir := filepath.Join(runDir, "inbox", "archive")
-			_ = os.MkdirAll(archiveDir, 0o755)
-			if b, err := json.MarshalIndent(task, "", "  "); err == nil {
-				_ = os.WriteFile(filepath.Join(archiveDir, taskID+".json"), b, 0o644)
-			}
-		}
-
-		if emit != nil {
-			emit(ctx, events.Event{
-				Type:    "webhook.task.queued",
-				Message: "Webhook task queued",
-				Data:    map[string]string{"taskId": taskID},
-			})
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"taskId": taskID, "status": "queued"})
-	})
-
-	srv := &http.Server{Addr: addr, Handler: mux}
-	if wg != nil {
-		wg.Add(2)
-	}
-	go func() {
-		if wg != nil {
-			defer wg.Done()
-		}
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
-	}()
-	go func() {
-		if wg != nil {
-			defer wg.Done()
-		}
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			if emit != nil {
-				emit(ctx, events.Event{
-					Type:    "webhook.error",
-					Message: "Webhook server error",
-					Data:    map[string]string{"error": err.Error()},
-				})
-			}
-		}
-	}()
 }
 
 func startHealthServer(ctx context.Context, addr string, emit func(context.Context, events.Event), wg *sync.WaitGroup) {

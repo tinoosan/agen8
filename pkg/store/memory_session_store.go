@@ -152,6 +152,7 @@ func (s *MemorySessionStore) ListSessionsPaginated(_ context.Context, filter Ses
 
 	titleContains := strings.TrimSpace(filter.TitleContains)
 	titleContainsLower := strings.ToLower(titleContains)
+	projectRoot := strings.TrimSpace(filter.ProjectRoot)
 
 	s.mu.RLock()
 	all := make([]memorySessionEntry, 0, len(s.sessions))
@@ -164,6 +165,9 @@ func (s *MemorySessionStore) ListSessionsPaginated(_ context.Context, filter Ses
 				!strings.Contains(strings.ToLower(ent.currentGoal), titleContainsLower) {
 				continue
 			}
+		}
+		if projectRoot != "" && strings.TrimSpace(ent.session.ProjectRoot) != projectRoot {
+			continue
 		}
 		all = append(all, ent)
 	}
@@ -226,11 +230,15 @@ func (s *MemorySessionStore) CountSessions(_ context.Context, filter SessionFilt
 	}
 	titleContains := strings.TrimSpace(filter.TitleContains)
 	titleContainsLower := strings.ToLower(titleContains)
+	projectRoot := strings.TrimSpace(filter.ProjectRoot)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	count := 0
 	for _, ent := range s.sessions {
 		if !filter.IncludeSystem && ent.session.System {
+			continue
+		}
+		if projectRoot != "" && strings.TrimSpace(ent.session.ProjectRoot) != projectRoot {
 			continue
 		}
 		if titleContainsLower == "" {
@@ -455,6 +463,58 @@ func (s *MemorySessionStore) CountActivities(_ context.Context, runID string) (i
 	n := len(s.activities[runID])
 	s.mu.RUnlock()
 	return n, nil
+}
+
+func (s *MemorySessionStore) LatestRun(_ context.Context) (types.Run, error) {
+	if s == nil {
+		return types.Run{}, fmt.Errorf("session store not configured")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var latest types.Run
+	var latestAt time.Time
+	for _, r := range s.runs {
+		t := runSortTime(r)
+		if t.After(latestAt) {
+			latestAt = t
+			latest = r
+		}
+	}
+	if latest.RunID == "" {
+		return types.Run{}, ErrNotFound
+	}
+	return latest, nil
+}
+
+func (s *MemorySessionStore) LatestRunningRun(_ context.Context) (types.Run, error) {
+	if s == nil {
+		return types.Run{}, fmt.Errorf("session store not configured")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var latest types.Run
+	var latestAt time.Time
+	for _, r := range s.runs {
+		if strings.EqualFold(strings.TrimSpace(string(r.Status)), types.RunStatusRunning) {
+			t := runSortTime(r)
+			if t.After(latestAt) {
+				latestAt = t
+				latest = r
+			}
+		}
+	}
+	if latest.RunID == "" {
+		return types.Run{}, ErrNotFound
+	}
+	return latest, nil
+}
+
+// runSortTime returns the time used for ordering runs (StartedAt if set, else zero time).
+func runSortTime(r types.Run) time.Time {
+	if r.StartedAt != nil {
+		return r.StartedAt.UTC()
+	}
+	return time.Time{}
 }
 
 func normalizeSessionSortColumn(col string) (string, bool) {

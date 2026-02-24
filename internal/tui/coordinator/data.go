@@ -33,6 +33,7 @@ type feedEntry struct {
 	status         string
 	opKind         string
 	sourceID       string
+	identityKey    string
 	isText         bool
 	isTaskResponse bool              // true if this text response came from the top-level task (prevents activity merge dupe)
 	data           map[string]string // raw activity Data for verb resolution
@@ -67,6 +68,8 @@ type activityLoadedMsg struct {
 	err       error
 }
 
+type reconnectNotificationMsg struct{}
+
 type goalSubmittedMsg struct {
 	goal      string
 	scope     rpcscope.ScopeState
@@ -90,6 +93,55 @@ type thinkingEventsMsg struct {
 
 type tickMsg struct{}
 type animTickMsg struct{}
+
+func activityToFeedEntry(act types.Activity) *feedEntry {
+	if isActivityPlanWrite(act.Kind, act.Path) || isActivitySummaryWrite(act.Kind, act.Path) {
+		if isActivitySummaryWrite(act.Kind, act.Path) {
+			return nil
+		}
+	}
+
+	ts := act.StartedAt
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	var fin time.Time
+	if act.FinishedAt != nil {
+		fin = *act.FinishedAt
+	}
+	var kind feedKind = feedAgent
+	kindName := strings.TrimSpace(strings.ToLower(act.Kind))
+	if kindName == "user_message" {
+		kind = feedUser
+	}
+	text := activityText(act)
+	isTaskResponse := kindName == "task.done"
+	if isTaskResponse && isTaskDonePlaceholder(text) {
+		return nil
+	}
+	sourceID := strings.TrimSpace(act.ID)
+	if isTaskResponse {
+		if taskID := strings.TrimSpace(act.Data["taskId"]); taskID != "" {
+			sourceID = taskID
+		}
+	}
+
+	entry := &feedEntry{
+		kind:           kind,
+		timestamp:      ts,
+		finishedAt:     fin,
+		role:           activityRole(act),
+		text:           text,
+		path:           strings.TrimSpace(act.Path),
+		status:         string(act.Status),
+		opKind:         strings.TrimSpace(act.Kind),
+		sourceID:       sourceID,
+		isText:         isActivityText(act),
+		isTaskResponse: isTaskResponse,
+		data:           act.Data,
+	}
+	return normalizeFeedEntry(entry)
+}
 
 func fetchSessionCmd(endpoint, sessionID string) tea.Cmd {
 	return func() tea.Msg {
@@ -142,39 +194,9 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 
 		entries := make([]feedEntry, 0, len(res.Activities))
 		for _, act := range res.Activities {
-			// Suppress tool operation writes to SUMMARY.md since we natively display the task.done response block.
-			if isActivityPlanWrite(act.Kind, act.Path) || isActivitySummaryWrite(act.Kind, act.Path) {
-				if isActivitySummaryWrite(act.Kind, act.Path) {
-					continue
-				}
+			if entry := activityToFeedEntry(act); entry != nil {
+				entries = append(entries, *entry)
 			}
-
-			ts := act.StartedAt
-			if ts.IsZero() {
-				ts = time.Now()
-			}
-			var fin time.Time
-			if act.FinishedAt != nil {
-				fin = *act.FinishedAt
-			}
-			var kind feedKind = feedAgent
-			if strings.TrimSpace(strings.ToLower(act.Kind)) == "user_message" {
-				kind = feedUser
-			}
-
-			entries = append(entries, feedEntry{
-				kind:       kind,
-				timestamp:  ts,
-				finishedAt: fin,
-				role:       activityRole(act),
-				text:       activityText(act),
-				path:       strings.TrimSpace(act.Path),
-				status:     string(act.Status),
-				opKind:     strings.TrimSpace(act.Kind),
-				sourceID:   strings.TrimSpace(act.ID),
-				isText:     isActivityText(act),
-				data:       act.Data,
-			})
 		}
 
 		sort.SliceStable(entries, func(i, j int) bool {
@@ -223,8 +245,6 @@ func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 			return thinkingEventsMsg{err: err}
 		}
 
-		// Separate thinking events (processed in model with persistent state)
-		// from task.done events (self-contained, processed here).
 		var thinkingEvents []types.EventRecord
 		var entries []feedEntry
 		var maxSeq int64
@@ -235,10 +255,9 @@ func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 			case "task.done":
 				summary := strings.TrimSpace(ev.Data["summary"])
 				if summary == "" {
-					summary = "(Task completed.)"
+					continue
 				}
 				taskId := strings.TrimSpace(ev.Data["taskId"])
-
 				role := strings.TrimSpace(ev.Data["agent"])
 				if role == "" {
 					role = strings.TrimSpace(ev.Data["role"])
@@ -249,7 +268,6 @@ func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 				if role == "" {
 					role = "agent"
 				}
-
 				entries = append(entries, feedEntry{
 					kind:           feedAgent,
 					isText:         true,
@@ -430,10 +448,20 @@ func isActivityText(act types.Activity) bool {
 		return true
 	}
 	// If it lacks a specific developer op prefix but has a title, treat as text summary.
-	if strings.TrimSpace(act.Title) != "" && !strings.HasPrefix(kind, "fs_") && !strings.HasPrefix(kind, "shell_") && kind != "agent_spawn" && kind != "tool_call" && kind != "code_exec" && kind != "http_fetch" {
+	if strings.TrimSpace(act.Title) != "" && !strings.HasPrefix(kind, "fs_") && !strings.HasPrefix(kind, "shell_") && kind != "agent_spawn" && kind != "tool_call" && kind != "tool_result" && kind != "code_exec" && kind != "http_fetch" && kind != "task_create" && kind != "task_review" && kind != "obsidian" && kind != "soul_update" {
 		return true
 	}
 	return false
+}
+
+func isTaskDonePlaceholder(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	switch trimmed {
+	case "", "Task finished", "(Task completed.)":
+		return true
+	default:
+		return false
+	}
 }
 
 // normPath returns a path with a leading slash for consistent prefix checks.
@@ -509,8 +537,12 @@ func kindToVerb(kind string, path string, data map[string]string) string {
 		return "Email"
 	case "agent_spawn":
 		return "Spawn"
+	case "obsidian":
+		return "Obsidian"
+	case "soul_update":
+		return "Update soul"
 	case "task_create":
-		return "Dispatch task"
+		return "Create task"
 	case "task_review":
 		return "Review task"
 	case "trace_run":

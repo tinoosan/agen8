@@ -7,39 +7,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/pkg/types"
 )
-
-func (m *monitorModel) listenEvent() tea.Cmd {
-	return func() tea.Msg {
-		if m.tailCh == nil {
-			time.Sleep(250 * time.Millisecond)
-			return tailedEventMsg{}
-		}
-		ev, ok := <-m.tailCh
-		if !ok {
-			time.Sleep(250 * time.Millisecond)
-			return tailedEventMsg{}
-		}
-		return tailedEventMsg{ev: ev}
-	}
-}
-
-func (m *monitorModel) listenErr() tea.Cmd {
-	return func() tea.Msg {
-		if m.errCh == nil {
-			time.Sleep(250 * time.Millisecond)
-			return tailErrMsg{}
-		}
-		err, ok := <-m.errCh
-		if !ok {
-			time.Sleep(250 * time.Millisecond)
-			return tailErrMsg{}
-		}
-		return tailErrMsg{err: err}
-	}
-}
 
 func (m *monitorModel) observeEvent(ev types.EventRecord) {
 	if !m.markEventSeen(ev) {
@@ -319,7 +288,7 @@ func (m *monitorModel) observeAgentOutput(ev types.EventRecord) {
 		item.Content = formatEventLine(ev)
 		m.appendAgentOutputItem(item)
 
-	case "task.queued", "webhook.task.queued", "task.start", "task.delegated", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped", "callback.batch.progress", "callback.batch.queued", "callback.batch.item.reviewed", "task.tool.invalid_repeated":
+	case "task.queued", "webhook.task.queued", "task.start", "task.delegated", "task.done", "task.quarantined", "task.delivered", "task.heartbeat.enqueued", "task.heartbeat.skipped", "callback.batch.progress", "callback.batch.queued", "callback.batch.item.reviewed", "callback.batch.closed", "review.closure.receipt", "task.tool.invalid_repeated":
 		item.Type = "info"
 		for _, line := range formatTaskEventLines(ev) {
 			it := item
@@ -553,6 +522,21 @@ func formatTaskEventLines(ev types.EventRecord) []string {
 		retried := strings.TrimSpace(ev.Data["retry"])
 		escalated := strings.TrimSpace(ev.Data["escalate"])
 		line := fmt.Sprintf("[%s] callback.batch.item.reviewed: %s approved=%s retry=%s escalate=%s", ts, parent, fallback(approved, "0"), fallback(retried, "0"), fallback(escalated, "0"))
+		return []string{line}
+	case "callback.batch.closed":
+		batchTaskID := shortID(strings.TrimSpace(ev.Data["batchTaskId"]))
+		handoff := shortID(strings.TrimSpace(ev.Data["handoffTaskId"]))
+		approved := strings.TrimSpace(ev.Data["approved"])
+		retried := strings.TrimSpace(ev.Data["retry"])
+		escalated := strings.TrimSpace(ev.Data["escalate"])
+		line := fmt.Sprintf("[%s] callback.batch.closed: %s approved=%s retry=%s escalate=%s handoff=%s", ts, fallback(batchTaskID, "?"), fallback(approved, "0"), fallback(retried, "0"), fallback(escalated, "0"), fallback(handoff, "?"))
+		return []string{line}
+	case "review.closure.receipt":
+		batchTaskID := shortID(strings.TrimSpace(ev.Data["batchTaskId"]))
+		handoff := shortID(strings.TrimSpace(ev.Data["handoffTaskId"]))
+		receipt := shortID(strings.TrimSpace(ev.Data["batchCloseTxnId"]))
+		count := fallback(strings.TrimSpace(ev.Data["reviewedItemCount"]), "0")
+		line := fmt.Sprintf("[%s] review.closure.receipt: %s items=%s handoff=%s receipt=%s", ts, fallback(batchTaskID, "?"), count, fallback(handoff, "?"), fallback(receipt, "?"))
 		return []string{line}
 	case "task.tool.invalid_repeated":
 		taskID := shortID(strings.TrimSpace(ev.Data["taskId"]))

@@ -104,7 +104,7 @@ func (m *Manager) Entries() []SkillEntry {
 	dirs := make([]string, 0, len(m.entries))
 	for dir := range m.entries {
 		if restricted {
-			if _, ok := allowed[dir]; !ok {
+			if _, ok := allowed[normalizeSkillKey(dir)]; !ok {
 				continue
 			}
 		}
@@ -180,7 +180,13 @@ func (m *Manager) ScriptsManifest() []SkillScripts {
 	return out
 }
 
-func (m *Manager) allowedSet() (map[string]struct{}, bool) {
+// normalizeSkillKey returns a key for allowlist matching: trimmed and lowercased.
+// Directory names remain canonical (on-disk); matching uses this normalized form.
+func normalizeSkillKey(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+func (m *Manager) allowedSet() (allowedNormalized map[string]struct{}, restricted bool) {
 	if len(m.AllowedSkills) == 0 {
 		if m != nil && m.EnforceAllowlist {
 			return map[string]struct{}{}, true
@@ -189,11 +195,11 @@ func (m *Manager) allowedSet() (map[string]struct{}, bool) {
 	}
 	allowed := make(map[string]struct{}, len(m.AllowedSkills))
 	for _, name := range m.AllowedSkills {
-		name = strings.TrimSpace(name)
-		if name == "" {
+		key := normalizeSkillKey(name)
+		if key == "" {
 			continue
 		}
-		allowed[name] = struct{}{}
+		allowed[key] = struct{}{}
 	}
 	if len(allowed) == 0 {
 		if m != nil && m.EnforceAllowlist {
@@ -209,7 +215,7 @@ func (m *Manager) isAllowed(dir string) bool {
 	if !restricted {
 		return true
 	}
-	_, ok := allowed[dir]
+	_, ok := allowed[normalizeSkillKey(dir)]
 	return ok
 }
 

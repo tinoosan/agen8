@@ -316,13 +316,13 @@ func (i *BuiltinCodeExecInvoker) Invoke(ctx context.Context, req pkgtools.ToolRe
 	}
 
 	out, err := i.runPython(ctx, pythonBin, cwd, codeExecRunConfig{
-		Code:               code,
-		Allowlist:          allow,
-		MaxToolCalls:       maxToolCalls,
-		TimeoutMs:          timeoutMs,
-		MaxOutput:          maxOutput,
-		Dispatch:           dispatch,
-		Bridge:             bridge,
+		Code:                code,
+		Allowlist:           allow,
+		MaxToolCalls:        maxToolCalls,
+		TimeoutMs:           timeoutMs,
+		MaxOutput:           maxOutput,
+		Dispatch:            dispatch,
+		Bridge:              bridge,
 		EnvAllowlist:        envAllow,
 		PathAccessAllowlist: pathAccessAllowlist,
 		PathAccessReadOnly:  pathAccessReadOnly,
@@ -670,7 +670,12 @@ func handleCodeExecToolCall(
 	if strings.TrimSpace(opReq.Op) == types.HostOpCodeExec {
 		return codeExecToolResultFrame{Type: "tool_result", ID: call.ID, OK: false, Error: "nested code_exec is not allowed"}
 	}
-	opReq.Tag = "code_exec_bridge"
+	// Preserve semantic tool tags (for example task_create/obsidian) and
+	// carry bridge provenance separately so coordinator grouping remains stable.
+	if strings.TrimSpace(opReq.Tag) == "" {
+		opReq.Tag = "code_exec_bridge"
+	}
+	opReq.Action = "code_exec_bridge"
 	resp := bridge(ctx, opReq)
 	if !resp.Ok {
 		return codeExecToolResultFrame{

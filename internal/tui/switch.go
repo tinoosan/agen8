@@ -34,11 +34,11 @@ func (e *MonitorSwitchRunError) Error() string {
 }
 
 // MonitorSwitchTeamError is returned by monitor runners when the user switches
-// from single-run monitor to team monitor context.
+// from single-run monitor to multi-agent monitor context.
 type MonitorSwitchTeamError struct {
 	TeamID string
 }
 
 func (e *MonitorSwitchTeamError) Error() string {
-	return "switch monitor to team: " + strings.TrimSpace(e.TeamID)
+	return "switch monitor to multi-agent: " + strings.TrimSpace(e.TeamID)
 }

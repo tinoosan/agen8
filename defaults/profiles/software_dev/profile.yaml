@@ -1,24 +1,51 @@
 id: software_dev
 description: Software engineering profile focused on building, debugging, testing, and documentation.
-model: openai/gpt-5.1-codex-mini
-subagent_model: openai/gpt-5.1-codex-mini
-code_exec_only: true
-allowed_tools:
-  - shell_exec
-  - http_fetch
-  - browser
-  - task_create
-  - task_review
-  - trace_run
-skills:
-  - coding
-  - reporting
-prompts:
-  system_prompt_path: prompt.md
-heartbeat:
-  - name: keep_build_green
-    interval: 12h
-    goal: "Keep tests/build passing for the changed scope, or explain failures with a mitigation plan."
-  - name: keep_changes_minimal
-    interval: 6h
-    goal: "Keep changes scoped to the request, with clear reasoning and validation."
+team:
+  model: moonshotai/kimi-k2.5
+  reviewer:
+    enabled: true
+    name: reviewer
+    description: Dedicated review runtime for team-level batch callback reviews.
+    prompts:
+      system_prompt: |
+        You are the dedicated reviewer for this team.
+
+        Review synthetic batch callback tasks only.
+        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
+        After finishing a batch review, hand off to the coordinator via the system handoff task.
+    code_exec_only: true
+    allowed_tools:
+      - task_review
+      - task_create
+      - fs_list
+      - fs_read
+      - fs_search
+    skills:
+      - reviewing
+  roles:
+    - name: Software Developer
+      coordinator: true
+      allow_subagents: true
+      model: moonshotai/kimi-k2.5
+      subagent_model: gpt-5-nano
+      code_exec_only: true
+      allowed_tools:
+        - shell_exec
+        - http_fetch
+        - browser
+        - task_create
+        - task_review
+        - trace_run
+      description: Software engineering profile focused on building, debugging, testing, and documentation.
+      prompts:
+        system_prompt_path: prompt.md
+      skills:
+        - coding
+        - reporting
+      heartbeat:
+        - name: keep_build_green
+          interval: 12h
+          goal: "Keep tests/build passing for the changed scope, or explain failures with a mitigation plan."
+        - name: keep_changes_minimal
+          interval: 6h
+          goal: "Keep changes scoped to the request, with clear reasoning and validation."

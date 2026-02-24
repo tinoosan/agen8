@@ -45,7 +45,6 @@ type runtimeSupervisorConfig struct {
 	LLMClient        llmtypes.LLMClient
 	Notifier         agent.Notifier
 	WorkdirAbs       string
-	BootstrapRunID   string
 	DefaultProfile   *profile.Profile
 	SoulService      pkgsoul.Service
 }
@@ -62,14 +61,25 @@ type runtimeSupervisor struct {
 	llmClient        llmtypes.LLMClient
 	notifier         agent.Notifier
 	workdirAbs       string
-	bootstrapRunID   string
 	defaultProfile   *profile.Profile
 	soulService      pkgsoul.Service
 
-	mu      sync.Mutex
-	workers map[string]*managedRuntime
+	mu                  sync.Mutex
+	workers             map[string]*managedRuntime
+	lastRoutingRepairAt time.Time
 
 	spawnOverride func(context.Context, types.Session, string) (*managedRuntime, error)
+}
+
+const defaultSubagentAwaitingReviewTimeout = 30 * time.Minute
+const defaultWorkerShutdownTimeout = 10 * time.Second
+
+type taskWakeSubscriber interface {
+	SubscribeWake(teamID, runID string) (<-chan struct{}, func())
+}
+
+type routingDriftRepairer interface {
+	RepairRoutingDrift(ctx context.Context, limit int) (int, error)
 }
 
 type managedRuntime struct {
@@ -117,6 +127,22 @@ func resolveRunModel(sess types.Session, run types.Run, fallbackModel string) (s
 		}
 	}
 	return strings.TrimSpace(fallbackModel), "profile"
+}
+
+// isSubagentRoleClass returns true when the run is a child (subagent) with the canonical
+// Subagent-N role. Used to branch on role class instead of string matching in spawnManagedRun.
+func isSubagentRoleClass(run types.Run) bool {
+	if strings.TrimSpace(run.ParentRunID) == "" {
+		return false
+	}
+	if run.Runtime == nil {
+		return false
+	}
+	r := strings.TrimSpace(run.Runtime.Role)
+	if r == "" {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(r), "subagent-")
 }
 
 func shouldSyncModelFromSession(run types.Run, loaded types.Session) bool {
@@ -184,10 +210,7 @@ func (n *subagentCleanupNotifier) Notify(ctx context.Context, task types.Task, t
 			if reviewDecision == "" || reviewDecision == "approve" {
 				if runID, ok := task.Metadata["sourceRunId"].(string); ok && strings.TrimSpace(runID) != "" {
 					runID = strings.TrimSpace(runID)
-					_ = n.supervisor.StopRun(runID)
-					if n.supervisor.sessionService != nil {
-						_, _ = n.supervisor.sessionService.StopRun(context.Background(), runID, types.RunStatusSucceeded, "")
-					}
+					n.supervisor.deactivateAndArchiveSubagent(ctx, runID)
 				}
 			}
 		}
@@ -206,10 +229,7 @@ func (n *subagentCleanupNotifier) Notify(ctx context.Context, task types.Task, t
 				if runID == "" {
 					continue
 				}
-				_ = n.supervisor.StopRun(runID)
-				if n.supervisor.sessionService != nil {
-					_, _ = n.supervisor.sessionService.StopRun(context.Background(), runID, types.RunStatusSucceeded, "")
-				}
+				n.supervisor.deactivateAndArchiveSubagent(ctx, runID)
 			}
 		}
 	}
@@ -217,6 +237,46 @@ func (n *subagentCleanupNotifier) Notify(ctx context.Context, task types.Task, t
 		return n.next.Notify(ctx, task, tr)
 	}
 	return nil
+}
+
+func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, runID string) {
+	run, err := s.sessionService.LoadRun(ctx, runID)
+	if err == nil && run.Runtime != nil {
+		run.Runtime.LifecycleState = "deactivated"
+		_ = s.sessionService.SaveRun(ctx, run)
+	}
+
+	s.mu.Lock()
+	worker := s.workers[runID]
+	s.mu.Unlock()
+
+	if worker != nil {
+		if worker.cancel != nil {
+			worker.cancel()
+		}
+		if worker.done != nil {
+			timeout := s.workerShutdownTimeout()
+			if !waitWorkerDone(worker.done, timeout) {
+				log.Printf("daemon: timed out waiting for worker shutdown during subagent cleanup: run=%s timeout=%s", runID, timeout)
+			}
+		}
+	}
+
+	if run, err := s.sessionService.LoadRun(ctx, runID); err == nil {
+		if run.Runtime != nil {
+			run.Runtime.LifecycleState = "archived"
+			_ = s.sessionService.SaveRun(ctx, run)
+		}
+		_, _ = s.sessionService.StopRun(context.Background(), runID, types.RunStatusSucceeded, "archived")
+	}
+
+	// Remove worker only after cancellation + terminal run status update to avoid
+	// a syncOnce respawn window while the run still appears running.
+	s.mu.Lock()
+	if current, ok := s.workers[runID]; ok && current == worker {
+		delete(s.workers, runID)
+	}
+	s.mu.Unlock()
 }
 
 func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
@@ -236,10 +296,57 @@ func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 		llmClient:        cfg.LLMClient,
 		notifier:         cfg.Notifier,
 		workdirAbs:       cfg.WorkdirAbs,
-		bootstrapRunID:   strings.TrimSpace(cfg.BootstrapRunID),
 		defaultProfile:   cfg.DefaultProfile,
 		soulService:      cfg.SoulService,
 		workers:          map[string]*managedRuntime{},
+	}
+}
+
+func (s *runtimeSupervisor) subagentAwaitingReviewTimeout() time.Duration {
+	if s == nil {
+		return defaultSubagentAwaitingReviewTimeout
+	}
+	raw := strings.TrimSpace(os.Getenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT"))
+	if raw == "" {
+		return defaultSubagentAwaitingReviewTimeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultSubagentAwaitingReviewTimeout
+	}
+	return d
+}
+
+func (s *runtimeSupervisor) workerShutdownTimeout() time.Duration {
+	if s == nil {
+		return defaultWorkerShutdownTimeout
+	}
+	raw := strings.TrimSpace(os.Getenv("AGEN8_WORKER_SHUTDOWN_TIMEOUT"))
+	if raw == "" {
+		return defaultWorkerShutdownTimeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultWorkerShutdownTimeout
+	}
+	return d
+}
+
+func waitWorkerDone(done <-chan struct{}, timeout time.Duration) bool {
+	if done == nil {
+		return true
+	}
+	if timeout <= 0 {
+		<-done
+		return true
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 
@@ -302,15 +409,8 @@ func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
 			continue
 		}
 		teamID := strings.TrimSpace(sess.TeamID)
-		if teamID != "" && strings.TrimSpace(run.ParentRunID) != "" {
-			// Team mode does not support spawned child runs; stop legacy runs.
-			log.Printf("daemon: stopping legacy team child run %s (team %s)", run.RunID, teamID)
-			_ = s.StopRun(run.RunID)
-			_, _ = s.sessionService.StopRun(ctx, run.RunID, types.RunStatusCanceled, "legacy team child run cleaned up")
-			continue
-		}
 		if teamID != "" && run.Runtime != nil && strings.TrimSpace(run.Runtime.Role) == "" {
-			if _, roleByRun := loadTeamManifestRunRoles(s.cfg.DataDir, teamID); len(roleByRun) != 0 {
+			if _, roleByRun := loadTeamManifestRunRolesFromStore(ctx, team.NewFileManifestStore(s.cfg), teamID); len(roleByRun) != 0 {
 				if role := strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)]); role != "" {
 					run.Runtime.Role = role
 					_ = s.sessionService.SaveRun(ctx, run)
@@ -321,7 +421,31 @@ func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
 			log.Printf("daemon: managed run start failed for %s: %v", run.RunID, err)
 		}
 	}
+	s.maybeRepairRoutingDrift(ctx)
 	return nil
+}
+
+func (s *runtimeSupervisor) maybeRepairRoutingDrift(ctx context.Context) {
+	repairer, ok := s.taskService.(routingDriftRepairer)
+	if !ok || repairer == nil {
+		return
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	if !s.lastRoutingRepairAt.IsZero() && now.Sub(s.lastRoutingRepairAt) < 10*time.Second {
+		s.mu.Unlock()
+		return
+	}
+	s.lastRoutingRepairAt = now
+	s.mu.Unlock()
+	n, err := repairer.RepairRoutingDrift(ctx, 400)
+	if err != nil {
+		log.Printf("daemon: routing drift repair failed: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("daemon: routing drift repaired %d task(s)", n)
+	}
 }
 
 func collectSessionRunIDs(sess types.Session) []string {
@@ -350,9 +474,6 @@ func (s *runtimeSupervisor) ensureRun(ctx context.Context, sess types.Session, r
 	if runID == "" {
 		return nil
 	}
-	if runID == s.bootstrapRunID {
-		return nil
-	}
 	run, err := s.sessionService.LoadRun(ctx, runID)
 	if err != nil {
 		return err
@@ -368,6 +489,12 @@ func (s *runtimeSupervisor) ensureRun(ctx context.Context, sess types.Session, r
 		return nil
 	}
 	s.mu.Unlock()
+
+	isChild := strings.TrimSpace(run.ParentRunID) != ""
+	if isChild && run.Runtime != nil && run.Runtime.LifecycleState == "spawn_requested" {
+		run.Runtime.LifecycleState = "spawning"
+		_ = s.sessionService.SaveRun(ctx, run)
+	}
 
 	startFn := s.spawnOverride
 	if startFn == nil {
@@ -452,42 +579,74 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	teamRoles := []string{}
 	teamRoleDescriptions := map[string]string{}
 	isCoordinator := false
+	allowSubagents := true // standalone: allow by default (current behavior)
 	var roleCodeExecOnlyOverride *bool
+	var reviewerRole string
+	var reviewerCfg *profile.ReviewerConfig
 	if isTeam {
-		if prof.Team == nil {
-			return nil, fmt.Errorf("team run %s requires a team profile", runID)
+		sessionRoles, err := prof.RolesForSession()
+		if err != nil {
+			return nil, fmt.Errorf("roles for session: %w", err)
 		}
-		roles, coord, err := team.ValidateTeamRoles(prof.Team.Roles)
+		roles, coord, err := team.ValidateTeamRoles(sessionRoles)
 		if err != nil {
 			return nil, err
 		}
 		teamRoles = roles
 		coordinatorRole = coord
+		if cfg, ok := prof.ReviewerForSession(); ok && cfg != nil {
+			reviewerCfg = cfg
+			reviewerRole = strings.TrimSpace(cfg.EffectiveName())
+			if desc := strings.TrimSpace(cfg.Description); desc != "" {
+				teamRoleDescriptions[reviewerRole] = desc
+			}
+		} else {
+			reviewerRole = coordinatorRole
+		}
 		if roleName == "" {
-			_, roleByRun := loadTeamManifestRunRoles(s.cfg.DataDir, teamID)
+			_, roleByRun := loadTeamManifestRunRolesFromStore(parent, team.NewFileManifestStore(s.cfg), teamID)
 			roleName = strings.TrimSpace(roleByRun[strings.TrimSpace(run.RunID)])
 		}
 		if roleName == "" {
 			return nil, fmt.Errorf("team run %s has no role mapping", runID)
 		}
-		var roleCfg *profile.RoleConfig
-		for i := range prof.Team.Roles {
-			r := prof.Team.Roles[i]
-			name := strings.TrimSpace(r.Name)
-			if name != "" {
-				teamRoleDescriptions[name] = strings.TrimSpace(r.Description)
+		isChildRun := strings.TrimSpace(run.ParentRunID) != ""
+		isSubagent := isChildRun && isSubagentRoleClass(run)
+		if isSubagent {
+			isCoordinator = false
+			allowSubagents = false
+			roleCodeExecOnlyOverride = nil
+			activeProfile = prof
+			teamRoleDescriptions[roleName] = "Spawned worker"
+		} else {
+			var roleCfg *profile.RoleConfig
+			if reviewerCfg != nil && strings.EqualFold(strings.TrimSpace(roleName), strings.TrimSpace(reviewerRole)) {
+				isCoordinator = false
+				allowSubagents = false
+				roleCodeExecOnlyOverride = reviewerCfg.CodeExecOnly
+				activeProfile = buildReviewerRuntimeProfile(*reviewerCfg)
+				goto resolvedTeamRole
 			}
-			if strings.EqualFold(name, roleName) {
-				copy := r
-				roleCfg = &copy
+			for i := range sessionRoles {
+				r := sessionRoles[i]
+				name := strings.TrimSpace(r.Name)
+				if name != "" {
+					teamRoleDescriptions[name] = strings.TrimSpace(r.Description)
+				}
+				if strings.EqualFold(name, roleName) {
+					copy := r
+					roleCfg = &copy
+				}
 			}
+			if roleCfg == nil {
+				return nil, fmt.Errorf("role %q not found in profile %q", roleName, prof.ID)
+			}
+			isCoordinator = strings.EqualFold(strings.TrimSpace(roleCfg.Name), coordinatorRole)
+			allowSubagents = roleCfg.AllowSubagents
+			roleCodeExecOnlyOverride = roleCfg.CodeExecOnly
+			activeProfile = buildRoleRuntimeProfile(*roleCfg)
 		}
-		if roleCfg == nil {
-			return nil, fmt.Errorf("role %q not found in team profile %q", roleName, prof.ID)
-		}
-		isCoordinator = strings.EqualFold(strings.TrimSpace(roleCfg.Name), coordinatorRole)
-		roleCodeExecOnlyOverride = roleCfg.CodeExecOnly
-		activeProfile = buildRoleRuntimeProfile(*roleCfg)
+	resolvedTeamRole:
 	}
 
 	soulContent := ""
@@ -803,9 +962,25 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		tool.RoleName = roleName
 		tool.IsCoordinator = isCoordinator
 		tool.CoordinatorRole = coordinatorRole
+		tool.ReviewerRole = reviewerRole
+		tool.ReviewerOnly = reviewerCfg != nil
 		tool.ValidRoles = teamRoles
-	} else if run.ParentRunID == "" {
-		// Standalone mode (non-team, non-child): enable spawn_worker.
+	}
+	allowSpawnWorker := !isChildRun && allowSubagents
+	if allowSpawnWorker && isTeam && isCoordinator && len(teamRoles) > 1 {
+		// Team-only delegation constitution (without policy engine): coordinators delegate to roles.
+		allowSpawnWorker = false
+		emitEvent(context.Background(), events.Event{
+			Type:    "delegation.policy.enforced",
+			Message: "Coordinator subagent spawning disabled in multi-role team",
+			Data: map[string]string{
+				"teamId":          teamID,
+				"role":            roleName,
+				"coordinatorRole": coordinatorRole,
+			},
+		})
+	}
+	if allowSpawnWorker {
 		tool.SpawnWorker = s.makeSpawnWorkerFunc(run, model, emitEvent)
 	}
 	if err := registry.Register(tool); err != nil {
@@ -894,18 +1069,20 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		_ = rt.Shutdown(context.Background())
 		return nil, err
 	}
-	reviewerRole := strings.TrimSpace(coordinatorRole)
-	for _, role := range teamRoles {
-		if strings.EqualFold(strings.TrimSpace(role), "reviewer") {
-			reviewerRole = strings.TrimSpace(role)
-			break
-		}
+	if reviewerRole == "" && coordinatorRole != "" {
+		reviewerRole = strings.TrimSpace(coordinatorRole)
 	}
 	runConvStore, err := implstore.NewSQLiteRunConversationStoreFromConfig(s.cfg)
 	if err != nil {
 		orderedEmitter.Close()
 		_ = rt.Shutdown(context.Background())
 		return nil, fmt.Errorf("run conversation store: %w", err)
+	}
+
+	var wakeCh <-chan struct{}
+	var wakeCancel func()
+	if wakeSub, ok := s.taskService.(taskWakeSubscriber); ok && wakeSub != nil {
+		wakeCh, wakeCancel = wakeSub.SubscribeWake(strings.TrimSpace(teamID), strings.TrimSpace(run.RunID))
 	}
 
 	workerSession, err := agentsession.New(agentsession.Config{
@@ -927,6 +1104,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		SoulContent:          soulContent,
 		SoulVersion:          soulVersion,
 		PollInterval:         s.pollInterval,
+		WakeCh:               wakeCh,
 		MaxReadBytes:         256 * 1024,
 		LeaseTTL:             2 * time.Minute,
 		MaxRetries:           3,
@@ -970,6 +1148,9 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		defer orderedEmitter.Close()
 		defer func() { _ = rt.Shutdown(context.Background()) }()
 		defer cancel()
+		if wakeCancel != nil {
+			defer wakeCancel()
+		}
 
 		emitEvent(workerCtx, events.Event{
 			Type:    "run.start",
@@ -981,6 +1162,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 				"model.source": modelSource,
 			},
 		})
+
+		if isChildRun && run.Runtime != nil {
+			run.Runtime.LifecycleState = "active"
+			_ = s.sessionService.SaveRun(parent, run)
+		}
 
 		syncRuntimeControls := func() {
 			loaded, err := s.sessionService.LoadSession(workerCtx, strings.TrimSpace(run.SessionID))
@@ -1053,11 +1239,40 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 							Message: "Spawned worker completed its task",
 							Data:    map[string]string{"runId": run.RunID},
 						})
-						_, _ = s.sessionService.StopRun(context.Background(), run.RunID, types.RunStatusSucceeded, "")
-						s.mu.Lock()
-						delete(s.workers, run.RunID)
-						s.mu.Unlock()
-						return
+
+						// Transition to awaiting_review instead of stopping
+						r, lerr := s.sessionService.LoadRun(context.Background(), run.RunID)
+						if lerr == nil && r.Runtime != nil {
+							r.Runtime.LifecycleState = "awaiting_review"
+							_ = s.sessionService.SaveRun(context.Background(), r)
+						}
+
+						// Bound awaiting_review residency to prevent leaked subagent runtimes
+						// when the expected review/cleanup path never arrives.
+						waitTimeout := s.subagentAwaitingReviewTimeout()
+						timer := time.NewTimer(waitTimeout)
+						defer timer.Stop()
+						select {
+						case <-workerCtx.Done():
+							return
+						case <-timer.C:
+							emitEvent(context.Background(), events.Event{
+								Type:    "subagent.awaiting_review.timeout",
+								Message: "Sub-agent archived after awaiting-review timeout",
+								Data: map[string]string{
+									"runId":   run.RunID,
+									"timeout": waitTimeout.String(),
+								},
+							})
+							if rr, serr := s.sessionService.LoadRun(context.Background(), run.RunID); serr == nil {
+								if rr.Runtime != nil {
+									rr.Runtime.LifecycleState = "archived"
+									_ = s.sessionService.SaveRun(context.Background(), rr)
+								}
+							}
+							_, _ = s.sessionService.StopRun(context.Background(), run.RunID, types.RunStatusSucceeded, "archived: awaiting review timeout")
+							return
+						}
 					}
 					errMsg := "unknown error"
 					if err != nil {
@@ -1477,49 +1692,58 @@ func (s *runtimeSupervisor) makeSpawnWorkerFunc(
 	parentModel string,
 	parentEmit events.EmitFunc,
 ) hosttools.SpawnWorkerFunc {
-	return func(ctx context.Context, goal, sessionID, parentRunID string) (string, error) {
-		if s.sessionService != nil {
-			if sess, err := s.sessionService.LoadSession(ctx, sessionID); err == nil {
-				if strings.TrimSpace(sess.TeamID) != "" {
-					return "", fmt.Errorf("spawn_worker unavailable in team mode")
-				}
-			}
-		}
+	return func(ctx context.Context, goal, sessionID, parentRunID string) (string, string, error) {
+		// Caller gates spawn via allowSubagents; we only get here when spawn is allowed.
 		// Count existing children to determine spawn index.
 		children, _ := s.sessionService.ListChildRuns(ctx, parentRunID)
 		spawnIndex := len(children) + 1
 
 		childRun := types.NewChildRun(parentRunID, goal, sessionID, spawnIndex)
 
-		// Resolve subagent model: env var > profile-level > parent model.
+		// Resolve subagent model: explicit override > parent role-level profile setting >
+		// profile-level setting > default profile role-level/profile-level > parent model.
 		subagentModel := strings.TrimSpace(s.resolved.SubagentModel)
+		parentRole := ""
+		parentProfileRef := ""
+		if parentRun.Runtime != nil {
+			parentRole = strings.TrimSpace(parentRun.Runtime.Role)
+			parentProfileRef = strings.TrimSpace(parentRun.Runtime.Profile)
+		}
+		if subagentModel == "" && parentProfileRef != "" {
+			if prof, _, err := resolveProfileRef(s.cfg, parentProfileRef); err == nil && prof != nil {
+				subagentModel = resolveSubagentModelForRole(prof, parentRole)
+			}
+		}
 		if subagentModel == "" && s.defaultProfile != nil {
-			subagentModel = strings.TrimSpace(s.defaultProfile.SubagentModel)
+			subagentModel = resolveSubagentModelForRole(s.defaultProfile, parentRole)
 		}
 		if subagentModel == "" {
 			subagentModel = parentModel
 		}
 
 		childRun.Runtime = &types.RunRuntimeConfig{
-			DataDir: s.cfg.DataDir,
-			Model:   subagentModel,
+			DataDir:        s.cfg.DataDir,
+			Model:          subagentModel,
+			Role:           fmt.Sprintf("Subagent-%d", spawnIndex),
+			LifecycleState: "spawn_requested",
+			LeaseID:        "lease-" + childRun.RunID,
 		}
 		if parentRun.Runtime != nil {
 			childRun.Runtime.Profile = parentRun.Runtime.Profile
 		}
 
 		if err := s.sessionService.SaveRun(ctx, childRun); err != nil {
-			return "", fmt.Errorf("save child run: %w", err)
+			return "", "", fmt.Errorf("save child run: %w", err)
 		}
 
 		// Add child run to session's run list so the supervisor discovers it.
 		sess, err := s.sessionService.LoadSession(ctx, sessionID)
 		if err != nil {
-			return "", fmt.Errorf("load session for spawn: %w", err)
+			return "", "", fmt.Errorf("load session for spawn: %w", err)
 		}
 		sess.Runs = append(sess.Runs, childRun.RunID)
 		if err := s.sessionService.SaveSession(ctx, sess); err != nil {
-			return "", fmt.Errorf("save session for spawn: %w", err)
+			return "", "", fmt.Errorf("save session for spawn: %w", err)
 		}
 
 		if parentEmit != nil {
@@ -1536,8 +1760,27 @@ func (s *runtimeSupervisor) makeSpawnWorkerFunc(
 			})
 		}
 
-		return childRun.RunID, nil
+		return childRun.RunID, strings.TrimSpace(childRun.Runtime.Role), nil
 	}
+}
+
+func resolveSubagentModelForRole(prof *profile.Profile, roleName string) string {
+	if prof == nil {
+		return ""
+	}
+	roleName = strings.TrimSpace(roleName)
+	if prof.Team != nil && roleName != "" {
+		for i := range prof.Team.Roles {
+			r := prof.Team.Roles[i]
+			if strings.EqualFold(strings.TrimSpace(r.Name), roleName) {
+				if m := strings.TrimSpace(r.SubagentModel); m != "" {
+					return m
+				}
+				break
+			}
+		}
+	}
+	return strings.TrimSpace(prof.SubagentModel)
 }
 
 func (s *runtimeSupervisor) GetRunState(ctx context.Context, sessionID, runID string) (protocol.RuntimeRunState, error) {

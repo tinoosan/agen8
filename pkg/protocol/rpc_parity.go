@@ -9,11 +9,12 @@ type SessionGetTotalsParams struct {
 }
 
 type SessionStartParams struct {
-	ThreadID ThreadID `json:"threadId"`
-	Mode     string   `json:"mode,omitempty"` // standalone|team
-	Profile  string   `json:"profile,omitempty"`
-	Goal     string   `json:"goal,omitempty"`
-	Model    string   `json:"model,omitempty"`
+	ThreadID    ThreadID `json:"threadId"`
+	Mode        string   `json:"mode,omitempty"` // single-agent|multi-agent
+	Profile     string   `json:"profile,omitempty"`
+	Goal        string   `json:"goal,omitempty"`
+	Model       string   `json:"model,omitempty"`
+	ProjectRoot string   `json:"projectRoot,omitempty"` // project dir when created via agen8 new
 }
 
 type SessionStartResult struct {
@@ -29,6 +30,7 @@ type SessionStartResult struct {
 type SessionListParams struct {
 	ThreadID      ThreadID `json:"threadId"`
 	TitleContains string   `json:"titleContains,omitempty"`
+	ProjectRoot   string   `json:"projectRoot,omitempty"` // filter sessions by project
 	Limit         int      `json:"limit,omitempty"`
 	Offset        int      `json:"offset,omitempty"`
 }
@@ -41,6 +43,7 @@ type SessionListItem struct {
 	Mode          string `json:"mode,omitempty"`
 	TeamID        string `json:"teamId,omitempty"`
 	Profile       string `json:"profile,omitempty"`
+	ProjectRoot   string `json:"projectRoot,omitempty"`
 	RunningAgents int    `json:"runningAgents,omitempty"`
 	PausedAgents  int    `json:"pausedAgents,omitempty"`
 	TotalAgents   int    `json:"totalAgents,omitempty"`
@@ -278,6 +281,7 @@ type TeamGetManifestResult struct {
 	TeamModel       string                   `json:"teamModel,omitempty"`
 	ModelChange     *TeamManifestModelChange `json:"modelChange,omitempty"`
 	CoordinatorRole string                   `json:"coordinatorRole"`
+	ReviewerRole    string                   `json:"reviewerRole,omitempty"`
 	CoordinatorRun  string                   `json:"coordinatorRunId"`
 	Roles           []TeamManifestRole       `json:"roles"`
 	CreatedAt       string                   `json:"createdAt"`
@@ -453,16 +457,16 @@ type RuntimeGetSessionStateParams struct {
 }
 
 type RuntimeRunState struct {
-	SessionID       string `json:"sessionId"`
-	RunID           string `json:"runId"`
-	Model           string `json:"model,omitempty"`
-	RunTotalTokens  int    `json:"runTotalTokens,omitempty"`
+	SessionID       string  `json:"sessionId"`
+	RunID           string  `json:"runId"`
+	Model           string  `json:"model,omitempty"`
+	RunTotalTokens  int     `json:"runTotalTokens,omitempty"`
 	RunTotalCostUSD float64 `json:"runTotalCostUSD,omitempty"`
-	PersistedStatus string `json:"persistedStatus,omitempty"`
-	WorkerPresent   bool   `json:"workerPresent"`
-	PausedFlag      bool   `json:"pausedFlag"`
-	LastHeartbeatAt string `json:"lastHeartbeatAt,omitempty"`
-	EffectiveStatus string `json:"effectiveStatus,omitempty"`
+	PersistedStatus string  `json:"persistedStatus,omitempty"`
+	WorkerPresent   bool    `json:"workerPresent"`
+	PausedFlag      bool    `json:"pausedFlag"`
+	LastHeartbeatAt string  `json:"lastHeartbeatAt,omitempty"`
+	EffectiveStatus string  `json:"effectiveStatus,omitempty"`
 }
 
 type RuntimeGetRunStateResult struct {
