@@ -1,30 +1,36 @@
 id: general
-name: General Agent
 description: General-purpose autonomous agent profile for broad problem solving and coordination.
-model: openai/gpt-5.1-codex-mini
-subagent_model: openai/gpt-5.1-codex-mini
-code_exec_only: true
-allowed_tools:
-  - shell_exec
-  - http_fetch
-  - task_create
-  - task_review
-  - obsidian
-skills:
-  - coding
-  - reporting
-  - acting
-  - planning
-  - data-engineering
-  - project-management
-  - financial-analysis
-  - market-monitoring
-  - automation
-prompts:
-  system_prompt_path: prompt.md
-heartbeat:
-  enabled: false
-  jobs:
-    - name: review_your_notes
-      interval: 10m
-      goal: "Review your notes and form connections meaningful connections between notes."
+team:
+  model: openai/gpt-5.1-codex-mini
+  roles:
+    - name: General Agent
+      coordinator: true
+      allow_subagents: true
+      model: openai/gpt-5.1-codex-mini
+      subagent_model: openai/gpt-5.1-codex-mini
+      code_exec_only: true
+      allowed_tools:
+        - shell_exec
+        - http_fetch
+        - task_create
+        - task_review
+        - obsidian
+      description: General-purpose autonomous agent profile for broad problem solving and coordination.
+      prompts:
+        system_prompt_path: prompt.md
+      skills:
+        - coding
+        - reporting
+        - acting
+        - planning
+        - data-engineering
+        - project-management
+        - financial-analysis
+        - market-monitoring
+        - automation
+      heartbeat:
+        enabled: false
+        jobs:
+          - name: review_your_notes
+            interval: 10m
+            goal: "Review your notes and form connections meaningful connections between notes."

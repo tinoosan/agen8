@@ -88,6 +88,129 @@ func TestListPendingTasks_TeamRouting(t *testing.T) {
 	}
 }
 
+func TestListPendingTasks_TeamChildRunUsesAgentAssignment(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	now := time.Now().UTC()
+	create := func(task types.Task) {
+		t.Helper()
+		if task.CreatedAt == nil {
+			task.CreatedAt = &now
+		}
+		if err := store.CreateTask(context.Background(), task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", task.TaskID, err)
+		}
+	}
+	create(types.Task{
+		TaskID:         "task-child-agent",
+		SessionID:      "s1",
+		RunID:          "run-child",
+		TeamID:         "team-1",
+		AssignedRole:   "Subagent-1",
+		AssignedToType: "agent",
+		AssignedTo:     "run-child",
+		Goal:           "child task",
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+	})
+	create(types.Task{
+		TaskID:         "task-role",
+		SessionID:      "s1",
+		RunID:          "run-parent",
+		TeamID:         "team-1",
+		AssignedRole:   "researcher",
+		AssignedToType: "role",
+		AssignedTo:     "researcher",
+		Goal:           "role task",
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+	})
+
+	child := &Session{cfg: Config{
+		TaskStore:   store,
+		TeamID:      "team-1",
+		RoleName:    "Subagent-1",
+		RunID:       "run-child",
+		ParentRunID: "run-parent",
+		MaxPending:  50,
+	}}
+	tasks, err := child.listPendingTasks(context.Background())
+	if err != nil {
+		t.Fatalf("child listPendingTasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].TaskID != "task-child-agent" {
+		t.Fatalf("expected child to receive only its agent-assigned task, got %+v", tasks)
+	}
+}
+
+func TestListPendingTasks_TeamRoleIncludesAgentAddressedCallbacks(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	now := time.Now().UTC()
+	create := func(task types.Task) {
+		t.Helper()
+		if task.CreatedAt == nil {
+			task.CreatedAt = &now
+		}
+		if err := store.CreateTask(context.Background(), task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", task.TaskID, err)
+		}
+	}
+	// Normal team role task.
+	create(types.Task{
+		TaskID:         "task-role",
+		SessionID:      "s1",
+		RunID:          "run-parent",
+		TeamID:         "team-1",
+		AssignedRole:   "researcher",
+		AssignedToType: "role",
+		AssignedTo:     "researcher",
+		Goal:           "role task",
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+	})
+	// Callback routed directly to the run (agent assignment).
+	create(types.Task{
+		TaskID:         "callback-task-role",
+		SessionID:      "s1",
+		RunID:          "run-parent",
+		TeamID:         "team-1",
+		AssignedRole:   "researcher",
+		AssignedToType: "agent",
+		AssignedTo:     "run-parent",
+		Goal:           "review spawned worker result",
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+		Metadata:       map[string]any{"source": "subagent.callback"},
+	})
+
+	worker := &Session{cfg: Config{
+		TaskStore:  store,
+		TeamID:     "team-1",
+		RoleName:   "researcher",
+		RunID:      "run-parent",
+		MaxPending: 50,
+	}}
+	tasks, err := worker.listPendingTasks(context.Background())
+	if err != nil {
+		t.Fatalf("listPendingTasks: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected role + agent-addressed callback tasks, got %d", len(tasks))
+	}
+	seen := map[string]bool{}
+	for _, task := range tasks {
+		seen[strings.TrimSpace(task.TaskID)] = true
+	}
+	if !seen["task-role"] || !seen["callback-task-role"] {
+		t.Fatalf("expected both tasks, got %+v", tasks)
+	}
+}
+
 func TestNormalizeTeamCallbackArtifactPath(t *testing.T) {
 	role := "frontend-engineer"
 	teamRoles := []string{"frontend-engineer", "qa-engineer"}

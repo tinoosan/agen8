@@ -103,6 +103,10 @@ type RunRuntimeConfig struct {
 
 	// SoulVersionSeen records the canonical SOUL version this run last observed.
 	SoulVersionSeen int `json:"soulVersionSeen,omitempty"`
+
+	// Subagent lifecycle and lease state
+	LifecycleState string `json:"lifecycleState,omitempty"` // spawn_requested, spawning, active, awaiting_review, approved, deactivated, archived
+	LeaseID        string `json:"leaseId,omitempty"`
 }
 
 // NewRun initializes a new Run instance with a unique ID and the given parameters.

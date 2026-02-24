@@ -328,6 +328,9 @@ func (m *monitorModel) handleLoadedDataMessages(msg tea.Msg) (tea.Model, tea.Cmd
 		}
 		m.childRunsLoadErr = ""
 		m.childRuns = msg.runs
+		m.childRunAssignedByRunID = msg.assignedByRunID
+		m.childRunCompletedByRunID = msg.completedByRunID
+		m.childRunActiveByRunID = msg.activeByRunID
 		m.dirtyInbox = true // Re-render dashboard
 		return m, m.scheduleUIRefresh()
 

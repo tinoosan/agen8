@@ -10,12 +10,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/tui/rpcscope"
-	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
-	"github.com/tinoosan/agen8/pkg/services/team"
 	agentstate "github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/cost"
 	"github.com/tinoosan/agen8/pkg/protocol"
+	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
+	"github.com/tinoosan/agen8/pkg/services/team"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
@@ -434,6 +434,11 @@ func (m *monitorModel) loadInboxPage() tea.Cmd {
 					Limit:    pageSize,
 					Offset:   targetPage * pageSize,
 				}
+				// In team overview, use team scope (RunID="") so inbox includes tasks
+				// assigned to any role/run, including subagents.
+				if strings.TrimSpace(scope.TeamID) != "" && (params.RunID == "" || strings.HasPrefix(strings.ToLower(params.RunID), "team:")) {
+					params.RunID = ""
+				}
 				if strings.TrimSpace(scope.TeamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
 					params.RunID = strings.TrimSpace(m.focusedRunID)
 				}
@@ -477,7 +482,9 @@ func (m *monitorModel) loadInboxPage() tea.Cmd {
 		out := make([]taskState, 0, len(res.Tasks))
 		for _, t := range res.Tasks {
 			status := strings.TrimSpace(t.Status)
-			if status != string(types.TaskStatusPending) && status != string(types.TaskStatusActive) {
+			if status != string(types.TaskStatusPending) &&
+				status != string(types.TaskStatusActive) &&
+				status != string(types.TaskStatusReviewPending) {
 				continue
 			}
 			ts := taskState{
@@ -531,6 +538,11 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 					View:     "outbox",
 					Limit:    pageSize,
 					Offset:   targetPage * pageSize,
+				}
+				// In team overview, use team scope (RunID="") so outbox includes tasks
+				// completed by any role/run, including subagents.
+				if strings.TrimSpace(scope.TeamID) != "" && (params.RunID == "" || strings.HasPrefix(strings.ToLower(params.RunID), "team:")) {
+					params.RunID = ""
 				}
 				if strings.TrimSpace(scope.TeamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
 					params.RunID = strings.TrimSpace(m.focusedRunID)
@@ -1006,13 +1018,53 @@ func (m *monitorModel) loadChildRuns() tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		// Use run.listChildren only: ask the daemon for children of this run by parent_run_id.
-		// This does not depend on session ID, so we avoid mismatches (e.g. TUI session vs daemon session).
-		var childRes protocol.RunListChildrenResult
-		if err := m.rpcRoundTrip(protocol.MethodRunListChildren, protocol.RunListChildrenParams{ParentRunID: runID}, &childRes); err != nil {
-			return childRunsLoadedMsg{err: err}
+		parentRunIDs := []string{}
+		isTeamOverview := strings.TrimSpace(m.teamID) != "" &&
+			strings.TrimSpace(m.focusedRunID) == "" &&
+			(runID == "" || strings.HasPrefix(strings.ToLower(runID), "team:"))
+		if isTeamOverview && len(m.teamRunIDs) > 0 {
+			seenParents := map[string]struct{}{}
+			for _, id := range m.teamRunIDs {
+				id = strings.TrimSpace(id)
+				if id == "" {
+					continue
+				}
+				if _, ok := seenParents[id]; ok {
+					continue
+				}
+				seenParents[id] = struct{}{}
+				parentRunIDs = append(parentRunIDs, id)
+			}
 		}
-		runs := childRes.Runs
+		if len(parentRunIDs) == 0 {
+			parentRunIDs = append(parentRunIDs, runID)
+		}
+
+		merged := make([]types.Run, 0, 8)
+		seenChild := map[string]struct{}{}
+		for _, parentID := range parentRunIDs {
+			parentID = strings.TrimSpace(parentID)
+			if parentID == "" || strings.HasPrefix(strings.ToLower(parentID), "team:") {
+				continue
+			}
+			var childRes protocol.RunListChildrenResult
+			if err := m.rpcRoundTrip(protocol.MethodRunListChildren, protocol.RunListChildrenParams{ParentRunID: parentID}, &childRes); err != nil {
+				return childRunsLoadedMsg{err: err}
+			}
+			for _, run := range childRes.Runs {
+				rid := strings.TrimSpace(run.RunID)
+				if rid == "" {
+					continue
+				}
+				if _, ok := seenChild[rid]; ok {
+					continue
+				}
+				seenChild[rid] = struct{}{}
+				merged = append(merged, run)
+			}
+		}
+
+		runs := merged
 		sort.Slice(runs, func(i, j int) bool {
 			if runs[i].StartedAt == nil {
 				return true
@@ -1022,6 +1074,41 @@ func (m *monitorModel) loadChildRuns() tea.Cmd {
 			}
 			return runs[i].StartedAt.Before(*runs[j].StartedAt)
 		})
-		return childRunsLoadedMsg{runs: runs}
+		assignedByRunID := map[string]int{}
+		completedByRunID := map[string]int{}
+		activeByRunID := map[string]int{}
+		if m.taskStore != nil {
+			for _, run := range runs {
+				rid := strings.TrimSpace(run.RunID)
+				if rid == "" {
+					continue
+				}
+				if n, err := m.taskStore.CountTasks(m.ctx, agentstate.TaskFilter{RunID: rid}); err == nil {
+					assignedByRunID[rid] = n
+				}
+				if n, err := m.taskStore.CountTasks(m.ctx, agentstate.TaskFilter{
+					RunID: rid,
+					Status: []types.TaskStatus{
+						types.TaskStatusSucceeded,
+						types.TaskStatusFailed,
+						types.TaskStatusCanceled,
+					},
+				}); err == nil {
+					completedByRunID[rid] = n
+				}
+				if n, err := m.taskStore.CountTasks(m.ctx, agentstate.TaskFilter{
+					RunID:  rid,
+					Status: []types.TaskStatus{types.TaskStatusActive},
+				}); err == nil {
+					activeByRunID[rid] = n
+				}
+			}
+		}
+		return childRunsLoadedMsg{
+			runs:             runs,
+			assignedByRunID:  assignedByRunID,
+			completedByRunID: completedByRunID,
+			activeByRunID:    activeByRunID,
+		}
 	}
 }

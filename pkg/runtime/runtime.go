@@ -276,6 +276,10 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	scope := resolveProfileSkillScope(cfg)
 	skillMgr.AllowedSkills = scope.AllowedSkills
 	skillMgr.EnforceAllowlist = scope.EnforceAllowlist
+	profileSource := "ProfileRef"
+	if cfg.ProfileConfig != nil {
+		profileSource = "ProfileConfig"
+	}
 	if cfg.Emit != nil && scope.EnforceAllowlist {
 		eventType := "runtime.info"
 		message := "Applied profile-scoped skills visibility"
@@ -284,15 +288,29 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			message = "Applied fail-closed profile-scoped skills visibility"
 		}
 		data := map[string]string{
-			"profile":      strings.TrimSpace(scope.ProfileID),
-			"allowedCount": strconv.Itoa(len(scope.AllowedSkills)),
-			"scope":        strings.TrimSpace(scope.Scope),
+			"profile":       strings.TrimSpace(scope.ProfileID),
+			"allowedCount":  strconv.Itoa(len(scope.AllowedSkills)),
+			"scope":         strings.TrimSpace(scope.Scope),
+			"profileSource": profileSource,
 		}
 		if role := strings.TrimSpace(scope.Role); role != "" {
 			data["role"] = role
 		}
+		if cfg.Run.Runtime != nil {
+			if tid := strings.TrimSpace(cfg.Run.Runtime.TeamID); tid != "" {
+				data["teamId"] = tid
+			}
+		}
 		if reason := strings.TrimSpace(scope.FailClosedReason); reason != "" {
 			data["reason"] = reason
+		}
+		// Include a small sample of allowlist for diagnostics (first 5)
+		if len(scope.AllowedSkills) > 0 {
+			sample := scope.AllowedSkills
+			if len(sample) > 5 {
+				sample = sample[:5]
+			}
+			data["allowedSample"] = strings.Join(sample, ",")
 		}
 		cfg.Emit(context.Background(), events.Event{
 			Type:    eventType,
@@ -302,6 +320,24 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 	if err := skillMgr.Scan(); err != nil {
 		return nil, fmt.Errorf("scan skills: %w", err)
+	}
+	visibleCount := len(skillMgr.Entries())
+	if cfg.Emit != nil && scope.EnforceAllowlist && visibleCount == 0 {
+		data := map[string]string{
+			"profile":       strings.TrimSpace(scope.ProfileID),
+			"scope":         strings.TrimSpace(scope.Scope),
+			"allowedCount":  strconv.Itoa(len(scope.AllowedSkills)),
+			"visibleCount":  "0",
+			"profileSource": profileSource,
+		}
+		if reason := strings.TrimSpace(scope.FailClosedReason); reason != "" {
+			data["reason"] = reason
+		}
+		cfg.Emit(context.Background(), events.Event{
+			Type:    "runtime.warning",
+			Message: "Profile-scoped skills: zero skills visible after scan",
+			Data:    data,
+		})
 	}
 	if err := fs.Mount(vfs.MountSkills, skills.NewResource(skillMgr)); err != nil {
 		return nil, fmt.Errorf("mount %s: %w", vfs.MountSkills, err)
@@ -605,19 +641,34 @@ func resolveProfileSkillScope(cfg BuildConfig) profileSkillScope {
 	if teamID != "" {
 		out.Scope = "team-role"
 		out.Role = role
-		if p.Team == nil {
-			out.FailClosedReason = "team_profile_missing"
-			return out
-		}
 		if role == "" {
 			out.FailClosedReason = "team_role_missing"
 			return out
 		}
-		for _, rc := range p.Team.Roles {
+		sessionRoles, err := p.RolesForSession()
+		if err != nil {
+			out.FailClosedReason = "team_profile_invalid"
+			return out
+		}
+		for _, rc := range sessionRoles {
 			if !strings.EqualFold(strings.TrimSpace(rc.Name), role) {
 				continue
 			}
 			out.AllowedSkills = normalizeSkillList(rc.Skills)
+			return out
+		}
+		// Legacy compatibility: team metadata may exist on runs while profile shape is standalone.
+		// In that case, fall back to profile-level skills rather than fail-closing visibility.
+		if p.Team == nil {
+			out.Scope = "team-standalone-fallback"
+			out.AllowedSkills = normalizeSkillList(p.Skills)
+			return out
+		}
+		// Unmapped team role: fail-closed by default; optional fallback to profile-level skills.
+		if cfg.Cfg.SkillsUnmappedRoleFallbackToProfile {
+			out.AllowedSkills = normalizeSkillList(p.Skills)
+			out.Scope = "team-role-fallback"
+			out.FailClosedReason = ""
 			return out
 		}
 		out.FailClosedReason = "team_role_unmapped"

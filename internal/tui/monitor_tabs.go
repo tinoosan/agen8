@@ -440,7 +440,38 @@ func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) str
 				}
 				dur = end.Sub(*run.StartedAt).Round(time.Second).String()
 			}
-			label := fmt.Sprintf("Sub-agent %d · %s (%s)", idx, truncateText(goal, 45), dur)
+			runID := strings.TrimSpace(run.RunID)
+			assigned := 0
+			completed := 0
+			active := 0
+			if m.childRunAssignedByRunID != nil {
+				assigned = m.childRunAssignedByRunID[runID]
+			}
+			if m.childRunCompletedByRunID != nil {
+				completed = m.childRunCompletedByRunID[runID]
+			}
+			if m.childRunActiveByRunID != nil {
+				active = m.childRunActiveByRunID[runID]
+			}
+			workState := "idle"
+			workGlyph := "·"
+			if active > 0 {
+				workState = "working"
+				workGlyph = "●"
+			} else if assigned > completed {
+				workState = "queued"
+				workGlyph = "○"
+			}
+			label := fmt.Sprintf(
+				"%s Subagent-%d · %s (%s) · tasks %d/%d · %s",
+				workGlyph,
+				idx,
+				truncateText(goal, 45),
+				dur,
+				completed,
+				assigned,
+				workState,
+			)
 			items = append(items, subagentListItem{RunID: run.RunID, Label: label})
 		}
 	}

@@ -21,6 +21,11 @@ type Config struct {
 
 	// PathAccess controls which paths outside VFS the agent may access.
 	PathAccess PathAccessConfig
+
+	// SkillsUnmappedRoleFallbackToProfile, when true, allows team runs whose role
+	// is not found in the profile to fall back to profile-level skills instead of
+	// fail-closed (zero skills). Default false for secure-by-default behavior.
+	SkillsUnmappedRoleFallbackToProfile bool
 }
 
 // CodeExecConfig controls code_exec Python runtime dependency policy.

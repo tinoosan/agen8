@@ -58,16 +58,18 @@ func agentsToPickerItems(agents []protocol.AgentListItem) []list.Item {
 		profile := strings.TrimSpace(a.Profile)
 		role := strings.TrimSpace(a.Role)
 		parentRunID := strings.TrimSpace(a.ParentRunID)
+		// For subagents, use canonical "Subagent-N" identity
 		if parentRunID != "" {
 			n := a.SpawnIndex
 			if n <= 0 {
 				n = i + 1
 			}
+			role = fmt.Sprintf("Subagent-%d", n)
 			goal := strings.TrimSpace(a.Goal)
 			if goal == "" {
 				goal = "(no goal)"
 			}
-			label = fmt.Sprintf("Sub-agent %d · %s", n, truncateText(goal, 50))
+			label = fmt.Sprintf("Subagent-%d · %s", n, truncateText(goal, 50))
 		} else if role != "" {
 			if profile != "" {
 				label = role + " · " + profile + " · " + shortID(runID)

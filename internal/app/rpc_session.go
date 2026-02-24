@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	implstore "github.com/tinoosan/agen8/internal/store"
 	"github.com/tinoosan/agen8/pkg/agent/state"
+	"github.com/tinoosan/agen8/pkg/profile"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	pkgagent "github.com/tinoosan/agen8/pkg/services/agent"
 	"github.com/tinoosan/agen8/pkg/services/team"
@@ -209,7 +210,7 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 	}
 	switch view {
 	case "inbox":
-		filter.Status = []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive}
+		filter.Status = []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive, types.TaskStatusReviewPending}
 		filter.SortBy = "created_at"
 		filter.SortDesc = false
 	case "outbox":
@@ -240,11 +241,8 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	if _, err := s.resolveThreadID(p.ThreadID); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
-	mode := strings.ToLower(strings.TrimSpace(p.Mode))
-	if mode == "" {
-		mode = "single-agent"
-	}
-	if mode != "single-agent" && mode != "multi-agent" {
+	requestedMode := strings.ToLower(strings.TrimSpace(p.Mode))
+	if requestedMode != "" && requestedMode != "single-agent" && requestedMode != "multi-agent" {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{
 			Code:    protocol.CodeInvalidParams,
 			Message: "mode must be single-agent or multi-agent",
@@ -252,9 +250,6 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	}
 	profileRef := strings.TrimSpace(p.Profile)
 	if profileRef == "" {
-		if mode == "multi-agent" {
-			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "team profile is required"}
-		}
 		profileRef = "general"
 	}
 	prof, _, err := resolveProfileRef(s.cfg, profileRef)
@@ -264,10 +259,6 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	if prof == nil {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "profile not found"}
 	}
-	if mode == "single-agent" && prof.Team != nil && len(prof.Team.Roles) > 1 {
-		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "single-agent mode requires a single-role or non-team profile"}
-	}
-
 	roles, err := prof.RolesForSession()
 	if err != nil {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
@@ -276,13 +267,27 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	if err != nil {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}
-	teamRoles, _, _, err := team.EnsureReviewerRole(roles, coordinatorRole)
-	if err != nil {
-		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
+	teamRoles := append([]profile.RoleConfig(nil), roles...)
+	// Single-role profiles stay single-agent; for multi-role teams we ensure a reviewer role exists.
+	if len(roles) > 1 {
+		teamRoles, _, _, err = team.EnsureReviewerRole(roles, coordinatorRole)
+		if err != nil {
+			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
+		}
 	}
 	_, coordinatorRole, err = team.ValidateTeamRoles(teamRoles)
 	if err != nil {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: err.Error()}
+	}
+	mode := "single-agent"
+	if len(teamRoles) > 1 {
+		mode = "multi-agent"
+	}
+	if requestedMode != "" && requestedMode != mode {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{
+			Code:    protocol.CodeInvalidParams,
+			Message: fmt.Sprintf("mode %q does not match profile role count (%s)", requestedMode, mode),
+		}
 	}
 
 	goal := strings.TrimSpace(p.Goal)
@@ -296,11 +301,7 @@ func (s *RPCServer) sessionStart(ctx context.Context, p protocol.SessionStartPar
 	sess.ProjectRoot = strings.TrimSpace(p.ProjectRoot)
 	teamID := "team-" + uuid.NewString()
 	sess.TeamID = teamID
-	if len(roles) == 1 {
-		sess.Mode = "single-agent"
-	} else {
-		sess.Mode = "multi-agent"
-	}
+	sess.Mode = mode
 
 	teamModel := strings.TrimSpace(p.Model)
 	if teamModel == "" {

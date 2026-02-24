@@ -59,6 +59,54 @@ func TestManager_EnforceAllowlistWithEmptyList_HidesAllSkills(t *testing.T) {
 	}
 }
 
+func TestManager_AllowedSkillsCaseInsensitiveMatch(t *testing.T) {
+	tmp := t.TempDir()
+	mustWriteSkill(t, tmp, "coding")
+	mustWriteSkill(t, tmp, "Planning")
+
+	mgr := NewManager([]string{tmp})
+	mgr.AllowedSkills = []string{"CODING", "planning"}
+	if err := mgr.Scan(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	entries := mgr.Entries()
+	got := make([]string, 0, len(entries))
+	for _, e := range entries {
+		got = append(got, e.Dir)
+	}
+	// Canonical dir names from disk are returned.
+	want := []string{"Planning", "coding"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("entries mismatch: got %v want %v", got, want)
+	}
+	if _, ok := mgr.Get("coding"); !ok {
+		t.Fatalf("expected coding to be visible")
+	}
+	if _, ok := mgr.Get("Planning"); !ok {
+		t.Fatalf("expected Planning to be visible")
+	}
+}
+
+func TestManager_EnforceAllowlistWithNonExistentAllowed_HidesAll(t *testing.T) {
+	tmp := t.TempDir()
+	mustWriteSkill(t, tmp, "real-skill")
+
+	mgr := NewManager([]string{tmp})
+	mgr.EnforceAllowlist = true
+	mgr.AllowedSkills = []string{"nonexistent-skill"}
+	if err := mgr.Scan(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	if entries := mgr.Entries(); len(entries) != 0 {
+		t.Fatalf("expected no visible entries when allowlist does not match any dir, got %d", len(entries))
+	}
+	if _, ok := mgr.Get("real-skill"); ok {
+		t.Fatalf("expected real-skill to be hidden when not in allowlist")
+	}
+}
+
 func TestManager_ScriptsManifest(t *testing.T) {
 	tmp := t.TempDir()
 	mustWriteSkill(t, tmp, "alpha")

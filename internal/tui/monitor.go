@@ -63,8 +63,11 @@ type agentsListMsg struct {
 }
 
 type childRunsLoadedMsg struct {
-	runs []types.Run
-	err  error
+	runs             []types.Run
+	assignedByRunID  map[string]int
+	completedByRunID map[string]int
+	activeByRunID    map[string]int
+	err              error
 }
 
 // AgentOutputItem represents a single logical entry in the agent output stream.
@@ -230,6 +233,9 @@ type monitorModel struct {
 	thinkingVP                   viewport.Model
 	thinkingAutoScroll           bool
 	childRuns                    []types.Run
+	childRunAssignedByRunID      map[string]int
+	childRunCompletedByRunID     map[string]int
+	childRunActiveByRunID        map[string]int
 	childRunsLoadErr             string // last error from loadChildRuns (e.g. RPC failed)
 	subagentsVP                  viewport.Model
 	subagentsList                list.Model

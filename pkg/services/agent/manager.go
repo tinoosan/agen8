@@ -181,6 +181,7 @@ func (m *Manager) Resume(ctx context.Context, runID, sessionID string) error {
 }
 
 // InferRunRoleAndTeam returns role and teamID from run RuntimeConfig or from task metadata.
+// For subagents (child runs), the role is preserved as set during spawn (e.g., "Subagent-N").
 func (m *Manager) InferRunRoleAndTeam(ctx context.Context, runID string) (role, teamID string) {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
@@ -189,6 +190,8 @@ func (m *Manager) InferRunRoleAndTeam(ctx context.Context, runID string) (role, 
 	if run, err := m.sessions.LoadRun(ctx, runID); err == nil && run.Runtime != nil {
 		role = strings.TrimSpace(run.Runtime.Role)
 		teamID = strings.TrimSpace(run.Runtime.TeamID)
+		// For subagents, preserve the canonical role even if teamID is empty.
+		// We still continue to infer teamID from tasks if it's not set.
 		if role != "" && teamID != "" {
 			return role, teamID
 		}
@@ -209,6 +212,7 @@ func (m *Manager) InferRunRoleAndTeam(ctx context.Context, runID string) (role, 
 		if strings.TrimSpace(teamID) == "" {
 			teamID = strings.TrimSpace(t.TeamID)
 		}
+		// Only infer role from tasks if not already set (preserves subagent roles)
 		if strings.TrimSpace(role) == "" {
 			role = strings.TrimSpace(t.RoleSnapshot)
 		}

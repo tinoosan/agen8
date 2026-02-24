@@ -15,9 +15,10 @@ import (
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
-// SpawnWorkerFunc creates a child run for a spawned worker and returns the child RunID.
+// SpawnWorkerFunc creates a child run for a spawned worker and returns the child RunID
+// plus the canonical child role (for example, "Subagent-1").
 // The daemon wires this callback to create Run records and add them to the session.
-type SpawnWorkerFunc func(ctx context.Context, goal, sessionID, parentRunID string) (childRunID string, err error)
+type SpawnWorkerFunc func(ctx context.Context, goal, sessionID, parentRunID string) (childRunID, childRole string, err error)
 
 // TaskCreateTool creates a DB-backed task.
 type TaskCreateTool struct {
@@ -250,13 +251,16 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 				return types.HostOpRequest{}, fmt.Errorf("task_create: spawn_worker is not available in this context")
 			}
 		}
-		childRunID, err := t.SpawnWorker(ctx, goal, t.SessionID, t.RunID)
+		childRunID, childRole, err := t.SpawnWorker(ctx, goal, t.SessionID, t.RunID)
 		if err != nil {
 			return types.HostOpRequest{}, fmt.Errorf("task_create: spawn worker: %w", err)
 		}
 		task.RunID = childRunID
 		task.AssignedToType = "agent"
 		task.AssignedTo = childRunID
+		if role := strings.TrimSpace(childRole); role != "" {
+			task.AssignedRole = role
+		}
 		task.Metadata["source"] = "spawn_worker"
 		task.Metadata["parentRunId"] = strings.TrimSpace(t.RunID)
 		if parentTaskID != "" {

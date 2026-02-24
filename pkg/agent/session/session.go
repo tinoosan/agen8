@@ -406,11 +406,22 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 	// Backpressure: if inbox is already large, skip emitting more tasks.
 	filter := state.TaskFilter{RunID: s.cfg.RunID, Status: []types.TaskStatus{types.TaskStatusPending}}
 	if strings.TrimSpace(s.cfg.TeamID) != "" {
-		filter = state.TaskFilter{
-			TeamID:         s.cfg.TeamID,
-			AssignedToType: "role",
-			AssignedTo:     s.cfg.RoleName,
-			Status:         []types.TaskStatus{types.TaskStatusPending},
+		isChildRun := strings.TrimSpace(s.cfg.ParentRunID) != ""
+		if isChildRun {
+			filter = state.TaskFilter{
+				TeamID:         s.cfg.TeamID,
+				RunID:          s.cfg.RunID,
+				AssignedToType: "agent",
+				AssignedTo:     s.cfg.RunID,
+				Status:         []types.TaskStatus{types.TaskStatusPending},
+			}
+		} else {
+			filter = state.TaskFilter{
+				TeamID:         s.cfg.TeamID,
+				AssignedToType: "role",
+				AssignedTo:     s.cfg.RoleName,
+				Status:         []types.TaskStatus{types.TaskStatusPending},
+			}
 		}
 	}
 	if count, err := s.cfg.TaskStore.CountTasks(ctx, filter); err == nil && count > s.cfg.MaxPending {
@@ -547,8 +558,11 @@ func getTaskSource(t types.Task) string {
 }
 
 func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
-	if strings.TrimSpace(s.cfg.TeamID) == "" {
+	isTeam := strings.TrimSpace(s.cfg.TeamID) != ""
+	isChildRun := strings.TrimSpace(s.cfg.ParentRunID) != ""
+	if !isTeam || isChildRun {
 		tasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+			TeamID:         strings.TrimSpace(s.cfg.TeamID),
 			RunID:          s.cfg.RunID,
 			AssignedToType: "agent",
 			AssignedTo:     s.cfg.RunID,
@@ -587,7 +601,7 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	tasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+	roleTasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
 		TeamID:         s.cfg.TeamID,
 		AssignedToType: "role",
 		AssignedTo:     s.cfg.RoleName,
@@ -597,6 +611,44 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Team roles can also receive agent-addressed callback tasks (e.g. subagent callbacks
+	// routed back to the spawning run). Include those so callbacks are not missed.
+	agentTasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
+		TeamID:         s.cfg.TeamID,
+		RunID:          s.cfg.RunID,
+		AssignedToType: "agent",
+		AssignedTo:     s.cfg.RunID,
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "priority",
+		Limit:          limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	tasks := make([]types.Task, 0, len(roleTasks)+len(agentTasks))
+	seen := map[string]struct{}{}
+	for _, task := range roleTasks {
+		id := strings.TrimSpace(task.TaskID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		tasks = append(tasks, task)
+	}
+	for _, task := range agentTasks {
+		id := strings.TrimSpace(task.TaskID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		tasks = append(tasks, task)
 	}
 	if !s.cfg.IsCoordinator {
 		return tasks, nil
@@ -613,7 +665,7 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 		return nil, err
 	}
 	out := make([]types.Task, 0, len(tasks)+len(unassigned))
-	seen := map[string]struct{}{}
+	seen = map[string]struct{}{}
 	for _, task := range tasks {
 		if strings.TrimSpace(task.TaskID) == "" {
 			continue

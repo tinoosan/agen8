@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -377,7 +378,10 @@ func (a *countingAgent) CloneWithConfig(cfg agent.AgentConfig) (agent.Agent, err
 	return a, nil
 }
 
-func TestRuntimeSupervisor_SyncOnce_CleansLegacyTeamChildRuns(t *testing.T) {
+// TestRuntimeSupervisor_SyncOnce_DoesNotCancelTeamChildRuns ensures we no longer cancel
+// team child runs in syncOnce. Spawned subagents in team mode are allowed to run;
+// only lifecycle-driven paths (e.g. approval) deactivate them.
+func TestRuntimeSupervisor_SyncOnce_DoesNotCancelTeamChildRuns(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess, parentRun, err := implstore.CreateSession(cfg, "team parent", 8*1024)
 	if err != nil {
@@ -390,6 +394,10 @@ func TestRuntimeSupervisor_SyncOnce_CleansLegacyTeamChildRuns(t *testing.T) {
 	}
 	childRun := types.NewChildRun(parentRun.RunID, "legacy child", sess.SessionID, 1)
 	childRun.Status = types.RunStatusRunning
+	if childRun.Runtime == nil {
+		childRun.Runtime = &types.RunRuntimeConfig{}
+	}
+	childRun.Runtime.Role = "Subagent-1"
 	if err := implstore.SaveRun(cfg, childRun); err != nil {
 		t.Fatalf("SaveRun child: %v", err)
 	}
@@ -433,16 +441,11 @@ func TestRuntimeSupervisor_SyncOnce_CleansLegacyTeamChildRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRun child: %v", err)
 	}
-	if loadedChild.Status != types.RunStatusCanceled {
-		t.Fatalf("legacy child status=%q want %q", loadedChild.Status, types.RunStatusCanceled)
+	// We no longer cancel team child runs; they are allowed to run (subagent role class).
+	if loadedChild.Status == types.RunStatusCanceled {
+		t.Fatalf("child run should not be canceled; got status=%q", loadedChild.Status)
 	}
-	task, err := ts.GetTask(context.Background(), "task-active")
-	if err != nil {
-		t.Fatalf("GetTask: %v", err)
-	}
-	if task.Status != types.TaskStatusCanceled {
-		t.Fatalf("active child task status=%q want %q", task.Status, types.TaskStatusCanceled)
-	}
+	_ = taskSvc // used by supervisor
 }
 
 func TestRuntimeSupervisor_MakeSpawnWorkerFunc_AllowsTeamModeWhenAllowed(t *testing.T) {
@@ -462,12 +465,15 @@ func TestRuntimeSupervisor_MakeSpawnWorkerFunc_AllowsTeamModeWhenAllowed(t *test
 		sessionService: sessionSvc,
 	}
 	spawn := supervisor.makeSpawnWorkerFunc(parentRun, "openai/gpt-5-mini", nil)
-	childRunID, err := spawn(context.Background(), "do work", sess.SessionID, parentRun.RunID)
+	childRunID, childRole, err := spawn(context.Background(), "do work", sess.SessionID, parentRun.RunID)
 	if err != nil {
 		t.Fatalf("spawn in team mode: %v", err)
 	}
 	if childRunID == "" {
 		t.Fatalf("expected non-empty child run ID")
+	}
+	if strings.TrimSpace(childRole) == "" {
+		t.Fatalf("expected canonical child role from spawn callback")
 	}
 	child, err := sessionSvc.LoadRun(context.Background(), childRunID)
 	if err != nil {

@@ -43,8 +43,9 @@ func TestRenderDashboardSubagentsTab(t *testing.T) {
 				},
 			},
 			wantLines: []string{
-				"Sub-agent 1",
+				"Subagent-1",
 				"Research agent memory",
+				"tasks 0/0",
 			},
 		},
 		{

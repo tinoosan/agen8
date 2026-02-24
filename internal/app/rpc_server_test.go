@@ -2054,6 +2054,52 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 	}
 }
 
+func TestRPCServer_SessionStart_SingleRoleTeamProfile_DoesNotInjectReviewer(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "single_team"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "single_team", "profile.yaml"), []byte(
+		"id: single_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: solo\n      coordinator: true\n      description: Solo\n      prompts:\n        system_prompt: lead\n      skills:\n        - coding\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Profile:  "single_team",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("session.start(single_team) error: %+v", resp.Error)
+	}
+	var out protocol.SessionStartResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if out.Mode != "single-agent" {
+		t.Fatalf("mode=%q want single-agent", out.Mode)
+	}
+	if len(out.RunIDs) != 1 {
+		t.Fatalf("expected 1 role run (no injected reviewer), got %d", len(out.RunIDs))
+	}
+	createdRun, err := sessStore.LoadRun(context.Background(), out.RunIDs[0])
+	if err != nil {
+		t.Fatalf("LoadRun(single_team): %v", err)
+	}
+	if createdRun.Runtime == nil || !strings.EqualFold(strings.TrimSpace(createdRun.Runtime.Role), "solo") {
+		t.Fatalf("expected run role solo, got runtime=%+v", createdRun.Runtime)
+	}
+}
+
 func TestRPCServer_SessionStart_StandaloneRejectsMultiRoleTeamProfile(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "multi_team"), 0o755); err != nil {
@@ -2086,7 +2132,7 @@ func TestRPCServer_SessionStart_StandaloneRejectsMultiRoleTeamProfile(t *testing
 	if resp.Error.Code != protocol.CodeInvalidParams {
 		t.Fatalf("code = %d want %d", resp.Error.Code, protocol.CodeInvalidParams)
 	}
-	if !strings.Contains(strings.ToLower(resp.Error.Message), "single-role") {
+	if !strings.Contains(strings.ToLower(resp.Error.Message), "role count") {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
 }

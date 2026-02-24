@@ -212,6 +212,14 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 		for _, agent := range agentsRes.Agents {
 			rid := strings.TrimSpace(agent.RunID)
 			role := strings.TrimSpace(agent.Role)
+			// For subagents, use canonical "Subagent-N" identity
+			if strings.TrimSpace(agent.ParentRunID) != "" {
+				spawnIndex := agent.SpawnIndex
+				if spawnIndex <= 0 {
+					spawnIndex = 1
+				}
+				role = fmt.Sprintf("Subagent-%d", spawnIndex)
+			}
 			if strings.EqualFold(mode, "standalone") && role == "" {
 				role = "-"
 			}
