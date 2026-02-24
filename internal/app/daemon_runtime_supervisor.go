@@ -248,9 +248,6 @@ func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, ru
 
 	s.mu.Lock()
 	worker := s.workers[runID]
-	if worker != nil {
-		delete(s.workers, runID)
-	}
 	s.mu.Unlock()
 
 	if worker != nil {
@@ -272,6 +269,14 @@ func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, ru
 		}
 		_, _ = s.sessionService.StopRun(context.Background(), runID, types.RunStatusSucceeded, "archived")
 	}
+
+	// Remove worker only after cancellation + terminal run status update to avoid
+	// a syncOnce respawn window while the run still appears running.
+	s.mu.Lock()
+	if current, ok := s.workers[runID]; ok && current == worker {
+		delete(s.workers, runID)
+	}
+	s.mu.Unlock()
 }
 
 func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
