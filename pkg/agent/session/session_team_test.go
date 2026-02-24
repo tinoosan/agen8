@@ -211,6 +211,122 @@ func TestListPendingTasks_TeamRoleIncludesAgentAddressedCallbacks(t *testing.T) 
 	}
 }
 
+func TestListPendingTasks_TeamRoleIncludesReviewPendingCallbacksOnly(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	now := time.Now().UTC()
+	create := func(task types.Task) {
+		t.Helper()
+		if task.CreatedAt == nil {
+			task.CreatedAt = &now
+		}
+		if err := store.CreateTask(context.Background(), task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", task.TaskID, err)
+		}
+	}
+	create(types.Task{
+		TaskID:         "callback-review-pending",
+		SessionID:      "s1",
+		RunID:          "run-parent",
+		TeamID:         "team-1",
+		AssignedRole:   "researcher",
+		AssignedToType: "agent",
+		AssignedTo:     "run-parent",
+		Goal:           "review pending callback",
+		Status:         types.TaskStatusReviewPending,
+		Metadata:       map[string]any{"source": "subagent.callback"},
+		CreatedAt:      &now,
+	})
+	create(types.Task{
+		TaskID:         "non-callback-review-pending",
+		SessionID:      "s1",
+		RunID:          "run-parent",
+		TeamID:         "team-1",
+		AssignedRole:   "researcher",
+		AssignedToType: "agent",
+		AssignedTo:     "run-parent",
+		Goal:           "should not be scheduled",
+		Status:         types.TaskStatusReviewPending,
+		Metadata:       map[string]any{"source": "task_create"},
+		CreatedAt:      &now,
+	})
+
+	worker := &Session{cfg: Config{
+		TaskStore:  store,
+		TeamID:     "team-1",
+		RoleName:   "researcher",
+		RunID:      "run-parent",
+		MaxPending: 50,
+	}}
+	tasks, err := worker.listPendingTasks(context.Background())
+	if err != nil {
+		t.Fatalf("listPendingTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected only callback review_pending task, got %d (%+v)", len(tasks), tasks)
+	}
+	if strings.TrimSpace(tasks[0].TaskID) != "callback-review-pending" {
+		t.Fatalf("unexpected scheduled task: %+v", tasks[0])
+	}
+}
+
+func TestListPendingTasks_StandaloneParentIncludesReviewPendingCallbacks(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	now := time.Now().UTC()
+	create := func(task types.Task) {
+		t.Helper()
+		if task.CreatedAt == nil {
+			task.CreatedAt = &now
+		}
+		if err := store.CreateTask(context.Background(), task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", task.TaskID, err)
+		}
+	}
+	create(types.Task{
+		TaskID:         "task-normal-pending",
+		SessionID:      "sess-parent",
+		RunID:          "run-parent",
+		AssignedToType: "agent",
+		AssignedTo:     "run-parent",
+		Goal:           "normal",
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+	})
+	create(types.Task{
+		TaskID:         "callback-review-pending",
+		SessionID:      "sess-parent",
+		RunID:          "run-parent",
+		AssignedToType: "agent",
+		AssignedTo:     "run-parent",
+		Goal:           "callback",
+		Status:         types.TaskStatusReviewPending,
+		Metadata:       map[string]any{"source": "subagent.batch.callback"},
+		CreatedAt:      &now,
+	})
+
+	parent := &Session{cfg: Config{
+		TaskStore:  store,
+		RunID:      "run-parent",
+		SessionID:  "sess-parent",
+		MaxPending: 50,
+	}}
+	tasks, err := parent.listPendingTasks(context.Background())
+	if err != nil {
+		t.Fatalf("listPendingTasks: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected pending + callback review_pending, got %d (%+v)", len(tasks), tasks)
+	}
+	if strings.TrimSpace(tasks[0].TaskID) != "callback-review-pending" {
+		t.Fatalf("expected callback task to be prioritized first, got %+v", tasks)
+	}
+}
+
 func TestNormalizeTeamCallbackArtifactPath(t *testing.T) {
 	role := "frontend-engineer"
 	teamRoles := []string{"frontend-engineer", "qa-engineer"}
@@ -428,6 +544,38 @@ func TestMaybeCreateCoordinatorCallback_SubagentWorkerCompletion_Unchanged(t *te
 	}
 	if artifacts[1] != "/tasks/subagent-1/2026-02-17/task-subagent-1/SUMMARY.md" {
 		t.Fatalf("unexpected summary artifact %q", artifacts[1])
+	}
+}
+
+func TestMaybeCreateCoordinatorCallback_SubagentWorkerCompletion_TeamContextSetsTeamID(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:   store,
+		SessionID:   "session-child",
+		RunID:       "run-child",
+		ParentRunID: "run-parent",
+		SpawnIndex:  1,
+		TeamID:      "team-1",
+	}}
+	task := types.Task{
+		TaskID:    "task-subagent-team-1",
+		CreatedBy: "run-parent",
+		Goal:      "do child work",
+	}
+	s.maybeCreateCoordinatorCallback(context.Background(), task, types.TaskResult{
+		TaskID:  task.TaskID,
+		Status:  types.TaskStatusSucceeded,
+		Summary: "child done",
+	})
+	callback, err := store.GetTask(context.Background(), "callback-"+task.TaskID)
+	if err != nil {
+		t.Fatalf("expected subagent callback task, got err=%v", err)
+	}
+	if callback.TeamID != "team-1" {
+		t.Fatalf("callback TeamID=%q, want team-1", callback.TeamID)
 	}
 }
 

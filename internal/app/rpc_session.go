@@ -205,8 +205,15 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 		Limit:    clampLimit(p.Limit, 200, 2000),
 		Offset:   max(0, p.Offset),
 	}
-	if strings.TrimSpace(scope.teamID) != "" && strings.TrimSpace(p.RunID) == "" {
+	scopeMode := strings.ToLower(strings.TrimSpace(p.Scope))
+	if scopeMode != "" && scopeMode != "team" && scopeMode != "run" {
+		return protocol.TaskListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "scope must be team or run"}
+	}
+	if scopeMode == "team" || (strings.TrimSpace(scope.teamID) != "" && strings.TrimSpace(p.RunID) == "") {
 		filter.RunID = ""
+	}
+	if scopeMode == "run" && strings.TrimSpace(scope.runID) == "" {
+		return protocol.TaskListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "run scope requires runId"}
 	}
 	switch view {
 	case "inbox":

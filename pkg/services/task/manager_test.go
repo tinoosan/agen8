@@ -187,3 +187,63 @@ func TestManager_ArtifactIndexer_NotImplemented(t *testing.T) {
 		t.Errorf("ArtifactIndexer: want (nil, false), got (%v, %v)", idx, ok)
 	}
 }
+
+func TestManager_CreateTask_CallbackRequiresTeamID(t *testing.T) {
+	store := &mockTaskStore{
+		createTask: func(ctx context.Context, task types.Task) error { return nil },
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetRoutingOracle(NewRoutingOracle())
+	err := mgr.CreateTask(context.Background(), types.Task{
+		TaskID:         "callback-task-1",
+		SessionID:      "s1",
+		RunID:          "run-parent",
+		AssignedToType: "agent",
+		AssignedTo:     "run-parent",
+		Goal:           "review",
+		Status:         types.TaskStatusPending,
+		Metadata:       map[string]any{"source": "subagent.callback"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing teamId") {
+		t.Fatalf("expected missing teamId error, got %v", err)
+	}
+}
+
+func TestManager_CreateTask_CallbackInfersTeamIDFromRun(t *testing.T) {
+	var created types.Task
+	store := &mockTaskStore{
+		createTask: func(ctx context.Context, task types.Task) error {
+			created = task
+			return nil
+		},
+	}
+	loader := &mockRunLoader{
+		run: types.Run{
+			RunID: "run-parent",
+			Runtime: &types.RunRuntimeConfig{
+				TeamID: "team-1",
+			},
+		},
+	}
+	mgr := NewManager(store, loader)
+	mgr.SetRoutingOracle(NewRoutingOracle())
+	err := mgr.CreateTask(context.Background(), types.Task{
+		TaskID:         "callback-task-2",
+		SessionID:      "s1",
+		RunID:          "run-parent",
+		AssignedToType: "agent",
+		AssignedTo:     "run-parent",
+		Goal:           "review",
+		Status:         types.TaskStatusPending,
+		Metadata:       map[string]any{"source": "subagent.callback"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if got := strings.TrimSpace(created.TeamID); got != "team-1" {
+		t.Fatalf("TeamID = %q, want team-1", got)
+	}
+	if created.Metadata["routingDecisionId"] == nil {
+		t.Fatalf("expected routingDecisionId metadata")
+	}
+}

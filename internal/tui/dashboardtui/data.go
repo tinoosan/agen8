@@ -149,6 +149,7 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			for _, view := range []string{"inbox", "outbox"} {
 				tasks, err := listTasksByView(ctx, scopeClient, protocol.TaskListParams{
 					ThreadID: threadID,
+					Scope:    "team",
 					TeamID:   teamID,
 					RunID:    "",
 					View:     view,

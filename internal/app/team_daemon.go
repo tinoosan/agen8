@@ -227,6 +227,8 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	sessionService := pkgsession.NewManager(cfg, sessionStore, supervisor)
 	supervisor.sessionService = sessionService
 	taskService := pkgtask.NewManager(taskStore, sessionService)
+	taskService.SetRoutingOracle(pkgtask.NewRoutingOracle())
+	taskService.SetEventsStore(eventsWithBroadcast)
 	supervisor.taskService = taskService
 
 	runCtx, stopSignals := signalNotifyContext(ctx)

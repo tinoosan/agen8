@@ -31,6 +31,7 @@ type Task struct {
 type TaskListParams struct {
 	ThreadID ThreadID `json:"threadId"`
 	View     string   `json:"view,omitempty"` // inbox|outbox
+	Scope    string   `json:"scope,omitempty"` // team|run (default: auto)
 	TeamID   string   `json:"teamId,omitempty"`
 	RunID    string   `json:"runId,omitempty"`
 	Assignee string   `json:"assignee,omitempty"`

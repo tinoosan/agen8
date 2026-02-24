@@ -442,6 +442,11 @@ func (m *monitorModel) loadInboxPage() tea.Cmd {
 				if strings.TrimSpace(scope.TeamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
 					params.RunID = strings.TrimSpace(m.focusedRunID)
 				}
+				if strings.TrimSpace(scope.TeamID) != "" && strings.TrimSpace(params.RunID) == "" {
+					params.Scope = "team"
+				} else {
+					params.Scope = "run"
+				}
 				return params, nil
 			}, &res)
 			if err != nil {
@@ -546,6 +551,11 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 				}
 				if strings.TrimSpace(scope.TeamID) != "" && strings.TrimSpace(m.focusedRunID) != "" {
 					params.RunID = strings.TrimSpace(m.focusedRunID)
+				}
+				if strings.TrimSpace(scope.TeamID) != "" && strings.TrimSpace(params.RunID) == "" {
+					params.Scope = "team"
+				} else {
+					params.Scope = "run"
 				}
 				return params, nil
 			}, &res)

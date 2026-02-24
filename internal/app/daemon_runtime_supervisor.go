@@ -66,8 +66,17 @@ type runtimeSupervisor struct {
 
 	mu      sync.Mutex
 	workers map[string]*managedRuntime
+	lastRoutingRepairAt time.Time
 
 	spawnOverride func(context.Context, types.Session, string) (*managedRuntime, error)
+}
+
+type taskWakeSubscriber interface {
+	SubscribeWake(teamID, runID string) (<-chan struct{}, func())
+}
+
+type routingDriftRepairer interface {
+	RepairRoutingDrift(ctx context.Context, limit int) (int, error)
 }
 
 type managedRuntime struct {
@@ -353,7 +362,31 @@ func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
 			log.Printf("daemon: managed run start failed for %s: %v", run.RunID, err)
 		}
 	}
+	s.maybeRepairRoutingDrift(ctx)
 	return nil
+}
+
+func (s *runtimeSupervisor) maybeRepairRoutingDrift(ctx context.Context) {
+	repairer, ok := s.taskService.(routingDriftRepairer)
+	if !ok || repairer == nil {
+		return
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	if !s.lastRoutingRepairAt.IsZero() && now.Sub(s.lastRoutingRepairAt) < 10*time.Second {
+		s.mu.Unlock()
+		return
+	}
+	s.lastRoutingRepairAt = now
+	s.mu.Unlock()
+	n, err := repairer.RepairRoutingDrift(ctx, 400)
+	if err != nil {
+		log.Printf("daemon: routing drift repair failed: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("daemon: routing drift repaired %d task(s)", n)
+	}
 }
 
 func collectSessionRunIDs(sess types.Session) []string {
@@ -954,6 +987,12 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		return nil, fmt.Errorf("run conversation store: %w", err)
 	}
 
+	var wakeCh <-chan struct{}
+	var wakeCancel func()
+	if wakeSub, ok := s.taskService.(taskWakeSubscriber); ok && wakeSub != nil {
+		wakeCh, wakeCancel = wakeSub.SubscribeWake(strings.TrimSpace(teamID), strings.TrimSpace(run.RunID))
+	}
+
 	workerSession, err := agentsession.New(agentsession.Config{
 		Agent:      a,
 		Profile:    activeProfile,
@@ -973,6 +1012,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		SoulContent:          soulContent,
 		SoulVersion:          soulVersion,
 		PollInterval:         s.pollInterval,
+		WakeCh:               wakeCh,
 		MaxReadBytes:         256 * 1024,
 		LeaseTTL:             2 * time.Minute,
 		MaxRetries:           3,
@@ -1016,6 +1056,9 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		defer orderedEmitter.Close()
 		defer func() { _ = rt.Shutdown(context.Background()) }()
 		defer cancel()
+		if wakeCancel != nil {
+			defer wakeCancel()
+		}
 
 		emitEvent(workerCtx, events.Event{
 			Type:    "run.start",

@@ -66,8 +66,13 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 
 		// Fetch inbox
 		var inboxRes protocol.TaskListResult
+		scopeMode := "run"
+		if strings.TrimSpace(scope.TeamID) != "" {
+			scopeMode = "team"
+		}
 		if err := client.Call(ctx, protocol.MethodTaskList, protocol.TaskListParams{
 			ThreadID: protocol.ThreadID(scope.ThreadID),
+			Scope:    scopeMode,
 			TeamID:   strings.TrimSpace(scope.TeamID),
 			RunID:    strings.TrimSpace(scope.RunID),
 			View:     "inbox",
@@ -84,6 +89,7 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 		var outboxRes protocol.TaskListResult
 		if err := client.Call(ctx, protocol.MethodTaskList, protocol.TaskListParams{
 			ThreadID: protocol.ThreadID(scope.ThreadID),
+			Scope:    scopeMode,
 			TeamID:   strings.TrimSpace(scope.TeamID),
 			RunID:    strings.TrimSpace(scope.RunID),
 			View:     "outbox",

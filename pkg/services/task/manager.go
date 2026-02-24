@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,21 @@ type activeTaskCanceler interface {
 type Manager struct {
 	store     state.TaskStore
 	runLoader RunLoader
+	oracle    *RoutingOracle
+	events    taskEventAppender
+
+	watchersMu sync.Mutex
+	watchers   map[string]taskWakeWatcher
+}
+
+type taskEventAppender interface {
+	Append(ctx context.Context, event types.EventRecord) error
+}
+
+type taskWakeWatcher struct {
+	teamID string
+	runID  string
+	ch     chan struct{}
 }
 
 // NewManager creates a new task service manager. runLoader may be nil and set later via SetRunLoader.
@@ -29,12 +45,76 @@ func NewManager(store state.TaskStore, runLoader RunLoader) *Manager {
 	return &Manager{
 		store:     store,
 		runLoader: runLoader,
+		watchers:  map[string]taskWakeWatcher{},
 	}
 }
 
 // SetRunLoader sets the run loader (e.g. after session service is constructed in daemon wiring).
 func (m *Manager) SetRunLoader(runLoader RunLoader) {
 	m.runLoader = runLoader
+}
+
+// SetRoutingOracle configures routing validation/canonicalization for task writes.
+func (m *Manager) SetRoutingOracle(oracle *RoutingOracle) {
+	m.oracle = oracle
+}
+
+func (m *Manager) SetEventsStore(store taskEventAppender) {
+	m.events = store
+}
+
+// SubscribeWake returns a channel that receives best-effort wake signals when matching
+// tasks are created/updated/completed. Filters are optional; when both are empty, all
+// task mutations trigger signals.
+func (m *Manager) SubscribeWake(teamID, runID string) (<-chan struct{}, func()) {
+	if m == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch, func() {}
+	}
+	id := uuid.NewString()
+	w := taskWakeWatcher{
+		teamID: strings.TrimSpace(teamID),
+		runID:  strings.TrimSpace(runID),
+		ch:     make(chan struct{}, 1),
+	}
+	m.watchersMu.Lock()
+	m.watchers[id] = w
+	m.watchersMu.Unlock()
+	cancel := func() {
+		m.watchersMu.Lock()
+		ww, ok := m.watchers[id]
+		if ok {
+			delete(m.watchers, id)
+		}
+		m.watchersMu.Unlock()
+		if ok {
+			close(ww.ch)
+		}
+	}
+	return w.ch, cancel
+}
+
+func (m *Manager) notifyWake(task types.Task) {
+	if m == nil {
+		return
+	}
+	taskTeam := strings.TrimSpace(task.TeamID)
+	taskRun := strings.TrimSpace(task.RunID)
+	m.watchersMu.Lock()
+	defer m.watchersMu.Unlock()
+	for _, w := range m.watchers {
+		if w.teamID != "" && taskTeam != w.teamID {
+			continue
+		}
+		if w.runID != "" && taskRun != w.runID {
+			continue
+		}
+		select {
+		case w.ch <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // CreateRetryTask creates a retry task for a child run (loads run via RunLoader, builds task, persists).
@@ -66,7 +146,7 @@ func (m *Manager) CreateRetryTask(ctx context.Context, childRunID, feedback stri
 			"retryFeedback": feedback,
 		},
 	}
-	return m.store.CreateTask(ctx, retryTask)
+	return m.CreateTask(ctx, retryTask)
 }
 
 // CreateEscalationTask creates an escalation task from a callback task (loads callback via store, builds escalation task, persists).
@@ -125,7 +205,7 @@ func (m *Manager) CreateEscalationTask(ctx context.Context, callbackTaskID strin
 		escalationTask.AssignedToType = "agent"
 		escalationTask.AssignedTo = parentRunID
 	}
-	if err := m.store.CreateTask(ctx, escalationTask); err != nil {
+	if err := m.CreateTask(ctx, escalationTask); err != nil {
 		return fmt.Errorf("create escalation task: %w", err)
 	}
 	return nil
@@ -198,7 +278,27 @@ func (m *Manager) CountTasks(ctx context.Context, filter state.TaskFilter) (int,
 }
 
 func (m *Manager) CreateTask(ctx context.Context, task types.Task) error {
-	return m.store.CreateTask(ctx, task)
+	if m.oracle != nil {
+		normalized, err := m.oracle.NormalizeCreate(ctx, m.runLoader, task)
+		if err != nil {
+			m.emitRoutingEvent(ctx, task, "routing.violation", err.Error(), map[string]string{
+				"taskId": strings.TrimSpace(task.TaskID),
+			})
+			return err
+		}
+		task = normalized
+	}
+	if err := m.store.CreateTask(ctx, task); err != nil {
+		return err
+	}
+	m.emitRoutingEvent(ctx, task, "routing.validated", "Task routing validated", map[string]string{
+		"taskId":       strings.TrimSpace(task.TaskID),
+		"assignedType": strings.TrimSpace(task.AssignedToType),
+		"assignedTo":   strings.TrimSpace(task.AssignedTo),
+		"teamId":       strings.TrimSpace(task.TeamID),
+	})
+	m.notifyWake(task)
+	return nil
 }
 
 func (m *Manager) DeleteTask(ctx context.Context, taskID string) error {
@@ -206,11 +306,51 @@ func (m *Manager) DeleteTask(ctx context.Context, taskID string) error {
 }
 
 func (m *Manager) UpdateTask(ctx context.Context, task types.Task) error {
-	return m.store.UpdateTask(ctx, task)
+	if m.oracle != nil {
+		normalized, err := m.oracle.NormalizeUpdate(ctx, m.runLoader, task)
+		if err != nil {
+			m.emitRoutingEvent(ctx, task, "routing.violation", err.Error(), map[string]string{
+				"taskId": strings.TrimSpace(task.TaskID),
+			})
+			return err
+		}
+		task = normalized
+	}
+	if err := m.store.UpdateTask(ctx, task); err != nil {
+		return err
+	}
+	m.emitRoutingEvent(ctx, task, "routing.validated", "Task routing validated", map[string]string{
+		"taskId":       strings.TrimSpace(task.TaskID),
+		"assignedType": strings.TrimSpace(task.AssignedToType),
+		"assignedTo":   strings.TrimSpace(task.AssignedTo),
+		"teamId":       strings.TrimSpace(task.TeamID),
+	})
+	m.notifyWake(task)
+	return nil
 }
 
 func (m *Manager) CompleteTask(ctx context.Context, taskID string, result types.TaskResult) error {
-	return m.store.CompleteTask(ctx, taskID, result)
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("taskID is required")
+	}
+	if m.oracle != nil {
+		current, err := m.store.GetTask(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		if err := m.oracle.ValidateCompletion(ctx, m.runLoader, current); err != nil {
+			return err
+		}
+	}
+	if err := m.store.CompleteTask(ctx, taskID, result); err != nil {
+		return err
+	}
+	updated, err := m.store.GetTask(ctx, taskID)
+	if err == nil {
+		m.notifyWake(updated)
+	}
+	return nil
 }
 
 func (m *Manager) ClaimTask(ctx context.Context, taskID string, ttl time.Duration) error {
@@ -235,4 +375,67 @@ func (m *Manager) ResumeTask(ctx context.Context, taskID string) error {
 
 func (m *Manager) RecoverExpiredLeases(ctx context.Context) error {
 	return m.store.RecoverExpiredLeases(ctx)
+}
+
+// RepairRoutingDrift scans for callback tasks with missing/broken routing fields and
+// applies deterministic repairs. Returns number of updated tasks.
+func (m *Manager) RepairRoutingDrift(ctx context.Context, limit int) (int, error) {
+	if m == nil || m.oracle == nil {
+		return 0, nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	tasks, err := m.store.ListTasks(ctx, state.TaskFilter{
+		Status: []types.TaskStatus{types.TaskStatusPending, types.TaskStatusReviewPending, types.TaskStatusActive},
+		SortBy: "created_at",
+		Limit:  limit,
+	})
+	if err != nil {
+		return 0, err
+	}
+	updated := 0
+	for _, task := range tasks {
+		norm, changed, err := m.oracle.RepairTask(ctx, m.runLoader, task)
+		if err != nil {
+			continue
+		}
+		if !changed {
+			continue
+		}
+		if err := m.store.UpdateTask(ctx, norm); err != nil {
+			continue
+		}
+		updated++
+		m.emitRoutingEvent(ctx, norm, "routing.repaired", "Routing drift repaired", map[string]string{
+			"taskId": strings.TrimSpace(norm.TaskID),
+			"teamId": strings.TrimSpace(norm.TeamID),
+		})
+		m.notifyWake(norm)
+	}
+	return updated, nil
+}
+
+func (m *Manager) emitRoutingEvent(ctx context.Context, task types.Task, typ, msg string, data map[string]string) {
+	if m == nil || m.events == nil {
+		return
+	}
+	evData := map[string]string{}
+	for k, v := range data {
+		evData[k] = strings.TrimSpace(v)
+	}
+	if evData["teamId"] == "" {
+		evData["teamId"] = strings.TrimSpace(task.TeamID)
+	}
+	if evData["runId"] == "" {
+		evData["runId"] = strings.TrimSpace(task.RunID)
+	}
+	_ = m.events.Append(ctx, types.EventRecord{
+		EventID:   uuid.NewString(),
+		RunID:     strings.TrimSpace(task.RunID),
+		Type:      strings.TrimSpace(typ),
+		Message:   strings.TrimSpace(msg),
+		Data:      evData,
+		Timestamp: time.Now().UTC(),
+	})
 }

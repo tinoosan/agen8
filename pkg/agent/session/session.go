@@ -557,6 +557,40 @@ func getTaskSource(t types.Task) string {
 	return ""
 }
 
+func pollableTaskStatuses() []types.TaskStatus {
+	return []types.TaskStatus{
+		types.TaskStatusPending,
+		types.TaskStatusReviewPending,
+	}
+}
+
+func isPollableTask(task types.Task) bool {
+	if task.Status != types.TaskStatusReviewPending {
+		return true
+	}
+	// Only callbacks should be processed from review_pending.
+	return isCallbackSource(getTaskSource(task))
+}
+
+func filterPollableTasks(ctx context.Context, store state.TaskStore, tasks []types.Task) []types.Task {
+	out := make([]types.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if len(task.Metadata) == 0 && store != nil {
+			taskID := strings.TrimSpace(task.TaskID)
+			if taskID != "" {
+				if loaded, err := store.GetTask(ctx, taskID); err == nil {
+					task = loaded
+				}
+			}
+		}
+		if !isPollableTask(task) {
+			continue
+		}
+		out = append(out, task)
+	}
+	return out
+}
+
 func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 	isTeam := strings.TrimSpace(s.cfg.TeamID) != ""
 	isChildRun := strings.TrimSpace(s.cfg.ParentRunID) != ""
@@ -566,19 +600,20 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 			RunID:          s.cfg.RunID,
 			AssignedToType: "agent",
 			AssignedTo:     s.cfg.RunID,
-			Status:         []types.TaskStatus{types.TaskStatusPending},
+			Status:         pollableTaskStatuses(),
 			SortBy:         "priority",
 			Limit:          s.cfg.MaxPending,
 		})
 		if err != nil {
 			return nil, err
 		}
+		tasks = filterPollableTasks(ctx, s.cfg.TaskStore, tasks)
 		// Prioritize subagent callbacks so the parent processes them before the overarching task.
 		sort.SliceStable(tasks, func(i, j int) bool {
 			sourceI := getTaskSource(tasks[i])
 			sourceJ := getTaskSource(tasks[j])
-			si := sourceI == "subagent.callback" || sourceI == "subagent.batch.callback"
-			sj := sourceJ == "subagent.callback" || sourceJ == "subagent.batch.callback"
+			si := isCallbackSource(sourceI)
+			sj := isCallbackSource(sourceJ)
 			if si && !sj {
 				return true
 			}
@@ -605,13 +640,14 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 		TeamID:         s.cfg.TeamID,
 		AssignedToType: "role",
 		AssignedTo:     s.cfg.RoleName,
-		Status:         []types.TaskStatus{types.TaskStatusPending},
+		Status:         pollableTaskStatuses(),
 		SortBy:         "priority",
 		Limit:          limit,
 	})
 	if err != nil {
 		return nil, err
 	}
+	roleTasks = filterPollableTasks(ctx, s.cfg.TaskStore, roleTasks)
 	// Team roles can also receive agent-addressed callback tasks (e.g. subagent callbacks
 	// routed back to the spawning run). Include those so callbacks are not missed.
 	agentTasks, err := s.cfg.TaskStore.ListTasks(ctx, state.TaskFilter{
@@ -619,13 +655,14 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 		RunID:          s.cfg.RunID,
 		AssignedToType: "agent",
 		AssignedTo:     s.cfg.RunID,
-		Status:         []types.TaskStatus{types.TaskStatusPending},
+		Status:         pollableTaskStatuses(),
 		SortBy:         "priority",
 		Limit:          limit,
 	})
 	if err != nil {
 		return nil, err
 	}
+	agentTasks = filterPollableTasks(ctx, s.cfg.TaskStore, agentTasks)
 	tasks := make([]types.Task, 0, len(roleTasks)+len(agentTasks))
 	seen := map[string]struct{}{}
 	for _, task := range roleTasks {
@@ -657,13 +694,14 @@ func (s *Session) listPendingTasks(ctx context.Context) ([]types.Task, error) {
 		TeamID:         s.cfg.TeamID,
 		AssignedToType: "team",
 		AssignedTo:     s.cfg.TeamID,
-		Status:         []types.TaskStatus{types.TaskStatusPending},
+		Status:         pollableTaskStatuses(),
 		SortBy:         "priority",
 		Limit:          limit,
 	})
 	if err != nil {
 		return nil, err
 	}
+	unassigned = filterPollableTasks(ctx, s.cfg.TaskStore, unassigned)
 	out := make([]types.Task, 0, len(tasks)+len(unassigned))
 	seen = map[string]struct{}{}
 	for _, task := range tasks {
@@ -1318,6 +1356,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			TaskID:         callbackTaskID,
 			SessionID:      strings.TrimSpace(s.cfg.SessionID),
 			RunID:          parentRunID,
+			TeamID:         strings.TrimSpace(s.cfg.TeamID),
 			AssignedToType: "agent",
 			AssignedTo:     parentRunID,
 			CreatedBy:      strings.TrimSpace(s.cfg.RunID),
@@ -1331,6 +1370,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				"source":            "subagent.callback",
 				"callbackForTaskId": taskID,
 				"sourceRunId":       strings.TrimSpace(s.cfg.RunID),
+				"sourceTeamId":      strings.TrimSpace(s.cfg.TeamID),
 				"sourceTaskStatus":  string(tr.Status),
 				"reviewGate":        true,
 				"reviewActions":     []string{"approve", "retry", "escalate"},
@@ -1587,6 +1627,8 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 		teamID = strings.TrimSpace(s.cfg.TeamID)
 		assignedRole = group.reviewerID
 		createdBy = strings.TrimSpace(s.cfg.RoleName)
+	} else if strings.TrimSpace(s.cfg.TeamID) != "" {
+		teamID = strings.TrimSpace(s.cfg.TeamID)
 	}
 
 	items := make([]any, 0, len(undelivered))
