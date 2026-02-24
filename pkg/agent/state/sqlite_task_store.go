@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
 	"github.com/tinoosan/agen8/pkg/timeutil"
@@ -324,6 +325,264 @@ func (s *SQLiteTaskStore) dbConn() (*sql.DB, error) {
 		return nil, fmt.Errorf("sqlite: db not initialized")
 	}
 	return db, nil
+}
+
+func metadataBool(raw any) bool {
+	switch v := raw.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	case float64:
+		return v != 0
+	case int:
+		return v != 0
+	default:
+		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(v)), "true")
+	}
+}
+
+func metadataString(m map[string]any, key string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(m[key]))
+}
+
+func metadataMap(m map[string]any, key string) map[string]any {
+	if len(m) == 0 {
+		return nil
+	}
+	v, _ := m[key].(map[string]any)
+	return v
+}
+
+func metadataArray(m map[string]any, key string) []any {
+	if len(m) == 0 {
+		return nil
+	}
+	v, _ := m[key].([]any)
+	return v
+}
+
+func batchItemStatusFromDecision(decision string) string {
+	switch strings.ToLower(strings.TrimSpace(decision)) {
+	case "approve":
+		return "approved"
+	case "retry":
+		return "retry"
+	case "escalate":
+		return "escalated"
+	default:
+		return "pending_review"
+	}
+}
+
+// CloseBatchAndHandoffAtomic closes a synthetic batch callback and creates one deterministic
+// coordinator handoff task in a single SQL transaction.
+func (s *SQLiteTaskStore) CloseBatchAndHandoffAtomic(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (handoffTaskID string, approved, retried, escalated int, err error) {
+	db, err := s.dbConn()
+	if err != nil {
+		return "", 0, 0, 0, err
+	}
+	batchTaskID = strings.TrimSpace(batchTaskID)
+	if batchTaskID == "" {
+		return "", 0, 0, 0, fmt.Errorf("batchTaskID is required")
+	}
+	reviewerIdentity = strings.TrimSpace(reviewerIdentity)
+	if reviewerIdentity == "" {
+		reviewerIdentity = "reviewer"
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", 0, 0, 0, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var sessionID, runID, teamID, assignedRole, assignedToType, assignedTo, taskKind, goal string
+	var status, artifactsJSON, inputsJSON, metadataJSON string
+	rowErr := tx.QueryRowContext(ctx, `
+		SELECT session_id, run_id, COALESCE(team_id,''), COALESCE(assigned_role,''), COALESCE(assigned_to_type,''), COALESCE(assigned_to,''), COALESCE(task_kind,''), goal, status, COALESCE(artifacts_json,'[]'), COALESCE(inputs_json,'{}'), COALESCE(metadata_json,'{}')
+		FROM tasks WHERE task_id = ?
+	`, batchTaskID).Scan(&sessionID, &runID, &teamID, &assignedRole, &assignedToType, &assignedTo, &taskKind, &goal, &status, &artifactsJSON, &inputsJSON, &metadataJSON)
+	if rowErr != nil {
+		if errors.Is(rowErr, sql.ErrNoRows) {
+			return "", 0, 0, 0, ErrTaskNotFound
+		}
+		return "", 0, 0, 0, rowErr
+	}
+
+	metadata := map[string]any{}
+	_ = json.Unmarshal([]byte(metadataJSON), &metadata)
+	source := metadataString(metadata, "source")
+	if source != "team.batch.callback" && source != "subagent.batch.callback" {
+		return "", 0, 0, 0, fmt.Errorf("task %s is not a synthetic batch callback (source=%q)", batchTaskID, source)
+	}
+
+	decisions := metadataMap(metadata, "batchItemDecisions")
+	if decisions == nil {
+		decisions = map[string]any{}
+	}
+	for _, raw := range decisions {
+		switch strings.ToLower(strings.TrimSpace(fmt.Sprint(raw))) {
+		case "approve":
+			approved++
+		case "retry":
+			retried++
+		case "escalate":
+			escalated++
+		}
+	}
+
+	handoffTaskID = strings.TrimSpace(metadataString(metadata, "batchHandoffTaskId"))
+	if handoffTaskID == "" {
+		handoffTaskID = "review-handoff-" + batchTaskID
+	}
+	if metadataBool(metadata["batchClosed"]) {
+		if err := tx.Commit(); err != nil {
+			return "", 0, 0, 0, err
+		}
+		return handoffTaskID, approved, retried, escalated, nil
+	}
+
+	inputs := map[string]any{}
+	_ = json.Unmarshal([]byte(inputsJSON), &inputs)
+	items := metadataArray(inputs, "items")
+	now := time.Now().UTC()
+	nowRaw := now.Format(time.RFC3339Nano)
+	decisionNote := strings.TrimSpace(reviewSummary)
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		if item == nil {
+			continue
+		}
+		callbackTaskID := strings.TrimSpace(fmt.Sprint(item["callbackTaskId"]))
+		if callbackTaskID == "" {
+			continue
+		}
+		decision := strings.ToLower(strings.TrimSpace(fmt.Sprint(item["decision"])))
+		if decision == "" {
+			decision = strings.ToLower(strings.TrimSpace(fmt.Sprint(decisions[callbackTaskID])))
+		}
+
+		var childMetaJSON, childSummary, childStatus string
+		if err := tx.QueryRowContext(ctx, `
+			SELECT COALESCE(metadata_json,'{}'), COALESCE(summary,''), status
+			FROM tasks WHERE task_id = ?
+		`, callbackTaskID).Scan(&childMetaJSON, &childSummary, &childStatus); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return "", 0, 0, 0, err
+		}
+		childMeta := map[string]any{}
+		_ = json.Unmarshal([]byte(childMetaJSON), &childMeta)
+		childMeta["batchItemStatus"] = batchItemStatusFromDecision(decision)
+		childMeta["batchReviewedAt"] = nowRaw
+		childMeta["batchReviewedBy"] = reviewerIdentity
+		if decisionNote != "" {
+			childMeta["batchDecisionNote"] = decisionNote
+		}
+		newChildMetaJSON, _ := json.Marshal(childMeta)
+		reviewSummaryLine := strings.TrimSpace(fmt.Sprintf("Reviewed in batch %s: %s", batchTaskID, decision))
+		if reviewSummaryLine == "" {
+			reviewSummaryLine = "Reviewed in batch " + batchTaskID
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE tasks
+			SET metadata_json = ?, status = ?, summary = CASE WHEN TRIM(COALESCE(summary,'')) = '' THEN ? ELSE summary END,
+			    finished_at = COALESCE(finished_at, ?), completed_at = COALESCE(completed_at, ?), updated_at = ?
+			WHERE task_id = ?
+		`, string(newChildMetaJSON), string(types.TaskStatusSucceeded), reviewSummaryLine, nowRaw, nowRaw, nowRaw, callbackTaskID); err != nil {
+			return "", 0, 0, 0, err
+		}
+	}
+
+	coordinatorRole := strings.TrimSpace(metadataString(metadata, "coordinatorRole"))
+	if coordinatorRole == "" {
+		coordinatorRole = strings.TrimSpace(assignedRole)
+	}
+	if strings.TrimSpace(reviewSummary) == "" {
+		reviewSummary = fmt.Sprintf("Batch review complete: approved=%d retry=%d escalate=%d.", approved, retried, escalated)
+	}
+	var artifacts []string
+	_ = json.Unmarshal([]byte(artifactsJSON), &artifacts)
+	reviewSummaryPath := ""
+	if len(artifacts) > 0 {
+		reviewSummaryPath = strings.TrimSpace(artifacts[0])
+	}
+	handoffMetadata := map[string]any{
+		"source":           "review.handoff",
+		"batchTaskId":      batchTaskID,
+		"batchParentTaskId": metadataString(metadata, "batchParentTaskId"),
+		"batchWaveId":      metadataString(metadata, "batchWaveId"),
+		"reviewerRole":     reviewerIdentity,
+		"reviewSummaryPath": reviewSummaryPath,
+		"approvedCount":    approved,
+		"retryCount":       retried,
+		"escalateCount":    escalated,
+	}
+	handoffMetadataJSON, _ := json.Marshal(handoffMetadata)
+	handoffInputs := map[string]any{
+		"batchTaskId":       batchTaskID,
+		"batchParentTaskId": metadataString(metadata, "batchParentTaskId"),
+		"batchWaveId":       metadataString(metadata, "batchWaveId"),
+		"reviewSummary":     strings.TrimSpace(reviewSummary),
+		"reviewSummaryPath": reviewSummaryPath,
+		"approvedCount":     approved,
+		"retryCount":        retried,
+		"escalateCount":     escalated,
+	}
+	handoffInputsJSON, _ := json.Marshal(handoffInputs)
+	handoffGoal := "REVIEW HANDOFF: Batch review completed. Review report is ready; coordinator can resume orchestration and next-step delegation."
+	if reviewSummaryPath != "" {
+		handoffGoal += " Review summary: " + reviewSummaryPath + "."
+	}
+
+	handoffAssignedType := "agent"
+	handoffAssignedTo := strings.TrimSpace(runID)
+	handoffAssignedRole := ""
+	if strings.TrimSpace(teamID) != "" {
+		handoffAssignedType = "role"
+		handoffAssignedRole = coordinatorRole
+		handoffAssignedTo = coordinatorRole
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO tasks (
+			task_id, session_id, run_id, team_id, assigned_role, assigned_to_type, assigned_to, claimed_by, role_snapshot, task_kind, created_by,
+			goal, inputs_json, priority, status, created_at, updated_at, metadata_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, handoffTaskID, strings.TrimSpace(sessionID), strings.TrimSpace(runID), strings.TrimSpace(teamID), strings.TrimSpace(handoffAssignedRole), handoffAssignedType, strings.TrimSpace(handoffAssignedTo), "", "", normalizeTaskKind("callback"), reviewerIdentity,
+		strings.TrimSpace(handoffGoal), string(handoffInputsJSON), 1, string(types.TaskStatusPending), nowRaw, nowRaw, string(handoffMetadataJSON))
+	if err != nil {
+		return "", 0, 0, 0, err
+	}
+
+	metadata["batchClosed"] = true
+	metadata["batchClosedAt"] = nowRaw
+	metadata["batchClosedBy"] = reviewerIdentity
+	metadata["batchCloseTxnId"] = uuid.NewString()
+	metadata["batchHandoffTaskId"] = handoffTaskID
+	metadata["batchReviewedCount"] = float64(approved + retried + escalated)
+	metadata["batchReviewComplete"] = true
+	newBatchMetaJSON, _ := json.Marshal(metadata)
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE tasks
+		SET metadata_json = ?, status = ?, summary = ?, finished_at = COALESCE(finished_at, ?), completed_at = COALESCE(completed_at, ?), updated_at = ?
+		WHERE task_id = ?
+	`, string(newBatchMetaJSON), string(types.TaskStatusSucceeded), strings.TrimSpace(reviewSummary), nowRaw, nowRaw, nowRaw, batchTaskID); err != nil {
+		return "", 0, 0, 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", 0, 0, 0, err
+	}
+	return handoffTaskID, approved, retried, escalated, nil
 }
 
 func parseTime(raw string) time.Time {

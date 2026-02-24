@@ -281,6 +281,7 @@ type TeamGetManifestResult struct {
 	TeamModel       string                   `json:"teamModel,omitempty"`
 	ModelChange     *TeamManifestModelChange `json:"modelChange,omitempty"`
 	CoordinatorRole string                   `json:"coordinatorRole"`
+	ReviewerRole    string                   `json:"reviewerRole,omitempty"`
 	CoordinatorRun  string                   `json:"coordinatorRunId"`
 	Roles           []TeamManifestRole       `json:"roles"`
 	CreatedAt       string                   `json:"createdAt"`
@@ -456,16 +457,16 @@ type RuntimeGetSessionStateParams struct {
 }
 
 type RuntimeRunState struct {
-	SessionID       string `json:"sessionId"`
-	RunID           string `json:"runId"`
-	Model           string `json:"model,omitempty"`
-	RunTotalTokens  int    `json:"runTotalTokens,omitempty"`
+	SessionID       string  `json:"sessionId"`
+	RunID           string  `json:"runId"`
+	Model           string  `json:"model,omitempty"`
+	RunTotalTokens  int     `json:"runTotalTokens,omitempty"`
 	RunTotalCostUSD float64 `json:"runTotalCostUSD,omitempty"`
-	PersistedStatus string `json:"persistedStatus,omitempty"`
-	WorkerPresent   bool   `json:"workerPresent"`
-	PausedFlag      bool   `json:"pausedFlag"`
-	LastHeartbeatAt string `json:"lastHeartbeatAt,omitempty"`
-	EffectiveStatus string `json:"effectiveStatus,omitempty"`
+	PersistedStatus string  `json:"persistedStatus,omitempty"`
+	WorkerPresent   bool    `json:"workerPresent"`
+	PausedFlag      bool    `json:"pausedFlag"`
+	LastHeartbeatAt string  `json:"lastHeartbeatAt,omitempty"`
+	EffectiveStatus string  `json:"effectiveStatus,omitempty"`
 }
 
 type RuntimeGetRunStateResult struct {

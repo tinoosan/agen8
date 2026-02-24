@@ -110,6 +110,9 @@ func (m *Model) renderHeader() string {
 
 	if strings.TrimSpace(m.teamID) != "" && !m.isNarrow() {
 		line += kit.StyleDim.Render("  ·  team: ") + styleAccent.Render(kit.TruncateRight(m.teamID, 12))
+		if reviewer := strings.TrimSpace(m.reviewerRole); reviewer != "" {
+			line += kit.StyleDim.Render("  ·  reviewer: ") + styleAccent.Render(kit.TruncateRight(reviewer, 14))
+		}
 	}
 	if m.lastErr != "" {
 		line += kit.StyleDim.Render("  ·  ") + styleErr.Render("err: "+truncate(m.lastErr, 40))
@@ -238,12 +241,11 @@ func (m *Model) renderAgentTableHeader(width int) string {
 	statusW := 12
 	modelW := 18
 	costW := 9
-	workerW := 8
-	hbW := 7
+	workerW := 6
 	asgnW := 4
 	doneW := 4
 	startW := 5
-	runW := maxInt(8, inner-(roleW+statusW+modelW+costW+workerW+hbW+asgnW+doneW+startW+9))
+	runW := maxInt(8, inner-(roleW+statusW+modelW+costW+workerW+asgnW+doneW+startW+8))
 
 	line := strings.Repeat(" ", markerW) +
 		padRight("ROLE", roleW) + " " +
@@ -251,7 +253,6 @@ func (m *Model) renderAgentTableHeader(width int) string {
 		padRight("MODEL", modelW) + " " +
 		padRight("COST", costW) + " " +
 		padRight("WORKER", workerW) + " " +
-		padRight("HEARTBT", hbW) + " " +
 		padRight("ASGN", asgnW) + " " +
 		padRight("DONE", doneW) + " " +
 		padRight("START", startW) + " " +
@@ -301,18 +302,16 @@ func (m *Model) buildAgentRows(width int) []string {
 		statusW := 12
 		modelW := 18
 		costW := 9
-		workerW := 8
-		hbW := 7
+		workerW := 6
 		asgnW := 4
 		doneW := 4
 		startW := 5
-		runW := maxInt(8, inner-(roleW+statusW+modelW+costW+workerW+hbW+asgnW+doneW+startW+9))
+		runW := maxInt(8, inner-(roleW+statusW+modelW+costW+workerW+asgnW+doneW+startW+8))
 
-		worker := "✗"
+		worker := ""
 		if row.WorkerPresent {
 			worker = "✓"
 		}
-		hb := relativeAge(row.LastHeartbeatAt)
 		started := startedClock(row.StartedAt)
 		run := shortRunID(row.RunID)
 
@@ -322,7 +321,6 @@ func (m *Model) buildAgentRows(width int) []string {
 			kit.StyleDim.Render(padRight(kit.TruncateRight(fallback(row.Model, "-"), modelW), modelW)) + " " +
 			kit.StyleStatusValue.Render(padRight(fmt.Sprintf("$%.4f", row.RunTotalCostUSD), costW)) + " " +
 			renderWorkerCell(row.WorkerPresent, worker, workerW) + " " +
-			kit.StyleDim.Render(padRight(hb, hbW)) + " " +
 			kit.StyleStatusValue.Render(padRight(fmt.Sprintf("%d", row.AssignedTasks), asgnW)) + " " +
 			kit.StyleStatusValue.Render(padRight(fmt.Sprintf("%d", row.CompletedTasks), doneW)) + " " +
 			kit.StyleDim.Render(padRight(started, startW)) + " " +
@@ -339,9 +337,9 @@ func renderStatusCell(status string, width, spinFrame int) string {
 
 func renderWorkerCell(present bool, symbol string, width int) string {
 	if present {
-		return styleOK.Render(padRight(symbol+" worker", width))
+		return styleOK.Render(padRight(symbol, width))
 	}
-	return kit.StyleDim.Render(padRight(symbol+" worker", width))
+	return kit.StyleDim.Render(padRight(symbol, width))
 }
 
 func statusDecor(status string, spinFrame int) (string, lipgloss.Style) {
@@ -404,9 +402,9 @@ func (m *Model) renderDetailBody(width, height int) string {
 	}
 
 	statusLabel, _ := statusDecor(agent.Status, m.spinFrame)
-	worker := "no"
+	worker := ""
 	if agent.WorkerPresent {
-		worker = "yes"
+		worker = "✓"
 	}
 
 	lines := []string{
@@ -420,13 +418,13 @@ func (m *Model) renderDetailBody(width, height int) string {
 		kit.StyleStatusKey.Render("Assigned:  ") + kit.StyleStatusValue.Render(fmt.Sprintf("%d", agent.AssignedTasks)),
 		kit.StyleStatusKey.Render("Completed: ") + kit.StyleStatusValue.Render(fmt.Sprintf("%d", agent.CompletedTasks)),
 		kit.StyleStatusKey.Render("Worker:    ") + kit.StyleStatusValue.Render(worker),
-		kit.StyleStatusKey.Render("Heartbeat: ") + kit.StyleStatusValue.Render(fallback(relativeAge(agent.LastHeartbeatAt), "—")),
 		kit.StyleStatusKey.Render("Started:   ") + kit.StyleStatusValue.Render(fallback(startedClock(agent.StartedAt), "—")),
 		kit.StyleStatusKey.Render("RawStatus: ") + kit.StyleStatusValue.Render(fallback(statusLabel, "-")),
 		"",
 		kit.StyleStatusKey.Render("Session:   ") + kit.StyleStatusValue.Render(fallback(m.sessionID, "-")),
 		kit.StyleStatusKey.Render("Mode:      ") + kit.StyleStatusValue.Render(fallback(m.sessionMode, "standalone")),
 		kit.StyleStatusKey.Render("Team:      ") + kit.StyleStatusValue.Render(fallback(m.teamID, "-")),
+		kit.StyleStatusKey.Render("Reviewer:  ") + kit.StyleStatusValue.Render(fallback(m.reviewerRole, "-")),
 		kit.StyleStatusKey.Render("Run:       ") + kit.StyleStatusValue.Render(fallback(m.runID, "-")),
 		"",
 		kit.StyleStatusKey.Render("Totals:    ") +
@@ -455,8 +453,18 @@ func relativeAge(raw string) string {
 	if d < 0 {
 		d = 0
 	}
+	if d < 2*time.Second {
+		return "just now"
+	}
 	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
+		secs := int(d.Seconds() + 0.5)
+		if secs < 2 {
+			return "just now"
+		}
+		return fmt.Sprintf("%ds", secs)
+	}
+	if d >= 2*time.Minute {
+		return fmt.Sprintf("%dm stale", int(d.Minutes()))
 	}
 	if d < time.Hour {
 		return fmt.Sprintf("%dm", int(d.Minutes()))

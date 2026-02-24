@@ -3009,6 +3009,11 @@ func TestRPCServer_TeamManifestPlanModelEndpoints(t *testing.T) {
 	if respManifest.Error != nil {
 		t.Fatalf("team.getManifest error: %+v", respManifest.Error)
 	}
+	var manifestRes protocol.TeamGetManifestResult
+	_ = json.Unmarshal(respManifest.Result, &manifestRes)
+	if strings.TrimSpace(manifestRes.ReviewerRole) != "ceo" {
+		t.Fatalf("reviewerRole=%q want ceo", manifestRes.ReviewerRole)
+	}
 
 	reqPlan, _ := protocol.NewRequest("3", protocol.MethodPlanGet, protocol.PlanGetParams{
 		ThreadID: protocol.ThreadID(run.SessionID), RunID: run.RunID,
@@ -3034,6 +3039,66 @@ func TestRPCServer_TeamManifestPlanModelEndpoints(t *testing.T) {
 	_ = json.Unmarshal(respModels.Result, &models)
 	if len(models.Models) == 0 {
 		t.Fatalf("expected model.list results")
+	}
+}
+
+func TestRPCServer_TeamGetManifest_ReviewerFromProfileYAML(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	profileDir := filepath.Join(cfg.DataDir, "profiles", "reviewer_team")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	profileYAML := `id: reviewer_team
+description: Team profile with explicit reviewer
+team:
+  model: openai/gpt-5-mini
+  roles:
+    - name: coordinator
+      coordinator: true
+      description: Lead
+      prompts:
+        system_prompt: lead
+    - name: qa
+      reviewer: true
+      description: Reviewer
+      prompts:
+        system_prompt: review
+`
+	if err := os.WriteFile(filepath.Join(profileDir, "profile.yaml"), []byte(profileYAML), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	teamID := "team-r"
+	teamDir := fsutil.GetTeamDir(cfg.DataDir, teamID)
+	if err := os.MkdirAll(teamDir, 0o755); err != nil {
+		t.Fatalf("mkdir team dir: %v", err)
+	}
+	manifest := `{"teamId":"team-r","profileId":"reviewer_team","teamModel":"openai/gpt-5-mini","coordinatorRole":"coordinator","coordinatorRunId":"run-1","roles":[{"roleName":"coordinator","runId":"run-1","sessionId":"sess-1"},{"roleName":"qa","runId":"run-2","sessionId":"sess-2"}],"createdAt":"2026-01-01T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(teamDir, "team.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	reqManifest, _ := protocol.NewRequest("2", protocol.MethodTeamGetManifest, protocol.TeamGetManifestParams{
+		ThreadID: protocol.ThreadID(run.SessionID), TeamID: teamID,
+	})
+	respManifest := rpcRoundTrip(t, srv, reqManifest)
+	if respManifest.Error != nil {
+		t.Fatalf("team.getManifest error: %+v", respManifest.Error)
+	}
+	var manifestRes protocol.TeamGetManifestResult
+	_ = json.Unmarshal(respManifest.Result, &manifestRes)
+	if strings.TrimSpace(manifestRes.ReviewerRole) != "qa" {
+		t.Fatalf("reviewerRole=%q want qa", manifestRes.ReviewerRole)
 	}
 }
 

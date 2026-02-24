@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/agen8/pkg/agent/state"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
@@ -37,6 +38,10 @@ type TaskReviewTool struct {
 	SessionID  string
 	RunID      string
 	Supervisor ReviewSupervisor
+}
+
+type batchCloseAndHandoffCloser interface {
+	CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (string, error)
 }
 
 func (t *TaskReviewTool) Definition() llmtypes.Tool {
@@ -200,6 +205,20 @@ func (t *TaskReviewTool) handleBatchDecision(ctx context.Context, batchTask type
 	if _, err := t.handleDecision(ctx, childTask, decision, feedback, rawEscData); err != nil {
 		return types.HostOpRequest{}, err
 	}
+	childTask.Metadata["batchItemStatus"] = batchItemStatusFromDecision(decision)
+	childTask.Metadata["batchReviewedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+	reviewerIdentity := strings.TrimSpace(batchTask.AssignedRole)
+	if reviewerIdentity == "" {
+		reviewerIdentity = strings.TrimSpace(batchTask.AssignedTo)
+	}
+	if reviewerIdentity == "" {
+		reviewerIdentity = strings.TrimSpace(t.RunID)
+	}
+	childTask.Metadata["batchReviewedBy"] = reviewerIdentity
+	if feedback != "" {
+		childTask.Metadata["batchDecisionNote"] = feedback
+	}
+	_ = t.Store.UpdateTask(ctx, childTask)
 
 	if batchTask.Metadata == nil {
 		batchTask.Metadata = map[string]any{}
@@ -215,10 +234,27 @@ func (t *TaskReviewTool) handleBatchDecision(ctx context.Context, batchTask type
 	batchTask.Inputs["items"] = itemsRaw
 	batchTask.Metadata["batchReviewedCount"] = float64(len(decisions))
 	batchTask.Metadata["batchTotalItems"] = float64(len(itemsRaw))
-	batchTask.Metadata["batchReviewComplete"] = len(decisions) >= len(itemsRaw)
+	reviewComplete := len(decisions) >= len(itemsRaw)
+	batchTask.Metadata["batchReviewComplete"] = reviewComplete
 	_ = t.Store.UpdateTask(ctx, batchTask)
 
 	approved, retried, escalated := countBatchDecisions(decisions)
+	handoffTaskID := ""
+	if reviewComplete {
+		summary := fmt.Sprintf("Batch review complete: approved=%d retry=%d escalate=%d.", approved, retried, escalated)
+		if closer, ok := t.Store.(batchCloseAndHandoffCloser); ok {
+			if hid, cerr := closer.CloseBatchAndHandoff(ctx, strings.TrimSpace(batchTask.TaskID), reviewerIdentity, summary); cerr == nil {
+				handoffTaskID = strings.TrimSpace(hid)
+			}
+		}
+	}
+	if handoffTaskID != "" {
+		return types.HostOpRequest{
+			Op:   types.HostOpToolResult,
+			Tag:  "task_review",
+			Text: fmt.Sprintf("Batch callback %s: item %s set to %s (approved=%d retry=%d escalate=%d). Handoff queued to coordinator as %s.", batchTask.TaskID, batchItemTaskID, decision, approved, retried, escalated, handoffTaskID),
+		}, nil
+	}
 	return types.HostOpRequest{
 		Op:   types.HostOpToolResult,
 		Tag:  "task_review",
@@ -247,6 +283,19 @@ func countBatchDecisions(decisions map[string]any) (approved, retried, escalated
 		}
 	}
 	return approved, retried, escalated
+}
+
+func batchItemStatusFromDecision(decision string) string {
+	switch strings.ToLower(strings.TrimSpace(decision)) {
+	case "approve":
+		return "approved"
+	case "retry":
+		return "retry"
+	case "escalate":
+		return "escalated"
+	default:
+		return "pending_review"
+	}
 }
 
 func (t *TaskReviewTool) handleApprove(ctx context.Context, task types.Task) (types.HostOpRequest, error) {

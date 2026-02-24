@@ -30,11 +30,12 @@ type Model struct {
 	notice    string
 	noticeAt  time.Time
 
-	agents      []agentRow
-	stats       sessionStats
-	sessionMode string
-	teamID      string
-	runID       string
+	agents       []agentRow
+	stats        sessionStats
+	sessionMode  string
+	teamID       string
+	runID        string
+	reviewerRole string
 
 	sel          int
 	detailOpen   bool

@@ -237,6 +237,27 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 	if err != nil {
 		return protocol.TaskListResult{}, err
 	}
+	if view == "inbox" {
+		visible := make([]types.Task, 0, len(tasks))
+		for _, task := range tasks {
+			if task.Status != types.TaskStatusReviewPending {
+				visible = append(visible, task)
+				continue
+			}
+			full, gerr := s.taskService.GetTask(ctx, strings.TrimSpace(task.TaskID))
+			if gerr != nil {
+				visible = append(visible, task)
+				continue
+			}
+			source := strings.TrimSpace(fmt.Sprint(full.Metadata["source"]))
+			if source == "team.callback" || source == "subagent.callback" {
+				continue
+			}
+			visible = append(visible, task)
+		}
+		tasks = visible
+		total = len(tasks)
+	}
 	out := make([]protocol.Task, 0, len(tasks))
 	for _, t := range tasks {
 		out = append(out, protocolTaskFromTypesTask(t))

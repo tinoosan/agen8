@@ -83,6 +83,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionMode = msg.sessionMode
 		m.teamID = msg.teamID
 		m.runID = msg.runID
+		m.reviewerRole = msg.reviewerRole
 
 		if m.sel >= len(m.agents) {
 			m.sel = maxInt(0, len(m.agents)-1)

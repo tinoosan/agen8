@@ -211,7 +211,7 @@ func TestListPendingTasks_TeamRoleIncludesAgentAddressedCallbacks(t *testing.T) 
 	}
 }
 
-func TestListPendingTasks_TeamRoleIncludesReviewPendingCallbacksOnly(t *testing.T) {
+func TestListPendingTasks_TeamRoleSkipsLegacyReviewPendingCallbacks(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
 	if err != nil {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
@@ -264,15 +264,12 @@ func TestListPendingTasks_TeamRoleIncludesReviewPendingCallbacksOnly(t *testing.
 	if err != nil {
 		t.Fatalf("listPendingTasks: %v", err)
 	}
-	if len(tasks) != 1 {
-		t.Fatalf("expected only callback review_pending task, got %d (%+v)", len(tasks), tasks)
-	}
-	if strings.TrimSpace(tasks[0].TaskID) != "callback-review-pending" {
-		t.Fatalf("unexpected scheduled task: %+v", tasks[0])
+	if len(tasks) != 0 {
+		t.Fatalf("expected no review_pending single callbacks, got %d (%+v)", len(tasks), tasks)
 	}
 }
 
-func TestListPendingTasks_StandaloneParentIncludesReviewPendingCallbacks(t *testing.T) {
+func TestListPendingTasks_StandaloneParentIncludesBatchReviewPendingCallbacks(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
 	if err != nil {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
@@ -320,7 +317,7 @@ func TestListPendingTasks_StandaloneParentIncludesReviewPendingCallbacks(t *test
 		t.Fatalf("listPendingTasks: %v", err)
 	}
 	if len(tasks) != 2 {
-		t.Fatalf("expected pending + callback review_pending, got %d (%+v)", len(tasks), tasks)
+		t.Fatalf("expected pending + batch callback review_pending, got %d (%+v)", len(tasks), tasks)
 	}
 	if strings.TrimSpace(tasks[0].TaskID) != "callback-review-pending" {
 		t.Fatalf("expected callback task to be prioritized first, got %+v", tasks)

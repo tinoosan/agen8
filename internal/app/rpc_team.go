@@ -240,10 +240,32 @@ func (s *RPCServer) teamGetManifest(ctx context.Context, p protocol.TeamGetManif
 		TeamModel:       strings.TrimSpace(manifest.TeamModel),
 		ModelChange:     modelChange,
 		CoordinatorRole: strings.TrimSpace(manifest.CoordinatorRole),
+		ReviewerRole:    s.resolveManifestReviewerRole(manifest.ProfileID, manifest.CoordinatorRole),
 		CoordinatorRun:  strings.TrimSpace(manifest.CoordinatorRun),
 		Roles:           roles,
 		CreatedAt:       strings.TrimSpace(manifest.CreatedAt),
 	}, nil
+}
+
+func (s *RPCServer) resolveManifestReviewerRole(profileID, coordinatorRole string) string {
+	coordinatorRole = strings.TrimSpace(coordinatorRole)
+	prof, _, err := resolveProfileRef(s.cfg, strings.TrimSpace(profileID))
+	if err != nil || prof == nil {
+		return coordinatorRole
+	}
+	roles, err := prof.RolesForSession()
+	if err != nil || len(roles) == 0 {
+		return coordinatorRole
+	}
+	_, profileCoordinatorRole, err := team.ValidateTeamRoles(roles)
+	if err == nil {
+		coordinatorRole = strings.TrimSpace(profileCoordinatorRole)
+	}
+	reviewerRole := strings.TrimSpace(team.ResolveReviewerRole(roles, coordinatorRole))
+	if reviewerRole == "" {
+		return coordinatorRole
+	}
+	return reviewerRole
 }
 
 func (s *RPCServer) readPlanFilesForRun(ctx context.Context, run types.Run) (checklist string, checklistErr string, details string, detailsErr string) {

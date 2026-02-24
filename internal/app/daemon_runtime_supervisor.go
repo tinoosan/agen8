@@ -64,8 +64,8 @@ type runtimeSupervisor struct {
 	defaultProfile   *profile.Profile
 	soulService      pkgsoul.Service
 
-	mu      sync.Mutex
-	workers map[string]*managedRuntime
+	mu                  sync.Mutex
+	workers             map[string]*managedRuntime
 	lastRoutingRepairAt time.Time
 
 	spawnOverride func(context.Context, types.Session, string) (*managedRuntime, error)
@@ -888,7 +888,21 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		tool.CoordinatorRole = coordinatorRole
 		tool.ValidRoles = teamRoles
 	}
-	if !isChildRun && allowSubagents {
+	allowSpawnWorker := !isChildRun && allowSubagents
+	if allowSpawnWorker && isTeam && isCoordinator && len(teamRoles) > 1 {
+		// Team-only delegation constitution (without policy engine): coordinators delegate to roles.
+		allowSpawnWorker = false
+		emitEvent(context.Background(), events.Event{
+			Type:    "delegation.policy.enforced",
+			Message: "Coordinator subagent spawning disabled in multi-role team",
+			Data: map[string]string{
+				"teamId":          teamID,
+				"role":            roleName,
+				"coordinatorRole": coordinatorRole,
+			},
+		})
+	}
+	if allowSpawnWorker {
 		tool.SpawnWorker = s.makeSpawnWorkerFunc(run, model, emitEvent)
 	}
 	if err := registry.Register(tool); err != nil {

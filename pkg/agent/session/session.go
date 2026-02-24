@@ -568,8 +568,9 @@ func isPollableTask(task types.Task) bool {
 	if task.Status != types.TaskStatusReviewPending {
 		return true
 	}
-	// Only callbacks should be processed from review_pending.
-	return isCallbackSource(getTaskSource(task))
+	// Team-only review pipeline: only synthetic batch callbacks are reviewable.
+	source := getTaskSource(task)
+	return source == "subagent.batch.callback" || source == "team.batch.callback"
 }
 
 func filterPollableTasks(ctx context.Context, store state.TaskStore, tasks []types.Task) []types.Task {
@@ -1175,7 +1176,6 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	if err := s.cfg.TaskStore.CompleteTask(completeCtx, taskID, tr); err != nil {
 		return err
 	}
-	s.maybeEmitCoordinatorPolicyWarn(ctx, task, tr)
 	s.maybeCreateCoordinatorCallback(ctx, task, tr)
 
 	task.Status = tr.Status
@@ -1290,17 +1290,15 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 
 	callbackTaskID := "callback-" + taskID
 	now := time.Now().UTC()
-	batchMode := metadataBool(task.Metadata, "batchMode")
 	batchParentTaskID := metadataString(task.Metadata, "batchParentTaskId")
 	batchWaveID := metadataString(task.Metadata, "batchWaveId")
 	if batchParentTaskID == "" {
-		batchMode = false
+		batchParentTaskID = taskID
 	}
-	if batchMode && batchWaveID == "" {
-		// Legacy fallback: treat missing wave IDs as one implicit wave per parent task.
-		batchWaveID = "legacy-" + batchParentTaskID
+	if batchWaveID == "" {
+		// Always place callbacks in a deterministic wave so review delivery is batch-only.
+		batchWaveID = normalizeWaveID(batchParentTaskID, "")
 	}
-
 	var callback types.Task
 	var group batchGroupScope
 	if isSubagentWorker {
@@ -1445,46 +1443,14 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 	if callback.Metadata == nil {
 		callback.Metadata = map[string]any{}
 	}
-	if batchMode {
-		callback.Status = types.TaskStatusReviewPending
-		callback.Metadata["batchMode"] = true
-		callback.Metadata["batchParentTaskId"] = batchParentTaskID
-		callback.Metadata["batchWaveId"] = batchWaveID
-		callback.Metadata["batchDelivered"] = false
-	}
+	callback.Status = types.TaskStatusReviewPending
+	callback.Metadata["batchMode"] = true
+	callback.Metadata["batchParentTaskId"] = batchParentTaskID
+	callback.Metadata["batchWaveId"] = batchWaveID
+	callback.Metadata["batchDelivered"] = false
 
 	if err := s.cfg.TaskStore.CreateTask(ctx, callback); err != nil {
 		return // idempotent via deterministic callback task id.
-	}
-
-	if !batchMode {
-		eventSource := "team.callback"
-		if isSubagentWorker {
-			eventSource = "subagent.callback"
-		}
-		s.emitTaskQueuedOnce(ctx, callbackTaskID, callback.Goal, eventSource)
-		s.emitBestEffort(ctx, events.Event{
-			Type:    eventSource + ".queued",
-			Message: "Worker completion callback queued",
-			Data: map[string]string{
-				"taskId":            callbackTaskID,
-				"callbackForTaskId": taskID,
-			},
-		})
-		if eventSource == "team.callback" {
-			if fallback, _ := callback.Metadata["reviewerFallback"].(string); strings.TrimSpace(fallback) != "" {
-				s.emitBestEffort(ctx, events.Event{
-					Type:    "team.callback.reviewer_fallback",
-					Message: "Reviewer unavailable; callback reassigned",
-					Data: map[string]string{
-						"taskId":          callbackTaskID,
-						"callbackForTask": taskID,
-						"assignedRole":    strings.TrimSpace(callback.AssignedRole),
-					},
-				})
-			}
-		}
-		return
 	}
 
 	s.emitBatchProgress(ctx, group)
@@ -1578,15 +1544,16 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 
 	expected := s.listBatchExpectedTasks(ctx, group)
 	expectedCount := len(expected)
-	if expectedCount == 0 {
-		return
-	}
 
 	callbacks := s.listBatchCallbacks(ctx, group)
 	if len(callbacks) == 0 {
 		return
 	}
 	completedCount := len(callbacks)
+	if expectedCount == 0 {
+		// Hard cutover: support singleton/non-staged sources as implicit batch-of-1.
+		expectedCount = completedCount
+	}
 	undelivered := make([]types.Task, 0, len(callbacks))
 	for _, cb := range callbacks {
 		if metadataBool(cb.Metadata, "batchDelivered") {
@@ -1677,6 +1644,7 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 			"batchSynthetic":      true,
 			"batchParentTaskId":   group.parentTaskID,
 			"batchWaveId":         group.waveID,
+			"coordinatorRole":     strings.TrimSpace(s.cfg.CoordinatorRole),
 			"batchExpectedCount":  expectedCount,
 			"batchCompletedCount": completedCount,
 			"batchWaveExpected":   expectedCount,

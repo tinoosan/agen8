@@ -34,6 +34,10 @@ type taskEventAppender interface {
 	Append(ctx context.Context, event types.EventRecord) error
 }
 
+type batchCloseStore interface {
+	CloseBatchAndHandoffAtomic(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (handoffTaskID string, approved, retried, escalated int, err error)
+}
+
 type taskWakeWatcher struct {
 	teamID string
 	runID  string
@@ -438,4 +442,57 @@ func (m *Manager) emitRoutingEvent(ctx context.Context, task types.Task, typ, ms
 		Data:      evData,
 		Timestamp: time.Now().UTC(),
 	})
+}
+
+// CloseBatchAndHandoff atomically closes a synthetic batch callback and creates
+// one deterministic coordinator handoff task.
+func (m *Manager) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (string, error) {
+	if m == nil || m.store == nil {
+		return "", fmt.Errorf("task manager is not configured")
+	}
+	batchTaskID = strings.TrimSpace(batchTaskID)
+	if batchTaskID == "" {
+		return "", fmt.Errorf("batchTaskID is required")
+	}
+	reviewerIdentity = strings.TrimSpace(reviewerIdentity)
+	if reviewerIdentity == "" {
+		reviewerIdentity = "reviewer"
+	}
+	closer, ok := m.store.(batchCloseStore)
+	if !ok {
+		return "", fmt.Errorf("task store does not support atomic batch close")
+	}
+	handoffTaskID, approved, retried, escalated, err := closer.CloseBatchAndHandoffAtomic(ctx, batchTaskID, reviewerIdentity, strings.TrimSpace(reviewSummary))
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(handoffTaskID) == "" {
+		return "", fmt.Errorf("atomic batch close did not return handoff task id")
+	}
+	if m.events != nil {
+		now := time.Now().UTC()
+		_ = m.events.Append(ctx, types.EventRecord{
+			EventID:   uuid.NewString(),
+			Type:      "callback.batch.closed",
+			Message:   "Batch callback closed and coordinator handoff queued",
+			Timestamp: now,
+			Data: map[string]string{
+				"taskId":         batchTaskID,
+				"batchTaskId":    batchTaskID,
+				"handoffTaskId":  strings.TrimSpace(handoffTaskID),
+				"approved":       fmt.Sprintf("%d", approved),
+				"retry":          fmt.Sprintf("%d", retried),
+				"escalate":       fmt.Sprintf("%d", escalated),
+				"reviewedBy":     reviewerIdentity,
+				"closeTimestamp": now.Format(time.RFC3339Nano),
+			},
+		})
+	}
+	if handoffTask, err := m.store.GetTask(ctx, strings.TrimSpace(handoffTaskID)); err == nil {
+		m.notifyWake(handoffTask)
+	}
+	if batchTask, err := m.store.GetTask(ctx, batchTaskID); err == nil {
+		m.notifyWake(batchTask)
+	}
+	return handoffTaskID, nil
 }
