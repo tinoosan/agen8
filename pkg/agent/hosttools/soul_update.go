@@ -75,5 +75,9 @@ func (t *SoulUpdateTool) Execute(ctx context.Context, args json.RawMessage) (pkg
 		return pkgt.HostOpRequest{}, fmt.Errorf("soul_update: %w", err)
 	}
 	msg := fmt.Sprintf("SOUL updated to version %d", doc.Version)
-	return pkgt.HostOpRequest{Op: pkgt.HostOpToolResult, Tag: "soul_update", Text: msg}, nil
+	type soulUpdateInput struct {
+		Reason string `json:"reason"`
+	}
+	input, _ := json.Marshal(soulUpdateInput{Reason: payload.Reason})
+	return pkgt.HostOpRequest{Op: pkgt.HostOpToolResult, Tag: "soul_update", Text: msg, Input: input}, nil
 }

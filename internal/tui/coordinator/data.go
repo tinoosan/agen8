@@ -446,7 +446,7 @@ func isActivityText(act types.Activity) bool {
 		return true
 	}
 	// If it lacks a specific developer op prefix but has a title, treat as text summary.
-	if strings.TrimSpace(act.Title) != "" && !strings.HasPrefix(kind, "fs_") && !strings.HasPrefix(kind, "shell_") && kind != "agent_spawn" && kind != "tool_call" && kind != "code_exec" && kind != "http_fetch" && kind != "task_create" && kind != "task_review" && kind != "obsidian" {
+	if strings.TrimSpace(act.Title) != "" && !strings.HasPrefix(kind, "fs_") && !strings.HasPrefix(kind, "shell_") && kind != "agent_spawn" && kind != "tool_call" && kind != "code_exec" && kind != "http_fetch" && kind != "task_create" && kind != "task_review" && kind != "obsidian" && kind != "soul_update" {
 		return true
 	}
 	return false
@@ -537,6 +537,8 @@ func kindToVerb(kind string, path string, data map[string]string) string {
 		return "Spawn"
 	case "obsidian":
 		return "Obsidian"
+	case "soul_update":
+		return "Update soul"
 	case "task_create":
 		return "Dispatch task"
 	case "task_review":

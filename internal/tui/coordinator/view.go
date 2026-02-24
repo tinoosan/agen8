@@ -354,8 +354,15 @@ func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
 }
 
 func (m *Model) feedLines(width int) []string {
+	if m.lineCache != nil && m.lineCacheGen == m.feedGen && m.lineCacheWidth == width {
+		return m.lineCache
+	}
+
 	turns := groupBridgeToolCalls(m.buildTurns())
 	if len(turns) == 0 {
+		m.lineCache = nil
+		m.lineCacheGen = m.feedGen
+		m.lineCacheWidth = width
 		return nil
 	}
 
@@ -380,6 +387,10 @@ func (m *Model) feedLines(width int) []string {
 			lines = append(lines, "")
 		}
 	}
+
+	m.lineCache = lines
+	m.lineCacheGen = m.feedGen
+	m.lineCacheWidth = width
 	return lines
 }
 
@@ -494,6 +505,10 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 			if cmd := strings.TrimSpace(e.data["command"]); cmd != "" {
 				argPreview = truncate(cmd, maxInt(8, inner-len(verb)-8))
 			}
+		} else if opLower == "soul_update" && e.data != nil {
+			if reason := strings.TrimSpace(e.data["reason"]); reason != "" {
+				argPreview = truncate(reason, maxInt(8, inner-len(verb)-8))
+			}
 		} else if opLower == "task_create" && e.data != nil {
 			if goal := strings.TrimSpace(e.data["goal"]); goal != "" {
 				argPreview = truncate(goal, maxInt(8, inner-len(verb)-8))
@@ -544,6 +559,10 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 				} else if bridgeOpLower == "obsidian" && e.bridgeSingleData != nil {
 					if cmd := strings.TrimSpace(e.bridgeSingleData["command"]); cmd != "" {
 						bridgeArg = truncate(cmd, maxInt(8, inner-len(bridgeVerb)-8))
+					}
+				} else if bridgeOpLower == "soul_update" && e.bridgeSingleData != nil {
+					if reason := strings.TrimSpace(e.bridgeSingleData["reason"]); reason != "" {
+						bridgeArg = truncate(reason, maxInt(8, inner-len(bridgeVerb)-8))
 					}
 				} else if bridgeOpLower == "task_create" && e.bridgeSingleData != nil {
 					if goal := strings.TrimSpace(e.bridgeSingleData["goal"]); goal != "" {

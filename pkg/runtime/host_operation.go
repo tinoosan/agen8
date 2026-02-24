@@ -1094,6 +1094,22 @@ func (toolResultOperation) EnrichRequestEvent(req types.HostOpRequest, reqData m
 		}
 		return
 	}
+	if tag == "soul_update" {
+		reqData["op"] = "soul_update"
+		storeReq["op"] = "soul_update"
+		if len(req.Input) > 0 {
+			var p struct {
+				Reason string `json:"reason"`
+			}
+			if err := json.Unmarshal(req.Input, &p); err == nil {
+				if r := strings.TrimSpace(p.Reason); r != "" {
+					reqData["reason"] = r
+					storeReq["reason"] = r
+				}
+			}
+		}
+		return
+	}
 	if tag != "task_create" {
 		return
 	}
@@ -1152,6 +1168,11 @@ func (toolResultOperation) EnrichResponseEvent(req types.HostOpRequest, _ types.
 	if tag == "task_review" {
 		respData["op"] = "task_review"
 		storeResp["op"] = "task_review"
+		return
+	}
+	if tag == "soul_update" {
+		respData["op"] = "soul_update"
+		storeResp["op"] = "soul_update"
 		return
 	}
 	if tag != "task_create" {

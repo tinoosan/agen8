@@ -32,6 +32,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.expireAgentStatus()
 		return m, tea.Batch(
 			fetchSessionCmd(m.endpoint, m.sessionID),
+			fetchActivityCmd(m.endpoint, m.sessionID),
 			fetchThinkingEventsCmd(m.endpoint, m.runID, m.lastEventSeq),
 			tickCmd(),
 		)
@@ -49,6 +50,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case adapter.EventPushedMsg:
 		if !m.isRunInScope(msg.Record.RunID) {
+			// In team mode, events from child runs should still trigger an activity refresh.
+			if strings.TrimSpace(m.teamID) != "" {
+				return m, tea.Batch(
+					fetchActivityCmd(m.endpoint, m.sessionID),
+					adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh),
+				)
+			}
 			return m, adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh)
 		}
 		act, ok := adapter.EventRecordToActivity(msg.Record)
@@ -62,7 +70,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if entry := activityToFeedEntry(act); entry != nil {
 			// Avoid showing the same summary twice: one task-response per sourceID (taskId).
 			if !entry.isTaskResponse || !m.feedAlreadyHasTaskResponse(entry.sourceID) {
-				m.mergeActivityEntries([]feedEntry{*entry})
+				// Use upsert so existing tool-op entries are not wiped on every streaming event.
+				m.upsertFeedEntry(*entry)
 				m.deriveAgentStatus()
 			}
 		}
@@ -134,6 +143,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			timestamp: time.Now(),
 			text:      msg.goal,
 		})
+		m.feedGen++
 		m.appendReconnectNotice(msg.recovered)
 		m.setFeedback("queued", feedbackOK)
 		m.pinFeedToBottom()
@@ -154,6 +164,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			timestamp: time.Now(),
 			text:      text,
 		})
+		m.feedGen++
 		m.appendReconnectNotice(msg.recovered)
 		m.setFeedback(text, feedbackOK)
 		m.pinFeedToBottom()
@@ -313,6 +324,42 @@ func (m *Model) feedAlreadyHasTaskResponse(sourceID string) bool {
 	return false
 }
 
+// upsertFeedEntry adds a single entry from the streaming path.
+// Unlike mergeActivityEntries it does NOT wipe existing tool-op entries — it
+// either updates the entry in-place (matched by kind + sourceID) or appends it.
+func (m *Model) upsertFeedEntry(e feedEntry) {
+	if sid := strings.TrimSpace(e.sourceID); sid != "" {
+		for i := range m.feed {
+			if m.feed[i].kind == e.kind && strings.TrimSpace(m.feed[i].sourceID) == sid {
+				m.feed[i] = e
+				m.feedGen++
+				sort.SliceStable(m.feed, func(a, b int) bool {
+					return m.feed[a].timestamp.Before(m.feed[b].timestamp)
+				})
+				return
+			}
+		}
+	}
+	oldLines := m.totalFeedLines()
+	m.feed = append(m.feed, e)
+	m.feedGen++
+	sort.SliceStable(m.feed, func(i, j int) bool {
+		return m.feed[i].timestamp.Before(m.feed[j].timestamp)
+	})
+	if m.liveFollow {
+		m.pinFeedToBottom()
+	} else {
+		newLines := m.totalFeedLines()
+		if newLines > oldLines {
+			m.feedScroll += (newLines - oldLines)
+		}
+		maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+		if m.feedScroll > maxScroll {
+			m.feedScroll = maxScroll
+		}
+	}
+}
+
 func (m *Model) mergeActivityEntries(entries []feedEntry) {
 	if len(entries) == 0 {
 		return
@@ -348,6 +395,7 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 		return merged[i].timestamp.Before(merged[j].timestamp)
 	})
 	m.feed = merged
+	m.feedGen++
 
 	if m.liveFollow {
 		m.pinFeedToBottom()
@@ -446,6 +494,7 @@ func (m *Model) processThinkingEvents(events []types.EventRecord) {
 	sort.SliceStable(m.feed, func(i, j int) bool {
 		return m.feed[i].timestamp.Before(m.feed[j].timestamp)
 	})
+	m.feedGen++
 
 	if m.liveFollow {
 		m.pinFeedToBottom()
@@ -495,6 +544,7 @@ func (m *Model) mergeThinkingEntries(entries []feedEntry) {
 	sort.SliceStable(m.feed, func(i, j int) bool {
 		return m.feed[i].timestamp.Before(m.feed[j].timestamp)
 	})
+	m.feedGen++
 
 	if m.liveFollow {
 		m.pinFeedToBottom()
@@ -546,6 +596,7 @@ func (m *Model) appendReconnectNotice(recovered bool) {
 		timestamp: m.lastReconnectAt,
 		text:      "reconnected context",
 	})
+	m.feedGen++
 }
 
 func (m *Model) feedHeight() int {
@@ -647,6 +698,10 @@ func (m *Model) deriveAgentStatus() {
 func (m *Model) isRunInScope(runID string) bool {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
+		return true
+	}
+	// In team mode, accept streaming events from all runs (child agents included).
+	if strings.TrimSpace(m.teamID) != "" {
 		return true
 	}
 	current := strings.TrimSpace(m.runID)

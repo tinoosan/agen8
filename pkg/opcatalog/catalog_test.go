@@ -77,6 +77,7 @@ func TestKnownOpsSorted(t *testing.T) {
 		"http_fetch",
 		"obsidian",
 		"shell_exec",
+		"soul_update",
 		"task_create",
 		"task_review",
 		"trace_run",

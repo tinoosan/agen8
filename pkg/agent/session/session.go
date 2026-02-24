@@ -1271,8 +1271,23 @@ type batchGroupScope struct {
 	reviewerID   string
 }
 
+type batchCloseAndHandoffStore interface {
+	CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (string, error)
+}
+
+type atomicBatchCloseAndHandoffStore interface {
+	CloseBatchAndHandoffAtomic(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (handoffTaskID string, approved, retried, escalated int, err error)
+}
+
 func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types.Task, tr types.TaskResult) {
-	if isCallbackSource(metadataString(task.Metadata, "source")) {
+	source := metadataString(task.Metadata, "source")
+	if source == "review.handoff" {
+		return
+	}
+	if source == "team.batch.callback" && tr.Status == types.TaskStatusSucceeded {
+		s.maybeCreateReviewerToCoordinatorHandoff(ctx, task, tr)
+	}
+	if isCallbackSource(source) {
 		return
 	}
 	parentRunID := strings.TrimSpace(s.cfg.ParentRunID)
@@ -1455,6 +1470,62 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 
 	s.emitBatchProgress(ctx, group)
 	s.maybeFlushBatchGroup(ctx, group)
+}
+
+func (s *Session) maybeCreateReviewerToCoordinatorHandoff(ctx context.Context, task types.Task, tr types.TaskResult) {
+	if s == nil || s.cfg.TaskStore == nil {
+		return
+	}
+	batchTaskID := strings.TrimSpace(task.TaskID)
+	if batchTaskID == "" {
+		return
+	}
+	reviewerIdentity := strings.TrimSpace(task.AssignedRole)
+	if reviewerIdentity == "" {
+		reviewerIdentity = strings.TrimSpace(s.cfg.RoleName)
+	}
+	if reviewerIdentity == "" {
+		reviewerIdentity = strings.TrimSpace(task.AssignedTo)
+	}
+	if reviewerIdentity == "" {
+		reviewerIdentity = "reviewer"
+	}
+	summary := strings.TrimSpace(tr.Summary)
+	if summary == "" {
+		summary = "Batch review completed."
+	}
+
+	if closer, ok := s.cfg.TaskStore.(batchCloseAndHandoffStore); ok {
+		if _, err := closer.CloseBatchAndHandoff(ctx, batchTaskID, reviewerIdentity, summary); err != nil {
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "callback.batch.close.error",
+				Message: "Failed to create reviewer->coordinator handoff",
+				Data: map[string]string{
+					"taskId":        batchTaskID,
+					"reviewedBy":    reviewerIdentity,
+					"closeError":    err.Error(),
+					"source":        "team.batch.callback",
+					"ensureHandoff": "true",
+				},
+			})
+		}
+		return
+	}
+	if atomicCloser, ok := s.cfg.TaskStore.(atomicBatchCloseAndHandoffStore); ok {
+		if _, _, _, _, err := atomicCloser.CloseBatchAndHandoffAtomic(ctx, batchTaskID, reviewerIdentity, summary); err != nil {
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "callback.batch.close.error",
+				Message: "Failed to create reviewer->coordinator handoff",
+				Data: map[string]string{
+					"taskId":        batchTaskID,
+					"reviewedBy":    reviewerIdentity,
+					"closeError":    err.Error(),
+					"source":        "team.batch.callback",
+					"ensureHandoff": "true",
+				},
+			})
+		}
+	}
 }
 
 func containsRoleCI(roles []string, want string) bool {
@@ -1928,7 +1999,7 @@ func countDecisionMap(decisions map[string]any) (approved, retried, escalated in
 
 func isCallbackSource(source string) bool {
 	switch strings.TrimSpace(source) {
-	case "subagent.callback", "team.callback", "subagent.batch.callback", "team.batch.callback":
+	case "subagent.callback", "team.callback", "subagent.batch.callback", "team.batch.callback", "review.handoff":
 		return true
 	default:
 		return false

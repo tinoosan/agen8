@@ -808,6 +808,174 @@ func TestMaybeCreateCoordinatorCallback_SyntheticBatchDoesNotRequeueCallback(t *
 	}
 }
 
+func TestMaybeCreateCoordinatorCallback_ReviewerBatchCompletionCreatesCoordinatorHandoff(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	now := time.Now().UTC()
+	child := types.Task{
+		TaskID:         "callback-team-child",
+		SessionID:      "team-team-1",
+		RunID:          "team-team-1-callback",
+		TeamID:         "team-1",
+		AssignedRole:   "reviewer",
+		AssignedToType: "role",
+		AssignedTo:     "reviewer",
+		TaskKind:       state.TaskKindCallback,
+		Goal:           "review child",
+		Status:         types.TaskStatusReviewPending,
+		CreatedAt:      &now,
+		Metadata: map[string]any{
+			"source":            "team.callback",
+			"callbackForTaskId": "task-child",
+		},
+	}
+	if err := store.CreateTask(context.Background(), child); err != nil {
+		t.Fatalf("CreateTask child: %v", err)
+	}
+	batch := types.Task{
+		TaskID:         "callback-batch-parent",
+		SessionID:      "team-team-1",
+		RunID:          "team-team-1-callback",
+		TeamID:         "team-1",
+		AssignedRole:   "reviewer",
+		AssignedToType: "role",
+		AssignedTo:     "reviewer",
+		TaskKind:       state.TaskKindCallback,
+		Goal:           "review batch",
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+		Inputs: map[string]any{
+			"items": []any{
+				map[string]any{"callbackTaskId": "callback-team-child", "decision": "approve", "artifacts": []any{"/workspace/reviewer/review.md"}},
+			},
+		},
+		Metadata: map[string]any{
+			"source":             "team.batch.callback",
+			"coordinatorRole":    "coordinator",
+			"batchParentTaskId":  "task-parent",
+			"batchWaveId":        "wave-a",
+			"batchItemDecisions": map[string]any{"callback-team-child": "approve"},
+		},
+	}
+	if err := store.CreateTask(context.Background(), batch); err != nil {
+		t.Fatalf("CreateTask batch: %v", err)
+	}
+
+	s := &Session{
+		cfg: Config{
+			TaskStore:    store,
+			TeamID:       "team-1",
+			RoleName:     "reviewer",
+			RunID:        "run-reviewer",
+			SessionID:    "sess-reviewer",
+			Events:       nil,
+			TeamRoles:    []string{"coordinator", "reviewer"},
+			ReviewerRole: "reviewer",
+		},
+	}
+	tr := types.TaskResult{
+		TaskID:      "callback-batch-parent",
+		Status:      types.TaskStatusSucceeded,
+		Summary:     "Review complete.",
+		CompletedAt: &now,
+		Artifacts:   []string{"/workspace/reviewer/review.md"},
+	}
+	s.maybeCreateCoordinatorCallback(context.Background(), batch, tr)
+
+	handoff, err := store.GetTask(context.Background(), "review-handoff-callback-batch-parent")
+	if err != nil {
+		t.Fatalf("expected coordinator handoff task: %v", err)
+	}
+	if got := strings.TrimSpace(handoff.AssignedRole); got != "coordinator" {
+		t.Fatalf("handoff assigned role=%q want coordinator", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(handoff.Metadata["source"])); got != "review.handoff" {
+		t.Fatalf("handoff source=%q want review.handoff", got)
+	}
+}
+
+func TestMaybeCreateCoordinatorCallback_ReviewHandoffDoesNotRequeueReviewerCallback(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	now := time.Now().UTC()
+	sess, err := New(Config{
+		Agent: &errorAgent{cfg: agent.AgentConfig{Model: "fake-model", Hooks: agent.Hooks{}}},
+		Profile: &profile.Profile{
+			ID:          "team",
+			Description: "team",
+			Team: &profile.TeamConfig{
+				Model: "gpt-5",
+				Roles: []profile.RoleConfig{
+					{Name: "coordinator", Coordinator: true, Description: "coord", Prompts: profile.PromptConfig{SystemPrompt: "coord"}},
+					{Name: "reviewer", Description: "review", Prompts: profile.PromptConfig{SystemPrompt: "review"}},
+				},
+			},
+		},
+		TaskStore:         store,
+		SessionID:         "sess-coord",
+		RunID:             "run-coord",
+		TeamID:            "team-1",
+		RoleName:          "coordinator",
+		IsCoordinator:     true,
+		CoordinatorRole:   "coordinator",
+		ReviewerRole:      "reviewer",
+		TeamRoles:         []string{"coordinator", "reviewer"},
+		LeaseTTL:          time.Minute,
+		LeaseExtend:       30 * time.Second,
+		PollInterval:      time.Second,
+		MaxReadBytes:      1024,
+		MaxPending:        50,
+		MemorySearchLimit: 1,
+		MaxRetries:        1,
+		InstanceID:        "inst",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	handoff := types.Task{
+		TaskID:         "review-handoff-callback-batch-1",
+		SessionID:      "sess-coord",
+		RunID:          "run-coord",
+		TeamID:         "team-1",
+		AssignedRole:   "coordinator",
+		AssignedToType: "role",
+		AssignedTo:     "coordinator",
+		TaskKind:       state.TaskKindCallback,
+		Goal:           "REVIEW HANDOFF",
+		Status:         types.TaskStatusSucceeded,
+		CreatedAt:      &now,
+		Metadata: map[string]any{
+			"source":      "review.handoff",
+			"batchTaskId": "callback-batch-1",
+		},
+	}
+	sess.maybeCreateCoordinatorCallback(context.Background(), handoff, types.TaskResult{
+		TaskID:      handoff.TaskID,
+		Status:      types.TaskStatusSucceeded,
+		CompletedAt: &now,
+		Summary:     "done",
+	})
+	tasks, err := store.ListTasks(context.Background(), state.TaskFilter{
+		TeamID:   "team-1",
+		Status:   []types.TaskStatus{types.TaskStatusReviewPending, types.TaskStatusPending},
+		SortBy:   "created_at",
+		SortDesc: true,
+		Limit:    100,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	for _, task := range tasks {
+		if strings.TrimSpace(task.TaskID) == "callback-review-handoff-callback-batch-1" {
+			t.Fatalf("unexpected callback generated from review.handoff completion")
+		}
+	}
+}
+
 func TestListBatchExpectedTasks_ExcludesSyntheticAndMatchesWave(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
 	if err != nil {

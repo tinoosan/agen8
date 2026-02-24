@@ -80,6 +80,11 @@ type Model struct {
 	lastEventSeq     int64 // cursor for incremental thinking event polling
 	thinkingExpanded bool  // ctrl+o toggles all thinking blocks globally
 
+	feedGen       int      // incremented on every feed mutation; used to invalidate lineCache
+	lineCache     []string // cached output of feedLines(); valid when lineCacheGen == feedGen && lineCacheWidth == width
+	lineCacheGen  int
+	lineCacheWidth int
+
 	pickerOpen    bool
 	pickerLoading bool
 	pickerTitle   string
