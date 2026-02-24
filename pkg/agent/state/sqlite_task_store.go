@@ -346,7 +346,11 @@ func metadataString(m map[string]any, key string) string {
 	if len(m) == 0 {
 		return ""
 	}
-	return strings.TrimSpace(fmt.Sprint(m[key]))
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(raw))
 }
 
 func metadataMap(m map[string]any, key string) map[string]any {
@@ -517,15 +521,15 @@ func (s *SQLiteTaskStore) CloseBatchAndHandoffAtomic(ctx context.Context, batchT
 		reviewSummaryPath = strings.TrimSpace(artifacts[0])
 	}
 	handoffMetadata := map[string]any{
-		"source":           "review.handoff",
-		"batchTaskId":      batchTaskID,
+		"source":            "review.handoff",
+		"batchTaskId":       batchTaskID,
 		"batchParentTaskId": metadataString(metadata, "batchParentTaskId"),
-		"batchWaveId":      metadataString(metadata, "batchWaveId"),
-		"reviewerRole":     reviewerIdentity,
+		"batchWaveId":       metadataString(metadata, "batchWaveId"),
+		"reviewerRole":      reviewerIdentity,
 		"reviewSummaryPath": reviewSummaryPath,
-		"approvedCount":    approved,
-		"retryCount":       retried,
-		"escalateCount":    escalated,
+		"approvedCount":     approved,
+		"retryCount":        retried,
+		"escalateCount":     escalated,
 	}
 	handoffMetadataJSON, _ := json.Marshal(handoffMetadata)
 	handoffInputs := map[string]any{

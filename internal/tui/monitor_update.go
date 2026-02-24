@@ -121,6 +121,8 @@ func (m *monitorModel) handleTailAndStreamMessages(msg tea.Msg) (tea.Model, tea.
 			cmds = append(cmds, m.loadInboxPage())
 		case "callback.batch.item.reviewed":
 			cmds = append(cmds, m.loadOutboxPage())
+		case "callback.batch.closed":
+			cmds = append(cmds, m.loadInboxPage(), m.loadOutboxPage())
 		case "task.delivered":
 			cmds = append(cmds, m.loadOutboxPage())
 		case "agent.op.request", "agent.op.response":

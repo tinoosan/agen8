@@ -243,9 +243,11 @@ func (t *TaskReviewTool) handleBatchDecision(ctx context.Context, batchTask type
 	if reviewComplete {
 		summary := fmt.Sprintf("Batch review complete: approved=%d retry=%d escalate=%d.", approved, retried, escalated)
 		if closer, ok := t.Store.(batchCloseAndHandoffCloser); ok {
-			if hid, cerr := closer.CloseBatchAndHandoff(ctx, strings.TrimSpace(batchTask.TaskID), reviewerIdentity, summary); cerr == nil {
-				handoffTaskID = strings.TrimSpace(hid)
+			hid, cerr := closer.CloseBatchAndHandoff(ctx, strings.TrimSpace(batchTask.TaskID), reviewerIdentity, summary)
+			if cerr != nil {
+				return types.HostOpRequest{}, fmt.Errorf("task_review: close batch and handoff: %w", cerr)
 			}
+			handoffTaskID = strings.TrimSpace(hid)
 		}
 	}
 	if handoffTaskID != "" {

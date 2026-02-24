@@ -89,10 +89,51 @@ func TestTaskReview_Execute_BatchItemApprove(t *testing.T) {
 	if strings.TrimSpace(fmt.Sprint(decisions["callback-task-1"])) != "approve" {
 		t.Fatalf("expected batch decision to be recorded, got %v", decisions)
 	}
+	updatedChild, err := cfg.store.GetTask(context.Background(), "callback-task-1")
+	if err != nil {
+		t.Fatalf("GetTask child: %v", err)
+	}
+	if updatedChild.Status != types.TaskStatusSucceeded {
+		t.Fatalf("child status=%q want succeeded", updatedChild.Status)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(updatedChild.Metadata["batchItemStatus"])); got != "approved" {
+		t.Fatalf("batchItemStatus=%q want approved", got)
+	}
+	handoff, err := cfg.store.GetTask(context.Background(), "review-handoff-callback-batch-parent-1")
+	if err != nil {
+		all, _ := cfg.store.ListTasks(context.Background(), state.TaskFilter{Limit: 100, SortBy: "created_at"})
+		ids := make([]string, 0, len(all))
+		for _, tk := range all {
+			ids = append(ids, tk.TaskID+":"+string(tk.Status))
+		}
+		t.Fatalf("expected handoff task: %v (tasks=%v)", err, ids)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(handoff.Metadata["source"])); got != "review.handoff" {
+		t.Fatalf("handoff source=%q", got)
+	}
+	if _, err := tool.Execute(context.Background(), args); err != nil {
+		t.Fatalf("idempotent batch close should not fail: %v", err)
+	}
+	handoffAgain, err := cfg.store.GetTask(context.Background(), "review-handoff-callback-batch-parent-1")
+	if err != nil {
+		t.Fatalf("expected handoff task on re-run: %v", err)
+	}
+	if handoffAgain.TaskID != handoff.TaskID {
+		t.Fatalf("expected deterministic handoff id, got %q vs %q", handoffAgain.TaskID, handoff.TaskID)
+	}
 }
 
 type taskReviewTestCfg struct {
 	store state.TaskStore
+}
+
+type batchCloseTestStore struct {
+	*state.SQLiteTaskStore
+}
+
+func (s *batchCloseTestStore) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (string, error) {
+	handoffTaskID, _, _, _, err := s.SQLiteTaskStore.CloseBatchAndHandoffAtomic(ctx, batchTaskID, reviewerIdentity, reviewSummary)
+	return handoffTaskID, err
 }
 
 func setupTaskReviewStore(t *testing.T) taskReviewTestCfg {
@@ -103,6 +144,7 @@ func setupTaskReviewStore(t *testing.T) taskReviewTestCfg {
 	if err != nil {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
 	}
+	closableStore := &batchCloseTestStore{SQLiteTaskStore: store}
 	ctx := context.Background()
 	now := time.Now().UTC()
 
@@ -113,7 +155,7 @@ func setupTaskReviewStore(t *testing.T) taskReviewTestCfg {
 		CreatedAt: &now,
 		Metadata:  map[string]any{"source": "spawn_worker"},
 	}
-	if err := store.CreateTask(ctx, delegated); err != nil {
+	if err := closableStore.CreateTask(ctx, delegated); err != nil {
 		t.Fatalf("CreateTask delegated: %v", err)
 	}
 
@@ -124,7 +166,7 @@ func setupTaskReviewStore(t *testing.T) taskReviewTestCfg {
 		CreatedAt: &now,
 		Metadata:  map[string]any{"source": "subagent.callback", "sourceRunId": "child-run", "callbackForTaskId": "task-1"},
 	}
-	if err := store.CreateTask(ctx, callback); err != nil {
+	if err := closableStore.CreateTask(ctx, callback); err != nil {
 		t.Fatalf("CreateTask callback: %v", err)
 	}
 	batch := types.Task{
@@ -145,7 +187,7 @@ func setupTaskReviewStore(t *testing.T) taskReviewTestCfg {
 			"batchItemDecisions": map[string]any{},
 		},
 	}
-	if err := store.CreateTask(ctx, batch); err != nil {
+	if err := closableStore.CreateTask(ctx, batch); err != nil {
 		t.Fatalf("CreateTask batch: %v", err)
 	}
 
@@ -156,9 +198,9 @@ func setupTaskReviewStore(t *testing.T) taskReviewTestCfg {
 		CreatedAt: &now,
 		Metadata:  map[string]any{"source": "user"},
 	}
-	if err := store.CreateTask(ctx, other); err != nil {
+	if err := closableStore.CreateTask(ctx, other); err != nil {
 		t.Fatalf("CreateTask other: %v", err)
 	}
 
-	return taskReviewTestCfg{store: store}
+	return taskReviewTestCfg{store: closableStore}
 }

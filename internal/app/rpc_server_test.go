@@ -3304,6 +3304,56 @@ func TestRPCServer_TaskList_TeamScopeNoRunIDReturnsAllRoleRuns(t *testing.T) {
 	}
 }
 
+func TestRPCServer_TaskList_InboxHidesStagedSingleCallbacks(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	teamID := "team-1"
+	sess.TeamID = teamID
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "callback-single-team", SessionID: sess.SessionID, RunID: run.RunID, TeamID: teamID, AssignedRole: "reviewer", AssignedToType: "role", AssignedTo: "reviewer",
+		Goal: "single team callback", Status: types.TaskStatusReviewPending, CreatedAt: &now, Metadata: map[string]any{"source": "team.callback"},
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "callback-single-sub", SessionID: sess.SessionID, RunID: run.RunID, TeamID: teamID, AssignedRole: "reviewer", AssignedToType: "role", AssignedTo: "reviewer",
+		Goal: "single sub callback", Status: types.TaskStatusReviewPending, CreatedAt: &now, Metadata: map[string]any{"source": "subagent.callback"},
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "callback-batch", SessionID: sess.SessionID, RunID: run.RunID, TeamID: teamID, AssignedRole: "reviewer", AssignedToType: "role", AssignedTo: "reviewer",
+		Goal: "batch callback", Status: types.TaskStatusReviewPending, CreatedAt: &now, Metadata: map[string]any{"source": "team.batch.callback"},
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodTaskList, protocol.TaskListParams{
+		ThreadID: protocol.ThreadID(sess.SessionID),
+		TeamID:   teamID,
+		Scope:    "team",
+		View:     "inbox",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("task.list inbox error: %+v", resp.Error)
+	}
+	var out protocol.TaskListResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if len(out.Tasks) != 1 {
+		t.Fatalf("expected only synthetic batch callback in inbox, got %d", len(out.Tasks))
+	}
+	if got := strings.TrimSpace(out.Tasks[0].ID); got != "callback-batch" {
+		t.Fatalf("unexpected inbox task %q", got)
+	}
+}
+
 func TestRPCServer_TeamGetStatus_ManifestRosterIgnoresStaleTaskRuns(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")
