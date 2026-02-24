@@ -19,7 +19,7 @@ func TestContextLengthFromOpenRouter(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":[{"id":"openrouter/mock-model","context_length":99000}]}`))
+		w.Write([]byte(`{"data":[{"id":"openrouter/mock-model","context_length":99000,"supported_parameters":["reasoning","temperature"]}]}`))
 	}))
 	defer srv.Close()
 
@@ -119,5 +119,96 @@ func TestContextLengthFromOpenRouter_FailBackoff(t *testing.T) {
 	_, _ = ContextLengthFromOpenRouter(ctx, "some-model")
 	if fetchCount.Load() != 2 {
 		t.Fatalf("expected fetch count to be 2 after backoff expiry, got %d", fetchCount.Load())
+	}
+}
+
+func TestSupportsReasoningSummaryFromOpenRouter(t *testing.T) {
+	ctx := context.Background()
+
+	os.Setenv("OPENROUTER_API_KEY", "test-key")
+	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[
+			{"id":"openrouter/reasoning-model","context_length":128000,"supported_parameters":["reasoning","temperature"]},
+			{"id":"openrouter/nonreasoning-model","context_length":128000,"supported_parameters":["temperature"]}
+		]}`))
+	}))
+	defer srv.Close()
+
+	openRouterAPIURL = srv.URL
+	orCacheMu = sync.RWMutex{}
+	orModelCache = nil
+	orCacheModTime = time.Time{}
+	orCacheFailTime = time.Time{}
+	t.Cleanup(func() {
+		openRouterAPIURL = "https://openrouter.ai/api/v1/models"
+		orModelCache = nil
+		orCacheModTime = time.Time{}
+		orCacheFailTime = time.Time{}
+	})
+
+	if supports, known := SupportsReasoningSummaryFromOpenRouter(ctx, "openrouter/reasoning-model"); !known || !supports {
+		t.Fatalf("expected reasoning support=true, known=true; got supports=%v known=%v", supports, known)
+	}
+	if supports, known := SupportsReasoningSummaryFromOpenRouter(ctx, "openrouter/nonreasoning-model"); !known || supports {
+		t.Fatalf("expected reasoning support=false, known=true; got supports=%v known=%v", supports, known)
+	}
+	if supports, known := SupportsReasoningSummaryFromOpenRouter(ctx, "openrouter/unknown-model"); known || supports {
+		t.Fatalf("expected unknown model to return supports=false, known=false; got supports=%v known=%v", supports, known)
+	}
+}
+
+func TestOpenRouterModelInfos_IncludesPricingPerM(t *testing.T) {
+	ctx := context.Background()
+
+	os.Setenv("OPENROUTER_API_KEY", "test-key")
+	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[
+			{
+				"id":"moonshotai/kimi-k2.5",
+				"supported_parameters":["reasoning","temperature"],
+				"pricing":{"prompt":"0.00000045","completion":"0.0000022"},
+				"top_provider":{"context_length":262144}
+			}
+		]}`))
+	}))
+	defer srv.Close()
+
+	openRouterAPIURL = srv.URL
+	orCacheMu = sync.RWMutex{}
+	orModelCache = nil
+	orCacheModTime = time.Time{}
+	orCacheFailTime = time.Time{}
+	t.Cleanup(func() {
+		openRouterAPIURL = "https://openrouter.ai/api/v1/models"
+		orModelCache = nil
+		orCacheModTime = time.Time{}
+		orCacheFailTime = time.Time{}
+	})
+
+	infos, ok := OpenRouterModelInfos(ctx)
+	if !ok || len(infos) != 1 {
+		t.Fatalf("expected one model info; ok=%v len=%d", ok, len(infos))
+	}
+	info := infos[0]
+	if info.ID != "moonshotai/kimi-k2.5" {
+		t.Fatalf("id=%q", info.ID)
+	}
+	if diff := info.InputPerM - 0.45; diff < -1e-9 || diff > 1e-9 {
+		t.Fatalf("inputPerM=%v, want 0.45", info.InputPerM)
+	}
+	if diff := info.OutputPerM - 2.2; diff < -1e-9 || diff > 1e-9 {
+		t.Fatalf("outputPerM=%v, want 2.2", info.OutputPerM)
+	}
+	if info.ContextLength != 262144 {
+		t.Fatalf("context=%d, want 262144", info.ContextLength)
+	}
+	if !info.IsReasoning {
+		t.Fatalf("expected IsReasoning=true")
 	}
 }

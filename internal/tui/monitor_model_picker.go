@@ -17,6 +17,8 @@ type monitorModelPickerItem struct {
 	provider   string
 	isProvider bool
 	count      int
+	inputPerM  float64
+	outputPerM float64
 }
 
 func (m monitorModelPickerItem) FilterValue() string {
@@ -35,8 +37,6 @@ func (m monitorModelPickerItem) Title() string {
 	}
 	return m.id
 }
-
-func (m monitorModelPickerItem) Description() string { return "" }
 
 // openModelPicker initializes and opens the provider-first model picker modal.
 func (m *monitorModel) openModelPicker() tea.Cmd {
@@ -109,7 +109,12 @@ func (m *monitorModel) refreshModelPickerItems() {
 			if q != "" && !strings.Contains(candidate, q) {
 				continue
 			}
-			items = append(items, monitorModelPickerItem{id: strings.TrimSpace(info.ID), provider: provider})
+			items = append(items, monitorModelPickerItem{
+				id:         strings.TrimSpace(info.ID),
+				provider:   provider,
+				inputPerM:  info.InputPerM,
+				outputPerM: info.OutputPerM,
+			})
 		}
 		m.modelPickerList.Title = "Select Model (" + provider + ")"
 	}
@@ -208,4 +213,18 @@ func (m *monitorModel) renderModelPicker(base string) string {
 
 	_ = base
 	return kit.RenderOverlay(opts)
+}
+
+func (m monitorModelPickerItem) Description() string {
+	if m.isProvider {
+		return ""
+	}
+	return "in $" + formatPricePerM(m.inputPerM) + "/M · out $" + formatPricePerM(m.outputPerM) + "/M"
+}
+
+func formatPricePerM(v float64) string {
+	if v <= 0 {
+		return "0"
+	}
+	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.4f", v), "0"), ".")
 }

@@ -1,9 +1,12 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -12,6 +15,38 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/tinoosan/agen8/pkg/llm/types"
 )
+
+type captureRoundTripper struct {
+	t              *testing.T
+	body           string
+	responseStatus int
+	responseBody   string
+}
+
+func (rt *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.t.Helper()
+	if req.Body != nil {
+		b, err := io.ReadAll(req.Body)
+		if err != nil {
+			rt.t.Fatalf("read request body: %v", err)
+		}
+		rt.body = string(b)
+	}
+	status := rt.responseStatus
+	if status == 0 {
+		status = http.StatusOK
+	}
+	body := rt.responseBody
+	if strings.TrimSpace(body) == "" {
+		body = `{"id":"chatcmpl_test","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+	}
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}, nil
+}
 
 type testRoleMapper struct {
 	fn func(raw string) (CanonicalRole, error)
@@ -375,6 +410,43 @@ func TestClient_buildResponseParams_ReasoningSummaryAutoForOnlineVariant(t *test
 	}
 }
 
+func TestClient_buildResponseParams_OpenRouterUnknownModelRequestsReasoningByDefault(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("https://openrouter.ai/api/v1"))
+	c := &Client{client: &cli, baseURL: "https://openrouter.ai/api/v1"}
+
+	params, err := c.buildResponseParams(types.LLMRequest{
+		Model:    "moonshotai/kimi-k2.5",
+		System:   "system",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("buildResponseParams: %v", err)
+	}
+	if string(params.Reasoning.Summary) != "auto" {
+		t.Fatalf("expected summary auto for OpenRouter model, got %+v", params.Reasoning.Summary)
+	}
+	if string(params.Reasoning.Effort) != "medium" {
+		t.Fatalf("expected effort medium default for OpenRouter model, got %+v", params.Reasoning.Effort)
+	}
+}
+
+func TestClient_buildResponseParams_NonOpenRouterUnknownModelDoesNotForceReasoning(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
+	c := &Client{client: &cli, baseURL: "http://example"}
+
+	params, err := c.buildResponseParams(types.LLMRequest{
+		Model:    "moonshotai/kimi-k2.5",
+		System:   "system",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("buildResponseParams: %v", err)
+	}
+	if string(params.Reasoning.Summary) != "" || string(params.Reasoning.Effort) != "" {
+		t.Fatalf("did not expect reasoning defaults for non-OpenRouter unknown model, got %+v", params.Reasoning)
+	}
+}
+
 func TestClient_toResponseFromResponses_MapsToolCallsAndUsage(t *testing.T) {
 	resp := &responses.Response{
 		Model: responses.ResponsesModelGPT5Pro,
@@ -554,6 +626,113 @@ func TestOnResponsesStreamEvent_CallbackNilTracksCompleted(t *testing.T) {
 	}
 }
 
+func TestOnResponsesStreamEvent_OpenRouterReasoningTextDeltaFallback(t *testing.T) {
+	raw := `{
+		"type":"response.reasoning_text.delta",
+		"sequence_number":1,
+		"delta":"fallback reasoning summary text"
+	}`
+	var ev responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+
+	c := &Client{baseURL: "https://openrouter.ai/api/v1"}
+	saw := false
+	var got []types.LLMStreamChunk
+	err := c.onResponsesStreamEvent(ev, func(ch types.LLMStreamChunk) error {
+		got = append(got, ch)
+		return nil
+	}, nil, nil, &saw)
+	if err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("chunks = %d, want 1", len(got))
+	}
+	if !got[0].IsReasoning || got[0].Text != "fallback reasoning summary text" {
+		t.Fatalf("chunk = %+v", got[0])
+	}
+	if saw {
+		t.Fatalf("expected sawReasoningSummaryText=false for reasoning_text fallback")
+	}
+}
+
+func TestOnResponsesStreamEvent_OpenRouterReasoningTextDeltaFallbackStreamsMultipleChunks(t *testing.T) {
+	raw1 := `{
+		"type":"response.reasoning_text.delta",
+		"sequence_number":1,
+		"delta":"The"
+	}`
+	raw2 := `{
+		"type":"response.reasoning_text.delta",
+		"sequence_number":2,
+		"delta":" plan is to call tools next."
+	}`
+	var ev1, ev2 responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(raw1), &ev1); err != nil {
+		t.Fatalf("unmarshal event 1: %v", err)
+	}
+	if err := json.Unmarshal([]byte(raw2), &ev2); err != nil {
+		t.Fatalf("unmarshal event 2: %v", err)
+	}
+
+	c := &Client{baseURL: "https://openrouter.ai/api/v1"}
+	saw := false
+	var got []types.LLMStreamChunk
+	cb := func(ch types.LLMStreamChunk) error {
+		got = append(got, ch)
+		return nil
+	}
+	if err := c.onResponsesStreamEvent(ev1, cb, nil, nil, &saw); err != nil {
+		t.Fatalf("onResponsesStreamEvent ev1: %v", err)
+	}
+	if err := c.onResponsesStreamEvent(ev2, cb, nil, nil, &saw); err != nil {
+		t.Fatalf("onResponsesStreamEvent ev2: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("chunks = %d, want 2", len(got))
+	}
+	if got[0].Text != "The" || got[1].Text != " plan is to call tools next." {
+		t.Fatalf("chunks = %+v", got)
+	}
+	if saw {
+		t.Fatalf("expected sawReasoningSummaryText=false for reasoning_text fallback")
+	}
+}
+
+func TestOnResponsesStreamEvent_NonOpenRouterReasoningTextDeltaNoText(t *testing.T) {
+	raw := `{
+		"type":"response.reasoning_text.delta",
+		"sequence_number":1,
+		"delta":"fallback reasoning summary text"
+	}`
+	var ev responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+
+	c := &Client{baseURL: "https://api.openai.com/v1"}
+	saw := false
+	var got []types.LLMStreamChunk
+	err := c.onResponsesStreamEvent(ev, func(ch types.LLMStreamChunk) error {
+		got = append(got, ch)
+		return nil
+	}, nil, nil, &saw)
+	if err != nil {
+		t.Fatalf("onResponsesStreamEvent: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("chunks = %d, want 1", len(got))
+	}
+	if !got[0].IsReasoning || strings.TrimSpace(got[0].Text) != "" {
+		t.Fatalf("chunk = %+v", got[0])
+	}
+	if saw {
+		t.Fatalf("expected sawReasoningSummaryText=false")
+	}
+}
+
 func TestOnStreamChunk_EmitsStructuredReasoningSummary(t *testing.T) {
 	raw := `{
 		"id":"chatcmpl-1",
@@ -689,8 +868,8 @@ func TestShouldFallbackToChatForRequest_DisablesFallbackForOpenAIBaseURL(t *test
 func TestShouldFallbackToChatForRequest_DisablesFallbackForReasoningModel(t *testing.T) {
 	req := types.LLMRequest{Model: "openai/gpt-5-nano:online"}
 	err := &openai.Error{StatusCode: 404}
-	if shouldFallbackToChatForRequest("https://openrouter.ai/api/v1", req, err) {
-		t.Fatalf("expected no fallback for reasoning model")
+	if !shouldFallbackToChatForRequest("https://openrouter.ai/api/v1", req, err) {
+		t.Fatalf("expected fallback for OpenRouter reasoning model when Responses is unsupported")
 	}
 }
 
@@ -721,6 +900,73 @@ func TestShouldAllowOpenRouterFreeModelDataCollection_DefaultAndEnv(t *testing.T
 	t.Setenv("OPENROUTER_FREE_MODEL_DATA_COLLECTION", "false")
 	if shouldAllowOpenRouterFreeModelDataCollection("openai/gpt-oss-120b:free") {
 		t.Fatalf("expected env override to disable free-model data collection")
+	}
+}
+
+func TestGenerateChat_OpenRouterIncludesReasoningEffortMediumByDefault(t *testing.T) {
+	rt := &captureRoundTripper{t: t}
+	httpClient := &http.Client{Transport: rt}
+	cli := openai.NewClient(
+		option.WithAPIKey("k"),
+		option.WithBaseURL("https://openrouter.ai/api/v1"),
+		option.WithHTTPClient(httpClient),
+	)
+	c := &Client{client: &cli, baseURL: "https://openrouter.ai/api/v1", DefaultMaxTokens: 64}
+
+	_, err := c.generateChat(context.Background(), types.LLMRequest{
+		Model:    "anthropic/claude-3.5-sonnet",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("generateChat: %v", err)
+	}
+	if !strings.Contains(rt.body, `"reasoning":{"effort":"medium"}`) {
+		t.Fatalf("expected OpenRouter Chat reasoning.effort=medium in request body, got %s", rt.body)
+	}
+}
+
+func TestGenerateChat_OpenRouterIncludesReasoningEffortFromRequest(t *testing.T) {
+	rt := &captureRoundTripper{t: t}
+	httpClient := &http.Client{Transport: rt}
+	cli := openai.NewClient(
+		option.WithAPIKey("k"),
+		option.WithBaseURL("https://openrouter.ai/api/v1"),
+		option.WithHTTPClient(httpClient),
+	)
+	c := &Client{client: &cli, baseURL: "https://openrouter.ai/api/v1", DefaultMaxTokens: 64}
+
+	_, err := c.generateChat(context.Background(), types.LLMRequest{
+		Model:           "anthropic/claude-3.5-sonnet",
+		ReasoningEffort: " low ",
+		Messages:        []types.LLMMessage{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("generateChat: %v", err)
+	}
+	if !strings.Contains(rt.body, `"reasoning":{"effort":"low"}`) {
+		t.Fatalf("expected OpenRouter Chat reasoning.effort=low in request body, got %s", rt.body)
+	}
+}
+
+func TestGenerateChat_NonOpenRouterDoesNotInjectReasoningByDefault(t *testing.T) {
+	rt := &captureRoundTripper{t: t}
+	httpClient := &http.Client{Transport: rt}
+	cli := openai.NewClient(
+		option.WithAPIKey("k"),
+		option.WithBaseURL("https://api.openai.com/v1"),
+		option.WithHTTPClient(httpClient),
+	)
+	c := &Client{client: &cli, baseURL: "https://api.openai.com/v1", DefaultMaxTokens: 64}
+
+	_, err := c.generateChat(context.Background(), types.LLMRequest{
+		Model:    "openai/gpt-4o-mini",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("generateChat: %v", err)
+	}
+	if strings.Contains(rt.body, `"reasoning":`) {
+		t.Fatalf("did not expect reasoning body for non-OpenRouter chat request, got %s", rt.body)
 	}
 }
 

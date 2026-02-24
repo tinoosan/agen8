@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"sort"
 	"strings"
 
@@ -422,10 +423,14 @@ func (s *RPCServer) modelList(ctx context.Context, p protocol.ModelListParams) (
 	if _, err := s.resolveThreadID(p.ThreadID); err != nil {
 		return protocol.ModelListResult{}, err
 	}
-	_ = ctx
 	providerFilter := strings.ToLower(strings.TrimSpace(p.Provider))
 	query := strings.ToLower(strings.TrimSpace(p.Query))
 	infos := cost.SupportedModelInfos()
+	if shouldUseOpenRouterModelCatalog() {
+		if dynamic, ok := cost.OpenRouterModelInfos(ctx); ok && len(dynamic) > 0 {
+			infos = dynamic
+		}
+	}
 	models := make([]protocol.ModelEntry, 0, len(infos))
 	counts := map[string]int{}
 	for _, info := range infos {
@@ -458,6 +463,18 @@ func (s *RPCServer) modelList(ctx context.Context, p protocol.ModelListParams) (
 		return models[i].ID < models[j].ID
 	})
 	return protocol.ModelListResult{Providers: providers, Models: models}, nil
+}
+
+func shouldUseOpenRouterModelCatalog() bool {
+	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" {
+		return false
+	}
+	baseURL := strings.ToLower(strings.TrimSpace(os.Getenv("OPENROUTER_BASE_URL")))
+	if baseURL == "" {
+		// Default OpenRouter endpoint used throughout runtime when unset.
+		return true
+	}
+	return strings.Contains(baseURL, "openrouter.ai")
 }
 
 func truncateText(s string, max int) string {
