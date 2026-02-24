@@ -204,3 +204,11 @@ func TestMergeActivityEntries_DedupesByIdentity(t *testing.T) {
 		t.Fatalf("expected one normalized op entry after replay, got %d", count)
 	}
 }
+
+func TestUpdate_ModelSetSchedulesImmediateRefresh(t *testing.T) {
+	m := &Model{endpoint: "tcp://127.0.0.1:1", sessionID: "sess-1"}
+	_, cmd := m.Update(modelSetMsg{model: "openai/gpt-5"})
+	if cmd == nil {
+		t.Fatalf("expected refresh command batch after successful model set")
+	}
+}

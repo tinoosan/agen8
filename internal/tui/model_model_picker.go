@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/agen8/internal/tui/kit"
+	"github.com/tinoosan/agen8/internal/tui/modelpicker"
 	"github.com/tinoosan/agen8/pkg/cost"
 )
 
@@ -19,10 +20,10 @@ type modelPickerItem struct {
 }
 
 func (m modelPickerItem) FilterValue() string { return m.id }
-func (m modelPickerItem) Title() string       { return m.id }
-func (m modelPickerItem) Description() string {
-	return "in $" + formatPricePerM(m.inputPerM) + "/M · out $" + formatPricePerM(m.outputPerM) + "/M"
+func (m modelPickerItem) Title() string {
+	return modelpicker.FormatModelTitle(m.id, m.inputPerM, m.outputPerM)
 }
+func (m modelPickerItem) Description() string { return "" }
 
 // openModelPicker initializes and opens the model picker modal.
 func (m *Model) openModelPicker() tea.Cmd {

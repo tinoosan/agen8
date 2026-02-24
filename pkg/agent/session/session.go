@@ -866,7 +866,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	var pricingKnown bool
 	{
 		modelID := strings.TrimSpace(runAgent.GetModel())
-		if in, out, ok := cost.DefaultPricing().Lookup(modelID); ok {
+		if in, out, ok := cost.LookupPricing(ctx, modelID); ok {
 			costInPerM = in
 			costOutPerM = out
 			pricingKnown = true

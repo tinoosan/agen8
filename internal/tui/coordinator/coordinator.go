@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/tui/adapter"
+	"github.com/tinoosan/agen8/internal/tui/modelpicker"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
@@ -35,11 +36,6 @@ type conversationTurn struct {
 	text      string      // for user/system turns or agent markdown text
 	entries   []feedEntry // for agent turns — grouped ops
 	isText    bool        // true if this turn represents a final text/markdown block
-}
-
-type pickerItem struct {
-	Label string
-	Value string
 }
 
 // Model is the Bubble Tea model for the coordinator chat UI.
@@ -85,12 +81,7 @@ type Model struct {
 	lineCacheGen  int
 	lineCacheWidth int
 
-	pickerOpen    bool
-	pickerLoading bool
-	pickerTitle   string
-	pickerKind    string
-	pickerItems   []pickerItem
-	pickerSel     int
+	modelPicker modelpicker.Controller
 
 	lastWheelEvent time.Time // Used to throttle mouse wheel events
 }

@@ -10,12 +10,54 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/tui/adapter"
+	"github.com/tinoosan/agen8/internal/tui/modelpicker"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
 type monitorReconnectNotificationMsg struct{}
 
 func (m *monitorModel) dispatchUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.modelPickerOpen {
+		pickerCmd, event := m.modelPickerCtrl.Update(msg)
+		m.syncModelPickerLegacy()
+		switch event.Type {
+		case modelpicker.EventModelSelected:
+			m.model = event.ModelID
+			var setCmd tea.Cmd
+			if m.teamID != "" {
+				setCmd = m.writeTeamControl("set_team_model", event.ModelID)
+			} else {
+				setCmd = m.writeControl("set_model", map[string]any{"model": event.ModelID})
+			}
+			if pickerCmd != nil {
+				return m, tea.Batch(pickerCmd, setCmd)
+			}
+			return m, setCmd
+		case modelpicker.EventClosed:
+			if pickerCmd != nil {
+				return m, pickerCmd
+			}
+			return m, nil
+		case modelpicker.EventError:
+			if event.Err != nil {
+				m.appendAgentOutput("[model picker] error: " + event.Err.Error())
+			}
+			if pickerCmd != nil {
+				return m, pickerCmd
+			}
+			if _, ok := msg.(tea.KeyMsg); ok {
+				return m, nil
+			}
+		default:
+			if pickerCmd != nil {
+				return m, pickerCmd
+			}
+			if _, ok := msg.(tea.KeyMsg); ok {
+				return m, nil
+			}
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg, tickMsg, rpcHealthMsg:
 		return m.handleWindowAndTick(msg)

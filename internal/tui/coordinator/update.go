@@ -1,12 +1,14 @@
 package coordinator
 
 import (
+	"strconv"
 	"sort"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/tui/adapter"
+	"github.com/tinoosan/agen8/internal/tui/modelpicker"
 	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 	"github.com/tinoosan/agen8/pkg/types"
 )
@@ -14,11 +16,43 @@ import (
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
+	if m.modelPicker.IsOpen() {
+		pickerCmd, event := m.modelPicker.Update(msg)
+		switch event.Type {
+		case modelpicker.EventModelSelected:
+			setCmd := setModelCmd(m.endpoint, m.sessionID, event.ModelID)
+			if pickerCmd != nil {
+				return m, tea.Batch(pickerCmd, setCmd)
+			}
+			return m, setCmd
+		case modelpicker.EventError:
+			if event.Err != nil {
+				m.setFeedback("model picker error: "+event.Err.Error(), feedbackErr)
+			}
+			// Keep modal open so user can retry with another query/provider.
+			if pickerCmd != nil {
+				return m, pickerCmd
+			}
+		case modelpicker.EventClosed:
+			if pickerCmd != nil {
+				return m, pickerCmd
+			}
+		default:
+			if pickerCmd != nil {
+				return m, pickerCmd
+			}
+		}
+		if _, ok := msg.(tea.KeyMsg); ok {
+			return m, nil
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.Width = maxInt(12, m.width-30)
+		m.modelPicker.SetSize(m.width, m.height)
 		return m, nil
 
 	case animTickMsg:
@@ -131,6 +165,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, fetchThinkingEventsCmd(m.endpoint, m.runID, m.lastEventSeq)
 		}
 		return m, nil
+
+	case modelSetMsg:
+		if msg.err != nil {
+			m.setFeedback("model set failed: "+msg.err.Error(), feedbackErr)
+			return m, nil
+		}
+		switch {
+		case !msg.accepted:
+			m.setFeedback("model change rejected for "+msg.model, feedbackErr)
+		case msg.applied > 0:
+			m.setFeedback("model applied to "+strconv.Itoa(msg.applied)+" run(s): "+msg.model, feedbackOK)
+		default:
+			m.setFeedback("model change queued: "+msg.model, feedbackInfo)
+		}
+		return m, tea.Batch(
+			fetchSessionCmd(m.endpoint, m.sessionID),
+			fetchActivityCmd(m.endpoint, m.sessionID),
+			fetchThinkingEventsCmd(m.endpoint, m.runID, m.lastEventSeq),
+		)
 
 	case goalSubmittedMsg:
 		if msg.err != nil {
@@ -279,7 +332,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleSlash(line string) tea.Cmd {
-	cmd := strings.ToLower(strings.TrimSpace(line))
+	line = strings.TrimSpace(line)
+	cmd := strings.ToLower(line)
+	parts := strings.Fields(line)
+	base := ""
+	if len(parts) > 0 {
+		base = strings.ToLower(strings.TrimSpace(parts[0]))
+	}
 	switch cmd {
 	case "/pause":
 		return sessionActionCmd(m.endpoint, m.sessionID, m.teamID, "pause")
@@ -288,10 +347,18 @@ func (m *Model) handleSlash(line string) tea.Cmd {
 	case "/stop":
 		return sessionActionCmd(m.endpoint, m.sessionID, m.teamID, "stop")
 	case "/help":
-		m.setFeedback("commands: /pause /resume /stop /help /quit", feedbackInfo)
+		m.setFeedback("commands: /model /pause /resume /stop /help /quit", feedbackInfo)
 		return nil
 	case "/quit":
 		return tea.Quit
+	}
+	switch base {
+	case "/model":
+		if len(parts) == 1 {
+			return m.modelPicker.Open(m.endpoint, m.sessionID)
+		}
+		model := strings.TrimSpace(strings.Join(parts[1:], " "))
+		return setModelCmd(m.endpoint, m.sessionID, model)
 	default:
 		m.setFeedback("unknown command: "+line, feedbackErr)
 		return nil

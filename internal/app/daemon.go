@@ -125,7 +125,7 @@ func ResolveRoleAllowSubagents(cfg config.Config, profileID, roleName string) bo
 func resolvePricing(modelID string, overrideIn, overrideOut float64) (inPerM float64, outPerM float64, known bool) {
 	modelID = strings.TrimSpace(modelID)
 	if modelID != "" {
-		if in, out, ok := cost.DefaultPricing().Lookup(modelID); ok {
+		if in, out, ok := cost.LookupPricing(context.Background(), modelID); ok {
 			return in, out, true
 		}
 	}
