@@ -27,7 +27,7 @@ func (t *ObsidianTool) Definition() llmtypes.Tool {
 		Type: "function",
 		Function: llmtypes.ToolFunction{
 			Name:        "obsidian",
-			Description: "[KNOWLEDGE] Manage Obsidian-compatible vault notes using init/search/graph/upsert_note. command is optional: inferred as upsert_note for note-write fields, search for query/tag/link filters, otherwise graph.",
+			Description: "[KNOWLEDGE] Manage Obsidian-compatible vault notes using init/search/graph/upsert_note. command is optional: inferred as upsert_note for note-write fields, search for query/tag/link filters, otherwise graph. For upsert_note, noteType is optional and inferred from file/title cues, then defaults to F.",
 			Strict:      false,
 			Parameters: map[string]any{
 				"type": "object",
@@ -49,7 +49,7 @@ func (t *ObsidianTool) Definition() llmtypes.Tool {
 
 					"file":      map[string]any{"type": "string"},
 					"title":     map[string]any{"type": "string"},
-					"noteType":  map[string]any{"type": "string"},
+					"noteType":  map[string]any{"type": "string", "description": "Optional for upsert_note. If omitted, inferred from path/title cues; defaults to F."},
 					"content":   map[string]any{"type": "string"},
 					"tags":      stringArrayOrNull,
 					"aliases":   stringArrayOrNull,
@@ -446,10 +446,7 @@ func obsidianGraph(vault string, in obsidianArgs) (map[string]any, error) {
 }
 
 func obsidianUpsertNote(vault string, in obsidianArgs) (map[string]any, error) {
-	noteType := strings.ToUpper(strings.TrimSpace(in.NoteType))
-	if noteType == "" {
-		return nil, fmt.Errorf("obsidian.noteType is required for upsert_note")
-	}
+	noteType := resolveUpsertNoteType(in)
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
 		return nil, fmt.Errorf("obsidian.title is required for upsert_note")
@@ -503,6 +500,35 @@ func obsidianUpsertNote(vault string, in obsidianArgs) (map[string]any, error) {
 		"createdAt": created,
 		"overwrote": in.Overwrite,
 	}, nil
+}
+
+func resolveUpsertNoteType(in obsidianArgs) string {
+	if explicit := strings.ToUpper(strings.TrimSpace(in.NoteType)); explicit != "" {
+		return explicit
+	}
+
+	fileLower := strings.ToLower(filepath.ToSlash(strings.TrimSpace(in.File)))
+	switch {
+	case strings.Contains(fileLower, "/journals/") || strings.HasPrefix(fileLower, "journals/"):
+		return "JOURNAL"
+	case strings.Contains(fileLower, "/mocs/") || strings.HasPrefix(fileLower, "mocs/"):
+		return "MOC"
+	case strings.Contains(fileLower, "/inbox/") || strings.HasPrefix(fileLower, "inbox/"):
+		return "F"
+	}
+
+	nameCue := strings.ToLower(strings.TrimSpace(in.Title))
+	if nameCue == "" {
+		nameCue = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(filepath.Base(in.File), filepath.Ext(in.File))))
+	}
+	switch {
+	case strings.Contains(nameCue, "journal"):
+		return "JOURNAL"
+	case strings.Contains(nameCue, "moc"):
+		return "MOC"
+	}
+
+	return "F"
 }
 
 func buildNoteContent(id string, noteType string, title string, created string, tags []string, aliases []string, source string, up string, body string) string {

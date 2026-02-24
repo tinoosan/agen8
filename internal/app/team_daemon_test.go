@@ -12,6 +12,17 @@ import (
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
+type sessionLoaderStub struct {
+	sessions map[string]types.Session
+}
+
+func (s sessionLoaderStub) LoadSession(_ context.Context, sessionID string) (types.Session, error) {
+	if sess, ok := s.sessions[sessionID]; ok {
+		return sess, nil
+	}
+	return types.Session{}, context.Canceled
+}
+
 func TestTeamIsIdle_IgnoresHeartbeatTasks(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(t.TempDir()))
 	if err != nil {
@@ -139,5 +150,96 @@ func TestBuildRoleRuntimeProfile_UsesRoleScopedSkillsOnly(t *testing.T) {
 	}
 	if len(got.CodeExecRequiredImports) != 1 || got.CodeExecRequiredImports[0] != "pandas" {
 		t.Fatalf("unexpected code_exec required imports: %v", got.CodeExecRequiredImports)
+	}
+}
+
+func TestResolveWebhookRoutingContextFromRuns_PrefersCoordinatorTeamRun(t *testing.T) {
+	now := time.Now().UTC()
+	older := now.Add(-1 * time.Hour)
+	runs := []types.Run{
+		{
+			RunID:       "run-standalone",
+			SessionID:   "sess-standalone",
+			ParentRunID: "",
+			StartedAt:   &older,
+			Runtime:     &types.RunRuntimeConfig{},
+		},
+		{
+			RunID:       "run-ceo",
+			SessionID:   "sess-team",
+			ParentRunID: "",
+			StartedAt:   &now,
+			Runtime: &types.RunRuntimeConfig{
+				TeamID: "team-1",
+				Role:   "ceo",
+			},
+		},
+	}
+	roleSet := map[string]struct{}{"ceo": {}, "cto": {}}
+	ctx, err := resolveWebhookRoutingContextFromRuns(context.Background(), runs, roleSet, "ceo", sessionLoaderStub{})
+	if err != nil {
+		t.Fatalf("resolve webhook route: %v", err)
+	}
+	if ctx.run.RunID != "run-ceo" {
+		t.Fatalf("selected run=%q want run-ceo", ctx.run.RunID)
+	}
+	if ctx.teamID != "team-1" {
+		t.Fatalf("teamID=%q want team-1", ctx.teamID)
+	}
+	if ctx.coordinatorRole != "ceo" {
+		t.Fatalf("coordinatorRole=%q want ceo", ctx.coordinatorRole)
+	}
+	if _, ok := ctx.validRoles["cto"]; !ok {
+		t.Fatalf("validRoles missing cto: %#v", ctx.validRoles)
+	}
+}
+
+func TestResolveWebhookRoutingContextFromRuns_UsesSessionTeamIDFallback(t *testing.T) {
+	now := time.Now().UTC()
+	runs := []types.Run{
+		{
+			RunID:       "run-coordinator",
+			SessionID:   "sess-1",
+			ParentRunID: "",
+			StartedAt:   &now,
+			Runtime: &types.RunRuntimeConfig{
+				Role: "ceo",
+			},
+		},
+	}
+	loader := sessionLoaderStub{
+		sessions: map[string]types.Session{
+			"sess-1": {SessionID: "sess-1", TeamID: "team-from-session"},
+		},
+	}
+	ctx, err := resolveWebhookRoutingContextFromRuns(context.Background(), runs, map[string]struct{}{"ceo": {}}, "ceo", loader)
+	if err != nil {
+		t.Fatalf("resolve webhook route: %v", err)
+	}
+	if ctx.teamID != "team-from-session" {
+		t.Fatalf("teamID=%q want team-from-session", ctx.teamID)
+	}
+	if ctx.coordinatorRole != "ceo" {
+		t.Fatalf("coordinatorRole=%q want ceo", ctx.coordinatorRole)
+	}
+}
+
+func TestResolveWebhookRoutingContextFromRuns_NoRootRunErrors(t *testing.T) {
+	now := time.Now().UTC()
+	runs := []types.Run{
+		{
+			RunID:       "run-child",
+			SessionID:   "sess-1",
+			ParentRunID: "run-parent",
+			StartedAt:   &now,
+			Runtime: &types.RunRuntimeConfig{
+				TeamID: "team-1",
+				Role:   "ceo",
+			},
+		},
+	}
+	_, err := resolveWebhookRoutingContextFromRuns(context.Background(), runs, nil, "", sessionLoaderStub{})
+	if err == nil {
+		t.Fatalf("expected error when no root run is available")
 	}
 }

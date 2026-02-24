@@ -15,6 +15,7 @@ import (
 	"time"
 
 	implstore "github.com/tinoosan/agen8/internal/store"
+	"github.com/tinoosan/agen8/internal/webhook"
 	"github.com/tinoosan/agen8/pkg/agent"
 	"github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/config"
@@ -32,6 +33,13 @@ import (
 	"github.com/tinoosan/agen8/pkg/services/team"
 	"github.com/tinoosan/agen8/pkg/types"
 )
+
+type webhookRoutingContext struct {
+	run             types.Run
+	teamID          string
+	coordinatorRole string
+	validRoles      map[string]struct{}
+}
 
 type teamRunRequest struct {
 	ctx             context.Context
@@ -246,6 +254,24 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	if healthAddr != "" {
 		startHealthServer(runCtx, healthAddr, nil, &serverWG)
 	}
+	webhookAddr := strings.TrimSpace(resolved.WebhookAddr)
+	if webhookAddr != "" {
+		webhookServer := webhook.NewServer(webhook.ServerConfig{
+			Addr:     webhookAddr,
+			Ingester: webhook.NewWebhookTaskIngester(taskService, nil, nil),
+			BuildTask: func(ctx context.Context, payload []byte) (types.Task, error) {
+				route, err := resolveWebhookRoutingContext(ctx, sessionService, prof)
+				if err != nil {
+					return types.Task{}, err
+				}
+				if strings.TrimSpace(route.teamID) != "" {
+					return webhook.BuildTeamTask(payload, route.teamID, route.coordinatorRole, route.run, route.validRoles)
+				}
+				return webhook.BuildStandaloneTask(payload, route.run)
+			},
+		})
+		webhookServer.Run(runCtx, &serverWG)
+	}
 	if protocolEnabled {
 		baseCfg := RPCServerConfig{
 			Cfg:            cfg,
@@ -372,4 +398,138 @@ func resolveRoleModel(role profile.RoleConfig, teamModel string) string {
 		return model
 	}
 	return strings.TrimSpace(teamModel)
+}
+
+func resolveWebhookRoutingContext(ctx context.Context, sessionService pkgsession.Service, prof *profile.Profile) (webhookRoutingContext, error) {
+	if sessionService == nil {
+		return webhookRoutingContext{}, fmt.Errorf("session service is not configured")
+	}
+	runs, err := sessionService.ListRunsByStatus(ctx, []string{types.RunStatusRunning, types.RunStatusPaused})
+	if err != nil {
+		return webhookRoutingContext{}, fmt.Errorf("list active runs: %w", err)
+	}
+	roleSet, coordinatorRole, _ := profileWebhookRoleHints(prof)
+	return resolveWebhookRoutingContextFromRuns(ctx, runs, roleSet, coordinatorRole, sessionService)
+}
+
+func resolveWebhookRoutingContextFromRuns(ctx context.Context, runs []types.Run, roleSet map[string]struct{}, coordinatorRole string, sessionLoader interface {
+	LoadSession(context.Context, string) (types.Session, error)
+}) (webhookRoutingContext, error) {
+	var rootRuns []types.Run
+	for _, run := range runs {
+		if strings.TrimSpace(run.ParentRunID) != "" {
+			continue
+		}
+		rootRuns = append(rootRuns, run)
+	}
+	if len(rootRuns) == 0 {
+		return webhookRoutingContext{}, fmt.Errorf("no active root run available for webhook routing")
+	}
+
+	selected := pickLatestRun(rootRuns, func(run types.Run) bool {
+		if run.Runtime == nil {
+			return false
+		}
+		if strings.TrimSpace(run.Runtime.TeamID) == "" {
+			return false
+		}
+		if strings.TrimSpace(coordinatorRole) == "" {
+			return true
+		}
+		return strings.EqualFold(strings.TrimSpace(run.Runtime.Role), strings.TrimSpace(coordinatorRole))
+	})
+	if selected.RunID == "" {
+		selected = pickLatestRun(rootRuns, func(run types.Run) bool {
+			return run.Runtime != nil && strings.TrimSpace(run.Runtime.TeamID) != ""
+		})
+	}
+	if selected.RunID == "" {
+		selected = pickLatestRun(rootRuns, nil)
+	}
+	if selected.RunID == "" {
+		return webhookRoutingContext{}, fmt.Errorf("no active run available for webhook routing")
+	}
+
+	teamID := ""
+	role := strings.TrimSpace(coordinatorRole)
+	if selected.Runtime != nil {
+		teamID = strings.TrimSpace(selected.Runtime.TeamID)
+		if role == "" {
+			role = strings.TrimSpace(selected.Runtime.Role)
+		}
+	}
+	if teamID == "" && sessionLoader != nil {
+		if sess, err := sessionLoader.LoadSession(ctx, strings.TrimSpace(selected.SessionID)); err == nil {
+			teamID = strings.TrimSpace(sess.TeamID)
+		}
+	}
+	if teamID != "" && role == "" && len(roleSet) == 1 {
+		for only := range roleSet {
+			role = only
+		}
+	}
+
+	validRoles := map[string]struct{}{}
+	for name := range roleSet {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		validRoles[name] = struct{}{}
+	}
+	if role != "" {
+		validRoles[role] = struct{}{}
+	}
+	if len(validRoles) == 0 {
+		validRoles = nil
+	}
+
+	return webhookRoutingContext{
+		run:             selected,
+		teamID:          teamID,
+		coordinatorRole: role,
+		validRoles:      validRoles,
+	}, nil
+}
+
+func profileWebhookRoleHints(prof *profile.Profile) (map[string]struct{}, string, error) {
+	if prof == nil {
+		return nil, "", nil
+	}
+	sessionRoles, err := prof.RolesForSession()
+	if err != nil {
+		return nil, "", err
+	}
+	roleNames, coordinatorRole, err := team.ValidateTeamRoles(sessionRoles)
+	if err != nil {
+		return nil, "", err
+	}
+	roleSet := make(map[string]struct{}, len(roleNames))
+	for _, roleName := range roleNames {
+		name := strings.TrimSpace(roleName)
+		if name == "" {
+			continue
+		}
+		roleSet[name] = struct{}{}
+	}
+	return roleSet, strings.TrimSpace(coordinatorRole), nil
+}
+
+func pickLatestRun(runs []types.Run, match func(types.Run) bool) types.Run {
+	var selected types.Run
+	var selectedStart time.Time
+	for _, run := range runs {
+		if match != nil && !match(run) {
+			continue
+		}
+		startedAt := time.Time{}
+		if run.StartedAt != nil {
+			startedAt = run.StartedAt.UTC()
+		}
+		if selected.RunID == "" || startedAt.After(selectedStart) {
+			selected = run
+			selectedStart = startedAt
+		}
+	}
+	return selected
 }
