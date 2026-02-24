@@ -460,6 +460,9 @@ func renderDashboardSubagentsTab(m *monitorModel, grid layoutmgr.GridLayout) str
 				workGlyph = "●"
 			} else if assigned > completed {
 				workState = "queued"
+				if completed > 0 {
+					workState = "awaiting_review"
+				}
 				workGlyph = "○"
 			}
 			label := fmt.Sprintf(

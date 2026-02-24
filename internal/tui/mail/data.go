@@ -121,7 +121,9 @@ func filterTasks(tasks []protocol.Task, isInbox bool) []taskEntry {
 	for _, t := range tasks {
 		status := strings.TrimSpace(t.Status)
 		if isInbox {
-			if status != string(types.TaskStatusPending) && status != string(types.TaskStatusActive) {
+			if status != string(types.TaskStatusPending) &&
+				status != string(types.TaskStatusActive) &&
+				status != string(types.TaskStatusReviewPending) {
 				continue
 			}
 		}

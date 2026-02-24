@@ -662,13 +662,13 @@ func (m *monitorModel) loadTeamEvents() tea.Cmd {
 	if m == nil || strings.TrimSpace(m.teamID) == "" {
 		return nil
 	}
-	runIDs := append([]string(nil), m.teamRunIDs...)
-	if len(runIDs) == 0 {
-		return nil
-	}
 	roleByRun := map[string]string{}
 	for k, v := range m.teamRoleByRunID {
 		roleByRun[k] = v
+	}
+	runIDs := mergeTeamAndChildRunIDs(m.teamRunIDs, m.childRuns, roleByRun)
+	if len(runIDs) == 0 {
+		return nil
 	}
 	cursors := map[string]int64{}
 	for runID, cursor := range m.teamEventCursor {
@@ -749,6 +749,40 @@ func (m *monitorModel) loadTeamEvents() tea.Cmd {
 			retryAt: nextRetry,
 		}
 	}
+}
+
+func mergeTeamAndChildRunIDs(teamRunIDs []string, childRuns []types.Run, roleByRun map[string]string) []string {
+	merged := make([]string, 0, len(teamRunIDs)+len(childRuns))
+	seen := map[string]struct{}{}
+	for _, runID := range teamRunIDs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		if _, ok := seen[runID]; ok {
+			continue
+		}
+		seen[runID] = struct{}{}
+		merged = append(merged, runID)
+	}
+	for _, run := range childRuns {
+		runID := strings.TrimSpace(run.RunID)
+		if runID == "" {
+			continue
+		}
+		if _, ok := seen[runID]; !ok {
+			seen[runID] = struct{}{}
+			merged = append(merged, runID)
+		}
+		if roleByRun != nil && strings.TrimSpace(roleByRun[runID]) == "" {
+			spawnIndex := run.SpawnIndex
+			if spawnIndex <= 0 {
+				spawnIndex = 1
+			}
+			roleByRun[runID] = fmt.Sprintf("Subagent-%d", spawnIndex)
+		}
+	}
+	return merged
 }
 
 func (m *monitorModel) loadTeamManifestCmd() tea.Cmd {
@@ -1103,6 +1137,14 @@ func (m *monitorModel) loadChildRuns() tea.Cmd {
 					activeByRunID[rid] = n
 				}
 			}
+			callbackPendingBySourceRunID := listReviewPendingCallbacksBySourceRunID(m.ctx, m.taskStore, strings.TrimSpace(m.teamID), strings.TrimSpace(m.rpcRun().SessionID))
+			for rid, pending := range callbackPendingBySourceRunID {
+				if pending <= 0 {
+					continue
+				}
+				// Keep callback review gates visible as queued work on the source subagent row.
+				assignedByRunID[rid] += pending
+			}
 		}
 		return childRunsLoadedMsg{
 			runs:             runs,
@@ -1111,4 +1153,60 @@ func (m *monitorModel) loadChildRuns() tea.Cmd {
 			activeByRunID:    activeByRunID,
 		}
 	}
+}
+
+func listReviewPendingCallbacksBySourceRunID(ctx context.Context, store agentstate.TaskStore, teamID, sessionID string) map[string]int {
+	out := map[string]int{}
+	if store == nil {
+		return out
+	}
+	filter := agentstate.TaskFilter{
+		Status: []types.TaskStatus{types.TaskStatusReviewPending},
+		Limit:  1000,
+		SortBy: "created_at",
+	}
+	if strings.TrimSpace(teamID) != "" {
+		filter.TeamID = strings.TrimSpace(teamID)
+	} else {
+		filter.SessionID = strings.TrimSpace(sessionID)
+	}
+	tasks, err := store.ListTasks(ctx, filter)
+	if err != nil {
+		return out
+	}
+	for _, task := range tasks {
+		taskID := strings.TrimSpace(task.TaskID)
+		if taskID == "" {
+			continue
+		}
+		if len(task.Metadata) == 0 {
+			if loaded, lerr := store.GetTask(ctx, taskID); lerr == nil {
+				task = loaded
+			}
+		}
+		source := strings.TrimSpace(metadataStringAny(task.Metadata, "source"))
+		if !strings.Contains(strings.ToLower(source), "callback") {
+			continue
+		}
+		sourceRunID := strings.TrimSpace(metadataStringAny(task.Metadata, "sourceRunId"))
+		if sourceRunID == "" {
+			sourceRunID = strings.TrimSpace(metadataStringAny(task.Metadata, "sourceRunID"))
+		}
+		if sourceRunID == "" {
+			continue
+		}
+		out[sourceRunID]++
+	}
+	return out
+}
+
+func metadataStringAny(m map[string]any, key string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(raw))
 }
