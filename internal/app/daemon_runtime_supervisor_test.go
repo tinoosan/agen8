@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -89,6 +90,101 @@ func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 	supervisor.mu.Unlock()
 	if exists {
 		t.Fatalf("expected worker to be removed after stop")
+	}
+}
+
+func TestRuntimeSupervisor_SubagentAwaitingReviewTimeout_DefaultAndEnv(t *testing.T) {
+	t.Setenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT", "")
+	s := &runtimeSupervisor{}
+	if got := s.subagentAwaitingReviewTimeout(); got != defaultSubagentAwaitingReviewTimeout {
+		t.Fatalf("default timeout=%v want %v", got, defaultSubagentAwaitingReviewTimeout)
+	}
+
+	t.Setenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT", "45s")
+	if got := s.subagentAwaitingReviewTimeout(); got != 45*time.Second {
+		t.Fatalf("env timeout=%v want 45s", got)
+	}
+
+	t.Setenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT", "invalid")
+	if got := s.subagentAwaitingReviewTimeout(); got != defaultSubagentAwaitingReviewTimeout {
+		t.Fatalf("invalid env timeout=%v want %v", got, defaultSubagentAwaitingReviewTimeout)
+	}
+
+	t.Setenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT", "-1s")
+	if got := s.subagentAwaitingReviewTimeout(); got != defaultSubagentAwaitingReviewTimeout {
+		t.Fatalf("negative env timeout=%v want %v", got, defaultSubagentAwaitingReviewTimeout)
+	}
+
+	// Sanity: environment restoration not required due to t.Setenv, but ensure no panic path.
+	_ = os.Getenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT")
+}
+
+func TestRuntimeSupervisor_WorkerShutdownTimeout_DefaultAndEnv(t *testing.T) {
+	t.Setenv("AGEN8_WORKER_SHUTDOWN_TIMEOUT", "")
+	s := &runtimeSupervisor{}
+	if got := s.workerShutdownTimeout(); got != defaultWorkerShutdownTimeout {
+		t.Fatalf("default timeout=%v want %v", got, defaultWorkerShutdownTimeout)
+	}
+
+	t.Setenv("AGEN8_WORKER_SHUTDOWN_TIMEOUT", "3s")
+	if got := s.workerShutdownTimeout(); got != 3*time.Second {
+		t.Fatalf("env timeout=%v want 3s", got)
+	}
+
+	t.Setenv("AGEN8_WORKER_SHUTDOWN_TIMEOUT", "invalid")
+	if got := s.workerShutdownTimeout(); got != defaultWorkerShutdownTimeout {
+		t.Fatalf("invalid env timeout=%v want %v", got, defaultWorkerShutdownTimeout)
+	}
+}
+
+func TestRuntimeSupervisor_DeactivateAndArchiveSubagent_DoesNotHangOnStuckWorker(t *testing.T) {
+	t.Setenv("AGEN8_WORKER_SHUTDOWN_TIMEOUT", "20ms")
+	cfg := config.Config{DataDir: t.TempDir()}
+	_, run, err := implstore.CreateSession(cfg, "cleanup run", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	run.Runtime = &types.RunRuntimeConfig{LifecycleState: "active"}
+	if err := implstore.SaveRun(cfg, run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+
+	cancelCalled := false
+	supervisor := &runtimeSupervisor{
+		cfg:            cfg,
+		sessionService: sessionSvc,
+		workers: map[string]*managedRuntime{
+			run.RunID: {
+				runID: run.RunID,
+				cancel: func() {
+					cancelCalled = true
+				},
+				done: make(chan struct{}), // never closes: simulates stuck worker
+			},
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		supervisor.deactivateAndArchiveSubagent(context.Background(), run.RunID)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatalf("deactivateAndArchiveSubagent blocked on stuck worker")
+	}
+	if !cancelCalled {
+		t.Fatalf("expected worker cancel to be called")
+	}
+	loaded, err := sessionSvc.LoadRun(context.Background(), run.RunID)
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+	if loaded.Status != types.RunStatusSucceeded {
+		t.Fatalf("run status=%q want %q", loaded.Status, types.RunStatusSucceeded)
 	}
 }
 

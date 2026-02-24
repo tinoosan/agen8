@@ -71,6 +71,9 @@ type runtimeSupervisor struct {
 	spawnOverride func(context.Context, types.Session, string) (*managedRuntime, error)
 }
 
+const defaultSubagentAwaitingReviewTimeout = 30 * time.Minute
+const defaultWorkerShutdownTimeout = 10 * time.Second
+
 type taskWakeSubscriber interface {
 	SubscribeWake(teamID, runID string) (<-chan struct{}, func())
 }
@@ -255,7 +258,10 @@ func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, ru
 			worker.cancel()
 		}
 		if worker.done != nil {
-			<-worker.done
+			timeout := s.workerShutdownTimeout()
+			if !waitWorkerDone(worker.done, timeout) {
+				log.Printf("daemon: timed out waiting for worker shutdown during subagent cleanup: run=%s timeout=%s", runID, timeout)
+			}
 		}
 	}
 
@@ -288,6 +294,54 @@ func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 		defaultProfile:   cfg.DefaultProfile,
 		soulService:      cfg.SoulService,
 		workers:          map[string]*managedRuntime{},
+	}
+}
+
+func (s *runtimeSupervisor) subagentAwaitingReviewTimeout() time.Duration {
+	if s == nil {
+		return defaultSubagentAwaitingReviewTimeout
+	}
+	raw := strings.TrimSpace(os.Getenv("AGEN8_SUBAGENT_AWAITING_REVIEW_TIMEOUT"))
+	if raw == "" {
+		return defaultSubagentAwaitingReviewTimeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultSubagentAwaitingReviewTimeout
+	}
+	return d
+}
+
+func (s *runtimeSupervisor) workerShutdownTimeout() time.Duration {
+	if s == nil {
+		return defaultWorkerShutdownTimeout
+	}
+	raw := strings.TrimSpace(os.Getenv("AGEN8_WORKER_SHUTDOWN_TIMEOUT"))
+	if raw == "" {
+		return defaultWorkerShutdownTimeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultWorkerShutdownTimeout
+	}
+	return d
+}
+
+func waitWorkerDone(done <-chan struct{}, timeout time.Duration) bool {
+	if done == nil {
+		return true
+	}
+	if timeout <= 0 {
+		<-done
+		return true
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 
@@ -1188,9 +1242,32 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 							_ = s.sessionService.SaveRun(context.Background(), r)
 						}
 
-						// Block until supervisor transitions and explicitly cancels workerCtx
-						<-workerCtx.Done()
-						return
+						// Bound awaiting_review residency to prevent leaked subagent runtimes
+						// when the expected review/cleanup path never arrives.
+						waitTimeout := s.subagentAwaitingReviewTimeout()
+						timer := time.NewTimer(waitTimeout)
+						defer timer.Stop()
+						select {
+						case <-workerCtx.Done():
+							return
+						case <-timer.C:
+							emitEvent(context.Background(), events.Event{
+								Type:    "subagent.awaiting_review.timeout",
+								Message: "Sub-agent archived after awaiting-review timeout",
+								Data: map[string]string{
+									"runId":   run.RunID,
+									"timeout": waitTimeout.String(),
+								},
+							})
+							if rr, serr := s.sessionService.LoadRun(context.Background(), run.RunID); serr == nil {
+								if rr.Runtime != nil {
+									rr.Runtime.LifecycleState = "archived"
+									_ = s.sessionService.SaveRun(context.Background(), rr)
+								}
+							}
+							_, _ = s.sessionService.StopRun(context.Background(), run.RunID, types.RunStatusSucceeded, "archived: awaiting review timeout")
+							return
+						}
 					}
 					errMsg := "unknown error"
 					if err != nil {
