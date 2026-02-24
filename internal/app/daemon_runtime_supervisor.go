@@ -1695,10 +1695,22 @@ func (s *runtimeSupervisor) makeSpawnWorkerFunc(
 
 		childRun := types.NewChildRun(parentRunID, goal, sessionID, spawnIndex)
 
-		// Resolve subagent model: env var > profile-level > parent model.
+		// Resolve subagent model: explicit override > parent role-level profile setting >
+		// profile-level setting > default profile role-level/profile-level > parent model.
 		subagentModel := strings.TrimSpace(s.resolved.SubagentModel)
+		parentRole := ""
+		parentProfileRef := ""
+		if parentRun.Runtime != nil {
+			parentRole = strings.TrimSpace(parentRun.Runtime.Role)
+			parentProfileRef = strings.TrimSpace(parentRun.Runtime.Profile)
+		}
+		if subagentModel == "" && parentProfileRef != "" {
+			if prof, _, err := resolveProfileRef(s.cfg, parentProfileRef); err == nil && prof != nil {
+				subagentModel = resolveSubagentModelForRole(prof, parentRole)
+			}
+		}
 		if subagentModel == "" && s.defaultProfile != nil {
-			subagentModel = strings.TrimSpace(s.defaultProfile.SubagentModel)
+			subagentModel = resolveSubagentModelForRole(s.defaultProfile, parentRole)
 		}
 		if subagentModel == "" {
 			subagentModel = parentModel
@@ -1745,6 +1757,25 @@ func (s *runtimeSupervisor) makeSpawnWorkerFunc(
 
 		return childRun.RunID, strings.TrimSpace(childRun.Runtime.Role), nil
 	}
+}
+
+func resolveSubagentModelForRole(prof *profile.Profile, roleName string) string {
+	if prof == nil {
+		return ""
+	}
+	roleName = strings.TrimSpace(roleName)
+	if prof.Team != nil && roleName != "" {
+		for i := range prof.Team.Roles {
+			r := prof.Team.Roles[i]
+			if strings.EqualFold(strings.TrimSpace(r.Name), roleName) {
+				if m := strings.TrimSpace(r.SubagentModel); m != "" {
+					return m
+				}
+				break
+			}
+		}
+	}
+	return strings.TrimSpace(prof.SubagentModel)
 }
 
 func (s *runtimeSupervisor) GetRunState(ctx context.Context, sessionID, runID string) (protocol.RuntimeRunState, error) {

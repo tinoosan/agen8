@@ -580,6 +580,56 @@ func TestRuntimeSupervisor_MakeSpawnWorkerFunc_AllowsTeamModeWhenAllowed(t *test
 	}
 }
 
+func TestRuntimeSupervisor_MakeSpawnWorkerFunc_PrefersRoleSubagentModel(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, parentRun, err := implstore.CreateSession(cfg, "team session", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sess.TeamID = "team-1"
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	if err := sessionSvc.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	parentRun.Runtime = &types.RunRuntimeConfig{
+		Profile: "startup_team",
+		Role:    "coordinator",
+		TeamID:  "team-1",
+		Model:   "moonshotai/kimi-k2.5",
+	}
+	if err := sessionSvc.SaveRun(context.Background(), parentRun); err != nil {
+		t.Fatalf("SaveRun parent: %v", err)
+	}
+
+	supervisor := &runtimeSupervisor{
+		cfg:            cfg,
+		sessionService: sessionSvc,
+		defaultProfile: &profile.Profile{
+			ID: "startup_team",
+			Team: &profile.TeamConfig{
+				Roles: []profile.RoleConfig{
+					{Name: "coordinator", Coordinator: true, SubagentModel: "openai/gpt-5-nano"},
+				},
+			},
+		},
+	}
+	spawn := supervisor.makeSpawnWorkerFunc(parentRun, "moonshotai/kimi-k2.5", nil)
+	childRunID, _, err := spawn(context.Background(), "do work", sess.SessionID, parentRun.RunID)
+	if err != nil {
+		t.Fatalf("spawn in team mode: %v", err)
+	}
+	child, err := sessionSvc.LoadRun(context.Background(), childRunID)
+	if err != nil {
+		t.Fatalf("LoadRun child: %v", err)
+	}
+	if child.Runtime == nil {
+		t.Fatalf("child runtime should be set")
+	}
+	if got := strings.TrimSpace(child.Runtime.Model); got != "openai/gpt-5-nano" {
+		t.Fatalf("child runtime model=%q want openai/gpt-5-nano", got)
+	}
+}
+
 func TestApplySessionModel_SkipsWhenAlreadyOnModel(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess, run, err := implstore.CreateSession(cfg, "same model", 8*1024)
