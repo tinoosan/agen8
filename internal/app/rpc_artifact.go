@@ -41,9 +41,15 @@ type artifactScope struct {
 	runID     string
 }
 
-func pathExists(path string) bool {
+func pathExists(path string) (bool, error) {
 	_, err := os.Stat(path)
-	return err == nil
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
 }
 
 func standaloneVisibleArtifactVPath(vpath string) bool {
@@ -634,7 +640,15 @@ func (s *RPCServer) artifactGet(ctx context.Context, p protocol.ArtifactGetParam
 	}
 
 	diskPath := strings.TrimSpace(sel.DiskPath)
-	if diskPath == "" || !pathExists(diskPath) {
+	if diskPath != "" {
+		exists, statErr := pathExists(diskPath)
+		if statErr != nil {
+			return protocol.ArtifactGetResult{}, &protocol.ProtocolError{Code: protocol.CodeInternalError, Message: "artifact file stat failed"}
+		}
+		if !exists {
+			diskPath = s.resolveArtifactDiskPathForScope(ctx, scope, sel.TeamID, sel.RunID, sel.VPath)
+		}
+	} else {
 		diskPath = s.resolveArtifactDiskPathForScope(ctx, scope, sel.TeamID, sel.RunID, sel.VPath)
 	}
 	if strings.TrimSpace(diskPath) == "" {

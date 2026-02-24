@@ -17,8 +17,24 @@ func EventRecordToActivity(ev types.EventRecord) (types.Activity, bool) {
 	switch typ {
 	case "agent.op.request":
 		op := ""
+		eventData := ev.Data
 		if ev.Data != nil {
 			op = strings.TrimSpace(ev.Data["op"])
+			if strings.EqualFold(op, "tool_result") {
+				if tag := strings.ToLower(strings.TrimSpace(ev.Data["tag"])); tag == "task_create" || tag == "task_review" || tag == "obsidian" || tag == "soul_update" {
+					op = tag
+				}
+			}
+		}
+		if eventData != nil {
+			copied := make(map[string]string, len(eventData)+1)
+			for k, v := range eventData {
+				copied[k] = v
+			}
+			if strings.TrimSpace(op) != "" {
+				copied["op"] = op
+			}
+			eventData = copied
 		}
 		if op == "" {
 			return types.Activity{}, false
@@ -47,7 +63,7 @@ func EventRecordToActivity(ev types.EventRecord) (types.Activity, bool) {
 		act := types.Activity{
 			ID:            actID,
 			Kind:          op,
-			Title:         opmeta.FormatRequestTitle(ev.Data),
+			Title:         opmeta.FormatRequestTitle(eventData),
 			Status:        types.ActivityPending,
 			StartedAt:     ts,
 			Path:          strings.TrimSpace(ev.Data["path"]),
@@ -57,7 +73,7 @@ func EventRecordToActivity(ev types.EventRecord) (types.Activity, bool) {
 			TextRedacted:  parseBool(ev.Data["textRedacted"]),
 			TextIsJSON:    parseBool(ev.Data["textIsJSON"]),
 			TextBytes:     strings.TrimSpace(ev.Data["textBytes"]),
-			Data:          ev.Data,
+			Data:          eventData,
 		}
 		return act, true
 

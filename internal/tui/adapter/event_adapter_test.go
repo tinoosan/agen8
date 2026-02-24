@@ -28,3 +28,25 @@ func TestEventRecordToActivity_TaskDoneUsesTaskID(t *testing.T) {
 		t.Fatalf("expected summary title, got %q", act.Title)
 	}
 }
+
+func TestEventRecordToActivity_ToolResultTagMapsToSemanticOp(t *testing.T) {
+	ev := types.EventRecord{
+		EventID:   "event-200",
+		RunID:     "run-1",
+		Timestamp: time.Now(),
+		Type:      "agent.op.request",
+		Data: map[string]string{
+			"op":   "tool_result",
+			"tag":  "task_create",
+			"opId": "op-9",
+		},
+	}
+
+	act, ok := EventRecordToActivity(ev)
+	if !ok {
+		t.Fatalf("expected agent.op.request to map to activity")
+	}
+	if act.Kind != "task_create" {
+		t.Fatalf("kind=%q want task_create", act.Kind)
+	}
+}

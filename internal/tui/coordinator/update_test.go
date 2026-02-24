@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -151,5 +152,55 @@ func TestAgentSpeakIsNotTerminalTaskResponse(t *testing.T) {
 	}
 	if entry.isTaskResponse {
 		t.Fatalf("agent_speak should not be marked as terminal task response")
+	}
+}
+
+func TestIsActivityText_ToolResultIsOperation(t *testing.T) {
+	act := types.Activity{
+		ID:    "run-1|op-1",
+		Kind:  "tool_result",
+		Title: "tool_result",
+		Data: map[string]string{
+			"opId": "op-1",
+		},
+	}
+	if isActivityText(act) {
+		t.Fatalf("tool_result must be treated as operation, not text")
+	}
+}
+
+func TestMergeActivityEntries_DedupesByIdentity(t *testing.T) {
+	m := &Model{}
+	ts := time.Now()
+
+	entry := feedEntry{
+		kind:      feedAgent,
+		timestamp: ts,
+		role:      "reviewer",
+		text:      "Create task",
+		status:    "ok",
+		opKind:    "task_create",
+		sourceID:  "run-a|op-1",
+		data: map[string]string{
+			"opId": "op-1",
+			"op":   "task_create",
+			"goal": "one",
+		},
+	}
+	entry = *normalizeFeedEntry(&entry)
+
+	entries := []feedEntry{entry}
+	for i := 0; i < 10; i++ {
+		m.mergeActivityEntries(entries)
+	}
+
+	count := 0
+	for _, e := range m.feed {
+		if strings.TrimSpace(e.identityKey) == "op:run-a|op-1" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected one normalized op entry after replay, got %d", count)
 	}
 }

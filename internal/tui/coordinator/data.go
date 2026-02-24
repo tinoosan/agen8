@@ -33,6 +33,7 @@ type feedEntry struct {
 	status         string
 	opKind         string
 	sourceID       string
+	identityKey    string
 	isText         bool
 	isTaskResponse bool              // true if this text response came from the top-level task (prevents activity merge dupe)
 	data           map[string]string // raw activity Data for verb resolution
@@ -125,7 +126,7 @@ func activityToFeedEntry(act types.Activity) *feedEntry {
 		}
 	}
 
-	return &feedEntry{
+	entry := &feedEntry{
 		kind:           kind,
 		timestamp:      ts,
 		finishedAt:     fin,
@@ -139,6 +140,7 @@ func activityToFeedEntry(act types.Activity) *feedEntry {
 		isTaskResponse: isTaskResponse,
 		data:           act.Data,
 	}
+	return normalizeFeedEntry(entry)
 }
 
 func fetchSessionCmd(endpoint, sessionID string) tea.Cmd {
@@ -446,7 +448,7 @@ func isActivityText(act types.Activity) bool {
 		return true
 	}
 	// If it lacks a specific developer op prefix but has a title, treat as text summary.
-	if strings.TrimSpace(act.Title) != "" && !strings.HasPrefix(kind, "fs_") && !strings.HasPrefix(kind, "shell_") && kind != "agent_spawn" && kind != "tool_call" && kind != "code_exec" && kind != "http_fetch" && kind != "task_create" && kind != "task_review" && kind != "obsidian" && kind != "soul_update" {
+	if strings.TrimSpace(act.Title) != "" && !strings.HasPrefix(kind, "fs_") && !strings.HasPrefix(kind, "shell_") && kind != "agent_spawn" && kind != "tool_call" && kind != "tool_result" && kind != "code_exec" && kind != "http_fetch" && kind != "task_create" && kind != "task_review" && kind != "obsidian" && kind != "soul_update" {
 		return true
 	}
 	return false
@@ -540,7 +542,7 @@ func kindToVerb(kind string, path string, data map[string]string) string {
 	case "soul_update":
 		return "Update soul"
 	case "task_create":
-		return "Dispatch task"
+		return "Create task"
 	case "task_review":
 		return "Review task"
 	case "trace_run":

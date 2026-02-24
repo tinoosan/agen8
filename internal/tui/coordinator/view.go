@@ -283,7 +283,8 @@ func (m *Model) renderFeed(height int) string {
 
 // groupBridgeToolCalls collapses code_exec bridge tool calls within each turn.
 // A bridge call is identified by either:
-//   - data["tag"] == "code_exec_bridge" (new activities), or
+//   - data["action"] == "code_exec_bridge" (canonical), or
+//   - data["tag"] == "code_exec_bridge" (legacy compatibility), or
 //   - temporal overlap: the entry started while a code_exec was still running
 //     (entry.timestamp >= code_exec.timestamp && entry.timestamp <= code_exec.finishedAt)
 func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
@@ -299,8 +300,11 @@ func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
 		for _, e := range t.entries {
 			isBridge := false
 
-			// Check tag first (works for new activities).
-			if e.data != nil && strings.TrimSpace(e.data["tag"]) == "code_exec_bridge" {
+			// Prefer explicit bridge action marker, then legacy tag marker.
+			if e.data != nil && strings.TrimSpace(e.data["action"]) == "code_exec_bridge" {
+				isBridge = true
+			}
+			if !isBridge && e.data != nil && strings.TrimSpace(e.data["tag"]) == "code_exec_bridge" {
 				isBridge = true
 			}
 
@@ -511,8 +515,16 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 			}
 		} else if opLower == "task_create" && e.data != nil {
 			if goal := strings.TrimSpace(e.data["goal"]); goal != "" {
-				argPreview = truncate(goal, maxInt(8, inner-len(verb)-8))
+				argPreview = goal
 			}
+			if assigned := strings.TrimSpace(e.data["assignedRole"]); assigned != "" {
+				if argPreview == "" {
+					argPreview = "-> " + assigned
+				} else {
+					argPreview += " -> " + assigned
+				}
+			}
+			argPreview = truncate(argPreview, maxInt(8, inner-len(verb)-8))
 		} else if opLower == "task_review" && e.data != nil {
 			if id := strings.TrimSpace(e.data["taskId"]); id != "" {
 				argPreview = truncate(id, maxInt(8, inner-len(verb)-8))
@@ -566,8 +578,16 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 					}
 				} else if bridgeOpLower == "task_create" && e.bridgeSingleData != nil {
 					if goal := strings.TrimSpace(e.bridgeSingleData["goal"]); goal != "" {
-						bridgeArg = truncate(goal, maxInt(8, inner-len(bridgeVerb)-8))
+						bridgeArg = goal
 					}
+					if assigned := strings.TrimSpace(e.bridgeSingleData["assignedRole"]); assigned != "" {
+						if bridgeArg == "" {
+							bridgeArg = "-> " + assigned
+						} else {
+							bridgeArg += " -> " + assigned
+						}
+					}
+					bridgeArg = truncate(bridgeArg, maxInt(8, inner-len(bridgeVerb)-8))
 				} else if bridgeOpLower == "task_review" && e.bridgeSingleData != nil {
 					if id := strings.TrimSpace(e.bridgeSingleData["taskId"]); id != "" {
 						bridgeArg = truncate(id, maxInt(8, inner-len(bridgeVerb)-8))

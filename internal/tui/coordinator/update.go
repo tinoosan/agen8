@@ -328,6 +328,19 @@ func (m *Model) feedAlreadyHasTaskResponse(sourceID string) bool {
 // Unlike mergeActivityEntries it does NOT wipe existing tool-op entries — it
 // either updates the entry in-place (matched by kind + sourceID) or appends it.
 func (m *Model) upsertFeedEntry(e feedEntry) {
+	normalizeFeedEntry(&e)
+	if key := strings.TrimSpace(e.identityKey); key != "" {
+		for i := range m.feed {
+			if strings.TrimSpace(m.feed[i].identityKey) == key {
+				m.feed[i] = e
+				m.feedGen++
+				sort.SliceStable(m.feed, func(a, b int) bool {
+					return m.feed[a].timestamp.Before(m.feed[b].timestamp)
+				})
+				return
+			}
+		}
+	}
 	if sid := strings.TrimSpace(e.sourceID); sid != "" {
 		for i := range m.feed {
 			if m.feed[i].kind == e.kind && strings.TrimSpace(m.feed[i].sourceID) == sid {
@@ -369,13 +382,14 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 	others := make([]feedEntry, 0, len(m.feed))
 	for _, e := range m.feed {
 		if e.kind == feedThinking || (e.kind == feedAgent && (e.isText || e.isTaskResponse)) {
-			others = append(others, e)
+			others = append(others, *normalizeFeedEntry(&e))
 		}
 	}
 	// Dedupe task-response (summary) entries: only one per sourceID so the summary is not shown twice.
 	filtered := make([]feedEntry, 0, len(entries))
 	seenTaskResponse := make(map[string]bool)
 	for _, e := range entries {
+		normalizeFeedEntry(&e)
 		if e.isTaskResponse {
 			sid := strings.TrimSpace(e.sourceID)
 			if sid != "" && (m.feedAlreadyHasTaskResponse(sid) || seenTaskResponse[sid]) {
@@ -391,6 +405,7 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 		return
 	}
 	merged := append(others, filtered...)
+	merged = dedupeFeedEntriesByIdentity(merged)
 	sort.SliceStable(merged, func(i, j int) bool {
 		return merged[i].timestamp.Before(merged[j].timestamp)
 	})
@@ -525,6 +540,7 @@ func (m *Model) mergeThinkingEntries(entries []feedEntry) {
 		}
 	}
 	for _, e := range entries {
+		normalizeFeedEntry(&e)
 		key := ""
 		if e.sourceID != "" {
 			if e.kind == feedThinking {
@@ -541,6 +557,7 @@ func (m *Model) mergeThinkingEntries(entries []feedEntry) {
 		}
 		m.feed = append(m.feed, e)
 	}
+	m.feed = dedupeFeedEntriesByIdentity(m.feed)
 	sort.SliceStable(m.feed, func(i, j int) bool {
 		return m.feed[i].timestamp.Before(m.feed[j].timestamp)
 	})

@@ -141,6 +141,10 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 	storeReq["opId"] = opID
 	storeReq["op"] = req.Op
 	storeReq["path"] = req.Path
+	if action := strings.TrimSpace(req.Action); action != "" {
+		reqData["action"] = action
+		storeReq["action"] = action
+	}
 	if req.Tag != "" {
 		reqData["tag"] = req.Tag
 		storeReq["tag"] = req.Tag

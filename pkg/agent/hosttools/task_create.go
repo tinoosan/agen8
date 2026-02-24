@@ -282,6 +282,9 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	if payload.SpawnWorker {
 		msg = fmt.Sprintf("Task %s created and worker agent spawned. You delegated this to a subagent; do not do the same work yourself. The worker was asked to write outputs under /workspace. When the callback task (callback-%s) appears in your inbox, process it with task_review and inspect worker files under /workspace/subagent-<N>/ and summaries under /tasks/subagent-<N>/<date>/<taskID>/SUMMARY.md.", taskID, taskID)
 		inputForEvent := map[string]string{"goal": goal, "taskId": taskID}
+		if role := strings.TrimSpace(task.AssignedRole); role != "" {
+			inputForEvent["assignedRole"] = role
+		}
 		if metadataBool(task.Metadata, "batchMode") {
 			inputForEvent["batchMode"] = "true"
 			inputForEvent["batchParentTaskId"] = metadataString(task.Metadata, "batchParentTaskId")
@@ -294,6 +297,9 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		return types.HostOpRequest{Op: types.HostOpToolResult, Tag: "task_create", Text: msg, Input: inputJSON}, nil
 	}
 	inputForEvent := map[string]string{"goal": goal, "taskId": taskID}
+	if role := strings.TrimSpace(task.AssignedRole); role != "" {
+		inputForEvent["assignedRole"] = role
+	}
 	if metadataBool(task.Metadata, "batchMode") {
 		inputForEvent["batchMode"] = "true"
 		inputForEvent["batchParentTaskId"] = metadataString(task.Metadata, "batchParentTaskId")

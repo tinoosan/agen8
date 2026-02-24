@@ -753,6 +753,75 @@ func TestRPCServer_ArtifactList_TeamScopeAndGetTruncated(t *testing.T) {
 	}
 }
 
+func TestRPCServer_ArtifactGet_StatPermissionErrorReturnsInternalError(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	now := time.Now().UTC()
+	task := types.Task{
+		TaskID:       "task-perm-001",
+		SessionID:    run.SessionID,
+		RunID:        run.RunID,
+		TeamID:       "team-1",
+		AssignedRole: "ceo",
+		CreatedBy:    "coordinator",
+		Goal:         "perm task",
+		Status:       types.TaskStatusPending,
+		CreatedAt:    &now,
+		Inputs:       map[string]any{},
+		Metadata:     map[string]any{},
+	}
+	if err := ts.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask(%s): %v", task.TaskID, err)
+	}
+	done := now.Add(1 * time.Second)
+	artifactVPath := "/tasks/ceo/2026-02-08/" + task.TaskID + "/SUMMARY.md"
+	if err := ts.CompleteTask(context.Background(), task.TaskID, types.TaskResult{
+		TaskID:      task.TaskID,
+		Status:      types.TaskStatusSucceeded,
+		Summary:     "ok",
+		CompletedAt: &done,
+		Artifacts:   []string{artifactVPath},
+	}); err != nil {
+		t.Fatalf("CompleteTask(%s): %v", task.TaskID, err)
+	}
+
+	p := filepath.Join(fsutil.GetTeamTasksDir(cfg.DataDir, "team-1"), "ceo", "2026-02-08", task.TaskID, "SUMMARY.md")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(p, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	parentDir := filepath.Dir(p)
+	if err := os.Chmod(parentDir, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	defer func() { _ = os.Chmod(parentDir, 0o755) }()
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodArtifactGet, protocol.ArtifactGetParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		VPath:    artifactVPath,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error == nil {
+		t.Fatalf("expected artifact.get error for stat permission failure")
+	}
+	if resp.Error.Code != protocol.CodeInternalError {
+		t.Fatalf("expected internal error code, got %+v", resp.Error)
+	}
+}
+
 func TestRPCServer_TaskFlow_CreateListClaimComplete(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")
