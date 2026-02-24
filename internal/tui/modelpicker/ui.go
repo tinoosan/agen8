@@ -36,6 +36,8 @@ type Controller struct {
 	providerView bool
 	provider     string
 	query        string
+	nextRequest  uint64
+	pendingReqID uint64
 
 	list      list.Model
 	lastItems []Item
@@ -61,6 +63,7 @@ type Item struct {
 }
 
 type listLoadedMsg struct {
+	reqID        uint64
 	providerView bool
 	provider     string
 	query        string
@@ -180,6 +183,9 @@ func (c *Controller) Update(msg tea.Msg) (tea.Cmd, Event) {
 
 	switch m := msg.(type) {
 	case listLoadedMsg:
+		if m.reqID == 0 || m.reqID != c.pendingReqID {
+			return nil, Event{}
+		}
 		if m.err != nil {
 			c.loading = false
 			return nil, Event{Type: EventError, Err: m.err}
@@ -274,12 +280,16 @@ func (c *Controller) fetchCmd(providerView bool, provider, query string) tea.Cmd
 	sessionID := strings.TrimSpace(c.sessionID)
 	provider = strings.TrimSpace(provider)
 	query = strings.TrimSpace(query)
+	c.nextRequest++
+	reqID := c.nextRequest
+	c.pendingReqID = reqID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		res, err := Fetch(ctx, endpoint, sessionID, provider, query)
 		if err != nil {
 			return listLoadedMsg{
+				reqID:        reqID,
 				providerView: providerView,
 				provider:     provider,
 				query:        query,
@@ -296,6 +306,7 @@ func (c *Controller) fetchCmd(providerView bool, provider, query string) tea.Cmd
 				})
 			}
 			return listLoadedMsg{
+				reqID:        reqID,
 				providerView: true,
 				query:        query,
 				items:        items,
@@ -314,6 +325,7 @@ func (c *Controller) fetchCmd(providerView bool, provider, query string) tea.Cmd
 			})
 		}
 		return listLoadedMsg{
+			reqID:        reqID,
 			providerView: false,
 			provider:     provider,
 			query:        query,

@@ -42,6 +42,8 @@ type openRouterModelMeta struct {
 	SupportsReasoning bool
 	InputPerM         float64
 	OutputPerM        float64
+	InputPerMKnown    bool
+	OutputPerMKnown   bool
 	Provider          string
 }
 
@@ -217,11 +219,15 @@ func fetchOpenRouterModels(ctx context.Context, apiKey string) map[string]openRo
 			if contextLength <= 0 {
 				contextLength = m.TopProvider.ContextLength
 			}
+			inputPerM, inputKnown := parsePerTokenPriceToPerM(m.Pricing.Prompt)
+			outputPerM, outputKnown := parsePerTokenPriceToPerM(m.Pricing.Completion)
 			cache[normalized] = openRouterModelMeta{
 				ContextLength:     contextLength,
 				SupportsReasoning: supportsReasoningParameter(m.SupportedParameters),
-				InputPerM:         parsePerTokenPriceToPerM(m.Pricing.Prompt),
-				OutputPerM:        parsePerTokenPriceToPerM(m.Pricing.Completion),
+				InputPerM:         inputPerM,
+				OutputPerM:        outputPerM,
+				InputPerMKnown:    inputKnown,
+				OutputPerMKnown:   outputKnown,
 				Provider:          providerFromModelID(normalized),
 			}
 		}
@@ -245,12 +251,12 @@ func supportsReasoningParameter(params []string) bool {
 	return false
 }
 
-func parsePerTokenPriceToPerM(raw string) float64 {
+func parsePerTokenPriceToPerM(raw string) (float64, bool) {
 	v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-	if err != nil || v <= 0 {
-		return 0
+	if err != nil || v < 0 {
+		return 0, false
 	}
-	return v * 1_000_000
+	return v * 1_000_000, true
 }
 
 func providerFromModelID(id string) string {

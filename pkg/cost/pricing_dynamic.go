@@ -1,6 +1,10 @@
 package cost
 
-import "context"
+import (
+	"context"
+	"os"
+	"strings"
+)
 
 // LookupPricing resolves pricing for a model from the static registry first,
 // then falls back to OpenRouter /models metadata when available.
@@ -8,20 +12,28 @@ func LookupPricing(ctx context.Context, modelID string) (inPerM, outPerM float64
 	if in, out, known := DefaultPricing().Lookup(modelID); known {
 		return in, out, true
 	}
-	infos, known := OpenRouterModelInfos(ctx)
-	if !known || len(infos) == 0 {
+	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" {
 		return 0, 0, false
 	}
-	models := make(map[string]ModelPricing, len(infos))
-	for _, info := range infos {
-		if info.ID == "" {
+	cache, known := openRouterModelCache(ctx)
+	if !known || len(cache) == 0 {
+		return 0, 0, false
+	}
+	models := make(map[string]ModelPricing, len(cache))
+	for id, meta := range cache {
+		if strings.TrimSpace(id) == "" {
 			continue
 		}
-		// Keep zero-price entries so free models are still considered "known".
-		models[info.ID] = ModelPricing{
-			InputPerM:  info.InputPerM,
-			OutputPerM: info.OutputPerM,
+		if !meta.InputPerMKnown || !meta.OutputPerMKnown {
+			continue
 		}
+		models[id] = ModelPricing{
+			InputPerM:  meta.InputPerM,
+			OutputPerM: meta.OutputPerM,
+		}
+	}
+	if len(models) == 0 {
+		return 0, 0, false
 	}
 	pf := PricingFile{Models: models}
 	return pf.Lookup(modelID)
