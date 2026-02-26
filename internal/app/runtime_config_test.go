@@ -30,6 +30,12 @@ allowlist = ["/home/user/shared", "/var/cache/build"]
 read_only = true
 [obsidian]
 vault_path = "/project/custom-vault"
+[harness]
+default_harness = "codex-cli"
+codex_bin = "/usr/local/bin/codex"
+codex_model = "gpt-5"
+codex_profile = "fast"
+codex_extra_args = ["--skip-git-repo-check", "--ephemeral"]
 `), 0o644); err != nil {
 		t.Fatalf("write dataDir config: %v", err)
 	}
@@ -90,6 +96,21 @@ required_packages = ["requests"]
 	if got := cfg.Obsidian.VaultPath; got != "/project/custom-vault" {
 		t.Fatalf("obsidian.vault_path=%q", got)
 	}
+	if got := cfg.Harness.DefaultHarness; got != "codex-cli" {
+		t.Fatalf("harness.default_harness=%q", got)
+	}
+	if got := cfg.Harness.CodexBin; got != "/usr/local/bin/codex" {
+		t.Fatalf("harness.codex_bin=%q", got)
+	}
+	if got := cfg.Harness.CodexModel; got != "gpt-5" {
+		t.Fatalf("harness.codex_model=%q", got)
+	}
+	if got := cfg.Harness.CodexProfile; got != "fast" {
+		t.Fatalf("harness.codex_profile=%q", got)
+	}
+	if got := strings.Join(cfg.Harness.CodexExtraArgs, ","); got != "--ephemeral,--skip-git-repo-check" {
+		t.Fatalf("harness.codex_extra_args=%q", got)
+	}
 }
 
 func TestApplyRuntimeConfigEnvDefaults_DoesNotOverrideExisting(t *testing.T) {
@@ -107,6 +128,13 @@ func TestApplyRuntimeConfigEnvDefaults_DoesNotOverrideExisting(t *testing.T) {
 		Obsidian: runtimeConfigObsidian{
 			VaultPath: "/knowledge",
 		},
+		Harness: runtimeConfigHarness{
+			DefaultHarness: "codex-cli",
+			CodexBin:       "/usr/local/bin/codex",
+			CodexModel:     "gpt-5",
+			CodexProfile:   "fast",
+			CodexExtraArgs: []string{"--ephemeral"},
+		},
 	}
 	applyRuntimeConfigEnvDefaults(cfg)
 	if got := os.Getenv("OPENROUTER_MODEL"); got != "existing-model" {
@@ -123,6 +151,21 @@ func TestApplyRuntimeConfigEnvDefaults_DoesNotOverrideExisting(t *testing.T) {
 	}
 	if got := os.Getenv("OBSIDIAN_VAULT_PATH"); got != "/knowledge" {
 		t.Fatalf("OBSIDIAN_VAULT_PATH=%q", got)
+	}
+	if got := os.Getenv("AGEN8_DEFAULT_HARNESS"); got != "codex-cli" {
+		t.Fatalf("AGEN8_DEFAULT_HARNESS=%q", got)
+	}
+	if got := os.Getenv("AGEN8_CODEX_BIN"); got != "/usr/local/bin/codex" {
+		t.Fatalf("AGEN8_CODEX_BIN=%q", got)
+	}
+	if got := os.Getenv("AGEN8_CODEX_MODEL"); got != "gpt-5" {
+		t.Fatalf("AGEN8_CODEX_MODEL=%q", got)
+	}
+	if got := os.Getenv("AGEN8_CODEX_PROFILE"); got != "fast" {
+		t.Fatalf("AGEN8_CODEX_PROFILE=%q", got)
+	}
+	if got := os.Getenv("AGEN8_CODEX_EXTRA_ARGS"); got != "--ephemeral" {
+		t.Fatalf("AGEN8_CODEX_EXTRA_ARGS=%q", got)
 	}
 }
 
@@ -151,6 +194,9 @@ func TestEnsureRuntimeConfigTemplate_CreatesDefaultTemplate(t *testing.T) {
 	}
 	if !strings.Contains(text, "[obsidian]") {
 		t.Fatalf("expected obsidian section in template, got:\n%s", text)
+	}
+	if !strings.Contains(text, "[harness]") {
+		t.Fatalf("expected harness section in template, got:\n%s", text)
 	}
 }
 
