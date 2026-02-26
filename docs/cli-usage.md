@@ -55,7 +55,11 @@ A typical onboarding workflow:
 | `agen8 coordinator` | Attach to a coordinator-focused chat view and oversee subordinate agents.
 | `agen8 dashboard` | Read-only observability for sessions, runs, tasks, and cost signals.
 | `agen8 monitor` | Observer UI that attaches to a running agent (start the daemon first).
-| `agen8 logs` | Query structured logs and filter by `--agent-id`, `--level`, or `--follow`.
+| `agen8 logs` | Query structured logs and filter by `--run-id`/`--session-id`, `--harness-id`, `--type`, and `--follow`.
+| `agen8 status` | One-shot runtime/dashboard summary (alias of dashboard once mode).
+| `agen8 feed` | Live task/harness event feed.
+| `agen8 trace` | Live tool/reasoning/harness event feed.
+| `agen8 costs` | Session + per-run token/cost summary (errors if RPC fails).
 | `agen8 activity` | Tail the activity stream of proposals and tool calls.
 | `agen8 show session/run/history` | Dump metadata or the JSONL operation log for debugging.
 
@@ -77,6 +81,8 @@ Runtime configuration resolves in this order: CLI flags → environment variable
 | `--include-history-ops` | `AGEN8_INCLUDE_HISTORY_OPS` | Whether operations from `/history` appear in prompts (default: enabled).
 
 For complete flag context and environment-variable guidance, see [docs/cli-usage.md](docs/cli-usage.md) (this document) complemented by [docs/config-toml.md](docs/config-toml.md).
+
+Harness defaults should be set in `${AGEN8_DATA_DIR}/config.toml` under `[harness]` (for example `default_harness = "codex-cli"`). Environment variables remain override-only for ad hoc runs.
 
 ## Troubleshooting CLI sessions
 

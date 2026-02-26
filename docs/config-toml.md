@@ -30,6 +30,13 @@ model = "z-ai/GLM-5"
 [code_exec]
 # venv_path = ""
 # required_packages = []
+
+[harness]
+# default_harness = "agen8-native" # or "codex-cli"
+# codex_bin = "codex"
+# codex_model = ""
+# codex_profile = ""
+# codex_extra_args = []
 ```
 
 Notes:
@@ -61,6 +68,34 @@ required_packages = ["pandas", "requests", "beautifulsoup4"]
 ```
 
 If an agent run fails due to a missing module, add the package to `required_packages`; the daemon picks it up and reconciles automatically.
+
+## Harness configuration
+
+Use `[harness]` for non-secret orchestrator defaults:
+
+- `harness.default_harness` (string): default adapter ID when task/run do not specify one. Common values: `agen8-native`, `codex-cli`.
+- `harness.codex_bin` (string): path/binary name used for Codex adapter execution.
+- `harness.codex_model` (string): default model passed to `codex exec`.
+- `harness.codex_profile` (string): default Codex profile passed to `codex exec`.
+- `harness.codex_extra_args` ([]string): extra flags passed to `codex exec`.
+
+Example:
+
+```toml
+[harness]
+default_harness = "codex-cli"
+codex_bin = "codex"
+codex_model = "gpt-5"
+codex_profile = "fast"
+codex_extra_args = ["--ephemeral", "--skip-git-repo-check"]
+```
+
+Selection precedence at runtime is:
+
+1. Task-level `harnessId` (RPC `task.create`)
+2. Run-level `run.runtime.harnessId`
+3. `harness.default_harness` from `config.toml`
+4. Fallback: `agen8-native`
 
 ## Resolution order
 
