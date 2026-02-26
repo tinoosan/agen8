@@ -876,7 +876,6 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	var costInPerM float64
 	var costOutPerM float64
 	var pricingKnown bool
-	adapterCostUSD := 0.0
 	nativeHarness := resolvedHarnessID == harness.NativeAdapterID
 
 	if nativeHarness {
@@ -1061,7 +1060,6 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 				} else {
 					adaptRes = harness.NormalizeResult(adaptRes)
 					adapterRunRef = strings.TrimSpace(adaptRes.AdapterRunID)
-					adapterCostUSD = adaptRes.CostUSD
 					cumulativeInputTokens = adaptRes.InputTokens
 					cumulativeOutputTokens = adaptRes.OutputTokens
 					cumulativeTotalTokens = adaptRes.TotalTokens
@@ -1085,7 +1083,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	if !nativeHarness && cumulativeTotalTokens > 0 {
 		totalTokens = cumulativeTotalTokens
 	}
-	costUSD := adapterCostUSD
+	costUSD := 0.0
 	if nativeHarness && pricingKnown {
 		costUSD = (float64(cumulativeInputTokens)/1_000_000.0)*costInPerM + (float64(cumulativeOutputTokens)/1_000_000.0)*costOutPerM
 	}
@@ -1260,7 +1258,9 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 				"inputTokens":  fmt.Sprintf("%d", tr.InputTokens),
 				"outputTokens": fmt.Sprintf("%d", tr.OutputTokens),
 				"totalTokens":  fmt.Sprintf("%d", tr.TotalTokens),
-				"costUSD":      fmt.Sprintf("%.4f", tr.CostUSD),
+			}
+			if nativeHarness && tr.CostUSD > 0 {
+				usageData["costUSD"] = fmt.Sprintf("%.4f", tr.CostUSD)
 			}
 			if adapterRunRef != "" {
 				usageData["harnessRunRef"] = adapterRunRef

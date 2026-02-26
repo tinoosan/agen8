@@ -111,8 +111,8 @@ func TestSessionRunTask_UsesExternalHarnessAdapter(t *testing.T) {
 	if stored.Summary == "" || stored.TotalTokens != 18 {
 		t.Fatalf("unexpected task summary/tokens: summary=%q tokens=%d", stored.Summary, stored.TotalTokens)
 	}
-	if got := stored.CostUSD; got <= 0 {
-		t.Fatalf("expected positive cost from adapter, got %.4f", got)
+	if got := stored.CostUSD; got != 0 {
+		t.Fatalf("expected external harness cost to remain zero, got %.4f", got)
 	}
 	if got := stored.Metadata["harnessId"]; got != "fake-external" {
 		t.Fatalf("metadata harnessId = %#v", got)
