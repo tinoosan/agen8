@@ -149,6 +149,17 @@ func parseAssignee(assignee string) (string, string) {
 	return "", assignee
 }
 
+func metadataValueString(metadata map[string]any, key string) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	raw, ok := metadata[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(raw))
+}
+
 func protocolTaskFromTypesTask(t types.Task) protocol.Task {
 	return protocol.Task{
 		ID:               strings.TrimSpace(t.TaskID),
@@ -156,6 +167,8 @@ func protocolTaskFromTypesTask(t types.Task) protocol.Task {
 		RunID:            protocol.RunID(strings.TrimSpace(t.RunID)),
 		TeamID:           strings.TrimSpace(t.TeamID),
 		TaskKind:         strings.TrimSpace(t.TaskKind),
+		HarnessID:        metadataValueString(t.Metadata, "harnessId"),
+		HarnessRunRef:    metadataValueString(t.Metadata, "harnessRunRef"),
 		AssignedToType:   strings.TrimSpace(t.AssignedToType),
 		AssignedTo:       strings.TrimSpace(t.AssignedTo),
 		AssignedRole:     strings.TrimSpace(t.AssignedRole),
@@ -1013,6 +1026,9 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 		Inputs:         map[string]any{},
 		Metadata:       map[string]any{"source": "rpc.task.create"},
 		CreatedBy:      "monitor",
+	}
+	if harnessID := strings.ToLower(strings.TrimSpace(p.HarnessID)); harnessID != "" {
+		task.Metadata["harnessId"] = harnessID
 	}
 	if task.Priority == 0 {
 		task.Priority = 5

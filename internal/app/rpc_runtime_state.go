@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"os"
 	"strings"
 
+	"github.com/tinoosan/agen8/pkg/harness"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
@@ -34,10 +36,16 @@ func (s *RPCServer) runtimeGetRunState(ctx context.Context, p protocol.RuntimeGe
 	if err != nil {
 		return protocol.RuntimeGetRunStateResult{}, err
 	}
+	harnessID := ""
+	if run.Runtime != nil {
+		harnessID = strings.TrimSpace(run.Runtime.HarnessID)
+	}
+	harnessID = harness.SelectHarnessID(nil, harnessID, os.Getenv)
 	return protocol.RuntimeGetRunStateResult{
 		State: protocol.RuntimeRunState{
 			SessionID:       sessionID,
 			RunID:           runID,
+			HarnessID:       harnessID,
 			PersistedStatus: strings.TrimSpace(run.Status),
 			EffectiveStatus: strings.TrimSpace(run.Status),
 		},
@@ -70,9 +78,15 @@ func (s *RPCServer) runtimeGetSessionState(ctx context.Context, p protocol.Runti
 			continue
 		}
 		status := strings.TrimSpace(run.Status)
+		harnessID := ""
+		if run.Runtime != nil {
+			harnessID = strings.TrimSpace(run.Runtime.HarnessID)
+		}
+		harnessID = harness.SelectHarnessID(nil, harnessID, os.Getenv)
 		out = append(out, protocol.RuntimeRunState{
 			SessionID:       sessionID,
 			RunID:           rid,
+			HarnessID:       harnessID,
 			PersistedStatus: status,
 			EffectiveStatus: status,
 		})

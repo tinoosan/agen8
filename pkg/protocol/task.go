@@ -10,6 +10,8 @@ type Task struct {
 	RunID            RunID     `json:"runId"`
 	TeamID           string    `json:"teamId,omitempty"`
 	TaskKind         string    `json:"taskKind,omitempty"`
+	HarnessID        string    `json:"harnessId,omitempty"`
+	HarnessRunRef    string    `json:"harnessRunRef,omitempty"`
 	AssignedToType   string    `json:"assignedToType,omitempty"`
 	AssignedTo       string    `json:"assignedTo,omitempty"`
 	AssignedRole     string    `json:"assignedRole,omitempty"`
@@ -30,7 +32,7 @@ type Task struct {
 
 type TaskListParams struct {
 	ThreadID ThreadID `json:"threadId"`
-	View     string   `json:"view,omitempty"` // inbox|outbox
+	View     string   `json:"view,omitempty"`  // inbox|outbox
 	Scope    string   `json:"scope,omitempty"` // team|run (default: auto)
 	TeamID   string   `json:"teamId,omitempty"`
 	RunID    string   `json:"runId,omitempty"`
@@ -50,6 +52,7 @@ type TaskCreateParams struct {
 	RunID          string   `json:"runId,omitempty"`
 	Goal           string   `json:"goal"`
 	TaskKind       string   `json:"taskKind,omitempty"`
+	HarnessID      string   `json:"harnessId,omitempty"`
 	AssignedToType string   `json:"assignedToType,omitempty"`
 	AssignedTo     string   `json:"assignedTo,omitempty"`
 	AssignedRole   string   `json:"assignedRole,omitempty"`

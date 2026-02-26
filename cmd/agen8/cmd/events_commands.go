@@ -16,6 +16,7 @@ var (
 	logsRunID     string
 	logsSessionID string
 	logsAgentID   string
+	logsHarnessID string
 	logsTypes     []string
 	logsFollow    bool
 	logsLimit     int
@@ -31,7 +32,7 @@ var logsCmd = &cobra.Command{
 		}
 		typesFilter := normalizeTypeFilter(logsTypes)
 		return followEventRuns(cmd, runIDs, logsFollow, logsLimit, func(cmd *cobra.Command, runID string, afterSeq int64, limit int) (int64, error) {
-			return printLogsBatch(cmd, runID, typesFilter, afterSeq, limit)
+			return printLogsBatch(cmd, runID, typesFilter, strings.TrimSpace(logsHarnessID), afterSeq, limit)
 		})
 	},
 }
@@ -73,7 +74,7 @@ func followEventRuns(cmd *cobra.Command, runIDs []string, follow bool, limit int
 	}
 }
 
-func printLogsBatch(cmd *cobra.Command, runID string, typesFilter []string, afterSeq int64, limit int) (int64, error) {
+func printLogsBatch(cmd *cobra.Command, runID string, typesFilter []string, harnessID string, afterSeq int64, limit int) (int64, error) {
 	var out protocol.LogsQueryResult
 	if err := rpcCall(cmd.Context(), protocol.MethodLogsQuery, protocol.LogsQueryParams{
 		RunID:    runID,
@@ -85,6 +86,9 @@ func printLogsBatch(cmd *cobra.Command, runID string, typesFilter []string, afte
 		return afterSeq, err
 	}
 	for _, ev := range out.Events {
+		if harnessID != "" && !strings.EqualFold(eventHarnessID(ev), harnessID) {
+			continue
+		}
 		fmt.Fprintln(cmd.OutOrStdout(), formatEventLine(ev))
 	}
 	if out.Next > 0 {
@@ -99,7 +103,24 @@ func formatEventLine(ev types.EventRecord) string {
 	if msg == "" {
 		msg = "-"
 	}
-	return fmt.Sprintf("%s  %s  %s  %s", ts, strings.TrimSpace(ev.RunID), strings.TrimSpace(ev.Type), msg)
+	harnessID := eventHarnessID(ev)
+	if harnessID == "" {
+		harnessID = "-"
+	}
+	return fmt.Sprintf("%s  %s  %s  %s  %s", ts, strings.TrimSpace(ev.RunID), strings.TrimSpace(ev.Type), harnessID, msg)
+}
+
+func eventHarnessID(ev types.EventRecord) string {
+	if len(ev.Data) == 0 {
+		return ""
+	}
+	if v := strings.TrimSpace(ev.Data["harnessId"]); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(ev.Data["harnessID"]); v != "" {
+		return v
+	}
+	return ""
 }
 
 func normalizeTypeFilter(in []string) []string {
@@ -215,6 +236,7 @@ func init() {
 	logsCmd.Flags().StringVar(&logsRunID, "run-id", "", "run id to query")
 	logsCmd.Flags().StringVar(&logsSessionID, "session-id", "", "session id scope (defaults to active project session)")
 	logsCmd.Flags().StringVar(&logsAgentID, "agent", "", "agent/run id alias for filtering")
+	logsCmd.Flags().StringVar(&logsHarnessID, "harness-id", "", "filter events by harness id")
 	logsCmd.Flags().StringSliceVar(&logsTypes, "type", nil, "event type filter (repeat or comma-separated)")
 	logsCmd.Flags().BoolVar(&logsFollow, "follow", true, "follow log updates")
 	logsCmd.Flags().IntVar(&logsLimit, "limit", 200, "max events per poll per run")

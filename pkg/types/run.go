@@ -72,6 +72,8 @@ type RunRuntimeConfig struct {
 
 	// Model is the configured LLM model identifier for this run.
 	Model string `json:"model,omitempty"`
+	// HarnessID is the configured harness adapter identifier for this run.
+	HarnessID string `json:"harnessId,omitempty"`
 
 	// TeamID is set when the run belongs to a team context.
 	TeamID string `json:"teamId,omitempty"`

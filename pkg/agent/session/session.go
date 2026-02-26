@@ -20,6 +20,7 @@ import (
 	"github.com/tinoosan/agen8/pkg/emit"
 	"github.com/tinoosan/agen8/pkg/events"
 	"github.com/tinoosan/agen8/pkg/fsutil"
+	"github.com/tinoosan/agen8/pkg/harness"
 	"github.com/tinoosan/agen8/pkg/llm"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/profile"
@@ -67,6 +68,10 @@ type Config struct {
 
 	SessionID string
 	RunID     string
+	Workdir   string
+
+	RunHarnessID    string
+	HarnessRegistry *harness.Registry
 
 	TeamID               string
 	RoleName             string
@@ -124,6 +129,8 @@ func New(cfg Config) (*Session, error) {
 	if strings.TrimSpace(cfg.RunID) == "" {
 		return nil, fmt.Errorf("runID is required")
 	}
+	cfg.RunHarnessID = strings.TrimSpace(cfg.RunHarnessID)
+	cfg.Workdir = strings.TrimSpace(cfg.Workdir)
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 2 * time.Second
 	}
@@ -829,174 +836,252 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		}
 	}()
 
-	runAgent := s.cfg.Agent
-	if s.cfg.Memory != nil || s.activeProfile != nil {
-		memSnips := []agent.MemorySnippet{}
-		if s.cfg.Memory != nil {
-			if ms, err := s.cfg.Memory.Search(ctx, strings.TrimSpace(task.Goal), s.cfg.MemorySearchLimit); err == nil {
-				memSnips = ms
-			}
-		}
-		aug := buildSystemPrompt(
-			runAgent.GetSystemPrompt(),
-			s.cfg.SoulContent,
-			*s.activeProfile,
-			s.activePromptText,
-			memSnips,
-			s.lastTaskOutcome,
-			s.cfg.TeamID,
-			s.cfg.RoleName,
-			s.cfg.CoordinatorRole,
-			s.cfg.TeamRoles,
-			s.cfg.TeamRoleDescriptions,
-		)
-		if strings.TrimSpace(aug) != "" {
-			cfg := runAgent.Config()
-			cfg.SystemPrompt = aug
-			if cloned, err := runAgent.CloneWithConfig(cfg); err == nil && cloned != nil {
-				runAgent = cloned
-			}
-		}
+	resolvedHarnessID := harness.SelectHarnessID(task.Metadata, s.cfg.RunHarnessID, os.Getenv)
+	if task.Metadata == nil {
+		task.Metadata = map[string]any{}
 	}
+	task.Metadata = harness.SetHarnessIDMetadata(task.Metadata, resolvedHarnessID)
+	_ = s.cfg.TaskStore.UpdateTask(ctx, task)
+	if s.cfg.Events != nil {
+		s.emitBestEffort(ctx, events.Event{
+			Type:    "harness.selected",
+			Message: "Harness selected",
+			Data: map[string]string{
+				"taskId":     taskID,
+				"runId":      strings.TrimSpace(s.cfg.RunID),
+				"harnessId":  resolvedHarnessID,
+				"resolution": "task_metadata|run_runtime|env|fallback",
+			},
+		})
+		s.emitBestEffort(ctx, events.Event{
+			Type:    "harness.run.start",
+			Message: "Harness run started",
+			Data: map[string]string{
+				"taskId":    taskID,
+				"runId":     strings.TrimSpace(s.cfg.RunID),
+				"harnessId": resolvedHarnessID,
+				"taskKind":  taskKind,
+			},
+		})
+	}
+
+	taskCtx := hosttools.WithBatchWaveState(hosttools.WithParentTaskID(ctx, taskID))
+	var runRes agent.RunResult
+	var err error
+	var adapterRunRef string
 
 	var cumulativeInputTokens int
 	var cumulativeOutputTokens int
 	var costInPerM float64
 	var costOutPerM float64
 	var pricingKnown bool
-	{
-		modelID := strings.TrimSpace(runAgent.GetModel())
-		if in, out, ok := cost.LookupPricing(ctx, modelID); ok {
-			costInPerM = in
-			costOutPerM = out
-			pricingKnown = true
-		}
-		cfg := runAgent.Config()
-		orig := cfg.Hooks.OnLLMUsage
-		cfg.Hooks.OnLLMUsage = func(step int, usage llmtypes.LLMUsage) {
-			if orig != nil {
-				orig(step, usage)
-			}
-			cumulativeInputTokens += usage.InputTokens
-			cumulativeOutputTokens += usage.OutputTokens
-			if s.cfg.Events != nil {
-				s.emitBestEffort(ctx, events.Event{
-					Type:    "task.usage",
-					Message: "Task LLM usage",
-					Data: map[string]string{
-						"taskId":       taskID,
-						"step":         fmt.Sprintf("%d", step),
-						"inputTokens":  fmt.Sprintf("%d", usage.InputTokens),
-						"outputTokens": fmt.Sprintf("%d", usage.OutputTokens),
-					},
-				})
-			}
-		}
-		cfg.PromptSource = agent.NewSteeringPromptSource(cfg.PromptSource)
-		if cloned, err := runAgent.CloneWithConfig(cfg); err == nil && cloned != nil {
-			runAgent = cloned
-		}
-	}
+	adapterCostUSD := 0.0
+	nativeHarness := resolvedHarnessID == harness.NativeAdapterID
 
-	taskCtx := hosttools.WithBatchWaveState(hosttools.WithParentTaskID(ctx, taskID))
-	var runRes agent.RunResult
-	var err error
-
-	if s.cfg.RunConversationStore != nil && taskKind == state.TaskKindTask {
-		if s.cfg.Events != nil {
-			s.emitBestEffort(ctx, events.Event{
-				Type:    "run.conversation.active",
-				Message: "Run conversation branch active",
-				Data:    map[string]string{"runId": s.cfg.RunID},
-			})
-		}
-		var msgs []llmtypes.LLMMessage
-		var loadFailed bool
-		msgs, err = s.cfg.RunConversationStore.LoadMessages(taskCtx, s.cfg.RunID)
-		if err != nil {
-			loadFailed = true
-			if s.cfg.Events != nil {
-				s.emitBestEffort(ctx, events.Event{
-					Type:    "run.conversation.load_failed",
-					Message: "Run conversation load failed",
-					Data: map[string]string{
-						"runId": s.cfg.RunID,
-						"error": err.Error(),
-					},
-				})
+	if nativeHarness {
+		runAgent := s.cfg.Agent
+		if s.cfg.Memory != nil || s.activeProfile != nil {
+			memSnips := []agent.MemorySnippet{}
+			if s.cfg.Memory != nil {
+				if ms, searchErr := s.cfg.Memory.Search(ctx, strings.TrimSpace(task.Goal), s.cfg.MemorySearchLimit); searchErr == nil {
+					memSnips = ms
+				}
 			}
-			msgs = nil
+			aug := buildSystemPrompt(
+				runAgent.GetSystemPrompt(),
+				s.cfg.SoulContent,
+				*s.activeProfile,
+				s.activePromptText,
+				memSnips,
+				s.lastTaskOutcome,
+				s.cfg.TeamID,
+				s.cfg.RoleName,
+				s.cfg.CoordinatorRole,
+				s.cfg.TeamRoles,
+				s.cfg.TeamRoleDescriptions,
+			)
+			if strings.TrimSpace(aug) != "" {
+				cfg := runAgent.Config()
+				cfg.SystemPrompt = aug
+				if cloned, cloneErr := runAgent.CloneWithConfig(cfg); cloneErr == nil && cloned != nil {
+					runAgent = cloned
+				}
+			}
 		}
-		loadedCount := len(msgs)
-		if s.cfg.Events != nil {
-			s.emitBestEffort(ctx, events.Event{
-				Type:    "run.conversation.loaded",
-				Message: "Run conversation loaded",
-				Data: map[string]string{
-					"runId":              s.cfg.RunID,
-					"loadedMessageCount": fmt.Sprintf("%d", loadedCount),
-				},
-			})
-		}
-		msgs = append(msgs, llmtypes.LLMMessage{
-			Role:    "user",
-			Content: strings.TrimSpace(task.Goal),
-		})
 
-		var updatedMsgs []llmtypes.LLMMessage
-		runRes, updatedMsgs, _, err = runAgent.RunConversation(taskCtx, msgs)
-		if err == nil && !loadFailed {
-			if saveErr := s.cfg.RunConversationStore.SaveMessages(taskCtx, s.cfg.RunID, updatedMsgs); saveErr != nil {
+		{
+			modelID := strings.TrimSpace(runAgent.GetModel())
+			if in, out, ok := cost.LookupPricing(ctx, modelID); ok {
+				costInPerM = in
+				costOutPerM = out
+				pricingKnown = true
+			}
+			cfg := runAgent.Config()
+			orig := cfg.Hooks.OnLLMUsage
+			cfg.Hooks.OnLLMUsage = func(step int, usage llmtypes.LLMUsage) {
+				if orig != nil {
+					orig(step, usage)
+				}
+				cumulativeInputTokens += usage.InputTokens
+				cumulativeOutputTokens += usage.OutputTokens
 				if s.cfg.Events != nil {
 					s.emitBestEffort(ctx, events.Event{
-						Type:    "run.conversation.save_failed",
-						Message: "Run conversation save failed",
+						Type:    "task.usage",
+						Message: "Task LLM usage",
 						Data: map[string]string{
-							"runId": s.cfg.RunID,
-							"error": saveErr.Error(),
+							"taskId":       taskID,
+							"step":         fmt.Sprintf("%d", step),
+							"inputTokens":  fmt.Sprintf("%d", usage.InputTokens),
+							"outputTokens": fmt.Sprintf("%d", usage.OutputTokens),
 						},
 					})
 				}
-			} else if s.cfg.Events != nil {
-				s.emitBestEffort(ctx, events.Event{
-					Type:    "run.conversation.saved",
-					Message: "Run conversation saved",
-					Data: map[string]string{
-						"runId":             s.cfg.RunID,
-						"savedMessageCount": fmt.Sprintf("%d", len(updatedMsgs)),
-					},
-				})
 			}
-		} else if err == nil && loadFailed {
+			cfg.PromptSource = agent.NewSteeringPromptSource(cfg.PromptSource)
+			if cloned, cloneErr := runAgent.CloneWithConfig(cfg); cloneErr == nil && cloned != nil {
+				runAgent = cloned
+			}
+		}
+
+		if s.cfg.RunConversationStore != nil && taskKind == state.TaskKindTask {
 			if s.cfg.Events != nil {
 				s.emitBestEffort(ctx, events.Event{
-					Type:    "run.conversation.save_skipped",
-					Message: "Run conversation save skipped due to prior load failure",
+					Type:    "run.conversation.active",
+					Message: "Run conversation branch active",
+					Data:    map[string]string{"runId": s.cfg.RunID},
+				})
+			}
+			var msgs []llmtypes.LLMMessage
+			var loadFailed bool
+			msgs, err = s.cfg.RunConversationStore.LoadMessages(taskCtx, s.cfg.RunID)
+			if err != nil {
+				loadFailed = true
+				if s.cfg.Events != nil {
+					s.emitBestEffort(ctx, events.Event{
+						Type:    "run.conversation.load_failed",
+						Message: "Run conversation load failed",
+						Data: map[string]string{
+							"runId": s.cfg.RunID,
+							"error": err.Error(),
+						},
+					})
+				}
+				msgs = nil
+			}
+			loadedCount := len(msgs)
+			if s.cfg.Events != nil {
+				s.emitBestEffort(ctx, events.Event{
+					Type:    "run.conversation.loaded",
+					Message: "Run conversation loaded",
 					Data: map[string]string{
-						"runId": s.cfg.RunID,
+						"runId":              s.cfg.RunID,
+						"loadedMessageCount": fmt.Sprintf("%d", loadedCount),
 					},
 				})
 			}
+			msgs = append(msgs, llmtypes.LLMMessage{
+				Role:    "user",
+				Content: strings.TrimSpace(task.Goal),
+			})
+
+			var updatedMsgs []llmtypes.LLMMessage
+			runRes, updatedMsgs, _, err = runAgent.RunConversation(taskCtx, msgs)
+			if err == nil && !loadFailed {
+				if saveErr := s.cfg.RunConversationStore.SaveMessages(taskCtx, s.cfg.RunID, updatedMsgs); saveErr != nil {
+					if s.cfg.Events != nil {
+						s.emitBestEffort(ctx, events.Event{
+							Type:    "run.conversation.save_failed",
+							Message: "Run conversation save failed",
+							Data: map[string]string{
+								"runId": s.cfg.RunID,
+								"error": saveErr.Error(),
+							},
+						})
+					}
+				} else if s.cfg.Events != nil {
+					s.emitBestEffort(ctx, events.Event{
+						Type:    "run.conversation.saved",
+						Message: "Run conversation saved",
+						Data: map[string]string{
+							"runId":             s.cfg.RunID,
+							"savedMessageCount": fmt.Sprintf("%d", len(updatedMsgs)),
+						},
+					})
+				}
+			} else if err == nil && loadFailed {
+				if s.cfg.Events != nil {
+					s.emitBestEffort(ctx, events.Event{
+						Type:    "run.conversation.save_skipped",
+						Message: "Run conversation save skipped due to prior load failure",
+						Data: map[string]string{
+							"runId": s.cfg.RunID,
+						},
+					})
+				}
+			}
+		} else {
+			if s.cfg.Events != nil {
+				reason := "store_nil"
+				if s.cfg.RunConversationStore != nil {
+					reason = "task_kind"
+				}
+				s.emitBestEffort(ctx, events.Event{
+					Type:    "run.conversation.skipped",
+					Message: "Run conversation branch skipped",
+					Data:    map[string]string{"runId": s.cfg.RunID, "reason": reason, "taskKind": taskKind},
+				})
+			}
+			runRes, err = runAgent.Run(taskCtx, strings.TrimSpace(task.Goal))
 		}
 	} else {
-		if s.cfg.Events != nil {
-			reason := "store_nil"
-			if s.cfg.RunConversationStore != nil {
-				reason = "task_kind"
+		reg := s.cfg.HarnessRegistry
+		if reg == nil {
+			err = fmt.Errorf("harness adapter %q unavailable (registry not configured)", resolvedHarnessID)
+		} else {
+			adapter, ok := reg.Get(resolvedHarnessID)
+			if !ok || adapter == nil {
+				err = fmt.Errorf("harness adapter %q is not registered", resolvedHarnessID)
+			} else {
+				reqMeta := map[string]any{}
+				for k, v := range task.Metadata {
+					reqMeta[k] = v
+				}
+				adaptRes, runErr := adapter.RunTask(taskCtx, harness.TaskRequest{
+					TaskID:    strings.TrimSpace(taskID),
+					RunID:     strings.TrimSpace(s.cfg.RunID),
+					SessionID: strings.TrimSpace(s.cfg.SessionID),
+					Goal:      strings.TrimSpace(task.Goal),
+					TaskKind:  taskKind,
+					Metadata:  reqMeta,
+					Workdir:   strings.TrimSpace(s.cfg.Workdir),
+				})
+				if runErr != nil {
+					err = runErr
+				} else {
+					adaptRes = harness.NormalizeResult(adaptRes)
+					adapterRunRef = strings.TrimSpace(adaptRes.AdapterRunID)
+					adapterCostUSD = adaptRes.CostUSD
+					cumulativeInputTokens = adaptRes.InputTokens
+					cumulativeOutputTokens = adaptRes.OutputTokens
+					runRes = agent.RunResult{
+						Text:      strings.TrimSpace(adaptRes.Text),
+						Artifacts: append([]string(nil), adaptRes.Artifacts...),
+						Status:    adaptRes.Status,
+						Error:     strings.TrimSpace(adaptRes.Error),
+					}
+				}
 			}
-			s.emitBestEffort(ctx, events.Event{
-				Type:    "run.conversation.skipped",
-				Message: "Run conversation branch skipped",
-				Data:    map[string]string{"runId": s.cfg.RunID, "reason": reason, "taskKind": taskKind},
-			})
 		}
-		runRes, err = runAgent.Run(taskCtx, strings.TrimSpace(task.Goal))
+	}
+	if adapterRunRef != "" {
+		task.Metadata["harnessRunRef"] = adapterRunRef
+		_ = s.cfg.TaskStore.UpdateTask(ctx, task)
 	}
 
 	doneAt := time.Now()
 	totalTokens := cumulativeInputTokens + cumulativeOutputTokens
-	costUSD := 0.0
-	if pricingKnown {
+	costUSD := adapterCostUSD
+	if nativeHarness && pricingKnown {
 		costUSD = (float64(cumulativeInputTokens)/1_000_000.0)*costInPerM + (float64(cumulativeOutputTokens)/1_000_000.0)*costOutPerM
 	}
 	tr := types.TaskResult{
@@ -1016,38 +1101,40 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		} else {
 			tr.Status = types.TaskStatusFailed
 			tr.Error = err.Error()
-			var repeatedInvalidErr *agent.RepeatedInvalidToolCallError
-			if errors.As(err, &repeatedInvalidErr) {
-				payload := map[string]string{
-					"taskId":             taskID,
-					"tool":               strings.TrimSpace(repeatedInvalidErr.ToolName),
-					"reason":             strings.TrimSpace(repeatedInvalidErr.LastError),
-					"consecutiveInvalid": fmt.Sprintf("%d", repeatedInvalidErr.Count),
-					"elapsedSeconds":     fmt.Sprintf("%d", int(repeatedInvalidErr.Elapsed.Round(time.Second).Seconds())),
+			if nativeHarness {
+				var repeatedInvalidErr *agent.RepeatedInvalidToolCallError
+				if errors.As(err, &repeatedInvalidErr) {
+					payload := map[string]string{
+						"taskId":             taskID,
+						"tool":               strings.TrimSpace(repeatedInvalidErr.ToolName),
+						"reason":             strings.TrimSpace(repeatedInvalidErr.LastError),
+						"consecutiveInvalid": fmt.Sprintf("%d", repeatedInvalidErr.Count),
+						"elapsedSeconds":     fmt.Sprintf("%d", int(repeatedInvalidErr.Elapsed.Round(time.Second).Seconds())),
+					}
+					s.emitBestEffort(ctx, events.Event{
+						Type:    "task.tool.invalid_repeated",
+						Message: "Task failed due to repeated invalid tool calls",
+						Data:    payload,
+					})
 				}
-				s.emitBestEffort(ctx, events.Event{
-					Type:    "task.tool.invalid_repeated",
-					Message: "Task failed due to repeated invalid tool calls",
-					Data:    payload,
-				})
-			}
-			if s.cfg.Events != nil {
-				errInfo := llm.ClassifyError(err)
-				payload := map[string]string{
-					"taskId":     taskID,
-					"class":      fallback(strings.TrimSpace(errInfo.Class), "unknown"),
-					"retryable":  fmt.Sprintf("%t", errInfo.Retryable),
-					"statusCode": fmt.Sprintf("%d", errInfo.StatusCode),
-					"message":    fallback(strings.TrimSpace(errInfo.Message), strings.TrimSpace(err.Error())),
+				if s.cfg.Events != nil {
+					errInfo := llm.ClassifyError(err)
+					payload := map[string]string{
+						"taskId":     taskID,
+						"class":      fallback(strings.TrimSpace(errInfo.Class), "unknown"),
+						"retryable":  fmt.Sprintf("%t", errInfo.Retryable),
+						"statusCode": fmt.Sprintf("%d", errInfo.StatusCode),
+						"message":    fallback(strings.TrimSpace(errInfo.Message), strings.TrimSpace(err.Error())),
+					}
+					if code := strings.TrimSpace(errInfo.Code); code != "" {
+						payload["code"] = code
+					}
+					s.emitBestEffort(ctx, events.Event{
+						Type:    "llm.error",
+						Message: llmErrorMessage(errInfo),
+						Data:    payload,
+					})
 				}
-				if code := strings.TrimSpace(errInfo.Code); code != "" {
-					payload["code"] = code
-				}
-				s.emitBestEffort(ctx, events.Event{
-					Type:    "llm.error",
-					Message: llmErrorMessage(errInfo),
-					Data:    payload,
-				})
 			}
 		}
 	} else {
@@ -1120,10 +1207,14 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	// Emit completion events before updating task state (ordering).
 	if s.cfg.Events != nil {
 		data := map[string]string{
-			"taskId":   taskID,
-			"status":   string(tr.Status),
-			"profile":  s.activeProfile.ID,
-			"taskKind": taskKind,
+			"taskId":    taskID,
+			"status":    string(tr.Status),
+			"profile":   s.activeProfile.ID,
+			"taskKind":  taskKind,
+			"harnessId": resolvedHarnessID,
+		}
+		if adapterRunRef != "" {
+			data["harnessRunRef"] = adapterRunRef
 		}
 		if taskSource != "" {
 			data["source"] = taskSource
@@ -1156,6 +1247,36 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			// Always include the first artifact path (typically SUMMARY.md).
 			data["artifact0"] = tr.Artifacts[0]
 		}
+		if tr.TotalTokens > 0 || tr.CostUSD > 0 {
+			usageData := map[string]string{
+				"taskId":       taskID,
+				"runId":        strings.TrimSpace(s.cfg.RunID),
+				"harnessId":    resolvedHarnessID,
+				"inputTokens":  fmt.Sprintf("%d", tr.InputTokens),
+				"outputTokens": fmt.Sprintf("%d", tr.OutputTokens),
+				"totalTokens":  fmt.Sprintf("%d", tr.TotalTokens),
+				"costUSD":      fmt.Sprintf("%.4f", tr.CostUSD),
+			}
+			if adapterRunRef != "" {
+				usageData["harnessRunRef"] = adapterRunRef
+			}
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "harness.usage.reported",
+				Message: "Harness usage recorded",
+				Data:    usageData,
+			})
+		}
+		harnessEventType := "harness.run.complete"
+		harnessEventMsg := "Harness run completed"
+		if tr.Status == types.TaskStatusFailed {
+			harnessEventType = "harness.run.error"
+			harnessEventMsg = "Harness run failed"
+		}
+		s.emitBestEffort(ctx, events.Event{
+			Type:    harnessEventType,
+			Message: harnessEventMsg,
+			Data:    data,
+		})
 		s.emitBestEffort(ctx, events.Event{Type: "task.done", Message: "Task finished", Data: data})
 		if strings.EqualFold(taskSource, "heartbeat") {
 			s.emitBestEffort(ctx, events.Event{

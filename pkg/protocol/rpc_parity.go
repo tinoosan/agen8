@@ -460,6 +460,7 @@ type RuntimeRunState struct {
 	SessionID       string  `json:"sessionId"`
 	RunID           string  `json:"runId"`
 	Model           string  `json:"model,omitempty"`
+	HarnessID       string  `json:"harnessId,omitempty"`
 	RunTotalTokens  int     `json:"runTotalTokens,omitempty"`
 	RunTotalCostUSD float64 `json:"runTotalCostUSD,omitempty"`
 	PersistedStatus string  `json:"persistedStatus,omitempty"`

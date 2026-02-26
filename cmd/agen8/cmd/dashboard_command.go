@@ -112,18 +112,22 @@ func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "ROLE\tRUN\tSTATUS\tPROFILE\tWORKER\tHEARTBEAT\tSTARTED")
+	fmt.Fprintln(w, "ROLE\tRUN\tHARNESS\tSTATUS\tPROFILE\tWORKER\tHEARTBEAT\tSTARTED")
 	for _, agent := range agents.Agents {
 		role := strings.TrimSpace(agent.Role)
 		if strings.EqualFold(strings.TrimSpace(item.Mode), "standalone") {
 			role = "-"
 		}
 		effective := strings.TrimSpace(agent.Status)
+		harnessID := "-"
 		worker := "-"
 		heartbeat := "-"
 		if rs, ok := effectiveByRun[strings.TrimSpace(agent.RunID)]; ok {
 			if v := strings.TrimSpace(rs.EffectiveStatus); v != "" {
 				effective = v
+			}
+			if v := strings.TrimSpace(rs.HarnessID); v != "" {
+				harnessID = v
 			}
 			if rs.WorkerPresent {
 				worker = "yes"
@@ -136,9 +140,10 @@ func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {
 		}
 		fmt.Fprintf(
 			w,
-			"%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			blankDash(role),
 			blankDash(strings.TrimSpace(agent.RunID)),
+			blankDash(harnessID),
 			blankDash(effective),
 			blankDash(strings.TrimSpace(agent.Profile)),
 			worker,
