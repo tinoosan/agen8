@@ -872,6 +872,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 
 	var cumulativeInputTokens int
 	var cumulativeOutputTokens int
+	var cumulativeTotalTokens int
 	var costInPerM float64
 	var costOutPerM float64
 	var pricingKnown bool
@@ -1063,6 +1064,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 					adapterCostUSD = adaptRes.CostUSD
 					cumulativeInputTokens = adaptRes.InputTokens
 					cumulativeOutputTokens = adaptRes.OutputTokens
+					cumulativeTotalTokens = adaptRes.TotalTokens
 					runRes = agent.RunResult{
 						Text:      strings.TrimSpace(adaptRes.Text),
 						Artifacts: append([]string(nil), adaptRes.Artifacts...),
@@ -1080,6 +1082,9 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 
 	doneAt := time.Now()
 	totalTokens := cumulativeInputTokens + cumulativeOutputTokens
+	if !nativeHarness && cumulativeTotalTokens > 0 {
+		totalTokens = cumulativeTotalTokens
+	}
 	costUSD := adapterCostUSD
 	if nativeHarness && pricingKnown {
 		costUSD = (float64(cumulativeInputTokens)/1_000_000.0)*costInPerM + (float64(cumulativeOutputTokens)/1_000_000.0)*costOutPerM

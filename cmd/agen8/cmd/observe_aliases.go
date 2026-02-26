@@ -115,16 +115,20 @@ var costsCmd = &cobra.Command{
 		}
 
 		var totals protocol.SessionGetTotalsResult
-		_ = rpcCall(cmd.Context(), protocol.MethodSessionGetTotals, protocol.SessionGetTotalsParams{
+		if err := rpcCall(cmd.Context(), protocol.MethodSessionGetTotals, protocol.SessionGetTotalsParams{
 			ThreadID: protocol.ThreadID(sessionID),
 			TeamID:   strings.TrimSpace(item.TeamID),
 			RunID:    strings.TrimSpace(item.CurrentRunID),
-		}, &totals)
+		}, &totals); err != nil {
+			return fmt.Errorf("session.getTotals: %w", err)
+		}
 
 		var runtimeState protocol.RuntimeGetSessionStateResult
-		_ = rpcCall(cmd.Context(), protocol.MethodRuntimeGetSessionState, protocol.RuntimeGetSessionStateParams{
+		if err := rpcCall(cmd.Context(), protocol.MethodRuntimeGetSessionState, protocol.RuntimeGetSessionStateParams{
 			SessionID: sessionID,
-		}, &runtimeState)
+		}, &runtimeState); err != nil {
+			return fmt.Errorf("runtime.getSessionState: %w", err)
+		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Session %s totals: tokens=%d cost=$%.4f\n", sessionID, totals.TotalTokens, totals.TotalCostUSD)
 		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
