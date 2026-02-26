@@ -1,6 +1,6 @@
 # Agen8
 
-Agen8 Core is a local agentic runtime that exposes an interactive CLI for launching sessions, resuming previous runs, and inspecting every artifact the agent creates. It builds on a virtual filesystem (VFS) abstraction so tooling remains explicit, auditable, and reproducible.
+Agen8 Contract Plane is an orchestrator-first runtime for routing work across multiple harnesses while keeping one control-plane for tasks, runs, artifacts, and observability. It builds on a virtual filesystem (VFS) abstraction so tooling remains explicit, auditable, and reproducible.
 
 ## Table of Contents
 
@@ -43,7 +43,8 @@ Sessions share a workspace under `dataDir/agents/<agentId>` and persist history 
 ### Rapid reference
 
 - `./agen8 monitor` attaches a minimalist observer to a running agent (start the daemon first).
-- Tail structured logs with `./agen8 logs --follow` and tool activity with `./agen8 activity --follow`.
+- Tail structured logs with `./agen8 logs --follow` or `./agen8 feed`, and deep traces with `./agen8 trace`.
+- Use `./agen8 status` for one-shot runtime health and `./agen8 costs` for per-run/session usage totals.
 - When you need flag help, run `./agen8 --help` or read [docs/cli-usage.md](docs/cli-usage.md).
 
 ## The Vision: Kubernetes for Agents

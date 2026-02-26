@@ -22,6 +22,7 @@ type runtimeConfig struct {
 	CodeExec   runtimeConfigCodeExec
 	PathAccess runtimeConfigPathAccess
 	Obsidian   runtimeConfigObsidian
+	Harness    runtimeConfigHarness
 }
 
 type runtimeConfigDefaults struct {
@@ -48,6 +49,14 @@ type runtimeConfigObsidian struct {
 	VaultPath string
 }
 
+type runtimeConfigHarness struct {
+	DefaultHarness string
+	CodexBin       string
+	CodexModel     string
+	CodexProfile   string
+	CodexExtraArgs []string
+}
+
 type runtimeConfigFile struct {
 	Defaults   runtimeConfigDefaultsFile   `toml:"defaults"`
 	Env        map[string]string           `toml:"env"`
@@ -55,6 +64,7 @@ type runtimeConfigFile struct {
 	CodeExec   runtimeConfigCodeExecFile   `toml:"code_exec"`
 	PathAccess runtimeConfigPathAccessFile `toml:"path_access"`
 	Obsidian   runtimeConfigObsidianFile   `toml:"obsidian"`
+	Harness    runtimeConfigHarnessFile    `toml:"harness"`
 }
 
 type runtimeConfigDefaultsFile struct {
@@ -79,6 +89,14 @@ type runtimeConfigPathAccessFile struct {
 
 type runtimeConfigObsidianFile struct {
 	VaultPath string `toml:"vault_path"`
+}
+
+type runtimeConfigHarnessFile struct {
+	DefaultHarness string   `toml:"default_harness"`
+	CodexBin       string   `toml:"codex_bin"`
+	CodexModel     string   `toml:"codex_model"`
+	CodexProfile   string   `toml:"codex_profile"`
+	CodexExtraArgs []string `toml:"codex_extra_args"`
 }
 
 func loadRuntimeConfig(dataDir string) (runtimeConfig, error) {
@@ -159,6 +177,13 @@ model = "`+runtimeDefaultModel+`"
 
 [obsidian]
 # vault_path = ""
+
+[harness]
+# default_harness = "agen8-native" # or "codex-cli"
+# codex_bin = "codex"
+# codex_model = ""
+# codex_profile = ""
+# codex_extra_args = []
 `) + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
@@ -202,6 +227,13 @@ func decodeRuntimeConfigFile(path string) (runtimeConfig, bool, error) {
 		},
 		Obsidian: runtimeConfigObsidian{
 			VaultPath: strings.TrimSpace(raw.Obsidian.VaultPath),
+		},
+		Harness: runtimeConfigHarness{
+			DefaultHarness: strings.ToLower(strings.TrimSpace(raw.Harness.DefaultHarness)),
+			CodexBin:       strings.TrimSpace(raw.Harness.CodexBin),
+			CodexModel:     strings.TrimSpace(raw.Harness.CodexModel),
+			CodexProfile:   strings.TrimSpace(raw.Harness.CodexProfile),
+			CodexExtraArgs: normalizeStringList(raw.Harness.CodexExtraArgs),
 		},
 	}
 	for k, v := range raw.Env {
@@ -303,6 +335,21 @@ func mergeRuntimeConfig(base, override runtimeConfig) runtimeConfig {
 	if vaultPath := strings.TrimSpace(override.Obsidian.VaultPath); vaultPath != "" {
 		out.Obsidian.VaultPath = vaultPath
 	}
+	if defaultHarness := strings.ToLower(strings.TrimSpace(override.Harness.DefaultHarness)); defaultHarness != "" {
+		out.Harness.DefaultHarness = defaultHarness
+	}
+	if codexBin := strings.TrimSpace(override.Harness.CodexBin); codexBin != "" {
+		out.Harness.CodexBin = codexBin
+	}
+	if codexModel := strings.TrimSpace(override.Harness.CodexModel); codexModel != "" {
+		out.Harness.CodexModel = codexModel
+	}
+	if codexProfile := strings.TrimSpace(override.Harness.CodexProfile); codexProfile != "" {
+		out.Harness.CodexProfile = codexProfile
+	}
+	if len(override.Harness.CodexExtraArgs) > 0 {
+		out.Harness.CodexExtraArgs = normalizeStringList(override.Harness.CodexExtraArgs)
+	}
 	return out
 }
 
@@ -331,6 +378,11 @@ func applyRuntimeConfigEnvDefaults(cfg runtimeConfig) {
 	setEnvIfUnset("AGEN8_SUBAGENT_MODEL", cfg.Defaults.SubagentModel)
 	setEnvIfUnset("AGEN8_PROFILE", cfg.Defaults.Profile)
 	setEnvIfUnset("OBSIDIAN_VAULT_PATH", cfg.Obsidian.VaultPath)
+	setEnvIfUnset("AGEN8_DEFAULT_HARNESS", cfg.Harness.DefaultHarness)
+	setEnvIfUnset("AGEN8_CODEX_BIN", cfg.Harness.CodexBin)
+	setEnvIfUnset("AGEN8_CODEX_MODEL", cfg.Harness.CodexModel)
+	setEnvIfUnset("AGEN8_CODEX_PROFILE", cfg.Harness.CodexProfile)
+	setEnvIfUnset("AGEN8_CODEX_EXTRA_ARGS", strings.Join(cfg.Harness.CodexExtraArgs, " "))
 	setEnvIfUnset(envSkillsSeedConflict, normalizeSkillsConflict(cfg.Skills.Conflict))
 }
 

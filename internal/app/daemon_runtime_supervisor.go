@@ -19,6 +19,8 @@ import (
 	"github.com/tinoosan/agen8/pkg/emit"
 	"github.com/tinoosan/agen8/pkg/events"
 	"github.com/tinoosan/agen8/pkg/fsutil"
+	"github.com/tinoosan/agen8/pkg/harness"
+	"github.com/tinoosan/agen8/pkg/harness/codexcli"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/profile"
 	"github.com/tinoosan/agen8/pkg/prompts"
@@ -47,6 +49,7 @@ type runtimeSupervisorConfig struct {
 	WorkdirAbs       string
 	DefaultProfile   *profile.Profile
 	SoulService      pkgsoul.Service
+	HarnessRegistry  *harness.Registry
 }
 
 type runtimeSupervisor struct {
@@ -63,6 +66,7 @@ type runtimeSupervisor struct {
 	workdirAbs       string
 	defaultProfile   *profile.Profile
 	soulService      pkgsoul.Service
+	harnessRegistry  *harness.Registry
 
 	mu                  sync.Mutex
 	workers             map[string]*managedRuntime
@@ -279,10 +283,34 @@ func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, ru
 	s.mu.Unlock()
 }
 
+func defaultHarnessRegistryFromEnv() *harness.Registry {
+	reg, err := harness.NewRegistry()
+	if err != nil {
+		log.Printf("daemon: harness registry init failed: %v", err)
+		return nil
+	}
+	codexCfg := codexcli.Config{
+		Binary:           strings.TrimSpace(os.Getenv("AGEN8_CODEX_BIN")),
+		Model:            strings.TrimSpace(os.Getenv("AGEN8_CODEX_MODEL")),
+		Profile:          strings.TrimSpace(os.Getenv("AGEN8_CODEX_PROFILE")),
+		ExtraArgs:        strings.Fields(strings.TrimSpace(os.Getenv("AGEN8_CODEX_EXTRA_ARGS"))),
+		SkipGitRepoCheck: true,
+		Ephemeral:        true,
+	}
+	if err := reg.Register(codexcli.New(codexCfg)); err != nil {
+		log.Printf("daemon: register codex harness adapter failed: %v", err)
+	}
+	return reg
+}
+
 func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 	poll := cfg.PollInterval
 	if poll <= 0 {
 		poll = 1 * time.Second // Faster inbox poll so callbacks and new tasks are picked up sooner
+	}
+	reg := cfg.HarnessRegistry
+	if reg == nil {
+		reg = defaultHarnessRegistryFromEnv()
 	}
 	return &runtimeSupervisor{
 		cfg:              cfg.Cfg,
@@ -298,6 +326,7 @@ func newRuntimeSupervisor(cfg runtimeSupervisorConfig) *runtimeSupervisor {
 		workdirAbs:       cfg.WorkdirAbs,
 		defaultProfile:   cfg.DefaultProfile,
 		soulService:      cfg.SoulService,
+		harnessRegistry:  reg,
 		workers:          map[string]*managedRuntime{},
 	}
 }
@@ -1111,6 +1140,9 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		MaxPending:           50,
 		SessionID:            run.SessionID,
 		RunID:                run.RunID,
+		Workdir:              strings.TrimSpace(s.workdirAbs),
+		RunHarnessID:         strings.TrimSpace(run.Runtime.HarnessID),
+		HarnessRegistry:      s.harnessRegistry,
 		TeamID:               teamID,
 		RoleName:             roleName,
 		IsCoordinator:        isCoordinator,
@@ -1797,12 +1829,15 @@ func (s *runtimeSupervisor) GetRunState(ctx context.Context, sessionID, runID st
 		SessionID:       sessionID,
 		RunID:           runID,
 		Model:           "",
+		HarnessID:       "",
 		PersistedStatus: strings.TrimSpace(run.Status),
 		EffectiveStatus: strings.TrimSpace(run.Status),
 	}
 	if run.Runtime != nil {
 		state.Model = strings.TrimSpace(run.Runtime.Model)
+		state.HarnessID = strings.TrimSpace(run.Runtime.HarnessID)
 	}
+	state.HarnessID = harness.SelectHarnessID(nil, state.HarnessID, os.Getenv)
 	if stats, statsErr := s.taskService.GetRunStats(ctx, runID); statsErr == nil {
 		state.RunTotalTokens = stats.TotalTokens
 		state.RunTotalCostUSD = stats.TotalCost

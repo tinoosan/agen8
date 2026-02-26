@@ -22,3 +22,11 @@ required_packages = ["pandas", "requests"]
 [path_access]
 # allowlist = ["/home/user/shared", "/var/cache/build"]
 # read_only = true   # If true, only reads; if false, reads and writes
+
+# Harness defaults for orchestrating external runtimes.
+[harness]
+# default_harness = "agen8-native"  # or "codex-cli"
+# codex_bin = "codex"
+# codex_model = ""
+# codex_profile = ""
+# codex_extra_args = ["--ephemeral", "--skip-git-repo-check"]

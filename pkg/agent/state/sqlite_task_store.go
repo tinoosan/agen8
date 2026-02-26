@@ -908,7 +908,8 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 			COALESCE(summary, ''), COALESCE(error, ''),
 			attempts, COALESCE(lease_until, ''),
 			input_tokens, output_tokens, total_tokens, cost_usd,
-			duration_seconds, updated_at
+			duration_seconds, updated_at,
+			COALESCE(metadata_json, '{}')
 		FROM tasks
 		WHERE 1=1
 	`
@@ -1011,6 +1012,7 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 		var finishedRaw string
 		var leaseRaw string
 		var updatedRaw string
+		var metadataRaw string
 		if err := rows.Scan(
 			&t.TaskID, &t.SessionID, &t.RunID, &t.TeamID, &t.AssignedRole, &t.AssignedToType, &t.AssignedTo, &t.ClaimedByAgentID, &t.RoleSnapshot, &t.TaskKind, &t.CreatedBy, &t.Goal,
 			&t.Priority, &status, &createdRaw,
@@ -1018,7 +1020,7 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 			&t.Summary, &t.Error,
 			&t.Attempts, &leaseRaw,
 			&t.InputTokens, &t.OutputTokens, &t.TotalTokens, &t.CostUSD,
-			&t.DurationSeconds, &updatedRaw,
+			&t.DurationSeconds, &updatedRaw, &metadataRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -1037,6 +1039,9 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 		}
 		if tt := parseTime(leaseRaw); !tt.IsZero() {
 			t.LeaseUntil = &tt
+		}
+		if strings.TrimSpace(metadataRaw) != "" {
+			_ = json.Unmarshal([]byte(metadataRaw), &t.Metadata)
 		}
 		out = append(out, t)
 	}

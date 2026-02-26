@@ -106,11 +106,11 @@ var tasksListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tSTATUS\tCOST\tTOKENS")
+		fmt.Fprintln(w, "ID\tSTATUS\tHARNESS\tCOST\tTOKENS")
 		for _, t := range tasks {
 			cost := fmt.Sprintf("$%.4f", t.CostUSD)
 			tokens := fmt.Sprintf("%d", t.TotalTokens)
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", t.TaskID, t.Status, cost, tokens)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", t.TaskID, t.Status, blankDash(taskHarnessID(t.Metadata)), cost, tokens)
 		}
 		_ = w.Flush()
 		return nil
@@ -236,7 +236,7 @@ func renderMailWatchOnce(cmd *cobra.Command, sessionID string, view string) erro
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Mail %s for session %s (count=%d)\n", view, sessionID, out.TotalCount)
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tSTATUS\tASSIGNEE\tRUN")
+	fmt.Fprintln(w, "ID\tSTATUS\tHARNESS\tASSIGNEE\tRUN")
 	for _, task := range out.Tasks {
 		assignee := strings.TrimSpace(task.AssignedRole)
 		if assignee == "" {
@@ -244,15 +244,27 @@ func renderMailWatchOnce(cmd *cobra.Command, sessionID string, view string) erro
 		}
 		fmt.Fprintf(
 			w,
-			"%s\t%s\t%s\t%s\n",
+			"%s\t%s\t%s\t%s\t%s\n",
 			blankDash(task.ID),
 			blankDash(task.Status),
+			blankDash(task.HarnessID),
 			blankDash(assignee),
 			blankDash(string(task.RunID)),
 		)
 	}
 	_ = w.Flush()
 	return nil
+}
+
+func taskHarnessID(metadata map[string]any) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	raw, ok := metadata["harnessId"]
+	if !ok || raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(raw))
 }
 
 func init() {
