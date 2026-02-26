@@ -23,6 +23,25 @@ We are developing; there is no need for backward compatibility. We just delete t
    - Native harness changes are allowed for parity/compatibility, but must not block orchestrator roadmap work.
    - Prioritize cross-harness routing, protocol consistency, and observability over native-only feature expansion.
 
+5. External harness orchestration semantics (critical)
+   - External harness adapters are execution engines; they do not own task state.
+   - Agen8 remains the source of truth for all task/run lifecycle mutations (create/claim/complete/retry/escalate).
+   - "Adapter runs a task" is not the same as "orchestration works." True orchestration requires the coordinator to issue actionable delegation intents that Agen8 applies.
+
+6. Current codex-cli reality (do not assume parity with native)
+   - Today, `codex-cli` is invoked per task and returns text/usage only.
+   - It does not directly call Agen8 host tools (`task_create`, `task_review`) in the external adapter path.
+   - Therefore external coordinator runs currently cannot autonomously spawn/assign agents unless Agen8 provides an action bridge.
+
+7. Required bridge contract for external coordinators
+   - External coordinator outputs must be parsed into a strict, machine-readable action envelope (for example: create-task, assign-role, review-decision).
+   - Agen8 must validate and apply those actions through existing task services; adapters must never write DB state directly.
+   - Enforce idempotency and safety limits (dedupe key, max actions per cycle, timeout/cancel handling, malformed output retry policy).
+
+8. Config-first harness control
+   - Harness selection and defaults should be controlled in `config.toml`; CLI flags are overrides, not primary policy.
+   - Selection precedence remains task metadata -> run runtime -> env default -> `agen8-native`.
+
 ## Session learnings (team-only reviewer pipeline)
 
 1. Reviewer -> coordinator handoff is mandatory.
