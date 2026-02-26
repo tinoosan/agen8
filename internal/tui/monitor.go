@@ -15,6 +15,7 @@ import (
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/tinoosan/agen8/internal/tui/adapter"
 	"github.com/tinoosan/agen8/internal/tui/kit"
+	"github.com/tinoosan/agen8/internal/tui/modelpicker"
 	agentstate "github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/protocol"
@@ -294,6 +295,7 @@ type monitorModel struct {
 	modelPickerProvider     string
 	modelPickerQuery        string
 	modelPickerProviderView bool
+	modelPickerCtrl         modelpicker.Controller
 
 	// Profile picker
 	profilePickerOpen     bool

@@ -1,20 +1,28 @@
 package tui
 
 import (
+	"os"
+	"strings"
+
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/agen8/internal/tui/kit"
+	"github.com/tinoosan/agen8/internal/tui/modelpicker"
 	"github.com/tinoosan/agen8/pkg/cost"
 )
 
 // modelPickerItem implements list.Item for the model picker.
 type modelPickerItem struct {
-	id string
+	id         string
+	inputPerM  float64
+	outputPerM float64
 }
 
 func (m modelPickerItem) FilterValue() string { return m.id }
-func (m modelPickerItem) Title() string       { return m.id }
+func (m modelPickerItem) Title() string {
+	return modelpicker.FormatModelTitle(m.id, m.inputPerM, m.outputPerM)
+}
 func (m modelPickerItem) Description() string { return "" }
 
 // openModelPicker initializes and opens the model picker modal.
@@ -24,10 +32,19 @@ func (m *Model) openModelPicker() tea.Cmd {
 	}
 	m.modelPickerOpen = true
 
-	ids := cost.SupportedModels()
-	items := make([]list.Item, 0, len(ids))
-	for _, id := range ids {
-		items = append(items, modelPickerItem{id: id})
+	infos := cost.SupportedModelInfos()
+	if shouldUseOpenRouterPickerCatalog() {
+		if dynamic, ok := cost.OpenRouterModelInfos(m.ctx); ok && len(dynamic) > 0 {
+			infos = dynamic
+		}
+	}
+	items := make([]list.Item, 0, len(infos))
+	for _, info := range infos {
+		items = append(items, modelPickerItem{
+			id:         info.ID,
+			inputPerM:  info.InputPerM,
+			outputPerM: info.OutputPerM,
+		})
 	}
 
 	l := list.New(items, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), nil), 0, 0)
@@ -101,4 +118,15 @@ func (m Model) renderModelPicker(base string) string {
 
 	_ = base
 	return kit.RenderOverlay(opts)
+}
+
+func shouldUseOpenRouterPickerCatalog() bool {
+	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" {
+		return false
+	}
+	baseURL := strings.ToLower(strings.TrimSpace(os.Getenv("OPENROUTER_BASE_URL")))
+	if baseURL == "" {
+		return true
+	}
+	return strings.Contains(baseURL, "openrouter.ai")
 }

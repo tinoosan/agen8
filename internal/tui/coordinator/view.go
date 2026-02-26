@@ -74,7 +74,11 @@ func (m *Model) View() string {
 	feed := m.renderFeed(bodyHeight)
 
 	out := header + "\n" + sep + "\n" + feed + "\n" + input + "\n" + footer
-	return lipgloss.NewStyle().MaxHeight(m.height).MaxWidth(m.width).Render(out)
+	base := lipgloss.NewStyle().MaxHeight(m.height).MaxWidth(m.width).Render(out)
+	if m.modelPicker.IsOpen() {
+		return m.renderModelPicker(base)
+	}
+	return base
 }
 
 // ── Header ─────────────────────────────────────────────────────────────
@@ -158,6 +162,14 @@ func (m *Model) renderHeader() string {
 
 	line := left + strings.Repeat(" ", gap) + right
 	return lipgloss.NewStyle().Width(m.width).MaxWidth(m.width).MaxHeight(1).Padding(0, 1).Render(line)
+}
+
+func (m *Model) renderModelPicker(base string) string {
+	dims := m.modelPicker.SetSize(m.width, m.height)
+	content := m.modelPicker.View()
+	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
+	_ = base
+	return kit.RenderOverlay(opts)
 }
 
 // ── Turn grouping ──────────────────────────────────────────────────────

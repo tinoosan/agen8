@@ -1,6 +1,12 @@
 package cost
 
-import "testing"
+import (
+	"context"
+	"os"
+	"sync"
+	"testing"
+	"time"
+)
 
 func TestPricingLookup_ExactMatch(t *testing.T) {
 	pf := PricingFile{
@@ -92,5 +98,98 @@ func TestSupportsReasoningEffort_CaseInsensitiveSuffixMatch(t *testing.T) {
 func TestSupportsReasoningEffort_Miss(t *testing.T) {
 	if SupportsReasoningEffort("unknown-model") {
 		t.Fatalf("expected unknown model to be unsupported")
+	}
+}
+
+func TestLookupPricing_OpenRouterFallback(t *testing.T) {
+	ctx := context.Background()
+	os.Setenv("OPENROUTER_API_KEY", "test-key")
+	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+	orCacheMu = sync.RWMutex{}
+	orModelCache = map[string]openRouterModelMeta{
+		"moonshotai/kimi-k2.5-unknown": {
+			InputPerM:       0.45,
+			OutputPerM:      2.2,
+			InputPerMKnown:  true,
+			OutputPerMKnown: true,
+			Provider:        "moonshotai",
+		},
+	}
+	orCacheModTime = time.Now()
+	orCacheFailTime = time.Time{}
+	t.Cleanup(func() {
+		orModelCache = nil
+		orCacheModTime = time.Time{}
+		orCacheFailTime = time.Time{}
+		orCacheMu = sync.RWMutex{}
+	})
+
+	in, out, ok := LookupPricing(ctx, "moonshotai/kimi-k2.5-unknown")
+	if !ok {
+		t.Fatalf("expected pricing from openrouter cache")
+	}
+	if in != 0.45 || out != 2.2 {
+		t.Fatalf("unexpected pricing: in=%v out=%v", in, out)
+	}
+}
+
+func TestLookupPricing_OpenRouterFallback_UnparsablePricingUnknown(t *testing.T) {
+	ctx := context.Background()
+	os.Setenv("OPENROUTER_API_KEY", "test-key")
+	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+	orCacheMu = sync.RWMutex{}
+	orModelCache = map[string]openRouterModelMeta{
+		"moonshotai/kimi-k2.5-unknown": {
+			InputPerM:       0,
+			OutputPerM:      0,
+			InputPerMKnown:  false,
+			OutputPerMKnown: false,
+			Provider:        "moonshotai",
+		},
+	}
+	orCacheModTime = time.Now()
+	orCacheFailTime = time.Time{}
+	t.Cleanup(func() {
+		orModelCache = nil
+		orCacheModTime = time.Time{}
+		orCacheFailTime = time.Time{}
+		orCacheMu = sync.RWMutex{}
+	})
+
+	_, _, ok := LookupPricing(ctx, "moonshotai/kimi-k2.5-unknown")
+	if ok {
+		t.Fatalf("expected unparsable OpenRouter pricing to be unknown")
+	}
+}
+
+func TestLookupPricing_OpenRouterFallback_ZeroPricingStillKnownWhenParsed(t *testing.T) {
+	ctx := context.Background()
+	os.Setenv("OPENROUTER_API_KEY", "test-key")
+	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+	orCacheMu = sync.RWMutex{}
+	orModelCache = map[string]openRouterModelMeta{
+		"openai/gpt-oss-120b": {
+			InputPerM:       0,
+			OutputPerM:      0,
+			InputPerMKnown:  true,
+			OutputPerMKnown: true,
+			Provider:        "openai",
+		},
+	}
+	orCacheModTime = time.Now()
+	orCacheFailTime = time.Time{}
+	t.Cleanup(func() {
+		orModelCache = nil
+		orCacheModTime = time.Time{}
+		orCacheFailTime = time.Time{}
+		orCacheMu = sync.RWMutex{}
+	})
+
+	in, out, ok := LookupPricing(ctx, "openai/gpt-oss-120b")
+	if !ok {
+		t.Fatalf("expected parsed zero OpenRouter pricing to remain known")
+	}
+	if in != 0 || out != 0 {
+		t.Fatalf("unexpected parsed zero pricing: in=%v out=%v", in, out)
 	}
 }

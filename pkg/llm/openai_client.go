@@ -134,6 +134,23 @@ func (c *Client) openRouterRequestOptions(model string) []option.RequestOption {
 	return opts
 }
 
+func (c *Client) openRouterChatReasoningOptions(req types.LLMRequest) []option.RequestOption {
+	if c == nil || !isOpenRouterBaseURL(c.baseURL) {
+		return nil
+	}
+	effort := strings.TrimSpace(req.ReasoningEffort)
+	if effort == "" {
+		// OpenRouter Chat can return reasoning summaries across providers even when
+		// the model is not explicitly registered as reasoning-capable.
+		effort = "medium"
+	}
+	return []option.RequestOption{
+		option.WithJSONSet("reasoning", map[string]any{
+			"effort": effort,
+		}),
+	}
+}
+
 func shouldRetryOpenRouterFreeModelPolicy(baseURL, model string, err error) bool {
 	if !isOpenRouterBaseURL(baseURL) || !isOpenRouterDataPolicyError(err) {
 		return false
@@ -689,10 +706,25 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	}
 
 	// Request reasoning summaries when supported.
-	if cost.SupportsReasoningSummary(req.Model) {
+	requestReasoning := cost.SupportsReasoningSummary(req.Model)
+	if isOpenRouterBaseURL(c.baseURL) {
+		// Prefer OpenRouter's live model metadata to avoid stale local flags.
+		if supports, known := cost.SupportsReasoningSummaryFromOpenRouter(context.Background(), req.Model); known {
+			requestReasoning = supports
+		} else {
+			// If metadata is unavailable, keep prior OpenRouter behavior and request
+			// reasoning by default.
+			requestReasoning = true
+		}
+	}
+	if requestReasoning {
 		params.Reasoning = shared.ReasoningParam{}
-		if v := strings.TrimSpace(req.ReasoningEffort); v != "" {
-			params.Reasoning.Effort = shared.ReasoningEffort(v)
+		effort := strings.TrimSpace(req.ReasoningEffort)
+		if effort == "" && isOpenRouterBaseURL(c.baseURL) {
+			effort = "medium"
+		}
+		if effort != "" {
+			params.Reasoning.Effort = shared.ReasoningEffort(effort)
 		}
 		// Summary control:
 		// - empty => default to auto (current behavior)
@@ -1131,6 +1163,7 @@ func (c *Client) generateChat(ctx context.Context, req types.LLMRequest) (types.
 		return types.LLMResponse{}, err
 	}
 	opts := c.openRouterRequestOptions(req.Model)
+	opts = append(opts, c.openRouterChatReasoningOptions(req)...)
 	resp, err := c.client.Chat.Completions.New(ctx, params, opts...)
 	if err != nil && shouldRetryOpenRouterFreeModelPolicy(c.baseURL, req.Model, err) {
 		resp, err = c.client.Chat.Completions.New(ctx, params, withOpenRouterForcedDataCollection(opts)...)
@@ -1202,6 +1235,7 @@ func (c *Client) onResponsesStreamEvent(ev responses.ResponseStreamEventUnion, c
 		OutText:                 outText,
 		Completed:               completed,
 		SawReasoningSummaryText: sawReasoningSummaryText,
+		AllowRawReasoningFallback: isOpenRouterBaseURL(c.baseURL),
 	}
 	handled, err := c.dispatchResponsesStreamEvent(ev, streamCtx)
 	if err != nil {
@@ -1326,6 +1360,9 @@ func shouldFallbackToChatForRequest(baseURL string, req types.LLMRequest, err er
 	if isOpenRouterDataPolicyError(err) {
 		return false
 	}
+	if isOpenRouterBaseURL(baseURL) && shouldFallbackToChat(err) {
+		return true
+	}
 	// Reasoning-capable models should remain on Responses to preserve summary events.
 	if cost.SupportsReasoningSummary(req.Model) {
 		return false
@@ -1424,7 +1461,9 @@ func (c *Client) generateStreamChat(ctx context.Context, req types.LLMRequest, c
 		return types.LLMResponse{}, err
 	}
 
-	stream := c.client.Chat.Completions.NewStreaming(ctx, params, c.openRouterRequestOptions(req.Model)...)
+	opts := c.openRouterRequestOptions(req.Model)
+	opts = append(opts, c.openRouterChatReasoningOptions(req)...)
+	stream := c.client.Chat.Completions.NewStreaming(ctx, params, opts...)
 	if stream == nil {
 		return types.LLMResponse{}, fmt.Errorf("stream is nil")
 	}

@@ -91,8 +91,44 @@ type thinkingEventsMsg struct {
 	err     error
 }
 
+type modelSetMsg struct {
+	model    string
+	accepted bool
+	applied  int
+	err      error
+}
+
 type tickMsg struct{}
 type animTickMsg struct{}
+
+func setModelCmd(endpoint, sessionID, model string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		model = strings.TrimSpace(model)
+		if model == "" {
+			return modelSetMsg{err: fmt.Errorf("model is required")}
+		}
+		sid := strings.TrimSpace(sessionID)
+		if sid == "" {
+			return modelSetMsg{err: fmt.Errorf("session id is required")}
+		}
+
+		cli := protocol.TCPClient{Endpoint: endpoint, Timeout: 5 * time.Second}
+		var out protocol.ControlSetModelResult
+		if err := cli.Call(ctx, protocol.MethodControlSetModel, protocol.ControlSetModelParams{
+			ThreadID: protocol.ThreadID(sid),
+			Model:    model,
+		}, &out); err != nil {
+			return modelSetMsg{model: model, err: err}
+		}
+		return modelSetMsg{
+			model:    model,
+			accepted: out.Accepted,
+			applied:  len(out.AppliedTo),
+		}
+	}
+}
 
 func activityToFeedEntry(act types.Activity) *feedEntry {
 	if isActivityPlanWrite(act.Kind, act.Path) || isActivitySummaryWrite(act.Kind, act.Path) {

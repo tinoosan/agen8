@@ -38,7 +38,7 @@ func pricingKnownForRunID(ctx context.Context, session pkgsession.Service, runID
 	if modelID == "" {
 		return false
 	}
-	_, _, ok := cost.DefaultPricing().Lookup(modelID)
+	_, _, ok := cost.LookupPricing(ctx, modelID)
 	return ok
 }
 

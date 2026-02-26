@@ -38,6 +38,9 @@ type ResponsesStreamEventContext struct {
 	OutText                 *strings.Builder
 	Completed               **responses.Response
 	SawReasoningSummaryText *bool
+	// AllowRawReasoningFallback controls whether reasoning_text deltas can be
+	// surfaced as a fallback when providers omit explicit reasoning summaries.
+	AllowRawReasoningFallback bool
 }
 
 // OpenAIClientConfig configures optional OpenAI client extension points.
@@ -304,12 +307,17 @@ func handleResponseReasoningSummaryTextDoneEvent(ev responses.ResponseStreamEven
 }
 
 func handleResponseReasoningTextDeltaEvent(ev responses.ResponseStreamEventUnion, ctx *ResponsesStreamEventContext) (bool, error) {
-	_, ok := ev.AsAny().(responses.ResponseReasoningTextDeltaEvent)
+	e, ok := ev.AsAny().(responses.ResponseReasoningTextDeltaEvent)
 	if !ok {
 		return false, nil
 	}
 	if ctx == nil || ctx.Callback == nil {
 		return true, nil
+	}
+	if !sawReasoningSummaryText(ctx) && ctx.AllowRawReasoningFallback {
+		if s := strings.TrimSpace(e.Delta); s != "" {
+			return true, emitStreamChunk(ctx, types.LLMStreamChunk{IsReasoning: true, Text: e.Delta})
+		}
 	}
 	return true, emitStreamChunk(ctx, types.LLMStreamChunk{IsReasoning: true})
 }

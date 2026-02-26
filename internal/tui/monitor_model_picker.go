@@ -1,22 +1,24 @@
 package tui
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/agen8/internal/tui/kit"
-	"github.com/tinoosan/agen8/pkg/protocol"
+	"github.com/tinoosan/agen8/internal/tui/modelpicker"
 )
 
 // modelPickerItem implements list.Item for the model picker.
+// It is kept for test compatibility; list contents are mirrored from the shared controller.
 type monitorModelPickerItem struct {
 	id         string
 	provider   string
 	isProvider bool
 	count      int
+	inputPerM  float64
+	outputPerM float64
 }
 
 func (m monitorModelPickerItem) FilterValue() string {
@@ -29,11 +31,11 @@ func (m monitorModelPickerItem) FilterValue() string {
 func (m monitorModelPickerItem) Title() string {
 	if m.isProvider {
 		if m.count > 0 {
-			return fmt.Sprintf("%s (%d)", m.provider, m.count)
+			return strings.TrimSpace(m.provider) + " (" + strconv.Itoa(m.count) + ")"
 		}
-		return m.provider
+		return strings.TrimSpace(m.provider)
 	}
-	return m.id
+	return modelpicker.FormatModelTitle(m.id, m.inputPerM, m.outputPerM)
 }
 
 func (m monitorModelPickerItem) Description() string { return "" }
@@ -42,170 +44,87 @@ func (m monitorModelPickerItem) Description() string { return "" }
 func (m *monitorModel) openModelPicker() tea.Cmd {
 	m.helpModalOpen = false
 	m.closeAllPickers()
-	m.modelPickerOpen = true
-	m.modelPickerProvider = ""
-	m.modelPickerQuery = ""
-	m.modelPickerProviderView = true
-
-	l := list.New([]list.Item{}, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), nil), 0, 0)
-	l.Title = "Select Provider"
-	l.SetShowHelp(false)
-	l.SetShowStatusBar(false)
-	l.SetShowPagination(true)
-	l.SetFilteringEnabled(false)
-	l.SetShowFilter(false)
-	l.Styles.Title = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#707070")).
-		Bold(true)
-
-	m.modelPickerList = l
-	m.refreshModelPickerItems()
+	cmd := m.modelPickerCtrl.Open(m.rpcEndpointOrDefault(), strings.TrimSpace(m.rpcRun().SessionID))
+	if cmd != nil {
+		msg := cmd()
+		_, _ = m.modelPickerCtrl.Update(msg)
+	}
+	m.syncModelPickerLegacy()
 	return nil
 }
 
 // closeModelPicker closes the model picker modal.
 func (m *monitorModel) closeModelPicker() {
-	m.modelPickerOpen = false
-	m.modelPickerList = list.Model{}
-	m.modelPickerProvider = ""
-	m.modelPickerQuery = ""
-	m.modelPickerProviderView = false
+	m.modelPickerCtrl.Close()
+	m.syncModelPickerLegacy()
 }
 
+// refreshModelPickerItems keeps backward-compatible behavior for tests that call this directly.
 func (m *monitorModel) refreshModelPickerItems() {
-	if !m.modelPickerOpen {
-		return
-	}
-	q := strings.ToLower(strings.TrimSpace(m.modelPickerQuery))
-	items := make([]list.Item, 0, 64)
-
-	if m.modelPickerProviderView {
-		var res protocol.ModelListResult
-		_ = m.rpcRoundTrip(protocol.MethodModelList, protocol.ModelListParams{
-			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
-			Query:    strings.TrimSpace(m.modelPickerQuery),
-		}, &res)
-		for _, p := range res.Providers {
-			candidate := strings.ToLower(strings.TrimSpace(p.Name))
-			if q != "" && !strings.Contains(candidate, q) {
-				continue
-			}
-			items = append(items, monitorModelPickerItem{provider: strings.TrimSpace(p.Name), isProvider: true, count: p.Count})
-		}
-		m.modelPickerList.Title = "Select Provider"
-	} else {
-		provider := strings.TrimSpace(m.modelPickerProvider)
-		var res protocol.ModelListResult
-		_ = m.rpcRoundTrip(protocol.MethodModelList, protocol.ModelListParams{
-			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
-			Provider: provider,
-			Query:    strings.TrimSpace(m.modelPickerQuery),
-		}, &res)
-		for _, info := range res.Models {
-			if !strings.EqualFold(strings.TrimSpace(info.Provider), provider) {
-				continue
-			}
-			candidate := strings.ToLower(strings.TrimSpace(info.ID))
-			if q != "" && !strings.Contains(candidate, q) {
-				continue
-			}
-			items = append(items, monitorModelPickerItem{id: strings.TrimSpace(info.ID), provider: provider})
-		}
-		m.modelPickerList.Title = "Select Model (" + provider + ")"
-	}
-
-	m.modelPickerList.SetItems(items)
-	if len(items) > 0 {
-		m.modelPickerList.Select(0)
-	}
+	m.syncModelPickerLegacy()
 }
 
-// updateModelPicker handles keyboard input when the model picker is open.
+// updateModelPicker delegates to the shared controller. dispatchUpdate also handles picker messages globally.
 func (m *monitorModel) updateModelPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	s := strings.ToLower(msg.String())
-	switch s {
-	case "esc", "escape":
-		if !m.modelPickerProviderView {
-			m.modelPickerProviderView = true
-			m.modelPickerProvider = ""
-			m.modelPickerQuery = ""
-			m.refreshModelPickerItems()
-			return m, nil
-		}
-		m.closeModelPicker()
-		return m, nil
-	case "backspace":
-		if m.modelPickerQuery != "" {
-			r := []rune(m.modelPickerQuery)
-			m.modelPickerQuery = string(r[:len(r)-1])
-			m.refreshModelPickerItems()
-			return m, nil
-		}
-	case "enter":
-		return m, m.selectModelFromPicker()
+	cmd, event := m.modelPickerCtrl.Update(msg)
+	if cmd != nil {
+		nextMsg := cmd()
+		_, _ = m.modelPickerCtrl.Update(nextMsg)
+		cmd = nil
 	}
-
-	if len(msg.Runes) > 0 {
-		for _, r := range msg.Runes {
-			if r >= 32 && r != 127 {
-				m.modelPickerQuery += string(r)
-			}
+	m.syncModelPickerLegacy()
+	switch event.Type {
+	case modelpicker.EventModelSelected:
+		m.model = event.ModelID
+		if m.teamID != "" {
+			return m, m.writeTeamControl("set_team_model", event.ModelID)
 		}
-		m.refreshModelPickerItems()
-		return m, nil
+		return m, m.writeControl("set_model", map[string]any{"model": event.ModelID})
+	case modelpicker.EventError:
+		if event.Err != nil {
+			m.appendAgentOutput("[model picker] error: " + event.Err.Error())
+		}
 	}
-
-	var cmd tea.Cmd
-	m.modelPickerList, cmd = m.modelPickerList.Update(msg)
 	return m, cmd
 }
 
-// selectModelFromPicker selects the currently highlighted provider/model.
-func (m *monitorModel) selectModelFromPicker() tea.Cmd {
-	if m.modelPickerList.Items() == nil || len(m.modelPickerList.Items()) == 0 {
-		return nil
-	}
-	selectedItem := m.modelPickerList.SelectedItem()
-	if selectedItem == nil {
-		return nil
-	}
-	item, ok := selectedItem.(monitorModelPickerItem)
-	if !ok {
-		return nil
-	}
-
-	if item.isProvider {
-		m.modelPickerProviderView = false
-		m.modelPickerProvider = strings.TrimSpace(item.provider)
-		m.modelPickerQuery = ""
-		m.refreshModelPickerItems()
-		return nil
-	}
-
-	selectedID := item.id
-	m.model = selectedID
-	m.closeModelPicker()
-	if m.teamID != "" {
-		return m.writeTeamControl("set_team_model", selectedID)
-	}
-	return m.writeControl("set_model", map[string]any{"model": selectedID})
-}
-
 func (m *monitorModel) renderModelPicker(base string) string {
-	dims := kit.ComputeModalDims(m.width, m.height, 70, 22, 46, 10, 8, 6)
-	m.modelPickerList.SetWidth(dims.ModalWidth - 4)
-	m.modelPickerList.SetHeight(dims.ListHeight)
-
-	scope := "Global"
-	if !m.modelPickerProviderView {
-		scope = "Provider: " + strings.TrimSpace(m.modelPickerProvider)
-	}
-	searchLine := kit.StyleDim.Render("Search: ") + kit.StyleStatusValue.Render(fallback(m.modelPickerQuery, ""))
-	helpLine := kit.StyleDim.Render("Enter select · Esc back/close · type to search")
-	content := scope + "\n" + searchLine + "\n\n" + m.modelPickerList.View() + "\n" + helpLine
-
+	dims := m.modelPickerCtrl.SetSize(m.width, m.height)
+	content := m.modelPickerCtrl.View()
 	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
-
 	_ = base
 	return kit.RenderOverlay(opts)
+}
+
+func (m *monitorModel) syncModelPickerLegacy() {
+	m.modelPickerOpen = m.modelPickerCtrl.IsOpen()
+	view := m.modelPickerCtrl.State()
+	m.modelPickerProviderView = view.ProviderView
+	m.modelPickerProvider = view.Provider
+	m.modelPickerQuery = view.Query
+	l := view.List
+	items := make([]list.Item, 0, len(view.Items))
+	for _, it := range view.Items {
+		items = append(items, monitorModelPickerItem{
+			id:         strings.TrimSpace(it.ID),
+			provider:   strings.TrimSpace(it.Provider),
+			isProvider: it.IsProvider,
+			count:      it.Count,
+			inputPerM:  it.InputPerM,
+			outputPerM: it.OutputPerM,
+		})
+	}
+	l.SetItems(items)
+	if len(items) > 0 && l.Index() >= len(items) {
+		l.Select(len(items) - 1)
+	}
+	m.modelPickerList = l
+}
+
+func (m *monitorModel) rpcEndpointOrDefault() string {
+	endpoint := strings.TrimSpace(m.rpcEndpoint)
+	if endpoint == "" {
+		endpoint = monitorRPCEndpoint()
+	}
+	return endpoint
 }
