@@ -250,10 +250,10 @@ func buildResponsesInputItems(
 		}
 
 		// If the assistant message carried tool calls, include them as function_call items.
-		for _, tc := range m.ToolCalls {
-			if strings.TrimSpace(strings.ToLower(tc.Type)) != "function" {
-				continue
-			}
+			for _, tc := range m.ToolCalls {
+				if !strings.EqualFold(tc.Type, "function") {
+					continue
+				}
 			stats.assistantToolCallN++
 			callID := strings.TrimSpace(tc.ID)
 			name := strings.TrimSpace(tc.Function.Name)
@@ -296,10 +296,10 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 			// subsequent tool messages (role="tool") can reference tool_call_id.
 			if len(m.ToolCalls) != 0 {
 				tcps := make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(m.ToolCalls))
-				for _, tc := range m.ToolCalls {
-					if strings.TrimSpace(strings.ToLower(tc.Type)) != "function" {
-						return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported toolCall type %q", tc.Type)
-					}
+					for _, tc := range m.ToolCalls {
+						if !strings.EqualFold(tc.Type, "function") {
+							return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported toolCall type %q", tc.Type)
+						}
 					id := strings.TrimSpace(tc.ID)
 					name := strings.TrimSpace(tc.Function.Name)
 					args := tc.Function.Arguments
@@ -387,10 +387,10 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 	// Tool/function calling (Chat Completions).
 	if len(req.Tools) != 0 {
 		tools := make([]openai.ChatCompletionToolUnionParam, 0, len(req.Tools))
-		for _, t := range req.Tools {
-			if strings.TrimSpace(strings.ToLower(t.Type)) != "function" {
-				return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported tool type %q", t.Type)
-			}
+			for _, t := range req.Tools {
+				if !strings.EqualFold(t.Type, "function") {
+					return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported tool type %q", t.Type)
+				}
 			name := strings.TrimSpace(t.Function.Name)
 			if name == "" {
 				return openai.ChatCompletionNewParams{}, fmt.Errorf("tool.function.name is required")
@@ -657,10 +657,10 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	// Tool/function calling (Responses API).
 	if len(req.Tools) != 0 {
 		tools := make([]responses.ToolUnionParam, 0, len(req.Tools))
-		for _, t := range req.Tools {
-			if strings.TrimSpace(strings.ToLower(t.Type)) != "function" {
-				return responses.ResponseNewParams{}, fmt.Errorf("unsupported tool type %q", t.Type)
-			}
+			for _, t := range req.Tools {
+				if !strings.EqualFold(t.Type, "function") {
+					return responses.ResponseNewParams{}, fmt.Errorf("unsupported tool type %q", t.Type)
+				}
 			name := strings.TrimSpace(t.Function.Name)
 			if name == "" {
 				return responses.ResponseNewParams{}, fmt.Errorf("tool.function.name is required")
