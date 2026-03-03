@@ -1953,3 +1953,204 @@ func (s *SQLiteTaskStore) CountMessages(ctx context.Context, filter MessageFilte
 	}
 	return count, nil
 }
+
+func isTerminalMessageStatus(status string) bool {
+	status = strings.TrimSpace(strings.ToLower(status))
+	switch status {
+	case types.MessageStatusAcked, types.MessageStatusDeadletter:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *SQLiteTaskStore) ClaimNextMessage(ctx context.Context, filter MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error) {
+	consumerID = strings.TrimSpace(consumerID)
+	if consumerID == "" {
+		return types.AgentMessage{}, fmt.Errorf("consumerID is required")
+	}
+	if ttl <= 0 {
+		ttl = 2 * time.Minute
+	}
+	db, err := s.dbConn()
+	if err != nil {
+		return types.AgentMessage{}, err
+	}
+	now := time.Now().UTC()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return types.AgentMessage{}, err
+	}
+	defer tx.Rollback()
+
+	where := " WHERE status = ? AND visible_at <= ?"
+	args := []any{types.MessageStatusPending, now.Format(time.RFC3339Nano)}
+	if id := strings.TrimSpace(filter.ThreadID); id != "" {
+		where += " AND thread_id = ?"
+		args = append(args, id)
+	}
+	if id := strings.TrimSpace(filter.RunID); id != "" {
+		where += " AND run_id = ?"
+		args = append(args, id)
+	}
+	if id := strings.TrimSpace(filter.TeamID); id != "" {
+		where += " AND team_id = ?"
+		args = append(args, id)
+	}
+	if ch := strings.TrimSpace(filter.Channel); ch != "" {
+		where += " AND channel = ?"
+		args = append(args, ch)
+	}
+	if len(filter.Kinds) > 0 {
+		ph := make([]string, 0, len(filter.Kinds))
+		for _, kind := range filter.Kinds {
+			kind = strings.TrimSpace(kind)
+			if kind == "" {
+				continue
+			}
+			ph = append(ph, "?")
+			args = append(args, kind)
+		}
+		if len(ph) > 0 {
+			where += " AND kind IN (" + strings.Join(ph, ",") + ")"
+		}
+	}
+
+	var messageID string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT message_id
+		FROM messages
+	`+where+`
+		ORDER BY priority ASC, created_at ASC
+		LIMIT 1
+	`, args...).Scan(&messageID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return types.AgentMessage{}, ErrMessageNotFound
+		}
+		return types.AgentMessage{}, err
+	}
+
+	leaseUntil := now.Add(ttl)
+	res, err := tx.ExecContext(ctx, `
+		UPDATE messages
+		SET status = ?, lease_owner = ?, lease_until = ?, updated_at = ?
+		WHERE message_id = ? AND status = ?
+	`, types.MessageStatusClaimed, consumerID, leaseUntil.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), messageID, types.MessageStatusPending)
+	if err != nil {
+		return types.AgentMessage{}, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return types.AgentMessage{}, ErrMessageClaimed
+	}
+
+	row := tx.QueryRowContext(ctx, `
+		SELECT message_id, intent_id, correlation_id, COALESCE(causation_id, ''), COALESCE(producer, ''),
+		       thread_id, COALESCE(run_id, ''), COALESCE(team_id, ''), channel, kind,
+		       COALESCE(body_json, '{}'), COALESCE(task_ref, ''), COALESCE(task_json, ''),
+		       status, COALESCE(lease_owner, ''), COALESCE(lease_until, ''), attempts,
+		       visible_at, priority, COALESCE(error, ''), COALESCE(metadata_json, '{}'),
+		       created_at, updated_at, COALESCE(processed_at, '')
+		FROM messages
+		WHERE message_id = ?
+	`, messageID)
+	msg, err := mapSQLiteMessage(row)
+	if err != nil {
+		return types.AgentMessage{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return types.AgentMessage{}, err
+	}
+	return msg, nil
+}
+
+func (s *SQLiteTaskStore) AckMessage(ctx context.Context, messageID string, result MessageAckResult) error {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return fmt.Errorf("messageID is required")
+	}
+	db, err := s.dbConn()
+	if err != nil {
+		return err
+	}
+	msg, err := s.GetMessage(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	if isTerminalMessageStatus(msg.Status) {
+		return nil
+	}
+	status := strings.TrimSpace(result.Status)
+	if status == "" {
+		status = types.MessageStatusAcked
+	}
+	processed := time.Now().UTC()
+	if result.Processed != nil && !result.Processed.IsZero() {
+		processed = result.Processed.UTC()
+	}
+	metadata := msg.Metadata
+	if result.Metadata != nil {
+		metadata = result.Metadata
+	}
+	metadataJSON, _ := json.Marshal(metadata)
+	_, err = db.ExecContext(ctx, `
+		UPDATE messages
+		SET status = ?, error = ?, metadata_json = ?, lease_owner = '', lease_until = NULL, processed_at = ?, updated_at = ?
+		WHERE message_id = ?
+	`, status, strings.TrimSpace(result.Error), string(metadataJSON), processed.Format(time.RFC3339Nano), processed.Format(time.RFC3339Nano), messageID)
+	return err
+}
+
+func (s *SQLiteTaskStore) NackMessage(ctx context.Context, messageID string, reason string, retryAt *time.Time) error {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return fmt.Errorf("messageID is required")
+	}
+	db, err := s.dbConn()
+	if err != nil {
+		return err
+	}
+	msg, err := s.GetMessage(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	if isTerminalMessageStatus(msg.Status) {
+		return nil
+	}
+	const maxAttempts = 5
+	now := time.Now().UTC()
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "message processing failed"
+	}
+	nextStatus := types.MessageStatusDeadletter
+	nextVisible := now
+	processedAt := now
+	if retryAt != nil && !retryAt.IsZero() && msg.Attempts < maxAttempts {
+		nextStatus = types.MessageStatusPending
+		nextVisible = retryAt.UTC()
+		processedAt = time.Time{}
+	}
+	_, err = db.ExecContext(ctx, `
+		UPDATE messages
+		SET status = ?, error = ?, lease_owner = '', lease_until = NULL, visible_at = ?, processed_at = ?, updated_at = ?
+		WHERE message_id = ?
+	`, nextStatus, reason, nextVisible.Format(time.RFC3339Nano), nullIfEmpty(processedAt.Format(time.RFC3339Nano)), now.Format(time.RFC3339Nano), messageID)
+	return err
+}
+
+func (s *SQLiteTaskStore) RequeueExpiredClaims(ctx context.Context) error {
+	db, err := s.dbConn()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = db.ExecContext(ctx, `
+		UPDATE messages
+		SET status = ?, lease_owner = '', lease_until = NULL, updated_at = ?
+		WHERE status = ?
+		  AND COALESCE(TRIM(lease_until), '') != ''
+		  AND lease_until < ?
+	`, types.MessageStatusPending, now, types.MessageStatusClaimed, now)
+	return err
+}
