@@ -49,6 +49,10 @@ const (
 
 type ResolveProfileFunc func(ref string) (*profile.Profile, string, error)
 
+type MessageBus interface {
+	state.MessageStore
+}
+
 type Config struct {
 	Agent agent.Agent
 
@@ -56,8 +60,9 @@ type Config struct {
 	ProfileDir     string
 	ResolveProfile ResolveProfileFunc
 
-	TaskStore state.TaskStore
-	Events    emit.Emitter[events.Event]
+	TaskStore  state.TaskStore
+	MessageBus MessageBus
+	Events     emit.Emitter[events.Event]
 
 	RunConversationStore store.RunConversationStore
 
@@ -133,6 +138,11 @@ func New(cfg Config) (*Session, error) {
 	}
 	if cfg.TaskStore == nil {
 		return nil, fmt.Errorf("task store is required")
+	}
+	if cfg.MessageBus == nil {
+		if mb, ok := cfg.TaskStore.(MessageBus); ok {
+			cfg.MessageBus = mb
+		}
 	}
 	if strings.TrimSpace(cfg.SessionID) == "" {
 		return nil, fmt.Errorf("sessionID is required")
@@ -551,6 +561,174 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 }
 
 func (s *Session) drainInbox(ctx context.Context) (bool, error) {
+	if s != nil && s.cfg.MessageBus != nil {
+		hadWork, err := s.drainInboxMessages(ctx)
+		if hadWork || err != nil {
+			return hadWork, err
+		}
+		// Compatibility bridge during cutover: fallback to legacy task scan
+		// when no messages are available yet.
+		return s.drainInboxTasks(ctx)
+	}
+	return s.drainInboxTasks(ctx)
+}
+
+func messageRetryDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := 250 * time.Millisecond
+	for i := 1; i < attempt; i++ {
+		delay *= 2
+		if delay >= 5*time.Second {
+			return 5 * time.Second
+		}
+	}
+	return delay
+}
+
+func (s *Session) drainInboxMessages(ctx context.Context) (bool, error) {
+	var errs error
+	hadWork := false
+	s.maybeFlushStagedBatchCallbacks(ctx, true)
+	if err := s.cfg.MessageBus.RequeueExpiredClaims(ctx); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("message requeue expired claims: %w", err))
+	}
+	limit := s.cfg.MaxPending
+	if limit <= 0 {
+		limit = 50
+	}
+	filter := state.MessageClaimFilter{
+		ThreadID: strings.TrimSpace(s.cfg.SessionID),
+		RunID:    strings.TrimSpace(s.cfg.RunID),
+		TeamID:   strings.TrimSpace(s.cfg.TeamID),
+		Channel:  types.MessageChannelInbox,
+		Kinds:    []string{types.MessageKindTask, types.MessageKindUserInput},
+	}
+	for i := 0; i < limit; i++ {
+		msg, err := s.cfg.MessageBus.ClaimNextMessage(ctx, filter, s.cfg.LeaseTTL, strings.TrimSpace(s.cfg.RunID))
+		if err != nil {
+			if errors.Is(err, state.ErrMessageNotFound) {
+				break
+			}
+			errs = errors.Join(errs, fmt.Errorf("claim next message: %w", err))
+			break
+		}
+		hadWork = true
+		if err := s.processClaimedMessage(ctx, msg); err != nil {
+			errs = errors.Join(errs, err)
+		}
+	}
+	return hadWork, errs
+}
+
+func (s *Session) processClaimedMessage(ctx context.Context, msg types.AgentMessage) error {
+	kind := strings.TrimSpace(msg.Kind)
+	switch kind {
+	case types.MessageKindTask, types.MessageKindUserInput:
+		return s.processTaskMessage(ctx, msg)
+	default:
+		_ = s.cfg.MessageBus.AckMessage(ctx, strings.TrimSpace(msg.MessageID), state.MessageAckResult{
+			Status: types.MessageStatusDeadletter,
+			Error:  "unsupported message kind: " + kind,
+		})
+		return nil
+	}
+}
+
+func (s *Session) processTaskMessage(ctx context.Context, msg types.AgentMessage) error {
+	task, err := s.resolveMessageTask(ctx, msg)
+	if err != nil {
+		_ = s.cfg.MessageBus.AckMessage(ctx, strings.TrimSpace(msg.MessageID), state.MessageAckResult{
+			Status: types.MessageStatusDeadletter,
+			Error:  err.Error(),
+		})
+		return err
+	}
+	taskID := strings.TrimSpace(task.TaskID)
+	if taskID == "" {
+		_ = s.cfg.MessageBus.AckMessage(ctx, strings.TrimSpace(msg.MessageID), state.MessageAckResult{
+			Status: types.MessageStatusDeadletter,
+			Error:  "taskID is required for task-backed message",
+		})
+		return fmt.Errorf("task-backed message missing taskID")
+	}
+	if err := s.cfg.TaskStore.ClaimTask(ctx, taskID, s.cfg.LeaseTTL); err != nil {
+		switch {
+		case errors.Is(err, state.ErrTaskClaimed), isSQLiteBusyErr(err):
+			retryAt := time.Now().UTC().Add(messageRetryDelay(msg.Attempts))
+			_ = s.cfg.MessageBus.NackMessage(ctx, strings.TrimSpace(msg.MessageID), err.Error(), &retryAt)
+			return nil
+		case errors.Is(err, state.ErrTaskTerminal), errors.Is(err, state.ErrTaskNotFound):
+			_ = s.cfg.MessageBus.AckMessage(ctx, strings.TrimSpace(msg.MessageID), state.MessageAckResult{
+				Status: types.MessageStatusAcked,
+				Error:  err.Error(),
+			})
+			return nil
+		default:
+			retryAt := time.Now().UTC().Add(messageRetryDelay(msg.Attempts))
+			_ = s.cfg.MessageBus.NackMessage(ctx, strings.TrimSpace(msg.MessageID), err.Error(), &retryAt)
+			return fmt.Errorf("claim task %s from message %s: %w", taskID, strings.TrimSpace(msg.MessageID), err)
+		}
+	}
+
+	claimed, err := s.cfg.TaskStore.GetTask(ctx, taskID)
+	if err != nil {
+		retryAt := time.Now().UTC().Add(messageRetryDelay(msg.Attempts))
+		_ = s.cfg.MessageBus.NackMessage(ctx, strings.TrimSpace(msg.MessageID), err.Error(), &retryAt)
+		return fmt.Errorf("get claimed %s: %w", taskID, err)
+	}
+	claimed.ClaimedByAgentID = strings.TrimSpace(s.cfg.RunID)
+	if strings.TrimSpace(s.cfg.TeamID) != "" {
+		claimed.RoleSnapshot = strings.TrimSpace(s.cfg.RoleName)
+	}
+	if err := s.cfg.TaskStore.UpdateTask(ctx, claimed); err != nil {
+		retryAt := time.Now().UTC().Add(messageRetryDelay(msg.Attempts))
+		_ = s.cfg.MessageBus.NackMessage(ctx, strings.TrimSpace(msg.MessageID), err.Error(), &retryAt)
+		return fmt.Errorf("update claimed %s: %w", taskID, err)
+	}
+	if claimed.Attempts > s.cfg.MaxRetries {
+		if err := s.quarantineTask(ctx, claimed); err != nil {
+			return err
+		}
+		_ = s.cfg.MessageBus.AckMessage(ctx, strings.TrimSpace(msg.MessageID), state.MessageAckResult{
+			Status: types.MessageStatusDeadletter,
+			Error:  "max task retries exceeded",
+		})
+		return nil
+	}
+	if err := s.runTask(ctx, taskID, claimed); err != nil {
+		retryAt := time.Now().UTC().Add(messageRetryDelay(msg.Attempts))
+		_ = s.cfg.MessageBus.NackMessage(ctx, strings.TrimSpace(msg.MessageID), err.Error(), &retryAt)
+		return err
+	}
+	_ = s.cfg.MessageBus.AckMessage(ctx, strings.TrimSpace(msg.MessageID), state.MessageAckResult{
+		Status: types.MessageStatusAcked,
+	})
+	return nil
+}
+
+func (s *Session) resolveMessageTask(ctx context.Context, msg types.AgentMessage) (types.Task, error) {
+	if msg.Task != nil {
+		return *msg.Task, nil
+	}
+	taskRef := strings.TrimSpace(msg.TaskRef)
+	if taskRef == "" && msg.Body != nil {
+		if v, ok := msg.Body["taskId"]; ok {
+			taskRef = strings.TrimSpace(fmt.Sprint(v))
+		}
+	}
+	if taskRef == "" {
+		return types.Task{}, fmt.Errorf("taskRef is required for task-backed message")
+	}
+	task, err := s.cfg.TaskStore.GetTask(ctx, taskRef)
+	if err != nil {
+		return types.Task{}, fmt.Errorf("load task %s: %w", taskRef, err)
+	}
+	return task, nil
+}
+
+func (s *Session) drainInboxTasks(ctx context.Context) (bool, error) {
 	// Execute pending tasks from SQLite only (DB-routed protocol v2).
 	var errs error
 	hadWork := false
