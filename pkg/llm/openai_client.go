@@ -637,10 +637,11 @@ func (c *Client) buildResponseParams(ctx context.Context, req types.LLMRequest) 
 	// Request reasoning summaries when supported.
 	requestReasoning := cost.SupportsReasoningSummary(req.Model)
 	if isOpenRouterBaseURL(c.baseURL) {
-		// Prefer OpenRouter's live model metadata to avoid stale local flags.
-		if supports, known := cost.SupportsReasoningSummaryFromOpenRouter(ctx, req.Model); known {
+		// Hot path: use cached metadata only, then refresh asynchronously when missing.
+		if supports, known := cost.SupportsReasoningSummaryFromOpenRouterCached(req.Model); known {
 			requestReasoning = supports
 		} else {
+			cost.TriggerOpenRouterModelRefreshAsync(ctx)
 			// If metadata is unavailable, keep prior OpenRouter behavior and request
 			// reasoning by default.
 			requestReasoning = true

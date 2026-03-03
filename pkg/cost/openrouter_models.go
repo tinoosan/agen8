@@ -35,6 +35,8 @@ var (
 	orCacheMu       sync.RWMutex
 	orCacheTTL      = 1 * time.Hour
 	orFailBackoff   = 2 * time.Minute
+	orRefreshMu     sync.Mutex
+	orRefreshActive bool
 )
 
 type openRouterModelMeta struct {
@@ -65,6 +67,45 @@ func SupportsReasoningSummaryFromOpenRouter(ctx context.Context, modelID string)
 		return false, false
 	}
 	return meta.SupportsReasoning, true
+}
+
+// SupportsReasoningSummaryFromOpenRouterCached reports whether cached OpenRouter
+// metadata indicates support for reasoning parameters without triggering a network call.
+func SupportsReasoningSummaryFromOpenRouterCached(modelID string) (bool, bool) {
+	meta, ok := openRouterModelMetaForCached(modelID)
+	if !ok {
+		return false, false
+	}
+	return meta.SupportsReasoning, true
+}
+
+// TriggerOpenRouterModelRefreshAsync refreshes OpenRouter metadata in the background.
+// It is safe to call frequently; concurrent refreshes are deduplicated.
+func TriggerOpenRouterModelRefreshAsync(ctx context.Context) {
+	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" {
+		return
+	}
+	orRefreshMu.Lock()
+	if orRefreshActive {
+		orRefreshMu.Unlock()
+		return
+	}
+	orRefreshActive = true
+	orRefreshMu.Unlock()
+
+	go func(parent context.Context) {
+		defer func() {
+			orRefreshMu.Lock()
+			orRefreshActive = false
+			orRefreshMu.Unlock()
+		}()
+		if parent == nil {
+			parent = context.Background()
+		}
+		refreshCtx, cancel := context.WithTimeout(parent, 12*time.Second)
+		defer cancel()
+		_, _ = openRouterModelCache(refreshCtx)
+	}(ctx)
 }
 
 // OpenRouterModelInfos returns model infos fetched from OpenRouter /models.
@@ -126,6 +167,35 @@ func openRouterModelMetaFor(ctx context.Context, modelID string) (openRouterMode
 	}
 
 	return openRouterModelMeta{}, false
+}
+
+func openRouterModelMetaForCached(modelID string) (openRouterModelMeta, bool) {
+	if strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")) == "" {
+		return openRouterModelMeta{}, false
+	}
+	id := normalizeModelID(modelID)
+	if id == "" {
+		return openRouterModelMeta{}, false
+	}
+	cache, ok := openRouterModelCacheCached()
+	if !ok {
+		return openRouterModelMeta{}, false
+	}
+	meta, ok := findInMap(cache, id)
+	if !ok {
+		return openRouterModelMeta{}, false
+	}
+	return meta, true
+}
+
+func openRouterModelCacheCached() (map[string]openRouterModelMeta, bool) {
+	orCacheMu.RLock()
+	defer orCacheMu.RUnlock()
+	if orModelCache == nil {
+		return nil, false
+	}
+	// Cached reads are intentionally permissive: stale data is acceptable on hot paths.
+	return orModelCache, true
 }
 
 func openRouterModelCache(ctx context.Context) (map[string]openRouterModelMeta, bool) {

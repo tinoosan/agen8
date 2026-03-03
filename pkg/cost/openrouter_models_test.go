@@ -212,3 +212,86 @@ func TestOpenRouterModelInfos_IncludesPricingPerM(t *testing.T) {
 		t.Fatalf("expected IsReasoning=true")
 	}
 }
+
+func TestSupportsReasoningSummaryFromOpenRouterCached_DoesNotFetch(t *testing.T) {
+	os.Setenv("OPENROUTER_API_KEY", "test-key")
+	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+
+	var fetchCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetchCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"openrouter/reasoning-model","supported_parameters":["reasoning"]}]}`))
+	}))
+	defer srv.Close()
+
+	openRouterAPIURL = srv.URL
+	orCacheMu = sync.RWMutex{}
+	orModelCache = nil
+	orCacheModTime = time.Time{}
+	orCacheFailTime = time.Time{}
+	orRefreshMu.Lock()
+	orRefreshActive = false
+	orRefreshMu.Unlock()
+	t.Cleanup(func() {
+		openRouterAPIURL = "https://openrouter.ai/api/v1/models"
+		orModelCache = nil
+		orCacheModTime = time.Time{}
+		orCacheFailTime = time.Time{}
+		orRefreshMu.Lock()
+		orRefreshActive = false
+		orRefreshMu.Unlock()
+	})
+
+	if supports, known := SupportsReasoningSummaryFromOpenRouterCached("openrouter/reasoning-model"); known || supports {
+		t.Fatalf("expected cache miss without network fetch; got supports=%v known=%v", supports, known)
+	}
+	if got := fetchCount.Load(); got != 0 {
+		t.Fatalf("expected no network fetch for cached lookup, got %d", got)
+	}
+}
+
+func TestTriggerOpenRouterModelRefreshAsync_WarmsCache(t *testing.T) {
+	os.Setenv("OPENROUTER_API_KEY", "test-key")
+	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+
+	var fetchCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetchCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"openrouter/reasoning-model","supported_parameters":["reasoning","temperature"]}]}`))
+	}))
+	defer srv.Close()
+
+	openRouterAPIURL = srv.URL
+	orCacheMu = sync.RWMutex{}
+	orModelCache = nil
+	orCacheModTime = time.Time{}
+	orCacheFailTime = time.Time{}
+	orRefreshMu.Lock()
+	orRefreshActive = false
+	orRefreshMu.Unlock()
+	t.Cleanup(func() {
+		openRouterAPIURL = "https://openrouter.ai/api/v1/models"
+		orModelCache = nil
+		orCacheModTime = time.Time{}
+		orCacheFailTime = time.Time{}
+		orRefreshMu.Lock()
+		orRefreshActive = false
+		orRefreshMu.Unlock()
+	})
+
+	TriggerOpenRouterModelRefreshAsync(context.Background())
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if supports, known := SupportsReasoningSummaryFromOpenRouterCached("openrouter/reasoning-model"); known && supports {
+			if fetchCount.Load() == 0 {
+				t.Fatalf("expected at least one refresh fetch")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for async refresh to populate cache; fetches=%d", fetchCount.Load())
+}
