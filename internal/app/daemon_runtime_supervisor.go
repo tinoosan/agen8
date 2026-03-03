@@ -644,15 +644,6 @@ type spawnWorkerLoopConfig struct {
 	wakeCancel     func()
 }
 
-func (s *runtimeSupervisor) cleanupSpawnRuntime(parent context.Context, rt spawnRuntimeParts) {
-	if rt.orderedEmitter != nil {
-		rt.orderedEmitter.Close()
-	}
-	if rt.rt != nil {
-		_ = rt.rt.Shutdown(parent)
-	}
-}
-
 func (s *runtimeSupervisor) loadSpawnRunState(parent context.Context, sess types.Session, runID string) (spawnRunState, error) {
 	run, err := s.sessionService.LoadRun(parent, runID)
 	if err != nil {
