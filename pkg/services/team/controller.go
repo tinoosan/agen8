@@ -47,13 +47,13 @@ type Controller struct {
 
 // ControllerConfig configures a Controller.
 type ControllerConfig struct {
-	SessionService         session.Service
-	TaskStore              state.TaskStore
-	TaskCanceler           task.ActiveTaskCanceler
-	StateMgr               *StateManager
-	Runtimes               []RoleRunController
-	Applier                ModelApplier
-	RunStopper             RunStopper
+	SessionService          session.Service
+	TaskStore               state.TaskStore
+	TaskCanceler            task.ActiveTaskCanceler
+	StateMgr                *StateManager
+	Runtimes                []RoleRunController
+	Applier                 ModelApplier
+	RunStopper              RunStopper
 	DefaultReasoningEffort  string
 	DefaultReasoningSummary string
 }
@@ -267,10 +267,10 @@ func (c *Controller) StopRuns(ctx context.Context, threadID, sessionID string) (
 		if err := c.sessionService.SaveRun(ctx, loaded); err != nil {
 			return err
 		}
-			r.SetPaused(true)
-			if c.runStopper != nil {
-				_ = c.runStopper.StopRun(ctx, runID)
-			}
+		r.SetPaused(true)
+		if c.runStopper != nil {
+			_ = c.runStopper.StopRun(ctx, runID)
+		}
 		if c.taskCanceler != nil {
 			_, _ = c.taskCanceler.CancelActiveTasksByRun(ctx, runID, "run stopped")
 		}

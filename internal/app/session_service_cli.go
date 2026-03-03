@@ -3,8 +3,8 @@ package app
 import (
 	"context"
 
-	"github.com/tinoosan/agen8/pkg/config"
 	implstore "github.com/tinoosan/agen8/internal/store"
+	"github.com/tinoosan/agen8/pkg/config"
 	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
 )
 
