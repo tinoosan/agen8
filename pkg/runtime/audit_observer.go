@@ -59,10 +59,6 @@ func boolToStr(b bool) string {
 	return "false"
 }
 
-func formatSeq(n uint64) string {
-	return strings.TrimSpace(strings.TrimLeft(strings.TrimPrefix(strings.TrimSpace(strings.ToLower(strings.TrimSpace(string([]byte{'a' + byte(n%26)})))), "#"), "#"))
-}
-
 func maybeInt(v int) string {
 	if v == 0 {
 		return ""

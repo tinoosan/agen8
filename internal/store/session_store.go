@@ -636,7 +636,7 @@ func execRowsAffectedTx(tx *sql.Tx, query string, args ...any) (int64, error) {
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return 0, nil
+		return 0, fmt.Errorf("rows affected: %w", err)
 	}
 	return n, nil
 }
