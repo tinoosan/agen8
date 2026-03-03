@@ -89,7 +89,7 @@ type mockSupervisor struct {
 	stoppedRuns []string
 }
 
-func (s *mockSupervisor) StopRun(runID string) error {
+func (s *mockSupervisor) StopRun(ctx context.Context, runID string) error {
 	s.stoppedRuns = append(s.stoppedRuns, runID)
 	return nil
 }

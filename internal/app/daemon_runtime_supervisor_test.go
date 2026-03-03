@@ -111,7 +111,7 @@ func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 		},
 	}
 
-	if err := supervisor.StopRun(run.RunID); err != nil {
+	if err := supervisor.StopRun(context.Background(), run.RunID); err != nil {
 		t.Fatalf("StopRun: %v", err)
 	}
 
@@ -357,7 +357,7 @@ func TestRuntimeSupervisor_PauseRun_CancelsWorkerAndActiveTasks(t *testing.T) {
 		},
 	}
 
-	if err := supervisor.PauseRun(run.RunID); err != nil {
+	if err := supervisor.PauseRun(context.Background(), run.RunID); err != nil {
 		t.Fatalf("PauseRun: %v", err)
 	}
 	mu.Lock()

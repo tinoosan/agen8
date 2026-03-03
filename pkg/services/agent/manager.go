@@ -164,7 +164,7 @@ func (m *Manager) Pause(ctx context.Context, runID, sessionID string) error {
 		return &ServiceError{Code: CodeInvalidParams, Message: "runId is required"}
 	}
 	if m.controller != nil {
-		return m.controller.PauseRun(runID)
+		return m.controller.PauseRun(ctx, runID)
 	}
 	return m.setRunPausedState(ctx, runID, sessionID, true)
 }

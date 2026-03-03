@@ -29,7 +29,7 @@ import (
 // noopSessionSupervisor is a test double for RuntimeSupervisor (StopRun/ResumeRun no-op).
 type noopSessionSupervisor struct{}
 
-func (noopSessionSupervisor) StopRun(runID string) error                        { return nil }
+func (noopSessionSupervisor) StopRun(ctx context.Context, runID string) error   { return nil }
 func (noopSessionSupervisor) ResumeRun(ctx context.Context, runID string) error { return nil }
 
 // newTestSessionService returns a Session service (Manager) backed by the given store for tests.

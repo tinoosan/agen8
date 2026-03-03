@@ -144,7 +144,7 @@ func TestEscalateToCoordinator(t *testing.T) {
 		},
 	}
 	runStopper := &mockRunStopper{
-		stopRun: func(runID string) error {
+		stopRun: func(ctx context.Context, runID string) error {
 			if runID == "child-run-1" {
 				stopRunCalled = true
 			}
@@ -183,7 +183,7 @@ func TestEscalateToCoordinator_ReturnsStopFailures(t *testing.T) {
 		},
 	}
 	runStopper := &mockRunStopper{
-		stopRun: func(runID string) error {
+		stopRun: func(ctx context.Context, runID string) error {
 			return stopLoopErr
 		},
 	}
@@ -407,12 +407,12 @@ func (m *mockSessionService) LatestRunningRun(ctx context.Context) (types.Run, e
 }
 
 type mockRunStopper struct {
-	stopRun func(runID string) error
+	stopRun func(ctx context.Context, runID string) error
 }
 
-func (m *mockRunStopper) StopRun(runID string) error {
+func (m *mockRunStopper) StopRun(ctx context.Context, runID string) error {
 	if m.stopRun != nil {
-		return m.stopRun(runID)
+		return m.stopRun(ctx, runID)
 	}
 	return nil
 }

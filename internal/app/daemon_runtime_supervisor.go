@@ -1327,8 +1327,8 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	return managed, nil
 }
 
-func (s *runtimeSupervisor) PauseRun(runID string) error {
-	return s.pauseRun(context.Background(), runID)
+func (s *runtimeSupervisor) PauseRun(ctx context.Context, runID string) error {
+	return s.pauseRun(ctx, runID)
 }
 
 func (s *runtimeSupervisor) pauseRun(ctx context.Context, runID string) error {
@@ -1401,8 +1401,8 @@ func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
 	return s.ensureRun(ctx, sess, runID)
 }
 
-func (s *runtimeSupervisor) StopRun(runID string) error {
-	return s.stopRun(context.Background(), runID)
+func (s *runtimeSupervisor) StopRun(ctx context.Context, runID string) error {
+	return s.stopRun(ctx, runID)
 }
 
 func (s *runtimeSupervisor) stopRun(ctx context.Context, runID string) error {
@@ -1826,7 +1826,7 @@ func (s *runtimeSupervisor) EscalateTask(ctx context.Context, callbackTaskID str
 	childRunID := strings.TrimSpace(data.SourceRunID)
 	if childRunID != "" {
 		var stopErr error
-		if err := s.StopRun(childRunID); err != nil {
+		if err := s.StopRun(ctx, childRunID); err != nil {
 			stopErr = errors.Join(stopErr, fmt.Errorf("stop child runtime %s: %w", childRunID, err))
 		}
 		if s.sessionService != nil {

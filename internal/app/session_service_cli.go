@@ -13,7 +13,7 @@ import (
 type noopCLISupervisor struct{}
 
 func (noopCLISupervisor) ResumeRun(context.Context, string) error { return nil }
-func (noopCLISupervisor) StopRun(string) error                    { return nil }
+func (noopCLISupervisor) StopRun(context.Context, string) error   { return nil }
 
 // NewSessionServiceForCLI creates a session service for CLI and TUI use.
 // It uses the SQLite store and a no-op supervisor (Stop/Delete will not actually

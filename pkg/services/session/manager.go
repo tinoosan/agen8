@@ -13,7 +13,7 @@ import (
 // RuntimeSupervisor defines the interface for managing agent runtimes.
 type RuntimeSupervisor interface {
 	ResumeRun(ctx context.Context, runID string) error
-	StopRun(runID string) error
+	StopRun(ctx context.Context, runID string) error
 }
 
 // Store defines the data access layer requirements for the session service.
@@ -79,7 +79,7 @@ func (m *Manager) Stop(ctx context.Context, sessionID string) error {
 	}
 	var errs []error
 	for _, run := range runs {
-		if err := m.supervisor.StopRun(run.RunID); err != nil {
+		if err := m.supervisor.StopRun(ctx, run.RunID); err != nil {
 			errs = append(errs, fmt.Errorf("stop run %s: %w", run.RunID, err))
 		}
 	}

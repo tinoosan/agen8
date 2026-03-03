@@ -32,7 +32,7 @@ import (
 
 type noopSessionSupervisor struct{}
 
-func (noopSessionSupervisor) StopRun(string) error                    { return nil }
+func (noopSessionSupervisor) StopRun(context.Context, string) error   { return nil }
 func (noopSessionSupervisor) ResumeRun(context.Context, string) error { return nil }
 
 func startMonitorTestRPCServer(t *testing.T, cfg config.Config, runID string) string {

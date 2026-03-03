@@ -267,10 +267,10 @@ func (c *Controller) StopRuns(ctx context.Context, threadID, sessionID string) (
 		if err := c.sessionService.SaveRun(ctx, loaded); err != nil {
 			return err
 		}
-		r.SetPaused(true)
-		if c.runStopper != nil {
-			_ = c.runStopper.StopRun(runID)
-		}
+			r.SetPaused(true)
+			if c.runStopper != nil {
+				_ = c.runStopper.StopRun(ctx, runID)
+			}
 		if c.taskCanceler != nil {
 			_, _ = c.taskCanceler.CancelActiveTasksByRun(ctx, runID, "run stopped")
 		}

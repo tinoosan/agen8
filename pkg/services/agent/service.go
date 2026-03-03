@@ -81,9 +81,9 @@ type ActiveTaskCanceler interface {
 
 // RuntimeController controls run lifecycle (pause/resume/stop). Set via setter to break circular dependency.
 type RuntimeController interface {
-	PauseRun(runID string) error
+	PauseRun(ctx context.Context, runID string) error
 	ResumeRun(ctx context.Context, runID string) error
-	StopRun(runID string) error
+	StopRun(ctx context.Context, runID string) error
 }
 
 // ServiceForRPC is the agent interface exposed to the RPC layer.

@@ -24,7 +24,7 @@ var (
 // RunStopper cancels a run's loop. Used by EscalateToCoordinator so the team service
 // can trigger "cancel this run" without depending on app's cancel map.
 type RunStopper interface {
-	StopRun(runID string) error
+	StopRun(ctx context.Context, runID string) error
 }
 
 // EscalateToCoordinator creates an escalation task and stops the child run (single policy).
@@ -44,7 +44,7 @@ func EscalateToCoordinator(
 	if childRunID != "" {
 		var stopErr error
 		if runStopper != nil {
-			if err := runStopper.StopRun(childRunID); err != nil {
+			if err := runStopper.StopRun(ctx, childRunID); err != nil {
 				stopErr = errors.Join(stopErr, fmt.Errorf("stop child run loop %s: %w", childRunID, err))
 			}
 		}

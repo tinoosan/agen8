@@ -91,7 +91,7 @@ type mockRuntimeController struct {
 	resumeErr error
 }
 
-func (m *mockRuntimeController) PauseRun(runID string) error {
+func (m *mockRuntimeController) PauseRun(ctx context.Context, runID string) error {
 	if m.paused == nil {
 		m.paused = make([]string, 0)
 	}
@@ -107,7 +107,7 @@ func (m *mockRuntimeController) ResumeRun(ctx context.Context, runID string) err
 	return m.resumeErr
 }
 
-func (m *mockRuntimeController) StopRun(runID string) error {
+func (m *mockRuntimeController) StopRun(ctx context.Context, runID string) error {
 	if m.stopped == nil {
 		m.stopped = make([]string, 0)
 	}
