@@ -573,20 +573,6 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 	return s.drainInboxTasks(ctx)
 }
 
-func messageRetryDelay(attempt int) time.Duration {
-	if attempt < 1 {
-		attempt = 1
-	}
-	delay := 250 * time.Millisecond
-	for i := 1; i < attempt; i++ {
-		delay *= 2
-		if delay >= 5*time.Second {
-			return 5 * time.Second
-		}
-	}
-	return delay
-}
-
 func (s *Session) drainInboxMessages(ctx context.Context) (bool, error) {
 	var errs error
 	hadWork := false
@@ -656,7 +642,7 @@ func (s *Session) processTaskMessage(ctx context.Context, msg types.AgentMessage
 	if err := s.cfg.TaskStore.ClaimTask(ctx, taskID, s.cfg.LeaseTTL); err != nil {
 		switch {
 		case errors.Is(err, state.ErrTaskClaimed), isSQLiteBusyErr(err):
-			retryAt := time.Now().UTC().Add(messageRetryDelay(msg.Attempts))
+			retryAt := time.Now().UTC()
 			_ = s.cfg.MessageBus.NackMessage(ctx, strings.TrimSpace(msg.MessageID), err.Error(), &retryAt)
 			return nil
 		case errors.Is(err, state.ErrTaskTerminal), errors.Is(err, state.ErrTaskNotFound):
@@ -666,7 +652,7 @@ func (s *Session) processTaskMessage(ctx context.Context, msg types.AgentMessage
 			})
 			return nil
 		default:
-			retryAt := time.Now().UTC().Add(messageRetryDelay(msg.Attempts))
+			retryAt := time.Now().UTC()
 			_ = s.cfg.MessageBus.NackMessage(ctx, strings.TrimSpace(msg.MessageID), err.Error(), &retryAt)
 			return fmt.Errorf("claim task %s from message %s: %w", taskID, strings.TrimSpace(msg.MessageID), err)
 		}
@@ -674,7 +660,7 @@ func (s *Session) processTaskMessage(ctx context.Context, msg types.AgentMessage
 
 	claimed, err := s.cfg.TaskStore.GetTask(ctx, taskID)
 	if err != nil {
-		retryAt := time.Now().UTC().Add(messageRetryDelay(msg.Attempts))
+		retryAt := time.Now().UTC()
 		_ = s.cfg.MessageBus.NackMessage(ctx, strings.TrimSpace(msg.MessageID), err.Error(), &retryAt)
 		return fmt.Errorf("get claimed %s: %w", taskID, err)
 	}
@@ -683,7 +669,7 @@ func (s *Session) processTaskMessage(ctx context.Context, msg types.AgentMessage
 		claimed.RoleSnapshot = strings.TrimSpace(s.cfg.RoleName)
 	}
 	if err := s.cfg.TaskStore.UpdateTask(ctx, claimed); err != nil {
-		retryAt := time.Now().UTC().Add(messageRetryDelay(msg.Attempts))
+		retryAt := time.Now().UTC()
 		_ = s.cfg.MessageBus.NackMessage(ctx, strings.TrimSpace(msg.MessageID), err.Error(), &retryAt)
 		return fmt.Errorf("update claimed %s: %w", taskID, err)
 	}
@@ -698,7 +684,7 @@ func (s *Session) processTaskMessage(ctx context.Context, msg types.AgentMessage
 		return nil
 	}
 	if err := s.runTask(ctx, taskID, claimed); err != nil {
-		retryAt := time.Now().UTC().Add(messageRetryDelay(msg.Attempts))
+		retryAt := time.Now().UTC()
 		_ = s.cfg.MessageBus.NackMessage(ctx, strings.TrimSpace(msg.MessageID), err.Error(), &retryAt)
 		return err
 	}
