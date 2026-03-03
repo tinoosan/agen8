@@ -41,104 +41,20 @@ type webhookRoutingContext struct {
 	validRoles      map[string]struct{}
 }
 
-type teamRunRequest struct {
-	ctx             context.Context
-	cfg             config.Config
-	prof            *profile.Profile
-	profDir         string
-	goal            string
-	maxContextB     int
-	poll            time.Duration
-	resolved        RunChatOptions
-	protocolEnabled bool
-}
-
-type TeamOrchestrator struct {
-	req          teamRunRequest
-	storeBuilder StoreBuilder
-	runtimePhase RuntimeBuilder
-	controlLoop  ControlLoop
-}
-
-type StoreBuilder struct {
-	req *teamRunRequest
-}
-
-type RuntimeBuilder struct {
-	req *teamRunRequest
-}
-
-type ControlLoop struct {
-	req *teamRunRequest
-}
-
-func newTeamOrchestrator(req teamRunRequest) *TeamOrchestrator {
-	o := &TeamOrchestrator{req: req}
-	o.storeBuilder = StoreBuilder{req: &o.req}
-	o.runtimePhase = RuntimeBuilder{req: &o.req}
-	o.controlLoop = ControlLoop{req: &o.req}
-	return o
-}
-
 func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, profDir string, goal string, maxContextB int, poll time.Duration, resolved RunChatOptions, protocolEnabled bool) error {
-	orch := newTeamOrchestrator(teamRunRequest{
-		ctx:             ctx,
-		cfg:             cfg,
-		prof:            prof,
-		profDir:         profDir,
-		goal:            goal,
-		maxContextB:     maxContextB,
-		poll:            poll,
-		resolved:        resolved,
-		protocolEnabled: protocolEnabled,
-	})
-	return orch.Run()
-}
-
-func (o *TeamOrchestrator) Run() error {
-	if o == nil {
-		return fmt.Errorf("team orchestrator is nil")
-	}
-	if err := o.storeBuilder.Validate(); err != nil {
-		return err
-	}
-	if err := o.runtimePhase.Prepare(); err != nil {
-		return err
-	}
-	return o.controlLoop.Run()
-}
-
-func (b *StoreBuilder) Validate() error {
-	if b == nil || b.req == nil {
-		return fmt.Errorf("team store builder is not configured")
-	}
-	if b.req.prof == nil {
+	if prof == nil {
 		return fmt.Errorf("profile is required")
 	}
-	return nil
-}
-
-func (b *RuntimeBuilder) Prepare() error {
-	if b == nil || b.req == nil {
-		return fmt.Errorf("team runtime builder is not configured")
-	}
-	return nil
-}
-
-func (c *ControlLoop) Run() error {
-	if c == nil || c.req == nil {
-		return fmt.Errorf("team control loop is not configured")
-	}
 	return runAsTeamInternal(
-		c.req.ctx,
-		c.req.cfg,
-		c.req.prof,
-		c.req.profDir,
-		c.req.goal,
-		c.req.maxContextB,
-		c.req.poll,
-		c.req.resolved,
-		c.req.protocolEnabled,
+		ctx,
+		cfg,
+		prof,
+		profDir,
+		goal,
+		maxContextB,
+		poll,
+		resolved,
+		protocolEnabled,
 	)
 }
 

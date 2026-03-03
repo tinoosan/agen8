@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tinoosan/agen8/pkg/agent/state"
+	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/fsutil"
 	"github.com/tinoosan/agen8/pkg/profile"
 	"github.com/tinoosan/agen8/pkg/services/team"
@@ -95,17 +96,10 @@ func TestResolveRoleModel_UsesRoleOverride(t *testing.T) {
 	}
 }
 
-func TestStoreBuilder_Validate_AcceptsStandaloneProfile(t *testing.T) {
-	prof := &profile.Profile{
-		ID:          "general",
-		Description: "Standalone",
-		Model:       "openai/gpt-5-mini",
-		Prompts:     profile.PromptConfig{SystemPrompt: "You are helpful."},
-		Team:        nil,
-	}
-	b := StoreBuilder{req: &teamRunRequest{prof: prof}}
-	if err := b.Validate(); err != nil {
-		t.Fatalf("Validate with standalone profile: %v", err)
+func TestRunAsTeam_RequiresProfile(t *testing.T) {
+	err := runAsTeam(context.Background(), config.Config{}, nil, "", "", 0, 0, RunChatOptions{}, false)
+	if err == nil {
+		t.Fatalf("expected profile required error")
 	}
 }
 
