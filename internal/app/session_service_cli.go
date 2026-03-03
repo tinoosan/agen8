@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 
 	implstore "github.com/tinoosan/agen8/internal/store"
 	"github.com/tinoosan/agen8/pkg/config"
@@ -12,8 +15,15 @@ import (
 // Used when the session service is created for CLI/TUI without a daemon.
 type noopCLISupervisor struct{}
 
-func (noopCLISupervisor) ResumeRun(context.Context, string) error { return nil }
-func (noopCLISupervisor) StopRun(context.Context, string) error   { return nil }
+var errCLIRuntimeControlUnsupported = errors.New("runtime control is not supported without a daemon supervisor")
+
+func (noopCLISupervisor) ResumeRun(_ context.Context, runID string) error {
+	return fmt.Errorf("resume run %s: %w", strings.TrimSpace(runID), errCLIRuntimeControlUnsupported)
+}
+
+func (noopCLISupervisor) StopRun(_ context.Context, runID string) error {
+	return fmt.Errorf("stop run %s: %w", strings.TrimSpace(runID), errCLIRuntimeControlUnsupported)
+}
 
 // NewSessionServiceForCLI creates a session service for CLI and TUI use.
 // It uses the SQLite store and a no-op supervisor (Stop/Delete will not actually
