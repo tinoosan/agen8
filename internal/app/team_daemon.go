@@ -19,7 +19,6 @@ import (
 	"github.com/tinoosan/agen8/pkg/agent"
 	"github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/config"
-	"github.com/tinoosan/agen8/pkg/emit"
 	"github.com/tinoosan/agen8/pkg/events"
 	"github.com/tinoosan/agen8/pkg/fsutil"
 	"github.com/tinoosan/agen8/pkg/llm"
@@ -238,34 +237,6 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	<-runCtx.Done()
 	serverWG.Wait()
 	return nil
-}
-
-func ptrNowUTC() *time.Time {
-	now := time.Now().UTC()
-	return &now
-}
-
-func newTeamOrderedEmitter(store events.StoreAppender, runID, teamID, roleName string) (*emit.OrderedEmitter[events.Event], error) {
-	emitter := &events.Emitter{
-		RunID: runID,
-		Sink: events.StoreSink{
-			Store: store,
-		},
-	}
-	ordered := emit.NewOrderedEmitter[events.Event](emitter)
-	if err := ordered.Emit(context.Background(), events.Event{
-		Type:    "daemon.start",
-		Message: "Team role started",
-		Data: map[string]string{
-			"runId":  runID,
-			"teamId": teamID,
-			"role":   roleName,
-		},
-	}); err != nil && !errorsIsDropped(err) {
-		ordered.Close()
-		return nil, err
-	}
-	return ordered, nil
 }
 
 func signalNotifyContext(ctx context.Context) (context.Context, context.CancelFunc) {

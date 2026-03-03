@@ -181,36 +181,6 @@ func resolveTargetRunIDs(ctx context.Context, runID string, sessionID string, ag
 	return runIDs, nil
 }
 
-func filterRunIDsByRole(ctx context.Context, runIDs []string, sessionID string, role string) ([]string, error) {
-	role = strings.TrimSpace(role)
-	if role == "" {
-		return runIDs, nil
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return runIDs, nil
-	}
-	var agents protocol.AgentListResult
-	if err := rpcCall(ctx, protocol.MethodAgentList, protocol.AgentListParams{
-		ThreadID:  protocol.ThreadID(sessionID),
-		SessionID: sessionID,
-	}, &agents); err != nil {
-		return nil, err
-	}
-	filtered := make([]string, 0, len(runIDs))
-	for _, agent := range agents.Agents {
-		if !strings.EqualFold(strings.TrimSpace(agent.Role), role) {
-			continue
-		}
-		rid := strings.TrimSpace(agent.RunID)
-		if rid == "" || !slices.Contains(runIDs, rid) {
-			continue
-		}
-		filtered = append(filtered, rid)
-	}
-	return filtered, nil
-}
-
 func init() {
 	logsCmd.Flags().StringVar(&logsRunID, "run-id", "", "run id to query")
 	logsCmd.Flags().StringVar(&logsSessionID, "session-id", "", "session id scope (defaults to active project session)")
