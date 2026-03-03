@@ -1969,9 +1969,6 @@ func (s *runtimeSupervisor) GetRunState(ctx context.Context, sessionID, runID st
 			state.LastHeartbeatAt = lastBeat.UTC().Format(time.RFC3339Nano)
 		}
 	}
-	if state.WorkerPresent && strings.EqualFold(state.PersistedStatus, types.RunStatusPaused) {
-		state.EffectiveStatus = types.RunStatusRunning
-	}
 	if state.WorkerPresent && strings.EqualFold(state.PersistedStatus, types.RunStatusRunning) {
 		state.EffectiveStatus = types.RunStatusRunning
 	}

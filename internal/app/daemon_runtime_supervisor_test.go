@@ -66,6 +66,10 @@ func (s *ctxCheckingTaskService) CancelActiveTasksByRun(ctx context.Context, run
 	return 0, nil
 }
 
+func (s *ctxCheckingTaskService) GetRunStats(_ context.Context, _ string) (state.RunStats, error) {
+	return state.RunStats{}, nil
+}
+
 // newSupervisorTestSessionService creates a session service backed by SQLite for supervisor tests.
 func newSupervisorTestSessionService(t *testing.T, cfg config.Config) pkgsession.Service {
 	t.Helper()
@@ -934,5 +938,50 @@ func TestApplySessionModel_PersistsRuntimeModelEvenWhenAgentAlreadyOnTarget(t *t
 	}
 	if loadedRun.Runtime == nil || loadedRun.Runtime.Model != "openai/gpt-5-mini" {
 		t.Fatalf("expected runtime model to persist new value, got %+v", loadedRun.Runtime)
+	}
+}
+
+// TestGetRunState_PausedStatusNotMaskedByWorker verifies that GetRunState returns
+// EffectiveStatus="paused" (not "running") when the persisted status is paused,
+// even when a worker goroutine is present for that run.
+func TestGetRunState_PausedStatusNotMaskedByWorker(t *testing.T) {
+	sessionSvc := &ctxCheckingSessionService{
+		loadRun: func(runID string) (types.Run, error) {
+			return types.Run{RunID: runID, Status: types.RunStatusPaused}, nil
+		},
+	}
+	taskSvc := &ctxCheckingTaskService{}
+	supervisor := &runtimeSupervisor{
+		sessionService: sessionSvc,
+		taskService:    taskSvc,
+		workers:        map[string]*managedRuntime{},
+	}
+
+	// Without a worker: paused should remain paused.
+	st, err := supervisor.GetRunState(context.Background(), "sess-1", "run-1")
+	if err != nil {
+		t.Fatalf("GetRunState: %v", err)
+	}
+	if st.EffectiveStatus != types.RunStatusPaused {
+		t.Errorf("EffectiveStatus without worker: got %q, want %q", st.EffectiveStatus, types.RunStatusPaused)
+	}
+	if !st.PausedFlag {
+		t.Errorf("PausedFlag without worker: got false, want true")
+	}
+
+	// With a worker present: paused should still be paused, not masked as running.
+	supervisor.workers["run-1"] = &managedRuntime{}
+	st, err = supervisor.GetRunState(context.Background(), "sess-1", "run-1")
+	if err != nil {
+		t.Fatalf("GetRunState with worker: %v", err)
+	}
+	if st.EffectiveStatus != types.RunStatusPaused {
+		t.Errorf("EffectiveStatus with worker: got %q, want %q (paused must not be masked as running)", st.EffectiveStatus, types.RunStatusPaused)
+	}
+	if !st.PausedFlag {
+		t.Errorf("PausedFlag with worker: got false, want true")
+	}
+	if !st.WorkerPresent {
+		t.Errorf("WorkerPresent: got false, want true")
 	}
 }
