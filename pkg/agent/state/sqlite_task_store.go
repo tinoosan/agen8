@@ -103,6 +103,38 @@ func (s *SQLiteTaskStore) init() error {
 			initErr = fmt.Errorf("sqlite: create tasks: %w", err)
 			return
 		}
+		if _, err := db.Exec(`
+			CREATE TABLE IF NOT EXISTS messages (
+				message_id TEXT PRIMARY KEY,
+				intent_id TEXT NOT NULL,
+				correlation_id TEXT NOT NULL,
+				causation_id TEXT DEFAULT '',
+				producer TEXT DEFAULT '',
+				thread_id TEXT NOT NULL,
+				run_id TEXT DEFAULT '',
+				team_id TEXT DEFAULT '',
+				channel TEXT NOT NULL,
+				kind TEXT NOT NULL,
+				body_json TEXT NOT NULL DEFAULT '{}',
+				task_ref TEXT DEFAULT '',
+				task_json TEXT DEFAULT '',
+				status TEXT NOT NULL,
+				lease_owner TEXT DEFAULT '',
+				lease_until TEXT,
+				attempts INTEGER NOT NULL DEFAULT 0,
+				visible_at TEXT NOT NULL,
+				priority INTEGER NOT NULL DEFAULT 0,
+				error TEXT DEFAULT '',
+				metadata_json TEXT NOT NULL DEFAULT '{}',
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL,
+				processed_at TEXT
+			);
+		`); err != nil {
+			_ = db.Close()
+			initErr = fmt.Errorf("sqlite: create messages: %w", err)
+			return
+		}
 		migrations := []string{
 			`ALTER TABLE tasks ADD COLUMN team_id TEXT DEFAULT '';`,
 			`ALTER TABLE tasks ADD COLUMN assigned_role TEXT DEFAULT '';`,
@@ -135,6 +167,13 @@ func (s *SQLiteTaskStore) init() error {
 			`CREATE INDEX IF NOT EXISTS idx_tasks_team_kind ON tasks(team_id, task_kind);`,
 			`CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to ON tasks(assigned_to_type, assigned_to, status);`,
 			`CREATE INDEX IF NOT EXISTS idx_tasks_claimed_by ON tasks(claimed_by, status);`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_thread_intent ON messages(thread_id, intent_id);`,
+			`CREATE INDEX IF NOT EXISTS idx_messages_thread_queue ON messages(thread_id, channel, status, visible_at, priority, created_at);`,
+			`CREATE INDEX IF NOT EXISTS idx_messages_run_status_visible ON messages(run_id, status, visible_at);`,
+			`CREATE INDEX IF NOT EXISTS idx_messages_task_ref ON messages(task_ref);`,
+			`CREATE INDEX IF NOT EXISTS idx_messages_correlation_id ON messages(correlation_id);`,
+			`CREATE INDEX IF NOT EXISTS idx_messages_causation_id ON messages(causation_id);`,
+			`CREATE INDEX IF NOT EXISTS idx_messages_status_lease ON messages(status, lease_until);`,
 		}
 		for _, idx := range indexes {
 			if _, err := db.Exec(idx); err != nil {
