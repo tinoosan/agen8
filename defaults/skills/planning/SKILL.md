@@ -1,5 +1,5 @@
 ---
-name: Planning
+name: planning
 description: Break down complex tasks into actionable steps with clear milestones and dependencies.
 ---
 
@@ -62,15 +62,16 @@ Use this skill when facing complex, multi-phase work that requires careful seque
 
 ### Option Comparison
 
-| Approach | Pros | Cons | Effort | Risk |
-|----------|------|------|--------|------|
-| Refactor existing | Preserves data, low risk | Slower, tech debt remains | M | Low |
-| Rewrite from scratch | Clean slate, modern stack | High risk, data migration | L | High |
-| Hybrid (phase migration) | Incremental, testable | Complex coordination | M-L | Medium |
+| Approach                 | Pros                      | Cons                      | Effort | Risk   |
+| ------------------------ | ------------------------- | ------------------------- | ------ | ------ |
+| Refactor existing        | Preserves data, low risk  | Slower, tech debt remains | M      | Low    |
+| Rewrite from scratch     | Clean slate, modern stack | High risk, data migration | L      | High   |
+| Hybrid (phase migration) | Incremental, testable     | Complex coordination      | M-L    | Medium |
 
 ### Phase Breakdown
 
 **Phase 1: Foundation**
+
 - Goal: Set up infrastructure
 - Deliverables: Database schema, API scaffolding, CI/CD pipeline
 - Success: Tests pass, deployment works
@@ -78,6 +79,7 @@ Use this skill when facing complex, multi-phase work that requires careful seque
 - Risks: Cloud permissions, quota limits
 
 **Phase 2: Core Logic**
+
 - Goal: Implement business rules
 - Deliverables: Core API endpoints, validation, error handling
 - Success: 80% test coverage, manual QA pass
@@ -85,6 +87,7 @@ Use this skill when facing complex, multi-phase work that requires careful seque
 - Risks: Edge cases, performance with large datasets
 
 **Phase 3: Integration**
+
 - Goal: Connect to existing systems
 - Deliverables: Webhook handlers, data sync, auth flow
 - Success: End-to-end flow works in staging
@@ -92,6 +95,7 @@ Use this skill when facing complex, multi-phase work that requires careful seque
 - Risks: Third-party API downtime, rate limits
 
 **Phase 4: Launch**
+
 - Goal: Production deployment
 - Deliverables: Rollout plan, monitoring, docs
 - Success: Live in prod, metrics green
@@ -103,6 +107,7 @@ Use this skill when facing complex, multi-phase work that requires careful seque
 **User request**: "Migrate our authentication from OAuth1 to OAuth2"
 
 **Plan**:
+
 1. **Context**: OAuth1 is deprecated, blocking new integrations. 5,000 active users.
 2. **Approach**: Dual-mode migration (support both OAuth1 and OAuth2 during transition)
 3. **Phases**:
@@ -136,6 +141,7 @@ Plot risks on Impact (low/high) vs. Likelihood (low/high):
 Identify the longest sequence of dependent tasks. This is your minimum timeline. Parallelize non-dependent work to shorten delivery.
 
 Example:
+
 ```
 Database schema (2 days) → API backend (5 days) → Frontend (3 days) = 10 days minimum
 Testing can happen in parallel with frontend = saves 1-2 days
@@ -144,6 +150,7 @@ Testing can happen in parallel with frontend = saves 1-2 days
 ### Spike planning
 
 For high-uncertainty work, dedicate time-boxed "spikes" to reduce risk before committing:
+
 - "Spend 1 day prototyping the new auth flow to validate feasibility"
 - "2-hour investigation: Can we use library X or do we need a custom solution?"
 
@@ -155,3 +162,23 @@ Spikes should answer a specific question and have a hard time limit.
 - Urgent hotfixes - plan quickly, execute faster
 - Exploratory work where the goal is to learn, not deliver
 - Tasks with rigid, predefined plans (just follow the existing spec)
+
+## Internal Mechanism Upgrade (v2.0)
+
+The following internal mechanisms are now mandatory for task management:
+
+- **Adaptive Complexity Threshold**:
+  - Level 1: Single step. Just do it.
+  - Level 2: Multiple files/tools. Minimal plan (HEAD + CHECKLIST).
+  - Level 3: Multi-agent/complex work. Full template (HEAD + CHECKLIST + Risk Log).
+
+- **Mandatory Quality Gates**:
+  Every checklist MUST include:
+  - [ ] QA/Testing step explicitly stated.
+  - [ ] Security/Style audit for code tasks.
+  - [ ] Memory Update step (record lessons learned/patterns).
+
+- **Plan Synchronization**:
+  When a task pivots:
+  1. Record "Plan Drift" in the daily memory file (/memory/YYYY-MM-DD-memory.md).
+  2. Rewrite /plan/HEAD.md and /plan/CHECKLIST.md immediately.
