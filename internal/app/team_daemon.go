@@ -40,6 +40,8 @@ type webhookRoutingContext struct {
 	validRoles      map[string]struct{}
 }
 
+var errDaemonGoalBootstrapUnsupported = errors.New("daemon goal bootstrap is not supported; create a session/task explicitly")
+
 func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, profDir string, goal string, maxContextB int, poll time.Duration, resolved RunChatOptions, protocolEnabled bool) error {
 	if prof == nil {
 		return fmt.Errorf("profile is required")
@@ -60,6 +62,9 @@ func runAsTeam(ctx context.Context, cfg config.Config, prof *profile.Profile, pr
 func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Profile, profDir string, goal string, maxContextB int, poll time.Duration, resolved RunChatOptions, protocolEnabled bool) (err error) {
 	if prof == nil {
 		return fmt.Errorf("profile is required")
+	}
+	if strings.TrimSpace(goal) != "" {
+		return errDaemonGoalBootstrapUnsupported
 	}
 	if maxContextB <= 0 {
 		maxContextB = 8 * 1024
@@ -190,7 +195,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	if protocolEnabled {
 		baseCfg := RPCServerConfig{
 			Cfg:            cfg,
-			Run:            types.Run{},
+			Run:            types.Run{MaxBytesForContext: maxContextB},
 			AllowAnyThread: true,
 			TaskService:    taskService,
 			Session:        sessionService,

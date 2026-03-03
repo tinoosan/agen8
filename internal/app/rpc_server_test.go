@@ -65,7 +65,7 @@ func TestRPCServer_ThreadGet_ReturnsActiveRunID(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
 	sess := types.NewSession("goal")
-	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	run := types.NewRun("goal", 32*1024, sess.SessionID)
 	sess.CurrentRunID = run.RunID
 	sess.Runs = []string{run.RunID}
 	sessStore := store.NewMemorySessionStore()
@@ -2023,6 +2023,13 @@ func TestRPCServer_SessionStart_Standalone(t *testing.T) {
 		t.Fatalf("load created session: %v", err)
 	} else if strings.TrimSpace(got.TeamID) != strings.TrimSpace(out.TeamID) {
 		t.Fatalf("session teamID=%q want %q", got.TeamID, out.TeamID)
+	}
+	createdRun, err := sessStore.LoadRun(context.Background(), out.PrimaryRunID)
+	if err != nil {
+		t.Fatalf("load created run: %v", err)
+	}
+	if createdRun.MaxBytesForContext != run.MaxBytesForContext {
+		t.Fatalf("created run maxContext=%d want %d", createdRun.MaxBytesForContext, run.MaxBytesForContext)
 	}
 }
 
