@@ -13,9 +13,6 @@ import (
 )
 
 func CountActivities(ctx context.Context, cfg config.Config, runID string) (int, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := cfg.Validate(); err != nil {
 		return 0, err
 	}
@@ -40,9 +37,6 @@ func CountActivities(ctx context.Context, cfg config.Config, runID string) (int,
 }
 
 func ListActivities(ctx context.Context, cfg config.Config, runID string, limit, offset int) ([]types.Activity, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -124,9 +118,6 @@ func ListActivities(ctx context.Context, cfg config.Config, runID string, limit,
 }
 
 func ensureActivitiesBackfilled(ctx context.Context, db *sql.DB, runID string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if db == nil {
 		return fmt.Errorf("db is nil")
 	}
