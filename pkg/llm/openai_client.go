@@ -264,10 +264,10 @@ func buildResponsesInputItems(
 		}
 
 		// If the assistant message carried tool calls, include them as function_call items.
-			for _, tc := range m.ToolCalls {
-				if !strings.EqualFold(tc.Type, "function") {
-					continue
-				}
+		for _, tc := range m.ToolCalls {
+			if !strings.EqualFold(tc.Type, "function") {
+				continue
+			}
 			stats.assistantToolCallN++
 			callID := strings.TrimSpace(tc.ID)
 			name := strings.TrimSpace(tc.Function.Name)
@@ -310,10 +310,10 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 			// subsequent tool messages (role="tool") can reference tool_call_id.
 			if len(m.ToolCalls) != 0 {
 				tcps := make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(m.ToolCalls))
-					for _, tc := range m.ToolCalls {
-						if !strings.EqualFold(tc.Type, "function") {
-							return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported toolCall type %q", tc.Type)
-						}
+				for _, tc := range m.ToolCalls {
+					if !strings.EqualFold(tc.Type, "function") {
+						return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported toolCall type %q", tc.Type)
+					}
 					id := strings.TrimSpace(tc.ID)
 					name := strings.TrimSpace(tc.Function.Name)
 					args := tc.Function.Arguments
@@ -401,10 +401,10 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 	// Tool/function calling (Chat Completions).
 	if len(req.Tools) != 0 {
 		tools := make([]openai.ChatCompletionToolUnionParam, 0, len(req.Tools))
-			for _, t := range req.Tools {
-				if !strings.EqualFold(t.Type, "function") {
-					return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported tool type %q", t.Type)
-				}
+		for _, t := range req.Tools {
+			if !strings.EqualFold(t.Type, "function") {
+				return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported tool type %q", t.Type)
+			}
 			name := strings.TrimSpace(t.Function.Name)
 			if name == "" {
 				return openai.ChatCompletionNewParams{}, fmt.Errorf("tool.function.name is required")
@@ -488,7 +488,10 @@ func isInternalUserRepair(s string) bool {
 	return false
 }
 
-func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNewParams, error) {
+func (c *Client) buildResponseParams(ctx context.Context, req types.LLMRequest) (responses.ResponseNewParams, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if c == nil || c.client == nil {
 		return responses.ResponseNewParams{}, fmt.Errorf("llm client is nil")
 	}
@@ -635,7 +638,7 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	requestReasoning := cost.SupportsReasoningSummary(req.Model)
 	if isOpenRouterBaseURL(c.baseURL) {
 		// Prefer OpenRouter's live model metadata to avoid stale local flags.
-		if supports, known := cost.SupportsReasoningSummaryFromOpenRouter(context.Background(), req.Model); known {
+		if supports, known := cost.SupportsReasoningSummaryFromOpenRouter(ctx, req.Model); known {
 			requestReasoning = supports
 		} else {
 			// If metadata is unavailable, keep prior OpenRouter behavior and request
@@ -673,10 +676,10 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	// Tool/function calling (Responses API).
 	if len(req.Tools) != 0 {
 		tools := make([]responses.ToolUnionParam, 0, len(req.Tools))
-			for _, t := range req.Tools {
-				if !strings.EqualFold(t.Type, "function") {
-					return responses.ResponseNewParams{}, fmt.Errorf("unsupported tool type %q", t.Type)
-				}
+		for _, t := range req.Tools {
+			if !strings.EqualFold(t.Type, "function") {
+				return responses.ResponseNewParams{}, fmt.Errorf("unsupported tool type %q", t.Type)
+			}
 			name := strings.TrimSpace(t.Function.Name)
 			if name == "" {
 				return responses.ResponseNewParams{}, fmt.Errorf("tool.function.name is required")
@@ -1068,7 +1071,7 @@ func (c *Client) generateOnce(ctx context.Context, req types.LLMRequest) (types.
 }
 
 func (c *Client) generateResponses(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
-	params, err := c.buildResponseParams(req)
+	params, err := c.buildResponseParams(ctx, req)
 	if err != nil {
 		return types.LLMResponse{}, err
 	}
@@ -1157,10 +1160,10 @@ func (c *Client) onStreamChunk(acc *openai.ChatCompletionAccumulator, chunk open
 
 func (c *Client) onResponsesStreamEvent(ev responses.ResponseStreamEventUnion, cb types.LLMStreamCallback, outText *strings.Builder, completed **responses.Response, sawReasoningSummaryText *bool) error {
 	streamCtx := &ResponsesStreamEventContext{
-		Callback:                cb,
-		OutText:                 outText,
-		Completed:               completed,
-		SawReasoningSummaryText: sawReasoningSummaryText,
+		Callback:                  cb,
+		OutText:                   outText,
+		Completed:                 completed,
+		SawReasoningSummaryText:   sawReasoningSummaryText,
 		AllowRawReasoningFallback: isOpenRouterBaseURL(c.baseURL),
 	}
 	handled, err := c.dispatchResponsesStreamEvent(ev, streamCtx)
@@ -1285,7 +1288,7 @@ func shouldFallbackToChatForRequest(baseURL string, req types.LLMRequest, err er
 }
 
 func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
-	params, err := c.buildResponseParams(req)
+	params, err := c.buildResponseParams(ctx, req)
 	if err != nil {
 		return types.LLMResponse{}, err
 	}

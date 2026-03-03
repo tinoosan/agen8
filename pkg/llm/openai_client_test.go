@@ -314,7 +314,7 @@ func TestClient_buildResponseParams_JSONSchema(t *testing.T) {
 	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
 	c := &Client{client: &cli, DefaultMaxTokens: 123}
 
-	params, err := c.buildResponseParams(types.LLMRequest{
+	params, err := c.buildResponseParams(context.Background(), types.LLMRequest{
 		Model:    "openai/gpt-5-mini",
 		System:   "system",
 		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
@@ -342,7 +342,7 @@ func TestClient_buildResponseParams_JSONSchema(t *testing.T) {
 func TestClient_buildResponseParams_UnknownRoleReturnsError(t *testing.T) {
 	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
 	c := &Client{client: &cli}
-	_, err := c.buildResponseParams(types.LLMRequest{
+	_, err := c.buildResponseParams(context.Background(), types.LLMRequest{
 		Model:    "openai/gpt-5-mini",
 		Messages: []types.LLMMessage{{Role: "unknown-role", Content: "hi"}},
 	})
@@ -355,7 +355,7 @@ func TestClient_buildResponseParams_ReasoningSummaryNoneMapsToOff(t *testing.T) 
 	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
 	c := &Client{client: &cli}
 
-	params, err := c.buildResponseParams(types.LLMRequest{
+	params, err := c.buildResponseParams(context.Background(), types.LLMRequest{
 		Model:            "openai/gpt-5-nano",
 		System:           "system",
 		Messages:         []types.LLMMessage{{Role: "user", Content: "hi"}},
@@ -373,7 +373,7 @@ func TestClient_buildResponseParams_InvalidReasoningSummaryFallsBackToAuto(t *te
 	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
 	c := &Client{client: &cli}
 
-	params, err := c.buildResponseParams(types.LLMRequest{
+	params, err := c.buildResponseParams(context.Background(), types.LLMRequest{
 		Model:            "openai/gpt-5-nano",
 		System:           "system",
 		Messages:         []types.LLMMessage{{Role: "user", Content: "hi"}},
@@ -394,7 +394,7 @@ func TestClient_buildResponseParams_ReasoningSummaryAutoForOnlineVariant(t *test
 	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
 	c := &Client{client: &cli}
 
-	params, err := c.buildResponseParams(types.LLMRequest{
+	params, err := c.buildResponseParams(context.Background(), types.LLMRequest{
 		Model:    "openai/gpt-5-nano:online",
 		System:   "system",
 		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
@@ -414,7 +414,7 @@ func TestClient_buildResponseParams_OpenRouterUnknownModelRequestsReasoningByDef
 	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("https://openrouter.ai/api/v1"))
 	c := &Client{client: &cli, baseURL: "https://openrouter.ai/api/v1"}
 
-	params, err := c.buildResponseParams(types.LLMRequest{
+	params, err := c.buildResponseParams(context.Background(), types.LLMRequest{
 		Model:    "moonshotai/kimi-k2.5",
 		System:   "system",
 		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
@@ -434,7 +434,7 @@ func TestClient_buildResponseParams_NonOpenRouterUnknownModelDoesNotForceReasoni
 	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
 	c := &Client{client: &cli, baseURL: "http://example"}
 
-	params, err := c.buildResponseParams(types.LLMRequest{
+	params, err := c.buildResponseParams(context.Background(), types.LLMRequest{
 		Model:    "moonshotai/kimi-k2.5",
 		System:   "system",
 		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
@@ -1063,7 +1063,7 @@ func TestBuildParams_UnsupportedToolType(t *testing.T) {
 func TestBuildResponseParams_ToolChoiceFunction(t *testing.T) {
 	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
 	c := &Client{client: &cli}
-	_, err := c.buildResponseParams(types.LLMRequest{
+	_, err := c.buildResponseParams(context.Background(), types.LLMRequest{
 		Model:    "openai/gpt-5-mini",
 		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
 		Tools: []types.Tool{
@@ -1079,7 +1079,7 @@ func TestBuildResponseParams_ToolChoiceFunction(t *testing.T) {
 func TestBuildResponseParams_UnsupportedToolType(t *testing.T) {
 	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
 	c := &Client{client: &cli}
-	_, err := c.buildResponseParams(types.LLMRequest{
+	_, err := c.buildResponseParams(context.Background(), types.LLMRequest{
 		Model:    "openai/gpt-5-mini",
 		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
 		Tools: []types.Tool{
@@ -1094,7 +1094,7 @@ func TestBuildResponseParams_UnsupportedToolType(t *testing.T) {
 func TestBuildResponseParams_CompactionMessageMapped(t *testing.T) {
 	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
 	c := &Client{client: &cli}
-	params, err := c.buildResponseParams(types.LLMRequest{
+	params, err := c.buildResponseParams(context.Background(), types.LLMRequest{
 		Model: "openai/gpt-5-mini",
 		Messages: []types.LLMMessage{
 			{Role: "user", Content: "hello"},
@@ -1185,7 +1185,7 @@ func TestClient_buildResponseParams_DropsSchemaAfterUnsupported(t *testing.T) {
 	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL("http://example"))
 	c := &Client{client: &cli, DefaultMaxTokens: 123}
 	c.schemaUnsupported.Store(true)
-	params, err := c.buildResponseParams(types.LLMRequest{
+	params, err := c.buildResponseParams(context.Background(), types.LLMRequest{
 		Model:          "openai/gpt-5-mini",
 		System:         "system",
 		Messages:       []types.LLMMessage{{Role: "user", Content: "hi"}},
