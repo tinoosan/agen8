@@ -1556,3 +1556,400 @@ func (s *SQLiteTaskStore) CancelActiveTasksByRun(ctx context.Context, runID stri
 	}
 	return int(n), nil
 }
+
+func allowedMessageSortColumn(sortBy string) (string, bool) {
+	switch strings.TrimSpace(sortBy) {
+	case "", "created_at":
+		return "created_at", true
+	case "visible_at":
+		return "visible_at", true
+	case "processed_at":
+		return "processed_at", true
+	case "priority":
+		return "priority", true
+	case "updated_at":
+		return "updated_at", true
+	default:
+		return "", false
+	}
+}
+
+func normalizeMessage(msg types.AgentMessage) types.AgentMessage {
+	now := time.Now().UTC()
+	out := msg
+	out.MessageID = strings.TrimSpace(out.MessageID)
+	if out.MessageID == "" {
+		out.MessageID = "msg-" + uuid.NewString()
+	}
+	out.IntentID = strings.TrimSpace(out.IntentID)
+	out.CorrelationID = strings.TrimSpace(out.CorrelationID)
+	out.CausationID = strings.TrimSpace(out.CausationID)
+	out.Producer = strings.TrimSpace(out.Producer)
+	out.ThreadID = strings.TrimSpace(out.ThreadID)
+	out.RunID = strings.TrimSpace(out.RunID)
+	out.TeamID = strings.TrimSpace(out.TeamID)
+	out.Channel = strings.TrimSpace(out.Channel)
+	out.Kind = strings.TrimSpace(out.Kind)
+	out.TaskRef = strings.TrimSpace(out.TaskRef)
+	out.Status = strings.TrimSpace(out.Status)
+	if out.Status == "" {
+		out.Status = types.MessageStatusPending
+	}
+	if out.VisibleAt.IsZero() {
+		out.VisibleAt = now
+	} else {
+		out.VisibleAt = out.VisibleAt.UTC()
+	}
+	if out.Body == nil {
+		out.Body = map[string]any{}
+	}
+	if out.Metadata == nil {
+		out.Metadata = map[string]any{}
+	}
+	return out
+}
+
+func mapSQLiteMessage(rowScanner interface {
+	Scan(dest ...any) error
+}) (types.AgentMessage, error) {
+	var (
+		msg         types.AgentMessage
+		bodyJSON    string
+		taskJSON    string
+		metaJSON    string
+		leaseUntil  string
+		visibleAt   string
+		createdAt   string
+		updatedAt   string
+		processedAt string
+	)
+	if err := rowScanner.Scan(
+		&msg.MessageID,
+		&msg.IntentID,
+		&msg.CorrelationID,
+		&msg.CausationID,
+		&msg.Producer,
+		&msg.ThreadID,
+		&msg.RunID,
+		&msg.TeamID,
+		&msg.Channel,
+		&msg.Kind,
+		&bodyJSON,
+		&msg.TaskRef,
+		&taskJSON,
+		&msg.Status,
+		&msg.LeaseOwner,
+		&leaseUntil,
+		&msg.Attempts,
+		&visibleAt,
+		&msg.Priority,
+		&msg.Error,
+		&metaJSON,
+		&createdAt,
+		&updatedAt,
+		&processedAt,
+	); err != nil {
+		return types.AgentMessage{}, err
+	}
+	if strings.TrimSpace(bodyJSON) != "" {
+		_ = json.Unmarshal([]byte(bodyJSON), &msg.Body)
+	}
+	if strings.TrimSpace(taskJSON) != "" {
+		var task types.Task
+		if err := json.Unmarshal([]byte(taskJSON), &task); err == nil {
+			msg.Task = &task
+		}
+	}
+	if strings.TrimSpace(metaJSON) != "" {
+		_ = json.Unmarshal([]byte(metaJSON), &msg.Metadata)
+	}
+	if tt := parseTime(leaseUntil); !tt.IsZero() {
+		msg.LeaseUntil = &tt
+	}
+	msg.VisibleAt = parseTime(visibleAt)
+	if tt := parseTime(createdAt); !tt.IsZero() {
+		msg.CreatedAt = &tt
+	}
+	if tt := parseTime(updatedAt); !tt.IsZero() {
+		msg.UpdatedAt = &tt
+	}
+	if tt := parseTime(processedAt); !tt.IsZero() {
+		msg.ProcessedAt = &tt
+	}
+	return msg, nil
+}
+
+func (s *SQLiteTaskStore) PublishMessage(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {
+	msg = normalizeMessage(msg)
+	if msg.IntentID == "" {
+		return types.AgentMessage{}, fmt.Errorf("intentID is required")
+	}
+	if msg.CorrelationID == "" {
+		return types.AgentMessage{}, fmt.Errorf("correlationID is required")
+	}
+	if msg.ThreadID == "" {
+		return types.AgentMessage{}, fmt.Errorf("threadID is required")
+	}
+	if msg.Channel == "" {
+		return types.AgentMessage{}, fmt.Errorf("channel is required")
+	}
+	if msg.Kind == "" {
+		return types.AgentMessage{}, fmt.Errorf("kind is required")
+	}
+	if msg.Kind == types.MessageKindTask && msg.TaskRef == "" {
+		return types.AgentMessage{}, fmt.Errorf("taskRef is required for task messages")
+	}
+	db, err := s.dbConn()
+	if err != nil {
+		return types.AgentMessage{}, err
+	}
+	now := time.Now().UTC()
+	bodyJSON, _ := json.Marshal(msg.Body)
+	metaJSON, _ := json.Marshal(msg.Metadata)
+	taskJSON := ""
+	if msg.Task != nil {
+		b, _ := json.Marshal(msg.Task)
+		taskJSON = string(b)
+	}
+
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO messages (
+			message_id, intent_id, correlation_id, causation_id, producer,
+			thread_id, run_id, team_id, channel, kind, body_json, task_ref, task_json,
+			status, lease_owner, lease_until, attempts, visible_at, priority, error,
+			metadata_json, created_at, updated_at, processed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, msg.MessageID, msg.IntentID, msg.CorrelationID, msg.CausationID, msg.Producer,
+		msg.ThreadID, msg.RunID, msg.TeamID, msg.Channel, msg.Kind, string(bodyJSON), msg.TaskRef, taskJSON,
+		msg.Status, strings.TrimSpace(msg.LeaseOwner), nullIfEmpty(timeutil.FormatRFC3339Nano(msg.LeaseUntil)), msg.Attempts,
+		msg.VisibleAt.Format(time.RFC3339Nano), msg.Priority, msg.Error, string(metaJSON),
+		now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), nullIfEmpty(timeutil.FormatRFC3339Nano(msg.ProcessedAt)))
+	if err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return types.AgentMessage{}, err
+		}
+		existing, gerr := s.getMessageByThreadIntent(ctx, msg.ThreadID, msg.IntentID)
+		if gerr != nil {
+			return types.AgentMessage{}, err
+		}
+		return existing, nil
+	}
+	return s.GetMessage(ctx, msg.MessageID)
+}
+
+func (s *SQLiteTaskStore) getMessageByThreadIntent(ctx context.Context, threadID, intentID string) (types.AgentMessage, error) {
+	db, err := s.dbConn()
+	if err != nil {
+		return types.AgentMessage{}, err
+	}
+	row := db.QueryRowContext(ctx, `
+		SELECT message_id, intent_id, correlation_id, COALESCE(causation_id, ''), COALESCE(producer, ''),
+		       thread_id, COALESCE(run_id, ''), COALESCE(team_id, ''), channel, kind,
+		       COALESCE(body_json, '{}'), COALESCE(task_ref, ''), COALESCE(task_json, ''),
+		       status, COALESCE(lease_owner, ''), COALESCE(lease_until, ''), attempts,
+		       visible_at, priority, COALESCE(error, ''), COALESCE(metadata_json, '{}'),
+		       created_at, updated_at, COALESCE(processed_at, '')
+		FROM messages
+		WHERE thread_id = ? AND intent_id = ?
+	`, strings.TrimSpace(threadID), strings.TrimSpace(intentID))
+	msg, err := mapSQLiteMessage(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return types.AgentMessage{}, ErrMessageNotFound
+		}
+		return types.AgentMessage{}, err
+	}
+	return msg, nil
+}
+
+func (s *SQLiteTaskStore) GetMessage(ctx context.Context, messageID string) (types.AgentMessage, error) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return types.AgentMessage{}, fmt.Errorf("messageID is required")
+	}
+	db, err := s.dbConn()
+	if err != nil {
+		return types.AgentMessage{}, err
+	}
+	row := db.QueryRowContext(ctx, `
+		SELECT message_id, intent_id, correlation_id, COALESCE(causation_id, ''), COALESCE(producer, ''),
+		       thread_id, COALESCE(run_id, ''), COALESCE(team_id, ''), channel, kind,
+		       COALESCE(body_json, '{}'), COALESCE(task_ref, ''), COALESCE(task_json, ''),
+		       status, COALESCE(lease_owner, ''), COALESCE(lease_until, ''), attempts,
+		       visible_at, priority, COALESCE(error, ''), COALESCE(metadata_json, '{}'),
+		       created_at, updated_at, COALESCE(processed_at, '')
+		FROM messages
+		WHERE message_id = ?
+	`, messageID)
+	msg, err := mapSQLiteMessage(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return types.AgentMessage{}, ErrMessageNotFound
+		}
+		return types.AgentMessage{}, err
+	}
+	return msg, nil
+}
+
+func (s *SQLiteTaskStore) ListMessages(ctx context.Context, filter MessageFilter) ([]types.AgentMessage, error) {
+	db, err := s.dbConn()
+	if err != nil {
+		return nil, err
+	}
+	if filter.Limit < 0 || filter.Offset < 0 {
+		return nil, ErrInvalidMsgFilter
+	}
+	sortBy, ok := allowedMessageSortColumn(filter.SortBy)
+	if !ok {
+		return nil, ErrInvalidMsgFilter
+	}
+	sortDir := "ASC"
+	if filter.SortDesc {
+		sortDir = "DESC"
+	}
+	q := `
+		SELECT message_id, intent_id, correlation_id, COALESCE(causation_id, ''), COALESCE(producer, ''),
+		       thread_id, COALESCE(run_id, ''), COALESCE(team_id, ''), channel, kind,
+		       COALESCE(body_json, '{}'), COALESCE(task_ref, ''), COALESCE(task_json, ''),
+		       status, COALESCE(lease_owner, ''), COALESCE(lease_until, ''), attempts,
+		       visible_at, priority, COALESCE(error, ''), COALESCE(metadata_json, '{}'),
+		       created_at, updated_at, COALESCE(processed_at, '')
+		FROM messages
+		WHERE 1=1
+	`
+	args := []any{}
+	if id := strings.TrimSpace(filter.ThreadID); id != "" {
+		q += " AND thread_id = ?"
+		args = append(args, id)
+	}
+	if id := strings.TrimSpace(filter.RunID); id != "" {
+		q += " AND run_id = ?"
+		args = append(args, id)
+	}
+	if id := strings.TrimSpace(filter.TeamID); id != "" {
+		q += " AND team_id = ?"
+		args = append(args, id)
+	}
+	if ch := strings.TrimSpace(filter.Channel); ch != "" {
+		q += " AND channel = ?"
+		args = append(args, ch)
+	}
+	if len(filter.Kinds) > 0 {
+		ph := make([]string, 0, len(filter.Kinds))
+		for _, kind := range filter.Kinds {
+			kind = strings.TrimSpace(kind)
+			if kind == "" {
+				continue
+			}
+			ph = append(ph, "?")
+			args = append(args, kind)
+		}
+		if len(ph) > 0 {
+			q += " AND kind IN (" + strings.Join(ph, ",") + ")"
+		}
+	}
+	if len(filter.Statuses) > 0 {
+		ph := make([]string, 0, len(filter.Statuses))
+		for _, st := range filter.Statuses {
+			st = strings.TrimSpace(st)
+			if st == "" {
+				continue
+			}
+			ph = append(ph, "?")
+			args = append(args, st)
+		}
+		if len(ph) > 0 {
+			q += " AND status IN (" + strings.Join(ph, ",") + ")"
+		}
+	}
+	q += " ORDER BY " + sortBy + " " + sortDir
+	if filter.Limit > 0 {
+		q += " LIMIT ?"
+		args = append(args, filter.Limit)
+	}
+	if filter.Offset > 0 {
+		if filter.Limit <= 0 {
+			q += " LIMIT -1"
+		}
+		q += " OFFSET ?"
+		args = append(args, filter.Offset)
+	}
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]types.AgentMessage, 0)
+	for rows.Next() {
+		msg, err := mapSQLiteMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *SQLiteTaskStore) CountMessages(ctx context.Context, filter MessageFilter) (int, error) {
+	db, err := s.dbConn()
+	if err != nil {
+		return 0, err
+	}
+	if filter.Limit < 0 || filter.Offset < 0 {
+		return 0, ErrInvalidMsgFilter
+	}
+	q := `SELECT COUNT(*) FROM messages WHERE 1=1`
+	args := []any{}
+	if id := strings.TrimSpace(filter.ThreadID); id != "" {
+		q += " AND thread_id = ?"
+		args = append(args, id)
+	}
+	if id := strings.TrimSpace(filter.RunID); id != "" {
+		q += " AND run_id = ?"
+		args = append(args, id)
+	}
+	if id := strings.TrimSpace(filter.TeamID); id != "" {
+		q += " AND team_id = ?"
+		args = append(args, id)
+	}
+	if ch := strings.TrimSpace(filter.Channel); ch != "" {
+		q += " AND channel = ?"
+		args = append(args, ch)
+	}
+	if len(filter.Kinds) > 0 {
+		ph := make([]string, 0, len(filter.Kinds))
+		for _, kind := range filter.Kinds {
+			kind = strings.TrimSpace(kind)
+			if kind == "" {
+				continue
+			}
+			ph = append(ph, "?")
+			args = append(args, kind)
+		}
+		if len(ph) > 0 {
+			q += " AND kind IN (" + strings.Join(ph, ",") + ")"
+		}
+	}
+	if len(filter.Statuses) > 0 {
+		ph := make([]string, 0, len(filter.Statuses))
+		for _, st := range filter.Statuses {
+			st = strings.TrimSpace(st)
+			if st == "" {
+				continue
+			}
+			ph = append(ph, "?")
+			args = append(args, st)
+		}
+		if len(ph) > 0 {
+			q += " AND status IN (" + strings.Join(ph, ",") + ")"
+		}
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
