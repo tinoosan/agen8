@@ -63,6 +63,9 @@ func configureCodeExecRuntime(
 				Data:    data,
 			})
 		}
+		if required && len(resolvedRequiredImports) > 0 {
+			return fmt.Errorf("code_exec is required but environment reconciliation failed: %w", err)
+		}
 	} else {
 		if bin := strings.TrimSpace(provisioned.PythonBin); bin != "" {
 			rt.CodeExec.PythonBin = bin
@@ -101,6 +104,9 @@ func configureCodeExecRuntime(
 				Message: "code_exec runtime preflight failed; check python runtime and update [code_exec].required_packages in config.toml",
 				Data:    data,
 			})
+		}
+		if required {
+			return fmt.Errorf("code_exec is required but runtime preflight failed: %w", err)
 		}
 	}
 	rt.CodeExec.SetDispatcher(func(ctx context.Context, toolName string, args json.RawMessage) (types.HostOpRequest, error) {

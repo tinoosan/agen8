@@ -92,7 +92,7 @@ func TestConfigureCodeExecRuntime_DedupesRepeatedWarnings(t *testing.T) {
 	}
 }
 
-func TestConfigureCodeExecRuntime_RequiredModeDoesNotFailWhenPreflightFails(t *testing.T) {
+func TestConfigureCodeExecRuntime_RequiredModeFailsWhenRequiredImportsCannotBeReconciled(t *testing.T) {
 	modelRegistry, err := agent.DefaultHostToolRegistry()
 	if err != nil {
 		t.Fatalf("default registry: %v", err)
@@ -106,9 +106,12 @@ func TestConfigureCodeExecRuntime_RequiredModeDoesNotFailWhenPreflightFails(t *t
 	inv.PythonBin = "missing-python-for-code-exec-preflight-tests"
 	rt := &runtime.Runtime{CodeExec: inv}
 
-	err = configureCodeExecRuntime(context.Background(), rt, config.Default(), modelRegistry, bridgeRegistry, nil, true, nil)
-	if err != nil {
-		t.Fatalf("did not expect error when preflight fails in required mode: %v", err)
+	err = configureCodeExecRuntime(context.Background(), rt, config.Default(), modelRegistry, bridgeRegistry, []string{"definitely_not_a_real_python_package_agen8"}, true, nil)
+	if err == nil {
+		t.Fatalf("expected error when required imports cannot be reconciled in required mode")
+	}
+	if !strings.Contains(err.Error(), "code_exec is required") {
+		t.Fatalf("expected required-mode error context, got: %v", err)
 	}
 }
 
@@ -143,7 +146,7 @@ func TestConfigureCodeExecRuntime_ConfiguresDispatcherAndAllowlist(t *testing.T)
 	inv.PythonBin = pythonBin
 	rt := &runtime.Runtime{CodeExec: inv}
 
-	err = configureCodeExecRuntime(context.Background(), rt, config.Default(), modelRegistry, bridgeRegistry, []string{"re", "json"}, true, nil)
+	err = configureCodeExecRuntime(context.Background(), rt, config.Default(), modelRegistry, bridgeRegistry, nil, true, nil)
 	if err != nil {
 		t.Fatalf("configureCodeExecRuntime: %v", err)
 	}
@@ -153,6 +156,7 @@ func TestConfigureCodeExecRuntime_ConfiguresDispatcherAndAllowlist(t *testing.T)
 	if _, ok := modelRegistry.Get("code_exec"); !ok {
 		t.Fatalf("expected code_exec to remain registered after successful preflight")
 	}
+	inv.PythonBin = pythonBin
 	inv.SetBridge(func(_ context.Context, req types.HostOpRequest) types.HostOpResponse {
 		return types.HostOpResponse{Op: req.Op, Ok: true, Text: `{"entries":[]}`}
 	})
