@@ -495,7 +495,7 @@ func compactConversationForBudget(msgs []llmtypes.LLMMessage, system string, bud
 	return compacted
 }
 
-func estimateTokens(bytes int) int { return bytes / 16 }
+func estimateTokens(bytes int) int { return bytes / 4 }
 
 func estimateConversationBytes(system string, msgs []llmtypes.LLMMessage) int {
 	total := len(system)
