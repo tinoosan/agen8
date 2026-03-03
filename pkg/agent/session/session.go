@@ -530,7 +530,10 @@ func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 		if strings.TrimSpace(s.cfg.TeamID) != "" {
 			claimed.RoleSnapshot = strings.TrimSpace(s.cfg.RoleName)
 		}
-		_ = s.cfg.TaskStore.UpdateTask(ctx, claimed)
+		if err := s.cfg.TaskStore.UpdateTask(ctx, claimed); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("update claimed %s: %w", taskID, err))
+			continue
+		}
 
 		if claimed.Attempts > s.cfg.MaxRetries {
 			if err := s.quarantineTask(ctx, claimed); err != nil {
@@ -756,7 +759,9 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		task.AssignedTo = strings.TrimSpace(s.cfg.RunID)
 	}
 	task.ClaimedByAgentID = strings.TrimSpace(s.cfg.RunID)
-	_ = s.cfg.TaskStore.UpdateTask(ctx, task)
+	if err := s.cfg.TaskStore.UpdateTask(ctx, task); err != nil {
+		return fmt.Errorf("mark task active %s: %w", taskID, err)
+	}
 
 	taskKind := strings.TrimSpace(task.TaskKind)
 	// Infer from task ID when kind is missing or stored as "other" (e.g. tasks created without TaskKind).
@@ -1190,7 +1195,9 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	if timeutil.IsSet(task.StartedAt) && timeutil.IsSet(tr.CompletedAt) {
 		task.DurationSeconds = int(tr.CompletedAt.Sub(*task.StartedAt).Round(time.Second).Seconds())
 	}
-	_ = s.cfg.TaskStore.UpdateTask(completeCtx, task)
+	if err := s.cfg.TaskStore.UpdateTask(completeCtx, task); err != nil {
+		return fmt.Errorf("persist completed task %s: %w", taskID, err)
+	}
 
 	if s.cfg.Notifier != nil {
 		if err := s.cfg.Notifier.Notify(completeCtx, task, tr); err != nil {

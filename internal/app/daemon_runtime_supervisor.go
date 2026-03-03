@@ -1886,9 +1886,17 @@ func (s *runtimeSupervisor) EscalateTask(ctx context.Context, callbackTaskID str
 	// Stop the child run after escalation.
 	childRunID := strings.TrimSpace(data.SourceRunID)
 	if childRunID != "" {
-		_ = s.StopRun(childRunID)
+		var stopErr error
+		if err := s.StopRun(childRunID); err != nil {
+			stopErr = errors.Join(stopErr, fmt.Errorf("stop child runtime %s: %w", childRunID, err))
+		}
 		if s.sessionService != nil {
-			_, _ = s.sessionService.StopRun(ctx, childRunID, types.RunStatusFailed, "escalated")
+			if _, err := s.sessionService.StopRun(ctx, childRunID, types.RunStatusFailed, "escalated"); err != nil {
+				stopErr = errors.Join(stopErr, fmt.Errorf("persist child run stop %s: %w", childRunID, err))
+			}
+		}
+		if stopErr != nil {
+			return stopErr
 		}
 	}
 	return nil

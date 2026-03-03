@@ -173,6 +173,45 @@ func TestEscalateToCoordinator(t *testing.T) {
 	}
 }
 
+func TestEscalateToCoordinator_ReturnsStopFailures(t *testing.T) {
+	stopLoopErr := errors.New("loop stop failed")
+	stopPersistErr := errors.New("persist stop failed")
+
+	taskCreator := &mockRetryEscalationCreator{
+		createEscalation: func(ctx context.Context, callbackTaskID string, data hosttools.EscalationData) error {
+			return nil
+		},
+	}
+	runStopper := &mockRunStopper{
+		stopRun: func(runID string) error {
+			return stopLoopErr
+		},
+	}
+	sessionSvc := &mockSessionService{
+		stopRun: func(ctx context.Context, runID, status, msg string) (types.Run, error) {
+			return types.Run{}, stopPersistErr
+		},
+	}
+
+	err := EscalateToCoordinator(
+		context.Background(),
+		taskCreator,
+		sessionSvc,
+		runStopper,
+		"callback-task-1",
+		hosttools.EscalationData{SourceRunID: "child-run-1"},
+	)
+	if err == nil {
+		t.Fatal("expected escalation stop error")
+	}
+	if !errors.Is(err, stopLoopErr) {
+		t.Fatalf("expected run stopper error, got: %v", err)
+	}
+	if !errors.Is(err, stopPersistErr) {
+		t.Fatalf("expected session stop error, got: %v", err)
+	}
+}
+
 func TestIsTeamIdle(t *testing.T) {
 	store := &mockTaskStore{
 		countTasks: func(ctx context.Context, filter state.TaskFilter) (int, error) {

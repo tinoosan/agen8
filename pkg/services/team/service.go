@@ -42,9 +42,19 @@ func EscalateToCoordinator(
 	}
 	childRunID := strings.TrimSpace(data.SourceRunID)
 	if childRunID != "" {
-		_ = runStopper.StopRun(childRunID)
+		var stopErr error
+		if runStopper != nil {
+			if err := runStopper.StopRun(childRunID); err != nil {
+				stopErr = errors.Join(stopErr, fmt.Errorf("stop child run loop %s: %w", childRunID, err))
+			}
+		}
 		if sessionService != nil {
-			_, _ = sessionService.StopRun(ctx, childRunID, types.RunStatusFailed, "escalated")
+			if _, err := sessionService.StopRun(ctx, childRunID, types.RunStatusFailed, "escalated"); err != nil {
+				stopErr = errors.Join(stopErr, fmt.Errorf("persist child run stop %s: %w", childRunID, err))
+			}
+		}
+		if stopErr != nil {
+			return stopErr
 		}
 	}
 	return nil
