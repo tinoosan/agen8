@@ -178,20 +178,20 @@ func RequestModelChange(
 	if target != "" {
 		appliedTo, err := applier.ApplyModel(ctx, model, target)
 		if err != nil {
-			_ = stateMgr.MarkModelFailed(model, err)
+			_ = stateMgr.MarkModelFailed(ctx, model, err)
 			return nil, err
 		}
-		return appliedTo, stateMgr.MarkModelApplied(model)
+		return appliedTo, stateMgr.MarkModelApplied(ctx, model)
 	}
 	if IsTeamIdle(ctx, taskStore, stateMgr.teamID) {
 		appliedTo, err := applier.ApplyModel(ctx, model, "")
 		if err != nil {
-			_ = stateMgr.MarkModelFailed(model, err)
+			_ = stateMgr.MarkModelFailed(ctx, model, err)
 			return nil, err
 		}
-		return appliedTo, stateMgr.MarkModelApplied(model)
+		return appliedTo, stateMgr.MarkModelApplied(ctx, model)
 	}
-	if err := stateMgr.QueueModelChange(model, reason); err != nil {
+	if err := stateMgr.QueueModelChange(ctx, model, reason); err != nil {
 		return nil, err
 	}
 	return []string{}, nil

@@ -95,11 +95,11 @@ func RunModelChangeLoop(ctx context.Context, taskStore state.TaskStore, stateMgr
 			}
 			applied, err := applier.ApplyModel(ctx, model, "")
 			if err != nil {
-				_ = stateMgr.MarkModelFailed(model, err)
+				_ = stateMgr.MarkModelFailed(ctx, model, err)
 				log.Printf("daemon: apply queued team model failed: %v", err)
 				continue
 			}
-			_ = stateMgr.MarkModelApplied(model)
+			_ = stateMgr.MarkModelApplied(ctx, model)
 			if len(applied) > 0 {
 				log.Printf("daemon: applied queued team model: %s", model)
 			}

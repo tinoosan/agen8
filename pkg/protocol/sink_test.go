@@ -145,6 +145,78 @@ func TestSink_OpRequestResponseEmitsToolItems(t *testing.T) {
 	}
 }
 
+func TestSink_InterleavedRuns_PreservesActiveItemsPerRun(t *testing.T) {
+	now := time.Date(2026, 2, 5, 12, 0, 0, 0, time.UTC)
+	var got []capturedNotification
+	s := NewEventSink(emit.SinkFunc[Notification](func(_ context.Context, msg emit.Message[Notification]) error {
+		b, err := json.Marshal(msg.Payload.Params)
+		if err != nil {
+			t.Fatalf("marshal params: %v", err)
+		}
+		got = append(got, capturedNotification{method: msg.Payload.Method, params: b})
+		return nil
+	}), WithThreadID("sess-1"), WithNow(func() time.Time { return now }))
+
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
+		Type:      "task.start",
+		Message:   "Task started",
+		Timestamp: now,
+		Data:      map[string]string{"taskId": "task-1", "goal": "run 1 goal"},
+	}})
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-2", Payload: types.EventRecord{
+		Type:      "task.start",
+		Message:   "Task started",
+		Timestamp: now,
+		Data:      map[string]string{"taskId": "task-2", "goal": "run 2 goal"},
+	}})
+
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
+		Type:      "agent.op.request",
+		Message:   "Host op requested",
+		Timestamp: now,
+		Data:      map[string]string{"opId": "op-1", "op": "fs_read", "path": "/r1.txt"},
+	}})
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-2", Payload: types.EventRecord{
+		Type:      "agent.op.request",
+		Message:   "Host op requested",
+		Timestamp: now,
+		Data:      map[string]string{"opId": "op-2", "op": "fs_read", "path": "/r2.txt"},
+	}})
+
+	// Completing run-1 must not clear in-flight run-2 op state.
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
+		Type:      "task.done",
+		Message:   "Task finished",
+		Timestamp: now,
+		Data:      map[string]string{"taskId": "task-1", "status": "succeeded"},
+	}})
+
+	got = nil
+	_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-2", Payload: types.EventRecord{
+		Type:      "agent.op.response",
+		Message:   "Host op completed",
+		Timestamp: now,
+		Data:      map[string]string{"opId": "op-2", "op": "fs_read", "ok": "true"},
+	}})
+
+	if len(got) != 1 {
+		t.Fatalf("notifications = %d want %d", len(got), 1)
+	}
+	if got[0].method != NotifyItemCompleted {
+		t.Fatalf("method = %q want %q", got[0].method, NotifyItemCompleted)
+	}
+	var completed ItemNotificationParams
+	if err := json.Unmarshal(got[0].params, &completed); err != nil {
+		t.Fatalf("unmarshal completed: %v", err)
+	}
+	if completed.Item.ID != "op-2" {
+		t.Fatalf("completed item id = %q want %q", completed.Item.ID, "op-2")
+	}
+	if completed.Item.RunID != "run-2" {
+		t.Fatalf("completed item runId = %q want %q", completed.Item.RunID, "run-2")
+	}
+}
+
 func TestSink_TaskDoneEmitsAgentMessageAndTurnCompleted(t *testing.T) {
 	now := time.Date(2026, 2, 5, 12, 0, 0, 0, time.UTC)
 	var got []capturedNotification

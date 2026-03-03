@@ -1883,6 +1883,97 @@ func TestRPCServer_SessionGetTotals_TeamScopeIncludesTokenBreakdown(t *testing.T
 	}
 }
 
+func TestRPCServer_SessionGetTotals_TeamScope_DoesNotDoubleCountSharedSession(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+
+	bootstrapSess, bootstrapRun, err := implstore.CreateSession(cfg, "bootstrap", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession bootstrap: %v", err)
+	}
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), bootstrapSess); err != nil {
+		t.Fatalf("SaveSession bootstrap: %v", err)
+	}
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	profileDir := filepath.Join(cfg.DataDir, "profiles", "startup_team")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("mkdir profile dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "profile.yaml"), []byte(
+		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        system_prompt: build\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	startReq, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID: protocol.ThreadID(bootstrapRun.SessionID),
+		Profile:  "startup_team",
+		Goal:     "build",
+		Mode:     "multi-agent",
+	})
+	startResp := rpcRoundTrip(t, srv, startReq)
+	if startResp.Error != nil {
+		t.Fatalf("session.start error: %+v", startResp.Error)
+	}
+	var started protocol.SessionStartResult
+	_ = json.Unmarshal(startResp.Result, &started)
+	if len(started.RunIDs) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(started.RunIDs))
+	}
+
+	teamSession, err := sessStore.LoadSession(context.Background(), started.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSession team: %v", err)
+	}
+	teamSession.InputTokens = 120
+	teamSession.OutputTokens = 45
+	teamSession.TotalTokens = 165
+	teamSession.CostUSD = 1.2
+	if err := sessStore.SaveSession(context.Background(), teamSession); err != nil {
+		t.Fatalf("SaveSession team: %v", err)
+	}
+
+	now := time.Now().UTC()
+	for i, runID := range started.RunIDs {
+		taskID := fmt.Sprintf("task-%d", i+1)
+		if err := ts.CreateTask(context.Background(), types.Task{
+			TaskID: taskID, SessionID: started.SessionID, RunID: runID, TeamID: started.TeamID, Goal: "g", Status: types.TaskStatusPending, CreatedAt: &now,
+		}); err != nil {
+			t.Fatalf("CreateTask %s: %v", taskID, err)
+		}
+		if err := ts.CompleteTask(context.Background(), taskID, types.TaskResult{
+			TaskID:      taskID,
+			Status:      types.TaskStatusSucceeded,
+			TotalTokens: 10,
+			CostUSD:     0.1,
+			CompletedAt: &now,
+		}); err != nil {
+			t.Fatalf("CompleteTask %s: %v", taskID, err)
+		}
+	}
+
+	totalsReq, _ := protocol.NewRequest("2", protocol.MethodSessionGetTotals, protocol.SessionGetTotalsParams{
+		ThreadID: protocol.ThreadID(bootstrapRun.SessionID),
+		TeamID:   started.TeamID,
+	})
+	totalsResp := rpcRoundTrip(t, srv, totalsReq)
+	if totalsResp.Error != nil {
+		t.Fatalf("session.getTotals(team) error: %+v", totalsResp.Error)
+	}
+	var out protocol.SessionGetTotalsResult
+	_ = json.Unmarshal(totalsResp.Result, &out)
+	if out.TotalTokensIn != 120 || out.TotalTokensOut != 45 || out.TotalTokens != 165 {
+		t.Fatalf("unexpected team totals tokens: %+v", out)
+	}
+}
+
 func TestRPCServer_SessionStart_Standalone(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "general"), 0o755); err != nil {

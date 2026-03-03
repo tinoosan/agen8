@@ -41,21 +41,24 @@ func (m *StateManager) ManifestSnapshot() Manifest {
 	return m.manifest
 }
 
-func (m *StateManager) updateManifest(mutator func(*Manifest)) error {
+func (m *StateManager) updateManifest(ctx context.Context, mutator func(*Manifest)) error {
 	m.manifestMu.Lock()
 	mutator(&m.manifest)
 	manifest := m.manifest
 	m.manifestMu.Unlock()
-	return m.store.Save(context.Background(), manifest)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return m.store.Save(ctx, manifest)
 }
 
 // QueueModelChange records a pending model change to be applied when the team is idle.
-func (m *StateManager) QueueModelChange(model, reason string) error {
+func (m *StateManager) QueueModelChange(ctx context.Context, model, reason string) error {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return fmt.Errorf("model is required")
 	}
-	return m.updateManifest(func(manifest *Manifest) {
+	return m.updateManifest(ctx, func(manifest *Manifest) {
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		manifest.ModelChange = &ModelChange{
 			RequestedModel: model,
@@ -67,12 +70,12 @@ func (m *StateManager) QueueModelChange(model, reason string) error {
 }
 
 // MarkModelApplied updates the manifest after a model change was applied successfully.
-func (m *StateManager) MarkModelApplied(model string) error {
+func (m *StateManager) MarkModelApplied(ctx context.Context, model string) error {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return fmt.Errorf("model is required")
 	}
-	return m.updateManifest(func(manifest *Manifest) {
+	return m.updateManifest(ctx, func(manifest *Manifest) {
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		manifest.TeamModel = model
 		manifest.ModelChange = &ModelChange{
@@ -85,12 +88,12 @@ func (m *StateManager) MarkModelApplied(model string) error {
 }
 
 // MarkModelFailed updates the manifest after a model change failed.
-func (m *StateManager) MarkModelFailed(model string, err error) error {
+func (m *StateManager) MarkModelFailed(ctx context.Context, model string, err error) error {
 	errMsg := "unknown error"
 	if err != nil {
 		errMsg = err.Error()
 	}
-	return m.updateManifest(func(manifest *Manifest) {
+	return m.updateManifest(ctx, func(manifest *Manifest) {
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		manifest.ModelChange = &ModelChange{
 			RequestedModel: strings.TrimSpace(model),

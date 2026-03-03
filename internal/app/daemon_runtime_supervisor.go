@@ -1315,59 +1315,36 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 }
 
 func (s *runtimeSupervisor) PauseRun(runID string) error {
+	return s.pauseRun(context.Background(), runID)
+}
+
+func (s *runtimeSupervisor) pauseRun(ctx context.Context, runID string) error {
 	if s == nil {
 		return nil
 	}
+	ctx = nonNilContext(ctx)
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return fmt.Errorf("run id is required")
 	}
-	run, err := s.sessionService.LoadRun(context.Background(), runID)
+	run, err := s.sessionService.LoadRun(ctx, runID)
 	if err != nil {
 		return err
 	}
 	if strings.EqualFold(strings.TrimSpace(run.Status), types.RunStatusPaused) {
-		s.mu.Lock()
-		worker := s.workers[runID]
-		s.mu.Unlock()
-		if worker != nil && worker.session != nil {
-			worker.session.SetPaused(true)
-		}
-		if worker != nil && worker.cancel != nil {
-			worker.cancel()
-		}
-		if worker != nil && worker.done != nil {
-			<-worker.done
-		}
-		s.mu.Lock()
-		delete(s.workers, runID)
-		s.mu.Unlock()
-		_, err := s.taskService.CancelActiveTasksByRun(context.Background(), runID, "run paused")
+		s.stopWorker(runID, true)
+		_, err := s.taskService.CancelActiveTasksByRun(ctx, runID, "run paused")
 		return err
 	}
 	run.Status = types.RunStatusPaused
 	run.FinishedAt = nil
 	run.Error = nil
-	if err := s.sessionService.SaveRun(context.Background(), run); err != nil {
+	if err := s.sessionService.SaveRun(ctx, run); err != nil {
 		return err
 	}
 
-	s.mu.Lock()
-	worker := s.workers[runID]
-	s.mu.Unlock()
-	if worker != nil && worker.session != nil {
-		worker.session.SetPaused(true)
-	}
-	if worker != nil && worker.cancel != nil {
-		worker.cancel()
-	}
-	if worker != nil && worker.done != nil {
-		<-worker.done
-	}
-	s.mu.Lock()
-	delete(s.workers, runID)
-	s.mu.Unlock()
-	_, err = s.taskService.CancelActiveTasksByRun(context.Background(), runID, "run paused")
+	s.stopWorker(runID, true)
+	_, err = s.taskService.CancelActiveTasksByRun(ctx, runID, "run paused")
 	return err
 }
 
@@ -1412,14 +1389,19 @@ func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
 }
 
 func (s *runtimeSupervisor) StopRun(runID string) error {
+	return s.stopRun(context.Background(), runID)
+}
+
+func (s *runtimeSupervisor) stopRun(ctx context.Context, runID string) error {
 	if s == nil {
 		return nil
 	}
+	ctx = nonNilContext(ctx)
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return fmt.Errorf("run id is required")
 	}
-	run, err := s.sessionService.LoadRun(context.Background(), runID)
+	run, err := s.sessionService.LoadRun(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -1427,16 +1409,35 @@ func (s *runtimeSupervisor) StopRun(runID string) error {
 	now := time.Now().UTC()
 	run.FinishedAt = &now
 	run.Error = nil
-	if err := s.sessionService.SaveRun(context.Background(), run); err != nil {
+	if err := s.sessionService.SaveRun(ctx, run); err != nil {
 		return err
 	}
 
+	s.stopWorker(runID, true)
+	_, err = s.taskService.CancelActiveTasksByRun(ctx, runID, "run stopped")
+	return err
+}
+
+func nonNilContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+func (s *runtimeSupervisor) stopWorker(runID string, paused bool) {
+	if s == nil {
+		return
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return
+	}
 	s.mu.Lock()
 	worker := s.workers[runID]
 	s.mu.Unlock()
-
 	if worker != nil && worker.session != nil {
-		worker.session.SetPaused(true)
+		worker.session.SetPaused(paused)
 	}
 	if worker != nil && worker.cancel != nil {
 		worker.cancel()
@@ -1447,8 +1448,6 @@ func (s *runtimeSupervisor) StopRun(runID string) error {
 	s.mu.Lock()
 	delete(s.workers, runID)
 	s.mu.Unlock()
-	_, err = s.taskService.CancelActiveTasksByRun(context.Background(), runID, "run stopped")
-	return err
 }
 
 func (s *runtimeSupervisor) PauseSession(ctx context.Context, sessionID string) ([]string, error) {
@@ -1482,7 +1481,7 @@ func (s *runtimeSupervisor) PauseSession(ctx context.Context, sessionID string) 
 		go func(rid string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := s.PauseRun(rid); err != nil {
+				if err := s.pauseRun(ctx, rid); err != nil {
 				mu.Lock()
 				errs = append(errs, rid+": "+err.Error())
 				mu.Unlock()
@@ -1580,7 +1579,7 @@ func (s *runtimeSupervisor) StopSession(ctx context.Context, sessionID string) (
 		go func(rid string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := s.StopRun(rid); err != nil {
+				if err := s.stopRun(ctx, rid); err != nil {
 				mu.Lock()
 				errs = append(errs, rid+": "+err.Error())
 				mu.Unlock()

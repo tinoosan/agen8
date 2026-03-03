@@ -1278,13 +1278,17 @@ func (s *RPCServer) sessionGetTotals(ctx context.Context, p protocol.SessionGetT
 		}
 	}
 	statsTotalTokens := 0
+	seenSessionIDs := map[string]struct{}{}
 	for runID := range runIDSet {
 		if s.session != nil {
 			if run, err := s.session.LoadRun(ctx, runID); err == nil {
 				if sessionID := strings.TrimSpace(run.SessionID); sessionID != "" {
-					if sess, serr := s.session.LoadSession(ctx, sessionID); serr == nil {
-						out.TotalTokensIn += sess.InputTokens
-						out.TotalTokensOut += sess.OutputTokens
+					if _, seen := seenSessionIDs[sessionID]; !seen {
+						seenSessionIDs[sessionID] = struct{}{}
+						if sess, serr := s.session.LoadSession(ctx, sessionID); serr == nil {
+							out.TotalTokensIn += sess.InputTokens
+							out.TotalTokensOut += sess.OutputTokens
+						}
 					}
 				}
 			}

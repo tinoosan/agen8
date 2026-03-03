@@ -38,7 +38,7 @@ type EventSink struct {
 	diagnostics func(Diagnostic)
 
 	activeTurn  map[string]*Turn // runID -> active turn
-	activeItems map[string]*Item // opId -> active item
+	activeItems map[string]map[string]*Item // runID -> opId -> active item
 }
 
 type EventSinkOption func(*EventSink)
@@ -79,7 +79,7 @@ func NewEventSink(notify NotificationSink, opts ...EventSinkOption) *EventSink {
 		notify:      notify,
 		now:         time.Now,
 		activeTurn:  make(map[string]*Turn),
-		activeItems: make(map[string]*Item),
+		activeItems: make(map[string]map[string]*Item),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -195,7 +195,7 @@ func (s *EventSink) mapEventLocked(runID string, ev types.EventRecord) []notific
 		}
 
 		statusStr := mapGet(ev.Data, "status")
-		if statusStr == "" && kind == "task.failed" || kind == "task.quarantined" {
+		if statusStr == "" && (kind == "task.failed" || kind == "task.quarantined") {
 			statusStr = "failed"
 		}
 		if statusStr == "" && (kind == "task.canceled" || kind == "task.cancelled") {
@@ -245,8 +245,8 @@ func (s *EventSink) mapEventLocked(runID string, ev types.EventRecord) []notific
 		}
 
 		delete(s.activeTurn, runID)
-		// Prevent leaks if a turn terminates while ops are in-flight.
-		s.activeItems = make(map[string]*Item)
+		// Prevent leaks for this run only; other runs may still have in-flight ops.
+		delete(s.activeItems, runID)
 		return out
 
 	case "agent.op.request":
@@ -295,7 +295,10 @@ func (s *EventSink) mapEventLocked(runID string, ev types.EventRecord) []notific
 		}
 		_ = item.SetContent(content)
 
-		s.activeItems[opID] = &item
+		if s.activeItems[runID] == nil {
+			s.activeItems[runID] = make(map[string]*Item)
+		}
+		s.activeItems[runID][opID] = &item
 		return []notificationCall{
 			{method: NotifyItemStarted, params: ItemNotificationParams{Item: item}},
 		}
@@ -305,7 +308,10 @@ func (s *EventSink) mapEventLocked(runID string, ev types.EventRecord) []notific
 		if opID == "" {
 			return nil
 		}
-		item := s.activeItems[opID]
+		var item *Item
+		if runItems := s.activeItems[runID]; runItems != nil {
+			item = runItems[opID]
+		}
 		turn := s.activeTurn[runID]
 		if item == nil {
 			if turn == nil {
@@ -366,7 +372,12 @@ func (s *EventSink) mapEventLocked(runID string, ev types.EventRecord) []notific
 			}
 		}
 
-		delete(s.activeItems, opID)
+		if runItems := s.activeItems[runID]; runItems != nil {
+			delete(runItems, opID)
+			if len(runItems) == 0 {
+				delete(s.activeItems, runID)
+			}
+		}
 		return []notificationCall{
 			{method: NotifyItemCompleted, params: ItemNotificationParams{Item: *item}},
 		}

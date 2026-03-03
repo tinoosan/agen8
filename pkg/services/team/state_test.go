@@ -15,13 +15,14 @@ func TestStateManager_QueueAndMarkModelChange(t *testing.T) {
 	}
 	initial := Manifest{TeamID: "team-1", TeamModel: "gpt-4"}
 	mgr := NewStateManager(store, initial)
+	ctx := context.Background()
 
 	snap := mgr.ManifestSnapshot()
 	if snap.TeamID != "team-1" || snap.TeamModel != "gpt-4" {
 		t.Fatalf("snapshot = %+v", snap)
 	}
 
-	err := mgr.QueueModelChange("gpt-5", "rpc")
+	err := mgr.QueueModelChange(ctx, "gpt-5", "rpc")
 	if err != nil {
 		t.Fatalf("QueueModelChange: %v", err)
 	}
@@ -33,7 +34,7 @@ func TestStateManager_QueueAndMarkModelChange(t *testing.T) {
 		t.Fatal("store.Save was not called with updated manifest")
 	}
 
-	err = mgr.MarkModelApplied("gpt-5")
+	err = mgr.MarkModelApplied(ctx, "gpt-5")
 	if err != nil {
 		t.Fatalf("MarkModelApplied: %v", err)
 	}
@@ -42,7 +43,7 @@ func TestStateManager_QueueAndMarkModelChange(t *testing.T) {
 		t.Fatalf("after mark applied: TeamModel=%q ModelChange=%+v", snap.TeamModel, snap.ModelChange)
 	}
 
-	err = mgr.MarkModelFailed("gpt-6", context.DeadlineExceeded)
+	err = mgr.MarkModelFailed(ctx, "gpt-6", context.DeadlineExceeded)
 	if err != nil {
 		t.Fatalf("MarkModelFailed: %v", err)
 	}
