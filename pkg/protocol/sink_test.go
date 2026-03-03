@@ -348,6 +348,59 @@ func TestSink_TaskCanceledWithoutStatusEmitsTurnCanceled(t *testing.T) {
 	}
 }
 
+func TestSink_TaskFailedAndQuarantinedWithoutStatusEmitTurnFailed(t *testing.T) {
+	cases := []struct {
+		name string
+		kind string
+	}{
+		{name: "failed", kind: "task.failed"},
+		{name: "quarantined", kind: "task.quarantined"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Date(2026, 2, 5, 12, 0, 0, 0, time.UTC)
+			var got []capturedNotification
+			s := NewEventSink(emit.SinkFunc[Notification](func(_ context.Context, msg emit.Message[Notification]) error {
+				b, err := json.Marshal(msg.Payload.Params)
+				if err != nil {
+					t.Fatalf("marshal params: %v", err)
+				}
+				got = append(got, capturedNotification{method: msg.Payload.Method, params: b})
+				return nil
+			}), WithThreadID("sess-1"), WithNow(func() time.Time { return now }))
+
+			_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
+				Type:      "task.start",
+				Message:   "Task started",
+				Timestamp: now,
+				Data:      map[string]string{"taskId": "task-1", "goal": "fail me"},
+			}})
+			got = nil
+
+			_ = s.Emit(context.Background(), emit.Message[types.EventRecord]{RunID: "run-1", Payload: types.EventRecord{
+				Type:      tc.kind,
+				Message:   "Task failed",
+				Timestamp: now,
+				Data:      map[string]string{"taskId": "task-1"},
+			}})
+
+			if len(got) != 1 {
+				t.Fatalf("notifications = %d want %d", len(got), 1)
+			}
+			if got[0].method != NotifyTurnFailed {
+				t.Fatalf("got[0].method = %q want %q", got[0].method, NotifyTurnFailed)
+			}
+			var tp TurnNotificationParams
+			if err := json.Unmarshal(got[0].params, &tp); err != nil {
+				t.Fatalf("unmarshal TurnNotificationParams: %v", err)
+			}
+			if tp.Turn.Status != TurnStatusFailed {
+				t.Fatalf("turn.status = %q want %q", tp.Turn.Status, TurnStatusFailed)
+			}
+		})
+	}
+}
+
 func TestSink_StepEmitsReasoningItem(t *testing.T) {
 	now := time.Date(2026, 2, 5, 12, 0, 0, 0, time.UTC)
 	var got []capturedNotification
