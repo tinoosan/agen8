@@ -96,19 +96,86 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		return nil, err
 	}
 
-	run := cfg.Run
-	teamID := ""
-	teamRole := ""
-	if cfg.Run.Runtime != nil {
-		teamID = strings.TrimSpace(cfg.Run.Runtime.TeamID)
-		teamRole = strings.TrimSpace(cfg.Run.Runtime.Role)
+	state, err := initRuntimeState(cfg)
+	if err != nil {
+		return nil, err
 	}
-	run.Runtime = &types.RunRuntimeConfig{
+	persistRunAndSessionState(cfg, state)
+	if err := mountCoreResources(cfg, state); err != nil {
+		return nil, err
+	}
+	if err := mountTeamOrSubagentResources(cfg, state); err != nil {
+		return nil, err
+	}
+	if err := buildHostInvokers(cfg, state); err != nil {
+		return nil, err
+	}
+	if err := buildExecutor(cfg, state); err != nil {
+		return nil, err
+	}
+	startBackgroundServices(state)
+	return assembleRuntime(state), nil
+}
+
+type runtimeBuildState struct {
+	run      types.Run
+	teamID   string
+	teamRole string
+
+	fs *vfs.FS
+
+	workdirRes    *resources.DirResource
+	resolvedVault pkgobsidian.ResolvedPath
+	wsRes         *resources.DirResource
+
+	runDir          string
+	planDir         string
+	skillDir        string
+	skillMgr        *skills.Manager
+	memStore        store.DailyMemoryStore
+	memRes          *resources.DailyMemoryResource
+	tasksDir        string
+	subagentsDir    string
+	deliverablesDir string
+
+	absWorkdirRoot string
+
+	traceStore      store.TraceStore
+	traceMiddleware *agent.TraceMiddleware
+
+	shellInvoker    *builtins.BuiltinShellInvoker
+	httpInvoker     *builtins.BuiltinHTTPInvoker
+	traceInvoker    builtins.BuiltinTraceInvoker
+	codeExecInvoker *builtins.BuiltinCodeExecInvoker
+	browserMgr      *builtins.BrowserSessionManager
+	emailClient     builtins.EmailSender
+
+	executor *agent.HostOpExecutor
+	hostExec agent.HostExecutor
+
+	constructor *agent.PromptBuilder
+	updater     *agent.PromptUpdater
+
+	browserCleanupCancel context.CancelFunc
+}
+
+func initRuntimeState(cfg BuildConfig) (*runtimeBuildState, error) {
+	state := &runtimeBuildState{
+		run:        cfg.Run,
+		fs:         vfs.NewFS(),
+		memStore:   cfg.MemoryStore,
+		traceStore: cfg.TraceStore,
+	}
+	if cfg.Run.Runtime != nil {
+		state.teamID = strings.TrimSpace(cfg.Run.Runtime.TeamID)
+		state.teamRole = strings.TrimSpace(cfg.Run.Runtime.Role)
+	}
+	state.run.Runtime = &types.RunRuntimeConfig{
 		DataDir:          cfg.Cfg.DataDir,
 		Profile:          strings.TrimSpace(cfg.Profile),
 		Model:            cfg.Model,
-		TeamID:           teamID,
-		Role:             teamRole,
+		TeamID:           state.teamID,
+		Role:             state.teamRole,
 		ReasoningEffort:  strings.TrimSpace(cfg.ReasoningEffort),
 		ReasoningSummary: strings.TrimSpace(cfg.ReasoningSummary),
 		ApprovalsMode:    strings.TrimSpace(cfg.ApprovalsMode),
@@ -121,8 +188,15 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		PriceInPerMTokensUSD:  cfg.PriceInPerMTokensUSD,
 		PriceOutPerMTokensUSD: cfg.PriceOutPerMTokensUSD,
 	}
+	return state, nil
+}
+
+func persistRunAndSessionState(cfg BuildConfig, state *runtimeBuildState) {
+	if state == nil {
+		return
+	}
 	if cfg.PersistRun != nil {
-		if err := cfg.PersistRun(run); err != nil && cfg.Emit != nil {
+		if err := cfg.PersistRun(state.run); err != nil && cfg.Emit != nil {
 			cfg.Emit(context.Background(), events.Event{
 				Type:    "runtime.warning",
 				Message: "Failed to persist run state",
@@ -133,7 +207,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 
 	// Do not update the shared session from child run config; session reflects the parent's choices.
 	if cfg.LoadSession != nil && strings.TrimSpace(cfg.Run.ParentRunID) == "" {
-		if sess, err := cfg.LoadSession(run.SessionID); err == nil {
+		if sess, err := cfg.LoadSession(state.run.SessionID); err == nil {
 			changed := false
 			if strings.TrimSpace(sess.ActiveModel) != strings.TrimSpace(cfg.Model) {
 				sess.ActiveModel = strings.TrimSpace(cfg.Model)
@@ -167,109 +241,44 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			}
 		}
 	}
+}
 
-	fs := vfs.NewFS()
-
+func mountCoreResources(cfg BuildConfig, state *runtimeBuildState) error {
+	if state == nil {
+		return fmt.Errorf("runtime build state is required")
+	}
 	workdirRes, err := resources.NewWorkdirResource(cfg.WorkdirAbs)
 	if err != nil {
-		return nil, fmt.Errorf("create workdir: %w", err)
+		return fmt.Errorf("create workdir: %w", err)
 	}
-	if err := fs.Mount(vfs.MountProject, workdirRes); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountProject, err)
+	if err := state.fs.Mount(vfs.MountProject, workdirRes); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountProject, err)
 	}
+	state.workdirRes = workdirRes
+
 	projectVaultPath := pkgobsidian.ResolveProjectVaultPath(cfg.WorkdirAbs)
 	resolvedVault, err := pkgobsidian.ResolveDefaultVaultPath(cfg.WorkdirAbs, projectVaultPath)
 	if err != nil {
-		return nil, fmt.Errorf("resolve obsidian vault path: %w", err)
+		return fmt.Errorf("resolve obsidian vault path: %w", err)
 	}
 	if err := os.MkdirAll(resolvedVault.Host, 0o755); err != nil {
-		return nil, fmt.Errorf("prepare knowledge dir: %w", err)
+		return fmt.Errorf("prepare knowledge dir: %w", err)
 	}
 	knowledgeRes, err := resources.NewDirResource(resolvedVault.Host, vfs.MountKnowledge)
 	if err != nil {
-		return nil, fmt.Errorf("create knowledge resource: %w", err)
+		return fmt.Errorf("create knowledge resource: %w", err)
 	}
-	if err := fs.Mount(vfs.MountKnowledge, knowledgeRes); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountKnowledge, err)
+	if err := state.fs.Mount(vfs.MountKnowledge, knowledgeRes); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountKnowledge, err)
 	}
-
-	runDir := fsutil.GetRunDir(cfg.Cfg.DataDir, cfg.Run)
-	var wsRes *resources.DirResource
-	sharedWorkspaceDir := strings.TrimSpace(cfg.SharedWorkspaceDir)
-	if sharedWorkspaceDir != "" {
-		if err := os.MkdirAll(sharedWorkspaceDir, 0o755); err != nil {
-			return nil, fmt.Errorf("prepare shared workspace dir: %w", err)
-		}
-		wsRes, err = resources.NewDirResource(sharedWorkspaceDir, vfs.MountWorkspace)
-		if err != nil {
-			return nil, fmt.Errorf("create shared workspace resource: %w", err)
-		}
-	} else if strings.TrimSpace(cfg.Run.ParentRunID) != "" {
-		if teamID == "" {
-			// Standalone subagent: workspace is parent-visible under /workspace/subagent-N.
-			wsDir := fsutil.GetStandaloneSubagentWorkspaceDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.SpawnIndex)
-			if err := os.MkdirAll(wsDir, 0o755); err != nil {
-				return nil, fmt.Errorf("prepare standalone subagent workspace dir: %w", err)
-			}
-			wsRes, err = resources.NewDirResource(wsDir, vfs.MountWorkspace)
-			if err != nil {
-				return nil, fmt.Errorf("create standalone subagent workspace resource: %w", err)
-			}
-		} else {
-			// Child team run fallback.
-			wsRes, err = resources.NewWorkspaceFromRunDir(runDir)
-			if err != nil {
-				return nil, fmt.Errorf("create workspace resource: %w", err)
-			}
-		}
-	} else {
-		wsRes, err = resources.NewWorkspaceFromRunDir(runDir)
-		if err != nil {
-			return nil, fmt.Errorf("create workspace resource: %w", err)
-		}
-	}
-	if err := fs.Mount(vfs.MountWorkspace, wsRes); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountWorkspace, err)
-	}
-
-	planDir := filepath.Join(runDir, "plan")
-	if strings.TrimSpace(cfg.Run.ParentRunID) != "" && teamID == "" {
-		planDir = fsutil.GetStandaloneSubagentPlanDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.SpawnIndex)
-	}
-	if err := os.MkdirAll(planDir, 0755); err != nil {
-		return nil, fmt.Errorf("prepare plan dir: %w", err)
-	}
-	ensureFile := func(path string, contents string) error {
-		if st, err := os.Stat(path); err == nil {
-			if st.IsDir() {
-				return fmt.Errorf("path %s is a directory", path)
-			}
-			return nil
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-		return os.WriteFile(path, []byte(contents), 0644)
-	}
-	if err := ensureFile(filepath.Join(planDir, "HEAD.md"), "# Current Plan\n\n_No active plan._\n"); err != nil {
-		return nil, fmt.Errorf("prepare plan details: %w", err)
-	}
-	if err := ensureFile(filepath.Join(planDir, "CHECKLIST.md"), "# Task Checklist\n\n_No tasks yet._\n"); err != nil {
-		return nil, fmt.Errorf("prepare plan checklist: %w", err)
-	}
-	planRes, err := resources.NewDirResource(planDir, vfs.MountPlan)
-	if err != nil {
-		return nil, fmt.Errorf("create plan resource: %w", err)
-	}
-	if err := fs.Mount(vfs.MountPlan, planRes); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountPlan, err)
-	}
+	state.resolvedVault = resolvedVault
 
 	skillDir, err := fsutil.GetAgentsSkillsDir()
 	if err != nil {
-		return nil, fmt.Errorf("resolve skills dir: %w", err)
+		return fmt.Errorf("resolve skills dir: %w", err)
 	}
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
-		return nil, fmt.Errorf("prepare skills dir: %w", err)
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		return fmt.Errorf("prepare skills dir: %w", err)
 	}
 	skillMgr := skills.NewManager([]string{skillDir})
 	skillMgr.WritableRoot = skillDir
@@ -304,7 +313,6 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		if reason := strings.TrimSpace(scope.FailClosedReason); reason != "" {
 			data["reason"] = reason
 		}
-		// Include a small sample of allowlist for diagnostics (first 5)
 		if len(scope.AllowedSkills) > 0 {
 			sample := scope.AllowedSkills
 			if len(sample) > 5 {
@@ -319,7 +327,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 		})
 	}
 	if err := skillMgr.Scan(); err != nil {
-		return nil, fmt.Errorf("scan skills: %w", err)
+		return fmt.Errorf("scan skills: %w", err)
 	}
 	visibleCount := len(skillMgr.Entries())
 	if cfg.Emit != nil && scope.EnforceAllowlist && visibleCount == 0 {
@@ -339,83 +347,157 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			Data:    data,
 		})
 	}
-	if err := fs.Mount(vfs.MountSkills, skills.NewResource(skillMgr)); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountSkills, err)
+	if err := state.fs.Mount(vfs.MountSkills, skills.NewResource(skillMgr)); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountSkills, err)
 	}
+	state.skillDir = skillDir
+	state.skillMgr = skillMgr
 
 	memStore := cfg.MemoryStore
-
 	if memStore == nil {
-		return nil, fmt.Errorf("memory store is required")
+		return fmt.Errorf("memory store is required")
 	}
 	memRes, err := resources.NewDailyMemoryResource(fsutil.GetMemoryDir(cfg.Cfg.DataDir))
 	if err != nil {
-		return nil, fmt.Errorf("create memory resource: %w", err)
+		return fmt.Errorf("create memory resource: %w", err)
 	}
-	if err := fs.Mount(vfs.MountMemory, resources.NewValidatingMemoryResource(memRes)); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountMemory, err)
+	if err := state.fs.Mount(vfs.MountMemory, resources.NewValidatingMemoryResource(memRes)); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountMemory, err)
 	}
+	state.memStore = memStore
+	state.memRes = memRes
+	return nil
+}
+
+func mountTeamOrSubagentResources(cfg BuildConfig, state *runtimeBuildState) error {
+	if state == nil {
+		return fmt.Errorf("runtime build state is required")
+	}
+	state.runDir = fsutil.GetRunDir(cfg.Cfg.DataDir, state.run)
+
+	sharedWorkspaceDir := strings.TrimSpace(cfg.SharedWorkspaceDir)
+	var wsRes *resources.DirResource
+	var err error
+	if sharedWorkspaceDir != "" {
+		if err := os.MkdirAll(sharedWorkspaceDir, 0o755); err != nil {
+			return fmt.Errorf("prepare shared workspace dir: %w", err)
+		}
+		wsRes, err = resources.NewDirResource(sharedWorkspaceDir, vfs.MountWorkspace)
+		if err != nil {
+			return fmt.Errorf("create shared workspace resource: %w", err)
+		}
+	} else if strings.TrimSpace(state.run.ParentRunID) != "" {
+		if state.teamID == "" {
+			wsDir := fsutil.GetStandaloneSubagentWorkspaceDir(cfg.Cfg.DataDir, state.run.ParentRunID, state.run.SpawnIndex)
+			if err := os.MkdirAll(wsDir, 0o755); err != nil {
+				return fmt.Errorf("prepare standalone subagent workspace dir: %w", err)
+			}
+			wsRes, err = resources.NewDirResource(wsDir, vfs.MountWorkspace)
+			if err != nil {
+				return fmt.Errorf("create standalone subagent workspace resource: %w", err)
+			}
+		} else {
+			wsRes, err = resources.NewWorkspaceFromRunDir(state.runDir)
+			if err != nil {
+				return fmt.Errorf("create workspace resource: %w", err)
+			}
+		}
+	} else {
+		wsRes, err = resources.NewWorkspaceFromRunDir(state.runDir)
+		if err != nil {
+			return fmt.Errorf("create workspace resource: %w", err)
+		}
+	}
+	if err := state.fs.Mount(vfs.MountWorkspace, wsRes); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountWorkspace, err)
+	}
+	state.wsRes = wsRes
+
+	planDir := filepath.Join(state.runDir, "plan")
+	if strings.TrimSpace(state.run.ParentRunID) != "" && state.teamID == "" {
+		planDir = fsutil.GetStandaloneSubagentPlanDir(cfg.Cfg.DataDir, state.run.ParentRunID, state.run.SpawnIndex)
+	}
+	if err := os.MkdirAll(planDir, 0o755); err != nil {
+		return fmt.Errorf("prepare plan dir: %w", err)
+	}
+	if err := ensureRuntimeFile(filepath.Join(planDir, "HEAD.md"), "# Current Plan\n\n_No active plan._\n"); err != nil {
+		return fmt.Errorf("prepare plan details: %w", err)
+	}
+	if err := ensureRuntimeFile(filepath.Join(planDir, "CHECKLIST.md"), "# Task Checklist\n\n_No tasks yet._\n"); err != nil {
+		return fmt.Errorf("prepare plan checklist: %w", err)
+	}
+	planRes, err := resources.NewDirResource(planDir, vfs.MountPlan)
+	if err != nil {
+		return fmt.Errorf("create plan resource: %w", err)
+	}
+	if err := state.fs.Mount(vfs.MountPlan, planRes); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountPlan, err)
+	}
+	state.planDir = planDir
 
 	var tasksDir string
-	if strings.TrimSpace(cfg.Run.ParentRunID) != "" {
-		if teamID == "" {
-			tasksDir = fsutil.GetStandaloneSubagentTasksDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.SpawnIndex)
+	if strings.TrimSpace(state.run.ParentRunID) != "" {
+		if state.teamID == "" {
+			tasksDir = fsutil.GetStandaloneSubagentTasksDir(cfg.Cfg.DataDir, state.run.ParentRunID, state.run.SpawnIndex)
 		} else {
-			tasksDir = fsutil.GetSubagentTasksDir(cfg.Cfg.DataDir, cfg.Run.ParentRunID, cfg.Run.RunID)
+			tasksDir = fsutil.GetSubagentTasksDir(cfg.Cfg.DataDir, state.run.ParentRunID, state.run.RunID)
 		}
-	} else if teamID != "" {
-		tasksDir = fsutil.GetTeamTasksDir(cfg.Cfg.DataDir, teamID)
+	} else if state.teamID != "" {
+		tasksDir = fsutil.GetTeamTasksDir(cfg.Cfg.DataDir, state.teamID)
 	} else {
-		tasksDir = fsutil.GetTasksDir(cfg.Cfg.DataDir, cfg.Run.RunID)
+		tasksDir = fsutil.GetTasksDir(cfg.Cfg.DataDir, state.run.RunID)
 	}
-	if err := os.MkdirAll(tasksDir, 0755); err != nil {
-		return nil, fmt.Errorf("prepare tasks dir: %w", err)
+	if err := os.MkdirAll(tasksDir, 0o755); err != nil {
+		return fmt.Errorf("prepare tasks dir: %w", err)
 	}
 	tasksRes, err := resources.NewDirResource(tasksDir, vfs.MountTasks)
 	if err != nil {
-		return nil, fmt.Errorf("create tasks resource: %w", err)
+		return fmt.Errorf("create tasks resource: %w", err)
 	}
-	if err := fs.Mount(vfs.MountTasks, tasksRes); err != nil {
-		return nil, fmt.Errorf("mount %s: %w", vfs.MountTasks, err)
+	if err := state.fs.Mount(vfs.MountTasks, tasksRes); err != nil {
+		return fmt.Errorf("mount %s: %w", vfs.MountTasks, err)
 	}
+	state.tasksDir = tasksDir
 
 	var subagentsDir string
 	var deliverablesDir string
-	if strings.TrimSpace(cfg.Run.ParentRunID) != "" {
+	if strings.TrimSpace(state.run.ParentRunID) != "" {
 		// Standalone subagents and team worker runs do not mount /deliverables.
 	} else if sharedWorkspaceDir != "" {
 		// Team mode: do not auto-create a /deliverables tree under shared workspace.
 	} else {
 		// Standalone top-level run.
-		subagentsDir = fsutil.GetSubagentsDir(cfg.Cfg.DataDir, cfg.Run.RunID)
-		if err := os.MkdirAll(subagentsDir, 0755); err != nil {
-			return nil, fmt.Errorf("prepare subagents dir: %w", err)
+		subagentsDir = fsutil.GetSubagentsDir(cfg.Cfg.DataDir, state.run.RunID)
+		if err := os.MkdirAll(subagentsDir, 0o755); err != nil {
+			return fmt.Errorf("prepare subagents dir: %w", err)
 		}
 		subagentsRes, err := resources.NewDirResource(subagentsDir, vfs.MountSubagents)
 		if err != nil {
-			return nil, fmt.Errorf("create subagents resource: %w", err)
+			return fmt.Errorf("create subagents resource: %w", err)
 		}
-		if err := fs.Mount(vfs.MountSubagents, subagentsRes); err != nil {
-			return nil, fmt.Errorf("mount %s: %w", vfs.MountSubagents, err)
+		if err := state.fs.Mount(vfs.MountSubagents, subagentsRes); err != nil {
+			return fmt.Errorf("mount %s: %w", vfs.MountSubagents, err)
 		}
 		// Standalone top-level runs no longer mount /deliverables.
 	}
+	state.subagentsDir = subagentsDir
+	state.deliverablesDir = deliverablesDir
 
 	if cfg.Emit != nil {
 		mountedData := map[string]string{
-			"/project":   workdirRes.BaseDir,
-			"/workspace": wsRes.BaseDir,
-			"/plan":      planDir,
-			"/tasks":     tasksDir,
+			"/project":   state.workdirRes.BaseDir,
+			"/workspace": state.wsRes.BaseDir,
+			"/plan":      state.planDir,
+			"/tasks":     state.tasksDir,
 			"/skills":    "(virtual)",
 			"/memory":    "(virtual)",
-			"/knowledge": resolvedVault.Host,
+			"/knowledge": state.resolvedVault.Host,
 		}
-		if subagentsDir != "" {
-			mountedData["/subagents"] = subagentsDir
+		if state.subagentsDir != "" {
+			mountedData["/subagents"] = state.subagentsDir
 		}
-		if deliverablesDir != "" {
-			mountedData["/deliverables"] = deliverablesDir
+		if state.deliverablesDir != "" {
+			mountedData["/deliverables"] = state.deliverablesDir
 		}
 		cfg.Emit(context.Background(), events.Event{
 			Type:    "host.mounted",
@@ -424,29 +506,35 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			Console: boolPtr(false),
 		})
 	}
+	return nil
+}
 
-	absWorkdirRoot, err := filepath.Abs(workdirRes.BaseDir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve workdir root: %w", err)
+func buildHostInvokers(cfg BuildConfig, state *runtimeBuildState) error {
+	if state == nil {
+		return fmt.Errorf("runtime build state is required")
 	}
+	absWorkdirRoot, err := filepath.Abs(state.workdirRes.BaseDir)
+	if err != nil {
+		return fmt.Errorf("resolve workdir root: %w", err)
+	}
+	state.absWorkdirRoot = absWorkdirRoot
 
-	traceStore := cfg.TraceStore
 	traceMiddleware := &agent.TraceMiddleware{
-		Store: traceStore,
-		FS:    fs,
+		Store: state.traceStore,
+		FS:    state.fs,
 	}
 	shellInvoker := builtins.NewBuiltinShellInvoker(absWorkdirRoot, nil, vfs.MountProject)
-	shellInvoker.MountRoots[vfs.MountWorkspace] = wsRes.BaseDir
-	shellInvoker.MountRoots[vfs.MountSkills] = skillDir
-	shellInvoker.MountRoots[vfs.MountPlan] = planDir
-	shellInvoker.MountRoots[vfs.MountTasks] = tasksDir
-	shellInvoker.MountRoots[vfs.MountMemory] = memRes.BaseDir
-	shellInvoker.MountRoots[vfs.MountKnowledge] = resolvedVault.Host
-	if subagentsDir != "" {
-		shellInvoker.MountRoots[vfs.MountSubagents] = subagentsDir
+	shellInvoker.MountRoots[vfs.MountWorkspace] = state.wsRes.BaseDir
+	shellInvoker.MountRoots[vfs.MountSkills] = state.skillDir
+	shellInvoker.MountRoots[vfs.MountPlan] = state.planDir
+	shellInvoker.MountRoots[vfs.MountTasks] = state.tasksDir
+	shellInvoker.MountRoots[vfs.MountMemory] = state.memRes.BaseDir
+	shellInvoker.MountRoots[vfs.MountKnowledge] = state.resolvedVault.Host
+	if state.subagentsDir != "" {
+		shellInvoker.MountRoots[vfs.MountSubagents] = state.subagentsDir
 	}
-	if deliverablesDir != "" {
-		shellInvoker.MountRoots[vfs.MountDeliverables] = deliverablesDir
+	if state.deliverablesDir != "" {
+		shellInvoker.MountRoots[vfs.MountDeliverables] = state.deliverablesDir
 	}
 	if raw := strings.TrimSpace(os.Getenv("AGEN8_SHELL_VFS_TRANSLATION")); raw != "" {
 		switch strings.ToLower(raw) {
@@ -456,7 +544,7 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 
 	httpInvoker := builtins.NewBuiltinHTTPInvoker()
-	traceInvoker := builtins.BuiltinTraceInvoker{Store: traceStore}
+	traceInvoker := builtins.BuiltinTraceInvoker{Store: state.traceStore}
 	codeExecInvoker := builtins.NewBuiltinCodeExecInvoker(absWorkdirRoot, shellInvoker.MountRoots)
 	if len(cfg.Cfg.PathAccess.Allowlist) > 0 {
 		codeExecInvoker.SetPathAccess(cfg.Cfg.PathAccess.Allowlist, cfg.Cfg.PathAccess.ReadOnly)
@@ -464,12 +552,9 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 
 	browserMgr, err := builtins.NewBrowserSessionManager(30 * time.Minute)
 	if err != nil {
-		return nil, fmt.Errorf("create browser manager: %w", err)
+		return fmt.Errorf("create browser manager: %w", err)
 	}
 
-	// Initialize email sender (optional; send-only).
-	//
-	// Gmail OAuth2 (XOAUTH2) configuration (no password-based SMTP for now).
 	dotEnv := loadDotEnv(cfg.WorkdirAbs)
 	var emailClient builtins.EmailSender
 	{
@@ -523,20 +608,83 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 	}
 
 	executor := &agent.HostOpExecutor{
-		FS:              fs,
+		FS:              state.fs,
 		ShellInvoker:    shellInvoker,
 		HTTPInvoker:     httpInvoker,
 		CodeExecInvoker: codeExecInvoker,
 		TraceInvoker:    traceInvoker,
 		EmailClient:     emailClient,
 		Browser:         browserMgr,
-		WorkspaceDir:    wsRes.BaseDir,
+		WorkspaceDir:    state.wsRes.BaseDir,
 		ProjectDir:      absWorkdirRoot,
 		DefaultMaxBytes: 4096,
 		MaxReadBytes:    256 * 1024,
 	}
 
-	// Periodically cleanup idle browser sessions.
+	state.traceMiddleware = traceMiddleware
+	state.shellInvoker = shellInvoker
+	state.httpInvoker = httpInvoker
+	state.traceInvoker = traceInvoker
+	state.codeExecInvoker = codeExecInvoker
+	state.browserMgr = browserMgr
+	state.emailClient = emailClient
+	state.executor = executor
+	return nil
+}
+
+func buildExecutor(cfg BuildConfig, state *runtimeBuildState) error {
+	if state == nil {
+		return fmt.Errorf("runtime build state is required")
+	}
+	constructor := &agent.PromptBuilder{
+		FS:             state.fs,
+		Skills:         state.skillMgr,
+		MaxMemoryBytes: cfg.MaxMemoryBytes,
+		Emit:           cfg.Emit,
+	}
+
+	updater := &agent.PromptUpdater{
+		FS:               state.fs,
+		Trace:            state.traceMiddleware,
+		MaxMemoryBytes:   cfg.MaxMemoryBytes,
+		MaxTraceBytes:    cfg.MaxTraceBytes,
+		Emit:             cfg.Emit,
+		ManifestDiskPath: filepath.Join(state.runDir, "context_constructor.json"),
+	}
+
+	auditObs := newAuditObserver(cfg.Run.RunID, cfg.Emit, cfg.AuditReads)
+
+	exec := NewExecutor(state.executor, ExecutorOptions{
+		Emit:      cfg.Emit,
+		Model:     cfg.Model,
+		RunID:     cfg.Run.RunID,
+		SessionID: cfg.Run.SessionID,
+		FS:        state.fs,
+		Guard: func(req types.HostOpRequest) *types.HostOpResponse {
+			if cfg.Guard == nil {
+				return nil
+			}
+			return cfg.Guard(state.fs, req)
+		},
+		Observers:       []HostOpObserver{constructor, updater, auditObs},
+		ArtifactObserve: cfg.ArtifactObserve,
+	})
+	if state.codeExecInvoker != nil {
+		state.codeExecInvoker.SetBridge(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+			return exec.Exec(ctx, req)
+		})
+	}
+
+	state.constructor = constructor
+	state.updater = updater
+	state.hostExec = exec
+	return nil
+}
+
+func startBackgroundServices(state *runtimeBuildState) {
+	if state == nil || state.browserMgr == nil {
+		return
+	}
 	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
@@ -546,62 +694,41 @@ func Build(cfg BuildConfig) (*Runtime, error) {
 			case <-cleanupCtx.Done():
 				return
 			case <-ticker.C:
-				browserMgr.CleanupStale()
+				state.browserMgr.CleanupStale()
 			}
 		}
 	}()
+	state.browserCleanupCancel = cleanupCancel
+}
 
-	constructor := &agent.PromptBuilder{
-		FS:             fs,
-		Skills:         skillMgr,
-		MaxMemoryBytes: cfg.MaxMemoryBytes,
-		Emit:           cfg.Emit,
+func assembleRuntime(state *runtimeBuildState) *Runtime {
+	if state == nil {
+		return nil
 	}
-
-	updater := &agent.PromptUpdater{
-		FS:               fs,
-		Trace:            traceMiddleware,
-		MaxMemoryBytes:   cfg.MaxMemoryBytes,
-		MaxTraceBytes:    cfg.MaxTraceBytes,
-		Emit:             cfg.Emit,
-		ManifestDiskPath: filepath.Join(runDir, "context_constructor.json"),
-	}
-
-	auditObs := newAuditObserver(cfg.Run.RunID, cfg.Emit, cfg.AuditReads)
-
-	exec := NewExecutor(executor, ExecutorOptions{
-		Emit:      cfg.Emit,
-		Model:     cfg.Model,
-		RunID:     cfg.Run.RunID,
-		SessionID: cfg.Run.SessionID,
-		FS:        fs,
-		Guard: func(req types.HostOpRequest) *types.HostOpResponse {
-			if cfg.Guard == nil {
-				return nil
-			}
-			return cfg.Guard(fs, req)
-		},
-		Observers:       []HostOpObserver{constructor, updater, auditObs},
-		ArtifactObserve: cfg.ArtifactObserve,
-	})
-	if codeExecInvoker != nil {
-		codeExecInvoker.SetBridge(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
-			return exec.Exec(ctx, req)
-		})
-	}
-
 	return &Runtime{
-		FS:                   fs,
-		Executor:             exec,
-		TraceMiddleware:      traceMiddleware,
-		Constructor:          constructor,
-		Updater:              updater,
-		WorkdirBase:          workdirRes.BaseDir,
-		MemStore:             memStore,
-		Browser:              browserMgr,
-		CodeExec:             codeExecInvoker,
-		browserCleanupCancel: cleanupCancel,
-	}, nil
+		FS:                   state.fs,
+		Executor:             state.hostExec,
+		TraceMiddleware:      state.traceMiddleware,
+		Constructor:          state.constructor,
+		Updater:              state.updater,
+		WorkdirBase:          state.workdirRes.BaseDir,
+		MemStore:             state.memStore,
+		Browser:              state.browserMgr,
+		CodeExec:             state.codeExecInvoker,
+		browserCleanupCancel: state.browserCleanupCancel,
+	}
+}
+
+func ensureRuntimeFile(path string, contents string) error {
+	if st, err := os.Stat(path); err == nil {
+		if st.IsDir() {
+			return fmt.Errorf("path %s is a directory", path)
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return os.WriteFile(path, []byte(contents), 0o644)
 }
 
 func boolPtr(v bool) *bool { return &v }
