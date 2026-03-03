@@ -354,6 +354,18 @@ func waitWorkerDone(done <-chan struct{}, timeout time.Duration) bool {
 	}
 }
 
+func workerDone(done <-chan struct{}) bool {
+	if done == nil {
+		return true
+	}
+	select {
+	case <-done:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *runtimeSupervisor) Run(ctx context.Context) {
 	if s == nil {
 		return
@@ -486,11 +498,14 @@ func (s *runtimeSupervisor) ensureRun(ctx context.Context, sess types.Session, r
 
 	s.mu.Lock()
 	if existing, ok := s.workers[runID]; ok {
-		s.mu.Unlock()
-		if existing != nil && existing.session != nil {
-			existing.session.SetPaused(paused)
+		if existing != nil && !workerDone(existing.done) {
+			s.mu.Unlock()
+			if existing.session != nil {
+				existing.session.SetPaused(paused)
+			}
+			return nil
 		}
-		return nil
+		delete(s.workers, runID)
 	}
 	s.mu.Unlock()
 
@@ -514,29 +529,20 @@ func (s *runtimeSupervisor) ensureRun(ctx context.Context, sess types.Session, r
 
 	s.mu.Lock()
 	if existing, ok := s.workers[runID]; ok {
-		s.mu.Unlock()
-		if managed.cancel != nil {
-			managed.cancel()
-		}
-		if managed.done != nil {
-			<-managed.done
-		}
-		if existing != nil {
+		if existing != nil && !workerDone(existing.done) {
+			s.mu.Unlock()
+			if managed.cancel != nil {
+				managed.cancel()
+			}
+			if managed.done != nil {
+				<-managed.done
+			}
 			return nil
 		}
-		return nil
+		delete(s.workers, runID)
 	}
 	s.workers[runID] = managed
 	s.mu.Unlock()
-
-	if managed.done != nil {
-		go func() {
-			<-managed.done
-			s.mu.Lock()
-			delete(s.workers, runID)
-			s.mu.Unlock()
-		}()
-	}
 	return nil
 }
 
