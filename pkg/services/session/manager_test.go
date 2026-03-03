@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/services/session"
@@ -170,4 +171,60 @@ func TestManager_Delete_ContinuesWhenStopFails(t *testing.T) {
 	if len(store.deletedSessions) != 1 || store.deletedSessions[0] != "sess-1" {
 		t.Fatalf("expected session delete to continue, got %v", store.deletedSessions)
 	}
+}
+
+func expectWake(t *testing.T, ch <-chan struct{}, label string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatalf("expected wake for %s", label)
+	}
+}
+
+func expectNoWake(t *testing.T, ch <-chan struct{}, label string) {
+	t.Helper()
+	select {
+	case <-ch:
+		t.Fatalf("unexpected wake for %s", label)
+	case <-time.After(80 * time.Millisecond):
+	}
+}
+
+func TestManager_SubscribeWake_FiltersAndCancel(t *testing.T) {
+	store := &mockStore{}
+	mgr := session.NewManager(config.Config{}, store, &mockSupervisor{})
+
+	allCh, cancelAll := mgr.SubscribeWake("", "")
+	defer cancelAll()
+	sessCh, cancelSess := mgr.SubscribeWake("sess-1", "")
+	defer cancelSess()
+	runCh, cancelRun := mgr.SubscribeWake("sess-1", "run-1")
+	defer cancelRun()
+	otherRunCh, cancelOtherRun := mgr.SubscribeWake("sess-1", "run-2")
+	defer cancelOtherRun()
+
+	if err := mgr.SaveSession(context.Background(), types.Session{SessionID: "sess-1"}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	expectWake(t, allCh, "all watcher on SaveSession")
+	expectWake(t, sessCh, "session watcher on SaveSession")
+	expectNoWake(t, runCh, "run watcher on SaveSession")
+	expectNoWake(t, otherRunCh, "other run watcher on SaveSession")
+
+	if err := mgr.SaveRun(context.Background(), types.Run{SessionID: "sess-1", RunID: "run-1"}); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	expectWake(t, allCh, "all watcher on SaveRun")
+	expectWake(t, sessCh, "session watcher on SaveRun")
+	expectWake(t, runCh, "run watcher on SaveRun")
+	expectNoWake(t, otherRunCh, "other run watcher on SaveRun")
+
+	cancelRun()
+	if err := mgr.SaveRun(context.Background(), types.Run{SessionID: "sess-1", RunID: "run-1"}); err != nil {
+		t.Fatalf("SaveRun second: %v", err)
+	}
+	expectWake(t, allCh, "all watcher after cancel")
+	expectWake(t, sessCh, "session watcher after cancel")
+	expectNoWake(t, otherRunCh, "other run watcher after cancel")
 }

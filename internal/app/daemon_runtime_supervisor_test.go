@@ -985,3 +985,75 @@ func TestGetRunState_PausedStatusNotMaskedByWorker(t *testing.T) {
 		t.Errorf("WorkerPresent: got false, want true")
 	}
 }
+
+func TestRuntimeSupervisor_Run_UsesSessionWakeToSyncRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess, run1, err := implstore.CreateSession(cfg, "wake sync", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sessionSvc := newSupervisorTestSessionService(t, cfg)
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	taskSvc := pkgtask.NewManager(ts, nil)
+
+	spawned := make(chan string, 8)
+	supervisor := newRuntimeSupervisor(runtimeSupervisorConfig{
+		Cfg:            cfg,
+		TaskService:    taskSvc,
+		SessionService: sessionSvc,
+	})
+	supervisor.spawnOverride = func(_ context.Context, sess types.Session, runID string) (*managedRuntime, error) {
+		done := make(chan struct{})
+		spawned <- runID
+		return &managedRuntime{
+			runID:     runID,
+			sessionID: sess.SessionID,
+			cancel:    func() { close(done) },
+			done:      done,
+		}, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan struct{})
+	go func() {
+		supervisor.Run(ctx)
+		close(runDone)
+	}()
+
+	select {
+	case got := <-spawned:
+		if got != run1.RunID {
+			t.Fatalf("initial spawned runID=%q want %q", got, run1.RunID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("expected initial sync spawn")
+	}
+
+	run2 := types.NewRun("wake sync second", 8*1024, sess.SessionID)
+	if err := sessionSvc.SaveRun(context.Background(), run2); err != nil {
+		t.Fatalf("SaveRun run2: %v", err)
+	}
+	if _, err := sessionSvc.AddRunToSession(context.Background(), sess.SessionID, run2.RunID); err != nil {
+		t.Fatalf("AddRunToSession run2: %v", err)
+	}
+
+	select {
+	case got := <-spawned:
+		if got != run2.RunID {
+			t.Fatalf("woken spawned runID=%q want %q", got, run2.RunID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("expected wake-driven sync spawn for run2")
+	}
+
+	cancel()
+	select {
+	case <-runDone:
+	case <-time.After(1 * time.Second):
+		t.Fatalf("supervisor run did not stop on context cancel")
+	}
+}
