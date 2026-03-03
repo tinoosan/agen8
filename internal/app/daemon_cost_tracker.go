@@ -2,8 +2,8 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -72,18 +72,18 @@ func (t *defaultCostTracker) emitUsage(step, input, output, total, reasoning int
 		return
 	}
 	// Use background context so usage events persist even if the run cancels.
-	t.emit(context.Background(), events.Event{
-		Type:    "llm.usage.total",
-		Message: "LLM usage totals",
-		Data: map[string]string{
-			"step":      fmt.Sprintf("%d", step),
-			"input":     fmt.Sprintf("%d", input),
-			"output":    fmt.Sprintf("%d", output),
-			"total":     fmt.Sprintf("%d", total),
-			"reasoning": fmt.Sprintf("%d", reasoning),
-		},
-	})
-}
+		t.emit(context.Background(), events.Event{
+			Type:    "llm.usage.total",
+			Message: "LLM usage totals",
+			Data: map[string]string{
+				"step":      strconv.Itoa(step),
+				"input":     strconv.Itoa(input),
+				"output":    strconv.Itoa(output),
+				"total":     strconv.Itoa(total),
+				"reasoning": strconv.Itoa(reasoning),
+			},
+		})
+	}
 
 func (t *defaultCostTracker) emitCost(costUSD float64, known bool) {
 	if t == nil || t.emit == nil {
@@ -91,10 +91,10 @@ func (t *defaultCostTracker) emitCost(costUSD float64, known bool) {
 	}
 	// Use background context so cost events persist even if the run cancels.
 	payload := map[string]string{
-		"known": fmt.Sprintf("%t", known),
+		"known": strconv.FormatBool(known),
 	}
 	if known {
-		payload["costUSD"] = fmt.Sprintf("%.4f", costUSD)
+		payload["costUSD"] = strconv.FormatFloat(costUSD, 'f', 4, 64)
 	}
 	t.emit(context.Background(), events.Event{
 		Type:    "llm.cost.total",

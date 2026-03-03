@@ -95,6 +95,7 @@ func (o *OrderedEmitter[T]) Close() {
 	if o == nil {
 		return
 	}
+	// start is idempotent; it initializes ch/workerDone even if Close is called first.
 	o.start()
 	o.closeOnce.Do(func() {
 		o.mu.Lock()

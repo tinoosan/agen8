@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/tinoosan/agen8/pkg/agent/state"
 	"github.com/tinoosan/agen8/pkg/events"
@@ -39,7 +40,7 @@ func NewWebhookTaskIngester(taskStore state.TaskStore, archive TaskArchiveWriter
 // emits webhook.task.queued when successful.
 func (w *WebhookTaskIngester) IngestTask(ctx context.Context, task types.Task) (taskID string, err error) {
 	if w.taskStore == nil {
-		return "", nil // caller should validate before calling
+		return "", fmt.Errorf("task store not configured")
 	}
 	if err := w.taskStore.CreateTask(ctx, task); err != nil {
 		return "", err
