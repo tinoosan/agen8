@@ -903,6 +903,18 @@ func TestShouldAllowOpenRouterFreeModelDataCollection_DefaultAndEnv(t *testing.T
 	}
 }
 
+func TestIsInternalUserRepair_PrefixContract(t *testing.T) {
+	for _, prefix := range internalUserRepairPrefixes {
+		msg := prefix + " details"
+		if !isInternalUserRepair(msg) {
+			t.Fatalf("expected prefix %q to be recognized", prefix)
+		}
+	}
+	if isInternalUserRepair("User asked for a project summary") {
+		t.Fatalf("did not expect normal user content to be recognized as internal repair")
+	}
+}
+
 func TestGenerateChat_OpenRouterIncludesReasoningEffortMediumByDefault(t *testing.T) {
 	rt := &captureRoundTripper{t: t}
 	httpClient := &http.Client{Transport: rt}

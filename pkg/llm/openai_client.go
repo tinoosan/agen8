@@ -45,6 +45,20 @@ type Client struct {
 	compactionUnsupported atomic.Bool
 }
 
+const (
+	internalUserRepairPrefixInvalidMessageJSON = "Your last message was not valid JSON"
+	internalUserRepairPrefixInvalidJSONOp      = "Your last JSON op was invalid:"
+	internalUserRepairPrefixInvalidJSONOpJSON  = "Your last JSON op was not valid JSON"
+	internalUserRepairPrefixHostOpResponse     = "HostOpResponse:"
+)
+
+var internalUserRepairPrefixes = [...]string{
+	internalUserRepairPrefixInvalidMessageJSON,
+	internalUserRepairPrefixInvalidJSONOp,
+	internalUserRepairPrefixInvalidJSONOpJSON,
+	internalUserRepairPrefixHostOpResponse,
+}
+
 func NewClientFromEnv() (*Client, error) {
 	return NewClientFromEnvWithConfig(OpenAIClientConfig{})
 }
@@ -461,6 +475,19 @@ func requestUsesToolCalling(req types.LLMRequest) bool {
 	return false
 }
 
+func isInternalUserRepair(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	for _, prefix := range internalUserRepairPrefixes {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNewParams, error) {
 	if c == nil || c.client == nil {
 		return responses.ResponseNewParams{}, fmt.Errorf("llm client is nil")
@@ -485,17 +512,6 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 	// System/developer instructions are provided via `Instructions`.
 	allMsgs := req.Messages
 	msgs := allMsgs
-
-	isInternalUserRepair := func(s string) bool {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			return false
-		}
-		return strings.HasPrefix(s, "Your last message was not valid JSON") ||
-			strings.HasPrefix(s, "Your last JSON op was invalid:") ||
-			strings.HasPrefix(s, "Your last JSON op was not valid JSON") ||
-			strings.HasPrefix(s, "HostOpResponse:")
-	}
 
 	lastRealUserIdx := -1
 	for i := len(allMsgs) - 1; i >= 0; i-- {
