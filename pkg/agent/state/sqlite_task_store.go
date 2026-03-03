@@ -2033,7 +2033,7 @@ func (s *SQLiteTaskStore) ClaimNextMessage(ctx context.Context, filter MessageCl
 	leaseUntil := now.Add(ttl)
 	res, err := tx.ExecContext(ctx, `
 		UPDATE messages
-		SET status = ?, lease_owner = ?, lease_until = ?, updated_at = ?
+		SET status = ?, lease_owner = ?, lease_until = ?, attempts = attempts + 1, updated_at = ?
 		WHERE message_id = ? AND status = ?
 	`, types.MessageStatusClaimed, consumerID, leaseUntil.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), messageID, types.MessageStatusPending)
 	if err != nil {
