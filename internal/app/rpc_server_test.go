@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +61,50 @@ func rpcRoundTrip(t *testing.T, srv *RPCServer, req protocol.Message) protocol.M
 		t.Fatalf("decode resp: %v", err)
 	}
 	return resp
+}
+
+func TestRPCServer_Serve_ContextCancelUnblocksIdleDecode(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	sessStore := store.NewMemorySessionStore()
+	if err := sessStore.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := sessStore.SaveRun(context.Background(), run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg:         cfg,
+		Run:         run,
+		TaskService: pkgtask.NewManager(ts, nil),
+		Session:     newTestSessionService(cfg, sessStore),
+		NotifyCh:    nil,
+		Index:       protocol.NewIndex(0, 0),
+	})
+
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx, serverConn, io.Discard) }()
+
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Serve error: got %v want context canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not return after context cancellation")
+	}
 }
 
 func TestRPCServer_ThreadGet_ReturnsActiveRunID(t *testing.T) {

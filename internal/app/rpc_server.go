@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"strings"
 	"sync"
 
+	"github.com/tinoosan/agen8/internal/storage"
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	pkgagent "github.com/tinoosan/agen8/pkg/services/agent"
@@ -20,7 +22,6 @@ import (
 	"github.com/tinoosan/agen8/pkg/services/team"
 	"github.com/tinoosan/agen8/pkg/timeutil"
 	"github.com/tinoosan/agen8/pkg/types"
-	"github.com/tinoosan/agen8/internal/storage"
 )
 
 // RPCServer serves the Agen8 protocol over JSON-RPC 2.0.
@@ -289,6 +290,17 @@ func (s *RPCServer) Serve(ctx context.Context, in io.Reader, out io.Writer) erro
 			close(outCh)
 		})
 	}
+	if conn, ok := in.(net.Conn); ok {
+		cancelWatchDone := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = conn.Close()
+			case <-cancelWatchDone:
+			}
+		}()
+		defer close(cancelWatchDone)
+	}
 
 	go func() {
 		defer close(writerDone)
@@ -375,6 +387,11 @@ func (s *RPCServer) Serve(ctx context.Context, in io.Reader, out io.Writer) erro
 
 		var msg protocol.Message
 		if err := dec.Decode(&msg); err != nil {
+			if ctx.Err() != nil {
+				closeOut()
+				<-writerDone
+				return ctx.Err()
+			}
 			if errors.Is(err, io.EOF) {
 				// Best-effort: flush any already-queued notifications before shutdown.
 				if s.notifyCh != nil {

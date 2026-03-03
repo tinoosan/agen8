@@ -38,6 +38,15 @@ func serveRPCOverTCP(ctx context.Context, addr string, srv *RPCServer) error {
 				continue
 			}
 			go func(c net.Conn) {
+				cancelWatchDone := make(chan struct{})
+				go func() {
+					select {
+					case <-ctx.Done():
+						_ = c.Close()
+					case <-cancelWatchDone:
+					}
+				}()
+				defer close(cancelWatchDone)
 				defer c.Close()
 				if err := srv.Serve(ctx, c, c); err != nil && ctx.Err() == nil {
 					log.Printf("daemon: rpc connection closed: %v", err)
@@ -79,6 +88,15 @@ func serveRPCOverTCPWithBroadcaster(ctx context.Context, addr string, broadcaste
 				continue
 			}
 			go func(c net.Conn) {
+				cancelWatchDone := make(chan struct{})
+				go func() {
+					select {
+					case <-ctx.Done():
+						_ = c.Close()
+					case <-cancelWatchDone:
+					}
+				}()
+				defer close(cancelWatchDone)
 				defer c.Close()
 				notifyCh := make(chan protocol.Message, 64)
 				broadcaster.Register(notifyCh)

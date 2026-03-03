@@ -24,6 +24,15 @@ func RunNotificationListener(ctx context.Context, endpoint string, onNotificatio
 	if err != nil {
 		return fmt.Errorf("connect notification endpoint %s: %w", endpoint, err)
 	}
+	cancelWatchDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-cancelWatchDone:
+		}
+	}()
+	defer close(cancelWatchDone)
 	defer conn.Close()
 
 	// Send a dummy request to establish intention, or just read?
@@ -40,6 +49,9 @@ func RunNotificationListener(ctx context.Context, endpoint string, onNotificatio
 		// Alternatively, set a long deadline and continue on timeout.
 		var msg Message
 		if err := dec.Decode(&msg); err != nil {
+			if cerr := ctx.Err(); cerr != nil {
+				return cerr
+			}
 			if err == io.EOF {
 				return fmt.Errorf("notification connection closed")
 			}
