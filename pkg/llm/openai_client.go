@@ -19,6 +19,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 	openaiConstant "github.com/openai/openai-go/v3/shared/constant"
+	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/cost"
 	"github.com/tinoosan/agen8/pkg/debuglog"
 	"github.com/tinoosan/agen8/pkg/llm/types"
@@ -102,17 +103,8 @@ func shouldAllowOpenRouterFreeModelDataCollection(model string) bool {
 	if !strings.Contains(id, ":free") {
 		return false
 	}
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("OPENROUTER_FREE_MODEL_DATA_COLLECTION")))
-	if v == "" {
-		// Default on for :free models so OpenRouter can route models gated by free-model data policy.
-		return true
-	}
-	switch v {
-	case "1", "true", "yes", "on", "allow":
-		return true
-	default:
-		return false
-	}
+	// Default on for :free models so OpenRouter can route models gated by free-model data policy.
+	return config.ParseBoolEnvDefault("OPENROUTER_FREE_MODEL_DATA_COLLECTION", true)
 }
 
 func (c *Client) openRouterRequestOptions(model string) []option.RequestOption {
