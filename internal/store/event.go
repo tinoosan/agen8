@@ -54,27 +54,19 @@ func AppendEvent(ctx context.Context, cfg config.Config, event types.EventRecord
 		return err
 	}
 
-	if ctx != nil {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-
 	runID := strings.TrimSpace(event.RunID)
 	if runID == "" {
-		return fmt.Errorf("error appending event, runID cannot be blank")
+		return fmt.Errorf("append event: runID is required")
 	}
 
 	eventType := strings.TrimSpace(event.Type)
 	if eventType == "" {
-		return fmt.Errorf("error appending event, eventType cannot be blank")
+		return fmt.Errorf("append event: eventType is required")
 	}
 
 	message := strings.TrimSpace(event.Message)
 	if message == "" {
-		return fmt.Errorf("error appending event, message cannot be blank")
+		return fmt.Errorf("append event: message is required")
 	}
 
 	db, err := getSQLiteDB(cfg)
