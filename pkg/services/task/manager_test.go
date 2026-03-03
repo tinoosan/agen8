@@ -13,13 +13,13 @@ import (
 
 // Ensure Manager implements interfaces at compile time.
 var (
-	_ state.TaskStore            = (*Manager)(nil)
-	_ RetryEscalationCreator     = (*Manager)(nil)
-	_ ActiveTaskCanceler         = (*Manager)(nil)
-	_ ArtifactIndexerProvider    = (*Manager)(nil)
-	_ TaskServiceForRPC          = (*Manager)(nil)
-	_ TaskServiceForSupervisor   = (*Manager)(nil)
-	_ TaskServiceForTeam         = (*Manager)(nil)
+	_ state.TaskStore          = (*Manager)(nil)
+	_ RetryEscalationCreator   = (*Manager)(nil)
+	_ ActiveTaskCanceler       = (*Manager)(nil)
+	_ ArtifactIndexerProvider  = (*Manager)(nil)
+	_ TaskServiceForRPC        = (*Manager)(nil)
+	_ TaskServiceForSupervisor = (*Manager)(nil)
+	_ TaskServiceForTeam       = (*Manager)(nil)
 )
 
 type mockRunLoader struct {
@@ -35,10 +35,14 @@ func (m *mockRunLoader) LoadRun(ctx context.Context, runID string) (types.Run, e
 }
 
 type mockTaskStore struct {
-	getTask    func(ctx context.Context, taskID string) (types.Task, error)
-	listTasks  func(ctx context.Context, filter state.TaskFilter) ([]types.Task, error)
-	createTask func(ctx context.Context, task types.Task) error
+	getTask      func(ctx context.Context, taskID string) (types.Task, error)
+	listTasks    func(ctx context.Context, filter state.TaskFilter) ([]types.Task, error)
+	createTask   func(ctx context.Context, task types.Task) error
 	completeTask func(ctx context.Context, taskID string, result types.TaskResult) error
+	claimTask    func(ctx context.Context, taskID string, ttl time.Duration) error
+	releaseLease func(ctx context.Context, taskID string) error
+	delegateTask func(ctx context.Context, taskID string) error
+	resumeTask   func(ctx context.Context, taskID string) error
 }
 
 func (m *mockTaskStore) GetTask(ctx context.Context, taskID string) (types.Task, error) {
@@ -70,7 +74,7 @@ func (m *mockTaskStore) CreateTask(ctx context.Context, task types.Task) error {
 	return nil
 }
 
-func (m *mockTaskStore) DeleteTask(ctx context.Context, taskID string) error { return nil }
+func (m *mockTaskStore) DeleteTask(ctx context.Context, taskID string) error   { return nil }
 func (m *mockTaskStore) UpdateTask(ctx context.Context, task types.Task) error { return nil }
 
 func (m *mockTaskStore) CompleteTask(ctx context.Context, taskID string, result types.TaskResult) error {
@@ -81,15 +85,33 @@ func (m *mockTaskStore) CompleteTask(ctx context.Context, taskID string, result 
 }
 
 func (m *mockTaskStore) ClaimTask(ctx context.Context, taskID string, ttl time.Duration) error {
+	if m.claimTask != nil {
+		return m.claimTask(ctx, taskID, ttl)
+	}
 	return nil
 }
 func (m *mockTaskStore) ExtendLease(ctx context.Context, taskID string, ttl time.Duration) error {
 	return nil
 }
-func (m *mockTaskStore) ReleaseLease(ctx context.Context, taskID string) error { return nil }
-func (m *mockTaskStore) DelegateTask(ctx context.Context, taskID string) error { return nil }
-func (m *mockTaskStore) ResumeTask(ctx context.Context, taskID string) error   { return nil }
-func (m *mockTaskStore) RecoverExpiredLeases(ctx context.Context) error       { return nil }
+func (m *mockTaskStore) ReleaseLease(ctx context.Context, taskID string) error {
+	if m.releaseLease != nil {
+		return m.releaseLease(ctx, taskID)
+	}
+	return nil
+}
+func (m *mockTaskStore) DelegateTask(ctx context.Context, taskID string) error {
+	if m.delegateTask != nil {
+		return m.delegateTask(ctx, taskID)
+	}
+	return nil
+}
+func (m *mockTaskStore) ResumeTask(ctx context.Context, taskID string) error {
+	if m.resumeTask != nil {
+		return m.resumeTask(ctx, taskID)
+	}
+	return nil
+}
+func (m *mockTaskStore) RecoverExpiredLeases(ctx context.Context) error { return nil }
 
 func TestManager_CreateRetryTask_NoRunLoader(t *testing.T) {
 	mgr := NewManager(&mockTaskStore{}, nil)
@@ -246,4 +268,49 @@ func TestManager_CreateTask_CallbackInfersTeamIDFromRun(t *testing.T) {
 	if created.Metadata["routingDecisionId"] == nil {
 		t.Fatalf("expected routingDecisionId metadata")
 	}
+}
+
+func TestManager_SubscribeWake_TriggeredByLifecycleMutations(t *testing.T) {
+	taskID := "task-1"
+	task := types.Task{TaskID: taskID, TeamID: "team-1", RunID: "run-1"}
+	store := &mockTaskStore{
+		getTask: func(ctx context.Context, id string) (types.Task, error) {
+			if id != taskID {
+				return types.Task{}, state.ErrTaskNotFound
+			}
+			return task, nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	wakeCh, cancel := mgr.SubscribeWake("team-1", "run-1")
+	defer cancel()
+
+	expectWake := func(label string) {
+		t.Helper()
+		select {
+		case <-wakeCh:
+		case <-time.After(200 * time.Millisecond):
+			t.Fatalf("expected wake for %s", label)
+		}
+	}
+
+	if err := mgr.ClaimTask(context.Background(), taskID, time.Minute); err != nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	expectWake("claim")
+
+	if err := mgr.ReleaseLease(context.Background(), taskID); err != nil {
+		t.Fatalf("ReleaseLease: %v", err)
+	}
+	expectWake("release lease")
+
+	if err := mgr.DelegateTask(context.Background(), taskID); err != nil {
+		t.Fatalf("DelegateTask: %v", err)
+	}
+	expectWake("delegate")
+
+	if err := mgr.ResumeTask(context.Background(), taskID); err != nil {
+		t.Fatalf("ResumeTask: %v", err)
+	}
+	expectWake("resume")
 }

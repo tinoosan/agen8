@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/tinoosan/agen8/pkg/config"
 	pkgstore "github.com/tinoosan/agen8/pkg/store"
@@ -41,6 +42,16 @@ type Manager struct {
 	cfg        config.Config
 	store      Store
 	supervisor RuntimeSupervisor
+
+	watchersMu  sync.Mutex
+	watchers    map[string]sessionWakeWatcher
+	nextWatchID uint64
+}
+
+type sessionWakeWatcher struct {
+	sessionID string
+	runID     string
+	ch        chan struct{}
 }
 
 // NewManager creates a new session service manager.
@@ -49,6 +60,61 @@ func NewManager(cfg config.Config, store Store, supervisor RuntimeSupervisor) *M
 		cfg:        cfg,
 		store:      store,
 		supervisor: supervisor,
+		watchers:   map[string]sessionWakeWatcher{},
+	}
+}
+
+// SubscribeWake returns a channel receiving best-effort wake signals for matching
+// session/run writes. Empty filters subscribe to all session mutations.
+func (m *Manager) SubscribeWake(sessionID, runID string) (<-chan struct{}, func()) {
+	if m == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch, func() {}
+	}
+	w := sessionWakeWatcher{
+		sessionID: strings.TrimSpace(sessionID),
+		runID:     strings.TrimSpace(runID),
+		ch:        make(chan struct{}, 1),
+	}
+	m.watchersMu.Lock()
+	m.nextWatchID++
+	id := fmt.Sprintf("watch-%d", m.nextWatchID)
+	m.watchers[id] = w
+	m.watchersMu.Unlock()
+	cancel := func() {
+		m.watchersMu.Lock()
+		ww, ok := m.watchers[id]
+		if ok {
+			delete(m.watchers, id)
+		}
+		m.watchersMu.Unlock()
+		if ok {
+			close(ww.ch)
+		}
+	}
+	return w.ch, cancel
+}
+
+func (m *Manager) notifyWake(sessionID, runID string) {
+	if m == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	runID = strings.TrimSpace(runID)
+	m.watchersMu.Lock()
+	defer m.watchersMu.Unlock()
+	for _, w := range m.watchers {
+		if w.sessionID != "" && w.sessionID != sessionID {
+			continue
+		}
+		if w.runID != "" && w.runID != runID {
+			continue
+		}
+		select {
+		case w.ch <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -61,14 +127,14 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (types.Session, 
 		maxBytes = 8 * 1024
 	}
 	sess := types.NewSession(goal)
-	if err := m.store.SaveSession(ctx, sess); err != nil {
+	if err := m.SaveSession(ctx, sess); err != nil {
 		return types.Session{}, types.Run{}, fmt.Errorf("save session: %w", err)
 	}
 	run := types.NewRun(goal, maxBytes, sess.SessionID)
-	if err := m.store.SaveRun(ctx, run); err != nil {
+	if err := m.SaveRun(ctx, run); err != nil {
 		return types.Session{}, types.Run{}, fmt.Errorf("save run: %w", err)
 	}
-	updated, err := m.store.AddRunToSession(ctx, sess.SessionID, run.RunID)
+	updated, err := m.AddRunToSession(ctx, sess.SessionID, run.RunID)
 	if err != nil {
 		return types.Session{}, types.Run{}, fmt.Errorf("add run to session: %w", err)
 	}
@@ -111,7 +177,11 @@ func (m *Manager) LoadSession(ctx context.Context, sessionID string) (types.Sess
 
 // SaveSession delegates to the store.
 func (m *Manager) SaveSession(ctx context.Context, s types.Session) error {
-	return m.store.SaveSession(ctx, s)
+	if err := m.store.SaveSession(ctx, s); err != nil {
+		return err
+	}
+	m.notifyWake(strings.TrimSpace(s.SessionID), "")
+	return nil
 }
 
 // ListSessionsPaginated delegates to the store.
@@ -131,12 +201,21 @@ func (m *Manager) LoadRun(ctx context.Context, runID string) (types.Run, error) 
 
 // SaveRun delegates to the store.
 func (m *Manager) SaveRun(ctx context.Context, run types.Run) error {
-	return m.store.SaveRun(ctx, run)
+	if err := m.store.SaveRun(ctx, run); err != nil {
+		return err
+	}
+	m.notifyWake(strings.TrimSpace(run.SessionID), strings.TrimSpace(run.RunID))
+	return nil
 }
 
 // StopRun delegates to the store.
 func (m *Manager) StopRun(ctx context.Context, runID, status, errorMsg string) (types.Run, error) {
-	return m.store.StopRun(ctx, runID, status, errorMsg)
+	run, err := m.store.StopRun(ctx, runID, status, errorMsg)
+	if err != nil {
+		return types.Run{}, err
+	}
+	m.notifyWake(strings.TrimSpace(run.SessionID), strings.TrimSpace(run.RunID))
+	return run, nil
 }
 
 // ListRunsByStatus delegates to the store.
@@ -161,7 +240,12 @@ func (m *Manager) ListChildRuns(ctx context.Context, parentRunID string) ([]type
 
 // AddRunToSession delegates to the store.
 func (m *Manager) AddRunToSession(ctx context.Context, sessionID, runID string) (types.Session, error) {
-	return m.store.AddRunToSession(ctx, sessionID, runID)
+	sess, err := m.store.AddRunToSession(ctx, sessionID, runID)
+	if err != nil {
+		return types.Session{}, err
+	}
+	m.notifyWake(strings.TrimSpace(sessionID), strings.TrimSpace(runID))
+	return sess, nil
 }
 
 // ListActivities delegates to the store.

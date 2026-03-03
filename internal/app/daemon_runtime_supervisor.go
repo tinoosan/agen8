@@ -92,6 +92,10 @@ type taskWakeSubscriber interface {
 	SubscribeWake(teamID, runID string) (<-chan struct{}, func())
 }
 
+type sessionWakeSubscriber interface {
+	SubscribeWake(sessionID, runID string) (<-chan struct{}, func())
+}
+
 type routingDriftRepairer interface {
 	RepairRoutingDrift(ctx context.Context, limit int) (int, error)
 }
@@ -387,7 +391,35 @@ func (s *runtimeSupervisor) Run(ctx context.Context) {
 	if err := s.syncOnce(ctx); err != nil {
 		log.Printf("daemon: runtime supervisor sync failed: %v", err)
 	}
+	var (
+		wakeCh     <-chan struct{}
+		wakeCancel func()
+	)
+	if wakeSub, ok := s.sessionService.(sessionWakeSubscriber); ok && wakeSub != nil {
+		wakeCh, wakeCancel = wakeSub.SubscribeWake("", "")
+	}
+	if wakeCancel != nil {
+		defer wakeCancel()
+	}
+	if wakeCh == nil {
+		// Compatibility fallback for non-pubsub session service implementations.
+		s.runWithPollingFallback(ctx)
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			s.stopAll()
+			return
+		case <-wakeCh:
+			if err := s.syncOnce(ctx); err != nil {
+				log.Printf("daemon: runtime supervisor sync failed: %v", err)
+			}
+		}
+	}
+}
 
+func (s *runtimeSupervisor) runWithPollingFallback(ctx context.Context) {
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
 	for {
@@ -1296,6 +1328,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		SoulVersion:          soulVersion,
 		PollInterval:         s.pollInterval,
 		WakeCh:               wakeCh,
+		RequireWakeCh:        true,
 		MaxReadBytes:         256 * 1024,
 		LeaseTTL:             2 * time.Minute,
 		MaxRetries:           3,
