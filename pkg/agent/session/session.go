@@ -32,6 +32,21 @@ import (
 // and the session has completed its assigned task.
 var ErrSingleTaskComplete = errors.New("single task completed")
 
+const (
+	taskMetaSource                  = "source"
+	taskSourceHeartbeat             = "heartbeat"
+	taskSourceSpawnWorker           = "spawn_worker"
+	taskSourceRetry                 = "retry"
+	taskSourceReviewHandoff         = "review.handoff"
+	taskSourceSubagentCallback      = "subagent.callback"
+	taskSourceTeamCallback          = "team.callback"
+	taskSourceSubagentBatchCallback = "subagent.batch.callback"
+	taskSourceTeamBatchCallback     = "team.batch.callback"
+	reviewDecisionApprove           = "approve"
+	reviewDecisionRetry             = "retry"
+	reviewDecisionEscalate          = "escalate"
+)
+
 type ResolveProfileFunc func(ref string) (*profile.Profile, string, error)
 
 type Config struct {
@@ -459,7 +474,7 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 		Status:         types.TaskStatusPending,
 		CreatedAt:      &now,
 		Metadata: map[string]any{
-			"source":          "heartbeat",
+			taskMetaSource:    taskSourceHeartbeat,
 			"profile":         s.activeProfile.ID,
 			"job":             strings.TrimSpace(job.Name),
 			"window":          window,
@@ -475,7 +490,7 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 		s.logf("heartbeat enqueue failed: %v", err)
 		return
 	}
-	s.emitTaskQueuedOnce(ctx, taskID, task.Goal, "heartbeat")
+	s.emitTaskQueuedOnce(ctx, taskID, task.Goal, taskSourceHeartbeat)
 	s.emitBestEffort(ctx, events.Event{
 		Type:    "task.heartbeat.enqueued",
 		Message: "Heartbeat task enqueued",
@@ -554,7 +569,7 @@ func getTaskSource(t types.Task) string {
 	if t.Metadata == nil {
 		return ""
 	}
-	if raw, ok := t.Metadata["source"]; ok {
+	if raw, ok := t.Metadata[taskMetaSource]; ok {
 		return strings.TrimSpace(fmt.Sprint(raw))
 	}
 	return ""
@@ -573,7 +588,7 @@ func isPollableTask(task types.Task) bool {
 	}
 	// Team-only review pipeline: only synthetic batch callbacks are reviewable.
 	source := getTaskSource(task)
-	return source == "subagent.batch.callback" || source == "team.batch.callback"
+	return source == taskSourceSubagentBatchCallback || source == taskSourceTeamBatchCallback
 }
 
 func filterPollableTasks(ctx context.Context, store state.TaskStore, tasks []types.Task) []types.Task {
@@ -783,7 +798,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	taskHeartbeatJob := ""
 	taskHeartbeatInterval := ""
 	if task.Metadata != nil {
-		if raw, ok := task.Metadata["source"]; ok {
+		if raw, ok := task.Metadata[taskMetaSource]; ok {
 			taskSource = strings.TrimSpace(fmt.Sprint(raw))
 		}
 		if raw, ok := task.Metadata["job"]; ok {
@@ -794,7 +809,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		}
 	}
 	if taskSource == "" && strings.EqualFold(taskKind, state.TaskKindHeartbeat) {
-		taskSource = "heartbeat"
+		taskSource = taskSourceHeartbeat
 	}
 	if s.cfg.Events != nil {
 		data := map[string]string{
@@ -804,7 +819,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			"taskKind": taskKind,
 		}
 		if taskSource != "" {
-			data["source"] = taskSource
+			data[taskMetaSource] = taskSource
 		}
 		if taskHeartbeatJob != "" {
 			data["job"] = taskHeartbeatJob
@@ -1078,7 +1093,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			tr.Error = fmt.Sprintf("invalid agent status %q", resStatus)
 		}
 	}
-	if source := metadataString(task.Metadata, "source"); source == "subagent.batch.callback" || source == "team.batch.callback" {
+	if source := metadataString(task.Metadata, taskMetaSource); source == taskSourceSubagentBatchCallback || source == taskSourceTeamBatchCallback {
 		decisions, _ := task.Metadata["batchItemDecisions"].(map[string]any)
 		approved, retried, escalated := countDecisionMap(decisions)
 		if len(decisions) != 0 {
@@ -1092,10 +1107,10 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 				Type:    "callback.batch.item.reviewed",
 				Message: "Batch review decisions updated",
 				Data: map[string]string{
-					"parentTaskId": metadataString(task.Metadata, "batchParentTaskId"),
-					"approved":     fmt.Sprintf("%d", approved),
-					"retry":        fmt.Sprintf("%d", retried),
-					"escalate":     fmt.Sprintf("%d", escalated),
+					"parentTaskId":         metadataString(task.Metadata, "batchParentTaskId"),
+					"approved":             fmt.Sprintf("%d", approved),
+					reviewDecisionRetry:    fmt.Sprintf("%d", retried),
+					reviewDecisionEscalate: fmt.Sprintf("%d", escalated),
 				},
 			})
 		}
@@ -1131,7 +1146,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			"taskKind": taskKind,
 		}
 		if taskSource != "" {
-			data["source"] = taskSource
+			data[taskMetaSource] = taskSource
 		}
 		if taskHeartbeatJob != "" {
 			data["job"] = taskHeartbeatJob
@@ -1162,7 +1177,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 			data["artifact0"] = tr.Artifacts[0]
 		}
 		s.emitBestEffort(ctx, events.Event{Type: "task.done", Message: "Task finished", Data: data})
-		if strings.EqualFold(taskSource, "heartbeat") {
+		if strings.EqualFold(taskSource, taskSourceHeartbeat) {
 			s.emitBestEffort(ctx, events.Event{
 				Type:    "task.heartbeat.done",
 				Message: "Heartbeat task finished",
@@ -1208,8 +1223,8 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		// Sub-agents spawned via spawn_worker or retry should not exit immediately;
 		// they enter a review-wait state so the parent can approve or retry.
 		if taskSource := ""; task.Metadata != nil {
-			taskSource, _ = task.Metadata["source"].(string)
-			if taskSource == "spawn_worker" || taskSource == "retry" {
+			taskSource, _ = task.Metadata[taskMetaSource].(string)
+			if taskSource == taskSourceSpawnWorker || taskSource == reviewDecisionRetry {
 				s.emitBestEffort(ctx, events.Event{
 					Type:    "subagent.awaiting_review",
 					Message: "Sub-agent completed; awaiting parent review",
@@ -1266,7 +1281,7 @@ func (s *Session) emitTaskQueuedOnce(ctx context.Context, taskID, goal, source s
 	s.queuedEmitted[taskID] = now
 	payload := map[string]string{"taskId": taskID, "profile": s.activeProfile.ID, "goal": truncateText(goal, 200)}
 	if strings.TrimSpace(source) != "" {
-		payload["source"] = strings.TrimSpace(source)
+		payload[taskMetaSource] = strings.TrimSpace(source)
 	}
 	s.emitBestEffort(ctx, events.Event{Type: "task.queued", Message: "Task queued", Data: payload})
 }
@@ -1287,11 +1302,11 @@ type atomicBatchCloseAndHandoffStore interface {
 }
 
 func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types.Task, tr types.TaskResult) {
-	source := metadataString(task.Metadata, "source")
-	if source == "review.handoff" {
+	source := metadataString(task.Metadata, taskMetaSource)
+	if source == taskSourceReviewHandoff {
 		return
 	}
-	if source == "team.batch.callback" && tr.Status == types.TaskStatusSucceeded {
+	if source == taskSourceTeamBatchCallback && tr.Status == types.TaskStatusSucceeded {
 		s.maybeCreateReviewerToCoordinatorHandoff(ctx, task, tr)
 	}
 	if isCallbackSource(source) {
@@ -1387,13 +1402,13 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			Status:         types.TaskStatusPending,
 			CreatedAt:      &now,
 			Metadata: map[string]any{
-				"source":            "subagent.callback",
+				taskMetaSource:      taskSourceSubagentCallback,
 				"callbackForTaskId": taskID,
 				"sourceRunId":       strings.TrimSpace(s.cfg.RunID),
 				"sourceTeamId":      strings.TrimSpace(s.cfg.TeamID),
 				"sourceTaskStatus":  string(tr.Status),
 				"reviewGate":        true,
-				"reviewActions":     []string{"approve", "retry", "escalate"},
+				"reviewActions":     []string{reviewDecisionApprove, reviewDecisionRetry, reviewDecisionEscalate},
 				"retryBudget":       float64(3),
 				"retryCount":        float64(0),
 			},
@@ -1449,7 +1464,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 			Status:         types.TaskStatusPending,
 			CreatedAt:      &now,
 			Metadata: map[string]any{
-				"source":            "team.callback",
+				taskMetaSource:      taskSourceTeamCallback,
 				"callbackForTaskId": taskID,
 				"sourceRole":        strings.TrimSpace(s.cfg.RoleName),
 				"sourceRunID":       strings.TrimSpace(s.cfg.RunID),
@@ -1511,7 +1526,7 @@ func (s *Session) maybeCreateReviewerToCoordinatorHandoff(ctx context.Context, t
 					"taskId":        batchTaskID,
 					"reviewedBy":    reviewerIdentity,
 					"closeError":    err.Error(),
-					"source":        "team.batch.callback",
+					taskMetaSource:  taskSourceTeamBatchCallback,
 					"ensureHandoff": "true",
 				},
 			})
@@ -1527,7 +1542,7 @@ func (s *Session) maybeCreateReviewerToCoordinatorHandoff(ctx context.Context, t
 					"taskId":        batchTaskID,
 					"reviewedBy":    reviewerIdentity,
 					"closeError":    err.Error(),
-					"source":        "team.batch.callback",
+					taskMetaSource:  taskSourceTeamBatchCallback,
 					"ensureHandoff": "true",
 				},
 			})
@@ -1583,16 +1598,16 @@ func (s *Session) collectStagedBatchGroups(ctx context.Context) []batchGroupScop
 		if parentTaskID == "" {
 			continue
 		}
-		source := metadataString(task.Metadata, "source")
+		source := metadataString(task.Metadata, taskMetaSource)
 		group := batchGroupScope{
 			parentTaskID: parentTaskID,
 			waveID:       metadataString(task.Metadata, "batchWaveId"),
 		}
 		switch source {
-		case "subagent.callback":
+		case taskSourceSubagentCallback:
 			group.mode = "agent"
 			group.reviewerID = strings.TrimSpace(task.AssignedTo)
-		case "team.callback":
+		case taskSourceTeamCallback:
 			group.mode = "team"
 			group.reviewerID = strings.TrimSpace(task.AssignedRole)
 		default:
@@ -1655,7 +1670,7 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 	flushReason := "all_complete"
 	isPartial := !allComplete
 	batchTaskID := fmt.Sprintf("callback-batch-%s-%d", group.parentTaskID, now.UnixNano())
-	source := "subagent.batch.callback"
+	source := taskSourceSubagentBatchCallback
 	taskKind := state.TaskKindReview
 	assignedToType := "agent"
 	sessionID := strings.TrimSpace(s.cfg.SessionID)
@@ -1664,7 +1679,7 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 	assignedRole := ""
 	createdBy := strings.TrimSpace(s.cfg.RunID)
 	if group.mode == "team" {
-		source = "team.batch.callback"
+		source = taskSourceTeamBatchCallback
 		taskKind = state.TaskKindCallback
 		assignedToType = "role"
 		sessionID = "team-" + strings.TrimSpace(s.cfg.TeamID)
@@ -1717,7 +1732,7 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 		Status:    types.TaskStatusPending,
 		CreatedAt: &now,
 		Metadata: map[string]any{
-			"source":              source,
+			taskMetaSource:        source,
 			"batchMode":           true,
 			"batchSynthetic":      true,
 			"batchParentTaskId":   group.parentTaskID,
@@ -1731,7 +1746,7 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 			"batchFlushReason":    flushReason,
 			"batchItemDecisions":  map[string]any{},
 			"reviewGate":          true,
-			"reviewActions":       []string{"approve", "retry", "escalate"},
+			"reviewActions":       []string{reviewDecisionApprove, reviewDecisionRetry, reviewDecisionEscalate},
 		},
 	}
 	if err := s.cfg.TaskStore.CreateTask(ctx, batch); err != nil {
@@ -1809,11 +1824,11 @@ func (s *Session) listBatchExpectedTasks(ctx context.Context, group batchGroupSc
 		if !waveMatches(group.parentTaskID, group.waveID, metadataString(task.Metadata, "batchWaveId")) {
 			continue
 		}
-		if isCallbackSource(metadataString(task.Metadata, "source")) {
+		if isCallbackSource(metadataString(task.Metadata, taskMetaSource)) {
 			continue
 		}
 		if group.mode == "agent" {
-			if metadataString(task.Metadata, "source") != "spawn_worker" {
+			if metadataString(task.Metadata, taskMetaSource) != taskSourceSpawnWorker {
 				continue
 			}
 			if metadataString(task.Metadata, "parentRunId") != group.reviewerID {
@@ -1852,11 +1867,11 @@ func (s *Session) listBatchCallbacks(ctx context.Context, group batchGroupScope)
 		if !waveMatches(group.parentTaskID, group.waveID, metadataString(task.Metadata, "batchWaveId")) {
 			continue
 		}
-		source := metadataString(task.Metadata, "source")
-		if group.mode == "agent" && source != "subagent.callback" {
+		source := metadataString(task.Metadata, taskMetaSource)
+		if group.mode == "agent" && source != taskSourceSubagentCallback {
 			continue
 		}
-		if group.mode == "team" && source != "team.callback" {
+		if group.mode == "team" && source != taskSourceTeamCallback {
 			continue
 		}
 		if group.mode == "agent" && strings.TrimSpace(task.AssignedTo) != group.reviewerID {
@@ -1885,16 +1900,16 @@ func (s *Session) hasOpenSyntheticBatchCallback(ctx context.Context, group batch
 	if err != nil {
 		return false
 	}
-	wantSource := "subagent.batch.callback"
+	wantSource := taskSourceSubagentBatchCallback
 	if group.mode == "team" {
-		wantSource = "team.batch.callback"
+		wantSource = taskSourceTeamBatchCallback
 	}
 	for _, task := range tasks {
 		task = s.loadTaskDetails(ctx, task)
 		if !metadataBool(task.Metadata, "batchSynthetic") {
 			continue
 		}
-		if metadataString(task.Metadata, "source") != wantSource {
+		if metadataString(task.Metadata, taskMetaSource) != wantSource {
 			continue
 		}
 		if metadataString(task.Metadata, "batchParentTaskId") != group.parentTaskID {
@@ -1993,11 +2008,11 @@ func inputStringSlice(inputs map[string]any, key string) []string {
 func countDecisionMap(decisions map[string]any) (approved, retried, escalated int) {
 	for _, raw := range decisions {
 		switch strings.ToLower(strings.TrimSpace(fmt.Sprint(raw))) {
-		case "approve":
+		case reviewDecisionApprove:
 			approved++
-		case "retry":
+		case reviewDecisionRetry:
 			retried++
-		case "escalate":
+		case reviewDecisionEscalate:
 			escalated++
 		}
 	}
@@ -2006,7 +2021,7 @@ func countDecisionMap(decisions map[string]any) (approved, retried, escalated in
 
 func isCallbackSource(source string) bool {
 	switch strings.TrimSpace(source) {
-	case "subagent.callback", "team.callback", "subagent.batch.callback", "team.batch.callback", "review.handoff":
+	case taskSourceSubagentCallback, taskSourceTeamCallback, taskSourceSubagentBatchCallback, taskSourceTeamBatchCallback, taskSourceReviewHandoff:
 		return true
 	default:
 		return false
@@ -2030,8 +2045,8 @@ func normalizeWaveID(parentTaskID, waveID string) string {
 }
 
 func synthesizeBatchSummary(task types.Task, tr types.TaskResult) string {
-	source := metadataString(task.Metadata, "source")
-	if source != "subagent.batch.callback" && source != "team.batch.callback" {
+	source := metadataString(task.Metadata, taskMetaSource)
+	if source != taskSourceSubagentBatchCallback && source != taskSourceTeamBatchCallback {
 		return strings.TrimSpace(tr.Summary)
 	}
 	current := strings.TrimSpace(tr.Summary)
@@ -2177,7 +2192,7 @@ func (s *Session) maybeEmitCoordinatorPolicyWarn(ctx context.Context, task types
 			continue
 		}
 		// Count as delegation: assigned to another role, or spawn_worker (callbacks created when workers finish).
-		if getTaskSource(candidate) == "spawn_worker" {
+		if getTaskSource(candidate) == taskSourceSpawnWorker {
 			delegated = true
 			break
 		}
@@ -2232,18 +2247,18 @@ func (s *Session) quarantineTask(ctx context.Context, task types.Task) error {
 	// When a spawn_worker or retry task is quarantined, emit an auto-escalation
 	// event so the TUI/user can be notified of the intervention needed.
 	if task.Metadata != nil {
-		taskSource, _ := task.Metadata["source"].(string)
-		if taskSource == "spawn_worker" || taskSource == "retry" {
+		taskSource, _ := task.Metadata[taskMetaSource].(string)
+		if taskSource == taskSourceSpawnWorker || taskSource == reviewDecisionRetry {
 			s.emitBestEffort(ctx, events.Event{
 				Type:    "task.escalation.auto",
 				Message: "Sub-agent task quarantined; escalation required",
 				Data: map[string]string{
-					"taskId":   taskID,
-					"runId":    s.cfg.RunID,
-					"parentId": s.cfg.ParentRunID,
-					"goal":     truncateText(task.Goal, 200),
-					"error":    fallback(strings.TrimSpace(task.Error), "max retries exceeded"),
-					"source":   taskSource,
+					"taskId":       taskID,
+					"runId":        s.cfg.RunID,
+					"parentId":     s.cfg.ParentRunID,
+					"goal":         truncateText(task.Goal, 200),
+					"error":        fallback(strings.TrimSpace(task.Error), "max retries exceeded"),
+					taskMetaSource: taskSource,
 				},
 			})
 		}

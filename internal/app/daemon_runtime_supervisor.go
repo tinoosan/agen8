@@ -75,6 +75,19 @@ const defaultSubagentAwaitingReviewTimeout = 30 * time.Minute
 const defaultWorkerShutdownTimeout = 10 * time.Second
 const sessionRunActionConcurrency = 10
 
+const (
+	taskMetaSource          = "source"
+	taskMetaReviewDecision  = "reviewDecision"
+	taskMetaSourceRunID     = "sourceRunId"
+	taskSourceSubagentCB    = "subagent.callback"
+	taskSourceSubagentBatch = "subagent.batch.callback"
+	reviewDecisionApprove   = "approve"
+	lifecycleDeactivated    = "deactivated"
+	lifecycleArchived       = "archived"
+	stopReasonArchived      = "archived"
+	controlSourceSession    = "session"
+)
+
 type taskWakeSubscriber interface {
 	SubscribeWake(teamID, runID string) (<-chan struct{}, func())
 }
@@ -203,29 +216,29 @@ type subagentCleanupNotifier struct {
 
 func (n *subagentCleanupNotifier) Notify(ctx context.Context, task types.Task, tr types.TaskResult) error {
 	if n != nil && n.supervisor != nil {
-		source, _ := task.Metadata["source"].(string)
-		if source == "subagent.callback" && tr.Status == types.TaskStatusSucceeded {
+		source, _ := task.Metadata[taskMetaSource].(string)
+		if source == taskSourceSubagentCB && tr.Status == types.TaskStatusSucceeded {
 			// Only cleanup on explicit approval or legacy no-review-gate callbacks.
 			// "retry" keeps the child alive; "escalate" defers cleanup to escalation resolution.
-			reviewDecision, _ := task.Metadata["reviewDecision"].(string)
-			if reviewDecision == "" || reviewDecision == "approve" {
-				if runID, ok := task.Metadata["sourceRunId"].(string); ok && strings.TrimSpace(runID) != "" {
+			reviewDecision, _ := task.Metadata[taskMetaReviewDecision].(string)
+			if reviewDecision == "" || reviewDecision == reviewDecisionApprove {
+				if runID, ok := task.Metadata[taskMetaSourceRunID].(string); ok && strings.TrimSpace(runID) != "" {
 					runID = strings.TrimSpace(runID)
 					n.supervisor.deactivateAndArchiveSubagent(ctx, runID)
 				}
 			}
 		}
-		if source == "subagent.batch.callback" && tr.Status == types.TaskStatusSucceeded && n.store != nil {
+		if source == taskSourceSubagentBatch && tr.Status == types.TaskStatusSucceeded && n.store != nil {
 			decisions, _ := task.Metadata["batchItemDecisions"].(map[string]any)
 			for callbackTaskID, rawDecision := range decisions {
-				if !strings.EqualFold(strings.TrimSpace(fmt.Sprint(rawDecision)), "approve") {
+				if !strings.EqualFold(strings.TrimSpace(fmt.Sprint(rawDecision)), reviewDecisionApprove) {
 					continue
 				}
 				callbackTask, err := n.store.GetTask(ctx, strings.TrimSpace(callbackTaskID))
 				if err != nil {
 					continue
 				}
-				runID, _ := callbackTask.Metadata["sourceRunId"].(string)
+				runID, _ := callbackTask.Metadata[taskMetaSourceRunID].(string)
 				runID = strings.TrimSpace(runID)
 				if runID == "" {
 					continue
@@ -243,7 +256,7 @@ func (n *subagentCleanupNotifier) Notify(ctx context.Context, task types.Task, t
 func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, runID string) {
 	run, err := s.sessionService.LoadRun(ctx, runID)
 	if err == nil && run.Runtime != nil {
-		run.Runtime.LifecycleState = "deactivated"
+		run.Runtime.LifecycleState = lifecycleDeactivated
 		if err := s.sessionService.SaveRun(ctx, run); err != nil {
 			log.Printf("daemon: deactivate subagent: save run %s: %v", runID, err)
 		}
@@ -267,12 +280,12 @@ func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, ru
 
 	if run, err := s.sessionService.LoadRun(ctx, runID); err == nil {
 		if run.Runtime != nil {
-			run.Runtime.LifecycleState = "archived"
+			run.Runtime.LifecycleState = lifecycleArchived
 			if err := s.sessionService.SaveRun(ctx, run); err != nil {
 				log.Printf("daemon: archive subagent: save run %s: %v", runID, err)
 			}
 		}
-		_, _ = s.sessionService.StopRun(ctx, runID, types.RunStatusSucceeded, "archived")
+		_, _ = s.sessionService.StopRun(ctx, runID, types.RunStatusSucceeded, stopReasonArchived)
 	}
 
 	// Remove worker only after cancellation + terminal run status update to avoid
@@ -760,16 +773,16 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		PriceInPerMTokensUSD:  s.resolved.PriceInPerMTokensUSD,
 		PriceOutPerMTokensUSD: s.resolved.PriceOutPerMTokensUSD,
 		SoulVersionSeen:       soulVersion,
-			PersistRun: func(r types.Run) error {
-				return s.sessionService.SaveRun(parent, r)
-			},
-			LoadSession: func(sessionID string) (types.Session, error) {
-				return s.sessionService.LoadSession(parent, sessionID)
-			},
-			SaveSession: func(session types.Session) error {
-				return s.sessionService.SaveSession(parent, session)
-			},
-		})
+		PersistRun: func(r types.Run) error {
+			return s.sessionService.SaveRun(parent, r)
+		},
+		LoadSession: func(sessionID string) (types.Session, error) {
+			return s.sessionService.LoadSession(parent, sessionID)
+		},
+		SaveSession: func(session types.Session) error {
+			return s.sessionService.SaveSession(parent, session)
+		},
+	})
 	if err != nil {
 		orderedEmitter.Close()
 		return nil, err
@@ -818,10 +831,10 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		emitLine := func(line string) {
 			line = strings.TrimRight(line, " \t\r")
 			if line != "" {
-					emitEvent(parent, events.Event{
-						Type:    "model.thinking.summary",
-						Message: "Thinking",
-						Data:    map[string]string{"step": stepStr, "text": line},
+				emitEvent(parent, events.Event{
+					Type:    "model.thinking.summary",
+					Message: "Thinking",
+					Data:    map[string]string{"step": stepStr, "text": line},
 				})
 			}
 		}
@@ -885,10 +898,10 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 					thinkingActive = true
 					thinkingStep = step
 					thinkingBuf.Reset()
-						emitEvent(parent, events.Event{
-							Type:    "model.thinking.start",
-							Message: "Thinking started",
-							Data:    map[string]string{"step": stepStr},
+					emitEvent(parent, events.Event{
+						Type:    "model.thinking.start",
+						Message: "Thinking started",
+						Data:    map[string]string{"step": stepStr},
 					})
 				}
 				if chunk.Text != "" {
@@ -898,10 +911,10 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			} else if thinkingActive {
 				flushThinkingLines(true)
 				thinkingActive = false
-					emitEvent(parent, events.Event{
-						Type:    "model.thinking.end",
-						Message: "Thinking ended",
-						Data:    map[string]string{"step": strconv.Itoa(thinkingStep)},
+				emitEvent(parent, events.Event{
+					Type:    "model.thinking.end",
+					Message: "Thinking ended",
+					Data:    map[string]string{"step": strconv.Itoa(thinkingStep)},
 				})
 			}
 		},
@@ -911,10 +924,10 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			if thinkingActive {
 				flushThinkingLines(true)
 				thinkingActive = false
-					emitEvent(parent, events.Event{
-						Type:    "model.thinking.end",
-						Message: "Thinking ended",
-						Data:    map[string]string{"step": strconv.Itoa(thinkingStep)},
+				emitEvent(parent, events.Event{
+					Type:    "model.thinking.end",
+					Message: "Thinking ended",
+					Data:    map[string]string{"step": strconv.Itoa(thinkingStep)},
 				})
 			}
 			thinkingMu.Unlock()
@@ -929,25 +942,25 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			if s := strings.TrimSpace(summary); s != "" {
 				data["reasoningSummary"] = s
 			}
-				emitEvent(parent, events.Event{Type: "agent.step", Message: fmt.Sprintf("Step %d completed", step), Data: data})
-			},
-			OnCompaction: func(step int, beforeTokens, afterTokens int, serverSide bool) {
-				emitEvent(parent, events.Event{
-					Type:    "context.compacted",
-					Message: fmt.Sprintf("Context compacted (%dk → %dk tokens)", beforeTokens/1000, afterTokens/1000),
-					Data: map[string]string{
+			emitEvent(parent, events.Event{Type: "agent.step", Message: fmt.Sprintf("Step %d completed", step), Data: data})
+		},
+		OnCompaction: func(step int, beforeTokens, afterTokens int, serverSide bool) {
+			emitEvent(parent, events.Event{
+				Type:    "context.compacted",
+				Message: fmt.Sprintf("Context compacted (%dk → %dk tokens)", beforeTokens/1000, afterTokens/1000),
+				Data: map[string]string{
 					"step":         strconv.Itoa(step),
 					"beforeTokens": strconv.Itoa(beforeTokens),
 					"afterTokens":  strconv.Itoa(afterTokens),
 					"serverSide":   strconv.FormatBool(serverSide),
 				},
 			})
-			},
-			OnContextSize: func(step int, currentTokens, budgetTokens int) {
-				emitEvent(parent, events.Event{
-					Type:    "context.size",
-					Message: fmt.Sprintf("Context: %dk/%dk tokens", currentTokens/1000, budgetTokens/1000),
-					Data: map[string]string{
+		},
+		OnContextSize: func(step int, currentTokens, budgetTokens int) {
+			emitEvent(parent, events.Event{
+				Type:    "context.size",
+				Message: fmt.Sprintf("Context: %dk/%dk tokens", currentTokens/1000, budgetTokens/1000),
+				Data: map[string]string{
 					"step":          strconv.Itoa(step),
 					"currentTokens": strconv.Itoa(currentTokens),
 					"budgetTokens":  strconv.Itoa(budgetTokens),
@@ -978,13 +991,13 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		tool.ValidRoles = teamRoles
 	}
 	allowSpawnWorker := !isChildRun && allowSubagents
-		if allowSpawnWorker && isTeam && isCoordinator && len(teamRoles) > 1 {
-			// Team-only delegation constitution (without policy engine): coordinators delegate to roles.
-			allowSpawnWorker = false
-			emitEvent(parent, events.Event{
-				Type:    "delegation.policy.enforced",
-				Message: "Coordinator subagent spawning disabled in multi-role team",
-				Data: map[string]string{
+	if allowSpawnWorker && isTeam && isCoordinator && len(teamRoles) > 1 {
+		// Team-only delegation constitution (without policy engine): coordinators delegate to roles.
+		allowSpawnWorker = false
+		emitEvent(parent, events.Event{
+			Type:    "delegation.policy.enforced",
+			Message: "Coordinator subagent spawning disabled in multi-role team",
+			Data: map[string]string{
 				"teamId":          teamID,
 				"role":            roleName,
 				"coordinatorRole": coordinatorRole,
@@ -1028,11 +1041,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	var allowedToolsForRun []string
 	if !isChildRun {
 		roleAllowedTools, removedTools := sanitizeAllowedToolsForRole(activeProfile.AllowedTools, teamID, isCoordinator)
-			if len(removedTools) > 0 {
-				emitEvent(parent, events.Event{
-					Type:    "daemon.warning",
-					Message: "Removed disallowed tool(s) for non-coordinator role",
-					Data: map[string]string{
+		if len(removedTools) > 0 {
+			emitEvent(parent, events.Event{
+				Type:    "daemon.warning",
+				Message: "Removed disallowed tool(s) for non-coordinator role",
+				Data: map[string]string{
 					"teamId": teamID,
 					"role":   roleName,
 					"tools":  strings.Join(removedTools, ","),
@@ -1200,7 +1213,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 								Data: map[string]string{
 									"command": "set_model",
 									"model":   targetModel,
-									"source":  "session",
+									"source":  controlSourceSession,
 								},
 							})
 						}
@@ -1253,11 +1266,11 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 						})
 
 						// Transition to awaiting_review instead of stopping
-							r, lerr := s.sessionService.LoadRun(workerCtx, run.RunID)
-							if lerr == nil && r.Runtime != nil {
-								r.Runtime.LifecycleState = "awaiting_review"
-								_ = s.sessionService.SaveRun(workerCtx, r)
-							}
+						r, lerr := s.sessionService.LoadRun(workerCtx, run.RunID)
+						if lerr == nil && r.Runtime != nil {
+							r.Runtime.LifecycleState = "awaiting_review"
+							_ = s.sessionService.SaveRun(workerCtx, r)
+						}
 
 						// Bound awaiting_review residency to prevent leaked subagent runtimes
 						// when the expected review/cleanup path never arrives.
@@ -1268,23 +1281,23 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 						case <-workerCtx.Done():
 							return
 						case <-timer.C:
-								emitEvent(workerCtx, events.Event{
-									Type:    "subagent.awaiting_review.timeout",
-									Message: "Sub-agent archived after awaiting-review timeout",
-									Data: map[string]string{
+							emitEvent(workerCtx, events.Event{
+								Type:    "subagent.awaiting_review.timeout",
+								Message: "Sub-agent archived after awaiting-review timeout",
+								Data: map[string]string{
 									"runId":   run.RunID,
 									"timeout": waitTimeout.String(),
 								},
 							})
-								if rr, serr := s.sessionService.LoadRun(workerCtx, run.RunID); serr == nil {
-									if rr.Runtime != nil {
-										rr.Runtime.LifecycleState = "archived"
-										_ = s.sessionService.SaveRun(workerCtx, rr)
-									}
+							if rr, serr := s.sessionService.LoadRun(workerCtx, run.RunID); serr == nil {
+								if rr.Runtime != nil {
+									rr.Runtime.LifecycleState = lifecycleArchived
+									_ = s.sessionService.SaveRun(workerCtx, rr)
 								}
-								_, _ = s.sessionService.StopRun(workerCtx, run.RunID, types.RunStatusSucceeded, "archived: awaiting review timeout")
-								return
 							}
+							_, _ = s.sessionService.StopRun(workerCtx, run.RunID, types.RunStatusSucceeded, "archived: awaiting review timeout")
+							return
+						}
 					}
 					errMsg := "unknown error"
 					if err != nil {
@@ -1503,14 +1516,14 @@ func (s *runtimeSupervisor) runSessionAction(
 		sem <- struct{}{}
 		wg.Add(1)
 		go func(rid string) {
-				defer wg.Done()
-				defer func() { <-sem }()
-				if err := apply(ctx, rid); err != nil {
-					mu.Lock()
-					errs = append(errs, rid+": "+err.Error())
-					mu.Unlock()
-					return
-				}
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := apply(ctx, rid); err != nil {
+				mu.Lock()
+				errs = append(errs, rid+": "+err.Error())
+				mu.Unlock()
+				return
+			}
 			mu.Lock()
 			affected = append(affected, rid)
 			mu.Unlock()
