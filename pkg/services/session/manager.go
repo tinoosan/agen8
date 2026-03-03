@@ -147,6 +147,9 @@ func (m *Manager) Stop(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return fmt.Errorf("list runs: %w", err)
 	}
+	if m.supervisor == nil {
+		return fmt.Errorf("runtime supervisor is not configured")
+	}
 	var errs []error
 	for _, run := range runs {
 		if err := m.supervisor.StopRun(ctx, run.RunID); err != nil {

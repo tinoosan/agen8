@@ -3,6 +3,7 @@ package session_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,6 +171,23 @@ func TestManager_Delete_ContinuesWhenStopFails(t *testing.T) {
 	}
 	if len(store.deletedSessions) != 1 || store.deletedSessions[0] != "sess-1" {
 		t.Fatalf("expected session delete to continue, got %v", store.deletedSessions)
+	}
+}
+
+func TestManager_Stop_NilSupervisor(t *testing.T) {
+	store := &mockStore{
+		runs: map[string]types.Run{
+			"run-1": {RunID: "run-1", SessionID: "sess-1"},
+		},
+	}
+	mgr := session.NewManager(config.Config{}, store, nil)
+
+	err := mgr.Stop(context.Background(), "sess-1")
+	if err == nil {
+		t.Fatalf("expected error when supervisor is nil")
+	}
+	if !strings.Contains(err.Error(), "runtime supervisor is not configured") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
