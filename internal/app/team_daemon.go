@@ -161,7 +161,9 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 
 	runCtx, stopSignals := signalNotifyContext(ctx)
 	defer stopSignals()
-	startCodeExecConfigReloader(runCtx, cfg, nil)
+	startCodeExecConfigReloader(runCtx, cfg, func(_ context.Context, ev events.Event) {
+		log.Printf("code_exec reload: type=%s message=%s data=%v", strings.TrimSpace(ev.Type), strings.TrimSpace(ev.Message), ev.Data)
+	})
 
 	go supervisor.Run(runCtx)
 	go eventBroadcaster.Run(runCtx)
