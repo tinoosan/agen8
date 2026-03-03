@@ -23,6 +23,15 @@ var (
 
 var ErrRepeatedInvalidToolCall = errors.New("agent repeated invalid tool call")
 
+const (
+	compactionNoticeServer = "Context was compacted automatically (server-side) to stay within a safe budget for long-running tasks. " +
+		"Older tool outputs and earlier conversation turns may be truncated/omitted. " +
+		"Re-open required details via tools (e.g., fs_read) rather than relying on long scrollback."
+	compactionNoticeClient = "Context was compacted automatically to stay within a safe budget for long-running tasks. " +
+		"Older tool outputs and earlier conversation turns may be truncated/omitted. " +
+		"Re-open required details via tools (e.g., fs_read) rather than relying on long scrollback."
+)
+
 type RepeatedInvalidToolCallError struct {
 	ToolName    string
 	Count       int
@@ -285,18 +294,14 @@ func (a *DefaultAgent) compactConversationForBudget(ctx context.Context, step in
 			System:   system,
 			Messages: msgs,
 		})
-		if err == nil && len(compacted.Messages) != 0 {
-			// Prepend developer notice so the agent knows context was compacted server-side.
-			notice := llmtypes.LLMMessage{
-				Role: "developer",
-				Content: strings.TrimSpace(strings.Join([]string{
-					"Context was compacted automatically (server-side) to stay within a safe budget for long-running tasks.",
-					"Older tool outputs and earlier conversation turns may be truncated/omitted.",
-					"Re-open required details via tools (e.g., fs_read) rather than relying on long scrollback.",
-				}, " ")),
-			}
-			result := append([]llmtypes.LLMMessage{notice}, compacted.Messages...)
-			if a.Hooks.OnCompaction != nil {
+			if err == nil && len(compacted.Messages) != 0 {
+				// Prepend developer notice so the agent knows context was compacted server-side.
+				notice := llmtypes.LLMMessage{
+					Role:    "developer",
+					Content: compactionNoticeServer,
+				}
+				result := append([]llmtypes.LLMMessage{notice}, compacted.Messages...)
+				if a.Hooks.OnCompaction != nil {
 				afterBytes := estimateConversationBytes(system, result)
 				a.Hooks.OnCompaction(step, estimateTokens(beforeBytes), estimateTokens(afterBytes), true)
 			}
@@ -462,21 +467,13 @@ func compactConversationForBudget(msgs []llmtypes.LLMMessage, system string, bud
 	}
 
 	notice := llmtypes.LLMMessage{
-		Role: "developer",
-		Content: strings.TrimSpace(strings.Join([]string{
-			"Context was compacted automatically to stay within a safe budget for long-running tasks.",
-			"Older tool outputs and earlier conversation turns may be truncated/omitted.",
-			"Re-open required details via tools (e.g., fs_read) rather than relying on long scrollback.",
-		}, " ")),
+		Role:    "developer",
+		Content: compactionNoticeClient,
 	}
 
 	compacted := append([]llmtypes.LLMMessage(nil), prefix...)
-	// Insert notice after preserved first message if present.
-	if len(compacted) != 0 {
-		compacted = append(compacted, notice)
-	} else {
-		compacted = append(compacted, notice)
-	}
+	// Always prepend notice; any preserved prefix message is already in compacted.
+	compacted = append(compacted, notice)
 	compacted = append(compacted, tail...)
 
 	// Final guard: if still over budget, drop more from the head of the tail.
