@@ -1027,6 +1027,13 @@ func (s *RPCServer) turnCreate(ctx context.Context, p protocol.TurnCreateParams)
 		Goal:           strings.TrimSpace(p.Input.Text),
 		Status:         types.TaskStatusPending,
 		CreatedAt:      &now,
+		Metadata: map[string]any{
+			"source":        "rpc.turn.create",
+			"messageKind":   types.MessageKindUserInput,
+			"intentId":      "turn.create:" + taskID,
+			"correlationId": taskID,
+			"producer":      "rpc.turn.create",
+		},
 	}
 	if err := s.taskService.CreateTask(ctx, task); err != nil {
 		return protocol.TurnCreateResult{}, err
