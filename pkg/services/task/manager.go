@@ -429,7 +429,40 @@ func (m *Manager) CompleteTask(ctx context.Context, taskID string, result types.
 	}
 	updated, err := m.store.GetTask(ctx, taskID)
 	if err == nil {
+		_ = m.syncTaskMessagesTerminal(ctx, updated)
 		m.notifyWake(updated)
+	}
+	return nil
+}
+
+func (m *Manager) syncTaskMessagesTerminal(ctx context.Context, task types.Task) error {
+	if m == nil || m.messageStore == nil {
+		return nil
+	}
+	taskID := strings.TrimSpace(task.TaskID)
+	if taskID == "" {
+		return nil
+	}
+	msgs, err := m.messageStore.ListMessages(ctx, state.MessageFilter{
+		ThreadID: strings.TrimSpace(task.SessionID),
+		RunID:    strings.TrimSpace(task.RunID),
+		TaskRef:  taskID,
+		Channel:  types.MessageChannelInbox,
+		Statuses: []string{types.MessageStatusPending, types.MessageStatusClaimed, types.MessageStatusNacked},
+		Limit:    200,
+		SortBy:   "created_at",
+	})
+	if err != nil {
+		return err
+	}
+	for _, msg := range msgs {
+		if strings.TrimSpace(msg.TaskRef) != taskID {
+			continue
+		}
+		_ = m.messageStore.AckMessage(ctx, strings.TrimSpace(msg.MessageID), state.MessageAckResult{
+			Status:   types.MessageStatusAcked,
+			Metadata: map[string]any{"taskStatus": strings.TrimSpace(string(task.Status))},
+		})
 	}
 	return nil
 }

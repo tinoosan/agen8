@@ -164,6 +164,7 @@ type MessageFilter struct {
 	ThreadID string
 	RunID    string
 	TeamID   string
+	TaskRef  string
 	Channel  string
 	Kinds    []string
 	Statuses []string

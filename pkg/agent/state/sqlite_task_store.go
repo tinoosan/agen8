@@ -1830,6 +1830,10 @@ func (s *SQLiteTaskStore) ListMessages(ctx context.Context, filter MessageFilter
 		q += " AND team_id = ?"
 		args = append(args, id)
 	}
+	if id := strings.TrimSpace(filter.TaskRef); id != "" {
+		q += " AND task_ref = ?"
+		args = append(args, id)
+	}
 	if ch := strings.TrimSpace(filter.Channel); ch != "" {
 		q += " AND channel = ?"
 		args = append(args, ch)
@@ -1913,6 +1917,10 @@ func (s *SQLiteTaskStore) CountMessages(ctx context.Context, filter MessageFilte
 	}
 	if id := strings.TrimSpace(filter.TeamID); id != "" {
 		q += " AND team_id = ?"
+		args = append(args, id)
+	}
+	if id := strings.TrimSpace(filter.TaskRef); id != "" {
+		q += " AND task_ref = ?"
 		args = append(args, id)
 	}
 	if ch := strings.TrimSpace(filter.Channel); ch != "" {
