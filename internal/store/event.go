@@ -270,6 +270,13 @@ func buildEventFilterClause(runID string, filter EventFilter) (string, []any) {
 //   - ASC: use it as AfterSeq for the next page.
 //   - DESC: use it as BeforeSeq for the next page.
 func ListEventsPaginated(cfg config.Config, filter EventFilter) ([]types.EventRecord, int64, error) {
+	return ListEventsPaginatedWithContext(context.Background(), cfg, filter)
+}
+
+func ListEventsPaginatedWithContext(ctx context.Context, cfg config.Config, filter EventFilter) ([]types.EventRecord, int64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, 0, err
 	}
@@ -305,7 +312,7 @@ func ListEventsPaginated(cfg config.Config, filter EventFilter) ([]types.EventRe
 		args = append(args, filter.Offset)
 	}
 
-	rows, err := db.Query(query, args...)
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list events paginated: %w", err)
 	}
@@ -348,6 +355,13 @@ func ListEventsPaginated(cfg config.Config, filter EventFilter) ([]types.EventRe
 // CountEvents returns the total number of events matching the filter.
 // Used for pagination UI ("showing X of Y events").
 func CountEvents(cfg config.Config, filter EventFilter) (int, error) {
+	return CountEventsWithContext(context.Background(), cfg, filter)
+}
+
+func CountEventsWithContext(ctx context.Context, cfg config.Config, filter EventFilter) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := cfg.Validate(); err != nil {
 		return 0, err
 	}
@@ -366,7 +380,7 @@ func CountEvents(cfg config.Config, filter EventFilter) (int, error) {
 	query := `SELECT COUNT(*) FROM events WHERE ` + whereClause
 
 	var count int
-	if err := db.QueryRow(query, args...).Scan(&count); err != nil {
+	if err := db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -375,6 +389,13 @@ func CountEvents(cfg config.Config, filter EventFilter) (int, error) {
 // GetLatestEventSeq returns the maximum seq number for a run without loading events.
 // Useful for getting the tail offset without loading all events into memory.
 func GetLatestEventSeq(cfg config.Config, runID string) (int64, error) {
+	return GetLatestEventSeqWithContext(context.Background(), cfg, runID)
+}
+
+func GetLatestEventSeqWithContext(ctx context.Context, cfg config.Config, runID string) (int64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := cfg.Validate(); err != nil {
 		return 0, err
 	}
@@ -390,7 +411,7 @@ func GetLatestEventSeq(cfg config.Config, runID string) (int64, error) {
 	}
 
 	var seq int64
-	if err := db.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM events WHERE run_id = ?`, runID).Scan(&seq); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) FROM events WHERE run_id = ?`, runID).Scan(&seq); err != nil {
 		return 0, err
 	}
 	return seq, nil
@@ -404,6 +425,9 @@ func GetLatestEventSeq(cfg config.Config, runID string) (int64, error) {
 func TailEvents(cfg config.Config, ctx context.Context, runID string, fromOffset int64) (<-chan TailedEvent, <-chan error) {
 	eventCh := make(chan TailedEvent)
 	errCh := make(chan error, 1)
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	if err := cfg.Validate(); err != nil {
 		errCh <- err
@@ -437,13 +461,17 @@ func TailEvents(cfg config.Config, ctx context.Context, runID string, fromOffset
 				return
 			case <-ticker.C:
 				const tailBatchLimit = 100
-				rows, err := db.Query(
+				rows, err := db.QueryContext(
+					ctx,
 					`SELECT seq, event_json FROM events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
 					runID,
 					currentOffset,
 					tailBatchLimit,
 				)
 				if err != nil {
+					if ctx.Err() != nil {
+						return
+					}
 					errCh <- err
 					return
 				}

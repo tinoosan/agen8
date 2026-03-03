@@ -133,6 +133,38 @@ func TestService_Tail(t *testing.T) {
 	cancel()
 }
 
+func TestService_Tail_CancelUnblocksWhenConsumerStops(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := config.Config{DataDir: tmpDir}
+	_, run, err := implstore.CreateSession(cfg, "Tail Cancel Run", 1024)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	svc := NewService(cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	tailCh, _ := svc.Tail(ctx, run.RunID, 0)
+
+	if err := svc.Append(context.Background(), types.EventRecord{
+		RunID:   run.RunID,
+		Type:    "test_event",
+		Message: "will block until cancel",
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+
+	select {
+	case _, ok := <-tailCh:
+		if ok {
+			t.Fatalf("expected tail channel to close after cancellation")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("tail channel did not close after cancellation")
+	}
+}
+
 func TestService_AppendEvent_StoreAppender(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.Config{DataDir: tmpDir}

@@ -40,13 +40,13 @@ func (s *Service) AppendEvent(ctx context.Context, event types.EventRecord) erro
 // ListPaginated returns events matching the filter and the cursor for the next page.
 func (s *Service) ListPaginated(ctx context.Context, filter Filter) ([]types.EventRecord, int64, error) {
 	storeFilter := toStoreFilter(filter)
-	return implstore.ListEventsPaginated(s.cfg, storeFilter)
+	return implstore.ListEventsPaginatedWithContext(ctx, s.cfg, storeFilter)
 }
 
 // Count returns the total number of events matching the filter.
 func (s *Service) Count(ctx context.Context, filter Filter) (int, error) {
 	storeFilter := toStoreFilter(filter)
-	return implstore.CountEvents(s.cfg, storeFilter)
+	return implstore.CountEventsWithContext(ctx, s.cfg, storeFilter)
 }
 
 // LatestSeq returns the maximum seq for the run without loading events.
@@ -55,11 +55,14 @@ func (s *Service) LatestSeq(ctx context.Context, runID string) (int64, error) {
 	if runID == "" {
 		return 0, ErrRunIDRequired
 	}
-	return implstore.GetLatestEventSeq(s.cfg, runID)
+	return implstore.GetLatestEventSeqWithContext(ctx, s.cfg, runID)
 }
 
 // Tail streams new events for the run from fromOffset. Caller cancels ctx to stop.
 func (s *Service) Tail(ctx context.Context, runID string, fromOffset int64) (<-chan TailedEvent, <-chan error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		ec := make(chan TailedEvent)
@@ -73,8 +76,20 @@ func (s *Service) Tail(ctx context.Context, runID string, fromOffset int64) (<-c
 	outCh := make(chan TailedEvent)
 	go func() {
 		defer close(outCh)
-		for te := range storeCh {
-			outCh <- TailedEvent{Event: te.Event, NextOffset: te.NextOffset}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case te, ok := <-storeCh:
+				if !ok {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case outCh <- TailedEvent{Event: te.Event, NextOffset: te.NextOffset}:
+				}
+			}
 		}
 	}()
 	return outCh, errCh
