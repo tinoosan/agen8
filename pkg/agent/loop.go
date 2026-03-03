@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ const (
 	compactionNoticeClient = "Context was compacted automatically to stay within a safe budget for long-running tasks. " +
 		"Older tool outputs and earlier conversation turns may be truncated/omitted. " +
 		"Re-open required details via tools (e.g., fs_read) rather than relying on long scrollback."
+	hostResponseMarshalFallback = `{"ok":false,"error":"internal: failed to serialise response"}`
 )
 
 type RepeatedInvalidToolCallError struct {
@@ -191,14 +193,14 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 					lastFailedTool = "final_answer"
 					lastFailureReason = err.Error()
 					hostResp := types.HostOpResponse{Op: "final_answer", Ok: false, Error: err.Error()}
-					hostRespJSON, _ := types.MarshalPretty(hostResp)
-					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+					hostRespJSON := marshalHostResponseJSON(hostResp)
+					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: hostRespJSON})
 					continue
 				}
 				finalText := strings.TrimSpace(args.Text)
 				hostResp := types.HostOpResponse{Op: "final_answer", Ok: true}
-				hostRespJSON, _ := types.MarshalPretty(hostResp)
-				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
+				hostRespJSON := marshalHostResponseJSON(hostResp)
+				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: hostRespJSON})
 				msgs = append(msgs, llmtypes.LLMMessage{Role: "assistant", Content: finalText})
 				return RunResult{
 					Text:      finalText,
@@ -209,21 +211,21 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			}
 
 			if a.ToolRegistry == nil {
-				lastFailedTool = which
-				lastFailureReason = "tool registry is not configured"
-				hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: "tool registry is not configured"}
-				hostRespJSON, _ := types.MarshalPretty(hostResp)
-				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
-				continue
-			}
-			op, err := a.ToolRegistry.Dispatch(ctx, which, []byte(tc.Function.Arguments))
-			if err != nil {
-				dispatchErr := "invalid tool call args: " + err.Error()
-				hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: dispatchErr}
-				hostRespJSON, _ := types.MarshalPretty(hostResp)
-				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: string(hostRespJSON)})
-				if strings.EqualFold(strings.TrimSpace(lastFailedTool), which) {
-					consecutiveInvalid++
+					lastFailedTool = which
+					lastFailureReason = "tool registry is not configured"
+					hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: "tool registry is not configured"}
+					hostRespJSON := marshalHostResponseJSON(hostResp)
+					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: hostRespJSON})
+					continue
+				}
+				op, err := a.ToolRegistry.Dispatch(ctx, which, []byte(tc.Function.Arguments))
+				if err != nil {
+					dispatchErr := "invalid tool call args: " + err.Error()
+					hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: dispatchErr}
+					hostRespJSON := marshalHostResponseJSON(hostResp)
+					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: hostRespJSON})
+					if strings.EqualFold(strings.TrimSpace(lastFailedTool), which) {
+						consecutiveInvalid++
 				} else {
 					consecutiveInvalid = 1
 				}
@@ -244,13 +246,13 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			pending = append(pending, pendingHostOp{req: op, callID: strings.TrimSpace(tc.ID)})
 		}
 
-		for _, item := range pending {
-			hostResp := a.Exec.Exec(ctx, item.req)
-			hostRespJSON, _ := types.MarshalPretty(hostResp)
-			msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: item.callID, Content: string(hostRespJSON)})
-			if !hostResp.Ok {
-				lastFailureReason = strings.TrimSpace(hostResp.Error)
-			}
+			for _, item := range pending {
+				hostResp := a.Exec.Exec(ctx, item.req)
+				hostRespJSON := marshalHostResponseJSON(hostResp)
+				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: item.callID, Content: hostRespJSON})
+				if !hostResp.Ok {
+					lastFailureReason = strings.TrimSpace(hostResp.Error)
+				}
 		}
 	}
 }
@@ -535,6 +537,15 @@ func adjustCutForToolMessages(msgs []llmtypes.LLMMessage, cut int) int {
 
 func messagesEqual(a, b llmtypes.LLMMessage) bool {
 	return a.Role == b.Role && a.Content == b.Content && a.ToolCallID == b.ToolCallID
+}
+
+func marshalHostResponseJSON(hostResp types.HostOpResponse) string {
+	hostRespJSON, err := types.MarshalPretty(hostResp)
+	if err != nil {
+		log.Printf("agent: marshal host response: %v", err)
+		return hostResponseMarshalFallback
+	}
+	return string(hostRespJSON)
 }
 
 // Run executes the agent loop for a single user goal and returns the final result.
