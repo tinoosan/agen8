@@ -243,7 +243,9 @@ func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, ru
 	run, err := s.sessionService.LoadRun(ctx, runID)
 	if err == nil && run.Runtime != nil {
 		run.Runtime.LifecycleState = "deactivated"
-		_ = s.sessionService.SaveRun(ctx, run)
+		if err := s.sessionService.SaveRun(ctx, run); err != nil {
+			log.Printf("daemon: deactivate subagent: save run %s: %v", runID, err)
+		}
 	}
 
 	s.mu.Lock()
@@ -265,9 +267,11 @@ func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, ru
 	if run, err := s.sessionService.LoadRun(ctx, runID); err == nil {
 		if run.Runtime != nil {
 			run.Runtime.LifecycleState = "archived"
-			_ = s.sessionService.SaveRun(ctx, run)
+			if err := s.sessionService.SaveRun(ctx, run); err != nil {
+				log.Printf("daemon: archive subagent: save run %s: %v", runID, err)
+			}
 		}
-		_, _ = s.sessionService.StopRun(context.Background(), runID, types.RunStatusSucceeded, "archived")
+		_, _ = s.sessionService.StopRun(ctx, runID, types.RunStatusSucceeded, "archived")
 	}
 
 	// Remove worker only after cancellation + terminal run status update to avoid
