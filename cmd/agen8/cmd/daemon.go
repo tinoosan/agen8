@@ -44,5 +44,5 @@ var daemonCmd = &cobra.Command{
 }
 
 func init() {
-	daemonCmd.Flags().DurationVar(&daemonPoll, "poll-interval", 2*time.Second, "inbox polling interval")
+	daemonCmd.Flags().DurationVar(&daemonPoll, "poll-interval", 2*time.Second, "deprecated: legacy polling interval (runtime now wake-driven)")
 }

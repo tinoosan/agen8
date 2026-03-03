@@ -359,7 +359,13 @@ func (m *Manager) CompleteTask(ctx context.Context, taskID string, result types.
 }
 
 func (m *Manager) ClaimTask(ctx context.Context, taskID string, ttl time.Duration) error {
-	return m.store.ClaimTask(ctx, taskID, ttl)
+	if err := m.store.ClaimTask(ctx, taskID, ttl); err != nil {
+		return err
+	}
+	if task, err := m.store.GetTask(ctx, taskID); err == nil {
+		m.notifyWake(task)
+	}
+	return nil
 }
 
 func (m *Manager) ExtendLease(ctx context.Context, taskID string, ttl time.Duration) error {
@@ -367,15 +373,33 @@ func (m *Manager) ExtendLease(ctx context.Context, taskID string, ttl time.Durat
 }
 
 func (m *Manager) ReleaseLease(ctx context.Context, taskID string) error {
-	return m.store.ReleaseLease(ctx, taskID)
+	if err := m.store.ReleaseLease(ctx, taskID); err != nil {
+		return err
+	}
+	if task, err := m.store.GetTask(ctx, taskID); err == nil {
+		m.notifyWake(task)
+	}
+	return nil
 }
 
 func (m *Manager) DelegateTask(ctx context.Context, taskID string) error {
-	return m.store.DelegateTask(ctx, taskID)
+	if err := m.store.DelegateTask(ctx, taskID); err != nil {
+		return err
+	}
+	if task, err := m.store.GetTask(ctx, taskID); err == nil {
+		m.notifyWake(task)
+	}
+	return nil
 }
 
 func (m *Manager) ResumeTask(ctx context.Context, taskID string) error {
-	return m.store.ResumeTask(ctx, taskID)
+	if err := m.store.ResumeTask(ctx, taskID); err != nil {
+		return err
+	}
+	if task, err := m.store.GetTask(ctx, taskID); err == nil {
+		m.notifyWake(task)
+	}
+	return nil
 }
 
 func (m *Manager) RecoverExpiredLeases(ctx context.Context) error {
