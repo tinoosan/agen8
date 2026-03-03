@@ -1451,106 +1451,32 @@ func (s *runtimeSupervisor) stopWorker(runID string, paused bool) {
 }
 
 func (s *runtimeSupervisor) PauseSession(ctx context.Context, sessionID string) ([]string, error) {
-	if s == nil {
-		return nil, nil
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return nil, fmt.Errorf("session id is required")
-	}
-	if s.sessionService == nil {
-		return nil, fmt.Errorf("session store not configured")
-	}
-	sess, err := s.sessionService.LoadSession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	runIDs := collectSessionRunIDs(sess)
-	affected := make([]string, 0, len(runIDs))
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	errs := make([]string, 0, len(runIDs))
-	sem := make(chan struct{}, sessionRunActionConcurrency)
-	for _, runID := range runIDs {
-		runID := strings.TrimSpace(runID)
-		if runID == "" {
-			continue
-		}
-		sem <- struct{}{}
-		wg.Add(1)
-		go func(rid string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-				if err := s.pauseRun(ctx, rid); err != nil {
-				mu.Lock()
-				errs = append(errs, rid+": "+err.Error())
-				mu.Unlock()
-				return
-			}
-			mu.Lock()
-			affected = append(affected, rid)
-			mu.Unlock()
-		}(runID)
-	}
-	wg.Wait()
-	if len(errs) != 0 {
-		return affected, fmt.Errorf("pause session partial failure: %s", strings.Join(errs, "; "))
-	}
-	return affected, nil
+	return s.runSessionAction(ctx, sessionID, "pause", s.pauseRun)
 }
 
 func (s *runtimeSupervisor) ResumeSession(ctx context.Context, sessionID string) ([]string, error) {
-	if s == nil {
-		return nil, nil
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return nil, fmt.Errorf("session id is required")
-	}
-	if s.sessionService == nil {
-		return nil, fmt.Errorf("session store not configured")
-	}
-	sess, err := s.sessionService.LoadSession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	runIDs := collectSessionRunIDs(sess)
-	affected := make([]string, 0, len(runIDs))
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	errs := make([]string, 0, len(runIDs))
-	sem := make(chan struct{}, sessionRunActionConcurrency)
-	for _, runID := range runIDs {
-		runID := strings.TrimSpace(runID)
-		if runID == "" {
-			continue
-		}
-		sem <- struct{}{}
-		wg.Add(1)
-		go func(rid string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			if err := s.ResumeRun(ctx, rid); err != nil {
-				mu.Lock()
-				errs = append(errs, rid+": "+err.Error())
-				mu.Unlock()
-				return
-			}
-			mu.Lock()
-			affected = append(affected, rid)
-			mu.Unlock()
-		}(runID)
-	}
-	wg.Wait()
-	if len(errs) != 0 {
-		return affected, fmt.Errorf("resume session partial failure: %s", strings.Join(errs, "; "))
-	}
-	return affected, nil
+	return s.runSessionAction(ctx, sessionID, "resume", s.ResumeRun)
 }
 
 func (s *runtimeSupervisor) StopSession(ctx context.Context, sessionID string) ([]string, error) {
+	return s.runSessionAction(ctx, sessionID, "stop", s.stopRun)
+}
+
+func (s *runtimeSupervisor) runSessionAction(
+	ctx context.Context,
+	sessionID string,
+	action string,
+	apply func(context.Context, string) error,
+) ([]string, error) {
 	if s == nil {
 		return nil, nil
+	}
+	action = strings.TrimSpace(action)
+	if action == "" {
+		return nil, fmt.Errorf("action is required")
+	}
+	if apply == nil {
+		return nil, fmt.Errorf("apply function is required")
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
@@ -1577,14 +1503,14 @@ func (s *runtimeSupervisor) StopSession(ctx context.Context, sessionID string) (
 		sem <- struct{}{}
 		wg.Add(1)
 		go func(rid string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-				if err := s.stopRun(ctx, rid); err != nil {
-				mu.Lock()
-				errs = append(errs, rid+": "+err.Error())
-				mu.Unlock()
-				return
-			}
+				defer wg.Done()
+				defer func() { <-sem }()
+				if err := apply(ctx, rid); err != nil {
+					mu.Lock()
+					errs = append(errs, rid+": "+err.Error())
+					mu.Unlock()
+					return
+				}
 			mu.Lock()
 			affected = append(affected, rid)
 			mu.Unlock()
@@ -1592,7 +1518,7 @@ func (s *runtimeSupervisor) StopSession(ctx context.Context, sessionID string) (
 	}
 	wg.Wait()
 	if len(errs) != 0 {
-		return affected, fmt.Errorf("stop session partial failure: %s", strings.Join(errs, "; "))
+		return affected, fmt.Errorf("%s session partial failure: %s", action, strings.Join(errs, "; "))
 	}
 	return affected, nil
 }
