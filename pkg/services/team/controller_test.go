@@ -3,6 +3,8 @@ package team
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/tinoosan/agen8/pkg/agent/state"
@@ -54,9 +56,9 @@ type mockRoleRunController struct {
 	summary   string
 }
 
-func (m *mockRoleRunController) RunID() string   { return m.runID }
+func (m *mockRoleRunController) RunID() string     { return m.runID }
 func (m *mockRoleRunController) SessionID() string { return m.sessionID }
-func (m *mockRoleRunController) SetPaused(p bool) { m.paused = p }
+func (m *mockRoleRunController) SetPaused(p bool)  { m.paused = p }
 func (m *mockRoleRunController) SetModel(ctx context.Context, model string) error {
 	m.model = model
 	return nil
@@ -65,6 +67,17 @@ func (m *mockRoleRunController) SetReasoning(ctx context.Context, effort, summar
 	m.effort = effort
 	m.summary = summary
 	return nil
+}
+
+type mockActiveTaskCanceler struct {
+	cancelFn func(ctx context.Context, runID, reason string) (int, error)
+}
+
+func (m *mockActiveTaskCanceler) CancelActiveTasksByRun(ctx context.Context, runID, reason string) (int, error) {
+	if m.cancelFn != nil {
+		return m.cancelFn(ctx, runID, reason)
+	}
+	return 0, nil
 }
 
 func TestController_SetModel_Integration(t *testing.T) {
@@ -136,3 +149,63 @@ func TestController_SetReasoning_Integration(t *testing.T) {
 	}
 }
 
+func TestController_PauseRuns_ReturnsTaskCancelError(t *testing.T) {
+	sessionSvc := &mockSessionService{}
+	rt := &mockRoleRunController{runID: "run-1", sessionID: "sess-1"}
+	ctrl := NewController(ControllerConfig{
+		SessionService: sessionSvc,
+		TaskCanceler: &mockActiveTaskCanceler{
+			cancelFn: func(ctx context.Context, runID, reason string) (int, error) {
+				return 0, fmt.Errorf("cancel failed")
+			},
+		},
+		Runtimes: []RoleRunController{rt},
+	})
+
+	affected, err := ctrl.PauseRuns(context.Background(), "sess-1", "")
+	if err == nil {
+		t.Fatalf("expected pause error")
+	}
+	if len(affected) != 0 {
+		t.Fatalf("expected no successful runs on pause failure, got %v", affected)
+	}
+	if !strings.Contains(err.Error(), "cancel active tasks for run run-1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestController_StopRuns_ReturnsStopAndCancelErrors(t *testing.T) {
+	sessionSvc := &mockSessionService{}
+	rt := &mockRoleRunController{runID: "run-1", sessionID: "sess-1"}
+	ctrl := NewController(ControllerConfig{
+		SessionService: sessionSvc,
+		TaskCanceler: &mockActiveTaskCanceler{
+			cancelFn: func(ctx context.Context, runID, reason string) (int, error) {
+				return 0, fmt.Errorf("cancel failed")
+			},
+		},
+		RunStopper: &mockRunStopper{
+			stopRun: func(ctx context.Context, runID string) error {
+				return fmt.Errorf("stop failed")
+			},
+		},
+		Runtimes: []RoleRunController{rt},
+	})
+
+	affected, err := ctrl.StopRuns(context.Background(), "sess-1", "")
+	if err == nil {
+		t.Fatalf("expected stop error")
+	}
+	if len(affected) != 0 {
+		t.Fatalf("expected no successful runs on stop failure, got %v", affected)
+	}
+	if !strings.Contains(err.Error(), "stop run run-1") {
+		t.Fatalf("expected stop-run error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "cancel active tasks for run run-1") {
+		t.Fatalf("expected cancel error, got: %v", err)
+	}
+	if !rt.paused {
+		t.Fatalf("expected runtime paused flag to be set")
+	}
+}

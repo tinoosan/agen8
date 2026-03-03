@@ -204,10 +204,13 @@ func (c *Controller) PauseRuns(ctx context.Context, threadID, sessionID string) 
 			return err
 		}
 		r.SetPaused(true)
+		var opErr error
 		if c.taskCanceler != nil {
-			_, _ = c.taskCanceler.CancelActiveTasksByRun(ctx, runID, "run paused")
+			if _, err := c.taskCanceler.CancelActiveTasksByRun(ctx, runID, "run paused"); err != nil {
+				opErr = errors.Join(opErr, fmt.Errorf("cancel active tasks for run %s: %w", runID, err))
+			}
 		}
-		return nil
+		return opErr
 	})
 }
 
@@ -268,13 +271,18 @@ func (c *Controller) StopRuns(ctx context.Context, threadID, sessionID string) (
 			return err
 		}
 		r.SetPaused(true)
+		var opErr error
 		if c.runStopper != nil {
-			_ = c.runStopper.StopRun(ctx, runID)
+			if err := c.runStopper.StopRun(ctx, runID); err != nil {
+				opErr = errors.Join(opErr, fmt.Errorf("stop run %s: %w", runID, err))
+			}
 		}
 		if c.taskCanceler != nil {
-			_, _ = c.taskCanceler.CancelActiveTasksByRun(ctx, runID, "run stopped")
+			if _, err := c.taskCanceler.CancelActiveTasksByRun(ctx, runID, "run stopped"); err != nil {
+				opErr = errors.Join(opErr, fmt.Errorf("cancel active tasks for run %s: %w", runID, err))
+			}
 		}
-		return nil
+		return opErr
 	})
 }
 

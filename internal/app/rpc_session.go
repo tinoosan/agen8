@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -656,12 +657,15 @@ func (s *RPCServer) setSessionStoppedState(ctx context.Context, threadID, sessio
 			return affected, asProtocolError(err)
 		}
 		loaded, lerr := s.session.LoadRun(ctx, runID)
-		if lerr == nil {
-			loaded.Status = types.RunStatusCanceled
-			now := time.Now().UTC()
-			loaded.FinishedAt = &now
-			loaded.Error = nil
-			_ = s.session.SaveRun(ctx, loaded)
+		if lerr != nil {
+			return affected, fmt.Errorf("load run %s: %w", runID, lerr)
+		}
+		loaded.Status = types.RunStatusCanceled
+		now := time.Now().UTC()
+		loaded.FinishedAt = &now
+		loaded.Error = nil
+		if err := s.session.SaveRun(ctx, loaded); err != nil {
+			return affected, fmt.Errorf("save run %s: %w", runID, err)
 		}
 		affected = append(affected, runID)
 	}
@@ -847,8 +851,13 @@ func (s *RPCServer) taskClaim(ctx context.Context, p protocol.TaskClaimParams) (
 	if strings.TrimSpace(task.RoleSnapshot) == "" {
 		task.RoleSnapshot = strings.TrimSpace(task.AssignedRole)
 	}
-	_ = s.taskService.UpdateTask(ctx, task)
-	task, _ = s.taskService.GetTask(ctx, taskID)
+	if err := s.taskService.UpdateTask(ctx, task); err != nil {
+		return protocol.TaskClaimResult{}, err
+	}
+	task, err = s.taskService.GetTask(ctx, taskID)
+	if err != nil {
+		return protocol.TaskClaimResult{}, err
+	}
 	return protocol.TaskClaimResult{Task: protocolTaskFromTypesTask(task)}, nil
 }
 

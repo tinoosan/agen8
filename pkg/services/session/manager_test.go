@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/tinoosan/agen8/pkg/config"
@@ -102,11 +103,12 @@ func (m *mockStore) LatestRunningRun(ctx context.Context) (types.Run, error) {
 
 type mockSupervisor struct {
 	stoppedRuns []string
+	stopErr     error
 }
 
 func (s *mockSupervisor) StopRun(ctx context.Context, runID string) error {
 	s.stoppedRuns = append(s.stoppedRuns, runID)
-	return nil
+	return s.stopErr
 }
 
 func (s *mockSupervisor) ResumeRun(ctx context.Context, runID string) error {
@@ -146,5 +148,26 @@ func TestManager_Delete(t *testing.T) {
 	// Check if session was deleted from store
 	if len(store.deletedSessions) != 1 || store.deletedSessions[0] != "sess-1" {
 		t.Errorf("expected session sess-1 to be deleted, got %v", store.deletedSessions)
+	}
+}
+
+func TestManager_Delete_ContinuesWhenStopFails(t *testing.T) {
+	store := &mockStore{
+		runs: map[string]types.Run{
+			"run-1": {RunID: "run-1", SessionID: "sess-1"},
+		},
+	}
+	supervisor := &mockSupervisor{stopErr: errors.New("stop failed")}
+
+	mgr := session.NewManager(config.Config{}, store, supervisor)
+
+	if err := mgr.Delete(context.Background(), "sess-1"); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+	if len(supervisor.stoppedRuns) != 1 || supervisor.stoppedRuns[0] != "run-1" {
+		t.Fatalf("expected stop attempt for run-1, got %v", supervisor.stoppedRuns)
+	}
+	if len(store.deletedSessions) != 1 || store.deletedSessions[0] != "sess-1" {
+		t.Fatalf("expected session delete to continue, got %v", store.deletedSessions)
 	}
 }

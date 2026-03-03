@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/tinoosan/agen8/pkg/config"
@@ -95,8 +96,7 @@ func (m *Manager) Stop(ctx context.Context, sessionID string) error {
 // Delete stops the session runs and removes persistent data.
 func (m *Manager) Delete(ctx context.Context, sessionID string) error {
 	if err := m.Stop(ctx, sessionID); err != nil {
-		// Best effort; log and continue
-		_ = err
+		log.Printf("session delete: stop runs best-effort for session %s: %v", strings.TrimSpace(sessionID), err)
 	}
 	if err := m.store.DeleteSession(ctx, sessionID); err != nil {
 		return fmt.Errorf("delete session storage: %w", err)
