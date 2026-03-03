@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -20,6 +22,49 @@ import (
 	pkgtask "github.com/tinoosan/agen8/pkg/services/task"
 	"github.com/tinoosan/agen8/pkg/types"
 )
+
+type ctxCheckingSessionService struct {
+	pkgsession.Service
+	expected context.Context
+	loadRun  func(runID string) (types.Run, error)
+	saveRun  func(run types.Run) error
+}
+
+func (s *ctxCheckingSessionService) LoadRun(ctx context.Context, runID string) (types.Run, error) {
+	if s.expected != nil && ctx != s.expected {
+		return types.Run{}, fmt.Errorf("LoadRun received unexpected context")
+	}
+	if s.loadRun != nil {
+		return s.loadRun(runID)
+	}
+	return types.Run{}, nil
+}
+
+func (s *ctxCheckingSessionService) SaveRun(ctx context.Context, run types.Run) error {
+	if s.expected != nil && ctx != s.expected {
+		return fmt.Errorf("SaveRun received unexpected context")
+	}
+	if s.saveRun != nil {
+		return s.saveRun(run)
+	}
+	return nil
+}
+
+type ctxCheckingTaskService struct {
+	pkgtask.TaskServiceForSupervisor
+	expected context.Context
+	cancel   func(runID, reason string) (int, error)
+}
+
+func (s *ctxCheckingTaskService) CancelActiveTasksByRun(ctx context.Context, runID, reason string) (int, error) {
+	if s.expected != nil && ctx != s.expected {
+		return 0, fmt.Errorf("CancelActiveTasksByRun received unexpected context")
+	}
+	if s.cancel != nil {
+		return s.cancel(runID, reason)
+	}
+	return 0, nil
+}
 
 // newSupervisorTestSessionService creates a session service backed by SQLite for supervisor tests.
 func newSupervisorTestSessionService(t *testing.T, cfg config.Config) pkgsession.Service {
@@ -327,6 +372,95 @@ func TestRuntimeSupervisor_PauseRun_CancelsWorkerAndActiveTasks(t *testing.T) {
 	}
 	if loadedTask.Status != types.TaskStatusCanceled {
 		t.Fatalf("task status=%q want %q", loadedTask.Status, types.TaskStatusCanceled)
+	}
+}
+
+func TestRuntimeSupervisor_PauseRun_UsesCallerContext(t *testing.T) {
+	ctx := context.WithValue(context.Background(), struct{}{}, "marker")
+	cancelCalled := false
+	sessionSvc := &ctxCheckingSessionService{
+		expected: ctx,
+		loadRun: func(runID string) (types.Run, error) {
+			return types.Run{RunID: runID, Status: types.RunStatusPaused}, nil
+		},
+	}
+	taskSvc := &ctxCheckingTaskService{
+		expected: ctx,
+		cancel: func(runID, reason string) (int, error) {
+			cancelCalled = true
+			return 1, nil
+		},
+	}
+	supervisor := &runtimeSupervisor{
+		sessionService: sessionSvc,
+		taskService:    taskSvc,
+		workers:        map[string]*managedRuntime{},
+	}
+
+	if err := supervisor.pauseRun(ctx, "run-ctx-1"); err != nil {
+		t.Fatalf("pauseRun: %v", err)
+	}
+	if !cancelCalled {
+		t.Fatalf("expected CancelActiveTasksByRun to be called")
+	}
+}
+
+func TestRuntimeSupervisor_StopRun_UsesCallerContext(t *testing.T) {
+	ctx := context.WithValue(context.Background(), struct{}{}, "marker")
+	cancelCalled := false
+	var saved types.Run
+	sessionSvc := &ctxCheckingSessionService{
+		expected: ctx,
+		loadRun: func(runID string) (types.Run, error) {
+			return types.Run{RunID: runID, Status: types.RunStatusRunning}, nil
+		},
+		saveRun: func(run types.Run) error {
+			saved = run
+			return nil
+		},
+	}
+	taskSvc := &ctxCheckingTaskService{
+		expected: ctx,
+		cancel: func(runID, reason string) (int, error) {
+			cancelCalled = true
+			return 1, nil
+		},
+	}
+	supervisor := &runtimeSupervisor{
+		sessionService: sessionSvc,
+		taskService:    taskSvc,
+		workers:        map[string]*managedRuntime{},
+	}
+
+	if err := supervisor.stopRun(ctx, "run-ctx-2"); err != nil {
+		t.Fatalf("stopRun: %v", err)
+	}
+	if !cancelCalled {
+		t.Fatalf("expected CancelActiveTasksByRun to be called")
+	}
+	if saved.Status != types.RunStatusCanceled {
+		t.Fatalf("saved status=%q want %q", saved.Status, types.RunStatusCanceled)
+	}
+}
+
+func TestRuntimeSupervisor_StopRun_HonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	sessionSvc := &ctxCheckingSessionService{
+		expected: ctx,
+		loadRun: func(runID string) (types.Run, error) {
+			return types.Run{}, ctx.Err()
+		},
+	}
+	supervisor := &runtimeSupervisor{
+		sessionService: sessionSvc,
+		taskService:    &ctxCheckingTaskService{expected: ctx},
+		workers:        map[string]*managedRuntime{},
+	}
+
+	err := supervisor.stopRun(ctx, "run-ctx-3")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
 
