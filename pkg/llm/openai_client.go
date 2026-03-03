@@ -59,6 +59,73 @@ var internalUserRepairPrefixes = [...]string{
 	internalUserRepairPrefixHostOpResponse,
 }
 
+const (
+	toolChoiceModeAuto     = "auto"
+	toolChoiceModeNone     = "none"
+	toolChoiceModeRequired = "required"
+	toolChoiceModeFunction = "function"
+)
+
+type normalizedFunctionTool struct {
+	name        string
+	description string
+	schema      map[string]any
+	strict      bool
+}
+
+type normalizedToolChoice struct {
+	mode         string
+	functionName string
+}
+
+func normalizeFunctionTools(tools []types.Tool) ([]normalizedFunctionTool, error) {
+	out := make([]normalizedFunctionTool, 0, len(tools))
+	for _, t := range tools {
+		if !strings.EqualFold(t.Type, "function") {
+			return nil, fmt.Errorf("unsupported tool type %q", t.Type)
+		}
+		name := strings.TrimSpace(t.Function.Name)
+		if name == "" {
+			return nil, fmt.Errorf("tool.function.name is required")
+		}
+		schema, ok := t.Function.Parameters.(map[string]any)
+		if !ok && t.Function.Parameters != nil {
+			return nil, fmt.Errorf("tool.function.parameters must be a JSON schema object")
+		}
+		out = append(out, normalizedFunctionTool{
+			name:        name,
+			description: strings.TrimSpace(t.Function.Description),
+			schema:      schema,
+			strict:      t.Function.Strict,
+		})
+	}
+	return out, nil
+}
+
+func normalizeToolChoice(raw string) (normalizedToolChoice, error) {
+	choice := strings.TrimSpace(raw)
+	switch strings.ToLower(choice) {
+	case "", toolChoiceModeAuto:
+		return normalizedToolChoice{mode: toolChoiceModeAuto}, nil
+	case toolChoiceModeNone:
+		return normalizedToolChoice{mode: toolChoiceModeNone}, nil
+	case toolChoiceModeRequired:
+		return normalizedToolChoice{mode: toolChoiceModeRequired}, nil
+	default:
+		if strings.HasPrefix(strings.ToLower(choice), toolChoiceModeFunction+":") {
+			funcName := strings.TrimSpace(choice[len(toolChoiceModeFunction)+1:])
+			if funcName == "" {
+				return normalizedToolChoice{}, fmt.Errorf("toolChoice function name is required")
+			}
+			return normalizedToolChoice{
+				mode:         toolChoiceModeFunction,
+				functionName: funcName,
+			}, nil
+		}
+		return normalizedToolChoice{}, fmt.Errorf("unsupported toolChoice %q", raw)
+	}
+}
+
 func NewClientFromEnv() (*Client, error) {
 	return NewClientFromEnvWithConfig(OpenAIClientConfig{})
 }
@@ -400,60 +467,48 @@ func (c *Client) buildParams(req types.LLMRequest) (openai.ChatCompletionNewPara
 
 	// Tool/function calling (Chat Completions).
 	if len(req.Tools) != 0 {
-		tools := make([]openai.ChatCompletionToolUnionParam, 0, len(req.Tools))
-		for _, t := range req.Tools {
-			if !strings.EqualFold(t.Type, "function") {
-				return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported tool type %q", t.Type)
-			}
-			name := strings.TrimSpace(t.Function.Name)
-			if name == "" {
-				return openai.ChatCompletionNewParams{}, fmt.Errorf("tool.function.name is required")
-			}
-			schema, ok := t.Function.Parameters.(map[string]any)
-			if !ok && t.Function.Parameters != nil {
-				return openai.ChatCompletionNewParams{}, fmt.Errorf("tool.function.parameters must be a JSON schema object")
-			}
+		normalizedTools, err := normalizeFunctionTools(req.Tools)
+		if err != nil {
+			return openai.ChatCompletionNewParams{}, err
+		}
+		tools := make([]openai.ChatCompletionToolUnionParam, 0, len(normalizedTools))
+		for _, tool := range normalizedTools {
 			fn := shared.FunctionDefinitionParam{
-				Name: name,
+				Name: tool.name,
 			}
-			if strings.TrimSpace(t.Function.Description) != "" {
-				fn.Description = param.NewOpt(strings.TrimSpace(t.Function.Description))
+			if tool.description != "" {
+				fn.Description = param.NewOpt(tool.description)
 			}
-			if t.Function.Strict {
+			if tool.strict {
 				fn.Strict = param.NewOpt(true)
 			}
-			if schema != nil {
-				fn.Parameters = shared.FunctionParameters(schema)
+			if tool.schema != nil {
+				fn.Parameters = shared.FunctionParameters(tool.schema)
 			}
 			tools = append(tools, openai.ChatCompletionFunctionTool(fn))
 		}
 		params.Tools = tools
 
-		choice := strings.TrimSpace(req.ToolChoice)
-		switch strings.ToLower(choice) {
-		case "", "auto":
+		choice, err := normalizeToolChoice(req.ToolChoice)
+		if err != nil {
+			return openai.ChatCompletionNewParams{}, err
+		}
+		switch choice.mode {
+		case toolChoiceModeAuto:
 			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(string(openai.ChatCompletionToolChoiceOptionAutoAuto))}
-		case "none":
+		case toolChoiceModeNone:
 			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(string(openai.ChatCompletionToolChoiceOptionAutoNone))}
-		case "required":
+		case toolChoiceModeRequired:
 			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(string(openai.ChatCompletionToolChoiceOptionAutoRequired))}
 			// Allow multiple tool calls per turn to reduce round-trips. The agent loop
 			// already supports handling multiple tool calls in one response.
-		default:
-			if strings.HasPrefix(strings.ToLower(choice), "function:") {
-				funcName := strings.TrimSpace(choice[len("function:"):])
-				if funcName == "" {
-					return openai.ChatCompletionNewParams{}, fmt.Errorf("toolChoice function name is required")
-				}
-				params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
-					OfFunctionToolChoice: &openai.ChatCompletionNamedToolChoiceParam{
-						Function: openai.ChatCompletionNamedToolChoiceFunctionParam{Name: funcName},
-						Type:     openaiConstant.Function("function"),
-					},
-				}
-				break
+		case toolChoiceModeFunction:
+			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
+				OfFunctionToolChoice: &openai.ChatCompletionNamedToolChoiceParam{
+					Function: openai.ChatCompletionNamedToolChoiceFunctionParam{Name: choice.functionName},
+					Type:     openaiConstant.Function("function"),
+				},
 			}
-			return openai.ChatCompletionNewParams{}, fmt.Errorf("unsupported toolChoice %q", req.ToolChoice)
 		}
 	}
 
@@ -676,65 +731,54 @@ func (c *Client) buildResponseParams(ctx context.Context, req types.LLMRequest) 
 
 	// Tool/function calling (Responses API).
 	if len(req.Tools) != 0 {
-		tools := make([]responses.ToolUnionParam, 0, len(req.Tools))
-		for _, t := range req.Tools {
-			if !strings.EqualFold(t.Type, "function") {
-				return responses.ResponseNewParams{}, fmt.Errorf("unsupported tool type %q", t.Type)
-			}
-			name := strings.TrimSpace(t.Function.Name)
-			if name == "" {
-				return responses.ResponseNewParams{}, fmt.Errorf("tool.function.name is required")
-			}
-			schema, ok := t.Function.Parameters.(map[string]any)
-			if !ok && t.Function.Parameters != nil {
-				return responses.ResponseNewParams{}, fmt.Errorf("tool.function.parameters must be a JSON schema object")
-			}
+		normalizedTools, err := normalizeFunctionTools(req.Tools)
+		if err != nil {
+			return responses.ResponseNewParams{}, err
+		}
+		tools := make([]responses.ToolUnionParam, 0, len(normalizedTools))
+		for _, tool := range normalizedTools {
+			schema := tool.schema
 			if schema == nil {
 				schema = map[string]any{}
 			}
 			fn := responses.FunctionToolParam{
-				Name:       name,
+				Name:       tool.name,
 				Parameters: schema,
-				Strict:     param.NewOpt(t.Function.Strict),
+				Strict:     param.NewOpt(tool.strict),
 			}
-			if strings.TrimSpace(t.Function.Description) != "" {
-				fn.Description = param.NewOpt(strings.TrimSpace(t.Function.Description))
+			if tool.description != "" {
+				fn.Description = param.NewOpt(tool.description)
 			}
 			tools = append(tools, responses.ToolUnionParam{OfFunction: &fn})
 		}
 		params.Tools = tools
 
-		choice := strings.TrimSpace(req.ToolChoice)
-		switch strings.ToLower(choice) {
-		case "", "auto":
+		choice, err := normalizeToolChoice(req.ToolChoice)
+		if err != nil {
+			return responses.ResponseNewParams{}, err
+		}
+		switch choice.mode {
+		case toolChoiceModeAuto:
 			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
 				OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto),
 			}
-		case "none":
+		case toolChoiceModeNone:
 			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
 				OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsNone),
 			}
-		case "required":
+		case toolChoiceModeRequired:
 			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
 				OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsRequired),
 			}
 			// Allow multiple tool calls per turn to reduce round-trips. The agent loop
 			// already supports handling multiple tool calls in one response.
-		default:
-			if strings.HasPrefix(strings.ToLower(choice), "function:") {
-				funcName := strings.TrimSpace(choice[len("function:"):])
-				if funcName == "" {
-					return responses.ResponseNewParams{}, fmt.Errorf("toolChoice function name is required")
-				}
-				params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
-					OfFunctionTool: &responses.ToolChoiceFunctionParam{
-						Name: funcName,
-						Type: openaiConstant.Function("function"),
-					},
-				}
-				break
+		case toolChoiceModeFunction:
+			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
+				OfFunctionTool: &responses.ToolChoiceFunctionParam{
+					Name: choice.functionName,
+					Type: openaiConstant.Function("function"),
+				},
 			}
-			return responses.ResponseNewParams{}, fmt.Errorf("unsupported toolChoice %q", req.ToolChoice)
 		}
 	}
 
