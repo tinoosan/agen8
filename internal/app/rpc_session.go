@@ -1395,6 +1395,13 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 	if offset < 0 {
 		offset = 0
 	}
+	nextOffset := func(start, count, total int) int {
+		if start+count < total {
+			return start + count
+		}
+		return 0
+	}
+	batchReader, hasBatchReader := s.session.(sessionActivityBatchReader)
 
 	if strings.TrimSpace(scope.teamID) == "" {
 		runID := strings.TrimSpace(scope.runID)
@@ -1417,21 +1424,65 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 				}
 			}
 			total, _ := s.session.CountActivities(ctx, runID)
-			next := 0
-			if offset+len(acts) < total {
-				next = offset + len(acts)
-			}
-			return protocol.ActivityListResult{Activities: acts, TotalCount: total, NextOffset: next}, nil
+			return protocol.ActivityListResult{
+				Activities: acts,
+				TotalCount: total,
+				NextOffset: nextOffset(offset, len(acts), total),
+			}, nil
 		}
-		// Include activities from child runs (sub-agents) with Data["role"] set.
+
+		parentRole := "agent"
+		if s.run.Runtime != nil && strings.TrimSpace(s.run.Runtime.Profile) != "" {
+			parentRole = strings.TrimSpace(s.run.Runtime.Profile)
+		}
+		roleByRunID := map[string]string{runID: parentRole}
+		runIDs := []string{runID}
+		children, childErr := s.session.ListChildRuns(ctx, runID)
+		if childErr == nil {
+			for _, child := range children {
+				childRunID := strings.TrimSpace(child.RunID)
+				if childRunID == "" {
+					continue
+				}
+				n := child.SpawnIndex
+				if n <= 0 {
+					n = 1
+				}
+				roleByRunID[childRunID] = fmt.Sprintf("Sub-agent %d", n)
+				runIDs = append(runIDs, childRunID)
+			}
+		}
+		if hasBatchReader {
+			total, totalErr := batchReader.CountActivitiesByRunIDs(ctx, runIDs)
+			if totalErr == nil {
+				acts, listErr := batchReader.ListActivitiesByRunIDs(ctx, runIDs, limit, offset, p.SortDesc)
+				if listErr == nil {
+					for i := range acts {
+						if acts[i].Data == nil {
+							acts[i].Data = map[string]string{}
+						}
+						runForAct := strings.TrimSpace(acts[i].Data["runId"])
+						role := strings.TrimSpace(roleByRunID[runForAct])
+						if role == "" {
+							role = parentRole
+						}
+						if strings.TrimSpace(acts[i].Data["role"]) == "" {
+							acts[i].Data["role"] = role
+						}
+					}
+					return protocol.ActivityListResult{
+						Activities: acts,
+						TotalCount: total,
+						NextOffset: nextOffset(offset, len(acts), total),
+					}, nil
+				}
+			}
+		}
+
+		// Compatibility fallback when batched query path is unavailable.
 		merged := make([]types.Activity, 0, 256)
 		parentActs, err := s.session.ListActivities(ctx, runID, 500, 0)
 		if err == nil {
-			// Populate Data["role"] with the profile name for standalone parent runs.
-			parentRole := "agent"
-			if s.run.Runtime != nil && strings.TrimSpace(s.run.Runtime.Profile) != "" {
-				parentRole = strings.TrimSpace(s.run.Runtime.Profile)
-			}
 			for i := range parentActs {
 				if parentActs[i].Data == nil {
 					parentActs[i].Data = map[string]string{}
@@ -1442,15 +1493,19 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 			}
 			merged = append(merged, parentActs...)
 		}
-		children, err := s.session.ListChildRuns(ctx, runID)
+		children, err = s.session.ListChildRuns(ctx, runID)
 		if err == nil {
 			for _, child := range children {
+				childRunID := strings.TrimSpace(child.RunID)
+				if childRunID == "" {
+					continue
+				}
 				n := child.SpawnIndex
 				if n <= 0 {
 					n = 1
 				}
 				childRole := fmt.Sprintf("Sub-agent %d", n)
-				childActs, err := s.session.ListActivities(ctx, child.RunID, 300, 0)
+				childActs, err := s.session.ListActivities(ctx, childRunID, 300, 0)
 				if err != nil {
 					continue
 				}
@@ -1481,11 +1536,11 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 		if offset < end {
 			out = append(out, merged[offset:end]...)
 		}
-		next := 0
-		if end < total {
-			next = end
-		}
-		return protocol.ActivityListResult{Activities: out, TotalCount: total, NextOffset: next}, nil
+		return protocol.ActivityListResult{
+			Activities: out,
+			TotalCount: total,
+			NextOffset: nextOffset(offset, len(out), total),
+		}, nil
 	}
 
 	manifestRunIDs, runRole := s.loadTeamManifestRunRoles(ctx, strings.TrimSpace(scope.teamID))
@@ -1525,16 +1580,51 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 			runSet = map[string]struct{}{}
 		}
 	}
-	merged := make([]types.Activity, 0, 512)
+
+	roleFilter := strings.TrimSpace(p.Role)
+	runIDs := make([]string, 0, len(runSet))
 	for runID := range runSet {
+		role := strings.TrimSpace(runRole[runID])
+		if roleFilter != "" && !strings.EqualFold(roleFilter, role) {
+			continue
+		}
+		runIDs = append(runIDs, runID)
+	}
+	if hasBatchReader {
+		total, totalErr := batchReader.CountActivitiesByRunIDs(ctx, runIDs)
+		if totalErr == nil {
+			acts, listErr := batchReader.ListActivitiesByRunIDs(ctx, runIDs, limit, offset, p.SortDesc)
+			if listErr == nil {
+				for i := range acts {
+					if acts[i].Data == nil {
+						acts[i].Data = map[string]string{}
+					}
+					runForAct := strings.TrimSpace(acts[i].Data["runId"])
+					role := strings.TrimSpace(runRole[runForAct])
+					if role != "" {
+						acts[i].Data["role"] = role
+					}
+					if runForAct != "" {
+						acts[i].ID = runForAct + ":" + acts[i].ID
+					}
+				}
+				return protocol.ActivityListResult{
+					Activities: acts,
+					TotalCount: total,
+					NextOffset: nextOffset(offset, len(acts), total),
+				}, nil
+			}
+		}
+	}
+
+	// Compatibility fallback when batched query path is unavailable.
+	merged := make([]types.Activity, 0, 512)
+	for _, runID := range runIDs {
 		acts, err := s.session.ListActivities(ctx, runID, 300, 0)
 		if err != nil {
 			continue
 		}
 		role := strings.TrimSpace(runRole[runID])
-		if roleFilter := strings.TrimSpace(p.Role); roleFilter != "" && !strings.EqualFold(roleFilter, role) {
-			continue
-		}
 		for i := range acts {
 			if role != "" {
 				if acts[i].Data == nil {
@@ -1564,11 +1654,11 @@ func (s *RPCServer) activityList(ctx context.Context, p protocol.ActivityListPar
 	if offset < end {
 		out = append(out, merged[offset:end]...)
 	}
-	next := 0
-	if end < total {
-		next = end
-	}
-	return protocol.ActivityListResult{Activities: out, TotalCount: total, NextOffset: next}, nil
+	return protocol.ActivityListResult{
+		Activities: out,
+		TotalCount: total,
+		NextOffset: nextOffset(offset, len(out), total),
+	}, nil
 }
 
 func (s *RPCServer) threadGet(ctx context.Context, p protocol.ThreadGetParams) (protocol.ThreadGetResult, error) {

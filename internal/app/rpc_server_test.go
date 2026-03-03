@@ -3347,6 +3347,141 @@ func TestRPCServer_ActivityList_TeamRunFilter(t *testing.T) {
 	}
 }
 
+func TestRPCServer_ActivityList_TeamPaginationAcrossRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	_, runA, err := implstore.CreateSession(cfg, "goal-a", 8*1024)
+	if err != nil {
+		t.Fatalf("create run-a session: %v", err)
+	}
+	_, runB, err := implstore.CreateSession(cfg, "goal-b", 8*1024)
+	if err != nil {
+		t.Fatalf("create run-b session: %v", err)
+	}
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	teamID := "team-paginated"
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-a", SessionID: run.SessionID, RunID: runA.RunID, TeamID: teamID, AssignedRole: "researcher",
+		Goal: "A", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-b", SessionID: run.SessionID, RunID: runB.RunID, TeamID: teamID, AssignedRole: "writer",
+		Goal: "B", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	for i := range 3 {
+		if err := implstore.AppendEvent(context.Background(), cfg, types.EventRecord{
+			RunID:     runA.RunID,
+			Timestamp: now.Add(time.Duration(i) * time.Second),
+			Type:      "agent.op.request",
+			Message:   fmt.Sprintf("run-a op %d", i),
+			Data: map[string]string{
+				"opId": fmt.Sprintf("a%d", i),
+				"op":   "fs_read",
+				"path": fmt.Sprintf("/workspace/a-%d.txt", i),
+			},
+		}); err != nil {
+			t.Fatalf("append event run-a: %v", err)
+		}
+	}
+	for i := range 2 {
+		if err := implstore.AppendEvent(context.Background(), cfg, types.EventRecord{
+			RunID:     runB.RunID,
+			Timestamp: now.Add(time.Duration(i+10) * time.Second),
+			Type:      "agent.op.request",
+			Message:   fmt.Sprintf("run-b op %d", i),
+			Data: map[string]string{
+				"opId": fmt.Sprintf("b%d", i),
+				"op":   "fs_read",
+				"path": fmt.Sprintf("/workspace/b-%d.txt", i),
+			},
+		}); err != nil {
+			t.Fatalf("append event run-b: %v", err)
+		}
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	reqPage1, _ := protocol.NewRequest("1", protocol.MethodActivityList, protocol.ActivityListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   teamID,
+		Limit:    2,
+		Offset:   0,
+	})
+	respPage1 := rpcRoundTrip(t, srv, reqPage1)
+	if respPage1.Error != nil {
+		t.Fatalf("activity.list page1 error: %+v", respPage1.Error)
+	}
+	var page1 protocol.ActivityListResult
+	_ = json.Unmarshal(respPage1.Result, &page1)
+	if page1.TotalCount != 5 || len(page1.Activities) != 2 || page1.NextOffset != 2 {
+		t.Fatalf("page1 unexpected: %+v", page1)
+	}
+
+	reqPage2, _ := protocol.NewRequest("2", protocol.MethodActivityList, protocol.ActivityListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   teamID,
+		Limit:    2,
+		Offset:   2,
+	})
+	respPage2 := rpcRoundTrip(t, srv, reqPage2)
+	if respPage2.Error != nil {
+		t.Fatalf("activity.list page2 error: %+v", respPage2.Error)
+	}
+	var page2 protocol.ActivityListResult
+	_ = json.Unmarshal(respPage2.Result, &page2)
+	if page2.TotalCount != 5 || len(page2.Activities) != 2 || page2.NextOffset != 4 {
+		t.Fatalf("page2 unexpected: %+v", page2)
+	}
+
+	reqPage3, _ := protocol.NewRequest("3", protocol.MethodActivityList, protocol.ActivityListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   teamID,
+		Limit:    2,
+		Offset:   4,
+	})
+	respPage3 := rpcRoundTrip(t, srv, reqPage3)
+	if respPage3.Error != nil {
+		t.Fatalf("activity.list page3 error: %+v", respPage3.Error)
+	}
+	var page3 protocol.ActivityListResult
+	_ = json.Unmarshal(respPage3.Result, &page3)
+	if page3.TotalCount != 5 || len(page3.Activities) != 1 || page3.NextOffset != 0 {
+		t.Fatalf("page3 unexpected: %+v", page3)
+	}
+
+	reqRole, _ := protocol.NewRequest("4", protocol.MethodActivityList, protocol.ActivityListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   teamID,
+		Role:     "writer",
+		Limit:    10,
+	})
+	respRole := rpcRoundTrip(t, srv, reqRole)
+	if respRole.Error != nil {
+		t.Fatalf("activity.list role filter error: %+v", respRole.Error)
+	}
+	var roleOut protocol.ActivityListResult
+	_ = json.Unmarshal(respRole.Result, &roleOut)
+	if roleOut.TotalCount != 2 || len(roleOut.Activities) != 2 {
+		t.Fatalf("role filter unexpected: %+v", roleOut)
+	}
+	for _, act := range roleOut.Activities {
+		if !strings.HasPrefix(strings.TrimSpace(act.ID), runB.RunID+":") {
+			t.Fatalf("expected writer(run-b) activity ids only, got %q", act.ID)
+		}
+	}
+}
+
 func TestRPCServer_PlanGet_AggregateTeamUsesManifestRuns(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")
