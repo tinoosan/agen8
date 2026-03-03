@@ -366,8 +366,11 @@ func fetchSessionItem(call func(method string, params, out any) error, sessionID
 	return protocol.SessionListItem{}, fmt.Errorf("session %q not found", sessionID)
 }
 
-func tickCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+func tickCmd(interval time.Duration) tea.Cmd {
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	return tea.Tick(interval, func(time.Time) tea.Msg {
 		return tickMsg{}
 	})
 }

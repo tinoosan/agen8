@@ -14,6 +14,7 @@ import (
 type Options struct {
 	ProjectRoot        string
 	FollowProjectState bool
+	RefreshInterval    time.Duration
 }
 
 // Model is the Bubble Tea model for the full-screen dashboard TUI.
@@ -24,6 +25,7 @@ type Model struct {
 	height             int
 	projectRoot        string
 	followProjectState bool
+	refreshInterval    time.Duration
 
 	connected bool
 	lastErr   string
@@ -48,11 +50,16 @@ func Run(endpoint, sessionID string, opts Options) error {
 	if endpoint == "" {
 		endpoint = protocol.DefaultRPCEndpoint
 	}
+	refreshInterval := opts.RefreshInterval
+	if refreshInterval <= 0 {
+		refreshInterval = 2 * time.Second
+	}
 	m := &Model{
 		endpoint:           endpoint,
 		sessionID:          sessionID,
 		projectRoot:        opts.ProjectRoot,
 		followProjectState: opts.FollowProjectState,
+		refreshInterval:    refreshInterval,
 		connected:          true,
 		sessionMode:        "standalone",
 	}
@@ -64,7 +71,7 @@ func Run(endpoint, sessionID string, opts Options) error {
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		fetchDataCmd(m.endpoint, m.sessionID),
-		tickCmd(),
+		tickCmd(m.refreshInterval),
 		adapter.StartNotificationListenerCmd(m.endpoint),
 	)
 }

@@ -24,9 +24,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = ""
 		}
 		if m.followProjectState {
-			return m, tea.Batch(syncSessionCmd(m.projectRoot, m.sessionID), tickCmd())
+			return m, tea.Batch(syncSessionCmd(m.projectRoot, m.sessionID), tickCmd(m.refreshInterval))
 		}
-		return m, tickCmd()
+		return m, tickCmd(m.refreshInterval)
 
 	case adapter.NotificationConnErrorMsg:
 		return m, tea.Sequence(

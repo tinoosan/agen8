@@ -47,7 +47,15 @@ func runDashboardFlow(cmd *cobra.Command) error {
 	return dashboardtui.Run(resolvedRPCEndpoint(), sessionID, dashboardtui.Options{
 		ProjectRoot:        projectRoot,
 		FollowProjectState: followProjectState,
+		RefreshInterval:    effectiveDashboardInterval(),
 	})
+}
+
+func effectiveDashboardInterval() time.Duration {
+	if dashboardInterval <= 0 {
+		return 2 * time.Second
+	}
+	return dashboardInterval
 }
 
 func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {
