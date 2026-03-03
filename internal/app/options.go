@@ -2,7 +2,6 @@ package app
 
 import (
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/tinoosan/agen8/pkg/protocol"
@@ -73,16 +72,6 @@ func WithModel(model string) RunChatOption {
 		model = strings.TrimSpace(model)
 		if model != "" {
 			o.Model = model
-		}
-		return nil
-	}
-}
-
-func WithSubagentModel(model string) RunChatOption {
-	return func(o *RunChatOptions) error {
-		model = strings.TrimSpace(model)
-		if model != "" {
-			o.SubagentModel = model
 		}
 		return nil
 	}
@@ -165,33 +154,6 @@ func WithApprovalsMode(mode string) RunChatOption {
 	}
 }
 
-func WithReasoningEffort(effort string) RunChatOption {
-	return func(o *RunChatOptions) error {
-		effort = strings.TrimSpace(effort)
-		if effort != "" {
-			o.ReasoningEffort = effort
-		}
-		return nil
-	}
-}
-
-func WithReasoningSummary(summary string) RunChatOption {
-	return func(o *RunChatOptions) error {
-		summary = strings.TrimSpace(summary)
-		if summary != "" {
-			o.ReasoningSummary = summary
-		}
-		return nil
-	}
-}
-
-func WithWebSearch(enabled bool) RunChatOption {
-	return func(o *RunChatOptions) error {
-		o.WebSearchEnabled = enabled
-		return nil
-	}
-}
-
 func WithRecentHistoryPairs(pairs int) RunChatOption {
 	return func(o *RunChatOptions) error {
 		o.RecentHistoryPairs = pairs
@@ -216,33 +178,6 @@ func WithTraceBytes(maxBytes int) RunChatOption {
 func WithMemoryBytes(maxBytes int) RunChatOption {
 	return func(o *RunChatOptions) error {
 		o.MaxMemoryBytes = maxBytes
-		return nil
-	}
-}
-
-func WithPriceInPerMTokensUSD(price float64) RunChatOption {
-	return func(o *RunChatOptions) error {
-		o.PriceInPerMTokensUSD = price
-		return nil
-	}
-}
-
-func WithPriceOutPerMTokensUSD(price float64) RunChatOption {
-	return func(o *RunChatOptions) error {
-		o.PriceOutPerMTokensUSD = price
-		return nil
-	}
-}
-
-func WithEnvWebSearch() RunChatOption {
-	return func(o *RunChatOptions) error {
-		raw := strings.TrimSpace(os.Getenv("AGEN8_WEB_SEARCH"))
-		if raw == "" {
-			return nil
-		}
-		if v, err := strconv.ParseBool(raw); err == nil {
-			o.WebSearchEnabled = v
-		}
 		return nil
 	}
 }
