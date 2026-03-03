@@ -106,6 +106,10 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read error: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	if s.buildTask == nil {
+		http.Error(w, "task parser not configured", http.StatusInternalServerError)
+		return
+	}
 	task, err := s.buildTask(r.Context(), raw)
 	if err != nil {
 		switch {
