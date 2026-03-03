@@ -1532,7 +1532,11 @@ func (s *runtimeSupervisor) startManagedWorkerLoop(parent context.Context, cfg s
 						Message: "Runner exited unexpectedly; restarting",
 						Data:    map[string]string{"error": errMsg},
 					})
-					time.Sleep(backoff)
+					select {
+					case <-workerCtx.Done():
+						return
+					case <-time.After(backoff):
+					}
 					if backoff < 60*time.Second {
 						backoff *= 2
 						if backoff > 60*time.Second {
