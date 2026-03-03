@@ -20,6 +20,15 @@ import (
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
+type sessionRunBatchReader interface {
+	ListRunsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]types.Run, error)
+}
+
+type sessionActivityBatchReader interface {
+	ListActivitiesByRunIDs(ctx context.Context, runIDs []string, limit, offset int, sortDesc bool) ([]types.Activity, error)
+	CountActivitiesByRunIDs(ctx context.Context, runIDs []string) (int, error)
+}
+
 func registerSessionHandlers(s *RPCServer, reg methodRegistry) error {
 	return registerHandlers(
 		func() error {
@@ -449,6 +458,45 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 	if err != nil {
 		return protocol.SessionListResult{}, err
 	}
+	runsBySessionID := map[string][]types.Run{}
+	runsByID := map[string]types.Run{}
+	if batchReader, ok := s.session.(sessionRunBatchReader); ok {
+		sessionIDs := make([]string, 0, len(sessions))
+		for _, sess := range sessions {
+			sessionID := strings.TrimSpace(sess.SessionID)
+			if sessionID == "" {
+				continue
+			}
+			sessionIDs = append(sessionIDs, sessionID)
+		}
+		if grouped, gerr := batchReader.ListRunsBySessionIDs(ctx, sessionIDs); gerr == nil {
+			runsBySessionID = grouped
+			for _, runs := range grouped {
+				for _, run := range runs {
+					runID := strings.TrimSpace(run.RunID)
+					if runID == "" {
+						continue
+					}
+					runsByID[runID] = run
+				}
+			}
+		}
+	}
+	resolveRun := func(runID string) (types.Run, bool) {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			return types.Run{}, false
+		}
+		if run, ok := runsByID[runID]; ok {
+			return run, true
+		}
+		run, rerr := s.session.LoadRun(ctx, runID)
+		if rerr != nil {
+			return types.Run{}, false
+		}
+		runsByID[runID] = run
+		return run, true
+	}
 	out := make([]protocol.SessionListItem, 0, len(sessions))
 	for _, sess := range sessions {
 		mode := strings.TrimSpace(sess.Mode)
@@ -459,7 +507,7 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 			runID = strings.TrimSpace(sess.Runs[0])
 		}
 		if runID != "" {
-			if run, rerr := s.session.LoadRun(ctx, runID); rerr == nil && run.Runtime != nil {
+			if run, ok := resolveRun(runID); ok && run.Runtime != nil {
 				if profileID == "" {
 					profileID = strings.TrimSpace(run.Runtime.Profile)
 				}
@@ -483,14 +531,38 @@ func (s *RPCServer) sessionList(ctx context.Context, p protocol.SessionListParam
 		totalAgents := 0
 		runningAgents := 0
 		pausedAgents := 0
-		for _, listedRunID := range collectSessionRunIDs(sess) {
+		sessionRunIDs := collectSessionRunIDs(sess)
+		if sessionID := strings.TrimSpace(sess.SessionID); sessionID != "" {
+			if groupedRuns, ok := runsBySessionID[sessionID]; ok && len(groupedRuns) > 0 {
+				runIDSet := make(map[string]struct{}, len(sessionRunIDs)+len(groupedRuns))
+				for _, listedRunID := range sessionRunIDs {
+					listedRunID = strings.TrimSpace(listedRunID)
+					if listedRunID == "" {
+						continue
+					}
+					runIDSet[listedRunID] = struct{}{}
+				}
+				for _, groupedRun := range groupedRuns {
+					groupedRunID := strings.TrimSpace(groupedRun.RunID)
+					if groupedRunID == "" {
+						continue
+					}
+					if _, ok := runIDSet[groupedRunID]; ok {
+						continue
+					}
+					sessionRunIDs = append(sessionRunIDs, groupedRunID)
+					runIDSet[groupedRunID] = struct{}{}
+				}
+			}
+		}
+		for _, listedRunID := range sessionRunIDs {
 			listedRunID = strings.TrimSpace(listedRunID)
 			if listedRunID == "" {
 				continue
 			}
 			totalAgents++
-			run, rerr := s.session.LoadRun(ctx, listedRunID)
-			if rerr != nil {
+			run, ok := resolveRun(listedRunID)
+			if !ok {
 				continue
 			}
 			switch strings.ToLower(strings.TrimSpace(run.Status)) {

@@ -36,6 +36,39 @@ func CountActivities(ctx context.Context, cfg config.Config, runID string) (int,
 	return count, nil
 }
 
+func CountActivitiesByRunIDs(ctx context.Context, cfg config.Config, runIDs []string) (int, error) {
+	if err := cfg.Validate(); err != nil {
+		return 0, err
+	}
+	normalized := normalizeRunIDs(runIDs)
+	if len(normalized) == 0 {
+		return 0, nil
+	}
+
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return 0, err
+	}
+	for _, runID := range normalized {
+		if err := ensureActivitiesBackfilled(ctx, db, runID); err != nil {
+			return 0, err
+		}
+	}
+
+	placeholders := make([]string, 0, len(normalized))
+	args := make([]any, 0, len(normalized))
+	for _, runID := range normalized {
+		placeholders = append(placeholders, "?")
+		args = append(args, runID)
+	}
+	query := `SELECT COUNT(*) FROM activities WHERE run_id IN (` + strings.Join(placeholders, ",") + `)`
+	var count int
+	if err := db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func ListActivities(ctx context.Context, cfg config.Config, runID string, limit, offset int) ([]types.Activity, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -115,6 +148,117 @@ func ListActivities(ctx context.Context, cfg config.Config, runID string, limit,
 		return nil, err
 	}
 	return out, nil
+}
+
+func ListActivitiesByRunIDs(ctx context.Context, cfg config.Config, runIDs []string, limit, offset int, sortDesc bool) ([]types.Activity, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	normalized := normalizeRunIDs(runIDs)
+	if len(normalized) == 0 {
+		return []types.Activity{}, nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return nil, err
+	}
+	for _, runID := range normalized {
+		if err := ensureActivitiesBackfilled(ctx, db, runID); err != nil {
+			return nil, err
+		}
+	}
+
+	placeholders := make([]string, 0, len(normalized))
+	args := make([]any, 0, len(normalized)+2)
+	for _, runID := range normalized {
+		placeholders = append(placeholders, "?")
+		args = append(args, runID)
+	}
+	orderBy := "ORDER BY started_at ASC, seq ASC"
+	if sortDesc {
+		orderBy = "ORDER BY started_at DESC, seq DESC"
+	}
+	query := `SELECT run_id, activity_id, kind, title, status, started_at, finished_at, meta_json
+		 FROM activities
+		 WHERE run_id IN (` + strings.Join(placeholders, ",") + `)
+		 ` + orderBy + `
+		 LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]types.Activity, 0, limit)
+	for rows.Next() {
+		var (
+			runID, id, kind, title, status, startedAt string
+			finishedAt                                sql.NullString
+			metaJSON                                  sql.NullString
+		)
+		if err := rows.Scan(&runID, &id, &kind, &title, &status, &startedAt, &finishedAt, &metaJSON); err != nil {
+			return nil, err
+		}
+
+		act := types.Activity{}
+		if metaJSON.Valid && strings.TrimSpace(metaJSON.String) != "" {
+			_ = json.Unmarshal([]byte(metaJSON.String), &act)
+		}
+		act.ID = strings.TrimSpace(id)
+		act.Kind = strings.TrimSpace(kind)
+		act.Title = strings.TrimSpace(title)
+		act.Status = types.ActivityStatus(strings.TrimSpace(status))
+		if ts, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(startedAt)); err == nil {
+			act.StartedAt = ts
+		}
+		if finishedAt.Valid && strings.TrimSpace(finishedAt.String) != "" {
+			if ts, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(finishedAt.String)); err == nil {
+				act.FinishedAt = &ts
+				if !act.StartedAt.IsZero() {
+					act.Duration = ts.Sub(act.StartedAt)
+				}
+			}
+		} else {
+			act.FinishedAt = nil
+			act.Duration = 0
+		}
+		if act.Data == nil {
+			act.Data = map[string]string{}
+		}
+		act.Data["runId"] = strings.TrimSpace(runID)
+
+		out = append(out, act)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func normalizeRunIDs(runIDs []string) []string {
+	out := make([]string, 0, len(runIDs))
+	seen := make(map[string]struct{}, len(runIDs))
+	for _, runID := range runIDs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		if _, ok := seen[runID]; ok {
+			continue
+		}
+		seen[runID] = struct{}{}
+		out = append(out, runID)
+	}
+	return out
 }
 
 func ensureActivitiesBackfilled(ctx context.Context, db *sql.DB, runID string) error {

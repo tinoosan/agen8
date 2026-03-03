@@ -25,6 +25,15 @@ func (m *mockStore) ListRunsBySession(ctx context.Context, sessionID string) ([]
 	return result, nil
 }
 
+func (m *mockStore) ListRunsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]types.Run, error) {
+	out := make(map[string][]types.Run, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		runs, _ := m.ListRunsBySession(ctx, sessionID)
+		out[sessionID] = runs
+	}
+	return out, nil
+}
+
 func (m *mockStore) DeleteSession(ctx context.Context, sessionID string) error {
 	m.deletedSessions = append(m.deletedSessions, sessionID)
 	return nil
@@ -70,7 +79,13 @@ func (m *mockStore) AddRunToSession(ctx context.Context, sessionID, runID string
 func (m *mockStore) ListActivities(ctx context.Context, runID string, limit, offset int) ([]types.Activity, error) {
 	return nil, nil
 }
+func (m *mockStore) ListActivitiesByRunIDs(ctx context.Context, runIDs []string, limit, offset int, sortDesc bool) ([]types.Activity, error) {
+	return nil, nil
+}
 func (m *mockStore) CountActivities(ctx context.Context, runID string) (int, error) {
+	return 0, nil
+}
+func (m *mockStore) CountActivitiesByRunIDs(ctx context.Context, runIDs []string) (int, error) {
 	return 0, nil
 }
 func (m *mockStore) ListSessionIDs(ctx context.Context) ([]string, error) {

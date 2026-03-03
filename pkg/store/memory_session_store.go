@@ -317,6 +317,38 @@ func (s *MemorySessionStore) ListRunsBySession(_ context.Context, sessionID stri
 	return out, nil
 }
 
+func (s *MemorySessionStore) ListRunsBySessionIDs(_ context.Context, sessionIDs []string) (map[string][]types.Run, error) {
+	if s == nil {
+		return nil, fmt.Errorf("session store not configured")
+	}
+	out := make(map[string][]types.Run, len(sessionIDs))
+	normalized := make(map[string]struct{}, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" {
+			continue
+		}
+		if _, ok := normalized[sessionID]; ok {
+			continue
+		}
+		normalized[sessionID] = struct{}{}
+		out[sessionID] = []types.Run{}
+	}
+	if len(normalized) == 0 {
+		return out, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, run := range s.runs {
+		sessionID := strings.TrimSpace(run.SessionID)
+		if _, ok := normalized[sessionID]; !ok {
+			continue
+		}
+		out[sessionID] = append(out[sessionID], run)
+	}
+	return out, nil
+}
+
 func (s *MemorySessionStore) StopRun(_ context.Context, runID, status, errorMsg string) (types.Run, error) {
 	if s == nil {
 		return types.Run{}, fmt.Errorf("session store not configured")
@@ -451,6 +483,62 @@ func (s *MemorySessionStore) ListActivities(_ context.Context, runID string, lim
 	return acts[offset:end], nil
 }
 
+func (s *MemorySessionStore) ListActivitiesByRunIDs(_ context.Context, runIDs []string, limit, offset int, sortDesc bool) ([]types.Activity, error) {
+	if s == nil {
+		return nil, fmt.Errorf("session store not configured")
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	seen := make(map[string]struct{}, len(runIDs))
+	normalized := make([]string, 0, len(runIDs))
+	for _, runID := range runIDs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		if _, ok := seen[runID]; ok {
+			continue
+		}
+		seen[runID] = struct{}{}
+		normalized = append(normalized, runID)
+	}
+	if len(normalized) == 0 {
+		return []types.Activity{}, nil
+	}
+	s.mu.RLock()
+	merged := make([]types.Activity, 0, 256)
+	for _, runID := range normalized {
+		acts := s.activities[runID]
+		for _, act := range acts {
+			copyAct := act
+			if copyAct.Data == nil {
+				copyAct.Data = map[string]string{}
+			}
+			copyAct.Data["runId"] = runID
+			merged = append(merged, copyAct)
+		}
+	}
+	s.mu.RUnlock()
+	sort.SliceStable(merged, func(i, j int) bool {
+		if sortDesc {
+			return merged[i].StartedAt.After(merged[j].StartedAt)
+		}
+		return merged[i].StartedAt.Before(merged[j].StartedAt)
+	})
+	if len(merged) <= offset {
+		return []types.Activity{}, nil
+	}
+	end := offset + limit
+	if end > len(merged) {
+		end = len(merged)
+	}
+	return merged[offset:end], nil
+}
+
 func (s *MemorySessionStore) CountActivities(_ context.Context, runID string) (int, error) {
 	if s == nil {
 		return 0, fmt.Errorf("session store not configured")
@@ -463,6 +551,28 @@ func (s *MemorySessionStore) CountActivities(_ context.Context, runID string) (i
 	n := len(s.activities[runID])
 	s.mu.RUnlock()
 	return n, nil
+}
+
+func (s *MemorySessionStore) CountActivitiesByRunIDs(_ context.Context, runIDs []string) (int, error) {
+	if s == nil {
+		return 0, fmt.Errorf("session store not configured")
+	}
+	seen := make(map[string]struct{}, len(runIDs))
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	total := 0
+	for _, runID := range runIDs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		if _, ok := seen[runID]; ok {
+			continue
+		}
+		seen[runID] = struct{}{}
+		total += len(s.activities[runID])
+	}
+	return total, nil
 }
 
 func (s *MemorySessionStore) LatestRun(_ context.Context) (types.Run, error) {

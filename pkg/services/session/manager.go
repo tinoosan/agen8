@@ -23,11 +23,14 @@ type Store interface {
 	SaveRun(ctx context.Context, run types.Run) error
 	StopRun(ctx context.Context, runID string, status string, errorMsg string) (types.Run, error)
 	ListRunsBySession(ctx context.Context, sessionID string) ([]types.Run, error)
+	ListRunsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]types.Run, error)
 	ListRunsByStatus(ctx context.Context, statuses []string) ([]types.Run, error)
 	ListChildRuns(ctx context.Context, parentRunID string) ([]types.Run, error)
 	AddRunToSession(ctx context.Context, sessionID, runID string) (types.Session, error)
 	ListActivities(ctx context.Context, runID string, limit, offset int) ([]types.Activity, error)
+	ListActivitiesByRunIDs(ctx context.Context, runIDs []string, limit, offset int, sortDesc bool) ([]types.Activity, error)
 	CountActivities(ctx context.Context, runID string) (int, error)
+	CountActivitiesByRunIDs(ctx context.Context, runIDs []string) (int, error)
 	LatestRun(ctx context.Context) (types.Run, error)
 	LatestRunningRun(ctx context.Context) (types.Run, error)
 }
@@ -146,6 +149,11 @@ func (m *Manager) ListRunsBySession(ctx context.Context, sessionID string) ([]ty
 	return m.store.ListRunsBySession(ctx, sessionID)
 }
 
+// ListRunsBySessionIDs delegates to the store.
+func (m *Manager) ListRunsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]types.Run, error) {
+	return m.store.ListRunsBySessionIDs(ctx, sessionIDs)
+}
+
 // ListChildRuns delegates to the store.
 func (m *Manager) ListChildRuns(ctx context.Context, parentRunID string) ([]types.Run, error) {
 	return m.store.ListChildRuns(ctx, parentRunID)
@@ -161,9 +169,19 @@ func (m *Manager) ListActivities(ctx context.Context, runID string, limit, offse
 	return m.store.ListActivities(ctx, runID, limit, offset)
 }
 
+// ListActivitiesByRunIDs delegates to the store.
+func (m *Manager) ListActivitiesByRunIDs(ctx context.Context, runIDs []string, limit, offset int, sortDesc bool) ([]types.Activity, error) {
+	return m.store.ListActivitiesByRunIDs(ctx, runIDs, limit, offset, sortDesc)
+}
+
 // CountActivities delegates to the store.
 func (m *Manager) CountActivities(ctx context.Context, runID string) (int, error) {
 	return m.store.CountActivities(ctx, runID)
+}
+
+// CountActivitiesByRunIDs delegates to the store.
+func (m *Manager) CountActivitiesByRunIDs(ctx context.Context, runIDs []string) (int, error) {
+	return m.store.CountActivitiesByRunIDs(ctx, runIDs)
 }
 
 // LatestRun delegates to the store.

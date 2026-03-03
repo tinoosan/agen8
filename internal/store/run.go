@@ -348,3 +348,69 @@ func ListRunsBySession(cfg config.Config, sessionID string) ([]types.Run, error)
 	}
 	return out, rows.Err()
 }
+
+// ListRunsBySessionIDs returns all runs grouped by session ID for the provided sessions.
+func ListRunsBySessionIDs(cfg config.Config, sessionIDs []string) (map[string][]types.Run, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	normalized := make([]string, 0, len(sessionIDs))
+	seen := make(map[string]struct{}, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" {
+			continue
+		}
+		if _, ok := seen[sessionID]; ok {
+			continue
+		}
+		seen[sessionID] = struct{}{}
+		normalized = append(normalized, sessionID)
+	}
+	if len(normalized) == 0 {
+		return map[string][]types.Run{}, nil
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return nil, err
+	}
+	placeholders := make([]string, 0, len(normalized))
+	args := make([]any, 0, len(normalized))
+	for _, sessionID := range normalized {
+		placeholders = append(placeholders, "?")
+		args = append(args, sessionID)
+	}
+	query := `SELECT session_id, run_json FROM runs WHERE session_id IN (` + strings.Join(placeholders, ",") + `) ORDER BY created_at`
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("error listing runs by session ids: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string][]types.Run, len(normalized))
+	for _, sessionID := range normalized {
+		out[sessionID] = []types.Run{}
+	}
+	for rows.Next() {
+		var sessionID, raw string
+		if err := rows.Scan(&sessionID, &raw); err != nil {
+			return nil, err
+		}
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" {
+			continue
+		}
+		var run types.Run
+		if err := json.Unmarshal([]byte(raw), &run); err != nil {
+			continue
+		}
+		if strings.TrimSpace(run.RunID) == "" {
+			continue
+		}
+		out[sessionID] = append(out[sessionID], run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
