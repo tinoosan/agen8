@@ -206,28 +206,6 @@ func maybeEnableWebSearchModel(baseURL string, model string, enable bool) string
 	return model + ":online"
 }
 
-func cursorDebugLog(hypothesisId, location, message string, data map[string]any) {
-	// #region agent log
-	f, err := debuglog.OpenLogFile()
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	payload := map[string]any{
-		"sessionId":    "debug-session",
-		"runId":        "pre-fix",
-		"hypothesisId": hypothesisId,
-		"location":     location,
-		"message":      message,
-		"data":         data,
-		"timestamp":    time.Now().UnixMilli(),
-	}
-	if b, err := json.Marshal(payload); err == nil {
-		_, _ = f.Write(append(b, '\n'))
-	}
-	// #endregion
-}
-
 type responsesInputBuildStats struct {
 	toolMsgN           int
 	assistantToolCallN int
@@ -593,71 +571,11 @@ func (c *Client) buildResponseParams(req types.LLMRequest) (responses.ResponseNe
 		}
 	}
 
-	// #region agent log
-	// Log the role/content shape we are sending (safe; no raw user text).
-	// This helps diagnose "model didn't receive a message" reports.
-	if previousResponseID != "" {
-		roles := make([]string, 0, len(msgs))
-		lens := make([]int, 0, len(msgs))
-		emptyN := 0
-		userN := 0
-		toolN := 0
-		assistantN := 0
-		for _, m := range msgs {
-			r := strings.ToLower(strings.TrimSpace(m.Role))
-			roles = append(roles, r)
-			l := len(strings.TrimSpace(m.Content))
-			lens = append(lens, l)
-			if l == 0 && r != "tool" {
-				emptyN++
-			}
-			switch r {
-			case "user":
-				userN++
-			case "tool":
-				toolN++
-			case "assistant":
-				assistantN++
-			}
-		}
-		debuglog.Log("toolcalling", "H14", "openai_client.go:buildResponseParams", "responses_input_msgs_shape", map[string]any{
-			"prevIDUsed":   true,
-			"usesToolCall": usesToolCalling,
-			"msgsLen":      len(msgs),
-			"userN":        userN,
-			"assistantN":   assistantN,
-			"toolN":        toolN,
-			"emptyN":       emptyN,
-			"roles":        roles,
-			"contentLens":  lens,
-		})
-	}
-	// #endregion
-
 	// Build input items. For tool calling, we encode tool results as function_call_output items.
-	items, stats, err := buildResponsesInputItems(msgs, c.canonicalRole)
+	items, _, err := buildResponsesInputItems(msgs, c.canonicalRole)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
-
-	// #region agent log
-	debuglog.Log("toolcalling", "H7", "openai_client.go:buildResponseParams", "responses_input_shape", map[string]any{
-		"usesToolCalling":    usesToolCalling,
-		"deltaOnly":          previousResponseID != "" && !usesToolCalling,
-		"deltaToolOutputs":   previousResponseID != "" && usesToolCalling,
-		"previousResponseID": strings.TrimSpace(req.PreviousResponseID) != "",
-		"prevIDUsed":         previousResponseID != "",
-		"msgsLenSent":        len(msgs),
-		"toolMsgN":           stats.toolMsgN,
-		"assistantToolCallN": stats.assistantToolCallN,
-		"toolsLen":           len(req.Tools),
-		"toolChoice":         strings.TrimSpace(req.ToolChoice),
-	})
-	debuglog.Log("toolcalling", "H7", "openai_client.go:buildResponseParams", "responses_input_call_ids", map[string]any{
-		"functionCallN":       len(stats.functionCallIDs),
-		"functionCallOutputN": len(stats.functionOutputIDs),
-	})
-	// #endregion
 
 	params := responses.ResponseNewParams{
 		Model: shared.ResponsesModel(req.Model),
@@ -1284,18 +1202,6 @@ func (c *Client) GenerateStream(ctx context.Context, req types.LLMRequest, cb ty
 	if c == nil || c.client == nil {
 		return types.LLMResponse{}, fmt.Errorf("llm client is nil")
 	}
-
-	// #region agent log
-	cursorDebugLog("H2", "openai_client.go:GenerateStream", "GenerateStream_request", map[string]any{
-		"model":           strings.TrimSpace(req.Model),
-		"enableWebSearch": req.EnableWebSearch,
-		"baseURL":         strings.TrimSpace(c.baseURL),
-		"hasSchema":       req.ResponseSchema != nil,
-		"jsonOnly":        req.JSONOnly,
-		"toolsLen":        len(req.Tools),
-		"toolChoice":      strings.TrimSpace(req.ToolChoice),
-	})
-	// #endregion
 
 	// #region agent log
 	debuglog.Log("toolcalling", "H2", "openai_client.go:GenerateStream", "route_selected", map[string]any{
