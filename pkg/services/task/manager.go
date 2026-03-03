@@ -229,30 +229,41 @@ func (m *Manager) CancelActiveTasksByRun(ctx context.Context, runID, reason stri
 	if c, ok := m.store.(activeTaskCanceler); ok {
 		return c.CancelActiveTasksByRun(ctx, runID, reason)
 	}
-	tasks, err := m.store.ListTasks(ctx, state.TaskFilter{
-		RunID:  runID,
-		Status: []types.TaskStatus{types.TaskStatusActive},
-		Limit:  500,
-	})
-	if err != nil {
-		return 0, err
-	}
-	doneAt := time.Now().UTC()
-	for _, task := range tasks {
-		taskID := strings.TrimSpace(task.TaskID)
-		if taskID == "" {
-			continue
+	totalCanceled := 0
+	for {
+		tasks, err := m.store.ListTasks(ctx, state.TaskFilter{
+			RunID:  runID,
+			Status: []types.TaskStatus{types.TaskStatusActive},
+			Limit:  500,
+		})
+		if err != nil {
+			return totalCanceled, err
 		}
-		if err := m.store.CompleteTask(ctx, taskID, types.TaskResult{
-			TaskID:      taskID,
-			Status:      types.TaskStatusCanceled,
-			CompletedAt: &doneAt,
-			Error:       reason,
-		}); err != nil {
-			return len(tasks), err
+		if len(tasks) == 0 {
+			return totalCanceled, nil
+		}
+		doneAt := time.Now().UTC()
+		canceledThisPage := 0
+		for _, task := range tasks {
+			taskID := strings.TrimSpace(task.TaskID)
+			if taskID == "" {
+				continue
+			}
+			if err := m.store.CompleteTask(ctx, taskID, types.TaskResult{
+				TaskID:      taskID,
+				Status:      types.TaskStatusCanceled,
+				CompletedAt: &doneAt,
+				Error:       reason,
+			}); err != nil {
+				return totalCanceled, err
+			}
+			canceledThisPage++
+		}
+		totalCanceled += canceledThisPage
+		if canceledThisPage == 0 {
+			return totalCanceled, nil
 		}
 	}
-	return len(tasks), nil
 }
 
 // ArtifactIndexer returns the underlying store as state.ArtifactIndexer if it implements it.

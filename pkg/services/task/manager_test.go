@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -176,15 +177,25 @@ func TestManager_CreateRetryTask_Success(t *testing.T) {
 }
 
 func TestManager_CancelActiveTasksByRun_Fallback(t *testing.T) {
+	active := map[string]struct{}{
+		"t1": {},
+		"t2": {},
+	}
 	var completed []string
 	store := &mockTaskStore{
 		listTasks: func(ctx context.Context, filter state.TaskFilter) ([]types.Task, error) {
-			return []types.Task{
-				{TaskID: "t1", RunID: "run-1", Status: types.TaskStatusActive},
-				{TaskID: "t2", RunID: "run-1", Status: types.TaskStatusActive},
-			}, nil
+			out := make([]types.Task, 0, len(active))
+			for taskID := range active {
+				out = append(out, types.Task{
+					TaskID: taskID,
+					RunID:  "run-1",
+					Status: types.TaskStatusActive,
+				})
+			}
+			return out, nil
 		},
 		completeTask: func(ctx context.Context, taskID string, result types.TaskResult) error {
+			delete(active, taskID)
 			completed = append(completed, taskID)
 			return nil
 		},
@@ -199,6 +210,49 @@ func TestManager_CancelActiveTasksByRun_Fallback(t *testing.T) {
 	}
 	if len(completed) != 2 || (completed[0] != "t1" && completed[0] != "t2") {
 		t.Errorf("completed: %v", completed)
+	}
+}
+
+func TestManager_CancelActiveTasksByRun_FallbackPaginatesBeyond500(t *testing.T) {
+	active := make(map[string]struct{}, 505)
+	for i := 0; i < 505; i++ {
+		active[fmt.Sprintf("task-%03d", i)] = struct{}{}
+	}
+	var completed int
+	store := &mockTaskStore{
+		listTasks: func(ctx context.Context, filter state.TaskFilter) ([]types.Task, error) {
+			tasks := make([]types.Task, 0, 500)
+			for taskID := range active {
+				if len(tasks) == 500 {
+					break
+				}
+				tasks = append(tasks, types.Task{
+					TaskID: taskID,
+					RunID:  "run-1",
+					Status: types.TaskStatusActive,
+				})
+			}
+			return tasks, nil
+		},
+		completeTask: func(ctx context.Context, taskID string, result types.TaskResult) error {
+			delete(active, taskID)
+			completed++
+			return nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	n, err := mgr.CancelActiveTasksByRun(context.Background(), "run-1", "paused")
+	if err != nil {
+		t.Fatalf("CancelActiveTasksByRun: %v", err)
+	}
+	if n != 505 {
+		t.Fatalf("count: got %d want 505", n)
+	}
+	if completed != 505 {
+		t.Fatalf("completed: got %d want 505", completed)
+	}
+	if len(active) != 0 {
+		t.Fatalf("remaining active tasks: %d", len(active))
 	}
 }
 
