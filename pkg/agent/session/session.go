@@ -139,6 +139,11 @@ func New(cfg Config) (*Session, error) {
 	if cfg.TaskStore == nil {
 		return nil, fmt.Errorf("task store is required")
 	}
+	if cfg.MessageBus == nil {
+		if mb, ok := cfg.TaskStore.(MessageBus); ok {
+			cfg.MessageBus = mb
+		}
+	}
 	if strings.TrimSpace(cfg.SessionID) == "" {
 		return nil, fmt.Errorf("sessionID is required")
 	}
@@ -556,10 +561,10 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 }
 
 func (s *Session) drainInbox(ctx context.Context) (bool, error) {
-	if s != nil && s.cfg.MessageBus != nil {
-		return s.drainInboxMessages(ctx)
+	if s == nil || s.cfg.MessageBus == nil {
+		return false, fmt.Errorf("message bus not configured")
 	}
-	return s.drainInboxTasks(ctx)
+	return s.drainInboxMessages(ctx)
 }
 
 func (s *Session) drainInboxMessages(ctx context.Context) (bool, error) {

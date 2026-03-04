@@ -12,6 +12,7 @@ import (
 	"github.com/tinoosan/agen8/pkg/agent/state"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/profile"
+	pkgtask "github.com/tinoosan/agen8/pkg/services/task"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
@@ -73,6 +74,7 @@ func (m *mockRunnerAgent) ExecHostOp(ctx context.Context, req types.HostOpReques
 func TestRunConversationContext(t *testing.T) {
 	ctx := context.Background()
 	taskStore, _ := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	taskSvc := pkgtask.NewManager(taskStore, nil)
 	runConvStore := &mockRunConversationStore{data: make(map[string][]llmtypes.LLMMessage)}
 
 	now := time.Now()
@@ -87,7 +89,7 @@ func TestRunConversationContext(t *testing.T) {
 		Status:         types.TaskStatusPending,
 		CreatedAt:      &now,
 	}
-	_ = taskStore.CreateTask(ctx, task1)
+	_ = taskSvc.CreateTask(ctx, task1)
 
 	cfg := Config{
 		Agent:                &mockRunnerAgent{},
@@ -128,7 +130,7 @@ func TestRunConversationContext(t *testing.T) {
 		Status:         types.TaskStatusPending,
 		CreatedAt:      &now,
 	}
-	_ = taskStore.CreateTask(ctx, task2)
+	_ = taskSvc.CreateTask(ctx, task2)
 	_, _ = s.drainInbox(ctx)
 
 	msgs = runConvStore.data["run1"]
@@ -143,6 +145,7 @@ func TestRunConversationContext(t *testing.T) {
 func TestRunConversationContext_NilStore(t *testing.T) {
 	ctx := context.Background()
 	taskStore, _ := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	taskSvc := pkgtask.NewManager(taskStore, nil)
 
 	now := time.Now()
 	task1 := types.Task{
@@ -156,7 +159,7 @@ func TestRunConversationContext_NilStore(t *testing.T) {
 		Status:         types.TaskStatusPending,
 		CreatedAt:      &now,
 	}
-	_ = taskStore.CreateTask(ctx, task1)
+	_ = taskSvc.CreateTask(ctx, task1)
 
 	cfg := Config{
 		Agent:        &mockRunnerAgent{},
@@ -184,6 +187,7 @@ func TestRunConversationContext_NilStore(t *testing.T) {
 func TestRunConversationContext_LoadErrorSkipsSave(t *testing.T) {
 	ctx := context.Background()
 	taskStore, _ := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	taskSvc := pkgtask.NewManager(taskStore, nil)
 
 	// Pre-populate conversation history that must not be overwritten.
 	existingMsgs := []llmtypes.LLMMessage{
@@ -207,7 +211,7 @@ func TestRunConversationContext_LoadErrorSkipsSave(t *testing.T) {
 		Status:         types.TaskStatusPending,
 		CreatedAt:      &now,
 	}
-	_ = taskStore.CreateTask(ctx, task1)
+	_ = taskSvc.CreateTask(ctx, task1)
 
 	cfg := Config{
 		Agent:                &mockRunnerAgent{},
