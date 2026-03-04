@@ -139,11 +139,6 @@ func New(cfg Config) (*Session, error) {
 	if cfg.TaskStore == nil {
 		return nil, fmt.Errorf("task store is required")
 	}
-	if cfg.MessageBus == nil {
-		if mb, ok := cfg.TaskStore.(MessageBus); ok {
-			cfg.MessageBus = mb
-		}
-	}
 	if strings.TrimSpace(cfg.SessionID) == "" {
 		return nil, fmt.Errorf("sessionID is required")
 	}
@@ -562,13 +557,7 @@ func (s *Session) handleHeartbeat(ctx context.Context, job profile.HeartbeatJob)
 
 func (s *Session) drainInbox(ctx context.Context) (bool, error) {
 	if s != nil && s.cfg.MessageBus != nil {
-		hadWork, err := s.drainInboxMessages(ctx)
-		if hadWork || err != nil {
-			return hadWork, err
-		}
-		// Compatibility bridge during cutover: fallback to legacy task scan
-		// when no messages are available yet.
-		return s.drainInboxTasks(ctx)
+		return s.drainInboxMessages(ctx)
 	}
 	return s.drainInboxTasks(ctx)
 }
