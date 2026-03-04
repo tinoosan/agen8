@@ -31,20 +31,31 @@ type sessionSyncedMsg struct {
 }
 
 type taskEntry struct {
-	ID           string
-	RunID        string
-	Role         string
-	Goal         string
-	Status       string
-	Summary      string
-	Error        string
-	InputTokens  int
-	OutputTokens int
-	TotalTokens  int
-	CostUSD      float64
-	Artifacts    int
-	CreatedAt    time.Time
-	CompletedAt  time.Time
+	ID              string
+	RunID           string
+	Role            string
+	Goal            string
+	Status          string
+	DisplayStatus   string
+	Source          string
+	Summary         string
+	Error           string
+	InputTokens     int
+	OutputTokens    int
+	TotalTokens     int
+	CostUSD         float64
+	Artifacts       int
+	CreatedAt       time.Time
+	CompletedAt     time.Time
+	BatchMode       bool
+	BatchSynthetic  bool
+	BatchDelivered  bool
+	BatchParentID   string
+	BatchWaveID     string
+	BatchIncludedIn string
+	IsBatchGroup    bool
+	Expanded        bool
+	Children        []taskEntry
 }
 
 func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
@@ -64,7 +75,6 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			return dataLoadedMsg{preserve: true, connected: true, err: fmt.Errorf("%w: missing run/team scope", rpcscope.ErrScopeUnavailable)}
 		}
 
-		// Fetch inbox
 		var inboxRes protocol.TaskListResult
 		scopeMode := "run"
 		runID := strings.TrimSpace(scope.RunID)
@@ -87,7 +97,6 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			return dataLoadedMsg{err: err}
 		}
 
-		// Fetch outbox
 		var outboxRes protocol.TaskListResult
 		if err := client.Call(ctx, protocol.MethodTaskList, protocol.TaskListParams{
 			ThreadID: protocol.ThreadID(scope.ThreadID),
@@ -125,7 +134,7 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 }
 
 func filterTasks(tasks []protocol.Task, isInbox bool) []taskEntry {
-	out := make([]taskEntry, 0, len(tasks))
+	flat := make([]taskEntry, 0, len(tasks))
 	for _, t := range tasks {
 		status := strings.TrimSpace(t.Status)
 		if isInbox {
@@ -142,28 +151,119 @@ func filterTasks(tasks []protocol.Task, isInbox bool) []taskEntry {
 				continue
 			}
 		}
-		id := strings.TrimSpace(t.ID)
-		if id == "" {
+		entry := taskEntryFromProtocol(t)
+		if entry.ID == "" {
 			continue
 		}
-		out = append(out, taskEntry{
-			ID:           id,
-			RunID:        strings.TrimSpace(string(t.RunID)),
-			Role:         strings.TrimSpace(t.AssignedRole),
-			Goal:         strings.TrimSpace(t.Goal),
-			Status:       status,
-			Summary:      strings.TrimSpace(t.Summary),
-			Error:        strings.TrimSpace(t.Error),
-			InputTokens:  t.InputTokens,
-			OutputTokens: t.OutputTokens,
-			TotalTokens:  t.TotalTokens,
-			CostUSD:      t.CostUSD,
-			Artifacts:    len(t.Artifacts),
-			CreatedAt:    t.CreatedAt,
-			CompletedAt:  t.CompletedAt,
-		})
+		flat = append(flat, entry)
 	}
-	return out
+	return buildTaskProjection(flat)
+}
+
+func taskEntryFromProtocol(t protocol.Task) taskEntry {
+	return taskEntry{
+		ID:              strings.TrimSpace(t.ID),
+		RunID:           strings.TrimSpace(string(t.RunID)),
+		Role:            firstNonEmpty(strings.TrimSpace(t.AssignedRole), strings.TrimSpace(t.RoleSnapshot)),
+		Goal:            strings.TrimSpace(t.Goal),
+		Status:          strings.TrimSpace(t.Status),
+		DisplayStatus:   strings.TrimSpace(t.Status),
+		Source:          strings.TrimSpace(t.Source),
+		Summary:         strings.TrimSpace(t.Summary),
+		Error:           strings.TrimSpace(t.Error),
+		InputTokens:     t.InputTokens,
+		OutputTokens:    t.OutputTokens,
+		TotalTokens:     t.TotalTokens,
+		CostUSD:         t.CostUSD,
+		Artifacts:       len(t.Artifacts),
+		CreatedAt:       t.CreatedAt,
+		CompletedAt:     t.CompletedAt,
+		BatchMode:       t.BatchMode,
+		BatchSynthetic:  t.BatchSynthetic,
+		BatchDelivered:  t.BatchDelivered,
+		BatchParentID:   strings.TrimSpace(t.BatchParentTaskID),
+		BatchWaveID:     strings.TrimSpace(t.BatchWaveID),
+		BatchIncludedIn: strings.TrimSpace(t.BatchIncludedIn),
+	}
+}
+
+func buildTaskProjection(entries []taskEntry) []taskEntry {
+	topLevel := make([]taskEntry, 0, len(entries))
+	parentIndex := map[string]int{}
+	stagedByParent := map[string][]taskEntry{}
+	orphanChildren := make([]taskEntry, 0)
+
+	for _, entry := range entries {
+		if entry.ID == "" {
+			continue
+		}
+		if isStagedBatchChild(entry) {
+			parentID := strings.TrimSpace(entry.BatchIncludedIn)
+			if parentID == "" {
+				orphanChildren = append(orphanChildren, entry)
+				continue
+			}
+			stagedByParent[parentID] = append(stagedByParent[parentID], entry)
+			continue
+		}
+		if entry.DisplayStatus == "" {
+			entry.DisplayStatus = entry.Status
+		}
+		topLevel = append(topLevel, entry)
+		parentIndex[entry.ID] = len(topLevel) - 1
+	}
+
+	for parentID, children := range stagedByParent {
+		idx, ok := parentIndex[parentID]
+		if !ok {
+			orphanChildren = append(orphanChildren, children...)
+			continue
+		}
+		parent := topLevel[idx]
+		for i := range children {
+			if children[i].DisplayStatus == "" {
+				children[i].DisplayStatus = children[i].Status
+			}
+			if strings.EqualFold(strings.TrimSpace(children[i].Status), string(types.TaskStatusReviewPending)) && isTerminalTaskStatus(parent.Status) {
+				children[i].DisplayStatus = "batched"
+			}
+		}
+		parent.Children = append(parent.Children, children...)
+		parent.IsBatchGroup = len(parent.Children) > 0
+		topLevel[idx] = parent
+	}
+
+	for _, orphan := range orphanChildren {
+		if orphan.DisplayStatus == "" {
+			orphan.DisplayStatus = orphan.Status
+		}
+		topLevel = append(topLevel, orphan)
+	}
+
+	return topLevel
+}
+
+func isStagedBatchChild(entry taskEntry) bool {
+	return entry.BatchMode && !entry.BatchSynthetic && strings.TrimSpace(entry.BatchIncludedIn) != ""
+}
+
+func isTerminalTaskStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case string(types.TaskStatusSucceeded), string(types.TaskStatusFailed), string(types.TaskStatusCanceled), "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func tickCmd() tea.Cmd {
