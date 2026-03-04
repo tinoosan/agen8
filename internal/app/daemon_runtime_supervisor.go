@@ -92,6 +92,10 @@ type taskWakeSubscriber interface {
 	SubscribeWake(teamID, runID string) (<-chan struct{}, func())
 }
 
+type taskWakeNotifier interface {
+	NotifyWake(teamID, runID string)
+}
+
 type sessionWakeSubscriber interface {
 	SubscribeWake(sessionID, runID string) (<-chan struct{}, func())
 }
@@ -1622,8 +1626,20 @@ func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
 	s.mu.Lock()
 	worker := s.workers[runID]
 	s.mu.Unlock()
-	if worker != nil && worker.session != nil {
+	// Only use the existing worker if its goroutine is still alive.
+	// If workerDone is true (zombie: ctx cancelled but not yet exited), fall
+	// through to ensureRun so a fresh worker is spawned with a startup tick().
+	if worker != nil && worker.session != nil && !workerDone(worker.done) {
 		worker.session.SetPaused(false)
+		// Wake the session so it immediately drains any pending inbox messages
+		// rather than waiting for the next external wake event.
+		if notifier, ok := s.taskService.(taskWakeNotifier); ok {
+			teamID := ""
+			if run.Runtime != nil {
+				teamID = strings.TrimSpace(run.Runtime.TeamID)
+			}
+			notifier.NotifyWake(teamID, runID)
+		}
 		return nil
 	}
 	if s.sessionService == nil {
@@ -1661,8 +1677,13 @@ func (s *runtimeSupervisor) stopRun(ctx context.Context, runID string) error {
 		return err
 	}
 
-	s.stopWorker(runID, true)
+	// Cancel active tasks first to help the in-flight LLM call abort cleanly.
 	_, err = s.taskService.CancelActiveTasksByRun(ctx, runID, "run stopped")
+
+	// Stop worker asynchronously — run is already terminal in DB so syncOnce
+	// won't respawn it. Cleanup (ctx cancel + map delete) happens in background.
+	go s.stopWorker(runID, true)
+
 	return err
 }
 
