@@ -75,6 +75,7 @@ type Model struct {
 
 	lastEventSeq     int64 // cursor for incremental thinking event polling
 	thinkingExpanded bool  // ctrl+o toggles all thinking blocks globally
+	hideDiffs        bool  // ctrl+e toggles inline diff display; false = show diffs (default)
 
 	feedGen       int      // incremented on every feed mutation; used to invalidate lineCache
 	lineCache     []string // cached output of feedLines(); valid when lineCacheGen == feedGen && lineCacheWidth == width

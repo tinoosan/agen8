@@ -44,6 +44,8 @@ type feedEntry struct {
 	bridgeSingleData   map[string]string
 	bridgeSingleText   string
 	bridgeSinglePath   string
+	// All bridge children that are write ops, collected regardless of childCount, for diff display.
+	bridgeWriteEntries []feedEntry
 
 	// Thinking-specific fields
 	live             bool          // true while model is still thinking (no .end yet)

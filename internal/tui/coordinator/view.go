@@ -14,6 +14,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+	"github.com/tinoosan/agen8/internal/tui"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 )
 
@@ -345,6 +346,10 @@ func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
 					parent.bridgeSingleText = ""
 					parent.bridgeSinglePath = ""
 				}
+				// Collect all bridge write ops for diff display, regardless of childCount.
+				if isWriteOp(e.opKind) {
+					parent.bridgeWriteEntries = append(parent.bridgeWriteEntries, e)
+				}
 				// Promote plan items from collapsed bridge entries to the parent code_exec.
 				if len(e.planItems) > 0 {
 					parent.planItems = e.planItems
@@ -556,6 +561,12 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 				opLine += " " + argPreview
 			}
 		}
+		// Append +N −M stat for write ops.
+		if isWriteOp(e.opKind) && e.data != nil {
+			if added, deleted := tui.DiffStat(e.data["patchPreview"]); added > 0 || deleted > 0 {
+				opLine += "  " + styleOK.Render("+"+strconv.Itoa(added)) + " " + styleErr.Render("−"+strconv.Itoa(deleted))
+			}
+		}
 		lines = append(lines, opLine)
 
 		// Collect sub-items (bridge summary + status) to render with tree branches.
@@ -617,6 +628,12 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 						line += " " + bridgeArg
 					}
 				}
+				// Append +N −M stat for bridge write ops.
+				if isWriteOp(e.bridgeSingleOpKind) && e.bridgeSingleData != nil {
+					if added, deleted := tui.DiffStat(e.bridgeSingleData["patchPreview"]); added > 0 || deleted > 0 {
+						line += "  " + styleOK.Render("+"+strconv.Itoa(added)) + " " + styleErr.Render("−"+strconv.Itoa(deleted))
+					}
+				}
 				subItems = append(subItems, line)
 			} else {
 				noun := "tools"
@@ -640,7 +657,15 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		default:
 			statusText = kit.StyleDim.Render(e.status)
 		}
-		subItems = append(subItems, statusText)
+
+		// Determine whether we have a renderable diff for this op or its bridge children.
+		hasDiff := isWriteOp(e.opKind) && isSuccessStatus(s) && e.data != nil && strings.TrimSpace(e.data["patchPreview"]) != ""
+		hasBridgeDiff := isSuccessStatus(s) && anyBridgeWriteDiff(e.bridgeWriteEntries)
+
+		// Suppress the "ok" sub-item when a diff will be rendered instead.
+		if !hasDiff && !hasBridgeDiff {
+			subItems = append(subItems, statusText)
+		}
 
 		// Add vertical connector when there are multiple sub-items (extends branch ~25%).
 
@@ -653,6 +678,36 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 				branch = styleVerbBold.Render("└─")
 			}
 			lines = append(lines, "  "+branch+" "+item)
+		}
+
+		// Render inline diff (replaces the "└─ ok" line for write ops).
+		if hasDiff {
+			if diffLines := renderFileDiff(e.data, m.hideDiffs, inner); len(diffLines) > 0 {
+				lines = append(lines, diffLines...)
+			} else {
+				// Fallback: no parseable diff → show status normally.
+				lines = append(lines, "  "+styleVerbBold.Render("└─")+" "+statusText)
+			}
+		} else if hasBridgeDiff {
+			anyRendered := false
+			for _, bw := range e.bridgeWriteEntries {
+				if bw.data == nil {
+					continue
+				}
+				diffLines := renderFileDiff(bw.data, m.hideDiffs, inner)
+				if len(diffLines) == 0 {
+					continue
+				}
+				anyRendered = true
+				// Show the file path as a dim label above its diff block when there are multiple writes.
+				if len(e.bridgeWriteEntries) > 1 && strings.TrimSpace(bw.path) != "" {
+					lines = append(lines, "    "+kit.StyleDim.Render(strings.TrimSpace(bw.path)))
+				}
+				lines = append(lines, diffLines...)
+			}
+			if !anyRendered {
+				lines = append(lines, "  "+styleVerbBold.Render("└─")+" "+statusText)
+			}
 		}
 
 		// ── Promoted plan checklist (from bridge tool calls) ──────
@@ -887,7 +942,13 @@ func (m *Model) renderFooter() string {
 	if m.isNarrow() {
 		hints = kit.StyleDim.Render("↵ /p /r /s pgup/dn g/G ^c")
 	} else {
+		diffsHint := "hide diffs"
+		if m.hideDiffs {
+			diffsHint = "show diffs"
+		}
 		hints = kit.StyleDim.Render("/help") + "  " +
+			kit.StyleDim.Render("ctrl+e") + " " + kit.StyleDim.Render(diffsHint) + "  " +
+			kit.StyleDim.Render("ctrl+o") + " thinking  " +
 			kit.StyleDim.Render("ctrl+c") + " quit"
 	}
 
@@ -961,6 +1022,96 @@ func stripLeadingVerb(text, verb string) string {
 		return strings.TrimSpace(text[len(verb):])
 	}
 	return text
+}
+
+// isWriteOp returns true for file-write operations that produce a diff preview.
+func isWriteOp(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "fs_write", "fs_append", "fs_edit", "fs_patch":
+		return true
+	}
+	return false
+}
+
+// isSuccessStatus returns true for terminal-success statuses.
+func isSuccessStatus(s string) bool {
+	switch s {
+	case "done", "ok", "succeeded", "completed":
+		return true
+	}
+	return false
+}
+
+var (
+	styleDiffAdd = lipgloss.NewStyle().Foreground(lipgloss.Color("#98c379"))
+	styleDiffDel = lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75"))
+	styleDiffSep = lipgloss.NewStyle().Foreground(lipgloss.Color("#7aa2f7")).Faint(true)
+)
+
+// renderDiffLines renders parsed diff lines with lipgloss colors.
+func renderDiffLines(patchPreview string, patchTruncated, patchRedacted bool, width int) []string {
+	if patchRedacted {
+		return []string{"    " + kit.StyleDim.Render("[diff redacted]")}
+	}
+	lines, _, _ := tui.ParseDiffLines(patchPreview)
+	if len(lines) == 0 {
+		return nil
+	}
+	maxNo := 0
+	for _, l := range lines {
+		if l.LineNo > maxNo {
+			maxNo = l.LineNo
+		}
+	}
+	noWidth := len(strconv.Itoa(maxNo))
+
+	var out []string
+	for _, l := range lines {
+		var rendered string
+		switch l.Kind {
+		case tui.DiffLineInsert:
+			no := fmt.Sprintf("%*d", noWidth, l.LineNo)
+			rendered = styleDiffAdd.Render("+ " + no + " │ " + truncate(l.Content, width-noWidth-6))
+		case tui.DiffLineDelete:
+			no := fmt.Sprintf("%*d", noWidth, l.LineNo)
+			rendered = styleDiffDel.Render("- " + no + " │ " + truncate(l.Content, width-noWidth-6))
+		case tui.DiffLineSep:
+			rendered = styleDiffSep.Render("  ···")
+		default: // context
+			no := fmt.Sprintf("%*d", noWidth, l.LineNo)
+			rendered = kit.StyleDim.Render("  " + no + " │ " + truncate(l.Content, width-noWidth-6))
+		}
+		out = append(out, "    "+rendered)
+	}
+	if patchTruncated {
+		out = append(out, "    "+kit.StyleDim.Render("  … (truncated)"))
+	}
+	return out
+}
+
+// anyBridgeWriteDiff returns true if at least one bridge write entry has a non-empty patchPreview.
+func anyBridgeWriteDiff(entries []feedEntry) bool {
+	for _, bw := range entries {
+		if bw.data != nil && strings.TrimSpace(bw.data["patchPreview"]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// renderFileDiff renders the diff block for a write op given its data map.
+// Returns nil when diffs are hidden, width is too narrow, or no patch is available.
+func renderFileDiff(data map[string]string, hideDiffs bool, width int) []string {
+	if hideDiffs || data == nil || width < 40 {
+		return nil
+	}
+	patchPreview := strings.TrimSpace(data["patchPreview"])
+	patchTruncated := strings.TrimSpace(data["patchTruncated"]) == "true"
+	patchRedacted := strings.TrimSpace(data["patchRedacted"]) == "true"
+	if patchPreview == "" && !patchRedacted {
+		return nil
+	}
+	return renderDiffLines(patchPreview, patchTruncated, patchRedacted, width)
 }
 
 // isPathBasedOp returns true for filesystem and related developer operations

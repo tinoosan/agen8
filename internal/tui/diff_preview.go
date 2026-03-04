@@ -13,6 +13,55 @@ const (
 	maxDiffLines = 260
 )
 
+// DiffLineKind classifies a parsed diff line without exposing gotextdiff types.
+type DiffLineKind int
+
+const (
+	DiffLineContext DiffLineKind = iota
+	DiffLineInsert
+	DiffLineDelete
+	DiffLineSep // hunk separator between hunks
+)
+
+// DiffLine is a single parsed line from a unified diff.
+type DiffLine struct {
+	Kind    DiffLineKind
+	LineNo  int
+	Content string
+}
+
+// ParseDiffLines parses a unified diff string into typed lines for custom rendering.
+// Returns nil if the input cannot be parsed as a valid unified diff.
+func ParseDiffLines(unified string) (lines []DiffLine, added int, deleted int) {
+	internal, a, d := parseUnifiedNumberedLines(unified)
+	if len(internal) == 0 {
+		return nil, 0, 0
+	}
+	result := make([]DiffLine, 0, len(internal))
+	for _, l := range internal {
+		var kind DiffLineKind
+		if l.meta {
+			kind = DiffLineSep
+		} else {
+			switch l.kind {
+			case gotextdiff.Insert:
+				kind = DiffLineInsert
+			case gotextdiff.Delete:
+				kind = DiffLineDelete
+			default:
+				kind = DiffLineContext
+			}
+		}
+		result = append(result, DiffLine{Kind: kind, LineNo: l.lineNo, Content: l.content})
+	}
+	return result, a, d
+}
+
+// DiffStat returns added/deleted line counts from a unified diff string.
+func DiffStat(unified string) (added, deleted int) {
+	return diffStat(unified)
+}
+
 // buildFileChangePreview returns markdown content for a file change block body.
 // It also returns whether the preview was truncated.
 func buildFileChangePreview(op, path, before, after string, hadBefore bool, afterTruncated bool, patchPreview string, patchTruncated bool, patchRedacted bool) (md string, truncated bool, added int, deleted int) {

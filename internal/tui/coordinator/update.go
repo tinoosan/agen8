@@ -288,6 +288,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle all thinking blocks expanded / collapsed globally.
 			m.thinkingExpanded = !m.thinkingExpanded
 			return m, nil
+		case "ctrl+e":
+			// Toggle inline diff display.
+			m.hideDiffs = !m.hideDiffs
+			m.feedGen++
+			maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+			if m.feedScroll > maxScroll {
+				m.feedScroll = maxScroll
+			}
+			return m, nil
 		case "enter":
 			line := strings.TrimSpace(m.input.Value())
 			if line == "" {
@@ -346,8 +355,16 @@ func (m *Model) handleSlash(line string) tea.Cmd {
 		return sessionActionCmd(m.endpoint, m.sessionID, m.teamID, "resume")
 	case "/stop":
 		return sessionActionCmd(m.endpoint, m.sessionID, m.teamID, "stop")
+	case "/diffs":
+		m.hideDiffs = !m.hideDiffs
+		m.feedGen++
+		maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+		if m.feedScroll > maxScroll {
+			m.feedScroll = maxScroll
+		}
+		return nil
 	case "/help":
-		m.setFeedback("commands: /model /pause /resume /stop /help /quit", feedbackInfo)
+		m.setFeedback("commands: /model /pause /resume /stop /diffs /help /quit", feedbackInfo)
 		return nil
 	case "/quit":
 		return tea.Quit

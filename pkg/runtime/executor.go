@@ -192,11 +192,14 @@ func (m *eventMiddleware) Handle(ctx context.Context, req types.HostOpRequest, n
 
 	if meta.PatchPreview != "" {
 		meta.RespData["patchPreview"] = meta.PatchPreview
+		meta.StoreResp["patchPreview"] = meta.PatchPreview
 		if meta.PatchTrunc {
 			meta.RespData["patchTruncated"] = "true"
+			meta.StoreResp["patchTruncated"] = "true"
 		}
 		if meta.PatchRedact {
 			meta.RespData["patchRedacted"] = "true"
+			meta.StoreResp["patchRedacted"] = "true"
 		}
 	}
 
