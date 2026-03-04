@@ -76,8 +76,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.connected = true
 		m.lastErr = ""
-		m.inbox = msg.inbox
-		m.outbox = msg.outbox
+		m.inbox = m.applyExpansionState(msg.inbox)
+		m.outbox = m.applyExpansionState(msg.outbox)
 		m.currentTask = msg.current
 
 		// Clamp selections
@@ -125,6 +125,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "enter":
 		m.detailOpen = !m.detailOpen
+		return m, nil
+
+	case " ":
+		if m.detailOpen {
+			return m, nil
+		}
+		m.toggleSelectedGroup()
 		return m, nil
 
 	case "r":
