@@ -152,6 +152,80 @@ func TestClaimNextScopedMessage_TeamRoleFallsBackAcrossSessions(t *testing.T) {
 	}
 }
 
+func TestProcessTaskMessage_SkipsStagedTeamCallbackMessages(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	now := time.Now().UTC()
+	task := types.Task{
+		TaskID:         "callback-task-1",
+		SessionID:      "team-team-1",
+		RunID:          "run-reviewer",
+		TeamID:         "team-1",
+		AssignedRole:   "reviewer",
+		AssignedToType: "role",
+		AssignedTo:     "reviewer",
+		TaskKind:       state.TaskKindCallback,
+		Goal:           "single staged callback",
+		Status:         types.TaskStatusReviewPending,
+		CreatedAt:      &now,
+		Metadata: map[string]any{
+			"source":    "team.callback",
+			"batchMode": true,
+		},
+	}
+	if err := store.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	msg, err := store.PublishMessage(context.Background(), types.AgentMessage{
+		MessageID:     "msg-callback-1",
+		IntentID:      "intent-callback-1",
+		CorrelationID: "corr-callback-1",
+		ThreadID:      task.SessionID,
+		RunID:         task.RunID,
+		TeamID:        task.TeamID,
+		Channel:       types.MessageChannelInbox,
+		Kind:          types.MessageKindTask,
+		TaskRef:       task.TaskID,
+		Status:        types.MessageStatusPending,
+		VisibleAt:     now,
+		CreatedAt:     &now,
+		UpdatedAt:     &now,
+	})
+	if err != nil {
+		t.Fatalf("PublishMessage: %v", err)
+	}
+
+	sess := &Session{cfg: Config{
+		TaskStore:  store,
+		MessageBus: store,
+		SessionID:  task.SessionID,
+		RunID:      "run-reviewer",
+		TeamID:     task.TeamID,
+		RoleName:   "reviewer",
+		LeaseTTL:   time.Minute,
+	}}
+	if err := sess.processTaskMessage(context.Background(), msg); err != nil {
+		t.Fatalf("processTaskMessage: %v", err)
+	}
+
+	loadedTask, err := store.GetTask(context.Background(), task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if loadedTask.Status != types.TaskStatusReviewPending {
+		t.Fatalf("task status=%s want %s", loadedTask.Status, types.TaskStatusReviewPending)
+	}
+	loadedMsg, err := store.GetMessage(context.Background(), msg.MessageID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if got := strings.TrimSpace(loadedMsg.Status); got != types.MessageStatusAcked {
+		t.Fatalf("message status=%q want %q", got, types.MessageStatusAcked)
+	}
+}
+
 func TestListPendingTasks_TeamChildRunUsesAgentAssignment(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
 	if err != nil {

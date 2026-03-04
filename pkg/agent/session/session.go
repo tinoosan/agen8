@@ -715,6 +715,16 @@ func (s *Session) processTaskMessage(ctx context.Context, msg types.AgentMessage
 		})
 		return fmt.Errorf("task-backed message missing taskID")
 	}
+	if !isPollableTask(task) {
+		_ = s.cfg.MessageBus.AckMessage(ctx, strings.TrimSpace(msg.MessageID), state.MessageAckResult{
+			Status: types.MessageStatusAcked,
+			Metadata: map[string]any{
+				"skipped": "staged_callback",
+				"source":  getTaskSource(task),
+			},
+		})
+		return nil
+	}
 	claimCtx := state.WithPreclaimedMessage(ctx, state.PreclaimedMessage{
 		MessageID:  strings.TrimSpace(msg.MessageID),
 		LeaseOwner: strings.TrimSpace(msg.LeaseOwner),
