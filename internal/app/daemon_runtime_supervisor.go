@@ -388,9 +388,6 @@ func (s *runtimeSupervisor) Run(ctx context.Context) {
 	if s == nil {
 		return
 	}
-	if err := s.syncOnce(ctx); err != nil {
-		log.Printf("daemon: runtime supervisor sync failed: %v", err)
-	}
 	var (
 		wakeCh     <-chan struct{}
 		wakeCancel func()
@@ -403,8 +400,14 @@ func (s *runtimeSupervisor) Run(ctx context.Context) {
 	}
 	if wakeCh == nil {
 		// Compatibility fallback for non-pubsub session service implementations.
+		if err := s.syncOnce(ctx); err != nil {
+			log.Printf("daemon: runtime supervisor sync failed: %v", err)
+		}
 		s.runWithPollingFallback(ctx)
 		return
+	}
+	if err := s.syncOnce(ctx); err != nil {
+		log.Printf("daemon: runtime supervisor sync failed: %v", err)
 	}
 	for {
 		select {
