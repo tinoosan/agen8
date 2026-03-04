@@ -149,3 +149,69 @@ func TestSQLiteTaskStore_ClaimAckNackAndRequeue(t *testing.T) {
 		t.Fatalf("expected pending after requeue, got %s", requeued.Status)
 	}
 }
+
+func TestSQLiteTaskStore_ClaimNextMessage_AssignedToFilter(t *testing.T) {
+	ctx := context.Background()
+	store := newSQLiteTaskStoreForMessageTest(t)
+	now := time.Now().UTC()
+
+	opsTask := types.Task{
+		TaskID:         "task-ops-1",
+		SessionID:      "thread-1",
+		RunID:          "run-ceo",
+		TeamID:         "team-1",
+		AssignedRole:   "operations-lead",
+		AssignedToType: "role",
+		AssignedTo:     "operations-lead",
+		Goal:           "ops task",
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+	}
+	if err := store.CreateTask(ctx, opsTask); err != nil {
+		t.Fatalf("CreateTask(ops): %v", err)
+	}
+	ctoTask := opsTask
+	ctoTask.TaskID = "task-cto-1"
+	ctoTask.AssignedRole = "cto"
+	ctoTask.AssignedTo = "cto"
+	ctoTask.Goal = "cto task"
+	if err := store.CreateTask(ctx, ctoTask); err != nil {
+		t.Fatalf("CreateTask(cto): %v", err)
+	}
+
+	msgOps := baseMessage()
+	msgOps.MessageID = "msg-ops-1"
+	msgOps.IntentID = "intent-ops-1"
+	msgOps.TeamID = "team-1"
+	msgOps.RunID = "run-ceo"
+	msgOps.TaskRef = opsTask.TaskID
+	msgOps.VisibleAt = now
+	if _, err := store.PublishMessage(ctx, msgOps); err != nil {
+		t.Fatalf("PublishMessage(ops): %v", err)
+	}
+	msgCTO := baseMessage()
+	msgCTO.MessageID = "msg-cto-1"
+	msgCTO.IntentID = "intent-cto-1"
+	msgCTO.TeamID = "team-1"
+	msgCTO.RunID = "run-ceo"
+	msgCTO.TaskRef = ctoTask.TaskID
+	msgCTO.VisibleAt = now
+	if _, err := store.PublishMessage(ctx, msgCTO); err != nil {
+		t.Fatalf("PublishMessage(cto): %v", err)
+	}
+
+	claimed, err := store.ClaimNextMessage(ctx, MessageClaimFilter{
+		ThreadID:       "thread-1",
+		TeamID:         "team-1",
+		Channel:        types.MessageChannelInbox,
+		Kinds:          []string{types.MessageKindTask},
+		AssignedToType: "role",
+		AssignedTo:     "operations-lead",
+	}, time.Minute, "run-ops")
+	if err != nil {
+		t.Fatalf("ClaimNextMessage(role-filter): %v", err)
+	}
+	if claimed.TaskRef != opsTask.TaskID {
+		t.Fatalf("claimed taskRef=%q want %q", claimed.TaskRef, opsTask.TaskID)
+	}
+}

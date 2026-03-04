@@ -449,7 +449,6 @@ func (m *Manager) syncTaskMessagesTerminal(ctx context.Context, task types.Task)
 	}
 	msgs, err := m.messageStore.ListMessages(ctx, state.MessageFilter{
 		ThreadID: strings.TrimSpace(task.SessionID),
-		RunID:    strings.TrimSpace(task.RunID),
 		TaskRef:  taskID,
 		Channel:  types.MessageChannelInbox,
 		Statuses: []string{types.MessageStatusPending, types.MessageStatusClaimed, types.MessageStatusNacked},
@@ -480,9 +479,15 @@ func (m *Manager) ClaimTask(ctx context.Context, taskID string, ttl time.Duratio
 	if err != nil {
 		return err
 	}
-	msg, err := m.claimBackingMessageForTask(ctx, task, ttl)
-	if err != nil {
-		return err
+	msg := types.AgentMessage{}
+	if preclaimed, ok := state.PreclaimedMessageFromContext(ctx); ok {
+		msg.MessageID = preclaimed.MessageID
+		msg.LeaseOwner = preclaimed.LeaseOwner
+	} else {
+		msg, err = m.claimBackingMessageForTask(ctx, task, ttl)
+		if err != nil {
+			return err
+		}
 	}
 	if err := m.store.ClaimTask(ctx, taskID, ttl); err != nil {
 		if m.messageStore != nil && strings.TrimSpace(msg.MessageID) != "" {
@@ -511,7 +516,6 @@ func (m *Manager) ensureTaskHasBackingMessage(ctx context.Context, task types.Ta
 	}
 	msgs, err := m.messageStore.ListMessages(ctx, state.MessageFilter{
 		ThreadID: strings.TrimSpace(task.SessionID),
-		RunID:    strings.TrimSpace(task.RunID),
 		TaskRef:  strings.TrimSpace(task.TaskID),
 		Channel:  types.MessageChannelInbox,
 		Limit:    1,
@@ -530,14 +534,24 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 	if m == nil || m.messageStore == nil {
 		return types.AgentMessage{}, nil
 	}
-	consumerID := strings.TrimSpace(task.RunID)
+	consumerID := strings.TrimSpace(task.ClaimedByAgentID)
+	if consumerID == "" && strings.EqualFold(strings.TrimSpace(task.AssignedToType), "agent") {
+		consumerID = strings.TrimSpace(task.AssignedTo)
+	}
+	if consumerID == "" {
+		consumerID = strings.TrimSpace(task.RunID)
+	}
+	if consumerID == "" {
+		consumerID = "task-service"
+	}
 	filter := state.MessageClaimFilter{
-		ThreadID: strings.TrimSpace(task.SessionID),
-		RunID:    strings.TrimSpace(task.RunID),
-		TeamID:   strings.TrimSpace(task.TeamID),
-		TaskRef:  strings.TrimSpace(task.TaskID),
-		Channel:  types.MessageChannelInbox,
-		Kinds:    []string{types.MessageKindTask, types.MessageKindUserInput},
+		ThreadID:       strings.TrimSpace(task.SessionID),
+		TeamID:         strings.TrimSpace(task.TeamID),
+		TaskRef:        strings.TrimSpace(task.TaskID),
+		AssignedToType: strings.TrimSpace(task.AssignedToType),
+		AssignedTo:     strings.TrimSpace(task.AssignedTo),
+		Channel:        types.MessageChannelInbox,
+		Kinds:          []string{types.MessageKindTask, types.MessageKindUserInput},
 	}
 	msg, err := m.messageStore.ClaimNextMessage(ctx, filter, ttl, consumerID)
 	if err == nil {
@@ -548,7 +562,6 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 	}
 	msgs, lerr := m.messageStore.ListMessages(ctx, state.MessageFilter{
 		ThreadID: strings.TrimSpace(task.SessionID),
-		RunID:    strings.TrimSpace(task.RunID),
 		TaskRef:  strings.TrimSpace(task.TaskID),
 		Channel:  types.MessageChannelInbox,
 		Limit:    50,
@@ -643,14 +656,22 @@ func (m *Manager) AckMessage(ctx context.Context, messageID string, result state
 	if m == nil || m.messageStore == nil {
 		return fmt.Errorf("message store is not configured")
 	}
-	return m.messageStore.AckMessage(ctx, messageID, result)
+	if err := m.messageStore.AckMessage(ctx, messageID, result); err != nil {
+		return err
+	}
+	m.notifyWakeForMessage(ctx, messageID)
+	return nil
 }
 
 func (m *Manager) NackMessage(ctx context.Context, messageID string, reason string, retryAt *time.Time) error {
 	if m == nil || m.messageStore == nil {
 		return fmt.Errorf("message store is not configured")
 	}
-	return m.messageStore.NackMessage(ctx, messageID, reason, retryAt)
+	if err := m.messageStore.NackMessage(ctx, messageID, reason, retryAt); err != nil {
+		return err
+	}
+	m.notifyWakeForMessage(ctx, messageID)
+	return nil
 }
 
 func (m *Manager) RequeueExpiredClaims(ctx context.Context) error {
@@ -742,6 +763,29 @@ func (m *Manager) emitRoutingEvent(ctx context.Context, task types.Task, typ, ms
 		Data:      evData,
 		Timestamp: time.Now().UTC(),
 	})
+}
+
+func (m *Manager) notifyWakeForMessage(ctx context.Context, messageID string) {
+	if m == nil || m.messageStore == nil {
+		return
+	}
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return
+	}
+	msg, err := m.messageStore.GetMessage(ctx, messageID)
+	if err != nil {
+		return
+	}
+	taskRef := strings.TrimSpace(msg.TaskRef)
+	if taskRef == "" {
+		return
+	}
+	task, err := m.store.GetTask(ctx, taskRef)
+	if err != nil {
+		return
+	}
+	m.notifyWake(task)
 }
 
 // CloseBatchAndHandoff atomically closes a synthetic batch callback and creates

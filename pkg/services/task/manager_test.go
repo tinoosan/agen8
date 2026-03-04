@@ -525,3 +525,134 @@ func TestManager_ClaimTask_ReturnsMessageClaimedWhenOwnedByOtherRun(t *testing.T
 		t.Fatalf("did not expect task claim when backing message is owned by another run")
 	}
 }
+
+func TestManager_ClaimTask_UsesPreclaimedMessageContext(t *testing.T) {
+	taskID := "task-preclaimed"
+	task := types.Task{TaskID: taskID, SessionID: "sess-1", RunID: "run-creator", Status: types.TaskStatusPending}
+	var claimCalled bool
+	store := &mockTaskStore{
+		getTask: func(ctx context.Context, id string) (types.Task, error) {
+			if id != taskID {
+				return types.Task{}, state.ErrTaskNotFound
+			}
+			return task, nil
+		},
+		claimTask: func(ctx context.Context, id string, ttl time.Duration) error {
+			claimCalled = true
+			return nil
+		},
+	}
+	msgStore := &mockMessageStore{
+		claimNextMessage: func(ctx context.Context, filter state.MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error) {
+			t.Fatalf("ClaimNextMessage should not be called when preclaimed context is present")
+			return types.AgentMessage{}, nil
+		},
+		listMessages: func(ctx context.Context, filter state.MessageFilter) ([]types.AgentMessage, error) {
+			t.Fatalf("ListMessages should not be called when preclaimed context is present")
+			return nil, nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+
+	ctx := state.WithPreclaimedMessage(context.Background(), state.PreclaimedMessage{
+		MessageID:  "msg-preclaimed-1",
+		LeaseOwner: "run-worker",
+	})
+	if err := mgr.ClaimTask(ctx, taskID, time.Minute); err != nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	if !claimCalled {
+		t.Fatalf("expected task claim to be executed")
+	}
+}
+
+func TestManager_ClaimTask_UsesAssigneeScopeForBackingMessage(t *testing.T) {
+	taskID := "task-role-1"
+	task := types.Task{
+		TaskID:         taskID,
+		SessionID:      "sess-1",
+		RunID:          "run-coordinator",
+		TeamID:         "team-1",
+		AssignedToType: "role",
+		AssignedTo:     "operations-lead",
+		Status:         types.TaskStatusPending,
+	}
+	claimedTask := task
+	claimedTask.Status = types.TaskStatusActive
+	var claimCalled bool
+	var seenFilter state.MessageClaimFilter
+	store := &mockTaskStore{
+		getTask: func(ctx context.Context, id string) (types.Task, error) {
+			if id != taskID {
+				return types.Task{}, state.ErrTaskNotFound
+			}
+			if claimCalled {
+				return claimedTask, nil
+			}
+			return task, nil
+		},
+		claimTask: func(ctx context.Context, id string, ttl time.Duration) error {
+			claimCalled = true
+			return nil
+		},
+	}
+	msgStore := &mockMessageStore{
+		claimNextMessage: func(ctx context.Context, filter state.MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error) {
+			seenFilter = filter
+			return types.AgentMessage{
+				MessageID: "msg-role-1",
+				TaskRef:   taskID,
+				Status:    types.MessageStatusClaimed,
+			}, nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+
+	if err := mgr.ClaimTask(context.Background(), taskID, time.Minute); err != nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	if strings.TrimSpace(seenFilter.RunID) != "" {
+		t.Fatalf("ClaimNextMessage filter.RunID=%q, want empty", seenFilter.RunID)
+	}
+	if got := strings.TrimSpace(seenFilter.AssignedToType); got != "role" {
+		t.Fatalf("ClaimNextMessage filter.AssignedToType=%q, want role", got)
+	}
+	if got := strings.TrimSpace(seenFilter.AssignedTo); got != "operations-lead" {
+		t.Fatalf("ClaimNextMessage filter.AssignedTo=%q, want operations-lead", got)
+	}
+}
+
+func TestManager_AckMessage_NotifiesWakeForBackedTask(t *testing.T) {
+	taskID := "task-ack-1"
+	store := &mockTaskStore{
+		getTask: func(ctx context.Context, id string) (types.Task, error) {
+			if id != taskID {
+				return types.Task{}, state.ErrTaskNotFound
+			}
+			return types.Task{TaskID: taskID, TeamID: "team-1", RunID: "run-1"}, nil
+		},
+	}
+	msgStore := &mockMessageStore{
+		ackMessage: func(ctx context.Context, messageID string, result state.MessageAckResult) error {
+			return nil
+		},
+		getMessage: func(ctx context.Context, messageID string) (types.AgentMessage, error) {
+			return types.AgentMessage{MessageID: messageID, TaskRef: taskID}, nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+	wakeCh, cancel := mgr.SubscribeWake("team-1", "run-1")
+	defer cancel()
+
+	if err := mgr.AckMessage(context.Background(), "msg-ack-1", state.MessageAckResult{Status: types.MessageStatusAcked}); err != nil {
+		t.Fatalf("AckMessage: %v", err)
+	}
+	select {
+	case <-wakeCh:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatalf("expected wake after AckMessage")
+	}
+}

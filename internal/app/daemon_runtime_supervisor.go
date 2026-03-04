@@ -1296,7 +1296,14 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	var wakeCh <-chan struct{}
 	var wakeCancel func()
 	if wakeSub, ok := s.taskService.(taskWakeSubscriber); ok && wakeSub != nil {
-		wakeCh, wakeCancel = wakeSub.SubscribeWake(strings.TrimSpace(teamID), strings.TrimSpace(run.RunID))
+		wakeTeamID := strings.TrimSpace(teamID)
+		wakeRunID := strings.TrimSpace(run.RunID)
+		// In team mode, messages are claimed by assignee (role/agent/team), so workers
+		// must all receive team-scoped wake signals regardless of task.RunID.
+		if wakeTeamID != "" {
+			wakeRunID = ""
+		}
+		wakeCh, wakeCancel = wakeSub.SubscribeWake(wakeTeamID, wakeRunID)
 	}
 	messageBus, ok := s.taskService.(agentsession.MessageBus)
 	if !ok || messageBus == nil {

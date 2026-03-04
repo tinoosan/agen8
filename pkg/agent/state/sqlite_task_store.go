@@ -2009,6 +2009,15 @@ func (s *SQLiteTaskStore) ClaimNextMessage(ctx context.Context, filter MessageCl
 		where += " AND task_ref = ?"
 		args = append(args, id)
 	}
+	if assignedToType := strings.TrimSpace(filter.AssignedToType); assignedToType != "" {
+		where += " AND EXISTS (SELECT 1 FROM tasks t WHERE t.task_id = messages.task_ref AND t.assigned_to_type = ?"
+		args = append(args, assignedToType)
+		if assignedTo := strings.TrimSpace(filter.AssignedTo); assignedTo != "" {
+			where += " AND t.assigned_to = ?"
+			args = append(args, assignedTo)
+		}
+		where += ")"
+	}
 	if ch := strings.TrimSpace(filter.Channel); ch != "" {
 		where += " AND channel = ?"
 		args = append(args, ch)

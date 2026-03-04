@@ -578,20 +578,14 @@ func (s *Session) drainInboxMessages(ctx context.Context) (bool, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	filter := state.MessageClaimFilter{
-		ThreadID: strings.TrimSpace(s.cfg.SessionID),
-		RunID:    strings.TrimSpace(s.cfg.RunID),
-		TeamID:   strings.TrimSpace(s.cfg.TeamID),
-		Channel:  types.MessageChannelInbox,
-		Kinds:    []string{types.MessageKindTask, types.MessageKindUserInput},
-	}
+	claimFilters := s.buildMessageClaimFilters()
 	for i := 0; i < limit; i++ {
-		msg, err := s.cfg.MessageBus.ClaimNextMessage(ctx, filter, s.cfg.LeaseTTL, strings.TrimSpace(s.cfg.RunID))
+		msg, ok, err := s.claimNextScopedMessage(ctx, claimFilters)
 		if err != nil {
-			if errors.Is(err, state.ErrMessageNotFound) {
-				break
-			}
-			errs = errors.Join(errs, fmt.Errorf("claim next message: %w", err))
+			errs = errors.Join(errs, err)
+			break
+		}
+		if !ok {
 			break
 		}
 		hadWork = true
@@ -600,6 +594,66 @@ func (s *Session) drainInboxMessages(ctx context.Context) (bool, error) {
 		}
 	}
 	return hadWork, errs
+}
+
+func (s *Session) buildMessageClaimFilters() []state.MessageClaimFilter {
+	base := state.MessageClaimFilter{
+		ThreadID: strings.TrimSpace(s.cfg.SessionID),
+		TeamID:   strings.TrimSpace(s.cfg.TeamID),
+		Channel:  types.MessageChannelInbox,
+		Kinds:    []string{types.MessageKindTask, types.MessageKindUserInput},
+	}
+	filters := []state.MessageClaimFilter{
+		{
+			ThreadID:       base.ThreadID,
+			TeamID:         base.TeamID,
+			Channel:        base.Channel,
+			Kinds:          base.Kinds,
+			AssignedToType: "agent",
+			AssignedTo:     strings.TrimSpace(s.cfg.RunID),
+		},
+	}
+	teamID := strings.TrimSpace(s.cfg.TeamID)
+	roleName := strings.TrimSpace(s.cfg.RoleName)
+	if teamID != "" && roleName != "" {
+		filters = append(filters, state.MessageClaimFilter{
+			ThreadID:       base.ThreadID,
+			TeamID:         base.TeamID,
+			Channel:        base.Channel,
+			Kinds:          base.Kinds,
+			AssignedToType: "role",
+			AssignedTo:     roleName,
+		})
+		if s.cfg.IsCoordinator {
+			filters = append(filters, state.MessageClaimFilter{
+				ThreadID:       base.ThreadID,
+				TeamID:         base.TeamID,
+				Channel:        base.Channel,
+				Kinds:          base.Kinds,
+				AssignedToType: "team",
+				AssignedTo:     teamID,
+			})
+		}
+	}
+	return filters
+}
+
+func (s *Session) claimNextScopedMessage(ctx context.Context, filters []state.MessageClaimFilter) (types.AgentMessage, bool, error) {
+	var claimErr error
+	for _, filter := range filters {
+		msg, err := s.cfg.MessageBus.ClaimNextMessage(ctx, filter, s.cfg.LeaseTTL, strings.TrimSpace(s.cfg.RunID))
+		if err == nil {
+			return msg, true, nil
+		}
+		if errors.Is(err, state.ErrMessageNotFound) {
+			continue
+		}
+		claimErr = errors.Join(claimErr, fmt.Errorf("claim next message: %w", err))
+	}
+	if claimErr != nil {
+		return types.AgentMessage{}, false, claimErr
+	}
+	return types.AgentMessage{}, false, nil
 }
 
 func (s *Session) processClaimedMessage(ctx context.Context, msg types.AgentMessage) error {
@@ -633,7 +687,11 @@ func (s *Session) processTaskMessage(ctx context.Context, msg types.AgentMessage
 		})
 		return fmt.Errorf("task-backed message missing taskID")
 	}
-	if err := s.cfg.TaskStore.ClaimTask(ctx, taskID, s.cfg.LeaseTTL); err != nil {
+	claimCtx := state.WithPreclaimedMessage(ctx, state.PreclaimedMessage{
+		MessageID:  strings.TrimSpace(msg.MessageID),
+		LeaseOwner: strings.TrimSpace(msg.LeaseOwner),
+	})
+	if err := s.cfg.TaskStore.ClaimTask(claimCtx, taskID, s.cfg.LeaseTTL); err != nil {
 		switch {
 		case errors.Is(err, state.ErrTaskClaimed), errors.Is(err, state.ErrMessageClaimed), errors.Is(err, state.ErrMessageNotClaimable), isSQLiteBusyErr(err):
 			retryAt := time.Now().UTC()
@@ -1652,8 +1710,8 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 		}
 		callback = types.Task{
 			TaskID:         callbackTaskID,
-			SessionID:      "team-" + strings.TrimSpace(s.cfg.TeamID),
-			RunID:          "team-" + strings.TrimSpace(s.cfg.TeamID) + "-callback",
+			SessionID:      strings.TrimSpace(s.cfg.SessionID),
+			RunID:          strings.TrimSpace(s.cfg.RunID),
 			TeamID:         strings.TrimSpace(s.cfg.TeamID),
 			AssignedRole:   reviewerRole,
 			AssignedToType: "role",
@@ -1884,8 +1942,8 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 		source = taskSourceTeamBatchCallback
 		taskKind = state.TaskKindCallback
 		assignedToType = "role"
-		sessionID = "team-" + strings.TrimSpace(s.cfg.TeamID)
-		runID = "team-" + strings.TrimSpace(s.cfg.TeamID) + "-callback"
+		sessionID = strings.TrimSpace(s.cfg.SessionID)
+		runID = strings.TrimSpace(s.cfg.RunID)
 		teamID = strings.TrimSpace(s.cfg.TeamID)
 		assignedRole = group.reviewerID
 		createdBy = strings.TrimSpace(s.cfg.RoleName)

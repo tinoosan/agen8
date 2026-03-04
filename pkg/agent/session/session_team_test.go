@@ -573,6 +573,51 @@ func TestMaybeCreateCoordinatorCallback_SubagentWorkerCompletion_TeamContextSets
 	}
 }
 
+func TestMaybeCreateCoordinatorCallback_TeamCallbackUsesWorkerSessionThread(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:       store,
+		TeamID:          "team-1",
+		RoleName:        "backend-engineer",
+		CoordinatorRole: "ceo",
+		ReviewerRole:    "reviewer",
+		TeamRoles:       []string{"ceo", "reviewer", "backend-engineer"},
+		SessionID:       "sess-team-1",
+		RunID:           "run-backend",
+	}}
+	task := types.Task{
+		TaskID:       "task-team-callback-1",
+		SessionID:    "sess-team-1",
+		RunID:        "run-backend",
+		TeamID:       "team-1",
+		AssignedRole: "backend-engineer",
+		CreatedBy:    "ceo",
+		Goal:         "deliver output",
+		Status:       types.TaskStatusPending,
+		Metadata: map[string]any{
+			"source": "task_create",
+		},
+	}
+	s.maybeCreateCoordinatorCallback(context.Background(), task, types.TaskResult{
+		TaskID:  task.TaskID,
+		Status:  types.TaskStatusSucceeded,
+		Summary: "done",
+	})
+	callback, err := store.GetTask(context.Background(), "callback-"+task.TaskID)
+	if err != nil {
+		t.Fatalf("expected team callback task, got err=%v", err)
+	}
+	if got := strings.TrimSpace(callback.SessionID); got != "sess-team-1" {
+		t.Fatalf("callback SessionID=%q, want sess-team-1", got)
+	}
+	if got := strings.TrimSpace(callback.RunID); got != "run-backend" {
+		t.Fatalf("callback RunID=%q, want run-backend", got)
+	}
+}
+
 func TestNormalizeStandaloneSubagentCallbackArtifactPath(t *testing.T) {
 	cases := []struct {
 		in   string

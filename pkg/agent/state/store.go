@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	pkgstore "github.com/tinoosan/agen8/pkg/store"
@@ -156,8 +157,11 @@ type MessageClaimFilter struct {
 	RunID    string
 	TeamID   string
 	TaskRef  string
-	Channel  string
-	Kinds    []string
+	// Optional assignee routing filters (resolved from projected task row via task_ref).
+	AssignedToType string
+	AssignedTo     string
+	Channel        string
+	Kinds          []string
 }
 
 // MessageFilter specifies query criteria for list/count operations.
@@ -204,3 +208,39 @@ var (
 	// ErrTaskMissingMessage indicates a task projection exists without any backing message envelope.
 	ErrTaskMissingMessage = errors.New("task projection has no backing message")
 )
+
+type preclaimedMessageKey struct{}
+
+// PreclaimedMessage carries bus-claim context from session runtime into task-service claim
+// to avoid duplicate message claims for the same envelope.
+type PreclaimedMessage struct {
+	MessageID  string
+	LeaseOwner string
+}
+
+// WithPreclaimedMessage annotates context with an already-claimed message envelope.
+func WithPreclaimedMessage(ctx context.Context, msg PreclaimedMessage) context.Context {
+	msg.MessageID = strings.TrimSpace(msg.MessageID)
+	msg.LeaseOwner = strings.TrimSpace(msg.LeaseOwner)
+	if ctx == nil || msg.MessageID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, preclaimedMessageKey{}, msg)
+}
+
+// PreclaimedMessageFromContext extracts an already-claimed message annotation, if present.
+func PreclaimedMessageFromContext(ctx context.Context) (PreclaimedMessage, bool) {
+	if ctx == nil {
+		return PreclaimedMessage{}, false
+	}
+	msg, ok := ctx.Value(preclaimedMessageKey{}).(PreclaimedMessage)
+	if !ok {
+		return PreclaimedMessage{}, false
+	}
+	msg.MessageID = strings.TrimSpace(msg.MessageID)
+	msg.LeaseOwner = strings.TrimSpace(msg.LeaseOwner)
+	if msg.MessageID == "" {
+		return PreclaimedMessage{}, false
+	}
+	return msg, true
+}
