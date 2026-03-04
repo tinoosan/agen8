@@ -331,7 +331,12 @@ func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
 				}
 			}
 
-			if isBridge && lastCodeExecIdx >= 0 {
+		if isBridge && lastCodeExecIdx >= 0 {
+			// Write ops that produce diffs are NOT collapsed — they stay in the turn
+			// as regular visible entries so each file path and diff renders individually,
+			// just like a standalone fs_write would. Only non-write bridge ops (reads,
+			// lists, http_fetch, etc.) are collapsed under the parent code_exec.
+			if !isWriteOp(e.opKind) {
 				parent := &filtered[lastCodeExecIdx]
 				parent.childCount++
 				if parent.childCount == 1 {
@@ -340,15 +345,11 @@ func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
 					parent.bridgeSingleText = e.text
 					parent.bridgeSinglePath = e.path
 				} else if parent.childCount == 2 {
-					// More than one bridge: show "Ran N tools" instead of single verb+args.
+					// More than one non-write bridge: show "Ran N tools".
 					parent.bridgeSingleOpKind = ""
 					parent.bridgeSingleData = nil
 					parent.bridgeSingleText = ""
 					parent.bridgeSinglePath = ""
-				}
-				// Collect all bridge write ops for diff display, regardless of childCount.
-				if isWriteOp(e.opKind) {
-					parent.bridgeWriteEntries = append(parent.bridgeWriteEntries, e)
 				}
 				// Promote plan items from collapsed bridge entries to the parent code_exec.
 				if len(e.planItems) > 0 {
@@ -356,6 +357,8 @@ func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
 				}
 				continue
 			}
+			// Write ops fall through to be added to filtered normally below.
+		}
 
 			if strings.ToLower(strings.TrimSpace(e.opKind)) == "code_exec" {
 				lastCodeExecIdx = len(filtered)
@@ -620,21 +623,15 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 				} else {
 					bridgeArg = truncate(stripLeadingVerb(e.bridgeSingleText, bridgeVerb), maxInt(8, inner-len(bridgeVerb)-8))
 				}
-				line := styleVerbBold.Render(bridgeVerb)
-				if bridgeArg != "" {
-					if bridgeArgItalic {
-						line += " " + styleArgItalic.Render(bridgeArg)
-					} else {
-						line += " " + bridgeArg
-					}
+			line := styleVerbBold.Render(bridgeVerb)
+			if bridgeArg != "" {
+				if bridgeArgItalic {
+					line += " " + styleArgItalic.Render(bridgeArg)
+				} else {
+					line += " " + bridgeArg
 				}
-				// Append +N −M stat for bridge write ops.
-				if isWriteOp(e.bridgeSingleOpKind) && e.bridgeSingleData != nil {
-					if added, deleted := tui.DiffStat(e.bridgeSingleData["patchPreview"]); added > 0 || deleted > 0 {
-						line += "  " + styleOK.Render("+"+strconv.Itoa(added)) + " " + styleErr.Render("−"+strconv.Itoa(deleted))
-					}
-				}
-				subItems = append(subItems, line)
+			}
+			subItems = append(subItems, line)
 			} else {
 				noun := "tools"
 				if e.childCount == 1 {
@@ -658,12 +655,11 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 			statusText = kit.StyleDim.Render(e.status)
 		}
 
-		// Determine whether we have a renderable diff for this op or its bridge children.
+		// Determine whether we have a renderable diff for this op.
 		hasDiff := isWriteOp(e.opKind) && isSuccessStatus(s) && e.data != nil && strings.TrimSpace(e.data["patchPreview"]) != ""
-		hasBridgeDiff := isSuccessStatus(s) && anyBridgeWriteDiff(e.bridgeWriteEntries)
 
 		// Suppress the "ok" sub-item when a diff will be rendered instead.
-		if !hasDiff && !hasBridgeDiff {
+		if !hasDiff {
 			subItems = append(subItems, statusText)
 		}
 
@@ -686,26 +682,6 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 				lines = append(lines, diffLines...)
 			} else {
 				// Fallback: no parseable diff → show status normally.
-				lines = append(lines, "  "+styleVerbBold.Render("└─")+" "+statusText)
-			}
-		} else if hasBridgeDiff {
-			anyRendered := false
-			for _, bw := range e.bridgeWriteEntries {
-				if bw.data == nil {
-					continue
-				}
-				diffLines := renderFileDiff(bw.data, m.hideDiffs, inner)
-				if len(diffLines) == 0 {
-					continue
-				}
-				anyRendered = true
-				// Show the file path as a dim label above its diff block when there are multiple writes.
-				if len(e.bridgeWriteEntries) > 1 && strings.TrimSpace(bw.path) != "" {
-					lines = append(lines, "    "+kit.StyleDim.Render(strings.TrimSpace(bw.path)))
-				}
-				lines = append(lines, diffLines...)
-			}
-			if !anyRendered {
 				lines = append(lines, "  "+styleVerbBold.Render("└─")+" "+statusText)
 			}
 		}
@@ -1087,16 +1063,6 @@ func renderDiffLines(patchPreview string, patchTruncated, patchRedacted bool, wi
 		out = append(out, "    "+kit.StyleDim.Render("  … (truncated)"))
 	}
 	return out
-}
-
-// anyBridgeWriteDiff returns true if at least one bridge write entry has a non-empty patchPreview.
-func anyBridgeWriteDiff(entries []feedEntry) bool {
-	for _, bw := range entries {
-		if bw.data != nil && strings.TrimSpace(bw.data["patchPreview"]) != "" {
-			return true
-		}
-	}
-	return false
 }
 
 // renderFileDiff renders the diff block for a write op given its data map.
