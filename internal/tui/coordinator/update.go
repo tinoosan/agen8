@@ -417,8 +417,11 @@ func (m *Model) upsertFeedEntry(e feedEntry) {
 	if key := strings.TrimSpace(e.identityKey); key != "" {
 		for i := range m.feed {
 			if strings.TrimSpace(m.feed[i].identityKey) == key {
+				changed := feedEntryRenderChanged(m.feed[i], e)
 				m.feed[i] = e
-				m.feedGen++
+				if changed {
+					m.feedGen++
+				}
 				sort.SliceStable(m.feed, func(a, b int) bool {
 					return m.feed[a].timestamp.Before(m.feed[b].timestamp)
 				})
@@ -429,8 +432,11 @@ func (m *Model) upsertFeedEntry(e feedEntry) {
 	if sid := strings.TrimSpace(e.sourceID); sid != "" {
 		for i := range m.feed {
 			if m.feed[i].kind == e.kind && strings.TrimSpace(m.feed[i].sourceID) == sid {
+				changed := feedEntryRenderChanged(m.feed[i], e)
 				m.feed[i] = e
-				m.feedGen++
+				if changed {
+					m.feedGen++
+				}
 				sort.SliceStable(m.feed, func(a, b int) bool {
 					return m.feed[a].timestamp.Before(m.feed[b].timestamp)
 				})
@@ -710,6 +716,53 @@ func (m *Model) appendReconnectNotice(recovered bool) {
 	m.feedGen++
 }
 
+// feedEntryRenderChanged returns true if anything that affects the rendered
+// output of a single entry has changed between old and new.
+func feedEntryRenderChanged(old, next feedEntry) bool {
+	if old.status != next.status {
+		return true
+	}
+	if old.opKind != next.opKind {
+		return true
+	}
+	if old.text != next.text {
+		return true
+	}
+	if old.path != next.path {
+		return true
+	}
+	if old.live != next.live {
+		return true
+	}
+	if old.thinkingDuration != next.thinkingDuration {
+		return true
+	}
+	if len(old.thinkingLines) != len(next.thinkingLines) {
+		return true
+	}
+	if old.childCount != next.childCount {
+		return true
+	}
+	if old.planDetailsTitle != next.planDetailsTitle {
+		return true
+	}
+	if len(old.planItems) != len(next.planItems) {
+		return true
+	}
+	oldPP := ""
+	if old.data != nil {
+		oldPP = old.data["patchPreview"]
+	}
+	nextPP := ""
+	if next.data != nil {
+		nextPP = next.data["patchPreview"]
+	}
+	if oldPP != nextPP {
+		return true
+	}
+	return false
+}
+
 // feedEqual returns true when two feed slices are identical in length and every
 // entry shares the same identity key, status, and patchPreview.  Used to avoid
 // bumping feedGen (and thus invalidating the line cache) when a poll returns
@@ -722,18 +775,7 @@ func feedEqual(a, b []feedEntry) bool {
 		if a[i].identityKey != b[i].identityKey {
 			return false
 		}
-		if a[i].status != b[i].status {
-			return false
-		}
-		ppa := ""
-		if a[i].data != nil {
-			ppa = a[i].data["patchPreview"]
-		}
-		ppb := ""
-		if b[i].data != nil {
-			ppb = b[i].data["patchPreview"]
-		}
-		if ppa != ppb {
+		if feedEntryRenderChanged(a[i], b[i]) {
 			return false
 		}
 	}
