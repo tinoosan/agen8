@@ -303,6 +303,15 @@ func (fsPatchOperation) FormatRequestText(_ types.HostOpRequest, reqData map[str
 func (fsPatchOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpResponse, _ map[string]string, respData map[string]string) string {
 	return opformat.FormatResponseText(respData)
 }
+func (fsPatchOperation) ResolveAfter(req types.HostOpRequest, _ string, fs *vfs.FS) (string, bool) {
+	if fs == nil {
+		return "", true
+	}
+	if b, err := fs.Read(req.Path); err == nil {
+		return string(b), true
+	}
+	return "", true
+}
 func (fsPatchOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
 	if req.DryRun {
 		reqData["dryRun"] = "true"
