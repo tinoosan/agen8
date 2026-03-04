@@ -2,7 +2,6 @@ package cost
 
 import (
 	"context"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -103,8 +102,7 @@ func TestSupportsReasoningEffort_Miss(t *testing.T) {
 
 func TestLookupPricing_OpenRouterFallback(t *testing.T) {
 	ctx := context.Background()
-	os.Setenv("OPENROUTER_API_KEY", "test-key")
-	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
 	orCacheMu = sync.RWMutex{}
 	orModelCache = map[string]openRouterModelMeta{
 		"moonshotai/kimi-k2.5-unknown": {
@@ -135,8 +133,7 @@ func TestLookupPricing_OpenRouterFallback(t *testing.T) {
 
 func TestLookupPricing_OpenRouterFallback_UnparsablePricingUnknown(t *testing.T) {
 	ctx := context.Background()
-	os.Setenv("OPENROUTER_API_KEY", "test-key")
-	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
 	orCacheMu = sync.RWMutex{}
 	orModelCache = map[string]openRouterModelMeta{
 		"moonshotai/kimi-k2.5-unknown": {
@@ -164,8 +161,7 @@ func TestLookupPricing_OpenRouterFallback_UnparsablePricingUnknown(t *testing.T)
 
 func TestLookupPricing_OpenRouterFallback_ZeroPricingStillKnownWhenParsed(t *testing.T) {
 	ctx := context.Background()
-	os.Setenv("OPENROUTER_API_KEY", "test-key")
-	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
 	orCacheMu = sync.RWMutex{}
 	orModelCache = map[string]openRouterModelMeta{
 		"openai/gpt-oss-120b": {

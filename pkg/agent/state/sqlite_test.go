@@ -80,9 +80,19 @@ func TestSQLiteStore_Claim_Expires(t *testing.T) {
 	if err := s.ClaimTask(ctx, "t1", 10*time.Millisecond); err != nil {
 		t.Fatalf("ClaimTask: %v", err)
 	}
-	time.Sleep(20 * time.Millisecond)
-	if err := s.ClaimTask(ctx, "t1", 50*time.Millisecond); err != nil {
-		t.Fatalf("ClaimTask(2): %v", err)
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		err = s.ClaimTask(ctx, "t1", 50*time.Millisecond)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, ErrTaskClaimed) {
+			t.Fatalf("ClaimTask(2): %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for lease expiry: %v", err)
+		}
 	}
 	got2, err := s.GetTask(ctx, "t1")
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,8 +13,7 @@ import (
 func TestContextLengthFromOpenRouter(t *testing.T) {
 	ctx := context.Background()
 
-	os.Setenv("OPENROUTER_API_KEY", "test-key")
-	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -58,7 +56,7 @@ func TestContextLengthFromOpenRouter(t *testing.T) {
 	}
 
 	// 5. Without API key
-	os.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
 	l, ok = ContextLengthFromOpenRouter(ctx, "openrouter/mock-model")
 	if ok || l != 0 {
 		t.Fatalf("expected 0, false without API key")
@@ -68,8 +66,7 @@ func TestContextLengthFromOpenRouter(t *testing.T) {
 func TestContextLengthFromOpenRouter_FailBackoff(t *testing.T) {
 	ctx := context.Background()
 
-	os.Setenv("OPENROUTER_API_KEY", "test-key")
-	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
 
 	var fetchCount atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -125,8 +122,7 @@ func TestContextLengthFromOpenRouter_FailBackoff(t *testing.T) {
 func TestSupportsReasoningSummaryFromOpenRouter(t *testing.T) {
 	ctx := context.Background()
 
-	os.Setenv("OPENROUTER_API_KEY", "test-key")
-	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -163,8 +159,7 @@ func TestSupportsReasoningSummaryFromOpenRouter(t *testing.T) {
 func TestOpenRouterModelInfos_IncludesPricingPerM(t *testing.T) {
 	ctx := context.Background()
 
-	os.Setenv("OPENROUTER_API_KEY", "test-key")
-	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -214,8 +209,7 @@ func TestOpenRouterModelInfos_IncludesPricingPerM(t *testing.T) {
 }
 
 func TestSupportsReasoningSummaryFromOpenRouterCached_DoesNotFetch(t *testing.T) {
-	os.Setenv("OPENROUTER_API_KEY", "test-key")
-	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
 
 	var fetchCount atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -252,8 +246,7 @@ func TestSupportsReasoningSummaryFromOpenRouterCached_DoesNotFetch(t *testing.T)
 }
 
 func TestTriggerOpenRouterModelRefreshAsync_WarmsCache(t *testing.T) {
-	os.Setenv("OPENROUTER_API_KEY", "test-key")
-	t.Cleanup(func() { os.Unsetenv("OPENROUTER_API_KEY") })
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
 
 	var fetchCount atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -283,15 +276,22 @@ func TestTriggerOpenRouterModelRefreshAsync_WarmsCache(t *testing.T) {
 
 	TriggerOpenRouterModelRefreshAsync(context.Background())
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	timeout := time.NewTimer(2 * time.Second)
+	defer timeout.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
 		if supports, known := SupportsReasoningSummaryFromOpenRouterCached("openrouter/reasoning-model"); known && supports {
 			if fetchCount.Load() == 0 {
 				t.Fatalf("expected at least one refresh fetch")
 			}
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-timeout.C:
+			t.Fatalf("timed out waiting for async refresh to populate cache; fetches=%d", fetchCount.Load())
+		case <-ticker.C:
+		}
 	}
-	t.Fatalf("timed out waiting for async refresh to populate cache; fetches=%d", fetchCount.Load())
 }

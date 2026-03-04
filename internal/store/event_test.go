@@ -161,12 +161,15 @@ func TestEventStore(t *testing.T) {
 
 		eventCh, errCh := TailEvents(cfg, ctx, run.RunID, offset)
 
-		// Append a new event after starting to tail
-		// Give the tail library time to set up file watching
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			_ = AppendEvent(context.Background(), cfg, types.EventRecord{RunID: run.RunID, Type: "new_event", Message: "new message"})
-		}()
+		// Append a new event after starting to tail.
+		// Tailing is seq-based, so the event is picked up even if it arrives before the first poll tick.
+		if err := AppendEvent(context.Background(), cfg, types.EventRecord{
+			RunID:   run.RunID,
+			Type:    "new_event",
+			Message: "new message",
+		}); err != nil {
+			t.Fatalf("AppendEvent failed: %v", err)
+		}
 
 		var tailedEvents []TailedEvent
 		done := false

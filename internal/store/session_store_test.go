@@ -128,19 +128,25 @@ func TestListSessionsPaginated_Basic(t *testing.T) {
 func TestListSessionsPaginated_Sorting(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	s1, _, err := CreateSession(cfg, "first", 64)
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
+	base := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	t1 := base.Add(1 * time.Minute)
+	t2 := base.Add(2 * time.Minute)
+	t3 := base.Add(3 * time.Minute)
+
+	s1 := types.NewSession("first")
+	s1.CreatedAt = &t1
+	if err := SaveSession(cfg, s1); err != nil {
+		t.Fatalf("SaveSession(s1): %v", err)
 	}
-	time.Sleep(10 * time.Millisecond)
-	s2, _, err := CreateSession(cfg, "second", 64)
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
+	s2 := types.NewSession("second")
+	s2.CreatedAt = &t2
+	if err := SaveSession(cfg, s2); err != nil {
+		t.Fatalf("SaveSession(s2): %v", err)
 	}
-	time.Sleep(10 * time.Millisecond)
-	s3, _, err := CreateSession(cfg, "third", 64)
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
+	s3 := types.NewSession("third")
+	s3.CreatedAt = &t3
+	if err := SaveSession(cfg, s3); err != nil {
+		t.Fatalf("SaveSession(s3): %v", err)
 	}
 
 	filter := SessionFilter{Limit: 10, SortBy: "created_at", SortDesc: true}
@@ -170,7 +176,6 @@ func TestListSessionsPaginated_Sorting(t *testing.T) {
 		t.Fatalf("expected newest session last, got %s", sessions[2].SessionID)
 	}
 
-	_ = s2
 }
 
 func TestListSessionsPaginated_TitleFilter(t *testing.T) {

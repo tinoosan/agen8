@@ -83,10 +83,14 @@ func TestMemorySessionStore_ListSessionsPaginated_SortsByUpdatedAtMeta(t *testin
 
 	s1 := types.NewSession("a")
 	s2 := types.NewSession("b")
+	base := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	t1 := base.Add(1 * time.Minute)
+	t2 := base.Add(2 * time.Minute)
+	s1.UpdatedAt = &t1
+	s2.UpdatedAt = &t2
 	if err := st.SaveSession(ctx, s1); err != nil {
 		t.Fatalf("SaveSession(s1): %v", err)
 	}
-	time.Sleep(10 * time.Millisecond)
 	if err := st.SaveSession(ctx, s2); err != nil {
 		t.Fatalf("SaveSession(s2): %v", err)
 	}

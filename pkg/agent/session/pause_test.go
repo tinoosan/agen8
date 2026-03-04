@@ -17,19 +17,27 @@ import (
 )
 
 type fakeAgent struct {
-	mu       sync.Mutex
-	runCount int
-	cfg      agent.AgentConfig
+	mu         sync.Mutex
+	runCount   int
+	runStarted chan struct{}
+	cfg        agent.AgentConfig
 }
 
 func newFakeAgent() *fakeAgent {
-	return &fakeAgent{cfg: agent.AgentConfig{Model: "fake-model", Hooks: agent.Hooks{}}}
+	return &fakeAgent{
+		runStarted: make(chan struct{}, 32),
+		cfg:        agent.AgentConfig{Model: "fake-model", Hooks: agent.Hooks{}},
+	}
 }
 
 func (f *fakeAgent) Run(_ context.Context, _ string) (agent.RunResult, error) {
 	f.mu.Lock()
 	f.runCount++
 	f.mu.Unlock()
+	select {
+	case f.runStarted <- struct{}{}:
+	default:
+	}
 	return agent.RunResult{Text: "ok", Status: types.TaskStatusSucceeded}, nil
 }
 
@@ -72,6 +80,15 @@ func (f *fakeAgent) runs() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.runCount
+}
+
+func (f *fakeAgent) waitForRun(timeout time.Duration) bool {
+	select {
+	case <-f.runStarted:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 type blockingAgent struct {
@@ -146,6 +163,52 @@ func (c *captureEventEmitter) firstByType(kind string) (events.Event, bool) {
 	return events.Event{}, false
 }
 
+func waitUntil(t *testing.T, timeout, pollInterval time.Duration, cond func() bool, failure string) {
+	t.Helper()
+	if cond() {
+		return
+	}
+	timeoutTimer := time.NewTimer(timeout)
+	defer timeoutTimer.Stop()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-timeoutTimer.C:
+			t.Fatal(failure)
+		case <-ticker.C:
+			if cond() {
+				return
+			}
+		}
+	}
+}
+
+func assertNoPendingTasksDuring(t *testing.T, ts state.TaskStore, runID string, duration time.Duration, failure string) {
+	t.Helper()
+	timeoutTimer := time.NewTimer(duration)
+	defer timeoutTimer.Stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-timeoutTimer.C:
+			return
+		case <-ticker.C:
+			count, err := ts.CountTasks(context.Background(), state.TaskFilter{
+				RunID:  runID,
+				Status: []types.TaskStatus{types.TaskStatusPending},
+			})
+			if err != nil {
+				t.Fatalf("CountTasks: %v", err)
+			}
+			if count != 0 {
+				t.Fatalf("%s: %d", failure, count)
+			}
+		}
+	}
+}
+
 func TestSessionPausedSkipsPendingUntilResumed(t *testing.T) {
 	t.Parallel()
 
@@ -191,22 +254,22 @@ func TestSessionPausedSkipsPendingUntilResumed(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- sess.Run(ctx) }()
 
-	time.Sleep(80 * time.Millisecond)
-	if got := ag.runs(); got != 0 {
-		t.Fatalf("agent runs while paused = %d, want 0", got)
+	// Explicitly nudge the loop while paused; it must not execute tasks.
+	select {
+	case wakeCh <- struct{}{}:
+	default:
+	}
+	if ag.waitForRun(200 * time.Millisecond) {
+		t.Fatalf("agent executed task while paused")
 	}
 
 	sess.SetPaused(false)
-	wakeCh <- struct{}{}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if ag.runs() > 0 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	select {
+	case wakeCh <- struct{}{}:
+	default:
 	}
-	if got := ag.runs(); got == 0 {
+
+	if !ag.waitForRun(2 * time.Second) {
 		t.Fatalf("agent did not resume task processing")
 	}
 
@@ -333,20 +396,9 @@ func TestSessionPausedSkipsHeartbeatEnqueue(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- sess.Run(ctx) }()
-	time.Sleep(150 * time.Millisecond)
+	assertNoPendingTasksDuring(t, ts, runID, 200*time.Millisecond, "heartbeat tasks enqueued while paused")
 	cancel()
 	<-done
-
-	count, err := ts.CountTasks(context.Background(), state.TaskFilter{
-		RunID:  runID,
-		Status: []types.TaskStatus{types.TaskStatusPending},
-	})
-	if err != nil {
-		t.Fatalf("CountTasks: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("heartbeat tasks enqueued while paused: %d", count)
-	}
 }
 
 func TestSessionHeartbeatDisabled_NoEnqueue(t *testing.T) {
@@ -388,20 +440,9 @@ func TestSessionHeartbeatDisabled_NoEnqueue(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- sess.Run(ctx) }()
-	time.Sleep(150 * time.Millisecond)
+	assertNoPendingTasksDuring(t, ts, runID, 200*time.Millisecond, "heartbeat_enabled=false: expected no heartbeat tasks, got")
 	cancel()
 	<-done
-
-	count, err := ts.CountTasks(context.Background(), state.TaskFilter{
-		RunID:  runID,
-		Status: []types.TaskStatus{types.TaskStatusPending},
-	})
-	if err != nil {
-		t.Fatalf("CountTasks: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("heartbeat_enabled=false: expected no heartbeat tasks, got %d", count)
-	}
 }
 
 func TestSessionContextCanceled_RecordsTaskCanceled(t *testing.T) {
@@ -445,19 +486,13 @@ func TestSessionContextCanceled_RecordsTaskCanceled(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- sess.Run(ctx) }()
 
-	deadline := time.Now().Add(2 * time.Second)
-	reachedActive := false
-	for time.Now().Before(deadline) {
+	waitUntil(t, 2*time.Second, 20*time.Millisecond, func() bool {
 		task, gerr := ts.GetTask(context.Background(), "task-cancel")
 		if gerr == nil && task.Status == types.TaskStatusActive {
-			reachedActive = true
-			break
+			return true
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !reachedActive {
-		t.Fatalf("task did not become active before cancellation")
-	}
+		return false
+	}, "task did not become active before cancellation")
 	cancel()
 	<-done
 

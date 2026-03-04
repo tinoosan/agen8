@@ -125,3 +125,57 @@ func TestRelUnderBaseDir(t *testing.T) {
 		}
 	})
 }
+
+func FuzzSafeJoinBaseDir_RoundTripBehaviour(f *testing.F) {
+	for _, seed := range []string{
+		"",
+		".",
+		"file.txt",
+		"a/b/c.md",
+		"./nested/file",
+		"../escape",
+		"/abs/path",
+		"a/../b",
+		"a//b",
+		" spaced/name.txt ",
+	} {
+		f.Add(seed)
+	}
+
+	base := f.TempDir()
+	baseAbs, err := filepath.Abs(base)
+	if err != nil {
+		f.Fatalf("Abs(base): %v", err)
+	}
+
+	f.Fuzz(func(t *testing.T, rawSubpath string) {
+		if len(rawSubpath) > 2048 {
+			t.Skip()
+		}
+
+		joined, err := SafeJoinBaseDir(baseAbs, rawSubpath)
+		if err != nil {
+			return
+		}
+		rel, err := RelUnderBaseDir(baseAbs, joined)
+		if err != nil {
+			t.Fatalf("RelUnderBaseDir(%q): %v", joined, err)
+		}
+		// Round-tripping through rel-under-base should preserve the absolute target.
+		joined2, err := SafeJoinBaseDir(baseAbs, rel)
+		if err != nil {
+			t.Fatalf("SafeJoinBaseDir(roundtrip rel=%q): %v", rel, err)
+		}
+		if joined2 != joined {
+			t.Fatalf("round-trip mismatch: raw=%q rel=%q joined=%q joined2=%q", rawSubpath, rel, joined, joined2)
+		}
+
+		relToBase, err := filepath.Rel(baseAbs, joined)
+		if err != nil {
+			t.Fatalf("filepath.Rel(%q,%q): %v", baseAbs, joined, err)
+		}
+		if relToBase == ".." || strings.HasPrefix(relToBase, ".."+string(filepath.Separator)) {
+			t.Fatalf("joined path escaped base: base=%q joined=%q rel=%q", baseAbs, joined, relToBase)
+		}
+	})
+}

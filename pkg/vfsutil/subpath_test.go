@@ -1,6 +1,7 @@
 package vfsutil
 
 import (
+	"path"
 	"strings"
 	"testing"
 )
@@ -122,4 +123,99 @@ func TestCleanResultsArtifactPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func FuzzNormalizeResourceSubpath_Invariants(f *testing.F) {
+	for _, seed := range []string{
+		"",
+		".",
+		"a",
+		"a/b",
+		"a/../b",
+		"../x",
+		"/abs",
+		"a//b",
+		" a/b ",
+		"./a",
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, in string) {
+		if len(in) > 2048 {
+			t.Skip()
+		}
+		clean, parts, err := NormalizeResourceSubpath(in)
+		if err != nil {
+			return
+		}
+
+		if clean == "" || clean == "." {
+			if len(parts) != 0 {
+				t.Fatalf("root-like clean path must have zero parts: clean=%q parts=%v", clean, parts)
+			}
+			return
+		}
+
+		if strings.HasPrefix(clean, "/") {
+			t.Fatalf("normalized path must be relative: %q", clean)
+		}
+		if clean == ".." || strings.HasPrefix(clean, "../") {
+			t.Fatalf("normalized path must not escape root: %q", clean)
+		}
+		if strings.Contains(clean, "//") {
+			t.Fatalf("normalized path must not contain empty segments: %q", clean)
+		}
+		if path.Clean(clean) != clean {
+			t.Fatalf("normalized path must already be clean: %q", clean)
+		}
+		if strings.Join(parts, "/") != clean {
+			t.Fatalf("parts should reconstruct clean path: clean=%q parts=%v", clean, parts)
+		}
+		for _, p := range parts {
+			if p == "" || p == "." || p == ".." {
+				t.Fatalf("invalid normalized segment %q in %v", p, parts)
+			}
+		}
+	})
+}
+
+func FuzzCleanResultsArtifactPath_Invariants(f *testing.F) {
+	for _, seed := range []string{
+		"",
+		".",
+		"result.json",
+		"a/b/c.json",
+		"../escape",
+		"/abs/path",
+		"a//b",
+		" ./report.md ",
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, in string) {
+		if len(in) > 2048 {
+			t.Skip()
+		}
+		clean, err := CleanResultsArtifactPath(in)
+		if err != nil {
+			return
+		}
+		if clean == "" || clean == "." {
+			t.Fatalf("artifact path must not be empty or dot: %q", clean)
+		}
+		if strings.HasPrefix(clean, "/") {
+			t.Fatalf("artifact path must be relative: %q", clean)
+		}
+		if clean == ".." || strings.HasPrefix(clean, "../") {
+			t.Fatalf("artifact path must not escape root: %q", clean)
+		}
+		if strings.Contains(clean, "//") {
+			t.Fatalf("artifact path must not have empty segments: %q", clean)
+		}
+		if path.Clean(clean) != clean {
+			t.Fatalf("artifact path must already be clean: %q", clean)
+		}
+	})
 }

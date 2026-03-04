@@ -148,20 +148,41 @@ func TestService_Tail_CancelUnblocksWhenConsumerStops(t *testing.T) {
 	if err := svc.Append(context.Background(), types.EventRecord{
 		RunID:   run.RunID,
 		Type:    "test_event",
-		Message: "will block until cancel",
+		Message: "first event",
 	}); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	time.Sleep(300 * time.Millisecond)
-	cancel()
 
+	// Consume exactly one event so the consumer is known to be active.
 	select {
 	case _, ok := <-tailCh:
-		if ok {
-			t.Fatalf("expected tail channel to close after cancellation")
+		if !ok {
+			t.Fatalf("tail channel closed before first event")
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("tail channel did not close after cancellation")
+		t.Fatal("tail channel did not deliver first event")
+	}
+
+	// Append another event, then stop consuming and cancel; the stream should close promptly.
+	if err := svc.Append(context.Background(), types.EventRecord{
+		RunID:   run.RunID,
+		Type:    "test_event",
+		Message: "second event",
+	}); err != nil {
+		t.Fatalf("Append second: %v", err)
+	}
+	cancel()
+
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-tailCh:
+			if !ok {
+				return
+			}
+		case <-timeout:
+			t.Fatal("tail channel did not close after cancellation")
+		}
 	}
 }
 

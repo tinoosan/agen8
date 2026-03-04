@@ -14,11 +14,16 @@ func TestRunRoleLoops_ContextCancel(t *testing.T) {
 	defer cancel()
 	var runCount int
 	var mu sync.Mutex
+	started := make(chan struct{}, 1)
 	runner := &mockRoleRunner{
 		run: func(ctx context.Context) error {
 			mu.Lock()
 			runCount++
 			mu.Unlock()
+			select {
+			case started <- struct{}{}:
+			default:
+			}
 			<-ctx.Done()
 			return ctx.Err()
 		},
@@ -28,11 +33,17 @@ func TestRunRoleLoops_ContextCancel(t *testing.T) {
 	registerCancel := func(runID string, c context.CancelFunc) {
 		registered = runID
 	}
+	done := make(chan error, 1)
 	go func() {
-		time.Sleep(10 * time.Millisecond)
-		cancel()
+		done <- RunRoleLoops(ctx, []RoleRunner{runner}, runIDs, registerCancel)
 	}()
-	err := RunRoleLoops(ctx, []RoleRunner{runner}, runIDs, registerCancel)
+	select {
+	case <-started:
+		cancel()
+	case <-time.After(time.Second):
+		t.Fatal("runner did not start")
+	}
+	err := <-done
 	if err != nil && err != context.Canceled {
 		t.Fatalf("RunRoleLoops: %v", err)
 	}
