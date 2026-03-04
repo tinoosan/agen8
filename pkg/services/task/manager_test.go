@@ -46,6 +46,73 @@ type mockTaskStore struct {
 	resumeTask   func(ctx context.Context, taskID string) error
 }
 
+type mockMessageStore struct {
+	publishMessage   func(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error)
+	claimNextMessage func(ctx context.Context, filter state.MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error)
+	ackMessage       func(ctx context.Context, messageID string, result state.MessageAckResult) error
+	nackMessage      func(ctx context.Context, messageID string, reason string, retryAt *time.Time) error
+	requeueExpired   func(ctx context.Context) error
+	getMessage       func(ctx context.Context, messageID string) (types.AgentMessage, error)
+	listMessages     func(ctx context.Context, filter state.MessageFilter) ([]types.AgentMessage, error)
+	countMessages    func(ctx context.Context, filter state.MessageFilter) (int, error)
+}
+
+func (m *mockMessageStore) PublishMessage(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {
+	if m.publishMessage != nil {
+		return m.publishMessage(ctx, msg)
+	}
+	return msg, nil
+}
+
+func (m *mockMessageStore) ClaimNextMessage(ctx context.Context, filter state.MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error) {
+	if m.claimNextMessage != nil {
+		return m.claimNextMessage(ctx, filter, ttl, consumerID)
+	}
+	return types.AgentMessage{}, state.ErrMessageNotFound
+}
+
+func (m *mockMessageStore) AckMessage(ctx context.Context, messageID string, result state.MessageAckResult) error {
+	if m.ackMessage != nil {
+		return m.ackMessage(ctx, messageID, result)
+	}
+	return nil
+}
+
+func (m *mockMessageStore) NackMessage(ctx context.Context, messageID string, reason string, retryAt *time.Time) error {
+	if m.nackMessage != nil {
+		return m.nackMessage(ctx, messageID, reason, retryAt)
+	}
+	return nil
+}
+
+func (m *mockMessageStore) RequeueExpiredClaims(ctx context.Context) error {
+	if m.requeueExpired != nil {
+		return m.requeueExpired(ctx)
+	}
+	return nil
+}
+
+func (m *mockMessageStore) GetMessage(ctx context.Context, messageID string) (types.AgentMessage, error) {
+	if m.getMessage != nil {
+		return m.getMessage(ctx, messageID)
+	}
+	return types.AgentMessage{}, state.ErrMessageNotFound
+}
+
+func (m *mockMessageStore) ListMessages(ctx context.Context, filter state.MessageFilter) ([]types.AgentMessage, error) {
+	if m.listMessages != nil {
+		return m.listMessages(ctx, filter)
+	}
+	return nil, nil
+}
+
+func (m *mockMessageStore) CountMessages(ctx context.Context, filter state.MessageFilter) (int, error) {
+	if m.countMessages != nil {
+		return m.countMessages(ctx, filter)
+	}
+	return 0, nil
+}
+
 func (m *mockTaskStore) GetTask(ctx context.Context, taskID string) (types.Task, error) {
 	if m.getTask != nil {
 		return m.getTask(ctx, taskID)
@@ -367,4 +434,94 @@ func TestManager_SubscribeWake_TriggeredByLifecycleMutations(t *testing.T) {
 		t.Fatalf("ResumeTask: %v", err)
 	}
 	expectWake("resume")
+}
+
+func TestManager_ClaimTask_AllowsAlreadyClaimedMessageBySameRun(t *testing.T) {
+	taskID := "task-1"
+	task := types.Task{TaskID: taskID, SessionID: "sess-1", RunID: "run-1", Status: types.TaskStatusPending}
+	claimedTask := task
+	claimedTask.Status = types.TaskStatusActive
+	var claimCalled bool
+	store := &mockTaskStore{
+		getTask: func(ctx context.Context, id string) (types.Task, error) {
+			if id != taskID {
+				return types.Task{}, state.ErrTaskNotFound
+			}
+			if claimCalled {
+				return claimedTask, nil
+			}
+			return task, nil
+		},
+		claimTask: func(ctx context.Context, id string, ttl time.Duration) error {
+			claimCalled = true
+			return nil
+		},
+	}
+	msgStore := &mockMessageStore{
+		claimNextMessage: func(ctx context.Context, filter state.MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error) {
+			return types.AgentMessage{}, state.ErrMessageNotFound
+		},
+		listMessages: func(ctx context.Context, filter state.MessageFilter) ([]types.AgentMessage, error) {
+			return []types.AgentMessage{
+				{
+					MessageID:  "msg-1",
+					TaskRef:    taskID,
+					Status:     types.MessageStatusClaimed,
+					LeaseOwner: "run-1",
+				},
+			}, nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+
+	if err := mgr.ClaimTask(context.Background(), taskID, time.Minute); err != nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	if !claimCalled {
+		t.Fatalf("expected task claim to be executed")
+	}
+}
+
+func TestManager_ClaimTask_ReturnsMessageClaimedWhenOwnedByOtherRun(t *testing.T) {
+	taskID := "task-2"
+	task := types.Task{TaskID: taskID, SessionID: "sess-1", RunID: "run-1", Status: types.TaskStatusPending}
+	var claimCalled bool
+	store := &mockTaskStore{
+		getTask: func(ctx context.Context, id string) (types.Task, error) {
+			if id != taskID {
+				return types.Task{}, state.ErrTaskNotFound
+			}
+			return task, nil
+		},
+		claimTask: func(ctx context.Context, id string, ttl time.Duration) error {
+			claimCalled = true
+			return nil
+		},
+	}
+	msgStore := &mockMessageStore{
+		claimNextMessage: func(ctx context.Context, filter state.MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error) {
+			return types.AgentMessage{}, state.ErrMessageNotFound
+		},
+		listMessages: func(ctx context.Context, filter state.MessageFilter) ([]types.AgentMessage, error) {
+			return []types.AgentMessage{
+				{
+					MessageID:  "msg-2",
+					TaskRef:    taskID,
+					Status:     types.MessageStatusClaimed,
+					LeaseOwner: "run-other",
+				},
+			}, nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+
+	err := mgr.ClaimTask(context.Background(), taskID, time.Minute)
+	if !errors.Is(err, state.ErrMessageClaimed) {
+		t.Fatalf("expected ErrMessageClaimed, got %v", err)
+	}
+	if claimCalled {
+		t.Fatalf("did not expect task claim when backing message is owned by another run")
+	}
 }

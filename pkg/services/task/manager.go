@@ -530,6 +530,7 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 	if m == nil || m.messageStore == nil {
 		return types.AgentMessage{}, nil
 	}
+	consumerID := strings.TrimSpace(task.RunID)
 	filter := state.MessageClaimFilter{
 		ThreadID: strings.TrimSpace(task.SessionID),
 		RunID:    strings.TrimSpace(task.RunID),
@@ -538,7 +539,7 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 		Channel:  types.MessageChannelInbox,
 		Kinds:    []string{types.MessageKindTask, types.MessageKindUserInput},
 	}
-	msg, err := m.messageStore.ClaimNextMessage(ctx, filter, ttl, strings.TrimSpace(task.RunID))
+	msg, err := m.messageStore.ClaimNextMessage(ctx, filter, ttl, consumerID)
 	if err == nil {
 		return msg, nil
 	}
@@ -550,7 +551,7 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 		RunID:    strings.TrimSpace(task.RunID),
 		TaskRef:  strings.TrimSpace(task.TaskID),
 		Channel:  types.MessageChannelInbox,
-		Limit:    5,
+		Limit:    50,
 		SortBy:   "created_at",
 	})
 	if lerr != nil {
@@ -559,13 +560,25 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 	if len(msgs) == 0 {
 		return types.AgentMessage{}, state.ErrTaskMissingMessage
 	}
+	claimedByOther := false
+	seenTerminal := false
 	for _, m := range msgs {
 		switch strings.TrimSpace(m.Status) {
 		case types.MessageStatusClaimed:
-			return types.AgentMessage{}, state.ErrMessageClaimed
+			if consumerID != "" && strings.TrimSpace(m.LeaseOwner) == consumerID {
+				// Session already claimed this message at the bus layer. Treat as usable.
+				return m, nil
+			}
+			claimedByOther = true
 		case types.MessageStatusAcked, types.MessageStatusDeadletter:
-			return types.AgentMessage{}, state.ErrMessageTerminal
+			seenTerminal = true
 		}
+	}
+	if claimedByOther {
+		return types.AgentMessage{}, state.ErrMessageClaimed
+	}
+	if seenTerminal {
+		return types.AgentMessage{}, state.ErrMessageTerminal
 	}
 	return types.AgentMessage{}, state.ErrMessageNotClaimable
 }

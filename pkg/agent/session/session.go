@@ -635,11 +635,11 @@ func (s *Session) processTaskMessage(ctx context.Context, msg types.AgentMessage
 	}
 	if err := s.cfg.TaskStore.ClaimTask(ctx, taskID, s.cfg.LeaseTTL); err != nil {
 		switch {
-		case errors.Is(err, state.ErrTaskClaimed), isSQLiteBusyErr(err):
+		case errors.Is(err, state.ErrTaskClaimed), errors.Is(err, state.ErrMessageClaimed), errors.Is(err, state.ErrMessageNotClaimable), isSQLiteBusyErr(err):
 			retryAt := time.Now().UTC()
 			_ = s.cfg.MessageBus.NackMessage(ctx, strings.TrimSpace(msg.MessageID), err.Error(), &retryAt)
 			return nil
-		case errors.Is(err, state.ErrTaskTerminal), errors.Is(err, state.ErrTaskNotFound):
+		case errors.Is(err, state.ErrTaskTerminal), errors.Is(err, state.ErrTaskNotFound), errors.Is(err, state.ErrMessageTerminal):
 			_ = s.cfg.MessageBus.AckMessage(ctx, strings.TrimSpace(msg.MessageID), state.MessageAckResult{
 				Status: types.MessageStatusAcked,
 				Error:  err.Error(),
