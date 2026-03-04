@@ -1,10 +1,14 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/tinoosan/agen8/pkg/agent"
 	hosttools "github.com/tinoosan/agen8/pkg/agent/hosttools"
+	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
+	"github.com/tinoosan/agen8/pkg/types"
 )
 
 func TestApplyAllowedTools(t *testing.T) {
@@ -160,5 +164,46 @@ func TestApplyAllowedTools_AlwaysKeepsObsidian(t *testing.T) {
 	}
 	if _, ok := reg.Get("obsidian"); !ok {
 		t.Fatalf("expected obsidian to remain")
+	}
+}
+
+type testHostTool struct {
+	name string
+}
+
+func (t testHostTool) Definition() llmtypes.Tool {
+	return llmtypes.Tool{
+		Type: "function",
+		Function: llmtypes.ToolFunction{
+			Name:        t.name,
+			Description: "test tool",
+			Parameters: map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{},
+				"required":             []any{},
+				"additionalProperties": false,
+			},
+		},
+	}
+}
+
+func (t testHostTool) Execute(context.Context, json.RawMessage) (types.HostOpRequest, error) {
+	return types.HostOpRequest{}, nil
+}
+
+func TestApplyAllowedTools_AlwaysKeepsAnyFSPrefixedTool(t *testing.T) {
+	reg := agent.NewHostToolRegistry()
+	if err := reg.Register(testHostTool{name: "fs_custom"}); err != nil {
+		t.Fatalf("register fs_custom: %v", err)
+	}
+	if err := reg.Register(testHostTool{name: "shell_exec"}); err != nil {
+		t.Fatalf("register shell_exec: %v", err)
+	}
+
+	if err := applyAllowedTools(reg, []string{"shell_exec"}); err != nil {
+		t.Fatalf("applyAllowedTools: %v", err)
+	}
+	if _, ok := reg.Get("fs_custom"); !ok {
+		t.Fatalf("expected fs_custom to remain because fs_* tools are always enabled")
 	}
 }

@@ -27,6 +27,7 @@ This guide explains how the CLI, configuration, and internal services collaborat
 ## Tooling & extensions
 
 - Built-in host tools (fs\_\*, shell_exec, http_fetch, trace_run) are defined directly in the system prompt.
+- For new filesystem tools, follow [Adding `fs_*` tools](adding_fs_tools.md). `fs_*` tools are auto-allowlisted and do not require profile `allowed_tools` entries.
 
 ## Debugging tips for contributors
 
