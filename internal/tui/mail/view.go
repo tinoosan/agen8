@@ -350,7 +350,7 @@ func (m *Model) renderOutboxPanel(width, height int) string {
 func (m *Model) buildOutboxLines(width int, isFocused bool) []string {
 	var lines []string
 	if len(m.outbox) == 0 {
-		return []string{kit.StyleDim.Render("No completed tasks yet.")}
+		return []string{kit.StyleDim.Render("No outbox tasks yet.")}
 	}
 
 	idLen := 8

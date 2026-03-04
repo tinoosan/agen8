@@ -67,14 +67,16 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 		// Fetch inbox
 		var inboxRes protocol.TaskListResult
 		scopeMode := "run"
+		runID := strings.TrimSpace(scope.RunID)
 		if strings.TrimSpace(scope.TeamID) != "" {
 			scopeMode = "team"
+			runID = ""
 		}
 		if err := client.Call(ctx, protocol.MethodTaskList, protocol.TaskListParams{
 			ThreadID: protocol.ThreadID(scope.ThreadID),
 			Scope:    scopeMode,
 			TeamID:   strings.TrimSpace(scope.TeamID),
-			RunID:    strings.TrimSpace(scope.RunID),
+			RunID:    runID,
 			View:     "inbox",
 			Limit:    200,
 			Offset:   0,
@@ -91,7 +93,7 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			ThreadID: protocol.ThreadID(scope.ThreadID),
 			Scope:    scopeMode,
 			TeamID:   strings.TrimSpace(scope.TeamID),
-			RunID:    strings.TrimSpace(scope.RunID),
+			RunID:    runID,
 			View:     "outbox",
 			Limit:    200,
 			Offset:   0,
@@ -130,6 +132,13 @@ func filterTasks(tasks []protocol.Task, isInbox bool) []taskEntry {
 			if status != string(types.TaskStatusPending) &&
 				status != string(types.TaskStatusActive) &&
 				status != string(types.TaskStatusReviewPending) {
+				continue
+			}
+		} else {
+			if status != string(types.TaskStatusReviewPending) &&
+				status != string(types.TaskStatusSucceeded) &&
+				status != string(types.TaskStatusFailed) &&
+				status != string(types.TaskStatusCanceled) {
 				continue
 			}
 		}
