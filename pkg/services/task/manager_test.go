@@ -44,6 +44,7 @@ type mockTaskStore struct {
 	releaseLease func(ctx context.Context, taskID string) error
 	delegateTask func(ctx context.Context, taskID string) error
 	resumeTask   func(ctx context.Context, taskID string) error
+	closeBatch   func(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (handoffTaskID string, approved, retried, escalated int, err error)
 }
 
 type mockMessageStore struct {
@@ -180,6 +181,13 @@ func (m *mockTaskStore) ResumeTask(ctx context.Context, taskID string) error {
 	return nil
 }
 func (m *mockTaskStore) RecoverExpiredLeases(ctx context.Context) error { return nil }
+
+func (m *mockTaskStore) CloseBatchAndHandoffAtomic(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (handoffTaskID string, approved, retried, escalated int, err error) {
+	if m.closeBatch != nil {
+		return m.closeBatch(ctx, batchTaskID, reviewerIdentity, reviewSummary)
+	}
+	return "", 0, 0, 0, fmt.Errorf("close batch not configured")
+}
 
 func TestManager_CreateRetryTask_NoRunLoader(t *testing.T) {
 	mgr := NewManager(&mockTaskStore{}, nil)
@@ -874,5 +882,147 @@ func TestManager_CompleteTask_TeamFallbackFindsBackingMessage(t *testing.T) {
 	}
 	if !foundRelaxed {
 		t.Fatalf("expected relaxed team-scope lookup when thread lookup misses")
+	}
+}
+
+func TestManager_CloseBatchAndHandoff_PublishesHandoffMessage(t *testing.T) {
+	batchTaskID := "callback-batch-1"
+	handoffTaskID := "review-handoff-callback-batch-1"
+	batchTask := types.Task{
+		TaskID:    batchTaskID,
+		SessionID: "sess-1",
+		RunID:     "run-reviewer",
+		TeamID:    "team-1",
+		Status:    types.TaskStatusPending,
+		Metadata: map[string]any{
+			"source":            "team.batch.callback",
+			"batchParentTaskId": "task-parent-1",
+		},
+	}
+	handoffTask := types.Task{
+		TaskID:         handoffTaskID,
+		SessionID:      "sess-1",
+		RunID:          "run-coord",
+		TeamID:         "team-1",
+		AssignedRole:   "coordinator",
+		AssignedToType: "role",
+		AssignedTo:     "coordinator",
+		Goal:           "REVIEW HANDOFF",
+		Status:         types.TaskStatusPending,
+		Metadata: map[string]any{
+			"source": "review.handoff",
+		},
+	}
+
+	var closeCalls int
+	store := &mockTaskStore{
+		getTask: func(ctx context.Context, taskID string) (types.Task, error) {
+			switch strings.TrimSpace(taskID) {
+			case batchTaskID:
+				return batchTask, nil
+			case handoffTaskID:
+				return handoffTask, nil
+			default:
+				return types.Task{}, state.ErrTaskNotFound
+			}
+		},
+		closeBatch: func(ctx context.Context, btID, reviewerIdentity, reviewSummary string) (string, int, int, int, error) {
+			closeCalls++
+			return handoffTaskID, 2, 0, 0, nil
+		},
+	}
+
+	var published []types.AgentMessage
+	msgStore := &mockMessageStore{
+		listMessages: func(ctx context.Context, filter state.MessageFilter) ([]types.AgentMessage, error) {
+			return nil, nil
+		},
+		publishMessage: func(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {
+			published = append(published, msg)
+			return msg, nil
+		},
+	}
+
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+
+	gotHandoff, err := mgr.CloseBatchAndHandoff(context.Background(), batchTaskID, "reviewer", "looks good")
+	if err != nil {
+		t.Fatalf("CloseBatchAndHandoff: %v", err)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("expected one atomic close call, got %d", closeCalls)
+	}
+	if gotHandoff != handoffTaskID {
+		t.Fatalf("handoff id=%q want %q", gotHandoff, handoffTaskID)
+	}
+	if len(published) != 1 {
+		t.Fatalf("expected one published handoff message, got %d", len(published))
+	}
+	if got := strings.TrimSpace(published[0].TaskRef); got != handoffTaskID {
+		t.Fatalf("published taskRef=%q want %q", got, handoffTaskID)
+	}
+}
+
+func TestManager_CloseBatchAndHandoff_ClosedBatchStillEnsuresHandoffMessage(t *testing.T) {
+	batchTaskID := "callback-batch-2"
+	handoffTaskID := "review-handoff-callback-batch-2"
+	store := &mockTaskStore{
+		getTask: func(ctx context.Context, taskID string) (types.Task, error) {
+			switch strings.TrimSpace(taskID) {
+			case batchTaskID:
+				return types.Task{
+					TaskID:    batchTaskID,
+					SessionID: "sess-1",
+					RunID:     "run-reviewer",
+					Metadata: map[string]any{
+						"batchClosed":        true,
+						"batchHandoffTaskId": handoffTaskID,
+					},
+				}, nil
+			case handoffTaskID:
+				return types.Task{
+					TaskID:         handoffTaskID,
+					SessionID:      "sess-1",
+					RunID:          "run-coord",
+					TeamID:         "team-1",
+					AssignedRole:   "coordinator",
+					AssignedToType: "role",
+					AssignedTo:     "coordinator",
+					Goal:           "REVIEW HANDOFF",
+					Status:         types.TaskStatusPending,
+					Metadata:       map[string]any{"source": "review.handoff"},
+				}, nil
+			default:
+				return types.Task{}, state.ErrTaskNotFound
+			}
+		},
+		closeBatch: func(ctx context.Context, btID, reviewerIdentity, reviewSummary string) (string, int, int, int, error) {
+			return "", 0, 0, 0, fmt.Errorf("should not call atomic closer when batch already closed")
+		},
+	}
+
+	var published int
+	msgStore := &mockMessageStore{
+		listMessages: func(ctx context.Context, filter state.MessageFilter) ([]types.AgentMessage, error) {
+			return nil, nil
+		},
+		publishMessage: func(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {
+			published++
+			return msg, nil
+		},
+	}
+
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+	gotHandoff, err := mgr.CloseBatchAndHandoff(context.Background(), batchTaskID, "reviewer", "")
+	if err != nil {
+		t.Fatalf("CloseBatchAndHandoff: %v", err)
+	}
+	if gotHandoff != handoffTaskID {
+		t.Fatalf("handoff id=%q want %q", gotHandoff, handoffTaskID)
+	}
+	if published != 1 {
+		t.Fatalf("expected one publish for closed-batch handoff, got %d", published)
 	}
 }

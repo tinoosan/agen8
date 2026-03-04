@@ -856,6 +856,12 @@ func (m *Manager) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewe
 		if handoffTaskID == "" {
 			handoffTaskID = "review-handoff-" + batchTaskID
 		}
+		if handoffTask, err := m.store.GetTask(ctx, handoffTaskID); err == nil {
+			if err := m.ensureTaskMessage(ctx, handoffTask); err != nil {
+				return "", fmt.Errorf("publish handoff message: %w", err)
+			}
+			m.notifyWake(handoffTask)
+		}
 		return handoffTaskID, nil
 	}
 	closer, ok := m.store.(batchCloseStore)
@@ -912,6 +918,9 @@ func (m *Manager) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewe
 		})
 	}
 	if handoffTask, err := m.store.GetTask(ctx, strings.TrimSpace(handoffTaskID)); err == nil {
+		if err := m.ensureTaskMessage(ctx, handoffTask); err != nil {
+			return "", fmt.Errorf("publish handoff message: %w", err)
+		}
 		m.notifyWake(handoffTask)
 	}
 	if batchErr == nil {
@@ -920,6 +929,34 @@ func (m *Manager) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewe
 		m.notifyWake(batchTask)
 	}
 	return handoffTaskID, nil
+}
+
+func (m *Manager) ensureTaskMessage(ctx context.Context, task types.Task) error {
+	if m == nil || m.messageStore == nil {
+		return nil
+	}
+	if shouldSkipMessagePublish(task) {
+		return nil
+	}
+	taskID := strings.TrimSpace(task.TaskID)
+	if taskID == "" {
+		return nil
+	}
+	msgs, err := m.listTaskMessages(ctx, task, state.MessageFilter{
+		ThreadID: strings.TrimSpace(task.SessionID),
+		TeamID:   strings.TrimSpace(task.TeamID),
+		TaskRef:  taskID,
+		Channel:  types.MessageChannelInbox,
+		Limit:    1,
+		SortBy:   "created_at",
+	})
+	if err != nil {
+		return err
+	}
+	if len(msgs) > 0 {
+		return nil
+	}
+	return m.publishTaskMessage(ctx, task)
 }
 
 func metadataString(meta map[string]any, key string) string {
