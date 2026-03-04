@@ -336,6 +336,9 @@ func (m *Manager) publishTaskMessage(ctx context.Context, task types.Task) error
 	if m == nil || m.messageStore == nil {
 		return nil
 	}
+	if shouldSkipMessagePublish(task) {
+		return nil
+	}
 	now := time.Now().UTC()
 	taskCopy := task
 	meta := task.Metadata
@@ -381,6 +384,21 @@ func (m *Manager) publishTaskMessage(ctx context.Context, task types.Task) error
 	}
 	_, err := m.messageStore.PublishMessage(ctx, msg)
 	return err
+}
+
+func shouldSkipMessagePublish(task types.Task) bool {
+	if task.Status != types.TaskStatusReviewPending {
+		return false
+	}
+	source := strings.TrimSpace(metadataString(task.Metadata, "source"))
+	switch source {
+	case "team.callback", "subagent.callback":
+		// Staged callbacks are batch inputs, not executable inbox work items.
+		return true
+	}
+	// Defense-in-depth: any non-synthetic batch staging callback should not
+	// emit a claimable message.
+	return metadataBool(task.Metadata, "batchMode") && !metadataBool(task.Metadata, "batchSynthetic")
 }
 
 func (m *Manager) DeleteTask(ctx context.Context, taskID string) error {
