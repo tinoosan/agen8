@@ -256,10 +256,20 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 			}
 		}
 		if lastChecklistIdx >= 0 || lastHeadIdx >= 0 {
+			// In multi-agent (team) mode the plan files live in a child run's directory,
+			// not the coordinator's. Extract the runID from the activity's sourceID
+			// (stored as "runID|opID") so plan.get reads from the right directory.
+			// Fall back to AggregateTeam when the runID cannot be determined.
+			planRunID := planWriteRunID(entries, lastChecklistIdx, lastHeadIdx)
+			params := protocol.PlanGetParams{ThreadID: protocol.ThreadID(sid)}
+			if planRunID != "" {
+				params.RunID = planRunID
+			} else {
+				params.AggregateTeam = true
+			}
+
 			var planRes protocol.PlanGetResult
-			if err := cli.Call(ctx, protocol.MethodPlanGet, protocol.PlanGetParams{
-				ThreadID: protocol.ThreadID(sid),
-			}, &planRes); err == nil {
+			if err := cli.Call(ctx, protocol.MethodPlanGet, params, &planRes); err == nil {
 				if lastChecklistIdx >= 0 && planRes.Checklist != "" {
 					entries[lastChecklistIdx].planItems = parseChecklistItems(planRes.Checklist)
 				}
@@ -636,6 +646,22 @@ func isActivitySummaryWrite(kind string, text string) bool {
 	}
 	p := strings.TrimSpace(text)
 	return strings.HasSuffix(strings.ToLower(p), "summary.md")
+}
+
+// planWriteRunID extracts the runID from the sourceID of the relevant plan write entries.
+// Activity sourceIDs are formatted as "runID|opID"; the runID prefix is the agent run that
+// performed the write, which is the correct target for plan.get in multi-agent mode.
+func planWriteRunID(entries []feedEntry, checklistIdx, headIdx int) string {
+	for _, idx := range []int{checklistIdx, headIdx} {
+		if idx < 0 {
+			continue
+		}
+		sid := strings.TrimSpace(entries[idx].sourceID)
+		if parts := strings.SplitN(sid, "|", 2); len(parts) == 2 && strings.TrimSpace(parts[0]) != "" {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	return ""
 }
 
 // extractPlanTitle returns the first meaningful heading or line from plan/HEAD.md content.

@@ -332,12 +332,28 @@ func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
 			}
 
 			if isBridge && lastCodeExecIdx >= 0 {
-				// Plan file writes (HEAD.md, CHECKLIST.md) are collapsed back into the
-				// parent code_exec and rendered via the dedicated plan rendering path
-				// rather than as diffs. Regular write ops (user files) pass through as
-				// visible entries so their path and diff are shown individually.
-				// Non-write bridge ops (reads, lists, http_fetch, etc.) are also collapsed.
-				if !isWriteOp(e.opKind) || isActivityPlanWrite(e.opKind, e.path) {
+				// Plan file writes (HEAD.md, CHECKLIST.md) are collapsed silently:
+				// they render via the dedicated plan block (renderPlanChecklist /
+				// renderPlanDetails) rather than as "Write /plan/..." sub-items or diffs.
+				// Their plan data is promoted to the parent; they do NOT increment
+				// childCount so they don't affect the "Ran N tools" counter.
+				//
+				// Non-write bridge ops (reads, lists, http_fetch, etc.) are collapsed
+				// and DO count toward childCount / bridgeSingle display.
+				//
+				// Regular user-file write ops pass through as visible entries so their
+				// path and diff are shown individually.
+				if isActivityPlanWrite(e.opKind, e.path) {
+					parent := &filtered[lastCodeExecIdx]
+					if len(e.planItems) > 0 {
+						parent.planItems = e.planItems
+					}
+					if e.planDetailsTitle != "" {
+						parent.planDetailsTitle = e.planDetailsTitle
+					}
+					continue
+				}
+				if !isWriteOp(e.opKind) {
 					parent := &filtered[lastCodeExecIdx]
 					parent.childCount++
 					if parent.childCount == 1 {
@@ -346,18 +362,11 @@ func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
 						parent.bridgeSingleText = e.text
 						parent.bridgeSinglePath = e.path
 					} else if parent.childCount == 2 {
-						// More than one collapsed bridge: show "Ran N tools".
+						// More than one collapsed non-write bridge: show "Ran N tools".
 						parent.bridgeSingleOpKind = ""
 						parent.bridgeSingleData = nil
 						parent.bridgeSingleText = ""
 						parent.bridgeSinglePath = ""
-					}
-					// Promote plan data from collapsed bridge entries to the parent code_exec.
-					if len(e.planItems) > 0 {
-						parent.planItems = e.planItems
-					}
-					if e.planDetailsTitle != "" {
-						parent.planDetailsTitle = e.planDetailsTitle
 					}
 					continue
 				}
@@ -666,8 +675,9 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		// Determine whether we have a renderable diff for this op.
 		hasDiff := isWriteOp(e.opKind) && isSuccessStatus(s) && e.data != nil && strings.TrimSpace(e.data["patchPreview"]) != ""
 
-		// Suppress the "ok" sub-item when a diff will be rendered instead.
-		if !hasDiff {
+		// Suppress the "ok" sub-item when a diff or plan block will be rendered instead.
+		hasPlanBlock := len(e.planItems) > 0 || e.planDetailsTitle != ""
+		if !hasDiff && !hasPlanBlock {
 			subItems = append(subItems, statusText)
 		}
 
