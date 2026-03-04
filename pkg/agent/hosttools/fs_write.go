@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tinoosan/agen8/pkg/checksumutil"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/types"
 )
@@ -22,7 +23,7 @@ func (t *FSWriteTool) Definition() llmtypes.Tool {
 			"path":             map[string]any{"type": "string", "description": "VFS path to write"},
 			"text":             map[string]any{"type": "string", "description": "File contents to write"},
 			"verify":           map[string]any{"type": "boolean", "description": "Read back and compare after writing."},
-			"checksum":         map[string]any{"type": "string", "enum": []string{"md5", "sha1", "sha256"}, "description": "Optional checksum algorithm for the written content."},
+			"checksum":         map[string]any{"type": "string", "enum": checksumutil.SupportedAlgorithms(), "description": "Optional checksum algorithm for the written content."},
 			"checksumExpected": map[string]any{"type": "string", "description": "Optional expected checksum hex digest for the selected algorithm. Fails write when mismatched."},
 			// Compatibility aliases for callers that pass explicit digest fields.
 			"checksumMd5":    map[string]any{"type": "string", "description": "Compatibility alias for checksum='md5' with expected digest value."},
@@ -70,7 +71,7 @@ func (t *FSWriteTool) Execute(_ context.Context, args json.RawMessage) (types.Ho
 }
 
 func normalizeChecksumArgs(checksum, expected, checksumMD5, checksumSHA1, checksumSHA256 string) (string, string, error) {
-	checksum = strings.ToLower(strings.TrimSpace(checksum))
+	checksum = checksumutil.NormalizeAlgorithm(checksum)
 	expected = strings.TrimSpace(expected)
 	legacy := map[string]string{}
 	if v := strings.TrimSpace(checksumMD5); v != "" {

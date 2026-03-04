@@ -3,11 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
-	"crypto/sha1"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/tinoosan/agen8/pkg/checksumutil"
 	"github.com/tinoosan/agen8/pkg/debuglog"
 	"github.com/tinoosan/agen8/pkg/store"
 	pkgtools "github.com/tinoosan/agen8/pkg/tools"
@@ -1227,21 +1224,7 @@ func (x *HostOpExecutor) resolveBrowserFilePath(vpath string) (string, error) {
 	return "", fmt.Errorf("filePath must be a VFS path under /project or /workspace")
 }
 
-func writeChecksumHex(algo string, b []byte) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(algo)) {
-	case "md5":
-		sum := md5.Sum(b)
-		return hex.EncodeToString(sum[:]), nil
-	case "sha1":
-		sum := sha1.Sum(b)
-		return hex.EncodeToString(sum[:]), nil
-	case "sha256":
-		sum := sha256.Sum256(b)
-		return hex.EncodeToString(sum[:]), nil
-	default:
-		return "", fmt.Errorf("unsupported checksum algorithm %q", algo)
-	}
-}
+func writeChecksumHex(algo string, b []byte) (string, error) { return checksumutil.ComputeHex(algo, b) }
 
 func firstMismatchOffset(a, b []byte) int {
 	n := len(a)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinoosan/agen8/pkg/checksumutil"
 	"github.com/tinoosan/agen8/pkg/validate"
 )
 
@@ -333,17 +334,15 @@ func validateMemoryWritePath(path string) error {
 }
 
 func validateWriteChecksum(checksum string) error {
-	checksum = strings.ToLower(strings.TrimSpace(checksum))
-	switch checksum {
-	case "", "md5", "sha1", "sha256":
+	checksum = checksumutil.NormalizeAlgorithm(checksum)
+	if checksum == "" || checksumutil.IsSupportedAlgorithm(checksum) {
 		return nil
-	default:
-		return fmt.Errorf("checksum must be one of md5|sha1|sha256")
 	}
+	return fmt.Errorf("checksum must be one of %s", checksumutil.SupportedAlgorithmsDisplay())
 }
 
 func validateWriteChecksumExpected(algo, expected string) error {
-	algo = strings.ToLower(strings.TrimSpace(algo))
+	algo = checksumutil.NormalizeAlgorithm(algo)
 	expected = strings.TrimSpace(expected)
 	if expected == "" {
 		return nil
@@ -351,16 +350,9 @@ func validateWriteChecksumExpected(algo, expected string) error {
 	if algo == "" {
 		return fmt.Errorf("checksum is required when checksumExpected is set")
 	}
-	wantLen := 0
-	switch algo {
-	case "md5":
-		wantLen = 32
-	case "sha1":
-		wantLen = 40
-	case "sha256":
-		wantLen = 64
-	default:
-		return fmt.Errorf("checksum must be one of md5|sha1|sha256")
+	wantLen, ok := checksumutil.HexLength(algo)
+	if !ok {
+		return fmt.Errorf("checksum must be one of %s", checksumutil.SupportedAlgorithmsDisplay())
 	}
 	if len(expected) != wantLen {
 		return fmt.Errorf("checksumExpected for %s must be %d hex chars", algo, wantLen)
