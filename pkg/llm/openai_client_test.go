@@ -66,7 +66,7 @@ func TestNewClientFromEnv_RequiresAPIKey(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	if !strings.Contains(err.Error(), "OPENROUTER_API_KEY") {
+	if !errors.Is(err, ErrOpenRouterAPIKeyRequired) {
 		t.Fatalf("unexpected error %v", err)
 	}
 }

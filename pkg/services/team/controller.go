@@ -18,6 +18,8 @@ import (
 var (
 	ErrThreadNotFound = errors.New("thread not found")
 	ErrRunNotFound    = errors.New("run not found")
+	ErrCancelActive   = errors.New("cancel active tasks failed")
+	ErrStopRunFailed  = errors.New("stop run failed")
 )
 
 // RoleRunController is the per-run handle used by Controller (SetPaused, SetModel, SetReasoning).
@@ -207,7 +209,7 @@ func (c *Controller) PauseRuns(ctx context.Context, threadID, sessionID string) 
 		var opErr error
 		if c.taskCanceler != nil {
 			if _, err := c.taskCanceler.CancelActiveTasksByRun(ctx, runID, "run paused"); err != nil {
-				opErr = errors.Join(opErr, fmt.Errorf("cancel active tasks for run %s: %w", runID, err))
+				opErr = errors.Join(opErr, fmt.Errorf("%w for run %s: %w", ErrCancelActive, runID, err))
 			}
 		}
 		return opErr
@@ -274,12 +276,12 @@ func (c *Controller) StopRuns(ctx context.Context, threadID, sessionID string) (
 		var opErr error
 		if c.runStopper != nil {
 			if err := c.runStopper.StopRun(ctx, runID); err != nil {
-				opErr = errors.Join(opErr, fmt.Errorf("stop run %s: %w", runID, err))
+				opErr = errors.Join(opErr, fmt.Errorf("%w %s: %w", ErrStopRunFailed, runID, err))
 			}
 		}
 		if c.taskCanceler != nil {
 			if _, err := c.taskCanceler.CancelActiveTasksByRun(ctx, runID, "run stopped"); err != nil {
-				opErr = errors.Join(opErr, fmt.Errorf("cancel active tasks for run %s: %w", runID, err))
+				opErr = errors.Join(opErr, fmt.Errorf("%w for run %s: %w", ErrCancelActive, runID, err))
 			}
 		}
 		return opErr
@@ -290,7 +292,7 @@ func (c *Controller) pauseResumeOrStop(ctx context.Context, op string, fn func(r
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	affected := make([]string, 0, len(c.runtimes))
-	errs := make([]string, 0, len(c.runtimes))
+	errs := make([]error, 0, len(c.runtimes))
 	for _, r := range c.runtimes {
 		runID := strings.TrimSpace(r.RunID())
 		if runID == "" {
@@ -302,7 +304,7 @@ func (c *Controller) pauseResumeOrStop(ctx context.Context, op string, fn func(r
 			defer wg.Done()
 			if err := fn(r, runID); err != nil {
 				mu.Lock()
-				errs = append(errs, runID+": "+err.Error())
+				errs = append(errs, fmt.Errorf("run %s: %w", runID, err))
 				mu.Unlock()
 				return
 			}
@@ -313,7 +315,7 @@ func (c *Controller) pauseResumeOrStop(ctx context.Context, op string, fn func(r
 	}
 	wg.Wait()
 	if len(errs) != 0 {
-		return affected, fmt.Errorf("%s session partial failure: %s", op, strings.Join(errs, "; "))
+		return affected, fmt.Errorf("%s session partial failure: %w", op, errors.Join(errs...))
 	}
 	return affected, nil
 }

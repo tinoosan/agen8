@@ -3,7 +3,6 @@ package session_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -186,7 +185,7 @@ func TestManager_Stop_NilSupervisor(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error when supervisor is nil")
 	}
-	if !strings.Contains(err.Error(), "runtime supervisor is not configured") {
+	if !errors.Is(err, session.ErrRuntimeSupervisorNotConfigured) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -23,6 +23,8 @@ var codeExecWarningState = struct {
 	seen: map[string]struct{}{},
 }
 
+var ErrCodeExecRequired = errors.New("code_exec is required")
+
 func configureCodeExecRuntime(
 	ctx context.Context,
 	rt *runtime.Runtime,
@@ -39,7 +41,7 @@ func configureCodeExecRuntime(
 	if rt.CodeExec == nil {
 		modelRegistry.Remove("code_exec")
 		if required {
-			return fmt.Errorf("code_exec is required but runtime invoker is not configured")
+			return fmt.Errorf("%w: runtime invoker is not configured", ErrCodeExecRequired)
 		}
 		return nil
 	}
@@ -64,7 +66,7 @@ func configureCodeExecRuntime(
 			})
 		}
 		if required && len(resolvedRequiredImports) > 0 {
-			return fmt.Errorf("code_exec is required but environment reconciliation failed: %w", err)
+			return fmt.Errorf("%w: environment reconciliation failed: %w", ErrCodeExecRequired, err)
 		}
 	} else {
 		if bin := strings.TrimSpace(provisioned.PythonBin); bin != "" {
@@ -106,7 +108,7 @@ func configureCodeExecRuntime(
 			})
 		}
 		if required {
-			return fmt.Errorf("code_exec is required but runtime preflight failed: %w", err)
+			return fmt.Errorf("%w: runtime preflight failed: %w", ErrCodeExecRequired, err)
 		}
 	}
 	rt.CodeExec.SetDispatcher(func(ctx context.Context, toolName string, args json.RawMessage) (types.HostOpRequest, error) {

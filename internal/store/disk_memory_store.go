@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,8 @@ import (
 type DiskMemoryStore struct {
 	DiskStore
 }
+
+var ErrMemoryWriteOnlyToday = errors.New("can only write to today's memory file")
 
 // NewDiskMemoryStore constructs a DiskMemoryStore under cfg.DataDir.
 func NewDiskMemoryStore(cfg config.Config) (*DiskMemoryStore, error) {
@@ -188,7 +191,7 @@ func (s *DiskMemoryStore) ensureTodayWritable(path string) error {
 	base := filepath.Base(strings.TrimSpace(path))
 	today := time.Now().Format("2006-01-02") + "-memory.md"
 	if base != today {
-		return fmt.Errorf("can only write to today's memory file: %s", today)
+		return fmt.Errorf("%w: %s", ErrMemoryWriteOnlyToday, today)
 	}
 	return nil
 }

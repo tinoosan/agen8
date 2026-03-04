@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -114,9 +113,6 @@ func TestRunAsTeam_GoalBootstrapIsRejected(t *testing.T) {
 	err := runAsTeam(context.Background(), config.Config{}, prof, "", "seed this goal", 8*1024, time.Second, RunChatOptions{}, false)
 	if !errors.Is(err, errDaemonGoalBootstrapUnsupported) {
 		t.Fatalf("expected errDaemonGoalBootstrapUnsupported, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "not supported") {
-		t.Fatalf("expected not supported message, got: %q", err.Error())
 	}
 }
 

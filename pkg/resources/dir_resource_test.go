@@ -1,20 +1,22 @@
 package resources
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/tinoosan/agen8/pkg/vfsutil"
 )
 
 func TestDirResource_TraversalRejected(t *testing.T) {
 	tmpDir := t.TempDir()
 	dr := &DirResource{BaseDir: tmpDir, Mount: "workspace"}
 
-	if err := dr.Write("../x", []byte("nope")); err == nil || !strings.Contains(err.Error(), "escapes mount root") {
+	if err := dr.Write("../x", []byte("nope")); err == nil || !errors.Is(err, vfsutil.ErrEscapesRoot) {
 		t.Fatalf("Write traversal should be rejected with escape error, got: %v", err)
 	}
-	if _, err := dr.Read("/etc/passwd"); err == nil || !strings.Contains(err.Error(), "absolute paths not allowed") {
+	if _, err := dr.Read("/etc/passwd"); err == nil || !errors.Is(err, vfsutil.ErrInvalidPath) {
 		t.Fatalf("Read absolute path should be rejected with absolute-path error, got: %v", err)
 	}
 }

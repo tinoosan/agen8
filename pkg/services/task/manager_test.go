@@ -120,7 +120,7 @@ func TestManager_CreateRetryTask_NoRunLoader(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when run loader is nil")
 	}
-	if !strings.Contains(err.Error(), "run loader not configured") {
+	if !errors.Is(err, ErrRunLoaderNotConfigured) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -140,7 +140,7 @@ func TestManager_CreateRetryTask_LoadRunError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when LoadRun fails")
 	}
-	if !errors.Is(err, loader.err) && !strings.Contains(err.Error(), "load failed") {
+	if !errors.Is(err, loader.err) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -280,7 +280,7 @@ func TestManager_CreateTask_CallbackRequiresTeamID(t *testing.T) {
 		Status:         types.TaskStatusPending,
 		Metadata:       map[string]any{"source": "subagent.callback"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "missing teamId") {
+	if err == nil || !errors.Is(err, ErrRoutingCallbackMissingTeamID) {
 		t.Fatalf("expected missing teamId error, got %v", err)
 	}
 }

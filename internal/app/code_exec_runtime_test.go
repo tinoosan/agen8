@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -110,7 +111,7 @@ func TestConfigureCodeExecRuntime_RequiredModeFailsWhenRequiredImportsCannotBeRe
 	if err == nil {
 		t.Fatalf("expected error when required imports cannot be reconciled in required mode")
 	}
-	if !strings.Contains(err.Error(), "code_exec is required") {
+	if !errors.Is(err, ErrCodeExecRequired) {
 		t.Fatalf("expected required-mode error context, got: %v", err)
 	}
 }

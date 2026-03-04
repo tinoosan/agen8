@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -44,6 +45,8 @@ type taskWakeWatcher struct {
 	runID  string
 	ch     chan struct{}
 }
+
+var ErrRunLoaderNotConfigured = errors.New("run loader not configured")
 
 // NewManager creates a new task service manager. runLoader may be nil and set later via SetRunLoader.
 func NewManager(store state.TaskStore, runLoader RunLoader) *Manager {
@@ -129,7 +132,7 @@ func (m *Manager) CreateRetryTask(ctx context.Context, childRunID, feedback stri
 		return fmt.Errorf("childRunID is required")
 	}
 	if m.runLoader == nil {
-		return fmt.Errorf("run loader not configured")
+		return ErrRunLoaderNotConfigured
 	}
 	run, err := m.runLoader.LoadRun(ctx, childRunID)
 	if err != nil {

@@ -1,6 +1,7 @@
 package vfsutil
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -22,7 +23,7 @@ func SafeJoinBaseDir(baseDir, subpath string) (string, error) {
 		clean = "."
 	}
 	if clean == ".." || strings.HasPrefix(clean, "../") {
-		return "", fmt.Errorf("invalid path: escapes mount root")
+		return "", fmt.Errorf("invalid path: escapes mount root: %w", errors.Join(ErrInvalidPath, ErrEscapesRoot))
 	}
 
 	joined := filepath.Join(baseDir, filepath.FromSlash(clean))
@@ -40,7 +41,7 @@ func SafeJoinBaseDir(baseDir, subpath string) (string, error) {
 		return "", fmt.Errorf("rel: %w", err)
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("invalid path: escapes mount root")
+		return "", fmt.Errorf("invalid path: escapes mount root: %w", errors.Join(ErrInvalidPath, ErrEscapesRoot))
 	}
 	return joinedAbs, nil
 }
@@ -72,7 +73,7 @@ func RelUnderBaseDir(baseDir, absPath string) (string, error) {
 	}
 	rel = filepath.ToSlash(rel)
 	if rel == ".." || strings.HasPrefix(rel, "../") {
-		return "", fmt.Errorf("invalid path: escapes mount root")
+		return "", fmt.Errorf("invalid path: escapes mount root: %w", errors.Join(ErrInvalidPath, ErrEscapesRoot))
 	}
 	return rel, nil
 }

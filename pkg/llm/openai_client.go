@@ -59,6 +59,8 @@ var internalUserRepairPrefixes = [...]string{
 	internalUserRepairPrefixHostOpResponse,
 }
 
+var ErrOpenRouterAPIKeyRequired = errors.New("OPENROUTER_API_KEY is required")
+
 const (
 	toolChoiceModeAuto     = "auto"
 	toolChoiceModeNone     = "none"
@@ -133,7 +135,7 @@ func NewClientFromEnv() (*Client, error) {
 func NewClientFromEnvWithConfig(cfg OpenAIClientConfig) (*Client, error) {
 	key := strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY"))
 	if key == "" {
-		return nil, fmt.Errorf("OPENROUTER_API_KEY is required")
+		return nil, ErrOpenRouterAPIKeyRequired
 	}
 
 	baseURL := strings.TrimSpace(os.Getenv("OPENROUTER_BASE_URL"))

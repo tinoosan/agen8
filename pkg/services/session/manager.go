@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -17,6 +18,8 @@ type RuntimeSupervisor interface {
 	ResumeRun(ctx context.Context, runID string) error
 	StopRun(ctx context.Context, runID string) error
 }
+
+var ErrRuntimeSupervisorNotConfigured = errors.New("runtime supervisor is not configured")
 
 // Store defines the data access layer requirements for the session service.
 type Store interface {
@@ -148,7 +151,7 @@ func (m *Manager) Stop(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("list runs: %w", err)
 	}
 	if m.supervisor == nil {
-		return fmt.Errorf("runtime supervisor is not configured")
+		return ErrRuntimeSupervisorNotConfigured
 	}
 	var errs []error
 	for _, run := range runs {

@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,8 @@ import (
 )
 
 const routingVersion = 1
+
+var ErrRoutingCallbackMissingTeamID = errors.New("routing.violation: callback task missing teamId")
 
 // RoutingOracle validates and canonicalizes task routing before persistence.
 type RoutingOracle struct{}
@@ -67,7 +70,7 @@ func (o *RoutingOracle) normalize(ctx context.Context, loader RunLoader, task ty
 		}
 	}
 	if callback && task.TeamID == "" {
-		return task, fmt.Errorf("routing.violation: callback task %s missing teamId", task.TaskID)
+		return task, fmt.Errorf("routing.violation: callback task %s missing teamId: %w", task.TaskID, ErrRoutingCallbackMissingTeamID)
 	}
 
 	if task.TeamID != "" {
@@ -106,7 +109,7 @@ func (o *RoutingOracle) normalize(ctx context.Context, loader RunLoader, task ty
 		}
 	} else {
 		if callback {
-			return task, fmt.Errorf("routing.violation: callback task %s missing teamId", task.TaskID)
+			return task, fmt.Errorf("routing.violation: callback task %s missing teamId: %w", task.TaskID, ErrRoutingCallbackMissingTeamID)
 		}
 		if task.AssignedToType == "" {
 			task.AssignedToType = "agent"
@@ -166,4 +169,3 @@ func isCallbackSource(source string) bool {
 		return false
 	}
 }
-

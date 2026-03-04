@@ -1,6 +1,7 @@
 package vfsutil
 
 import (
+	"errors"
 	"path"
 	"strings"
 	"testing"
@@ -13,13 +14,14 @@ func TestNormalizeResourceSubpath(t *testing.T) {
 		wantClean string
 		wantParts []string
 		wantErr   string
+		wantErrIs []error
 	}{
 		{name: "empty is root", in: "", wantClean: "", wantParts: nil},
 		{name: "dot is root", in: ".", wantClean: ".", wantParts: nil},
 		{name: "simple path", in: "a/b", wantClean: "a/b", wantParts: []string{"a", "b"}},
-		{name: "absolute rejected", in: "/etc/passwd", wantErr: "absolute paths not allowed"},
-		{name: "escape rejected", in: "../x", wantErr: "escapes mount root"},
-		{name: "clean-away parent still rejected", in: "a/../x", wantErr: "escapes mount root"},
+		{name: "absolute rejected", in: "/etc/passwd", wantErr: "absolute paths not allowed", wantErrIs: []error{ErrInvalidPath}},
+		{name: "escape rejected", in: "../x", wantErr: "escapes mount root", wantErrIs: []error{ErrInvalidPath, ErrEscapesRoot}},
+		{name: "clean-away parent still rejected", in: "a/../x", wantErr: "escapes mount root", wantErrIs: []error{ErrInvalidPath, ErrEscapesRoot}},
 	}
 
 	for _, tt := range tests {
@@ -31,6 +33,11 @@ func TestNormalizeResourceSubpath(t *testing.T) {
 				}
 				if !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+				}
+				for _, wantErr := range tt.wantErrIs {
+					if !errors.Is(err, wantErr) {
+						t.Fatalf("error = %v, want errors.Is(..., %v)", err, wantErr)
+					}
 				}
 				return
 			}
@@ -54,15 +61,16 @@ func TestNormalizeResourceSubpath(t *testing.T) {
 
 func TestCleanRelPath(t *testing.T) {
 	tests := []struct {
-		name    string
-		in      string
-		want    string
-		wantErr string
+		name      string
+		in        string
+		want      string
+		wantErr   string
+		wantErrIs []error
 	}{
 		{name: "empty rejected", in: "", wantErr: "invalid path: empty"},
-		{name: "absolute rejected", in: "/x", wantErr: "absolute paths not allowed"},
-		{name: "escape rejected", in: "../x", wantErr: "escapes mount root"},
-		{name: "clean-away parent still rejected", in: "a/../x", wantErr: "escapes mount root"},
+		{name: "absolute rejected", in: "/x", wantErr: "absolute paths not allowed", wantErrIs: []error{ErrInvalidPath}},
+		{name: "escape rejected", in: "../x", wantErr: "escapes mount root", wantErrIs: []error{ErrInvalidPath, ErrEscapesRoot}},
+		{name: "clean-away parent still rejected", in: "a/../x", wantErr: "escapes mount root", wantErrIs: []error{ErrInvalidPath, ErrEscapesRoot}},
 		{name: "dot allowed", in: ".", want: "."},
 		{name: "normal path", in: "a/b/c.txt", want: "a/b/c.txt"},
 	}
@@ -76,6 +84,11 @@ func TestCleanRelPath(t *testing.T) {
 				}
 				if !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+				}
+				for _, wantErr := range tt.wantErrIs {
+					if !errors.Is(err, wantErr) {
+						t.Fatalf("error = %v, want errors.Is(..., %v)", err, wantErr)
+					}
 				}
 				return
 			}

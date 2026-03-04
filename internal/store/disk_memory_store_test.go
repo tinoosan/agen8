@@ -2,9 +2,9 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -92,7 +92,7 @@ func TestDiskMemoryStore_WriteMemory_RejectsNonToday(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error when writing non-today memory file")
 	}
-	if !strings.Contains(err.Error(), "can only write to today's memory file") {
+	if !errors.Is(err, ErrMemoryWriteOnlyToday) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -110,7 +110,7 @@ func TestDiskMemoryStore_AppendMemory_RejectsNonToday(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error when appending non-today memory file")
 	}
-	if !strings.Contains(err.Error(), "can only write to today's memory file") {
+	if !errors.Is(err, ErrMemoryWriteOnlyToday) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

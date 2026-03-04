@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/tinoosan/agen8/pkg/agent/state"
@@ -169,7 +168,7 @@ func TestController_PauseRuns_ReturnsTaskCancelError(t *testing.T) {
 	if len(affected) != 0 {
 		t.Fatalf("expected no successful runs on pause failure, got %v", affected)
 	}
-	if !strings.Contains(err.Error(), "cancel active tasks for run run-1") {
+	if !errors.Is(err, ErrCancelActive) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -199,10 +198,10 @@ func TestController_StopRuns_ReturnsStopAndCancelErrors(t *testing.T) {
 	if len(affected) != 0 {
 		t.Fatalf("expected no successful runs on stop failure, got %v", affected)
 	}
-	if !strings.Contains(err.Error(), "stop run run-1") {
+	if !errors.Is(err, ErrStopRunFailed) {
 		t.Fatalf("expected stop-run error, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "cancel active tasks for run run-1") {
+	if !errors.Is(err, ErrCancelActive) {
 		t.Fatalf("expected cancel error, got: %v", err)
 	}
 	if !rt.paused {

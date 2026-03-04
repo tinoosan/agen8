@@ -1,6 +1,7 @@
 package vfsutil
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,8 +26,8 @@ func TestSafeJoinBaseDir_BlocksEscapeAttempts(t *testing.T) {
 			if err == nil {
 				t.Fatalf("SafeJoinBaseDir(%q) should error", sub)
 			}
-			if !strings.Contains(err.Error(), "escapes mount root") {
-				t.Fatalf("SafeJoinBaseDir(%q) error should mention escapes mount root, got: %v", sub, err)
+			if !errors.Is(err, ErrEscapesRoot) || !errors.Is(err, ErrInvalidPath) {
+				t.Fatalf("SafeJoinBaseDir(%q) should wrap ErrEscapesRoot and ErrInvalidPath, got: %v", sub, err)
 			}
 		})
 	}
@@ -44,8 +45,8 @@ func TestSafeJoinBaseDir_BlocksAbsolutePaths(t *testing.T) {
 			if err == nil {
 				t.Fatalf("SafeJoinBaseDir(%q) should error", sub)
 			}
-			if !strings.Contains(err.Error(), "absolute paths not allowed") {
-				t.Fatalf("SafeJoinBaseDir(%q) error should mention absolute paths not allowed, got: %v", sub, err)
+			if !errors.Is(err, ErrInvalidPath) {
+				t.Fatalf("SafeJoinBaseDir(%q) should wrap ErrInvalidPath, got: %v", sub, err)
 			}
 		})
 	}
@@ -79,7 +80,7 @@ func TestSafeJoinBaseDir_AllowsNormalPaths(t *testing.T) {
 			if got != tt.wantAbs {
 				t.Fatalf("SafeJoinBaseDir(%q) = %q, want %q", tt.subpath, got, tt.wantAbs)
 			}
-			if !strings.HasPrefix(got, baseAbs) {
+			if !isUnderBase(baseAbs, got) {
 				t.Fatalf("SafeJoinBaseDir(%q) result %q should start with baseAbs %q", tt.subpath, got, baseAbs)
 			}
 		})
@@ -120,8 +121,8 @@ func TestRelUnderBaseDir(t *testing.T) {
 		if err == nil {
 			t.Fatalf("RelUnderBaseDir should error for outside path")
 		}
-		if !strings.Contains(err.Error(), "escapes mount root") {
-			t.Fatalf("RelUnderBaseDir error should mention escapes mount root, got: %v", err)
+		if !errors.Is(err, ErrEscapesRoot) || !errors.Is(err, ErrInvalidPath) {
+			t.Fatalf("RelUnderBaseDir should wrap ErrEscapesRoot and ErrInvalidPath, got: %v", err)
 		}
 	})
 }
@@ -174,8 +175,20 @@ func FuzzSafeJoinBaseDir_RoundTripBehaviour(f *testing.F) {
 		if err != nil {
 			t.Fatalf("filepath.Rel(%q,%q): %v", baseAbs, joined, err)
 		}
-		if relToBase == ".." || strings.HasPrefix(relToBase, ".."+string(filepath.Separator)) {
+		if relToBase == ".." || hasParentPrefix(relToBase) {
 			t.Fatalf("joined path escaped base: base=%q joined=%q rel=%q", baseAbs, joined, relToBase)
 		}
 	})
+}
+
+func isUnderBase(baseAbs, pathAbs string) bool {
+	rel, err := filepath.Rel(baseAbs, pathAbs)
+	if err != nil {
+		return false
+	}
+	return rel == "." || !hasParentPrefix(rel)
+}
+
+func hasParentPrefix(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
