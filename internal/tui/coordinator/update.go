@@ -464,17 +464,16 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 	}
 	oldLines := m.totalFeedLines()
 
-	// Keep ALL thinking and agent entries (text, task-response, AND tool-ops)
-	// so that tool-call entries are updated in-place by the dedup below rather
-	// than being dropped and re-added on every poll.  Dropping and re-adding
-	// causes feedGen to bump and the line cache to rebuild even when nothing
-	// has actually changed, which manifests as flickering in the terminal.
-	// User/system entries are intentionally excluded: they have no stable
-	// identity key, so keeping them here would duplicate them (they are always
-	// re-supplied in full by the activity poll).
+	// Keep thinking entries and agent text/task-response entries across polls so
+	// they are not dropped and re-added (which would bump feedGen and cause
+	// flickering).  Tool-op entries are intentionally excluded: live-streamed
+	// versions carry different sourceIDs than their polled counterparts, so
+	// retaining them prevents the dedup from collapsing the two and produces
+	// duplicate rows.  User/system entries have no stable identity key either,
+	// so keeping them would also cause duplicates.
 	others := make([]feedEntry, 0, len(m.feed))
 	for _, e := range m.feed {
-		if e.kind == feedThinking || e.kind == feedAgent {
+		if e.kind == feedThinking || (e.kind == feedAgent && (e.isText || e.isTaskResponse)) {
 			others = append(others, *normalizeFeedEntry(&e))
 		}
 	}
@@ -502,8 +501,10 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 	sort.SliceStable(merged, func(i, j int) bool {
 		return merged[i].timestamp.Before(merged[j].timestamp)
 	})
-	m.feed = merged
-	m.feedGen++
+	if !feedEqual(m.feed, merged) {
+		m.feed = merged
+		m.feedGen++
+	}
 
 	if m.liveFollow {
 		m.pinFeedToBottom()
@@ -707,6 +708,36 @@ func (m *Model) appendReconnectNotice(recovered bool) {
 		text:      "reconnected context",
 	})
 	m.feedGen++
+}
+
+// feedEqual returns true when two feed slices are identical in length and every
+// entry shares the same identity key, status, and patchPreview.  Used to avoid
+// bumping feedGen (and thus invalidating the line cache) when a poll returns
+// the same data.
+func feedEqual(a, b []feedEntry) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].identityKey != b[i].identityKey {
+			return false
+		}
+		if a[i].status != b[i].status {
+			return false
+		}
+		ppa := ""
+		if a[i].data != nil {
+			ppa = a[i].data["patchPreview"]
+		}
+		ppb := ""
+		if b[i].data != nil {
+			ppb = b[i].data["patchPreview"]
+		}
+		if ppa != ppb {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Model) feedHeight() int {
