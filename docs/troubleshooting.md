@@ -43,11 +43,43 @@ This guide captures common issues and diagnostics that surface when running Agen
 
 - **Verify critical writes**: use `tools.fs_write(path="...", text="...", verify=true)` to force read-back validation.
 - **Integrity hashes**: set `checksum` to `md5`, `sha1`, or `sha256` to get a deterministic digest in the response/activity details.
+- **Checksum parameter names**:
+  - Canonical form:
+    - `checksum`: algorithm name (`md5`, `sha1`, `sha256`)
+    - `checksumExpected`: expected hex digest for the selected algorithm
+  - Compatibility aliases (equivalent to setting `checksum` + `checksumExpected`):
+    - `checksumMd5`
+    - `checksumSha1`
+    - `checksumSha256`
+  - Rules:
+    - Use either canonical fields or one alias field.
+    - If both are set, they must agree on algorithm and digest.
 - **Mismatch triage**: on verification failure, inspect `writeMismatchAt`, `writeExpectedBytes`, and `writeActualBytes` fields.
 - **Recommended loop**:
   1. Run with `verify=true` (+ `checksum="sha256"` for audit trails).
   2. If mismatch occurs, re-read the file and compare against source payload.
   3. Re-write and verify again before downstream operations.
+
+Example (canonical):
+
+```python
+tools.fs_write(
+    path="/workspace/file.txt",
+    text="Hello World",
+    checksum="sha256",
+    checksumExpected="a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+)
+```
+
+Example (alias):
+
+```python
+tools.fs_write(
+    path="/workspace/file.txt",
+    text="Hello World",
+    checksumMd5="b10a8db164e0754105b7a99be72e3fe5",
+)
+```
 
 ## When to seek help
 
