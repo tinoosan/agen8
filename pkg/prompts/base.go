@@ -48,6 +48,7 @@ func DefaultPromptToolSpec() PromptToolSpec {
 			{Name: "fs_append", Description: "Append to files."},
 			{Name: "fs_edit", Description: "Make precise edits via JSON diffs."},
 			{Name: "fs_list", Description: "List VFS paths."},
+			{Name: "fs_stat", Description: "Inspect path metadata (type, optional size) without reading file contents."},
 			{Name: "fs_patch", Description: "Apply unified-diff patches."},
 			{Name: "fs_read", Description: "Read file contents."},
 			{Name: "fs_search", Description: "Search files under a VFS path using keyword/regex text search (e.g. /memory, /project)."},
@@ -232,6 +233,7 @@ const basePromptRaw = `<system>
     <rule id="stop">Call final_answer only once the overarching goal is complete; plain assistant text without tool calls is treated as final output when finished.</rule>
     <rule id="path_resolution">For shell_exec, you can use relative paths or absolute VFS mount paths (/project, /workspace, /knowledge, /skills, /plan, /memory) in cwd and command args. fs_* tools still expect absolute VFS paths.</rule>
     <rule id="tool_usage">{{.ToolUsageRule}}</rule>
+    <rule id="fs_cost">When you only need filesystem metadata (path type/size), prefer fs_stat before fs_read to reduce token usage.</rule>
     <rule id="knowledge_tool_preference">For knowledge-base tasks (especially under /knowledge or Obsidian-style vault content), prefer the obsidian tool first. Use direct fs_* reads/writes as fallback only when obsidian is unavailable, errors, or cannot perform the required operation and for basic writes and reads.</rule>
 {{.CodeExecGuidanceRules}}
     <rule id="browser_usage">Use browser for JS-heavy sites, multi-step interactions (login/forms/navigation), or when you need screenshots/PDFs/downloads/uploads. Use browser(action:\"dismiss\") for cookie banners/popups and browser(action:\"wait\") for explicit readiness. Prefer http_fetch for simple APIs and static pages.</rule>

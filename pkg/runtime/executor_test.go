@@ -385,6 +385,11 @@ func TestEventMiddleware_EmitsRequestTextForRepresentativeOps(t *testing.T) {
 		want string
 	}{
 		{
+			name: "fs_stat",
+			req:  types.HostOpRequest{Op: types.HostOpFSStat, Path: "/workspace/a.txt"},
+			want: "Stat /workspace/a.txt",
+		},
+		{
 			name: "shell_exec",
 			req:  types.HostOpRequest{Op: types.HostOpShellExec, Argv: []string{"rg", "-n", "todo"}},
 			want: "rg -n todo",
@@ -432,6 +437,10 @@ func TestEventMiddleware_EmitsRequestTextForRepresentativeOps(t *testing.T) {
 func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		switch req.Op {
+		case types.HostOpFSStat:
+			isDir := false
+			sizeBytes := int64(12)
+			return types.HostOpResponse{Op: req.Op, Ok: true, IsDir: &isDir, SizeBytes: &sizeBytes}
 		case types.HostOpFSRead:
 			return types.HostOpResponse{Op: req.Op, Ok: true, Truncated: true}
 		case types.HostOpShellExec:
@@ -467,6 +476,7 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 		req  types.HostOpRequest
 		want string
 	}{
+		{name: "fs_stat", req: types.HostOpRequest{Op: types.HostOpFSStat, Path: "/workspace/a.txt"}, want: "✓ file 12 bytes"},
 		{name: "fs_read", req: types.HostOpRequest{Op: types.HostOpFSRead, Path: "/workspace/a.txt"}, want: "✓ truncated"},
 		{name: "shell_exec", req: types.HostOpRequest{Op: types.HostOpShellExec, Argv: []string{"echo", "ok"}}, want: "✓ exit 0"},
 		{name: "http_fetch", req: types.HostOpRequest{Op: types.HostOpHTTPFetch, URL: "https://example.com"}, want: "✓ 200"},
@@ -485,6 +495,41 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 				t.Fatalf("responseText = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestEventMiddleware_FSStatResponseEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		isDir := false
+		sizeBytes := int64(99)
+		return types.HostOpResponse{Op: req.Op, Ok: true, IsDir: &isDir, SizeBytes: &sizeBytes}
+	})
+
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSStat,
+		Path: "/workspace/a.txt",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if gotResp.Data["isDir"] != "false" || gotResp.Data["sizeBytes"] != "99" {
+		t.Fatalf("expected fs_stat response enrichment, got data=%v", gotResp.Data)
+	}
+	if gotResp.StoreData["isDir"] != "false" || gotResp.StoreData["sizeBytes"] != "99" {
+		t.Fatalf("expected fs_stat store response enrichment, got storeData=%v", gotResp.StoreData)
 	}
 }
 

@@ -13,6 +13,8 @@ import (
 const (
 	// HostOpFSList lists directory entries in the VFS.
 	HostOpFSList = "fs_list"
+	// HostOpFSStat returns metadata for a VFS path without reading file content.
+	HostOpFSStat = "fs_stat"
 	// HostOpFSRead reads a file from the VFS.
 	HostOpFSRead = "fs_read"
 	// HostOpFSSearch searches a VFS mount for matching content (e.g. /memory vector search).
@@ -82,7 +84,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = strings.ToLower(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpCodeExec, HostOpNoop, HostOpToolResult, HostOpFinal:
+	case HostOpFSList, HostOpFSStat, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpCodeExec, HostOpNoop, HostOpToolResult, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -111,6 +113,15 @@ func (r HostOpRequest) Validate() error {
 		}
 		if r.MaxBytes < 0 {
 			return fmt.Errorf("maxBytes must be >= 0")
+		}
+		return nil
+
+	case HostOpFSStat:
+		if err := validate.NonEmpty("path", r.Path); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+			return fmt.Errorf("path must be an absolute VFS path (start with /)")
 		}
 		return nil
 
@@ -308,6 +319,8 @@ type HostOpResponse struct {
 	ErrorCode string         `json:"errorCode,omitempty"`
 	Entries   []string       `json:"entries,omitempty"`
 	Results   []SearchResult `json:"results,omitempty"`
+	IsDir     *bool          `json:"isDir,omitempty"`
+	SizeBytes *int64         `json:"sizeBytes,omitempty"`
 	BytesLen  int            `json:"bytesLen,omitempty"`
 	Text      string         `json:"text,omitempty"`
 	BytesB64  string         `json:"bytesB64,omitempty"`

@@ -51,6 +51,8 @@ func VerbFromKind(kind string) string {
 		return "Read"
 	case "fs_list":
 		return "List"
+	case "fs_stat":
+		return "Stat"
 	case "fs_write":
 		return "Write"
 	case "fs_append":

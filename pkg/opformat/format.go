@@ -110,6 +110,22 @@ func FormatResponseText(d map[string]string) string {
 	}
 
 	switch op {
+	case "fs_stat":
+		if ok == "true" {
+			isDir := strings.TrimSpace(d["isDir"]) == "true"
+			sizeBytes := strings.TrimSpace(d["sizeBytes"])
+			if isDir {
+				return prefix + " dir"
+			}
+			if sizeBytes != "" {
+				return prefix + " file " + sizeBytes + " bytes"
+			}
+			return prefix + " file"
+		}
+		if errStr != "" {
+			return prefix + " " + errStr
+		}
+		return prefix + " failed"
 	case "fs_read":
 		tr := strings.TrimSpace(d["truncated"])
 		if ok == "true" && tr == "true" {

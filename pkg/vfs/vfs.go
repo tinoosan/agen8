@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	iofs "io/fs"
+	"path"
 	"sort"
 	"strings"
 
@@ -167,6 +168,65 @@ func (fs *FS) List(vpath string) ([]Entry, error) {
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// Stat returns metadata for a single VFS path.
+func (fs *FS) Stat(vpath string) (Entry, error) {
+	trimmed := strings.TrimSpace(vpath)
+	if trimmed == "/" {
+		return Entry{
+			Path:       "/",
+			IsDir:      true,
+			HasSize:    false,
+			HasModTime: false,
+		}, nil
+	}
+
+	mountName, r, subpath, err := fs.Resolve(trimmed)
+	if err != nil {
+		return Entry{}, err
+	}
+	if subpath == "" {
+		return Entry{
+			Path:       "/" + mountName,
+			IsDir:      true,
+			HasSize:    false,
+			HasModTime: false,
+		}, nil
+	}
+
+	target := cleanResourceSubpath(subpath)
+	parentSubpath := ""
+	if idx := strings.LastIndex(target, "/"); idx >= 0 {
+		parentSubpath = target[:idx]
+	}
+
+	entries, err := r.List(parentSubpath)
+	if err != nil {
+		return Entry{}, fmt.Errorf("stat %s:%s: %w", mountName, subpath, err)
+	}
+	for _, e := range entries {
+		if cleanResourceSubpath(e.Path) != target {
+			continue
+		}
+		vp := "/" + mountName + "/" + target
+		e.Path = strings.TrimSuffix(vp, "/")
+		return e, nil
+	}
+
+	return Entry{}, errors.Join(store.ErrNotFound, iofs.ErrNotExist, fmt.Errorf("not found: %q", trimmed))
+}
+
+func cleanResourceSubpath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	cleaned := path.Clean("/" + p)
+	if cleaned == "/" {
+		return ""
+	}
+	return strings.TrimPrefix(cleaned, "/")
 }
 
 func (fs *FS) rootEntries() ([]Entry, error) {

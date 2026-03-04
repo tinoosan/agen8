@@ -100,6 +100,7 @@ func registryFromConfig(cfg AgentConfig) (*HostToolRegistry, []llmtypes.Tool, er
 func defaultHostTools() []HostTool {
 	return []HostTool{
 		&hosttools.FSListTool{},
+		&hosttools.FSStatTool{},
 		&hosttools.FSReadTool{},
 		&hosttools.FSSearchTool{},
 		&hosttools.FSWriteTool{},

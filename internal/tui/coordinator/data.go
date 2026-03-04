@@ -24,22 +24,22 @@ const (
 )
 
 type feedEntry struct {
-	kind           feedKind
-	timestamp      time.Time
-	finishedAt     time.Time // zero if not yet finished
-	role           string
-	text           string
-	path           string
-	status         string
-	opKind         string
-	sourceID       string
-	identityKey    string
-	isText         bool
-	isTaskResponse bool              // true if this text response came from the top-level task (prevents activity merge dupe)
-	data           map[string]string // raw activity Data for verb resolution
-	planItems        []string // parsed checklist items for plan/CHECKLIST.md writes
-	planDetailsTitle string   // first heading extracted from plan/HEAD.md writes
-	childCount       int      // number of grouped bridge tool calls (for code_exec parents)
+	kind             feedKind
+	timestamp        time.Time
+	finishedAt       time.Time // zero if not yet finished
+	role             string
+	text             string
+	path             string
+	status           string
+	opKind           string
+	sourceID         string
+	identityKey      string
+	isText           bool
+	isTaskResponse   bool              // true if this text response came from the top-level task (prevents activity merge dupe)
+	data             map[string]string // raw activity Data for verb resolution
+	planItems        []string          // parsed checklist items for plan/CHECKLIST.md writes
+	planDetailsTitle string            // first heading extracted from plan/HEAD.md writes
+	childCount       int               // number of grouped bridge tool calls (for code_exec parents)
 	// When childCount == 1 (a single non-write bridge), store the call so we can show "Verb + Args" instead of "Ran 1 tools".
 	bridgeSingleOpKind string
 	bridgeSingleData   map[string]string
@@ -576,6 +576,8 @@ func kindToVerb(kind string, path string, data map[string]string) string {
 		return "Read"
 	case "fs_list":
 		return "List"
+	case "fs_stat":
+		return "Stat"
 	case "fs_write":
 		return "Write"
 	case "fs_append":

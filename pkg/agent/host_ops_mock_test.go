@@ -112,6 +112,46 @@ func TestHostOpExecutor_FSRead_TextBinaryAndTruncation(t *testing.T) {
 	}
 }
 
+func TestHostOpExecutor_FSStat_FileAndDirectory(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	if err := exec.FS.Write("/workspace/a.txt", []byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{Op: types.HostOpFSStat, Path: "/workspace/a.txt"})
+	if !resp.Ok {
+		t.Fatalf("expected success, got %#v", resp)
+	}
+	if resp.IsDir == nil || *resp.IsDir {
+		t.Fatalf("expected file stat with isDir=false, got %#v", resp)
+	}
+	if resp.SizeBytes == nil || *resp.SizeBytes != int64(5) {
+		t.Fatalf("expected sizeBytes=5, got %#v", resp)
+	}
+
+	resp = exec.Exec(context.Background(), types.HostOpRequest{Op: types.HostOpFSStat, Path: "/workspace"})
+	if !resp.Ok {
+		t.Fatalf("expected success, got %#v", resp)
+	}
+	if resp.IsDir == nil || !*resp.IsDir {
+		t.Fatalf("expected directory stat with isDir=true, got %#v", resp)
+	}
+	if resp.SizeBytes != nil {
+		t.Fatalf("expected nil sizeBytes for directory stat, got %#v", resp)
+	}
+}
+
+func TestHostOpExecutor_FSStat_MissingPathFails(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	resp := exec.Exec(context.Background(), types.HostOpRequest{Op: types.HostOpFSStat, Path: "/workspace/missing.txt"})
+	if resp.Ok {
+		t.Fatalf("expected missing path failure")
+	}
+	if strings.TrimSpace(resp.Error) == "" {
+		t.Fatalf("expected error message for missing path")
+	}
+}
+
 func TestHostOpExecutor_ShellExec_ResponseMapping(t *testing.T) {
 	inv := &stubToolInvoker{
 		result: pkgtools.ToolCallResult{Output: json.RawMessage(`{"exitCode":2,"stdout":"","stderr":"boom","warning":"","vfsPathTranslated":false,"vfsPathMounts":"  ","scriptPathNormalized":false,"scriptAntiPattern":" "}`)},

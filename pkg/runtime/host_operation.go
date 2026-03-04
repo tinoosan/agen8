@@ -94,6 +94,7 @@ func resolveOperationForResponse(r *hostOperationRegistry, req types.HostOpReque
 func defaultHostOperations() []HostOperation {
 	return []HostOperation{
 		fsListOperation{},
+		fsStatOperation{},
 		fsReadOperation{},
 		fsSearchOperation{},
 		fsWriteOperation{},
@@ -123,6 +124,31 @@ func (fsListOperation) FormatRequestText(_ types.HostOpRequest, reqData map[stri
 }
 func (fsListOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpResponse, _ map[string]string, respData map[string]string) string {
 	return opformat.FormatResponseText(respData)
+}
+
+type fsStatOperation struct{}
+
+func (fsStatOperation) Op() string { return types.HostOpFSStat }
+func (fsStatOperation) Execute(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
+	return next(ctx, req)
+}
+func (fsStatOperation) FormatRequestText(_ types.HostOpRequest, reqData map[string]string) string {
+	return opformat.FormatRequestText(reqData)
+}
+func (fsStatOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpResponse, _ map[string]string, respData map[string]string) string {
+	return opformat.FormatResponseText(respData)
+}
+func (fsStatOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	if resp.IsDir != nil {
+		v := fmtBool(*resp.IsDir)
+		respData["isDir"] = v
+		storeResp["isDir"] = v
+	}
+	if resp.SizeBytes != nil {
+		v := strconv.FormatInt(*resp.SizeBytes, 10)
+		respData["sizeBytes"] = v
+		storeResp["sizeBytes"] = v
+	}
 }
 
 type fsReadOperation struct{}

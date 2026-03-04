@@ -43,6 +43,10 @@ func TestFormatResponseText(t *testing.T) {
 		{name: "shell exec fail", data: map[string]string{"op": "shell_exec", "ok": "false", "exitCode": "1", "err": "boom"}, want: "✗ exit 1: boom"},
 		{name: "http status", data: map[string]string{"op": "http_fetch", "ok": "true", "status": "200"}, want: "✓ 200"},
 		{name: "search results", data: map[string]string{"op": "fs_search", "ok": "true", "results": "3"}, want: "✓ 3 results"},
+		{name: "fs stat dir", data: map[string]string{"op": "fs_stat", "ok": "true", "isDir": "true"}, want: "✓ dir"},
+		{name: "fs stat file with size", data: map[string]string{"op": "fs_stat", "ok": "true", "isDir": "false", "sizeBytes": "42"}, want: "✓ file 42 bytes"},
+		{name: "fs stat file no size", data: map[string]string{"op": "fs_stat", "ok": "true", "isDir": "false"}, want: "✓ file"},
+		{name: "fs stat error", data: map[string]string{"op": "fs_stat", "ok": "false", "err": "not found"}, want: "✗ not found"},
 		{name: "browser navigate title", data: map[string]string{"op": "browser.navigate", "ok": "true", "title": "Example Domain"}, want: `✓ navigated "Example Domain"`},
 		{name: "browser generic", data: map[string]string{"op": "browser.custom_step", "ok": "true"}, want: "✓ custom step"},
 		{name: "unknown fail", data: map[string]string{"op": "video_record", "ok": "false", "err": "not allowed"}, want: "✗ not allowed"},
@@ -61,6 +65,7 @@ func TestFormatResponseText(t *testing.T) {
 func TestFormatRequestText_SharedTitleOpsParityWithOpmeta(t *testing.T) {
 	tests := []map[string]string{
 		{"op": "fs_search", "path": "/workspace", "query": "needle"},
+		{"op": "fs_stat", "path": "/workspace/a.txt"},
 		{"op": "shell_exec", "argvPreview": "rg -n todo"},
 		{"op": "http_fetch", "method": "POST", "url": "https://example.com", "body": "{\n\"x\":1\n}"},
 		{"op": "http_fetch", "url": "https://example.com"},

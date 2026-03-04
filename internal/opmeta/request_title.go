@@ -12,7 +12,7 @@ func ShouldHideRoutingNoiseOp(op, path string) bool {
 		return false
 	}
 	switch op {
-	case "fs_list", "fs_read":
+	case "fs_list", "fs_stat", "fs_read":
 		return strings.HasPrefix(path, "/workspace/deliverables/") || strings.HasPrefix(path, "/workspace/quarantine/")
 	default:
 		return false
@@ -26,6 +26,8 @@ func FormatRequestTitle(d map[string]string) string {
 	switch op {
 	case "fs_list":
 		return "List " + path
+	case "fs_stat":
+		return "Stat " + path
 	case "fs_read":
 		return "Read " + path
 	case "fs_search":

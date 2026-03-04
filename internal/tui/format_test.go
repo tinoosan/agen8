@@ -137,6 +137,7 @@ func TestActionCategory_RepresentativeOps(t *testing.T) {
 		{op: "browser.navigate", want: "Browsed"},
 		{op: "email", want: "Sent"},
 		{op: "fs_read", want: "Explored"},
+		{op: "fs_stat", want: "Explored"},
 		{op: "fs_write", want: "Updated"},
 		{op: "shell_exec", want: "Ran"},
 		{op: "http_fetch", want: "Fetched"},
@@ -156,6 +157,7 @@ func TestActionCategory_RepresentativeOps(t *testing.T) {
 func TestRenderOpRequest_SharedOpParityWithOpMeta(t *testing.T) {
 	tests := []map[string]string{
 		{"op": "fs_search", "path": "/workspace", "query": "needle"},
+		{"op": "fs_stat", "path": "/workspace/a.txt"},
 		{"op": "shell_exec", "argvPreview": "rg -n todo"},
 		{"op": "http_fetch", "method": "POST", "url": "https://example.com", "body": "{\n\"x\":1\n}"},
 		{"op": "http_fetch", "url": "https://example.com"},
@@ -278,6 +280,20 @@ func TestClassifyEvent_HiddenInboxOpIgnored(t *testing.T) {
 		Type: "agent.op.request",
 		Data: map[string]string{
 			"op":   "fs_read",
+			"path": "/inbox/checklist.md",
+		},
+	}
+	rr := classifyEvent(ev)
+	if rr.Class != RenderIgnore {
+		t.Fatalf("expected hidden inbox op to be ignored, got %v", rr.Class)
+	}
+}
+
+func TestClassifyEvent_HiddenInboxFSStatOpIgnored(t *testing.T) {
+	ev := events.Event{
+		Type: "agent.op.request",
+		Data: map[string]string{
+			"op":   "fs_stat",
 			"path": "/inbox/checklist.md",
 		},
 	}

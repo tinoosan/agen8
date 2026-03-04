@@ -98,6 +98,29 @@ func TestRenderActivityDetailMarkdown_EmailAndFSSearch(t *testing.T) {
 	}
 }
 
+func TestRenderActivityDetailMarkdown_FSStat_Metadata(t *testing.T) {
+	a := Activity{
+		Kind:   "fs_stat",
+		Path:   "/workspace/a.txt",
+		Status: ActivityOK,
+		Ok:     "true",
+		Data: map[string]string{
+			"isDir":     "false",
+			"sizeBytes": "42",
+		},
+	}
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- path: `/workspace/a.txt`",
+		"- type: `file`",
+		"- sizeBytes: `42`",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in fs_stat markdown, got:\n%s", want, md)
+		}
+	}
+}
+
 func TestRenderActivityDetailMarkdown_AgentSpawnArgumentsAndOutput(t *testing.T) {
 	a := Activity{
 		Kind:          "agent_spawn",

@@ -64,7 +64,7 @@ type BrowserManager interface {
 //
 // This is not the final host API; it is a concrete reference for the agent-facing
 // request/response flow:
-//   - fs_list/fs_read/fs_search/fs_write/fs_append are always available
+//   - fs_list/fs_stat/fs_read/fs_search/fs_write/fs_append are always available
 type HostOpExecutor struct {
 	FS *vfs.FS
 
@@ -135,6 +135,7 @@ var (
 		types.HostOpToolResult: mockNoopOrToolResultOp,
 
 		types.HostOpFSList:   fsListMockOp{},
+		types.HostOpFSStat:   fsStatMockOp{},
 		types.HostOpFSRead:   fsReadMockOp{},
 		types.HostOpFSSearch: fsSearchMockOp{},
 		types.HostOpFSWrite:  fsWriteMockOp{},
@@ -174,6 +175,27 @@ func (fsListMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpEx
 		out = append(out, e.Path)
 	}
 	return types.HostOpResponse{Op: req.Op, Ok: true, Entries: out}
+}
+
+type fsStatMockOp struct{}
+
+func (fsStatMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
+	entry, err := x.FS.Stat(req.Path)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+
+	isDir := entry.IsDir
+	resp := types.HostOpResponse{
+		Op:    req.Op,
+		Ok:    true,
+		IsDir: &isDir,
+	}
+	if entry.HasSize {
+		size := entry.Size
+		resp.SizeBytes = &size
+	}
+	return resp
 }
 
 type fsReadMockOp struct{}

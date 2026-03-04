@@ -126,7 +126,7 @@ func shouldSuppressOp(op, path string) bool {
 		return false
 	}
 	switch op {
-	case "fs_list", "fs_read":
+	case "fs_list", "fs_stat", "fs_read":
 		// Suppress high-frequency system scans that are not user-facing routing activity.
 		return strings.HasPrefix(path, "/workspace/deliverables/") || strings.HasPrefix(path, "/workspace/quarantine/")
 	default:

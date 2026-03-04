@@ -19,6 +19,7 @@ var defaultTeamToolRules = []teamToolRule{
 var requiredToolsAlwaysEnabled = map[string]struct{}{
 	"obsidian":  {},
 	"fs_list":   {},
+	"fs_stat":   {},
 	"fs_read":   {},
 	"fs_search": {},
 	"fs_write":  {},

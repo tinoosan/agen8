@@ -68,3 +68,9 @@ func TestTruncateMiddle(t *testing.T) {
 		})
 	}
 }
+
+func TestVerbFromKind_FSStat(t *testing.T) {
+	if got := VerbFromKind("fs_stat"); got != "Stat" {
+		t.Fatalf("VerbFromKind(fs_stat) = %q, want %q", got, "Stat")
+	}
+}

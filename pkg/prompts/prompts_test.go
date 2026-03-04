@@ -13,6 +13,12 @@ func TestDefaultSystemPrompt_ContainsCoreContent(t *testing.T) {
 	if !strings.Contains(s, "fs_list") {
 		t.Error("DefaultSystemPrompt() should contain fs_list")
 	}
+	if !strings.Contains(s, "fs_stat") {
+		t.Error("DefaultSystemPrompt() should contain fs_stat")
+	}
+	if !strings.Contains(s, "prefer fs_stat before fs_read") {
+		t.Error("DefaultSystemPrompt() should include fs_stat cost guidance")
+	}
 	if !strings.Contains(s, "/plan/HEAD.md") {
 		t.Error("DefaultSystemPrompt() should contain planning content")
 	}

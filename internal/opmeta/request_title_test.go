@@ -9,6 +9,11 @@ func TestFormatRequestTitle_SharedOps(t *testing.T) {
 		want string
 	}{
 		{
+			name: "stat with path",
+			data: map[string]string{"op": "fs_stat", "path": "/workspace/a.txt"},
+			want: "Stat /workspace/a.txt",
+		},
+		{
 			name: "search with path and query",
 			data: map[string]string{"op": "fs_search", "path": "/workspace", "query": "todo"},
 			want: `Search /workspace for "todo"`,
@@ -66,6 +71,7 @@ func TestShouldHideRoutingNoiseOp(t *testing.T) {
 		want bool
 	}{
 		{op: "fs_list", path: "/workspace/deliverables/a.txt", want: true},
+		{op: "fs_stat", path: "/workspace/quarantine/a.txt", want: true},
 		{op: "fs_read", path: "/workspace/quarantine/a.txt", want: true},
 		{op: "fs_read", path: "/workspace/src/main.go", want: false},
 		{op: "shell_exec", path: "/workspace/deliverables/a.txt", want: false},

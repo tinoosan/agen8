@@ -12,6 +12,7 @@ func TestCategory(t *testing.T) {
 		wantSeen bool
 	}{
 		{op: "fs_read", want: "Explored", wantSeen: true},
+		{op: "fs_stat", want: "Explored", wantSeen: true},
 		{op: "fs_write", want: "Updated", wantSeen: true},
 		{op: "shell_exec", want: "Ran", wantSeen: true},
 		{op: "code_exec", want: "Ran", wantSeen: true},
@@ -42,6 +43,7 @@ func TestUsesSharedRequestTitle(t *testing.T) {
 		want bool
 	}{
 		{op: "fs_read", want: true},
+		{op: "fs_stat", want: true},
 		{op: "shell_exec", want: true},
 		{op: "code_exec", want: true},
 		{op: "http_fetch", want: true},
@@ -73,6 +75,7 @@ func TestKnownOpsSorted(t *testing.T) {
 		"fs_patch",
 		"fs_read",
 		"fs_search",
+		"fs_stat",
 		"fs_write",
 		"http_fetch",
 		"obsidian",

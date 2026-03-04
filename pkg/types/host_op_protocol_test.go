@@ -102,3 +102,20 @@ func TestHostOpRequest_CodeExecValidation_RequiresPythonAndCode(t *testing.T) {
 		t.Fatalf("expected error for cwd escaping root")
 	}
 }
+
+func TestHostOpRequest_FSStatValidation(t *testing.T) {
+	req := HostOpRequest{Op: HostOpFSStat, Path: "/workspace/a.txt"}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	req = HostOpRequest{Op: HostOpFSStat, Path: ""}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for empty path")
+	}
+
+	req = HostOpRequest{Op: HostOpFSStat, Path: "workspace/a.txt"}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for relative path")
+	}
+}

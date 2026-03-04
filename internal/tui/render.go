@@ -282,7 +282,7 @@ func shouldHideInboxOp(op, path string) bool {
 		return false
 	}
 	switch op {
-	case "fs_list", "fs_read":
+	case "fs_list", "fs_stat", "fs_read":
 		return true
 	default:
 		return false

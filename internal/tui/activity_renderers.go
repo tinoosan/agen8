@@ -15,6 +15,7 @@ var activityRenderers = map[string]ActivityRenderer{
 	"code_exec":       codeExecRenderer{},
 	"email":           emailRenderer{},
 	"fs_append":       fsWriteAppendRenderer{},
+	"fs_stat":         fsStatRenderer{},
 	"fs_search":       fsSearchRenderer{},
 	"fs_write":        fsWriteAppendRenderer{},
 	"http_fetch":      httpFetchRenderer{},
@@ -354,6 +355,25 @@ func (fsSearchRenderer) RenderArguments(a Activity, telemetry bool, b *strings.B
 		b.WriteString(v)
 		b.WriteString("`\n")
 	}
+}
+
+type fsStatRenderer struct{ baseRenderer }
+
+func (fsStatRenderer) RenderDetail(a Activity, expanded bool, telemetry bool, b *strings.Builder) {
+	if !renderCommonOutputPreview(a, expanded, b) {
+		switch strings.TrimSpace(a.Data["isDir"]) {
+		case "true":
+			b.WriteString("- type: `dir`\n")
+		case "false":
+			b.WriteString("- type: `file`\n")
+		}
+		if v := strings.TrimSpace(a.Data["sizeBytes"]); v != "" {
+			b.WriteString("- sizeBytes: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+	}
+	renderTelemetryBlock(a, telemetry, false, false, b)
 }
 
 type agentSpawnRenderer struct{ baseRenderer }

@@ -15,6 +15,10 @@ var catalog = map[string]metadata{
 		category:              "Explored",
 		useSharedRequestTitle: true,
 	},
+	"fs_stat": {
+		category:              "Explored",
+		useSharedRequestTitle: true,
+	},
 	"fs_read": {
 		category:              "Explored",
 		useSharedRequestTitle: true,

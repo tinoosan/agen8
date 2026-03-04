@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tinoosan/agen8/pkg/vfs"
 )
@@ -206,5 +207,78 @@ func TestReadWriteAppend_WrapErrors(t *testing.T) {
 	}
 	if err := fs.Append("/m/a.txt", []byte("x")); err == nil || !strings.Contains(err.Error(), "append m:a.txt") {
 		t.Fatalf("expected wrapped append error, got %v", err)
+	}
+}
+
+func TestStat_RootAndMount(t *testing.T) {
+	fs := vfs.NewFS()
+	mustMount(t, fs, "m", fakeResource{})
+
+	root, err := fs.Stat("/")
+	if err != nil {
+		t.Fatalf("Stat(/): %v", err)
+	}
+	if root.Path != "/" || !root.IsDir {
+		t.Fatalf("unexpected root stat: %+v", root)
+	}
+
+	mount, err := fs.Stat("/m")
+	if err != nil {
+		t.Fatalf("Stat(/m): %v", err)
+	}
+	if mount.Path != "/m" || !mount.IsDir {
+		t.Fatalf("unexpected mount stat: %+v", mount)
+	}
+}
+
+func TestStat_FileAndDirectory(t *testing.T) {
+	fs := vfs.NewFS()
+	mustMount(t, fs, "m", fakeResource{
+		listFn: func(subpath string) ([]vfs.Entry, error) {
+			switch subpath {
+			case "":
+				return []vfs.Entry{
+					vfs.NewDirEntry("docs"),
+					vfs.NewFileEntry("main.go", 42, time.Unix(0, 0)),
+				}, nil
+			case "docs":
+				return []vfs.Entry{
+					vfs.NewFileEntry("docs/readme.md", 64, time.Unix(0, 0)),
+				}, nil
+			default:
+				return nil, errors.New("not found")
+			}
+		},
+	})
+
+	fileStat, err := fs.Stat("/m/main.go")
+	if err != nil {
+		t.Fatalf("Stat file: %v", err)
+	}
+	if fileStat.Path != "/m/main.go" || fileStat.IsDir || !fileStat.HasSize || fileStat.Size != 42 {
+		t.Fatalf("unexpected file stat: %+v", fileStat)
+	}
+
+	dirStat, err := fs.Stat("/m/docs")
+	if err != nil {
+		t.Fatalf("Stat dir: %v", err)
+	}
+	if dirStat.Path != "/m/docs" || !dirStat.IsDir {
+		t.Fatalf("unexpected dir stat: %+v", dirStat)
+	}
+}
+
+func TestStat_MissingPathFails(t *testing.T) {
+	fs := vfs.NewFS()
+	mustMount(t, fs, "m", fakeResource{
+		listFn: func(subpath string) ([]vfs.Entry, error) {
+			return []vfs.Entry{
+				vfs.NewFileEntry("present.txt", 1, time.Unix(0, 0)),
+			}, nil
+		},
+	})
+
+	if _, err := fs.Stat("/m/missing.txt"); err == nil {
+		t.Fatalf("expected error for missing stat path")
 	}
 }
