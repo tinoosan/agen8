@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/tui/adapter"
+	"github.com/tinoosan/agen8/internal/tui/kit"
 )
 
 type activitytuiReconnectNotificationMsg struct{}
@@ -19,7 +20,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		m.spinFrame = (m.spinFrame + 1) % len(spinnerFrames)
+		m.spinFrame = (m.spinFrame + 1) % len(kit.SpinnerFrames)
 		if m.notice != "" && time.Since(m.noticeAt) > 4*time.Second {
 			m.notice = ""
 		}
@@ -56,7 +57,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sel = len(m.activities) - 1
 		}
 		if m.sel >= len(m.activities) {
-			m.sel = maxInt(0, len(m.activities)-1)
+			m.sel = max(0, len(m.activities)-1)
 		}
 
 		return m, adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh)
@@ -103,7 +104,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Clamp selection
 		if m.sel >= len(m.activities) {
-			m.sel = maxInt(0, len(m.activities)-1)
+			m.sel = max(0, len(m.activities)-1)
 		}
 		return m, nil
 

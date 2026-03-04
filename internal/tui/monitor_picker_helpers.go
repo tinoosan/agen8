@@ -16,10 +16,10 @@ func (m *monitorModel) closeAllPickers() {
 	if m.modelPickerOpen {
 		m.closeModelPicker()
 	}
-	if m.reasoningEffortPickerOpen {
+	if m.reasoningEffortPicker.Open {
 		m.closeReasoningEffortPicker()
 	}
-	if m.reasoningSummaryPickerOpen {
+	if m.reasoningSummaryPicker.Open {
 		m.closeReasoningSummaryPicker()
 	}
 	if m.filePickerOpen {

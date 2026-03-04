@@ -700,11 +700,11 @@ func (m *monitorModel) routeModalKey(msg tea.KeyMsg) (bool, tea.Model, tea.Cmd) 
 		model, cmd := m.updateModelPicker(msg)
 		return true, model, cmd
 	}
-	if m.reasoningEffortPickerOpen {
+	if m.reasoningEffortPicker.Open {
 		model, cmd := m.updateReasoningEffortPicker(msg)
 		return true, model, cmd
 	}
-	if m.reasoningSummaryPickerOpen {
+	if m.reasoningSummaryPicker.Open {
 		model, cmd := m.updateReasoningSummaryPicker(msg)
 		return true, model, cmd
 	}

@@ -108,3 +108,62 @@ func clampInt(value, minVal, maxVal int) int {
 	}
 	return value
 }
+
+// Truncate trims s to fit within max display-width characters (appends "…" if truncated).
+func Truncate(s string, maxW int) string {
+	if maxW <= 0 {
+		return ""
+	}
+	s = strings.TrimSpace(s)
+	if s == "" || runewidth.StringWidth(s) <= maxW {
+		return s
+	}
+	if maxW <= 1 {
+		return runewidth.Truncate(s, maxW, "")
+	}
+	return runewidth.Truncate(s, maxW-1, "") + "…"
+}
+
+// Fallback returns v if non-blank, otherwise def.
+func Fallback(v, def string) string {
+	if strings.TrimSpace(v) == "" {
+		return def
+	}
+	return v
+}
+
+// ViewportSlice returns a window of visibleLines from content, scrolled near targetIdx.
+func ViewportSlice(content string, visibleLines, targetIdx int) string {
+	lines := strings.Split(content, "\n")
+	if visibleLines <= 0 {
+		visibleLines = 1
+	}
+	if len(lines) <= visibleLines {
+		return content
+	}
+	if targetIdx < 0 {
+		targetIdx = 0
+	}
+	if targetIdx >= len(lines) {
+		targetIdx = len(lines) - 1
+	}
+	start := targetIdx
+	end := start + visibleLines
+	if end > len(lines) {
+		end = len(lines)
+		start = max(0, end-visibleLines)
+	}
+	return strings.Join(lines[start:end], "\n")
+}
+
+// MaxPage returns the last valid 0-based page index.
+func MaxPage(total, pageSize int) int {
+	if pageSize <= 0 {
+		return 0
+	}
+	p := (total + pageSize - 1) / pageSize - 1
+	if p < 0 {
+		return 0
+	}
+	return p
+}

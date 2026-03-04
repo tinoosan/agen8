@@ -437,7 +437,8 @@ func (m Model) renderInput() string {
 	status = lipgloss.NewStyle().Width(statusW).Render(status)
 
 	// Render command palette if open.
-	palette := m.renderCommandPalette()
+	paletteW := max(1, max(20, m.width-8)-4)
+	palette := m.renderCommandPalette(paletteW)
 	contentParts := []string{status}
 	if palette != "" {
 		contentParts = append(contentParts, "", palette)
@@ -511,64 +512,9 @@ func (m Model) renderStatusLine() string {
 	return "last: " + strings.Join(parts, " • ")
 }
 
-func (m Model) renderCommandPalette() string {
-	if !m.commandPaletteOpen || len(m.commandPaletteMatches) == 0 {
-		return ""
-	}
-
-	maxDisplay := 6
-
-	outerW := max(20, m.width-8)
-	contentW := max(1, outerW-4)
-
-	items := make([]kit.Item, len(m.commandPaletteMatches))
-	for i, cmd := range m.commandPaletteMatches {
-		items[i] = commandPaletteItem(cmd)
-	}
-
-	selected := m.commandPaletteSelected
-	if selected < 0 {
-		selected = 0
-	}
-	if selected >= len(items) {
-		selected = len(items) - 1
-	}
-
-	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6bbcff")).
-		Bold(true)
-	unselectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#c0c0c0"))
-
-	opts := kit.SelectorOptions{
-		Width:         contentW,
-		MaxHeight:     maxDisplay,
-		SelectedIndex: selected,
-		ShowPrefix:    true,
-		Styles: kit.SelectorStyles{
-			SelectedTitle:   kit.CloneStyle(selectedStyle),
-			UnselectedTitle: kit.CloneStyle(unselectedStyle),
-		},
-	}
-
-	paletteContent := kit.RenderSelector(items, opts)
-
-	// IMPORTANT: keep the palette's TOTAL rendered width within the composer content width.
-	// lipgloss.Style.Width applies to the content box (excluding border + padding).
-	// Since we use padding(0,1) and a rounded border, total width is:
-	//   contentWidth + (padding L+R=2) + (border L+R=2) = contentWidth + 4
-	// The composer content budget is ~ (m.width-8), so we set contentWidth to (budget-4).
-	paletteStyle := lipgloss.NewStyle().
-		Width(contentW).
-		Padding(0, 1).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#404040"))
-
-	return paletteStyle.Render(paletteContent)
-}
 
 func (m Model) renderReasoningEffortPicker() string {
-	if !m.reasoningEffortPickerOpen {
+	if !m.reasoningEffortPicker.Open {
 		return ""
 	}
 
@@ -581,7 +527,7 @@ func (m Model) renderReasoningEffortPicker() string {
 		items[i] = reasoningEffortItem(opt)
 	}
 
-	selected := m.reasoningEffortPickerSelected
+	selected := m.reasoningEffortPicker.Selected
 	if selected < 0 {
 		selected = 0
 	}
@@ -610,7 +556,7 @@ func (m Model) renderReasoningEffortPicker() string {
 }
 
 func (m Model) renderReasoningSummaryPicker() string {
-	if !m.reasoningSummaryPickerOpen {
+	if !m.reasoningSummaryPicker.Open {
 		return ""
 	}
 
@@ -622,7 +568,7 @@ func (m Model) renderReasoningSummaryPicker() string {
 		items[i] = reasoningSummaryItem(opt)
 	}
 
-	selected := m.reasoningSummaryPickerSelected
+	selected := m.reasoningSummaryPicker.Selected
 	if selected < 0 {
 		selected = 0
 	}

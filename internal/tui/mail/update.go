@@ -82,10 +82,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Clamp selections
 		if m.inboxSel >= len(m.inbox) {
-			m.inboxSel = maxInt(0, len(m.inbox)-1)
+			m.inboxSel = max(0, len(m.inbox)-1)
 		}
 		if m.outboxSel >= len(m.outbox) {
-			m.outboxSel = maxInt(0, len(m.outbox)-1)
+			m.outboxSel = max(0, len(m.outbox)-1)
 		}
 		return m, nil
 

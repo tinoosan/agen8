@@ -315,9 +315,7 @@ type monitorModel struct {
 	newSessionWizardProfileList list.Model // step 1 list
 
 	// Command palette (inline autocomplete above composer)
-	commandPaletteOpen     bool
-	commandPaletteMatches  []string
-	commandPaletteSelected int
+	commandPalette kit.CommandPalette
 
 	// Artifact viewer (full-screen takeover)
 	artifactViewerOpen      bool
@@ -343,10 +341,8 @@ type monitorModel struct {
 	artifactWorkspaceExpand map[string]bool
 
 	// Reasoning pickers
-	reasoningEffortPickerOpen      bool
-	reasoningEffortPickerSelected  int
-	reasoningSummaryPickerOpen     bool
-	reasoningSummaryPickerSelected int
+	reasoningEffortPicker  kit.OptionsPicker
+	reasoningSummaryPicker kit.OptionsPicker
 
 	// File picker (for @ references)
 	filePickerOpen     bool

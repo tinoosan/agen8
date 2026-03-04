@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/agen8/internal/tui/kit"
 	layoutmgr "github.com/tinoosan/agen8/internal/tui/layout"
 	"github.com/tinoosan/agen8/pkg/types"
 )
@@ -14,20 +15,20 @@ import (
 func (m *monitorModel) handleNextPage() (tea.Model, tea.Cmd) {
 	switch m.focusedPanel {
 	case panelActivity:
-		maxPage := max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize)-1)
+		maxPage := kit.MaxPage(m.activityTotalCount, m.activityPageSize)
 		if m.activityPage < maxPage {
 			m.activityPage++
 			m.activityFollowingTail = m.activityPage == maxPage
 			return m, m.loadActivityPage()
 		}
 	case panelInbox:
-		maxPage := max(0, (m.inboxTotalCount+m.inboxPageSize-1)/max(1, m.inboxPageSize)-1)
+		maxPage := kit.MaxPage(m.inboxTotalCount, m.inboxPageSize)
 		if m.inboxPage < maxPage {
 			m.inboxPage++
 			return m, m.loadInboxPage()
 		}
 	case panelOutbox:
-		maxPage := max(0, (m.outboxTotalCount+m.outboxPageSize-1)/max(1, m.outboxPageSize)-1)
+		maxPage := kit.MaxPage(m.outboxTotalCount, m.outboxPageSize)
 		if m.outboxPage < maxPage {
 			m.outboxPage++
 			return m, m.loadOutboxPage()
@@ -83,20 +84,20 @@ func (m *monitorModel) handleFirstPage() (tea.Model, tea.Cmd) {
 func (m *monitorModel) handleLastPage() (tea.Model, tea.Cmd) {
 	switch m.focusedPanel {
 	case panelActivity:
-		maxPage := max(0, (m.activityTotalCount+m.activityPageSize-1)/max(1, m.activityPageSize)-1)
+		maxPage := kit.MaxPage(m.activityTotalCount, m.activityPageSize)
 		if m.activityPage != maxPage {
 			m.activityPage = maxPage
 			m.activityFollowingTail = true
 			return m, m.loadActivityPage()
 		}
 	case panelInbox:
-		maxPage := max(0, (m.inboxTotalCount+m.inboxPageSize-1)/max(1, m.inboxPageSize)-1)
+		maxPage := kit.MaxPage(m.inboxTotalCount, m.inboxPageSize)
 		if m.inboxPage != maxPage {
 			m.inboxPage = maxPage
 			return m, m.loadInboxPage()
 		}
 	case panelOutbox:
-		maxPage := max(0, (m.outboxTotalCount+m.outboxPageSize-1)/max(1, m.outboxPageSize)-1)
+		maxPage := kit.MaxPage(m.outboxTotalCount, m.outboxPageSize)
 		if m.outboxPage != maxPage {
 			m.outboxPage = maxPage
 			return m, m.loadOutboxPage()

@@ -18,26 +18,8 @@ import (
 	"github.com/tinoosan/agen8/internal/tui/kit"
 )
 
-// ── Color palette ──────────────────────────────────────────────────────
-
 var (
-	colorOK       = lipgloss.Color("#98c379")
-	colorErr      = lipgloss.Color("#e06c75")
-	colorPending  = lipgloss.Color("#e5c07b")
-	colorAccent   = lipgloss.Color("#7aa2f7")
-	colorThinking = lipgloss.Color("#9d7fdb") // muted purple for thinking
-	colorPlan     = lipgloss.Color("#56b6c2") // teal for plan updates
-
-	styleOK        = lipgloss.NewStyle().Foreground(colorOK)
-	styleErr       = lipgloss.NewStyle().Foreground(colorErr)
-	stylePending   = lipgloss.NewStyle().Foreground(colorPending)
-	styleAccent    = lipgloss.NewStyle().Foreground(colorAccent)
-	styleThinking  = lipgloss.NewStyle().Foreground(colorThinking)
-	stylePlan      = lipgloss.NewStyle().Foreground(colorPlan)
 	styleHeader    = lipgloss.NewStyle().Bold(true)
-	stylePillOK    = lipgloss.NewStyle().Bold(true).Foreground(colorOK).Reverse(true).Padding(0, 1)
-	stylePillErr   = lipgloss.NewStyle().Bold(true).Foreground(colorErr).Reverse(true).Padding(0, 1)
-	stylePillWhite = lipgloss.NewStyle().Bold(true).Reverse(true).Padding(0, 1)
 	styleVerbBold  = lipgloss.NewStyle().Bold(true)
 	styleArgItalic = lipgloss.NewStyle().Italic(true)
 
@@ -45,8 +27,6 @@ var (
 	mdByWidth  = map[int]*glamour.TermRenderer{}
 	mdFallback = lipgloss.NewStyle()
 )
-
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 const (
 	compactWidth = 60
@@ -103,9 +83,9 @@ func (m *Model) renderHeader() string {
 
 	// Connection pill
 	if m.connected {
-		tags = append(tags, styleOK.Render("● connected"))
+		tags = append(tags, kit.StyleOK.Render("● connected"))
 	} else {
-		tags = append(tags, styleErr.Render("● disconnected"))
+		tags = append(tags, kit.StyleErr.Render("● disconnected"))
 	}
 
 	// Agent status pill
@@ -113,11 +93,11 @@ func (m *Model) renderHeader() string {
 		var statusPill string
 		switch {
 		case strings.Contains(m.agentStatus, "Error"):
-			statusPill = stylePillErr.Render(m.agentStatus)
+			statusPill = kit.StylePillErr.Render(m.agentStatus)
 		case strings.Contains(m.agentStatus, "Done"):
-			statusPill = stylePillOK.Render(m.agentStatus)
+			statusPill = kit.StylePillOK.Render(m.agentStatus)
 		default:
-			statusPill = stylePillWhite.Render(m.agentStatus + " " + m.spinner())
+			statusPill = kit.StylePillWhite.Render(m.agentStatus + " " + m.spinner())
 		}
 		tags = append(tags, statusPill)
 	}
@@ -132,7 +112,7 @@ func (m *Model) renderHeader() string {
 	}
 
 	// Mode tag
-	mode := fallback(m.sessionMode, "standalone")
+	mode := kit.Fallback(m.sessionMode, "standalone")
 	tags = append(tags, kit.RenderTag(kit.TagOptions{
 		Key:   "mode",
 		Value: mode,
@@ -147,7 +127,7 @@ func (m *Model) renderHeader() string {
 	}
 
 	if m.lastErr != "" {
-		tags = append(tags, styleErr.Render("err: "+truncate(m.lastErr, 32)))
+		tags = append(tags, kit.StyleErr.Render("err: "+kit.Truncate(m.lastErr, 32)))
 	}
 
 	right := strings.Join(tags, kit.StyleDim.Render(" · "))
@@ -231,7 +211,7 @@ func (m *Model) buildTurns() []conversationTurn {
 				})
 			}
 		case feedAgent:
-			role := fallback(e.role, "agent")
+			role := kit.Fallback(e.role, "agent")
 
 			// Flush if role changes, or if we are switching between text and ops records.
 			// Also flush if both are text (to keep distinct text blocks separate).
@@ -276,11 +256,11 @@ func (m *Model) renderFeed(height int) string {
 	total := len(lines)
 	start := m.feedScroll
 	if m.liveFollow {
-		start = maxInt(0, total-height)
+		start = max(0, total-height)
 	}
 
 	// Compute scroll percent
-	maxScroll := maxInt(1, total-height)
+	maxScroll := max(1, total-height)
 	if total <= height {
 		m.scrollPercent = 100.0
 	} else {
@@ -290,7 +270,7 @@ func (m *Model) renderFeed(height int) string {
 		}
 	}
 
-	content := viewportSlice(strings.Join(lines, "\n"), height, start)
+	content := kit.ViewportSlice(strings.Join(lines, "\n"), height, start)
 	return lipgloss.NewStyle().Width(m.width).Height(height).Render(content)
 }
 
@@ -403,7 +383,7 @@ func (m *Model) feedLines(width int) []string {
 		return nil
 	}
 
-	inner := maxInt(12, width-4)
+	inner := max(12, width-4)
 	lines := make([]string, 0, len(turns)*4)
 
 	for i, t := range turns {
@@ -439,12 +419,12 @@ func (m *Model) feedLines(width int) []string {
 
 func (m *Model) renderUserBlock(t conversationTurn, inner int) []string {
 	age := relativeAge(t.timestamp.Format(time.RFC3339))
-	label := styleAccent.Bold(true).Render("You")
+	label := kit.StyleAccent.Bold(true).Render("You")
 	ageStr := kit.StyleDim.Render(age)
 
 	labelW := runewidth.StringWidth(stripANSI(label))
 	ageW := runewidth.StringWidth(stripANSI(ageStr))
-	gap := maxInt(1, inner-labelW-ageW)
+	gap := max(1, inner-labelW-ageW)
 	headerLine := "  " + label + strings.Repeat(" ", gap) + ageStr
 
 	msg := strings.TrimSpace(renderMarkdown(t.text, inner-2))
@@ -466,7 +446,7 @@ func (m *Model) renderUserBlock(t conversationTurn, inner int) []string {
 func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 	if t.isText {
 		msg := strings.TrimSpace(renderMarkdown(t.text, inner-4))
-		outLines := []string{"  " + styleVerbBold.Render("●") + " " + styleVerbBold.Render(fallback(t.role, "agent"))}
+		outLines := []string{"  " + styleVerbBold.Render("●") + " " + styleVerbBold.Render(kit.Fallback(t.role, "agent"))}
 		for _, l := range strings.Split(msg, "\n") {
 			outLines = append(outLines, "    "+l)
 		}
@@ -475,13 +455,13 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 
 	// Tool operations block
 	age := relativeAge(t.timestamp.Format(time.RFC3339))
-	role := truncate(t.role, maxInt(4, 14))
-	label := kit.StyleDim.Render("● ") + styleAccent.Bold(true).Render(role)
+	role := kit.Truncate(t.role, max(4, 14))
+	label := kit.StyleDim.Render("● ") + kit.StyleAccent.Bold(true).Render(role)
 	ageStr := kit.StyleDim.Render(age)
 
 	labelW := runewidth.StringWidth(stripANSI(label))
 	ageW := runewidth.StringWidth(stripANSI(ageStr))
-	gap := maxInt(1, inner-labelW-ageW)
+	gap := max(1, inner-labelW-ageW)
 	headerLine := label + strings.Repeat(" ", gap) + ageStr
 
 	lines := []string{headerLine}
@@ -512,12 +492,12 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		var dot string
 		switch {
 		case s == "done" || s == "completed" || s == "ok" || s == "succeeded":
-			dot = styleOK.Render("●")
+			dot = kit.StyleOK.Render("●")
 		case s == "error" || s == "failed" || s == "canceled" || s == "cancelled":
-			dot = styleErr.Render("●")
+			dot = kit.StyleErr.Render("●")
 		case s == "running" || s == "pending":
 			if m.spinFrame%2 == 0 {
-				dot = stylePending.Render("●")
+				dot = kit.StylePending.Render("●")
 			} else {
 				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")).Render("●")
 			}
@@ -535,20 +515,20 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		} else if verb == "Learning" {
 			argPreview = skillNameFromPath(e.path)
 			if argPreview != "" {
-				argPreview = truncate(argPreview, maxInt(8, inner-len(verb)-8))
+				argPreview = kit.Truncate(argPreview, max(8, inner-len(verb)-8))
 			}
 		} else if opLower == "http_fetch" && e.data != nil {
 			if u := strings.TrimSpace(e.data["url"]); u != "" {
-				argPreview = truncate(u, maxInt(8, inner-len(verb)-8))
+				argPreview = kit.Truncate(u, max(8, inner-len(verb)-8))
 				argItalic = true
 			}
 		} else if opLower == "obsidian" && e.data != nil {
 			if cmd := strings.TrimSpace(e.data["command"]); cmd != "" {
-				argPreview = truncate(cmd, maxInt(8, inner-len(verb)-8))
+				argPreview = kit.Truncate(cmd, max(8, inner-len(verb)-8))
 			}
 		} else if opLower == "soul_update" && e.data != nil {
 			if reason := strings.TrimSpace(e.data["reason"]); reason != "" {
-				argPreview = truncate(reason, maxInt(8, inner-len(verb)-8))
+				argPreview = kit.Truncate(reason, max(8, inner-len(verb)-8))
 			}
 		} else if opLower == "task_create" && e.data != nil {
 			if goal := strings.TrimSpace(e.data["goal"]); goal != "" {
@@ -561,15 +541,15 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 					argPreview += " -> " + assigned
 				}
 			}
-			argPreview = truncate(argPreview, maxInt(8, inner-len(verb)-8))
+			argPreview = kit.Truncate(argPreview, max(8, inner-len(verb)-8))
 		} else if opLower == "task_review" && e.data != nil {
 			if id := strings.TrimSpace(e.data["taskId"]); id != "" {
-				argPreview = truncate(id, maxInt(8, inner-len(verb)-8))
+				argPreview = kit.Truncate(id, max(8, inner-len(verb)-8))
 			}
 		} else if e.path != "" && isPathBasedOp(e.opKind) {
-			argPreview = truncate(e.path, maxInt(8, inner-len(verb)-8))
+			argPreview = kit.Truncate(e.path, max(8, inner-len(verb)-8))
 		} else {
-			argPreview = truncate(stripLeadingVerb(e.text, verb), maxInt(8, inner-len(verb)-8))
+			argPreview = kit.Truncate(stripLeadingVerb(e.text, verb), max(8, inner-len(verb)-8))
 		}
 
 		// Primary operation line: colored dot + bold verb + arg preview
@@ -584,7 +564,7 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		// Append +N −M stat for write ops.
 		if isWriteOp(e.opKind) && e.data != nil {
 			if added, deleted := tui.DiffStat(e.data["patchPreview"]); added > 0 || deleted > 0 {
-				opLine += "  " + styleOK.Render("+"+strconv.Itoa(added)) + " " + styleErr.Render("−"+strconv.Itoa(deleted))
+				opLine += "  " + kit.StyleOK.Render("+"+strconv.Itoa(added)) + " " + kit.StyleErr.Render("−"+strconv.Itoa(deleted))
 			}
 		}
 		lines = append(lines, opLine)
@@ -604,20 +584,20 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 				} else if bridgeVerb == "Learning" {
 					bridgeArg = skillNameFromPath(e.bridgeSinglePath)
 					if bridgeArg != "" {
-						bridgeArg = truncate(bridgeArg, maxInt(8, inner-len(bridgeVerb)-8))
+						bridgeArg = kit.Truncate(bridgeArg, max(8, inner-len(bridgeVerb)-8))
 					}
 				} else if bridgeOpLower == "http_fetch" && e.bridgeSingleData != nil {
 					if u := strings.TrimSpace(e.bridgeSingleData["url"]); u != "" {
-						bridgeArg = truncate(u, maxInt(8, inner-len(bridgeVerb)-8))
+						bridgeArg = kit.Truncate(u, max(8, inner-len(bridgeVerb)-8))
 						bridgeArgItalic = true
 					}
 				} else if bridgeOpLower == "obsidian" && e.bridgeSingleData != nil {
 					if cmd := strings.TrimSpace(e.bridgeSingleData["command"]); cmd != "" {
-						bridgeArg = truncate(cmd, maxInt(8, inner-len(bridgeVerb)-8))
+						bridgeArg = kit.Truncate(cmd, max(8, inner-len(bridgeVerb)-8))
 					}
 				} else if bridgeOpLower == "soul_update" && e.bridgeSingleData != nil {
 					if reason := strings.TrimSpace(e.bridgeSingleData["reason"]); reason != "" {
-						bridgeArg = truncate(reason, maxInt(8, inner-len(bridgeVerb)-8))
+						bridgeArg = kit.Truncate(reason, max(8, inner-len(bridgeVerb)-8))
 					}
 				} else if bridgeOpLower == "task_create" && e.bridgeSingleData != nil {
 					if goal := strings.TrimSpace(e.bridgeSingleData["goal"]); goal != "" {
@@ -630,15 +610,15 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 							bridgeArg += " -> " + assigned
 						}
 					}
-					bridgeArg = truncate(bridgeArg, maxInt(8, inner-len(bridgeVerb)-8))
+					bridgeArg = kit.Truncate(bridgeArg, max(8, inner-len(bridgeVerb)-8))
 				} else if bridgeOpLower == "task_review" && e.bridgeSingleData != nil {
 					if id := strings.TrimSpace(e.bridgeSingleData["taskId"]); id != "" {
-						bridgeArg = truncate(id, maxInt(8, inner-len(bridgeVerb)-8))
+						bridgeArg = kit.Truncate(id, max(8, inner-len(bridgeVerb)-8))
 					}
 				} else if e.bridgeSinglePath != "" && isPathBasedOp(e.bridgeSingleOpKind) {
-					bridgeArg = truncate(e.bridgeSinglePath, maxInt(8, inner-len(bridgeVerb)-8))
+					bridgeArg = kit.Truncate(e.bridgeSinglePath, max(8, inner-len(bridgeVerb)-8))
 				} else {
-					bridgeArg = truncate(stripLeadingVerb(e.bridgeSingleText, bridgeVerb), maxInt(8, inner-len(bridgeVerb)-8))
+					bridgeArg = kit.Truncate(stripLeadingVerb(e.bridgeSingleText, bridgeVerb), max(8, inner-len(bridgeVerb)-8))
 				}
 			line := styleVerbBold.Render(bridgeVerb)
 			if bridgeArg != "" {
@@ -728,18 +708,18 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 //	├─ ○ Add unit tests
 //	└─ ○ Deploy to staging
 func renderPlanChecklist(items []string) []string {
-	lines := []string{"  " + stylePlan.Render("●") + " " + stylePlan.Bold(true).Render("Updated plan")}
+	lines := []string{"  " + kit.StylePlan.Render("●") + " " + kit.StylePlan.Bold(true).Render("Updated plan")}
 	for i, item := range items {
 		isLast := i == len(items)-1
 		var branch string
 		if isLast {
-			branch = stylePlan.Render("  └─")
+			branch = kit.StylePlan.Render("  └─")
 		} else {
-			branch = stylePlan.Render("  ├─")
+			branch = kit.StylePlan.Render("  ├─")
 		}
 		if strings.HasPrefix(item, "[x]") {
 			text := strings.TrimPrefix(item, "[x] ")
-			lines = append(lines, branch+" "+styleOK.Render("✓")+" "+kit.StyleDim.Strikethrough(true).Render(text))
+			lines = append(lines, branch+" "+kit.StyleOK.Render("✓")+" "+kit.StyleDim.Strikethrough(true).Render(text))
 		} else {
 			text := strings.TrimPrefix(item, "[ ] ")
 			lines = append(lines, branch+" "+kit.StyleDim.Render("○")+" "+text)
@@ -754,11 +734,11 @@ func renderPlanChecklist(items []string) []string {
 //	● Updated plan details
 //	└─ Create blog post about Redis
 func renderPlanDetails(title string) []string {
-	header := "  " + stylePlan.Render("●") + " " + stylePlan.Bold(true).Render("Updated plan details")
+	header := "  " + kit.StylePlan.Render("●") + " " + kit.StylePlan.Bold(true).Render("Updated plan details")
 	if strings.TrimSpace(title) == "" {
 		return []string{header}
 	}
-	branch := stylePlan.Render("  └─")
+	branch := kit.StylePlan.Render("  └─")
 	return []string{header, branch + " " + kit.StyleDim.Render(strings.TrimSpace(title))}
 }
 
@@ -793,20 +773,20 @@ func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
 		hint := kit.StyleDim.Render("ctrl+o")
 		var spinner string
 		if e.live {
-			spinner = " " + styleThinking.Render(m.spinner())
+			spinner = " " + kit.StyleThinking.Render(m.spinner())
 		}
-		triangle := styleThinking.Render("▸")
-		labelStr := styleThinking.Italic(true).Render(label) + spinner
+		triangle := kit.StyleThinking.Render("▸")
+		labelStr := kit.StyleThinking.Italic(true).Render(label) + spinner
 		labelW := runewidth.StringWidth(stripANSI("▸ " + label + spinner))
 		hintW := runewidth.StringWidth(stripANSI("ctrl+o"))
-		gap := maxInt(1, inner-2-labelW-hintW)
+		gap := max(1, inner-2-labelW-hintW)
 		line := "  " + triangle + " " + labelStr + strings.Repeat(" ", gap) + hint
 		return []string{line}
 	}
 
 	// Expanded: ▾ Thought for Ns + tree branches; one chunk per summary, markdown-rendered, separated by blank lines.
-	triangle := styleThinking.Render("▾")
-	headerLine := "  " + triangle + " " + styleThinking.Italic(true).Render(label)
+	triangle := kit.StyleThinking.Render("▾")
+	headerLine := "  " + triangle + " " + kit.StyleThinking.Italic(true).Render(label)
 	result := []string{headerLine}
 
 	rawLines := e.thinkingLines
@@ -832,7 +812,7 @@ func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
 
 	// Render each chunk as markdown and collect all content lines, with a blank line between chunks.
 	// Prefix per line: "  " (2) + branch (4) + " " (1) = 7 visible chars.
-	mdWidth := maxInt(20, inner-7)
+	mdWidth := max(20, inner-7)
 	var contentLines []string
 	for i, chunk := range chunks {
 		rendered := strings.TrimSpace(renderMarkdown(chunk, mdWidth))
@@ -864,9 +844,9 @@ func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
 	for i, l := range contentLines {
 		var branch string
 		if i == lastNonBlank {
-			branch = styleThinking.Render("  └─")
+			branch = kit.StyleThinking.Render("  └─")
 		} else {
-			branch = styleThinking.Render("  │ ")
+			branch = kit.StyleThinking.Render("  │ ")
 		}
 		if strings.TrimSpace(l) == "" {
 			result = append(result, "  "+branch)
@@ -884,12 +864,12 @@ func (m *Model) renderThinkingBlock(e feedEntry, inner int) []string {
 
 func (m *Model) renderSystemBlock(t conversationTurn, inner int) []string {
 	age := relativeAge(t.timestamp.Format(time.RFC3339))
-	label := stylePending.Bold(true).Render("system")
+	label := kit.StylePending.Bold(true).Render("system")
 	ageStr := kit.StyleDim.Render(age)
 
 	labelW := runewidth.StringWidth(stripANSI(label))
 	ageW := runewidth.StringWidth(stripANSI(ageStr))
-	gap := maxInt(1, inner-labelW-ageW)
+	gap := max(1, inner-labelW-ageW)
 	headerLine := "  " + label + strings.Repeat(" ", gap) + ageStr
 
 	msg := strings.TrimSpace(renderMarkdown(t.text, inner-2))
@@ -908,15 +888,15 @@ func (m *Model) renderInputBar() string {
 	if feedback != "" {
 		switch m.feedbackKind {
 		case feedbackOK:
-			feedbackStyled = styleOK.Render(feedback)
+			feedbackStyled = kit.StyleOK.Render(feedback)
 		case feedbackErr:
-			feedbackStyled = styleErr.Render(feedback)
+			feedbackStyled = kit.StyleErr.Render(feedback)
 		default:
-			feedbackStyled = stylePending.Render(feedback)
+			feedbackStyled = kit.StylePending.Render(feedback)
 		}
 	}
 
-	avail := maxInt(12, m.width-2-runewidth.StringWidth(stripANSI(feedback))-2)
+	avail := max(12, m.width-2-runewidth.StringWidth(stripANSI(feedback))-2)
 	m.input.Width = avail
 	left := m.input.View()
 	line := left
@@ -964,14 +944,14 @@ func (m *Model) renderFooter() string {
 
 	leftW := runewidth.StringWidth(stripANSI(scrollLabel))
 	rightW := runewidth.StringWidth(stripANSI(hints))
-	gap := maxInt(1, m.width-2-leftW-rightW)
+	gap := max(1, m.width-2-leftW-rightW)
 
 	line := scrollLabel + strings.Repeat(" ", gap) + hints
 	return lipgloss.NewStyle().Width(m.width).MaxWidth(m.width).MaxHeight(1).Padding(0, 1).Render(line)
 }
 
 func (m *Model) spinner() string {
-	return spinnerFrames[m.spinFrame%len(spinnerFrames)]
+	return kit.SpinnerFrames[m.spinFrame%len(kit.SpinnerFrames)]
 }
 
 func (m *Model) totalFeedLines() int {
@@ -999,26 +979,6 @@ func stripANSI(s string) string {
 	return string(b)
 }
 
-func truncate(s string, max int) string {
-	if max <= 0 {
-		return ""
-	}
-	s = strings.TrimSpace(s)
-	if s == "" || runewidth.StringWidth(s) <= max {
-		return s
-	}
-	if max <= 1 {
-		return runewidth.Truncate(s, max, "")
-	}
-	return runewidth.Truncate(s, max-1, "") + "…"
-}
-
-func fallback(v, def string) string {
-	if strings.TrimSpace(v) == "" {
-		return def
-	}
-	return v
-}
 
 // stripLeadingVerb removes a leading verb word from text to avoid duplication
 // when the verb is rendered separately (e.g. "Write /path" with verb "Write" → "/path").
@@ -1052,11 +1012,7 @@ func isSuccessStatus(s string) bool {
 	return false
 }
 
-var (
-	styleDiffAdd = lipgloss.NewStyle().Foreground(lipgloss.Color("#98c379"))
-	styleDiffDel = lipgloss.NewStyle().Foreground(lipgloss.Color("#e06c75"))
-	styleDiffSep = lipgloss.NewStyle().Foreground(lipgloss.Color("#7aa2f7")).Faint(true)
-)
+var styleDiffSep = kit.StyleAccent.Copy().Faint(true)
 
 // renderDiffLines renders parsed diff lines with lipgloss colors.
 func renderDiffLines(patchPreview string, patchTruncated, patchRedacted bool, width int) []string {
@@ -1081,15 +1037,15 @@ func renderDiffLines(patchPreview string, patchTruncated, patchRedacted bool, wi
 		switch l.Kind {
 		case tui.DiffLineInsert:
 			no := fmt.Sprintf("%*d", noWidth, l.LineNo)
-			rendered = styleDiffAdd.Render("+ " + no + " │ " + truncate(l.Content, width-noWidth-6))
+			rendered = kit.StyleOK.Render("+ " + no + " │ " + kit.Truncate(l.Content, width-noWidth-6))
 		case tui.DiffLineDelete:
 			no := fmt.Sprintf("%*d", noWidth, l.LineNo)
-			rendered = styleDiffDel.Render("- " + no + " │ " + truncate(l.Content, width-noWidth-6))
+			rendered = kit.StyleErr.Render("- " + no + " │ " + kit.Truncate(l.Content, width-noWidth-6))
 		case tui.DiffLineSep:
 			rendered = styleDiffSep.Render("  ···")
 		default: // context
 			no := fmt.Sprintf("%*d", noWidth, l.LineNo)
-			rendered = kit.StyleDim.Render("  " + no + " │ " + truncate(l.Content, width-noWidth-6))
+			rendered = kit.StyleDim.Render("  " + no + " │ " + kit.Truncate(l.Content, width-noWidth-6))
 		}
 		out = append(out, "    "+rendered)
 	}
@@ -1128,35 +1084,6 @@ func isPathBasedOp(kind string) bool {
 	return false
 }
 
-func viewportSlice(content string, visibleLines, targetIdx int) string {
-	lines := strings.Split(content, "\n")
-	if visibleLines <= 0 {
-		visibleLines = 1
-	}
-	if len(lines) <= visibleLines {
-		return content
-	}
-	if targetIdx < 0 {
-		targetIdx = 0
-	}
-	if targetIdx >= len(lines) {
-		targetIdx = len(lines) - 1
-	}
-	start := targetIdx
-	end := start + visibleLines
-	if end > len(lines) {
-		end = len(lines)
-		start = maxInt(0, end-visibleLines)
-	}
-	return strings.Join(lines[start:end], "\n")
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
 
 func parseIntStr(s string) int {
 	s = strings.TrimSpace(s)
@@ -1184,7 +1111,7 @@ func relativeAge(raw string) string {
 	}
 	ts, ok := parseTime(raw)
 	if !ok {
-		return truncate(raw, 8)
+		return kit.Truncate(raw, 8)
 	}
 	d := time.Since(ts)
 	if d < 0 {

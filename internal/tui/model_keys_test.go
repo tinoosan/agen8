@@ -254,8 +254,8 @@ func TestReasoningEffortPicker_OpensOnReasoningEffortNoValue(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("expected no cmd (should open picker only), got %v", cmd)
 	}
-	if !updated.reasoningEffortPickerOpen {
-		t.Fatalf("expected reasoningEffortPickerOpen true")
+	if !updated.reasoningEffortPicker.Open {
+		t.Fatalf("expected reasoningEffortPicker.Open true")
 	}
 	if updated.turnInFlight {
 		t.Fatalf("expected turnInFlight false (should not submit)")
@@ -273,14 +273,14 @@ func TestReasoningEffortPicker_SelectRunsReasoningCommand(t *testing.T) {
 	m.single.SetValue("/reasoning-effort")
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	opened := m2.(Model)
-	if !opened.reasoningEffortPickerOpen {
+	if !opened.reasoningEffortPicker.Open {
 		t.Fatalf("expected picker open")
 	}
 
 	// Move selection down once from default "medium" -> "high".
 	m3, _ := opened.Update(tea.KeyMsg{Type: tea.KeyDown})
 	moved := m3.(Model)
-	if !moved.reasoningEffortPickerOpen {
+	if !moved.reasoningEffortPicker.Open {
 		t.Fatalf("expected picker still open")
 	}
 
@@ -292,7 +292,7 @@ func TestReasoningEffortPicker_SelectRunsReasoningCommand(t *testing.T) {
 	if cmd == nil {
 		t.Fatalf("expected cmd to run /reasoning effort <val>, got nil")
 	}
-	if afterSelect.reasoningEffortPickerOpen {
+	if afterSelect.reasoningEffortPicker.Open {
 		t.Fatalf("expected picker closed after selection")
 	}
 	if afterSelect.turnInFlight != beforeInFlight {
@@ -319,7 +319,7 @@ func TestReasoningEffortPicker_EscClosesWithoutRunning(t *testing.T) {
 	m.single.SetValue("/reasoning-effort")
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	opened := m2.(Model)
-	if !opened.reasoningEffortPickerOpen {
+	if !opened.reasoningEffortPicker.Open {
 		t.Fatalf("expected picker open")
 	}
 
@@ -328,7 +328,7 @@ func TestReasoningEffortPicker_EscClosesWithoutRunning(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("expected no cmd on esc, got %v", cmd)
 	}
-	if closed.reasoningEffortPickerOpen {
+	if closed.reasoningEffortPicker.Open {
 		t.Fatalf("expected picker closed after esc")
 	}
 	if runner.lastMessage != "" {
@@ -349,8 +349,8 @@ func TestReasoningSummaryPicker_OpensOnReasoningSummaryNoValue(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("expected no cmd (should open picker only), got %v", cmd)
 	}
-	if !updated.reasoningSummaryPickerOpen {
-		t.Fatalf("expected reasoningSummaryPickerOpen true")
+	if !updated.reasoningSummaryPicker.Open {
+		t.Fatalf("expected reasoningSummaryPicker.Open true")
 	}
 	if updated.turnInFlight {
 		t.Fatalf("expected turnInFlight false (should not submit)")
@@ -367,13 +367,13 @@ func TestReasoningSummaryPicker_SelectRunsReasoningSummaryCommand(t *testing.T) 
 	m.single.SetValue("/reasoning-summary")
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	opened := m2.(Model)
-	if !opened.reasoningSummaryPickerOpen {
+	if !opened.reasoningSummaryPicker.Open {
 		t.Fatalf("expected picker open")
 	}
 
 	m3, _ := opened.Update(tea.KeyMsg{Type: tea.KeyDown})
 	moved := m3.(Model)
-	if !moved.reasoningSummaryPickerOpen {
+	if !moved.reasoningSummaryPicker.Open {
 		t.Fatalf("expected picker still open")
 	}
 
@@ -384,7 +384,7 @@ func TestReasoningSummaryPicker_SelectRunsReasoningSummaryCommand(t *testing.T) 
 	if cmd == nil {
 		t.Fatalf("expected cmd to run /reasoning summary <val>, got nil")
 	}
-	if afterSelect.reasoningSummaryPickerOpen {
+	if afterSelect.reasoningSummaryPicker.Open {
 		t.Fatalf("expected picker closed after selection")
 	}
 	if afterSelect.turnInFlight != beforeInFlight {
@@ -410,7 +410,7 @@ func TestReasoningSummaryPicker_EscClosesWithoutRunning(t *testing.T) {
 	m.single.SetValue("/reasoning-summary")
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	opened := m2.(Model)
-	if !opened.reasoningSummaryPickerOpen {
+	if !opened.reasoningSummaryPicker.Open {
 		t.Fatalf("expected picker open")
 	}
 
@@ -419,7 +419,7 @@ func TestReasoningSummaryPicker_EscClosesWithoutRunning(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("expected no cmd on esc, got %v", cmd)
 	}
-	if closed.reasoningSummaryPickerOpen {
+	if closed.reasoningSummaryPicker.Open {
 		t.Fatalf("expected picker closed after esc")
 	}
 	if runner.lastMessage != "" {
@@ -724,7 +724,7 @@ func TestLayout_WithCommandPalette_ViewNeverExceedsTerminalBounds(t *testing.T) 
 	// Open palette by typing "/".
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	updated := m2.(Model)
-	if !updated.commandPaletteOpen {
+	if !updated.commandPalette.Open {
 		t.Fatalf("expected commandPaletteOpen true")
 	}
 
@@ -792,10 +792,10 @@ func TestCommandPalette_OpensOnSlashPrefix(t *testing.T) {
 	// Type "/" - palette should open.
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	updated := m2.(Model)
-	if !updated.commandPaletteOpen {
+	if !updated.commandPalette.Open {
 		t.Fatalf("expected commandPaletteOpen true after typing '/'")
 	}
-	if len(updated.commandPaletteMatches) == 0 {
+	if len(updated.commandPalette.Matches) == 0 {
 		t.Fatalf("expected commandPaletteMatches to have items")
 	}
 }
@@ -812,18 +812,18 @@ func TestCommandPalette_FiltersOnTyping(t *testing.T) {
 	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
 	updated3 := m4.(Model)
 
-	if !updated3.commandPaletteOpen {
+	if !updated3.commandPalette.Open {
 		t.Fatalf("expected commandPaletteOpen true after typing '/mo'")
 	}
 	found := false
-	for _, match := range updated3.commandPaletteMatches {
+	for _, match := range updated3.commandPalette.Matches {
 		if match == "/model" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected '/model' in matches, got %v", updated3.commandPaletteMatches)
+		t.Fatalf("expected '/model' in matches, got %v", updated3.commandPalette.Matches)
 	}
 }
 
@@ -835,25 +835,25 @@ func TestCommandPalette_UpDownNavigation(t *testing.T) {
 	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	updated := m2.(Model)
 
-	if !updated.commandPaletteOpen {
+	if !updated.commandPalette.Open {
 		t.Fatalf("expected commandPaletteOpen true")
 	}
-	if len(updated.commandPaletteMatches) < 2 {
-		t.Fatalf("expected at least 2 matches, got %d", len(updated.commandPaletteMatches))
+	if len(updated.commandPalette.Matches) < 2 {
+		t.Fatalf("expected at least 2 matches, got %d", len(updated.commandPalette.Matches))
 	}
 
 	// Press Down - should move selection.
 	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated2 := m3.(Model)
-	if updated2.commandPaletteSelected != 1 {
-		t.Fatalf("expected selected index 1 after Down, got %d", updated2.commandPaletteSelected)
+	if updated2.commandPalette.Selected != 1 {
+		t.Fatalf("expected selected index 1 after Down, got %d", updated2.commandPalette.Selected)
 	}
 
 	// Press Up - should move back.
 	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyUp})
 	updated3 := m4.(Model)
-	if updated3.commandPaletteSelected != 0 {
-		t.Fatalf("expected selected index 0 after Up, got %d", updated3.commandPaletteSelected)
+	if updated3.commandPalette.Selected != 0 {
+		t.Fatalf("expected selected index 0 after Up, got %d", updated3.commandPalette.Selected)
 	}
 }
 
@@ -867,7 +867,7 @@ func TestCommandPalette_EscClosesPalette(t *testing.T) {
 	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
 	updated2 := m3.(Model)
 
-	if !updated2.commandPaletteOpen {
+	if !updated2.commandPalette.Open {
 		t.Fatalf("expected commandPaletteOpen true")
 	}
 
@@ -875,7 +875,7 @@ func TestCommandPalette_EscClosesPalette(t *testing.T) {
 	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	updated3 := m4.(Model)
 
-	if updated3.commandPaletteOpen {
+	if updated3.commandPalette.Open {
 		t.Fatalf("expected commandPaletteOpen false after Esc")
 	}
 	if updated3.single.Value() != "/m" {
@@ -912,7 +912,7 @@ func TestCommandPalette_PreservesTrailingArgs(t *testing.T) {
 	m9, cmd := updated7.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated8 := m9.(Model)
 
-	if updated8.commandPaletteOpen {
+	if updated8.commandPalette.Open {
 		t.Fatalf("expected commandPaletteOpen false after Enter")
 	}
 	if cmd == nil {
@@ -942,11 +942,11 @@ func TestCommandPalette_EnterInsertsArgCommandsWithoutSubmitting(t *testing.T) {
 	m3, _ := updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
 	updated2 := m3.(Model)
 
-	if !updated2.commandPaletteOpen {
+	if !updated2.commandPalette.Open {
 		t.Fatalf("expected commandPaletteOpen true after typing '/c'")
 	}
-	if len(updated2.commandPaletteMatches) < 2 {
-		t.Fatalf("expected at least 2 matches for '/c', got %d", len(updated2.commandPaletteMatches))
+	if len(updated2.commandPalette.Matches) < 2 {
+		t.Fatalf("expected at least 2 matches for '/c', got %d", len(updated2.commandPalette.Matches))
 	}
 
 	// Move selection from /copy to /cd.
@@ -957,7 +957,7 @@ func TestCommandPalette_EnterInsertsArgCommandsWithoutSubmitting(t *testing.T) {
 	m5, cmd := updated3.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated4 := m5.(Model)
 
-	if updated4.commandPaletteOpen {
+	if updated4.commandPalette.Open {
 		t.Fatalf("expected commandPaletteOpen false after Enter")
 	}
 	if cmd != nil {
@@ -987,7 +987,7 @@ func TestCommandPalette_EnterInvokesPickerCommand_WhenNoArgs(t *testing.T) {
 	m4, _ := updated2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
 	updated3 := m4.(Model)
 
-	if !updated3.commandPaletteOpen {
+	if !updated3.commandPalette.Open {
 		t.Fatalf("expected commandPaletteOpen true after typing '/mo'")
 	}
 
@@ -995,7 +995,7 @@ func TestCommandPalette_EnterInvokesPickerCommand_WhenNoArgs(t *testing.T) {
 	m5, cmd := updated3.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated4 := m5.(Model)
 
-	if updated4.commandPaletteOpen {
+	if updated4.commandPalette.Open {
 		t.Fatalf("expected commandPaletteOpen false after Enter")
 	}
 	if cmd != nil {

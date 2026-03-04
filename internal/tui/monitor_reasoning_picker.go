@@ -15,118 +15,76 @@ var monitorReasoningSummaryOptions = []string{"off", "auto", "concise", "detaile
 func (m *monitorModel) openReasoningEffortPicker() {
 	m.closeHelpModal()
 	m.closeAllPickers()
-	m.reasoningEffortPickerOpen = true
-	sel := 3 // default to medium
-	cur := strings.ToLower(strings.TrimSpace(m.reasoningEffort))
-	for i, opt := range monitorReasoningEffortOptions {
-		if strings.EqualFold(opt, cur) {
-			sel = i
-			break
-		}
-	}
-	m.reasoningEffortPickerSelected = sel
+	m.reasoningEffortPicker.Options = monitorReasoningEffortOptions
+	m.reasoningEffortPicker.OpenAt(m.reasoningEffort, 3) // default: medium
 }
 
 // closeReasoningEffortPicker closes the reasoning effort picker.
 func (m *monitorModel) closeReasoningEffortPicker() {
-	m.reasoningEffortPickerOpen = false
-	m.reasoningEffortPickerSelected = 0
+	m.reasoningEffortPicker.Close()
 }
 
 // updateReasoningEffortPicker handles input when the effort picker is open.
 func (m *monitorModel) updateReasoningEffortPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "escape":
-		m.closeReasoningEffortPicker()
-		return m, nil
-	case "enter":
+	handled, confirmed := m.reasoningEffortPicker.HandleKey(msg.String())
+	if confirmed {
 		return m, m.selectReasoningEffort()
-	case "up", "k":
-		if m.reasoningEffortPickerSelected > 0 {
-			m.reasoningEffortPickerSelected--
-		}
-		return m, nil
-	case "down", "j":
-		if m.reasoningEffortPickerSelected < len(monitorReasoningEffortOptions)-1 {
-			m.reasoningEffortPickerSelected++
-		}
-		return m, nil
 	}
+	_ = handled
 	return m, nil
 }
 
 // selectReasoningEffort selects the current option and writes control file.
 func (m *monitorModel) selectReasoningEffort() tea.Cmd {
-	if m.reasoningEffortPickerSelected < 0 || m.reasoningEffortPickerSelected >= len(monitorReasoningEffortOptions) {
-		m.reasoningEffortPickerSelected = 0
+	val := m.reasoningEffortPicker.CurrentValue()
+	if val == "" {
+		val = monitorReasoningEffortOptions[0]
 	}
-	val := monitorReasoningEffortOptions[m.reasoningEffortPickerSelected]
 	m.closeReasoningEffortPicker()
 	m.reasoningEffort = val
 	return m.writeControl("set_reasoning", map[string]any{"effort": val})
 }
 
 func (m *monitorModel) renderReasoningEffortPicker(base string) string {
-	return m.renderOptionsPicker(base, "Reasoning Effort", monitorReasoningEffortOptions, m.reasoningEffortPickerSelected)
+	return m.renderOptionsPicker(base, "Reasoning Effort", monitorReasoningEffortOptions, m.reasoningEffortPicker.Selected)
 }
 
 // openReasoningSummaryPicker opens the reasoning summary picker.
 func (m *monitorModel) openReasoningSummaryPicker() {
 	m.closeHelpModal()
 	m.closeAllPickers()
-	m.reasoningSummaryPickerOpen = true
-	sel := 1 // default to auto
-	cur := strings.ToLower(strings.TrimSpace(m.reasoningSummary))
-	for i, opt := range monitorReasoningSummaryOptions {
-		if strings.EqualFold(opt, cur) {
-			sel = i
-			break
-		}
-	}
-	m.reasoningSummaryPickerSelected = sel
+	m.reasoningSummaryPicker.Options = monitorReasoningSummaryOptions
+	m.reasoningSummaryPicker.OpenAt(m.reasoningSummary, 1) // default: auto
 }
 
 // closeReasoningSummaryPicker closes the reasoning summary picker.
 func (m *monitorModel) closeReasoningSummaryPicker() {
-	m.reasoningSummaryPickerOpen = false
-	m.reasoningSummaryPickerSelected = 0
+	m.reasoningSummaryPicker.Close()
 }
 
 // updateReasoningSummaryPicker handles input when the summary picker is open.
 func (m *monitorModel) updateReasoningSummaryPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "escape":
-		m.closeReasoningSummaryPicker()
-		return m, nil
-	case "enter":
+	handled, confirmed := m.reasoningSummaryPicker.HandleKey(msg.String())
+	if confirmed {
 		return m, m.selectReasoningSummary()
-	case "up", "k":
-		if m.reasoningSummaryPickerSelected > 0 {
-			m.reasoningSummaryPickerSelected--
-		}
-		return m, nil
-	case "down", "j":
-		if m.reasoningSummaryPickerSelected < len(monitorReasoningSummaryOptions)-1 {
-			m.reasoningSummaryPickerSelected++
-		}
-		return m, nil
 	}
+	_ = handled
 	return m, nil
 }
 
 // selectReasoningSummary selects the current option and writes control file.
 func (m *monitorModel) selectReasoningSummary() tea.Cmd {
-	if m.reasoningSummaryPickerSelected < 0 || m.reasoningSummaryPickerSelected >= len(monitorReasoningSummaryOptions) {
-		m.reasoningSummaryPickerSelected = 0
+	val := m.reasoningSummaryPicker.CurrentValue()
+	if val == "" {
+		val = monitorReasoningSummaryOptions[0]
 	}
-	val := monitorReasoningSummaryOptions[m.reasoningSummaryPickerSelected]
 	m.closeReasoningSummaryPicker()
 	m.reasoningSummary = val
 	return m.writeControl("set_reasoning", map[string]any{"summary": val})
 }
 
 func (m *monitorModel) renderReasoningSummaryPicker(base string) string {
-	return m.renderOptionsPicker(base, "Reasoning Summary", monitorReasoningSummaryOptions, m.reasoningSummaryPickerSelected)
+	return m.renderOptionsPicker(base, "Reasoning Summary", monitorReasoningSummaryOptions, m.reasoningSummaryPicker.Selected)
 }
 
 // renderOptionsPicker renders a simple options picker modal.

@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/tui/adapter"
+	"github.com/tinoosan/agen8/internal/tui/kit"
 	"github.com/tinoosan/agen8/internal/tui/modelpicker"
 	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 	"github.com/tinoosan/agen8/pkg/types"
@@ -51,12 +52,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.input.Width = maxInt(12, m.width-30)
+		m.input.Width = max(12, m.width-30)
 		m.modelPicker.SetSize(m.width, m.height)
 		return m, nil
 
 	case animTickMsg:
-		m.spinFrame = (m.spinFrame + 1) % len(spinnerFrames)
+		m.spinFrame = (m.spinFrame + 1) % len(kit.SpinnerFrames)
 		return m, animTickCmd()
 
 	case tickMsg:
@@ -242,7 +243,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down":
 			if strings.TrimSpace(m.input.Value()) == "" {
 				m.feedScroll++
-				maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+				maxScroll := max(0, m.totalFeedLines()-m.feedHeight())
 				if m.feedScroll >= maxScroll {
 					m.liveFollow = true
 					m.feedScroll = maxScroll
@@ -251,14 +252,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "pgup", "shift+up", "ctrl+u":
 			m.liveFollow = false
-			m.feedScroll -= maxInt(1, m.feedHeight()/2)
+			m.feedScroll -= max(1, m.feedHeight()/2)
 			if m.feedScroll < 0 {
 				m.feedScroll = 0
 			}
 			return m, nil
 		case "pgdown", "shift+down", "ctrl+d":
-			m.feedScroll += maxInt(1, m.feedHeight()/2)
-			maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+			m.feedScroll += max(1, m.feedHeight()/2)
+			maxScroll := max(0, m.totalFeedLines()-m.feedHeight())
 			if m.feedScroll >= maxScroll {
 				m.liveFollow = true
 				m.feedScroll = maxScroll
@@ -292,7 +293,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle inline diff display.
 			m.hideDiffs = !m.hideDiffs
 			m.feedGen++
-			maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+			maxScroll := max(0, m.totalFeedLines()-m.feedHeight())
 			if m.feedScroll > maxScroll {
 				m.feedScroll = maxScroll
 			}
@@ -326,7 +327,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		} else if msg.Type == tea.MouseWheelDown {
 			m.feedScroll += 1
-			maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+			maxScroll := max(0, m.totalFeedLines()-m.feedHeight())
 			if m.feedScroll >= maxScroll {
 				m.liveFollow = true
 				m.feedScroll = maxScroll
@@ -358,7 +359,7 @@ func (m *Model) handleSlash(line string) tea.Cmd {
 	case "/diffs":
 		m.hideDiffs = !m.hideDiffs
 		m.feedGen++
-		maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+		maxScroll := max(0, m.totalFeedLines()-m.feedHeight())
 		if m.feedScroll > maxScroll {
 			m.feedScroll = maxScroll
 		}
@@ -450,7 +451,7 @@ func (m *Model) upsertFeedEntry(e feedEntry) {
 		if newLines > oldLines {
 			m.feedScroll += (newLines - oldLines)
 		}
-		maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+		maxScroll := max(0, m.totalFeedLines()-m.feedHeight())
 		if m.feedScroll > maxScroll {
 			m.feedScroll = maxScroll
 		}
@@ -503,7 +504,7 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 		if newLines > oldLines {
 			m.feedScroll += (newLines - oldLines)
 		}
-		maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+		maxScroll := max(0, m.totalFeedLines()-m.feedHeight())
 		if m.feedScroll > maxScroll {
 			m.feedScroll = maxScroll
 		}
@@ -602,7 +603,7 @@ func (m *Model) processThinkingEvents(events []types.EventRecord) {
 		if newLines > oldLines {
 			m.feedScroll += (newLines - oldLines)
 		}
-		maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+		maxScroll := max(0, m.totalFeedLines()-m.feedHeight())
 		if m.feedScroll > maxScroll {
 			m.feedScroll = maxScroll
 		}
@@ -654,7 +655,7 @@ func (m *Model) mergeThinkingEntries(entries []feedEntry) {
 		if newLines > oldLines {
 			m.feedScroll += (newLines - oldLines)
 		}
-		maxScroll := maxInt(0, m.totalFeedLines()-m.feedHeight())
+		maxScroll := max(0, m.totalFeedLines()-m.feedHeight())
 		if m.feedScroll > maxScroll {
 			m.feedScroll = maxScroll
 		}
@@ -663,7 +664,7 @@ func (m *Model) mergeThinkingEntries(entries []feedEntry) {
 
 func (m *Model) pinFeedToBottom() {
 	m.liveFollow = true
-	m.feedScroll = maxInt(0, m.totalFeedLines()-m.feedHeight())
+	m.feedScroll = max(0, m.totalFeedLines()-m.feedHeight())
 }
 
 func (m *Model) applyRecoveredScope(scope rpcscope.ScopeState) {

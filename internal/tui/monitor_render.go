@@ -51,10 +51,10 @@ func (m *monitorModel) View() string {
 	if m.modelPickerOpen {
 		return m.renderModelPicker(base)
 	}
-	if m.reasoningEffortPickerOpen {
+	if m.reasoningEffortPicker.Open {
 		return m.renderReasoningEffortPicker(base)
 	}
-	if m.reasoningSummaryPickerOpen {
+	if m.reasoningSummaryPicker.Open {
 		return m.renderReasoningSummaryPicker(base)
 	}
 	if m.filePickerOpen {

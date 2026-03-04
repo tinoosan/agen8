@@ -9,103 +9,26 @@ import (
 )
 
 // updateCommandPalette updates the command palette state based on the current input value.
-// It detects if the input starts with "/" and filters commands accordingly.
 func (m *monitorModel) updateCommandPalette() {
 	inputValue := m.input.Value()
-
-	// Extract the first token (command part) from the input.
-	fields := strings.Fields(inputValue)
-	var firstToken string
-	if len(fields) > 0 {
-		firstToken = fields[0]
-	} else {
-		// Empty input or only whitespace - use the raw value.
-		firstToken = strings.TrimSpace(inputValue)
-	}
-
-	// Check if we're in command mode (starts with "/").
-	if strings.HasPrefix(firstToken, "/") {
-		// If the user has already completed a valid command token and is now typing
-		// arguments (i.e. there is whitespace after the first token), keep the palette closed.
-		if isExactMonitorCommand(firstToken) && strings.ContainsAny(inputValue, " \t\n") {
-			m.commandPaletteOpen = false
-			m.commandPaletteMatches = nil
-			m.commandPaletteSelected = 0
-			return
-		}
-
-		// Filter commands that match the typed prefix.
-		matches := []string{}
-		for _, cmd := range monitorAvailableCommands {
-			if strings.HasPrefix(cmd, firstToken) {
-				matches = append(matches, cmd)
-			}
-		}
-
-		if len(matches) > 0 {
-			m.commandPaletteOpen = true
-			m.commandPaletteMatches = matches
-			// Ensure selected index is valid.
-			if m.commandPaletteSelected >= len(matches) {
-				m.commandPaletteSelected = 0
-			}
-			if m.commandPaletteSelected < 0 {
-				m.commandPaletteSelected = 0
-			}
-		} else {
-			// No matches, close palette.
-			m.commandPaletteOpen = false
-			m.commandPaletteMatches = nil
-			m.commandPaletteSelected = 0
-		}
-	} else {
-		// Not in command mode, close palette.
-		m.commandPaletteOpen = false
-		m.commandPaletteMatches = nil
-		m.commandPaletteSelected = 0
-	}
+	m.commandPalette.Update(inputValue, monitorAvailableCommands, isExactMonitorCommand)
 }
 
 // autocompleteCommand replaces the first token in the input with the selected command,
 // preserving any trailing arguments.
 func (m *monitorModel) autocompleteCommand() {
-	if !m.commandPaletteOpen || len(m.commandPaletteMatches) == 0 {
+	newValue, ok := m.commandPalette.Autocomplete(m.input.Value(), true)
+	if !ok {
 		return
 	}
-	if m.commandPaletteSelected < 0 || m.commandPaletteSelected >= len(m.commandPaletteMatches) {
-		return
-	}
-
-	selectedCmd := m.commandPaletteMatches[m.commandPaletteSelected]
-	inputValue := m.input.Value()
-
-	// Extract the first token and any trailing args.
-	fields := strings.Fields(inputValue)
-	if len(fields) == 0 {
-		// Empty input, just set the command.
-		m.input.SetValue(selectedCmd + " ")
-	} else {
-		// Replace first token with selected command, preserve rest.
-		rest := strings.TrimSpace(strings.TrimPrefix(inputValue, fields[0]))
-		newValue := selectedCmd
-		if rest != "" {
-			newValue = selectedCmd + " " + rest
-		} else {
-			newValue = selectedCmd + " "
-		}
-		m.input.SetValue(newValue)
-	}
-
-	// Close palette after autocomplete.
-	m.commandPaletteOpen = false
-	m.commandPaletteMatches = nil
-	m.commandPaletteSelected = 0
+	m.input.SetValue(newValue)
+	m.commandPalette.Reset()
 }
 
 // handleCommandPaletteKey processes keyboard events when the command palette is showing.
 // Returns (cmd, consumed) where cmd can be non-nil for immediate-invoke commands.
 func (m *monitorModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Cmd, bool) {
-	if !m.commandPaletteOpen {
+	if !m.commandPalette.Open {
 		return nil, false
 	}
 
@@ -114,24 +37,20 @@ func (m *monitorModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		m.autocompleteCommand()
 		return nil, true
 	case "up", "ctrl+p":
-		if m.commandPaletteSelected > 0 {
-			m.commandPaletteSelected--
-		}
+		m.commandPalette.Navigate(-1)
 		return nil, true
 	case "down", "ctrl+n":
-		if m.commandPaletteSelected < len(m.commandPaletteMatches)-1 {
-			m.commandPaletteSelected++
-		}
+		m.commandPalette.Navigate(1)
 		return nil, true
 	case "enter":
-		if len(m.commandPaletteMatches) == 0 {
+		if len(m.commandPalette.Matches) == 0 {
 			return nil, true
 		}
-		selected := m.commandPaletteSelected
-		if selected < 0 || selected >= len(m.commandPaletteMatches) {
+		selected := m.commandPalette.Selected
+		if selected < 0 || selected >= len(m.commandPalette.Matches) {
 			selected = 0
 		}
-		selectedCmd := m.commandPaletteMatches[selected]
+		selectedCmd := m.commandPalette.Matches[selected]
 
 		// Determine whether the user already typed anything beyond the first token.
 		inputValue := strings.TrimSpace(m.input.Value())
@@ -144,21 +63,16 @@ func (m *monitorModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		hasRest := rest != ""
 
 		// If no args are present and the command is invokable, invoke immediately.
-		// Otherwise, just autocomplete so the user can continue typing (submit uses Ctrl+Enter).
 		if !hasRest && monitorCommandInvokesWithoutArgs(selectedCmd) {
 			m.input.SetValue("")
-			m.commandPaletteOpen = false
-			m.commandPaletteMatches = nil
-			m.commandPaletteSelected = 0
+			m.commandPalette.Reset()
 			return m.handleCommand(selectedCmd), true
 		}
 
 		m.autocompleteCommand()
 		return nil, true
 	case "esc", "escape":
-		m.commandPaletteOpen = false
-		m.commandPaletteMatches = nil
-		m.commandPaletteSelected = 0
+		m.commandPalette.Reset()
 		return nil, true
 	}
 	return nil, false
@@ -166,7 +80,7 @@ func (m *monitorModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 
 // renderCommandPalette renders the inline command palette if open.
 func (m *monitorModel) renderCommandPalette(contentW int) string {
-	if !m.commandPaletteOpen || len(m.commandPaletteMatches) == 0 {
+	if !m.commandPalette.Open || len(m.commandPalette.Matches) == 0 {
 		return ""
 	}
 
@@ -174,12 +88,12 @@ func (m *monitorModel) renderCommandPalette(contentW int) string {
 	outerW := max(20, contentW)
 	paletteW := max(1, outerW-4)
 
-	items := make([]kit.Item, len(m.commandPaletteMatches))
-	for i, cmd := range m.commandPaletteMatches {
+	items := make([]kit.Item, len(m.commandPalette.Matches))
+	for i, cmd := range m.commandPalette.Matches {
 		items[i] = monitorCommandPaletteItem{command: cmd}
 	}
 
-	selected := m.commandPaletteSelected
+	selected := m.commandPalette.Selected
 	if selected < 0 {
 		selected = 0
 	}

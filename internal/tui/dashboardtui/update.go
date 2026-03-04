@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/tui/adapter"
+	"github.com/tinoosan/agen8/internal/tui/kit"
 )
 
 type dashboardtuiReconnectNotificationMsg struct{}
@@ -19,7 +20,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		m.spinFrame = (m.spinFrame + 1) % len(spinnerFrames)
+		m.spinFrame = (m.spinFrame + 1) % len(kit.SpinnerFrames)
 		if m.notice != "" && time.Since(m.noticeAt) > 4*time.Second {
 			m.notice = ""
 		}
@@ -86,7 +87,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reviewerRole = msg.reviewerRole
 
 		if m.sel >= len(m.agents) {
-			m.sel = maxInt(0, len(m.agents)-1)
+			m.sel = max(0, len(m.agents)-1)
 		}
 		if len(m.agents) == 0 {
 			m.sel = 0

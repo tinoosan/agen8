@@ -2,6 +2,9 @@ package tui
 
 import (
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/agen8/internal/tui/kit"
 )
 
 type commandPaletteItem string
@@ -46,12 +49,11 @@ func isExactCommand(s string) bool {
 }
 
 // updateCommandPalette updates the command palette state based on the current input value.
-// It detects if the input starts with "/" and filters commands accordingly.
 func (m *Model) updateCommandPalette() {
-	prevOpen := m.commandPaletteOpen
+	prevOpen := m.commandPalette.Open
 	prevVisible := 0
 	if prevOpen {
-		prevVisible = min(len(m.commandPaletteMatches), 6)
+		prevVisible = min(len(m.commandPalette.Matches), 6)
 	}
 
 	var inputValue string
@@ -61,69 +63,14 @@ func (m *Model) updateCommandPalette() {
 		inputValue = m.single.Value()
 	}
 
-	// Extract the first token (command part) from the input.
-	fields := strings.Fields(inputValue)
-	var firstToken string
-	if len(fields) > 0 {
-		firstToken = fields[0]
-	} else {
-		// Empty input or only whitespace - use the raw value.
-		firstToken = strings.TrimSpace(inputValue)
-	}
+	changed := m.commandPalette.Update(inputValue, availableCommands, isExactCommand)
 
-	// Check if we're in command mode (starts with "/").
-	if strings.HasPrefix(firstToken, "/") {
-		// If the user has already completed a valid command token and is now typing
-		// arguments (i.e. there is whitespace after the first token), keep the palette closed.
-		if isExactCommand(firstToken) && strings.ContainsAny(inputValue, " \t\n") {
-			m.commandPaletteOpen = false
-			m.commandPaletteMatches = nil
-			m.commandPaletteSelected = 0
-			if prevOpen {
-				m.layout()
-			}
-			return
-		}
-
-		// Filter commands that match the typed prefix.
-		matches := []string{}
-		for _, cmd := range availableCommands {
-			if strings.HasPrefix(cmd, firstToken) {
-				matches = append(matches, cmd)
-			}
-		}
-
-		if len(matches) > 0 {
-			m.commandPaletteOpen = true
-			m.commandPaletteMatches = matches
-			// Ensure selected index is valid.
-			if m.commandPaletteSelected >= len(matches) {
-				m.commandPaletteSelected = 0
-			}
-			if m.commandPaletteSelected < 0 {
-				m.commandPaletteSelected = 0
-			}
-		} else {
-			// No matches, close palette.
-			m.commandPaletteOpen = false
-			m.commandPaletteMatches = nil
-			m.commandPaletteSelected = 0
-		}
-	} else {
-		// Not in command mode, close palette.
-		m.commandPaletteOpen = false
-		m.commandPaletteMatches = nil
-		m.commandPaletteSelected = 0
-	}
-
-	// If the palette visibility/height changed, recompute layout so total View height
-	// stays within the terminal bounds (avoids header/transcript clipping).
-	newOpen := m.commandPaletteOpen
+	newOpen := m.commandPalette.Open
 	newVisible := 0
 	if newOpen {
-		newVisible = min(len(m.commandPaletteMatches), 6)
+		newVisible = min(len(m.commandPalette.Matches), 6)
 	}
-	if prevOpen != newOpen || prevVisible != newVisible {
+	if changed || prevOpen != newOpen || prevVisible != newVisible {
 		m.layout()
 	}
 }
@@ -131,15 +78,6 @@ func (m *Model) updateCommandPalette() {
 // autocompleteCommand replaces the first token in the input with the selected command,
 // preserving any trailing arguments.
 func (m *Model) autocompleteCommand() {
-	if !m.commandPaletteOpen || len(m.commandPaletteMatches) == 0 {
-		return
-	}
-	if m.commandPaletteSelected < 0 || m.commandPaletteSelected >= len(m.commandPaletteMatches) {
-		return
-	}
-
-	selectedCmd := m.commandPaletteMatches[m.commandPaletteSelected]
-
 	var inputValue string
 	if m.isMulti {
 		inputValue = m.multiline.Value()
@@ -147,34 +85,66 @@ func (m *Model) autocompleteCommand() {
 		inputValue = m.single.Value()
 	}
 
-	// Extract the first token and any trailing args.
-	fields := strings.Fields(inputValue)
-	if len(fields) == 0 {
-		// Empty input, just set the command.
-		if m.isMulti {
-			m.multiline.SetValue(selectedCmd)
-		} else {
-			m.single.SetValue(selectedCmd)
-		}
-	} else {
-		// Replace first token with selected command, preserve rest.
-		rest := strings.TrimSpace(strings.TrimPrefix(inputValue, fields[0]))
-		newValue := selectedCmd
-		if rest != "" {
-			newValue = selectedCmd + " " + rest
-		}
-		if m.isMulti {
-			m.multiline.SetValue(newValue)
-		} else {
-			m.single.SetValue(newValue)
-		}
+	newValue, ok := m.commandPalette.Autocomplete(inputValue, false)
+	if !ok {
+		return
 	}
 
-	// Close palette after autocomplete.
-	m.commandPaletteOpen = false
-	m.commandPaletteMatches = nil
-	m.commandPaletteSelected = 0
+	if m.isMulti {
+		m.multiline.SetValue(newValue)
+	} else {
+		m.single.SetValue(newValue)
+	}
 
-	// Recompute layout so the transcript area expands again.
+	m.commandPalette.Reset()
 	m.layout()
+}
+
+// renderCommandPalette renders the inline command palette if open (for the chat model).
+// contentW is the pre-calculated content width (excluding border+padding).
+func (m *Model) renderCommandPalette(contentW int) string {
+	if !m.commandPalette.Open || len(m.commandPalette.Matches) == 0 {
+		return ""
+	}
+	if contentW < 1 {
+		contentW = 20
+	}
+	maxDisplay := 6
+
+	items := make([]kit.Item, len(m.commandPalette.Matches))
+	for i, cmd := range m.commandPalette.Matches {
+		items[i] = commandPaletteItem(cmd)
+	}
+
+	selected := m.commandPalette.Selected
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= len(items) {
+		selected = len(items) - 1
+	}
+
+	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6bbcff")).Bold(true)
+	unselectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#c0c0c0"))
+
+	opts := kit.SelectorOptions{
+		Width:         contentW,
+		MaxHeight:     maxDisplay,
+		SelectedIndex: selected,
+		ShowPrefix:    true,
+		Styles: kit.SelectorStyles{
+			SelectedTitle:   kit.CloneStyle(selectedStyle),
+			UnselectedTitle: kit.CloneStyle(unselectedStyle),
+		},
+	}
+
+	paletteContent := kit.RenderSelector(items, opts)
+
+	paletteStyle := lipgloss.NewStyle().
+		Width(contentW).
+		Padding(0, 1).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#404040"))
+
+	return paletteStyle.Render(paletteContent)
 }

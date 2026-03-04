@@ -9,24 +9,11 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
-// ── Color palette (Tokyo Night-ish) ────────────────────────────────────
-
 var (
-	colorOK      = lipgloss.Color("#98c379")
-	colorErr     = lipgloss.Color("#e06c75")
-	colorPending = lipgloss.Color("#e5c07b")
-	colorAccent  = lipgloss.Color("#7aa2f7")
-
-	styleOK      = lipgloss.NewStyle().Foreground(colorOK)
-	styleErr     = lipgloss.NewStyle().Foreground(colorErr)
-	stylePending = lipgloss.NewStyle().Foreground(colorPending)
-	styleAccent  = lipgloss.NewStyle().Foreground(colorAccent)
-
 	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#c8d3f5"))
 	styleDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("#5a6375"))
 	styleMeta   = lipgloss.NewStyle().Foreground(lipgloss.Color("#9da3b4"))
@@ -39,8 +26,6 @@ var (
 	mdByWidth  = map[int]*glamour.TermRenderer{}
 	mdFallback = lipgloss.NewStyle()
 )
-
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 const (
 	compactWidth = 60
@@ -84,18 +69,18 @@ func (m *Model) View() string {
 // ── Header ─────────────────────────────────────────────────────────────
 
 func (m *Model) renderHeader() string {
-	status := styleOK.Render("● connected")
+	status := kit.StyleOK.Render("● connected")
 	if !m.connected {
-		status = styleErr.Render("● disconnected")
+		status = kit.StyleErr.Render("● disconnected")
 	}
 
 	if m.isNarrow() {
 		left := styleHeader.Render("activity") + styleDim.Render(" · ") + status
 		if m.lastErr != "" {
-			left += styleDim.Render(" · ") + styleErr.Render("err: "+truncate(m.lastErr, 20))
+			left += styleDim.Render(" · ") + kit.StyleErr.Render("err: "+kit.Truncate(m.lastErr, 20))
 		}
 		if m.notice != "" {
-			left += styleDim.Render(" · ") + stylePending.Render(truncate(m.notice, 18))
+			left += styleDim.Render(" · ") + kit.StylePending.Render(kit.Truncate(m.notice, 18))
 		}
 		return lipgloss.NewStyle().
 			Width(m.width).MaxWidth(m.width).MaxHeight(1).
@@ -117,15 +102,15 @@ func (m *Model) renderHeader() string {
 		sid = "-"
 	}
 	left := styleHeader.Render("agen8 activity") +
-		styleDim.Render("  ·  session: ") + styleAccent.Render(sid) +
+		styleDim.Render("  ·  session: ") + kit.StyleAccent.Render(sid) +
 		styleDim.Render("  ·  ") + status +
 		styleDim.Render("  ·  ") + styleMeta.Render(count)
 
 	if m.lastErr != "" {
-		left += styleDim.Render("  ·  ") + styleErr.Render("err: "+truncate(m.lastErr, 40))
+		left += styleDim.Render("  ·  ") + kit.StyleErr.Render("err: "+kit.Truncate(m.lastErr, 40))
 	}
 	if m.notice != "" {
-		left += styleDim.Render("  ·  ") + stylePending.Render(truncate(m.notice, 28))
+		left += styleDim.Render("  ·  ") + kit.StylePending.Render(kit.Truncate(m.notice, 28))
 	}
 
 	return lipgloss.NewStyle().
@@ -173,7 +158,7 @@ func (m *Model) renderBody(height int) string {
 	if len(m.activities) == 0 {
 		empty := styleDim.Render("  No activities yet. Waiting for agent ops…")
 		if m.lastErr != "" {
-			empty = styleErr.Render("  " + m.lastErr)
+			empty = kit.StyleErr.Render("  " + m.lastErr)
 		}
 		return lipgloss.NewStyle().Width(m.width).Height(height).Render(empty)
 	}
@@ -194,13 +179,13 @@ func (m *Model) renderListPanel(width, height int) string {
 		if anchor < 0 {
 			anchor = 0
 		}
-		content = viewportSlice(content, height, anchor)
+		content = kit.ViewportSlice(content, height, anchor)
 	} else {
 		startLine := m.sel
 		if startLine+height > len(lines) {
-			startLine = maxInt(0, len(lines)-height)
+			startLine = max(0, len(lines)-height)
 		}
-		content = viewportSlice(content, height, startLine)
+		content = kit.ViewportSlice(content, height, startLine)
 	}
 	return lipgloss.NewStyle().Width(width).Height(height).Render(content)
 }
@@ -217,7 +202,7 @@ func (m *Model) buildListLines(width int) []string {
 		// Build: marker status timestamp [role] emoji tool_name activity
 		marker := "  "
 		if isSel {
-			marker = styleAccent.Render("› ")
+			marker = kit.StyleAccent.Render("› ")
 		}
 
 		statusIcon := m.statusIcon(act)
@@ -245,12 +230,12 @@ func (m *Model) buildListLines(width int) []string {
 		title := actTitle(act)
 		// Calculate remaining width for title truncation
 		fixedW := 2 + 2 + 9 + len(kind) + 4 // marker + status + timestamp + kind + spacing
-		availW := maxInt(10, width-fixedW)
-		title = truncate(title, availW)
+		availW := max(10, width-fixedW)
+		title = kit.Truncate(title, availW)
 
 		var line string
 		if isSel {
-			line = marker + statusIcon + " " + ts + role + icon + " " + styleAccent.Render(kind) + " " + styleSelRow.Render(title)
+			line = marker + statusIcon + " " + ts + role + icon + " " + kit.StyleAccent.Render(kind) + " " + styleSelRow.Render(title)
 		} else {
 			line = marker + statusIcon + " " + ts + role + icon + " " + styleMeta.Render(kind) + " " + styleUnselRow.Render(title)
 		}
@@ -263,12 +248,12 @@ func (m *Model) buildListLines(width int) []string {
 func (m *Model) statusIcon(act types.Activity) string {
 	switch act.Status {
 	case types.ActivityOK:
-		return styleOK.Render("✓")
+		return kit.StyleOK.Render("✓")
 	case types.ActivityError:
-		return styleErr.Render("✗")
+		return kit.StyleErr.Render("✗")
 	default:
-		frame := spinnerFrames[m.spinFrame%len(spinnerFrames)]
-		return stylePending.Render(frame)
+		frame := kit.SpinnerFrames[m.spinFrame%len(kit.SpinnerFrames)]
+		return kit.StylePending.Render(frame)
 	}
 }
 
@@ -282,9 +267,9 @@ func (m *Model) renderDetailHeader() string {
 		kind = "op"
 	}
 	title := actTitle(act)
-	title = truncate(title, maxInt(10, m.width-len(kind)-10))
+	title = kit.Truncate(title, max(10, m.width-len(kind)-10))
 
-	left := styleAccent.Render(icon+" "+kind) + styleDim.Render(" · ") + styleHeader.Render(title)
+	left := kit.StyleAccent.Render(icon+" "+kind) + styleDim.Render(" · ") + styleHeader.Render(title)
 
 	return lipgloss.NewStyle().
 		Width(m.width).MaxWidth(m.width).MaxHeight(1).
@@ -307,13 +292,13 @@ func (m *Model) renderDetailFooter() string {
 
 func (m *Model) renderDetailView(width, height int) string {
 	act := m.activities[m.sel]
-	innerW := maxInt(10, width-2)
+	innerW := max(10, width-2)
 
 	md := renderActivityDetailMD(act)
 	rendered := renderMarkdown(md, innerW)
 
 	// Apply viewport scroll
-	rendered = viewportSlice(rendered, height, m.detailScroll)
+	rendered = kit.ViewportSlice(rendered, height, m.detailScroll)
 
 	return lipgloss.NewStyle().
 		Width(width).
@@ -466,50 +451,6 @@ func actTitle(a types.Activity) string {
 	return kind
 }
 
-func truncate(s string, max int) string {
-	if max <= 0 {
-		return ""
-	}
-	s = strings.TrimSpace(s)
-	if s == "" || runewidth.StringWidth(s) <= max {
-		return s
-	}
-	if max <= 3 {
-		return runewidth.Truncate(s, max, "")
-	}
-	return runewidth.Truncate(s, max-1, "") + "…"
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-// viewportSlice returns a window of visibleLines starting from targetIdx (top-anchored).
-func viewportSlice(content string, visibleLines, targetIdx int) string {
-	lines := strings.Split(content, "\n")
-	if visibleLines <= 0 {
-		visibleLines = 1
-	}
-	if len(lines) <= visibleLines {
-		return content
-	}
-	if targetIdx < 0 {
-		targetIdx = 0
-	}
-	if targetIdx >= len(lines) {
-		targetIdx = len(lines) - 1
-	}
-	start := targetIdx
-	end := start + visibleLines
-	if end > len(lines) {
-		end = len(lines)
-		start = maxInt(0, end-visibleLines)
-	}
-	return strings.Join(lines[start:end], "\n")
-}
 
 func renderMarkdown(md string, width int) string {
 	md = strings.TrimSpace(md)

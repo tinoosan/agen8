@@ -240,22 +240,16 @@ func outputLineStyle(line string) lipgloss.Style {
 		}
 	}
 	switch eventType {
-	case "error", "daemon.error", "daemon.runner.error":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))
-	case "agent.error":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))
-	case "task.done", "task.delivered":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950"))
+	case "error", "daemon.error", "daemon.runner.error", "agent.error", "task.quarantined":
+		return kit.StyleErr
+	case "task.done", "task.delivered", "agent.turn.complete":
+		return kit.StyleOK
 	case "task.start", "task.queued":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#6bbcff"))
+		return kit.StyleAccent
 	case "control", "control.check", "control.success", "control.error":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#d29922"))
-	case "agent.turn.complete":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#3fb950"))
+		return kit.StylePending
 	case "daemon.start", "daemon.stop", "daemon.control", "daemon.warning", "run.start":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#a371f7"))
-	case "task.quarantined":
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))
+		return kit.StyleThinking
 	default:
 		return kit.StyleDim
 	}
@@ -369,9 +363,9 @@ func (m *monitorModel) renderAgentOutputItemLogicalLines(item AgentOutputItem, w
 		return out
 
 	} else if item.Type == "error" {
-		style = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff5f5f"))
+		style = kit.StyleErr
 	} else if item.Type == "user" {
-		style = kit.StyleBold.Foreground(lipgloss.Color("#6bbcff"))
+		style = kit.StyleBold.Foreground(kit.ColorAccent)
 		prefix = fmt.Sprintf("[%s] ", item.Timestamp.Local().Format("15:04:05"))
 	} else if item.Type == "tool_call" || item.Type == "tool_result" {
 		prefix = fmt.Sprintf("[%s] ", item.Timestamp.Local().Format("15:04:05"))
