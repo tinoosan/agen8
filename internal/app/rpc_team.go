@@ -75,6 +75,31 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 		runIDSet[runID] = struct{}{}
 	}
 	manifestRoster := len(runIDSet) > 0
+	if manifestRoster {
+		for _, runID := range manifestRunIDs {
+			runID = strings.TrimSpace(runID)
+			if runID == "" {
+				continue
+			}
+			role := strings.TrimSpace(roleByRunID[runID])
+			if role == "" {
+				role = "(coordinator)"
+			}
+			if _, exists := roleInfo[role]; exists {
+				continue
+			}
+			info := "idle"
+			if s.session != nil {
+				if run, err := s.session.LoadRun(ctx, runID); err == nil {
+					status := strings.TrimSpace(run.Status)
+					if status != "" {
+						info = "run: " + status
+					}
+				}
+			}
+			roleInfo[role] = info
+		}
+	}
 	pendingTasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusPending}, SortBy: "created_at", SortDesc: false, Limit: 200})
 	activeTasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusActive}, SortBy: "updated_at", SortDesc: true, Limit: 200})
 	completedTasks, _ := s.taskService.ListTasks(ctx, state.TaskFilter{TeamID: teamID, Status: []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled}, SortBy: "finished_at", SortDesc: true, Limit: 500})

@@ -3878,6 +3878,13 @@ func TestRPCServer_TeamGetStatus_ManifestRosterIgnoresStaleTaskRuns(t *testing.T
 	if _, ok := out.RoleByRunID["run-legacy"]; ok {
 		t.Fatalf("stale run should not appear in role map: %+v", out.RoleByRunID)
 	}
+	roleInfo := map[string]string{}
+	for _, role := range out.Roles {
+		roleInfo[strings.TrimSpace(role.Role)] = strings.TrimSpace(role.Info)
+	}
+	if got := roleInfo["ux-researcher"]; got == "" {
+		t.Fatalf("expected manifest role ux-researcher to appear in team roles even without tasks; roles=%+v", out.Roles)
+	}
 }
 
 func TestRPCServer_TeamGetStatus_IncludesTokenBreakdown(t *testing.T) {
