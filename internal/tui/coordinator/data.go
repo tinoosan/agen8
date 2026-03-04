@@ -648,14 +648,22 @@ func isActivitySummaryWrite(kind string, text string) bool {
 	return strings.HasSuffix(strings.ToLower(p), "summary.md")
 }
 
-// planWriteRunID extracts the runID from the sourceID of the relevant plan write entries.
-// Activity sourceIDs are formatted as "runID|opID"; the runID prefix is the agent run that
-// performed the write, which is the correct target for plan.get in multi-agent mode.
+// planWriteRunID returns the runID of the agent that performed the relevant plan file write.
+// In team mode activity.list prefixes activity IDs with "runID:" (e.g. "ceo-run:ceo-run|op")
+// so parsing sourceID with SplitN("|") would yield "runID:runID" instead of "runID".
+// data["runId"] is always the clean, unprefixed run ID set by the activity store and is
+// never modified by the team-mode fetch path, so it is the reliable source.
 func planWriteRunID(entries []feedEntry, checklistIdx, headIdx int) string {
 	for _, idx := range []int{checklistIdx, headIdx} {
 		if idx < 0 {
 			continue
 		}
+		if entries[idx].data != nil {
+			if runID := strings.TrimSpace(entries[idx].data["runId"]); runID != "" {
+				return runID
+			}
+		}
+		// Fallback for entries without data["runId"] (e.g. legacy / non-DB paths).
 		sid := strings.TrimSpace(entries[idx].sourceID)
 		if parts := strings.SplitN(sid, "|", 2); len(parts) == 2 && strings.TrimSpace(parts[0]) != "" {
 			return strings.TrimSpace(parts[0])
