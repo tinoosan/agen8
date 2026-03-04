@@ -58,6 +58,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case animTickMsg:
 		m.spinFrame = (m.spinFrame + 1) % len(kit.SpinnerFrames)
+		m.flushPendingLiveEntries()
 		return m, animTickCmd()
 
 	case tickMsg:
@@ -105,9 +106,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if entry := activityToFeedEntry(act); entry != nil {
 			// Avoid showing the same summary twice: one task-response per sourceID (taskId).
 			if !entry.isTaskResponse || !m.feedAlreadyHasTaskResponse(entry.sourceID) {
-				// Use upsert so existing tool-op entries are not wiped on every streaming event.
-				m.upsertFeedEntry(*entry)
-				m.deriveAgentStatus()
+				m.pendingLiveEntries = append(m.pendingLiveEntries, *entry)
 			}
 		}
 		return m, adapter.WaitForNextNotificationCmd(msg.Ch, msg.ErrCh)
@@ -413,19 +412,55 @@ func (m *Model) feedAlreadyHasTaskResponse(sourceID string) bool {
 // Unlike mergeActivityEntries it does NOT wipe existing tool-op entries — it
 // either updates the entry in-place (matched by kind + sourceID) or appends it.
 func (m *Model) upsertFeedEntry(e feedEntry) {
+	oldLines := 0
+	if !m.liveFollow {
+		oldLines = m.totalFeedLines()
+	}
+	if !m.applyLiveFeedEntry(e) {
+		return
+	}
+	m.feedGen++
+	if m.liveFollow {
+		m.pinFeedToBottom()
+	} else {
+		newLines := m.totalFeedLines()
+		if newLines > oldLines {
+			m.feedScroll += (newLines - oldLines)
+		}
+		maxScroll := max(0, m.totalFeedLines()-m.feedHeight())
+		if m.feedScroll > maxScroll {
+			m.feedScroll = maxScroll
+		}
+	}
+}
+
+// applyLiveFeedEntry applies a live streaming entry in-place or appends it.
+// Bridge ops are absorbed into their parent code_exec entry at the data layer
+// so they never appear as independent feed entries.
+// Returns true only when the rendered output would change.
+func (m *Model) applyLiveFeedEntry(e feedEntry) bool {
 	normalizeFeedEntry(&e)
+
+	// Bridge ops are absorbed into their parent code_exec rather than
+	// being added as separate feed entries. This prevents role-mismatch
+	// flickering and enables live-ticking tool counters.
+	if isBridgeOp(e) {
+		if idx := m.findParentCodeExec(e); idx >= 0 {
+			old := m.feed[idx]
+			absorbBridgeOp(&m.feed[idx], e)
+			return feedEntryRenderChanged(old, m.feed[idx])
+		}
+	}
+
 	if key := strings.TrimSpace(e.identityKey); key != "" {
 		for i := range m.feed {
 			if strings.TrimSpace(m.feed[i].identityKey) == key {
 				changed := feedEntryRenderChanged(m.feed[i], e)
 				m.feed[i] = e
-				if changed {
-					m.feedGen++
-				}
 				sort.SliceStable(m.feed, func(a, b int) bool {
 					return m.feed[a].timestamp.Before(m.feed[b].timestamp)
 				})
-				return
+				return changed
 			}
 		}
 	}
@@ -434,22 +469,59 @@ func (m *Model) upsertFeedEntry(e feedEntry) {
 			if m.feed[i].kind == e.kind && strings.TrimSpace(m.feed[i].sourceID) == sid {
 				changed := feedEntryRenderChanged(m.feed[i], e)
 				m.feed[i] = e
-				if changed {
-					m.feedGen++
-				}
 				sort.SliceStable(m.feed, func(a, b int) bool {
 					return m.feed[a].timestamp.Before(m.feed[b].timestamp)
 				})
-				return
+				return changed
 			}
 		}
 	}
-	oldLines := m.totalFeedLines()
 	m.feed = append(m.feed, e)
-	m.feedGen++
 	sort.SliceStable(m.feed, func(i, j int) bool {
 		return m.feed[i].timestamp.Before(m.feed[j].timestamp)
 	})
+	return true
+}
+
+// findParentCodeExec returns the index of the most recent code_exec entry
+// in m.feed that temporally contains the given bridge op, or -1 if none.
+func (m *Model) findParentCodeExec(bridge feedEntry) int {
+	for i := len(m.feed) - 1; i >= 0; i-- {
+		e := m.feed[i]
+		if strings.ToLower(strings.TrimSpace(e.opKind)) != "code_exec" {
+			continue
+		}
+		if e.timestamp.After(bridge.timestamp) {
+			continue
+		}
+		if !e.finishedAt.IsZero() && bridge.timestamp.After(e.finishedAt) {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+func (m *Model) flushPendingLiveEntries() {
+	if len(m.pendingLiveEntries) == 0 {
+		return
+	}
+	oldLines := 0
+	if !m.liveFollow {
+		oldLines = m.totalFeedLines()
+	}
+	changed := false
+	for _, e := range m.pendingLiveEntries {
+		if m.applyLiveFeedEntry(e) {
+			changed = true
+		}
+	}
+	m.pendingLiveEntries = m.pendingLiveEntries[:0]
+	if !changed {
+		return
+	}
+	m.feedGen++
+	m.deriveAgentStatus()
 	if m.liveFollow {
 		m.pinFeedToBottom()
 	} else {
@@ -468,7 +540,10 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 	if len(entries) == 0 {
 		return
 	}
-	oldLines := m.totalFeedLines()
+	oldLines := 0
+	if !m.liveFollow {
+		oldLines = m.totalFeedLines()
+	}
 
 	// Keep thinking entries and agent text/task-response entries across polls so
 	// they are not dropped and re-added (which would bump feedGen and cause
@@ -741,6 +816,9 @@ func feedEntryRenderChanged(old, next feedEntry) bool {
 		return true
 	}
 	if old.childCount != next.childCount {
+		return true
+	}
+	if len(old.bridgeWriteOps) != len(next.bridgeWriteOps) {
 		return true
 	}
 	if old.planDetailsTitle != next.planDetailsTitle {

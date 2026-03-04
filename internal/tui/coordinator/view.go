@@ -211,7 +211,15 @@ func (m *Model) buildTurns() []conversationTurn {
 				})
 			}
 		case feedAgent:
-			role := kit.Fallback(e.role, "agent")
+			// If a non-text entry has no role (e.g. live-streamed bridge ops where
+			// the role name hasn't been populated yet), inherit the role from the
+			// currently-active agent turn so it doesn't cause a spurious flush and
+			// duplicate "agent" block that flickers until the poll corrects it.
+			role := strings.TrimSpace(e.role)
+			if role == "" && curAgent != nil && !curAgent.isText {
+				role = curAgent.role
+			}
+			role = kit.Fallback(role, "agent")
 
 			// Flush if role changes, or if we are switching between text and ops records.
 			// Also flush if both are text (to keep distinct text blocks separate).
@@ -237,6 +245,12 @@ func (m *Model) buildTurns() []conversationTurn {
 			}
 			if !e.isText {
 				curAgent.entries = append(curAgent.entries, e)
+				// Unpack bridge write ops so they render inline with their
+				// own dot, verb, path, and diff — without ever existing as
+				// independent feed entries that could cause role-mismatch flicker.
+				for _, wo := range e.bridgeWriteOps {
+					curAgent.entries = append(curAgent.entries, wo)
+				}
 			}
 		}
 	}
@@ -274,109 +288,13 @@ func (m *Model) renderFeed(height int) string {
 	return lipgloss.NewStyle().Width(m.width).Height(height).Render(content)
 }
 
-// groupBridgeToolCalls collapses code_exec bridge tool calls within each turn.
-// A bridge call is identified by either:
-//   - data["action"] == "code_exec_bridge" (canonical), or
-//   - data["tag"] == "code_exec_bridge" (legacy compatibility), or
-//   - temporal overlap: the entry started while a code_exec was still running
-//     (entry.timestamp >= code_exec.timestamp && entry.timestamp <= code_exec.finishedAt)
-func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
-	for ti := range turns {
-		t := &turns[ti]
-		if t.kind != turnAgent || t.isText || len(t.entries) == 0 {
-			continue
-		}
-
-		var filtered []feedEntry
-		var lastCodeExecIdx int = -1 // index in filtered slice
-
-		for _, e := range t.entries {
-			isBridge := false
-
-			// Prefer explicit bridge action marker, then legacy tag marker.
-			if e.data != nil && strings.TrimSpace(e.data["action"]) == "code_exec_bridge" {
-				isBridge = true
-			}
-			if !isBridge && e.data != nil && strings.TrimSpace(e.data["tag"]) == "code_exec_bridge" {
-				isBridge = true
-			}
-
-			// Temporal fallback: entry started during code_exec execution window.
-			if !isBridge && lastCodeExecIdx >= 0 {
-				ce := filtered[lastCodeExecIdx]
-				if !ce.finishedAt.IsZero() &&
-					!e.timestamp.Before(ce.timestamp) &&
-					!e.timestamp.After(ce.finishedAt) {
-					isBridge = true
-				}
-			}
-
-			if isBridge && lastCodeExecIdx >= 0 {
-				// Plan file writes (HEAD.md, CHECKLIST.md) are collapsed silently:
-				// they render via the dedicated plan block (renderPlanChecklist /
-				// renderPlanDetails) rather than as "Write /plan/..." sub-items or diffs.
-				// Their plan data is promoted to the parent; they do NOT increment
-				// childCount so they don't affect the "Ran N tools" counter.
-				//
-				// Non-write bridge ops (reads, lists, http_fetch, etc.) are collapsed
-				// and DO count toward childCount / bridgeSingle display.
-				//
-				// Regular user-file write ops pass through as visible entries so their
-				// path and diff are shown individually.
-				if isActivityPlanWrite(e.opKind, e.path) {
-					parent := &filtered[lastCodeExecIdx]
-					if len(e.planItems) > 0 {
-						parent.planItems = e.planItems
-					}
-					if e.planDetailsTitle != "" {
-						parent.planDetailsTitle = e.planDetailsTitle
-					}
-					continue
-				}
-				if !isWriteOp(e.opKind) {
-					parent := &filtered[lastCodeExecIdx]
-					parent.childCount++
-					if parent.childCount == 1 {
-						parent.bridgeSingleOpKind = e.opKind
-						parent.bridgeSingleData = e.data
-						parent.bridgeSingleText = e.text
-						parent.bridgeSinglePath = e.path
-					} else if parent.childCount == 2 {
-						// More than one collapsed non-write bridge: show "Ran N tools".
-						parent.bridgeSingleOpKind = ""
-						parent.bridgeSingleData = nil
-						parent.bridgeSingleText = ""
-						parent.bridgeSinglePath = ""
-					}
-					continue
-				}
-				// Regular write ops fall through to be added to filtered as visible entries.
-			}
-
-			if strings.ToLower(strings.TrimSpace(e.opKind)) == "code_exec" {
-				lastCodeExecIdx = len(filtered)
-			} else if lastCodeExecIdx >= 0 {
-				// If this non-bridge entry started after code_exec finished,
-				// clear the code_exec anchor so later entries aren't grouped.
-				ce := filtered[lastCodeExecIdx]
-				if !ce.finishedAt.IsZero() && e.timestamp.After(ce.finishedAt) {
-					lastCodeExecIdx = -1
-				}
-			}
-			filtered = append(filtered, e)
-		}
-		t.entries = filtered
-	}
-	return turns
-}
-
 func (m *Model) feedLines(width int) []string {
 	spinParity := m.spinFrame % 2
 	if m.lineCache != nil && m.lineCacheGen == m.feedGen && m.lineCacheWidth == width && m.lineCacheSpinParity == spinParity {
 		return m.lineCache
 	}
 
-	turns := groupBridgeToolCalls(m.buildTurns())
+	turns := m.buildTurns()
 	if len(turns) == 0 {
 		m.lineCache = nil
 		m.lineCacheGen = m.feedGen

@@ -50,6 +50,7 @@ type Model struct {
 	lastErr   string
 
 	feed       []feedEntry
+	pendingLiveEntries []feedEntry // buffered live entries flushed on anim tick
 	feedScroll int
 	liveFollow bool
 

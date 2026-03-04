@@ -39,12 +39,13 @@ type feedEntry struct {
 	data             map[string]string // raw activity Data for verb resolution
 	planItems        []string          // parsed checklist items for plan/CHECKLIST.md writes
 	planDetailsTitle string            // first heading extracted from plan/HEAD.md writes
-	childCount       int               // number of grouped bridge tool calls (for code_exec parents)
+	childCount       int               // number of grouped non-write bridge tool calls (for code_exec parents)
 	// When childCount == 1 (a single non-write bridge), store the call so we can show "Verb + Args" instead of "Ran 1 tools".
 	bridgeSingleOpKind string
 	bridgeSingleData   map[string]string
 	bridgeSingleText   string
 	bridgeSinglePath   string
+	bridgeWriteOps     []feedEntry       // write bridge ops stored for inline diff rendering under the parent
 
 	// Thinking-specific fields
 	live             bool          // true while model is still thinking (no .end yet)
@@ -239,6 +240,10 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 		sort.SliceStable(entries, func(i, j int) bool {
 			return entries[i].timestamp.Before(entries[j].timestamp)
 		})
+
+		// Group bridge ops into their parent code_exec entries at the data
+		// layer so they never appear as independent feed entries.
+		entries = groupBridgeOpsInEntries(entries)
 
 		// If any activity is a plan write, fetch the current plan data and
 		// attach it to the appropriate entries for rendering.

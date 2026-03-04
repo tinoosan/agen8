@@ -28,46 +28,83 @@ func TestStripLeadingVerb(t *testing.T) {
 	}
 }
 
-func TestGroupBridgeToolCalls_DetectsActionAndLegacyTag(t *testing.T) {
+func TestGroupBridgeOpsInEntries_DetectsActionAndLegacyTag(t *testing.T) {
 	now := time.Now()
-	turns := []conversationTurn{
+	entries := []feedEntry{
 		{
-			kind:   turnAgent,
-			role:   "reviewer",
-			isText: false,
-			entries: []feedEntry{
-				{
-					kind:       feedAgent,
-					opKind:     "code_exec",
-					status:     "ok",
-					timestamp:  now,
-					finishedAt: now.Add(2 * time.Second),
-				},
-				{
-					kind:      feedAgent,
-					opKind:    "task_create",
-					timestamp: now.Add(time.Second),
-					data: map[string]string{
-						"action": "code_exec_bridge",
-					},
-				},
-				{
-					kind:      feedAgent,
-					opKind:    "obsidian",
-					timestamp: now.Add(time.Second),
-					data: map[string]string{
-						"tag": "code_exec_bridge",
-					},
-				},
+			kind:       feedAgent,
+			opKind:     "code_exec",
+			status:     "ok",
+			timestamp:  now,
+			finishedAt: now.Add(2 * time.Second),
+		},
+		{
+			kind:      feedAgent,
+			opKind:    "task_create",
+			timestamp: now.Add(time.Second),
+			data: map[string]string{
+				"action": "code_exec_bridge",
+			},
+		},
+		{
+			kind:      feedAgent,
+			opKind:    "obsidian",
+			timestamp: now.Add(time.Second),
+			data: map[string]string{
+				"tag": "code_exec_bridge",
 			},
 		},
 	}
 
-	out := groupBridgeToolCalls(turns)
-	if len(out) != 1 || len(out[0].entries) != 1 {
-		t.Fatalf("expected single grouped parent entry, got %+v", out)
+	out := groupBridgeOpsInEntries(entries)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 grouped parent entry, got %d", len(out))
 	}
-	if out[0].entries[0].childCount != 2 {
-		t.Fatalf("childCount=%d want 2", out[0].entries[0].childCount)
+	if out[0].childCount != 2 {
+		t.Fatalf("childCount=%d want 2", out[0].childCount)
+	}
+}
+
+func TestGroupBridgeOpsInEntries_WriteOpsStoredInBridgeWriteOps(t *testing.T) {
+	now := time.Now()
+	entries := []feedEntry{
+		{
+			kind:       feedAgent,
+			opKind:     "code_exec",
+			status:     "ok",
+			timestamp:  now,
+			finishedAt: now.Add(2 * time.Second),
+		},
+		{
+			kind:      feedAgent,
+			opKind:    "fs_write",
+			path:      "/workspace/output.txt",
+			timestamp: now.Add(time.Second),
+			data: map[string]string{
+				"action": "code_exec_bridge",
+			},
+		},
+		{
+			kind:      feedAgent,
+			opKind:    "fs_read",
+			timestamp: now.Add(time.Second),
+			data: map[string]string{
+				"action": "code_exec_bridge",
+			},
+		},
+	}
+
+	out := groupBridgeOpsInEntries(entries)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 grouped parent entry, got %d", len(out))
+	}
+	if len(out[0].bridgeWriteOps) != 1 {
+		t.Fatalf("bridgeWriteOps=%d want 1", len(out[0].bridgeWriteOps))
+	}
+	if out[0].bridgeWriteOps[0].path != "/workspace/output.txt" {
+		t.Fatalf("bridgeWriteOps[0].path=%q want /workspace/output.txt", out[0].bridgeWriteOps[0].path)
+	}
+	if out[0].childCount != 1 {
+		t.Fatalf("childCount=%d want 1 (fs_read only)", out[0].childCount)
 	}
 }
