@@ -13,6 +13,7 @@ import (
 	"github.com/tinoosan/agen8/pkg/fsutil"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/profile"
+	pkgtask "github.com/tinoosan/agen8/pkg/services/task"
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
@@ -217,11 +218,12 @@ func TestSessionPausedSkipsPendingUntilResumed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
 	}
+	taskSvc := pkgtask.NewManager(ts, nil)
 
 	runID := "run-test-1"
 	sessionID := "sess-test-1"
 	now := time.Now().UTC()
-	if err := ts.CreateTask(context.Background(), types.Task{
+	if err := taskSvc.CreateTask(context.Background(), types.Task{
 		TaskID:         "task-1",
 		SessionID:      sessionID,
 		RunID:          runID,
@@ -285,7 +287,6 @@ func TestHeartbeatEventsIncludeIntervalAndSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
 	}
-
 	em := &captureEventEmitter{}
 	runID := "run-heartbeat-events"
 	sessionID := "sess-heartbeat-events"
@@ -453,11 +454,12 @@ func TestSessionContextCanceled_RecordsTaskCanceled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
 	}
+	taskSvc := pkgtask.NewManager(ts, nil)
 
 	runID := "run-test-cancel"
 	sessionID := "sess-test-cancel"
 	now := time.Now().UTC()
-	if err := ts.CreateTask(context.Background(), types.Task{
+	if err := taskSvc.CreateTask(context.Background(), types.Task{
 		TaskID:         "task-cancel",
 		SessionID:      sessionID,
 		RunID:          runID,

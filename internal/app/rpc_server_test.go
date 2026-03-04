@@ -894,6 +894,24 @@ func TestRPCServer_TaskFlow_CreateListClaimComplete(t *testing.T) {
 	if strings.TrimSpace(createRes.Task.ID) == "" {
 		t.Fatalf("missing task id")
 	}
+	msgs, err := ts.ListMessages(context.Background(), state.MessageFilter{
+		ThreadID: run.SessionID,
+		RunID:    run.RunID,
+		TaskRef:  createRes.Task.ID,
+		Channel:  types.MessageChannelInbox,
+		Kinds:    []string{types.MessageKindTask},
+		Limit:    5,
+		SortBy:   "created_at",
+	})
+	if err != nil {
+		t.Fatalf("ListMessages(create): %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected exactly one backing message, got %d", len(msgs))
+	}
+	if got := strings.TrimSpace(msgs[0].Status); got != types.MessageStatusPending {
+		t.Fatalf("message status after create=%q want %q", got, types.MessageStatusPending)
+	}
 
 	inboxReq, _ := protocol.NewRequest("2", protocol.MethodTaskList, protocol.TaskListParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
@@ -922,6 +940,24 @@ func TestRPCServer_TaskFlow_CreateListClaimComplete(t *testing.T) {
 	_ = json.Unmarshal(claimResp.Result, &claimRes)
 	if claimRes.Task.ClaimedByAgentID != "agent-1" {
 		t.Fatalf("expected claimedByAgentId agent-1, got %q", claimRes.Task.ClaimedByAgentID)
+	}
+	msgs, err = ts.ListMessages(context.Background(), state.MessageFilter{
+		ThreadID: run.SessionID,
+		RunID:    run.RunID,
+		TaskRef:  createRes.Task.ID,
+		Channel:  types.MessageChannelInbox,
+		Kinds:    []string{types.MessageKindTask},
+		Limit:    5,
+		SortBy:   "created_at",
+	})
+	if err != nil {
+		t.Fatalf("ListMessages(claim): %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected one backing message after claim, got %d", len(msgs))
+	}
+	if got := strings.TrimSpace(msgs[0].Status); got != types.MessageStatusClaimed {
+		t.Fatalf("message status after claim=%q want %q", got, types.MessageStatusClaimed)
 	}
 	inboxAfterClaimReq, _ := protocol.NewRequest("3b", protocol.MethodTaskList, protocol.TaskListParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
@@ -954,6 +990,24 @@ func TestRPCServer_TaskFlow_CreateListClaimComplete(t *testing.T) {
 	if completeResp.Error != nil {
 		t.Fatalf("task.complete error: %+v", completeResp.Error)
 	}
+	msgs, err = ts.ListMessages(context.Background(), state.MessageFilter{
+		ThreadID: run.SessionID,
+		RunID:    run.RunID,
+		TaskRef:  createRes.Task.ID,
+		Channel:  types.MessageChannelInbox,
+		Kinds:    []string{types.MessageKindTask},
+		Limit:    5,
+		SortBy:   "created_at",
+	})
+	if err != nil {
+		t.Fatalf("ListMessages(complete): %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected one backing message after complete, got %d", len(msgs))
+	}
+	if got := strings.TrimSpace(msgs[0].Status); got != types.MessageStatusAcked {
+		t.Fatalf("message status after complete=%q want %q", got, types.MessageStatusAcked)
+	}
 
 	outboxReq, _ := protocol.NewRequest("5", protocol.MethodTaskList, protocol.TaskListParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
@@ -974,6 +1028,67 @@ func TestRPCServer_TaskFlow_CreateListClaimComplete(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("completed task not found in outbox")
+	}
+}
+
+func TestRPCServer_TaskClaimComplete_MissingBackingMessageErrors(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	taskSvc := pkgtask.NewManager(ts, nil)
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: taskSvc, Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	now := time.Now().UTC()
+	raw := types.Task{
+		TaskID:    "task-no-envelope",
+		SessionID: run.SessionID,
+		RunID:     run.RunID,
+		Goal:      "legacy pending row",
+		Status:    types.TaskStatusPending,
+		CreatedAt: &now,
+	}
+	if err := ts.CreateTask(context.Background(), raw); err != nil {
+		t.Fatalf("CreateTask(raw): %v", err)
+	}
+
+	claimReq, _ := protocol.NewRequest("1", protocol.MethodTaskClaim, protocol.TaskClaimParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TaskID:   raw.TaskID,
+		AgentID:  "agent-1",
+	})
+	claimResp := rpcRoundTrip(t, srv, claimReq)
+	if claimResp.Error == nil {
+		t.Fatalf("expected task.claim to fail without backing message")
+	}
+	if claimResp.Error.Code != protocol.CodeInvalidState {
+		t.Fatalf("task.claim error code=%d want %d", claimResp.Error.Code, protocol.CodeInvalidState)
+	}
+	if !strings.Contains(strings.ToLower(claimResp.Error.Message), "backing message") {
+		t.Fatalf("task.claim error message=%q", claimResp.Error.Message)
+	}
+
+	completeReq, _ := protocol.NewRequest("2", protocol.MethodTaskComplete, protocol.TaskCompleteParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TaskID:   raw.TaskID,
+		Status:   "canceled",
+		Summary:  "cancel legacy",
+	})
+	completeResp := rpcRoundTrip(t, srv, completeReq)
+	if completeResp.Error == nil {
+		t.Fatalf("expected task.complete to fail without backing message")
+	}
+	if completeResp.Error.Code != protocol.CodeInvalidState {
+		t.Fatalf("task.complete error code=%d want %d", completeResp.Error.Code, protocol.CodeInvalidState)
+	}
+	if !strings.Contains(strings.ToLower(completeResp.Error.Message), "backing message") {
+		t.Fatalf("task.complete error message=%q", completeResp.Error.Message)
 	}
 }
 
@@ -1458,6 +1573,7 @@ func TestRPCServer_TurnCancel_NonBootstrapTask(t *testing.T) {
 	_ = sessStore.SaveSession(context.Background(), bootstrapSess)
 	_ = sessStore.SaveSession(context.Background(), targetSess)
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	taskSvc := pkgtask.NewManager(ts, nil)
 	now := time.Now().UTC()
 	task := types.Task{
 		TaskID:    "task-turn-cancel-target",
@@ -1467,11 +1583,11 @@ func TestRPCServer_TurnCancel_NonBootstrapTask(t *testing.T) {
 		Status:    types.TaskStatusPending,
 		CreatedAt: &now,
 	}
-	if err := ts.CreateTask(context.Background(), task); err != nil {
-		t.Fatalf("CreateTask: %v", err)
+	if err := taskSvc.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask via TaskService: %v", err)
 	}
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: taskSvc, Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
 	})
 
 	req, _ := protocol.NewRequest("1", protocol.MethodTurnCancel, protocol.TurnCancelParams{

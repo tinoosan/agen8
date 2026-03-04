@@ -23,10 +23,11 @@ type activeTaskCanceler interface {
 // Manager implements state.TaskStore, RetryEscalationCreator, ActiveTaskCanceler, and ArtifactIndexerProvider.
 // It delegates CRUD to the store and implements callback lifecycle (retry/escalation) and cancel-by-run.
 type Manager struct {
-	store     state.TaskStore
-	runLoader RunLoader
-	oracle    *RoutingOracle
-	events    taskEventAppender
+	store        state.TaskStore
+	messageStore state.MessageStore
+	runLoader    RunLoader
+	oracle       *RoutingOracle
+	events       taskEventAppender
 
 	watchersMu sync.Mutex
 	watchers   map[string]taskWakeWatcher
@@ -50,10 +51,15 @@ var ErrRunLoaderNotConfigured = errors.New("run loader not configured")
 
 // NewManager creates a new task service manager. runLoader may be nil and set later via SetRunLoader.
 func NewManager(store state.TaskStore, runLoader RunLoader) *Manager {
+	var messageStore state.MessageStore
+	if ms, ok := store.(state.MessageStore); ok {
+		messageStore = ms
+	}
 	return &Manager{
-		store:     store,
-		runLoader: runLoader,
-		watchers:  map[string]taskWakeWatcher{},
+		store:        store,
+		messageStore: messageStore,
+		runLoader:    runLoader,
+		watchers:     map[string]taskWakeWatcher{},
 	}
 }
 
@@ -69,6 +75,10 @@ func (m *Manager) SetRoutingOracle(oracle *RoutingOracle) {
 
 func (m *Manager) SetEventsStore(store taskEventAppender) {
 	m.events = store
+}
+
+func (m *Manager) SetMessageStore(store state.MessageStore) {
+	m.messageStore = store
 }
 
 // SubscribeWake returns a channel that receives best-effort wake signals when matching
@@ -310,6 +320,10 @@ func (m *Manager) CreateTask(ctx context.Context, task types.Task) error {
 	if err := m.store.CreateTask(ctx, task); err != nil {
 		return err
 	}
+	if err := m.publishTaskMessage(ctx, task); err != nil {
+		_ = m.store.DeleteTask(ctx, task.TaskID)
+		return fmt.Errorf("publish task message: %w", err)
+	}
 	m.emitRoutingEvent(ctx, task, "routing.validated", "Task routing validated", map[string]string{
 		"taskId":       strings.TrimSpace(task.TaskID),
 		"assignedType": strings.TrimSpace(task.AssignedToType),
@@ -318,6 +332,57 @@ func (m *Manager) CreateTask(ctx context.Context, task types.Task) error {
 	})
 	m.notifyWake(task)
 	return nil
+}
+
+func (m *Manager) publishTaskMessage(ctx context.Context, task types.Task) error {
+	if m == nil || m.messageStore == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	taskCopy := task
+	meta := task.Metadata
+	kind := strings.TrimSpace(metadataString(meta, "messageKind"))
+	if kind == "" {
+		kind = types.MessageKindTask
+	}
+	intentID := strings.TrimSpace(metadataString(meta, "intentId"))
+	if intentID == "" {
+		intentID = "task.create:" + strings.TrimSpace(task.TaskID)
+	}
+	correlationID := strings.TrimSpace(metadataString(meta, "correlationId"))
+	if correlationID == "" {
+		correlationID = strings.TrimSpace(task.TaskID)
+	}
+	msg := types.AgentMessage{
+		MessageID:     "msg-" + uuid.NewString(),
+		IntentID:      intentID,
+		CorrelationID: correlationID,
+		CausationID:   strings.TrimSpace(metadataString(meta, "causationId")),
+		Producer:      strings.TrimSpace(metadataString(meta, "producer")),
+		ThreadID:      strings.TrimSpace(task.SessionID),
+		RunID:         strings.TrimSpace(task.RunID),
+		TeamID:        strings.TrimSpace(task.TeamID),
+		Channel:       types.MessageChannelInbox,
+		Kind:          kind,
+		Body: map[string]any{
+			"goal":     strings.TrimSpace(task.Goal),
+			"taskKind": strings.TrimSpace(task.TaskKind),
+		},
+		TaskRef:     strings.TrimSpace(task.TaskID),
+		Task:        &taskCopy,
+		Status:      types.MessageStatusPending,
+		VisibleAt:   now,
+		Priority:    task.Priority,
+		Metadata:    map[string]any{"source": "task.create"},
+		CreatedAt:   &now,
+		UpdatedAt:   &now,
+		ProcessedAt: nil,
+	}
+	if msg.Producer == "" {
+		msg.Producer = "task.manager.create"
+	}
+	_, err := m.messageStore.PublishMessage(ctx, msg)
+	return err
 }
 
 func (m *Manager) DeleteTask(ctx context.Context, taskID string) error {
@@ -353,11 +418,14 @@ func (m *Manager) CompleteTask(ctx context.Context, taskID string, result types.
 	if taskID == "" {
 		return fmt.Errorf("taskID is required")
 	}
+	current, err := m.store.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if _, err := m.ensureTaskHasBackingMessage(ctx, current); err != nil {
+		return err
+	}
 	if m.oracle != nil {
-		current, err := m.store.GetTask(ctx, taskID)
-		if err != nil {
-			return err
-		}
 		if err := m.oracle.ValidateCompletion(ctx, m.runLoader, current); err != nil {
 			return err
 		}
@@ -367,19 +435,180 @@ func (m *Manager) CompleteTask(ctx context.Context, taskID string, result types.
 	}
 	updated, err := m.store.GetTask(ctx, taskID)
 	if err == nil {
+		_ = m.syncTaskMessagesTerminal(ctx, updated)
 		m.notifyWake(updated)
 	}
 	return nil
 }
 
+func (m *Manager) syncTaskMessagesTerminal(ctx context.Context, task types.Task) error {
+	if m == nil || m.messageStore == nil {
+		return nil
+	}
+	taskID := strings.TrimSpace(task.TaskID)
+	if taskID == "" {
+		return nil
+	}
+	msgs, err := m.listTaskMessages(ctx, task, state.MessageFilter{
+		ThreadID: strings.TrimSpace(task.SessionID),
+		TeamID:   strings.TrimSpace(task.TeamID),
+		TaskRef:  taskID,
+		Channel:  types.MessageChannelInbox,
+		Statuses: []string{types.MessageStatusPending, types.MessageStatusClaimed, types.MessageStatusNacked},
+		Limit:    200,
+		SortBy:   "created_at",
+	})
+	if err != nil {
+		return err
+	}
+	for _, msg := range msgs {
+		if strings.TrimSpace(msg.TaskRef) != taskID {
+			continue
+		}
+		_ = m.messageStore.AckMessage(ctx, strings.TrimSpace(msg.MessageID), state.MessageAckResult{
+			Status:   types.MessageStatusAcked,
+			Metadata: map[string]any{"taskStatus": strings.TrimSpace(string(task.Status))},
+		})
+	}
+	return nil
+}
+
 func (m *Manager) ClaimTask(ctx context.Context, taskID string, ttl time.Duration) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("taskID is required")
+	}
+	task, err := m.store.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	msg := types.AgentMessage{}
+	if preclaimed, ok := state.PreclaimedMessageFromContext(ctx); ok {
+		msg.MessageID = preclaimed.MessageID
+		msg.LeaseOwner = preclaimed.LeaseOwner
+	} else {
+		msg, err = m.claimBackingMessageForTask(ctx, task, ttl)
+		if err != nil {
+			return err
+		}
+	}
 	if err := m.store.ClaimTask(ctx, taskID, ttl); err != nil {
+		if m.messageStore != nil && strings.TrimSpace(msg.MessageID) != "" {
+			retryAt := time.Now().UTC()
+			switch {
+			case errors.Is(err, state.ErrTaskTerminal):
+				_ = m.messageStore.AckMessage(ctx, msg.MessageID, state.MessageAckResult{
+					Status: types.MessageStatusAcked,
+					Error:  err.Error(),
+				})
+			default:
+				_ = m.messageStore.NackMessage(ctx, msg.MessageID, err.Error(), &retryAt)
+			}
+		}
 		return err
 	}
 	if task, err := m.store.GetTask(ctx, taskID); err == nil {
 		m.notifyWake(task)
 	}
 	return nil
+}
+
+func (m *Manager) ensureTaskHasBackingMessage(ctx context.Context, task types.Task) (types.AgentMessage, error) {
+	if m == nil || m.messageStore == nil {
+		return types.AgentMessage{}, nil
+	}
+	msgs, err := m.listTaskMessages(ctx, task, state.MessageFilter{
+		ThreadID: strings.TrimSpace(task.SessionID),
+		TeamID:   strings.TrimSpace(task.TeamID),
+		TaskRef:  strings.TrimSpace(task.TaskID),
+		Channel:  types.MessageChannelInbox,
+		Limit:    1,
+		SortBy:   "created_at",
+	})
+	if err != nil {
+		return types.AgentMessage{}, err
+	}
+	if len(msgs) == 0 {
+		return types.AgentMessage{}, state.ErrTaskMissingMessage
+	}
+	return msgs[0], nil
+}
+
+func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Task, ttl time.Duration) (types.AgentMessage, error) {
+	if m == nil || m.messageStore == nil {
+		return types.AgentMessage{}, nil
+	}
+	consumerID := strings.TrimSpace(task.ClaimedByAgentID)
+	if consumerID == "" && strings.EqualFold(strings.TrimSpace(task.AssignedToType), "agent") {
+		consumerID = strings.TrimSpace(task.AssignedTo)
+	}
+	if consumerID == "" {
+		consumerID = strings.TrimSpace(task.RunID)
+	}
+	if consumerID == "" {
+		consumerID = "task-service"
+	}
+	filter := state.MessageClaimFilter{
+		ThreadID:       strings.TrimSpace(task.SessionID),
+		TeamID:         strings.TrimSpace(task.TeamID),
+		TaskRef:        strings.TrimSpace(task.TaskID),
+		AssignedToType: strings.TrimSpace(task.AssignedToType),
+		AssignedTo:     strings.TrimSpace(task.AssignedTo),
+		Channel:        types.MessageChannelInbox,
+		Kinds:          []string{types.MessageKindTask, types.MessageKindUserInput},
+	}
+	msg, err := m.messageStore.ClaimNextMessage(ctx, filter, ttl, consumerID)
+	if err == nil {
+		return msg, nil
+	}
+	// Team tasks can be consumed from a role session different from the task/session thread.
+	// Retry without thread pinning so team+assignee routing remains authoritative.
+	if errors.Is(err, state.ErrMessageNotFound) && strings.TrimSpace(task.TeamID) != "" {
+		relaxed := filter
+		relaxed.ThreadID = ""
+		msg, err = m.messageStore.ClaimNextMessage(ctx, relaxed, ttl, consumerID)
+		if err == nil {
+			return msg, nil
+		}
+	}
+	if !errors.Is(err, state.ErrMessageNotFound) {
+		return types.AgentMessage{}, err
+	}
+	msgs, lerr := m.listTaskMessages(ctx, task, state.MessageFilter{
+		ThreadID: strings.TrimSpace(task.SessionID),
+		TeamID:   strings.TrimSpace(task.TeamID),
+		TaskRef:  strings.TrimSpace(task.TaskID),
+		Channel:  types.MessageChannelInbox,
+		Limit:    50,
+		SortBy:   "created_at",
+	})
+	if lerr != nil {
+		return types.AgentMessage{}, lerr
+	}
+	if len(msgs) == 0 {
+		return types.AgentMessage{}, state.ErrTaskMissingMessage
+	}
+	claimedByOther := false
+	seenTerminal := false
+	for _, m := range msgs {
+		switch strings.TrimSpace(m.Status) {
+		case types.MessageStatusClaimed:
+			if consumerID != "" && strings.TrimSpace(m.LeaseOwner) == consumerID {
+				// Session already claimed this message at the bus layer. Treat as usable.
+				return m, nil
+			}
+			claimedByOther = true
+		case types.MessageStatusAcked, types.MessageStatusDeadletter:
+			seenTerminal = true
+		}
+	}
+	if claimedByOther {
+		return types.AgentMessage{}, state.ErrMessageClaimed
+	}
+	if seenTerminal {
+		return types.AgentMessage{}, state.ErrMessageTerminal
+	}
+	return types.AgentMessage{}, state.ErrMessageNotClaimable
 }
 
 func (m *Manager) ExtendLease(ctx context.Context, taskID string, ttl time.Duration) error {
@@ -418,6 +647,74 @@ func (m *Manager) ResumeTask(ctx context.Context, taskID string) error {
 
 func (m *Manager) RecoverExpiredLeases(ctx context.Context) error {
 	return m.store.RecoverExpiredLeases(ctx)
+}
+
+func (m *Manager) PublishMessage(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {
+	if m == nil || m.messageStore == nil {
+		return types.AgentMessage{}, fmt.Errorf("message store is not configured")
+	}
+	out, err := m.messageStore.PublishMessage(ctx, msg)
+	if err == nil && out.Task != nil {
+		m.notifyWake(*out.Task)
+	}
+	return out, err
+}
+
+func (m *Manager) ClaimNextMessage(ctx context.Context, filter state.MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error) {
+	if m == nil || m.messageStore == nil {
+		return types.AgentMessage{}, fmt.Errorf("message store is not configured")
+	}
+	return m.messageStore.ClaimNextMessage(ctx, filter, ttl, consumerID)
+}
+
+func (m *Manager) AckMessage(ctx context.Context, messageID string, result state.MessageAckResult) error {
+	if m == nil || m.messageStore == nil {
+		return fmt.Errorf("message store is not configured")
+	}
+	if err := m.messageStore.AckMessage(ctx, messageID, result); err != nil {
+		return err
+	}
+	m.notifyWakeForMessage(ctx, messageID)
+	return nil
+}
+
+func (m *Manager) NackMessage(ctx context.Context, messageID string, reason string, retryAt *time.Time) error {
+	if m == nil || m.messageStore == nil {
+		return fmt.Errorf("message store is not configured")
+	}
+	if err := m.messageStore.NackMessage(ctx, messageID, reason, retryAt); err != nil {
+		return err
+	}
+	m.notifyWakeForMessage(ctx, messageID)
+	return nil
+}
+
+func (m *Manager) RequeueExpiredClaims(ctx context.Context) error {
+	if m == nil || m.messageStore == nil {
+		return nil
+	}
+	return m.messageStore.RequeueExpiredClaims(ctx)
+}
+
+func (m *Manager) GetMessage(ctx context.Context, messageID string) (types.AgentMessage, error) {
+	if m == nil || m.messageStore == nil {
+		return types.AgentMessage{}, fmt.Errorf("message store is not configured")
+	}
+	return m.messageStore.GetMessage(ctx, messageID)
+}
+
+func (m *Manager) ListMessages(ctx context.Context, filter state.MessageFilter) ([]types.AgentMessage, error) {
+	if m == nil || m.messageStore == nil {
+		return nil, fmt.Errorf("message store is not configured")
+	}
+	return m.messageStore.ListMessages(ctx, filter)
+}
+
+func (m *Manager) CountMessages(ctx context.Context, filter state.MessageFilter) (int, error) {
+	if m == nil || m.messageStore == nil {
+		return 0, fmt.Errorf("message store is not configured")
+	}
+	return m.messageStore.CountMessages(ctx, filter)
 }
 
 // RepairRoutingDrift scans for callback tasks with missing/broken routing fields and
@@ -481,6 +778,46 @@ func (m *Manager) emitRoutingEvent(ctx context.Context, task types.Task, typ, ms
 		Data:      evData,
 		Timestamp: time.Now().UTC(),
 	})
+}
+
+func (m *Manager) notifyWakeForMessage(ctx context.Context, messageID string) {
+	if m == nil || m.messageStore == nil {
+		return
+	}
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return
+	}
+	msg, err := m.messageStore.GetMessage(ctx, messageID)
+	if err != nil {
+		return
+	}
+	taskRef := strings.TrimSpace(msg.TaskRef)
+	if taskRef == "" {
+		return
+	}
+	task, err := m.store.GetTask(ctx, taskRef)
+	if err != nil {
+		return
+	}
+	m.notifyWake(task)
+}
+
+func (m *Manager) listTaskMessages(ctx context.Context, task types.Task, filter state.MessageFilter) ([]types.AgentMessage, error) {
+	if m == nil || m.messageStore == nil {
+		return nil, nil
+	}
+	msgs, err := m.messageStore.ListMessages(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if len(msgs) != 0 || strings.TrimSpace(filter.TeamID) == "" || strings.TrimSpace(filter.ThreadID) == "" {
+		return msgs, nil
+	}
+	// Team fallback: allow cross-session role workers to locate the same authoritative message.
+	relaxed := filter
+	relaxed.ThreadID = ""
+	return m.messageStore.ListMessages(ctx, relaxed)
 }
 
 // CloseBatchAndHandoff atomically closes a synthetic batch callback and creates

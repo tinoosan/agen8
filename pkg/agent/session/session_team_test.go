@@ -88,6 +88,70 @@ func TestListPendingTasks_TeamRouting(t *testing.T) {
 	}
 }
 
+func TestClaimNextScopedMessage_TeamRoleFallsBackAcrossSessions(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	now := time.Now().UTC()
+	task := types.Task{
+		TaskID:         "task-team-role-1",
+		SessionID:      "sess-coordinator",
+		RunID:          "run-coordinator",
+		TeamID:         "team-1",
+		AssignedRole:   "operations-lead",
+		AssignedToType: "role",
+		AssignedTo:     "operations-lead",
+		Goal:           "delegate to ops",
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+	}
+	if err := store.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if _, err := store.PublishMessage(context.Background(), types.AgentMessage{
+		MessageID:     "msg-team-role-1",
+		IntentID:      "intent-team-role-1",
+		CorrelationID: "corr-team-role-1",
+		ThreadID:      "sess-coordinator",
+		RunID:         "run-coordinator",
+		TeamID:        "team-1",
+		Channel:       types.MessageChannelInbox,
+		Kind:          types.MessageKindTask,
+		TaskRef:       task.TaskID,
+		Task:          &task,
+		Status:        types.MessageStatusPending,
+		VisibleAt:     now,
+		CreatedAt:     &now,
+		UpdatedAt:     &now,
+	}); err != nil {
+		t.Fatalf("PublishMessage: %v", err)
+	}
+
+	sess := &Session{cfg: Config{
+		SessionID:  "sess-ops",
+		RunID:      "run-ops",
+		TeamID:     "team-1",
+		RoleName:   "operations-lead",
+		LeaseTTL:   time.Minute,
+		MessageBus: store,
+	}}
+
+	msg, ok, err := sess.claimNextScopedMessage(context.Background(), sess.buildMessageClaimFilters())
+	if err != nil {
+		t.Fatalf("claimNextScopedMessage: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected message claim across team sessions")
+	}
+	if got := strings.TrimSpace(msg.MessageID); got != "msg-team-role-1" {
+		t.Fatalf("claimed message=%q want msg-team-role-1", got)
+	}
+	if got := strings.TrimSpace(msg.LeaseOwner); got != "run-ops" {
+		t.Fatalf("leaseOwner=%q want run-ops", got)
+	}
+}
+
 func TestListPendingTasks_TeamChildRunUsesAgentAssignment(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
 	if err != nil {
@@ -570,6 +634,51 @@ func TestMaybeCreateCoordinatorCallback_SubagentWorkerCompletion_TeamContextSets
 	}
 	if callback.TeamID != "team-1" {
 		t.Fatalf("callback TeamID=%q, want team-1", callback.TeamID)
+	}
+}
+
+func TestMaybeCreateCoordinatorCallback_TeamCallbackUsesWorkerSessionThread(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:       store,
+		TeamID:          "team-1",
+		RoleName:        "backend-engineer",
+		CoordinatorRole: "ceo",
+		ReviewerRole:    "reviewer",
+		TeamRoles:       []string{"ceo", "reviewer", "backend-engineer"},
+		SessionID:       "sess-team-1",
+		RunID:           "run-backend",
+	}}
+	task := types.Task{
+		TaskID:       "task-team-callback-1",
+		SessionID:    "sess-team-1",
+		RunID:        "run-backend",
+		TeamID:       "team-1",
+		AssignedRole: "backend-engineer",
+		CreatedBy:    "ceo",
+		Goal:         "deliver output",
+		Status:       types.TaskStatusPending,
+		Metadata: map[string]any{
+			"source": "task_create",
+		},
+	}
+	s.maybeCreateCoordinatorCallback(context.Background(), task, types.TaskResult{
+		TaskID:  task.TaskID,
+		Status:  types.TaskStatusSucceeded,
+		Summary: "done",
+	})
+	callback, err := store.GetTask(context.Background(), "callback-"+task.TaskID)
+	if err != nil {
+		t.Fatalf("expected team callback task, got err=%v", err)
+	}
+	if got := strings.TrimSpace(callback.SessionID); got != "sess-team-1" {
+		t.Fatalf("callback SessionID=%q, want sess-team-1", got)
+	}
+	if got := strings.TrimSpace(callback.RunID); got != "run-backend" {
+		t.Fatalf("callback RunID=%q, want run-backend", got)
 	}
 }
 

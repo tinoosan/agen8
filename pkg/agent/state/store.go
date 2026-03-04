@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	pkgstore "github.com/tinoosan/agen8/pkg/store"
@@ -103,6 +104,18 @@ type TaskStore interface {
 	TaskLeaser
 }
 
+// MessageStore persists runtime messages for bus-driven processing.
+type MessageStore interface {
+	PublishMessage(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error)
+	ClaimNextMessage(ctx context.Context, filter MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error)
+	AckMessage(ctx context.Context, messageID string, result MessageAckResult) error
+	NackMessage(ctx context.Context, messageID string, reason string, retryAt *time.Time) error
+	RequeueExpiredClaims(ctx context.Context) error
+	GetMessage(ctx context.Context, messageID string) (types.AgentMessage, error)
+	ListMessages(ctx context.Context, filter MessageFilter) ([]types.AgentMessage, error)
+	CountMessages(ctx context.Context, filter MessageFilter) (int, error)
+}
+
 // TaskFilter specifies query criteria for ListTasks.
 type TaskFilter struct {
 	SessionID      string // Filter by session
@@ -138,6 +151,44 @@ type RunStats struct {
 	TotalDuration time.Duration
 }
 
+// MessageClaimFilter constrains claim/list operations for bus consumers.
+type MessageClaimFilter struct {
+	ThreadID string
+	RunID    string
+	TeamID   string
+	TaskRef  string
+	// Optional assignee routing filters (resolved from projected task row via task_ref).
+	AssignedToType string
+	AssignedTo     string
+	Channel        string
+	Kinds          []string
+}
+
+// MessageFilter specifies query criteria for list/count operations.
+type MessageFilter struct {
+	ThreadID string
+	RunID    string
+	TeamID   string
+	TaskRef  string
+	Channel  string
+	Kinds    []string
+	Statuses []string
+
+	Limit  int
+	Offset int
+
+	SortBy   string // created_at|visible_at|processed_at|priority
+	SortDesc bool
+}
+
+// MessageAckResult captures optional terminal metadata when acknowledging a message.
+type MessageAckResult struct {
+	Status    string
+	Error     string
+	Metadata  map[string]any
+	Processed *time.Time
+}
+
 var (
 	// ErrTaskNotFound indicates the requested task does not exist.
 	// Wraps pkgstore.ErrNotFound so callers can use errors.Is(err, pkgstore.ErrNotFound).
@@ -145,4 +196,51 @@ var (
 	ErrTaskClaimed   = errors.New("task already claimed by another worker")
 	ErrTaskTerminal  = errors.New("task is in terminal state (completed/failed/canceled)")
 	ErrInvalidFilter = errors.New("invalid task filter")
+
+	// ErrMessageNotFound indicates the requested message does not exist.
+	// Wraps pkgstore.ErrNotFound so callers can use errors.Is(err, pkgstore.ErrNotFound).
+	ErrMessageNotFound     = fmt.Errorf("%w: message", pkgstore.ErrNotFound)
+	ErrMessageClaimed      = errors.New("message already claimed by another worker")
+	ErrMessageTerminal     = errors.New("message is in terminal state")
+	ErrMessageNotClaimable = errors.New("message is not claimable")
+	ErrInvalidMsgFilter    = errors.New("invalid message filter")
+
+	// ErrTaskMissingMessage indicates a task projection exists without any backing message envelope.
+	ErrTaskMissingMessage = errors.New("task projection has no backing message")
 )
+
+type preclaimedMessageKey struct{}
+
+// PreclaimedMessage carries bus-claim context from session runtime into task-service claim
+// to avoid duplicate message claims for the same envelope.
+type PreclaimedMessage struct {
+	MessageID  string
+	LeaseOwner string
+}
+
+// WithPreclaimedMessage annotates context with an already-claimed message envelope.
+func WithPreclaimedMessage(ctx context.Context, msg PreclaimedMessage) context.Context {
+	msg.MessageID = strings.TrimSpace(msg.MessageID)
+	msg.LeaseOwner = strings.TrimSpace(msg.LeaseOwner)
+	if ctx == nil || msg.MessageID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, preclaimedMessageKey{}, msg)
+}
+
+// PreclaimedMessageFromContext extracts an already-claimed message annotation, if present.
+func PreclaimedMessageFromContext(ctx context.Context) (PreclaimedMessage, bool) {
+	if ctx == nil {
+		return PreclaimedMessage{}, false
+	}
+	msg, ok := ctx.Value(preclaimedMessageKey{}).(PreclaimedMessage)
+	if !ok {
+		return PreclaimedMessage{}, false
+	}
+	msg.MessageID = strings.TrimSpace(msg.MessageID)
+	msg.LeaseOwner = strings.TrimSpace(msg.LeaseOwner)
+	if msg.MessageID == "" {
+		return PreclaimedMessage{}, false
+	}
+	return msg, true
+}

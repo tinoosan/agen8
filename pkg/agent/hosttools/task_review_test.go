@@ -248,6 +248,19 @@ type batchCloseTestStore struct {
 	*state.SQLiteTaskStore
 }
 
+type reviewSupervisorStub struct {
+	retriedRunID string
+}
+
+func (r *reviewSupervisorStub) RetrySubagent(ctx context.Context, childRunID, feedback string) error {
+	r.retriedRunID = strings.TrimSpace(childRunID)
+	return nil
+}
+
+func (r *reviewSupervisorStub) EscalateTask(ctx context.Context, taskID string, data EscalationData) error {
+	return nil
+}
+
 func (s *batchCloseTestStore) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewerIdentity, reviewSummary string) (string, error) {
 	handoffTaskID, _, _, _, err := s.SQLiteTaskStore.CloseBatchAndHandoffAtomic(ctx, batchTaskID, reviewerIdentity, reviewSummary)
 	return handoffTaskID, err
@@ -286,6 +299,15 @@ func setupTaskReviewStore(t *testing.T) taskReviewTestCfg {
 	if err := closableStore.CreateTask(ctx, callback); err != nil {
 		t.Fatalf("CreateTask callback: %v", err)
 	}
+	legacyCallback := types.Task{
+		TaskID: "callback-task-legacy-runid", SessionID: "sess", RunID: "parent",
+		Goal: "Review result legacy key", Status: types.TaskStatusPending,
+		CreatedAt: &now,
+		Metadata:  map[string]any{"source": "subagent.callback", "sourceRunID": "child-run-legacy", "callbackForTaskId": "task-1"},
+	}
+	if err := closableStore.CreateTask(ctx, legacyCallback); err != nil {
+		t.Fatalf("CreateTask legacy callback: %v", err)
+	}
 	batch := types.Task{
 		TaskID: "callback-batch-parent-1", SessionID: "sess", RunID: "parent",
 		Goal: "Batch callback", Status: types.TaskStatusPending,
@@ -320,4 +342,22 @@ func setupTaskReviewStore(t *testing.T) taskReviewTestCfg {
 	}
 
 	return taskReviewTestCfg{store: closableStore, dbPath: path}
+}
+
+func TestTaskReview_Execute_RetryAcceptsLegacySourceRunIDKey(t *testing.T) {
+	cfg := setupTaskReviewStore(t)
+	supervisor := &reviewSupervisorStub{}
+	tool := &TaskReviewTool{Store: cfg.store, SessionID: "sess", RunID: "parent", Supervisor: supervisor}
+
+	args, _ := json.Marshal(map[string]string{
+		"taskId":   "callback-task-legacy-runid",
+		"decision": "retry",
+		"feedback": "tighten scope",
+	})
+	if _, err := tool.Execute(context.Background(), args); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := strings.TrimSpace(supervisor.retriedRunID); got != "child-run-legacy" {
+		t.Fatalf("retry child run=%q want child-run-legacy", got)
+	}
 }

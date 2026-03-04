@@ -826,6 +826,15 @@ func (s *RPCServer) taskClaim(ctx context.Context, p protocol.TaskClaimParams) (
 		if errors.Is(err, state.ErrTaskNotFound) {
 			return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeTurnNotFound, Message: "task not found"}
 		}
+		if errors.Is(err, state.ErrTaskMissingMessage) {
+			return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "task has no backing message envelope"}
+		}
+		if errors.Is(err, state.ErrMessageClaimed) {
+			return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "task message already claimed"}
+		}
+		if errors.Is(err, state.ErrMessageTerminal) || errors.Is(err, state.ErrMessageNotClaimable) {
+			return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "task message is not claimable"}
+		}
 		return protocol.TaskClaimResult{}, err
 	}
 	task, err := s.taskService.GetTask(ctx, taskID)
@@ -902,6 +911,9 @@ func (s *RPCServer) taskComplete(ctx context.Context, p protocol.TaskCompletePar
 		CompletedAt: &done,
 	}
 	if err := s.taskService.CompleteTask(ctx, taskID, res); err != nil {
+		if errors.Is(err, state.ErrTaskMissingMessage) {
+			return protocol.TaskCompleteResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "task has no backing message envelope"}
+		}
 		return protocol.TaskCompleteResult{}, err
 	}
 	updated, err := s.taskService.GetTask(ctx, taskID)
@@ -1027,6 +1039,13 @@ func (s *RPCServer) turnCreate(ctx context.Context, p protocol.TurnCreateParams)
 		Goal:           strings.TrimSpace(p.Input.Text),
 		Status:         types.TaskStatusPending,
 		CreatedAt:      &now,
+		Metadata: map[string]any{
+			"source":        "rpc.turn.create",
+			"messageKind":   types.MessageKindUserInput,
+			"intentId":      "turn.create:" + taskID,
+			"correlationId": taskID,
+			"producer":      "rpc.turn.create",
+		},
 	}
 	if err := s.taskService.CreateTask(ctx, task); err != nil {
 		return protocol.TurnCreateResult{}, err
@@ -1070,6 +1089,9 @@ func (s *RPCServer) turnCancel(ctx context.Context, p protocol.TurnCancelParams)
 			CompletedAt: &doneAt,
 		}
 		if err := s.taskService.CompleteTask(ctx, task.TaskID, tr); err != nil {
+			if errors.Is(err, state.ErrTaskMissingMessage) {
+				return protocol.TurnCancelResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "turn has no backing message envelope"}
+			}
 			return protocol.TurnCancelResult{}, err
 		}
 		return protocol.TurnCancelResult{Turn: protocol.Turn{
