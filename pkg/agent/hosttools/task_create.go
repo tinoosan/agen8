@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"reflect"
 	"sort"
 	"strings"
@@ -238,7 +239,14 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 		if parentTaskID != "" && assignedRole != roleName {
 			task.Metadata["batchMode"] = true
 			task.Metadata["batchParentTaskId"] = parentTaskID
-			task.Metadata["batchWaveId"] = EnsureBatchWaveIDFromContext(ctx, parentTaskID, strings.TrimSpace(t.RunID))
+			waveID := EnsureBatchWaveIDFromContext(ctx, parentTaskID, strings.TrimSpace(t.RunID))
+			task.Metadata["batchWaveId"] = waveID
+			if strings.TrimSpace(metadataString(task.Metadata, "intentId")) == "" {
+				task.Metadata["intentId"] = coordinatorDelegationIntentID(teamID, parentTaskID, waveID, assignedRole, goal)
+			}
+			if strings.TrimSpace(metadataString(task.Metadata, "producer")) == "" {
+				task.Metadata["producer"] = "hosttools.task_create.delegate"
+			}
 		}
 	}
 
@@ -475,4 +483,19 @@ func metadataBool(m map[string]any, key string) bool {
 	default:
 		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(v)), "true")
 	}
+}
+
+func coordinatorDelegationIntentID(teamID, parentTaskID, waveID, assignedRole, goal string) string {
+	normalizedGoal := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(goal)), " "))
+	key := strings.Join([]string{
+		"team_delegate",
+		strings.TrimSpace(teamID),
+		strings.TrimSpace(parentTaskID),
+		strings.TrimSpace(waveID),
+		strings.TrimSpace(assignedRole),
+		normalizedGoal,
+	}, "|")
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(key))
+	return fmt.Sprintf("task.delegate:%016x", h.Sum64())
 }

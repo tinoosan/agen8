@@ -16,6 +16,50 @@ import (
 	"github.com/tinoosan/agen8/pkg/types"
 )
 
+type stubMessageBus struct {
+	requeueErr  error
+	claimErr    error
+	requeueCall int
+	claimCall   int
+}
+
+func (s *stubMessageBus) PublishMessage(context.Context, types.AgentMessage) (types.AgentMessage, error) {
+	return types.AgentMessage{}, nil
+}
+
+func (s *stubMessageBus) ClaimNextMessage(context.Context, state.MessageClaimFilter, time.Duration, string) (types.AgentMessage, error) {
+	s.claimCall++
+	if s.claimErr != nil {
+		return types.AgentMessage{}, s.claimErr
+	}
+	return types.AgentMessage{}, state.ErrMessageNotFound
+}
+
+func (s *stubMessageBus) AckMessage(context.Context, string, state.MessageAckResult) error {
+	return nil
+}
+
+func (s *stubMessageBus) NackMessage(context.Context, string, string, *time.Time) error {
+	return nil
+}
+
+func (s *stubMessageBus) RequeueExpiredClaims(context.Context) error {
+	s.requeueCall++
+	return s.requeueErr
+}
+
+func (s *stubMessageBus) GetMessage(context.Context, string) (types.AgentMessage, error) {
+	return types.AgentMessage{}, state.ErrMessageNotFound
+}
+
+func (s *stubMessageBus) ListMessages(context.Context, state.MessageFilter) ([]types.AgentMessage, error) {
+	return nil, nil
+}
+
+func (s *stubMessageBus) CountMessages(context.Context, state.MessageFilter) (int, error) {
+	return 0, nil
+}
+
 func TestListPendingTasks_TeamRouting(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
 	if err != nil {
@@ -85,6 +129,87 @@ func TestListPendingTasks_TeamRouting(t *testing.T) {
 	}
 	if len(coordTasks) != 2 {
 		t.Fatalf("expected coordinator to receive assigned+unassigned tasks, got %d", len(coordTasks))
+	}
+}
+
+func TestDrainInboxMessages_TeamNonCoordinatorSkipsRequeueSweep(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	mb := &stubMessageBus{
+		requeueErr: fmt.Errorf("database is locked (5) (SQLITE_BUSY)"),
+		claimErr:   state.ErrMessageNotFound,
+	}
+	s := &Session{cfg: Config{
+		TaskStore:  store,
+		MessageBus: mb,
+		SessionID:  "sess-1",
+		RunID:      "run-1",
+		TeamID:     "team-1",
+		RoleName:   "cto",
+	}}
+	_, drainErr := s.drainInboxMessages(context.Background())
+	if drainErr != nil {
+		t.Fatalf("drainInboxMessages: %v", drainErr)
+	}
+	if mb.requeueCall != 0 {
+		t.Fatalf("expected non-coordinator team session to skip requeue sweep, got calls=%d", mb.requeueCall)
+	}
+}
+
+func TestDrainInboxMessages_RequeueBusyIsSoftFailure(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	mb := &stubMessageBus{
+		requeueErr: fmt.Errorf("database is locked (5) (SQLITE_BUSY)"),
+		claimErr:   state.ErrMessageNotFound,
+	}
+	s := &Session{cfg: Config{
+		TaskStore:       store,
+		MessageBus:      mb,
+		SessionID:       "team-team-1",
+		RunID:           "run-ceo",
+		TeamID:          "team-1",
+		RoleName:        "ceo",
+		IsCoordinator:   true,
+		CoordinatorRole: "ceo",
+	}}
+	_, drainErr := s.drainInboxMessages(context.Background())
+	if drainErr != nil {
+		t.Fatalf("expected busy requeue to soft-fail, got: %v", drainErr)
+	}
+	if mb.requeueCall == 0 {
+		t.Fatalf("expected coordinator to execute requeue sweep")
+	}
+}
+
+func TestDrainInboxMessages_ClaimBusyDoesNotReturnDrainError(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	mb := &stubMessageBus{
+		claimErr: fmt.Errorf("claim next message: database is locked (5) (SQLITE_BUSY)"),
+	}
+	s := &Session{cfg: Config{
+		TaskStore:       store,
+		MessageBus:      mb,
+		SessionID:       "team-team-1",
+		RunID:           "run-ceo",
+		TeamID:          "team-1",
+		RoleName:        "ceo",
+		IsCoordinator:   true,
+		CoordinatorRole: "ceo",
+	}}
+	_, drainErr := s.drainInboxMessages(context.Background())
+	if drainErr != nil {
+		t.Fatalf("expected busy claim to short-circuit this drain pass without hard error, got: %v", drainErr)
+	}
+	if mb.claimCall == 0 {
+		t.Fatalf("expected claim loop to run at least once")
 	}
 }
 
