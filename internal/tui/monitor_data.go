@@ -597,8 +597,15 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 		out := make([]outboxEntry, 0, len(res.Tasks))
 		for _, t := range res.Tasks {
 			status := strings.TrimSpace(t.Status)
-			if status != string(types.TaskStatusSucceeded) && status != string(types.TaskStatusFailed) && status != string(types.TaskStatusCanceled) {
+			if status != string(types.TaskStatusSucceeded) &&
+				status != string(types.TaskStatusFailed) &&
+				status != string(types.TaskStatusCanceled) &&
+				status != string(types.TaskStatusReviewPending) {
 				continue
+			}
+			timestamp := t.CompletedAt
+			if timestamp.IsZero() {
+				timestamp = t.CreatedAt
 			}
 			out = append(out, outboxEntry{
 				TaskID:       strings.TrimSpace(t.ID),
@@ -612,7 +619,7 @@ func (m *monitorModel) loadOutboxPage() tea.Cmd {
 				OutputTokens: t.OutputTokens,
 				TotalTokens:  t.TotalTokens,
 				CostUSD:      t.CostUSD,
-				Timestamp:    t.CompletedAt,
+				Timestamp:    timestamp,
 			})
 		}
 		return outboxLoadedMsg{entries: out, totalCount: total, page: page}
