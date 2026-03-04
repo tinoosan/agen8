@@ -181,13 +181,17 @@ func (s *RPCServer) teamGetStatus(ctx context.Context, p protocol.TeamGetStatusP
 	statsTotalTokens := 0
 	totalCostUSD := 0.0
 	pricingKnown := true
+	seenSessionIDs := map[string]struct{}{}
 	for _, runID := range runIDs {
 		if s.session != nil {
 			if run, err := s.session.LoadRun(ctx, runID); err == nil {
 				if sessionID := strings.TrimSpace(run.SessionID); sessionID != "" {
-					if sess, serr := s.session.LoadSession(ctx, sessionID); serr == nil {
-						totalTokensIn += sess.InputTokens
-						totalTokensOut += sess.OutputTokens
+					if _, seen := seenSessionIDs[sessionID]; !seen {
+						seenSessionIDs[sessionID] = struct{}{}
+						if sess, serr := s.session.LoadSession(ctx, sessionID); serr == nil {
+							totalTokensIn += sess.InputTokens
+							totalTokensOut += sess.OutputTokens
+						}
 					}
 				}
 			}
