@@ -1947,9 +1947,6 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 	}
 
 	allComplete := completedCount >= expectedCount
-	if !allComplete {
-		return
-	}
 	if s.hasOpenSyntheticBatchCallback(ctx, group) {
 		return
 	}
@@ -1957,6 +1954,9 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 	now := time.Now().UTC()
 	flushReason := "all_complete"
 	isPartial := !allComplete
+	if isPartial {
+		flushReason = "partial_progress"
+	}
 	batchTaskID := fmt.Sprintf("callback-batch-%s-%d", group.parentTaskID, now.UnixNano())
 	source := taskSourceSubagentBatchCallback
 	taskKind := state.TaskKindReview

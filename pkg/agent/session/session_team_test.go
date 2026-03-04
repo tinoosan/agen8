@@ -878,6 +878,106 @@ func TestMaybeCreateCoordinatorCallback_TeamBatchFlushesWhenComplete(t *testing.
 	}
 }
 
+func TestMaybeCreateCoordinatorCallback_TeamBatchFlushesPartialProgress(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:       store,
+		TeamID:          "team-1",
+		RoleName:        "backend-engineer",
+		CoordinatorRole: "ceo",
+		TeamRoles:       []string{"ceo", "backend-engineer", "qa"},
+		SessionID:       "team-team-1",
+		RunID:           "run-backend",
+	}}
+	now := time.Now().UTC()
+	for i := 1; i <= 2; i++ {
+		taskID := fmt.Sprintf("task-team-partial-%d", i)
+		task := types.Task{
+			TaskID:       taskID,
+			SessionID:    "team-team-1",
+			RunID:        "run-backend",
+			TeamID:       "team-1",
+			AssignedRole: "backend-engineer",
+			CreatedBy:    "ceo",
+			Goal:         "work",
+			Status:       types.TaskStatusPending,
+			CreatedAt:    &now,
+			Metadata: map[string]any{
+				"source":            "task_create",
+				"batchMode":         true,
+				"batchParentTaskId": "task-parent-team-partial",
+				"batchWaveId":       "wave-partial",
+			},
+		}
+		if err := store.CreateTask(context.Background(), task); err != nil {
+			t.Fatalf("CreateTask expected[%d]: %v", i, err)
+		}
+	}
+
+	// Complete only one callback-producing task. Batch should still be synthesized (partial mode),
+	// and single callbacks must remain staging-only (not directly reviewable in session loop).
+	completedTask := types.Task{
+		TaskID:       "task-team-partial-1",
+		SessionID:    "team-team-1",
+		RunID:        "run-backend",
+		TeamID:       "team-1",
+		AssignedRole: "backend-engineer",
+		CreatedBy:    "ceo",
+		Goal:         "work",
+		Status:       types.TaskStatusPending,
+		CreatedAt:    &now,
+		Metadata: map[string]any{
+			"source":            "task_create",
+			"batchMode":         true,
+			"batchParentTaskId": "task-parent-team-partial",
+			"batchWaveId":       "wave-partial",
+		},
+	}
+	s.maybeCreateCoordinatorCallback(context.Background(), completedTask, types.TaskResult{
+		TaskID:    completedTask.TaskID,
+		Status:    types.TaskStatusSucceeded,
+		Summary:   "done",
+		Artifacts: []string{"/workspace/backend-engineer/capabilities.md"},
+	})
+
+	pending, err := store.ListTasks(context.Background(), state.TaskFilter{
+		TeamID:         "team-1",
+		AssignedRole:   "ceo",
+		AssignedToType: "role",
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "created_at",
+		Limit:          50,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks pending: %v", err)
+	}
+	var batch types.Task
+	foundBatch := false
+	for _, task := range pending {
+		loaded, _ := store.GetTask(context.Background(), task.TaskID)
+		if strings.TrimSpace(fmt.Sprint(loaded.Metadata["source"])) == "team.batch.callback" {
+			batch = loaded
+			foundBatch = true
+			break
+		}
+	}
+	if !foundBatch {
+		t.Fatalf("expected synthetic team batch callback for partial progress")
+	}
+	if !strings.Contains(strings.ToLower(strings.TrimSpace(batch.Goal)), "[partial]") {
+		t.Fatalf("expected partial batch goal marker, got: %q", batch.Goal)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(batch.Metadata["batchFlushReason"])); got != "partial_progress" {
+		t.Fatalf("batchFlushReason=%q want partial_progress", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(batch.Metadata["batchPartial"])); got != "true" {
+		t.Fatalf("batchPartial=%q want true", got)
+	}
+}
+
 func TestMaybeCreateCoordinatorCallback_SyntheticBatchDoesNotRequeueCallback(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
 	if err != nil {
