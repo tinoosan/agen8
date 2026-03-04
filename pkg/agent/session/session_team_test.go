@@ -792,6 +792,93 @@ func TestMaybeCreateCoordinatorCallback_SubagentBatchFlushesWhenComplete(t *test
 	}
 }
 
+func TestMaybeCreateCoordinatorCallback_SubagentBatchWaitsUntilComplete(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	s := &Session{cfg: Config{
+		TaskStore:   store,
+		SessionID:   "session-parent",
+		RunID:       "run-child-1",
+		ParentRunID: "run-parent",
+		SpawnIndex:  1,
+	}}
+	now := time.Now().UTC()
+	for i := 1; i <= 2; i++ {
+		taskID := fmt.Sprintf("task-subagent-wait-%d", i)
+		task := types.Task{
+			TaskID:    taskID,
+			SessionID: "session-parent",
+			RunID:     "child-run",
+			Goal:      "work",
+			Status:    types.TaskStatusPending,
+			CreatedAt: &now,
+			Metadata: map[string]any{
+				"source":            "spawn_worker",
+				"batchMode":         true,
+				"batchParentTaskId": "task-parent-subagent-wait",
+				"parentRunId":       "run-parent",
+			},
+		}
+		if err := store.CreateTask(context.Background(), task); err != nil {
+			t.Fatalf("CreateTask expected[%d]: %v", i, err)
+		}
+	}
+
+	completed := types.Task{
+		TaskID:    "task-subagent-wait-1",
+		SessionID: "session-parent",
+		RunID:     "child-run",
+		Goal:      "work",
+		Status:    types.TaskStatusPending,
+		CreatedAt: &now,
+		Metadata: map[string]any{
+			"source":            "spawn_worker",
+			"batchMode":         true,
+			"batchParentTaskId": "task-parent-subagent-wait",
+			"parentRunId":       "run-parent",
+		},
+	}
+	s.maybeCreateCoordinatorCallback(context.Background(), completed, types.TaskResult{
+		TaskID:    completed.TaskID,
+		Status:    types.TaskStatusSucceeded,
+		Summary:   "done",
+		Artifacts: []string{"/workspace/output.md"},
+	})
+
+	queued, err := store.ListTasks(context.Background(), state.TaskFilter{
+		SessionID:      "session-parent",
+		AssignedTo:     "run-parent",
+		AssignedToType: "agent",
+		Status:         []types.TaskStatus{types.TaskStatusPending},
+		SortBy:         "created_at",
+		Limit:          50,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks pending: %v", err)
+	}
+	for _, task := range queued {
+		loaded, _ := store.GetTask(context.Background(), task.TaskID)
+		if strings.TrimSpace(fmt.Sprint(loaded.Metadata["source"])) == "subagent.batch.callback" {
+			t.Fatalf("did not expect synthetic subagent batch callback before all callbacks are ready")
+		}
+	}
+
+	staged, err := store.ListTasks(context.Background(), state.TaskFilter{
+		SessionID: "session-parent",
+		Status:    []types.TaskStatus{types.TaskStatusReviewPending},
+		SortBy:    "created_at",
+		Limit:     50,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks staged callbacks: %v", err)
+	}
+	if len(staged) == 0 {
+		t.Fatalf("expected staged callback task while waiting for full batch completion")
+	}
+}
+
 func TestMaybeCreateCoordinatorCallback_TeamBatchFlushesWhenComplete(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
 	if err != nil {
@@ -878,7 +965,7 @@ func TestMaybeCreateCoordinatorCallback_TeamBatchFlushesWhenComplete(t *testing.
 	}
 }
 
-func TestMaybeCreateCoordinatorCallback_TeamBatchFlushesPartialProgress(t *testing.T) {
+func TestMaybeCreateCoordinatorCallback_TeamBatchWaitsUntilComplete(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
 	if err != nil {
 		t.Fatalf("NewSQLiteTaskStore: %v", err)
@@ -917,8 +1004,8 @@ func TestMaybeCreateCoordinatorCallback_TeamBatchFlushesPartialProgress(t *testi
 		}
 	}
 
-	// Complete only one callback-producing task. Batch should still be synthesized (partial mode),
-	// and single callbacks must remain staging-only (not directly reviewable in session loop).
+	// Complete only one callback-producing task.
+	// Batch should wait until all callbacks in the wave are staged.
 	completedTask := types.Task{
 		TaskID:       "task-team-partial-1",
 		SessionID:    "team-team-1",
@@ -954,27 +1041,33 @@ func TestMaybeCreateCoordinatorCallback_TeamBatchFlushesPartialProgress(t *testi
 	if err != nil {
 		t.Fatalf("ListTasks pending: %v", err)
 	}
-	var batch types.Task
-	foundBatch := false
 	for _, task := range pending {
 		loaded, _ := store.GetTask(context.Background(), task.TaskID)
 		if strings.TrimSpace(fmt.Sprint(loaded.Metadata["source"])) == "team.batch.callback" {
-			batch = loaded
-			foundBatch = true
+			t.Fatalf("did not expect synthetic team batch callback before all callbacks are ready")
+		}
+	}
+
+	staged, err := store.ListTasks(context.Background(), state.TaskFilter{
+		TeamID:   "team-1",
+		Status:   []types.TaskStatus{types.TaskStatusReviewPending},
+		SortBy:   "created_at",
+		SortDesc: true,
+		Limit:    50,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks staged callbacks: %v", err)
+	}
+	foundStaged := false
+	for _, task := range staged {
+		loaded, _ := store.GetTask(context.Background(), task.TaskID)
+		if strings.TrimSpace(fmt.Sprint(loaded.Metadata["source"])) == "team.callback" {
+			foundStaged = true
 			break
 		}
 	}
-	if !foundBatch {
-		t.Fatalf("expected synthetic team batch callback for partial progress")
-	}
-	if !strings.Contains(strings.ToLower(strings.TrimSpace(batch.Goal)), "[partial]") {
-		t.Fatalf("expected partial batch goal marker, got: %q", batch.Goal)
-	}
-	if got := strings.TrimSpace(fmt.Sprint(batch.Metadata["batchFlushReason"])); got != "partial_progress" {
-		t.Fatalf("batchFlushReason=%q want partial_progress", got)
-	}
-	if got := strings.TrimSpace(fmt.Sprint(batch.Metadata["batchPartial"])); got != "true" {
-		t.Fatalf("batchPartial=%q want true", got)
+	if !foundStaged {
+		t.Fatalf("expected staged team callback while waiting for full batch completion")
 	}
 }
 

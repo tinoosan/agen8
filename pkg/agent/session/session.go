@@ -1947,16 +1947,15 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 	}
 
 	allComplete := completedCount >= expectedCount
+	if !allComplete {
+		return
+	}
 	if s.hasOpenSyntheticBatchCallback(ctx, group) {
 		return
 	}
 
 	now := time.Now().UTC()
 	flushReason := "all_complete"
-	isPartial := !allComplete
-	if isPartial {
-		flushReason = "partial_progress"
-	}
 	batchTaskID := fmt.Sprintf("callback-batch-%s-%d", group.parentTaskID, now.UnixNano())
 	source := taskSourceSubagentBatchCallback
 	taskKind := state.TaskKindReview
@@ -1996,9 +1995,6 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 	}
 
 	goal := fmt.Sprintf("BATCH REVIEW ONLY: [batch %d items] Review delegated results for parent task %s. Decide per child item using task_review (approve/retry/escalate). Provide a final review summary and next actions. If work quality is weak/incomplete, delegate concrete follow-up tasks before finishing.", len(undelivered), truncateText(group.parentTaskID, 32))
-	if isPartial {
-		goal += " [partial]"
-	}
 
 	batch := types.Task{
 		TaskID:         batchTaskID,
@@ -2030,7 +2026,7 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 			"batchCompletedCount": completedCount,
 			"batchWaveExpected":   expectedCount,
 			"batchWaveCompleted":  completedCount,
-			"batchPartial":        isPartial,
+			"batchPartial":        false,
 			"batchFlushReason":    flushReason,
 			"batchItemDecisions":  map[string]any{},
 			"reviewGate":          true,
@@ -2060,7 +2056,7 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 			"batchExpectedCount":   fmt.Sprintf("%d", expectedCount),
 			"batchCompletedCount":  fmt.Sprintf("%d", completedCount),
 			"batchFlushReason":     flushReason,
-			"batchPartial":         fmt.Sprintf("%t", isPartial),
+			"batchPartial":         "false",
 			"batchReviewer":        group.reviewerID,
 			"batchReviewerMode":    group.mode,
 			"batchSyntheticSource": source,
