@@ -135,6 +135,13 @@ func (m *Manager) notifyWake(task types.Task) {
 	}
 }
 
+// NotifyWake manually triggers a wake signal for workers matching the given
+// teamID and/or runID. Used by the supervisor after unpausing a run to ensure
+// the session immediately drains its inbox.
+func (m *Manager) NotifyWake(teamID, runID string) {
+	m.notifyWake(types.Task{TeamID: teamID, RunID: runID})
+}
+
 // CreateRetryTask creates a retry task for a child run (loads run via RunLoader, builds task, persists).
 func (m *Manager) CreateRetryTask(ctx context.Context, childRunID, feedback string) error {
 	childRunID = strings.TrimSpace(childRunID)

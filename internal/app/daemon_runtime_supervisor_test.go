@@ -119,6 +119,13 @@ func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 		t.Fatalf("StopRun: %v", err)
 	}
 
+	// stopWorker runs asynchronously; wait for the done channel to close (cancel fires inside).
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for worker cancel to be called")
+	}
+
 	mu.Lock()
 	gotCancel := cancelCalled
 	mu.Unlock()
@@ -134,6 +141,17 @@ func TestRuntimeSupervisor_StopRun_CancelsWorkerAndPauses(t *testing.T) {
 		t.Fatalf("run status=%q want %q", loaded.Status, types.RunStatusCanceled)
 	}
 
+	// Wait for the async stopWorker goroutine to finish cleaning up the map.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		supervisor.mu.Lock()
+		_, exists := supervisor.workers[run.RunID]
+		supervisor.mu.Unlock()
+		if !exists {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	supervisor.mu.Lock()
 	_, exists := supervisor.workers[run.RunID]
 	supervisor.mu.Unlock()
