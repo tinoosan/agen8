@@ -44,6 +44,7 @@ func TestFormatResponseText(t *testing.T) {
 		{name: "http status", data: map[string]string{"op": "http_fetch", "ok": "true", "status": "200"}, want: "✓ 200"},
 		{name: "search results", data: map[string]string{"op": "fs_search", "ok": "true", "results": "3"}, want: "✓ 3 results"},
 		{name: "fs write default", data: map[string]string{"op": "fs_write", "ok": "true"}, want: "✓ wrote"},
+		{name: "fs write bytes and mode", data: map[string]string{"op": "fs_write", "ok": "true", "writeBytes": "0", "writeMode": "overwritten"}, want: "✓ wrote 0 bytes (overwritten)"},
 		{name: "fs write verified checksum", data: map[string]string{"op": "fs_write", "ok": "true", "writeVerified": "true", "writeChecksumAlgo": "sha256"}, want: "✓ verified (sha256)"},
 		{name: "fs write verify mismatch", data: map[string]string{"op": "fs_write", "ok": "false", "writeVerified": "false", "writeMismatchAt": "4", "writeExpectedBytes": "10", "writeActualBytes": "9"}, want: "✗ verify mismatch at byte 4 (10 != 9)"},
 		{name: "fs write checksum mismatch", data: map[string]string{"op": "fs_write", "ok": "false", "writeChecksumMatch": "false", "writeChecksumAlgo": "md5"}, want: "✗ checksum mismatch (md5)"},

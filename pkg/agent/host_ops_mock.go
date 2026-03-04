@@ -245,15 +245,30 @@ type fsWriteMockOp struct{}
 
 func (fsWriteMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
 	writeBytes := []byte(req.Text)
+	writeMode := "overwritten"
+	if _, err := x.FS.Stat(req.Path); err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
+			writeMode = "created"
+		} else {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+	}
 	if err := x.FS.Write(req.Path, writeBytes); err != nil {
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 	}
 
+	written := int64(len(writeBytes))
 	resp := types.HostOpResponse{
 		Op:                   req.Op,
 		Ok:                   true,
+		WriteMode:            writeMode,
+		WriteBytes:           &written,
 		WriteAtomicRequested: req.Atomic,
 		WriteSyncRequested:   req.Sync,
+	}
+	if entry, err := x.FS.Stat(req.Path); err == nil && entry.HasSize {
+		size := entry.Size
+		resp.WriteFinalSize = &size
 	}
 	if algo := strings.ToLower(strings.TrimSpace(req.Checksum)); algo != "" {
 		sum, err := writeChecksumHex(algo, writeBytes)

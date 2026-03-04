@@ -653,6 +653,8 @@ func TestEventMiddleware_FSWriteResponseEnrichment(t *testing.T) {
 		mismatchAt := int64(0)
 		expectedBytes := int64(12)
 		actualBytes := int64(12)
+		writeBytes := int64(12)
+		writeFinalSize := int64(12)
 		return types.HostOpResponse{
 			Op:                    req.Op,
 			Ok:                    true,
@@ -661,6 +663,9 @@ func TestEventMiddleware_FSWriteResponseEnrichment(t *testing.T) {
 			WriteChecksumAlgo:     "sha256",
 			WriteChecksum:         "abc123",
 			WriteChecksumExpected: "abc123",
+			WriteMode:             "created",
+			WriteBytes:            &writeBytes,
+			WriteFinalSize:        &writeFinalSize,
 			WriteAtomicRequested:  true,
 			WriteSyncRequested:    true,
 			WriteMismatchAt:       &mismatchAt,
@@ -696,6 +701,9 @@ func TestEventMiddleware_FSWriteResponseEnrichment(t *testing.T) {
 		"writeChecksumAlgo":     "sha256",
 		"writeChecksum":         "abc123",
 		"writeChecksumExpected": "abc123",
+		"writeMode":             "created",
+		"writeBytes":            "12",
+		"writeFinalSize":        "12",
 		"writeAtomicRequested":  "true",
 		"writeSyncRequested":    "true",
 		"writeMismatchAt":       "0",

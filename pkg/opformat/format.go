@@ -123,6 +123,12 @@ func FormatResponseText(d map[string]string) string {
 			if algo != "" {
 				return prefix + " wrote (" + algo + ")"
 			}
+			if bytes := strings.TrimSpace(d["writeBytes"]); bytes != "" {
+				if mode := strings.TrimSpace(d["writeMode"]); mode != "" {
+					return prefix + " wrote " + bytes + " bytes (" + mode + ")"
+				}
+				return prefix + " wrote " + bytes + " bytes"
+			}
 			return prefix + " wrote"
 		}
 		if strings.TrimSpace(d["writeVerified"]) == "false" {

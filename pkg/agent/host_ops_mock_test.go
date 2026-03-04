@@ -198,8 +198,49 @@ func TestHostOpExecutor_FSWrite_VerifyChecksumSuccess(t *testing.T) {
 	if resp.WriteChecksumMatch == nil || !*resp.WriteChecksumMatch {
 		t.Fatalf("expected checksumMatch=true, got %#v", resp)
 	}
+	if resp.WriteMode != "created" {
+		t.Fatalf("expected writeMode=created, got %#v", resp)
+	}
+	if resp.WriteBytes == nil || *resp.WriteBytes != int64(6) {
+		t.Fatalf("expected writeBytes=6, got %#v", resp)
+	}
+	if resp.WriteFinalSize == nil || *resp.WriteFinalSize != int64(6) {
+		t.Fatalf("expected writeFinalSize=6, got %#v", resp)
+	}
 	if !resp.WriteAtomicRequested || !resp.WriteSyncRequested {
 		t.Fatalf("expected atomic/sync requested flags, got %#v", resp)
+	}
+}
+
+func TestHostOpExecutor_FSWrite_AllowsEmptyTextAndReportsOverwriteMetadata(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	if err := exec.FS.Write("/workspace/a.txt", []byte("non-empty")); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSWrite,
+		Path: "/workspace/a.txt",
+		Text: "",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected success, got %#v", resp)
+	}
+	if resp.WriteMode != "overwritten" {
+		t.Fatalf("expected writeMode=overwritten, got %#v", resp)
+	}
+	if resp.WriteBytes == nil || *resp.WriteBytes != 0 {
+		t.Fatalf("expected writeBytes=0, got %#v", resp)
+	}
+	if resp.WriteFinalSize == nil || *resp.WriteFinalSize != 0 {
+		t.Fatalf("expected writeFinalSize=0, got %#v", resp)
+	}
+	b, err := exec.FS.Read("/workspace/a.txt")
+	if err != nil {
+		t.Fatalf("read truncated file: %v", err)
+	}
+	if len(b) != 0 {
+		t.Fatalf("expected empty file after truncate, got %q", string(b))
 	}
 }
 

@@ -155,9 +155,6 @@ func (r HostOpRequest) Validate() error {
 		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
 			return fmt.Errorf("path must be an absolute VFS path (start with /)")
 		}
-		if err := validate.NonEmpty("text", r.Text); err != nil {
-			return err
-		}
 		if err := validateWriteChecksum(r.Checksum); err != nil {
 			return err
 		}
@@ -420,6 +417,9 @@ type HostOpResponse struct {
 	WriteChecksumAlgo     string `json:"writeChecksumAlgo,omitempty"`
 	WriteChecksum         string `json:"writeChecksum,omitempty"`
 	WriteChecksumExpected string `json:"writeChecksumExpected,omitempty"`
+	WriteMode             string `json:"writeMode,omitempty"` // created|overwritten
+	WriteBytes            *int64 `json:"writeBytes,omitempty"`
+	WriteFinalSize        *int64 `json:"writeFinalSize,omitempty"`
 	WriteAtomicRequested  bool   `json:"writeAtomicRequested,omitempty"`
 	WriteSyncRequested    bool   `json:"writeSyncRequested,omitempty"`
 	WriteMismatchAt       *int64 `json:"writeMismatchAt,omitempty"`

@@ -117,6 +117,11 @@ func TestRenderOpResponse_ToolSpecific(t *testing.T) {
 			want: "✓ verified (sha256)",
 		},
 		{
+			name: "write bytes and mode",
+			data: map[string]string{"op": "fs_write", "ok": "true", "writeBytes": "0", "writeMode": "created"},
+			want: "✓ wrote 0 bytes (created)",
+		},
+		{
 			name: "write verify mismatch",
 			data: map[string]string{"op": "fs_write", "ok": "false", "writeVerified": "false", "writeMismatchAt": "3", "writeExpectedBytes": "12", "writeActualBytes": "10"},
 			want: "✗ verify mismatch at byte 3 (12 != 10)",

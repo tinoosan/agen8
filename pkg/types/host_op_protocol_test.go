@@ -167,6 +167,15 @@ func TestHostOpRequest_FSWriteValidation_AllowsWriteVerifyFlags(t *testing.T) {
 	}
 
 	req = HostOpRequest{
+		Op:   HostOpFSWrite,
+		Path: "/workspace/empty.txt",
+		Text: "",
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate empty fs_write text: %v", err)
+	}
+
+	req = HostOpRequest{
 		Op:       HostOpFSWrite,
 		Path:     "/workspace/a.txt",
 		Text:     "hello",

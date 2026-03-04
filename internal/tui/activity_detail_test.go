@@ -23,6 +23,9 @@ func TestRenderActivityDetailMarkdown_FSWrite_ShowsContentPreview(t *testing.T) 
 			"writeChecksumAlgo":     "sha256",
 			"writeChecksum":         "abc123",
 			"writeChecksumExpected": "abc123",
+			"writeMode":             "created",
+			"writeBytes":            "14",
+			"writeFinalSize":        "14",
 			"writeExpectedBytes":    "14",
 			"writeActualBytes":      "14",
 		},
@@ -46,6 +49,9 @@ func TestRenderActivityDetailMarkdown_FSWrite_ShowsContentPreview(t *testing.T) 
 		"- checksumAlgo: `sha256`",
 		"- checksum: `abc123`",
 		"- checksumExpected: `abc123`",
+		"- writeMode: `created`",
+		"- writeBytes: `14`",
+		"- writeFinalSize: `14`",
 	} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("expected %q in fs_write markdown, got:\n%s", want, md)

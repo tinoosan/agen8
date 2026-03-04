@@ -583,6 +583,21 @@ func (fsWriteAppendRenderer) RenderDetail(a Activity, expanded bool, telemetry b
 			b.WriteString(v)
 			b.WriteString("`\n")
 		}
+		if v := strings.TrimSpace(a.Data["writeMode"]); v != "" {
+			b.WriteString("- writeMode: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["writeBytes"]); v != "" {
+			b.WriteString("- writeBytes: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["writeFinalSize"]); v != "" {
+			b.WriteString("- writeFinalSize: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
 		if v := strings.TrimSpace(a.Data["writeMismatchAt"]); v != "" {
 			b.WriteString("- mismatchAtByte: `")
 			b.WriteString(v)

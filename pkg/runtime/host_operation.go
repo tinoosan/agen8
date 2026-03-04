@@ -274,6 +274,20 @@ func (fsWriteOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.Ho
 		respData["writeChecksumMatch"] = v
 		storeResp["writeChecksumMatch"] = v
 	}
+	if mode := strings.TrimSpace(resp.WriteMode); mode != "" {
+		respData["writeMode"] = mode
+		storeResp["writeMode"] = mode
+	}
+	if resp.WriteBytes != nil {
+		v := strconv.FormatInt(*resp.WriteBytes, 10)
+		respData["writeBytes"] = v
+		storeResp["writeBytes"] = v
+	}
+	if resp.WriteFinalSize != nil {
+		v := strconv.FormatInt(*resp.WriteFinalSize, 10)
+		respData["writeFinalSize"] = v
+		storeResp["writeFinalSize"] = v
+	}
 	if resp.WriteAtomicRequested {
 		respData["writeAtomicRequested"] = "true"
 		storeResp["writeAtomicRequested"] = "true"
