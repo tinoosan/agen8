@@ -55,6 +55,7 @@ func TestFormatResponseText(t *testing.T) {
 		{name: "fs stat dir", data: map[string]string{"op": "fs_stat", "ok": "true", "isDir": "true"}, want: "✓ dir"},
 		{name: "fs stat file with size", data: map[string]string{"op": "fs_stat", "ok": "true", "isDir": "false", "sizeBytes": "42"}, want: "✓ file 42 bytes"},
 		{name: "fs stat file no size", data: map[string]string{"op": "fs_stat", "ok": "true", "isDir": "false"}, want: "✓ file"},
+		{name: "fs stat missing", data: map[string]string{"op": "fs_stat", "ok": "true", "exists": "false"}, want: "✓ missing"},
 		{name: "fs stat error", data: map[string]string{"op": "fs_stat", "ok": "false", "err": "not found"}, want: "✗ not found"},
 		{name: "browser navigate title", data: map[string]string{"op": "browser.navigate", "ok": "true", "title": "Example Domain"}, want: `✓ navigated "Example Domain"`},
 		{name: "browser generic", data: map[string]string{"op": "browser.custom_step", "ok": "true"}, want: "✓ custom step"},

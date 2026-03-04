@@ -62,7 +62,9 @@ type HostOpRequest struct {
 	MaxBytes  int             `json:"maxBytes,omitempty"`
 	Text      string          `json:"text,omitempty"`
 	Verify    bool            `json:"verify,omitempty"`
+	Mode      string          `json:"mode,omitempty"`
 	Checksum  string          `json:"checksum,omitempty"`
+	Checksums []string        `json:"checksums,omitempty"`
 	// ChecksumExpected optionally enforces an expected digest value for the selected algorithm.
 	ChecksumExpected string `json:"checksumExpected,omitempty"`
 	Atomic           bool   `json:"atomic,omitempty"`
@@ -123,6 +125,9 @@ func (r HostOpRequest) Validate() error {
 		if r.MaxBytes < 0 {
 			return fmt.Errorf("maxBytes must be >= 0")
 		}
+		if err := validateReadChecksums(r.Checksum, r.Checksums); err != nil {
+			return err
+		}
 		return nil
 
 	case HostOpFSStat:
@@ -160,6 +165,9 @@ func (r HostOpRequest) Validate() error {
 			return err
 		}
 		if err := validateWriteChecksumExpected(r.Checksum, r.ChecksumExpected); err != nil {
+			return err
+		}
+		if err := validateWriteMode(r.Mode); err != nil {
 			return err
 		}
 
@@ -368,6 +376,43 @@ func validateWriteChecksumExpected(algo, expected string) error {
 	return nil
 }
 
+func validateReadChecksums(single string, many []string) error {
+	if s := checksumutil.NormalizeAlgorithm(single); s != "" && !checksumutil.IsSupportedAlgorithm(s) {
+		return fmt.Errorf("checksum must be one of %s", checksumutil.SupportedAlgorithmsDisplay())
+	}
+	for _, raw := range many {
+		algo := checksumutil.NormalizeAlgorithm(raw)
+		if algo == "" {
+			return fmt.Errorf("checksums entries must be non-empty")
+		}
+		if !checksumutil.IsSupportedAlgorithm(algo) {
+			return fmt.Errorf("checksums entries must be one of %s", checksumutil.SupportedAlgorithmsDisplay())
+		}
+	}
+	return nil
+}
+
+func validateWriteMode(mode string) error {
+	switch normalizeWriteMode(mode) {
+	case "w", "a":
+		return nil
+	default:
+		return fmt.Errorf("mode must be one of w|a")
+	}
+}
+
+func normalizeWriteMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case "", "w", "overwrite":
+		return "w"
+	case "a", "append":
+		return "a"
+	default:
+		return mode
+	}
+}
+
 // SearchResult is one result returned by fs_search.
 type SearchResult struct {
 	Title   string  `json:"title,omitempty"`
@@ -398,8 +443,12 @@ type HostOpResponse struct {
 	ErrorCode string         `json:"errorCode,omitempty"`
 	Entries   []string       `json:"entries,omitempty"`
 	Results   []SearchResult `json:"results,omitempty"`
+	Exists    *bool          `json:"exists,omitempty"`
 	IsDir     *bool          `json:"isDir,omitempty"`
 	SizeBytes *int64         `json:"sizeBytes,omitempty"`
+	Mtime     *int64         `json:"mtime,omitempty"`
+	// fs_read checksum metadata.
+	ReadChecksums map[string]string `json:"readChecksums,omitempty"`
 	// Patch diagnostics are emitted for fs_patch success/failure and dry-run validation.
 	PatchDiagnostics *PatchDiagnostics `json:"patchDiagnostics,omitempty"`
 	PatchDryRun      bool              `json:"patchDryRun,omitempty"`
@@ -409,7 +458,8 @@ type HostOpResponse struct {
 	WriteChecksumAlgo     string `json:"writeChecksumAlgo,omitempty"`
 	WriteChecksum         string `json:"writeChecksum,omitempty"`
 	WriteChecksumExpected string `json:"writeChecksumExpected,omitempty"`
-	WriteMode             string `json:"writeMode,omitempty"` // created|overwritten
+	WriteRequestMode      string `json:"writeRequestMode,omitempty"` // w|a
+	WriteMode             string `json:"writeMode,omitempty"`        // created|overwritten
 	WriteBytes            *int64 `json:"writeBytes,omitempty"`
 	WriteFinalSize        *int64 `json:"writeFinalSize,omitempty"`
 	WriteAtomicRequested  bool   `json:"writeAtomicRequested,omitempty"`

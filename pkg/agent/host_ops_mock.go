@@ -184,18 +184,32 @@ type fsStatMockOp struct{}
 func (fsStatMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
 	entry, err := x.FS.Stat(req.Path)
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
+			exists := false
+			return types.HostOpResponse{
+				Op:     req.Op,
+				Ok:     true,
+				Exists: &exists,
+			}
+		}
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 	}
 
+	exists := true
 	isDir := entry.IsDir
 	resp := types.HostOpResponse{
-		Op:    req.Op,
-		Ok:    true,
-		IsDir: &isDir,
+		Op:     req.Op,
+		Ok:     true,
+		Exists: &exists,
+		IsDir:  &isDir,
 	}
-	if entry.HasSize {
+	if !entry.IsDir && entry.HasSize {
 		size := entry.Size
 		resp.SizeBytes = &size
+	}
+	if entry.HasModTime {
+		mtime := entry.ModTime.Unix()
+		resp.Mtime = &mtime
 	}
 	return resp
 }
@@ -218,13 +232,15 @@ func (fsReadMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpEx
 		maxBytes = x.MaxReadBytes
 	}
 	text, b64, truncated := encodeReadPayload(b, maxBytes)
+	readChecksums := readChecksumsForResponse(req.Checksum, req.Checksums, b)
 	return types.HostOpResponse{
-		Op:        req.Op,
-		Ok:        true,
-		BytesLen:  len(b),
-		Text:      text,
-		BytesB64:  b64,
-		Truncated: truncated,
+		Op:            req.Op,
+		Ok:            true,
+		BytesLen:      len(b),
+		Text:          text,
+		BytesB64:      b64,
+		Truncated:     truncated,
+		ReadChecksums: readChecksums,
 	}
 }
 
@@ -242,22 +258,31 @@ type fsWriteMockOp struct{}
 
 func (fsWriteMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
 	writeBytes := []byte(req.Text)
+	requestMode := normalizeWriteModeInput(req.Mode)
 	writeMode := "overwritten"
-	if _, err := x.FS.Stat(req.Path); err != nil {
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
-			writeMode = "created"
-		} else {
+	if requestMode == "a" {
+		writeMode = "appended"
+		if err := x.FS.Append(req.Path, writeBytes); err != nil {
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 		}
-	}
-	if err := x.FS.Write(req.Path, writeBytes); err != nil {
-		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	} else {
+		if _, err := x.FS.Stat(req.Path); err != nil {
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
+				writeMode = "created"
+			} else {
+				return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+			}
+		}
+		if err := x.FS.Write(req.Path, writeBytes); err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
 	}
 
 	written := int64(len(writeBytes))
 	resp := types.HostOpResponse{
 		Op:                   req.Op,
 		Ok:                   true,
+		WriteRequestMode:     requestMode,
 		WriteMode:            writeMode,
 		WriteBytes:           &written,
 		WriteAtomicRequested: req.Atomic,
@@ -310,11 +335,18 @@ func (fsWriteMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpE
 				WriteSyncRequested:   resp.WriteSyncRequested,
 			}
 		}
-		if !bytes.Equal(writeBytes, readBack) {
+		expected := writeBytes
+		actual := readBack
+		if requestMode == "a" {
+			if len(readBack) >= len(writeBytes) {
+				actual = readBack[len(readBack)-len(writeBytes):]
+			}
+		}
+		if !bytes.Equal(expected, actual) {
 			verified := false
-			mismatchAt := int64(firstMismatchOffset(writeBytes, readBack))
-			expectedBytes := int64(len(writeBytes))
-			actualBytes := int64(len(readBack))
+			mismatchAt := int64(firstMismatchOffset(expected, actual))
+			expectedBytes := int64(len(expected))
+			actualBytes := int64(len(actual))
 			resp.WriteVerified = &verified
 			resp.WriteMismatchAt = &mismatchAt
 			resp.WriteExpectedBytes = &expectedBytes
@@ -324,6 +356,7 @@ func (fsWriteMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpE
 				Ok:                   false,
 				Error:                fmt.Sprintf("verify failed: read-back mismatch at byte %d (expected %d bytes, got %d bytes)", mismatchAt, expectedBytes, actualBytes),
 				WriteVerified:        resp.WriteVerified,
+				WriteRequestMode:     resp.WriteRequestMode,
 				WriteChecksumAlgo:    resp.WriteChecksumAlgo,
 				WriteChecksum:        resp.WriteChecksum,
 				WriteAtomicRequested: resp.WriteAtomicRequested,
@@ -1225,6 +1258,51 @@ func (x *HostOpExecutor) resolveBrowserFilePath(vpath string) (string, error) {
 }
 
 func writeChecksumHex(algo string, b []byte) (string, error) { return checksumutil.ComputeHex(algo, b) }
+
+func normalizeWriteModeInput(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case "", "w", "overwrite":
+		return "w"
+	case "a", "append":
+		return "a"
+	default:
+		return "w"
+	}
+}
+
+func readChecksumsForResponse(single string, many []string, b []byte) map[string]string {
+	algos := make([]string, 0, len(many)+1)
+	if s := checksumutil.NormalizeAlgorithm(single); s != "" {
+		algos = append(algos, s)
+	}
+	for _, raw := range many {
+		if s := checksumutil.NormalizeAlgorithm(raw); s != "" {
+			algos = append(algos, s)
+		}
+	}
+	if len(algos) == 0 {
+		return nil
+	}
+	out := make(map[string]string)
+	for _, algo := range algos {
+		if !checksumutil.IsSupportedAlgorithm(algo) {
+			continue
+		}
+		if _, exists := out[algo]; exists {
+			continue
+		}
+		sum, err := checksumutil.ComputeHex(algo, b)
+		if err != nil {
+			continue
+		}
+		out[algo] = sum
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
 
 func firstMismatchOffset(a, b []byte) int {
 	n := len(a)

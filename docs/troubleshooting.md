@@ -42,6 +42,7 @@ This guide captures common issues and diagnostics that surface when running Agen
 ## fs_write verification/checksum
 
 - **Verify critical writes**: use `tools.fs_write(path="...", text="...", verify=true)` to force read-back validation.
+- **Append mode**: set `mode="a"` to append/create without reading the existing file first (`mode="w"` is default overwrite/create).
 - **Integrity hashes**: set `checksum` to `md5`, `sha1`, or `sha256` to get a deterministic digest in the response/activity details.
 - **Checksum parameter names**:
   - Canonical form:
@@ -78,6 +79,33 @@ tools.fs_write(
     path="/workspace/file.txt",
     text="Hello World",
     checksumMd5="b10a8db164e0754105b7a99be72e3fe5",
+)
+```
+
+Append example:
+
+```python
+tools.fs_write(
+    path="/workspace/app.log",
+    text="line\n",
+    mode="a",
+)
+```
+
+## fs_read checksums
+
+- **Integrity on read**: request checksum(s) on read without a second tool call.
+- Use either:
+  - `checksum="sha256"` (single algorithm)
+  - `checksum=["md5","sha256"]` (multiple algorithms)
+- Results are returned in `readChecksums`.
+
+Example:
+
+```python
+tools.fs_read(
+    path="/workspace/file.txt",
+    checksum=["md5", "sha256"],
 )
 ```
 

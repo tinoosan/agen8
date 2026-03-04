@@ -139,15 +139,25 @@ func TestEventMiddleware_FSReadMaxBytesFromOperation(t *testing.T) {
 	})
 
 	resp := exec.Exec(context.Background(), types.HostOpRequest{
-		Op:       types.HostOpFSRead,
-		Path:     "/workspace/file.txt",
-		MaxBytes: 123,
+		Op:        types.HostOpFSRead,
+		Path:      "/workspace/file.txt",
+		MaxBytes:  123,
+		Checksums: []string{"sha256", "md5"},
 	})
 	if !resp.Ok {
 		t.Fatalf("expected ok response, got %+v", resp)
 	}
 	if got := gotReq.Data["maxBytes"]; got != "123" {
 		t.Fatalf("expected reqData.maxBytes=123, got %q", got)
+	}
+	if got := gotReq.StoreData["maxBytes"]; got != "123" {
+		t.Fatalf("expected storeData.maxBytes=123, got %q", got)
+	}
+	if got := gotReq.Data["checksums"]; got != "md5,sha256" {
+		t.Fatalf("expected reqData.checksums=md5,sha256, got %q", got)
+	}
+	if got := gotReq.StoreData["checksums"]; got != "md5,sha256" {
+		t.Fatalf("expected storeData.checksums=md5,sha256, got %q", got)
 	}
 
 	resp = exec.Exec(context.Background(), types.HostOpRequest{
@@ -521,9 +531,11 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 
 func TestEventMiddleware_FSStatResponseEnrichment(t *testing.T) {
 	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		exists := true
 		isDir := false
 		sizeBytes := int64(99)
-		return types.HostOpResponse{Op: req.Op, Ok: true, IsDir: &isDir, SizeBytes: &sizeBytes}
+		mtime := int64(1700000000)
+		return types.HostOpResponse{Op: req.Op, Ok: true, Exists: &exists, IsDir: &isDir, SizeBytes: &sizeBytes, Mtime: &mtime}
 	})
 
 	var gotResp events.Event
@@ -546,11 +558,51 @@ func TestEventMiddleware_FSStatResponseEnrichment(t *testing.T) {
 	if !resp.Ok {
 		t.Fatalf("expected ok response, got %+v", resp)
 	}
-	if gotResp.Data["isDir"] != "false" || gotResp.Data["sizeBytes"] != "99" {
+	if gotResp.Data["exists"] != "true" || gotResp.Data["isDir"] != "false" || gotResp.Data["sizeBytes"] != "99" || gotResp.Data["mtime"] != "1700000000" {
 		t.Fatalf("expected fs_stat response enrichment, got data=%v", gotResp.Data)
 	}
-	if gotResp.StoreData["isDir"] != "false" || gotResp.StoreData["sizeBytes"] != "99" {
+	if gotResp.StoreData["exists"] != "true" || gotResp.StoreData["isDir"] != "false" || gotResp.StoreData["sizeBytes"] != "99" || gotResp.StoreData["mtime"] != "1700000000" {
 		t.Fatalf("expected fs_stat store response enrichment, got storeData=%v", gotResp.StoreData)
+	}
+}
+
+func TestEventMiddleware_FSReadResponseEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{
+			Op:            req.Op,
+			Ok:            true,
+			ReadChecksums: map[string]string{"md5": "abc", "sha256": "def"},
+		}
+	})
+
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSRead,
+		Path: "/workspace/a.txt",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	if gotResp.Data["readChecksumAlgos"] != "md5,sha256" {
+		t.Fatalf("expected fs_read checksum algos enrichment, got data=%v", gotResp.Data)
+	}
+	if gotResp.StoreData["readChecksumAlgos"] != "md5,sha256" {
+		t.Fatalf("expected fs_read checksum algos store enrichment, got storeData=%v", gotResp.StoreData)
+	}
+	if !strings.Contains(gotResp.Data["readChecksums"], `"md5":"abc"`) {
+		t.Fatalf("expected fs_read checksum map enrichment, got data=%v", gotResp.Data)
 	}
 }
 
@@ -601,6 +653,7 @@ func TestEventMiddleware_RequestEnrichmentMovedToOperations(t *testing.T) {
 		Op:               types.HostOpFSWrite,
 		Path:             "/workspace/data.json",
 		Text:             `{"x":1}`,
+		Mode:             "a",
 		Verify:           true,
 		Checksum:         "sha256",
 		ChecksumExpected: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
@@ -617,6 +670,7 @@ func TestEventMiddleware_RequestEnrichmentMovedToOperations(t *testing.T) {
 		"verify":           "true",
 		"checksum":         "sha256",
 		"checksumExpected": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+		"mode":             "a",
 		"atomic":           "true",
 		"sync":             "true",
 	} {
@@ -663,6 +717,7 @@ func TestEventMiddleware_FSWriteResponseEnrichment(t *testing.T) {
 			WriteChecksumAlgo:     "sha256",
 			WriteChecksum:         "abc123",
 			WriteChecksumExpected: "abc123",
+			WriteRequestMode:      "a",
 			WriteMode:             "created",
 			WriteBytes:            &writeBytes,
 			WriteFinalSize:        &writeFinalSize,
@@ -701,6 +756,7 @@ func TestEventMiddleware_FSWriteResponseEnrichment(t *testing.T) {
 		"writeChecksumAlgo":     "sha256",
 		"writeChecksum":         "abc123",
 		"writeChecksumExpected": "abc123",
+		"writeRequestMode":      "a",
 		"writeMode":             "created",
 		"writeBytes":            "12",
 		"writeFinalSize":        "12",

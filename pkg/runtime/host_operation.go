@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -139,6 +140,11 @@ func (fsStatOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpR
 	return opformat.FormatResponseText(respData)
 }
 func (fsStatOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	if resp.Exists != nil {
+		v := fmtBool(*resp.Exists)
+		respData["exists"] = v
+		storeResp["exists"] = v
+	}
 	if resp.IsDir != nil {
 		v := fmtBool(*resp.IsDir)
 		respData["isDir"] = v
@@ -148,6 +154,11 @@ func (fsStatOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.Hos
 		v := strconv.FormatInt(*resp.SizeBytes, 10)
 		respData["sizeBytes"] = v
 		storeResp["sizeBytes"] = v
+	}
+	if resp.Mtime != nil {
+		v := strconv.FormatInt(*resp.Mtime, 10)
+		respData["mtime"] = v
+		storeResp["mtime"] = v
 	}
 }
 
@@ -163,9 +174,50 @@ func (fsReadOperation) FormatRequestText(_ types.HostOpRequest, reqData map[stri
 func (fsReadOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpResponse, _ map[string]string, respData map[string]string) string {
 	return opformat.FormatResponseText(respData)
 }
-func (fsReadOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, _ map[string]string) {
+func (fsReadOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
 	if req.MaxBytes != 0 {
 		reqData["maxBytes"] = strconv.Itoa(req.MaxBytes)
+		storeReq["maxBytes"] = strconv.Itoa(req.MaxBytes)
+	}
+	algos := make([]string, 0, len(req.Checksums)+1)
+	if s := strings.ToLower(strings.TrimSpace(req.Checksum)); s != "" {
+		algos = append(algos, s)
+	}
+	for _, raw := range req.Checksums {
+		s := strings.ToLower(strings.TrimSpace(raw))
+		if s != "" {
+			algos = append(algos, s)
+		}
+	}
+	if len(algos) > 0 {
+		sort.Strings(algos)
+		uniq := make([]string, 0, len(algos))
+		for _, s := range algos {
+			if len(uniq) == 0 || uniq[len(uniq)-1] != s {
+				uniq = append(uniq, s)
+			}
+		}
+		reqData["checksums"] = strings.Join(uniq, ",")
+		storeReq["checksums"] = strings.Join(uniq, ",")
+	}
+}
+func (fsReadOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	if len(resp.ReadChecksums) == 0 {
+		return
+	}
+	b, err := json.Marshal(resp.ReadChecksums)
+	if err == nil {
+		respData["readChecksums"] = string(b)
+		storeResp["readChecksums"] = string(b)
+	}
+	keys := make([]string, 0, len(resp.ReadChecksums))
+	for k := range resp.ReadChecksums {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) > 0 {
+		respData["readChecksumAlgos"] = strings.Join(keys, ",")
+		storeResp["readChecksumAlgos"] = strings.Join(keys, ",")
 	}
 }
 
@@ -231,6 +283,12 @@ func (fsWriteOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[
 		reqData["sync"] = "true"
 		storeReq["sync"] = "true"
 	}
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if mode == "" {
+		mode = "w"
+	}
+	reqData["mode"] = mode
+	storeReq["mode"] = mode
 	if strings.TrimSpace(req.Text) == "" {
 		return
 	}
@@ -277,6 +335,10 @@ func (fsWriteOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.Ho
 	if mode := strings.TrimSpace(resp.WriteMode); mode != "" {
 		respData["writeMode"] = mode
 		storeResp["writeMode"] = mode
+	}
+	if mode := strings.TrimSpace(resp.WriteRequestMode); mode != "" {
+		respData["writeRequestMode"] = mode
+		storeResp["writeRequestMode"] = mode
 	}
 	if resp.WriteBytes != nil {
 		v := strconv.FormatInt(*resp.WriteBytes, 10)

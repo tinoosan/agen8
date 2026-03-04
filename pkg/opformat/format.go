@@ -179,6 +179,9 @@ func FormatResponseText(d map[string]string) string {
 		return prefix + " failed"
 	case "fs_stat":
 		if ok == "true" {
+			if strings.TrimSpace(d["exists"]) == "false" {
+				return prefix + " missing"
+			}
 			isDir := strings.TrimSpace(d["isDir"]) == "true"
 			sizeBytes := strings.TrimSpace(d["sizeBytes"])
 			if isDir {

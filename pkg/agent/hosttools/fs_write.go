@@ -22,6 +22,7 @@ func (t *FSWriteTool) Definition() llmtypes.Tool {
 		map[string]any{
 			"path":             map[string]any{"type": "string", "description": "VFS path to write"},
 			"text":             map[string]any{"type": "string", "description": "File contents to write"},
+			"mode":             map[string]any{"type": "string", "enum": []string{"w", "a"}, "description": "Write mode: w=overwrite/create (default), a=append/create."},
 			"verify":           map[string]any{"type": "boolean", "description": "Read back and compare after writing."},
 			"checksum":         map[string]any{"type": "string", "enum": checksumutil.SupportedAlgorithms(), "description": "Optional checksum algorithm for the written content."},
 			"checksumExpected": map[string]any{"type": "string", "description": "Optional expected checksum hex digest for the selected algorithm. Fails write when mismatched."},
@@ -40,6 +41,7 @@ func (t *FSWriteTool) Execute(_ context.Context, args json.RawMessage) (types.Ho
 	var payload struct {
 		Path             string `json:"path"`
 		Text             string `json:"text"`
+		Mode             string `json:"mode"`
 		Verify           bool   `json:"verify"`
 		Checksum         string `json:"checksum"`
 		ChecksumExpected string `json:"checksumExpected"`
@@ -62,6 +64,7 @@ func (t *FSWriteTool) Execute(_ context.Context, args json.RawMessage) (types.Ho
 		Op:               types.HostOpFSWrite,
 		Path:             resolveVFSPath(payload.Path),
 		Text:             payload.Text,
+		Mode:             strings.TrimSpace(payload.Mode),
 		Verify:           payload.Verify,
 		Checksum:         checksum,
 		ChecksumExpected: expected,

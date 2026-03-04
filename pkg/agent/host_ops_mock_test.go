@@ -173,6 +173,27 @@ func TestHostOpExecutor_FSRead_TextBinaryAndTruncation(t *testing.T) {
 	}
 }
 
+func TestHostOpExecutor_FSRead_ComputesChecksums(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	if err := exec.FS.Write("/workspace/a.txt", []byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:        types.HostOpFSRead,
+		Path:      "/workspace/a.txt",
+		Checksums: []string{"md5", "sha256", "md5"},
+	})
+	if !resp.Ok {
+		t.Fatalf("expected success, got %#v", resp)
+	}
+	if len(resp.ReadChecksums) != 2 {
+		t.Fatalf("expected 2 checksums, got %#v", resp.ReadChecksums)
+	}
+	if len(resp.ReadChecksums["md5"]) != 32 || len(resp.ReadChecksums["sha256"]) != 64 {
+		t.Fatalf("unexpected digest lengths %#v", resp.ReadChecksums)
+	}
+}
+
 func TestHostOpExecutor_FSWrite_VerifyChecksumSuccess(t *testing.T) {
 	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
 
@@ -244,6 +265,39 @@ func TestHostOpExecutor_FSWrite_AllowsEmptyTextAndReportsOverwriteMetadata(t *te
 	}
 }
 
+func TestHostOpExecutor_FSWrite_AppendMode(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	if err := exec.FS.Write("/workspace/a.txt", []byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:     types.HostOpFSWrite,
+		Path:   "/workspace/a.txt",
+		Text:   "\nworld",
+		Mode:   "a",
+		Verify: true,
+	})
+	if !resp.Ok {
+		t.Fatalf("expected append success, got %#v", resp)
+	}
+	if resp.WriteRequestMode != "a" {
+		t.Fatalf("expected writeRequestMode=a, got %#v", resp)
+	}
+	if resp.WriteMode != "appended" {
+		t.Fatalf("expected writeMode=appended, got %#v", resp)
+	}
+	if resp.WriteBytes == nil || *resp.WriteBytes != int64(6) {
+		t.Fatalf("expected writeBytes=6, got %#v", resp)
+	}
+	b, err := exec.FS.Read("/workspace/a.txt")
+	if err != nil {
+		t.Fatalf("read appended file: %v", err)
+	}
+	if got := string(b); got != "hello\nworld" {
+		t.Fatalf("unexpected appended content %q", got)
+	}
+}
+
 func TestHostOpExecutor_FSWrite_ChecksumExpectedMismatchFails(t *testing.T) {
 	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
 	resp := exec.Exec(context.Background(), types.HostOpRequest{
@@ -312,8 +366,14 @@ func TestHostOpExecutor_FSStat_FileAndDirectory(t *testing.T) {
 	if resp.IsDir == nil || *resp.IsDir {
 		t.Fatalf("expected file stat with isDir=false, got %#v", resp)
 	}
+	if resp.Exists == nil || !*resp.Exists {
+		t.Fatalf("expected exists=true for file stat, got %#v", resp)
+	}
 	if resp.SizeBytes == nil || *resp.SizeBytes != int64(5) {
 		t.Fatalf("expected sizeBytes=5, got %#v", resp)
+	}
+	if resp.Mtime == nil {
+		t.Fatalf("expected mtime for file stat, got %#v", resp)
 	}
 
 	resp = exec.Exec(context.Background(), types.HostOpRequest{Op: types.HostOpFSStat, Path: "/workspace"})
@@ -323,19 +383,22 @@ func TestHostOpExecutor_FSStat_FileAndDirectory(t *testing.T) {
 	if resp.IsDir == nil || !*resp.IsDir {
 		t.Fatalf("expected directory stat with isDir=true, got %#v", resp)
 	}
+	if resp.Exists == nil || !*resp.Exists {
+		t.Fatalf("expected exists=true for directory stat, got %#v", resp)
+	}
 	if resp.SizeBytes != nil {
 		t.Fatalf("expected nil sizeBytes for directory stat, got %#v", resp)
 	}
 }
 
-func TestHostOpExecutor_FSStat_MissingPathFails(t *testing.T) {
+func TestHostOpExecutor_FSStat_MissingPathReturnsExistsFalse(t *testing.T) {
 	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
 	resp := exec.Exec(context.Background(), types.HostOpRequest{Op: types.HostOpFSStat, Path: "/workspace/missing.txt"})
-	if resp.Ok {
-		t.Fatalf("expected missing path failure")
+	if !resp.Ok {
+		t.Fatalf("expected non-throwing missing stat response, got %#v", resp)
 	}
-	if strings.TrimSpace(resp.Error) == "" {
-		t.Fatalf("expected error message for missing path")
+	if resp.Exists == nil || *resp.Exists {
+		t.Fatalf("expected exists=false for missing path, got %#v", resp)
 	}
 }
 

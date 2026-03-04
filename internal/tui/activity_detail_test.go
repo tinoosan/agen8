@@ -13,6 +13,7 @@ func TestRenderActivityDetailMarkdown_FSWrite_ShowsContentPreview(t *testing.T) 
 		TextPreview: `{"a":1,"b":{"c":2}}`,
 		TextIsJSON:  true,
 		Data: map[string]string{
+			"mode":                  "a",
 			"verify":                "true",
 			"checksum":              "sha256",
 			"checksumExpected":      "abc123",
@@ -42,6 +43,7 @@ func TestRenderActivityDetailMarkdown_FSWrite_ShowsContentPreview(t *testing.T) 
 		"- verify: `true`",
 		"- checksum: `sha256`",
 		"- checksumExpected: `abc123`",
+		"- mode: `a`",
 		"- atomic: `true`",
 		"- sync: `true`",
 		"- writeVerified: `true`",
@@ -141,18 +143,43 @@ func TestRenderActivityDetailMarkdown_FSStat_Metadata(t *testing.T) {
 		Status: ActivityOK,
 		Ok:     "true",
 		Data: map[string]string{
+			"exists":    "true",
 			"isDir":     "false",
 			"sizeBytes": "42",
+			"mtime":     "1700000000",
 		},
 	}
 	md := renderActivityDetailMarkdown(a, false, false)
 	for _, want := range []string{
 		"- path: `/workspace/a.txt`",
+		"- exists: `true`",
 		"- type: `file`",
 		"- sizeBytes: `42`",
+		"- mtime: `1700000000`",
 	} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("expected %q in fs_stat markdown, got:\n%s", want, md)
+		}
+	}
+}
+
+func TestRenderActivityDetailMarkdown_FSStat_Missing(t *testing.T) {
+	a := Activity{
+		Kind:   "fs_stat",
+		Path:   "/workspace/missing.txt",
+		Status: ActivityOK,
+		Ok:     "true",
+		Data: map[string]string{
+			"exists": "false",
+		},
+	}
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- path: `/workspace/missing.txt`",
+		"- exists: `false`",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in fs_stat missing markdown, got:\n%s", want, md)
 		}
 	}
 }
@@ -407,6 +434,30 @@ func TestRenderActivityDetailMarkdown_CodeExecDetailedSections(t *testing.T) {
 	} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("expected %q in code_exec markdown, got:\n%s", want, md)
+		}
+	}
+}
+
+func TestRenderActivityDetailMarkdown_FSRead_Checksums(t *testing.T) {
+	a := Activity{
+		Kind:   "fs_read",
+		Path:   "/workspace/a.txt",
+		Status: ActivityOK,
+		Ok:     "true",
+		Data: map[string]string{
+			"checksums":     "md5,sha256",
+			"readChecksums": `{"md5":"abc","sha256":"def"}`,
+		},
+	}
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- path: `/workspace/a.txt`",
+		"- checksums: `md5,sha256`",
+		"readChecksums",
+		`"md5":"abc"`,
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in fs_read markdown, got:\n%s", want, md)
 		}
 	}
 }
