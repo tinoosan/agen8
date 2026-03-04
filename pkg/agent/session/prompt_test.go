@@ -124,7 +124,7 @@ func TestBuildWorkerTeamRules_ExcludesCoordinatorOnlyRestrictions(t *testing.T) 
 }
 
 func TestBuildCoordinatorTeamRules_IncludesNoSelfReviewGuidance(t *testing.T) {
-	rules := buildCoordinatorTeamRules()
+	rules := buildCoordinatorTeamRules(3)
 	if !strings.Contains(rules, "do not create or expect coordinator review callbacks") {
 		t.Fatalf("expected no-self-review guidance in coordinator rules, got: %s", rules)
 	}
@@ -132,6 +132,16 @@ func TestBuildCoordinatorTeamRules_IncludesNoSelfReviewGuidance(t *testing.T) {
 		t.Fatalf("expected coordinator workspace guidance, got: %s", rules)
 	}
 	if !strings.Contains(rules, `NEVER use spawnWorker=True`) {
-		t.Fatalf("expected coordinator spawnWorker prohibition, got: %s", rules)
+		t.Fatalf("expected coordinator spawnWorker prohibition for multi-role team, got: %s", rules)
+	}
+}
+
+func TestBuildCoordinatorTeamRules_SingleAgentAllowsSpawnWorker(t *testing.T) {
+	rules := buildCoordinatorTeamRules(1)
+	if strings.Contains(rules, `NEVER use spawnWorker=True`) {
+		t.Fatalf("single-agent coordinator should NOT be told never to spawn workers, got: %s", rules)
+	}
+	if !strings.Contains(rules, `spawnWorker=True`) {
+		t.Fatalf("single-agent coordinator should be told to use spawnWorker=True, got: %s", rules)
 	}
 }
