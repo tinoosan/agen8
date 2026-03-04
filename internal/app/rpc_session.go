@@ -227,7 +227,12 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 		filter.SortBy = "created_at"
 		filter.SortDesc = false
 	case "outbox":
-		filter.Status = []types.TaskStatus{types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled}
+		filter.Status = []types.TaskStatus{
+			types.TaskStatusSucceeded,
+			types.TaskStatusFailed,
+			types.TaskStatusCanceled,
+			types.TaskStatusReviewPending,
+		}
 		filter.SortBy = "finished_at"
 		filter.SortDesc = true
 	}

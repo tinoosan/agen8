@@ -3823,6 +3823,59 @@ func TestRPCServer_TaskList_InboxHidesStagedSingleCallbacks(t *testing.T) {
 	}
 }
 
+func TestRPCServer_TaskList_OutboxIncludesReviewPendingCallbacks(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	teamID := "team-1"
+	sess.TeamID = teamID
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "callback-single-team", SessionID: sess.SessionID, RunID: run.RunID, TeamID: teamID, AssignedRole: "reviewer", AssignedToType: "role", AssignedTo: "reviewer",
+		Goal: "single team callback", Status: types.TaskStatusReviewPending, CreatedAt: &now, Metadata: map[string]any{"source": "team.callback"},
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "callback-single-sub", SessionID: sess.SessionID, RunID: run.RunID, TeamID: teamID, AssignedRole: "reviewer", AssignedToType: "role", AssignedTo: "reviewer",
+		Goal: "single sub callback", Status: types.TaskStatusReviewPending, CreatedAt: &now, Metadata: map[string]any{"source": "subagent.callback"},
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodTaskList, protocol.TaskListParams{
+		ThreadID: protocol.ThreadID(sess.SessionID),
+		TeamID:   teamID,
+		Scope:    "team",
+		View:     "outbox",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("task.list outbox error: %+v", resp.Error)
+	}
+	var out protocol.TaskListResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if len(out.Tasks) != 2 {
+		t.Fatalf("expected staged callbacks in outbox, got %d", len(out.Tasks))
+	}
+	seen := map[string]bool{}
+	for _, task := range out.Tasks {
+		seen[strings.TrimSpace(task.ID)] = true
+		if got := strings.TrimSpace(task.Status); got != string(types.TaskStatusReviewPending) {
+			t.Fatalf("expected review_pending callback in outbox, got status=%q", got)
+		}
+	}
+	if !seen["callback-single-team"] || !seen["callback-single-sub"] {
+		t.Fatalf("missing staged callbacks in outbox: %+v", out.Tasks)
+	}
+}
+
 func TestRPCServer_TeamGetStatus_ManifestRosterIgnoresStaleTaskRuns(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")

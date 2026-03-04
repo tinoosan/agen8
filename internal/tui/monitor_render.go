@@ -522,7 +522,7 @@ func renderOutboxLines(results []outboxEntry, renderer *ContentRenderer, width i
 	_ = renderer
 	_ = width
 	if len(results) == 0 {
-		return kit.StyleDim.Render("No completed tasks yet.")
+		return kit.StyleDim.Render("No outbox tasks yet.")
 	}
 	lines := make([]string, 0, len(results))
 	for _, r := range results {

@@ -391,6 +391,98 @@ func TestManager_CreateTask_CallbackInfersTeamIDFromRun(t *testing.T) {
 	}
 }
 
+func TestManager_CreateTask_StagedCallbacksDoNotPublishMessages(t *testing.T) {
+	store := &mockTaskStore{
+		createTask: func(ctx context.Context, task types.Task) error { return nil },
+	}
+	var published int
+	msgStore := &mockMessageStore{
+		publishMessage: func(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {
+			published++
+			return msg, nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+
+	cases := []types.Task{
+		{
+			TaskID:         "callback-team-1",
+			SessionID:      "team-team-1",
+			RunID:          "run-reviewer",
+			TeamID:         "team-1",
+			AssignedRole:   "reviewer",
+			AssignedToType: "role",
+			AssignedTo:     "reviewer",
+			Status:         types.TaskStatusReviewPending,
+			Metadata: map[string]any{
+				"source":            "team.callback",
+				"batchMode":         true,
+				"batchParentTaskId": "task-parent-1",
+			},
+		},
+		{
+			TaskID:         "callback-subagent-1",
+			SessionID:      "sess-parent",
+			RunID:          "run-parent",
+			TeamID:         "team-1",
+			AssignedToType: "agent",
+			AssignedTo:     "run-parent",
+			Status:         types.TaskStatusReviewPending,
+			Metadata: map[string]any{
+				"source":            "subagent.callback",
+				"batchMode":         true,
+				"batchParentTaskId": "task-parent-2",
+			},
+		},
+	}
+	for _, task := range cases {
+		if err := mgr.CreateTask(context.Background(), task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", task.TaskID, err)
+		}
+	}
+	if published != 0 {
+		t.Fatalf("expected no message publish for staged callbacks, got %d", published)
+	}
+}
+
+func TestManager_CreateTask_SyntheticBatchCallbackPublishesMessage(t *testing.T) {
+	store := &mockTaskStore{
+		createTask: func(ctx context.Context, task types.Task) error { return nil },
+	}
+	var published int
+	msgStore := &mockMessageStore{
+		publishMessage: func(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {
+			published++
+			return msg, nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+
+	task := types.Task{
+		TaskID:         "callback-batch-team-1",
+		SessionID:      "team-team-1",
+		RunID:          "run-reviewer",
+		TeamID:         "team-1",
+		AssignedRole:   "reviewer",
+		AssignedToType: "role",
+		AssignedTo:     "reviewer",
+		Status:         types.TaskStatusPending,
+		Metadata: map[string]any{
+			"source":         "team.batch.callback",
+			"batchMode":      true,
+			"batchSynthetic": true,
+		},
+	}
+	if err := mgr.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if published != 1 {
+		t.Fatalf("expected 1 message publish for synthetic batch callback, got %d", published)
+	}
+}
+
 func TestManager_SubscribeWake_TriggeredByLifecycleMutations(t *testing.T) {
 	taskID := "task-1"
 	task := types.Task{TaskID: taskID, TeamID: "team-1", RunID: "run-1"}
