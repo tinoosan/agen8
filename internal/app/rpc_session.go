@@ -829,6 +829,9 @@ func (s *RPCServer) taskClaim(ctx context.Context, p protocol.TaskClaimParams) (
 		if errors.Is(err, state.ErrTaskMissingMessage) {
 			return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "task has no backing message envelope"}
 		}
+		if errors.Is(err, state.ErrMessageClaimed) {
+			return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "task message already claimed"}
+		}
 		if errors.Is(err, state.ErrMessageTerminal) || errors.Is(err, state.ErrMessageNotClaimable) {
 			return protocol.TaskClaimResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "task message is not claimable"}
 		}
