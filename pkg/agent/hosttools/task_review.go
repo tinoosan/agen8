@@ -332,8 +332,10 @@ func (t *TaskReviewTool) handleRetry(ctx context.Context, task types.Task, feedb
 		return types.HostOpRequest{}, fmt.Errorf("task_review: retry budget exhausted (%d/%d); consider escalating instead", retryCount, retryBudget)
 	}
 
-	childRunID, _ := task.Metadata["sourceRunId"].(string)
-	childRunID = strings.TrimSpace(childRunID)
+	childRunID := reviewMetadataString(task.Metadata, "sourceRunId")
+	if childRunID == "" {
+		childRunID = reviewMetadataString(task.Metadata, "sourceRunID")
+	}
 	if childRunID == "" {
 		return types.HostOpRequest{}, fmt.Errorf("task_review: no sourceRunId in callback metadata")
 	}
@@ -368,8 +370,11 @@ func (t *TaskReviewTool) handleEscalate(ctx context.Context, task types.Task, fe
 	if rc, ok := task.Metadata["retryCount"].(float64); ok {
 		retryCount = int(rc)
 	}
-	sourceRunID, _ := task.Metadata["sourceRunId"].(string)
-	sourceTaskID, _ := task.Metadata["callbackForTaskId"].(string)
+	sourceRunID := reviewMetadataString(task.Metadata, "sourceRunId")
+	if sourceRunID == "" {
+		sourceRunID = reviewMetadataString(task.Metadata, "sourceRunID")
+	}
+	sourceTaskID := reviewMetadataString(task.Metadata, "callbackForTaskId")
 	originalGoal := ""
 	if inputs, ok := task.Inputs["sourceGoal"].(string); ok {
 		originalGoal = inputs
@@ -417,4 +422,15 @@ func (t *TaskReviewTool) handleEscalate(ctx context.Context, task types.Task, fe
 		Text:  fmt.Sprintf("Task %s escalated. Reason: %s", task.TaskID, feedback),
 		Input: input,
 	}, nil
+}
+
+func reviewMetadataString(meta map[string]any, key string) string {
+	if len(meta) == 0 {
+		return ""
+	}
+	raw, ok := meta[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(raw))
 }

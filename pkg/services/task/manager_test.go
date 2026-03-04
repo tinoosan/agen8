@@ -656,3 +656,131 @@ func TestManager_AckMessage_NotifiesWakeForBackedTask(t *testing.T) {
 		t.Fatalf("expected wake after AckMessage")
 	}
 }
+
+func TestManager_ClaimTask_TeamFallbackWithoutThreadScope(t *testing.T) {
+	taskID := "task-role-fallback"
+	task := types.Task{
+		TaskID:         taskID,
+		SessionID:      "sess-worker",
+		RunID:          "run-coordinator",
+		TeamID:         "team-1",
+		AssignedToType: "role",
+		AssignedTo:     "operations-lead",
+		Status:         types.TaskStatusPending,
+	}
+	claimedTask := task
+	claimedTask.Status = types.TaskStatusActive
+	var claimCalled bool
+	var filters []state.MessageClaimFilter
+	store := &mockTaskStore{
+		getTask: func(ctx context.Context, id string) (types.Task, error) {
+			if id != taskID {
+				return types.Task{}, state.ErrTaskNotFound
+			}
+			if claimCalled {
+				return claimedTask, nil
+			}
+			return task, nil
+		},
+		claimTask: func(ctx context.Context, id string, ttl time.Duration) error {
+			claimCalled = true
+			return nil
+		},
+	}
+	msgStore := &mockMessageStore{
+		claimNextMessage: func(ctx context.Context, filter state.MessageClaimFilter, ttl time.Duration, consumerID string) (types.AgentMessage, error) {
+			filters = append(filters, filter)
+			if strings.TrimSpace(filter.ThreadID) != "" {
+				return types.AgentMessage{}, state.ErrMessageNotFound
+			}
+			return types.AgentMessage{
+				MessageID: "msg-role-fallback",
+				TaskRef:   taskID,
+				Status:    types.MessageStatusClaimed,
+			}, nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+
+	if err := mgr.ClaimTask(context.Background(), taskID, time.Minute); err != nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	if !claimCalled {
+		t.Fatalf("expected task claim after relaxed team-scope message claim")
+	}
+	if len(filters) < 2 {
+		t.Fatalf("expected strict + relaxed claim attempts, got %d", len(filters))
+	}
+	if got := strings.TrimSpace(filters[0].ThreadID); got == "" {
+		t.Fatalf("first claim should be thread-scoped")
+	}
+	if got := strings.TrimSpace(filters[len(filters)-1].ThreadID); got != "" {
+		t.Fatalf("final claim should relax thread scope, got threadID=%q", got)
+	}
+}
+
+func TestManager_CompleteTask_TeamFallbackFindsBackingMessage(t *testing.T) {
+	taskID := "task-complete-fallback"
+	task := types.Task{
+		TaskID:    taskID,
+		SessionID: "sess-worker",
+		TeamID:    "team-1",
+		Status:    types.TaskStatusActive,
+	}
+	updated := task
+	updated.Status = types.TaskStatusSucceeded
+	var completed bool
+	var listFilters []state.MessageFilter
+	store := &mockTaskStore{
+		getTask: func(ctx context.Context, id string) (types.Task, error) {
+			if id != taskID {
+				return types.Task{}, state.ErrTaskNotFound
+			}
+			if completed {
+				return updated, nil
+			}
+			return task, nil
+		},
+		completeTask: func(ctx context.Context, id string, result types.TaskResult) error {
+			completed = true
+			return nil
+		},
+	}
+	msgStore := &mockMessageStore{
+		listMessages: func(ctx context.Context, filter state.MessageFilter) ([]types.AgentMessage, error) {
+			listFilters = append(listFilters, filter)
+			if strings.TrimSpace(filter.ThreadID) != "" {
+				return nil, nil
+			}
+			return []types.AgentMessage{
+				{MessageID: "msg-complete-fallback", TaskRef: taskID, Status: types.MessageStatusClaimed},
+			}, nil
+		},
+		ackMessage: func(ctx context.Context, messageID string, result state.MessageAckResult) error {
+			return nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+
+	if err := mgr.CompleteTask(context.Background(), taskID, types.TaskResult{Status: types.TaskStatusSucceeded}); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+	if len(listFilters) < 2 {
+		t.Fatalf("expected thread + team fallback lookups, got %d", len(listFilters))
+	}
+	if got := strings.TrimSpace(listFilters[0].ThreadID); got == "" {
+		t.Fatalf("expected first lookup to use task session thread")
+	}
+	foundRelaxed := false
+	for _, filter := range listFilters {
+		if strings.TrimSpace(filter.ThreadID) == "" && strings.TrimSpace(filter.TeamID) == "team-1" {
+			foundRelaxed = true
+			break
+		}
+	}
+	if !foundRelaxed {
+		t.Fatalf("expected relaxed team-scope lookup when thread lookup misses")
+	}
+}

@@ -447,8 +447,9 @@ func (m *Manager) syncTaskMessagesTerminal(ctx context.Context, task types.Task)
 	if taskID == "" {
 		return nil
 	}
-	msgs, err := m.messageStore.ListMessages(ctx, state.MessageFilter{
+	msgs, err := m.listTaskMessages(ctx, task, state.MessageFilter{
 		ThreadID: strings.TrimSpace(task.SessionID),
+		TeamID:   strings.TrimSpace(task.TeamID),
 		TaskRef:  taskID,
 		Channel:  types.MessageChannelInbox,
 		Statuses: []string{types.MessageStatusPending, types.MessageStatusClaimed, types.MessageStatusNacked},
@@ -514,8 +515,9 @@ func (m *Manager) ensureTaskHasBackingMessage(ctx context.Context, task types.Ta
 	if m == nil || m.messageStore == nil {
 		return types.AgentMessage{}, nil
 	}
-	msgs, err := m.messageStore.ListMessages(ctx, state.MessageFilter{
+	msgs, err := m.listTaskMessages(ctx, task, state.MessageFilter{
 		ThreadID: strings.TrimSpace(task.SessionID),
+		TeamID:   strings.TrimSpace(task.TeamID),
 		TaskRef:  strings.TrimSpace(task.TaskID),
 		Channel:  types.MessageChannelInbox,
 		Limit:    1,
@@ -557,11 +559,22 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 	if err == nil {
 		return msg, nil
 	}
+	// Team tasks can be consumed from a role session different from the task/session thread.
+	// Retry without thread pinning so team+assignee routing remains authoritative.
+	if errors.Is(err, state.ErrMessageNotFound) && strings.TrimSpace(task.TeamID) != "" {
+		relaxed := filter
+		relaxed.ThreadID = ""
+		msg, err = m.messageStore.ClaimNextMessage(ctx, relaxed, ttl, consumerID)
+		if err == nil {
+			return msg, nil
+		}
+	}
 	if !errors.Is(err, state.ErrMessageNotFound) {
 		return types.AgentMessage{}, err
 	}
-	msgs, lerr := m.messageStore.ListMessages(ctx, state.MessageFilter{
+	msgs, lerr := m.listTaskMessages(ctx, task, state.MessageFilter{
 		ThreadID: strings.TrimSpace(task.SessionID),
+		TeamID:   strings.TrimSpace(task.TeamID),
 		TaskRef:  strings.TrimSpace(task.TaskID),
 		Channel:  types.MessageChannelInbox,
 		Limit:    50,
@@ -786,6 +799,23 @@ func (m *Manager) notifyWakeForMessage(ctx context.Context, messageID string) {
 		return
 	}
 	m.notifyWake(task)
+}
+
+func (m *Manager) listTaskMessages(ctx context.Context, task types.Task, filter state.MessageFilter) ([]types.AgentMessage, error) {
+	if m == nil || m.messageStore == nil {
+		return nil, nil
+	}
+	msgs, err := m.messageStore.ListMessages(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if len(msgs) != 0 || strings.TrimSpace(filter.TeamID) == "" || strings.TrimSpace(filter.ThreadID) == "" {
+		return msgs, nil
+	}
+	// Team fallback: allow cross-session role workers to locate the same authoritative message.
+	relaxed := filter
+	relaxed.ThreadID = ""
+	return m.messageStore.ListMessages(ctx, relaxed)
 }
 
 // CloseBatchAndHandoff atomically closes a synthetic batch callback and creates

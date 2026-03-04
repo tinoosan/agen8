@@ -639,19 +639,47 @@ func (s *Session) buildMessageClaimFilters() []state.MessageClaimFilter {
 }
 
 func (s *Session) claimNextScopedMessage(ctx context.Context, filters []state.MessageClaimFilter) (types.AgentMessage, bool, error) {
-	var claimErr error
-	for _, filter := range filters {
-		msg, err := s.cfg.MessageBus.ClaimNextMessage(ctx, filter, s.cfg.LeaseTTL, strings.TrimSpace(s.cfg.RunID))
-		if err == nil {
-			return msg, true, nil
+	tryClaim := func(pass []state.MessageClaimFilter) (types.AgentMessage, bool, error) {
+		var claimErr error
+		for _, filter := range pass {
+			msg, err := s.cfg.MessageBus.ClaimNextMessage(ctx, filter, s.cfg.LeaseTTL, strings.TrimSpace(s.cfg.RunID))
+			if err == nil {
+				return msg, true, nil
+			}
+			if errors.Is(err, state.ErrMessageNotFound) {
+				continue
+			}
+			claimErr = errors.Join(claimErr, fmt.Errorf("claim next message: %w", err))
 		}
-		if errors.Is(err, state.ErrMessageNotFound) {
+		if claimErr != nil {
+			return types.AgentMessage{}, false, claimErr
+		}
+		return types.AgentMessage{}, false, nil
+	}
+	msg, ok, err := tryClaim(filters)
+	if err != nil || ok {
+		return msg, ok, err
+	}
+	// Team runs may use distinct per-role sessions. If nothing matched in the role-local
+	// thread, retry without thread pinning and rely on team+assignee routing.
+	if strings.TrimSpace(s.cfg.TeamID) == "" {
+		return types.AgentMessage{}, false, nil
+	}
+	fallback := make([]state.MessageClaimFilter, 0, len(filters))
+	for _, filter := range filters {
+		if strings.TrimSpace(filter.ThreadID) == "" {
 			continue
 		}
-		claimErr = errors.Join(claimErr, fmt.Errorf("claim next message: %w", err))
+		relaxed := filter
+		relaxed.ThreadID = ""
+		fallback = append(fallback, relaxed)
 	}
-	if claimErr != nil {
-		return types.AgentMessage{}, false, claimErr
+	if len(fallback) == 0 {
+		return types.AgentMessage{}, false, nil
+	}
+	msg, ok, err = tryClaim(fallback)
+	if err != nil || ok {
+		return msg, ok, err
 	}
 	return types.AgentMessage{}, false, nil
 }
@@ -1727,7 +1755,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				taskMetaSource:      taskSourceTeamCallback,
 				"callbackForTaskId": taskID,
 				"sourceRole":        strings.TrimSpace(s.cfg.RoleName),
-				"sourceRunID":       strings.TrimSpace(s.cfg.RunID),
+				"sourceRunId":       strings.TrimSpace(s.cfg.RunID),
 				"sourceTaskStatus":  string(tr.Status),
 				"reviewerRole":      reviewerRole,
 			},
@@ -1957,7 +1985,7 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 			"callbackTaskId": strings.TrimSpace(cb.TaskID),
 			"sourceTaskId":   metadataString(cb.Metadata, "callbackForTaskId"),
 			"sourceStatus":   metadataString(cb.Metadata, "sourceTaskStatus"),
-			"sourceRunId":    metadataString(cb.Metadata, "sourceRunId"),
+			"sourceRunId":    firstNonEmpty(metadataString(cb.Metadata, "sourceRunId"), metadataString(cb.Metadata, "sourceRunID")),
 			"sourceRole":     metadataString(cb.Metadata, "sourceRole"),
 			"summary":        inputString(cb.Inputs, "summary"),
 			"error":          inputString(cb.Inputs, "error"),
@@ -2198,6 +2226,15 @@ func metadataString(m map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprint(raw))
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if v := strings.TrimSpace(value); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func metadataBool(m map[string]any, key string) bool {
