@@ -1298,6 +1298,12 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 	if wakeSub, ok := s.taskService.(taskWakeSubscriber); ok && wakeSub != nil {
 		wakeCh, wakeCancel = wakeSub.SubscribeWake(strings.TrimSpace(teamID), strings.TrimSpace(run.RunID))
 	}
+	messageBus, ok := s.taskService.(agentsession.MessageBus)
+	if !ok || messageBus == nil {
+		orderedEmitter.Close()
+		_ = rt.Shutdown(parent)
+		return nil, fmt.Errorf("task service does not implement message bus")
+	}
 
 	workerSession, err := agentsession.New(agentsession.Config{
 		Agent:      a,
@@ -1307,6 +1313,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 			return resolveProfileRef(s.cfg, strings.TrimSpace(ref))
 		},
 		TaskStore:            s.taskService,
+		MessageBus:           messageBus,
 		Events:               orderedEmitter,
 		RunConversationStore: runConvStore,
 		Memory: &validatingMemoryProvider{
