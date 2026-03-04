@@ -60,6 +60,10 @@ type HostOpRequest struct {
 	TimeoutMs int             `json:"timeoutMs,omitempty"`
 	MaxBytes  int             `json:"maxBytes,omitempty"`
 	Text      string          `json:"text,omitempty"`
+	Verify    bool            `json:"verify,omitempty"`
+	Checksum  string          `json:"checksum,omitempty"`
+	Atomic    bool            `json:"atomic,omitempty"`
+	Sync      bool            `json:"sync,omitempty"`
 	DryRun    bool            `json:"dryRun,omitempty"`
 	Verbose   bool            `json:"verbose,omitempty"`
 	Tag       string          `json:"tag,omitempty"`
@@ -142,7 +146,28 @@ func (r HostOpRequest) Validate() error {
 		}
 		return nil
 
-	case HostOpFSWrite, HostOpFSAppend:
+	case HostOpFSWrite:
+		if err := validate.NonEmpty("path", r.Path); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+			return fmt.Errorf("path must be an absolute VFS path (start with /)")
+		}
+		if err := validate.NonEmpty("text", r.Text); err != nil {
+			return err
+		}
+		if err := validateWriteChecksum(r.Checksum); err != nil {
+			return err
+		}
+
+		if strings.HasPrefix(strings.TrimSpace(r.Path), "/memory/") {
+			if err := validateMemoryWritePath(r.Path); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	case HostOpFSAppend:
 		if err := validate.NonEmpty("path", r.Path); err != nil {
 			return err
 		}
@@ -305,6 +330,16 @@ func validateMemoryWritePath(path string) error {
 	return nil
 }
 
+func validateWriteChecksum(checksum string) error {
+	checksum = strings.ToLower(strings.TrimSpace(checksum))
+	switch checksum {
+	case "", "md5", "sha1", "sha256":
+		return nil
+	default:
+		return fmt.Errorf("checksum must be one of md5|sha1|sha256")
+	}
+}
+
 // SearchResult is one result returned by fs_search.
 type SearchResult struct {
 	Title   string  `json:"title,omitempty"`
@@ -340,10 +375,19 @@ type HostOpResponse struct {
 	// Patch diagnostics are emitted for fs_patch success/failure and dry-run validation.
 	PatchDiagnostics *PatchDiagnostics `json:"patchDiagnostics,omitempty"`
 	PatchDryRun      bool              `json:"patchDryRun,omitempty"`
-	BytesLen         int               `json:"bytesLen,omitempty"`
-	Text             string            `json:"text,omitempty"`
-	BytesB64         string            `json:"bytesB64,omitempty"`
-	Truncated        bool              `json:"truncated,omitempty"`
+	// fs_write verification/checksum metadata.
+	WriteVerified        *bool  `json:"writeVerified,omitempty"`
+	WriteChecksumAlgo    string `json:"writeChecksumAlgo,omitempty"`
+	WriteChecksum        string `json:"writeChecksum,omitempty"`
+	WriteAtomicRequested bool   `json:"writeAtomicRequested,omitempty"`
+	WriteSyncRequested   bool   `json:"writeSyncRequested,omitempty"`
+	WriteMismatchAt      *int64 `json:"writeMismatchAt,omitempty"`
+	WriteExpectedBytes   *int64 `json:"writeExpectedBytes,omitempty"`
+	WriteActualBytes     *int64 `json:"writeActualBytes,omitempty"`
+	BytesLen             int    `json:"bytesLen,omitempty"`
+	Text                 string `json:"text,omitempty"`
+	BytesB64             string `json:"bytesB64,omitempty"`
+	Truncated            bool   `json:"truncated,omitempty"`
 	// Shell output
 	ExitCode int    `json:"exitCode,omitempty"`
 	Stdout   string `json:"stdout,omitempty"`

@@ -150,3 +150,28 @@ func TestHostOpRequest_FSPatchValidation_AllowsDryRunVerbose(t *testing.T) {
 		t.Fatalf("expected error for relative path")
 	}
 }
+
+func TestHostOpRequest_FSWriteValidation_AllowsWriteVerifyFlags(t *testing.T) {
+	req := HostOpRequest{
+		Op:       HostOpFSWrite,
+		Path:     "/workspace/a.txt",
+		Text:     "hello",
+		Verify:   true,
+		Checksum: "sha256",
+		Atomic:   true,
+		Sync:     true,
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	req = HostOpRequest{
+		Op:       HostOpFSWrite,
+		Path:     "/workspace/a.txt",
+		Text:     "hello",
+		Checksum: "crc32",
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for unsupported checksum")
+	}
+}

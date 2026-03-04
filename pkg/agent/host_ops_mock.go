@@ -1,8 +1,13 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -239,10 +244,70 @@ func (fsSearchMockOp) Exec(ctx context.Context, req types.HostOpRequest, x *Host
 type fsWriteMockOp struct{}
 
 func (fsWriteMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
-	if err := x.FS.Write(req.Path, []byte(req.Text)); err != nil {
+	writeBytes := []byte(req.Text)
+	if err := x.FS.Write(req.Path, writeBytes); err != nil {
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 	}
-	return types.HostOpResponse{Op: req.Op, Ok: true}
+
+	resp := types.HostOpResponse{
+		Op:                   req.Op,
+		Ok:                   true,
+		WriteAtomicRequested: req.Atomic,
+		WriteSyncRequested:   req.Sync,
+	}
+	if algo := strings.ToLower(strings.TrimSpace(req.Checksum)); algo != "" {
+		sum, err := writeChecksumHex(algo, writeBytes)
+		if err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		resp.WriteChecksumAlgo = algo
+		resp.WriteChecksum = sum
+	}
+
+	if req.Verify {
+		readBack, err := x.FS.Read(req.Path)
+		if err != nil {
+			verified := false
+			resp.WriteVerified = &verified
+			return types.HostOpResponse{
+				Op:                   req.Op,
+				Ok:                   false,
+				Error:                fmt.Sprintf("verify failed: read-back error: %v", err),
+				WriteVerified:        resp.WriteVerified,
+				WriteChecksumAlgo:    resp.WriteChecksumAlgo,
+				WriteChecksum:        resp.WriteChecksum,
+				WriteAtomicRequested: resp.WriteAtomicRequested,
+				WriteSyncRequested:   resp.WriteSyncRequested,
+			}
+		}
+		if !bytes.Equal(writeBytes, readBack) {
+			verified := false
+			mismatchAt := int64(firstMismatchOffset(writeBytes, readBack))
+			expectedBytes := int64(len(writeBytes))
+			actualBytes := int64(len(readBack))
+			resp.WriteVerified = &verified
+			resp.WriteMismatchAt = &mismatchAt
+			resp.WriteExpectedBytes = &expectedBytes
+			resp.WriteActualBytes = &actualBytes
+			return types.HostOpResponse{
+				Op:                   req.Op,
+				Ok:                   false,
+				Error:                fmt.Sprintf("verify failed: read-back mismatch at byte %d (expected %d bytes, got %d bytes)", mismatchAt, expectedBytes, actualBytes),
+				WriteVerified:        resp.WriteVerified,
+				WriteChecksumAlgo:    resp.WriteChecksumAlgo,
+				WriteChecksum:        resp.WriteChecksum,
+				WriteAtomicRequested: resp.WriteAtomicRequested,
+				WriteSyncRequested:   resp.WriteSyncRequested,
+				WriteMismatchAt:      resp.WriteMismatchAt,
+				WriteExpectedBytes:   resp.WriteExpectedBytes,
+				WriteActualBytes:     resp.WriteActualBytes,
+			}
+		}
+		verified := true
+		resp.WriteVerified = &verified
+	}
+
+	return resp
 }
 
 type fsAppendMockOp struct{}
@@ -1127,6 +1192,35 @@ func (x *HostOpExecutor) resolveBrowserFilePath(vpath string) (string, error) {
 		return filepath.Join(x.ProjectDir, r), nil
 	}
 	return "", fmt.Errorf("filePath must be a VFS path under /project or /workspace")
+}
+
+func writeChecksumHex(algo string, b []byte) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(algo)) {
+	case "md5":
+		sum := md5.Sum(b)
+		return hex.EncodeToString(sum[:]), nil
+	case "sha1":
+		sum := sha1.Sum(b)
+		return hex.EncodeToString(sum[:]), nil
+	case "sha256":
+		sum := sha256.Sum256(b)
+		return hex.EncodeToString(sum[:]), nil
+	default:
+		return "", fmt.Errorf("unsupported checksum algorithm %q", algo)
+	}
+}
+
+func firstMismatchOffset(a, b []byte) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
 }
 
 func encodeReadPayload(b []byte, maxBytes int) (text string, bytesB64 string, truncated bool) {

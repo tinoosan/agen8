@@ -39,6 +39,16 @@ This guide captures common issues and diagnostics that surface when running Agen
   3. Re-run dry-run until clean.
   4. Re-run with `dryRun=false` to apply.
 
+## fs_write verification/checksum
+
+- **Verify critical writes**: use `tools.fs_write(path="...", text="...", verify=true)` to force read-back validation.
+- **Integrity hashes**: set `checksum` to `md5`, `sha1`, or `sha256` to get a deterministic digest in the response/activity details.
+- **Mismatch triage**: on verification failure, inspect `writeMismatchAt`, `writeExpectedBytes`, and `writeActualBytes` fields.
+- **Recommended loop**:
+  1. Run with `verify=true` (+ `checksum="sha256"` for audit trails).
+  2. If mismatch occurs, re-read the file and compare against source payload.
+  3. Re-write and verify again before downstream operations.
+
 ## When to seek help
 
 Collect the following before raising an issue:

@@ -12,6 +12,17 @@ func TestRenderActivityDetailMarkdown_FSWrite_ShowsContentPreview(t *testing.T) 
 		Path:        "/workspace/example.json",
 		TextPreview: `{"a":1,"b":{"c":2}}`,
 		TextIsJSON:  true,
+		Data: map[string]string{
+			"verify":             "true",
+			"checksum":           "sha256",
+			"atomic":             "true",
+			"sync":               "true",
+			"writeVerified":      "true",
+			"writeChecksumAlgo":  "sha256",
+			"writeChecksum":      "abc123",
+			"writeExpectedBytes": "14",
+			"writeActualBytes":   "14",
+		},
 	}
 
 	md := renderActivityDetailMarkdown(a, false, false)
@@ -20,6 +31,19 @@ func TestRenderActivityDetailMarkdown_FSWrite_ShowsContentPreview(t *testing.T) 
 	}
 	if !strings.Contains(md, "```json") {
 		t.Fatalf("expected json code fence, got:\n%s", md)
+	}
+	for _, want := range []string{
+		"- verify: `true`",
+		"- checksum: `sha256`",
+		"- atomic: `true`",
+		"- sync: `true`",
+		"- writeVerified: `true`",
+		"- checksumAlgo: `sha256`",
+		"- checksum: `abc123`",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in fs_write markdown, got:\n%s", want, md)
+		}
 	}
 }
 

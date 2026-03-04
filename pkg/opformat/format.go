@@ -110,6 +110,33 @@ func FormatResponseText(d map[string]string) string {
 	}
 
 	switch op {
+	case "fs_write":
+		if ok == "true" {
+			verified := strings.TrimSpace(d["writeVerified"]) == "true"
+			algo := strings.TrimSpace(d["writeChecksumAlgo"])
+			if verified && algo != "" {
+				return prefix + " verified (" + algo + ")"
+			}
+			if verified {
+				return prefix + " verified"
+			}
+			if algo != "" {
+				return prefix + " wrote (" + algo + ")"
+			}
+			return prefix + " wrote"
+		}
+		if strings.TrimSpace(d["writeVerified"]) == "false" {
+			at := strings.TrimSpace(d["writeMismatchAt"])
+			exp := strings.TrimSpace(d["writeExpectedBytes"])
+			act := strings.TrimSpace(d["writeActualBytes"])
+			if at != "" && exp != "" && act != "" {
+				return prefix + " verify mismatch at byte " + at + " (" + exp + " != " + act + ")"
+			}
+		}
+		if errStr != "" {
+			return prefix + " " + errStr
+		}
+		return prefix + " failed"
 	case "fs_patch":
 		mode := strings.TrimSpace(d["patchMode"])
 		dryRun := strings.TrimSpace(d["patchDryRun"]) == "true" || mode == "dry_run"

@@ -210,7 +210,23 @@ func (fsWriteOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOp
 func (fsWriteOperation) ResolveAfter(req types.HostOpRequest, _ string, _ *vfs.FS) (string, bool) {
 	return req.Text, true
 }
-func (fsWriteOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, _ map[string]string) {
+func (fsWriteOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
+	if req.Verify {
+		reqData["verify"] = "true"
+		storeReq["verify"] = "true"
+	}
+	if checksum := strings.ToLower(strings.TrimSpace(req.Checksum)); checksum != "" {
+		reqData["checksum"] = checksum
+		storeReq["checksum"] = checksum
+	}
+	if req.Atomic {
+		reqData["atomic"] = "true"
+		storeReq["atomic"] = "true"
+	}
+	if req.Sync {
+		reqData["sync"] = "true"
+		storeReq["sync"] = "true"
+	}
 	if strings.TrimSpace(req.Text) == "" {
 		return
 	}
@@ -229,6 +245,44 @@ func (fsWriteOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[
 	}
 	if isJSON {
 		reqData["textIsJSON"] = "true"
+	}
+}
+func (fsWriteOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	if resp.WriteVerified != nil {
+		v := fmtBool(*resp.WriteVerified)
+		respData["writeVerified"] = v
+		storeResp["writeVerified"] = v
+	}
+	if algo := strings.TrimSpace(resp.WriteChecksumAlgo); algo != "" {
+		respData["writeChecksumAlgo"] = algo
+		storeResp["writeChecksumAlgo"] = algo
+	}
+	if sum := strings.TrimSpace(resp.WriteChecksum); sum != "" {
+		respData["writeChecksum"] = sum
+		storeResp["writeChecksum"] = sum
+	}
+	if resp.WriteAtomicRequested {
+		respData["writeAtomicRequested"] = "true"
+		storeResp["writeAtomicRequested"] = "true"
+	}
+	if resp.WriteSyncRequested {
+		respData["writeSyncRequested"] = "true"
+		storeResp["writeSyncRequested"] = "true"
+	}
+	if resp.WriteMismatchAt != nil {
+		v := strconv.FormatInt(*resp.WriteMismatchAt, 10)
+		respData["writeMismatchAt"] = v
+		storeResp["writeMismatchAt"] = v
+	}
+	if resp.WriteExpectedBytes != nil {
+		v := strconv.FormatInt(*resp.WriteExpectedBytes, 10)
+		respData["writeExpectedBytes"] = v
+		storeResp["writeExpectedBytes"] = v
+	}
+	if resp.WriteActualBytes != nil {
+		v := strconv.FormatInt(*resp.WriteActualBytes, 10)
+		respData["writeActualBytes"] = v
+		storeResp["writeActualBytes"] = v
 	}
 }
 

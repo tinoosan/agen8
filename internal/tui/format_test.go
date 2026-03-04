@@ -112,6 +112,16 @@ func TestRenderOpResponse_ToolSpecific(t *testing.T) {
 			want: "✓ 3 results",
 		},
 		{
+			name: "write verified checksum",
+			data: map[string]string{"op": "fs_write", "ok": "true", "writeVerified": "true", "writeChecksumAlgo": "sha256"},
+			want: "✓ verified (sha256)",
+		},
+		{
+			name: "write verify mismatch",
+			data: map[string]string{"op": "fs_write", "ok": "false", "writeVerified": "false", "writeMismatchAt": "3", "writeExpectedBytes": "12", "writeActualBytes": "10"},
+			want: "✗ verify mismatch at byte 3 (12 != 10)",
+		},
+		{
 			name: "patch apply summary",
 			data: map[string]string{"op": "fs_patch", "ok": "true", "patchMode": "apply", "patchHunksApplied": "1", "patchHunksTotal": "1"},
 			want: "✓ patched 1/1 hunks",

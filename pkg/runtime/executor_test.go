@@ -442,6 +442,9 @@ func TestEventMiddleware_EmitsRequestTextForRepresentativeOps(t *testing.T) {
 func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		switch req.Op {
+		case types.HostOpFSWrite:
+			verified := true
+			return types.HostOpResponse{Op: req.Op, Ok: true, WriteVerified: &verified, WriteChecksumAlgo: "sha256"}
 		case types.HostOpFSStat:
 			isDir := false
 			sizeBytes := int64(12)
@@ -492,6 +495,7 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 		req  types.HostOpRequest
 		want string
 	}{
+		{name: "fs_write", req: types.HostOpRequest{Op: types.HostOpFSWrite, Path: "/workspace/a.txt", Text: "hello"}, want: "✓ verified (sha256)"},
 		{name: "fs_stat", req: types.HostOpRequest{Op: types.HostOpFSStat, Path: "/workspace/a.txt"}, want: "✓ file 12 bytes"},
 		{name: "fs_patch", req: types.HostOpRequest{Op: types.HostOpFSPatch, Path: "/workspace/a.txt", Text: "@@ -1 +1 @@\n-old\n+new\n", DryRun: true}, want: "✓ dry-run 1/2 hunks"},
 		{name: "fs_read", req: types.HostOpRequest{Op: types.HostOpFSRead, Path: "/workspace/a.txt"}, want: "✓ truncated"},
@@ -594,15 +598,32 @@ func TestEventMiddleware_RequestEnrichmentMovedToOperations(t *testing.T) {
 	}
 
 	resp = exec.Exec(context.Background(), types.HostOpRequest{
-		Op:   types.HostOpFSWrite,
-		Path: "/workspace/data.json",
-		Text: `{"x":1}`,
+		Op:       types.HostOpFSWrite,
+		Path:     "/workspace/data.json",
+		Text:     `{"x":1}`,
+		Verify:   true,
+		Checksum: "sha256",
+		Atomic:   true,
+		Sync:     true,
 	})
 	if !resp.Ok {
 		t.Fatalf("expected ok response, got %+v", resp)
 	}
 	if gotReq.Data["textPreview"] == "" || gotReq.Data["textIsJSON"] != "true" {
 		t.Fatalf("expected fs_write preview enrichment, got data=%v", gotReq.Data)
+	}
+	for k, want := range map[string]string{
+		"verify":   "true",
+		"checksum": "sha256",
+		"atomic":   "true",
+		"sync":     "true",
+	} {
+		if gotReq.Data[k] != want {
+			t.Fatalf("expected fs_write request enrichment %s=%q, got %q (data=%v)", k, want, gotReq.Data[k], gotReq.Data)
+		}
+		if gotReq.StoreData[k] != want {
+			t.Fatalf("expected fs_write request store enrichment %s=%q, got %q (store=%v)", k, want, gotReq.StoreData[k], gotReq.StoreData)
+		}
 	}
 
 	resp = exec.Exec(context.Background(), types.HostOpRequest{
@@ -620,6 +641,66 @@ func TestEventMiddleware_RequestEnrichmentMovedToOperations(t *testing.T) {
 	}
 	if gotReq.Data["dryRun"] != "true" || gotReq.Data["verbose"] != "true" {
 		t.Fatalf("expected fs_patch dryRun/verbose request enrichment, got data=%v", gotReq.Data)
+	}
+}
+
+func TestEventMiddleware_FSWriteResponseEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		verified := true
+		mismatchAt := int64(0)
+		expectedBytes := int64(12)
+		actualBytes := int64(12)
+		return types.HostOpResponse{
+			Op:                   req.Op,
+			Ok:                   true,
+			WriteVerified:        &verified,
+			WriteChecksumAlgo:    "sha256",
+			WriteChecksum:        "abc123",
+			WriteAtomicRequested: true,
+			WriteSyncRequested:   true,
+			WriteMismatchAt:      &mismatchAt,
+			WriteExpectedBytes:   &expectedBytes,
+			WriteActualBytes:     &actualBytes,
+		}
+	})
+
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSWrite,
+		Path: "/workspace/a.txt",
+		Text: "hello",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected success response")
+	}
+	for k, want := range map[string]string{
+		"writeVerified":        "true",
+		"writeChecksumAlgo":    "sha256",
+		"writeChecksum":        "abc123",
+		"writeAtomicRequested": "true",
+		"writeSyncRequested":   "true",
+		"writeMismatchAt":      "0",
+		"writeExpectedBytes":   "12",
+		"writeActualBytes":     "12",
+	} {
+		if gotResp.Data[k] != want {
+			t.Fatalf("expected response enrichment %s=%q, got %q (data=%v)", k, want, gotResp.Data[k], gotResp.Data)
+		}
+		if gotResp.StoreData[k] != want {
+			t.Fatalf("expected store enrichment %s=%q, got %q (store=%v)", k, want, gotResp.StoreData[k], gotResp.StoreData)
+		}
 	}
 }
 

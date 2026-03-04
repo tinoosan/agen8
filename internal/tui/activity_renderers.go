@@ -557,6 +557,39 @@ func (workdirChangedRenderer) RenderArguments(a Activity, telemetry bool, b *str
 type fsWriteAppendRenderer struct{ baseRenderer }
 
 func (fsWriteAppendRenderer) RenderDetail(a Activity, expanded bool, telemetry bool, b *strings.Builder) {
+	if strings.TrimSpace(a.Kind) == "fs_write" {
+		if v := strings.TrimSpace(a.Data["writeVerified"]); v != "" {
+			b.WriteString("- writeVerified: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["writeChecksumAlgo"]); v != "" {
+			b.WriteString("- checksumAlgo: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["writeChecksum"]); v != "" {
+			b.WriteString("- checksum: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["writeMismatchAt"]); v != "" {
+			b.WriteString("- mismatchAtByte: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["writeExpectedBytes"]); v != "" {
+			b.WriteString("- expectedBytes: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["writeActualBytes"]); v != "" {
+			b.WriteString("- actualBytes: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+	}
+
 	if !a.TextRedacted && strings.TrimSpace(a.TextPreview) != "" {
 		lang := guessCodeFenceLang(a.Path, a.TextIsJSON)
 		b.WriteString("\n**Written content preview**")
@@ -575,6 +608,27 @@ func (fsWriteAppendRenderer) RenderDetail(a Activity, expanded bool, telemetry b
 	}
 	renderCommonOutputPreview(a, expanded, b)
 	renderTelemetryBlock(a, telemetry, false, true, b)
+}
+
+func (fsWriteAppendRenderer) RenderArguments(a Activity, telemetry bool, b *strings.Builder) {
+	renderDefaultArgumentsPrefix(a, telemetry, b)
+	if strings.TrimSpace(a.Kind) != "fs_write" {
+		return
+	}
+	if strings.TrimSpace(a.Data["verify"]) == "true" {
+		b.WriteString("- verify: `true`\n")
+	}
+	if v := strings.TrimSpace(a.Data["checksum"]); v != "" {
+		b.WriteString("- checksum: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if strings.TrimSpace(a.Data["atomic"]) == "true" {
+		b.WriteString("- atomic: `true`\n")
+	}
+	if strings.TrimSpace(a.Data["sync"]) == "true" {
+		b.WriteString("- sync: `true`\n")
+	}
 }
 
 type llmWebSearchRenderer struct{ baseRenderer }

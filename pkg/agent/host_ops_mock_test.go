@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tinoosan/agen8/pkg/resources"
 	pkgtools "github.com/tinoosan/agen8/pkg/tools"
@@ -45,6 +47,65 @@ func newMountedWorkspaceFS(t *testing.T) *vfs.FS {
 		t.Fatalf("new workspace resource: %v", err)
 	}
 	if err := fs.Mount(vfs.MountWorkspace, res); err != nil {
+		t.Fatalf("mount workspace: %v", err)
+	}
+	return fs
+}
+
+type corruptingResource struct {
+	files map[string][]byte
+}
+
+func (r *corruptingResource) SupportsNestedList() bool { return true }
+
+func (r *corruptingResource) List(path string) ([]vfs.Entry, error) {
+	path = strings.Trim(strings.TrimSpace(path), "/")
+	if path != "" {
+		if _, ok := r.files[path]; !ok {
+			return nil, os.ErrNotExist
+		}
+		return []vfs.Entry{vfs.NewFileEntry(path, int64(len(r.files[path])), time.Now())}, nil
+	}
+	out := make([]vfs.Entry, 0, len(r.files))
+	for p, b := range r.files {
+		out = append(out, vfs.NewFileEntry(p, int64(len(b)), time.Now()))
+	}
+	return out, nil
+}
+
+func (r *corruptingResource) Read(path string) ([]byte, error) {
+	b, ok := r.files[strings.Trim(strings.TrimSpace(path), "/")]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	out := append([]byte(nil), b...)
+	if len(out) != 0 {
+		out[len(out)-1] ^= 0x01
+	}
+	return out, nil
+}
+
+func (r *corruptingResource) Write(path string, data []byte) error {
+	if r.files == nil {
+		r.files = map[string][]byte{}
+	}
+	r.files[strings.Trim(strings.TrimSpace(path), "/")] = append([]byte(nil), data...)
+	return nil
+}
+
+func (r *corruptingResource) Append(path string, data []byte) error {
+	key := strings.Trim(strings.TrimSpace(path), "/")
+	if r.files == nil {
+		r.files = map[string][]byte{}
+	}
+	r.files[key] = append(r.files[key], data...)
+	return nil
+}
+
+func newCorruptMountedWorkspaceFS(t *testing.T) *vfs.FS {
+	t.Helper()
+	fs := vfs.NewFS()
+	if err := fs.Mount(vfs.MountWorkspace, &corruptingResource{files: map[string][]byte{}}); err != nil {
 		t.Fatalf("mount workspace: %v", err)
 	}
 	return fs
@@ -109,6 +170,64 @@ func TestHostOpExecutor_FSRead_TextBinaryAndTruncation(t *testing.T) {
 	}
 	if resp.Text != "" || resp.BytesB64 == "" {
 		t.Fatalf("expected base64 binary payload, got %#v", resp)
+	}
+}
+
+func TestHostOpExecutor_FSWrite_VerifyChecksumSuccess(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:       types.HostOpFSWrite,
+		Path:     "/workspace/a.txt",
+		Text:     "hello\n",
+		Verify:   true,
+		Checksum: "sha256",
+		Atomic:   true,
+		Sync:     true,
+	})
+	if !resp.Ok {
+		t.Fatalf("expected success, got %#v", resp)
+	}
+	if resp.WriteVerified == nil || !*resp.WriteVerified {
+		t.Fatalf("expected writeVerified=true, got %#v", resp)
+	}
+	if resp.WriteChecksumAlgo != "sha256" || len(resp.WriteChecksum) != 64 {
+		t.Fatalf("expected sha256 checksum metadata, got %#v", resp)
+	}
+	if !resp.WriteAtomicRequested || !resp.WriteSyncRequested {
+		t.Fatalf("expected atomic/sync requested flags, got %#v", resp)
+	}
+}
+
+func TestHostOpExecutor_FSWrite_VerifyMismatchDiagnostics(t *testing.T) {
+	exec := &HostOpExecutor{FS: newCorruptMountedWorkspaceFS(t)}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:     types.HostOpFSWrite,
+		Path:   "/workspace/a.txt",
+		Text:   "hello",
+		Verify: true,
+	})
+	if resp.Ok {
+		t.Fatalf("expected verify mismatch failure")
+	}
+	if resp.WriteVerified == nil || *resp.WriteVerified {
+		t.Fatalf("expected writeVerified=false, got %#v", resp)
+	}
+	if resp.WriteMismatchAt == nil || resp.WriteExpectedBytes == nil || resp.WriteActualBytes == nil {
+		t.Fatalf("expected mismatch diagnostics, got %#v", resp)
+	}
+	if !strings.Contains(resp.Error, "verify failed") {
+		t.Fatalf("expected verify failure error, got %q", resp.Error)
+	}
+	if got, want := *resp.WriteExpectedBytes, int64(5); got != want {
+		t.Fatalf("expected expectedBytes=%d, got %d", want, got)
+	}
+	if got, want := *resp.WriteActualBytes, int64(5); got != want {
+		t.Fatalf("expected actualBytes=%d, got %d", want, got)
+	}
+	if got := *resp.WriteMismatchAt; got < 0 || got >= int64(5) {
+		t.Fatalf("expected mismatch offset in [0,4], got %d", got)
 	}
 }
 
