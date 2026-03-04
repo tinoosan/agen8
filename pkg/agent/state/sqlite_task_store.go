@@ -2005,6 +2005,10 @@ func (s *SQLiteTaskStore) ClaimNextMessage(ctx context.Context, filter MessageCl
 		where += " AND team_id = ?"
 		args = append(args, id)
 	}
+	if id := strings.TrimSpace(filter.TaskRef); id != "" {
+		where += " AND task_ref = ?"
+		args = append(args, id)
+	}
 	if ch := strings.TrimSpace(filter.Channel); ch != "" {
 		where += " AND channel = ?"
 		args = append(args, ch)

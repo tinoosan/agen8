@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -415,11 +416,14 @@ func (m *Manager) CompleteTask(ctx context.Context, taskID string, result types.
 	if taskID == "" {
 		return fmt.Errorf("taskID is required")
 	}
+	current, err := m.store.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if _, err := m.ensureTaskHasBackingMessage(ctx, current); err != nil {
+		return err
+	}
 	if m.oracle != nil {
-		current, err := m.store.GetTask(ctx, taskID)
-		if err != nil {
-			return err
-		}
 		if err := m.oracle.ValidateCompletion(ctx, m.runLoader, current); err != nil {
 			return err
 		}
@@ -468,13 +472,102 @@ func (m *Manager) syncTaskMessagesTerminal(ctx context.Context, task types.Task)
 }
 
 func (m *Manager) ClaimTask(ctx context.Context, taskID string, ttl time.Duration) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("taskID is required")
+	}
+	task, err := m.store.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	msg, err := m.claimBackingMessageForTask(ctx, task, ttl)
+	if err != nil {
+		return err
+	}
 	if err := m.store.ClaimTask(ctx, taskID, ttl); err != nil {
+		if m.messageStore != nil && strings.TrimSpace(msg.MessageID) != "" {
+			retryAt := time.Now().UTC()
+			switch {
+			case errors.Is(err, state.ErrTaskTerminal):
+				_ = m.messageStore.AckMessage(ctx, msg.MessageID, state.MessageAckResult{
+					Status: types.MessageStatusAcked,
+					Error:  err.Error(),
+				})
+			default:
+				_ = m.messageStore.NackMessage(ctx, msg.MessageID, err.Error(), &retryAt)
+			}
+		}
 		return err
 	}
 	if task, err := m.store.GetTask(ctx, taskID); err == nil {
 		m.notifyWake(task)
 	}
 	return nil
+}
+
+func (m *Manager) ensureTaskHasBackingMessage(ctx context.Context, task types.Task) (types.AgentMessage, error) {
+	if m == nil || m.messageStore == nil {
+		return types.AgentMessage{}, nil
+	}
+	msgs, err := m.messageStore.ListMessages(ctx, state.MessageFilter{
+		ThreadID: strings.TrimSpace(task.SessionID),
+		RunID:    strings.TrimSpace(task.RunID),
+		TaskRef:  strings.TrimSpace(task.TaskID),
+		Channel:  types.MessageChannelInbox,
+		Limit:    1,
+		SortBy:   "created_at",
+	})
+	if err != nil {
+		return types.AgentMessage{}, err
+	}
+	if len(msgs) == 0 {
+		return types.AgentMessage{}, state.ErrTaskMissingMessage
+	}
+	return msgs[0], nil
+}
+
+func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Task, ttl time.Duration) (types.AgentMessage, error) {
+	if m == nil || m.messageStore == nil {
+		return types.AgentMessage{}, nil
+	}
+	filter := state.MessageClaimFilter{
+		ThreadID: strings.TrimSpace(task.SessionID),
+		RunID:    strings.TrimSpace(task.RunID),
+		TeamID:   strings.TrimSpace(task.TeamID),
+		TaskRef:  strings.TrimSpace(task.TaskID),
+		Channel:  types.MessageChannelInbox,
+		Kinds:    []string{types.MessageKindTask, types.MessageKindUserInput},
+	}
+	msg, err := m.messageStore.ClaimNextMessage(ctx, filter, ttl, strings.TrimSpace(task.RunID))
+	if err == nil {
+		return msg, nil
+	}
+	if !errors.Is(err, state.ErrMessageNotFound) {
+		return types.AgentMessage{}, err
+	}
+	msgs, lerr := m.messageStore.ListMessages(ctx, state.MessageFilter{
+		ThreadID: strings.TrimSpace(task.SessionID),
+		RunID:    strings.TrimSpace(task.RunID),
+		TaskRef:  strings.TrimSpace(task.TaskID),
+		Channel:  types.MessageChannelInbox,
+		Limit:    5,
+		SortBy:   "created_at",
+	})
+	if lerr != nil {
+		return types.AgentMessage{}, lerr
+	}
+	if len(msgs) == 0 {
+		return types.AgentMessage{}, state.ErrTaskMissingMessage
+	}
+	for _, m := range msgs {
+		switch strings.TrimSpace(m.Status) {
+		case types.MessageStatusClaimed:
+			return types.AgentMessage{}, state.ErrMessageClaimed
+		case types.MessageStatusAcked, types.MessageStatusDeadletter:
+			return types.AgentMessage{}, state.ErrMessageTerminal
+		}
+	}
+	return types.AgentMessage{}, state.ErrMessageNotClaimable
 }
 
 func (m *Manager) ExtendLease(ctx context.Context, taskID string, ttl time.Duration) error {

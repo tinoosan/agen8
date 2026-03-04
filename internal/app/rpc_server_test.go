@@ -1458,6 +1458,7 @@ func TestRPCServer_TurnCancel_NonBootstrapTask(t *testing.T) {
 	_ = sessStore.SaveSession(context.Background(), bootstrapSess)
 	_ = sessStore.SaveSession(context.Background(), targetSess)
 	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	taskSvc := pkgtask.NewManager(ts, nil)
 	now := time.Now().UTC()
 	task := types.Task{
 		TaskID:    "task-turn-cancel-target",
@@ -1467,11 +1468,11 @@ func TestRPCServer_TurnCancel_NonBootstrapTask(t *testing.T) {
 		Status:    types.TaskStatusPending,
 		CreatedAt: &now,
 	}
-	if err := ts.CreateTask(context.Background(), task); err != nil {
-		t.Fatalf("CreateTask: %v", err)
+	if err := taskSvc.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask via TaskService: %v", err)
 	}
 	srv := NewRPCServer(RPCServerConfig{
-		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: taskSvc, Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
 	})
 
 	req, _ := protocol.NewRequest("1", protocol.MethodTurnCancel, protocol.TurnCancelParams{

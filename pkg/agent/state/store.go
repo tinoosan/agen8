@@ -155,6 +155,7 @@ type MessageClaimFilter struct {
 	ThreadID string
 	RunID    string
 	TeamID   string
+	TaskRef  string
 	Channel  string
 	Kinds    []string
 }
@@ -194,8 +195,12 @@ var (
 
 	// ErrMessageNotFound indicates the requested message does not exist.
 	// Wraps pkgstore.ErrNotFound so callers can use errors.Is(err, pkgstore.ErrNotFound).
-	ErrMessageNotFound  = fmt.Errorf("%w: message", pkgstore.ErrNotFound)
-	ErrMessageClaimed   = errors.New("message already claimed by another worker")
-	ErrMessageTerminal  = errors.New("message is in terminal state")
-	ErrInvalidMsgFilter = errors.New("invalid message filter")
+	ErrMessageNotFound     = fmt.Errorf("%w: message", pkgstore.ErrNotFound)
+	ErrMessageClaimed      = errors.New("message already claimed by another worker")
+	ErrMessageTerminal     = errors.New("message is in terminal state")
+	ErrMessageNotClaimable = errors.New("message is not claimable")
+	ErrInvalidMsgFilter    = errors.New("invalid message filter")
+
+	// ErrTaskMissingMessage indicates a task projection exists without any backing message envelope.
+	ErrTaskMissingMessage = errors.New("task projection has no backing message")
 )
