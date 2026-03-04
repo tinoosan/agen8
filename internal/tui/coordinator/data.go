@@ -316,7 +316,10 @@ func fetchThinkingEventsCmd(endpoint, runID string, afterSeq int64) tea.Cmd {
 					continue
 				}
 				taskId := strings.TrimSpace(ev.Data["taskId"])
-				role := strings.TrimSpace(ev.Data["agent"])
+				role := strings.TrimSpace(ev.Data["sourceRole"])
+				if role == "" {
+					role = strings.TrimSpace(ev.Data["agent"])
+				}
 				if role == "" {
 					role = strings.TrimSpace(ev.Data["role"])
 				}

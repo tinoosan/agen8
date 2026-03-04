@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -18,43 +16,33 @@ func (m *Model) openReasoningSummaryPicker() {
 	if m.runtimeChangeLocked("changing reasoning summary") {
 		return
 	}
-	m.reasoningSummaryPickerOpen = true
-	m.reasoningEffortPickerOpen = false
-	m.commandPaletteOpen = false
-	m.commandPaletteMatches = nil
-	m.commandPaletteSelected = 0
-
-	sel := 1 // default to "auto"
-	cur := strings.ToLower(strings.TrimSpace(m.reasoningSummary))
-	for i, opt := range reasoningSummaryOptions {
-		if cur != "" && cur == string(opt) {
-			sel = i
-			break
-		}
+	opts := make([]string, len(reasoningSummaryOptions))
+	for i, o := range reasoningSummaryOptions {
+		opts[i] = string(o)
 	}
-	m.reasoningSummaryPickerSelected = sel
+	m.reasoningSummaryPicker.Options = opts
+	m.reasoningSummaryPicker.OpenAt(m.reasoningSummary, 1) // default: auto (index 1)
+	m.reasoningEffortPicker.Close()
+	m.commandPalette.Reset()
 	m.layout()
 }
 
 func (m *Model) closeReasoningSummaryPicker() {
-	m.reasoningSummaryPickerOpen = false
-	m.reasoningSummaryPickerSelected = 0
+	m.reasoningSummaryPicker.Close()
 	m.layout()
 }
 
 func (m *Model) selectReasoningSummaryFromPicker() tea.Cmd {
-	if !m.reasoningSummaryPickerOpen {
+	if !m.reasoningSummaryPicker.Open {
 		return nil
 	}
-	i := m.reasoningSummaryPickerSelected
-	if i < 0 || i >= len(reasoningSummaryOptions) {
-		i = 0
+	val := m.reasoningSummaryPicker.CurrentValue()
+	if val == "" {
+		val = string(reasoningSummaryOptions[0])
 	}
-	val := string(reasoningSummaryOptions[i])
 
 	m.reasoningSummary = val
-	m.reasoningSummaryPickerOpen = false
-	m.reasoningSummaryPickerSelected = 0
+	m.reasoningSummaryPicker.Close()
 	m.layout()
 
 	return func() tea.Msg {

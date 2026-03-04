@@ -384,9 +384,10 @@ func (q *sessionQueryService) activityList(ctx context.Context, p protocol.Activ
 						if role == "" {
 							role = parentRole
 						}
-						if strings.TrimSpace(acts[i].Data["role"]) == "" {
-							acts[i].Data["role"] = role
-						}
+						// Always override — the stored event role reflects the session's
+						// profile name (e.g. "General Agent"), not its logical role in the
+						// parent (e.g. "Sub-agent 1"). Mirror the fallback-path behaviour.
+						acts[i].Data["role"] = role
 					}
 					return protocol.ActivityListResult{
 						Activities: acts,

@@ -8,20 +8,11 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 	"github.com/muesli/reflow/wordwrap"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 )
 
 var (
-	colorGreen = lipgloss.Color("#98c379")
-	colorRed   = lipgloss.Color("#e06c75")
-	colorAmber = lipgloss.Color("#e5c07b")
-
-	styleGreen = lipgloss.NewStyle().Foreground(colorGreen)
-	styleRed   = lipgloss.NewStyle().Foreground(colorRed)
-	styleAmber = lipgloss.NewStyle().Foreground(colorAmber)
-
 	styleAccent  = lipgloss.NewStyle().Foreground(kit.BorderColorAccent)
 	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#eaeaea"))
 	styleSection = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#9ad0ff"))
@@ -66,17 +57,17 @@ func (m *Model) View() string {
 
 func (m *Model) renderHeader() string {
 	if m.isNarrow() {
-		status := styleGreen.Render("● connected")
+		status := kit.StyleOK.Render("● connected")
 		if !m.connected {
-			status = styleRed.Render("● disconnected")
+			status = kit.StyleErr.Render("● disconnected")
 		}
 
 		left := styleHeader.Render("mail") + kit.StyleDim.Render(" · ") + status
 		if m.lastErr != "" {
-			left += kit.StyleDim.Render(" · ") + styleRed.Render("err: "+truncate(m.lastErr, 20))
+			left += kit.StyleDim.Render(" · ") + kit.StyleErr.Render("err: "+kit.Truncate(m.lastErr, 20))
 		}
 		if m.notice != "" {
-			left += kit.StyleDim.Render(" · ") + styleAmber.Render(truncate(m.notice, 18))
+			left += kit.StyleDim.Render(" · ") + kit.StylePending.Render(kit.Truncate(m.notice, 18))
 		}
 
 		return lipgloss.NewStyle().
@@ -93,9 +84,9 @@ func (m *Model) renderHeader() string {
 		sid = sid[:12]
 	}
 
-	status := styleGreen.Render("● connected")
+	status := kit.StyleOK.Render("● connected")
 	if !m.connected {
-		status = styleRed.Render("● disconnected")
+		status = kit.StyleErr.Render("● disconnected")
 	}
 
 	counts := fmt.Sprintf("inbox:%d  outbox:%d", len(m.inbox), len(m.outbox))
@@ -106,10 +97,10 @@ func (m *Model) renderHeader() string {
 		kit.StyleDim.Render("  ·  ") + kit.StyleDim.Render(counts)
 
 	if m.lastErr != "" {
-		left += kit.StyleDim.Render("  ·  ") + styleRed.Render("err: "+truncate(m.lastErr, 40))
+		left += kit.StyleDim.Render("  ·  ") + kit.StyleErr.Render("err: "+kit.Truncate(m.lastErr, 40))
 	}
 	if m.notice != "" {
-		left += kit.StyleDim.Render("  ·  ") + styleAmber.Render(truncate(m.notice, 28))
+		left += kit.StyleDim.Render("  ·  ") + kit.StylePending.Render(kit.Truncate(m.notice, 28))
 	}
 
 	return lipgloss.NewStyle().
@@ -215,10 +206,10 @@ func (m *Model) renderCurrentTask(width, height int) string {
 	if m.currentTask != nil {
 		t := m.currentTask
 		elapsed := time.Since(t.CreatedAt).Round(time.Second)
-		contentW := maxInt(10, width-14)
+		contentW := max(10, width-14)
 		body = strings.Join([]string{
-			kit.StyleStatusKey.Render("Goal:    ") + kit.StyleStatusValue.Render(truncate(t.Goal, contentW)),
-			kit.StyleStatusKey.Render("Status:  ") + renderStatus(t.Status) + kit.StyleDim.Render("   Role: ") + kit.StyleStatusValue.Render(fallback(t.Role, "-")),
+			kit.StyleStatusKey.Render("Goal:    ") + kit.StyleStatusValue.Render(kit.Truncate(t.Goal, contentW)),
+			kit.StyleStatusKey.Render("Status:  ") + renderStatus(t.Status) + kit.StyleDim.Render("   Role: ") + kit.StyleStatusValue.Render(kit.Fallback(t.Role, "-")),
 			kit.StyleStatusKey.Render("Started: ") + t.CreatedAt.Format("15:04:05") + kit.StyleDim.Render("   Elapsed: ") + elapsed.String(),
 		}, "\n")
 	}
@@ -241,7 +232,7 @@ func (m *Model) renderFocusedOnly(width, height int) string {
 		}
 		lines := m.buildInboxLines(width, true)
 		content := strings.Join(lines, "\n")
-		content = viewportSlice(content, contentH, m.inboxSel)
+		content = kit.ViewportSlice(content, contentH, m.inboxSel)
 		return lipgloss.NewStyle().Width(width).Height(height).Render(title + "\n" + content)
 	}
 
@@ -252,7 +243,7 @@ func (m *Model) renderFocusedOnly(width, height int) string {
 	}
 	lines := m.buildOutboxLines(width, true)
 	content := strings.Join(lines, "\n")
-	content = viewportSlice(content, contentH, m.outboxScrollOffset())
+	content = kit.ViewportSlice(content, contentH, m.outboxScrollOffset())
 	return lipgloss.NewStyle().Width(width).Height(height).Render(title + "\n" + content)
 }
 
@@ -268,7 +259,7 @@ func (m *Model) renderInboxPanel(width, height int) string {
 	lines := m.buildInboxLines(width, isFocused)
 	content := strings.Join(lines, "\n")
 	// Manual viewport: show slice around selection (title line eats 1 from contentH)
-	content = viewportSlice(content, contentH-1, m.inboxSel)
+	content = kit.ViewportSlice(content, contentH-1, m.inboxSel)
 
 	borderColor := kit.BorderColorDefault
 	if isFocused {
@@ -324,7 +315,7 @@ func (m *Model) buildInboxLines(width int, isFocused bool) []string {
 		if m.isNarrow() {
 			space = 15
 		}
-		goal := truncate(t.Goal, maxInt(10, width-space))
+		goal := kit.Truncate(t.Goal, max(10, width-space))
 		if goal != "" {
 			line += " — " + goal
 		}
@@ -367,7 +358,7 @@ func (m *Model) renderOutboxPanel(width, height int) string {
 	lines := m.buildOutboxLines(width, isFocused)
 	content := strings.Join(lines, "\n")
 	// Title line eats 1 from contentH
-	content = viewportSlice(content, contentH-1, m.outboxScrollOffset())
+	content = kit.ViewportSlice(content, contentH-1, m.outboxScrollOffset())
 
 	borderColor := kit.BorderColorDefault
 	if isFocused {
@@ -411,7 +402,7 @@ func (m *Model) buildOutboxLines(width int, isFocused bool) []string {
 		if m.isNarrow() {
 			space = 20
 		}
-		goal := truncate(r.Goal, maxInt(10, width-space))
+		goal := kit.Truncate(r.Goal, max(10, width-space))
 		statusStr := renderStatus(r.Status)
 
 		meta := ""
@@ -439,7 +430,7 @@ func (m *Model) buildOutboxLines(width int, isFocused bool) []string {
 		lines = append(lines, header)
 
 		if r.Error != "" && (r.Status == "failed" || r.Status == "canceled") {
-			lines = append(lines, "    └ "+styleRed.Render("error: "+truncate(r.Error, maxInt(10, width-20))))
+			lines = append(lines, "    └ "+kit.StyleErr.Render("error: "+kit.Truncate(r.Error, max(10, width-20))))
 		}
 		if !m.isNarrow() && r.TotalTokens > 0 {
 			tokLine := fmt.Sprintf("    └ tokens: %d (%d in + %d out)", r.TotalTokens, r.InputTokens, r.OutputTokens)
@@ -480,13 +471,13 @@ func (m *Model) renderDetailPanel(width, height int) string {
 	if contentH < 1 {
 		contentH = 1
 	}
-	contentW := maxInt(10, width-4)
+	contentW := max(10, width-4)
 
 	title := styleSection.Render("Task Detail")
 	lines := []string{
 		kit.StyleStatusKey.Render("ID:       ") + kit.StyleStatusValue.Render(task.ID),
-		kit.StyleStatusKey.Render("Run:      ") + kit.StyleStatusValue.Render(fallback(task.RunID, "-")),
-		kit.StyleStatusKey.Render("Role:     ") + kit.StyleStatusValue.Render(fallback(task.Role, "-")),
+		kit.StyleStatusKey.Render("Run:      ") + kit.StyleStatusValue.Render(kit.Fallback(task.RunID, "-")),
+		kit.StyleStatusKey.Render("Role:     ") + kit.StyleStatusValue.Render(kit.Fallback(task.Role, "-")),
 		kit.StyleStatusKey.Render("Status:   ") + renderStatus(task.Status),
 	}
 
@@ -497,7 +488,7 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		lines = append(lines, kit.StyleStatusKey.Render("Summary:  ")+renderDetailMarkdown(task.Summary, contentW-10))
 	}
 	if task.Error != "" {
-		lines = append(lines, kit.StyleStatusKey.Render("Error:    ")+styleRed.Render(wrapText(task.Error, contentW-10)))
+		lines = append(lines, kit.StyleStatusKey.Render("Error:    ")+kit.StyleErr.Render(wrapText(task.Error, contentW-10)))
 	}
 	if task.TotalTokens > 0 {
 		lines = append(lines, kit.StyleStatusKey.Render("Tokens:   ")+
@@ -521,7 +512,7 @@ func (m *Model) renderDetailPanel(width, height int) string {
 
 	content := strings.Join(lines, "\n")
 	// Title line eats 1 from contentH
-	content = viewportSlice(content, contentH-1, 0)
+	content = kit.ViewportSlice(content, contentH-1, 0)
 
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -535,14 +526,12 @@ func (m *Model) renderDetailPanel(width, height int) string {
 
 func renderStatus(status string) string {
 	switch status {
-	case "succeeded":
-		return styleGreen.Render(status)
-	case "batched":
-		return styleGreen.Render(status)
+	case "succeeded", "batched":
+		return kit.StyleOK.Render(status)
 	case "failed", "canceled":
-		return styleRed.Render(status)
+		return kit.StyleErr.Render(status)
 	case "active":
-		return styleAmber.Render(status)
+		return kit.StylePending.Render(status)
 	default:
 		return status
 	}
@@ -555,26 +544,6 @@ func shortID(id string, n int) string {
 	return id[:n]
 }
 
-func truncate(s string, max int) string {
-	if max <= 0 {
-		return ""
-	}
-	s = strings.TrimSpace(s)
-	if s == "" || runewidth.StringWidth(s) <= max {
-		return s
-	}
-	if max <= 3 {
-		return runewidth.Truncate(s, max, "")
-	}
-	return runewidth.Truncate(s, max-3, "") + "..."
-}
-
-func fallback(v, def string) string {
-	if strings.TrimSpace(v) == "" {
-		return def
-	}
-	return v
-}
 
 func wrapText(s string, width int) string {
 	if width <= 0 {
@@ -623,34 +592,3 @@ func detailMarkdownRenderer(width int) (*glamour.TermRenderer, error) {
 	return r, nil
 }
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-// viewportSlice returns a window of visibleLines starting from targetIdx (top-anchored).
-func viewportSlice(content string, visibleLines, targetIdx int) string {
-	lines := strings.Split(content, "\n")
-	if visibleLines <= 0 {
-		visibleLines = 1
-	}
-	if len(lines) <= visibleLines {
-		return content
-	}
-	// Clamp targetIdx to valid range
-	if targetIdx < 0 {
-		targetIdx = 0
-	}
-	if targetIdx >= len(lines) {
-		targetIdx = len(lines) - 1
-	}
-	start := targetIdx
-	end := start + visibleLines
-	if end > len(lines) {
-		end = len(lines)
-		start = maxInt(0, end-visibleLines)
-	}
-	return strings.Join(lines[start:end], "\n")
-}

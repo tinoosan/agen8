@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tinoosan/agen8/internal/tui/kit"
 	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/events"
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
@@ -287,9 +288,7 @@ type Model struct {
 	renderer *ContentRenderer
 
 	// Command palette state
-	commandPaletteOpen     bool
-	commandPaletteMatches  []string
-	commandPaletteSelected int
+	commandPalette kit.CommandPalette
 
 	// Model picker state
 	modelPickerOpen bool
@@ -309,12 +308,10 @@ type Model struct {
 	switchNew       bool
 
 	// Reasoning effort picker (opened via `/reasoning effort` with no value)
-	reasoningEffortPickerOpen     bool
-	reasoningEffortPickerSelected int
+	reasoningEffortPicker kit.OptionsPicker
 
 	// Reasoning summary picker (/reasoning summary command)
-	reasoningSummaryPickerOpen     bool
-	reasoningSummaryPickerSelected int
+	reasoningSummaryPicker kit.OptionsPicker
 
 	// Help modal (Ctrl+P)
 	helpModalOpen  bool

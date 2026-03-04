@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -18,44 +16,29 @@ func (m *Model) openReasoningEffortPicker() {
 	if m.runtimeChangeLocked("changing reasoning effort") {
 		return
 	}
-	m.reasoningEffortPickerOpen = true
-	m.commandPaletteOpen = false
-	m.commandPaletteMatches = nil
-	m.commandPaletteSelected = 0
-
-	// Preselect current effort if known; otherwise default to "medium".
-	sel := 3 // medium
-	cur := strings.ToLower(strings.TrimSpace(m.reasoningEffort))
-	for i, opt := range reasoningEffortOptions {
-		if cur != "" && cur == opt {
-			sel = i
-			break
-		}
-	}
-	m.reasoningEffortPickerSelected = sel
+	m.reasoningEffortPicker.Options = reasoningEffortOptions
+	m.reasoningEffortPicker.OpenAt(m.reasoningEffort, 3) // default: medium (index 3)
+	m.commandPalette.Reset()
 	m.layout()
 }
 
 func (m *Model) closeReasoningEffortPicker() {
-	m.reasoningEffortPickerOpen = false
-	m.reasoningEffortPickerSelected = 0
+	m.reasoningEffortPicker.Close()
 	m.layout()
 }
 
 func (m *Model) selectReasoningEffortFromPicker() tea.Cmd {
-	if !m.reasoningEffortPickerOpen {
+	if !m.reasoningEffortPicker.Open {
 		return nil
 	}
-	i := m.reasoningEffortPickerSelected
-	if i < 0 || i >= len(reasoningEffortOptions) {
-		i = 0
+	val := m.reasoningEffortPicker.CurrentValue()
+	if val == "" {
+		val = reasoningEffortOptions[0]
 	}
-	val := reasoningEffortOptions[i]
 
 	// Optimistic update so the composer status row updates immediately.
 	m.reasoningEffort = val
-	m.reasoningEffortPickerOpen = false
-	m.reasoningEffortPickerSelected = 0
+	m.reasoningEffortPicker.Close()
 	// Critical: the picker changes composer height; recompute layout so transcript expands back.
 	m.layout()
 

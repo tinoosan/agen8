@@ -90,84 +90,31 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) keyReasoningEffortPicker(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	if !m.reasoningEffortPickerOpen {
+	if !m.reasoningEffortPicker.Open {
 		return m, nil, false
 	}
-
-	// Capture all keys while open; user can Esc to cancel.
-	switch msg.Type {
-	case tea.KeyEsc:
-		m.closeReasoningEffortPicker()
-		return m, nil, true
-	case tea.KeyEnter:
+	// Handle enter before calling HandleKey, which would close the picker first.
+	if msg.String() == "enter" {
 		return m, m.selectReasoningEffortFromPicker(), true
-	case tea.KeyUp:
-		m.reasoningEffortPickerSelected--
-		if m.reasoningEffortPickerSelected < 0 {
-			m.reasoningEffortPickerSelected = len(reasoningEffortOptions) - 1
-		}
-		return m, nil, true
-	case tea.KeyDown:
-		m.reasoningEffortPickerSelected++
-		if m.reasoningEffortPickerSelected >= len(reasoningEffortOptions) {
-			m.reasoningEffortPickerSelected = 0
-		}
-		return m, nil, true
 	}
-	switch msg.String() {
-	case "j":
-		m.reasoningEffortPickerSelected++
-		if m.reasoningEffortPickerSelected >= len(reasoningEffortOptions) {
-			m.reasoningEffortPickerSelected = 0
-		}
-		return m, nil, true
-	case "k":
-		m.reasoningEffortPickerSelected--
-		if m.reasoningEffortPickerSelected < 0 {
-			m.reasoningEffortPickerSelected = len(reasoningEffortOptions) - 1
-		}
-		return m, nil, true
+	// Capture all keys while open; user can Esc to cancel.
+	handled, _ := m.reasoningEffortPicker.HandleKey(msg.String())
+	if handled {
+		m.layout()
 	}
 	return m, nil, true
 }
 
 func (m Model) keyReasoningSummaryPicker(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
-	if !m.reasoningSummaryPickerOpen {
+	if !m.reasoningSummaryPicker.Open {
 		return m, nil, false
 	}
-
-	switch msg.Type {
-	case tea.KeyEsc:
-		m.closeReasoningSummaryPicker()
-		return m, nil, true
-	case tea.KeyEnter:
+	if msg.String() == "enter" {
 		return m, m.selectReasoningSummaryFromPicker(), true
-	case tea.KeyUp:
-		m.reasoningSummaryPickerSelected--
-		if m.reasoningSummaryPickerSelected < 0 {
-			m.reasoningSummaryPickerSelected = len(reasoningSummaryOptions) - 1
-		}
-		return m, nil, true
-	case tea.KeyDown:
-		m.reasoningSummaryPickerSelected++
-		if m.reasoningSummaryPickerSelected >= len(reasoningSummaryOptions) {
-			m.reasoningSummaryPickerSelected = 0
-		}
-		return m, nil, true
 	}
-	switch msg.String() {
-	case "j":
-		m.reasoningSummaryPickerSelected++
-		if m.reasoningSummaryPickerSelected >= len(reasoningSummaryOptions) {
-			m.reasoningSummaryPickerSelected = 0
-		}
-		return m, nil, true
-	case "k":
-		m.reasoningSummaryPickerSelected--
-		if m.reasoningSummaryPickerSelected < 0 {
-			m.reasoningSummaryPickerSelected = len(reasoningSummaryOptions) - 1
-		}
-		return m, nil, true
+	handled, _ := m.reasoningSummaryPicker.HandleKey(msg.String())
+	if handled {
+		m.layout()
 	}
 	return m, nil, true
 }
@@ -505,10 +452,10 @@ func (m Model) keyEscClosesPanels(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if msg.Type != tea.KeyEsc {
 		return m, nil, false
 	}
-	if m.commandPaletteOpen {
-		m.commandPaletteOpen = false
-		m.commandPaletteMatches = nil
-		m.commandPaletteSelected = 0
+	if m.commandPalette.Open {
+		m.commandPalette.Open = false
+		m.commandPalette.Matches = nil
+		m.commandPalette.Selected = 0
 		m.layout()
 		return m, nil, true
 	}
@@ -655,39 +602,39 @@ func (m Model) keyActivityPaneFocused(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 func (m Model) keyCommandPaletteNav(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	// Command palette navigation (Up/Down/Enter) when palette is open.
 	// These keys must be intercepted before they reach the textarea.
-	if !m.commandPaletteOpen {
+	if !m.commandPalette.Open {
 		return m, nil, false
 	}
 	switch msg.Type {
 	case tea.KeyUp:
-		if len(m.commandPaletteMatches) > 0 {
-			m.commandPaletteSelected--
-			if m.commandPaletteSelected < 0 {
-				m.commandPaletteSelected = len(m.commandPaletteMatches) - 1
+		if len(m.commandPalette.Matches) > 0 {
+			m.commandPalette.Selected--
+			if m.commandPalette.Selected < 0 {
+				m.commandPalette.Selected = len(m.commandPalette.Matches) - 1
 			}
 		}
 		return m, nil, true
 	case tea.KeyDown:
-		if len(m.commandPaletteMatches) > 0 {
-			m.commandPaletteSelected++
-			if m.commandPaletteSelected >= len(m.commandPaletteMatches) {
-				m.commandPaletteSelected = 0
+		if len(m.commandPalette.Matches) > 0 {
+			m.commandPalette.Selected++
+			if m.commandPalette.Selected >= len(m.commandPalette.Matches) {
+				m.commandPalette.Selected = 0
 			}
 		}
 		return m, nil, true
 	case tea.KeyEnter:
-		if len(m.commandPaletteMatches) == 0 {
+		if len(m.commandPalette.Matches) == 0 {
 			return m, nil, true
 		}
 		// Enter accepts the highlighted command. If the user has already started typing
 		// arguments, Enter should still submit as before. If there are no args yet:
 		//   - picker/no-arg commands invoke immediately
 		//   - arg-taking commands only insert the command + trailing space
-		selected := m.commandPaletteSelected
-		if selected < 0 || selected >= len(m.commandPaletteMatches) {
+		selected := m.commandPalette.Selected
+		if selected < 0 || selected >= len(m.commandPalette.Matches) {
 			selected = 0
 		}
-		selectedCmd := m.commandPaletteMatches[selected]
+		selectedCmd := m.commandPalette.Matches[selected]
 
 		// Determine whether the user has already typed anything beyond the first token.
 		inputValue := strings.TrimSpace(m.currentInputValue())

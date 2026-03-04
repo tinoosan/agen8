@@ -4243,6 +4243,81 @@ func TestRPCServer_TeamGetStatus_TotalTokensMatchesInOutWhenTheyDifferFromRunSta
 	}
 }
 
+func TestRPCServer_TeamGetStatus_SharedSessionNotDoubleCountedAcrossRuns(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	bootstrapSess, bootstrapRun, err := implstore.CreateSession(cfg, "bootstrap", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession bootstrap: %v", err)
+	}
+	sharedSess, runA, err := implstore.CreateSession(cfg, "shared-a", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession shared-a: %v", err)
+	}
+	runB := types.NewRun("shared-b", 8*1024, sharedSess.SessionID)
+
+	sharedSess.InputTokens = 321
+	sharedSess.OutputTokens = 123
+	sharedSess.TotalTokens = 444
+
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), bootstrapSess); err != nil {
+		t.Fatalf("SaveSession bootstrap: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), sharedSess); err != nil {
+		t.Fatalf("SaveSession shared: %v", err)
+	}
+	if err := sessStore.SaveRun(context.Background(), runA); err != nil {
+		t.Fatalf("SaveRun A: %v", err)
+	}
+	if err := sessStore.SaveRun(context.Background(), runB); err != nil {
+		t.Fatalf("SaveRun B: %v", err)
+	}
+
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	now := time.Now().UTC()
+	teamID := "team-shared"
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-a", SessionID: runA.SessionID, RunID: runA.RunID, TeamID: teamID, AssignedRole: "role-a",
+		Goal: "A", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CompleteTask(context.Background(), "task-a", types.TaskResult{
+		TaskID:      "task-a",
+		Status:      types.TaskStatusSucceeded,
+		TotalTokens: 200,
+		CompletedAt: &now,
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "task-b", SessionID: runB.SessionID, RunID: runB.RunID, TeamID: teamID, AssignedRole: "role-b",
+		Goal: "B", Status: types.TaskStatusPending, CreatedAt: &now,
+	})
+	_ = ts.CompleteTask(context.Background(), "task-b", types.TaskResult{
+		TaskID:      "task-b",
+		Status:      types.TaskStatusSucceeded,
+		TotalTokens: 244,
+		CompletedAt: &now,
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: bootstrapRun, AllowAnyThread: true, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodTeamGetStatus, protocol.TeamGetStatusParams{
+		ThreadID: protocol.ThreadID(bootstrapRun.SessionID),
+		TeamID:   teamID,
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("team.getStatus error: %+v", resp.Error)
+	}
+	var out protocol.TeamGetStatusResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if out.TotalTokensIn != 321 || out.TotalTokensOut != 123 || out.TotalTokens != 444 {
+		t.Fatalf("expected shared session totals counted once, got %+v", out)
+	}
+}
+
 func TestRPCServer_ActivityList_TeamUsesManifestRunsOnlyByDefault(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tinoosan/agen8/internal/tui/kit"
 	"github.com/tinoosan/agen8/internal/tui/rpcscope"
 	"github.com/tinoosan/agen8/internal/tui/sessionsync"
 	"github.com/tinoosan/agen8/pkg/protocol"
@@ -101,7 +102,7 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			}
 			return dataLoadedMsg{err: err}
 		}
-		mode := fallback(strings.TrimSpace(scope.Mode), "standalone")
+		mode := kit.Fallback(strings.TrimSpace(scope.Mode), "standalone")
 		teamID := strings.TrimSpace(scope.TeamID)
 		runID := strings.TrimSpace(scope.RunID)
 		reviewerRole := ""
@@ -264,11 +265,11 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			}
 
 			agents = append(agents, agentRow{
-				Role:            fallback(role, "-"),
+				Role:            kit.Fallback(role, "-"),
 				RunID:           rid,
-				Status:          fallback(status, "idle"),
+				Status:          kit.Fallback(status, "idle"),
 				Profile:         strings.TrimSpace(agent.Profile),
-				Model:           fallback(model, "-"),
+				Model:           kit.Fallback(model, "-"),
 				RunTotalTokens:  runTotalTokens,
 				RunTotalCostUSD: runTotalCostUSD,
 				AssignedTasks:   assignedTasks,

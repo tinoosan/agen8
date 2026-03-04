@@ -191,7 +191,7 @@ func buildTeamBlock(teamID string, roleName string, coordinatorRole string, team
 	if roleName != coordinatorRole {
 		b.WriteString(buildWorkerTeamRules(roleName))
 	} else {
-		b.WriteString(buildCoordinatorTeamRules())
+		b.WriteString(buildCoordinatorTeamRules(len(roles)))
 	}
 	b.WriteString("- Use WriteMemory and AppendMemory tools for memory updates; do not write memory files directly in the workspace.\n")
 	b.WriteString("</team>")
@@ -201,18 +201,23 @@ func buildTeamBlock(teamID string, roleName string, coordinatorRole string, team
 func buildWorkerTeamRules(roleName string) string {
 	var b strings.Builder
 	b.WriteString("- You cannot assign tasks to other non-coordinator roles.\n")
-	b.WriteString("- Team workspace is shared. Write your deliverables under /workspace/<your-role>/... (for example, /workspace/")
+	b.WriteString("- Team workspace is shared. Write deliverables using full paths (for example, tools.fs_write(path='/workspace/")
 	b.WriteString(roleName)
-	b.WriteString("/report.pdf).\n")
+	b.WriteString("/report.txt', text='...')). Create subdirectories explicitly with os.makedirs if needed. Do not set /workspace/<your-role> as cwd because the directory may not exist yet.\n")
 	b.WriteString("- Team tasks are shared. Your task summaries are recorded under /tasks/<your-role>/<date>/<taskID>/SUMMARY.md.\n")
 	return b.String()
 }
 
-func buildCoordinatorTeamRules() string {
+func buildCoordinatorTeamRules(teamSize int) string {
 	var b strings.Builder
 	b.WriteString("- As coordinator, you may assign tasks to any valid role.\n")
 	b.WriteString("- As coordinator, you MUST NOT perform specialist work unless it is a job for your role.\n")
 	b.WriteString("- As coordinator, your only responsibilities are: break down goals, delegate tasks, review callbacks, and track completion.\n")
+	if teamSize > 1 {
+		b.WriteString("- In code_exec_only mode, delegate with tools.task_create(goal=\"...\", assignedRole=\"role\"). NEVER use spawnWorker=True - coordinators in multi-role teams must delegate to co-agents instead.\n")
+	} else {
+		b.WriteString("- In code_exec_only mode, use tools.task_create(goal=\"...\", spawnWorker=True) to spawn workers for subtasks. You are the only role, so use spawnWorker to create subagents.\n")
+	}
 	b.WriteString("- As coordinator, NEVER use web_search, file tools, or shell tools for specialist work.\n")
 	b.WriteString("- If you create and complete a coordinator-assigned task yourself, do not create or expect coordinator review callbacks.\n")
 	b.WriteString("- Team workspace is shared at /workspace. Delegate and review outputs using /workspace/<target-role>/... (e.g. /workspace/researcher/report.pdf).\n")

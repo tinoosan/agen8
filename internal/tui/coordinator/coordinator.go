@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tinoosan/agen8/internal/tui/adapter"
+	"github.com/tinoosan/agen8/internal/tui/kit"
 	"github.com/tinoosan/agen8/internal/tui/modelpicker"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
@@ -93,7 +94,7 @@ func Run(endpoint, sessionID string) error {
 		endpoint = protocol.DefaultRPCEndpoint
 	}
 	in := textinput.New()
-	in.Prompt = styleAccent.Render("❯ ")
+	in.Prompt = kit.StyleAccent.Render("❯ ")
 	in.Placeholder = "type a goal or /command..."
 	in.Focus()
 	in.CharLimit = 0

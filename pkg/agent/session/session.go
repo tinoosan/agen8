@@ -1184,6 +1184,9 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 		if taskSource != "" {
 			data[taskMetaSource] = taskSource
 		}
+		if sourceLabel := metadataString(task.Metadata, "sourceLabel"); sourceLabel != "" {
+			data["sourceRole"] = sourceLabel
+		}
 		if taskHeartbeatJob != "" {
 			data["job"] = taskHeartbeatJob
 		}
@@ -1768,6 +1771,7 @@ func (s *Session) maybeCreateCoordinatorCallback(ctx context.Context, task types
 				taskMetaSource:      taskSourceSubagentCallback,
 				"callbackForTaskId": taskID,
 				"sourceRunId":       strings.TrimSpace(s.cfg.RunID),
+				"sourceLabel":       subagentLabel,
 				"sourceTeamId":      strings.TrimSpace(s.cfg.TeamID),
 				"sourceTaskStatus":  string(tr.Status),
 				"reviewGate":        true,

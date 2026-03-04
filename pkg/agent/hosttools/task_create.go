@@ -222,7 +222,7 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args json.RawMessage) (typ
 	teamID := strings.TrimSpace(t.TeamID)
 	if teamID != "" {
 		roleName := strings.TrimSpace(t.RoleName)
-		if assignedRole == "" && t.IsCoordinator {
+		if assignedRole == "" && t.IsCoordinator && !payload.SpawnWorker {
 			return types.HostOpRequest{}, fmt.Errorf("task_create.assignedRole is required for coordinators in team mode")
 		}
 		if assignedRole == "" {

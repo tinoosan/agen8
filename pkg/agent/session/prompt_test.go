@@ -18,10 +18,10 @@ func TestBuildTeamBlock(t *testing.T) {
 	if !strings.Contains(block, `assignedRole="head-analyst"`) {
 		t.Fatalf("expected escalation target in team block, got: %s", block)
 	}
-	if !strings.Contains(block, `/workspace/<your-role>/...`) {
+	if !strings.Contains(block, `Write deliverables using full paths`) {
 		t.Fatalf("expected worker workspace guidance in team block, got: %s", block)
 	}
-	if !strings.Contains(block, `/workspace/researcher/report.pdf`) {
+	if !strings.Contains(block, `tools.fs_write(path='/workspace/researcher/report.txt', text='...')`) {
 		t.Fatalf("expected worker role-prefixed example path, got: %s", block)
 	}
 	if !strings.Contains(block, `/tasks/<your-role>/<date>/<taskID>/SUMMARY.md`) {
@@ -115,17 +115,33 @@ func TestBuildWorkerTeamRules_ExcludesCoordinatorOnlyRestrictions(t *testing.T) 
 	if strings.Contains(rules, "MUST NOT perform specialist research, analysis, or report writing") {
 		t.Fatalf("worker rules should not include coordinator-only specialist restriction: %s", rules)
 	}
-	if !strings.Contains(rules, "/workspace/<your-role>/...") {
+	if !strings.Contains(rules, "Write deliverables using full paths") {
 		t.Fatalf("expected worker workspace guidance, got: %s", rules)
+	}
+	if !strings.Contains(rules, "Do not set /workspace/<your-role> as cwd") {
+		t.Fatalf("expected worker cwd guardrail guidance, got: %s", rules)
 	}
 }
 
 func TestBuildCoordinatorTeamRules_IncludesNoSelfReviewGuidance(t *testing.T) {
-	rules := buildCoordinatorTeamRules()
+	rules := buildCoordinatorTeamRules(3)
 	if !strings.Contains(rules, "do not create or expect coordinator review callbacks") {
 		t.Fatalf("expected no-self-review guidance in coordinator rules, got: %s", rules)
 	}
 	if !strings.Contains(rules, "/workspace/<target-role>/...") {
 		t.Fatalf("expected coordinator workspace guidance, got: %s", rules)
+	}
+	if !strings.Contains(rules, `NEVER use spawnWorker=True`) {
+		t.Fatalf("expected coordinator spawnWorker prohibition for multi-role team, got: %s", rules)
+	}
+}
+
+func TestBuildCoordinatorTeamRules_SingleAgentAllowsSpawnWorker(t *testing.T) {
+	rules := buildCoordinatorTeamRules(1)
+	if strings.Contains(rules, `NEVER use spawnWorker=True`) {
+		t.Fatalf("single-agent coordinator should NOT be told never to spawn workers, got: %s", rules)
+	}
+	if !strings.Contains(rules, `spawnWorker=True`) {
+		t.Fatalf("single-agent coordinator should be told to use spawnWorker=True, got: %s", rules)
 	}
 }
