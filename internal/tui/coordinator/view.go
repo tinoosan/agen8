@@ -331,34 +331,38 @@ func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
 				}
 			}
 
-		if isBridge && lastCodeExecIdx >= 0 {
-			// Write ops that produce diffs are NOT collapsed — they stay in the turn
-			// as regular visible entries so each file path and diff renders individually,
-			// just like a standalone fs_write would. Only non-write bridge ops (reads,
-			// lists, http_fetch, etc.) are collapsed under the parent code_exec.
-			if !isWriteOp(e.opKind) {
-				parent := &filtered[lastCodeExecIdx]
-				parent.childCount++
-				if parent.childCount == 1 {
-					parent.bridgeSingleOpKind = e.opKind
-					parent.bridgeSingleData = e.data
-					parent.bridgeSingleText = e.text
-					parent.bridgeSinglePath = e.path
-				} else if parent.childCount == 2 {
-					// More than one non-write bridge: show "Ran N tools".
-					parent.bridgeSingleOpKind = ""
-					parent.bridgeSingleData = nil
-					parent.bridgeSingleText = ""
-					parent.bridgeSinglePath = ""
+			if isBridge && lastCodeExecIdx >= 0 {
+				// Plan file writes (HEAD.md, CHECKLIST.md) are collapsed back into the
+				// parent code_exec and rendered via the dedicated plan rendering path
+				// rather than as diffs. Regular write ops (user files) pass through as
+				// visible entries so their path and diff are shown individually.
+				// Non-write bridge ops (reads, lists, http_fetch, etc.) are also collapsed.
+				if !isWriteOp(e.opKind) || isActivityPlanWrite(e.opKind, e.path) {
+					parent := &filtered[lastCodeExecIdx]
+					parent.childCount++
+					if parent.childCount == 1 {
+						parent.bridgeSingleOpKind = e.opKind
+						parent.bridgeSingleData = e.data
+						parent.bridgeSingleText = e.text
+						parent.bridgeSinglePath = e.path
+					} else if parent.childCount == 2 {
+						// More than one collapsed bridge: show "Ran N tools".
+						parent.bridgeSingleOpKind = ""
+						parent.bridgeSingleData = nil
+						parent.bridgeSingleText = ""
+						parent.bridgeSinglePath = ""
+					}
+					// Promote plan data from collapsed bridge entries to the parent code_exec.
+					if len(e.planItems) > 0 {
+						parent.planItems = e.planItems
+					}
+					if e.planDetailsTitle != "" {
+						parent.planDetailsTitle = e.planDetailsTitle
+					}
+					continue
 				}
-				// Promote plan items from collapsed bridge entries to the parent code_exec.
-				if len(e.planItems) > 0 {
-					parent.planItems = e.planItems
-				}
-				continue
+				// Regular write ops fall through to be added to filtered as visible entries.
 			}
-			// Write ops fall through to be added to filtered normally below.
-		}
 
 			if strings.ToLower(strings.TrimSpace(e.opKind)) == "code_exec" {
 				lastCodeExecIdx = len(filtered)
@@ -480,11 +484,15 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		}
 
 		// ── Standalone plan write ─────────────────────────────────
-		// When the entry itself is a plan write with checklist items,
-		// render as a dedicated "Updated plan" block and skip the
-		// normal verb rendering entirely.
-		if len(e.planItems) > 0 && isActivityPlanWrite(e.opKind, e.path) {
-			lines = append(lines, renderPlanChecklist(e.planItems)...)
+		// Plan file writes are always rendered as dedicated plan blocks,
+		// never as diffs. Skip normal verb/diff rendering entirely.
+		if isActivityPlanWrite(e.opKind, e.path) {
+			if len(e.planItems) > 0 {
+				lines = append(lines, renderPlanChecklist(e.planItems)...)
+			}
+			if e.planDetailsTitle != "" {
+				lines = append(lines, renderPlanDetails(e.planDetailsTitle)...)
+			}
 			continue
 		}
 
@@ -686,18 +694,20 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 			}
 		}
 
-		// ── Promoted plan checklist (from bridge tool calls) ──────
-		// When a code_exec parent has plan items promoted from a
-		// collapsed bridge child, render the checklist below the
-		// normal operation sub-items.
+		// ── Promoted plan blocks (from collapsed bridge plan writes) ──────
+		// Render checklist and/or plan details title promoted from
+		// plan/CHECKLIST.md and plan/HEAD.md bridge writes respectively.
 		if len(e.planItems) > 0 {
 			lines = append(lines, renderPlanChecklist(e.planItems)...)
+		}
+		if e.planDetailsTitle != "" {
+			lines = append(lines, renderPlanDetails(e.planDetailsTitle)...)
 		}
 	}
 	return lines
 }
 
-// ── Plan checklist ────────────────────────────────────────────────────
+// ── Plan blocks ───────────────────────────────────────────────────────
 
 // renderPlanChecklist renders an "Updated plan" block with tree branches
 // connecting each checklist item. Completed items show a green ✓, pending
@@ -726,6 +736,20 @@ func renderPlanChecklist(items []string) []string {
 		}
 	}
 	return lines
+}
+
+// renderPlanDetails renders an "Updated plan details" block showing the title
+// extracted from plan/HEAD.md.
+//
+//	● Updated plan details
+//	└─ Create blog post about Redis
+func renderPlanDetails(title string) []string {
+	header := "  " + stylePlan.Render("●") + " " + stylePlan.Bold(true).Render("Updated plan details")
+	if strings.TrimSpace(title) == "" {
+		return []string{header}
+	}
+	branch := stylePlan.Render("  └─")
+	return []string{header, branch + " " + kit.StyleDim.Render(strings.TrimSpace(title))}
 }
 
 // ── Thinking line ──────────────────────────────────────────────────────

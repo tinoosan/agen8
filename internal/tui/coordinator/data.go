@@ -37,8 +37,9 @@ type feedEntry struct {
 	isText         bool
 	isTaskResponse bool              // true if this text response came from the top-level task (prevents activity merge dupe)
 	data           map[string]string // raw activity Data for verb resolution
-	planItems      []string          // parsed checklist items for plan writes
-	childCount     int               // number of grouped bridge tool calls (for code_exec parents)
+	planItems        []string // parsed checklist items for plan/CHECKLIST.md writes
+	planDetailsTitle string   // first heading extracted from plan/HEAD.md writes
+	childCount       int      // number of grouped bridge tool calls (for code_exec parents)
 	// When childCount == 1 (a single non-write bridge), store the call so we can show "Verb + Args" instead of "Ran 1 tools".
 	bridgeSingleOpKind string
 	bridgeSingleData   map[string]string
@@ -239,21 +240,32 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 			return entries[i].timestamp.Before(entries[j].timestamp)
 		})
 
-		// If any activity is a plan write, fetch the current plan checklist.
-		hasPlanWrite := false
-		lastPlanIdx := -1
+		// If any activity is a plan write, fetch the current plan data and
+		// attach it to the appropriate entries for rendering.
+		lastChecklistIdx := -1
+		lastHeadIdx := -1
 		for i, e := range entries {
-			if isActivityPlanWrite(e.opKind, e.path) {
-				hasPlanWrite = true
-				lastPlanIdx = i
+			if !isActivityPlanWrite(e.opKind, e.path) {
+				continue
+			}
+			p := strings.ToLower(strings.TrimSpace(e.path))
+			if strings.HasSuffix(p, "checklist.md") {
+				lastChecklistIdx = i
+			} else if strings.HasSuffix(p, "head.md") {
+				lastHeadIdx = i
 			}
 		}
-		if hasPlanWrite && lastPlanIdx >= 0 {
+		if lastChecklistIdx >= 0 || lastHeadIdx >= 0 {
 			var planRes protocol.PlanGetResult
 			if err := cli.Call(ctx, protocol.MethodPlanGet, protocol.PlanGetParams{
 				ThreadID: protocol.ThreadID(sid),
-			}, &planRes); err == nil && planRes.Checklist != "" {
-				entries[lastPlanIdx].planItems = parseChecklistItems(planRes.Checklist)
+			}, &planRes); err == nil {
+				if lastChecklistIdx >= 0 && planRes.Checklist != "" {
+					entries[lastChecklistIdx].planItems = parseChecklistItems(planRes.Checklist)
+				}
+				if lastHeadIdx >= 0 && planRes.Details != "" {
+					entries[lastHeadIdx].planDetailsTitle = extractPlanTitle(planRes.Details)
+				}
 			}
 		}
 
@@ -624,6 +636,26 @@ func isActivitySummaryWrite(kind string, text string) bool {
 	}
 	p := strings.TrimSpace(text)
 	return strings.HasSuffix(strings.ToLower(p), "summary.md")
+}
+
+// extractPlanTitle returns the first meaningful heading or line from plan/HEAD.md content.
+// It strips the leading "# " markdown heading marker if present.
+func extractPlanTitle(md string) string {
+	for _, line := range strings.Split(md, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "---" {
+			continue
+		}
+		// Strip markdown heading markers (##, #, etc.)
+		if strings.HasPrefix(line, "#") {
+			line = strings.TrimSpace(strings.TrimLeft(line, "#"))
+		}
+		if line == "" || strings.EqualFold(line, "Current Plan") || strings.EqualFold(line, "No active plan.") {
+			continue
+		}
+		return line
+	}
+	return ""
 }
 
 // checklistRe matches markdown checklist lines like "- [x] item" or "* [ ] item".
