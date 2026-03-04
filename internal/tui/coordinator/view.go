@@ -244,12 +244,38 @@ func (m *Model) buildTurns() []conversationTurn {
 				curAgent.timestamp = e.timestamp
 			}
 			if !e.isText {
-				curAgent.entries = append(curAgent.entries, e)
-				// Unpack bridge write ops so they render inline with their
-				// own dot, verb, path, and diff — without ever existing as
-				// independent feed entries that could cause role-mismatch flicker.
-				for _, wo := range e.bridgeWriteOps {
-					curAgent.entries = append(curAgent.entries, wo)
+				if strings.ToLower(strings.TrimSpace(e.opKind)) == "code_exec" {
+					// Hide the code_exec parent. Surface its children as flat entries:
+					// write ops render individually; a synthetic summary carries the
+					// non-write bridge count, status, and plan data.
+					for _, wo := range e.bridgeWriteOps {
+						curAgent.entries = append(curAgent.entries, wo)
+					}
+					s := strings.ToLower(strings.TrimSpace(e.status))
+					isSuccess := s == "done" || s == "ok" || s == "succeeded" || s == "completed"
+					needSummary := e.childCount > 0 || len(e.bridgeWriteOps) == 0 || !isSuccess ||
+						len(e.planItems) > 0 || e.planDetailsTitle != ""
+					if needSummary {
+						curAgent.entries = append(curAgent.entries, feedEntry{
+							kind:               e.kind,
+							timestamp:          e.timestamp,
+							finishedAt:         e.finishedAt,
+							role:               e.role,
+							status:             e.status,
+							opKind:             "code_exec_summary",
+							sourceID:           e.sourceID,
+							data:               e.data,
+							childCount:         e.childCount,
+							bridgeSingleOpKind: e.bridgeSingleOpKind,
+							bridgeSingleData:   e.bridgeSingleData,
+							bridgeSingleText:   e.bridgeSingleText,
+							bridgeSinglePath:   e.bridgeSinglePath,
+							planItems:          e.planItems,
+							planDetailsTitle:   e.planDetailsTitle,
+						})
+					}
+				} else {
+					curAgent.entries = append(curAgent.entries, e)
 				}
 			}
 		}
@@ -429,8 +455,19 @@ func (m *Model) renderAgentBlock(t conversationTurn, inner int) []string {
 		var argPreview string
 		var argItalic bool // http_fetch: show URL in italic, no brackets
 		opLower := strings.ToLower(strings.TrimSpace(e.opKind))
-		if opLower == "code_exec" {
-			// Show just the verb — no arg preview for code_exec.
+		if opLower == "code_exec" || opLower == "code_exec_summary" {
+			// For summary entries, show tool count in parens for failed/running state.
+			if opLower == "code_exec_summary" && e.childCount > 0 {
+				isFail := s == "error" || s == "failed" || s == "canceled" || s == "cancelled"
+				isRunning := s == "running" || s == "pending"
+				if isFail || isRunning {
+					noun := "tools"
+					if e.childCount == 1 {
+						noun = "tool"
+					}
+					argPreview = fmt.Sprintf("(%d %s)", e.childCount, noun)
+				}
+			}
 		} else if verb == "Updated memory" || verb == "Remembering" {
 			// /memory: no path in display.
 		} else if verb == "Learning" {

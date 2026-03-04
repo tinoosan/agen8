@@ -601,6 +601,8 @@ func kindToVerb(kind string, path string, data map[string]string) string {
 		return "Browse"
 	case "code_exec":
 		return "Python"
+	case "code_exec_summary":
+		return "Ran code"
 	case "email":
 		return "Email"
 	case "agent_spawn":
