@@ -598,13 +598,14 @@ func TestEventMiddleware_RequestEnrichmentMovedToOperations(t *testing.T) {
 	}
 
 	resp = exec.Exec(context.Background(), types.HostOpRequest{
-		Op:       types.HostOpFSWrite,
-		Path:     "/workspace/data.json",
-		Text:     `{"x":1}`,
-		Verify:   true,
-		Checksum: "sha256",
-		Atomic:   true,
-		Sync:     true,
+		Op:               types.HostOpFSWrite,
+		Path:             "/workspace/data.json",
+		Text:             `{"x":1}`,
+		Verify:           true,
+		Checksum:         "sha256",
+		ChecksumExpected: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+		Atomic:           true,
+		Sync:             true,
 	})
 	if !resp.Ok {
 		t.Fatalf("expected ok response, got %+v", resp)
@@ -613,10 +614,11 @@ func TestEventMiddleware_RequestEnrichmentMovedToOperations(t *testing.T) {
 		t.Fatalf("expected fs_write preview enrichment, got data=%v", gotReq.Data)
 	}
 	for k, want := range map[string]string{
-		"verify":   "true",
-		"checksum": "sha256",
-		"atomic":   "true",
-		"sync":     "true",
+		"verify":           "true",
+		"checksum":         "sha256",
+		"checksumExpected": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+		"atomic":           "true",
+		"sync":             "true",
 	} {
 		if gotReq.Data[k] != want {
 			t.Fatalf("expected fs_write request enrichment %s=%q, got %q (data=%v)", k, want, gotReq.Data[k], gotReq.Data)
@@ -647,20 +649,23 @@ func TestEventMiddleware_RequestEnrichmentMovedToOperations(t *testing.T) {
 func TestEventMiddleware_FSWriteResponseEnrichment(t *testing.T) {
 	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		verified := true
+		checksumMatch := true
 		mismatchAt := int64(0)
 		expectedBytes := int64(12)
 		actualBytes := int64(12)
 		return types.HostOpResponse{
-			Op:                   req.Op,
-			Ok:                   true,
-			WriteVerified:        &verified,
-			WriteChecksumAlgo:    "sha256",
-			WriteChecksum:        "abc123",
-			WriteAtomicRequested: true,
-			WriteSyncRequested:   true,
-			WriteMismatchAt:      &mismatchAt,
-			WriteExpectedBytes:   &expectedBytes,
-			WriteActualBytes:     &actualBytes,
+			Op:                    req.Op,
+			Ok:                    true,
+			WriteVerified:         &verified,
+			WriteChecksumMatch:    &checksumMatch,
+			WriteChecksumAlgo:     "sha256",
+			WriteChecksum:         "abc123",
+			WriteChecksumExpected: "abc123",
+			WriteAtomicRequested:  true,
+			WriteSyncRequested:    true,
+			WriteMismatchAt:       &mismatchAt,
+			WriteExpectedBytes:    &expectedBytes,
+			WriteActualBytes:      &actualBytes,
 		}
 	})
 
@@ -686,14 +691,16 @@ func TestEventMiddleware_FSWriteResponseEnrichment(t *testing.T) {
 		t.Fatalf("expected success response")
 	}
 	for k, want := range map[string]string{
-		"writeVerified":        "true",
-		"writeChecksumAlgo":    "sha256",
-		"writeChecksum":        "abc123",
-		"writeAtomicRequested": "true",
-		"writeSyncRequested":   "true",
-		"writeMismatchAt":      "0",
-		"writeExpectedBytes":   "12",
-		"writeActualBytes":     "12",
+		"writeVerified":         "true",
+		"writeChecksumMatch":    "true",
+		"writeChecksumAlgo":     "sha256",
+		"writeChecksum":         "abc123",
+		"writeChecksumExpected": "abc123",
+		"writeAtomicRequested":  "true",
+		"writeSyncRequested":    "true",
+		"writeMismatchAt":       "0",
+		"writeExpectedBytes":    "12",
+		"writeActualBytes":      "12",
 	} {
 		if gotResp.Data[k] != want {
 			t.Fatalf("expected response enrichment %s=%q, got %q (data=%v)", k, want, gotResp.Data[k], gotResp.Data)

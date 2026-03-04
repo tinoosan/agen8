@@ -573,6 +573,16 @@ func (fsWriteAppendRenderer) RenderDetail(a Activity, expanded bool, telemetry b
 			b.WriteString(v)
 			b.WriteString("`\n")
 		}
+		if v := strings.TrimSpace(a.Data["writeChecksumExpected"]); v != "" {
+			b.WriteString("- checksumExpected: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["writeChecksumMatch"]); v != "" {
+			b.WriteString("- checksumMatch: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
 		if v := strings.TrimSpace(a.Data["writeMismatchAt"]); v != "" {
 			b.WriteString("- mismatchAtByte: `")
 			b.WriteString(v)
@@ -620,6 +630,11 @@ func (fsWriteAppendRenderer) RenderArguments(a Activity, telemetry bool, b *stri
 	}
 	if v := strings.TrimSpace(a.Data["checksum"]); v != "" {
 		b.WriteString("- checksum: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["checksumExpected"]); v != "" {
+		b.WriteString("- checksumExpected: `")
 		b.WriteString(v)
 		b.WriteString("`\n")
 	}

@@ -133,6 +133,12 @@ func FormatResponseText(d map[string]string) string {
 				return prefix + " verify mismatch at byte " + at + " (" + exp + " != " + act + ")"
 			}
 		}
+		if strings.TrimSpace(d["writeChecksumMatch"]) == "false" {
+			if algo := strings.TrimSpace(d["writeChecksumAlgo"]); algo != "" {
+				return prefix + " checksum mismatch (" + algo + ")"
+			}
+			return prefix + " checksum mismatch"
+		}
 		if errStr != "" {
 			return prefix + " " + errStr
 		}

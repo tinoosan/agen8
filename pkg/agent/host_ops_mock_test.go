@@ -177,13 +177,14 @@ func TestHostOpExecutor_FSWrite_VerifyChecksumSuccess(t *testing.T) {
 	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
 
 	resp := exec.Exec(context.Background(), types.HostOpRequest{
-		Op:       types.HostOpFSWrite,
-		Path:     "/workspace/a.txt",
-		Text:     "hello\n",
-		Verify:   true,
-		Checksum: "sha256",
-		Atomic:   true,
-		Sync:     true,
+		Op:               types.HostOpFSWrite,
+		Path:             "/workspace/a.txt",
+		Text:             "hello\n",
+		Verify:           true,
+		Checksum:         "sha256",
+		ChecksumExpected: "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+		Atomic:           true,
+		Sync:             true,
 	})
 	if !resp.Ok {
 		t.Fatalf("expected success, got %#v", resp)
@@ -194,8 +195,34 @@ func TestHostOpExecutor_FSWrite_VerifyChecksumSuccess(t *testing.T) {
 	if resp.WriteChecksumAlgo != "sha256" || len(resp.WriteChecksum) != 64 {
 		t.Fatalf("expected sha256 checksum metadata, got %#v", resp)
 	}
+	if resp.WriteChecksumMatch == nil || !*resp.WriteChecksumMatch {
+		t.Fatalf("expected checksumMatch=true, got %#v", resp)
+	}
 	if !resp.WriteAtomicRequested || !resp.WriteSyncRequested {
 		t.Fatalf("expected atomic/sync requested flags, got %#v", resp)
+	}
+}
+
+func TestHostOpExecutor_FSWrite_ChecksumExpectedMismatchFails(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:               types.HostOpFSWrite,
+		Path:             "/workspace/a.txt",
+		Text:             "hello\n",
+		Checksum:         "sha256",
+		ChecksumExpected: "0000000000000000000000000000000000000000000000000000000000000000",
+	})
+	if resp.Ok {
+		t.Fatalf("expected checksum mismatch failure")
+	}
+	if resp.WriteChecksumMatch == nil || *resp.WriteChecksumMatch {
+		t.Fatalf("expected checksumMatch=false, got %#v", resp)
+	}
+	if resp.WriteChecksumExpected == "" || resp.WriteChecksum == "" {
+		t.Fatalf("expected checksum expected/actual metadata, got %#v", resp)
+	}
+	if !strings.Contains(resp.Error, "checksum mismatch") {
+		t.Fatalf("expected checksum mismatch error, got %q", resp.Error)
 	}
 }
 

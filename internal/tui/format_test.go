@@ -122,6 +122,11 @@ func TestRenderOpResponse_ToolSpecific(t *testing.T) {
 			want: "✗ verify mismatch at byte 3 (12 != 10)",
 		},
 		{
+			name: "write checksum mismatch",
+			data: map[string]string{"op": "fs_write", "ok": "false", "writeChecksumMatch": "false", "writeChecksumAlgo": "sha256"},
+			want: "✗ checksum mismatch (sha256)",
+		},
+		{
 			name: "patch apply summary",
 			data: map[string]string{"op": "fs_patch", "ok": "true", "patchMode": "apply", "patchHunksApplied": "1", "patchHunksTotal": "1"},
 			want: "✓ patched 1/1 hunks",

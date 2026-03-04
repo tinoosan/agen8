@@ -262,6 +262,24 @@ func (fsWriteMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpE
 		}
 		resp.WriteChecksumAlgo = algo
 		resp.WriteChecksum = sum
+		if expected := strings.TrimSpace(req.ChecksumExpected); expected != "" {
+			resp.WriteChecksumExpected = expected
+			matched := strings.EqualFold(sum, expected)
+			resp.WriteChecksumMatch = &matched
+			if !matched {
+				return types.HostOpResponse{
+					Op:                    req.Op,
+					Ok:                    false,
+					Error:                 fmt.Sprintf("checksum mismatch (%s): expected %s, got %s", algo, expected, sum),
+					WriteChecksumAlgo:     resp.WriteChecksumAlgo,
+					WriteChecksum:         resp.WriteChecksum,
+					WriteChecksumExpected: resp.WriteChecksumExpected,
+					WriteChecksumMatch:    resp.WriteChecksumMatch,
+					WriteAtomicRequested:  resp.WriteAtomicRequested,
+					WriteSyncRequested:    resp.WriteSyncRequested,
+				}
+			}
+		}
 	}
 
 	if req.Verify {

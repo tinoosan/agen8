@@ -219,6 +219,10 @@ func (fsWriteOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[
 		reqData["checksum"] = checksum
 		storeReq["checksum"] = checksum
 	}
+	if expected := strings.TrimSpace(req.ChecksumExpected); expected != "" {
+		reqData["checksumExpected"] = expected
+		storeReq["checksumExpected"] = expected
+	}
 	if req.Atomic {
 		reqData["atomic"] = "true"
 		storeReq["atomic"] = "true"
@@ -260,6 +264,15 @@ func (fsWriteOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.Ho
 	if sum := strings.TrimSpace(resp.WriteChecksum); sum != "" {
 		respData["writeChecksum"] = sum
 		storeResp["writeChecksum"] = sum
+	}
+	if expected := strings.TrimSpace(resp.WriteChecksumExpected); expected != "" {
+		respData["writeChecksumExpected"] = expected
+		storeResp["writeChecksumExpected"] = expected
+	}
+	if resp.WriteChecksumMatch != nil {
+		v := fmtBool(*resp.WriteChecksumMatch)
+		respData["writeChecksumMatch"] = v
+		storeResp["writeChecksumMatch"] = v
 	}
 	if resp.WriteAtomicRequested {
 		respData["writeAtomicRequested"] = "true"

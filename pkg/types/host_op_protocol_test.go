@@ -153,13 +153,14 @@ func TestHostOpRequest_FSPatchValidation_AllowsDryRunVerbose(t *testing.T) {
 
 func TestHostOpRequest_FSWriteValidation_AllowsWriteVerifyFlags(t *testing.T) {
 	req := HostOpRequest{
-		Op:       HostOpFSWrite,
-		Path:     "/workspace/a.txt",
-		Text:     "hello",
-		Verify:   true,
-		Checksum: "sha256",
-		Atomic:   true,
-		Sync:     true,
+		Op:               HostOpFSWrite,
+		Path:             "/workspace/a.txt",
+		Text:             "hello",
+		Verify:           true,
+		Checksum:         "sha256",
+		ChecksumExpected: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+		Atomic:           true,
+		Sync:             true,
 	}
 	if err := req.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
@@ -173,5 +174,26 @@ func TestHostOpRequest_FSWriteValidation_AllowsWriteVerifyFlags(t *testing.T) {
 	}
 	if err := req.Validate(); err == nil {
 		t.Fatalf("expected error for unsupported checksum")
+	}
+
+	req = HostOpRequest{
+		Op:               HostOpFSWrite,
+		Path:             "/workspace/a.txt",
+		Text:             "hello",
+		ChecksumExpected: "5d41402abc4b2a76b9719d911017c592",
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error when checksumExpected is set without checksum algorithm")
+	}
+
+	req = HostOpRequest{
+		Op:               HostOpFSWrite,
+		Path:             "/workspace/a.txt",
+		Text:             "hello",
+		Checksum:         "md5",
+		ChecksumExpected: "invalid-hex",
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for invalid checksumExpected format")
 	}
 }

@@ -13,15 +13,18 @@ func TestRenderActivityDetailMarkdown_FSWrite_ShowsContentPreview(t *testing.T) 
 		TextPreview: `{"a":1,"b":{"c":2}}`,
 		TextIsJSON:  true,
 		Data: map[string]string{
-			"verify":             "true",
-			"checksum":           "sha256",
-			"atomic":             "true",
-			"sync":               "true",
-			"writeVerified":      "true",
-			"writeChecksumAlgo":  "sha256",
-			"writeChecksum":      "abc123",
-			"writeExpectedBytes": "14",
-			"writeActualBytes":   "14",
+			"verify":                "true",
+			"checksum":              "sha256",
+			"checksumExpected":      "abc123",
+			"atomic":                "true",
+			"sync":                  "true",
+			"writeVerified":         "true",
+			"writeChecksumMatch":    "true",
+			"writeChecksumAlgo":     "sha256",
+			"writeChecksum":         "abc123",
+			"writeChecksumExpected": "abc123",
+			"writeExpectedBytes":    "14",
+			"writeActualBytes":      "14",
 		},
 	}
 
@@ -35,11 +38,14 @@ func TestRenderActivityDetailMarkdown_FSWrite_ShowsContentPreview(t *testing.T) 
 	for _, want := range []string{
 		"- verify: `true`",
 		"- checksum: `sha256`",
+		"- checksumExpected: `abc123`",
 		"- atomic: `true`",
 		"- sync: `true`",
 		"- writeVerified: `true`",
+		"- checksumMatch: `true`",
 		"- checksumAlgo: `sha256`",
 		"- checksum: `abc123`",
+		"- checksumExpected: `abc123`",
 	} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("expected %q in fs_write markdown, got:\n%s", want, md)

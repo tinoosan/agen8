@@ -62,11 +62,13 @@ type HostOpRequest struct {
 	Text      string          `json:"text,omitempty"`
 	Verify    bool            `json:"verify,omitempty"`
 	Checksum  string          `json:"checksum,omitempty"`
-	Atomic    bool            `json:"atomic,omitempty"`
-	Sync      bool            `json:"sync,omitempty"`
-	DryRun    bool            `json:"dryRun,omitempty"`
-	Verbose   bool            `json:"verbose,omitempty"`
-	Tag       string          `json:"tag,omitempty"`
+	// ChecksumExpected optionally enforces an expected digest value for the selected algorithm.
+	ChecksumExpected string `json:"checksumExpected,omitempty"`
+	Atomic           bool   `json:"atomic,omitempty"`
+	Sync             bool   `json:"sync,omitempty"`
+	DryRun           bool   `json:"dryRun,omitempty"`
+	Verbose          bool   `json:"verbose,omitempty"`
+	Tag              string `json:"tag,omitempty"`
 	// Code execution parameters
 	Language string `json:"language,omitempty"`
 	Code     string `json:"code,omitempty"`
@@ -157,6 +159,9 @@ func (r HostOpRequest) Validate() error {
 			return err
 		}
 		if err := validateWriteChecksum(r.Checksum); err != nil {
+			return err
+		}
+		if err := validateWriteChecksumExpected(r.Checksum, r.ChecksumExpected); err != nil {
 			return err
 		}
 
@@ -340,6 +345,40 @@ func validateWriteChecksum(checksum string) error {
 	}
 }
 
+func validateWriteChecksumExpected(algo, expected string) error {
+	algo = strings.ToLower(strings.TrimSpace(algo))
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return nil
+	}
+	if algo == "" {
+		return fmt.Errorf("checksum is required when checksumExpected is set")
+	}
+	wantLen := 0
+	switch algo {
+	case "md5":
+		wantLen = 32
+	case "sha1":
+		wantLen = 40
+	case "sha256":
+		wantLen = 64
+	default:
+		return fmt.Errorf("checksum must be one of md5|sha1|sha256")
+	}
+	if len(expected) != wantLen {
+		return fmt.Errorf("checksumExpected for %s must be %d hex chars", algo, wantLen)
+	}
+	for _, ch := range expected {
+		isDigit := ch >= '0' && ch <= '9'
+		isLowerHex := ch >= 'a' && ch <= 'f'
+		isUpperHex := ch >= 'A' && ch <= 'F'
+		if !isDigit && !isLowerHex && !isUpperHex {
+			return fmt.Errorf("checksumExpected for %s must be hex", algo)
+		}
+	}
+	return nil
+}
+
 // SearchResult is one result returned by fs_search.
 type SearchResult struct {
 	Title   string  `json:"title,omitempty"`
@@ -376,18 +415,20 @@ type HostOpResponse struct {
 	PatchDiagnostics *PatchDiagnostics `json:"patchDiagnostics,omitempty"`
 	PatchDryRun      bool              `json:"patchDryRun,omitempty"`
 	// fs_write verification/checksum metadata.
-	WriteVerified        *bool  `json:"writeVerified,omitempty"`
-	WriteChecksumAlgo    string `json:"writeChecksumAlgo,omitempty"`
-	WriteChecksum        string `json:"writeChecksum,omitempty"`
-	WriteAtomicRequested bool   `json:"writeAtomicRequested,omitempty"`
-	WriteSyncRequested   bool   `json:"writeSyncRequested,omitempty"`
-	WriteMismatchAt      *int64 `json:"writeMismatchAt,omitempty"`
-	WriteExpectedBytes   *int64 `json:"writeExpectedBytes,omitempty"`
-	WriteActualBytes     *int64 `json:"writeActualBytes,omitempty"`
-	BytesLen             int    `json:"bytesLen,omitempty"`
-	Text                 string `json:"text,omitempty"`
-	BytesB64             string `json:"bytesB64,omitempty"`
-	Truncated            bool   `json:"truncated,omitempty"`
+	WriteVerified         *bool  `json:"writeVerified,omitempty"`
+	WriteChecksumMatch    *bool  `json:"writeChecksumMatch,omitempty"`
+	WriteChecksumAlgo     string `json:"writeChecksumAlgo,omitempty"`
+	WriteChecksum         string `json:"writeChecksum,omitempty"`
+	WriteChecksumExpected string `json:"writeChecksumExpected,omitempty"`
+	WriteAtomicRequested  bool   `json:"writeAtomicRequested,omitempty"`
+	WriteSyncRequested    bool   `json:"writeSyncRequested,omitempty"`
+	WriteMismatchAt       *int64 `json:"writeMismatchAt,omitempty"`
+	WriteExpectedBytes    *int64 `json:"writeExpectedBytes,omitempty"`
+	WriteActualBytes      *int64 `json:"writeActualBytes,omitempty"`
+	BytesLen              int    `json:"bytesLen,omitempty"`
+	Text                  string `json:"text,omitempty"`
+	BytesB64              string `json:"bytesB64,omitempty"`
+	Truncated             bool   `json:"truncated,omitempty"`
 	// Shell output
 	ExitCode int    `json:"exitCode,omitempty"`
 	Stdout   string `json:"stdout,omitempty"`
