@@ -119,3 +119,34 @@ func TestHostOpRequest_FSStatValidation(t *testing.T) {
 		t.Fatalf("expected error for relative path")
 	}
 }
+
+func TestHostOpRequest_FSPatchValidation_AllowsDryRunVerbose(t *testing.T) {
+	req := HostOpRequest{
+		Op:      HostOpFSPatch,
+		Path:    "/workspace/a.txt",
+		Text:    "@@ -1 +1 @@\n-old\n+new\n",
+		DryRun:  true,
+		Verbose: true,
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	req = HostOpRequest{
+		Op:   HostOpFSPatch,
+		Path: "/workspace/a.txt",
+		Text: "",
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for empty patch text")
+	}
+
+	req = HostOpRequest{
+		Op:   HostOpFSPatch,
+		Path: "workspace/a.txt",
+		Text: "@@ -1 +1 @@\n-old\n+new\n",
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for relative path")
+	}
+}

@@ -152,6 +152,92 @@ func TestHostOpExecutor_FSStat_MissingPathFails(t *testing.T) {
 	}
 }
 
+func TestHostOpExecutor_FSPatch_ApplySuccessReturnsDiagnostics(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	if err := exec.FS.Write("/workspace/a.txt", []byte("alpha\nbeta\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSPatch,
+		Path: "/workspace/a.txt",
+		Text: "@@ -1,2 +1,2 @@\n alpha\n-beta\n+gamma\n",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected success, got %#v", resp)
+	}
+	if resp.PatchDryRun {
+		t.Fatalf("expected apply mode, got dry-run response %#v", resp)
+	}
+	if resp.PatchDiagnostics == nil || resp.PatchDiagnostics.HunksApplied != 1 || resp.PatchDiagnostics.HunksTotal != 1 {
+		t.Fatalf("expected patch diagnostics summary, got %#v", resp)
+	}
+	b, err := exec.FS.Read("/workspace/a.txt")
+	if err != nil {
+		t.Fatalf("read patched file: %v", err)
+	}
+	if got := string(b); got != "alpha\ngamma\n" {
+		t.Fatalf("patched file content=%q", got)
+	}
+}
+
+func TestHostOpExecutor_FSPatch_DryRunDoesNotWrite(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	if err := exec.FS.Write("/workspace/a.txt", []byte("alpha\nbeta\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:      types.HostOpFSPatch,
+		Path:    "/workspace/a.txt",
+		Text:    "@@ -1,2 +1,2 @@\n alpha\n-beta\n+gamma\n",
+		DryRun:  true,
+		Verbose: true,
+	})
+	if !resp.Ok {
+		t.Fatalf("expected dry-run success, got %#v", resp)
+	}
+	if !resp.PatchDryRun {
+		t.Fatalf("expected patchDryRun=true, got %#v", resp)
+	}
+	if resp.PatchDiagnostics == nil || resp.PatchDiagnostics.Mode != "dry_run" || resp.PatchDiagnostics.HunksApplied != 1 {
+		t.Fatalf("unexpected diagnostics for dry-run %#v", resp)
+	}
+	b, err := exec.FS.Read("/workspace/a.txt")
+	if err != nil {
+		t.Fatalf("read file after dry-run: %v", err)
+	}
+	if got := string(b); got != "alpha\nbeta\n" {
+		t.Fatalf("dry-run mutated file: %q", got)
+	}
+}
+
+func TestHostOpExecutor_FSPatch_FailureReturnsDiagnostics(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	if err := exec.FS.Write("/workspace/a.txt", []byte("alpha\nbeta\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:      types.HostOpFSPatch,
+		Path:    "/workspace/a.txt",
+		Text:    "@@ -1,2 +1,2 @@\n gamma\n-beta\n+delta\n",
+		Verbose: true,
+	})
+	if resp.Ok {
+		t.Fatalf("expected failure for context mismatch")
+	}
+	if resp.PatchDiagnostics == nil {
+		t.Fatalf("expected patch diagnostics on failure, got %#v", resp)
+	}
+	if resp.PatchDiagnostics.FailureReason != "context_mismatch" {
+		t.Fatalf("unexpected failure reason %#v", resp.PatchDiagnostics)
+	}
+	if resp.PatchDiagnostics.FailedHunk != 1 || resp.PatchDiagnostics.TargetLine != 1 {
+		t.Fatalf("unexpected failed hunk/line %#v", resp.PatchDiagnostics)
+	}
+}
+
 func TestHostOpExecutor_ShellExec_ResponseMapping(t *testing.T) {
 	inv := &stubToolInvoker{
 		result: pkgtools.ToolCallResult{Output: json.RawMessage(`{"exitCode":2,"stdout":"","stderr":"boom","warning":"","vfsPathTranslated":false,"vfsPathMounts":"  ","scriptPathNormalized":false,"scriptAntiPattern":" "}`)},

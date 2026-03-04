@@ -112,6 +112,21 @@ func TestRenderOpResponse_ToolSpecific(t *testing.T) {
 			want: "✓ 3 results",
 		},
 		{
+			name: "patch apply summary",
+			data: map[string]string{"op": "fs_patch", "ok": "true", "patchMode": "apply", "patchHunksApplied": "1", "patchHunksTotal": "1"},
+			want: "✓ patched 1/1 hunks",
+		},
+		{
+			name: "patch dry run summary",
+			data: map[string]string{"op": "fs_patch", "ok": "true", "patchDryRun": "true", "patchHunksApplied": "0", "patchHunksTotal": "1"},
+			want: "✓ dry-run 0/1 hunks",
+		},
+		{
+			name: "patch diagnostic failure",
+			data: map[string]string{"op": "fs_patch", "ok": "false", "patchFailedHunk": "2", "patchFailureReason": "delete_mismatch", "patchTargetLine": "14"},
+			want: "✗ hunk 2 delete mismatch (line 14)",
+		},
+		{
 			name: "email sent",
 			data: map[string]string{"op": "email", "ok": "true"},
 			want: "✓ sent",

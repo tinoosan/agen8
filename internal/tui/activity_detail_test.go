@@ -121,6 +121,49 @@ func TestRenderActivityDetailMarkdown_FSStat_Metadata(t *testing.T) {
 	}
 }
 
+func TestRenderActivityDetailMarkdown_FSPatch_Diagnostics(t *testing.T) {
+	a := Activity{
+		Kind:   "fs_patch",
+		Path:   "/workspace/a.txt",
+		Status: ActivityError,
+		Ok:     "false",
+		Data: map[string]string{
+			"dryRun":               "true",
+			"verbose":              "true",
+			"patchMode":            "dry_run",
+			"patchDryRun":          "true",
+			"patchHunksApplied":    "0",
+			"patchHunksTotal":      "1",
+			"patchFailureReason":   "context_mismatch",
+			"patchFailedHunk":      "1",
+			"patchTargetLine":      "7",
+			"patchHunkHeader":      "@@ -7,3 +7,3 @@",
+			"patchSuggestion":      "Re-read the file and regenerate patch hunks using current context.",
+			"patchExpectedContext": `["# Title"]`,
+			"patchActualContext":   `["# Different Title"]`,
+		},
+	}
+
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- path: `/workspace/a.txt`",
+		"- dryRun: `true`",
+		"- verbose: `true`",
+		"- mode: `dry_run`",
+		"- hunks: `0/1`",
+		"- failureReason: `context_mismatch`",
+		"- failedHunk: `1`",
+		"- targetLine: `7`",
+		"- hunkHeader: `@@ -7,3 +7,3 @@`",
+		"expectedContext",
+		"actualContext",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in fs_patch markdown, got:\n%s", want, md)
+		}
+	}
+}
+
 func TestRenderActivityDetailMarkdown_AgentSpawnArgumentsAndOutput(t *testing.T) {
 	a := Activity{
 		Kind:          "agent_spawn",

@@ -303,7 +303,15 @@ func (fsPatchOperation) FormatRequestText(_ types.HostOpRequest, reqData map[str
 func (fsPatchOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpResponse, _ map[string]string, respData map[string]string) string {
 	return opformat.FormatResponseText(respData)
 }
-func (fsPatchOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, _ map[string]string) {
+func (fsPatchOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
+	if req.DryRun {
+		reqData["dryRun"] = "true"
+		storeReq["dryRun"] = "true"
+	}
+	if req.Verbose {
+		reqData["verbose"] = "true"
+		storeReq["verbose"] = "true"
+	}
 	if strings.TrimSpace(req.Text) == "" {
 		return
 	}
@@ -319,6 +327,62 @@ func (fsPatchOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[
 	}
 	if n != 0 {
 		reqData["patchBytes"] = strconv.Itoa(n)
+	}
+}
+func (fsPatchOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	if resp.PatchDryRun {
+		respData["patchDryRun"] = "true"
+		storeResp["patchDryRun"] = "true"
+	}
+	if resp.PatchDiagnostics == nil {
+		return
+	}
+	diag := resp.PatchDiagnostics
+	if mode := strings.TrimSpace(diag.Mode); mode != "" {
+		respData["patchMode"] = mode
+		storeResp["patchMode"] = mode
+	}
+	if diag.HunksTotal != 0 {
+		v := strconv.Itoa(diag.HunksTotal)
+		respData["patchHunksTotal"] = v
+		storeResp["patchHunksTotal"] = v
+	}
+	if diag.HunksApplied != 0 {
+		v := strconv.Itoa(diag.HunksApplied)
+		respData["patchHunksApplied"] = v
+		storeResp["patchHunksApplied"] = v
+	}
+	if diag.FailedHunk != 0 {
+		v := strconv.Itoa(diag.FailedHunk)
+		respData["patchFailedHunk"] = v
+		storeResp["patchFailedHunk"] = v
+	}
+	if diag.TargetLine != 0 {
+		v := strconv.Itoa(diag.TargetLine)
+		respData["patchTargetLine"] = v
+		storeResp["patchTargetLine"] = v
+	}
+	if v := strings.TrimSpace(diag.HunkHeader); v != "" {
+		respData["patchHunkHeader"] = v
+		storeResp["patchHunkHeader"] = v
+	}
+	if v := strings.TrimSpace(diag.FailureReason); v != "" {
+		respData["patchFailureReason"] = v
+		storeResp["patchFailureReason"] = v
+	}
+	if v := strings.TrimSpace(diag.Suggestion); v != "" {
+		respData["patchSuggestion"] = v
+		storeResp["patchSuggestion"] = v
+	}
+	if b, err := json.Marshal(diag.ExpectedContext); err == nil && len(diag.ExpectedContext) != 0 {
+		v := strings.TrimSpace(string(b))
+		respData["patchExpectedContext"] = v
+		storeResp["patchExpectedContext"] = v
+	}
+	if b, err := json.Marshal(diag.ActualContext); err == nil && len(diag.ActualContext) != 0 {
+		v := strings.TrimSpace(string(b))
+		respData["patchActualContext"] = v
+		storeResp["patchActualContext"] = v
 	}
 }
 

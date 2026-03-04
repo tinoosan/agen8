@@ -390,6 +390,11 @@ func TestEventMiddleware_EmitsRequestTextForRepresentativeOps(t *testing.T) {
 			want: "Stat /workspace/a.txt",
 		},
 		{
+			name: "fs_patch",
+			req:  types.HostOpRequest{Op: types.HostOpFSPatch, Path: "/workspace/a.txt", Text: "@@ -1 +1 @@\n-old\n+new\n", DryRun: true},
+			want: "Patch /workspace/a.txt",
+		},
+		{
 			name: "shell_exec",
 			req:  types.HostOpRequest{Op: types.HostOpShellExec, Argv: []string{"rg", "-n", "todo"}},
 			want: "rg -n todo",
@@ -441,6 +446,17 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 			isDir := false
 			sizeBytes := int64(12)
 			return types.HostOpResponse{Op: req.Op, Ok: true, IsDir: &isDir, SizeBytes: &sizeBytes}
+		case types.HostOpFSPatch:
+			return types.HostOpResponse{
+				Op:          req.Op,
+				Ok:          true,
+				PatchDryRun: true,
+				PatchDiagnostics: &types.PatchDiagnostics{
+					Mode:         "dry_run",
+					HunksApplied: 1,
+					HunksTotal:   2,
+				},
+			}
 		case types.HostOpFSRead:
 			return types.HostOpResponse{Op: req.Op, Ok: true, Truncated: true}
 		case types.HostOpShellExec:
@@ -477,6 +493,7 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 		want string
 	}{
 		{name: "fs_stat", req: types.HostOpRequest{Op: types.HostOpFSStat, Path: "/workspace/a.txt"}, want: "✓ file 12 bytes"},
+		{name: "fs_patch", req: types.HostOpRequest{Op: types.HostOpFSPatch, Path: "/workspace/a.txt", Text: "@@ -1 +1 @@\n-old\n+new\n", DryRun: true}, want: "✓ dry-run 1/2 hunks"},
 		{name: "fs_read", req: types.HostOpRequest{Op: types.HostOpFSRead, Path: "/workspace/a.txt"}, want: "✓ truncated"},
 		{name: "shell_exec", req: types.HostOpRequest{Op: types.HostOpShellExec, Argv: []string{"echo", "ok"}}, want: "✓ exit 0"},
 		{name: "http_fetch", req: types.HostOpRequest{Op: types.HostOpHTTPFetch, URL: "https://example.com"}, want: "✓ 200"},
@@ -589,15 +606,86 @@ func TestEventMiddleware_RequestEnrichmentMovedToOperations(t *testing.T) {
 	}
 
 	resp = exec.Exec(context.Background(), types.HostOpRequest{
-		Op:   types.HostOpFSPatch,
-		Path: "/workspace/a.txt",
-		Text: "@@ -1 +1 @@\n-old\n+new\n",
+		Op:      types.HostOpFSPatch,
+		Path:    "/workspace/a.txt",
+		Text:    "@@ -1 +1 @@\n-old\n+new\n",
+		DryRun:  true,
+		Verbose: true,
 	})
 	if !resp.Ok {
 		t.Fatalf("expected ok response, got %+v", resp)
 	}
 	if gotReq.Data["patchPreview"] == "" {
 		t.Fatalf("expected fs_patch preview enrichment, got data=%v", gotReq.Data)
+	}
+	if gotReq.Data["dryRun"] != "true" || gotReq.Data["verbose"] != "true" {
+		t.Fatalf("expected fs_patch dryRun/verbose request enrichment, got data=%v", gotReq.Data)
+	}
+}
+
+func TestEventMiddleware_FSPatchResponseEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{
+			Op:          req.Op,
+			Ok:          false,
+			Error:       "patch did not apply cleanly (context mismatch)",
+			PatchDryRun: true,
+			PatchDiagnostics: &types.PatchDiagnostics{
+				Mode:            "dry_run",
+				HunksTotal:      3,
+				HunksApplied:    1,
+				FailedHunk:      2,
+				HunkHeader:      "@@ -7,3 +7,3 @@",
+				TargetLine:      9,
+				FailureReason:   "context_mismatch",
+				ExpectedContext: []string{"# Title"},
+				ActualContext:   []string{"# Different Title"},
+				Suggestion:      "Re-read and regenerate patch.",
+			},
+		}
+	})
+
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSPatch,
+		Path: "/workspace/a.txt",
+		Text: "@@ -1 +1 @@\n-old\n+new\n",
+	})
+	if resp.Ok {
+		t.Fatalf("expected failure response")
+	}
+	for k, want := range map[string]string{
+		"patchDryRun":        "true",
+		"patchMode":          "dry_run",
+		"patchHunksTotal":    "3",
+		"patchHunksApplied":  "1",
+		"patchFailedHunk":    "2",
+		"patchTargetLine":    "9",
+		"patchFailureReason": "context_mismatch",
+		"patchHunkHeader":    "@@ -7,3 +7,3 @@",
+		"patchSuggestion":    "Re-read and regenerate patch.",
+	} {
+		if gotResp.Data[k] != want {
+			t.Fatalf("expected response enrichment %s=%q, got %q (data=%v)", k, want, gotResp.Data[k], gotResp.Data)
+		}
+		if gotResp.StoreData[k] != want {
+			t.Fatalf("expected store enrichment %s=%q, got %q (store=%v)", k, want, gotResp.StoreData[k], gotResp.StoreData)
+		}
+	}
+	if gotResp.Data["patchExpectedContext"] == "" || gotResp.Data["patchActualContext"] == "" {
+		t.Fatalf("expected serialized context diagnostics, got data=%v", gotResp.Data)
 	}
 }
 

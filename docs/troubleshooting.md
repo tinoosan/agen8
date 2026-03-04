@@ -29,6 +29,16 @@ This guide captures common issues and diagnostics that surface when running Agen
 - **Trace budget exceeded**: When trace budget (`--trace-bytes`) is exhausted, the agent may stop writing further trace output. Increase the flag or disable tracing to continue.
 - **Memory budget issues**: If the agent stops due to memory injection limits, raise `--memory-bytes` or inspect `/memory` proposals stored under `<dataDir>/memory`.
 
+## fs_patch diagnostics
+
+- **Validate first with dry-run**: use `tools.fs_patch(path=\"...\", text=\"...\", dryRun=true, verbose=true)` to check hunks without writing.
+- **Failure fields**: when a patch fails, inspect `patchFailureReason`, `patchFailedHunk`, `patchTargetLine`, `patchHunkHeader`, `patchExpectedContext`, `patchActualContext`, and `patchSuggestion` in activity details/events.
+- **Recommended loop**:
+  1. `dryRun=true` to validate.
+  2. If failure, re-open the target file and adjust context lines/hunk header.
+  3. Re-run dry-run until clean.
+  4. Re-run with `dryRun=false` to apply.
+
 ## When to seek help
 
 Collect the following before raising an issue:

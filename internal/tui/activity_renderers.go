@@ -15,6 +15,7 @@ var activityRenderers = map[string]ActivityRenderer{
 	"code_exec":       codeExecRenderer{},
 	"email":           emailRenderer{},
 	"fs_append":       fsWriteAppendRenderer{},
+	"fs_patch":        fsPatchRenderer{},
 	"fs_stat":         fsStatRenderer{},
 	"fs_search":       fsSearchRenderer{},
 	"fs_write":        fsWriteAppendRenderer{},
@@ -374,6 +375,82 @@ func (fsStatRenderer) RenderDetail(a Activity, expanded bool, telemetry bool, b 
 		}
 	}
 	renderTelemetryBlock(a, telemetry, false, false, b)
+}
+
+type fsPatchRenderer struct{ baseRenderer }
+
+func (fsPatchRenderer) RenderDetail(a Activity, expanded bool, telemetry bool, b *strings.Builder) {
+	if !renderCommonOutputPreview(a, expanded, b) {
+		if v := strings.TrimSpace(a.Data["patchMode"]); v != "" {
+			b.WriteString("- mode: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["patchDryRun"]); v == "true" {
+			b.WriteString("- dryRun: `true`\n")
+		}
+		applied := strings.TrimSpace(a.Data["patchHunksApplied"])
+		total := strings.TrimSpace(a.Data["patchHunksTotal"])
+		if applied != "" || total != "" {
+			b.WriteString("- hunks: `")
+			if applied == "" {
+				applied = "0"
+			}
+			if total == "" {
+				total = "?"
+			}
+			b.WriteString(applied)
+			b.WriteString("/")
+			b.WriteString(total)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["patchFailureReason"]); v != "" {
+			b.WriteString("- failureReason: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["patchFailedHunk"]); v != "" {
+			b.WriteString("- failedHunk: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["patchTargetLine"]); v != "" {
+			b.WriteString("- targetLine: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["patchHunkHeader"]); v != "" {
+			b.WriteString("- hunkHeader: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["patchSuggestion"]); v != "" {
+			b.WriteString("- suggestion: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["patchExpectedContext"]); v != "" {
+			b.WriteString("\n**expectedContext**\n\n")
+			b.WriteString(FormatCode("json", v))
+			b.WriteString("\n")
+		}
+		if v := strings.TrimSpace(a.Data["patchActualContext"]); v != "" {
+			b.WriteString("\n**actualContext**\n\n")
+			b.WriteString(FormatCode("json", v))
+			b.WriteString("\n")
+		}
+	}
+	renderTelemetryBlock(a, telemetry, false, false, b)
+}
+
+func (fsPatchRenderer) RenderArguments(a Activity, telemetry bool, b *strings.Builder) {
+	renderDefaultArgumentsPrefix(a, telemetry, b)
+	if strings.TrimSpace(a.Data["dryRun"]) == "true" {
+		b.WriteString("- dryRun: `true`\n")
+	}
+	if strings.TrimSpace(a.Data["verbose"]) == "true" {
+		b.WriteString("- verbose: `true`\n")
+	}
 }
 
 type agentSpawnRenderer struct{ baseRenderer }

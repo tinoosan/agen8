@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/tinoosan/agen8/pkg/types"
 )
 
 // ApplyStructuredEdits applies structured edits (fs_edit) to the provided text.
@@ -42,12 +44,24 @@ func ApplyStructuredEdits(before string, input json.RawMessage) (string, error) 
 
 // ApplyUnifiedDiffStrict applies a unified diff patch (fs_patch) with no fuzz.
 func ApplyUnifiedDiffStrict(oldText string, patch string) (string, error) {
+	after, _, err := ApplyUnifiedDiffWithDiagnostics(oldText, patch, false, false)
+	return after, err
+}
+
+// ApplyUnifiedDiffWithDiagnostics applies a unified diff patch and reports structured diagnostics.
+func ApplyUnifiedDiffWithDiagnostics(oldText string, patch string, dryRun bool, verbose bool) (string, types.PatchDiagnostics, error) {
 	type hunk struct {
 		oldStart int
 		oldCount int
 		newStart int
 		newCount int
+		header   string
 		lines    []string
+	}
+
+	diag := types.PatchDiagnostics{Mode: "apply"}
+	if dryRun {
+		diag.Mode = "dry_run"
 	}
 
 	parseRange := func(s string) (start, count int, err error) {
@@ -85,17 +99,35 @@ func ApplyUnifiedDiffStrict(oldText string, patch string) (string, error) {
 
 			fields := strings.Fields(inner)
 			if len(fields) < 2 {
-				return "", fmt.Errorf("invalid hunk header: %q", ln)
+				diag.FailureReason = "invalid_hunk_header"
+				diag.FailedHunk = len(hunks) + 1
+				diag.HunkHeader = ln
+				diag.Suggestion = "Ensure hunk headers use unified diff format like @@ -start,count +start,count @@."
+				return "", diag, fmt.Errorf("patch did not apply cleanly (invalid hunk header)")
 			}
 			os, oc, err := parseRange(fields[0])
 			if err != nil {
-				return "", fmt.Errorf("invalid old range in hunk header %q: %w", ln, err)
+				diag.FailureReason = "invalid_hunk_header"
+				diag.FailedHunk = len(hunks) + 1
+				diag.HunkHeader = ln
+				diag.Suggestion = "Check the old-range segment in the hunk header."
+				return "", diag, fmt.Errorf("patch did not apply cleanly (invalid hunk header)")
 			}
 			ns, nc, err := parseRange(fields[1])
 			if err != nil {
-				return "", fmt.Errorf("invalid new range in hunk header %q: %w", ln, err)
+				diag.FailureReason = "invalid_hunk_header"
+				diag.FailedHunk = len(hunks) + 1
+				diag.HunkHeader = ln
+				diag.Suggestion = "Check the new-range segment in the hunk header."
+				return "", diag, fmt.Errorf("patch did not apply cleanly (invalid hunk header)")
 			}
-			hunks = append(hunks, hunk{oldStart: os, oldCount: oc, newStart: ns, newCount: nc})
+			hunks = append(hunks, hunk{
+				oldStart: os,
+				oldCount: oc,
+				newStart: ns,
+				newCount: nc,
+				header:   ln,
+			})
 			cur = &hunks[len(hunks)-1]
 			continue
 		}
@@ -114,8 +146,11 @@ func ApplyUnifiedDiffStrict(oldText string, patch string) (string, error) {
 		}
 		cur.lines = append(cur.lines, ln)
 	}
+	diag.HunksTotal = len(hunks)
 	if len(hunks) == 0 {
-		return "", fmt.Errorf("no hunks found in patch")
+		diag.FailureReason = "no_hunks"
+		diag.Suggestion = "Provide a unified diff with at least one @@ ... @@ hunk."
+		return "", diag, fmt.Errorf("patch did not apply cleanly (no hunks found)")
 	}
 
 	oldText = strings.ReplaceAll(oldText, "\r\n", "\n")
@@ -131,12 +166,18 @@ func ApplyUnifiedDiffStrict(oldText string, patch string) (string, error) {
 	outLines := oldLines
 	offset := 0
 	for _, hk := range hunks {
+		hunkIndex := diag.HunksApplied + 1
 		idx := (hk.oldStart - 1) + offset
 		if idx < 0 {
 			idx = 0
 		}
 		if idx > len(outLines) {
-			return "", fmt.Errorf("hunk out of range (oldStart=%d) for file with %d lines", hk.oldStart, len(outLines))
+			diag.FailureReason = "hunk_out_of_range"
+			diag.FailedHunk = hunkIndex
+			diag.HunkHeader = hk.header
+			diag.TargetLine = hk.oldStart
+			diag.Suggestion = "Re-read the file and regenerate patch hunks using current line numbers."
+			return "", diag, fmt.Errorf("patch did not apply cleanly (hunk out of range)")
 		}
 		prefix := append([]string(nil), outLines[:idx]...)
 		suffixStart := idx
@@ -151,14 +192,44 @@ func ApplyUnifiedDiffStrict(oldText string, patch string) (string, error) {
 			switch tag {
 			case ' ':
 				if suffixStart >= len(outLines) || outLines[suffixStart] != content {
-					return "", fmt.Errorf("patch did not apply cleanly (context mismatch)")
+					diag.FailureReason = "context_mismatch"
+					diag.FailedHunk = hunkIndex
+					diag.HunkHeader = hk.header
+					diag.TargetLine = suffixStart + 1
+					diag.ExpectedContext = []string{content}
+					if suffixStart >= len(outLines) {
+						diag.ActualContext = []string{}
+					} else {
+						diag.ActualContext = []string{outLines[suffixStart]}
+					}
+					if verbose {
+						diag.ExpectedContext = expectedContextWindow(hk.lines, pl)
+						diag.ActualContext = actualContextWindow(outLines, suffixStart)
+					}
+					diag.Suggestion = "Re-read the target file and regenerate the patch using exact current context lines."
+					return "", diag, fmt.Errorf("patch did not apply cleanly (context mismatch)")
 				}
 				newPart = append(newPart, content)
 				suffixStart++
 				consumed++
 			case '-':
 				if suffixStart >= len(outLines) || outLines[suffixStart] != content {
-					return "", fmt.Errorf("patch did not apply cleanly (delete mismatch)")
+					diag.FailureReason = "delete_mismatch"
+					diag.FailedHunk = hunkIndex
+					diag.HunkHeader = hk.header
+					diag.TargetLine = suffixStart + 1
+					diag.ExpectedContext = []string{content}
+					if suffixStart >= len(outLines) {
+						diag.ActualContext = []string{}
+					} else {
+						diag.ActualContext = []string{outLines[suffixStart]}
+					}
+					if verbose {
+						diag.ExpectedContext = expectedContextWindow(hk.lines, pl)
+						diag.ActualContext = actualContextWindow(outLines, suffixStart)
+					}
+					diag.Suggestion = "Ensure lines marked with '-' exactly match the current file before applying."
+					return "", diag, fmt.Errorf("patch did not apply cleanly (delete mismatch)")
 				}
 				suffixStart++
 				consumed++
@@ -167,17 +238,72 @@ func ApplyUnifiedDiffStrict(oldText string, patch string) (string, error) {
 			}
 		}
 		if hk.oldCount != 0 && consumed != hk.oldCount {
-			return "", fmt.Errorf("patch did not apply cleanly (hunk expected to consume %d lines, consumed %d)", hk.oldCount, consumed)
+			diag.FailureReason = "consumed_mismatch"
+			diag.FailedHunk = hunkIndex
+			diag.HunkHeader = hk.header
+			diag.TargetLine = hk.oldStart
+			diag.Suggestion = "Verify old-range counts in the hunk header and ensure context/delete lines are complete."
+			return "", diag, fmt.Errorf("patch did not apply cleanly (hunk expected to consume %d lines, consumed %d)", hk.oldCount, consumed)
 		}
 		outLines = append(prefix, append(newPart, outLines[suffixStart:]...)...)
 		offset += hk.newCount - hk.oldCount
+		diag.HunksApplied++
 	}
 
 	out := strings.Join(outLines, "\n")
 	if hadFinalNL {
 		out += "\n"
 	}
-	return out, nil
+	return out, diag, nil
+}
+
+func expectedContextWindow(hunkLines []string, failedLine string) []string {
+	if len(hunkLines) == 0 {
+		return nil
+	}
+	start := 0
+	for i, ln := range hunkLines {
+		if ln == failedLine {
+			start = i
+			break
+		}
+	}
+	out := make([]string, 0, 3)
+	for i := start; i < len(hunkLines) && len(out) < 3; i++ {
+		ln := hunkLines[i]
+		if len(ln) == 0 {
+			continue
+		}
+		switch ln[0] {
+		case ' ', '-':
+			out = append(out, ln[1:])
+		}
+	}
+	if len(out) == 0 && len(failedLine) > 0 {
+		return []string{failedLine[1:]}
+	}
+	return out
+}
+
+func actualContextWindow(lines []string, index int) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	if index < 0 {
+		index = 0
+	}
+	if index > len(lines)-1 {
+		index = len(lines) - 1
+	}
+	end := index + 3
+	if end > len(lines) {
+		end = len(lines)
+	}
+	out := make([]string, 0, end-index)
+	for i := index; i < end; i++ {
+		out = append(out, lines[i])
+	}
+	return out
 }
 
 func replaceNth(s, old, new string, occurrence int) (string, error) {

@@ -60,6 +60,8 @@ type HostOpRequest struct {
 	TimeoutMs int             `json:"timeoutMs,omitempty"`
 	MaxBytes  int             `json:"maxBytes,omitempty"`
 	Text      string          `json:"text,omitempty"`
+	DryRun    bool            `json:"dryRun,omitempty"`
+	Verbose   bool            `json:"verbose,omitempty"`
 	Tag       string          `json:"tag,omitempty"`
 	// Code execution parameters
 	Language string `json:"language,omitempty"`
@@ -311,6 +313,20 @@ type SearchResult struct {
 	Score   float64 `json:"score,omitempty"`
 }
 
+// PatchDiagnostics captures detailed fs_patch apply/validation outcomes.
+type PatchDiagnostics struct {
+	Mode            string   `json:"mode,omitempty"`
+	HunksTotal      int      `json:"hunksTotal,omitempty"`
+	HunksApplied    int      `json:"hunksApplied,omitempty"`
+	FailedHunk      int      `json:"failedHunk,omitempty"`
+	HunkHeader      string   `json:"hunkHeader,omitempty"`
+	TargetLine      int      `json:"targetLine,omitempty"`
+	FailureReason   string   `json:"failureReason,omitempty"`
+	ExpectedContext []string `json:"expectedContext,omitempty"`
+	ActualContext   []string `json:"actualContext,omitempty"`
+	Suggestion      string   `json:"suggestion,omitempty"`
+}
+
 // HostOpResponse is the minimal "host primitive" response envelope.
 type HostOpResponse struct {
 	Op        string         `json:"op"`
@@ -321,10 +337,13 @@ type HostOpResponse struct {
 	Results   []SearchResult `json:"results,omitempty"`
 	IsDir     *bool          `json:"isDir,omitempty"`
 	SizeBytes *int64         `json:"sizeBytes,omitempty"`
-	BytesLen  int            `json:"bytesLen,omitempty"`
-	Text      string         `json:"text,omitempty"`
-	BytesB64  string         `json:"bytesB64,omitempty"`
-	Truncated bool           `json:"truncated,omitempty"`
+	// Patch diagnostics are emitted for fs_patch success/failure and dry-run validation.
+	PatchDiagnostics *PatchDiagnostics `json:"patchDiagnostics,omitempty"`
+	PatchDryRun      bool              `json:"patchDryRun,omitempty"`
+	BytesLen         int               `json:"bytesLen,omitempty"`
+	Text             string            `json:"text,omitempty"`
+	BytesB64         string            `json:"bytesB64,omitempty"`
+	Truncated        bool              `json:"truncated,omitempty"`
 	// Shell output
 	ExitCode int    `json:"exitCode,omitempty"`
 	Stdout   string `json:"stdout,omitempty"`

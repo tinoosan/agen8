@@ -110,6 +110,34 @@ func FormatResponseText(d map[string]string) string {
 	}
 
 	switch op {
+	case "fs_patch":
+		mode := strings.TrimSpace(d["patchMode"])
+		dryRun := strings.TrimSpace(d["patchDryRun"]) == "true" || mode == "dry_run"
+		applied := strings.TrimSpace(d["patchHunksApplied"])
+		total := strings.TrimSpace(d["patchHunksTotal"])
+		if ok == "true" {
+			if dryRun {
+				if applied != "" && total != "" {
+					return prefix + " dry-run " + applied + "/" + total + " hunks"
+				}
+				return prefix + " dry-run ok"
+			}
+			if applied != "" && total != "" {
+				return prefix + " patched " + applied + "/" + total + " hunks"
+			}
+			return prefix + " patched"
+		}
+		failedHunk := strings.TrimSpace(d["patchFailedHunk"])
+		reason := strings.TrimSpace(d["patchFailureReason"])
+		line := strings.TrimSpace(d["patchTargetLine"])
+		if failedHunk != "" && reason != "" && line != "" {
+			reason = strings.ReplaceAll(reason, "_", " ")
+			return prefix + " hunk " + failedHunk + " " + reason + " (line " + line + ")"
+		}
+		if errStr != "" {
+			return prefix + " " + errStr
+		}
+		return prefix + " failed"
 	case "fs_stat":
 		if ok == "true" {
 			isDir := strings.TrimSpace(d["isDir"]) == "true"

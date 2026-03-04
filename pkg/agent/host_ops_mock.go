@@ -289,14 +289,32 @@ func (fsPatchMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpE
 			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 		}
 	}
-	after, err := ApplyUnifiedDiffStrict(string(beforeBytes), req.Text)
+	after, diag, err := ApplyUnifiedDiffWithDiagnostics(string(beforeBytes), req.Text, req.DryRun, req.Verbose)
 	if err != nil {
-		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		return types.HostOpResponse{
+			Op:               req.Op,
+			Ok:               false,
+			Error:            err.Error(),
+			PatchDryRun:      req.DryRun,
+			PatchDiagnostics: &diag,
+		}
+	}
+	if req.DryRun {
+		return types.HostOpResponse{
+			Op:               req.Op,
+			Ok:               true,
+			PatchDryRun:      true,
+			PatchDiagnostics: &diag,
+		}
 	}
 	if err := x.FS.Write(req.Path, []byte(after)); err != nil {
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 	}
-	return types.HostOpResponse{Op: req.Op, Ok: true}
+	return types.HostOpResponse{
+		Op:               req.Op,
+		Ok:               true,
+		PatchDiagnostics: &diag,
+	}
 }
 
 type shellExecMockOp struct{}
