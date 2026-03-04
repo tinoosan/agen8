@@ -336,7 +336,7 @@ func (m *Model) buildInboxLines(width int, isFocused bool) []string {
 				if src := strings.TrimSpace(child.Source); src != "" && !m.isNarrow() {
 					childLine += " " + kit.StyleDim.Render("["+src+"]")
 				}
-				if goal := truncate(child.Goal, maxInt(10, width-space)); goal != "" {
+				if goal := kit.Truncate(child.Goal, max(10, width-space)); goal != "" {
 					childLine += " — " + goal
 				}
 				lines = append(lines, childLine)
@@ -452,7 +452,7 @@ func (m *Model) buildOutboxLines(width int, isFocused bool) []string {
 				if src := strings.TrimSpace(child.Source); src != "" && !m.isNarrow() {
 					childLine += " " + kit.StyleDim.Render("["+src+"]")
 				}
-				childGoal := truncate(child.Goal, maxInt(10, width-space))
+				childGoal := kit.Truncate(child.Goal, max(10, width-space))
 				childLine += " " + kit.StyleDim.Render("\""+childGoal+"\"") + " → " + renderStatus(status)
 				lines = append(lines, childLine)
 			}
@@ -544,7 +544,6 @@ func shortID(id string, n int) string {
 	return id[:n]
 }
 
-
 func wrapText(s string, width int) string {
 	if width <= 0 {
 		width = 40
@@ -591,4 +590,3 @@ func detailMarkdownRenderer(width int) (*glamour.TermRenderer, error) {
 	detailMDByWidth[width] = r
 	return r, nil
 }
-
