@@ -25,14 +25,16 @@ External RPC method names and response shapes are unchanged.
 - Added `pkg/services/message` manager with wake subscriptions.
 - `pkg/services/task.Manager` now publishes a corresponding message when creating
   a task (projection bridge).
-- `pkg/agent/session.Session` inbox drain is now message-first:
+- `pkg/agent/session.Session` inbox drain is now message-authoritative:
   - claim messages
   - resolve task payload
   - execute existing task pipeline
   - ack/nack message
-  - fallback to legacy task scan when no messages are present (temporary bridge).
+- no legacy task polling fallback in runtime worker sessions.
 - `turn.create` now marks created task metadata so publish path emits
   `kind=user_input` messages.
+- `task.claim` / `task.complete` require a backing inbox message envelope.
+  Projection-only task rows without envelopes return explicit invalid-state errors.
 
 ## Causal Identity Rules
 
@@ -51,7 +53,8 @@ External RPC method names and response shapes are unchanged.
 
 - Wake-driven loops continue to be used.
 - Immediate nack requeue is currently used to avoid wake-stall in retry paths.
-- Legacy task scan fallback remains while producer migration completes.
+- Legacy pending task rows are not backfilled into `messages` in this phase.
+- `tasks` remains a read/projection surface; execution authority is `messages`.
 
 ## Verification Commands
 
@@ -61,4 +64,3 @@ go vet ./...
 go test ./pkg/agent/state -run Message
 go test -bench MessageStore ./pkg/agent/state
 ```
-
