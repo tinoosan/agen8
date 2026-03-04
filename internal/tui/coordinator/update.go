@@ -464,9 +464,17 @@ func (m *Model) mergeActivityEntries(entries []feedEntry) {
 	}
 	oldLines := m.totalFeedLines()
 
+	// Keep ALL thinking and agent entries (text, task-response, AND tool-ops)
+	// so that tool-call entries are updated in-place by the dedup below rather
+	// than being dropped and re-added on every poll.  Dropping and re-adding
+	// causes feedGen to bump and the line cache to rebuild even when nothing
+	// has actually changed, which manifests as flickering in the terminal.
+	// User/system entries are intentionally excluded: they have no stable
+	// identity key, so keeping them here would duplicate them (they are always
+	// re-supplied in full by the activity poll).
 	others := make([]feedEntry, 0, len(m.feed))
 	for _, e := range m.feed {
-		if e.kind == feedThinking || (e.kind == feedAgent && (e.isText || e.isTaskResponse)) {
+		if e.kind == feedThinking || e.kind == feedAgent {
 			others = append(others, *normalizeFeedEntry(&e))
 		}
 	}

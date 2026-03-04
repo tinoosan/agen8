@@ -371,7 +371,8 @@ func groupBridgeToolCalls(turns []conversationTurn) []conversationTurn {
 }
 
 func (m *Model) feedLines(width int) []string {
-	if m.lineCache != nil && m.lineCacheGen == m.feedGen && m.lineCacheWidth == width {
+	spinParity := m.spinFrame % 2
+	if m.lineCache != nil && m.lineCacheGen == m.feedGen && m.lineCacheWidth == width && m.lineCacheSpinParity == spinParity {
 		return m.lineCache
 	}
 
@@ -380,6 +381,7 @@ func (m *Model) feedLines(width int) []string {
 		m.lineCache = nil
 		m.lineCacheGen = m.feedGen
 		m.lineCacheWidth = width
+		m.lineCacheSpinParity = spinParity
 		return nil
 	}
 
@@ -408,6 +410,7 @@ func (m *Model) feedLines(width int) []string {
 	m.lineCache = lines
 	m.lineCacheGen = m.feedGen
 	m.lineCacheWidth = width
+	m.lineCacheSpinParity = spinParity
 	return lines
 }
 

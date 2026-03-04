@@ -79,9 +79,10 @@ type Model struct {
 	hideDiffs        bool  // ctrl+e toggles inline diff display; false = show diffs (default)
 
 	feedGen       int      // incremented on every feed mutation; used to invalidate lineCache
-	lineCache     []string // cached output of feedLines(); valid when lineCacheGen == feedGen && lineCacheWidth == width
-	lineCacheGen  int
-	lineCacheWidth int
+	lineCache     []string // cached output of feedLines(); valid when lineCacheGen == feedGen && lineCacheWidth == width && lineCacheSpinParity == spinFrame%2
+	lineCacheGen        int
+	lineCacheWidth      int
+	lineCacheSpinParity int // spinFrame%2 at cache-fill time; ensures pulsing dots animate
 
 	modelPicker modelpicker.Controller
 
