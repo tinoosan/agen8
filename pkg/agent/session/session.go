@@ -46,6 +46,7 @@ const (
 	reviewDecisionApprove           = "approve"
 	reviewDecisionRetry             = "retry"
 	reviewDecisionEscalate          = "escalate"
+	minMessageRequeueSweepInterval  = 2 * time.Second
 )
 
 type ResolveProfileFunc func(ref string) (*profile.Profile, string, error)
@@ -128,6 +129,9 @@ type Session struct {
 
 	pauseMu sync.RWMutex
 	paused  bool
+
+	requeueSweepMu sync.Mutex
+	lastRequeueAt  time.Time
 }
 
 func New(cfg Config) (*Session, error) {
@@ -572,7 +576,7 @@ func (s *Session) drainInboxMessages(ctx context.Context) (bool, error) {
 	var errs error
 	hadWork := false
 	s.maybeFlushStagedBatchCallbacks(ctx, true)
-	if err := s.cfg.MessageBus.RequeueExpiredClaims(ctx); err != nil {
+	if err := s.maybeSweepExpiredMessageClaims(ctx); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("message requeue expired claims: %w", err))
 	}
 	limit := s.cfg.MaxPending
@@ -583,6 +587,17 @@ func (s *Session) drainInboxMessages(ctx context.Context) (bool, error) {
 	for i := 0; i < limit; i++ {
 		msg, ok, err := s.claimNextScopedMessage(ctx, claimFilters)
 		if err != nil {
+			if isSQLiteBusyErr(err) {
+				s.emitBestEffort(ctx, events.Event{
+					Type:    "message.busy.retry",
+					Message: "Message claim busy, deferring this drain pass",
+					Data: map[string]string{
+						"op":       "claim_next_message",
+						"attempts": "1",
+					},
+				})
+				break
+			}
 			errs = errors.Join(errs, err)
 			break
 		}
@@ -595,6 +610,55 @@ func (s *Session) drainInboxMessages(ctx context.Context) (bool, error) {
 		}
 	}
 	return hadWork, errs
+}
+
+func (s *Session) maybeSweepExpiredMessageClaims(ctx context.Context) error {
+	if s == nil || s.cfg.MessageBus == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	if strings.TrimSpace(s.cfg.TeamID) != "" && !s.cfg.IsCoordinator {
+		s.emitBestEffort(ctx, events.Event{
+			Type:    "message.requeue.skipped",
+			Message: "Skipped expired-claim sweep for non-coordinator team session",
+			Data: map[string]string{
+				"reason": "non_coordinator",
+			},
+		})
+		return nil
+	}
+	s.requeueSweepMu.Lock()
+	last := s.lastRequeueAt
+	if !last.IsZero() && now.Sub(last) < minMessageRequeueSweepInterval {
+		s.requeueSweepMu.Unlock()
+		s.emitBestEffort(ctx, events.Event{
+			Type:    "message.requeue.skipped",
+			Message: "Skipped expired-claim sweep due throttle window",
+			Data: map[string]string{
+				"reason":       "throttled",
+				"minInterval":  minMessageRequeueSweepInterval.String(),
+				"lastSweepAge": now.Sub(last).String(),
+			},
+		})
+		return nil
+	}
+	s.lastRequeueAt = now
+	s.requeueSweepMu.Unlock()
+	if err := s.cfg.MessageBus.RequeueExpiredClaims(ctx); err != nil {
+		if isSQLiteBusyErr(err) {
+			s.emitBestEffort(ctx, events.Event{
+				Type:    "message.requeue.skipped",
+				Message: "Skipped expired-claim sweep due SQLite lock contention",
+				Data: map[string]string{
+					"reason": "busy",
+					"error":  err.Error(),
+				},
+			})
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Session) buildMessageClaimFilters() []state.MessageClaimFilter {
@@ -1933,6 +1997,34 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 	if group.parentTaskID == "" || group.reviewerID == "" {
 		return
 	}
+	parentTask, err := s.cfg.TaskStore.GetTask(ctx, group.parentTaskID)
+	if err != nil {
+		s.emitBestEffort(ctx, events.Event{
+			Type:    "batch.flush.blocked",
+			Message: "Batch flush blocked because parent task could not be loaded",
+			Data: map[string]string{
+				"parentTaskId":  group.parentTaskID,
+				"batchWaveId":   group.waveID,
+				"batchReviewer": group.reviewerID,
+				"reason":        "parent_missing",
+			},
+		})
+		return
+	}
+	if !isTaskTerminalStatus(parentTask.Status) {
+		s.emitBestEffort(ctx, events.Event{
+			Type:    "batch.flush.blocked",
+			Message: "Batch flush blocked until parent task reaches terminal state",
+			Data: map[string]string{
+				"parentTaskId":  group.parentTaskID,
+				"batchWaveId":   group.waveID,
+				"batchReviewer": group.reviewerID,
+				"reason":        "parent_not_terminal",
+				"parentStatus":  string(parentTask.Status),
+			},
+		})
+		return
+	}
 
 	expected := s.listBatchExpectedTasks(ctx, group)
 	expectedCount := len(expected)
@@ -1946,6 +2038,7 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 		// Hard cutover: support singleton/non-staged sources as implicit batch-of-1.
 		expectedCount = completedCount
 	}
+	expectedCount = s.freezeBatchExpectedCount(ctx, parentTask, group, expectedCount)
 	undelivered := make([]types.Task, 0, len(callbacks))
 	for _, cb := range callbacks {
 		if metadataBool(cb.Metadata, "batchDelivered") {
@@ -1959,6 +2052,18 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 
 	allComplete := completedCount >= expectedCount
 	if !allComplete {
+		s.emitBestEffort(ctx, events.Event{
+			Type:    "batch.flush.blocked",
+			Message: "Batch flush blocked because expected callbacks are not yet complete",
+			Data: map[string]string{
+				"parentTaskId":        group.parentTaskID,
+				"batchWaveId":         group.waveID,
+				"batchReviewer":       group.reviewerID,
+				"reason":              "expected_mismatch",
+				"batchExpectedCount":  fmt.Sprintf("%d", expectedCount),
+				"batchCompletedCount": fmt.Sprintf("%d", completedCount),
+			},
+		})
 		return
 	}
 	if s.hasOpenSyntheticBatchCallback(ctx, group) {
@@ -2074,6 +2179,32 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 		},
 	})
 	s.emitBatchProgress(ctx, group)
+}
+
+func (s *Session) freezeBatchExpectedCount(ctx context.Context, parentTask types.Task, group batchGroupScope, expectedCount int) int {
+	if expectedCount <= 0 {
+		return expectedCount
+	}
+	parentTaskID := strings.TrimSpace(parentTask.TaskID)
+	if parentTaskID == "" {
+		return expectedCount
+	}
+	waveID := normalizeWaveID(parentTaskID, group.waveID)
+	if frozen, ok := metadataIntFromNestedMap(parentTask.Metadata, "batchWaveExpectedFrozen", waveID); ok && frozen > 0 {
+		return frozen
+	}
+	if parentTask.Metadata == nil {
+		parentTask.Metadata = map[string]any{}
+	}
+	frozenMap := metadataNestedMap(parentTask.Metadata, "batchWaveExpectedFrozen")
+	frozenMap[waveID] = expectedCount
+	parentTask.Metadata["batchWaveExpectedFrozen"] = frozenMap
+	parentTask.Metadata["batchExpectedCount"] = expectedCount
+	parentTask.Metadata["batchWaveId"] = waveID
+	if err := s.cfg.TaskStore.UpdateTask(ctx, parentTask); err != nil {
+		return expectedCount
+	}
+	return expectedCount
 }
 
 func syntheticBatchTaskID(group batchGroupScope) string {
@@ -2290,6 +2421,77 @@ func metadataBool(m map[string]any, key string) bool {
 		return v != 0
 	default:
 		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(v)), "true")
+	}
+}
+
+func metadataNestedMap(meta map[string]any, key string) map[string]any {
+	if len(meta) == 0 {
+		return map[string]any{}
+	}
+	raw, ok := meta[key]
+	if !ok || raw == nil {
+		return map[string]any{}
+	}
+	switch m := raw.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(m))
+		for k, v := range m {
+			out[strings.TrimSpace(k)] = v
+		}
+		return out
+	case map[string]string:
+		out := make(map[string]any, len(m))
+		for k, v := range m {
+			out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
+		return out
+	default:
+		return map[string]any{}
+	}
+}
+
+func metadataIntFromNestedMap(meta map[string]any, mapKey, key string) (int, bool) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return 0, false
+	}
+	values := metadataNestedMap(meta, mapKey)
+	if len(values) == 0 {
+		return 0, false
+	}
+	raw, ok := values[key]
+	if !ok || raw == nil {
+		return 0, false
+	}
+	switch v := raw.(type) {
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case float64:
+		return int(v), true
+	case string:
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return 0, false
+		}
+		var parsed int
+		_, err := fmt.Sscanf(v, "%d", &parsed)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		return 0, false
+	}
+}
+
+func isTaskTerminalStatus(status types.TaskStatus) bool {
+	switch status {
+	case types.TaskStatusSucceeded, types.TaskStatusFailed, types.TaskStatusCanceled:
+		return true
+	default:
+		return false
 	}
 }
 

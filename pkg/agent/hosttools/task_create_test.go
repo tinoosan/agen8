@@ -3,6 +3,7 @@ package hosttools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -366,6 +367,9 @@ func TestTaskCreateTool_TagsBatchMetadataFromContext(t *testing.T) {
 	if strings.TrimSpace(task.Metadata["batchWaveId"].(string)) == "" {
 		t.Fatalf("expected batchWaveId to be set")
 	}
+	if strings.TrimSpace(fmt.Sprint(task.Metadata["intentId"])) == "" {
+		t.Fatalf("expected deterministic intentId to be set for coordinator delegation")
+	}
 }
 
 func TestTaskCreateTool_ReusesBatchWaveIDWithinContext(t *testing.T) {
@@ -398,6 +402,11 @@ func TestTaskCreateTool_ReusesBatchWaveIDWithinContext(t *testing.T) {
 	}
 	if waveA != waveB {
 		t.Fatalf("expected stable wave ID in shared context, got %q vs %q", waveA, waveB)
+	}
+	intentA := strings.TrimSpace(fmt.Sprint(store.tasks["task-batch-a"].Metadata["intentId"]))
+	intentB := strings.TrimSpace(fmt.Sprint(store.tasks["task-batch-b"].Metadata["intentId"]))
+	if intentA != intentB {
+		t.Fatalf("expected stable intentId for identical coordinator delegation, got %q vs %q", intentA, intentB)
 	}
 }
 

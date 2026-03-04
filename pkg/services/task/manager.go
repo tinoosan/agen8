@@ -317,13 +317,23 @@ func (m *Manager) CreateTask(ctx context.Context, task types.Task) error {
 		}
 		task = normalized
 	}
+	if existing, deduped, err := m.findDeterministicDelegationDuplicate(ctx, task); err != nil {
+		return err
+	} else if deduped {
+		m.notifyWake(existing)
+		return nil
+	}
 	if err := m.store.CreateTask(ctx, task); err != nil {
 		return err
 	}
 	if err := m.publishTaskMessage(ctx, task); err != nil {
-		_ = m.store.DeleteTask(ctx, task.TaskID)
+		if isSQLiteBusyErr(err) {
+			m.markTaskMessageDeferred(ctx, task, err)
+			return nil
+		}
 		return fmt.Errorf("publish task message: %w", err)
 	}
+	m.clearTaskMessageDeferred(ctx, task)
 	m.emitRoutingEvent(ctx, task, "routing.validated", "Task routing validated", map[string]string{
 		"taskId":       strings.TrimSpace(task.TaskID),
 		"assignedType": strings.TrimSpace(task.AssignedToType),
@@ -401,6 +411,138 @@ func shouldSkipMessagePublish(task types.Task) bool {
 	// Defense-in-depth: any non-synthetic batch staging callback should not
 	// emit a claimable message.
 	return metadataBool(task.Metadata, "batchMode") && !metadataBool(task.Metadata, "batchSynthetic")
+}
+
+func (m *Manager) findDeterministicDelegationDuplicate(ctx context.Context, task types.Task) (types.Task, bool, error) {
+	if m == nil {
+		return types.Task{}, false, nil
+	}
+	if !isDeterministicDelegationTask(task) {
+		return types.Task{}, false, nil
+	}
+	intentID := strings.TrimSpace(metadataString(task.Metadata, "intentId"))
+	if intentID == "" {
+		return types.Task{}, false, nil
+	}
+	filter := state.TaskFilter{
+		TeamID: strings.TrimSpace(task.TeamID),
+		SortBy: "created_at",
+		Limit:  500,
+	}
+	tasks, err := m.store.ListTasks(ctx, filter)
+	if err != nil {
+		return types.Task{}, false, err
+	}
+	parentTaskID := strings.TrimSpace(metadataString(task.Metadata, "batchParentTaskId"))
+	waveID := strings.TrimSpace(metadataString(task.Metadata, "batchWaveId"))
+	assignedRole := strings.TrimSpace(task.AssignedRole)
+	for _, existing := range tasks {
+		existing = m.loadTaskDetails(ctx, existing)
+		if strings.TrimSpace(existing.TaskID) == "" {
+			continue
+		}
+		if strings.TrimSpace(existing.TaskID) == strings.TrimSpace(task.TaskID) {
+			return existing, true, nil
+		}
+		if strings.TrimSpace(existing.TeamID) != strings.TrimSpace(task.TeamID) {
+			continue
+		}
+		if !metadataBool(existing.Metadata, "batchMode") {
+			continue
+		}
+		if metadataBool(existing.Metadata, "batchSynthetic") {
+			continue
+		}
+		if metadataString(existing.Metadata, "source") != metadataString(task.Metadata, "source") {
+			continue
+		}
+		if strings.TrimSpace(metadataString(existing.Metadata, "batchParentTaskId")) != parentTaskID {
+			continue
+		}
+		if strings.TrimSpace(metadataString(existing.Metadata, "batchWaveId")) != waveID {
+			continue
+		}
+		if strings.TrimSpace(existing.AssignedRole) != assignedRole {
+			continue
+		}
+		if strings.TrimSpace(metadataString(existing.Metadata, "intentId")) != intentID {
+			continue
+		}
+		return existing, true, nil
+	}
+	return types.Task{}, false, nil
+}
+
+func isDeterministicDelegationTask(task types.Task) bool {
+	if strings.TrimSpace(task.TeamID) == "" {
+		return false
+	}
+	if !metadataBool(task.Metadata, "batchMode") {
+		return false
+	}
+	if metadataBool(task.Metadata, "batchSynthetic") {
+		return false
+	}
+	if strings.TrimSpace(metadataString(task.Metadata, "batchParentTaskId")) == "" {
+		return false
+	}
+	return strings.TrimSpace(task.AssignedRole) != ""
+}
+
+func (m *Manager) markTaskMessageDeferred(ctx context.Context, task types.Task, publishErr error) {
+	task = m.loadTaskDetails(ctx, task)
+	if strings.TrimSpace(task.TaskID) == "" {
+		return
+	}
+	if task.Metadata == nil {
+		task.Metadata = map[string]any{}
+	}
+	now := time.Now().UTC()
+	task.Metadata["messagePending"] = true
+	task.Metadata["messagePendingReason"] = strings.TrimSpace(publishErr.Error())
+	task.Metadata["messagePendingAt"] = now.Format(time.RFC3339Nano)
+	_ = m.store.UpdateTask(ctx, task)
+	m.emitRoutingEvent(ctx, task, "task.message.deferred", "Task message publish deferred due transient lock contention", map[string]string{
+		"taskId":      strings.TrimSpace(task.TaskID),
+		"deferReason": strings.TrimSpace(publishErr.Error()),
+	})
+}
+
+func (m *Manager) clearTaskMessageDeferred(ctx context.Context, task types.Task) {
+	task = m.loadTaskDetails(ctx, task)
+	if strings.TrimSpace(task.TaskID) == "" || len(task.Metadata) == 0 {
+		return
+	}
+	if !metadataBool(task.Metadata, "messagePending") {
+		return
+	}
+	task.Metadata["messagePending"] = false
+	delete(task.Metadata, "messagePendingReason")
+	delete(task.Metadata, "messagePendingAt")
+	_ = m.store.UpdateTask(ctx, task)
+}
+
+func (m *Manager) loadTaskDetails(ctx context.Context, task types.Task) types.Task {
+	if m == nil || m.store == nil {
+		return task
+	}
+	taskID := strings.TrimSpace(task.TaskID)
+	if taskID == "" {
+		return task
+	}
+	loaded, err := m.store.GetTask(ctx, taskID)
+	if err != nil {
+		return task
+	}
+	return loaded
+}
+
+func isSQLiteBusyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(msg, "sqlite_busy") || strings.Contains(msg, "database is locked")
 }
 
 func (m *Manager) DeleteTask(ctx context.Context, taskID string) error {
@@ -738,7 +880,7 @@ func (m *Manager) CountMessages(ctx context.Context, filter state.MessageFilter)
 // RepairRoutingDrift scans for callback tasks with missing/broken routing fields and
 // applies deterministic repairs. Returns number of updated tasks.
 func (m *Manager) RepairRoutingDrift(ctx context.Context, limit int) (int, error) {
-	if m == nil || m.oracle == nil {
+	if m == nil {
 		return 0, nil
 	}
 	if limit <= 0 {
@@ -754,26 +896,31 @@ func (m *Manager) RepairRoutingDrift(ctx context.Context, limit int) (int, error
 	}
 	updated := 0
 	for _, task := range tasks {
-		norm, changed, err := m.oracle.RepairTask(ctx, m.runLoader, task)
-		if err != nil {
-			continue
-		}
 		effective := task
-		if !changed {
-			effective = norm
-		} else {
-			if err := m.store.UpdateTask(ctx, norm); err != nil {
+		changed := false
+		if m.oracle != nil {
+			norm, changedNow, err := m.oracle.RepairTask(ctx, m.runLoader, task)
+			if err != nil {
 				continue
 			}
 			effective = norm
-			updated++
-			m.emitRoutingEvent(ctx, norm, "routing.repaired", "Routing drift repaired", map[string]string{
-				"taskId": strings.TrimSpace(norm.TaskID),
-				"teamId": strings.TrimSpace(norm.TeamID),
-			})
-			m.notifyWake(norm)
+			changed = changedNow
+			if changed {
+				if err := m.store.UpdateTask(ctx, norm); err != nil {
+					continue
+				}
+				updated++
+				m.emitRoutingEvent(ctx, norm, "routing.repaired", "Routing drift repaired", map[string]string{
+					"taskId": strings.TrimSpace(norm.TaskID),
+					"teamId": strings.TrimSpace(norm.TeamID),
+				})
+				m.notifyWake(norm)
+			}
 		}
 		if published, err := m.ensureTaskMessage(ctx, effective); err == nil && published {
+			m.emitRoutingEvent(ctx, effective, "task.message.backfilled", "Backfilled missing task message envelope", map[string]string{
+				"taskId": strings.TrimSpace(effective.TaskID),
+			})
 			m.notifyWake(effective)
 		}
 	}
@@ -962,11 +1109,13 @@ func (m *Manager) ensureTaskMessage(ctx context.Context, task types.Task) (bool,
 		return false, err
 	}
 	if len(msgs) > 0 {
+		m.clearTaskMessageDeferred(ctx, task)
 		return false, nil
 	}
 	if err := m.publishTaskMessage(ctx, task); err != nil {
 		return false, err
 	}
+	m.clearTaskMessageDeferred(ctx, task)
 	return true, nil
 }
 

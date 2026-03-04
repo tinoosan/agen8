@@ -39,6 +39,7 @@ type mockTaskStore struct {
 	getTask      func(ctx context.Context, taskID string) (types.Task, error)
 	listTasks    func(ctx context.Context, filter state.TaskFilter) ([]types.Task, error)
 	createTask   func(ctx context.Context, task types.Task) error
+	updateTask   func(ctx context.Context, task types.Task) error
 	completeTask func(ctx context.Context, taskID string, result types.TaskResult) error
 	claimTask    func(ctx context.Context, taskID string, ttl time.Duration) error
 	releaseLease func(ctx context.Context, taskID string) error
@@ -143,8 +144,13 @@ func (m *mockTaskStore) CreateTask(ctx context.Context, task types.Task) error {
 	return nil
 }
 
-func (m *mockTaskStore) DeleteTask(ctx context.Context, taskID string) error   { return nil }
-func (m *mockTaskStore) UpdateTask(ctx context.Context, task types.Task) error { return nil }
+func (m *mockTaskStore) DeleteTask(ctx context.Context, taskID string) error { return nil }
+func (m *mockTaskStore) UpdateTask(ctx context.Context, task types.Task) error {
+	if m.updateTask != nil {
+		return m.updateTask(ctx, task)
+	}
+	return nil
+}
 
 func (m *mockTaskStore) CompleteTask(ctx context.Context, taskID string, result types.TaskResult) error {
 	if m.completeTask != nil {
@@ -488,6 +494,151 @@ func TestManager_CreateTask_SyntheticBatchCallbackPublishesMessage(t *testing.T)
 	}
 	if published != 1 {
 		t.Fatalf("expected 1 message publish for synthetic batch callback, got %d", published)
+	}
+}
+
+func TestManager_CreateTask_DedupesDeterministicCoordinatorDelegation(t *testing.T) {
+	existing := types.Task{
+		TaskID:       "task-existing",
+		SessionID:    "team-team-1",
+		RunID:        "run-ceo",
+		TeamID:       "team-1",
+		AssignedRole: "growth-lead",
+		Status:       types.TaskStatusPending,
+		Metadata: map[string]any{
+			"source":            "task_create",
+			"batchMode":         true,
+			"batchParentTaskId": "task-parent-1",
+			"batchWaveId":       "wave-a",
+			"intentId":          "task.delegate:abc",
+		},
+	}
+	createCalls := 0
+	store := &mockTaskStore{
+		listTasks: func(context.Context, state.TaskFilter) ([]types.Task, error) {
+			return []types.Task{existing}, nil
+		},
+		getTask: func(ctx context.Context, taskID string) (types.Task, error) {
+			if strings.TrimSpace(taskID) == "task-existing" {
+				return existing, nil
+			}
+			return types.Task{}, state.ErrTaskNotFound
+		},
+		createTask: func(context.Context, types.Task) error {
+			createCalls++
+			return nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	err := mgr.CreateTask(context.Background(), types.Task{
+		TaskID:       "task-new",
+		SessionID:    "team-team-1",
+		RunID:        "run-ceo",
+		TeamID:       "team-1",
+		AssignedRole: "growth-lead",
+		Status:       types.TaskStatusPending,
+		Metadata: map[string]any{
+			"source":            "task_create",
+			"batchMode":         true,
+			"batchParentTaskId": "task-parent-1",
+			"batchWaveId":       "wave-a",
+			"intentId":          "task.delegate:abc",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if createCalls != 0 {
+		t.Fatalf("expected duplicate delegation to short-circuit before create, got create calls=%d", createCalls)
+	}
+}
+
+func TestManager_CreateTask_BusyPublishMarksDeferredAndReturnsNil(t *testing.T) {
+	stored := map[string]types.Task{}
+	store := &mockTaskStore{
+		createTask: func(ctx context.Context, task types.Task) error {
+			stored[strings.TrimSpace(task.TaskID)] = task
+			return nil
+		},
+		getTask: func(ctx context.Context, taskID string) (types.Task, error) {
+			task, ok := stored[strings.TrimSpace(taskID)]
+			if !ok {
+				return types.Task{}, state.ErrTaskNotFound
+			}
+			return task, nil
+		},
+		updateTask: func(ctx context.Context, task types.Task) error {
+			stored[strings.TrimSpace(task.TaskID)] = task
+			return nil
+		},
+	}
+	msgStore := &mockMessageStore{
+		publishMessage: func(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {
+			return types.AgentMessage{}, fmt.Errorf("database is locked (5) (SQLITE_BUSY)")
+		},
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+	err := mgr.CreateTask(context.Background(), types.Task{
+		TaskID:    "task-busy",
+		SessionID: "sess-1",
+		RunID:     "run-1",
+		Status:    types.TaskStatusPending,
+		Goal:      "work",
+		Metadata: map[string]any{
+			"source": "task_create",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask should degrade on busy publish error, got: %v", err)
+	}
+	task, ok := stored["task-busy"]
+	if !ok {
+		t.Fatalf("expected task to remain stored when publish is deferred")
+	}
+	if !metadataBool(task.Metadata, "messagePending") {
+		t.Fatalf("expected messagePending=true after busy publish defer")
+	}
+}
+
+func TestManager_RepairRoutingDrift_BackfillsMessagesWithoutOracle(t *testing.T) {
+	task := types.Task{
+		TaskID:    "task-backfill-1",
+		SessionID: "sess-1",
+		RunID:     "run-1",
+		Status:    types.TaskStatusPending,
+		Goal:      "work",
+		Metadata:  map[string]any{"source": "task_create"},
+	}
+	published := 0
+	store := &mockTaskStore{
+		listTasks: func(context.Context, state.TaskFilter) ([]types.Task, error) {
+			return []types.Task{task}, nil
+		},
+		getTask: func(context.Context, string) (types.Task, error) {
+			return task, nil
+		},
+	}
+	msgStore := &mockMessageStore{
+		listMessages: func(context.Context, state.MessageFilter) ([]types.AgentMessage, error) {
+			return nil, nil
+		},
+		publishMessage: func(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {
+			published++
+			return msg, nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+	updated, err := mgr.RepairRoutingDrift(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RepairRoutingDrift: %v", err)
+	}
+	if updated != 0 {
+		t.Fatalf("expected no routing-field updates without oracle, got %d", updated)
+	}
+	if published != 1 {
+		t.Fatalf("expected missing task message to be backfilled, publishes=%d", published)
 	}
 }
 
