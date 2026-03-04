@@ -155,28 +155,82 @@ func parseAssignee(assignee string) (string, string) {
 }
 
 func protocolTaskFromTypesTask(t types.Task) protocol.Task {
+	source := taskMetaString(t.Metadata, "source")
+	batchMode := taskMetaBool(t.Metadata, "batchMode")
+	batchSynthetic := taskMetaBool(t.Metadata, "batchSynthetic")
+	batchDelivered := taskMetaBool(t.Metadata, "batchDelivered")
+	batchParentTaskID := taskMetaString(t.Metadata, "batchParentTaskId")
+	batchWaveID := taskMetaString(t.Metadata, "batchWaveId")
+	batchIncludedIn := taskMetaString(t.Metadata, "batchIncludedIn")
+
 	return protocol.Task{
-		ID:               strings.TrimSpace(t.TaskID),
-		ThreadID:         protocol.ThreadID(strings.TrimSpace(t.SessionID)),
-		RunID:            protocol.RunID(strings.TrimSpace(t.RunID)),
-		TeamID:           strings.TrimSpace(t.TeamID),
-		TaskKind:         strings.TrimSpace(t.TaskKind),
-		AssignedToType:   strings.TrimSpace(t.AssignedToType),
-		AssignedTo:       strings.TrimSpace(t.AssignedTo),
-		AssignedRole:     strings.TrimSpace(t.AssignedRole),
-		ClaimedByAgentID: strings.TrimSpace(t.ClaimedByAgentID),
-		RoleSnapshot:     strings.TrimSpace(t.RoleSnapshot),
-		Goal:             strings.TrimSpace(t.Goal),
-		Status:           strings.TrimSpace(string(t.Status)),
-		Summary:          strings.TrimSpace(t.Summary),
-		Error:            strings.TrimSpace(t.Error),
-		Artifacts:        append([]string(nil), t.Artifacts...),
-		InputTokens:      t.InputTokens,
-		OutputTokens:     t.OutputTokens,
-		TotalTokens:      t.TotalTokens,
-		CostUSD:          t.CostUSD,
-		CreatedAt:        timeutil.OrNow(t.CreatedAt),
-		CompletedAt:      timeutil.OrNow(t.CompletedAt),
+		ID:                strings.TrimSpace(t.TaskID),
+		ThreadID:          protocol.ThreadID(strings.TrimSpace(t.SessionID)),
+		RunID:             protocol.RunID(strings.TrimSpace(t.RunID)),
+		TeamID:            strings.TrimSpace(t.TeamID),
+		Source:            source,
+		BatchMode:         batchMode,
+		BatchSynthetic:    batchSynthetic,
+		BatchDelivered:    batchDelivered,
+		BatchParentTaskID: batchParentTaskID,
+		BatchWaveID:       batchWaveID,
+		BatchIncludedIn:   batchIncludedIn,
+		TaskKind:          strings.TrimSpace(t.TaskKind),
+		AssignedToType:    strings.TrimSpace(t.AssignedToType),
+		AssignedTo:        strings.TrimSpace(t.AssignedTo),
+		AssignedRole:      strings.TrimSpace(t.AssignedRole),
+		ClaimedByAgentID:  strings.TrimSpace(t.ClaimedByAgentID),
+		RoleSnapshot:      strings.TrimSpace(t.RoleSnapshot),
+		Goal:              strings.TrimSpace(t.Goal),
+		Status:            strings.TrimSpace(string(t.Status)),
+		Summary:           strings.TrimSpace(t.Summary),
+		Error:             strings.TrimSpace(t.Error),
+		Artifacts:         append([]string(nil), t.Artifacts...),
+		InputTokens:       t.InputTokens,
+		OutputTokens:      t.OutputTokens,
+		TotalTokens:       t.TotalTokens,
+		CostUSD:           t.CostUSD,
+		CreatedAt:         timeutil.OrNow(t.CreatedAt),
+		CompletedAt:       timeutil.OrNow(t.CompletedAt),
+	}
+}
+
+func taskMetaString(metadata map[string]any, key string) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	raw, ok := metadata[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(raw))
+}
+
+func taskMetaBool(metadata map[string]any, key string) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+	raw, ok := metadata[key]
+	if !ok || raw == nil {
+		return false
+	}
+	switch v := raw.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	case int:
+		return v != 0
+	case int32:
+		return v != 0
+	case int64:
+		return v != 0
+	case float32:
+		return v != 0
+	case float64:
+		return v != 0
+	default:
+		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(v)), "true")
 	}
 }
 

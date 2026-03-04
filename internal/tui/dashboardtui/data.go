@@ -59,6 +59,18 @@ type sessionSyncedMsg struct {
 	err       error
 }
 
+type dashboardTaskCounts struct {
+	AssignedByRun   map[string]int
+	CompletedByRun  map[string]int
+	AssignedByRole  map[string]int
+	CompletedByRole map[string]int
+	Pending         int
+	Active          int
+	Done            int
+	Assigned        int
+	Completed       int
+}
+
 func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -154,6 +166,7 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			}
 
 			seenTask := map[string]bool{}
+			teamTasks := make([]protocol.Task, 0, 512)
 			for _, view := range []string{"inbox", "outbox"} {
 				tasks, err := listTasksByView(ctx, scopeClient, protocol.TaskListParams{
 					ThreadID: threadID,
@@ -176,29 +189,19 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 					if taskID != "" {
 						seenTask[taskID] = true
 					}
-					assignedRunID := strings.TrimSpace(string(t.RunID))
-					if assignedRunID != "" {
-						assignedByRun[assignedRunID]++
-						if isCompletedTaskStatus(t.Status) {
-							completedByRun[assignedRunID]++
-						}
-						continue
-					}
-					role := taskAssignedRole(t)
-					if role == "" {
-						continue
-					}
-					assignedByRole[role]++
-					if isCompletedTaskStatus(t.Status) {
-						completedByRole[role]++
-					}
+					teamTasks = append(teamTasks, t)
 				}
 			}
-			stats.Pending = teamStatus.Pending
-			stats.Active = teamStatus.Active
-			stats.Assigned = teamStatus.Pending + teamStatus.Active + teamStatus.Done
-			stats.Completed = teamStatus.Done
-			stats.Done = teamStatus.Done
+			taskCounts := accumulateTeamTaskCounts(teamTasks)
+			assignedByRun = taskCounts.AssignedByRun
+			completedByRun = taskCounts.CompletedByRun
+			assignedByRole = taskCounts.AssignedByRole
+			completedByRole = taskCounts.CompletedByRole
+			stats.Pending = taskCounts.Pending
+			stats.Active = taskCounts.Active
+			stats.Assigned = taskCounts.Assigned
+			stats.Completed = taskCounts.Completed
+			stats.Done = taskCounts.Done
 			if stats.TotalTokens == 0 {
 				stats.TotalTokens = teamStatus.TotalTokens
 			}
@@ -347,6 +350,54 @@ func isCompletedTaskStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func accumulateTeamTaskCounts(tasks []protocol.Task) dashboardTaskCounts {
+	counts := dashboardTaskCounts{
+		AssignedByRun:   map[string]int{},
+		CompletedByRun:  map[string]int{},
+		AssignedByRole:  map[string]int{},
+		CompletedByRole: map[string]int{},
+	}
+	for _, task := range tasks {
+		if isStagedCallbackChildTask(task) {
+			continue
+		}
+		assignedRunID := strings.TrimSpace(string(task.RunID))
+		if assignedRunID != "" {
+			counts.AssignedByRun[assignedRunID]++
+			if isCompletedTaskStatus(task.Status) {
+				counts.CompletedByRun[assignedRunID]++
+			}
+		} else {
+			role := taskAssignedRole(task)
+			if role != "" {
+				counts.AssignedByRole[role]++
+				if isCompletedTaskStatus(task.Status) {
+					counts.CompletedByRole[role]++
+				}
+			}
+		}
+
+		status := strings.ToLower(strings.TrimSpace(task.Status))
+		switch status {
+		case "pending":
+			counts.Pending++
+		case "active", "review_pending":
+			counts.Active++
+		default:
+			if isCompletedTaskStatus(status) {
+				counts.Done++
+			}
+		}
+	}
+	counts.Assigned = counts.Pending + counts.Active + counts.Done
+	counts.Completed = counts.Done
+	return counts
+}
+
+func isStagedCallbackChildTask(task protocol.Task) bool {
+	return task.BatchMode && !task.BatchSynthetic && strings.TrimSpace(task.BatchIncludedIn) != ""
 }
 
 func fetchSessionItem(call func(method string, params, out any) error, sessionID string) (protocol.SessionListItem, error) {

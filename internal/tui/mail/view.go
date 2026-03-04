@@ -125,6 +125,7 @@ func (m *Model) renderFooter() string {
 	if m.isNarrow() {
 		hints := kit.StyleDim.Render("tab") + " " +
 			kit.StyleDim.Render("j/k") + " " +
+			kit.StyleDim.Render("space") + " " +
 			kit.StyleDim.Render("↵") + " " +
 			kit.StyleDim.Render("esc") + " " +
 			kit.StyleDim.Render("r") + " " +
@@ -140,6 +141,7 @@ func (m *Model) renderFooter() string {
 
 	hints := kit.StyleDim.Render("tab") + " focus  " +
 		kit.StyleDim.Render("j/k") + " scroll  " +
+		kit.StyleDim.Render("space") + " expand  " +
 		kit.StyleDim.Render("enter") + " detail  " +
 		kit.StyleDim.Render("esc") + " close  " +
 		kit.StyleDim.Render("r") + " refresh  " +
@@ -297,13 +299,24 @@ func (m *Model) buildInboxLines(width int, isFocused bool) []string {
 		if isFocused && i == m.inboxSel {
 			marker = styleAccent.Render("› ")
 		}
-		line := marker + kit.StyleBold.Render(shortID(t.ID, idLen))
+		indicator := "  "
+		if len(t.Children) > 0 {
+			if t.Expanded {
+				indicator = "▾ "
+			} else {
+				indicator = "▸ "
+			}
+		}
+		line := marker + indicator + kit.StyleBold.Render(shortID(t.ID, idLen))
 		if !m.isNarrow() {
 			if t.Role != "" {
 				line += " " + kit.StyleDim.Render("["+t.Role+"]")
 			}
 			if t.Status != "" && t.Status != "pending" {
 				line += " " + kit.StyleDim.Render("["+t.Status+"]")
+			}
+			if len(t.Children) > 0 {
+				line += " " + kit.StyleDim.Render(fmt.Sprintf("[batch:%d]", len(t.Children)))
 			}
 		}
 
@@ -316,6 +329,28 @@ func (m *Model) buildInboxLines(width int, isFocused bool) []string {
 			line += " — " + goal
 		}
 		lines = append(lines, line)
+		if t.Expanded {
+			for _, child := range t.Children {
+				childLine := "    " + styleAccent.Render("↳ ") + kit.StyleBold.Render(shortID(child.ID, idLen))
+				if child.Role != "" {
+					childLine += " " + kit.StyleDim.Render("["+child.Role+"]")
+				}
+				status := strings.TrimSpace(child.DisplayStatus)
+				if status == "" {
+					status = child.Status
+				}
+				if status != "" {
+					childLine += " " + kit.StyleDim.Render("[") + renderStatus(status) + kit.StyleDim.Render("]")
+				}
+				if src := strings.TrimSpace(child.Source); src != "" && !m.isNarrow() {
+					childLine += " " + kit.StyleDim.Render("["+src+"]")
+				}
+				if goal := truncate(child.Goal, maxInt(10, width-space)); goal != "" {
+					childLine += " — " + goal
+				}
+				lines = append(lines, childLine)
+			}
+		}
 	}
 	return lines
 }
@@ -363,6 +398,14 @@ func (m *Model) buildOutboxLines(width int, isFocused bool) []string {
 		if isFocused && i == m.outboxSel {
 			marker = styleAccent.Render("› ")
 		}
+		indicator := "  "
+		if len(r.Children) > 0 {
+			if r.Expanded {
+				indicator = "▾ "
+			} else {
+				indicator = "▸ "
+			}
+		}
 
 		space := 30
 		if m.isNarrow() {
@@ -385,9 +428,12 @@ func (m *Model) buildOutboxLines(width int, isFocused bool) []string {
 			}
 		}
 
-		header := marker + kit.StyleBold.Render(shortID(r.ID, idLen))
+		header := marker + indicator + kit.StyleBold.Render(shortID(r.ID, idLen))
 		if !m.isNarrow() && r.Role != "" {
 			header += " " + kit.StyleDim.Render("["+r.Role+"]")
+		}
+		if !m.isNarrow() && len(r.Children) > 0 {
+			header += " " + kit.StyleDim.Render(fmt.Sprintf("[batch:%d]", len(r.Children)))
 		}
 		header += " " + kit.StyleDim.Render("\""+goal+"\"") + " → " + statusStr + meta
 		lines = append(lines, header)
@@ -401,6 +447,24 @@ func (m *Model) buildOutboxLines(width int, isFocused bool) []string {
 				tokLine += fmt.Sprintf(" · cost: $%.4f", r.CostUSD)
 			}
 			lines = append(lines, tokLine)
+		}
+		if r.Expanded {
+			for _, child := range r.Children {
+				status := strings.TrimSpace(child.DisplayStatus)
+				if status == "" {
+					status = child.Status
+				}
+				childLine := "    " + styleAccent.Render("↳ ") + kit.StyleBold.Render(shortID(child.ID, idLen))
+				if child.Role != "" {
+					childLine += " " + kit.StyleDim.Render("["+child.Role+"]")
+				}
+				if src := strings.TrimSpace(child.Source); src != "" && !m.isNarrow() {
+					childLine += " " + kit.StyleDim.Render("["+src+"]")
+				}
+				childGoal := truncate(child.Goal, maxInt(10, width-space))
+				childLine += " " + kit.StyleDim.Render("\""+childGoal+"\"") + " → " + renderStatus(status)
+				lines = append(lines, childLine)
+			}
 		}
 	}
 	return lines
@@ -439,6 +503,9 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		lines = append(lines, kit.StyleStatusKey.Render("Tokens:   ")+
 			fmt.Sprintf("%d (%d in + %d out)", task.TotalTokens, task.InputTokens, task.OutputTokens))
 	}
+	if len(task.Children) > 0 {
+		lines = append(lines, kit.StyleStatusKey.Render("Children: ")+fmt.Sprintf("%d callbacks", len(task.Children)))
+	}
 	if task.CostUSD > 0 {
 		lines = append(lines, kit.StyleStatusKey.Render("Cost:     ")+fmt.Sprintf("$%.4f", task.CostUSD))
 	}
@@ -469,6 +536,8 @@ func (m *Model) renderDetailPanel(width, height int) string {
 func renderStatus(status string) string {
 	switch status {
 	case "succeeded":
+		return styleGreen.Render(status)
+	case "batched":
 		return styleGreen.Render(status)
 	case "failed", "canceled":
 		return styleRed.Render(status)

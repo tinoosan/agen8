@@ -3876,6 +3876,89 @@ func TestRPCServer_TaskList_OutboxIncludesReviewPendingCallbacks(t *testing.T) {
 	}
 }
 
+func TestRPCServer_TaskList_ExposesBatchProjectionFields(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	teamID := "team-1"
+	sess.TeamID = teamID
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	now := time.Now().UTC()
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "callback-batch", SessionID: sess.SessionID, RunID: run.RunID, TeamID: teamID, AssignedRole: "reviewer", AssignedToType: "role", AssignedTo: "reviewer",
+		Goal: "batch callback", Status: types.TaskStatusReviewPending, CreatedAt: &now, Metadata: map[string]any{
+			"source":            "team.batch.callback",
+			"batchMode":         true,
+			"batchSynthetic":    true,
+			"batchParentTaskId": "task-parent-1",
+			"batchWaveId":       "wave-a",
+		},
+	})
+	_ = ts.CreateTask(context.Background(), types.Task{
+		TaskID: "callback-child", SessionID: sess.SessionID, RunID: run.RunID, TeamID: teamID, AssignedRole: "reviewer", AssignedToType: "role", AssignedTo: "reviewer",
+		Goal: "single callback", Status: types.TaskStatusReviewPending, CreatedAt: &now, Metadata: map[string]any{
+			"source":            "team.callback",
+			"batchMode":         true,
+			"batchDelivered":    true,
+			"batchParentTaskId": "task-parent-1",
+			"batchWaveId":       "wave-a",
+			"batchIncludedIn":   "callback-batch",
+		},
+	})
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+	req, _ := protocol.NewRequest("1", protocol.MethodTaskList, protocol.TaskListParams{
+		ThreadID: protocol.ThreadID(sess.SessionID),
+		TeamID:   teamID,
+		Scope:    "team",
+		View:     "outbox",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("task.list outbox error: %+v", resp.Error)
+	}
+	var out protocol.TaskListResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if len(out.Tasks) != 2 {
+		t.Fatalf("expected 2 outbox callbacks, got %d", len(out.Tasks))
+	}
+
+	byID := map[string]protocol.Task{}
+	for _, task := range out.Tasks {
+		byID[strings.TrimSpace(task.ID)] = task
+	}
+
+	batch, ok := byID["callback-batch"]
+	if !ok {
+		t.Fatalf("missing synthetic batch callback: %+v", byID)
+	}
+	if strings.TrimSpace(batch.Source) != "team.batch.callback" || !batch.BatchMode || !batch.BatchSynthetic {
+		t.Fatalf("unexpected synthetic batch projection: %+v", batch)
+	}
+	if strings.TrimSpace(batch.BatchParentTaskID) != "task-parent-1" || strings.TrimSpace(batch.BatchWaveID) != "wave-a" {
+		t.Fatalf("unexpected synthetic batch linkage: %+v", batch)
+	}
+
+	child, ok := byID["callback-child"]
+	if !ok {
+		t.Fatalf("missing staged callback child: %+v", byID)
+	}
+	if strings.TrimSpace(child.Source) != "team.callback" || !child.BatchMode || child.BatchSynthetic {
+		t.Fatalf("unexpected child callback projection: %+v", child)
+	}
+	if !child.BatchDelivered || strings.TrimSpace(child.BatchIncludedIn) != "callback-batch" {
+		t.Fatalf("unexpected child callback batch delivery projection: %+v", child)
+	}
+}
+
 func TestRPCServer_TeamGetStatus_ManifestRosterIgnoresStaleTaskRuns(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")
