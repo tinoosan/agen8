@@ -1039,6 +1039,179 @@ func TestMaybeCreateCoordinatorCallback_TeamBatchFlushesWhenComplete(t *testing.
 	}
 }
 
+func TestMaybeFlushBatchGroup_TeamSyntheticBatchIsIdempotentAndUsesParentRun(t *testing.T) {
+	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	parentTaskID := "task-parent-team-dedupe"
+	waveID := "wave-dedupe-1"
+
+	mustCreate := func(task types.Task) {
+		t.Helper()
+		if err := store.CreateTask(ctx, task); err != nil {
+			t.Fatalf("CreateTask(%s): %v", task.TaskID, err)
+		}
+	}
+
+	mustCreate(types.Task{
+		TaskID:         parentTaskID,
+		SessionID:      "team-team-1",
+		RunID:          "run-ceo",
+		TeamID:         "team-1",
+		AssignedRole:   "ceo",
+		AssignedToType: "role",
+		AssignedTo:     "ceo",
+		Goal:           "parent",
+		Status:         types.TaskStatusPending,
+		CreatedAt:      &now,
+		Metadata:       map[string]any{"source": "task_create"},
+	})
+	mustCreate(types.Task{
+		TaskID:       "task-child-dedupe-1",
+		SessionID:    "team-team-1",
+		RunID:        "run-backend",
+		TeamID:       "team-1",
+		AssignedRole: "backend-engineer",
+		Goal:         "child 1",
+		Status:       types.TaskStatusSucceeded,
+		CreatedAt:    &now,
+		Metadata: map[string]any{
+			"source":            "task_create",
+			"batchMode":         true,
+			"batchParentTaskId": parentTaskID,
+			"batchWaveId":       waveID,
+		},
+	})
+	mustCreate(types.Task{
+		TaskID:       "task-child-dedupe-2",
+		SessionID:    "team-team-1",
+		RunID:        "run-qa",
+		TeamID:       "team-1",
+		AssignedRole: "qa",
+		Goal:         "child 2",
+		Status:       types.TaskStatusSucceeded,
+		CreatedAt:    &now,
+		Metadata: map[string]any{
+			"source":            "task_create",
+			"batchMode":         true,
+			"batchParentTaskId": parentTaskID,
+			"batchWaveId":       waveID,
+		},
+	})
+	mustCreate(types.Task{
+		TaskID:         "callback-child-dedupe-1",
+		SessionID:      "team-team-1",
+		RunID:          "run-backend",
+		TeamID:         "team-1",
+		AssignedRole:   "reviewer",
+		AssignedToType: "role",
+		AssignedTo:     "reviewer",
+		TaskKind:       state.TaskKindCallback,
+		Goal:           "review child 1",
+		Status:         types.TaskStatusReviewPending,
+		CreatedAt:      &now,
+		Metadata: map[string]any{
+			"source":            "team.callback",
+			"batchMode":         true,
+			"batchParentTaskId": parentTaskID,
+			"batchWaveId":       waveID,
+			"callbackForTaskId": "task-child-dedupe-1",
+			"batchDelivered":    false,
+		},
+	})
+	mustCreate(types.Task{
+		TaskID:         "callback-child-dedupe-2",
+		SessionID:      "team-team-1",
+		RunID:          "run-qa",
+		TeamID:         "team-1",
+		AssignedRole:   "reviewer",
+		AssignedToType: "role",
+		AssignedTo:     "reviewer",
+		TaskKind:       state.TaskKindCallback,
+		Goal:           "review child 2",
+		Status:         types.TaskStatusReviewPending,
+		CreatedAt:      &now,
+		Metadata: map[string]any{
+			"source":            "team.callback",
+			"batchMode":         true,
+			"batchParentTaskId": parentTaskID,
+			"batchWaveId":       waveID,
+			"callbackForTaskId": "task-child-dedupe-2",
+			"batchDelivered":    false,
+		},
+	})
+
+	group := batchGroupScope{
+		mode:         "team",
+		parentTaskID: parentTaskID,
+		waveID:       waveID,
+		reviewerID:   "reviewer",
+	}
+	sA := &Session{cfg: Config{
+		TaskStore:       store,
+		TeamID:          "team-1",
+		RoleName:        "backend-engineer",
+		CoordinatorRole: "ceo",
+		ReviewerRole:    "reviewer",
+		SessionID:       "team-team-1",
+		RunID:           "run-backend",
+	}}
+	sB := &Session{cfg: Config{
+		TaskStore:       store,
+		TeamID:          "team-1",
+		RoleName:        "qa",
+		CoordinatorRole: "ceo",
+		ReviewerRole:    "reviewer",
+		SessionID:       "team-team-1",
+		RunID:           "run-qa",
+	}}
+
+	sA.maybeFlushBatchGroup(ctx, group)
+	sB.maybeFlushBatchGroup(ctx, group)
+
+	pending, err := store.ListTasks(ctx, state.TaskFilter{
+		TeamID:   "team-1",
+		Status:   []types.TaskStatus{types.TaskStatusPending, types.TaskStatusActive},
+		SortBy:   "created_at",
+		SortDesc: true,
+		Limit:    100,
+	})
+	if err != nil {
+		t.Fatalf("ListTasks pending: %v", err)
+	}
+	batches := make([]types.Task, 0, 2)
+	for _, task := range pending {
+		loaded, _ := store.GetTask(ctx, task.TaskID)
+		if strings.TrimSpace(fmt.Sprint(loaded.Metadata["source"])) == "team.batch.callback" {
+			batches = append(batches, loaded)
+		}
+	}
+	if len(batches) != 1 {
+		t.Fatalf("expected exactly one synthetic team batch callback, got %d (%+v)", len(batches), batches)
+	}
+	wantBatchID := syntheticBatchTaskID(group)
+	if got := strings.TrimSpace(batches[0].TaskID); got != wantBatchID {
+		t.Fatalf("synthetic batch id=%q want %q", got, wantBatchID)
+	}
+	if got := strings.TrimSpace(batches[0].RunID); got != "run-ceo" {
+		t.Fatalf("synthetic batch runID=%q want run-ceo", got)
+	}
+	cb1, err := store.GetTask(ctx, "callback-child-dedupe-1")
+	if err != nil {
+		t.Fatalf("GetTask callback-child-dedupe-1: %v", err)
+	}
+	cb2, err := store.GetTask(ctx, "callback-child-dedupe-2")
+	if err != nil {
+		t.Fatalf("GetTask callback-child-dedupe-2: %v", err)
+	}
+	if !metadataBool(cb1.Metadata, "batchDelivered") || !metadataBool(cb2.Metadata, "batchDelivered") {
+		t.Fatalf("expected callbacks marked batchDelivered=true, got cb1=%v cb2=%v", cb1.Metadata["batchDelivered"], cb2.Metadata["batchDelivered"])
+	}
+}
+
 func TestMaybeCreateCoordinatorCallback_TeamBatchWaitsUntilComplete(t *testing.T) {
 	store, err := state.NewSQLiteTaskStore(filepath.Join(t.TempDir(), "agen8.db"))
 	if err != nil {

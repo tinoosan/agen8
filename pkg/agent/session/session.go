@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path"
 	"path/filepath"
@@ -1966,7 +1967,7 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 
 	now := time.Now().UTC()
 	flushReason := "all_complete"
-	batchTaskID := fmt.Sprintf("callback-batch-%s-%d", group.parentTaskID, now.UnixNano())
+	batchTaskID := syntheticBatchTaskID(group)
 	source := taskSourceSubagentBatchCallback
 	taskKind := state.TaskKindReview
 	assignedToType := "agent"
@@ -1980,7 +1981,7 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 		taskKind = state.TaskKindCallback
 		assignedToType = "role"
 		sessionID = strings.TrimSpace(s.cfg.SessionID)
-		runID = strings.TrimSpace(s.cfg.RunID)
+		runID = firstNonEmpty(s.resolveBatchParentRunID(ctx, group.parentTaskID), strings.TrimSpace(s.cfg.RunID))
 		teamID = strings.TrimSpace(s.cfg.TeamID)
 		assignedRole = group.reviewerID
 		createdBy = strings.TrimSpace(s.cfg.RoleName)
@@ -2073,6 +2074,33 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 		},
 	})
 	s.emitBatchProgress(ctx, group)
+}
+
+func syntheticBatchTaskID(group batchGroupScope) string {
+	key := strings.Join([]string{
+		strings.TrimSpace(group.mode),
+		strings.TrimSpace(group.parentTaskID),
+		normalizeWaveID(group.parentTaskID, group.waveID),
+		strings.TrimSpace(group.reviewerID),
+	}, "|")
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(key))
+	return fmt.Sprintf("callback-batch-%016x", h.Sum64())
+}
+
+func (s *Session) resolveBatchParentRunID(ctx context.Context, parentTaskID string) string {
+	if s == nil || s.cfg.TaskStore == nil {
+		return ""
+	}
+	parentTaskID = strings.TrimSpace(parentTaskID)
+	if parentTaskID == "" {
+		return ""
+	}
+	task, err := s.cfg.TaskStore.GetTask(ctx, parentTaskID)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(task.RunID)
 }
 
 func (s *Session) emitBatchProgress(ctx context.Context, group batchGroupScope) {

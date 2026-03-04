@@ -11,10 +11,11 @@ import (
 )
 
 type mockSessionProvider struct {
-	sessions map[string]types.Session
-	runs     map[string]types.Run
-	loadErr  error
-	saveErr  error
+	sessions      map[string]types.Session
+	runs          map[string]types.Run
+	groupedBySess map[string][]types.Run
+	loadErr       error
+	saveErr       error
 }
 
 func (m *mockSessionProvider) LoadSession(ctx context.Context, sessionID string) (types.Session, error) {
@@ -57,6 +58,33 @@ func (m *mockSessionProvider) SaveRun(ctx context.Context, run types.Run) error 
 	}
 	m.runs[run.RunID] = run
 	return nil
+}
+
+func (m *mockSessionProvider) ListRunsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]types.Run, error) {
+	if m.loadErr != nil {
+		return nil, m.loadErr
+	}
+	out := make(map[string][]types.Run, len(sessionIDs))
+	if len(m.groupedBySess) > 0 {
+		for _, sessionID := range sessionIDs {
+			runs := m.groupedBySess[sessionID]
+			cp := make([]types.Run, len(runs))
+			copy(cp, runs)
+			out[sessionID] = cp
+		}
+		return out, nil
+	}
+	for _, sessionID := range sessionIDs {
+		runs := make([]types.Run, 0)
+		for _, run := range m.runs {
+			if run.SessionID != sessionID {
+				continue
+			}
+			runs = append(runs, run)
+		}
+		out[sessionID] = runs
+	}
+	return out, nil
 }
 
 type mockTaskLister struct {
@@ -164,6 +192,43 @@ func TestList_SessionNotFound(t *testing.T) {
 	_, err := mgr.List(ctx, "sess-missing")
 	if err == nil {
 		t.Fatal("expected error when session not found")
+	}
+}
+
+func TestList_IncludesRunsFromBatchWhenSessionRunsStale(t *testing.T) {
+	now := time.Now().UTC()
+	sessions := map[string]types.Session{
+		"sess-1": {
+			SessionID:    "sess-1",
+			CurrentRunID: "",
+			Runs:         nil,
+		},
+	}
+	run := types.Run{
+		RunID:     "run-live",
+		SessionID: "sess-1",
+		Status:    types.RunStatusRunning,
+		Goal:      "live",
+		StartedAt: &now,
+	}
+	prov := &mockSessionProvider{
+		sessions: sessions,
+		runs:     map[string]types.Run{"run-live": run},
+		groupedBySess: map[string][]types.Run{
+			"sess-1": {run},
+		},
+	}
+	mgr := NewManager(prov, nil, nil)
+
+	list, err := mgr.List(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 agent from grouped runs, got %d", len(list))
+	}
+	if list[0].RunID != "run-live" {
+		t.Fatalf("expected run-live, got %q", list[0].RunID)
 	}
 }
 

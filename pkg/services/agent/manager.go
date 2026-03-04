@@ -18,6 +18,10 @@ type Manager struct {
 	controller RuntimeController
 }
 
+type sessionRunBatchReader interface {
+	ListRunsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]types.Run, error)
+}
+
 // NewManager creates a new agent service manager.
 func NewManager(sessions SessionProvider, tasks TaskLister, taskCancel ActiveTaskCanceler) *Manager {
 	return &Manager{
@@ -42,15 +46,42 @@ func (m *Manager) List(ctx context.Context, sessionID string) ([]AgentInfo, erro
 	if err != nil {
 		return nil, err
 	}
-	out := make([]AgentInfo, 0, len(sess.Runs))
-	for _, runID := range sess.Runs {
+	runIDs, runByID := collectSessionRunsForList(sess)
+	if batchReader, ok := m.sessions.(sessionRunBatchReader); ok {
+		if grouped, gerr := batchReader.ListRunsBySessionIDs(ctx, []string{sessionID}); gerr == nil {
+			if groupedRuns := grouped[sessionID]; len(groupedRuns) > 0 {
+				seen := make(map[string]struct{}, len(runIDs)+len(groupedRuns))
+				for _, existing := range runIDs {
+					seen[existing] = struct{}{}
+				}
+				for _, run := range groupedRuns {
+					runID := strings.TrimSpace(run.RunID)
+					if runID == "" {
+						continue
+					}
+					runByID[runID] = run
+					if _, ok := seen[runID]; ok {
+						continue
+					}
+					seen[runID] = struct{}{}
+					runIDs = append(runIDs, runID)
+				}
+			}
+		}
+	}
+	out := make([]AgentInfo, 0, len(runIDs))
+	for _, runID := range runIDs {
 		runID = strings.TrimSpace(runID)
 		if runID == "" {
 			continue
 		}
-		run, err := m.sessions.LoadRun(ctx, runID)
-		if err != nil {
-			continue
+		run, ok := runByID[runID]
+		if !ok {
+			var loadErr error
+			run, loadErr = m.sessions.LoadRun(ctx, runID)
+			if loadErr != nil {
+				continue
+			}
 		}
 		item := AgentInfo{
 			RunID:       runID,
@@ -83,6 +114,27 @@ func (m *Manager) List(ctx context.Context, sessionID string) ([]AgentInfo, erro
 		return a > b
 	})
 	return out, nil
+}
+
+func collectSessionRunsForList(sess types.Session) ([]string, map[string]types.Run) {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(sess.Runs)+1)
+	if runID := strings.TrimSpace(sess.CurrentRunID); runID != "" {
+		seen[runID] = struct{}{}
+		out = append(out, runID)
+	}
+	for _, runID := range sess.Runs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			continue
+		}
+		if _, ok := seen[runID]; ok {
+			continue
+		}
+		seen[runID] = struct{}{}
+		out = append(out, runID)
+	}
+	return out, make(map[string]types.Run, len(out))
 }
 
 // Start creates a new run and updates the session.

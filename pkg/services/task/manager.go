@@ -758,18 +758,24 @@ func (m *Manager) RepairRoutingDrift(ctx context.Context, limit int) (int, error
 		if err != nil {
 			continue
 		}
+		effective := task
 		if !changed {
-			continue
+			effective = norm
+		} else {
+			if err := m.store.UpdateTask(ctx, norm); err != nil {
+				continue
+			}
+			effective = norm
+			updated++
+			m.emitRoutingEvent(ctx, norm, "routing.repaired", "Routing drift repaired", map[string]string{
+				"taskId": strings.TrimSpace(norm.TaskID),
+				"teamId": strings.TrimSpace(norm.TeamID),
+			})
+			m.notifyWake(norm)
 		}
-		if err := m.store.UpdateTask(ctx, norm); err != nil {
-			continue
+		if published, err := m.ensureTaskMessage(ctx, effective); err == nil && published {
+			m.notifyWake(effective)
 		}
-		updated++
-		m.emitRoutingEvent(ctx, norm, "routing.repaired", "Routing drift repaired", map[string]string{
-			"taskId": strings.TrimSpace(norm.TaskID),
-			"teamId": strings.TrimSpace(norm.TeamID),
-		})
-		m.notifyWake(norm)
 	}
 	return updated, nil
 }
@@ -858,6 +864,12 @@ func (m *Manager) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewe
 		if handoffTaskID == "" {
 			handoffTaskID = "review-handoff-" + batchTaskID
 		}
+		if handoffTask, err := m.store.GetTask(ctx, handoffTaskID); err == nil {
+			if _, err := m.ensureTaskMessage(ctx, handoffTask); err != nil {
+				return "", fmt.Errorf("publish handoff message: %w", err)
+			}
+			m.notifyWake(handoffTask)
+		}
 		return handoffTaskID, nil
 	}
 	closer, ok := m.store.(batchCloseStore)
@@ -914,6 +926,9 @@ func (m *Manager) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewe
 		})
 	}
 	if handoffTask, err := m.store.GetTask(ctx, strings.TrimSpace(handoffTaskID)); err == nil {
+		if _, err := m.ensureTaskMessage(ctx, handoffTask); err != nil {
+			return "", fmt.Errorf("publish handoff message: %w", err)
+		}
 		m.notifyWake(handoffTask)
 	}
 	if batchErr == nil {
@@ -922,6 +937,37 @@ func (m *Manager) CloseBatchAndHandoff(ctx context.Context, batchTaskID, reviewe
 		m.notifyWake(batchTask)
 	}
 	return handoffTaskID, nil
+}
+
+func (m *Manager) ensureTaskMessage(ctx context.Context, task types.Task) (bool, error) {
+	if m == nil || m.messageStore == nil {
+		return false, nil
+	}
+	if shouldSkipMessagePublish(task) {
+		return false, nil
+	}
+	taskID := strings.TrimSpace(task.TaskID)
+	if taskID == "" {
+		return false, nil
+	}
+	msgs, err := m.listTaskMessages(ctx, task, state.MessageFilter{
+		ThreadID: strings.TrimSpace(task.SessionID),
+		TeamID:   strings.TrimSpace(task.TeamID),
+		TaskRef:  taskID,
+		Channel:  types.MessageChannelInbox,
+		Limit:    1,
+		SortBy:   "created_at",
+	})
+	if err != nil {
+		return false, err
+	}
+	if len(msgs) > 0 {
+		return false, nil
+	}
+	if err := m.publishTaskMessage(ctx, task); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func metadataString(meta map[string]any, key string) string {
