@@ -786,6 +786,17 @@ func TestMaybeCreateCoordinatorCallback_SubagentBatchFlushesWhenComplete(t *test
 		SpawnIndex:  1,
 	}}
 	now := time.Now().UTC()
+	if err := store.CreateTask(context.Background(), types.Task{
+		TaskID:    "task-parent-1",
+		SessionID: "session-parent",
+		RunID:     "run-parent",
+		Goal:      "parent",
+		Status:    types.TaskStatusSucceeded,
+		CreatedAt: &now,
+		Metadata:  map[string]any{"source": "task_create"},
+	}); err != nil {
+		t.Fatalf("CreateTask parent: %v", err)
+	}
 	for i := 1; i <= 3; i++ {
 		taskID := fmt.Sprintf("task-subagent-%d", i)
 		task := types.Task{
@@ -879,6 +890,19 @@ func TestMaybeCreateCoordinatorCallback_SubagentBatchWaitsUntilComplete(t *testi
 		SpawnIndex:  1,
 	}}
 	now := time.Now().UTC()
+	if err := store.CreateTask(context.Background(), types.Task{
+		TaskID:       "task-parent-team-1",
+		SessionID:    "team-team-1",
+		RunID:        "run-ceo",
+		TeamID:       "team-1",
+		AssignedRole: "ceo",
+		Goal:         "parent",
+		Status:       types.TaskStatusSucceeded,
+		CreatedAt:    &now,
+		Metadata:     map[string]any{"source": "task_create"},
+	}); err != nil {
+		t.Fatalf("CreateTask parent: %v", err)
+	}
 	for i := 1; i <= 2; i++ {
 		taskID := fmt.Sprintf("task-subagent-wait-%d", i)
 		task := types.Task{
@@ -968,6 +992,20 @@ func TestMaybeCreateCoordinatorCallback_TeamBatchFlushesWhenComplete(t *testing.
 		RunID:           "run-backend",
 	}}
 	now := time.Now().UTC()
+	if err := store.CreateTask(context.Background(), types.Task{
+		TaskID:       "task-parent-team-1",
+		SessionID:    "team-team-1",
+		RunID:        "run-ceo",
+		TeamID:       "team-1",
+		AssignedRole: "ceo",
+		CreatedBy:    "user",
+		Goal:         "parent",
+		Status:       types.TaskStatusSucceeded,
+		CreatedAt:    &now,
+		Metadata:     map[string]any{"source": "task_create"},
+	}); err != nil {
+		t.Fatalf("CreateTask parent: %v", err)
+	}
 	for i := 1; i <= 2; i++ {
 		taskID := fmt.Sprintf("task-team-%d", i)
 		task := types.Task{
@@ -1065,7 +1103,7 @@ func TestMaybeFlushBatchGroup_TeamSyntheticBatchIsIdempotentAndUsesParentRun(t *
 		AssignedToType: "role",
 		AssignedTo:     "ceo",
 		Goal:           "parent",
-		Status:         types.TaskStatusPending,
+		Status:         types.TaskStatusSucceeded,
 		CreatedAt:      &now,
 		Metadata:       map[string]any{"source": "task_create"},
 	})
