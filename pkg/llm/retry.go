@@ -40,6 +40,10 @@ type ErrorInfo struct {
 	StatusCode int
 	Code       string
 	Message    string
+	// ProviderDetail captures backend-specific detail text when available.
+	ProviderDetail string
+	// ProviderRoute identifies the backend route family (e.g. chatgpt_codex, openrouter).
+	ProviderRoute string
 }
 
 func (c RetryConfig) WithDefaults() RetryConfig {
@@ -199,46 +203,61 @@ func ClassifyError(err error) ErrorInfo {
 	if err == nil {
 		return ErrorInfo{}
 	}
+	errMsg := safeErrorString(err)
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return ErrorInfo{Class: "timeout", Retryable: true, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "timeout", Retryable: true, Message: errMsg}, errMsg)
 	}
 	if errors.Is(err, io.EOF) {
-		return ErrorInfo{Class: "network", Retryable: true, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "network", Retryable: true, Message: errMsg}, errMsg)
 	}
 	if errors.Is(err, net.ErrClosed) {
-		return ErrorInfo{Class: "network", Retryable: true, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "network", Retryable: true, Message: errMsg}, errMsg)
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
-		return ErrorInfo{Class: "timeout", Retryable: true, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "timeout", Retryable: true, Message: errMsg}, errMsg)
 	}
 	var apiErr *openai.Error
 	if errors.As(err, &apiErr) {
-		return classifyOpenAIError(apiErr)
+		return withProviderContext(classifyOpenAIError(apiErr), errMsg)
 	}
 
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	msg := strings.ToLower(errMsg)
 	switch {
+	case looksLikeUsageLimit(msg, ""):
+		return withProviderContext(ErrorInfo{Class: "rate_limit", Retryable: true, Message: errMsg}, errMsg)
 	case looksLikeQuota(msg, ""):
-		return ErrorInfo{Class: "quota", Retryable: false, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "quota", Retryable: false, Message: errMsg}, errMsg)
 	case strings.Contains(msg, "unauthorized"), strings.Contains(msg, "invalid api key"), strings.Contains(msg, "authentication"):
-		return ErrorInfo{Class: "auth", Retryable: false, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "auth", Retryable: false, Message: errMsg}, errMsg)
 	case strings.Contains(msg, "forbidden"), strings.Contains(msg, "permission"):
-		return ErrorInfo{Class: "permission", Retryable: false, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "permission", Retryable: false, Message: errMsg}, errMsg)
 	case strings.Contains(msg, "bad request"), strings.Contains(msg, "invalid request"), strings.Contains(msg, "unprocessable"):
-		return ErrorInfo{Class: "invalid_request", Retryable: false, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "invalid_request", Retryable: false, Message: errMsg}, errMsg)
 	case strings.Contains(msg, "timeout"):
-		return ErrorInfo{Class: "timeout", Retryable: true, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "timeout", Retryable: true, Message: errMsg}, errMsg)
 	case strings.Contains(msg, "rate limit"):
-		return ErrorInfo{Class: "rate_limit", Retryable: true, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "rate_limit", Retryable: true, Message: errMsg}, errMsg)
 	case strings.Contains(msg, "connection reset"):
-		return ErrorInfo{Class: "network", Retryable: true, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "network", Retryable: true, Message: errMsg}, errMsg)
 	case strings.Contains(msg, "connection refused"):
-		return ErrorInfo{Class: "network", Retryable: true, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "network", Retryable: true, Message: errMsg}, errMsg)
 	case strings.Contains(msg, "connection aborted"):
-		return ErrorInfo{Class: "network", Retryable: true, Message: strings.TrimSpace(err.Error())}
+		return withProviderContext(ErrorInfo{Class: "network", Retryable: true, Message: errMsg}, errMsg)
 	}
-	return ErrorInfo{Class: "unknown", Retryable: false, Message: strings.TrimSpace(err.Error())}
+	return withProviderContext(ErrorInfo{Class: "unknown", Retryable: false, Message: errMsg}, errMsg)
+}
+
+func safeErrorString(err error) (out string) {
+	if err == nil {
+		return ""
+	}
+	defer func() {
+		if recover() != nil {
+			out = "unknown error"
+		}
+	}()
+	return strings.TrimSpace(err.Error())
 }
 
 func classifyOpenAIError(apiErr *openai.Error) ErrorInfo {
@@ -255,6 +274,11 @@ func classifyOpenAIError(apiErr *openai.Error) ErrorInfo {
 		strings.Contains(msgLower, "settings/privacy") {
 		info.Class = "policy"
 		info.Retryable = false
+		return info
+	}
+	if looksLikeUsageLimit(msgLower, strings.ToLower(code)) {
+		info.Class = "rate_limit"
+		info.Retryable = true
 		return info
 	}
 	switch apiErr.StatusCode {
@@ -326,4 +350,59 @@ func looksLikeQuota(msgLower, codeLower string) bool {
 		strings.Contains(msgLower, "no credits") ||
 		strings.Contains(codeLower, "insufficient_quota") ||
 		strings.Contains(codeLower, "insufficient_credits")
+}
+
+func looksLikeUsageLimit(msgLower, codeLower string) bool {
+	return strings.Contains(msgLower, "usage_limit_reached") ||
+		strings.Contains(msgLower, "usage not included") ||
+		strings.Contains(msgLower, "usage_not_included") ||
+		strings.Contains(msgLower, "rate_limit_exceeded") ||
+		strings.Contains(codeLower, "usage_limit_reached") ||
+		strings.Contains(codeLower, "usage_not_included") ||
+		strings.Contains(codeLower, "rate_limit_exceeded")
+}
+
+func withProviderContext(info ErrorInfo, message string) ErrorInfo {
+	if strings.TrimSpace(info.ProviderDetail) == "" {
+		info.ProviderDetail = extractProviderDetail(message)
+	}
+	if strings.TrimSpace(info.ProviderRoute) == "" {
+		info.ProviderRoute = inferProviderRoute(message)
+	}
+	return info
+}
+
+func extractProviderDetail(message string) string {
+	msg := strings.TrimSpace(message)
+	if msg == "" {
+		return ""
+	}
+	const marker = "provider_detail="
+	idx := strings.Index(msg, marker)
+	if idx < 0 {
+		return ""
+	}
+	s := msg[idx+len(marker):]
+	if end := strings.Index(s, ")"); end >= 0 {
+		s = s[:end]
+	}
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "\"") && strings.HasSuffix(s, "\"") && len(s) >= 2 {
+		s = strings.Trim(s, "\"")
+	}
+	return strings.TrimSpace(s)
+}
+
+func inferProviderRoute(message string) string {
+	msg := strings.ToLower(strings.TrimSpace(message))
+	switch {
+	case strings.Contains(msg, "chatgpt.com/backend-api/codex"):
+		return "chatgpt_codex"
+	case strings.Contains(msg, "openrouter.ai"):
+		return "openrouter"
+	case strings.Contains(msg, "api.openai.com"):
+		return "openai_api"
+	default:
+		return ""
+	}
 }

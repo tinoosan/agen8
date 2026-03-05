@@ -9,6 +9,14 @@ model = "z-ai/GLM-5"
 [skills]
 # conflict = "keep"
 
+[auth]
+# auth provider default for runtime (optional):
+# provider = "chatgpt_account"   # or "api_key"
+# When AGEN8_AUTH_PROVIDER=chatgpt_account:
+# - false (default): non-openai models fail fast (no silent API-key fallback)
+# - true: non-openai models use OPENROUTER_API_KEY fallback
+# allow_api_key_fallback_for_non_openai = false
+
 # code_exec runtime policy.
 # SECURITY: enabling auto_provision allows Agen8 to prepare/use a Python venv
 # and (optionally) install third-party packages.

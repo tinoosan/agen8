@@ -102,6 +102,9 @@ func runCoordinatorForSession(cmd *cobra.Command, sessionID string) error {
 	if err != nil {
 		return err
 	}
+	if err := requireRuntimeAuthReady(cmd.Context(), cfg); err != nil {
+		return err
+	}
 	runID, teamID, err := rpcResolveCoordinatorRun(cmd.Context(), sessionID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "thread not found") {
@@ -121,11 +124,17 @@ func runCoordinatorForSession(cmd *cobra.Command, sessionID string) error {
 	if err := updateProjectActiveSession(sessionID, teamID, runID, "coordinator"); err != nil {
 		return err
 	}
-	_ = cfg
 	return runCoordinatorShellFn(cmd, sessionID, runID, teamID)
 }
 
 func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
+	cfg, err := effectiveConfig(cmd)
+	if err != nil {
+		return err
+	}
+	if err := requireRuntimeAuthReady(cmd.Context(), cfg); err != nil {
+		return err
+	}
 	if err := rpcPing(cmd.Context()); err != nil {
 		return err
 	}

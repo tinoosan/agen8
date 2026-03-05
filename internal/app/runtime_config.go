@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	authpkg "github.com/tinoosan/agen8/pkg/auth"
 	"github.com/tinoosan/agen8/pkg/config"
 )
 
@@ -19,6 +21,7 @@ type runtimeConfig struct {
 	Defaults   runtimeConfigDefaults
 	Env        map[string]string
 	Skills     runtimeConfigSkills
+	Auth       runtimeConfigAuth
 	CodeExec   runtimeConfigCodeExec
 	PathAccess runtimeConfigPathAccess
 	Obsidian   runtimeConfigObsidian
@@ -32,6 +35,11 @@ type runtimeConfigDefaults struct {
 
 type runtimeConfigSkills struct {
 	Conflict string
+}
+
+type runtimeConfigAuth struct {
+	Provider                        string
+	AllowAPIKeyFallbackForNonOpenAI *bool
 }
 
 type runtimeConfigCodeExec struct {
@@ -52,6 +60,7 @@ type runtimeConfigFile struct {
 	Defaults   runtimeConfigDefaultsFile   `toml:"defaults"`
 	Env        map[string]string           `toml:"env"`
 	Skills     runtimeConfigSkillsFile     `toml:"skills"`
+	Auth       runtimeConfigAuthFile       `toml:"auth"`
 	CodeExec   runtimeConfigCodeExecFile   `toml:"code_exec"`
 	PathAccess runtimeConfigPathAccessFile `toml:"path_access"`
 	Obsidian   runtimeConfigObsidianFile   `toml:"obsidian"`
@@ -65,6 +74,11 @@ type runtimeConfigDefaultsFile struct {
 
 type runtimeConfigSkillsFile struct {
 	Conflict string `toml:"conflict"`
+}
+
+type runtimeConfigAuthFile struct {
+	Provider                        string `toml:"provider"`
+	AllowAPIKeyFallbackForNonOpenAI *bool  `toml:"allow_api_key_fallback_for_non_openai"`
 }
 
 type runtimeConfigCodeExecFile struct {
@@ -119,6 +133,17 @@ func loadRuntimeConfig(dataDir string) (runtimeConfig, error) {
 	return out, nil
 }
 
+// ApplyRuntimeConfigEnvDefaults loads runtime config from dataDir and applies
+// non-secret env defaults for the current process without overwriting existing env.
+func ApplyRuntimeConfigEnvDefaults(dataDir string) error {
+	cfg, err := loadRuntimeConfig(dataDir)
+	if err != nil {
+		return err
+	}
+	applyRuntimeConfigEnvDefaults(cfg)
+	return nil
+}
+
 func ensureRuntimeConfigTemplate(dataDir string) (string, error) {
 	dataDir = strings.TrimSpace(dataDir)
 	if dataDir == "" {
@@ -149,6 +174,10 @@ model = "`+runtimeDefaultModel+`"
 [skills]
 # conflict = "keep"
 
+[auth]
+# provider = "api_key" # api_key | chatgpt_account
+# allow_api_key_fallback_for_non_openai = false
+
 [code_exec]
 # venv_path = ""
 # required_packages = []
@@ -164,6 +193,37 @@ model = "`+runtimeDefaultModel+`"
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 	return path, nil
+}
+
+// PersistRuntimeAuthProvider writes the selected auth provider into runtime config.toml.
+func PersistRuntimeAuthProvider(dataDir, provider string) error {
+	provider, err := authpkg.ParseProvider(provider)
+	if err != nil {
+		return err
+	}
+	path, err := ensureRuntimeConfigTemplate(dataDir)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	raw := runtimeConfigFile{}
+	if _, err := toml.DecodeFile(path, &raw); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	raw.Auth.Provider = provider
+
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	defer f.Close()
+	enc := toml.NewEncoder(f)
+	if err := enc.Encode(raw); err != nil {
+		return fmt.Errorf("encode %s: %w", path, err)
+	}
+	return nil
 }
 
 func decodeRuntimeConfigFile(path string) (runtimeConfig, bool, error) {
@@ -191,6 +251,10 @@ func decodeRuntimeConfigFile(path string) (runtimeConfig, bool, error) {
 		Env: map[string]string{},
 		Skills: runtimeConfigSkills{
 			Conflict: strings.ToLower(strings.TrimSpace(raw.Skills.Conflict)),
+		},
+		Auth: runtimeConfigAuth{
+			Provider:                        strings.TrimSpace(raw.Auth.Provider),
+			AllowAPIKeyFallbackForNonOpenAI: raw.Auth.AllowAPIKeyFallbackForNonOpenAI,
 		},
 		CodeExec: runtimeConfigCodeExec{
 			VenvPath:         strings.TrimSpace(raw.CodeExec.VenvPath),
@@ -237,6 +301,12 @@ func mergeRuntimeConfig(base, override runtimeConfig) runtimeConfig {
 	}
 	if c := normalizeSkillsConflict(override.Skills.Conflict); c != "" {
 		out.Skills.Conflict = c
+	}
+	if p := strings.TrimSpace(override.Auth.Provider); p != "" {
+		out.Auth.Provider = p
+	}
+	if override.Auth.AllowAPIKeyFallbackForNonOpenAI != nil {
+		out.Auth.AllowAPIKeyFallbackForNonOpenAI = override.Auth.AllowAPIKeyFallbackForNonOpenAI
 	}
 	if vp := strings.TrimSpace(override.CodeExec.VenvPath); vp != "" {
 		out.CodeExec.VenvPath = vp
@@ -330,6 +400,12 @@ func applyRuntimeConfigEnvDefaults(cfg runtimeConfig) {
 	setEnvIfUnset("OPENROUTER_MODEL", cfg.Defaults.Model)
 	setEnvIfUnset("AGEN8_SUBAGENT_MODEL", cfg.Defaults.SubagentModel)
 	setEnvIfUnset("AGEN8_PROFILE", cfg.Defaults.Profile)
+	if p, err := authpkg.ParseProvider(cfg.Auth.Provider); err == nil {
+		setEnvIfUnset(authpkg.EnvAuthProvider, p)
+	}
+	if cfg.Auth.AllowAPIKeyFallbackForNonOpenAI != nil {
+		setEnvIfUnset("AGEN8_AUTH_CHATGPT_FALLBACK_API_KEY_NON_OPENAI", strconv.FormatBool(*cfg.Auth.AllowAPIKeyFallbackForNonOpenAI))
+	}
 	setEnvIfUnset("OBSIDIAN_VAULT_PATH", cfg.Obsidian.VaultPath)
 	setEnvIfUnset(envSkillsSeedConflict, normalizeSkillsConflict(cfg.Skills.Conflict))
 }

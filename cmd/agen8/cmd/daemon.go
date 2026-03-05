@@ -39,6 +39,9 @@ var daemonCmd = &cobra.Command{
 			app.WithRecentHistoryPairs(recentHistoryPairs),
 			app.WithIncludeHistoryOps(includeHistoryOps),
 		}
+		if cmd.Root().PersistentFlags().Changed("auth-provider") {
+			opts = append(opts, app.WithAuthProvider(authProvider))
+		}
 		return app.RunDaemon(cmd.Context(), cfg, "", maxContextB, daemonPoll, opts...)
 	},
 }

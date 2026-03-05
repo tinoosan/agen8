@@ -18,6 +18,7 @@ import (
 
 	implstore "github.com/tinoosan/agen8/internal/store"
 	"github.com/tinoosan/agen8/pkg/agent/state"
+	authpkg "github.com/tinoosan/agen8/pkg/auth"
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/fsutil"
 	"github.com/tinoosan/agen8/pkg/protocol"
@@ -2133,6 +2134,50 @@ func TestRPCServer_SessionGetTotals_TeamScope_DoesNotDoubleCountSharedSession(t 
 	_ = json.Unmarshal(totalsResp.Result, &out)
 	if out.TotalTokensIn != 120 || out.TotalTokensOut != 45 || out.TotalTokens != 165 {
 		t.Fatalf("unexpected team totals tokens: %+v", out)
+	}
+}
+
+func TestRPCServer_SessionStart_RequiresChatGPTLoginWhenProviderSet(t *testing.T) {
+	t.Setenv(authpkg.EnvAuthProvider, authpkg.ProviderChatGPTAccount)
+
+	cfg := config.Config{DataDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "general"), 0o755); err != nil {
+		t.Fatalf("mkdir profiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		Mode:     "single-agent",
+		Goal:     "fresh start",
+		Profile:  "general",
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error == nil {
+		t.Fatalf("expected auth-required error")
+	}
+	if resp.Error.Code != protocol.CodeInvalidState {
+		t.Fatalf("code=%d want %d", resp.Error.Code, protocol.CodeInvalidState)
+	}
+	if !strings.Contains(strings.ToLower(resp.Error.Message), "auth login") {
+		t.Fatalf("expected relogin guidance, got: %+v", resp.Error)
 	}
 }
 

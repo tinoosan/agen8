@@ -288,3 +288,36 @@ func TestClassifyError_NetworkAndTimeout(t *testing.T) {
 		t.Fatalf("network classify = %+v", got)
 	}
 }
+
+func TestClassifyError_UsageLimitMarkersAreRateLimit(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "openai code usage_limit_reached", err: &openai.Error{StatusCode: 429, Code: "usage_limit_reached", Message: "usage_limit_reached"}},
+		{name: "openai code usage_not_included", err: &openai.Error{StatusCode: 429, Code: "usage_not_included", Message: "usage not included for this account"}},
+		{name: "generic message rate_limit_exceeded", err: fmt.Errorf("provider returned rate_limit_exceeded")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := ClassifyError(tt.err)
+			if info.Class != "rate_limit" {
+				t.Fatalf("class=%q, want rate_limit", info.Class)
+			}
+			if !info.Retryable {
+				t.Fatalf("retryable=false, want true")
+			}
+		})
+	}
+}
+
+func TestClassifyError_ExtractsProviderDetailAndRoute(t *testing.T) {
+	err := fmt.Errorf(`POST "https://chatgpt.com/backend-api/codex/responses": 400 Bad Request (provider_detail=Unsupported parameter: max_output_tokens)`)
+	info := ClassifyError(err)
+	if info.ProviderRoute != "chatgpt_codex" {
+		t.Fatalf("provider route = %q, want chatgpt_codex", info.ProviderRoute)
+	}
+	if info.ProviderDetail != "Unsupported parameter: max_output_tokens" {
+		t.Fatalf("provider detail = %q", info.ProviderDetail)
+	}
+}

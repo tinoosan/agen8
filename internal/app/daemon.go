@@ -41,12 +41,14 @@ func RunDaemon(ctx context.Context, cfg config.Config, goal string, maxContextB 
 		return err
 	}
 	applyRuntimeConfigEnvDefaults(runtimeCfg)
-	if err := ensureRuntimeCredentials(cfg.DataDir, stdinTTY && stdoutTTY, os.Stdin, os.Stdout); err != nil {
-		return err
-	}
-
 	resolved, err := resolveRunChatOptions(opts...)
 	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(resolved.AuthProvider) != "" {
+		_ = os.Setenv("AGEN8_AUTH_PROVIDER", strings.TrimSpace(resolved.AuthProvider))
+	}
+	if err := ensureRuntimeCredentials(cfg.DataDir, stdinTTY && stdoutTTY, os.Stdin, os.Stdout); err != nil {
 		return err
 	}
 	if err := maybeSeedRepoDefaults(cfg.DataDir); err != nil {

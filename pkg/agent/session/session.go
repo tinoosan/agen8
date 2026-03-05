@@ -1429,6 +1429,12 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 				if code := strings.TrimSpace(errInfo.Code); code != "" {
 					payload["code"] = code
 				}
+				if detail := strings.TrimSpace(errInfo.ProviderDetail); detail != "" {
+					payload["provider_detail"] = detail
+				}
+				if route := strings.TrimSpace(errInfo.ProviderRoute); route != "" {
+					payload["provider_route"] = route
+				}
 				s.emitBestEffort(ctx, events.Event{
 					Type:    "llm.error",
 					Message: llmErrorMessage(errInfo),
