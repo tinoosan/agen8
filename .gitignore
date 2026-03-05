@@ -51,6 +51,8 @@ obsidian-vault/
 # Agent8
 .agent8/
 .agen8/
+internal/app/db/exec/.venv/
+internal/app/db/exec/.venv/**
 
 # Claude
 .claude/
