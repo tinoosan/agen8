@@ -73,7 +73,7 @@ type Resource interface {
 
 // Searchable is an optional interface for resources that can perform semantic or indexed search.
 type Searchable interface {
-	Search(ctx context.Context, path string, query string, limit int) ([]types.SearchResult, error)
+	Search(ctx context.Context, path string, req types.SearchRequest) (types.SearchResponse, error)
 }
 
 // Entry describes one item returned by Resource.List.

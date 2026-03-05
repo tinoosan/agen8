@@ -1,7 +1,6 @@
 package resources
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -130,81 +129,82 @@ func (r *DailyMemoryResource) Append(subpath string, data []byte) error {
 	return nil
 }
 
-func (r *DailyMemoryResource) Search(ctx context.Context, subpath string, query string, limit int) ([]types.SearchResult, error) {
+func (r *DailyMemoryResource) Search(ctx context.Context, subpath string, req types.SearchRequest) (types.SearchResponse, error) {
 	clean, _, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {
-		return nil, err
+		return types.SearchResponse{}, err
 	}
 	if clean != "" && clean != "." {
-		return nil, fmt.Errorf("invalid subpath %q: search only supported at root", subpath)
+		return types.SearchResponse{}, fmt.Errorf("invalid subpath %q: search only supported at root", subpath)
 	}
 
-	re, reOK, qLower := compileSearchQuery(query)
+	spec, err := compileSearchRequest(req)
+	if err != nil {
+		return types.SearchResponse{}, err
+	}
 	if files, rgTried, rgErr := rgFilesWithMatches(ctx, rgFilesWithMatchesOpts{
-		Dir:         r.BaseDir,
-		Query:       query,
-		RegexOK:     reOK,
-		MaxFilesize: "2M",
-		Globs:       []string{"MEMORY.MD", "*-memory.md"},
-		MaxFiles:    max(1000, limit*200),
+		Dir:          r.BaseDir,
+		Query:        spec.effectiveQuery(),
+		FixedString:  !spec.usesRegex(),
+		MaxFilesize:  spec.rgMaxFileSize(),
+		IncludeGlobs: []string{"MEMORY.MD", "*-memory.md"},
+		ExcludeGlobs: spec.excludeGlobs,
+		MaxFiles:     max(1000, spec.limit*200),
 	}); rgTried && rgErr == nil {
-		if len(files) == 0 {
-			return nil, nil
-		}
 		allow := func(name string) bool {
 			return strings.EqualFold(name, "MEMORY.MD") || dailyNameRE.MatchString(name)
 		}
 		// Enforce allowlist (rg globs are broader than our naming rules).
 		filtered := make([]string, 0, len(files))
 		for _, name := range files {
-			name = strings.TrimPrefix(name, "./")
-			name = strings.TrimPrefix(name, ".\\")
+			name = normalizeSearchPath(name)
 			if strings.Contains(name, "/") || strings.Contains(name, "\\") {
 				continue
 			}
 			if !allow(name) {
 				continue
 			}
+			if !spec.allowRelativePath(name) {
+				continue
+			}
 			filtered = append(filtered, name)
 		}
 		sort.Strings(filtered)
 
-		if limit <= 0 {
-			limit = 5
-		}
-		out := make([]types.SearchResult, 0, min(limit, len(filtered)))
+		out := make([]types.SearchResult, 0, min(spec.limit, len(filtered)))
 		for _, name := range filtered {
 			if ctx != nil {
 				select {
 				case <-ctx.Done():
-					return out, ctx.Err()
+					return types.SearchResponse{Results: out, Returned: len(out)}, ctx.Err()
 				default:
 				}
 			}
-			m, err := bestMatchInFile(ctx, filepath.Join(r.BaseDir, name), re, reOK, qLower)
-			if err != nil {
-				if ctx != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
-					return out, err
+			abs := filepath.Join(r.BaseDir, name)
+			info, statErr := os.Stat(abs)
+			if statErr != nil || info.IsDir() || spec.shouldSkipSize(info.Size()) {
+				continue
+			}
+			m, matchErr := bestMatchInFile(ctx, abs, spec)
+			if matchErr != nil {
+				if ctx != nil && (errors.Is(matchErr, context.Canceled) || errors.Is(matchErr, context.DeadlineExceeded)) {
+					return types.SearchResponse{Results: out, Returned: len(out)}, matchErr
 				}
 				continue
 			}
 			if m.score <= 0 {
 				continue
 			}
-			out = append(out, types.SearchResult{
-				Title:   name,
-				Path:    "/memory/" + name,
-				Snippet: fmt.Sprintf("%s:%d: %s", name, m.line, m.text),
-				Score:   m.score,
-			})
-			if len(out) >= limit {
-				break
+			result, buildErr := buildSearchResult(name, "/memory/"+name, m, abs, spec)
+			if buildErr != nil {
+				continue
 			}
+			out = append(out, result)
 		}
-		return out, nil
+		return finalizeSearchResults(out, spec.limit), nil
 	}
 
-	return searchTextFiles(ctx, r.BaseDir, query, limit, func(name string) bool {
+	return searchTextFiles(ctx, r.BaseDir, spec, func(name string) bool {
 		return strings.EqualFold(name, "MEMORY.MD") || dailyNameRE.MatchString(name)
 	}, "/memory/")
 }
@@ -241,26 +241,15 @@ func (r *DailyMemoryResource) ensureWritable(name string) error {
 	return nil
 }
 
-func searchTextFiles(ctx context.Context, baseDir string, query string, limit int, allow func(name string) bool, vfsPrefix string) ([]types.SearchResult, error) {
-	if limit <= 0 {
-		limit = 5
-	}
+func searchTextFiles(ctx context.Context, baseDir string, spec compiledSearchRequest, allow func(name string) bool, vfsPrefix string) (types.SearchResponse, error) {
 	baseDir = strings.TrimSpace(baseDir)
-	query = strings.TrimSpace(query)
 	if baseDir == "" {
-		return nil, fmt.Errorf("baseDir is required")
+		return types.SearchResponse{}, fmt.Errorf("baseDir is required")
 	}
-	if query == "" {
-		return nil, fmt.Errorf("query is required")
-	}
-
-	re, reErr := regexp.Compile(query)
-	reOK := reErr == nil
-	qLower := strings.ToLower(query)
 
 	des, err := os.ReadDir(baseDir)
 	if err != nil {
-		return nil, err
+		return types.SearchResponse{}, err
 	}
 	names := make([]string, 0, len(des))
 	for _, de := range des {
@@ -271,72 +260,36 @@ func searchTextFiles(ctx context.Context, baseDir string, query string, limit in
 		if allow != nil && !allow(name) {
 			continue
 		}
+		if !spec.allowRelativePath(name) {
+			continue
+		}
+		if info, ierr := de.Info(); ierr == nil && spec.shouldSkipSize(info.Size()) {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
-	results := make([]types.SearchResult, 0, limit)
+	results := make([]types.SearchResult, 0, spec.limit)
 	for _, name := range names {
 		if ctx != nil {
 			select {
 			case <-ctx.Done():
-				return results, ctx.Err()
+				return types.SearchResponse{Results: results, Returned: len(results)}, ctx.Err()
 			default:
 			}
 		}
 
 		p := filepath.Join(baseDir, name)
-		f, err := os.Open(p)
-		if err != nil {
+		match, matchErr := bestMatchInFile(ctx, p, spec)
+		if matchErr != nil || match.score <= 0 {
 			continue
 		}
-		sc := bufio.NewScanner(f)
-		buf := make([]byte, 0, 64*1024)
-		sc.Buffer(buf, 1024*1024)
-
-		lineN := 0
-		bestScore := 0.0
-		bestSnippet := ""
-		for sc.Scan() {
-			lineN++
-			ln := sc.Text()
-			match := false
-			matchN := 0
-			if reOK && re != nil {
-				idxs := re.FindAllStringIndex(ln, -1)
-				if len(idxs) != 0 {
-					match = true
-					matchN = len(idxs)
-				}
-			} else {
-				if strings.Contains(strings.ToLower(ln), qLower) {
-					match = true
-					matchN = 1
-				}
-			}
-			if !match {
-				continue
-			}
-			score := float64(matchN)
-			if score > bestScore {
-				bestScore = score
-				bestSnippet = fmt.Sprintf("%s:%d: %s", name, lineN, strings.TrimSpace(ln))
-			}
-		}
-		_ = f.Close()
-		if bestScore <= 0 || bestSnippet == "" {
+		result, buildErr := buildSearchResult(name, strings.TrimRight(vfsPrefix, "/")+"/"+name, match, p, spec)
+		if buildErr != nil {
 			continue
 		}
-
-		results = append(results, types.SearchResult{
-			Title:   name,
-			Path:    strings.TrimRight(vfsPrefix, "/") + "/" + name,
-			Snippet: bestSnippet,
-			Score:   bestScore,
-		})
-		if len(results) >= limit {
-			break
-		}
+		results = append(results, result)
 	}
-	return results, nil
+	return finalizeSearchResults(results, spec.limit), nil
 }

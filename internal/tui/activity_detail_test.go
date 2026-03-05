@@ -118,17 +118,35 @@ func TestRenderActivityDetailMarkdown_EmailAndFSSearch(t *testing.T) {
 		Status: ActivityOK,
 		Ok:     "true",
 		Data: map[string]string{
-			"query":   "needle",
-			"limit":   "25",
-			"results": "7",
+			"query":               "needle",
+			"maxResults":          "25",
+			"previewLines":        "2",
+			"glob":                "**/*.go",
+			"exclude":             "vendor/**,**/*_test.go",
+			"includeMetadata":     "true",
+			"maxSizeBytes":        "2048",
+			"results":             "7",
+			"resultsTotal":        "12",
+			"resultsReturned":     "7",
+			"resultsTruncated":    "true",
+			"resultsHavePreview":  "true",
+			"resultsHaveMetadata": "true",
 		},
 	}
 	searchMD := renderActivityDetailMarkdown(search, false, false)
 	for _, want := range []string{
 		"- path: `/workspace`",
 		"- query: `needle`",
-		"- limit: `25`",
+		"- maxResults: `25`",
+		"- previewLines: `2`",
+		"- glob: `**/*.go`",
+		"- exclude: `vendor/**,**/*_test.go`",
+		"- includeMetadata: `true`",
+		"- maxSizeBytes: `2048`",
 		"- results: `7`",
+		"- resultsTotal: `12`",
+		"- resultsReturned: `7`",
+		"- resultsTruncated: `true`",
 	} {
 		if !strings.Contains(searchMD, want) {
 			t.Fatalf("expected %q in fs_search markdown, got:\n%s", want, searchMD)

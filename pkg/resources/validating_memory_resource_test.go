@@ -19,7 +19,7 @@ type fakeResource struct {
 	appendErr     error
 	appended      []byte
 	appendCalls   int
-	searchOut     []types.SearchResult
+	searchOut     types.SearchResponse
 	searchErr     error
 	nestedSupport bool
 }
@@ -43,7 +43,7 @@ func (f *fakeResource) Append(path string, data []byte) error {
 	return f.appendErr
 }
 
-func (f *fakeResource) Search(ctx context.Context, path string, query string, limit int) ([]types.SearchResult, error) {
+func (f *fakeResource) Search(ctx context.Context, path string, req types.SearchRequest) (types.SearchResponse, error) {
 	return f.searchOut, f.searchErr
 }
 
@@ -52,7 +52,7 @@ func TestValidatingMemoryResource_DelegatesReadWriteListSearch(t *testing.T) {
 		nestedSupport: true,
 		entries:       []vfs.Entry{{Path: "x"}},
 		readData:      []byte("a"),
-		searchOut:     []types.SearchResult{{Title: "hit"}},
+		searchOut:     types.SearchResponse{Results: []types.SearchResult{{Title: "hit"}}, Total: 1, Returned: 1},
 	}
 	res := NewValidatingMemoryResource(inner)
 	if !res.SupportsNestedList() {
@@ -67,11 +67,11 @@ func TestValidatingMemoryResource_DelegatesReadWriteListSearch(t *testing.T) {
 	if err := res.Write("x", []byte("y")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	out, err := res.Search(context.Background(), "", "q", 2)
+	out, err := res.Search(context.Background(), "", types.SearchRequest{Query: "q", Limit: 2})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(out) != 1 {
+	if len(out.Results) != 1 {
 		t.Fatalf("expected 1 search result")
 	}
 }

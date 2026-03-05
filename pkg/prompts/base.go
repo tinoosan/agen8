@@ -51,7 +51,7 @@ func DefaultPromptToolSpec() PromptToolSpec {
 			{Name: "fs_stat", Description: "Inspect path metadata (type, optional size) without reading file contents."},
 			{Name: "fs_patch", Description: "Apply unified-diff patches."},
 			{Name: "fs_read", Description: "Read file contents."},
-			{Name: "fs_search", Description: "Search files under a VFS path using keyword/regex text search (e.g. /memory, /project)."},
+			{Name: "fs_search", Description: "Search files under any VFS path using plain-text or regex matching. Use previews, globs, and metadata to narrow candidates before fs_read."},
 			{Name: "fs_write", Description: "Write new files (optional verify/checksum/atomic/sync safety flags)."},
 			{Name: "http_fetch", Description: "Make HTTP requests."},
 			{Name: "shell_exec", Description: "Run shell commands (pipes, redirects, etc.)."},

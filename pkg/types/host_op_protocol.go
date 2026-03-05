@@ -56,6 +56,7 @@ type HostOpRequest struct {
 	Op        string          `json:"op"`
 	Path      string          `json:"path,omitempty"`
 	Query     string          `json:"query,omitempty"`
+	Pattern   string          `json:"pattern,omitempty"`
 	Limit     int             `json:"limit,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
 	TimeoutMs int             `json:"timeoutMs,omitempty"`
@@ -66,12 +67,17 @@ type HostOpRequest struct {
 	Checksum  string          `json:"checksum,omitempty"`
 	Checksums []string        `json:"checksums,omitempty"`
 	// ChecksumExpected optionally enforces an expected digest value for the selected algorithm.
-	ChecksumExpected string `json:"checksumExpected,omitempty"`
-	Atomic           bool   `json:"atomic,omitempty"`
-	Sync             bool   `json:"sync,omitempty"`
-	DryRun           bool   `json:"dryRun,omitempty"`
-	Verbose          bool   `json:"verbose,omitempty"`
-	Tag              string `json:"tag,omitempty"`
+	ChecksumExpected string   `json:"checksumExpected,omitempty"`
+	Atomic           bool     `json:"atomic,omitempty"`
+	Sync             bool     `json:"sync,omitempty"`
+	DryRun           bool     `json:"dryRun,omitempty"`
+	Verbose          bool     `json:"verbose,omitempty"`
+	Glob             string   `json:"glob,omitempty"`
+	Exclude          []string `json:"exclude,omitempty"`
+	PreviewLines     int      `json:"previewLines,omitempty"`
+	IncludeMetadata  bool     `json:"includeMetadata,omitempty"`
+	MaxSizeBytes     int64    `json:"maxSizeBytes,omitempty"`
+	Tag              string   `json:"tag,omitempty"`
 	// Code execution parameters
 	Language string `json:"language,omitempty"`
 	Code     string `json:"code,omitempty"`
@@ -146,11 +152,17 @@ func (r HostOpRequest) Validate() error {
 		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
 			return fmt.Errorf("path must be an absolute VFS path (start with /)")
 		}
-		if err := validate.NonEmpty("query", r.Query); err != nil {
-			return err
+		if strings.TrimSpace(r.Query) == "" && strings.TrimSpace(r.Pattern) == "" {
+			return fmt.Errorf("query or pattern is required")
 		}
 		if r.Limit < 0 {
 			return fmt.Errorf("limit must be >= 0")
+		}
+		if r.PreviewLines < 0 {
+			return fmt.Errorf("previewLines must be >= 0")
+		}
+		if r.MaxSizeBytes < 0 {
+			return fmt.Errorf("maxSizeBytes must be >= 0")
 		}
 		return nil
 
@@ -415,10 +427,35 @@ func normalizeWriteMode(mode string) string {
 
 // SearchResult is one result returned by fs_search.
 type SearchResult struct {
-	Title   string  `json:"title,omitempty"`
-	Path    string  `json:"path,omitempty"`
-	Snippet string  `json:"snippet,omitempty"`
-	Score   float64 `json:"score,omitempty"`
+	Title         string   `json:"title,omitempty"`
+	Path          string   `json:"path,omitempty"`
+	Snippet       string   `json:"snippet,omitempty"`
+	Score         float64  `json:"score,omitempty"`
+	PreviewBefore []string `json:"previewBefore,omitempty"`
+	PreviewMatch  string   `json:"previewMatch,omitempty"`
+	PreviewAfter  []string `json:"previewAfter,omitempty"`
+	SizeBytes     *int64   `json:"sizeBytes,omitempty"`
+	Mtime         *int64   `json:"mtime,omitempty"`
+}
+
+// SearchRequest describes a structured filesystem search request.
+type SearchRequest struct {
+	Query           string   `json:"query,omitempty"`
+	Pattern         string   `json:"pattern,omitempty"`
+	Limit           int      `json:"limit,omitempty"`
+	Glob            string   `json:"glob,omitempty"`
+	Exclude         []string `json:"exclude,omitempty"`
+	PreviewLines    int      `json:"previewLines,omitempty"`
+	IncludeMetadata bool     `json:"includeMetadata,omitempty"`
+	MaxSizeBytes    int64    `json:"maxSizeBytes,omitempty"`
+}
+
+// SearchResponse captures structured fs_search results and truncation metadata.
+type SearchResponse struct {
+	Results   []SearchResult `json:"results,omitempty"`
+	Total     int            `json:"total,omitempty"`
+	Returned  int            `json:"returned,omitempty"`
+	Truncated bool           `json:"truncated,omitempty"`
 }
 
 // PatchDiagnostics captures detailed fs_patch apply/validation outcomes.
@@ -437,16 +474,19 @@ type PatchDiagnostics struct {
 
 // HostOpResponse is the minimal "host primitive" response envelope.
 type HostOpResponse struct {
-	Op        string         `json:"op"`
-	Ok        bool           `json:"ok"`
-	Error     string         `json:"error,omitempty"`
-	ErrorCode string         `json:"errorCode,omitempty"`
-	Entries   []string       `json:"entries,omitempty"`
-	Results   []SearchResult `json:"results,omitempty"`
-	Exists    *bool          `json:"exists,omitempty"`
-	IsDir     *bool          `json:"isDir,omitempty"`
-	SizeBytes *int64         `json:"sizeBytes,omitempty"`
-	Mtime     *int64         `json:"mtime,omitempty"`
+	Op               string         `json:"op"`
+	Ok               bool           `json:"ok"`
+	Error            string         `json:"error,omitempty"`
+	ErrorCode        string         `json:"errorCode,omitempty"`
+	Entries          []string       `json:"entries,omitempty"`
+	Results          []SearchResult `json:"results,omitempty"`
+	ResultsTotal     int            `json:"resultsTotal,omitempty"`
+	ResultsReturned  int            `json:"resultsReturned,omitempty"`
+	ResultsTruncated bool           `json:"resultsTruncated,omitempty"`
+	Exists           *bool          `json:"exists,omitempty"`
+	IsDir            *bool          `json:"isDir,omitempty"`
+	SizeBytes        *int64         `json:"sizeBytes,omitempty"`
+	Mtime            *int64         `json:"mtime,omitempty"`
 	// fs_read checksum metadata.
 	ReadChecksums map[string]string `json:"readChecksums,omitempty"`
 	// Patch diagnostics are emitted for fs_patch success/failure and dry-run validation.

@@ -15,6 +15,7 @@ import (
 	"github.com/tinoosan/agen8/pkg/fsutil"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	"github.com/tinoosan/agen8/pkg/resources"
+	"github.com/tinoosan/agen8/pkg/types"
 )
 
 type commandHandler struct {
@@ -794,12 +795,12 @@ func (m *monitorModel) searchMemory(query string) tea.Cmd {
 		if err != nil {
 			return commandLinesMsg{lines: []string{"[memory] error: " + err.Error()}}
 		}
-		results, err := res.Search(m.ctx, "", query, 5)
+		results, err := res.Search(m.ctx, "", types.SearchRequest{Query: query, Limit: 5})
 		if err != nil {
 			return commandLinesMsg{lines: []string{"[memory] error: " + err.Error()}}
 		}
 		lines := []string{"[memory] search: " + query}
-		for _, r := range results {
+		for _, r := range results.Results {
 			lines = append(lines, fmt.Sprintf("  - %.3f %s (%s)", r.Score, r.Title, r.Path))
 		}
 		return commandLinesMsg{lines: lines}

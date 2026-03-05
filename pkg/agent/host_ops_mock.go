@@ -247,11 +247,27 @@ func (fsReadMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpEx
 type fsSearchMockOp struct{}
 
 func (fsSearchMockOp) Exec(ctx context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
-	results, err := x.FS.Search(ctx, req.Path, req.Query, req.Limit)
+	searchResp, err := x.FS.Search(ctx, req.Path, types.SearchRequest{
+		Query:           req.Query,
+		Pattern:         req.Pattern,
+		Limit:           req.Limit,
+		Glob:            req.Glob,
+		Exclude:         req.Exclude,
+		PreviewLines:    req.PreviewLines,
+		IncludeMetadata: req.IncludeMetadata,
+		MaxSizeBytes:    req.MaxSizeBytes,
+	})
 	if err != nil {
 		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
 	}
-	return types.HostOpResponse{Op: req.Op, Ok: true, Results: results}
+	return types.HostOpResponse{
+		Op:               req.Op,
+		Ok:               true,
+		Results:          searchResp.Results,
+		ResultsTotal:     searchResp.Total,
+		ResultsReturned:  searchResp.Returned,
+		ResultsTruncated: searchResp.Truncated,
+	}
 }
 
 type fsWriteMockOp struct{}

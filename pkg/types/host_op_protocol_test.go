@@ -137,6 +137,41 @@ func TestHostOpRequest_FSReadValidation_AllowsChecksums(t *testing.T) {
 	}
 }
 
+func TestHostOpRequest_FSSearchValidation_AllowsQueryOrPattern(t *testing.T) {
+	req := HostOpRequest{Op: HostOpFSSearch, Path: "/workspace", Query: "needle", Limit: 5}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate query search: %v", err)
+	}
+
+	req = HostOpRequest{
+		Op:              HostOpFSSearch,
+		Path:            "/workspace",
+		Pattern:         `n.*e`,
+		Limit:           5,
+		PreviewLines:    2,
+		IncludeMetadata: true,
+		MaxSizeBytes:    2048,
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate pattern search: %v", err)
+	}
+
+	req = HostOpRequest{Op: HostOpFSSearch, Path: "/workspace"}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error when query and pattern are both empty")
+	}
+
+	req = HostOpRequest{Op: HostOpFSSearch, Path: "/workspace", Query: "needle", PreviewLines: -1}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for negative previewLines")
+	}
+
+	req = HostOpRequest{Op: HostOpFSSearch, Path: "/workspace", Query: "needle", MaxSizeBytes: -1}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for negative maxSizeBytes")
+	}
+}
+
 func TestHostOpRequest_FSPatchValidation_AllowsDryRunVerbose(t *testing.T) {
 	req := HostOpRequest{
 		Op:      HostOpFSPatch,

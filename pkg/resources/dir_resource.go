@@ -2,14 +2,12 @@
 package resources
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/tinoosan/agen8/pkg/fsutil"
@@ -134,10 +132,10 @@ func (d *DirResource) Append(subpath string, data []byte) error {
 	return nil
 }
 
-func (d *DirResource) Search(ctx context.Context, subpath string, query string, limit int) ([]types.SearchResult, error) {
+func (d *DirResource) Search(ctx context.Context, subpath string, req types.SearchRequest) (types.SearchResponse, error) {
 	cleanSubpath, _, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {
-		return nil, err
+		return types.SearchResponse{}, err
 	}
 	if cleanSubpath == "." {
 		cleanSubpath = ""
@@ -145,109 +143,62 @@ func (d *DirResource) Search(ctx context.Context, subpath string, query string, 
 
 	targetPath, err := d.safeJoin(cleanSubpath)
 	if err != nil {
-		return nil, fmt.Errorf("safeJoin %s: %w", subpath, err)
+		return types.SearchResponse{}, fmt.Errorf("safeJoin %s: %w", subpath, err)
 	}
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return nil, fmt.Errorf("query is required")
+	spec, err := compileSearchRequest(req)
+	if err != nil {
+		return types.SearchResponse{}, err
 	}
-	if limit <= 0 {
-		limit = 5
-	}
-
-	re, reOK, qLower := compileSearchQuery(query)
+	results := make([]types.SearchResult, 0, spec.limit)
 
 	if files, rgTried, rgErr := rgFilesWithMatches(ctx, rgFilesWithMatchesOpts{
-		Dir:         targetPath,
-		Query:       query,
-		RegexOK:     reOK,
-		MaxFilesize: "2M",
-		MaxFiles:    max(2000, limit*500),
+		Dir:          targetPath,
+		Query:        spec.effectiveQuery(),
+		FixedString:  !spec.usesRegex(),
+		MaxFilesize:  spec.rgMaxFileSize(),
+		IncludeGlobs: includeGlobs(spec.includeGlob),
+		ExcludeGlobs: spec.excludeGlobs,
+		MaxFiles:     max(2000, spec.limit*500),
 	}); rgTried && rgErr == nil {
-		if len(files) == 0 {
-			return nil, nil
-		}
-
-		type hit struct {
-			path    string
-			snippet string
-			score   float64
-		}
-		best := map[string]hit{}
 		for _, relToTarget := range files {
 			if ctx != nil {
 				select {
 				case <-ctx.Done():
-					return nil, ctx.Err()
+					return types.SearchResponse{}, ctx.Err()
 				default:
 				}
 			}
-
-			relToTarget = strings.TrimPrefix(relToTarget, "./")
-			relToTarget = filepath.ToSlash(relToTarget)
-			if relToTarget == "" || strings.HasPrefix(relToTarget, "../") {
+			relToTarget = normalizeSearchPath(relToTarget)
+			if !spec.allowRelativePath(relToTarget) {
 				continue
 			}
-
 			abs := filepath.Join(targetPath, filepath.FromSlash(relToTarget))
-			m, err := bestMatchInFile(ctx, abs, re, reOK, qLower)
-			if err != nil {
-				if ctx != nil && errors.Is(err, context.Canceled) {
-					return nil, err
+			info, statErr := os.Stat(abs)
+			if statErr != nil || info.IsDir() || spec.shouldSkipSize(info.Size()) {
+				continue
+			}
+			match, matchErr := bestMatchInFile(ctx, abs, spec)
+			if matchErr != nil {
+				if ctx != nil && errors.Is(matchErr, context.Canceled) {
+					return types.SearchResponse{}, matchErr
 				}
 				continue
 			}
-			if m.score <= 0 {
+			if match.score <= 0 {
 				continue
 			}
-
-			relToBase := filepath.ToSlash(filepath.Join(cleanSubpath, relToTarget))
-			relToBase = strings.TrimPrefix(relToBase, "./")
-			best[relToBase] = hit{
-				path:    relToBase,
-				snippet: fmt.Sprintf("%d: %s", m.line, m.text),
-				score:   m.score,
+			relToBase := normalizeSearchPath(filepath.Join(cleanSubpath, relToTarget))
+			result, buildErr := buildSearchResult(relToBase, "/"+strings.TrimLeft(d.Mount, "/")+"/"+relToBase, match, abs, spec)
+			if buildErr != nil {
+				continue
 			}
+			results = append(results, result)
 		}
-
-		paths := make([]string, 0, len(best))
-		for p := range best {
-			paths = append(paths, p)
-		}
-		sort.Slice(paths, func(i, j int) bool {
-			hi := best[paths[i]]
-			hj := best[paths[j]]
-			if hi.score != hj.score {
-				return hi.score > hj.score
-			}
-			return hi.path < hj.path
-		})
-		if len(paths) > limit {
-			paths = paths[:limit]
-		}
-
-		out := make([]types.SearchResult, 0, len(paths))
-		for _, p := range paths {
-			h := best[p]
-			out = append(out, types.SearchResult{
-				Title:   p,
-				Path:    "/" + strings.TrimLeft(d.Mount, "/") + "/" + p,
-				Snippet: p + ":" + h.snippet,
-				Score:   h.score,
-			})
-		}
-		return out, nil
+		return finalizeSearchResults(results, spec.limit), nil
 	}
 
-	type hit struct {
-		path    string
-		snippet string
-		score   float64
-	}
-	best := map[string]hit{}
-
-	walkFn := func(p string, de fs.DirEntry, err error) error {
-		if err != nil {
+	walkFn := func(p string, de fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
 			return nil
 		}
 		if ctx != nil {
@@ -260,93 +211,38 @@ func (d *DirResource) Search(ctx context.Context, subpath string, query string, 
 		if de.IsDir() {
 			return nil
 		}
-		// Skip large files by size, best-effort.
-		if info, ierr := de.Info(); ierr == nil {
-			const max = 2 * 1024 * 1024
-			if info.Size() > max {
-				return nil
-			}
-		}
-		f, oerr := os.Open(p)
-		if oerr != nil {
+		relToTarget, err := filepath.Rel(targetPath, p)
+		if err != nil {
 			return nil
 		}
-		defer f.Close()
-		sc := bufio.NewScanner(f)
-		buf := make([]byte, 0, 64*1024)
-		sc.Buffer(buf, 1024*1024)
-		lineN := 0
-		bestScore := 0.0
-		bestSnippet := ""
-		for sc.Scan() {
-			lineN++
-			ln := sc.Text()
-			match := false
-			matchN := 0
-			if reOK && re != nil {
-				idxs := re.FindAllStringIndex(ln, -1)
-				if len(idxs) != 0 {
-					match = true
-					matchN = len(idxs)
-				}
-			} else {
-				if strings.Contains(strings.ToLower(ln), qLower) {
-					match = true
-					matchN = 1
-				}
-			}
-			if !match {
-				continue
-			}
-			score := float64(matchN)
-			if score > bestScore {
-				bestScore = score
-				bestSnippet = fmt.Sprintf("%d: %s", lineN, strings.TrimSpace(ln))
-			}
-		}
-		if bestScore <= 0 || bestSnippet == "" {
+		relToTarget = normalizeSearchPath(relToTarget)
+		if !spec.allowRelativePath(relToTarget) {
 			return nil
 		}
-		rel, rerr := filepath.Rel(d.BaseDir, p)
-		if rerr != nil {
+		if info, ierr := de.Info(); ierr == nil && spec.shouldSkipSize(info.Size()) {
 			return nil
 		}
-		rel = filepath.ToSlash(rel)
-		best[rel] = hit{path: rel, snippet: bestSnippet, score: bestScore}
+		match, matchErr := bestMatchInFile(ctx, p, spec)
+		if matchErr != nil {
+			return nil
+		}
+		if match.score <= 0 {
+			return nil
+		}
+		relToBase := normalizeSearchPath(filepath.Join(cleanSubpath, relToTarget))
+		result, buildErr := buildSearchResult(relToBase, "/"+strings.TrimLeft(d.Mount, "/")+"/"+relToBase, match, p, spec)
+		if buildErr != nil {
+			return nil
+		}
+		results = append(results, result)
 		return nil
 	}
 
 	if err := filepath.WalkDir(targetPath, walkFn); err != nil {
-		return nil, err
+		return types.SearchResponse{}, err
 	}
 
-	paths := make([]string, 0, len(best))
-	for p := range best {
-		paths = append(paths, p)
-	}
-	sort.Slice(paths, func(i, j int) bool {
-		hi := best[paths[i]]
-		hj := best[paths[j]]
-		if hi.score != hj.score {
-			return hi.score > hj.score
-		}
-		return hi.path < hj.path
-	})
-	if len(paths) > limit {
-		paths = paths[:limit]
-	}
-
-	out := make([]types.SearchResult, 0, len(paths))
-	for _, p := range paths {
-		h := best[p]
-		out = append(out, types.SearchResult{
-			Title:   p,
-			Path:    "/" + strings.TrimLeft(d.Mount, "/") + "/" + p,
-			Snippet: p + ":" + h.snippet,
-			Score:   h.score,
-		})
-	}
-	return out, nil
+	return finalizeSearchResults(results, spec.limit), nil
 }
 
 func (d *DirResource) safeJoin(subpath string) (string, error) {

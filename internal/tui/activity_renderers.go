@@ -341,6 +341,31 @@ func (fsSearchRenderer) RenderDetail(a Activity, expanded bool, telemetry bool, 
 			b.WriteString(v)
 			b.WriteString("`\n")
 		}
+		if v := strings.TrimSpace(a.Data["resultsTotal"]); v != "" {
+			b.WriteString("- resultsTotal: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["resultsReturned"]); v != "" {
+			b.WriteString("- resultsReturned: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["resultsTruncated"]); v != "" {
+			b.WriteString("- resultsTruncated: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["resultsHavePreview"]); v != "" {
+			b.WriteString("- resultsHavePreview: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["resultsHaveMetadata"]); v != "" {
+			b.WriteString("- resultsHaveMetadata: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
 	}
 	renderTelemetryBlock(a, telemetry, false, false, b)
 }
@@ -352,8 +377,42 @@ func (fsSearchRenderer) RenderArguments(a Activity, telemetry bool, b *strings.B
 		b.WriteString(v)
 		b.WriteString("`\n")
 	}
-	if v := strings.TrimSpace(a.Data["limit"]); v != "" {
-		b.WriteString("- limit: `")
+	if v := strings.TrimSpace(a.Data["pattern"]); v != "" {
+		b.WriteString("- pattern: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["glob"]); v != "" {
+		b.WriteString("- glob: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["exclude"]); v != "" {
+		b.WriteString("- exclude: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	maxResults := strings.TrimSpace(a.Data["maxResults"])
+	if maxResults == "" {
+		maxResults = strings.TrimSpace(a.Data["limit"])
+	}
+	if v := maxResults; v != "" {
+		b.WriteString("- maxResults: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["previewLines"]); v != "" {
+		b.WriteString("- previewLines: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["maxSizeBytes"]); v != "" {
+		b.WriteString("- maxSizeBytes: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["includeMetadata"]); v != "" {
+		b.WriteString("- includeMetadata: `")
 		b.WriteString(v)
 		b.WriteString("`\n")
 	}

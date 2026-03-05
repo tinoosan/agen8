@@ -625,16 +625,33 @@ func TestEventMiddleware_RequestEnrichmentMovedToOperations(t *testing.T) {
 	})
 
 	resp := exec.Exec(context.Background(), types.HostOpRequest{
-		Op:    types.HostOpFSSearch,
-		Path:  "/workspace",
-		Query: "needle",
-		Limit: 25,
+		Op:              types.HostOpFSSearch,
+		Path:            "/workspace",
+		Query:           "needle",
+		Pattern:         "n.*e",
+		Glob:            "**/*.go",
+		Exclude:         []string{"vendor/**", "**/*_test.go"},
+		PreviewLines:    2,
+		IncludeMetadata: true,
+		MaxSizeBytes:    2048,
+		Limit:           25,
 	})
 	if !resp.Ok {
 		t.Fatalf("expected ok response, got %+v", resp)
 	}
-	if gotReq.Data["query"] != "needle" || gotReq.Data["limit"] != "25" {
-		t.Fatalf("expected fs_search query/limit enrichment, got data=%v", gotReq.Data)
+	for key, want := range map[string]string{
+		"query":           "needle",
+		"pattern":         "n.*e",
+		"glob":            "**/*.go",
+		"exclude":         "vendor/**,**/*_test.go",
+		"previewLines":    "2",
+		"includeMetadata": "true",
+		"maxSizeBytes":    "2048",
+		"maxResults":      "25",
+	} {
+		if gotReq.Data[key] != want {
+			t.Fatalf("expected fs_search request enrichment %s=%q, got %q (data=%v)", key, want, gotReq.Data[key], gotReq.Data)
+		}
 	}
 
 	resp = exec.Exec(context.Background(), types.HostOpRequest{
@@ -697,6 +714,55 @@ func TestEventMiddleware_RequestEnrichmentMovedToOperations(t *testing.T) {
 	}
 	if gotReq.Data["dryRun"] != "true" || gotReq.Data["verbose"] != "true" {
 		t.Fatalf("expected fs_patch dryRun/verbose request enrichment, got data=%v", gotReq.Data)
+	}
+}
+
+func TestEventMiddleware_FSSearchResponseEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		size := int64(42)
+		mtime := int64(1700000000)
+		return types.HostOpResponse{
+			Op:               req.Op,
+			Ok:               true,
+			Results:          []types.SearchResult{{Title: "a.go", Path: "/workspace/a.go", PreviewMatch: "needle", SizeBytes: &size, Mtime: &mtime}},
+			ResultsTotal:     12,
+			ResultsReturned:  5,
+			ResultsTruncated: true,
+		}
+	})
+
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:    types.HostOpFSSearch,
+		Path:  "/workspace",
+		Query: "needle",
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response, got %+v", resp)
+	}
+	for key, want := range map[string]string{
+		"results":             "5",
+		"resultsTotal":        "12",
+		"resultsReturned":     "5",
+		"resultsTruncated":    "true",
+		"resultsHavePreview":  "true",
+		"resultsHaveMetadata": "true",
+	} {
+		if gotResp.Data[key] != want {
+			t.Fatalf("expected fs_search response enrichment %s=%q, got %q (data=%v)", key, want, gotResp.Data[key], gotResp.Data)
+		}
 	}
 }
 

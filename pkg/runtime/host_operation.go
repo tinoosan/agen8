@@ -238,13 +238,87 @@ func (fsSearchOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map
 		reqData["query"] = strings.TrimSpace(req.Query)
 		storeReq["query"] = strings.TrimSpace(req.Query)
 	}
+	if strings.TrimSpace(req.Pattern) != "" {
+		reqData["pattern"] = strings.TrimSpace(req.Pattern)
+		storeReq["pattern"] = strings.TrimSpace(req.Pattern)
+	}
+	if strings.TrimSpace(req.Glob) != "" {
+		reqData["glob"] = strings.TrimSpace(req.Glob)
+		storeReq["glob"] = strings.TrimSpace(req.Glob)
+	}
+	if len(req.Exclude) != 0 {
+		exclude := strings.Join(req.Exclude, ",")
+		reqData["exclude"] = exclude
+		storeReq["exclude"] = exclude
+	}
 	if req.Limit != 0 {
+		reqData["maxResults"] = strconv.Itoa(req.Limit)
 		reqData["limit"] = strconv.Itoa(req.Limit)
+		storeReq["maxResults"] = strconv.Itoa(req.Limit)
 		storeReq["limit"] = strconv.Itoa(req.Limit)
 	}
+	if req.PreviewLines != 0 {
+		reqData["previewLines"] = strconv.Itoa(req.PreviewLines)
+		storeReq["previewLines"] = strconv.Itoa(req.PreviewLines)
+	}
+	if req.IncludeMetadata {
+		reqData["includeMetadata"] = "true"
+		storeReq["includeMetadata"] = "true"
+	}
+	if req.MaxSizeBytes != 0 {
+		reqData["maxSizeBytes"] = strconv.FormatInt(req.MaxSizeBytes, 10)
+		storeReq["maxSizeBytes"] = strconv.FormatInt(req.MaxSizeBytes, 10)
+	}
 }
-func (fsSearchOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, _ map[string]string) {
-	respData["results"] = strconv.Itoa(len(resp.Results))
+func (fsSearchOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	resultsReturned := resp.ResultsReturned
+	if resultsReturned == 0 && len(resp.Results) != 0 {
+		resultsReturned = len(resp.Results)
+	}
+	resultsTotal := resp.ResultsTotal
+	if resultsTotal == 0 && len(resp.Results) != 0 {
+		resultsTotal = len(resp.Results)
+	}
+	respData["results"] = strconv.Itoa(resultsReturned)
+	storeResp["results"] = strconv.Itoa(resultsReturned)
+	if resultsTotal != 0 {
+		respData["resultsTotal"] = strconv.Itoa(resultsTotal)
+		storeResp["resultsTotal"] = strconv.Itoa(resultsTotal)
+	}
+	if resultsReturned != 0 {
+		respData["resultsReturned"] = strconv.Itoa(resultsReturned)
+		storeResp["resultsReturned"] = strconv.Itoa(resultsReturned)
+	}
+	if resp.ResultsTruncated {
+		respData["resultsTruncated"] = "true"
+		storeResp["resultsTruncated"] = "true"
+	}
+	if searchResultsHavePreview(resp.Results) {
+		respData["resultsHavePreview"] = "true"
+		storeResp["resultsHavePreview"] = "true"
+	}
+	if searchResultsHaveMetadata(resp.Results) {
+		respData["resultsHaveMetadata"] = "true"
+		storeResp["resultsHaveMetadata"] = "true"
+	}
+}
+
+func searchResultsHavePreview(results []types.SearchResult) bool {
+	for _, result := range results {
+		if len(result.PreviewBefore) != 0 || strings.TrimSpace(result.PreviewMatch) != "" || len(result.PreviewAfter) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func searchResultsHaveMetadata(results []types.SearchResult) bool {
+	for _, result := range results {
+		if result.SizeBytes != nil || result.Mtime != nil {
+			return true
+		}
+	}
+	return false
 }
 
 type fsWriteOperation struct{}

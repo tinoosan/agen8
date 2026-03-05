@@ -31,7 +31,10 @@ func FormatRequestTitle(d map[string]string) string {
 	case "fs_read":
 		return "Read " + path
 	case "fs_search":
-		q := strings.TrimSpace(d["query"])
+		q := strings.TrimSpace(d["pattern"])
+		if q == "" {
+			q = strings.TrimSpace(d["query"])
+		}
 		if path != "" && q != "" {
 			return fmt.Sprintf("Search %s for %q", path, q)
 		}

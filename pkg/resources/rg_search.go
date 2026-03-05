@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 	"sync"
 )
@@ -25,12 +24,13 @@ func hasRipgrep() bool {
 }
 
 type rgFilesWithMatchesOpts struct {
-	Dir         string
-	Query       string
-	RegexOK     bool
-	MaxFilesize string
-	Globs       []string
-	MaxFiles    int
+	Dir          string
+	Query        string
+	FixedString  bool
+	MaxFilesize  string
+	IncludeGlobs []string
+	ExcludeGlobs []string
+	MaxFiles     int
 }
 
 func rgFilesWithMatches(ctx context.Context, opts rgFilesWithMatchesOpts) ([]string, bool, error) {
@@ -60,14 +60,21 @@ func rgFilesWithMatches(ctx context.Context, opts rgFilesWithMatchesOpts) ([]str
 	if strings.TrimSpace(opts.MaxFilesize) != "" {
 		args = append(args, "--max-filesize", opts.MaxFilesize)
 	}
-	for _, g := range opts.Globs {
+	for _, g := range opts.IncludeGlobs {
 		g = strings.TrimSpace(g)
 		if g == "" {
 			continue
 		}
 		args = append(args, "--glob", g)
 	}
-	if !opts.RegexOK {
+	for _, g := range opts.ExcludeGlobs {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			continue
+		}
+		args = append(args, "--glob", "!"+g)
+	}
+	if opts.FixedString {
 		// Fixed-string fallback should match our non-regex path (case-insensitive substring).
 		args = append(args, "-F", "--ignore-case")
 	}
@@ -114,19 +121,9 @@ func rgFilesWithMatches(ctx context.Context, opts rgFilesWithMatchesOpts) ([]str
 }
 
 type bestMatch struct {
-	score float64
-	line  int
-	text  string
-}
-
-func compileSearchQuery(query string) (*regexp.Regexp, bool, string) {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return nil, false, ""
-	}
-	re, err := regexp.Compile(query)
-	if err != nil {
-		return nil, false, strings.ToLower(query)
-	}
-	return re, true, strings.ToLower(query)
+	score         float64
+	line          int
+	text          string
+	previewBefore []string
+	previewAfter  []string
 }

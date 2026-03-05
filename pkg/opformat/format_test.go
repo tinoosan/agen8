@@ -43,6 +43,7 @@ func TestFormatResponseText(t *testing.T) {
 		{name: "shell exec fail", data: map[string]string{"op": "shell_exec", "ok": "false", "exitCode": "1", "err": "boom"}, want: "✗ exit 1: boom"},
 		{name: "http status", data: map[string]string{"op": "http_fetch", "ok": "true", "status": "200"}, want: "✓ 200"},
 		{name: "search results", data: map[string]string{"op": "fs_search", "ok": "true", "results": "3"}, want: "✓ 3 results"},
+		{name: "search results truncated", data: map[string]string{"op": "fs_search", "ok": "true", "resultsReturned": "5", "resultsTotal": "12", "resultsTruncated": "true"}, want: "✓ 5/12 results"},
 		{name: "fs write default", data: map[string]string{"op": "fs_write", "ok": "true"}, want: "✓ wrote"},
 		{name: "fs write bytes and mode", data: map[string]string{"op": "fs_write", "ok": "true", "writeBytes": "0", "writeMode": "overwritten"}, want: "✓ wrote 0 bytes (overwritten)"},
 		{name: "fs write verified checksum", data: map[string]string{"op": "fs_write", "ok": "true", "writeVerified": "true", "writeChecksumAlgo": "sha256"}, want: "✓ verified (sha256)"},

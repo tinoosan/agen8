@@ -112,6 +112,11 @@ func TestRenderOpResponse_ToolSpecific(t *testing.T) {
 			want: "✓ 3 results",
 		},
 		{
+			name: "search results truncated",
+			data: map[string]string{"op": "fs_search", "ok": "true", "resultsReturned": "5", "resultsTotal": "12", "resultsTruncated": "true"},
+			want: "✓ 5/12 results",
+		},
+		{
 			name: "write verified checksum",
 			data: map[string]string{"op": "fs_write", "ok": "true", "writeVerified": "true", "writeChecksumAlgo": "sha256"},
 			want: "✓ verified (sha256)",

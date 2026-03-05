@@ -104,15 +104,15 @@ func (r *ValidatingMemoryResource) Append(subpath string, data []byte) error {
 	return r.inner.Append(subpath, []byte(strings.Join(validLines, "\n")+"\n"))
 }
 
-func (r *ValidatingMemoryResource) Search(ctx context.Context, subpath string, query string, limit int) ([]types.SearchResult, error) {
+func (r *ValidatingMemoryResource) Search(ctx context.Context, subpath string, req types.SearchRequest) (types.SearchResponse, error) {
 	if r == nil || r.inner == nil {
-		return nil, fmt.Errorf("memory resource is nil")
+		return types.SearchResponse{}, fmt.Errorf("memory resource is nil")
 	}
 	searchable, ok := r.inner.(vfs.Searchable)
 	if !ok {
-		return nil, fmt.Errorf("search not supported")
+		return types.SearchResponse{}, fmt.Errorf("search not supported")
 	}
-	return searchable.Search(ctx, subpath, query, limit)
+	return searchable.Search(ctx, subpath, req)
 }
 
 func parseMemoryLine(line string) (parsedMemoryLine, error) {

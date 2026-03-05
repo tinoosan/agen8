@@ -242,12 +242,17 @@ func FormatResponseText(d map[string]string) string {
 		}
 		return prefix + " failed"
 	case "fs_search":
-		results := strings.TrimSpace(d["results"])
-		if ok == "true" && results != "" {
-			if results == "1" {
+		resultsReturned := strings.TrimSpace(firstNonEmpty(d["resultsReturned"], d["results"]))
+		resultsTotal := strings.TrimSpace(d["resultsTotal"])
+		truncated := strings.TrimSpace(d["resultsTruncated"]) == "true"
+		if ok == "true" && resultsReturned != "" {
+			if resultsReturned == "1" && (!truncated && (resultsTotal == "" || resultsTotal == "1")) {
 				return prefix + " 1 result"
 			}
-			return prefix + " " + results + " results"
+			if truncated && resultsTotal != "" && resultsTotal != resultsReturned {
+				return prefix + " " + resultsReturned + "/" + resultsTotal + " results"
+			}
+			return prefix + " " + resultsReturned + " results"
 		}
 		if ok != "true" && errStr != "" {
 			return prefix + " " + errStr

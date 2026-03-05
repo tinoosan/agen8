@@ -131,17 +131,17 @@ func (fs *FS) Append(vpath string, data []byte) error {
 	return nil
 }
 
-// Search searches a mounted resource (if supported) for a query.
-func (fs *FS) Search(ctx context.Context, vpath, query string, limit int) ([]types.SearchResult, error) {
+// Search searches a mounted resource (if supported) for matching content.
+func (fs *FS) Search(ctx context.Context, vpath string, req types.SearchRequest) (types.SearchResponse, error) {
 	mountName, r, subpath, err := fs.Resolve(vpath)
 	if err != nil {
-		return nil, err
+		return types.SearchResponse{}, err
 	}
 	searchable, ok := r.(Searchable)
 	if !ok {
-		return nil, errors.Join(store.ErrInvalid, fmt.Errorf("search not supported for mount %q", mountName))
+		return types.SearchResponse{}, errors.Join(store.ErrInvalid, fmt.Errorf("search not supported for mount %q", mountName))
 	}
-	return searchable.Search(ctx, subpath, query, limit)
+	return searchable.Search(ctx, subpath, req)
 }
 
 // List returns a list of entries under the given subpath.
