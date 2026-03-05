@@ -382,18 +382,28 @@ func TestRuntimeSupervisor_PauseRun_CancelsWorkerAndActiveTasks(t *testing.T) {
 	if err := supervisor.PauseRun(context.Background(), run.RunID); err != nil {
 		t.Fatalf("PauseRun: %v", err)
 	}
-	mu.Lock()
-	gotCancel := cancelCalled
-	mu.Unlock()
-	if !gotCancel {
-		t.Fatalf("expected worker cancel to be called")
-	}
+
+	// Task cancellation happens synchronously before the stopWorker goroutine fires.
 	loadedTask, err := ts.GetTask(context.Background(), "task-active")
 	if err != nil {
 		t.Fatalf("GetTask: %v", err)
 	}
 	if loadedTask.Status != types.TaskStatusCanceled {
 		t.Fatalf("task status=%q want %q", loadedTask.Status, types.TaskStatusCanceled)
+	}
+
+	// stopWorker runs asynchronously; wait for the done channel to close (cancel fires inside).
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for worker cancel to be called")
+	}
+
+	mu.Lock()
+	gotCancel := cancelCalled
+	mu.Unlock()
+	if !gotCancel {
+		t.Fatalf("expected worker cancel to be called")
 	}
 }
 
