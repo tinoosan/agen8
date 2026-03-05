@@ -819,9 +819,19 @@ func (s *runtimeSupervisor) buildSpawnRuntime(
 		}
 		if role.teamID != "" {
 			ev.Data["teamId"] = role.teamID
+			// StoreData, when non-nil, replaces Data in StoreSink before persistence
+			// and broadcast. Set role/teamId there too so the event.append notification
+			// received by the TUI includes the correct role immediately (not just after
+			// the next activity.list poll where the server re-attaches the role).
+			if ev.StoreData != nil {
+				ev.StoreData["teamId"] = role.teamID
+			}
 		}
 		if role.roleName != "" {
 			ev.Data["role"] = role.roleName
+			if ev.StoreData != nil {
+				ev.StoreData["role"] = role.roleName
+			}
 		}
 		if err := orderedEmitter.Emit(ctx, ev); err != nil && !errorsIsDropped(err) {
 			log.Printf("daemon: emit failed (%s): %v", strings.TrimSpace(run.RunID), err)

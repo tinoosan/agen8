@@ -241,12 +241,9 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 			return entries[i].timestamp.Before(entries[j].timestamp)
 		})
 
-		// Group bridge ops into their parent code_exec entries at the data
-		// layer so they never appear as independent feed entries.
-		entries = groupBridgeOpsInEntries(entries)
-
-		// If any activity is a plan write, fetch the current plan data and
-		// attach it to the appropriate entries for rendering.
+		// Detect plan writes and fetch plan data BEFORE grouping so that when
+		// groupBridgeOpsInEntries calls absorbBridgeOp the plan fields are
+		// already populated on the bridge entry and get promoted to the parent.
 		lastChecklistIdx := -1
 		lastHeadIdx := -1
 		for i, e := range entries {
@@ -283,6 +280,12 @@ func fetchActivityCmd(endpoint, sessionID string) tea.Cmd {
 				}
 			}
 		}
+
+		// Group bridge ops into their parent code_exec entries at the data
+		// layer so they never appear as independent feed entries. Plan write
+		// entries now carry their populated planItems/planDetailsTitle so
+		// absorbBridgeOp correctly promotes the data to the code_exec parent.
+		entries = groupBridgeOpsInEntries(entries)
 
 		return activityLoadedMsg{entries: entries, connected: true}
 	}
