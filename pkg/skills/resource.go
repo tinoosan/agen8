@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/tinoosan/agen8/pkg/fsutil"
+	"github.com/tinoosan/agen8/pkg/resources"
+	"github.com/tinoosan/agen8/pkg/types"
 	"github.com/tinoosan/agen8/pkg/vfs"
 	"github.com/tinoosan/agen8/pkg/vfsutil"
 )
@@ -152,6 +155,36 @@ func (r *SkillsResource) Append(path string, data []byte) error {
 	return r.manager.Scan()
 }
 
+func (r *SkillsResource) Search(ctx context.Context, subpath string, req types.SearchRequest) (types.SearchResponse, error) {
+	if r.manager == nil {
+		return types.SearchResponse{}, fmt.Errorf("skills manager is required")
+	}
+	clean, parts, err := vfsutil.NormalizeResourceSubpath(subpath)
+	if err != nil {
+		return types.SearchResponse{}, err
+	}
+	if clean == "." {
+		clean = ""
+	}
+	if clean == "" {
+		return r.searchAllSkills(ctx, req)
+	}
+
+	skillName := strings.TrimSpace(parts[0])
+	if skillName == "" {
+		return types.SearchResponse{}, fmt.Errorf("skills: invalid path %q", subpath)
+	}
+	skill, ok := r.manager.Get(skillName)
+	if !ok {
+		return types.SearchResponse{}, fmt.Errorf("skills: not found %q", skillName)
+	}
+	innerSubpath := ""
+	if len(parts) > 1 {
+		innerSubpath = filepath.ToSlash(filepath.Join(parts[1:]...))
+	}
+	return searchSingleSkill(ctx, skillName, skill, innerSubpath, req)
+}
+
 func (r *SkillsResource) listSkillDirs() ([]vfs.Entry, error) {
 	entries := r.manager.Entries()
 	if len(entries) == 0 {
@@ -163,6 +196,89 @@ func (r *SkillsResource) listSkillDirs() ([]vfs.Entry, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
+}
+
+func (r *SkillsResource) searchAllSkills(ctx context.Context, req types.SearchRequest) (types.SearchResponse, error) {
+	entries := r.manager.Entries()
+	if len(entries) == 0 {
+		return types.SearchResponse{}, nil
+	}
+
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+	perSkillLimit := max(limit*len(entries), 32)
+	childReq := req
+	childReq.Limit = perSkillLimit
+
+	allResults := make([]types.SearchResult, 0, perSkillLimit)
+	total := 0
+	for _, entry := range entries {
+		resp, err := searchSingleSkill(ctx, entry.Dir, entry.Skill, "", childReq)
+		if err != nil {
+			return types.SearchResponse{}, err
+		}
+		total += resp.Total
+		allResults = append(allResults, resp.Results...)
+	}
+	sort.Slice(allResults, func(i, j int) bool {
+		if allResults[i].Score != allResults[j].Score {
+			return allResults[i].Score > allResults[j].Score
+		}
+		return allResults[i].Path < allResults[j].Path
+	})
+	truncated := false
+	if len(allResults) > limit {
+		allResults = allResults[:limit]
+		truncated = true
+	}
+	if total > len(allResults) {
+		truncated = true
+	}
+	return types.SearchResponse{
+		Results:   allResults,
+		Total:     total,
+		Returned:  len(allResults),
+		Truncated: truncated,
+	}, nil
+}
+
+func searchSingleSkill(ctx context.Context, skillName string, skill *Skill, subpath string, req types.SearchRequest) (types.SearchResponse, error) {
+	if skill == nil || strings.TrimSpace(skill.Dir) == "" {
+		return types.SearchResponse{}, fmt.Errorf("skills: invalid skill directory")
+	}
+	dirRes, err := resources.NewDirResource(skill.Dir, vfs.MountSkills)
+	if err != nil {
+		return types.SearchResponse{}, err
+	}
+	resp, err := dirRes.Search(ctx, subpath, req)
+	if err != nil {
+		return types.SearchResponse{}, err
+	}
+	for i := range resp.Results {
+		resp.Results[i] = prefixSkillSearchResult(skillName, resp.Results[i])
+	}
+	return resp, nil
+}
+
+func prefixSkillSearchResult(skillName string, result types.SearchResult) types.SearchResult {
+	prefix := strings.Trim(strings.TrimSpace(skillName), "/")
+	if prefix == "" {
+		return result
+	}
+	if result.Title != "" {
+		result.Title = prefix + "/" + strings.TrimLeft(result.Title, "/")
+	}
+	if result.Path != "" {
+		path := strings.TrimPrefix(result.Path, "/"+vfs.MountSkills+"/")
+		path = strings.TrimLeft(path, "/")
+		result.Path = "/" + vfs.MountSkills + "/" + prefix + "/" + path
+	}
+	if result.Snippet != "" {
+		result.Snippet = prefix + "/" + result.Snippet
+	}
+	return result
 }
 
 func (r *SkillsResource) listSkillDir(skill *Skill, listPrefix, subpath string) ([]vfs.Entry, error) {

@@ -1,10 +1,13 @@
 package skills
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/tinoosan/agen8/pkg/types"
 )
 
 func TestSkillsResource_WriteAddsSkill(t *testing.T) {
@@ -154,5 +157,55 @@ func TestSkillsResource_EnforceAllowlistWithEmptyList_HidesAllSkills(t *testing.
 
 	if _, err := res.Read("allowed/SKILL.md"); err == nil {
 		t.Fatalf("expected read to fail when strict allowlist is empty")
+	}
+}
+
+func TestSkillsResource_SearchRootAndSkillSubpath(t *testing.T) {
+	tmp := t.TempDir()
+	mustWriteSkill(t, tmp, "coding")
+	if err := os.MkdirAll(filepath.Join(tmp, "coding", "scripts"), 0o755); err != nil {
+		t.Fatalf("mkdir scripts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "coding", "scripts", "helper.py"), []byte("print('needle')\n"), 0o644); err != nil {
+		t.Fatalf("write helper: %v", err)
+	}
+
+	mgr := NewManager([]string{tmp})
+	if err := mgr.Scan(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	res := NewResource(mgr)
+
+	rootResp, err := res.Search(context.Background(), "", types.SearchRequest{
+		Query:           "needle",
+		Limit:           10,
+		IncludeMetadata: true,
+		PreviewLines:    1,
+	})
+	if err != nil {
+		t.Fatalf("root search: %v", err)
+	}
+	if rootResp.Total == 0 || len(rootResp.Results) == 0 {
+		t.Fatalf("expected root search results, got %+v", rootResp)
+	}
+	if got := rootResp.Results[0].Path; got != "/skills/coding/scripts/helper.py" {
+		t.Fatalf("unexpected root result path %q", got)
+	}
+	if rootResp.Results[0].SizeBytes == nil || rootResp.Results[0].PreviewMatch == "" {
+		t.Fatalf("expected metadata and preview in root result, got %+v", rootResp.Results[0])
+	}
+
+	subResp, err := res.Search(context.Background(), "coding/scripts", types.SearchRequest{
+		Query: "needle",
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("subpath search: %v", err)
+	}
+	if subResp.Total != 1 || len(subResp.Results) != 1 {
+		t.Fatalf("expected one subpath result, got %+v", subResp)
+	}
+	if got := subResp.Results[0].Path; got != "/skills/coding/scripts/helper.py" {
+		t.Fatalf("unexpected subpath result path %q", got)
 	}
 }
