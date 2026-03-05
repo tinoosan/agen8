@@ -37,5 +37,8 @@ func effectiveConfig(cmd *cobra.Command) (config.Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return config.Config{}, err
 	}
+	if err := app.ApplyRuntimeConfigEnvDefaults(cfg.DataDir); err != nil {
+		return config.Config{}, err
+	}
 	return cfg, nil
 }

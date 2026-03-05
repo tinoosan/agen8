@@ -122,7 +122,9 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			if err != nil {
 				return RunResult{}, nil, 0, err
 			}
-			system = updatedSystem
+			if strings.TrimSpace(updatedSystem) != "" {
+				system = updatedSystem
+			}
 		}
 
 		// Keep context bounded for long-running tool loops.
@@ -211,21 +213,21 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			}
 
 			if a.ToolRegistry == nil {
-					lastFailedTool = which
-					lastFailureReason = "tool registry is not configured"
-					hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: "tool registry is not configured"}
-					hostRespJSON := marshalHostResponseJSON(hostResp)
-					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: hostRespJSON})
-					continue
-				}
-				op, err := a.ToolRegistry.Dispatch(ctx, which, []byte(tc.Function.Arguments))
-				if err != nil {
-					dispatchErr := "invalid tool call args: " + err.Error()
-					hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: dispatchErr}
-					hostRespJSON := marshalHostResponseJSON(hostResp)
-					msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: hostRespJSON})
-					if strings.EqualFold(strings.TrimSpace(lastFailedTool), which) {
-						consecutiveInvalid++
+				lastFailedTool = which
+				lastFailureReason = "tool registry is not configured"
+				hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: "tool registry is not configured"}
+				hostRespJSON := marshalHostResponseJSON(hostResp)
+				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: hostRespJSON})
+				continue
+			}
+			op, err := a.ToolRegistry.Dispatch(ctx, which, []byte(tc.Function.Arguments))
+			if err != nil {
+				dispatchErr := "invalid tool call args: " + err.Error()
+				hostResp := types.HostOpResponse{Op: "tool_call", Ok: false, Error: dispatchErr}
+				hostRespJSON := marshalHostResponseJSON(hostResp)
+				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: strings.TrimSpace(tc.ID), Content: hostRespJSON})
+				if strings.EqualFold(strings.TrimSpace(lastFailedTool), which) {
+					consecutiveInvalid++
 				} else {
 					consecutiveInvalid = 1
 				}
@@ -246,13 +248,13 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 			pending = append(pending, pendingHostOp{req: op, callID: strings.TrimSpace(tc.ID)})
 		}
 
-			for _, item := range pending {
-				hostResp := a.Exec.Exec(ctx, item.req)
-				hostRespJSON := marshalHostResponseJSON(hostResp)
-				msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: item.callID, Content: hostRespJSON})
-				if !hostResp.Ok {
-					lastFailureReason = strings.TrimSpace(hostResp.Error)
-				}
+		for _, item := range pending {
+			hostResp := a.Exec.Exec(ctx, item.req)
+			hostRespJSON := marshalHostResponseJSON(hostResp)
+			msgs = append(msgs, llmtypes.LLMMessage{Role: "tool", ToolCallID: item.callID, Content: hostRespJSON})
+			if !hostResp.Ok {
+				lastFailureReason = strings.TrimSpace(hostResp.Error)
+			}
 		}
 	}
 }
@@ -296,14 +298,14 @@ func (a *DefaultAgent) compactConversationForBudget(ctx context.Context, step in
 			System:   system,
 			Messages: msgs,
 		})
-			if err == nil && len(compacted.Messages) != 0 {
-				// Prepend developer notice so the agent knows context was compacted server-side.
-				notice := llmtypes.LLMMessage{
-					Role:    "developer",
-					Content: compactionNoticeServer,
-				}
-				result := append([]llmtypes.LLMMessage{notice}, compacted.Messages...)
-				if a.Hooks.OnCompaction != nil {
+		if err == nil && len(compacted.Messages) != 0 {
+			// Prepend developer notice so the agent knows context was compacted server-side.
+			notice := llmtypes.LLMMessage{
+				Role:    "developer",
+				Content: compactionNoticeServer,
+			}
+			result := append([]llmtypes.LLMMessage{notice}, compacted.Messages...)
+			if a.Hooks.OnCompaction != nil {
 				afterBytes := estimateConversationBytes(system, result)
 				a.Hooks.OnCompaction(step, estimateTokens(beforeBytes), estimateTokens(afterBytes), true)
 			}

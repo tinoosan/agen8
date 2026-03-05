@@ -11,6 +11,7 @@ import (
 // It is intentionally minimal and only includes fields still used outside the chat TUI.
 type RunChatOptions struct {
 	Model            string
+	AuthProvider     string
 	SubagentModel    string
 	Profile          string
 	WorkDir          string
@@ -46,6 +47,7 @@ func (o RunChatOptions) WithDefaults() RunChatOptions {
 func resolveRunChatOptions(opts ...RunChatOption) (RunChatOptions, error) {
 	o := RunChatOptions{
 		Model:            strings.TrimSpace(os.Getenv("OPENROUTER_MODEL")),
+		AuthProvider:     strings.TrimSpace(os.Getenv("AGEN8_AUTH_PROVIDER")),
 		SubagentModel:    strings.TrimSpace(os.Getenv("AGEN8_SUBAGENT_MODEL")),
 		Profile:          strings.TrimSpace(os.Getenv("AGEN8_PROFILE")),
 		WorkDir:          strings.TrimSpace(os.Getenv("AGEN8_WORKDIR")),
@@ -72,6 +74,16 @@ func WithModel(model string) RunChatOption {
 		model = strings.TrimSpace(model)
 		if model != "" {
 			o.Model = model
+		}
+		return nil
+	}
+}
+
+func WithAuthProvider(provider string) RunChatOption {
+	return func(o *RunChatOptions) error {
+		provider = strings.TrimSpace(provider)
+		if provider != "" {
+			o.AuthProvider = provider
 		}
 		return nil
 	}

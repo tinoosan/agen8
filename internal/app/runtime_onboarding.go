@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	authpkg "github.com/tinoosan/agen8/pkg/auth"
 	pkgobsidian "github.com/tinoosan/agen8/pkg/obsidian"
 	"github.com/zalando/go-keyring"
 	"golang.org/x/term"
@@ -27,7 +29,7 @@ const (
 ============================================
 
 This guided setup will configure the daemon for its first run.
-You will need an API key from your LLM provider (default: OpenRouter).
+You can use an API key provider (default: OpenRouter) or chatgpt_account OAuth login.
 `
 )
 
@@ -36,9 +38,31 @@ var (
 	keyringSet       = keyring.Set
 	onboardingPrompt = promptLine
 	onboardingSecret = promptSecret
+	newAuthProvider  = func(opts authpkg.ChatGPTAccountProviderOptions) (authpkg.Provider, error) {
+		return authpkg.NewChatGPTAccountProvider(opts)
+	}
 )
 
 func ensureRuntimeCredentials(dataDir string, interactive bool, in *os.File, out io.Writer) error {
+	if authpkg.NormalizeProvider(os.Getenv(authpkg.EnvAuthProvider)) == authpkg.ProviderChatGPTAccount {
+		provider, err := newAuthProvider(authpkg.ChatGPTAccountProviderOptions{
+			DataDir: dataDir,
+			In:      in,
+			Out:     out,
+		})
+		if err != nil {
+			return err
+		}
+		st, err := provider.Status(context.Background())
+		if err == nil && st.LoggedIn {
+			return nil
+		}
+		if !interactive {
+			cfgPath := filepath.Join(strings.TrimSpace(dataDir), "config.toml")
+			return fmt.Errorf("chatgpt_account auth is required. Run `agen8 auth login --provider chatgpt_account` in a TTY.\nConfig path: %s", cfgPath)
+		}
+		return provider.Login(context.Background(), true)
+	}
 	if strings.TrimSpace(os.Getenv(openRouterAPIKeyEnv)) != "" {
 		return nil
 	}
@@ -84,6 +108,10 @@ func runInteractiveRuntimeOnboarding(dataDir string, in *os.File, out io.Writer)
 	if provider == "" {
 		provider = openRouterProvider
 	}
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == authpkg.ProviderChatGPTAccount {
+		_ = os.Setenv(authpkg.EnvAuthProvider, authpkg.ProviderChatGPTAccount)
+	}
 	model, err := onboardingPrompt(reader, out, "Default model", runtimeDefaultModel)
 	if err != nil {
 		return err
@@ -95,6 +123,28 @@ func runInteractiveRuntimeOnboarding(dataDir string, in *os.File, out io.Writer)
 	obsidianVaultPath, err := configureObsidianOnboarding(reader, out)
 	if err != nil {
 		return err
+	}
+	if provider == authpkg.ProviderChatGPTAccount {
+		authProvider, err := newAuthProvider(authpkg.ChatGPTAccountProviderOptions{
+			DataDir: dataDir,
+			In:      in,
+			Out:     out,
+		})
+		if err != nil {
+			return err
+		}
+		if err := authProvider.Login(context.Background(), true); err != nil {
+			return err
+		}
+		setEnvIfUnset(openRouterModelEnv, model)
+		if err := PersistRuntimeAuthProvider(dataDir, authpkg.ProviderChatGPTAccount); err != nil {
+			return err
+		}
+		if err := upsertRuntimeConfigDefaultsModel(dataDir, model); err != nil {
+			return err
+		}
+		printOnboardingSummary(out, provider, model, "oauth token stored in auth store", dataDir, obsidianStatus.Installed, obsidianVaultPath)
+		return nil
 	}
 	key, err := onboardingSecret(in, out, "API key")
 	if err != nil {
@@ -108,14 +158,17 @@ func runInteractiveRuntimeOnboarding(dataDir string, in *os.File, out io.Writer)
 	}
 	_ = os.Setenv(openRouterAPIKeyEnv, key)
 	setEnvIfUnset(openRouterModelEnv, model)
+	if err := PersistRuntimeAuthProvider(dataDir, authpkg.ProviderAPIKey); err != nil {
+		return err
+	}
 	if err := upsertRuntimeConfigDefaultsModel(dataDir, model); err != nil {
 		return err
 	}
-	printOnboardingSummary(out, provider, model, dataDir, obsidianStatus.Installed, obsidianVaultPath)
+	printOnboardingSummary(out, provider, model, "saved to OS keychain", dataDir, obsidianStatus.Installed, obsidianVaultPath)
 	return nil
 }
 
-func printOnboardingSummary(out io.Writer, provider, model, dataDir string, obsidianInstalled bool, obsidianVaultPath string) {
+func printOnboardingSummary(out io.Writer, provider, model, authSummary, dataDir string, obsidianInstalled bool, obsidianVaultPath string) {
 	cfgPath := filepath.Join(strings.TrimSpace(dataDir), "config.toml")
 	obsidianLine := "not detected (you can still use Agen8; obsidian tool calls will fail until installed)"
 	if obsidianInstalled {
@@ -126,7 +179,7 @@ func printOnboardingSummary(out io.Writer, provider, model, dataDir string, obsi
 
   Provider:   %s
   Model:      %s
-  API key:    saved to OS keychain
+  Auth:       %s
   Obsidian:   %s
   Vault:      %s
   Config:     %s
@@ -144,7 +197,7 @@ func printOnboardingSummary(out io.Writer, provider, model, dataDir string, obsi
 
   Edit runtime config:
     %s
-`, provider, model, obsidianLine, strings.TrimSpace(obsidianVaultPath), cfgPath, cfgPath)
+`, provider, model, strings.TrimSpace(authSummary), obsidianLine, strings.TrimSpace(obsidianVaultPath), cfgPath, cfgPath)
 }
 
 func keyringAccountName(provider string) string {

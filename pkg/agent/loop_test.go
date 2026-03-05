@@ -13,6 +13,7 @@ import (
 type scriptedStreamingLLM struct {
 	responses []llmtypes.LLMResponse
 	index     int
+	lastReq   llmtypes.LLMRequest
 }
 
 func (s *scriptedStreamingLLM) Generate(context.Context, llmtypes.LLMRequest) (llmtypes.LLMResponse, error) {
@@ -21,7 +22,8 @@ func (s *scriptedStreamingLLM) Generate(context.Context, llmtypes.LLMRequest) (l
 
 func (s *scriptedStreamingLLM) SupportsStreaming() bool { return true }
 
-func (s *scriptedStreamingLLM) GenerateStream(_ context.Context, _ llmtypes.LLMRequest, _ llmtypes.LLMStreamCallback) (llmtypes.LLMResponse, error) {
+func (s *scriptedStreamingLLM) GenerateStream(_ context.Context, req llmtypes.LLMRequest, _ llmtypes.LLMStreamCallback) (llmtypes.LLMResponse, error) {
+	s.lastReq = req
 	if len(s.responses) == 0 {
 		return llmtypes.LLMResponse{}, nil
 	}
@@ -156,5 +158,28 @@ func TestDefaultAgent_RunConversation_SuccessfulToolProgressStillCompletes(t *te
 	}
 	if res.Text != "done" {
 		t.Fatalf("text=%q, want %q", res.Text, "done")
+	}
+}
+
+func TestDefaultAgent_RunConversation_EmptyPromptSourceFallsBackToBaseSystemPrompt(t *testing.T) {
+	llm := &scriptedStreamingLLM{
+		responses: []llmtypes.LLMResponse{{Text: "done"}},
+	}
+	a := &DefaultAgent{
+		LLM:          llm,
+		Exec:         fixedHostExecutor{resp: types.HostOpResponse{Ok: true}},
+		Model:        "test-model",
+		SystemPrompt: "HARNESS_PROMPT_SHOULD_BE_PRESENT",
+		PromptSource: PromptSourceFunc(func(context.Context, string, int) (string, error) {
+			return "   ", nil
+		}),
+	}
+
+	_, _, _, err := a.RunConversation(context.Background(), []llmtypes.LLMMessage{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if got := llm.lastReq.System; got != "HARNESS_PROMPT_SHOULD_BE_PRESENT" {
+		t.Fatalf("system prompt = %q, want harness prompt fallback", got)
 	}
 }

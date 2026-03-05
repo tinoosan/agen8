@@ -27,6 +27,10 @@ model = "z-ai/GLM-5"
 [skills]
 # conflict = "keep"
 
+[auth]
+# provider = "chatgpt_account" # or "api_key"
+# allow_api_key_fallback_for_non_openai = false
+
 [code_exec]
 # venv_path = ""
 # required_packages = []
@@ -36,6 +40,12 @@ Notes:
 
 - Do not store API keys in `config.toml`.
 - API keys are loaded from environment variables or OS keychain.
+- `AGEN8_AUTH_PROVIDER` selects auth mode: `api_key` (default) or `chatgpt_account`.
+- `auth.provider` in `config.toml` can set the runtime default provider without shell exports.
+- `chatgpt_account` tokens are stored in `${AGEN8_DATA_DIR}/auth/chatgpt_oauth.json` with mode `0600`.
+- `auth.allow_api_key_fallback_for_non_openai` controls non-openai routing in `chatgpt_account` mode.
+  - `false` (default): fail fast for non-openai models.
+  - `true`: allow explicit fallback to `OPENROUTER_API_KEY`.
 - For a full copy-paste template, see [docs/config.toml.example](config.toml.example).
 
 ## `code_exec` configuration
@@ -71,6 +81,19 @@ For runtime options (model/profile/workdir/etc):
 3. `config.toml` values (applied as env defaults)
 4. Built-in defaults
 
+For auth provider selection:
+
+1. `--auth-provider`
+2. `AGEN8_AUTH_PROVIDER`
+3. `auth.provider` in `config.toml`
+4. default `api_key`
+
+For ChatGPT non-openai fallback policy:
+
+1. `auth.allow_api_key_fallback_for_non_openai` in `config.toml`
+2. `AGEN8_AUTH_CHATGPT_FALLBACK_API_KEY_NON_OPENAI`
+3. default `false`
+
 For API key (`OPENROUTER_API_KEY`):
 
 1. Environment variable
@@ -78,6 +101,12 @@ For API key (`OPENROUTER_API_KEY`):
 3. If still missing:
 4. TTY: interactive onboarding prompt
 5. Non-TTY: fail-fast with setup instructions
+
+For ChatGPT account auth (`AGEN8_AUTH_PROVIDER=chatgpt_account`):
+
+1. Local OAuth token file at `${AGEN8_DATA_DIR}/auth/chatgpt_oauth.json`
+2. TTY: run `agen8 auth login --provider chatgpt_account` (or onboarding auto-login)
+3. Non-TTY without token: fail-fast with relogin command hint
 
 ## How TTY detection works
 
@@ -98,6 +127,13 @@ When interactive (TTY) and API key is missing:
 4. Save API key to OS keychain
 5. Write/update non-secret defaults in `${dataDir}/config.toml`
 6. Continue startup
+
+When interactive and provider is `chatgpt_account`:
+
+1. Prompt for provider/model
+2. Start browser OAuth login flow
+3. Persist access/refresh token locally
+4. Continue startup with no API key requirement
 
 When non-interactive and API key is missing:
 

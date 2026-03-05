@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	authpkg "github.com/tinoosan/agen8/pkg/auth"
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
@@ -28,6 +29,7 @@ var (
 	webhookAddr        string
 	resultWebhookURL   string
 	healthAddr         string
+	authProvider       string
 )
 
 var runRootEntrypointFn = runSmartEntrypoint
@@ -81,6 +83,13 @@ Each executed task can:
 		if strings.TrimSpace(rpcEndpoint) != "" {
 			_ = os.Setenv("AGEN8_RPC_ENDPOINT", strings.TrimSpace(rpcEndpoint))
 		}
+		if cmd.Root().PersistentFlags().Changed("auth-provider") {
+			provider, err := authpkg.ParseProvider(authProvider)
+			if err != nil {
+				return err
+			}
+			_ = os.Setenv(authpkg.EnvAuthProvider, provider)
+		}
 
 		// Pricing is resolved against the effective model at runtime (after session
 		// load and/or /model overrides).
@@ -119,6 +128,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&modelID, "model", modelID, "LLM model identifier (default: env OPENROUTER_MODEL)")
 	profileRef = strings.TrimSpace(os.Getenv("AGEN8_PROFILE"))
 	rootCmd.PersistentFlags().StringVar(&profileRef, "profile", profileRef, "agent profile id or path (env AGEN8_PROFILE)")
+	authProvider = authpkg.NormalizeProvider(strings.TrimSpace(os.Getenv(authpkg.EnvAuthProvider)))
+	rootCmd.PersistentFlags().StringVar(&authProvider, "auth-provider", authProvider, "authentication provider (api_key or chatgpt_account; env AGEN8_AUTH_PROVIDER)")
 	webhookAddr = strings.TrimSpace(os.Getenv("AGEN8_WEBHOOK_ADDR"))
 	rootCmd.PersistentFlags().StringVar(&webhookAddr, "webhook-addr", webhookAddr, "listen address for task webhook server (env AGEN8_WEBHOOK_ADDR)")
 	resultWebhookURL = strings.TrimSpace(os.Getenv("AGEN8_RESULT_WEBHOOK_URL"))
@@ -134,6 +145,7 @@ func init() {
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(monitorCmd)
 	rootCmd.AddCommand(profilesCmd)
+	rootCmd.AddCommand(authCmd)
 }
 
 func envBool(key string, def bool) bool {

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -19,6 +21,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 	openaiConstant "github.com/openai/openai-go/v3/shared/constant"
+	authpkg "github.com/tinoosan/agen8/pkg/auth"
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/cost"
 	"github.com/tinoosan/agen8/pkg/debuglog"
@@ -30,6 +33,12 @@ import (
 type Client struct {
 	client  *openai.Client
 	baseURL string
+	// authProvider is used for provider-specific auth refresh/hooks (e.g. chatgpt_account).
+	authProvider authpkg.Provider
+	// apiKeyFallbackClient is used only in chatgpt_account mode for non-openai models when explicitly enabled.
+	apiKeyFallbackClient *Client
+	// allowAPIKeyFallbackForNonOpenAI controls whether non-openai models can route to api_key credentials.
+	allowAPIKeyFallbackForNonOpenAI bool
 
 	// DefaultMaxTokens is used when LLMRequest.MaxTokens is 0.
 	DefaultMaxTokens int
@@ -60,6 +69,13 @@ var internalUserRepairPrefixes = [...]string{
 }
 
 var ErrOpenRouterAPIKeyRequired = errors.New("OPENROUTER_API_KEY is required")
+var ErrChatGPTAccountAuthRequired = errors.New("chatgpt_account login is required (run `agen8 auth login --provider chatgpt_account`)")
+var ErrChatGPTAccountNonOpenAIModel = errors.New("chatgpt_account mode only supports openai models unless api-key fallback is enabled")
+var ErrChatGPTAccountFallbackAPIKeyRequired = errors.New("OPENROUTER_API_KEY is required for non-openai model fallback in chatgpt_account mode")
+
+const chatGPTCodexBaseURL = "https://chatgpt.com/backend-api/codex"
+const chatGPTCodexDefaultInstructions = "You are Agen8, a pragmatic coding assistant."
+const envChatGPTFallbackAPIKeyNonOpenAI = "AGEN8_AUTH_CHATGPT_FALLBACK_API_KEY_NON_OPENAI"
 
 const (
 	toolChoiceModeAuto     = "auto"
@@ -133,14 +149,42 @@ func NewClientFromEnv() (*Client, error) {
 }
 
 func NewClientFromEnvWithConfig(cfg OpenAIClientConfig) (*Client, error) {
-	key := strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY"))
-	if key == "" {
-		return nil, ErrOpenRouterAPIKeyRequired
+	provider, err := authpkg.ParseProvider(os.Getenv(authpkg.EnvAuthProvider))
+	if err != nil {
+		return nil, err
 	}
-
-	baseURL := strings.TrimSpace(os.Getenv("OPENROUTER_BASE_URL"))
-	if baseURL == "" {
-		baseURL = "https://openrouter.ai/api/v1"
+	allowFallback := config.ParseBoolEnvDefault(envChatGPTFallbackAPIKeyNonOpenAI, false)
+	key := ""
+	baseURL := ""
+	var authProvider authpkg.Provider
+	var apiKeyFallbackClient *Client
+	if provider == authpkg.ProviderChatGPTAccount {
+		mgr, err := authpkg.NewManagerFromEnv("")
+		if err != nil {
+			return nil, err
+		}
+		authProvider = mgr.Provider()
+		if authProvider == nil {
+			return nil, ErrChatGPTAccountAuthRequired
+		}
+		tok, err := authProvider.AccessToken(context.Background())
+		if err != nil {
+			return nil, ErrChatGPTAccountAuthRequired
+		}
+		if strings.TrimSpace(tok.AccessToken) == "" {
+			return nil, ErrChatGPTAccountAuthRequired
+		}
+		key = strings.TrimSpace(tok.AccessToken)
+		baseURL = chatGPTCodexBaseURL
+	} else {
+		key = strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY"))
+		if key == "" {
+			return nil, ErrOpenRouterAPIKeyRequired
+		}
+		baseURL = strings.TrimSpace(os.Getenv("OPENROUTER_BASE_URL"))
+		if baseURL == "" {
+			baseURL = "https://openrouter.ai/api/v1"
+		}
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 
@@ -153,21 +197,47 @@ func NewClientFromEnvWithConfig(cfg OpenAIClientConfig) (*Client, error) {
 		}
 	}
 
-	cli := openai.NewClient(
-		option.WithAPIKey(key),
-		option.WithBaseURL(baseURL),
-	)
 	roleMapper := cfg.RoleMapper
 	if roleMapper == nil {
 		roleMapper = defaultRoleMapper{}
 	}
+	streamHandlers := buildResponsesStreamEventHandlerIndex(cfg.StreamEventHandlers)
+
+	cli := openai.NewClient(
+		option.WithAPIKey(key),
+		option.WithBaseURL(baseURL),
+	)
+	if provider == authpkg.ProviderChatGPTAccount && allowFallback {
+		fallbackKey := strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY"))
+		if fallbackKey != "" {
+			fallbackBaseURL := strings.TrimSpace(os.Getenv("OPENROUTER_BASE_URL"))
+			if fallbackBaseURL == "" {
+				fallbackBaseURL = "https://openrouter.ai/api/v1"
+			}
+			fallbackBaseURL = strings.TrimRight(fallbackBaseURL, "/")
+			fallbackOpenAIClient := openai.NewClient(
+				option.WithAPIKey(fallbackKey),
+				option.WithBaseURL(fallbackBaseURL),
+			)
+			apiKeyFallbackClient = &Client{
+				client:              &fallbackOpenAIClient,
+				baseURL:             fallbackBaseURL,
+				DefaultMaxTokens:    defaultMaxTokens,
+				roleMapper:          roleMapper,
+				streamEventHandlers: streamHandlers,
+			}
+		}
+	}
 
 	return &Client{
-		client:              &cli,
-		baseURL:             baseURL,
-		DefaultMaxTokens:    defaultMaxTokens,
-		roleMapper:          roleMapper,
-		streamEventHandlers: buildResponsesStreamEventHandlerIndex(cfg.StreamEventHandlers),
+		client:                          &cli,
+		baseURL:                         baseURL,
+		authProvider:                    authProvider,
+		apiKeyFallbackClient:            apiKeyFallbackClient,
+		allowAPIKeyFallbackForNonOpenAI: allowFallback,
+		DefaultMaxTokens:                defaultMaxTokens,
+		roleMapper:                      roleMapper,
+		streamEventHandlers:             streamHandlers,
 	}, nil
 }
 
@@ -179,6 +249,166 @@ func isOpenRouterBaseURL(baseURL string) bool {
 func isOpenAIBaseURL(baseURL string) bool {
 	u := strings.ToLower(strings.TrimSpace(baseURL))
 	return strings.Contains(u, "api.openai.com")
+}
+
+func isChatGPTCodexBaseURL(baseURL string) bool {
+	u := strings.ToLower(strings.TrimSpace(baseURL))
+	return strings.Contains(u, "chatgpt.com/backend-api/codex")
+}
+
+func isOpenAIModelID(model string) bool {
+	id := strings.ToLower(strings.TrimSpace(model))
+	if id == "" {
+		return false
+	}
+	if strings.HasPrefix(id, "openai/") {
+		return true
+	}
+	// Allow bare OpenAI model IDs when users omit provider prefixes.
+	return strings.HasPrefix(id, "gpt-") ||
+		strings.HasPrefix(id, "o1") ||
+		strings.HasPrefix(id, "o3") ||
+		strings.HasPrefix(id, "o4") ||
+		strings.HasPrefix(id, "codex-")
+}
+
+func stripOpenAIProviderPrefix(model string) string {
+	id := strings.TrimSpace(model)
+	if id == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(id), "openai/") {
+		return strings.TrimSpace(id[len("openai/"):])
+	}
+	return id
+}
+
+func stripModelVariantSuffix(model string) string {
+	id := strings.TrimSpace(model)
+	if id == "" {
+		return ""
+	}
+	if i := strings.Index(id, ":"); i > 0 {
+		return strings.TrimSpace(id[:i])
+	}
+	return id
+}
+
+// normalizeChatGPTCodexModelID rewrites model aliases/variants to stable model IDs
+// accepted by the ChatGPT Codex backend.
+func normalizeChatGPTCodexModelID(model string) string {
+	id := strings.ToLower(stripModelVariantSuffix(stripOpenAIProviderPrefix(model)))
+	switch id {
+	case "":
+		return ""
+	case "gpt-5.2-codex-low", "gpt-5.2-codex-medium", "gpt-5.2-codex-high", "gpt-5.2-codex-xhigh":
+		return "gpt-5.2-codex"
+	case "gpt-5.1-codex-max-low", "gpt-5.1-codex-max-medium", "gpt-5.1-codex-max-high", "gpt-5.1-codex-max-xhigh":
+		return "gpt-5.1-codex-max"
+	case "gpt-5.1-codex-low", "gpt-5.1-codex-medium", "gpt-5.1-codex-high":
+		return "gpt-5.1-codex"
+	case "gpt-5.1-codex-mini-medium", "gpt-5.1-codex-mini-high", "codex-mini-latest", "gpt-5-codex-mini", "gpt-5-codex-mini-medium", "gpt-5-codex-mini-high":
+		return "gpt-5.1-codex-mini"
+	case "gpt-5.2-none", "gpt-5.2-low", "gpt-5.2-medium", "gpt-5.2-high", "gpt-5.2-xhigh":
+		return "gpt-5.2"
+	case "gpt-5.1-none", "gpt-5.1-low", "gpt-5.1-medium", "gpt-5.1-high", "gpt-5.1-chat-latest":
+		return "gpt-5.1"
+	case "gpt-5-codex":
+		return "gpt-5.1-codex"
+	case "gpt-5", "gpt-5-mini", "gpt-5-nano":
+		return "gpt-5.1"
+	}
+	if strings.Contains(id, "codex-max") {
+		return "gpt-5.1-codex-max"
+	}
+	if strings.Contains(id, "codex-mini") {
+		return "gpt-5.1-codex-mini"
+	}
+	if strings.Contains(id, "codex") {
+		if strings.Contains(id, "5.2") {
+			return "gpt-5.2-codex"
+		}
+		return "gpt-5.1-codex"
+	}
+	if strings.Contains(id, "gpt-5.2") {
+		return "gpt-5.2"
+	}
+	if strings.HasPrefix(id, "gpt-5") {
+		return "gpt-5.1"
+	}
+	return id
+}
+
+func normalizeChatGPTCodexReasoningEffort(model, effort string) string {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort == "" {
+		return ""
+	}
+	if effort == "minimal" {
+		effort = "low"
+	}
+	id := strings.ToLower(strings.TrimSpace(model))
+	isCodex := strings.Contains(id, "codex")
+	isCodexMini := strings.Contains(id, "codex-mini")
+	if isCodexMini {
+		switch effort {
+		case "none", "low":
+			return "medium"
+		case "xhigh":
+			return "high"
+		}
+	}
+	if isCodex && effort == "none" {
+		return "low"
+	}
+	if !strings.Contains(id, "gpt-5.2") && !strings.Contains(id, "codex-max") && effort == "xhigh" {
+		return "high"
+	}
+	return effort
+}
+
+func (c *Client) normalizeRequestForProvider(req types.LLMRequest) types.LLMRequest {
+	if c == nil || !isChatGPTCodexBaseURL(c.baseURL) {
+		return req
+	}
+	req.Model = normalizeChatGPTCodexModelID(req.Model)
+	req.ReasoningEffort = normalizeChatGPTCodexReasoningEffort(req.Model, req.ReasoningEffort)
+	return req
+}
+
+func (c *Client) normalizeCompactionRequestForProvider(req types.LLMCompactionRequest) types.LLMCompactionRequest {
+	if c == nil || !isChatGPTCodexBaseURL(c.baseURL) {
+		return req
+	}
+	req.Model = normalizeChatGPTCodexModelID(req.Model)
+	if strings.TrimSpace(req.System) == "" {
+		req.System = chatGPTCodexDefaultInstructions
+	}
+	return req
+}
+
+func (c *Client) routeClientForModel(model string) (*Client, error) {
+	if c == nil || c.client == nil {
+		return nil, fmt.Errorf("llm client is nil")
+	}
+	if c.authProvider == nil {
+		return c, nil
+	}
+	if strings.TrimSpace(model) == "" || isOpenAIModelID(model) {
+		return c, nil
+	}
+	if !c.allowAPIKeyFallbackForNonOpenAI {
+		return nil, fmt.Errorf(
+			"%w: model=%q (set %s=true to enable explicit fallback)",
+			ErrChatGPTAccountNonOpenAIModel,
+			strings.TrimSpace(model),
+			envChatGPTFallbackAPIKeyNonOpenAI,
+		)
+	}
+	if c.apiKeyFallbackClient == nil || c.apiKeyFallbackClient.client == nil {
+		return nil, fmt.Errorf("%w (model=%q)", ErrChatGPTAccountFallbackAPIKeyRequired, strings.TrimSpace(model))
+	}
+	return c.apiKeyFallbackClient, nil
 }
 
 func shouldAllowOpenRouterFreeModelDataCollection(model string) bool {
@@ -226,6 +456,61 @@ func (c *Client) openRouterChatReasoningOptions(req types.LLMRequest) []option.R
 	}
 }
 
+func (c *Client) chatGPTAuthOptions(ctx context.Context) ([]option.RequestOption, error) {
+	if c == nil || !isChatGPTCodexBaseURL(c.baseURL) {
+		return nil, nil
+	}
+	if c.authProvider == nil {
+		return nil, ErrChatGPTAccountAuthRequired
+	}
+	tok, err := c.authProvider.AccessToken(ctx)
+	if err != nil {
+		return nil, ErrChatGPTAccountAuthRequired
+	}
+	access := strings.TrimSpace(tok.AccessToken)
+	accountID := strings.TrimSpace(tok.AccountID)
+	if access == "" || accountID == "" {
+		return nil, ErrChatGPTAccountAuthRequired
+	}
+	return []option.RequestOption{
+		option.WithHeader("Authorization", "Bearer "+access),
+		option.WithHeader("chatgpt-account-id", accountID),
+		option.WithHeader("OpenAI-Beta", "responses=experimental"),
+		option.WithHeader("originator", "codex_cli_rs"),
+		option.WithHeader("accept", "text/event-stream"),
+	}, nil
+}
+
+func (c *Client) authResponsesRequestOptions(ctx context.Context, model string) ([]option.RequestOption, error) {
+	opts := c.openRouterRequestOptions(model)
+	chatOpts, err := c.chatGPTAuthOptions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	opts = append(opts, chatOpts...)
+	if isChatGPTCodexBaseURL(c.baseURL) {
+		opts = append(opts,
+			option.WithJSONSet("store", false),
+			option.WithJSONSet("include", []string{"reasoning.encrypted_content"}),
+			// Defensive normalization for Codex backend compatibility.
+			option.WithJSONDel("max_output_tokens"),
+			option.WithJSONDel("max_completion_tokens"),
+		)
+	}
+	return opts, nil
+}
+
+func (c *Client) authChatRequestOptions(ctx context.Context, req types.LLMRequest) ([]option.RequestOption, error) {
+	opts := c.openRouterRequestOptions(req.Model)
+	opts = append(opts, c.openRouterChatReasoningOptions(req)...)
+	chatOpts, err := c.chatGPTAuthOptions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	opts = append(opts, chatOpts...)
+	return opts, nil
+}
+
 func shouldRetryOpenRouterFreeModelPolicy(baseURL, model string, err error) bool {
 	if !isOpenRouterBaseURL(baseURL) || !isOpenRouterDataPolicyError(err) {
 		return false
@@ -257,6 +542,72 @@ func isOpenRouterDataPolicyError(err error) bool {
 	return strings.Contains(s, "data policy") ||
 		strings.Contains(s, "free model publication") ||
 		strings.Contains(s, "settings/privacy")
+}
+
+func providerErrorDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) {
+		return ""
+	}
+	msg := strings.TrimSpace(apiErr.Message)
+	raw := strings.TrimSpace(apiErr.RawJSON())
+	if raw == "" {
+		return msg
+	}
+	var payload map[string]any
+	if json.Unmarshal([]byte(raw), &payload) != nil {
+		if msg != "" {
+			return msg
+		}
+		return raw
+	}
+	detail := strings.TrimSpace(fmt.Sprint(payload["detail"]))
+	if detail == "<nil>" {
+		detail = ""
+	}
+	if errObj, ok := payload["error"].(map[string]any); ok {
+		for _, k := range []string{"message", "code", "type", "param"} {
+			v := strings.TrimSpace(fmt.Sprint(errObj[k]))
+			if v == "" || v == "<nil>" {
+				continue
+			}
+			if detail == "" {
+				detail = v
+			} else if !strings.Contains(detail, v) {
+				detail += " | " + v
+			}
+		}
+	}
+	if detail == "" {
+		detail = msg
+	}
+	detail = strings.Join(strings.Fields(detail), " ")
+	if len(detail) > 500 {
+		detail = detail[:500]
+	}
+	return strings.TrimSpace(detail)
+}
+
+func withProviderErrorDetail(err error) error {
+	detail := providerErrorDetail(err)
+	if detail == "" {
+		return err
+	}
+	hint := ""
+	lower := strings.ToLower(detail)
+	switch {
+	case strings.Contains(lower, "instructions are required"):
+		hint = "hint=chatgpt codex requires non-empty instructions/system prompt"
+	case strings.Contains(lower, "stream must be set to true"):
+		hint = "hint=chatgpt codex only accepts streaming responses"
+	}
+	if hint == "" {
+		return fmt.Errorf("%w (provider_detail=%s)", err, detail)
+	}
+	return fmt.Errorf("%w (provider_detail=%s %s)", err, detail, hint)
 }
 
 func maybeEnableWebSearchModel(baseURL string, model string, enable bool) string {
@@ -654,10 +1005,15 @@ func (c *Client) buildResponseParams(ctx context.Context, req types.LLMRequest) 
 	if previousResponseID != "" {
 		params.PreviousResponseID = openai.String(previousResponseID)
 	}
-	if strings.TrimSpace(req.System) != "" {
-		params.Instructions = openai.String(req.System)
+	instructions := strings.TrimSpace(req.System)
+	if instructions == "" && isChatGPTCodexBaseURL(c.baseURL) {
+		instructions = chatGPTCodexDefaultInstructions
 	}
-	if maxTokens > 0 {
+	if instructions != "" {
+		params.Instructions = openai.String(instructions)
+	}
+	// ChatGPT Codex backend rejects max_output_tokens (400 unsupported parameter).
+	if maxTokens > 0 && !isChatGPTCodexBaseURL(c.baseURL) {
 		params.MaxOutputTokens = openai.Int(int64(maxTokens))
 	}
 	if req.Temperature != 0 {
@@ -1019,6 +1375,14 @@ func (c *Client) Generate(ctx context.Context, req types.LLMRequest) (types.LLMR
 	if c == nil || c.client == nil {
 		return types.LLMResponse{}, fmt.Errorf("llm client is nil")
 	}
+	target, err := c.routeClientForModel(req.Model)
+	if err != nil {
+		return types.LLMResponse{}, err
+	}
+	if target != c {
+		return target.Generate(ctx, req)
+	}
+	req = c.normalizeRequestForProvider(req)
 
 	out, err := c.generateOnce(ctx, req)
 	if err != nil && req.ResponseSchema != nil && shouldFallbackFromJSONSchema(err) {
@@ -1044,6 +1408,14 @@ func (c *Client) CompactConversation(ctx context.Context, req types.LLMCompactio
 	if c == nil || c.client == nil {
 		return types.LLMCompactionResponse{}, fmt.Errorf("llm client is nil")
 	}
+	target, err := c.routeClientForModel(req.Model)
+	if err != nil {
+		return types.LLMCompactionResponse{}, err
+	}
+	if target != c {
+		return target.CompactConversation(ctx, req)
+	}
+	req = c.normalizeCompactionRequestForProvider(req)
 	if c.compactionUnsupported.Load() {
 		return types.LLMCompactionResponse{}, fmt.Errorf("server compaction is unsupported")
 	}
@@ -1104,6 +1476,10 @@ func (c *Client) CompactConversation(ctx context.Context, req types.LLMCompactio
 }
 
 func (c *Client) generateOnce(ctx context.Context, req types.LLMRequest) (types.LLMResponse, error) {
+	if isChatGPTCodexBaseURL(c.baseURL) {
+		// ChatGPT Codex backend requires stream=true. Use streaming path and aggregate.
+		return c.generateStreamResponses(ctx, req, nil)
+	}
 	if req.ForceChat {
 		return c.generateChat(ctx, req)
 	}
@@ -1122,13 +1498,16 @@ func (c *Client) generateResponses(ctx context.Context, req types.LLMRequest) (t
 	if err != nil {
 		return types.LLMResponse{}, err
 	}
-	opts := c.openRouterRequestOptions(req.Model)
+	opts, err := c.authResponsesRequestOptions(ctx, req.Model)
+	if err != nil {
+		return types.LLMResponse{}, err
+	}
 	resp, err := c.client.Responses.New(ctx, params, opts...)
 	if err != nil && shouldRetryOpenRouterFreeModelPolicy(c.baseURL, req.Model, err) {
 		resp, err = c.client.Responses.New(ctx, params, withOpenRouterForcedDataCollection(opts)...)
 	}
 	if err != nil {
-		return types.LLMResponse{}, err
+		return types.LLMResponse{}, withProviderErrorDetail(err)
 	}
 	return c.toResponseFromResponses(resp)
 }
@@ -1138,14 +1517,16 @@ func (c *Client) generateChat(ctx context.Context, req types.LLMRequest) (types.
 	if err != nil {
 		return types.LLMResponse{}, err
 	}
-	opts := c.openRouterRequestOptions(req.Model)
-	opts = append(opts, c.openRouterChatReasoningOptions(req)...)
+	opts, err := c.authChatRequestOptions(ctx, req)
+	if err != nil {
+		return types.LLMResponse{}, err
+	}
 	resp, err := c.client.Chat.Completions.New(ctx, params, opts...)
 	if err != nil && shouldRetryOpenRouterFreeModelPolicy(c.baseURL, req.Model, err) {
 		resp, err = c.client.Chat.Completions.New(ctx, params, withOpenRouterForcedDataCollection(opts)...)
 	}
 	if err != nil {
-		return types.LLMResponse{}, err
+		return types.LLMResponse{}, withProviderErrorDetail(err)
 	}
 	return c.toResponse(resp)
 }
@@ -1260,6 +1641,14 @@ func (c *Client) GenerateStream(ctx context.Context, req types.LLMRequest, cb ty
 	if c == nil || c.client == nil {
 		return types.LLMResponse{}, fmt.Errorf("llm client is nil")
 	}
+	target, err := c.routeClientForModel(req.Model)
+	if err != nil {
+		return types.LLMResponse{}, err
+	}
+	if target != c {
+		return target.GenerateStream(ctx, req, cb)
+	}
+	req = c.normalizeRequestForProvider(req)
 
 	// #region agent log
 	debuglog.Log("toolcalling", "H2", "openai_client.go:GenerateStream", "route_selected", map[string]any{
@@ -1302,6 +1691,9 @@ func (c *Client) GenerateStream(ctx context.Context, req types.LLMRequest, cb ty
 }
 
 func (c *Client) generateStreamOnce(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
+	if isChatGPTCodexBaseURL(c.baseURL) {
+		return c.generateStreamResponses(ctx, req, cb)
+	}
 	if req.ForceChat {
 		return c.generateStreamChat(ctx, req, cb)
 	}
@@ -1318,6 +1710,10 @@ func (c *Client) generateStreamOnce(ctx context.Context, req types.LLMRequest, c
 func shouldFallbackToChatForRequest(baseURL string, req types.LLMRequest, err error) bool {
 	// For native OpenAI, keep reasoning paths strictly on Responses API.
 	if isOpenAIBaseURL(baseURL) {
+		return false
+	}
+	// For ChatGPT Codex backend, keep requests on /codex/responses.
+	if isChatGPTCodexBaseURL(baseURL) {
 		return false
 	}
 	// OpenRouter policy failures are not route incompatibilities; avoid wasteful route fallback.
@@ -1339,6 +1735,10 @@ func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMReque
 	if err != nil {
 		return types.LLMResponse{}, err
 	}
+	opts, err := c.authResponsesRequestOptions(ctx, req.Model)
+	if err != nil {
+		return types.LLMResponse{}, err
+	}
 
 	start := time.Now()
 	evN := 0
@@ -1348,7 +1748,7 @@ func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMReque
 	})
 	// #endregion
 
-	stream := c.client.Responses.NewStreaming(ctx, params, c.openRouterRequestOptions(req.Model)...)
+	stream := c.client.Responses.NewStreaming(ctx, params, opts...)
 	if stream == nil {
 		return types.LLMResponse{}, fmt.Errorf("stream is nil")
 	}
@@ -1379,7 +1779,7 @@ func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMReque
 			"err":   err.Error(),
 		})
 		// #endregion
-		return types.LLMResponse{}, err
+		return types.LLMResponse{}, c.enrichStreamResponseError(ctx, err, params, opts)
 	}
 
 	if cb != nil && completed != nil && !sawReasoningSummaryText {
@@ -1419,14 +1819,100 @@ func (c *Client) generateStreamResponses(ctx context.Context, req types.LLMReque
 	}, nil
 }
 
+func (c *Client) enrichStreamResponseError(
+	ctx context.Context,
+	streamErr error,
+	params responses.ResponseNewParams,
+	opts []option.RequestOption,
+) error {
+	if streamErr == nil {
+		return nil
+	}
+	// If the stream error already carries provider detail, keep it.
+	if detail := providerErrorDetail(streamErr); detail != "" {
+		return withProviderErrorDetail(streamErr)
+	}
+	// Some backends (including ChatGPT Codex) return a generic stream error string
+	// without exposing the JSON error payload. Probe with non-stream request once to
+	// recover a precise provider error reason for diagnostics.
+	if c != nil && isChatGPTCodexBaseURL(c.baseURL) && c.client != nil {
+		probeOpts := make([]option.RequestOption, 0, len(opts)+1)
+		probeOpts = append(probeOpts, opts...)
+		var probeResp *http.Response
+		probeOpts = append(probeOpts, option.WithResponseInto(&probeResp))
+		if _, probeErr := c.client.Responses.New(ctx, params, probeOpts...); probeErr != nil {
+			detail := providerErrorDetail(probeErr)
+			if detail == "" {
+				detail = providerHTTPErrorDetail(probeResp)
+			}
+			if detail != "" {
+				hint := ""
+				lower := strings.ToLower(detail)
+				switch {
+				case strings.Contains(lower, "instructions are required"):
+					hint = "hint=chatgpt codex requires non-empty instructions/system prompt"
+				case strings.Contains(lower, "stream must be set to true"):
+					hint = "hint=chatgpt codex only accepts streaming responses"
+				case strings.Contains(lower, "unsupported parameter: max_output_tokens"):
+					hint = "hint=chatgpt codex rejects max_output_tokens; omit this field for chatgpt_account mode"
+				}
+				if hint == "" {
+					return fmt.Errorf("%w (provider_detail=%s)", streamErr, detail)
+				}
+				return fmt.Errorf("%w (provider_detail=%s %s)", streamErr, detail, hint)
+			}
+		}
+	}
+	return withProviderErrorDetail(streamErr)
+}
+
+func providerHTTPErrorDetail(resp *http.Response) string {
+	if resp == nil || resp.Body == nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
+	if err != nil {
+		return ""
+	}
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return ""
+	}
+	var payload map[string]any
+	if json.Unmarshal(raw, &payload) == nil {
+		if detail := strings.TrimSpace(fmt.Sprint(payload["detail"])); detail != "" && detail != "<nil>" {
+			return normalizeProviderDetail(detail)
+		}
+		if errObj, ok := payload["error"].(map[string]any); ok {
+			for _, k := range []string{"message", "code", "type", "param"} {
+				if v := strings.TrimSpace(fmt.Sprint(errObj[k])); v != "" && v != "<nil>" {
+					return normalizeProviderDetail(v)
+				}
+			}
+		}
+	}
+	return normalizeProviderDetail(text)
+}
+
+func normalizeProviderDetail(detail string) string {
+	detail = strings.Join(strings.Fields(strings.TrimSpace(detail)), " ")
+	if len(detail) > 500 {
+		detail = detail[:500]
+	}
+	return detail
+}
+
 func (c *Client) generateStreamChat(ctx context.Context, req types.LLMRequest, cb types.LLMStreamCallback) (types.LLMResponse, error) {
 	params, err := c.buildParams(req)
 	if err != nil {
 		return types.LLMResponse{}, err
 	}
 
-	opts := c.openRouterRequestOptions(req.Model)
-	opts = append(opts, c.openRouterChatReasoningOptions(req)...)
+	opts, err := c.authChatRequestOptions(ctx, req)
+	if err != nil {
+		return types.LLMResponse{}, err
+	}
 	stream := c.client.Chat.Completions.NewStreaming(ctx, params, opts...)
 	if stream == nil {
 		return types.LLMResponse{}, fmt.Errorf("stream is nil")

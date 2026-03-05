@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	authpkg "github.com/tinoosan/agen8/pkg/auth"
 	"github.com/tinoosan/agen8/pkg/config"
 )
 
@@ -20,6 +21,9 @@ func TestLoadRuntimeConfig_DataDirOnly(t *testing.T) {
 model = "openai/gpt-5-mini"
 [skills]
 conflict = "keep"
+[auth]
+provider = "chatgpt_account"
+allow_api_key_fallback_for_non_openai = true
 [env]
 OPENROUTER_API_KEY = "from-data-dir"
 [code_exec]
@@ -72,6 +76,12 @@ required_packages = ["requests"]
 	if cfg.Skills.Conflict != "keep" {
 		t.Fatalf("skills.conflict=%q", cfg.Skills.Conflict)
 	}
+	if cfg.Auth.AllowAPIKeyFallbackForNonOpenAI == nil || !*cfg.Auth.AllowAPIKeyFallbackForNonOpenAI {
+		t.Fatalf("auth.allow_api_key_fallback_for_non_openai=%v", cfg.Auth.AllowAPIKeyFallbackForNonOpenAI)
+	}
+	if cfg.Auth.Provider != "chatgpt_account" {
+		t.Fatalf("auth.provider=%q", cfg.Auth.Provider)
+	}
 	if got := cfg.Env["OPENROUTER_API_KEY"]; got != "from-data-dir" {
 		t.Fatalf("OPENROUTER_API_KEY=%q", got)
 	}
@@ -95,6 +105,7 @@ required_packages = ["requests"]
 func TestApplyRuntimeConfigEnvDefaults_DoesNotOverrideExisting(t *testing.T) {
 	t.Setenv("OPENROUTER_MODEL", "existing-model")
 	t.Setenv("AGEN8_PROFILE", "existing-profile")
+	t.Setenv("AGEN8_AUTH_PROVIDER", "existing-provider")
 	cfg := runtimeConfig{
 		Defaults: runtimeConfigDefaults{
 			Model:   "new-model",
@@ -104,6 +115,10 @@ func TestApplyRuntimeConfigEnvDefaults_DoesNotOverrideExisting(t *testing.T) {
 			"OPENROUTER_API_KEY": "key-1",
 		},
 		Skills: runtimeConfigSkills{Conflict: "keep"},
+		Auth: runtimeConfigAuth{
+			Provider:                        "chatgpt_account",
+			AllowAPIKeyFallbackForNonOpenAI: boolPtr(true),
+		},
 		Obsidian: runtimeConfigObsidian{
 			VaultPath: "/knowledge",
 		},
@@ -118,11 +133,75 @@ func TestApplyRuntimeConfigEnvDefaults_DoesNotOverrideExisting(t *testing.T) {
 	if got := os.Getenv("OPENROUTER_API_KEY"); got != "key-1" {
 		t.Fatalf("OPENROUTER_API_KEY=%q", got)
 	}
+	if got := os.Getenv("AGEN8_AUTH_PROVIDER"); got != "existing-provider" {
+		t.Fatalf("AGEN8_AUTH_PROVIDER=%q", got)
+	}
+	if got := os.Getenv("AGEN8_AUTH_CHATGPT_FALLBACK_API_KEY_NON_OPENAI"); got != "true" {
+		t.Fatalf("AGEN8_AUTH_CHATGPT_FALLBACK_API_KEY_NON_OPENAI=%q", got)
+	}
 	if got := os.Getenv(envSkillsSeedConflict); got != "keep" {
 		t.Fatalf("%s=%q", envSkillsSeedConflict, got)
 	}
 	if got := os.Getenv("OBSIDIAN_VAULT_PATH"); got != "/knowledge" {
 		t.Fatalf("OBSIDIAN_VAULT_PATH=%q", got)
+	}
+}
+
+func TestApplyRuntimeConfigEnvDefaults_SetsAuthProviderWhenUnset(t *testing.T) {
+	prev, hadPrev := os.LookupEnv("AGEN8_AUTH_PROVIDER")
+	_ = os.Unsetenv("AGEN8_AUTH_PROVIDER")
+	t.Cleanup(func() {
+		if hadPrev {
+			_ = os.Setenv("AGEN8_AUTH_PROVIDER", prev)
+		} else {
+			_ = os.Unsetenv("AGEN8_AUTH_PROVIDER")
+		}
+	})
+	applyRuntimeConfigEnvDefaults(runtimeConfig{
+		Auth: runtimeConfigAuth{Provider: "chatgpt_account"},
+		Env:  map[string]string{},
+	})
+	if got := os.Getenv("AGEN8_AUTH_PROVIDER"); got != "chatgpt_account" {
+		t.Fatalf("AGEN8_AUTH_PROVIDER=%q", got)
+	}
+}
+
+func TestApplyRuntimeConfigEnvDefaults_FromDataDir(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, "config.toml"), []byte(`
+[defaults]
+model = "openai/gpt-5-mini"
+[auth]
+provider = "chatgpt_account"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	prevModel, hadModel := os.LookupEnv("OPENROUTER_MODEL")
+	_ = os.Unsetenv("OPENROUTER_MODEL")
+	t.Cleanup(func() {
+		if hadModel {
+			_ = os.Setenv("OPENROUTER_MODEL", prevModel)
+		} else {
+			_ = os.Unsetenv("OPENROUTER_MODEL")
+		}
+	})
+	prevAuth, hadAuth := os.LookupEnv(authpkg.EnvAuthProvider)
+	_ = os.Unsetenv(authpkg.EnvAuthProvider)
+	t.Cleanup(func() {
+		if hadAuth {
+			_ = os.Setenv(authpkg.EnvAuthProvider, prevAuth)
+		} else {
+			_ = os.Unsetenv(authpkg.EnvAuthProvider)
+		}
+	})
+	if err := ApplyRuntimeConfigEnvDefaults(dataDir); err != nil {
+		t.Fatalf("ApplyRuntimeConfigEnvDefaults: %v", err)
+	}
+	if got := os.Getenv("OPENROUTER_MODEL"); got != "openai/gpt-5-mini" {
+		t.Fatalf("OPENROUTER_MODEL=%q", got)
+	}
+	if got := os.Getenv(authpkg.EnvAuthProvider); got != authpkg.ProviderChatGPTAccount {
+		t.Fatalf("%s=%q", authpkg.EnvAuthProvider, got)
 	}
 }
 
@@ -143,11 +222,14 @@ func TestEnsureRuntimeConfigTemplate_CreatesDefaultTemplate(t *testing.T) {
 	if !strings.Contains(text, `model = "`+runtimeDefaultModel+`"`) {
 		t.Fatalf("expected default model in template, got:\n%s", text)
 	}
-	if strings.Contains(strings.ToUpper(text), "API_KEY") {
-		t.Fatalf("template should not include secrets")
+	if strings.Contains(text, `OPENROUTER_API_KEY = "`) || strings.Contains(text, `OPENAI_API_KEY = "`) {
+		t.Fatalf("template should not include concrete API key values")
 	}
 	if !strings.Contains(text, "[code_exec]") {
 		t.Fatalf("expected code_exec section in template, got:\n%s", text)
+	}
+	if !strings.Contains(text, "[auth]") {
+		t.Fatalf("expected auth section in template, got:\n%s", text)
 	}
 	if !strings.Contains(text, "[obsidian]") {
 		t.Fatalf("expected obsidian section in template, got:\n%s", text)
@@ -221,5 +303,26 @@ func TestApplyRuntimeConfigHostDefaults_CodeExec(t *testing.T) {
 	}
 	if !out.PathAccess.ReadOnly {
 		t.Fatalf("path_access.read_only=%v, want true", out.PathAccess.ReadOnly)
+	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func TestPersistRuntimeAuthProvider_WritesProviderToConfig(t *testing.T) {
+	dataDir := t.TempDir()
+	if _, err := ensureRuntimeConfigTemplate(dataDir); err != nil {
+		t.Fatalf("ensure template: %v", err)
+	}
+	if err := PersistRuntimeAuthProvider(dataDir, authpkg.ProviderChatGPTAccount); err != nil {
+		t.Fatalf("PersistRuntimeAuthProvider: %v", err)
+	}
+	cfg, err := loadRuntimeConfig(dataDir)
+	if err != nil {
+		t.Fatalf("loadRuntimeConfig: %v", err)
+	}
+	if got := strings.TrimSpace(cfg.Auth.Provider); got != authpkg.ProviderChatGPTAccount {
+		t.Fatalf("auth.provider=%q", got)
 	}
 }

@@ -6,7 +6,7 @@ team:
     - name: General Agent
       coordinator: true
       allow_subagents: true
-      model: moonshotai/kimi-k2.5
+      model: openai/gpt-5.1-codex-mini
       subagent_model: gpt-5-nano
       code_exec_only: true
       allowed_tools:

@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tinoosan/agen8/internal/app"
+	authpkg "github.com/tinoosan/agen8/pkg/auth"
 )
 
 func TestAttachCommand_RequiresSessionID(t *testing.T) {
@@ -19,7 +21,7 @@ func TestAttachCommand_RequiresSessionID(t *testing.T) {
 func TestProjectModeDefault(t *testing.T) {
 	tests := []struct {
 		configMode string
-		want      string
+		want       string
 	}{
 		{"team", "multi-agent"},
 		{"multi-agent", "multi-agent"},
@@ -94,5 +96,35 @@ func TestMailCommand_RemovesTasksAlias(t *testing.T) {
 		if alias == "tasks" {
 			t.Fatalf("unexpected tasks alias on mail command")
 		}
+	}
+}
+
+func TestRunNewSessionFlow_RequiresChatGPTLogin(t *testing.T) {
+	prevDataDir := dataDir
+	dataDir = t.TempDir()
+	t.Cleanup(func() { dataDir = prevDataDir })
+
+	t.Setenv(authpkg.EnvAuthProvider, authpkg.ProviderChatGPTAccount)
+	err := runNewSessionFlow(newCmd, false)
+	if err == nil {
+		t.Fatalf("expected login-required error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "auth login") {
+		t.Fatalf("expected relogin guidance, got: %v", err)
+	}
+}
+
+func TestRunCoordinatorForSession_RequiresChatGPTLogin(t *testing.T) {
+	prevDataDir := dataDir
+	dataDir = t.TempDir()
+	t.Cleanup(func() { dataDir = prevDataDir })
+
+	t.Setenv(authpkg.EnvAuthProvider, authpkg.ProviderChatGPTAccount)
+	err := runCoordinatorForSession(coordinatorCmd, "sess-123")
+	if err == nil {
+		t.Fatalf("expected login-required error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "auth login") {
+		t.Fatalf("expected relogin guidance, got: %v", err)
 	}
 }

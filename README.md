@@ -118,12 +118,31 @@ Agen8 ships a Cobra CLI that covers the full agent lifecycle. Use the tables bel
 
 Runtime configuration resolves in this order: CLI flags → environment variables → `${AGEN8_DATA_DIR}/config.toml` → built-in defaults. See [docs/config-toml.md](docs/config-toml.md) for onboarding behavior, `code_exec` settings, and allowed path access.
 
+Agen8 supports two auth providers:
+
+- `api_key` (default): `OPENROUTER_API_KEY`/`OPENAI_API_KEY` + keychain fallback
+- `chatgpt_account`: browser OAuth login with local token storage (`${AGEN8_DATA_DIR}/auth/chatgpt_oauth.json`)
+  - OpenAI models use account auth directly
+  - Non-openai models fail fast by default (no silent fallback)
+  - Optional explicit fallback via `config.toml`:
+    - `[auth] provider = "chatgpt_account"`
+    - `[auth] allow_api_key_fallback_for_non_openai = true`
+
+Quick auth commands:
+
+```sh
+./agen8 auth login --provider chatgpt_account
+./agen8 auth status --provider chatgpt_account
+./agen8 auth logout --provider chatgpt_account
+```
+
 | Flag | Env | Description |
 |------|-----|-------------|
 | `--data-dir` | `AGEN8_DATA_DIR` | Base directory for `agen8.db`, sessions, agents, and shared memory. |
 | `--workdir` | `AGEN8_WORKDIR` | Host path mounted as `/project`. |
 | `--context-bytes` | `AGEN8_CONTEXT_BYTES` | Max bytes of history included in prompts. |
 | `--include-history-ops` | `AGEN8_INCLUDE_HISTORY_OPS` | Include host operations from `/history` (default: enabled). |
+| `--auth-provider` | `AGEN8_AUTH_PROVIDER` | Auth provider selector: `api_key` or `chatgpt_account`. |
 
 Helpers in `internal/config/effectiveConfig()` resolve the final configuration before each command runs. Additional flag and env var guidance resides in [docs/cli-usage.md](docs/cli-usage.md).
 
@@ -176,6 +195,7 @@ Refer to [docs/data-layout.md](docs/data-layout.md) for a guided walkthrough, sa
 
 - **[docs/cli-usage.md](docs/cli-usage.md)** – Step-by-step workflows, flag guidance, and session lifecycle examples for the CLI.
 - **[docs/config-toml.md](docs/config-toml.md)** – Onboarding, config hierarchy, `code_exec`, and path access settings.
+- **[docs/chatgpt-account-auth.md](docs/chatgpt-account-auth.md)** – Browser OAuth setup, token refresh behavior, and troubleshooting for `chatgpt_account`.
 - **[docs/developer-guide.md](docs/developer-guide.md)** – Internal architecture, session/run lifecycle, and execution hierarchy reference.
 - **[docs/troubleshooting.md](docs/troubleshooting.md)** – Quick triage for build issues, stuck connections, and retries.
 - **[docs/data-layout.md](docs/data-layout.md)** – Map directories, sub-agent workspaces, and inspect artifacts/logs manually.

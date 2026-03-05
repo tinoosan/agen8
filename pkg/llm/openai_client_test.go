@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,16 +10,21 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
+	authpkg "github.com/tinoosan/agen8/pkg/auth"
 	"github.com/tinoosan/agen8/pkg/llm/types"
 )
 
 type captureRoundTripper struct {
 	t              *testing.T
 	body           string
+	method         string
+	url            string
+	headers        http.Header
 	responseStatus int
 	responseBody   string
 }
@@ -32,6 +38,9 @@ func (rt *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 		}
 		rt.body = string(b)
 	}
+	rt.method = req.Method
+	rt.url = req.URL.String()
+	rt.headers = req.Header.Clone()
 	status := rt.responseStatus
 	if status == 0 {
 		status = http.StatusOK
@@ -52,6 +61,250 @@ type testRoleMapper struct {
 	fn func(raw string) (CanonicalRole, error)
 }
 
+type fakeAuthProvider struct {
+	token authpkg.Token
+	err   error
+	calls int
+}
+
+func (f *fakeAuthProvider) Name() string { return authpkg.ProviderChatGPTAccount }
+func (f *fakeAuthProvider) Login(ctx context.Context, interactive bool) error {
+	_ = ctx
+	_ = interactive
+	return nil
+}
+func (f *fakeAuthProvider) Status(ctx context.Context) (authpkg.Status, error) {
+	_ = ctx
+	return authpkg.Status{Provider: authpkg.ProviderChatGPTAccount, LoggedIn: true}, nil
+}
+func (f *fakeAuthProvider) Logout(ctx context.Context) error {
+	_ = ctx
+	return nil
+}
+func (f *fakeAuthProvider) AccessToken(ctx context.Context) (authpkg.Token, error) {
+	_ = ctx
+	f.calls++
+	return f.token, f.err
+}
+
+type roundTripFuncLLM func(*http.Request) (*http.Response, error)
+
+func (f roundTripFuncLLM) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func makeJWTForLLMTest(accountID string) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	payloadRaw := []byte(`{"https://api.openai.com/auth":{"chatgpt_account_id":"` + accountID + `"}}`)
+	return header + "." + base64.RawURLEncoding.EncodeToString(payloadRaw) + ".sig"
+}
+
+func TestNormalizeChatGPTCodexModelID(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "openai/gpt-5", want: "gpt-5.1"},
+		{in: "openai/gpt-5.1-codex-low", want: "gpt-5.1-codex"},
+		{in: "openai/gpt-5.2-codex-xhigh", want: "gpt-5.2-codex"},
+		{in: "openai/gpt-5-codex-mini", want: "gpt-5.1-codex-mini"},
+		{in: "openai/o4-mini", want: "o4-mini"},
+		{in: "openai/gpt-5:online", want: "gpt-5.1"},
+	}
+	for _, tc := range tests {
+		if got := normalizeChatGPTCodexModelID(tc.in); got != tc.want {
+			t.Fatalf("normalizeChatGPTCodexModelID(%q)=%q want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeChatGPTCodexReasoningEffort(t *testing.T) {
+	tests := []struct {
+		model string
+		in    string
+		want  string
+	}{
+		{model: "gpt-5.1-codex-mini", in: "minimal", want: "medium"},
+		{model: "gpt-5.1-codex", in: "none", want: "low"},
+		{model: "gpt-5.1", in: "none", want: "none"},
+		{model: "gpt-5.1-codex", in: "xhigh", want: "high"},
+	}
+	for _, tc := range tests {
+		if got := normalizeChatGPTCodexReasoningEffort(tc.model, tc.in); got != tc.want {
+			t.Fatalf("normalizeChatGPTCodexReasoningEffort(%q,%q)=%q want %q", tc.model, tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestClient_normalizeRequestForProvider_ChatGPT(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL(chatGPTCodexBaseURL))
+	c := &Client{client: &cli, baseURL: chatGPTCodexBaseURL}
+	req := c.normalizeRequestForProvider(types.LLMRequest{
+		Model:           "openai/gpt-5-codex-mini:online",
+		ReasoningEffort: "minimal",
+	})
+	if req.Model != "gpt-5.1-codex-mini" {
+		t.Fatalf("model=%q", req.Model)
+	}
+	if req.ReasoningEffort != "medium" {
+		t.Fatalf("reasoningEffort=%q", req.ReasoningEffort)
+	}
+}
+
+func TestGenerateResponses_ChatGPTModeInjectsHeadersAndStatelessOptions(t *testing.T) {
+	rt := &captureRoundTripper{
+		t: t,
+		responseBody: `{
+			"id":"resp_123",
+			"model":"openai/gpt-5",
+			"output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}],
+			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"output_tokens_details":{"reasoning_tokens":0}}
+		}`,
+	}
+	httpClient := &http.Client{Transport: rt}
+	cli := openai.NewClient(
+		option.WithAPIKey("placeholder"),
+		option.WithBaseURL(chatGPTCodexBaseURL),
+		option.WithHTTPClient(httpClient),
+	)
+	provider := &fakeAuthProvider{
+		token: authpkg.Token{
+			AccessToken: "token_abc",
+			AccountID:   "acct_123",
+			ExpiresAt:   time.Now().Add(time.Hour),
+		},
+	}
+	c := &Client{
+		client:           &cli,
+		baseURL:          chatGPTCodexBaseURL,
+		authProvider:     provider,
+		DefaultMaxTokens: 64,
+	}
+
+	_, err := c.Generate(context.Background(), types.LLMRequest{
+		Model:    "openai/gpt-5",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("expected provider AccessToken call, got %d", provider.calls)
+	}
+	if got := rt.headers.Get("Authorization"); got != "Bearer token_abc" {
+		t.Fatalf("authorization header=%q", got)
+	}
+	if got := rt.headers.Get("chatgpt-account-id"); got != "acct_123" {
+		t.Fatalf("chatgpt-account-id header=%q", got)
+	}
+	if got := rt.headers.Get("OpenAI-Beta"); got != "responses=experimental" {
+		t.Fatalf("OpenAI-Beta header=%q", got)
+	}
+	if got := rt.headers.Get("originator"); got != "codex_cli_rs" {
+		t.Fatalf("originator header=%q", got)
+	}
+	if got := rt.headers.Get("accept"); got != "text/event-stream" {
+		t.Fatalf("accept header=%q", got)
+	}
+	if !strings.Contains(rt.body, `"store":false`) {
+		t.Fatalf("expected store=false in body, got %s", rt.body)
+	}
+	if !strings.Contains(rt.body, `"include":["reasoning.encrypted_content"]`) {
+		t.Fatalf("expected include reasoning.encrypted_content in body, got %s", rt.body)
+	}
+	if strings.Contains(rt.body, `"max_output_tokens"`) {
+		t.Fatalf("did not expect max_output_tokens for chatgpt codex request, got %s", rt.body)
+	}
+	if strings.Contains(rt.body, `"max_completion_tokens"`) {
+		t.Fatalf("did not expect max_completion_tokens for chatgpt codex request, got %s", rt.body)
+	}
+	if !strings.Contains(rt.body, `"model":"gpt-5.1"`) {
+		t.Fatalf("expected normalized codex model in body, got %s", rt.body)
+	}
+}
+
+func TestGenerateResponses_ChatGPTModeRefreshesExpiredToken(t *testing.T) {
+	dataDir := t.TempDir()
+	store := authpkg.NewFileTokenStore(dataDir)
+	if err := store.Save(authpkg.OAuthTokenRecord{
+		Provider:      authpkg.ProviderChatGPTAccount,
+		AccessToken:   makeJWTForLLMTest("acct_old"),
+		RefreshToken:  "refresh_old",
+		ExpiresAtUnix: time.Now().Add(-time.Minute).UnixMilli(),
+		AccountID:     "acct_old",
+		TokenType:     "Bearer",
+	}); err != nil {
+		t.Fatalf("seed token store: %v", err)
+	}
+
+	sawRefresh := false
+	var requestAuthHeader string
+	transport := roundTripFuncLLM(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Host {
+		case "auth.openai.com":
+			sawRefresh = true
+			return &http.Response{
+				StatusCode: 200,
+				Header:     make(http.Header),
+				Body: io.NopCloser(strings.NewReader(`{
+					"access_token":"` + makeJWTForLLMTest("acct_new") + `",
+					"refresh_token":"refresh_new",
+					"expires_in":3600
+				}`)),
+				Request: req,
+			}, nil
+		case "chatgpt.com":
+			requestAuthHeader = req.Header.Get("Authorization")
+			return &http.Response{
+				StatusCode: 200,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{
+					"id":"resp_123",
+					"model":"openai/gpt-5",
+					"output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}],
+					"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"output_tokens_details":{"reasoning_tokens":0}}
+				}`)),
+				Request: req,
+			}, nil
+		default:
+			t.Fatalf("unexpected request host: %s", req.URL.Host)
+			return nil, fmt.Errorf("unexpected host")
+		}
+	})
+	httpClient := &http.Client{Transport: transport}
+	provider, err := authpkg.NewChatGPTAccountProvider(authpkg.ChatGPTAccountProviderOptions{
+		DataDir:     dataDir,
+		HTTPClient:  httpClient,
+		OpenBrowser: func(string) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("new auth provider: %v", err)
+	}
+	cli := openai.NewClient(
+		option.WithAPIKey("placeholder"),
+		option.WithBaseURL(chatGPTCodexBaseURL),
+		option.WithHTTPClient(httpClient),
+	)
+	c := &Client{
+		client:           &cli,
+		baseURL:          chatGPTCodexBaseURL,
+		authProvider:     provider,
+		DefaultMaxTokens: 64,
+	}
+
+	_, err = c.generateResponses(context.Background(), types.LLMRequest{
+		Model:    "openai/gpt-5",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("generateResponses: %v", err)
+	}
+	if !sawRefresh {
+		t.Fatalf("expected token refresh to be triggered")
+	}
+	if !strings.HasPrefix(requestAuthHeader, "Bearer ") || !strings.Contains(requestAuthHeader, ".") {
+		t.Fatalf("expected bearer jwt header after refresh, got %q", requestAuthHeader)
+	}
+}
+
 func (m testRoleMapper) Canonicalize(raw string) (CanonicalRole, error) {
 	if m.fn == nil {
 		return "", fmt.Errorf("mapper fn is nil")
@@ -68,6 +321,72 @@ func TestNewClientFromEnv_RequiresAPIKey(t *testing.T) {
 	}
 	if !errors.Is(err, ErrOpenRouterAPIKeyRequired) {
 		t.Fatalf("unexpected error %v", err)
+	}
+}
+
+func TestGenerate_ChatGPTMode_NonOpenAIModelFailsWithoutExplicitFallback(t *testing.T) {
+	primary := openai.NewClient(option.WithAPIKey("placeholder"), option.WithBaseURL(chatGPTCodexBaseURL))
+	c := &Client{
+		client:                          &primary,
+		baseURL:                         chatGPTCodexBaseURL,
+		authProvider:                    &fakeAuthProvider{token: authpkg.Token{AccessToken: "tok", AccountID: "acct"}},
+		allowAPIKeyFallbackForNonOpenAI: false,
+		DefaultMaxTokens:                64,
+	}
+	_, err := c.Generate(context.Background(), types.LLMRequest{
+		Model:    "z-ai/GLM-5",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hello"}},
+	})
+	if err == nil {
+		t.Fatalf("expected non-openai model routing error")
+	}
+	if !strings.Contains(err.Error(), envChatGPTFallbackAPIKeyNonOpenAI) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGenerate_ChatGPTMode_NonOpenAIModelUsesAPIKeyFallbackWhenEnabled(t *testing.T) {
+	primary := openai.NewClient(option.WithAPIKey("placeholder"), option.WithBaseURL(chatGPTCodexBaseURL))
+	rt := &captureRoundTripper{
+		t: t,
+		responseBody: `{
+			"id":"resp_456",
+			"model":"z-ai/GLM-5",
+			"output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"fallback ok","annotations":[]}]}],
+			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"output_tokens_details":{"reasoning_tokens":0}}
+		}`,
+	}
+	fallbackHTTP := &http.Client{Transport: rt}
+	fallbackOpenAI := openai.NewClient(
+		option.WithAPIKey("or-key"),
+		option.WithBaseURL("https://openrouter.ai/api/v1"),
+		option.WithHTTPClient(fallbackHTTP),
+	)
+	fallbackClient := &Client{
+		client:           &fallbackOpenAI,
+		baseURL:          "https://openrouter.ai/api/v1",
+		DefaultMaxTokens: 64,
+	}
+	c := &Client{
+		client:                          &primary,
+		baseURL:                         chatGPTCodexBaseURL,
+		authProvider:                    &fakeAuthProvider{token: authpkg.Token{AccessToken: "tok", AccountID: "acct"}},
+		apiKeyFallbackClient:            fallbackClient,
+		allowAPIKeyFallbackForNonOpenAI: true,
+		DefaultMaxTokens:                64,
+	}
+	out, err := c.Generate(context.Background(), types.LLMRequest{
+		Model:    "z-ai/GLM-5",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if out.Text != "fallback ok" {
+		t.Fatalf("text=%q", out.Text)
+	}
+	if !strings.Contains(rt.url, "openrouter.ai") {
+		t.Fatalf("expected fallback request to openrouter, got %s", rt.url)
 	}
 }
 
@@ -348,6 +667,64 @@ func TestClient_buildResponseParams_UnknownRoleReturnsError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected error for unknown role")
+	}
+}
+
+func TestClient_buildResponseParams_ChatGPTRequiresInstructions(t *testing.T) {
+	cli := openai.NewClient(option.WithAPIKey("k"), option.WithBaseURL(chatGPTCodexBaseURL))
+	c := &Client{client: &cli, baseURL: chatGPTCodexBaseURL}
+
+	params, err := c.buildResponseParams(context.Background(), types.LLMRequest{
+		Model:    "openai/gpt-5.1-codex-mini",
+		Messages: []types.LLMMessage{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("buildResponseParams: %v", err)
+	}
+	if got := strings.TrimSpace(params.Instructions.Or("")); got != chatGPTCodexDefaultInstructions {
+		t.Fatalf("instructions = %q, want %q", got, chatGPTCodexDefaultInstructions)
+	}
+}
+
+func TestClient_normalizeCompactionRequestForProvider_ChatGPTSetsDefaultInstructions(t *testing.T) {
+	c := &Client{baseURL: chatGPTCodexBaseURL}
+	req := c.normalizeCompactionRequestForProvider(types.LLMCompactionRequest{
+		Model: "openai/gpt-5.1-codex-mini",
+	})
+	if got := strings.TrimSpace(req.System); got != chatGPTCodexDefaultInstructions {
+		t.Fatalf("system = %q, want %q", got, chatGPTCodexDefaultInstructions)
+	}
+}
+
+func TestProviderErrorDetail_ExtractsDetailField(t *testing.T) {
+	err := &openai.Error{StatusCode: 400, Message: "bad request"}
+	if uerr := err.UnmarshalJSON([]byte(`{"detail":"Instructions are required"}`)); uerr != nil {
+		t.Fatalf("unmarshal api error: %v", uerr)
+	}
+	got := providerErrorDetail(err)
+	if got != "Instructions are required" {
+		t.Fatalf("providerErrorDetail = %q", got)
+	}
+}
+
+func TestWithProviderErrorDetail_WrapsOpenAIError(t *testing.T) {
+	base := &openai.Error{StatusCode: 400, Message: "bad request"}
+	if uerr := base.UnmarshalJSON([]byte(`{"detail":"Stream must be set to true"}`)); uerr != nil {
+		t.Fatalf("unmarshal api error: %v", uerr)
+	}
+	wrapped := withProviderErrorDetail(base)
+	if wrapped == nil {
+		t.Fatalf("wrapped error is nil")
+	}
+	if !strings.Contains(wrapped.Error(), "provider_detail=Stream must be set to true") {
+		t.Fatalf("wrapped error missing provider detail: %v", wrapped)
+	}
+	if !strings.Contains(wrapped.Error(), "hint=chatgpt codex only accepts streaming responses") {
+		t.Fatalf("wrapped error missing hint: %v", wrapped)
+	}
+	var apiErr *openai.Error
+	if !errors.As(wrapped, &apiErr) {
+		t.Fatalf("wrapped error must preserve openai.Error")
 	}
 }
 

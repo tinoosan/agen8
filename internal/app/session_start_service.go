@@ -29,6 +29,12 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 	if _, err := srv.resolveThreadID(p.ThreadID); err != nil {
 		return protocol.SessionStartResult{}, err
 	}
+	if err := EnsureRuntimeAuthReady(ctx, srv.cfg.DataDir, ""); err != nil {
+		return protocol.SessionStartResult{}, &protocol.ProtocolError{
+			Code:    protocol.CodeInvalidState,
+			Message: err.Error(),
+		}
+	}
 	requestedMode := strings.ToLower(strings.TrimSpace(p.Mode))
 	if requestedMode != "" && requestedMode != "single-agent" && requestedMode != "multi-agent" {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{
