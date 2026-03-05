@@ -144,6 +144,7 @@ var (
 		types.HostOpFSAppend: fsAppendMockOp{},
 		types.HostOpFSEdit:   fsEditMockOp{},
 		types.HostOpFSPatch:  fsPatchMockOp{},
+		types.HostOpFSTxn:    fsTxnMockOp{},
 
 		types.HostOpShellExec: shellExecMockOp{},
 		types.HostOpHTTPFetch: httpFetchMockOp{},
@@ -458,6 +459,287 @@ func (fsPatchMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpE
 		Op:               req.Op,
 		Ok:               true,
 		PatchDiagnostics: &diag,
+	}
+}
+
+type fsTxnMockOp struct{}
+
+func (fsTxnMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
+	dryRun := true
+	apply := false
+	rollbackOnError := true
+	if req.TxnOptions != nil {
+		if req.TxnOptions.DryRun {
+			dryRun = true
+		}
+		if req.TxnOptions.Apply {
+			apply = true
+			dryRun = false
+		}
+		if !req.TxnOptions.RollbackOnError {
+			rollbackOnError = false
+		}
+	}
+
+	if !dryRun && !apply {
+		dryRun = true
+	}
+
+	stepResults := make([]types.FSTxnStepResult, 0, len(req.TxnSteps))
+	diag := types.FSTxnDiagnostics{
+		StepsTotal: len(req.TxnSteps),
+		ApplyMode:  "dry_run",
+	}
+	if apply {
+		diag.ApplyMode = "apply"
+	}
+
+	type snapshot struct {
+		existed bool
+		content []byte
+	}
+
+	snapshots := map[string]snapshot{}
+	touchedPaths := make([]string, 0, len(req.TxnSteps))
+
+	type shadowFile struct {
+		exists  bool
+		content []byte
+	}
+	shadow := map[string]shadowFile{}
+
+	loadShadow := func(path string) (shadowFile, error) {
+		if current, ok := shadow[path]; ok {
+			return current, nil
+		}
+		b, err := x.FS.Read(path)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
+				current := shadowFile{exists: false}
+				shadow[path] = current
+				return current, nil
+			}
+			return shadowFile{}, err
+		}
+		current := shadowFile{exists: true, content: append([]byte(nil), b...)}
+		shadow[path] = current
+		return current, nil
+	}
+
+	saveShadow := func(path string, content []byte) {
+		shadow[path] = shadowFile{exists: true, content: append([]byte(nil), content...)}
+	}
+
+	captureSnapshot := func(path string) error {
+		if _, ok := snapshots[path]; ok {
+			return nil
+		}
+		b, err := x.FS.Read(path)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
+				snapshots[path] = snapshot{existed: false}
+				touchedPaths = append(touchedPaths, path)
+				return nil
+			}
+			return err
+		}
+		snapshots[path] = snapshot{existed: true, content: append([]byte(nil), b...)}
+		touchedPaths = append(touchedPaths, path)
+		return nil
+	}
+
+	for i, step := range req.TxnSteps {
+		result := types.FSTxnStepResult{
+			Index: i + 1,
+			Op:    step.Op,
+			Path:  step.Path,
+		}
+
+		if apply {
+			if err := captureSnapshot(step.Path); err != nil {
+				result.Ok = false
+				result.Error = err.Error()
+				stepResults = append(stepResults, result)
+				diag.FailedStep = i + 1
+				break
+			}
+		}
+
+		if dryRun {
+			current, err := loadShadow(step.Path)
+			if err != nil {
+				result.Ok = false
+				result.Error = err.Error()
+				stepResults = append(stepResults, result)
+				diag.FailedStep = i + 1
+				break
+			}
+			nextText, stepSummary, err := executeTxnStep(step, string(current.content), current.exists, true)
+			result.WriteMode = stepSummary.writeMode
+			result.WriteBytes = stepSummary.writeBytes
+			result.PatchDiagnostics = stepSummary.patchDiagnostics
+			if err != nil {
+				result.Ok = false
+				result.Error = err.Error()
+				stepResults = append(stepResults, result)
+				diag.FailedStep = i + 1
+				break
+			}
+			result.Ok = true
+			stepResults = append(stepResults, result)
+			diag.StepsApplied++
+			saveShadow(step.Path, []byte(nextText))
+			continue
+		}
+
+		stepReq := hostRequestFromTxnStep(step)
+		handler, ok := mockHostOperationFor(stepReq.Op)
+		if !ok {
+			result.Ok = false
+			result.Error = fmt.Sprintf("unsupported txn step op %q", stepReq.Op)
+			stepResults = append(stepResults, result)
+			diag.FailedStep = i + 1
+			break
+		}
+		stepResp := handler.Exec(context.Background(), stepReq, x)
+		result.WriteMode = strings.TrimSpace(stepResp.WriteMode)
+		result.WriteBytes = stepResp.WriteBytes
+		result.PatchDiagnostics = stepResp.PatchDiagnostics
+		if !stepResp.Ok {
+			result.Ok = false
+			result.Error = strings.TrimSpace(stepResp.Error)
+			stepResults = append(stepResults, result)
+			diag.FailedStep = i + 1
+			break
+		}
+		result.Ok = true
+		stepResults = append(stepResults, result)
+		diag.StepsApplied++
+	}
+
+	if diag.FailedStep != 0 && apply && rollbackOnError {
+		diag.RollbackPerformed = true
+		for i := len(touchedPaths) - 1; i >= 0; i-- {
+			path := touchedPaths[i]
+			snap := snapshots[path]
+			if snap.existed {
+				if err := x.FS.Write(path, snap.content); err != nil {
+					diag.RollbackFailed = true
+					diag.RollbackErrors = append(diag.RollbackErrors, fmt.Sprintf("%s: %v", path, err))
+				}
+				continue
+			}
+			if err := x.FS.Delete(path); err != nil {
+				diag.RollbackFailed = true
+				diag.RollbackErrors = append(diag.RollbackErrors, fmt.Sprintf("%s: %v", path, err))
+			}
+		}
+	}
+
+	ok := diag.FailedStep == 0 && !diag.RollbackFailed
+	errMsg := ""
+	if !ok {
+		if diag.FailedStep != 0 && diag.FailedStep <= len(stepResults) {
+			errMsg = strings.TrimSpace(stepResults[diag.FailedStep-1].Error)
+		}
+		if errMsg == "" {
+			errMsg = "transaction failed"
+		}
+		if diag.RollbackFailed {
+			errMsg += " (rollback failed)"
+		}
+	}
+
+	return types.HostOpResponse{
+		Op:             req.Op,
+		Ok:             ok,
+		Error:          errMsg,
+		TxnStepResults: stepResults,
+		TxnDiagnostics: &diag,
+	}
+}
+
+type txnStepSummary struct {
+	writeMode        string
+	writeBytes       *int64
+	patchDiagnostics *types.PatchDiagnostics
+}
+
+func executeTxnStep(step types.FSTxnStep, before string, beforeExists bool, dryRun bool) (string, txnStepSummary, error) {
+	summary := txnStepSummary{}
+	op := strings.ToLower(strings.TrimSpace(step.Op))
+	switch op {
+	case types.HostOpFSWrite:
+		mode := normalizeWriteModeInput(step.Mode)
+		switch mode {
+		case "a":
+			after := before + step.Text
+			bytes := int64(len(step.Text))
+			summary.writeBytes = &bytes
+			summary.writeMode = "appended"
+			return after, summary, nil
+		default:
+			after := step.Text
+			bytes := int64(len(step.Text))
+			summary.writeBytes = &bytes
+			if beforeExists {
+				summary.writeMode = "overwritten"
+			} else {
+				summary.writeMode = "created"
+			}
+			return after, summary, nil
+		}
+	case types.HostOpFSAppend:
+		after := before + step.Text
+		bytes := int64(len(step.Text))
+		summary.writeBytes = &bytes
+		summary.writeMode = "appended"
+		return after, summary, nil
+	case types.HostOpFSEdit:
+		after, err := ApplyStructuredEdits(before, step.Input)
+		if err != nil {
+			return "", summary, err
+		}
+		bytes := int64(len(after))
+		summary.writeBytes = &bytes
+		if beforeExists {
+			summary.writeMode = "overwritten"
+		} else {
+			summary.writeMode = "created"
+		}
+		return after, summary, nil
+	case types.HostOpFSPatch:
+		after, diag, err := ApplyUnifiedDiffWithDiagnostics(before, step.Text, dryRun, step.Verbose)
+		summary.patchDiagnostics = &diag
+		if err != nil {
+			return "", summary, err
+		}
+		bytes := int64(len(after))
+		summary.writeBytes = &bytes
+		if beforeExists {
+			summary.writeMode = "overwritten"
+		} else {
+			summary.writeMode = "created"
+		}
+		return after, summary, nil
+	default:
+		return "", summary, fmt.Errorf("unsupported txn step op %q", step.Op)
+	}
+}
+
+func hostRequestFromTxnStep(step types.FSTxnStep) types.HostOpRequest {
+	return types.HostOpRequest{
+		Op:               strings.ToLower(strings.TrimSpace(step.Op)),
+		Path:             step.Path,
+		Text:             step.Text,
+		Input:            step.Input,
+		Mode:             step.Mode,
+		Verify:           step.Verify,
+		Checksum:         step.Checksum,
+		ChecksumExpected: step.ChecksumExpected,
+		Atomic:           step.Atomic,
+		Sync:             step.Sync,
+		Verbose:          step.Verbose,
 	}
 }
 

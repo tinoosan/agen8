@@ -149,6 +149,38 @@ func FormatResponseText(d map[string]string) string {
 			return prefix + " " + errStr
 		}
 		return prefix + " failed"
+	case "fs_txn":
+		mode := strings.TrimSpace(d["txnMode"])
+		if mode == "" {
+			mode = "dry_run"
+		}
+		applied := strings.TrimSpace(d["txnStepsApplied"])
+		total := strings.TrimSpace(d["txnStepsTotal"])
+		if applied == "" {
+			applied = "0"
+		}
+		if total == "" {
+			total = strings.TrimSpace(d["steps"])
+		}
+		if total == "" {
+			total = "?"
+		}
+		if ok == "true" {
+			if mode == "dry_run" {
+				return prefix + " txn dry-run " + applied + "/" + total + " steps"
+			}
+			return prefix + " txn applied " + applied + "/" + total + " steps"
+		}
+		if failed := strings.TrimSpace(d["txnFailedStep"]); failed != "" {
+			if strings.TrimSpace(d["txnRollbackFailed"]) == "true" {
+				return prefix + " txn failed at step " + failed + " (rollback failed)"
+			}
+			return prefix + " txn failed at step " + failed
+		}
+		if errStr != "" {
+			return prefix + " " + errStr
+		}
+		return prefix + " txn failed"
 	case "fs_patch":
 		mode := strings.TrimSpace(d["patchMode"])
 		dryRun := strings.TrimSpace(d["patchDryRun"]) == "true" || mode == "dry_run"

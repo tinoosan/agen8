@@ -488,6 +488,94 @@ func TestHostOpExecutor_FSPatch_FailureReturnsDiagnostics(t *testing.T) {
 	}
 }
 
+func TestHostOpExecutor_FSTxn_DryRunDoesNotWrite(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	req := types.HostOpRequest{
+		Op: types.HostOpFSTxn,
+		TxnSteps: []types.FSTxnStep{
+			{Op: types.HostOpFSWrite, Path: "/workspace/a.txt", Text: "hello"},
+			{Op: types.HostOpFSPatch, Path: "/workspace/a.txt", Text: "@@ -1 +1 @@\n-hello\n+hi\n"},
+		},
+	}
+	resp := exec.Exec(context.Background(), req)
+	if !resp.Ok {
+		t.Fatalf("expected dry-run success, got %#v", resp)
+	}
+	if resp.TxnDiagnostics == nil || resp.TxnDiagnostics.ApplyMode != "dry_run" || resp.TxnDiagnostics.StepsApplied != 2 {
+		t.Fatalf("unexpected txn diagnostics %#v", resp.TxnDiagnostics)
+	}
+	if _, err := exec.FS.Read("/workspace/a.txt"); err == nil {
+		t.Fatalf("dry-run should not write file")
+	}
+}
+
+func TestHostOpExecutor_FSTxn_ApplySuccess(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	req := types.HostOpRequest{
+		Op: types.HostOpFSTxn,
+		TxnSteps: []types.FSTxnStep{
+			{Op: types.HostOpFSWrite, Path: "/workspace/a.txt", Text: "hello\n"},
+			{Op: types.HostOpFSAppend, Path: "/workspace/a.txt", Text: "world\n"},
+		},
+		TxnOptions: &types.FSTxnOptions{Apply: true},
+	}
+	resp := exec.Exec(context.Background(), req)
+	if !resp.Ok {
+		t.Fatalf("expected apply success, got %#v", resp)
+	}
+	if resp.TxnDiagnostics == nil || resp.TxnDiagnostics.ApplyMode != "apply" || resp.TxnDiagnostics.StepsApplied != 2 {
+		t.Fatalf("unexpected txn diagnostics %#v", resp.TxnDiagnostics)
+	}
+	got, err := exec.FS.Read("/workspace/a.txt")
+	if err != nil {
+		t.Fatalf("read applied file: %v", err)
+	}
+	if string(got) != "hello\nworld\n" {
+		t.Fatalf("unexpected applied file content %q", string(got))
+	}
+}
+
+func TestHostOpExecutor_FSTxn_ApplyFailureRollsBack(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	req := types.HostOpRequest{
+		Op: types.HostOpFSTxn,
+		TxnSteps: []types.FSTxnStep{
+			{Op: types.HostOpFSWrite, Path: "/workspace/a.txt", Text: "hello\n"},
+			{Op: types.HostOpFSPatch, Path: "/workspace/a.txt", Text: "@@ -1 +1 @@\n-missing\n+new\n"},
+		},
+		TxnOptions: &types.FSTxnOptions{Apply: true, RollbackOnError: true},
+	}
+	resp := exec.Exec(context.Background(), req)
+	if resp.Ok {
+		t.Fatalf("expected txn failure, got %#v", resp)
+	}
+	if resp.TxnDiagnostics == nil || resp.TxnDiagnostics.FailedStep != 2 || !resp.TxnDiagnostics.RollbackPerformed || resp.TxnDiagnostics.RollbackFailed {
+		t.Fatalf("unexpected txn diagnostics %#v", resp.TxnDiagnostics)
+	}
+	if _, err := exec.FS.Read("/workspace/a.txt"); err == nil {
+		t.Fatalf("expected created file to be removed by rollback")
+	}
+}
+
+func TestHostOpExecutor_FSTxn_ApplyFailureRollbackFailureSurfaced(t *testing.T) {
+	exec := &HostOpExecutor{FS: newCorruptMountedWorkspaceFS(t)}
+	req := types.HostOpRequest{
+		Op: types.HostOpFSTxn,
+		TxnSteps: []types.FSTxnStep{
+			{Op: types.HostOpFSWrite, Path: "/workspace/a.txt", Text: "hello\n"},
+			{Op: types.HostOpFSPatch, Path: "/workspace/a.txt", Text: "@@ -1 +1 @@\n-missing\n+new\n"},
+		},
+		TxnOptions: &types.FSTxnOptions{Apply: true, RollbackOnError: true},
+	}
+	resp := exec.Exec(context.Background(), req)
+	if resp.Ok {
+		t.Fatalf("expected txn failure with rollback failure, got %#v", resp)
+	}
+	if resp.TxnDiagnostics == nil || !resp.TxnDiagnostics.RollbackPerformed || !resp.TxnDiagnostics.RollbackFailed || len(resp.TxnDiagnostics.RollbackErrors) == 0 {
+		t.Fatalf("expected rollback failure diagnostics, got %#v", resp.TxnDiagnostics)
+	}
+}
+
 func TestHostOpExecutor_ShellExec_ResponseMapping(t *testing.T) {
 	inv := &stubToolInvoker{
 		result: pkgtools.ToolCallResult{Output: json.RawMessage(`{"exitCode":2,"stdout":"","stderr":"boom","warning":"","vfsPathTranslated":false,"vfsPathMounts":"  ","scriptPathNormalized":false,"scriptAntiPattern":" "}`)},

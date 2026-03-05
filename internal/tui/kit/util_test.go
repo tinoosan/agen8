@@ -74,3 +74,9 @@ func TestVerbFromKind_FSStat(t *testing.T) {
 		t.Fatalf("VerbFromKind(fs_stat) = %q, want %q", got, "Stat")
 	}
 }
+
+func TestVerbFromKind_FSTxn(t *testing.T) {
+	if got := VerbFromKind("fs_txn"); got != "Txn" {
+		t.Fatalf("VerbFromKind(fs_txn) = %q, want %q", got, "Txn")
+	}
+}

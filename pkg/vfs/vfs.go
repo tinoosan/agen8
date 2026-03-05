@@ -131,6 +131,22 @@ func (fs *FS) Append(vpath string, data []byte) error {
 	return nil
 }
 
+// Delete removes a file at the given VFS path when the underlying resource supports deletion.
+func (fs *FS) Delete(vpath string) error {
+	mountName, r, subpath, err := fs.Resolve(vpath)
+	if err != nil {
+		return err
+	}
+	deletable, ok := r.(Deletable)
+	if !ok {
+		return errors.Join(store.ErrInvalid, fmt.Errorf("delete not supported for mount %q", mountName))
+	}
+	if err := deletable.Delete(subpath); err != nil {
+		return fmt.Errorf("delete %s:%s: %w", mountName, subpath, err)
+	}
+	return nil
+}
+
 // Search searches a mounted resource (if supported) for matching content.
 func (fs *FS) Search(ctx context.Context, vpath string, req types.SearchRequest) (types.SearchResponse, error) {
 	mountName, r, subpath, err := fs.Resolve(vpath)

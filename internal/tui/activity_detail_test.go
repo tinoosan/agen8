@@ -245,6 +245,46 @@ func TestRenderActivityDetailMarkdown_FSPatch_Diagnostics(t *testing.T) {
 	}
 }
 
+func TestRenderActivityDetailMarkdown_FSTxn_Diagnostics(t *testing.T) {
+	a := Activity{
+		Kind:   "fs_txn",
+		Status: ActivityError,
+		Ok:     "false",
+		Data: map[string]string{
+			"steps":                "3",
+			"dryRun":               "false",
+			"apply":                "true",
+			"rollbackOnError":      "true",
+			"txnMode":              "apply",
+			"txnStepsApplied":      "1",
+			"txnStepsTotal":        "3",
+			"txnFailedStep":        "2",
+			"txnRollbackPerformed": "true",
+			"txnRollbackFailed":    "true",
+			"txnRollbackErrors":    `["restore /workspace/a.txt: permission denied"]`,
+		},
+	}
+
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- steps: `3`",
+		"- dryRun: `false`",
+		"- apply: `true`",
+		"- rollbackOnError: `true`",
+		"- mode: `apply`",
+		"- steps: `1/3`",
+		"- failedStep: `2`",
+		"- rollbackPerformed: `true`",
+		"- rollbackFailed: `true`",
+		"rollbackErrors",
+		"permission denied",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in fs_txn markdown, got:\n%s", want, md)
+		}
+	}
+}
+
 func TestRenderActivityDetailMarkdown_AgentSpawnArgumentsAndOutput(t *testing.T) {
 	a := Activity{
 		Kind:          "agent_spawn",

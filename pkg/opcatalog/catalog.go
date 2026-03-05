@@ -43,6 +43,10 @@ var catalog = map[string]metadata{
 		category:              "Updated",
 		useSharedRequestTitle: true,
 	},
+	"fs_txn": {
+		category:              "Updated",
+		useSharedRequestTitle: true,
+	},
 	"shell_exec": {
 		category:              "Ran",
 		useSharedRequestTitle: true,

@@ -132,6 +132,20 @@ func (d *DirResource) Append(subpath string, data []byte) error {
 	return nil
 }
 
+func (d *DirResource) Delete(subpath string) error {
+	targetPath, err := d.safeJoin(subpath)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(targetPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("delete %s: %w", targetPath, err)
+	}
+	return nil
+}
+
 func (d *DirResource) Search(ctx context.Context, subpath string, req types.SearchRequest) (types.SearchResponse, error) {
 	cleanSubpath, _, err := vfsutil.NormalizeResourceSubpath(subpath)
 	if err != nil {

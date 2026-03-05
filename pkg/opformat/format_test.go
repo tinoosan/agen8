@@ -53,6 +53,10 @@ func TestFormatResponseText(t *testing.T) {
 		{name: "fs patch success dry run", data: map[string]string{"op": "fs_patch", "ok": "true", "patchDryRun": "true", "patchHunksApplied": "2", "patchHunksTotal": "2"}, want: "✓ dry-run 2/2 hunks"},
 		{name: "fs patch failure with diagnostics", data: map[string]string{"op": "fs_patch", "ok": "false", "patchFailedHunk": "1", "patchFailureReason": "context_mismatch", "patchTargetLine": "7"}, want: "✗ hunk 1 context mismatch (line 7)"},
 		{name: "fs patch failure fallback err", data: map[string]string{"op": "fs_patch", "ok": "false", "err": "patch did not apply cleanly"}, want: "✗ patch did not apply cleanly"},
+		{name: "fs txn dry run success", data: map[string]string{"op": "fs_txn", "ok": "true", "txnMode": "dry_run", "txnStepsApplied": "2", "txnStepsTotal": "3"}, want: "✓ txn dry-run 2/3 steps"},
+		{name: "fs txn apply success", data: map[string]string{"op": "fs_txn", "ok": "true", "txnMode": "apply", "txnStepsApplied": "3", "txnStepsTotal": "3"}, want: "✓ txn applied 3/3 steps"},
+		{name: "fs txn failure", data: map[string]string{"op": "fs_txn", "ok": "false", "txnFailedStep": "2"}, want: "✗ txn failed at step 2"},
+		{name: "fs txn rollback failure", data: map[string]string{"op": "fs_txn", "ok": "false", "txnFailedStep": "2", "txnRollbackFailed": "true"}, want: "✗ txn failed at step 2 (rollback failed)"},
 		{name: "fs stat dir", data: map[string]string{"op": "fs_stat", "ok": "true", "isDir": "true"}, want: "✓ dir"},
 		{name: "fs stat file with size", data: map[string]string{"op": "fs_stat", "ok": "true", "isDir": "false", "sizeBytes": "42"}, want: "✓ file 42 bytes"},
 		{name: "fs stat file no size", data: map[string]string{"op": "fs_stat", "ok": "true", "isDir": "false"}, want: "✓ file"},
@@ -77,6 +81,7 @@ func TestFormatRequestText_SharedTitleOpsParityWithOpmeta(t *testing.T) {
 	tests := []map[string]string{
 		{"op": "fs_search", "path": "/workspace", "query": "needle"},
 		{"op": "fs_stat", "path": "/workspace/a.txt"},
+		{"op": "fs_txn", "steps": "2"},
 		{"op": "shell_exec", "argvPreview": "rg -n todo"},
 		{"op": "http_fetch", "method": "POST", "url": "https://example.com", "body": "{\n\"x\":1\n}"},
 		{"op": "http_fetch", "url": "https://example.com"},

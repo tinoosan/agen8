@@ -50,6 +50,11 @@ func FormatRequestTitle(d map[string]string) string {
 		return "Edit " + path
 	case "fs_patch":
 		return "Patch " + path
+	case "fs_txn":
+		if steps := strings.TrimSpace(d["steps"]); steps != "" {
+			return "Txn " + steps + " steps"
+		}
+		return "Txn"
 	case "shell_exec":
 		if cmd := strings.TrimSpace(d["argvPreview"]); cmd != "" {
 			return cmd

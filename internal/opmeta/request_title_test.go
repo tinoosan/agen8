@@ -24,6 +24,11 @@ func TestFormatRequestTitle_SharedOps(t *testing.T) {
 			want: `Search /workspace for "TODO\\([a-z]+\\)"`,
 		},
 		{
+			name: "txn with step count",
+			data: map[string]string{"op": "fs_txn", "steps": "3"},
+			want: "Txn 3 steps",
+		},
+		{
 			name: "shell uses argvPreview",
 			data: map[string]string{"op": "shell_exec", "argvPreview": "rg -n test"},
 			want: "rg -n test",

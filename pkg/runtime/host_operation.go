@@ -102,6 +102,7 @@ func defaultHostOperations() []HostOperation {
 		fsAppendOperation{},
 		fsEditOperation{},
 		fsPatchOperation{},
+		fsTxnOperation{},
 		shellExecOperation{},
 		codeExecOperation{},
 		httpFetchOperation{},
@@ -609,6 +610,91 @@ func (fsPatchOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.Ho
 		v := strings.TrimSpace(string(b))
 		respData["patchActualContext"] = v
 		storeResp["patchActualContext"] = v
+	}
+}
+
+type fsTxnOperation struct{}
+
+func (fsTxnOperation) Op() string { return types.HostOpFSTxn }
+func (fsTxnOperation) Execute(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
+	return next(ctx, req)
+}
+func (fsTxnOperation) FormatRequestText(_ types.HostOpRequest, reqData map[string]string) string {
+	return opformat.FormatRequestText(reqData)
+}
+func (fsTxnOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpResponse, _ map[string]string, respData map[string]string) string {
+	return opformat.FormatResponseText(respData)
+}
+func (fsTxnOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
+	reqData["steps"] = strconv.Itoa(len(req.TxnSteps))
+	storeReq["steps"] = strconv.Itoa(len(req.TxnSteps))
+
+	dryRun := true
+	apply := false
+	rollbackOnError := true
+	if req.TxnOptions != nil {
+		if req.TxnOptions.DryRun {
+			dryRun = true
+		}
+		if req.TxnOptions.Apply {
+			apply = true
+			dryRun = false
+		}
+		if !req.TxnOptions.RollbackOnError {
+			rollbackOnError = false
+		}
+	}
+
+	reqData["dryRun"] = fmtBool(dryRun)
+	reqData["apply"] = fmtBool(apply)
+	reqData["rollbackOnError"] = fmtBool(rollbackOnError)
+	storeReq["dryRun"] = fmtBool(dryRun)
+	storeReq["apply"] = fmtBool(apply)
+	storeReq["rollbackOnError"] = fmtBool(rollbackOnError)
+}
+func (fsTxnOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	if len(resp.TxnStepResults) != 0 {
+		v := strconv.Itoa(len(resp.TxnStepResults))
+		respData["txnStepResults"] = v
+		storeResp["txnStepResults"] = v
+	}
+	if resp.TxnDiagnostics == nil {
+		return
+	}
+	diag := resp.TxnDiagnostics
+	if diag.StepsTotal != 0 {
+		v := strconv.Itoa(diag.StepsTotal)
+		respData["txnStepsTotal"] = v
+		storeResp["txnStepsTotal"] = v
+	}
+	if diag.StepsApplied != 0 {
+		v := strconv.Itoa(diag.StepsApplied)
+		respData["txnStepsApplied"] = v
+		storeResp["txnStepsApplied"] = v
+	}
+	if diag.FailedStep != 0 {
+		v := strconv.Itoa(diag.FailedStep)
+		respData["txnFailedStep"] = v
+		storeResp["txnFailedStep"] = v
+	}
+	if v := strings.TrimSpace(diag.ApplyMode); v != "" {
+		respData["txnMode"] = v
+		storeResp["txnMode"] = v
+	}
+	if diag.RollbackPerformed {
+		respData["txnRollbackPerformed"] = "true"
+		storeResp["txnRollbackPerformed"] = "true"
+	}
+	if diag.RollbackFailed {
+		respData["txnRollbackFailed"] = "true"
+		storeResp["txnRollbackFailed"] = "true"
+	}
+	if len(diag.RollbackErrors) != 0 {
+		if b, err := json.Marshal(diag.RollbackErrors); err == nil {
+			v := string(b)
+			respData["txnRollbackErrors"] = v
+			storeResp["txnRollbackErrors"] = v
+		}
 	}
 }
 

@@ -16,6 +16,7 @@ var activityRenderers = map[string]ActivityRenderer{
 	"email":           emailRenderer{},
 	"fs_append":       fsWriteAppendRenderer{},
 	"fs_patch":        fsPatchRenderer{},
+	"fs_txn":          fsTxnRenderer{},
 	"fs_read":         fsReadRenderer{},
 	"fs_stat":         fsStatRenderer{},
 	"fs_search":       fsSearchRenderer{},
@@ -542,6 +543,70 @@ func (fsPatchRenderer) RenderArguments(a Activity, telemetry bool, b *strings.Bu
 	}
 	if strings.TrimSpace(a.Data["verbose"]) == "true" {
 		b.WriteString("- verbose: `true`\n")
+	}
+}
+
+type fsTxnRenderer struct{ baseRenderer }
+
+func (fsTxnRenderer) RenderDetail(a Activity, expanded bool, telemetry bool, b *strings.Builder) {
+	if !renderCommonOutputPreview(a, expanded, b) {
+		if v := strings.TrimSpace(a.Data["txnMode"]); v != "" {
+			b.WriteString("- mode: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["txnStepsApplied"]); v != "" {
+			total := strings.TrimSpace(a.Data["txnStepsTotal"])
+			if total == "" {
+				total = "?"
+			}
+			b.WriteString("- steps: `")
+			b.WriteString(v)
+			b.WriteString("/")
+			b.WriteString(total)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["txnFailedStep"]); v != "" {
+			b.WriteString("- failedStep: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if strings.TrimSpace(a.Data["txnRollbackPerformed"]) == "true" {
+			b.WriteString("- rollbackPerformed: `true`\n")
+		}
+		if strings.TrimSpace(a.Data["txnRollbackFailed"]) == "true" {
+			b.WriteString("- rollbackFailed: `true`\n")
+		}
+		if v := strings.TrimSpace(a.Data["txnRollbackErrors"]); v != "" {
+			b.WriteString("\n**rollbackErrors**\n\n")
+			b.WriteString(FormatCode("json", v))
+			b.WriteString("\n")
+		}
+	}
+	renderTelemetryBlock(a, telemetry, false, false, b)
+}
+
+func (fsTxnRenderer) RenderArguments(a Activity, telemetry bool, b *strings.Builder) {
+	renderDefaultArgumentsPrefix(a, telemetry, b)
+	if v := strings.TrimSpace(a.Data["steps"]); v != "" {
+		b.WriteString("- steps: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["dryRun"]); v != "" {
+		b.WriteString("- dryRun: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["apply"]); v != "" {
+		b.WriteString("- apply: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["rollbackOnError"]); v != "" {
+		b.WriteString("- rollbackOnError: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
 	}
 }
 

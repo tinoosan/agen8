@@ -26,7 +26,7 @@ func TestApplyAllowedTools(t *testing.T) {
 		t.Fatalf("expected http_fetch to be removed")
 	}
 	// fs tools stay even though not in allowed list
-	for _, name := range []string{"fs_list", "fs_stat", "fs_read", "fs_search", "fs_write", "fs_append", "fs_edit", "fs_patch"} {
+	for _, name := range []string{"fs_list", "fs_stat", "fs_read", "fs_search", "fs_write", "fs_append", "fs_edit", "fs_patch", "fs_txn"} {
 		if _, ok := reg.Get(name); !ok {
 			t.Fatalf("expected always-enabled fs tool %q to remain", name)
 		}
@@ -141,7 +141,7 @@ func TestApplyAllowedTools_AlwaysKeepsFsTools(t *testing.T) {
 	if err := applyAllowedTools(reg, []string{"http_fetch"}); err != nil {
 		t.Fatalf("applyAllowedTools: %v", err)
 	}
-	for _, name := range []string{"fs_list", "fs_stat", "fs_read", "fs_search", "fs_write", "fs_append", "fs_edit", "fs_patch"} {
+	for _, name := range []string{"fs_list", "fs_stat", "fs_read", "fs_search", "fs_write", "fs_append", "fs_edit", "fs_patch", "fs_txn"} {
 		if _, ok := reg.Get(name); !ok {
 			t.Fatalf("expected always-enabled fs tool %q to survive, but it was removed", name)
 		}

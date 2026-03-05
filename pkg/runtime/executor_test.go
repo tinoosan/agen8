@@ -405,6 +405,17 @@ func TestEventMiddleware_EmitsRequestTextForRepresentativeOps(t *testing.T) {
 			want: "Patch /workspace/a.txt",
 		},
 		{
+			name: "fs_txn",
+			req: types.HostOpRequest{
+				Op: types.HostOpFSTxn,
+				TxnSteps: []types.FSTxnStep{
+					{Op: types.HostOpFSWrite, Path: "/workspace/a.txt", Text: "hello"},
+					{Op: types.HostOpFSAppend, Path: "/workspace/a.txt", Text: "\nworld"},
+				},
+			},
+			want: "Txn 2 steps",
+		},
+		{
 			name: "shell_exec",
 			req:  types.HostOpRequest{Op: types.HostOpShellExec, Argv: []string{"rg", "-n", "todo"}},
 			want: "rg -n todo",
@@ -470,6 +481,16 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 					HunksTotal:   2,
 				},
 			}
+		case types.HostOpFSTxn:
+			return types.HostOpResponse{
+				Op: req.Op,
+				Ok: true,
+				TxnDiagnostics: &types.FSTxnDiagnostics{
+					ApplyMode:    "apply",
+					StepsApplied: 2,
+					StepsTotal:   2,
+				},
+			}
 		case types.HostOpFSRead:
 			return types.HostOpResponse{Op: req.Op, Ok: true, Truncated: true}
 		case types.HostOpShellExec:
@@ -508,6 +529,7 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 		{name: "fs_write", req: types.HostOpRequest{Op: types.HostOpFSWrite, Path: "/workspace/a.txt", Text: "hello"}, want: "✓ verified (sha256)"},
 		{name: "fs_stat", req: types.HostOpRequest{Op: types.HostOpFSStat, Path: "/workspace/a.txt"}, want: "✓ file 12 bytes"},
 		{name: "fs_patch", req: types.HostOpRequest{Op: types.HostOpFSPatch, Path: "/workspace/a.txt", Text: "@@ -1 +1 @@\n-old\n+new\n", DryRun: true}, want: "✓ dry-run 1/2 hunks"},
+		{name: "fs_txn", req: types.HostOpRequest{Op: types.HostOpFSTxn, TxnSteps: []types.FSTxnStep{{Op: types.HostOpFSWrite, Path: "/workspace/a.txt", Text: "hello"}, {Op: types.HostOpFSAppend, Path: "/workspace/a.txt", Text: " world"}}}, want: "✓ txn applied 2/2 steps"},
 		{name: "fs_read", req: types.HostOpRequest{Op: types.HostOpFSRead, Path: "/workspace/a.txt"}, want: "✓ truncated"},
 		{name: "shell_exec", req: types.HostOpRequest{Op: types.HostOpShellExec, Argv: []string{"echo", "ok"}}, want: "✓ exit 0"},
 		{name: "http_fetch", req: types.HostOpRequest{Op: types.HostOpHTTPFetch, URL: "https://example.com"}, want: "✓ 200"},
@@ -526,6 +548,84 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 				t.Fatalf("responseText = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestEventMiddleware_FSTxnRequestAndResponseEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{
+			Op: req.Op,
+			Ok: false,
+			TxnDiagnostics: &types.FSTxnDiagnostics{
+				ApplyMode:         "apply",
+				StepsTotal:        3,
+				StepsApplied:      1,
+				FailedStep:        2,
+				RollbackPerformed: true,
+				RollbackFailed:    true,
+				RollbackErrors:    []string{"restore /workspace/a.txt: permission denied"},
+			},
+			TxnStepResults: []types.FSTxnStepResult{
+				{Index: 1, Op: types.HostOpFSWrite, Path: "/workspace/a.txt", Ok: true},
+				{Index: 2, Op: types.HostOpFSPatch, Path: "/workspace/a.txt", Ok: false, Error: "context mismatch"},
+			},
+		}
+	})
+
+	var gotReq events.Event
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op: types.HostOpFSTxn,
+		TxnSteps: []types.FSTxnStep{
+			{Op: types.HostOpFSWrite, Path: "/workspace/a.txt", Text: "hello"},
+			{Op: types.HostOpFSPatch, Path: "/workspace/a.txt", Text: "@@ -1 +1 @@\n-hello\n+hi\n"},
+			{Op: types.HostOpFSAppend, Path: "/workspace/a.txt", Text: "\nend"},
+		},
+		TxnOptions: &types.FSTxnOptions{Apply: true, RollbackOnError: true},
+	})
+	if resp.Ok {
+		t.Fatalf("expected txn response to fail")
+	}
+	for key, want := range map[string]string{
+		"steps":           "3",
+		"dryRun":          "false",
+		"apply":           "true",
+		"rollbackOnError": "true",
+	} {
+		if gotReq.Data[key] != want {
+			t.Fatalf("expected fs_txn request enrichment %s=%q, got %q (data=%v)", key, want, gotReq.Data[key], gotReq.Data)
+		}
+	}
+	for key, want := range map[string]string{
+		"txnMode":              "apply",
+		"txnStepsTotal":        "3",
+		"txnStepsApplied":      "1",
+		"txnFailedStep":        "2",
+		"txnRollbackPerformed": "true",
+		"txnRollbackFailed":    "true",
+		"txnStepResults":       "2",
+	} {
+		if gotResp.Data[key] != want {
+			t.Fatalf("expected fs_txn response enrichment %s=%q, got %q (data=%v)", key, want, gotResp.Data[key], gotResp.Data)
+		}
+	}
+	if gotResp.Data["txnRollbackErrors"] == "" || !strings.Contains(gotResp.Data["txnRollbackErrors"], "permission denied") {
+		t.Fatalf("expected rollback errors in response data, got %v", gotResp.Data)
 	}
 }
 

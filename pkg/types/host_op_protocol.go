@@ -28,6 +28,8 @@ const (
 	HostOpFSEdit = "fs_edit"
 	// HostOpFSPatch applies a unified diff patch to a file in the VFS.
 	HostOpFSPatch = "fs_patch"
+	// HostOpFSTxn applies a sequence of mutating fs_* operations atomically.
+	HostOpFSTxn = "fs_txn"
 	// HostOpShellExec executes a shell command.
 	HostOpShellExec = "shell_exec"
 	// HostOpHTTPFetch issues an HTTP request.
@@ -67,17 +69,19 @@ type HostOpRequest struct {
 	Checksum  string          `json:"checksum,omitempty"`
 	Checksums []string        `json:"checksums,omitempty"`
 	// ChecksumExpected optionally enforces an expected digest value for the selected algorithm.
-	ChecksumExpected string   `json:"checksumExpected,omitempty"`
-	Atomic           bool     `json:"atomic,omitempty"`
-	Sync             bool     `json:"sync,omitempty"`
-	DryRun           bool     `json:"dryRun,omitempty"`
-	Verbose          bool     `json:"verbose,omitempty"`
-	Glob             string   `json:"glob,omitempty"`
-	Exclude          []string `json:"exclude,omitempty"`
-	PreviewLines     int      `json:"previewLines,omitempty"`
-	IncludeMetadata  bool     `json:"includeMetadata,omitempty"`
-	MaxSizeBytes     int64    `json:"maxSizeBytes,omitempty"`
-	Tag              string   `json:"tag,omitempty"`
+	ChecksumExpected string        `json:"checksumExpected,omitempty"`
+	Atomic           bool          `json:"atomic,omitempty"`
+	Sync             bool          `json:"sync,omitempty"`
+	DryRun           bool          `json:"dryRun,omitempty"`
+	Verbose          bool          `json:"verbose,omitempty"`
+	TxnSteps         []FSTxnStep   `json:"txnSteps,omitempty"`
+	TxnOptions       *FSTxnOptions `json:"txnOptions,omitempty"`
+	Glob             string        `json:"glob,omitempty"`
+	Exclude          []string      `json:"exclude,omitempty"`
+	PreviewLines     int           `json:"previewLines,omitempty"`
+	IncludeMetadata  bool          `json:"includeMetadata,omitempty"`
+	MaxSizeBytes     int64         `json:"maxSizeBytes,omitempty"`
+	Tag              string        `json:"tag,omitempty"`
 	// Code execution parameters
 	Language string `json:"language,omitempty"`
 	Code     string `json:"code,omitempty"`
@@ -101,7 +105,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = strings.ToLower(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSStat, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpCodeExec, HostOpNoop, HostOpToolResult, HostOpFinal:
+	case HostOpFSList, HostOpFSStat, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpFSTxn, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpCodeExec, HostOpNoop, HostOpToolResult, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -229,6 +233,22 @@ func (r HostOpRequest) Validate() error {
 		}
 		if err := validate.NonEmpty("text", r.Text); err != nil {
 			return err
+		}
+		return nil
+
+	case HostOpFSTxn:
+		if len(r.TxnSteps) == 0 {
+			return fmt.Errorf("txnSteps is required")
+		}
+		for i, step := range r.TxnSteps {
+			if err := validateTxnStep(i, step); err != nil {
+				return err
+			}
+		}
+		if r.TxnOptions != nil {
+			if r.TxnOptions.Apply && r.TxnOptions.DryRun {
+				return fmt.Errorf("txnOptions.apply and txnOptions.dryRun cannot both be true")
+			}
 		}
 		return nil
 
@@ -438,6 +458,51 @@ type SearchResult struct {
 	Mtime         *int64   `json:"mtime,omitempty"`
 }
 
+// FSTxnStep describes one fs_* mutating step inside fs_txn.
+type FSTxnStep struct {
+	Op               string          `json:"op,omitempty"`
+	Path             string          `json:"path,omitempty"`
+	Text             string          `json:"text,omitempty"`
+	Input            json.RawMessage `json:"input,omitempty"`
+	Mode             string          `json:"mode,omitempty"`
+	Verify           bool            `json:"verify,omitempty"`
+	Checksum         string          `json:"checksum,omitempty"`
+	ChecksumExpected string          `json:"checksumExpected,omitempty"`
+	Atomic           bool            `json:"atomic,omitempty"`
+	Sync             bool            `json:"sync,omitempty"`
+	Verbose          bool            `json:"verbose,omitempty"`
+}
+
+// FSTxnOptions controls transaction mode and rollback behavior.
+type FSTxnOptions struct {
+	DryRun          bool `json:"dryRun,omitempty"`
+	Apply           bool `json:"apply,omitempty"`
+	RollbackOnError bool `json:"rollbackOnError,omitempty"`
+}
+
+// FSTxnStepResult captures one step result.
+type FSTxnStepResult struct {
+	Index            int               `json:"index,omitempty"`
+	Op               string            `json:"op,omitempty"`
+	Path             string            `json:"path,omitempty"`
+	Ok               bool              `json:"ok"`
+	Error            string            `json:"error,omitempty"`
+	WriteMode        string            `json:"writeMode,omitempty"`
+	WriteBytes       *int64            `json:"writeBytes,omitempty"`
+	PatchDiagnostics *PatchDiagnostics `json:"patchDiagnostics,omitempty"`
+}
+
+// FSTxnDiagnostics summarizes transaction outcome and rollback.
+type FSTxnDiagnostics struct {
+	StepsTotal        int      `json:"stepsTotal,omitempty"`
+	StepsApplied      int      `json:"stepsApplied,omitempty"`
+	FailedStep        int      `json:"failedStep,omitempty"`
+	ApplyMode         string   `json:"applyMode,omitempty"` // dry_run|apply
+	RollbackPerformed bool     `json:"rollbackPerformed,omitempty"`
+	RollbackFailed    bool     `json:"rollbackFailed,omitempty"`
+	RollbackErrors    []string `json:"rollbackErrors,omitempty"`
+}
+
 // SearchRequest describes a structured filesystem search request.
 type SearchRequest struct {
 	Query           string   `json:"query,omitempty"`
@@ -474,19 +539,21 @@ type PatchDiagnostics struct {
 
 // HostOpResponse is the minimal "host primitive" response envelope.
 type HostOpResponse struct {
-	Op               string         `json:"op"`
-	Ok               bool           `json:"ok"`
-	Error            string         `json:"error,omitempty"`
-	ErrorCode        string         `json:"errorCode,omitempty"`
-	Entries          []string       `json:"entries,omitempty"`
-	Results          []SearchResult `json:"results,omitempty"`
-	ResultsTotal     int            `json:"resultsTotal,omitempty"`
-	ResultsReturned  int            `json:"resultsReturned,omitempty"`
-	ResultsTruncated bool           `json:"resultsTruncated,omitempty"`
-	Exists           *bool          `json:"exists,omitempty"`
-	IsDir            *bool          `json:"isDir,omitempty"`
-	SizeBytes        *int64         `json:"sizeBytes,omitempty"`
-	Mtime            *int64         `json:"mtime,omitempty"`
+	Op               string            `json:"op"`
+	Ok               bool              `json:"ok"`
+	Error            string            `json:"error,omitempty"`
+	ErrorCode        string            `json:"errorCode,omitempty"`
+	Entries          []string          `json:"entries,omitempty"`
+	Results          []SearchResult    `json:"results,omitempty"`
+	TxnStepResults   []FSTxnStepResult `json:"txnStepResults,omitempty"`
+	TxnDiagnostics   *FSTxnDiagnostics `json:"txnDiagnostics,omitempty"`
+	ResultsTotal     int               `json:"resultsTotal,omitempty"`
+	ResultsReturned  int               `json:"resultsReturned,omitempty"`
+	ResultsTruncated bool              `json:"resultsTruncated,omitempty"`
+	Exists           *bool             `json:"exists,omitempty"`
+	IsDir            *bool             `json:"isDir,omitempty"`
+	SizeBytes        *int64            `json:"sizeBytes,omitempty"`
+	Mtime            *int64            `json:"mtime,omitempty"`
 	// fs_read checksum metadata.
 	ReadChecksums map[string]string `json:"readChecksums,omitempty"`
 	// Patch diagnostics are emitted for fs_patch success/failure and dry-run validation.
@@ -532,4 +599,45 @@ type HostOpResponse struct {
 	// Trace output
 	TraceKeys  []string `json:"traceKeys,omitempty"`
 	TraceValue string   `json:"value,omitempty"`
+}
+
+func validateTxnStep(index int, step FSTxnStep) error {
+	op := strings.ToLower(strings.TrimSpace(step.Op))
+	switch op {
+	case HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch:
+	default:
+		return fmt.Errorf("txnSteps[%d].op must be one of fs_write|fs_append|fs_edit|fs_patch", index)
+	}
+	if err := validate.NonEmpty(fmt.Sprintf("txnSteps[%d].path", index), step.Path); err != nil {
+		return err
+	}
+	if !strings.HasPrefix(strings.TrimSpace(step.Path), "/") {
+		return fmt.Errorf("txnSteps[%d].path must be an absolute VFS path (start with /)", index)
+	}
+
+	switch op {
+	case HostOpFSWrite:
+		if err := validateWriteChecksum(step.Checksum); err != nil {
+			return fmt.Errorf("txnSteps[%d]: %w", index, err)
+		}
+		if err := validateWriteChecksumExpected(step.Checksum, step.ChecksumExpected); err != nil {
+			return fmt.Errorf("txnSteps[%d]: %w", index, err)
+		}
+		if err := validateWriteMode(step.Mode); err != nil {
+			return fmt.Errorf("txnSteps[%d]: %w", index, err)
+		}
+	case HostOpFSAppend:
+		if err := validate.NonEmpty(fmt.Sprintf("txnSteps[%d].text", index), step.Text); err != nil {
+			return err
+		}
+	case HostOpFSEdit:
+		if len(step.Input) == 0 {
+			return fmt.Errorf("txnSteps[%d].input is required", index)
+		}
+	case HostOpFSPatch:
+		if err := validate.NonEmpty(fmt.Sprintf("txnSteps[%d].text", index), step.Text); err != nil {
+			return err
+		}
+	}
+	return nil
 }

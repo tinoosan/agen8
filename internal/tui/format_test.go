@@ -152,6 +152,16 @@ func TestRenderOpResponse_ToolSpecific(t *testing.T) {
 			want: "✗ hunk 2 delete mismatch (line 14)",
 		},
 		{
+			name: "txn apply success",
+			data: map[string]string{"op": "fs_txn", "ok": "true", "txnMode": "apply", "txnStepsApplied": "2", "txnStepsTotal": "2"},
+			want: "✓ txn applied 2/2 steps",
+		},
+		{
+			name: "txn failure",
+			data: map[string]string{"op": "fs_txn", "ok": "false", "txnFailedStep": "2"},
+			want: "✗ txn failed at step 2",
+		},
+		{
 			name: "email sent",
 			data: map[string]string{"op": "email", "ok": "true"},
 			want: "✓ sent",
@@ -179,6 +189,7 @@ func TestActionCategory_RepresentativeOps(t *testing.T) {
 		{op: "fs_read", want: "Explored"},
 		{op: "fs_stat", want: "Explored"},
 		{op: "fs_write", want: "Updated"},
+		{op: "fs_txn", want: "Updated"},
 		{op: "shell_exec", want: "Ran"},
 		{op: "http_fetch", want: "Fetched"},
 		{op: "trace_run", want: "Traced"},
@@ -198,6 +209,7 @@ func TestRenderOpRequest_SharedOpParityWithOpMeta(t *testing.T) {
 	tests := []map[string]string{
 		{"op": "fs_search", "path": "/workspace", "query": "needle"},
 		{"op": "fs_stat", "path": "/workspace/a.txt"},
+		{"op": "fs_txn", "steps": "3"},
 		{"op": "shell_exec", "argvPreview": "rg -n todo"},
 		{"op": "http_fetch", "method": "POST", "url": "https://example.com", "body": "{\n\"x\":1\n}"},
 		{"op": "http_fetch", "url": "https://example.com"},

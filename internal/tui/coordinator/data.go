@@ -45,7 +45,7 @@ type feedEntry struct {
 	bridgeSingleData   map[string]string
 	bridgeSingleText   string
 	bridgeSinglePath   string
-	bridgeWriteOps     []feedEntry       // write bridge ops stored for inline diff rendering under the parent
+	bridgeWriteOps     []feedEntry // write bridge ops stored for inline diff rendering under the parent
 
 	// Thinking-specific fields
 	live             bool          // true while model is still thinking (no .end yet)
@@ -594,6 +594,8 @@ func kindToVerb(kind string, path string, data map[string]string) string {
 		return "Edit"
 	case "fs_patch":
 		return "Patch"
+	case "fs_txn":
+		return "Txn"
 	case "fs_search":
 		return "Search"
 	case "shell_exec":

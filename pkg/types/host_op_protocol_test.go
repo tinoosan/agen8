@@ -278,3 +278,45 @@ func TestHostOpRequest_FSWriteValidation_AllowsWriteVerifyFlags(t *testing.T) {
 		t.Fatalf("expected error for invalid mode")
 	}
 }
+
+func TestHostOpRequest_FSTxnValidation(t *testing.T) {
+	req := HostOpRequest{
+		Op: HostOpFSTxn,
+		TxnSteps: []FSTxnStep{
+			{Op: HostOpFSWrite, Path: "/workspace/a.txt", Text: "hello"},
+			{Op: HostOpFSPatch, Path: "/workspace/a.txt", Text: "@@ -1 +1 @@\n-hello\n+hi\n"},
+		},
+		TxnOptions: &FSTxnOptions{DryRun: true},
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	req = HostOpRequest{
+		Op:       HostOpFSTxn,
+		TxnSteps: []FSTxnStep{},
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for empty txnSteps")
+	}
+
+	req = HostOpRequest{
+		Op: HostOpFSTxn,
+		TxnSteps: []FSTxnStep{
+			{Op: "shell_exec", Path: "/workspace/a.txt"},
+		},
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for unsupported txn step op")
+	}
+
+	req = HostOpRequest{
+		Op: HostOpFSTxn,
+		TxnSteps: []FSTxnStep{
+			{Op: HostOpFSWrite, Path: "workspace/a.txt", Text: "hello"},
+		},
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for relative txn step path")
+	}
+}

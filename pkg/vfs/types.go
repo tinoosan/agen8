@@ -71,6 +71,11 @@ type Resource interface {
 	Append(path string, data []byte) error
 }
 
+// Deletable is an optional interface for resources that can remove files.
+type Deletable interface {
+	Delete(path string) error
+}
+
 // Searchable is an optional interface for resources that can perform semantic or indexed search.
 type Searchable interface {
 	Search(ctx context.Context, path string, req types.SearchRequest) (types.SearchResponse, error)
