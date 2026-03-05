@@ -1594,8 +1594,9 @@ func (s *runtimeSupervisor) pauseRun(ctx context.Context, runID string) error {
 		return err
 	}
 	if strings.EqualFold(strings.TrimSpace(run.Status), types.RunStatusPaused) {
-		s.stopWorker(runID, true)
+		// Cancel active tasks synchronously, then drain worker in background.
 		_, err := s.taskService.CancelActiveTasksByRun(ctx, runID, "run paused")
+		go s.stopWorker(runID, true)
 		return err
 	}
 	run.Status = types.RunStatusPaused
@@ -1605,8 +1606,12 @@ func (s *runtimeSupervisor) pauseRun(ctx context.Context, runID string) error {
 		return err
 	}
 
-	s.stopWorker(runID, true)
+	// Cancel active tasks first to help the in-flight LLM call abort cleanly.
 	_, err = s.taskService.CancelActiveTasksByRun(ctx, runID, "run paused")
+	// Stop worker asynchronously — run is already saved as paused in DB.
+	// stopWorker holds its own pointer reference and only deletes its own entry,
+	// so a concurrent ResumeRun+ensureRun spawning a fresh worker is safe.
+	go s.stopWorker(runID, true)
 	return err
 }
 
@@ -1633,25 +1638,6 @@ func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
 		return err
 	}
 
-	s.mu.Lock()
-	worker := s.workers[runID]
-	s.mu.Unlock()
-	// Only use the existing worker if its goroutine is still alive.
-	// If workerDone is true (zombie: ctx cancelled but not yet exited), fall
-	// through to ensureRun so a fresh worker is spawned with a startup tick().
-	if worker != nil && worker.session != nil && !workerDone(worker.done) {
-		worker.session.SetPaused(false)
-		// Wake the session so it immediately drains any pending inbox messages
-		// rather than waiting for the next external wake event.
-		if notifier, ok := s.taskService.(taskWakeNotifier); ok {
-			teamID := ""
-			if run.Runtime != nil {
-				teamID = strings.TrimSpace(run.Runtime.TeamID)
-			}
-			notifier.NotifyWake(teamID, runID)
-		}
-		return nil
-	}
 	if s.sessionService == nil {
 		return nil
 	}
@@ -1659,7 +1645,26 @@ func (s *runtimeSupervisor) ResumeRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
-	return s.ensureRun(ctx, sess, runID)
+	// ensureRun handles all worker states:
+	//   - live worker  → SetPaused(false), no new spawn
+	//   - zombie worker → delete zombie, spawn fresh worker with startup tick()
+	//   - no worker    → spawn fresh worker with startup tick()
+	// This eliminates the TOCTOU race of checking workerDone then acting on it.
+	if err := s.ensureRun(ctx, sess, runID); err != nil {
+		return err
+	}
+	// Always send a wake signal. For live workers that ensureRun merely unpaused,
+	// this kicks the session to drain inbox messages immediately instead of
+	// waiting for the next external event. For freshly-spawned workers the
+	// startup tick() already handles the inbox, but the signal is harmless.
+	if notifier, ok := s.taskService.(taskWakeNotifier); ok {
+		teamID := ""
+		if run.Runtime != nil {
+			teamID = strings.TrimSpace(run.Runtime.TeamID)
+		}
+		notifier.NotifyWake(teamID, runID)
+	}
+	return nil
 }
 
 func (s *runtimeSupervisor) StopRun(ctx context.Context, runID string) error {
@@ -1724,9 +1729,26 @@ func (s *runtimeSupervisor) stopWorker(runID string, paused bool) {
 	if worker != nil && worker.done != nil {
 		<-worker.done
 	}
+	// Only delete our own entry. A concurrent ResumeRun → ensureRun may have
+	// already replaced this zombie with a fresh worker; guard against clobbering it.
 	s.mu.Lock()
-	delete(s.workers, runID)
+	if s.workers[runID] == worker {
+		delete(s.workers, runID)
+	}
 	s.mu.Unlock()
+
+	// If the run was resumed while we were draining the zombie, spawn a fresh
+	// worker now so the resumed session can pick up any pending inbox messages.
+	// ensureRun is a no-op if a live worker already exists.
+	if worker != nil && s.sessionService != nil {
+		bg := context.Background()
+		if run, err := s.sessionService.LoadRun(bg, runID); err == nil &&
+			strings.TrimSpace(run.Status) == types.RunStatusRunning {
+			if sess, err := s.sessionService.LoadSession(bg, strings.TrimSpace(run.SessionID)); err == nil {
+				_ = s.ensureRun(bg, sess, runID)
+			}
+		}
+	}
 }
 
 func (s *runtimeSupervisor) PauseSession(ctx context.Context, sessionID string) ([]string, error) {
