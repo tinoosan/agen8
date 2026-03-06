@@ -1,4 +1,3 @@
-import PulseDot from './PulseDot'
 import type { TeamRoleStatus } from '../lib/types'
 
 interface RoleRowProps {
@@ -17,35 +16,59 @@ function inferStatus(info: string): 'active' | 'idle' | 'pending' | 'failed' | '
 export default function RoleRow({ role }: RoleRowProps) {
   const status = inferStatus(role.info)
 
+  // Determine status color
+  const statusColor =
+    status === 'active' ? 'var(--accent)' :
+      status === 'done' ? 'var(--green)' :
+        status === 'failed' ? 'var(--red)' :
+          'var(--text-4)'
+
   return (
     <div
-      className="row-hover"
       style={{
-        display: 'flex', alignItems: 'flex-start', gap: 9,
-        padding: '6px 4px',
-        marginBottom: 1,
+        display: 'flex', flexDirection: 'column', gap: 4,
+        padding: '10px 14px',
+        marginBottom: 6,
+        background: 'rgba(255, 255, 255, 0.02)',
+        border: '1px solid rgba(255, 255, 255, 0.04)',
+        borderRadius: 'var(--r-md)',
+        transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+        cursor: 'default',
+        position: 'relative',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
       }}
+      className="role-glass-hover"
       title={role.info || undefined}
     >
-      <div style={{ paddingTop: 4, flexShrink: 0 }}>
-        <PulseDot status={status} size={7} />
-      </div>
-      <div style={{ minWidth: 0, flex: 1 }}>
+      {/* Top Header line: Status Indicator + Uppercase Role Name */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {/* Sleek status indicator */}
         <div style={{
-          fontSize: 12, fontWeight: 500,
-          color: 'var(--text-1)',
-          marginBottom: 1,
-          letterSpacing: '-0.01em',
+          width: 6, height: 6, borderRadius: '50%',
+          background: statusColor,
+          boxShadow: status === 'active' ? `0 0 8px ${statusColor}, 0 0 4px ${statusColor}` : 'none',
+          opacity: status === 'idle' ? 0.3 : 1
+        }} />
+
+        {/* Role Name */}
+        <div className="truncate" style={{
+          fontSize: 10, fontWeight: 700,
+          color: status === 'active' ? 'var(--text-1)' : 'var(--text-3)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
         }}>
-          {role.role}
+          {role.role.replace(/-/g, ' ')}
         </div>
-        {role.info && (
-          <div className="truncate" style={{
-            fontSize: 11, color: 'var(--text-3)',
-          }}>
-            {role.info}
-          </div>
-        )}
+      </div>
+
+      {/* Info Line */}
+      <div className="truncate" style={{
+        fontSize: 12, color: 'var(--text-2)',
+        fontWeight: 400,
+        paddingLeft: 12, // Indent to align with text above
+      }}>
+        {role.info || 'Waiting for tasks...'}
       </div>
     </div>
   )

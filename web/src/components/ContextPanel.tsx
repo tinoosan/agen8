@@ -25,55 +25,65 @@ export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
       background: 'var(--bg-panel)',
       minWidth: 0,
     }}>
-      {/* Roles section */}
-      <div className="section-label">Team</div>
+      {/* ── Team roles section ─────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <span className="section-label" style={{ marginBottom: 0 }}>Team</span>
+        {roles.length > 0 && (
+          <span className="section-count">· {roles.length}</span>
+        )}
+      </div>
+
       <div style={{ marginBottom: 6 }}>
         {isLoading ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '6px 0' }}>
-            <div className="skeleton" style={{ width: '100%', height: 14 }} />
-            <div className="skeleton" style={{ width: '80%', height: 14 }} />
-            <div className="skeleton" style={{ width: '60%', height: 14 }} />
+          <div className="roles-container">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="skeleton" style={{ width: '100%', height: 50 }} />
+              <div className="skeleton" style={{ width: '100%', height: 50 }} />
+              <div className="skeleton" style={{ width: '100%', height: 50 }} />
+            </div>
           </div>
         ) : roles.length === 0 ? (
           <div style={{ fontSize: 11, color: 'var(--text-3)', padding: '6px 0' }}>No roles</div>
         ) : (
-          roles.map(role => <RoleRow key={role.role} role={role} />)
+          <div className="roles-container">
+            {roles.map(role => <RoleRow key={role.role} role={role} />)}
+          </div>
         )}
       </div>
 
-      <div style={{ height: 1, background: 'var(--border)', margin: '12px 0 10px' }} />
+      <div style={{ height: 1, background: 'var(--border)', margin: '8px 0 10px' }} />
 
-      {/* Activity */}
-      <div className="section-label">Activity</div>
+      {/* ── Activity section ───────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <span className="section-label" style={{ marginBottom: 0 }}>Activity</span>
+      </div>
       <ActivityFeed teamId={teamId} threadId={threadId} />
 
-      {/* Bottom action buttons */}
+      {/* ── Bottom action tray ─────────────────────────── */}
       <div style={{
-        display: 'flex', gap: 6, marginTop: 12, paddingTop: 12,
+        display: 'flex', gap: 8, marginTop: 12, paddingTop: 12,
         borderTop: '1px solid var(--border)',
       }}>
         <button
-          className="btn-surface"
+          className="action-tray-btn"
           onClick={() => setMailOpen(true)}
-          style={{ flex: 1, position: 'relative' }}
         >
-          <Mail size={12} />
+          <Mail size={14} />
           Mail
           {badgeCount > 0 && (
             <span
               className="badge badge-red"
-              style={{ position: 'absolute', top: -6, right: -2 }}
+              style={{ position: 'absolute', top: -6, right: -4 }}
             >
               {badgeCount}
             </span>
           )}
         </button>
         <button
-          className="btn-surface"
+          className="action-tray-btn"
           onClick={() => setArtifactsOpen(true)}
-          style={{ flex: 1 }}
         >
-          <FolderOpen size={12} />
+          <FolderOpen size={14} />
           Files
         </button>
       </div>

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useActivity } from '../hooks/useActivity'
 import { useConversation } from '../hooks/useConversation'
+import { useTaskHistory } from '../hooks/useTaskHistory'
 import { rpcCall } from '../lib/rpc'
 import { ArrowUp, Zap } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { ActivityEvent, Item, UserMessageContent, AgentMessageContent } from '../lib/types'
+import type { ActivityEvent, Item, Task, UserMessageContent, AgentMessageContent } from '../lib/types'
 
 interface ConversationProps {
   threadId: string | null
@@ -18,6 +19,7 @@ interface ChatEntry {
   kind: 'user' | 'agent'
   text: string
   role?: string
+  createdAt: number
 }
 
 interface ChatTurn {
@@ -174,6 +176,7 @@ function toChatEntry(event: ActivityEvent): ChatEntry | null {
       kind: 'user',
       text,
       role: 'You',
+      createdAt: getTimestampMs(event.startedAt),
     }
   }
 
@@ -183,6 +186,7 @@ function toChatEntry(event: ActivityEvent): ChatEntry | null {
       kind: 'agent',
       text,
       role: extractRole(event),
+      createdAt: getTimestampMs(event.finishedAt ?? event.startedAt),
     }
   }
 
@@ -199,6 +203,7 @@ function itemToChatEntry(item: Item): ChatEntry | null {
       kind: 'user',
       text,
       role: 'You',
+      createdAt: getTimestampMs(item.createdAt),
     }
   }
   if (item.type === 'agent_message') {
@@ -210,9 +215,25 @@ function itemToChatEntry(item: Item): ChatEntry | null {
       kind: 'agent',
       text,
       role: 'agent',
+      createdAt: getTimestampMs(item.createdAt),
     }
   }
   return null
+}
+
+function taskToChatEntry(task: Task): ChatEntry | null {
+  const summary = task.summary?.trim()
+  if (!summary) return null
+  const kind = (task.taskKind ?? '').trim().toLowerCase()
+  if (kind === 'user_message') return null
+
+  return {
+    id: `task:${task.id}`,
+    kind: 'agent',
+    text: summary,
+    role: task.assignedRole?.trim() || task.roleSnapshot?.trim() || 'agent',
+    createdAt: getTimestampMs(task.completedAt || task.createdAt),
+  }
 }
 
 function extractActivityText(event: ActivityEvent): string {
@@ -241,9 +262,16 @@ function isTaskDonePlaceholder(text: string): boolean {
   return trimmed === '' || trimmed === 'Task finished' || trimmed === '(Task completed.)'
 }
 
+function getTimestampMs(value?: string): number {
+  if (!value) return 0
+  const ts = Date.parse(value)
+  return Number.isFinite(ts) ? ts : 0
+}
+
 export default function Conversation({ threadId, teamId, coordinatorRole }: ConversationProps) {
   const { query: conversationQuery } = useConversation(threadId)
   const activityQuery = useActivity({ threadId, teamId, includeChildRuns: true, limit: 500 })
+  const taskHistoryQuery = useTaskHistory({ threadId, teamId, limit: 500 })
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
@@ -254,18 +282,29 @@ export default function Conversation({ threadId, teamId, coordinatorRole }: Conv
   const entries = useMemo(() => {
     const fromItems = (conversationQuery.data ?? []).map(itemToChatEntry).filter((entry): entry is ChatEntry => entry !== null)
     const fromActivities = (activityQuery.data ?? []).map(toChatEntry).filter((entry): entry is ChatEntry => entry !== null)
-    const merged = [...fromItems]
-    const seen = new Set(merged.map((entry) => `${entry.kind}:${entry.text}`))
-    for (const entry of fromActivities) {
-      const key = `${entry.kind}:${entry.text}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      merged.push(entry)
+    const fromTasks = (taskHistoryQuery.data ?? []).map(taskToChatEntry).filter((entry): entry is ChatEntry => entry !== null)
+    const byID = new Map<string, ChatEntry>()
+    for (const entry of [...fromItems, ...fromTasks, ...fromActivities]) {
+      const prev = byID.get(entry.id)
+      if (!prev || entry.createdAt >= prev.createdAt) {
+        byID.set(entry.id, entry)
+      }
     }
-    const userSeen = new Set(merged.filter((entry) => entry.kind === 'user').map((entry) => `${entry.kind}:${entry.text}`))
-    const pending = optimistic.filter((entry) => !userSeen.has(`${entry.kind}:${entry.text}`))
-    return [...merged, ...pending]
-  }, [conversationQuery.data, activityQuery.data, optimistic])
+    const userSeen = new Set(
+      [...byID.values()]
+        .filter((entry) => entry.kind === 'user')
+        .map((entry) => entry.text),
+    )
+    for (const entry of optimistic) {
+      if (!userSeen.has(entry.text)) {
+        byID.set(entry.id, entry)
+      }
+    }
+    return [...byID.values()].sort((a, b) => {
+      if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt
+      return a.id.localeCompare(b.id)
+    })
+  }, [conversationQuery.data, activityQuery.data, optimistic, taskHistoryQuery.data])
 
   const turns = useMemo(() => {
     const grouped: ChatTurn[] = []
@@ -315,12 +354,13 @@ export default function Conversation({ threadId, teamId, coordinatorRole }: Conv
     setInput('')
     setOptimistic((prev) => [
       ...prev,
-      {
-        id: `optimistic-${Date.now()}`,
-        kind: 'user',
-        text,
-        role: 'You',
-      },
+        {
+          id: `optimistic-${Date.now()}`,
+          kind: 'user',
+          text,
+          role: 'You',
+          createdAt: Date.now(),
+        },
     ])
     try {
       await rpcCall('task.create', {
@@ -396,6 +436,7 @@ export default function Conversation({ threadId, teamId, coordinatorRole }: Conv
               kind: turn.kind,
               role: turn.role,
               text: turn.texts.join('\n\n'),
+              createdAt: 0,
             }
             return turn.kind === 'user' ? <UserBubble key={turn.id} entry={entry} /> : <AgentBubble key={turn.id} entry={entry} />
           })
