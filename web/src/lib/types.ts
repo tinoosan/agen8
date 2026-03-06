@@ -208,3 +208,18 @@ export interface Artifact {
   createdAt?: string
   sizeBytes?: number
 }
+
+export interface RuntimeRunState {
+  runId: string
+  model: string
+  status: string
+  effectiveStatus: string
+  workerPresent: boolean
+  runTotalTokens: number
+  runTotalCostUSD: number
+}
+
+export interface RuntimeGetSessionStateResult {
+  sessionId: string
+  runs: RuntimeRunState[]
+}

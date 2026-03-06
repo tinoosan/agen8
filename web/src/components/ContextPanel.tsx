@@ -4,6 +4,7 @@ import { useMail } from '../hooks/useMail'
 import RoleRow from './RoleRow'
 import ActivityFeed from './ActivityFeed'
 import { Mail, FolderOpen } from 'lucide-react'
+import { useRuntimeState } from '../hooks/useRuntimeState'
 
 interface ContextPanelProps {
   teamId: string
@@ -13,9 +14,21 @@ interface ContextPanelProps {
 export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
   const { setMailOpen, setArtifactsOpen } = useStore()
   const statusQuery = useTeamStatus(teamId)
+  const runtimeQuery = useRuntimeState(threadId || '')
   const { badgeCount } = useMail(teamId)
   const roles = statusQuery.data?.roles ?? []
   const isLoading = statusQuery.isLoading
+
+  const roleByRunId = statusQuery.data?.roleByRunId || {}
+  const statsByRole: Record<string, { tokens: number; cost: number; model?: string }> = {}
+
+  for (const run of runtimeQuery.data?.runs || []) {
+    const role = roleByRunId[run.runId] || '(coordinator)'
+    if (!statsByRole[role]) statsByRole[role] = { tokens: 0, cost: 0 }
+    statsByRole[role].tokens += run.runTotalTokens
+    statsByRole[role].cost += run.runTotalCostUSD
+    if (run.model) statsByRole[role].model = run.model
+  }
 
   return (
     <div style={{
@@ -46,7 +59,13 @@ export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
           <div style={{ fontSize: 11, color: 'var(--text-3)', padding: '6px 0' }}>No roles</div>
         ) : (
           <div className="roles-container">
-            {roles.map(role => <RoleRow key={role.role} role={role} />)}
+            {roles.map(role => (
+              <RoleRow
+                key={role.role}
+                role={role}
+                stats={statsByRole[role.role]}
+              />
+            ))}
           </div>
         )}
       </div>

@@ -1,6 +1,8 @@
 import { useRef, useState, useEffect, useMemo } from 'react'
 import { useActivity } from '../hooks/useActivity'
 import type { ActivityEvent } from '../lib/types'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { ChevronRight, Activity } from 'lucide-react'
 
 interface ActivityFeedProps {
@@ -34,7 +36,14 @@ function humanizeKind(kind: string): string | null {
     'fs_read': 'Read',
     'fs_write': 'Write',
     'fs_list': 'List',
+    'fs_stat': 'Stat',
+    'fs_delete': 'Delete',
+    'fs_mkdir': 'Mkdir',
+    'fs_move': 'Move',
+    'fs_replace': 'Replace',
+    'fs_search': 'Search',
     'code_exec': 'Exec',
+    'code_compile': 'Compile',
     'tool_execution': 'Tool',
     'user_message': 'Message',
     'agent_message': 'Reply',
@@ -122,26 +131,114 @@ function buildFeed(events: ActivityEvent[]): FeedEntry[] {
 
 /* ── Single event row ───────────────────────────────── */
 
+function renderJSONOrText(data: any): string {
+  if (typeof data === 'string') return data
+  return JSON.stringify(data, null, 2)
+}
+
 function EventRow({ event }: { event: ActivityEvent }) {
   const [expanded, setExpanded] = useState(false)
-  const summary = event.title || event.outputPreview || event.textPreview || event.path || event.kind
-  const role = event.data?.role || event.data?.agent_role
+  const eventRole = event.data?.role || event.data?.agent_role || ''
+  const message = event.title || event.outputPreview || event.textPreview || ''
+
+  // Handle specialized "Thinking" blocks
+  if (event.kind === 'model.thinking.summary') {
+    return (
+      <div
+        className="activity-row"
+        style={{
+          background: 'rgba(255, 255, 255, 0.015)',
+          borderLeft: '2px solid var(--accent)',
+          borderTop: '1px solid rgba(255, 255, 255, 0.03)',
+          borderRight: '1px solid rgba(255, 255, 255, 0.03)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
+          marginBottom: 6,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, width: '100%' }}>
+          {/* Animated thinking pulse */}
+          <div style={{
+            width: 6, height: 6, borderRadius: '50%',
+            background: 'var(--accent)',
+            animation: 'pulse-soft 2s infinite',
+            marginLeft: 4,
+          }} />
+
+          {/* Role text label */}
+          {eventRole && (
+            <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', letterSpacing: '0.04em', textTransform: 'uppercase', flexShrink: 0 }}>
+              {eventRole}
+            </span>
+          )}
+
+          <span className="truncate" style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-1)', fontStyle: 'italic', flexShrink: 0, maxWidth: 300 }}>
+            {message || 'Thinking...'}
+          </span>
+
+          {/* Optional extracted text */}
+          {event.data?.text && (
+            <span className="truncate" style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic', flex: 1 }}>
+              {event.data.text}
+            </span>
+          )}
+
+          {/* Relative timestamp */}
+          {event.startedAt && (
+            <span style={{
+              fontSize: 10, color: 'var(--text-4)',
+              fontVariantNumeric: 'tabular-nums',
+              flexShrink: 0,
+            }}>
+              {relativeTime(event.startedAt)}
+            </span>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Filter out the noisy start/end thinking events
+  if (event.kind === 'model.thinking.start' || event.kind === 'model.thinking.end') {
+    return null
+  }
+
+  const summary = message || event.kind || ''
+  const role = eventRole
   const statusClass = getStatusClass(event)
-  const isError = statusClass === 'error'
+  const isError = event.status === 'error' || event.kind === 'error'
 
   // Build a rich detail object of all interesting payload fields to display when expanded.
   const detailsList = useMemo(() => {
-    const d: Record<string, string> = {}
-    if (event.path) d['Path'] = event.path
-    if (event.textPreview) d['Input/Text'] = event.textPreview
+    const d: Record<string, React.ReactNode> = {}
+
+    // Add Syntax Highlighting for code_exec
+    if (event.kind === 'code_exec' && event.data?.code) {
+      d['Code Executed'] = (
+        <SyntaxHighlighter
+          language={event.data?.language || 'javascript'}
+          style={vscDarkPlus}
+          customStyle={{ margin: 0, padding: '12px', fontSize: '11px', borderRadius: '4px', background: 'rgba(0,0,0,0.2)' }}
+        >
+          {event.data.code}
+        </SyntaxHighlighter>
+      )
+    }
+
     if (event.data) {
-      for (const [k, v] of Object.entries(event.data)) {
-        if (k === 'role' || k === 'agent_role') continue // Already shown in the header
-        d[k] = v
+      const remainingData = { ...event.data }
+      delete remainingData.role
+      delete remainingData.agent_role
+      // Don't duplicate the code payload if we already rendered it
+      if (event.kind === 'code_exec') delete remainingData.code
+
+      if (Object.keys(remainingData).length > 0) {
+        d['Data payload'] = <span className="mono">{renderJSONOrText(remainingData)}</span>
       }
     }
-    if (event.outputPreview) d['Output'] = event.outputPreview
-    if (event.error) d['Error'] = event.error
+
+    if (event.path) d['Path'] = <span className="mono">{event.path}</span>
+    if (event.outputPreview) d['Output'] = <span className="mono">{event.outputPreview}</span>
+    if (event.error) d['Error'] = <span className="mono">{event.error}</span>
     return d
   }, [event])
 
@@ -234,15 +331,13 @@ function EventRow({ event }: { event: ActivityEvent }) {
                   {key}
                 </div>
                 <div
-                  className="mono"
                   style={{
                     fontSize: 11,
                     color: 'var(--text-2)',
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
-                    maxHeight: 200,
-                    overflow: 'auto',
-                    lineHeight: 1.6,
+                    maxHeight: 250,
+                    overflowY: 'auto',
                   }}
                 >
                   {val}
