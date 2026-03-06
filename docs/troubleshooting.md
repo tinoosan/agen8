@@ -49,6 +49,16 @@ This guide captures common issues and diagnostics that surface when running Agen
   2. Review counts/details for unexpected matches or skips.
   3. Re-run with `apply=true` once the dry-run output looks correct.
 
+## pipe
+
+- **Use it for linear flows**: `pipe` is for straightforward tool-to-tool dataflow. If you need loops, branching, or custom shaping, switch to `code_exec`.
+- **Selector failures**: if a step uses `output="foo.bar"` and that field does not exist, the pipeline fails fast at that step. Re-run in `debug=true` mode to inspect per-step summaries.
+- **Transform type mismatches**: string transforms (`uppercase`, `trim`, `regex_replace`) require a string current value. `join` expects an array, `split` expects a string, and `get` expects an object-like value.
+- **Recommended patterns**:
+  1. `fs_read -> uppercase -> fs_write`
+  2. `http_fetch -> json_parse -> get -> json_stringify -> fs_write`
+  3. `shell_exec -> output=stdout -> trim`
+
 ## fs_write verification/checksum
 
 - **Verify critical writes**: use `tools.fs_write(path="...", text="...", verify=true)` to force read-back validation.

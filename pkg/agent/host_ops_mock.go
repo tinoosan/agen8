@@ -10,11 +10,13 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	hosttools "github.com/tinoosan/agen8/pkg/agent/hosttools"
 	"github.com/tinoosan/agen8/pkg/checksumutil"
 	"github.com/tinoosan/agen8/pkg/debuglog"
 	"github.com/tinoosan/agen8/pkg/store"
@@ -153,6 +155,7 @@ var (
 		types.HostOpFSArchiveList:    fsArchiveListMockOp{},
 
 		types.HostOpShellExec: shellExecMockOp{},
+		types.HostOpPipe:      pipeMockOp{},
 		types.HostOpHTTPFetch: httpFetchMockOp{},
 		types.HostOpCodeExec:  codeExecMockOp{},
 		types.HostOpTrace:     traceMockOp{},
@@ -274,6 +277,351 @@ func (fsSearchMockOp) Exec(ctx context.Context, req types.HostOpRequest, x *Host
 		ResultsTotal:     searchResp.Total,
 		ResultsReturned:  searchResp.Returned,
 		ResultsTruncated: searchResp.Truncated,
+	}
+}
+
+type pipeMockOp struct{}
+
+func (pipeMockOp) Exec(ctx context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
+	debugEnabled := req.PipeOptions != nil && req.PipeOptions.Debug
+	maxValueBytes := 65536
+	if req.PipeOptions != nil && req.PipeOptions.MaxValueBytes > 0 {
+		maxValueBytes = req.PipeOptions.MaxValueBytes
+	}
+
+	var current any
+	stepResults := make([]types.PipeStepResult, 0, len(req.PipeSteps))
+	for i, step := range req.PipeSteps {
+		start := time.Now()
+		result := types.PipeStepResult{
+			Index: i + 1,
+			Type:  strings.ToLower(strings.TrimSpace(step.Type)),
+			Name:  pipeStepName(step),
+		}
+
+		nextValue, err := executePipeStep(ctx, step, current, x)
+		result.DurationMs = time.Since(start).Milliseconds()
+		if err != nil {
+			result.Error = err.Error()
+			stepResults = append(stepResults, result)
+			resp := types.HostOpResponse{
+				Op:               req.Op,
+				Ok:               false,
+				Error:            err.Error(),
+				PipeFailedAtStep: i + 1,
+				PipeDebug:        debugEnabled,
+				PipeStepResults:  stepResults,
+			}
+			if b, jerr := json.Marshal(current); jerr == nil && len(b) != 0 {
+				resp.PipeValue = b
+			}
+			return resp
+		}
+
+		result.OutputType = pipeValueType(nextValue)
+		result.OutputPreview = pipeValuePreview(nextValue)
+		if err := validatePipeValueSize(nextValue, maxValueBytes); err != nil {
+			result.Error = err.Error()
+			stepResults = append(stepResults, result)
+			resp := types.HostOpResponse{
+				Op:               req.Op,
+				Ok:               false,
+				Error:            err.Error(),
+				PipeFailedAtStep: i + 1,
+				PipeDebug:        debugEnabled,
+				PipeStepResults:  stepResults,
+			}
+			if b, jerr := json.Marshal(current); jerr == nil && len(b) != 0 {
+				resp.PipeValue = b
+			}
+			return resp
+		}
+
+		if debugEnabled {
+			stepResults = append(stepResults, result)
+		}
+		current = nextValue
+	}
+
+	resp := types.HostOpResponse{
+		Op:              req.Op,
+		Ok:              true,
+		PipeDebug:       debugEnabled,
+		PipeStepResults: stepResults,
+	}
+	if b, err := json.Marshal(current); err == nil && len(b) != 0 {
+		resp.PipeValue = b
+	}
+	return resp
+}
+
+func executePipeStep(ctx context.Context, step types.PipeStep, current any, x *HostOpExecutor) (any, error) {
+	switch strings.ToLower(strings.TrimSpace(step.Type)) {
+	case "tool":
+		return executePipeToolStep(ctx, step, current, x)
+	case "transform":
+		return executePipeTransformStep(step, current)
+	default:
+		return nil, fmt.Errorf("unsupported pipe step type %q", step.Type)
+	}
+}
+
+func executePipeToolStep(ctx context.Context, step types.PipeStep, current any, x *HostOpExecutor) (any, error) {
+	args := make(map[string]any, len(step.Args)+1)
+	for k, v := range step.Args {
+		args[k] = v
+	}
+	if inputArg := strings.TrimSpace(step.InputArg); inputArg != "" {
+		args[inputArg] = current
+	}
+	rawArgs, err := json.Marshal(args)
+	if err != nil {
+		return nil, fmt.Errorf("marshal pipe step args: %w", err)
+	}
+	nestedReq, err := compilePipeNestedRequest(ctx, step.Tool, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	if err := nestedReq.Validate(); err != nil {
+		return nil, err
+	}
+	nestedOp, ok := mockHostOperationFor(nestedReq.Op)
+	if !ok {
+		return nil, fmt.Errorf("unsupported nested op %q", nestedReq.Op)
+	}
+	resp := nestedOp.Exec(ctx, nestedReq, x)
+	if !resp.Ok {
+		if strings.TrimSpace(resp.Error) != "" {
+			return nil, errors.New(resp.Error)
+		}
+		return nil, fmt.Errorf("nested tool %q failed", step.Tool)
+	}
+	payload, err := pipeResponseToValue(resp)
+	if err != nil {
+		return nil, err
+	}
+	if selector := strings.TrimSpace(step.Output); selector != "" {
+		return resolvePipeSelector(payload, selector)
+	}
+	return payload, nil
+}
+
+func compilePipeNestedRequest(ctx context.Context, tool string, args json.RawMessage) (types.HostOpRequest, error) {
+	var t interface {
+		Execute(context.Context, json.RawMessage) (types.HostOpRequest, error)
+	}
+	switch strings.ToLower(strings.TrimSpace(tool)) {
+	case types.HostOpFSRead:
+		t = &hosttools.FSReadTool{}
+	case types.HostOpFSWrite:
+		t = &hosttools.FSWriteTool{}
+	case types.HostOpFSAppend:
+		t = &hosttools.FSAppendTool{}
+	case types.HostOpFSSearch:
+		t = &hosttools.FSSearchTool{}
+	case types.HostOpFSStat:
+		t = &hosttools.FSStatTool{}
+	case types.HostOpHTTPFetch:
+		t = &hosttools.HTTPFetchTool{}
+	case types.HostOpShellExec:
+		t = &hosttools.ShellExecTool{}
+	case types.HostOpEmail:
+		t = &hosttools.EmailTool{}
+	default:
+		return types.HostOpRequest{}, fmt.Errorf("pipe tool %q is not supported in pipe v1", tool)
+	}
+	return t.Execute(ctx, args)
+}
+
+func pipeResponseToValue(resp types.HostOpResponse) (any, error) {
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return nil, fmt.Errorf("marshal pipe step response: %w", err)
+	}
+	var out any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, fmt.Errorf("decode pipe step response: %w", err)
+	}
+	return out, nil
+}
+
+func resolvePipeSelector(value any, selector string) (any, error) {
+	current := value
+	for _, part := range strings.Split(strings.TrimSpace(selector), ".") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, fmt.Errorf("invalid empty selector segment in %q", selector)
+		}
+		obj, ok := current.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("selector %q expected object at %q", selector, part)
+		}
+		next, ok := obj[part]
+		if !ok {
+			return nil, fmt.Errorf("selector %q did not match field %q", selector, part)
+		}
+		current = next
+	}
+	return current, nil
+}
+
+func executePipeTransformStep(step types.PipeStep, current any) (any, error) {
+	switch strings.ToLower(strings.TrimSpace(step.Transform)) {
+	case "uppercase":
+		s, err := pipeStringValue(current, "uppercase")
+		if err != nil {
+			return nil, err
+		}
+		return strings.ToUpper(s), nil
+	case "lowercase":
+		s, err := pipeStringValue(current, "lowercase")
+		if err != nil {
+			return nil, err
+		}
+		return strings.ToLower(s), nil
+	case "trim":
+		s, err := pipeStringValue(current, "trim")
+		if err != nil {
+			return nil, err
+		}
+		return strings.TrimSpace(s), nil
+	case "json_parse":
+		s, err := pipeStringValue(current, "json_parse")
+		if err != nil {
+			return nil, err
+		}
+		var out any
+		if err := json.Unmarshal([]byte(s), &out); err != nil {
+			return nil, fmt.Errorf("json_parse: %w", err)
+		}
+		return out, nil
+	case "json_stringify":
+		b, err := json.Marshal(current)
+		if err != nil {
+			return nil, fmt.Errorf("json_stringify: %w", err)
+		}
+		return string(b), nil
+	case "get":
+		obj, ok := current.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("get requires an object value")
+		}
+		value, ok := obj[step.Field]
+		if !ok {
+			return nil, fmt.Errorf("get field %q not found", step.Field)
+		}
+		return value, nil
+	case "join":
+		items, err := pipeSliceValues(current, "join")
+		if err != nil {
+			return nil, err
+		}
+		parts := make([]string, 0, len(items))
+		for _, item := range items {
+			parts = append(parts, fmt.Sprint(item))
+		}
+		return strings.Join(parts, step.Separator), nil
+	case "split":
+		s, err := pipeStringValue(current, "split")
+		if err != nil {
+			return nil, err
+		}
+		return strings.Split(s, step.Separator), nil
+	case "regex_replace":
+		s, err := pipeStringValue(current, "regex_replace")
+		if err != nil {
+			return nil, err
+		}
+		re, err := regexp.Compile(step.Pattern)
+		if err != nil {
+			return nil, fmt.Errorf("regex_replace: %w", err)
+		}
+		return re.ReplaceAllString(s, step.Replacement), nil
+	default:
+		return nil, fmt.Errorf("unsupported transform %q", step.Transform)
+	}
+}
+
+func pipeStringValue(value any, transform string) (string, error) {
+	s, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("%s requires a string value", transform)
+	}
+	return s, nil
+}
+
+func pipeSliceValues(value any, transform string) ([]any, error) {
+	switch v := value.(type) {
+	case []any:
+		return v, nil
+	case []string:
+		out := make([]any, 0, len(v))
+		for _, item := range v {
+			out = append(out, item)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("%s requires an array value", transform)
+	}
+}
+
+func validatePipeValueSize(value any, maxValueBytes int) error {
+	b, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("marshal pipe value: %w", err)
+	}
+	if len(b) > maxValueBytes {
+		return fmt.Errorf("pipe value exceeds maxValueBytes (%d > %d)", len(b), maxValueBytes)
+	}
+	return nil
+}
+
+func pipeStepName(step types.PipeStep) string {
+	if strings.EqualFold(step.Type, "tool") {
+		return strings.ToLower(strings.TrimSpace(step.Tool))
+	}
+	return strings.ToLower(strings.TrimSpace(step.Transform))
+}
+
+func pipeValueType(value any) string {
+	switch value.(type) {
+	case nil:
+		return "null"
+	case string:
+		return "string"
+	case bool:
+		return "bool"
+	case float64, float32, int, int64, int32, uint, uint64, uint32:
+		return "number"
+	case []any, []string:
+		return "array"
+	case map[string]any:
+		return "object"
+	default:
+		return fmt.Sprintf("%T", value)
+	}
+}
+
+func pipeValuePreview(value any) string {
+	if value == nil {
+		return "null"
+	}
+	switch v := value.(type) {
+	case string:
+		v = strings.TrimSpace(v)
+		if len(v) > 120 {
+			return v[:120] + "..."
+		}
+		return v
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return pipeValueType(value)
+		}
+		if len(b) > 160 {
+			return string(b[:160]) + "..."
+		}
+		return string(b)
 	}
 }
 

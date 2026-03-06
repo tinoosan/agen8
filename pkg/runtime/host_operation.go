@@ -108,6 +108,7 @@ func defaultHostOperations() []HostOperation {
 		fsArchiveExtractOperation{},
 		fsArchiveListOperation{},
 		shellExecOperation{},
+		pipeOperation{},
 		codeExecOperation{},
 		httpFetchOperation{},
 		browserOperation{},
@@ -955,6 +956,93 @@ func (fsTxnOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.Host
 			respData["txnRollbackErrors"] = v
 			storeResp["txnRollbackErrors"] = v
 		}
+	}
+}
+
+type pipeOperation struct{}
+
+func (pipeOperation) Op() string { return types.HostOpPipe }
+func (pipeOperation) Execute(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
+	return next(ctx, req)
+}
+func (pipeOperation) FormatRequestText(_ types.HostOpRequest, reqData map[string]string) string {
+	return opformat.FormatRequestText(reqData)
+}
+func (pipeOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpResponse, _ map[string]string, respData map[string]string) string {
+	return opformat.FormatResponseText(respData)
+}
+func (pipeOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
+	steps := strconv.Itoa(len(req.PipeSteps))
+	reqData["steps"] = steps
+	storeReq["steps"] = steps
+	if req.PipeOptions == nil {
+		return
+	}
+	if req.PipeOptions.Debug {
+		reqData["debug"] = "true"
+		storeReq["debug"] = "true"
+	}
+	if req.PipeOptions.MaxSteps != 0 {
+		v := strconv.Itoa(req.PipeOptions.MaxSteps)
+		reqData["maxSteps"] = v
+		storeReq["maxSteps"] = v
+	}
+	if req.PipeOptions.MaxValueBytes != 0 {
+		v := strconv.Itoa(req.PipeOptions.MaxValueBytes)
+		reqData["maxValueBytes"] = v
+		storeReq["maxValueBytes"] = v
+	}
+}
+func (pipeOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	if resp.PipeFailedAtStep != 0 {
+		v := strconv.Itoa(resp.PipeFailedAtStep)
+		respData["failedAtStep"] = v
+		storeResp["failedAtStep"] = v
+	}
+	if resp.PipeDebug {
+		respData["pipeDebug"] = "true"
+		storeResp["pipeDebug"] = "true"
+	}
+	if len(resp.PipeStepResults) != 0 {
+		v := strconv.Itoa(len(resp.PipeStepResults))
+		respData["pipeSteps"] = v
+		storeResp["pipeSteps"] = v
+		if b, err := json.Marshal(resp.PipeStepResults); err == nil {
+			respData["pipeStepResults"] = string(b)
+			storeResp["pipeStepResults"] = string(b)
+		}
+	}
+	if len(resp.PipeValue) != 0 {
+		respData["pipeValue"] = string(resp.PipeValue)
+		storeResp["pipeValue"] = string(resp.PipeValue)
+		valueBytes := strconv.Itoa(len(resp.PipeValue))
+		respData["pipeValueBytes"] = valueBytes
+		storeResp["pipeValueBytes"] = valueBytes
+		var decoded any
+		if err := json.Unmarshal(resp.PipeValue, &decoded); err == nil {
+			valueType := pipeRuntimeValueType(decoded)
+			respData["pipeValueType"] = valueType
+			storeResp["pipeValueType"] = valueType
+		}
+	}
+}
+
+func pipeRuntimeValueType(v any) string {
+	switch v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return "string"
+	case bool:
+		return "bool"
+	case float64:
+		return "number"
+	case []any:
+		return "array"
+	case map[string]any:
+		return "object"
+	default:
+		return "value"
 	}
 }
 

@@ -67,6 +67,10 @@ var catalog = map[string]metadata{
 		category:              "Ran",
 		useSharedRequestTitle: true,
 	},
+	"pipe": {
+		category:              "Ran",
+		useSharedRequestTitle: true,
+	},
 	"code_exec": {
 		category:              "Ran",
 		useSharedRequestTitle: true,

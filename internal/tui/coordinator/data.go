@@ -608,6 +608,8 @@ func kindToVerb(kind string, path string, data map[string]string) string {
 		return "List archive"
 	case "shell_exec":
 		return "Bash"
+	case "pipe":
+		return "Pipe"
 	case "http_fetch":
 		return "Fetched"
 	case "browser":
