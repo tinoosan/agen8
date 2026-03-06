@@ -29,6 +29,11 @@ func TestFormatRequestTitle_SharedOps(t *testing.T) {
 			want: "Txn 3 steps",
 		},
 		{
+			name: "batch edit",
+			data: map[string]string{"op": "fs_batch_edit", "path": "/knowledge", "glob": "**/*.md"},
+			want: "Batch edit /knowledge (**/*.md)",
+		},
+		{
 			name: "archive create",
 			data: map[string]string{"op": "fs_archive_create", "path": "/workspace/journals", "destination": "/workspace/journals.tar.gz"},
 			want: "Archive /workspace/journals -> /workspace/journals.tar.gz",

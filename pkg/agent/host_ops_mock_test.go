@@ -578,6 +578,99 @@ func TestHostOpExecutor_FSTxn_ApplyFailureRollbackFailureSurfaced(t *testing.T) 
 	}
 }
 
+func TestHostOpExecutor_FSBatchEdit_DryRunDoesNotWrite(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	if err := exec.FS.Write("/workspace/a.md", []byte("old old")); err != nil {
+		t.Fatal(err)
+	}
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSBatchEdit,
+		Path: "/workspace",
+		Glob: "*.md",
+		BatchEditEdits: []types.BatchEdit{
+			{Old: "old", New: "new", Occurrence: "all"},
+		},
+	})
+	if !resp.Ok || !resp.BatchEditDryRun {
+		t.Fatalf("expected dry-run success, got %#v", resp)
+	}
+	if resp.MatchedFiles != 1 || resp.ModifiedFiles != 1 {
+		t.Fatalf("unexpected counts: %#v", resp)
+	}
+	out, err := exec.FS.Read("/workspace/a.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "old old" {
+		t.Fatalf("dry-run should not write, got %q", string(out))
+	}
+}
+
+func TestHostOpExecutor_FSBatchEdit_ApplySuccess(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	if err := exec.FS.Write("/workspace/a.md", []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.FS.Write("/workspace/b.md", []byte("skip")); err != nil {
+		t.Fatal(err)
+	}
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSBatchEdit,
+		Path: "/workspace",
+		Glob: "*.md",
+		BatchEditEdits: []types.BatchEdit{
+			{Old: "old", New: "new", Occurrence: "all"},
+		},
+		BatchEditOptions: &types.BatchOptions{Apply: true, RollbackOnError: true},
+	})
+	if !resp.Ok || !resp.BatchEditApplied {
+		t.Fatalf("expected apply success, got %#v", resp)
+	}
+	if resp.ModifiedFiles != 1 || resp.SkippedFiles != 1 {
+		t.Fatalf("unexpected counts: %#v", resp)
+	}
+	out, err := exec.FS.Read("/workspace/a.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "new" {
+		t.Fatalf("expected edited file, got %q", string(out))
+	}
+}
+
+func TestHostOpExecutor_FSBatchEdit_ApplyFailureRollsBack(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	if err := exec.FS.Write("/workspace/a.md", []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.FS.Write("/workspace/b.md", []byte("other")); err != nil {
+		t.Fatal(err)
+	}
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSBatchEdit,
+		Path: "/workspace",
+		Glob: "*.md",
+		BatchEditEdits: []types.BatchEdit{
+			{Old: "old", New: "new", Occurrence: "all"},
+			{Old: "new", New: "newer", Occurrence: "2"},
+		},
+		BatchEditOptions: &types.BatchOptions{Apply: true, RollbackOnError: true},
+	})
+	if resp.Ok {
+		t.Fatalf("expected failure, got %#v", resp)
+	}
+	if !resp.BatchEditRollbackPerformed || resp.BatchEditRollbackFailed {
+		t.Fatalf("expected rollback success, got %#v", resp)
+	}
+	out, err := exec.FS.Read("/workspace/a.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "old" {
+		t.Fatalf("expected rollback to restore content, got %q", string(out))
+	}
+}
+
 func TestHostOpExecutor_FSArchiveCreateListExtract(t *testing.T) {
 	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
 	if err := exec.FS.Write("/workspace/journals/a.md", []byte("alpha")); err != nil {

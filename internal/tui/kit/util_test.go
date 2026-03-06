@@ -86,3 +86,9 @@ func TestVerbFromKind_FSArchiveCreate(t *testing.T) {
 		t.Fatalf("VerbFromKind(fs_archive_create) = %q, want %q", got, "Archive")
 	}
 }
+
+func TestVerbFromKind_FSBatchEdit(t *testing.T) {
+	if got := VerbFromKind("fs_batch_edit"); got != "Batch edit" {
+		t.Fatalf("VerbFromKind(fs_batch_edit) = %q, want %q", got, "Batch edit")
+	}
+}

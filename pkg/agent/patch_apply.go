@@ -21,25 +21,49 @@ func ApplyStructuredEdits(before string, input json.RawMessage) (string, error) 
 	if err := json.Unmarshal(input, &in); err != nil {
 		return "", fmt.Errorf("invalid input JSON: %w", err)
 	}
-	if len(in.Edits) == 0 {
-		return "", fmt.Errorf("input.edits must be non-empty")
+	edits := make([]types.BatchEdit, 0, len(in.Edits))
+	for _, e := range in.Edits {
+		edits = append(edits, types.BatchEdit{
+			Old:        e.Old,
+			New:        e.New,
+			Occurrence: strconv.Itoa(e.Occurrence),
+		})
+	}
+	after, _, err := ApplyStructuredBatchEdits(before, edits)
+	return after, err
+}
+
+// ApplyStructuredBatchEdits applies exact-match replacements and returns the total replacements made.
+func ApplyStructuredBatchEdits(before string, edits []types.BatchEdit) (string, int, error) {
+	if len(edits) == 0 {
+		return "", 0, fmt.Errorf("input.edits must be non-empty")
 	}
 
 	after := before
-	for i, e := range in.Edits {
+	totalApplied := 0
+	for i, e := range edits {
 		if strings.TrimSpace(e.Old) == "" {
-			return "", fmt.Errorf("edit[%d].old must be non-empty", i)
+			return "", totalApplied, fmt.Errorf("edit[%d].old must be non-empty", i)
 		}
-		if e.Occurrence <= 0 {
-			return "", fmt.Errorf("edit[%d].occurrence must be >= 1", i)
+		occurrence := strings.TrimSpace(e.Occurrence)
+		if occurrence == "" || strings.EqualFold(occurrence, "all") {
+			var applied int
+			after, applied = replaceAllCount(after, e.Old, e.New)
+			totalApplied += applied
+			continue
 		}
-		var err error
-		after, err = replaceNth(after, e.Old, e.New, e.Occurrence)
+		n, err := strconv.Atoi(occurrence)
+		if err != nil || n <= 0 {
+			return "", totalApplied, fmt.Errorf("edit[%d].occurrence must be \"all\" or an integer >= 1", i)
+		}
+		next, err := replaceNth(after, e.Old, e.New, n)
 		if err != nil {
-			return "", fmt.Errorf("edit[%d] failed: %w", i, err)
+			return "", totalApplied, fmt.Errorf("edit[%d] failed: %w", i, err)
 		}
+		after = next
+		totalApplied++
 	}
-	return after, nil
+	return after, totalApplied, nil
 }
 
 // ApplyUnifiedDiffStrict applies a unified diff patch (fs_patch) with no fuzz.
@@ -326,4 +350,15 @@ func replaceNth(s, old, new string, occurrence int) (string, error) {
 		idx = pos + len(old)
 	}
 	return s, fmt.Errorf("old not found at occurrence %d", occurrence)
+}
+
+func replaceAllCount(s, old, new string) (string, int) {
+	if old == "" {
+		return s, 0
+	}
+	count := strings.Count(s, old)
+	if count == 0 {
+		return s, 0
+	}
+	return strings.ReplaceAll(s, old, new), count
 }

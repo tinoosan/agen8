@@ -61,6 +61,8 @@ func VerbFromKind(kind string) string {
 		return "Edit"
 	case "fs_patch":
 		return "Patch"
+	case "fs_batch_edit":
+		return "Batch edit"
 	case "fs_txn":
 		return "Txn"
 	case "fs_search":

@@ -110,6 +110,31 @@ func FormatResponseText(d map[string]string) string {
 	}
 
 	switch op {
+	case "fs_batch_edit":
+		matched := strings.TrimSpace(d["matchedFiles"])
+		modified := strings.TrimSpace(d["modifiedFiles"])
+		if matched == "" {
+			matched = "0"
+		}
+		if modified == "" {
+			modified = "0"
+		}
+		if ok == "true" {
+			if strings.TrimSpace(d["batchEditDryRun"]) == "true" {
+				return prefix + " batch edit dry-run " + matched + " matched, " + modified + " modified"
+			}
+			return prefix + " batch edit applied " + modified + " files"
+		}
+		if errStr != "" {
+			return prefix + " " + errStr
+		}
+		if failed := strings.TrimSpace(d["failedFiles"]); failed != "" {
+			if strings.TrimSpace(d["batchEditRollbackFailed"]) == "true" {
+				return prefix + " batch edit failed (" + failed + " failed, rollback failed)"
+			}
+			return prefix + " batch edit failed (" + failed + " failed)"
+		}
+		return prefix + " batch edit failed"
 	case "fs_archive_create":
 		if ok == "true" {
 			added := strings.TrimSpace(d["filesAdded"])

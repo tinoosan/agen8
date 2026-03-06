@@ -405,6 +405,18 @@ func TestEventMiddleware_EmitsRequestTextForRepresentativeOps(t *testing.T) {
 			want: "Patch /workspace/a.txt",
 		},
 		{
+			name: "fs_batch_edit",
+			req: types.HostOpRequest{
+				Op:   types.HostOpFSBatchEdit,
+				Path: "/knowledge",
+				Glob: "**/*.md",
+				BatchEditEdits: []types.BatchEdit{
+					{Old: "[[old]]", New: "[[new]]", Occurrence: "all"},
+				},
+			},
+			want: "Batch edit /knowledge (**/*.md)",
+		},
+		{
 			name: "fs_txn",
 			req: types.HostOpRequest{
 				Op: types.HostOpFSTxn,
@@ -501,6 +513,14 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 					StepsTotal:   2,
 				},
 			}
+		case types.HostOpFSBatchEdit:
+			return types.HostOpResponse{
+				Op:              req.Op,
+				Ok:              true,
+				MatchedFiles:    6,
+				ModifiedFiles:   4,
+				BatchEditDryRun: true,
+			}
 		case types.HostOpFSRead:
 			return types.HostOpResponse{Op: req.Op, Ok: true, Truncated: true}
 		case types.HostOpFSArchiveCreate:
@@ -561,6 +581,7 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 		{name: "fs_stat", req: types.HostOpRequest{Op: types.HostOpFSStat, Path: "/workspace/a.txt"}, want: "✓ file 12 bytes"},
 		{name: "fs_patch", req: types.HostOpRequest{Op: types.HostOpFSPatch, Path: "/workspace/a.txt", Text: "@@ -1 +1 @@\n-old\n+new\n", DryRun: true}, want: "✓ dry-run 1/2 hunks"},
 		{name: "fs_txn", req: types.HostOpRequest{Op: types.HostOpFSTxn, TxnSteps: []types.FSTxnStep{{Op: types.HostOpFSWrite, Path: "/workspace/a.txt", Text: "hello"}, {Op: types.HostOpFSAppend, Path: "/workspace/a.txt", Text: " world"}}}, want: "✓ txn applied 2/2 steps"},
+		{name: "fs_batch_edit", req: types.HostOpRequest{Op: types.HostOpFSBatchEdit, Path: "/knowledge", Glob: "**/*.md", BatchEditEdits: []types.BatchEdit{{Old: "old", New: "new", Occurrence: "all"}}}, want: "✓ batch edit dry-run 6 matched, 4 modified"},
 		{name: "fs_archive_create", req: types.HostOpRequest{Op: types.HostOpFSArchiveCreate, Path: "/workspace/journals", Destination: "/workspace/journals.tar.gz", Format: "tar.gz"}, want: "✓ archived 3 files (0.3400)"},
 		{name: "fs_archive_extract", req: types.HostOpRequest{Op: types.HostOpFSArchiveExtract, Path: "/workspace/journals.tar.gz", Destination: "/workspace/out"}, want: "✓ extracted 2 files (1 skipped)"},
 		{name: "fs_archive_list", req: types.HostOpRequest{Op: types.HostOpFSArchiveList, Path: "/workspace/journals.tar.gz"}, want: "✓ listed 2 entries (truncated)"},
@@ -735,6 +756,85 @@ func TestEventMiddleware_FSArchiveRequestAndResponseEnrichment(t *testing.T) {
 	}
 	if gotResp.Data["skipped"] == "" || !strings.Contains(gotResp.Data["skipped"], "/workspace/out/a.txt") {
 		t.Fatalf("expected skipped list in response enrichment, got %v", gotResp.Data)
+	}
+}
+
+func TestEventMiddleware_FSBatchEditRequestAndResponseEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{
+			Op:                         req.Op,
+			Ok:                         true,
+			MatchedFiles:               12,
+			ModifiedFiles:              9,
+			SkippedFiles:               3,
+			BatchEditDryRun:            true,
+			BatchEditRollbackPerformed: true,
+			BatchEditDetails: []types.BatchEditResult{
+				{Path: "/knowledge/a.md", Ok: true, Changed: true, EditsApplied: 2},
+			},
+			Truncated: true,
+		}
+	})
+
+	var gotReq events.Event
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSBatchEdit,
+		Path: "/knowledge",
+		Glob: "**/*.md",
+		Exclude: []string{
+			"archive/**",
+		},
+		BatchEditEdits: []types.BatchEdit{
+			{Old: "[[old]]", New: "[[new]]", Occurrence: "all"},
+		},
+		BatchEditOptions: &types.BatchOptions{DryRun: true, MaxFiles: 50},
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response")
+	}
+	for key, want := range map[string]string{
+		"glob":     "**/*.md",
+		"exclude":  "archive/**",
+		"edits":    "1",
+		"dryRun":   "true",
+		"apply":    "false",
+		"maxFiles": "50",
+	} {
+		if gotReq.Data[key] != want {
+			t.Fatalf("expected batch edit request enrichment %s=%q, got %q (data=%v)", key, want, gotReq.Data[key], gotReq.Data)
+		}
+	}
+	for key, want := range map[string]string{
+		"matchedFiles":               "12",
+		"modifiedFiles":              "9",
+		"skippedFiles":               "3",
+		"batchEditDryRun":            "true",
+		"batchEditRollbackPerformed": "true",
+		"details":                    "1",
+		"truncated":                  "true",
+	} {
+		if gotResp.Data[key] != want {
+			t.Fatalf("expected batch edit response enrichment %s=%q, got %q (data=%v)", key, want, gotResp.Data[key], gotResp.Data)
+		}
+	}
+	if gotResp.Data["batchEditDetails"] == "" || !strings.Contains(gotResp.Data["batchEditDetails"], "/knowledge/a.md") {
+		t.Fatalf("expected details list in response enrichment, got %v", gotResp.Data)
 	}
 }
 

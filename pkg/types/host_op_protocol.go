@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +29,8 @@ const (
 	HostOpFSEdit = "fs_edit"
 	// HostOpFSPatch applies a unified diff patch to a file in the VFS.
 	HostOpFSPatch = "fs_patch"
+	// HostOpFSBatchEdit applies the same structured edits across multiple files.
+	HostOpFSBatchEdit = "fs_batch_edit"
 	// HostOpFSTxn applies a sequence of mutating fs_* operations atomically.
 	HostOpFSTxn = "fs_txn"
 	// HostOpFSArchiveCreate creates a zip/tar/tar.gz archive from VFS paths.
@@ -80,6 +83,8 @@ type HostOpRequest struct {
 	Sync             bool          `json:"sync,omitempty"`
 	DryRun           bool          `json:"dryRun,omitempty"`
 	Verbose          bool          `json:"verbose,omitempty"`
+	BatchEditEdits   []BatchEdit   `json:"batchEditEdits,omitempty"`
+	BatchEditOptions *BatchOptions `json:"batchEditOptions,omitempty"`
 	TxnSteps         []FSTxnStep   `json:"txnSteps,omitempty"`
 	TxnOptions       *FSTxnOptions `json:"txnOptions,omitempty"`
 	Destination      string        `json:"destination,omitempty"`
@@ -114,7 +119,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = strings.ToLower(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSStat, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpFSTxn, HostOpFSArchiveCreate, HostOpFSArchiveExtract, HostOpFSArchiveList, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpCodeExec, HostOpNoop, HostOpToolResult, HostOpFinal:
+	case HostOpFSList, HostOpFSStat, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpFSBatchEdit, HostOpFSTxn, HostOpFSArchiveCreate, HostOpFSArchiveExtract, HostOpFSArchiveList, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpCodeExec, HostOpNoop, HostOpToolResult, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -242,6 +247,34 @@ func (r HostOpRequest) Validate() error {
 		}
 		if err := validate.NonEmpty("text", r.Text); err != nil {
 			return err
+		}
+		return nil
+
+	case HostOpFSBatchEdit:
+		if err := validate.NonEmpty("path", r.Path); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+			return fmt.Errorf("path must be an absolute VFS path (start with /)")
+		}
+		if err := validate.NonEmpty("glob", r.Glob); err != nil {
+			return err
+		}
+		if len(r.BatchEditEdits) == 0 {
+			return fmt.Errorf("batchEditEdits must be non-empty")
+		}
+		for i, edit := range r.BatchEditEdits {
+			if err := validateBatchEdit(i, edit); err != nil {
+				return err
+			}
+		}
+		if r.BatchEditOptions != nil {
+			if r.BatchEditOptions.Apply && r.BatchEditOptions.DryRun {
+				return fmt.Errorf("batchEditOptions.apply and batchEditOptions.dryRun cannot both be true")
+			}
+			if r.BatchEditOptions.MaxFiles < 0 {
+				return fmt.Errorf("batchEditOptions.maxFiles must be >= 0")
+			}
 		}
 		return nil
 
@@ -536,6 +569,31 @@ type FSTxnStep struct {
 	Verbose          bool            `json:"verbose,omitempty"`
 }
 
+// BatchEdit describes one exact-match replacement for fs_batch_edit.
+type BatchEdit struct {
+	Old        string `json:"old,omitempty"`
+	New        string `json:"new,omitempty"`
+	Occurrence string `json:"occurrence,omitempty"` // all|1|2|...
+}
+
+// BatchOptions controls dry-run/apply and safety behavior for fs_batch_edit.
+type BatchOptions struct {
+	DryRun          bool `json:"dryRun,omitempty"`
+	Apply           bool `json:"apply,omitempty"`
+	RollbackOnError bool `json:"rollbackOnError,omitempty"`
+	MaxFiles        int  `json:"maxFiles,omitempty"`
+}
+
+// BatchEditResult captures one file outcome for fs_batch_edit.
+type BatchEditResult struct {
+	Path         string `json:"path,omitempty"`
+	Ok           bool   `json:"ok"`
+	Changed      bool   `json:"changed,omitempty"`
+	EditsApplied int    `json:"editsApplied,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
 // FSTxnOptions controls transaction mode and rollback behavior.
 type FSTxnOptions struct {
 	DryRun          bool `json:"dryRun,omitempty"`
@@ -610,29 +668,38 @@ type ArchiveEntry struct {
 
 // HostOpResponse is the minimal "host primitive" response envelope.
 type HostOpResponse struct {
-	Op               string            `json:"op"`
-	Ok               bool              `json:"ok"`
-	Error            string            `json:"error,omitempty"`
-	ErrorCode        string            `json:"errorCode,omitempty"`
-	Entries          []string          `json:"entries,omitempty"`
-	Results          []SearchResult    `json:"results,omitempty"`
-	ArchiveEntries   []ArchiveEntry    `json:"archiveEntries,omitempty"`
-	TxnStepResults   []FSTxnStepResult `json:"txnStepResults,omitempty"`
-	TxnDiagnostics   *FSTxnDiagnostics `json:"txnDiagnostics,omitempty"`
-	ArchiveFormat    string            `json:"archiveFormat,omitempty"`
-	FilesAdded       int               `json:"filesAdded,omitempty"`
-	FilesExtracted   int               `json:"filesExtracted,omitempty"`
-	TotalSizeBytes   int64             `json:"totalSizeBytes,omitempty"`
-	ArchiveSizeBytes int64             `json:"archiveSizeBytes,omitempty"`
-	CompressionRatio float64           `json:"compressionRatio,omitempty"`
-	Skipped          []string          `json:"skipped,omitempty"`
-	ResultsTotal     int               `json:"resultsTotal,omitempty"`
-	ResultsReturned  int               `json:"resultsReturned,omitempty"`
-	ResultsTruncated bool              `json:"resultsTruncated,omitempty"`
-	Exists           *bool             `json:"exists,omitempty"`
-	IsDir            *bool             `json:"isDir,omitempty"`
-	SizeBytes        *int64            `json:"sizeBytes,omitempty"`
-	Mtime            *int64            `json:"mtime,omitempty"`
+	Op                         string            `json:"op"`
+	Ok                         bool              `json:"ok"`
+	Error                      string            `json:"error,omitempty"`
+	ErrorCode                  string            `json:"errorCode,omitempty"`
+	Entries                    []string          `json:"entries,omitempty"`
+	Results                    []SearchResult    `json:"results,omitempty"`
+	ArchiveEntries             []ArchiveEntry    `json:"archiveEntries,omitempty"`
+	BatchEditDetails           []BatchEditResult `json:"details,omitempty"`
+	TxnStepResults             []FSTxnStepResult `json:"txnStepResults,omitempty"`
+	TxnDiagnostics             *FSTxnDiagnostics `json:"txnDiagnostics,omitempty"`
+	ArchiveFormat              string            `json:"archiveFormat,omitempty"`
+	FilesAdded                 int               `json:"filesAdded,omitempty"`
+	FilesExtracted             int               `json:"filesExtracted,omitempty"`
+	TotalSizeBytes             int64             `json:"totalSizeBytes,omitempty"`
+	ArchiveSizeBytes           int64             `json:"archiveSizeBytes,omitempty"`
+	CompressionRatio           float64           `json:"compressionRatio,omitempty"`
+	Skipped                    []string          `json:"skipped,omitempty"`
+	MatchedFiles               int               `json:"matchedFiles,omitempty"`
+	ModifiedFiles              int               `json:"modifiedFiles,omitempty"`
+	FailedFiles                int               `json:"failedFiles,omitempty"`
+	SkippedFiles               int               `json:"skippedFiles,omitempty"`
+	BatchEditDryRun            bool              `json:"batchEditDryRun,omitempty"`
+	BatchEditApplied           bool              `json:"batchEditApplied,omitempty"`
+	BatchEditRollbackPerformed bool              `json:"batchEditRollbackPerformed,omitempty"`
+	BatchEditRollbackFailed    bool              `json:"batchEditRollbackFailed,omitempty"`
+	ResultsTotal               int               `json:"resultsTotal,omitempty"`
+	ResultsReturned            int               `json:"resultsReturned,omitempty"`
+	ResultsTruncated           bool              `json:"resultsTruncated,omitempty"`
+	Exists                     *bool             `json:"exists,omitempty"`
+	IsDir                      *bool             `json:"isDir,omitempty"`
+	SizeBytes                  *int64            `json:"sizeBytes,omitempty"`
+	Mtime                      *int64            `json:"mtime,omitempty"`
 	// fs_read checksum metadata.
 	ReadChecksums map[string]string `json:"readChecksums,omitempty"`
 	// Patch diagnostics are emitted for fs_patch success/failure and dry-run validation.
@@ -717,6 +784,21 @@ func validateTxnStep(index int, step FSTxnStep) error {
 		if err := validate.NonEmpty(fmt.Sprintf("txnSteps[%d].text", index), step.Text); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateBatchEdit(index int, edit BatchEdit) error {
+	if err := validate.NonEmpty(fmt.Sprintf("batchEditEdits[%d].old", index), edit.Old); err != nil {
+		return err
+	}
+	occurrence := strings.TrimSpace(edit.Occurrence)
+	if occurrence == "" || strings.EqualFold(occurrence, "all") {
+		return nil
+	}
+	n, err := strconv.Atoi(occurrence)
+	if err != nil || n <= 0 {
+		return fmt.Errorf("batchEditEdits[%d].occurrence must be \"all\" or an integer >= 1", index)
 	}
 	return nil
 }

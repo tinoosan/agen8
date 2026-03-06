@@ -146,6 +146,7 @@ var (
 		types.HostOpFSAppend:         fsAppendMockOp{},
 		types.HostOpFSEdit:           fsEditMockOp{},
 		types.HostOpFSPatch:          fsPatchMockOp{},
+		types.HostOpFSBatchEdit:      fsBatchEditMockOp{},
 		types.HostOpFSTxn:            fsTxnMockOp{},
 		types.HostOpFSArchiveCreate:  fsArchiveCreateMockOp{},
 		types.HostOpFSArchiveExtract: fsArchiveExtractMockOp{},
@@ -467,6 +468,131 @@ func (fsPatchMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpE
 	}
 }
 
+type fsBatchEditMockOp struct{}
+
+func (fsBatchEditMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
+	dryRun := true
+	apply := false
+	rollbackOnError := true
+	maxFiles := 1000
+	if req.BatchEditOptions != nil {
+		if req.BatchEditOptions.Apply {
+			apply = true
+			dryRun = false
+		}
+		if req.BatchEditOptions.DryRun {
+			dryRun = true
+			apply = false
+		}
+		if !req.BatchEditOptions.RollbackOnError {
+			rollbackOnError = false
+		}
+		if req.BatchEditOptions.MaxFiles > 0 {
+			maxFiles = req.BatchEditOptions.MaxFiles
+		}
+	}
+
+	paths, truncated, err := collectBatchEditPaths(x.FS, req.Path, req.Glob, req.Exclude, maxFiles)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+
+	resp := types.HostOpResponse{
+		Op:               req.Op,
+		Ok:               true,
+		MatchedFiles:     len(paths),
+		BatchEditDryRun:  dryRun,
+		BatchEditApplied: apply,
+		Truncated:        truncated,
+	}
+	if !dryRun && !apply {
+		resp.BatchEditDryRun = true
+	}
+
+	type snapshot struct {
+		existed bool
+		content []byte
+	}
+	snapshots := map[string]snapshot{}
+	touchedPaths := make([]string, 0, len(paths))
+
+	for _, filePath := range paths {
+		result := types.BatchEditResult{Path: filePath, Ok: true}
+		beforeBytes, err := x.FS.Read(filePath)
+		if err != nil {
+			if isNotFoundErr(err) {
+				result.Ok = false
+				result.Error = err.Error()
+				resp.FailedFiles++
+				resp.BatchEditDetails = append(resp.BatchEditDetails, result)
+				break
+			}
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+
+		after, appliedCount, err := ApplyStructuredBatchEdits(string(beforeBytes), req.BatchEditEdits)
+		if err != nil {
+			result.Ok = false
+			result.Error = err.Error()
+			resp.FailedFiles++
+			resp.BatchEditDetails = append(resp.BatchEditDetails, result)
+			break
+		}
+		result.EditsApplied = appliedCount
+		if appliedCount == 0 {
+			result.Reason = "no match"
+			resp.SkippedFiles++
+			resp.BatchEditDetails = append(resp.BatchEditDetails, result)
+			continue
+		}
+
+		result.Changed = true
+		if !resp.BatchEditDryRun {
+			if _, ok := snapshots[filePath]; !ok {
+				touchedPaths = append(touchedPaths, filePath)
+				snapshots[filePath] = snapshot{existed: true, content: append([]byte(nil), beforeBytes...)}
+			}
+			if err := x.FS.Write(filePath, []byte(after)); err != nil {
+				result.Ok = false
+				result.Error = err.Error()
+				resp.FailedFiles++
+				resp.BatchEditDetails = append(resp.BatchEditDetails, result)
+				break
+			}
+		}
+		resp.ModifiedFiles++
+		resp.BatchEditDetails = append(resp.BatchEditDetails, result)
+	}
+
+	if resp.FailedFiles == 0 {
+		return resp
+	}
+
+	resp.Ok = false
+	if !resp.BatchEditDryRun && rollbackOnError {
+		resp.BatchEditRollbackPerformed = true
+		for i := len(touchedPaths) - 1; i >= 0; i-- {
+			p := touchedPaths[i]
+			snap := snapshots[p]
+			if !snap.existed {
+				if err := x.FS.Delete(p); err != nil {
+					resp.BatchEditRollbackFailed = true
+				}
+				continue
+			}
+			if err := x.FS.Write(p, snap.content); err != nil {
+				resp.BatchEditRollbackFailed = true
+			}
+		}
+	}
+	if resp.BatchEditRollbackFailed {
+		resp.Error = fmt.Sprintf("batch edit failed after %d files (rollback failed)", len(resp.BatchEditDetails))
+	} else {
+		resp.Error = fmt.Sprintf("batch edit failed after %d files", len(resp.BatchEditDetails))
+	}
+	return resp
+}
+
 type fsTxnMockOp struct{}
 
 func (fsTxnMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
@@ -777,6 +903,62 @@ func (fsArchiveListMockOp) Exec(_ context.Context, req types.HostOpRequest, x *H
 		TotalSizeBytes: listResult.TotalSizeBytes,
 		Truncated:      listResult.Truncated,
 	}
+}
+
+func collectBatchEditPaths(fsx *vfs.FS, rootPath string, includeGlob string, exclude []string, maxFiles int) ([]string, bool, error) {
+	entry, err := fsx.Stat(rootPath)
+	if err != nil {
+		return nil, false, err
+	}
+	if !entry.IsDir {
+		matched, err := archivePatternMatches(includeGlob, path.Base(rootPath))
+		if err != nil {
+			return nil, false, err
+		}
+		if !matched || archivePathExcluded(path.Base(rootPath), exclude) {
+			return []string{}, false, nil
+		}
+		return []string{rootPath}, false, nil
+	}
+
+	root := strings.TrimRight(strings.TrimSpace(rootPath), "/")
+	queue := []string{root}
+	matches := make([]string, 0)
+	truncated := false
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		children, err := fsx.List(current)
+		if err != nil {
+			return nil, false, err
+		}
+		for _, child := range children {
+			if child.IsDir {
+				queue = append(queue, child.Path)
+				continue
+			}
+			rel := strings.TrimPrefix(child.Path, root+"/")
+			if rel == child.Path {
+				rel = path.Base(child.Path)
+			}
+			if archivePathExcluded(rel, exclude) {
+				continue
+			}
+			ok, err := archivePatternMatches(includeGlob, rel)
+			if err != nil {
+				return nil, false, err
+			}
+			if !ok {
+				continue
+			}
+			matches = append(matches, child.Path)
+			if maxFiles > 0 && len(matches) >= maxFiles {
+				truncated = true
+				return matches, truncated, nil
+			}
+		}
+	}
+	return matches, truncated, nil
 }
 
 func collectArchiveSourceFiles(fsx *vfs.FS, sourcePath string, exclude []string) ([]archiveSourceFile, error) {

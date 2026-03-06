@@ -321,6 +321,64 @@ func TestHostOpRequest_FSTxnValidation(t *testing.T) {
 	}
 }
 
+func TestHostOpRequest_FSBatchEditValidation(t *testing.T) {
+	req := HostOpRequest{
+		Op:   HostOpFSBatchEdit,
+		Path: "/knowledge",
+		Glob: "**/*.md",
+		BatchEditEdits: []BatchEdit{
+			{Old: "[[old]]", New: "[[new]]", Occurrence: "all"},
+			{Old: "old", New: "new", Occurrence: "2"},
+		},
+		BatchEditOptions: &BatchOptions{DryRun: true, MaxFiles: 10},
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	req = HostOpRequest{
+		Op:             HostOpFSBatchEdit,
+		Path:           "/knowledge",
+		BatchEditEdits: []BatchEdit{{Old: "old", New: "new"}},
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for missing glob")
+	}
+
+	req = HostOpRequest{
+		Op:             HostOpFSBatchEdit,
+		Path:           "knowledge",
+		Glob:           "**/*.md",
+		BatchEditEdits: []BatchEdit{{Old: "old", New: "new"}},
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for relative path")
+	}
+
+	req = HostOpRequest{
+		Op:             HostOpFSBatchEdit,
+		Path:           "/knowledge",
+		Glob:           "**/*.md",
+		BatchEditEdits: []BatchEdit{{Old: "old", New: "new", Occurrence: "zero"}},
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for invalid occurrence")
+	}
+
+	req = HostOpRequest{
+		Op:             HostOpFSBatchEdit,
+		Path:           "/knowledge",
+		Glob:           "**/*.md",
+		BatchEditEdits: []BatchEdit{{Old: "old", New: "new"}},
+		BatchEditOptions: &BatchOptions{
+			MaxFiles: -1,
+		},
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for negative maxFiles")
+	}
+}
+
 func TestHostOpRequest_FSArchiveValidation(t *testing.T) {
 	req := HostOpRequest{
 		Op:              HostOpFSArchiveCreate,

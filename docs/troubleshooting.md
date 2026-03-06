@@ -39,6 +39,16 @@ This guide captures common issues and diagnostics that surface when running Agen
   3. Re-run dry-run until clean.
   4. Re-run with `dryRun=false` to apply.
 
+## fs_batch_edit
+
+- **Preview first**: use `tools.fs_batch_edit(path="/knowledge", glob="**/*.md", edits=[...], options={"dryRun": True})` before committing broad refactors.
+- **No-match files are skipped**: inspect `matchedFiles`, `modifiedFiles`, `skippedFiles`, `failedFiles`, and per-file `details` in activity output to separate harmless no-match skips from real failures.
+- **Rollback behavior**: with `apply=true`, V1 rolls back touched files on failure when `rollbackOnError` is left enabled. If `batchEditRollbackFailed=true`, re-read affected files before retrying.
+- **Recommended loop**:
+  1. Run with `dryRun=true`.
+  2. Review counts/details for unexpected matches or skips.
+  3. Re-run with `apply=true` once the dry-run output looks correct.
+
 ## fs_write verification/checksum
 
 - **Verify critical writes**: use `tools.fs_write(path="...", text="...", verify=true)` to force read-back validation.

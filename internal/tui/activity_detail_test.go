@@ -318,6 +318,51 @@ func TestRenderActivityDetailMarkdown_FSArchive_Metadata(t *testing.T) {
 	}
 }
 
+func TestRenderActivityDetailMarkdown_FSBatchEdit_Metadata(t *testing.T) {
+	a := Activity{
+		Kind:   "fs_batch_edit",
+		Path:   "/knowledge",
+		Status: ActivityOK,
+		Ok:     "true",
+		Data: map[string]string{
+			"glob":                       "**/*.md",
+			"exclude":                    "archive/**",
+			"edits":                      "2",
+			"dryRun":                     "true",
+			"apply":                      "false",
+			"rollbackOnError":            "true",
+			"maxFiles":                   "50",
+			"matchedFiles":               "12",
+			"modifiedFiles":              "9",
+			"skippedFiles":               "3",
+			"batchEditRollbackPerformed": "true",
+			"details":                    "12",
+			"batchEditDetails":           `[{"path":"/knowledge/a.md","ok":true,"changed":true,"editsApplied":2}]`,
+		},
+	}
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- path: `/knowledge`",
+		"- glob: `**/*.md`",
+		"- exclude: `archive/**`",
+		"- edits: `2`",
+		"- dryRun: `true`",
+		"- apply: `false`",
+		"- rollbackOnError: `true`",
+		"- maxFiles: `50`",
+		"- matchedFiles: `12`",
+		"- modifiedFiles: `9`",
+		"- skippedFiles: `3`",
+		"- rollbackPerformed: `true`",
+		"details",
+		"/knowledge/a.md",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in fs_batch_edit markdown, got:\n%s", want, md)
+		}
+	}
+}
+
 func TestRenderActivityDetailMarkdown_AgentSpawnArgumentsAndOutput(t *testing.T) {
 	a := Activity{
 		Kind:          "agent_spawn",

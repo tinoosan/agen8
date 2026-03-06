@@ -46,6 +46,7 @@ func DefaultPromptToolSpec() PromptToolSpec {
 			{Name: "email", Description: "Send email notifications (plain text)."},
 			{Name: "final_answer", Description: "Emit the final response once the user's goal is complete."},
 			{Name: "fs_append", Description: "Append to files."},
+			{Name: "fs_batch_edit", Description: "Apply the same exact-match edits across many files selected by path + glob, with dry-run/apply and rollback support."},
 			{Name: "fs_edit", Description: "Make precise edits via JSON diffs."},
 			{Name: "fs_list", Description: "List VFS paths."},
 			{Name: "fs_stat", Description: "Inspect path metadata (type, optional size) without reading file contents."},
@@ -242,6 +243,7 @@ const basePromptRaw = `<system>
 {{.CodeExecGuidanceRules}}
     <rule id="browser_usage">Use browser for JS-heavy sites, multi-step interactions (login/forms/navigation), or when you need screenshots/PDFs/downloads/uploads. Use browser(action:\"dismiss\") for cookie banners/popups and browser(action:\"wait\") for explicit readiness. Prefer http_fetch for simple APIs and static pages.</rule>
     <rule id="fs_edit">fs_edit expects JSON like {"path": "/project/file", "edits": [{"old": "...", "new": "...", "occurrence": 1}]}; if it fails, re-read the file and try a more specific snippet.</rule>
+    <rule id="fs_batch_edit">When the same exact-match edit must apply across many files, prefer fs_batch_edit over fs_search plus manual edit loops. Use dryRun=true first, then apply=true to commit.</rule>
     <rule id="fs_patch">fs_patch needs a unified diff with hunk headers (e.g., @@ -1,3 +1,3 @@). Prefer dryRun=true first to validate and inspect diagnostics before applying.</rule>
     <rule id="fs_txn">For coordinated multi-file mutations, prefer fs_txn with dryRun=true first, then apply=true to commit with rollback on failure.</rule>
     <rule id="fs_archive">Prefer fs_archive_list before fs_archive_extract when inspecting unknown archives.</rule>

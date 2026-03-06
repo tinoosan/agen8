@@ -162,6 +162,11 @@ func TestRenderOpResponse_ToolSpecific(t *testing.T) {
 			want: "✗ txn failed at step 2",
 		},
 		{
+			name: "batch edit dry run",
+			data: map[string]string{"op": "fs_batch_edit", "ok": "true", "batchEditDryRun": "true", "matchedFiles": "6", "modifiedFiles": "4"},
+			want: "✓ batch edit dry-run 6 matched, 4 modified",
+		},
+		{
 			name: "archive create",
 			data: map[string]string{"op": "fs_archive_create", "ok": "true", "filesAdded": "2", "compressionRatio": "0.4000"},
 			want: "✓ archived 2 files (0.4000)",
@@ -199,6 +204,7 @@ func TestActionCategory_RepresentativeOps(t *testing.T) {
 		{op: "fs_read", want: "Explored"},
 		{op: "fs_stat", want: "Explored"},
 		{op: "fs_write", want: "Updated"},
+		{op: "fs_batch_edit", want: "Updated"},
 		{op: "fs_txn", want: "Updated"},
 		{op: "fs_archive_create", want: "Updated"},
 		{op: "fs_archive_extract", want: "Updated"},
@@ -223,6 +229,7 @@ func TestRenderOpRequest_SharedOpParityWithOpMeta(t *testing.T) {
 		{"op": "fs_search", "path": "/workspace", "query": "needle"},
 		{"op": "fs_stat", "path": "/workspace/a.txt"},
 		{"op": "fs_txn", "steps": "3"},
+		{"op": "fs_batch_edit", "path": "/knowledge", "glob": "**/*.md"},
 		{"op": "fs_archive_extract", "path": "/workspace/a.tar.gz", "destination": "/workspace/out"},
 		{"op": "shell_exec", "argvPreview": "rg -n todo"},
 		{"op": "http_fetch", "method": "POST", "url": "https://example.com", "body": "{\n\"x\":1\n}"},

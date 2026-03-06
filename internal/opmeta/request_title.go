@@ -50,6 +50,15 @@ func FormatRequestTitle(d map[string]string) string {
 		return "Edit " + path
 	case "fs_patch":
 		return "Patch " + path
+	case "fs_batch_edit":
+		glob := strings.TrimSpace(d["glob"])
+		if path != "" && glob != "" {
+			return "Batch edit " + path + " (" + glob + ")"
+		}
+		if path != "" {
+			return "Batch edit " + path
+		}
+		return "Batch edit"
 	case "fs_txn":
 		if steps := strings.TrimSpace(d["steps"]); steps != "" {
 			return "Txn " + steps + " steps"

@@ -102,6 +102,7 @@ func defaultHostOperations() []HostOperation {
 		fsAppendOperation{},
 		fsEditOperation{},
 		fsPatchOperation{},
+		fsBatchEditOperation{},
 		fsTxnOperation{},
 		fsArchiveCreateOperation{},
 		fsArchiveExtractOperation{},
@@ -613,6 +614,112 @@ func (fsPatchOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.Ho
 		v := strings.TrimSpace(string(b))
 		respData["patchActualContext"] = v
 		storeResp["patchActualContext"] = v
+	}
+}
+
+type fsBatchEditOperation struct{}
+
+func (fsBatchEditOperation) Op() string { return types.HostOpFSBatchEdit }
+func (fsBatchEditOperation) Execute(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
+	return next(ctx, req)
+}
+func (fsBatchEditOperation) FormatRequestText(_ types.HostOpRequest, reqData map[string]string) string {
+	return opformat.FormatRequestText(reqData)
+}
+func (fsBatchEditOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpResponse, _ map[string]string, respData map[string]string) string {
+	return opformat.FormatResponseText(respData)
+}
+func (fsBatchEditOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
+	if v := strings.TrimSpace(req.Glob); v != "" {
+		reqData["glob"] = v
+		storeReq["glob"] = v
+	}
+	if len(req.Exclude) != 0 {
+		v := strings.Join(req.Exclude, ",")
+		reqData["exclude"] = v
+		storeReq["exclude"] = v
+	}
+	reqData["edits"] = strconv.Itoa(len(req.BatchEditEdits))
+	storeReq["edits"] = strconv.Itoa(len(req.BatchEditEdits))
+
+	dryRun := true
+	apply := false
+	rollbackOnError := true
+	maxFiles := 1000
+	if req.BatchEditOptions != nil {
+		if req.BatchEditOptions.Apply {
+			apply = true
+			dryRun = false
+		}
+		if req.BatchEditOptions.DryRun {
+			dryRun = true
+			apply = false
+		}
+		if !req.BatchEditOptions.RollbackOnError {
+			rollbackOnError = false
+		}
+		if req.BatchEditOptions.MaxFiles > 0 {
+			maxFiles = req.BatchEditOptions.MaxFiles
+		}
+	}
+	reqData["dryRun"] = fmtBool(dryRun)
+	reqData["apply"] = fmtBool(apply)
+	reqData["rollbackOnError"] = fmtBool(rollbackOnError)
+	reqData["maxFiles"] = strconv.Itoa(maxFiles)
+	storeReq["dryRun"] = fmtBool(dryRun)
+	storeReq["apply"] = fmtBool(apply)
+	storeReq["rollbackOnError"] = fmtBool(rollbackOnError)
+	storeReq["maxFiles"] = strconv.Itoa(maxFiles)
+}
+func (fsBatchEditOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	if resp.MatchedFiles != 0 {
+		v := strconv.Itoa(resp.MatchedFiles)
+		respData["matchedFiles"] = v
+		storeResp["matchedFiles"] = v
+	}
+	if resp.ModifiedFiles != 0 {
+		v := strconv.Itoa(resp.ModifiedFiles)
+		respData["modifiedFiles"] = v
+		storeResp["modifiedFiles"] = v
+	}
+	if resp.SkippedFiles != 0 {
+		v := strconv.Itoa(resp.SkippedFiles)
+		respData["skippedFiles"] = v
+		storeResp["skippedFiles"] = v
+	}
+	if resp.FailedFiles != 0 {
+		v := strconv.Itoa(resp.FailedFiles)
+		respData["failedFiles"] = v
+		storeResp["failedFiles"] = v
+	}
+	if resp.BatchEditDryRun {
+		respData["batchEditDryRun"] = "true"
+		storeResp["batchEditDryRun"] = "true"
+	}
+	if resp.BatchEditApplied {
+		respData["batchEditApplied"] = "true"
+		storeResp["batchEditApplied"] = "true"
+	}
+	if resp.BatchEditRollbackPerformed {
+		respData["batchEditRollbackPerformed"] = "true"
+		storeResp["batchEditRollbackPerformed"] = "true"
+	}
+	if resp.BatchEditRollbackFailed {
+		respData["batchEditRollbackFailed"] = "true"
+		storeResp["batchEditRollbackFailed"] = "true"
+	}
+	if len(resp.BatchEditDetails) != 0 {
+		v := strconv.Itoa(len(resp.BatchEditDetails))
+		respData["details"] = v
+		storeResp["details"] = v
+		if b, err := json.Marshal(resp.BatchEditDetails); err == nil {
+			respData["batchEditDetails"] = string(b)
+			storeResp["batchEditDetails"] = string(b)
+		}
+	}
+	if resp.Truncated {
+		respData["truncated"] = "true"
+		storeResp["truncated"] = "true"
 	}
 }
 

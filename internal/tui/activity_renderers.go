@@ -15,6 +15,7 @@ var activityRenderers = map[string]ActivityRenderer{
 	"code_exec":          codeExecRenderer{},
 	"email":              emailRenderer{},
 	"fs_append":          fsWriteAppendRenderer{},
+	"fs_batch_edit":      fsBatchEditRenderer{},
 	"fs_patch":           fsPatchRenderer{},
 	"fs_txn":             fsTxnRenderer{},
 	"fs_archive_create":  archiveRenderer{},
@@ -587,6 +588,87 @@ func (fsTxnRenderer) RenderDetail(a Activity, expanded bool, telemetry bool, b *
 		}
 	}
 	renderTelemetryBlock(a, telemetry, false, false, b)
+}
+
+type fsBatchEditRenderer struct{ baseRenderer }
+
+func (fsBatchEditRenderer) RenderDetail(a Activity, expanded bool, telemetry bool, b *strings.Builder) {
+	if !renderCommonOutputPreview(a, expanded, b) {
+		if v := strings.TrimSpace(a.Data["matchedFiles"]); v != "" {
+			b.WriteString("- matchedFiles: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["modifiedFiles"]); v != "" {
+			b.WriteString("- modifiedFiles: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["skippedFiles"]); v != "" {
+			b.WriteString("- skippedFiles: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["failedFiles"]); v != "" {
+			b.WriteString("- failedFiles: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if strings.TrimSpace(a.Data["batchEditRollbackPerformed"]) == "true" {
+			b.WriteString("- rollbackPerformed: `true`\n")
+		}
+		if strings.TrimSpace(a.Data["batchEditRollbackFailed"]) == "true" {
+			b.WriteString("- rollbackFailed: `true`\n")
+		}
+		if strings.TrimSpace(a.Data["truncated"]) == "true" {
+			b.WriteString("- truncated: `true`\n")
+		}
+		if v := strings.TrimSpace(a.Data["batchEditDetails"]); v != "" {
+			b.WriteString("\n**details**\n\n")
+			b.WriteString(FormatCode("json", v))
+			b.WriteString("\n")
+		}
+	}
+	renderTelemetryBlock(a, telemetry, false, false, b)
+}
+
+func (fsBatchEditRenderer) RenderArguments(a Activity, telemetry bool, b *strings.Builder) {
+	renderDefaultArgumentsPrefix(a, telemetry, b)
+	if v := strings.TrimSpace(a.Data["glob"]); v != "" {
+		b.WriteString("- glob: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["exclude"]); v != "" {
+		b.WriteString("- exclude: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["edits"]); v != "" {
+		b.WriteString("- edits: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["dryRun"]); v != "" {
+		b.WriteString("- dryRun: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["apply"]); v != "" {
+		b.WriteString("- apply: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["rollbackOnError"]); v != "" {
+		b.WriteString("- rollbackOnError: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["maxFiles"]); v != "" {
+		b.WriteString("- maxFiles: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
 }
 
 type archiveRenderer struct{ baseRenderer }
