@@ -71,7 +71,7 @@ export default function TeamFocus({ teamId }: TeamFocusProps) {
       </div>
 
       {/* Right sidebar */}
-      <div style={{ width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
         <ContextPanel teamId={teamId} threadId={threadId} />
       </div>
 
