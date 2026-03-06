@@ -15,6 +15,7 @@ team:
         After finishing a batch review, hand off to the coordinator via the system handoff task.
     code_exec_only: true
     allowed_tools:
+      - pipe
       - task_review
       - task_create
       - fs_list
@@ -29,6 +30,7 @@ team:
       subagent_model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
         - task_create
@@ -51,6 +53,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
       description: Produces long-form articles, blog posts, newsletters, and copy.
       prompts:
@@ -63,6 +66,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
       description: Investigates topics, gathers data, and produces fact-checked source briefs for writers.
@@ -77,6 +81,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
       description: Plans and executes content distribution across channels for maximum reach.
@@ -91,6 +96,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
         - task_review
@@ -107,6 +113,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
       description: Creates social content, plans posting schedules, and tracks engagement metrics.
