@@ -16,85 +16,59 @@ function inferStatus(info: string): 'active' | 'idle' | 'pending' | 'failed' | '
 export default function RoleRow({ role }: RoleRowProps) {
   const status = inferStatus(role.info)
 
+  // Determine status color
+  const statusColor =
+    status === 'active' ? 'var(--accent)' :
+      status === 'done' ? 'var(--green)' :
+        status === 'failed' ? 'var(--red)' :
+          'var(--text-4)'
+
   return (
     <div
       style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        padding: '10px 12px',
-        marginBottom: 8,
-        background: 'var(--bg-elevated)',
-        border: '1px solid var(--border)',
+        display: 'flex', flexDirection: 'column', gap: 4,
+        padding: '10px 14px',
+        marginBottom: 6,
+        background: 'rgba(255, 255, 255, 0.02)',
+        border: '1px solid rgba(255, 255, 255, 0.04)',
         borderRadius: 'var(--r-md)',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-        transition: 'border-color 0.15s, transform 0.15s',
+        transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
         cursor: 'default',
         position: 'relative',
-        overflow: 'hidden',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
       }}
-      className="role-card-hover"
+      className="role-glass-hover"
       title={role.info || undefined}
     >
-      {/* Subtle active glow on the left edge if active */}
-      {status === 'active' && (
+      {/* Top Header line: Status Indicator + Uppercase Role Name */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {/* Sleek status indicator */}
         <div style={{
-          position: 'absolute', top: 0, bottom: 0, left: 0, width: 3,
-          background: 'var(--accent)',
-          boxShadow: '0 0 8px var(--accent-glow)'
+          width: 6, height: 6, borderRadius: '50%',
+          background: statusColor,
+          boxShadow: status === 'active' ? `0 0 8px ${statusColor}, 0 0 4px ${statusColor}` : 'none',
+          opacity: status === 'idle' ? 0.3 : 1
         }} />
-      )}
 
-      <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-          <div className="truncate" style={{
-            fontSize: 13, fontWeight: 600,
-            color: 'var(--text-1)',
-            letterSpacing: '-0.01em',
-          }}>
-            {role.role}
-          </div>
-          {/* Status Badge */}
-          {status === 'active' ? (
-            <span style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              fontSize: 9, fontWeight: 700, color: 'var(--accent)',
-              background: 'var(--accent-dim)', padding: '2px 6px',
-              borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.04em'
-            }}>
-              <div className="spinner spinner-sm" style={{ width: 8, height: 8, borderWidth: 1.5, borderColor: 'rgba(139,123,248,0.3)', borderTopColor: 'var(--accent)' }} />
-              Running
-            </span>
-          ) : status === 'done' ? (
-            <span style={{
-              fontSize: 9, fontWeight: 700, color: 'var(--green)',
-              background: 'var(--green-dim)', padding: '2px 6px',
-              borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.04em'
-            }}>
-              Done
-            </span>
-          ) : status === 'failed' ? (
-            <span style={{
-              fontSize: 9, fontWeight: 700, color: 'var(--red)',
-              background: 'var(--red-dim)', padding: '2px 6px',
-              borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.04em'
-            }}>
-              Error
-            </span>
-          ) : (
-            <span style={{
-              fontSize: 9, fontWeight: 600, color: 'var(--text-3)',
-              background: 'var(--bg-active)', padding: '2px 6px',
-              borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.04em'
-            }}>
-              Idle
-            </span>
-          )}
-        </div>
-
+        {/* Role Name */}
         <div className="truncate" style={{
-          fontSize: 11, color: 'var(--text-3)',
+          fontSize: 10, fontWeight: 700,
+          color: status === 'active' ? 'var(--text-1)' : 'var(--text-3)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
         }}>
-          {role.info || 'Waiting for tasks…'}
+          {role.role.replace(/-/g, ' ')}
         </div>
+      </div>
+
+      {/* Info Line */}
+      <div className="truncate" style={{
+        fontSize: 12, color: 'var(--text-2)',
+        fontWeight: 400,
+        paddingLeft: 12, // Indent to align with text above
+      }}>
+        {role.info || 'Waiting for tasks...'}
       </div>
     </div>
   )
