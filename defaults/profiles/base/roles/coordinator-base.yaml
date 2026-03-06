@@ -1,0 +1,18 @@
+coordinator: true
+subagentModel: moonshotai/kimi-k2.5
+codeExecOnly: true
+allowedTools:
+  - pipe
+  - http_fetch
+  - browser
+  - task_create
+  - task_review
+heartbeat:
+  enabled: false
+  jobs:
+    - name: coordinator-check-in
+      interval: 10m
+      goal: "Review task board, unblock stalled work, delegate next steps."
+    - name: coordinator-daily-brief
+      interval: 24h
+      goal: "Produce consolidated progress brief from completed role outputs."

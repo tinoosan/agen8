@@ -7,7 +7,7 @@ team:
     name: reviewer
     description: Dedicated review runtime for team-level batch callback reviews.
     prompts:
-      system_prompt: |
+      systemPrompt: |
         You are the dedicated reviewer for this team.
 
         Your task goal contains everything you need: the batch task ID, and the full list of batch items with their callbackTaskId, summary, artifacts, and status.
@@ -22,109 +22,70 @@ team:
         3. After all items are reviewed, write a final summary. Use retry/escalate decisions to flag items that need follow-up — the coordinator will handle delegation.
 
         Do NOT search the filesystem for tasks. Everything you need is in the goal.
-    code_exec_only: true
-    allowed_tools:
+    codeExecOnly: true
+    allowedTools:
       - pipe
       - task_review
     skills:
       - reviewing
   roles:
-    - name: head-analyst
-      coordinator: true
-      model: moonshotai/kimi-k2.5
-      subagent_model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
-        - task_create
-        - task_review
+    - roleRef: ../base/roles/coordinator-base.yaml
+      name: head-analyst
       description: Coordinates tasks, synthesizes findings, and delivers final conclusions.
       prompts:
-        system_prompt_path: head-analyst-prompt.md
+        systemPromptPath: head-analyst-prompt.md
       skills:
         - project-management
         - reporting
-      heartbeat:
-        enabled: false
-        jobs:
-          - name: coordinator-check-in
-            interval: 10m
-            goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
-          - name: coordinator-daily-brief
-            interval: 24h
-            goal: "Produce a consolidated market and stock brief from completed role outputs."
-
-    - name: market-researcher
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: market-researcher
       description: Investigates macro themes, sector rotation, and broad market conditions.
       prompts:
-        system_prompt_path: market-researcher-prompt.md
+        systemPromptPath: market-researcher-prompt.md
       skills:
         - planning
         - market-monitoring
         - hybrid-web
-
-    - name: stock-researcher
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: stock-researcher
       description: Analyzes company fundamentals, catalysts, and valuation signals.
       prompts:
-        system_prompt_path: stock-researcher-prompt.md
+        systemPromptPath: stock-researcher-prompt.md
       skills:
         - planning
         - financial-analysis
         - market-monitoring
-
     - name: report-writer
       model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+      codeExecOnly: true
+      allowedTools:
         - pipe
         - http_fetch
       description: Produces concise final reports and executive-ready summaries.
       prompts:
-        system_prompt_path: report-writer-prompt.md
+        systemPromptPath: report-writer-prompt.md
       skills:
         - planning
         - reporting
-
-    - name: risk-analyst
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: risk-analyst
       description: Assesses portfolio risk, correlation exposure, and downside scenarios across positions. Reviews delegated work and provides quality feedback.
       prompts:
-        system_prompt_path: risk-analyst-prompt.md
+        systemPromptPath: risk-analyst-prompt.md
       skills:
         - financial-analysis
         - planning
         - reporting
-
-    - name: quant-researcher
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+    - roleRef: ../base/roles/worker-web.yaml
+      name: quant-researcher
+      description: Builds data-driven models, screens for signals, and backtests quantitative strategies.
+      prompts:
+        systemPromptPath: quant-researcher-prompt.md
+      allowedTools:
         - pipe
         - shell_exec
         - http_fetch
         - browser
-      description: Builds data-driven models, screens for signals, and backtests quantitative strategies.
-      prompts:
-        system_prompt_path: quant-researcher-prompt.md
       skills:
         - data-engineering
         - planning

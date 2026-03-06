@@ -3,128 +3,65 @@ description: Virtual startup team that ideates, validates, builds, and operates 
 team:
   model: moonshotai/kimi-k2.5
   reviewer:
+    roleRef: ../base/roles/reviewer.yaml
     enabled: true
-    name: reviewer
-    description: Dedicated review runtime for team-level batch callback reviews.
-    prompts:
-      system_prompt: |
-        You are the dedicated reviewer for this team.
-
-        Review synthetic batch callback tasks only.
-        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
-        After finishing a batch review, hand off to the coordinator via the system handoff task.
-    code_exec_only: true
-    allowed_tools:
-      - pipe
-      - task_review
-      - task_create
-      - fs_list
-      - fs_read
-      - fs_search
-    skills:
-      - reviewing
   roles:
-    - name: ceo
-      coordinator: true
-      model: moonshotai/kimi-k2.5
-      subagent_model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
-        - task_create
-        - task_review
+    - roleRef: ../base/roles/coordinator-base.yaml
+      name: ceo
       description: Sets vision and strategy, delegates execution to the team, and drives the business toward revenue.
       prompts:
-        system_prompt_path: ceo-prompt.md
+        systemPromptPath: ceo-prompt.md
       skills:
         - project-management
         - reporting
-      heartbeat:
-        enabled: false
-        jobs:
-          - name: coordinator-check-in
-            interval: 10m
-            goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
-          - name: coordinator-daily-brief
-            interval: 24h
-            goal: "Produce a consolidated business progress brief from completed role outputs."
-    - name: cto
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - shell_exec
-        - http_fetch
-        - browser
-        - trace_run
+    - roleRef: ../base/roles/worker-code.yaml
+      name: cto
       description: Owns technical architecture, builds the product, and ships working software.
       prompts:
-        system_prompt_path: cto-prompt.md
+        systemPromptPath: cto-prompt.md
       skills:
         - coding
         - planning
         - automation
-
-    - name: growth-lead
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: growth-lead
       description: Researches markets, acquires users, and runs marketing and outreach campaigns.
       prompts:
-        system_prompt_path: growth-lead-prompt.md
+        systemPromptPath: growth-lead-prompt.md
       skills:
         - planning
         - hybrid-web
         - market-monitoring
         - automation
-
-    - name: finance-ops
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: finance-ops
       description: Manages business model, budgets, revenue tracking, and operational finances.
       prompts:
-        system_prompt_path: finance-ops-prompt.md
+        systemPromptPath: finance-ops-prompt.md
       skills:
         - financial-analysis
         - planning
         - reporting
-
-    - name: designer
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: designer
       description: Owns product design, branding, landing pages, and visual identity.
       prompts:
-        system_prompt_path: designer-prompt.md
+        systemPromptPath: designer-prompt.md
       skills:
         - planning
         - hybrid-web
         - reporting
-
-    - name: operations-lead
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+    - roleRef: ../base/roles/worker-web.yaml
+      name: operations-lead
+      description: Manages day-to-day operations, vendor relationships, processes, and logistics. Reviews delegated work and provides quality feedback.
+      prompts:
+        systemPromptPath: operations-lead-prompt.md
+      allowedTools:
         - pipe
         - http_fetch
         - browser
         - task_review
         - task_create
-      description: Manages day-to-day operations, vendor relationships, processes, and logistics. Reviews delegated work and provides quality feedback.
-      prompts:
-        system_prompt_path: operations-lead-prompt.md
       skills:
         - planning
         - automation

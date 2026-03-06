@@ -13,7 +13,7 @@ func TestLoad_ValidDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
 		t.Fatalf("write prompt: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte("id: test\ndescription: x\nprompts:\n  system_prompt_path: prompt.md\nskills: [coding]\nheartbeat:\n  - name: ping\n    interval: 1m\n    goal: hello\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte("id: test\ndescription: x\nprompts:\n  systemPromptPath: prompt.md\nskills: [coding]\nheartbeat:\n  - name: ping\n    interval: 1m\n    goal: hello\n"), 0o644); err != nil {
 		t.Fatalf("write profile.yaml: %v", err)
 	}
 	p, err := Load(dir)
@@ -33,7 +33,7 @@ func TestLoad_HeartbeatHourInterval(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("# hi\n"), 0o644); err != nil {
 		t.Fatalf("write prompt: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte("id: test\ndescription: x\nprompts:\n  system_prompt_path: prompt.md\nheartbeat:\n  - name: ping\n    interval: 1h\n    goal: hello\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte("id: test\ndescription: x\nprompts:\n  systemPromptPath: prompt.md\nheartbeat:\n  - name: ping\n    interval: 1h\n    goal: hello\n"), 0o644); err != nil {
 		t.Fatalf("write profile.yaml: %v", err)
 	}
 	p, err := Load(dir)
@@ -64,7 +64,7 @@ func TestLoad_DefaultsPromptMD(t *testing.T) {
 
 func TestLoad_Invalid(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte("id: \ndescription: x\nprompts:\n  system_prompt: hi\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte("id: \ndescription: x\nprompts:\n  systemPrompt: hi\n"), 0o644); err != nil {
 		t.Fatalf("write profile.yaml: %v", err)
 	}
 	if _, err := Load(dir); err == nil {
@@ -89,11 +89,11 @@ team:
       coordinator: true
       description: Team lead
       prompts:
-        system_prompt_path: coord.md
+        systemPromptPath: coord.md
     - name: worker
       description: Team worker
       prompts:
-        system_prompt_path: worker.md
+        systemPromptPath: worker.md
 `
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
@@ -124,12 +124,12 @@ team:
       coordinator: true
       description: Lead
       prompts:
-        system_prompt_path: prompt.md
-      allow_subagents: true
+        systemPromptPath: prompt.md
+      allowSubagents: true
     - name: worker
       description: Worker
       prompts:
-        system_prompt_path: prompt.md
+        systemPromptPath: prompt.md
 `
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
@@ -154,7 +154,7 @@ func TestProfile_RolesForSession(t *testing.T) {
 		t.Fatalf("write prompt: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(
-		"id: solo\ndescription: Solo\nmodel: gpt-5\nprompts:\n  system_prompt_path: prompt.md\n",
+		"id: solo\ndescription: Solo\nmodel: gpt-5\nprompts:\n  systemPromptPath: prompt.md\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestProfile_RolesForSession_WithName(t *testing.T) {
 		t.Fatalf("write prompt: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(
-		"id: researcher\nname: Stock Researcher\ndescription: Research\nmodel: gpt-5\nprompts:\n  system_prompt_path: prompt.md\n",
+		"id: researcher\nname: Stock Researcher\ndescription: Research\nmodel: gpt-5\nprompts:\n  systemPromptPath: prompt.md\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestResolveByRef(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(generalDir, "profile.yaml"), []byte(
-		"id: general\ndescription: General\nmodel: gpt-5\nprompts:\n  system_prompt: hi\n",
+		"id: general\ndescription: General\nmodel: gpt-5\nprompts:\n  systemPrompt: hi\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -259,11 +259,11 @@ team:
     - name: worker-a
       description: Worker A
       prompts:
-        system_prompt_path: prompt.md
+        systemPromptPath: prompt.md
     - name: worker-b
       description: Worker B
       prompts:
-        system_prompt_path: prompt.md
+        systemPromptPath: prompt.md
 `
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
@@ -287,11 +287,11 @@ team:
       coordinator: true
       description: Lead
       prompts:
-        system_prompt_path: prompt.md
+        systemPromptPath: prompt.md
     - name: lead
       description: Duplicate lead
       prompts:
-        system_prompt_path: prompt.md
+        systemPromptPath: prompt.md
 `
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
@@ -315,13 +315,13 @@ team:
     name: lead
     description: Reviewer
     prompts:
-      system_prompt_path: prompt.md
+      systemPromptPath: prompt.md
   roles:
     - name: lead
       coordinator: true
       description: Lead
       prompts:
-        system_prompt_path: prompt.md
+        systemPromptPath: prompt.md
 `
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
@@ -337,8 +337,8 @@ func TestLoad_NormalizesAllowedTools(t *testing.T) {
 id: tools-test
 description: Tools profile
 prompts:
-  system_prompt: hi
-allowed_tools: [fs_read, " fs_read ", shell_exec]
+  systemPrompt: hi
+allowedTools: [fs_read, " fs_read ", shell_exec]
 `
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
@@ -360,10 +360,10 @@ func TestLoad_ParsesCodeExecOnly(t *testing.T) {
 	raw := `
 id: code-exec-only
 description: Code exec profile
-code_exec_only: true
+codeExecOnly: true
 prompts:
-  system_prompt: hi
-allowed_tools: [fs_list, fs_read]
+  systemPrompt: hi
+allowedTools: [fs_list, fs_read]
 `
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
@@ -383,8 +383,8 @@ func TestLoad_NormalizesCodeExecRequiredImports(t *testing.T) {
 id: code-exec-imports
 description: Code exec imports
 prompts:
-  system_prompt: hi
-code_exec_required_imports: [requests, " requests ", pandas]
+  systemPrompt: hi
+codeExecRequiredImports: [requests, " requests ", pandas]
 `
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
@@ -412,19 +412,19 @@ func TestLoad_TeamRoleCodeExecOnlyOverride(t *testing.T) {
 	raw := `
 id: team-code-exec
 description: Team profile
-code_exec_only: true
+codeExecOnly: true
 team:
   roles:
     - name: lead
       coordinator: true
       description: Team lead
       prompts:
-        system_prompt_path: coord.md
+        systemPromptPath: coord.md
     - name: worker
       description: Team worker
-      code_exec_only: false
+      codeExecOnly: false
       prompts:
-        system_prompt_path: worker.md
+        systemPromptPath: worker.md
 `
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
@@ -493,7 +493,7 @@ func TestLoad_HeartbeatEnabledFalse(t *testing.T) {
 id: test
 description: x
 prompts:
-  system_prompt_path: prompt.md
+  systemPromptPath: prompt.md
 heartbeat:
   enabled: false
   jobs:
@@ -527,19 +527,19 @@ func TestLoad_TeamRoleCodeExecRequiredImports(t *testing.T) {
 	raw := `
 id: team-code-exec-imports
 description: Team profile
-code_exec_required_imports: [requests, " requests "]
+codeExecRequiredImports: [requests, " requests "]
 team:
   roles:
     - name: lead
       coordinator: true
       description: Team lead
       prompts:
-        system_prompt_path: coord.md
+        systemPromptPath: coord.md
     - name: worker
       description: Team worker
-      code_exec_required_imports: [pandas, " pandas "]
+      codeExecRequiredImports: [pandas, " pandas "]
       prompts:
-        system_prompt_path: worker.md
+        systemPromptPath: worker.md
 `
 	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
@@ -552,12 +552,322 @@ team:
 		t.Fatalf("profile code_exec_required_imports len=%d want=%d (%v)", got, want, p.CodeExecRequiredImports)
 	}
 	if p.CodeExecRequiredImports[0] != "requests" {
-		t.Fatalf("unexpected profile code_exec_required_imports: %v", p.CodeExecRequiredImports)
+		t.Fatalf("unexpected profile codeExecRequiredImports: %v", p.CodeExecRequiredImports)
 	}
 	if p.Team == nil || len(p.Team.Roles) != 2 {
 		t.Fatalf("unexpected roles: %+v", p.Team)
 	}
 	if len(p.Team.Roles[1].CodeExecRequiredImports) != 1 || p.Team.Roles[1].CodeExecRequiredImports[0] != "pandas" {
-		t.Fatalf("unexpected role code_exec_required_imports: %v", p.Team.Roles[1].CodeExecRequiredImports)
+		t.Fatalf("unexpected role codeExecRequiredImports: %v", p.Team.Roles[1].CodeExecRequiredImports)
+	}
+}
+
+func TestLoad_PromptFragments(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "base.md"), []byte("Base prompt."), 0o644); err != nil {
+		t.Fatalf("write base.md: %v", err)
+	}
+	raw := `
+id: frag-test
+description: Fragment test
+prompts:
+  systemFragments:
+    - path: base.md
+    - inline: "Focus on data quality."
+`
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(p.Prompts.SystemFragments) != 2 {
+		t.Fatalf("expected 2 fragments, got %d", len(p.Prompts.SystemFragments))
+	}
+	if p.Prompts.SystemFragments[0].Path != "base.md" {
+		t.Fatalf("fragment[0].Path = %q", p.Prompts.SystemFragments[0].Path)
+	}
+	if p.Prompts.SystemFragments[1].Inline != "Focus on data quality." {
+		t.Fatalf("fragment[1].Inline = %q", p.Prompts.SystemFragments[1].Inline)
+	}
+
+	// ResolveFragments should concatenate
+	text, err := ResolveFragments(dir, p.Prompts)
+	if err != nil {
+		t.Fatalf("ResolveFragments: %v", err)
+	}
+	if text != "Base prompt.\n\nFocus on data quality." {
+		t.Fatalf("unexpected resolved text: %q", text)
+	}
+}
+
+func TestLoad_PromptFragments_RejectsMixed(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "base.md"), []byte("Base."), 0o644); err != nil {
+		t.Fatalf("write base.md: %v", err)
+	}
+	raw := `
+id: frag-mixed
+description: Mixed legacy and fragments
+prompts:
+  systemPromptPath: base.md
+  systemFragments:
+    - inline: "Extra."
+`
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	if _, err := Load(dir); err == nil {
+		t.Fatalf("expected error for mixing legacy and fragments")
+	}
+}
+
+func TestEffectiveFragments(t *testing.T) {
+	// Legacy systemPrompt → single inline fragment
+	pc := PromptConfig{SystemPrompt: "hello"}
+	frags := pc.EffectiveFragments()
+	if len(frags) != 1 || frags[0].Inline != "hello" {
+		t.Fatalf("legacy systemPrompt: %+v", frags)
+	}
+
+	// Legacy systemPromptPath → single path fragment
+	pc2 := PromptConfig{SystemPromptPath: "prompt.md"}
+	frags2 := pc2.EffectiveFragments()
+	if len(frags2) != 1 || frags2[0].Path != "prompt.md" {
+		t.Fatalf("legacy systemPromptPath: %+v", frags2)
+	}
+
+	// Explicit fragments take priority
+	pc3 := PromptConfig{SystemFragments: []PromptFragment{{Inline: "a"}, {Path: "b.md"}}}
+	frags3 := pc3.EffectiveFragments()
+	if len(frags3) != 2 {
+		t.Fatalf("explicit fragments: %+v", frags3)
+	}
+
+	// Empty → nil
+	pc4 := PromptConfig{}
+	if frags4 := pc4.EffectiveFragments(); frags4 != nil {
+		t.Fatalf("empty: %+v", frags4)
+	}
+}
+
+func TestLoad_PromptFragments_RelativeTraversal(t *testing.T) {
+	// Create parent/shared/safety.md and parent/profile/profile.yaml
+	parent := t.TempDir()
+	shared := filepath.Join(parent, "shared")
+	profDir := filepath.Join(parent, "profile")
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatalf("mkdir shared: %v", err)
+	}
+	if err := os.MkdirAll(profDir, 0o755); err != nil {
+		t.Fatalf("mkdir profDir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(shared, "safety.md"), []byte("Safety rules."), 0o644); err != nil {
+		t.Fatalf("write safety.md: %v", err)
+	}
+	raw := `
+id: traversal-test
+description: Test relative traversal
+prompts:
+  systemFragments:
+    - path: ../shared/safety.md
+    - inline: "Local context."
+`
+	if err := os.WriteFile(filepath.Join(profDir, "profile.yaml"), []byte(strings.TrimSpace(raw)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(profDir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	text, err := ResolveFragments(profDir, p.Prompts)
+	if err != nil {
+		t.Fatalf("ResolveFragments: %v", err)
+	}
+	if text != "Safety rules.\n\nLocal context." {
+		t.Fatalf("unexpected resolved text: %q", text)
+	}
+}
+
+func TestLoad_BackwardCompat(t *testing.T) {
+	// Ensure existing profiles with legacy systemPromptPath still load
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("Legacy prompt."), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(
+		"id: legacy\ndescription: Legacy\nprompts:\n  systemPromptPath: prompt.md\n",
+	), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if p.Prompts.SystemPromptPath != "prompt.md" {
+		t.Fatalf("expected systemPromptPath=prompt.md, got %q", p.Prompts.SystemPromptPath)
+	}
+	text, err := ResolveFragments(dir, p.Prompts)
+	if err != nil {
+		t.Fatalf("ResolveFragments: %v", err)
+	}
+	if text != "Legacy prompt." {
+		t.Fatalf("unexpected text: %q", text)
+	}
+}
+
+func TestLoad_RoleRef_Resolves(t *testing.T) {
+	parent := t.TempDir()
+	baseDir := filepath.Join(parent, "base", "roles")
+	profDir := filepath.Join(parent, "myprofile")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.MkdirAll(profDir, 0o755); err != nil {
+		t.Fatalf("mkdir profile: %v", err)
+	}
+	// Base role with prompt path relative to its own directory
+	basePromptDir := filepath.Join(parent, "base", "prompts")
+	if err := os.MkdirAll(basePromptDir, 0o755); err != nil {
+		t.Fatalf("mkdir prompts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(basePromptDir, "worker.md"), []byte("Worker prompt."), 0o644); err != nil {
+		t.Fatalf("write worker.md: %v", err)
+	}
+
+	baseRole := `codeExecOnly: true
+allowedTools: [pipe, http_fetch, browser]
+prompts:
+  systemFragments:
+    - path: ../prompts/worker.md
+`
+	if err := os.WriteFile(filepath.Join(baseDir, "worker-web.yaml"), []byte(baseRole), 0o644); err != nil {
+		t.Fatalf("write base role: %v", err)
+	}
+
+	// Coordinator prompt
+	if err := os.WriteFile(filepath.Join(profDir, "coord.md"), []byte("Coord prompt."), 0o644); err != nil {
+		t.Fatalf("write coord.md: %v", err)
+	}
+
+	profileYAML := `
+id: roleref-test
+description: Test roleRef resolution
+team:
+  roles:
+    - name: lead
+      coordinator: true
+      description: Team lead
+      prompts:
+        systemPromptPath: coord.md
+    - roleRef: ../base/roles/worker-web.yaml
+      name: researcher
+      description: Researches stuff
+      skills: [planning]
+`
+	if err := os.WriteFile(filepath.Join(profDir, "profile.yaml"), []byte(strings.TrimSpace(profileYAML)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(profDir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(p.Team.Roles) != 2 {
+		t.Fatalf("expected 2 roles, got %d", len(p.Team.Roles))
+	}
+	worker := p.Team.Roles[1]
+	if worker.Name != "researcher" {
+		t.Fatalf("role name = %q, want researcher", worker.Name)
+	}
+	if worker.Description != "Researches stuff" {
+		t.Fatalf("role description = %q", worker.Description)
+	}
+	if worker.CodeExecOnly == nil || !*worker.CodeExecOnly {
+		t.Fatalf("expected codeExecOnly from base")
+	}
+	if len(worker.AllowedTools) != 3 || worker.AllowedTools[0] != "pipe" {
+		t.Fatalf("allowedTools = %v", worker.AllowedTools)
+	}
+	if len(worker.Skills) != 1 || worker.Skills[0] != "planning" {
+		t.Fatalf("skills = %v (should be inline override)", worker.Skills)
+	}
+}
+
+func TestLoad_RoleRef_Override(t *testing.T) {
+	parent := t.TempDir()
+	baseDir := filepath.Join(parent, "base")
+	profDir := filepath.Join(parent, "profile")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(profDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	baseRole := `name: base-worker
+description: Base worker
+coordinator: true
+subagentModel: moonshotai/kimi-k2.5
+codeExecOnly: true
+allowedTools: [pipe, http_fetch]
+prompts:
+  systemPrompt: base prompt
+heartbeat:
+  enabled: false
+  jobs:
+    - name: check-in
+      interval: 10m
+      goal: "Check in"
+`
+	if err := os.WriteFile(filepath.Join(baseDir, "coord.yaml"), []byte(baseRole), 0o644); err != nil {
+		t.Fatalf("write base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profDir, "lead.md"), []byte("Lead prompt."), 0o644); err != nil {
+		t.Fatalf("write lead.md: %v", err)
+	}
+
+	profileYAML := `
+id: override-test
+description: Override test
+team:
+  roles:
+    - roleRef: ../base/coord.yaml
+      name: lead
+      description: Team lead
+      model: gpt-5-mini
+      prompts:
+        systemPromptPath: lead.md
+`
+	if err := os.WriteFile(filepath.Join(profDir, "profile.yaml"), []byte(strings.TrimSpace(profileYAML)+"\n"), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	p, err := Load(profDir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	role := p.Team.Roles[0]
+	// Inline overrides
+	if role.Name != "lead" {
+		t.Fatalf("name = %q", role.Name)
+	}
+	if role.Description != "Team lead" {
+		t.Fatalf("description = %q", role.Description)
+	}
+	if role.Model != "gpt-5-mini" {
+		t.Fatalf("model = %q (should be override)", role.Model)
+	}
+	if role.Prompts.SystemPromptPath != "lead.md" {
+		t.Fatalf("prompts = %+v (should be override)", role.Prompts)
+	}
+	// Inherited from base
+	if !role.Coordinator {
+		t.Fatalf("coordinator should be inherited from base")
+	}
+	if role.SubagentModel != "moonshotai/kimi-k2.5" {
+		t.Fatalf("subagentModel = %q (should be inherited)", role.SubagentModel)
+	}
+	if role.CodeExecOnly == nil || !*role.CodeExecOnly {
+		t.Fatalf("codeExecOnly should be inherited")
 	}
 }

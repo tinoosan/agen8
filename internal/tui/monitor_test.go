@@ -773,7 +773,7 @@ func TestMonitorProfilePicker_FilterAndSelectStartsNewStandaloneSession(t *testi
 	}
 	writeProfile := func(dir, id, desc string) {
 		t.Helper()
-		raw := "id: " + id + "\ndescription: " + desc + "\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt: hello\n"
+		raw := "id: " + id + "\ndescription: " + desc + "\nmodel: openai/gpt-5-mini\nprompts:\n  systemPrompt: hello\n"
 		if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(raw), 0o644); err != nil {
 			t.Fatalf("write profile.yaml: %v", err)
 		}
@@ -783,7 +783,7 @@ func TestMonitorProfilePicker_FilterAndSelectStartsNewStandaloneSession(t *testi
 	writeProfile(filepath.Join(profilesDir, "stock_analyst"), "stock_analyst", "Stocks and markets")
 	if err := os.WriteFile(
 		filepath.Join(profilesDir, "startup_team", "profile.yaml"),
-		[]byte("id: startup_team\ndescription: Team\nteam:\n  model: test\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n"),
+		[]byte("id: startup_team\ndescription: Team\nteam:\n  model: test\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        systemPrompt: lead\n"),
 		0o644,
 	); err != nil {
 		t.Fatalf("write team profile.yaml: %v", err)
@@ -868,7 +868,7 @@ func TestMonitorProfilePicker_DefaultMode_DisallowsProfileSwitch(t *testing.T) {
 		t.Fatalf("mkdir profiles/general: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(profilesDir, "general", "profile.yaml"), []byte(
-		"id: general\ndescription: General\nprompts:\n  system_prompt: hi\n"), 0o644); err != nil {
+		"id: general\ndescription: General\nprompts:\n  systemPrompt: hi\n"), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
 
@@ -909,7 +909,7 @@ func TestMonitorProfilePicker_ArrowKeysMoveSelection(t *testing.T) {
 	}
 	writeProfile := func(dir, id, desc string) {
 		t.Helper()
-		raw := "id: " + id + "\ndescription: " + desc + "\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt: hello\n"
+		raw := "id: " + id + "\ndescription: " + desc + "\nmodel: openai/gpt-5-mini\nprompts:\n  systemPrompt: hello\n"
 		if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(raw), 0o644); err != nil {
 			t.Fatalf("write profile.yaml: %v", err)
 		}
@@ -1025,12 +1025,12 @@ func TestMonitorHandleCommand_NewTeamOpensTeamProfileWizard(t *testing.T) {
 		t.Fatalf("mkdir startup_team: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(profilesDir, "general", "profile.yaml"), []byte(
-		"id: general\ndescription: General\nprompts:\n  system_prompt: hi\n",
+		"id: general\ndescription: General\nprompts:\n  systemPrompt: hi\n",
 	), 0o644); err != nil {
 		t.Fatalf("write general profile: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(profilesDir, "startup_team", "profile.yaml"), []byte(
-		"id: startup_team\ndescription: Team\nteam:\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n",
+		"id: startup_team\ndescription: Team\nteam:\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        systemPrompt: lead\n",
 	), 0o644); err != nil {
 		t.Fatalf("write team profile: %v", err)
 	}

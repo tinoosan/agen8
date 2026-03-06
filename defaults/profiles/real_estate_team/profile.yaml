@@ -3,125 +3,77 @@ description: Real estate investment team that analyzes markets, underwrites deal
 team:
   model: moonshotai/kimi-k2.5
   reviewer:
+    roleRef: ../base/roles/reviewer.yaml
     enabled: true
-    name: reviewer
-    description: Dedicated review runtime for team-level batch callback reviews.
-    prompts:
-      system_prompt: |
-        You are the dedicated reviewer for this team.
-
-        Review synthetic batch callback tasks only.
-        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
-        After finishing a batch review, hand off to the coordinator via the system handoff task.
-    code_exec_only: true
-    allowed_tools:
-      - pipe
-      - task_review
-      - task_create
-      - fs_list
-      - fs_read
-      - fs_search
-    skills:
-      - reviewing
   roles:
-    - name: portfolio-manager
-      coordinator: true
-      model: moonshotai/kimi-k2.5
-      subagent_model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
-        - task_create
-        - task_review
+    - roleRef: ../base/roles/coordinator-base.yaml
+      name: portfolio-manager
       description: Sets investment thesis, delegates research and analysis, and makes portfolio-level decisions.
       prompts:
-        system_prompt_path: portfolio-manager-prompt.md
+        systemPromptPath: portfolio-manager-prompt.md
       skills:
         - project-management
         - reporting
       heartbeat:
-        - name: coordinator-check-in
-          interval: 10m
-          goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
-        - name: coordinator-daily-brief
-          interval: 24h
-          goal: "Produce a consolidated investment pipeline brief from completed role outputs."
-
-    - name: market-analyst
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+        jobs:
+          - name: coordinator-check-in
+            interval: 10m
+            goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
+          - name: coordinator-daily-brief
+            interval: 24h
+            goal: "Produce a consolidated investment pipeline brief from completed role outputs."
+    - roleRef: ../base/roles/worker-web.yaml
+      name: market-analyst
       description: Tracks real estate market trends, demographics, and economic indicators by region.
       prompts:
-        system_prompt_path: market-analyst-prompt.md
+        systemPromptPath: market-analyst-prompt.md
       skills:
         - market-monitoring
         - hybrid-web
         - planning
-
-    - name: deal-underwriter
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+    - roleRef: ../base/roles/worker-web.yaml
+      name: deal-underwriter
+      description: Evaluates individual property deals — financials, risk, and return projections. Reviews delegated work and provides quality feedback.
+      prompts:
+        systemPromptPath: deal-underwriter-prompt.md
+      allowedTools:
         - pipe
         - http_fetch
         - browser
         - task_review
         - task_create
-      description: Evaluates individual property deals — financials, risk, and return projections. Reviews delegated work and provides quality feedback.
-      prompts:
-        system_prompt_path: deal-underwriter-prompt.md
       skills:
         - financial-analysis
         - planning
         - reporting
-
-    - name: property-researcher
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: property-researcher
       description: Sources properties, gathers comparable data, and produces property-level research briefs.
       prompts:
-        system_prompt_path: property-researcher-prompt.md
+        systemPromptPath: property-researcher-prompt.md
       skills:
         - hybrid-web
         - planning
         - reporting
-
-    - name: financial-modeler
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+    - roleRef: ../base/roles/worker-web.yaml
+      name: financial-modeler
+      description: Builds financial models, cash flow projections, and scenario analyses for investments.
+      prompts:
+        systemPromptPath: financial-modeler-prompt.md
+      allowedTools:
         - pipe
         - shell_exec
         - http_fetch
         - browser
-      description: Builds financial models, cash flow projections, and scenario analyses for investments.
-      prompts:
-        system_prompt_path: financial-modeler-prompt.md
       skills:
         - financial-analysis
         - data-engineering
         - planning
-
-    - name: legal-researcher
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: legal-researcher
       description: Researches zoning, regulations, tax implications, and legal structures for real estate deals.
       prompts:
-        system_prompt_path: legal-researcher-prompt.md
+        systemPromptPath: legal-researcher-prompt.md
       skills:
         - hybrid-web
         - planning

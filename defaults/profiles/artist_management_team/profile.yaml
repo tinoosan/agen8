@@ -3,33 +3,15 @@ description: Multi-role artist management team for career planning, marketing, r
 team:
   model: moonshotai/kimi-k2.5
   reviewer:
+    roleRef: ../base/roles/reviewer.yaml
     enabled: true
-    name: reviewer
-    description: Dedicated review runtime for team-level batch callback reviews.
-    prompts:
-      system_prompt: |
-        You are the dedicated reviewer for this team.
-
-        Review synthetic batch callback tasks only.
-        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
-        After finishing a batch review, hand off to the coordinator via the system handoff task.
-    code_exec_only: true
-    allowed_tools:
-      - pipe
-      - task_review
-      - task_create
-      - fs_list
-      - fs_read
-      - fs_search
-    skills:
-      - reviewing
   roles:
-    - name: artist-manager
-      coordinator: true
-      model: moonshotai/kimi-k2.5
-      subagent_model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+    - roleRef: ../base/roles/coordinator-base.yaml
+      name: artist-manager
+      description: Central career management hub that delegates to specialists and tracks delivery.
+      prompts:
+        systemPromptPath: artist-manager-prompt.md
+      allowedTools:
         - pipe
         - http_fetch
         - browser
@@ -37,24 +19,21 @@ team:
         - task_review
         - obsidian
         - shell_exec
-      description: Central career management hub that delegates to specialists and tracks delivery.
-      prompts:
-        system_prompt_path: artist-manager-prompt.md
       skills:
         - project-management
         - reporting
       heartbeat:
-        - name: coordinator-check-in
-          interval: 10m
-          goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
-        - name: coordinator-daily-brief
-          interval: 24h
-          goal: "Produce a consolidated activity brief from completed role outputs."
-
+        jobs:
+          - name: coordinator-check-in
+            interval: 10m
+            goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
+          - name: coordinator-daily-brief
+            interval: 24h
+            goal: "Produce a consolidated activity brief from completed role outputs."
     - name: marketing-strategist
       model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+      codeExecOnly: true
+      allowedTools:
         - pipe
         - http_fetch
         - browser
@@ -62,17 +41,16 @@ team:
         - shell_exec
       description: Develops marketing plans, audience research, and campaign strategies.
       prompts:
-        system_prompt_path: marketing-strategist-prompt.md
+        systemPromptPath: marketing-strategist-prompt.md
       skills:
         - planning
         - hybrid-web
         - reporting
         - automation
-
     - name: release-coordinator
       model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+      codeExecOnly: true
+      allowedTools:
         - pipe
         - http_fetch
         - browser
@@ -80,16 +58,15 @@ team:
         - shell_exec
       description: Manages release schedules, distribution research, and playlist or PR outreach.
       prompts:
-        system_prompt_path: release-coordinator-prompt.md
+        systemPromptPath: release-coordinator-prompt.md
       skills:
         - planning
         - automation
         - reporting
-
     - name: business-manager
       model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+      codeExecOnly: true
+      allowedTools:
         - pipe
         - http_fetch
         - browser
@@ -97,16 +74,15 @@ team:
         - shell_exec
       description: Handles royalty analysis, deal evaluation, and budget planning.
       prompts:
-        system_prompt_path: business-manager-prompt.md
+        systemPromptPath: business-manager-prompt.md
       skills:
         - financial-analysis
         - planning
         - reporting
-
     - name: creative-director
       model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+      codeExecOnly: true
+      allowedTools:
         - pipe
         - http_fetch
         - browser
@@ -116,16 +92,15 @@ team:
         - shell_exec
       description: Owns visual identity, content creation direction, artwork, and brand consistency. Reviews delegated work and provides quality feedback.
       prompts:
-        system_prompt_path: creative-director-prompt.md
+        systemPromptPath: creative-director-prompt.md
       skills:
         - planning
         - hybrid-web
         - reporting
-
     - name: touring-events-manager
       model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+      codeExecOnly: true
+      allowedTools:
         - pipe
         - http_fetch
         - browser
@@ -133,7 +108,7 @@ team:
         - shell_exec
       description: Plans live shows, tours, fan events, and manages event logistics and budgets.
       prompts:
-        system_prompt_path: touring-events-manager-prompt.md
+        systemPromptPath: touring-events-manager-prompt.md
       skills:
         - planning
         - automation

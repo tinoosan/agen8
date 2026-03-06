@@ -2219,7 +2219,7 @@ func TestRPCServer_SessionGetTotals_TeamScope_DoesNotDoubleCountSharedSession(t 
 		t.Fatalf("mkdir profile dir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(profileDir, "profile.yaml"), []byte(
-		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        system_prompt: build\n",
+		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        systemPrompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        systemPrompt: build\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -2297,7 +2297,7 @@ func TestRPCServer_SessionStart_RequiresChatGPTLoginWhenProviderSet(t *testing.T
 		t.Fatalf("write prompt: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
-		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  systemPromptPath: prompt.md\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -2339,7 +2339,7 @@ func TestRPCServer_SessionStart_Standalone(t *testing.T) {
 		t.Fatalf("write prompt: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
-		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  systemPromptPath: prompt.md\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -2398,7 +2398,7 @@ func TestRPCServer_SessionStart_PersistsProjectRoot(t *testing.T) {
 		t.Fatalf("write prompt: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
-		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  systemPromptPath: prompt.md\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -2445,7 +2445,7 @@ func TestRPCServer_SessionStart_EmptyProjectRootOmitted(t *testing.T) {
 		t.Fatalf("write prompt: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
-		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  systemPromptPath: prompt.md\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -2511,7 +2511,7 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 		t.Fatalf("mkdir profiles: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "startup_team", "profile.yaml"), []byte(
-		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  reviewer:\n    enabled: true\n    name: reviewer\n    description: Reviewer\n    prompts:\n      system_prompt: review\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        system_prompt: build\n",
+		"id: startup_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  reviewer:\n    enabled: true\n    name: reviewer\n    description: Reviewer\n    prompts:\n      systemPrompt: review\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        systemPrompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        systemPrompt: build\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -2586,7 +2586,7 @@ func TestRPCServer_SessionStart_SingleRoleTeamProfile_DoesNotInjectReviewer(t *t
 		t.Fatalf("mkdir profiles: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "single_team", "profile.yaml"), []byte(
-		"id: single_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: solo\n      coordinator: true\n      description: Solo\n      prompts:\n        system_prompt: lead\n      skills:\n        - coding\n",
+		"id: single_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: solo\n      coordinator: true\n      description: Solo\n      prompts:\n        systemPrompt: lead\n      skills:\n        - coding\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -2632,7 +2632,7 @@ func TestRPCServer_SessionStart_IgnoresLegacyModeMismatchAndUsesProfileShape(t *
 		t.Fatalf("mkdir profiles: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "multi_team", "profile.yaml"), []byte(
-		"id: multi_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        system_prompt: build\n",
+		"id: multi_team\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: ceo\n      coordinator: true\n      description: Lead\n      prompts:\n        systemPrompt: lead\n    - name: cto\n      description: Build\n      prompts:\n        systemPrompt: build\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -2805,7 +2805,7 @@ func TestRPCServer_SessionList_FiltersByProjectRoot(t *testing.T) {
 		t.Fatalf("write prompt: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg.DataDir, "profiles", "general", "profile.yaml"), []byte(
-		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  system_prompt_path: prompt.md\n",
+		"id: general\ndescription: General\nmodel: openai/gpt-5-mini\nprompts:\n  systemPromptPath: prompt.md\n",
 	), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -3617,18 +3617,18 @@ team:
     name: qa
     description: Reviewer
     prompts:
-      system_prompt: review
+      systemPrompt: review
   model: openai/gpt-5-mini
   roles:
     - name: coordinator
       coordinator: true
       description: Lead
       prompts:
-        system_prompt: lead
+        systemPrompt: lead
     - name: analyst
       description: Reviewer
       prompts:
-        system_prompt: review
+        systemPrompt: review
 `
 	if err := os.WriteFile(filepath.Join(profileDir, "profile.yaml"), []byte(profileYAML), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)

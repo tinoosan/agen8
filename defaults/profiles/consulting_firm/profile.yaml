@@ -3,123 +3,75 @@ description: Strategy consulting team that researches problems, builds analyses,
 team:
   model: moonshotai/kimi-k2.5
   reviewer:
+    roleRef: ../base/roles/reviewer.yaml
     enabled: true
-    name: reviewer
-    description: Dedicated review runtime for team-level batch callback reviews.
-    prompts:
-      system_prompt: |
-        You are the dedicated reviewer for this team.
-
-        Review synthetic batch callback tasks only.
-        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
-        After finishing a batch review, hand off to the coordinator via the system handoff task.
-    code_exec_only: true
-    allowed_tools:
-      - pipe
-      - task_review
-      - task_create
-      - fs_list
-      - fs_read
-      - fs_search
-    skills:
-      - reviewing
   roles:
-    - name: managing-partner
-      coordinator: true
-      model: moonshotai/kimi-k2.5
-      subagent_model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
-        - task_create
-        - task_review
+    - roleRef: ../base/roles/coordinator-base.yaml
+      name: managing-partner
       description: Scopes engagements, delegates workstreams, synthesizes findings, and drives delivery of client recommendations.
       prompts:
-        system_prompt_path: managing-partner-prompt.md
+        systemPromptPath: managing-partner-prompt.md
       skills:
         - project-management
         - reporting
       heartbeat:
-        - name: coordinator-check-in
-          interval: 10m
-          goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
-        - name: coordinator-daily-brief
-          interval: 24h
-          goal: "Produce a consolidated engagement progress brief from completed role outputs."
-
-    - name: strategy-analyst
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+        jobs:
+          - name: coordinator-check-in
+            interval: 10m
+            goal: "Review team task board, unblock stalled work, and delegate next steps to all required roles."
+          - name: coordinator-daily-brief
+            interval: 24h
+            goal: "Produce a consolidated engagement progress brief from completed role outputs."
+    - roleRef: ../base/roles/worker-web.yaml
+      name: strategy-analyst
       description: Performs strategic analysis — competitive positioning, market sizing, and business case evaluation.
       prompts:
-        system_prompt_path: strategy-analyst-prompt.md
+        systemPromptPath: strategy-analyst-prompt.md
       skills:
         - planning
         - financial-analysis
         - reporting
-
-    - name: market-researcher
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: market-researcher
       description: Conducts primary and secondary market research to inform strategic recommendations.
       prompts:
-        system_prompt_path: market-researcher-prompt.md
+        systemPromptPath: market-researcher-prompt.md
       skills:
         - hybrid-web
         - market-monitoring
         - planning
-
-    - name: data-analyst
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+    - roleRef: ../base/roles/worker-web.yaml
+      name: data-analyst
+      description: Crunches numbers, builds models, and turns raw data into insights that support recommendations.
+      prompts:
+        systemPromptPath: data-analyst-prompt.md
+      allowedTools:
         - pipe
         - shell_exec
         - http_fetch
         - browser
-      description: Crunches numbers, builds models, and turns raw data into insights that support recommendations.
-      prompts:
-        system_prompt_path: data-analyst-prompt.md
       skills:
         - data-engineering
         - planning
         - automation
-
-    - name: deliverable-writer
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
+    - roleRef: ../base/roles/worker-web.yaml
+      name: deliverable-writer
+      description: Produces polished strategy decks, memos, and executive presentations. Reviews delegated work and provides quality feedback.
+      prompts:
+        systemPromptPath: deliverable-writer-prompt.md
+      allowedTools:
         - pipe
         - http_fetch
         - task_review
         - task_create
-      description: Produces polished strategy decks, memos, and executive presentations. Reviews delegated work and provides quality feedback.
-      prompts:
-        system_prompt_path: deliverable-writer-prompt.md
       skills:
         - reporting
         - planning
-
-    - name: industry-specialist
-      model: moonshotai/kimi-k2.5
-      code_exec_only: true
-      allowed_tools:
-        - pipe
-        - http_fetch
-        - browser
+    - roleRef: ../base/roles/worker-web.yaml
+      name: industry-specialist
       description: Provides deep domain expertise on specific industries, trends, and regulatory environments.
       prompts:
-        system_prompt_path: industry-specialist-prompt.md
+        systemPromptPath: industry-specialist-prompt.md
       skills:
         - hybrid-web
         - planning

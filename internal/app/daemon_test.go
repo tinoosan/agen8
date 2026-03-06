@@ -22,7 +22,7 @@ func TestResolveRoleAllowSubagents_StandaloneProfile(t *testing.T) {
 id: general
 description: General
 prompts:
-  system_prompt_path: prompt.md
+  systemPromptPath: prompt.md
 `), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
@@ -51,18 +51,18 @@ team:
       coordinator: true
       description: CEO
       prompts:
-        system_prompt_path: prompt.md
-      allow_subagents: true
+        systemPromptPath: prompt.md
+      allowSubagents: true
     - name: worker
       description: Worker
       prompts:
-        system_prompt_path: prompt.md
+        systemPromptPath: prompt.md
 `), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
 
 	if !ResolveRoleAllowSubagents(cfg, "team-test", "ceo") {
-		t.Fatalf("ceo with allow_subagents: true should allow")
+		t.Fatalf("ceo with allowSubagents: true should allow")
 	}
 	if ResolveRoleAllowSubagents(cfg, "team-test", "worker") {
 		t.Fatalf("worker without allow_subagents should not allow")
