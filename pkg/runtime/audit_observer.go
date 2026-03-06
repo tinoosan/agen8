@@ -68,9 +68,10 @@ func maybeInt(v int) string {
 
 func shouldAuditOp(op string, auditReads bool) bool {
 	switch strings.ToLower(strings.TrimSpace(op)) {
-	case types.HostOpFSRead, types.HostOpFSList:
+	case types.HostOpFSRead, types.HostOpFSList, types.HostOpFSArchiveList:
 		return auditReads
 	case types.HostOpFSWrite, types.HostOpFSAppend, types.HostOpFSEdit, types.HostOpFSPatch,
+		types.HostOpFSArchiveCreate, types.HostOpFSArchiveExtract,
 		types.HostOpShellExec, types.HostOpHTTPFetch:
 		return true
 	default:

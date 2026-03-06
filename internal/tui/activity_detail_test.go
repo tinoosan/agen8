@@ -285,6 +285,39 @@ func TestRenderActivityDetailMarkdown_FSTxn_Diagnostics(t *testing.T) {
 	}
 }
 
+func TestRenderActivityDetailMarkdown_FSArchive_Metadata(t *testing.T) {
+	a := Activity{
+		Kind:   "fs_archive_extract",
+		Path:   "/workspace/input.tar.gz",
+		Status: ActivityOK,
+		Ok:     "true",
+		Data: map[string]string{
+			"destination":    "/workspace/out",
+			"pattern":        "*.md",
+			"overwrite":      "true",
+			"archiveFormat":  "tar.gz",
+			"filesExtracted": "3",
+			"totalSizeBytes": "2048",
+			"skipped":        `["/workspace/out/existing.md"]`,
+		},
+	}
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- path: `/workspace/input.tar.gz`",
+		"- destination: `/workspace/out`",
+		"- pattern: `*.md`",
+		"- overwrite: `true`",
+		"- format: `tar.gz`",
+		"- filesExtracted: `3`",
+		"- totalSizeBytes: `2048`",
+		"skipped",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in archive markdown, got:\n%s", want, md)
+		}
+	}
+}
+
 func TestRenderActivityDetailMarkdown_AgentSpawnArgumentsAndOutput(t *testing.T) {
 	a := Activity{
 		Kind:          "agent_spawn",

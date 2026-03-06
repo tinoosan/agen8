@@ -29,6 +29,16 @@ func TestFormatRequestTitle_SharedOps(t *testing.T) {
 			want: "Txn 3 steps",
 		},
 		{
+			name: "archive create",
+			data: map[string]string{"op": "fs_archive_create", "path": "/workspace/journals", "destination": "/workspace/journals.tar.gz"},
+			want: "Archive /workspace/journals -> /workspace/journals.tar.gz",
+		},
+		{
+			name: "archive list",
+			data: map[string]string{"op": "fs_archive_list", "path": "/workspace/journals.tar.gz"},
+			want: "List archive /workspace/journals.tar.gz",
+		},
+		{
 			name: "shell uses argvPreview",
 			data: map[string]string{"op": "shell_exec", "argvPreview": "rg -n test"},
 			want: "rg -n test",

@@ -10,23 +10,26 @@ type ActivityRenderer interface {
 var defaultActivityRenderer ActivityRenderer = baseRenderer{}
 
 var activityRenderers = map[string]ActivityRenderer{
-	"agent_spawn":     agentSpawnRenderer{},
-	"browser":         browserRenderer{},
-	"code_exec":       codeExecRenderer{},
-	"email":           emailRenderer{},
-	"fs_append":       fsWriteAppendRenderer{},
-	"fs_patch":        fsPatchRenderer{},
-	"fs_txn":          fsTxnRenderer{},
-	"fs_read":         fsReadRenderer{},
-	"fs_stat":         fsStatRenderer{},
-	"fs_search":       fsSearchRenderer{},
-	"fs_write":        fsWriteAppendRenderer{},
-	"http_fetch":      httpFetchRenderer{},
-	"llm.web.search":  llmWebSearchRenderer{},
-	"shell_exec":      shellExecRenderer{},
-	"task_create":     taskCreateRenderer{},
-	"trace_run":       traceRunRenderer{},
-	"workdir.changed": workdirChangedRenderer{},
+	"agent_spawn":        agentSpawnRenderer{},
+	"browser":            browserRenderer{},
+	"code_exec":          codeExecRenderer{},
+	"email":              emailRenderer{},
+	"fs_append":          fsWriteAppendRenderer{},
+	"fs_patch":           fsPatchRenderer{},
+	"fs_txn":             fsTxnRenderer{},
+	"fs_archive_create":  archiveRenderer{},
+	"fs_archive_extract": archiveRenderer{},
+	"fs_archive_list":    archiveRenderer{},
+	"fs_read":            fsReadRenderer{},
+	"fs_stat":            fsStatRenderer{},
+	"fs_search":          fsSearchRenderer{},
+	"fs_write":           fsWriteAppendRenderer{},
+	"http_fetch":         httpFetchRenderer{},
+	"llm.web.search":     llmWebSearchRenderer{},
+	"shell_exec":         shellExecRenderer{},
+	"task_create":        taskCreateRenderer{},
+	"trace_run":          traceRunRenderer{},
+	"workdir.changed":    workdirChangedRenderer{},
 }
 
 func activityRendererFor(kind string) ActivityRenderer {
@@ -584,6 +587,96 @@ func (fsTxnRenderer) RenderDetail(a Activity, expanded bool, telemetry bool, b *
 		}
 	}
 	renderTelemetryBlock(a, telemetry, false, false, b)
+}
+
+type archiveRenderer struct{ baseRenderer }
+
+func (archiveRenderer) RenderDetail(a Activity, expanded bool, telemetry bool, b *strings.Builder) {
+	if !renderCommonOutputPreview(a, expanded, b) {
+		if v := strings.TrimSpace(a.Data["archiveFormat"]); v != "" {
+			b.WriteString("- format: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["filesAdded"]); v != "" {
+			b.WriteString("- filesAdded: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["filesExtracted"]); v != "" {
+			b.WriteString("- filesExtracted: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["archiveEntries"]); v != "" {
+			b.WriteString("- archiveEntries: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["totalSizeBytes"]); v != "" {
+			b.WriteString("- totalSizeBytes: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["archiveSizeBytes"]); v != "" {
+			b.WriteString("- archiveSizeBytes: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["compressionRatio"]); v != "" {
+			b.WriteString("- compressionRatio: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if strings.TrimSpace(a.Data["truncated"]) == "true" {
+			b.WriteString("- truncated: `true`\n")
+		}
+		if v := strings.TrimSpace(a.Data["skipped"]); v != "" {
+			b.WriteString("\n**skipped**\n\n")
+			b.WriteString(FormatCode("json", v))
+			b.WriteString("\n")
+		}
+	}
+	renderTelemetryBlock(a, telemetry, false, false, b)
+}
+
+func (archiveRenderer) RenderArguments(a Activity, telemetry bool, b *strings.Builder) {
+	renderDefaultArgumentsPrefix(a, telemetry, b)
+	if v := strings.TrimSpace(a.Data["destination"]); v != "" {
+		b.WriteString("- destination: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["format"]); v != "" {
+		b.WriteString("- format: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["exclude"]); v != "" {
+		b.WriteString("- exclude: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["pattern"]); v != "" {
+		b.WriteString("- pattern: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["overwrite"]); v != "" {
+		b.WriteString("- overwrite: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["includeMetadata"]); v != "" {
+		b.WriteString("- includeMetadata: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["limit"]); v != "" {
+		b.WriteString("- limit: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
 }
 
 func (fsTxnRenderer) RenderArguments(a Activity, telemetry bool, b *strings.Builder) {

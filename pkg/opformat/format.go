@@ -110,6 +110,52 @@ func FormatResponseText(d map[string]string) string {
 	}
 
 	switch op {
+	case "fs_archive_create":
+		if ok == "true" {
+			added := strings.TrimSpace(d["filesAdded"])
+			if added == "" {
+				added = "0"
+			}
+			if ratio := strings.TrimSpace(d["compressionRatio"]); ratio != "" {
+				return prefix + " archived " + added + " files (" + ratio + ")"
+			}
+			return prefix + " archived " + added + " files"
+		}
+		if errStr != "" {
+			return prefix + " " + errStr
+		}
+		return prefix + " archive failed"
+	case "fs_archive_extract":
+		if ok == "true" {
+			extracted := strings.TrimSpace(d["filesExtracted"])
+			if extracted == "" {
+				extracted = "0"
+			}
+			skipped := strings.TrimSpace(d["skippedCount"])
+			if skipped != "" && skipped != "0" {
+				return prefix + " extracted " + extracted + " files (" + skipped + " skipped)"
+			}
+			return prefix + " extracted " + extracted + " files"
+		}
+		if errStr != "" {
+			return prefix + " " + errStr
+		}
+		return prefix + " extract failed"
+	case "fs_archive_list":
+		if ok == "true" {
+			count := strings.TrimSpace(d["archiveEntries"])
+			if count == "" {
+				count = "0"
+			}
+			if strings.TrimSpace(d["truncated"]) == "true" {
+				return prefix + " listed " + count + " entries (truncated)"
+			}
+			return prefix + " listed " + count + " entries"
+		}
+		if errStr != "" {
+			return prefix + " " + errStr
+		}
+		return prefix + " list failed"
 	case "fs_write":
 		if ok == "true" {
 			verified := strings.TrimSpace(d["writeVerified"]) == "true"

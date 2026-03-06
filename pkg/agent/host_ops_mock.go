@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -136,15 +138,18 @@ var (
 		types.HostOpNoop:       mockNoopOrToolResultOp,
 		types.HostOpToolResult: mockNoopOrToolResultOp,
 
-		types.HostOpFSList:   fsListMockOp{},
-		types.HostOpFSStat:   fsStatMockOp{},
-		types.HostOpFSRead:   fsReadMockOp{},
-		types.HostOpFSSearch: fsSearchMockOp{},
-		types.HostOpFSWrite:  fsWriteMockOp{},
-		types.HostOpFSAppend: fsAppendMockOp{},
-		types.HostOpFSEdit:   fsEditMockOp{},
-		types.HostOpFSPatch:  fsPatchMockOp{},
-		types.HostOpFSTxn:    fsTxnMockOp{},
+		types.HostOpFSList:           fsListMockOp{},
+		types.HostOpFSStat:           fsStatMockOp{},
+		types.HostOpFSRead:           fsReadMockOp{},
+		types.HostOpFSSearch:         fsSearchMockOp{},
+		types.HostOpFSWrite:          fsWriteMockOp{},
+		types.HostOpFSAppend:         fsAppendMockOp{},
+		types.HostOpFSEdit:           fsEditMockOp{},
+		types.HostOpFSPatch:          fsPatchMockOp{},
+		types.HostOpFSTxn:            fsTxnMockOp{},
+		types.HostOpFSArchiveCreate:  fsArchiveCreateMockOp{},
+		types.HostOpFSArchiveExtract: fsArchiveExtractMockOp{},
+		types.HostOpFSArchiveList:    fsArchiveListMockOp{},
 
 		types.HostOpShellExec: shellExecMockOp{},
 		types.HostOpHTTPFetch: httpFetchMockOp{},
@@ -657,6 +662,222 @@ func (fsTxnMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpExe
 		TxnStepResults: stepResults,
 		TxnDiagnostics: &diag,
 	}
+}
+
+type fsArchiveCreateMockOp struct{}
+
+func (fsArchiveCreateMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
+	codec, archiveFormat, err := archiveCodecForCreate(req.Format)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+	files, err := collectArchiveSourceFiles(x.FS, req.Path, req.Exclude)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+	archiveBytes, totalSizeBytes, err := codec.Write(files, req.IncludeMetadata)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+	if err := x.FS.Write(req.Destination, archiveBytes); err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+	archiveSizeBytes := int64(len(archiveBytes))
+	compressionRatio := float64(0)
+	if totalSizeBytes > 0 {
+		compressionRatio = float64(archiveSizeBytes) / float64(totalSizeBytes)
+	}
+	return types.HostOpResponse{
+		Op:               req.Op,
+		Ok:               true,
+		ArchiveFormat:    archiveFormat,
+		FilesAdded:       len(files),
+		TotalSizeBytes:   totalSizeBytes,
+		ArchiveSizeBytes: archiveSizeBytes,
+		CompressionRatio: compressionRatio,
+	}
+}
+
+type fsArchiveExtractMockOp struct{}
+
+func (fsArchiveExtractMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
+	archiveBytes, err := x.FS.Read(req.Path)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+	codec, archiveFormat, err := archiveCodecForPath(req.Path)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+	entries, err := codec.Decode(archiveBytes)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+	extracted := 0
+	skipped := make([]string, 0)
+	totalSizeBytes := int64(0)
+	for _, entry := range entries {
+		if entry.IsDir {
+			continue
+		}
+		if strings.TrimSpace(req.Pattern) != "" {
+			ok, matchErr := archivePatternMatches(req.Pattern, entry.Name)
+			if matchErr != nil {
+				return types.HostOpResponse{Op: req.Op, Ok: false, Error: matchErr.Error()}
+			}
+			if !ok {
+				continue
+			}
+		}
+		targetPath := path.Join(strings.TrimRight(req.Destination, "/"), entry.Name)
+		if !req.Overwrite {
+			if _, statErr := x.FS.Stat(targetPath); statErr == nil {
+				skipped = append(skipped, targetPath)
+				continue
+			} else if !isNotFoundErr(statErr) {
+				return types.HostOpResponse{Op: req.Op, Ok: false, Error: statErr.Error()}
+			}
+		}
+		if err := x.FS.Write(targetPath, entry.Data); err != nil {
+			return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+		}
+		extracted++
+		totalSizeBytes += entry.SizeBytes
+	}
+	return types.HostOpResponse{
+		Op:             req.Op,
+		Ok:             true,
+		ArchiveFormat:  archiveFormat,
+		FilesExtracted: extracted,
+		Skipped:        skipped,
+		TotalSizeBytes: totalSizeBytes,
+	}
+}
+
+type fsArchiveListMockOp struct{}
+
+func (fsArchiveListMockOp) Exec(_ context.Context, req types.HostOpRequest, x *HostOpExecutor) types.HostOpResponse {
+	archiveBytes, err := x.FS.Read(req.Path)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+	codec, archiveFormat, err := archiveCodecForPath(req.Path)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+	listResult, err := codec.List(archiveBytes, req.Limit)
+	if err != nil {
+		return types.HostOpResponse{Op: req.Op, Ok: false, Error: err.Error()}
+	}
+	return types.HostOpResponse{
+		Op:             req.Op,
+		Ok:             true,
+		ArchiveFormat:  archiveFormat,
+		ArchiveEntries: listResult.Entries,
+		TotalSizeBytes: listResult.TotalSizeBytes,
+		Truncated:      listResult.Truncated,
+	}
+}
+
+func collectArchiveSourceFiles(fsx *vfs.FS, sourcePath string, exclude []string) ([]archiveSourceFile, error) {
+	entry, err := fsx.Stat(sourcePath)
+	if err != nil {
+		return nil, err
+	}
+	if !entry.IsDir {
+		relName := path.Base(strings.TrimSuffix(strings.TrimSpace(sourcePath), "/"))
+		if archivePathExcluded(relName, exclude) {
+			return []archiveSourceFile{}, nil
+		}
+		data, err := fsx.Read(sourcePath)
+		if err != nil {
+			return nil, err
+		}
+		var mtime *time.Time
+		if entry.HasModTime {
+			t := entry.ModTime
+			mtime = &t
+		}
+		return []archiveSourceFile{{Name: relName, Data: data, Mtime: mtime}}, nil
+	}
+
+	root := strings.TrimRight(strings.TrimSpace(sourcePath), "/")
+	rootName := path.Base(root)
+	queue := []string{root}
+	files := make([]archiveSourceFile, 0)
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		children, err := fsx.List(current)
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range children {
+			if child.IsDir {
+				queue = append(queue, child.Path)
+				continue
+			}
+			rel := strings.TrimPrefix(child.Path, root+"/")
+			if rel == child.Path {
+				rel = path.Base(child.Path)
+			}
+			archiveName := path.Join(rootName, rel)
+			if archivePathExcluded(archiveName, exclude) {
+				continue
+			}
+			data, err := fsx.Read(child.Path)
+			if err != nil {
+				return nil, err
+			}
+			var mtime *time.Time
+			if child.HasModTime {
+				t := child.ModTime
+				mtime = &t
+			}
+			files = append(files, archiveSourceFile{Name: archiveName, Data: data, Mtime: mtime})
+		}
+	}
+	return files, nil
+}
+
+func archivePathExcluded(relPath string, patterns []string) bool {
+	if len(patterns) == 0 {
+		return false
+	}
+	relPath = path.Clean(strings.TrimSpace(relPath))
+	base := path.Base(relPath)
+	for _, raw := range patterns {
+		p := strings.TrimSpace(raw)
+		if p == "" {
+			continue
+		}
+		if ok, _ := path.Match(p, relPath); ok {
+			return true
+		}
+		if ok, _ := path.Match(p, base); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func archivePatternMatches(pattern, entryName string) (bool, error) {
+	p := strings.TrimSpace(pattern)
+	if p == "" {
+		return true, nil
+	}
+	ok, err := path.Match(p, entryName)
+	if err != nil {
+		return false, fmt.Errorf("invalid pattern %q: %w", pattern, err)
+	}
+	if ok {
+		return true, nil
+	}
+	return path.Match(p, path.Base(entryName))
+}
+
+func isNotFoundErr(err error) bool {
+	return errors.Is(err, store.ErrNotFound) || errors.Is(err, fs.ErrNotExist)
 }
 
 type txnStepSummary struct {

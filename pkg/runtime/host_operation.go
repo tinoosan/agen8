@@ -103,6 +103,9 @@ func defaultHostOperations() []HostOperation {
 		fsEditOperation{},
 		fsPatchOperation{},
 		fsTxnOperation{},
+		fsArchiveCreateOperation{},
+		fsArchiveExtractOperation{},
+		fsArchiveListOperation{},
 		shellExecOperation{},
 		codeExecOperation{},
 		httpFetchOperation{},
@@ -618,6 +621,156 @@ type fsTxnOperation struct{}
 func (fsTxnOperation) Op() string { return types.HostOpFSTxn }
 func (fsTxnOperation) Execute(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
 	return next(ctx, req)
+}
+
+type fsArchiveCreateOperation struct{}
+
+func (fsArchiveCreateOperation) Op() string { return types.HostOpFSArchiveCreate }
+func (fsArchiveCreateOperation) Execute(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
+	return next(ctx, req)
+}
+func (fsArchiveCreateOperation) FormatRequestText(_ types.HostOpRequest, reqData map[string]string) string {
+	return opformat.FormatRequestText(reqData)
+}
+func (fsArchiveCreateOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpResponse, _ map[string]string, respData map[string]string) string {
+	return opformat.FormatResponseText(respData)
+}
+func (fsArchiveCreateOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
+	if v := strings.TrimSpace(req.Destination); v != "" {
+		reqData["destination"] = v
+		storeReq["destination"] = v
+	}
+	if v := strings.TrimSpace(req.Format); v != "" {
+		reqData["format"] = v
+		storeReq["format"] = v
+	}
+	if len(req.Exclude) != 0 {
+		v := strings.Join(req.Exclude, ",")
+		reqData["exclude"] = v
+		storeReq["exclude"] = v
+	}
+	reqData["includeMetadata"] = fmtBool(req.IncludeMetadata)
+	storeReq["includeMetadata"] = fmtBool(req.IncludeMetadata)
+}
+func (fsArchiveCreateOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	enrichArchiveResponse(resp, respData, storeResp)
+	if resp.FilesAdded != 0 {
+		v := strconv.Itoa(resp.FilesAdded)
+		respData["filesAdded"] = v
+		storeResp["filesAdded"] = v
+	}
+	if resp.ArchiveSizeBytes != 0 {
+		v := strconv.FormatInt(resp.ArchiveSizeBytes, 10)
+		respData["archiveSizeBytes"] = v
+		storeResp["archiveSizeBytes"] = v
+	}
+	if resp.CompressionRatio != 0 {
+		v := strconv.FormatFloat(resp.CompressionRatio, 'f', 4, 64)
+		respData["compressionRatio"] = v
+		storeResp["compressionRatio"] = v
+	}
+}
+
+type fsArchiveExtractOperation struct{}
+
+func (fsArchiveExtractOperation) Op() string { return types.HostOpFSArchiveExtract }
+func (fsArchiveExtractOperation) Execute(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
+	return next(ctx, req)
+}
+func (fsArchiveExtractOperation) FormatRequestText(_ types.HostOpRequest, reqData map[string]string) string {
+	return opformat.FormatRequestText(reqData)
+}
+func (fsArchiveExtractOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpResponse, _ map[string]string, respData map[string]string) string {
+	return opformat.FormatResponseText(respData)
+}
+func (fsArchiveExtractOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
+	if v := strings.TrimSpace(req.Destination); v != "" {
+		reqData["destination"] = v
+		storeReq["destination"] = v
+	}
+	if req.Overwrite {
+		reqData["overwrite"] = "true"
+		storeReq["overwrite"] = "true"
+	}
+	if v := strings.TrimSpace(req.Pattern); v != "" {
+		reqData["pattern"] = v
+		storeReq["pattern"] = v
+	}
+}
+func (fsArchiveExtractOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	enrichArchiveResponse(resp, respData, storeResp)
+	if resp.FilesExtracted != 0 {
+		v := strconv.Itoa(resp.FilesExtracted)
+		respData["filesExtracted"] = v
+		storeResp["filesExtracted"] = v
+	}
+	if len(resp.Skipped) != 0 {
+		if b, err := json.Marshal(resp.Skipped); err == nil {
+			v := string(b)
+			respData["skipped"] = v
+			storeResp["skipped"] = v
+			respData["skippedCount"] = strconv.Itoa(len(resp.Skipped))
+			storeResp["skippedCount"] = strconv.Itoa(len(resp.Skipped))
+		}
+	}
+}
+
+type fsArchiveListOperation struct{}
+
+func (fsArchiveListOperation) Op() string { return types.HostOpFSArchiveList }
+func (fsArchiveListOperation) Execute(ctx context.Context, req types.HostOpRequest, next types.HostExecFunc) types.HostOpResponse {
+	return next(ctx, req)
+}
+func (fsArchiveListOperation) FormatRequestText(_ types.HostOpRequest, reqData map[string]string) string {
+	return opformat.FormatRequestText(reqData)
+}
+func (fsArchiveListOperation) FormatResponseText(_ types.HostOpRequest, _ types.HostOpResponse, _ map[string]string, respData map[string]string) string {
+	return opformat.FormatResponseText(respData)
+}
+func (fsArchiveListOperation) EnrichRequestEvent(req types.HostOpRequest, reqData map[string]string, storeReq map[string]string) {
+	if req.Limit != 0 {
+		v := strconv.Itoa(req.Limit)
+		reqData["limit"] = v
+		storeReq["limit"] = v
+	}
+}
+func (fsArchiveListOperation) EnrichResponseEvent(_ types.HostOpRequest, resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	enrichArchiveResponse(resp, respData, storeResp)
+	if len(resp.ArchiveEntries) != 0 {
+		v := strconv.Itoa(len(resp.ArchiveEntries))
+		respData["archiveEntries"] = v
+		storeResp["archiveEntries"] = v
+	}
+}
+
+func enrichArchiveResponse(resp types.HostOpResponse, respData map[string]string, storeResp map[string]string) {
+	if v := strings.TrimSpace(resp.ArchiveFormat); v != "" {
+		respData["archiveFormat"] = v
+		storeResp["archiveFormat"] = v
+	}
+	if len(resp.ArchiveEntries) != 0 {
+		v := strconv.Itoa(len(resp.ArchiveEntries))
+		respData["archiveEntries"] = v
+		storeResp["archiveEntries"] = v
+	}
+	if resp.TotalSizeBytes != 0 {
+		v := strconv.FormatInt(resp.TotalSizeBytes, 10)
+		respData["totalSizeBytes"] = v
+		storeResp["totalSizeBytes"] = v
+	}
+	if len(resp.Skipped) != 0 {
+		if b, err := json.Marshal(resp.Skipped); err == nil {
+			v := string(b)
+			respData["skipped"] = v
+			storeResp["skipped"] = v
+			respData["skippedCount"] = strconv.Itoa(len(resp.Skipped))
+			storeResp["skippedCount"] = strconv.Itoa(len(resp.Skipped))
+		}
+	}
+	if resp.Truncated {
+		respData["truncated"] = "true"
+		storeResp["truncated"] = "true"
+	}
 }
 func (fsTxnOperation) FormatRequestText(_ types.HostOpRequest, reqData map[string]string) string {
 	return opformat.FormatRequestText(reqData)

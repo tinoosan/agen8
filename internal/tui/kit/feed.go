@@ -65,6 +65,12 @@ func VerbFromKind(kind string) string {
 		return "Txn"
 	case "fs_search":
 		return "Search"
+	case "fs_archive_create":
+		return "Archive"
+	case "fs_archive_extract":
+		return "Extract"
+	case "fs_archive_list":
+		return "List archive"
 	case "shell_exec":
 		return "Bash"
 	case "http_fetch":

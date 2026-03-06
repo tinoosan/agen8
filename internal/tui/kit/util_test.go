@@ -80,3 +80,9 @@ func TestVerbFromKind_FSTxn(t *testing.T) {
 		t.Fatalf("VerbFromKind(fs_txn) = %q, want %q", got, "Txn")
 	}
 }
+
+func TestVerbFromKind_FSArchiveCreate(t *testing.T) {
+	if got := VerbFromKind("fs_archive_create"); got != "Archive" {
+		t.Fatalf("VerbFromKind(fs_archive_create) = %q, want %q", got, "Archive")
+	}
+}

@@ -320,3 +320,50 @@ func TestHostOpRequest_FSTxnValidation(t *testing.T) {
 		t.Fatalf("expected error for relative txn step path")
 	}
 }
+
+func TestHostOpRequest_FSArchiveValidation(t *testing.T) {
+	req := HostOpRequest{
+		Op:              HostOpFSArchiveCreate,
+		Path:            "/workspace/data",
+		Destination:     "/workspace/data.zip",
+		Format:          "zip",
+		IncludeMetadata: true,
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("archive create validate: %v", err)
+	}
+
+	req = HostOpRequest{
+		Op:          HostOpFSArchiveExtract,
+		Path:        "/workspace/data.zip",
+		Destination: "/workspace/out",
+		Pattern:     "*.md",
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("archive extract validate: %v", err)
+	}
+
+	req = HostOpRequest{
+		Op:    HostOpFSArchiveList,
+		Path:  "/workspace/data.zip",
+		Limit: 10,
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("archive list validate: %v", err)
+	}
+
+	req = HostOpRequest{Op: HostOpFSArchiveCreate, Path: "/workspace/data", Destination: "/workspace/out.zip", Format: "tar.bz2"}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for unsupported archive format")
+	}
+
+	req = HostOpRequest{Op: HostOpFSArchiveExtract, Path: "/workspace/data.zip", Destination: "workspace/out"}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for relative destination")
+	}
+
+	req = HostOpRequest{Op: HostOpFSArchiveList, Path: "/workspace/data.zip", Limit: -1}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for negative list limit")
+	}
+}

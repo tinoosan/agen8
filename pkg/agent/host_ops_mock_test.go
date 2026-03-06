@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -573,6 +575,126 @@ func TestHostOpExecutor_FSTxn_ApplyFailureRollbackFailureSurfaced(t *testing.T) 
 	}
 	if resp.TxnDiagnostics == nil || !resp.TxnDiagnostics.RollbackPerformed || !resp.TxnDiagnostics.RollbackFailed || len(resp.TxnDiagnostics.RollbackErrors) == 0 {
 		t.Fatalf("expected rollback failure diagnostics, got %#v", resp.TxnDiagnostics)
+	}
+}
+
+func TestHostOpExecutor_FSArchiveCreateListExtract(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	if err := exec.FS.Write("/workspace/journals/a.md", []byte("alpha")); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.FS.Write("/workspace/journals/b.tmp", []byte("skip")); err != nil {
+		t.Fatal(err)
+	}
+
+	createResp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:              types.HostOpFSArchiveCreate,
+		Path:            "/workspace/journals",
+		Destination:     "/workspace/journals.tar.gz",
+		Format:          "tar.gz",
+		Exclude:         []string{"*.tmp"},
+		IncludeMetadata: true,
+	})
+	if !createResp.Ok {
+		t.Fatalf("archive create failed: %#v", createResp)
+	}
+	if createResp.FilesAdded != 1 || createResp.ArchiveFormat != "tar.gz" {
+		t.Fatalf("unexpected archive create response: %#v", createResp)
+	}
+
+	listResp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:   types.HostOpFSArchiveList,
+		Path: "/workspace/journals.tar.gz",
+	})
+	if !listResp.Ok {
+		t.Fatalf("archive list failed: %#v", listResp)
+	}
+	if len(listResp.ArchiveEntries) != 1 || listResp.ArchiveEntries[0].Name != "journals/a.md" {
+		t.Fatalf("unexpected archive entries: %#v", listResp.ArchiveEntries)
+	}
+
+	extractResp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:          types.HostOpFSArchiveExtract,
+		Path:        "/workspace/journals.tar.gz",
+		Destination: "/workspace/out",
+		Pattern:     "*.md",
+		Overwrite:   false,
+	})
+	if !extractResp.Ok {
+		t.Fatalf("archive extract failed: %#v", extractResp)
+	}
+	if extractResp.FilesExtracted != 1 {
+		t.Fatalf("expected 1 extracted file, got %#v", extractResp)
+	}
+	out, err := exec.FS.Read("/workspace/out/journals/a.md")
+	if err != nil {
+		t.Fatalf("read extracted file: %v", err)
+	}
+	if string(out) != "alpha" {
+		t.Fatalf("unexpected extracted content: %q", string(out))
+	}
+}
+
+func TestHostOpExecutor_FSArchiveExtract_OverwriteFalseSkips(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	if err := exec.FS.Write("/workspace/a.txt", []byte("v1")); err != nil {
+		t.Fatal(err)
+	}
+	createResp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:          types.HostOpFSArchiveCreate,
+		Path:        "/workspace/a.txt",
+		Destination: "/workspace/a.zip",
+		Format:      "zip",
+	})
+	if !createResp.Ok {
+		t.Fatalf("create archive: %#v", createResp)
+	}
+	if err := exec.FS.Write("/workspace/out/a.txt", []byte("existing")); err != nil {
+		t.Fatal(err)
+	}
+
+	extractResp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:          types.HostOpFSArchiveExtract,
+		Path:        "/workspace/a.zip",
+		Destination: "/workspace/out",
+		Overwrite:   false,
+	})
+	if !extractResp.Ok {
+		t.Fatalf("extract archive: %#v", extractResp)
+	}
+	if extractResp.FilesExtracted != 0 || len(extractResp.Skipped) != 1 {
+		t.Fatalf("expected skip behavior, got %#v", extractResp)
+	}
+}
+
+func TestHostOpExecutor_FSArchiveExtract_RejectsTraversalEntries(t *testing.T) {
+	exec := &HostOpExecutor{FS: newMountedWorkspaceFS(t)}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("../evil.txt")
+	if err != nil {
+		t.Fatalf("create zip entry: %v", err)
+	}
+	if _, err := w.Write([]byte("bad")); err != nil {
+		t.Fatalf("write zip entry: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := exec.FS.Write("/workspace/bad.zip", buf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:          types.HostOpFSArchiveExtract,
+		Path:        "/workspace/bad.zip",
+		Destination: "/workspace/out",
+	})
+	if resp.Ok {
+		t.Fatalf("expected traversal rejection, got %#v", resp)
+	}
+	if !strings.Contains(strings.ToLower(resp.Error), "traversal") {
+		t.Fatalf("expected traversal error, got %q", resp.Error)
 	}
 }
 

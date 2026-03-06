@@ -55,6 +55,29 @@ func FormatRequestTitle(d map[string]string) string {
 			return "Txn " + steps + " steps"
 		}
 		return "Txn"
+	case "fs_archive_create":
+		dst := strings.TrimSpace(d["destination"])
+		if path != "" && dst != "" {
+			return "Archive " + path + " -> " + dst
+		}
+		if path != "" {
+			return "Archive " + path
+		}
+		return "Archive"
+	case "fs_archive_extract":
+		dst := strings.TrimSpace(d["destination"])
+		if path != "" && dst != "" {
+			return "Extract " + path + " -> " + dst
+		}
+		if path != "" {
+			return "Extract " + path
+		}
+		return "Extract"
+	case "fs_archive_list":
+		if path != "" {
+			return "List archive " + path
+		}
+		return "List archive"
 	case "shell_exec":
 		if cmd := strings.TrimSpace(d["argvPreview"]); cmd != "" {
 			return cmd

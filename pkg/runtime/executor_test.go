@@ -416,6 +416,16 @@ func TestEventMiddleware_EmitsRequestTextForRepresentativeOps(t *testing.T) {
 			want: "Txn 2 steps",
 		},
 		{
+			name: "fs_archive_create",
+			req: types.HostOpRequest{
+				Op:          types.HostOpFSArchiveCreate,
+				Path:        "/workspace/journals",
+				Destination: "/workspace/journals.tar.gz",
+				Format:      "tar.gz",
+			},
+			want: "Archive /workspace/journals -> /workspace/journals.tar.gz",
+		},
+		{
 			name: "shell_exec",
 			req:  types.HostOpRequest{Op: types.HostOpShellExec, Argv: []string{"rg", "-n", "todo"}},
 			want: "rg -n todo",
@@ -493,6 +503,27 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 			}
 		case types.HostOpFSRead:
 			return types.HostOpResponse{Op: req.Op, Ok: true, Truncated: true}
+		case types.HostOpFSArchiveCreate:
+			return types.HostOpResponse{
+				Op:               req.Op,
+				Ok:               true,
+				FilesAdded:       3,
+				CompressionRatio: 0.34,
+			}
+		case types.HostOpFSArchiveExtract:
+			return types.HostOpResponse{
+				Op:             req.Op,
+				Ok:             true,
+				FilesExtracted: 2,
+				Skipped:        []string{"/workspace/out/existing.md"},
+			}
+		case types.HostOpFSArchiveList:
+			return types.HostOpResponse{
+				Op:             req.Op,
+				Ok:             true,
+				ArchiveEntries: []types.ArchiveEntry{{Name: "a.md"}, {Name: "b.md"}},
+				Truncated:      true,
+			}
 		case types.HostOpShellExec:
 			return types.HostOpResponse{Op: req.Op, Ok: true, ExitCode: 0}
 		case types.HostOpHTTPFetch:
@@ -530,6 +561,9 @@ func TestEventMiddleware_EmitsResponseTextForRepresentativeOps(t *testing.T) {
 		{name: "fs_stat", req: types.HostOpRequest{Op: types.HostOpFSStat, Path: "/workspace/a.txt"}, want: "✓ file 12 bytes"},
 		{name: "fs_patch", req: types.HostOpRequest{Op: types.HostOpFSPatch, Path: "/workspace/a.txt", Text: "@@ -1 +1 @@\n-old\n+new\n", DryRun: true}, want: "✓ dry-run 1/2 hunks"},
 		{name: "fs_txn", req: types.HostOpRequest{Op: types.HostOpFSTxn, TxnSteps: []types.FSTxnStep{{Op: types.HostOpFSWrite, Path: "/workspace/a.txt", Text: "hello"}, {Op: types.HostOpFSAppend, Path: "/workspace/a.txt", Text: " world"}}}, want: "✓ txn applied 2/2 steps"},
+		{name: "fs_archive_create", req: types.HostOpRequest{Op: types.HostOpFSArchiveCreate, Path: "/workspace/journals", Destination: "/workspace/journals.tar.gz", Format: "tar.gz"}, want: "✓ archived 3 files (0.3400)"},
+		{name: "fs_archive_extract", req: types.HostOpRequest{Op: types.HostOpFSArchiveExtract, Path: "/workspace/journals.tar.gz", Destination: "/workspace/out"}, want: "✓ extracted 2 files (1 skipped)"},
+		{name: "fs_archive_list", req: types.HostOpRequest{Op: types.HostOpFSArchiveList, Path: "/workspace/journals.tar.gz"}, want: "✓ listed 2 entries (truncated)"},
 		{name: "fs_read", req: types.HostOpRequest{Op: types.HostOpFSRead, Path: "/workspace/a.txt"}, want: "✓ truncated"},
 		{name: "shell_exec", req: types.HostOpRequest{Op: types.HostOpShellExec, Argv: []string{"echo", "ok"}}, want: "✓ exit 0"},
 		{name: "http_fetch", req: types.HostOpRequest{Op: types.HostOpHTTPFetch, URL: "https://example.com"}, want: "✓ 200"},
@@ -626,6 +660,81 @@ func TestEventMiddleware_FSTxnRequestAndResponseEnrichment(t *testing.T) {
 	}
 	if gotResp.Data["txnRollbackErrors"] == "" || !strings.Contains(gotResp.Data["txnRollbackErrors"], "permission denied") {
 		t.Fatalf("expected rollback errors in response data, got %v", gotResp.Data)
+	}
+}
+
+func TestEventMiddleware_FSArchiveRequestAndResponseEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{
+			Op:               req.Op,
+			Ok:               true,
+			ArchiveFormat:    "zip",
+			FilesAdded:       2,
+			FilesExtracted:   0,
+			TotalSizeBytes:   256,
+			ArchiveSizeBytes: 128,
+			CompressionRatio: 0.5,
+			ArchiveEntries: []types.ArchiveEntry{
+				{Name: "a.txt", SizeBytes: 12},
+				{Name: "b.txt", SizeBytes: 20},
+			},
+			Skipped:   []string{"/workspace/out/a.txt"},
+			Truncated: true,
+		}
+	})
+
+	var gotReq events.Event
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op:              types.HostOpFSArchiveCreate,
+		Path:            "/workspace/src",
+		Destination:     "/workspace/src.zip",
+		Format:          "zip",
+		Exclude:         []string{"*.tmp"},
+		IncludeMetadata: true,
+	})
+	if !resp.Ok {
+		t.Fatalf("expected ok response")
+	}
+	for key, want := range map[string]string{
+		"destination":     "/workspace/src.zip",
+		"format":          "zip",
+		"exclude":         "*.tmp",
+		"includeMetadata": "true",
+	} {
+		if gotReq.Data[key] != want {
+			t.Fatalf("expected archive request enrichment %s=%q, got %q (data=%v)", key, want, gotReq.Data[key], gotReq.Data)
+		}
+	}
+	for key, want := range map[string]string{
+		"archiveFormat":    "zip",
+		"filesAdded":       "2",
+		"archiveEntries":   "2",
+		"totalSizeBytes":   "256",
+		"archiveSizeBytes": "128",
+		"truncated":        "true",
+	} {
+		if gotResp.Data[key] != want {
+			t.Fatalf("expected archive response enrichment %s=%q, got %q (data=%v)", key, want, gotResp.Data[key], gotResp.Data)
+		}
+	}
+	if gotResp.Data["skipped"] == "" || !strings.Contains(gotResp.Data["skipped"], "/workspace/out/a.txt") {
+		t.Fatalf("expected skipped list in response enrichment, got %v", gotResp.Data)
 	}
 }
 

@@ -51,6 +51,9 @@ func DefaultPromptToolSpec() PromptToolSpec {
 			{Name: "fs_stat", Description: "Inspect path metadata (type, optional size) without reading file contents."},
 			{Name: "fs_patch", Description: "Apply unified-diff patches."},
 			{Name: "fs_txn", Description: "Execute coordinated multi-step fs mutations atomically with dry-run/apply and rollback diagnostics."},
+			{Name: "fs_archive_create", Description: "Create archives in zip/tar/tar.gz format from VFS files/directories."},
+			{Name: "fs_archive_extract", Description: "Extract zip/tar/tar.gz archives into VFS destinations with overwrite/pattern controls."},
+			{Name: "fs_archive_list", Description: "List archive contents and metadata without extracting."},
 			{Name: "fs_read", Description: "Read file contents."},
 			{Name: "fs_search", Description: "Search files under any VFS path using plain-text or regex matching. Use previews, globs, and metadata to narrow candidates before fs_read."},
 			{Name: "fs_write", Description: "Write new files (optional verify/checksum/atomic/sync safety flags)."},
@@ -241,6 +244,7 @@ const basePromptRaw = `<system>
     <rule id="fs_edit">fs_edit expects JSON like {"path": "/project/file", "edits": [{"old": "...", "new": "...", "occurrence": 1}]}; if it fails, re-read the file and try a more specific snippet.</rule>
     <rule id="fs_patch">fs_patch needs a unified diff with hunk headers (e.g., @@ -1,3 +1,3 @@). Prefer dryRun=true first to validate and inspect diagnostics before applying.</rule>
     <rule id="fs_txn">For coordinated multi-file mutations, prefer fs_txn with dryRun=true first, then apply=true to commit with rollback on failure.</rule>
+    <rule id="fs_archive">Prefer fs_archive_list before fs_archive_extract when inspecting unknown archives.</rule>
     <memory_management>
       <structure>
         The /memory directory contains daily memory files in YYYY-MM-DD-memory.md format.

@@ -30,6 +30,12 @@ const (
 	HostOpFSPatch = "fs_patch"
 	// HostOpFSTxn applies a sequence of mutating fs_* operations atomically.
 	HostOpFSTxn = "fs_txn"
+	// HostOpFSArchiveCreate creates a zip/tar/tar.gz archive from VFS paths.
+	HostOpFSArchiveCreate = "fs_archive_create"
+	// HostOpFSArchiveExtract extracts an archive into a VFS destination.
+	HostOpFSArchiveExtract = "fs_archive_extract"
+	// HostOpFSArchiveList lists archive entries without extracting.
+	HostOpFSArchiveList = "fs_archive_list"
 	// HostOpShellExec executes a shell command.
 	HostOpShellExec = "shell_exec"
 	// HostOpHTTPFetch issues an HTTP request.
@@ -76,6 +82,9 @@ type HostOpRequest struct {
 	Verbose          bool          `json:"verbose,omitempty"`
 	TxnSteps         []FSTxnStep   `json:"txnSteps,omitempty"`
 	TxnOptions       *FSTxnOptions `json:"txnOptions,omitempty"`
+	Destination      string        `json:"destination,omitempty"`
+	Format           string        `json:"format,omitempty"`
+	Overwrite        bool          `json:"overwrite,omitempty"`
 	Glob             string        `json:"glob,omitempty"`
 	Exclude          []string      `json:"exclude,omitempty"`
 	PreviewLines     int           `json:"previewLines,omitempty"`
@@ -105,7 +114,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = strings.ToLower(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSStat, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpFSTxn, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpCodeExec, HostOpNoop, HostOpToolResult, HostOpFinal:
+	case HostOpFSList, HostOpFSStat, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpFSTxn, HostOpFSArchiveCreate, HostOpFSArchiveExtract, HostOpFSArchiveList, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpCodeExec, HostOpNoop, HostOpToolResult, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -249,6 +258,51 @@ func (r HostOpRequest) Validate() error {
 			if r.TxnOptions.Apply && r.TxnOptions.DryRun {
 				return fmt.Errorf("txnOptions.apply and txnOptions.dryRun cannot both be true")
 			}
+		}
+		return nil
+
+	case HostOpFSArchiveCreate:
+		if err := validate.NonEmpty("path", r.Path); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+			return fmt.Errorf("path must be an absolute VFS path (start with /)")
+		}
+		if err := validate.NonEmpty("destination", r.Destination); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Destination), "/") {
+			return fmt.Errorf("destination must be an absolute VFS path (start with /)")
+		}
+		if err := validateArchiveFormat(r.Format); err != nil {
+			return err
+		}
+		return nil
+
+	case HostOpFSArchiveExtract:
+		if err := validate.NonEmpty("path", r.Path); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+			return fmt.Errorf("path must be an absolute VFS path (start with /)")
+		}
+		if err := validate.NonEmpty("destination", r.Destination); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Destination), "/") {
+			return fmt.Errorf("destination must be an absolute VFS path (start with /)")
+		}
+		return nil
+
+	case HostOpFSArchiveList:
+		if err := validate.NonEmpty("path", r.Path); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(strings.TrimSpace(r.Path), "/") {
+			return fmt.Errorf("path must be an absolute VFS path (start with /)")
+		}
+		if r.Limit < 0 {
+			return fmt.Errorf("limit must be >= 0")
 		}
 		return nil
 
@@ -445,6 +499,15 @@ func normalizeWriteMode(mode string) string {
 	}
 }
 
+func validateArchiveFormat(format string) error {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "zip", "tar", "tar.gz":
+		return nil
+	default:
+		return fmt.Errorf("format must be one of zip|tar|tar.gz")
+	}
+}
+
 // SearchResult is one result returned by fs_search.
 type SearchResult struct {
 	Title         string   `json:"title,omitempty"`
@@ -537,6 +600,14 @@ type PatchDiagnostics struct {
 	Suggestion      string   `json:"suggestion,omitempty"`
 }
 
+// ArchiveEntry represents one entry in an archive file.
+type ArchiveEntry struct {
+	Name      string `json:"name,omitempty"`
+	IsDir     bool   `json:"isDir,omitempty"`
+	SizeBytes int64  `json:"sizeBytes,omitempty"`
+	Mtime     *int64 `json:"mtime,omitempty"`
+}
+
 // HostOpResponse is the minimal "host primitive" response envelope.
 type HostOpResponse struct {
 	Op               string            `json:"op"`
@@ -545,8 +616,16 @@ type HostOpResponse struct {
 	ErrorCode        string            `json:"errorCode,omitempty"`
 	Entries          []string          `json:"entries,omitempty"`
 	Results          []SearchResult    `json:"results,omitempty"`
+	ArchiveEntries   []ArchiveEntry    `json:"archiveEntries,omitempty"`
 	TxnStepResults   []FSTxnStepResult `json:"txnStepResults,omitempty"`
 	TxnDiagnostics   *FSTxnDiagnostics `json:"txnDiagnostics,omitempty"`
+	ArchiveFormat    string            `json:"archiveFormat,omitempty"`
+	FilesAdded       int               `json:"filesAdded,omitempty"`
+	FilesExtracted   int               `json:"filesExtracted,omitempty"`
+	TotalSizeBytes   int64             `json:"totalSizeBytes,omitempty"`
+	ArchiveSizeBytes int64             `json:"archiveSizeBytes,omitempty"`
+	CompressionRatio float64           `json:"compressionRatio,omitempty"`
+	Skipped          []string          `json:"skipped,omitempty"`
 	ResultsTotal     int               `json:"resultsTotal,omitempty"`
 	ResultsReturned  int               `json:"resultsReturned,omitempty"`
 	ResultsTruncated bool              `json:"resultsTruncated,omitempty"`

@@ -47,6 +47,18 @@ var catalog = map[string]metadata{
 		category:              "Updated",
 		useSharedRequestTitle: true,
 	},
+	"fs_archive_create": {
+		category:              "Updated",
+		useSharedRequestTitle: true,
+	},
+	"fs_archive_extract": {
+		category:              "Updated",
+		useSharedRequestTitle: true,
+	},
+	"fs_archive_list": {
+		category:              "Explored",
+		useSharedRequestTitle: true,
+	},
 	"shell_exec": {
 		category:              "Ran",
 		useSharedRequestTitle: true,
