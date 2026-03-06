@@ -539,30 +539,16 @@ func (m *Model) renderProjectHeader() string {
 }
 
 func (m *Model) renderProjectSummaryBar() string {
-	var pending, active, done, runningAgents int
+	var runningAgents, totalAgents int
 	for _, t := range m.teams {
-		pending += t.Pending
-		active += t.Active
-		done += t.Done
 		runningAgents += t.RunningAgents
+		totalAgents += t.TotalAgents
 	}
 
-	pendingLabel := kit.StylePending.Render(fmt.Sprintf("⏳ %d pending", pending))
-	activeLabel := kit.StyleOK.Render(fmt.Sprintf("● %d active", active))
-	doneLabel := styleDim.Render(fmt.Sprintf("✓ %d done", done))
-	runningLabel := kit.StyleOK.Render(fmt.Sprintf("agents:%d", runningAgents))
+	runningLabel := kit.StyleOK.Render(fmt.Sprintf("● %d running", runningAgents))
+	totalLabel := styleDim.Render(fmt.Sprintf("/ %d agents", totalAgents))
 
-	var line string
-	if m.isCompact() {
-		line = pendingLabel +
-			styleDim.Render("  ") + activeLabel +
-			styleDim.Render("  ") + doneLabel
-	} else {
-		line = pendingLabel +
-			styleDim.Render("  ") + activeLabel +
-			styleDim.Render("  ") + doneLabel +
-			styleDim.Render("  ·  ") + runningLabel
-	}
+	line := runningLabel + " " + totalLabel
 
 	return lipgloss.NewStyle().
 		Width(m.width).MaxWidth(m.width).MaxHeight(1).Padding(0, 1).
@@ -627,37 +613,27 @@ func (m *Model) renderTeamTableHeader(width int) string {
 	}
 	if m.isCompact() {
 		statusW := 10
-		profileW := 14
-		tasksW := 12
-		teamW := max(8, inner-(statusW+profileW+tasksW+3))
+		agentsW := 8
+		teamW := max(8, inner-(statusW+agentsW+2))
 		line := strings.Repeat(" ", markerW) +
 			padRight("TEAM", teamW) + " " +
 			padRight("STATUS", statusW) + " " +
-			padRight("PROFILE", profileW) + " " +
-			padRight("TASKS", tasksW)
+			padRight("AGENTS", agentsW)
 		return lipgloss.NewStyle().Padding(0, 1).Width(width).Render(styleDim.Render(line))
 	}
 
-	// Full width columns (no cost — activity focuses on ops).
-	teamW := 14
+	// Full width: TEAM, STATUS, AGENTS, PROFILE, AGE.
+	teamW := 16
 	statusW := 10
-	profileW := 14
-	coordW := 12
 	agentsW := 8
-	pendW := 5
-	actW := 5
-	doneW := 5
-	ageW := max(6, inner-(teamW+statusW+profileW+coordW+agentsW+pendW+actW+doneW+8))
+	profileW := 16
+	ageW := max(6, inner-(teamW+statusW+agentsW+profileW+4))
 
 	line := strings.Repeat(" ", markerW) +
 		padRight("TEAM", teamW) + " " +
 		padRight("STATUS", statusW) + " " +
-		padRight("PROFILE", profileW) + " " +
-		padRight("COORD", coordW) + " " +
 		padRight("AGENTS", agentsW) + " " +
-		padRight("PEND", pendW) + " " +
-		padRight("ACT", actW) + " " +
-		padRight("DONE", doneW) + " " +
+		padRight("PROFILE", profileW) + " " +
 		padRight("AGE", ageW)
 	return lipgloss.NewStyle().Padding(0, 1).Width(width).Render(styleDim.Render(line))
 }
@@ -685,44 +661,32 @@ func (m *Model) buildTeamRows(width int) []string {
 			continue
 		}
 
+		agentStr := fmt.Sprintf("%d/%d", row.RunningAgents, row.TotalAgents)
+
 		if m.isCompact() {
 			statusW := 10
-			profileW := 14
-			tasksW := 12
-			teamW := max(8, inner-(statusW+profileW+tasksW+3))
-			tasksSummary := fmt.Sprintf("%d/%d/%d", row.Pending, row.Active, row.Done)
+			agentsW := 8
+			teamW := max(8, inner-(statusW+agentsW+2))
 			line := marker +
 				styleMeta.Render(padRight(kit.TruncateRight(teamLabel, teamW), teamW)) + " " +
 				renderTeamStatusCell(row, statusW, m.spinFrame) + " " +
-				styleDim.Render(padRight(kit.TruncateRight(kit.Fallback(row.ProfileID, "-"), profileW), profileW)) + " " +
-				styleMeta.Render(padRight(tasksSummary, tasksW))
+				kit.StyleOK.Render(padRight(agentStr, agentsW))
 			rows = append(rows, line)
 			continue
 		}
 
-		// Full width (no cost — activity focuses on ops).
-		teamW := 14
+		// Full width: TEAM, STATUS, AGENTS, PROFILE, AGE.
+		teamW := 16
 		statusW := 10
-		profileW := 14
-		coordW := 12
 		agentsW := 8
-		pendW := 5
-		actW := 5
-		doneW := 5
-		ageW := max(6, inner-(teamW+statusW+profileW+coordW+agentsW+pendW+actW+doneW+8))
-
-		agentStr := fmt.Sprintf("%d/%d", row.RunningAgents, row.TotalAgents)
-		coordLabel := kit.Fallback(kit.TruncateRight(row.CoordinatorRole, coordW), "-")
+		profileW := 16
+		ageW := max(6, inner-(teamW+statusW+agentsW+profileW+4))
 
 		line := marker +
 			styleMeta.Render(padRight(kit.TruncateRight(teamLabel, teamW), teamW)) + " " +
 			renderTeamStatusCell(row, statusW, m.spinFrame) + " " +
-			styleDim.Render(padRight(kit.TruncateRight(kit.Fallback(row.ProfileID, "-"), profileW), profileW)) + " " +
-			styleMeta.Render(padRight(coordLabel, coordW)) + " " +
 			kit.StyleOK.Render(padRight(agentStr, agentsW)) + " " +
-			kit.StylePending.Render(padRight(fmt.Sprintf("%d", row.Pending), pendW)) + " " +
-			kit.StyleOK.Render(padRight(fmt.Sprintf("%d", row.Active), actW)) + " " +
-			styleDim.Render(padRight(fmt.Sprintf("%d", row.Done), doneW)) + " " +
+			styleDim.Render(padRight(kit.TruncateRight(kit.Fallback(row.ProfileID, "-"), profileW), profileW)) + " " +
 			styleDim.Render(padRight(relativeAge(row.UpdatedAt), ageW))
 		rows = append(rows, line)
 	}
