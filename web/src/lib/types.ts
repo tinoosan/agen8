@@ -129,6 +129,8 @@ export function getItemText(item: Item): string {
 export interface Task {
   id: string
   threadId?: string
+  sourceTeamId?: string
+  destinationTeamId?: string
   teamId?: string
   runId?: string
   assignedRole?: string
@@ -150,6 +152,8 @@ export interface MailMessage {
   messageId: string
   threadId?: string
   runId?: string
+  sourceTeamId?: string
+  destinationTeamId?: string
   teamId?: string
   channel: string
   kind: string

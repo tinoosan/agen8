@@ -60,6 +60,8 @@ type AgentMessage struct {
 	ProcessedAt *time.Time `json:"processedAt,omitempty"`
 }
 
+// NormalizeTeamFields canonicalizes explicit source/destination team semantics.
+// TeamID remains a destination alias for compatibility at projection edges.
 func (m *AgentMessage) NormalizeTeamFields() {
 	if m == nil {
 		return
@@ -67,10 +69,15 @@ func (m *AgentMessage) NormalizeTeamFields() {
 	m.SourceTeamID = strings.TrimSpace(m.SourceTeamID)
 	m.DestinationTeamID = strings.TrimSpace(m.DestinationTeamID)
 	m.TeamID = strings.TrimSpace(m.TeamID)
-	if m.DestinationTeamID == "" && m.TeamID != "" {
+	if m.DestinationTeamID == "" {
 		m.DestinationTeamID = m.TeamID
 	}
-	m.TeamID = m.DestinationTeamID
+	if m.TeamID == "" {
+		m.TeamID = m.DestinationTeamID
+	}
+	if m.SourceTeamID == "" && m.DestinationTeamID != "" {
+		m.SourceTeamID = m.DestinationTeamID
+	}
 	if m.Task != nil {
 		m.Task.NormalizeTeamFields()
 	}

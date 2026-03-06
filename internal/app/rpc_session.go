@@ -4,10 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
-	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,8 +15,6 @@ import (
 	"github.com/tinoosan/agen8/pkg/timeutil"
 	"github.com/tinoosan/agen8/pkg/types"
 )
-
-var warnLegacyTeamFallbackOnce sync.Once
 
 type sessionRunBatchReader interface {
 	ListRunsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]types.Run, error)
@@ -270,13 +265,14 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 		return protocol.TaskListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "view must be inbox or outbox"}
 	}
 	filter := state.TaskFilter{
-		TeamID:   scope.teamID,
-		RunID:    scope.runID,
-		View:     view,
-		SortBy:   "created_at",
-		SortDesc: true,
-		Limit:    clampLimit(p.Limit, 200, 2000),
-		Offset:   max(0, p.Offset),
+		DestinationTeamID: scope.teamID,
+		TeamID:            scope.teamID,
+		RunID:             scope.runID,
+		View:              view,
+		SortBy:            "created_at",
+		SortDesc:          true,
+		Limit:             clampLimit(p.Limit, 200, 2000),
+		Offset:            max(0, p.Offset),
 	}
 	scopeMode := strings.ToLower(strings.TrimSpace(p.Scope))
 	if scopeMode != "" && scopeMode != "team" && scopeMode != "run" {
@@ -776,17 +772,6 @@ func normalizeAssignedToType(s string) string {
 	}
 }
 
-func legacyTeamFallbackEnabled() bool {
-	raw := strings.ToLower(strings.TrimSpace(os.Getenv("AGEN8_LEGACY_TEAM_FALLBACK")))
-	enabled := raw == "1" || raw == "true" || raw == "yes" || raw == "on"
-	if enabled {
-		warnLegacyTeamFallbackOnce.Do(func() {
-			slog.Warn("AGEN8_LEGACY_TEAM_FALLBACK is enabled; implicit team fallback remains active and should be removed after compatibility window", "component", "rpc")
-		})
-	}
-	return enabled
-}
-
 func (s *RPCServer) deriveDefaultTeamRole(ctx context.Context, scope artifactScope) string {
 	runID := strings.TrimSpace(scope.runID)
 	if runID != "" && s.session != nil {
@@ -808,7 +793,11 @@ func (s *RPCServer) deriveDefaultTeamRole(ctx context.Context, scope artifactSco
 }
 
 func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams) (protocol.TaskCreateResult, error) {
-	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, p.TeamID, p.RunID)
+	scopeTeamID := strings.TrimSpace(p.DestinationTeamID)
+	if scopeTeamID == "" {
+		scopeTeamID = strings.TrimSpace(p.TeamID)
+	}
+	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, scopeTeamID, p.RunID)
 	if err != nil {
 		return protocol.TaskCreateResult{}, err
 	}
@@ -825,23 +814,23 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 	}
 	assignedTo := strings.TrimSpace(p.AssignedTo)
 	assignedRole := strings.TrimSpace(p.AssignedRole)
-	teamScope := strings.TrimSpace(scope.teamID) != ""
 	sourceTeamID := strings.TrimSpace(p.SourceTeamID)
 	destinationTeamID := strings.TrimSpace(p.DestinationTeamID)
 	if destinationTeamID == "" {
 		destinationTeamID = strings.TrimSpace(p.TeamID)
 	}
-	if sourceTeamID == "" && teamScope {
-		sourceTeamID = strings.TrimSpace(scope.teamID)
-	}
-	if destinationTeamID == "" && teamScope {
+	if destinationTeamID == "" {
 		destinationTeamID = strings.TrimSpace(scope.teamID)
+	}
+	if sourceTeamID == "" {
+		sourceTeamID = strings.TrimSpace(scope.teamID)
 	}
 	if sourceTeamID == "" && destinationTeamID != "" {
 		sourceTeamID = destinationTeamID
 	}
+	teamScope := destinationTeamID != ""
 	if assignedToType == "" {
-		if destinationTeamID != "" {
+		if teamScope {
 			if assignedRole != "" {
 				assignedToType = "role"
 				assignedTo = assignedRole
@@ -849,9 +838,6 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 				assignedRole = derivedRole
 				assignedToType = "role"
 				assignedTo = derivedRole
-			} else if legacyTeamFallbackEnabled() {
-				assignedToType = "team"
-				assignedTo = destinationTeamID
 			} else {
 				return protocol.TaskCreateResult{}, &protocol.ProtocolError{
 					Code:    protocol.CodeInvalidParams,
@@ -866,7 +852,7 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 	if assignedTo == "" {
 		switch assignedToType {
 		case "team":
-			if destinationTeamID == "" {
+			if !teamScope {
 				return protocol.TaskCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "assignedToType=team requires destinationTeamId"}
 			}
 			assignedTo = destinationTeamID
@@ -918,6 +904,7 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 		Metadata:          map[string]any{"source": "rpc.task.create"},
 		CreatedBy:         "monitor",
 	}
+	task.NormalizeTeamFields()
 	if task.Priority == 0 {
 		task.Priority = 5
 	}

@@ -55,9 +55,9 @@ type TaskListResult struct {
 
 type TaskCreateParams struct {
 	ThreadID          ThreadID `json:"threadId"`
-	TeamID            string   `json:"teamId,omitempty"`
 	SourceTeamID      string   `json:"sourceTeamId,omitempty"`
 	DestinationTeamID string   `json:"destinationTeamId,omitempty"`
+	TeamID            string   `json:"teamId,omitempty"`
 	RunID             string   `json:"runId,omitempty"`
 	Goal              string   `json:"goal"`
 	TaskKind          string   `json:"taskKind,omitempty"`

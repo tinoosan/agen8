@@ -189,7 +189,7 @@ func (s *SQLiteTaskStore) init() error {
 			`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_thread_intent ON messages(thread_id, intent_id);`,
 			`CREATE INDEX IF NOT EXISTS idx_messages_thread_queue ON messages(thread_id, channel, status, visible_at, priority, created_at);`,
 			`CREATE INDEX IF NOT EXISTS idx_messages_run_status_visible ON messages(run_id, status, visible_at);`,
-			`CREATE INDEX IF NOT EXISTS idx_messages_destination ON messages(destination_team_id);`,
+			`CREATE INDEX IF NOT EXISTS idx_messages_destination ON messages(destination_team_id, status, visible_at);`,
 			`CREATE INDEX IF NOT EXISTS idx_messages_source_destination ON messages(source_team_id, destination_team_id);`,
 			`CREATE INDEX IF NOT EXISTS idx_messages_task_ref ON messages(task_ref);`,
 			`CREATE INDEX IF NOT EXISTS idx_messages_correlation_id ON messages(correlation_id);`,
@@ -920,10 +920,10 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (types.Tas
 	}
 
 	t.Status = types.TaskStatus(strings.TrimSpace(status))
-	t.NormalizeTeamFields()
 	_ = json.Unmarshal([]byte(inputsJSON), &t.Inputs)
 	_ = json.Unmarshal([]byte(artifactsJSON), &t.Artifacts)
 	_ = json.Unmarshal([]byte(metadataJSON), &t.Metadata)
+	t.NormalizeTeamFields()
 
 	if tt := parseTime(createdRaw); !tt.IsZero() {
 		t.CreatedAt = &tt
@@ -1045,13 +1045,13 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 		q += " AND run_id = ?"
 		args = append(args, strings.TrimSpace(filter.RunID))
 	}
+	if strings.TrimSpace(filter.SourceTeamID) != "" {
+		q += " AND source_team_id = ?"
+		args = append(args, strings.TrimSpace(filter.SourceTeamID))
+	}
 	destinationTeamID := strings.TrimSpace(filter.DestinationTeamID)
 	if destinationTeamID == "" {
 		destinationTeamID = strings.TrimSpace(filter.TeamID)
-	}
-	if sourceTeamID := strings.TrimSpace(filter.SourceTeamID); sourceTeamID != "" {
-		q += " AND source_team_id = ?"
-		args = append(args, sourceTeamID)
 	}
 	if destinationTeamID != "" {
 		q += " AND destination_team_id = ?"
@@ -1155,7 +1155,6 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 			return nil, err
 		}
 		t.Status = types.TaskStatus(strings.TrimSpace(status))
-		t.NormalizeTeamFields()
 		if tt := parseTime(createdRaw); !tt.IsZero() {
 			t.CreatedAt = &tt
 		}
@@ -1169,6 +1168,7 @@ func (s *SQLiteTaskStore) ListTasks(ctx context.Context, filter TaskFilter) ([]t
 			t.UpdatedAt = &tt
 		}
 		_ = json.Unmarshal([]byte(metadataJSON), &t.Metadata)
+		t.NormalizeTeamFields()
 		if tt := parseTime(leaseRaw); !tt.IsZero() {
 			t.LeaseUntil = &tt
 		}
@@ -1198,13 +1198,13 @@ func (s *SQLiteTaskStore) CountTasks(ctx context.Context, filter TaskFilter) (in
 		q += " AND run_id = ?"
 		args = append(args, strings.TrimSpace(filter.RunID))
 	}
+	if strings.TrimSpace(filter.SourceTeamID) != "" {
+		q += " AND source_team_id = ?"
+		args = append(args, strings.TrimSpace(filter.SourceTeamID))
+	}
 	destinationTeamID := strings.TrimSpace(filter.DestinationTeamID)
 	if destinationTeamID == "" {
 		destinationTeamID = strings.TrimSpace(filter.TeamID)
-	}
-	if sourceTeamID := strings.TrimSpace(filter.SourceTeamID); sourceTeamID != "" {
-		q += " AND source_team_id = ?"
-		args = append(args, sourceTeamID)
 	}
 	if destinationTeamID != "" {
 		q += " AND destination_team_id = ?"
@@ -1287,10 +1287,10 @@ func (s *SQLiteTaskStore) UpdateTask(ctx context.Context, task types.Task) error
 	if task.Metadata == nil {
 		task.Metadata = map[string]any{}
 	}
-	task.NormalizeTeamFields()
 	if task.Artifacts == nil {
 		task.Artifacts = []string{}
 	}
+	task.NormalizeTeamFields()
 	inputsJSON, _ := json.Marshal(task.Inputs)
 	metadataJSON, _ := json.Marshal(task.Metadata)
 	artifactsJSON, _ := json.Marshal(task.Artifacts)
@@ -1692,9 +1692,7 @@ func normalizeMessage(msg types.AgentMessage) types.AgentMessage {
 	out.Producer = strings.TrimSpace(out.Producer)
 	out.ThreadID = strings.TrimSpace(out.ThreadID)
 	out.RunID = strings.TrimSpace(out.RunID)
-	out.SourceTeamID = strings.TrimSpace(out.SourceTeamID)
-	out.DestinationTeamID = strings.TrimSpace(out.DestinationTeamID)
-	out.TeamID = strings.TrimSpace(out.TeamID)
+	out.NormalizeTeamFields()
 	out.Channel = strings.TrimSpace(out.Channel)
 	out.Kind = strings.TrimSpace(out.Kind)
 	out.TaskRef = strings.TrimSpace(out.TaskRef)
@@ -1713,7 +1711,6 @@ func normalizeMessage(msg types.AgentMessage) types.AgentMessage {
 	if out.Metadata == nil {
 		out.Metadata = map[string]any{}
 	}
-	out.NormalizeTeamFields()
 	return out
 }
 
@@ -1767,6 +1764,7 @@ func mapSQLiteMessage(rowScanner interface {
 	if strings.TrimSpace(taskJSON) != "" {
 		var task types.Task
 		if err := json.Unmarshal([]byte(taskJSON), &task); err == nil {
+			task.NormalizeTeamFields()
 			msg.Task = &task
 		}
 	}
@@ -1939,13 +1937,13 @@ func (s *SQLiteTaskStore) ListMessages(ctx context.Context, filter MessageFilter
 		q += " AND run_id = ?"
 		args = append(args, id)
 	}
-	destinationTeamID := strings.TrimSpace(filter.DestinationTeamID)
-	if destinationTeamID == "" {
-		destinationTeamID = strings.TrimSpace(filter.TeamID)
-	}
 	if id := strings.TrimSpace(filter.SourceTeamID); id != "" {
 		q += " AND source_team_id = ?"
 		args = append(args, id)
+	}
+	destinationTeamID := strings.TrimSpace(filter.DestinationTeamID)
+	if destinationTeamID == "" {
+		destinationTeamID = strings.TrimSpace(filter.TeamID)
 	}
 	if destinationTeamID != "" {
 		q += " AND destination_team_id = ?"
@@ -2036,13 +2034,13 @@ func (s *SQLiteTaskStore) CountMessages(ctx context.Context, filter MessageFilte
 		q += " AND run_id = ?"
 		args = append(args, id)
 	}
-	destinationTeamID := strings.TrimSpace(filter.DestinationTeamID)
-	if destinationTeamID == "" {
-		destinationTeamID = strings.TrimSpace(filter.TeamID)
-	}
 	if id := strings.TrimSpace(filter.SourceTeamID); id != "" {
 		q += " AND source_team_id = ?"
 		args = append(args, id)
+	}
+	destinationTeamID := strings.TrimSpace(filter.DestinationTeamID)
+	if destinationTeamID == "" {
+		destinationTeamID = strings.TrimSpace(filter.TeamID)
 	}
 	if destinationTeamID != "" {
 		q += " AND destination_team_id = ?"
@@ -2131,13 +2129,13 @@ func (s *SQLiteTaskStore) ClaimNextMessage(ctx context.Context, filter MessageCl
 			where += " AND run_id = ?"
 			args = append(args, id)
 		}
-		destinationTeamID := strings.TrimSpace(filter.DestinationTeamID)
-		if destinationTeamID == "" {
-			destinationTeamID = strings.TrimSpace(filter.TeamID)
-		}
 		if id := strings.TrimSpace(filter.SourceTeamID); id != "" {
 			where += " AND source_team_id = ?"
 			args = append(args, id)
+		}
+		destinationTeamID := strings.TrimSpace(filter.DestinationTeamID)
+		if destinationTeamID == "" {
+			destinationTeamID = strings.TrimSpace(filter.TeamID)
 		}
 		if destinationTeamID != "" {
 			where += " AND destination_team_id = ?"

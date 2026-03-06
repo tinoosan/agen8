@@ -120,19 +120,19 @@ type MessageStore interface {
 type TaskFilter struct {
 	SessionID         string // Filter by session
 	RunID             string // Filter by run
-	SourceTeamID      string // Filter by source team
-	DestinationTeamID string // Filter by destination team
-	TeamID            string // Destination-team compatibility alias
-	AssignedRole   string // Filter by assigned role
-	AssignedToType string // Filter by assignee type: team|role|agent
-	AssignedTo     string // Filter by assignee id/name
-	ClaimedBy      string // Filter by claimed_by agent id
-	TaskKind       string // Filter by task_kind
-	View           string // Logical view: inbox|outbox
-	UnassignedOnly bool   // Filter tasks where assigned_role is empty
-	Status         []types.TaskStatus
-	FromDate       *time.Time // Created after this time
-	ToDate         *time.Time // Created before this time
+	SourceTeamID      string // Filter by origin team
+	DestinationTeamID string // Filter by mailbox/owner team
+	TeamID            string // Destination alias for compatibility at call sites
+	AssignedRole      string // Filter by assigned role
+	AssignedToType    string // Filter by assignee type: team|role|agent
+	AssignedTo        string // Filter by assignee id/name
+	ClaimedBy         string // Filter by claimed_by agent id
+	TaskKind          string // Filter by task_kind
+	View              string // Logical view: inbox|outbox
+	UnassignedOnly    bool   // Filter tasks where assigned_role is empty
+	Status            []types.TaskStatus
+	FromDate          *time.Time // Created after this time
+	ToDate            *time.Time // Created before this time
 
 	// Pagination
 	Limit  int // Max results (default: 50)

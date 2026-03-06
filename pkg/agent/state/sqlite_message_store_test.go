@@ -215,3 +215,116 @@ func TestSQLiteTaskStore_ClaimNextMessage_AssignedToFilter(t *testing.T) {
 		t.Fatalf("claimed taskRef=%q want %q", claimed.TaskRef, opsTask.TaskID)
 	}
 }
+
+func TestSQLiteTaskStore_PersistsExplicitSourceAndDestinationTeams(t *testing.T) {
+	ctx := context.Background()
+	store := newSQLiteTaskStoreForMessageTest(t)
+	now := time.Now().UTC()
+
+	task := types.Task{
+		TaskID:            "task-cross-team-1",
+		SessionID:         "thread-1",
+		RunID:             "run-a",
+		SourceTeamID:      "team-a",
+		DestinationTeamID: "team-b",
+		AssignedToType:    "team",
+		AssignedTo:        "team-b",
+		Goal:              "cross team handoff",
+		Status:            types.TaskStatusPending,
+		CreatedAt:         &now,
+	}
+	if err := store.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	loadedTask, err := store.GetTask(ctx, task.TaskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got := loadedTask.SourceTeamID; got != "team-a" {
+		t.Fatalf("task sourceTeamId=%q want team-a", got)
+	}
+	if got := loadedTask.DestinationTeamID; got != "team-b" {
+		t.Fatalf("task destinationTeamId=%q want team-b", got)
+	}
+	if got := loadedTask.TeamID; got != "team-b" {
+		t.Fatalf("task teamId alias=%q want team-b", got)
+	}
+
+	msg := baseMessage()
+	msg.MessageID = "msg-cross-team-1"
+	msg.IntentID = "intent-cross-team-1"
+	msg.TaskRef = task.TaskID
+	msg.SourceTeamID = "team-a"
+	msg.DestinationTeamID = "team-b"
+	msg.TeamID = ""
+	msg.VisibleAt = now
+	if _, err := store.PublishMessage(ctx, msg); err != nil {
+		t.Fatalf("PublishMessage: %v", err)
+	}
+	loadedMsg, err := store.GetMessage(ctx, msg.MessageID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if got := loadedMsg.SourceTeamID; got != "team-a" {
+		t.Fatalf("message sourceTeamId=%q want team-a", got)
+	}
+	if got := loadedMsg.DestinationTeamID; got != "team-b" {
+		t.Fatalf("message destinationTeamId=%q want team-b", got)
+	}
+	if got := loadedMsg.TeamID; got != "team-b" {
+		t.Fatalf("message teamId alias=%q want team-b", got)
+	}
+}
+
+func TestSQLiteTaskStore_ClaimNextMessage_UsesDestinationMailboxOwnership(t *testing.T) {
+	ctx := context.Background()
+	store := newSQLiteTaskStoreForMessageTest(t)
+	now := time.Now().UTC()
+
+	task := types.Task{
+		TaskID:            "task-mailbox-1",
+		SessionID:         "thread-1",
+		RunID:             "run-a",
+		SourceTeamID:      "team-a",
+		DestinationTeamID: "team-b",
+		AssignedToType:    "team",
+		AssignedTo:        "team-b",
+		Goal:              "send to team-b",
+		Status:            types.TaskStatusPending,
+		CreatedAt:         &now,
+	}
+	if err := store.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	msg := baseMessage()
+	msg.MessageID = "msg-mailbox-1"
+	msg.IntentID = "intent-mailbox-1"
+	msg.TaskRef = task.TaskID
+	msg.SourceTeamID = "team-a"
+	msg.DestinationTeamID = "team-b"
+	msg.VisibleAt = now
+	if _, err := store.PublishMessage(ctx, msg); err != nil {
+		t.Fatalf("PublishMessage: %v", err)
+	}
+
+	if _, err := store.ClaimNextMessage(ctx, MessageClaimFilter{
+		ThreadID:          "thread-1",
+		DestinationTeamID: "team-a",
+		Channel:           types.MessageChannelInbox,
+	}, time.Minute, "consumer-a"); err == nil {
+		t.Fatalf("expected no claim for source-team mailbox")
+	}
+
+	claimed, err := store.ClaimNextMessage(ctx, MessageClaimFilter{
+		ThreadID:          "thread-1",
+		DestinationTeamID: "team-b",
+		Channel:           types.MessageChannelInbox,
+	}, time.Minute, "consumer-b")
+	if err != nil {
+		t.Fatalf("ClaimNextMessage(team-b): %v", err)
+	}
+	if got := claimed.MessageID; got != "msg-mailbox-1" {
+		t.Fatalf("claimed message=%q want msg-mailbox-1", got)
+	}
+}

@@ -15,8 +15,8 @@ const (
 	TaskStatusSucceeded     TaskStatus = "succeeded"
 	TaskStatusFailed        TaskStatus = "failed"
 	TaskStatusCanceled      TaskStatus = "canceled"
-	TaskStatusDelegated     TaskStatus = "delegated"  // Workers spawned, parent execution ended
-	TaskStatusResumed       TaskStatus = "resumed"    // All callbacks processed, ready for finalization
+	TaskStatusDelegated     TaskStatus = "delegated" // Workers spawned, parent execution ended
+	TaskStatusResumed       TaskStatus = "resumed"   // All callbacks processed, ready for finalization
 )
 
 // Task is the canonical DB-backed unit of work for autonomous agents.
@@ -29,25 +29,25 @@ type Task struct {
 	TeamID            string         `json:"teamId,omitempty"`
 	AssignedRole      string         `json:"assignedRole,omitempty"`
 	AssignedToType    string         `json:"assignedToType,omitempty"` // team | role | agent
-	AssignedTo     string       `json:"assignedTo,omitempty"`     // team id, role name, or agent id
-	ClaimedByAgentID string     `json:"claimedByAgentId,omitempty"`
-	RoleSnapshot string         `json:"roleSnapshot,omitempty"`
-	TaskKind     string         `json:"taskKind,omitempty"`
-	CreatedBy    string         `json:"createdBy,omitempty"`
-	Goal         string         `json:"goal"`
-	Inputs       map[string]any `json:"inputs,omitempty"`
-	Priority     int            `json:"priority,omitempty"` // 0 = highest
-	Status       TaskStatus     `json:"status,omitempty"`   // pending, active, succeeded, failed, canceled
-	CreatedAt    *time.Time     `json:"createdAt,omitempty"`
-	StartedAt    *time.Time     `json:"startedAt,omitempty"`
-	CompletedAt  *time.Time     `json:"completedAt,omitempty"`
-	UpdatedAt    *time.Time     `json:"updatedAt,omitempty"`
-	LeaseUntil   *time.Time     `json:"leaseUntil,omitempty"`
-	Attempts     int            `json:"attempts,omitempty"`
-	Error        string         `json:"error,omitempty"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
-	Summary      string         `json:"summary,omitempty"`
-	Artifacts    []string       `json:"artifacts,omitempty"`
+	AssignedTo        string         `json:"assignedTo,omitempty"`     // team id, role name, or agent id
+	ClaimedByAgentID  string         `json:"claimedByAgentId,omitempty"`
+	RoleSnapshot      string         `json:"roleSnapshot,omitempty"`
+	TaskKind          string         `json:"taskKind,omitempty"`
+	CreatedBy         string         `json:"createdBy,omitempty"`
+	Goal              string         `json:"goal"`
+	Inputs            map[string]any `json:"inputs,omitempty"`
+	Priority          int            `json:"priority,omitempty"` // 0 = highest
+	Status            TaskStatus     `json:"status,omitempty"`   // pending, active, succeeded, failed, canceled
+	CreatedAt         *time.Time     `json:"createdAt,omitempty"`
+	StartedAt         *time.Time     `json:"startedAt,omitempty"`
+	CompletedAt       *time.Time     `json:"completedAt,omitempty"`
+	UpdatedAt         *time.Time     `json:"updatedAt,omitempty"`
+	LeaseUntil        *time.Time     `json:"leaseUntil,omitempty"`
+	Attempts          int            `json:"attempts,omitempty"`
+	Error             string         `json:"error,omitempty"`
+	Metadata          map[string]any `json:"metadata,omitempty"`
+	Summary           string         `json:"summary,omitempty"`
+	Artifacts         []string       `json:"artifacts,omitempty"`
 
 	// Best-effort LLM usage totals for the task (populated after completion).
 	InputTokens     int     `json:"inputTokens,omitempty"`
@@ -78,6 +78,8 @@ func (t *Task) NormalizeStatus() {
 	t.Status = TaskStatus(status)
 }
 
+// NormalizeTeamFields canonicalizes explicit source/destination team semantics.
+// TeamID remains a destination alias for compatibility at projection edges.
 func (t *Task) NormalizeTeamFields() {
 	if t == nil {
 		return
@@ -85,10 +87,15 @@ func (t *Task) NormalizeTeamFields() {
 	t.SourceTeamID = strings.TrimSpace(t.SourceTeamID)
 	t.DestinationTeamID = strings.TrimSpace(t.DestinationTeamID)
 	t.TeamID = strings.TrimSpace(t.TeamID)
-	if t.DestinationTeamID == "" && t.TeamID != "" {
+	if t.DestinationTeamID == "" {
 		t.DestinationTeamID = t.TeamID
 	}
-	t.TeamID = t.DestinationTeamID
+	if t.TeamID == "" {
+		t.TeamID = t.DestinationTeamID
+	}
+	if t.SourceTeamID == "" && t.DestinationTeamID != "" {
+		t.SourceTeamID = t.DestinationTeamID
+	}
 }
 
 // TaskResult captures the outcome of a task.

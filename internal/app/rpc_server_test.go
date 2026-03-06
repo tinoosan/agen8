@@ -1111,6 +1111,12 @@ func TestRPCServer_MessageListAndGet_ReturnMixedMessageRows(t *testing.T) {
 	if taskRow == nil || taskRow.Task == nil {
 		t.Fatalf("expected task-backed message row with task metadata: %+v", inboxRes.Messages)
 	}
+	if got := strings.TrimSpace(taskRow.SourceTeamID); got != "team-alpha" {
+		t.Fatalf("task row sourceTeamId=%q want team-alpha", got)
+	}
+	if got := strings.TrimSpace(taskRow.DestinationTeamID); got != "team-alpha" {
+		t.Fatalf("task row destinationTeamId=%q want team-alpha", got)
+	}
 	if !taskRow.CanClaim || taskRow.ReadOnly {
 		t.Fatalf("expected pending task row to be claimable and writable: %+v", taskRow)
 	}
@@ -1122,6 +1128,12 @@ func TestRPCServer_MessageListAndGet_ReturnMixedMessageRows(t *testing.T) {
 	}
 	if got := strings.TrimSpace(userRow.Subject); got != "Clarification requested" {
 		t.Fatalf("user message subject=%q want clarification subject", got)
+	}
+	if got := strings.TrimSpace(userRow.SourceTeamID); got != "team-alpha" {
+		t.Fatalf("user row sourceTeamId=%q want team-alpha", got)
+	}
+	if got := strings.TrimSpace(userRow.DestinationTeamID); got != "team-alpha" {
+		t.Fatalf("user row destinationTeamId=%q want team-alpha", got)
 	}
 
 	getReq, _ := protocol.NewRequest("3", protocol.MethodMessageGet, protocol.MessageGetParams{
@@ -1971,8 +1983,7 @@ func TestRPCServer_TaskCreate_TeamMissingRoleRequiresExplicitAssignee(t *testing
 	}
 }
 
-func TestRPCServer_TaskCreate_TeamMissingRoleLegacyFallbackOptIn(t *testing.T) {
-	t.Setenv("AGEN8_LEGACY_TEAM_FALLBACK", "true")
+func TestRPCServer_TaskCreate_TeamMissingRole_NoLegacyFallback(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("team goal")
 	sess.TeamID = "team-1"
@@ -1996,16 +2007,11 @@ func TestRPCServer_TaskCreate_TeamMissingRoleLegacyFallbackOptIn(t *testing.T) {
 		Goal:     "delegate",
 	})
 	createResp := rpcRoundTrip(t, srv, createReq)
-	if createResp.Error != nil {
-		t.Fatalf("task.create error: %+v", createResp.Error)
+	if createResp.Error == nil {
+		t.Fatalf("expected validation error when team role cannot be derived")
 	}
-	var createRes protocol.TaskCreateResult
-	_ = json.Unmarshal(createResp.Result, &createRes)
-	if got := strings.TrimSpace(createRes.Task.AssignedToType); got != "team" {
-		t.Fatalf("assignedToType=%q want team", got)
-	}
-	if got := strings.TrimSpace(createRes.Task.AssignedTo); got != "team-1" {
-		t.Fatalf("assignedTo=%q want team-1", got)
+	if createResp.Error.Code != protocol.CodeInvalidParams {
+		t.Fatalf("error code=%d want %d", createResp.Error.Code, protocol.CodeInvalidParams)
 	}
 }
 
@@ -2044,6 +2050,121 @@ func TestRPCServer_TaskCreate_TeamExplicitTeamRouteStillAllowed(t *testing.T) {
 	}
 	if got := strings.TrimSpace(createRes.Task.AssignedTo); got != "team-1" {
 		t.Fatalf("assignedTo=%q want team-1", got)
+	}
+}
+
+func TestRPCServer_TaskCreate_CrossTeamRoutingExposesSourceAndDestination(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("team goal")
+	sess.TeamID = "team-a"
+	sess.Mode = "multi-agent"
+	run := types.NewRun("coord", 8*1024, sess.SessionID)
+	run.Runtime = &types.RunRuntimeConfig{TeamID: "team-a"}
+	sess.CurrentRunID = run.RunID
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	createReq, _ := protocol.NewRequest("1", protocol.MethodTaskCreate, protocol.TaskCreateParams{
+		ThreadID:          protocol.ThreadID(run.SessionID),
+		SourceTeamID:      "team-a",
+		DestinationTeamID: "team-b",
+		AssignedToType:    "team",
+		AssignedTo:        "team-b",
+		Goal:              "Ask team-b to review the plan",
+	})
+	createResp := rpcRoundTrip(t, srv, createReq)
+	if createResp.Error != nil {
+		t.Fatalf("task.create error: %+v", createResp.Error)
+	}
+	var createRes protocol.TaskCreateResult
+	_ = json.Unmarshal(createResp.Result, &createRes)
+	if got := strings.TrimSpace(createRes.Task.SourceTeamID); got != "team-a" {
+		t.Fatalf("sourceTeamId=%q want team-a", got)
+	}
+	if got := strings.TrimSpace(createRes.Task.DestinationTeamID); got != "team-b" {
+		t.Fatalf("destinationTeamId=%q want team-b", got)
+	}
+	if got := strings.TrimSpace(createRes.Task.TeamID); got != "team-b" {
+		t.Fatalf("teamId alias=%q want team-b", got)
+	}
+}
+
+func TestRPCServer_MessageList_UsesDestinationTeamMailboxForCrossTeamMessage(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	now := time.Now().UTC()
+	if _, err := ts.PublishMessage(context.Background(), types.AgentMessage{
+		MessageID:         "msg-cross-mailbox-1",
+		IntentID:          "intent-cross-mailbox-1",
+		CorrelationID:     "corr-cross-mailbox-1",
+		Producer:          "rpc.test",
+		ThreadID:          run.SessionID,
+		RunID:             run.RunID,
+		SourceTeamID:      "team-a",
+		DestinationTeamID: "team-b",
+		Channel:           types.MessageChannelInbox,
+		Kind:              types.MessageKindUserInput,
+		Body: map[string]any{
+			"subject": "Need review",
+			"text":    "Please review this from team-a.",
+		},
+		Status:    types.MessageStatusPending,
+		VisibleAt: now,
+		CreatedAt: &now,
+		UpdatedAt: &now,
+	}); err != nil {
+		t.Fatalf("PublishMessage: %v", err)
+	}
+
+	inboxAReq, _ := protocol.NewRequest("1", protocol.MethodMessageList, protocol.MessageListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   "team-a",
+		View:     "inbox",
+	})
+	inboxAResp := rpcRoundTrip(t, srv, inboxAReq)
+	if inboxAResp.Error != nil {
+		t.Fatalf("message.list team-a error: %+v", inboxAResp.Error)
+	}
+	var inboxA protocol.MessageListResult
+	_ = json.Unmarshal(inboxAResp.Result, &inboxA)
+	if len(inboxA.Messages) != 0 {
+		t.Fatalf("expected source team inbox to be empty, got %+v", inboxA.Messages)
+	}
+
+	inboxBReq, _ := protocol.NewRequest("2", protocol.MethodMessageList, protocol.MessageListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   "team-b",
+		View:     "inbox",
+	})
+	inboxBResp := rpcRoundTrip(t, srv, inboxBReq)
+	if inboxBResp.Error != nil {
+		t.Fatalf("message.list team-b error: %+v", inboxBResp.Error)
+	}
+	var inboxB protocol.MessageListResult
+	_ = json.Unmarshal(inboxBResp.Result, &inboxB)
+	if len(inboxB.Messages) != 1 {
+		t.Fatalf("expected destination team inbox to contain the message, got %+v", inboxB.Messages)
+	}
+	if got := strings.TrimSpace(inboxB.Messages[0].SourceTeamID); got != "team-a" {
+		t.Fatalf("sourceTeamId=%q want team-a", got)
+	}
+	if got := strings.TrimSpace(inboxB.Messages[0].DestinationTeamID); got != "team-b" {
+		t.Fatalf("destinationTeamId=%q want team-b", got)
 	}
 }
 
