@@ -28,7 +28,7 @@ var dashboardCmd = &cobra.Command{
 }
 
 func runDashboardFlow(cmd *cobra.Command) error {
-	followProjectState := strings.TrimSpace(dashboardSessionID) == ""
+	explicitSession := strings.TrimSpace(dashboardSessionID) != ""
 	projectRoot := projectSearchDir()
 	sessionID := strings.TrimSpace(dashboardSessionID)
 	if sessionID == "" {
@@ -38,17 +38,35 @@ func runDashboardFlow(cmd *cobra.Command) error {
 			sessionID = resolvedSessionID
 		}
 	}
+
+	if dashboardOnce || !isInteractiveTerminal() {
+		if sessionID == "" {
+			return fmt.Errorf("active team session is required (start a team with `agen8 team start <profile-ref>` or pass --session-id)")
+		}
+		return renderDashboardOnce(cmd, sessionID)
+	}
+
+	// Interactive mode: project-first when we have a project root and no
+	// explicit --session-id; session-first otherwise.
+	if !explicitSession && strings.TrimSpace(projectRoot) != "" {
+		return dashboardtui.Run(resolvedRPCEndpoint(), dashboardtui.Options{
+			ProjectRoot:        projectRoot,
+			FollowProjectState: true,
+			RefreshInterval:    effectiveDashboardInterval(),
+			SessionID:          sessionID,
+			SessionExplicit:    false,
+		})
+	}
+
 	if sessionID == "" {
 		return fmt.Errorf("active team session is required (start a team with `agen8 team start <profile-ref>` or pass --session-id)")
 	}
-
-	if dashboardOnce || !isInteractiveTerminal() {
-		return renderDashboardOnce(cmd, sessionID)
-	}
-	return dashboardtui.Run(resolvedRPCEndpoint(), sessionID, dashboardtui.Options{
+	return dashboardtui.Run(resolvedRPCEndpoint(), dashboardtui.Options{
 		ProjectRoot:        projectRoot,
-		FollowProjectState: followProjectState,
+		FollowProjectState: !explicitSession,
 		RefreshInterval:    effectiveDashboardInterval(),
+		SessionID:          sessionID,
+		SessionExplicit:    explicitSession,
 	})
 }
 

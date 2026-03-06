@@ -1,9 +1,13 @@
 // Package dashboardtui provides a standalone, full-screen Bubble Tea TUI for
-// per-agent session dashboarding. It is designed for tmux pane composition
+// project and team dashboarding. It is designed for tmux pane composition
 // alongside the monitor, mail, and activity TUIs.
+//
+// The default top-level screen is a project overview listing all teams.
+// Selecting a team drills into the per-agent workspace for that team's session.
 package dashboardtui
 
 import (
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,10 +15,20 @@ import (
 	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
+type viewMode int
+
+const (
+	viewProject viewMode = iota // top-level: list of teams
+	viewTeam                    // drill-in: per-agent dashboard for one team
+)
+
+// Options configures the dashboard TUI.
 type Options struct {
 	ProjectRoot        string
 	FollowProjectState bool
 	RefreshInterval    time.Duration
+	SessionID          string // non-empty to scope to a specific session
+	SessionExplicit    bool   // true when --session-id was explicitly passed
 }
 
 // Model is the Bubble Tea model for the full-screen dashboard TUI.
@@ -32,6 +46,7 @@ type Model struct {
 	notice    string
 	noticeAt  time.Time
 
+	// Team workspace (per-agent) state.
 	agents       []agentRow
 	stats        sessionStats
 	sessionMode  string
@@ -43,10 +58,18 @@ type Model struct {
 	detailOpen   bool
 	detailScroll int
 	spinFrame    int
+
+	// Project overview state.
+	mode            viewMode
+	teams           []teamRow
+	teamSel         int
+	selectedTeam    *teamRow
+	projectID       string
+	sessionExplicit bool
 }
 
 // Run launches the full-screen dashboard TUI.
-func Run(endpoint, sessionID string, opts Options) error {
+func Run(endpoint string, opts Options) error {
 	if endpoint == "" {
 		endpoint = protocol.DefaultRPCEndpoint
 	}
@@ -54,6 +77,13 @@ func Run(endpoint, sessionID string, opts Options) error {
 	if refreshInterval <= 0 {
 		refreshInterval = 2 * time.Second
 	}
+
+	mode := viewProject
+	sessionID := strings.TrimSpace(opts.SessionID)
+	if opts.SessionExplicit && sessionID != "" {
+		mode = viewTeam
+	}
+
 	m := &Model{
 		endpoint:           endpoint,
 		sessionID:          sessionID,
@@ -62,6 +92,8 @@ func Run(endpoint, sessionID string, opts Options) error {
 		refreshInterval:    refreshInterval,
 		connected:          true,
 		sessionMode:        "team",
+		mode:               mode,
+		sessionExplicit:    opts.SessionExplicit,
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
@@ -69,11 +101,17 @@ func Run(endpoint, sessionID string, opts Options) error {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(
-		fetchDataCmd(m.endpoint, m.sessionID),
+	baseCmds := []tea.Cmd{
 		tickCmd(m.refreshInterval),
 		adapter.StartNotificationListenerCmd(m.endpoint),
-	)
+	}
+	switch m.mode {
+	case viewProject:
+		return tea.Batch(append(baseCmds, fetchProjectDataCmd(m.endpoint, m.projectRoot))...)
+	case viewTeam:
+		return tea.Batch(append(baseCmds, fetchDataCmd(m.endpoint, m.sessionID))...)
+	}
+	return tea.Batch(baseCmds...)
 }
 
 func (m *Model) selectedAgent() *agentRow {

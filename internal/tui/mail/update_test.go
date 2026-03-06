@@ -16,7 +16,7 @@ func TestHandleKey_SpaceTogglesBatchExpansion(t *testing.T) {
 		expandedByID: map[string]bool{},
 	}
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	_, _ = m.handleMailKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	if !m.outbox[0].Expanded {
 		t.Fatalf("expected batch task to expand on space")
 	}
@@ -24,7 +24,7 @@ func TestHandleKey_SpaceTogglesBatchExpansion(t *testing.T) {
 		t.Fatalf("expected expansion state persisted by task ID")
 	}
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	_, _ = m.handleMailKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	if m.outbox[0].Expanded {
 		t.Fatalf("expected batch task to collapse on second space")
 	}
@@ -39,7 +39,7 @@ func TestHandleKey_SpaceDoesNotToggleWithoutChildren(t *testing.T) {
 		expandedByID: map[string]bool{},
 	}
 
-	_, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	_, _ = m.handleMailKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	if m.outbox[0].Expanded {
 		t.Fatalf("did not expect expansion for non-group task")
 	}

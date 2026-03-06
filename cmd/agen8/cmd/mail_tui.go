@@ -9,7 +9,7 @@ import (
 )
 
 func runMailTUI(cmd *cobra.Command) error {
-	followProjectState := strings.TrimSpace(mailWatchSessionID) == ""
+	explicitSession := strings.TrimSpace(mailWatchSessionID) != ""
 	projectRoot := projectSearchDir()
 	sessionID := strings.TrimSpace(mailWatchSessionID)
 	if sessionID == "" {
@@ -19,11 +19,25 @@ func runMailTUI(cmd *cobra.Command) error {
 			sessionID = resolvedSessionID
 		}
 	}
+
+	// Interactive mode: project-first when we have a project root and no
+	// explicit --session-id; session-first otherwise.
+	if !explicitSession && strings.TrimSpace(projectRoot) != "" {
+		return mail.Run(resolvedRPCEndpoint(), mail.Options{
+			ProjectRoot:        projectRoot,
+			FollowProjectState: true,
+			SessionID:          sessionID,
+			SessionExplicit:    false,
+		})
+	}
+
 	if sessionID == "" {
 		return fmt.Errorf("active team session is required (start a team with `agen8 team start <profile-ref>` or pass --session-id)")
 	}
-	return mail.Run(resolvedRPCEndpoint(), sessionID, mail.Options{
+	return mail.Run(resolvedRPCEndpoint(), mail.Options{
 		ProjectRoot:        projectRoot,
-		FollowProjectState: followProjectState,
+		FollowProjectState: !explicitSession,
+		SessionID:          sessionID,
+		SessionExplicit:    explicitSession,
 	})
 }

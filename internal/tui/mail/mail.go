@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,9 +16,20 @@ const (
 	panelOutbox
 )
 
+type viewMode int
+
+const (
+	viewProject viewMode = iota // top-level: list of teams
+	viewTeam                    // drill-in: inbox/outbox for one team
+)
+
+// Options configures the mail TUI.
 type Options struct {
 	ProjectRoot        string
 	FollowProjectState bool
+	RefreshInterval    time.Duration
+	SessionID          string // non-empty to scope to a specific session
+	SessionExplicit    bool   // true when --session-id was explicitly passed
 }
 
 // Model is the Bubble Tea model for the full-screen mail TUI.
@@ -28,6 +40,7 @@ type Model struct {
 	height             int
 	projectRoot        string
 	followProjectState bool
+	refreshInterval    time.Duration
 
 	connected    bool
 	lastErr      string
@@ -43,21 +56,44 @@ type Model struct {
 	outboxSel int
 
 	detailOpen bool
+	spinFrame  int
+
+	// Project overview state.
+	mode            viewMode
+	teams           []teamRow
+	teamSel         int
+	selectedTeam    *teamRow
+	projectID       string
+	sessionExplicit bool
 }
 
 // Run launches the full-screen mail TUI.
-func Run(endpoint, sessionID string, opts Options) error {
+func Run(endpoint string, opts Options) error {
 	if endpoint == "" {
 		endpoint = protocol.DefaultRPCEndpoint
 	}
+	refreshInterval := opts.RefreshInterval
+	if refreshInterval <= 0 {
+		refreshInterval = 2 * time.Second
+	}
+
+	mode := viewProject
+	sessionID := strings.TrimSpace(opts.SessionID)
+	if opts.SessionExplicit && sessionID != "" {
+		mode = viewTeam
+	}
+
 	m := &Model{
 		endpoint:           endpoint,
 		sessionID:          sessionID,
 		projectRoot:        opts.ProjectRoot,
 		followProjectState: opts.FollowProjectState,
+		refreshInterval:    refreshInterval,
 		connected:          true,
 		focus:              panelInbox,
 		expandedByID:       map[string]bool{},
+		mode:               mode,
+		sessionExplicit:    opts.SessionExplicit,
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
@@ -65,11 +101,17 @@ func Run(endpoint, sessionID string, opts Options) error {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(
-		fetchDataCmd(m.endpoint, m.sessionID),
+	baseCmds := []tea.Cmd{
 		tickCmd(),
 		adapter.StartNotificationListenerCmd(m.endpoint),
-	)
+	}
+	switch m.mode {
+	case viewProject:
+		return tea.Batch(append(baseCmds, fetchProjectDataCmd(m.endpoint, m.projectRoot))...)
+	case viewTeam:
+		return tea.Batch(append(baseCmds, fetchDataCmd(m.endpoint, m.sessionID))...)
+	}
+	return tea.Batch(baseCmds...)
 }
 
 func (m *Model) selectedTask() *taskEntry {
