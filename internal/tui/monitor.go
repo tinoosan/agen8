@@ -276,6 +276,7 @@ type monitorModel struct {
 	confirmSessionID  string
 
 	// Session picker
+	sessionPickerCtrl     kit.PickerController
 	sessionPickerOpen     bool
 	sessionPickerList     list.Model
 	sessionPickerErr      string
@@ -345,6 +346,7 @@ type monitorModel struct {
 	reasoningSummaryPicker kit.OptionsPicker
 
 	// File picker (for @ references)
+	filePickerCtrl     kit.PickerController
 	filePickerOpen     bool
 	filePickerList     list.Model
 	filePickerAllPaths []string

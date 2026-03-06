@@ -1,12 +1,9 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	"github.com/tinoosan/agen8/pkg/types"
@@ -17,39 +14,29 @@ func (m *monitorModel) openSessionPicker() tea.Cmd {
 	m.helpModalOpen = false
 	m.closeAllPickers()
 
-	m.sessionPickerOpen = true
 	m.sessionPickerErr = ""
-	if m.sessionPickerPageSize <= 0 {
-		m.sessionPickerPageSize = 50
-	}
-	m.sessionPickerPage = 0
-	m.sessionPickerTotal = 0
-	m.sessionPickerFilter = ""
-
-	l := list.New(nil, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderSessionPickerLine), 0, 0)
-	l.Title = "Select Session"
-	l.SetShowHelp(false)
-	l.SetShowStatusBar(false)
-	l.SetShowPagination(false)
-	l.SetFilteringEnabled(true)
-	l.SetShowFilter(true)
-	l.SetFilterText("")
-	l.SetFilterState(list.Unfiltered)
-	l.Styles.Title = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#707070")).
-		Bold(true)
-
-	m.sessionPickerList = l
+	m.sessionPickerCtrl.Open(kit.PickerConfig{
+		Title:            "Select Session",
+		FilteringEnabled: true,
+		ShowFilter:       true,
+		PageKeyNav:       true,
+		PageSize:         50,
+		Delegate:         newSessionPickerDelegate(),
+		ModalWidth:       80,
+		ModalHeight:      22,
+		ModalMinWidth:    48,
+		ModalMinHeight:   12,
+		ModalMarginX:     8,
+		ModalMarginY:     4,
+	})
+	m.syncSessionPickerState()
 	return m.fetchSessionsPage()
 }
 
 func (m *monitorModel) closeSessionPicker() {
-	m.sessionPickerOpen = false
-	m.sessionPickerList = list.Model{}
+	m.sessionPickerCtrl.Close()
+	m.syncSessionPickerState()
 	m.sessionPickerErr = ""
-	m.sessionPickerPage = 0
-	m.sessionPickerTotal = 0
-	m.sessionPickerFilter = ""
 }
 
 func (m *monitorModel) fetchSessionsPage() tea.Cmd {
@@ -95,13 +82,25 @@ func (m *monitorModel) fetchSessionsPage() tea.Cmd {
 }
 
 func (m *monitorModel) updateSessionPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEsc:
+	m.ensureSessionPickerCtrl()
+	if msg.Type == tea.KeyRunes && strings.EqualFold(strings.TrimSpace(msg.String()), "d") {
+		selected := m.sessionPickerCtrl.SelectedItem()
+		item, ok := selected.(sessionPickerItem)
+		if ok && strings.TrimSpace(item.id) != "" {
+			return m, m.openSessionDeleteConfirm(strings.TrimSpace(item.id))
+		}
+		return m, nil
+	}
+
+	action := m.sessionPickerCtrl.Update(msg)
+	m.syncSessionPickerState()
+	switch action.Type {
+	case kit.PickerActionClose:
 		m.closeSessionPicker()
 		return m, nil
-	case tea.KeyEnter:
+	case kit.PickerActionAccept:
 		return m, m.selectSessionFromPicker()
-	case tea.KeyCtrlN, tea.KeyPgDown:
+	case kit.PickerActionPageNext:
 		pageSize := m.sessionPickerPageSize
 		if pageSize <= 0 {
 			pageSize = 50
@@ -115,54 +114,29 @@ func (m *monitorModel) updateSessionPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 			return m, m.fetchSessionsPage()
 		}
 		return m, nil
-	case tea.KeyCtrlP, tea.KeyPgUp:
+	case kit.PickerActionPagePrev:
 		if m.sessionPickerPage > 0 {
 			m.sessionPickerPage--
+			m.sessionPickerCtrl.SetPage(m.sessionPickerPage, m.sessionPickerTotal, m.sessionPickerPageSize)
+			m.syncSessionPickerState()
 			return m, m.fetchSessionsPage()
 		}
 		return m, nil
-	case tea.KeyUp:
-		m.sessionPickerList.CursorUp()
-		return m, nil
-	case tea.KeyDown:
-		m.sessionPickerList.CursorDown()
-		return m, nil
-	case tea.KeyRunes:
-		if m.sessionPickerList.FilterState() != list.Filtering && strings.EqualFold(strings.TrimSpace(msg.String()), "d") {
-			selected := m.sessionPickerList.SelectedItem()
-			item, ok := selected.(sessionPickerItem)
-			if ok && strings.TrimSpace(item.id) != "" {
-				return m, m.openSessionDeleteConfirm(strings.TrimSpace(item.id))
-			}
-			return m, nil
-		}
-		var cmd tea.Cmd
-		m.sessionPickerList, cmd = m.sessionPickerList.Update(msg)
-		newFilter := strings.TrimSpace(m.sessionPickerList.FilterInput.Value())
-		if newFilter != m.sessionPickerFilter {
-			m.sessionPickerFilter = newFilter
+	case kit.PickerActionFilterChanged:
+		if action.Filter != m.sessionPickerFilter {
+			m.sessionPickerFilter = action.Filter
 			m.sessionPickerPage = 0
-			return m, tea.Batch(cmd, m.fetchSessionsPage())
+			m.sessionPickerCtrl.SetPage(0, m.sessionPickerTotal, m.sessionPickerPageSize)
+			m.syncSessionPickerState()
+			return m, tea.Batch(action.Cmd, m.fetchSessionsPage())
 		}
-		return m, cmd
-	default:
-		var cmd tea.Cmd
-		m.sessionPickerList, cmd = m.sessionPickerList.Update(msg)
-		newFilter := strings.TrimSpace(m.sessionPickerList.FilterInput.Value())
-		if newFilter != m.sessionPickerFilter {
-			m.sessionPickerFilter = newFilter
-			m.sessionPickerPage = 0
-			return m, tea.Batch(cmd, m.fetchSessionsPage())
-		}
-		return m, cmd
 	}
+	return m, action.Cmd
 }
 
 func (m *monitorModel) selectSessionFromPicker() tea.Cmd {
-	if m.sessionPickerList.Items() == nil || len(m.sessionPickerList.Items()) == 0 {
-		return nil
-	}
-	selectedItem := m.sessionPickerList.SelectedItem()
+	m.ensureSessionPickerCtrl()
+	selectedItem := m.sessionPickerCtrl.SelectedItem()
 	if selectedItem == nil {
 		return nil
 	}
@@ -241,38 +215,11 @@ func (m *monitorModel) selectSessionFromPicker() tea.Cmd {
 }
 
 func (m *monitorModel) renderSessionPicker(base string) string {
-	dims := kit.ComputeModalDims(m.width, m.height, 80, 22, 48, 12, 8, 4)
-	m.sessionPickerList.SetWidth(dims.ModalWidth - 4)
-	m.sessionPickerList.SetHeight(dims.ListHeight)
-
-	content := m.sessionPickerList.View()
-	if strings.TrimSpace(m.sessionPickerErr) != "" {
-		errLine := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff8080")).Render("Error: " + m.sessionPickerErr)
-		content = errLine + "\n\n" + content
-	}
-	content += "\n" + m.renderSessionPickerFooter()
-
-	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
-
+	m.ensureSessionPickerCtrl()
 	_ = base
-	return kit.RenderOverlay(opts)
+	return m.sessionPickerCtrl.Render(m.width, m.height, m.renderSessionPickerFooter(), m.sessionPickerErr)
 }
 
 func (m *monitorModel) renderSessionPickerFooter() string {
-	if m.sessionPickerTotal == 0 {
-		if strings.TrimSpace(m.sessionPickerErr) != "" {
-			return kit.StyleDim.Render("Ctrl+N/P: page")
-		}
-		return kit.StyleDim.Render("No sessions")
-	}
-
-	pageSize := m.sessionPickerPageSize
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-	maxPage := (m.sessionPickerTotal + pageSize - 1) / pageSize
-	currentPage := m.sessionPickerPage + 1
-
-	pageInfo := fmt.Sprintf("Page %d of %d (%d sessions)", currentPage, maxPage, m.sessionPickerTotal)
-	return kit.StyleDim.Render(pageInfo + " • Ctrl+N/P: page")
+	return pickerFooter(m.sessionPickerTotal, m.sessionPickerPage, m.sessionPickerPageSize, strings.TrimSpace(m.sessionPickerErr), "No sessions", kit.StyleDim)
 }

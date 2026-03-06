@@ -131,28 +131,19 @@ func (s *DiskHistoryStore) LinesSince(_ context.Context, cursor pkgstore.History
 	}
 
 	r := bufio.NewReader(f)
-	var out [][]byte
-	var bytesRead int
-	var linesTotal int
+	var records []historyRecord
+	var bytesRead int64
 	truncated := false
 
 	for {
-		if bytesRead >= maxBytes {
+		if int(bytesRead) >= maxBytes {
 			truncated = true
 			break
 		}
 		line, err := r.ReadBytes('\n')
 		if len(line) > 0 {
-			bytesRead += len(line)
-			linesTotal++
-			trim := bytesutil.TrimRightNewlines(line)
-			if len(trim) > 0 {
-				out = append(out, append([]byte(nil), trim...))
-			}
-			if len(out) >= limit {
-				truncated = true
-				break
-			}
+			bytesRead += int64(len(line))
+			records = append(records, historyRecord{line: append([]byte(nil), line...), size: len(line)})
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -162,20 +153,15 @@ func (s *DiskHistoryStore) LinesSince(_ context.Context, cursor pkgstore.History
 		}
 	}
 
-	after := offset + int64(bytesRead)
+	result := buildHistorySinceBatch(records, maxBytes, limit)
+	after := offset + int64(result.batch.BytesRead)
 	if after > size {
 		after = size
 	}
 
-	return pkgstore.HistoryBatch{
-		Lines:          out,
-		CursorAfter:    pkgstore.HistoryCursorFromInt64(after),
-		BytesRead:      bytesRead,
-		LinesTotal:     linesTotal,
-		Returned:       len(out),
-		ReturnedCapped: len(out) >= limit,
-		Truncated:      truncated,
-	}, nil
+	result.batch.CursorAfter = pkgstore.HistoryCursorFromInt64(after)
+	result.batch.Truncated = result.batch.Truncated || truncated
+	return result.batch, nil
 }
 
 func (s *DiskHistoryStore) LinesLatest(_ context.Context, opts pkgstore.HistoryLatestOptions) (pkgstore.HistoryBatch, error) {
@@ -222,32 +208,19 @@ func (s *DiskHistoryStore) LinesLatest(_ context.Context, opts pkgstore.HistoryL
 
 	sc := bufio.NewScanner(bytes.NewReader(b))
 	sc.Buffer(make([]byte, 0, 64*1024), 256*1024)
-	var lines [][]byte
+	var records []historyRecord
 	for sc.Scan() {
 		line := bytesutil.TrimRightNewlines(sc.Bytes())
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		lines = append(lines, append([]byte(nil), line...))
+		cloned := append([]byte(nil), line...)
+		records = append(records, historyRecord{line: cloned, size: len(cloned) + 1})
 	}
 	if err := sc.Err(); err != nil {
 		return pkgstore.HistoryBatch{CursorAfter: pkgstore.HistoryCursorFromInt64(0)}, err
 	}
-
-	// Keep last N lines.
-	truncated := false
-	if len(lines) > limit {
-		lines = lines[len(lines)-limit:]
-		truncated = true
-	}
-
-	return pkgstore.HistoryBatch{
-		Lines:          lines,
-		CursorAfter:    pkgstore.HistoryCursorFromInt64(size),
-		BytesRead:      len(b),
-		LinesTotal:     len(lines),
-		Returned:       len(lines),
-		ReturnedCapped: truncated,
-		Truncated:      truncated || start > 0,
-	}, nil
+	batch := buildHistoryLatestBatch(records, maxBytes, limit, start > 0)
+	batch.CursorAfter = pkgstore.HistoryCursorFromInt64(size)
+	return batch, nil
 }

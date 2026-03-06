@@ -18,6 +18,7 @@ const (
 	markdownVariantNormal markdownVariant = iota
 	markdownVariantAgent
 	markdownVariantThinking
+	markdownVariantCoordinator
 )
 
 // markdownRenderer caches Glamour renderers keyed by wrap width.
@@ -154,7 +155,19 @@ func agen8MarkdownStyle(variant markdownVariant) ansi.StyleConfig {
 	if variant == markdownVariantThinking {
 		applyThinkingMutedTheme(&style)
 	}
+	if variant == markdownVariantCoordinator {
+		applyCoordinatorMarkdownTheme(&style)
+	}
 	return style
+}
+
+func applyCoordinatorMarkdownTheme(style *ansi.StyleConfig) {
+	if style == nil {
+		return
+	}
+	style.Document.Margin = uintPtr(0)
+	style.CodeBlock.StylePrimitive.BackgroundColor = nil
+	style.CodeBlock.StylePrimitive.Color = nil
 }
 
 func applyThinkingMutedTheme(style *ansi.StyleConfig) {

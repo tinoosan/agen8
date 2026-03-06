@@ -8,7 +8,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 )
 
@@ -25,20 +24,20 @@ func (f monitorFilePickerItem) Description() string { return "" }
 func (m *monitorModel) openFilePicker(query string) tea.Cmd {
 	m.helpModalOpen = false
 	m.closeAllPickers()
-	m.filePickerOpen = true
-	m.filePickerQuery = strings.TrimSpace(query)
-
-	l := list.New([]list.Item{}, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), nil), 0, 0)
-	l.Title = "Select File"
-	l.SetShowHelp(false)
-	l.SetShowStatusBar(false)
-	l.SetShowPagination(true)
-	l.SetFilteringEnabled(false)
-	l.SetShowFilter(false)
-	l.Styles.Title = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#707070")).
-		Bold(true)
-	m.filePickerList = l
+	m.filePickerCtrl.Open(kit.PickerConfig{
+		Title:            "Select File",
+		ShowPagination:   true,
+		CursorPageKeyNav: true,
+		Delegate:         kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), nil),
+		ModalWidth:       80,
+		ModalHeight:      22,
+		ModalMinWidth:    40,
+		ModalMinHeight:   10,
+		ModalMarginX:     8,
+		ModalMarginY:     2,
+	})
+	m.filePickerCtrl.SetFilter(strings.TrimSpace(query))
+	m.syncFilePickerState()
 
 	// Scan files in background
 	return m.scanFilesForPicker()
@@ -46,8 +45,8 @@ func (m *monitorModel) openFilePicker(query string) tea.Cmd {
 
 // closeFilePicker closes the file picker modal.
 func (m *monitorModel) closeFilePicker() {
-	m.filePickerOpen = false
-	m.filePickerList = list.Model{}
+	m.filePickerCtrl.Close()
+	m.syncFilePickerState()
 	m.filePickerAllPaths = nil
 	m.filePickerQuery = ""
 }
@@ -113,17 +112,17 @@ func scanMonitorWorkdirFiles(baseDir string, maxVisited int) ([]string, error) {
 
 // updateFilePicker handles keyboard input when the file picker is open.
 func (m *monitorModel) updateFilePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "escape":
+	m.ensureFilePickerCtrl()
+	action := m.filePickerCtrl.Update(msg)
+	m.syncFilePickerState()
+	switch action.Type {
+	case kit.PickerActionClose:
 		m.closeFilePicker()
 		return m, nil
-	case "enter":
+	case kit.PickerActionAccept:
 		return m, m.selectFileFromPicker()
 	}
-
-	var cmd tea.Cmd
-	m.filePickerList, cmd = m.filePickerList.Update(msg)
-	return m, cmd
+	return m, action.Cmd
 }
 
 // handleFilePickerPaths updates the file picker with scanned paths.
@@ -144,18 +143,15 @@ func (m *monitorModel) applyFilePickerFilter() {
 			}
 		}
 	}
-	m.filePickerList.SetItems(items)
-	if len(items) > 0 {
-		m.filePickerList.Select(0)
-	}
+	m.filePickerCtrl.SetItems(items)
+	m.filePickerCtrl.SetFilter(m.filePickerQuery)
+	m.syncFilePickerState()
 }
 
 // selectFileFromPicker inserts the selected file path into the composer.
 func (m *monitorModel) selectFileFromPicker() tea.Cmd {
-	if m.filePickerList.Items() == nil || len(m.filePickerList.Items()) == 0 {
-		return nil
-	}
-	selected := m.filePickerList.SelectedItem()
+	m.ensureFilePickerCtrl()
+	selected := m.filePickerCtrl.SelectedItem()
 	it, ok := selected.(monitorFilePickerItem)
 	if !ok {
 		m.closeFilePicker()
@@ -178,20 +174,14 @@ func (m *monitorModel) selectFileFromPicker() tea.Cmd {
 }
 
 func (m *monitorModel) renderFilePicker(base string) string {
-	dims := kit.ComputeModalDims(m.width, m.height, 80, 22, 40, 10, 8, 2)
-	m.filePickerList.SetWidth(dims.ModalWidth - 4)
-	m.filePickerList.SetHeight(dims.ListHeight)
-
+	m.ensureFilePickerCtrl()
 	title := "Select File"
 	if m.filePickerQuery != "" {
 		title += " (@" + kit.TruncateMiddle(m.filePickerQuery, 32) + ")"
 	}
-	m.filePickerList.Title = title
-
-	content := m.filePickerList.View()
-
-	opts := kit.DefaultPickerModalOpts(content, m.width, m.height, dims.ModalWidth, dims.ModalHeight)
+	m.filePickerCtrl.SetTitle(title)
+	m.syncFilePickerState()
 
 	_ = base
-	return kit.RenderOverlay(opts)
+	return m.filePickerCtrl.Render(m.width, m.height, "", "")
 }

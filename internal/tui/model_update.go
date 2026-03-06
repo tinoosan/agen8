@@ -195,15 +195,18 @@ func (m Model) keySessionPickerModal(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if !m.sessionPickerOpen {
 		return m, nil, false
 	}
+	m.ensureSessionPickerCtrl()
 
-	switch msg.Type {
-	case tea.KeyEsc:
+	action := m.sessionPickerCtrl.Update(msg)
+	m.syncSessionPickerState()
+	switch action.Type {
+	case kit.PickerActionClose:
 		m.closeSessionPicker()
 		m.layout()
 		return m, nil, true
-	case tea.KeyEnter:
+	case kit.PickerActionAccept:
 		return m, m.selectSessionFromPicker(), true
-	case tea.KeyCtrlN, tea.KeyPgDown:
+	case kit.PickerActionPageNext:
 		pageSize := m.sessionPickerPageSize
 		if pageSize <= 0 {
 			pageSize = 50
@@ -217,29 +220,24 @@ func (m Model) keySessionPickerModal(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, m.fetchSessionsPage(), true
 		}
 		return m, nil, true
-	case tea.KeyCtrlP, tea.KeyPgUp:
+	case kit.PickerActionPagePrev:
 		if m.sessionPickerPage > 0 {
 			m.sessionPickerPage--
+			m.sessionPickerCtrl.SetPage(m.sessionPickerPage, m.sessionPickerTotal, m.sessionPickerPageSize)
+			m.syncSessionPickerState()
 			return m, m.fetchSessionsPage(), true
 		}
 		return m, nil, true
-	case tea.KeyUp:
-		m.sessionPickerList.CursorUp()
-		return m, nil, true
-	case tea.KeyDown:
-		m.sessionPickerList.CursorDown()
-		return m, nil, true
-	default:
-		var cmd tea.Cmd
-		m.sessionPickerList, cmd = m.sessionPickerList.Update(msg)
-		newFilter := strings.TrimSpace(m.sessionPickerList.FilterInput.Value())
-		if newFilter != m.sessionPickerFilter {
-			m.sessionPickerFilter = newFilter
+	case kit.PickerActionFilterChanged:
+		if action.Filter != m.sessionPickerFilter {
+			m.sessionPickerFilter = action.Filter
 			m.sessionPickerPage = 0
-			return m, tea.Batch(cmd, m.fetchSessionsPage()), true
+			m.sessionPickerCtrl.SetPage(0, m.sessionPickerTotal, m.sessionPickerPageSize)
+			m.syncSessionPickerState()
+			return m, tea.Batch(action.Cmd, m.fetchSessionsPage()), true
 		}
-		return m, cmd, true
 	}
+	return m, action.Cmd, true
 }
 
 func (m Model) keyModelPickerModal(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
@@ -339,6 +337,7 @@ func (m Model) keyFilePickerModal(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if !(m.filePickerOpen && m.focus == focusInput) {
 		return m, nil, false
 	}
+	m.ensureFilePickerCtrl()
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.closeFilePicker()
@@ -346,19 +345,20 @@ func (m Model) keyFilePickerModal(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	case tea.KeyEnter:
 		return m, m.selectFileFromPicker(), true
-	case tea.KeyUp:
-		m.filePickerList.CursorUp()
-		return m, nil, true
-	case tea.KeyDown:
-		m.filePickerList.CursorDown()
-		return m, nil, true
-	case tea.KeyPgUp, tea.KeyCtrlU:
-		m.filePickerList.CursorUp()
-		return m, nil, true
-	case tea.KeyPgDown, tea.KeyCtrlF:
-		m.filePickerList.CursorDown()
-		return m, nil, true
 	default:
+		action := m.filePickerCtrl.Update(msg)
+		m.syncFilePickerState()
+		switch action.Type {
+		case kit.PickerActionClose:
+			m.closeFilePicker()
+			m.layout()
+			return m, nil, true
+		case kit.PickerActionAccept:
+			return m, m.selectFileFromPicker(), true
+		}
+		if msg.Type == tea.KeyUp || msg.Type == tea.KeyDown || msg.Type == tea.KeyPgUp || msg.Type == tea.KeyPgDown || msg.Type == tea.KeyCtrlU || msg.Type == tea.KeyCtrlF {
+			return m, action.Cmd, true
+		}
 		return m, nil, false
 	}
 }
