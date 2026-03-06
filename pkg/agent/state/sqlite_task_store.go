@@ -1522,82 +1522,84 @@ func (s *SQLiteTaskStore) CompleteTask(ctx context.Context, taskID string, resul
 	if taskID == "" {
 		return fmt.Errorf("taskID is required")
 	}
-	db, err := s.dbConn()
-	if err != nil {
-		return err
-	}
-	status := types.TaskStatus(strings.TrimSpace(string(result.Status)))
-	if !isTerminalStatus(status) {
-		// Fall back to failed if provided status isn't terminal.
-		status = types.TaskStatusFailed
-	}
-	now := time.Now().UTC()
-	finishedAt := now
-	if timeutil.IsSet(result.CompletedAt) {
-		finishedAt = result.CompletedAt.UTC()
-	}
-	artifactsJSON, _ := json.Marshal(result.Artifacts)
-
-	total := result.TotalTokens
-	if total == 0 {
-		total = result.InputTokens + result.OutputTokens
-	}
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Only transition from non-terminal states; never overwrite succeeded/failed/canceled.
-	res, err := tx.ExecContext(ctx, `
-		UPDATE tasks
-		SET status = ?, finished_at = ?, completed_at = ?, summary = ?, artifacts_json = ?, error = ?,
-		    input_tokens = ?, output_tokens = ?, total_tokens = ?, cost_usd = ?,
-		    lease_until = NULL, updated_at = ?
-		WHERE task_id = ? AND status IN (?, ?, ?)
-`, string(status), finishedAt.Format(time.RFC3339Nano), finishedAt.Format(time.RFC3339Nano),
-		strings.TrimSpace(result.Summary), string(artifactsJSON), strings.TrimSpace(result.Error),
-		result.InputTokens, result.OutputTokens, total, result.CostUSD,
-		now.Format(time.RFC3339Nano), taskID,
-		string(types.TaskStatusActive), string(types.TaskStatusPending), string(types.TaskStatusDelegated))
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		// Task already terminal or not found; idempotent success.
-		return nil
-	}
-
-	var task types.Task
-	var finishedRaw string
-	var metadataRaw string
-	if err := tx.QueryRowContext(ctx, `
-		SELECT task_id, COALESCE(source_team_id, ''), COALESCE(destination_team_id, ''), COALESCE(team_id, ''), COALESCE(run_id, ''), COALESCE(assigned_role, ''),
-		       COALESCE(role_snapshot, ''), COALESCE(task_kind, ''), COALESCE(created_by, ''), COALESCE(goal, ''), COALESCE(status, ''), COALESCE(finished_at, ''),
-		       COALESCE(metadata_json, '{}')
-		FROM tasks
-		WHERE task_id = ?
-	`, taskID).Scan(
-		&task.TaskID, &task.SourceTeamID, &task.DestinationTeamID, &task.TeamID, &task.RunID, &task.AssignedRole, &task.RoleSnapshot, &task.TaskKind, &task.CreatedBy, &task.Goal, &task.Status, &finishedRaw, &metadataRaw,
-	); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrTaskNotFound
+	return withSQLiteBusyRetryErr(ctx, func() error {
+		db, err := s.dbConn()
+		if err != nil {
+			return err
 		}
-		return err
-	}
-	if strings.TrimSpace(metadataRaw) != "" {
-		_ = json.Unmarshal([]byte(metadataRaw), &task.Metadata)
-	}
-	if tt := parseTime(finishedRaw); !tt.IsZero() {
-		task.CompletedAt = &tt
-	}
-	task.NormalizeTeamFields()
-	if err := s.upsertArtifactsTx(ctx, tx, task, result); err != nil {
-		return err
-	}
-	return tx.Commit()
+		status := types.TaskStatus(strings.TrimSpace(string(result.Status)))
+		if !isTerminalStatus(status) {
+			// Fall back to failed if provided status isn't terminal.
+			status = types.TaskStatusFailed
+		}
+		now := time.Now().UTC()
+		finishedAt := now
+		if timeutil.IsSet(result.CompletedAt) {
+			finishedAt = result.CompletedAt.UTC()
+		}
+		artifactsJSON, _ := json.Marshal(result.Artifacts)
+
+		total := result.TotalTokens
+		if total == 0 {
+			total = result.InputTokens + result.OutputTokens
+		}
+
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		// Only transition from non-terminal states; never overwrite succeeded/failed/canceled.
+		res, err := tx.ExecContext(ctx, `
+			UPDATE tasks
+			SET status = ?, finished_at = ?, completed_at = ?, summary = ?, artifacts_json = ?, error = ?,
+			    input_tokens = ?, output_tokens = ?, total_tokens = ?, cost_usd = ?,
+			    lease_until = NULL, updated_at = ?
+			WHERE task_id = ? AND status IN (?, ?, ?)
+	`, string(status), finishedAt.Format(time.RFC3339Nano), finishedAt.Format(time.RFC3339Nano),
+			strings.TrimSpace(result.Summary), string(artifactsJSON), strings.TrimSpace(result.Error),
+			result.InputTokens, result.OutputTokens, total, result.CostUSD,
+			now.Format(time.RFC3339Nano), taskID,
+			string(types.TaskStatusActive), string(types.TaskStatusPending), string(types.TaskStatusDelegated))
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			// Task already terminal or not found; idempotent success.
+			return nil
+		}
+
+		var task types.Task
+		var finishedRaw string
+		var metadataRaw string
+		if err := tx.QueryRowContext(ctx, `
+			SELECT task_id, COALESCE(source_team_id, ''), COALESCE(destination_team_id, ''), COALESCE(team_id, ''), COALESCE(run_id, ''), COALESCE(assigned_role, ''),
+			       COALESCE(role_snapshot, ''), COALESCE(task_kind, ''), COALESCE(created_by, ''), COALESCE(goal, ''), COALESCE(status, ''), COALESCE(finished_at, ''),
+			       COALESCE(metadata_json, '{}')
+			FROM tasks
+			WHERE task_id = ?
+		`, taskID).Scan(
+			&task.TaskID, &task.SourceTeamID, &task.DestinationTeamID, &task.TeamID, &task.RunID, &task.AssignedRole, &task.RoleSnapshot, &task.TaskKind, &task.CreatedBy, &task.Goal, &task.Status, &finishedRaw, &metadataRaw,
+		); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrTaskNotFound
+			}
+			return err
+		}
+		if strings.TrimSpace(metadataRaw) != "" {
+			_ = json.Unmarshal([]byte(metadataRaw), &task.Metadata)
+		}
+		if tt := parseTime(finishedRaw); !tt.IsZero() {
+			task.CompletedAt = &tt
+		}
+		task.NormalizeTeamFields()
+		if err := s.upsertArtifactsTx(ctx, tx, task, result); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
 }
 
 func (s *SQLiteTaskStore) RecoverExpiredLeases(ctx context.Context) error {

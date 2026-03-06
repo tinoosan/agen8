@@ -4,6 +4,7 @@ import type { ActivityEvent } from '../lib/types'
 import { ChevronRight, Activity } from 'lucide-react'
 
 interface ActivityFeedProps {
+  threadId: string | null
   teamId: string
 }
 
@@ -26,20 +27,23 @@ function getTypeColor(type: string): string {
 
 function EventRow({ event }: { event: ActivityEvent }) {
   const [expanded, setExpanded] = useState(false)
-  const typeColor = event.type ? getTypeColor(event.type) : 'var(--text-3)'
+  const typeColor = event.kind ? getTypeColor(event.kind) : 'var(--text-3)'
+  const role = event.data?.role || event.data?.agent_role
+  const summary = event.title || event.outputPreview || event.textPreview || event.path || event.kind
+  const detail = [event.textPreview, event.outputPreview, event.error].filter(Boolean).join('\n\n')
 
   return (
     <div
       className="row-hover"
       style={{
         padding: '5px 4px',
-        cursor: event.detail ? 'pointer' : 'default',
+        cursor: detail ? 'pointer' : 'default',
         marginBottom: 1,
       }}
-      onClick={() => event.detail && setExpanded(e => !e)}
+      onClick={() => detail && setExpanded(e => !e)}
     >
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        {event.detail ? (
+        {detail ? (
           <span style={{ color: 'var(--text-3)', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
             <ChevronRight
               size={10}
@@ -52,24 +56,24 @@ function EventRow({ event }: { event: ActivityEvent }) {
         ) : (
           <span style={{ width: 10, flexShrink: 0 }} />
         )}
-        {event.role && (
+        {role && (
           <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-2)', flexShrink: 0 }}>
-            {event.role}
+            {role}
           </span>
         )}
-        {event.type && (
+        {event.kind && (
           <span style={{
             fontSize: 9, color: typeColor, flexShrink: 0,
             fontWeight: 500, letterSpacing: '0.03em', textTransform: 'uppercase',
           }}>
-            {event.type}
+            {event.kind}
           </span>
         )}
         <span className="truncate" style={{ fontSize: 11, color: 'var(--text-2)', flex: 1 }}>
-          {event.summary}
+          {summary}
         </span>
       </div>
-      {expanded && event.detail && (
+      {expanded && detail && (
         <div className="mono" style={{
           marginTop: 5, marginLeft: 16, padding: '6px 8px',
           background: 'var(--bg-elevated)',
@@ -80,15 +84,15 @@ function EventRow({ event }: { event: ActivityEvent }) {
           maxHeight: 180, overflow: 'auto',
           lineHeight: 1.6,
         }}>
-          {event.detail}
+          {detail}
         </div>
       )}
     </div>
   )
 }
 
-export default function ActivityFeed({ teamId }: ActivityFeedProps) {
-  const query = useActivity(teamId)
+export default function ActivityFeed({ threadId, teamId }: ActivityFeedProps) {
+  const query = useActivity({ threadId, teamId, includeChildRuns: true, limit: 100 })
   const containerRef = useRef<HTMLDivElement>(null)
   const events = query.data ?? []
   const recent = events.slice(-50)
@@ -113,7 +117,7 @@ export default function ActivityFeed({ teamId }: ActivityFeedProps) {
           <div style={{ fontSize: 11, color: 'var(--text-3)' }}>No activity yet</div>
         </div>
       ) : (
-        recent.map((event, i) => <EventRow key={event.seq ?? i} event={event} />)
+        recent.map((event) => <EventRow key={event.id} event={event} />)
       )}
     </div>
   )

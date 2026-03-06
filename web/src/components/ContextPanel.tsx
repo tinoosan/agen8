@@ -7,9 +7,10 @@ import { Mail, FolderOpen } from 'lucide-react'
 
 interface ContextPanelProps {
   teamId: string
+  threadId: string | null
 }
 
-export default function ContextPanel({ teamId }: ContextPanelProps) {
+export default function ContextPanel({ teamId, threadId }: ContextPanelProps) {
   const { setMailOpen, setArtifactsOpen } = useStore()
   const statusQuery = useTeamStatus(teamId)
   const { badgeCount } = useMail(teamId)
@@ -44,7 +45,7 @@ export default function ContextPanel({ teamId }: ContextPanelProps) {
 
       {/* Activity */}
       <div className="section-label">Activity</div>
-      <ActivityFeed teamId={teamId} />
+      <ActivityFeed teamId={teamId} threadId={threadId} />
 
       {/* Bottom action buttons */}
       <div style={{

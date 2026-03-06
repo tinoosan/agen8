@@ -173,15 +173,31 @@ export interface MailMessage {
   task?: Task
 }
 
+export type ActivityStatus = 'pending' | 'ok' | 'error'
+
 export interface ActivityEvent {
-  seq?: number
-  runId?: string
-  type?: string
-  role?: string
-  summary?: string
-  detail?: string
-  createdAt?: string
-  data?: unknown
+  id: string
+  kind: string
+  title: string
+  status: ActivityStatus
+  startedAt: string
+  finishedAt?: string
+  duration?: number
+  from?: string
+  to?: string
+  path?: string
+  maxBytes?: string
+  textPreview?: string
+  textTruncated?: boolean
+  textRedacted?: boolean
+  textIsJSON?: boolean
+  textBytes?: string
+  ok?: string
+  error?: string
+  outputPreview?: string
+  bytesLen?: string
+  truncated?: boolean
+  data?: Record<string, string>
 }
 
 export interface Artifact {

@@ -21,6 +21,7 @@ import (
 	authpkg "github.com/tinoosan/agen8/pkg/auth"
 	"github.com/tinoosan/agen8/pkg/config"
 	"github.com/tinoosan/agen8/pkg/fsutil"
+	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	pkgagent "github.com/tinoosan/agen8/pkg/services/agent"
 	pkgsession "github.com/tinoosan/agen8/pkg/services/session"
@@ -1716,6 +1717,136 @@ func TestRPCServer_TurnCreate_NonBootstrapThreadScope(t *testing.T) {
 	}
 	if strings.TrimSpace(task.SessionID) != targetRun.SessionID || strings.TrimSpace(task.RunID) != targetRun.RunID {
 		t.Fatalf("task scope mismatch session=%q run=%q", task.SessionID, task.RunID)
+	}
+}
+
+func TestRPCServer_TurnCreate_PreservesTeamScopeForCoordinatorThread(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	coordSess, coordRun, err := implstore.CreateSession(cfg, "team coordinator", 8*1024)
+	if err != nil {
+		t.Fatalf("CreateSession coordinator: %v", err)
+	}
+	coordSess.Mode = "multi-agent"
+	coordSess.TeamID = "team-web"
+	coordSess.CurrentRunID = coordRun.RunID
+	coordSess.Runs = []string{coordRun.RunID}
+
+	sessStore, err := implstore.NewSQLiteSessionStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteSessionStore: %v", err)
+	}
+	if err := sessStore.SaveSession(context.Background(), coordSess); err != nil {
+		t.Fatalf("SaveSession coordinator: %v", err)
+	}
+
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg:            cfg,
+		Run:            coordRun,
+		AllowAnyThread: true,
+		TaskService:    pkgtask.NewManager(ts, nil),
+		Session:        newTestSessionService(cfg, sessStore),
+		Index:          protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodTurnCreate, protocol.TurnCreateParams{
+		ThreadID: protocol.ThreadID(coordSess.SessionID),
+		Input:    &protocol.UserMessageContent{Text: "hello coordinator"},
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("turn.create error: %+v", resp.Error)
+	}
+
+	var out protocol.TurnCreateResult
+	if err := json.Unmarshal(resp.Result, &out); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	task, err := ts.GetTask(context.Background(), string(out.Turn.ID))
+	if err != nil {
+		t.Fatalf("GetTask turn task: %v", err)
+	}
+	if got := strings.TrimSpace(task.TeamID); got != "team-web" {
+		t.Fatalf("task teamID=%q want team-web", got)
+	}
+}
+
+func TestRPCServer_ItemList_FallsBackToPersistedRunConversation(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sess.Runs = []string{run.RunID}
+
+	sessStore := store.NewMemorySessionStore()
+	if err := sessStore.SaveSession(context.Background(), sess); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := sessStore.SaveRun(context.Background(), run); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+
+	runConvStore, err := implstore.NewSQLiteRunConversationStoreFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteRunConversationStoreFromConfig: %v", err)
+	}
+	if err := runConvStore.SaveMessages(context.Background(), run.RunID, []llmtypes.LLMMessage{
+		{Role: "user", Content: "hello coordinator"},
+		{Role: "assistant", Content: "hello from persisted state"},
+	}); err != nil {
+		t.Fatalf("SaveMessages: %v", err)
+	}
+
+	ts, err := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("NewSQLiteTaskStore: %v", err)
+	}
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg:         cfg,
+		Run:         run,
+		TaskService: pkgtask.NewManager(ts, nil),
+		Session:     newTestSessionService(cfg, sessStore),
+		Index:       protocol.NewIndex(0, 0),
+	})
+
+	req, _ := protocol.NewRequest("1", protocol.MethodItemList, protocol.ItemListParams{
+		ThreadID: protocol.ThreadID(sess.SessionID),
+	})
+	resp := rpcRoundTrip(t, srv, req)
+	if resp.Error != nil {
+		t.Fatalf("item.list error: %+v", resp.Error)
+	}
+
+	var out protocol.ItemListResult
+	if err := json.Unmarshal(resp.Result, &out); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(out.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(out.Items))
+	}
+	if out.Items[0].Type != protocol.ItemTypeUserMessage {
+		t.Fatalf("first item type=%q want %q", out.Items[0].Type, protocol.ItemTypeUserMessage)
+	}
+	if out.Items[1].Type != protocol.ItemTypeAgentMessage {
+		t.Fatalf("second item type=%q want %q", out.Items[1].Type, protocol.ItemTypeAgentMessage)
+	}
+	var userContent protocol.UserMessageContent
+	if err := out.Items[0].DecodeContent(&userContent); err != nil {
+		t.Fatalf("decode user content: %v", err)
+	}
+	if strings.TrimSpace(userContent.Text) != "hello coordinator" {
+		t.Fatalf("user text=%q want hello coordinator", userContent.Text)
+	}
+	var agentContent protocol.AgentMessageContent
+	if err := out.Items[1].DecodeContent(&agentContent); err != nil {
+		t.Fatalf("decode agent content: %v", err)
+	}
+	if strings.TrimSpace(agentContent.Text) != "hello from persisted state" {
+		t.Fatalf("agent text=%q want persisted assistant text", agentContent.Text)
 	}
 }
 
