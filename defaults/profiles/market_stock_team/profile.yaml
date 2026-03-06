@@ -1,7 +1,7 @@
 id: market_stock_team
 description: Multi-role market and stock research team profile.
 team:
-  model: moonshotai/kimi-k2.5
+  model: openai/gpt-5.1-codex-mini
   reviewer:
     enabled: true
     name: reviewer
@@ -25,8 +25,8 @@ team:
   roles:
     - name: head-analyst
       coordinator: true
-      model: moonshotai/kimi-k2.5
-      subagent_model: gpt-5-nano
+      model: openai/gpt-5.1-codex-mini
+      subagent_model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -48,7 +48,7 @@ team:
           goal: "Produce a consolidated market and stock brief from completed role outputs."
 
     - name: market-researcher
-      model: moonshotai/kimi-k2.5
+      model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -62,7 +62,7 @@ team:
         - hybrid-web
 
     - name: stock-researcher
-      model: moonshotai/kimi-k2.5
+      model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -76,7 +76,7 @@ team:
         - market-monitoring
 
     - name: report-writer
-      model: moonshotai/kimi-k2.5
+      model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -88,7 +88,7 @@ team:
         - reporting
 
     - name: risk-analyst
-      model: moonshotai/kimi-k2.5
+      model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
         - http_fetch
@@ -104,7 +104,7 @@ team:
         - reporting
 
     - name: quant-researcher
-      model: moonshotai/kimi-k2.5
+      model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
         - shell_exec

@@ -1,7 +1,7 @@
 id: software_dev
 description: Software engineering profile focused on building, debugging, testing, and documentation.
 team:
-  model: moonshotai/kimi-k2.5
+  model: openai/gpt-5.1-codex-mini
   reviewer:
     enabled: true
     name: reviewer
@@ -26,8 +26,8 @@ team:
     - name: Software Developer
       coordinator: true
       allow_subagents: true
-      model: moonshotai/kimi-k2.5
-      subagent_model: gpt-5-nano
+      model: openai/gpt-5.1-codex-mini
+      subagent_model: openai/gpt-5.1-codex-mini
       code_exec_only: true
       allowed_tools:
         - shell_exec
