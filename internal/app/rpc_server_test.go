@@ -2626,7 +2626,7 @@ func TestRPCServer_SessionStart_SingleRoleTeamProfile_DoesNotInjectReviewer(t *t
 	}
 }
 
-func TestRPCServer_SessionStart_StandaloneRejectsMultiRoleTeamProfile(t *testing.T) {
+func TestRPCServer_SessionStart_IgnoresLegacyModeMismatchAndUsesProfileShape(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "profiles", "multi_team"), 0o755); err != nil {
 		t.Fatalf("mkdir profiles: %v", err)
@@ -2652,14 +2652,16 @@ func TestRPCServer_SessionStart_StandaloneRejectsMultiRoleTeamProfile(t *testing
 		Profile:  "multi_team",
 	})
 	resp := rpcRoundTrip(t, srv, req)
-	if resp.Error == nil {
-		t.Fatalf("expected standalone rejection for multi-role team profile")
+	if resp.Error != nil {
+		t.Fatalf("session.start should infer shape from profile: %+v", resp.Error)
 	}
-	if resp.Error.Code != protocol.CodeInvalidParams {
-		t.Fatalf("code = %d want %d", resp.Error.Code, protocol.CodeInvalidParams)
+	var out protocol.SessionStartResult
+	_ = json.Unmarshal(resp.Result, &out)
+	if out.Mode != "multi-agent" {
+		t.Fatalf("mode=%q want multi-agent", out.Mode)
 	}
-	if !strings.Contains(strings.ToLower(resp.Error.Message), "role count") {
-		t.Fatalf("unexpected error: %+v", resp.Error)
+	if len(out.RunIDs) != 2 {
+		t.Fatalf("expected 2 role runs, got %d", len(out.RunIDs))
 	}
 }
 

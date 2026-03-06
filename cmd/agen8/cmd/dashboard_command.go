@@ -19,8 +19,9 @@ var (
 )
 
 var dashboardCmd = &cobra.Command{
-	Use:   "dashboard",
-	Short: "Live per-agent dashboard for the active session",
+	Use:    "dashboard",
+	Short:  "Live per-agent dashboard for the active session",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runDashboardFlow(cmd)
 	},
@@ -38,7 +39,7 @@ func runDashboardFlow(cmd *cobra.Command) error {
 		}
 	}
 	if sessionID == "" {
-		return fmt.Errorf("session id is required (use --session-id or initialize project and attach a session)")
+		return fmt.Errorf("active team session is required (start a team with `agen8 team start <profile-ref>` or pass --session-id)")
 	}
 
 	if dashboardOnce || !isInteractiveTerminal() {
@@ -173,7 +174,6 @@ func init() {
 	dashboardCmd.Flags().StringVar(&dashboardSessionID, "session-id", "", "session id to inspect (default: active project session)")
 	dashboardCmd.Flags().BoolVar(&dashboardOnce, "once", false, "render once and exit")
 	dashboardCmd.Flags().DurationVar(&dashboardInterval, "interval", 2*time.Second, "refresh interval for live mode")
-	rootCmd.AddCommand(dashboardCmd)
 }
 
 func minInt(a, b int) int {

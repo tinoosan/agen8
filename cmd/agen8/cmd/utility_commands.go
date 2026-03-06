@@ -14,8 +14,9 @@ var (
 )
 
 var doctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Run local diagnostics for daemon/project/config",
+	Use:    "doctor",
+	Short:  "Run local diagnostics for daemon/project/config",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := effectiveConfig(cmd)
 		if err != nil {
@@ -36,7 +37,7 @@ var doctorCmd = &cobra.Command{
 			return nil
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "project_root: %s\n", projectCtx.RootDir)
-		fmt.Fprintf(cmd.OutOrStdout(), "project_mode: %s\n", projectModeDefault(projectCtx))
+		fmt.Fprintf(cmd.OutOrStdout(), "project_mode: %s\n", blankDash(projectCtx.Config.DefaultMode))
 		fmt.Fprintf(cmd.OutOrStdout(), "active_session: %s\n", blankDash(projectCtx.State.ActiveSessionID))
 		fmt.Fprintf(cmd.OutOrStdout(), "active_run: %s\n", blankDash(projectCtx.State.ActiveRunID))
 		return nil
@@ -44,8 +45,9 @@ var doctorCmd = &cobra.Command{
 }
 
 var configCmd = &cobra.Command{
-	Use:   "config",
-	Short: "Show merged effective configuration",
+	Use:    "config",
+	Short:  "Show merged effective configuration",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := effectiveConfig(cmd)
 		if err != nil {
@@ -62,7 +64,7 @@ var configCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "model=%s\n", blankDash(strings.TrimSpace(modelID)))
 		if projectCtx.Exists {
 			fmt.Fprintf(cmd.OutOrStdout(), "project.root=%s\n", projectCtx.RootDir)
-			fmt.Fprintf(cmd.OutOrStdout(), "project.mode=%s\n", projectModeDefault(projectCtx))
+			fmt.Fprintf(cmd.OutOrStdout(), "project.mode=%s\n", blankDash(projectCtx.Config.DefaultMode))
 			fmt.Fprintf(cmd.OutOrStdout(), "project.default_profile=%s\n", blankDash(projectCtx.Config.DefaultProfile))
 			fmt.Fprintf(cmd.OutOrStdout(), "project.default_team_profile=%s\n", blankDash(projectCtx.Config.DefaultTeamProfile))
 			fmt.Fprintf(cmd.OutOrStdout(), "project.active_session=%s\n", blankDash(projectCtx.State.ActiveSessionID))
@@ -75,8 +77,9 @@ var configCmd = &cobra.Command{
 }
 
 var whoamiCmd = &cobra.Command{
-	Use:   "whoami",
-	Short: "Show current project/session/run context",
+	Use:    "whoami",
+	Short:  "Show current project/session/run context",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		projectCtx, err := loadProjectContext()
 		if err != nil {
@@ -131,8 +134,9 @@ var whoamiCmd = &cobra.Command{
 }
 
 var watchCmd = &cobra.Command{
-	Use:   "watch",
-	Short: "Shortcut for activity TUI",
+	Use:    "watch",
+	Short:  "Shortcut for activity TUI",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return activityCmd.RunE(cmd, args)
 	},
@@ -142,8 +146,4 @@ func init() {
 	whoamiCmd.Flags().StringVar(&whoamiSessionID, "session-id", "", "session id override")
 	whoamiCmd.Flags().StringVar(&whoamiRunID, "run-id", "", "run id override")
 
-	rootCmd.AddCommand(doctorCmd)
-	rootCmd.AddCommand(configCmd)
-	rootCmd.AddCommand(whoamiCmd)
-	rootCmd.AddCommand(watchCmd)
 }

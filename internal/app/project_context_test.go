@@ -10,10 +10,8 @@ import (
 func TestInitProjectAndLoadContext(t *testing.T) {
 	base := t.TempDir()
 	ctx, err := InitProject(base, ProjectConfig{
-		DefaultProfile:     "software_dev",
-		DefaultMode:        "team",
-		DefaultTeamProfile: "startup_team",
-		RPCEndpoint:        "127.0.0.1:7777",
+		ProjectID:   "software-dev",
+		RPCEndpoint: "127.0.0.1:7777",
 	})
 	if err != nil {
 		t.Fatalf("InitProject: %v", err)
@@ -21,14 +19,8 @@ func TestInitProjectAndLoadContext(t *testing.T) {
 	if !ctx.Exists {
 		t.Fatalf("expected initialized context")
 	}
-	if got := ctx.Config.DefaultProfile; got != "software_dev" {
-		t.Fatalf("default profile=%q", got)
-	}
-	if got := ctx.Config.DefaultMode; got != "multi-agent" {
-		t.Fatalf("default mode=%q (team normalizes to multi-agent)", got)
-	}
-	if got := ctx.Config.DefaultTeamProfile; got != "startup_team" {
-		t.Fatalf("default team profile=%q", got)
+	if got := ctx.Config.ProjectID; got != "software-dev" {
+		t.Fatalf("project id=%q", got)
 	}
 	if got := ctx.Config.RPCEndpoint; got != "127.0.0.1:7777" {
 		t.Fatalf("rpc endpoint=%q", got)
@@ -97,7 +89,6 @@ func TestSaveProjectConfig_PersistsObsidianFields(t *testing.T) {
 	}
 	ctx, err := SaveProjectConfig(base, ProjectConfig{
 		ProjectID:         "p1",
-		DefaultMode:       "standalone",
 		ObsidianVaultPath: "/project/obsidian-vault",
 		ObsidianEnabled:   true,
 	})
@@ -112,7 +103,7 @@ func TestSaveProjectConfig_PersistsObsidianFields(t *testing.T) {
 	}
 }
 
-func TestNormalizeProjectConfig_ModeValues(t *testing.T) {
+func TestNormalizeProjectConfig_LegacyModeValues(t *testing.T) {
 	base := t.TempDir()
 	tests := []struct {
 		input string
@@ -122,14 +113,38 @@ func TestNormalizeProjectConfig_ModeValues(t *testing.T) {
 		{"multi-agent", "multi-agent"},
 		{"standalone", "single-agent"},
 		{"single-agent", "single-agent"},
-		{"", "single-agent"},
-		{"invalid", "single-agent"},
+		{"", ""},
+		{"invalid", "invalid"},
 	}
 	for _, tc := range tests {
 		cfg := ProjectConfig{DefaultMode: tc.input}
 		norm := normalizeProjectConfig(cfg, base)
 		if got := norm.DefaultMode; got != tc.want {
 			t.Errorf("normalizeProjectConfig(DefaultMode=%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestInitProject_WritesConfigWithoutLegacyDefaultFields(t *testing.T) {
+	base := t.TempDir()
+	ctx, err := InitProject(base, ProjectConfig{
+		ProjectID:          "legacy-free",
+		DefaultProfile:     "general",
+		DefaultMode:        "single-agent",
+		DefaultTeamProfile: "startup_team",
+		RPCEndpoint:        "127.0.0.1:7777",
+	})
+	if err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+	raw, err := os.ReadFile(ctx.ConfigPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	text := string(raw)
+	for _, unwanted := range []string{"default_profile", "default_team_profile", "default_mode"} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("config unexpectedly contains %q:\n%s", unwanted, text)
 		}
 	}
 }

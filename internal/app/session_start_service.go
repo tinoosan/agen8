@@ -67,12 +67,6 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 	if len(teamRoles) > 1 || reviewerEnabled {
 		mode = "multi-agent"
 	}
-	if requestedMode != "" && requestedMode != mode {
-		return protocol.SessionStartResult{}, &protocol.ProtocolError{
-			Code:    protocol.CodeInvalidParams,
-			Message: fmt.Sprintf("mode %q does not match profile role count (%s)", requestedMode, mode),
-		}
-	}
 
 	goal := strings.TrimSpace(p.Goal)
 	maxContext := srv.run.MaxBytesForContext

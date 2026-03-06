@@ -20,7 +20,7 @@ func runMailTUI(cmd *cobra.Command) error {
 		}
 	}
 	if sessionID == "" {
-		return fmt.Errorf("session id is required (use --session-id or initialize project and attach a session)")
+		return fmt.Errorf("active team session is required (start a team with `agen8 team start <profile-ref>` or pass --session-id)")
 	}
 	return mail.Run(resolvedRPCEndpoint(), sessionID, mail.Options{
 		ProjectRoot:        projectRoot,

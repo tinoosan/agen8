@@ -33,9 +33,10 @@ var (
 )
 
 var tasksCmd = &cobra.Command{
-	Use:   "mail",
-	Short: "Query and manage task inbox/outbox",
-	Long:  "Mail is the task inbox/outbox surface.",
+	Use:    "mail",
+	Short:  "Query and manage task inbox/outbox",
+	Long:   "Mail is the task inbox/outbox surface.",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runMailTUI(cmd)
 	},
@@ -271,5 +272,4 @@ func init() {
 	mailWatchCmd.Flags().StringVar(&mailWatchView, "view", "inbox", "task view (inbox|outbox)")
 	mailWatchCmd.Flags().DurationVar(&mailWatchInterval, "interval", 2*time.Second, "refresh interval")
 	tasksCmd.AddCommand(mailWatchCmd)
-	rootCmd.AddCommand(tasksCmd)
 }
