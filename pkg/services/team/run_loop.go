@@ -2,7 +2,7 @@ package team
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -49,7 +49,7 @@ func RunRoleLoops(
 				if err != nil {
 					errMsg = err.Error()
 				}
-				log.Printf("daemon: runner %s exited unexpectedly; restarting in %s: %s", runID, backoff, errMsg)
+				slog.Warn("runner exited unexpectedly; restarting", "component", "supervisor", "run_id", runID, "backoff", backoff, "error", errMsg)
 				select {
 				case <-gctx.Done():
 					return nil
@@ -96,12 +96,12 @@ func RunModelChangeLoop(ctx context.Context, taskStore state.TaskStore, stateMgr
 			applied, err := applier.ApplyModel(ctx, model, "")
 			if err != nil {
 				_ = stateMgr.MarkModelFailed(ctx, model, err)
-				log.Printf("daemon: apply queued team model failed: %v", err)
+				slog.Warn("apply queued team model failed", "component", "supervisor", "error", err)
 				continue
 			}
 			_ = stateMgr.MarkModelApplied(ctx, model)
 			if len(applied) > 0 {
-				log.Printf("daemon: applied queued team model: %s", model)
+				slog.Info("applied queued team model", "component", "supervisor", "model", model)
 			}
 		}
 	}

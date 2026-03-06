@@ -1,11 +1,20 @@
 import { useState } from 'react'
 import { useStore } from '../lib/store'
 import { useMail } from '../hooks/useMail'
-import { X, ArrowUpRight } from 'lucide-react'
+import { X, ArrowUpRight, Inbox, Send, Mail } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { MailMessage } from '../lib/types'
 
 interface MailSlideOverProps {
   teamId: string
+}
+
+const statusColors: Record<string, string> = {
+  pending: 'var(--amber)',
+  failed: 'var(--red)',
+  succeeded: 'var(--green)',
+  acked: 'var(--green)',
 }
 
 function MailRow({ message, onSelect, selected }: { message: MailMessage; onSelect: () => void; selected: boolean }) {
@@ -13,31 +22,58 @@ function MailRow({ message, onSelect, selected }: { message: MailMessage; onSele
   const isCrossTeam = task?.assignedToType === 'team' || (task?.teamId && task?.assignedTo && task.teamId !== task.assignedTo)
   const displayStatus = task?.status ?? message.status
   const label = task?.goal ?? message.subject ?? message.summary ?? message.bodyPreview ?? message.kind
+  const dotColor = statusColors[displayStatus ?? ''] ?? 'var(--text-3)'
 
   return (
     <div
       onClick={onSelect}
+      className={selected ? '' : 'row-hover'}
       style={{
-        padding: '8px 12px', cursor: 'pointer', borderRadius: 8,
-        background: selected ? 'light-dark(rgba(0,0,0,0.06), rgba(255,255,255,0.06))' : 'transparent',
-        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '9px 12px', cursor: 'pointer',
+        borderRadius: 'var(--r-md)',
+        background: selected ? 'var(--bg-active)' : 'transparent',
+        display: 'flex', alignItems: 'center', gap: 9,
+        margin: '1px 0',
       }}
     >
       <span style={{
-        fontSize: 8, width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-        background: displayStatus === 'pending' ? '#f59e0b' : displayStatus === 'failed' ? '#ef4444' : displayStatus === 'succeeded' || displayStatus === 'acked' ? '#22c55e' : '#71717a',
+        width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+        background: dotColor,
       }} />
-      <span style={{ flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span className="truncate" style={{
+        flex: 1, fontSize: 12, color: 'var(--text-1)',
+        fontWeight: selected ? 500 : 400,
+      }}>
         {label}
       </span>
       {isCrossTeam && (
-        <ArrowUpRight size={10} style={{ opacity: 0.5, flexShrink: 0 }} />
+        <ArrowUpRight size={11} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
       )}
       {task?.assignedRole && (
-        <span style={{ fontSize: 10, opacity: 0.45, flexShrink: 0 }}>
+        <span style={{
+          fontSize: 10, color: 'var(--text-3)', flexShrink: 0,
+          background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+          padding: '1px 6px', borderRadius: 999,
+        }}>
           {task.assignedRole}
         </span>
       )}
+    </div>
+  )
+}
+
+function SectionLabel({ icon, label, count }: { icon: React.ReactNode; label: string; count: number }) {
+  return (
+    <div className="section-label" style={{ padding: '10px 12px 5px' }}>
+      {icon}
+      {label}
+      <span style={{
+        background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+        borderRadius: 999, padding: '0 6px',
+        fontSize: 9, fontWeight: 700, letterSpacing: 0,
+        textTransform: 'none',
+        fontVariantNumeric: 'tabular-nums',
+      }}>{count}</span>
     </div>
   )
 }
@@ -49,85 +85,147 @@ export default function MailSlideOver({ teamId }: MailSlideOverProps) {
 
   return (
     <div
-      className="animate-slide-in-right"
-      style={{
-        position: 'absolute', inset: 0, zIndex: 50,
-        display: 'flex', justifyContent: 'flex-end',
-        background: 'rgba(0,0,0,0.3)',
-      }}
+      className="slide-over-backdrop animate-slide-in-right"
       onClick={() => setMailOpen(false)}
     >
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          width: 380, height: '100%',
-          background: 'light-dark(#ffffff, #111113)',
+          width: 420, height: '100%',
+          background: 'var(--bg-panel)',
+          borderLeft: '1px solid var(--border)',
           display: 'flex', flexDirection: 'column',
-          boxShadow: '-8px 0 40px rgba(0,0,0,0.2)',
+          boxShadow: '-12px 0 48px rgba(0,0,0,0.4)',
         }}
       >
         {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '16px 16px', borderBottom: '1px solid light-dark(rgba(0,0,0,0.08), rgba(255,255,255,0.08))',
+          padding: '14px 16px',
+          borderBottom: '1px solid var(--border)',
+          flexShrink: 0,
         }}>
-          <span style={{ fontWeight: 700, fontSize: 15 }}>Mail</span>
-          <button onClick={() => setMailOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: 0.5 }}>
-            <X size={18} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
+              Mail
+            </span>
+            {(inbox.length + outbox.length) > 0 && (
+              <span style={{
+                fontSize: 11, color: 'var(--text-3)',
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border)',
+                borderRadius: 999, padding: '0 6px',
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {inbox.length + outbox.length}
+              </span>
+            )}
+          </div>
+          <button className="btn-ghost" onClick={() => setMailOpen(false)} aria-label="Close">
+            <X size={16} />
           </button>
         </div>
 
-        {/* Tasks list */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 8px' }}>
+        {/* Message list */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '4px 8px' }}>
           {inbox.length > 0 && (
             <>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', opacity: 0.35, padding: '0 12px 6px' }}>
-                Inbox ({inbox.length})
-              </div>
+              <SectionLabel icon={<Inbox size={10} />} label="Inbox" count={inbox.length} />
               {inbox.map(message => (
-                <MailRow key={message.messageId} message={message} onSelect={() => setSelected(message)} selected={selected?.messageId === message.messageId} />
+                <MailRow
+                  key={message.messageId}
+                  message={message}
+                  onSelect={() => setSelected(message)}
+                  selected={selected?.messageId === message.messageId}
+                />
               ))}
             </>
           )}
 
           {outbox.length > 0 && (
             <>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', opacity: 0.35, padding: '12px 12px 6px' }}>
-                Outbox ({outbox.length})
-              </div>
+              <SectionLabel icon={<Send size={10} />} label="Sent" count={outbox.length} />
               {outbox.map(message => (
-                <MailRow key={message.messageId} message={message} onSelect={() => setSelected(message)} selected={selected?.messageId === message.messageId} />
+                <MailRow
+                  key={message.messageId}
+                  message={message}
+                  onSelect={() => setSelected(message)}
+                  selected={selected?.messageId === message.messageId}
+                />
               ))}
             </>
           )}
 
           {inbox.length === 0 && outbox.length === 0 && (
-            <div style={{ padding: 24, textAlign: 'center', opacity: 0.3, fontSize: 13 }}>No messages</div>
+            <div style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center',
+              padding: '40px 20px', textAlign: 'center', gap: 8,
+            }}>
+              <Mail size={24} style={{ color: 'var(--text-3)' }} />
+              <div style={{ color: 'var(--text-3)', fontSize: 13 }}>No messages</div>
+              <div style={{ color: 'var(--text-3)', fontSize: 11, lineHeight: 1.5 }}>
+                Inter-team messages will appear here
+              </div>
+            </div>
           )}
         </div>
 
-        {/* Message detail */}
+        {/* Selected message detail */}
         {selected && (
           <div style={{
-            padding: 16, borderTop: '1px solid light-dark(rgba(0,0,0,0.08), rgba(255,255,255,0.08))',
+            flex: '0 0 55%',
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            borderTop: '1px solid var(--border)',
+            background: 'var(--bg-surface)',
           }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-              {selected.task?.goal ?? selected.subject ?? selected.summary ?? selected.kind}
+            {/* Detail header */}
+            <div style={{
+              padding: '12px 16px 10px',
+              borderBottom: '1px solid var(--border)',
+              flexShrink: 0,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', letterSpacing: '-0.01em', lineHeight: 1.4 }}>
+                {selected.task?.goal ?? selected.subject ?? selected.summary ?? selected.kind}
+              </div>
             </div>
-            {selected.summary && (
-              <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 8 }}>{selected.summary}</div>
-            )}
-            {selected.bodyPreview && selected.bodyPreview !== selected.summary && (
-              <div style={{ fontSize: 12, opacity: 0.55, marginBottom: 8 }}>{selected.bodyPreview}</div>
-            )}
-            {(selected.task?.error ?? selected.error) && (
-              <div style={{ fontSize: 11, color: '#ef4444', marginBottom: 8 }}>{selected.task?.error ?? selected.error}</div>
-            )}
-            <div style={{ display: 'flex', gap: 8 }}>
+
+            {/* Scrollable body */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px 16px' }}>
+              {selected.summary && (
+                <div className="md-prose" style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 10, lineHeight: 1.6 }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.summary}</ReactMarkdown>
+                </div>
+              )}
+              {selected.bodyPreview && selected.bodyPreview !== selected.summary && (
+                <div className="md-prose" style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 10, lineHeight: 1.6 }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.bodyPreview}</ReactMarkdown>
+                </div>
+              )}
+              {(selected.task?.error ?? selected.error) && (
+                <div style={{
+                  fontSize: 11, color: 'var(--red)', marginBottom: 8,
+                  background: 'var(--red-dim)', border: '1px solid rgba(239,68,68,0.2)',
+                  padding: '8px 12px', borderRadius: 'var(--r-md)',
+                  lineHeight: 1.5,
+                }}>
+                  {selected.task?.error ?? selected.error}
+                </div>
+              )}
+            </div>
+
+            {/* Action buttons */}
+            <div style={{
+              padding: '10px 16px',
+              borderTop: '1px solid var(--border)',
+              display: 'flex', gap: 8,
+              flexShrink: 0,
+            }}>
               {selected.canClaim && selected.taskId && (
                 <button
+                  className="btn-surface"
                   onClick={() => claim(selected.taskId!)}
-                  style={{ fontSize: 12, padding: '5px 12px', borderRadius: 8, border: '1px solid currentColor', background: 'none', cursor: 'pointer', color: 'inherit' }}
                 >
                   Claim
                 </button>
@@ -135,13 +233,23 @@ export default function MailSlideOver({ teamId }: MailSlideOverProps) {
               {selected.canComplete && selected.taskId && (
                 <button
                   onClick={() => complete({ taskId: selected.taskId! })}
-                  style={{ fontSize: 12, padding: '5px 12px', borderRadius: 8, border: 'none', background: '#22c55e', color: '#fff', cursor: 'pointer' }}
+                  style={{
+                    fontSize: 12, fontWeight: 500,
+                    padding: '7px 16px', borderRadius: 'var(--r-md)',
+                    border: 'none',
+                    background: 'var(--green)',
+                    color: '#fff', cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    transition: 'opacity 0.15s',
+                  }}
                 >
                   Complete
                 </button>
               )}
               {(selected.readOnly || !selected.taskId) && (
-                <span style={{ fontSize: 11, opacity: 0.45, alignSelf: 'center' }}>Read-only message</span>
+                <span style={{ fontSize: 11, color: 'var(--text-3)', alignSelf: 'center' }}>
+                  Read-only
+                </span>
               )}
             </div>
           </div>

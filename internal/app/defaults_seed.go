@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -346,9 +346,9 @@ func (r *seedConflictResolver) logSummary() {
 		return
 	}
 	if r.skipped > 0 && !r.interactive {
-		log.Printf("defaults seed: skipped %d existing skill files (non-interactive mode)", r.skipped)
+		slog.Info("defaults seed: skipped existing skill files", "component", "seed", "skipped", r.skipped, "reason", "non-interactive mode")
 	}
 	if r.overwritten > 0 {
-		log.Printf("defaults seed: overwritten %d skill files", r.overwritten)
+		slog.Info("defaults seed: overwritten skill files", "component", "seed", "overwritten", r.overwritten)
 	}
 }

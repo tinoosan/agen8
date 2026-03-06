@@ -875,6 +875,46 @@ func TestManager_ClaimTask_UsesAssigneeScopeForBackingMessage(t *testing.T) {
 	}
 }
 
+func TestManager_PublishTaskMessage_CopiesExplicitSourceAndDestinationTeams(t *testing.T) {
+	store := &mockTaskStore{
+		createTask: func(ctx context.Context, task types.Task) error { return nil },
+	}
+	var published types.AgentMessage
+	msgStore := &mockMessageStore{
+		publishMessage: func(ctx context.Context, msg types.AgentMessage) (types.AgentMessage, error) {
+			published = msg
+			return msg, nil
+		},
+	}
+	mgr := NewManager(store, nil)
+	mgr.SetMessageStore(msgStore)
+
+	err := mgr.CreateTask(context.Background(), types.Task{
+		TaskID:            "task-publish-cross-team",
+		SessionID:         "sess-1",
+		RunID:             "run-a",
+		SourceTeamID:      "team-a",
+		DestinationTeamID: "team-b",
+		AssignedToType:    "team",
+		AssignedTo:        "team-b",
+		Status:            types.TaskStatusPending,
+		Goal:              "review this",
+		Metadata:          map[string]any{"source": "task_create"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if got := strings.TrimSpace(published.SourceTeamID); got != "team-a" {
+		t.Fatalf("published sourceTeamId=%q want team-a", got)
+	}
+	if got := strings.TrimSpace(published.DestinationTeamID); got != "team-b" {
+		t.Fatalf("published destinationTeamId=%q want team-b", got)
+	}
+	if got := strings.TrimSpace(published.TeamID); got != "team-b" {
+		t.Fatalf("published teamId alias=%q want team-b", got)
+	}
+}
+
 func TestManager_AckMessage_NotifiesWakeForBackedTask(t *testing.T) {
 	taskID := "task-ack-1"
 	store := &mockTaskStore{

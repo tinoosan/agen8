@@ -3,13 +3,25 @@ package events
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"fmt"
+	"io"
+	"os"
 )
 
 // ConsoleSink prints compact JSON event lines to the terminal.
-type ConsoleSink struct{}
+// If Writer is nil, output goes to os.Stderr.
+type ConsoleSink struct {
+	Writer io.Writer
+}
 
-func (ConsoleSink) Emit(_ context.Context, msg Message) error {
+func (c ConsoleSink) w() io.Writer {
+	if c.Writer != nil {
+		return c.Writer
+	}
+	return os.Stderr
+}
+
+func (c ConsoleSink) Emit(_ context.Context, msg Message) error {
 	event := msg.Payload
 	if !enabled(event.Console) {
 		return nil
@@ -25,9 +37,9 @@ func (ConsoleSink) Emit(_ context.Context, msg Message) error {
 	}
 	b, err := json.Marshal(line)
 	if err != nil {
-		log.Printf("%s %s", event.Type, event.Message)
+		fmt.Fprintf(c.w(), "%s %s\n", event.Type, event.Message)
 		return nil
 	}
-	log.Printf("%s", string(b))
+	fmt.Fprintf(c.w(), "%s\n", string(b))
 	return nil
 }

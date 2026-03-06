@@ -3,7 +3,6 @@ package events
 import (
 	"bytes"
 	"context"
-	"log"
 	"strings"
 	"testing"
 )
@@ -30,16 +29,7 @@ func TestMultiSink_FanoutOrder(t *testing.T) {
 
 func TestConsoleSink_JSONShape(t *testing.T) {
 	var buf bytes.Buffer
-	oldOut := log.Writer()
-	oldFlags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(oldOut)
-		log.SetFlags(oldFlags)
-	})
-
-	s := ConsoleSink{}
+	s := ConsoleSink{Writer: &buf}
 	if err := s.Emit(context.Background(), Message{RunID: "run-1", Payload: Event{
 		Type:    "x",
 		Message: "hello",

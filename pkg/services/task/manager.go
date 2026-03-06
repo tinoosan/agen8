@@ -130,7 +130,8 @@ func (m *Manager) notifyWake(task types.Task) {
 	if m == nil {
 		return
 	}
-	taskTeam := strings.TrimSpace(task.TeamID)
+	task.NormalizeTeamFields()
+	taskTeam := strings.TrimSpace(task.DestinationTeamID)
 	taskRun := strings.TrimSpace(task.RunID)
 	m.watchers.Notify(func(filter taskWakeFilter) bool {
 		if filter.teamID != "" && taskTeam != filter.teamID {
@@ -147,7 +148,7 @@ func (m *Manager) notifyWake(task types.Task) {
 // teamID and/or runID. Used by the supervisor after unpausing a run to ensure
 // the session immediately drains its inbox.
 func (m *Manager) NotifyWake(teamID, runID string) {
-	m.notifyWake(types.Task{TeamID: teamID, RunID: runID})
+	m.notifyWake(types.Task{DestinationTeamID: teamID, TeamID: teamID, RunID: runID})
 }
 
 // CreateRetryTask creates a retry task for a child run (loads run via RunLoader, builds task, persists).
@@ -219,8 +220,9 @@ func (m *Manager) CreateEscalationTask(ctx context.Context, callbackTaskID strin
 		CreatedAt: &now,
 		Metadata:  escMeta,
 	}
-	teamID := strings.TrimSpace(task.TeamID)
-	if teamID != "" {
+	task.NormalizeTeamFields()
+	destinationTeamID := strings.TrimSpace(task.DestinationTeamID)
+	if destinationTeamID != "" {
 		coordinatorRole := ""
 		if cr, ok := task.Metadata["coordinatorRole"].(string); ok {
 			coordinatorRole = strings.TrimSpace(cr)
@@ -228,7 +230,9 @@ func (m *Manager) CreateEscalationTask(ctx context.Context, callbackTaskID strin
 		if coordinatorRole == "" {
 			coordinatorRole = strings.TrimSpace(task.AssignedRole)
 		}
-		escalationTask.TeamID = teamID
+		escalationTask.SourceTeamID = strings.TrimSpace(task.SourceTeamID)
+		escalationTask.DestinationTeamID = destinationTeamID
+		escalationTask.TeamID = destinationTeamID
 		escalationTask.AssignedRole = coordinatorRole
 		escalationTask.AssignedToType = "role"
 		escalationTask.AssignedTo = coordinatorRole
@@ -350,10 +354,11 @@ func (m *Manager) CreateTask(ctx context.Context, task types.Task) error {
 	}
 	m.clearTaskMessageDeferred(ctx, task)
 	m.emitRoutingEvent(ctx, task, "routing.validated", "Task routing validated", map[string]string{
-		"taskId":       strings.TrimSpace(task.TaskID),
-		"assignedType": strings.TrimSpace(task.AssignedToType),
-		"assignedTo":   strings.TrimSpace(task.AssignedTo),
-		"teamId":       strings.TrimSpace(task.TeamID),
+		"taskId":            strings.TrimSpace(task.TaskID),
+		"assignedType":      strings.TrimSpace(task.AssignedToType),
+		"assignedTo":        strings.TrimSpace(task.AssignedTo),
+		"sourceTeamId":      strings.TrimSpace(task.SourceTeamID),
+		"destinationTeamId": strings.TrimSpace(task.DestinationTeamID),
 	})
 	if metadataBool(task.Metadata, "allowSelfAssign") {
 		m.emitRoutingEvent(ctx, task, "team.coordinator.self_assign.allowed", "Coordinator self-assignment override accepted", map[string]string{
@@ -375,6 +380,7 @@ func (m *Manager) publishTaskMessage(ctx context.Context, task types.Task) error
 		return nil
 	}
 	now := time.Now().UTC()
+	task.NormalizeTeamFields()
 	taskCopy := task
 	meta := task.Metadata
 	kind := strings.TrimSpace(metadataString(meta, "messageKind"))
@@ -390,16 +396,18 @@ func (m *Manager) publishTaskMessage(ctx context.Context, task types.Task) error
 		correlationID = strings.TrimSpace(task.TaskID)
 	}
 	msg := types.AgentMessage{
-		MessageID:     "msg-" + uuid.NewString(),
-		IntentID:      intentID,
-		CorrelationID: correlationID,
-		CausationID:   strings.TrimSpace(metadataString(meta, "causationId")),
-		Producer:      strings.TrimSpace(metadataString(meta, "producer")),
-		ThreadID:      strings.TrimSpace(task.SessionID),
-		RunID:         strings.TrimSpace(task.RunID),
-		TeamID:        strings.TrimSpace(task.TeamID),
-		Channel:       types.MessageChannelInbox,
-		Kind:          kind,
+		MessageID:         "msg-" + uuid.NewString(),
+		IntentID:          intentID,
+		CorrelationID:     correlationID,
+		CausationID:       strings.TrimSpace(metadataString(meta, "causationId")),
+		Producer:          strings.TrimSpace(metadataString(meta, "producer")),
+		ThreadID:          strings.TrimSpace(task.SessionID),
+		RunID:             strings.TrimSpace(task.RunID),
+		SourceTeamID:      strings.TrimSpace(task.SourceTeamID),
+		DestinationTeamID: strings.TrimSpace(task.DestinationTeamID),
+		TeamID:            strings.TrimSpace(task.TeamID),
+		Channel:           types.MessageChannelInbox,
+		Kind:              kind,
 		Body: map[string]any{
 			"goal":     strings.TrimSpace(task.Goal),
 			"taskKind": strings.TrimSpace(task.TaskKind),
@@ -440,6 +448,7 @@ func (m *Manager) findDeterministicDelegationDuplicate(ctx context.Context, task
 	if m == nil {
 		return types.Task{}, false, nil
 	}
+	task.NormalizeTeamFields()
 	if !isDeterministicDelegationTask(task) {
 		return types.Task{}, false, nil
 	}
@@ -448,9 +457,10 @@ func (m *Manager) findDeterministicDelegationDuplicate(ctx context.Context, task
 		return types.Task{}, false, nil
 	}
 	filter := state.TaskFilter{
-		TeamID: strings.TrimSpace(task.TeamID),
-		SortBy: "created_at",
-		Limit:  500,
+		DestinationTeamID: strings.TrimSpace(task.DestinationTeamID),
+		TeamID:            strings.TrimSpace(task.DestinationTeamID),
+		SortBy:            "created_at",
+		Limit:             500,
 	}
 	tasks, err := m.store.ListTasks(ctx, filter)
 	if err != nil {
@@ -467,7 +477,8 @@ func (m *Manager) findDeterministicDelegationDuplicate(ctx context.Context, task
 		if strings.TrimSpace(existing.TaskID) == strings.TrimSpace(task.TaskID) {
 			return existing, true, nil
 		}
-		if strings.TrimSpace(existing.TeamID) != strings.TrimSpace(task.TeamID) {
+		existing.NormalizeTeamFields()
+		if strings.TrimSpace(existing.DestinationTeamID) != strings.TrimSpace(task.DestinationTeamID) {
 			continue
 		}
 		if !metadataBool(existing.Metadata, "batchMode") {
@@ -497,7 +508,8 @@ func (m *Manager) findDeterministicDelegationDuplicate(ctx context.Context, task
 }
 
 func isDeterministicDelegationTask(task types.Task) bool {
-	if strings.TrimSpace(task.TeamID) == "" {
+	task.NormalizeTeamFields()
+	if strings.TrimSpace(task.DestinationTeamID) == "" {
 		return false
 	}
 	if !metadataBool(task.Metadata, "batchMode") {
@@ -587,10 +599,11 @@ func (m *Manager) UpdateTask(ctx context.Context, task types.Task) error {
 		return err
 	}
 	m.emitRoutingEvent(ctx, task, "routing.validated", "Task routing validated", map[string]string{
-		"taskId":       strings.TrimSpace(task.TaskID),
-		"assignedType": strings.TrimSpace(task.AssignedToType),
-		"assignedTo":   strings.TrimSpace(task.AssignedTo),
-		"teamId":       strings.TrimSpace(task.TeamID),
+		"taskId":            strings.TrimSpace(task.TaskID),
+		"assignedType":      strings.TrimSpace(task.AssignedToType),
+		"assignedTo":        strings.TrimSpace(task.AssignedTo),
+		"sourceTeamId":      strings.TrimSpace(task.SourceTeamID),
+		"destinationTeamId": strings.TrimSpace(task.DestinationTeamID),
 	})
 	m.notifyWake(task)
 	return nil
@@ -628,18 +641,20 @@ func (m *Manager) syncTaskMessagesTerminal(ctx context.Context, task types.Task)
 	if m == nil || m.messageStore == nil {
 		return nil
 	}
+	task.NormalizeTeamFields()
 	taskID := strings.TrimSpace(task.TaskID)
 	if taskID == "" {
 		return nil
 	}
 	msgs, err := m.listTaskMessages(ctx, task, state.MessageFilter{
-		ThreadID: strings.TrimSpace(task.SessionID),
-		TeamID:   strings.TrimSpace(task.TeamID),
-		TaskRef:  taskID,
-		Channel:  types.MessageChannelInbox,
-		Statuses: []string{types.MessageStatusPending, types.MessageStatusClaimed, types.MessageStatusNacked},
-		Limit:    200,
-		SortBy:   "created_at",
+		ThreadID:          strings.TrimSpace(task.SessionID),
+		DestinationTeamID: strings.TrimSpace(task.DestinationTeamID),
+		TeamID:            strings.TrimSpace(task.DestinationTeamID),
+		TaskRef:           taskID,
+		Channel:           types.MessageChannelInbox,
+		Statuses:          []string{types.MessageStatusPending, types.MessageStatusClaimed, types.MessageStatusNacked},
+		Limit:             200,
+		SortBy:            "created_at",
 	})
 	if err != nil {
 		return err
@@ -705,13 +720,15 @@ func (m *Manager) ensureTaskHasBackingMessage(ctx context.Context, task types.Ta
 	if m == nil || m.messageStore == nil {
 		return types.AgentMessage{}, nil
 	}
+	task.NormalizeTeamFields()
 	msgs, err := m.listTaskMessages(ctx, task, state.MessageFilter{
-		ThreadID: strings.TrimSpace(task.SessionID),
-		TeamID:   strings.TrimSpace(task.TeamID),
-		TaskRef:  strings.TrimSpace(task.TaskID),
-		Channel:  types.MessageChannelInbox,
-		Limit:    1,
-		SortBy:   "created_at",
+		ThreadID:          strings.TrimSpace(task.SessionID),
+		DestinationTeamID: strings.TrimSpace(task.DestinationTeamID),
+		TeamID:            strings.TrimSpace(task.DestinationTeamID),
+		TaskRef:           strings.TrimSpace(task.TaskID),
+		Channel:           types.MessageChannelInbox,
+		Limit:             1,
+		SortBy:            "created_at",
 	})
 	if err != nil {
 		return types.AgentMessage{}, err
@@ -731,6 +748,7 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 	if m == nil || m.messageStore == nil {
 		return types.AgentMessage{}, nil
 	}
+	task.NormalizeTeamFields()
 	consumerID := strings.TrimSpace(task.ClaimedByAgentID)
 	if consumerID == "" && strings.EqualFold(strings.TrimSpace(task.AssignedToType), "agent") {
 		consumerID = strings.TrimSpace(task.AssignedTo)
@@ -742,13 +760,14 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 		consumerID = "task-service"
 	}
 	filter := state.MessageClaimFilter{
-		ThreadID:       strings.TrimSpace(task.SessionID),
-		TeamID:         strings.TrimSpace(task.TeamID),
-		TaskRef:        strings.TrimSpace(task.TaskID),
-		AssignedToType: strings.TrimSpace(task.AssignedToType),
-		AssignedTo:     strings.TrimSpace(task.AssignedTo),
-		Channel:        types.MessageChannelInbox,
-		Kinds:          []string{types.MessageKindTask, types.MessageKindUserInput},
+		ThreadID:          strings.TrimSpace(task.SessionID),
+		DestinationTeamID: strings.TrimSpace(task.DestinationTeamID),
+		TeamID:            strings.TrimSpace(task.DestinationTeamID),
+		TaskRef:           strings.TrimSpace(task.TaskID),
+		AssignedToType:    strings.TrimSpace(task.AssignedToType),
+		AssignedTo:        strings.TrimSpace(task.AssignedTo),
+		Channel:           types.MessageChannelInbox,
+		Kinds:             []string{types.MessageKindTask, types.MessageKindUserInput},
 	}
 	scheduler := m.scheduler
 	if scheduler == nil {
@@ -760,7 +779,7 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 	}
 	// Team tasks can be consumed from a role session different from the task/session thread.
 	// Retry without thread pinning so team+assignee routing remains authoritative.
-	if errors.Is(err, state.ErrMessageNotFound) && strings.TrimSpace(task.TeamID) != "" {
+	if errors.Is(err, state.ErrMessageNotFound) && strings.TrimSpace(task.DestinationTeamID) != "" {
 		relaxed := filter
 		relaxed.ThreadID = ""
 		msg, err = scheduler.ClaimNextMessage(ctx, relaxed, ttl, consumerID)
@@ -772,12 +791,13 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 		return types.AgentMessage{}, err
 	}
 	msgs, lerr := m.listTaskMessages(ctx, task, state.MessageFilter{
-		ThreadID: strings.TrimSpace(task.SessionID),
-		TeamID:   strings.TrimSpace(task.TeamID),
-		TaskRef:  strings.TrimSpace(task.TaskID),
-		Channel:  types.MessageChannelInbox,
-		Limit:    50,
-		SortBy:   "created_at",
+		ThreadID:          strings.TrimSpace(task.SessionID),
+		DestinationTeamID: strings.TrimSpace(task.DestinationTeamID),
+		TeamID:            strings.TrimSpace(task.DestinationTeamID),
+		TaskRef:           strings.TrimSpace(task.TaskID),
+		Channel:           types.MessageChannelInbox,
+		Limit:             50,
+		SortBy:            "created_at",
 	})
 	if lerr != nil {
 		return types.AgentMessage{}, lerr
@@ -957,8 +977,9 @@ func (m *Manager) RepairRoutingDrift(ctx context.Context, limit int) (int, error
 				}
 				updated++
 				m.emitRoutingEvent(ctx, norm, "routing.repaired", "Routing drift repaired", map[string]string{
-					"taskId": strings.TrimSpace(norm.TaskID),
-					"teamId": strings.TrimSpace(norm.TeamID),
+					"taskId":            strings.TrimSpace(norm.TaskID),
+					"sourceTeamId":      strings.TrimSpace(norm.SourceTeamID),
+					"destinationTeamId": strings.TrimSpace(norm.DestinationTeamID),
 				})
 				m.notifyWake(norm)
 			}
@@ -981,8 +1002,15 @@ func (m *Manager) emitRoutingEvent(ctx context.Context, task types.Task, typ, ms
 	for k, v := range data {
 		evData[k] = strings.TrimSpace(v)
 	}
+	task.NormalizeTeamFields()
 	if evData["teamId"] == "" {
-		evData["teamId"] = strings.TrimSpace(task.TeamID)
+		evData["teamId"] = strings.TrimSpace(task.DestinationTeamID)
+	}
+	if evData["destinationTeamId"] == "" {
+		evData["destinationTeamId"] = strings.TrimSpace(task.DestinationTeamID)
+	}
+	if evData["sourceTeamId"] == "" {
+		evData["sourceTeamId"] = strings.TrimSpace(task.SourceTeamID)
 	}
 	if evData["runId"] == "" {
 		evData["runId"] = strings.TrimSpace(task.RunID)
@@ -1024,11 +1052,20 @@ func (m *Manager) listTaskMessages(ctx context.Context, task types.Task, filter 
 	if m == nil || m.messageStore == nil {
 		return nil, nil
 	}
+	task.NormalizeTeamFields()
+	if filter.DestinationTeamID == "" && filter.TeamID == "" {
+		filter.DestinationTeamID = strings.TrimSpace(task.DestinationTeamID)
+		filter.TeamID = filter.DestinationTeamID
+	}
 	msgs, err := m.messageStore.ListMessages(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
-	if len(msgs) != 0 || strings.TrimSpace(filter.TeamID) == "" || strings.TrimSpace(filter.ThreadID) == "" {
+	destinationTeamID := strings.TrimSpace(filter.DestinationTeamID)
+	if destinationTeamID == "" {
+		destinationTeamID = strings.TrimSpace(filter.TeamID)
+	}
+	if len(msgs) != 0 || destinationTeamID == "" || strings.TrimSpace(filter.ThreadID) == "" {
 		return msgs, nil
 	}
 	// Team fallback: allow cross-session role workers to locate the same authoritative message.
@@ -1144,12 +1181,13 @@ func (m *Manager) ensureTaskMessage(ctx context.Context, task types.Task) (bool,
 		return false, nil
 	}
 	msgs, err := m.listTaskMessages(ctx, task, state.MessageFilter{
-		ThreadID: strings.TrimSpace(task.SessionID),
-		TeamID:   strings.TrimSpace(task.TeamID),
-		TaskRef:  taskID,
-		Channel:  types.MessageChannelInbox,
-		Limit:    1,
-		SortBy:   "created_at",
+		ThreadID:          strings.TrimSpace(task.SessionID),
+		DestinationTeamID: strings.TrimSpace(task.DestinationTeamID),
+		TeamID:            strings.TrimSpace(task.DestinationTeamID),
+		TaskRef:           taskID,
+		Channel:           types.MessageChannelInbox,
+		Limit:             1,
+		SortBy:            "created_at",
 	})
 	if err != nil {
 		return false, err

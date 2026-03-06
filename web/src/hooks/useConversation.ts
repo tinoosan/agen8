@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { rpcCall, onNotification } from '../lib/rpc'
 import type {
   Item,
@@ -18,6 +18,11 @@ export function useConversation(threadId: string | null) {
   const queryClient = useQueryClient()
   const key = ['item.list', threadId]
 
+  // Persistent ref so registerTurnId() can add to it from outside the effect,
+  // allowing callers to pre-register a turnId immediately after turn.create returns
+  // (before SSE delivers item.started for that turn).
+  const knownTurnIdsRef = useRef<Set<string>>(new Set())
+
   const query = useQuery<Item[]>({
     queryKey: key,
     queryFn: async () => {
@@ -25,7 +30,12 @@ export function useConversation(threadId: string | null) {
         threadId,
         limit: 200,
       })
-      return res.items ?? []
+      const items = res.items ?? []
+      // Seed knownTurnIds from initial data so existing items are accepted.
+      for (const item of items) {
+        if (item.turnId) knownTurnIdsRef.current.add(item.turnId)
+      }
+      return items
     },
     enabled: !!threadId,
     staleTime: Infinity,
@@ -35,29 +45,27 @@ export function useConversation(threadId: string | null) {
   useEffect(() => {
     if (!threadId) return
 
-    // Track which turnIds belong to our thread so we can filter notifications.
-    const knownTurnIds = new Set<string>()
-
-    // Seed from current cache.
+    // Seed from current cache on mount / threadId change.
     const cached = queryClient.getQueryData<Item[]>(key)
     if (cached) {
       for (const item of cached) {
-        if (item.turnId) knownTurnIds.add(item.turnId)
+        if (item.turnId) knownTurnIdsRef.current.add(item.turnId)
       }
     }
 
+    // turn.started — register turns that belong to our thread.
     const unsubTurn = onNotification('turn.started', (notif) => {
       const params = notif.params as { turn?: { id: string; threadId: string } } | undefined
       if (params?.turn?.threadId === threadId) {
-        knownTurnIds.add(params.turn.id)
+        knownTurnIdsRef.current.add(params.turn.id)
       }
     })
 
-    // item.completed — optimistically update item in cache.
+    // item.completed — update item in cache (only for our thread's turns).
     const unsub1 = onNotification('item.completed', (notif) => {
       const params = notif.params as ItemNotificationParams | undefined
       if (!params?.item) return
-      if (params.item.turnId && !knownTurnIds.has(params.item.turnId)) return
+      if (params.item.turnId && !knownTurnIdsRef.current.has(params.item.turnId)) return
 
       queryClient.setQueryData<Item[]>(key, (prev) => {
         if (!prev) return [params.item]
@@ -69,7 +77,7 @@ export function useConversation(threadId: string | null) {
       })
     })
 
-    // item.delta — accumulate text into existing item's content.
+    // item.delta — accumulate streaming text into existing item's content.
     const unsub2 = onNotification('item.delta', (notif) => {
       const params = notif.params as ItemDeltaParams | undefined
       if (!params?.itemId || !params?.delta) return
@@ -99,17 +107,18 @@ export function useConversation(threadId: string | null) {
       })
     })
 
-    // item.started — add new item to cache.
+    // item.started — ONLY accept items for turns we know belong to our thread.
+    // This prevents cross-team pollution when the SSE stream delivers notifications
+    // from all teams simultaneously.
     const unsub3 = onNotification('item.started', (notif) => {
       const params = notif.params as ItemNotificationParams | undefined
       if (!params?.item) return
-
-      // Track this turn as belonging to our thread.
-      if (params.item.turnId) knownTurnIds.add(params.item.turnId)
+      // Filter: skip items from unknown turns (they belong to other threads/teams).
+      if (params.item.turnId && !knownTurnIdsRef.current.has(params.item.turnId)) return
 
       queryClient.setQueryData<Item[]>(key, (prev) => {
         if (!prev) return [params.item]
-        // Replace optimistic items for the same turn.
+        // Replace optimistic items for the same turn/type.
         const filtered = prev.filter(
           (i) =>
             !(
@@ -131,5 +140,11 @@ export function useConversation(threadId: string | null) {
     }
   }, [threadId, queryClient])
 
-  return query
+  // Expose so Conversation can pre-register a turnId right after turn.create,
+  // before SSE delivers item.started notifications for that turn.
+  const registerTurnId = useCallback((turnId: string) => {
+    knownTurnIdsRef.current.add(turnId)
+  }, [])
+
+  return { query, registerTurnId }
 }

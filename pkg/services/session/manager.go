@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/tinoosan/agen8/pkg/config"
@@ -141,7 +141,7 @@ func (m *Manager) Stop(ctx context.Context, sessionID string) error {
 // Delete stops the session runs and removes persistent data.
 func (m *Manager) Delete(ctx context.Context, sessionID string) error {
 	if err := m.Stop(ctx, sessionID); err != nil {
-		log.Printf("session delete: stop runs best-effort for session %s: %v", strings.TrimSpace(sessionID), err)
+		slog.Warn("session delete: stop runs best-effort", "component", "session", "session_id", strings.TrimSpace(sessionID), "error", err)
 	}
 	if err := m.store.DeleteSession(ctx, sessionID); err != nil {
 		return fmt.Errorf("delete session storage: %w", err)

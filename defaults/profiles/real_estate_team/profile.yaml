@@ -15,6 +15,7 @@ team:
         - project-management
         - reporting
       heartbeat:
+        enabled: false
         jobs:
           - name: coordinator-check-in
             interval: 10m

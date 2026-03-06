@@ -38,7 +38,7 @@ func TestSessionStart_RevivesInactiveProjectTeam(t *testing.T) {
 		t.Fatalf("MkdirAll(profileDir): %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(profileDir, "profile.yaml"), []byte(
-		"id: general\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: lead\n      coordinator: true\n      description: Lead\n      prompts:\n        system_prompt: lead\n",
+		"id: general\ndescription: Team\nteam:\n  model: openai/gpt-5-mini\n  roles:\n    - name: lead\n      coordinator: true\n      description: Lead\n      prompts:\n        systemPrompt: lead\n",
 	), 0o644); err != nil {
 		t.Fatalf("WriteFile(profile.yaml): %v", err)
 	}

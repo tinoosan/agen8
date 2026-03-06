@@ -4,22 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
-	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	implstore "github.com/tinoosan/agen8/internal/store"
 	"github.com/tinoosan/agen8/pkg/agent/state"
+	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	pkgagent "github.com/tinoosan/agen8/pkg/services/agent"
 	"github.com/tinoosan/agen8/pkg/timeutil"
 	"github.com/tinoosan/agen8/pkg/types"
 )
-
-var warnLegacyTeamFallbackOnce sync.Once
 
 type sessionRunBatchReader interface {
 	ListRunsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]types.Run, error)
@@ -178,6 +174,8 @@ func protocolTaskFromTypesTask(t types.Task) protocol.Task {
 		ID:                strings.TrimSpace(t.TaskID),
 		ThreadID:          protocol.ThreadID(strings.TrimSpace(t.SessionID)),
 		RunID:             protocol.RunID(strings.TrimSpace(t.RunID)),
+		SourceTeamID:      strings.TrimSpace(t.SourceTeamID),
+		DestinationTeamID: strings.TrimSpace(t.DestinationTeamID),
 		TeamID:            strings.TrimSpace(t.TeamID),
 		Source:            source,
 		BatchMode:         batchMode,
@@ -268,13 +266,14 @@ func (s *RPCServer) taskList(ctx context.Context, p protocol.TaskListParams) (pr
 		return protocol.TaskListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "view must be inbox or outbox"}
 	}
 	filter := state.TaskFilter{
-		TeamID:   scope.teamID,
-		RunID:    scope.runID,
-		View:     view,
-		SortBy:   "created_at",
-		SortDesc: true,
-		Limit:    clampLimit(p.Limit, 200, 2000),
-		Offset:   max(0, p.Offset),
+		DestinationTeamID: scope.teamID,
+		TeamID:            scope.teamID,
+		RunID:             scope.runID,
+		View:              view,
+		SortBy:            "created_at",
+		SortDesc:          true,
+		Limit:             clampLimit(p.Limit, 200, 2000),
+		Offset:            max(0, p.Offset),
 	}
 	scopeMode := strings.ToLower(strings.TrimSpace(p.Scope))
 	if scopeMode != "" && scopeMode != "team" && scopeMode != "run" {
@@ -774,17 +773,6 @@ func normalizeAssignedToType(s string) string {
 	}
 }
 
-func legacyTeamFallbackEnabled() bool {
-	raw := strings.ToLower(strings.TrimSpace(os.Getenv("AGEN8_LEGACY_TEAM_FALLBACK")))
-	enabled := raw == "1" || raw == "true" || raw == "yes" || raw == "on"
-	if enabled {
-		warnLegacyTeamFallbackOnce.Do(func() {
-			log.Printf("rpc: AGEN8_LEGACY_TEAM_FALLBACK is enabled; implicit team fallback remains active and should be removed after compatibility window")
-		})
-	}
-	return enabled
-}
-
 func (s *RPCServer) deriveDefaultTeamRole(ctx context.Context, scope artifactScope) string {
 	runID := strings.TrimSpace(scope.runID)
 	if runID != "" && s.session != nil {
@@ -806,7 +794,11 @@ func (s *RPCServer) deriveDefaultTeamRole(ctx context.Context, scope artifactSco
 }
 
 func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams) (protocol.TaskCreateResult, error) {
-	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, p.TeamID, p.RunID)
+	scopeTeamID := strings.TrimSpace(p.DestinationTeamID)
+	if scopeTeamID == "" {
+		scopeTeamID = strings.TrimSpace(p.TeamID)
+	}
+	scope, err := s.resolveTeamOrRunScope(ctx, p.ThreadID, scopeTeamID, p.RunID)
 	if err != nil {
 		return protocol.TaskCreateResult{}, err
 	}
@@ -823,7 +815,21 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 	}
 	assignedTo := strings.TrimSpace(p.AssignedTo)
 	assignedRole := strings.TrimSpace(p.AssignedRole)
-	teamScope := strings.TrimSpace(scope.teamID) != ""
+	sourceTeamID := strings.TrimSpace(p.SourceTeamID)
+	destinationTeamID := strings.TrimSpace(p.DestinationTeamID)
+	if destinationTeamID == "" {
+		destinationTeamID = strings.TrimSpace(p.TeamID)
+	}
+	if destinationTeamID == "" {
+		destinationTeamID = strings.TrimSpace(scope.teamID)
+	}
+	if sourceTeamID == "" {
+		sourceTeamID = strings.TrimSpace(scope.teamID)
+	}
+	if sourceTeamID == "" && destinationTeamID != "" {
+		sourceTeamID = destinationTeamID
+	}
+	teamScope := destinationTeamID != ""
 	if assignedToType == "" {
 		if teamScope {
 			if assignedRole != "" {
@@ -833,9 +839,6 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 				assignedRole = derivedRole
 				assignedToType = "role"
 				assignedTo = derivedRole
-			} else if legacyTeamFallbackEnabled() {
-				assignedToType = "team"
-				assignedTo = scope.teamID
 			} else {
 				return protocol.TaskCreateResult{}, &protocol.ProtocolError{
 					Code:    protocol.CodeInvalidParams,
@@ -851,9 +854,9 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 		switch assignedToType {
 		case "team":
 			if !teamScope {
-				return protocol.TaskCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "assignedToType=team requires team scope"}
+				return protocol.TaskCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "assignedToType=team requires destinationTeamId"}
 			}
-			assignedTo = scope.teamID
+			assignedTo = destinationTeamID
 		case "role":
 			if assignedRole == "" && teamScope {
 				assignedRole = s.deriveDefaultTeamRole(ctx, scope)
@@ -884,22 +887,25 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 		return protocol.TaskCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
 	}
 	task := types.Task{
-		TaskID:         taskID,
-		SessionID:      sessionID,
-		RunID:          taskRunID,
-		TeamID:         strings.TrimSpace(scope.teamID),
-		AssignedRole:   assignedRole,
-		AssignedToType: assignedToType,
-		AssignedTo:     assignedTo,
-		TaskKind:       strings.TrimSpace(p.TaskKind),
-		Goal:           goal,
-		Priority:       p.Priority,
-		Status:         types.TaskStatusPending,
-		CreatedAt:      &now,
-		Inputs:         map[string]any{},
-		Metadata:       map[string]any{"source": "rpc.task.create"},
-		CreatedBy:      "monitor",
+		TaskID:            taskID,
+		SessionID:         sessionID,
+		RunID:             taskRunID,
+		SourceTeamID:      sourceTeamID,
+		DestinationTeamID: destinationTeamID,
+		TeamID:            destinationTeamID,
+		AssignedRole:      assignedRole,
+		AssignedToType:    assignedToType,
+		AssignedTo:        assignedTo,
+		TaskKind:          strings.TrimSpace(p.TaskKind),
+		Goal:              goal,
+		Priority:          p.Priority,
+		Status:            types.TaskStatusPending,
+		CreatedAt:         &now,
+		Inputs:            map[string]any{},
+		Metadata:          map[string]any{"source": "rpc.task.create"},
+		CreatedBy:         "monitor",
 	}
+	task.NormalizeTeamFields()
 	if task.Priority == 0 {
 		task.Priority = 5
 	}
@@ -1182,6 +1188,7 @@ func (s *RPCServer) turnCreate(ctx context.Context, p protocol.TurnCreateParams)
 		TaskID:         taskID,
 		SessionID:      strings.TrimSpace(scope.sessionID),
 		RunID:          strings.TrimSpace(scope.runID),
+		TeamID:         strings.TrimSpace(scope.teamID),
 		TaskKind:       state.TaskKindTask,
 		AssignedToType: "agent",
 		AssignedTo:     strings.TrimSpace(scope.runID),
@@ -1292,8 +1299,10 @@ func (s *RPCServer) turnCancel(ctx context.Context, p protocol.TurnCancelParams)
 }
 
 func (s *RPCServer) itemList(ctx context.Context, p protocol.ItemListParams) (protocol.ItemListResult, error) {
-	_ = ctx
 	if s.index == nil {
+		if items, next, ok := s.loadPersistedThreadItems(ctx, p); ok {
+			return protocol.ItemListResult{Items: items, NextCursor: next}, nil
+		}
 		return protocol.ItemListResult{Items: nil}, nil
 	}
 	turnID := strings.TrimSpace(string(p.TurnID))
@@ -1305,7 +1314,123 @@ func (s *RPCServer) itemList(ctx context.Context, p protocol.ItemListParams) (pr
 	}
 	if threadID != "" {
 		items, next := s.index.ListByThread(p.ThreadID, strings.TrimSpace(p.Cursor), p.Limit)
+		if len(items) == 0 {
+			if persisted, persistedNext, ok := s.loadPersistedThreadItems(ctx, p); ok {
+				return protocol.ItemListResult{Items: persisted, NextCursor: persistedNext}, nil
+			}
+		}
 		return protocol.ItemListResult{Items: items, NextCursor: next}, nil
 	}
 	return protocol.ItemListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "turnId or threadId is required"}
+}
+
+func (s *RPCServer) loadPersistedThreadItems(ctx context.Context, p protocol.ItemListParams) ([]protocol.Item, string, bool) {
+	threadID := strings.TrimSpace(string(p.ThreadID))
+	if threadID == "" || s.session == nil {
+		return nil, "", false
+	}
+	sess, err := s.loadSessionForID(ctx, threadID)
+	if err != nil {
+		return nil, "", false
+	}
+	runID := strings.TrimSpace(defaultRunIDForSession(sess))
+	if runID == "" {
+		return nil, "", false
+	}
+	runConvStore, err := implstore.NewSQLiteRunConversationStoreFromConfig(s.cfg)
+	if err != nil {
+		return nil, "", false
+	}
+	msgs, err := runConvStore.LoadMessages(ctx, runID)
+	if err != nil || len(msgs) == 0 {
+		return nil, "", false
+	}
+	items := persistedItemsFromConversation(threadID, runID, msgs)
+	if len(items) == 0 {
+		return nil, "", false
+	}
+	return paginateItems(items, strings.TrimSpace(p.Cursor), p.Limit)
+}
+
+func persistedItemsFromConversation(threadID, runID string, msgs []llmtypes.LLMMessage) []protocol.Item {
+	threadID = strings.TrimSpace(threadID)
+	runID = strings.TrimSpace(runID)
+	if threadID == "" || runID == "" || len(msgs) == 0 {
+		return nil
+	}
+	turnID := protocol.TurnID("persisted:" + runID)
+	base := time.Unix(0, 0).UTC()
+	items := make([]protocol.Item, 0, len(msgs))
+	for i, msg := range msgs {
+		role := strings.TrimSpace(strings.ToLower(msg.Role))
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+		item := protocol.Item{
+			ID:        protocol.ItemID(fmt.Sprintf("persisted:%s:%d", runID, i)),
+			TurnID:    turnID,
+			RunID:     protocol.RunID(runID),
+			Status:    protocol.ItemStatusCompleted,
+			CreatedAt: base.Add(time.Duration(i) * time.Millisecond),
+		}
+		switch role {
+		case "user":
+			item.Type = protocol.ItemTypeUserMessage
+			_ = item.SetContent(protocol.UserMessageContent{Text: content})
+		case "assistant":
+			item.Type = protocol.ItemTypeAgentMessage
+			_ = item.SetContent(protocol.AgentMessageContent{Text: content})
+		default:
+			continue
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func paginateItems(items []protocol.Item, cursor string, limit int) ([]protocol.Item, string, bool) {
+	if len(items) == 0 {
+		return nil, "", false
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	start := 0
+	if cursor != "" {
+		if i, ok := parseIndexCursor(cursor); ok && i >= 0 {
+			start = i
+		}
+	}
+	if start >= len(items) {
+		return nil, "", true
+	}
+	end := start + limit
+	if end > len(items) {
+		end = len(items)
+	}
+	next := ""
+	if end < len(items) {
+		next = fmt.Sprintf("i:%d", end)
+	}
+	return append([]protocol.Item(nil), items[start:end]...), next, true
+}
+
+func parseIndexCursor(cursor string) (int, bool) {
+	cursor = strings.TrimSpace(cursor)
+	if !strings.HasPrefix(cursor, "i:") {
+		return 0, false
+	}
+	n := strings.TrimSpace(strings.TrimPrefix(cursor, "i:"))
+	if n == "" {
+		return 0, false
+	}
+	value := 0
+	for _, ch := range n {
+		if ch < '0' || ch > '9' {
+			return 0, false
+		}
+		value = value*10 + int(ch-'0')
+	}
+	return value, true
 }

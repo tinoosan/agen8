@@ -34,6 +34,11 @@ model = "z-ai/GLM-5"
 [code_exec]
 # venv_path = ""
 # required_packages = []
+
+[logging]
+# level = "info"    # debug | info | warn | error
+# format = "auto"   # auto | text | json
+# quiet = false
 ```
 
 Notes:

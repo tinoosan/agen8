@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"sort"
 	"strconv"
@@ -316,7 +316,7 @@ func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, ru
 	if err == nil && run.Runtime != nil {
 		run.Runtime.LifecycleState = lifecycleDeactivated
 		if err := s.sessionService.SaveRun(ctx, run); err != nil {
-			log.Printf("daemon: deactivate subagent: save run %s: %v", runID, err)
+			slog.Error("deactivate subagent: save run", "component", "supervisor", "run_id", runID, "error", err)
 		}
 	}
 
@@ -326,7 +326,7 @@ func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, ru
 		sessionID: strings.TrimSpace(run.SessionID),
 		paused:    false,
 	}); err != nil {
-		log.Printf("daemon: deactivate subagent: enqueue stop for run %s: %v", runID, err)
+		slog.Error("deactivate subagent: enqueue stop", "component", "supervisor", "run_id", runID, "error", err)
 	}
 
 	timeout := time.After(s.workerShutdownTimeout())
@@ -339,7 +339,7 @@ func (s *runtimeSupervisor) deactivateAndArchiveSubagent(ctx context.Context, ru
 		}
 		select {
 		case <-timeout:
-			log.Printf("daemon: timed out waiting for worker shutdown during subagent cleanup: run=%s timeout=%s", runID, s.workerShutdownTimeout())
+			slog.Warn("timed out waiting for worker shutdown during subagent cleanup", "component", "supervisor", "run_id", runID, "timeout", s.workerShutdownTimeout())
 			goto archive
 		case <-ticker.C:
 		}
@@ -351,7 +351,7 @@ archive:
 		if run.Runtime != nil {
 			run.Runtime.LifecycleState = lifecycleArchived
 			if err := s.sessionService.SaveRun(ctx, run); err != nil {
-				log.Printf("daemon: archive subagent: save run %s: %v", runID, err)
+				slog.Error("archive subagent: save run", "component", "supervisor", "run_id", runID, "error", err)
 			}
 		}
 		_, _ = s.sessionService.StopRun(ctx, runID, types.RunStatusSucceeded, stopReasonArchived)
@@ -452,7 +452,7 @@ func (s *runtimeSupervisor) Run(ctx context.Context) {
 	}
 	s.ensureLoopState()
 	if err := s.loadAndSpawnActiveRuns(ctx); err != nil {
-		log.Printf("daemon: runtime supervisor startup load failed: %v", err)
+		slog.Error("runtime supervisor startup load failed", "component", "supervisor", "error", err)
 	}
 
 	var supervisorWakeCh <-chan struct{}
@@ -491,7 +491,7 @@ func (s *runtimeSupervisor) runWithPollingFallback(ctx context.Context) {
 			return
 		case <-t.C:
 			if err := s.syncOnce(ctx); err != nil {
-				log.Printf("daemon: runtime supervisor sync failed: %v", err)
+				slog.Warn("runtime supervisor sync failed", "component", "supervisor", "error", err)
 			}
 		}
 	}
@@ -513,7 +513,7 @@ func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
 	for _, run := range runs {
 		sess, lerr := s.loadSessionWithTimeout(ctx, strings.TrimSpace(run.SessionID))
 		if lerr != nil {
-			log.Printf("daemon: load session for run %s: %v", run.RunID, lerr)
+			slog.Warn("load session for run", "component", "supervisor", "run_id", run.RunID, "error", lerr)
 			continue
 		}
 		teamID := strings.TrimSpace(sess.TeamID)
@@ -534,12 +534,12 @@ func (s *runtimeSupervisor) syncOnce(ctx context.Context) error {
 			sessionID: strings.TrimSpace(run.SessionID),
 			sess:      &sess,
 		}); err != nil {
-			log.Printf("daemon: managed run start failed for %s: %v", run.RunID, err)
+			slog.Error("managed run start failed", "component", "supervisor", "run_id", run.RunID, "error", err)
 		}
 	}
 	for teamID := range teamIDs {
 		if err := s.reconcileTeamRoleReplicas(ctx, teamID); err != nil {
-			log.Printf("daemon: role replica reconcile failed for team %s: %v", teamID, err)
+			slog.Warn("role replica reconcile failed", "component", "supervisor", "team_id", teamID, "error", err)
 		}
 	}
 	s.maybeRepairRoutingDrift(ctx)
@@ -645,7 +645,7 @@ func (s *runtimeSupervisor) reconcileTeamRoleReplicas(ctx context.Context, teamI
 						sessionID: strings.TrimSpace(newSessionID),
 						sess:      &sess,
 					}); err != nil {
-						log.Printf("daemon: start scaled replica %s: %v", newRun.RunID, err)
+						slog.Warn("start scaled replica", "component", "supervisor", "run_id", newRun.RunID, "error", err)
 					}
 				}
 			}
@@ -770,11 +770,11 @@ func (s *runtimeSupervisor) maybeRepairRoutingDrift(ctx context.Context) {
 	s.lastRoutingRepairAt = now
 	n, err := repairer.RepairRoutingDrift(ctx, 400)
 	if err != nil {
-		log.Printf("daemon: routing drift repair failed: %v", err)
+		slog.Warn("routing drift repair failed", "component", "supervisor", "error", err)
 		return
 	}
 	if n > 0 {
-		log.Printf("daemon: routing drift repaired %d task(s)", n)
+		slog.Info("routing drift repaired", "component", "supervisor", "repaired", n)
 	}
 }
 
@@ -909,7 +909,7 @@ func (s *runtimeSupervisor) sendCmd(cmd supervisorCmd) {
 	select {
 	case s.cmdCh <- cmd:
 	case <-timer.C:
-		log.Printf("daemon: runtime supervisor command enqueue timed out: kind=%d run=%s", cmd.kind, strings.TrimSpace(cmd.runID))
+		slog.Error("runtime supervisor command enqueue timed out", "component", "supervisor", "kind", cmd.kind, "run_id", strings.TrimSpace(cmd.runID))
 	}
 }
 
@@ -931,13 +931,13 @@ func (s *runtimeSupervisor) processCmd(ctx context.Context, cmd supervisorCmd) {
 	switch cmd.kind {
 	case cmdSpawn:
 		if err := s.handleSpawn(ctx, cmd); err != nil {
-			log.Printf("daemon: runtime supervisor spawn failed for %s: %v", strings.TrimSpace(cmd.runID), err)
+			slog.Error("runtime supervisor spawn failed", "component", "supervisor", "run_id", strings.TrimSpace(cmd.runID), "error", err)
 		}
 	case cmdStop:
 		s.handleStop(cmd)
 	case cmdWorkerExited:
 		if err := s.handleWorkerExited(ctx, cmd); err != nil {
-			log.Printf("daemon: runtime supervisor exit handling failed for %s: %v", strings.TrimSpace(cmd.runID), err)
+			slog.Error("runtime supervisor exit handling failed", "component", "supervisor", "run_id", strings.TrimSpace(cmd.runID), "error", err)
 		}
 	case cmdRepairDrift:
 		s.maybeRepairRoutingDrift(ctx)
@@ -1132,7 +1132,7 @@ func (s *runtimeSupervisor) loadAndSpawnActiveRuns(ctx context.Context) error {
 	for _, run := range runs {
 		sess, lerr := s.loadSessionWithTimeout(ctx, strings.TrimSpace(run.SessionID))
 		if lerr != nil {
-			log.Printf("daemon: load session for run %s: %v", run.RunID, lerr)
+			slog.Warn("load session for run", "component", "supervisor", "run_id", run.RunID, "error", lerr)
 			continue
 		}
 		if err := s.handleSpawn(ctx, supervisorCmd{
@@ -1141,7 +1141,7 @@ func (s *runtimeSupervisor) loadAndSpawnActiveRuns(ctx context.Context) error {
 			sessionID: strings.TrimSpace(run.SessionID),
 			sess:      &sess,
 		}); err != nil {
-			log.Printf("daemon: managed run start failed for %s: %v", run.RunID, err)
+			slog.Error("managed run start failed", "component", "supervisor", "run_id", run.RunID, "error", err)
 		}
 	}
 	return nil
@@ -1154,7 +1154,7 @@ func (s *runtimeSupervisor) handleTaskWake(ctx context.Context) {
 	s.ensureLoopState()
 	runs, err := s.sessionService.ListRunsByStatus(ctx, []string{types.RunStatusRunning})
 	if err != nil {
-		log.Printf("daemon: runtime supervisor wake scan failed: %v", err)
+		slog.Warn("runtime supervisor wake scan failed", "component", "supervisor", "error", err)
 		return
 	}
 	const maxWakeScanSize = 50
@@ -1174,7 +1174,7 @@ func (s *runtimeSupervisor) handleTaskWake(ctx context.Context) {
 		}
 		sess, lerr := s.loadSessionWithTimeout(ctx, strings.TrimSpace(run.SessionID))
 		if lerr != nil {
-			log.Printf("daemon: load session for wake spawn %s: %v", runID, lerr)
+			slog.Warn("load session for wake spawn", "component", "supervisor", "run_id", runID, "error", lerr)
 			continue
 		}
 		if err := s.handleSpawn(ctx, supervisorCmd{
@@ -1183,7 +1183,7 @@ func (s *runtimeSupervisor) handleTaskWake(ctx context.Context) {
 			sessionID: strings.TrimSpace(run.SessionID),
 			sess:      &sess,
 		}); err != nil {
-			log.Printf("daemon: wake spawn failed for %s: %v", runID, err)
+			slog.Error("wake spawn failed", "component", "supervisor", "run_id", runID, "error", err)
 		}
 	}
 }
@@ -1467,7 +1467,7 @@ func (s *runtimeSupervisor) buildSpawnRuntime(
 			}
 		}
 		if err := orderedEmitter.Emit(ctx, ev); err != nil && !errorsIsDropped(err) {
-			log.Printf("daemon: emit failed (%s): %v", strings.TrimSpace(run.RunID), err)
+			slog.Warn("emit failed", "component", "supervisor", "run_id", strings.TrimSpace(run.RunID), "error", err)
 		}
 	}
 
@@ -2007,7 +2007,7 @@ func (s *runtimeSupervisor) spawnManagedRun(parent context.Context, sess types.S
 		SingleTask:           isChildRun,
 		InstanceID:           run.RunID,
 		Logf: func(format string, args ...any) {
-			log.Printf("daemon [%s]: "+format, append([]any{run.RunID}, args...)...)
+			slog.Info(fmt.Sprintf(format, args...), "component", "supervisor", "run_id", run.RunID)
 		},
 	})
 	if err != nil {

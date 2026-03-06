@@ -30,3 +30,9 @@ required_packages = ["pandas", "requests"]
 [path_access]
 # allowlist = ["/home/user/shared", "/var/cache/build"]
 # read_only = true   # If true, only reads; if false, reads and writes
+
+# Daemon logging verbosity, format, and quiet mode.
+[logging]
+# level = "info"    # debug | info | warn | error
+# format = "auto"   # auto | text | json (auto = text on TTY, json otherwise)
+# quiet = false      # true = errors only + startup banner

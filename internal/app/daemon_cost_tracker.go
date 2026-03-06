@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -72,18 +72,18 @@ func (t *defaultCostTracker) emitUsage(step, input, output, total, reasoning int
 		return
 	}
 	// Use background context so usage events persist even if the run cancels.
-		t.emit(context.Background(), events.Event{
-			Type:    "llm.usage.total",
-			Message: "LLM usage totals",
-			Data: map[string]string{
-				"step":      strconv.Itoa(step),
-				"input":     strconv.Itoa(input),
-				"output":    strconv.Itoa(output),
-				"total":     strconv.Itoa(total),
-				"reasoning": strconv.Itoa(reasoning),
-			},
-		})
-	}
+	t.emit(context.Background(), events.Event{
+		Type:    "llm.usage.total",
+		Message: "LLM usage totals",
+		Data: map[string]string{
+			"step":      strconv.Itoa(step),
+			"input":     strconv.Itoa(input),
+			"output":    strconv.Itoa(output),
+			"total":     strconv.Itoa(total),
+			"reasoning": strconv.Itoa(reasoning),
+		},
+	})
+}
 
 func (t *defaultCostTracker) emitCost(costUSD float64, known bool) {
 	if t == nil || t.emit == nil {
@@ -137,7 +137,7 @@ func (t *defaultCostTracker) Track(step int, usage llmtypes.LLMUsage) {
 		t.run.CostUSD += costUSD
 	}
 	if err := t.sessionStore.SaveRun(context.Background(), t.run); err != nil {
-		log.Printf("daemon: warning: failed to save run: %v", err)
+		slog.Warn("failed to save run", "component", "cost", "run_id", t.run.RunID, "error", err)
 		if t.emit != nil {
 			t.emit(context.Background(), events.Event{
 				Type:    "daemon.warning",
@@ -163,7 +163,7 @@ func (t *defaultCostTracker) Track(step int, usage llmtypes.LLMUsage) {
 			t.session.CostUSD += costUSD
 		}
 		if err := t.sessionStore.SaveSession(context.Background(), t.session); err != nil {
-			log.Printf("daemon: warning: failed to save session: %v", err)
+			slog.Warn("failed to save session", "component", "cost", "session_id", t.run.SessionID, "error", err)
 			if t.emit != nil {
 				t.emit(context.Background(), events.Event{
 					Type:    "daemon.warning",

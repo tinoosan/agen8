@@ -1,55 +1,107 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useActivity } from '../hooks/useActivity'
 import type { ActivityEvent } from '../lib/types'
+import { ChevronRight, Activity } from 'lucide-react'
 
 interface ActivityFeedProps {
+  threadId: string | null
   teamId: string
+}
+
+const typeColors: Record<string, string> = {
+  error: 'var(--red)',
+  fail: 'var(--red)',
+  done: 'var(--green)',
+  complete: 'var(--green)',
+  start: 'var(--accent)',
+  tool: 'var(--amber)',
+}
+
+function getTypeColor(type: string): string {
+  const lower = type.toLowerCase()
+  for (const [key, color] of Object.entries(typeColors)) {
+    if (lower.includes(key)) return color
+  }
+  return 'var(--text-3)'
 }
 
 function EventRow({ event }: { event: ActivityEvent }) {
   const [expanded, setExpanded] = useState(false)
+  const typeColor = event.kind ? getTypeColor(event.kind) : 'var(--text-3)'
+  const role = event.data?.role || event.data?.agent_role
+  const summary = event.title || event.outputPreview || event.textPreview || event.path || event.kind
+  const detail = [event.textPreview, event.outputPreview, event.error].filter(Boolean).join('\n\n')
 
   return (
     <div
-      style={{ padding: '4px 0', borderBottom: '1px solid light-dark(rgba(0,0,0,0.05), rgba(255,255,255,0.05))', cursor: event.detail ? 'pointer' : 'default' }}
-      onClick={() => event.detail && setExpanded(e => !e)}
+      className="row-hover"
+      style={{
+        padding: '5px 4px',
+        cursor: detail ? 'pointer' : 'default',
+        marginBottom: 1,
+      }}
+      onClick={() => detail && setExpanded(e => !e)}
     >
-      <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-        {event.role && (
-          <span style={{ fontSize: 10, fontWeight: 700, opacity: 0.5, flexShrink: 0 }}>
-            {event.role}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        {detail ? (
+          <span style={{ color: 'var(--text-3)', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+            <ChevronRight
+              size={10}
+              style={{
+                transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                transition: 'transform 0.15s',
+              }}
+            />
+          </span>
+        ) : (
+          <span style={{ width: 10, flexShrink: 0 }} />
+        )}
+        {role && (
+          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-2)', flexShrink: 0 }}>
+            {role}
           </span>
         )}
-        {event.type && (
-          <span style={{ fontSize: 10, opacity: 0.4, fontFamily: 'monospace', flexShrink: 0 }}>
-            {event.type}
+        {event.kind && (
+          <span style={{
+            fontSize: 9, color: typeColor, flexShrink: 0,
+            fontWeight: 500, letterSpacing: '0.03em', textTransform: 'uppercase',
+          }}>
+            {event.kind}
           </span>
         )}
-        <span style={{ fontSize: 11, opacity: 0.7, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-          {event.summary}
+        <span className="truncate" style={{ fontSize: 11, color: 'var(--text-2)', flex: 1 }}>
+          {summary}
         </span>
       </div>
-      {expanded && event.detail && (
-        <div style={{
-          marginTop: 4, padding: '6px 8px',
-          background: 'light-dark(rgba(0,0,0,0.04), rgba(255,255,255,0.04))',
-          borderRadius: 6,
-          fontSize: 10, fontFamily: 'monospace', opacity: 0.7,
+      {expanded && detail && (
+        <div className="mono" style={{
+          marginTop: 5, marginLeft: 16, padding: '6px 8px',
+          background: 'var(--bg-elevated)',
+          borderRadius: 'var(--r-md)',
+          border: '1px solid var(--border)',
+          fontSize: 10, color: 'var(--text-2)',
           whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-          maxHeight: 200, overflow: 'auto',
+          maxHeight: 180, overflow: 'auto',
+          lineHeight: 1.6,
         }}>
-          {event.detail}
+          {detail}
         </div>
       )}
     </div>
   )
 }
 
-export default function ActivityFeed({ teamId }: ActivityFeedProps) {
-  const query = useActivity(teamId)
+export default function ActivityFeed({ threadId, teamId }: ActivityFeedProps) {
+  const query = useActivity({ threadId, teamId, includeChildRuns: true, limit: 100 })
   const containerRef = useRef<HTMLDivElement>(null)
   const events = query.data ?? []
   const recent = events.slice(-50)
+
+  // Auto-scroll to latest event
+  useEffect(() => {
+    const el = containerRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [recent.length])
 
   return (
     <div
@@ -57,9 +109,15 @@ export default function ActivityFeed({ teamId }: ActivityFeedProps) {
       style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}
     >
       {recent.length === 0 ? (
-        <div style={{ fontSize: 11, opacity: 0.35, padding: '8px 0' }}>No activity yet</div>
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          padding: '20px 8px', gap: 6, textAlign: 'center',
+        }}>
+          <Activity size={16} style={{ color: 'var(--text-3)' }} />
+          <div style={{ fontSize: 11, color: 'var(--text-3)' }}>No activity yet</div>
+        </div>
       ) : (
-        recent.map((event, i) => <EventRow key={event.seq ?? i} event={event} />)
+        recent.map((event) => <EventRow key={event.id} event={event} />)
       )}
     </div>
   )

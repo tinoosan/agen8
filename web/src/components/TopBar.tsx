@@ -1,13 +1,17 @@
 import { useStore } from '../lib/store'
 import { useProjectTeams } from '../hooks/useProjectTeams'
 import { useTeamStatus } from '../hooks/useTeamStatus'
-import { Settings, Search } from 'lucide-react'
+import { Search, ChevronLeft, Zap } from 'lucide-react'
 
 function TotalCost({ teamIds }: { teamIds: string[] }) {
   const statuses = teamIds.map(id => useTeamStatus(id))
   const total = statuses.reduce((sum, s) => sum + (s.data?.totalCostUSD ?? 0), 0)
   if (total === 0) return null
-  return <span style={{ fontSize: 13, color: 'light-dark(#71717a, #a1a1aa)' }}>${total.toFixed(2)}</span>
+  return (
+    <span style={{ fontSize: 12, color: 'var(--text-3)', letterSpacing: '-0.01em', fontVariantNumeric: 'tabular-nums' }}>
+      ${total.toFixed(2)}
+    </span>
+  )
 }
 
 function ActiveCount({ teamIds }: { teamIds: string[] }) {
@@ -15,11 +19,7 @@ function ActiveCount({ teamIds }: { teamIds: string[] }) {
   const active = statuses.filter(s => (s.data?.active ?? 0) > 0).length
   if (active === 0) return null
   return (
-    <span style={{
-      fontSize: 12, fontWeight: 600,
-      background: 'rgba(34,197,94,0.15)', color: '#22c55e',
-      borderRadius: 999, padding: '2px 8px',
-    }}>
+    <span className="badge badge-green" style={{ fontSize: 11, fontWeight: 500, padding: '2px 8px' }}>
       {active} active
     </span>
   )
@@ -34,50 +34,68 @@ export default function TopBar() {
   return (
     <header style={{
       height: 48,
-      display: 'flex', alignItems: 'center', gap: 12,
+      display: 'flex', alignItems: 'center', gap: 10,
       padding: '0 16px',
-      borderBottom: '1px solid light-dark(rgba(0,0,0,0.08), rgba(255,255,255,0.08))',
-      background: 'light-dark(rgba(255,255,255,0.8), rgba(15,15,16,0.8))',
-      backdropFilter: 'blur(12px)',
-      WebkitBackdropFilter: 'blur(12px)',
+      borderBottom: '1px solid var(--border)',
+      background: 'rgba(12,12,15,0.92)',
+      backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)',
       position: 'relative', zIndex: 10,
       flexShrink: 0,
     }}>
       {focusedTeamId ? (
         <button
+          className="btn-ghost"
           onClick={() => setFocusedTeamId(null)}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: 6, fontSize: 13, color: 'inherit', opacity: 0.6 }}
+          style={{ gap: 5, padding: '5px 10px', fontSize: 13, color: 'var(--text-2)' }}
         >
-          ← Teams
+          <ChevronLeft size={14} />
+          <span>Teams</span>
         </button>
       ) : (
-        <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em' }}>agen8</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{
+            width: 24, height: 24, borderRadius: 7,
+            background: 'linear-gradient(135deg, #8b7bf8, #6366f1)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Zap size={13} color="#fff" fill="#fff" strokeWidth={0} />
+          </div>
+          <span style={{
+            fontWeight: 600, fontSize: 15,
+            letterSpacing: '-0.03em',
+            color: 'var(--text-1)',
+          }}>agen8</span>
+        </div>
       )}
 
       <div style={{ flex: 1 }} />
 
       {teamIds.length > 0 && (
-        <>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <ActiveCount teamIds={teamIds} />
           <TotalCost teamIds={teamIds} />
-        </>
+        </div>
       )}
 
+      {/* Divider */}
+      <div style={{ width: 1, height: 18, background: 'var(--border-strong)', margin: '0 2px' }} />
+
       <button
+        className="btn-surface"
         onClick={() => setPaletteOpen(true)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '4px 10px', borderRadius: 8, border: '1px solid light-dark(rgba(0,0,0,0.1), rgba(255,255,255,0.1))',
-          background: 'light-dark(rgba(0,0,0,0.04), rgba(255,255,255,0.04))',
-          cursor: 'pointer', fontSize: 12, color: 'inherit', opacity: 0.7,
-        }}
+        style={{ padding: '5px 10px', gap: 7 }}
       >
         <Search size={12} />
-        <span>⌘K</span>
-      </button>
-
-      <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 6, opacity: 0.6, color: 'inherit' }}>
-        <Settings size={16} />
+        <span style={{ fontSize: 12 }}>Search</span>
+        <kbd style={{
+          fontSize: 10, fontFamily: 'inherit',
+          background: 'var(--bg-app)', color: 'var(--text-3)',
+          padding: '1px 5px', borderRadius: 4,
+          border: '1px solid var(--border)',
+          lineHeight: 1.5,
+        }}>⌘K</kbd>
       </button>
     </header>
   )

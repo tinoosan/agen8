@@ -4,44 +4,73 @@ import { rpcCall, onNotification } from '../lib/rpc'
 import type { ActivityEvent } from '../lib/types'
 
 interface ActivityListResult {
-  events: ActivityEvent[]
+  activities: ActivityEvent[]
+  totalCount?: number
+  nextOffset?: number
 }
 
-export function useActivity(teamId: string | null) {
+interface UseActivityOptions {
+  threadId: string | null
+  teamId?: string | null
+  includeChildRuns?: boolean
+  limit?: number
+}
+
+export function useActivity({ threadId, teamId, includeChildRuns = true, limit = 200 }: UseActivityOptions) {
   const queryClient = useQueryClient()
-  const key = ['activity.list', teamId]
+  const key = ['activity.list', threadId, teamId ?? null, includeChildRuns, limit]
 
   const query = useQuery<ActivityEvent[]>({
     queryKey: key,
     queryFn: async () => {
-      const res = await rpcCall<ActivityListResult>('activity.list', {
-        teamId,
-        limit: 100,
-      })
-      return res.events ?? []
+      const all: ActivityEvent[] = []
+      const seen = new Set<string>()
+      let offset = 0
+      let remaining = Math.max(limit, 1)
+
+      while (remaining > 0) {
+        const pageSize = Math.min(remaining, 500)
+        const res = await rpcCall<ActivityListResult>('activity.list', {
+          threadId,
+          teamId: teamId ?? undefined,
+          includeChildRuns,
+          limit: pageSize,
+          offset,
+          sortDesc: false,
+        })
+        const page = res.activities ?? []
+        for (const activity of page) {
+          if (!activity.id || seen.has(activity.id)) continue
+          seen.add(activity.id)
+          all.push(activity)
+        }
+        if (!res.nextOffset || page.length === 0 || res.nextOffset <= offset) {
+          break
+        }
+        remaining -= page.length
+        offset = res.nextOffset
+      }
+
+      return all
     },
-    enabled: !!teamId,
-    staleTime: Infinity,
+    enabled: !!threadId,
+    refetchInterval: 1500,
+    staleTime: 1000,
     retry: false,
   })
 
   useEffect(() => {
-    if (!teamId) return
+    if (!threadId) return
 
     const unsub = onNotification('event.append', (notif) => {
-      const params = notif.params as { event?: ActivityEvent; teamId?: string } | undefined
-      if (!params?.event) return
-      if (params.teamId && params.teamId !== teamId) return
-
-      queryClient.setQueryData<ActivityEvent[]>(key, (prev) => {
-        const next = [...(prev ?? []), params.event!]
-        // Keep last 200 events
-        return next.length > 200 ? next.slice(next.length - 200) : next
-      })
+      const params = notif.params as { event?: { runId?: string } } | undefined
+      const runId = params?.event?.runId
+      if (!runId) return
+      queryClient.invalidateQueries({ queryKey: key })
     })
 
     return unsub
-  }, [teamId, queryClient])
+  }, [threadId, queryClient, key])
 
   return query
 }
