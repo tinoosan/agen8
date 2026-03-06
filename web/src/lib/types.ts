@@ -134,6 +134,7 @@ export interface Task {
   teamId?: string
   runId?: string
   assignedRole?: string
+  roleSnapshot?: string
   assignedTo?: string
   assignedToType?: string
   claimedByAgentId?: string
