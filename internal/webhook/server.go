@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -84,7 +84,7 @@ func (s *Server) Run(ctx context.Context, wg *sync.WaitGroup) {
 					Data:    map[string]string{"error": err.Error()},
 				})
 			} else {
-				log.Printf("daemon: webhook server error: %v", err)
+				slog.Error("webhook server error", "component", "webhook", "error", err.Error())
 			}
 		}
 	}()

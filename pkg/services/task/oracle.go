@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -17,7 +17,7 @@ var warnLegacyTeamFallbackOnce sync.Once
 
 const routingVersion = 1
 
-var ErrRoutingCallbackMissingTeamID = errors.New("routing.violation: callback task missing teamId")
+var ErrRoutingCallbackMissingTeamID = errors.New("routing.violation: callback task missing destinationTeamId")
 
 // RoutingOracle validates and canonicalizes task routing before persistence.
 type RoutingOracle struct{}
@@ -52,7 +52,7 @@ func (o *RoutingOracle) RepairTask(ctx context.Context, loader RunLoader, task t
 func (o *RoutingOracle) normalize(ctx context.Context, loader RunLoader, task types.Task) (types.Task, error) {
 	task.TaskID = strings.TrimSpace(task.TaskID)
 	task.RunID = strings.TrimSpace(task.RunID)
-	task.TeamID = strings.TrimSpace(task.TeamID)
+	task.NormalizeTeamFields()
 	task.AssignedToType = strings.TrimSpace(task.AssignedToType)
 	task.AssignedTo = strings.TrimSpace(task.AssignedTo)
 	task.AssignedRole = strings.TrimSpace(task.AssignedRole)
@@ -68,17 +68,21 @@ func (o *RoutingOracle) normalize(ctx context.Context, loader RunLoader, task ty
 	callback := isCallbackSource(source)
 
 	// Team resolution for callbacks: infer team from run when possible.
-	if callback && task.TeamID == "" && loader != nil && task.RunID != "" {
+	if callback && task.DestinationTeamID == "" && loader != nil && task.RunID != "" {
 		run, err := loader.LoadRun(ctx, task.RunID)
 		if err == nil && run.Runtime != nil {
-			task.TeamID = strings.TrimSpace(run.Runtime.TeamID)
+			task.DestinationTeamID = strings.TrimSpace(run.Runtime.TeamID)
 		}
 	}
-	if callback && task.TeamID == "" {
-		return task, fmt.Errorf("routing.violation: callback task %s missing teamId: %w", task.TaskID, ErrRoutingCallbackMissingTeamID)
+	if callback && task.DestinationTeamID == "" {
+		return task, fmt.Errorf("routing.violation: callback task %s missing destinationTeamId: %w", task.TaskID, ErrRoutingCallbackMissingTeamID)
 	}
+	if task.SourceTeamID == "" && task.DestinationTeamID != "" {
+		task.SourceTeamID = task.DestinationTeamID
+	}
+	task.TeamID = task.DestinationTeamID
 
-	if task.TeamID != "" {
+	if task.DestinationTeamID != "" {
 		if task.AssignedToType == "" {
 			if task.AssignedRole != "" {
 				task.AssignedToType = "role"
@@ -87,7 +91,7 @@ func (o *RoutingOracle) normalize(ctx context.Context, loader RunLoader, task ty
 				task.AssignedToType = "agent"
 			} else if legacyTeamFallbackEnabled() {
 				task.AssignedToType = "team"
-				task.AssignedTo = task.TeamID
+				task.AssignedTo = task.DestinationTeamID
 			} else {
 				return task, fmt.Errorf("routing.violation: team task %s missing assignee route", task.TaskID)
 			}
@@ -109,14 +113,14 @@ func (o *RoutingOracle) normalize(ctx context.Context, loader RunLoader, task ty
 			}
 		case "team":
 			if task.AssignedTo == "" {
-				task.AssignedTo = task.TeamID
+				task.AssignedTo = task.DestinationTeamID
 			}
 		default:
 			return task, fmt.Errorf("routing.violation: task %s has invalid assignedToType %q", task.TaskID, task.AssignedToType)
 		}
 	} else {
 		if callback {
-			return task, fmt.Errorf("routing.violation: callback task %s missing teamId: %w", task.TaskID, ErrRoutingCallbackMissingTeamID)
+			return task, fmt.Errorf("routing.violation: callback task %s missing destinationTeamId: %w", task.TaskID, ErrRoutingCallbackMissingTeamID)
 		}
 		if task.AssignedToType == "" {
 			task.AssignedToType = "agent"
@@ -128,7 +132,7 @@ func (o *RoutingOracle) normalize(ctx context.Context, loader RunLoader, task ty
 
 	task.Metadata["routingVersion"] = float64(routingVersion)
 	task.Metadata["routingDecisionId"] = "route-" + uuid.NewString()
-	task.Metadata["routingReasonCode"] = routingReasonCode(callback, task.TeamID, task.AssignedToType)
+	task.Metadata["routingReasonCode"] = routingReasonCode(callback, task.DestinationTeamID, task.AssignedToType)
 	task.Metadata["routingRecipients"] = []string{task.AssignedToType + ":" + task.AssignedTo}
 	task.Metadata["routingScopes"] = routingScopes(task)
 	return task, nil
@@ -139,7 +143,7 @@ func legacyTeamFallbackEnabled() bool {
 	enabled := raw == "1" || raw == "true" || raw == "yes" || raw == "on"
 	if enabled {
 		warnLegacyTeamFallbackOnce.Do(func() {
-			log.Printf("task routing: AGEN8_LEGACY_TEAM_FALLBACK is enabled; implicit team fallback remains active and should be removed after compatibility window")
+			slog.Warn("AGEN8_LEGACY_TEAM_FALLBACK is enabled; implicit team fallback remains active", "component", "routing")
 		})
 	}
 	return enabled
@@ -157,7 +161,10 @@ func routingReasonCode(callback bool, teamID, assigneeType string) string {
 
 func routingScopes(task types.Task) []string {
 	out := []string{}
-	if task.TeamID != "" {
+	if task.SourceTeamID != "" {
+		out = append(out, "source_team")
+	}
+	if task.DestinationTeamID != "" {
 		out = append(out, "team")
 	}
 	if task.RunID != "" {
@@ -173,7 +180,8 @@ func routingScopes(task types.Task) []string {
 }
 
 func routingEquivalent(a, b types.Task) bool {
-	return strings.TrimSpace(a.TeamID) == strings.TrimSpace(b.TeamID) &&
+	return strings.TrimSpace(a.SourceTeamID) == strings.TrimSpace(b.SourceTeamID) &&
+		strings.TrimSpace(a.DestinationTeamID) == strings.TrimSpace(b.DestinationTeamID) &&
 		strings.TrimSpace(a.AssignedToType) == strings.TrimSpace(b.AssignedToType) &&
 		strings.TrimSpace(a.AssignedTo) == strings.TrimSpace(b.AssignedTo) &&
 		strings.TrimSpace(a.AssignedRole) == strings.TrimSpace(b.AssignedRole)

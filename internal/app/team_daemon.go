@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tinoosan/agen8/internal/daemonlog"
 	implstore "github.com/tinoosan/agen8/internal/store"
 	"github.com/tinoosan/agen8/internal/webhook"
 	"github.com/tinoosan/agen8/pkg/agent"
@@ -81,10 +82,10 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	if err != nil {
 		return fmt.Errorf("open daemon log file: %w", err)
 	}
-	prevLogWriter := log.Writer()
-	log.SetOutput(io.MultiWriter(os.Stderr, logFile))
+	prevHandler := slog.Default().Handler()
+	daemonlog.Init(io.MultiWriter(os.Stderr, logFile))
 	defer func() {
-		log.SetOutput(prevLogWriter)
+		slog.SetDefault(slog.New(prevHandler))
 		_ = logFile.Close()
 	}()
 
@@ -162,7 +163,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 	runCtx, stopSignals := signalNotifyContext(ctx)
 	defer stopSignals()
 	startCodeExecConfigReloader(runCtx, cfg, func(_ context.Context, ev events.Event) {
-		log.Printf("code_exec reload: type=%s message=%s data=%v", strings.TrimSpace(ev.Type), strings.TrimSpace(ev.Message), ev.Data)
+		slog.Info("code_exec reload", "component", "config", "type", strings.TrimSpace(ev.Type), "message", strings.TrimSpace(ev.Message))
 	})
 
 	go supervisor.Run(runCtx)
@@ -227,7 +228,7 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		srv := NewRPCServer(baseCfg)
 		go func() {
 			if err := srv.Serve(runCtx, os.Stdin, os.Stdout); err != nil && runCtx.Err() == nil {
-				log.Printf("daemon: team protocol server stopped: %v", err)
+				slog.Error("team protocol server stopped", "component", "protocol", "error", err)
 			}
 		}()
 		if err := serveRPCOverTCPWithBroadcaster(runCtx, strings.TrimSpace(resolved.RPCListen), eventBroadcaster, func(notifyCh <-chan protocol.Message) RPCServerConfig {
@@ -239,7 +240,15 @@ func runAsTeamInternal(ctx context.Context, cfg config.Config, prof *profile.Pro
 		}
 	}
 
-	log.Printf("daemon: protocol control-plane ready at %s — attach with: agen8", strings.TrimSpace(resolved.RPCListen))
+	slog.Info("daemon ready",
+		"component", "daemon",
+		"rpc_addr", strings.TrimSpace(resolved.RPCListen),
+		"log_file", daemonLogPath,
+		"attach", "agen8",
+	)
+	if !daemonlog.IsQuiet() {
+		fmt.Fprintf(os.Stderr, "\nagen8 daemon ready\n  rpc:    %s\n  logs:   %s\n  attach: agen8\n\n", strings.TrimSpace(resolved.RPCListen), daemonLogPath)
+	}
 
 	<-runCtx.Done()
 	serverWG.Wait()

@@ -7,7 +7,7 @@ import (
 	"context"
 	"embed"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -66,7 +66,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("agen8 web UI: http://%s  (daemon RPC: %s)", ln.Addr(), rpc)
+	slog.Info("web UI started", "component", "web", "addr", ln.Addr().String(), "rpc_endpoint", rpc)
 
 	srv := &http.Server{Handler: mux}
 	go func() {

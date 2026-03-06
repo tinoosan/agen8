@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -178,6 +178,8 @@ func protocolTaskFromTypesTask(t types.Task) protocol.Task {
 		ID:                strings.TrimSpace(t.TaskID),
 		ThreadID:          protocol.ThreadID(strings.TrimSpace(t.SessionID)),
 		RunID:             protocol.RunID(strings.TrimSpace(t.RunID)),
+		SourceTeamID:      strings.TrimSpace(t.SourceTeamID),
+		DestinationTeamID: strings.TrimSpace(t.DestinationTeamID),
 		TeamID:            strings.TrimSpace(t.TeamID),
 		Source:            source,
 		BatchMode:         batchMode,
@@ -779,7 +781,7 @@ func legacyTeamFallbackEnabled() bool {
 	enabled := raw == "1" || raw == "true" || raw == "yes" || raw == "on"
 	if enabled {
 		warnLegacyTeamFallbackOnce.Do(func() {
-			log.Printf("rpc: AGEN8_LEGACY_TEAM_FALLBACK is enabled; implicit team fallback remains active and should be removed after compatibility window")
+			slog.Warn("AGEN8_LEGACY_TEAM_FALLBACK is enabled; implicit team fallback remains active and should be removed after compatibility window", "component", "rpc")
 		})
 	}
 	return enabled
@@ -824,8 +826,22 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 	assignedTo := strings.TrimSpace(p.AssignedTo)
 	assignedRole := strings.TrimSpace(p.AssignedRole)
 	teamScope := strings.TrimSpace(scope.teamID) != ""
+	sourceTeamID := strings.TrimSpace(p.SourceTeamID)
+	destinationTeamID := strings.TrimSpace(p.DestinationTeamID)
+	if destinationTeamID == "" {
+		destinationTeamID = strings.TrimSpace(p.TeamID)
+	}
+	if sourceTeamID == "" && teamScope {
+		sourceTeamID = strings.TrimSpace(scope.teamID)
+	}
+	if destinationTeamID == "" && teamScope {
+		destinationTeamID = strings.TrimSpace(scope.teamID)
+	}
+	if sourceTeamID == "" && destinationTeamID != "" {
+		sourceTeamID = destinationTeamID
+	}
 	if assignedToType == "" {
-		if teamScope {
+		if destinationTeamID != "" {
 			if assignedRole != "" {
 				assignedToType = "role"
 				assignedTo = assignedRole
@@ -835,7 +851,7 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 				assignedTo = derivedRole
 			} else if legacyTeamFallbackEnabled() {
 				assignedToType = "team"
-				assignedTo = scope.teamID
+				assignedTo = destinationTeamID
 			} else {
 				return protocol.TaskCreateResult{}, &protocol.ProtocolError{
 					Code:    protocol.CodeInvalidParams,
@@ -850,10 +866,10 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 	if assignedTo == "" {
 		switch assignedToType {
 		case "team":
-			if !teamScope {
-				return protocol.TaskCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "assignedToType=team requires team scope"}
+			if destinationTeamID == "" {
+				return protocol.TaskCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "assignedToType=team requires destinationTeamId"}
 			}
-			assignedTo = scope.teamID
+			assignedTo = destinationTeamID
 		case "role":
 			if assignedRole == "" && teamScope {
 				assignedRole = s.deriveDefaultTeamRole(ctx, scope)
@@ -884,21 +900,23 @@ func (s *RPCServer) taskCreate(ctx context.Context, p protocol.TaskCreateParams)
 		return protocol.TaskCreateResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "threadId is required"}
 	}
 	task := types.Task{
-		TaskID:         taskID,
-		SessionID:      sessionID,
-		RunID:          taskRunID,
-		TeamID:         strings.TrimSpace(scope.teamID),
-		AssignedRole:   assignedRole,
-		AssignedToType: assignedToType,
-		AssignedTo:     assignedTo,
-		TaskKind:       strings.TrimSpace(p.TaskKind),
-		Goal:           goal,
-		Priority:       p.Priority,
-		Status:         types.TaskStatusPending,
-		CreatedAt:      &now,
-		Inputs:         map[string]any{},
-		Metadata:       map[string]any{"source": "rpc.task.create"},
-		CreatedBy:      "monitor",
+		TaskID:            taskID,
+		SessionID:         sessionID,
+		RunID:             taskRunID,
+		SourceTeamID:      sourceTeamID,
+		DestinationTeamID: destinationTeamID,
+		TeamID:            destinationTeamID,
+		AssignedRole:      assignedRole,
+		AssignedToType:    assignedToType,
+		AssignedTo:        assignedTo,
+		TaskKind:          strings.TrimSpace(p.TaskKind),
+		Goal:              goal,
+		Priority:          p.Priority,
+		Status:            types.TaskStatusPending,
+		CreatedAt:         &now,
+		Inputs:            map[string]any{},
+		Metadata:          map[string]any{"source": "rpc.task.create"},
+		CreatedBy:         "monitor",
 	}
 	if task.Priority == 0 {
 		task.Priority = 5

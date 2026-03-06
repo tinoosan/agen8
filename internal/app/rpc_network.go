@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"strings"
 
@@ -38,7 +38,7 @@ func serveRPCOverTCPWithBroadcaster(ctx context.Context, addr string, broadcaste
 				if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 					return
 				}
-				log.Printf("daemon: rpc accept error: %v", err)
+				slog.Error("rpc accept error", "component", "rpc", "error", err)
 				continue
 			}
 			go func(c net.Conn) {
@@ -58,7 +58,7 @@ func serveRPCOverTCPWithBroadcaster(ctx context.Context, addr string, broadcaste
 				cfg := configForNotifyCh(notifyCh)
 				srv := NewRPCServer(cfg)
 				if err := srv.Serve(ctx, c, c); err != nil && ctx.Err() == nil {
-					log.Printf("daemon: rpc connection closed: %v", err)
+					slog.Error("rpc connection closed", "component", "rpc", "error", err)
 				}
 			}(conn)
 		}

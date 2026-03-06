@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math"
 	"net"
 	"os"
@@ -3546,9 +3546,9 @@ func TestRPCServer_LogsRequestAndResponseSummary(t *testing.T) {
 	})
 
 	var logs bytes.Buffer
-	prev := log.Writer()
-	log.SetOutput(&logs)
-	defer log.SetOutput(prev)
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
 
 	req, _ := protocol.NewRequest("1", protocol.MethodThreadGet, protocol.ThreadGetParams{ThreadID: protocol.ThreadID(run.SessionID)})
 	_ = rpcRoundTrip(t, srv, req)

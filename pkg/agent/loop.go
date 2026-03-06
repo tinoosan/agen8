@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -589,7 +589,7 @@ func messagesEqual(a, b llmtypes.LLMMessage) bool {
 func marshalHostResponseJSON(hostResp types.HostOpResponse) string {
 	hostRespJSON, err := types.MarshalPretty(hostResp)
 	if err != nil {
-		log.Printf("agent: marshal host response: %v", err)
+		slog.Error("marshal host response", "component", "agent", "error", err)
 		return hostResponseMarshalFallback
 	}
 	return string(hostRespJSON)

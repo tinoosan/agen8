@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"strings"
 	"sync"
@@ -473,7 +473,7 @@ func (s *RPCServer) logRequestSummary(msg protocol.Message) {
 	if msg.ID != nil {
 		id = strings.TrimSpace(*msg.ID)
 	}
-	log.Printf("rpc.request id=%q jsonrpc=%q method=%q params_bytes=%d", id, strings.TrimSpace(msg.JSONRPC), method, len(msg.Params))
+	slog.Debug("rpc.request", "component", "rpc", "id", id, "jsonrpc", strings.TrimSpace(msg.JSONRPC), "method", method, "params_bytes", len(msg.Params))
 }
 
 func (s *RPCServer) logResponseSummary(msg protocol.Message) {
@@ -482,10 +482,10 @@ func (s *RPCServer) logResponseSummary(msg protocol.Message) {
 		id = strings.TrimSpace(*msg.ID)
 	}
 	if msg.Error != nil {
-		log.Printf("rpc.response id=%q error_code=%d error_message=%q", id, msg.Error.Code, strings.TrimSpace(msg.Error.Message))
+		slog.Debug("rpc.response", "component", "rpc", "id", id, "error_code", msg.Error.Code, "error_message", strings.TrimSpace(msg.Error.Message))
 		return
 	}
-	log.Printf("rpc.response id=%q ok result_bytes=%d", id, len(msg.Result))
+	slog.Debug("rpc.response", "component", "rpc", "id", id, "ok", true, "result_bytes", len(msg.Result))
 }
 
 func (s *RPCServer) logNotificationSummary(msg protocol.Message) {
@@ -493,7 +493,7 @@ func (s *RPCServer) logNotificationSummary(msg protocol.Message) {
 	if method == "" {
 		return
 	}
-	log.Printf("rpc.notify method=%q params_bytes=%d", method, len(msg.Params))
+	slog.Debug("rpc.notify", "component", "rpc", "method", method, "params_bytes", len(msg.Params))
 }
 
 func (s *RPCServer) resolveThreadID(threadID protocol.ThreadID) (string, error) {

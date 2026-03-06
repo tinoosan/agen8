@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/tinoosan/agen8/internal/daemonlog"
 	authpkg "github.com/tinoosan/agen8/pkg/auth"
 	"github.com/tinoosan/agen8/pkg/config"
 )
@@ -25,6 +26,7 @@ type runtimeConfig struct {
 	CodeExec   runtimeConfigCodeExec
 	PathAccess runtimeConfigPathAccess
 	Obsidian   runtimeConfigObsidian
+	Logging    runtimeConfigLogging
 }
 
 type runtimeConfigDefaults struct {
@@ -56,6 +58,12 @@ type runtimeConfigObsidian struct {
 	VaultPath string
 }
 
+type runtimeConfigLogging struct {
+	Level  string
+	Format string
+	Quiet  bool
+}
+
 type runtimeConfigFile struct {
 	Defaults   runtimeConfigDefaultsFile   `toml:"defaults"`
 	Env        map[string]string           `toml:"env"`
@@ -64,6 +72,7 @@ type runtimeConfigFile struct {
 	CodeExec   runtimeConfigCodeExecFile   `toml:"code_exec"`
 	PathAccess runtimeConfigPathAccessFile `toml:"path_access"`
 	Obsidian   runtimeConfigObsidianFile   `toml:"obsidian"`
+	Logging    runtimeConfigLoggingFile    `toml:"logging"`
 }
 
 type runtimeConfigDefaultsFile struct {
@@ -93,6 +102,12 @@ type runtimeConfigPathAccessFile struct {
 
 type runtimeConfigObsidianFile struct {
 	VaultPath string `toml:"vault_path"`
+}
+
+type runtimeConfigLoggingFile struct {
+	Level  string `toml:"level"`
+	Format string `toml:"format"`
+	Quiet  *bool  `toml:"quiet"`
 }
 
 func loadRuntimeConfig(dataDir string) (runtimeConfig, error) {
@@ -188,6 +203,11 @@ model = "`+runtimeDefaultModel+`"
 
 [obsidian]
 # vault_path = ""
+
+[logging]
+# level = "info"    # debug | info | warn | error
+# format = "auto"   # auto | text | json (auto = text on TTY, json otherwise)
+# quiet = false      # true = errors only + startup banner
 `) + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
@@ -266,6 +286,11 @@ func decodeRuntimeConfigFile(path string) (runtimeConfig, bool, error) {
 		},
 		Obsidian: runtimeConfigObsidian{
 			VaultPath: strings.TrimSpace(raw.Obsidian.VaultPath),
+		},
+		Logging: runtimeConfigLogging{
+			Level:  strings.ToLower(strings.TrimSpace(raw.Logging.Level)),
+			Format: strings.ToLower(strings.TrimSpace(raw.Logging.Format)),
+			Quiet:  raw.Logging.Quiet != nil && *raw.Logging.Quiet,
 		},
 	}
 	for k, v := range raw.Env {
@@ -373,6 +398,15 @@ func mergeRuntimeConfig(base, override runtimeConfig) runtimeConfig {
 	if vaultPath := strings.TrimSpace(override.Obsidian.VaultPath); vaultPath != "" {
 		out.Obsidian.VaultPath = vaultPath
 	}
+	if lvl := strings.TrimSpace(override.Logging.Level); lvl != "" {
+		out.Logging.Level = lvl
+	}
+	if fmt := strings.TrimSpace(override.Logging.Format); fmt != "" {
+		out.Logging.Format = fmt
+	}
+	if override.Logging.Quiet {
+		out.Logging.Quiet = true
+	}
 	return out
 }
 
@@ -408,6 +442,11 @@ func applyRuntimeConfigEnvDefaults(cfg runtimeConfig) {
 	}
 	setEnvIfUnset("OBSIDIAN_VAULT_PATH", cfg.Obsidian.VaultPath)
 	setEnvIfUnset(envSkillsSeedConflict, normalizeSkillsConflict(cfg.Skills.Conflict))
+	setEnvIfUnset(daemonlog.EnvLogLevel, cfg.Logging.Level)
+	setEnvIfUnset(daemonlog.EnvLogFormat, cfg.Logging.Format)
+	if cfg.Logging.Quiet {
+		setEnvIfUnset(daemonlog.EnvQuiet, "1")
+	}
 }
 
 func setEnvIfUnset(key, value string) {
