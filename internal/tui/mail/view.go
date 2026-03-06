@@ -3,23 +3,19 @@ package mail
 import (
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wordwrap"
+	tuishared "github.com/tinoosan/agen8/internal/tui"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 )
 
 var (
-	styleAccent  = lipgloss.NewStyle().Foreground(kit.BorderColorAccent)
-	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#eaeaea"))
-	styleSection = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#9ad0ff"))
-
-	detailMDMu       sync.Mutex
-	detailMDByWidth  = map[int]*glamour.TermRenderer{}
-	detailMDFallback = lipgloss.NewStyle()
+	styleAccent    = lipgloss.NewStyle().Foreground(kit.BorderColorAccent)
+	styleHeader    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#eaeaea"))
+	styleSection   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#9ad0ff"))
+	detailRenderer = tuishared.NewContentRenderer()
 )
 
 const (
@@ -556,37 +552,9 @@ func renderDetailMarkdown(md string, width int) string {
 	if md == "" {
 		return ""
 	}
-	if width <= 0 {
-		width = 40
+	rendered := strings.TrimRight(detailRenderer.RenderMarkdown(md, width), "\n")
+	if strings.TrimSpace(rendered) == "" {
+		return wrapText(md, width)
 	}
-
-	r, err := detailMarkdownRenderer(width)
-	if err != nil {
-		return detailMDFallback.Render(wrapText(md, width))
-	}
-	out, err := r.Render(md)
-	if err != nil {
-		return detailMDFallback.Render(wrapText(md, width))
-	}
-	return strings.TrimRight(out, "\n")
-}
-
-func detailMarkdownRenderer(width int) (*glamour.TermRenderer, error) {
-	detailMDMu.Lock()
-	defer detailMDMu.Unlock()
-
-	if r, ok := detailMDByWidth[width]; ok {
-		return r, nil
-	}
-
-	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(width),
-		glamour.WithPreservedNewLines(),
-	)
-	if err != nil {
-		return nil, err
-	}
-	detailMDByWidth[width] = r
-	return r, nil
+	return rendered
 }

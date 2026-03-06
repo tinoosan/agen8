@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 )
 
@@ -32,17 +31,17 @@ func (m *monitorModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 
-	switch msg.String() {
-	case "tab", "right":
+	switch kit.PaletteActionFromKey(msg) {
+	case kit.PaletteKeyAutocomplete:
 		m.autocompleteCommand()
 		return nil, true
-	case "up", "ctrl+p":
-		m.commandPalette.Navigate(-1)
+	case kit.PaletteKeyMoveUp:
+		m.commandPalette.Move(-1, false)
 		return nil, true
-	case "down", "ctrl+n":
-		m.commandPalette.Navigate(1)
+	case kit.PaletteKeyMoveDown:
+		m.commandPalette.Move(1, false)
 		return nil, true
-	case "enter":
+	case kit.PaletteKeyAccept:
 		if len(m.commandPalette.Matches) == 0 {
 			return nil, true
 		}
@@ -53,14 +52,7 @@ func (m *monitorModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		selectedCmd := m.commandPalette.Matches[selected]
 
 		// Determine whether the user already typed anything beyond the first token.
-		inputValue := strings.TrimSpace(m.input.Value())
-		fields := strings.Fields(inputValue)
-		firstToken := ""
-		if len(fields) > 0 {
-			firstToken = fields[0]
-		}
-		rest := strings.TrimSpace(strings.TrimPrefix(inputValue, firstToken))
-		hasRest := rest != ""
+		hasRest := kit.AnalyzeCommandInput(m.input.Value()).HasRest
 
 		// If no args are present and the command is invokable, invoke immediately.
 		if !hasRest && monitorCommandInvokesWithoutArgs(selectedCmd) {
@@ -71,7 +63,7 @@ func (m *monitorModel) handleCommandPaletteKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 
 		m.autocompleteCommand()
 		return nil, true
-	case "esc", "escape":
+	case kit.PaletteKeyClose:
 		m.commandPalette.Reset()
 		return nil, true
 	}
@@ -100,33 +92,7 @@ func (m *monitorModel) renderCommandPalette(contentW int) string {
 	if selected >= len(items) {
 		selected = len(items) - 1
 	}
-
-	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6bbcff")).
-		Bold(true)
-	unselectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#c0c0c0"))
-
-	opts := kit.SelectorOptions{
-		Width:         paletteW,
-		MaxHeight:     maxDisplay,
-		SelectedIndex: selected,
-		ShowPrefix:    true,
-		Styles: kit.SelectorStyles{
-			SelectedTitle:   kit.CloneStyle(selectedStyle),
-			UnselectedTitle: kit.CloneStyle(unselectedStyle),
-		},
-	}
-
-	paletteContent := kit.RenderSelector(items, opts)
-
-	paletteStyle := lipgloss.NewStyle().
-		Width(paletteW).
-		Padding(0, 1).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#404040"))
-
-	return paletteStyle.Render(paletteContent)
+	return kit.RenderCommandPalette(paletteW, items, selected, maxDisplay)
 }
 
 // monitorCommandPaletteItem implements kit.Item for the command palette.

@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 
 	"github.com/tinoosan/agen8/pkg/config"
 	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/types"
+	"github.com/tinoosan/agen8/pkg/wake"
 )
 
 // RuntimeSupervisor defines the interface for managing agent runtimes.
@@ -45,16 +45,12 @@ type Manager struct {
 	cfg        config.Config
 	store      Store
 	supervisor RuntimeSupervisor
-
-	watchersMu  sync.Mutex
-	watchers    map[string]sessionWakeWatcher
-	nextWatchID uint64
+	watchers   *wake.SignalHub[sessionWakeFilter]
 }
 
-type sessionWakeWatcher struct {
+type sessionWakeFilter struct {
 	sessionID string
 	runID     string
-	ch        chan struct{}
 }
 
 // NewManager creates a new session service manager.
@@ -63,7 +59,7 @@ func NewManager(cfg config.Config, store Store, supervisor RuntimeSupervisor) *M
 		cfg:        cfg,
 		store:      store,
 		supervisor: supervisor,
-		watchers:   map[string]sessionWakeWatcher{},
+		watchers:   wake.NewSignalHub[sessionWakeFilter](),
 	}
 }
 
@@ -75,28 +71,10 @@ func (m *Manager) SubscribeWake(sessionID, runID string) (<-chan struct{}, func(
 		close(ch)
 		return ch, func() {}
 	}
-	w := sessionWakeWatcher{
+	return m.watchers.Subscribe(sessionWakeFilter{
 		sessionID: strings.TrimSpace(sessionID),
 		runID:     strings.TrimSpace(runID),
-		ch:        make(chan struct{}, 1),
-	}
-	m.watchersMu.Lock()
-	m.nextWatchID++
-	id := fmt.Sprintf("watch-%d", m.nextWatchID)
-	m.watchers[id] = w
-	m.watchersMu.Unlock()
-	cancel := func() {
-		m.watchersMu.Lock()
-		ww, ok := m.watchers[id]
-		if ok {
-			delete(m.watchers, id)
-		}
-		m.watchersMu.Unlock()
-		if ok {
-			close(ww.ch)
-		}
-	}
-	return w.ch, cancel
+	})
 }
 
 func (m *Manager) notifyWake(sessionID, runID string) {
@@ -105,20 +83,15 @@ func (m *Manager) notifyWake(sessionID, runID string) {
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	runID = strings.TrimSpace(runID)
-	m.watchersMu.Lock()
-	defer m.watchersMu.Unlock()
-	for _, w := range m.watchers {
-		if w.sessionID != "" && w.sessionID != sessionID {
-			continue
+	m.watchers.Notify(func(filter sessionWakeFilter) bool {
+		if filter.sessionID != "" && filter.sessionID != sessionID {
+			return false
 		}
-		if w.runID != "" && w.runID != runID {
-			continue
+		if filter.runID != "" && filter.runID != runID {
+			return false
 		}
-		select {
-		case w.ch <- struct{}{}:
-		default:
-		}
-	}
+		return true
+	})
 }
 
 // Start creates a new session and its first run, persists both, and links them.

@@ -82,36 +82,10 @@ func (c *RetryClient) Generate(ctx context.Context, req types.LLMRequest) (types
 	if c == nil || c.Wrapped == nil {
 		return types.LLMResponse{}, fmt.Errorf("retry client is nil")
 	}
-
-	cfg := c.Config.WithDefaults()
-	if cfg.MaxRetries == 0 {
-		return c.Wrapped.Generate(ctx, req)
-	}
-
-	for attempt := 0; ; attempt++ {
+	return c.runWithRetry(ctx, func() (types.LLMResponse, error, bool) {
 		resp, err := c.Wrapped.Generate(ctx, req)
-		if err == nil {
-			return resp, nil
-		}
-		info := ClassifyError(err)
-		if !info.Retryable || attempt >= cfg.MaxRetries {
-			return types.LLMResponse{}, err
-		}
-		delay := backoff(cfg.InitialDelay, cfg.Multiplier, cfg.MaxDelay, attempt+1)
-		if cfg.OnRetry != nil {
-			cfg.OnRetry(ctx, RetryAttemptInfo{
-				Class:      info.Class,
-				Attempt:    attempt + 1,
-				Delay:      delay,
-				StatusCode: info.StatusCode,
-				Code:       info.Code,
-				Message:    info.Message,
-			})
-		}
-		if err := sleep(ctx, delay); err != nil {
-			return types.LLMResponse{}, err
-		}
-	}
+		return resp, err, false
+	})
 }
 
 func (c *RetryClient) SupportsStreaming() bool {
@@ -133,12 +107,7 @@ func (c *RetryClient) GenerateStream(ctx context.Context, req types.LLMRequest, 
 		return types.LLMResponse{}, fmt.Errorf("LLM client does not implement streaming")
 	}
 
-	cfg := c.Config.WithDefaults()
-	if cfg.MaxRetries == 0 {
-		return streaming.GenerateStream(ctx, req, cb)
-	}
-
-	for attempt := 0; ; attempt++ {
+	return c.runWithRetry(ctx, func() (types.LLMResponse, error, bool) {
 		emitted := false
 		wrappedCb := func(chunk types.LLMStreamChunk) error {
 			if chunk.Text != "" || chunk.Done || chunk.IsReasoning {
@@ -149,8 +118,20 @@ func (c *RetryClient) GenerateStream(ctx context.Context, req types.LLMRequest, 
 			}
 			return nil
 		}
-
 		resp, err := streaming.GenerateStream(ctx, req, wrappedCb)
+		return resp, err, emitted
+	})
+}
+
+func (c *RetryClient) runWithRetry(ctx context.Context, call func() (types.LLMResponse, error, bool)) (types.LLMResponse, error) {
+	cfg := c.Config.WithDefaults()
+	if cfg.MaxRetries == 0 {
+		resp, err, _ := call()
+		return resp, err
+	}
+
+	for attempt := 0; ; attempt++ {
+		resp, err, emitted := call()
 		if err == nil {
 			return resp, nil
 		}
