@@ -4,7 +4,7 @@ import { useProjectTeams } from '../hooks/useProjectTeams'
 import { rpcCall } from '../lib/rpc'
 import { useQueryClient } from '@tanstack/react-query'
 import PulseDot from './PulseDot'
-import { Home, StopCircle } from 'lucide-react'
+import { Home, Trash2 } from 'lucide-react'
 
 export default function CommandPalette() {
   const { setPaletteOpen, setFocusedTeamId } = useStore()
@@ -13,6 +13,7 @@ export default function CommandPalette() {
   const queryClient = useQueryClient()
 
   async function stopTeam(teamId: string) {
+    if (!confirm('Stop this team? This action cannot be undone.')) return
     await rpcCall('team.delete', { teamId })
     queryClient.invalidateQueries({ queryKey: ['project.listTeams'] })
     setPaletteOpen(false)
@@ -25,7 +26,7 @@ export default function CommandPalette() {
         background: 'rgba(0,0,0,0.6)',
         display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
         paddingTop: '14vh',
-        backdropFilter: 'blur(6px)',
+        backdropFilter: 'blur(8px)',
       }}
       onClick={() => setPaletteOpen(false)}
     >
@@ -33,7 +34,7 @@ export default function CommandPalette() {
         onClick={e => e.stopPropagation()}
         className="animate-scale-in"
         style={{
-          width: 560,
+          width: 540,
           background: 'var(--bg-surface)',
           borderRadius: 'var(--r-xl)',
           border: '1px solid var(--border-strong)',
@@ -47,11 +48,11 @@ export default function CommandPalette() {
           borderBottom: '1px solid var(--border)',
         }}>
           <Command.Input
-            placeholder="Search teams, run actions…"
+            placeholder="Search teams or run actions…"
             autoFocus
             style={{
               flex: 1,
-              padding: '14px 0',
+              padding: '15px 0',
               border: 'none', outline: 'none',
               background: 'transparent', color: 'var(--text-1)',
               fontSize: 14,
@@ -63,16 +64,17 @@ export default function CommandPalette() {
             style={{
               fontSize: 11, cursor: 'pointer',
               background: 'var(--bg-elevated)', color: 'var(--text-3)',
-              padding: '2px 6px', borderRadius: 5,
+              padding: '2px 7px', borderRadius: 5,
               border: '1px solid var(--border)',
               fontFamily: 'inherit',
+              transition: 'color 0.15s',
             }}
           >ESC</kbd>
         </div>
 
-        <Command.List style={{ maxHeight: 380, overflowY: 'auto', padding: '6px 0' }}>
+        <Command.List style={{ maxHeight: 360, overflowY: 'auto', padding: '6px 0' }}>
           <Command.Empty style={{
-            padding: '28px 16px', textAlign: 'center',
+            padding: '32px 16px', textAlign: 'center',
             color: 'var(--text-3)', fontSize: 13,
           }}>
             No results found
@@ -88,7 +90,7 @@ export default function CommandPalette() {
                     value={`team-${team.teamId}-${team.profileId}`}
                     onSelect={() => { setFocusedTeamId(team.teamId); setPaletteOpen(false) }}
                     style={{
-                      padding: '9px 14px', cursor: 'pointer',
+                      padding: '10px 14px', cursor: 'pointer',
                       display: 'flex', alignItems: 'center', gap: 10,
                       fontSize: 13, color: 'var(--text-1)',
                       borderRadius: 'var(--r-md)',
@@ -99,7 +101,12 @@ export default function CommandPalette() {
                     <span style={{ flex: 1, fontWeight: 500 }}>
                       {team.profileId ?? team.teamId.slice(0, 12)}
                     </span>
-                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{team.status}</span>
+                    <span style={{
+                      fontSize: 11, color: 'var(--text-3)',
+                      textTransform: 'capitalize',
+                    }}>
+                      {team.status}
+                    </span>
                   </Command.Item>
                 )
               })}
@@ -111,7 +118,7 @@ export default function CommandPalette() {
               value="overview back home all teams"
               onSelect={() => { setFocusedTeamId(null); setPaletteOpen(false) }}
               style={{
-                padding: '9px 14px', cursor: 'pointer', fontSize: 13,
+                padding: '10px 14px', cursor: 'pointer', fontSize: 13,
                 display: 'flex', alignItems: 'center', gap: 10,
                 color: 'var(--text-1)',
                 borderRadius: 'var(--r-md)',
@@ -119,7 +126,7 @@ export default function CommandPalette() {
               }}
             >
               <Home size={13} style={{ color: 'var(--text-3)' }} />
-              All teams
+              Back to overview
             </Command.Item>
 
             {teams.map(team => (
@@ -128,14 +135,14 @@ export default function CommandPalette() {
                 value={`stop delete team ${team.profileId}`}
                 onSelect={() => stopTeam(team.teamId)}
                 style={{
-                  padding: '9px 14px', cursor: 'pointer', fontSize: 13,
+                  padding: '10px 14px', cursor: 'pointer', fontSize: 13,
                   display: 'flex', alignItems: 'center', gap: 10,
                   color: 'var(--red)',
                   borderRadius: 'var(--r-md)',
                   margin: '1px 6px',
                 }}
               >
-                <StopCircle size={13} />
+                <Trash2 size={13} />
                 Stop {team.profileId ?? 'team'}
               </Command.Item>
             ))}
