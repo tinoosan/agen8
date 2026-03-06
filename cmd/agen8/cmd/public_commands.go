@@ -114,9 +114,11 @@ var teamListCmd = &cobra.Command{
 		}
 
 		activeProfile := ""
-		if sessionID := strings.TrimSpace(projectCtx.State.ActiveSessionID); sessionID != "" {
-			if item, err := rpcFindSession(cmd.Context(), sessionID); err == nil && item != nil {
-				activeProfile = strings.TrimSpace(item.Profile)
+		if projectRoot := strings.TrimSpace(projectCtx.RootDir); projectRoot != "" {
+			if teamID := strings.TrimSpace(projectCtx.State.ActiveTeamID); teamID != "" {
+				if teamInfo, err := rpcGetProjectTeam(cmd.Context(), projectRoot, teamID); err == nil {
+					activeProfile = strings.TrimSpace(teamInfo.ProfileID)
+				}
 			}
 		}
 		for _, name := range listProfileRefs(fsutil.GetProfilesDir(cfg.DataDir)) {
@@ -269,29 +271,9 @@ var viewMailCmd = &cobra.Command{
 }
 
 func loadActiveTaskScope(cmd *cobra.Command) (app.ProjectState, error) {
-	projectCtx, err := loadProjectContext()
+	_, teamID, sessionID, runID, err := resolveActiveProjectScope(cmd.Context())
 	if err != nil {
 		return app.ProjectState{}, err
-	}
-	if !projectCtx.Exists {
-		return app.ProjectState{}, fmt.Errorf("project is not initialized; run `agen8 project init` first")
-	}
-	sessionID := strings.TrimSpace(projectCtx.State.ActiveSessionID)
-	runID := strings.TrimSpace(projectCtx.State.ActiveRunID)
-	teamID := strings.TrimSpace(projectCtx.State.ActiveTeamID)
-	if sessionID == "" {
-		return app.ProjectState{}, fmt.Errorf("no active team session; run `agen8 team start <profile-ref>` first")
-	}
-	if runID == "" {
-		if resolvedRunID, resolvedTeamID, err := rpcResolveCoordinatorRun(cmd.Context(), sessionID); err == nil {
-			runID = strings.TrimSpace(resolvedRunID)
-			if teamID == "" {
-				teamID = strings.TrimSpace(resolvedTeamID)
-			}
-		}
-	}
-	if runID == "" {
-		return app.ProjectState{}, fmt.Errorf("active run not found for session %s", sessionID)
 	}
 	return app.ProjectState{
 		ActiveSessionID: sessionID,

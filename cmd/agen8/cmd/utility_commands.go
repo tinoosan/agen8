@@ -103,7 +103,7 @@ var whoamiCmd = &cobra.Command{
 				teamID = resolvedTeamID
 			}
 		}
-		mode := "standalone"
+		mode := "team"
 		profile := ""
 		if sessionID != "" {
 			if item, err := rpcFindSession(cmd.Context(), sessionID); err == nil && item != nil {
@@ -127,7 +127,7 @@ var whoamiCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "session=%s\n", blankDash(sessionID))
 		fmt.Fprintf(cmd.OutOrStdout(), "run=%s\n", blankDash(runID))
 		fmt.Fprintf(cmd.OutOrStdout(), "team=%s\n", blankDash(teamID))
-		fmt.Fprintf(cmd.OutOrStdout(), "mode=%s\n", mode)
+		fmt.Fprintf(cmd.OutOrStdout(), "mode=%s\n", blankDash(mode))
 		fmt.Fprintf(cmd.OutOrStdout(), "profile=%s\n", blankDash(profile))
 		return nil
 	},

@@ -20,9 +20,9 @@ Navigation:
 Type a message and press Ctrl+Enter to queue a task, or use a command (below):
   /task <goal>            Queue a task (explicit)
   /new                    Open new-session wizard
-  /new [goal]             Start single-agent session
-  /new multi-agent <profile> [goal] Start multi-agent session and switch to multi-agent monitor
-  /team                   Focus agent in multi-agent session (or clear focus)
+  /new [goal]             Start a new team session
+  /new <profile> [goal]   Start a new team session with a profile
+  /team                   Focus an agent in the active team session (or clear focus)
   /sessions               Switch session (reattach to its current run)
   /agents                 Switch agent/run in the active session
   /rename <title> Rename current session

@@ -47,13 +47,12 @@ var sessionsListCmd = &cobra.Command{
 			return err
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(w, "SESSION\tMODE\tTEAM\tRUN\tPROJECT\tRUNNING\tPAUSED\tUPDATED")
+		fmt.Fprintln(w, "SESSION\tTEAM\tRUN\tPROJECT\tRUNNING\tPAUSED\tUPDATED")
 		for _, s := range out.Sessions {
 			fmt.Fprintf(
 				w,
-				"%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\n",
+				"%s\t%s\t%s\t%s\t%d\t%d\t%s\n",
 				strings.TrimSpace(s.SessionID),
-				fallback(strings.TrimSpace(s.Mode), "single-agent"),
 				blankDash(strings.TrimSpace(s.TeamID)),
 				blankDash(strings.TrimSpace(s.CurrentRunID)),
 				blankDash(strings.TrimSpace(s.ProjectRoot)),

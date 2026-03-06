@@ -14,7 +14,7 @@ func TestResolveActiveSessionID(t *testing.T) {
 	if _, err := app.SetActiveSession(root, app.ProjectState{ActiveSessionID: "sess-123"}); err != nil {
 		t.Fatalf("set active: %v", err)
 	}
-	got, err := ResolveActiveSessionID(root)
+	got, err := ResolveActiveSessionID(root, "")
 	if err != nil {
 		t.Fatalf("resolve active session: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestResolveActiveSessionID_NoActive(t *testing.T) {
 	if _, err := app.InitProject(root, app.ProjectConfig{}); err != nil {
 		t.Fatalf("init project: %v", err)
 	}
-	if _, err := ResolveActiveSessionID(root); err == nil {
+	if _, err := ResolveActiveSessionID(root, ""); err == nil {
 		t.Fatalf("expected error when active session is missing")
 	}
 }

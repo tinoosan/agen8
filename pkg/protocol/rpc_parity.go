@@ -10,10 +10,11 @@ type SessionGetTotalsParams struct {
 
 type SessionStartParams struct {
 	ThreadID    ThreadID `json:"threadId"`
-	Mode        string   `json:"mode,omitempty"` // single-agent|multi-agent
+	Mode        string   `json:"mode,omitempty"` // canonical: team; legacy aliases accepted on input
 	Profile     string   `json:"profile,omitempty"`
 	Goal        string   `json:"goal,omitempty"`
 	Model       string   `json:"model,omitempty"`
+	ProjectID   string   `json:"projectId,omitempty"`
 	ProjectRoot string   `json:"projectRoot,omitempty"` // project dir when created via agen8 new
 }
 
@@ -404,6 +405,38 @@ type ProjectGetContextParams struct {
 
 type ProjectGetContextResult struct {
 	Context ProjectContext `json:"context"`
+}
+
+type ProjectListTeamsParams struct {
+	Cwd         string `json:"cwd,omitempty"`
+	ProjectRoot string `json:"projectRoot,omitempty"`
+}
+
+type ProjectTeamSummary struct {
+	ProjectID        string `json:"projectId,omitempty"`
+	ProjectRoot      string `json:"projectRoot,omitempty"`
+	TeamID           string `json:"teamId,omitempty"`
+	ProfileID        string `json:"profileId,omitempty"`
+	PrimarySessionID string `json:"primarySessionId,omitempty"`
+	CoordinatorRunID string `json:"coordinatorRunId,omitempty"`
+	Status           string `json:"status,omitempty"`
+	CreatedAt        string `json:"createdAt,omitempty"`
+	UpdatedAt        string `json:"updatedAt,omitempty"`
+	ManifestPresent  bool   `json:"manifestPresent,omitempty"`
+}
+
+type ProjectListTeamsResult struct {
+	Teams []ProjectTeamSummary `json:"teams"`
+}
+
+type ProjectGetTeamParams struct {
+	Cwd         string `json:"cwd,omitempty"`
+	ProjectRoot string `json:"projectRoot,omitempty"`
+	TeamID      string `json:"teamId"`
+}
+
+type ProjectGetTeamResult struct {
+	Team ProjectTeamSummary `json:"team"`
 }
 
 type ProjectSetActiveSessionParams struct {

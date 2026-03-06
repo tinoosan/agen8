@@ -594,7 +594,7 @@ func TestDeleteSession_CascadesRunRows(t *testing.T) {
 	}
 }
 
-func TestDeleteSession_RemovesTeamDirectory(t *testing.T) {
+func TestDeleteSession_PreservesTeamDirectory(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess, run, err := CreateSession(cfg, "team session", 64)
 	if err != nil {
@@ -620,7 +620,7 @@ func TestDeleteSession_RemovesTeamDirectory(t *testing.T) {
 	if err := DeleteSession(cfg, sess.SessionID); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
-	if _, err := os.Stat(teamDir); !os.IsNotExist(err) {
-		t.Fatalf("expected team dir deleted, err=%v", err)
+	if _, err := os.Stat(teamDir); err != nil {
+		t.Fatalf("expected team dir preserved, err=%v", err)
 	}
 }

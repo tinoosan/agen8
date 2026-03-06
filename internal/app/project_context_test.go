@@ -109,10 +109,10 @@ func TestNormalizeProjectConfig_LegacyModeValues(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"team", "multi-agent"},
-		{"multi-agent", "multi-agent"},
-		{"standalone", "single-agent"},
-		{"single-agent", "single-agent"},
+		{"team", "team"},
+		{"multi-agent", "team"},
+		{"standalone", "team"},
+		{"single-agent", "team"},
 		{"", ""},
 		{"invalid", "invalid"},
 	}

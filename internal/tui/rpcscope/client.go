@@ -82,8 +82,7 @@ func (c *Client) call(ctx context.Context, method string, params, out any) error
 	return nil
 }
 
-// ResolveControlSessionID resolves the freshest usable control session ID.
-// When teamID is provided, the selected session must belong to that team.
+// ResolveControlSessionID resolves a usable control session ID without project-wide session enumeration.
 func ResolveControlSessionID(ctx context.Context, endpoint, preferredSessionID, teamID string) (string, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
@@ -91,20 +90,8 @@ func ResolveControlSessionID(ctx context.Context, endpoint, preferredSessionID, 
 	}
 	preferredSessionID = strings.TrimSpace(preferredSessionID)
 	teamID = strings.TrimSpace(teamID)
-
-	cli := protocol.TCPClient{Endpoint: endpoint, Timeout: 5 * time.Second}
-	var sessions protocol.SessionListResult
-	if err := cli.Call(ctx, protocol.MethodSessionList, protocol.SessionListParams{
-		ThreadID: detachedThreadID,
-		Limit:    500,
-		Offset:   0,
-	}, &sessions); err != nil {
-		return "", fmt.Errorf("rpc %s: %w", protocol.MethodSessionList, err)
-	}
-
-	selected := pickControlSessionID(sessions.Sessions, preferredSessionID, teamID)
-	if selected != "" {
-		return selected, nil
+	if preferredSessionID != "" {
+		return preferredSessionID, nil
 	}
 	if teamID != "" {
 		return "", fmt.Errorf("%w: team control session unavailable", ErrScopeUnavailable)
@@ -118,35 +105,33 @@ func (c *Client) RefreshScope(ctx context.Context) (ScopeState, error) {
 		return ScopeState{}, fmt.Errorf("%w: session id is required", ErrScopeUnavailable)
 	}
 
-	var sessions protocol.SessionListResult
-	if err := c.call(ctx, protocol.MethodSessionList, protocol.SessionListParams{
-		ThreadID: detachedThreadID,
-		Limit:    500,
-		Offset:   0,
-	}, &sessions); err != nil {
-		return ScopeState{}, err
-	}
-
-	var item *protocol.SessionListItem
-	for i := range sessions.Sessions {
-		if strings.TrimSpace(sessions.Sessions[i].SessionID) == sid {
-			item = &sessions.Sessions[i]
-			break
-		}
-	}
-	if item == nil {
-		return ScopeState{}, fmt.Errorf("%w: session %q not found", ErrScopeUnavailable, sid)
-	}
-
 	state := ScopeState{
 		SessionID: sid,
 		ThreadID:  sid,
-		RunID:     strings.TrimSpace(item.CurrentRunID),
-		TeamID:    strings.TrimSpace(item.TeamID),
-		Mode:      fallback(strings.TrimSpace(item.Mode), "standalone"),
+		Mode:      "team",
+	}
+
+	var resolved protocol.SessionResolveThreadResult
+	if err := c.call(ctx, protocol.MethodSessionResolveThread, protocol.SessionResolveThreadParams{
+		SessionID: sid,
+		RunID:     "",
+	}, &resolved); err == nil {
+		if threadID := strings.TrimSpace(resolved.ThreadID); threadID != "" {
+			state.ThreadID = threadID
+		}
+		if runID := strings.TrimSpace(resolved.RunID); runID != "" {
+			state.RunID = runID
+		}
+		if teamID := strings.TrimSpace(resolved.TeamID); teamID != "" {
+			state.TeamID = teamID
+		}
+		if runID := strings.TrimSpace(resolved.RunID); runID != "" {
+			state.RunID = runID
+		}
 	}
 
 	if state.TeamID != "" {
+		state.Mode = "team"
 		var manifest protocol.TeamGetManifestResult
 		if err := c.call(ctx, protocol.MethodTeamGetManifest, protocol.TeamGetManifestParams{
 			ThreadID: protocol.ThreadID(sid),
@@ -159,19 +144,20 @@ func (c *Client) RefreshScope(ctx context.Context) (ScopeState, error) {
 		}
 	}
 
-	var resolved protocol.SessionResolveThreadResult
-	if err := c.call(ctx, protocol.MethodSessionResolveThread, protocol.SessionResolveThreadParams{
-		SessionID: sid,
-		RunID:     state.RunID,
-	}, &resolved); err == nil {
-		if threadID := strings.TrimSpace(resolved.ThreadID); threadID != "" {
-			state.ThreadID = threadID
-		}
-		if runID := strings.TrimSpace(resolved.RunID); runID != "" {
-			state.RunID = runID
-		}
-		if teamID := strings.TrimSpace(resolved.TeamID); teamID != "" {
-			state.TeamID = teamID
+	if state.RunID == "" {
+		var agents protocol.AgentListResult
+		if err := c.call(ctx, protocol.MethodAgentList, protocol.AgentListParams{
+			ThreadID:  protocol.ThreadID(sid),
+			SessionID: sid,
+		}, &agents); err == nil {
+			state.Mode = "team"
+			for _, agent := range agents.Agents {
+				runID := strings.TrimSpace(agent.RunID)
+				if runID != "" {
+					state.RunID = runID
+					break
+				}
+			}
 		}
 	}
 
@@ -337,7 +323,7 @@ func normalizeState(state ScopeState) ScopeState {
 	state.ThreadID = strings.TrimSpace(state.ThreadID)
 	state.RunID = strings.TrimSpace(state.RunID)
 	state.TeamID = strings.TrimSpace(state.TeamID)
-	state.Mode = fallback(strings.TrimSpace(state.Mode), "standalone")
+	state.Mode = fallback(strings.TrimSpace(state.Mode), "team")
 	state.CoordinatorRole = strings.TrimSpace(state.CoordinatorRole)
 	if state.ThreadID == "" {
 		state.ThreadID = state.SessionID

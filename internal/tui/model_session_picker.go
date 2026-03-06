@@ -6,8 +6,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/internal/tui/kit"
+	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/timeutil"
 	"github.com/tinoosan/agen8/pkg/types"
 )
@@ -54,12 +54,8 @@ func renderSessionPickerLine(item list.Item, maxWidth int) string {
 	}
 	meta := strings.TrimSpace(it.updatedAt)
 	line := title
-	mode := strings.ToLower(strings.TrimSpace(it.mode))
-	switch mode {
-	case "multi-agent", "team":
-		line += " · multi-agent"
-	case "single-agent", "standalone":
-		line += " · single-agent"
+	if strings.TrimSpace(it.teamID) != "" {
+		line += " · team"
 	}
 	if p := strings.TrimSpace(it.profile); p != "" {
 		line += " · " + p

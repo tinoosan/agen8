@@ -135,10 +135,8 @@ func normalizeProjectConfig(cfg ProjectConfig, baseDir string) ProjectConfig {
 	}
 	mode := strings.ToLower(strings.TrimSpace(out.DefaultMode))
 	switch mode {
-	case "team":
-		out.DefaultMode = "multi-agent"
-	case "standalone":
-		out.DefaultMode = "single-agent"
+	case "team", "multi-agent", "standalone", "single-agent":
+		out.DefaultMode = "team"
 	default:
 		out.DefaultMode = strings.TrimSpace(mode)
 	}

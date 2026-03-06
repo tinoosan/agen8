@@ -15,6 +15,7 @@ func TestResolveTargetRunIDs_UsesProjectSessionsByDefault(t *testing.T) {
 	origProjectSessions := logsListProjectSessionsFn
 	origSessionRuns := logsListSessionRunIDsFn
 	origProjectTeamRuns := logsListProjectTeamRunIDsFn
+	origProjectTeams := logsListProjectTeamsFn
 	origWorkDir := workDir
 	base := t.TempDir()
 	workDir = base
@@ -22,6 +23,7 @@ func TestResolveTargetRunIDs_UsesProjectSessionsByDefault(t *testing.T) {
 		logsListProjectSessionsFn = origProjectSessions
 		logsListSessionRunIDsFn = origSessionRuns
 		logsListProjectTeamRunIDsFn = origProjectTeamRuns
+		logsListProjectTeamsFn = origProjectTeams
 		workDir = origWorkDir
 	})
 
@@ -29,8 +31,11 @@ func TestResolveTargetRunIDs_UsesProjectSessionsByDefault(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	logsListProjectSessionsFn = func(ctx context.Context, projectRoot string) ([]string, error) {
-		return []string{"sess-b", "sess-a"}, nil
+	logsListProjectTeamsFn = func(ctx context.Context, projectRoot string) ([]protocol.ProjectTeamSummary, error) {
+		return []protocol.ProjectTeamSummary{
+			{PrimarySessionID: "sess-b"},
+			{PrimarySessionID: "sess-a"},
+		}, nil
 	}
 	logsListProjectTeamRunIDsFn = func(ctx context.Context, projectRoot string, teamID string) ([]string, error) {
 		t.Fatalf("unexpected team scope lookup for team %q", teamID)
@@ -171,6 +176,7 @@ func TestResolveTargetRunIDs_UsesProjectTeamScope(t *testing.T) {
 	origProjectSessions := logsListProjectSessionsFn
 	origSessionRuns := logsListSessionRunIDsFn
 	origProjectTeamRuns := logsListProjectTeamRunIDsFn
+	origProjectTeam := logsGetProjectTeamFn
 	origWorkDir := workDir
 	base := t.TempDir()
 	workDir = base
@@ -178,6 +184,7 @@ func TestResolveTargetRunIDs_UsesProjectTeamScope(t *testing.T) {
 		logsListProjectSessionsFn = origProjectSessions
 		logsListSessionRunIDsFn = origSessionRuns
 		logsListProjectTeamRunIDsFn = origProjectTeamRuns
+		logsGetProjectTeamFn = origProjectTeam
 		workDir = origWorkDir
 	})
 
@@ -189,22 +196,24 @@ func TestResolveTargetRunIDs_UsesProjectTeamScope(t *testing.T) {
 		t.Fatalf("unexpected project session lookup for %q", projectRoot)
 		return nil, nil
 	}
-	logsListProjectTeamRunIDsFn = func(ctx context.Context, projectRoot string, teamID string) ([]string, error) {
+	logsGetProjectTeamFn = func(ctx context.Context, projectRoot, teamID string) (protocol.ProjectTeamSummary, error) {
 		if teamID != "research" {
 			t.Fatalf("teamID=%q want research", teamID)
 		}
-		return []string{"run-2", "run-1"}, nil
+		return protocol.ProjectTeamSummary{PrimarySessionID: "sess-research"}, nil
 	}
 	logsListSessionRunIDsFn = func(ctx context.Context, sessionID string) ([]string, error) {
-		t.Fatalf("unexpected session run lookup for %q", sessionID)
-		return nil, nil
+		if sessionID != "sess-research" {
+			t.Fatalf("sessionID=%q want sess-research", sessionID)
+		}
+		return []string{"run-2", "run-1"}, nil
 	}
 
 	got, err := resolveTargetRunIDs(context.Background(), "", "", "", "research")
 	if err != nil {
 		t.Fatalf("resolveTargetRunIDs: %v", err)
 	}
-	want := []string{"run-2", "run-1"}
+	want := []string{"run-1", "run-2"}
 	if len(got) != len(want) {
 		t.Fatalf("run count=%d want %d (%v)", len(got), len(want), got)
 	}

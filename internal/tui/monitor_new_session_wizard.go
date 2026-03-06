@@ -8,8 +8,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tinoosan/agen8/internal/tui/kit"
-	"github.com/tinoosan/agen8/pkg/fsutil"
-	"github.com/tinoosan/agen8/pkg/profile"
 	"github.com/tinoosan/agen8/pkg/protocol"
 	pkgstore "github.com/tinoosan/agen8/pkg/store"
 	"github.com/tinoosan/agen8/pkg/timeutil"
@@ -94,7 +92,7 @@ func (m *monitorModel) openNewSessionWizard() tea.Cmd {
 	}
 
 	items = append(items,
-		newSessionWizardItem{mode: "new", title: "New Session", desc: "choose profile; mode inferred (single-agent or multi-agent)"},
+		newSessionWizardItem{mode: "new", title: "New Session", desc: "choose profile; sessions are always team-based"},
 	)
 
 	l := list.New(items, kit.NewPickerDelegate(kit.DefaultPickerDelegateStyles(), renderNewSessionWizardLine), 0, 0)
@@ -220,7 +218,7 @@ func (m *monitorModel) updateNewSessionWizardModeStep(msg tea.KeyMsg) (tea.Model
 			}
 		}
 
-		// Standalone or Team → transition to profile step.
+		// Transition to the profile step; sessions are always team-based.
 		m.newSessionWizardMode = strings.ToLower(strings.TrimSpace(item.mode))
 		m.initWizardProfileStep()
 		return m, nil
@@ -288,17 +286,8 @@ func (m *monitorModel) selectProfileFromWizard() tea.Cmd {
 		m.profile = ref
 	}
 
-		m.closeNewSessionWizard()
+	m.closeNewSessionWizard()
 
-	// Infer mode from profile: single-role = single-agent, multi-role = multi-agent
-	prof, _, err := profile.ResolveByRef(fsutil.GetProfilesDir(m.cfg.DataDir), ref)
-	if err != nil || prof == nil {
-		return m.startNewStandaloneSession(ref, "")
-	}
-	roles, err := prof.RolesForSession()
-	if err != nil || len(roles) <= 1 {
-		return m.startNewStandaloneSession(ref, "")
-	}
 	return m.startNewTeamSession(ref, "")
 }
 

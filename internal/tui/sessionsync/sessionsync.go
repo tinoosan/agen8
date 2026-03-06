@@ -1,17 +1,24 @@
 package sessionsync
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/tinoosan/agen8/internal/app"
+	"github.com/tinoosan/agen8/pkg/protocol"
 )
 
-// ResolveActiveSessionID returns the active session from <project>/.agen8/state.json.
-func ResolveActiveSessionID(projectRoot string) (string, error) {
+// ResolveActiveSessionID derives the control session for the active project team.
+func ResolveActiveSessionID(projectRoot, endpoint string) (string, error) {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
 		return "", fmt.Errorf("project root is required")
+	}
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		endpoint = protocol.DefaultRPCEndpoint
 	}
 	ctx, err := app.LoadProjectContext(projectRoot)
 	if err != nil {
@@ -20,9 +27,25 @@ func ResolveActiveSessionID(projectRoot string) (string, error) {
 	if !ctx.Exists {
 		return "", fmt.Errorf("project context not found")
 	}
-	sessionID := strings.TrimSpace(ctx.State.ActiveSessionID)
+	teamID := strings.TrimSpace(ctx.State.ActiveTeamID)
+	if teamID == "" {
+		sessionID := strings.TrimSpace(ctx.State.ActiveSessionID)
+		if sessionID == "" {
+			return "", fmt.Errorf("active team is not set")
+		}
+		return sessionID, nil
+	}
+	var out protocol.ProjectGetTeamResult
+	cli := protocol.TCPClient{Endpoint: endpoint, Timeout: 5 * time.Second}
+	if err := cli.Call(context.Background(), protocol.MethodProjectGetTeam, protocol.ProjectGetTeamParams{
+		ProjectRoot: projectRoot,
+		TeamID:      teamID,
+	}, &out); err != nil {
+		return "", fmt.Errorf("rpc %s: %w", protocol.MethodProjectGetTeam, err)
+	}
+	sessionID := strings.TrimSpace(out.Team.PrimarySessionID)
 	if sessionID == "" {
-		return "", fmt.Errorf("active session is not set")
+		return "", fmt.Errorf("active team %s has no control session", teamID)
 	}
 	return sessionID, nil
 }

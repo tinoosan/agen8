@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -64,4 +65,43 @@ func updateProjectActiveSession(sessionID, teamID, runID, lastCommand string) er
 		return fmt.Errorf("update %s/state.json: %w", app.ProjectDirName, err)
 	}
 	return nil
+}
+
+func resolveActiveProjectScope(ctx context.Context) (projectRoot, teamID, sessionID, runID string, err error) {
+	projectCtx, err := loadProjectContext()
+	if err != nil {
+		return "", "", "", "", err
+	}
+	if !projectCtx.Exists {
+		return "", "", "", "", fmt.Errorf("project is not initialized; run `agen8 project init` first")
+	}
+	projectRoot = strings.TrimSpace(projectCtx.RootDir)
+	teamID = strings.TrimSpace(projectCtx.State.ActiveTeamID)
+	sessionID = strings.TrimSpace(projectCtx.State.ActiveSessionID)
+	runID = strings.TrimSpace(projectCtx.State.ActiveRunID)
+	if teamID == "" {
+		return "", "", "", "", fmt.Errorf("no active team; run `agen8 team start <profile-ref>` first")
+	}
+	teamInfo, err := rpcGetProjectTeam(ctx, projectRoot, teamID)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(teamInfo.PrimarySessionID)
+	}
+	if sessionID == "" {
+		return "", "", "", "", fmt.Errorf("control session unavailable for active team %s", teamID)
+	}
+	if runID == "" {
+		runID = strings.TrimSpace(teamInfo.CoordinatorRunID)
+	}
+	if runID == "" {
+		if resolvedRunID, _, rerr := rpcResolveCoordinatorRun(ctx, sessionID); rerr == nil {
+			runID = strings.TrimSpace(resolvedRunID)
+		}
+	}
+	if runID == "" {
+		return "", "", "", "", fmt.Errorf("coordinator run unavailable for active team %s", teamID)
+	}
+	return projectRoot, teamID, sessionID, runID, nil
 }

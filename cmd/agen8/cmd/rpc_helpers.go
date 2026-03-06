@@ -126,3 +126,33 @@ func rpcResolveThread(ctx context.Context, sessionID string, runID string) (prot
 	}
 	return out, nil
 }
+
+func rpcListProjectTeams(ctx context.Context, projectRoot string) ([]protocol.ProjectTeamSummary, error) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return nil, fmt.Errorf("project root is required")
+	}
+	var out protocol.ProjectListTeamsResult
+	if err := rpcCall(ctx, protocol.MethodProjectListTeams, protocol.ProjectListTeamsParams{
+		ProjectRoot: projectRoot,
+	}, &out); err != nil {
+		return nil, err
+	}
+	return out.Teams, nil
+}
+
+func rpcGetProjectTeam(ctx context.Context, projectRoot, teamID string) (protocol.ProjectTeamSummary, error) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	teamID = strings.TrimSpace(teamID)
+	if projectRoot == "" || teamID == "" {
+		return protocol.ProjectTeamSummary{}, fmt.Errorf("project root and team id are required")
+	}
+	var out protocol.ProjectGetTeamResult
+	if err := rpcCall(ctx, protocol.MethodProjectGetTeam, protocol.ProjectGetTeamParams{
+		ProjectRoot: projectRoot,
+		TeamID:      teamID,
+	}, &out); err != nil {
+		return protocol.ProjectTeamSummary{}, err
+	}
+	return out.Team, nil
+}

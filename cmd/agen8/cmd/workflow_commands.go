@@ -156,8 +156,10 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 	}
 
 	projectRoot := ""
+	projectID := ""
 	if projectCtx.Exists {
 		projectRoot = strings.TrimSpace(projectCtx.RootDir)
+		projectID = strings.TrimSpace(projectCtx.Config.ProjectID)
 	}
 
 	var out protocol.SessionStartResult
@@ -165,6 +167,7 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 		ThreadID:    detachedThreadID,
 		Profile:     profile,
 		Model:       strings.TrimSpace(newModel),
+		ProjectID:   projectID,
 		ProjectRoot: projectRoot,
 	}, &out); err != nil {
 		return err

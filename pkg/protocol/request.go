@@ -42,6 +42,8 @@ const (
 	MethodRunListChildren        = "run.listChildren"
 	MethodProjectGetContext      = "project.getContext"
 	MethodProjectSetActive       = "project.setActiveSession"
+	MethodProjectListTeams       = "project.listTeams"
+	MethodProjectGetTeam         = "project.getTeam"
 	MethodLogsQuery              = "logs.query"
 	MethodActivityStream         = "activity.stream"
 	MethodRuntimeGetRunState     = "runtime.getRunState"

@@ -846,12 +846,12 @@ func TestMonitorProfilePicker_FilterAndSelectStartsNewStandaloneSession(t *testi
 		t.Fatalf("expected profilePickerOpen false after selection")
 	}
 	msg := cmd()
-	sw, ok := msg.(monitorSwitchRunMsg)
+	sw, ok := msg.(monitorSwitchTeamMsg)
 	if !ok {
-		t.Fatalf("expected monitorSwitchRunMsg, got %T", msg)
+		t.Fatalf("expected monitorSwitchTeamMsg, got %T", msg)
 	}
-	if strings.TrimSpace(sw.RunID) == "" {
-		t.Fatalf("expected non-empty switched run id")
+	if strings.TrimSpace(sw.TeamID) == "" {
+		t.Fatalf("expected non-empty switched team id")
 	}
 	if m.profile != "software_dev" {
 		t.Fatalf("expected monitor profile %q, got %q", "software_dev", m.profile)
@@ -997,11 +997,11 @@ func TestParseNewSessionRequest(t *testing.T) {
 		wantProfile string
 		wantGoal    string
 	}{
-		{"", "general", "single-agent", "general", ""},
-		{"ship feature", "general", "single-agent", "general", "ship feature"},
-		{"standalone software_dev implement parser", "general", "single-agent", "software_dev", "implement parser"},
-		{"team startup_team launch", "general", "multi-agent", "startup_team", "launch"},
-		{"team", "general", "multi-agent", "", ""},
+		{"", "general", "team", "general", ""},
+		{"ship feature", "general", "team", "general", "ship feature"},
+		{"standalone software_dev implement parser", "general", "team", "software_dev", "implement parser"},
+		{"team startup_team launch", "general", "team", "startup_team", "launch"},
+		{"team", "general", "team", "", ""},
 	}
 	for _, tc := range cases {
 		got := parseNewSessionRequest(tc.in, tc.defaultProf)
@@ -1049,14 +1049,11 @@ func TestMonitorHandleCommand_NewTeamOpensTeamProfileWizard(t *testing.T) {
 	if !m.profilePickerOpen {
 		t.Fatalf("expected profile picker open")
 	}
-	if !m.profilePickerTeamOnly {
-		t.Fatalf("expected team-only profile picker")
+	if got := strings.TrimSpace(m.profilePickerMode); got != "new-team" {
+		t.Fatalf("profilePickerMode=%q want new-team", got)
 	}
-	if got := strings.TrimSpace(m.profilePickerMode); got != "new-multi-agent" {
-		t.Fatalf("profilePickerMode=%q want new-multi-agent", got)
-	}
-	if len(m.profilePickerList.Items()) != 1 {
-		t.Fatalf("expected only team profiles in picker, got %d", len(m.profilePickerList.Items()))
+	if len(m.profilePickerList.Items()) != 2 {
+		t.Fatalf("expected all profiles in picker, got %d", len(m.profilePickerList.Items()))
 	}
 }
 

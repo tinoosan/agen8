@@ -65,9 +65,9 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func syncSessionCmd(projectRoot, currentSessionID string) tea.Cmd {
+func syncSessionCmd(projectRoot, endpoint, currentSessionID string) tea.Cmd {
 	return func() tea.Msg {
-		nextID, err := sessionsync.ResolveActiveSessionID(projectRoot)
+		nextID, err := sessionsync.ResolveActiveSessionID(projectRoot, endpoint)
 		if err != nil {
 			return sessionSyncedMsg{sessionID: strings.TrimSpace(currentSessionID), err: err}
 		}

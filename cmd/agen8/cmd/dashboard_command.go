@@ -32,10 +32,10 @@ func runDashboardFlow(cmd *cobra.Command) error {
 	projectRoot := projectSearchDir()
 	sessionID := strings.TrimSpace(dashboardSessionID)
 	if sessionID == "" {
-		projectCtx, err := loadProjectContext()
-		if err == nil && projectCtx.Exists {
-			projectRoot = strings.TrimSpace(projectCtx.RootDir)
-			sessionID = strings.TrimSpace(projectCtx.State.ActiveSessionID)
+		resolvedRoot, _, resolvedSessionID, _, err := resolveActiveProjectScope(cmd.Context())
+		if err == nil {
+			projectRoot = resolvedRoot
+			sessionID = resolvedSessionID
 		}
 	}
 	if sessionID == "" {
@@ -60,9 +60,14 @@ func effectiveDashboardInterval() time.Duration {
 }
 
 func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {
-	item, err := rpcFindSession(cmd.Context(), sessionID)
-	if err != nil {
-		return err
+	teamID := ""
+	currentRunID := ""
+	if _, resolvedTeamID, resolvedSessionID, resolvedRunID, err := resolveActiveProjectScope(cmd.Context()); err == nil && strings.TrimSpace(resolvedSessionID) == strings.TrimSpace(sessionID) {
+		teamID = strings.TrimSpace(resolvedTeamID)
+		currentRunID = strings.TrimSpace(resolvedRunID)
+	} else if resolved, err := rpcResolveThread(cmd.Context(), sessionID, ""); err == nil {
+		teamID = strings.TrimSpace(resolved.TeamID)
+		currentRunID = strings.TrimSpace(resolved.RunID)
 	}
 	var agents protocol.AgentListResult
 	if err := rpcCall(cmd.Context(), protocol.MethodAgentList, protocol.AgentListParams{
@@ -71,22 +76,29 @@ func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {
 	}, &agents); err != nil {
 		return err
 	}
+	mode := "team"
+	runningAgents := 0
+	for _, agent := range agents.Agents {
+		if strings.EqualFold(strings.TrimSpace(agent.Status), "running") {
+			runningAgents++
+		}
+	}
 
 	var totals protocol.SessionGetTotalsResult
 	_ = rpcCall(cmd.Context(), protocol.MethodSessionGetTotals, protocol.SessionGetTotalsParams{
 		ThreadID: protocol.ThreadID(sessionID),
-		TeamID:   strings.TrimSpace(item.TeamID),
-		RunID:    strings.TrimSpace(item.CurrentRunID),
+		TeamID:   teamID,
+		RunID:    currentRunID,
 	}, &totals)
 
 	pending := 0
 	active := 0
 	done := totals.TasksDone
-	if strings.TrimSpace(item.TeamID) != "" {
+	if teamID != "" {
 		var teamStatus protocol.TeamGetStatusResult
 		if err := rpcCall(cmd.Context(), protocol.MethodTeamGetStatus, protocol.TeamGetStatusParams{
 			ThreadID: protocol.ThreadID(sessionID),
-			TeamID:   strings.TrimSpace(item.TeamID),
+			TeamID:   teamID,
 		}, &teamStatus); err == nil {
 			pending = teamStatus.Pending
 			active = teamStatus.Active
@@ -103,8 +115,8 @@ func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {
 	if !dashboardOnce && isInteractiveTerminal() {
 		fmt.Fprint(cmd.OutOrStdout(), "\033[H\033[2J")
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Session %s (%s)\n", strings.TrimSpace(item.SessionID), fallback(item.Mode, "standalone"))
-	fmt.Fprintf(cmd.OutOrStdout(), "Run %s  Team %s\n", blankDash(strings.TrimSpace(item.CurrentRunID)), blankDash(strings.TrimSpace(item.TeamID)))
+	fmt.Fprintf(cmd.OutOrStdout(), "Session %s (%s)\n", strings.TrimSpace(sessionID), mode)
+	fmt.Fprintf(cmd.OutOrStdout(), "Run %s  Team %s\n", blankDash(currentRunID), blankDash(teamID))
 
 	effectiveByRun := map[string]protocol.RuntimeRunState{}
 	var runtimeState protocol.RuntimeGetSessionStateResult
@@ -124,9 +136,6 @@ func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {
 	fmt.Fprintln(w, "ROLE\tRUN\tSTATUS\tPROFILE\tWORKER\tHEARTBEAT\tSTARTED")
 	for _, agent := range agents.Agents {
 		role := strings.TrimSpace(agent.Role)
-		if strings.EqualFold(strings.TrimSpace(item.Mode), "standalone") {
-			role = "-"
-		}
 		effective := strings.TrimSpace(agent.Status)
 		worker := "-"
 		heartbeat := "-"
@@ -165,7 +174,7 @@ func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {
 		pending,
 		active,
 		done,
-		item.RunningAgents,
+		runningAgents,
 	)
 	return nil
 }

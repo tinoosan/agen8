@@ -108,12 +108,9 @@ func (q *sessionQueryService) sessionList(ctx context.Context, p protocol.Sessio
 				}
 			}
 		}
-		if mode == "" {
-			if teamID != "" {
-				mode = "multi-agent"
-			} else {
-				mode = "single-agent"
-			}
+		switch strings.ToLower(mode) {
+		case "", "single-agent", "multi-agent", "standalone":
+			mode = "team"
 		}
 		totalAgents := 0
 		runningAgents := 0

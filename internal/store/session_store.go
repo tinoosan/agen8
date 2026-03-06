@@ -520,8 +520,6 @@ func DeleteSession(cfg config.Config, sessionID string) error {
 		return err
 	}
 
-	sess, sessErr := LoadSession(cfg, sessionID)
-
 	db, err := getSQLiteDB(cfg)
 	if err != nil {
 		return err
@@ -603,17 +601,6 @@ func DeleteSession(cfg config.Config, sessionID string) error {
 		runDir := fsutil.GetAgentDir(cfg.DataDir, runID)
 		if err := os.RemoveAll(runDir); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove run dir %s: %w", runDir, err)
-		}
-	}
-
-	// If this was a team session, remove the team directory as well.
-	if sessErr == nil {
-		teamID := strings.TrimSpace(sess.TeamID)
-		if teamID != "" {
-			teamDir := fsutil.GetTeamDir(cfg.DataDir, teamID)
-			if err := os.RemoveAll(teamDir); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("remove team dir: %w", err)
-			}
 		}
 	}
 

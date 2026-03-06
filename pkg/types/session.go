@@ -24,8 +24,8 @@ type Session struct {
 	// Example: "openai/gpt-5.2".
 	ActiveModel string `json:"activeModel,omitempty"`
 
-	// Mode records the session execution mode.
-	// Valid values: "single-agent", "multi-agent".
+	// Mode records the public session type.
+	// Canonical value is "team"; legacy aliases may still appear on older data.
 	Mode string `json:"mode,omitempty"`
 
 	// TeamID is set for all sessions (every session is a team).

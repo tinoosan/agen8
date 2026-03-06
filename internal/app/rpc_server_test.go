@@ -2314,7 +2314,7 @@ func TestRPCServer_SessionStart_RequiresChatGPTLoginWhenProviderSet(t *testing.T
 
 	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
-		Mode:     "single-agent",
+		Mode:     "team",
 		Goal:     "fresh start",
 		Profile:  "general",
 	})
@@ -2369,8 +2369,8 @@ func TestRPCServer_SessionStart_Standalone(t *testing.T) {
 	if strings.TrimSpace(out.SessionID) == "" || strings.TrimSpace(out.PrimaryRunID) == "" {
 		t.Fatalf("missing ids: %+v", out)
 	}
-	if out.Mode != "single-agent" {
-		t.Fatalf("mode = %q, want single-agent", out.Mode)
+	if out.Mode != "team" {
+		t.Fatalf("mode = %q, want team", out.Mode)
 	}
 	if strings.TrimSpace(out.TeamID) == "" {
 		t.Fatalf("expected team id (unified flow), got %+v", out)
@@ -2416,7 +2416,7 @@ func TestRPCServer_SessionStart_PersistsProjectRoot(t *testing.T) {
 	projectRoot := "/abs/path/to/project"
 	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID:    protocol.ThreadID(run.SessionID),
-		Mode:        "single-agent",
+		Mode:        "team",
 		Goal:        "project task",
 		Profile:     "general",
 		ProjectRoot: projectRoot,
@@ -2462,7 +2462,7 @@ func TestRPCServer_SessionStart_EmptyProjectRootOmitted(t *testing.T) {
 
 	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
-		Mode:     "single-agent",
+		Mode:     "team",
 		Profile:  "general",
 	})
 	resp := rpcRoundTrip(t, srv, req)
@@ -2528,7 +2528,7 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 
 	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
-		Mode:     "multi-agent",
+		Mode:     "team",
 		Profile:  "startup_team",
 	})
 	resp := rpcRoundTrip(t, srv, req)
@@ -2537,8 +2537,8 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 	}
 	var out protocol.SessionStartResult
 	_ = json.Unmarshal(resp.Result, &out)
-	if out.Mode != "multi-agent" {
-		t.Fatalf("mode=%q want multi-agent", out.Mode)
+	if out.Mode != "team" {
+		t.Fatalf("mode=%q want team", out.Mode)
 	}
 	if strings.TrimSpace(out.TeamID) == "" {
 		t.Fatalf("expected team id, got %+v", out)
@@ -2553,8 +2553,8 @@ func TestRPCServer_SessionStart_Team(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession(team): %v", err)
 	}
-	if got := strings.TrimSpace(createdSess.Mode); got != "multi-agent" {
-		t.Fatalf("session mode=%q want multi-agent", got)
+	if got := strings.TrimSpace(createdSess.Mode); got != "team" {
+		t.Fatalf("session mode=%q want team", got)
 	}
 	if got := strings.TrimSpace(createdSess.TeamID); got != strings.TrimSpace(out.TeamID) {
 		t.Fatalf("session teamID=%q want %q", got, out.TeamID)
@@ -2611,8 +2611,8 @@ func TestRPCServer_SessionStart_SingleRoleTeamProfile_DoesNotInjectReviewer(t *t
 	}
 	var out protocol.SessionStartResult
 	_ = json.Unmarshal(resp.Result, &out)
-	if out.Mode != "single-agent" {
-		t.Fatalf("mode=%q want single-agent", out.Mode)
+	if out.Mode != "team" {
+		t.Fatalf("mode=%q want team", out.Mode)
 	}
 	if len(out.RunIDs) != 1 {
 		t.Fatalf("expected 1 role run (no reviewer configured), got %d", len(out.RunIDs))
@@ -2648,7 +2648,7 @@ func TestRPCServer_SessionStart_IgnoresLegacyModeMismatchAndUsesProfileShape(t *
 
 	req, _ := protocol.NewRequest("1", protocol.MethodSessionStart, protocol.SessionStartParams{
 		ThreadID: protocol.ThreadID(run.SessionID),
-		Mode:     "single-agent",
+		Mode:     "team",
 		Profile:  "multi_team",
 	})
 	resp := rpcRoundTrip(t, srv, req)
@@ -2657,8 +2657,8 @@ func TestRPCServer_SessionStart_IgnoresLegacyModeMismatchAndUsesProfileShape(t *
 	}
 	var out protocol.SessionStartResult
 	_ = json.Unmarshal(resp.Result, &out)
-	if out.Mode != "multi-agent" {
-		t.Fatalf("mode=%q want multi-agent", out.Mode)
+	if out.Mode != "team" {
+		t.Fatalf("mode=%q want team", out.Mode)
 	}
 	if len(out.RunIDs) != 2 {
 		t.Fatalf("expected 2 role runs, got %d", len(out.RunIDs))
@@ -2755,8 +2755,8 @@ func TestRPCServer_SessionList_And_AgentList(t *testing.T) {
 			continue
 		}
 		foundSessB = true
-		if got := strings.TrimSpace(s.Mode); got != "multi-agent" {
-			t.Fatalf("session %s mode=%q want multi-agent", s.SessionID, got)
+		if got := strings.TrimSpace(s.Mode); got != "team" {
+			t.Fatalf("session %s mode=%q want team", s.SessionID, got)
 		}
 		if got := strings.TrimSpace(s.TeamID); got != "team-1" {
 			t.Fatalf("session %s teamID=%q want team-1", s.SessionID, got)

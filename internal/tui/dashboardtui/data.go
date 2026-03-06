@@ -102,16 +102,11 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			}
 			return dataLoadedMsg{err: err}
 		}
-		mode := kit.Fallback(strings.TrimSpace(scope.Mode), "standalone")
+		mode := kit.Fallback(strings.TrimSpace(scope.Mode), "team")
 		teamID := strings.TrimSpace(scope.TeamID)
 		runID := strings.TrimSpace(scope.RunID)
 		reviewerRole := ""
 		threadID := protocol.ThreadID(scope.ThreadID)
-
-		session, err := fetchSessionItem(call, sid)
-		if err != nil {
-			return dataLoadedMsg{err: err}
-		}
 
 		var agentsRes protocol.AgentListResult
 		if err := call(protocol.MethodAgentList, protocol.AgentListParams{
@@ -143,7 +138,6 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 			Assigned:     totals.TasksDone,
 			Completed:    totals.TasksDone,
 			Done:         totals.TasksDone,
-			RunningCount: session.RunningAgents,
 		}
 
 		assignedByRun := map[string]int{}
@@ -233,7 +227,7 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 				}
 				role = fmt.Sprintf("Subagent-%d", spawnIndex)
 			}
-			if strings.EqualFold(mode, "standalone") && role == "" {
+			if role == "" {
 				role = "-"
 			}
 
@@ -297,9 +291,9 @@ func fetchDataCmd(endpoint, sessionID string) tea.Cmd {
 	}
 }
 
-func syncSessionCmd(projectRoot, currentSessionID string) tea.Cmd {
+func syncSessionCmd(projectRoot, endpoint, currentSessionID string) tea.Cmd {
 	return func() tea.Msg {
-		nextID, err := sessionsync.ResolveActiveSessionID(projectRoot)
+		nextID, err := sessionsync.ResolveActiveSessionID(projectRoot, endpoint)
 		if err != nil {
 			return sessionSyncedMsg{sessionID: strings.TrimSpace(currentSessionID), err: err}
 		}
@@ -399,23 +393,6 @@ func accumulateTeamTaskCounts(tasks []protocol.Task) dashboardTaskCounts {
 
 func isStagedCallbackChildTask(task protocol.Task) bool {
 	return task.BatchMode && !task.BatchSynthetic && strings.TrimSpace(task.BatchIncludedIn) != ""
-}
-
-func fetchSessionItem(call func(method string, params, out any) error, sessionID string) (protocol.SessionListItem, error) {
-	var out protocol.SessionListResult
-	if err := call(protocol.MethodSessionList, protocol.SessionListParams{
-		ThreadID: detachedThreadID,
-		Limit:    500,
-		Offset:   0,
-	}, &out); err != nil {
-		return protocol.SessionListItem{}, err
-	}
-	for i := range out.Sessions {
-		if strings.TrimSpace(out.Sessions[i].SessionID) == sessionID {
-			return out.Sessions[i], nil
-		}
-	}
-	return protocol.SessionListItem{}, fmt.Errorf("session %q not found", sessionID)
 }
 
 func tickCmd(interval time.Duration) tea.Cmd {

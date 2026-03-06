@@ -55,6 +55,7 @@ type RPCServer struct {
 	sessionStop         func(ctx context.Context, threadID, sessionID string) ([]string, error)
 
 	manifestStore     team.ManifestStore
+	projectTeamSvc    *ProjectTeamService
 	planReader        PlanReaderForRPC
 	fileReader        FileReaderForRPC
 	workspacePreparer WorkspacePreparerForRPC
@@ -83,6 +84,7 @@ type RPCServerConfig struct {
 
 	// Storage abstractions (optional; when nil, defaults use Cfg)
 	ManifestStore     team.ManifestStore
+	ProjectTeamSvc    *ProjectTeamService
 	PlanReader        PlanReaderForRPC
 	FileReader        FileReaderForRPC
 	WorkspacePreparer WorkspacePreparerForRPC
@@ -214,6 +216,11 @@ func NewRPCServer(cfg RPCServerConfig) *RPCServer {
 		srv.manifestStore = cfg.ManifestStore
 	} else {
 		srv.manifestStore = team.NewFileManifestStore(cfg.Cfg)
+	}
+	if cfg.ProjectTeamSvc != nil {
+		srv.projectTeamSvc = cfg.ProjectTeamSvc
+	} else {
+		srv.projectTeamSvc = NewProjectTeamService(cfg.Cfg, sess, srv.manifestStore)
 	}
 	if cfg.PlanReader != nil {
 		srv.planReader = cfg.PlanReader

@@ -26,6 +26,8 @@ var logsListProjectSessionsFn = listProjectSessionIDs
 var logsListSessionRunIDsFn = listSessionRunIDs
 var logsListProjectTeamRunIDsFn = listProjectTeamRunIDs
 var logsListSessionAgentsFn = listSessionAgents
+var logsListProjectTeamsFn = rpcListProjectTeams
+var logsGetProjectTeamFn = rpcGetProjectTeam
 
 var logsCmd = &cobra.Command{
 	Use:   "logs",
@@ -166,41 +168,39 @@ func resolveTargetRunIDs(ctx context.Context, runID string, sessionID string, ag
 		projectCtx, err := loadProjectContext()
 		if err == nil && projectCtx.Exists {
 			projectRoot := strings.TrimSpace(projectCtx.RootDir)
-			if projectRoot != "" {
-				if teamID != "" {
-					runIDs, err := logsListProjectTeamRunIDsFn(ctx, projectRoot, teamID)
-					if err != nil {
-						return nil, err
+			if teamID != "" {
+				runIDs, err := logsListProjectTeamRunIDsFn(ctx, projectRoot, teamID)
+				if err != nil {
+					return nil, err
+				}
+				if len(runIDs) > 0 {
+					return runIDs, nil
+				}
+			} else {
+				sessionIDs, err := logsListProjectSessionsFn(ctx, projectRoot)
+				if err == nil && len(sessionIDs) > 0 {
+					runIDs := make([]string, 0, len(sessionIDs))
+					seen := map[string]struct{}{}
+					for _, sessionID := range sessionIDs {
+						ids, err := logsListSessionRunIDsFn(ctx, sessionID)
+						if err != nil {
+							return nil, err
+						}
+						for _, rid := range ids {
+							rid = strings.TrimSpace(rid)
+							if rid == "" {
+								continue
+							}
+							if _, ok := seen[rid]; ok {
+								continue
+							}
+							seen[rid] = struct{}{}
+							runIDs = append(runIDs, rid)
+						}
 					}
+					slices.Sort(runIDs)
 					if len(runIDs) > 0 {
 						return runIDs, nil
-					}
-				} else {
-					sessionIDs, err := logsListProjectSessionsFn(ctx, projectRoot)
-					if err == nil && len(sessionIDs) > 0 {
-						runIDs := make([]string, 0, len(sessionIDs))
-						seen := map[string]struct{}{}
-						for _, sessionID := range sessionIDs {
-							ids, err := logsListSessionRunIDsFn(ctx, sessionID)
-							if err != nil {
-								return nil, err
-							}
-							for _, rid := range ids {
-								rid = strings.TrimSpace(rid)
-								if rid == "" {
-									continue
-								}
-								if _, ok := seen[rid]; ok {
-									continue
-								}
-								seen[rid] = struct{}{}
-								runIDs = append(runIDs, rid)
-							}
-						}
-						slices.Sort(runIDs)
-						if len(runIDs) > 0 {
-							return runIDs, nil
-						}
 					}
 				}
 			}
@@ -221,18 +221,13 @@ func listProjectSessionIDs(ctx context.Context, projectRoot string) ([]string, e
 	if projectRoot == "" {
 		return nil, nil
 	}
-	var out protocol.SessionListResult
-	if err := rpcCall(ctx, protocol.MethodSessionList, protocol.SessionListParams{
-		ThreadID:    detachedThreadID,
-		ProjectRoot: projectRoot,
-		Limit:       500,
-		Offset:      0,
-	}, &out); err != nil {
+	teams, err := logsListProjectTeamsFn(ctx, projectRoot)
+	if err != nil {
 		return nil, err
 	}
-	sessionIDs := make([]string, 0, len(out.Sessions))
-	for _, item := range out.Sessions {
-		sessionID := strings.TrimSpace(item.SessionID)
+	sessionIDs := make([]string, 0, len(teams))
+	for _, item := range teams {
+		sessionID := strings.TrimSpace(item.PrimarySessionID)
 		if sessionID == "" {
 			continue
 		}
@@ -321,14 +316,12 @@ func resolveRunRoleLabels(ctx context.Context, runIDs []string, sessionID string
 		projectCtx, err := loadProjectContext()
 		if err == nil && projectCtx.Exists {
 			projectRoot := strings.TrimSpace(projectCtx.RootDir)
-			if projectRoot != "" {
-				projectSessionIDs, err := logsListProjectSessionsFn(ctx, projectRoot)
-				if err != nil {
-					return nil, err
-				}
-				for _, projectSessionID := range projectSessionIDs {
-					appendSessionID(projectSessionID)
-				}
+			projectSessionIDs, err := logsListProjectSessionsFn(ctx, projectRoot)
+			if err != nil {
+				return nil, err
+			}
+			for _, projectSessionID := range projectSessionIDs {
+				appendSessionID(projectSessionID)
 			}
 		}
 	}
@@ -362,31 +355,25 @@ func listProjectTeamRunIDs(ctx context.Context, projectRoot string, teamID strin
 	if projectRoot == "" || teamID == "" {
 		return nil, nil
 	}
-	var out protocol.SessionListResult
-	if err := rpcCall(ctx, protocol.MethodSessionList, protocol.SessionListParams{
-		ThreadID:    detachedThreadID,
-		ProjectRoot: projectRoot,
-		Limit:       500,
-		Offset:      0,
-	}, &out); err != nil {
+	teamInfo, err := logsGetProjectTeamFn(ctx, projectRoot, teamID)
+	if err != nil {
 		return nil, err
 	}
-	runIDs := make([]string, 0, len(out.Sessions))
-	for _, item := range out.Sessions {
-		if strings.TrimSpace(item.TeamID) != teamID {
+	sessionID := strings.TrimSpace(teamInfo.PrimarySessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("team %q has no primary session in project %q", teamID, projectRoot)
+	}
+	runIDs := []string{}
+	sessionRunIDs, err := logsListSessionRunIDsFn(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	for _, runID := range sessionRunIDs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" || slices.Contains(runIDs, runID) {
 			continue
 		}
-		sessionRunIDs, err := logsListSessionRunIDsFn(ctx, strings.TrimSpace(item.SessionID))
-		if err != nil {
-			return nil, err
-		}
-		for _, runID := range sessionRunIDs {
-			runID = strings.TrimSpace(runID)
-			if runID == "" || slices.Contains(runIDs, runID) {
-				continue
-			}
-			runIDs = append(runIDs, runID)
-		}
+		runIDs = append(runIDs, runID)
 	}
 	slices.Sort(runIDs)
 	return runIDs, nil

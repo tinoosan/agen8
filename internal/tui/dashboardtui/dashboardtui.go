@@ -61,7 +61,7 @@ func Run(endpoint, sessionID string, opts Options) error {
 		followProjectState: opts.FollowProjectState,
 		refreshInterval:    refreshInterval,
 		connected:          true,
-		sessionMode:        "standalone",
+		sessionMode:        "team",
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()

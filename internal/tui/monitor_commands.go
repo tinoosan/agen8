@@ -165,19 +165,10 @@ func cmdNewSession(m *monitorModel, rest string) tea.Cmd {
 		return m.openNewSessionWizard()
 	}
 	req := parseNewSessionRequest(strings.TrimSpace(rest), strings.TrimSpace(m.profile))
-	switch req.Mode {
-	case "multi-agent", "team":
-		if strings.TrimSpace(req.Profile) == "" {
-			return m.openProfilePickerFor("new-multi-agent", true)
-		}
-		return m.startNewTeamSession(req.Profile, req.Goal)
-	case "single-agent", "standalone":
-		return m.startNewStandaloneSession(req.Profile, req.Goal)
-	default:
-		return func() tea.Msg {
-			return commandLinesMsg{lines: []string{"[command] usage: /new [single-agent [profile]] [goal] | /new multi-agent <profile> [goal]"}}
-		}
+	if strings.TrimSpace(req.Profile) == "" {
+		return m.openProfilePickerFor("new-team", false)
 	}
+	return m.startNewTeamSession(req.Profile, req.Goal)
 }
 
 func cmdRenameSession(m *monitorModel, rest string) tea.Cmd {
@@ -470,58 +461,29 @@ func parseNewSessionRequest(rest, defaultProfile string) newSessionRequest {
 		defaultProfile = "general"
 	}
 	if rest == "" {
-		return newSessionRequest{Mode: "single-agent", Profile: defaultProfile}
+		return newSessionRequest{Mode: "team", Profile: defaultProfile}
 	}
 	toks := strings.Fields(rest)
 	if len(toks) == 0 {
-		return newSessionRequest{Mode: "single-agent", Profile: defaultProfile}
+		return newSessionRequest{Mode: "team", Profile: defaultProfile}
 	}
 	mode := strings.ToLower(strings.TrimSpace(toks[0]))
 	switch mode {
-	case "multi-agent", "team":
+	case "multi-agent", "team", "single-agent", "standalone":
 		if len(toks) == 1 {
-			return newSessionRequest{Mode: "multi-agent"}
+			return newSessionRequest{Mode: "team"}
 		}
 		return newSessionRequest{
-			Mode:    "multi-agent",
-			Profile: strings.TrimSpace(toks[1]),
-			Goal:    strings.TrimSpace(strings.Join(toks[2:], " ")),
-		}
-	case "single-agent", "standalone":
-		if len(toks) == 1 {
-			return newSessionRequest{Mode: "single-agent", Profile: defaultProfile}
-		}
-		return newSessionRequest{
-			Mode:    "single-agent",
+			Mode:    "team",
 			Profile: strings.TrimSpace(toks[1]),
 			Goal:    strings.TrimSpace(strings.Join(toks[2:], " ")),
 		}
 	default:
 		return newSessionRequest{
-			Mode:    "single-agent",
+			Mode:    "team",
 			Profile: defaultProfile,
 			Goal:    strings.TrimSpace(rest),
 		}
-	}
-}
-
-func (m *monitorModel) startNewStandaloneSession(profileRef, goal string) tea.Cmd {
-	return func() tea.Msg {
-		var res protocol.SessionStartResult
-		if err := m.rpcRoundTrip(protocol.MethodSessionStart, protocol.SessionStartParams{
-			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
-			Mode:     "single-agent",
-			Profile:  strings.TrimSpace(profileRef),
-			Goal:     strings.TrimSpace(goal),
-			Model:    "", // Do not inherit current session's model; let profile resolve it.
-		}, &res); err != nil {
-			return commandLinesMsg{lines: []string{"[session] error: " + err.Error()}}
-		}
-		runID := strings.TrimSpace(res.PrimaryRunID)
-		if runID == "" {
-			return commandLinesMsg{lines: []string{"[session] error: session.start returned empty primaryRunId"}}
-		}
-		return monitorSwitchRunMsg{RunID: runID}
 	}
 }
 
@@ -530,7 +492,7 @@ func (m *monitorModel) startNewTeamSession(profileRef, goal string) tea.Cmd {
 		var res protocol.SessionStartResult
 		if err := m.rpcRoundTrip(protocol.MethodSessionStart, protocol.SessionStartParams{
 			ThreadID: protocol.ThreadID(strings.TrimSpace(m.rpcRun().SessionID)),
-			Mode:     "multi-agent",
+			Mode:     "team",
 			Profile:  strings.TrimSpace(profileRef),
 			Goal:     strings.TrimSpace(goal),
 			Model:    "", // Do not inherit current session's model; let profile resolve it.
@@ -543,6 +505,10 @@ func (m *monitorModel) startNewTeamSession(profileRef, goal string) tea.Cmd {
 		}
 		return monitorSwitchTeamMsg{TeamID: teamID}
 	}
+}
+
+func (m *monitorModel) startNewStandaloneSession(profileRef, goal string) tea.Cmd {
+	return m.startNewTeamSession(profileRef, goal)
 }
 
 func (m *monitorModel) enqueueTask(goal string, priority int) tea.Cmd {

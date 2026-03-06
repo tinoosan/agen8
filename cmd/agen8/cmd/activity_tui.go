@@ -27,10 +27,10 @@ func runActivityTUI(cmd *cobra.Command) error {
 	projectRoot := projectSearchDir()
 	sessionID := strings.TrimSpace(activityTUISessionID)
 	if sessionID == "" {
-		projectCtx, err := loadProjectContext()
-		if err == nil && projectCtx.Exists {
-			projectRoot = strings.TrimSpace(projectCtx.RootDir)
-			sessionID = strings.TrimSpace(projectCtx.State.ActiveSessionID)
+		resolvedRoot, _, resolvedSessionID, _, err := resolveActiveProjectScope(cmd.Context())
+		if err == nil {
+			projectRoot = resolvedRoot
+			sessionID = resolvedSessionID
 		}
 	}
 	if sessionID == "" {

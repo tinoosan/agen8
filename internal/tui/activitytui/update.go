@@ -25,7 +25,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = ""
 		}
 		if m.followProjectState {
-			return m, tea.Batch(syncSessionCmd(m.projectRoot, m.sessionID), tickCmd())
+			return m, tea.Batch(syncSessionCmd(m.projectRoot, m.endpoint, m.sessionID), tickCmd())
 		}
 		return m, tickCmd()
 

@@ -95,7 +95,7 @@ func (m *Model) renderHeader() string {
 	line := styleHeader.Render("agen8 dashboard") +
 		kit.StyleDim.Render("  ·  session: ") + kit.StyleAccent.Render(kit.Fallback(sid, "-")) +
 		kit.StyleDim.Render("  ·  ") + status +
-		kit.StyleDim.Render("  ·  mode: ") + kit.StyleStatusValue.Render(kit.Fallback(m.sessionMode, "standalone"))
+		kit.StyleDim.Render("  ·  mode: ") + kit.StyleStatusValue.Render(kit.Fallback(m.sessionMode, "team"))
 
 	if strings.TrimSpace(m.teamID) != "" && !m.isNarrow() {
 		line += kit.StyleDim.Render("  ·  team: ") + kit.StyleAccent.Render(kit.TruncateRight(m.teamID, 12))
@@ -408,7 +408,7 @@ func (m *Model) renderDetailBody(width, height int) string {
 		kit.StyleStatusKey.Render("RawStatus: ") + kit.StyleStatusValue.Render(kit.Fallback(statusLabel, "-")),
 		"",
 		kit.StyleStatusKey.Render("Session:   ") + kit.StyleStatusValue.Render(kit.Fallback(m.sessionID, "-")),
-		kit.StyleStatusKey.Render("Mode:      ") + kit.StyleStatusValue.Render(kit.Fallback(m.sessionMode, "standalone")),
+		kit.StyleStatusKey.Render("Mode:      ") + kit.StyleStatusValue.Render(kit.Fallback(m.sessionMode, "team")),
 		kit.StyleStatusKey.Render("Team:      ") + kit.StyleStatusValue.Render(kit.Fallback(m.teamID, "-")),
 		kit.StyleStatusKey.Render("Run:       ") + kit.StyleStatusValue.Render(kit.Fallback(m.runID, "-")),
 		"",
@@ -500,4 +500,3 @@ func padRight(s string, width int) string {
 	}
 	return s + strings.Repeat(" ", width-w)
 }
-

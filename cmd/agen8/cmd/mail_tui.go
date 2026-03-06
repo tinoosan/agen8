@@ -13,10 +13,10 @@ func runMailTUI(cmd *cobra.Command) error {
 	projectRoot := projectSearchDir()
 	sessionID := strings.TrimSpace(mailWatchSessionID)
 	if sessionID == "" {
-		projectCtx, err := loadProjectContext()
-		if err == nil && projectCtx.Exists {
-			projectRoot = strings.TrimSpace(projectCtx.RootDir)
-			sessionID = strings.TrimSpace(projectCtx.State.ActiveSessionID)
+		resolvedRoot, _, resolvedSessionID, _, err := resolveActiveProjectScope(cmd.Context())
+		if err == nil {
+			projectRoot = resolvedRoot
+			sessionID = resolvedSessionID
 		}
 	}
 	if sessionID == "" {

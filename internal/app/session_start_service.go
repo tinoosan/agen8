@@ -36,10 +36,10 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 		}
 	}
 	requestedMode := strings.ToLower(strings.TrimSpace(p.Mode))
-	if requestedMode != "" && requestedMode != "single-agent" && requestedMode != "multi-agent" {
+	if requestedMode != "" && requestedMode != "team" && requestedMode != "single-agent" && requestedMode != "multi-agent" && requestedMode != "standalone" {
 		return protocol.SessionStartResult{}, &protocol.ProtocolError{
 			Code:    protocol.CodeInvalidParams,
-			Message: "mode must be single-agent or multi-agent",
+			Message: "mode must be team",
 		}
 	}
 	profileRef := strings.TrimSpace(p.Profile)
@@ -63,15 +63,18 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 	}
 	teamRoles := append([]profile.RoleConfig(nil), roles...)
 	reviewerCfg, reviewerEnabled := prof.ReviewerForSession()
-	mode := "single-agent"
-	if len(teamRoles) > 1 || reviewerEnabled {
-		mode = "multi-agent"
-	}
+	mode := "team"
 
 	goal := strings.TrimSpace(p.Goal)
 	maxContext := srv.run.MaxBytesForContext
 	if maxContext <= 0 {
 		maxContext = 8 * 1024
+	}
+	projectID := ""
+	if projectRoot := strings.TrimSpace(p.ProjectRoot); projectRoot != "" {
+		if projectCtx, err := LoadProjectContext(projectRoot); err == nil {
+			projectID = strings.TrimSpace(projectCtx.Config.ProjectID)
+		}
 	}
 	sess := types.NewSession(goal)
 	sess.CurrentGoal = goal
@@ -94,6 +97,13 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 	ensureSessionReasoningForModel(&sess, sess.ActiveModel, "", "")
 	if err := srv.session.SaveSession(ctx, sess); err != nil {
 		return protocol.SessionStartResult{}, err
+	}
+	registeredProjectTeam := false
+	cleanupStart := func() {
+		if registeredProjectTeam && strings.TrimSpace(sess.ProjectRoot) != "" && srv.projectTeamSvc != nil {
+			_ = srv.projectTeamSvc.UnregisterTeam(ctx, strings.TrimSpace(sess.ProjectRoot), strings.TrimSpace(teamID))
+		}
+		_ = srv.session.Delete(ctx, strings.TrimSpace(sess.SessionID))
 	}
 
 	runIDs := make([]string, 0, len(teamRoles))
@@ -121,6 +131,7 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 			WorkerClass: "persistent",
 		}
 		if err := srv.session.SaveRun(ctx, run); err != nil {
+			cleanupStart()
 			return protocol.SessionStartResult{}, err
 		}
 		runID := strings.TrimSpace(run.RunID)
@@ -166,6 +177,7 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 			WorkerClass: "persistent",
 		}
 		if err := srv.session.SaveRun(ctx, reviewerRun); err != nil {
+			cleanupStart()
 			return protocol.SessionStartResult{}, err
 		}
 		reviewerRunID := strings.TrimSpace(reviewerRun.RunID)
@@ -185,18 +197,41 @@ func (s *sessionStartService) sessionStart(ctx context.Context, p protocol.Sessi
 	}
 	sess.CurrentRunID = primaryRunID
 	if err := srv.session.SaveSession(ctx, sess); err != nil {
+		cleanupStart()
 		return protocol.SessionStartResult{}, err
+	}
+	if strings.TrimSpace(sess.ProjectRoot) != "" {
+		if srv.projectTeamSvc == nil {
+			cleanupStart()
+			return protocol.SessionStartResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "project team service is not configured"}
+		}
+		if _, err := srv.projectTeamSvc.RegisterTeam(ctx, ProjectTeamSummary{
+			ProjectID:        projectID,
+			ProjectRoot:      strings.TrimSpace(sess.ProjectRoot),
+			TeamID:           strings.TrimSpace(teamID),
+			ProfileID:        strings.TrimSpace(prof.ID),
+			PrimarySessionID: strings.TrimSpace(sess.SessionID),
+			CoordinatorRunID: primaryRunID,
+			Status:           "active",
+		}); err != nil {
+			cleanupStart()
+			return protocol.SessionStartResult{}, err
+		}
+		registeredProjectTeam = true
 	}
 
 	if err := srv.workspacePreparer.PrepareTeamWorkspace(ctx, teamID); err != nil {
+		cleanupStart()
 		return protocol.SessionStartResult{}, err
 	}
 	manifest := team.BuildManifest(teamID, strings.TrimSpace(prof.ID), coordinatorRole, primaryRunID, teamModel, manifestRoles, time.Now().UTC().Format(time.RFC3339Nano))
 	if err := srv.manifestStore.Save(ctx, manifest); err != nil {
+		cleanupStart()
 		return protocol.SessionStartResult{}, err
 	}
 	if goal != "" {
 		if err := team.SeedCoordinatorTask(ctx, srv.taskService, strings.TrimSpace(sess.SessionID), primaryRunID, teamID, coordinatorRole, goal); err != nil {
+			cleanupStart()
 			return protocol.SessionStartResult{}, err
 		}
 	}
