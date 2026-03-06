@@ -284,6 +284,7 @@ type TeamGetManifestResult struct {
 	CoordinatorRole       string                   `json:"coordinatorRole"`
 	ReviewerRole          string                   `json:"reviewerRole,omitempty"`
 	CoordinatorRun        string                   `json:"coordinatorRunId"`
+	CoordinatorThreadID   string                   `json:"coordinatorThreadId,omitempty"`
 	Roles                 []TeamManifestRole       `json:"roles"`
 	DesiredReplicasByRole map[string]int           `json:"desiredReplicasByRole,omitempty"`
 	CreatedAt             string                   `json:"createdAt"`

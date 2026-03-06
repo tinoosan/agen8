@@ -291,6 +291,12 @@ func (s *RPCServer) teamGetManifest(ctx context.Context, p protocol.TeamGetManif
 			Error:          strings.TrimSpace(mc.Error),
 		}
 	}
+	coordinatorThreadID := ""
+	if coordRunID := strings.TrimSpace(manifest.CoordinatorRun); coordRunID != "" && s.session != nil {
+		if run, rerr := s.session.LoadRun(ctx, coordRunID); rerr == nil {
+			coordinatorThreadID = strings.TrimSpace(run.SessionID)
+		}
+	}
 	return protocol.TeamGetManifestResult{
 		TeamID:                strings.TrimSpace(manifest.TeamID),
 		ProfileID:             strings.TrimSpace(manifest.ProfileID),
@@ -299,6 +305,7 @@ func (s *RPCServer) teamGetManifest(ctx context.Context, p protocol.TeamGetManif
 		CoordinatorRole:       strings.TrimSpace(manifest.CoordinatorRole),
 		ReviewerRole:          s.resolveManifestReviewerRole(manifest.ProfileID, manifest.CoordinatorRole),
 		CoordinatorRun:        strings.TrimSpace(manifest.CoordinatorRun),
+		CoordinatorThreadID:   coordinatorThreadID,
 		Roles:                 roles,
 		DesiredReplicasByRole: cloneDesiredReplicas(manifest.DesiredReplicasByRole),
 		CreatedAt:             strings.TrimSpace(manifest.CreatedAt),

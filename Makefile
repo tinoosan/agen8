@@ -1,10 +1,21 @@
 DATA_DIR ?= ./data
 
-.PHONY: run seed-clean seed-list
+.PHONY: run seed-clean seed-list web-install web-build build
 
 # Seeding is automatic at startup (from ./defaults) for now.
 run:
 	@go run ./cmd/agen8 --data-dir "$(DATA_DIR)"
+
+# Web UI targets
+web-install:
+	@cd web && npm install
+
+web-build: web-install
+	@cd web && npm run build
+
+# Build the full binary (requires web assets to be built first)
+build: web-build
+	@go build -o bin/agen8 ./cmd/agen8
 
 seed-list:
 	@echo "DATA_DIR=$(DATA_DIR)"

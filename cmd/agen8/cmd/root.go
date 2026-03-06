@@ -147,6 +147,7 @@ func init() {
 	rootCmd.AddCommand(monitorCmd)
 	rootCmd.AddCommand(profilesCmd)
 	rootCmd.AddCommand(authCmd)
+	rootCmd.AddCommand(webCmd)
 }
 
 func envBool(key string, def bool) bool {
