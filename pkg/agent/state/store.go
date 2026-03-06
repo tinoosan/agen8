@@ -118,9 +118,11 @@ type MessageStore interface {
 
 // TaskFilter specifies query criteria for ListTasks.
 type TaskFilter struct {
-	SessionID      string // Filter by session
-	RunID          string // Filter by run
-	TeamID         string // Filter by team
+	SessionID         string // Filter by session
+	RunID             string // Filter by run
+	SourceTeamID      string // Filter by source team
+	DestinationTeamID string // Filter by destination team
+	TeamID            string // Destination-team compatibility alias
 	AssignedRole   string // Filter by assigned role
 	AssignedToType string // Filter by assignee type: team|role|agent
 	AssignedTo     string // Filter by assignee id/name
@@ -153,10 +155,12 @@ type RunStats struct {
 
 // MessageClaimFilter constrains claim/list operations for bus consumers.
 type MessageClaimFilter struct {
-	ThreadID string
-	RunID    string
-	TeamID   string
-	TaskRef  string
+	ThreadID          string
+	RunID             string
+	SourceTeamID      string
+	DestinationTeamID string
+	TeamID            string
+	TaskRef           string
 	// Optional assignee routing filters (resolved from projected task row via task_ref).
 	AssignedToType string
 	AssignedTo     string
@@ -166,13 +170,15 @@ type MessageClaimFilter struct {
 
 // MessageFilter specifies query criteria for list/count operations.
 type MessageFilter struct {
-	ThreadID string
-	RunID    string
-	TeamID   string
-	TaskRef  string
-	Channel  string
-	Kinds    []string
-	Statuses []string
+	ThreadID          string
+	RunID             string
+	SourceTeamID      string
+	DestinationTeamID string
+	TeamID            string
+	TaskRef           string
+	Channel           string
+	Kinds             []string
+	Statuses          []string
 
 	Limit  int
 	Offset int

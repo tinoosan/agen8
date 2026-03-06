@@ -21,12 +21,14 @@ const (
 
 // Task is the canonical DB-backed unit of work for autonomous agents.
 type Task struct {
-	TaskID       string         `json:"taskId"`
-	SessionID    string         `json:"sessionId,omitempty"`
-	RunID        string         `json:"runId,omitempty"`
-	TeamID       string         `json:"teamId,omitempty"`
-	AssignedRole string         `json:"assignedRole,omitempty"`
-	AssignedToType string       `json:"assignedToType,omitempty"` // team | role | agent
+	TaskID            string         `json:"taskId"`
+	SessionID         string         `json:"sessionId,omitempty"`
+	RunID             string         `json:"runId,omitempty"`
+	SourceTeamID      string         `json:"sourceTeamId,omitempty"`
+	DestinationTeamID string         `json:"destinationTeamId,omitempty"`
+	TeamID            string         `json:"teamId,omitempty"`
+	AssignedRole      string         `json:"assignedRole,omitempty"`
+	AssignedToType    string         `json:"assignedToType,omitempty"` // team | role | agent
 	AssignedTo     string       `json:"assignedTo,omitempty"`     // team id, role name, or agent id
 	ClaimedByAgentID string     `json:"claimedByAgentId,omitempty"`
 	RoleSnapshot string         `json:"roleSnapshot,omitempty"`
@@ -74,6 +76,19 @@ func (t *Task) NormalizeStatus() {
 		return
 	}
 	t.Status = TaskStatus(status)
+}
+
+func (t *Task) NormalizeTeamFields() {
+	if t == nil {
+		return
+	}
+	t.SourceTeamID = strings.TrimSpace(t.SourceTeamID)
+	t.DestinationTeamID = strings.TrimSpace(t.DestinationTeamID)
+	t.TeamID = strings.TrimSpace(t.TeamID)
+	if t.DestinationTeamID == "" && t.TeamID != "" {
+		t.DestinationTeamID = t.TeamID
+	}
+	t.TeamID = t.DestinationTeamID
 }
 
 // TaskResult captures the outcome of a task.

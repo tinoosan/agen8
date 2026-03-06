@@ -375,6 +375,7 @@ func (m *Manager) publishTaskMessage(ctx context.Context, task types.Task) error
 		return nil
 	}
 	now := time.Now().UTC()
+	task.NormalizeTeamFields()
 	taskCopy := task
 	meta := task.Metadata
 	kind := strings.TrimSpace(metadataString(meta, "messageKind"))
@@ -395,11 +396,13 @@ func (m *Manager) publishTaskMessage(ctx context.Context, task types.Task) error
 		CorrelationID: correlationID,
 		CausationID:   strings.TrimSpace(metadataString(meta, "causationId")),
 		Producer:      strings.TrimSpace(metadataString(meta, "producer")),
-		ThreadID:      strings.TrimSpace(task.SessionID),
-		RunID:         strings.TrimSpace(task.RunID),
-		TeamID:        strings.TrimSpace(task.TeamID),
-		Channel:       types.MessageChannelInbox,
-		Kind:          kind,
+		ThreadID:          strings.TrimSpace(task.SessionID),
+		RunID:             strings.TrimSpace(task.RunID),
+		SourceTeamID:      strings.TrimSpace(task.SourceTeamID),
+		DestinationTeamID: strings.TrimSpace(task.DestinationTeamID),
+		TeamID:            strings.TrimSpace(task.TeamID),
+		Channel:           types.MessageChannelInbox,
+		Kind:              kind,
 		Body: map[string]any{
 			"goal":     strings.TrimSpace(task.Goal),
 			"taskKind": strings.TrimSpace(task.TaskKind),
@@ -742,13 +745,14 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 		consumerID = "task-service"
 	}
 	filter := state.MessageClaimFilter{
-		ThreadID:       strings.TrimSpace(task.SessionID),
-		TeamID:         strings.TrimSpace(task.TeamID),
-		TaskRef:        strings.TrimSpace(task.TaskID),
-		AssignedToType: strings.TrimSpace(task.AssignedToType),
-		AssignedTo:     strings.TrimSpace(task.AssignedTo),
-		Channel:        types.MessageChannelInbox,
-		Kinds:          []string{types.MessageKindTask, types.MessageKindUserInput},
+		ThreadID:          strings.TrimSpace(task.SessionID),
+		DestinationTeamID: strings.TrimSpace(task.DestinationTeamID),
+		TeamID:            strings.TrimSpace(task.TeamID),
+		TaskRef:           strings.TrimSpace(task.TaskID),
+		AssignedToType:    strings.TrimSpace(task.AssignedToType),
+		AssignedTo:        strings.TrimSpace(task.AssignedTo),
+		Channel:           types.MessageChannelInbox,
+		Kinds:             []string{types.MessageKindTask, types.MessageKindUserInput},
 	}
 	scheduler := m.scheduler
 	if scheduler == nil {
@@ -760,7 +764,7 @@ func (m *Manager) claimBackingMessageForTask(ctx context.Context, task types.Tas
 	}
 	// Team tasks can be consumed from a role session different from the task/session thread.
 	// Retry without thread pinning so team+assignee routing remains authoritative.
-	if errors.Is(err, state.ErrMessageNotFound) && strings.TrimSpace(task.TeamID) != "" {
+	if errors.Is(err, state.ErrMessageNotFound) && strings.TrimSpace(task.DestinationTeamID) != "" {
 		relaxed := filter
 		relaxed.ThreadID = ""
 		msg, err = scheduler.ClaimNextMessage(ctx, relaxed, ttl, consumerID)

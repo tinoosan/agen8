@@ -8,6 +8,8 @@ type Task struct {
 	ID                string    `json:"id"`
 	ThreadID          ThreadID  `json:"threadId"`
 	RunID             RunID     `json:"runId"`
+	SourceTeamID      string    `json:"sourceTeamId,omitempty"`
+	DestinationTeamID string    `json:"destinationTeamId,omitempty"`
 	TeamID            string    `json:"teamId,omitempty"`
 	Source            string    `json:"source,omitempty"`
 	BatchMode         bool      `json:"batchMode,omitempty"`
@@ -52,15 +54,17 @@ type TaskListResult struct {
 }
 
 type TaskCreateParams struct {
-	ThreadID       ThreadID `json:"threadId"`
-	TeamID         string   `json:"teamId,omitempty"`
-	RunID          string   `json:"runId,omitempty"`
-	Goal           string   `json:"goal"`
-	TaskKind       string   `json:"taskKind,omitempty"`
-	AssignedToType string   `json:"assignedToType,omitempty"`
-	AssignedTo     string   `json:"assignedTo,omitempty"`
-	AssignedRole   string   `json:"assignedRole,omitempty"`
-	Priority       int      `json:"priority,omitempty"`
+	ThreadID          ThreadID `json:"threadId"`
+	TeamID            string   `json:"teamId,omitempty"`
+	SourceTeamID      string   `json:"sourceTeamId,omitempty"`
+	DestinationTeamID string   `json:"destinationTeamId,omitempty"`
+	RunID             string   `json:"runId,omitempty"`
+	Goal              string   `json:"goal"`
+	TaskKind          string   `json:"taskKind,omitempty"`
+	AssignedToType    string   `json:"assignedToType,omitempty"`
+	AssignedTo        string   `json:"assignedTo,omitempty"`
+	AssignedRole      string   `json:"assignedRole,omitempty"`
+	Priority          int      `json:"priority,omitempty"`
 }
 
 type TaskCreateResult struct {

@@ -21,26 +21,28 @@ type MessageGetParams struct {
 }
 
 type MailMessage struct {
-	MessageID   string     `json:"messageId"`
-	ThreadID    ThreadID   `json:"threadId"`
-	RunID       RunID      `json:"runId,omitempty"`
-	TeamID      string     `json:"teamId,omitempty"`
-	Channel     string     `json:"channel"`
-	Kind        string     `json:"kind"`
-	Status      string     `json:"status"`
-	Subject     string     `json:"subject,omitempty"`
-	Summary     string     `json:"summary,omitempty"`
-	BodyPreview string     `json:"bodyPreview,omitempty"`
-	Error       string     `json:"error,omitempty"`
-	TaskID      string     `json:"taskId,omitempty"`
-	TaskStatus  string     `json:"taskStatus,omitempty"`
-	ReadOnly    bool       `json:"readOnly,omitempty"`
-	CanClaim    bool       `json:"canClaim,omitempty"`
-	CanComplete bool       `json:"canComplete,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
-	ProcessedAt *time.Time `json:"processedAt,omitempty"`
-	Task        *Task      `json:"task,omitempty"`
+	MessageID         string     `json:"messageId"`
+	ThreadID          ThreadID   `json:"threadId"`
+	RunID             RunID      `json:"runId,omitempty"`
+	SourceTeamID      string     `json:"sourceTeamId,omitempty"`
+	DestinationTeamID string     `json:"destinationTeamId,omitempty"`
+	TeamID            string     `json:"teamId,omitempty"`
+	Channel           string     `json:"channel"`
+	Kind              string     `json:"kind"`
+	Status            string     `json:"status"`
+	Subject           string     `json:"subject,omitempty"`
+	Summary           string     `json:"summary,omitempty"`
+	BodyPreview       string     `json:"bodyPreview,omitempty"`
+	Error             string     `json:"error,omitempty"`
+	TaskID            string     `json:"taskId,omitempty"`
+	TaskStatus        string     `json:"taskStatus,omitempty"`
+	ReadOnly          bool       `json:"readOnly,omitempty"`
+	CanClaim          bool       `json:"canClaim,omitempty"`
+	CanComplete       bool       `json:"canComplete,omitempty"`
+	CreatedAt         time.Time  `json:"createdAt"`
+	UpdatedAt         time.Time  `json:"updatedAt"`
+	ProcessedAt       *time.Time `json:"processedAt,omitempty"`
+	Task              *Task      `json:"task,omitempty"`
 }
 
 type MessageListResult struct {

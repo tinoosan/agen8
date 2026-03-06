@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 const (
 	MessageChannelInbox  = "inbox"
@@ -30,11 +33,13 @@ type AgentMessage struct {
 	CausationID   string `json:"causationId,omitempty"`
 	Producer      string `json:"producer,omitempty"`
 
-	ThreadID string `json:"threadId"`
-	RunID    string `json:"runId,omitempty"`
-	TeamID   string `json:"teamId,omitempty"`
-	Channel  string `json:"channel"`
-	Kind     string `json:"kind"`
+	ThreadID          string `json:"threadId"`
+	RunID             string `json:"runId,omitempty"`
+	SourceTeamID      string `json:"sourceTeamId,omitempty"`
+	DestinationTeamID string `json:"destinationTeamId,omitempty"`
+	TeamID            string `json:"teamId,omitempty"`
+	Channel           string `json:"channel"`
+	Kind              string `json:"kind"`
 
 	Body    map[string]any `json:"body,omitempty"`
 	TaskRef string         `json:"taskRef,omitempty"`
@@ -53,4 +58,20 @@ type AgentMessage struct {
 	CreatedAt   *time.Time `json:"createdAt,omitempty"`
 	UpdatedAt   *time.Time `json:"updatedAt,omitempty"`
 	ProcessedAt *time.Time `json:"processedAt,omitempty"`
+}
+
+func (m *AgentMessage) NormalizeTeamFields() {
+	if m == nil {
+		return
+	}
+	m.SourceTeamID = strings.TrimSpace(m.SourceTeamID)
+	m.DestinationTeamID = strings.TrimSpace(m.DestinationTeamID)
+	m.TeamID = strings.TrimSpace(m.TeamID)
+	if m.DestinationTeamID == "" && m.TeamID != "" {
+		m.DestinationTeamID = m.TeamID
+	}
+	m.TeamID = m.DestinationTeamID
+	if m.Task != nil {
+		m.Task.NormalizeTeamFields()
+	}
 }

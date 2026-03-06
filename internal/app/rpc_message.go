@@ -35,12 +35,13 @@ func (s *RPCServer) messageList(ctx context.Context, p protocol.MessageListParam
 		return protocol.MessageListResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "scope must be team or run"}
 	}
 	filter := state.MessageFilter{
-		ThreadID: scope.threadID,
-		TeamID:   scope.teamID,
-		RunID:    scope.runID,
-		Kinds:    append([]string(nil), p.Kinds...),
-		Statuses: append([]string(nil), p.Statuses...),
-		SortBy:   "created_at",
+		ThreadID:          scope.threadID,
+		DestinationTeamID: scope.teamID,
+		TeamID:            scope.teamID,
+		RunID:             scope.runID,
+		Kinds:             append([]string(nil), p.Kinds...),
+		Statuses:          append([]string(nil), p.Statuses...),
+		SortBy:            "created_at",
 	}
 	if scopeMode == "team" || (scope.teamID != "" && strings.TrimSpace(p.RunID) == "") {
 		filter.RunID = ""
@@ -90,7 +91,7 @@ func (s *RPCServer) messageGet(ctx context.Context, p protocol.MessageGetParams)
 		return protocol.MessageGetResult{}, &protocol.ProtocolError{Code: protocol.CodeTurnNotFound, Message: "message not found"}
 	}
 	teamID := strings.TrimSpace(p.TeamID)
-	if teamID != "" && strings.TrimSpace(msg.TeamID) != teamID {
+	if teamID != "" && strings.TrimSpace(msg.DestinationTeamID) != teamID && strings.TrimSpace(msg.TeamID) != teamID {
 		return protocol.MessageGetResult{}, &protocol.ProtocolError{Code: protocol.CodeTurnNotFound, Message: "message not found"}
 	}
 	rows, err := s.projectMessages(ctx, []types.AgentMessage{msg})
@@ -166,22 +167,24 @@ func (s *RPCServer) projectMessage(ctx context.Context, msg types.AgentMessage) 
 	}
 	subject, summary, bodyPreview := summarizeMessageContent(msg, task)
 	row := protocol.MailMessage{
-		MessageID:   strings.TrimSpace(msg.MessageID),
-		ThreadID:    protocol.ThreadID(strings.TrimSpace(msg.ThreadID)),
-		RunID:       protocol.RunID(strings.TrimSpace(msg.RunID)),
-		TeamID:      strings.TrimSpace(msg.TeamID),
-		Channel:     strings.TrimSpace(msg.Channel),
-		Kind:        strings.TrimSpace(msg.Kind),
-		Status:      strings.TrimSpace(msg.Status),
-		Subject:     subject,
-		Summary:     summary,
-		BodyPreview: bodyPreview,
-		Error:       firstNonEmpty(strings.TrimSpace(msg.Error), bodyString(msg.Body, "error"), bodyString(msg.Metadata, "error")),
-		TaskID:      strings.TrimSpace(msg.TaskRef),
-		ReadOnly:    task == nil,
-		CreatedAt:   timeutil.OrNow(msg.CreatedAt),
-		UpdatedAt:   timeutil.OrNow(msg.UpdatedAt),
-		ProcessedAt: msg.ProcessedAt,
+		MessageID:         strings.TrimSpace(msg.MessageID),
+		ThreadID:          protocol.ThreadID(strings.TrimSpace(msg.ThreadID)),
+		RunID:             protocol.RunID(strings.TrimSpace(msg.RunID)),
+		SourceTeamID:      strings.TrimSpace(msg.SourceTeamID),
+		DestinationTeamID: strings.TrimSpace(msg.DestinationTeamID),
+		TeamID:            strings.TrimSpace(msg.TeamID),
+		Channel:           strings.TrimSpace(msg.Channel),
+		Kind:              strings.TrimSpace(msg.Kind),
+		Status:            strings.TrimSpace(msg.Status),
+		Subject:           subject,
+		Summary:           summary,
+		BodyPreview:       bodyPreview,
+		Error:             firstNonEmpty(strings.TrimSpace(msg.Error), bodyString(msg.Body, "error"), bodyString(msg.Metadata, "error")),
+		TaskID:            strings.TrimSpace(msg.TaskRef),
+		ReadOnly:          task == nil,
+		CreatedAt:         timeutil.OrNow(msg.CreatedAt),
+		UpdatedAt:         timeutil.OrNow(msg.UpdatedAt),
+		ProcessedAt:       msg.ProcessedAt,
 	}
 	if task != nil {
 		pt := protocolTaskFromTypesTask(*task)
