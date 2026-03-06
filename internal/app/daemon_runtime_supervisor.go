@@ -1245,6 +1245,7 @@ type spawnProfileAndRole struct {
 	teamRoles                []string
 	teamRoleDescriptions     map[string]string
 	isCoordinator            bool
+	isReviewer               bool
 	allowSubagents           bool
 	roleCodeExecOnlyOverride *bool
 	reviewerRole             string
@@ -1372,6 +1373,7 @@ func (s *runtimeSupervisor) resolveSpawnProfileAndRole(parent context.Context, s
 
 	if out.reviewerCfg != nil && strings.EqualFold(strings.TrimSpace(out.roleName), strings.TrimSpace(out.reviewerRole)) {
 		out.isCoordinator = false
+		out.isReviewer = true
 		out.allowSubagents = false
 		out.roleCodeExecOnlyOverride = out.reviewerCfg.CodeExecOnly
 		out.activeProfile = buildReviewerRuntimeProfile(*out.reviewerCfg)
@@ -1801,7 +1803,7 @@ func (s *runtimeSupervisor) wireSpawnTools(
 
 	var allowedToolsForRun []string
 	if !isChildRun {
-		roleAllowedTools, removedTools := sanitizeAllowedToolsForRole(activeProfile.AllowedTools, teamID, role.isCoordinator)
+		roleAllowedTools, removedTools := sanitizeAllowedToolsForRole(activeProfile.AllowedTools, teamID, role.isCoordinator, role.isReviewer)
 		if len(removedTools) > 0 {
 			emitEvent(parent, events.Event{
 				Type:    "daemon.warning",

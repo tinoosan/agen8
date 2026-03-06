@@ -27,9 +27,9 @@ func isAlwaysEnabledTool(name string) bool {
 	return name == "obsidian"
 }
 
-func sanitizeAllowedToolsForRole(allowed []string, teamID string, isCoordinator bool) (sanitized []string, removed []string) {
+func sanitizeAllowedToolsForRole(allowed []string, teamID string, isCoordinator bool, isReviewer bool) (sanitized []string, removed []string) {
 	teamID = strings.TrimSpace(teamID)
-	if teamID == "" || isCoordinator {
+	if teamID == "" || isCoordinator || isReviewer {
 		return append([]string(nil), allowed...), nil
 	}
 	restricted := map[string]struct{}{}

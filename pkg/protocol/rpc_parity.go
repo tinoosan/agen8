@@ -289,6 +289,13 @@ type TeamGetManifestResult struct {
 	CreatedAt             string                   `json:"createdAt"`
 }
 
+type TeamDeleteResult struct {
+	TeamID             string   `json:"teamId"`
+	ProjectRoot        string   `json:"projectRoot,omitempty"`
+	DeletedSessionIDs  []string `json:"deletedSessionIds,omitempty"`
+	DeletedArtifactSet bool     `json:"deletedArtifactSet,omitempty"`
+}
+
 type PlanGetParams struct {
 	ThreadID      ThreadID `json:"threadId"`
 	TeamID        string   `json:"teamId,omitempty"`
@@ -437,6 +444,12 @@ type ProjectGetTeamParams struct {
 
 type ProjectGetTeamResult struct {
 	Team ProjectTeamSummary `json:"team"`
+}
+
+type ProjectDeleteTeamsResult struct {
+	ProjectRoot       string   `json:"projectRoot,omitempty"`
+	DeletedTeamIDs    []string `json:"deletedTeamIds,omitempty"`
+	DeletedSessionIDs []string `json:"deletedSessionIds,omitempty"`
 }
 
 type ProjectSetActiveSessionParams struct {

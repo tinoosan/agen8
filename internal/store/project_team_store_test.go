@@ -2,9 +2,12 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/tinoosan/agen8/pkg/config"
+	"github.com/tinoosan/agen8/pkg/fsutil"
+	_ "modernc.org/sqlite"
 )
 
 func TestProjectTeamStore_CRUD(t *testing.T) {
@@ -48,5 +51,47 @@ func TestProjectTeamStore_CRUD(t *testing.T) {
 	}
 	if _, err := LoadProjectTeam(ctx, cfg, "/tmp/project-a", "team-alpha"); err == nil {
 		t.Fatalf("expected deleted project team lookup to fail")
+	}
+}
+
+func TestDeleteTeamScopedData_RemovesTasksMessagesAndArtifacts(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", fsutil.GetSQLitePath(cfg.DataDir))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS tasks (task_id TEXT PRIMARY KEY, team_id TEXT DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS messages (message_id TEXT PRIMARY KEY, team_id TEXT DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS artifacts (artifact_id INTEGER PRIMARY KEY AUTOINCREMENT, team_id TEXT DEFAULT '')`,
+		`INSERT INTO tasks(task_id, team_id) VALUES ('task-1', 'team-z')`,
+		`INSERT INTO messages(message_id, team_id) VALUES ('msg-1', 'team-z')`,
+		`INSERT INTO artifacts(team_id) VALUES ('team-z')`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("exec %q: %v", stmt, err)
+		}
+	}
+	if err := DeleteTeamScopedData(ctx, cfg, "team-z"); err != nil {
+		t.Fatalf("DeleteTeamScopedData: %v", err)
+	}
+	for _, check := range []struct {
+		table string
+		col   string
+	}{
+		{table: "tasks", col: "task_id"},
+		{table: "messages", col: "message_id"},
+		{table: "artifacts", col: "artifact_id"},
+	} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM `+check.table+` WHERE team_id = ?`, "team-z").Scan(&count); err != nil {
+			t.Fatalf("count %s: %v", check.table, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s rows remaining=%d want 0", check.table, count)
+		}
 	}
 }

@@ -156,3 +156,33 @@ func rpcGetProjectTeam(ctx context.Context, projectRoot, teamID string) (protoco
 	}
 	return out.Team, nil
 }
+
+func rpcDeleteTeam(ctx context.Context, teamID, projectRoot string) (protocol.TeamDeleteResult, error) {
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		return protocol.TeamDeleteResult{}, fmt.Errorf("team id is required")
+	}
+	var out protocol.TeamDeleteResult
+	if err := rpcCall(ctx, protocol.MethodTeamDelete, protocol.TeamDeleteParams{
+		ThreadID:    detachedThreadID,
+		TeamID:      teamID,
+		ProjectRoot: strings.TrimSpace(projectRoot),
+	}, &out); err != nil {
+		return protocol.TeamDeleteResult{}, err
+	}
+	return out, nil
+}
+
+func rpcDeleteProjectTeams(ctx context.Context, projectRoot string) (protocol.ProjectDeleteTeamsResult, error) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return protocol.ProjectDeleteTeamsResult{}, fmt.Errorf("project root is required")
+	}
+	var out protocol.ProjectDeleteTeamsResult
+	if err := rpcCall(ctx, protocol.MethodProjectDeleteTeams, protocol.ProjectDeleteTeamsParams{
+		ProjectRoot: projectRoot,
+	}, &out); err != nil {
+		return protocol.ProjectDeleteTeamsResult{}, err
+	}
+	return out, nil
+}

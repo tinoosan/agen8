@@ -213,6 +213,7 @@ func buildCoordinatorTeamRules(teamSize int) string {
 	b.WriteString("- As coordinator, you may assign tasks to any valid role.\n")
 	b.WriteString("- As coordinator, you MUST NOT perform specialist work unless it is a job for your role.\n")
 	b.WriteString("- As coordinator, your only responsibilities are: break down goals, delegate tasks, review callbacks, and track completion.\n")
+	b.WriteString("- After delegating all specialist tasks for the current goal, call final_answer with status=\"succeeded\" summarizing what was delegated. Callbacks from completed specialist tasks will arrive as separate tasks for you to review — do not wait for them within the current task.\n")
 	b.WriteString("- In multi-role teams, only self-assign when necessary. If you assign to your own coordinator role, set allowSelfAssign=true and provide selfAssignReason in task_create.\n")
 	if teamSize > 1 {
 		b.WriteString("- In code_exec_only mode, delegate with tools.task_create(goal=\"...\", assignedRole=\"role\"). NEVER use spawnWorker=True - coordinators in multi-role teams must delegate to co-agents instead.\n")

@@ -19,13 +19,12 @@ team:
            - batchItemTaskId = the item's "callbackTaskId"
            - decision = approve / retry / escalate
            - feedback = concise reasoning for your decision
-        3. After all items are reviewed, write a final summary and delegate follow-up tasks if needed.
+        3. After all items are reviewed, write a final summary. Use retry/escalate decisions to flag items that need follow-up — the coordinator will handle delegation.
 
         Do NOT search the filesystem for tasks. Everything you need is in the goal.
     code_exec_only: true
     allowed_tools:
       - task_review
-      - task_create
     skills:
       - reviewing
   roles:

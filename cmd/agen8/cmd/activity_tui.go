@@ -23,7 +23,7 @@ var activityCmd = &cobra.Command{
 }
 
 func runActivityTUI(cmd *cobra.Command) error {
-	followProjectState := strings.TrimSpace(activityTUISessionID) == ""
+	explicitSession := strings.TrimSpace(activityTUISessionID) != ""
 	projectRoot := projectSearchDir()
 	sessionID := strings.TrimSpace(activityTUISessionID)
 	if sessionID == "" {
@@ -33,12 +33,26 @@ func runActivityTUI(cmd *cobra.Command) error {
 			sessionID = resolvedSessionID
 		}
 	}
+
+	// Interactive mode: project-first when we have a project root and no
+	// explicit --session-id; session-first otherwise.
+	if !explicitSession && strings.TrimSpace(projectRoot) != "" {
+		return activitytui.Run(resolvedRPCEndpoint(), activitytui.Options{
+			ProjectRoot:        projectRoot,
+			FollowProjectState: true,
+			SessionID:          sessionID,
+			SessionExplicit:    false,
+		})
+	}
+
 	if sessionID == "" {
 		return fmt.Errorf("active team session is required (start a team with `agen8 team start <profile-ref>` or pass --session-id)")
 	}
-	return activitytui.Run(resolvedRPCEndpoint(), sessionID, activitytui.Options{
+	return activitytui.Run(resolvedRPCEndpoint(), activitytui.Options{
 		ProjectRoot:        projectRoot,
-		FollowProjectState: followProjectState,
+		FollowProjectState: !explicitSession,
+		SessionID:          sessionID,
+		SessionExplicit:    explicitSession,
 	})
 }
 

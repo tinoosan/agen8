@@ -23,6 +23,9 @@ func registerProjectHandlers(s *RPCServer, reg methodRegistry) error {
 			return addBoundHandler[protocol.ProjectGetTeamParams, protocol.ProjectGetTeamResult](reg, protocol.MethodProjectGetTeam, false, s.projectGetTeam)
 		},
 		func() error {
+			return addBoundHandler[protocol.ProjectDeleteTeamsParams, protocol.ProjectDeleteTeamsResult](reg, protocol.MethodProjectDeleteTeams, false, s.projectDeleteTeams)
+		},
+		func() error {
 			return addBoundHandler[protocol.LogsQueryParams, protocol.LogsQueryResult](reg, protocol.MethodLogsQuery, false, s.logsQuery)
 		},
 		func() error {
@@ -127,6 +130,53 @@ func (s *RPCServer) projectGetTeam(ctx context.Context, p protocol.ProjectGetTea
 		UpdatedAt:        strings.TrimSpace(summary.UpdatedAt),
 		ManifestPresent:  summary.ManifestPresent,
 	}}, nil
+}
+
+func (s *RPCServer) projectDeleteTeams(ctx context.Context, p protocol.ProjectDeleteTeamsParams) (protocol.ProjectDeleteTeamsResult, error) {
+	projectRoot, err := resolveProjectRootForRPC(strings.TrimSpace(p.Cwd), strings.TrimSpace(p.ProjectRoot))
+	if err != nil {
+		return protocol.ProjectDeleteTeamsResult{}, err
+	}
+	if s.projectTeamSvc == nil {
+		return protocol.ProjectDeleteTeamsResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidState, Message: "project team service is not configured"}
+	}
+	teams, err := s.projectTeamSvc.ListTeams(ctx, projectRoot)
+	if err != nil {
+		return protocol.ProjectDeleteTeamsResult{}, err
+	}
+	deleteSvc := NewTeamDeleteService(s.cfg, s.session, s.manifestStore, s.projectTeamSvc)
+	deletedTeamIDs := make([]string, 0, len(teams))
+	deletedSessionSet := map[string]struct{}{}
+	for _, summary := range teams {
+		teamID := strings.TrimSpace(summary.TeamID)
+		if teamID == "" {
+			continue
+		}
+		out, err := deleteSvc.DeleteTeam(ctx, TeamDeleteInput{
+			TeamID:      teamID,
+			ProjectRoot: projectRoot,
+		})
+		if err != nil {
+			return protocol.ProjectDeleteTeamsResult{}, err
+		}
+		deletedTeamIDs = append(deletedTeamIDs, teamID)
+		for _, sessionID := range out.DeletedSessionIDs {
+			sessionID = strings.TrimSpace(sessionID)
+			if sessionID == "" {
+				continue
+			}
+			deletedSessionSet[sessionID] = struct{}{}
+		}
+	}
+	deletedSessionIDs := make([]string, 0, len(deletedSessionSet))
+	for sessionID := range deletedSessionSet {
+		deletedSessionIDs = append(deletedSessionIDs, sessionID)
+	}
+	return protocol.ProjectDeleteTeamsResult{
+		ProjectRoot:       projectRoot,
+		DeletedTeamIDs:    deletedTeamIDs,
+		DeletedSessionIDs: deletedSessionIDs,
+	}, nil
 }
 
 func (s *RPCServer) projectSetActiveSession(_ context.Context, p protocol.ProjectSetActiveSessionParams) (protocol.ProjectSetActiveSessionResult, error) {

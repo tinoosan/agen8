@@ -47,7 +47,7 @@ func TestSanitizeAllowedToolsForRole_RemovesTaskCreateForTeamWorker(t *testing.T
 	sanitized, removed := sanitizeAllowedToolsForRole(
 		[]string{"fs_read", "task_create", "task_review"},
 		"team-1",
-		false,
+		false, false,
 	)
 	if len(removed) != 1 || removed[0] != "task_create" {
 		t.Fatalf("removed=%v", removed)
@@ -61,12 +61,26 @@ func TestSanitizeAllowedToolsForRole_KeepsTaskCreateForCoordinator(t *testing.T)
 	sanitized, removed := sanitizeAllowedToolsForRole(
 		[]string{"fs_read", "task_create", "task_review"},
 		"team-1",
-		true,
+		true, false,
 	)
 	if len(removed) != 0 {
 		t.Fatalf("removed=%v", removed)
 	}
 	if len(sanitized) != 3 {
+		t.Fatalf("sanitized=%v", sanitized)
+	}
+}
+
+func TestSanitizeAllowedToolsForRole_KeepsTaskCreateForReviewer(t *testing.T) {
+	sanitized, removed := sanitizeAllowedToolsForRole(
+		[]string{"task_review", "task_create"},
+		"team-1",
+		false, true,
+	)
+	if len(removed) != 0 {
+		t.Fatalf("removed=%v", removed)
+	}
+	if len(sanitized) != 2 {
 		t.Fatalf("sanitized=%v", sanitized)
 	}
 }

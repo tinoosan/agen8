@@ -1502,7 +1502,7 @@ func (s *Session) runTask(ctx context.Context, taskID string, task types.Task) e
 	}
 
 	base := tasksBase(strings.TrimSpace(s.cfg.TeamID), strings.TrimSpace(s.cfg.RoleName), doneAt, taskID)
-	artifacts := sanitizeArtifactPaths(dedupeArtifactPaths(runRes.Artifacts))
+	artifacts := filterExistingArtifacts(ctx, s.cfg.Agent, sanitizeArtifactPaths(dedupeArtifactPaths(runRes.Artifacts)), s.cfg.Logf)
 	if summaryPath := s.writeTaskSummary(ctx, base, taskID, task.Goal, tr, artifacts); summaryPath != "" {
 		tr.Artifacts = append([]string{summaryPath}, artifacts...)
 	} else {
@@ -2142,7 +2142,7 @@ Use task_review for EACH item below:
 BATCH ITEMS:
 %s
 
-After reviewing all items, provide a final review summary and next actions. If work quality is weak/incomplete, delegate concrete follow-up tasks before finishing.`,
+After reviewing all items, provide a final review summary. Use retry/escalate for items needing follow-up — the coordinator handles delegation.`,
 		len(undelivered),
 		truncateText(group.parentTaskID, 32),
 		batchTaskID,
@@ -2866,6 +2866,25 @@ func sanitizeArtifactPaths(artifacts []string) []string {
 			continue
 		}
 		out = append(out, p)
+	}
+	return out
+}
+
+// filterExistingArtifacts checks each artifact path against the VFS and drops
+// paths that do not exist. This prevents phantom artifacts (hallucinated by the
+// model) from appearing in task summaries and deliverables.
+func filterExistingArtifacts(ctx context.Context, runner agent.Runner, artifacts []string, logf func(string, ...any)) []string {
+	if len(artifacts) == 0 || runner == nil {
+		return artifacts
+	}
+	out := make([]string, 0, len(artifacts))
+	for _, p := range artifacts {
+		resp := runner.ExecHostOp(ctx, types.HostOpRequest{Op: types.HostOpFSStat, Path: p})
+		if resp.Ok {
+			out = append(out, p)
+		} else if logf != nil {
+			logf("artifact %q not found on disk, dropping from deliverables", p)
+		}
 	}
 	return out
 }

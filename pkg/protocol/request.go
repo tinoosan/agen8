@@ -28,6 +28,7 @@ const (
 	MethodActivityList           = "activity.list"
 	MethodTeamGetStatus          = "team.getStatus"
 	MethodTeamGetManifest        = "team.getManifest"
+	MethodTeamDelete             = "team.delete"
 	MethodPlanGet                = "plan.get"
 	MethodModelList              = "model.list"
 	MethodControlSetModel        = "control.setModel"
@@ -44,6 +45,7 @@ const (
 	MethodProjectSetActive       = "project.setActiveSession"
 	MethodProjectListTeams       = "project.listTeams"
 	MethodProjectGetTeam         = "project.getTeam"
+	MethodProjectDeleteTeams     = "project.deleteTeams"
 	MethodLogsQuery              = "logs.query"
 	MethodActivityStream         = "activity.stream"
 	MethodRuntimeGetRunState     = "runtime.getRunState"
@@ -131,6 +133,17 @@ type ArtifactGetParams struct {
 // SessionDeleteParams are the params for session.delete.
 type SessionDeleteParams struct {
 	SessionID string `json:"sessionId"`
+}
+
+type TeamDeleteParams struct {
+	ThreadID    ThreadID `json:"threadId,omitempty"`
+	TeamID      string   `json:"teamId"`
+	ProjectRoot string   `json:"projectRoot,omitempty"`
+}
+
+type ProjectDeleteTeamsParams struct {
+	Cwd         string `json:"cwd,omitempty"`
+	ProjectRoot string `json:"projectRoot,omitempty"`
 }
 
 type SoulGetParams struct{}

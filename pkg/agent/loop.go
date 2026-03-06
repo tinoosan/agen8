@@ -20,9 +20,37 @@ import (
 var (
 	// repeatedInvalidToolCallThreshold bounds repeated invalid tool-call arg loops.
 	repeatedInvalidToolCallThreshold = 6
+
+	// textOnlyNudgeThreshold bounds how many times the loop will nudge the agent
+	// to call final_answer before giving up. If the agent produces text without
+	// tool calls this many times, the loop fails.
+	textOnlyNudgeThreshold = 3
 )
 
 var ErrRepeatedInvalidToolCall = errors.New("agent repeated invalid tool call")
+var ErrTextOnlyCompletion = errors.New("agent responded with text only without calling final_answer")
+
+// TextOnlyCompletionError is returned when the agent repeatedly produces text
+// without calling final_answer or any other tool.
+type TextOnlyCompletionError struct {
+	Count    int
+	LastText string
+	Elapsed  time.Duration
+}
+
+func (e *TextOnlyCompletionError) Error() string {
+	return fmt.Sprintf("agent produced text without calling final_answer %d times: %s", e.Count, truncateForError(e.LastText, 120))
+}
+
+func (e *TextOnlyCompletionError) Unwrap() error { return ErrTextOnlyCompletion }
+
+func truncateForError(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
+}
 
 const (
 	compactionNoticeServer = "Context was compacted automatically (server-side) to stay within a safe budget for long-running tasks. " +
@@ -114,6 +142,7 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 	lastFailedTool := ""
 	lastFailureReason := ""
 	consecutiveInvalid := 0
+	textOnlyNudges := 0
 
 	for step := startStep; ; step++ {
 		system := baseSystem
@@ -168,9 +197,21 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 		}
 
 		if len(resp.ToolCalls) == 0 {
-			finalText := strings.TrimSpace(resp.Text)
-			msgs = append(msgs, llmtypes.LLMMessage{Role: "assistant", Content: finalText})
-			return RunResult{Text: finalText, Status: types.TaskStatusSucceeded}, msgs, step, nil
+			textOnlyNudges++
+			bareText := strings.TrimSpace(resp.Text)
+			if textOnlyNudgeThreshold > 0 && textOnlyNudges >= textOnlyNudgeThreshold {
+				return RunResult{}, nil, 0, &TextOnlyCompletionError{
+					Count:    textOnlyNudges,
+					LastText: bareText,
+					Elapsed:  time.Since(loopStart),
+				}
+			}
+			msgs = append(msgs, llmtypes.LLMMessage{Role: "assistant", Content: bareText})
+			msgs = append(msgs, llmtypes.LLMMessage{
+				Role:    "developer",
+				Content: "You produced text without calling any tools. You MUST call the final_answer tool to end your turn. If your work is done, use status=\"succeeded\". If you cannot complete the task, use status=\"failed\" with an error message explaining why. Do not output bare text.",
+			})
+			continue
 		}
 
 		assistantMsg := llmtypes.LLMMessage{
@@ -245,6 +286,7 @@ func (a *DefaultAgent) runConversation(ctx context.Context, msgs []llmtypes.LLMM
 				continue
 			}
 			consecutiveInvalid = 0
+			textOnlyNudges = 0 // successful tool dispatch = agent is making progress
 			pending = append(pending, pendingHostOp{req: op, callID: strings.TrimSpace(tc.ID)})
 		}
 

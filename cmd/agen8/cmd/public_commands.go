@@ -16,6 +16,7 @@ import (
 
 var (
 	teamStartModel string
+	teamDeleteID   string
 	taskSendRole   string
 	taskListView   string
 	taskListLimit  int
@@ -64,6 +65,32 @@ var projectStatusCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "active_session=%s\n", blankDash(projectCtx.State.ActiveSessionID))
 		fmt.Fprintf(cmd.OutOrStdout(), "active_team=%s\n", blankDash(projectCtx.State.ActiveTeamID))
 		fmt.Fprintf(cmd.OutOrStdout(), "active_run=%s\n", blankDash(projectCtx.State.ActiveRunID))
+		return nil
+	},
+}
+
+var projectDeleteTeamsCmd = &cobra.Command{
+	Use:   "delete-teams",
+	Short: "Delete all teams in the current project and their related runtime data",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectCtx, err := loadProjectContext()
+		if err != nil {
+			return err
+		}
+		if !projectCtx.Exists {
+			return fmt.Errorf("project is not initialized; run `agen8 project init` first")
+		}
+		out, err := rpcDeleteProjectTeams(cmd.Context(), strings.TrimSpace(projectCtx.RootDir))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Deleted %d team(s)\n", len(out.DeletedTeamIDs))
+		if len(out.DeletedTeamIDs) > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "Teams: %s\n", strings.Join(out.DeletedTeamIDs, ", "))
+		}
+		if len(out.DeletedSessionIDs) > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "Sessions: %s\n", strings.Join(out.DeletedSessionIDs, ", "))
+		}
 		return nil
 	},
 }
@@ -167,6 +194,41 @@ var teamStartCmd = &cobra.Command{
 			return nil
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Next: `agen8 monitor`\n")
+		return nil
+	},
+}
+
+var teamDeleteCmd = &cobra.Command{
+	Use:   "delete [team-id]",
+	Short: "Delete a team and all related runtime data",
+	Args:  cobra.RangeArgs(0, 1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		projectCtx, err := loadProjectContext()
+		if err != nil {
+			return err
+		}
+		teamID := strings.TrimSpace(teamDeleteID)
+		if len(args) > 0 {
+			teamID = strings.TrimSpace(args[0])
+		}
+		if teamID == "" && projectCtx.Exists {
+			teamID = strings.TrimSpace(projectCtx.State.ActiveTeamID)
+		}
+		if teamID == "" {
+			return fmt.Errorf("team id is required")
+		}
+		projectRoot := ""
+		if projectCtx.Exists {
+			projectRoot = strings.TrimSpace(projectCtx.RootDir)
+		}
+		out, err := rpcDeleteTeam(cmd.Context(), teamID, projectRoot)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Deleted team %s\n", blankDash(out.TeamID))
+		if len(out.DeletedSessionIDs) > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "Deleted sessions: %s\n", strings.Join(out.DeletedSessionIDs, ", "))
+		}
 		return nil
 	},
 }
@@ -312,6 +374,7 @@ func init() {
 	projectInitCmd.Flags().StringVar(&initDataDirOverride, "data-dir", "", "project-level data-dir override")
 
 	teamStartCmd.Flags().StringVar(&teamStartModel, "model", "", "model override for the started team")
+	teamDeleteCmd.Flags().StringVar(&teamDeleteID, "team-id", "", "team id to delete (defaults to active project team)")
 
 	taskSendCmd.Flags().StringVar(&taskSendRole, "role", "", "assign the task to a specific role")
 	taskListCmd.Flags().StringVar(&taskListView, "view", "inbox", "task view to inspect (inbox|outbox)")
@@ -320,8 +383,10 @@ func init() {
 
 	projectCmd.AddCommand(projectInitCmd)
 	projectCmd.AddCommand(projectStatusCmd)
+	projectCmd.AddCommand(projectDeleteTeamsCmd)
 	teamCmd.AddCommand(teamListCmd)
 	teamCmd.AddCommand(teamStartCmd)
+	teamCmd.AddCommand(teamDeleteCmd)
 	taskCmd.AddCommand(taskSendCmd)
 	taskCmd.AddCommand(taskListCmd)
 	viewCmd.AddCommand(viewDashboardCmd)

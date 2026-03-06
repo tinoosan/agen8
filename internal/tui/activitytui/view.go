@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	tuishared "github.com/tinoosan/agen8/internal/tui"
 	"github.com/tinoosan/agen8/internal/tui/kit"
 	"github.com/tinoosan/agen8/pkg/types"
@@ -24,18 +25,27 @@ var (
 )
 
 const (
-	compactWidth = 60
-	smallHeight  = 14
+	compactWidth        = 60
+	compactWidthProject = 80
+	smallHeight         = 14
 )
 
-func (m *Model) isNarrow() bool { return m.width < compactWidth }
-func (m *Model) isShort() bool  { return m.height < smallHeight }
+func (m *Model) isNarrow() bool  { return m.width < compactWidth }
+func (m *Model) isCompact() bool { return m.width < compactWidthProject }
+func (m *Model) isShort() bool   { return m.height < smallHeight }
 
 // ── View ───────────────────────────────────────────────────────────────
 
 func (m *Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return ""
+	}
+
+	switch m.mode {
+	case viewProject:
+		return m.renderProjectView()
+	case viewTeam:
+		// fall through to existing rendering
 	}
 
 	var header, footer, body string
@@ -97,7 +107,12 @@ func (m *Model) renderHeader() string {
 	if sid == "" {
 		sid = "-"
 	}
-	left := styleHeader.Render("agen8 activity") +
+	prefix := ""
+	if m.selectedTeam != nil {
+		prefix = styleDim.Render("← ") + kit.StyleAccent.Render(teamShortLabel(*m.selectedTeam)) + styleDim.Render("  ·  ")
+	}
+
+	left := prefix + styleHeader.Render("agen8 activity") +
 		styleDim.Render("  ·  session: ") + kit.StyleAccent.Render(sid) +
 		styleDim.Render("  ·  ") + status +
 		styleDim.Render("  ·  ") + styleMeta.Render(count)
@@ -119,6 +134,18 @@ func (m *Model) renderHeader() string {
 // ── Footer ─────────────────────────────────────────────────────────────
 
 func (m *Model) renderFooter() string {
+	backKey := "q"
+	backLabel := "quit"
+	if m.selectedTeam != nil {
+		backKey = "esc"
+		backLabel = "back"
+	}
+
+	teamNav := ""
+	if m.selectedTeam != nil && !m.isNarrow() {
+		teamNav = styleDim.Render("[/]") + " prev/next team  "
+	}
+
 	if m.isNarrow() {
 		hints := styleDim.Render("j/k") + " " +
 			styleDim.Render("↵") + " " +
@@ -126,7 +153,7 @@ func (m *Model) renderFooter() string {
 			styleDim.Render("g/G") + " " +
 			styleDim.Render("t") + " " +
 			styleDim.Render("r") + " " +
-			styleDim.Render("q")
+			styleDim.Render(backKey)
 		return lipgloss.NewStyle().
 			Width(m.width).MaxWidth(m.width).MaxHeight(1).
 			Padding(0, 1).
@@ -138,9 +165,9 @@ func (m *Model) renderFooter() string {
 		styleDim.Render("esc") + " close  " +
 		styleDim.Render("g/G") + " top/bottom  " +
 		styleDim.Render("t") + " timestamps  " +
-		styleDim.Render("pgup/pgdn") + " page  " +
+		teamNav +
 		styleDim.Render("r") + " refresh  " +
-		styleDim.Render("q") + " quit"
+		styleDim.Render(backKey) + " " + backLabel
 
 	return lipgloss.NewStyle().
 		Width(m.width).MaxWidth(m.width).MaxHeight(1).
@@ -453,4 +480,352 @@ func renderMarkdown(md string, width int) string {
 		return ""
 	}
 	return strings.TrimRight(mdRenderer.RenderMarkdown(md, width), "\n")
+}
+
+// ---------------------------------------------------------------------------
+// Project overview rendering
+// ---------------------------------------------------------------------------
+
+func (m *Model) renderProjectView() string {
+	header := m.renderProjectHeader()
+	footer := m.renderProjectFooter()
+	summary := ""
+	reserved := 2 // header + footer
+	if !m.isShort() {
+		summary = m.renderProjectSummaryBar()
+		reserved++
+	}
+
+	bodyHeight := m.height - reserved
+	if bodyHeight < 1 {
+		out := header + "\n" + footer
+		return lipgloss.NewStyle().MaxHeight(m.height).MaxWidth(m.width).Render(out)
+	}
+
+	body := m.renderTeamTable(m.width, bodyHeight)
+	body = lipgloss.NewStyle().MaxHeight(bodyHeight).Render(body)
+
+	out := header + "\n" + body + "\n" + footer
+	if summary != "" {
+		out = header + "\n" + summary + "\n" + body + "\n" + footer
+	}
+	return lipgloss.NewStyle().MaxHeight(m.height).MaxWidth(m.width).Render(out)
+}
+
+func (m *Model) renderProjectHeader() string {
+	status := kit.StyleOK.Render("● connected")
+	if !m.connected {
+		status = kit.StyleErr.Render("● disconnected")
+	}
+
+	pid := kit.Fallback(kit.TruncateRight(m.projectID, 20), "-")
+	teamCount := fmt.Sprintf("%d teams", len(m.teams))
+
+	line := styleHeader.Render("agen8 activity") +
+		styleDim.Render("  ·  ") + kit.StyleAccent.Render(pid) +
+		styleDim.Render("  ·  ") + styleMeta.Render(teamCount) +
+		styleDim.Render("  ·  ") + status
+
+	if m.lastErr != "" {
+		line += styleDim.Render("  ·  ") + kit.StyleErr.Render("err: "+kit.Truncate(m.lastErr, 40))
+	}
+	if m.notice != "" {
+		line += styleDim.Render("  ·  ") + kit.StylePending.Render(kit.Truncate(m.notice, 28))
+	}
+
+	return lipgloss.NewStyle().
+		Width(m.width).MaxWidth(m.width).MaxHeight(1).Padding(0, 1).
+		Render(line)
+}
+
+func (m *Model) renderProjectSummaryBar() string {
+	var pending, active, done, runningAgents int
+	for _, t := range m.teams {
+		pending += t.Pending
+		active += t.Active
+		done += t.Done
+		runningAgents += t.RunningAgents
+	}
+
+	pendingLabel := kit.StylePending.Render(fmt.Sprintf("⏳ %d pending", pending))
+	activeLabel := kit.StyleOK.Render(fmt.Sprintf("● %d active", active))
+	doneLabel := styleDim.Render(fmt.Sprintf("✓ %d done", done))
+	runningLabel := kit.StyleOK.Render(fmt.Sprintf("agents:%d", runningAgents))
+
+	var line string
+	if m.isCompact() {
+		line = pendingLabel +
+			styleDim.Render("  ") + activeLabel +
+			styleDim.Render("  ") + doneLabel
+	} else {
+		line = pendingLabel +
+			styleDim.Render("  ") + activeLabel +
+			styleDim.Render("  ") + doneLabel +
+			styleDim.Render("  ·  ") + runningLabel
+	}
+
+	return lipgloss.NewStyle().
+		Width(m.width).MaxWidth(m.width).MaxHeight(1).Padding(0, 1).
+		Render(line)
+}
+
+func (m *Model) renderProjectFooter() string {
+	var hints string
+	if m.isNarrow() {
+		hints = styleDim.Render("j/k") + " " +
+			styleDim.Render("↵") + " " +
+			styleDim.Render("r") + " " +
+			styleDim.Render("q")
+	} else {
+		hints = styleDim.Render("j/k") + " scroll  " +
+			styleDim.Render("enter") + " open team  " +
+			styleDim.Render("g/G") + " first/last  " +
+			styleDim.Render("r") + " refresh  " +
+			styleDim.Render("q") + " quit"
+	}
+	return lipgloss.NewStyle().
+		Width(m.width).MaxWidth(m.width).MaxHeight(1).Padding(0, 1).
+		Render(hints)
+}
+
+func (m *Model) renderTeamTable(width, height int) string {
+	header := m.renderTeamTableHeader(width)
+	if len(m.teams) == 0 {
+		empty := styleDim.Render("No teams found for this project.")
+		body := lipgloss.NewStyle().Width(width).Height(max(1, height-1)).Padding(0, 1).Render(empty)
+		return header + "\n" + body
+	}
+
+	rows := m.buildTeamRows(width)
+	visibleRows := max(1, height-1)
+	start := m.teamSel - visibleRows/2
+	if start < 0 {
+		start = 0
+	}
+	maxStart := max(0, len(rows)-visibleRows)
+	if start > maxStart {
+		start = maxStart
+	}
+
+	content := kit.ViewportSlice(strings.Join(rows, "\n"), visibleRows, start)
+	body := lipgloss.NewStyle().
+		Width(width).Height(visibleRows).Padding(0, 1).
+		Render(content)
+
+	return header + "\n" + body
+}
+
+func (m *Model) renderTeamTableHeader(width int) string {
+	const markerW = 2
+	inner := max(12, width-2-markerW)
+
+	if m.isNarrow() {
+		line := strings.Repeat(" ", markerW) +
+			padRight("TEAM", max(6, inner-16)) + " " +
+			padRight("STATUS", 14)
+		return lipgloss.NewStyle().Padding(0, 1).Width(width).Render(styleDim.Render(line))
+	}
+	if m.isCompact() {
+		statusW := 10
+		profileW := 14
+		tasksW := 12
+		teamW := max(8, inner-(statusW+profileW+tasksW+3))
+		line := strings.Repeat(" ", markerW) +
+			padRight("TEAM", teamW) + " " +
+			padRight("STATUS", statusW) + " " +
+			padRight("PROFILE", profileW) + " " +
+			padRight("TASKS", tasksW)
+		return lipgloss.NewStyle().Padding(0, 1).Width(width).Render(styleDim.Render(line))
+	}
+
+	// Full width columns (no cost — activity focuses on ops).
+	teamW := 14
+	statusW := 10
+	profileW := 14
+	coordW := 12
+	agentsW := 8
+	pendW := 5
+	actW := 5
+	doneW := 5
+	ageW := max(6, inner-(teamW+statusW+profileW+coordW+agentsW+pendW+actW+doneW+8))
+
+	line := strings.Repeat(" ", markerW) +
+		padRight("TEAM", teamW) + " " +
+		padRight("STATUS", statusW) + " " +
+		padRight("PROFILE", profileW) + " " +
+		padRight("COORD", coordW) + " " +
+		padRight("AGENTS", agentsW) + " " +
+		padRight("PEND", pendW) + " " +
+		padRight("ACT", actW) + " " +
+		padRight("DONE", doneW) + " " +
+		padRight("AGE", ageW)
+	return lipgloss.NewStyle().Padding(0, 1).Width(width).Render(styleDim.Render(line))
+}
+
+func (m *Model) buildTeamRows(width int) []string {
+	rows := make([]string, 0, len(m.teams))
+	const markerW = 2
+	inner := max(12, width-2-markerW)
+
+	for i, row := range m.teams {
+		isSel := i == m.teamSel
+		marker := "  "
+		if isSel {
+			marker = kit.StyleAccent.Render("› ")
+		}
+
+		teamLabel := teamShortLabel(row)
+
+		if m.isNarrow() {
+			teamW := max(6, inner-16)
+			line := marker +
+				styleMeta.Render(padRight(kit.TruncateRight(teamLabel, teamW), teamW)) + " " +
+				renderTeamStatusCell(row, 14, m.spinFrame)
+			rows = append(rows, line)
+			continue
+		}
+
+		if m.isCompact() {
+			statusW := 10
+			profileW := 14
+			tasksW := 12
+			teamW := max(8, inner-(statusW+profileW+tasksW+3))
+			tasksSummary := fmt.Sprintf("%d/%d/%d", row.Pending, row.Active, row.Done)
+			line := marker +
+				styleMeta.Render(padRight(kit.TruncateRight(teamLabel, teamW), teamW)) + " " +
+				renderTeamStatusCell(row, statusW, m.spinFrame) + " " +
+				styleDim.Render(padRight(kit.TruncateRight(kit.Fallback(row.ProfileID, "-"), profileW), profileW)) + " " +
+				styleMeta.Render(padRight(tasksSummary, tasksW))
+			rows = append(rows, line)
+			continue
+		}
+
+		// Full width (no cost — activity focuses on ops).
+		teamW := 14
+		statusW := 10
+		profileW := 14
+		coordW := 12
+		agentsW := 8
+		pendW := 5
+		actW := 5
+		doneW := 5
+		ageW := max(6, inner-(teamW+statusW+profileW+coordW+agentsW+pendW+actW+doneW+8))
+
+		agentStr := fmt.Sprintf("%d/%d", row.RunningAgents, row.TotalAgents)
+		coordLabel := kit.Fallback(kit.TruncateRight(row.CoordinatorRole, coordW), "-")
+
+		line := marker +
+			styleMeta.Render(padRight(kit.TruncateRight(teamLabel, teamW), teamW)) + " " +
+			renderTeamStatusCell(row, statusW, m.spinFrame) + " " +
+			styleDim.Render(padRight(kit.TruncateRight(kit.Fallback(row.ProfileID, "-"), profileW), profileW)) + " " +
+			styleMeta.Render(padRight(coordLabel, coordW)) + " " +
+			kit.StyleOK.Render(padRight(agentStr, agentsW)) + " " +
+			kit.StylePending.Render(padRight(fmt.Sprintf("%d", row.Pending), pendW)) + " " +
+			kit.StyleOK.Render(padRight(fmt.Sprintf("%d", row.Active), actW)) + " " +
+			styleDim.Render(padRight(fmt.Sprintf("%d", row.Done), doneW)) + " " +
+			styleDim.Render(padRight(relativeAge(row.UpdatedAt), ageW))
+		rows = append(rows, line)
+	}
+	return rows
+}
+
+// teamShortLabel returns a compact display name for a team.
+func teamShortLabel(row teamRow) string {
+	id := strings.TrimSpace(row.TeamID)
+	profile := strings.TrimSpace(row.ProfileID)
+
+	hash := strings.TrimPrefix(id, "team-")
+	if len(hash) > 8 {
+		hash = hash[:8]
+	}
+	if hash == "" {
+		hash = kit.Fallback(id, "-")
+	}
+
+	if profile != "" {
+		return profile + "·" + hash[:min(4, len(hash))]
+	}
+	return hash
+}
+
+func renderTeamStatusCell(row teamRow, width, spinFrame int) string {
+	if row.HasBlockedTasks {
+		return kit.StyleErr.Render(padRight("blocked", width))
+	}
+	hasActiveTasks := row.Pending > 0 || row.Active > 0
+	if row.RunningAgents > 0 {
+		if hasActiveTasks && row.CoordinatorStatus != "" && isRunningStatus(row.CoordinatorStatus) {
+			return kit.StyleOK.Render(padRight(kit.SpinnerFrames[spinFrame%len(kit.SpinnerFrames)]+" working", width))
+		}
+		if hasActiveTasks {
+			return kit.StyleOK.Render(padRight("active", width))
+		}
+		return kit.StylePending.Render(padRight("idle", width))
+	}
+	s := strings.ToLower(strings.TrimSpace(row.Status))
+	switch s {
+	case "active":
+		return kit.StylePending.Render(padRight("idle", width))
+	case "registered":
+		return styleDim.Render(padRight("registered", width))
+	default:
+		return styleDim.Render(padRight(kit.Fallback(s, "—"), width))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers (replicated from dashboardtui — unexported there)
+// ---------------------------------------------------------------------------
+
+func padRight(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	w := runewidth.StringWidth(s)
+	if w >= width {
+		return runewidth.Truncate(s, width, "")
+	}
+	return s + strings.Repeat(" ", width-w)
+}
+
+func relativeAge(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "—"
+	}
+	ts, ok := parseTime(raw)
+	if !ok {
+		return kit.TruncateRight(raw, 8)
+	}
+	d := time.Since(ts)
+	if d < 0 {
+		d = 0
+	}
+	if d < 2*time.Second {
+		return "just now"
+	}
+	if d < time.Minute {
+		secs := int(d.Seconds() + 0.5)
+		if secs < 2 {
+			return "just now"
+		}
+		return fmt.Sprintf("%ds", secs)
+	}
+	if d >= 2*time.Minute {
+		return fmt.Sprintf("%dm stale", int(d.Minutes()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%dh", int(d.Hours()))
+}
+
+func parseTime(raw string) (time.Time, bool) {
+	layouts := []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }

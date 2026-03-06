@@ -265,3 +265,34 @@ func DeleteProjectTeam(ctx context.Context, cfg config.Config, projectRoot, team
 	}
 	return nil
 }
+
+func DeleteTeamScopedData(ctx context.Context, cfg config.Config, teamID string) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		return fmt.Errorf("team id is required: %w", ErrInvalid)
+	}
+	db, err := getSQLiteDB(cfg)
+	if err != nil {
+		return err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	statements := []string{
+		`DELETE FROM artifacts WHERE team_id = ?`,
+		`DELETE FROM messages WHERE team_id = ?`,
+		`DELETE FROM tasks WHERE team_id = ?`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt, teamID); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "no such table") {
+				continue
+			}
+			return fmt.Errorf("delete team scoped data: %w", err)
+		}
+	}
+	return nil
+}

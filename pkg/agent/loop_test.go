@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	llmtypes "github.com/tinoosan/agen8/pkg/llm/types"
@@ -138,7 +139,16 @@ func TestDefaultAgent_RunConversation_SuccessfulToolProgressStillCompletes(t *te
 				},
 			},
 			{
-				Text: "done",
+				ToolCalls: []llmtypes.ToolCall{
+					{
+						ID:   "tc-2",
+						Type: "function",
+						Function: llmtypes.ToolCallFunction{
+							Name:      "final_answer",
+							Arguments: `{"text":"done","status":"succeeded","error":"","artifacts":[]}`,
+						},
+					},
+				},
 			},
 		},
 	}
@@ -163,7 +173,20 @@ func TestDefaultAgent_RunConversation_SuccessfulToolProgressStillCompletes(t *te
 
 func TestDefaultAgent_RunConversation_EmptyPromptSourceFallsBackToBaseSystemPrompt(t *testing.T) {
 	llm := &scriptedStreamingLLM{
-		responses: []llmtypes.LLMResponse{{Text: "done"}},
+		responses: []llmtypes.LLMResponse{
+			{
+				ToolCalls: []llmtypes.ToolCall{
+					{
+						ID:   "tc-1",
+						Type: "function",
+						Function: llmtypes.ToolCallFunction{
+							Name:      "final_answer",
+							Arguments: `{"text":"done","status":"succeeded","error":"","artifacts":[]}`,
+						},
+					},
+				},
+			},
+		},
 	}
 	a := &DefaultAgent{
 		LLM:          llm,
@@ -181,5 +204,154 @@ func TestDefaultAgent_RunConversation_EmptyPromptSourceFallsBackToBaseSystemProm
 	}
 	if got := llm.lastReq.System; got != "HARNESS_PROMPT_SHOULD_BE_PRESENT" {
 		t.Fatalf("system prompt = %q, want harness prompt fallback", got)
+	}
+}
+
+func TestDefaultAgent_RunConversation_TextOnlyResponseTriggersNudge(t *testing.T) {
+	llm := &scriptedStreamingLLM{
+		responses: []llmtypes.LLMResponse{
+			// First response: text only (triggers nudge)
+			{Text: "I need to think about this..."},
+			// Second response: proper final_answer (succeeds after nudge)
+			{
+				ToolCalls: []llmtypes.ToolCall{
+					{
+						ID:   "tc-1",
+						Type: "function",
+						Function: llmtypes.ToolCallFunction{
+							Name:      "final_answer",
+							Arguments: `{"text":"done","status":"succeeded","error":"","artifacts":[]}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	a := &DefaultAgent{
+		LLM:          llm,
+		Exec:         fixedHostExecutor{resp: types.HostOpResponse{Ok: true}},
+		Model:        "test-model",
+		ToolRegistry: &fixedToolRegistry{},
+	}
+
+	res, msgs, _, err := a.RunConversation(context.Background(), []llmtypes.LLMMessage{{Role: "user", Content: "do work"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v", err)
+	}
+	if res.Status != types.TaskStatusSucceeded {
+		t.Fatalf("status=%q, want %q", res.Status, types.TaskStatusSucceeded)
+	}
+	if res.Text != "done" {
+		t.Fatalf("text=%q, want %q", res.Text, "done")
+	}
+
+	// Verify the developer nudge message was injected into the conversation.
+	foundNudge := false
+	for _, m := range msgs {
+		if m.Role == "developer" && strings.Contains(m.Content, "MUST call the final_answer tool to end your turn") {
+			foundNudge = true
+			break
+		}
+	}
+	if !foundNudge {
+		t.Fatal("expected developer nudge message in conversation history")
+	}
+}
+
+func TestDefaultAgent_RunConversation_RepeatedTextOnlyTripsCircuitBreaker(t *testing.T) {
+	prev := textOnlyNudgeThreshold
+	textOnlyNudgeThreshold = 2
+	t.Cleanup(func() {
+		textOnlyNudgeThreshold = prev
+	})
+
+	llm := &scriptedStreamingLLM{
+		responses: []llmtypes.LLMResponse{
+			// Always returns text only, never calls final_answer.
+			{Text: "still thinking..."},
+		},
+	}
+	a := &DefaultAgent{
+		LLM:          llm,
+		Exec:         fixedHostExecutor{resp: types.HostOpResponse{Ok: true}},
+		Model:        "test-model",
+		ToolRegistry: &fixedToolRegistry{},
+	}
+
+	_, _, _, err := a.RunConversation(context.Background(), []llmtypes.LLMMessage{{Role: "user", Content: "do work"}})
+	if err == nil {
+		t.Fatal("expected text-only completion error")
+	}
+	var typedErr *TextOnlyCompletionError
+	if !errors.As(err, &typedErr) {
+		t.Fatalf("expected TextOnlyCompletionError, got %T (%v)", err, err)
+	}
+	if typedErr.Count != 2 {
+		t.Fatalf("typedErr.Count=%d, want 2", typedErr.Count)
+	}
+	if !errors.Is(err, ErrTextOnlyCompletion) {
+		t.Fatal("expected error to wrap ErrTextOnlyCompletion")
+	}
+}
+
+func TestDefaultAgent_RunConversation_ToolCallResetsTextOnlyNudgeCounter(t *testing.T) {
+	prev := textOnlyNudgeThreshold
+	textOnlyNudgeThreshold = 2
+	t.Cleanup(func() {
+		textOnlyNudgeThreshold = prev
+	})
+
+	llm := &scriptedStreamingLLM{
+		responses: []llmtypes.LLMResponse{
+			// Step 1: text only (nudge counter = 1)
+			{Text: "let me think..."},
+			// Step 2: successful tool call (resets nudge counter to 0)
+			{
+				ToolCalls: []llmtypes.ToolCall{
+					{
+						ID:   "tc-1",
+						Type: "function",
+						Function: llmtypes.ToolCallFunction{
+							Name:      "task_create",
+							Arguments: `{"goal":"delegate"}`,
+						},
+					},
+				},
+			},
+			// Step 3: text only again (nudge counter = 1, NOT 2)
+			{Text: "delegated, waiting..."},
+			// Step 4: proper final_answer (succeeds)
+			{
+				ToolCalls: []llmtypes.ToolCall{
+					{
+						ID:   "tc-2",
+						Type: "function",
+						Function: llmtypes.ToolCallFunction{
+							Name:      "final_answer",
+							Arguments: `{"text":"delegated work","status":"succeeded","error":"","artifacts":[]}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	a := &DefaultAgent{
+		LLM:          llm,
+		Exec:         fixedHostExecutor{resp: types.HostOpResponse{Ok: true}},
+		Model:        "test-model",
+		ToolRegistry: &fixedToolRegistry{},
+	}
+
+	// With threshold=2 and NO reset, this would fail at step 3 (2 text-only responses total).
+	// With the reset, the tool call at step 2 resets the counter, so step 3 is only count=1.
+	res, _, _, err := a.RunConversation(context.Background(), []llmtypes.LLMMessage{{Role: "user", Content: "coordinate"}})
+	if err != nil {
+		t.Fatalf("RunConversation: %v (expected success because tool call resets nudge counter)", err)
+	}
+	if res.Status != types.TaskStatusSucceeded {
+		t.Fatalf("status=%q, want %q", res.Status, types.TaskStatusSucceeded)
+	}
+	if res.Text != "delegated work" {
+		t.Fatalf("text=%q, want %q", res.Text, "delegated work")
 	}
 }

@@ -23,12 +23,39 @@ func registerTeamHandlers(s *RPCServer, reg methodRegistry) error {
 			return addBoundHandler[protocol.TeamGetManifestParams, protocol.TeamGetManifestResult](reg, protocol.MethodTeamGetManifest, false, s.teamGetManifest)
 		},
 		func() error {
+			return addBoundHandler[protocol.TeamDeleteParams, protocol.TeamDeleteResult](reg, protocol.MethodTeamDelete, false, s.teamDelete)
+		},
+		func() error {
 			return addBoundHandler[protocol.PlanGetParams, protocol.PlanGetResult](reg, protocol.MethodPlanGet, false, s.planGet)
 		},
 		func() error {
 			return addBoundHandler[protocol.ModelListParams, protocol.ModelListResult](reg, protocol.MethodModelList, false, s.modelList)
 		},
 	)
+}
+
+func (s *RPCServer) teamDelete(ctx context.Context, p protocol.TeamDeleteParams) (protocol.TeamDeleteResult, error) {
+	teamID := strings.TrimSpace(p.TeamID)
+	if teamID == "" {
+		return protocol.TeamDeleteResult{}, &protocol.ProtocolError{Code: protocol.CodeInvalidParams, Message: "teamId is required"}
+	}
+	svc := NewTeamDeleteService(s.cfg, s.session, s.manifestStore, s.projectTeamSvc)
+	summary, err := svc.DeleteTeam(ctx, TeamDeleteInput{
+		TeamID:      teamID,
+		ProjectRoot: strings.TrimSpace(p.ProjectRoot),
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return protocol.TeamDeleteResult{}, &protocol.ProtocolError{Code: protocol.CodeItemNotFound, Message: err.Error()}
+		}
+		return protocol.TeamDeleteResult{}, err
+	}
+	return protocol.TeamDeleteResult{
+		TeamID:             strings.TrimSpace(summary.TeamID),
+		ProjectRoot:        strings.TrimSpace(summary.ProjectRoot),
+		DeletedSessionIDs:  append([]string(nil), summary.DeletedSessionIDs...),
+		DeletedArtifactSet: summary.DeletedArtifactSet,
+	}, nil
 }
 
 func pricingKnownForRun(ctx context.Context, session pkgsession.Service, runID string) bool {
