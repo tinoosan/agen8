@@ -20,6 +20,7 @@ export default function TeamFocus({ teamId }: TeamFocusProps) {
 
   const threadId = manifest?.coordinatorThreadId ?? null
   const coordinatorRole = manifest?.coordinatorRole ?? null
+  const coordinatorRunId = manifest?.coordinatorRunId ?? null
   const isActive = (status?.active ?? 0) > 0
   const cardStatus = isActive ? 'active' : 'idle'
 
@@ -66,7 +67,7 @@ export default function TeamFocus({ teamId }: TeamFocusProps) {
 
         {/* Conversation */}
         <div style={{ flex: 1, minHeight: 0 }}>
-          <Conversation threadId={threadId} teamId={teamId} coordinatorRole={coordinatorRole} />
+          <Conversation threadId={threadId} teamId={teamId} coordinatorRole={coordinatorRole} coordinatorRunId={coordinatorRunId} />
         </div>
       </div>
 

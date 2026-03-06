@@ -8,6 +8,7 @@ import type { Item, UserMessageContent, AgentMessageContent } from '../lib/types
 const mockUseConversation = vi.fn()
 const mockUseActivity = vi.fn()
 const mockUseTaskHistory = vi.fn()
+const mockUseThinkingEvents = vi.fn()
 const mockRpcCall = vi.fn()
 
 vi.mock('../hooks/useConversation', () => ({
@@ -20,6 +21,10 @@ vi.mock('../hooks/useActivity', () => ({
 
 vi.mock('../hooks/useTaskHistory', () => ({
   useTaskHistory: (...args: unknown[]) => mockUseTaskHistory(...args),
+}))
+
+vi.mock('../hooks/useThinkingEvents', () => ({
+  useThinkingEvents: (...args: unknown[]) => mockUseThinkingEvents(...args),
 }))
 
 vi.mock('../lib/rpc', () => ({
@@ -45,6 +50,7 @@ function renderConversation(
   threadId: string | null = 'thread-1',
   teamId: string = 'team-1',
   coordinatorRole: string | null = 'coordinator',
+  coordinatorRunId: string | null = 'run-1',
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -52,7 +58,7 @@ function renderConversation(
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <Conversation threadId={threadId} teamId={teamId} coordinatorRole={coordinatorRole} />
+      <Conversation threadId={threadId} teamId={teamId} coordinatorRole={coordinatorRole} coordinatorRunId={coordinatorRunId} />
     </QueryClientProvider>,
   )
 }
@@ -67,6 +73,7 @@ describe('Conversation', () => {
     })
     mockUseActivity.mockReturnValue({ data: [], isLoading: false, isSuccess: true, refetch: vi.fn() })
     mockUseTaskHistory.mockReturnValue({ data: [], isLoading: false, isSuccess: true })
+    mockUseThinkingEvents.mockReturnValue({ data: [], isLoading: false, isSuccess: true })
   })
 
   it('shows connecting state when threadId is null', () => {
@@ -360,10 +367,10 @@ describe('Conversation', () => {
     expect(screen.getByText('I completed the task successfully')).toBeInTheDocument()
   })
 
-  it('skips items that are not user_message or agent_message', () => {
+  it('renders reasoning items as thinking blocks', () => {
     const items = [
       makeItem({ id: 'item-1', type: 'tool_execution', content: { toolName: 'search', ok: true } }),
-      makeItem({ id: 'item-2', type: 'reasoning', content: { summary: 'Thinking...' } }),
+      makeItem({ id: 'item-2', type: 'reasoning', content: { summary: 'Thinking through the plan' } }),
     ]
     mockUseConversation.mockReturnValue({
       query: { data: items, isLoading: false },
@@ -371,8 +378,7 @@ describe('Conversation', () => {
     })
     renderConversation()
 
-    // tool_execution and reasoning are filtered out by itemToChatEntry
-    // so the empty state should show
-    expect(screen.getByText(/send a message to get started/i)).toBeInTheDocument()
+    expect(screen.getByText(/thinking/i)).toBeInTheDocument()
+    expect(screen.getByText('Thinking through the plan')).toBeInTheDocument()
   })
 })

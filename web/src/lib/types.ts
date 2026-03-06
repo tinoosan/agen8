@@ -223,3 +223,13 @@ export interface RuntimeGetSessionStateResult {
   sessionId: string
   runs: RuntimeRunState[]
 }
+
+export interface EventRecord {
+  eventId: string
+  runId: string
+  timestamp: string
+  type: string
+  message: string
+  data?: Record<string, string>
+  origin?: string
+}

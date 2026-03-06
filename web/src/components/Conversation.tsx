@@ -2,16 +2,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useActivity } from '../hooks/useActivity'
 import { useConversation } from '../hooks/useConversation'
 import { useTaskHistory } from '../hooks/useTaskHistory'
+import { useThinkingEvents } from '../hooks/useThinkingEvents'
 import { rpcCall } from '../lib/rpc'
-import { ArrowUp, Zap } from 'lucide-react'
+import { ArrowUp, ChevronRight, Zap } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { ActivityEvent, Item, Task, UserMessageContent, AgentMessageContent } from '../lib/types'
+import type { ActivityEvent, EventRecord, Item, Task, UserMessageContent, AgentMessageContent } from '../lib/types'
 
 interface ConversationProps {
   threadId: string | null
   teamId: string
   coordinatorRole: string | null
+  coordinatorRunId: string | null
 }
 
 interface ChatEntry {
@@ -20,6 +22,8 @@ interface ChatEntry {
   text: string
   role?: string
   createdAt: number
+  live?: boolean
+  source?: 'item' | 'activity' | 'task' | 'thinking' | 'optimistic'
 }
 
 interface ChatTurn {
@@ -133,6 +137,12 @@ function AgentBubble({ entry }: { entry: ChatEntry }) {
 }
 
 function ThoughtBubble({ entry }: { entry: ChatEntry }) {
+  const [open, setOpen] = useState(entry.live)
+
+  useEffect(() => {
+    if (entry.live) setOpen(true)
+  }, [entry.live])
+
   return (
     <div
       className="animate-fade-in"
@@ -159,30 +169,54 @@ function ThoughtBubble({ entry }: { entry: ChatEntry }) {
       >
         <div style={{
           width: 6, height: 6, borderRadius: '50%',
-          background: 'var(--text-4)',
-          animation: 'pulse-soft 2s infinite',
+          background: entry.live ? 'var(--amber)' : 'var(--text-4)',
+          animation: entry.live ? 'pulse-soft 2s infinite' : 'none',
         }} />
       </div>
       <div style={{ maxWidth: '78%', minWidth: 0 }}>
-        {entry.role && (
-          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            {entry.role}
-          </div>
-        )}
-        <div
+        <button
+          onClick={() => !entry.live && setOpen((prev) => !prev)}
           style={{
-            padding: '8px 12px',
-            borderRadius: '4px 14px 14px 14px',
-            background: 'var(--bg-surface)',
-            borderLeft: '2px solid var(--accent-dim)',
-            color: 'var(--text-2)',
-            fontSize: 12.5,
-            fontStyle: 'italic',
-            overflowWrap: 'break-word',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            color: 'var(--text-3)',
+            cursor: entry.live ? 'default' : 'pointer',
+            marginBottom: open ? 6 : 0,
           }}
         >
-          {entry.text}
-        </div>
+          <ChevronRight
+            size={12}
+            style={{
+              transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+              transition: 'transform 0.15s',
+            }}
+          />
+          <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            {entry.role ? `${entry.role} thinking` : 'Thinking'}
+          </span>
+          {entry.live && <span style={{ fontSize: 11, color: 'var(--amber)' }}>live</span>}
+        </button>
+        {open && (
+          <div
+            style={{
+              padding: '8px 12px',
+              borderRadius: '4px 14px 14px 14px',
+              background: 'var(--bg-surface)',
+              borderLeft: '2px solid var(--accent-dim)',
+              color: 'var(--text-2)',
+              fontSize: 12.5,
+              fontStyle: 'italic',
+              whiteSpace: 'pre-wrap',
+              overflowWrap: 'break-word',
+            }}
+          >
+            {entry.text}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -224,18 +258,6 @@ function UserBubble({ entry }: { entry: ChatEntry }) {
 function toChatEntry(event: ActivityEvent): ChatEntry | null {
   const kind = (event.kind ?? '').trim().toLowerCase()
 
-  if (kind === 'model.thinking.summary') {
-    const text = event.data?.text || event.data?.thought || event.title || 'Thinking...'
-    if (!text || isTaskDonePlaceholder(text)) return null
-    return {
-      id: event.id,
-      kind: 'thought',
-      text,
-      role: extractRole(event),
-      createdAt: getTimestampMs(event.startedAt),
-    }
-  }
-
   const text = extractActivityText(event)
   if (!text || isTaskDonePlaceholder(text)) return null
 
@@ -246,6 +268,7 @@ function toChatEntry(event: ActivityEvent): ChatEntry | null {
       text,
       role: 'You',
       createdAt: getTimestampMs(event.startedAt),
+      source: 'activity',
     }
   }
 
@@ -256,6 +279,7 @@ function toChatEntry(event: ActivityEvent): ChatEntry | null {
       text,
       role: extractRole(event),
       createdAt: getTimestampMs(event.finishedAt ?? event.startedAt),
+      source: 'activity',
     }
   }
 
@@ -273,6 +297,7 @@ function itemToChatEntry(item: Item): ChatEntry | null {
       text,
       role: 'You',
       createdAt: getTimestampMs(item.createdAt),
+      source: 'item',
     }
   }
   if (item.type === 'agent_message') {
@@ -285,6 +310,7 @@ function itemToChatEntry(item: Item): ChatEntry | null {
       text,
       role: 'agent',
       createdAt: getTimestampMs(item.createdAt),
+      source: 'item',
     }
   }
   return null
@@ -302,7 +328,73 @@ function taskToChatEntry(task: Task): ChatEntry | null {
     text: summary,
     role: task.assignedRole?.trim() || task.roleSnapshot?.trim() || 'agent',
     createdAt: getTimestampMs(task.completedAt || task.createdAt),
+    source: 'task',
   }
+}
+
+function thinkingEventsToEntries(events: EventRecord[]): ChatEntry[] {
+  if (events.length === 0) return []
+
+  const order = [...events].sort((a, b) => {
+    const ts = getTimestampMs(a.timestamp) - getTimestampMs(b.timestamp)
+    if (ts !== 0) return ts
+    return a.eventId.localeCompare(b.eventId)
+  })
+
+  const byStep = new Map<string, ChatEntry>()
+  for (const ev of order) {
+    const type = (ev.type ?? '').trim()
+    const step = (ev.data?.step ?? '').trim()
+    if (!step) continue
+
+    if (type === 'model.thinking.start') {
+      if (!byStep.has(step)) {
+        byStep.set(step, {
+          id: `thinking:${step}`,
+          kind: 'thought',
+          text: '',
+          role: ev.data?.role?.trim() || ev.data?.agent_role?.trim() || 'agent',
+          createdAt: getTimestampMs(ev.timestamp),
+          live: true,
+          source: 'thinking',
+        })
+      }
+      continue
+    }
+
+    const current = byStep.get(step)
+    if (!current) continue
+
+    if (type === 'model.thinking.summary') {
+      const line = (ev.data?.text ?? '').trim()
+      if (!line) continue
+      current.text = current.text ? `${current.text}\n${line}` : line
+      if (!current.role) {
+        current.role = ev.data?.role?.trim() || ev.data?.agent_role?.trim() || 'agent'
+      }
+      continue
+    }
+
+    if (type === 'model.thinking.end') {
+      if (!current.text.trim()) {
+        current.text = 'Reasoning used; provider did not return a summary.'
+      }
+      current.live = false
+    }
+  }
+
+  return [...byStep.values()]
+    .map((entry) => {
+      if (entry.text.trim()) return entry
+      if (entry.live) {
+        return {
+          ...entry,
+          text: 'Thinking…',
+        }
+      }
+      return entry
+    })
+    .filter((entry) => entry.text.trim() !== '')
 }
 
 function extractActivityText(event: ActivityEvent): string {
@@ -337,10 +429,28 @@ function getTimestampMs(value?: string): number {
   return Number.isFinite(ts) ? ts : 0
 }
 
-export default function Conversation({ threadId, teamId, coordinatorRole }: ConversationProps) {
+function normalizeText(value: string): string {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
+function shouldDeduplicate(prev: ChatEntry, next: ChatEntry): boolean {
+  if (prev.kind !== next.kind) return false
+  if (normalizeText(prev.text) !== normalizeText(next.text)) return false
+  if ((prev.role ?? '').trim().toLowerCase() !== (next.role ?? '').trim().toLowerCase()) return false
+
+  if (prev.kind === 'thought') {
+    return true
+  }
+
+  const pair = new Set([prev.source, next.source])
+  return (pair.has('task') && pair.has('activity')) || (pair.has('item') && pair.has('activity'))
+}
+
+export default function Conversation({ threadId, teamId, coordinatorRole, coordinatorRunId }: ConversationProps) {
   const { query: conversationQuery } = useConversation(threadId)
   const activityQuery = useActivity({ threadId, teamId, includeChildRuns: true, limit: 500 })
   const taskHistoryQuery = useTaskHistory({ threadId, teamId, limit: 500 })
+  const thinkingQuery = useThinkingEvents(coordinatorRunId, 2000)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
@@ -352,8 +462,9 @@ export default function Conversation({ threadId, teamId, coordinatorRole }: Conv
     const fromItems = (conversationQuery.data ?? []).map(itemToChatEntry).filter((entry): entry is ChatEntry => entry !== null)
     const fromActivities = (activityQuery.data ?? []).map(toChatEntry).filter((entry): entry is ChatEntry => entry !== null)
     const fromTasks = (taskHistoryQuery.data ?? []).map(taskToChatEntry).filter((entry): entry is ChatEntry => entry !== null)
+    const fromThinking = thinkingEventsToEntries(thinkingQuery.data ?? [])
     const byID = new Map<string, ChatEntry>()
-    for (const entry of [...fromItems, ...fromTasks, ...fromActivities]) {
+    for (const entry of [...fromItems, ...fromTasks, ...fromActivities, ...fromThinking]) {
       const prev = byID.get(entry.id)
       if (!prev || entry.createdAt >= prev.createdAt) {
         byID.set(entry.id, entry)
@@ -369,11 +480,23 @@ export default function Conversation({ threadId, teamId, coordinatorRole }: Conv
         byID.set(entry.id, entry)
       }
     }
-    return [...byID.values()].sort((a, b) => {
+    const sorted = [...byID.values()].sort((a, b) => {
       if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt
       return a.id.localeCompare(b.id)
     })
-  }, [conversationQuery.data, activityQuery.data, optimistic, taskHistoryQuery.data])
+    const deduped: ChatEntry[] = []
+    for (const entry of sorted) {
+      const prev = deduped[deduped.length - 1]
+      if (!prev || !shouldDeduplicate(prev, entry)) {
+        deduped.push(entry)
+        continue
+      }
+      if ((prev.source === 'activity' && entry.source !== 'activity') || (prev.live && !entry.live)) {
+        deduped[deduped.length - 1] = entry
+      }
+    }
+    return deduped
+  }, [conversationQuery.data, activityQuery.data, optimistic, taskHistoryQuery.data, thinkingQuery.data])
 
   const turns = useMemo(() => {
     const grouped: ChatTurn[] = []
@@ -430,6 +553,7 @@ export default function Conversation({ threadId, teamId, coordinatorRole }: Conv
         text,
         role: 'You',
         createdAt: Date.now(),
+        source: 'optimistic',
       },
     ])
     try {
