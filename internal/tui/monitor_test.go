@@ -735,6 +735,22 @@ func TestMonitorModelPicker_ProviderAndScopedFilteringWorks(t *testing.T) {
 	}
 }
 
+func TestMonitorSyncModelPickerLegacy_ClosedPickerDoesNotPanic(t *testing.T) {
+	m := &monitorModel{modelPickerOpen: true}
+	m.modelPickerCtrl.Close()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("syncModelPickerLegacy panicked for closed picker: %v", r)
+		}
+	}()
+
+	m.syncModelPickerLegacy()
+	if m.modelPickerOpen {
+		t.Fatalf("expected modelPickerOpen false when picker is closed")
+	}
+}
+
 func TestMonitorProfilePicker_FilterAndSelectStartsNewStandaloneSession(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()

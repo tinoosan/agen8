@@ -102,6 +102,10 @@ func (m *monitorModel) syncModelPickerLegacy() {
 	m.modelPickerProviderView = view.ProviderView
 	m.modelPickerProvider = view.Provider
 	m.modelPickerQuery = view.Query
+	if !view.Open {
+		m.modelPickerList = list.Model{}
+		return
+	}
 	l := view.List
 	items := make([]list.Item, 0, len(view.Items))
 	for _, it := range view.Items {
