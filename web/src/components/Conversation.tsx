@@ -16,7 +16,7 @@ interface ConversationProps {
 
 interface ChatEntry {
   id: string
-  kind: 'user' | 'agent'
+  kind: 'user' | 'agent' | 'thought'
   text: string
   role?: string
   createdAt: number
@@ -24,7 +24,7 @@ interface ChatEntry {
 
 interface ChatTurn {
   id: string
-  kind: 'user' | 'agent'
+  kind: 'user' | 'agent' | 'thought'
   role?: string
   texts: string[]
 }
@@ -132,6 +132,62 @@ function AgentBubble({ entry }: { entry: ChatEntry }) {
   )
 }
 
+function ThoughtBubble({ entry }: { entry: ChatEntry }) {
+  return (
+    <div
+      className="animate-fade-in"
+      style={{
+        display: 'flex',
+        justifyContent: 'flex-start',
+        alignItems: 'flex-start',
+        gap: 10,
+        marginBottom: 16,
+      }}
+    >
+      <div
+        style={{
+          width: 30,
+          height: 30,
+          borderRadius: 8,
+          background: 'transparent',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          marginTop: 1,
+        }}
+      >
+        <div style={{
+          width: 6, height: 6, borderRadius: '50%',
+          background: 'var(--text-4)',
+          animation: 'pulse-soft 2s infinite',
+        }} />
+      </div>
+      <div style={{ maxWidth: '78%', minWidth: 0 }}>
+        {entry.role && (
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            {entry.role}
+          </div>
+        )}
+        <div
+          style={{
+            padding: '8px 12px',
+            borderRadius: '4px 14px 14px 14px',
+            background: 'var(--bg-surface)',
+            borderLeft: '2px solid var(--accent-dim)',
+            color: 'var(--text-2)',
+            fontSize: 12.5,
+            fontStyle: 'italic',
+            overflowWrap: 'break-word',
+          }}
+        >
+          {entry.text}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function UserBubble({ entry }: { entry: ChatEntry }) {
   return (
     <div
@@ -167,6 +223,19 @@ function UserBubble({ entry }: { entry: ChatEntry }) {
 
 function toChatEntry(event: ActivityEvent): ChatEntry | null {
   const kind = (event.kind ?? '').trim().toLowerCase()
+
+  if (kind === 'model.thinking.summary') {
+    const text = event.data?.text || event.data?.thought || event.title || 'Thinking...'
+    if (!text || isTaskDonePlaceholder(text)) return null
+    return {
+      id: event.id,
+      kind: 'thought',
+      text,
+      role: extractRole(event),
+      createdAt: getTimestampMs(event.startedAt),
+    }
+  }
+
   const text = extractActivityText(event)
   if (!text || isTaskDonePlaceholder(text)) return null
 
@@ -310,7 +379,8 @@ export default function Conversation({ threadId, teamId, coordinatorRole }: Conv
     const grouped: ChatTurn[] = []
     for (const entry of entries) {
       const prev = grouped[grouped.length - 1]
-      if (prev && prev.kind === entry.kind && prev.role === entry.role && entry.kind === 'agent') {
+      // Group contiguous messages of the same kind/role EXCEPT thoughts, which we can keep separate or group
+      if (prev && prev.kind === entry.kind && prev.role === entry.role && (entry.kind === 'agent' || entry.kind === 'thought')) {
         prev.texts.push(entry.text)
         continue
       }
@@ -354,13 +424,13 @@ export default function Conversation({ threadId, teamId, coordinatorRole }: Conv
     setInput('')
     setOptimistic((prev) => [
       ...prev,
-        {
-          id: `optimistic-${Date.now()}`,
-          kind: 'user',
-          text,
-          role: 'You',
-          createdAt: Date.now(),
-        },
+      {
+        id: `optimistic-${Date.now()}`,
+        kind: 'user',
+        text,
+        role: 'You',
+        createdAt: Date.now(),
+      },
     ])
     try {
       await rpcCall('task.create', {
@@ -438,6 +508,7 @@ export default function Conversation({ threadId, teamId, coordinatorRole }: Conv
               text: turn.texts.join('\n\n'),
               createdAt: 0,
             }
+            if (turn.kind === 'thought') return <ThoughtBubble key={turn.id} entry={entry} />
             return turn.kind === 'user' ? <UserBubble key={turn.id} entry={entry} /> : <AgentBubble key={turn.id} entry={entry} />
           })
         )}

@@ -141,64 +141,8 @@ function EventRow({ event }: { event: ActivityEvent }) {
   const eventRole = event.data?.role || event.data?.agent_role || ''
   const message = event.title || event.outputPreview || event.textPreview || ''
 
-  // Handle specialized "Thinking" blocks
-  if (event.kind === 'model.thinking.summary') {
-    return (
-      <div
-        className="activity-row"
-        style={{
-          background: 'rgba(255, 255, 255, 0.015)',
-          borderLeft: '2px solid var(--accent)',
-          borderTop: '1px solid rgba(255, 255, 255, 0.03)',
-          borderRight: '1px solid rgba(255, 255, 255, 0.03)',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
-          marginBottom: 6,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, width: '100%' }}>
-          {/* Animated thinking pulse */}
-          <div style={{
-            width: 6, height: 6, borderRadius: '50%',
-            background: 'var(--accent)',
-            animation: 'pulse-soft 2s infinite',
-            marginLeft: 4,
-          }} />
-
-          {/* Role text label */}
-          {eventRole && (
-            <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', letterSpacing: '0.04em', textTransform: 'uppercase', flexShrink: 0 }}>
-              {eventRole}
-            </span>
-          )}
-
-          <span className="truncate" style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-1)', fontStyle: 'italic', flexShrink: 0, maxWidth: 300 }}>
-            {message || 'Thinking...'}
-          </span>
-
-          {/* Optional extracted text */}
-          {event.data?.text && (
-            <span className="truncate" style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic', flex: 1 }}>
-              {event.data.text}
-            </span>
-          )}
-
-          {/* Relative timestamp */}
-          {event.startedAt && (
-            <span style={{
-              fontSize: 10, color: 'var(--text-4)',
-              fontVariantNumeric: 'tabular-nums',
-              flexShrink: 0,
-            }}>
-              {relativeTime(event.startedAt)}
-            </span>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  // Filter out the noisy start/end thinking events
-  if (event.kind === 'model.thinking.start' || event.kind === 'model.thinking.end') {
+  // Hide thinking events entirely from activity feed
+  if (event.kind?.startsWith('model.thinking')) {
     return null
   }
 
