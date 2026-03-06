@@ -2120,7 +2120,35 @@ func (s *Session) maybeFlushBatchGroup(ctx context.Context, group batchGroupScop
 		items = append(items, item)
 	}
 
-	goal := fmt.Sprintf("BATCH REVIEW ONLY: [batch %d items] Review delegated results for parent task %s. Decide per child item using task_review (approve/retry/escalate). Provide a final review summary and next actions. If work quality is weak/incomplete, delegate concrete follow-up tasks before finishing.", len(undelivered), truncateText(group.parentTaskID, 32))
+	// Serialize batch items into the goal so the reviewer can see them and
+	// knows what task IDs to pass to task_review.
+	var itemsSummary string
+	if itemsJSON, jerr := json.MarshalIndent(items, "", "  "); jerr == nil {
+		itemsSummary = string(itemsJSON)
+	} else {
+		itemsSummary = fmt.Sprintf("[%d items - serialization failed]", len(items))
+	}
+
+	goal := fmt.Sprintf(`BATCH REVIEW ONLY: [batch %d items] Review delegated results for parent task %s.
+
+YOUR BATCH TASK ID: %s
+
+Use task_review for EACH item below:
+  - taskId = %q  (this batch task ID, same for every call)
+  - batchItemTaskId = the "callbackTaskId" from each item
+  - decision = approve / retry / escalate
+  - feedback = concise reasoning
+
+BATCH ITEMS:
+%s
+
+After reviewing all items, provide a final review summary and next actions. If work quality is weak/incomplete, delegate concrete follow-up tasks before finishing.`,
+		len(undelivered),
+		truncateText(group.parentTaskID, 32),
+		batchTaskID,
+		batchTaskID,
+		itemsSummary,
+	)
 
 	batch := types.Task{
 		TaskID:         batchTaskID,

@@ -10,16 +10,22 @@ team:
       system_prompt: |
         You are the dedicated reviewer for this team.
 
-        Review synthetic batch callback tasks only.
-        Decide approve/retry/escalate per item with task_review and provide concise, actionable reasoning.
-        After finishing a batch review, hand off to the coordinator via the system handoff task.
+        Your task goal contains everything you need: the batch task ID, and the full list of batch items with their callbackTaskId, summary, artifacts, and status.
+
+        Workflow:
+        1. Read the BATCH ITEMS list from your task goal.
+        2. For EACH item, call task_review with:
+           - taskId = the batch task ID (given in the goal as YOUR BATCH TASK ID)
+           - batchItemTaskId = the item's "callbackTaskId"
+           - decision = approve / retry / escalate
+           - feedback = concise reasoning for your decision
+        3. After all items are reviewed, write a final summary and delegate follow-up tasks if needed.
+
+        Do NOT search the filesystem for tasks. Everything you need is in the goal.
     code_exec_only: true
     allowed_tools:
       - task_review
       - task_create
-      - fs_list
-      - fs_read
-      - fs_search
     skills:
       - reviewing
   roles:
@@ -95,8 +101,6 @@ team:
       allowed_tools:
         - http_fetch
         - browser
-        - task_review
-        - task_create
       description: Assesses portfolio risk, correlation exposure, and downside scenarios across positions. Reviews delegated work and provides quality feedback.
       prompts:
         system_prompt_path: risk-analyst-prompt.md
