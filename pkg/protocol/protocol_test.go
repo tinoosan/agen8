@@ -210,6 +210,37 @@ func TestSessionStartRequest_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMessageListRequest_JSONRoundTrip(t *testing.T) {
+	msg, err := NewRequest("ml1", MethodMessageList, MessageListParams{
+		ThreadID: "thread-1",
+		TeamID:   "team-1",
+		View:     "inbox",
+		Limit:    25,
+		Offset:   10,
+	})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	b, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var decoded Message
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if decoded.Method != MethodMessageList {
+		t.Fatalf("Method = %q, want %q", decoded.Method, MethodMessageList)
+	}
+	var params MessageListParams
+	if err := json.Unmarshal(decoded.Params, &params); err != nil {
+		t.Fatalf("unmarshal params: %v", err)
+	}
+	if params.ThreadID != "thread-1" || params.TeamID != "team-1" || params.View != "inbox" || params.Limit != 25 || params.Offset != 10 {
+		t.Fatalf("unexpected params: %+v", params)
+	}
+}
+
 func TestSessionListRequest_JSONRoundTrip(t *testing.T) {
 	msg, err := NewRequest("sl1", MethodSessionList, SessionListParams{
 		ThreadID:      "thread-1",

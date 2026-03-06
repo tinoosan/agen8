@@ -229,8 +229,8 @@ func (m *Model) renderBody(height int) string {
 }
 
 func (m *Model) renderCurrentTask(width, height int) string {
-	title := styleSection.Render("Current Task")
-	body := kit.StyleDim.Render("No active task")
+	title := styleSection.Render("Current Work")
+	body := kit.StyleDim.Render("No active work")
 
 	if m.currentTask != nil {
 		t := m.currentTask
@@ -306,7 +306,7 @@ func (m *Model) renderInboxPanel(width, height int) string {
 func (m *Model) buildInboxLines(width int, isFocused bool) []string {
 	var lines []string
 	if len(m.inbox) == 0 {
-		return []string{kit.StyleDim.Render("No pending inbox tasks.")}
+		return []string{kit.StyleDim.Render("No pending inbox messages.")}
 	}
 
 	idLen := 8
@@ -332,11 +332,14 @@ func (m *Model) buildInboxLines(width int, isFocused bool) []string {
 			if t.Role != "" {
 				line += " " + kit.StyleDim.Render("["+t.Role+"]")
 			}
-			if t.Status != "" && t.Status != "pending" {
-				line += " " + kit.StyleDim.Render("["+t.Status+"]")
+			if display := kit.Fallback(t.DisplayStatus, t.Status); display != "" && display != "pending" {
+				line += " " + kit.StyleDim.Render("[") + renderStatus(display) + kit.StyleDim.Render("]")
 			}
 			if len(t.Children) > 0 {
 				line += " " + kit.StyleDim.Render(fmt.Sprintf("[batch:%d]", len(t.Children)))
+			}
+			if t.ReadOnly {
+				line += " " + kit.StyleDim.Render("[read-only]")
 			}
 		}
 
@@ -347,6 +350,8 @@ func (m *Model) buildInboxLines(width int, isFocused bool) []string {
 		goal := kit.Truncate(t.Goal, max(10, width-space))
 		if goal != "" {
 			line += " — " + goal
+		} else if preview := kit.Truncate(t.BodyPreview, max(10, width-space)); preview != "" {
+			line += " — " + preview
 		}
 		lines = append(lines, line)
 		if t.Expanded {
@@ -405,7 +410,7 @@ func (m *Model) renderOutboxPanel(width, height int) string {
 func (m *Model) buildOutboxLines(width int, isFocused bool) []string {
 	var lines []string
 	if len(m.outbox) == 0 {
-		return []string{kit.StyleDim.Render("No outbox tasks yet.")}
+		return []string{kit.StyleDim.Render("No outbox messages yet.")}
 	}
 
 	idLen := 8
@@ -502,19 +507,35 @@ func (m *Model) renderDetailPanel(width, height int) string {
 	}
 	contentW := max(10, width-4)
 
-	title := styleSection.Render("Task Detail")
+	title := styleSection.Render("Message Detail")
 	lines := []string{
 		kit.StyleStatusKey.Render("ID:       ") + kit.StyleStatusValue.Render(task.ID),
+		kit.StyleStatusKey.Render("Message:  ") + kit.StyleStatusValue.Render(kit.Fallback(task.MessageID, "-")),
 		kit.StyleStatusKey.Render("Run:      ") + kit.StyleStatusValue.Render(kit.Fallback(task.RunID, "-")),
 		kit.StyleStatusKey.Render("Role:     ") + kit.StyleStatusValue.Render(kit.Fallback(task.Role, "-")),
 		kit.StyleStatusKey.Render("Status:   ") + renderStatus(task.Status),
+	}
+	if task.Kind != "" {
+		lines = append(lines, kit.StyleStatusKey.Render("Kind:     ")+kit.StyleStatusValue.Render(task.Kind))
+	}
+	if task.Channel != "" {
+		lines = append(lines, kit.StyleStatusKey.Render("Channel:  ")+kit.StyleStatusValue.Render(task.Channel))
+	}
+	if task.MessageStatus != "" && task.MessageStatus != task.Status {
+		lines = append(lines, kit.StyleStatusKey.Render("Envelope: ")+renderStatus(task.MessageStatus))
 	}
 
 	if task.Goal != "" {
 		lines = append(lines, kit.StyleStatusKey.Render("Goal:     ")+wrapText(task.Goal, contentW-10))
 	}
+	if task.Subject != "" && task.Subject != task.Goal {
+		lines = append(lines, kit.StyleStatusKey.Render("Subject:  ")+wrapText(task.Subject, contentW-10))
+	}
 	if task.Summary != "" {
 		lines = append(lines, kit.StyleStatusKey.Render("Summary:  ")+renderDetailMarkdown(task.Summary, contentW-10))
+	}
+	if task.BodyPreview != "" && task.BodyPreview != task.Summary && task.BodyPreview != task.Goal {
+		lines = append(lines, kit.StyleStatusKey.Render("Preview:  ")+renderDetailMarkdown(task.BodyPreview, contentW-10))
 	}
 	if task.Error != "" {
 		lines = append(lines, kit.StyleStatusKey.Render("Error:    ")+kit.StyleErr.Render(wrapText(task.Error, contentW-10)))

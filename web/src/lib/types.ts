@@ -91,6 +91,29 @@ export interface Task {
   completedAt?: string
 }
 
+export interface MailMessage {
+  messageId: string
+  threadId?: string
+  runId?: string
+  teamId?: string
+  channel: string
+  kind: string
+  status: string
+  subject?: string
+  summary?: string
+  bodyPreview?: string
+  error?: string
+  taskId?: string
+  taskStatus?: string
+  readOnly?: boolean
+  canClaim?: boolean
+  canComplete?: boolean
+  createdAt: string
+  updatedAt: string
+  processedAt?: string
+  task?: Task
+}
+
 export interface ActivityEvent {
   seq?: number
   runId?: string

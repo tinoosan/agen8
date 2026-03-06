@@ -1032,6 +1032,156 @@ func TestRPCServer_TaskFlow_CreateListClaimComplete(t *testing.T) {
 	}
 }
 
+func TestRPCServer_MessageListAndGet_ReturnMixedMessageRows(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sess := types.NewSession("goal")
+	run := types.NewRun("goal", 8*1024, sess.SessionID)
+	sess.CurrentRunID = run.RunID
+	sessStore := store.NewMemorySessionStore()
+	_ = sessStore.SaveSession(context.Background(), sess)
+	_ = sessStore.SaveRun(context.Background(), run)
+	ts, _ := state.NewSQLiteTaskStore(fsutil.GetSQLitePath(cfg.DataDir))
+	srv := NewRPCServer(RPCServerConfig{
+		Cfg: cfg, Run: run, TaskService: pkgtask.NewManager(ts, nil), Session: newTestSessionService(cfg, sessStore), Index: protocol.NewIndex(0, 0),
+	})
+
+	createReq, _ := protocol.NewRequest("1", protocol.MethodTaskCreate, protocol.TaskCreateParams{
+		ThreadID:       protocol.ThreadID(run.SessionID),
+		TeamID:         "team-alpha",
+		AssignedToType: "role",
+		AssignedTo:     "coordinator",
+		AssignedRole:   "coordinator",
+		Goal:           "Review launch plan",
+	})
+	createResp := rpcRoundTrip(t, srv, createReq)
+	if createResp.Error != nil {
+		t.Fatalf("task.create error: %+v", createResp.Error)
+	}
+	var createRes protocol.TaskCreateResult
+	_ = json.Unmarshal(createResp.Result, &createRes)
+
+	now := time.Now().UTC()
+	userMessage, err := ts.PublishMessage(context.Background(), types.AgentMessage{
+		MessageID:     "msg-user-1",
+		IntentID:      "intent-user-1",
+		CorrelationID: "corr-user-1",
+		Producer:      "rpc.test",
+		ThreadID:      run.SessionID,
+		RunID:         run.RunID,
+		TeamID:        "team-alpha",
+		Channel:       types.MessageChannelInbox,
+		Kind:          types.MessageKindUserInput,
+		Body: map[string]any{
+			"subject": "Clarification requested",
+			"text":    "Please confirm the launch owner.",
+		},
+		Status:    types.MessageStatusPending,
+		VisibleAt: now,
+		CreatedAt: &now,
+		UpdatedAt: &now,
+	})
+	if err != nil {
+		t.Fatalf("PublishMessage(user): %v", err)
+	}
+
+	inboxReq, _ := protocol.NewRequest("2", protocol.MethodMessageList, protocol.MessageListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   "team-alpha",
+		View:     "inbox",
+	})
+	inboxResp := rpcRoundTrip(t, srv, inboxReq)
+	if inboxResp.Error != nil {
+		t.Fatalf("message.list inbox error: %+v", inboxResp.Error)
+	}
+	var inboxRes protocol.MessageListResult
+	_ = json.Unmarshal(inboxResp.Result, &inboxRes)
+	if len(inboxRes.Messages) != 2 {
+		t.Fatalf("expected 2 inbox messages, got %d", len(inboxRes.Messages))
+	}
+	var taskRow, userRow *protocol.MailMessage
+	for i := range inboxRes.Messages {
+		row := inboxRes.Messages[i]
+		switch row.Kind {
+		case types.MessageKindTask:
+			taskRow = &row
+		case types.MessageKindUserInput:
+			userRow = &row
+		}
+	}
+	if taskRow == nil || taskRow.Task == nil {
+		t.Fatalf("expected task-backed message row with task metadata: %+v", inboxRes.Messages)
+	}
+	if !taskRow.CanClaim || taskRow.ReadOnly {
+		t.Fatalf("expected pending task row to be claimable and writable: %+v", taskRow)
+	}
+	if userRow == nil {
+		t.Fatalf("expected message-only row in inbox: %+v", inboxRes.Messages)
+	}
+	if !userRow.ReadOnly || userRow.Task != nil {
+		t.Fatalf("expected user-input row to be read-only with no task: %+v", userRow)
+	}
+	if got := strings.TrimSpace(userRow.Subject); got != "Clarification requested" {
+		t.Fatalf("user message subject=%q want clarification subject", got)
+	}
+
+	getReq, _ := protocol.NewRequest("3", protocol.MethodMessageGet, protocol.MessageGetParams{
+		TeamID:    "team-alpha",
+		MessageID: userMessage.MessageID,
+	})
+	getResp := rpcRoundTrip(t, srv, getReq)
+	if getResp.Error != nil {
+		t.Fatalf("message.get error: %+v", getResp.Error)
+	}
+	var getRes protocol.MessageGetResult
+	_ = json.Unmarshal(getResp.Result, &getRes)
+	if getRes.Message.MessageID != userMessage.MessageID || !getRes.Message.ReadOnly {
+		t.Fatalf("unexpected message.get result: %+v", getRes.Message)
+	}
+
+	claimReq, _ := protocol.NewRequest("4", protocol.MethodTaskClaim, protocol.TaskClaimParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TaskID:   createRes.Task.ID,
+		AgentID:  "agent-1",
+	})
+	claimResp := rpcRoundTrip(t, srv, claimReq)
+	if claimResp.Error != nil {
+		t.Fatalf("task.claim error: %+v", claimResp.Error)
+	}
+	completeReq, _ := protocol.NewRequest("5", protocol.MethodTaskComplete, protocol.TaskCompleteParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   "team-alpha",
+		TaskID:   createRes.Task.ID,
+		Summary:  "Launch plan reviewed",
+		Status:   "succeeded",
+	})
+	completeResp := rpcRoundTrip(t, srv, completeReq)
+	if completeResp.Error != nil {
+		t.Fatalf("task.complete error: %+v", completeResp.Error)
+	}
+
+	outboxReq, _ := protocol.NewRequest("6", protocol.MethodMessageList, protocol.MessageListParams{
+		ThreadID: protocol.ThreadID(run.SessionID),
+		TeamID:   "team-alpha",
+		View:     "outbox",
+	})
+	outboxResp := rpcRoundTrip(t, srv, outboxReq)
+	if outboxResp.Error != nil {
+		t.Fatalf("message.list outbox error: %+v", outboxResp.Error)
+	}
+	var outboxRes protocol.MessageListResult
+	_ = json.Unmarshal(outboxResp.Result, &outboxRes)
+	if len(outboxRes.Messages) != 1 {
+		t.Fatalf("expected 1 outbox message, got %d", len(outboxRes.Messages))
+	}
+	row := outboxRes.Messages[0]
+	if row.TaskID != createRes.Task.ID || row.TaskStatus != string(types.TaskStatusSucceeded) {
+		t.Fatalf("unexpected outbox task row: %+v", row)
+	}
+	if row.CanClaim || row.CanComplete {
+		t.Fatalf("completed row should not be actionable: %+v", row)
+	}
+}
+
 func TestRPCServer_TaskClaimComplete_MissingBackingMessageErrors(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
 	sess := types.NewSession("goal")

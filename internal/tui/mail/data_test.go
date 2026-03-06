@@ -10,14 +10,14 @@ import (
 
 func TestFilterTasks_InboxIncludesReviewPending(t *testing.T) {
 	now := time.Now().UTC()
-	tasks := []protocol.Task{
-		{ID: "task-pending", Status: string(types.TaskStatusPending), Goal: "pending", CreatedAt: now},
-		{ID: "task-active", Status: string(types.TaskStatusActive), Goal: "active", CreatedAt: now},
-		{ID: "task-review", Status: string(types.TaskStatusReviewPending), Goal: "review", CreatedAt: now},
-		{ID: "task-done", Status: string(types.TaskStatusSucceeded), Goal: "done", CreatedAt: now},
+	messages := []protocol.MailMessage{
+		taskBackedMessage("task-pending", string(types.TaskStatusPending), "pending", now),
+		taskBackedMessage("task-active", string(types.TaskStatusActive), "active", now),
+		taskBackedMessage("task-review", string(types.TaskStatusReviewPending), "review", now),
+		taskBackedMessage("task-done", string(types.TaskStatusSucceeded), "done", now),
 	}
 
-	inbox := filterTasks(tasks, true)
+	inbox := filterMessages(messages, true)
 	if len(inbox) != 3 {
 		t.Fatalf("expected 3 inbox tasks (pending/active/review_pending), got %d", len(inbox))
 	}
@@ -35,15 +35,15 @@ func TestFilterTasks_InboxIncludesReviewPending(t *testing.T) {
 
 func TestFilterTasks_OutboxIncludesReviewPendingAndCompletedOnly(t *testing.T) {
 	now := time.Now().UTC()
-	tasks := []protocol.Task{
-		{ID: "task-pending", Status: string(types.TaskStatusPending), Goal: "pending", CreatedAt: now},
-		{ID: "task-active", Status: string(types.TaskStatusActive), Goal: "active", CreatedAt: now},
-		{ID: "task-review", Status: string(types.TaskStatusReviewPending), Goal: "review", CreatedAt: now},
-		{ID: "task-done", Status: string(types.TaskStatusSucceeded), Goal: "done", CreatedAt: now},
-		{ID: "task-failed", Status: string(types.TaskStatusFailed), Goal: "failed", CreatedAt: now},
+	messages := []protocol.MailMessage{
+		taskBackedMessage("task-pending", string(types.TaskStatusPending), "pending", now),
+		taskBackedMessage("task-active", string(types.TaskStatusActive), "active", now),
+		taskBackedMessage("task-review", string(types.TaskStatusReviewPending), "review", now),
+		taskBackedMessage("task-done", string(types.TaskStatusSucceeded), "done", now),
+		taskBackedMessage("task-failed", string(types.TaskStatusFailed), "failed", now),
 	}
 
-	outbox := filterTasks(tasks, false)
+	outbox := filterMessages(messages, false)
 	if len(outbox) != 3 {
 		t.Fatalf("expected 3 outbox tasks (review_pending + terminal), got %d", len(outbox))
 	}
@@ -61,8 +61,8 @@ func TestFilterTasks_OutboxIncludesReviewPendingAndCompletedOnly(t *testing.T) {
 
 func TestFilterTasks_CollapsesStagedCallbacksUnderBatchParent(t *testing.T) {
 	now := time.Now().UTC()
-	tasks := []protocol.Task{
-		{
+	messages := []protocol.MailMessage{
+		taskBackedMessageWithTask(protocol.Task{
 			ID:             "callback-batch-1",
 			Status:         string(types.TaskStatusReviewPending),
 			Goal:           "batch callback",
@@ -70,8 +70,8 @@ func TestFilterTasks_CollapsesStagedCallbacksUnderBatchParent(t *testing.T) {
 			BatchMode:      true,
 			BatchSynthetic: true,
 			CreatedAt:      now,
-		},
-		{
+		}, now),
+		taskBackedMessageWithTask(protocol.Task{
 			ID:              "callback-child-1",
 			Status:          string(types.TaskStatusReviewPending),
 			Goal:            "child callback one",
@@ -79,8 +79,8 @@ func TestFilterTasks_CollapsesStagedCallbacksUnderBatchParent(t *testing.T) {
 			BatchMode:       true,
 			BatchIncludedIn: "callback-batch-1",
 			CreatedAt:       now,
-		},
-		{
+		}, now),
+		taskBackedMessageWithTask(protocol.Task{
 			ID:              "callback-child-2",
 			Status:          string(types.TaskStatusReviewPending),
 			Goal:            "child callback two",
@@ -88,16 +88,11 @@ func TestFilterTasks_CollapsesStagedCallbacksUnderBatchParent(t *testing.T) {
 			BatchMode:       true,
 			BatchIncludedIn: "callback-batch-1",
 			CreatedAt:       now,
-		},
-		{
-			ID:        "task-terminal",
-			Status:    string(types.TaskStatusSucceeded),
-			Goal:      "normal completed task",
-			CreatedAt: now,
-		},
+		}, now),
+		taskBackedMessage("task-terminal", string(types.TaskStatusSucceeded), "normal completed task", now),
 	}
 
-	outbox := filterTasks(tasks, false)
+	outbox := filterMessages(messages, false)
 	if len(outbox) != 2 {
 		t.Fatalf("expected 2 top-level outbox tasks, got %d: %+v", len(outbox), outbox)
 	}
@@ -118,8 +113,8 @@ func TestFilterTasks_CollapsesStagedCallbacksUnderBatchParent(t *testing.T) {
 
 func TestFilterTasks_OrphanStagedCallbackRemainsVisible(t *testing.T) {
 	now := time.Now().UTC()
-	tasks := []protocol.Task{
-		{
+	messages := []protocol.MailMessage{
+		taskBackedMessageWithTask(protocol.Task{
 			ID:              "callback-orphan",
 			Status:          string(types.TaskStatusReviewPending),
 			Goal:            "orphan callback",
@@ -127,10 +122,10 @@ func TestFilterTasks_OrphanStagedCallbackRemainsVisible(t *testing.T) {
 			BatchMode:       true,
 			BatchIncludedIn: "missing-batch-parent",
 			CreatedAt:       now,
-		},
+		}, now),
 	}
 
-	outbox := filterTasks(tasks, false)
+	outbox := filterMessages(messages, false)
 	if len(outbox) != 1 {
 		t.Fatalf("expected orphan callback to remain visible, got %d", len(outbox))
 	}
@@ -141,8 +136,8 @@ func TestFilterTasks_OrphanStagedCallbackRemainsVisible(t *testing.T) {
 
 func TestFilterTasks_ChildDisplayStatusUsesBatchedForTerminalParent(t *testing.T) {
 	now := time.Now().UTC()
-	tasks := []protocol.Task{
-		{
+	messages := []protocol.MailMessage{
+		taskBackedMessageWithTask(protocol.Task{
 			ID:             "callback-batch-done",
 			Status:         string(types.TaskStatusSucceeded),
 			Goal:           "completed batch",
@@ -151,8 +146,8 @@ func TestFilterTasks_ChildDisplayStatusUsesBatchedForTerminalParent(t *testing.T
 			BatchSynthetic: true,
 			CreatedAt:      now,
 			CompletedAt:    now,
-		},
-		{
+		}, now),
+		taskBackedMessageWithTask(protocol.Task{
 			ID:              "callback-child-review-pending",
 			Status:          string(types.TaskStatusReviewPending),
 			Goal:            "staged callback",
@@ -160,10 +155,10 @@ func TestFilterTasks_ChildDisplayStatusUsesBatchedForTerminalParent(t *testing.T
 			BatchMode:       true,
 			BatchIncludedIn: "callback-batch-done",
 			CreatedAt:       now,
-		},
+		}, now),
 	}
 
-	outbox := filterTasks(tasks, false)
+	outbox := filterMessages(messages, false)
 	if len(outbox) != 1 {
 		t.Fatalf("expected one batch row, got %d", len(outbox))
 	}
@@ -172,5 +167,31 @@ func TestFilterTasks_ChildDisplayStatusUsesBatchedForTerminalParent(t *testing.T
 	}
 	if got := outbox[0].Children[0].DisplayStatus; got != "batched" {
 		t.Fatalf("expected child display status to be batched, got %q", got)
+	}
+}
+
+func taskBackedMessage(taskID, status, goal string, now time.Time) protocol.MailMessage {
+	return taskBackedMessageWithTask(protocol.Task{
+		ID:        taskID,
+		Status:    status,
+		Goal:      goal,
+		CreatedAt: now,
+	}, now)
+}
+
+func taskBackedMessageWithTask(task protocol.Task, now time.Time) protocol.MailMessage {
+	task.TaskKind = task.TaskKind
+	return protocol.MailMessage{
+		MessageID:   "msg-" + task.ID,
+		Kind:        types.MessageKindTask,
+		Channel:     types.MessageChannelInbox,
+		Status:      types.MessageStatusPending,
+		TaskID:      task.ID,
+		TaskStatus:  task.Status,
+		ReadOnly:    false,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		BodyPreview: task.Goal,
+		Task:        &task,
 	}
 }

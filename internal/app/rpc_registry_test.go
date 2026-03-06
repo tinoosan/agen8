@@ -117,6 +117,8 @@ func TestRPCServer_MethodRegistry_CoversAllProtocolMethods(t *testing.T) {
 		protocol.MethodTurnCreate,
 		protocol.MethodTurnCancel,
 		protocol.MethodItemList,
+		protocol.MethodMessageList,
+		protocol.MethodMessageGet,
 		protocol.MethodTaskList,
 		protocol.MethodTaskClaim,
 		protocol.MethodTaskCreate,

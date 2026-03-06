@@ -37,6 +37,7 @@ type ArtifactIndexerProvider interface {
 // TaskServiceForRPC is the task dependency for the RPC server: full store + cancel + artifact indexer.
 type TaskServiceForRPC interface {
 	state.TaskStore
+	state.MessageStore
 	ActiveTaskCanceler
 	ArtifactIndexerProvider
 }
