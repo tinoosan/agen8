@@ -93,9 +93,12 @@ func (m *Model) renderHeader() string {
 		status = kit.StyleErr.Render("● disconnected")
 	}
 
-	sid := strings.TrimSpace(m.sessionID)
-	if len(sid) > 12 {
-		sid = sid[:12]
+	tid := strings.TrimSpace(m.teamID)
+	if tid == "" {
+		tid = strings.TrimSpace(m.sessionID)
+	}
+	if len(tid) > 12 {
+		tid = tid[:12]
 	}
 
 	prefix := ""
@@ -104,13 +107,8 @@ func (m *Model) renderHeader() string {
 	}
 
 	line := prefix + styleHeader.Render("agen8 dashboard") +
-		kit.StyleDim.Render("  ·  session: ") + kit.StyleAccent.Render(kit.Fallback(sid, "-")) +
-		kit.StyleDim.Render("  ·  ") + status +
-		kit.StyleDim.Render("  ·  mode: ") + kit.StyleStatusValue.Render(kit.Fallback(m.sessionMode, "team"))
-
-	if strings.TrimSpace(m.teamID) != "" && !m.isNarrow() {
-		line += kit.StyleDim.Render("  ·  team: ") + kit.StyleAccent.Render(kit.TruncateRight(m.teamID, 12))
-	}
+		kit.StyleDim.Render("  ·  team: ") + kit.StyleAccent.Render(kit.Fallback(tid, "-")) +
+		kit.StyleDim.Render("  ·  ") + status
 	if m.lastErr != "" {
 		line += kit.StyleDim.Render("  ·  ") + kit.StyleErr.Render("err: "+kit.Truncate(m.lastErr, 40))
 	}
@@ -433,7 +431,6 @@ func (m *Model) renderDetailBody(width, height int) string {
 		kit.StyleStatusKey.Render("Completed: ") + kit.StyleStatusValue.Render(fmt.Sprintf("%d", agent.CompletedTasks)),
 		"",
 		kit.StyleDim.Render("── Context ──"),
-		kit.StyleStatusKey.Render("Session:   ") + kit.StyleStatusValue.Render(kit.Fallback(m.sessionID, "-")),
 		kit.StyleStatusKey.Render("Team:      ") + kit.StyleStatusValue.Render(kit.Fallback(m.teamID, "-")),
 	}
 

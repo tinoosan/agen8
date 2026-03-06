@@ -100,12 +100,18 @@ func (m *Model) renderHeader() string {
 		count = fmt.Sprintf("%d/%d ops", len(m.activities), m.totalCount)
 	}
 
-	sid := strings.TrimSpace(m.sessionID)
-	if len(sid) > 12 {
-		sid = sid[:12]
+	tid := ""
+	if m.selectedTeam != nil {
+		tid = strings.TrimSpace(m.selectedTeam.TeamID)
 	}
-	if sid == "" {
-		sid = "-"
+	if tid == "" {
+		tid = strings.TrimSpace(m.sessionID)
+	}
+	if len(tid) > 12 {
+		tid = tid[:12]
+	}
+	if tid == "" {
+		tid = "-"
 	}
 	prefix := ""
 	if m.selectedTeam != nil {
@@ -113,7 +119,7 @@ func (m *Model) renderHeader() string {
 	}
 
 	left := prefix + styleHeader.Render("agen8 activity") +
-		styleDim.Render("  ·  session: ") + kit.StyleAccent.Render(sid) +
+		styleDim.Render("  ·  team: ") + kit.StyleAccent.Render(tid) +
 		styleDim.Render("  ·  ") + status +
 		styleDim.Render("  ·  ") + styleMeta.Render(count)
 

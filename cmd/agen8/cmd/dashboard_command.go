@@ -41,7 +41,7 @@ func runDashboardFlow(cmd *cobra.Command) error {
 
 	if dashboardOnce || !isInteractiveTerminal() {
 		if sessionID == "" {
-			return fmt.Errorf("active team session is required (start a team with `agen8 team start <profile-ref>` or pass --session-id)")
+			return fmt.Errorf("active team is required (start a team with `agen8 team start <profile-ref>`)")
 		}
 		return renderDashboardOnce(cmd, sessionID)
 	}
@@ -59,7 +59,7 @@ func runDashboardFlow(cmd *cobra.Command) error {
 	}
 
 	if sessionID == "" {
-		return fmt.Errorf("active team session is required (start a team with `agen8 team start <profile-ref>` or pass --session-id)")
+		return fmt.Errorf("active team is required (start a team with `agen8 team start <profile-ref>`)")
 	}
 	return dashboardtui.Run(resolvedRPCEndpoint(), dashboardtui.Options{
 		ProjectRoot:        projectRoot,
@@ -94,7 +94,6 @@ func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {
 	}, &agents); err != nil {
 		return err
 	}
-	mode := "team"
 	runningAgents := 0
 	for _, agent := range agents.Agents {
 		if strings.EqualFold(strings.TrimSpace(agent.Status), "running") {
@@ -133,8 +132,7 @@ func renderDashboardOnce(cmd *cobra.Command, sessionID string) error {
 	if !dashboardOnce && isInteractiveTerminal() {
 		fmt.Fprint(cmd.OutOrStdout(), "\033[H\033[2J")
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Session %s (%s)\n", strings.TrimSpace(sessionID), mode)
-	fmt.Fprintf(cmd.OutOrStdout(), "Run %s  Team %s\n", blankDash(currentRunID), blankDash(teamID))
+	fmt.Fprintf(cmd.OutOrStdout(), "Team %s\n", blankDash(teamID))
 
 	effectiveByRun := map[string]protocol.RuntimeRunState{}
 	var runtimeState protocol.RuntimeGetSessionStateResult

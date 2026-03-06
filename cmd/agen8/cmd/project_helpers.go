@@ -90,7 +90,7 @@ func resolveActiveProjectScope(ctx context.Context) (projectRoot, teamID, sessio
 		sessionID = strings.TrimSpace(teamInfo.PrimarySessionID)
 	}
 	if sessionID == "" {
-		return "", "", "", "", fmt.Errorf("control session unavailable for active team %s", teamID)
+		return "", "", "", "", fmt.Errorf("team %s is not ready (no active control session)", teamID)
 	}
 	if runID == "" {
 		runID = strings.TrimSpace(teamInfo.CoordinatorRunID)
