@@ -180,7 +180,7 @@ func runNewSessionFlow(cmd *cobra.Command, attach bool) error {
 	if attach {
 		return runCoordinatorFn(cmd, out.SessionID)
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Started team session %s (run %s)\n", out.SessionID, out.PrimaryRunID)
+	fmt.Fprintf(cmd.OutOrStdout(), "Started team %s\n", blankDash(out.TeamID))
 	return nil
 }
 

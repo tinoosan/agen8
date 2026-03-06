@@ -59,6 +59,7 @@ func DefaultPromptToolSpec() PromptToolSpec {
 			{Name: "fs_search", Description: "Search files under any VFS path using plain-text or regex matching. Use previews, globs, and metadata to narrow candidates before fs_read."},
 			{Name: "fs_write", Description: "Write new files (optional verify/checksum/atomic/sync safety flags)."},
 			{Name: "http_fetch", Description: "Make HTTP requests."},
+			{Name: "pipe", Description: "Run simple linear tool-and-transform pipelines with explicit input/output binding and optional debug summaries."},
 			{Name: "shell_exec", Description: "Run shell commands (pipes, redirects, etc.)."},
 			{Name: "trace_run", Description: "Run trace actions (e.g. events.latest/events.since/events.summary)."},
 		},
@@ -244,6 +245,7 @@ const basePromptRaw = `<system>
     <rule id="browser_usage">Use browser for JS-heavy sites, multi-step interactions (login/forms/navigation), or when you need screenshots/PDFs/downloads/uploads. Use browser(action:\"dismiss\") for cookie banners/popups and browser(action:\"wait\") for explicit readiness. Prefer http_fetch for simple APIs and static pages.</rule>
     <rule id="fs_edit">fs_edit expects JSON like {"path": "/project/file", "edits": [{"old": "...", "new": "...", "occurrence": 1}]}; if it fails, re-read the file and try a more specific snippet.</rule>
     <rule id="fs_batch_edit">When the same exact-match edit must apply across many files, prefer fs_batch_edit over fs_search plus manual edit loops. Use dryRun=true first, then apply=true to commit.</rule>
+    <rule id="pipe">Prefer pipe for simple linear dataflow such as read -> transform -> write or fetch -> parse -> extract -> write. Prefer code_exec for loops, branching, custom logic, or non-trivial data shaping.</rule>
     <rule id="fs_patch">fs_patch needs a unified diff with hunk headers (e.g., @@ -1,3 +1,3 @@). Prefer dryRun=true first to validate and inspect diagnostics before applying.</rule>
     <rule id="fs_txn">For coordinated multi-file mutations, prefer fs_txn with dryRun=true first, then apply=true to commit with rollback on failure.</rule>
     <rule id="fs_archive">Prefer fs_archive_list before fs_archive_extract when inspecting unknown archives.</rule>

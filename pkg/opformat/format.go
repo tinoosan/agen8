@@ -110,6 +110,24 @@ func FormatResponseText(d map[string]string) string {
 	}
 
 	switch op {
+	case "pipe":
+		if ok == "true" {
+			steps := strings.TrimSpace(d["steps"])
+			if steps == "" {
+				steps = strings.TrimSpace(d["pipeSteps"])
+			}
+			if steps == "" {
+				steps = "0"
+			}
+			return prefix + " pipe ok (" + steps + " steps)"
+		}
+		if failed := strings.TrimSpace(d["failedAtStep"]); failed != "" {
+			return prefix + " pipe failed at step " + failed
+		}
+		if errStr != "" {
+			return prefix + " " + errStr
+		}
+		return prefix + " pipe failed"
 	case "fs_batch_edit":
 		matched := strings.TrimSpace(d["matchedFiles"])
 		modified := strings.TrimSpace(d["modifiedFiles"])

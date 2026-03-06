@@ -22,6 +22,9 @@ func TestDefaultSystemPrompt_ContainsCoreContent(t *testing.T) {
 	if !strings.Contains(s, "fs_batch_edit") {
 		t.Error("DefaultSystemPrompt() should contain fs_batch_edit")
 	}
+	if !strings.Contains(s, "pipe") {
+		t.Error("DefaultSystemPrompt() should contain pipe")
+	}
 	if !strings.Contains(s, "prefer fs_stat before fs_read") {
 		t.Error("DefaultSystemPrompt() should include fs_stat cost guidance")
 	}
@@ -30,6 +33,9 @@ func TestDefaultSystemPrompt_ContainsCoreContent(t *testing.T) {
 	}
 	if !strings.Contains(s, "prefer fs_batch_edit over fs_search plus manual edit loops") {
 		t.Error("DefaultSystemPrompt() should include fs_batch_edit guidance")
+	}
+	if !strings.Contains(s, "Prefer pipe for simple linear dataflow") {
+		t.Error("DefaultSystemPrompt() should include pipe guidance")
 	}
 	if !strings.Contains(s, "/plan/HEAD.md") {
 		t.Error("DefaultSystemPrompt() should contain planning content")

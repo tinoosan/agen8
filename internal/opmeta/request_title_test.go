@@ -44,6 +44,11 @@ func TestFormatRequestTitle_SharedOps(t *testing.T) {
 			want: "List archive /workspace/journals.tar.gz",
 		},
 		{
+			name: "pipe",
+			data: map[string]string{"op": "pipe", "steps": "4"},
+			want: "Pipe 4 steps",
+		},
+		{
 			name: "shell uses argvPreview",
 			data: map[string]string{"op": "shell_exec", "argvPreview": "rg -n test"},
 			want: "rg -n test",

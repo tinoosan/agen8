@@ -285,6 +285,42 @@ func TestRenderActivityDetailMarkdown_FSTxn_Diagnostics(t *testing.T) {
 	}
 }
 
+func TestRenderActivityDetailMarkdown_Pipe_Debug(t *testing.T) {
+	a := Activity{
+		Kind:   "pipe",
+		Status: ActivityError,
+		Ok:     "false",
+		Data: map[string]string{
+			"steps":           "3",
+			"debug":           "true",
+			"maxSteps":        "5",
+			"maxValueBytes":   "4096",
+			"failedAtStep":    "2",
+			"pipeValueType":   "string",
+			"pipeValueBytes":  "4",
+			"pipeValue":       `"HI"`,
+			"pipeStepResults": `[{"index":1,"type":"tool","name":"fs_read","durationMs":3,"outputType":"string","outputPreview":"hi"},{"index":2,"type":"transform","name":"uppercase","durationMs":1,"error":"boom"}]`,
+		},
+	}
+
+	md := renderActivityDetailMarkdown(a, false, false)
+	for _, want := range []string{
+		"- steps: `3`",
+		"- debug: `true`",
+		"- maxSteps: `5`",
+		"- maxValueBytes: `4096`",
+		"- failedAtStep: `2`",
+		"- valueType: `string`",
+		"**value**",
+		"**steps**",
+		"uppercase",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("expected %q in pipe markdown, got:\n%s", want, md)
+		}
+	}
+}
+
 func TestRenderActivityDetailMarkdown_FSArchive_Metadata(t *testing.T) {
 	a := Activity{
 		Kind:   "fs_archive_extract",

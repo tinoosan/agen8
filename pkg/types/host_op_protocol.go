@@ -41,6 +41,8 @@ const (
 	HostOpFSArchiveList = "fs_archive_list"
 	// HostOpShellExec executes a shell command.
 	HostOpShellExec = "shell_exec"
+	// HostOpPipe runs a declarative pipeline of tool calls and transforms.
+	HostOpPipe = "pipe"
 	// HostOpHTTPFetch issues an HTTP request.
 	HostOpHTTPFetch = "http_fetch"
 	// HostOpBrowser performs an interactive browser action (stateful session).
@@ -96,6 +98,8 @@ type HostOpRequest struct {
 	IncludeMetadata  bool          `json:"includeMetadata,omitempty"`
 	MaxSizeBytes     int64         `json:"maxSizeBytes,omitempty"`
 	Tag              string        `json:"tag,omitempty"`
+	PipeSteps        []PipeStep    `json:"pipeSteps,omitempty"`
+	PipeOptions      *PipeOptions  `json:"pipeOptions,omitempty"`
 	// Code execution parameters
 	Language string `json:"language,omitempty"`
 	Code     string `json:"code,omitempty"`
@@ -119,7 +123,7 @@ type HostOpRequest struct {
 func (r HostOpRequest) Validate() error {
 	r.Op = strings.ToLower(strings.TrimSpace(r.Op))
 	switch r.Op {
-	case HostOpFSList, HostOpFSStat, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpFSBatchEdit, HostOpFSTxn, HostOpFSArchiveCreate, HostOpFSArchiveExtract, HostOpFSArchiveList, HostOpShellExec, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpCodeExec, HostOpNoop, HostOpToolResult, HostOpFinal:
+	case HostOpFSList, HostOpFSStat, HostOpFSRead, HostOpFSSearch, HostOpFSWrite, HostOpFSAppend, HostOpFSEdit, HostOpFSPatch, HostOpFSBatchEdit, HostOpFSTxn, HostOpFSArchiveCreate, HostOpFSArchiveExtract, HostOpFSArchiveList, HostOpShellExec, HostOpPipe, HostOpHTTPFetch, HostOpBrowser, HostOpTrace, HostOpEmail, HostOpCodeExec, HostOpNoop, HostOpToolResult, HostOpFinal:
 	default:
 		return fmt.Errorf("unknown op %q", r.Op)
 	}
@@ -342,6 +346,36 @@ func (r HostOpRequest) Validate() error {
 	case HostOpShellExec:
 		if len(r.Argv) == 0 {
 			return fmt.Errorf("argv is required")
+		}
+		return nil
+
+	case HostOpPipe:
+		if len(r.PipeSteps) == 0 {
+			return fmt.Errorf("pipeSteps is required")
+		}
+		maxSteps := 16
+		maxValueBytes := 65536
+		if r.PipeOptions != nil {
+			if r.PipeOptions.MaxSteps != 0 {
+				maxSteps = r.PipeOptions.MaxSteps
+			}
+			if r.PipeOptions.MaxValueBytes != 0 {
+				maxValueBytes = r.PipeOptions.MaxValueBytes
+			}
+		}
+		if maxSteps <= 0 {
+			return fmt.Errorf("pipeOptions.maxSteps must be >= 1")
+		}
+		if maxValueBytes <= 0 {
+			return fmt.Errorf("pipeOptions.maxValueBytes must be >= 1")
+		}
+		if len(r.PipeSteps) > maxSteps {
+			return fmt.Errorf("pipeSteps exceeds maxSteps (%d)", maxSteps)
+		}
+		for i, step := range r.PipeSteps {
+			if err := validatePipeStep(i, step); err != nil {
+				return err
+			}
 		}
 		return nil
 
@@ -594,6 +628,38 @@ type BatchEditResult struct {
 	Error        string `json:"error,omitempty"`
 }
 
+// PipeStep describes one declarative pipeline step.
+type PipeStep struct {
+	Type        string         `json:"type,omitempty"` // tool|transform
+	Tool        string         `json:"tool,omitempty"`
+	Args        map[string]any `json:"args,omitempty"`
+	InputArg    string         `json:"inputArg,omitempty"`
+	Output      string         `json:"output,omitempty"`
+	Transform   string         `json:"transform,omitempty"`
+	Field       string         `json:"field,omitempty"`
+	Separator   string         `json:"separator,omitempty"`
+	Pattern     string         `json:"pattern,omitempty"`
+	Replacement string         `json:"replacement,omitempty"`
+}
+
+// PipeOptions controls debug mode and limits for pipe.
+type PipeOptions struct {
+	Debug         bool `json:"debug,omitempty"`
+	MaxSteps      int  `json:"maxSteps,omitempty"`
+	MaxValueBytes int  `json:"maxValueBytes,omitempty"`
+}
+
+// PipeStepResult summarizes one executed pipeline step.
+type PipeStepResult struct {
+	Index         int    `json:"index,omitempty"`
+	Type          string `json:"type,omitempty"`
+	Name          string `json:"name,omitempty"`
+	DurationMs    int64  `json:"durationMs,omitempty"`
+	OutputType    string `json:"outputType,omitempty"`
+	OutputPreview string `json:"outputPreview,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
 // FSTxnOptions controls transaction mode and rollback behavior.
 type FSTxnOptions struct {
 	DryRun          bool `json:"dryRun,omitempty"`
@@ -676,6 +742,7 @@ type HostOpResponse struct {
 	Results                    []SearchResult    `json:"results,omitempty"`
 	ArchiveEntries             []ArchiveEntry    `json:"archiveEntries,omitempty"`
 	BatchEditDetails           []BatchEditResult `json:"details,omitempty"`
+	PipeStepResults            []PipeStepResult  `json:"steps,omitempty"`
 	TxnStepResults             []FSTxnStepResult `json:"txnStepResults,omitempty"`
 	TxnDiagnostics             *FSTxnDiagnostics `json:"txnDiagnostics,omitempty"`
 	ArchiveFormat              string            `json:"archiveFormat,omitempty"`
@@ -693,6 +760,9 @@ type HostOpResponse struct {
 	BatchEditApplied           bool              `json:"batchEditApplied,omitempty"`
 	BatchEditRollbackPerformed bool              `json:"batchEditRollbackPerformed,omitempty"`
 	BatchEditRollbackFailed    bool              `json:"batchEditRollbackFailed,omitempty"`
+	PipeFailedAtStep           int               `json:"failedAtStep,omitempty"`
+	PipeValue                  json.RawMessage   `json:"value,omitempty"`
+	PipeDebug                  bool              `json:"pipeDebug,omitempty"`
 	ResultsTotal               int               `json:"resultsTotal,omitempty"`
 	ResultsReturned            int               `json:"resultsReturned,omitempty"`
 	ResultsTruncated           bool              `json:"resultsTruncated,omitempty"`
@@ -799,6 +869,53 @@ func validateBatchEdit(index int, edit BatchEdit) error {
 	n, err := strconv.Atoi(occurrence)
 	if err != nil || n <= 0 {
 		return fmt.Errorf("batchEditEdits[%d].occurrence must be \"all\" or an integer >= 1", index)
+	}
+	return nil
+}
+
+func validatePipeStep(index int, step PipeStep) error {
+	stepType := strings.ToLower(strings.TrimSpace(step.Type))
+	switch stepType {
+	case "tool":
+		switch strings.ToLower(strings.TrimSpace(step.Tool)) {
+		case HostOpFSRead, HostOpFSWrite, HostOpFSAppend, HostOpFSSearch, HostOpFSStat, HostOpHTTPFetch, HostOpShellExec, HostOpEmail:
+		default:
+			return fmt.Errorf("pipeSteps[%d].tool is not supported in pipe v1", index)
+		}
+		if strings.TrimSpace(step.Transform) != "" {
+			return fmt.Errorf("pipeSteps[%d].transform must be empty for tool steps", index)
+		}
+		if len(step.Args) == 0 && strings.TrimSpace(step.InputArg) == "" {
+			return fmt.Errorf("pipeSteps[%d].args is required for tool steps", index)
+		}
+	case "transform":
+		switch strings.ToLower(strings.TrimSpace(step.Transform)) {
+		case "uppercase", "lowercase", "trim", "json_parse", "json_stringify", "get", "join", "split", "regex_replace":
+		default:
+			return fmt.Errorf("pipeSteps[%d].transform is not supported in pipe v1", index)
+		}
+		if strings.TrimSpace(step.Tool) != "" {
+			return fmt.Errorf("pipeSteps[%d].tool must be empty for transform steps", index)
+		}
+		switch strings.ToLower(strings.TrimSpace(step.Transform)) {
+		case "get":
+			if err := validate.NonEmpty(fmt.Sprintf("pipeSteps[%d].field", index), step.Field); err != nil {
+				return err
+			}
+		case "regex_replace":
+			if err := validate.NonEmpty(fmt.Sprintf("pipeSteps[%d].pattern", index), step.Pattern); err != nil {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("pipeSteps[%d].type must be tool or transform", index)
+	}
+	output := strings.TrimSpace(step.Output)
+	if strings.Contains(output, "[") || strings.Contains(output, "]") {
+		return fmt.Errorf("pipeSteps[%d].output does not support array indexing in v1", index)
+	}
+	if strings.TrimSpace(step.InputArg) == "." {
+		return fmt.Errorf("pipeSteps[%d].inputArg is invalid", index)
 	}
 	return nil
 }

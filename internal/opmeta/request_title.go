@@ -87,6 +87,11 @@ func FormatRequestTitle(d map[string]string) string {
 			return "List archive " + path
 		}
 		return "List archive"
+	case "pipe":
+		if steps := strings.TrimSpace(d["steps"]); steps != "" {
+			return "Pipe " + steps + " steps"
+		}
+		return "Pipe"
 	case "shell_exec":
 		if cmd := strings.TrimSpace(d["argvPreview"]); cmd != "" {
 			return cmd

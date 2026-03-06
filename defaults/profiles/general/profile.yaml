@@ -10,6 +10,7 @@ team:
       subagent_model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - shell_exec
         - http_fetch
         - task_create

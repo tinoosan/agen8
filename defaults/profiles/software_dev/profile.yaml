@@ -15,6 +15,7 @@ team:
         After finishing a batch review, hand off to the coordinator via the system handoff task.
     code_exec_only: true
     allowed_tools:
+      - pipe
       - task_review
       - task_create
       - fs_list
@@ -30,6 +31,7 @@ team:
       subagent_model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - shell_exec
         - http_fetch
         - browser

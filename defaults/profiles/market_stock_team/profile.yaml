@@ -24,6 +24,7 @@ team:
         Do NOT search the filesystem for tasks. Everything you need is in the goal.
     code_exec_only: true
     allowed_tools:
+      - pipe
       - task_review
     skills:
       - reviewing
@@ -34,6 +35,7 @@ team:
       subagent_model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
         - task_create
@@ -58,6 +60,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
       description: Investigates macro themes, sector rotation, and broad market conditions.
@@ -72,6 +75,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
       description: Analyzes company fundamentals, catalysts, and valuation signals.
@@ -86,6 +90,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
       description: Produces concise final reports and executive-ready summaries.
       prompts:
@@ -98,6 +103,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
       description: Assesses portfolio risk, correlation exposure, and downside scenarios across positions. Reviews delegated work and provides quality feedback.
@@ -112,6 +118,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - shell_exec
         - http_fetch
         - browser

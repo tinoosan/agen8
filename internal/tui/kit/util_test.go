@@ -92,3 +92,9 @@ func TestVerbFromKind_FSBatchEdit(t *testing.T) {
 		t.Fatalf("VerbFromKind(fs_batch_edit) = %q, want %q", got, "Batch edit")
 	}
 }
+
+func TestVerbFromKind_Pipe(t *testing.T) {
+	if got := VerbFromKind("pipe"); got != "Pipe" {
+		t.Fatalf("VerbFromKind(pipe) = %q, want %q", got, "Pipe")
+	}
+}

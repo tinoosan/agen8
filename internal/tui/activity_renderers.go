@@ -1,6 +1,8 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+)
 
 type ActivityRenderer interface {
 	RenderDetail(a Activity, expanded bool, telemetry bool, b *strings.Builder)
@@ -14,6 +16,7 @@ var activityRenderers = map[string]ActivityRenderer{
 	"browser":            browserRenderer{},
 	"code_exec":          codeExecRenderer{},
 	"email":              emailRenderer{},
+	"pipe":               pipeRenderer{},
 	"fs_append":          fsWriteAppendRenderer{},
 	"fs_batch_edit":      fsBatchEditRenderer{},
 	"fs_patch":           fsPatchRenderer{},
@@ -332,6 +335,63 @@ func (emailRenderer) RenderArguments(a Activity, telemetry bool, b *strings.Buil
 	}
 	if v := strings.TrimSpace(a.Data["subject"]); v != "" {
 		b.WriteString("- subject: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+}
+
+type pipeRenderer struct{ baseRenderer }
+
+func (pipeRenderer) RenderDetail(a Activity, expanded bool, telemetry bool, b *strings.Builder) {
+	if !renderCommonOutputPreview(a, expanded, b) {
+		if v := strings.TrimSpace(a.Data["failedAtStep"]); v != "" {
+			b.WriteString("- failedAtStep: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["pipeValueType"]); v != "" {
+			b.WriteString("- valueType: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["pipeValueBytes"]); v != "" {
+			b.WriteString("- valueBytes: `")
+			b.WriteString(v)
+			b.WriteString("`\n")
+		}
+		if v := strings.TrimSpace(a.Data["pipeValue"]); v != "" {
+			b.WriteString("\n**value**\n\n")
+			b.WriteString(FormatCode("json", v))
+			b.WriteString("\n")
+		}
+		if v := strings.TrimSpace(a.Data["pipeStepResults"]); v != "" {
+			b.WriteString("\n**steps**\n\n")
+			b.WriteString(FormatCode("json", v))
+			b.WriteString("\n")
+		}
+	}
+	renderTelemetryBlock(a, telemetry, false, false, b)
+}
+
+func (pipeRenderer) RenderArguments(a Activity, telemetry bool, b *strings.Builder) {
+	renderDefaultArgumentsPrefix(a, telemetry, b)
+	if v := strings.TrimSpace(a.Data["steps"]); v != "" {
+		b.WriteString("- steps: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["debug"]); v != "" {
+		b.WriteString("- debug: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["maxSteps"]); v != "" {
+		b.WriteString("- maxSteps: `")
+		b.WriteString(v)
+		b.WriteString("`\n")
+	}
+	if v := strings.TrimSpace(a.Data["maxValueBytes"]); v != "" {
+		b.WriteString("- maxValueBytes: `")
 		b.WriteString(v)
 		b.WriteString("`\n")
 	}

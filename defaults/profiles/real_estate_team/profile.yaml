@@ -15,6 +15,7 @@ team:
         After finishing a batch review, hand off to the coordinator via the system handoff task.
     code_exec_only: true
     allowed_tools:
+      - pipe
       - task_review
       - task_create
       - fs_list
@@ -29,6 +30,7 @@ team:
       subagent_model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
         - task_create
@@ -51,6 +53,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
       description: Tracks real estate market trends, demographics, and economic indicators by region.
@@ -65,6 +68,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
         - task_review
@@ -81,6 +85,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
       description: Sources properties, gathers comparable data, and produces property-level research briefs.
@@ -95,6 +100,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - shell_exec
         - http_fetch
         - browser
@@ -110,6 +116,7 @@ team:
       model: moonshotai/kimi-k2.5
       code_exec_only: true
       allowed_tools:
+        - pipe
         - http_fetch
         - browser
       description: Researches zoning, regulations, tax implications, and legal structures for real estate deals.

@@ -46,7 +46,7 @@ func runActivityTUI(cmd *cobra.Command) error {
 	}
 
 	if sessionID == "" {
-		return fmt.Errorf("active team session is required (start a team with `agen8 team start <profile-ref>` or pass --session-id)")
+		return fmt.Errorf("active team is required (start a team with `agen8 team start <profile-ref>`)")
 	}
 	return activitytui.Run(resolvedRPCEndpoint(), activitytui.Options{
 		ProjectRoot:        projectRoot,

@@ -62,9 +62,7 @@ var projectStatusCmd = &cobra.Command{
 			return nil
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "root=%s\n", projectCtx.RootDir)
-		fmt.Fprintf(cmd.OutOrStdout(), "active_session=%s\n", blankDash(projectCtx.State.ActiveSessionID))
 		fmt.Fprintf(cmd.OutOrStdout(), "active_team=%s\n", blankDash(projectCtx.State.ActiveTeamID))
-		fmt.Fprintf(cmd.OutOrStdout(), "active_run=%s\n", blankDash(projectCtx.State.ActiveRunID))
 		return nil
 	},
 }
@@ -87,9 +85,6 @@ var projectDeleteTeamsCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "Deleted %d team(s)\n", len(out.DeletedTeamIDs))
 		if len(out.DeletedTeamIDs) > 0 {
 			fmt.Fprintf(cmd.OutOrStdout(), "Teams: %s\n", strings.Join(out.DeletedTeamIDs, ", "))
-		}
-		if len(out.DeletedSessionIDs) > 0 {
-			fmt.Fprintf(cmd.OutOrStdout(), "Sessions: %s\n", strings.Join(out.DeletedSessionIDs, ", "))
 		}
 		return nil
 	},
@@ -226,9 +221,6 @@ var teamDeleteCmd = &cobra.Command{
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Deleted team %s\n", blankDash(out.TeamID))
-		if len(out.DeletedSessionIDs) > 0 {
-			fmt.Fprintf(cmd.OutOrStdout(), "Deleted sessions: %s\n", strings.Join(out.DeletedSessionIDs, ", "))
-		}
 		return nil
 	},
 }

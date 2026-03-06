@@ -379,6 +379,66 @@ func TestHostOpRequest_FSBatchEditValidation(t *testing.T) {
 	}
 }
 
+func TestHostOpRequest_PipeValidation(t *testing.T) {
+	req := HostOpRequest{
+		Op: HostOpPipe,
+		PipeSteps: []PipeStep{
+			{Type: "tool", Tool: HostOpFSRead, Args: map[string]any{"path": "/workspace/a.txt"}, Output: "text"},
+			{Type: "transform", Transform: "trim"},
+		},
+		PipeOptions: &PipeOptions{Debug: true, MaxSteps: 4, MaxValueBytes: 2048},
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	req = HostOpRequest{Op: HostOpPipe}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for empty pipeSteps")
+	}
+
+	req = HostOpRequest{
+		Op: HostOpPipe,
+		PipeSteps: []PipeStep{
+			{Type: "tool", Tool: HostOpCodeExec, Args: map[string]any{"code": "print(1)"}},
+		},
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for unsupported nested tool")
+	}
+
+	req = HostOpRequest{
+		Op: HostOpPipe,
+		PipeSteps: []PipeStep{
+			{Type: "transform", Transform: "map"},
+		},
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for unsupported transform")
+	}
+
+	req = HostOpRequest{
+		Op: HostOpPipe,
+		PipeSteps: []PipeStep{
+			{Type: "tool", Tool: HostOpFSRead, Args: map[string]any{"path": "/workspace/a.txt"}, Output: "results[0]"},
+		},
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for array indexing selector")
+	}
+
+	req = HostOpRequest{
+		Op: HostOpPipe,
+		PipeSteps: []PipeStep{
+			{Type: "transform", Transform: "trim"},
+		},
+		PipeOptions: &PipeOptions{MaxSteps: 0, MaxValueBytes: -1},
+	}
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected error for invalid maxValueBytes")
+	}
+}
+
 func TestHostOpRequest_FSArchiveValidation(t *testing.T) {
 	req := HostOpRequest{
 		Op:              HostOpFSArchiveCreate,

@@ -112,6 +112,7 @@ func defaultHostTools() []HostTool {
 		&hosttools.FSArchiveCreateTool{},
 		&hosttools.FSArchiveExtractTool{},
 		&hosttools.FSArchiveListTool{},
+		&hosttools.PipeTool{},
 		&hosttools.CodeExecTool{},
 		&hosttools.ShellExecTool{},
 		&hosttools.HTTPFetchTool{},

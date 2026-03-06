@@ -85,9 +85,15 @@ func (m *Model) renderHeader() string {
 			Render(left)
 	}
 
-	sid := m.sessionID
-	if len(sid) > 12 {
-		sid = sid[:12]
+	tid := ""
+	if m.selectedTeam != nil {
+		tid = strings.TrimSpace(m.selectedTeam.TeamID)
+	}
+	if tid == "" {
+		tid = strings.TrimSpace(m.sessionID)
+	}
+	if len(tid) > 12 {
+		tid = tid[:12]
 	}
 
 	status := kit.StyleOK.Render("● connected")
@@ -103,7 +109,7 @@ func (m *Model) renderHeader() string {
 	}
 
 	left := prefix + styleHeader.Render("agen8 mail") +
-		kit.StyleDim.Render("  ·  session: ") + styleAccent.Render(sid) +
+		kit.StyleDim.Render("  ·  team: ") + styleAccent.Render(kit.Fallback(tid, "-")) +
 		kit.StyleDim.Render("  ·  ") + status +
 		kit.StyleDim.Render("  ·  ") + kit.StyleDim.Render(counts)
 

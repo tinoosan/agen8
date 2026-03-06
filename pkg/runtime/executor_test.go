@@ -838,6 +838,79 @@ func TestEventMiddleware_FSBatchEditRequestAndResponseEnrichment(t *testing.T) {
 	}
 }
 
+func TestEventMiddleware_PipeRequestAndResponseEnrichment(t *testing.T) {
+	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
+		return types.HostOpResponse{
+			Op:               req.Op,
+			Ok:               false,
+			Error:            "selector missing",
+			PipeFailedAtStep: 2,
+			PipeDebug:        true,
+			PipeValue:        json.RawMessage(`"HI"`),
+			PipeStepResults: []types.PipeStepResult{
+				{Index: 1, Type: "tool", Name: "fs_read", DurationMs: 2, OutputType: "string", OutputPreview: "hi"},
+				{Index: 2, Type: "transform", Name: "uppercase", DurationMs: 1, Error: "selector missing"},
+			},
+		}
+	})
+
+	var gotReq events.Event
+	var gotResp events.Event
+	seq := uint64(0)
+	exec := ChainExecutor(base, &eventMiddleware{
+		emit: func(ctx context.Context, ev events.Event) {
+			if ev.Type == "agent.op.request" {
+				gotReq = ev
+			}
+			if ev.Type == "agent.op.response" {
+				gotResp = ev
+			}
+		},
+		seq:        &seq,
+		metaKey:    opContextKey{},
+		operations: newHostOperationRegistry(nil),
+	})
+
+	resp := exec.Exec(context.Background(), types.HostOpRequest{
+		Op: types.HostOpPipe,
+		PipeSteps: []types.PipeStep{
+			{Type: "tool", Tool: types.HostOpFSRead, Args: map[string]any{"path": "/workspace/a.txt"}, Output: "text"},
+			{Type: "transform", Transform: "uppercase"},
+		},
+		PipeOptions: &types.PipeOptions{Debug: true, MaxSteps: 4, MaxValueBytes: 2048},
+	})
+	if resp.Ok {
+		t.Fatalf("expected pipe failure response")
+	}
+	for key, want := range map[string]string{
+		"steps":         "2",
+		"debug":         "true",
+		"maxSteps":      "4",
+		"maxValueBytes": "2048",
+	} {
+		if gotReq.Data[key] != want {
+			t.Fatalf("expected pipe request enrichment %s=%q, got %q (data=%v)", key, want, gotReq.Data[key], gotReq.Data)
+		}
+	}
+	for key, want := range map[string]string{
+		"failedAtStep":   "2",
+		"pipeDebug":      "true",
+		"pipeSteps":      "2",
+		"pipeValueType":  "string",
+		"pipeValueBytes": "4",
+	} {
+		if gotResp.Data[key] != want {
+			t.Fatalf("expected pipe response enrichment %s=%q, got %q (data=%v)", key, want, gotResp.Data[key], gotResp.Data)
+		}
+	}
+	if gotResp.Data["responseText"] != "✗ pipe failed at step 2" {
+		t.Fatalf("unexpected pipe response text: %q", gotResp.Data["responseText"])
+	}
+	if gotResp.Data["pipeStepResults"] == "" || !strings.Contains(gotResp.Data["pipeStepResults"], "uppercase") {
+		t.Fatalf("expected pipe step results enrichment, got %v", gotResp.Data)
+	}
+}
+
 func TestEventMiddleware_FSStatResponseEnrichment(t *testing.T) {
 	base := types.HostExecFunc(func(ctx context.Context, req types.HostOpRequest) types.HostOpResponse {
 		exists := true

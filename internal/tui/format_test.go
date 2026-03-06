@@ -177,6 +177,11 @@ func TestRenderOpResponse_ToolSpecific(t *testing.T) {
 			want: "✓ listed 5 entries",
 		},
 		{
+			name: "pipe success",
+			data: map[string]string{"op": "pipe", "ok": "true", "steps": "2"},
+			want: "✓ pipe ok (2 steps)",
+		},
+		{
 			name: "email sent",
 			data: map[string]string{"op": "email", "ok": "true"},
 			want: "✓ sent",
@@ -210,6 +215,7 @@ func TestActionCategory_RepresentativeOps(t *testing.T) {
 		{op: "fs_archive_extract", want: "Updated"},
 		{op: "fs_archive_list", want: "Explored"},
 		{op: "shell_exec", want: "Ran"},
+		{op: "pipe", want: "Ran"},
 		{op: "http_fetch", want: "Fetched"},
 		{op: "trace_run", want: "Traced"},
 		{op: "agent_spawn", want: "Delegated"},
@@ -231,6 +237,7 @@ func TestRenderOpRequest_SharedOpParityWithOpMeta(t *testing.T) {
 		{"op": "fs_txn", "steps": "3"},
 		{"op": "fs_batch_edit", "path": "/knowledge", "glob": "**/*.md"},
 		{"op": "fs_archive_extract", "path": "/workspace/a.tar.gz", "destination": "/workspace/out"},
+		{"op": "pipe", "steps": "3"},
 		{"op": "shell_exec", "argvPreview": "rg -n todo"},
 		{"op": "http_fetch", "method": "POST", "url": "https://example.com", "body": "{\n\"x\":1\n}"},
 		{"op": "http_fetch", "url": "https://example.com"},

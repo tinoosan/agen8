@@ -235,7 +235,7 @@ func renderMailWatchOnce(cmd *cobra.Command, sessionID string, view string) erro
 	if isInteractiveTerminal() {
 		fmt.Fprint(cmd.OutOrStdout(), "\033[H\033[2J")
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Mail %s for session %s (count=%d)\n", view, sessionID, out.TotalCount)
+	fmt.Fprintf(cmd.OutOrStdout(), "Mail %s (count=%d)\n", view, out.TotalCount)
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tSTATUS\tASSIGNEE\tRUN")
 	for _, task := range out.Tasks {
